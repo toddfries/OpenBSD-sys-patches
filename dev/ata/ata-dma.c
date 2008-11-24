@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/ata-dma.c,v 1.156 2008/04/18 15:15:04 sos Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/ata-dma.c,v 1.158 2008/10/21 18:51:55 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -78,10 +78,10 @@ ata_dmainit(device_t dev)
     ch->dma.unload = ata_dmaunload;
     ch->dma.alignment = 2;
     ch->dma.boundary = 65536;
-    ch->dma.segsize = 63536;
+    ch->dma.segsize = 65536;
     ch->dma.max_iosize = 128 * DEV_BSIZE;
     ch->dma.max_address = BUS_SPACE_MAXADDR_32BIT;
-    ch->dma.dma_slots = 2;
+    ch->dma.dma_slots = 6;
 
     if (bus_dma_tag_create(bus_get_dma_tag(dev), ch->dma.alignment, 0,
 			   ch->dma.max_address, BUS_SPACE_MAXADDR,

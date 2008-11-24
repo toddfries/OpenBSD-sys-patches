@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/Osd/OsdSchedule.c,v 1.40 2008/01/12 22:13:12 njl Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/Osd/OsdSchedule.c,v 1.42 2008/11/03 18:28:12 mav Exp $");
 
 #include "opt_acpi.h"
 #include <sys/param.h>
@@ -187,13 +187,9 @@ AcpiOsStall(UINT32 Microseconds)
 ACPI_THREAD_ID
 AcpiOsGetThreadId(void)
 {
-    struct proc *p;
 
     /* XXX do not add ACPI_FUNCTION_TRACE here, results in recursive call. */
 
-    p = curproc;
-    KASSERT(p != NULL, ("%s: curproc is NULL!", __func__));
-
     /* Returning 0 is not allowed. */
-    return (p->p_pid + 1);
+    return (curthread->td_tid);
 }

@@ -15,7 +15,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/dev/usb/uark.c,v 1.8 2008/01/26 04:30:48 emaste Exp $
+ * $FreeBSD: src/sys/dev/usb/uark.c,v 1.9 2008/10/09 20:51:25 n_hibma Exp $
  */
 
 #include <sys/param.h>
@@ -185,7 +185,7 @@ uark_attach(device_t self)
 	return 0;
 
 bad:
-	DPRINTF(("uftdi_attach: ATTACH ERROR\n"));
+	DPRINTF(("uark_attach: ATTACH ERROR\n"));
 	ucom->sc_dying = 1;
 	return ENXIO;
 }

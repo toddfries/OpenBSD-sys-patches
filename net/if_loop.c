@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)if_loop.c	8.2 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/net/if_loop.c,v 1.113 2007/10/27 18:25:53 yar Exp $
+ * $FreeBSD: src/sys/net/if_loop.c,v 1.121 2008/11/19 09:39:34 zec Exp $
  */
 
 /*
@@ -42,7 +42,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/module.h>
 #include <machine/bus.h>
@@ -50,6 +49,7 @@
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/sysctl.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_clone.h>
@@ -57,7 +57,6 @@
 #include <net/netisr.h>
 #include <net/route.h>
 #include <net/bpf.h>
-#include <net/bpfdesc.h>
 
 #ifdef	INET
 #include <netinet/in.h>
@@ -90,12 +89,6 @@
 #define LOMTU	16384
 #endif
 
-#define LONAME	"lo"
-
-struct lo_softc {
-	struct	ifnet *sc_ifp;
-};
-
 int		loioctl(struct ifnet *, u_long, caddr_t);
 static void	lortrequest(int, struct rtentry *, struct rt_addrinfo *);
 int		looutput(struct ifnet *ifp, struct mbuf *m,
@@ -103,44 +96,33 @@ int		looutput(struct ifnet *ifp, struct mbuf *m,
 static int	lo_clone_create(struct if_clone *, int, caddr_t);
 static void	lo_clone_destroy(struct ifnet *);
 
-struct ifnet *loif = NULL;			/* Used externally */
-
-static MALLOC_DEFINE(M_LO, LONAME, "Loopback Interface");
+#ifdef VIMAGE_GLOBALS
+struct ifnet *loif;			/* Used externally */
+#endif
 
 IFC_SIMPLE_DECLARE(lo, 1);
 
 static void
-lo_clone_destroy(ifp)
-	struct ifnet *ifp;
+lo_clone_destroy(struct ifnet *ifp)
 {
-	struct lo_softc *sc;
-	
-	sc = ifp->if_softc;
 
 	/* XXX: destroying lo0 will lead to panics. */
-	KASSERT(loif != ifp, ("%s: destroying lo0", __func__));
+	KASSERT(V_loif != ifp, ("%s: destroying lo0", __func__));
 
 	bpfdetach(ifp);
 	if_detach(ifp);
 	if_free(ifp);
-	free(sc, M_LO);
 }
 
 static int
-lo_clone_create(ifc, unit, params)
-	struct if_clone *ifc;
-	int unit;
-	caddr_t params;
+lo_clone_create(struct if_clone *ifc, int unit, caddr_t params)
 {
+	INIT_VNET_NET(curvnet);
 	struct ifnet *ifp;
-	struct lo_softc *sc;
 
-	MALLOC(sc, struct lo_softc *, sizeof(*sc), M_LO, M_WAITOK | M_ZERO);
-	ifp = sc->sc_ifp = if_alloc(IFT_LOOP);
-	if (ifp == NULL) {
-		free(sc, M_LO);
+	ifp = if_alloc(IFT_LOOP);
+	if (ifp == NULL)
 		return (ENOSPC);
-	}
 
 	if_initname(ifp, ifc->ifc_name, unit);
 	ifp->if_mtu = LOMTU;
@@ -148,45 +130,45 @@ lo_clone_create(ifc, unit, params)
 	ifp->if_ioctl = loioctl;
 	ifp->if_output = looutput;
 	ifp->if_snd.ifq_maxlen = ifqmaxlen;
-	ifp->if_softc = sc;
 	if_attach(ifp);
 	bpfattach(ifp, DLT_NULL, sizeof(u_int32_t));
-	if (loif == NULL)
-		loif = ifp;
+	if (V_loif == NULL)
+		V_loif = ifp;
 
 	return (0);
 }
 
 static int
-loop_modevent(module_t mod, int type, void *data) 
-{ 
-	switch (type) { 
-	case MOD_LOAD: 
-		if_clone_attach(&lo_cloner);
-		break; 
-	case MOD_UNLOAD: 
-		printf("loop module unload - not possible for this module type\n"); 
-		return EINVAL; 
-	default:
-		return EOPNOTSUPP;
-	} 
-	return 0; 
-} 
+loop_modevent(module_t mod, int type, void *data)
+{
 
-static moduledata_t loop_mod = { 
-	"loop", 
-	loop_modevent, 
+	switch (type) {
+	case MOD_LOAD:
+		V_loif = NULL;
+		if_clone_attach(&lo_cloner);
+		break;
+
+	case MOD_UNLOAD:
+		printf("loop module unload - not possible for this module type\n");
+		return (EINVAL);
+
+	default:
+		return (EOPNOTSUPP);
+	}
+	return (0);
+}
+
+static moduledata_t loop_mod = {
+	"loop",
+	loop_modevent,
 	0
-}; 
+};
 
 DECLARE_MODULE(loop, loop_mod, SI_SUB_PROTO_IFATTACHDOMAIN, SI_ORDER_ANY);
 
 int
-looutput(ifp, m, dst, rt)
-	struct ifnet *ifp;
-	register struct mbuf *m;
-	struct sockaddr *dst;
-	register struct rtentry *rt;
+looutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
+    struct rtentry *rt)
 {
 	u_int32_t af;
 
@@ -220,7 +202,7 @@ looutput(ifp, m, dst, rt)
 		return (EAFNOSUPPORT);
 	}
 #endif
-	return(if_simloop(ifp, m, dst->sa_family, 0));
+	return (if_simloop(ifp, m, dst->sa_family, 0));
 }
 
 /*
@@ -233,14 +215,10 @@ looutput(ifp, m, dst, rt)
  *
  * This function expects the packet to include the media header of length hlen.
  */
-
 int
-if_simloop(ifp, m, af, hlen)
-	struct ifnet *ifp;
-	struct mbuf *m;
-	int af;
-	int hlen;
+if_simloop(struct ifnet *ifp, struct mbuf *m, int af, int hlen)
 {
+	INIT_VNET_NET(ifp->if_vnet);
 	int isr;
 
 	M_ASSERTPKTHDR(m);
@@ -249,7 +227,7 @@ if_simloop(ifp, m, af, hlen)
 
 	/*
 	 * Let BPF see incoming packet in the following manner:
-	 *  - Emulated packet loopback for a simplex interface 
+	 *  - Emulated packet loopback for a simplex interface
 	 *    (net/if_ethersubr.c)
 	 *	-> passes it to ifp's BPF
 	 *  - IPv4/v6 multicast packet loopback (netinet(6)/ip(6)_output.c)
@@ -262,15 +240,15 @@ if_simloop(ifp, m, af, hlen)
 			bpf_mtap(ifp->if_bpf, m);
 		}
 	} else {
-		if (bpf_peers_present(loif->if_bpf)) {
-			if ((m->m_flags & M_MCAST) == 0 || loif == ifp) {
+		if (bpf_peers_present(V_loif->if_bpf)) {
+			if ((m->m_flags & M_MCAST) == 0 || V_loif == ifp) {
 				/* XXX beware sizeof(af) != 4 */
-				u_int32_t af1 = af;	
+				u_int32_t af1 = af;
 
 				/*
 				 * We need to prepend the address family.
 				 */
-				bpf_mtap2(loif->if_bpf, &af1, sizeof(af1), m);
+				bpf_mtap2(V_loif->if_bpf, &af1, sizeof(af1), m);
 			}
 		}
 	}
@@ -285,8 +263,8 @@ if_simloop(ifp, m, af, hlen)
 		 */
 		if (mtod(m, vm_offset_t) & 3) {
 			KASSERT(hlen >= 3, ("if_simloop: hlen too small"));
-			bcopy(m->m_data, 
-			    (char *)(mtod(m, vm_offset_t) 
+			bcopy(m->m_data,
+			    (char *)(mtod(m, vm_offset_t)
 				- (mtod(m, vm_offset_t) & 3)),
 			    m->m_len);
 			m->m_data -= (mtod(m,vm_offset_t) & 3);
@@ -330,11 +308,9 @@ if_simloop(ifp, m, af, hlen)
 
 /* ARGSUSED */
 static void
-lortrequest(cmd, rt, info)
-	int cmd;
-	struct rtentry *rt;
-	struct rt_addrinfo *info;
+lortrequest(int cmd, struct rtentry *rt, struct rt_addrinfo *info)
 {
+
 	RT_LOCK_ASSERT(rt);
 	rt->rt_rmx.rmx_mtu = rt->rt_ifp->if_mtu;
 }
@@ -344,17 +320,13 @@ lortrequest(cmd, rt, info)
  */
 /* ARGSUSED */
 int
-loioctl(ifp, cmd, data)
-	register struct ifnet *ifp;
-	u_long cmd;
-	caddr_t data;
+loioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
-	register struct ifaddr *ifa;
-	register struct ifreq *ifr = (struct ifreq *)data;
-	register int error = 0;
+	struct ifaddr *ifa;
+	struct ifreq *ifr = (struct ifreq *)data;
+	int error = 0;
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		ifp->if_drv_flags |= IFF_DRV_RUNNING;

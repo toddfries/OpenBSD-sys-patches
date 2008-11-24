@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_uuid.c,v 1.13 2007/04/23 12:53:00 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_uuid.c,v 1.15 2008/10/02 15:37:58 zec Exp $");
 
 #include <sys/param.h>
 #include <sys/endian.h>
@@ -37,6 +37,7 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_uuid.c,v 1.13 2007/04/23 12:53:00 pjd Exp 
 #include <sys/sysproto.h>
 #include <sys/systm.h>
 #include <sys/uuid.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -87,13 +88,14 @@ MTX_SYSINIT(uuid_lock, &uuid_mutex, "UUID generator mutex lock", MTX_DEF);
 static void
 uuid_node(uint16_t *node)
 {
+	INIT_VNET_NET(curvnet);
 	struct ifnet *ifp;
 	struct ifaddr *ifa;
 	struct sockaddr_dl *sdl;
 	int i;
 
 	IFNET_RLOCK();
-	TAILQ_FOREACH(ifp, &ifnet, if_link) {
+	TAILQ_FOREACH(ifp, &V_ifnet, if_link) {
 		/* Walk the address list */
 		TAILQ_FOREACH(ifa, &ifp->if_addrhead, ifa_link) {
 			sdl = (struct sockaddr_dl*)ifa->ifa_addr;

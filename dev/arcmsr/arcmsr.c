@@ -56,7 +56,7 @@
 **                                                       and cause g_vfs_done() read write error
 **     1.20.00.15   10/10/2007         Erich Chen        support new RAID adapter type ARC120x
 ******************************************************************************************
-* $FreeBSD: src/sys/dev/arcmsr/arcmsr.c,v 1.27 2007/12/09 19:24:27 scottl Exp $
+* $FreeBSD: src/sys/dev/arcmsr/arcmsr.c,v 1.28 2008/09/27 08:51:18 ed Exp $
 */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -256,7 +256,7 @@ MODULE_DEPEND(arcmsr, cam, 1, 1, 1);
 	#if __FreeBSD_version < 503000
 		struct AdapterControlBlock *acb=dev->si_drv1;
 	#else
-		int	unit = minor(dev);
+		int	unit = dev2unit(dev);
 		struct AdapterControlBlock *acb = devclass_get_softc(arcmsr_devclass, unit);
 	#endif
 	if(acb==NULL) {
@@ -281,7 +281,7 @@ MODULE_DEPEND(arcmsr, cam, 1, 1, 1);
 	#if __FreeBSD_version < 503000
 		struct AdapterControlBlock *acb=dev->si_drv1;
 	#else
-		int	unit = minor(dev);
+		int	unit = dev2unit(dev);
 		struct AdapterControlBlock *acb = devclass_get_softc(arcmsr_devclass, unit);
 	#endif
 	if(acb==NULL) {
@@ -306,7 +306,7 @@ MODULE_DEPEND(arcmsr, cam, 1, 1, 1);
 	#if __FreeBSD_version < 503000
 		struct AdapterControlBlock *acb=dev->si_drv1;
 	#else
-		int	unit = minor(dev);
+		int	unit = dev2unit(dev);
 		struct AdapterControlBlock *acb = devclass_get_softc(arcmsr_devclass, unit);
 	#endif
 	

@@ -37,7 +37,7 @@
  *
  * Author: Julian Elischer <julian@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_lmi.c,v 1.25 2006/01/14 14:17:27 glebius Exp $
+ * $FreeBSD: src/sys/netgraph/ng_lmi.c,v 1.26 2008/10/23 15:53:51 des Exp $
  * $Whistle: ng_lmi.c,v 1.38 1999/11/01 09:24:52 julian Exp $
  */
 
@@ -185,7 +185,7 @@ nglmi_constructor(node_p node)
 {
 	sc_p sc;
 
-	MALLOC(sc, sc_p, sizeof(*sc), M_NETGRAPH, M_NOWAIT | M_ZERO);
+	sc = malloc(sizeof(*sc), M_NETGRAPH, M_NOWAIT | M_ZERO);
 	if (sc == NULL)
 		return (ENOMEM);
 
@@ -1053,7 +1053,7 @@ nglmi_shutdown(node_p node)
 
 	NG_NODE_SET_PRIVATE(node, NULL);
 	NG_NODE_UNREF(sc->node);
-	FREE(sc, M_NETGRAPH);
+	free(sc, M_NETGRAPH);
 	return (0);
 }
 

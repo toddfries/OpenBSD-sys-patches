@@ -26,8 +26,10 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "opt_compat.h"
+
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_ioctl.c,v 1.138 2007/04/07 19:40:58 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_ioctl.c,v 1.145 2008/10/23 15:53:51 des Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,11 +58,11 @@ __FBSDID("$FreeBSD: src/sys/compat/linux/linux_ioctl.c,v 1.138 2007/04/07 19:40:
 #include <sys/sx.h>
 #include <sys/tty.h>
 #include <sys/uio.h>
+#include <sys/vimage.h>
+
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
-
-#include "opt_compat.h"
 
 #ifdef COMPAT_LINUX32
 #include <machine/../linux32/linux.h>
@@ -294,6 +296,11 @@ struct linux_winsize {
 	unsigned short ws_xpixel, ws_ypixel;
 };
 
+struct speedtab {
+	int sp_speed;			/* Speed. */
+	int sp_code;			/* Code. */
+};
+
 static struct speedtab sptab[] = {
 	{ B0, LINUX_B0 }, { B50, LINUX_B50 },
 	{ B75, LINUX_B75 }, { B110, LINUX_B110 },
@@ -393,7 +400,7 @@ bsd_to_linux_termios(struct termios *bios, struct linux_termios *lios)
 		lios->c_oflag |= LINUX_OPOST;
 	if (bios->c_oflag & ONLCR)
 		lios->c_oflag |= LINUX_ONLCR;
-	if (bios->c_oflag & OXTABS)
+	if (bios->c_oflag & TAB3)
 		lios->c_oflag |= LINUX_XTABS;
 
 	lios->c_cflag = bsd_to_linux_speed(bios->c_ispeed, sptab);
@@ -535,7 +542,7 @@ linux_to_bsd_termios(struct linux_termios *lios, struct termios *bios)
 	if (lios->c_oflag & LINUX_ONLCR)
 		bios->c_oflag |= ONLCR;
 	if (lios->c_oflag & LINUX_XTABS)
-		bios->c_oflag |= OXTABS;
+		bios->c_oflag |= TAB3;
 
 	bios->c_cflag = (lios->c_cflag & LINUX_CSIZE) << 4;
 	if (lios->c_cflag & LINUX_CSTOPB)
@@ -893,7 +900,10 @@ linux_ioctl_termio(struct thread *td, struct linux_ioctl_args *args)
 		break;
 	}
 
-	/* LINUX_TIOCPKT */
+	case LINUX_TIOCPKT:
+		args->cmd = TIOCPKT;
+		error = (ioctl(td, (struct ioctl_args *)args));
+		break;
 
 	case LINUX_FIONBIO:
 		args->cmd = FIONBIO;
@@ -993,6 +1003,10 @@ linux_ioctl_termio(struct thread *td, struct linux_ioctl_args *args)
 			    sizeof(int));
 		break;
 	}
+	case LINUX_TIOCSPTLCK:
+		/* Our unlockpt() does nothing. */
+		error = 0;
+		break;
 	default:
 		error = ENOIOCTL;
 		break;
@@ -2037,6 +2051,7 @@ linux_ioctl_console(struct thread *td, struct linux_ioctl_args *args)
 int
 linux_ifname(struct ifnet *ifp, char *buffer, size_t buflen)
 {
+	INIT_VNET_NET(ifp->if_vnet);
 	struct ifnet *ifscan;
 	int ethno;
 
@@ -2047,7 +2062,7 @@ linux_ifname(struct ifnet *ifp, char *buffer, size_t buflen)
 	/* Determine the (relative) unit number for ethernet interfaces */
 	ethno = 0;
 	IFNET_RLOCK();
-	TAILQ_FOREACH(ifscan, &ifnet, if_link) {
+	TAILQ_FOREACH(ifscan, &V_ifnet, if_link) {
 		if (ifscan == ifp) {
 			IFNET_RUNLOCK();
 			return (snprintf(buffer, buflen, "eth%d", ethno));
@@ -2070,6 +2085,7 @@ linux_ifname(struct ifnet *ifp, char *buffer, size_t buflen)
 static struct ifnet *
 ifname_linux_to_bsd(const char *lxname, char *bsdname)
 {
+	INIT_VNET_NET(TD_TO_VNET(curthread));
 	struct ifnet *ifp;
 	int len, unit;
 	char *ep;
@@ -2086,7 +2102,7 @@ ifname_linux_to_bsd(const char *lxname, char *bsdname)
 	index = 0;
 	is_eth = (len == 3 && !strncmp(lxname, "eth", len)) ? 1 : 0;
 	IFNET_RLOCK();
-	TAILQ_FOREACH(ifp, &ifnet, if_link) {
+	TAILQ_FOREACH(ifp, &V_ifnet, if_link) {
 		/*
 		 * Allow Linux programs to use FreeBSD names. Don't presume
 		 * we never have an interface named "eth", so don't make
@@ -2110,6 +2126,7 @@ ifname_linux_to_bsd(const char *lxname, char *bsdname)
 static int
 linux_ifconf(struct thread *td, struct ifconf *uifc)
 {
+	INIT_VNET_NET(TD_TO_VNET(td));
 #ifdef COMPAT_LINUX32
 	struct l_ifconf ifc;
 #else
@@ -2130,7 +2147,7 @@ linux_ifconf(struct thread *td, struct ifconf *uifc)
 	/* handle the 'request buffer size' case */
 	if (ifc.ifc_buf == PTROUT(NULL)) {
 		ifc.ifc_len = 0;
-		TAILQ_FOREACH(ifp, &ifnet, if_link) {
+		TAILQ_FOREACH(ifp, &V_ifnet, if_link) {
 			TAILQ_FOREACH(ifa, &ifp->if_addrhead, ifa_link) {
 				struct sockaddr *sa = ifa->ifa_addr;
 				if (sa->sa_family == AF_INET)
@@ -2157,7 +2174,7 @@ again:
 
 	/* Return all AF_INET addresses of all interfaces */
 	IFNET_RLOCK();		/* could sleep XXX */
-	TAILQ_FOREACH(ifp, &ifnet, if_link) {
+	TAILQ_FOREACH(ifp, &V_ifnet, if_link) {
 		int addrs = 0;
 
 		bzero(&ifr, sizeof(ifr));
@@ -2323,6 +2340,7 @@ linux_ioctl_socket(struct thread *td, struct linux_ioctl_args *args)
 	case LINUX_SIOCGIFCONF:
 	case LINUX_SIOCGPGRP:
 	case LINUX_SIOCSPGRP:
+	case LINUX_SIOCGIFCOUNT:
 		/* these ioctls don't take an interface name */
 #ifdef DEBUG
 		printf("%s(): ioctl %d\n", __func__,
@@ -2344,6 +2362,7 @@ linux_ioctl_socket(struct thread *td, struct linux_ioctl_args *args)
 	case LINUX_SIOCSIFHWADDR:
 	case LINUX_SIOCDEVPRIVATE:
 	case LINUX_SIOCDEVPRIVATE+1:
+	case LINUX_SIOCGIFINDEX:
 		/* copy in the interface name and translate it. */
 		error = copyin((void *)args->arg, lifname, LINUX_IFNAMSIZ);
 		if (error != 0)
@@ -2476,6 +2495,15 @@ linux_ioctl_socket(struct thread *td, struct linux_ioctl_args *args)
 	case LINUX_SIOCDELMULTI:
 		args->cmd = SIOCDELMULTI;
 		error = ioctl(td, (struct ioctl_args *)args);
+		break;
+
+	case LINUX_SIOCGIFINDEX:
+		args->cmd = SIOCGIFINDEX;
+		error = ioctl(td, (struct ioctl_args *)args);
+		break;
+
+	case LINUX_SIOCGIFCOUNT:
+		error = 0;
 		break;
 
 	/*
@@ -2645,7 +2673,7 @@ linux_ioctl_register_handler(struct linux_ioctl_handler *h)
 			break;
 	}
 	if (he == NULL) {
-		MALLOC(he, struct handler_element *, sizeof(*he),
+		he = malloc(sizeof(*he),
 		    M_LINUX, M_WAITOK);
 		he->func = h->func;
 	} else
@@ -2683,7 +2711,7 @@ linux_ioctl_unregister_handler(struct linux_ioctl_handler *h)
 		if (he->func == h->func) {
 			TAILQ_REMOVE(&handlers, he, list);
 			sx_xunlock(&linux_ioctl_sx);
-			FREE(he, M_LINUX);
+			free(he, M_LINUX);
 			return (0);
 		}
 	}

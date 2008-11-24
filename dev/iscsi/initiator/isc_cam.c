@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iscsi/initiator/isc_cam.c,v 1.1 2007/07/24 15:35:02 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iscsi/initiator/isc_cam.c,v 1.2 2008/09/27 08:51:18 ed Exp $");
 
 #include "opt_iscsi_initiator.h"
 
@@ -142,7 +142,7 @@ ic_fullfeature(struct cdev *dev)
      isc_session_t	*sp = (isc_session_t *)dev->si_drv2;
 
      debug_called(8);
-     sdebug(3, "dev=%d sc=%p", minor(dev), isp);
+     sdebug(3, "dev=%d sc=%p", dev2unit(dev), isp);
 
      sp->flags &= ~ISC_FFPHASE;
      sp->flags |= ISC_FFPWAIT;

@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/powermac/openpic_macio.c,v 1.10 2007/08/11 19:25:32 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/powermac/openpic_macio.c,v 1.13 2008/10/14 14:54:14 nwhitehorn Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -43,7 +43,6 @@ __FBSDID("$FreeBSD: src/sys/powerpc/powermac/openpic_macio.c,v 1.10 2007/08/11 1
 #include <machine/intr.h>
 #include <machine/intr_machdep.h>
 #include <machine/md_var.h>
-#include <machine/nexusvar.h>
 #include <machine/pio.h>
 #include <machine/resource.h>
 
@@ -67,9 +66,11 @@ static device_method_t  openpic_macio_methods[] = {
 	DEVMETHOD(device_attach,	openpic_attach),
 
 	/* PIC interface */
+	DEVMETHOD(pic_config,		openpic_config),
 	DEVMETHOD(pic_dispatch,		openpic_dispatch),
 	DEVMETHOD(pic_enable,		openpic_enable),
 	DEVMETHOD(pic_eoi,		openpic_eoi),
+	DEVMETHOD(pic_ipi,		openpic_ipi),
 	DEVMETHOD(pic_mask,		openpic_mask),
 	DEVMETHOD(pic_unmask,		openpic_unmask),
 

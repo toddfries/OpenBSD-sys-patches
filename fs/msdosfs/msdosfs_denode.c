@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_denode.c,v 1.98 2007/10/19 12:23:25 bde Exp $ */
+/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_denode.c,v 1.100 2008/10/23 15:53:51 des Exp $ */
 /*	$NetBSD: msdosfs_denode.c,v 1.28 1998/02/10 14:10:00 mrg Exp $	*/
 
 /*-
@@ -105,7 +105,6 @@ deget(pmp, dirclust, diroffset, depp)
 	struct denode *ldep;
 	struct vnode *nvp, *xvp;
 	struct buf *bp;
-	struct thread *td;
 
 #ifdef MSDOSFS_DEBUG
 	printf("deget(pmp %p, dirclust %lu, diroffset %lx, depp %p)\n",
@@ -149,7 +148,7 @@ deget(pmp, dirclust, diroffset, depp)
 	 * might cause a bogus v_data pointer to get dereferenced
 	 * elsewhere if MALLOC should block.
 	 */
-	MALLOC(ldep, struct denode *, sizeof(struct denode), M_MSDOSFSNODE, M_WAITOK);
+	ldep = malloc(sizeof(struct denode), M_MSDOSFSNODE, M_WAITOK);
 
 	/*
 	 * Directory entry was not in cache, have to create a vnode and
@@ -159,7 +158,7 @@ deget(pmp, dirclust, diroffset, depp)
 	error = getnewvnode("msdosfs", mntp, &msdosfs_vnodeops, &nvp);
 	if (error) {
 		*depp = NULL;
-		FREE(ldep, M_MSDOSFSNODE);
+		free(ldep, M_MSDOSFSNODE);
 		return error;
 	}
 	bzero((caddr_t)ldep, sizeof *ldep);
@@ -171,15 +170,14 @@ deget(pmp, dirclust, diroffset, depp)
 	ldep->de_inode = inode;
 	fc_purge(ldep, 0);	/* init the fat cache for this denode */
 
-	td = curthread;
-	lockmgr(nvp->v_vnlock, LK_EXCLUSIVE, NULL, td);
+	lockmgr(nvp->v_vnlock, LK_EXCLUSIVE, NULL);
 	error = insmntque(nvp, mntp);
 	if (error != 0) {
-		FREE(ldep, M_MSDOSFSNODE);
+		free(ldep, M_MSDOSFSNODE);
 		*depp = NULL;
 		return (error);
 	}
-	error = vfs_hash_insert(nvp, inode, LK_EXCLUSIVE, td, &xvp,
+	error = vfs_hash_insert(nvp, inode, LK_EXCLUSIVE, curthread, &xvp,
 	    de_vncmpf, &inode);
 	if (error) {
 		*depp = NULL;
@@ -569,7 +567,7 @@ msdosfs_reclaim(ap)
 #if 0 /* XXX */
 	dep->de_flag = 0;
 #endif
-	FREE(dep, M_MSDOSFSNODE);
+	free(dep, M_MSDOSFSNODE);
 	vp->v_data = NULL;
 
 	return (0);

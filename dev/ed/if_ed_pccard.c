@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/ed/if_ed_pccard.c,v 1.113 2007/07/11 04:14:40 imp Exp $
+ * $FreeBSD: src/sys/dev/ed/if_ed_pccard.c,v 1.115 2008/08/06 22:22:27 imp Exp $
  */
 
 /*
@@ -157,6 +157,8 @@ static const struct ed_product {
 	{ PCMCIA_CARD(COREGA, FAST_ETHER_PCC_TX), NE2000DVF_DL100XX},
 	{ PCMCIA_CARD(COREGA, FETHER_PCC_TXD), NE2000DVF_AX88X90},
 	{ PCMCIA_CARD(COREGA, FETHER_PCC_TXF), NE2000DVF_DL100XX},
+	{ PCMCIA_CARD(COREGA, FETHER_II_PCC_TXD), NE2000DVF_AX88X90},
+	{ PCMCIA_CARD(COREGA, LAPCCTXD), 0},
 	{ PCMCIA_CARD(DAYNA, COMMUNICARD_E_1), 0},
 	{ PCMCIA_CARD(DAYNA, COMMUNICARD_E_2), 0},
 	{ PCMCIA_CARD(DLINK, DE650), 0 },
@@ -570,7 +572,7 @@ ed_pccard_attach(device_t dev)
 		ed_pccard_add_modem(dev);
 	return (0);
 bad:
-	ed_release_resources(dev);
+	ed_detach(dev);
 	return (error);
 }
 

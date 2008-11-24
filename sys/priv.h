@@ -26,7 +26,7 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/priv.h,v 1.16 2007/10/21 22:50:11 rwatson Exp $
+ * $FreeBSD: src/sys/sys/priv.h,v 1.25 2008/11/17 20:49:29 pjd Exp $
  */
 
 /*
@@ -84,7 +84,7 @@
 #define	PRIV_CLOCK_SETTIME	17	/* Can call clock_settime. */
 #define	PRIV_SETTIMEOFDAY	18	/* Can call settimeofday. */
 #define	PRIV_SETHOSTID		19	/* Can call sethostid. */
-#define	PRIV_SETDOMAINNAME	20	/* Can call setdomainname. */
+#define	_PRIV_SETDOMAINNAME	20	/* Removed. */
 
 /*
  * Audit subsystem privileges.
@@ -187,6 +187,7 @@
 #define	PRIV_SCHED_SETPOLICY	203	/* Can set scheduler policy. */
 #define	PRIV_SCHED_SET		204	/* Can set thread scheduler. */
 #define	PRIV_SCHED_SETPARAM	205	/* Can set thread scheduler params. */
+#define	PRIV_SCHED_CPUSET	206	/* Can manipulate cpusets. */
 
 /*
  * POSIX semaphore privileges.
@@ -267,7 +268,7 @@
 #define	PRIV_VFS_MKNOD_DEV	331	/* Can mknod() to create dev nodes. */
 #define	PRIV_VFS_MKNOD_WHT	332	/* Can mknod() to create whiteout. */
 #define	PRIV_VFS_MOUNT		333	/* Can mount(). */
-#define	PRIV_VFS_MOUNT_OWNER	334	/* Override owner on user mounts. */
+#define	PRIV_VFS_MOUNT_OWNER	334	/* Can manage other users' file systems. */
 #define	PRIV_VFS_MOUNT_EXPORTED	335	/* Can set MNT_EXPORTED on mount. */
 #define	PRIV_VFS_MOUNT_PERM	336	/* Override dev node perms at mount. */
 #define	PRIV_VFS_MOUNT_SUIDDIR	337	/* Can set MNT_SUIDDIR on mount. */
@@ -375,6 +376,7 @@
 #define	PRIV_NETINET_ALIFETIME6	502	/* Administer IPv6 address lifetimes. */
 #define	PRIV_NETINET_IPSEC	503	/* Administer IPSEC. */
 #define	PRIV_NETINET_REUSEPORT	504	/* Allow [rapid] port/address reuse. */
+#define	PRIV_NETINET_SETHDROPTS	505	/* Set certain IPv4/6 header options. */
 
 /*
  * IPX/SPX privileges.
@@ -443,9 +445,25 @@
 #define	PRIV_MODULE15		615
 
 /*
+ * DDB(4) privileges.
+ */
+#define	PRIV_DDB_CAPTURE	620	/* Allow reading of DDB capture log. */
+
+/*
+ * Arla/nnpfs privileges.
+ */
+#define	PRIV_NNPFS_DEBUG	630	/* Perforn ARLA_VIOC_NNPFSDEBUG. */
+
+/*
+ * cpuctl(4) privileges.
+ */
+#define PRIV_CPUCTL_WRMSR	640	/* Write model-specific register. */
+#define PRIV_CPUCTL_UPDATE	641	/* Update cpu microcode. */
+
+/*
  * Track end of privilege list.
  */
-#define	_PRIV_HIGHEST		616
+#define	_PRIV_HIGHEST		642
 
 /*
  * Validate that a named privilege is known by the privilege system.  Invalid
@@ -467,12 +485,6 @@ struct thread;
 struct ucred;
 int	priv_check(struct thread *td, int priv);
 int	priv_check_cred(struct ucred *cred, int priv, int flags);
-
-/*
- * Continue to support external modules that rely on suser(9) -- for now.
- */
-int	suser(struct thread *td);
-int	suser_cred(struct ucred *cred, int flags);
 #endif
 
 #endif /* !_SYS_PRIV_H_ */

@@ -1,4 +1,4 @@
- $FreeBSD: src/sys/compat/freebsd32/syscalls.master,v 1.91 2007/08/16 05:30:04 davidxu Exp $
+ $FreeBSD: src/sys/compat/freebsd32/syscalls.master,v 1.111 2008/11/09 10:45:13 ed Exp $
 ;	from: @(#)syscalls.master	8.2 (Berkeley) 1/13/94
 ;	from: src/sys/kern/syscalls.master 1.107
 ;
@@ -31,6 +31,13 @@
 ;	NOSTD	implemented but as a lkm that can be statically
 ;		compiled in; sysent entry will be filled with lkmsys
 ;		so the SYSCALL_MODULE macro works
+;	NOARGS	same as STD except do not create structure in sys/sysproto.h
+;	NODEF	same as STD except only have the entry in the syscall table
+;		added.  Meaning - do not create structure or function
+;		prototype in sys/sysproto.h
+;	NOPROTO	same as STD except do not create structure or
+;		function prototype in sys/sysproto.h.  Does add a
+;		definition to syscall.h besides adding a sysent.
 
 ; #ifdef's, etc. may be included, and are copied to the output files.
 
@@ -38,6 +45,7 @@
 #include <sys/sysent.h>
 #include <sys/sysproto.h>
 #include <sys/mount.h>
+#include <sys/socket.h>
 #include <compat/freebsd32/freebsd32.h>
 #include <compat/freebsd32/freebsd32_proto.h>
 
@@ -126,13 +134,13 @@
 53	AUE_SIGALTSTACK	STD	{ int freebsd32_sigaltstack( \
 				    struct sigaltstack32 *ss, \
 				    struct sigaltstack32 *oss); }
-54	AUE_IOCTL	NOPROTO	{ int ioctl(int fd, u_long com, \
-				    caddr_t data); }
+54	AUE_NULL	STD	{ int freebsd32_ioctl(int fd, uint32_t com, \
+				    struct md_ioctl32 *data); }
 55	AUE_REBOOT	NOPROTO	{ int reboot(int opt); }
 56	AUE_REVOKE	NOPROTO	{ int revoke(char *path); }
 57	AUE_SYMLINK	NOPROTO	{ int symlink(char *path, char *link); }
-58	AUE_READLINK	NOPROTO	{ int readlink(char *path, char *buf, \
-				    int count); }
+58	AUE_READLINK	NOPROTO	{ ssize_t readlink(char *path, char *buf, \
+				    size_t count); }
 59	AUE_EXECVE	STD	{ int freebsd32_execve(char *fname, \
 				    u_int32_t *argv, u_int32_t *envv); }
 60	AUE_UMASK	NOPROTO	{ int umask(int newmask); } umask \
@@ -171,7 +179,7 @@
 				    struct itimerval32 *oitv); }
 84	AUE_NULL	OBSOL	owait
 ; XXX implement
-85	AUE_SWAPON	OBSOL	oswapon
+85	AUE_SWAPON	NOPROTO	{ int swapon(char *name); }
 86	AUE_GETITIMER	STD	{ int freebsd32_getitimer(u_int which, \
 				    struct itimerval32 *itv); }
 87	AUE_O_GETHOSTNAME	OBSOL	ogethostname
@@ -273,7 +281,8 @@
 151	AUE_NULL	UNIMPL	sem_lock (BSD/OS 2.x)
 152	AUE_NULL	UNIMPL	sem_wakeup (BSD/OS 2.x)
 153	AUE_NULL	UNIMPL	asyncdaemon (BSD/OS 2.x)
-154	AUE_NULL	UNIMPL	nosys
+; 154 is initialised by the NLM code, if present.
+154	AUE_NULL	UNIMPL	nlm_syscall
 ; 155 is initialized by the NFS code, if present.
 ; XXX this is a problem!!!
 155	AUE_NFS_SVC	UNIMPL	nfssvc
@@ -286,11 +295,9 @@
 160	AUE_LGETFH	UNIMPL	lgetfh
 161	AUE_NFS_GETFH	NOPROTO	{ int getfh(char *fname, \
 				    struct fhandle *fhp); }
-162	AUE_SYSCTL	NOPROTO	{ int getdomainname(char *domainname, \
-				    int len); }
-163	AUE_SYSCTL	NOPROTO	{ int setdomainname(char *domainname, \
-				    int len); }
-164	AUE_NULL	NOPROTO	{ int uname(struct utsname *name); }
+162	AUE_NULL	OBSOL	getdomainname
+163	AUE_NULL	OBSOL	setdomainname
+164	AUE_NULL	OBSOL	uname
 165	AUE_SYSARCH	NOPROTO	{ int sysarch(int op, char *parms); }
 166	AUE_RTPRIO	NOPROTO	{ int rtprio(int function, pid_t pid, \
 				    struct rtprio *rtp); }
@@ -341,8 +348,8 @@
 195	AUE_SETRLIMIT	NOPROTO	{ int setrlimit(u_int which, \
 				    struct rlimit *rlp); } setrlimit \
 				    __setrlimit_args int
-196	AUE_GETDIRENTRIES	NOPROTO	{ int getdirentries(int fd, char *buf, \
-				    u_int count, long *basep); }
+196	AUE_GETDIRENTRIES	STD	{ int freebsd32_getdirentries(int fd, \
+				    char *buf, u_int count, int32_t *basep); }
 197	AUE_MMAP	COMPAT6	{ caddr_t freebsd32_mmap(caddr_t addr, \
 				    size_t len, int prot, int flags, int fd, \
 				    int pad, u_int32_t poslo, \
@@ -379,30 +386,30 @@
 ;
 ; The following are reserved for loadable syscalls
 ;
-210	AUE_NULL	UNIMPL
-211	AUE_NULL	UNIMPL
-212	AUE_NULL	UNIMPL
-213	AUE_NULL	UNIMPL
-214	AUE_NULL	UNIMPL
-215	AUE_NULL	UNIMPL
-216	AUE_NULL	UNIMPL
-217	AUE_NULL	UNIMPL
-218	AUE_NULL	UNIMPL
-219	AUE_NULL	UNIMPL
+210	AUE_NULL	NODEF	lkmnosys lkmnosys nosys_args int
+211	AUE_NULL	NODEF	lkmnosys lkmnosys nosys_args int
+212	AUE_NULL	NODEF	lkmnosys lkmnosys nosys_args int
+213	AUE_NULL	NODEF	lkmnosys lkmnosys nosys_args int
+214	AUE_NULL	NODEF	lkmnosys lkmnosys nosys_args int
+215	AUE_NULL	NODEF	lkmnosys lkmnosys nosys_args int
+216	AUE_NULL	NODEF	lkmnosys lkmnosys nosys_args int
+217	AUE_NULL	NODEF	lkmnosys lkmnosys nosys_args int
+218	AUE_NULL	NODEF	lkmnosys lkmnosys nosys_args int
+219	AUE_NULL	NODEF	lkmnosys lkmnosys nosys_args int
 
 ;
 ; The following were introduced with NetBSD/4.4Lite-2
 ; They are initialized by thier respective modules/sysinits
 ; XXX PROBLEM!!
-220	AUE_SEMCTL	NOPROTO	{ int __semctl(int semid, int semnum, \
-				    int cmd, union semun *arg); }
+220	AUE_SEMCTL	STD	{ int freebsd32_semctl(int semid, int semnum, \
+				    int cmd, union semun32 *arg); }
 221	AUE_SEMGET	NOPROTO	{ int semget(key_t key, int nsems, \
 				    int semflg); }
 222	AUE_SEMOP	NOPROTO	{ int semop(int semid, struct sembuf *sops, \
 				    u_int nsops); }
 223	AUE_NULL	UNIMPL	semconfig
-224	AUE_MSGCTL	NOPROTO	{ int msgctl(int msqid, int cmd, \
-				    struct msqid_ds *buf); }
+224	AUE_MSGCTL	STD	{ int freebsd32_msgctl(int msqid, int cmd, \
+				    struct msqid_ds32 *buf); }
 225	AUE_MSGGET	NOPROTO	{ int msgget(key_t key, int msgflg); }
 226	AUE_MSGSND	STD	{ int freebsd32_msgsnd(int msqid, void *msgp, \
 				    size_t msgsz, int msgflg); }
@@ -628,7 +635,7 @@
 367	AUE_NULL	UNIMPL	__cap_get_file
 368	AUE_NULL	UNIMPL	__cap_set_fd
 369	AUE_NULL	UNIMPL	__cap_set_file
-370	AUE_NULL	UNIMPL	lkmressys
+370	AUE_NULL	UNIMPL	nosys
 371	AUE_EXTATTR_SET_FD	NOPROTO	{ int extattr_set_fd(int fd, \
 				    int attrnamespace, const char *attrname, \
 				    void *data, size_t nbytes); }
@@ -642,15 +649,13 @@
 375	AUE_NULL	UNIMPL	nfsclnt
 376	AUE_EACCESS	NOPROTO	{ int eaccess(char *path, int flags); }
 377	AUE_NULL	UNIMPL	afs_syscall
-378	AUE_NMOUNT	NOPROTO	{ int nmount(struct iovec *iovp, \
+378	AUE_NMOUNT	STD	{ int freebsd32_nmount(struct iovec32 *iovp, \
 				    unsigned int iovcnt, int flags); }
-379	AUE_NULL	NOPROTO	{ int kse_exit(void); }
-380	AUE_NULL	NOPROTO	{ int kse_wakeup(struct kse_mailbox *mbx); }
-381	AUE_NULL	NOPROTO	{ int kse_create(struct kse_mailbox *mbx, \
-				    int newgroup); }
-382	AUE_NULL	NOPROTO	{ int kse_thr_interrupt( \
-				    struct kse_thr_mailbox *tmbx); }
-383	AUE_NULL	NOPROTO	{ int kse_release(void); }
+379	AUE_NULL	UNIMPL	kse_exit
+380	AUE_NULL	UNIMPL	kse_wakeup
+381	AUE_NULL	UNIMPL	kse_create
+382	AUE_NULL	UNIMPL	kse_thr_interrupt
+383	AUE_NULL	UNIMPL	kse_release
 384	AUE_NULL	UNIMPL	__mac_get_proc
 385	AUE_NULL	UNIMPL	__mac_set_proc
 386	AUE_NULL	UNIMPL	__mac_get_fd
@@ -795,3 +800,57 @@
 480	AUE_FTRUNCATE	STD	{ int freebsd32_ftruncate(int fd, \
 				    u_int32_t lengthlo, u_int32_t lengthhi); }
 481	AUE_KILL	NOPROTO	{ int thr_kill2(pid_t pid, long id, int sig); }
+482	AUE_SHMOPEN	NOPROTO	{ int shm_open(const char *path, int flags, \
+				    mode_t mode); }
+483	AUE_SHMUNLINK	NOPROTO	{ int shm_unlink(const char *path); }
+484	AUE_NULL	NOPROTO	{ int cpuset(cpusetid_t *setid); }
+485	AUE_NULL	STD	{ int freebsd32_cpuset_setid(cpuwhich_t which, \
+				    uint32_t idlo, uint32_t idhi, \
+				    cpusetid_t setid); }
+486	AUE_NULL	STD	{ int freebsd32_cpuset_getid(cpulevel_t level, \
+				    cpuwhich_t which, \
+				    uint32_t idlo, uint32_t idhi, \
+				    cpusetid_t *setid); }
+487	AUE_NULL	STD	{ int freebsd32_cpuset_getaffinity( \
+				    cpulevel_t level, cpuwhich_t which, \
+				    uint32_t idlo, uint32_t idhi, \
+				    size_t cpusetsize, \
+				    cpuset_t *mask); }
+488	AUE_NULL	STD	{ int freebsd32_cpuset_setaffinity( \
+				    cpulevel_t level, cpuwhich_t which, \
+				    uint32_t idlo, uint32_t idhi, \
+				    size_t cpusetsize, \
+				    const cpuset_t *mask); }
+489	AUE_FACCESSAT	NOPROTO	{ int faccessat(int fd, char *path, int mode, \
+				    int flag); }
+490	AUE_FCHMODAT	NOPROTO	{ int fchmodat(int fd, const char *path, \
+				    mode_t mode, int flag); }
+491	AUE_FCHOWNAT	NOPROTO	{ int fchownat(int fd, char *path, uid_t uid, \
+				    gid_t gid, int flag); }
+492	AUE_FEXECVE	STD	{ int freebsd32_fexecve(int fd, \
+				    u_int32_t *argv, u_int32_t *envv); }
+493	AUE_FSTATAT	STD	{ int freebsd32_fstatat(int fd, char *path, \
+				    struct stat *buf, int flag); }
+494	AUE_FUTIMESAT	STD	{ int freebsd32_futimesat(int fd, char *path, \
+				    struct timeval *times); }
+495	AUE_LINKAT	NOPROTO	{ int linkat(int fd1, char *path1, int fd2, \
+				    char *path2, int flag); }
+496	AUE_MKDIRAT	NOPROTO	{ int mkdirat(int fd, char *path, \
+				    mode_t mode); }
+497	AUE_MKFIFOAT	NOPROTO	{ int mkfifoat(int fd, char *path, \
+				    mode_t mode); }
+498	AUE_MKNODAT	NOPROTO	{ int mknodat(int fd, char *path, \
+				    mode_t mode, dev_t dev); }
+499	AUE_OPENAT_RWTC	NOPROTO	{ int openat(int fd, char *path, int flag, \
+				    mode_t mode); }
+500	AUE_READLINKAT	NOPROTO	{ int readlinkat(int fd, char *path, char *buf, \
+				    size_t bufsize); }
+501	AUE_RENAMEAT	NOPROTO	{ int renameat(int oldfd, char *old, int newfd, \
+				    const char *new); }
+502	AUE_SYMLINKAT	NOPROTO	{ int symlinkat(char *path1, int fd, \
+				    char *path2); }
+503	AUE_UNLINKAT	NOPROTO	{ int unlinkat(int fd, char *path, \
+				    int flag); }
+504	AUE_POSIX_OPENPT	NOPROTO	{ int posix_openpt(int flags); }
+; 505 is initialised by the kgssapi code, if present.
+505	AUE_NULL	UNIMPL	gssd_syscall

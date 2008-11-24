@@ -27,7 +27,7 @@
 # SUCH DAMAGE.
 #
 #	@(#)vnode_if.src	8.12 (Berkeley) 5/14/95
-# $FreeBSD: src/sys/kern/vnode_if.src,v 1.87 2007/05/31 11:51:52 kib Exp $
+# $FreeBSD: src/sys/kern/vnode_if.src,v 1.94 2008/10/28 13:44:11 trasz Exp $
 #
 
 #
@@ -61,7 +61,6 @@
 
 vop_islocked {
 	IN struct vnode *vp;
-	IN struct thread *td;
 };
 
 %% lookup	dvp	L ? ?
@@ -148,7 +147,7 @@ vop_close {
 
 vop_access {
 	IN struct vnode *vp;
-	IN int mode;
+	IN accmode_t accmode;
 	IN struct ucred *cred;
 	IN struct thread *td;
 };
@@ -160,7 +159,6 @@ vop_getattr {
 	IN struct vnode *vp;
 	OUT struct vattr *vap;
 	IN struct ucred *cred;
-	IN struct thread *td;
 };
 
 
@@ -171,7 +169,6 @@ vop_setattr {
 	IN struct vnode *vp;
 	IN struct vattr *vap;
 	IN struct ucred *cred;
-	IN struct thread *td;
 };
 
 
@@ -219,7 +216,7 @@ vop_ioctl {
 };
 
 
-%% poll	vp	U U U
+%% poll		vp	U U U
 
 vop_poll {
 	IN struct vnode *vp;
@@ -368,7 +365,6 @@ vop_reclaim {
 vop_lock1 {
 	IN struct vnode *vp;
 	IN int flags;
-	IN struct thread *td;
 	IN char *file;
 	IN int line;
 };
@@ -380,7 +376,6 @@ vop_lock1 {
 vop_unlock {
 	IN struct vnode *vp;
 	IN int flags;
-	IN struct thread *td;
 };
 
 
@@ -413,7 +408,7 @@ vop_getwritemount {
 };
 
 
-%% print	vp	= = =
+%% print	vp	- - -
 
 vop_print {
 	IN struct vnode *vp;
@@ -437,6 +432,19 @@ vop_advlock {
 	IN int op;
 	IN struct flock *fl;
 	IN int flags;
+};
+
+
+%% advlockasync	vp	U U U
+
+vop_advlockasync {
+	IN struct vnode *vp;
+	IN void *id;
+	IN int op;
+	IN struct flock *fl;
+	IN int flags;
+	IN struct task *task;	
+	INOUT void **cookiep;
 };
 
 
@@ -581,7 +589,7 @@ vop_setlabel {
 };
 
 
-%% setlabel	vp	= = =
+%% vptofh	vp	= = =
 
 vop_vptofh {
 	IN struct vnode *vp;

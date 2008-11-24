@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_hpet.c,v 1.14 2008/01/16 18:47:07 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_hpet.c,v 1.15 2008/11/19 20:31:38 jkim Exp $");
 
 #include "opt_acpi.h"
 #include <sys/param.h>
@@ -83,7 +83,9 @@ hpet_enable(struct acpi_hpet_softc *sc)
 	uint32_t val;
 
 	val = bus_read_4(sc->mem_res, HPET_CONFIG);
-	bus_write_4(sc->mem_res, HPET_CONFIG, val | HPET_CNF_ENABLE);
+	val &= ~HPET_CNF_LEG_RT;
+	val |= HPET_CNF_ENABLE;
+	bus_write_4(sc->mem_res, HPET_CONFIG, val);
 }
 
 static void
@@ -92,7 +94,8 @@ hpet_disable(struct acpi_hpet_softc *sc)
 	uint32_t val;
 
 	val = bus_read_4(sc->mem_res, HPET_CONFIG);
-	bus_write_4(sc->mem_res, HPET_CONFIG, val & ~HPET_CNF_ENABLE);
+	val &= ~HPET_CNF_ENABLE;
+	bus_write_4(sc->mem_res, HPET_CONFIG, val);
 }
 
 /* Discover the HPET via the ACPI table of the same name. */

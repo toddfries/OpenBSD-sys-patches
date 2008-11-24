@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/net/if_gif.h,v 1.19 2006/01/30 08:39:09 glebius Exp $	*/
+/*	$FreeBSD: src/sys/net/if_gif.h,v 1.21 2008/10/02 15:37:58 zec Exp $	*/
 /*	$KAME: if_gif.h,v 1.17 2000/09/11 11:36:41 sumikawa Exp $	*/
 
 /*-
@@ -67,6 +67,7 @@ struct gif_softc {
 #endif
 	} gifsc_gifscr;
 	int		gif_flags;
+	u_int		gif_fibnum;
 	const struct encaptab *encap_cookie4;
 	const struct encaptab *encap_cookie6;
 	void		*gif_netgraph;	/* ng_gif(4) netgraph node info */
@@ -108,6 +109,30 @@ int gif_ioctl(struct ifnet *, u_long, caddr_t);
 int gif_set_tunnel(struct ifnet *, struct sockaddr *, struct sockaddr *);
 void gif_delete_tunnel(struct ifnet *);
 int gif_encapcheck(const struct mbuf *, int, int, void *);
+
+/*
+ * Virtualization support
+ */
+#ifdef VIMAGE
+struct vnet_gif {
+	LIST_HEAD(, gif_softc) _gif_softc_list;
+	int	_max_gif_nesting;
+	int	_parallel_tunnels;
+	int	_ip_gif_ttl;
+	int	_ip6_gif_hlim;
+};
+#endif
+
+#define	INIT_VNET_GIF(vnet) \
+	INIT_FROM_VNET(vnet, VNET_MOD_GIF, struct vnet_gif, vnet_gif)
+
+#define	VNET_GIF(sym)	VSYM(vnet_gif, sym)
+
+#define	V_gif_softc_list	VNET_GIF(gif_softc_list)
+#define	V_max_gif_nesting	VNET_GIF(max_gif_nesting)
+#define	V_parallel_tunnels	VNET_GIF(parallel_tunnels)
+#define	V_ip_gif_ttl		VNET_GIF(ip_gif_ttl)
+#define	V_ip6_gif_hlim		VNET_GIF(ip6_gif_hlim)
 
 #endif /* _KERNEL */
 

@@ -43,7 +43,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_pcpu.c,v 1.8 2005/11/03 21:06:29 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_pcpu.c,v 1.11 2008/09/15 22:45:14 sam Exp $");
 
 #include "opt_ddb.h"
 
@@ -56,7 +56,7 @@ __FBSDID("$FreeBSD: src/sys/kern/subr_pcpu.c,v 1.8 2005/11/03 21:06:29 jhb Exp $
 #include <sys/smp.h>
 #include <ddb/ddb.h>
 
-static struct pcpu *cpuid_to_pcpu[MAXCPU];
+struct pcpu *cpuid_to_pcpu[MAXCPU];
 struct cpuhead cpuhead = SLIST_HEAD_INITIALIZER(cpuhead);
 
 /*
@@ -74,6 +74,9 @@ pcpu_init(struct pcpu *pcpu, int cpuid, size_t size)
 	cpuid_to_pcpu[cpuid] = pcpu;
 	SLIST_INSERT_HEAD(&cpuhead, pcpu, pc_allcpu);
 	cpu_pcpu_init(pcpu, cpuid, size);
+	pcpu->pc_rm_queue.rmq_next = &pcpu->pc_rm_queue;
+	pcpu->pc_rm_queue.rmq_prev = &pcpu->pc_rm_queue;
+
 }
 
 /*
@@ -109,7 +112,7 @@ show_pcpu(struct pcpu *pc)
 	td = pc->pc_curthread;
 	if (td != NULL)
 		db_printf("%p: pid %d \"%s\"\n", td, td->td_proc->p_pid,
-		    td->td_proc->p_comm);
+		    td->td_name);
 	else
 		db_printf("none\n");
 	db_printf("curpcb       = %p\n", pc->pc_curpcb);
@@ -117,14 +120,14 @@ show_pcpu(struct pcpu *pc)
 	td = pc->pc_fpcurthread;
 	if (td != NULL)
 		db_printf("%p: pid %d \"%s\"\n", td, td->td_proc->p_pid,
-		    td->td_proc->p_comm);
+		    td->td_name);
 	else
 		db_printf("none\n");
 	db_printf("idlethread   = ");
 	td = pc->pc_idlethread;
 	if (td != NULL)
 		db_printf("%p: pid %d \"%s\"\n", td, td->td_proc->p_pid,
-		    td->td_proc->p_comm);
+		    td->td_name);
 	else
 		db_printf("none\n");
 	db_show_mdpcpu(pc);
@@ -152,7 +155,7 @@ DB_SHOW_COMMAND(pcpu, db_show_pcpu)
 	show_pcpu(pc);
 }
 
-DB_SHOW_COMMAND(allpcpu, db_show_cpu_all)
+DB_SHOW_ALL_COMMAND(pcpu, db_show_cpu_all)
 {
 	struct pcpu *pc;
 	int id;
@@ -166,4 +169,5 @@ DB_SHOW_COMMAND(allpcpu, db_show_cpu_all)
 		}
 	}
 }
+DB_SHOW_ALIAS(allpcpu, db_show_cpu_all);
 #endif

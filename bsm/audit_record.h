@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005 Apple Computer, Inc.
+ * Copyright (c) 2005 Apple Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -11,7 +11,7 @@
  * 2.  Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- * 3.  Neither the name of Apple Computer, Inc. ("Apple") nor the names of
+ * 3.  Neither the name of Apple Inc. ("Apple") nor the names of
  *     its contributors may be used to endorse or promote products derived
  *     from this software without specific prior written permission.
  *
@@ -27,7 +27,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * P4: //depot/projects/trustedbsd/audit3/sys/bsm/audit_record.h#26
- * $FreeBSD: src/sys/bsm/audit_record.h,v 1.10 2007/07/22 12:28:13 rwatson Exp $
+ * $FreeBSD: src/sys/bsm/audit_record.h,v 1.12 2008/11/11 21:57:03 csjp Exp $
  */
 
 #ifndef _BSM_AUDIT_RECORD_H_
@@ -244,10 +244,13 @@ token_t	*au_to_file(char *file, struct timeval tm);
 
 token_t	*au_to_header32_tm(int rec_size, au_event_t e_type, au_emod_t e_mod,
 	    struct timeval tm);
+token_t	*au_to_header32_ex_tm(int rec_size, au_event_t e_type, au_emod_t e_mod,
+	    struct timeval tm, struct auditinfo_addr *aia);
 token_t	*au_to_header64_tm(int rec_size, au_event_t e_type, au_emod_t e_mod,
 	    struct timeval tm);
 #if !defined(KERNEL) && !defined(_KERNEL)
 token_t	*au_to_header(int rec_size, au_event_t e_type, au_emod_t e_mod);
+token_t	*au_to_header_ex(int rec_size, au_event_t e_type, au_emod_t e_mod);
 token_t	*au_to_header32(int rec_size, au_event_t e_type, au_emod_t e_mod);
 token_t	*au_to_header64(int rec_size, au_event_t e_type, au_emod_t e_mod);
 #endif

@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/pseudofs/pseudofs_vncache.c,v 1.38 2007/04/23 19:17:01 des Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/pseudofs/pseudofs_vncache.c,v 1.42 2008/10/23 15:53:51 des Exp $");
 
 #include "opt_pseudofs.h"
 
@@ -149,7 +149,7 @@ retry:
 	++pfs_vncache_misses;
 
 	/* nope, get a new one */
-	MALLOC(pvd, struct pfs_vdata *, sizeof *pvd, M_PFSVNCACHE, M_WAITOK);
+	pvd = malloc(sizeof *pvd, M_PFSVNCACHE, M_WAITOK);
 	mtx_lock(&pfs_vncache_mutex);
 	if (++pfs_vncache_entries > pfs_vncache_maxentries)
 		pfs_vncache_maxentries = pfs_vncache_entries;
@@ -159,7 +159,7 @@ retry:
 		mtx_lock(&pfs_vncache_mutex);
 		--pfs_vncache_entries;
 		mtx_unlock(&pfs_vncache_mutex);
-		FREE(pvd, M_PFSVNCACHE);
+		free(pvd, M_PFSVNCACHE);
 		return (error);
 	}
 	pvd->pvd_pn = pn;
@@ -196,14 +196,14 @@ retry:
 	if ((pn->pn_flags & PFS_PROCDEP) != 0)
 		(*vpp)->v_vflag |= VV_PROCDEP;
 	pvd->pvd_vnode = *vpp;
-	(*vpp)->v_vnlock->lk_flags |= LK_CANRECURSE;
-	vn_lock(*vpp, LK_EXCLUSIVE | LK_RETRY, curthread);
+	VN_LOCK_AREC(*vpp);
+	vn_lock(*vpp, LK_EXCLUSIVE | LK_RETRY);
 	error = insmntque(*vpp, mp);
 	if (error != 0) {
 		mtx_lock(&pfs_vncache_mutex);
 		--pfs_vncache_entries;
 		mtx_unlock(&pfs_vncache_mutex);
-		FREE(pvd, M_PFSVNCACHE);
+		free(pvd, M_PFSVNCACHE);
 		*vpp = NULLVP;
 		return (error);
 	}
@@ -237,7 +237,7 @@ pfs_vncache_free(struct vnode *vp)
 	--pfs_vncache_entries;
 	mtx_unlock(&pfs_vncache_mutex);
 
-	FREE(pvd, M_PFSVNCACHE);
+	free(pvd, M_PFSVNCACHE);
 	vp->v_data = NULL;
 	return (0);
 }
@@ -268,9 +268,9 @@ pfs_purge(struct pfs_node *pn)
 			vnp = pvd->pvd_vnode;
 			vhold(vnp);
 			mtx_unlock(&pfs_vncache_mutex);
-			VOP_LOCK(vnp, LK_EXCLUSIVE, curthread);
+			VOP_LOCK(vnp, LK_EXCLUSIVE);
 			vgone(vnp);
-			VOP_UNLOCK(vnp, 0, curthread);
+			VOP_UNLOCK(vnp, 0);
 			vdrop(vnp);
 			mtx_lock(&pfs_vncache_mutex);
 			pvd = pfs_vncache;

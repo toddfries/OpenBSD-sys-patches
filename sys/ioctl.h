@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ioctl.h	8.6 (Berkeley) 3/28/94
- * $FreeBSD: src/sys/sys/ioctl.h,v 1.15 2006/01/10 09:19:10 phk Exp $
+ * $FreeBSD: src/sys/sys/ioctl.h,v 1.16 2008/06/14 10:42:18 ed Exp $
  */
 
 #ifndef	_SYS_IOCTL_H_
@@ -69,14 +69,3 @@ struct ttysize {
 #include <sys/sockio.h>
 
 #endif /* !_SYS_IOCTL_H_ */
-
-/*
- * Keep outside _SYS_IOCTL_H_
- * Compatibility with old terminal driver
- *
- * Source level -> #define USE_OLD_TTY
- * Kernel level -> options COMPAT_43TTY
- */
-#if defined(USE_OLD_TTY) || defined(COMPAT_43TTY)
-#include <sys/ioctl_compat.h>
-#endif

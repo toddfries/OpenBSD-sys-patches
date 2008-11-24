@@ -32,7 +32,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/en/midway.c,v 1.74 2008/03/25 09:38:57 ru Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/en/midway.c,v 1.75 2008/11/06 09:41:31 bz Exp $");
 
 /*
  *
@@ -141,9 +141,11 @@ enum {
 #include <net/if_media.h>
 #include <net/if_atm.h>
 
-#if defined(INET) || defined(INET6)
+#if defined(NATM) || defined(INET) || defined(INET6)
 #include <netinet/in.h>
+#if defined(INET) || defined(INET6)
 #include <netinet/if_atm.h>
+#endif
 #endif
 
 #ifdef NATM
@@ -1524,7 +1526,9 @@ static int
 en_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct en_softc *sc = (struct en_softc *)ifp->if_softc;
+#if defined(INET) || defined(INET6)
 	struct ifaddr *ifa = (struct ifaddr *)data;
+#endif
 	struct ifreq *ifr = (struct ifreq *)data;
 	struct atmio_vcctable *vtab;
 	int error = 0;

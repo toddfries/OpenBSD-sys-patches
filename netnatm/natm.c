@@ -60,7 +60,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netnatm/natm.c,v 1.49 2007/01/08 22:30:39 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/netnatm/natm.c,v 1.50 2008/10/23 15:53:51 des Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -422,7 +422,7 @@ natmintr(struct mbuf *m)
 
 	if (npcb->npcb_flags & NPCB_DRAIN) {
 		if (npcb->npcb_inq == 0)
-			FREE(npcb, M_PCB);			/* done! */
+			free(npcb, M_PCB);			/* done! */
 		NATM_UNLOCK();
 		m_freem(m);
 		return;

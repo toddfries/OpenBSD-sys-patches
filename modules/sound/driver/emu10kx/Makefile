@@ -1,13 +1,12 @@
-# $FreeBSD: src/sys/modules/sound/driver/emu10kx/Makefile,v 1.4 2007/09/12 07:43:43 ariff Exp $
+# $FreeBSD: src/sys/modules/sound/driver/emu10kx/Makefile,v 1.6 2008/03/27 20:38:03 antoine Exp $
 .PATH: ${.CURDIR}/../../../../dev/sound/pci \
        ${.CURDIR}/../../../../gnu/dev/sound/pci
 
-WARNS?=	2
 KMOD=	snd_emu10kx
 
 SRCS=	device_if.h bus_if.h pci_if.h
 SRCS+=	isa_if.h channel_if.h ac97_if.h mixer_if.h mpufoi_if.h
-SRCS+=	vnode_if.h opt_emu10kx.h
+SRCS+=	vnode_if.h
 # Master, PCM and MIDI devices
 SRCS+=	emu10kx.c
 SRCS+=	emu10kx-pcm.c

@@ -1,5 +1,5 @@
-/*
- * Copyright (c) 1999-2005 Apple Computer, Inc.
+/*-
+ * Copyright (c) 1999-2005 Apple Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -10,7 +10,7 @@
  * 2.  Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- * 3.  Neither the name of Apple Computer, Inc. ("Apple") nor the names of
+ * 3.  Neither the name of Apple Inc. ("Apple") nor the names of
  *     its contributors may be used to endorse or promote products derived
  *     from this software without specific prior written permission.
  *
@@ -26,7 +26,7 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/audit/audit_private.h,v 1.16 2007/06/01 21:58:58 rwatson Exp $
+ * $FreeBSD: src/sys/security/audit/audit_private.h,v 1.25 2008/11/13 00:21:01 rwatson Exp $
  */
 
 /*
@@ -109,7 +109,7 @@ struct groupset {
 };
 
 struct socket_au_info {
-	int 		so_domain;
+	int		so_domain;
 	int		so_type;
 	int		so_protocol;
 	in_addr_t	so_raddr;	/* Remote address if INET socket. */
@@ -132,6 +132,7 @@ union auditon_udata {
 	au_qctrl_t		au_qctrl;
 	au_stat_t		au_stat;
 	au_fstat_t		au_fstat;
+	auditinfo_addr_t	au_kau_info;
 };
 
 struct posix_ipc_perm {
@@ -274,8 +275,8 @@ extern struct mtx		audit_mtx;
 extern struct cv		audit_watermark_cv;
 extern struct cv		audit_worker_cv;
 extern struct kaudit_queue	audit_q;
-extern int			audit_q_len;
-extern int			audit_pre_q_len;
+extern size_t			audit_q_len;
+extern size_t			audit_pre_q_len;
 extern int			audit_in_failure;
 
 /*
@@ -300,22 +301,28 @@ token_t		*kau_to_socket(struct socket_au_info *soi);
  */
 int		 au_preselect(au_event_t event, au_class_t class,
 		    au_mask_t *mask_p, int sorf);
-au_event_t	 flags_and_error_to_openevent(int oflags, int error);
 void		 au_evclassmap_init(void);
 void		 au_evclassmap_insert(au_event_t event, au_class_t class);
 au_class_t	 au_event_class(au_event_t event);
-au_event_t	 ctlname_to_sysctlevent(int name[], uint64_t valid_arg);
+au_event_t	 audit_ctlname_to_sysctlevent(int name[], uint64_t valid_arg);
+au_event_t	 audit_flags_and_error_to_openevent(int oflags, int error);
+int		 audit_msgctl_to_event(int cmd);
+int		 audit_semctl_to_event(int cmr);
+void		 audit_canon_path(struct thread *td, char *path, char *cpath);
 int		 auditon_command_event(int cmd);
-int		 msgctl_to_event(int cmd);
-int		 semctl_to_event(int cmr);
-void		 canon_path(struct thread *td, char *path, char *cpath);
 
 /*
  * Audit trigger events notify user space of kernel audit conditions
  * asynchronously.
  */
 void		 audit_trigger_init(void);
-int		 send_trigger(unsigned int trigger);
+int		 audit_send_trigger(unsigned int trigger);
+
+/*
+ * Accessor functions to manage global audit state.
+ */
+void	 audit_set_kinfo(struct auditinfo_addr *);
+void	 audit_get_kinfo(struct auditinfo_addr *);
 
 /*
  * General audit related functions.

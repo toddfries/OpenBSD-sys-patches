@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_emul.c,v 1.20 2007/04/02 18:38:13 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_emul.c,v 1.22 2008/10/31 10:38:30 kib Exp $");
 
 #include "opt_compat.h"
 
@@ -44,9 +44,6 @@ __FBSDID("$FreeBSD: src/sys/compat/linux/linux_emul.c,v 1.20 2007/04/02 18:38:13
 #include <sys/sysproto.h>
 #include <sys/unistd.h>
 
-#include <compat/linux/linux_emul.h>
-#include <compat/linux/linux_futex.h>
-
 #ifdef COMPAT_LINUX32
 #include <machine/../linux32/linux.h>
 #include <machine/../linux32/linux32_proto.h>
@@ -54,6 +51,9 @@ __FBSDID("$FreeBSD: src/sys/compat/linux/linux_emul.c,v 1.20 2007/04/02 18:38:13
 #include <machine/../linux/linux.h>
 #include <machine/../linux/linux_proto.h>
 #endif
+
+#include <compat/linux/linux_emul.h>
+#include <compat/linux/linux_futex.h>
 
 struct sx	emul_shared_lock;
 struct mtx	emul_lock;
@@ -86,6 +86,7 @@ linux_proc_init(struct thread *td, pid_t child, int flags)
 		em = malloc(sizeof *em, M_LINUX, M_WAITOK | M_ZERO);
 		em->pid = child;
 		em->pdeath_signal = 0;
+		em->robust_futexes = NULL;
 		if (flags & LINUX_CLONE_THREAD) {
 			/* handled later in the code */
 		} else {
@@ -161,6 +162,8 @@ linux_proc_exit(void *arg __unused, struct proc *p)
 	if (__predict_true(p->p_sysent != &elf_linux_sysvec))
 		return;
 
+	release_futexes(p);
+
 	/* find the emuldata */
 	em = em_find(p, EMUL_DOLOCK);
 
@@ -232,11 +235,11 @@ linux_proc_exit(void *arg __unused, struct proc *p)
 			continue;
 		em = em_find(q, EMUL_DOLOCK);
 		KASSERT(em != NULL, ("linux_reparent: emuldata not found: %i\n", q->p_pid));
-		if (em->pdeath_signal != 0) {
-			PROC_LOCK(q);
+		PROC_LOCK(q);
+		if ((q->p_flag & P_WEXIT) == 0 && em->pdeath_signal != 0) {
 			psignal(q, em->pdeath_signal);
-			PROC_UNLOCK(q);
 		}
+		PROC_UNLOCK(q);
 		EMUL_UNLOCK(&emul_lock);
 	}
 	sx_xunlock(&proctree_lock);

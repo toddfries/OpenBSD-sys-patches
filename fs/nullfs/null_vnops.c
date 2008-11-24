@@ -36,7 +36,7 @@
  *	...and...
  *	@(#)null_vnodeops.c 1.20 92/07/07 UCLA Ficus project
  *
- * $FreeBSD: src/sys/fs/nullfs/null_vnops.c,v 1.96 2007/10/14 13:57:11 daichi Exp $
+ * $FreeBSD: src/sys/fs/nullfs/null_vnops.c,v 1.102 2008/10/28 13:44:11 trasz Exp $
  */
 
 /*
@@ -296,7 +296,7 @@ null_bypass(struct vop_generic_args *ap)
 			*(vps_p[i]) = old_vps[i];
 #if 0
 			if (reles & VDESC_VP0_WILLUNLOCK)
-				VOP_UNLOCK(*(vps_p[i]), 0, curthread);
+				VOP_UNLOCK(*(vps_p[i]), 0);
 #endif
 			if (reles & VDESC_VP0_WILLRELE)
 				vrele(*(vps_p[i]));
@@ -451,14 +451,14 @@ static int
 null_access(struct vop_access_args *ap)
 {
 	struct vnode *vp = ap->a_vp;
-	mode_t mode = ap->a_mode;
+	accmode_t accmode = ap->a_accmode;
 
 	/*
 	 * Disallow write attempts on read-only layers;
 	 * unless the file is a socket, fifo, or a block or
 	 * character device resident on the filesystem.
 	 */
-	if (mode & VWRITE) {
+	if (accmode & VWRITE) {
 		switch (vp->v_type) {
 		case VDIR:
 		case VLNK:
@@ -513,7 +513,6 @@ null_lock(struct vop_lock1_args *ap)
 {
 	struct vnode *vp = ap->a_vp;
 	int flags = ap->a_flags;
-	struct thread *td = ap->a_td;
 	struct null_node *nn;
 	struct vnode *lvp;
 	int error;
@@ -544,7 +543,7 @@ null_lock(struct vop_lock1_args *ap)
 		 * here.
 		 */
 		vholdl(lvp);
-		error = VOP_LOCK(lvp, flags, td);
+		error = VOP_LOCK(lvp, flags);
 
 		/*
 		 * We might have slept to get the lock and someone might have
@@ -566,7 +565,7 @@ null_lock(struct vop_lock1_args *ap)
 				panic("Unsupported lock request %d\n",
 				    ap->a_flags);
 			}
-			VOP_UNLOCK(lvp, 0, td);
+			VOP_UNLOCK(lvp, 0);
 			error = vop_stdlock(ap);
 		}
 		vdrop(lvp);
@@ -587,7 +586,6 @@ null_unlock(struct vop_unlock_args *ap)
 	struct vnode *vp = ap->a_vp;
 	int flags = ap->a_flags;
 	int mtxlkflag = 0;
-	struct thread *td = ap->a_td;
 	struct null_node *nn;
 	struct vnode *lvp;
 	int error;
@@ -604,7 +602,7 @@ null_unlock(struct vop_unlock_args *ap)
 		flags |= LK_INTERLOCK;
 		vholdl(lvp);
 		VI_UNLOCK(vp);
-		error = VOP_UNLOCK(lvp, flags, td);
+		error = VOP_UNLOCK(lvp, flags);
 		vdrop(lvp);
 		if (mtxlkflag == 0)
 			VI_LOCK(vp);
@@ -621,14 +619,13 @@ static int
 null_islocked(struct vop_islocked_args *ap)
 {
 	struct vnode *vp = ap->a_vp;
-	struct thread *td = ap->a_td;
 
-	return (lockstatus(vp->v_vnlock, td));
+	return (lockstatus(vp->v_vnlock));
 }
 
 /*
  * There is no way to tell that someone issued remove/rmdir operation
- * on the underlying filesystem. For now we just have to release lowevrp
+ * on the underlying filesystem. For now we just have to release lowervp
  * as soon as possible.
  *
  * Note, we can't release any resources nor remove vnode from hash before 
@@ -676,12 +673,11 @@ null_reclaim(struct vop_reclaim_args *ap)
 	vnlock = vp->v_vnlock;
 	vp->v_vnlock = &vp->v_lock;
 	if (lowervp) {
-		lockmgr(vp->v_vnlock,
-		    LK_EXCLUSIVE|LK_INTERLOCK, VI_MTX(vp), curthread);
+		lockmgr(vp->v_vnlock, LK_EXCLUSIVE | LK_INTERLOCK, VI_MTX(vp));
 		vput(lowervp);
 	} else
-		panic("null_reclaim: reclaiming an node with now lowervp");
-	FREE(xp, M_NULLFSNODE);
+		panic("null_reclaim: reclaiming a node with no lowervp");
+	free(xp, M_NULLFSNODE);
 
 	return (0);
 }

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/i386/libi386/biosdisk.c,v 1.53 2007/10/25 16:53:35 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/i386/libi386/biosdisk.c,v 1.56 2008/11/19 16:04:07 dfr Exp $");
 
 /*
  * BIOS disk device handling.
@@ -254,7 +254,7 @@ bd_int13probe(struct bdinfo *bd)
 	    ((v86.ebx & 0xffff) == 0xaa55) &&		/* signature */
 	    (v86.ecx & 0x1)) {				/* packets mode ok */
 	    bd->bd_flags |= BD_MODEEDD1;
-	    if((v86.eax & 0xff00) > 0x300)
+	    if((v86.eax & 0xff00) >= 0x3000)
 	        bd->bd_flags |= BD_MODEEDD3;
 	}
 	return(1);
@@ -316,6 +316,29 @@ bd_print(int verbose)
     }
 }
 
+/* Given a size in 512 byte sectors, convert it to a human-readable number. */
+static char *
+display_size(uint64_t size)
+{
+    static char buf[80];
+    char unit;
+
+    size /= 2;
+    unit = 'K';
+    if (size >= 10485760000LL) {
+	size /= 1073741824;
+	unit = 'T';
+    } else if (size >= 10240000) {
+	size /= 1048576;
+	unit = 'G';
+    } else if (size >= 10000) {
+	size /= 1024;
+	unit = 'M';
+    }
+    sprintf(buf, "%.6ld%cB", (long)size, unit);
+    return (buf);
+}
+
 static uuid_t efi = GPT_ENT_TYPE_EFI;
 static uuid_t freebsd_boot = GPT_ENT_TYPE_FREEBSD_BOOT;
 static uuid_t freebsd_ufs = GPT_ENT_TYPE_FREEBSD_UFS;
@@ -329,33 +352,22 @@ bd_printgptpart(struct open_disk *od, struct gpt_part *gp, char *prefix,
 {
     char stats[80];
     char line[96];
-    uint64_t size;
-    char unit;
 
-    if (verbose) {
-	size = (gp->gp_end + 1 - gp->gp_start) / 2048;
-	unit = 'M';
-	if (size >= 10240000) {
-	    size /= 1048576;
-	    unit = 'T';
-	} else if (size >= 10000) {
-	    size /= 1024;
-	    unit = 'G';
-	}
-	sprintf(stats, " %.6ld%cB", (long)size, unit);
-    } else
+    if (verbose)
+	sprintf(stats, " %s", display_size(gp->gp_end + 1 - gp->gp_start));
+    else
 	stats[0] = '\0';
 
     if (uuid_equal(&gp->gp_type, &efi, NULL))
-	sprintf(line, "%s: EFI%s\n", prefix, stats);
+	sprintf(line, "%s: EFI         %s\n", prefix, stats);
     else if (uuid_equal(&gp->gp_type, &ms_basic_data, NULL))
-	sprintf(line, "%s: FAT/NTFS%s\n", prefix, stats);
+	sprintf(line, "%s: FAT/NTFS    %s\n", prefix, stats);
     else if (uuid_equal(&gp->gp_type, &freebsd_boot, NULL))
 	sprintf(line, "%s: FreeBSD boot%s\n", prefix, stats);
     else if (uuid_equal(&gp->gp_type, &freebsd_ufs, NULL))
-	sprintf(line, "%s: FreeBSD UFS%s\n", prefix, stats);
+	sprintf(line, "%s: FreeBSD UFS %s\n", prefix, stats);
     else if (uuid_equal(&gp->gp_type, &freebsd_zfs, NULL))
-	sprintf(line, "%s: FreeBSD ZFS%s\n", prefix, stats);
+	sprintf(line, "%s: FreeBSD ZFS %s\n", prefix, stats);
     else if (uuid_equal(&gp->gp_type, &freebsd_swap, NULL))
 	sprintf(line, "%s: FreeBSD swap%s\n", prefix, stats);
     else
@@ -377,70 +389,50 @@ static void
 bd_printslice(struct open_disk *od, struct dos_partition *dp, char *prefix,
 	int verbose)
 {
+	char stats[80];
 	char line[80];
+
+	if (verbose)
+		sprintf(stats, " %s (%d - %d)", display_size(dp->dp_size),
+		    dp->dp_start, dp->dp_start + dp->dp_size);
+	else
+		stats[0] = '\0';
 
 	switch (dp->dp_typ) {
 	case DOSPTYP_386BSD:
 		bd_printbsdslice(od, (daddr_t)dp->dp_start, prefix, verbose);
 		return;
 	case DOSPTYP_LINSWP:
-		if (verbose)
-			sprintf(line, "%s: Linux swap %.6dMB (%d - %d)\n",
-			    prefix, dp->dp_size / 2048,
-			    dp->dp_start, dp->dp_start + dp->dp_size);
-		else
-			sprintf(line, "%s: Linux swap\n", prefix);
+		sprintf(line, "%s: Linux swap%s\n", prefix, stats);
 		break;
 	case DOSPTYP_LINUX:
 		/*
 		 * XXX
 		 * read the superblock to confirm this is an ext2fs partition?
 		 */
-		if (verbose)
-			sprintf(line, "%s: ext2fs  %.6dMB (%d - %d)\n", prefix,
-			    dp->dp_size / 2048, dp->dp_start,
-			    dp->dp_start + dp->dp_size);
-		else
-			sprintf(line, "%s: ext2fs\n", prefix);
+		sprintf(line, "%s: ext2fs%s\n", prefix, stats);
 		break;
 	case 0x00:				/* unused partition */
 	case DOSPTYP_EXT:
 		return;
 	case 0x01:
-		if (verbose)
-			sprintf(line, "%s: FAT-12  %.6dMB (%d - %d)\n", prefix,
-			    dp->dp_size / 2048, dp->dp_start,
-			    dp->dp_start + dp->dp_size);
-		else
-			sprintf(line, "%s: FAT-12\n", prefix);
+		sprintf(line, "%s: FAT-12%s\n", prefix, stats);
 		break;
 	case 0x04:
 	case 0x06:
 	case 0x0e:
-		if (verbose)
-			sprintf(line, "%s: FAT-16  %.6dMB (%d - %d)\n", prefix,
-			    dp->dp_size / 2048, dp->dp_start,
-			    dp->dp_start + dp->dp_size);
-		else
-			sprintf(line, "%s: FAT-16\n", prefix);
+		sprintf(line, "%s: FAT-16%s\n", prefix, stats);
+		break;
+	case 0x07:
+		sprintf(line, "%s: NTFS/HPFS%s\n", prefix, stats);
 		break;
 	case 0x0b:
 	case 0x0c:
-		if (verbose)
-			sprintf(line, "%s: FAT-32  %.6dMB (%d - %d)\n", prefix,
-			    dp->dp_size / 2048, dp->dp_start,
-			    dp->dp_start + dp->dp_size);
-		else
-			sprintf(line, "%s: FAT-32\n", prefix);
+		sprintf(line, "%s: FAT-32%s\n", prefix, stats);
 		break;
 	default:
-		if (verbose)
-			sprintf(line, "%s: Unknown fs: 0x%x  %.6dMB (%d - %d)\n",
-			    prefix, dp->dp_typ, dp->dp_size / 2048,
-			    dp->dp_start, dp->dp_start + dp->dp_size);
-		else
-			sprintf(line, "%s: Unknown fs: 0x%x\n", prefix,
-			    dp->dp_typ);
+		sprintf(line, "%s: Unknown fs: 0x%x %s\n", prefix, dp->dp_typ,
+		    stats);
 	}
 	pager_output(line);
 }
@@ -484,11 +476,11 @@ bd_printbsdslice(struct open_disk *od, daddr_t offset, char *prefix,
 
 	    /* Only print out statistics in verbose mode */
 	    if (verbose)
-	        sprintf(line, "  %s%c: %s  %.6dMB (%d - %d)\n", prefix, 'a' + i,
-		    (lp->d_partitions[i].p_fstype == FS_SWAP) ? "swap" : 
+	        sprintf(line, "  %s%c: %s %s (%d - %d)\n", prefix, 'a' + i,
+		    (lp->d_partitions[i].p_fstype == FS_SWAP) ? "swap " : 
 		    (lp->d_partitions[i].p_fstype == FS_VINUM) ? "vinum" :
-		    "FFS",
-		    lp->d_partitions[i].p_size / 2048,
+		    "FFS  ",
+		    display_size(lp->d_partitions[i].p_size),
 		    lp->d_partitions[i].p_offset,
 		    lp->d_partitions[i].p_offset + lp->d_partitions[i].p_size);
 	    else
@@ -977,8 +969,10 @@ bd_open_gpt(struct open_disk *od, struct i386_devdesc *dev)
     od->od_boff = gp->gp_start;
 
 out:
-    if (error)
+    if (error) {
 	free(od->od_partitions);
+	od->od_flags &= ~BD_GPTOK;
+    }
     return (error);
 }
 
@@ -1066,7 +1060,7 @@ bd_realstrategy(void *devdata, int rw, daddr_t dblk, size_t size, char *buf, siz
 
     switch(rw){
     case F_READ:
-	DEBUG("read %d from %d to %p", blks, dblk, buf);
+	DEBUG("read %d from %lld to %p", blks, dblk, buf);
 
 	if (blks && bd_read(od, dblk, blks, buf)) {
 	    DEBUG("read error");

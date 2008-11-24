@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/bus.h,v 1.78 2007/02/23 12:19:07 piso Exp $
+ * $FreeBSD: src/sys/sys/bus.h,v 1.82 2008/06/20 16:58:15 imp Exp $
  */
 
 #ifndef _SYS_BUS_H_
@@ -83,6 +83,7 @@ struct u_device {
  * hook to send the message.  However, devctl_queue_data is also
  * included in case devctl_notify isn't sufficiently general.
  */
+boolean_t devctl_process_running(void);
 void devctl_notify(const char *__system, const char *__subsystem,
     const char *__type, const char *__data);
 void devctl_queue_data(char *__data);
@@ -285,6 +286,8 @@ struct resource *
 				   int *rid, u_long start, u_long end,
 				   u_long count, u_int flags);
 int	bus_generic_attach(device_t dev);
+int	bus_generic_bind_intr(device_t dev, device_t child,
+			      struct resource *irq, int cpu);
 int	bus_generic_child_present(device_t dev, device_t child);
 int	bus_generic_config_intr(device_t, int, enum intr_trigger,
 				enum intr_polarity);
@@ -357,6 +360,7 @@ int	bus_setup_intr(device_t dev, struct resource *r, int flags,
 		       driver_filter_t filter, driver_intr_t handler, 
 		       void *arg, void **cookiep);
 int	bus_teardown_intr(device_t dev, struct resource *r, void *cookie);
+int	bus_bind_intr(device_t dev, struct resource *r, int cpu);
 int	bus_set_resource(device_t dev, int type, int rid,
 			 u_long start, u_long count);
 int	bus_get_resource(device_t dev, int type, int rid,
@@ -410,6 +414,7 @@ int	device_is_enabled(device_t dev);
 int	device_is_quiet(device_t dev);
 int	device_print_prettyname(device_t dev);
 int	device_printf(device_t dev, const char *, ...) __printflike(2, 3);
+int	device_probe(device_t dev);
 int	device_probe_and_attach(device_t dev);
 int	device_probe_child(device_t bus, device_t dev);
 int	device_quiesce(device_t dev);
@@ -493,7 +498,10 @@ void	bus_data_generation_update(void);
  * is for drivers that wish to have a generic form and a specialized form,
  * like is done with the pci bus and the acpi pci bus.  BUS_PROBE_HOOVER is
  * for those busses that implement a generic device place-holder for devices on
- * the bus that have no more specific driver for them (aka ugen).
+ * the bus that have no more specific river for them (aka ugen).
+ * BUS_PROBE_NOWILDCARD or lower means that the device isn't really bidding
+ * for a device node, but accepts only devices that its parent has told it
+ * use this driver.
  */
 #define BUS_PROBE_SPECIFIC	0	/* Only I can use this device */
 #define BUS_PROBE_VENDOR	(-10)	/* Vendor supplied driver */
@@ -501,6 +509,7 @@ void	bus_data_generation_update(void);
 #define BUS_PROBE_LOW_PRIORITY	(-40)	/* Older, less desirable drivers */
 #define BUS_PROBE_GENERIC	(-100)	/* generic driver for dev */
 #define BUS_PROBE_HOOVER	(-500)	/* Generic dev for all devs on bus */
+#define BUS_PROBE_NOWILDCARD	(-2000000000) /* No wildcard device matches */
 
 /**
  * Shorthand for constructing method tables.

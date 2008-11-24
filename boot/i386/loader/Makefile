@@ -1,4 +1,6 @@
-# $FreeBSD: src/sys/boot/i386/loader/Makefile,v 1.85 2007/05/29 14:35:57 simokawa Exp $
+# $FreeBSD: src/sys/boot/i386/loader/Makefile,v 1.88 2008/11/18 03:55:55 ache Exp $
+
+WITHOUT_SSP=
 
 .include <bsd.own.mk>
 
@@ -13,6 +15,14 @@ SRCS=		main.c conf.c vers.c
 .if defined(LOADER_FIREWIRE_SUPPORT)
 CFLAGS+=	-DLOADER_FIREWIRE_SUPPORT
 LIBFIREWIRE=	${.OBJDIR}/../libfirewire/libfirewire.a
+.endif
+
+# Put LOADER_ZFS_SUPPORT=yes in /etc/make.conf for ZFS support
+.if defined(LOADER_ZFS_SUPPORT)
+CFLAGS+=	-DLOADER_ZFS_SUPPORT
+LIBZFS=		${.OBJDIR}/../../zfs/libzfsboot.a
+.else
+LIBZFS=
 .endif
 
 # Enable PXE TFTP or NFS support, not both.
@@ -96,8 +106,8 @@ FILES+=	loader.rc
 # XXX crt0.o needs to be first for pxeboot(8) to work
 OBJS=	${BTXCRT} 
 
-DPADD=	${LIBFICL} ${LIBFIREWIRE} ${LIBI386} ${LIBSTAND}
-LDADD=	${LIBFICL} ${LIBFIREWIRE} ${LIBI386} -lstand
+DPADD=	${LIBFICL} ${LIBFIREWIRE} ${LIBZFS} ${LIBI386} ${LIBSTAND}
+LDADD=	${LIBFICL} ${LIBFIREWIRE} ${LIBZFS} ${LIBI386} -lstand
 
 .include <bsd.prog.mk>
 

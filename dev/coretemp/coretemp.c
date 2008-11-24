@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2007 Rui Paulo <rpaulo@FreeBSD.org>
+ * Copyright (c) 2007, 2008 Rui Paulo <rpaulo@FreeBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -22,9 +22,6 @@
  * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
- *
- * $FreeBSD: src/sys/dev/coretemp/coretemp.c,v 1.6 2008/02/14 14:14:59 rpaulo Exp $
- *
  */
 
 /*
@@ -33,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/coretemp/coretemp.c,v 1.6 2008/02/14 14:14:59 rpaulo Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/coretemp/coretemp.c,v 1.8 2008/05/14 10:02:25 rpaulo Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -96,8 +93,8 @@ coretemp_identify(driver_t *driver, device_t parent)
 	if (device_find_child(parent, "coretemp", -1) != NULL)
 		return;
 
-	/* Check that CPUID is supported and the vendor is Intel.*/
-	if (cpu_high == 0 || strcmp(cpu_vendor, "GenuineIntel"))
+	/* Check that CPUID 0x06 is supported and the vendor is Intel.*/
+	if (cpu_high < 6 || strcmp(cpu_vendor, "GenuineIntel"))
 		return;
 	/*
 	 * CPUID 0x06 returns 1 if the processor has on-die thermal

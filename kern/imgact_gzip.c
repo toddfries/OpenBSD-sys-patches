@@ -22,7 +22,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/imgact_gzip.c,v 1.55 2005/12/24 04:57:50 alc Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/imgact_gzip.c,v 1.58 2008/01/13 14:44:08 attilio Exp $");
 
 #include <sys/param.h>
 #include <sys/exec.h>
@@ -158,7 +158,6 @@ static int
 do_aout_hdr(struct imgact_gzip * gz)
 {
 	int             error;
-	struct thread  *td = curthread;
 	struct vmspace *vmspace;
 	vm_offset_t     vmaddr;
 
@@ -234,14 +233,18 @@ do_aout_hdr(struct imgact_gzip * gz)
 	 * However, in cases where the vnode lock is external, such as nullfs,
 	 * v_usecount may become zero.
 	 */
-	VOP_UNLOCK(gz->ip->vp, 0, td);
+	VOP_UNLOCK(gz->ip->vp, 0);
 
 	/*
 	 * Destroy old process VM and create a new one (with a new stack)
 	 */
-	exec_new_vmspace(gz->ip, &aout_sysvec);
+	error = exec_new_vmspace(gz->ip, &aout_sysvec);
 
-	vn_lock(gz->ip->vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(gz->ip->vp, LK_EXCLUSIVE | LK_RETRY);
+	if (error) {
+		gz->where = __LINE__;
+		return (error);
+	}
 
 	vmspace = gz->ip->proc->p_vmspace;
 

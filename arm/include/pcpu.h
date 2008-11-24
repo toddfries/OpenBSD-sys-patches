@@ -24,7 +24,7 @@
  * SUCH DAMAGE.
  *
  *	from: FreeBSD: src/sys/i386/include/globaldata.h,v 1.27 2001/04/27
- * $FreeBSD: src/sys/arm/include/pcpu.h,v 1.6 2007/06/06 23:23:47 jeff Exp $
+ * $FreeBSD: src/sys/arm/include/pcpu.h,v 1.8 2008/09/11 20:39:46 cognet Exp $
  */
 
 #ifndef	_MACHINE_PCPU_H_
@@ -38,12 +38,11 @@
 
 struct vmspace;
 
-/*
- * Inside the kernel, the globally reserved register g7 is used to
- * point at the globaldata structure.
- */
-#define	PCPU_MD_FIELDS							\
-	struct pcup *pc_prvspace;
+#endif	/* _KERNEL */
+
+#define	PCPU_MD_FIELDS
+
+#ifdef _KERNEL
 
 struct pcb;
 struct pcpu;

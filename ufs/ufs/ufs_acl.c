@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_acl.c,v 1.21 2007/01/08 17:55:32 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_acl.c,v 1.22 2008/11/04 12:30:31 trasz Exp $");
 
 #include "opt_ufs.h"
 #include "opt_quota.h"
@@ -53,6 +53,7 @@ __FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_acl.c,v 1.21 2007/01/08 17:55:32 rwatson
 #include <ufs/ufs/dir.h>
 #include <ufs/ufs/ufsmount.h>
 #include <ufs/ufs/ufs_extern.h>
+#include <ufs/ffs/fs.h>
 
 #ifdef UFS_ACL
 
@@ -217,7 +218,8 @@ ufs_getacl(ap)
 				 * are unsafe.
 				 */
 				printf("ufs_getacl(): Loaded invalid ACL ("
-				    "%d bytes)\n", len);
+				    "%d bytes), inumber %d on %s\n", len,
+				    ip->i_number, ip->i_fs->fs_fsmnt);
 				return (EPERM);
 			}
 			ufs_sync_acl_from_inode(ip, ap->a_aclp);
@@ -262,7 +264,8 @@ ufs_getacl(ap)
 				 * protections are unsafe.
 				 */
 				printf("ufs_getacl(): Loaded invalid ACL ("
-				    "%d bytes)\n", len);
+				    "%d bytes), inumber %d on %s\n", len,
+				    ip->i_number, ip->i_fs->fs_fsmnt);
 				return (EPERM);
 			}
 			break;

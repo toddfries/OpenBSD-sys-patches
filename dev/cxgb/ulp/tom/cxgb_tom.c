@@ -28,7 +28,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_tom.c,v 1.5 2008/04/19 03:22:42 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_tom.c,v 1.12 2008/11/12 04:45:09 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -43,7 +43,9 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_tom.c,v 1.5 2008/04/19 03:22:4
 #include <sys/condvar.h>
 #include <sys/mutex.h>
 #include <sys/socket.h>
-#include <sys/sysctl.h>
+#include <sys/sockopt.h>
+#include <sys/sockstate.h>
+#include <sys/sockbuf.h>
 #include <sys/syslog.h>
 #include <sys/taskqueue.h>
 
@@ -55,50 +57,36 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_tom.c,v 1.5 2008/04/19 03:22:4
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 
-#include <dev/cxgb/cxgb_osdep.h>
-#include <dev/cxgb/sys/mbufq.h>
+#include <cxgb_osdep.h>
+#include <sys/mbufq.h>
 
 #include <netinet/in_pcb.h>
 
-#include <dev/cxgb/ulp/tom/cxgb_tcp_offload.h>
+#include <ulp/tom/cxgb_tcp_offload.h>
 #include <netinet/tcp.h>
 #include <netinet/tcp_var.h>
 #include <netinet/tcp_offload.h>
 #include <netinet/tcp_fsm.h>
 
-#ifdef CONFIG_DEFINED
 #include <cxgb_include.h>
-#else
-#include <dev/cxgb/cxgb_include.h>
-#endif
 
 #include <net/if_vlan_var.h>
 #include <net/route.h>
 
-
-#include <dev/cxgb/t3cdev.h>
-#include <dev/cxgb/common/cxgb_firmware_exports.h>
-#include <dev/cxgb/common/cxgb_tcb.h>
-#include <dev/cxgb/cxgb_include.h>
-#include <dev/cxgb/common/cxgb_ctl_defs.h>
-#include <dev/cxgb/common/cxgb_t3_cpl.h>
-#include <dev/cxgb/cxgb_offload.h>
-#include <dev/cxgb/ulp/toecore/cxgb_toedev.h>
-#include <dev/cxgb/ulp/tom/cxgb_tom.h>
-#include <dev/cxgb/ulp/tom/cxgb_defs.h>
-#include <dev/cxgb/ulp/tom/cxgb_t3_ddp.h>
-#include <dev/cxgb/ulp/tom/cxgb_toepcb.h>
-#include <dev/cxgb/ulp/tom/cxgb_tcp.h>
-
-
-
-
-
-static int activated = 1;
-TUNABLE_INT("hw.t3toe.activated", &activated);
-SYSCTL_NODE(_hw, OID_AUTO, t3toe, CTLFLAG_RD, 0, "T3 toe driver parameters");
-SYSCTL_UINT(_hw_t3toe, OID_AUTO, activated, CTLFLAG_RDTUN, &activated, 0,
-    "enable TOE at init time");
+#include <t3cdev.h>
+#include <common/cxgb_firmware_exports.h>
+#include <common/cxgb_tcb.h>
+#include <cxgb_include.h>
+#include <common/cxgb_ctl_defs.h>
+#include <common/cxgb_t3_cpl.h>
+#include <cxgb_offload.h>
+#include <ulp/toecore/cxgb_toedev.h>
+#include <ulp/tom/cxgb_l2t.h>
+#include <ulp/tom/cxgb_tom.h>
+#include <ulp/tom/cxgb_defs.h>
+#include <ulp/tom/cxgb_t3_ddp.h>
+#include <ulp/tom/cxgb_toepcb.h>
+#include <ulp/tom/cxgb_tcp.h>
 
 
 TAILQ_HEAD(, adapter) adapter_list;
@@ -141,6 +129,35 @@ struct cxgb_client t3c_tom_client = {
 	.handlers = tom_cpl_handlers,
 	.redirect = NULL
 };
+
+void
+cxgb_log_tcb(struct adapter *sc, unsigned int tid)
+{
+
+	char buf[TCB_SIZE];
+	uint64_t *tcb = (uint64_t *)buf;
+	int i, error;
+	struct mc7 *mem = &sc->cm;
+
+	error = t3_mc7_bd_read(mem, tid*TCB_SIZE/8, TCB_SIZE/8, tcb);
+	if (error)
+		printf("cxgb_tcb_log failed\n");
+
+
+	CTR1(KTR_CXGB, "TCB tid=%u", tid);
+	for (i = 0; i < TCB_SIZE / 32; i++) {
+
+		CTR5(KTR_CXGB, "%1d: %08x %08x %08x %08x",
+		    i, (uint32_t)tcb[1], (uint32_t)(tcb[1] >> 32),
+		    (uint32_t)tcb[0], (uint32_t)(tcb[0] >> 32));
+
+		tcb += 2;
+		CTR4(KTR_CXGB, "   %08x %08x %08x %08x",
+		    (uint32_t)tcb[1], (uint32_t)(tcb[1] >> 32),
+		    (uint32_t)tcb[0], (uint32_t)(tcb[0] >> 32));
+		tcb += 2;
+	}
+}
 
 /*
  * Add an skb to the deferred skb queue for processing from process context.
@@ -913,7 +930,7 @@ do_act_establish(struct t3cdev *dev, struct mbuf *m)
 	} else {
 	
 		log(LOG_ERR, "%s: received clientless CPL command 0x%x\n",
-			dev->name, CPL_PASS_ACCEPT_REQ);
+			dev->name, CPL_ACT_ESTABLISH);
 		return CPL_RET_BUF_DONE | CPL_RET_BAD_MSG;
 	}
 }
@@ -1335,8 +1352,6 @@ t3_toe_attach(struct toedev *dev, const struct offload_id *entry)
 	t3_init_tunables(t);
 	mtx_init(&t->listen_lock, "tom data listeners", NULL, MTX_DEF);
 	CTR2(KTR_TOM, "t3_toe_attach dev=%p entry=%p", dev, entry);
-	/* Adjust TOE activation for this module */
-	t->conf.activated = activated;
 
 	dev->tod_can_offload = can_offload;
 	dev->tod_connect = t3_connect;

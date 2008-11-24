@@ -1,6 +1,10 @@
-# $FreeBSD: src/sys/boot/Makefile,v 1.32 2006/11/05 22:03:02 marcel Exp $
+# $FreeBSD: src/sys/boot/Makefile,v 1.37 2008/11/17 20:49:29 pjd Exp $
 
 .include <bsd.own.mk>
+
+.if ${MACHINE_ARCH} == "mips"
+MK_FORTH=no	# not yet
+.endif
 
 .if ${MK_FORTH} != "no"
 # Build the add-in FORTH interpreter.
@@ -17,7 +21,19 @@ SUBDIR+=		efi
 SUBDIR+=		ofw
 .endif
 
+# Build U-Boot library.
+.if ${MACHINE_ARCH} == "powerpc" || ${MACHINE_ARCH} == "arm"
+SUBDIR+=		uboot
+.endif
+
+.if defined(LOADER_ZFS_SUPPORT)
+SUBDIR+=		zfs
+.endif
+
 # Pick the machine-dependent subdir based on the target architecture.
-SUBDIR+=		${MACHINE:S/amd64/i386/:S/sun4v/sparc64/}
+ADIR=			${MACHINE:S/amd64/i386/:S/sun4v/sparc64/}
+.if exists(${.CURDIR}/${ADIR}/.)
+SUBDIR+=		${ADIR}
+.endif
 
 .include <bsd.subdir.mk>

@@ -25,15 +25,17 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/dump_machdep.c,v 1.2 2005/10/03 14:05:03 cognet Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/dump_machdep.c,v 1.6 2008/11/06 16:20:27 raj Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/conf.h>
 #include <sys/cons.h>
+#include <sys/sysctl.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/kerneldump.h>
+#include <sys/vimage.h>
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <machine/elf.h>
@@ -42,6 +44,11 @@ __FBSDID("$FreeBSD: src/sys/arm/arm/dump_machdep.c,v 1.2 2005/10/03 14:05:03 cog
 #include <machine/armreg.h>
 
 CTASSERT(sizeof(struct kerneldumpheader) == 512);
+
+int do_minidump = 1;
+TUNABLE_INT("debug.minidump", &do_minidump);
+SYSCTL_INT(_debug, OID_AUTO, minidump, CTLFLAG_RW, &do_minidump, 0,
+    "Enable mini crash dumps");
 
 /*
  * Don't touch the first SIZEOF_METADATA bytes on the dump device. This
@@ -102,27 +109,6 @@ md_pa_next(struct md_pa *mdp)
 	return (mdp);
 }
 
-/* XXX should be MI */
-static void
-mkdumpheader(struct kerneldumpheader *kdh, uint32_t archver, uint64_t dumplen,
-    uint32_t blksz)
-{
-
-	bzero(kdh, sizeof(*kdh));
-	strncpy(kdh->magic, KERNELDUMPMAGIC, sizeof(kdh->magic));
-	strncpy(kdh->architecture, MACHINE_ARCH, sizeof(kdh->architecture));
-	kdh->version = htod32(KERNELDUMPVERSION);
-	kdh->architectureversion = htod32(archver);
-	kdh->dumplength = htod64(dumplen);
-	kdh->dumptime = htod64(time_second);
-	kdh->blocksize = htod32(blksz);
-	strncpy(kdh->hostname, hostname, sizeof(kdh->hostname));
-	strncpy(kdh->versionstring, version, sizeof(kdh->versionstring));
-	if (panicstr != NULL)
-		strncpy(kdh->panicstring, panicstr, sizeof(kdh->panicstring));
-	kdh->parity = kerneldump_parity(kdh);
-}
-
 static int
 buf_write(struct dumperinfo *di, char *ptr, size_t sz)
 {
@@ -138,7 +124,7 @@ buf_write(struct dumperinfo *di, char *ptr, size_t sz)
 		ptr += len;
 		sz -= len;
 		if (fragsz == DEV_BSIZE) {
-			error = di->dumper(di->priv, buffer, 0, dumplo,
+			error = dump_write(di, buffer, 0, dumplo,
 			    DEV_BSIZE);
 			if (error)
 				return error;
@@ -158,7 +144,7 @@ buf_flush(struct dumperinfo *di)
 	if (fragsz == 0)
 		return (0);
 
-	error = di->dumper(di->priv, buffer, 0, dumplo, DEV_BSIZE);
+	error = dump_write(di, buffer, 0, dumplo, DEV_BSIZE);
 	dumplo += DEV_BSIZE;
 	fragsz = 0;
 	return (error);
@@ -175,11 +161,10 @@ cb_dumpdata(struct md_pa *mdp, int seqnr, void *arg)
 	vm_offset_t va;
 	uint32_t pgs;
 	size_t counter, sz, chunk;
-	int c, error, twiddle;
+	int c, error;
 
 	error = 0;	/* catch case in which chunk size is 0 */
-	counter = 0;	/* Update twiddle every 16MB */
-	twiddle = 0;
+	counter = 0;
 	va = 0;
 	pgs = mdp->md_size / PAGE_SIZE;
 	pa = mdp->md_start;
@@ -207,7 +192,7 @@ cb_dumpdata(struct md_pa *mdp, int seqnr, void *arg)
 			cpu_tlb_flushID_SE(0);
 			cpu_cpwait();
 		}
-		error = di->dumper(di->priv, 
+		error = dump_write(di, 
 		    (void *)(pa - (pa & L1_ADDR_BITS)),0, dumplo, sz);
 		if (error)
 			break;
@@ -284,7 +269,12 @@ dumpsys(struct dumperinfo *di)
 	off_t hdrgap;
 	size_t hdrsz;
 	int error;
-	
+
+	if (do_minidump) {
+		minidumpsys(di);
+		return;
+	}
+
 	bzero(&ehdr, sizeof(ehdr));
 	ehdr.e_ident[EI_MAG0] = ELFMAG0;
 	ehdr.e_ident[EI_MAG1] = ELFMAG1;
@@ -324,13 +314,13 @@ dumpsys(struct dumperinfo *di)
 	dumplo = di->mediaoffset + di->mediasize - dumpsize;
 	dumplo -= sizeof(kdh) * 2;
 
-	mkdumpheader(&kdh, KERNELDUMP_ARM_VERSION, dumpsize, di->blocksize);
+	mkdumpheader(&kdh, KERNELDUMPMAGIC, KERNELDUMP_ARM_VERSION, dumpsize, di->blocksize);
 
 	printf("Dumping %llu MB (%d chunks)\n", (long long)dumpsize >> 20,
 	    ehdr.e_phnum);
 
 	/* Dump leader */
-	error = di->dumper(di->priv, &kdh, 0, dumplo, sizeof(kdh));
+	error = dump_write(di, &kdh, 0, dumplo, sizeof(kdh));
 	if (error)
 		goto fail;
 	dumplo += sizeof(kdh);
@@ -361,12 +351,12 @@ dumpsys(struct dumperinfo *di)
 		goto fail;
 
 	/* Dump trailer */
-	error = di->dumper(di->priv, &kdh, 0, dumplo, sizeof(kdh));
+	error = dump_write(di, &kdh, 0, dumplo, sizeof(kdh));
 	if (error)
 		goto fail;
 
 	/* Signal completion, signoff and exit stage left. */
-	di->dumper(di->priv, NULL, 0, 0, 0);
+	dump_write(di, NULL, 0, 0, 0);
 	printf("\nDump complete\n");
 	return;
 

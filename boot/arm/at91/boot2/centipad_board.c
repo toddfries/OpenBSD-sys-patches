@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/arm/at91/boot2/centipad_board.c,v 1.1 2007/07/13 14:27:04 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/arm/at91/boot2/centipad_board.c,v 1.2 2008/10/05 23:39:28 imp Exp $");
 
 #include <sys/param.h>
 
@@ -48,11 +48,6 @@ MacFromEE()
 #endif
 	printf("MAC %x:%x:%x:%x:%x:%x\n", mac[0],
 	  mac[1], mac[2], mac[3], mac[4], mac[5]);
-}
-
-void
-Update(void)
-{
 }
 
 void

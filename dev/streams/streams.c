@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/streams/streams.c,v 1.58 2008/01/07 20:05:18 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/streams/streams.c,v 1.59 2008/09/27 08:51:18 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -108,7 +108,7 @@ struct streams_softc {
 	struct isa_device *dev;
 } ;
 
-#define UNIT(dev) minor(dev)	/* assume one minor number per unit */
+#define UNIT(dev) dev2unit(dev)	/* assume one minor number per unit */
 
 typedef	struct streams_softc *sc_p;
 
@@ -194,7 +194,7 @@ streamsopen(struct cdev *dev, int oflags, int devtype, struct thread *td)
 	if (td->td_dupfd >= 0)
 	  return ENODEV;
 
-	switch (minor(dev)) {
+	switch (dev2unit(dev)) {
 	case dev_udp:
 	  family = AF_INET;
 	  type = SOCK_DGRAM;

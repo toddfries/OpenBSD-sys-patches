@@ -3,7 +3,7 @@
  * Garrett Wollman, September 1994.
  * This file is in the public domain.
  *
- * $FreeBSD: src/sys/ia64/include/clock.h,v 1.11 2006/10/02 12:59:57 phk Exp $
+ * $FreeBSD: src/sys/ia64/include/clock.h,v 1.12 2008/03/26 20:09:19 phk Exp $
  */
 
 #ifndef _MACHINE_CLOCK_H_
@@ -15,8 +15,6 @@
 
 extern uint64_t	ia64_clock_reload;
 extern uint64_t	itc_frequency;
-
-int sysbeep(int pitch, int period);
 
 #endif
 

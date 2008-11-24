@@ -1,6 +1,6 @@
 /*-
  * Copyright (c) 2001 Atsushi Onoe
- * Copyright (c) 2002-2007 Sam Leffler, Errno Consulting
+ * Copyright (c) 2002-2008 Sam Leffler, Errno Consulting
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net80211/ieee80211.h,v 1.15 2007/09/05 20:29:51 sam Exp $
+ * $FreeBSD: src/sys/net80211/ieee80211.h,v 1.23 2008/09/21 22:09:18 sam Exp $
  */
 #ifndef _NET80211_IEEE80211_H_
 #define _NET80211_IEEE80211_H_
@@ -47,6 +47,11 @@ struct ieee80211_plcp_hdr {
 
 #define IEEE80211_PLCP_SFD      0xF3A0 
 #define IEEE80211_PLCP_SERVICE  0x00
+#define IEEE80211_PLCP_SERVICE_LOCKED	0x04
+#define IEEE80211_PLCL_SERVICE_PBCC	0x08
+#define IEEE80211_PLCP_SERVICE_LENEXT5	0x20
+#define IEEE80211_PLCP_SERVICE_LENEXT6	0x40
+#define IEEE80211_PLCP_SERVICE_LENEXT7	0x80
 
 /*
  * generic definitions for IEEE 802.11 frames
@@ -169,6 +174,10 @@ struct ieee80211_qosframe_addr4 {
 #define	IEEE80211_SEQ_SUB(a, b) \
 	(((a) + IEEE80211_SEQ_RANGE - (b)) & (IEEE80211_SEQ_RANGE-1))
 
+#define	IEEE80211_SEQ_BA_RANGE			2048	/* 2^11 */
+#define	IEEE80211_SEQ_BA_BEFORE(a, b) \
+	(IEEE80211_SEQ_SUB(b, a+1) < IEEE80211_SEQ_BA_RANGE-1)
+
 #define	IEEE80211_NWID_LEN			32
 
 #define	IEEE80211_QOS_TXOP			0x00ff
@@ -179,8 +188,8 @@ struct ieee80211_qosframe_addr4 {
 #define	IEEE80211_QOS_ACKPOLICY_S		5
 #define	IEEE80211_QOS_ACKPOLICY_NOACK		0x20	/* No ACK required */
 #define	IEEE80211_QOS_ACKPOLICY_BA		0x60	/* Block ACK */
-#define	IEEE80211_QOS_ESOP			0x10
-#define	IEEE80211_QOS_ESOP_S			4
+#define	IEEE80211_QOS_EOSP			0x10	/* EndOfService Period*/
+#define	IEEE80211_QOS_EOSP_S			4
 #define	IEEE80211_QOS_TID			0x0f
 
 /* does frame have QoS sequence control data */
@@ -260,7 +269,7 @@ struct ieee80211_wme_acparams {
 	0)
 
 #define TID_TO_WME_AC(_tid) (      \
-	((_tid) < 1) ? WME_AC_BE : \
+	((_tid) == 0 || (_tid) == 3) ? WME_AC_BE : \
 	((_tid) < 3) ? WME_AC_BK : \
 	((_tid) < 6) ? WME_AC_VI : \
 	WME_AC_VO)
@@ -322,9 +331,15 @@ struct ieee80211_action_ht_txchwidth {
 /* HT - MIMO Power Save (NB: D2.04) */
 struct ieee80211_action_ht_mimopowersave {
 	struct ieee80211_action am_header;
-	uint8_t		am_enable;
-	uint8_t		am_mode;
+	uint8_t		am_control;
 } __packed;
+
+#define	IEEE80211_A_HT_MIMOPWRSAVE_ENA		0x01	/* PS enabled */
+#define	IEEE80211_A_HT_MIMOPWRSAVE_MODE		0x02
+#define	IEEE80211_A_HT_MIMOPWRSAVE_MODE_S	1
+#define	IEEE80211_A_HT_MIMOPWRSAVE_DYNAMIC	0x02	/* Dynamic Mode */
+#define	IEEE80211_A_HT_MIMOPWRSAVE_STATIC	0x00	/* no SM packets */
+/* bits 2-7 reserved */
 
 /* Block Ack actions */
 #define IEEE80211_ACTION_BA_ADDBA_REQUEST       0   /* ADDBA request */
@@ -382,9 +397,13 @@ struct ieee80211_action_ba_delba {
 /* BAR Control */
 #define	IEEE80211_BAR_TID	0xf000		/* TID */
 #define	IEEE80211_BAR_TID_S	12
-#define	IEEE80211_BAR_COMP	0x0004		/* compressed */
-#define	IEEE80211_BAR_MTID	0x0002
-#define	IEEE80211_BAR_NOACK	0x0001		/* no-ack policy */
+#define	IEEE80211_BAR_COMP	0x0004		/* Compressed Bitmap */
+#define	IEEE80211_BAR_MTID	0x0002		/* Multi-TID */
+#define	IEEE80211_BAR_NOACK	0x0001		/* No-Ack policy */
+
+/* BAR Starting Sequence Control */
+#define	IEEE80211_BAR_SEQ_START	0xfff0		/* starting seqnum */
+#define	IEEE80211_BAR_SEQ_START_S	4
 
 struct ieee80211_ba_request {
 	uint16_t	rq_barctl;
@@ -521,10 +540,10 @@ struct ieee80211_ie_htcap {
 #define	IEEE80211_HTCAP_LDPC		0x0001	/* LDPC supported */
 #define	IEEE80211_HTCAP_CHWIDTH40	0x0002	/* 20/40 supported */
 #define	IEEE80211_HTCAP_SMPS		0x000c	/* SM Power Save mode */
-#define	IEEE80211_HTCAP_SMPS_OFF	0x0000	/* none (static mode) */
+#define	IEEE80211_HTCAP_SMPS_OFF	0x000c	/* disabled */
 #define	IEEE80211_HTCAP_SMPS_DYNAMIC	0x0004	/* send RTS first */
 /* NB: SMPS value 2 is reserved */
-#define	IEEE80211_HTCAP_SMPS_ENA	0x000c	/* enabled */
+#define	IEEE80211_HTCAP_SMPS_ENA	0x0000	/* enabled (static mode) */
 #define	IEEE80211_HTCAP_GREENFIELD	0x0010	/* Greenfield supported */
 #define	IEEE80211_HTCAP_SHORTGI20	0x0020	/* Short GI in 20MHz */
 #define	IEEE80211_HTCAP_SHORTGI40	0x0040	/* Short GI in 40MHz */
@@ -546,20 +565,20 @@ struct ieee80211_ie_htcap {
 /* HT parameters (hc_param) */
 #define	IEEE80211_HTCAP_MAXRXAMPDU	0x03	/* max rx A-MPDU factor */
 #define	IEEE80211_HTCAP_MAXRXAMPDU_S	0
-#define	IEEE80211_HTCAP_MAXRXAMPDU_8K	0x00
-#define	IEEE80211_HTCAP_MAXRXAMPDU_16K	0x01
-#define	IEEE80211_HTCAP_MAXRXAMPDU_32K	0x02
-#define	IEEE80211_HTCAP_MAXRXAMPDU_64K	0x03
+#define	IEEE80211_HTCAP_MAXRXAMPDU_8K	0
+#define	IEEE80211_HTCAP_MAXRXAMPDU_16K	1
+#define	IEEE80211_HTCAP_MAXRXAMPDU_32K	2
+#define	IEEE80211_HTCAP_MAXRXAMPDU_64K	3
 #define	IEEE80211_HTCAP_MPDUDENSITY	0x1c	/* min MPDU start spacing */
 #define	IEEE80211_HTCAP_MPDUDENSITY_S	2
-#define	IEEE80211_HTCAP_MPDUDENSITY_NA	0x00	/* no time restriction */
-#define	IEEE80211_HTCAP_MPDUDENSITY_025	0x04	/* 1/4 us */
-#define	IEEE80211_HTCAP_MPDUDENSITY_05	0x08	/* 1/2 us */
-#define	IEEE80211_HTCAP_MPDUDENSITY_1	0x0c	/* 1 us */
-#define	IEEE80211_HTCAP_MPDUDENSITY_2	0x10	/* 2 us */
-#define	IEEE80211_HTCAP_MPDUDENSITY_4	0x14	/* 4 us */
-#define	IEEE80211_HTCAP_MPDUDENSITY_8	0x18	/* 8 us */
-#define	IEEE80211_HTCAP_MPDUDENSITY_16	0x1c	/* 16 us */
+#define	IEEE80211_HTCAP_MPDUDENSITY_NA	0	/* no time restriction */
+#define	IEEE80211_HTCAP_MPDUDENSITY_025	1	/* 1/4 us */
+#define	IEEE80211_HTCAP_MPDUDENSITY_05	2	/* 1/2 us */
+#define	IEEE80211_HTCAP_MPDUDENSITY_1	3	/* 1 us */
+#define	IEEE80211_HTCAP_MPDUDENSITY_2	4	/* 2 us */
+#define	IEEE80211_HTCAP_MPDUDENSITY_4	5	/* 4 us */
+#define	IEEE80211_HTCAP_MPDUDENSITY_8	6	/* 8 us */
+#define	IEEE80211_HTCAP_MPDUDENSITY_16	7	/* 16 us */
 
 /* HT extended capabilities (hc_extcap) */
 #define	IEEE80211_HTCAP_PCO		0x0001	/* PCO capable */
@@ -686,8 +705,12 @@ struct ieee80211_country_ie {
 		uint8_t schan;			/* starting channel */
 		uint8_t nchan;			/* number channels */
 		uint8_t maxtxpwr;		/* tx power cap */
-	} __packed band[4];			/* up to 4 sub bands */
+	} __packed band[1];			/* sub bands (NB: var size) */
 } __packed;
+
+#define	IEEE80211_COUNTRY_MAX_BANDS	84	/* max possible bands */
+#define	IEEE80211_COUNTRY_MAX_SIZE \
+	(sizeof(struct ieee80211_country_ie) + 3*(IEEE80211_COUNTRY_MAX_BANDS-1))
 
 /*
  * 802.11h Channel Switch Announcement (CSA).
@@ -753,6 +776,8 @@ struct ieee80211_ath_ie {
 #define	WPA_ASE_NONE		0x00
 #define	WPA_ASE_8021X_UNSPEC	0x01
 #define	WPA_ASE_8021X_PSK	0x02
+
+#define	WPS_OUI_TYPE		0x04
 
 #define	RSN_OUI			0xac0f00
 #define	RSN_VERSION		1		/* current supported version */
@@ -846,6 +871,14 @@ enum {
 	IEEE80211_REASON_INVALID_RSN_IE_CAP	= 22,	/* 11i */
 	IEEE80211_REASON_802_1X_AUTH_FAILED	= 23,	/* 11i */
 	IEEE80211_REASON_CIPHER_SUITE_REJECTED	= 24,	/* 11i */
+	IEEE80211_REASON_UNSPECIFIED_QOS	= 32,	/* 11e */
+	IEEE80211_REASON_INSUFFICIENT_BW	= 33,	/* 11e */
+	IEEE80211_REASON_TOOMANY_FRAMES		= 34,	/* 11e */
+	IEEE80211_REASON_OUTSIDE_TXOP		= 35,	/* 11e */
+	IEEE80211_REASON_LEAVING_QBSS		= 36,	/* 11e */
+	IEEE80211_REASON_BAD_MECHANISM		= 37,	/* 11e */
+	IEEE80211_REASON_SETUP_NEEDED		= 38,	/* 11e */
+	IEEE80211_REASON_TIMEOUT		= 39,	/* 11e */
 
 	IEEE80211_STATUS_SUCCESS		= 0,
 	IEEE80211_STATUS_UNSPECIFIED		= 1,
@@ -879,6 +912,9 @@ enum {
 #define	IEEE80211_WEP_IVLEN		3	/* 24bit */
 #define	IEEE80211_WEP_KIDLEN		1	/* 1 octet */
 #define	IEEE80211_WEP_CRCLEN		4	/* CRC-32 */
+#define	IEEE80211_WEP_TOTLEN		(IEEE80211_WEP_IVLEN + \
+					 IEEE80211_WEP_KIDLEN + \
+					 IEEE80211_WEP_CRCLEN)
 #define	IEEE80211_WEP_NKID		4	/* number of key ids */
 
 /*
@@ -914,12 +950,12 @@ enum {
 /*
  * The 802.11 spec says at most 2007 stations may be
  * associated at once.  For most AP's this is way more
- * than is feasible so we use a default of 128.  This
- * number may be overridden by the driver and/or by
- * user configuration.
+ * than is feasible so we use a default of IEEE80211_AID_DEF.
+ * This number may be overridden by the driver and/or by
+ * user configuration but may not be less than IEEE80211_AID_MIN
+ * (see _ieee80211.h for implementation-specific settings).
  */
 #define	IEEE80211_AID_MAX		2007
-#define	IEEE80211_AID_DEF		128
 
 #define	IEEE80211_AID(b)	((b) &~ 0xc000)
 

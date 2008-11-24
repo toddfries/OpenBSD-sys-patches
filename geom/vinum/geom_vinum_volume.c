@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_volume.c,v 1.12 2007/10/20 23:23:20 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_volume.c,v 1.13 2008/10/26 17:20:37 lulf Exp $");
 
 #include <sys/param.h>
 #include <sys/bio.h>
@@ -385,8 +385,8 @@ gv_volume_taste(struct g_class *mp, struct g_provider *pp, int flags __unused)
 	if ((ocp != NULL) && (ocp->acr > 0 || ocp->acw > 0 || ocp->ace > 0)) {
 		error = g_access(cp, ocp->acr, ocp->acw, ocp->ace);
 		if (error) {
-			printf("GEOM_VINUM: failed g_access %s -> %s; "
-			    "errno %d\n", v->name, p->name, error);
+			G_VINUM_DEBUG(0, "failed g_access %s -> %s; "
+			    "errno %d", v->name, p->name, error);
 			g_detach(cp);
 			g_destroy_consumer(cp);
 			if (first)

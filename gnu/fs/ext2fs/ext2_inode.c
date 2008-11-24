@@ -33,7 +33,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ffs_inode.c	8.5 (Berkeley) 12/30/93
- * $FreeBSD: src/sys/gnu/fs/ext2fs/ext2_inode.c,v 1.58 2006/09/26 04:15:58 tegge Exp $
+ * $FreeBSD: src/sys/gnu/fs/ext2fs/ext2_inode.c,v 1.60 2008/10/23 15:53:51 des Exp $
  */
 
 #include <sys/param.h>
@@ -409,7 +409,7 @@ ext2_indirtrunc(ip, lbn, dbn, lastbn, level, countp)
 	}
 
 	bap = (int32_t *)bp->b_data;
-	MALLOC(copy, int32_t *, fs->s_blocksize, M_TEMP, M_WAITOK);
+	copy = malloc(fs->s_blocksize, M_TEMP, M_WAITOK);
 	bcopy((caddr_t)bap, (caddr_t)copy, (u_int)fs->s_blocksize);
 	bzero((caddr_t)&bap[last + 1],
 	  (u_int)(NINDIR(fs) - (last + 1)) * sizeof (int32_t));
@@ -451,7 +451,7 @@ ext2_indirtrunc(ip, lbn, dbn, lastbn, level, countp)
 			blocksreleased += blkcount;
 		}
 	}
-	FREE(copy, M_TEMP);
+	free(copy, M_TEMP);
 	*countp = blocksreleased;
 	return (allerror);
 }
@@ -481,7 +481,6 @@ ext2_inactive(ap)
 	if (ip->i_mode == 0)
 		goto out;
 	if (ip->i_nlink <= 0) {
-		(void) vn_write_suspend_wait(vp, NULL, V_WAIT);
 		error = ext2_truncate(vp, (off_t)0, 0, NOCRED, td);
 		ip->i_rdev = 0;
 		mode = ip->i_mode;
@@ -489,15 +488,8 @@ ext2_inactive(ap)
 		ip->i_flag |= IN_CHANGE | IN_UPDATE;
 		ext2_vfree(vp, ip->i_number, mode);
 	}
-	if (ip->i_flag & (IN_ACCESS | IN_CHANGE | IN_MODIFIED | IN_UPDATE)) {
-		if ((ip->i_flag & (IN_CHANGE | IN_UPDATE | IN_MODIFIED)) == 0 &&
-		    vn_write_suspend_wait(vp, NULL, V_NOWAIT)) {
-			ip->i_flag &= ~IN_ACCESS;
-		} else {
-			(void) vn_write_suspend_wait(vp, NULL, V_WAIT);
-			ext2_update(vp, 0);
-		}
-	}
+	if (ip->i_flag & (IN_ACCESS | IN_CHANGE | IN_MODIFIED | IN_UPDATE))
+		ext2_update(vp, 0);
 out:
 	/*
 	 * If we are done with the inode, reclaim it
@@ -529,7 +521,7 @@ ext2_reclaim(ap)
 		ext2_update(vp, 0);
 	}
 	vfs_hash_remove(vp);
-	FREE(vp->v_data, M_EXT2NODE);
+	free(vp->v_data, M_EXT2NODE);
 	vp->v_data = 0;
 	vnode_destroy_vobject(vp);
 	return (0);

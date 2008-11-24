@@ -9,12 +9,13 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/led/led.c,v 1.17 2007/04/23 12:42:15 phk Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/led/led.c,v 1.20 2008/09/26 14:19:52 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
+#include <sys/limits.h>
 #include <sys/malloc.h>
 #include <sys/ctype.h>
 #include <sys/sbuf.h>
@@ -141,7 +142,7 @@ led_write(struct cdev *dev, struct uio *uio, int ioflag)
 		return(error);
 	}
 
-	sb = sbuf_new(NULL, NULL, 0, SBUF_AUTOEXTEND);
+	sb = sbuf_new_auto();
 	if (sb == NULL) {
 		free(s2, M_DEVBUF);
 		return (ENOMEM);
@@ -256,7 +257,7 @@ led_create_state(led_t *func, void *priv, char const *name, int state)
 	sc->unit = alloc_unr(led_unit);
 	sc->private = priv;
 	sc->func = func;
-	sc->dev = make_dev(&led_cdevsw, unit2minor(sc->unit),
+	sc->dev = make_dev(&led_cdevsw, sc->unit,
 	    UID_ROOT, GID_WHEEL, 0600, "led/%s", name);
 	sx_xunlock(&led_sx);
 
@@ -298,7 +299,7 @@ static void
 led_drvinit(void *unused)
 {
 
-	led_unit = new_unrhdr(0, minor2unit(MAXMINOR), NULL);
+	led_unit = new_unrhdr(0, INT_MAX, NULL);
 	mtx_init(&led_mtx, "LED mtx", NULL, MTX_DEF);
 	sx_init(&led_sx, "LED sx");
 	callout_init(&led_ch, CALLOUT_MPSAFE);

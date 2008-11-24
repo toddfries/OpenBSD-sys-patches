@@ -59,7 +59,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfs4client/nfs4_vnops.c,v 1.37 2007/06/01 01:12:44 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/nfs4client/nfs4_vnops.c,v 1.49 2008/10/28 13:44:11 trasz Exp $");
 
 /*
  * vnode op calls for Sun NFS version 2 and 3
@@ -128,9 +128,8 @@ __FBSDID("$FreeBSD: src/sys/nfs4client/nfs4_vnops.c,v 1.37 2007/06/01 01:12:44 j
 
 static int	nfs4_flush(struct vnode *, int, struct thread *,
 		    int);
-static int	nfs4_setattrrpc(struct vnode *, struct vattr *, struct ucred *,
-		    struct thread *);
-static int      nfs4_closerpc(struct vnode *, struct ucred *, struct thread *, int);
+static int	nfs4_setattrrpc(struct vnode *, struct vattr *, struct ucred *);
+static int      nfs4_closerpc(struct vnode *, struct ucred *, int);
 
 static vop_lookup_t	nfs4_lookup;
 static vop_create_t	nfs4_create;
@@ -157,6 +156,7 @@ static	int	nfs4_sillyrename(struct vnode *, struct vnode *,
 static vop_readlink_t	nfs4_readlink;
 static vop_print_t	nfs4_print;
 static vop_advlock_t	nfs4_advlock;
+static vop_advlockasync_t nfs4_advlockasync;
 
 /*
  * Global vfs data structures for nfs
@@ -165,6 +165,7 @@ struct vop_vector nfs4_vnodeops = {
 	.vop_default =		&default_vnodeops,
 	.vop_access =		nfs4_access,
 	.vop_advlock =		nfs4_advlock,
+	.vop_advlockasync =	nfs4_advlockasync,
 	.vop_close =		nfs4_close,
 	.vop_create =		nfs4_create,
 	.vop_fsync =		nfs4_fsync,
@@ -300,7 +301,7 @@ nfs4_access(struct vop_access_args *ap)
 	 * unless the file is a socket, fifo, or a block or character
 	 * device resident on the filesystem.
 	 */
-	if ((ap->a_mode & VWRITE) && (vp->v_mount->mnt_flag & MNT_RDONLY)) {
+	if ((ap->a_accmode & VWRITE) && (vp->v_mount->mnt_flag & MNT_RDONLY)) {
 		switch (vp->v_type) {
 		case VREG:
 		case VDIR:
@@ -320,20 +321,20 @@ nfs4_access(struct vop_access_args *ap)
 	 */
 	/* XXX Disable this for now; needs fixing of _access_otw() */
 	if (0 && v3) {
-		if (ap->a_mode & VREAD)
+		if (ap->a_accmode & VREAD)
 			mode = NFSV3ACCESS_READ;
 		else
 			mode = 0;
 		if (vp->v_type != VDIR) {
-			if (ap->a_mode & VWRITE)
+			if (ap->a_accmode & VWRITE)
 				mode |= (NFSV3ACCESS_MODIFY | NFSV3ACCESS_EXTEND);
-			if (ap->a_mode & VEXEC)
+			if (ap->a_accmode & VEXEC)
 				mode |= NFSV3ACCESS_EXECUTE;
 		} else {
-			if (ap->a_mode & VWRITE)
+			if (ap->a_accmode & VWRITE)
 				mode |= (NFSV3ACCESS_MODIFY | NFSV3ACCESS_EXTEND |
 				    NFSV3ACCESS_DELETE);
-			if (ap->a_mode & VEXEC)
+			if (ap->a_accmode & VEXEC)
 				mode |= NFSV3ACCESS_LOOKUP;
 		}
 		/* XXX safety belt, only make blanket request if caching */
@@ -369,16 +370,16 @@ nfs4_access(struct vop_access_args *ap)
 	}
 
 	/* XXX use generic access code here? */
-	mode = ap->a_mode & VREAD ? NFSV4ACCESS_READ : 0;
+	mode = ap->a_accmode & VREAD ? NFSV4ACCESS_READ : 0;
 	if (vp->v_type == VDIR) {
-		if (ap->a_mode & VWRITE)
+		if (ap->a_accmode & VWRITE)
 			mode |= NFSV4ACCESS_MODIFY | NFSV4ACCESS_EXTEND | NFSV4ACCESS_DELETE;
-		if (ap->a_mode & VEXEC)
+		if (ap->a_accmode & VEXEC)
 			mode |= NFSV4ACCESS_LOOKUP;
 	} else {
-		if (ap->a_mode & VWRITE)
+		if (ap->a_accmode & VWRITE)
 			mode |= NFSV4ACCESS_MODIFY | NFSV4ACCESS_EXTEND;
-		if (ap->a_mode & VEXEC)
+		if (ap->a_accmode & VEXEC)
 			mode |= NFSV4ACCESS_EXECUTE;
 	}
 
@@ -505,8 +506,8 @@ nfs4_openrpc(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
 		np->n_dvp = dvp;
 		np->n_namelen = cnp->cn_namelen; /* XXX memory leaks on these; track! */
 		if (np->n_name != NULL)
-			FREE(np->n_name, M_NFSREQ);
-		MALLOC(np->n_name, u_char *, np->n_namelen + 1, M_NFSREQ, M_WAITOK);
+			free(np->n_name, M_NFSREQ);
+		np->n_name = malloc(np->n_namelen + 1, M_NFSREQ, M_WAITOK);
 		bcopy(cnp->cn_nameptr, np->n_name, np->n_namelen);
 		np->n_name[np->n_namelen] = '\0';
 		if (flags & FWRITE)
@@ -526,8 +527,7 @@ nfs4_openrpc(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
 
 			VATTR_NULL(&va);
 			va.va_size = 0;
-			error = nfs4_setattrrpc(vp, &va,
-			    cnp->cn_cred, cnp->cn_thread);
+			error = nfs4_setattrrpc(vp, &va, cnp->cn_cred);
 		}
 		np->n_attrstamp = 0;
 	}
@@ -619,15 +619,17 @@ nfs4_open(struct vop_open_args *ap)
 }
 
 static int
-nfs4_closerpc(struct vnode *vp, struct ucred *cred, struct thread *td, int flags)
+nfs4_closerpc(struct vnode *vp, struct ucred *cred, int flags)
 {
 	caddr_t bpos, dpos;
 	int error = 0;
 	struct mbuf *mreq, *mrep = NULL, *md, *mb;
+	struct thread *td;
 	struct nfs4_fctx *fcp;
 	struct nfs4_compound cp;
 	struct nfsnode *np = VTONFS(vp);
 
+	td = curthread;
 	fcp = flags & FWRITE ? &np->n_wfc : &np->n_rfc;
 
 	nfs_v4initcompound(&cp);
@@ -685,7 +687,7 @@ nfs4_close(struct vop_close_args *ap)
 		np->n_attrstamp = 0;
 	}
 
-	error = nfs4_closerpc(vp, ap->a_cred, ap->a_td, ap->a_fflag);
+	error = nfs4_closerpc(vp, ap->a_cred, ap->a_fflag);
 
 	if (!error && np->n_flag & NWRITEERR) {
 		np->n_flag &= ~NWRITEERR;
@@ -733,7 +735,7 @@ nfs4_getattr(struct vop_getattr_args *ap)
 	nfsm_v4build_getattr(&cp, &ga);
 	nfsm_v4build_finalize(&cp);
 
-	nfsm_request(vp, NFSV4PROC_COMPOUND, ap->a_td, ap->a_cred);
+	nfsm_request(vp, NFSV4PROC_COMPOUND, curthread, ap->a_cred);
 	if (error != 0)
 		goto nfsmout;
 
@@ -760,6 +762,7 @@ nfs4_setattr(struct vop_setattr_args *ap)
 	struct vnode *vp = ap->a_vp;
 	struct nfsnode *np = VTONFS(vp);
 	struct vattr *vap = ap->a_vap;
+	struct thread *td = curthread;
 	int error = 0;
 	u_quad_t tsize;
 
@@ -813,14 +816,14 @@ nfs4_setattr(struct vop_setattr_args *ap)
 			 */
 
 			tsize = np->n_size;
-			error = nfs_meta_setsize(vp, ap->a_cred, 
-						ap->a_td, vap->va_size);
+			error = nfs_meta_setsize(vp, ap->a_cred, td,
+			    vap->va_size);
 
  			if (np->n_flag & NMODIFIED) {
  			    if (vap->va_size == 0)
- 				error = nfs_vinvalbuf(vp, 0, ap->a_td, 1);
+ 				error = nfs_vinvalbuf(vp, 0, td, 1);
  			    else
- 				error = nfs_vinvalbuf(vp, V_SAVE, ap->a_td, 1);
+ 				error = nfs_vinvalbuf(vp, V_SAVE, td, 1);
  			    if (error) {
 				vnode_pager_setsize(vp, np->n_size);
  				return (error);
@@ -837,7 +840,7 @@ nfs4_setattr(struct vop_setattr_args *ap)
   	} else if ((vap->va_mtime.tv_sec != VNOVAL ||
 		vap->va_atime.tv_sec != VNOVAL) && (np->n_flag & NMODIFIED) &&
 		vp->v_type == VREG &&
-  		(error = nfs_vinvalbuf(vp, V_SAVE, ap->a_td, 1)) == EINTR)
+  		(error = nfs_vinvalbuf(vp, V_SAVE, td, 1)) == EINTR)
 		return (error);
 
 	if (vap->va_size != VNOVAL && np->n_wfc.refcnt == 0) {
@@ -847,14 +850,14 @@ nfs4_setattr(struct vop_setattr_args *ap)
 		cn.cn_nameptr = np->n_name;
 		cn.cn_namelen = np->n_namelen;
 		cn.cn_cred = ap->a_cred;
-		cn.cn_thread = ap->a_td;
+		cn.cn_thread = td;
 		error = nfs4_openrpc(np->n_dvp, &vp, &cn, FWRITE, NULL);
 		if (error)
 			return error;
 		np->n_flag |= NTRUNCATE;
 	}
 
-	error = nfs4_setattrrpc(vp, vap, ap->a_cred, ap->a_td);
+	error = nfs4_setattrrpc(vp, vap, ap->a_cred);
 	if (error && vap->va_size != VNOVAL) {
 		np->n_size = np->n_vattr.va_size = tsize;
 		vnode_pager_setsize(vp, np->n_size);
@@ -866,17 +869,18 @@ nfs4_setattr(struct vop_setattr_args *ap)
  * Do an nfs setattr rpc.
  */
 static int
-nfs4_setattrrpc(struct vnode *vp, struct vattr *vap, struct ucred *cred,
-    struct thread *td)
+nfs4_setattrrpc(struct vnode *vp, struct vattr *vap, struct ucred *cred)
 {
 	caddr_t bpos, dpos;
 	int error = 0;
 	struct mbuf *mreq, *mrep = NULL, *md, *mb;
+	struct thread *td;
 	struct nfs4_compound cp;
 	struct nfs4_oparg_getattr ga;
 	struct nfsnode *np = VTONFS(vp);
 	struct nfs4_fctx *fcp;
 
+	td = curthread;
 	nfsstats.rpccnt[NFSPROC_SETATTR]++;
 	mreq = nfsm_reqhead(vp, NFSV4PROC_COMPOUND, 0);
 	mb = mreq;
@@ -905,7 +909,7 @@ nfs4_setattrrpc(struct vnode *vp, struct vattr *vap, struct ucred *cred,
 
 	/* TODO: do the settatr and close in a single compound rpc */
 	if (np->n_flag & NTRUNCATE) {
-		error = nfs4_closerpc(vp, cred, td, FWRITE);
+		error = nfs4_closerpc(vp, cred, FWRITE);
 		np->n_flag &= ~NTRUNCATE;
 	}
 
@@ -963,7 +967,7 @@ nfs4_lookup(struct vop_lookup_args *ap)
 		struct vattr vattr;
 
 		newvp = *vpp;
-		if (!VOP_GETATTR(newvp, &vattr, cnp->cn_cred, td)
+		if (!VOP_GETATTR(newvp, &vattr, cnp->cn_cred)
 		 && vattr.va_ctime.tv_sec == VTONFS(newvp)->n_ctime) {
 		     nfsstats.lookupcache_hits++;
 		     if (cnp->cn_nameiop != LOOKUP &&
@@ -1045,10 +1049,10 @@ nfs4_lookup(struct vop_lookup_args *ap)
 	}
 
 	if (flags & ISDOTDOT) {
-		VOP_UNLOCK(dvp, 0, td);
+		VOP_UNLOCK(dvp, 0);
 
 		error = nfs_nget(dvp->v_mount, fhp, fhsize, &np, LK_EXCLUSIVE);
-		vn_lock(dvp, LK_EXCLUSIVE | LK_RETRY, td);
+		vn_lock(dvp, LK_EXCLUSIVE | LK_RETRY);
 		if (error)
 			return (error);
 		newvp = NFSTOV(np);
@@ -1067,8 +1071,8 @@ nfs4_lookup(struct vop_lookup_args *ap)
 		np->n_dvp = dvp;
 		np->n_namelen = cnp->cn_namelen;
 		if (np->n_name != NULL)
-			FREE(np->n_name, M_NFSREQ);
-		MALLOC(np->n_name, u_char *, np->n_namelen + 1, M_NFSREQ, M_WAITOK);
+			free(np->n_name, M_NFSREQ);
+		np->n_name = malloc(np->n_namelen + 1, M_NFSREQ, M_WAITOK);
 		bcopy(cnp->cn_nameptr, np->n_name, np->n_namelen);
 		np->n_name[np->n_namelen] = '\0';
 
@@ -1451,7 +1455,7 @@ nfs4_createrpc(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
 		m_freem(mrep);
 
 	/* XXX */
-	/*FREE(cnp->cn_pnbuf, M_NAMEI);*/
+	/*free(cnp->cn_pnbuf, M_NAMEI);*/
 	if (error != 0 && newvp != NULL)
 		vput(newvp);
 	else if (error == 0)
@@ -1530,7 +1534,7 @@ nfs4_create(struct vop_create_args *ap)
 	int error = 0, fmode = (O_CREAT | FREAD | FWRITE);
 	struct vattr vattr;
 
-	if ((error = VOP_GETATTR(dvp, &vattr, cnp->cn_cred, cnp->cn_thread)) != 0)
+	if ((error = VOP_GETATTR(dvp, &vattr, cnp->cn_cred)) != 0)
 		return (error);
 
 	if (vap->va_vaflags & VA_EXCLUSIVE)
@@ -1584,8 +1588,7 @@ nfs4_remove(struct vop_remove_args *ap)
 	if (vp->v_type == VDIR)
 		error = EPERM;
 	else if (vrefcnt(vp) == 1 || (np->n_sillyrename &&
-	    VOP_GETATTR(vp, &vattr, cnp->cn_cred, cnp->cn_thread) == 0 &&
-	    vattr.va_nlink > 1)) {
+	    !VOP_GETATTR(vp, &vattr, cnp->cn_cred) && vattr.va_nlink > 1)) {
 		/*
 		 * Purge the name cache so that the chance of a lookup for
 		 * the name succeeding while the remove is in progress is
@@ -1709,7 +1712,7 @@ nfs4_rename(struct vop_rename_args *ap)
 		error = 0;
 		goto out;
 	}
-	if ((error = vn_lock(fvp, LK_EXCLUSIVE, fcnp->cn_thread)) != 0)
+	if ((error = vn_lock(fvp, LK_EXCLUSIVE)) != 0)
 		goto out;
 
 	/*
@@ -1721,7 +1724,7 @@ nfs4_rename(struct vop_rename_args *ap)
 	 * often.
 	 */
 	VOP_FSYNC(fvp, MNT_WAIT, fcnp->cn_thread);
-	VOP_UNLOCK(fvp, 0, fcnp->cn_thread);
+	VOP_UNLOCK(fvp, 0);
 	if (tvp)
 	    VOP_FSYNC(tvp, MNT_WAIT, tcnp->cn_thread);
 
@@ -1923,7 +1926,7 @@ nfs4_readdir(struct vop_readdir_args *ap)
 	 */
 	if (np->n_direofoffset > 0 && uio->uio_offset >= np->n_direofoffset &&
 	    (np->n_flag & NMODIFIED) == 0) {
-		if (VOP_GETATTR(vp, &vattr, ap->a_cred, uio->uio_td) == 0 &&
+		if (!VOP_GETATTR(vp, &vattr, ap->a_cred) &&
 			!NFS_TIMESPEC_COMPARE(&np->n_mtime, &vattr.va_mtime)) {
 			nfsstats.direofcache_hits++;
 			return (0);
@@ -2232,8 +2235,7 @@ nfs4_sillyrename(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 	if (vp->v_type == VDIR)
 		panic("nfs: sillyrename dir");
 #endif
-	MALLOC(sp, struct sillyrename *, sizeof (struct sillyrename),
-		M_NFSREQ, M_WAITOK);
+	sp = malloc(sizeof (struct sillyrename), M_NFSREQ, M_WAITOK);
 	sp->s_cred = crhold(cnp->cn_cred);
 	sp->s_dvp = dvp;
 	sp->s_removeit = nfs4_removeit;
@@ -2348,9 +2350,8 @@ nfs4_lookitup(struct vnode *dvp, const char *name, int len, struct ucred *cred,
 			np->n_dvp = dvp;
 			np->n_namelen = len;
 			if (np->n_name != NULL)
-				FREE(np->n_name, M_NFSREQ);
-			MALLOC(np->n_name, u_char *,
-			    np->n_namelen + 1, M_NFSREQ, M_WAITOK);
+				free(np->n_name, M_NFSREQ);
+			np->n_name = malloc(np->n_namelen + 1, M_NFSREQ, M_WAITOK);
 			memcpy(np->n_name, name, len);
 			np->n_name[len] = '\0';
 		}
@@ -2446,8 +2447,9 @@ nfs4_strategy(struct vop_strategy_args *ap)
 	struct ucred *cr;
 	int error = 0;
 
-	KASSERT(!(bp->b_flags & B_DONE), ("nfs4_strategy: buffer %p unexpectedly marked B_DONE", bp));
-	KASSERT(BUF_REFCNT(bp) > 0, ("nfs4_strategy: buffer %p not locked", bp));
+	KASSERT(!(bp->b_flags & B_DONE),
+	    ("nfs4_strategy: buffer %p unexpectedly marked B_DONE", bp));
+	BUF_ASSERT_HELD(bp);
 
 	if (bp->b_iocmd == BIO_READ)
 		cr = bp->b_rcred;
@@ -2485,11 +2487,12 @@ nfs4_flush(struct vnode *vp, int waitfor, struct thread *td,
     int commit)
 {
 	struct nfsnode *np = VTONFS(vp);
+	struct bufobj *bo;
 	struct buf *bp;
 	int i;
 	struct buf *nbp;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
-	int s, error = 0, slptimeo = 0, slpflag = 0, retv, bvecpos;
+	int error = 0, slptimeo = 0, slpflag = 0, retv, bvecpos;
 	int passone = 1;
 	u_quad_t off, endoff, toff;
 	struct ucred* wcred = NULL;
@@ -2499,6 +2502,7 @@ nfs4_flush(struct vnode *vp, int waitfor, struct thread *td,
 #endif
 	struct buf *bvec_on_stack[NFS_COMMITBVECSIZ];
 	int bvecsize = 0, bveccount;
+	bo = &vp->v_bufobj;
 
 	if (nmp->nm_flag & NFSMNT_INT)
 		slpflag = PCATCH;
@@ -2516,16 +2520,15 @@ again:
 	endoff = 0;
 	bvecpos = 0;
 	if (NFS_ISV3(vp) && commit) {
-		s = splbio();
 		if (bvec != NULL && bvec != bvec_on_stack)
 			free(bvec, M_TEMP);
 		/*
 		 * Count up how many buffers waiting for a commit.
 		 */
 		bveccount = 0;
-		VI_LOCK(vp);
-		TAILQ_FOREACH_SAFE(bp, &vp->v_bufobj.bo_dirty.bv_hd, b_bobufs, nbp) {
-			if (BUF_REFCNT(bp) == 0 &&
+		BO_LOCK(bo);
+		TAILQ_FOREACH_SAFE(bp, &bo->bo_dirty.bv_hd, b_bobufs, nbp) {
+			if (!BUF_ISLOCKED(bp) &&
 			    (bp->b_flags & (B_DELWRI | B_NEEDCOMMIT))
 				== (B_DELWRI | B_NEEDCOMMIT))
 				bveccount++;
@@ -2541,11 +2544,11 @@ again:
 			 * Release the vnode interlock to avoid a lock
 			 * order reversal.
 			 */
-			VI_UNLOCK(vp);
+			BO_UNLOCK(bo);
 			bvec = (struct buf **)
 				malloc(bveccount * sizeof(struct buf *),
 				       M_TEMP, M_NOWAIT);
-			VI_LOCK(vp);
+			BO_LOCK(bo);
 			if (bvec == NULL) {
 				bvec = bvec_on_stack;
 				bvecsize = NFS_COMMITBVECSIZ;
@@ -2555,7 +2558,7 @@ again:
 			bvec = bvec_on_stack;
 			bvecsize = NFS_COMMITBVECSIZ;
 		}
-		TAILQ_FOREACH_SAFE(bp, &vp->v_bufobj.bo_dirty.bv_hd, b_bobufs, nbp) {
+		TAILQ_FOREACH_SAFE(bp, &bo->bo_dirty.bv_hd, b_bobufs, nbp) {
 			if (bvecpos >= bvecsize)
 				break;
 			if (BUF_LOCK(bp, LK_EXCLUSIVE | LK_NOWAIT, NULL)) {
@@ -2568,7 +2571,7 @@ again:
 				nbp = TAILQ_NEXT(bp, b_bobufs);
 				continue;
 			}
-			VI_UNLOCK(vp);
+			BO_UNLOCK(bo);
 			bremfree(bp);
 			/*
 			 * Work out if all buffers are using the same cred
@@ -2587,7 +2590,7 @@ again:
 				wcred = NOCRED;
 			vfs_busy_pages(bp, 1);
 
-			VI_LOCK(vp);
+			BO_LOCK(bo);
 			/*
 			 * bp is protected by being locked, but nbp is not
 			 * and vfs_busy_pages() may sleep.  We have to
@@ -2611,8 +2614,7 @@ again:
 			if (toff > endoff)
 				endoff = toff;
 		}
-		splx(s);
-		VI_UNLOCK(vp);
+		BO_UNLOCK(bo);
 	}
 	if (bvecpos > 0) {
 		/*
@@ -2664,14 +2666,12 @@ again:
 				 * specific.  We should probably move that
 				 * into bundirty(). XXX
 				 */
-				s = splbio();
-				bufobj_wref(&vp->v_bufobj);
+				bufobj_wref(bo);
 				bp->b_flags |= B_ASYNC;
 				bundirty(bp);
 				bp->b_flags &= ~B_DONE;
 				bp->b_ioflags &= ~BIO_ERROR;
 				bp->b_dirtyoff = bp->b_dirtyend = 0;
-				splx(s);
 				bufdone(bp);
 			}
 		}
@@ -2681,21 +2681,21 @@ again:
 	 * Start/do any write(s) that are required.
 	 */
 loop:
-	s = splbio();
-	VI_LOCK(vp);
-	TAILQ_FOREACH_SAFE(bp, &vp->v_bufobj.bo_dirty.bv_hd, b_bobufs, nbp) {
+	BO_LOCK(bo);
+	TAILQ_FOREACH_SAFE(bp, &bo->bo_dirty.bv_hd, b_bobufs, nbp) {
 		if (BUF_LOCK(bp, LK_EXCLUSIVE | LK_NOWAIT, NULL)) {
 			if (waitfor != MNT_WAIT || passone)
 				continue;
 
 			error = BUF_TIMELOCK(bp,
 			    LK_EXCLUSIVE | LK_SLEEPFAIL | LK_INTERLOCK,
-			    VI_MTX(vp), "nfsfsync", slpflag, slptimeo);
-			splx(s);
+			    BO_MTX(bo), "nfsfsync", slpflag, slptimeo);
 			if (error == 0)
 				panic("nfs4_fsync: inconsistent lock");
-			if (error == ENOLCK)
+			if (error == ENOLCK) {
+				error = 0;
 				goto loop;
+			}
 			if (nfs4_sigintr(nmp, NULL, td)) {
 				error = EINTR;
 				goto done;
@@ -2712,27 +2712,25 @@ loop:
 			BUF_UNLOCK(bp);
 			continue;
 		}
-		VI_UNLOCK(vp);
+		BO_LOCK(bo);
 		bremfree(bp);
 		if (passone || !commit)
 		    bp->b_flags |= B_ASYNC;
 		else
 		    bp->b_flags |= B_ASYNC;
-		splx(s);
 		bwrite(bp);
 		goto loop;
 	}
-	splx(s);
 	if (passone) {
 		passone = 0;
-		VI_UNLOCK(vp);
+		BO_UNLOCK(bo);
 		goto again;
 	}
 	if (waitfor == MNT_WAIT) {
-		while (vp->v_bufobj.bo_numoutput) {
-			error = bufobj_wwait(&vp->v_bufobj, slpflag, slptimeo);
+		while (bo->bo_numoutput) {
+			error = bufobj_wwait(bo, slpflag, slptimeo);
 			if (error) {
-			    VI_UNLOCK(vp);
+			    BO_UNLOCK(bo);
 			    if (nfs4_sigintr(nmp, NULL, td)) {
 				error = EINTR;
 				goto done;
@@ -2741,15 +2739,15 @@ loop:
 				slpflag = 0;
 				slptimeo = 2 * hz;
 			    }
-			    VI_LOCK(vp);
+			    BO_LOCK(bo);
 			}
 		}
 		if (vp->v_bufobj.bo_dirty.bv_cnt > 0 && commit) {
-			VI_UNLOCK(vp);
+			BO_UNLOCK(bo);
 			goto loop;
 		}
 	}
-	VI_UNLOCK(vp);
+	BO_UNLOCK(bo);
 	if (np->n_flag & NWRITEERR) {
 		error = np->n_error;
 		np->n_flag &= ~NWRITEERR;
@@ -2766,14 +2764,48 @@ done:
 static int
 nfs4_advlock(struct vop_advlock_args *ap)
 {
+	struct vnode *vp = ap->a_vp;
+	u_quad_t size;
+	int error;
+
 	return (EPERM);
 
-	if ((VFSTONFS(ap->a_vp->v_mount)->nm_flag & NFSMNT_NOLOCKD) != 0) {
-		struct nfsnode *np = VTONFS(ap->a_vp);
+	error = vn_lock(vp, LK_SHARED);
+	if (error)
+		return (error);
+	if ((VFSTONFS(vp->v_mount)->nm_flag & NFSMNT_NOLOCKD) != 0) {
+		size = VTONFS(vp)->n_size;
+		VOP_UNLOCK(vp, 0);
+		error = lf_advlock(ap, &(vp->v_lockf), size);
+	} else
+		error = nfs_dolock(ap);
+	return (error);
+}
 
-		return (lf_advlock(ap, &(np->n_lockf), np->n_size));
+/*
+ * NFS advisory byte-level locks.
+ */
+static int
+nfs4_advlockasync(struct vop_advlockasync_args *ap)
+{
+	struct vnode *vp = ap->a_vp;
+	u_quad_t size;
+	int error;
+
+	return (EPERM);
+
+	error = vn_lock(vp, LK_SHARED);
+	if (error)
+		return (error);
+	if ((VFSTONFS(vp->v_mount)->nm_flag & NFSMNT_NOLOCKD) != 0) {
+		size = VTONFS(vp)->n_size;
+		VOP_UNLOCK(vp, 0);
+		error = lf_advlockasync(ap, &(vp->v_lockf), size);
+	} else {
+		VOP_UNLOCK(vp, 0);
+		error = EOPNOTSUPP;
 	}
-	return (nfs_dolock(ap));
+	return (error);
 }
 
 /*
@@ -2807,8 +2839,7 @@ nfs4_writebp(struct buf *bp, int force __unused, struct thread *td)
 	off_t off;
 #endif
 
-	if (BUF_REFCNT(bp) == 0)
-		panic("bwrite: buffer is not locked???");
+	BUF_ASSERT_HELD(bp);
 
 	if (bp->b_flags & B_INVAL) {
 		brelse(bp);

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/ubsa.c,v 1.35 2008/04/09 22:20:28 flz Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/ubsa.c,v 1.46 2008/10/22 20:18:47 n_hibma Exp $");
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -210,6 +210,8 @@ static const struct ubsa_product {
 	uint16_t	vendor;
 	uint16_t	product;
 } ubsa_products [] = {
+	/* AnyData ADU-500A */
+	{ USB_VENDOR_ANYDATA, USB_PRODUCT_ANYDATA_ADU_500A },
 	/* AnyData ADU-E100A/H */
 	{ USB_VENDOR_ANYDATA, USB_PRODUCT_ANYDATA_ADU_E100X },
 	/* Axesstel MV100H */
@@ -224,22 +226,6 @@ static const struct ubsa_product {
 	{ USB_VENDOR_GOHUBS, USB_PRODUCT_GOHUBS_GOCOM232 },
 	/* Peracom */
 	{ USB_VENDOR_PERACOM, USB_PRODUCT_PERACOM_SERIAL1 },
-	/* Novatel Wireless Merlin cards */
-	{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_U740 },
-	/* Novatel Wireless Merlin v740 */
-	{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_V740 },
-	/* Option Vodafone MC3G */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_VODAFONEMC3G },
-	/* Option GlobeTrotter 3G */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3G },
-	/* Option GlobeTrotter 3G QUAD */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GQUAD },
-	/* Option GlobeTrotter 3G+ */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GPLUS },
-	/* Huawei Mobile */
-	{ USB_VENDOR_HUAWEI, USB_PRODUCT_HUAWEI_MOBILE },
-	/* Qualcomm, Inc. ZTE CDMA */
-	{ USB_VENDOR_QUALCOMMINC, USB_PRODUCT_QUALCOMMINC_CDMA_MSM },
 	{ 0, 0 }
 };
 
@@ -400,6 +386,8 @@ ubsa_attach(device_t self)
 	ucom->sc_parent = sc;
 	ucom->sc_portno = UCOM_UNK_PORTNO;
 	/* bulkin, bulkout set above */
+	ucom->sc_ibufsize = 1024;
+	ucom->sc_obufsize = 1024;
 	ucom->sc_ibufsizepad = ucom->sc_ibufsize;
 	ucom->sc_opkthdrlen = 0;
 	ucom->sc_callback = &ubsa_callback;
@@ -453,8 +441,8 @@ ubsa_request(struct ubsa_softc *sc, u_int8_t request, u_int16_t value)
 
 	err = usbd_do_request(sc->sc_ucom.sc_udev, &req, 0);
 	if (err)
-		device_printf(sc->sc_ucom.sc_dev, "ubsa_request: %s\n",
-		    usbd_errstr(err));
+		device_printf(sc->sc_ucom.sc_dev, "ubsa_request(%x, %x): %s\n",
+		    request, value, usbd_errstr(err));
 	return (err);
 }
 

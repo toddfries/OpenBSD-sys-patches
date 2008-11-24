@@ -25,7 +25,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/syscons/daemon/daemon_saver.c,v 1.24 2007/12/29 23:26:57 wkoszek Exp $
+ * $FreeBSD: src/sys/dev/syscons/daemon/daemon_saver.c,v 1.26 2008/08/17 23:27:27 bz Exp $
  */
 
 #include <sys/param.h>
@@ -36,6 +36,7 @@
 #include <sys/sysctl.h>
 #include <sys/consio.h>
 #include <sys/fbio.h>
+#include <sys/vimage.h>
 
 #include <machine/pc/display.h>
 
@@ -350,10 +351,12 @@ daemon_saver(video_adapter_t *adp, int blank)
 static int
 daemon_init(video_adapter_t *adp)
 {
-	messagelen = strlen(hostname) + 3 + strlen(ostype) + 1 + 
+
+	/* XXXRW: Locking -- these can change! */
+	messagelen = strlen(G_hostname) + 3 + strlen(ostype) + 1 + 
 	    strlen(osrelease);
 	message = malloc(messagelen + 1, M_DEVBUF, M_WAITOK);
-	sprintf(message, "%s - %s %s", hostname, ostype, osrelease);
+	sprintf(message, "%s - %s %s", G_hostname, ostype, osrelease);
 	blanked = 0;
 	switch (adp->va_mode) {
 	case M_PC98_80x25:

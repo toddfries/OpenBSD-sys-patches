@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/linux/imgact_linux.c,v 1.55 2007/02/24 16:49:24 netchild Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/linux/imgact_linux.c,v 1.58 2008/01/13 14:44:08 attilio Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -65,7 +65,6 @@ exec_linux_imgact(struct image_params *imgp)
     unsigned long virtual_offset, file_offset;
     vm_offset_t buffer;
     unsigned long bss_size;
-    struct thread *td = curthread;
     int error;
 
     if (((a_out->a_magic >> 16) & 0xff) != 0x64)
@@ -114,12 +113,14 @@ exec_linux_imgact(struct image_params *imgp)
     }
     PROC_UNLOCK(imgp->proc);
 
-    VOP_UNLOCK(imgp->vp, 0, td);
+    VOP_UNLOCK(imgp->vp, 0);
 
     /*
      * Destroy old process VM and create a new one (with a new stack)
      */
-    exec_new_vmspace(imgp, &linux_sysvec);
+    error = exec_new_vmspace(imgp, &linux_sysvec);
+    if (error)
+	    goto fail;
     vmspace = imgp->proc->p_vmspace;
 
     /*
@@ -234,7 +235,7 @@ exec_linux_imgact(struct image_params *imgp)
     imgp->proc->p_sysent = &linux_sysvec;
 
 fail:
-    vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY, td);
+    vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY);
     return (error);
 }
 

@@ -29,7 +29,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  *	$NetBSD: cpu.h,v 1.11 2000/05/26 21:19:53 thorpej Exp $
- * $FreeBSD: src/sys/powerpc/include/cpu.h,v 1.21 2007/06/09 21:55:16 marcel Exp $
+ * $FreeBSD: src/sys/powerpc/include/cpu.h,v 1.22 2008/10/27 00:26:07 marcel Exp $
  */
 
 #ifndef _MACHINE_CPU_H_
@@ -68,6 +68,9 @@ get_cyclecount(void)
 
 #define	cpu_getstack(td)	((td)->td_frame->fixreg[1])
 #define	cpu_spinwait()		/* nothing */
+
+extern char btext[];
+extern char etext[];
 
 void	cpu_halt(void);
 void	cpu_reset(void);

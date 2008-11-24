@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_environment.c,v 1.49 2007/10/24 19:03:54 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_environment.c,v 1.50 2008/07/21 15:05:25 pjd Exp $");
 
 #include "opt_mac.h"
 
@@ -561,6 +561,14 @@ tunable_ulong_init(void *data)
 	struct tunable_ulong *d = (struct tunable_ulong *)data;
 
 	TUNABLE_ULONG_FETCH(d->path, d->var);
+}
+
+void
+tunable_quad_init(void *data)
+{
+	struct tunable_quad *d = (struct tunable_quad *)data;
+
+	TUNABLE_QUAD_FETCH(d->path, d->var);
 }
 
 void

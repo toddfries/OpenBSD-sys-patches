@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/sio/sio.c,v 1.473 2007/12/25 17:51:57 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/sio/sio.c,v 1.475 2008/10/08 08:08:03 imp Exp $");
 
 #include "opt_comconsole.h"
 #include "opt_compat.h"
@@ -696,6 +696,14 @@ sioprobe(dev, xrid, rclk, noprobe)
 		bus_release_resource(dev, SYS_RES_IOPORT, rid, port);
 		if (iobase == siocniobase)
 			result = 0;
+		/*
+		 * XXX: Since we don't return 0, we shouldn't be relying on
+		 * the softc that we set to persist to the call to attach
+		 * since other probe routines may be called, and the malloc
+		 * here causes subr_bus to not allocate anything for the
+		 * other probes.  Instead, this softc is preserved and other
+		 * probe routines can corrupt it.
+		 */
 		if (result != 0) {
 			device_set_softc(dev, NULL);
 			free(com, M_DEVBUF);
@@ -773,6 +781,13 @@ sioprobe(dev, xrid, rclk, noprobe)
 	bus_release_resource(dev, SYS_RES_IOPORT, rid, port);
 	if (iobase == siocniobase)
 		result = 0;
+	/*
+	 * XXX: Since we don't return 0, we shouldn't be relying on the softc
+	 * that we set to persist to the call to attach since other probe
+	 * routines may be called, and the malloc here causes subr_bus to not
+	 * allocate anything for the other probes.  Instead, this softc is
+	 * preserved and other probe routines can corrupt it.
+	 */
 	if (result != 0) {
 		device_set_softc(dev, NULL);
 		free(com, M_DEVBUF);
@@ -1469,6 +1484,11 @@ siointr1(com)
 	u_char	modem_status;
 	u_char	*ioptr;
 	u_char	recv_data;
+#if defined(KDB) && defined(ALT_BREAK_TO_DEBUGGER)
+	int	kdb_brk;
+
+again:
+#endif
 
 	if (COM_IIR_TXRDYBUG(com->flags)) {
 		int_ctl = inb(com->int_ctl_port);
@@ -1501,9 +1521,24 @@ siointr1(com)
 #ifdef KDB
 #ifdef ALT_BREAK_TO_DEBUGGER
 			if (com->unit == comconsole &&
-			    kdb_alt_break(recv_data, &com->alt_brk_state) != 0)
-				kdb_enter(KDB_WHY_BREAK,
-				    "Break sequence on console");
+			    (kdb_brk = kdb_alt_break(recv_data,
+					&com->alt_brk_state)) != 0) {
+				mtx_unlock_spin(&sio_lock);
+				switch (kdb_brk) {
+				case KDB_REQ_DEBUGGER:
+					kdb_enter(KDB_WHY_BREAK,
+					    "Break sequence on console");
+					break;
+				case KDB_REQ_PANIC:
+					kdb_panic("panic on console");
+					break;
+				case KDB_REQ_REBOOT:
+					kdb_reboot();
+					break;
+				}
+				mtx_lock_spin(&sio_lock);
+				goto again;
+			}
 #endif /* ALT_BREAK_TO_DEBUGGER */
 #endif /* KDB */
 			if (line_status & (LSR_BI | LSR_FE | LSR_PE)) {

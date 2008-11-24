@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/dc/if_dc.c,v 1.194 2008/03/24 17:38:24 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/dc/if_dc.c,v 1.197 2008/08/29 20:31:41 marius Exp $");
 
 /*
  * DEC "tulip" clone ethernet driver. Supports the DEC/Intel 21143
@@ -1141,7 +1141,7 @@ dc_setfilt_21143(struct dc_softc *sc)
 static void
 dc_setfilt_admtek(struct dc_softc *sc)
 {
-	uint32_t eaddr[(ETHER_ADDR_LEN+3)/4];
+	uint8_t eaddr[ETHER_ADDR_LEN];
 	struct ifnet *ifp;
 	struct ifmultiaddr *ifma;
 	int h = 0;
@@ -1151,8 +1151,9 @@ dc_setfilt_admtek(struct dc_softc *sc)
 
 	/* Init our MAC address. */
 	bcopy(IF_LLADDR(sc->dc_ifp), eaddr, ETHER_ADDR_LEN);
-	CSR_WRITE_4(sc, DC_AL_PAR0, eaddr[0]);
-	CSR_WRITE_4(sc, DC_AL_PAR1, eaddr[1]);
+	CSR_WRITE_4(sc, DC_AL_PAR0, eaddr[3] << 24 | eaddr[2] << 16 |
+	    eaddr[1] << 8 | eaddr[0]);
+	CSR_WRITE_4(sc, DC_AL_PAR1, eaddr[5] << 8 | eaddr[4]);
 
 	/* If we want promiscuous mode, set the allframes bit. */
 	if (ifp->if_flags & IFF_PROMISC)
@@ -1392,9 +1393,7 @@ dc_setcfg(struct dc_softc *sc, int media)
 				    __func__);
 			if (!((isr & DC_ISR_RX_STATE) == DC_RXSTATE_STOPPED ||
 			    (isr & DC_ISR_RX_STATE) == DC_RXSTATE_WAIT) &&
-			    !(DC_IS_CENTAUR(sc) || DC_IS_CONEXANT(sc) ||
-			    (DC_IS_DAVICOM(sc) && pci_get_revid(sc->dc_dev) >=
-			    DC_REVISION_DM9102A)))
+			    !DC_HAS_BROKEN_RXSTATE(sc))
 				device_printf(sc->dc_dev,
 				    "%s: failed to force rx to idle state\n",
 				    __func__);
@@ -1812,7 +1811,7 @@ dc_attach(device_t dev)
 	u_int32_t command;
 	struct dc_softc *sc;
 	struct ifnet *ifp;
-	u_int32_t revision;
+	u_int32_t reg, revision;
 	int error = 0, rid, mac_offset;
 	int i;
 	u_int8_t *mac;
@@ -2052,8 +2051,15 @@ dc_attach(device_t dev)
 		break;
 	case DC_TYPE_AL981:
 	case DC_TYPE_AN985:
-		eaddr[0] = CSR_READ_4(sc, DC_AL_PAR0);
-		eaddr[1] = CSR_READ_4(sc, DC_AL_PAR1);
+		reg = CSR_READ_4(sc, DC_AL_PAR0);
+		mac = (uint8_t *)&eaddr[0];
+		mac[0] = (reg >> 0) & 0xff;
+		mac[1] = (reg >> 8) & 0xff;
+		mac[2] = (reg >> 16) & 0xff;
+		mac[3] = (reg >> 24) & 0xff;
+		reg = CSR_READ_4(sc, DC_AL_PAR1);
+		mac[4] = (reg >> 0) & 0xff;
+		mac[5] = (reg >> 8) & 0xff;
 		break;
 	case DC_TYPE_CONEXANT:
 		bcopy(sc->dc_srom + DC_CONEXANT_EE_NODEADDR, &eaddr,
@@ -2876,8 +2882,12 @@ dc_tick(void *xsc)
 			if (sc->dc_link == 0)
 				mii_tick(mii);
 		} else {
-			r = CSR_READ_4(sc, DC_ISR);
-			if ((r & DC_ISR_RX_STATE) == DC_RXSTATE_WAIT &&
+			/*
+			 * For NICs which never report DC_RXSTATE_WAIT, we
+			 * have to bite the bullet...
+			 */
+			if ((DC_HAS_BROKEN_RXSTATE(sc) || (CSR_READ_4(sc,
+			    DC_ISR) & DC_ISR_RX_STATE) == DC_RXSTATE_WAIT) &&
 			    sc->dc_cdata.dc_tx_cnt == 0) {
 				mii_tick(mii);
 				if (!(mii->mii_media_status & IFM_ACTIVE))
@@ -3130,7 +3140,7 @@ dc_encap(struct dc_softc *sc, struct mbuf **m_head)
 	bus_dma_segment_t segs[DC_MAXFRAGS];
 	struct dc_desc *f;
 	struct mbuf *m;
-	int chainlen, cur, error, first, frag, i, idx, nseg;
+	int cur, defragged, error, first, frag, i, idx, nseg;
 
 	/*
 	 * If there's no way we can send any packets, return now.
@@ -3138,22 +3148,30 @@ dc_encap(struct dc_softc *sc, struct mbuf **m_head)
 	if (DC_TX_LIST_CNT - sc->dc_cdata.dc_tx_cnt <= DC_TX_LIST_RSVD)
 		return (ENOBUFS);
 
-	/*
-	 * Count the number of frags in this chain to see if
-	 * we need to m_defrag.  Since the descriptor list is shared
-	 * by all packets, we'll m_defrag long chains so that they
-	 * do not use up the entire list, even if they would fit.
-	 */
-	chainlen = 0;
-	for (m = *m_head; m != NULL; m = m->m_next)
-		chainlen++;
-
 	m = NULL;
-	if ((sc->dc_flags & DC_TX_COALESCE && ((*m_head)->m_next != NULL ||
-	    sc->dc_flags & DC_TX_ALIGN)) || (chainlen > DC_TX_LIST_CNT / 4) ||
-	    (DC_TX_LIST_CNT - (chainlen + sc->dc_cdata.dc_tx_cnt) <=
-	    DC_TX_LIST_RSVD)) {
+	defragged = 0;
+	if (sc->dc_flags & DC_TX_COALESCE &&
+	    ((*m_head)->m_next != NULL || sc->dc_flags & DC_TX_ALIGN)) {
 		m = m_defrag(*m_head, M_DONTWAIT);
+		defragged = 1;
+	} else {
+		/*
+		 * Count the number of frags in this chain to see if we
+		 * need to m_collapse.  Since the descriptor list is shared
+		 * by all packets, we'll m_collapse long chains so that they
+		 * do not use up the entire list, even if they would fit.
+		 */
+		i = 0;
+		for (m = *m_head; m != NULL; m = m->m_next)
+			i++;
+		if (i > DC_TX_LIST_CNT / 4 ||
+		    DC_TX_LIST_CNT - i + sc->dc_cdata.dc_tx_cnt <=
+		    DC_TX_LIST_RSVD) {
+			m = m_collapse(*m_head, M_DONTWAIT, DC_MAXFRAGS);
+			defragged = 1;
+		}
+	}
+	if (defragged != 0) {
 		if (m == NULL) {
 			m_freem(*m_head);
 			*m_head = NULL;
@@ -3161,15 +3179,16 @@ dc_encap(struct dc_softc *sc, struct mbuf **m_head)
 		}
 		*m_head = m;
 	}
+
 	idx = sc->dc_cdata.dc_tx_prod;
 	error = bus_dmamap_load_mbuf_sg(sc->dc_mtag,
 	    sc->dc_cdata.dc_tx_map[idx], *m_head, segs, &nseg, 0);
 	if (error == EFBIG) {
-		m = m_defrag(*m_head, M_DONTWAIT);
-		if (m == NULL) {
+		if (defragged != 0 || (m = m_collapse(*m_head, M_DONTWAIT,
+		    DC_MAXFRAGS)) == NULL) {
 			m_freem(*m_head);
 			*m_head = NULL;
-			return (ENOBUFS);
+			return (defragged != 0 ? error : ENOBUFS);
 		}
 		*m_head = m;
 		error = bus_dmamap_load_mbuf_sg(sc->dc_mtag,

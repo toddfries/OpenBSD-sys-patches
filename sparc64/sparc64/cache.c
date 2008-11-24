@@ -67,20 +67,20 @@
  *
  *	from: @(#)cache.c	8.2 (Berkeley) 10/30/93
  *	from: NetBSD: cache.c,v 1.5 2000/12/06 01:47:50 mrg Exp
- *
- * $FreeBSD: src/sys/sparc64/sparc64/cache.c,v 1.20 2005/01/07 02:29:23 imp Exp $
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/cache.c,v 1.22 2008/09/02 21:13:54 marius Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/pcpu.h>
 
 #include <dev/ofw/openfirm.h>
 
 #include <machine/cache.h>
 #include <machine/tlb.h>
 #include <machine/ver.h>
-
-struct cacheinfo cache;
 
 cache_enable_t *cache_enable;
 cache_flush_t *cache_flush;
@@ -93,33 +93,41 @@ icache_page_inval_t *icache_page_inval;
  * Fill in the cache parameters using the cpu node.
  */
 void
-cache_init(phandle_t node)
+cache_init(struct pcpu *pcpu)
 {
 	u_long set;
 
-	if (OF_GET(node, "icache-size", cache.ic_size) == -1 ||
-	    OF_GET(node, "icache-line-size", cache.ic_linesize) == -1 ||
-	    OF_GET(node, "icache-associativity", cache.ic_assoc) == -1 ||
-	    OF_GET(node, "dcache-size", cache.dc_size) == -1 ||
-	    OF_GET(node, "dcache-line-size", cache.dc_linesize) == -1 ||
-	    OF_GET(node, "dcache-associativity", cache.dc_assoc) == -1 ||
-	    OF_GET(node, "ecache-size", cache.ec_size) == -1 ||
-	    OF_GET(node, "ecache-line-size", cache.ec_linesize) == -1 ||
-	    OF_GET(node, "ecache-associativity", cache.ec_assoc) == -1)
+	if (OF_GET(pcpu->pc_node, "icache-size",
+	    pcpu->pc_cache.ic_size) == -1 ||
+	    OF_GET(pcpu->pc_node, "icache-line-size",
+	    pcpu->pc_cache.ic_linesize) == -1 ||
+	    OF_GET(pcpu->pc_node, "icache-associativity",
+	    pcpu->pc_cache.ic_assoc) == -1 ||
+	    OF_GET(pcpu->pc_node, "dcache-size",
+	    pcpu->pc_cache.dc_size) == -1 ||
+	    OF_GET(pcpu->pc_node, "dcache-line-size",
+	    pcpu->pc_cache.dc_linesize) == -1 ||
+	    OF_GET(pcpu->pc_node, "dcache-associativity",
+	    pcpu->pc_cache.dc_assoc) == -1 ||
+	    OF_GET(pcpu->pc_node, "ecache-size",
+	    pcpu->pc_cache.ec_size) == -1 ||
+	    OF_GET(pcpu->pc_node, "ecache-line-size",
+	    pcpu->pc_cache.ec_linesize) == -1 ||
+	    OF_GET(pcpu->pc_node, "ecache-associativity",
+	    pcpu->pc_cache.ec_assoc) == -1)
 		panic("cache_init: could not retrieve cache parameters");
 
-	cache.ic_set = cache.ic_size / cache.ic_assoc;
-	cache.ic_l2set = ffs(cache.ic_set) - 1;
-	if ((cache.ic_set & ~(1UL << cache.ic_l2set)) != 0)
+	set = pcpu->pc_cache.ic_size / pcpu->pc_cache.ic_assoc;
+	if ((set & ~(1UL << (ffs(set) - 1))) != 0)
 		panic("cache_init: I$ set size not a power of 2");
-	cache.dc_l2size = ffs(cache.dc_size) - 1;
-	if ((cache.dc_size & ~(1UL << cache.dc_l2size)) != 0)
+	if ((pcpu->pc_cache.dc_size &
+	    ~(1UL << (ffs(pcpu->pc_cache.dc_size) - 1))) != 0)
 		panic("cache_init: D$ size not a power of 2");
-	if (((cache.dc_size / cache.dc_assoc) / PAGE_SIZE) != DCACHE_COLORS)
+	if (((pcpu->pc_cache.dc_size / pcpu->pc_cache.dc_assoc) /
+	    PAGE_SIZE) != DCACHE_COLORS)
 		panic("cache_init: too many D$ colors");
-	set = cache.ec_size / cache.ec_assoc;
-	cache.ec_l2set = ffs(set) - 1;
-	if ((set & ~(1UL << cache.ec_l2set)) != 0)
+	set = pcpu->pc_cache.ec_size / pcpu->pc_cache.ec_assoc;
+	if ((set & ~(1UL << (ffs(set) - 1))) != 0)
 		panic("cache_init: E$ set size not a power of 2");
 
 	if (cpu_impl >= CPU_IMPL_ULTRASPARCIII) {
@@ -127,12 +135,14 @@ cache_init(phandle_t node)
 		cache_flush = cheetah_cache_flush;
 		dcache_page_inval = cheetah_dcache_page_inval;
 		icache_page_inval = cheetah_icache_page_inval;
+		tlb_flush_nonlocked = cheetah_tlb_flush_nonlocked;
 		tlb_flush_user = cheetah_tlb_flush_user;
 	} else {
 		cache_enable = spitfire_cache_enable;
 		cache_flush = spitfire_cache_flush;
 		dcache_page_inval = spitfire_dcache_page_inval;
 		icache_page_inval = spitfire_icache_page_inval;
+		tlb_flush_nonlocked = spitfire_tlb_flush_nonlocked;
 		tlb_flush_user = spitfire_tlb_flush_user;
 	}
 }

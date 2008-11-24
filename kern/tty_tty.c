@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/tty_tty.c,v 1.60 2007/07/03 17:46:37 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/tty_tty.c,v 1.62 2008/06/03 12:38:00 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -43,7 +43,6 @@ static struct cdevsw ctty_cdevsw = {
 	.d_version =	D_VERSION,
 	.d_open =	cttyopen,
 	.d_name =	"ctty",
-	.d_flags =	D_TTY | D_NEEDGIANT,
 };
 
 static struct cdev *ctty;
@@ -65,7 +64,6 @@ ctty_clone(void *arg, struct ucred *cred, char *name, int namelen,
 	if (strcmp(name, "tty"))
 		return;
 	sx_sunlock(&clone_drain_lock);
-	mtx_lock(&Giant);
 	sx_slock(&proctree_lock);
 	sx_slock(&clone_drain_lock);
 	dev_lock();
@@ -82,7 +80,6 @@ ctty_clone(void *arg, struct ucred *cred, char *name, int namelen,
 	dev_refl(*dev);
 	dev_unlock();
 	sx_sunlock(&proctree_lock);
-	mtx_unlock(&Giant);
 }
 
 static void
@@ -93,4 +90,4 @@ ctty_drvinit(void *unused)
 	ctty = make_dev(&ctty_cdevsw, 0, 0, 0, 0666, "ctty");
 }
 
-SYSINIT(cttydev,SI_SUB_DRIVERS,SI_ORDER_MIDDLE,ctty_drvinit,NULL)
+SYSINIT(cttydev,SI_SUB_DRIVERS,SI_ORDER_MIDDLE,ctty_drvinit,NULL);

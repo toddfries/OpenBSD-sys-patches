@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  * $Id: ng_btsocket_hci_raw.c,v 1.14 2003/09/14 23:29:06 max Exp $
- * $FreeBSD: src/sys/netgraph/bluetooth/socket/ng_btsocket_hci_raw.c,v 1.23 2006/11/06 13:42:04 rwatson Exp $
+ * $FreeBSD: src/sys/netgraph/bluetooth/socket/ng_btsocket_hci_raw.c,v 1.26 2008/10/23 15:53:51 des Exp $
  */
 
 #include <sys/param.h>
@@ -107,7 +107,6 @@ static struct ng_type typestruct = {
 };
 
 /* Globals */
-extern int					ifqmaxlen;
 static u_int32_t				ng_btsocket_hci_raw_debug_level;
 static u_int32_t				ng_btsocket_hci_raw_ioctl_timeout;
 static node_p					ng_btsocket_hci_raw_node;
@@ -119,6 +118,8 @@ static struct mtx				ng_btsocket_hci_raw_sockets_mtx;
 static u_int32_t				ng_btsocket_hci_raw_token;
 static struct mtx				ng_btsocket_hci_raw_token_mtx;
 static struct ng_btsocket_hci_raw_sec_filter	*ng_btsocket_hci_raw_sec_filter;
+static struct timeval				ng_btsocket_hci_raw_lasttime;
+static int					ng_btsocket_hci_raw_curpps;
  
 /* Sysctl tree */
 SYSCTL_DECL(_net_bluetooth_hci_sockets);
@@ -142,19 +143,23 @@ SYSCTL_INT(_net_bluetooth_hci_sockets_raw, OID_AUTO, queue_drops, CTLFLAG_RD,
 
 /* Debug */
 #define NG_BTSOCKET_HCI_RAW_INFO \
-	if (ng_btsocket_hci_raw_debug_level >= NG_BTSOCKET_INFO_LEVEL) \
+	if (ng_btsocket_hci_raw_debug_level >= NG_BTSOCKET_INFO_LEVEL && \
+	    ppsratecheck(&ng_btsocket_hci_raw_lasttime, &ng_btsocket_hci_raw_curpps, 1)) \
 		printf
 
 #define NG_BTSOCKET_HCI_RAW_WARN \
-	if (ng_btsocket_hci_raw_debug_level >= NG_BTSOCKET_WARN_LEVEL) \
+	if (ng_btsocket_hci_raw_debug_level >= NG_BTSOCKET_WARN_LEVEL && \
+	    ppsratecheck(&ng_btsocket_hci_raw_lasttime, &ng_btsocket_hci_raw_curpps, 1)) \
 		printf
 
 #define NG_BTSOCKET_HCI_RAW_ERR \
-	if (ng_btsocket_hci_raw_debug_level >= NG_BTSOCKET_ERR_LEVEL) \
+	if (ng_btsocket_hci_raw_debug_level >= NG_BTSOCKET_ERR_LEVEL && \
+	    ppsratecheck(&ng_btsocket_hci_raw_lasttime, &ng_btsocket_hci_raw_curpps, 1)) \
 		printf
 
 #define NG_BTSOCKET_HCI_RAW_ALERT \
-	if (ng_btsocket_hci_raw_debug_level >= NG_BTSOCKET_ALERT_LEVEL) \
+	if (ng_btsocket_hci_raw_debug_level >= NG_BTSOCKET_ALERT_LEVEL && \
+	    ppsratecheck(&ng_btsocket_hci_raw_lasttime, &ng_btsocket_hci_raw_curpps, 1)) \
 		printf
 
 /****************************************************************************
@@ -760,7 +765,7 @@ ng_btsocket_hci_raw_init(void)
 	}
 
 	/* Create input queue */
-	NG_BT_ITEMQ_INIT(&ng_btsocket_hci_raw_queue, ifqmaxlen);
+	NG_BT_ITEMQ_INIT(&ng_btsocket_hci_raw_queue, 300);
 	mtx_init(&ng_btsocket_hci_raw_queue_mtx,
 		"btsocks_hci_raw_queue_mtx", NULL, MTX_DEF);
 	TASK_INIT(&ng_btsocket_hci_raw_task, 0,
@@ -778,14 +783,10 @@ ng_btsocket_hci_raw_init(void)
 
 	/* 
 	 * Security filter
-	 * XXX never FREE()ed
+	 * XXX never free()ed
 	 */
-
-	ng_btsocket_hci_raw_sec_filter = NULL;
-
-	MALLOC(ng_btsocket_hci_raw_sec_filter, 
-		struct ng_btsocket_hci_raw_sec_filter *,
-		sizeof(struct ng_btsocket_hci_raw_sec_filter), 
+	ng_btsocket_hci_raw_sec_filter =
+	    malloc(sizeof(struct ng_btsocket_hci_raw_sec_filter), 
 		M_NETGRAPH_BTSOCKET_HCI_RAW, M_NOWAIT|M_ZERO);
 	if (ng_btsocket_hci_raw_sec_filter == NULL) {
 		printf("%s: Could not allocate security filter!\n", __func__);
@@ -909,7 +910,7 @@ ng_btsocket_hci_raw_attach(struct socket *so, int proto, struct thread *td)
 	if (error != 0)
 		return (error);
 
-	MALLOC(pcb, ng_btsocket_hci_raw_pcb_p, sizeof(*pcb), 
+	pcb = malloc(sizeof(*pcb), 
 		M_NETGRAPH_BTSOCKET_HCI_RAW, M_NOWAIT|M_ZERO);
 	if (pcb == NULL)
 		return (ENOMEM);
@@ -1488,7 +1489,7 @@ ng_btsocket_hci_raw_detach(struct socket *so)
 	mtx_destroy(&pcb->pcb_mtx);
 
 	bzero(pcb, sizeof(*pcb));
-	FREE(pcb, M_NETGRAPH_BTSOCKET_HCI_RAW);
+	free(pcb, M_NETGRAPH_BTSOCKET_HCI_RAW);
 
 	so->so_pcb = NULL;
 } /* ng_btsocket_hci_raw_detach */

@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/nfs4client/nfs4_vn_subs.c,v 1.5 2006/11/28 19:33:28 rees Exp $ */
+/* $FreeBSD: src/sys/nfs4client/nfs4_vn_subs.c,v 1.6 2008/10/23 15:53:51 des Exp $ */
 /* $Id: nfs4_vn_subs.c,v 1.9 2003/11/05 14:59:00 rees Exp $ */
 
 /*-
@@ -176,7 +176,7 @@ nfs4_getcookie(struct nfsnode *np, off_t off, int add)
 	dp = LIST_FIRST(&np->n_cookies);
 	if (!dp) {
 		if (add) {
-			MALLOC(dp, struct nfsdmap *, sizeof (struct nfsdmap),
+			dp = malloc(sizeof (struct nfsdmap),
 				M_NFSDIROFF, M_WAITOK);
 			dp->ndm_eocookie = 0;
 			LIST_INSERT_HEAD(&np->n_cookies, dp, ndm_list);
@@ -191,7 +191,7 @@ nfs4_getcookie(struct nfsnode *np, off_t off, int add)
 				return (NULL);
 			dp = LIST_NEXT(dp, ndm_list);
 		} else if (add) {
-			MALLOC(dp2, struct nfsdmap *, sizeof (struct nfsdmap),
+			dp2 = malloc(sizeof (struct nfsdmap),
 				M_NFSDIROFF, M_WAITOK);
 			dp2->ndm_eocookie = 0;
 			LIST_INSERT_AFTER(dp, dp2, ndm_list);

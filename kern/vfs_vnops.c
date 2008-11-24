@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/vfs_vnops.c,v 1.253 2007/10/24 19:03:56 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/vfs_vnops.c,v 1.273 2008/11/16 21:56:29 kib Exp $");
 
 #include "opt_mac.h"
 
@@ -66,6 +66,7 @@ __FBSDID("$FreeBSD: src/sys/kern/vfs_vnops.c,v 1.253 2007/10/24 19:03:56 rwatson
 
 static fo_rdwr_t	vn_read;
 static fo_rdwr_t	vn_write;
+static fo_truncate_t	vn_truncate;
 static fo_ioctl_t	vn_ioctl;
 static fo_poll_t	vn_poll;
 static fo_kqfilter_t	vn_kqfilter;
@@ -75,6 +76,7 @@ static fo_close_t	vn_closefile;
 struct 	fileops vnops = {
 	.fo_read = vn_read,
 	.fo_write = vn_write,
+	.fo_truncate = vn_truncate,
 	.fo_ioctl = vn_ioctl,
 	.fo_poll = vn_poll,
 	.fo_kqfilter = vn_kqfilter,
@@ -113,7 +115,8 @@ vn_open_cred(ndp, flagp, cmode, cred, fp)
 	struct thread *td = ndp->ni_cnd.cn_thread;
 	struct vattr vat;
 	struct vattr *vap = &vat;
-	int mode, fmode, error;
+	int fmode, error;
+	accmode_t accmode;
 	int vfslocked, mpsafe;
 
 	mpsafe = ndp->ni_cnd.cn_flags & MPSAFE;
@@ -200,31 +203,33 @@ restart:
 		error = EOPNOTSUPP;
 		goto bad;
 	}
-	mode = 0;
+	accmode = 0;
 	if (fmode & (FWRITE | O_TRUNC)) {
 		if (vp->v_type == VDIR) {
 			error = EISDIR;
 			goto bad;
 		}
-		mode |= VWRITE;
+		accmode |= VWRITE;
 	}
 	if (fmode & FREAD)
-		mode |= VREAD;
+		accmode |= VREAD;
+	if (fmode & FEXEC)
+		accmode |= VEXEC;
 	if (fmode & O_APPEND)
-		mode |= VAPPEND;
+		accmode |= VAPPEND;
 #ifdef MAC
-	error = mac_vnode_check_open(cred, vp, mode);
+	error = mac_vnode_check_open(cred, vp, accmode);
 	if (error)
 		goto bad;
 #endif
 	if ((fmode & O_CREAT) == 0) {
-		if (mode & VWRITE) {
+		if (accmode & VWRITE) {
 			error = vn_writechk(vp);
 			if (error)
 				goto bad;
 		}
-		if (mode) {
-		        error = VOP_ACCESS(vp, mode, cred, td);
+		if (accmode) {
+		        error = VOP_ACCESS(vp, accmode, cred, td);
 			if (error)
 				goto bad;
 		}
@@ -285,7 +290,7 @@ vn_close(vp, flags, file_cred, td)
 	VFS_ASSERT_GIANT(vp->v_mount);
 
 	vn_start_write(vp, &mp, V_WAIT);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	if (flags & FWRITE) {
 		VNASSERT(vp->v_writecount > 0, vp, 
 		    ("vn_close: negative writecount"));
@@ -298,35 +303,42 @@ vn_close(vp, flags, file_cred, td)
 }
 
 /*
- * Sequential heuristic - detect sequential operation
+ * Heuristic to detect sequential operation.
  */
-static __inline
-int
+static int
 sequential_heuristic(struct uio *uio, struct file *fp)
 {
 
+	/*
+	 * Offset 0 is handled specially.  open() sets f_seqcount to 1 so
+	 * that the first I/O is normally considered to be slightly
+	 * sequential.  Seeking to offset 0 doesn't change sequentiality
+	 * unless previous seeks have reduced f_seqcount to 0, in which
+	 * case offset 0 is not special.
+	 */
 	if ((uio->uio_offset == 0 && fp->f_seqcount > 0) ||
 	    uio->uio_offset == fp->f_nextoff) {
 		/*
-		 * XXX we assume that the filesystem block size is
-		 * the default.  Not true, but still gives us a pretty
-		 * good indicator of how sequential the read operations
-		 * are.
+		 * f_seqcount is in units of fixed-size blocks so that it
+		 * depends mainly on the amount of sequential I/O and not
+		 * much on the number of sequential I/O's.  The fixed size
+		 * of 16384 is hard-coded here since it is (not quite) just
+		 * a magic size that works well here.  This size is more
+		 * closely related to the best I/O size for real disks than
+		 * to any block size used by software.
 		 */
-		fp->f_seqcount += (uio->uio_resid + BKVASIZE - 1) / BKVASIZE;
+		fp->f_seqcount += howmany(uio->uio_resid, 16384);
 		if (fp->f_seqcount > IO_SEQMAX)
 			fp->f_seqcount = IO_SEQMAX;
-		return(fp->f_seqcount << IO_SEQSHIFT);
+		return (fp->f_seqcount << IO_SEQSHIFT);
 	}
 
-	/*
-	 * Not sequential, quick draw-down of seqcount
-	 */
+	/* Not sequential.  Quickly draw-down sequentiality. */
 	if (fp->f_seqcount > 1)
 		fp->f_seqcount = 1;
 	else
 		fp->f_seqcount = 0;
-	return(0);
+	return (0);
 }
 
 /*
@@ -362,14 +374,14 @@ vn_rdwr(rw, vp, base, len, offset, segflg, ioflg, active_cred, file_cred,
 			    (error = vn_start_write(vp, &mp, V_WAIT | PCATCH))
 			    != 0)
 				return (error);
-			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 		} else {
 			/*
 			 * XXX This should be LK_SHARED but I don't trust VFS
 			 * enough to leave it like that until it has been
 			 * reviewed further.
 			 */
-			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 		}
 
 	}
@@ -412,7 +424,7 @@ vn_rdwr(rw, vp, base, len, offset, segflg, ioflg, active_cred, file_cred,
 	if ((ioflg & IO_NODELOCKED) == 0) {
 		if (rw == UIO_WRITE && vp->v_type != VCHR)
 			vn_finished_write(mp);
-		VOP_UNLOCK(vp, 0, td);
+		VOP_UNLOCK(vp, 0);
 	}
 	return (error);
 }
@@ -488,10 +500,12 @@ vn_read(fp, uio, active_cred, flags, td)
 {
 	struct vnode *vp;
 	int error, ioflag;
+	struct mtx *mtxp;
 	int vfslocked;
 
 	KASSERT(uio->uio_td == td, ("uio_td %p is not td %p",
 	    uio->uio_td, td));
+	mtxp = NULL;
 	vp = fp->f_vnode;
 	ioflag = 0;
 	if (fp->f_flag & FNONBLOCK)
@@ -505,17 +519,19 @@ vn_read(fp, uio, active_cred, flags, td)
 	 * It is now protected by the FOFFSET_LOCKED flag.
 	 */
 	if ((flags & FOF_OFFSET) == 0) {
-		FILE_LOCK(fp);
+		mtxp = mtx_pool_find(mtxpool_sleep, fp);
+		mtx_lock(mtxp);
 		while(fp->f_vnread_flags & FOFFSET_LOCKED) {
 			fp->f_vnread_flags |= FOFFSET_LOCK_WAITING;
-			msleep(&fp->f_vnread_flags,fp->f_mtxp,PUSER -1,"vnread offlock",0);
+			msleep(&fp->f_vnread_flags, mtxp, PUSER -1,
+			    "vnread offlock", 0);
 		}
 		fp->f_vnread_flags |= FOFFSET_LOCKED;
-		FILE_UNLOCK(fp);
-		vn_lock(vp, LK_SHARED | LK_RETRY, td);
+		mtx_unlock(mtxp);
+		vn_lock(vp, LK_SHARED | LK_RETRY);
 		uio->uio_offset = fp->f_offset;
 	} else
-		vn_lock(vp, LK_SHARED | LK_RETRY, td);
+		vn_lock(vp, LK_SHARED | LK_RETRY);
 
 	ioflag |= sequential_heuristic(uio, fp);
 
@@ -526,14 +542,14 @@ vn_read(fp, uio, active_cred, flags, td)
 		error = VOP_READ(vp, uio, ioflag, fp->f_cred);
 	if ((flags & FOF_OFFSET) == 0) {
 		fp->f_offset = uio->uio_offset;
-		FILE_LOCK(fp);
+		mtx_lock(mtxp);
 		if (fp->f_vnread_flags & FOFFSET_LOCK_WAITING)
 			wakeup(&fp->f_vnread_flags);
 		fp->f_vnread_flags = 0;
-		FILE_UNLOCK(fp);
+		mtx_unlock(mtxp);
 	}
 	fp->f_nextoff = uio->uio_offset;
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	VFS_UNLOCK_GIANT(vfslocked);
 	return (error);
 }
@@ -575,7 +591,7 @@ vn_write(fp, uio, active_cred, flags, td)
 	    (error = vn_start_write(vp, &mp, V_WAIT | PCATCH)) != 0)
 		goto unlock;
 	VOP_LEASE(vp, td, fp->f_cred, LEASE_WRITE);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	if ((flags & FOF_OFFSET) == 0)
 		uio->uio_offset = fp->f_offset;
 	ioflag |= sequential_heuristic(uio, fp);
@@ -587,10 +603,57 @@ vn_write(fp, uio, active_cred, flags, td)
 	if ((flags & FOF_OFFSET) == 0)
 		fp->f_offset = uio->uio_offset;
 	fp->f_nextoff = uio->uio_offset;
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	if (vp->v_type != VCHR)
 		vn_finished_write(mp);
 unlock:
+	VFS_UNLOCK_GIANT(vfslocked);
+	return (error);
+}
+
+/*
+ * File table truncate routine.
+ */
+static int
+vn_truncate(fp, length, active_cred, td)
+	struct file *fp;
+	off_t length;
+	struct ucred *active_cred;
+	struct thread *td;
+{
+	struct vattr vattr;
+	struct mount *mp;
+	struct vnode *vp;
+	int vfslocked;
+	int error;
+
+	vp = fp->f_vnode;
+	vfslocked = VFS_LOCK_GIANT(vp->v_mount);
+	error = vn_start_write(vp, &mp, V_WAIT | PCATCH);
+	if (error) {
+		VFS_UNLOCK_GIANT(vfslocked);
+		return (error);
+	}
+	VOP_LEASE(vp, td, active_cred, LEASE_WRITE);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+	if (vp->v_type == VDIR) {
+		error = EISDIR;
+		goto out;
+	}
+#ifdef MAC
+	error = mac_vnode_check_write(active_cred, fp->f_cred, vp);
+	if (error)
+		goto out;
+#endif
+	error = vn_writechk(vp);
+	if (error == 0) {
+		VATTR_NULL(&vattr);
+		vattr.va_size = length;
+		error = VOP_SETATTR(vp, &vattr, fp->f_cred);
+	}
+out:
+	VOP_UNLOCK(vp, 0);
+	vn_finished_write(mp);
 	VFS_UNLOCK_GIANT(vfslocked);
 	return (error);
 }
@@ -610,9 +673,9 @@ vn_statfile(fp, sb, active_cred, td)
 	int error;
 
 	vfslocked = VFS_LOCK_GIANT(vp->v_mount);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_SHARED | LK_RETRY);
 	error = vn_stat(vp, sb, active_cred, fp->f_cred, td);
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	VFS_UNLOCK_GIANT(vfslocked);
 
 	return (error);
@@ -641,7 +704,18 @@ vn_stat(vp, sb, active_cred, file_cred, td)
 #endif
 
 	vap = &vattr;
-	error = VOP_GETATTR(vp, vap, active_cred, td);
+
+	/*
+	 * Initialize defaults for new and unusual fields, so that file
+	 * systems which don't support these fields don't need to know
+	 * about them.
+	 */
+	vap->va_birthtime.tv_sec = -1;
+	vap->va_birthtime.tv_nsec = 0;
+	vap->va_fsid = VNOVAL;
+	vap->va_rdev = NODEV;
+
+	error = VOP_GETATTR(vp, vap, active_cred);
 	if (error)
 		return (error);
 
@@ -674,11 +748,6 @@ vn_stat(vp, sb, active_cred, file_cred, td)
 		break;
 	case VLNK:
 		mode |= S_IFLNK;
-		/* This is a cosmetic change, symlinks do not have a mode. */
-		if (vp->v_mount->mnt_flag & MNT_NOSYMFOLLOW)
-			sb->st_mode &= ~ACCESSPERMS;	/* 0000 */
-		else
-			sb->st_mode |= ACCESSPERMS;	/* 0777 */
 		break;
 	case VSOCK:
 		mode |= S_IFSOCK;
@@ -745,9 +814,9 @@ vn_ioctl(fp, com, data, active_cred, td)
 	case VREG:
 	case VDIR:
 		if (com == FIONREAD) {
-			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
-			error = VOP_GETATTR(vp, &vattr, active_cred, td);
-			VOP_UNLOCK(vp, 0, td);
+			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+			error = VOP_GETATTR(vp, &vattr, active_cred);
+			VOP_UNLOCK(vp, 0);
 			if (!error)
 				*(int *)data = vattr.va_size - fp->f_offset;
 		}
@@ -782,9 +851,9 @@ vn_poll(fp, events, active_cred, td)
 	vp = fp->f_vnode;
 	vfslocked = VFS_LOCK_GIANT(vp->v_mount);
 #ifdef MAC
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	error = mac_vnode_check_poll(active_cred, fp->f_cred, vp);
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	if (!error)
 #endif
 
@@ -794,35 +863,23 @@ vn_poll(fp, events, active_cred, td)
 }
 
 /*
- * Check that the vnode is still valid, and if so
- * acquire requested lock.
+ * Acquire the requested lock and then check for validity.  LK_RETRY
+ * permits vn_lock to return doomed vnodes.
  */
 int
-_vn_lock(struct vnode *vp, int flags, struct thread *td, char *file, int line)
+_vn_lock(struct vnode *vp, int flags, char *file, int line)
 {
 	int error;
 
+	VNASSERT((flags & LK_TYPE_MASK) != 0, vp,
+	    ("vn_lock called with no locktype."));
 	do {
-		if ((flags & LK_INTERLOCK) == 0)
-			VI_LOCK(vp);
-		if ((flags & LK_NOWAIT || (flags & LK_TYPE_MASK) == 0) &&
-		    vp->v_iflag & VI_DOOMED) {
-			VI_UNLOCK(vp);
-			return (ENOENT);
-		}
-		/*
-		 * Just polling to check validity.
-		 */
-		if ((flags & LK_TYPE_MASK) == 0) {
-			VI_UNLOCK(vp);
-			return (0);
-		}
-		/*
-		 * lockmgr drops interlock before it will return for
-		 * any reason.  So force the code above to relock it.
-		 */
-		error = VOP_LOCK1(vp, flags | LK_INTERLOCK, td, file, line);
-		flags &= ~LK_INTERLOCK;
+#ifdef DEBUG_VFS_LOCKS
+		KASSERT(vp->v_holdcnt != 0,
+		    ("vn_lock %p: zero hold count", vp));
+#endif
+		error = VOP_LOCK1(vp, flags, file, line);
+		flags &= ~LK_INTERLOCK;	/* Interlock is always dropped. */
 		KASSERT((flags & LK_RETRY) == 0 || error == 0,
 		    ("LK_RETRY set with incompatible flags %d\n", flags));
 		/*
@@ -831,7 +888,7 @@ _vn_lock(struct vnode *vp, int flags, struct thread *td, char *file, int line)
 		 */
 		if (error == 0 && vp->v_iflag & VI_DOOMED &&
 		    (flags & LK_RETRY) == 0) {
-			VOP_UNLOCK(vp, 0, td);
+			VOP_UNLOCK(vp, 0);
 			error = ENOENT;
 			break;
 		}
@@ -900,21 +957,33 @@ vn_start_write(vp, mpp, flags)
 	}
 	if ((mp = *mpp) == NULL)
 		return (0);
+
+	/*
+	 * VOP_GETWRITEMOUNT() returns with the mp refcount held through
+	 * a vfs_ref().
+	 * As long as a vnode is not provided we need to acquire a
+	 * refcount for the provided mountpoint too, in order to
+	 * emulate a vfs_ref().
+	 */
 	MNT_ILOCK(mp);
 	if (vp == NULL)
 		MNT_REF(mp);
+
 	/*
 	 * Check on status of suspension.
 	 */
-	while ((mp->mnt_kern_flag & MNTK_SUSPEND) != 0) {
-		if (flags & V_NOWAIT) {
-			error = EWOULDBLOCK;
-			goto unlock;
+	if ((curthread->td_pflags & TDP_IGNSUSP) == 0 ||
+	    mp->mnt_susp_owner != curthread) {
+		while ((mp->mnt_kern_flag & MNTK_SUSPEND) != 0) {
+			if (flags & V_NOWAIT) {
+				error = EWOULDBLOCK;
+				goto unlock;
+			}
+			error = msleep(&mp->mnt_flag, MNT_MTX(mp),
+			    (PUSER - 1) | (flags & PCATCH), "suspfs", 0);
+			if (error)
+				goto unlock;
 		}
-		error = msleep(&mp->mnt_flag, MNT_MTX(mp), 
-		    (PUSER - 1) | (flags & PCATCH), "suspfs", 0);
-		if (error)
-			goto unlock;
 	}
 	if (flags & V_XSLEEP)
 		goto unlock;
@@ -922,56 +991,6 @@ vn_start_write(vp, mpp, flags)
 unlock:
 	MNT_REL(mp);
 	MNT_IUNLOCK(mp);
-	return (error);
-}
-
-/*
- * Secondary suspension. Used by operations such as vop_inactive
- * routines that are needed by the higher level functions. These
- * are allowed to proceed until all the higher level functions have
- * completed (indicated by mnt_writeopcount dropping to zero). At that
- * time, these operations are halted until the suspension is over.
- */
-int
-vn_write_suspend_wait(vp, mp, flags)
-	struct vnode *vp;
-	struct mount *mp;
-	int flags;
-{
-	int error;
-
-	if (vp != NULL) {
-		if ((error = VOP_GETWRITEMOUNT(vp, &mp)) != 0) {
-			if (error != EOPNOTSUPP)
-				return (error);
-			return (0);
-		}
-	}
-	/*
-	 * If we are not suspended or have not yet reached suspended
-	 * mode, then let the operation proceed.
-	 */
-	if (mp == NULL)
-		return (0);
-	MNT_ILOCK(mp);
-	if (vp == NULL)
-		MNT_REF(mp);
-	if ((mp->mnt_kern_flag & MNTK_SUSPENDED) == 0) {
-		MNT_REL(mp);
-		MNT_IUNLOCK(mp);
-		return (0);
-	}
-	if (flags & V_NOWAIT) {
-		MNT_REL(mp);
-		MNT_IUNLOCK(mp);
-		return (EWOULDBLOCK);
-	}
-	/*
-	 * Wait for the suspension to finish.
-	 */
-	error = msleep(&mp->mnt_flag, MNT_MTX(mp),
-	    (PUSER - 1) | (flags & PCATCH) | PDROP, "suspfs", 0);
-	vfs_rel(mp);
 	return (error);
 }
 
@@ -1006,6 +1025,14 @@ vn_start_secondary_write(vp, mpp, flags)
 	 */
 	if ((mp = *mpp) == NULL)
 		return (0);
+
+	/*
+	 * VOP_GETWRITEMOUNT() returns with the mp refcount held through
+	 * a vfs_ref().
+	 * As long as a vnode is not provided we need to acquire a
+	 * refcount for the provided mountpoint too, in order to
+	 * emulate a vfs_ref().
+	 */
 	MNT_ILOCK(mp);
 	if (vp == NULL)
 		MNT_REF(mp);
@@ -1088,11 +1115,14 @@ vfs_write_suspend(mp)
 	int error;
 
 	MNT_ILOCK(mp);
-	if (mp->mnt_kern_flag & MNTK_SUSPEND) {
+	if (mp->mnt_susp_owner == curthread) {
 		MNT_IUNLOCK(mp);
-		return (0);
+		return (EALREADY);
 	}
+	while (mp->mnt_kern_flag & MNTK_SUSPEND)
+		msleep(&mp->mnt_flag, MNT_MTX(mp), PUSER - 1, "wsuspfs", 0);
 	mp->mnt_kern_flag |= MNTK_SUSPEND;
+	mp->mnt_susp_owner = curthread;
 	if (mp->mnt_writeopcount > 0)
 		(void) msleep(&mp->mnt_writeopcount, 
 		    MNT_MTX(mp), (PUSER - 1)|PDROP, "suspwt", 0);
@@ -1113,12 +1143,17 @@ vfs_write_resume(mp)
 
 	MNT_ILOCK(mp);
 	if ((mp->mnt_kern_flag & MNTK_SUSPEND) != 0) {
+		KASSERT(mp->mnt_susp_owner == curthread, ("mnt_susp_owner"));
 		mp->mnt_kern_flag &= ~(MNTK_SUSPEND | MNTK_SUSPEND2 |
 				       MNTK_SUSPENDED);
+		mp->mnt_susp_owner = NULL;
 		wakeup(&mp->mnt_writeopcount);
 		wakeup(&mp->mnt_flag);
-	}
-	MNT_IUNLOCK(mp);
+		curthread->td_pflags &= ~TDP_IGNSUSP;
+		MNT_IUNLOCK(mp);
+		VFS_SUSP_CLEAN(mp);
+	} else
+		MNT_IUNLOCK(mp);
 }
 
 /*
@@ -1162,7 +1197,7 @@ vn_extattr_get(struct vnode *vp, int ioflg, int attrnamespace,
 	auio.uio_resid = *buflen;
 
 	if ((ioflg & IO_NODELOCKED) == 0)
-		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 
 	ASSERT_VOP_LOCKED(vp, "IO_NODELOCKED with no vp lock held");
 
@@ -1171,7 +1206,7 @@ vn_extattr_get(struct vnode *vp, int ioflg, int attrnamespace,
 	    td);
 
 	if ((ioflg & IO_NODELOCKED) == 0)
-		VOP_UNLOCK(vp, 0, td);
+		VOP_UNLOCK(vp, 0);
 
 	if (error == 0) {
 		*buflen = *buflen - auio.uio_resid;
@@ -1206,7 +1241,7 @@ vn_extattr_set(struct vnode *vp, int ioflg, int attrnamespace,
 	if ((ioflg & IO_NODELOCKED) == 0) {
 		if ((error = vn_start_write(vp, &mp, V_WAIT)) != 0)
 			return (error);
-		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	}
 
 	ASSERT_VOP_LOCKED(vp, "IO_NODELOCKED with no vp lock held");
@@ -1216,7 +1251,7 @@ vn_extattr_set(struct vnode *vp, int ioflg, int attrnamespace,
 
 	if ((ioflg & IO_NODELOCKED) == 0) {
 		vn_finished_write(mp);
-		VOP_UNLOCK(vp, 0, td);
+		VOP_UNLOCK(vp, 0);
 	}
 
 	return (error);
@@ -1232,7 +1267,7 @@ vn_extattr_rm(struct vnode *vp, int ioflg, int attrnamespace,
 	if ((ioflg & IO_NODELOCKED) == 0) {
 		if ((error = vn_start_write(vp, &mp, V_WAIT)) != 0)
 			return (error);
-		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	}
 
 	ASSERT_VOP_LOCKED(vp, "IO_NODELOCKED with no vp lock held");
@@ -1245,7 +1280,7 @@ vn_extattr_rm(struct vnode *vp, int ioflg, int attrnamespace,
 
 	if ((ioflg & IO_NODELOCKED) == 0) {
 		vn_finished_write(mp);
-		VOP_UNLOCK(vp, 0, td);
+		VOP_UNLOCK(vp, 0);
 	}
 
 	return (error);

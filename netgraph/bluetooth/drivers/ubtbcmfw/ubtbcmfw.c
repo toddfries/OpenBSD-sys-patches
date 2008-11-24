@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  * $Id: ubtbcmfw.c,v 1.3 2003/10/10 19:15:08 max Exp $
- * $FreeBSD: src/sys/netgraph/bluetooth/drivers/ubtbcmfw/ubtbcmfw.c,v 1.18 2007/06/23 04:34:38 imp Exp $
+ * $FreeBSD: src/sys/netgraph/bluetooth/drivers/ubtbcmfw/ubtbcmfw.c,v 1.19 2008/09/27 08:51:18 ed Exp $
  */
 
 #include <sys/param.h>
@@ -83,8 +83,8 @@ typedef struct ubtbcmfw_softc	*ubtbcmfw_softc_p;
  * Device methods
  */
 
-#define UBTBCMFW_UNIT(n)	((minor(n) >> 4) & 0xf)
-#define UBTBCMFW_ENDPOINT(n)	(minor(n) & 0xf)
+#define UBTBCMFW_UNIT(n)	((dev2unit(n) >> 4) & 0xf)
+#define UBTBCMFW_ENDPOINT(n)	(dev2unit(n) & 0xf)
 #define UBTBCMFW_MINOR(u, e)	(((u) << 4) | (e))
 #define UBTBCMFW_BSIZE		1024
 

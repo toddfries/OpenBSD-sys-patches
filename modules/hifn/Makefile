@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/hifn/Makefile,v 1.6 2007/03/21 03:42:50 sam Exp $
+# $FreeBSD: src/sys/modules/hifn/Makefile,v 1.7 2008/09/01 23:59:00 imp Exp $
 
 .PATH:	${.CURDIR}/../../dev/hifn
 KMOD	= hifn
@@ -8,7 +8,7 @@ SRCS   += opt_bus.h cryptodev_if.h
 
 .if !defined(KERNBUILDDIR)
 opt_hifn.h:
-	echo "#define HIFN_DEBUG 1" > opt_hifn.h
+	echo "#define HIFN_DEBUG 1" > ${.TARGET}
 .endif
 
 .include <bsd.kmod.mk>

@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/sys_socket.c,v 1.74 2007/10/24 19:03:55 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/sys_socket.c,v 1.77 2008/10/07 07:10:28 rwatson Exp $");
 
 #include "opt_mac.h"
 
@@ -59,6 +59,7 @@ __FBSDID("$FreeBSD: src/sys/kern/sys_socket.c,v 1.74 2007/10/24 19:03:55 rwatson
 struct fileops	socketops = {
 	.fo_read = soo_read,
 	.fo_write = soo_write,
+	.fo_truncate = soo_truncate,
 	.fo_ioctl = soo_ioctl,
 	.fo_poll = soo_poll,
 	.fo_kqfilter = soo_kqfilter,
@@ -107,6 +108,14 @@ soo_write(struct file *fp, struct uio *uio, struct ucred *active_cred,
 		PROC_UNLOCK(uio->uio_td->td_proc);
 	}
 	return (error);
+}
+
+int
+soo_truncate(struct file *fp, off_t length, struct ucred *active_cred,
+    struct thread *td)
+{
+
+	return (EINVAL);
 }
 
 int
@@ -190,7 +199,7 @@ soo_ioctl(struct file *fp, u_long cmd, void *data, struct ucred *active_cred,
 		if (IOCGROUP(cmd) == 'i')
 			error = ifioctl(so, cmd, data, td);
 		else if (IOCGROUP(cmd) == 'r')
-			error = rtioctl(cmd, data);
+			error = rtioctl_fib(cmd, data, so->so_fibnum);
 		else
 			error = ((*so->so_proto->pr_usrreqs->pru_control)
 			    (so, cmd, data, 0, td));
@@ -237,17 +246,16 @@ soo_stat(struct file *fp, struct stat *ub, struct ucred *active_cred,
 	/*
 	 * If SBS_CANTRCVMORE is set, but there's still data left in the
 	 * receive buffer, the socket is still readable.
-	 *
-	 * XXXRW: perhaps should lock socket buffer so st_size result is
-	 * consistent.
 	 */
-	/* Unlocked read. */
+	SOCKBUF_LOCK(&so->so_rcv);
 	if ((so->so_rcv.sb_state & SBS_CANTRCVMORE) == 0 ||
 	    so->so_rcv.sb_cc != 0)
 		ub->st_mode |= S_IRUSR | S_IRGRP | S_IROTH;
+	ub->st_size = so->so_rcv.sb_cc - so->so_rcv.sb_ctl;
+	SOCKBUF_UNLOCK(&so->so_rcv);
+	/* Unlocked read. */
 	if ((so->so_snd.sb_state & SBS_CANTSENDMORE) == 0)
 		ub->st_mode |= S_IWUSR | S_IWGRP | S_IWOTH;
-	ub->st_size = so->so_rcv.sb_cc - so->so_rcv.sb_ctl;
 	ub->st_uid = so->so_cred->cr_uid;
 	ub->st_gid = so->so_cred->cr_gid;
 	return (*so->so_proto->pr_usrreqs->pru_sense)(so, ub);

@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/identcpu.c,v 1.180 2007/05/29 19:39:18 des Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/identcpu.c,v 1.193 2008/10/22 21:03:30 jkim Exp $");
 
 #include "opt_cpu.h"
 
@@ -77,15 +77,12 @@ void panicifcpuunsupported(void);
 
 static void identifycyrix(void);
 static void init_exthigh(void);
-void setPQL2(int *const size, int *const ways);
-static void setPQL2_AMD(int *const size, int *const ways);
-static void setPQL2_INTEL(int *const size, int *const ways);
-static void get_INTEL_TLB(u_int data, int *const size, int *const ways);
 static void print_AMD_info(void);
 static void print_INTEL_info(void);
 static void print_INTEL_TLB(u_int data);
 static void print_AMD_assoc(int i);
 static void print_transmeta_info(void);
+static void print_via_padlock_info(void);
 
 int	cpu_class;
 u_int	cpu_exthigh;		/* Highest arg to extended CPUID */
@@ -141,6 +138,9 @@ static struct {
 	{ "Pentium 4",		CPUCLASS_686 },		/* CPU_P4 */
 };
 
+int cpu_cores;
+int cpu_logical;
+
 #if defined(I586_CPU) && !defined(NO_F00F_HACK)
 int has_f00f_bug = 0;		/* Initialized so that it can be patched. */
 #endif
@@ -157,6 +157,7 @@ init_exthigh(void)
 		    strcmp(cpu_vendor, "AuthenticAMD") == 0 ||
 		    strcmp(cpu_vendor, "GenuineTMx86") == 0 ||
 		    strcmp(cpu_vendor, "TransmetaCPU") == 0 ||
+		    strcmp(cpu_vendor, "CentaurHauls") == 0 ||
 		    strcmp(cpu_vendor, "Geode by NSC") == 0)) {
 			do_cpuid(0x80000000, regs);
 			if (regs[0] >= 0x80000000)
@@ -580,29 +581,10 @@ printcpuinfo(void)
 			break;
 		case 0x690:
 			strcpy(cpu_model, "VIA C3 Nehemiah");
-			if ((cpu_id & 0xf) < 3)
-				break;
-			goto via_common;
+			break;
 		case 0x6a0:
+		case 0x6d0:
 			strcpy(cpu_model, "VIA C7 Esther");
-via_common:
-			do_cpuid(0xc0000000, regs);
-			i = regs[0];
-			if (i >= 0xC0000001) {
-				do_cpuid(0xc0000001, regs);
-				i = regs[3];
-			} else
-				i = 0;
-			if (i & VIA_CPUID_HAS_RNG)
-				strcat(cpu_model, "+RNG");
-			if (i & VIA_CPUID_HAS_ACE)
-				strcat(cpu_model, "+AES");
-			if (i & VIA_CPUID_HAS_ACE2)
-				strcat(cpu_model, "+AES-CTR");
-			if (i & VIA_CPUID_HAS_PHE)
-				strcat(cpu_model, "+SHA1+SHA256");
-			if (i & VIA_CPUID_HAS_PMM)
-				strcat(cpu_model, "+RSA");
 			break;
 		default:
 			strcpy(cpu_model, "VIA/IDT Unknown");
@@ -737,7 +719,7 @@ via_common:
 				"\020"
 				"\001SSE3"	/* SSE3 */
 				"\002<b1>"
-				"\003RSVD2"	/* "Reserved" bit 2 */
+				"\003DTES64"	/* 64-bit Debug Trace */
 				"\004MON"	/* MONITOR/MWAIT Instructions */
 				"\005DS_CPL"	/* CPL Qualified Debug Store */
 				"\006VMX"	/* Virtual Machine Extensions */
@@ -754,15 +736,15 @@ via_common:
 				"\021<b16>"
 				"\022<b17>"
 				"\023DCA"	/* Direct Cache Access */
-				"\024<b19>"
-				"\025<b20>"
-				"\026<b21>"
+				"\024SSE4.1"
+				"\025SSE4.2"
+				"\026x2APIC"	/* xAPIC Extensions */
 				"\027<b22>"
-				"\030<b23>"
+				"\030POPCNT"
 				"\031<b24>"
 				"\032<b25>"
-				"\033<b26>"
-				"\034<b27>"
+				"\033XSAVE"
+				"\034OSXSAVE"
 				"\035<b28>"
 				"\036<b29>"
 				"\037<b30>"
@@ -808,7 +790,7 @@ via_common:
 				"\030<s23>"	/* Same */
 				"\031<s24>"	/* Same */
 				"\032FFXSR"	/* Fast FXSAVE/FXRSTOR */
-				"\033<b26>"	/* Undefined */
+				"\033Page1GB"	/* 1-GB large page support */
 				"\034RDTSCP"	/* RDTSCP */
 				"\035<b28>"	/* Undefined */
 				"\036LM"	/* 64 bit long mode */
@@ -860,6 +842,19 @@ via_common:
 				cpu_feature &= ~CPUID_HTT;
 
 			/*
+			 * If this CPU supports P-state invariant TSC then
+			 * mention the capability.
+			 */
+			if (!tsc_is_invariant &&
+			    (strcmp(cpu_vendor, "AuthenticAMD") == 0 &&
+			    ((amd_pminfo & AMDPM_TSC_INVARIANT) != 0 ||
+			    I386_CPU_FAMILY(cpu_id) >= 0x10 ||
+			    cpu_id == 0x60fb2))) {
+				tsc_is_invariant = 1;
+				printf("\n  TSC: P-state invariant");
+			}
+
+			/*
 			 * If this CPU supports HTT or CMP then mention the
 			 * number of physical/logical cores it contains.
 			 */
@@ -874,11 +869,13 @@ via_common:
 				if ((regs[0] & 0x1f) != 0)
 					cmp = ((regs[0] >> 26) & 0x3f) + 1;
 			}
+			cpu_cores = cmp;
+			cpu_logical = htt / cmp;
 			if (cmp > 1)
 				printf("\n  Cores per package: %d", cmp);
 			if ((htt / cmp) > 1)
 				printf("\n  Logical CPUs per core: %d",
-				    htt / cmp);
+				    cpu_logical);
 		}
 	} else if (strcmp(cpu_vendor, "CyrixInstead") == 0) {
 		printf("  DIR=0x%04x", cyrix_did);
@@ -889,6 +886,9 @@ via_common:
 			printf("\n  CPU cache: write-through mode");
 #endif
 	}
+	if (strcmp(cpu_vendor, "CentaurHauls") == 0)
+		print_via_padlock_info();
+
 	/* Avoid ugly blank lines: only print newline when we have to. */
 	if (*cpu_vendor || cpu_id)
 		printf("\n");
@@ -1072,8 +1072,11 @@ identifycyrix(void)
 static void
 tsc_freq_changed(void *arg, const struct cf_level *level, int status)
 {
-	/* If there was an error during the transition, don't do anything. */
-	if (status != 0)
+	/*
+	 * If there was an error during the transition or
+	 * TSC is P-state invariant, don't do anything.
+	 */
+	if (status != 0 || tsc_is_invariant)
 		return;
 
 	/* Total setting for this level gives the new frequency in MHz. */
@@ -1101,6 +1104,10 @@ finishidentcpu(void)
 			do_cpuid(0x80000001, regs);
 			amd_feature = regs[3] & ~(cpu_feature & 0x0183f3ff);
 			amd_feature2 = regs[2];
+		}
+		if (cpu_exthigh >= 0x80000007) {
+			do_cpuid(0x80000007, regs);
+			amd_pminfo = regs[3];
 		}
 		if (cpu_exthigh >= 0x80000008) {
 			do_cpuid(0x80000008, regs);
@@ -1471,301 +1478,8 @@ print_INTEL_TLB(u_int data)
 	}
 }
 
-
 static void
-setPQL2_AMD(int *const size, int *const ways) {
-	if (cpu_exthigh >= 0x80000006) {
-		u_int regs[4];
-
-		do_cpuid(0x80000006, regs);
-		*size = regs[2] >> 16;
-		*ways = (regs[2] >> 12) & 0x0f;
-	}
-}
-
-
-static void
-setPQL2_INTEL(int *const size, int *const ways)
-{
-	u_int rounds, regnum;
-	u_int regs[4];
-	u_int nwaycode;
-
-	if (cpu_high >= 2) {
-		rounds = 0;
-		do {
-			do_cpuid(0x2, regs);
-			if (rounds == 0 && (rounds = (regs[0] & 0xff)) == 0)
-				break;	/* we have a buggy CPU */
-
-			for (regnum = 0; regnum <= 3; ++regnum) {
-				if (regs[regnum] & (1<<31))
-					continue;
-				if (regnum != 0)
-					get_INTEL_TLB(regs[regnum] & 0xff,
-					    size, ways);
-				get_INTEL_TLB((regs[regnum] >> 8) & 0xff,
-				    size, ways);
-				get_INTEL_TLB((regs[regnum] >> 16) & 0xff,
-				    size, ways);
-				get_INTEL_TLB((regs[regnum] >> 24) & 0xff,
-				    size, ways);
-			}
-		} while (--rounds > 0);
-	}
-
-	if (cpu_exthigh >= 0x80000006) {
-		do_cpuid(0x80000006, regs);
-		if (*size < ((regs[2] >> 16) & 0xffff)) {
-			*size = (regs[2] >> 16) & 0xffff;
-			nwaycode = (regs[2] >> 12) & 0x0f;
-			if (nwaycode >= 0x02 && nwaycode <= 0x08)
-				*ways = 1 << (nwaycode / 2);
-			else
-				*ways = 0;
-		}
-        }
-}
-
-static void
-get_INTEL_TLB(u_int data, int *const size, int *const ways)
-{
-	switch (data) {
-	default:
-		break;
-	case 0x22:
-		/* 3rd-level cache: 512 KB, 4-way set associative,
-		 * sectored cache, 64 byte line size */
-		if (*size < 512) {
-			*size = 512;
-			*ways = 4;
-		}
-		break;
-	case 0x23:
-		/* 3rd-level cache: 1 MB, 8-way set associative,
-		 * sectored cache, 64 byte line size */
-		if (*size < 1024) {
-			*size = 1024;
-			*ways = 8;
-		}
-		break;
-	case 0x25:
-		/* 3rd-level cache: 2 MB, 8-way set associative,
-		 * sectored cache, 64 byte line size */
-		if (*size < 2048) {
-			*size = 2048;
-			*ways = 8;
-		}
-		break;
-	case 0x29:
-		/* 3rd-level cache: 4 MB, 8-way set associative,
-		 * sectored cache, 64 byte line size */
-		if (*size < 4096) {
-			*size = 4096;
-			*ways = 8;
-		}
-		break;
-	case 0x39:
-		/* 2nd-level cache: 128 KB, 4-way set associative,
-		 * sectored cache, 64 byte line size */
-		if (*size < 128) {
-			*size = 128;
-			*ways = 4;
-		}
-		break;
-	case 0x3b:
-		/* 2nd-level cache: 128 KB, 2-way set associative,
-		 * sectored cache, 64 byte line size */
-		if (*size < 128) {
-			*size = 128;
-			*ways = 2;
-		}
-		break;
-	case 0x3c:
-		/* 2nd-level cache: 256 KB, 4-way set associative,
-		 * sectored cache, 64 byte line size */
-		if (*size < 256) {
-			*size = 256;
-			*ways = 4;
-		}
-		break;
-	case 0x41:
-		/* 2nd-level cache: 128 KB, 4-way set associative,
-		 * 32 byte line size */
-		if (*size < 128) {
-			*size = 128;
-			*ways = 4;
-		}
-		break;
-	case 0x42:
-		/* 2nd-level cache: 256 KB, 4-way set associative,
-		 * 32 byte line size */
-		if (*size < 256) {
-			*size = 256;
-			*ways = 4;
-		}
-		break;
-	case 0x43:
-		/* 2nd-level cache: 512 KB, 4-way set associative,
-		 * 32 byte line size */
-		if (*size < 512) {
-			*size = 512;
-			*ways = 4;
-		}
-		break;
-	case 0x44:
-		/* 2nd-level cache: 1 MB, 4-way set associative,
-		 * 32 byte line size */
-		if (*size < 1024) {
-			*size = 1024;
-			*ways = 4;
-		}
-		break;
-	case 0x45:
-		/* 2nd-level cache: 2 MB, 4-way set associative,
-		 * 32 byte line size */
-		if (*size < 2048) {
-			*size = 2048;
-			*ways = 4;
-		}
-		break;
-	case 0x46:
-		/* 3rd-level cache: 4 MB, 4-way set associative,
-		 * 64 byte line size */
-		if (*size < 4096) {
-			*size = 4096;
-			*ways = 4;
-		}
-		break;
-	case 0x47:
-		/* 3rd-level cache: 8 MB, 8-way set associative,
-		 * 64 byte line size */
-		if (*size < 8192) {
-			*size = 8192;
-			*ways = 8;
-		}
-		break;
-	case 0x78:
-		/* 2nd-level cache: 1 MB, 4-way set associative,
-		 * 64-byte line size */
-		if (*size < 1024) {
-			*size = 1024;
-			*ways = 4;
-		}
-		break;
-	case 0x79:
-		/* 2nd-level cache: 128 KB, 8-way set associative,
-		 * sectored cache, 64 byte line size */
-		if (*size < 128) {
-			*size = 128;
-			*ways = 8;
-		}
-		break;
-	case 0x7a:
-		/* 2nd-level cache: 256 KB, 8-way set associative,
-		 * sectored cache, 64 byte line size */
-		if (*size < 256) {
-			*size = 256;
-			*ways = 8;
-		}
-		break;
-	case 0x7b:
-		/* 2nd-level cache: 512 KB, 8-way set associative,
-		 * sectored cache, 64 byte line size */
-		if (*size < 512) {
-			*size = 512;
-			*ways = 8;
-		}
-		break;
-	case 0x7c:
-		/* 2nd-level cache: 1 MB, 8-way set associative,
-		 * sectored cache, 64 byte line size */
-		if (*size < 1024) {
-			*size = 1024;
-			*ways = 8;
-		}
-		break;
-	case 0x7d:
-		/* 2nd-level cache: 2 MB, 8-way set associative,
-		 * 64-byte line size */
-		if (*size < 2048) {
-			*size = 2048;
-			*ways = 8;
-		}
-		break;
-	case 0x7f:
-		/* 2nd-level cache: 512 KB, 2-way set associative,
-		 * 64-byte line size */
-		if (*size < 512) {
-			*size = 512;
-			*ways = 2;
-		}
-		break;
-	case 0x82:
-		/* 2nd-level cache: 256 KB, 8-way set associative,
-		 * 32 byte line size */
-		if (*size < 256) {
-			*size = 256;
-			*ways = 8;
-		}
-		break;
-	case 0x83:
-		/* 2nd-level cache: 512 KB, 8-way set associative,
-		 * 32 byte line size */
-		if (*size < 512) {
-			*size = 512;
-			*ways = 8;
-		}
-		break;
-	case 0x84:
-		/* 2nd-level cache: 1 MB, 8-way set associative,
-		 * 32 byte line size */
-		if (*size < 1024) {
-			*size = 1024;
-			*ways = 8;
-		}
-		break;
-	case 0x85:
-		/* 2nd-level cache: 2 MB, 8-way set associative,
-		 * 32 byte line size */
-		if (*size < 2048) {
-			*size = 2048;
-			*ways = 8;
-		}
-		break;
-	case 0x86:
-		/* 2nd-level cache: 512 KB, 4-way set associative,
-		 * 64 byte line size */
-		if (*size < 512) {
-			*size = 512;
-			*ways = 4;
-		}
-		break;
-	case 0x87:
-		/* 2nd-level cache: 1 MB, 8-way set associative,
-		 * 64 byte line size */
-		if (*size < 1024) {
-			*size = 512;
-			*ways = 8;
-		}
-		break;
-	}
-}
-
-void
-setPQL2(int *const size, int *const ways)
-{
-	/* make sure the cpu_exthigh variable is initialized */
-	init_exthigh();
-
-	if (strcmp(cpu_vendor, "AuthenticAMD") == 0)
-		setPQL2_AMD(size, ways);
-	else if (strcmp(cpu_vendor, "GenuineIntel") == 0)
-		setPQL2_INTEL(size, ways);
-}
-
-static void
-print_transmeta_info()
+print_transmeta_info(void)
 {
 	u_int regs[4], nreg = 0;
 
@@ -1797,4 +1511,37 @@ print_transmeta_info()
 		info[64] = 0;
 		printf("  %s\n", info);
 	}
+}
+
+static void
+print_via_padlock_info(void)
+{
+	u_int regs[4];
+
+	/* Check for supported models. */
+	switch (cpu_id & 0xff0) {
+	case 0x690:
+		if ((cpu_id & 0xf) < 3)
+			return;
+	case 0x6a0:
+	case 0x6d0:
+		break;
+	default:
+		return;
+	}
+	
+	do_cpuid(0xc0000000, regs);
+	if (regs[0] >= 0xc0000001)
+		do_cpuid(0xc0000001, regs);
+	else
+		return;
+
+	printf("\n  VIA Padlock Features=0x%b", regs[3],
+	"\020"
+	"\003RNG"		/* RNG */
+	"\007AES"		/* ACE */
+	"\011AES-CTR"		/* ACE2 */
+	"\013SHA1,SHA256"	/* PHE */
+	"\015RSA"		/* PMM */
+	);
 }

@@ -26,7 +26,7 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/arm/include/resource.h,v 1.2 2005/01/05 21:58:48 imp Exp $
+ * $FreeBSD: src/sys/arm/include/resource.h,v 1.3 2008/10/13 20:07:13 raj Exp $
  */
 
 #ifndef _MACHINE_RESOURCE_H_
@@ -41,5 +41,6 @@
 #define	SYS_RES_DRQ	2	/* isa dma lines */
 #define	SYS_RES_MEMORY	3	/* i/o memory */
 #define	SYS_RES_IOPORT	4	/* i/o ports */
+#define	SYS_RES_GPIO	5	/* general purpose i/o */
 
 #endif /* !_MACHINE_RESOURCE_H_ */

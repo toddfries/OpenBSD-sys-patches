@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/i386/loader/conf.c,v 1.26 2007/05/29 14:35:57 simokawa Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/i386/loader/conf.c,v 1.27 2008/11/17 20:49:29 pjd Exp $");
 
 #include <stand.h>
 #include <bootstrap.h>
@@ -50,6 +50,10 @@ __FBSDID("$FreeBSD: src/sys/boot/i386/loader/conf.c,v 1.26 2007/05/29 14:35:57 s
 extern struct devsw fwohci;
 #endif
 
+#if defined(LOADER_ZFS_SUPPORT)
+extern struct devsw zfs_dev;
+#endif
+
 /* Exported for libstand */
 struct devsw *devsw[] = {
     &bioscd,
@@ -60,8 +64,15 @@ struct devsw *devsw[] = {
 #if defined(LOADER_FIREWIRE_SUPPORT)
     &fwohci,
 #endif
+#if defined(LOADER_ZFS_SUPPORT)
+    &zfs_dev,
+#endif
     NULL
 };
+
+#if defined(LOADER_ZFS_SUPPORT)
+extern struct fs_ops zfs_fsops;
+#endif
 
 struct fs_ops *file_system[] = {
     &ufs_fsops,
@@ -69,6 +80,9 @@ struct fs_ops *file_system[] = {
     &dosfs_fsops,
     &cd9660_fsops,
     &splitfs_fsops,
+#if defined(LOADER_ZFS_SUPPORT)
+    &zfs_fsops,
+#endif
 #ifdef LOADER_GZIP_SUPPORT
     &gzipfs_fsops,
 #endif

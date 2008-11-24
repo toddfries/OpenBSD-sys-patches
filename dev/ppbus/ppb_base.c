@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ppbus/ppb_base.c,v 1.14 2003/08/24 17:54:16 obrien Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ppbus/ppb_base.c,v 1.16 2008/11/16 17:42:02 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -34,15 +34,15 @@ __FBSDID("$FreeBSD: src/sys/dev/ppbus/ppb_base.c,v 1.14 2003/08/24 17:54:16 obri
 #include <sys/bus.h>
 
 #include <dev/ppbus/ppbconf.h>
-  
+
 #include "ppbus_if.h"
 
 #include <dev/ppbus/ppbio.h>
-  
+
 MODULE_VERSION(ppbus, 1);
 
 #define DEVTOSOFTC(dev) ((struct ppb_data *)device_get_softc(dev))
- 
+
 /*
  * ppb_poll_bus()
  *
@@ -75,7 +75,7 @@ ppb_poll_bus(device_t bus, int max,
 		switch (how) {
 		case PPB_NOINTR:
 			/* wait 10 ms */
-			tsleep((caddr_t)bus, PPBPRI, "ppbpoll", hz/100);
+			pause("ppbpoll", hz/100);
 			break;
 
 		case PPB_INTR:
@@ -133,7 +133,7 @@ ppb_set_mode(device_t bus, int mode)
 	int old_mode = ppb_get_mode(bus);
 
 	if (PPBUS_SETMODE(device_get_parent(bus), mode))
-		return -1;
+		return (-1);
 
 	/* XXX yet device mode = ppbus mode = chipset mode */
 	ppb->mode = (mode & PPB_MASK);

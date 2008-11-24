@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/busdma_machdep.c,v 1.89 2007/06/11 17:57:24 mjacob Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/busdma_machdep.c,v 1.94 2008/08/15 20:51:31 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/kdb.h>
@@ -142,7 +142,12 @@ static bus_addr_t add_bounce_page(bus_dma_tag_t dmat, bus_dmamap_t map,
 static void free_bounce_page(bus_dma_tag_t dmat, struct bounce_page *bpage);
 int run_filter(bus_dma_tag_t dmat, bus_addr_t paddr);
 int _bus_dmamap_count_pages(bus_dma_tag_t dmat, bus_dmamap_t map, void *buf,
-			    bus_size_t buflen, int flags, int *nb);
+			    bus_size_t buflen, int flags);
+
+#ifdef XEN
+#undef pmap_kextract
+#define pmap_kextract pmap_kextract_ma
+#endif
 
 /*
  * Return true if a match is made.
@@ -488,8 +493,6 @@ bus_dmamem_alloc(bus_dma_tag_t dmat, void** vaddr, int flags,
 		mflags = M_NOWAIT;
 	else
 		mflags = M_WAITOK;
-	if (flags & BUS_DMA_ZERO)
-		mflags |= M_ZERO;
 
 	/* If we succeed, no mapping/bouncing will be required */
 	*mapp = NULL;
@@ -497,13 +500,15 @@ bus_dmamem_alloc(bus_dma_tag_t dmat, void** vaddr, int flags,
 	if (dmat->segments == NULL) {
 		dmat->segments = (bus_dma_segment_t *)malloc(
 		    sizeof(bus_dma_segment_t) * dmat->nsegments, M_DEVBUF,
-		    M_NOWAIT);
+		    mflags);
 		if (dmat->segments == NULL) {
 			CTR4(KTR_BUSDMA, "%s: tag %p tag flags 0x%x error %d",
 			    __func__, dmat, dmat->flags, ENOMEM);
 			return (ENOMEM);
 		}
 	}
+	if (flags & BUS_DMA_ZERO)
+		mflags |= M_ZERO;
 
 	/* 
 	 * XXX:
@@ -539,7 +544,7 @@ bus_dmamem_alloc(bus_dma_tag_t dmat, void** vaddr, int flags,
 		pmap_change_attr((vm_offset_t)*vaddr, dmat->maxsize,
 		    PAT_UNCACHEABLE);
 	CTR4(KTR_BUSDMA, "%s: tag %p tag flags 0x%x error %d",
-	    __func__, dmat, dmat->flags, ENOMEM);
+	    __func__, dmat, dmat->flags, 0);
 	return (0);
 }
 
@@ -569,12 +574,11 @@ bus_dmamem_free(bus_dma_tag_t dmat, void *vaddr, bus_dmamap_t map)
 
 int
 _bus_dmamap_count_pages(bus_dma_tag_t dmat, bus_dmamap_t map, void *buf,
-			bus_size_t buflen, int flags, int *nb)
+			bus_size_t buflen, int flags)
 {
 	vm_offset_t vaddr;
 	vm_offset_t vendaddr;
 	bus_addr_t paddr;
-	int needbounce = *nb;
 
 	if ((map != &nobounce_dmamap && map->pagesneeded == 0)) {
 		CTR4(KTR_BUSDMA, "lowaddr= %d Maxmem= %d, boundary= %d, "
@@ -586,17 +590,16 @@ _bus_dmamap_count_pages(bus_dma_tag_t dmat, bus_dmamap_t map, void *buf,
 		 * Count the number of bounce pages
 		 * needed in order to complete this transfer
 		 */
-		vaddr = trunc_page((vm_offset_t)buf);
+		vaddr = (vm_offset_t)buf;
 		vendaddr = (vm_offset_t)buf + buflen;
 
 		while (vaddr < vendaddr) {
 			paddr = pmap_kextract(vaddr);
 			if (((dmat->flags & BUS_DMA_COULD_BOUNCE) != 0) &&
 			    run_filter(dmat, paddr) != 0) {
-				needbounce = 1;
 				map->pagesneeded++;
 			}
-			vaddr += PAGE_SIZE;
+			vaddr += (PAGE_SIZE - ((vm_offset_t)vaddr & PAGE_MASK));
 		}
 		CTR1(KTR_BUSDMA, "pagesneeded= %d\n", map->pagesneeded);
 	}
@@ -624,7 +627,6 @@ _bus_dmamap_count_pages(bus_dma_tag_t dmat, bus_dmamap_t map, void *buf,
 		mtx_unlock(&bounce_lock);
 	}
 
-	*nb = needbounce;
 	return (0);
 }
 
@@ -648,15 +650,13 @@ _bus_dmamap_load_buffer(bus_dma_tag_t dmat,
 	bus_size_t sgsize;
 	bus_addr_t curaddr, lastaddr, baddr, bmask;
 	vm_offset_t vaddr;
-	int needbounce = 0;
 	int seg, error;
 
 	if (map == NULL)
 		map = &nobounce_dmamap;
 
 	if ((dmat->flags & BUS_DMA_COULD_BOUNCE) != 0) {
-		error = _bus_dmamap_count_pages(dmat, map, buf, buflen, flags,
-		    &needbounce);
+		error = _bus_dmamap_count_pages(dmat, map, buf, buflen, flags);
 		if (error)
 			return (error);
 	}
@@ -705,7 +705,7 @@ _bus_dmamap_load_buffer(bus_dma_tag_t dmat,
 			segs[seg].ds_len = sgsize;
 			first = 0;
 		} else {
-			if (needbounce == 0 && curaddr == lastaddr &&
+			if (curaddr == lastaddr &&
 			    (segs[seg].ds_len + sgsize) <= dmat->maxsegsz &&
 			    (dmat->boundary == 0 ||
 			     (segs[seg].ds_addr & bmask) == (curaddr & bmask)))

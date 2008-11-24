@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_vfs.c,v 1.11 2007/01/23 10:01:17 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_vfs.c,v 1.12 2008/10/10 21:23:50 attilio Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -163,7 +163,7 @@ g_vfs_open(struct vnode *vp, struct g_consumer **cpp, const char *fsname, int wr
 }
 
 void
-g_vfs_close(struct g_consumer *cp, struct thread *td)
+g_vfs_close(struct g_consumer *cp)
 {
 	struct g_geom *gp;
 	struct bufobj *bo;
@@ -172,6 +172,6 @@ g_vfs_close(struct g_consumer *cp, struct thread *td)
 
 	gp = cp->geom;
 	bo = gp->softc;
-	bufobj_invalbuf(bo, V_SAVE, td, 0, 0);
+	bufobj_invalbuf(bo, V_SAVE, 0, 0);
 	g_wither_geom_close(gp, ENXIO);
 }

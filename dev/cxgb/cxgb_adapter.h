@@ -1,6 +1,6 @@
 /**************************************************************************
 
-Copyright (c) 2007, Chelsio Inc.
+Copyright (c) 2007-2008, Chelsio Inc.
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -25,8 +25,7 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
-
-$FreeBSD: src/sys/dev/cxgb/cxgb_adapter.h,v 1.31 2008/03/31 21:02:27 kmacy Exp $
+$FreeBSD: src/sys/dev/cxgb/cxgb_adapter.h,v 1.43 2008/11/22 08:05:05 kmacy Exp $
 
 ***************************************************************************/
 
@@ -42,6 +41,7 @@ $FreeBSD: src/sys/dev/cxgb/cxgb_adapter.h,v 1.31 2008/03/31 21:02:27 kmacy Exp $
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/condvar.h>
+#include <sys/buf_ring.h>
 
 #include <net/ethernet.h>
 #include <net/if.h>
@@ -55,17 +55,12 @@ $FreeBSD: src/sys/dev/cxgb/cxgb_adapter.h,v 1.31 2008/03/31 21:02:27 kmacy Exp $
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 
-
-#ifdef CONFIG_DEFINED
 #include <cxgb_osdep.h>
 #include <t3cdev.h>
-#include <ulp/toecore/cxgb_toedev.h>
 #include <sys/mbufq.h>
-#else
-#include <dev/cxgb/cxgb_osdep.h>
-#include <dev/cxgb/t3cdev.h>
-#include <dev/cxgb/sys/mbufq.h>
-#include <dev/cxgb/ulp/toecore/cxgb_toedev.h>
+
+#ifdef LRO_SUPPORTED
+#include <netinet/tcp_lro.h>
 #endif
 
 #define USE_SX
@@ -126,16 +121,12 @@ struct port_info {
 	uint32_t	nqsets;
 	
 	uint8_t		hw_addr[ETHER_ADDR_LEN];
-	struct taskqueue *tq;
-	struct task     start_task;
 	struct task	timer_reclaim_task;
 	struct cdev     *port_cdev;
 
 #define PORT_LOCK_NAME_LEN 32
-#define TASKQ_NAME_LEN 32
 #define PORT_NAME_LEN 32
 	char            lockbuf[PORT_LOCK_NAME_LEN];
-	char            taskqbuf[TASKQ_NAME_LEN];
 	char            namebuf[PORT_NAME_LEN];
 };
 
@@ -152,12 +143,7 @@ enum {				/* adapter flags */
 };
 
 #define FL_Q_SIZE	4096
-
-#ifdef __i386__
-#define JUMBO_Q_SIZE	256
-#else
 #define JUMBO_Q_SIZE	1024
-#endif
 #define RSPQ_Q_SIZE	1024
 #define TX_ETH_Q_SIZE	1024
 
@@ -170,35 +156,14 @@ enum { TXQ_ETH = 0,
  * work request size in bytes
  */
 #define WR_LEN (WR_FLITS * 8)
-#define PIO_LEN (WR_LEN - sizeof(struct cpl_tx_pkt))
+#define PIO_LEN (WR_LEN - sizeof(struct cpl_tx_pkt_lso))
 
-
-/* careful, the following are set on priv_flags and must not collide with
- * IFF_ flags!
- */
-enum {
-	LRO_ACTIVE = (1 << 8),
-};
-
-/* Max concurrent LRO sessions per queue set */
-#define MAX_LRO_SES 8
-
-struct t3_lro_session {
-	struct mbuf *head;
-	struct mbuf *tail;
-	uint32_t seq;
-	uint16_t ip_len;
-	uint16_t mss;
-	uint16_t vtag;
-	uint8_t npkts;
-};
-
+#ifdef LRO_SUPPORTED
 struct lro_state {
 	unsigned short enabled;
-	unsigned short active_idx;
-	unsigned int nactive;
-	struct t3_lro_session sess[MAX_LRO_SES];
+	struct lro_ctrl ctrl;
 };
+#endif
 
 #define RX_BUNDLE_SIZE 8
 
@@ -294,8 +259,10 @@ struct sge_txq {
 	 * mbuf touches
 	 */
 	struct mbuf_head cleanq;	
-	struct buf_ring txq_mr;
+	struct buf_ring *txq_mr;
+	struct ifaltq	*txq_ifq;
 	struct mbuf     *immpkt;
+
 	uint32_t        txq_drops;
 	uint32_t        txq_skipped;
 	uint32_t        txq_coalesced;
@@ -316,12 +283,9 @@ enum {
 	SGE_PSTAT_TX_CSUM,          /* # of TX checksum offloads */
 	SGE_PSTAT_VLANEX,           /* # of VLAN tag extractions */
 	SGE_PSTAT_VLANINS,          /* # of VLAN tag insertions */
-	SGE_PSTATS_LRO_QUEUED,	    /* # of LRO appended packets */
-	SGE_PSTATS_LRO_FLUSHED,	    /* # of LRO flushed packets */
-	SGE_PSTATS_LRO_X_STREAMS,   /* # of exceeded LRO contexts */
 };
 
-#define SGE_PSTAT_MAX (SGE_PSTATS_LRO_X_STREAMS+1)
+#define SGE_PSTAT_MAX (SGE_PSTAT_VLANINS+1)
 
 #define QS_EXITING              0x1
 #define QS_RUNNING              0x2
@@ -330,7 +294,9 @@ enum {
 struct sge_qset {
 	struct sge_rspq		rspq;
 	struct sge_fl		fl[SGE_RXQ_PER_SET];
+#ifdef LRO_SUPPORTED
 	struct lro_state        lro;
+#endif
 	struct sge_txq		txq[SGE_TXQ_PER_SET];
 	uint32_t                txq_stopped;       /* which Tx queues are stopped */
 	uint64_t                port_stats[SGE_PSTAT_MAX];
@@ -400,10 +366,11 @@ struct adapter {
 	struct task		ext_intr_task;
 	struct task		slow_intr_task;
 	struct task		tick_task;
-	struct task		process_responses_task;
 	struct taskqueue	*tq;
 	struct callout		cxgb_tick_ch;
 	struct callout		sge_timer_ch;
+
+	unsigned int		check_task_cnt;
 
 	/* Register lock for use by the hardware layer */
 	struct mtx		mdio_lock;
@@ -560,6 +527,7 @@ int t3_os_pci_save_state(struct adapter *adapter);
 int t3_os_pci_restore_state(struct adapter *adapter);
 void t3_os_link_changed(adapter_t *adapter, int port_id, int link_status,
 			int speed, int duplex, int fc);
+void t3_os_phymod_changed(struct adapter *adap, int port_id);
 void t3_sge_err_intr_handler(adapter_t *adapter);
 int t3_offload_tx(struct t3cdev *, struct mbuf *);
 void t3_os_ext_intr_handler(adapter_t *adapter);
@@ -586,16 +554,18 @@ void t3_sge_deinit_sw(adapter_t *);
 void t3_free_tx_desc(struct sge_txq *q, int n);
 void t3_free_tx_desc_all(struct sge_txq *q);
 
-void t3_rx_eth_lro(adapter_t *adap, struct sge_rspq *rq, struct mbuf *m,
-    int ethpad, uint32_t rss_hash, uint32_t rss_csum, int lro);
 void t3_rx_eth(struct adapter *adap, struct sge_rspq *rq, struct mbuf *m, int ethpad);
-void t3_lro_flush(adapter_t *adap, struct sge_qset *qs, struct lro_state *state);
 
 void t3_add_attach_sysctls(adapter_t *sc);
 void t3_add_configured_sysctls(adapter_t *sc);
 int t3_get_desc(const struct sge_qset *qs, unsigned int qnum, unsigned int idx,
     unsigned char *data);
 void t3_update_qset_coalesce(struct sge_qset *qs, const struct qset_params *p);
+
+#define CXGB_TICKS(a) ((a)->params.linkpoll_period ? \
+    (hz * (a)->params.linkpoll_period) / 10 : \
+    (a)->params.stats_update_period * hz)
+
 /*
  * XXX figure out how we can return this to being private to sge
  */
@@ -636,7 +606,7 @@ static inline int offload_running(adapter_t *adapter)
 }
 
 int cxgb_pcpu_enqueue_packet(struct ifnet *ifp, struct mbuf *m);
-int cxgb_pcpu_start(struct ifnet *ifp, struct mbuf *m);
+int cxgb_pcpu_transmit(struct ifnet *ifp, struct mbuf *m);
 void cxgb_pcpu_shutdown_threads(struct adapter *sc);
 void cxgb_pcpu_startup_threads(struct adapter *sc);
 

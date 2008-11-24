@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  * $Id: vkbd.c,v 1.20 2004/11/15 23:53:30 max Exp $
- * $FreeBSD: src/sys/dev/vkbd/vkbd.c,v 1.12 2007/12/29 21:55:25 wkoszek Exp $
+ * $FreeBSD: src/sys/dev/vkbd/vkbd.c,v 1.14 2008/09/26 14:19:52 ed Exp $
  */
 
 #include "opt_compat.h"
@@ -158,7 +158,7 @@ static int		vkbd_data_read(vkbd_state_t *, int);
 
 static struct cdevsw	vkbd_dev_cdevsw = {
 	.d_version =	D_VERSION,
-	.d_flags =	D_PSEUDO | D_NEEDGIANT,
+	.d_flags =	D_PSEUDO | D_NEEDGIANT | D_NEEDMINOR,
 	.d_open =	vkbd_dev_open,
 	.d_close =	vkbd_dev_close,
 	.d_read =	vkbd_dev_read,
@@ -187,7 +187,7 @@ vkbd_dev_clone(void *arg, struct ucred *cred, char *name, int namelen,
 
 	/* find any existing device, or allocate new unit number */
 	if (clone_create(&vkbd_dev_clones, &vkbd_dev_cdevsw, &unit, dev, 0)) {
-		*dev = make_dev(&vkbd_dev_cdevsw, unit2minor(unit),
+		*dev = make_dev(&vkbd_dev_cdevsw, unit,
 			UID_ROOT, GID_WHEEL, 0600, DEVICE_NAME "%d", unit);
 		if (*dev != NULL) {
 			dev_ref(*dev);

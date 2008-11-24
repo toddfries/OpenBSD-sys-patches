@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ddb/db_run.c,v 1.27 2005/04/14 05:25:40 peter Exp $");
+__FBSDID("$FreeBSD: src/sys/ddb/db_run.c,v 1.28 2008/08/02 12:49:43 cognet Exp $");
 
 #include <sys/param.h>
 #include <sys/kdb.h>
@@ -269,7 +269,7 @@ db_set_single_step(void)
 	 *	at pc was not executed.
 	 */
 	inst = db_get_value(pc, sizeof(int), FALSE);
-	if (inst_branch(inst) || inst_call(inst)) {
+	if (inst_branch(inst) || inst_call(inst) || inst_return(inst)) {
 		brpc = branch_taken(inst, pc);
 		if (brpc != pc) {	/* self-branches are hopeless */
 			db_taken_bkpt = db_set_temp_breakpoint(brpc);

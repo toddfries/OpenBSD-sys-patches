@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/dev/usb/if_ural.c,v 1.71 2008/04/20 20:35:38 sam Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/if_ural.c,v 1.75 2008/07/30 00:38:10 thompsa Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2006
@@ -18,7 +18,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/if_ural.c,v 1.71 2008/04/20 20:35:38 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/if_ural.c,v 1.75 2008/07/30 00:38:10 thompsa Exp $");
 
 /*-
  * Ralink Technology RT2500USB chipset driver
@@ -156,7 +156,8 @@ static void		ural_write_multi(struct ural_softc *, uint16_t, void *,
 static void		ural_bbp_write(struct ural_softc *, uint8_t, uint8_t);
 static uint8_t		ural_bbp_read(struct ural_softc *, uint8_t);
 static void		ural_rf_write(struct ural_softc *, uint8_t, uint32_t);
-static struct ieee80211_node *ural_node_alloc(struct ieee80211_node_table *);
+static struct ieee80211_node *ural_node_alloc(struct ieee80211vap *,
+			    const uint8_t mac[IEEE80211_ADDR_LEN]);
 static void		ural_newassoc(struct ieee80211_node *, int);
 static void		ural_scan_start(struct ieee80211com *);
 static void		ural_scan_end(struct ieee80211com *);
@@ -479,7 +480,8 @@ ural_attach(device_t self)
 
 	/* set device capabilities */
 	ic->ic_caps =
-	      IEEE80211_C_IBSS		/* IBSS mode supported */
+	      IEEE80211_C_STA		/* station mode supported */
+	    | IEEE80211_C_IBSS		/* IBSS mode supported */
 	    | IEEE80211_C_MONITOR	/* monitor mode supported */
 	    | IEEE80211_C_HOSTAP	/* HostAp mode supported */
 	    | IEEE80211_C_TXPMGT	/* tx power management */
@@ -709,7 +711,7 @@ ural_alloc_rx_list(struct ural_softc *sc)
 
 	return 0;
 
-fail:	ural_free_tx_list(sc);
+fail:	ural_free_rx_list(sc);
 	return error;
 }
 
@@ -966,7 +968,8 @@ ural_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 		tap->wr_flags = IEEE80211_RADIOTAP_F_FCS;   
 		tap->wr_rate = ieee80211_plcp2rate(desc->rate,
-		    le32toh(desc->flags) & RAL_RX_OFDM);
+		    (desc->flags & htole32(RAL_RX_OFDM)) ?
+			IEEE80211_T_OFDM : IEEE80211_T_CCK);
 		tap->wr_chan_freq = htole16(ic->ic_curchan->ic_freq);
 		tap->wr_chan_flags = htole16(ic->ic_curchan->ic_flags);
 		tap->wr_antenna = sc->rx_ant;
@@ -994,6 +997,29 @@ skip:	/* setup a new transfer */
 	usbd_transfer(xfer);
 }
 
+static uint8_t
+ural_plcp_signal(int rate)
+{
+	switch (rate) {
+	/* OFDM rates (cf IEEE Std 802.11a-1999, pp. 14 Table 80) */
+	case 12:	return 0xb;
+	case 18:	return 0xf;
+	case 24:	return 0xa;
+	case 36:	return 0xe;
+	case 48:	return 0x9;
+	case 72:	return 0xd;
+	case 96:	return 0x8;
+	case 108:	return 0xc;
+
+	/* CCK rates (NB: not IEEE std, device-specific) */
+	case 2:		return 0x0;
+	case 4:		return 0x1;
+	case 11:	return 0x2;
+	case 22:	return 0x3;
+	}
+	return 0xff;		/* XXX unsupported/unknown rate */
+}
+
 static void
 ural_setup_tx_desc(struct ural_softc *sc, struct ural_tx_desc *desc,
     uint32_t flags, int len, int rate)
@@ -1011,7 +1037,7 @@ ural_setup_tx_desc(struct ural_softc *sc, struct ural_tx_desc *desc,
 	desc->wme |= htole16(RAL_IVOFFSET(sizeof (struct ieee80211_frame)));
 
 	/* setup PLCP fields */
-	desc->plcp_signal  = ieee80211_rate2plcp(rate);
+	desc->plcp_signal  = ural_plcp_signal(rate);
 	desc->plcp_service = 4;
 
 	len += IEEE80211_CRC_LEN;
@@ -1734,7 +1760,8 @@ ural_rf_write(struct ural_softc *sc, uint8_t reg, uint32_t val)
 
 /* ARGUSED */
 static struct ieee80211_node *
-ural_node_alloc(struct ieee80211_node_table *nt __unused)
+ural_node_alloc(struct ieee80211vap *vap __unused,
+	const uint8_t mac[IEEE80211_ADDR_LEN] __unused)
 {
 	struct ural_node *un;
 

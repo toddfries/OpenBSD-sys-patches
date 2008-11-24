@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)libkern.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/sys/libkern.h,v 1.56 2007/04/10 21:42:12 wkoszek Exp $
+ * $FreeBSD: src/sys/sys/libkern.h,v 1.59 2008/09/23 14:45:10 obrien Exp $
  */
 
 #ifndef _SYS_LIBKERN_H_
@@ -37,6 +37,11 @@
 #include <sys/types.h>
 #ifdef _KERNEL
 #include <sys/systm.h>
+#endif
+
+#ifndef	LIBKERN_INLINE
+#define	LIBKERN_INLINE  static __inline
+#define	LIBKERN_BODY
 #endif
 
 /* BCD conversions. */
@@ -87,6 +92,7 @@ int	 flsl(long);
 int	 fnmatch(const char *, const char *, int);
 void	 gets(char *, size_t, int);
 int	 locc(int, char *, u_int);
+int	 memcmp(const void *b1, const void *b2, size_t len);
 void	 qsort(void *base, size_t nmemb, size_t size,
 	    int (*compar)(const void *, const void *));
 void	 qsort_r(void *base, size_t nmemb, size_t size, void *thunk,
@@ -101,6 +107,7 @@ int	 strcasecmp(const char *, const char *);
 char	*strcat(char * __restrict, const char * __restrict);
 int	 strcmp(const char *, const char *);
 char	*strcpy(char * __restrict, const char * __restrict);
+size_t	 strcspn(const char * __restrict, const char * __restrict) __pure;
 char	*strdup(const char *__restrict, struct malloc_type *);
 size_t	 strlcat(char *, const char *, size_t);
 size_t	 strlcpy(char *, const char *, size_t);
@@ -134,13 +141,9 @@ crc32(const void *buf, size_t size)
 	return (crc ^ ~0U);
 }
 
-static __inline int
-memcmp(const void *b1, const void *b2, size_t len)
-{
-	return (bcmp(b1, b2, len));
-}
-
-static __inline void *
+LIBKERN_INLINE void *memset(void *, int, size_t);
+#ifdef LIBKERN_BODY
+LIBKERN_INLINE void *
 memset(void *b, int c, size_t len)
 {
 	char *bb;
@@ -152,6 +155,7 @@ memset(void *b, int c, size_t len)
 			*bb++ = c;
 	return (b);
 }
+#endif
 
 static __inline char *
 strchr(const char *p, int ch)

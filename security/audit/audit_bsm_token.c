@@ -1,5 +1,5 @@
-/*
- * Copyright (c) 2004 Apple Computer, Inc.
+/*-
+ * Copyright (c) 2004 Apple Inc.
  * Copyright (c) 2005 SPARTA, Inc.
  * All rights reserved.
  *
@@ -14,7 +14,7 @@
  * 2.  Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- * 3.  Neither the name of Apple Computer, Inc. ("Apple") nor the names of
+ * 3.  Neither the name of Apple Inc. ("Apple") nor the names of
  *     its contributors may be used to endorse or promote products derived
  *     from this software without specific prior written permission.
  *
@@ -29,9 +29,10 @@
  * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
- *
- * $FreeBSD: src/sys/security/audit/audit_bsm_token.c,v 1.14 2007/06/27 17:01:14 csjp Exp $
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/security/audit/audit_bsm_token.c,v 1.19 2008/11/11 21:57:03 csjp Exp $");
 
 #include <sys/types.h>
 #include <sys/endian.h>
@@ -157,7 +158,7 @@ au_to_attr32(struct vnode_au_info *vni)
 	ADD_U_INT32(dptr, vni->vn_fsid);
 
 	/*
-	 * Some systems use 32-bit file ID's, other's use 64-bit file IDs.
+	 * Some systems use 32-bit file ID's, others use 64-bit file IDs.
 	 * Attempt to handle both, and let the compiler sort it out.  If we
 	 * could pick this out at compile-time, it would be better, so as to
 	 * avoid the else case below.
@@ -261,7 +262,7 @@ au_to_data(char unit_print, char unit_type, char unit_count, char *p)
 		break;
 
 	default:
- 		return (NULL);
+		return (NULL);
 	}
 
 	totdata = datasize * unit_count;
@@ -917,7 +918,7 @@ au_to_sock_inet32(struct sockaddr_in *so)
 	 *
 	 * XXXRW: Should a name space conversion be taking place on the value
 	 * of sin_family?
- 	 */
+	 */
 	family = so->sin_family;
 	ADD_U_INT16(dptr, family);
 	ADD_MEM(dptr, &so->sin_port, sizeof(uint16_t));
@@ -939,8 +940,8 @@ au_to_sock_inet128(struct sockaddr_in6 *so)
 	ADD_U_CHAR(dptr, AUT_SOCKINET128);
 	/*
 	 * In Darwin, sin6_family is one octet, but BSM defines the token
- 	 * to store two. So we copy in a 0 first.
- 	 */
+	 * to store two. So we copy in a 0 first.
+	 */
 	ADD_U_CHAR(dptr, 0);
 	ADD_U_CHAR(dptr, so->sin6_family);
 
@@ -1287,6 +1288,51 @@ au_to_exec_env(char **envp)
 	return (t);
 }
 #endif
+
+/*
+ * token ID                1 byte
+ * record byte count       4 bytes
+ * version #               1 byte
+ * event type              2 bytes
+ * event modifier          2 bytes
+ * address type/length     4 bytes
+ * machine address         4 bytes/16 bytes (IPv4/IPv6 address)
+ * seconds of time         4 bytes/8 bytes  (32/64-bits)
+ * milliseconds of time    4 bytes/8 bytes  (32/64-bits) 
+ */
+token_t *
+au_to_header32_ex_tm(int rec_size, au_event_t e_type, au_emod_t e_mod,
+    struct timeval tm, struct auditinfo_addr *aia)
+{
+	token_t *t;  
+	u_char *dptr = NULL;
+	u_int32_t timems;
+	struct au_tid_addr *tid;
+
+	tid = &aia->ai_termid;
+	KASSERT(tid->at_type == AU_IPv4 || tid->at_type == AU_IPv6,
+	    ("au_to_header32_ex_tm: invalid address family"));
+
+	GET_TOKEN_AREA(t, dptr, sizeof(u_char) + sizeof(u_int32_t) +
+	    sizeof(u_char) + 2 * sizeof(u_int16_t) + 3 * sizeof(u_int32_t) +
+	    tid->at_type);
+
+	ADD_U_CHAR(dptr, AUT_HEADER32_EX);
+	ADD_U_INT32(dptr, rec_size);
+	ADD_U_CHAR(dptr, AUDIT_HEADER_VERSION_OPENBSM);
+	ADD_U_INT16(dptr, e_type);
+	ADD_U_INT16(dptr, e_mod);
+	ADD_U_INT32(dptr, tid->at_type);
+	if (tid->at_type == AU_IPv6)
+		ADD_MEM(dptr, &tid->at_addr[0], 4 * sizeof(u_int32_t));
+	else
+		ADD_MEM(dptr, &tid->at_addr[0], sizeof(u_int32_t));
+	timems = tm.tv_usec / 1000;
+	/* Add the timestamp */
+	ADD_U_INT32(dptr, tm.tv_sec);
+	ADD_U_INT32(dptr, timems);      /* We need time in ms. */
+	return (t);
+}
 
 /*
  * token ID                1 byte

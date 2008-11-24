@@ -46,7 +46,7 @@
  *	Ann Arbor, Michigan
  *	+1-313-764-2278
  *	netatalk@umich.edu
- * $FreeBSD: src/sys/netatalk/ddp_pcb.c,v 1.52 2007/01/12 15:07:51 rwatson Exp $
+ * $FreeBSD: src/sys/netatalk/ddp_pcb.c,v 1.53 2008/10/23 15:53:51 des Exp $
  */
 
 #include <sys/param.h>
@@ -290,7 +290,7 @@ at_pcballoc(struct socket *so)
 
 	DDP_LIST_XLOCK_ASSERT();
 
-	MALLOC(ddp, struct ddpcb *, sizeof *ddp, M_PCB, M_NOWAIT | M_ZERO);
+	ddp = malloc(sizeof *ddp, M_PCB, M_NOWAIT | M_ZERO);
 	if (ddp == NULL)
 		return (ENOBUFS);
 	DDP_LOCK_INIT(ddp);
@@ -344,7 +344,7 @@ at_pcbdetach(struct socket *so, struct ddpcb *ddp)
 		ddp->ddp_next->ddp_prev = ddp->ddp_prev;
 	DDP_UNLOCK(ddp);
 	DDP_LOCK_DESTROY(ddp);
-	FREE(ddp, M_PCB);
+	free(ddp, M_PCB);
 }
 
 /*

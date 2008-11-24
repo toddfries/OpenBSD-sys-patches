@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia64/trap.c,v 1.128 2007/06/04 21:38:46 attilio Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia64/trap.c,v 1.130 2008/03/12 10:11:58 jeff Exp $");
 
 #include "opt_ddb.h"
 #include "opt_ktrace.h"
@@ -279,7 +279,7 @@ printtrap(int vector, struct trapframe *tf, int isfatal, int user)
 	printf("    curthread   = %p\n", curthread);
 	if (curthread != NULL)
 		printf("        pid = %d, comm = %s\n",
-		       curthread->td_proc->p_pid, curthread->td_proc->p_comm);
+		       curthread->td_proc->p_pid, curthread->td_name);
 	printf("\n");
 }
 
@@ -987,10 +987,6 @@ syscall(struct trapframe *tf)
 	td->td_pticks = 0;
 	if (td->td_ucred != p->p_ucred)
 		cred_update_thread(td);
-#ifdef KSE
-	if (p->p_flag & P_SA)
-		thread_user_enter(td);
-#endif
 
 	if (p->p_sysent->sv_prepsyscall) {
 		/* (*p->p_sysent->sv_prepsyscall)(tf, args, &code, &params); */
@@ -1022,7 +1018,7 @@ syscall(struct trapframe *tf)
 		ktrsyscall(code, callp->sy_narg, args);
 #endif
 	CTR4(KTR_SYSC, "syscall enter thread %p pid %d proc %s code %d", td,
-	    td->td_proc->p_pid, td->td_proc->p_comm, code);
+	    td->td_proc->p_pid, td->td_name, code);
 
 	td->td_retval[0] = 0;
 	td->td_retval[1] = 0;
@@ -1077,7 +1073,7 @@ syscall(struct trapframe *tf)
 	userret(td, tf);
 
 	CTR4(KTR_SYSC, "syscall exit thread %p pid %d proc %s code %d", td,
-	    td->td_proc->p_pid, td->td_proc->p_comm, code);
+	    td->td_proc->p_pid, td->td_name, code);
 #ifdef KTRACE
 	if (KTRPOINT(td, KTR_SYSRET))
 		ktrsysret(code, error, td->td_retval[0]);

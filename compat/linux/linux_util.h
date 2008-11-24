@@ -28,7 +28,7 @@
  *
  * from: svr4_util.h,v 1.5 1994/11/18 02:54:31 christos Exp
  * from: linux_util.h,v 1.2 1995/03/05 23:23:50 fvdl Exp
- * $FreeBSD: src/sys/compat/linux/linux_util.h,v 1.29 2007/03/29 02:11:45 julian Exp $
+ * $FreeBSD: src/sys/compat/linux/linux_util.h,v 1.30 2008/04/08 09:45:47 kib Exp $
  */
 
 /*
@@ -51,23 +51,25 @@
 
 extern const char linux_emul_path[];
 
-int linux_emul_convpath(struct thread *, char *, enum uio_seg, char **, int);
+int linux_emul_convpath(struct thread *, const char *, enum uio_seg, char **, int, int);
 
-#define LCONVPATH_SEG(td, upath, pathp, i, seg)				\
+#define LCONVPATH_AT(td, upath, pathp, i, dfd)				\
 	do {								\
 		int _error;						\
 									\
-		_error = linux_emul_convpath(td, upath, seg,		\
-		    pathp, i);						\
+		_error = linux_emul_convpath(td, upath, UIO_USERSPACE,	\
+		    pathp, i, dfd);					\
 		if (*(pathp) == NULL)					\
 			return (_error);				\
 	} while (0)
 
 #define LCONVPATH(td, upath, pathp, i) 	\
-   LCONVPATH_SEG(td, upath, pathp, i, UIO_USERSPACE)
+   LCONVPATH_AT(td, upath, pathp, i, AT_FDCWD)
 
 #define LCONVPATHEXIST(td, upath, pathp) LCONVPATH(td, upath, pathp, 0)
+#define LCONVPATHEXIST_AT(td, upath, pathp, dfd) LCONVPATH_AT(td, upath, pathp, 0, dfd)
 #define LCONVPATHCREAT(td, upath, pathp) LCONVPATH(td, upath, pathp, 1)
+#define LCONVPATHCREAT_AT(td, upath, pathp, dfd) LCONVPATH_AT(td, upath, pathp, 1, dfd)
 #define LFREEPATH(path)	free(path, M_TEMP)
 
 #define DUMMY(s)							\

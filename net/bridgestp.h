@@ -67,7 +67,7 @@
  *
  * OpenBSD: if_bridge.h,v 1.14 2001/03/22 03:48:29 jason Exp
  *
- * $FreeBSD: src/sys/net/bridgestp.h,v 1.14 2007/08/04 21:09:04 thompsa Exp $
+ * $FreeBSD: src/sys/net/bridgestp.h,v 1.15 2007/12/09 20:47:12 thompsa Exp $
  */
 
 /*
@@ -171,7 +171,7 @@
 #define	BSTP_PROTO_RSTP		0x02
 #define	BSTP_PROTO_MAX		BSTP_PROTO_RSTP
 
-#define	BSTP_INFO_RECIEVED	1
+#define	BSTP_INFO_RECEIVED	1
 #define	BSTP_INFO_MINE		2
 #define	BSTP_INFO_AGED		3
 #define	BSTP_INFO_DISABLED	4

@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/svr4/imgact_svr4.c,v 1.25 2005/04/01 20:00:10 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/svr4/imgact_svr4.c,v 1.28 2008/01/13 14:44:01 attilio Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -68,7 +68,6 @@ exec_svr4_imgact(imgp)
     vm_offset_t buffer;
     unsigned long bss_size;
     int error;
-    struct thread *td = curthread;
 
     if (((a_out->a_magic >> 16) & 0xff) != 0x64)
 	return -1;
@@ -115,12 +114,14 @@ exec_svr4_imgact(imgp)
     }
     PROC_UNLOCK(imgp->proc);
 
-    VOP_UNLOCK(imgp->vp, 0, td);
+    VOP_UNLOCK(imgp->vp, 0);
 
     /*
      * Destroy old process VM and create a new one (with a new stack)
      */
-    exec_new_vmspace(imgp, &svr4_sysvec);
+    error = exec_new_vmspace(imgp, &svr4_sysvec);
+    if (error)
+	    goto fail;
     vmspace = imgp->proc->p_vmspace;
 
     /*
@@ -229,7 +230,7 @@ exec_svr4_imgact(imgp)
     
     imgp->proc->p_sysent = &svr4_sysvec;
 fail:
-    vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY, td);
+    vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY);
     return (error);
 }
 

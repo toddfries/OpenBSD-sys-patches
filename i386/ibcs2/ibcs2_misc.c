@@ -47,7 +47,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_misc.c,v 1.68 2007/10/24 19:03:53 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_misc.c,v 1.70 2008/01/13 14:44:07 attilio Exp $");
 
 /*
  * IBCS2 compatibility module.
@@ -356,7 +356,7 @@ ibcs2_getdents(td, uap)
 	buflen = max(DIRBLKSIZ, uap->nbytes);
 	buflen = min(buflen, MAXBSIZE);
 	buf = malloc(buflen, M_TEMP, M_WAITOK);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 again:
 	aiov.iov_base = buf;
 	aiov.iov_len = buflen;
@@ -462,7 +462,7 @@ again:
 eof:
 	td->td_retval[0] = uap->nbytes - resid;
 out:
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	VFS_UNLOCK_GIANT(vfslocked);
 	fdrop(fp, td);
 	if (cookies)
@@ -518,7 +518,7 @@ ibcs2_read(td, uap)
 	buflen = max(DIRBLKSIZ, uap->nbytes);
 	buflen = min(buflen, MAXBSIZE);
 	buf = malloc(buflen, M_TEMP, M_WAITOK);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 again:
 	aiov.iov_base = buf;
 	aiov.iov_len = buflen;
@@ -628,7 +628,7 @@ again:
 eof:
 	td->td_retval[0] = uap->nbytes - resid;
 out:
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	VFS_UNLOCK_GIANT(vfslocked);
 	fdrop(fp, td);
 	if (cookies)

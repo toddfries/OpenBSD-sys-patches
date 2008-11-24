@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_slice.c,v 1.62 2007/05/05 17:52:22 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_slice.c,v 1.63 2008/08/09 11:14:05 des Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -385,7 +385,7 @@ g_slice_config(struct g_geom *gp, u_int idx, int how, off_t offset, off_t length
 		pp->mediasize = gsl->length;
 		return (0);
 	}
-	sb = sbuf_new(NULL, NULL, 0, SBUF_AUTOEXTEND);
+	sb = sbuf_new_auto();
 	va_start(ap, fmt);
 	sbuf_vprintf(sb, fmt, ap);
 	va_end(ap);

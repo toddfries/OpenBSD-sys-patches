@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/isa/pmtimer.c,v 1.6 2006/10/02 12:59:57 phk Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/isa/pmtimer.c,v 1.8 2008/10/28 04:32:41 imp Exp $");
 
 /*
  * Timer device driver for power management events.
@@ -35,7 +35,6 @@ __FBSDID("$FreeBSD: src/sys/i386/isa/pmtimer.c,v 1.6 2006/10/02 12:59:57 phk Exp
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bus.h>
-#include <sys/clock.h>
 #include <sys/kernel.h>
 #include <sys/module.h>
 #include <sys/syslog.h>
@@ -70,9 +69,8 @@ static int
 pmtimer_probe(device_t dev)
 {
 
-	if (ISA_PNP_PROBE(device_get_parent(dev), dev, pmtimer_ids) == ENXIO) {
+	if (ISA_PNP_PROBE(device_get_parent(dev), dev, pmtimer_ids) == ENXIO)
 		return (ENXIO);
-	}
 
 	/* only one instance always */
 	return (device_get_unit(dev));

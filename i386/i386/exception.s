@@ -1,7 +1,11 @@
 /*-
  * Copyright (c) 1989, 1990 William F. Jolitz.
  * Copyright (c) 1990 The Regents of the University of California.
+ * Copyright (c) 2007 The FreeBSD Foundation
  * All rights reserved.
+ *
+ * Portions of this software were developed by A. Joseph Koshy under
+ * sponsorship from the FreeBSD Foundation and Google, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,10 +31,12 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/i386/exception.s,v 1.117 2006/12/17 05:07:00 kmacy Exp $
+ * $FreeBSD: src/sys/i386/i386/exception.s,v 1.121 2008/05/25 14:50:47 attilio Exp $
  */
 
 #include "opt_apic.h"
+#include "opt_hwpmc_hooks.h"
+#include "opt_kdtrace.h"
 #include "opt_npx.h"
 
 #include <machine/asmacros.h>
@@ -40,9 +46,27 @@
 #include "assym.s"
 
 #define	SEL_RPL_MASK	0x0003
+#define	GSEL_KPL	0x0020	/* GSEL(GCODE_SEL, SEL_KPL) */
 
+#ifdef KDTRACE_HOOKS
+	.bss
+	.globl	dtrace_invop_jump_addr
+	.align	4
+	.type	dtrace_invop_jump_addr, @object
+        .size	dtrace_invop_jump_addr, 4
+dtrace_invop_jump_addr:
+	.zero	4
+	.globl	dtrace_invop_calltrap_addr
+	.align	4
+	.type	dtrace_invop_calltrap_addr, @object
+        .size	dtrace_invop_calltrap_addr, 4
+dtrace_invop_calltrap_addr:
+	.zero	8
+#endif
 	.text
-
+#ifdef HWPMC_HOOKS
+	ENTRY(start_exceptions)
+#endif
 /*****************************************************************************/
 /* Trap handling                                                             */
 /*****************************************************************************/
@@ -88,8 +112,10 @@ IDTVEC(ofl)
 	pushl $0; TRAP(T_OFLOW)
 IDTVEC(bnd)
 	pushl $0; TRAP(T_BOUND)
+#ifndef KDTRACE_HOOKS
 IDTVEC(ill)
 	pushl $0; TRAP(T_PRIVINFLT)
+#endif
 IDTVEC(dna)
 	pushl $0; TRAP(T_DNA)
 IDTVEC(fpusegm)
@@ -144,6 +170,45 @@ calltrap:
 	 */
 	MEXITCOUNT
 	jmp	doreti
+
+/*
+ * Privileged instruction fault.
+ */
+#ifdef KDTRACE_HOOKS
+	SUPERALIGN_TEXT
+IDTVEC(ill)
+	/* Check if there is no DTrace hook registered. */
+	cmpl	$0,dtrace_invop_jump_addr
+	je	norm_ill
+
+	/* Check if this is a user fault. */
+	cmpl	$GSEL_KPL, 4(%esp)	/* Check the code segment. */
+              
+	/* If so, just handle it as a normal trap. */
+	jne	norm_ill
+              
+	/*
+	 * This is a kernel instruction fault that might have been caused
+	 * by a DTrace provider.
+	 */
+	pushal				/* Push all registers onto the stack. */
+
+	/*
+	 * Set our jump address for the jump back in the event that
+	 * the exception wasn't caused by DTrace at all.
+	 */
+	movl	$norm_ill, dtrace_invop_calltrap_addr
+
+	/* Jump to the code hooked in by DTrace. */
+	jmpl	*dtrace_invop_jump_addr
+
+	/*
+	 * Process the instruction fault in the normal way.
+	 */
+norm_ill:
+	pushl $0
+	TRAP(T_PRIVINFLT)
+#endif
 
 /*
  * SYSCALL CALL GATE (old entry point for a.out binaries)
@@ -261,8 +326,18 @@ doreti:
 	FAKE_MCOUNT($bintr)		/* init "from" bintr -> doreti */
 doreti_next:
 	/*
-	 * Check if ASTs can be handled now.  PSL_VM must be checked first
-	 * since segment registers only have an RPL in non-VM86 mode.
+	 * Check if ASTs can be handled now.  ASTs cannot be safely
+	 * processed when returning from an NMI.
+	 */
+	cmpb	$T_NMI,TF_TRAPNO(%esp)
+#ifdef HWPMC_HOOKS
+	je	doreti_nmi
+#else
+	je	doreti_exit
+#endif
+	/*
+	 * PSL_VM must be checked first since segment registers only
+	 * have an RPL in non-VM86 mode.
 	 */
 	testl	$PSL_VM,TF_EFLAGS(%esp)	/* are we in vm86 mode? */
 	jz	doreti_notvm86
@@ -340,3 +415,32 @@ doreti_popl_fs_fault:
 	movl	$0,TF_ERR(%esp)	/* XXX should be the error code */
 	movl	$T_PROTFLT,TF_TRAPNO(%esp)
 	jmp	alltraps_with_regs_pushed
+#ifdef HWPMC_HOOKS
+doreti_nmi:
+	/*
+	 * Since we are returning from an NMI, check if the current trap
+	 * was from user mode and if so whether the current thread
+	 * needs a user call chain capture.
+	 */
+	testb	$SEL_RPL_MASK,TF_CS(%esp)
+	jz	doreti_exit
+	movl	PCPU(CURTHREAD),%eax	/* curthread present? */
+	orl	%eax,%eax
+	jz	doreti_exit
+	testl	$TDP_CALLCHAIN,TD_PFLAGS(%eax) /* flagged for capture? */
+	jz	doreti_exit
+	/*
+	 * Take the processor out of NMI mode by executing a fake "iret".
+	 */
+	pushfl
+	pushl	%cs
+	pushl	$outofnmi
+	iret
+outofnmi:
+	/*
+	 * Clear interrupts and jump to AST handling code.
+	 */
+	sti
+	jmp	doreti_ast
+	ENTRY(end_exceptions)
+#endif

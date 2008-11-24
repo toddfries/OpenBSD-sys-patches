@@ -28,7 +28,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_tom_sysctl.c,v 1.3 2008/04/19 03:22:42 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_tom_sysctl.c,v 1.6 2008/11/12 04:45:09 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -39,10 +39,14 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_tom_sysctl.c,v 1.3 2008/04/19 
 #include <sys/mbuf.h>
 #include <sys/module.h>
 #include <sys/mutex.h>
+
+#include <sys/sockopt.h>
+#include <sys/sockstate.h>
+#include <sys/sockbuf.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
+
 #include <sys/syslog.h>
-#include <sys/socketvar.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -52,25 +56,29 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_tom_sysctl.c,v 1.3 2008/04/19 
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 
-#include <dev/cxgb/cxgb_osdep.h>
-#include <dev/cxgb/sys/mbufq.h>
+#include <cxgb_osdep.h>
+#include <sys/mbufq.h>
 
 #include <netinet/tcp.h>
 #include <netinet/tcp_var.h>
 #include <netinet/tcp_fsm.h>
 #include <net/route.h>
 
-#include <dev/cxgb/t3cdev.h>
-#include <dev/cxgb/common/cxgb_firmware_exports.h>
-#include <dev/cxgb/common/cxgb_tcb.h>
-#include <dev/cxgb/common/cxgb_ctl_defs.h>
-#include <dev/cxgb/common/cxgb_t3_cpl.h>
-#include <dev/cxgb/cxgb_offload.h>
-#include <dev/cxgb/cxgb_include.h>
-#include <dev/cxgb/ulp/toecore/cxgb_toedev.h>
-#include <dev/cxgb/ulp/tom/cxgb_tom.h>
-#include <dev/cxgb/ulp/tom/cxgb_defs.h>
-#include <dev/cxgb/ulp/tom/cxgb_t3_ddp.h>
+#include <t3cdev.h>
+#include <common/cxgb_firmware_exports.h>
+#include <common/cxgb_tcb.h>
+#include <common/cxgb_ctl_defs.h>
+#include <common/cxgb_t3_cpl.h>
+#include <cxgb_offload.h>
+#include <cxgb_include.h>
+#include <ulp/toecore/cxgb_toedev.h>
+#include <ulp/tom/cxgb_tom.h>
+#include <ulp/tom/cxgb_defs.h>
+#include <ulp/tom/cxgb_t3_ddp.h>
+
+/* Avoid clutter in the hw.* space, keep all toe tunables within hw.cxgb */
+SYSCTL_DECL(_hw_cxgb);
+SYSCTL_NODE(_hw_cxgb, OID_AUTO, toe, CTLFLAG_RD, 0, "TOE parameters");
 
 static struct tom_tunables default_tunable_vals = {
 	.max_host_sndbuf = 32 * 1024,
@@ -96,10 +104,23 @@ static struct tom_tunables default_tunable_vals = {
 	.activated = 1,
 };
 
+static int activated = 1;
+TUNABLE_INT("hw.cxgb.toe.activated", &activated);
+SYSCTL_UINT(_hw_cxgb_toe, OID_AUTO, activated, CTLFLAG_RDTUN, &activated, 0,
+    "enable TOE at init time");
+
+static int ddp = 1;
+TUNABLE_INT("hw.cxgb.toe.ddp", &ddp);
+SYSCTL_UINT(_hw_cxgb_toe, OID_AUTO, ddp, CTLFLAG_RDTUN, &ddp, 0, "enable DDP");
+
 void
 t3_init_tunables(struct tom_data *t)
 {
 	t->conf = default_tunable_vals;
+
+	/* Adjust tunables */
+	t->conf.activated = activated;
+	t->conf.ddp = ddp;
 
 	/* Now apply device specific fixups. */
 	t->conf.mss = T3C_DATA(t->cdev)->tx_max_chunk;

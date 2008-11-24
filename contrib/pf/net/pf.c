@@ -1,4 +1,5 @@
 /*	$OpenBSD: pf.c,v 1.527 2007/02/22 15:23:23 pyr Exp $ */
+/* add:	$OpenBSD: pf.c,v 1.559 2007/09/18 18:45:59 markus Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -40,7 +41,7 @@
 #include "opt_inet6.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf.c,v 1.50 2007/10/28 17:12:46 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf.c,v 1.58 2008/10/04 15:06:34 bz Exp $");
 #endif
 
 #ifdef __FreeBSD__
@@ -91,6 +92,7 @@ __FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf.c,v 1.50 2007/10/28 17:12:46 rwats
 #include <sys/kthread.h>
 #include <sys/lock.h>
 #include <sys/sx.h>
+#include <sys/vimage.h>
 #else
 #include <sys/rwlock.h>
 #endif
@@ -1757,6 +1759,7 @@ pf_send_tcp(const struct pf_rule *r, sa_family_t af,
     u_int8_t flags, u_int16_t win, u_int16_t mss, u_int8_t ttl, int tag,
     u_int16_t rtag, struct ether_header *eh, struct ifnet *ifp)
 {
+	INIT_VNET_INET(curvnet);
 	struct mbuf	*m;
 	int		 len, tlen;
 #ifdef INET
@@ -1839,7 +1842,14 @@ pf_send_tcp(const struct pf_rule *r, sa_family_t af,
 	pf_mtag->tag = rtag;
 
 	if (r != NULL && r->rtableid >= 0)
+#ifdef __FreeBSD__
+	{
+		M_SETFIB(m, r->rtableid);
+#endif
 		pf_mtag->rtableid = r->rtableid;
+#ifdef __FreeBSD__
+	}
+#endif
 #ifdef ALTQ
 	if (r != NULL && r->qid) {
 		pf_mtag->qid = r->qid;
@@ -1909,13 +1919,13 @@ pf_send_tcp(const struct pf_rule *r, sa_family_t af,
 		h->ip_hl = sizeof(*h) >> 2;
 		h->ip_tos = IPTOS_LOWDELAY;
 #ifdef __FreeBSD__
-		h->ip_off = path_mtu_discovery ? IP_DF : 0;
+		h->ip_off = V_path_mtu_discovery ? IP_DF : 0;
 		h->ip_len = len;
 #else
 		h->ip_off = htons(ip_mtudisc ? IP_DF : 0);
 		h->ip_len = htons(len);
 #endif
-		h->ip_ttl = ttl ? ttl : ip_defttl;
+		h->ip_ttl = ttl ? ttl : V_ip_defttl;
 		h->ip_sum = 0;
 		if (eh == NULL) {
 #ifdef __FreeBSD__
@@ -2004,7 +2014,14 @@ pf_send_icmp(struct mbuf *m, u_int8_t type, u_int8_t code, sa_family_t af,
 #endif
 
 	if (r->rtableid >= 0)
+#ifdef __FreeBSD__
+	{
+		M_SETFIB(m0, r->rtableid);
+#endif
 		pf_mtag->rtableid = r->rtableid;
+#ifdef __FreeBSD__
+	}
+#endif
 
 #ifdef ALTQ
 	if (r->qid) {
@@ -2195,7 +2212,14 @@ pf_tag_packet(struct mbuf *m, struct pf_mtag *pf_mtag, int tag, int rtableid)
 	if (tag > 0)
 		pf_mtag->tag = tag;
 	if (rtableid >= 0)
+#ifdef __FreeBSD__
+	{
+		M_SETFIB(m, rtableid);
+#endif
 		pf_mtag->rtableid = rtableid;
+#ifdef __FreeBSD__
+	}
+#endif
 
 	return (0);
 }
@@ -2899,6 +2923,7 @@ pf_socket_lookup(int direction, struct pf_pdesc *pd, struct inpcb *inp_arg)
 pf_socket_lookup(int direction, struct pf_pdesc *pd)
 #endif
 {
+	INIT_VNET_INET(curvnet);
 	struct pf_addr		*saddr, *daddr;
 	u_int16_t		 sport, dport;
 #ifdef __FreeBSD__
@@ -2916,13 +2941,9 @@ pf_socket_lookup(int direction, struct pf_pdesc *pd)
 #ifdef __FreeBSD__
 	if (inp_arg != NULL) {
 		INP_LOCK_ASSERT(inp_arg);
-		if (inp_arg->inp_socket) {
-			pd->lookup.uid = inp_arg->inp_socket->so_cred->cr_uid;
-			pd->lookup.gid =
-			    inp_arg->inp_socket->so_cred->cr_groups[0];
-			return (1);
-		} else
-			return (-1);
+		pd->lookup.uid = inp_arg->inp_cred->cr_uid;
+		pd->lookup.gid = inp_arg->inp_cred->cr_groups[0];
+		return (1);
 	}
 #endif
 	switch (pd->proto) {
@@ -2932,7 +2953,7 @@ pf_socket_lookup(int direction, struct pf_pdesc *pd)
 		sport = pd->hdr.tcp->th_sport;
 		dport = pd->hdr.tcp->th_dport;
 #ifdef __FreeBSD__
-		pi = &tcbinfo;
+		pi = &V_tcbinfo;
 #else
 		tb = &tcbtable;
 #endif
@@ -2943,7 +2964,7 @@ pf_socket_lookup(int direction, struct pf_pdesc *pd)
 		sport = pd->hdr.udp->uh_sport;
 		dport = pd->hdr.udp->uh_dport;
 #ifdef __FreeBSD__
-		pi = &udbinfo;
+		pi = &V_udbinfo;
 #else
 		tb = &udbtable;
 #endif
@@ -3018,15 +3039,8 @@ pf_socket_lookup(int direction, struct pf_pdesc *pd)
 		return (-1);
 	}
 #ifdef __FreeBSD__
-	INP_LOCK(inp);
-	if ((inp->inp_socket == NULL) || (inp->inp_socket->so_cred == NULL)) {
-		INP_UNLOCK(inp);
-		INP_INFO_RUNLOCK(pi);
-		return (-1);
-	}
-	pd->lookup.uid = inp->inp_socket->so_cred->cr_uid;
-	pd->lookup.gid = inp->inp_socket->so_cred->cr_groups[0];
-	INP_UNLOCK(inp);
+	pd->lookup.uid = inp->inp_cred->cr_uid;
+	pd->lookup.gid = inp->inp_cred->cr_groups[0];
 	INP_INFO_RUNLOCK(pi);
 #else
 	pd->lookup.uid = inp->inp_socket->so_euid;
@@ -3079,10 +3093,11 @@ pf_get_wscale(struct mbuf *m, int off, u_int16_t th_off, sa_family_t af)
 u_int16_t
 pf_get_mss(struct mbuf *m, int off, u_int16_t th_off, sa_family_t af)
 {
+	INIT_VNET_INET(curvnet);
 	int		 hlen;
 	u_int8_t	 hdr[60];
 	u_int8_t	*opt, optlen;
-	u_int16_t	 mss = tcp_mssdflt;
+	u_int16_t	 mss = V_tcp_mssdflt;
 
 	hlen = th_off << 2;	/* hlen <= sizeof(hdr) */
 	if (hlen <= sizeof(struct tcphdr))
@@ -3118,6 +3133,7 @@ u_int16_t
 pf_calc_mss(struct pf_addr *addr, sa_family_t af, u_int16_t offer)
 {
 #ifdef INET
+	INIT_VNET_INET(curvnet);
 	struct sockaddr_in	*dst;
 	struct route		 ro;
 #endif /* INET */
@@ -3127,7 +3143,7 @@ pf_calc_mss(struct pf_addr *addr, sa_family_t af, u_int16_t offer)
 #endif /* INET6 */
 	struct rtentry		*rt = NULL;
 	int			 hlen = 0;	/* make the compiler happy */
-	u_int16_t		 mss = tcp_mssdflt;
+	u_int16_t		 mss = V_tcp_mssdflt;
 
 	switch (af) {
 #ifdef INET
@@ -3142,7 +3158,7 @@ pf_calc_mss(struct pf_addr *addr, sa_family_t af, u_int16_t offer)
 #ifdef RTF_PRCLONING
 		rtalloc_ign(&ro, (RTF_CLONING | RTF_PRCLONING));
 #else /* !RTF_PRCLONING */
-		rtalloc_ign(&ro, RTF_CLONING);
+		in_rtalloc_ign(&ro, RTF_CLONING, 0);
 #endif
 #else /* ! __FreeBSD__ */
 		rtalloc_noclone(&ro, NO_CLONING);
@@ -3175,7 +3191,7 @@ pf_calc_mss(struct pf_addr *addr, sa_family_t af, u_int16_t offer)
 
 	if (rt && rt->rt_ifp) {
 		mss = rt->rt_ifp->if_mtu - hlen - sizeof(struct tcphdr);
-		mss = max(tcp_mssdflt, mss);
+		mss = max(V_tcp_mssdflt, mss);
 		RTFREE(rt);
 	}
 	mss = min(mss, offer);
@@ -3220,6 +3236,7 @@ pf_test_tcp(struct pf_rule **rm, struct pf_state **sm, int direction,
     struct ifqueue *ifq)
 #endif
 {
+	INIT_VNET_INET(curvnet);
 	struct pf_rule		*nr = NULL;
 	struct pf_addr		*saddr = pd->src, *daddr = pd->dst;
 	struct tcphdr		*th = pd->hdr.tcp;
@@ -3231,7 +3248,7 @@ pf_test_tcp(struct pf_rule **rm, struct pf_state **sm, int direction,
 	u_short			 reason;
 	int			 rewrite = 0;
 	int			 tag = -1, rtableid = -1;
-	u_int16_t		 mss = tcp_mssdflt;
+	u_int16_t		 mss = V_tcp_mssdflt;
 	int			 asd = 0;
 	int			 match = 0;
 
@@ -4560,9 +4577,17 @@ pf_test_fragment(struct pf_rule **rm, int direction, struct pfi_kif *kif,
 			r = r->skip[PF_SKIP_DST_ADDR].ptr;
 		else if (r->tos && !(r->tos == pd->tos))
 			r = TAILQ_NEXT(r, entries);
-		else if (r->src.port_op || r->dst.port_op ||
-		    r->flagset || r->type || r->code ||
-		    r->os_fingerprint != PF_OSFP_ANY)
+		else if (r->os_fingerprint != PF_OSFP_ANY)
+			r = TAILQ_NEXT(r, entries);
+		else if (pd->proto == IPPROTO_UDP &&
+		    (r->src.port_op || r->dst.port_op))
+			r = TAILQ_NEXT(r, entries);
+		else if (pd->proto == IPPROTO_TCP &&
+		    (r->src.port_op || r->dst.port_op || r->flagset))
+			r = TAILQ_NEXT(r, entries);
+		else if ((pd->proto == IPPROTO_ICMP ||
+		    pd->proto == IPPROTO_ICMPV6) &&
+		    (r->type || r->code))
 			r = TAILQ_NEXT(r, entries);
 		else if (r->prob && r->prob <= arc4random())
 			r = TAILQ_NEXT(r, entries);
@@ -4749,6 +4774,22 @@ pf_test_state_tcp(struct pf_state **state, int direction, struct pfi_kif *kif,
 			REASON_SET(reason, PFRES_SYNPROXY);
 			return (PF_SYNPROXY_DROP);
 		}
+	}
+
+	if (((th->th_flags & (TH_SYN|TH_ACK)) == TH_SYN) &&
+	    dst->state >= TCPS_FIN_WAIT_2 &&
+	    src->state >= TCPS_FIN_WAIT_2) {
+		if (pf_status.debug >= PF_DEBUG_MISC) {
+			printf("pf: state reuse ");
+			pf_print_state(*state);
+			pf_print_flags(th->th_flags);
+			printf("\n");
+		}
+		/* XXX make sure it's the same direction ?? */
+		(*state)->src.state = (*state)->dst.state = TCPS_CLOSED;
+		pf_unlink_state(*state);
+		*state = NULL;
+		return (PF_DROP);
 	}
 
 	if (src->wscale && dst->wscale && !(th->th_flags & TH_SYN)) {
@@ -5939,7 +5980,11 @@ pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kif *kif)
 		goto out;
 
 #ifdef __FreeBSD__
-	rtalloc_ign((struct route *)&ro, RTF_CLONING);
+/* XXX MRT not always INET */ /* stick with table 0 though */
+	if (af == AF_INET)
+		in_rtalloc_ign((struct route *)&ro, RTF_CLONING, 0);
+	else
+		rtalloc_ign((struct route *)&ro, RTF_CLONING);
 #else /* ! __FreeBSD__ */
 	rtalloc_noclone((struct route *)&ro, NO_CLONING);
 #endif
@@ -6018,7 +6063,10 @@ pf_rtlabel_match(struct pf_addr *addr, sa_family_t af, struct pf_addr_wrap *aw)
 # ifdef RTF_PRCLONING
 	rtalloc_ign((struct route *)&ro, (RTF_CLONING|RTF_PRCLONING));
 # else /* !RTF_PRCLONING */
-	rtalloc_ign((struct route *)&ro, RTF_CLONING);
+	if (af == AF_INET)
+		in_rtalloc_ign((struct route *)&ro, RTF_CLONING, 0);
+	else
+		rtalloc_ign((struct route *)&ro, RTF_CLONING);
 # endif
 #else /* ! __FreeBSD__ */
 	rtalloc_noclone((struct route *)&ro, NO_CLONING);
@@ -6043,6 +6091,7 @@ void
 pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
     struct pf_state *s, struct pf_pdesc *pd)
 {
+	INIT_VNET_INET(curvnet);
 	struct mbuf		*m0, *m1;
 	struct route		 iproute;
 	struct route		*ro = NULL;
@@ -6098,9 +6147,9 @@ pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	dst->sin_addr = ip->ip_dst;
 
 	if (r->rt == PF_FASTROUTE) {
-		rtalloc(ro);
+		in_rtalloc(ro, 0);
 		if (ro->ro_rt == 0) {
-			ipstat.ips_noroute++;
+			V_ipstat.ips_noroute++;
 			goto bad;
 		}
 
@@ -6231,16 +6280,16 @@ pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 		if ((ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
 		    ifp->if_bridge == NULL) {
 			m0->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
-			ipstat.ips_outhwcsum++;
+			V_ipstat.ips_outhwcsum++;
 		} else {
 			ip->ip_sum = 0;
 			ip->ip_sum = in_cksum(m0, ip->ip_hl << 2);
 		}
 		/* Update relevant hardware checksum stats for TCP/UDP */
 		if (m0->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
-			tcpstat.tcps_outhwcsum++;
+			V_tcpstat.tcps_outhwcsum++;
 		else if (m0->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
-			udpstat.udps_outhwcsum++;
+			V_udpstat.udps_outhwcsum++;
 		error = (*ifp->if_output)(ifp, m0, sintosa(dst), NULL);
 		goto done;
 	}
@@ -6250,7 +6299,7 @@ pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	 * Must be able to put at least 8 bytes per fragment.
 	 */
 	if (ip->ip_off & htons(IP_DF)) {
-		ipstat.ips_cantfrag++;
+		V_ipstat.ips_cantfrag++;
 		if (r->rt != PF_DUPTO) {
 #ifdef __FreeBSD__
 			/* icmp_error() expects host byte ordering */
@@ -6307,7 +6356,7 @@ pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	}
 
 	if (error == 0)
-		ipstat.ips_fragmented++;
+		V_ipstat.ips_fragmented++;
 
 done:
 	if (r->rt != PF_DUPTO)
@@ -6580,18 +6629,30 @@ pf_check_proto_cksum(struct mbuf *m, int off, int len, u_int8_t p, sa_family_t a
 	if (sum) {
 		switch (p) {
 		case IPPROTO_TCP:
-			tcpstat.tcps_rcvbadsum++;
+		    {
+			INIT_VNET_INET(curvnet);
+			V_tcpstat.tcps_rcvbadsum++;
 			break;
+		    }
 		case IPPROTO_UDP:
-			udpstat.udps_badsum++;
+		    {
+			INIT_VNET_INET(curvnet);
+			V_udpstat.udps_badsum++;
 			break;
+		    }
 		case IPPROTO_ICMP:
-			icmpstat.icps_checksum++;
+		    {
+			INIT_VNET_INET(curvnet);
+			V_icmpstat.icps_checksum++;
 			break;
+		    }
 #ifdef INET6
 		case IPPROTO_ICMPV6:
-			icmp6stat.icp6s_checksum++;
+		    {
+			INIT_VNET_INET6(curvnet);
+			V_icmp6stat.icp6s_checksum++;
 			break;
+		    }
 #endif /* INET6 */
 		}
 		return (1);
@@ -6676,17 +6737,17 @@ pf_check_proto_cksum(struct mbuf *m, int off, int len, u_int8_t p,
 		m->m_pkthdr.csum_flags |= flag_bad;
 		switch (p) {
 		case IPPROTO_TCP:
-			tcpstat.tcps_rcvbadsum++;
+			V_tcpstat.tcps_rcvbadsum++;
 			break;
 		case IPPROTO_UDP:
-			udpstat.udps_badsum++;
+			V_udpstat.udps_badsum++;
 			break;
 		case IPPROTO_ICMP:
-			icmpstat.icps_checksum++;
+			V_icmpstat.icps_checksum++;
 			break;
 #ifdef INET6
 		case IPPROTO_ICMPV6:
-			icmp6stat.icp6s_checksum++;
+			V_icmp6stat.icp6s_checksum++;
 			break;
 #endif /* INET6 */
 		}

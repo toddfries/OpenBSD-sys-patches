@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/svr4/Makefile,v 1.30 2006/07/01 10:51:55 markm Exp $
+# $FreeBSD: src/sys/modules/svr4/Makefile,v 1.32 2008/09/15 15:09:35 ed Exp $
 
 .PATH:	${.CURDIR}/../../${MACHINE_ARCH}/svr4 ${.CURDIR}/../../compat/svr4
 KMOD=	svr4
@@ -24,14 +24,9 @@ svr4_locore.o: svr4_locore.s svr4_assym.h
 svr4_genassym.o: svr4_genassym.c svr4.h @ machine
 	${CC} -c ${CFLAGS:N-fno-common} ${.IMPSRC}
 
-.if !defined(KERNBUILDDIR)
-opt_compat.h:
-	echo "#define COMPAT_43 1" > opt_compat.h
-
-.if defined(DEBUG)
+.if !defined(KERNBUILDDIR) && defined(DEBUG)
 opt_svr4.h:
-	echo "#define DEBUG_SVR4 1" > opt_svr4.h
-.endif
+	echo "#define DEBUG_SVR4 1" > ${.TARGET}
 .endif
 
 .include <bsd.kmod.mk>

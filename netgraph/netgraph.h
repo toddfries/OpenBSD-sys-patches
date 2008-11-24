@@ -37,7 +37,7 @@
  *
  * Author: Julian Elischer <julian@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/netgraph.h,v 1.69 2007/10/19 15:04:17 mav Exp $
+ * $FreeBSD: src/sys/netgraph/netgraph.h,v 1.77 2008/10/23 15:53:51 des Exp $
  * $Whistle: netgraph.h,v 1.29 1999/11/01 07:56:13 julian Exp $
  */
 
@@ -54,7 +54,9 @@
 #include <sys/module.h>
 #include <sys/mutex.h>
 
+#ifdef HAVE_KERNEL_OPTION_HEADERS
 #include "opt_netgraph.h"
+#endif
 
 /* debugging options */
 #define NG_SEPARATE_MALLOC	/* make modules use their own malloc types */
@@ -66,7 +68,7 @@
  * Change it for NETGRAPH_DEBUG version so we cannot mix debug and non debug
  * modules.
  */
-#define _NG_ABI_VERSION 11
+#define _NG_ABI_VERSION 12
 #ifdef	NETGRAPH_DEBUG /*----------------------------------------------*/
 #define NG_ABI_VERSION	(_NG_ABI_VERSION + 0x10000)
 #else	/* NETGRAPH_DEBUG */ /*----------------------------------------------*/
@@ -107,13 +109,13 @@ struct ng_hook {
 	char	hk_name[NG_HOOKSIZ];	/* what this node knows this link as */
 	void   *hk_private;		/* node dependant ID for this hook */
 	int	hk_flags;		/* info about this hook/link */
-	int	hk_refs;		/* dont actually free this till 0 */
 	int	hk_type;		/* tbd: hook data link type */
 	struct	ng_hook *hk_peer;	/* the other end of this link */
 	struct	ng_node *hk_node;	/* The node this hook is attached to */
 	LIST_ENTRY(ng_hook) hk_hooks;	/* linked list of all hooks on node */
 	ng_rcvmsg_t	*hk_rcvmsg;	/* control messages come here */
 	ng_rcvdata_t	*hk_rcvdata;	/* data comes here */
+	int	hk_refs;		/* dont actually free this till 0 */
 #ifdef	NETGRAPH_DEBUG /*----------------------------------------------*/
 #define HK_MAGIC 0x78573011
 	int	hk_magic;
@@ -127,6 +129,7 @@ struct ng_hook {
 #define HK_QUEUE		0x0002	/* queue for later delivery */
 #define HK_FORCE_WRITER		0x0004	/* Incoming data queued as a writer */
 #define HK_DEAD			0x0008	/* This is the dead hook.. don't free */
+#define HK_HI_STACK		0x0010	/* Hook has hi stack usage */
 
 /*
  * Public Methods for hook
@@ -147,6 +150,7 @@ void ng_unref_hook(hook_p hook); /* don't move this */
 #define _NG_HOOK_FORCE_WRITER(hook)				\
 		do { hook->hk_flags |= HK_FORCE_WRITER; } while (0)
 #define _NG_HOOK_FORCE_QUEUE(hook) do { hook->hk_flags |= HK_QUEUE; } while (0)
+#define _NG_HOOK_HI_STACK(hook) do { hook->hk_flags |= HK_HI_STACK; } while (0)
 
 /* Some shortcuts */
 #define NG_PEER_NODE(hook)	NG_HOOK_NODE(NG_HOOK_PEER(hook))
@@ -277,6 +281,13 @@ _ng_hook_force_queue(hook_p hook, char * file, int line)
 	_NG_HOOK_FORCE_QUEUE(hook);
 }
 
+static __inline void
+_ng_hook_hi_stack(hook_p hook, char * file, int line)
+{
+	_chkhook(hook, file, line);
+	_NG_HOOK_HI_STACK(hook);
+}
+
 
 #define	NG_HOOK_REF(hook)		_ng_hook_ref(hook, _NN_)
 #define NG_HOOK_NAME(hook)		_ng_hook_name(hook, _NN_)
@@ -291,6 +302,7 @@ _ng_hook_force_queue(hook_p hook, char * file, int line)
 #define NG_HOOK_PEER(hook)		_ng_hook_peer(hook, _NN_)
 #define NG_HOOK_FORCE_WRITER(hook)	_ng_hook_force_writer(hook, _NN_)
 #define NG_HOOK_FORCE_QUEUE(hook)	_ng_hook_force_queue(hook, _NN_)
+#define NG_HOOK_HI_STACK(hook)		_ng_hook_hi_stack(hook, _NN_)
 
 #else	/* NETGRAPH_DEBUG */ /*----------------------------------------------*/
 
@@ -307,6 +319,7 @@ _ng_hook_force_queue(hook_p hook, char * file, int line)
 #define NG_HOOK_PEER(hook)		_NG_HOOK_PEER(hook)
 #define NG_HOOK_FORCE_WRITER(hook)	_NG_HOOK_FORCE_WRITER(hook)
 #define NG_HOOK_FORCE_QUEUE(hook)	_NG_HOOK_FORCE_QUEUE(hook)
+#define NG_HOOK_HI_STACK(hook)		_NG_HOOK_HI_STACK(hook)
 
 #endif	/* NETGRAPH_DEBUG */ /*----------------------------------------------*/
 
@@ -320,26 +333,25 @@ _ng_hook_force_queue(hook_p hook, char * file, int line)
  * embedded in the node structure
  */
 struct ng_queue {
-	u_long		q_flags;
+	u_int		q_flags;	/* Current r/w/q lock flags */
+	u_int		q_flags2;	/* Other queue flags */
 	struct mtx	q_mtx;
-	item_p queue;
-	item_p *last;
-	struct ng_node *q_node;		/* find the front of the node.. */
+	STAILQ_ENTRY(ng_node)	q_work;	/* nodes with work to do */
+	STAILQ_HEAD(, ng_item)	queue;	/* actually items queue */
 };
 
 struct ng_node {
 	char	nd_name[NG_NODESIZ];	/* optional globally unique name */
 	struct	ng_type *nd_type;	/* the installed 'type' */
 	int	nd_flags;		/* see below for bit definitions */
-	int	nd_refs;		/* # of references to this node */
 	int	nd_numhooks;		/* number of hooks */
 	void   *nd_private;		/* node type dependant node ID */
 	ng_ID_t	nd_ID;			/* Unique per node */
 	LIST_HEAD(hooks, ng_hook) nd_hooks;	/* linked list of node hooks */
 	LIST_ENTRY(ng_node)	  nd_nodes;	/* linked list of all nodes */
 	LIST_ENTRY(ng_node)	  nd_idnodes;	/* ID hash collision list */
-	TAILQ_ENTRY(ng_node)	  nd_work;	/* nodes with work to do */
 	struct	ng_queue	  nd_input_queue; /* input queue for locking */
+	int	nd_refs;		/* # of references to this node */
 #ifdef	NETGRAPH_DEBUG /*----------------------------------------------*/
 #define ND_MAGIC 0x59264837
 	int	nd_magic;
@@ -352,14 +364,13 @@ struct ng_node {
 /* Flags for a node */
 #define NGF_INVALID	0x00000001	/* free when refs go to 0 */
 #define NG_INVALID	NGF_INVALID	/* compat for old code */
-#define NGF_WORKQ	0x00000002	/* node is on the work queue */
-#define NG_WORKQ	NGF_WORKQ	/* compat for old code */
 #define NGF_FORCE_WRITER	0x00000004	/* Never multithread this node */
 #define NG_FORCE_WRITER	NGF_FORCE_WRITER /* compat for old code */
 #define NGF_CLOSING	0x00000008	/* ng_rmnode() at work */
 #define NG_CLOSING	NGF_CLOSING	/* compat for old code */
 #define NGF_REALLY_DIE	0x00000010	/* "persistent" node is unloading */
 #define NG_REALLY_DIE	NGF_REALLY_DIE	/* compat for old code */
+#define NGF_HI_STACK	0x00000020	/* node has hi stack usage */
 #define NGF_TYPE1	0x10000000	/* reserved for type specific storage */
 #define NGF_TYPE2	0x20000000	/* reserved for type specific storage */
 #define NGF_TYPE3	0x40000000	/* reserved for type specific storage */
@@ -382,6 +393,8 @@ int	ng_unref_node(node_p node); /* don't move this */
 #define _NG_NODE_NUMHOOKS(node)	((node)->nd_numhooks + 0) /* rvalue */
 #define _NG_NODE_FORCE_WRITER(node)					\
 	do{ node->nd_flags |= NGF_FORCE_WRITER; }while (0)
+#define _NG_NODE_HI_STACK(node)						\
+	do{ node->nd_flags |= NGF_HI_STACK; }while (0)
 #define _NG_NODE_REALLY_DIE(node)					\
 	do{ node->nd_flags |= (NGF_REALLY_DIE|NGF_INVALID); }while (0)
 #define _NG_NODE_REVIVE(node) \
@@ -513,6 +526,13 @@ _ng_node_force_writer(node_p node, char *file, int line)
 }
 
 static __inline void
+_ng_node_hi_stack(node_p node, char *file, int line)
+{
+	_chknode(node, file, line);
+	_NG_NODE_HI_STACK(node);
+}
+
+static __inline void
 _ng_node_really_die(node_p node, char *file, int line)
 {
 	_chknode(node, file, line);
@@ -546,6 +566,7 @@ _ng_node_foreach_hook(node_p node, ng_fn_eachhook *fn, void *arg,
 #define NG_NODE_IS_VALID(node)		_ng_node_is_valid(node, _NN_)
 #define NG_NODE_NOT_VALID(node)		_ng_node_not_valid(node, _NN_)
 #define NG_NODE_FORCE_WRITER(node) 	_ng_node_force_writer(node, _NN_)
+#define NG_NODE_HI_STACK(node) 		_ng_node_hi_stack(node, _NN_)
 #define NG_NODE_REALLY_DIE(node) 	_ng_node_really_die(node, _NN_)
 #define NG_NODE_NUMHOOKS(node)		_ng_node_numhooks(node, _NN_)
 #define NG_NODE_REVIVE(node)		_ng_node_revive(node, _NN_)
@@ -566,6 +587,7 @@ _ng_node_foreach_hook(node_p node, ng_fn_eachhook *fn, void *arg,
 #define NG_NODE_IS_VALID(node)		_NG_NODE_IS_VALID(node)	
 #define NG_NODE_NOT_VALID(node)		_NG_NODE_NOT_VALID(node)	
 #define NG_NODE_FORCE_WRITER(node) 	_NG_NODE_FORCE_WRITER(node)
+#define NG_NODE_HI_STACK(node) 		_NG_NODE_HI_STACK(node)
 #define NG_NODE_REALLY_DIE(node) 	_NG_NODE_REALLY_DIE(node)
 #define NG_NODE_NUMHOOKS(node)		_NG_NODE_NUMHOOKS(node)	
 #define NG_NODE_REVIVE(node)		_NG_NODE_REVIVE(node)
@@ -585,10 +607,11 @@ struct ng_apply_info {
 	ng_apply_t	*apply;
 	void		*context;
 	int		refs;
+	int		error;
 };
 struct ng_item {
 	u_long	el_flags;
-	item_p	el_next;
+	STAILQ_ENTRY(ng_item)	el_next;
 	node_p	el_dest; /* The node it will be applied against (or NULL) */
 	hook_p	el_hook; /* Entering hook. Optional in Control messages */
 	union {
@@ -611,7 +634,7 @@ struct ng_item {
 	 * and its context.
 	 */
 	struct ng_apply_info	*apply;
-	void		*PAD1;
+	u_int	depth;
 #ifdef	NETGRAPH_DEBUG /*----------------------------------------------*/
 	char *lastfile;
 	int  lastline;
@@ -892,7 +915,7 @@ _ngi_hook(item_p item, char *file, int line)
 #define NG_FREE_MSG(msg)						\
 	do {								\
 		if ((msg)) {						\
-			FREE((msg), M_NETGRAPH_MSG);			\
+			free((msg), M_NETGRAPH_MSG);			\
 			(msg) = NULL;					\
 		}	 						\
 	} while (0)
@@ -1107,25 +1130,16 @@ item_p	ng_package_msg(struct ng_mesg *msg, int flags);
 item_p	ng_package_msg_self(node_p here, hook_p hook, struct ng_mesg *msg);
 void	ng_replace_retaddr(node_p here, item_p item, ng_ID_t retaddr);
 int	ng_rmhook_self(hook_p hook);	/* if a node wants to kill a hook */
+int	ng_rmnode_flags(node_p here, int flags);
 int	ng_rmnode_self(node_p here);	/* if a node wants to suicide */
 int	ng_rmtype(struct ng_type *tp);
 int	ng_snd_item(item_p item, int queue);
-int 	ng_send_fn1(node_p node, hook_p hook, ng_item_fn *fn,
+int 	ng_send_fn(node_p node, hook_p hook, ng_item_fn *fn, void *arg1,
+	int arg2);
+int 	ng_send_fn1(node_p node, hook_p hook, ng_item_fn *fn, void *arg1,
+	int arg2, int flags);
+int 	ng_send_fn2(node_p node, hook_p hook, item_p pitem, ng_item_fn2 *fn,
 	void *arg1, int arg2, int flags);
-#define	ng_send_fn(node, hook, fn, arg1, arg2) \
-	ng_send_fn1(node, hook, fn, arg1, arg2, NG_NOFLAGS)
-int 	ng_send_fn21(node_p node, hook_p hook, ng_item_fn2 *fn,
-	void *arg1, int arg2, int flags);
-#define	ng_send_fn2(node, hook, fn, arg1, arg2) \
-	ng_send_fn21(node, hook, fn, arg1, arg2, NG_NOFLAGS)
-int 	ng_send_fn21_cont(item_p item, node_p node, hook_p hook, ng_item_fn2 *fn,
-	void *arg1, int arg2, int flags);
-#define	ng_send_fn2_cont(item, node, hook, fn, arg1, arg2) \
-	ng_send_fn21_cont(item, node, hook, fn, arg1, arg2, NG_NOFLAGS)
-int 	ng_send_fn21_fwd(item_p item, node_p node, hook_p hook, ng_item_fn2 *fn,
-	void *arg1, int arg2, int flags);
-#define	ng_send_fn2_fwd(item, node, hook, fn, arg1, arg2) \
-	ng_send_fn21_fwd(item, node, hook, fn, arg1, arg2, NG_NOFLAGS)
 int	ng_uncallout(struct callout *c, node_p node);
 int	ng_callout(struct callout *c, node_p node, hook_p hook, int ticks,
 	    ng_item_fn *fn, void * arg1, int arg2);
@@ -1135,7 +1149,9 @@ int	ng_callout(struct callout *c, node_p node, hook_p hook, int ticks,
 #define	NG_NOFLAGS	0x00000000	/* no special options */
 #define	NG_QUEUE	0x00000001	/* enqueue item, don't dispatch */
 #define	NG_WAITOK	0x00000002	/* use M_WAITOK, etc. */
+/* XXXGL: NG_PROGRESS unused since ng_base.c rev. 1.136. Should be deleted? */
 #define	NG_PROGRESS	0x00000004	/* return EINPROGRESS if queued */
+#define	NG_REUSE_ITEM	0x00000008	/* supplied item should be reused */
 
 /*
  * prototypes the user should DEFINITELY not use directly
@@ -1167,5 +1183,24 @@ typedef void *meta_p;
 #define NG_FREE_META(meta)
 #define NGI_GET_META(i,m)
 #define	ng_copy_meta(meta) NULL
+
+/* Hash related definitions */
+#define	NG_ID_HASH_SIZE 128 /* most systems wont need even this many */
+
+/* Virtualization macros */
+#define	INIT_VNET_NETGRAPH(vnet) \
+	INIT_FROM_VNET(vnet, VNET_MOD_NETGRAPH, \
+	    struct vnet_netgraph, vnet_netgraph)
+
+#define	VNET_NETGRAPH(sym)	VSYM(vnet_netgraph, sym)
+
+/* Symbol translation macros */
+#define	V_nextID		VNET_NETGRAPH(nextID)
+#define	V_ng_ID_hash		VNET_NETGRAPH(ng_ID_hash)
+#define	V_ng_eiface_unit	VNET_NETGRAPH(ng_eiface_unit)
+#define	V_ng_iface_unit		VNET_NETGRAPH(ng_iface_unit)
+#define	V_ng_name_hash		VNET_NETGRAPH(ng_name_hash)
+#define	V_ng_nodelist		VNET_NETGRAPH(ng_nodelist)
+#define	V_ng_wormhole_unit	VNET_NETGRAPH(ng_wormhole_unit)
 
 #endif /* _NETGRAPH_NETGRAPH_H_ */

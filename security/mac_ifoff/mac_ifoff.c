@@ -35,7 +35,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_ifoff/mac_ifoff.c,v 1.16 2007/10/29 13:33:05 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac_ifoff/mac_ifoff.c,v 1.17 2008/08/23 15:26:36 rwatson Exp $
  */
 
 /*
@@ -170,4 +170,4 @@ static struct mac_policy_ops ifoff_ops =
 };
 
 MAC_POLICY_SET(&ifoff_ops, mac_ifoff, "TrustedBSD MAC/ifoff",
-    MPC_LOADTIME_FLAG_UNLOADOK, NULL);
+    MPC_LOADTIME_FLAG_UNLOADOK, NULL, 0);

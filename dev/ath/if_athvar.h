@@ -26,7 +26,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGES.
  *
- * $FreeBSD: src/sys/dev/ath/if_athvar.h,v 1.63 2008/04/20 20:35:35 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/if_athvar.h,v 1.74 2008/11/24 01:31:10 sam Exp $
  */
 
 /*
@@ -82,7 +82,6 @@ struct ath_buf;
 /* driver-specific node state */
 struct ath_node {
 	struct ieee80211_node an_node;	/* base class */
-	const struct ieee80211_txparam *an_tp;
 	u_int8_t	an_mgmtrix;	/* min h/w rate index */
 	u_int8_t	an_mcastrix;	/* mcast h/w rate index */
 	struct ath_buf	*an_ff_buf[WME_NUM_AC]; /* ff staging area */
@@ -101,13 +100,16 @@ struct ath_node {
     if ((y) >= -20)							\
     	x = ATH_LPF_RSSI((x), ATH_RSSI_IN((y)), ATH_RSSI_LPF_LEN);	\
 } while (0)
+#define	ATH_EP_RND(x,mul) \
+	((((x)%(mul)) >= ((mul)/2)) ? ((x) + ((mul) - 1)) / (mul) : (x)/(mul))
+#define	ATH_RSSI(x)		ATH_EP_RND(x, HAL_RSSI_EP_MULTIPLIER)
 
 struct ath_buf {
 	STAILQ_ENTRY(ath_buf)	bf_list;
 	TAILQ_ENTRY(ath_buf)	bf_stagelist;	/* stage queue list */
 	u_int32_t		bf_age;		/* age when placed on stageq */
 	int			bf_nseg;
-	int			bf_flags;	/* tx descriptor flags */
+	int			bf_txflags;	/* tx descriptor flags */
 	struct ath_desc		*bf_desc;	/* virtual addr of desc */
 	struct ath_desc_status	bf_status;	/* tx/rx status */
 	bus_addr_t		bf_daddr;	/* physical addr of desc */
@@ -245,7 +247,10 @@ struct ath_softc {
 				sc_beacons  : 1,/* beacons running */
 				sc_swbmiss  : 1,/* sta mode using sw bmiss */
 				sc_stagbeacons:1,/* use staggered beacons */
-				sc_wmetkipmic:1;/* can do WME+TKIP MIC */
+				sc_wmetkipmic:1,/* can do WME+TKIP MIC */
+				sc_resume_up: 1;/* on resume, start all vaps */
+	uint32_t		sc_eerd;	/* regdomain from EEPROM */
+	uint32_t		sc_eecc;	/* country code from EEPROM */
 						/* rate tables */
 #define	IEEE80211_MODE_HALF	(IEEE80211_MODE_MAX+0)
 #define	IEEE80211_MODE_QUARTER	(IEEE80211_MODE_MAX+1)
@@ -279,8 +284,7 @@ struct ath_softc {
 	u_int			sc_ledon;	/* pin setting for LED on */
 	u_int			sc_ledidle;	/* idle polling interval */
 	int			sc_ledevent;	/* time of last LED event */
-	u_int8_t		sc_rxrate;	/* current rx rate for LED */
-	u_int8_t		sc_txrate;	/* current tx rate for LED */
+	u_int8_t		sc_txrix;	/* current tx rate for LED */
 	u_int16_t		sc_ledoff;	/* off time for current blink */
 	struct callout		sc_ledtimer;	/* led off timer */
 
@@ -298,7 +302,6 @@ struct ath_softc {
 	struct mbuf		*sc_rxpending;	/* pending receive data */
 	u_int32_t		*sc_rxlink;	/* link ptr in last RX desc */
 	struct task		sc_rxtask;	/* rx int processing */
-	struct task		sc_rxorntask;	/* rxorn int processing */
 	u_int8_t		sc_defant;	/* current default antenna */
 	u_int8_t		sc_rxotherant;	/* rx's on non-default antenna*/
 	u_int64_t		sc_lastrx;	/* tsf at last rx'd frame */
@@ -502,8 +505,19 @@ void	ath_intr(void *);
 	(ath_hal_getcapability(_ah, HAL_CAP_CIPHER, _cipher, NULL) == HAL_OK)
 #define	ath_hal_getregdomain(_ah, _prd) \
 	(ath_hal_getcapability(_ah, HAL_CAP_REG_DMN, 0, (_prd)) == HAL_OK)
+#if HAL_ABI_VERSION < 0x08090100
+/* XXX wrong for anything but amd64 and i386 */
+#if defined(__LP64__)
 #define	ath_hal_setregdomain(_ah, _rd) \
-	(*(uint16_t *)(((uint8_t *)(_ah)) + 520) = (_rd))
+	(*(uint16_t *)(((uint8_t *)&(_ah)[1]) + 176) = (_rd))
+#else
+#define	ath_hal_setregdomain(_ah, _rd) \
+	(*(uint16_t *)(((uint8_t *)&(_ah)[1]) + 128) = (_rd))
+#endif
+#else
+#define	ath_hal_setregdomain(_ah, _rd) \
+	ath_hal_setcapability(_ah, HAL_CAP_REG_DMN, 0, _rd, NULL)
+#endif
 #define	ath_hal_getcountrycode(_ah, _pcc) \
 	(*(_pcc) = (_ah)->ah_countryCode)
 #define	ath_hal_gettkipmic(_ah) \
@@ -594,6 +608,12 @@ void	ath_intr(void *);
 	(ath_hal_getcapability(_ah, HAL_CAP_TPC_CTS, 0, _ptpcts) == HAL_OK)
 #define	ath_hal_settpcts(_ah, _tpcts) \
 	ath_hal_setcapability(_ah, HAL_CAP_TPC_CTS, 0, _tpcts, NULL)
+#define	ath_hal_hasintmit(_ah) \
+	(ath_hal_getcapability(_ah, HAL_CAP_INTMIT, 0, NULL) == HAL_OK)
+#define	ath_hal_getintmit(_ah) \
+	(ath_hal_getcapability(_ah, HAL_CAP_INTMIT, 1, NULL) == HAL_OK)
+#define	ath_hal_setintmit(_ah, _v) \
+	ath_hal_setcapability(_ah, HAL_CAP_INTMIT, 1, _v, NULL)
 #define	ath_hal_getchannoise(_ah, _c) \
 	((*(_ah)->ah_getChanNoise)((_ah), (_c)))
 #if HAL_ABI_VERSION < 0x05122200

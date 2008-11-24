@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/rwlock.h,v 1.14 2007/07/20 08:43:42 attilio Exp $
+ * $FreeBSD: src/sys/sys/rwlock.h,v 1.19 2008/05/15 20:10:06 attilio Exp $
  */
 
 #ifndef _SYS_RWLOCK_H_
@@ -66,10 +66,11 @@
 #define	RW_LOCK_READ		0x01
 #define	RW_LOCK_READ_WAITERS	0x02
 #define	RW_LOCK_WRITE_WAITERS	0x04
-#define	RW_LOCK_RECURSED	0x08
+#define	RW_LOCK_WRITE_SPINNER	0x08
 #define	RW_LOCK_FLAGMASK						\
 	(RW_LOCK_READ | RW_LOCK_READ_WAITERS | RW_LOCK_WRITE_WAITERS |	\
-	RW_LOCK_RECURSED)
+	RW_LOCK_WRITE_SPINNER)
+#define	RW_LOCK_WAITERS		(RW_LOCK_READ_WAITERS | RW_LOCK_WRITE_WAITERS)
 
 #define	RW_OWNER(x)		((x) & ~RW_LOCK_FLAGMASK)
 #define	RW_READERS_SHIFT	4
@@ -81,6 +82,8 @@
 #define	RW_DESTROYED		(RW_LOCK_READ_WAITERS | RW_LOCK_WRITE_WAITERS)
 
 #ifdef _KERNEL
+
+#define	rw_recurse	lock_object.lo_data
 
 /* Very simple operations on rw_lock. */
 
@@ -113,7 +116,9 @@
 #define	__rw_wunlock(rw, tid, file, line) do {				\
 	uintptr_t _tid = (uintptr_t)(tid);				\
 									\
-	if (!_rw_write_unlock((rw), _tid))				\
+	if ((rw)->rw_recurse)						\
+		(rw)->rw_recurse--;					\
+	else if (!_rw_write_unlock((rw), _tid))				\
 		_rw_wunlock_hard((rw), _tid, (file), (line));		\
 } while (0)
 
@@ -129,8 +134,10 @@ void	rw_destroy(struct rwlock *rw);
 void	rw_sysinit(void *arg);
 int	rw_wowned(struct rwlock *rw);
 void	_rw_wlock(struct rwlock *rw, const char *file, int line);
+int	_rw_try_wlock(struct rwlock *rw, const char *file, int line);
 void	_rw_wunlock(struct rwlock *rw, const char *file, int line);
 void	_rw_rlock(struct rwlock *rw, const char *file, int line);
+int	_rw_try_rlock(struct rwlock *rw, const char *file, int line);
 void	_rw_runlock(struct rwlock *rw, const char *file, int line);
 void	_rw_wlock_hard(struct rwlock *rw, uintptr_t tid, const char *file,
 	    int line);
@@ -144,8 +151,6 @@ void	_rw_assert(struct rwlock *rw, int what, const char *file, int line);
 
 /*
  * Public interface for lock operations.
- *
- * XXX: Missing try locks.
  */
 
 #ifndef LOCK_DEBUG
@@ -162,8 +167,16 @@ void	_rw_assert(struct rwlock *rw, int what, const char *file, int line);
 #endif
 #define	rw_rlock(rw)		_rw_rlock((rw), LOCK_FILE, LOCK_LINE)
 #define	rw_runlock(rw)		_rw_runlock((rw), LOCK_FILE, LOCK_LINE)
+#define	rw_try_rlock(rw)	_rw_try_rlock((rw), LOCK_FILE, LOCK_LINE)
 #define	rw_try_upgrade(rw)	_rw_try_upgrade((rw), LOCK_FILE, LOCK_LINE)
+#define	rw_try_wlock(rw)	_rw_try_wlock((rw), LOCK_FILE, LOCK_LINE)
 #define	rw_downgrade(rw)	_rw_downgrade((rw), LOCK_FILE, LOCK_LINE)
+#define	rw_unlock(rw)	do {						\
+	if (rw_wowned(rw))						\
+		rw_wunlock(rw);						\
+	else								\
+		rw_runlock(rw);						\
+} while (0)
 #define	rw_sleep(chan, rw, pri, wmesg, timo)				\
 	_sleep((chan), &(rw)->lock_object, (pri), (wmesg), (timo))
 

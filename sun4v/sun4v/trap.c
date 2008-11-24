@@ -37,7 +37,7 @@
  *
  *      from: @(#)trap.c        7.4 (Berkeley) 5/13/91
  * 	from: FreeBSD: src/sys/i386/i386/trap.c,v 1.197 2001/07/19
- * $FreeBSD: src/sys/sun4v/sun4v/trap.c,v 1.15 2007/06/16 22:30:38 marius Exp $
+ * $FreeBSD: src/sys/sun4v/sun4v/trap.c,v 1.17 2007/12/25 17:52:01 rwatson Exp $
  */
 
 #include "opt_ddb.h"
@@ -366,11 +366,11 @@ trap(struct trapframe *tf, int64_t type, uint64_t data)
 			}
 			if (debugger_on_signal &&
 			    (sig == 4 || sig == 10 || sig == 11))
-				kdb_enter("trapsig");
+				kdb_enter(KDB_WHY_TRAPSIG, "trapsig");
 #ifdef VERBOSE
 			if (sig == 4 || sig == 10 || sig == 11)
 				printf("trap: %ld:%s: 0x%lx at 0x%lx on cpu=%d sig=%d proc=%s\n", 
-				       trapno, trap_msg[trapno], data, tf->tf_tpc, curcpu, sig, curthread->td_proc->p_comm);
+				       trapno, trap_msg[trapno], data, tf->tf_tpc, curcpu, sig, curthread->td_name);
 #endif
 			/* XXX I've renumbered the traps to largely reflect what the hardware uses
 			 * so this will need to be re-visited

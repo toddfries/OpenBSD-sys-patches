@@ -29,6 +29,7 @@
  */
 /*-
  * Copyright (c) 2002 Jake Burkholder.
+ * Copyright (c) 2007 Marius Strobl <marius@FreeBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -54,7 +55,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/mp_machdep.c,v 1.36 2007/06/16 23:26:00 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/mp_machdep.c,v 1.48 2008/09/20 11:26:13 marius Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -80,6 +81,7 @@ __FBSDID("$FreeBSD: src/sys/sparc64/sparc64/mp_machdep.c,v 1.36 2007/06/16 23:26
 #include <machine/asi.h>
 #include <machine/atomic.h>
 #include <machine/bus.h>
+#include <machine/cpu.h>
 #include <machine/md_var.h>
 #include <machine/metadata.h>
 #include <machine/ofw_machdep.h>
@@ -90,7 +92,11 @@ __FBSDID("$FreeBSD: src/sys/sparc64/sparc64/mp_machdep.c,v 1.36 2007/06/16 23:26
 #include <machine/tte.h>
 #include <machine/ver.h>
 
+#define	SUNW_STARTCPU		"SUNW,start-cpu"
+#define	SUNW_STOPSELF		"SUNW,stop-self"
+
 static ih_func_t cpu_ipi_ast;
+static ih_func_t cpu_ipi_preempt;
 static ih_func_t cpu_ipi_stop;
 
 /*
@@ -99,7 +105,7 @@ static ih_func_t cpu_ipi_stop;
  * since the other processors will use it before the boot CPU enters the
  * kernel.
  */
-struct	cpu_start_args cpu_start_args = { 0, -1, -1, 0, 0 };
+struct	cpu_start_args cpu_start_args = { 0, -1, -1, 0, 0, 0 };
 struct	ipi_cache_args ipi_cache_args;
 struct	ipi_tlb_args ipi_tlb_args;
 struct	pcb stoppcbs[MAXCPU];
@@ -110,11 +116,12 @@ cpu_ipi_selected_t *cpu_ipi_selected;
 
 static vm_offset_t mp_tramp;
 static u_int cpuid_to_mid[MAXCPU];
+static int has_stopself;
 static int isjbus;
 static volatile u_int shutdown_cpus;
 
 static void cpu_mp_unleash(void *v);
-static void spitfire_ipi_send(u_int, u_long, u_long, u_long);
+static void spitfire_ipi_send(u_int mid, u_long d0, u_long d1, u_long d2);
 static void sun4u_startcpu(phandle_t cpu, void *func, u_long arg);
 static void sun4u_stopself(void);
 
@@ -169,7 +176,7 @@ cpu_mp_setmaxid(void)
 {
 	char buf[128];
 	phandle_t child;
-	int cpus;
+	u_int cpus;
 
 	all_cpus = 1 << curcpu;
 	mp_ncpus = 1;
@@ -189,6 +196,13 @@ cpu_mp_probe(void)
 	return (mp_maxid > 0);
 }
 
+struct cpu_group *
+cpu_topo(void)
+{
+
+	return (smp_topo_none());
+}
+
 static void
 sun4u_startcpu(phandle_t cpu, void *func, u_long arg)
 {
@@ -200,7 +214,7 @@ sun4u_startcpu(phandle_t cpu, void *func, u_long arg)
 		cell_t	func;
 		cell_t	arg;
 	} args = {
-		(cell_t)"SUNW,start-cpu",
+		(cell_t)SUNW_STARTCPU,
 		3,
 	};
 
@@ -221,7 +235,7 @@ sun4u_stopself(void)
 		cell_t	nargs;
 		cell_t	nreturns;
 	} args = {
-		(cell_t)"SUNW,stop-self",
+		(cell_t)SUNW_STOPSELF,
 	};
 
 	openfirmware_exit(&args);
@@ -240,16 +254,20 @@ cpu_mp_start(void)
 	register_t s;
 	vm_offset_t va;
 	phandle_t child;
-	u_int clock;
 	u_int mid;
-	int cpuid;
+	u_int clock;
+	u_int cpuid;
 
 	mtx_init(&ipi_mtx, "ipi", NULL, MTX_SPIN);
+
+	if (OF_test(SUNW_STOPSELF) == 0)
+		has_stopself = 1;
 
 	intr_setup(PIL_AST, cpu_ipi_ast, -1, NULL, NULL);
 	intr_setup(PIL_RENDEZVOUS, (ih_func_t *)smp_rendezvous_action,
 	    -1, NULL, NULL);
 	intr_setup(PIL_STOP, cpu_ipi_stop, -1, NULL, NULL);
+	intr_setup(PIL_PREEMPT, cpu_ipi_preempt, -1, NULL, NULL);
 
 	cpuid_to_mid[curcpu] = PCPU_GET(mid);
 
@@ -267,17 +285,25 @@ cpu_mp_start(void)
 		if (OF_getprop(child, "clock-frequency", &clock,
 		    sizeof(clock)) <= 0)
 			panic("%s: can't get clock", __func__);
+		if (clock != PCPU_GET(clock))
+			hardclock_use_stick = 1;
 
 		csa->csa_state = 0;
 		sun4u_startcpu(child, (void *)mp_tramp, 0);
 		s = intr_disable();
-		while (csa->csa_state != CPU_CLKSYNC)
+		while (csa->csa_state != CPU_TICKSYNC)
 			;
 		membar(StoreLoad);
 		csa->csa_tick = rd(tick);
+		if (cpu_impl >= CPU_IMPL_ULTRASPARCIII) {
+			while (csa->csa_state != CPU_STICKSYNC)
+				;
+			membar(StoreLoad);
+			csa->csa_stick = rdstick();
+		}
 		while (csa->csa_state != CPU_INIT)
 			;
-		csa->csa_tick = 0;
+		csa->csa_tick = csa->csa_stick = 0;
 		intr_restore(s);
 
 		cpuid = mp_ncpus++;
@@ -288,10 +314,14 @@ cpu_mp_start(void)
 		pc = (struct pcpu *)(va + (PCPU_PAGES * PAGE_SIZE)) - 1;
 		pcpu_init(pc, cpuid, sizeof(*pc));
 		pc->pc_addr = va;
+		pc->pc_clock = clock;
 		pc->pc_mid = mid;
 		pc->pc_node = child;
 
+		cache_init(pc);
+
 		all_cpus |= 1 << cpuid;
+		intr_add_cpu(cpuid);
 	}
 	KASSERT(!isjbus || mp_ncpus <= IDR_JALAPENO_MAX_BN_PAIRS,
 	    ("%s: can only IPI a maximum of %d JBus-CPUs",
@@ -314,8 +344,8 @@ cpu_mp_unleash(void *v)
 	register_t s;
 	vm_offset_t va;
 	vm_paddr_t pa;
-	u_int ctx_min;
 	u_int ctx_inc;
+	u_int ctx_min;
 	int i;
 
 	ctx_min = TLB_CTX_USER_MIN;
@@ -363,7 +393,15 @@ cpu_mp_bootstrap(struct pcpu *pc)
 	volatile struct cpu_start_args *csa;
 
 	csa = &cpu_start_args;
+	if (cpu_impl >= CPU_IMPL_ULTRASPARCIII)
+		cheetah_init();
+	cache_enable();
 	pmap_map_tsb();
+	/*
+	 * Flush all non-locked TLB entries possibly left over by the
+	 * firmware.
+	 */
+	tlb_flush_nonlocked();
 	cpu_setregs(pc);
 	tick_start();
 
@@ -378,7 +416,7 @@ cpu_mp_bootstrap(struct pcpu *pc)
 	while (csa->csa_count != 0)
 		;
 
-	/* ok, now enter the scheduler */
+	/* Ok, now enter the scheduler. */
 	sched_throw(NULL);
 }
 
@@ -419,12 +457,23 @@ cpu_ipi_stop(struct trapframe *tf)
 	while ((started_cpus & PCPU_GET(cpumask)) == 0) {
 		if ((shutdown_cpus & PCPU_GET(cpumask)) != 0) {
 			atomic_clear_int(&shutdown_cpus, PCPU_GET(cpumask));
-			sun4u_stopself();
+			if (has_stopself != 0)
+				sun4u_stopself();
+			(void)intr_disable();
+			for (;;)
+				;
 		}
 	}
 	atomic_clear_rel_int(&started_cpus, PCPU_GET(cpumask));
 	atomic_clear_rel_int(&stopped_cpus, PCPU_GET(cpumask));
 	CTR2(KTR_SMP, "%s: restarted %d", __func__, curcpu);
+}
+
+static void
+cpu_ipi_preempt(struct trapframe *tf)
+{
+
+	sched_preempt(curthread);
 }
 
 static void
@@ -558,25 +607,4 @@ cheetah_ipi_selected(u_int cpus, u_long d0, u_long d1, u_long d2)
 		    __func__, cpus, ids);
 	else
 		panic("%s: couldn't send IPI", __func__);
-}
-
-void
-ipi_selected(u_int cpus, u_int ipi)
-{
-
-	cpu_ipi_selected(cpus, 0, (u_long)tl_ipi_level, ipi);
-}
-
-void
-ipi_all(u_int ipi)
-{
-
-	panic("%s", __func__);
-}
-
-void
-ipi_all_but_self(u_int ipi)
-{
-
-	cpu_ipi_selected(PCPU_GET(other_cpus), 0, (u_long)tl_ipi_level, ipi);
 }

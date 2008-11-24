@@ -32,7 +32,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/kerneldump.h,v 1.8 2005/10/03 14:06:00 cognet Exp $
+ * $FreeBSD: src/sys/sys/kerneldump.h,v 1.11 2008/10/01 22:08:53 peter Exp $
  */
 
 #ifndef _SYS_KERNELDUMP_H
@@ -60,6 +60,7 @@
 struct kerneldumpheader {
 	char		magic[20];
 #define	KERNELDUMPMAGIC		"FreeBSD Kernel Dump"
+#define	TEXTDUMPMAGIC		"FreeBSD Text Dump"
 #define	KERNELDUMPMAGIC_CLEARED	"Cleared Kernel Dump"
 	char		architecture[12];
 	uint32_t	version;
@@ -70,7 +71,8 @@ struct kerneldumpheader {
 #define	KERNELDUMP_IA64_VERSION	1
 #define	KERNELDUMP_SPARC64_VERSION	1
 #define	KERNELDUMP_AMD64_VERSION	2
-#define KERNELDUMP_ARM_VERSION	1
+#define	KERNELDUMP_ARM_VERSION	1
+#define	KERNELDUMP_TEXT_VERSION	1
 	uint64_t	dumplength;		/* excl headers */
 	uint64_t	dumptime;
 	uint32_t	blocksize;
@@ -96,5 +98,9 @@ kerneldump_parity(struct kerneldumpheader *kdhp)
 	return (parity);
 }
 
+#ifdef _KERNEL
+void mkdumpheader(struct kerneldumpheader *kdh, char *magic, uint32_t archver,
+    uint64_t dumplen, uint32_t blksz);
+#endif
 
 #endif /* _SYS_KERNELDUMP_H */

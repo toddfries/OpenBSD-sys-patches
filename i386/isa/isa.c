@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/isa/isa.c,v 1.151 2007/09/01 12:18:28 nyan Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/isa/isa.c,v 1.152 2008/09/07 04:44:24 nyan Exp $");
 
 /*-
  * Modifications for Intel architecture by Garrett A. Wollman.
@@ -203,28 +203,9 @@ isa_alloc_resourcev(device_t child, int type, int *rid,
 int
 isa_load_resourcev(struct resource *re, bus_addr_t *res, bus_size_t count)
 {
-	bus_addr_t	start;
-	bus_space_handle_t bh;
-	int		i;
 
-	bh = rman_get_bushandle(re);
-	if (count > bh->bsh_maxiatsz) {
-		printf("isa_load_resourcev: map size too large\n");
-		return EINVAL;
-	}
-
-	start = rman_get_start(re);
-	for (i = 0; i < bh->bsh_maxiatsz; i++) {
-		if (i < count)
-			bh->bsh_iat[i] = start + res[i];
-		else
-			bh->bsh_iat[i] = start;
-	}
-
-	bh->bsh_iatsz = count;
-	bh->bsh_bam = rman_get_bustag(re)->bs_ra;	/* relocate access */
-
-	return 0;
+	return bus_space_map_load(rman_get_bustag(re), rman_get_bushandle(re),
+				  count, res, 0);
 }
 #endif	/* PC98 */
 

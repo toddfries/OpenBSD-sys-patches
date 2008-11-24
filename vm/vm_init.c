@@ -63,7 +63,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_init.c,v 1.46 2005/04/25 19:22:05 kris Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_init.c,v 1.48 2008/05/10 21:46:20 alc Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -97,7 +97,7 @@ SYSCTL_INT(_vm, OID_AUTO, exec_map_entries, CTLFLAG_RD, &exec_map_entries, 0,
  * System initialization
  */
 static void vm_mem_init(void *);
-SYSINIT(vm_mem, SI_SUB_VM, SI_ORDER_FIRST, vm_mem_init, NULL)
+SYSINIT(vm_mem, SI_SUB_VM, SI_ORDER_FIRST, vm_mem_init, NULL);
 
 /*
  *	vm_init initializes the virtual memory system.
@@ -186,16 +186,17 @@ again:
 		panic("startup: table size inconsistency");
 
 	clean_map = kmem_suballoc(kernel_map, &kmi->clean_sva, &kmi->clean_eva,
-			(nbuf*BKVASIZE) + (nswbuf*MAXPHYS));
+	    nbuf * BKVASIZE + nswbuf * MAXPHYS, FALSE);
 	buffer_map = kmem_suballoc(clean_map, &kmi->buffer_sva,
-			&kmi->buffer_eva, (nbuf*BKVASIZE));
+	    &kmi->buffer_eva, nbuf * BKVASIZE, FALSE);
 	buffer_map->system_map = 1;
 	pager_map = kmem_suballoc(clean_map, &kmi->pager_sva, &kmi->pager_eva,
-				(nswbuf*MAXPHYS));
+	    nswbuf * MAXPHYS, FALSE);
 	pager_map->system_map = 1;
 	exec_map = kmem_suballoc(kernel_map, &minaddr, &maxaddr,
-				(exec_map_entries*(ARG_MAX+(PAGE_SIZE*3))));
-	pipe_map = kmem_suballoc(kernel_map, &minaddr, &maxaddr, maxpipekva);
+	    exec_map_entries * (ARG_MAX + (PAGE_SIZE * 3)), FALSE);
+	pipe_map = kmem_suballoc(kernel_map, &minaddr, &maxaddr, maxpipekva,
+	    FALSE);
 
 	/*
 	 * XXX: Mbuf system machine-specific initializations should

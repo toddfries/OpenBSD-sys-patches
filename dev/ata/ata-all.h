@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/ata/ata-all.h,v 1.133 2008/04/17 12:29:35 sos Exp $
+ * $FreeBSD: src/sys/dev/ata/ata-all.h,v 1.135 2008/10/09 12:56:57 sos Exp $
  */
 
 /* ATA register defines */
@@ -544,7 +544,8 @@ extern struct intr_config_hook *ata_delayed_attach;
 extern devclass_t ata_devclass;
 extern int ata_wc;
 extern int ata_setmax;
- 
+extern int ata_dma_check_80pin;
+
 /* public prototypes */
 /* ata-all.c: */
 int ata_probe(device_t dev);
@@ -562,6 +563,7 @@ void ata_modify_if_48bit(struct ata_request *request);
 void ata_udelay(int interval);
 char *ata_unit2str(struct ata_device *atadev);
 char *ata_mode2str(int mode);
+int ata_atapi(device_t dev);
 int ata_pmode(struct ata_params *ap);
 int ata_wmode(struct ata_params *ap);
 int ata_umode(struct ata_params *ap);

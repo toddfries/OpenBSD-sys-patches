@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/syscons/scterm-sc.c,v 1.23 2006/05/12 05:04:43 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/syscons/scterm-sc.c,v 1.24 2008/08/20 08:31:58 ed Exp $");
 
 #include "opt_syscons.h"
 
@@ -705,7 +705,7 @@ outloop:
 
 static int
 scterm_ioctl(scr_stat *scp, struct tty *tp, u_long cmd, caddr_t data,
-	     int flag, struct thread *td)
+	     struct thread *td)
 {
 	term_stat *tcp = scp->ts;
 	vid_info_t *vi;

@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/security/mac/mac_sysv_sem.c,v 1.9 2007/10/24 19:04:01 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/security/mac/mac_sysv_sem.c,v 1.10 2008/08/23 15:26:36 rwatson Exp $");
 
 #include "opt_mac.h"
 
@@ -70,7 +70,10 @@ void
 mac_sysvsem_init(struct semid_kernel *semakptr)
 {
 
-	semakptr->label = mac_sysv_sem_label_alloc();
+	if (mac_labeled & MPC_OBJECT_SYSVSEM)
+		semakptr->label = mac_sysv_sem_label_alloc();
+	else
+		semakptr->label = NULL;
 }
 
 static void
@@ -85,8 +88,10 @@ void
 mac_sysvsem_destroy(struct semid_kernel *semakptr)
 {
 
-	mac_sysv_sem_label_free(semakptr->label);
-	semakptr->label = NULL;
+	if (semakptr->label != NULL) {
+		mac_sysv_sem_label_free(semakptr->label);
+		semakptr->label = NULL;
+	}
 }
 
 void

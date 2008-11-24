@@ -1,8 +1,8 @@
-# $FreeBSD: src/sys/modules/snp/Makefile,v 1.5 2005/09/19 10:14:05 mux Exp $
+# $FreeBSD: src/sys/modules/snp/Makefile,v 1.6 2008/11/05 15:04:03 ed Exp $
 
 .PATH: ${.CURDIR}/../../dev/snp
 
 KMOD=	snp
-SRCS=	snp.c vnode_if.h
+SRCS=	snp.c
 
 .include <bsd.kmod.mk>

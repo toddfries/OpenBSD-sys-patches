@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/isa/isa_common.h,v 1.15 2007/02/23 12:19:01 piso Exp $
+ * $FreeBSD: src/sys/isa/isa_common.h,v 1.17 2008/11/18 21:01:54 jhb Exp $
  */
 
 /*
@@ -56,6 +56,10 @@ struct isa_device {
 	isa_config_cb		*id_config_cb; /* callback function */
 	void			*id_config_arg;	/* callback argument */
 	int			id_config_attr;	/* pnp config attributes */
+	int			id_pnpbios_handle; /* pnp handle, if any */
+	int			id_pnp_csn; /* pnp Card Number */
+	int			id_pnp_ldn; /* pnp Logical device on card */
+	int			id_order;
 };
 
 #define DEVTOISA(dev)	((struct isa_device *) device_get_ivars(dev))

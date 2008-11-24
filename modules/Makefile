@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/Makefile,v 1.547 2007/10/31 18:47:04 sam Exp $
+# $FreeBSD: src/sys/modules/Makefile,v 1.596 2008/11/12 09:52:06 yongari Exp $
 
 .include <bsd.own.mk>
 
@@ -6,8 +6,11 @@ SUBDIR=	${_3dfx} \
 	${_3dfx_linux} \
 	${_aac} \
 	accf_data \
+	accf_dns \
 	accf_http \
 	${_acpi} \
+	ae \
+	age \
 	${_agp} \
 	aha \
 	${_ahb} \
@@ -15,6 +18,7 @@ SUBDIR=	${_3dfx} \
 	aic7xxx \
 	aio \
 	${_amd} \
+	ale \
 	amr \
 	${_an} \
 	${_aout} \
@@ -22,7 +26,7 @@ SUBDIR=	${_3dfx} \
 	${_ar} \
 	${_arcmsr} \
 	${_arcnet} \
-	${_arl} \
+	${_asmc} \
 	${_asr} \
 	ata \
 	${_ath} \
@@ -32,13 +36,13 @@ SUBDIR=	${_3dfx} \
 	${_ath_rate_sample} \
 	aue \
 	${_auxio} \
-	${_awi} \
 	axe \
 	bce \
 	bfe \
 	bge \
 	${_bios} \
 	${_bktr} \
+	${_bm} \
 	bridgestp \
 	cam \
 	${_canbepm} \
@@ -51,32 +55,37 @@ SUBDIR=	${_3dfx} \
 	${_ce} \
 	${_ciss} \
 	${_cm} \
+	${_cmx} \
 	coda \
 	coda5 \
 	${_coff} \
 	${_coretemp} \
 	${_cp} \
+	${_cpuctl} \
 	${_cpufreq} \
 	${_crypto} \
 	${_cryptodev} \
 	${_cs} \
 	${_ctau} \
 	cue \
-	${_cx} \
 	cxgb \
+	${_cyclic} \
 	dc \
 	dcons \
 	dcons_crom \
 	de \
-	${_digi} \
+	${_dpms} \
 	${_dpt} \
 	${_drm} \
+	${_dtrace} \
 	dummynet \
 	${_ed} \
+	ehci \
 	${_elink} \
 	${_em} \
 	en \
 	${_ep} \
+	${_et} \
 	${_ex} \
 	${_exca} \
 	${_ext2fs} \
@@ -89,19 +98,18 @@ SUBDIR=	${_3dfx} \
 	fxp \
 	gem \
 	geom \
-	${_harp} \
+	${_glxsb} \
 	hatm \
-	${_hfa} \
 	hifn \
 	hme \
 	${_hptiop} \
 	${_hptmv} \
+	${_hptrr} \
 	hwpmc \
 	${_i2c} \
 	${_ibcs2} \
 	${_ichwd} \
 	${_ida} \
-	${_idt} \
 	${_ie} \
 	if_bridge \
 	if_disc \
@@ -112,17 +120,17 @@ SUBDIR=	${_3dfx} \
 	if_gre \
 	if_lagg \
 	${_if_ndis} \
-	if_ppp \
-	if_sl \
 	if_stf \
 	if_tap \
 	if_tun \
 	if_vlan \
+	${_igb} \
 	${_iir} \
 	${_io} \
 	ipdivert \
 	${_ipfilter} \
 	ipfw \
+	ipfw_nat \
 	${_ipmi} \
 	ip_mroute_mod \
 	${_ips} \
@@ -133,9 +141,14 @@ SUBDIR=	${_3dfx} \
 	ispfw \
 	${_iwi} \
 	${_iwifw} \
+	${_iwn} \
+	${_iwnfw} \
 	${_ixgb} \
+	jme \
 	joy \
+	${_k8temp} \
 	kbdmux \
+	krpc \
 	kue \
 	le \
 	lge \
@@ -159,6 +172,7 @@ SUBDIR=	${_3dfx} \
 	mac_seeotheruids \
 	mac_stub \
 	mac_test \
+	malo \
 	mcd \
 	md \
 	mem \
@@ -166,6 +180,8 @@ SUBDIR=	${_3dfx} \
 	mii \
 	mlx \
 	${_mly} \
+	mmc \
+	mmcsd \
 	mpt \
 	mqueue \
 	msdosfs \
@@ -180,6 +196,7 @@ SUBDIR=	${_3dfx} \
 	netgraph \
 	${_nfe} \
 	nfsclient \
+	nfslockd \
 	nfsserver \
 	nge \
 	nmdm \
@@ -191,13 +208,13 @@ SUBDIR=	${_3dfx} \
 	${_nvram} \
 	${_nwfs} \
 	${_nxge} \
-	${_oltr} \
+	${_opensolaris} \
+	ohci \
 	${_padlock} \
 	patm \
 	${_pccard} \
 	${_pcfclock} \
 	pcn \
-	${_pecoff} \
 	${_pf} \
 	${_pflog} \
 	plip \
@@ -214,25 +231,23 @@ SUBDIR=	${_3dfx} \
 	ral \
 	${_random} \
 	${_ray} \
-	rc \
 	rc4 \
+	${_rdma} \
 	re \
 	reiserfs \
 	rl \
-	rp \
-	${_rr232x} \
 	rue \
 	rum \
 	${_s3} \
 	${_safe} \
 	${_sbni} \
-	sbsh \
 	scc \
 	scd \
 	${_scsi_low} \
+	sdhci \
 	sem \
 	sf \
-	${_sio} \
+	slhci \
 	sis \
 	sk \
 	${_smbfs} \
@@ -259,13 +274,12 @@ SUBDIR=	${_3dfx} \
 	twe \
 	tx \
 	txp \
+	u3g \
 	uark \
 	uart \
 	ubsa \
 	ubsec \
-	ubser \
 	ucom \
-	ucycom \
 	udav \
 	udbp \
 	udf \
@@ -275,7 +289,9 @@ SUBDIR=	${_3dfx} \
 	ufoma \
 	uftdi \
 	ugen \
+	uhci \
 	uhid \
+	uipaq \
 	ukbd \
 	ulpt \
 	umass \
@@ -283,11 +299,14 @@ SUBDIR=	${_3dfx} \
 	umodem \
 	ums \
 	unionfs \
+	${_upgt} \
 	uplcom \
 	ural \
 	urio \
 	usb \
+	usb2 \
 	uscanner \
+	uslcom \
 	utopia \
 	uvisor \
 	uvscom \
@@ -303,11 +322,12 @@ SUBDIR=	${_3dfx} \
 	wlan_acl \
 	wlan_amrr \
 	wlan_ccmp \
-	wlan_scan_ap \
-	wlan_scan_sta \
+	wlan_rssadapt \
 	wlan_tkip \
 	wlan_wep \
 	wlan_xauth \
+	${_wpi} \
+	${_wpifw} \
 	${_xe} \
 	xfs \
 	xl \
@@ -323,11 +343,6 @@ _vpo=		vpo
 .if defined(ALL_MODULES)
 _ufs=		ufs
 .endif
-
-# Disabled in 7.0 as netatm is not MPSAFE.
-#if ${MK_ATM} != "no"
-#_harp=		harp
-#.endif
 
 .if ${MK_CRYPT} != "no" || defined(ALL_MODULES)
 .if exists(${.CURDIR}/../opencrypto)
@@ -366,30 +381,37 @@ _ath_hal=	ath_hal
 _ath_rate_amrr=	ath_rate_amrr
 _ath_rate_onoe=	ath_rate_onoe
 _ath_rate_sample=ath_rate_sample
-_awi=		awi
 _bktr=		bktr
 _cardbus=	cardbus
 _cbb=		cbb
 _ce=		ce
 _coff=		coff
 _cp=		cp
+_cpuctl=	cpuctl
 _cpufreq=	cpufreq
 _cs=		cs
-_digi=		digi
+.if ${MK_CDDL} != "no" || defined(ALL_MODULES)
+_cyclic=	cyclic
+.endif
+_dpms=		dpms
 _drm=		drm
+.if ${MK_CDDL} != "no" || defined(ALL_MODULES)
+_dtrace=	dtrace
+.endif
 _ed=		ed
 _elink=		elink
 _em=		em
 _ep=		ep
+_et=		et
 _exca=		exca
 _ext2fs=	ext2fs
 _fe=		fe
-# Disabled due to non-MPSAFEty in 7.0
-#_hfa=		hfa
+_glxsb=		glxsb
 _i2c=		i2c
 _ibcs2=		ibcs2
 _ie=		ie
 _if_ndis=	if_ndis
+_igb=		igb
 _io=		io
 _linprocfs=	linprocfs
 _linsysfs=	linsysfs
@@ -404,16 +426,17 @@ _nsp=		nsp
 .if ${MK_NCP} != "no"
 _nwfs=		nwfs
 .endif
-_oltr=		oltr
+.if ${MK_CDDL} != "no" || defined(ALL_MODULES)
+_opensolaris=	opensolaris
+.endif
 _pccard=	pccard
 _pcfclock=	pcfclock
-_pecoff=	pecoff
 _pst=		pst
 _ray=		ray
+_rdma=		rdma
 _safe=		safe
 _sbni=		sbni
 _scsi_low=	scsi_low
-_sio=		sio
 _smbfs=		smbfs
 _sound=		sound
 _speaker=	speaker
@@ -423,6 +446,7 @@ _sr=		sr
 _stg=		stg
 _streams=	streams
 _tmpfs=		tmpfs
+_upgt=		upgt
 _wi=		wi
 _xe=		xe
 .if ${MK_ZFS} != "no" || defined(ALL_MODULES)
@@ -433,22 +457,21 @@ _aac=		aac
 _acpi=		acpi
 _ahb=		ahb
 _arcmsr=	arcmsr
-_arl=		arl
+_asmc=		asmc
 _asr=		asr
 _bios=		bios
 _ciss=		ciss
 _cm=		cm
+_cmx=		cmx
 _coretemp=	coretemp
 _ctau=		ctau
-_cx=		cx
 _dpt=		dpt
 _ex=		ex
 _hptiop=	hptiop
 _hptmv=		hptmv
+_hptrr=		hptrr
 _ichwd=		ichwd
 _ida=		ida
-# Disabled due to non-MPSAFEty in 7.0
-#_idt=		idt
 _iir=		iir
 _ipmi=		ipmi
 _ips=		ips
@@ -456,18 +479,22 @@ _ipw=		ipw
 _ipwfw=		ipwfw
 _iwi=		iwi
 _iwifw=		iwifw
+_iwn=		iwn
+_iwnfw=		iwnfw
 _ixgb=		ixgb
+_k8temp=	k8temp
 _mly=		mly
 _nfe=		nfe
 _nve=		nve
 _nvram=		nvram
 _nxge=		nxge
+_wpi=		wpi
+_wpifw=		wpifw
 .if ${MK_CRYPT} != "no" || defined(ALL_MODULES)
 .if exists(${.CURDIR}/../crypto/via)
 _padlock=	padlock
 .endif
 .endif
-_rr232x=	rr232x
 _s3=		s3
 _twa=		twa
 _vesa=		vesa
@@ -485,6 +512,7 @@ _acpi=		acpi
 _agp=		agp
 _an=		an
 _arcmsr=	arcmsr
+_asmc=		asmc
 _ath=		ath
 _ath_hal=	ath_hal
 _ath_rate_amrr=	ath_rate_amrr
@@ -492,28 +520,41 @@ _ath_rate_onoe=	ath_rate_onoe
 _ath_rate_sample=ath_rate_sample
 _cardbus=	cardbus
 _cbb=		cbb
+_cmx=		cmx
 _ciss=		ciss
 _coretemp=	coretemp
+_cpuctl=	cpuctl
 _cpufreq=	cpufreq
-_digi=		digi
+.if ${MK_CDDL} != "no" || defined(ALL_MODULES)
+_cyclic=	cyclic
+.endif
 _drm=		drm
+.if ${MK_CDDL} != "no" || defined(ALL_MODULES)
+_dtrace=	dtrace
+.endif
 _ed=		ed
+_et=		et
 _em=		em
 _exca=		exca
 _ext2fs=	ext2fs
 _hptiop=	hptiop
 _hptmv=		hptmv
+_hptrr=		hptrr
 _i2c=		i2c
 _ichwd=		ichwd
 _ida=		ida
 _if_ndis=	if_ndis
+_igb=		igb
 _iir=		iir
 _io=		io
 _ipmi=		ipmi
 _ips=		ips
 _ipw=		ipw
 _ipwfw=		ipwfw
+_iwn=		iwn
+_iwnfw=		iwnfw
 _ixgb=		ixgb
+_k8temp=	k8temp
 _linprocfs=	linprocfs
 _linsysfs=	linsysfs
 _linux=		linux
@@ -523,8 +564,11 @@ _nfe=		nfe
 _nve=		nve
 _nvram=		nvram
 _nxge=		nxge
+.if ${MK_CDDL} != "no" || defined(ALL_MODULES)
+_opensolaris=	opensolaris
+.endif
 _pccard=	pccard
-_rr232x=	rr232x
+_rdma=		rdma	
 _safe=		safe
 _scsi_low=	scsi_low
 _smbfs=		smbfs
@@ -533,7 +577,10 @@ _speaker=	speaker
 _sppp=		sppp
 _tmpfs=		tmpfs
 _twa=		twa
+_upgt=		upgt
 _wi=		wi
+_wpi=		wpi
+_wpifw=		wpifw
 .if ${MK_ZFS} != "no" || defined(ALL_MODULES)
 _zfs=		zfs
 .endif
@@ -542,7 +589,7 @@ _zfs=		zfs
 .if ${MACHINE_ARCH} == "ia64"
 # Modules not enabled on ia64 (as compared to i386) include:
 #	aac acpi aout apm atspeaker drm ibcs2 linprocfs linux ncv
-#	nsp oltr pecoff s3 sbni stg vesa
+#	nsp s3 sbni stg vesa
 # acpi is not enabled because it is broken as a module on ia64
 _aic=		aic
 #_ar=		ar	not 64-bit clean
@@ -554,13 +601,14 @@ _cardbus=	cardbus
 _cbb=		cbb
 _ciss=		ciss
 _cm=		cm
+_cmx=		cmx
 _coff=		coff
 _cpufreq=	cpufreq
 _em=		em
 _ep=		ep
 _exca=		exca
 _fe=		fe
-_hfa=		hfa
+_igb=		igb
 _iir=		iir
 _mly=		mly
 _pccard=	pccard
@@ -582,8 +630,10 @@ _ath_hal=	ath_hal
 _ath_rate_amrr=	ath_rate_amrr
 _ath_rate_onoe=	ath_rate_onoe
 _ath_rate_sample=ath_rate_sample
+_bm=		bm
 _nvram=		powermac_nvram
 _smbfs=		smbfs
+_upgt=		upgt
 .endif
 
 .if ${MACHINE_ARCH} == "sparc64"
@@ -595,7 +645,12 @@ _ath_rate_sample=ath_rate_sample
 _auxio=		auxio
 _em=		em
 _i2c=		i2c
+_igb=		igb
 _sound=		sound
+_upgt=		upgt
+.if ${MK_ZFS} != "no" || defined(ALL_MODULES)
+_zfs=		zfs
+.endif
 .endif
 
 .if defined(MODULES_OVERRIDE) && !defined(ALL_MODULES)

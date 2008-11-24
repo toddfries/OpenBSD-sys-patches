@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)namei.h	8.5 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/sys/namei.h,v 1.48 2006/02/05 15:42:01 rwatson Exp $
+ * $FreeBSD: src/sys/sys/namei.h,v 1.50 2008/11/17 20:49:29 pjd Exp $
  */
 
 #ifndef _SYS_NAMEI_H_
@@ -66,9 +66,10 @@ struct nameidata {
 	/*
 	 * Arguments to lookup.
 	 */
-	struct	vnode *ni_startdir;	/* starting directory */
+	struct  vnode *ni_startdir;	/* starting directory */
 	struct	vnode *ni_rootdir;	/* logical root directory */
 	struct	vnode *ni_topdir;	/* logical top directory */
+	int	ni_dirfd;		/* starting directory for *at functions */
 	/*
 	 * Results: returned from/manipulated by lookup
 	 */
@@ -148,19 +149,28 @@ struct nameidata {
 /*
  * Initialization of a nameidata structure.
  */
-static void NDINIT(struct nameidata *, u_long, u_long, enum uio_seg,
-	    const char *, struct thread *);
+#define	NDINIT(ndp, op, flags, segflg, namep, td)			\
+	NDINIT_ALL(ndp, op, flags, segflg, namep, AT_FDCWD, NULL, td)
+#define	NDINIT_AT(ndp, op, flags, segflg, namep, dirfd, td)		\
+	NDINIT_ALL(ndp, op, flags, segflg, namep, dirfd, NULL, td)
+#define	NDINIT_ATVP(ndp, op, flags, segflg, namep, vp, td)		\
+	NDINIT_ALL(ndp, op, flags, segflg, namep, AT_FDCWD, vp, td)
+
 static __inline void
-NDINIT(struct nameidata *ndp,
+NDINIT_ALL(struct nameidata *ndp,
 	u_long op, u_long flags,
 	enum uio_seg segflg,
 	const char *namep,
+	int dirfd,
+	struct vnode *startdir,
 	struct thread *td)
 {
 	ndp->ni_cnd.cn_nameiop = op;
 	ndp->ni_cnd.cn_flags = flags;
 	ndp->ni_segflg = segflg;
 	ndp->ni_dirp = namep;
+	ndp->ni_dirfd = dirfd;
+	ndp->ni_startdir = startdir;
 	ndp->ni_cnd.cn_thread = td;
 }
 

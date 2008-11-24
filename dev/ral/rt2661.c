@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/dev/ral/rt2661.c,v 1.20 2008/04/20 20:35:37 sam Exp $	*/
+/*	$FreeBSD: src/sys/dev/ral/rt2661.c,v 1.27 2008/10/27 16:46:50 sam Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -18,7 +18,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ral/rt2661.c,v 1.20 2008/04/20 20:35:37 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ral/rt2661.c,v 1.27 2008/10/27 16:46:50 sam Exp $");
 
 /*-
  * Ralink Technology RT2561, RT2561S and RT2661 chipset driver
@@ -101,8 +101,8 @@ static void		rt2661_reset_rx_ring(struct rt2661_softc *,
 			    struct rt2661_rx_ring *);
 static void		rt2661_free_rx_ring(struct rt2661_softc *,
 			    struct rt2661_rx_ring *);
-static struct		ieee80211_node *rt2661_node_alloc(
-			    struct ieee80211_node_table *);
+static struct ieee80211_node *rt2661_node_alloc(struct ieee80211vap *,
+			    const uint8_t [IEEE80211_ADDR_LEN]);
 static void		rt2661_newassoc(struct ieee80211_node *, int);
 static int		rt2661_newstate(struct ieee80211vap *,
 			    enum ieee80211_state, int);
@@ -280,7 +280,8 @@ rt2661_attach(device_t dev, int id)
 
 	/* set device capabilities */
 	ic->ic_caps =
-		  IEEE80211_C_IBSS		/* ibss, nee adhoc, mode */
+		  IEEE80211_C_STA		/* station mode */
+		| IEEE80211_C_IBSS		/* ibss, nee adhoc, mode */
 		| IEEE80211_C_HOSTAP		/* hostap mode */
 		| IEEE80211_C_MONITOR		/* monitor mode */
 		| IEEE80211_C_AHDEMO		/* adhoc demo mode */
@@ -775,7 +776,8 @@ rt2661_free_rx_ring(struct rt2661_softc *sc, struct rt2661_rx_ring *ring)
 }
 
 static struct ieee80211_node *
-rt2661_node_alloc(struct ieee80211_node_table *nt)
+rt2661_node_alloc(struct ieee80211vap *vap,
+	const uint8_t mac[IEEE80211_ADDR_LEN])
 {
 	struct rt2661_node *rn;
 
@@ -828,13 +830,8 @@ rt2661_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 			if (error != 0)
 				return error;
 		}
-		if (vap->iv_opmode != IEEE80211_M_MONITOR) {
-			if (vap->iv_opmode == IEEE80211_M_STA) {
-				/* fake a join to init the tx rate */
-				rt2661_newassoc(ni, 1);
-			}
+		if (vap->iv_opmode != IEEE80211_M_MONITOR)
 			rt2661_enable_tsf_sync(sc);
-		}
 	}
 	return error;
 }
@@ -1118,7 +1115,8 @@ rt2661_rx_intr(struct rt2661_softc *sc)
 			    htole64(((uint64_t)tsf_hi << 32) | tsf_lo);
 			tap->wr_flags = 0;
 			tap->wr_rate = ieee80211_plcp2rate(desc->rate,
-			    le32toh(desc->flags) & RT2661_RX_OFDM);
+			    (desc->flags & htole32(RT2661_RX_OFDM)) ?
+				IEEE80211_T_OFDM : IEEE80211_T_CCK);
 			tap->wr_antsignal = rssi < 0 ? 0 : rssi;
 
 			bpf_mtap2(ifp->if_bpf, tap, sc->sc_rxtap_len, m);
@@ -1245,6 +1243,29 @@ rt2661_intr(void *arg)
 	RAL_UNLOCK(sc);
 }
 
+static uint8_t
+rt2661_plcp_signal(int rate)
+{
+	switch (rate) {
+	/* OFDM rates (cf IEEE Std 802.11a-1999, pp. 14 Table 80) */
+	case 12:	return 0xb;
+	case 18:	return 0xf;
+	case 24:	return 0xa;
+	case 36:	return 0xe;
+	case 48:	return 0x9;
+	case 72:	return 0xd;
+	case 96:	return 0x8;
+	case 108:	return 0xc;
+
+	/* CCK rates (NB: not IEEE std, device-specific) */
+	case 2:		return 0x0;
+	case 4:		return 0x1;
+	case 11:	return 0x2;
+	case 22:	return 0x3;
+	}
+	return 0xff;		/* XXX unsupported/unknown rate */
+}
+
 static void
 rt2661_setup_tx_desc(struct rt2661_softc *sc, struct rt2661_tx_desc *desc,
     uint32_t flags, uint16_t xflags, int len, int rate,
@@ -1276,7 +1297,7 @@ rt2661_setup_tx_desc(struct rt2661_softc *sc, struct rt2661_tx_desc *desc,
 	desc->qid = ac;
 
 	/* setup PLCP fields */
-	desc->plcp_signal  = ieee80211_rate2plcp(rate);
+	desc->plcp_signal  = rt2661_plcp_signal(rate);
 	desc->plcp_service = 4;
 
 	len += IEEE80211_CRC_LEN;
@@ -1420,7 +1441,7 @@ rt2661_sendprot(struct rt2661_softc *sc, int ac,
 	ackrate = ieee80211_ack_rate(sc->sc_rates, rate);
 
 	isshort = (ic->ic_flags & IEEE80211_F_SHPREAMBLE) != 0;
-	dur = ieee80211_compute_duration(sc->sc_rates, pktlen, rate, isshort);
+	dur = ieee80211_compute_duration(sc->sc_rates, pktlen, rate, isshort)
 	    + ieee80211_ack_duration(sc->sc_rates, rate, isshort);
 	flags = RT2661_TX_MORE_FRAG;
 	if (prot == IEEE80211_PROT_RTSCTS) {
@@ -1747,9 +1768,9 @@ rt2661_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ifreq *ifr = (struct ifreq *) data;
 	int error = 0, startall = 0;
 
-	RAL_LOCK(sc);
 	switch (cmd) {
 	case SIOCSIFFLAGS:
+		RAL_LOCK(sc);
 		if (ifp->if_flags & IFF_UP) {
 			if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0) {
 				rt2661_init_locked(sc);
@@ -1760,19 +1781,20 @@ rt2661_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if (ifp->if_drv_flags & IFF_DRV_RUNNING)
 				rt2661_stop_locked(sc);
 		}
+		RAL_UNLOCK(sc);
+		if (startall)
+			ieee80211_start_all(ic);
 		break;
 	case SIOCGIFMEDIA:
-	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &ic->ic_media, cmd);
 		break;
-	default:
+	case SIOCGIFADDR:
 		error = ether_ioctl(ifp, cmd, data);
 		break;
+	default:
+		error = EINVAL;
+		break;
 	}
-	RAL_UNLOCK(sc);
-
-	if (startall)
-		ieee80211_start_all(ic);
 	return error;
 }
 
@@ -2470,7 +2492,8 @@ rt2661_init(void *priv)
 	rt2661_init_locked(sc);
 	RAL_UNLOCK(sc);
 
-	ieee80211_start_all(ic);
+	if (ifp->if_drv_flags & IFF_DRV_RUNNING)
+		ieee80211_start_all(ic);		/* start all vap's */
 }
 
 void

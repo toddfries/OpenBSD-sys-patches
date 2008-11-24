@@ -24,13 +24,20 @@
 # SUCH DAMAGE.
 #
 # from: src/sys/kern/bus_if.m,v 1.21 2002/04/21 11:16:10 markm Exp
-# $FreeBSD: src/sys/powerpc/powerpc/pic_if.m,v 1.4 2007/08/11 19:25:32 marcel Exp $
+# $FreeBSD: src/sys/powerpc/powerpc/pic_if.m,v 1.6 2008/03/07 22:08:43 marcel Exp $
 #
 
 #include <sys/bus.h>
 #include <machine/frame.h>
 
 INTERFACE pic;
+
+METHOD void config {
+	device_t	dev;
+	u_int		irq;
+	enum intr_trigger trig;
+	enum intr_polarity pol;
+};
 
 METHOD void dispatch {
 	device_t	dev;
@@ -46,6 +53,11 @@ METHOD void enable {
 METHOD void eoi {
 	device_t	dev;
 	u_int		irq;
+};
+
+METHOD void ipi {
+	device_t	dev;
+	u_int		cpu;
 };
 
 METHOD void mask {

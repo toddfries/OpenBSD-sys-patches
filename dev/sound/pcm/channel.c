@@ -31,7 +31,7 @@
 
 #include "feeder_if.h"
 
-SND_DECLARE_FILE("$FreeBSD: src/sys/dev/sound/pcm/channel.c,v 1.122 2007/12/03 14:26:56 ariff Exp $");
+SND_DECLARE_FILE("$FreeBSD: src/sys/dev/sound/pcm/channel.c,v 1.123 2008/11/04 02:31:03 alfred Exp $");
 
 int report_soft_formats = 1;
 SYSCTL_INT(_hw_snd, OID_AUTO, report_soft_formats, CTLFLAG_RW,
@@ -570,13 +570,26 @@ chn_read(struct pcm_channel *c, struct uio *buf)
 void
 chn_intr(struct pcm_channel *c)
 {
-	CHN_LOCK(c);
+	uint8_t do_unlock;
+	if (CHN_LOCK_OWNED(c)) {
+		/* 
+		 * Allow sound drivers to call this function with
+		 * "CHN_LOCK()" locked:
+		 */
+		do_unlock = 0;
+	} else {
+		do_unlock = 1;
+		CHN_LOCK(c);
+	}
 	c->interrupts++;
 	if (c->direction == PCMDIR_PLAY)
 		chn_wrintr(c);
 	else
 		chn_rdintr(c);
-	CHN_UNLOCK(c);
+	if (do_unlock) {
+		CHN_UNLOCK(c);
+	}
+	return;
 }
 
 u_int32_t

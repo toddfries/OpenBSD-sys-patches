@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/fs/msdosfs/denode.h,v 1.38 2007/10/25 08:23:08 trhodes Exp $ */
+/* $FreeBSD: src/sys/fs/msdosfs/denode.h,v 1.39 2008/04/16 11:33:29 kib Exp $ */
 /*	$NetBSD: denode.h,v 1.25 1997/11/17 15:36:28 ws Exp $	*/
 
 /*-
@@ -159,7 +159,6 @@ struct denode {
 	u_long de_FileSize;	/* size of file in bytes */
 	struct fatcache de_fc[FC_SIZE];	/* fat cache */
 	u_quad_t de_modrev;	/* Revision level for lease. */
-	struct lockf *de_lockf; /* lockf */
 	u_int64_t de_inode;	/* Inode number (really byte offset of direntry) */
 };
 

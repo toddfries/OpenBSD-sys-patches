@@ -8,7 +8,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/usb.c,v 1.121 2007/10/20 23:23:18 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/usb.c,v 1.123 2008/09/27 08:51:18 ed Exp $");
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -78,7 +78,7 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/usb.c,v 1.121 2007/10/20 23:23:18 julian Exp
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdi_util.h>
 
-#define USBUNIT(d)	(minor(d))	/* usb_discover device nodes, kthread */
+#define USBUNIT(d)	(dev2unit(d))	/* usb_discover device nodes, kthread */
 #define USB_DEV_MINOR	255		/* event queue device */
 
 MALLOC_DEFINE(M_USB, "USB", "USB");
@@ -453,6 +453,8 @@ usb_event_thread(void *arg)
 	wakeup(sc);
 
 	DPRINTF(("usb_event_thread: exit\n"));
+	while (mtx_owned(&Giant))
+		mtx_unlock(&Giant);
 	kproc_exit(0);
 }
 
@@ -490,6 +492,8 @@ usb_task_thread(void *arg)
 	wakeup(&taskq->taskcreated);
 
 	DPRINTF(("usb_event_thread: exit\n"));
+	while (mtx_owned(&Giant))
+		mtx_unlock(&Giant);
 	kproc_exit(0);
 }
 

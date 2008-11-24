@@ -25,9 +25,10 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * $FreeBSD: src/sys/netinet6/ip6_ipsec.c,v 1.6 2007/08/05 16:16:15 bz Exp $
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/netinet6/ip6_ipsec.c,v 1.13 2008/10/02 15:37:58 zec Exp $");
 
 #include "opt_ipsec.h"
 
@@ -41,6 +42,7 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/sysctl.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -49,6 +51,7 @@
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
+#include <netinet/ip6.h>
 #include <netinet/in_pcb.h>
 #include <netinet/ip_var.h>
 #include <netinet/ip_options.h>
@@ -68,6 +71,7 @@
 #endif /*IPSEC*/
 
 #include <netinet6/ip6_ipsec.h>
+#include <netinet6/ip6_var.h>
 
 extern	struct protosw inet6sw[];
 
@@ -99,6 +103,8 @@ int
 ip6_ipsec_fwd(struct mbuf *m)
 {
 #ifdef IPSEC
+	INIT_VNET_INET6(curvnet);
+	INIT_VNET_IPSEC(curvnet);
 	struct m_tag *mtag;
 	struct tdb_ident *tdbi;
 	struct secpolicy *sp;
@@ -126,7 +132,7 @@ ip6_ipsec_fwd(struct mbuf *m)
 	KEY_FREESP(&sp);
 	splx(s);
 	if (error) {
-		ipstat.ips_cantforward++;
+		V_ip6stat.ip6s_cantforward++;
 		return 1;
 	}
 #endif /* IPSEC */
@@ -144,6 +150,7 @@ int
 ip6_ipsec_input(struct mbuf *m, int nxt)
 {
 #ifdef IPSEC
+	INIT_VNET_IPSEC(curvnet);
 	struct m_tag *mtag;
 	struct tdb_ident *tdbi;
 	struct secpolicy *sp;
@@ -256,7 +263,7 @@ ip6_ipsec_output(struct mbuf **m, struct inpcb *inp, int *flags, int *error,
 				 * NB: null pointer to avoid free at
 				 *     done: below.
 				 */
-				KEY_FREESP(sp), sp = NULL;
+				KEY_FREESP(sp), *sp = NULL;
 				/* XXX splx(s); */
 				goto done;
 			}
@@ -297,21 +304,16 @@ ip6_ipsec_output(struct mbuf **m, struct inpcb *inp, int *flags, int *error,
 		}
 	}
 done:
-	if (sp != NULL)
-		if (*sp != NULL)
-			KEY_FREESP(sp);
 	return 0;
 do_ipsec:
 	return -1;
 bad:
-	if (sp != NULL)
-		if (*sp != NULL)
-			KEY_FREESP(sp);
 	return 1;
 #endif /* IPSEC */
 	return 0;
 }
 
+#if 0
 /*
  * Compute the MTU for a forwarded packet that gets IPSEC encapsulated.
  * Called from ip_forward().
@@ -327,16 +329,15 @@ ip6_ipsec_mtu(struct mbuf *m)
 	 *	tunnel MTU = if MTU - sizeof(IP) - ESP/AH hdrsiz
 	 * XXX quickhack!!!
 	 */
+#ifdef IPSEC
 	struct secpolicy *sp = NULL;
 	int ipsecerror;
 	int ipsechdr;
 	struct route *ro;
-#ifdef IPSEC
 	sp = ipsec_getpolicybyaddr(m,
 				   IPSEC_DIR_OUTBOUND,
 				   IP_FORWARDING,
 				   &ipsecerror);
-#endif /* IPSEC */
 	if (sp != NULL) {
 		/* count IPsec header size */
 		ipsechdr = ipsec4_hdrsiz(m,
@@ -359,10 +360,10 @@ ip6_ipsec_mtu(struct mbuf *m)
 				mtu -= ipsechdr;
 			}
 		}
-#ifdef IPSEC
 		KEY_FREESP(&sp);
-#endif /* IPSEC */
 	}
+#endif /* IPSEC */
+	/* XXX else case missing. */
 	return mtu;
 }
-
+#endif

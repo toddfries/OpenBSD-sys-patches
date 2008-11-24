@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sparc64/include/ver.h,v 1.6 2007/05/20 13:47:36 marius Exp $
+ * $FreeBSD: src/sys/sparc64/include/ver.h,v 1.7 2008/09/03 17:39:19 marius Exp $
  */
 
 #ifndef	_MACHINE_VER_H_
@@ -40,6 +40,8 @@
 #define	VER_MASK_SIZE		(8)
 #define	VER_MAXTL_SIZE		(8)
 #define	VER_MAXWIN_SIZE		(5)
+
+#ifndef LOCORE
 
 #define	VER_MANUF_MASK		(((1L<<VER_MANUF_SIZE)-1)<<VER_MANUF_SHIFT)
 #define	VER_IMPL_MASK		(((1L<<VER_IMPL_SIZE)-1)<<VER_IMPL_SHIFT)
@@ -60,6 +62,8 @@
 
 extern int cpu_impl;
 extern char sparc64_model[];
+
+#endif /* !LOCORE */
 
 /* Known implementations. */
 #define	CPU_IMPL_SPARC64		0x01

@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  * 
  * $Id: dcons.h,v 1.15 2003/10/23 15:05:31 simokawa Exp $
- * $FreeBSD: src/sys/dev/dcons/dcons.h,v 1.6 2007/06/08 04:33:25 simokawa Exp $
+ * $FreeBSD: src/sys/dev/dcons/dcons.h,v 1.7 2008/08/20 08:31:58 ed Exp $
  */
 
 #if defined(_KERNEL) || defined(_BOOT)
@@ -98,7 +98,7 @@ struct dcons_softc {
         int brk_state;
 #define DC_GDB  1
         int flags;
-	void *dev;
+	void *tty;
 };
 
 int	dcons_checkc(struct dcons_softc *);

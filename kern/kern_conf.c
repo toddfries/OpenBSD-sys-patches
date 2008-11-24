@@ -25,11 +25,12 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_conf.c,v 1.208 2007/07/05 13:04:59 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_conf.c,v 1.224 2008/09/27 13:19:09 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
+#include <sys/bus.h>
 #include <sys/bio.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
@@ -41,7 +42,6 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_conf.c,v 1.208 2007/07/05 13:04:59 kib Exp
 #include <sys/poll.h>
 #include <sys/sx.h>
 #include <sys/ctype.h>
-#include <sys/tty.h>
 #include <sys/ucred.h>
 #include <sys/taskqueue.h>
 #include <machine/stdarg.h>
@@ -55,12 +55,14 @@ static void destroy_devl(struct cdev *dev);
 static int destroy_dev_sched_cbl(struct cdev *dev,
     void (*cb)(void *), void *arg);
 static struct cdev *make_dev_credv(int flags,
-    struct cdevsw *devsw, int minornr,
+    struct cdevsw *devsw, int unit,
     struct ucred *cr, uid_t uid, gid_t gid, int mode, const char *fmt,
     va_list ap);
 
 static struct cdev_priv_list cdevp_free_list =
     TAILQ_HEAD_INITIALIZER(cdevp_free_list);
+static SLIST_HEAD(free_cdevsw, cdevsw) cdevsw_gt_post_list =
+    SLIST_HEAD_INITIALIZER();
 
 void
 dev_lock(void)
@@ -69,19 +71,41 @@ dev_lock(void)
 	mtx_lock(&devmtx);
 }
 
+/*
+ * Free all the memory collected while the cdev mutex was
+ * locked. Since devmtx is after the system map mutex, free() cannot
+ * be called immediately and is postponed until cdev mutex can be
+ * dropped.
+ */
 static void
 dev_unlock_and_free(void)
 {
+	struct cdev_priv_list cdp_free;
+	struct free_cdevsw csw_free;
 	struct cdev_priv *cdp;
+	struct cdevsw *csw;
 
 	mtx_assert(&devmtx, MA_OWNED);
-	while ((cdp = TAILQ_FIRST(&cdevp_free_list)) != NULL) {
-		TAILQ_REMOVE(&cdevp_free_list, cdp, cdp_list);
-		mtx_unlock(&devmtx);
-		devfs_free(&cdp->cdp_c);
-		mtx_lock(&devmtx);
-	}
+
+	/*
+	 * Make the local copy of the list heads while the dev_mtx is
+	 * held. Free it later.
+	 */
+	TAILQ_INIT(&cdp_free);
+	TAILQ_CONCAT(&cdp_free, &cdevp_free_list, cdp_list);
+	csw_free = cdevsw_gt_post_list;
+	SLIST_INIT(&cdevsw_gt_post_list);
+
 	mtx_unlock(&devmtx);
+
+	while ((cdp = TAILQ_FIRST(&cdp_free)) != NULL) {
+		TAILQ_REMOVE(&cdp_free, cdp, cdp_list);
+		devfs_free(&cdp->cdp_c);
+	}
+	while ((csw = SLIST_FIRST(&csw_free)) != NULL) {
+		SLIST_REMOVE_HEAD(&csw_free, d_postfree_list);
+		free(csw, M_DEVT);
+	}
 }
 
 static void
@@ -90,8 +114,16 @@ dev_free_devlocked(struct cdev *cdev)
 	struct cdev_priv *cdp;
 
 	mtx_assert(&devmtx, MA_OWNED);
-	cdp = cdev->si_priv;
+	cdp = cdev2priv(cdev);
 	TAILQ_INSERT_HEAD(&cdevp_free_list, cdp, cdp_list);
+}
+
+static void
+cdevsw_free_devlocked(struct cdevsw *csw)
+{
+
+	mtx_assert(&devmtx, MA_OWNED);
+	SLIST_INSERT_HEAD(&cdevsw_gt_post_list, csw, d_postfree_list);
 }
 
 void
@@ -154,7 +186,7 @@ dev_refthread(struct cdev *dev)
 	dev_lock();
 	csw = dev->si_devsw;
 	if (csw != NULL) {
-		cdp = dev->si_priv;
+		cdp = cdev2priv(dev);
 		if ((cdp->cdp_flags & CDP_SCHED_DTR) == 0)
 			dev->si_threadcount++;
 		else
@@ -175,7 +207,7 @@ devvn_refthread(struct vnode *vp, struct cdev **devp)
 	dev_lock();
 	*devp = vp->v_rdev;
 	if (*devp != NULL) {
-		cdp = (*devp)->si_priv;
+		cdp = cdev2priv(*devp);
 		if ((cdp->cdp_flags & CDP_SCHED_DTR) == 0) {
 			csw = (*devp)->si_devsw;
 			if (csw != NULL)
@@ -192,6 +224,8 @@ dev_relthread(struct cdev *dev)
 
 	mtx_assert(&devmtx, MA_NOTOWNED);
 	dev_lock();
+	KASSERT(dev->si_threadcount > 0,
+	    ("%s threadcount is wrong", dev->si_name));
 	dev->si_threadcount--;
 	dev_unlock();
 }
@@ -297,157 +331,195 @@ no_poll(struct cdev *dev __unused, int events, struct thread *td __unused)
 static int
 giant_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 {
+	struct cdevsw *dsw;
 	int retval;
 
+	dsw = dev_refthread(dev);
+	if (dsw == NULL)
+		return (ENXIO);
 	mtx_lock(&Giant);
-	retval = dev->si_devsw->d_gianttrick->
-	    d_open(dev, oflags, devtype, td);
+	retval = dsw->d_gianttrick->d_open(dev, oflags, devtype, td);
 	mtx_unlock(&Giant);
+	dev_relthread(dev);
 	return (retval);
 }
 
 static int
 giant_fdopen(struct cdev *dev, int oflags, struct thread *td, struct file *fp)
 {
+	struct cdevsw *dsw;
 	int retval;
 
+	dsw = dev_refthread(dev);
+	if (dsw == NULL)
+		return (ENXIO);
 	mtx_lock(&Giant);
-	retval = dev->si_devsw->d_gianttrick->
-	    d_fdopen(dev, oflags, td, fp);
+	retval = dsw->d_gianttrick->d_fdopen(dev, oflags, td, fp);
 	mtx_unlock(&Giant);
+	dev_relthread(dev);
 	return (retval);
 }
 
 static int
 giant_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 {
+	struct cdevsw *dsw;
 	int retval;
 
+	dsw = dev_refthread(dev);
+	if (dsw == NULL)
+		return (ENXIO);
 	mtx_lock(&Giant);
-	retval = dev->si_devsw->d_gianttrick->
-	    d_close(dev, fflag, devtype, td);
+	retval = dsw->d_gianttrick->d_close(dev, fflag, devtype, td);
 	mtx_unlock(&Giant);
+	dev_relthread(dev);
 	return (retval);
 }
 
 static void
 giant_strategy(struct bio *bp)
 {
+	struct cdevsw *dsw;
+	struct cdev *dev;
 
+	dev = bp->bio_dev;
+	dsw = dev_refthread(dev);
+	if (dsw == NULL) {
+		biofinish(bp, NULL, ENXIO);
+		return;
+	}
 	mtx_lock(&Giant);
-	bp->bio_dev->si_devsw->d_gianttrick->
-	    d_strategy(bp);
+	dsw->d_gianttrick->d_strategy(bp);
 	mtx_unlock(&Giant);
+	dev_relthread(dev);
 }
 
 static int
 giant_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag, struct thread *td)
 {
+	struct cdevsw *dsw;
 	int retval;
 
+	dsw = dev_refthread(dev);
+	if (dsw == NULL)
+		return (ENXIO);
 	mtx_lock(&Giant);
-	retval = dev->si_devsw->d_gianttrick->
-	    d_ioctl(dev, cmd, data, fflag, td);
+	retval = dsw->d_gianttrick->d_ioctl(dev, cmd, data, fflag, td);
 	mtx_unlock(&Giant);
+	dev_relthread(dev);
 	return (retval);
 }
   
 static int
 giant_read(struct cdev *dev, struct uio *uio, int ioflag)
 {
+	struct cdevsw *dsw;
 	int retval;
 
+	dsw = dev_refthread(dev);
+	if (dsw == NULL)
+		return (ENXIO);
 	mtx_lock(&Giant);
-	retval = dev->si_devsw->d_gianttrick->
-	    d_read(dev, uio, ioflag);
+	retval = dsw->d_gianttrick->d_read(dev, uio, ioflag);
 	mtx_unlock(&Giant);
+	dev_relthread(dev);
 	return (retval);
 }
 
 static int
 giant_write(struct cdev *dev, struct uio *uio, int ioflag)
 {
+	struct cdevsw *dsw;
 	int retval;
 
+	dsw = dev_refthread(dev);
+	if (dsw == NULL)
+		return (ENXIO);
 	mtx_lock(&Giant);
-	retval = dev->si_devsw->d_gianttrick->
-		d_write(dev, uio, ioflag);
+	retval = dsw->d_gianttrick->d_write(dev, uio, ioflag);
 	mtx_unlock(&Giant);
+	dev_relthread(dev);
 	return (retval);
 }
 
 static int
 giant_poll(struct cdev *dev, int events, struct thread *td)
 {
+	struct cdevsw *dsw;
 	int retval;
 
+	dsw = dev_refthread(dev);
+	if (dsw == NULL)
+		return (ENXIO);
 	mtx_lock(&Giant);
-	retval = dev->si_devsw->d_gianttrick->
-	    d_poll(dev, events, td);
+	retval = dsw->d_gianttrick->d_poll(dev, events, td);
 	mtx_unlock(&Giant);
+	dev_relthread(dev);
 	return (retval);
 }
 
 static int
 giant_kqfilter(struct cdev *dev, struct knote *kn)
 {
+	struct cdevsw *dsw;
 	int retval;
 
+	dsw = dev_refthread(dev);
+	if (dsw == NULL)
+		return (ENXIO);
 	mtx_lock(&Giant);
-	retval = dev->si_devsw->d_gianttrick->
-	    d_kqfilter(dev, kn);
+	retval = dsw->d_gianttrick->d_kqfilter(dev, kn);
 	mtx_unlock(&Giant);
+	dev_relthread(dev);
 	return (retval);
 }
 
 static int
 giant_mmap(struct cdev *dev, vm_offset_t offset, vm_paddr_t *paddr, int nprot)
 {
+	struct cdevsw *dsw;
 	int retval;
 
+	dsw = dev_refthread(dev);
+	if (dsw == NULL)
+		return (ENXIO);
 	mtx_lock(&Giant);
-	retval = dev->si_devsw->d_gianttrick->
-	    d_mmap(dev, offset, paddr, nprot);
+	retval = dsw->d_gianttrick->d_mmap(dev, offset, paddr, nprot);
 	mtx_unlock(&Giant);
+	dev_relthread(dev);
 	return (retval);
 }
 
 
-/*
- * struct cdev * and u_dev_t primitives
- */
-
-int
-minor(struct cdev *x)
+static void
+notify(struct cdev *dev, const char *ev)
 {
-	if (x == NULL)
-		return NODEV;
-	return(x->si_drv0 & MAXMINOR);
+	static const char prefix[] = "cdev=";
+	char *data;
+	int namelen;
+
+	if (cold)
+		return;
+	namelen = strlen(dev->si_name);
+	data = malloc(namelen + sizeof(prefix), M_TEMP, M_WAITOK);
+	memcpy(data, prefix, sizeof(prefix) - 1);
+	memcpy(data + sizeof(prefix) - 1, dev->si_name, namelen + 1);
+	devctl_notify("DEVFS", "CDEV", ev, data);
+	free(data, M_TEMP);
 }
 
-int
-dev2unit(struct cdev *x)
+static void
+notify_create(struct cdev *dev)
 {
 
-	if (x == NULL)
-		return NODEV;
-	return (minor2unit(minor(x)));
+	notify(dev, "CREATE");
 }
 
-u_int
-minor2unit(u_int _minor)
+static void
+notify_destroy(struct cdev *dev)
 {
 
-	KASSERT((_minor & ~MAXMINOR) == 0, ("Illegal minor %x", _minor));
-	return ((_minor & 0xff) | ((_minor >> 8) & 0xffff00));
-}
-
-int
-unit2minor(int unit)
-{
-
-	KASSERT(unit <= 0xffffff, ("Invalid unit (%d) in unit2minor", unit));
-	return ((unit & 0xff) | ((unit << 8) & ~0xffff));
+	notify(dev, "DESTROY");
 }
 
 static struct cdev *
@@ -458,28 +530,19 @@ newdev(struct cdevsw *csw, int y, struct cdev *si)
 
 	mtx_assert(&devmtx, MA_OWNED);
 	udev = y;
-	LIST_FOREACH(si2, &csw->d_devs, si_list) {
-		if (si2->si_drv0 == udev) {
-			dev_free_devlocked(si);
-			return (si2);
+	if (csw->d_flags & D_NEEDMINOR) {
+		/* We may want to return an existing device */
+		LIST_FOREACH(si2, &csw->d_devs, si_list) {
+			if (si2->si_drv0 == udev) {
+				dev_free_devlocked(si);
+				return (si2);
+			}
 		}
 	}
 	si->si_drv0 = udev;
 	si->si_devsw = csw;
 	LIST_INSERT_HEAD(&csw->d_devs, si, si_list);
 	return (si);
-}
-
-int
-uminor(dev_t dev)
-{
-	return (dev & MAXMINOR);
-}
-
-int
-umajor(dev_t dev)
-{
-	return ((dev & ~MAXMINOR) >> 8);
 }
 
 static void
@@ -490,7 +553,7 @@ fini_cdevsw(struct cdevsw *devsw)
 	if (devsw->d_gianttrick != NULL) {
 		gt = devsw->d_gianttrick;
 		memcpy(devsw, gt, sizeof *devsw);
-		free(gt, M_DEVT);
+		cdevsw_free_devlocked(gt);
 		devsw->d_gianttrick = NULL;
 	}
 	devsw->d_flags &= ~D_INIT;
@@ -501,11 +564,20 @@ prep_cdevsw(struct cdevsw *devsw)
 {
 	struct cdevsw *dsw2;
 
-	if (devsw->d_flags & D_NEEDGIANT)
+	mtx_assert(&devmtx, MA_OWNED);
+	if (devsw->d_flags & D_INIT)
+		return;
+	if (devsw->d_flags & D_NEEDGIANT) {
+		dev_unlock();
 		dsw2 = malloc(sizeof *dsw2, M_DEVT, M_WAITOK);
-	else
+		dev_lock();
+	} else
 		dsw2 = NULL;
-	dev_lock();
+	if (devsw->d_flags & D_INIT) {
+		if (dsw2 != NULL)
+			cdevsw_free_devlocked(dsw2);
+		return;
+	}
 
 	if (devsw->d_version != D_VERSION_01) {
 		printf(
@@ -524,20 +596,12 @@ prep_cdevsw(struct cdevsw *devsw)
 		devsw->d_kqfilter = dead_kqfilter;
 	}
 	
-	if (devsw->d_flags & D_TTY) {
-		if (devsw->d_ioctl == NULL)	devsw->d_ioctl = ttyioctl;
-		if (devsw->d_read == NULL)	devsw->d_read = ttyread;
-		if (devsw->d_write == NULL)	devsw->d_write = ttywrite;
-		if (devsw->d_kqfilter == NULL)	devsw->d_kqfilter = ttykqfilter;
-		if (devsw->d_poll == NULL)	devsw->d_poll = ttypoll;
-	}
-
 	if (devsw->d_flags & D_NEEDGIANT) {
 		if (devsw->d_gianttrick == NULL) {
 			memcpy(dsw2, devsw, sizeof *dsw2);
 			devsw->d_gianttrick = dsw2;
-		} else
-			free(dsw2, M_DEVT);
+			dsw2 = NULL;
+		}
 	}
 
 #define FIXUP(member, noop, giant) 				\
@@ -566,25 +630,22 @@ prep_cdevsw(struct cdevsw *devsw)
 
 	devsw->d_flags |= D_INIT;
 
-	dev_unlock();
+	if (dsw2 != NULL)
+		cdevsw_free_devlocked(dsw2);
 }
 
 struct cdev *
-make_dev_credv(int flags, struct cdevsw *devsw, int minornr,
+make_dev_credv(int flags, struct cdevsw *devsw, int unit,
     struct ucred *cr, uid_t uid,
     gid_t gid, int mode, const char *fmt, va_list ap)
 {
 	struct cdev *dev;
 	int i;
 
-	KASSERT((minornr & ~MAXMINOR) == 0,
-	    ("Invalid minor (0x%x) in make_dev", minornr));
-
-	if (!(devsw->d_flags & D_INIT)) 
-		prep_cdevsw(devsw);
 	dev = devfs_alloc();
 	dev_lock();
-	dev = newdev(devsw, minornr, dev);
+	prep_cdevsw(devsw);
+	dev = newdev(devsw, unit, dev);
 	if (flags & MAKEDEV_REF)
 		dev_refl(dev);
 	if (dev->si_flags & SI_CHEAPCLONE &&
@@ -599,7 +660,7 @@ make_dev_credv(int flags, struct cdevsw *devsw, int minornr,
 	}
 	KASSERT(!(dev->si_flags & SI_NAMED),
 	    ("make_dev() by driver %s on pre-existing device (min=%x, name=%s)",
-	    devsw->d_name, minor(dev), devtoname(dev)));
+	    devsw->d_name, dev2unit(dev), devtoname(dev)));
 
 	i = vsnrprintf(dev->__si_namebuf, sizeof dev->__si_namebuf, 32, fmt, ap);
 	if (i > (sizeof dev->__si_namebuf - 1)) {
@@ -618,39 +679,42 @@ make_dev_credv(int flags, struct cdevsw *devsw, int minornr,
 
 	devfs_create(dev);
 	clean_unrhdrl(devfs_inos);
-	dev_unlock();
+	dev_unlock_and_free();
+
+	notify_create(dev);
+
 	return (dev);
 }
 
 struct cdev *
-make_dev(struct cdevsw *devsw, int minornr, uid_t uid, gid_t gid, int mode,
+make_dev(struct cdevsw *devsw, int unit, uid_t uid, gid_t gid, int mode,
     const char *fmt, ...)
 {
 	struct cdev *dev;
 	va_list ap;
 
 	va_start(ap, fmt);
-	dev = make_dev_credv(0, devsw, minornr, NULL, uid, gid, mode, fmt, ap);
+	dev = make_dev_credv(0, devsw, unit, NULL, uid, gid, mode, fmt, ap);
 	va_end(ap);
 	return (dev);
 }
 
 struct cdev *
-make_dev_cred(struct cdevsw *devsw, int minornr, struct ucred *cr, uid_t uid,
+make_dev_cred(struct cdevsw *devsw, int unit, struct ucred *cr, uid_t uid,
     gid_t gid, int mode, const char *fmt, ...)
 {
 	struct cdev *dev;
 	va_list ap;
 
 	va_start(ap, fmt);
-	dev = make_dev_credv(0, devsw, minornr, cr, uid, gid, mode, fmt, ap);
+	dev = make_dev_credv(0, devsw, unit, cr, uid, gid, mode, fmt, ap);
 	va_end(ap);
 
 	return (dev);
 }
 
 struct cdev *
-make_dev_credf(int flags, struct cdevsw *devsw, int minornr,
+make_dev_credf(int flags, struct cdevsw *devsw, int unit,
     struct ucred *cr, uid_t uid,
     gid_t gid, int mode, const char *fmt, ...)
 {
@@ -658,7 +722,7 @@ make_dev_credf(int flags, struct cdevsw *devsw, int minornr,
 	va_list ap;
 
 	va_start(ap, fmt);
-	dev = make_dev_credv(flags, devsw, minornr, cr, uid, gid, mode,
+	dev = make_dev_credv(flags, devsw, unit, cr, uid, gid, mode,
 	    fmt, ap);
 	va_end(ap);
 
@@ -691,6 +755,7 @@ make_dev_alias(struct cdev *pdev, const char *fmt, ...)
 	va_list ap;
 	int i;
 
+	KASSERT(pdev != NULL, ("NULL pdev"));
 	dev = devfs_alloc();
 	dev_lock();
 	dev->si_flags |= SI_ALIAS;
@@ -704,9 +769,12 @@ make_dev_alias(struct cdev *pdev, const char *fmt, ...)
 	va_end(ap);
 
 	devfs_create(dev);
+	dev_dependsl(pdev, dev);
 	clean_unrhdrl(devfs_inos);
 	dev_unlock();
-	dev_depends(pdev, dev);
+
+	notify_create(dev);
+
 	return (dev);
 }
 
@@ -714,10 +782,11 @@ static void
 destroy_devl(struct cdev *dev)
 {
 	struct cdevsw *csw;
+	struct cdev_privdata *p, *p1;
 
 	mtx_assert(&devmtx, MA_OWNED);
 	KASSERT(dev->si_flags & SI_NAMED,
-	    ("WARNING: Driver mistake: destroy_dev on %d\n", minor(dev)));
+	    ("WARNING: Driver mistake: destroy_dev on %d\n", dev2unit(dev)));
 
 	devfs_destroy(dev);
 
@@ -754,6 +823,16 @@ destroy_devl(struct cdev *dev)
 		/* Use unique dummy wait ident */
 		msleep(&csw, &devmtx, PRIBIO, "devdrn", hz / 10);
 	}
+
+	dev_unlock();
+	notify_destroy(dev);
+	mtx_lock(&cdevpriv_mtx);
+	LIST_FOREACH_SAFE(p, &cdev2priv(dev)->cdp_fdpriv, cdpd_list, p1) {
+		devfs_destroy_cdevpriv(p);
+		mtx_lock(&cdevpriv_mtx);
+	}
+	mtx_unlock(&cdevpriv_mtx);
+	dev_lock();
 
 	dev->si_drv1 = 0;
 	dev->si_drv2 = 0;
@@ -803,7 +882,7 @@ devtoname(struct cdev *dev)
 			dev_relthread(dev);
 		}
 		p += strlen(p);
-		mynor = minor(dev);
+		mynor = dev2unit(dev);
 		if (mynor < 0 || mynor > 255)
 			sprintf(p, "/%#x", (u_int)mynor);
 		else
@@ -881,9 +960,9 @@ clone_create(struct clonedevs **cdp, struct cdevsw *csw, int *up, struct cdev **
 	    ("Illegal extra bits (0x%x) in clone_create", extra));
 	KASSERT(*up <= CLONE_UNITMASK,
 	    ("Too high unit (0x%x) in clone_create", *up));
+	KASSERT(csw->d_flags & D_NEEDMINOR,
+	    ("clone_create() on cdevsw without minor numbers"));
 
-	if (!(csw->d_flags & D_INIT))
-		prep_cdevsw(csw);
 
 	/*
 	 * Search the list for a lot of things in one go:
@@ -896,6 +975,7 @@ clone_create(struct clonedevs **cdp, struct cdevsw *csw, int *up, struct cdev **
 	unit = *up;
 	ndev = devfs_alloc();
 	dev_lock();
+	prep_cdevsw(csw);
 	low = extra;
 	de = dl = NULL;
 	cd = *cdp;
@@ -923,7 +1003,7 @@ clone_create(struct clonedevs **cdp, struct cdevsw *csw, int *up, struct cdev **
 	}
 	if (unit == -1)
 		unit = low & CLONE_UNITMASK;
-	dev = newdev(csw, unit2minor(unit | extra), ndev);
+	dev = newdev(csw, unit | extra, ndev);
 	if (dev->si_flags & SI_CLONELIST) {
 		printf("dev %p (%s) is on clonelist\n", dev, dev->si_name);
 		printf("unit=%d, low=%d, extra=0x%x\n", unit, low, extra);
@@ -967,7 +1047,7 @@ clone_cleanup(struct clonedevs **cdp)
 		KASSERT(dev->si_flags & SI_CLONELIST,
 		    ("Dev %p(%s) should be on clonelist", dev, dev->si_name));
 		dev->si_flags &= ~SI_CLONELIST;
-		cp = dev->si_priv;
+		cp = cdev2priv(dev);
 		if (!(cp->cdp_flags & CDP_SCHED_DTR)) {
 			cp->cdp_flags |= CDP_SCHED_DTR;
 			KASSERT(dev->si_flags & SI_NAMED,
@@ -975,7 +1055,7 @@ clone_cleanup(struct clonedevs **cdp)
 			destroy_devl(dev);
 		}
 	}
-	dev_unlock();
+	dev_unlock_and_free();
 	free(cd, M_DEVBUF);
 	*cdp = NULL;
 }
@@ -1002,7 +1082,7 @@ destroy_dev_tq(void *ctx, int pending)
 		cb = cp->cdp_dtr_cb;
 		cb_arg = cp->cdp_dtr_cb_arg;
 		destroy_devl(dev);
-		dev_unlock();
+		dev_unlock_and_free();
 		dev_rel(dev);
 		if (cb != NULL)
 			cb(cb_arg);
@@ -1021,7 +1101,7 @@ destroy_dev_sched_cbl(struct cdev *dev, void (*cb)(void *), void *arg)
 	struct cdev_priv *cp;
 
 	mtx_assert(&devmtx, MA_OWNED);
-	cp = dev->si_priv;
+	cp = cdev2priv(dev);
 	if (cp->cdp_flags & CDP_SCHED_DTR) {
 		dev_unlock();
 		return (0);

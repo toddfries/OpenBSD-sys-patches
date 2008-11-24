@@ -26,7 +26,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGES.
  *
- * $FreeBSD: src/sys/dev/ath/ah_osdep.c,v 1.4 2008/04/20 20:35:35 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ah_osdep.c,v 1.5 2008/10/27 18:30:33 sam Exp $
  */
 #include "opt_ah.h"
 
@@ -71,8 +71,12 @@ extern	void ath_hal_assert_failed(const char* filename,
 		int lineno, const char* msg);
 #endif
 #ifdef AH_DEBUG
+#if HAL_ABI_VERSION >= 0x08090101
+extern	void HALDEBUG(struct ath_hal *ah, u_int mask, const char* fmt, ...);
+#else
 extern	void HALDEBUG(struct ath_hal *ah, const char* fmt, ...);
 extern	void HALDEBUGn(struct ath_hal *ah, u_int level, const char* fmt, ...);
+#endif
 #endif /* AH_DEBUG */
 
 /* NB: put this here instead of the driver to avoid circular references */
@@ -139,6 +143,18 @@ ath_hal_ether_sprintf(const u_int8_t *mac)
 }
 
 #ifdef AH_DEBUG
+#if HAL_ABI_VERSION >= 0x08090101
+void
+HALDEBUG(struct ath_hal *ah, u_int mask, const char* fmt, ...)
+{
+	if (ath_hal_debug & mask) {
+		__va_list ap;
+		va_start(ap, fmt);
+		ath_hal_vprintf(ah, fmt, ap);
+		va_end(ap);
+	}
+}
+#else
 void
 HALDEBUG(struct ath_hal *ah, const char* fmt, ...)
 {
@@ -160,6 +176,7 @@ HALDEBUGn(struct ath_hal *ah, u_int level, const char* fmt, ...)
 		va_end(ap);
 	}
 }
+#endif
 #endif /* AH_DEBUG */
 
 #ifdef AH_DEBUG_ALQ

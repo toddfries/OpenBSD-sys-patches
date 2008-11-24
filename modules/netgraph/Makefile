@@ -1,5 +1,5 @@
 # $Whistle: Makefile,v 1.5 1999/01/24 06:48:37 archie Exp $
-# $FreeBSD: src/sys/modules/netgraph/Makefile,v 1.49 2007/05/15 16:24:49 mav Exp $
+# $FreeBSD: src/sys/modules/netgraph/Makefile,v 1.50 2008/08/03 10:32:17 ed Exp $
 
 .include <bsd.own.mk>
 
@@ -48,7 +48,6 @@ SUBDIR=	async \
 	tag \
 	tcpmss \
 	tee \
-	tty \
 	UI \
 	vjc \
 	vlan

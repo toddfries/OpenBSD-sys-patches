@@ -34,7 +34,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/arm/include/asmacros.h,v 1.6 2007/09/22 14:23:52 cognet Exp $
+ * $FreeBSD: src/sys/arm/include/asmacros.h,v 1.8 2008/02/05 10:22:33 raj Exp $
  */
 
 #ifndef	_MACHINE_ASMACROS_H_
@@ -67,7 +67,13 @@
 	stmia	r0, {r13-r14}^;		/* Push the user mode registers */ \
         mov     r0, r0;                 /* NOP for previous instruction */ \
 	mrs	r0, spsr_all;		/* Put the SPSR on the stack */	   \
-	str	r0, [sp, #-4]!;
+	str	r0, [sp, #-4]!;						   \
+	ldr	r0, =ARM_RAS_START;					   \
+	mov	r1, #0;							   \
+	str	r1, [r0];						   \
+	ldr	r0, =ARM_RAS_END;					   \
+	mov	r1, #0xffffffff;					   \
+	str	r1, [r0];
 
 /*
  * PULLFRAME - macro to pull a trap frame from the stack in the current mode
@@ -113,14 +119,15 @@
 	add	r0, sp, #(4*13);	/* Adjust the stack pointer */	   \
 	stmia	r0, {r13-r14}^;		/* Push the user mode registers */ \
         mov     r0, r0;                 /* NOP for previous instruction */ \
-	ldr	r5, =0xe0000004;	/* Check if there's any RAS */	   \
+	ldr	r5, =ARM_RAS_START;	/* Check if there's any RAS */	   \
 	ldr	r3, [r5];						   \
 	cmp	r3, #0;			/* Is the update needed ? */	   \
 	ldrgt	lr, [r0, #16];						   \
-	ldrgt	r1, =0xe0000008;					   \
+	ldrgt	r1, =ARM_RAS_END;					   \
 	ldrgt	r4, [r1];		/* Get the end of the RAS */	   \
 	movgt	r2, #0;			/* Reset the magic addresses */	   \
 	strgt	r2, [r5];						   \
+	movgt	r2, #0xffffffff;					   \
 	strgt	r2, [r1];						   \
 	cmpgt	lr, r3;			/* Were we in the RAS ? */	   \
 	cmpgt	r4, lr;							   \

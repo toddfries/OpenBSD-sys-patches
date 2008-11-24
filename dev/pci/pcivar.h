@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/pci/pcivar.h,v 1.81 2008/04/12 20:26:07 phk Exp $
+ * $FreeBSD: src/sys/dev/pci/pcivar.h,v 1.83 2008/07/23 09:44:36 luoqi Exp $
  *
  */
 
@@ -115,6 +115,13 @@ struct pcicfg_msix {
     struct resource *msix_pba_res;	/* Resource containing PBA. */
 };
 
+/* Interesting values for HyperTransport */
+struct pcicfg_ht {
+    uint8_t	ht_msimap;	/* Offset of MSI mapping cap registers. */
+    uint16_t	ht_msictrl;	/* MSI mapping control */
+    uint64_t	ht_msiaddr;	/* MSI mapping base address */
+};
+
 /* config header information common to all header types */
 typedef struct pcicfg {
     struct device *dev;		/* device which owns this */
@@ -156,6 +163,7 @@ typedef struct pcicfg {
     struct pcicfg_vpd vpd;	/* pci vital product data */
     struct pcicfg_msi msi;	/* pci msi */
     struct pcicfg_msix msix;	/* pci msi-x */
+    struct pcicfg_ht ht;	/* HyperTransport */
 } pcicfgregs;
 
 /* additional type 1 device config header information (PCI to PCI bridge) */
@@ -209,13 +217,6 @@ struct pci_devinfo {
 #ifdef _SYS_BUS_H_
 
 #include "pci_if.h"
-
-/*
- * Define pci-specific resource flags for accessing memory via dense
- * or bwx memory spaces. These flags are ignored on i386.
- */
-#define	PCI_RF_DENSE	0x10000
-#define	PCI_RF_BWX	0x20000
 
 enum pci_device_ivars {
     PCI_IVAR_SUBVENDOR,
@@ -461,6 +462,8 @@ int	pci_remap_msi_irq(device_t dev, u_int irq);
 int	pci_pending_msix(device_t dev, u_int index);
 
 int	pci_msi_device_blacklisted(device_t dev);
+
+void	pci_ht_map_msi(device_t dev, uint64_t addr);
 
 #endif	/* _SYS_BUS_H_ */
 

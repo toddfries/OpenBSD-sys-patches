@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/legacy.c,v 1.63 2007/09/30 11:05:16 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/legacy.c,v 1.65 2008/03/13 20:39:04 jhb Exp $");
 
 /*
  * This code implements a system driver for legacy systems that do not
@@ -62,7 +62,6 @@ struct legacy_device {
 
 #define DEVTOAT(dev)	((struct legacy_device *)device_get_ivars(dev))
 
-static void legacy_identify(driver_t *driver, device_t parent);
 static	int legacy_probe(device_t);
 static	int legacy_attach(device_t);
 static	int legacy_print_child(device_t, device_t);
@@ -73,7 +72,6 @@ static	int legacy_write_ivar(device_t, device_t, int, uintptr_t);
 
 static device_method_t legacy_methods[] = {
 	/* Device interface */
-	DEVMETHOD(device_identify,	legacy_identify),
 	DEVMETHOD(device_probe,		legacy_probe),
 	DEVMETHOD(device_attach,	legacy_attach),
 	DEVMETHOD(device_detach,	bus_generic_detach),
@@ -105,29 +103,10 @@ static devclass_t legacy_devclass;
 
 DRIVER_MODULE(legacy, nexus, legacy_driver, legacy_devclass, 0, 0);
 
-static void
-legacy_identify(driver_t *driver, device_t parent)
-{
-
-	/*
-	 * Add child device with order of 11 so it gets probed
-	 * after ACPI (which is at order 10).
-	 */
-	if (BUS_ADD_CHILD(parent, 11, "legacy", 0) == NULL)
-		panic("legacy: could not attach");
-}
-
 static int
 legacy_probe(device_t dev)
 {
-	device_t acpi;
 
-	/*
-	 * Fail to probe if ACPI is ok.
-	 */
-	acpi = devclass_get_device(devclass_find("acpi"), 0);
-	if (acpi != NULL && device_is_alive(acpi))
-		return (ENXIO);
 	device_set_desc(dev, "legacy system");
 	device_quiet(dev);
 	return (0);
@@ -137,20 +116,10 @@ static int
 legacy_attach(device_t dev)
 {
 	device_t child;
-	int i;
-
-	/* First, attach the CPU pseudo-driver. */
-	for (i = 0; i <= mp_maxid; i++)
-		if (!CPU_ABSENT(i)) {
-			child = BUS_ADD_CHILD(dev, 0, "cpu", i);
-			if (child == NULL)
-				panic("legacy_attach cpu");
-			device_probe_and_attach(child);
-		}
 
 	/*
-	 * Second, let our child driver's identify any child devices that
-	 * they can find.  Once that is done attach any devices that we
+	 * Let our child drivers identify any child devices that they
+	 * can find.  Once that is done attach any devices that we
 	 * found.
 	 */
 	bus_generic_probe(dev);
@@ -262,6 +231,7 @@ legacy_write_ivar(device_t dev, device_t child, int which, uintptr_t value)
  * Legacy CPU attachment when ACPI is not available.  Drivers like
  * cpufreq(4) hang off this.
  */
+static void	cpu_identify(driver_t *driver, device_t parent);
 static int	cpu_read_ivar(device_t dev, device_t child, int index,
 		    uintptr_t *result);
 static device_t cpu_add_child(device_t bus, int order, const char *name,
@@ -275,6 +245,7 @@ struct cpu_device {
 
 static device_method_t cpu_methods[] = {
 	/* Device interface */
+	DEVMETHOD(device_identify,	cpu_identify),
 	DEVMETHOD(device_probe,		bus_generic_probe),
 	DEVMETHOD(device_attach,	bus_generic_attach),
 	DEVMETHOD(device_detach,	bus_generic_detach),
@@ -307,6 +278,25 @@ static driver_t cpu_driver = {
 };
 static devclass_t cpu_devclass;
 DRIVER_MODULE(cpu, legacy, cpu_driver, cpu_devclass, 0, 0);
+
+static void
+cpu_identify(driver_t *driver, device_t parent)
+{
+	device_t child;
+	int i;
+
+	/*
+	 * Attach a cpuX device for each CPU.  We use an order of 150
+	 * so that these devices are attached after the Host-PCI
+	 * bridges (which are added at order 100).
+	 */
+	for (i = 0; i <= mp_maxid; i++)
+		if (!CPU_ABSENT(i)) {
+			child = BUS_ADD_CHILD(parent, 150, "cpu", i);
+			if (child == NULL)
+				panic("legacy_attach cpu");
+		}
+}
 
 static device_t
 cpu_add_child(device_t bus, int order, const char *name, int unit)

@@ -3,6 +3,7 @@
  * Copyright (c) 2001 Ilmar S. Habibulin
  * Copyright (c) 2001-2004 Networks Associates Technology, Inc.
  * Copyright (c) 2006 SPARTA, Inc.
+ * Copyright (c) 2008 Apple Inc.
  * All rights reserved.
  *
  * This software was developed by Robert Watson and Ilmar Habibulin for the
@@ -39,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/security/mac/mac_inet.c,v 1.16 2007/10/28 17:12:47 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/security/mac/mac_inet.c,v 1.22 2008/10/17 12:54:28 bz Exp $");
 
 #include "opt_mac.h"
 
@@ -91,9 +92,12 @@ int
 mac_inpcb_init(struct inpcb *inp, int flag)
 {
 
-	inp->inp_label = mac_inpcb_label_alloc(flag);
-	if (inp->inp_label == NULL)
-		return (ENOMEM);
+	if (mac_labeled & MPC_OBJECT_INPCB) {
+		inp->inp_label = mac_inpcb_label_alloc(flag);
+		if (inp->inp_label == NULL)
+			return (ENOMEM);
+	} else
+		inp->inp_label = NULL;
 	return (0);
 }
 
@@ -117,12 +121,15 @@ mac_ipq_label_alloc(int flag)
 }
 
 int
-mac_ipq_init(struct ipq *ipq, int flag)
+mac_ipq_init(struct ipq *q, int flag)
 {
 
-	ipq->ipq_label = mac_ipq_label_alloc(flag);
-	if (ipq->ipq_label == NULL)
-		return (ENOMEM);
+	if (mac_labeled & MPC_OBJECT_IPQ) {
+		q->ipq_label = mac_ipq_label_alloc(flag);
+		if (q->ipq_label == NULL)
+			return (ENOMEM);
+	} else
+		q->ipq_label = NULL;
 	return (0);
 }
 
@@ -138,8 +145,10 @@ void
 mac_inpcb_destroy(struct inpcb *inp)
 {
 
-	mac_inpcb_label_free(inp->inp_label);
-	inp->inp_label = NULL;
+	if (inp->inp_label != NULL) {
+		mac_inpcb_label_free(inp->inp_label);
+		inp->inp_label = NULL;
+	}
 }
 
 static void
@@ -151,11 +160,13 @@ mac_ipq_label_free(struct label *label)
 }
 
 void
-mac_ipq_destroy(struct ipq *ipq)
+mac_ipq_destroy(struct ipq *q)
 {
 
-	mac_ipq_label_free(ipq->ipq_label);
-	ipq->ipq_label = NULL;
+	if (q->ipq_label != NULL) {
+		mac_ipq_label_free(q->ipq_label);
+		q->ipq_label = NULL;
+	}
 }
 
 void
@@ -166,13 +177,13 @@ mac_inpcb_create(struct socket *so, struct inpcb *inp)
 }
 
 void
-mac_ipq_reassemble(struct ipq *ipq, struct mbuf *m)
+mac_ipq_reassemble(struct ipq *q, struct mbuf *m)
 {
 	struct label *label;
 
 	label = mac_mbuf_to_label(m);
 
-	MAC_PERFORM(ipq_reassemble, ipq, ipq->ipq_label, m, label);
+	MAC_PERFORM(ipq_reassemble, q, q->ipq_label, m, label);
 }
 
 void
@@ -187,13 +198,13 @@ mac_netinet_fragment(struct mbuf *m, struct mbuf *frag)
 }
 
 void
-mac_ipq_create(struct mbuf *m, struct ipq *ipq)
+mac_ipq_create(struct mbuf *m, struct ipq *q)
 {
 	struct label *label;
 
 	label = mac_mbuf_to_label(m);
 
-	MAC_PERFORM(ipq_create, m, label, ipq, ipq->ipq_label);
+	MAC_PERFORM(ipq_create, m, label, q, q->ipq_label);
 }
 
 void
@@ -208,7 +219,7 @@ mac_inpcb_create_mbuf(struct inpcb *inp, struct mbuf *m)
 }
 
 int
-mac_ipq_match(struct mbuf *m, struct ipq *ipq)
+mac_ipq_match(struct mbuf *m, struct ipq *q)
 {
 	struct label *label;
 	int result;
@@ -216,7 +227,7 @@ mac_ipq_match(struct mbuf *m, struct ipq *ipq)
 	label = mac_mbuf_to_label(m);
 
 	result = 1;
-	MAC_BOOLEAN(ipq_match, &&, m, label, ipq, ipq->ipq_label);
+	MAC_BOOLEAN(ipq_match, &&, m, label, q, q->ipq_label);
 
 	return (result);
 }
@@ -278,13 +289,13 @@ mac_netinet_tcp_reply(struct mbuf *m)
 }
 
 void
-mac_ipq_update(struct mbuf *m, struct ipq *ipq)
+mac_ipq_update(struct mbuf *m, struct ipq *q)
 {
 	struct label *label;
 
 	label = mac_mbuf_to_label(m);
 
-	MAC_PERFORM(ipq_update, m, label, ipq, ipq->ipq_label);
+	MAC_PERFORM(ipq_update, m, label, q, q->ipq_label);
 }
 
 int
@@ -302,11 +313,23 @@ mac_inpcb_check_deliver(struct inpcb *inp, struct mbuf *m)
 	return (error);
 }
 
+int
+mac_inpcb_check_visible(struct ucred *cred, struct inpcb *inp)
+{
+	int error;
+
+	INP_LOCK_ASSERT(inp);
+
+	MAC_CHECK(inpcb_check_visible, cred, inp, inp->inp_label);
+
+	return (error);
+}
+
 void
 mac_inpcb_sosetlabel(struct socket *so, struct inpcb *inp)
 {
 
-	INP_LOCK_ASSERT(inp);
+	INP_WLOCK_ASSERT(inp);
 	SOCK_LOCK_ASSERT(so);
 	MAC_PERFORM(inpcb_sosetlabel, so, so->so_label, inp, inp->inp_label);
 }
@@ -349,9 +372,11 @@ void
 mac_syncache_destroy(struct label **label)
 {
 
-	MAC_PERFORM(syncache_destroy_label, *label);
-	mac_labelzone_free(*label);
-	*label = NULL;
+	if (*label != NULL) {
+		MAC_PERFORM(syncache_destroy_label, *label);
+		mac_labelzone_free(*label);
+		*label = NULL;
+	}
 }
 
 int
@@ -359,24 +384,33 @@ mac_syncache_init(struct label **label)
 {
 	int error;
 
-	*label = mac_labelzone_alloc(M_NOWAIT);
-	if (*label == NULL)
-		return (ENOMEM);
-	/*
-	 * Since we are holding the inpcb locks the policy can not allocate
-	 * policy specific label storage using M_WAITOK.  So we need to do a
-	 * MAC_CHECK instead of the typical MAC_PERFORM so we can propagate
-	 * allocation failures back to the syncache code.
-	 */
-	MAC_CHECK(syncache_init_label, *label, M_NOWAIT);
-	return (error);
+	if (mac_labeled & MPC_OBJECT_SYNCACHE) {
+		*label = mac_labelzone_alloc(M_NOWAIT);
+		if (*label == NULL)
+			return (ENOMEM);
+		/*
+		 * Since we are holding the inpcb locks the policy can not
+		 * allocate policy specific label storage using M_WAITOK.  So
+		 * we need to do a MAC_CHECK instead of the typical
+		 * MAC_PERFORM so we can propagate allocation failures back
+		 * to the syncache code.
+		 */
+		MAC_CHECK(syncache_init_label, *label, M_NOWAIT);
+		if (error) {
+			MAC_PERFORM(syncache_destroy_label, *label);
+			mac_labelzone_free(*label);
+		}
+		return (error);
+	} else
+		*label = NULL;
+	return (0);
 }
 
 void
 mac_syncache_create(struct label *label, struct inpcb *inp)
 {
 
-	INP_LOCK_ASSERT(inp);
+	INP_WLOCK_ASSERT(inp);
 	MAC_PERFORM(syncache_create, label, inp);
 }
 

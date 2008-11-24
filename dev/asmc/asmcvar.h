@@ -23,7 +23,7 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/asmc/asmcvar.h,v 1.6 2008/04/12 12:04:09 rpaulo Exp $
+ * $FreeBSD: src/sys/dev/asmc/asmcvar.h,v 1.7 2008/09/07 18:15:34 rpaulo Exp $
  *
  */
 
@@ -126,8 +126,8 @@ struct asmc_softc {
 /*
  * Temperatures.
  *
- * First for MacBook, second for MacBook Pro, third for Intel Mac Mini and
- * last Mac Pro 8-core.
+ * First for MacBook, second for MacBook Pro, third for Intel Mac Mini,
+ * fourth the Mac Pro 8-core and finally the MacBook Air.
  *
  */
 /* maximum array size for temperatures including the last NULL */
@@ -186,3 +186,7 @@ struct asmc_softc {
 				  "TM1S", "TM2P", "TM2S", "TM3S", "TM8P", \
 				  "TM8S", "TM9P", "TM9S", "TN0H", "TS0C", \
 				  NULL }
+
+#define	ASMC_MBA_TEMPS		{ "TB0T", NULL }
+#define	ASMC_MBA_TEMPNAMES	{ "enclosure" }
+#define	ASMC_MBA_TEMPDESCS	{ "Enclosure Bottom" }

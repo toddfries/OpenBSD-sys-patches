@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_cpu.c,v 1.28 2007/10/30 22:18:08 njl Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_cpu.c,v 1.30 2008/05/05 19:13:52 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -452,8 +452,7 @@ cf_get_method(device_t dev, struct cf_level *level)
 	for (n = 0; n < numdevs && curr_set->freq == CPUFREQ_VAL_UNKNOWN; n++) {
 		if (!device_is_attached(devs[n]))
 			continue;
-		error = CPUFREQ_DRV_GET(devs[n], &set);
-		if (error)
+		if (CPUFREQ_DRV_GET(devs[n], &set) != 0)
 			continue;
 		for (i = 0; i < count; i++) {
 			if (CPUFREQ_CMP(set.freq, levels[i].total_set.freq)) {
@@ -483,9 +482,10 @@ cf_get_method(device_t dev, struct cf_level *level)
 		if (CPUFREQ_CMP(rate, levels[i].total_set.freq)) {
 			sc->curr_level = levels[i];
 			CF_DEBUG("get estimated freq %d\n", curr_set->freq);
-			break;
+			goto out;
 		}
 	}
+	error = ENXIO;
 
 out:
 	if (error == 0)
@@ -606,6 +606,17 @@ cf_levels_method(device_t dev, struct cf_level *levels, int *count)
 	/* Finally, output the list of levels. */
 	i = 0;
 	TAILQ_FOREACH(lev, &sc->all_levels, link) {
+		/*
+		 * Skip levels that are too close in frequency to the
+		 * previous levels.  Some systems report bogus duplicate
+		 * settings (i.e., for acpi_perf).
+		 */
+		if (i > 0 && CPUFREQ_CMP(lev->total_set.freq,
+		    levels[i - 1].total_set.freq)) {
+			sc->all_count--;
+			continue;
+		}
+
 		/* Skip levels that have a frequency that is too low. */
 		if (lev->total_set.freq < cf_lowest_freq) {
 			sc->all_count--;

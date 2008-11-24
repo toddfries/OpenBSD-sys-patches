@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/dev/ciss/ciss.c,v 1.87 2008/02/10 06:21:52 iwasaki Exp $
+ *	$FreeBSD: src/sys/dev/ciss/ciss.c,v 1.92 2008/08/29 01:23:16 scottl Exp $
  */
 
 /*
@@ -102,8 +102,8 @@
 #include <dev/pci/pcivar.h>
 
 #include <dev/ciss/cissreg.h>
-#include <dev/ciss/cissvar.h>
 #include <dev/ciss/cissio.h>
+#include <dev/ciss/cissvar.h>
 
 MALLOC_DEFINE(CISS_MALLOC_CLASS, "ciss_data", "ciss internal data buffers");
 
@@ -116,6 +116,8 @@ static int	ciss_shutdown(device_t dev);
 
 /* (de)initialisation functions, control wrappers */
 static int	ciss_init_pci(struct ciss_softc *sc);
+static int	ciss_setup_msix(struct ciss_softc *sc);
+static int	ciss_init_perf(struct ciss_softc *sc);
 static int	ciss_wait_adapter(struct ciss_softc *sc);
 static int	ciss_flush_adapter(struct ciss_softc *sc);
 static int	ciss_init_requests(struct ciss_softc *sc);
@@ -137,11 +139,13 @@ static void	ciss_kill_notify_thread(struct ciss_softc *sc);
 
 /* request submission/completion */
 static int	ciss_start(struct ciss_request *cr);
-static void	ciss_done(struct ciss_softc *sc);
+static void	ciss_done(struct ciss_softc *sc, cr_qhead_t *qh);
+static void	ciss_perf_done(struct ciss_softc *sc, cr_qhead_t *qh);
 static void	ciss_intr(void *arg);
-static void	ciss_complete(struct ciss_softc *sc);
-static int	ciss_report_request(struct ciss_request *cr, int *command_status,
-				    int *scsi_status);
+static void	ciss_perf_intr(void *arg);
+static void	ciss_perf_msi_intr(void *arg);
+static void	ciss_complete(struct ciss_softc *sc, cr_qhead_t *qh);
+static int	_ciss_report_request(struct ciss_request *cr, int *command_status, int *scsi_status, const char *func);
 static int	ciss_synch_request(struct ciss_request *cr, int timeout);
 static int	ciss_poll_request(struct ciss_request *cr, int timeout);
 static int	ciss_wait_request(struct ciss_request *cr, int timeout);
@@ -250,6 +254,24 @@ TUNABLE_INT("hw.ciss.expose_hidden_physical", &ciss_expose_hidden_physical);
 static unsigned int ciss_nop_message_heartbeat = 0;
 TUNABLE_INT("hw.ciss.nop_message_heartbeat", &ciss_nop_message_heartbeat);
 
+/*
+ * This tunable can force a particular transport to be used:
+ * <= 0 : use default
+ *    1 : force simple
+ *    2 : force performant
+ */
+static int ciss_force_transport = 0;
+TUNABLE_INT("hw.ciss.force_transport", &ciss_force_transport);
+
+/*
+ * This tunable can force a particular interrupt delivery method to be used:
+ * <= 0 : use default
+ *    1 : force INTx
+ *    2 : force MSIX
+ */
+static int ciss_force_interrupt = 0;
+TUNABLE_INT("hw.ciss.force_interrupt", &ciss_force_interrupt);
+
 /************************************************************************
  * CISS adapters amazingly don't have a defined programming interface
  * value.  (One could say some very despairing things about PCI and
@@ -298,6 +320,11 @@ static struct
     { 0x103C, 0x323A, CISS_BOARD_SA5,	"HP Smart Array" },
     { 0x103C, 0x323B, CISS_BOARD_SA5,	"HP Smart Array" },
     { 0x103C, 0x323C, CISS_BOARD_SA5,	"HP Smart Array" },
+    { 0x103C, 0x3241, CISS_BOARD_SA5,	"HP Smart Array P212" },
+    { 0x103C, 0x3243, CISS_BOARD_SA5,	"HP Smart Array P410" },
+    { 0x103C, 0x3245, CISS_BOARD_SA5,	"HP Smart Array P410i" },
+    { 0x103C, 0x3247, CISS_BOARD_SA5,	"HP Smart Array P411" },
+    { 0x103C, 0x3249, CISS_BOARD_SA5,	"HP Smart Array P812" },
     { 0, 0, 0, NULL }
 };
 
@@ -340,7 +367,7 @@ static int
 ciss_attach(device_t dev)
 {
     struct ciss_softc	*sc;
-    int			i, error;
+    int			error;
 
     debug_called(1);
 
@@ -388,26 +415,6 @@ ciss_attach(device_t dev)
     sc->ciss_dev = dev;
 
     /*
-     * Work out adapter type.
-     */
-    i = ciss_lookup(dev);
-    if (i < 0) {
-	ciss_printf(sc, "unknown adapter type\n");
-	error = ENXIO;
-	goto out;
-    }
-    if (ciss_vendor_data[i].flags & CISS_BOARD_SA5) {
-	sc->ciss_interrupt_mask = CISS_TL_SIMPLE_INTR_OPQ_SA5;
-    } else if (ciss_vendor_data[i].flags & CISS_BOARD_SA5B) {
-	sc->ciss_interrupt_mask = CISS_TL_SIMPLE_INTR_OPQ_SA5B;
-    } else {
-	/* really an error on our part */
-	ciss_printf(sc, "unable to determine hardware type\n");
-	error = ENXIO;
-	goto out;
-    }
-
-    /*
      * Do PCI-specific init.
      */
     if ((error = ciss_init_pci(sc)) != 0)
@@ -417,8 +424,6 @@ ciss_attach(device_t dev)
      * Initialise driver queues.
      */
     ciss_initq_free(sc);
-    ciss_initq_busy(sc);
-    ciss_initq_complete(sc);
     ciss_initq_notify(sc);
     mtx_init(&sc->ciss_mtx, "cissmtx", NULL, MTX_DEF);
     callout_init_mtx(&sc->ciss_periodic, &sc->ciss_mtx, 0);
@@ -553,9 +558,33 @@ static int
 ciss_init_pci(struct ciss_softc *sc)
 {
     uintptr_t		cbase, csize, cofs;
-    int			error;
+    uint32_t		method, supported_methods;
+    int			error, sqmask, i;
+    void		*intr;
 
     debug_called(1);
+
+    /*
+     * Work out adapter type.
+     */
+    i = ciss_lookup(sc->ciss_dev);
+    if (i < 0) {
+	ciss_printf(sc, "unknown adapter type\n");
+	return (ENXIO);
+    }
+
+    if (ciss_vendor_data[i].flags & CISS_BOARD_SA5) {
+	sqmask = CISS_TL_SIMPLE_INTR_OPQ_SA5;
+    } else if (ciss_vendor_data[i].flags & CISS_BOARD_SA5B) {
+	sqmask = CISS_TL_SIMPLE_INTR_OPQ_SA5B;
+    } else {
+	/*
+	 * XXX Big hammer, masks/unmasks all possible interrupts.  This should
+	 * work on all hardware variants.  Need to add code to handle the
+	 * "controller crashed" interupt bit that this unmasks.
+	 */
+	sqmask = ~0;
+    }
 
     /*
      * Allocate register window first (we need this to find the config
@@ -606,6 +635,12 @@ ciss_init_pci(struct ciss_softc *sc)
     debug(1, "config struct at %p", sc->ciss_cfg);
 
     /*
+     * Calculate the number of request structures/commands we are
+     * going to provide for this adapter.
+     */
+    sc->ciss_max_requests = min(CISS_MAX_REQUESTS, sc->ciss_cfg->max_outstanding_commands);
+
+    /*
      * Validate the config structure.  If we supported other transport
      * methods, we could select amongst them at this point in time.
      */
@@ -617,14 +652,49 @@ ciss_init_pci(struct ciss_softc *sc)
     }
 
     /*
-     * Put the board into simple mode, and tell it we're using the low
-     * 4GB of RAM.  Set the default interrupt coalescing options.
+     * Select the mode of operation, prefer Performant.
      */
-    if (!(sc->ciss_cfg->supported_methods & CISS_TRANSPORT_METHOD_SIMPLE)) {
-	ciss_printf(sc, "adapter does not support 'simple' transport layer\n");
+    if (!(sc->ciss_cfg->supported_methods &
+	(CISS_TRANSPORT_METHOD_SIMPLE | CISS_TRANSPORT_METHOD_PERF))) {
+	ciss_printf(sc, "No supported transport layers: 0x%x\n",
+	    sc->ciss_cfg->supported_methods);
 	return(ENXIO);
     }
-    sc->ciss_cfg->requested_method = CISS_TRANSPORT_METHOD_SIMPLE;
+
+    switch (ciss_force_transport) {
+    case 1:
+	supported_methods = CISS_TRANSPORT_METHOD_SIMPLE;
+	break;
+    case 2:
+	supported_methods = CISS_TRANSPORT_METHOD_PERF;
+	break;
+    default:
+	supported_methods = sc->ciss_cfg->supported_methods;
+	break;
+    }
+
+setup:
+    if (supported_methods & CISS_TRANSPORT_METHOD_PERF) {
+	method = CISS_TRANSPORT_METHOD_PERF;
+	sc->ciss_perf = (struct ciss_perf_config *)(cbase + cofs +
+	    sc->ciss_cfg->transport_offset);
+	if (ciss_init_perf(sc)) {
+	    supported_methods &= ~method;
+	    goto setup;
+	}
+    } else if (supported_methods & CISS_TRANSPORT_METHOD_SIMPLE) {
+	method = CISS_TRANSPORT_METHOD_SIMPLE;
+    } else {
+	ciss_printf(sc, "No supported transport methods: 0x%x\n",
+	    sc->ciss_cfg->supported_methods);
+	return(ENXIO);
+    }
+
+    /*
+     * Tell it we're using the low 4GB of RAM.  Set the default interrupt
+     * coalescing options.
+     */
+    sc->ciss_cfg->requested_method = method;
     sc->ciss_cfg->command_physlimit = 0;
     sc->ciss_cfg->interrupt_coalesce_delay = CISS_INTERRUPT_COALESCE_DELAY;
     sc->ciss_cfg->interrupt_coalesce_count = CISS_INTERRUPT_COALESCE_COUNT;
@@ -638,11 +708,15 @@ ciss_init_pci(struct ciss_softc *sc)
 		    CISS_TL_SIMPLE_READ(sc, CISS_TL_SIMPLE_IDBR));
 	return(ENXIO);
     }
-    if (!(sc->ciss_cfg->active_method != CISS_TRANSPORT_METHOD_SIMPLE)) {
-	ciss_printf(sc,
-		    "adapter refuses to go into 'simple' transport mode (0x%x, 0x%x)\n",
-		    sc->ciss_cfg->supported_methods, sc->ciss_cfg->active_method);
-	return(ENXIO);
+    if ((sc->ciss_cfg->active_method & method) == 0) {
+	supported_methods &= ~method;
+	if (supported_methods == 0) {
+	    ciss_printf(sc, "adapter refuses to go into available transports "
+		"mode (0x%x, 0x%x)\n", supported_methods,
+		sc->ciss_cfg->active_method);
+	    return(ENXIO);
+	} else 
+	    goto setup;
     }
 
     /*
@@ -650,6 +724,30 @@ ciss_init_pci(struct ciss_softc *sc)
      */
     if ((error = ciss_wait_adapter(sc)) != 0)
 	return(error);
+
+    /* Prepare to possibly use MSIX and/or PERFORMANT interrupts.  Normal
+     * interrupts have a rid of 0, this will be overridden if MSIX is used.
+     */
+    sc->ciss_irq_rid[0] = 0;
+    if (method == CISS_TRANSPORT_METHOD_PERF) {
+	ciss_printf(sc, "PERFORMANT Transport\n");
+	if ((ciss_force_interrupt != 1) && (ciss_setup_msix(sc) == 0)) {
+	    intr = ciss_perf_msi_intr;
+	    sc->ciss_interrupt_mask = CISS_TL_PERF_INTR_MSI;
+	} else {
+	    intr = ciss_perf_intr;
+	    sc->ciss_interrupt_mask = CISS_TL_PERF_INTR_OPQ;
+	}
+    } else {
+	ciss_printf(sc, "SIMPLE Transport\n");
+	/* MSIX doesn't seem to work in SIMPLE mode, only enable if it forced */
+	if (ciss_force_interrupt == 2)
+	    /* If this fails, we automatically revert to INTx */
+	    ciss_setup_msix(sc);
+	sc->ciss_perf = NULL;
+	intr = ciss_intr;
+	sc->ciss_interrupt_mask = sqmask;
+    }
 
     /*
      * Turn off interrupts before we go routing anything.
@@ -659,15 +757,15 @@ ciss_init_pci(struct ciss_softc *sc)
     /*
      * Allocate and set up our interrupt.
      */
-    sc->ciss_irq_rid = 0;
     if ((sc->ciss_irq_resource =
-	 bus_alloc_resource_any(sc->ciss_dev, SYS_RES_IRQ, &sc->ciss_irq_rid,
+	 bus_alloc_resource_any(sc->ciss_dev, SYS_RES_IRQ, &sc->ciss_irq_rid[0],
 				RF_ACTIVE | RF_SHAREABLE)) == NULL) {
 	ciss_printf(sc, "can't allocate interrupt\n");
 	return(ENXIO);
     }
+
     if (bus_setup_intr(sc->ciss_dev, sc->ciss_irq_resource,
-		       INTR_TYPE_CAM|INTR_MPSAFE, NULL, ciss_intr, sc,
+		       INTR_TYPE_CAM|INTR_MPSAFE, NULL, intr, sc,
 		       &sc->ciss_intr)) {
 	ciss_printf(sc, "can't set up interrupt\n");
 	return(ENXIO);
@@ -688,7 +786,7 @@ ciss_init_pci(struct ciss_softc *sc)
 			   BUS_SPACE_MAXSIZE_32BIT,	/* maxsize */
 			   CISS_COMMAND_SG_LENGTH,	/* nsegments */
 			   BUS_SPACE_MAXSIZE_32BIT,	/* maxsegsize */
-			   BUS_DMA_ALLOCNOW,		/* flags */
+			   0,				/* flags */
 			   NULL, NULL,			/* lockfunc, lockarg */
 			   &sc->ciss_parent_dmat)) {
 	ciss_printf(sc, "can't allocate parent DMA tag\n");
@@ -706,12 +804,116 @@ ciss_init_pci(struct ciss_softc *sc)
 			   NULL, NULL, 			/* filter, filterarg */
 			   MAXBSIZE, CISS_COMMAND_SG_LENGTH,	/* maxsize, nsegments */
 			   BUS_SPACE_MAXSIZE_32BIT,	/* maxsegsize */
-			   0,				/* flags */
+			   BUS_DMA_ALLOCNOW,		/* flags */
 			   busdma_lock_mutex, &sc->ciss_mtx,	/* lockfunc, lockarg */
 			   &sc->ciss_buffer_dmat)) {
 	ciss_printf(sc, "can't allocate buffer DMA tag\n");
 	return(ENOMEM);
     }
+    return(0);
+}
+
+/************************************************************************
+ * Setup MSI/MSIX operation (Performant only)
+ * Four interrupts are available, but we only use 1 right now.
+ */
+static int
+ciss_setup_msix(struct ciss_softc *sc)
+{
+    uint32_t id;
+    int val, i;
+
+    /* Weed out devices that don't actually support MSI */
+    id = (pci_get_subvendor(sc->ciss_dev) << 16) |
+	pci_get_subdevice(sc->ciss_dev);
+    if ((id == 0x0e114070) || (id == 0x0e114080) || (id == 0x0e114082) ||
+	(id == 0x0e114083))
+	return (EINVAL);
+
+    val = pci_msix_count(sc->ciss_dev);
+    if ((val != CISS_MSI_COUNT) || (pci_alloc_msix(sc->ciss_dev, &val) != 0))
+	return (EINVAL);
+
+    sc->ciss_msi = val;
+    ciss_printf(sc, "Using MSIX interrupt\n");
+
+    for (i = 0; i < CISS_MSI_COUNT; i++)
+	sc->ciss_irq_rid[i] = i + 1;
+
+    return (0);
+
+}
+
+/************************************************************************
+ * Setup the Performant structures.
+ */
+static int
+ciss_init_perf(struct ciss_softc *sc)
+{
+    struct ciss_perf_config *pc = sc->ciss_perf;
+    int reply_size;
+
+    /*
+     * Create the DMA tag for the reply queue.
+     */
+    reply_size = sizeof(uint64_t) * sc->ciss_max_requests;
+    if (bus_dma_tag_create(sc->ciss_parent_dmat,	/* parent */
+			   1, 0, 			/* alignment, boundary */
+			   BUS_SPACE_MAXADDR_32BIT,	/* lowaddr */
+			   BUS_SPACE_MAXADDR, 		/* highaddr */
+			   NULL, NULL, 			/* filter, filterarg */
+			   reply_size, 1,		/* maxsize, nsegments */
+			   BUS_SPACE_MAXSIZE_32BIT,	/* maxsegsize */
+			   0,				/* flags */
+			   NULL, NULL,			/* lockfunc, lockarg */
+			   &sc->ciss_reply_dmat)) {
+	ciss_printf(sc, "can't allocate reply DMA tag\n");
+	return(ENOMEM);
+    }
+    /*
+     * Allocate memory and make it available for DMA.
+     */
+    if (bus_dmamem_alloc(sc->ciss_reply_dmat, (void **)&sc->ciss_reply,
+			 BUS_DMA_NOWAIT, &sc->ciss_reply_map)) {
+	ciss_printf(sc, "can't allocate reply memory\n");
+	return(ENOMEM);
+    }
+    bus_dmamap_load(sc->ciss_reply_dmat, sc->ciss_reply_map, sc->ciss_reply,
+		    reply_size, ciss_command_map_helper, &sc->ciss_reply_phys, 0);
+    bzero(sc->ciss_reply, reply_size);
+
+    sc->ciss_cycle = 0x1;
+    sc->ciss_rqidx = 0;
+
+    /*
+     * Preload the fetch table with common command sizes.  This allows the
+     * hardware to not waste bus cycles for typical i/o commands, but also not
+     * tax the driver to be too exact in choosing sizes.  The table is optimized
+     * for page-aligned i/o's, but since most i/o comes from the various pagers,
+     * it's a reasonable assumption to make.
+     */
+    pc->fetch_count[CISS_SG_FETCH_NONE] = (sizeof(struct ciss_command) + 15) / 16;
+    pc->fetch_count[CISS_SG_FETCH_1] =
+	(sizeof(struct ciss_command) + sizeof(struct ciss_sg_entry) * 1 + 15) / 16;
+    pc->fetch_count[CISS_SG_FETCH_2] =
+	(sizeof(struct ciss_command) + sizeof(struct ciss_sg_entry) * 2 + 15) / 16;
+    pc->fetch_count[CISS_SG_FETCH_4] =
+	(sizeof(struct ciss_command) + sizeof(struct ciss_sg_entry) * 4 + 15) / 16;
+    pc->fetch_count[CISS_SG_FETCH_8] =
+	(sizeof(struct ciss_command) + sizeof(struct ciss_sg_entry) * 8 + 15) / 16;
+    pc->fetch_count[CISS_SG_FETCH_16] =
+	(sizeof(struct ciss_command) + sizeof(struct ciss_sg_entry) * 16 + 15) / 16;
+    pc->fetch_count[CISS_SG_FETCH_32] =
+	(sizeof(struct ciss_command) + sizeof(struct ciss_sg_entry) * 32 + 15) / 16;
+    pc->fetch_count[CISS_SG_FETCH_MAX] = (CISS_COMMAND_ALLOC_SIZE + 15) / 16;
+
+    pc->rq_size = sc->ciss_max_requests; /* XXX less than the card supports? */
+    pc->rq_count = 1;	/* XXX Hardcode for a single queue */
+    pc->rq_bank_hi = 0;
+    pc->rq_bank_lo = 0;
+    pc->rq[0].rq_addr_hi = 0x0;
+    pc->rq[0].rq_addr_lo = sc->ciss_reply_phys;
+
     return(0);
 }
 
@@ -849,12 +1051,6 @@ ciss_init_requests(struct ciss_softc *sc)
 
     debug_called(1);
 
-    /*
-     * Calculate the number of request structures/commands we are
-     * going to provide for this adapter.
-     */
-    sc->ciss_max_requests = min(CISS_MAX_REQUESTS, sc->ciss_cfg->max_outstanding_commands);
-
     if (bootverbose)
 	ciss_printf(sc, "using %d of %d available commands\n",
 		    sc->ciss_max_requests, sc->ciss_cfg->max_outstanding_commands);
@@ -863,14 +1059,14 @@ ciss_init_requests(struct ciss_softc *sc)
      * Create the DMA tag for commands.
      */
     if (bus_dma_tag_create(sc->ciss_parent_dmat,	/* parent */
-			   1, 0, 			/* alignment, boundary */
+			   32, 0, 			/* alignment, boundary */
 			   BUS_SPACE_MAXADDR_32BIT,	/* lowaddr */
 			   BUS_SPACE_MAXADDR, 		/* highaddr */
 			   NULL, NULL, 			/* filter, filterarg */
 			   CISS_COMMAND_ALLOC_SIZE *
 			   sc->ciss_max_requests, 1,	/* maxsize, nsegments */
 			   BUS_SPACE_MAXSIZE_32BIT,	/* maxsegsize */
-			   BUS_DMA_ALLOCNOW,		/* flags */
+			   0,				/* flags */
 			   NULL, NULL,			/* lockfunc, lockarg */
 			   &sc->ciss_command_dmat)) {
 	ciss_printf(sc, "can't allocate command DMA tag\n");
@@ -884,9 +1080,9 @@ ciss_init_requests(struct ciss_softc *sc)
 	ciss_printf(sc, "can't allocate command memory\n");
 	return(ENOMEM);
     }
-    bus_dmamap_load(sc->ciss_command_dmat, sc->ciss_command_map, sc->ciss_command,
+    bus_dmamap_load(sc->ciss_command_dmat, sc->ciss_command_map,sc->ciss_command,
 		    CISS_COMMAND_ALLOC_SIZE * sc->ciss_max_requests,
-		    ciss_command_map_helper, sc, 0);
+		    ciss_command_map_helper, &sc->ciss_command_phys, 0);
     bzero(sc->ciss_command, CISS_COMMAND_ALLOC_SIZE * sc->ciss_max_requests);
 
     /*
@@ -906,9 +1102,10 @@ ciss_init_requests(struct ciss_softc *sc)
 static void
 ciss_command_map_helper(void *arg, bus_dma_segment_t *segs, int nseg, int error)
 {
-    struct ciss_softc	*sc = (struct ciss_softc *)arg;
+    uint32_t *addr;
 
-    sc->ciss_command_phys = segs->ds_addr;
+    addr = arg;
+    *addr = segs[0].ds_addr;
 }
 
 /************************************************************************
@@ -1723,11 +1920,9 @@ ciss_free(struct ciss_softc *sc)
 	bus_teardown_intr(sc->ciss_dev, sc->ciss_irq_resource, sc->ciss_intr);
     if (sc->ciss_irq_resource != NULL)
 	bus_release_resource(sc->ciss_dev, SYS_RES_IRQ,
-			     sc->ciss_irq_rid, sc->ciss_irq_resource);
-
-    /* destroy DMA tags */
-    if (sc->ciss_parent_dmat)
-	bus_dma_tag_destroy(sc->ciss_parent_dmat);
+			     sc->ciss_irq_rid[0], sc->ciss_irq_resource);
+    if (sc->ciss_msi)
+	pci_release_msi(sc->ciss_dev);
 
     while ((cr = ciss_dequeue_free(sc)) != NULL)
 	bus_dmamap_destroy(sc->ciss_buffer_dmat, cr->cr_datamap);
@@ -1742,6 +1937,16 @@ ciss_free(struct ciss_softc *sc)
     if (sc->ciss_command_dmat)
 	bus_dma_tag_destroy(sc->ciss_command_dmat);
 
+    if (sc->ciss_reply) {
+	bus_dmamap_unload(sc->ciss_reply_dmat, sc->ciss_reply_map);
+	bus_dmamem_free(sc->ciss_reply_dmat, sc->ciss_reply, sc->ciss_reply_map);
+    }
+    if (sc->ciss_reply_dmat)
+	bus_dma_tag_destroy(sc->ciss_reply_dmat);
+
+    /* destroy DMA tags */
+    if (sc->ciss_parent_dmat)
+	bus_dma_tag_destroy(sc->ciss_parent_dmat);
     if (sc->ciss_logical) {
 	for (i = 0; i <= sc->ciss_max_logical_bus; i++) {
 	    for (j = 0; j < CISS_MAX_LOGICAL; j++) {
@@ -1815,25 +2020,19 @@ ciss_start(struct ciss_request *cr)
  * (eg. timeouts, etc.)
  */
 static void
-ciss_done(struct ciss_softc *sc)
+ciss_done(struct ciss_softc *sc, cr_qhead_t *qh)
 {
     struct ciss_request	*cr;
     struct ciss_command	*cc;
     u_int32_t		tag, index;
-    int			complete;
 
     debug_called(3);
 
     /*
      * Loop quickly taking requests from the adapter and moving them
-     * from the busy queue to the completed queue.
+     * to the completed queue.
      */
-    complete = 0;
     for (;;) {
-
-	/* see if the OPQ contains anything */
-	if (!CISS_TL_SIMPLE_OPQ_INTERRUPT(sc))
-	    break;
 
 	tag = CISS_TL_SIMPLE_FETCH_CMD(sc);
 	if (tag == CISS_TL_SIMPLE_OPQ_EMPTY)
@@ -1848,21 +2047,45 @@ ciss_done(struct ciss_softc *sc)
 	cr = &(sc->ciss_request[index]);
 	cc = CISS_FIND_COMMAND(cr);
 	cc->header.host_tag = tag;	/* not updated by adapter */
-	if (ciss_remove_busy(cr)) {
-	    /* assume this is garbage out of the adapter */
-	    ciss_printf(sc, "completed nonbusy request %d\n", index);
-	} else {
-	    ciss_enqueue_complete(cr);
-	}
-	complete = 1;
+	ciss_enqueue_complete(cr, qh);
     }
 
+}
+
+static void
+ciss_perf_done(struct ciss_softc *sc, cr_qhead_t *qh)
+{
+    struct ciss_request	*cr;
+    struct ciss_command	*cc;
+    u_int32_t		tag, index;
+
+    debug_called(3);
+
     /*
-     * Invoke completion processing.  If we can defer this out of
-     * interrupt context, that'd be good.
+     * Loop quickly taking requests from the adapter and moving them
+     * to the completed queue.
      */
-    if (complete)
-	ciss_complete(sc);
+    for (;;) {
+	tag = sc->ciss_reply[sc->ciss_rqidx];
+	if ((tag & CISS_CYCLE_MASK) != sc->ciss_cycle)
+	    break;
+	index = tag >> 2;
+	debug(2, "completed command %d%s\n", index,
+	      (tag & CISS_HDR_HOST_TAG_ERROR) ? " with error" : "");
+	if (index < sc->ciss_max_requests) {
+	    cr = &(sc->ciss_request[index]);
+	    cc = CISS_FIND_COMMAND(cr);
+	    cc->header.host_tag = tag;	/* not updated by adapter */
+	    ciss_enqueue_complete(cr, qh);
+	} else {
+	    ciss_printf(sc, "completed invalid request %d (0x%x)\n", index, tag);
+	}
+	if (++sc->ciss_rqidx == sc->ciss_max_requests) {
+	    sc->ciss_rqidx = 0;
+	    sc->ciss_cycle ^= 1;
+	}
+    }
+
 }
 
 /************************************************************************
@@ -1871,16 +2094,47 @@ ciss_done(struct ciss_softc *sc)
 static void
 ciss_intr(void *arg)
 {
+    cr_qhead_t qh;
     struct ciss_softc	*sc = (struct ciss_softc *)arg;
 
     /*
      * The only interrupt we recognise indicates that there are
      * entries in the outbound post queue.
      */
+    STAILQ_INIT(&qh);
+    ciss_done(sc, &qh);
     mtx_lock(&sc->ciss_mtx);
-    ciss_done(sc);
+    ciss_complete(sc, &qh);
     mtx_unlock(&sc->ciss_mtx);
 }
+
+static void
+ciss_perf_intr(void *arg)
+{
+    struct ciss_softc	*sc = (struct ciss_softc *)arg;
+
+    /* Clear the interrupt and flush the bridges.  Docs say that the flush
+     * needs to be done twice, which doesn't seem right.
+     */
+    CISS_TL_PERF_CLEAR_INT(sc);
+    CISS_TL_PERF_FLUSH_INT(sc);
+
+    ciss_perf_msi_intr(sc);
+}
+
+static void
+ciss_perf_msi_intr(void *arg)
+{
+    cr_qhead_t qh;
+    struct ciss_softc	*sc = (struct ciss_softc *)arg;
+
+    STAILQ_INIT(&qh);
+    ciss_perf_done(sc, &qh);
+    mtx_lock(&sc->ciss_mtx);
+    ciss_complete(sc, &qh);
+    mtx_unlock(&sc->ciss_mtx);
+}
+
 
 /************************************************************************
  * Process completed requests.
@@ -1892,7 +2146,7 @@ ciss_intr(void *arg)
  * - by clearing the CISS_REQ_POLL flag in interrupt/timeout context
  */
 static void
-ciss_complete(struct ciss_softc *sc)
+ciss_complete(struct ciss_softc *sc, cr_qhead_t *qh)
 {
     struct ciss_request	*cr;
 
@@ -1903,9 +2157,13 @@ ciss_complete(struct ciss_softc *sc)
      * completion processing on them.
      */
     for (;;) {
-	if ((cr = ciss_dequeue_complete(sc)) == NULL)
+	if ((cr = ciss_dequeue_complete(sc, qh)) == NULL)
 	    break;
 	ciss_unmap_request(cr);
+
+	if ((cr->cr_flags & CISS_REQ_BUSY) == 0)
+	    ciss_printf(sc, "WARNING: completing non-busy request\n");
+	cr->cr_flags &= ~CISS_REQ_BUSY;
 
 	/*
 	 * If the request has a callback, invoke it.
@@ -1946,7 +2204,7 @@ ciss_complete(struct ciss_softc *sc)
  * and command status values.
  */
 static int
-ciss_report_request(struct ciss_request *cr, int *command_status, int *scsi_status)
+_ciss_report_request(struct ciss_request *cr, int *command_status, int *scsi_status, const char *func)
 {
     struct ciss_command		*cc;
     struct ciss_error_info	*ce;
@@ -1995,10 +2253,11 @@ ciss_report_request(struct ciss_request *cr, int *command_status, int *scsi_stat
 			ce->command_status, ciss_name_command_status(ce->command_status),
 			ce->scsi_status);
 	if (ce->command_status == CISS_CMD_STATUS_INVALID_COMMAND) {
-	    ciss_printf(cr->cr_sc, "invalid command, offense size %d at %d, value 0x%x\n",
+	    ciss_printf(cr->cr_sc, "invalid command, offense size %d at %d, value 0x%x, function %s\n",
 			ce->additional_error_info.invalid_command.offense_size,
 			ce->additional_error_info.invalid_command.offense_offset,
-			ce->additional_error_info.invalid_command.offense_value);
+			ce->additional_error_info.invalid_command.offense_value,
+			func);
 	}
     }
 #if 0
@@ -2031,16 +2290,24 @@ ciss_synch_request(struct ciss_request *cr, int timeout)
 static int
 ciss_poll_request(struct ciss_request *cr, int timeout)
 {
+    cr_qhead_t qh;
+    struct ciss_softc *sc;
     int		error;
 
     debug_called(2);
 
+    STAILQ_INIT(&qh);
+    sc = cr->cr_sc;
     cr->cr_flags |= CISS_REQ_POLL;
     if ((error = ciss_start(cr)) != 0)
 	return(error);
 
     do {
-	ciss_done(cr->cr_sc);
+	if (sc->ciss_perf)
+	    ciss_perf_done(sc, &qh);
+	else
+	    ciss_done(sc, &qh);
+	ciss_complete(sc, &qh);
 	if (!(cr->cr_flags & CISS_REQ_POLL))
 	    return(0);
 	DELAY(1000);
@@ -2057,7 +2324,7 @@ ciss_poll_request(struct ciss_request *cr, int timeout)
 static int
 ciss_wait_request(struct ciss_request *cr, int timeout)
 {
-    int		s, error;
+    int		error;
 
     debug_called(2);
 
@@ -2065,11 +2332,9 @@ ciss_wait_request(struct ciss_request *cr, int timeout)
     if ((error = ciss_start(cr)) != 0)
 	return(error);
 
-    s = splcam();
     while ((cr->cr_flags & CISS_REQ_SLEEP) && (error != EWOULDBLOCK)) {
 	error = msleep(cr, &cr->cr_sc->ciss_mtx, PRIBIO, "cissREQ", (timeout * hz) / 1000);
     }
-    splx(s);
     return(error);
 }
 
@@ -2143,6 +2408,7 @@ ciss_get_request(struct ciss_softc *sc, struct ciss_request **crp)
     cr->cr_flags = 0;
     cr->cr_complete = NULL;
     cr->cr_private = NULL;
+    cr->cr_sg_tag = CISS_SG_MAX;	/* Backstop to prevent accidents */
 
     ciss_preen_command(cr);
     *crp = cr;
@@ -2379,8 +2645,12 @@ ciss_map_request(struct ciss_request *cr)
 	/*
 	 * Post the command to the adapter.
 	 */
-	ciss_enqueue_busy(cr);
-	CISS_TL_SIMPLE_POST_CMD(cr->cr_sc, CISS_FIND_COMMANDPHYS(cr));
+	cr->cr_sg_tag = CISS_SG_NONE;
+	cr->cr_flags |= CISS_REQ_BUSY;
+	if (sc->ciss_perf)
+	    CISS_TL_PERF_POST_CMD(sc, cr);
+	else
+	    CISS_TL_SIMPLE_POST_CMD(sc, CISS_FIND_COMMANDPHYS(cr));
     }
 
     return(0);
@@ -2414,11 +2684,31 @@ ciss_request_map_helper(void *arg, bus_dma_segment_t *segs, int nseg, int error)
     if (cr->cr_flags & CISS_REQ_DATAOUT)
 	bus_dmamap_sync(sc->ciss_buffer_dmat, cr->cr_datamap, BUS_DMASYNC_PREWRITE);
 
+    if (nseg == 1)
+	cr->cr_sg_tag = CISS_SG_NONE;
+    else if (nseg == 1)
+	cr->cr_sg_tag = CISS_SG_1;
+    else if (nseg == 2)
+	cr->cr_sg_tag = CISS_SG_2;
+    else if (nseg <= 4)
+	cr->cr_sg_tag = CISS_SG_4;
+    else if (nseg <= 8)
+	cr->cr_sg_tag = CISS_SG_8;
+    else if (nseg <= 16)
+	cr->cr_sg_tag = CISS_SG_16;
+    else if (nseg <= 32)
+	cr->cr_sg_tag = CISS_SG_32;
+    else
+	cr->cr_sg_tag = CISS_SG_MAX;
+
     /*
      * Post the command to the adapter.
      */
-    ciss_enqueue_busy(cr);
-    CISS_TL_SIMPLE_POST_CMD(cr->cr_sc, CISS_FIND_COMMANDPHYS(cr));
+    cr->cr_flags |= CISS_REQ_BUSY;
+    if (sc->ciss_perf)
+	CISS_TL_PERF_POST_CMD(sc, cr);
+    else
+	CISS_TL_SIMPLE_POST_CMD(sc, CISS_FIND_COMMANDPHYS(cr));
 }
 
 /************************************************************************
@@ -2497,7 +2787,7 @@ ciss_cam_init(struct ciss_softc *sc)
 						 "ciss", sc,
 						 device_get_unit(sc->ciss_dev),
 						 &sc->ciss_mtx,
-						 sc->ciss_max_requests - 2,
+						 2,
 						 sc->ciss_max_requests - 2,
 						 sc->ciss_cam_devq)) == NULL) {
 	    ciss_printf(sc, "can't allocate CAM SIM for controller %d\n", i);
@@ -2738,12 +3028,6 @@ ciss_cam_action_io(struct cam_sim *sim, struct ccb_scsiio *csio)
 
     debug(2, "XPT_SCSI_IO %d:%d:%d", bus, target, csio->ccb_h.target_lun);
 
-    /* firmware does not support commands > 10 bytes */
-    if (csio->cdb_len > 12/*CISS_CDB_BUFFER_SIZE*/) {
-	debug(3, "  command too large (%d > %d)", csio->cdb_len, CISS_CDB_BUFFER_SIZE);
-	csio->ccb_h.status = CAM_REQ_CMP_ERR;
-    }
-
     /* check that the CDB pointer is not to a physical address */
     if ((csio->ccb_h.flags & CAM_CDB_POINTER) && (csio->ccb_h.flags & CAM_CDB_PHYS)) {
 	debug(3, "  CDB pointer is to physical address");
@@ -2901,11 +3185,17 @@ ciss_cam_emulate(struct ciss_softc *sc, struct ccb_scsiio *csio)
 static void
 ciss_cam_poll(struct cam_sim *sim)
 {
+    cr_qhead_t qh;
     struct ciss_softc	*sc = cam_sim_softc(sim);
 
     debug_called(2);
 
-    ciss_done(sc);
+    STAILQ_INIT(&qh);
+    if (sc->ciss_perf)
+	ciss_perf_done(sc, &qh);
+    else
+	ciss_done(sc, &qh);
+    ciss_complete(sc, &qh);
 }
 
 /************************************************************************
@@ -2984,8 +3274,8 @@ ciss_cam_complete(struct ciss_request *cr)
     /* tell CAM we're ready for more commands */
     csio->ccb_h.status |= CAM_RELEASE_SIMQ;
 
-    xpt_done((union ccb *)csio);
     ciss_release_request(cr);
+    xpt_done((union ccb *)csio);
 }
 
 /********************************************************************************
@@ -3158,29 +3448,29 @@ ciss_nop_complete(struct ciss_request *cr)
 static void
 ciss_disable_adapter(struct ciss_softc *sc)
 {
+    cr_qhead_t			qh;
     struct ciss_request		*cr;
     struct ciss_command		*cc;
     struct ciss_error_info	*ce;
-    int				s;
-
-    s = splcam();
+    int				i;
 
     CISS_TL_SIMPLE_DISABLE_INTERRUPTS(sc);
     pci_disable_busmaster(sc->ciss_dev);
     sc->ciss_flags &= ~CISS_FLAG_RUNNING;
 
-    for (;;) {
-	if ((cr = ciss_dequeue_busy(sc)) == NULL)
-	    break;
+    for (i = 1; i < sc->ciss_max_requests; i++) {
+	cr = &sc->ciss_request[i];
+	if ((cr->cr_flags & CISS_REQ_BUSY) == 0)
+	    continue;
 
 	cc = CISS_FIND_COMMAND(cr);
 	ce = (struct ciss_error_info *)&(cc->sg[0]);
 	ce->command_status = CISS_CMD_STATUS_HARDWARE_ERROR;
-	ciss_enqueue_complete(cr);
+	ciss_enqueue_complete(cr, &qh);
     }
 
     for (;;) {
-	if ((cr = ciss_dequeue_complete(sc)) == NULL)
+	if ((cr = ciss_dequeue_complete(sc, &qh)) == NULL)
 	    break;
     
 	/*
@@ -3200,8 +3490,6 @@ ciss_disable_adapter(struct ciss_softc *sc)
 	    continue;
 	}
     }
-
-    splx(s);
 }
 
 /************************************************************************
@@ -3382,7 +3670,7 @@ ciss_notify_abort(struct ciss_softc *sc)
     struct ciss_request		*cr;
     struct ciss_command		*cc;
     struct ciss_notify_cdb	*cnc;
-    int				error, s, command_status, scsi_status;
+    int				error, command_status, scsi_status;
 
     debug_called(1);
 
@@ -3476,7 +3764,6 @@ ciss_notify_abort(struct ciss_softc *sc)
      * requires the Notify Event command to be cancelled in order to
      * maintain internal bookkeeping.
      */
-    s = splcam();
     while (sc->ciss_periodic_notify != NULL) {
 	error = msleep(&sc->ciss_periodic_notify, &sc->ciss_mtx, PRIBIO, "cissNEA", hz * 5);
 	if (error == EWOULDBLOCK) {
@@ -3484,7 +3771,6 @@ ciss_notify_abort(struct ciss_softc *sc)
 	    break;
 	}
     }
-    splx(s);
 
  out:
     /* release the cancel request */
@@ -3729,7 +4015,6 @@ ciss_notify_hotplug(struct ciss_softc *sc, struct ciss_notify *cn)
 {
     struct ciss_lun_report *cll = NULL;
     int bus, target;
-    int s;
 
     switch (cn->subclass) {
     case CISS_NOTIFY_HOTPLUG_PHYSICAL:
@@ -3738,7 +4023,6 @@ ciss_notify_hotplug(struct ciss_softc *sc, struct ciss_notify *cn)
 	target =
 	    CISS_BIG_MAP_TARGET(sc, cn->data.drive.big_physical_drive_number);
 
-	s = splcam();
 	if (cn->detail == 0) {
 	    /*
 	     * Mark the device offline so that it'll start producing selection
@@ -3758,7 +4042,6 @@ ciss_notify_hotplug(struct ciss_softc *sc, struct ciss_notify *cn)
 	    }
 	    ciss_filter_physical(sc, cll);
 	}
-	splx(s);
 	break;
 
     default:
@@ -3780,16 +4063,14 @@ ciss_notify_thread(void *arg)
     struct ciss_softc		*sc;
     struct ciss_request		*cr;
     struct ciss_notify		*cn;
-    int				s;
 
     sc = (struct ciss_softc *)arg;
 #if __FreeBSD_version >= 500000
     mtx_lock(&sc->ciss_mtx);
 #endif
 
-    s = splcam();
     for (;;) {
-	if (TAILQ_EMPTY(&sc->ciss_notify) != 0 &&
+	if (STAILQ_EMPTY(&sc->ciss_notify) != 0 &&
 	    (sc->ciss_flags & CISS_FLAG_THREAD_SHUT) == 0) {
 	    msleep(&sc->ciss_notify, &sc->ciss_mtx, PUSER, "idle", 0);
 	}
@@ -3798,7 +4079,6 @@ ciss_notify_thread(void *arg)
 	    break;
 
 	cr = ciss_dequeue_notify(sc);
-	splx(s);
 
 	if (cr == NULL)
 		panic("cr null");
@@ -3818,11 +4098,9 @@ ciss_notify_thread(void *arg)
 
 	ciss_release_request(cr);
 
-	s = splcam();
     }
     sc->ciss_notify_thread = NULL;
     wakeup(&sc->ciss_notify_thread);
-    splx(s);
 
 #if __FreeBSD_version >= 500000
     mtx_unlock(&sc->ciss_mtx);
@@ -4216,6 +4494,24 @@ ciss_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int32_t flag, d_thread_t 
     mtx_lock(&sc->ciss_mtx);
 
     switch(cmd) {
+    case CCISS_GETQSTATS:
+    {
+	union ciss_statrequest *cr = (union ciss_statrequest *)addr;
+
+	switch (cr->cs_item) {
+	case CISSQ_FREE:
+	case CISSQ_NOTIFY:
+	    bcopy(&sc->ciss_qstat[cr->cs_item], &cr->cs_qstat,
+		sizeof(struct ciss_qstat));
+	    break;
+	default:
+	    error = ENOIOCTL;
+	    break;
+	}
+
+	break;
+    }
+
     case CCISS_GETPCIINFO:
     {
 	cciss_pci_info_struct	*pis = (cciss_pci_info_struct *)addr;

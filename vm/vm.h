@@ -55,7 +55,7 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  *
- * $FreeBSD: src/sys/vm/vm.h,v 1.27 2006/07/21 23:22:49 alc Exp $
+ * $FreeBSD: src/sys/vm/vm.h,v 1.28 2007/12/27 17:08:11 alc Exp $
  */
 
 #ifndef VM_H
@@ -113,6 +113,9 @@ typedef int boolean_t;
 struct vm_page;
 typedef struct vm_page *vm_page_t;
 #endif				/* _KERNEL */
+
+struct vm_reserv;
+typedef struct vm_reserv *vm_reserv_t;
 
 /*
  * Information passed from the machine-independant VM initialization code

@@ -1,0 +1,5 @@
+# $FreeBSD: src/sys/arm/mv/kirkwood/files.db88f6xxx,v 1.1 2008/10/13 20:07:13 raj Exp $
+
+arm/mv/rtc.c			standard
+arm/mv/kirkwood/kirkwood.c	standard
+arm/mv/kirkwood/db88f6xxx.c	standard

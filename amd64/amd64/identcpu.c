@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/identcpu.c,v 1.154 2007/05/30 14:23:26 des Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/identcpu.c,v 1.164 2008/10/22 17:30:37 jkim Exp $");
 
 #include "opt_cpu.h"
 
@@ -71,8 +71,6 @@ void panicifcpuunsupported(void);
 
 static void print_AMD_info(void);
 static void print_AMD_assoc(int i);
-void setPQL2(int *const size, int *const ways);
-static void setPQL2_AMD(int *const size, int *const ways);
 
 int	cpu_class;
 char machine[] = "amd64";
@@ -96,6 +94,10 @@ static struct {
 	{ "Clawhammer",		CPUCLASS_K8 },		/* CPU_CLAWHAMMER */
 	{ "Sledgehammer",	CPUCLASS_K8 },		/* CPU_SLEDGEHAMMER */
 };
+
+int cpu_cores;
+int cpu_logical;
+
 
 extern int pq_l2size;
 extern int pq_l2nways;
@@ -223,7 +225,7 @@ printcpuinfo(void)
 				"\020"
 				"\001SSE3"	/* SSE3 */
 				"\002<b1>"
-				"\003RSVD2"	/* "Reserved" bit 2 */
+				"\003DTES64"	/* 64-bit Debug Trace */
 				"\004MON"	/* MONITOR/MWAIT Instructions */
 				"\005DS_CPL"	/* CPL Qualified Debug Store */
 				"\006VMX"	/* Virtual Machine Extensions */
@@ -240,15 +242,15 @@ printcpuinfo(void)
 				"\021<b16>"
 				"\022<b17>"
 				"\023DCA"	/* Direct Cache Access */
-				"\024<b19>"
-				"\025<b20>"
-				"\026<b21>"
+				"\024SSE4.1"
+				"\025SSE4.2"
+				"\026x2APIC"	/* xAPIC Extensions */
 				"\027<b22>"
-				"\030<b23>"
+				"\030POPCNT"
 				"\031<b24>"
 				"\032<b25>"
-				"\033<b26>"
-				"\034<b27>"
+				"\033XSAVE"
+				"\034OSXSAVE"
 				"\035<b28>"
 				"\036<b29>"
 				"\037<b30>"
@@ -294,7 +296,7 @@ printcpuinfo(void)
 				"\030<s23>"	/* Same */
 				"\031<s24>"	/* Same */
 				"\032FFXSR"	/* Fast FXSAVE/FXRSTOR */
-				"\033<b26>"	/* Undefined */
+				"\033Page1GB"	/* 1-GB large page support */
 				"\034RDTSCP"	/* RDTSCP */
 				"\035<b28>"	/* Undefined */
 				"\036LM"	/* 64 bit long mode */
@@ -346,6 +348,19 @@ printcpuinfo(void)
 				cpu_feature &= ~CPUID_HTT;
 
 			/*
+			 * If this CPU supports P-state invariant TSC then
+			 * mention the capability.
+			 */
+			if (!tsc_is_invariant &&
+			    (strcmp(cpu_vendor, "AuthenticAMD") == 0 &&
+			    ((amd_pminfo & AMDPM_TSC_INVARIANT) != 0 ||
+			    AMD64_CPU_FAMILY(cpu_id) >= 0x10 ||
+			    cpu_id == 0x60fb2))) {
+				tsc_is_invariant = 1;
+				printf("\n  TSC: P-state invariant");
+			}
+
+			/*
 			 * If this CPU supports HTT or CMP then mention the
 			 * number of physical/logical cores it contains.
 			 */
@@ -360,11 +375,13 @@ printcpuinfo(void)
 				if ((regs[0] & 0x1f) != 0)
 					cmp = ((regs[0] >> 26) & 0x3f) + 1;
 			}
+			cpu_cores = cmp;
+			cpu_logical = htt / cmp;
 			if (cmp > 1)
 				printf("\n  Cores per package: %d", cmp);
 			if ((htt / cmp) > 1)
 				printf("\n  Logical CPUs per core: %d",
-				    htt / cmp);
+				    cpu_logical);
 		}
 	}
 	/* Avoid ugly blank lines: only print newline when we have to. */
@@ -405,8 +422,11 @@ panicifcpuunsupported(void)
 static void
 tsc_freq_changed(void *arg, const struct cf_level *level, int status)
 {
-	/* If there was an error during the transition, don't do anything. */
-	if (status != 0)
+	/*
+	 * If there was an error during the transition or
+	 * TSC is P-state invariant, don't do anything.
+	 */
+	if (status != 0 || tsc_is_invariant)
 		return;
 
 	/* Total setting for this level gives the new frequency in MHz. */
@@ -446,6 +466,10 @@ identify_cpu(void)
 		do_cpuid(0x80000001, regs);
 		amd_feature = regs[3] & ~(cpu_feature & 0x0183f3ff);
 		amd_feature2 = regs[2];
+	}
+	if (cpu_exthigh >= 0x80000007) {
+		do_cpuid(0x80000007, regs);
+		amd_pminfo = regs[3];
 	}
 	if (cpu_exthigh >= 0x80000008) {
 		do_cpuid(0x80000008, regs);
@@ -543,31 +567,4 @@ print_AMD_info(void)
 		printf(", %d lines/tag", (regs[2] >> 8) & 0x0f);
 		print_AMD_l2_assoc((regs[2] >> 12) & 0x0f);	
 	}
-}
-
-static void             
-setPQL2_AMD(int *const size, int *const ways)
-{
-	if (cpu_exthigh >= 0x80000006) {
-		u_int regs[4];
-
-		do_cpuid(0x80000006, regs);
-		*size = regs[2] >> 16;
-		*ways = (regs[2] >> 12) & 0x0f;
-		switch (*ways) {
-		case 0:				/* disabled/not present */
-		case 15:			/* fully associative */
-		default: *ways = 1; break;	/* reserved configuration */
-		case 4: *ways = 4; break;
-		case 6: *ways = 8; break;
-		case 8: *ways = 16; break;
-		}
-	}
-}
-
-void
-setPQL2(int *const size, int *const ways)
-{
-	if (strcmp(cpu_vendor, "AuthenticAMD") == 0)
-		setPQL2_AMD(size, ways);
 }

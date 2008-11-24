@@ -37,7 +37,7 @@
  *
  * Author: Julian Elischer <julian@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_message.h,v 1.29 2006/10/17 11:01:20 glebius Exp $
+ * $FreeBSD: src/sys/netgraph/ng_message.h,v 1.30 2008/10/23 15:53:51 des Exp $
  * $Whistle: ng_message.h,v 1.12 1999/01/25 01:17:44 archie Exp $
  */
 
@@ -388,7 +388,7 @@ struct flow_manager {
  */
 #define NG_MKMESSAGE(msg, cookie, cmdid, len, how)			\
 	do {								\
-	  MALLOC((msg), struct ng_mesg *, sizeof(struct ng_mesg)	\
+	  (msg) = malloc(sizeof(struct ng_mesg)				\
 	    + (len), M_NETGRAPH_MSG, (how) | M_ZERO);			\
 	  if ((msg) == NULL)						\
 	    break;							\
@@ -406,7 +406,7 @@ struct flow_manager {
  */
 #define NG_MKRESPONSE(rsp, msg, len, how)				\
 	do {								\
-	  MALLOC((rsp), struct ng_mesg *, sizeof(struct ng_mesg)	\
+	  (rsp) = malloc(sizeof(struct ng_mesg)				\
 	    + (len), M_NETGRAPH_MSG, (how) | M_ZERO);			\
 	  if ((rsp) == NULL)						\
 	    break;							\
@@ -425,8 +425,8 @@ struct flow_manager {
  */
 #define	NG_COPYMESSAGE(copy, msg, how)					\
 	do {								\
-	  MALLOC((copy), struct ng_mesg *, sizeof(struct ng_mesg) +	\
-	    (msg)->header.arglen, M_NETGRAPH_MSG, (how) | M_ZERO);	\
+	  (copy) = malloc(sizeof(struct ng_mesg)			\
+	    + (msg)->header.arglen, M_NETGRAPH_MSG, (how) | M_ZERO);	\
 	  if ((copy) == NULL)						\
 	    break;							\
 	  (copy)->header.version = NG_VERSION;				\

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/acpica/acpi_machdep.c,v 1.37 2007/07/07 17:54:33 njl Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/acpica/acpi_machdep.c,v 1.40 2008/09/26 14:19:52 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -34,6 +34,7 @@ __FBSDID("$FreeBSD: src/sys/i386/acpica/acpi_machdep.c,v 1.37 2007/07/07 17:54:3
 #include <sys/fcntl.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/module.h>
 #include <sys/poll.h>
 #include <sys/sysctl.h>
 #include <sys/uio.h>
@@ -43,6 +44,8 @@ __FBSDID("$FreeBSD: src/sys/i386/acpica/acpi_machdep.c,v 1.37 2007/07/07 17:54:3
 #include <contrib/dev/acpica/acpi.h>
 #include <dev/acpica/acpivar.h>
 #include <dev/acpica/acpiio.h>
+
+#include <machine/nexusvar.h>
 
 /*
  * APM driver emulation 
@@ -81,7 +84,7 @@ static struct filterops	apm_readfiltops =
 
 static struct cdevsw apm_cdevsw = {
 	.d_version =	D_VERSION,
-	.d_flags =	D_TRACKCLOSE,
+	.d_flags =	D_TRACKCLOSE | D_NEEDMINOR,
 	.d_open =	apmopen,
 	.d_close =	apmclose,
 	.d_write =	apmwrite,
@@ -232,10 +235,10 @@ apm_clone(void *arg, struct ucred *cred, char *name, int namelen,
 	unit = -1;
 	if (clone_create(&apm_clones, &apm_cdevsw, &unit, dev, 0)) {
 		if (ctl_dev) {
-			*dev = make_dev(&apm_cdevsw, unit2minor(unit),
+			*dev = make_dev(&apm_cdevsw, unit,
 			    UID_ROOT, GID_OPERATOR, 0660, "apmctl%d", unit);
 		} else {
-			*dev = make_dev(&apm_cdevsw, unit2minor(unit),
+			*dev = make_dev(&apm_cdevsw, unit,
 			    UID_ROOT, GID_OPERATOR, 0664, "apm%d", unit);
 		}
 		if (*dev != NULL) {
@@ -549,3 +552,43 @@ acpi_cpu_c1()
 {
 	__asm __volatile("sti; hlt");
 }
+
+/*
+ * ACPI nexus(4) driver.
+ */
+static int
+nexus_acpi_probe(device_t dev)
+{
+	int error;
+
+	error = acpi_identify();
+	if (error)
+		return (error);
+
+	return (BUS_PROBE_DEFAULT);
+}
+
+static int
+nexus_acpi_attach(device_t dev)
+{
+
+	nexus_init_resources();
+	bus_generic_probe(dev);
+	if (BUS_ADD_CHILD(dev, 10, "acpi", 0) == NULL)
+		panic("failed to add acpi0 device");
+
+	return (bus_generic_attach(dev));
+}
+
+static device_method_t nexus_acpi_methods[] = {
+	/* Device interface */
+	DEVMETHOD(device_probe,		nexus_acpi_probe),
+	DEVMETHOD(device_attach,	nexus_acpi_attach),
+
+	{ 0, 0 }
+};
+
+DEFINE_CLASS_1(nexus, nexus_acpi_driver, nexus_acpi_methods, 1, nexus_driver);
+static devclass_t nexus_devclass;
+
+DRIVER_MODULE(nexus_acpi, root, nexus_acpi_driver, nexus_devclass, 0, 0);

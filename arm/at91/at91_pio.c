@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/at91/at91_pio.c,v 1.5 2007/02/23 12:18:27 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/at91/at91_pio.c,v 1.6 2008/08/19 22:17:14 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -347,6 +347,49 @@ at91_pio_gpio_clear(uint32_t pio, uint32_t data_mask)
 	uint32_t *PIO = (uint32_t *)(AT91RM92_BASE + pio);
 
 	PIO[PIO_CODR / 4] = data_mask;
+}
+
+uint8_t
+at91_pio_gpio_get(uint32_t pio, uint32_t data_mask)
+{
+	uint32_t *PIO = (uint32_t *)(AT91RM92_BASE + pio);
+
+	data_mask &= PIO[PIO_PDSR / 4];
+
+	return (data_mask ? 1 : 0);
+}
+
+void
+at91_pio_gpio_set_deglitch(uint32_t pio, uint32_t data_mask, int use_deglitch)
+{
+	uint32_t *PIO = (uint32_t *)(AT91RM92_BASE + pio);
+
+	if (use_deglitch)
+		PIO[PIO_IFER / 4] = data_mask;
+	else
+		PIO[PIO_IFDR / 4] = data_mask;
+	return;
+}
+
+void
+at91_pio_gpio_set_interrupt(uint32_t pio, uint32_t data_mask, 
+	int enable_interrupt)
+{
+	uint32_t *PIO = (uint32_t *)(AT91RM92_BASE + pio);
+
+	if (enable_interrupt)
+		PIO[PIO_IER / 4] = data_mask;
+	else
+		PIO[PIO_IDR / 4] = data_mask;
+	return;
+}
+
+uint32_t
+at91_pio_gpio_clear_interrupt(uint32_t pio)
+{
+	uint32_t *PIO = (uint32_t *)(AT91RM92_BASE + pio);
+	/* reading this register will clear the interrupts */
+	return (PIO[PIO_ISR / 4]);
 }
 
 static device_method_t at91_pio_methods[] = {

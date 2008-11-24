@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2005 Ed Schouten <ed@fxq.nl>
+ * Copyright (c) 2005 Ed Schouten <ed@FreeBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/usb/uxb360gp_rdesc.h,v 1.2 2005/12/31 04:38:50 mux Exp $
+ * $FreeBSD: src/sys/dev/usb/uxb360gp_rdesc.h,v 1.3 2008/05/24 18:35:55 ed Exp $
  */
 
 /*

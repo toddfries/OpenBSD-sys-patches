@@ -12,7 +12,7 @@
  * warranties of merchantability and fitness for a particular
  * purpose.
  *
- * $FreeBSD: src/sys/boot/i386/pxeldr/pxeldr.S,v 1.15 2006/09/05 19:28:03 ru Exp $
+ * $FreeBSD: src/sys/boot/i386/pxeldr/pxeldr.S,v 1.17 2008/04/09 17:59:17 jhb Exp $
  */
 
 /*

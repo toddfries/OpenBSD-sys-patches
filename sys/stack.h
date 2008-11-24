@@ -23,20 +23,15 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/stack.h,v 1.2 2005/08/29 11:34:08 pjd Exp $
+ * $FreeBSD: src/sys/sys/stack.h,v 1.5 2008/04/06 20:08:50 attilio Exp $
  */
 
 #ifndef _SYS_STACK_H_
 #define	_SYS_STACK_H_
 
-#define	STACK_MAX	18	/* Don't change, stack_ktr relies on this. */
+#include <sys/_stack.h>
 
 struct sbuf;
-
-struct stack {
-	int		depth;
-	vm_offset_t	pcs[STACK_MAX];
-};
 
 /* MI Routines. */
 struct stack	*stack_create(void);
@@ -45,7 +40,9 @@ int		 stack_put(struct stack *, vm_offset_t);
 void		 stack_copy(struct stack *, struct stack *);
 void		 stack_zero(struct stack *);
 void		 stack_print(struct stack *);
+void		 stack_print_ddb(struct stack *);
 void		 stack_sbuf_print(struct sbuf *, struct stack *);
+void		 stack_sbuf_print_ddb(struct sbuf *, struct stack *);
 #ifdef KTR
 void		 stack_ktr(u_int, const char *, int, struct stack *, u_int, int);
 #define	CTRSTACK(m, st, depth, cheap) do {				\
@@ -57,6 +54,8 @@ void		 stack_ktr(u_int, const char *, int, struct stack *, u_int, int);
 #endif
 
 /* MD Routine. */
+struct thread;
 void		 stack_save(struct stack *);
+void		 stack_save_td(struct stack *, struct thread *);
 
 #endif

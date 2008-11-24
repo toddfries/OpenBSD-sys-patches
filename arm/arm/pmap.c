@@ -147,10 +147,11 @@
 #include "opt_vm.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/pmap.c,v 1.87 2007/10/16 20:40:04 cognet Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/pmap.c,v 1.106 2008/11/06 16:28:28 raj Exp $");
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/ktr.h>
 #include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/msgbuf.h>
@@ -199,11 +200,8 @@ static pv_entry_t pmap_get_pv_entry(void);
 
 static void		pmap_enter_locked(pmap_t, vm_offset_t, vm_page_t,
     vm_prot_t, boolean_t, int);
-static void		pmap_vac_me_harder(struct vm_page *, pmap_t,
+static __inline	void	pmap_fix_cache(struct vm_page *, pmap_t,
     vm_offset_t);
-static void		pmap_vac_me_kpmap(struct vm_page *, pmap_t, 
-    vm_offset_t);
-static void		pmap_vac_me_user(struct vm_page *, pmap_t, vm_offset_t);
 static void		pmap_alloc_l1(pmap_t);
 static void		pmap_free_l1(pmap_t);
 static void		pmap_use_l1(pmap_t);
@@ -271,6 +269,11 @@ void		(*pmap_zero_page_func)(vm_paddr_t, int, int);
 union pmap_cache_state *pmap_cache_state;
 
 struct msgbuf *msgbufp = 0;
+
+/*
+ * Crashdump maps.
+ */
+static caddr_t crashdumpmap;
 
 extern void bcopy_page(vm_offset_t, vm_offset_t);
 extern void bzero_page(vm_offset_t);
@@ -430,10 +433,10 @@ pmap_init_l1(struct l1_ttable *l1, pd_entry_t *l1pt)
 
 	l1->l1_kva = l1pt;
 	l1->l1_domain_use_count = 0;
-	l1->l1_domain_first = 1;
+	l1->l1_domain_first = 0;
 
 	for (i = 0; i < PMAP_DOMAINS; i++)
-		l1->l1_domain_free[i] = i + 2;
+		l1->l1_domain_free[i] = i + 1;
 
 	/*
 	 * Copy the kernel's L1 entries to each new L1.
@@ -787,7 +790,7 @@ pmap_alloc_l1(pmap_t pm)
 	 * Fix up the relevant bits in the pmap structure
 	 */
 	pm->pm_l1 = l1;
-	pm->pm_domain = domain;
+	pm->pm_domain = domain + 1;
 }
 
 /*
@@ -810,8 +813,8 @@ pmap_free_l1(pmap_t pm)
 	/*
 	 * Free up the domain number which was allocated to the pmap
 	 */
-	l1->l1_domain_free[pm->pm_domain] = l1->l1_domain_first;
-	l1->l1_domain_first = pm->pm_domain;
+	l1->l1_domain_free[pm->pm_domain - 1] = l1->l1_domain_first;
+	l1->l1_domain_first = pm->pm_domain - 1;
 	l1->l1_domain_use_count--;
 
 	/*
@@ -1199,27 +1202,104 @@ pmap_tlb_flushD(pmap_t pm)
 }
 
 static PMAP_INLINE void
-pmap_idcache_wbinv_range(pmap_t pm, vm_offset_t va, vm_size_t len)
+pmap_l2cache_wbinv_range(pmap_t pm, vm_offset_t va, vm_size_t len)
 {
+	vm_size_t rest;
+	pd_entry_t *pde;
+	pt_entry_t *ptep;
 
-	if (pmap_is_current(pm))
-		cpu_idcache_wbinv_range(va, len);
+	rest = MIN(PAGE_SIZE - (va & PAGE_MASK), len);
+
+	while (len > 0) {
+		CTR4(KTR_PMAP, "pmap_l2cache_wbinv_range: pmap %p is_kernel %d "
+		    "va 0x%08x len 0x%x ", pm, pm == pmap_kernel(), va, rest);
+		if (pmap_get_pde_pte(pm, va, &pde, &ptep) && l2pte_valid(*ptep))
+			cpu_l2cache_wb_range(va, rest);
+
+		len -= rest;
+		va += rest;
+
+		rest = MIN(PAGE_SIZE, len);
+	}
 }
 
 static PMAP_INLINE void
-pmap_dcache_wb_range(pmap_t pm, vm_offset_t va, vm_size_t len,
-    boolean_t do_inv, boolean_t rd_only)
+pmap_idcache_wbinv_range(pmap_t pm, vm_offset_t va, vm_size_t len)
 {
 
 	if (pmap_is_current(pm)) {
+		cpu_idcache_wbinv_range(va, len);
+		pmap_l2cache_wbinv_range(pm, va, len);
+	}
+}
+
+static PMAP_INLINE void
+pmap_l2cache_wb_range(pmap_t pm, vm_offset_t va, vm_size_t len)
+{
+	vm_size_t rest;
+	pd_entry_t *pde;
+	pt_entry_t *ptep;
+
+	rest = MIN(PAGE_SIZE - (va & PAGE_MASK), len);
+
+	while (len > 0) {
+		CTR4(KTR_PMAP, "pmap_l2cache_wb_range: pmap %p is_kernel %d "
+		    "va 0x%08x len 0x%x ", pm, pm == pmap_kernel(), va, rest);
+		if (pmap_get_pde_pte(pm, va, &pde, &ptep) && l2pte_valid(*ptep))
+			cpu_l2cache_wb_range(va, rest);
+
+		len -= rest;
+		va += rest;
+
+		rest = MIN(PAGE_SIZE, len);
+	}
+}
+
+static PMAP_INLINE void
+pmap_l2cache_inv_range(pmap_t pm, vm_offset_t va, vm_size_t len)
+{
+	vm_size_t rest;
+	pd_entry_t *pde;
+	pt_entry_t *ptep;
+
+	rest = MIN(PAGE_SIZE - (va & PAGE_MASK), len);
+
+	while (len > 0) {
+		CTR4(KTR_PMAP, "pmap_l2cache_wb_range: pmap %p is_kernel %d "
+		    "va 0x%08x len 0x%x ", pm, pm == pmap_kernel(), va, rest);
+		if (pmap_get_pde_pte(pm, va, &pde, &ptep) && l2pte_valid(*ptep)) 
+		    cpu_l2cache_inv_range(va, rest);
+
+		len -= rest;
+		va += rest;
+
+		rest = MIN(PAGE_SIZE, len);
+	}
+}
+
+static PMAP_INLINE void
+pmap_dcache_wb_range(pmap_t pm, vm_offset_t va, vm_size_t len, boolean_t do_inv,
+    boolean_t rd_only)
+{
+
+	CTR4(KTR_PMAP, "pmap_dcache_wb_range: pmap %p is_kernel %d va 0x%08x "
+	    "len 0x%x ", pm, pm == pmap_kernel(), va, len);
+	CTR2(KTR_PMAP, " do_inv %d rd_only %d", do_inv, rd_only);
+
+	if (pmap_is_current(pm)) {
 		if (do_inv) {
-			if (rd_only)
+			if (rd_only) {
 				cpu_dcache_inv_range(va, len);
-			else
+				pmap_l2cache_inv_range(pm, va, len);
+			}
+			else {
 				cpu_dcache_wbinv_range(va, len);
-		} else
-		if (!rd_only)
+				pmap_l2cache_wbinv_range(pm, va, len);
+			}
+		} else if (!rd_only) {
 			cpu_dcache_wb_range(va, len);
+			pmap_l2cache_wb_range(pm, va, len);
+		}
 	}
 }
 
@@ -1227,16 +1307,20 @@ static PMAP_INLINE void
 pmap_idcache_wbinv_all(pmap_t pm)
 {
 
-	if (pmap_is_current(pm))
+	if (pmap_is_current(pm)) {
 		cpu_idcache_wbinv_all();
+		cpu_l2cache_wbinv_all();
+	}
 }
 
 static PMAP_INLINE void
 pmap_dcache_wbinv_all(pmap_t pm)
 {
 
-	if (pmap_is_current(pm))
+	if (pmap_is_current(pm)) {
 		cpu_dcache_wbinv_all();
+		cpu_l2cache_wbinv_all();
+	}
 }
 
 /*
@@ -1260,276 +1344,147 @@ do {					\
 #endif
 
 /*
- * Since we have a virtually indexed cache, we may need to inhibit caching if
- * there is more than one mapping and at least one of them is writable.
- * Since we purge the cache on every context switch, we only need to check for
- * other mappings within the same pmap, or kernel_pmap.
- * This function is also called when a page is unmapped, to possibly reenable
- * caching on any remaining mappings.
- *
- * The code implements the following logic, where:
- *
- * KW = # of kernel read/write pages
- * KR = # of kernel read only pages
- * UW = # of user read/write pages
- * UR = # of user read only pages
- * 
- * KC = kernel mapping is cacheable
- * UC = user mapping is cacheable
- *
- *               KW=0,KR=0  KW=0,KR>0  KW=1,KR=0  KW>1,KR>=0
- *             +---------------------------------------------
- * UW=0,UR=0   | ---        KC=1       KC=1       KC=0
- * UW=0,UR>0   | UC=1       KC=1,UC=1  KC=0,UC=0  KC=0,UC=0
- * UW=1,UR=0   | UC=1       KC=0,UC=0  KC=0,UC=0  KC=0,UC=0
- * UW>1,UR>=0  | UC=0       KC=0,UC=0  KC=0,UC=0  KC=0,UC=0
+ * cacheable == -1 means we must make the entry uncacheable, 1 means
+ * cacheable;
  */
-
-static const int pmap_vac_flags[4][4] = {
-	{-1,		0,		0,		PVF_KNC},
-	{0,		0,		PVF_NC,		PVF_NC},
-	{0,		PVF_NC,		PVF_NC,		PVF_NC},
-	{PVF_UNC,	PVF_NC,		PVF_NC,		PVF_NC}
-};
-
-static PMAP_INLINE int
-pmap_get_vac_flags(const struct vm_page *pg)
-{
-	int kidx, uidx;
-
-	kidx = 0;
-	if (pg->md.kro_mappings || pg->md.krw_mappings > 1)
-		kidx |= 1;
-	if (pg->md.krw_mappings)
-		kidx |= 2;
-
-	uidx = 0;
-	if (pg->md.uro_mappings || pg->md.urw_mappings > 1)
-		uidx |= 1;
-	if (pg->md.urw_mappings)
-		uidx |= 2;
-
-	return (pmap_vac_flags[uidx][kidx]);
-}
-
 static __inline void
-pmap_vac_me_harder(struct vm_page *pg, pmap_t pm, vm_offset_t va)
+pmap_set_cache_entry(pv_entry_t pv, pmap_t pm, vm_offset_t va, int cacheable)
 {
-	int nattr;
-
-	mtx_assert(&vm_page_queue_mtx, MA_OWNED);
-	nattr = pmap_get_vac_flags(pg);
-
-	if (nattr < 0) {
-		pg->md.pvh_attrs &= ~PVF_NC;
-		return;
-	}
-
-	if (nattr == 0 && (pg->md.pvh_attrs & PVF_NC) == 0) {
-		return;
-	}
-
-	if (pm == pmap_kernel())
-		pmap_vac_me_kpmap(pg, pm, va);
-	else
-		pmap_vac_me_user(pg, pm, va);
-
-	pg->md.pvh_attrs = (pg->md.pvh_attrs & ~PVF_NC) | nattr;
-}
-
-static void
-pmap_vac_me_kpmap(struct vm_page *pg, pmap_t pm, vm_offset_t va)
-{
-	u_int u_cacheable, u_entries;
-	struct pv_entry *pv;
-	pmap_t last_pmap = pm;
-
-	/* 
-	 * Pass one, see if there are both kernel and user pmaps for
-	 * this page.  Calculate whether there are user-writable or
-	 * kernel-writable pages.
-	 */
-	u_cacheable = 0;
-	TAILQ_FOREACH(pv, &pg->md.pv_list, pv_list) {
-		if (pv->pv_pmap != pm && (pv->pv_flags & PVF_NC) == 0)
-			u_cacheable++;
-	}
-
-	u_entries = pg->md.urw_mappings + pg->md.uro_mappings;
-
-	/* 
-	 * We know we have just been updating a kernel entry, so if
-	 * all user pages are already cacheable, then there is nothing
-	 * further to do.
-	 */
-	if (pg->md.k_mappings == 0 && u_cacheable == u_entries)
-		return;
-
-	if (u_entries) {
-		/* 
-		 * Scan over the list again, for each entry, if it
-		 * might not be set correctly, call pmap_vac_me_user
-		 * to recalculate the settings.
-		 */
-		TAILQ_FOREACH(pv, &pg->md.pv_list, pv_list) {
-			/* 
-			 * We know kernel mappings will get set
-			 * correctly in other calls.  We also know
-			 * that if the pmap is the same as last_pmap
-			 * then we've just handled this entry.
-			 */
-			if (pv->pv_pmap == pm || pv->pv_pmap == last_pmap)
-				continue;
-
-			/* 
-			 * If there are kernel entries and this page
-			 * is writable but non-cacheable, then we can
-			 * skip this entry also.  
-			 */
-			if (pg->md.k_mappings &&
-			    (pv->pv_flags & (PVF_NC | PVF_WRITE)) ==
-			    (PVF_NC | PVF_WRITE))
-				continue;
-
-			/* 
-			 * Similarly if there are no kernel-writable 
-			 * entries and the page is already 
-			 * read-only/cacheable.
-			 */
-			if (pg->md.krw_mappings == 0 &&
-			    (pv->pv_flags & (PVF_NC | PVF_WRITE)) == 0)
-				continue;
-
-			/* 
-			 * For some of the remaining cases, we know
-			 * that we must recalculate, but for others we
-			 * can't tell if they are correct or not, so
-			 * we recalculate anyway.
-			 */
-			pmap_vac_me_user(pg, (last_pmap = pv->pv_pmap), 0);
-		}
-
-		if (pg->md.k_mappings == 0)
-			return;
-	}
-
-	pmap_vac_me_user(pg, pm, va);
-}
-
-static void
-pmap_vac_me_user(struct vm_page *pg, pmap_t pm, vm_offset_t va)
-{
-	pmap_t kpmap = pmap_kernel();
-	struct pv_entry *pv, *npv;
 	struct l2_bucket *l2b;
 	pt_entry_t *ptep, pte;
-	u_int entries = 0;
-	u_int writable = 0;
-	u_int cacheable_entries = 0;
-	u_int kern_cacheable = 0;
-	u_int other_writable = 0;
 
-	/*
-	 * Count mappings and writable mappings in this pmap.
-	 * Include kernel mappings as part of our own.
-	 * Keep a pointer to the first one.
-	 */
-	npv = TAILQ_FIRST(&pg->md.pv_list);
-	TAILQ_FOREACH(pv, &pg->md.pv_list, pv_list) {
-		/* Count mappings in the same pmap */
-		if (pm == pv->pv_pmap || kpmap == pv->pv_pmap) {
-			if (entries++ == 0)
-				npv = pv;
+	l2b = pmap_get_l2_bucket(pv->pv_pmap, pv->pv_va);
+	ptep = &l2b->l2b_kva[l2pte_index(pv->pv_va)];
 
-			/* Cacheable mappings */
-			if ((pv->pv_flags & PVF_NC) == 0) {
-				cacheable_entries++;
-				if (kpmap == pv->pv_pmap)
-					kern_cacheable++;
+	if (cacheable == 1) {
+		pte = (*ptep & ~L2_S_CACHE_MASK) | pte_l2_s_cache_mode;
+		if (l2pte_valid(pte)) {
+			if (PV_BEEN_EXECD(pv->pv_flags)) {
+				pmap_tlb_flushID_SE(pv->pv_pmap, pv->pv_va);
+			} else if (PV_BEEN_REFD(pv->pv_flags)) {
+				pmap_tlb_flushD_SE(pv->pv_pmap, pv->pv_va);
 			}
-
-			/* Writable mappings */
-			if (pv->pv_flags & PVF_WRITE)
-				++writable;
-		} else
-		if (pv->pv_flags & PVF_WRITE)
-			other_writable = 1;
-	}
-
-	/*
-	 * Enable or disable caching as necessary.
-	 * Note: the first entry might be part of the kernel pmap,
-	 * so we can't assume this is indicative of the state of the
-	 * other (maybe non-kpmap) entries.
-	 */
-	if ((entries > 1 && writable) ||
-	    (entries > 0 && pm == kpmap && other_writable)) {
-		if (cacheable_entries == 0)
-			return;
-
-		for (pv = npv; pv; pv = TAILQ_NEXT(pv, pv_list)) {
-			if ((pm != pv->pv_pmap && kpmap != pv->pv_pmap) ||
-			    (pv->pv_flags & PVF_NC))
-				continue;
-
-			pv->pv_flags |= PVF_NC;
-
-			l2b = pmap_get_l2_bucket(pv->pv_pmap, pv->pv_va);
-			ptep = &l2b->l2b_kva[l2pte_index(pv->pv_va)];
-			pte = *ptep & ~L2_S_CACHE_MASK;
-
-			if ((va != pv->pv_va || pm != pv->pv_pmap) &&
+		}
+	} else {
+		pte = *ptep &~ L2_S_CACHE_MASK;
+		if ((va != pv->pv_va || pm != pv->pv_pmap) &&
 			    l2pte_valid(pte)) {
-				if (PV_BEEN_EXECD(pv->pv_flags)) {
-					pmap_idcache_wbinv_range(pv->pv_pmap,
+			if (PV_BEEN_EXECD(pv->pv_flags)) {
+				pmap_idcache_wbinv_range(pv->pv_pmap,
 					    pv->pv_va, PAGE_SIZE);
-					pmap_tlb_flushID_SE(pv->pv_pmap,
-					    pv->pv_va);
-				} else
-				if (PV_BEEN_REFD(pv->pv_flags)) {
-					pmap_dcache_wb_range(pv->pv_pmap,
+				pmap_tlb_flushID_SE(pv->pv_pmap, pv->pv_va);
+			} else if (PV_BEEN_REFD(pv->pv_flags)) {
+				pmap_dcache_wb_range(pv->pv_pmap,
 					    pv->pv_va, PAGE_SIZE, TRUE,
 					    (pv->pv_flags & PVF_WRITE) == 0);
-					pmap_tlb_flushD_SE(pv->pv_pmap,
+				pmap_tlb_flushD_SE(pv->pv_pmap,
 					    pv->pv_va);
-				}
 			}
-
-			*ptep = pte;
-			PTE_SYNC_CURRENT(pv->pv_pmap, ptep);
 		}
-		cpu_cpwait();
-	} else
-	if (entries > cacheable_entries) {
+	}
+	*ptep = pte;
+	PTE_SYNC_CURRENT(pv->pv_pmap, ptep);
+}
+
+static void
+pmap_fix_cache(struct vm_page *pg, pmap_t pm, vm_offset_t va)
+{
+	int pmwc = 0;
+	int writable = 0, kwritable = 0, uwritable = 0;
+	int entries = 0, kentries = 0, uentries = 0;
+	struct pv_entry *pv;
+
+	mtx_assert(&vm_page_queue_mtx, MA_OWNED);
+
+	/* the cache gets written back/invalidated on context switch.
+	 * therefore, if a user page shares an entry in the same page or
+	 * with the kernel map and at least one is writable, then the
+	 * cache entry must be set write-through.
+	 */
+
+	TAILQ_FOREACH(pv, &pg->md.pv_list, pv_list) {
+			/* generate a count of the pv_entry uses */
+		if (pv->pv_flags & PVF_WRITE) {
+			if (pv->pv_pmap == pmap_kernel())
+				kwritable++;
+			else if (pv->pv_pmap == pm)
+				uwritable++;
+			writable++;
+		}
+		if (pv->pv_pmap == pmap_kernel())
+			kentries++;
+		else {
+			if (pv->pv_pmap == pm)
+				uentries++;
+			entries++;
+		}
+	}
 		/*
-		 * Turn cacheing back on for some pages.  If it is a kernel
-		 * page, only do so if there are no other writable pages.
+		 * check if the user duplicate mapping has
+		 * been removed.
 		 */
-		for (pv = npv; pv; pv = TAILQ_NEXT(pv, pv_list)) {
-			if (!(pv->pv_flags & PVF_NC) || (pm != pv->pv_pmap &&
-			    (kpmap != pv->pv_pmap || other_writable)))
+	if ((pm != pmap_kernel()) && (((uentries > 1) && uwritable) ||
+	    (uwritable > 1)))
+			pmwc = 1;
+
+	TAILQ_FOREACH(pv, &pg->md.pv_list, pv_list) {
+		/* check for user uncachable conditions - order is important */
+		if (pm != pmap_kernel() &&
+		    (pv->pv_pmap == pm || pv->pv_pmap == pmap_kernel())) {
+
+			if ((uentries > 1 && uwritable) || uwritable > 1) {
+
+				/* user duplicate mapping */
+				if (pv->pv_pmap != pmap_kernel())
+					pv->pv_flags |= PVF_MWC;
+
+				if (!(pv->pv_flags & PVF_NC)) {
+					pv->pv_flags |= PVF_NC;
+					pmap_set_cache_entry(pv, pm, va, -1);
+				}
 				continue;
+			} else	/* no longer a duplicate user */
+				pv->pv_flags &= ~PVF_MWC;
+		}
+
+		/*
+		 * check for kernel uncachable conditions
+		 * kernel writable or kernel readable with writable user entry
+		 */
+		if ((kwritable && entries) ||
+		    ((kwritable != writable) && kentries &&
+		     (pv->pv_pmap == pmap_kernel() ||
+		      (pv->pv_flags & PVF_WRITE) ||
+		      (pv->pv_flags & PVF_MWC)))) {
+
+			if (!(pv->pv_flags & PVF_NC)) {
+				pv->pv_flags |= PVF_NC;
+				pmap_set_cache_entry(pv, pm, va, -1);
+			}
+			continue;
+		}
+
+			/* kernel and user are cachable */
+		if ((pm == pmap_kernel()) && !(pv->pv_flags & PVF_MWC) &&
+		    (pv->pv_flags & PVF_NC)) {
 
 			pv->pv_flags &= ~PVF_NC;
-
-			l2b = pmap_get_l2_bucket(pv->pv_pmap, pv->pv_va);
-			ptep = &l2b->l2b_kva[l2pte_index(pv->pv_va)];
-			pte = (*ptep & ~L2_S_CACHE_MASK) | pte_l2_s_cache_mode;
-
-			if (l2pte_valid(pte)) {
-				if (PV_BEEN_EXECD(pv->pv_flags)) {
-					pmap_tlb_flushID_SE(pv->pv_pmap,
-					    pv->pv_va);
-				} else
-				if (PV_BEEN_REFD(pv->pv_flags)) {
-					pmap_tlb_flushD_SE(pv->pv_pmap,
-					    pv->pv_va);
-				}
-			}
-
-			*ptep = pte;
-			PTE_SYNC_CURRENT(pv->pv_pmap, ptep);
+			pmap_set_cache_entry(pv, pm, va, 1);
+			continue;
 		}
+			/* user is no longer sharable and writable */
+		if (pm != pmap_kernel() && (pv->pv_pmap == pm) &&
+		    !pmwc && (pv->pv_flags & PVF_NC)) {
+
+			pv->pv_flags &= ~(PVF_NC | PVF_MWC);
+			pmap_set_cache_entry(pv, pm, va, 1);
+		}
+	}
+
+	if ((kwritable == 0) && (writable == 0)) {
+		pg->md.pvh_attrs &= ~PVF_MOD;
+		vm_page_flag_clear(pg, PG_WRITEABLE);
+		return;
 	}
 }
 
@@ -1551,6 +1506,8 @@ pmap_clearbit(struct vm_page *pg, u_int maskbits)
 
 	mtx_assert(&vm_page_queue_mtx, MA_OWNED);
 
+	if (maskbits & PVF_WRITE)
+		maskbits |= PVF_MOD;
 	/*
 	 * Clear saved attributes (modify, reference)
 	 */
@@ -1567,6 +1524,21 @@ pmap_clearbit(struct vm_page *pg, u_int maskbits)
 		va = pv->pv_va;
 		pm = pv->pv_pmap;
 		oflags = pv->pv_flags;
+
+		if (!(oflags & maskbits)) {
+			if ((maskbits & PVF_WRITE) && (pv->pv_flags & PVF_NC)) {
+				/* It is safe to re-enable cacheing here. */
+				PMAP_LOCK(pm);
+				l2b = pmap_get_l2_bucket(pm, va);
+				ptep = &l2b->l2b_kva[l2pte_index(va)];
+				*ptep |= pte_l2_s_cache_mode;
+				PTE_SYNC(ptep);
+				PMAP_UNLOCK(pm);
+				pv->pv_flags &= ~(PVF_NC | PVF_MWC);
+				
+			}
+			continue;
+		}
 		pv->pv_flags &= ~maskbits;
 
 		PMAP_LOCK(pm);
@@ -1584,16 +1556,16 @@ pmap_clearbit(struct vm_page *pg, u_int maskbits)
 				 * Don't turn caching on again if this is a 
 				 * modified emulation. This would be
 				 * inconsitent with the settings created by
-				 * pmap_vac_me_harder(). Otherwise, it's safe
+				 * pmap_fix_cache(). Otherwise, it's safe
 				 * to re-enable cacheing.
 				 *
-				 * There's no need to call pmap_vac_me_harder()
+				 * There's no need to call pmap_fix_cache()
 				 * here: all pages are losing their write
 				 * permission.
 				 */
 				if (maskbits & PVF_WRITE) {
 					npte |= pte_l2_s_cache_mode;
-					pv->pv_flags &= ~PVF_NC;
+					pv->pv_flags &= ~(PVF_NC | PVF_MWC);
 				}
 			} else
 			if (opte & L2_S_PROT_W) {
@@ -1616,22 +1588,6 @@ pmap_clearbit(struct vm_page *pg, u_int maskbits)
 
 			/* make the pte read only */
 			npte &= ~L2_S_PROT_W;
-
-			if (maskbits & PVF_WRITE) {
-				/*
-				 * Keep alias accounting up to date
-				 */
-				if (pv->pv_pmap == pmap_kernel()) {
-					if (oflags & PVF_WRITE) {
-						pg->md.krw_mappings--;
-						pg->md.kro_mappings++;
-					}
-				} else
-				if (oflags & PVF_WRITE) {
-					pg->md.urw_mappings--;
-					pg->md.uro_mappings++;
-				}
-			}
 		}
 
 		if (maskbits & PVF_REF) {
@@ -1728,17 +1684,6 @@ pmap_enter_pv(struct vm_page *pg, struct pv_entry *pve, pmap_t pm,
 	TAILQ_INSERT_HEAD(&pg->md.pv_list, pve, pv_list);
 	TAILQ_INSERT_HEAD(&pm->pm_pvlist, pve, pv_plist);
 	pg->md.pvh_attrs |= flags & (PVF_REF | PVF_MOD);
-	if (pm == pmap_kernel()) {
-		if (flags & PVF_WRITE)
-			pg->md.krw_mappings++;
-		else
-			pg->md.kro_mappings++;
-	} 
-	if (flags & PVF_WRITE)
-		pg->md.urw_mappings++;
-	else
-		pg->md.uro_mappings++;
-	pg->md.pv_list_count++;
 	if (pve->pv_flags & PVF_WIRED)
 		++pm->pm_stats.wired_count;
 	vm_page_flag_set(pg, PG_REFERENCED);
@@ -1804,30 +1749,24 @@ pmap_nuke_pv(struct vm_page *pg, pmap_t pm, struct pv_entry *pve)
 	TAILQ_REMOVE(&pm->pm_pvlist, pve, pv_plist);
 	if (pve->pv_flags & PVF_WIRED)
 		--pm->pm_stats.wired_count;
-	pg->md.pv_list_count--;
 	if (pg->md.pvh_attrs & PVF_MOD)
 		vm_page_dirty(pg);
-	if (pm == pmap_kernel()) {
-		if (pve->pv_flags & PVF_WRITE)
-			pg->md.krw_mappings--;
-		else
-			pg->md.kro_mappings--;
-	} else
-		if (pve->pv_flags & PVF_WRITE)
-			pg->md.urw_mappings--;
-		else
-			pg->md.uro_mappings--;
-	if (TAILQ_FIRST(&pg->md.pv_list) == NULL ||
-	    (pg->md.krw_mappings == 0 && pg->md.urw_mappings == 0)) {
-		pg->md.pvh_attrs &= ~PVF_MOD;
-		if (TAILQ_FIRST(&pg->md.pv_list) == NULL)
-			pg->md.pvh_attrs &= ~PVF_REF;
-		vm_page_flag_clear(pg, PG_WRITEABLE);
-	}
-	if (TAILQ_FIRST(&pg->md.pv_list))
+	if (TAILQ_FIRST(&pg->md.pv_list) == NULL)
+		pg->md.pvh_attrs &= ~PVF_REF;
+       	else
 		vm_page_flag_set(pg, PG_REFERENCED);
-	if (pve->pv_flags & PVF_WRITE)
-		pmap_vac_me_harder(pg, pm, 0);
+	if ((pve->pv_flags & PVF_NC) && ((pm == pmap_kernel()) ||
+	     (pve->pv_flags & PVF_WRITE) || !(pve->pv_flags & PVF_MWC)))
+		pmap_fix_cache(pg, pm, 0);
+	else if (pve->pv_flags & PVF_WRITE) {
+		TAILQ_FOREACH(pve, &pg->md.pv_list, pv_list)
+		    if (pve->pv_flags & PVF_WRITE)
+			    break;
+		if (!pve) {
+			pg->md.pvh_attrs &= ~PVF_MOD;
+			vm_page_flag_clear(pg, PG_WRITEABLE);
+		}
+	}
 }
 
 static struct pv_entry *
@@ -1854,8 +1793,6 @@ pmap_remove_pv(struct vm_page *pg, pmap_t pm, vm_offset_t va)
  *
  * => caller should hold lock on vm_page [so that attrs can be adjusted]
  * => caller should NOT adjust pmap's wire_count
- * => caller must call pmap_vac_me_harder() if writable status of a page
- *    may have changed.
  * => we return the old flags
  * 
  * Modify a physical-virtual mapping in the pv table
@@ -1889,29 +1826,8 @@ pmap_modify_pv(struct vm_page *pg, pmap_t pm, vm_offset_t va,
 			--pm->pm_stats.wired_count;
 	}
 
-	if ((flags ^ oflags) & PVF_WRITE) {
-		if (pm == pmap_kernel()) {
-			if (flags & PVF_WRITE) {
-				pg->md.krw_mappings++;
-				pg->md.kro_mappings--;
-			} else {
-				pg->md.kro_mappings++;
-				pg->md.krw_mappings--;
-			}
-		} else
-		if (flags & PVF_WRITE) {
-			pg->md.urw_mappings++;
-			pg->md.uro_mappings--;
-		} else {
-			pg->md.uro_mappings++;
-			pg->md.urw_mappings--;
-		}
-		if (pg->md.krw_mappings == 0 && pg->md.urw_mappings == 0) {
-			pg->md.pvh_attrs &= ~PVF_MOD;
-			vm_page_flag_clear(pg, PG_WRITEABLE);
-		}
-		pmap_vac_me_harder(pg, pm, 0);
-	}
+	if ((flags ^ oflags) & PVF_WRITE)
+		pmap_fix_cache(pg, pm, 0);
 
 	return (oflags);
 }
@@ -1946,7 +1862,6 @@ pmap_page_init(vm_page_t m)
 {
 
 	TAILQ_INIT(&m->md.pv_list);
-	m->md.pv_list_count = 0;
 }
 
 /*
@@ -2072,7 +1987,7 @@ pmap_fault_fixup(pmap_t pm, vm_offset_t va, vm_prot_t ftype, int user)
 
 		/* 
 		 * Re-enable write permissions for the page.  No need to call
-		 * pmap_vac_me_harder(), since this is just a
+		 * pmap_fix_cache(), since this is just a
 		 * modified-emulation fault, and the PVF_WRITE bit isn't
 		 * changing. We've already set the cacheable bits based on
 		 * the assumption that we can write to this page.
@@ -2341,6 +2256,8 @@ pmap_set_pt_cache_mode(pd_entry_t *kl1, vm_offset_t va)
 			PTE_SYNC(pdep);
 			cpu_dcache_wbinv_range((vm_offset_t)pdep,
 			    sizeof(*pdep));
+			cpu_l2cache_wbinv_range((vm_offset_t)pdep,
+			    sizeof(*pdep));
 			rv = 1;
 		}
 	} else {
@@ -2356,6 +2273,8 @@ pmap_set_pt_cache_mode(pd_entry_t *kl1, vm_offset_t va)
 			    pte_l2_s_cache_mode_pt;
 			PTE_SYNC(ptep);
 			cpu_dcache_wbinv_range((vm_offset_t)ptep,
+			    sizeof(*ptep));
+			cpu_l2cache_wbinv_range((vm_offset_t)ptep,
 			    sizeof(*ptep));
 			rv = 1;
 		}
@@ -2509,6 +2428,7 @@ pmap_bootstrap(vm_offset_t firstaddr, vm_offset_t lastaddr, struct pv_addr *l1pt
 	}
 
 	cpu_dcache_wbinv_all();
+	cpu_l2cache_wbinv_all();
 	cpu_tlb_flushID();
 	cpu_cpwait();
 
@@ -2540,11 +2460,14 @@ pmap_bootstrap(vm_offset_t firstaddr, vm_offset_t lastaddr, struct pv_addr *l1pt
 
 	pmap_alloc_specials(&virtual_avail,
 	    1, (vm_offset_t*)&_tmppt, NULL);
+	pmap_alloc_specials(&virtual_avail,
+	    MAXDUMPPGS, (vm_offset_t *)&crashdumpmap, NULL);
 	SLIST_INIT(&l1_list);
 	TAILQ_INIT(&l1_lru_list);
 	mtx_init(&l1_lru_lock, "l1 list lock", NULL, MTX_DEF);
 	pmap_init_l1(l1, kernel_l1pt);
 	cpu_dcache_wbinv_all();
+	cpu_l2cache_wbinv_all();
 
 	virtual_avail = round_page(virtual_avail);
 	virtual_end = lastaddr;
@@ -2574,6 +2497,7 @@ pmap_release(pmap_t pmap)
 	struct pcb *pcb;
 	
 	pmap_idcache_wbinv_all(pmap);
+	cpu_l2cache_wbinv_all();
 	pmap_tlb_flushID(pmap);
 	cpu_cpwait();
 	if (vector_page < KERNBASE) {
@@ -2761,10 +2685,10 @@ pmap_growkernel(vm_offset_t addr)
 	 * rarely
 	 */
 	cpu_dcache_wbinv_all();
+	cpu_l2cache_wbinv_all();
 	cpu_tlb_flushD();
 	cpu_cpwait();
 	kernel_vm_end = pmap_curmaxkvaddr;
-
 }
 
 
@@ -2786,6 +2710,8 @@ pmap_remove_pages(pmap_t pmap)
 	
 	vm_page_lock_queues();
 	PMAP_LOCK(pmap);
+	cpu_idcache_wbinv_all();
+	cpu_l2cache_wbinv_all();
 	for (pv = TAILQ_FIRST(&pmap->pm_pvlist); pv; pv = npv) {
 		if (pv->pv_flags & PVF_WIRED) {
 			/* The page is wired, cannot remove it now. */
@@ -2812,7 +2738,6 @@ pmap_remove_pages(pmap_t pmap)
 		pmap_free_l2_bucket(pmap, l2b, 1);
 	}
 	vm_page_unlock_queues();
-	cpu_idcache_wbinv_all();
 	cpu_tlb_flushID();
 	cpu_cpwait();
 	PMAP_UNLOCK(pmap);
@@ -2875,6 +2800,20 @@ pmap_kenter_section(vm_offset_t va, vm_offset_t pa, int flags)
 }
 
 /*
+ * Make a temporary mapping for a physical address.  This is only intended
+ * to be used for panic dumps.
+ */
+void *
+pmap_kenter_temp(vm_paddr_t pa, int i)
+{
+	vm_offset_t va;
+
+	va = (vm_offset_t)crashdumpmap + (i * PAGE_SIZE);
+	pmap_kenter(va, pa);
+	return ((void *)crashdumpmap);
+}
+
+/*
  * add a wired page to the kva
  * note that in order for the mapping to take effect -- you
  * should do a invltlb after doing the pmap_kenter...
@@ -2899,6 +2838,7 @@ pmap_kenter_internal(vm_offset_t va, vm_offset_t pa, int flags)
 	    (uint32_t) pte, opte, *pte));
 	if (l2pte_valid(opte)) {
 		cpu_dcache_wbinv_range(va, PAGE_SIZE);
+		cpu_l2cache_wbinv_range(va, PAGE_SIZE);
 		cpu_tlb_flushD_SE(va);
 		cpu_cpwait();
 	} else {
@@ -2957,6 +2897,7 @@ pmap_kremove(vm_offset_t va)
 	opte = *pte;
 	if (l2pte_valid(opte)) {
 		cpu_dcache_wbinv_range(va, PAGE_SIZE);
+		cpu_l2cache_wbinv_range(va, PAGE_SIZE);
 		cpu_tlb_flushD_SE(va);
 		cpu_cpwait();
 		*pte = 0;
@@ -3169,17 +3110,17 @@ pmap_remove_all(vm_page_t m)
 
 #if defined(PMAP_DEBUG)
 	/*
-	 * XXX this makes pmap_page_protect(NONE) illegal for non-managed
-	 * pages!
+	 * XXX This makes pmap_remove_all() illegal for non-managed pages!
 	 */
 	if (m->flags & PG_FICTITIOUS) {
-		panic("pmap_page_protect: illegal for unmanaged page, va: 0x%x", VM_PAGE_TO_PHYS(m));
+		panic("pmap_remove_all: illegal for unmanaged page, va: 0x%x", VM_PAGE_TO_PHYS(m));
 	}
 #endif
 
 	if (TAILQ_EMPTY(&m->md.pv_list))
 		return;
 	mtx_assert(&vm_page_queue_mtx, MA_OWNED);
+	pmap_remove_write(m);
 	curpm = vmspace_pmap(curproc->p_vmspace);
 	while ((pv = TAILQ_FIRST(&m->md.pv_list)) != NULL) {
 		if (flush == FALSE && (pv->pv_pmap == curpm ||
@@ -3224,6 +3165,9 @@ pmap_protect(pmap_t pm, vm_offset_t sva, vm_offset_t eva, vm_prot_t prot)
 	vm_offset_t next_bucket;
 	u_int flags;
 	int flush;
+
+	CTR4(KTR_PMAP, "pmap_protect: pmap %p sva 0x%08x eva 0x%08x prot %x",
+	    pm, sva, eva, prot);
 
 	if ((prot & VM_PROT_READ) == 0) {
 		pmap_remove(pm, sva, eva);
@@ -3276,7 +3220,6 @@ pmap_protect(pmap_t pm, vm_offset_t sva, vm_offset_t eva, vm_prot_t prot)
 				if (pg != NULL) {
 					f = pmap_modify_pv(pg, pm, sva,
 					    PVF_WRITE, 0);
-					pmap_vac_me_harder(pg, pm, sva);
 					vm_page_dirty(pg);
 				} else
 					f = PVF_REF | PVF_EXEC;
@@ -3325,8 +3268,8 @@ pmap_protect(pmap_t pm, vm_offset_t sva, vm_offset_t eva, vm_prot_t prot)
  */
 
 void
-pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
-    boolean_t wired)
+pmap_enter(pmap_t pmap, vm_offset_t va, vm_prot_t access, vm_page_t m,
+    vm_prot_t prot, boolean_t wired)
 {
 
 	vm_page_lock_queues();
@@ -3460,9 +3403,11 @@ do_l2b_alloc:
 		 */
 		if (pmap_is_current(pmap) &&
 		    (oflags & PVF_NC) == 0 &&
-			    (opte & L2_S_PROT_W) != 0 &&
-			    (prot & VM_PROT_WRITE) == 0)
+		    (opte & L2_S_PROT_W) != 0 &&
+		    (prot & VM_PROT_WRITE) == 0) {
 			cpu_dcache_wb_range(va, PAGE_SIZE);
+			pmap_l2cache_wb_range(pmap, va, PAGE_SIZE);
+		}
 	} else {
 		/*
 		 * New mapping, or changing the backing page
@@ -3570,7 +3515,7 @@ do_l2b_alloc:
 
 
 		if (m)
-			pmap_vac_me_harder(m, pmap, va);
+			pmap_fix_cache(m, pmap, va);
 	}
 }
 
@@ -3813,7 +3758,7 @@ pmap_extract_and_hold(pmap_t pmap, vm_offset_t va, vm_prot_t prot)
  * such as one in a vmspace structure.
  */
 
-void
+int
 pmap_pinit(pmap_t pmap)
 {
 	PDEBUG(1, printf("pmap_pinit: pmap = %08x\n", (uint32_t) pmap));
@@ -3822,16 +3767,17 @@ pmap_pinit(pmap_t pmap)
 	pmap_alloc_l1(pmap);
 	bzero(pmap->pm_l2, sizeof(pmap->pm_l2));
 
-	pmap->pm_count = 1;
 	pmap->pm_active = 0;
 		
 	TAILQ_INIT(&pmap->pm_pvlist);
 	bzero(&pmap->pm_stats, sizeof pmap->pm_stats);
 	pmap->pm_stats.resident_count = 1;
 	if (vector_page < KERNBASE) {
-		pmap_enter(pmap, vector_page, PHYS_TO_VM_PAGE(systempage.pv_pa),
+		pmap_enter(pmap, vector_page,
+		    VM_PROT_READ, PHYS_TO_VM_PAGE(systempage.pv_pa),
 		    VM_PROT_READ, 1);
 	} 
+	return (1);
 }
 
 
@@ -3866,25 +3812,20 @@ pmap_get_pv_entry(void)
 	return ret_value;
 }
 
-
 /*
  *	Remove the given range of addresses from the specified map.
  *
  *	It is assumed that the start and end are properly
  *	rounded to the page size.
  */
-#define  PMAP_REMOVE_CLEAN_LIST_SIZE     3
+#define	PMAP_REMOVE_CLEAN_LIST_SIZE	3
 void
 pmap_remove(pmap_t pm, vm_offset_t sva, vm_offset_t eva)
 {
 	struct l2_bucket *l2b;
 	vm_offset_t next_bucket;
 	pt_entry_t *ptep;
-	u_int cleanlist_idx, total, cnt;
-	struct {
-		vm_offset_t va;
-		pt_entry_t *pte;
-	} cleanlist[PMAP_REMOVE_CLEAN_LIST_SIZE];
+	u_int total;
 	u_int mappings, is_exec, is_refd;
 	int flushall = 0;
 
@@ -3895,11 +3836,6 @@ pmap_remove(pmap_t pm, vm_offset_t sva, vm_offset_t eva)
 
 	vm_page_lock_queues();
 	PMAP_LOCK(pm);
-	if (!pmap_is_current(pm)) {
-		cleanlist_idx = PMAP_REMOVE_CLEAN_LIST_SIZE + 1;
-	} else
-		cleanlist_idx = 0;
-
 	total = 0;
 	while (sva < eva) {
 		/*
@@ -3955,87 +3891,38 @@ pmap_remove(pmap_t pm, vm_offset_t sva, vm_offset_t eva)
 				}
 			}
 
-			if (!l2pte_valid(pte)) {
-				*ptep = 0;
-				PTE_SYNC_CURRENT(pm, ptep);
-				sva += PAGE_SIZE;
-				ptep++;
-				mappings++;
-				continue;
-			}
-
-			if (cleanlist_idx < PMAP_REMOVE_CLEAN_LIST_SIZE) {
-				/* Add to the clean list. */
-				cleanlist[cleanlist_idx].pte = ptep;
-				cleanlist[cleanlist_idx].va =
-				    sva | (is_exec & 1);
-				cleanlist_idx++;
-			} else
-			if (cleanlist_idx == PMAP_REMOVE_CLEAN_LIST_SIZE) {
-				/* Nuke everything if needed. */
-				pmap_idcache_wbinv_all(pm);
-				pmap_tlb_flushID(pm);
-
-				/*
-				 * Roll back the previous PTE list,
-				 * and zero out the current PTE.
-				 */
-				for (cnt = 0;
-				     cnt < PMAP_REMOVE_CLEAN_LIST_SIZE; cnt++) {
-					*cleanlist[cnt].pte = 0;
+			if (l2pte_valid(pte) && pmap_is_current(pm)) {
+				if (total < PMAP_REMOVE_CLEAN_LIST_SIZE) {
+					total++;
+			   		if (is_exec) {
+        					cpu_idcache_wbinv_range(sva,
+						    PAGE_SIZE);
+						cpu_l2cache_wbinv_range(sva,
+						    PAGE_SIZE);
+						cpu_tlb_flushID_SE(sva);
+			   		} else if (is_refd) {
+						cpu_dcache_wbinv_range(sva,
+						    PAGE_SIZE);
+						cpu_l2cache_wbinv_range(sva,
+						    PAGE_SIZE);
+						cpu_tlb_flushD_SE(sva);
+					}
+				} else if (total == PMAP_REMOVE_CLEAN_LIST_SIZE) {
+					/* flushall will also only get set for
+					 * for a current pmap
+					 */
+					cpu_idcache_wbinv_all();
+					cpu_l2cache_wbinv_all();
+					flushall = 1;
+					total++;
 				}
-				*ptep = 0;
-				PTE_SYNC(ptep);
-				cleanlist_idx++;
-				flushall = 1;
-			} else {
-				*ptep = 0;
-				PTE_SYNC(ptep);
-					if (is_exec)
-						pmap_tlb_flushID_SE(pm, sva);
-					else
-					if (is_refd)
-						pmap_tlb_flushD_SE(pm, sva);
 			}
+			*ptep = 0;
+			PTE_SYNC(ptep);
 
 			sva += PAGE_SIZE;
 			ptep++;
 			mappings++;
-		}
-
-		/*
-		 * Deal with any left overs
-		 */
-		if (cleanlist_idx <= PMAP_REMOVE_CLEAN_LIST_SIZE) {
-			total += cleanlist_idx;
-			for (cnt = 0; cnt < cleanlist_idx; cnt++) {
-				vm_offset_t clva =
-				    cleanlist[cnt].va & ~1;
-				if (cleanlist[cnt].va & 1) {
-					pmap_idcache_wbinv_range(pm,
-					    clva, PAGE_SIZE);
-					pmap_tlb_flushID_SE(pm, clva);
-				} else {
-					pmap_dcache_wb_range(pm,
-					    clva, PAGE_SIZE, TRUE,
-					    FALSE);
-					pmap_tlb_flushD_SE(pm, clva);
-				}
-				*cleanlist[cnt].pte = 0;
-				PTE_SYNC_CURRENT(pm, cleanlist[cnt].pte);
-			}
-
-			if (total <= PMAP_REMOVE_CLEAN_LIST_SIZE)
-				cleanlist_idx = 0;
-			else {
-				/*
-				 * We are removing so much entries it's just
-				 * easier to flush the whole cache.
-				 */
-				cleanlist_idx = PMAP_REMOVE_CLEAN_LIST_SIZE + 1;
-				pmap_idcache_wbinv_all(pm);
-				flushall = 1;
-			}
 		}
 
 		pmap_free_l2_bucket(pm, l2b, mappings);
@@ -4046,9 +3933,6 @@ pmap_remove(pmap_t pm, vm_offset_t sva, vm_offset_t eva)
 		cpu_tlb_flushID();
  	PMAP_UNLOCK(pm);
 }
-
-
-
 
 /*
  * pmap_zero_page()
@@ -4082,29 +3966,29 @@ pmap_zero_page_generic(vm_paddr_t phys, int off, int size)
 	if (off || size != PAGE_SIZE) {
 		bzero(dstpg + off, size);
 		cpu_dcache_wbinv_range((vm_offset_t)(dstpg + off), size);
+		cpu_l2cache_wbinv_range((vm_offset_t)(dstpg + off), size);
 	} else {
 		bzero_page((vm_offset_t)dstpg);
 		cpu_dcache_wbinv_range((vm_offset_t)dstpg, PAGE_SIZE);
+		cpu_l2cache_wbinv_range((vm_offset_t)dstpg, PAGE_SIZE);
 	}
 #else
 
 	mtx_lock(&cmtx);
 	/*
-	 * Hook in the page, zero it, and purge the cache for that
-	 * zeroed page. Invalidate the TLB as needed.
+	 * Hook in the page, zero it, invalidate the TLB as needed.
+	 *
+	 * Note the temporary zero-page mapping must be a non-cached page in
+	 * order to work without corruption when write-allocate is enabled.
 	 */
-	*cdst_pte = L2_S_PROTO | phys |
-	    L2_S_PROT(PTE_KERNEL, VM_PROT_WRITE) | pte_l2_s_cache_mode;
-	PTE_SYNC(cdst_pte);
+	*cdst_pte = L2_S_PROTO | phys | L2_S_PROT(PTE_KERNEL, VM_PROT_WRITE);
 	cpu_tlb_flushD_SE(cdstp);
 	cpu_cpwait();
-	if (off || size != PAGE_SIZE) {
+	if (off || size != PAGE_SIZE)
 		bzero((void *)(cdstp + off), size);
-		cpu_dcache_wbinv_range(cdstp + off, size);
-	} else {
+	else
 		bzero_page(cdstp);
-		cpu_dcache_wbinv_range(cdstp, PAGE_SIZE);
-	}
+
 	mtx_unlock(&cmtx);
 #endif
 }
@@ -4381,6 +4265,8 @@ pmap_copy_page_generic(vm_paddr_t src, vm_paddr_t dst)
 	mtx_unlock(&cmtx);
 	cpu_dcache_inv_range(csrcp, PAGE_SIZE);
 	cpu_dcache_wbinv_range(cdstp, PAGE_SIZE);
+	cpu_l2cache_inv_range(csrcp, PAGE_SIZE);
+	cpu_l2cache_wbinv_range(cdstp, PAGE_SIZE);
 }
 #endif /* (ARM_MMU_GENERIC + ARM_MMU_SA1) != 0 */
 
@@ -4443,6 +4329,7 @@ pmap_copy_page(vm_page_t src, vm_page_t dst)
 #endif
 
 	cpu_dcache_wbinv_all();
+	cpu_l2cache_wbinv_all();
 	if (_arm_memcpy && PAGE_SIZE >= _min_memcpy_size &&
 	    _arm_memcpy((void *)VM_PAGE_TO_PHYS(dst), 
 	    (void *)VM_PAGE_TO_PHYS(src), PAGE_SIZE, IS_PHYSICAL) == 0)
@@ -4452,6 +4339,7 @@ pmap_copy_page(vm_page_t src, vm_page_t dst)
 	dstpg = arm_ptovirt(VM_PAGE_TO_PHYS(dst));
 	bcopy_page(srcpg, dstpg);
 	cpu_dcache_wbinv_range(dstpg, PAGE_SIZE);
+	cpu_l2cache_wbinv_range(dstpg, PAGE_SIZE);
 #else
 	pmap_copy_page_func(VM_PAGE_TO_PHYS(src), VM_PAGE_TO_PHYS(dst));
 #endif
@@ -4489,6 +4377,27 @@ pmap_page_exists_quick(pmap_t pmap, vm_page_t m)
 	return (FALSE);
 }
 
+/*
+ *	pmap_page_wired_mappings:
+ *
+ *	Return the number of managed mappings to the given physical page
+ *	that are wired.
+ */
+int
+pmap_page_wired_mappings(vm_page_t m)
+{
+	pv_entry_t pv;
+	int count;
+
+	count = 0;
+	if ((m->flags & PG_FICTITIOUS) != 0)
+		return (count);
+	mtx_assert(&vm_page_queue_mtx, MA_OWNED);
+	TAILQ_FOREACH(pv, &m->md.pv_list, pv_list)
+		if ((pv->pv_flags & PVF_WIRED) != 0)
+			count++;
+	return (count);
+}
 
 /*
  *	pmap_ts_referenced:
@@ -4566,11 +4475,14 @@ pmap_mincore(pmap_t pmap, vm_offset_t addr)
 }
 
 
-vm_offset_t
-pmap_addr_hint(vm_object_t obj, vm_offset_t addr, vm_size_t size)
+/*
+ *	Increase the starting virtual address of the given mapping if a
+ *	different alignment might result in more superpage mappings.
+ */
+void
+pmap_align_superpage(vm_object_t object, vm_ooffset_t offset,
+    vm_offset_t *addr, vm_size_t size)
 {
-
-	return(addr);
 }
 
 

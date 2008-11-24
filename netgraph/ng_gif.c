@@ -62,7 +62,7 @@
  * THIS SOFTWARE, EVEN IF WHISTLE COMMUNICATIONS IS ADVISED OF THE POSSIBILITY
  * OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netgraph/ng_gif.c,v 1.19 2005/06/10 16:49:21 brooks Exp $
+ * $FreeBSD: src/sys/netgraph/ng_gif.c,v 1.22 2008/10/23 15:53:51 des Exp $
  */
 
 /*
@@ -77,6 +77,7 @@
 #include <sys/errno.h>
 #include <sys/syslog.h>
 #include <sys/socket.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -240,7 +241,7 @@ ng_gif_attach(struct ifnet *ifp)
 	}
 
 	/* Allocate private data */
-	MALLOC(priv, priv_p, sizeof(*priv), M_NETGRAPH, M_NOWAIT | M_ZERO);
+	priv = malloc(sizeof(*priv), M_NETGRAPH, M_NOWAIT | M_ZERO);
 	if (priv == NULL) {
 		log(LOG_ERR, "%s: can't %s for %s\n",
 		    __func__, "allocate memory", ifp->if_xname);
@@ -502,7 +503,7 @@ ng_gif_shutdown(node_p node)
 		 * Assume the ifp has already been freed.
 		 */
 		NG_NODE_SET_PRIVATE(node, NULL);
-		FREE(priv, M_NETGRAPH);		
+		free(priv, M_NETGRAPH);		
 		NG_NODE_UNREF(node);	/* free node itself */
 		return (0);
 	}
@@ -540,6 +541,7 @@ ng_gif_disconnect(hook_p hook)
 static int
 ng_gif_mod_event(module_t mod, int event, void *data)
 {
+	VNET_ITERATOR_DECL(vnet_iter);
 	struct ifnet *ifp;
 	int error = 0;
 	int s;
@@ -560,10 +562,17 @@ ng_gif_mod_event(module_t mod, int event, void *data)
 
 		/* Create nodes for any already-existing gif interfaces */
 		IFNET_RLOCK();
-		TAILQ_FOREACH(ifp, &ifnet, if_link) {
-			if (ifp->if_type == IFT_GIF)
-				ng_gif_attach(ifp);
+		VNET_LIST_RLOCK();
+		VNET_FOREACH(vnet_iter) {
+			CURVNET_SET_QUIET(vnet_iter); /* XXX revisit quiet */
+			INIT_VNET_NET(curvnet);
+			TAILQ_FOREACH(ifp, &V_ifnet, if_link) {
+				if (ifp->if_type == IFT_GIF)
+					ng_gif_attach(ifp);
+			}
+			CURVNET_RESTORE();
 		}
+		VNET_LIST_RUNLOCK();
 		IFNET_RUNLOCK();
 		break;
 

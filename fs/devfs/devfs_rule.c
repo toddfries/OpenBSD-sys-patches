@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/devfs/devfs_rule.c,v 1.23 2006/11/06 13:41:56 rwatson Exp $
+ * $FreeBSD: src/sys/fs/devfs/devfs_rule.c,v 1.25 2008/06/22 14:34:38 gonzo Exp $
  */
 
 /*
@@ -527,6 +527,7 @@ devfs_rule_match(struct devfs_krule *dk, struct devfs_dirent *de)
 {
 	struct devfs_rule *dr = &dk->dk_rule;
 	struct cdev *dev;
+	struct cdevsw *dsw;
 
 	dev = devfs_rule_getdev(de);
 	/*
@@ -540,13 +541,19 @@ devfs_rule_match(struct devfs_krule *dk, struct devfs_dirent *de)
 	 * They're actually testing to see whether the condition does
 	 * *not* match, since the default is to assume the rule should
 	 * be run (such as if there are no conditions).
-	 *
-	 * XXX: lacks threadref on dev
 	 */
-	if (dr->dr_icond & DRC_DSWFLAGS)
-		if (dev == NULL ||
-		    (dev->si_devsw->d_flags & dr->dr_dswflags) == 0)
+	if (dr->dr_icond & DRC_DSWFLAGS) {
+		if (dev == NULL)
 			return (0);
+		dsw = dev_refthread(dev);
+		if (dsw == NULL)
+			return (0);
+		if ((dsw->d_flags & dr->dr_dswflags) == 0) {
+			dev_relthread(dev);
+			return (0);
+		}
+		dev_relthread(dev);
+	}
 	if (dr->dr_icond & DRC_PATHPTRN)
 		if (!devfs_rule_matchpath(dk, de))
 			return (0);
@@ -728,15 +735,15 @@ devfs_ruleset_use(devfs_rsnum rsnum, struct devfs_mount *dm)
 {
 	struct devfs_ruleset *cds, *ds;
 
-	ds = devfs_ruleset_bynum(rsnum);
-	if (ds == NULL)
-		ds = devfs_ruleset_create(rsnum);
 	if (dm->dm_ruleset != 0) {
 		cds = devfs_ruleset_bynum(dm->dm_ruleset);
 		--cds->ds_refcount;
 		devfs_ruleset_reap(cds);
 	}
 
+	ds = devfs_ruleset_bynum(rsnum);
+	if (ds == NULL)
+		ds = devfs_ruleset_create(rsnum);
 	/* These should probably be made atomic somehow. */
 	++ds->ds_refcount;
 	dm->dm_ruleset = rsnum;

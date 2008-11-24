@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/linux32/linux32_machdep.c,v 1.45 2007/07/04 23:06:43 peter Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/linux32/linux32_machdep.c,v 1.50 2008/11/11 14:55:59 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -694,9 +694,8 @@ linux_clone(struct thread *td, struct linux_clone_args *args)
 #endif
 			td2->td_pcb->pcb_gsbase = (register_t)info.base_addr;
 			td2->td_pcb->pcb_gs32sd = sd;
-			td2->td_pcb->pcb_gs32p = &gdt[GUGS32_SEL];
 			td2->td_pcb->pcb_gs = GSEL(GUGS32_SEL, SEL_UPL);
-			td2->td_pcb->pcb_flags |= PCB_32BIT;
+			td2->td_pcb->pcb_flags |= PCB_GS32BIT | PCB_32BIT;
 		}
 	}
 
@@ -907,21 +906,22 @@ linux_mmap_common(struct thread *td, struct l_mmap_argv *linux_args)
 			PROC_UNLOCK(p);
 		}
 
-		/* This gives us our maximum stack size */
-		if (linux_args->len > STACK_SIZE - GUARD_SIZE)
-			bsd_args.len = linux_args->len;
-		else
-			bsd_args.len  = STACK_SIZE - GUARD_SIZE;
-
 		/*
-		 * This gives us a new BOS.  If we're using VM_STACK, then
-		 * mmap will just map the top SGROWSIZ bytes, and let
-		 * the stack grow down to the limit at BOS.  If we're
-		 * not using VM_STACK we map the full stack, since we
-		 * don't have a way to autogrow it.
+		 * This gives us our maximum stack size and a new BOS.
+		 * If we're using VM_STACK, then mmap will just map
+		 * the top SGROWSIZ bytes, and let the stack grow down
+		 * to the limit at BOS.  If we're not using VM_STACK
+		 * we map the full stack, since we don't have a way
+		 * to autogrow it.
 		 */
-		bsd_args.addr = (caddr_t)PTRIN(linux_args->addr) -
-		    bsd_args.len;
+		if (linux_args->len > STACK_SIZE - GUARD_SIZE) {
+			bsd_args.addr = (caddr_t)PTRIN(linux_args->addr);
+			bsd_args.len = linux_args->len;
+		} else {
+			bsd_args.addr = (caddr_t)PTRIN(linux_args->addr) -
+			    (STACK_SIZE - GUARD_SIZE - linux_args->len);
+			bsd_args.len = STACK_SIZE - GUARD_SIZE;
+		}
 	} else {
 		bsd_args.addr = (caddr_t)PTRIN(linux_args->addr);
 		bsd_args.len  = linux_args->len;
@@ -977,33 +977,20 @@ linux_iopl(struct thread *td, struct linux_iopl_args *args)
 int
 linux_pipe(struct thread *td, struct linux_pipe_args *args)
 {
-	int pip[2];
 	int error;
-	register_t reg_rdx;
+	int fildes[2];
 
 #ifdef DEBUG
 	if (ldebug(pipe))
 		printf(ARGS(pipe, "*"));
 #endif
 
-	reg_rdx = td->td_retval[1];
-	error = pipe(td, 0);
-	if (error) {
-		td->td_retval[1] = reg_rdx;
+	error = kern_pipe(td, fildes);
+	if (error)
 		return (error);
-	}
 
-	pip[0] = td->td_retval[0];
-	pip[1] = td->td_retval[1];
-	error = copyout(pip, args->pipefds, 2 * sizeof(int));
-	if (error) {
-		td->td_retval[1] = reg_rdx;
-		return (error);
-	}
-
-	td->td_retval[1] = reg_rdx;
-	td->td_retval[0] = 0;
-	return (0);
+	/* XXX: Close descriptors on error. */
+	return (copyout(fildes, args->pipefds, sizeof fildes));
 }
 
 int
@@ -1351,9 +1338,8 @@ linux_set_thread_area(struct thread *td,
 
 	critical_enter();
 	td->td_pcb->pcb_gsbase = (register_t)info.base_addr;
-	td->td_pcb->pcb_gs32sd = gdt[GUGS32_SEL] = sd;
-	td->td_pcb->pcb_gs32p = &gdt[GUGS32_SEL];
-	td->td_pcb->pcb_flags |= PCB_32BIT;
+	td->td_pcb->pcb_gs32sd = *PCPU_GET(gs32p) = sd;
+	td->td_pcb->pcb_flags |= PCB_32BIT | PCB_GS32BIT;
 	wrmsr(MSR_KGSBASE, td->td_pcb->pcb_gsbase);
 	critical_exit();
 

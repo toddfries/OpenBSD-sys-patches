@@ -31,7 +31,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/wi/if_wivar.h,v 1.32 2008/04/20 20:35:38 sam Exp $
+ * $FreeBSD: src/sys/dev/wi/if_wivar.h,v 1.33 2008/07/28 17:00:37 imp Exp $
  */
 
 /*
@@ -87,6 +87,8 @@ struct wi_softc	{
 #define	WI_SYMBOL	3
 	int			sc_pri_firmware_ver;	/* Primary firmware */
 	int			sc_sta_firmware_ver;	/* Station firmware */
+	unsigned int		sc_nic_id;		/* Type of NIC */
+	char *			sc_nic_name;
 
 	int			wi_bus_type;	/* Bus attachment type */
 	struct resource *	local;

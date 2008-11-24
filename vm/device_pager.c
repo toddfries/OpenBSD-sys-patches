@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/device_pager.c,v 1.84 2007/08/18 16:41:31 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/device_pager.c,v 1.86 2008/09/26 14:50:49 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -146,10 +146,14 @@ dev_pager_alloc(void *handle, vm_ooffset_t size, vm_prot_t prot, vm_ooffset_t fo
 	object = vm_pager_object_lookup(&dev_pager_object_list, handle);
 	if (object == NULL) {
 		/*
-		 * Allocate object and associate it with the pager.
+		 * Allocate object and associate it with the pager.  Initialize
+		 * the object's pg_color based upon the physical address of the
+		 * device's memory.
 		 */
 		mtx_unlock(&dev_pager_mtx);
 		object1 = vm_object_allocate(OBJT_DEVICE, pindex);
+		object1->flags |= OBJ_COLORED;
+		object1->pg_color = atop(paddr) - OFF_TO_IDX(off - PAGE_SIZE);
 		mtx_lock(&dev_pager_mtx);
 		object = vm_pager_object_lookup(&dev_pager_object_list, handle);
 		if (object != NULL) {
@@ -210,6 +214,8 @@ dev_pager_getpages(object, m, count, reqpage)
 	int i, ret;
 	int prot;
 	struct cdevsw *csw;
+	struct thread *td;
+	struct file *fpop;
 
 	VM_OBJECT_LOCK_ASSERT(object, MA_OWNED);
 	dev = object->handle;
@@ -220,8 +226,12 @@ dev_pager_getpages(object, m, count, reqpage)
 		panic("dev_pager_getpage: no cdevsw");
 	prot = PROT_READ;	/* XXX should pass in? */
 
+	td = curthread;
+	fpop = td->td_fpop;
+	td->td_fpop = NULL;
 	ret = (*csw->d_mmap)(dev, (vm_offset_t)offset << PAGE_SHIFT, &paddr, prot);
 	KASSERT(ret == 0, ("dev_pager_getpage: map function returns error"));
+	td->td_fpop = fpop;
 	dev_relthread(dev);
 
 	if ((m[reqpage]->flags & PG_FICTITIOUS) != 0) {

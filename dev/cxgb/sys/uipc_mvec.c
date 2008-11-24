@@ -29,7 +29,7 @@
  ***************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/sys/uipc_mvec.c,v 1.25 2008/02/23 01:06:17 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/sys/uipc_mvec.c,v 1.27 2008/09/25 06:46:28 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -45,15 +45,8 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/sys/uipc_mvec.c,v 1.25 2008/02/23 01:06:17 
 
 #include <machine/bus.h>
 
-
-
-#ifdef CONFIG_DEFINED
 #include <cxgb_include.h>
 #include <sys/mvec.h>
-#else
-#include <dev/cxgb/cxgb_include.h>
-#include <dev/cxgb/sys/mvec.h>
-#endif
 
 #include "opt_zero.h"
 
@@ -412,8 +405,13 @@ mb_free_ext_fast(struct mbuf_iovec *mi, int type, int idx)
 	case EXT_EXTREF:
 		KASSERT(mi->mi_ext.ext_free != NULL,
 		    ("%s: ext_free not set", __func__));
+#if __FreeBSD_version >= 800016
 		(*(mi->mi_ext.ext_free))(mi->mi_ext.ext_arg1,
 		    mi->mi_ext.ext_arg2);
+#else
+		(*(mi->mi_ext.ext_free))(mi->mi_ext.ext_buf,
+		    mi->mi_ext.ext_args);
+#endif
 		break;
 	default:
 		dump_mi(mi);

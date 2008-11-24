@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia64/sal.c,v 1.15 2005/08/13 21:08:32 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia64/sal.c,v 1.17 2008/09/28 18:34:14 marius Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -80,7 +80,6 @@ setup_ipi_vectors(int ceil)
 
 	ipi_vector[IPI_HIGH_FP] = ceil - 0x30;
 	ipi_vector[IPI_MCA_CMCV] = ceil - 0x30 + 1;
-	ipi_vector[IPI_TEST] = ceil - 0x30 + 2;
 }
 
 void
@@ -96,7 +95,7 @@ ia64_sal_init(void)
 	if (sal_systbl == NULL)
 		return;
 
-	if (memcmp(sal_systbl->sal_signature, SAL_SIGNATURE, 4)) {
+	if (bcmp(sal_systbl->sal_signature, SAL_SIGNATURE, 4)) {
 		printf("Bad signature for SAL System Table\n");
 		return;
 	}

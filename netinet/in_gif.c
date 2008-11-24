@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/in_gif.c,v 1.38 2007/10/07 20:44:22 silby Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/in_gif.c,v 1.42 2008/11/19 09:39:34 zec Exp $");
 
 #include "opt_mrouting.h"
 #include "opt_inet.h"
@@ -45,8 +45,8 @@ __FBSDID("$FreeBSD: src/sys/netinet/in_gif.c,v 1.38 2007/10/07 20:44:22 silby Ex
 #include <sys/kernel.h>
 #include <sys/sysctl.h>
 #include <sys/protosw.h>
-
 #include <sys/malloc.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -85,13 +85,16 @@ struct protosw in_gif_protosw = {
 	.pr_usrreqs =		&rip_usrreqs
 };
 
-static int ip_gif_ttl = GIF_TTL;
-SYSCTL_INT(_net_inet_ip, IPCTL_GIF_TTL, gifttl, CTLFLAG_RW,
-	&ip_gif_ttl,	0, "");
+#ifdef VIMAGE_GLOBALS
+extern int ip_gif_ttl;
+#endif
+SYSCTL_V_INT(V_NET, vnet_gif, _net_inet_ip, IPCTL_GIF_TTL, gifttl,
+	CTLFLAG_RW, ip_gif_ttl,	0, "");
 
 int
 in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 {
+	INIT_VNET_GIF(ifp->if_vnet);
 	struct gif_softc *sc = ifp->if_softc;
 	struct sockaddr_in *dst = (struct sockaddr_in *)&sc->gif_ro.ro_dst;
 	struct sockaddr_in *sin_src = (struct sockaddr_in *)sc->gif_psrc;
@@ -176,7 +179,7 @@ in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 	}
 	iphdr.ip_p = proto;
 	/* version will be set in ip_output() */
-	iphdr.ip_ttl = ip_gif_ttl;
+	iphdr.ip_ttl = V_ip_gif_ttl;
 	iphdr.ip_len = m->m_pkthdr.len + sizeof(struct ip);
 	ip_ecn_ingress((ifp->if_flags & IFF_LINK1) ? ECN_ALLOWED : ECN_NOCARE,
 		       &iphdr.ip_tos, &tos);
@@ -190,6 +193,8 @@ in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 		return ENOBUFS;
 	}
 	bcopy(&iphdr, mtod(m, struct ip *), sizeof(struct ip));
+
+	M_SETFIB(m, sc->gif_fibnum);
 
 	if (dst->sin_family != sin_dst->sin_family ||
 	    dst->sin_addr.s_addr != sin_dst->sin_addr.s_addr) {
@@ -208,7 +213,7 @@ in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 	}
 
 	if (sc->gif_ro.ro_rt == NULL) {
-		rtalloc_ign(&sc->gif_ro, 0);
+		in_rtalloc_ign(&sc->gif_ro, 0, sc->gif_fibnum);
 		if (sc->gif_ro.ro_rt == NULL) {
 			m_freem(m);
 			return ENETUNREACH;
@@ -239,6 +244,7 @@ in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 void
 in_gif_input(struct mbuf *m, int off)
 {
+	INIT_VNET_INET(curvnet);
 	struct ifnet *gifp = NULL;
 	struct gif_softc *sc;
 	struct ip *ip;
@@ -252,14 +258,14 @@ in_gif_input(struct mbuf *m, int off)
 	sc = (struct gif_softc *)encap_getarg(m);
 	if (sc == NULL) {
 		m_freem(m);
-		ipstat.ips_nogif++;
+		V_ipstat.ips_nogif++;
 		return;
 	}
 
 	gifp = GIF2IFP(sc);
 	if (gifp == NULL || (gifp->if_flags & IFF_UP) == 0) {
 		m_freem(m);
-		ipstat.ips_nogif++;
+		V_ipstat.ips_nogif++;
 		return;
 	}
 
@@ -319,7 +325,7 @@ in_gif_input(struct mbuf *m, int off)
  		break;	
 
 	default:
-		ipstat.ips_nogif++;
+		V_ipstat.ips_nogif++;
 		m_freem(m);
 		return;
 	}
@@ -333,6 +339,7 @@ in_gif_input(struct mbuf *m, int off)
 static int
 gif_validate4(const struct ip *ip, struct gif_softc *sc, struct ifnet *ifp)
 {
+	INIT_VNET_INET(curvnet);
 	struct sockaddr_in *src, *dst;
 	struct in_ifaddr *ia4;
 
@@ -352,7 +359,7 @@ gif_validate4(const struct ip *ip, struct gif_softc *sc, struct ifnet *ifp)
 		return 0;
 	}
 	/* reject packets with broadcast on source */
-	TAILQ_FOREACH(ia4, &in_ifaddrhead, ia_link) {
+	TAILQ_FOREACH(ia4, &V_in_ifaddrhead, ia_link) {
 		if ((ia4->ia_ifa.ifa_ifp->if_flags & IFF_BROADCAST) == 0)
 			continue;
 		if (ip->ip_src.s_addr == ia4->ia_broadaddr.sin_addr.s_addr)
@@ -368,7 +375,9 @@ gif_validate4(const struct ip *ip, struct gif_softc *sc, struct ifnet *ifp)
 		sin.sin_family = AF_INET;
 		sin.sin_len = sizeof(struct sockaddr_in);
 		sin.sin_addr = ip->ip_src;
-		rt = rtalloc1((struct sockaddr *)&sin, 0, 0UL);
+		/* XXX MRT  check for the interface we would use on output */
+		rt = in_rtalloc1((struct sockaddr *)&sin, 0,
+		    0UL, sc->gif_fibnum);
 		if (!rt || rt->rt_ifp != ifp) {
 #if 0
 			log(LOG_WARNING, "%s: packet from 0x%x dropped "

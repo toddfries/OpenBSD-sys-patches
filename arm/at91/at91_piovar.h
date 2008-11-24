@@ -22,7 +22,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* $FreeBSD: src/sys/arm/at91/at91_piovar.h,v 1.2 2006/07/14 22:22:57 imp Exp $ */
+/* $FreeBSD: src/sys/arm/at91/at91_piovar.h,v 1.3 2008/08/19 22:17:14 imp Exp $ */
 
 #ifndef ARM_AT91_AT91_PIOVAR_H
 #define ARM_AT91_AT91_PIOVAR_H
@@ -35,5 +35,9 @@ void at91_pio_gpio_output(uint32_t pio, uint32_t output_enable_mask,
 	int use_pullup);
 void at91_pio_gpio_set(uint32_t pio, uint32_t data_mask);
 void at91_pio_gpio_clear(uint32_t pio, uint32_t data_mask);
+uint8_t at91_pio_gpio_get(uint32_t pio, uint32_t data_mask);
+void at91_pio_gpio_set_deglitch(uint32_t pio, uint32_t data_mask, int use_deglitch);
+void at91_pio_gpio_set_interrupt(uint32_t pio, uint32_t data_mask, int enable_interrupt);
+uint32_t at91_pio_gpio_clear_interrupt(uint32_t pio);
 
 #endif /* ARM_AT91_AT91_PIOVAR_H */

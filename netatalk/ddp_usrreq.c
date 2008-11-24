@@ -47,7 +47,7 @@
  *	+1-313-764-2278
  *	netatalk@umich.edu
  *
- * $FreeBSD: src/sys/netatalk/ddp_usrreq.c,v 1.55 2007/05/11 10:20:49 rwatson Exp $
+ * $FreeBSD: src/sys/netatalk/ddp_usrreq.c,v 1.56 2008/07/04 00:21:38 rwatson Exp $
  */
 
 #include <sys/param.h>
@@ -267,9 +267,9 @@ ddp_init(void)
 	mtx_init(&atintrq2.ifq_mtx, "at2_inq", NULL, MTX_DEF);
 	mtx_init(&aarpintrq.ifq_mtx, "aarp_inq", NULL, MTX_DEF);
 	DDP_LIST_LOCK_INIT();
-	netisr_register(NETISR_ATALK1, at1intr, &atintrq1, NETISR_MPSAFE);
-	netisr_register(NETISR_ATALK2, at2intr, &atintrq2, NETISR_MPSAFE);
-	netisr_register(NETISR_AARP, aarpintr, &aarpintrq, NETISR_MPSAFE);
+	netisr_register(NETISR_ATALK1, at1intr, &atintrq1, 0);
+	netisr_register(NETISR_ATALK2, at2intr, &atintrq2, 0);
+	netisr_register(NETISR_AARP, aarpintr, &aarpintrq, 0);
 }
 
 #if 0

@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/cpufunc.h,v 1.145 2007/08/09 20:14:35 njl Exp $
+ * $FreeBSD: src/sys/i386/include/cpufunc.h,v 1.150 2008/10/19 01:27:40 kmacy Exp $
  */
 
 /*
@@ -40,6 +40,17 @@
 
 #ifndef _SYS_CDEFS_H_
 #error this file needs sys/cdefs.h as a prerequisite
+#endif
+
+#ifdef XEN
+extern void xen_cli(void);
+extern void xen_sti(void);
+extern u_int xen_rcr2(void);
+extern void xen_load_cr3(u_int data);
+extern void xen_tlb_flush(void);
+extern void xen_invlpg(u_int addr);
+extern int xen_save_and_cli(void);
+extern void xen_restore_flags(u_int eflags);
 #endif
 
 struct region_descriptor;
@@ -81,7 +92,11 @@ bsrl(u_int mask)
 static __inline void
 disable_intr(void)
 {
+#ifdef XEN
+	xen_cli();
+#else	
 	__asm __volatile("cli" : : : "memory");
+#endif
 }
 
 static __inline void
@@ -103,7 +118,24 @@ cpuid_count(u_int ax, u_int cx, u_int *p)
 static __inline void
 enable_intr(void)
 {
+#ifdef XEN
+	xen_sti();
+#else
 	__asm __volatile("sti");
+#endif
+}
+
+static inline void
+cpu_monitor(const void *addr, int extensions, int hints)
+{
+	__asm __volatile("monitor;"
+	    : :"a" (addr), "c" (extensions), "d"(hints));
+}
+
+static inline void
+cpu_mwait(int extensions, int hints)
+{
+	__asm __volatile("mwait;" : :"a" (hints), "c" (extensions));
 }
 
 #ifdef _KERNEL
@@ -392,6 +424,9 @@ rcr2(void)
 {
 	u_int	data;
 
+#ifdef XEN
+	return (xen_rcr2());
+#endif
 	__asm __volatile("movl %%cr2,%0" : "=r" (data));
 	return (data);
 }
@@ -399,8 +434,11 @@ rcr2(void)
 static __inline void
 load_cr3(u_int data)
 {
-
+#ifdef XEN
+	xen_load_cr3(data);
+#else
 	__asm __volatile("movl %0,%%cr3" : : "r" (data) : "memory");
+#endif
 }
 
 static __inline u_int
@@ -433,8 +471,11 @@ rcr4(void)
 static __inline void
 invltlb(void)
 {
-
+#ifdef XEN
+	xen_tlb_flush();
+#else	
 	load_cr3(rcr3());
+#endif
 }
 
 /*
@@ -445,7 +486,11 @@ static __inline void
 invlpg(u_int addr)
 {
 
+#ifdef XEN
+	xen_invlpg(addr);
+#else
 	__asm __volatile("invlpg %0" : : "m" (*(char *)addr) : "memory");
+#endif
 }
 
 static __inline u_int
@@ -651,15 +696,23 @@ intr_disable(void)
 {
 	register_t eflags;
 
+#ifdef XEN
+	eflags = xen_save_and_cli();
+#else 	
 	eflags = read_eflags();
 	disable_intr();
+#endif	
 	return (eflags);
 }
 
 static __inline void
 intr_restore(register_t eflags)
 {
+#ifdef XEN
+	xen_restore_flags(eflags);
+#else
 	write_eflags(eflags);
+#endif
 }
 
 #else /* !(__GNUCLIKE_ASM && __CC_SUPPORTS___INLINE) */
@@ -734,5 +787,10 @@ void	wrmsr(u_int msr, uint64_t newval);
 #endif	/* __GNUCLIKE_ASM && __CC_SUPPORTS___INLINE */
 
 void    reset_dbregs(void);
+
+#ifdef _KERNEL
+int	rdmsr_safe(u_int msr, uint64_t *val);
+int	wrmsr_safe(u_int msr, uint64_t newval);
+#endif
 
 #endif /* !_MACHINE_CPUFUNC_H_ */

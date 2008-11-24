@@ -29,7 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/smbfs/smbfs_io.c,v 1.41 2007/06/04 21:45:16 attilio Exp $
+ * $FreeBSD: src/sys/fs/smbfs/smbfs_io.c,v 1.45 2008/10/10 21:23:50 attilio Exp $
  *
  */
 #include <sys/param.h>
@@ -203,24 +203,24 @@ smbfs_readvnode(struct vnode *vp, struct uio *uiop, struct ucred *cred)
 		return EFBIG;*/
 	td = uiop->uio_td;
 	if (vp->v_type == VDIR) {
-		lks = LK_EXCLUSIVE;/*lockstatus(vp->v_vnlock, td);*/
+		lks = LK_EXCLUSIVE;	/* lockstatus(vp->v_vnlock); */
 		if (lks == LK_SHARED)
-			vn_lock(vp, LK_UPGRADE | LK_RETRY, td);
+			vn_lock(vp, LK_UPGRADE | LK_RETRY);
 		error = smbfs_readvdir(vp, uiop, cred);
 		if (lks == LK_SHARED)
-			vn_lock(vp, LK_DOWNGRADE | LK_RETRY, td);
+			vn_lock(vp, LK_DOWNGRADE | LK_RETRY);
 		return error;
 	}
 
 /*	biosize = SSTOCN(smp->sm_share)->sc_txmax;*/
 	if (np->n_flag & NMODIFIED) {
 		smbfs_attr_cacheremove(vp);
-		error = VOP_GETATTR(vp, &vattr, cred, td);
+		error = VOP_GETATTR(vp, &vattr, cred);
 		if (error)
 			return error;
 		np->n_mtime.tv_sec = vattr.va_mtime.tv_sec;
 	} else {
-		error = VOP_GETATTR(vp, &vattr, cred, td);
+		error = VOP_GETATTR(vp, &vattr, cred);
 		if (error)
 			return error;
 		if (np->n_mtime.tv_sec != vattr.va_mtime.tv_sec) {
@@ -269,7 +269,7 @@ smbfs_writevnode(struct vnode *vp, struct uio *uiop,
 			 * File size can be changed by another client
 			 */
 			smbfs_attr_cacheremove(vp);
-			error = VOP_GETATTR(vp, &vattr, cred, td);
+			error = VOP_GETATTR(vp, &vattr, cred);
 			if (error) return (error);
 #endif
 			uiop->uio_offset = np->n_size;
@@ -690,7 +690,7 @@ smbfs_vinvalbuf(struct vnode *vp, struct thread *td)
 		VM_OBJECT_UNLOCK(vp->v_bufobj.bo_object);
 	}
 
-	error = vinvalbuf(vp, V_SAVE, td, PCATCH, 0);
+	error = vinvalbuf(vp, V_SAVE, PCATCH, 0);
 	while (error) {
 		if (error == ERESTART || error == EINTR) {
 			np->n_flag &= ~NFLUSHINPROG;
@@ -700,7 +700,7 @@ smbfs_vinvalbuf(struct vnode *vp, struct thread *td)
 			}
 			return EINTR;
 		}
-		error = vinvalbuf(vp, V_SAVE, td, PCATCH, 0);
+		error = vinvalbuf(vp, V_SAVE, PCATCH, 0);
 	}
 	np->n_flag &= ~(NMODIFIED | NFLUSHINPROG);
 	if (np->n_flag & NFLUSHWANT) {

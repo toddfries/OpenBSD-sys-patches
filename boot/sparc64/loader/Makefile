@@ -1,4 +1,6 @@
-# $FreeBSD: src/sys/boot/sparc64/loader/Makefile,v 1.20 2006/03/17 18:54:36 ru Exp $
+# $FreeBSD: src/sys/boot/sparc64/loader/Makefile,v 1.21 2008/06/25 21:33:28 ru Exp $
+
+WITHOUT_SSP=
 
 .include <bsd.own.mk>
 

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netinet/libalias/alias_local.h,v 1.34 2006/12/15 12:50:06 piso Exp $
+ * $FreeBSD: src/sys/netinet/libalias/alias_local.h,v 1.36 2008/06/01 18:34:58 mav Exp $
  */
 
 /*
@@ -60,7 +60,7 @@
 #endif
 
 /* Sizes of input and output link tables */
-#define LINK_TABLE_OUT_SIZE         101
+#define LINK_TABLE_OUT_SIZE        4001
 #define LINK_TABLE_IN_SIZE         4001
 
 struct proxy_entry;
@@ -109,8 +109,6 @@ struct libalias {
 	int		lastCleanupTime;	/* Last time
 						 * IncrementalCleanup()  */
 	/* was called                      */
-
-	int		houseKeepingResidual;	/* used by HouseKeeping()          */
 
 	int		deleteAllLinks;	/* If equal to zero, DeleteLink()  */
 	/* will not remove permanent links */
@@ -298,9 +296,10 @@ u_short		GetProxyPort(struct alias_link *_lnk);
 void		SetProxyPort(struct alias_link *_lnk, u_short _port);
 void		SetAckModified(struct alias_link *_lnk);
 int		GetAckModified(struct alias_link *_lnk);
-int		GetDeltaAckIn(struct ip *_pip, struct alias_link *_lnk);
-int		GetDeltaSeqOut(struct ip *_pip, struct alias_link *_lnk);
-void		AddSeq    (struct ip *_pip, struct alias_link *_lnk, int _delta);
+int		GetDeltaAckIn(u_long, struct alias_link *_lnk);
+int             GetDeltaSeqOut(u_long, struct alias_link *lnk);
+void            AddSeq(struct alias_link *lnk, int delta, u_int ip_hl, 
+		    u_short ip_len, u_long th_seq, u_int th_off);
 void		SetExpire (struct alias_link *_lnk, int _expire);
 void		ClearCheckNewLink(struct libalias *la);
 void		SetProtocolFlags(struct alias_link *_lnk, int _pflags);
@@ -320,8 +319,9 @@ void		HouseKeeping(struct libalias *);
 
 /* Transparent proxy routines */
 int
-ProxyCheck(struct libalias *la, struct ip *_pip, struct in_addr *_proxy_server_addr,
-    u_short * _proxy_server_port);
+ProxyCheck(struct libalias *la, struct in_addr *proxy_server_addr,
+    u_short * proxy_server_port, struct in_addr src_addr, 
+    struct in_addr dst_addr, u_short dst_port, u_char ip_p);
 void
 ProxyModify(struct libalias *la, struct alias_link *_lnk, struct ip *_pip,
     int _maxpacketsize, int _proxy_type);

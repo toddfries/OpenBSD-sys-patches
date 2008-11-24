@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/sppp/Makefile,v 1.7 2005/10/14 23:30:15 yar Exp $
+# $FreeBSD: src/sys/modules/sppp/Makefile,v 1.8 2008/09/01 23:59:00 imp Exp $
 
 .PATH: ${.CURDIR}/../../net
 
@@ -17,13 +17,13 @@ EXPORT_SYMS=	sppp_attach	\
 
 .if !defined(KERNBUILDDIR)
 opt_inet.h:
-	echo "#define INET 1" > opt_inet.h
+	echo "#define INET 1" > ${.TARGET}
 
 opt_inet6.h:
-	echo "#define INET6 1" > opt_inet6.h
+	echo "#define INET6 1" > ${.TARGET}
 
 opt_ipx.h:
-	echo "#define IPX 1" > opt_ipx.h
+	echo "#define IPX 1" > ${.TARGET}
 .endif
 
 .include <bsd.kmod.mk>

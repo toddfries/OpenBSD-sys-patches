@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/cd9660/cd9660_node.c,v 1.56 2007/02/11 13:54:25 rodrigc Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/cd9660/cd9660_node.c,v 1.59 2008/11/18 23:13:40 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -72,7 +72,6 @@ cd9660_inactive(ap)
 	if (prtactive && vrefcnt(vp) != 0)
 		vprint("cd9660_inactive: pushing active", vp);
 
-	ip->i_flag = 0;
 	/*
 	 * If we are done with the inode, reclaim it
 	 * so that it can be reused immediately.
@@ -111,7 +110,7 @@ cd9660_reclaim(ap)
 	 */
 	if (ip->i_mnt->im_devvp)
 		vrele(ip->i_mnt->im_devvp);
-	FREE(vp->v_data, M_ISOFSNODE);
+	free(vp->v_data, M_ISOFSNODE);
 	vp->v_data = NULL;
 	return (0);
 }
@@ -156,24 +155,24 @@ cd9660_defattr(isodir, inop, bp, ftype)
 
 		if (isonum_711(ap->version) == 1) {
 			if (!(ap->perm[0]&0x40))
-				inop->inode.iso_mode |= VEXEC >> 6;
+				inop->inode.iso_mode |= S_IXOTH;
 			if (!(ap->perm[0]&0x10))
-				inop->inode.iso_mode |= VREAD >> 6;
+				inop->inode.iso_mode |= S_IROTH;
 			if (!(ap->perm[0]&4))
-				inop->inode.iso_mode |= VEXEC >> 3;
+				inop->inode.iso_mode |= S_IXGRP;
 			if (!(ap->perm[0]&1))
-				inop->inode.iso_mode |= VREAD >> 3;
+				inop->inode.iso_mode |= S_IRGRP;
 			if (!(ap->perm[1]&0x40))
-				inop->inode.iso_mode |= VEXEC;
+				inop->inode.iso_mode |= S_IXUSR;
 			if (!(ap->perm[1]&0x10))
-				inop->inode.iso_mode |= VREAD;
+				inop->inode.iso_mode |= S_IRUSR;
 			inop->inode.iso_uid = isonum_723(ap->owner); /* what about 0? */
 			inop->inode.iso_gid = isonum_723(ap->group); /* what about 0? */
 		} else
 			ap = NULL;
 	}
 	if (!ap) {
-		inop->inode.iso_mode |= VREAD|VEXEC|(VREAD|VEXEC)>>3|(VREAD|VEXEC)>>6;
+		inop->inode.iso_mode |= S_IRUSR|S_IXUSR|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH;
 		inop->inode.iso_uid = (uid_t)0;
 		inop->inode.iso_gid = (gid_t)0;
 	}

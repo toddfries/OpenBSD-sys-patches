@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/_rwlock.h,v 1.4 2007/06/26 21:31:56 attilio Exp $
+ * $FreeBSD: src/sys/sys/_rwlock.h,v 1.5 2008/05/15 20:10:06 attilio Exp $
  */
 
 #ifndef _SYS__RWLOCK_H_
@@ -38,7 +38,6 @@
 struct rwlock {
 	struct lock_object	lock_object;
 	volatile uintptr_t	rw_lock;
-	volatile unsigned	rw_recurse;
 };
 
 #endif /* !_SYS__RWLOCK_H_ */

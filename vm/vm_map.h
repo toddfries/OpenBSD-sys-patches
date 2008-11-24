@@ -57,7 +57,7 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  *
- * $FreeBSD: src/sys/vm/vm_map.h,v 1.120 2007/08/20 12:05:45 kib Exp $
+ * $FreeBSD: src/sys/vm/vm_map.h,v 1.124 2008/05/10 18:55:35 alc Exp $
  */
 
 /*
@@ -233,7 +233,6 @@ vm_map_modflags(vm_map_t map, vm_flags_t set, vm_flags_t clear)
  */
 struct vmspace {
 	struct vm_map vm_map;	/* VM address map */
-	struct pmap vm_pmap;	/* private physical map */
 	struct shmmap_state *vm_shm;	/* SYS5 shared memory private data XXX */
 	segsz_t vm_swrss;	/* resident set size before last swap */
 	segsz_t vm_tsize;	/* text size (pages) XXX */
@@ -243,6 +242,12 @@ struct vmspace {
 	caddr_t vm_daddr;	/* (c) user virtual address of data */
 	caddr_t vm_maxsaddr;	/* user VA at max stack growth */
 	int	vm_refcnt;	/* number of references */
+	/*
+	 * Keep the PMAP last, so that CPU-specific variations of that
+	 * structure on a single architecture don't result in offset
+	 * variations of the machine-independent fields in the vmspace.
+	 */
+	struct pmap vm_pmap;	/* private physical map */
 };
 
 #ifdef	_KERNEL
@@ -272,7 +277,7 @@ int _vm_map_trylock(vm_map_t map, const char *file, int line);
 int _vm_map_trylock_read(vm_map_t map, const char *file, int line);
 int _vm_map_lock_upgrade(vm_map_t map, const char *file, int line);
 void _vm_map_lock_downgrade(vm_map_t map, const char *file, int line);
-int vm_map_unlock_and_wait(vm_map_t map, boolean_t user_wait);
+int vm_map_unlock_and_wait(vm_map_t map, int timo);
 void vm_map_wakeup(vm_map_t map);
 
 #define	vm_map_lock(map)	_vm_map_lock(map, LOCK_FILE, LOCK_LINE)
@@ -320,6 +325,13 @@ long vmspace_wired_count(struct vmspace *vmspace);
 #define VM_FAULT_DIRTY 8		/* Dirty the page */
 
 /*
+ * The following "find_space" options are supported by vm_map_find()
+ */
+#define	VMFS_NO_SPACE		0	/* don't find; use the given range */
+#define	VMFS_ANY_SPACE		1	/* find a range with any alignment */
+#define	VMFS_ALIGNED_SPACE	2	/* find a superpage-aligned range */
+
+/*
  * vm_map_wire and vm_map_unwire option flags
  */
 #define VM_MAP_WIRE_SYSTEM	0	/* wiring in a kernel map */
@@ -332,8 +344,10 @@ long vmspace_wired_count(struct vmspace *vmspace);
 boolean_t vm_map_check_protection (vm_map_t, vm_offset_t, vm_offset_t, vm_prot_t);
 vm_map_t vm_map_create(pmap_t, vm_offset_t, vm_offset_t);
 int vm_map_delete (vm_map_t, vm_offset_t, vm_offset_t);
-int vm_map_find (vm_map_t, vm_object_t, vm_ooffset_t, vm_offset_t *, vm_size_t, boolean_t, vm_prot_t, vm_prot_t, int);
-int vm_map_fixed (vm_map_t, vm_object_t, vm_ooffset_t, vm_offset_t *, vm_size_t, vm_prot_t, vm_prot_t, int);
+int vm_map_find(vm_map_t, vm_object_t, vm_ooffset_t, vm_offset_t *, vm_size_t,
+    int, vm_prot_t, vm_prot_t, int);
+int vm_map_fixed(vm_map_t, vm_object_t, vm_ooffset_t, vm_offset_t, vm_size_t,
+    vm_prot_t, vm_prot_t, int);
 int vm_map_findspace (vm_map_t, vm_offset_t, vm_size_t, vm_offset_t *);
 int vm_map_inherit (vm_map_t, vm_offset_t, vm_offset_t, vm_inherit_t);
 void vm_map_init (struct vm_map *, vm_offset_t, vm_offset_t);

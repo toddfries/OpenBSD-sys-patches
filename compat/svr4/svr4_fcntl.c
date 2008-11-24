@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_fcntl.c,v 1.41 2007/10/24 19:03:52 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_fcntl.c,v 1.46 2008/08/28 15:23:18 attilio Exp $");
 
 #include "opt_mac.h"
 
@@ -79,6 +79,8 @@ svr4_to_bsd_cmd(cmd)
 	switch (cmd) {
 	case SVR4_F_DUPFD:
 		return F_DUPFD;
+	case SVR4_F_DUP2FD:
+		return F_DUP2FD;
 	case SVR4_F_GETFD:
 		return F_GETFD;
 	case SVR4_F_SETFD:
@@ -191,7 +193,7 @@ svr4_to_bsd_flock(iflp, oflp)
 	oflp->l_start = (off_t) iflp->l_start;
 	oflp->l_len = (off_t) iflp->l_len;
 	oflp->l_pid = (pid_t) iflp->l_pid;
-
+	oflp->l_sysid = iflp->l_sysid;
 }
 
 static void
@@ -217,7 +219,7 @@ bsd_to_svr4_flock64(iflp, oflp)
 	oflp->l_whence = (short) iflp->l_whence;
 	oflp->l_start = (svr4_off64_t) iflp->l_start;
 	oflp->l_len = (svr4_off64_t) iflp->l_len;
-	oflp->l_sysid = 0;
+	oflp->l_sysid = iflp->l_sysid;
 	oflp->l_pid = (svr4_pid_t) iflp->l_pid;
 }
 
@@ -270,14 +272,14 @@ fd_revoke(td, fd)
 	}
 
 #ifdef MAC
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	error = mac_vnode_check_revoke(td->td_ucred, vp);
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	if (error)
 		goto out;
 #endif
 
-	if ((error = VOP_GETATTR(vp, &vattr, td->td_ucred, td)) != 0)
+	if ((error = VOP_GETATTR(vp, &vattr, td->td_ucred)) != 0)
 		goto out;
 
 	if (td->td_ucred->cr_uid != vattr.va_uid &&
@@ -323,7 +325,7 @@ fd_truncate(td, fd, flp)
 		return ESPIPE;
 	}
 
-	if ((error = VOP_GETATTR(vp, &vattr, td->td_ucred, td)) != 0) {
+	if ((error = VOP_GETATTR(vp, &vattr, td->td_ucred)) != 0) {
 		fdrop(fp, td);
 		return error;
 	}
@@ -584,6 +586,7 @@ svr4_sys_fcntl(td, uap)
 
 	switch (cmd) {
 	case F_DUPFD:
+	case F_DUP2FD:
 	case F_GETFD:
 	case F_SETFD:
 		return (kern_fcntl(td, uap->fd, cmd, (intptr_t)uap->arg));
@@ -637,19 +640,6 @@ svr4_sys_fcntl(td, uap)
 		}
 	case -1:
 		switch (uap->cmd) {
-		case SVR4_F_DUP2FD:
-			{
-				struct dup2_args du;
-
-				du.from = uap->fd;
-				du.to = (int)uap->arg;
-				error = dup2(td, &du);
-				if (error)
-					return error;
-				*retval = du.to;
-				return 0;
-			}
-
 		case SVR4_F_FREESP:
 			{
 				struct svr4_flock	 ifl;

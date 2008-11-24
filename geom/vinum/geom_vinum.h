@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/geom/vinum/geom_vinum.h,v 1.13 2007/04/12 17:54:35 le Exp $
+ * $FreeBSD: src/sys/geom/vinum/geom_vinum.h,v 1.15 2008/10/26 17:20:37 lulf Exp $
  */
 
 #ifndef	_GEOM_VINUM_H_
@@ -34,9 +34,11 @@
 /* geom_vinum_drive.c */
 void	gv_config_new_drive(struct gv_drive *);
 void	gv_drive_modify(struct gv_drive *);
+int	gv_read_header(struct g_consumer *, struct gv_hdr *);
 void	gv_save_config_all(struct gv_softc *);
 void	gv_save_config(struct g_consumer *, struct gv_drive *,
 	    struct gv_softc *);
+int	gv_write_header(struct g_consumer *, struct gv_hdr *);
 
 /* geom_vinum_init.c */
 void	gv_parityop(struct g_geom *, struct gctl_req *);
@@ -93,5 +95,31 @@ void	gv_update_plex_config(struct gv_plex *);
 void	gv_update_vol_size(struct gv_volume *, off_t);
 off_t	gv_vol_size(struct gv_volume *);
 off_t	gv_plex_size(struct gv_plex *);
+
+extern	u_int	g_vinum_debug;
+
+#define	G_VINUM_DEBUG(lvl, ...)	do {					\
+	if (g_vinum_debug >= (lvl)) {					\
+		printf("GEOM_VINUM");					\
+		if (g_vinum_debug > 0)					\
+			printf("[%u]", lvl);				\
+		printf(": ");						\
+		printf(__VA_ARGS__);					\
+		printf("\n");						\
+	}								\
+} while (0)
+
+#define	G_VINUM_LOGREQ(lvl, bp, ...)	do {				\
+	if (g_vinum_debug >= (lvl)) {					\
+		printf("GEOM_VINUM");					\
+		if (g_vinum_debug > 0)					\
+			printf("[%u]", lvl);				\
+		printf(": ");						\
+		printf(__VA_ARGS__);					\
+		printf(" ");						\
+		g_print_bio(bp);					\
+		printf("\n");						\
+	}								\
+} while (0)
 
 #endif /* !_GEOM_VINUM_H_ */

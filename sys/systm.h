@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)systm.h	8.7 (Berkeley) 3/29/95
- * $FreeBSD: src/sys/sys/systm.h,v 1.261 2007/10/13 11:30:19 des Exp $
+ * $FreeBSD: src/sys/sys/systm.h,v 1.270 2008/10/17 16:26:16 bz Exp $
  */
 
 #ifndef _SYS_SYSTM_H_
@@ -56,10 +56,6 @@ extern int kstack_pages;	/* number of kernel stack pages */
 
 extern int nswap;		/* size of swap space */
 
-extern u_int nselcoll;		/* select collisions since boot */
-extern struct mtx sellock;	/* select lock variable */
-extern struct cv selwait;	/* select conditional variable */
-
 extern long physmem;		/* physical memory */
 extern long realmem;		/* 'real' memory */
 
@@ -77,7 +73,7 @@ extern int maxusers;		/* system tune hint */
 } while (0)
 #define	VNASSERT(exp, vp, msg) do {					\
 	if (__predict_false(!(exp))) {					\
-		vn_printf(vp, "VNASSERT failed\n");		\
+		vn_printf(vp, "VNASSERT failed\n");			\
 		panic msg;						\
 	}								\
 } while (0)
@@ -101,6 +97,7 @@ extern int maxusers;		/* system tune hint */
  * in two files.
  * XXX most of these variables should be const.
  */
+extern int osreldate;
 extern int envmode;
 extern int hintmode;		/* 0 = off. 1 = config, 2 = fallback */
 extern int dynamic_kenv;
@@ -115,11 +112,11 @@ extern char **kenvp;
  * General function declarations.
  */
 
+struct inpcb;
 struct lock_object;
 struct malloc_type;
 struct mtx;
 struct proc;
-struct kse;
 struct socket;
 struct thread;
 struct tty;
@@ -216,11 +213,7 @@ u_long	 casuword(volatile u_long *p, u_long oldval, u_long newval);
 
 void	realitexpire(void *);
 
-/*
- * Cyclic clock function type definition used to hook the cyclic 
- * subsystem into the appropriate timer interrupt.
- */
-typedef	void (*cyclic_clock_func_t)(void);
+int	sysbeep(int hertz, int period);
 
 void	hardclock(int usermode, uintfptr_t pc);
 void	hardclock_cpu(int usermode);
@@ -235,6 +228,7 @@ void	cpu_stopprofclock(void);
 
 int	cr_cansee(struct ucred *u1, struct ucred *u2);
 int	cr_canseesocket(struct ucred *cred, struct socket *so);
+int	cr_canseeinpcb(struct ucred *cred, struct inpcb *inp);
 
 char	*getenv(const char *name);
 void	freeenv(char *env);
@@ -319,10 +313,7 @@ void	wakeup_one(void *chan) __nonnull(1);
  */
 
 struct cdev;
-int minor(struct cdev *x);
 dev_t dev2udev(struct cdev *x);
-int uminor(dev_t dev);
-int umajor(dev_t dev);
 const char *devtoname(struct cdev *cdev);
 
 /* XXX: Should be void nanodelay(u_int nsec); */

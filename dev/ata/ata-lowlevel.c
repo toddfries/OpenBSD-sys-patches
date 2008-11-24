@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/ata-lowlevel.c,v 1.83 2008/04/17 12:29:35 sos Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/ata-lowlevel.c,v 1.84 2008/05/08 17:55:44 grehan Exp $");
 
 #include "opt_ata.h"
 #include <sys/param.h>
@@ -213,7 +213,9 @@ ata_begin_transaction(struct ata_request *request)
     printf("ata_begin_transaction OOPS!!!\n");
 
 begin_finished:
-    ch->dma.unload(request);
+    if (ch->dma.unload) {
+        ch->dma.unload(request);
+    }
     return ATA_OP_FINISHED;
 
 begin_continue:

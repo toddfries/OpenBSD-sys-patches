@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/pc98/cbus/scterm-sck.c,v 1.17 2005/12/05 11:58:34 ru Exp $
+ * $FreeBSD: src/sys/pc98/cbus/scterm-sck.c,v 1.18 2008/08/20 08:31:58 ed Exp $
  */
 
 #include "opt_syscons.h"
@@ -1110,7 +1110,7 @@ ascii_end:
 
 static int
 scterm_ioctl(scr_stat *scp, struct tty *tp, u_long cmd, caddr_t data,
-	     int flag, struct thread *td)
+	     struct thread *td)
 {
 	term_stat *tcp = scp->ts;
 	vid_info_t *vi;

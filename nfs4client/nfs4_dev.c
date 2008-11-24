@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/nfs4client/nfs4_dev.c,v 1.9 2006/05/13 00:16:35 cel Exp $ */
+/* $FreeBSD: src/sys/nfs4client/nfs4_dev.c,v 1.10 2008/10/23 15:53:51 des Exp $ */
 /* $Id: nfs4_dev.c,v 1.10 2003/11/05 14:58:59 rees Exp $ */
 
 /*-
@@ -69,9 +69,9 @@ struct nfs4dev_upcall {
 };
 
 
-#define nfs4dev_upcall_get(MP) MALLOC((MP), struct nfs4dev_upcall *, sizeof(struct nfs4dev_upcall), M_NFS4DEV, M_WAITOK | M_ZERO)
+#define nfs4dev_upcall_get(MP) (MP) = malloc(sizeof(struct nfs4dev_upcall), M_NFS4DEV, M_WAITOK | M_ZERO)
 
-#define nfs4dev_upcall_put(MP) FREE((MP), M_NFS4DEV)
+#define nfs4dev_upcall_put(MP) free((MP), M_NFS4DEV)
 
 static int nfs4dev_nopen = 0;
 static struct thread * nfs4dev_reader = NULL;

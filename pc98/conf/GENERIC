@@ -16,7 +16,7 @@
 # If you are in doubt as to the purpose or necessity of a line, check first
 # in NOTES.
 #
-# $FreeBSD: src/sys/pc98/conf/GENERIC,v 1.298 2007/10/26 13:38:00 nyan Exp $
+# $FreeBSD: src/sys/pc98/conf/GENERIC,v 1.310 2008/08/25 14:52:50 nyan Exp $
 
 cpu		I486_CPU
 cpu		I586_CPU
@@ -41,6 +41,7 @@ options 	UFS_GJOURNAL		# Enable gjournal-based UFS journaling
 options 	MD_ROOT			# MD is a potential root device
 options 	NFSCLIENT		# Network Filesystem Client
 options 	NFSSERVER		# Network Filesystem Server
+options 	NFSLOCKD		# Network Lock Manager
 options 	NFS_ROOT		# NFS usable as /, requires NFSCLIENT
 options 	MSDOSFS			# MSDOS Filesystem
 options 	CD9660			# ISO 9660 Filesystem
@@ -52,16 +53,19 @@ options 	COMPAT_43TTY		# BSD 4.3 TTY compat [KEEP THIS!]
 options 	COMPAT_FREEBSD4		# Compatible with FreeBSD4
 options 	COMPAT_FREEBSD5		# Compatible with FreeBSD5
 options 	COMPAT_FREEBSD6		# Compatible with FreeBSD6
+options 	COMPAT_FREEBSD7		# Compatible with FreeBSD7
 options 	SCSI_DELAY=5000		# Delay (in ms) before probing SCSI
 options 	EPSON_BOUNCEDMA		# use bounce buffer for 15-16M
 #options 	EPSON_MEMWIN		# EPSON memory window support
 #options 	LINE30
 options 	KTRACE			# ktrace(1) support
+options 	STACK			# stack(9) support
 options 	SYSVSHM			# SYSV-style shared memory
 options 	SYSVMSG			# SYSV-style message queues
 options 	SYSVSEM			# SYSV-style semaphores
 options 	_KPOSIX_PRIORITY_SCHEDULING # POSIX P1003_1B real-time extensions
 options 	KBD_INSTALL_CDEV	# install a CDEV entry in /dev
+options 	HWPMC_HOOKS		# Necessary kernel hooks for hwpmc(4)
 options 	AUDIT			# Security event auditing
 
 # Debugging for use in -current
@@ -148,9 +152,10 @@ device		pccard		# PC Card (16-bit) bus
 device		cardbus		# CardBus (32-bit) bus
 
 # Serial (COM) ports
-options 	COM_MULTIPORT
+#options 	COM_MULTIPORT
 #options 	COM_ESP		# ESP98
-device		sio		# 8250, 16[45]50, 8251 based serial ports
+#device		sio		# 8250, 16[45]50, 8251 based serial ports
+device		uart		# Generic UART driver
 
 device		mse
 #device		joy
@@ -170,6 +175,7 @@ device		ppi		# Parallel port interface device
 device		de		# DEC/Intel DC21x4x (``Tulip'')
 device		em		# Intel PRO/1000 adapter Gigabit Ethernet Card
 device		le		# AMD Am7900 LANCE and Am79C9xx PCnet
+device		ti		# Alteon Networks Tigon I/II gigabit Ethernet
 device		txp		# 3Com 3cR990 (``Typhoon'')
 device		vx		# 3Com 3c590, 3c595 (``Vortex'')
 
@@ -189,7 +195,6 @@ device		sf		# Adaptec AIC-6915 (``Starfire'')
 device		sis		# Silicon Integrated Systems SiS 900/SiS 7016
 device		sk		# SysKonnect SK-984x & SK-982x gigabit Ethernet
 device		ste		# Sundance ST201 (D-Link DFE-550TX)
-device		ti		# Alteon Networks Tigon I/II gigabit Ethernet
 device		tl		# Texas Instruments ThunderLAN
 device		tx		# SMC EtherPower II (83c170 ``EPIC'')
 device		vge		# VIA VT612x gigabit Ethernet
@@ -208,17 +213,16 @@ device		xe		# Xircom pccard Ethernet
 
 # Wireless NIC cards
 device		wlan		# 802.11 support
+options		IEEE80211_DEBUG	# enable debug msgs
+options		IEEE80211_AMPDU_AGE	# age frames in AMPDU reorder q's
 device		wlan_wep	# 802.11 WEP support
 device		wlan_ccmp	# 802.11 CCMP support
 device		wlan_tkip	# 802.11 TKIP support
 device		wlan_amrr	# AMRR transmit rate control algorithm
-device		wlan_scan_ap	# 802.11 AP mode scanning
-device		wlan_scan_sta	# 802.11 STA mode scanning
 device		an		# Aironet 4500/4800 802.11 wireless NICs.
 device		ath		# Atheros pci/cardbus NIC's
 device		ath_hal		# Atheros HAL (Hardware Access Layer)
 device		ath_rate_sample	# SampleRate tx rate control for ath
-device		awi		# BayStack 660 and others
 device		ral		# Ralink Technology RT2500 wireless NICs.
 device		wi		# WaveLAN/Intersil/Symbol 802.11 wireless NICs.
 #device		wl		# Older non 802.11 Wavelan wireless NIC.
@@ -227,10 +231,8 @@ device		wi		# WaveLAN/Intersil/Symbol 802.11 wireless NICs.
 device		loop		# Network loopback
 device		random		# Entropy device
 device		ether		# Ethernet support
-device		sl		# Kernel SLIP
-device		ppp		# Kernel PPP
 device		tun		# Packet tunnel.
-device		pty		# Pseudo-ttys (telnet etc)
+device		pty		# BSD-style compatibility pseudo ttys
 device		md		# Memory "disks"
 device		gif		# IPv6 and IPv4 tunneling
 device		faith		# IPv6-to-IPv4 relaying (translation)
@@ -266,6 +268,7 @@ device		bpf		# Berkeley packet filter
 #device		uftdi		# For FTDI usb serial adapters
 #device		uipaq		# Some WinCE based devices
 #device		uplcom		# Prolific PL-2303 serial adapters
+#device		uslcom		# SI Labs CP2101/CP2102 serial adapters
 #device		uvisor		# Visor and Palm devices
 #device		uvscom		# USB serial support for DDI pocket's PHS
 # USB Ethernet, requires miibus

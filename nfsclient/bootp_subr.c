@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsclient/bootp_subr.c,v 1.70 2007/08/06 14:26:02 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsclient/bootp_subr.c,v 1.74 2008/08/17 23:27:27 bz Exp $");
 
 #include "opt_bootp.h"
 
@@ -57,6 +57,7 @@ __FBSDID("$FreeBSD: src/sys/nfsclient/bootp_subr.c,v 1.70 2007/08/06 14:26:02 rw
 #include <sys/socketvar.h>
 #include <sys/sysctl.h>
 #include <sys/uio.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -208,6 +209,11 @@ struct bootpc_globalcontext {
 #define DHCP_OFFER    2
 #define DHCP_REQUEST  3
 #define DHCP_ACK      5
+
+/* NFS read/write block size */
+#ifndef BOOTP_BLOCKSIZE
+#define	BOOTP_BLOCKSIZE	8192
+#endif
 
 static char bootp_cookie[128];
 SYSCTL_STRING(_kern, OID_AUTO, bootp_cookie, CTLFLAG_RD,
@@ -369,9 +375,9 @@ bootpboot_p_rtlist(void)
 {
 
 	printf("Routing table:\n");
-	RADIX_NODE_LOCK(rt_tables[AF_INET]);	/* could sleep XXX */
-	bootpboot_p_tree(rt_tables[AF_INET]->rnh_treetop);
-	RADIX_NODE_UNLOCK(rt_tables[AF_INET]);
+	RADIX_NODE_LOCK(V_rt_tables[AF_INET]);	/* could sleep XXX */
+	bootpboot_p_tree(V_rt_tables[AF_INET]->rnh_treetop);
+	RADIX_NODE_UNLOCK(V_rt_tables[AF_INET]);
 }
 
 void
@@ -396,7 +402,7 @@ bootpboot_p_iflist(void)
 
 	printf("Interface list:\n");
 	IFNET_RLOCK(); /* could sleep, but okay for debugging XXX */
-	for (ifp = TAILQ_FIRST(&ifnet);
+	for (ifp = TAILQ_FIRST(&V_ifnet);
 	     ifp != NULL;
 	     ifp = TAILQ_NEXT(ifp, if_link)) {
 		for (ifa = TAILQ_FIRST(&ifp->if_addrhead);
@@ -1137,11 +1143,12 @@ bootpc_adjust_interface(struct bootpc_ifcontext *ifctx,
 	if (ifctx->gotgw != 0 || gctx->gotgw == 0) {
 		clear_sinaddr(&defdst);
 		clear_sinaddr(&defmask);
-		error = rtrequest(RTM_ADD,
+		/* XXX MRT just table 0 */
+		error = rtrequest_fib(RTM_ADD,
 				  (struct sockaddr *) &defdst,
 				  (struct sockaddr *) gw,
 				  (struct sockaddr *) &defmask,
-				  (RTF_UP | RTF_GATEWAY | RTF_STATIC), NULL);
+				  (RTF_UP | RTF_GATEWAY | RTF_STATIC), NULL, 0);
 		if (error != 0) {
 			printf("bootpc_adjust_interface: "
 			       "add net route, error=%d\n", error);
@@ -1233,8 +1240,8 @@ static void
 mountopts(struct nfs_args *args, char *p)
 {
 	args->version = NFS_ARGSVERSION;
-	args->rsize = 8192;
-	args->wsize = 8192;
+	args->rsize = BOOTP_BLOCKSIZE;
+	args->wsize = BOOTP_BLOCKSIZE;
 	args->flags = NFSMNT_RSIZE | NFSMNT_WSIZE | NFSMNT_RESVPORT;
 	args->sotype = SOCK_DGRAM;
 	if (p != NULL)
@@ -1563,8 +1570,10 @@ bootpc_decode_reply(struct nfsv3_diskless *nd, struct bootpc_ifcontext *ifctx,
 			printf("hostname %s (ignored) ", p);
 		} else {
 			strcpy(nd->my_hostnam, p);
-			strcpy(hostname, p);
-			printf("hostname %s ", hostname);
+			mtx_lock(&hostname_mtx);
+			strcpy(G_hostname, p);
+			printf("hostname %s ", G_hostname);
+			mtx_unlock(&hostname_mtx);
 			gctx->sethostname = ifctx;
 		}
 	}
@@ -1636,7 +1645,7 @@ bootpc_init(void)
 	 * attaches and wins the race, it won't be eligible for bootp.
 	 */
 	IFNET_RLOCK();
-	for (ifp = TAILQ_FIRST(&ifnet), ifcnt = 0;
+	for (ifp = TAILQ_FIRST(&V_ifnet), ifcnt = 0;
 	     ifp != NULL;
 	     ifp = TAILQ_NEXT(ifp, if_link)) {
 		if ((ifp->if_flags &
@@ -1653,7 +1662,7 @@ bootpc_init(void)
 #endif
 
 	IFNET_RLOCK();
-	for (ifp = TAILQ_FIRST(&ifnet), ifctx = gctx->interfaces;
+	for (ifp = TAILQ_FIRST(&V_ifnet), ifctx = gctx->interfaces;
 	     ifp != NULL && ifctx != NULL;
 	     ifp = TAILQ_NEXT(ifp, if_link)) {
 		strlcpy(ifctx->ireq.ifr_name, ifp->if_xname,

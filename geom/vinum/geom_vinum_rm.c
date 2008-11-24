@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_rm.c,v 1.13 2007/04/12 17:54:35 le Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_rm.c,v 1.15 2008/10/26 17:20:37 lulf Exp $");
 
 #include <sys/param.h>
 #include <sys/libkern.h>
@@ -351,18 +351,18 @@ gv_rm_drive(struct gv_softc *sc, struct gctl_req *req, struct gv_drive *d, int f
 	cp = LIST_FIRST(&gp->consumer);
 	err = g_access(cp, 0, 1, 0);
 	if (err) {
-		printf("GEOM_VINUM: gv_rm_drive: couldn't access '%s', errno: "
-		    "%d\n", cp->provider->name, err);
+		G_VINUM_DEBUG(0, "%s: unable to access '%s', errno: "
+		    "%d", __func__, cp->provider->name, err);
 		return (err);
 	}
 
 	/* Clear the Vinum Magic. */
 	d->hdr->magic = GV_NOMAGIC;
 	g_topology_unlock();
-	err = g_write_data(cp, GV_HDR_OFFSET, d->hdr, GV_HDR_LEN);
+	err = gv_write_header(cp, d->hdr);
 	if (err) {
-		printf("GEOM_VINUM: gv_rm_drive: couldn't write header to '%s'"
-		    ", errno: %d\n", cp->provider->name, err);
+		G_VINUM_DEBUG(0, "%s: unable to write header to '%s'"
+		    ", errno: %d", __func__, cp->provider->name, err);
 		d->hdr->magic = GV_MAGIC;
 	}
 	g_topology_lock();

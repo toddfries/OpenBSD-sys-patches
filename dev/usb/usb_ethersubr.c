@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/usb_ethersubr.c,v 1.23 2007/01/08 23:21:06 alfred Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/usb_ethersubr.c,v 1.24 2008/07/04 00:21:38 rwatson Exp $");
 
 /*
  * Callbacks in the USB code operate at splusb() (actually splbio()
@@ -82,6 +82,8 @@ usbintr(void)
 	struct usb_qdat		*q;
 	struct ifnet		*ifp;
 
+	mtx_lock(&Giant);
+
 	/* Check the RX queue */
 	while(1) {
 		IF_DEQUEUE(&usbq_rx, m);
@@ -109,6 +111,8 @@ usbintr(void)
 			(*ifp->if_start)(ifp);
 	}
 
+	mtx_unlock(&Giant);
+
 	return;
 }
 
@@ -117,7 +121,8 @@ usb_register_netisr(void)
 {
 	if (mtx_inited)
 		return;
-	netisr_register(NETISR_USB, (netisr_t *)usbintr, NULL, 0);
+	netisr_register(NETISR_USB, (netisr_t *)usbintr, NULL,
+	    NETISR_FORCEQUEUE);
 	mtx_init(&usbq_tx.ifq_mtx, "usbq_tx_mtx", NULL, MTX_DEF);
 	mtx_init(&usbq_rx.ifq_mtx, "usbq_rx_mtx", NULL, MTX_DEF);
 	mtx_inited++;

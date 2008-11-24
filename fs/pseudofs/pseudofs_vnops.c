@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/pseudofs/pseudofs_vnops.c,v 1.65 2007/10/05 17:37:25 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/pseudofs/pseudofs_vnops.c,v 1.70 2008/10/28 13:44:11 trasz Exp $");
 
 #include "opt_pseudofs.h"
 
@@ -128,11 +128,11 @@ pfs_access(struct vop_access_args *va)
 	PFS_TRACE(("%s", pvd->pvd_pn->pn_name));
 	(void)pvd;
 
-	error = VOP_GETATTR(vn, &vattr, va->a_cred, va->a_td);
+	error = VOP_GETATTR(vn, &vattr, va->a_cred);
 	if (error)
 		PFS_RETURN (error);
 	error = vaccess(vn->v_type, vattr.va_mode, vattr.va_uid,
-	    vattr.va_gid, va->a_mode, va->a_cred, NULL);
+	    vattr.va_gid, va->a_accmode, va->a_cred, NULL);
 	PFS_RETURN (error);
 }
 
@@ -191,12 +191,12 @@ pfs_getattr(struct vop_getattr_args *va)
 	if (!pfs_visible(curthread, pn, pvd->pvd_pid, &proc))
 		PFS_RETURN (ENOENT);
 
-	VATTR_NULL(vap);
 	vap->va_type = vn->v_type;
 	vap->va_fileid = pn_fileno(pn, pvd->pvd_pid);
 	vap->va_flags = 0;
 	vap->va_blocksize = PAGE_SIZE;
 	vap->va_bytes = vap->va_size = 0;
+	vap->va_filerev = 0;
 	vap->va_fsid = vn->v_mount->mnt_stat.f_fsid.val[0];
 	vap->va_nlink = 1;
 	nanotime(&vap->va_ctime);
@@ -227,7 +227,7 @@ pfs_getattr(struct vop_getattr_args *va)
 		vap->va_uid = proc->p_ucred->cr_ruid;
 		vap->va_gid = proc->p_ucred->cr_rgid;
 		if (pn->pn_attr != NULL)
-			error = pn_attr(va->a_td, proc, pn, vap);
+			error = pn_attr(curthread, proc, pn, vap);
 		PROC_UNLOCK(proc);
 	} else {
 		vap->va_uid = 0;
@@ -366,7 +366,7 @@ pfs_lookup(struct vop_cachedlookup_args *va)
 	if (cnp->cn_flags & ISDOTDOT) {
 		if (pd->pn_type == pfstype_root)
 			PFS_RETURN (EIO);
-		VOP_UNLOCK(vn, 0, cnp->cn_thread);
+		VOP_UNLOCK(vn, 0);
 		KASSERT(pd->pn_parent != NULL,
 		    ("%s(): non-root directory has no parent", __func__));
 		/*
@@ -428,13 +428,13 @@ pfs_lookup(struct vop_cachedlookup_args *va)
 		goto failed;
 
 	if (cnp->cn_flags & ISDOTDOT)
-		vn_lock(vn, LK_EXCLUSIVE|LK_RETRY, cnp->cn_thread);
+		vn_lock(vn, LK_EXCLUSIVE|LK_RETRY);
 	if (cnp->cn_flags & MAKEENTRY)
 		cache_enter(vn, *vpp, cnp);
 	PFS_RETURN (0);
  failed:
 	if (cnp->cn_flags & ISDOTDOT)
-		vn_lock(vn, LK_EXCLUSIVE|LK_RETRY, cnp->cn_thread);
+		vn_lock(vn, LK_EXCLUSIVE|LK_RETRY);
 	PFS_RETURN(error);
 }
 

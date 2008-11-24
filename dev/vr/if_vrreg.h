@@ -29,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/vr/if_vrreg.h,v 1.36 2008/03/11 04:51:22 yongari Exp $
+ * $FreeBSD: src/sys/dev/vr/if_vrreg.h,v 1.38 2008/07/16 08:35:29 yongari Exp $
  */
 
 /*
@@ -47,6 +47,14 @@
 #define VR_IMR			0x0E	/* interrupt mask register */
 #define VR_MAR0			0x10	/* multicast hash 0 */
 #define VR_MAR1			0x14	/* multicast hash 1 */
+#define VR_MCAM0		0x10
+#define VR_MCAM1		0x11
+#define VR_MCAM2		0x12
+#define VR_MCAM3		0x13
+#define VR_MCAM4		0x14
+#define VR_MCAM5		0x15
+#define VR_VCAM0		0x16
+#define VR_VCAM1		0x17
 #define VR_RXADDR		0x18	/* rx descriptor list start addr */
 #define VR_TXADDR		0x1C	/* tx descriptor list start addr */
 #define VR_CURRXDESC0		0x20
@@ -368,6 +376,7 @@
 #define VR_BCR1_TXTHRESH512BYTES 0x20
 #define VR_BCR1_TXTHRESH1024BYTES 0x28
 #define VR_BCR1_TXTHRESHSTORENFWD 0x38
+#define	VR_BCR1_VLANFILT_ENB	0x80	/* VT6105M */
 
 /*
  * CAMCTL register bits. (VT6105M only)
@@ -455,7 +464,8 @@ struct vr_desc {
 #define VR_RXSTAT_RX_PHYS	0x00000800
 #define VR_RXSTAT_RX_BROAD	0x00001000
 #define VR_RXSTAT_RX_MULTI	0x00002000
-#define VR_RXSTAT_RX_OK		0x00004000
+#define VR_RXSTAT_RX_VIDHIT	0x00004000	/* 6105M */
+#define VR_RXSTAT_RX_OK		0x00008000
 #define VR_RXSTAT_RXLEN		0x07FF0000
 #define VR_RXSTAT_RXLEN_EXT	0x78000000
 #define VR_RXSTAT_OWN		0x80000000
@@ -750,3 +760,6 @@ struct vr_softc {
 
 #define VR_SETBIT16(sc, reg, x) CSR_WRITE_2(sc, reg, CSR_READ_2(sc, reg) | (x))
 #define VR_CLRBIT16(sc, reg, x) CSR_WRITE_2(sc, reg, CSR_READ_2(sc, reg) & ~(x))
+
+#define	VR_MCAST_CAM	0
+#define	VR_VLAN_CAM	1

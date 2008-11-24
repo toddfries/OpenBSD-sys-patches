@@ -37,7 +37,7 @@
  *
  * Author: Julian Elischer <julian@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_cisco.c,v 1.28 2005/04/13 14:03:28 glebius Exp $
+ * $FreeBSD: src/sys/netgraph/ng_cisco.c,v 1.30 2008/10/23 15:53:51 des Exp $
  * $Whistle: ng_cisco.c,v 1.25 1999/11/01 09:24:51 julian Exp $
  */
 
@@ -193,7 +193,7 @@ cisco_constructor(node_p node)
 {
 	sc_p sc;
 
-	MALLOC(sc, sc_p, sizeof(*sc), M_NETGRAPH, M_NOWAIT | M_ZERO);
+	sc = malloc(sizeof(*sc), M_NETGRAPH, M_NOWAIT | M_ZERO);
 	if (sc == NULL)
 		return (ENOMEM);
 
@@ -228,6 +228,9 @@ cisco_newhook(node_p node, hook_p hook, const char *name)
 	} else if (strcmp(name, NG_CISCO_HOOK_INET) == 0) {
 		sc->inet.hook = hook;
 		NG_HOOK_SET_PRIVATE(hook, &sc->inet);
+	} else if (strcmp(name, NG_CISCO_HOOK_INET6) == 0) {
+		sc->inet6.hook = hook;
+		NG_HOOK_SET_PRIVATE(hook, &sc->inet6);
 	} else if (strcmp(name, NG_CISCO_HOOK_APPLETALK) == 0) {
 		sc->atalk.hook = hook;
 		NG_HOOK_SET_PRIVATE(hook, &sc->atalk);
@@ -405,7 +408,7 @@ cisco_shutdown(node_p node)
 
 	NG_NODE_SET_PRIVATE(node, NULL);
 	NG_NODE_UNREF(sc->node);
-	FREE(sc, M_NETGRAPH);
+	free(sc, M_NETGRAPH);
 	return (0);
 }
 

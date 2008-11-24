@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_clock.c,v 1.12 2007/07/23 09:42:31 dwmalone Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_clock.c,v 1.15 2008/04/22 19:38:28 phk Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -49,20 +49,17 @@ __FBSDID("$FreeBSD: src/sys/kern/subr_clock.c,v 1.12 2007/07/23 09:42:31 dwmalon
 #include <sys/sysctl.h>
 #include <sys/timetc.h>
 
+#define ct_debug bootverbose
 static int adjkerntz;		/* local offset from GMT in seconds */
 static int wall_cmos_clock;	/* wall CMOS clock assumed if != 0 */
-int disable_rtc_set;		/* disable resettodr() if != 0 */
 
 int tz_minuteswest;
 int tz_dsttime;
 
 /*
- * These have traditionally been in machdep, but should probably be moved to
+ * This have traditionally been in machdep, but should probably be moved to
  * kern.
  */
-SYSCTL_INT(_machdep, OID_AUTO, disable_rtc_set,
-	CTLFLAG_RW, &disable_rtc_set, 0, "");
-
 SYSCTL_INT(_machdep, OID_AUTO, wall_cmos_clock,
 	CTLFLAG_RW, &wall_cmos_clock, 0, "");
 
@@ -70,8 +67,7 @@ static int
 sysctl_machdep_adjkerntz(SYSCTL_HANDLER_ARGS)
 {
 	int error;
-	error = sysctl_handle_int(oidp, oidp->oid_arg1, oidp->oid_arg2,
-		req);
+	error = sysctl_handle_int(oidp, oidp->oid_arg1, oidp->oid_arg2, req);
 	if (!error && req->newptr)
 		resettodr();
 	return (error);
@@ -107,7 +103,7 @@ static const int month_days[12] = {
  *     ((year % 400) == 0) )
  * It is otherwise equivalent.
  */
-static __inline int
+static int
 leapyear(int year)
 {
 	int rv = 0;
@@ -123,6 +119,14 @@ leapyear(int year)
 	return (rv);
 }
 
+static void
+print_ct(struct clocktime *ct)
+{
+	printf("[%04d-%02d-%02d %02d:%02d:%02d]",
+	    ct->year, ct->mon, ct->day,
+	    ct->hour, ct->min, ct->sec);
+}
+
 int
 clock_ct_to_ts(struct clocktime *ct, struct timespec *ts)
 {
@@ -131,12 +135,21 @@ clock_ct_to_ts(struct clocktime *ct, struct timespec *ts)
 
 	year = ct->year;
 
+	if (ct_debug) {
+		printf("ct_to_ts(");
+		print_ct(ct);
+		printf(")");
+	}
+
 	/* Sanity checks. */
 	if (ct->mon < 1 || ct->mon > 12 || ct->day < 1 ||
 	    ct->day > days_in_month(year, ct->mon) ||
 	    ct->hour > 23 ||  ct->min > 59 || ct->sec > 59 ||
-	    ct->year > 2037)		/* time_t overflow */
+	    ct->year > 2037) {		/* time_t overflow */
+		if (ct_debug)
+			printf(" = EINVAL\n");
 		return (EINVAL);
+	}
 
 	/*
 	 * Compute days since start of time
@@ -160,6 +173,8 @@ clock_ct_to_ts(struct clocktime *ct, struct timespec *ts)
 
 	ts->tv_sec = secs;
 	ts->tv_nsec = ct->nsec;
+	if (ct_debug)
+		printf(" = %ld.%09ld\n", (long)ts->tv_sec, (long)ts->tv_nsec);
 	return (0);
 }
 
@@ -196,6 +211,12 @@ clock_ts_to_ct(struct timespec *ts, struct clocktime *ct)
 	rsec = rsec % 60;
 	ct->sec  = rsec;
 	ct->nsec = ts->tv_nsec;
+	if (ct_debug) {
+		printf("ts_to_ct(%ld.%09ld) = ",
+		    (long)ts->tv_sec, (long)ts->tv_nsec);
+		print_ct(ct);
+		printf("\n");
+	}
 }
 
 int

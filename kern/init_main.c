@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/init_main.c,v 1.286 2007/10/26 08:00:41 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/init_main.c,v 1.297 2008/10/28 11:33:06 rwatson Exp $");
 
 #include "opt_ddb.h"
 #include "opt_init_path.h"
@@ -73,6 +73,7 @@ __FBSDID("$FreeBSD: src/sys/kern/init_main.c,v 1.286 2007/10/26 08:00:41 julian 
 #include <sys/unistd.h>
 #include <sys/malloc.h>
 #include <sys/conf.h>
+#include <sys/cpuset.h>
 
 #include <machine/cpu.h>
 
@@ -108,7 +109,7 @@ SYSCTL_INT(_debug, OID_AUTO, bootverbose, CTLFLAG_RW, &bootverbose, 0, "");
  * symbol is not undefined.  A sybsystem ID of SI_SUB_DUMMY is never
  * executed.
  */
-SYSINIT(placeholder, SI_SUB_DUMMY, SI_ORDER_ANY, NULL, NULL)
+SYSINIT(placeholder, SI_SUB_DUMMY, SI_ORDER_ANY, NULL, NULL);
 
 /*
  * The sysinit table itself.  Items are checked off as the are run.
@@ -287,26 +288,28 @@ print_caddr_t(void *data __unused)
 {
 	printf("%s", (char *)data);
 }
-SYSINIT(announce, SI_SUB_COPYRIGHT, SI_ORDER_FIRST, print_caddr_t, copyright)
-SYSINIT(trademark, SI_SUB_COPYRIGHT, SI_ORDER_SECOND, print_caddr_t, trademark)
-SYSINIT(version, SI_SUB_COPYRIGHT, SI_ORDER_THIRD, print_caddr_t, version)
+SYSINIT(announce, SI_SUB_COPYRIGHT, SI_ORDER_FIRST, print_caddr_t,
+    copyright);
+SYSINIT(trademark, SI_SUB_COPYRIGHT, SI_ORDER_SECOND, print_caddr_t,
+    trademark);
+SYSINIT(version, SI_SUB_COPYRIGHT, SI_ORDER_THIRD, print_caddr_t, version);
 
 #ifdef WITNESS
 static char wit_warn[] =
      "WARNING: WITNESS option enabled, expect reduced performance.\n";
 SYSINIT(witwarn, SI_SUB_COPYRIGHT, SI_ORDER_THIRD + 1,
-   print_caddr_t, wit_warn)
+   print_caddr_t, wit_warn);
 SYSINIT(witwarn2, SI_SUB_RUN_SCHEDULER, SI_ORDER_THIRD + 1,
-   print_caddr_t, wit_warn)
+   print_caddr_t, wit_warn);
 #endif
 
 #ifdef DIAGNOSTIC
 static char diag_warn[] =
      "WARNING: DIAGNOSTIC option enabled, expect reduced performance.\n";
 SYSINIT(diagwarn, SI_SUB_COPYRIGHT, SI_ORDER_THIRD + 2,
-    print_caddr_t, diag_warn)
+    print_caddr_t, diag_warn);
 SYSINIT(diagwarn2, SI_SUB_RUN_SCHEDULER, SI_ORDER_THIRD + 2,
-    print_caddr_t, diag_warn)
+    print_caddr_t, diag_warn);
 #endif
 
 static void
@@ -316,35 +319,36 @@ set_boot_verbose(void *data __unused)
 	if (boothowto & RB_VERBOSE)
 		bootverbose++;
 }
-SYSINIT(boot_verbose, SI_SUB_TUNABLES, SI_ORDER_ANY, set_boot_verbose, NULL)
+SYSINIT(boot_verbose, SI_SUB_TUNABLES, SI_ORDER_ANY, set_boot_verbose, NULL);
 
 struct sysentvec null_sysvec = {
-	0,
-	NULL,
-	0,
-	0,
-	NULL,
-	0,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	"null",
-	NULL,
-	NULL,
-	0,
-	PAGE_SIZE,
-	VM_MIN_ADDRESS,
-	VM_MAXUSER_ADDRESS,
-	USRSTACK,
-	PS_STRINGS,
-	VM_PROT_ALL,
-	NULL,
-	NULL,
-	NULL
+	.sv_size	= 0,
+	.sv_table	= NULL,
+	.sv_mask	= 0,
+	.sv_sigsize	= 0,
+	.sv_sigtbl	= NULL,
+	.sv_errsize	= 0,
+	.sv_errtbl	= NULL,
+	.sv_transtrap	= NULL,
+	.sv_fixup	= NULL,
+	.sv_sendsig	= NULL,
+	.sv_sigcode	= NULL,
+	.sv_szsigcode	= NULL,
+	.sv_prepsyscall	= NULL,
+	.sv_name	= "null",
+	.sv_coredump	= NULL,
+	.sv_imgact_try	= NULL,
+	.sv_minsigstksz	= 0,
+	.sv_pagesize	= PAGE_SIZE,
+	.sv_minuser	= VM_MIN_ADDRESS,
+	.sv_maxuser	= VM_MAXUSER_ADDRESS,
+	.sv_usrstack	= USRSTACK,
+	.sv_psstrings	= PS_STRINGS,
+	.sv_stackprot	= VM_PROT_ALL,
+	.sv_copyout_strings	= NULL,
+	.sv_setregs	= NULL,
+	.sv_fixlimit	= NULL,
+	.sv_maxssiz	= NULL
 };
 
 /*
@@ -371,11 +375,12 @@ proc0_init(void *dummy __unused)
 	GIANT_REQUIRED;
 	p = &proc0;
 	td = &thread0;
-
+	
 	/*
-	 * Initialize magic number.
+	 * Initialize magic number and osrel.
 	 */
 	p->p_magic = P_MAGIC;
+	p->p_osrel = osreldate;
 
 	/*
 	 * Initialize thread and process structures.
@@ -411,7 +416,7 @@ proc0_init(void *dummy __unused)
 
 	pgrp0.pg_session = &session0;
 	mtx_init(&session0.s_mtx, "session", NULL, MTX_DEF);
-	session0.s_count = 1;
+	refcount_init(&session0.s_count, 1);
 	session0.s_leader = p;
 
 	p->p_sysent = &null_sysvec;
@@ -420,6 +425,7 @@ proc0_init(void *dummy __unused)
 	knlist_init(&p->p_klist, &p->p_mtx, NULL, NULL, NULL);
 	STAILQ_INIT(&p->p_ktr);
 	p->p_nice = NZERO;
+	td->td_tid = PID_MAX + 1;
 	td->td_state = TDS_RUNNING;
 	td->td_pri_class = PRI_TIMESHARE;
 	td->td_user_pri = PUSER;
@@ -428,6 +434,7 @@ proc0_init(void *dummy __unused)
 	td->td_base_pri = PUSER;
 	td->td_oncpu = 0;
 	td->td_flags = TDF_INMEM|TDP_KTHREAD;
+	td->td_cpuset = cpuset_thread0();
 	p->p_peers = 0;
 	p->p_leader = p;
 
@@ -449,7 +456,7 @@ proc0_init(void *dummy __unused)
 	audit_cred_kproc0(p->p_ucred);
 #endif
 #ifdef MAC
-	mac_proc_create_swapper(p->p_ucred);
+	mac_cred_create_swapper(p->p_ucred);
 #endif
 	td->td_ucred = crhold(p->p_ucred);
 
@@ -488,12 +495,22 @@ proc0_init(void *dummy __unused)
 	    p->p_sysent->sv_maxuser);
 	vmspace0.vm_map.pmap = vmspace_pmap(&vmspace0);
 
+	/*-
+	 * call the init and ctor for the new thread and proc
+	 * we wait to do this until all other structures
+	 * are fairly sane.
+	 */
+	EVENTHANDLER_INVOKE(process_init, p);
+	EVENTHANDLER_INVOKE(thread_init, td);
+	EVENTHANDLER_INVOKE(process_ctor, p);
+	EVENTHANDLER_INVOKE(thread_ctor, td);
+
 	/*
 	 * Charge root for one process.
 	 */
 	(void)chgproccnt(p->p_ucred->cr_ruidinfo, 1, 0);
 }
-SYSINIT(p0init, SI_SUB_INTRINSIC, SI_ORDER_FIRST, proc0_init, NULL)
+SYSINIT(p0init, SI_SUB_INTRINSIC, SI_ORDER_FIRST, proc0_init, NULL);
 
 /* ARGSUSED*/
 static void
@@ -502,6 +519,7 @@ proc0_post(void *dummy __unused)
 	struct timespec ts;
 	struct proc *p;
 	struct rusage ru;
+	struct thread *td;
 
 	/*
 	 * Now we can look at the time, having had a chance to verify the
@@ -517,6 +535,9 @@ proc0_post(void *dummy __unused)
 		p->p_rux.rux_uticks = 0;
 		p->p_rux.rux_sticks = 0;
 		p->p_rux.rux_iticks = 0;
+		FOREACH_THREAD_IN_PROC(p, td) {
+			td->td_runtime = 0;
+		}
 	}
 	sx_sunlock(&allproc_lock);
 	PCPU_SET(switchtime, cpu_ticks());
@@ -528,7 +549,7 @@ proc0_post(void *dummy __unused)
 	nanotime(&ts);
 	srandom(ts.tv_sec ^ ts.tv_nsec);
 }
-SYSINIT(p0post, SI_SUB_INTRINSIC_POST, SI_ORDER_FIRST, proc0_post, NULL)
+SYSINIT(p0post, SI_SUB_INTRINSIC_POST, SI_ORDER_FIRST, proc0_post, NULL);
 
 /*
  ***************************************************************************
@@ -715,7 +736,7 @@ create_init(const void *udata __unused)
 	oldcred = initproc->p_ucred;
 	crcopy(newcred, oldcred);
 #ifdef MAC
-	mac_proc_create_init(newcred);
+	mac_cred_create_init(newcred);
 #endif
 #ifdef AUDIT
 	audit_cred_proc1(newcred);
@@ -726,7 +747,7 @@ create_init(const void *udata __unused)
 	cred_update_thread(FIRST_THREAD_IN_PROC(initproc));
 	cpu_set_fork_handler(FIRST_THREAD_IN_PROC(initproc), start_init, NULL);
 }
-SYSINIT(init, SI_SUB_CREATE_INIT, SI_ORDER_FIRST, create_init, NULL)
+SYSINIT(init, SI_SUB_CREATE_INIT, SI_ORDER_FIRST, create_init, NULL);
 
 /*
  * Make it runnable now.
@@ -742,4 +763,4 @@ kick_init(const void *udata __unused)
 	sched_add(td, SRQ_BORING);
 	thread_unlock(td);
 }
-SYSINIT(kickinit, SI_SUB_KTHREAD_INIT, SI_ORDER_FIRST, kick_init, NULL)
+SYSINIT(kickinit, SI_SUB_KTHREAD_INIT, SI_ORDER_FIRST, kick_init, NULL);

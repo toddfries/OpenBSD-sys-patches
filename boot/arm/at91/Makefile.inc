@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/arm/at91/Makefile.inc,v 1.7 2007/07/13 14:27:04 imp Exp $
+# $FreeBSD: src/sys/boot/arm/at91/Makefile.inc,v 1.8 2008/06/25 21:33:28 ru Exp $
 
 .if !target(__at91_boot_Makefile.inc__)
 .PATH:	${.CURDIR}/../../../../libkern ${.CURDIR}/../../../../libkern/arm
@@ -53,3 +53,5 @@ MK_FPGA:=no
 .endif
 
 .endif
+
+.include "../Makefile.inc"

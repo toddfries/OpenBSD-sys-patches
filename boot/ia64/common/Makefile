@@ -1,4 +1,6 @@
-# $FreeBSD: src/sys/boot/ia64/common/Makefile,v 1.1 2006/11/05 22:03:03 marcel Exp $
+# $FreeBSD: src/sys/boot/ia64/common/Makefile,v 1.2 2008/06/25 21:33:28 ru Exp $
+
+WITHOUT_SSP=
 
 .include <bsd.own.mk>
 

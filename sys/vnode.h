@@ -27,23 +27,16 @@
  * SUCH DAMAGE.
  *
  *	@(#)vnode.h	8.7 (Berkeley) 2/4/94
- * $FreeBSD: src/sys/sys/vnode.h,v 1.327 2007/10/20 09:41:55 pjd Exp $
+ * $FreeBSD: src/sys/sys/vnode.h,v 1.344 2008/11/17 20:49:29 pjd Exp $
  */
 
 #ifndef _SYS_VNODE_H_
 #define	_SYS_VNODE_H_
 
-/*
- * XXX - compatability until lockmgr() goes away or all the #includes are
- * updated.
- */
-#include <sys/lockmgr.h>
-
 #include <sys/bufobj.h>
 #include <sys/queue.h>
-#include <sys/_lock.h>
 #include <sys/lock.h>
-#include <sys/_mutex.h>
+#include <sys/lockmgr.h>
 #include <sys/mutex.h>
 #include <sys/selinfo.h>
 #include <sys/uio.h>
@@ -99,9 +92,6 @@ struct vpollinfo {
  *	4) vget with LK_INTERLOCK and check for ENOENT, or
  *	5) Check for DOOMED if the vnode lock is not required.
  *	6) Perform your operation, then vput().
- *
- * XXX Not all fields are locked yet and some fields that are marked are not
- * locked consistently.  This is a work in progress.  Requires Giant!
  */
 
 #if defined(_KERNEL) || defined(_KVM_VNODE)
@@ -131,6 +121,7 @@ struct vnode {
 		struct socket	*vu_socket;	/* v unix domain net (VSOCK) */
 		struct cdev	*vu_cdev; 	/* v device (VCHR, VBLK) */
 		struct fifoinfo	*vu_fifoinfo;	/* v fifo (VFIFO) */
+		int		vu_yield;	/*   yield count (VMARKER) */
 	} v_un;
 
 	/*
@@ -177,6 +168,7 @@ struct vnode {
 	 */
 	struct vpollinfo *v_pollinfo;		/* G Poll events, p for *v_pi */
 	struct label *v_label;			/* MAC label for vnode */
+	struct lockf *v_lockf;			/* Byte-level lock list */
 };
 
 #endif /* defined(_KERNEL) || defined(_KVM_VNODE) */
@@ -185,6 +177,7 @@ struct vnode {
 #define	v_socket	v_un.vu_socket
 #define	v_rdev		v_un.vu_cdev
 #define	v_fifoinfo	v_un.vu_fifoinfo
+#define	v_yield		v_un.vu_yield
 
 /* XXX: These are temporary to avoid a source sweep at this time */
 #define v_object	v_bufobj.bo_object
@@ -235,6 +228,9 @@ struct xvnode {
  * Vnode flags.
  *	VI flags are protected by interlock and live in v_iflag
  *	VV flags are protected by the vnode lock and live in v_vflag
+ *
+ *	VI_DOOMED is doubly protected by the interlock and vnode lock.  Both
+ *	are required for writing but the status may be checked with either.
  */
 #define	VI_MOUNT	0x0020	/* Mount in progress */
 #define	VI_AGE		0x0040	/* Insert vnode at head of free list */
@@ -255,6 +251,7 @@ struct xvnode {
 #define	VV_NOKNOTE	0x0200	/* don't activate knotes on this vnode */
 #define	VV_DELETED	0x0400	/* should be removed */
 #define	VV_MD		0x0800	/* vnode backs the md device */
+#define	VV_FORCEINSMQ	0x1000	/* force the insmntque to succeed */
 
 /*
  * Vnode attributes.  A field value of VNOVAL represents a field whose value
@@ -312,14 +309,11 @@ struct vattr {
 #define IO_SEQSHIFT	16		/* seq heuristic in upper 16 bits */
 
 /*
- *  Modes.  Some values same as Ixxx entries from inode.h for now.
+ *  Flags for accmode_t.
  */
 #define	VEXEC	000100		/* execute/search permission */
 #define	VWRITE	000200		/* write permission */
 #define	VREAD	000400		/* read permission */
-#define	VSVTX	001000		/* save swapped text even after use */
-#define	VSGID	002000		/* set group id on execution */
-#define	VSUID	004000		/* set user id on execution */
 #define	VADMIN	010000		/* permission to administer */
 #define	VSTAT	020000		/* permission to retrieve attrs */
 #define	VAPPEND	040000		/* permission to write/append */
@@ -399,6 +393,11 @@ extern void	(*lease_updatetime)(int deltat);
 #define	VI_TRYLOCK(vp)	mtx_trylock(&(vp)->v_interlock)
 #define	VI_UNLOCK(vp)	mtx_unlock(&(vp)->v_interlock)
 #define	VI_MTX(vp)	(&(vp)->v_interlock)
+
+#define	VN_LOCK_AREC(vp)						\
+	((vp)->v_vnlock->lock_object.lo_flags |= LK_CANRECURSE)
+#define	VN_LOCK_ASHARE(vp)						\
+	((vp)->v_vnlock->lock_object.lo_flags &= ~LK_NOSHARE)
 
 #endif /* _KERNEL */
 
@@ -581,23 +580,26 @@ int	speedup_syncer(void);
 	vn_fullpath(FIRST_THREAD_IN_PROC(p), (p)->p_textvp, rb, rfb)
 int	vn_fullpath(struct thread *td, struct vnode *vn,
 	    char **retbuf, char **freebuf);
+int	vn_fullpath_global(struct thread *td, struct vnode *vn,
+	    char **retbuf, char **freebuf);
+int	vn_commname(struct vnode *vn, char *buf, u_int buflen);
 int	vaccess(enum vtype type, mode_t file_mode, uid_t file_uid,
-	    gid_t file_gid, mode_t acc_mode, struct ucred *cred,
+	    gid_t file_gid, accmode_t accmode, struct ucred *cred,
 	    int *privused);
 int	vaccess_acl_posix1e(enum vtype type, uid_t file_uid,
-	    gid_t file_gid, struct acl *acl, mode_t acc_mode,
+	    gid_t file_gid, struct acl *acl, accmode_t accmode,
 	    struct ucred *cred, int *privused);
 void	vattr_null(struct vattr *vap);
 int	vcount(struct vnode *vp);
 void	vdrop(struct vnode *);
 void	vdropl(struct vnode *);
+void	vdestroy(struct vnode *);
 int	vflush(struct mount *mp, int rootrefs, int flags, struct thread *td);
 int	vget(struct vnode *vp, int lockflag, struct thread *td);
 void	vgone(struct vnode *vp);
 void	vhold(struct vnode *);
 void	vholdl(struct vnode *);
-int	vinvalbuf(struct vnode *vp, int save,
-	    struct thread *td, int slpflag, int slptimeo);
+int	vinvalbuf(struct vnode *vp, int save, int slpflag, int slptimeo);
 int	vtruncbuf(struct vnode *vp, struct ucred *cred, struct thread *td,
 	    off_t length, int blksize);
 void	vn_printf(struct vnode *vp, const char *fmt, ...) __printflike(2,3);
@@ -608,8 +610,8 @@ int	vn_close(struct vnode *vp,
 void	vn_finished_write(struct mount *mp);
 void	vn_finished_secondary_write(struct mount *mp);
 int	vn_isdisk(struct vnode *vp, int *errp);
-int	_vn_lock(struct vnode *vp, int flags, struct thread *td, char *file, int line);
-#define vn_lock(vp, flags, td) _vn_lock(vp, flags, td, __FILE__, __LINE__)
+int	_vn_lock(struct vnode *vp, int flags, char *file, int line);
+#define vn_lock(vp, flags) _vn_lock(vp, flags, __FILE__, __LINE__)
 int	vn_open(struct nameidata *ndp, int *flagp, int cmode, struct file *fp);
 int	vn_open_cred(struct nameidata *ndp, int *flagp, int cmode,
 	    struct ucred *cred, struct file *fp);
@@ -626,8 +628,6 @@ int	vn_stat(struct vnode *vp, struct stat *sb, struct ucred *active_cred,
 	    struct ucred *file_cred, struct thread *td);
 int	vn_start_write(struct vnode *vp, struct mount **mpp, int flags);
 int	vn_start_secondary_write(struct vnode *vp, struct mount **mpp,
-	    int flags);
-int	vn_write_suspend_wait(struct vnode *vp, struct mount *mp,
 	    int flags);
 int	vn_writechk(struct vnode *vp);
 int	vn_extattr_get(struct vnode *vp, int ioflg, int attrnamespace,
@@ -651,6 +651,8 @@ int	vop_stdlock(struct vop_lock1_args *);
 int	vop_stdputpages(struct vop_putpages_args *);
 int	vop_stdunlock(struct vop_unlock_args *);
 int	vop_nopoll(struct vop_poll_args *);
+int	vop_stdadvlock(struct vop_advlock_args *ap);
+int	vop_stdadvlockasync(struct vop_advlockasync_args *ap);
 int	vop_stdpathconf(struct vop_pathconf_args *);
 int	vop_stdpoll(struct vop_poll_args *);
 int	vop_stdvptofh(struct vop_vptofh_args *ap);
@@ -686,8 +688,7 @@ void	vop_unlock_pre(void *a);
 									\
 	osize = ooffset = noffset = 0;					\
 	if (!VN_KNLIST_EMPTY((ap)->a_vp)) {				\
-		error = VOP_GETATTR((ap)->a_vp, &va, (ap)->a_cred,	\
-		    curthread);						\
+		error = VOP_GETATTR((ap)->a_vp, &va, (ap)->a_cred);	\
 		if (error)						\
 			return (error);					\
 		ooffset = (ap)->a_uio->uio_offset;			\
@@ -701,7 +702,7 @@ void	vop_unlock_pre(void *a);
 		    | (noffset > osize ? NOTE_EXTEND : 0));		\
 	}
 
-#define VOP_LOCK(vp, flags, td) VOP_LOCK1(vp, flags, td, __FILE__, __LINE__)
+#define VOP_LOCK(vp, flags) VOP_LOCK1(vp, flags, __FILE__, __LINE__)
 
 
 void	vput(struct vnode *vp);
@@ -733,7 +734,7 @@ void vfs_hash_rehash(struct vnode *vp, u_int hash);
 void vfs_hash_remove(struct vnode *vp);
 
 int vfs_kqfilter(struct vop_kqfilter_args *);
-void vfs_mark_atime(struct vnode *vp, struct thread *td);
+void vfs_mark_atime(struct vnode *vp, struct ucred *cred);
 struct dirent;
 int vfs_read_dirent(struct vop_readdir_args *ap, struct dirent *dp, off_t off);
 

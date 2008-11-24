@@ -1,5 +1,5 @@
 /*	$NetBSD: if_arcsubr.c,v 1.36 2001/06/14 05:44:23 itojun Exp $	*/
-/*	$FreeBSD: src/sys/net/if_arcsubr.c,v 1.30 2006/04/12 07:44:31 rwatson Exp $ */
+/*	$FreeBSD: src/sys/net/if_arcsubr.c,v 1.32 2008/11/05 11:43:01 bz Exp $ */
 
 /*-
  * Copyright (c) 1994, 1995 Ignatios Souvatzis
@@ -758,7 +758,9 @@ arc_resolvemulti(struct ifnet *ifp, struct sockaddr **llsa,
     struct sockaddr *sa)
 {
 	struct sockaddr_dl *sdl;
+#ifdef INET
 	struct sockaddr_in *sin;
+#endif
 #ifdef INET6
 	struct sockaddr_in6 *sin6;
 #endif
@@ -778,7 +780,7 @@ arc_resolvemulti(struct ifnet *ifp, struct sockaddr **llsa,
 		sin = (struct sockaddr_in *)sa;
 		if (!IN_MULTICAST(ntohl(sin->sin_addr.s_addr)))
 			return EADDRNOTAVAIL;
-		MALLOC(sdl, struct sockaddr_dl *, sizeof *sdl, M_IFMADDR,
+		sdl = malloc(sizeof *sdl, M_IFMADDR,
 		       M_NOWAIT | M_ZERO);
 		if (sdl == NULL)
 			return ENOMEM;
@@ -806,7 +808,7 @@ arc_resolvemulti(struct ifnet *ifp, struct sockaddr **llsa,
 		}
 		if (!IN6_IS_ADDR_MULTICAST(&sin6->sin6_addr))
 			return EADDRNOTAVAIL;
-		MALLOC(sdl, struct sockaddr_dl *, sizeof *sdl, M_IFMADDR,
+		sdl = malloc(sizeof *sdl, M_IFMADDR,
 		       M_NOWAIT | M_ZERO);
 		if (sdl == NULL)
 			return ENOMEM;

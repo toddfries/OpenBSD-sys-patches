@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/i386/libi386/bootinfo32.c,v 1.37 2006/11/02 01:23:17 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/i386/libi386/bootinfo32.c,v 1.38 2008/11/17 20:49:29 pjd Exp $");
 
 #include <stand.h>
 #include <sys/param.h>
@@ -183,6 +183,7 @@ bi_load32(char *args, int *howtop, int *bootdevp, vm_offset_t *bip, vm_offset_t 
 	break;
 
     case DEVT_NET:
+    case DEVT_ZFS:
 	    break;
 	    
     default:

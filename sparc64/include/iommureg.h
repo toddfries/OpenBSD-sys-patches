@@ -33,7 +33,7 @@
  *	from: @(#)sbusreg.h	8.1 (Berkeley) 6/11/93
  *	from: NetBSD: iommureg.h,v 1.6 2001/07/20 00:07:13 eeh Exp
  *
- * $FreeBSD: src/sys/sparc64/include/iommureg.h,v 1.8 2007/08/05 11:56:43 marius Exp $
+ * $FreeBSD: src/sys/sparc64/include/iommureg.h,v 1.9 2008/11/16 19:53:49 marius Exp $
  */
 
 #ifndef _MACHINE_IOMMUREG_H_
@@ -54,7 +54,7 @@
 #define	ISR_PGFLUSH	0x0008	/* streaming buffer page flush */
 #define	ISR_FLUSHSYNC	0x0010	/* streaming buffer flush sync */
 
-/* streaming buffer diagnostics registers. */
+/* streaming buffer diagnostics registers */
 #define	ISD_DATA_DIAG	0x0000	/* streaming buffer data RAM diag 0..127 */
 #define	ISD_ERROR_DIAG	0x0400	/* streaming buffer error status diag 0..127 */
 #define	ISD_PG_TAG_DIAG	0x0800	/* streaming buffer page tag diag 0..15 */
@@ -63,6 +63,7 @@
 /* streaming buffer control register */
 #define STRBUF_EN		0x0000000000000001UL
 #define STRBUF_D		0x0000000000000002UL
+#define STRBUF_RR_DIS		0x0000000000000004UL
 
 #define	IOMMU_MAXADDR(bits)	((1UL << (bits)) - 1)
 
@@ -91,7 +92,7 @@
 #define IOMMUCR_EN		0x0000000000000001UL
 
 /*
- * Diagnostic register definitions.
+ * Diagnostic register definitions
  */
 #define	IOMMU_DTAG_VPNBITS	19
 #define	IOMMU_DTAG_VPNMASK	((1 << IOMMU_DTAG_VPNBITS) - 1)
@@ -126,10 +127,10 @@
 /* Writeable */
 #define IOTTE_W			0x0000000000000002UL
 
-/* log2 of the IOMMU TTE size. */
+/* log2 of the IOMMU TTE size */
 #define	IOTTE_SHIFT		3
 
-/* Streaming buffer line size. */
+/* Streaming buffer line size */
 #define	STRBUF_LINESZ		64
 
 /*

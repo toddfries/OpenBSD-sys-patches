@@ -27,25 +27,42 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/pci/pci_cfgreg.c,v 1.109 2005/10/25 04:53:29 wpaul Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/pci/pci_cfgreg.c,v 1.113 2008/09/11 21:42:11 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bus.h>
 #include <sys/lock.h>
+#include <sys/kernel.h>
 #include <sys/mutex.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
+#include <vm/vm.h>
+#include <vm/pmap.h>
 #include <machine/pci_cfgreg.h>
 
-static int cfgmech;
-static int devmax;
+enum {
+	CFGMECH_NONE = 0,
+	CFGMECH_1,
+	CFGMECH_PCIE,
+};
 
+static uint32_t	pci_docfgregread(int bus, int slot, int func, int reg,
+		    int bytes);
+static int	pciereg_cfgread(int bus, unsigned slot, unsigned func,
+		    unsigned reg, unsigned bytes);
+static void	pciereg_cfgwrite(int bus, unsigned slot, unsigned func,
+		    unsigned reg, int data, unsigned bytes);
 static int	pcireg_cfgread(int bus, int slot, int func, int reg, int bytes);
 static void	pcireg_cfgwrite(int bus, int slot, int func, int reg, int data, int bytes);
-static int	pcireg_cfgopen(void);
 
+static int cfgmech;
+static vm_offset_t pcie_base;
+static int pcie_minbus, pcie_maxbus;
+static uint32_t pcie_badslots;
 static struct mtx pcicfg_mtx;
+static int mcfg_enable = 1;
+TUNABLE_INT("hw.pci.mcfg", &mcfg_enable);
 
 /* 
  * Initialise access to PCI configuration space 
@@ -53,15 +70,59 @@ static struct mtx pcicfg_mtx;
 int
 pci_cfgregopen(void)
 {
-	static int		opened = 0;
+	static int once = 0;
+	uint64_t pciebar;
+	uint16_t did, vid;
 
-	if (opened)
+	if (!once) {
+		mtx_init(&pcicfg_mtx, "pcicfg", NULL, MTX_SPIN);
+		once = 1;
+	}
+
+	if (cfgmech != CFGMECH_NONE)
 		return (1);
-	if (pcireg_cfgopen() == 0)
-		return (0);
-	mtx_init(&pcicfg_mtx, "pcicfg", NULL, MTX_SPIN);
-	opened = 1;
+	cfgmech = CFGMECH_1;
+
+	/*
+	 * Grope around in the PCI config space to see if this is a
+	 * chipset that is capable of doing memory-mapped config cycles.
+	 * This also implies that it can do PCIe extended config cycles.
+	 */
+
+	/* Check for supported chipsets */
+	vid = pci_cfgregread(0, 0, 0, PCIR_VENDOR, 2);
+	did = pci_cfgregread(0, 0, 0, PCIR_DEVICE, 2);
+	switch (vid) {
+	case 0x8086:
+		switch (did) {
+		case 0x3590:
+		case 0x3592:
+			/* Intel 7520 or 7320 */
+			pciebar = pci_cfgregread(0, 0, 0, 0xce, 2) << 16;
+			pcie_cfgregopen(pciebar, 0, 255);
+			break;
+		case 0x2580:
+		case 0x2584:
+		case 0x2590:
+			/* Intel 915, 925, or 915GM */
+			pciebar = pci_cfgregread(0, 0, 0, 0x48, 4);
+			pcie_cfgregopen(pciebar, 0, 255);
+			break;
+		}
+	}
+
 	return (1);
+}
+
+static uint32_t
+pci_docfgregread(int bus, int slot, int func, int reg, int bytes)
+{
+
+	if (cfgmech == CFGMECH_PCIE &&
+	    (bus != 0 || !(1 << slot & pcie_badslots)))
+		return (pciereg_cfgread(bus, slot, func, reg, bytes));
+	else
+		return (pcireg_cfgread(bus, slot, func, reg, bytes));
 }
 
 /* 
@@ -81,12 +142,12 @@ pci_cfgregread(int bus, int slot, int func, int reg, int bytes)
 	 * as an invalid IRQ.
 	 */
 	if (reg == PCIR_INTLINE && bytes == 1) {
-		line = pcireg_cfgread(bus, slot, func, PCIR_INTLINE, 1);
+		line = pci_docfgregread(bus, slot, func, PCIR_INTLINE, 1);
 		if (line == 0 || line >= 128)
 			line = PCI_INVALID_IRQ;
 		return (line);
 	}
-	return (pcireg_cfgread(bus, slot, func, reg, bytes));
+	return (pci_docfgregread(bus, slot, func, reg, bytes));
 }
 
 /* 
@@ -96,7 +157,11 @@ void
 pci_cfgregwrite(int bus, int slot, int func, int reg, u_int32_t data, int bytes)
 {
 
-	pcireg_cfgwrite(bus, slot, func, reg, data, bytes);
+	if (cfgmech == CFGMECH_PCIE &&
+	    (bus != 0 || !(1 << slot & pcie_badslots)))
+		pciereg_cfgwrite(bus, slot, func, reg, data, bytes);
+	else
+		pcireg_cfgwrite(bus, slot, func, reg, data, bytes);
 }
 
 /* 
@@ -109,26 +174,12 @@ pci_cfgenable(unsigned bus, unsigned slot, unsigned func, int reg, int bytes)
 {
 	int dataport = 0;
 
-	if (bus <= PCI_BUSMAX
-	    && slot < devmax
-	    && func <= PCI_FUNCMAX
-	    && reg <= PCI_REGMAX
-	    && bytes != 3
-	    && (unsigned) bytes <= 4
-	    && (reg & (bytes - 1)) == 0) {
-		switch (cfgmech) {
-		case 1:
-			outl(CONF1_ADDR_PORT, (1 << 31)
-			    | (bus << 16) | (slot << 11) 
-			    | (func << 8) | (reg & ~0x03));
-			dataport = CONF1_DATA_PORT + (reg & 0x03);
-			break;
-		case 2:
-			outb(CONF2_ENABLE_PORT, 0xf0 | (func << 1));
-			outb(CONF2_FORWARD_PORT, bus);
-			dataport = 0xc000 | (slot << 8) | reg;
-			break;
-		}
+	if (bus <= PCI_BUSMAX && slot < 32 && func <= PCI_FUNCMAX &&
+	    reg <= PCI_REGMAX && bytes != 3 && (unsigned) bytes <= 4 &&
+	    (reg & (bytes - 1)) == 0) {
+		outl(CONF1_ADDR_PORT, (1 << 31) | (bus << 16) | (slot << 11) 
+		    | (func << 8) | (reg & ~0x03));
+		dataport = CONF1_DATA_PORT + (reg & 0x03);
 	}
 	return (dataport);
 }
@@ -137,19 +188,11 @@ pci_cfgenable(unsigned bus, unsigned slot, unsigned func, int reg, int bytes)
 static void
 pci_cfgdisable(void)
 {
-	switch (cfgmech) {
-	case 1:
-		/*
-		 * Do nothing for the config mechanism 1 case.
-		 * Writing a 0 to the address port can apparently
-		 * confuse some bridges and cause spurious
-		 * access failures.
-		 */
-		break;
-	case 2:
-		outb(CONF2_ENABLE_PORT, 0);
-		break;
-	}
+
+	/*
+	 * Do nothing.  Writing a 0 to the address port can apparently
+	 * confuse some bridges and cause spurious access failures.
+	 */
 }
 
 static int
@@ -202,130 +245,105 @@ pcireg_cfgwrite(int bus, int slot, int func, int reg, int data, int bytes)
 	mtx_unlock_spin(&pcicfg_mtx);
 }
 
-/* check whether the configuration mechanism has been correctly identified */
-static int
-pci_cfgcheck(int maxdev)
+int
+pcie_cfgregopen(uint64_t base, uint8_t minbus, uint8_t maxbus)
 {
-	uint32_t id, class;
-	uint8_t header;
-	uint8_t device;
-	int port;
+	uint32_t val1, val2;
+	int slot;
 
-	if (bootverbose) 
-		printf("pci_cfgcheck:\tdevice ");
+	if (!mcfg_enable)
+		return (0);
 
-	for (device = 0; device < maxdev; device++) {
-		if (bootverbose) 
-			printf("%d ", device);
+	if (minbus != 0)
+		return (0);
 
-		port = pci_cfgenable(0, device, 0, 0, 4);
-		id = inl(port);
-		if (id == 0 || id == 0xffffffff)
-			continue;
+	if (bootverbose)
+		printf("PCIe: Memory Mapped configuration base @ 0x%lx\n",
+		    base);
 
-		port = pci_cfgenable(0, device, 0, 8, 4);
-		class = inl(port) >> 8;
-		if (bootverbose)
-			printf("[class=%06x] ", class);
-		if (class == 0 || (class & 0xf870ff) != 0)
-			continue;
+	/* XXX: We should make sure this really fits into the direct map. */
+	pcie_base = (vm_offset_t)pmap_mapdev(base, (maxbus + 1) << 20);
+	pcie_minbus = minbus;
+	pcie_maxbus = maxbus;
+	cfgmech = CFGMECH_PCIE;
 
-		port = pci_cfgenable(0, device, 0, 14, 1);
-		header = inb(port);
-		if (bootverbose)
-			printf("[hdr=%02x] ", header);
-		if ((header & 0x7e) != 0)
-			continue;
+	/*
+	 * On some AMD systems, some of the devices on bus 0 are
+	 * inaccessible using memory-mapped PCI config access.  Walk
+	 * bus 0 looking for such devices.  For these devices, we will
+	 * fall back to using type 1 config access instead.
+	 */
+	if (pci_cfgregopen() != 0) {
+		for (slot = 0; slot < 32; slot++) {
+			val1 = pcireg_cfgread(0, slot, 0, 0, 4);
+			if (val1 == 0xffffffff)
+				continue;
 
-		if (bootverbose)
-			printf("is there (id=%08x)\n", id);
-
-		pci_cfgdisable();
-		return (1);
+			val2 = pciereg_cfgread(0, slot, 0, 0, 4);
+			if (val2 != val1)
+				pcie_badslots |= (1 << slot);
+		}
 	}
-	if (bootverbose) 
-		printf("-- nothing found\n");
 
-	pci_cfgdisable();
-	return (0);
+	return (1);
 }
 
+#define PCIE_VADDR(base, reg, bus, slot, func)	\
+	((base)				+	\
+	((((bus) & 0xff) << 20)		|	\
+	(((slot) & 0x1f) << 15)		|	\
+	(((func) & 0x7) << 12)		|	\
+	((reg) & 0xfff)))
+
 static int
-pcireg_cfgopen(void)
+pciereg_cfgread(int bus, unsigned slot, unsigned func, unsigned reg,
+    unsigned bytes)
 {
-	uint32_t mode1res, oldval1;
-	uint8_t mode2res, oldval2;
+	volatile vm_offset_t va;
+	int data = -1;
 
-	oldval1 = inl(CONF1_ADDR_PORT);
+	if (bus < pcie_minbus || bus > pcie_maxbus || slot >= 32 ||
+	    func > PCI_FUNCMAX || reg >= 0x1000)
+		return (-1);
 
-	if (bootverbose) {
-		printf("pci_open(1):\tmode 1 addr port (0x0cf8) is 0x%08x\n",
-		    oldval1);
+	va = PCIE_VADDR(pcie_base, reg, bus, slot, func);
+
+	switch (bytes) {
+	case 4:
+		data = *(volatile uint32_t *)(va);
+		break;
+	case 2:
+		data = *(volatile uint16_t *)(va);
+		break;
+	case 1:
+		data = *(volatile uint8_t *)(va);
+		break;
 	}
 
-	if ((oldval1 & CONF1_ENABLE_MSK) == 0) {
+	return (data);
+}
 
-		cfgmech = 1;
-		devmax = 32;
+static void
+pciereg_cfgwrite(int bus, unsigned slot, unsigned func, unsigned reg, int data,
+    unsigned bytes)
+{
+	volatile vm_offset_t va;
 
-		outl(CONF1_ADDR_PORT, CONF1_ENABLE_CHK);
-		DELAY(1);
-		mode1res = inl(CONF1_ADDR_PORT);
-		outl(CONF1_ADDR_PORT, oldval1);
+	if (bus < pcie_minbus || bus > pcie_maxbus || slot >= 32 ||
+	    func > PCI_FUNCMAX || reg >= 0x1000)
+		return;
 
-		if (bootverbose)
-			printf("pci_open(1a):\tmode1res=0x%08x (0x%08lx)\n", 
-			    mode1res, CONF1_ENABLE_CHK);
+	va = PCIE_VADDR(pcie_base, reg, bus, slot, func);
 
-		if (mode1res) {
-			if (pci_cfgcheck(32)) 
-				return (cfgmech);
-		}
-
-		outl(CONF1_ADDR_PORT, CONF1_ENABLE_CHK1);
-		mode1res = inl(CONF1_ADDR_PORT);
-		outl(CONF1_ADDR_PORT, oldval1);
-
-		if (bootverbose)
-			printf("pci_open(1b):\tmode1res=0x%08x (0x%08lx)\n", 
-			    mode1res, CONF1_ENABLE_CHK1);
-
-		if ((mode1res & CONF1_ENABLE_MSK1) == CONF1_ENABLE_RES1) {
-			if (pci_cfgcheck(32)) 
-				return (cfgmech);
-		}
+	switch (bytes) {
+	case 4:
+		*(volatile uint32_t *)(va) = data;
+		break;
+	case 2:
+		*(volatile uint16_t *)(va) = data;
+		break;
+	case 1:
+		*(volatile uint8_t *)(va) = data;
+		break;
 	}
-
-	oldval2 = inb(CONF2_ENABLE_PORT);
-
-	if (bootverbose) {
-		printf("pci_open(2):\tmode 2 enable port (0x0cf8) is 0x%02x\n",
-		    oldval2);
-	}
-
-	if ((oldval2 & 0xf0) == 0) {
-
-		cfgmech = 2;
-		devmax = 16;
-
-		outb(CONF2_ENABLE_PORT, CONF2_ENABLE_CHK);
-		mode2res = inb(CONF2_ENABLE_PORT);
-		outb(CONF2_ENABLE_PORT, oldval2);
-
-		if (bootverbose)
-			printf("pci_open(2a):\tmode2res=0x%02x (0x%02x)\n", 
-			    mode2res, CONF2_ENABLE_CHK);
-
-		if (mode2res == CONF2_ENABLE_RES) {
-			if (bootverbose)
-				printf("pci_open(2a):\tnow trying mechanism 2\n");
-
-			if (pci_cfgcheck(16)) 
-				return (cfgmech);
-		}
-	}
-
-	cfgmech = 0;
-	devmax = 0;
-	return (cfgmech);
 }

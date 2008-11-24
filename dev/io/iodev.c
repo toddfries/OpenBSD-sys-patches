@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/io/iodev.c,v 1.2 2004/08/02 20:42:28 markm Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/io/iodev.c,v 1.4 2008/08/08 13:43:56 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -52,7 +52,6 @@ static struct cdev *iodev;
 
 static struct cdevsw io_cdevsw = {
 	.d_version =	D_VERSION,
-	.d_flags =	D_NEEDGIANT,
 	.d_open =	ioopen,
 	.d_close =	ioclose,
 	.d_name =	"io",
@@ -66,7 +65,7 @@ io_modevent(module_t mod __unused, int type, void *data __unused)
 	case MOD_LOAD:
 		if (bootverbose)
 			printf("io: <I/O>\n");
-		iodev = make_dev(&io_cdevsw, CDEV_MINOR_IO,
+		iodev = make_dev(&io_cdevsw, 0,
 			UID_ROOT, GID_WHEEL, 0600, "io");
 		break;
 

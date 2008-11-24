@@ -37,7 +37,7 @@
  *
  * Author: Julian Elischer <julian@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_pppoe.c,v 1.86 2007/10/14 09:58:22 mav Exp $
+ * $FreeBSD: src/sys/netgraph/ng_pppoe.c,v 1.94 2008/03/03 19:36:03 mav Exp $
  * $Whistle: ng_pppoe.c,v 1.10 1999/11/01 09:24:52 julian Exp $
  */
 
@@ -64,7 +64,6 @@ MALLOC_DEFINE(M_NETGRAPH_PPPOE, "netgraph_pppoe", "netgraph pppoe node");
 #endif
 
 #define SIGNOFF "session closed"
-#define OFFSETOF(s, e) ((char *)&((s *)0)->e - (char *)((s *)0))
 
 /*
  * This section contains the netgraph method declarations for the
@@ -236,8 +235,17 @@ struct sess_con {
 	ng_ID_t			creator;	/* who to notify */
 	struct pppoe_full_hdr	pkt_hdr;	/* used when connected */
 	negp			neg;		/* used when negotiating */
+	LIST_ENTRY(sess_con)	sessions;
 };
 typedef struct sess_con *sessp;
+
+#define SESSHASHSIZE	0x0100
+#define SESSHASH(x)	(((x) ^ ((x) >> 8)) & (SESSHASHSIZE - 1))
+
+struct sess_hash_entry {
+	struct mtx	mtx;
+	LIST_HEAD(hhead, sess_con) head;
+};
 
 /*
  * Information we store for each node
@@ -252,6 +260,8 @@ struct PPPoE {
 #define	COMPAT_3COM	0x00000001
 #define	COMPAT_DLINK	0x00000002
 	struct ether_header	eh;
+	LIST_HEAD(, sess_con) listeners;
+	struct sess_hash_entry	sesshash[SESSHASHSIZE];
 };
 typedef struct PPPoE *priv_p;
 
@@ -272,43 +282,6 @@ static	int	pppoe_send_event(sessp sp, enum cmd cmdid);
  * Author:	Michal Ostrowski <mostrows@styx.uwaterloo.ca>		 *
  ************************************************************************/
 
-/*
- * Generate a new session id
- * XXX find out the FreeBSD locking scheme.
- */
-static uint16_t
-get_new_sid(node_p node)
-{
-	static int pppoe_sid = 10;
-	hook_p	hook;
-	uint16_t val;
-
-restart:
-	val = pppoe_sid++;
-	/*
-	 * Spec says 0xFFFF is reserved.
-	 * Also don't use 0x0000
-	 */
-	if (val == 0xffff) {
-		pppoe_sid = 20;
-		goto restart;
-	}
-
-	/* Check it isn't already in use. */
-	LIST_FOREACH(hook, &node->nd_hooks, hk_hooks) {
-		sessp sp = NG_HOOK_PRIVATE(hook);
-
-		/* Skip any nonsession hook. */
-		if (sp == NULL)
-			continue;
-		if (sp->Session_ID == val)
-			goto restart;
-	}
-
-	CTR2(KTR_NET, "%20s: new sid %d", __func__, val);
-
-	return (val);
-}
 
 
 /*
@@ -443,21 +416,11 @@ make_packet(sessp sp) {
 static hook_p
 pppoe_match_svc(node_p node, const struct pppoe_tag *tag)
 {
-	hook_p hook;
+	const priv_p privp = NG_NODE_PRIVATE(node);
+	sessp sp;
 
-	LIST_FOREACH(hook, &node->nd_hooks, hk_hooks) {
-		sessp sp = NG_HOOK_PRIVATE(hook);
-		negp neg;
-
-		/* Skip any nonsession hook. */
-		if (sp == NULL)
-			continue;
-
-		/* Skip any sessions which are not in LISTEN mode. */
-		if (sp->state != PPPOE_LISTENING)
-			continue;
-
-		neg = sp->neg;
+	LIST_FOREACH(sp, &privp->listeners, sessions) {
+		negp neg = sp->neg;
 
 		/* Empty Service-Name matches any service. */
 		if (neg->service_len == 0)
@@ -475,9 +438,10 @@ pppoe_match_svc(node_p node, const struct pppoe_tag *tag)
 		    ntohs(tag->tag_len)) == 0)
 			break;
 	}
-	CTR3(KTR_NET, "%20s: matched %p for %s", __func__, hook, tag->tag_data);
+	CTR3(KTR_NET, "%20s: matched %p for %s", __func__,
+	    sp?sp->hook:NULL, tag->tag_data);
 
-	return (hook);
+	return (sp?sp->hook:NULL);
 }
 
 /*
@@ -489,27 +453,17 @@ pppoe_match_svc(node_p node, const struct pppoe_tag *tag)
 static int
 pppoe_broadcast_padi(node_p node, struct mbuf *m0)
 {
-	hook_p hook;
+	const priv_p privp = NG_NODE_PRIVATE(node);
+	sessp sp;
 	int error = 0;
 
-	LIST_FOREACH(hook, &node->nd_hooks, hk_hooks) {
-		sessp sp = NG_HOOK_PRIVATE(hook);
+	LIST_FOREACH(sp, &privp->listeners, sessions) {
 		struct mbuf *m;
-
-		/*
-		 * Go through all listening hooks and
-		 * broadcast the PADI packet up there
-		 */
-		if (sp == NULL)
-			continue;
-
-		if (sp->state != PPPOE_LISTENING)
-			continue;
 
 		m = m_dup(m0, M_DONTWAIT);
 		if (m == NULL)
 			return (ENOMEM);
-		NG_SEND_DATA_ONLY(error, hook, m);
+		NG_SEND_DATA_ONLY(error, sp->hook, m);
 		if (error)
 			return (error);
 	}
@@ -523,59 +477,104 @@ pppoe_broadcast_padi(node_p node, struct mbuf *m0)
 static hook_p
 pppoe_find_svc(node_p node, const char *svc_name, int svc_len)
 {
-	hook_p	hook;
+	const priv_p privp = NG_NODE_PRIVATE(node);
+	sessp sp;
 
-	LIST_FOREACH(hook, &node->nd_hooks, hk_hooks) {
-		sessp sp = NG_HOOK_PRIVATE(hook);
-		negp neg;
-
-		/* Skip any nonsession hook. */
-		if (sp == NULL)
-			continue;
-
-		/* Skip any sessions which are not in LISTEN mode. */
-		if (sp->state != PPPOE_LISTENING)
-			continue;
-
-		neg = sp->neg;
+	LIST_FOREACH(sp, &privp->listeners, sessions) {
+		negp neg = sp->neg;
 
 		if (neg->service_len == svc_len &&
-		    strncmp(svc_name, neg->service.data, svc_len == 0))
-			return (hook);
+		    strncmp(svc_name, neg->service.data, svc_len) == 0)
+			return (sp->hook);
 	}
 
 	return (NULL);
 }
 
 /**************************************************************************
- * Routine to find a particular session that matches an incoming packet.  *
+ * Routines to find a particular session that matches an incoming packet. *
  **************************************************************************/
-static hook_p
-pppoe_findsession(node_p node, const struct pppoe_full_hdr *wh)
+/* Find free session and add to hash. */
+static uint16_t
+pppoe_getnewsession(sessp sp)
 {
-	hook_p	hook = NULL;
-	uint16_t session = ntohs(wh->ph.sid);
+	const priv_p privp = NG_NODE_PRIVATE(NG_HOOK_NODE(sp->hook));
+	static uint16_t pppoe_sid = 1;
+	sessp	tsp;
+	uint16_t val, hash;
 
-	/*
-	 * Find matching peer/session combination.
-	 */
-	LIST_FOREACH(hook, &node->nd_hooks, hk_hooks) {
-		sessp	sp = NG_HOOK_PRIVATE(hook);
+restart:
+	/* Atomicity is not needed here as value will be checked. */
+	val = pppoe_sid++;
+	/* Spec says 0xFFFF is reserved, also don't use 0x0000. */
+	if (val == 0xffff || val == 0x0000)
+		val = pppoe_sid = 1;
 
-		/* Skip any nonsession hook. */
-		if (sp == NULL)
-			continue;
+	/* Check it isn't already in use. */
+	hash = SESSHASH(val);
+	mtx_lock(&privp->sesshash[hash].mtx);
+	LIST_FOREACH(tsp, &privp->sesshash[hash].head, sessions) {
+		if (tsp->Session_ID == val)
+			break;
+	}
+	if (!tsp) {
+		sp->Session_ID = val;
+		LIST_INSERT_HEAD(&privp->sesshash[hash].head, sp, sessions);
+	}
+	mtx_unlock(&privp->sesshash[hash].mtx);
+	if (tsp)
+		goto restart;
+
+	CTR2(KTR_NET, "%20s: new sid %d", __func__, val);
+
+	return (val);
+}
+
+/* Add specified session to hash. */
+static void
+pppoe_addsession(sessp sp)
+{
+	const priv_p	privp = NG_NODE_PRIVATE(NG_HOOK_NODE(sp->hook));
+	uint16_t	hash = SESSHASH(sp->Session_ID);
+
+	mtx_lock(&privp->sesshash[hash].mtx);
+	LIST_INSERT_HEAD(&privp->sesshash[hash].head, sp, sessions);
+	mtx_unlock(&privp->sesshash[hash].mtx);
+}
+
+/* Delete specified session from hash. */
+static void
+pppoe_delsession(sessp sp)
+{
+	const priv_p	privp = NG_NODE_PRIVATE(NG_HOOK_NODE(sp->hook));
+	uint16_t	hash = SESSHASH(sp->Session_ID);
+
+	mtx_lock(&privp->sesshash[hash].mtx);
+	LIST_REMOVE(sp, sessions);
+	mtx_unlock(&privp->sesshash[hash].mtx);
+}
+
+/* Find matching peer/session combination. */
+static sessp
+pppoe_findsession(priv_p privp, const struct pppoe_full_hdr *wh)
+{
+	uint16_t 	session = ntohs(wh->ph.sid);
+	uint16_t	hash = SESSHASH(session);
+	sessp		sp = NULL;
+
+	mtx_lock(&privp->sesshash[hash].mtx);
+	LIST_FOREACH(sp, &privp->sesshash[hash].head, sessions) {
 		if (sp->Session_ID == session &&
-		    (sp->state == PPPOE_CONNECTED ||
-		     sp->state == PPPOE_NEWCONNECTED) &&
 		    bcmp(sp->pkt_hdr.eh.ether_dhost,
 		     wh->eh.ether_shost, ETHER_ADDR_LEN) == 0) {
 			break;
 		}
 	}
-	CTR3(KTR_NET, "%20s: matched %p for %d", __func__, hook, session);
+	mtx_unlock(&privp->sesshash[hash].mtx);
+	CTR3(KTR_NET, "%20s: matched %p for %d", __func__, sp?sp->hook:NULL,
+	    session);
 
-	return (hook);
+	return (sp);
 }
 
 static hook_p
@@ -608,7 +607,8 @@ pppoe_finduniq(node_p node, const struct pppoe_tag *tag)
 static int
 ng_pppoe_constructor(node_p node)
 {
-	priv_p privp;
+	priv_p	privp;
+	int	i;
 
 	/* Initialize private descriptor. */
 	privp = malloc(sizeof(*privp), M_NETGRAPH_PPPOE, M_NOWAIT | M_ZERO);
@@ -622,6 +622,12 @@ ng_pppoe_constructor(node_p node)
 	/* Initialize to standard mode. */
 	memset(&privp->eh.ether_dhost, 0xff, ETHER_ADDR_LEN);
 	privp->eh.ether_type = ETHERTYPE_PPPOE_DISC;
+
+	LIST_INIT(&privp->listeners);
+	for (i = 0; i < SESSHASHSIZE; i++) {
+	    mtx_init(&privp->sesshash[i].mtx, "PPPoE hash mutex", NULL, MTX_DEF);
+	    LIST_INIT(&privp->sesshash[i].head);
+	}
 
 	CTR3(KTR_NET, "%20s: created node [%x] (%p)",
 	    __func__, node->nd_ID, node);
@@ -756,18 +762,12 @@ ng_pppoe_rcvmsg(node_p node, item_p item, hook_p lasthook)
 			/* Make sure strcmp will terminate safely. */
 			ourmsg->hook[sizeof(ourmsg->hook) - 1] = '\0';
 
-			/* Cycle through all known hooks. */
-			LIST_FOREACH(hook, &node->nd_hooks, hk_hooks) {
-				if (NG_HOOK_NAME(hook) &&
-				    strcmp(NG_HOOK_NAME(hook), ourmsg->hook) ==
-				    0)
-					break;
-			}
+			/* Find hook by name. */
+			hook = ng_findhook(node, ourmsg->hook);
 			if (hook == NULL)
 				LEAVE(ENOENT);
 
 			sp = NG_HOOK_PRIVATE(hook);
-
 			if (sp == NULL)
 				LEAVE(EINVAL);
 
@@ -837,6 +837,7 @@ ng_pppoe_rcvmsg(node_p node, item_p item, hook_p lasthook)
 			break;
 		    }
 		case NGM_PPPOE_CONNECT:
+		    {
 			/*
 			 * Check the hook exists and is Uninitialised.
 			 * Send a PADI request, and start the timeout logic.
@@ -846,15 +847,27 @@ ng_pppoe_rcvmsg(node_p node, item_p item, hook_p lasthook)
 			 * Set up the session to the correct state and
 			 * start it.
 			 */
+			int	i, acnlen = 0, acnsep = 0, srvlen;
+			for (i = 0; i < ourmsg->data_len; i++) {
+				if (ourmsg->data[i] == '\\') {
+					acnlen = i;
+					acnsep = 1;
+					break;
+				}
+			}
+			srvlen = ourmsg->data_len - acnlen - acnsep;
+
+			bcopy(ourmsg->data, neg->ac_name.data, acnlen);
+			neg->ac_name_len = acnlen;
+
 			neg->service.hdr.tag_type = PTT_SRV_NAME;
-			neg->service.hdr.tag_len =
-			    htons((uint16_t)ourmsg->data_len);
-			if (ourmsg->data_len)
-				bcopy(ourmsg->data, neg->service.data,
-				    ourmsg->data_len);
-			neg->service_len = ourmsg->data_len;
+			neg->service.hdr.tag_len = htons((uint16_t)srvlen);
+			bcopy(ourmsg->data + acnlen + acnsep,
+			    neg->service.data, srvlen);
+			neg->service_len = srvlen;
 			pppoe_start(sp);
 			break;
+		    }
 		case NGM_PPPOE_LISTEN:
 			/*
 			 * Check the hook exists and is Uninitialised.
@@ -876,6 +889,7 @@ ng_pppoe_rcvmsg(node_p node, item_p item, hook_p lasthook)
 			 * Wait for PADI packet coming from Ethernet.
 			 */
 			sp->state = PPPOE_LISTENING;
+			LIST_INSERT_HEAD(&privp->listeners, sp, sessions);
 			break;
 		case NGM_PPPOE_OFFER:
 			/*
@@ -1132,8 +1146,6 @@ ng_pppoe_rcvdata(hook_p hook, item_p item)
 	switch (sp->state) {
 	case	PPPOE_NEWCONNECTED:
 	case	PPPOE_CONNECTED: {
-		static const u_char addrctrl[] = { 0xff, 0x03 };
-
 		/*
 		 * Remove PPP address and control fields, if any.
 		 * For example, ng_ppp(4) always sends LCP packets
@@ -1143,7 +1155,8 @@ ng_pppoe_rcvdata(hook_p hook, item_p item)
 		if (m->m_pkthdr.len >= 2) {
 			if (m->m_len < 2 && !(m = m_pullup(m, 2)))
 				LEAVE(ENOBUFS);
-			if (bcmp(mtod(m, u_char *), addrctrl, 2) == 0)
+			if (mtod(m, u_char *)[0] == 0xff &&
+			    mtod(m, u_char *)[1] == 0x03)
 				m_adj(m, 2);
 		}
 		/*
@@ -1407,12 +1420,30 @@ ng_pppoe_rcvdata_ether(hook_p hook, item_p item)
 			 * It needs to be in PPPOE_SINIT.
 			 */
 			sp = NG_HOOK_PRIVATE(sendhook);
+			if (sp->state == PPPOE_SREQ ||
+			    sp->state == PPPOE_CONNECTED) {
+				break;	/* Multiple PADO is OK. */
+			}
 			if (sp->state != PPPOE_SINIT) {
 				log(LOG_NOTICE, "ng_pppoe[%x]: session "
 				    "in wrong state\n", node->nd_ID);
 				LEAVE(ENETUNREACH);
 			}
 			neg = sp->neg;
+			/* If requested specific AC-name, check it. */
+			if (neg->ac_name_len) {
+				tag = get_tag(ph, PTT_AC_NAME);
+				if (!tag) {
+					/* No PTT_AC_NAME in PADO */
+					break;
+				}
+				if (neg->ac_name_len != htons(tag->tag_len) ||
+				    strncmp(neg->ac_name.data, tag->tag_data,
+				    neg->ac_name_len) != 0) {
+					break;
+				}
+			}
+			sp->state = PPPOE_SREQ;
 			ng_uncallout(&neg->handle, node);
 
 			/*
@@ -1474,16 +1505,15 @@ ng_pppoe_rcvdata_ether(hook_p hook, item_p item)
 				 * We should still have a copy of it.
 				 */
 				sp->state = PPPOE_SOFFER;
-			}
-			if (sp->state != PPPOE_SOFFER)
+			} else if (sp->state != PPPOE_SOFFER)
 				LEAVE (ENETUNREACH);
 			neg = sp->neg;
 			ng_uncallout(&neg->handle, node);
 			neg->pkt->pkt_header.ph.code = PADS_CODE;
-			if (sp->Session_ID == 0)
+			if (sp->Session_ID == 0) {
 				neg->pkt->pkt_header.ph.sid =
-				    htons(sp->Session_ID
-					= get_new_sid(node));
+				    htons(pppoe_getnewsession(sp));
+			}
 			send_sessionid(sp);
 			neg->timeout = 0;
 			/*
@@ -1553,6 +1583,7 @@ ng_pppoe_rcvdata_ether(hook_p hook, item_p item)
 			ng_uncallout(&neg->handle, node);
 			neg->pkt->pkt_header.ph.sid = wh->ph.sid;
 			sp->Session_ID = ntohs(wh->ph.sid);
+			pppoe_addsession(sp);
 			send_sessionid(sp);
 			neg->timeout = 0;
 			sp->state = PPPOE_CONNECTED;
@@ -1578,11 +1609,11 @@ ng_pppoe_rcvdata_ether(hook_p hook, item_p item)
 			/*
 			 * Find matching peer/session combination.
 			 */
-			sendhook = pppoe_findsession(node, wh);
-			if (sendhook == NULL)
+			sp = pppoe_findsession(privp, wh);
+			if (sp == NULL)
 				LEAVE(ENETUNREACH);
 			/* Disconnect that hook. */
-			ng_rmhook_self(sendhook);
+			ng_rmhook_self(sp->hook);
 			break;
 		default:
 			LEAVE(EPFNOSUPPORT);
@@ -1593,10 +1624,9 @@ ng_pppoe_rcvdata_ether(hook_p hook, item_p item)
 		/*
 		 * Find matching peer/session combination.
 		 */
-		sendhook = pppoe_findsession(node, wh);
-		if (sendhook == NULL)
+		sp = pppoe_findsession(privp, wh);
+		if (sp == NULL)
 			LEAVE (ENETUNREACH);
-		sp = NG_HOOK_PRIVATE(sendhook);
 		m_adj(m, sizeof(*wh));
 
 		/* If packet too short, dump it. */
@@ -1623,7 +1653,7 @@ ng_pppoe_rcvdata_ether(hook_p hook, item_p item)
 				LEAVE (ENETUNREACH);
 			}
 		}
-		NG_FWD_NEW_DATA(error, item, sendhook, m);
+		NG_FWD_NEW_DATA(error, item, sp->hook, m);
 		break;
 	default:
 		LEAVE(EPFNOSUPPORT);
@@ -1661,11 +1691,14 @@ ng_pppoe_rcvdata_debug(hook_p hook, item_p item)
 static int
 ng_pppoe_shutdown(node_p node)
 {
-	const priv_p privdata = NG_NODE_PRIVATE(node);
+	const priv_p privp = NG_NODE_PRIVATE(node);
+	int	i;
 
+	for (i = 0; i < SESSHASHSIZE; i++)
+	    mtx_destroy(&privp->sesshash[i].mtx);
 	NG_NODE_SET_PRIVATE(node, NULL);
-	NG_NODE_UNREF(privdata->node);
-	free(privdata, M_NETGRAPH_PPPOE);
+	NG_NODE_UNREF(privp->node);
+	free(privp, M_NETGRAPH_PPPOE);
 	return (0);
 }
 
@@ -1745,6 +1778,10 @@ ng_pppoe_disconnect(hook_p hook)
 					privp->ethernet_hook, m);
 			}
 		}
+		if (sp->state == PPPOE_LISTENING)
+			LIST_REMOVE(sp, sessions);
+		else if (sp->Session_ID)
+			pppoe_delsession(sp);
 		/*
 		 * As long as we have somewhere to store the timeout handle,
 		 * we may have a timeout pending.. get rid of it.

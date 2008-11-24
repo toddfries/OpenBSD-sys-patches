@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_state.c,v 1.8 2006/03/30 14:01:25 le Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_state.c,v 1.9 2008/10/26 17:20:37 lulf Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -280,8 +280,8 @@ gv_update_sd_state(struct gv_sd *s)
 		s->state = GV_SD_UP;
 	
 	if (s->state != oldstate)
-		printf("GEOM_VINUM: subdisk %s state change: %s -> %s\n",
-		    s->name, gv_sdstate(oldstate), gv_sdstate(s->state));
+		G_VINUM_DEBUG(1, "subdisk %s state change: %s -> %s", s->name,
+		    gv_sdstate(oldstate), gv_sdstate(s->state));
 
 	/* Update the plex, if we have one. */
 	if (s->plex_sc != NULL)
@@ -324,7 +324,7 @@ gv_update_plex_state(struct gv_plex *p)
 		p->state = GV_PLEX_DOWN;
 
 	if (p->state != oldstate)
-		printf("GEOM_VINUM: plex %s state change: %s -> %s\n", p->name,
+		G_VINUM_DEBUG(1, "plex %s state change: %s -> %s", p->name,
 		    gv_plexstate(oldstate), gv_plexstate(p->state));
 
 	/* Update our volume, if we have one. */

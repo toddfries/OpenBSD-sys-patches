@@ -5,7 +5,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/uscanner.c,v 1.91 2008/04/29 00:51:20 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/uscanner.c,v 1.94 2008/09/27 08:51:18 ed Exp $");
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -209,10 +209,12 @@ static const struct uscan_info uscanner_devs[] = {
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_3500 }, USC_KEEP_OPEN },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_3590 }, 0 },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_4200 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_4800 }, 0 },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_4990 }, 0 },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_5000 }, 0 },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_6000 }, 0 },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_CX5400 }, 0 },
+ {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_DX7400 }, 0 },
  {{ USB_VENDOR_EPSON, USB_PRODUCT_EPSON_DX8400 }, 0 },
 
   /* UMAX */
@@ -291,7 +293,7 @@ static int uscanner_do_read(struct uscanner_softc *, struct uio *, int);
 static int uscanner_do_write(struct uscanner_softc *, struct uio *, int);
 static void uscanner_do_close(struct uscanner_softc *);
 
-#define USCANNERUNIT(n) (minor(n))
+#define USCANNERUNIT(n) (dev2unit(n))
 
 static device_probe_t uscanner_match;
 static device_attach_t uscanner_attach;

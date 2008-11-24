@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  * 
  * $Id: dcons_crom.c,v 1.8 2003/10/23 15:47:21 simokawa Exp $
- * $FreeBSD: src/sys/dev/dcons/dcons_crom.c,v 1.9 2007/06/08 04:33:25 simokawa Exp $
+ * $FreeBSD: src/sys/dev/dcons/dcons_crom.c,v 1.10 2008/11/19 22:09:03 marius Exp $
  */
 
 #include <sys/param.h>
@@ -229,7 +229,7 @@ dcons_crom_attach(device_t dev)
 		/*lockarg*/&Giant,
 #endif
 		&sc->dma_tag);
-	bus_dmamap_create(sc->dma_tag, 0, &sc->dma_map);
+	bus_dmamap_create(sc->dma_tag, BUS_DMA_COHERENT, &sc->dma_map);
 	bus_dmamap_load(sc->dma_tag, sc->dma_map,
 	    (void *)dcons_conf->buf, dcons_conf->size,
 	    dmamap_cb, sc, 0);

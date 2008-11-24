@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/mem.c,v 1.18 2007/05/20 13:06:45 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/mem.c,v 1.20 2008/09/27 08:51:18 ed Exp $");
 
 /*
  * Memory special file
@@ -47,7 +47,6 @@ __FBSDID("$FreeBSD: src/sys/sparc64/sparc64/mem.c,v 1.18 2007/05/20 13:06:45 mar
  * might cause illegal aliases to be created for the locked kernel page(s), so
  * it is not implemented.
  */
-#include "opt_global.h"
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -112,7 +111,7 @@ memrw(struct cdev *dev, struct uio *uio, int flags)
 				panic("memrw");
 			continue;
 		}
-		if (minor(dev) == CDEV_MINOR_MEM) {
+		if (dev2unit(dev) == CDEV_MINOR_MEM) {
 			pa = uio->uio_offset & ~PAGE_MASK;
 			if (!is_physical_memory(pa)) {
 				error = EFAULT;
@@ -160,7 +159,7 @@ memrw(struct cdev *dev, struct uio *uio, int flags)
 			}
 			break;
 		}
-		else if (minor(dev) == CDEV_MINOR_KMEM) {
+		else if (dev2unit(dev) == CDEV_MINOR_KMEM) {
 			va = trunc_page(uio->uio_offset);
 			eva = round_page(uio->uio_offset + iov->iov_len);
 

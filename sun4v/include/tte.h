@@ -26,7 +26,7 @@
  * SUCH DAMAGE.
  *
  *	from: BSDI: pmap.v9.h,v 1.10.2.6 1999/08/23 22:18:44 cp Exp
- * $FreeBSD: src/sys/sun4v/include/tte.h,v 1.2 2006/10/09 04:45:18 kmacy Exp $
+ * $FreeBSD: src/sys/sun4v/include/tte.h,v 1.3 2008/08/07 22:46:25 marius Exp $
  */
 
 #ifndef	_MACHINE_TTE_H_
@@ -41,11 +41,15 @@
 
 #define	TD_SOFT2_BITS	(9)
 #define	TD_DIAG_BITS	(9)
+#define	TD_PA_CH_BITS	(30)
+#define	TD_PA_SF_BITS	(28)
 #define	TD_PA_BITS	(42)
 #define	TD_SOFT_BITS	(6)
 
 #define	TD_SOFT2_MASK	((1UL << TD_SOFT2_BITS) - 1)
 #define	TD_DIAG_MASK	((1UL << TD_DIAG_BITS) - 1)
+#define	TD_PA_CH_MASK	((1UL << TD_PA_CH_BITS) - 1)
+#define	TD_PA_SF_MASK	((1UL << TD_PA_SF_BITS) - 1)
 #define	TD_PA_MASK	((1UL << TD_PA_BITS) - 1)
 #define	TD_SOFT_MASK	((1UL << TD_SOFT_BITS) - 1)
 

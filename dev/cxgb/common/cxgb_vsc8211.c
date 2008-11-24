@@ -28,13 +28,9 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/common/cxgb_vsc8211.c,v 1.4 2008/02/23 01:06:16 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/common/cxgb_vsc8211.c,v 1.6 2008/09/23 03:16:54 kmacy Exp $");
 
-#ifdef CONFIG_DEFINED
 #include <cxgb_include.h>
-#else
-#include <dev/cxgb/cxgb_include.h>
-#endif
 
 #undef msleep
 #define msleep t3_os_sleep
@@ -45,6 +41,7 @@ enum {
 	VSC8211_EXT_CTRL      = 23,
 	VSC8211_INTR_ENABLE   = 25,
 	VSC8211_INTR_STATUS   = 26,
+	VSC8211_LED_CTRL      = 27,
 	VSC8211_AUX_CTRL_STAT = 28,
 	VSC8211_EXT_PAGE_AXS  = 31,
 };
@@ -393,8 +390,10 @@ int t3_vsc8211_phy_prep(struct cphy *phy, adapter_t *adapter, int phy_addr,
 	err = mdio_read(phy, 0, VSC8211_EXT_CTRL, &val);
 	if (err)
 		return err;
-	if (val & VSC_CTRL_MEDIA_MODE_HI)
-		return 0;   /* copper interface, done */
+	if (val & VSC_CTRL_MEDIA_MODE_HI) {
+		/* copper interface, just need to configure the LEDs */
+		return mdio_write(phy, 0, VSC8211_LED_CTRL, 0x100);
+	}
 
 	phy->caps = SUPPORTED_1000baseT_Full | SUPPORTED_Autoneg |
 		    SUPPORTED_MII | SUPPORTED_FIBRE | SUPPORTED_IRQ;

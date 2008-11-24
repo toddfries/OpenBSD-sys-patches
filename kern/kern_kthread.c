@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_kthread.c,v 1.43 2007/10/27 00:54:16 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_kthread.c,v 1.47 2008/08/03 21:07:19 antoine Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -243,12 +243,10 @@ kthread_add(void (*func)(void *), void *arg, struct proc *p,
 {
 	va_list ap;
 	struct thread *newtd, *oldtd;
-	int error;
 
 	if (!proc0.p_stats)
 		panic("kthread_add called too soon");
 
-	error = 0;
 	/* If no process supplied, put it on proc0 */
 	if (p == NULL) {
 		p = &proc0;
@@ -292,14 +290,12 @@ kthread_add(void (*func)(void *), void *arg, struct proc *p,
 	PROC_LOCK(p);
 	p->p_flag |= P_HADTHREADS;
 	newtd->td_sigmask = oldtd->td_sigmask; /* XXX dubious */
-	PROC_SLOCK(p);
 	thread_link(newtd, p);
 	thread_lock(oldtd);
 	/* let the scheduler know about these things. */
 	sched_fork_thread(oldtd, newtd);
 	TD_SET_CAN_RUN(newtd);
 	thread_unlock(oldtd);
-	PROC_SUNLOCK(p);
 	PROC_UNLOCK(p);
 
 
@@ -317,14 +313,21 @@ kthread_add(void (*func)(void *), void *arg, struct proc *p,
 void
 kthread_exit(void)
 {
-	/* a module may be waiting for us to exit */
+	struct proc *p;
+
+	/* A module may be waiting for us to exit. */
 	wakeup(curthread);
+
 	/*
 	 * We could rely on thread_exit to call exit1() but
 	 * there is extra work that needs to be done
 	 */
 	if (curthread->td_proc->p_numthreads == 1)
 		kproc_exit(0);	/* never returns */
+
+	p = curthread->td_proc;
+	PROC_LOCK(p);
+	PROC_SLOCK(p);
 	thread_exit();
 }
 
@@ -398,7 +401,8 @@ kproc_kthread_add(void (*func)(void *), void *arg,
 		if (error)
 			return (error);
 		td = FIRST_THREAD_IN_PROC(*procptr);
-		*tdptr = td;
+		if (tdptr)
+			*tdptr = td;
 		va_start(ap, fmt);
 		vsnprintf(td->td_name, sizeof(td->td_name), fmt, ap);
 		va_end(ap);

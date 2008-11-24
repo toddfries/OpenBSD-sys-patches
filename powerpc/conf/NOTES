@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/powerpc/conf/NOTES,v 1.9 2007/09/26 21:14:18 marius Exp $
+# $FreeBSD: src/sys/powerpc/conf/NOTES,v 1.18 2008/06/08 01:58:11 marcel Exp $
 #
 # This file contains machine dependent kernel configuration notes.  For
 # machine independent notes, look in /sys/conf/NOTES.
@@ -10,8 +10,12 @@
 
 #
 # You must specify at least one CPU (the one you intend to run on).
-cpu		OEA
+cpu		AIM
+#cpu		E500
 
+options 	FPU_EMU
+
+#options 	MPC85XX
 options 	POWERMAC		#NewWorld Apple PowerMacs
 options 	PSIM			#GDB PSIM ppc simulator
 
@@ -20,6 +24,7 @@ options		SC_OFWFB		# OFW frame buffer
 # Standard busses
 device		pci
 
+device		bm		# Apple BMAC (Big Mac Ethernet)
 device		ofwd		# Open Firmware disks
 
 
@@ -47,6 +52,8 @@ nodevice	snake_saver
 # isa
 nodevice	pcii
 nodevice	tnt4882
+# sound
+nodevice	snd_cmi
 # wants gdb_cur
 nodevice	dcons
 nodevice	dcons_crom
@@ -55,9 +62,6 @@ nodevice	dcons_crom
 #####################################################################
 # Options we don't want to deal with
 
-nooption 	SMP
-nooption 	ADAPTIVE_SX
-nooption 	GDB
 nooption	PPC_DEBUG
 nooption	PPC_PROBE_CHIPSET
 nooption 	SC_NO_MODE_CHANGE

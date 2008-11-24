@@ -1,7 +1,7 @@
 #
 # DEFAULTS -- Default kernel configuration file for FreeBSD/pc98
 #
-# $FreeBSD: src/sys/pc98/conf/DEFAULTS,v 1.10 2007/06/11 00:38:06 marcel Exp $
+# $FreeBSD: src/sys/pc98/conf/DEFAULTS,v 1.11 2008/03/12 10:12:00 jeff Exp $
 
 machine		pc98 i386
 options 	PC98
@@ -24,6 +24,3 @@ device		uart_ns8250
 # Default partitioning schemes
 options 	GEOM_BSD
 options 	GEOM_PC98
-
-# KSE support went from being default to a kernel option
-options 	KSE

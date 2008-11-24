@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/pbio/pbio.c,v 1.10 2006/05/16 14:36:30 phk Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/pbio/pbio.c,v 1.11 2008/09/27 08:51:18 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -79,8 +79,8 @@ static char *port_names[] = {"a", "b", "ch", "cl"};
 
 #define	PBIO_PNAME(n)		(port_names[(n)])
 
-#define	UNIT(dev)		(minor(dev) >> 2)
-#define	PORT(dev)		(minor(dev) & 0x3)
+#define	UNIT(dev)		(dev2unit(dev) >> 2)
+#define	PORT(dev)		(dev2unit(dev) & 0x3)
 
 #define	PBIOPRI	((PZERO + 5) | PCATCH)
 

@@ -1,6 +1,6 @@
-# $FreeBSD: src/sys/modules/vr/Makefile,v 1.13 2005/09/27 18:10:40 mlaier Exp $
+# $FreeBSD: src/sys/modules/vr/Makefile,v 1.14 2008/03/11 03:50:57 yongari Exp $
 
-.PATH: ${.CURDIR}/../../pci
+.PATH: ${.CURDIR}/../../dev/vr
 
 KMOD=	if_vr
 SRCS=	if_vr.c device_if.h bus_if.h pci_if.h

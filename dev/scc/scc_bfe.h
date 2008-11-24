@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/scc/scc_bfe.h,v 1.7 2008/03/03 18:20:16 raj Exp $
+ * $FreeBSD: src/sys/dev/scc/scc_bfe.h,v 1.8 2008/04/26 18:40:59 marcel Exp $
  */
 
 #ifndef _DEV_SCC_BFE_H_
@@ -138,7 +138,7 @@ struct scc_softc {
 extern devclass_t scc_devclass;
 extern char scc_driver_name[];
 
-int scc_bfe_attach(device_t dev);
+int scc_bfe_attach(device_t dev, u_int ipc);
 int scc_bfe_detach(device_t dev);
 int scc_bfe_probe(device_t dev, u_int regshft, u_int rclk, u_int rid);
 

@@ -63,7 +63,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netipx/ipx_input.c,v 1.57 2007/05/11 10:38:34 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/netipx/ipx_input.c,v 1.60 2008/07/25 23:54:07 trhodes Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -86,19 +86,19 @@ __FBSDID("$FreeBSD: src/sys/netipx/ipx_input.c,v 1.57 2007/05/11 10:38:34 rwatso
 
 int	ipxcksum = 0;
 SYSCTL_INT(_net_ipx_ipx, OID_AUTO, checksum, CTLFLAG_RW,
-	   &ipxcksum, 0, "");
+	   &ipxcksum, 0, "Compute ipx checksum");
 
 static int	ipxprintfs = 0;		/* printing forwarding information */
 SYSCTL_INT(_net_ipx_ipx, OID_AUTO, ipxprintfs, CTLFLAG_RW,
-	   &ipxprintfs, 0, "");
+	   &ipxprintfs, 0, "Printing forwarding information");
 
 static int	ipxforwarding = 0;
 SYSCTL_INT(_net_ipx_ipx, OID_AUTO, ipxforwarding, CTLFLAG_RW,
-	    &ipxforwarding, 0, "");
+	    &ipxforwarding, 0, "Enable ipx forwarding");
 
 static int	ipxnetbios = 0;
 SYSCTL_INT(_net_ipx, OID_AUTO, ipxnetbios, CTLFLAG_RW,
-	   &ipxnetbios, 0, "");
+	   &ipxnetbios, 0, "Propagate netbios over ipx");
 
 const union	ipx_net ipx_zeronet;
 const union	ipx_host ipx_zerohost;
@@ -153,7 +153,7 @@ ipx_init(void)
 
 	ipxintrq.ifq_maxlen = ipxqmaxlen;
 	mtx_init(&ipxintrq.ifq_mtx, "ipx_inq", NULL, MTX_DEF);
-	netisr_register(NETISR_IPX, ipxintr, &ipxintrq, NETISR_MPSAFE);
+	netisr_register(NETISR_IPX, ipxintr, &ipxintrq, 0);
 }
 
 /*

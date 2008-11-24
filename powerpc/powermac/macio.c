@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/powermac/macio.c,v 1.20 2006/04/20 04:19:10 imp Exp $
+ * $FreeBSD: src/sys/powerpc/powermac/macio.c,v 1.27 2008/10/26 19:37:38 nwhitehorn Exp $
  */
 
 /*
@@ -139,6 +139,8 @@ static struct macio_pci_dev {
 	{ 0x0022106b, "KeyLargo I/O Controller" },
 	{ 0x0025106b, "Pangea I/O Controller" },
 	{ 0x003e106b, "Intrepid I/O Controller" },
+	{ 0x0041106b, "K2 KeyLargo I/O Controller" },
+	{ 0x004f106b, "Shasta I/O Controller" },
 	{ 0, NULL }
 };
 
@@ -179,27 +181,40 @@ macio_get_quirks(const char *name)
 static void
 macio_add_intr(phandle_t devnode, struct macio_devinfo *dinfo)
 {
-	int	intr;
+	int	*intr;
+	int	i, nintr;
+	phandle_t iparent;
+	int 	icells;
 
-	if (dinfo->mdi_ninterrupts >= 5) {
-		printf("macio: device has more than 5 interrupts\n");
+	if (dinfo->mdi_ninterrupts >= 6) {
+		printf("macio: device has more than 6 interrupts\n");
 		return;
 	}
 
-	if (OF_getprop(devnode, "interrupts", &intr, sizeof(intr)) == -1) {
-		if (OF_getprop(devnode, "AAPL,interrupts", &intr,
-		    sizeof(intr)) == -1)
+	icells = 1;
+	
+	if (OF_getprop(devnode, "interrupt-parent", &iparent, sizeof(iparent)) == sizeof(iparent))
+		OF_getprop(iparent, "#interrupt-cells", &icells, sizeof(icells));
+
+	nintr = OF_getprop_alloc(devnode, "interrupts", sizeof(*intr), 
+		(void **)&intr);
+	if (nintr == -1) {
+		nintr = OF_getprop_alloc(devnode, "AAPL,interrupts", 
+			sizeof(*intr), (void **)&intr);
+		if (nintr == -1)
 			return;
 	}
 
-	if (intr == -1)
+	if (intr[0] == -1)
 		return;
 
-        resource_list_add(&dinfo->mdi_resources, SYS_RES_IRQ,
-	    dinfo->mdi_ninterrupts, intr, intr, 1);
+	for (i = 0; i < nintr; i+=icells) {
+		resource_list_add(&dinfo->mdi_resources, SYS_RES_IRQ,
+		    dinfo->mdi_ninterrupts, intr[i], intr[i], 1);
 
-	dinfo->mdi_interrupts[dinfo->mdi_ninterrupts] = intr;
-	dinfo->mdi_ninterrupts++;
+		dinfo->mdi_interrupts[dinfo->mdi_ninterrupts] = intr[i];
+		dinfo->mdi_ninterrupts++;
+	}
 }
 
 
@@ -254,10 +269,10 @@ macio_attach(device_t dev)
 	phandle_t  subchild;
         device_t cdev;
         u_int reg[3];
-	int quirks;
+	int error, quirks;
 
 	sc = device_get_softc(dev);
-	root = sc->sc_node = OF_finddevice("mac-io");
+	root = sc->sc_node = ofw_bus_get_node(dev);
 	
 	/*
 	 * Locate the device node and it's base address
@@ -272,12 +287,17 @@ macio_attach(device_t dev)
 
 	sc->sc_mem_rman.rm_type = RMAN_ARRAY;
 	sc->sc_mem_rman.rm_descr = "MacIO Device Memory";
-	if (rman_init(&sc->sc_mem_rman) != 0) {
-		device_printf(dev,
-			      "failed to init mem range resources\n");
-		return (ENXIO);
+	error = rman_init(&sc->sc_mem_rman);
+	if (error) {
+		device_printf(dev, "rman_init() failed. error = %d\n", error);
+		return (error);
 	}
-	rman_manage_region(&sc->sc_mem_rman, 0, sc->sc_size);	
+	error = rman_manage_region(&sc->sc_mem_rman, 0, sc->sc_size);	
+	if (error) {
+		device_printf(dev,
+		    "rman_manage_region() failed. error = %d\n", error);
+		return (error);
+	}
 
 	/*
 	 * Iterate through the sub-devices
@@ -369,7 +389,6 @@ macio_alloc_resource(device_t bus, device_t child, int type, int *rid,
 	int		needactivate;
 	struct		resource *rv;
 	struct		rman *rm;
-	bus_space_tag_t	tagval;
 	u_long		adjstart, adjend, adjcount;
 	struct		macio_devinfo *dinfo;
 	struct		resource_list_entry *rle;
@@ -408,17 +427,20 @@ macio_alloc_resource(device_t bus, device_t child, int type, int *rid,
 		adjcount = adjend - adjstart;
 
 		rm = &sc->sc_mem_rman;
-
-		tagval = PPC_BUS_SPACE_MEM;
 		break;
 
 	case SYS_RES_IRQ:
+		/* Check for passthrough from subattachments like macgpio */
+		if (device_get_parent(child) != bus)
+			return BUS_ALLOC_RESOURCE(device_get_parent(bus), child,
+			    type, rid, start, end, count, flags);
+
 		rle = resource_list_find(&dinfo->mdi_resources, SYS_RES_IRQ,
 		    *rid);
 		if (rle == NULL) {
-			if (dinfo->mdi_ninterrupts >= 5) {
+			if (dinfo->mdi_ninterrupts >= 6) {
 				device_printf(bus,
-				    "%s has more than 5 interrupts\n",
+				    "%s has more than 6 interrupts\n",
 				    device_get_nameunit(child));
 				return (NULL);
 			}
@@ -431,7 +453,6 @@ macio_alloc_resource(device_t bus, device_t child, int type, int *rid,
 
 		return (resource_list_alloc(&dinfo->mdi_resources, bus, child,
 		    type, rid, start, end, count, flags));
-		break;
 
 	default:
 		device_printf(bus, "unknown resource request from %s\n",
@@ -449,8 +470,6 @@ macio_alloc_resource(device_t bus, device_t child, int type, int *rid,
 	}
 
 	rman_set_rid(rv, *rid);
-	rman_set_bustag(rv, tagval);
-	rman_set_bushandle(rv, rman_get_start(rv));
 
 	if (needactivate) {
 		if (bus_activate_resource(child, type, *rid, rv) != 0) {
@@ -498,6 +517,7 @@ macio_activate_resource(device_t bus, device_t child, int type, int rid,
 		if (p == NULL)
 			return (ENOMEM);
 		rman_set_virtual(res, p);
+		rman_set_bustag(res, &bs_le_tag);
 		rman_set_bushandle(res, (u_long)p);
 	}
 

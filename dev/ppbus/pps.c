@@ -9,13 +9,13 @@
  *
  * This driver implements a draft-mogul-pps-api-02.txt PPS source.
  *
- * The input pin is pin#10 
+ * The input pin is pin#10
  * The echo output pin is pin#14
  *
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ppbus/pps.c,v 1.52 2007/02/23 12:18:49 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ppbus/pps.c,v 1.55 2008/11/16 17:42:02 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -77,7 +77,7 @@ ppsidentify(driver_t *driver, device_t parent)
 
 	device_t dev;
 
-	dev = device_find_child(parent, PPS_NAME, 0);
+	dev = device_find_child(parent, PPS_NAME, -1);
 	if (!dev)
 		BUS_ADD_CHILD(parent, 0, PPS_NAME, -1);
 }
@@ -107,18 +107,14 @@ ppsattach(device_t dev)
 	struct pps_data *sc = DEVTOSOFTC(dev);
 	device_t ppbus = device_get_parent(dev);
 	struct cdev *d;
-	intptr_t irq;
-	int i, unit, zero = 0;
+	int i, unit, rid = 0;
 
 	mtx_init(&sc->mtx, device_get_nameunit(dev), "pps", MTX_SPIN);
-	/* retrieve the ppbus irq */
-	BUS_READ_IVAR(ppbus, dev, PPBUS_IVAR_IRQ, &irq);
 
-	if (irq > 0) {
-		/* declare our interrupt handler */
-		sc->intr_resource = bus_alloc_resource(dev, SYS_RES_IRQ,
-		    &zero, irq, irq, 1, RF_SHAREABLE);
-	}
+	/* declare our interrupt handler */
+	sc->intr_resource = bus_alloc_resource_any(dev, SYS_RES_IRQ, &rid,
+	    RF_SHAREABLE);
+
 	/* interrupts seem mandatory */
 	if (sc->intr_resource == NULL)
 		return (ENXIO);
@@ -260,7 +256,7 @@ ppshcpoll(void *arg)
 	mtx_lock_spin(&sc->mtx);
 	sc->timeout = timeout(ppshcpoll, sc, 1);
 	i = ppb_rdtr(sc->ppbus);
-	if (i == sc->lastdata) 
+	if (i == sc->lastdata)
 		return;
 	l = sc->lastdata ^ i;
 	k = 1;
@@ -284,12 +280,12 @@ ppsintr(void *arg)
 	pps_capture(&sc->pps[0]);
 	if (!(ppb_rstr(sc->ppbus) & nACK))
 		return (FILTER_STRAY);
-	if (sc->pps[0].ppsparam.mode & PPS_ECHOASSERT) 
+	if (sc->pps[0].ppsparam.mode & PPS_ECHOASSERT)
 		ppb_wctr(sc->ppbus, IRQENABLE | AUTOFEED);
 	mtx_lock_spin(&sc->mtx);
 	pps_event(&sc->pps[0], PPS_CAPTUREASSERT);
 	mtx_unlock_spin(&sc->mtx);
-	if (sc->pps[0].ppsparam.mode & PPS_ECHOASSERT) 
+	if (sc->pps[0].ppsparam.mode & PPS_ECHOASSERT)
 		ppb_wctr(sc->ppbus, IRQENABLE);
 	return (FILTER_HANDLED);
 }

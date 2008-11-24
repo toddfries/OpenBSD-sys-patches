@@ -26,7 +26,7 @@
  * SUCH DAMAGE.
  *
  *	from: BSDI: asi.h,v 1.3 1997/08/08 14:31:42 torek
- * $FreeBSD: src/sys/sparc64/include/asi.h,v 1.12 2006/10/09 05:59:04 kmacy Exp $
+ * $FreeBSD: src/sys/sparc64/include/asi.h,v 1.14 2008/09/08 21:24:25 marius Exp $
  */
 
 #ifndef	_MACHINE_ASI_H_
@@ -140,10 +140,11 @@
 #define		AA_DMMU_TSB_PEXT_REG		0x48
 #define		AA_DMMU_TSB_SEXT_REG		0x50
 #define		AA_DMMU_TSB_NEXT_REG		0x58
+#define		AA_DMMU_TAG_ACCESS_EXT		0x60	/* US-III family */
 
 #define	ASI_DMMU_TSB_8KB_PTR_REG		0x59
 #define	ASI_DMMU_TSB_64KB_PTR_REG		0x5a
-#define	ASI_DMMU_TSB_DIRECT_PTR_REG 		0x5b
+#define	ASI_DMMU_TSB_DIRECT_PTR_REG		0x5b
 #define	ASI_DTLB_DATA_IN_REG			0x5c
 /* US-III Cu: also ASI_DTLB_CAM_ADDRESS_REG */
 #define	ASI_DTLB_DATA_ACCESS_REG		0x5d

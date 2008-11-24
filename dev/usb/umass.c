@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/dev/usb/umass.c,v 1.162 2008/02/21 19:07:08 remko Exp $
+ *	$FreeBSD: src/sys/dev/usb/umass.c,v 1.171 2008/10/14 08:41:54 n_hibma Exp $
  *	$NetBSD: umass.c,v 1.28 2000/04/02 23:46:53 augustss Exp $
  */
 
@@ -340,6 +340,10 @@ static struct umass_devdescr_t umass_devdescrs[] = {
 	  UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
 	  NO_QUIRKS
 	},
+	{ USB_VENDOR_ALCOR, USB_PRODUCT_ALCOR_UMCR_9361, RID_WILDCARD,
+	  UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
+	  NO_GETMAXLUN
+	},
 	{ USB_VENDOR_ASAHIOPTICAL, USB_PRODUCT_ASAHIOPTICAL_OPTIO230, RID_WILDCARD,
 	  UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
 	  NO_INQUIRY
@@ -578,6 +582,10 @@ static struct umass_devdescr_t umass_devdescrs[] = {
 	  UMASS_PROTO_ATAPI,
 	  NO_INQUIRY
 	},
+	{ USB_VENDOR_NIKON, USB_PRODUCT_NIKON_D300, RID_WILDCARD,
+	  UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
+	  NO_QUIRKS
+	},
 	{ USB_VENDOR_OLYMPUS, USB_PRODUCT_OLYMPUS_C1, RID_WILDCARD,
 	  UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
 	  WRONG_CSWSIG
@@ -601,6 +609,10 @@ static struct umass_devdescr_t umass_devdescrs[] = {
 	{ USB_VENDOR_ONSPEC, USB_PRODUCT_ONSPEC_CFSM_READER2, RID_WILDCARD,
 	  UMASS_PROTO_SCSI,
 	  NO_QUIRKS
+	},
+	{ USB_VENDOR_ONSPEC, USB_PRODUCT_ONSPEC_SDS_HOTFIND_D, RID_WILDCARD,
+	  UMASS_PROTO_SCSI | UMASS_PROTO_BBB,
+	  NO_GETMAXLUN | NO_SYNCHRONIZE_CACHE
 	},
 	{ USB_VENDOR_ONSPEC, USB_PRODUCT_ONSPEC_MDCFE_B_CF_READER, RID_WILDCARD,
 	  UMASS_PROTO_SCSI,
@@ -753,6 +765,10 @@ static struct umass_devdescr_t umass_devdescrs[] = {
 	{ USB_VENDOR_SONY, USB_PRODUCT_SONY_DSC, RID_WILDCARD,
 	  UMASS_PROTO_RBC | UMASS_PROTO_CBI,
 	  NO_QUIRKS
+	},
+	{ USB_VENDOR_SONY, USB_PRODUCT_SONY_HANDYCAM, 0x0500,
+	  UMASS_PROTO_RBC | UMASS_PROTO_CBI,
+	  RBC_PAD_TO_12
 	},
 	{ USB_VENDOR_SONY, USB_PRODUCT_SONY_HANDYCAM, RID_WILDCARD,
 	  UMASS_PROTO_RBC | UMASS_PROTO_CBI,
@@ -1256,7 +1272,7 @@ umass_match_proto(struct umass_softc *sc, usbd_interface_handle iface,
 		return(UMATCH_NONE);
 	}
 
-	return(UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO);
+	return(UMATCH_IFACECLASS_IFACESUBCLASS_IFACEPROTO);
 }
 
 static int
@@ -1268,6 +1284,7 @@ umass_match(device_t self)
 	sc->sc_dev = self;
 	if (uaa->iface == NULL)
 		return(UMATCH_NONE);
+	
 	return(umass_match_proto(sc, uaa->iface, uaa->device));
 }
 
@@ -3268,17 +3285,6 @@ umass_cam_quirk_cb(struct umass_softc *sc, void *priv, int residue, int status)
 	xpt_done(ccb);
 }
 
-static int
-umass_driver_load(module_t mod, int what, void *arg)
-{
-	switch (what) {
-	case MOD_UNLOAD:
-	case MOD_LOAD:
-	default:
-		return(usbd_driver_load(mod, what, arg));
-	}
-}
-
 /*
  * SCSI specific functions
  */
@@ -3518,7 +3524,7 @@ umass_atapi_transform(struct umass_softc *sc, unsigned char *cmd, int cmdlen,
 
 /* (even the comment is missing) */
 
-DRIVER_MODULE(umass, uhub, umass_driver, umass_devclass, umass_driver_load, 0);
+DRIVER_MODULE(umass, uhub, umass_driver, umass_devclass, usbd_driver_load, 0);
 
 
 

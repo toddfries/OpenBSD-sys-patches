@@ -35,22 +35,26 @@
  *
  *	$NetBSD: clock_subr.h,v 1.7 2000/10/03 13:41:07 tsutsui Exp $
  *
- * $FreeBSD: src/sys/sys/clock.h,v 1.7 2006/10/24 10:27:23 phk Exp $
+ *
+ * This file is the central clearing-house for calendrical issues.
+ *
+ * In general the kernel does not know about minutes, hours, days, timezones,
+ * daylight savings time, leap-years and such.  All that is theoretically a
+ * matter for userland only.
+ *
+ * Parts of kernel code does however care: badly designed filesystems store
+ * timestamps in local time and RTC chips sometimes track time in a local
+ * timezone instead of UTC and so on.
+ *
+ * All that code should go here for service.
+ *
+ * $FreeBSD: src/sys/sys/clock.h,v 1.8 2008/04/22 19:38:30 phk Exp $
  */
 
 #ifndef _SYS_CLOCK_H_
 #define _SYS_CLOCK_H_
 
 #ifdef _KERNEL		/* No user serviceable parts */
-
-/*
- * Kernel to clock driver interface.
- */
-void	inittodr(time_t base);
-void	resettodr(void);
-void	startrtclock(void);
-
-extern int	disable_rtc_set;
 
 /*
  * Timezone info from settimeofday(2), usually not used

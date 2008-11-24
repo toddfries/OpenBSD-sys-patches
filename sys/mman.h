@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)mman.h	8.2 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/sys/mman.h,v 1.40 2005/04/02 12:33:31 das Exp $
+ * $FreeBSD: src/sys/sys/mman.h,v 1.42 2008/03/28 04:29:27 ps Exp $
  */
 
 #ifndef _SYS_MMAN_H_
@@ -139,6 +139,12 @@
 #define	MINCORE_MODIFIED	 0x4 /* Page has been modified by us */
 #define	MINCORE_REFERENCED_OTHER 0x8 /* Page has been referenced */
 #define	MINCORE_MODIFIED_OTHER	0x10 /* Page has been modified */
+#define	MINCORE_SUPER		0x20 /* Page is a "super" page */
+
+/*
+ * Anonymous object constant for shm_open().
+ */
+#define	SHM_ANON		((char *)1)
 #endif /* __BSD_VISIBLE */
 
 /*
@@ -168,7 +174,33 @@ typedef	__size_t	size_t;
 #define	_SIZE_T_DECLARED
 #endif
 
-#ifndef _KERNEL
+#ifdef _KERNEL
+#include <vm/vm.h>
+
+struct shmfd {
+	size_t		shm_size;
+	vm_object_t	shm_object;
+	int		shm_refs;
+	uid_t		shm_uid;
+	gid_t		shm_gid;
+	mode_t		shm_mode;
+
+	/*
+	 * Values maintained solely to make this a better-behaved file
+	 * descriptor for fstat() to run on.
+	 */
+	struct timespec	shm_atime;
+	struct timespec	shm_mtime;
+	struct timespec	shm_ctime;
+	struct timespec	shm_birthtime;
+
+	struct label	*shm_label;		/* MAC label */
+};
+
+int	shm_mmap(struct shmfd *shmfd, vm_size_t objsize, vm_ooffset_t foff,
+	    vm_object_t *obj);
+
+#else /* !_KERNEL */
 
 __BEGIN_DECLS
 /*

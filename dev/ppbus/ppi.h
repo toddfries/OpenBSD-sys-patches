@@ -23,11 +23,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/ppbus/ppi.h,v 1.5 1999/12/29 04:35:43 peter Exp $
+ * $FreeBSD: src/sys/dev/ppbus/ppi.h,v 1.6 2008/11/16 17:42:02 jhb Exp $
  *
  */
 #ifndef __PPI_H
-#define __PPI_H
+#define	__PPI_H
 
 #ifndef _KERNEL
 # include <sys/types.h>

@@ -29,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/wi/if_wi_pci.c,v 1.28 2008/04/20 20:35:38 sam Exp $
+ * $FreeBSD: src/sys/dev/wi/if_wi_pci.c,v 1.29 2008/08/02 20:45:28 imp Exp $
  */
 
 /*
@@ -190,10 +190,10 @@ wi_pci_attach(device_t dev)
 		sc->wi_bmemhandle = rman_get_bushandle(sc->mem);
 
 		/*
-		 * From Linux driver:
 		 * Write COR to enable PC card
 		 * This is a subset of the protocol that the pccard bus code
-		 * would do.
+		 * would do.  In theory, we should parse the CIS to find the
+		 * COR offset.  In practice, the COR_OFFSET is always 0x3e0.
 		 */
 		CSM_WRITE_1(sc, WI_COR_OFFSET, WI_COR_VALUE); 
 		reg = CSM_READ_1(sc, WI_COR_OFFSET);
@@ -208,10 +208,10 @@ wi_pci_attach(device_t dev)
 		if (error)
 			return (error);
 
-		CSR_WRITE_2(sc, WI_HFA384X_PCICOR_OFF, 0x0080);
+		CSR_WRITE_2(sc, WI_PCICOR_OFF, WI_PCICOR_RESET);
 		DELAY(250000);
 
-		CSR_WRITE_2(sc, WI_HFA384X_PCICOR_OFF, 0x0000);
+		CSR_WRITE_2(sc, WI_PCICOR_OFF, 0x0000);
 		DELAY(500000);
 
 		timeout=2000000;
@@ -220,7 +220,7 @@ wi_pci_attach(device_t dev)
 			DELAY(10);
 
 		if (timeout == 0) {
-			device_printf(dev, "couldn't reset prism2.5 core.\n");
+			device_printf(dev, "couldn't reset prism pci core.\n");
 			wi_free(dev);
 			return(ENXIO);
 		}

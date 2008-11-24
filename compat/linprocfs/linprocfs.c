@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2000 Dag-Erling Coïdan Smørgrav
+ * Copyright (c) 2000 Dag-Erling CoÃ¯dan SmÃ¸rgrav
  * Copyright (c) 1999 Pierre Beyssac
  * Copyright (c) 1993 Jan-Simon Pendry
  * Copyright (c) 1993
@@ -39,14 +39,17 @@
  *	@(#)procfs_status.c	8.4 (Berkeley) 6/15/94
  */
 
+#include "opt_compat.h"
+
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linprocfs/linprocfs.c,v 1.116 2007/10/12 06:03:42 kevlo Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linprocfs/linprocfs.c,v 1.127 2008/11/05 15:08:09 des Exp $");
 
 #include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/blist.h>
 #include <sys/conf.h>
 #include <sys/exec.h>
+#include <sys/fcntl.h>
 #include <sys/filedesc.h>
 #include <sys/jail.h>
 #include <sys/kernel.h>
@@ -70,6 +73,7 @@ __FBSDID("$FreeBSD: src/sys/compat/linprocfs/linprocfs.c,v 1.116 2007/10/12 06:0
 #include <sys/user.h>
 #include <sys/vmmeter.h>
 #include <sys/vnode.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 
@@ -87,7 +91,6 @@ __FBSDID("$FreeBSD: src/sys/compat/linprocfs/linprocfs.c,v 1.116 2007/10/12 06:0
 #include <machine/md_var.h>
 #endif /* __i386__ || __amd64__ */
 
-#include "opt_compat.h"
 #ifdef COMPAT_LINUX32				/* XXX */
 #include <machine/../linux32/linux.h>
 #else
@@ -220,7 +223,7 @@ linprocfs_docpuinfo(PFS_FILL_ARGS)
 		"sep",	    "sep",     "mtrr",	   "pge",      "mca",
 		"cmov",	    "pat",     "pse36",	   "pn",       "b19",
 		"b20",	    "b21",     "mmxext",   "mmx",      "fxsr",
-		"xmm",	    "b26",     "b27",	   "b28",      "b29",
+		"xmm",	    "sse2",    "b27",	   "b28",      "b29",
 		"3dnowext", "3dnow"
 	};
 
@@ -315,11 +318,13 @@ linprocfs_domtab(PFS_FILL_ARGS)
 	NDINIT(&nd, LOOKUP, FOLLOW | MPSAFE, UIO_SYSSPACE, linux_emul_path, td);
 	flep = NULL;
 	error = namei(&nd);
-	VFS_UNLOCK_GIANT(NDHASGIANT(&nd));
-	if (error != 0 || vn_fullpath(td, nd.ni_vp, &dlep, &flep) != 0)
-		lep = linux_emul_path;
-	else
-		lep = dlep;
+	lep = linux_emul_path;
+	if (error == 0) {
+		if (vn_fullpath(td, nd.ni_vp, &dlep, &flep) != 0)
+			lep = dlep;
+		vrele(nd.ni_vp);
+		VFS_UNLOCK_GIANT(NDHASGIANT(&nd));
+	}
 	lep_len = strlen(lep);
 
 	mtx_lock(&mountlist_mtx);
@@ -374,19 +379,28 @@ linprocfs_domtab(PFS_FILL_ARGS)
 static int
 linprocfs_dostat(PFS_FILL_ARGS)
 {
+	struct pcpu *pcpu;
+	long cp_time[CPUSTATES];
+	long *cp;
 	int i;
 
+	read_cpu_time(cp_time);
 	sbuf_printf(sb, "cpu %ld %ld %ld %ld\n",
 	    T2J(cp_time[CP_USER]),
 	    T2J(cp_time[CP_NICE]),
 	    T2J(cp_time[CP_SYS] /*+ cp_time[CP_INTR]*/),
 	    T2J(cp_time[CP_IDLE]));
-	for (i = 0; i < mp_ncpus; ++i)
+	for (i = 0; i <= mp_maxid; ++i) {
+		if (CPU_ABSENT(i))
+			continue;
+		pcpu = pcpu_find(i);
+		cp = pcpu->pc_cp_time;
 		sbuf_printf(sb, "cpu%d %ld %ld %ld %ld\n", i,
-		    T2J(cp_time[CP_USER]) / mp_ncpus,
-		    T2J(cp_time[CP_NICE]) / mp_ncpus,
-		    T2J(cp_time[CP_SYS]) / mp_ncpus,
-		    T2J(cp_time[CP_IDLE]) / mp_ncpus);
+		    T2J(cp[CP_USER]),
+		    T2J(cp[CP_NICE]),
+		    T2J(cp[CP_SYS] /*+ cp[CP_INTR]*/),
+		    T2J(cp[CP_IDLE]));
+	}
 	sbuf_printf(sb,
 	    "disk 0 0 0 0\n"
 	    "page %u %u\n"
@@ -410,9 +424,11 @@ linprocfs_dostat(PFS_FILL_ARGS)
 static int
 linprocfs_douptime(PFS_FILL_ARGS)
 {
+	long cp_time[CPUSTATES];
 	struct timeval tv;
 
 	getmicrouptime(&tv);
+	read_cpu_time(cp_time);
 	sbuf_printf(sb, "%lld.%02ld %ld.%02ld\n",
 	    (long long)tv.tv_sec, tv.tv_usec / 10000,
 	    T2S(cp_time[CP_IDLE]), T2J(cp_time[CP_IDLE]) % 100);
@@ -858,16 +874,13 @@ linprocfs_doprocenviron(PFS_FILL_ARGS)
 static int
 linprocfs_doprocmaps(PFS_FILL_ARGS)
 {
-	char mebuffer[512];
 	vm_map_t map = &p->p_vmspace->vm_map;
-	vm_map_entry_t entry, tmp_entry;
+	vm_map_entry_t entry;
 	vm_object_t obj, tobj, lobj;
 	vm_offset_t saved_end;
 	vm_ooffset_t off = 0;
 	char *name = "", *freename = NULL;
-	size_t len;
 	ino_t ino;
-	unsigned int last_timestamp;
 	int ref_count, shadow_count, flags;
 	int error;
 	struct vnode *vp;
@@ -883,13 +896,9 @@ linprocfs_doprocmaps(PFS_FILL_ARGS)
 	if (uio->uio_rw != UIO_READ)
 		return (EOPNOTSUPP);
 
-	if (uio->uio_offset != 0)
-		return (0);
-
 	error = 0;
 	vm_map_lock_read(map);
-	for (entry = map->header.next;
-	    ((uio->uio_resid > 0) && (entry != &map->header));
+	for (entry = map->header.next; entry != &map->header;
 	    entry = entry->next) {
 		name = "";
 		freename = NULL;
@@ -922,8 +931,8 @@ linprocfs_doprocmaps(PFS_FILL_ARGS)
 			if (vp) {
 				vn_fullpath(td, vp, &name, &freename);
 				locked = VFS_LOCK_GIANT(vp->v_mount);
-				vn_lock(vp, LK_SHARED | LK_RETRY, td);
-				VOP_GETATTR(vp, &vat, td->td_ucred, td);
+				vn_lock(vp, LK_SHARED | LK_RETRY);
+				VOP_GETATTR(vp, &vat, td->td_ucred);
 				ino = vat.va_fileid;
 				vput(vp);
 				VFS_UNLOCK_GIANT(locked);
@@ -938,7 +947,7 @@ linprocfs_doprocmaps(PFS_FILL_ARGS)
 		 * format:
 		 *  start, end, access, offset, major, minor, inode, name.
 		 */
-		snprintf(mebuffer, sizeof mebuffer,
+		error = sbuf_printf(sb,
 		    "%08lx-%08lx %s%s%s%s %08lx %02x:%02x %lu%s%s\n",
 		    (u_long)entry->start, (u_long)entry->end,
 		    (entry->protection & VM_PROT_READ)?"r":"-",
@@ -954,26 +963,9 @@ linprocfs_doprocmaps(PFS_FILL_ARGS)
 		    );
 		if (freename)
 			free(freename, M_TEMP);
-		len = strlen(mebuffer);
-		if (len > uio->uio_resid)
-			len = uio->uio_resid; /*
-					       * XXX We should probably return
-					       * EFBIG here, as in procfs.
-					       */
-		last_timestamp = map->timestamp;
-		vm_map_unlock_read(map);
-		error = uiomove(mebuffer, len, uio);
-		vm_map_lock_read(map);
-		if (error)
+		if (error == -1) {
+			error = 0;
 			break;
-		if (last_timestamp + 1 != map->timestamp) {
-			/*
-			 * Look again for the entry because the map was
-			 * modified while it was unlocked.  Specifically,
-			 * the entry may have been clipped, merged, or deleted.
-			 */
-			vm_map_lookup_entry(map, saved_end - 1, &tmp_entry);
-			entry = tmp_entry;
 		}
 	}
 	vm_map_unlock_read(map);
@@ -987,6 +979,7 @@ linprocfs_doprocmaps(PFS_FILL_ARGS)
 static int
 linprocfs_donetdev(PFS_FILL_ARGS)
 {
+	INIT_VNET_NET(TD_TO_VNET(curthread));
 	char ifname[16]; /* XXX LINUX_IFNAMSIZ */
 	struct ifnet *ifp;
 
@@ -996,7 +989,7 @@ linprocfs_donetdev(PFS_FILL_ARGS)
 	    "bytes    packets errs drop fifo frame compressed");
 
 	IFNET_RLOCK();
-	TAILQ_FOREACH(ifp, &ifnet, if_link) {
+	TAILQ_FOREACH(ifp, &V_ifnet, if_link) {
 		linux_ifname(ifp, ifname, sizeof ifname);
 			sbuf_printf(sb, "%6.6s:", ifname);
 		sbuf_printf(sb, "%8lu %7lu %4lu %4lu %4lu %5lu %10lu %9lu ",

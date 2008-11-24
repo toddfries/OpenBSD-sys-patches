@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/fb/vgareg.h,v 1.8 2005/02/28 21:06:14 iedowse Exp $
+ * $FreeBSD: src/sys/dev/fb/vgareg.h,v 1.9 2008/09/27 08:51:18 ed Exp $
  */
 
 #ifndef _DEV_FB_VGAREG_H_
@@ -61,7 +61,7 @@
 #define GDCREG		(IO_VGA + 0x0F)		/* graph data controller data */
 
 #define VGA_DRIVER_NAME		"vga"
-#define VGA_UNIT(dev)		minor(dev)
+#define VGA_UNIT(dev)		dev2unit(dev)
 #define VGA_MKMINOR(unit)	(unit)
 
 #ifdef _KERNEL

@@ -26,7 +26,7 @@
  * SUCH DAMAGE.
  *
  *	from BSDI: pmap.c,v 1.28.2.15 2000/04/27 03:10:31 cp Exp
- * $FreeBSD: src/sys/sparc64/sparc64/tsb.c,v 1.39 2007/06/03 19:39:38 alc Exp $
+ * $FreeBSD: src/sys/sparc64/sparc64/tsb.c,v 1.40 2007/12/27 03:52:14 alc Exp $
  */
 
 #include "opt_ddb.h"
@@ -118,10 +118,9 @@ tsb_tte_enter(pmap_t pm, vm_page_t m, vm_offset_t va, u_long sz, u_long data)
 	int i;
 
 	if (DCACHE_COLOR(VM_PAGE_TO_PHYS(m)) != DCACHE_COLOR(va)) {
-		CTR6(KTR_CT2,
-	"tsb_tte_enter: off colour va=%#lx pa=%#lx o=%p oc=%#lx ot=%d pi=%#lx",
+		CTR5(KTR_CT2,
+	"tsb_tte_enter: off colour va=%#lx pa=%#lx o=%p ot=%d pi=%#lx",
 		    va, VM_PAGE_TO_PHYS(m), m->object,
-		    m->object ? m->object->pg_color : -1,
 		    m->object ? m->object->type : -1,
 		    m->pindex);
 		if (pm == kernel_pmap)

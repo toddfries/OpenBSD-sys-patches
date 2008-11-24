@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/kern.mk,v 1.52 2007/05/24 21:53:42 obrien Exp $
+# $FreeBSD: src/sys/conf/kern.mk,v 1.57 2008/07/23 06:16:34 imp Exp $
 
 #
 # Warning flags for compiling the kernel and components of the kernel.
@@ -70,7 +70,7 @@ INLINE_LIMIT?=	15000
 #
 .if ${MACHINE_ARCH} == "amd64"
 CFLAGS+=	-mcmodel=kernel -mno-red-zone \
-		-mfpmath=387 -mno-sse -mno-sse2 -mno-mmx -mno-3dnow \
+		-mfpmath=387 -mno-sse -mno-sse2 -mno-sse3 -mno-mmx -mno-3dnow \
 		-msoft-float -fno-asynchronous-unwind-tables
 INLINE_LIMIT?=	8000
 .endif
@@ -81,6 +81,15 @@ INLINE_LIMIT?=	8000
 #
 .if ${MACHINE_ARCH} == "powerpc"
 CFLAGS+=	-msoft-float
+INLINE_LIMIT?=	15000
+.endif
+
+#
+# For MIPS we also tell gcc to use floating point emulation and 
+# disable MIPS DSP ASE Instruction set.
+#
+.if ${MACHINE_ARCH} == "mips"
+CFLAGS+=	-msoft-float -mno-dsp
 INLINE_LIMIT?=	15000
 .endif
 
@@ -96,4 +105,12 @@ CFLAGS+=	-ffreestanding
 
 .if ${CC} == "icc"
 CFLAGS+=	-restrict
+.endif
+
+#
+# GCC SSP support.
+#
+.if ${MK_SSP} != "no" && ${CC} != "icc" && ${MACHINE_ARCH} != "ia64" && \
+	${MACHINE_ARCH} != "arm" && ${MACHINE_ARCH} != "mips"
+CFLAGS+=	-fstack-protector
 .endif

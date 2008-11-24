@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/at91/if_ate.c,v 1.21 2007/10/24 23:12:19 cognet Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/at91/if_ate.c,v 1.29 2008/10/07 17:23:16 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -170,7 +170,8 @@ ate_attach(device_t dev)
 	struct sysctl_ctx_list *sctx;
 	struct sysctl_oid *soid;
 	int err;
-	u_char eaddr[6];
+	u_char eaddr[ETHER_ADDR_LEN];
+	uint32_t rnd;
 
 	sc->dev = dev;
 	err = ate_activate(dev);
@@ -179,7 +180,7 @@ ate_attach(device_t dev)
 
 	sc->use_rmii = (RD4(sc, ETH_CFG) & ETH_CFG_RMII) == ETH_CFG_RMII;
 
-	/*Sysctls*/
+	/* Sysctls */
 	sctx = device_get_sysctl_ctx(dev);
 	soid = device_get_sysctl_tree(dev);
 	SYSCTL_ADD_UINT(sctx, SYSCTL_CHILDREN(soid), OID_AUTO, "rmii",
@@ -191,8 +192,25 @@ ate_attach(device_t dev)
 	callout_init_mtx(&sc->tick_ch, &sc->sc_mtx, 0);
 
 	if ((err = ate_get_mac(sc, eaddr)) != 0) {
-		device_printf(dev, "No MAC address set");
-		goto out;
+		/*
+		 * No MAC address configured. Generate the random one.
+		 */
+		if  (bootverbose)
+			device_printf(dev,
+			    "Generating random ethernet address.\n");
+		rnd = arc4random();
+
+		/*
+		 * Set OUI to convenient locally assigned address.  'b'
+		 * is 0x62, which has the locally assigned bit set, and
+		 * the broadcast/multicast bit clear.
+		 */
+		eaddr[0] = 'b';
+		eaddr[1] = 's';
+		eaddr[2] = 'd';
+		eaddr[3] = (rnd >> 16) & 0xff;
+		eaddr[4] = (rnd >> 8) & 0xff;
+		eaddr[5] = rnd & 0xff;
 	}
 	ate_set_mac(sc, eaddr);
 
@@ -341,9 +359,9 @@ ate_activate(device_t dev)
 	/*
 	 * Allocate DMA tags and maps
 	 */
-	err = bus_dma_tag_create(NULL, 1, 0, BUS_SPACE_MAXADDR_32BIT,
-	    BUS_SPACE_MAXADDR, NULL, NULL, MCLBYTES, 1, MCLBYTES, 0,
-	    busdma_lock_mutex, &sc->sc_mtx, &sc->mtag);
+	err = bus_dma_tag_create(bus_get_dma_tag(dev), 1, 0,
+	    BUS_SPACE_MAXADDR_32BIT, BUS_SPACE_MAXADDR, NULL, NULL, MCLBYTES,
+	    1, MCLBYTES, 0, busdma_lock_mutex, &sc->sc_mtx, &sc->mtag);
 	if (err != 0)
 		goto errout;
 	for (i = 0; i < ATE_MAX_TX_BUFFERS; i++) {
@@ -359,15 +377,15 @@ ate_activate(device_t dev)
 	/*
 	 * Allocate DMA tags and maps for RX.
 	 */
-	err = bus_dma_tag_create(NULL, 1, 0, BUS_SPACE_MAXADDR_32BIT,
-	    BUS_SPACE_MAXADDR, NULL, NULL, MCLBYTES, 1, MCLBYTES, 0,
-	    busdma_lock_mutex, &sc->sc_mtx, &sc->rxtag);
+	err = bus_dma_tag_create(bus_get_dma_tag(dev), 1, 0,
+	    BUS_SPACE_MAXADDR_32BIT, BUS_SPACE_MAXADDR, NULL, NULL, MCLBYTES,
+	    1, MCLBYTES, 0, busdma_lock_mutex, &sc->sc_mtx, &sc->rxtag);
 	if (err != 0)
 		goto errout;
 
 	/* Dma TAG and MAP for the rx descriptors. */
-	err = bus_dma_tag_create(NULL, sizeof(eth_rx_desc_t), 0, 
-	    BUS_SPACE_MAXADDR_32BIT, BUS_SPACE_MAXADDR, NULL, NULL,
+	err = bus_dma_tag_create(bus_get_dma_tag(dev), sizeof(eth_rx_desc_t),
+	    0, BUS_SPACE_MAXADDR_32BIT, BUS_SPACE_MAXADDR, NULL, NULL,
 	    ATE_MAX_RX_BUFFERS * sizeof(eth_rx_desc_t), 1,
 	    ATE_MAX_RX_BUFFERS * sizeof(eth_rx_desc_t), 0, busdma_lock_mutex,
 	    &sc->sc_mtx, &sc->rx_desc_tag);
@@ -586,24 +604,29 @@ ate_set_mac(struct ate_softc *sc, u_char *eaddr)
 static int
 ate_get_mac(struct ate_softc *sc, u_char *eaddr)
 {
+	bus_size_t sa_low_reg[] = { ETH_SA1L, ETH_SA2L, ETH_SA3L, ETH_SA4L };
+	bus_size_t sa_high_reg[] = { ETH_SA1H, ETH_SA2H, ETH_SA3H, ETH_SA4H };
 	uint32_t low, high;
+	int i;
 
 	/*
 	 * The boot loader setup the MAC with an address, if one is set in
-	 * the loader.  The TSC loader will also set the MAC address in a
-	 * similar way.  Grab the MAC address from the SA1[HL] registers.
+	 * the loader. Grab one MAC address from the SA[1-4][HL] registers.
 	 */
-	low = RD4(sc, ETH_SA1L);
-	high =  RD4(sc, ETH_SA1H);
-	if ((low | (high & 0xffff)) == 0)
-		return (ENXIO);
-	eaddr[0] = low & 0xff;
-	eaddr[1] = (low >> 8) & 0xff;
-	eaddr[2] = (low >> 16) & 0xff;
-	eaddr[3] = (low >> 24) & 0xff;
-	eaddr[4] = high & 0xff;
-	eaddr[5] = (high >> 8) & 0xff;
-	return (0);
+	for (i = 0; i < 4; i++) {
+		low = RD4(sc, sa_low_reg[i]);
+		high = RD4(sc, sa_high_reg[i]);
+		if ((low | (high & 0xffff)) != 0) {
+			eaddr[0] = low & 0xff;
+			eaddr[1] = (low >> 8) & 0xff;
+			eaddr[2] = (low >> 16) & 0xff;
+			eaddr[3] = (low >> 24) & 0xff;
+			eaddr[4] = high & 0xff;
+			eaddr[5] = (high >> 8) & 0xff;
+			return (0);
+		}
+	}
+	return (ENXIO);
 }
 
 static void
@@ -668,7 +691,7 @@ ate_intr(void *xsc)
 		ATE_LOCK(sc);
 		/* XXX TSR register should be cleared */
 		if (sc->sent_mbuf[0]) {
-			bus_dmamap_sync(sc->rxtag, sc->tx_map[0],
+			bus_dmamap_sync(sc->mtag, sc->tx_map[0],
 			    BUS_DMASYNC_POSTWRITE);
 			m_freem(sc->sent_mbuf[0]);
 			ifp->if_opackets++;
@@ -676,7 +699,7 @@ ate_intr(void *xsc)
 		}
 		if (sc->sent_mbuf[1]) {
 			if (RD4(sc, ETH_TSR) & ETH_TSR_IDLE) {
-				bus_dmamap_sync(sc->rxtag, sc->tx_map[1],
+				bus_dmamap_sync(sc->mtag, sc->tx_map[1],
 				    BUS_DMASYNC_POSTWRITE);
 				m_freem(sc->sent_mbuf[1]);
 				ifp->if_opackets++;
@@ -996,8 +1019,6 @@ ate_miibus_readreg(device_t dev, int phy, int reg)
 	 * XXX to make sure that the clock to the emac is on here
 	 */
 
-	if (phy != 0)
-		return (0xffff);
 	sc = device_get_softc(dev);
 	DELAY(1);	/* Hangs w/o this delay really 30.5us atm */
 	WR4(sc, ETH_MAN, ETH_MAN_REG_RD(phy, reg));

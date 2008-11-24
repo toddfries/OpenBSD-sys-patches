@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/genassym.c,v 1.160 2007/09/17 21:55:28 peter Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/genassym.c,v 1.163 2008/08/15 20:51:31 kmacy Exp $");
 
 #include "opt_apic.h"
 #include "opt_compat.h"
@@ -82,9 +82,12 @@ ASSYM(PM_ACTIVE, offsetof(struct pmap, pm_active));
 ASSYM(TD_FLAGS, offsetof(struct thread, td_flags));
 ASSYM(TD_LOCK, offsetof(struct thread, td_lock));
 ASSYM(TD_PCB, offsetof(struct thread, td_pcb));
+ASSYM(TD_PFLAGS, offsetof(struct thread, td_pflags));
 ASSYM(TD_PROC, offsetof(struct thread, td_proc));
 ASSYM(TD_MD, offsetof(struct thread, td_md));
 ASSYM(TD_TID, offsetof(struct thread, td_tid));
+
+ASSYM(TDP_CALLCHAIN, TDP_CALLCHAIN);
 
 ASSYM(P_MD, offsetof(struct proc, p_md));
 ASSYM(MD_LDT, offsetof(struct mdproc, md_ldt));
@@ -219,12 +222,15 @@ ASSYM(BC32SEL, GSEL(GBIOSCODE32_SEL, SEL_KPL));
 ASSYM(GPROC0_SEL, GPROC0_SEL);
 ASSYM(VM86_FRAMESIZE, sizeof(struct vm86frame));
 
-ASSYM(MTX_LOCK, offsetof(struct mtx, mtx_lock));
-ASSYM(MTX_RECURSECNT, offsetof(struct mtx, mtx_recurse));
-
 #ifdef PC98
 #include <machine/bus.h>
 
 ASSYM(BUS_SPACE_HANDLE_BASE, offsetof(struct bus_space_handle, bsh_base));
 ASSYM(BUS_SPACE_HANDLE_IAT, offsetof(struct bus_space_handle, bsh_iat));
+#endif
+
+#ifdef XEN
+#include <machine/xen/hypervisor.h>
+ASSYM(PC_CR3, offsetof(struct pcpu, pc_cr3));
+ASSYM(HYPERVISOR_VIRT_START, __HYPERVISOR_VIRT_START);
 #endif

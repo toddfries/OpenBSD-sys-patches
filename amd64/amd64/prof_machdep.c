@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/prof_machdep.c,v 1.29 2007/03/26 18:03:29 njl Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/prof_machdep.c,v 1.33 2008/10/21 00:38:00 jkim Exp $");
 
 #ifdef GUPROF
 #if 0
@@ -82,10 +82,10 @@ __mcount:							\n\
 	# Check that we are profiling.  Do it early for speed.	\n\
 	#							\n\
 	cmpl	$GMON_PROF_OFF,_gmonparam+GM_STATE		\n\
- 	je	.mcount_exit					\n\
- 	#							\n\
- 	# __mcount is the same as [.]mcount except the caller	\n\
- 	# hasn't changed the stack except to call here, so the	\n\
+	je	.mcount_exit					\n\
+	#							\n\
+	# __mcount is the same as [.]mcount except the caller	\n\
+	# hasn't changed the stack except to call here, so the	\n\
 	# caller's raddr is above our raddr.			\n\
 	#							\n\
 	pushq	%rax						\n\
@@ -96,13 +96,11 @@ __mcount:							\n\
 	pushq	%r8						\n\
 	pushq	%r9						\n\
 	movq	7*8+8(%rsp),%rdi				\n\
- 	jmp	.got_frompc					\n\
- 								\n\
- 	.p2align 4,0x90						\n\
- 	.globl	.mcount						\n\
+	jmp	.got_frompc					\n\
+								\n\
+	.p2align 4,0x90						\n\
+	.globl	.mcount						\n\
 .mcount:							\n\
- 	.globl	__cyg_profile_func_enter			\n\
-__cyg_profile_func_enter:					\n\
 	cmpl	$GMON_PROF_OFF,_gmonparam+GM_STATE		\n\
 	je	.mcount_exit					\n\
 	#							\n\
@@ -137,7 +135,7 @@ __cyg_profile_func_enter:					\n\
 	popq	%rdx						\n\
 	popq	%rax						\n\
 .mcount_exit:							\n\
-	ret							\n\
+	ret	$0						\n\
 ");
 #else /* !__GNUCLIKE_ASM */
 #error "this file needs to be ported to your compiler"
@@ -167,8 +165,6 @@ GMON_PROF_HIRES	=	4					\n\
 	.p2align 4,0x90						\n\
 	.globl	.mexitcount					\n\
 .mexitcount:							\n\
- 	.globl	__cyg_profile_func_exit				\n\
-__cyg_profile_func_exit:					\n\
 	cmpl	$GMON_PROF_HIRES,_gmonparam+GM_STATE		\n\
 	jne	.mexitcount_exit				\n\
 	pushq	%rax						\n\
@@ -191,7 +187,7 @@ __cyg_profile_func_exit:					\n\
 	popq	%rdx						\n\
 	popq	%rax						\n\
 .mexitcount_exit:						\n\
-	ret							\n\
+	ret	$0						\n\
 ");
 #endif /* __GNUCLIKE_ASM */
 
@@ -262,7 +258,7 @@ cputime()
 	delta = prev_count - count;
 	prev_count = count;
 	if ((int) delta <= 0)
-		return (delta + (timer0_max_count << CPUTIME_CLOCK_I8254_SHIFT));
+		return (delta + (i8254_max_count << CPUTIME_CLOCK_I8254_SHIFT));
 	return (delta);
 }
 
@@ -327,7 +323,7 @@ startguprof(gp)
 			cputime_clock = CPUTIME_CLOCK_TSC;
 #endif
 	}
-	gp->profrate = timer_freq << CPUTIME_CLOCK_I8254_SHIFT;
+	gp->profrate = i8254_freq << CPUTIME_CLOCK_I8254_SHIFT;
 #if defined(I586_CPU) || defined(I686_CPU)
 	if (cputime_clock == CPUTIME_CLOCK_TSC) {
 		gp->profrate = tsc_freq >> 1;
@@ -387,8 +383,11 @@ static void
 tsc_freq_changed(void *arg, const struct cf_level *level, int status)
 {
 
-	/* If there was an error during the transition, don't do anything. */
-	if (status != 0)
+	/*
+	 * If there was an error during the transition or
+	 * TSC is P-state invariant, don't do anything.
+	 */
+	if (status != 0 || tsc_is_invariant)
 		return;
 	if (cputime_prof_active && cputime_clock == CPUTIME_CLOCK_TSC)
 		printf("warning: cpu freq changed while profiling active\n");

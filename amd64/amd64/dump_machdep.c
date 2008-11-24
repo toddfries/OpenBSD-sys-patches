@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/dump_machdep.c,v 1.12 2006/04/21 04:24:50 peter Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/dump_machdep.c,v 1.17 2008/10/31 10:11:35 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -34,6 +34,7 @@ __FBSDID("$FreeBSD: src/sys/amd64/amd64/dump_machdep.c,v 1.12 2006/04/21 04:24:5
 #include <sys/sysctl.h>
 #include <sys/kernel.h>
 #include <sys/kerneldump.h>
+#include <sys/vimage.h>
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <machine/elf.h>
@@ -104,27 +105,6 @@ md_pa_next(struct md_pa *mdp)
 	return (mdp);
 }
 
-/* XXX should be MI */
-static void
-mkdumpheader(struct kerneldumpheader *kdh, uint32_t archver, uint64_t dumplen,
-    uint32_t blksz)
-{
-
-	bzero(kdh, sizeof(*kdh));
-	strncpy(kdh->magic, KERNELDUMPMAGIC, sizeof(kdh->magic));
-	strncpy(kdh->architecture, MACHINE_ARCH, sizeof(kdh->architecture));
-	kdh->version = htod32(KERNELDUMPVERSION);
-	kdh->architectureversion = htod32(archver);
-	kdh->dumplength = htod64(dumplen);
-	kdh->dumptime = htod64(time_second);
-	kdh->blocksize = htod32(blksz);
-	strncpy(kdh->hostname, hostname, sizeof(kdh->hostname));
-	strncpy(kdh->versionstring, version, sizeof(kdh->versionstring));
-	if (panicstr != NULL)
-		strncpy(kdh->panicstring, panicstr, sizeof(kdh->panicstring));
-	kdh->parity = kerneldump_parity(kdh);
-}
-
 static int
 buf_write(struct dumperinfo *di, char *ptr, size_t sz)
 {
@@ -140,7 +120,7 @@ buf_write(struct dumperinfo *di, char *ptr, size_t sz)
 		ptr += len;
 		sz -= len;
 		if (fragsz == DEV_BSIZE) {
-			error = di->dumper(di->priv, buffer, 0, dumplo,
+			error = dump_write(di, buffer, 0, dumplo,
 			    DEV_BSIZE);
 			if (error)
 				return error;
@@ -160,7 +140,7 @@ buf_flush(struct dumperinfo *di)
 	if (fragsz == 0)
 		return (0);
 
-	error = di->dumper(di->priv, buffer, 0, dumplo, DEV_BSIZE);
+	error = dump_write(di, buffer, 0, dumplo, DEV_BSIZE);
 	dumplo += DEV_BSIZE;
 	fragsz = 0;
 	return (error);
@@ -177,6 +157,7 @@ cb_dumpdata(struct md_pa *mdp, int seqnr, void *arg)
 	uint64_t pgs;
 	size_t counter, sz, chunk;
 	int i, c, error, twiddle;
+	u_int maxdumppgs;
 
 	error = 0;	/* catch case in which chunk size is 0 */
 	counter = 0;	/* Update twiddle every 16MB */
@@ -184,13 +165,16 @@ cb_dumpdata(struct md_pa *mdp, int seqnr, void *arg)
 	va = 0;
 	pgs = mdp->md_size / PAGE_SIZE;
 	pa = mdp->md_start;
+	maxdumppgs = min(di->maxiosize / PAGE_SIZE, MAXDUMPPGS);
+	if (maxdumppgs == 0)	/* seatbelt */
+		maxdumppgs = 1;
 
 	printf("  chunk %d: %ldMB (%ld pages)", seqnr, PG2MB(pgs), pgs);
 
 	while (pgs) {
 		chunk = pgs;
-		if (chunk > MAXDUMPPGS)
-			chunk = MAXDUMPPGS;
+		if (chunk > maxdumppgs)
+			chunk = maxdumppgs;
 		sz = chunk << PAGE_SHIFT;
 		counter += sz;
 		if (counter >> 24) {
@@ -201,7 +185,7 @@ cb_dumpdata(struct md_pa *mdp, int seqnr, void *arg)
 			a = pa + i * PAGE_SIZE;
 			va = pmap_kenter_temporary(trunc_page(a), i);
 		}
-		error = di->dumper(di->priv, va, 0, dumplo, sz);
+		error = dump_write(di, va, 0, dumplo, sz);
 		if (error)
 			break;
 		dumplo += sz;
@@ -321,13 +305,13 @@ dumpsys(struct dumperinfo *di)
 	dumplo = di->mediaoffset + di->mediasize - dumpsize;
 	dumplo -= sizeof(kdh) * 2;
 
-	mkdumpheader(&kdh, KERNELDUMP_AMD64_VERSION, dumpsize, di->blocksize);
+	mkdumpheader(&kdh, KERNELDUMPMAGIC, KERNELDUMP_AMD64_VERSION, dumpsize, di->blocksize);
 
 	printf("Dumping %llu MB (%d chunks)\n", (long long)dumpsize >> 20,
 	    ehdr.e_phnum);
 
 	/* Dump leader */
-	error = di->dumper(di->priv, &kdh, 0, dumplo, sizeof(kdh));
+	error = dump_write(di, &kdh, 0, dumplo, sizeof(kdh));
 	if (error)
 		goto fail;
 	dumplo += sizeof(kdh);
@@ -358,12 +342,12 @@ dumpsys(struct dumperinfo *di)
 		goto fail;
 
 	/* Dump trailer */
-	error = di->dumper(di->priv, &kdh, 0, dumplo, sizeof(kdh));
+	error = dump_write(di, &kdh, 0, dumplo, sizeof(kdh));
 	if (error)
 		goto fail;
 
 	/* Signal completion, signoff and exit stage left. */
-	di->dumper(di->priv, NULL, 0, 0, 0);
+	dump_write(di, NULL, 0, 0, 0);
 	printf("\nDump complete\n");
 	return;
 

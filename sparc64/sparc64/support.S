@@ -25,7 +25,7 @@
  */
 
 #include <machine/asm.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/support.S,v 1.32 2007/01/19 11:15:33 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/support.S,v 1.35 2008/11/16 19:28:55 marius Exp $");
 
 #include <sys/errno.h>
 
@@ -647,7 +647,7 @@ ENTRY(spitfire_block_copy)
 	stda	%f32, [%o1] %asi
 	add	%o0, 64, %o0
 	sub	%o2, 64, %o2
-	ba	%xcc, 2b
+	ba,pt	%xcc, 2b
 	 add	%o1, 64, %o1
 
 3:	membar	#Sync
@@ -655,10 +655,8 @@ ENTRY(spitfire_block_copy)
 	stda	%f16, [%o1] %asi
 	membar	#Sync
 
-	wr	%g0, 0, %fprs
-
 	retl
-	 nop
+	 wr	%g0, 0, %fprs
 END(spitfire_block_copy)
 
 /*
@@ -704,14 +702,12 @@ ENTRY(spitfire_block_zero)
 	stda	%f0, [%o0 + 128] %asi
 	stda	%f0, [%o0 + 192] %asi
 	sub	%o1, 256, %o1
-	brnz	%o1, 1b
+	brnz,pt	%o1, 1b
 	 add	%o0, 256, %o0
 	membar	#Sync
 
-	wr	%g0, 0, %fprs
-
 	retl
-	 nop
+	 wr	%g0, 0, %fprs
 END(spitfire_block_zero)
 
 	.globl	fpu_fault_end
@@ -765,7 +761,7 @@ ENTRY(openfirmware)
 END(openfirmware)
 
 /*
- * void ofw_exit(cell_t args[])
+ * void openfirmware_exit(cell_t args[])
  */
 ENTRY(openfirmware_exit)
 	save	%sp, -CCFSZ, %sp
@@ -773,15 +769,16 @@ ENTRY(openfirmware_exit)
 	wrpr	%g0, PIL_TICK, %pil
 	SET(ofw_tba, %l7, %l5)
 	ldx	[%l5], %l5
-	wrpr	%l5, 0, %tba			! restore the ofw trap table
+	wrpr	%l5, 0, %tba			! restore the OFW trap table
 	SET(ofw_vec, %l7, %l6)
 	ldx	[%l6], %l6
 	SET(kstack0 + KSTACK_PAGES * PAGE_SIZE - PCB_SIZEOF, %l7, %l0)
 	sub	%l0, SPOFF, %fp			! setup a stack in a locked page
 	sub	%l0, SPOFF + CCFSZ, %sp
-	mov     AA_DMMU_PCXR, %l3		! set context 0
-	stxa    %g0, [%l3] ASI_DMMU
-	membar	#Sync
+	mov	AA_DMMU_PCXR, %l3		! force primary DMMU context 0
+	sethi	%hi(KERNBASE), %l5
+	stxa	%g0, [%l3] ASI_DMMU
+	flush	%l5
 	wrpr	%g0, 0, %tl			! force trap level 0
 	call	%l6
 	 mov	%i0, %o0
@@ -805,7 +802,6 @@ ENTRY(bintr)
 ENTRY(eintr)
 	nop
 
-
 /*
  * XXX including sys/gmon.h in genassym.c is not possible due to uintfptr_t
  * badness.
@@ -819,14 +815,14 @@ ENTRY(eintr)
 
 ENTRY(__cyg_profile_func_enter)
 	SET(_gmonparam, %o3, %o2)
-	lduw    [%o2 + GM_STATE], %o3
-	cmp     %o3, GMON_PROF_OFF
+	lduw	[%o2 + GM_STATE], %o3
+	cmp	%o3, GMON_PROF_OFF
 	be,a,pn %icc, 1f
 	 nop
 	SET(mcount, %o3, %o2)
 	jmpl	%o2, %g0
 	 nop
-1:      retl
+1:	retl
 	 nop
 END(__cyg_profile_func_enter)
 
@@ -834,14 +830,14 @@ END(__cyg_profile_func_enter)
 
 ENTRY(__cyg_profile_func_exit)
 	SET(_gmonparam, %o3, %o2)
-	lduw    [%o2 + GM_STATE], %o3
-	cmp     %o3, GMON_PROF_HIRES
+	lduw	[%o2 + GM_STATE], %o3
+	cmp	%o3, GMON_PROF_HIRES
 	be,a,pn %icc, 1f
 	 nop
 	SET(mexitcount, %o3, %o2)
 	jmpl	%o2, %g0
 	 nop
-1:      retl
+1:	retl
 	 nop
 END(__cyg_profile_func_exit)
 

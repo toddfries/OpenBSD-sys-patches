@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/atapi-cd.c,v 1.199 2008/04/17 12:29:35 sos Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/atapi-cd.c,v 1.200 2008/05/08 17:55:44 grehan Exp $");
 
 #include "opt_ata.h"
 #include <sys/param.h>
@@ -906,8 +906,11 @@ acd_set_ioparm(device_t dev)
 {
     struct ata_channel *ch = device_get_softc(device_get_parent(dev));
     struct acd_softc *cdp = device_get_ivars(dev);
+    uint32_t max_iosize;
 
-    cdp->iomax = min(ch->dma.max_iosize, 65534);
+    max_iosize = ch->dma.max_iosize ? ch->dma.max_iosize : DFLTPHYS;
+
+    cdp->iomax = min(max_iosize, 65534);
 }
 
 static void 

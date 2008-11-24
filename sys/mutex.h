@@ -26,7 +26,7 @@
  * SUCH DAMAGE.
  *
  *	from BSDI $Id: mutex.h,v 2.7.2.35 2000/04/27 03:10:26 cp Exp $
- * $FreeBSD: src/sys/sys/mutex.h,v 1.101 2007/08/06 14:26:03 rwatson Exp $
+ * $FreeBSD: src/sys/sys/mutex.h,v 1.103 2008/05/15 20:10:06 attilio Exp $
  */
 
 #ifndef _SYS_MUTEX_H_
@@ -133,6 +133,8 @@ void	_thread_lock_flags(struct thread *, int, const char *, int);
     _thread_lock_flags((tdp), (opt), __FILE__, __LINE__)
 #define	thread_unlock(tdp)						\
        mtx_unlock_spin((tdp)->td_lock)
+
+#define	mtx_recurse	lock_object.lo_data
 
 /*
  * We define our machine-independent (unoptimized) mutex micro-operations
@@ -421,10 +423,10 @@ struct mtx_args {
  * _mtx_assert() must build.
  */
 #if defined(INVARIANTS) || defined(INVARIANT_SUPPORT)
-#define MA_OWNED	0x01
-#define MA_NOTOWNED	0x02
-#define MA_RECURSED	0x04
-#define MA_NOTRECURSED	0x08
+#define MA_OWNED	LA_XLOCKED
+#define MA_NOTOWNED	LA_UNLOCKED
+#define MA_RECURSED	LA_RECURSED
+#define MA_NOTRECURSED	LA_NOTRECURSED
 #endif
 
 #ifdef INVARIANTS

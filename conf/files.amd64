@@ -1,7 +1,7 @@
 # This file tells config what files go into building a kernel,
 # files marked standard are always included.
 #
-# $FreeBSD: src/sys/conf/files.amd64,v 1.111 2007/10/26 03:23:52 peter Exp $
+# $FreeBSD: src/sys/conf/files.amd64,v 1.124 2008/11/09 17:37:54 jkoshy Exp $
 #
 # The long compile-with and dependency lines are required because of
 # limitations in config: backslash-newline doesn't work in strings, and
@@ -72,9 +72,9 @@ hptmvraid.o			optional	hptmv			\
 	dependency	"$S/dev/hptmv/amd64-elf.raid.o.uu"	\
 	compile-with	"uudecode < $S/dev/hptmv/amd64-elf.raid.o.uu" \
 	no-implicit-rule
-rr232x_lib.o		optional	rr232x				\
-	dependency	"$S/dev/rr232x/amd64-elf.rr232x_lib.o.uu"	\
-	compile-with	"uudecode < $S/dev/rr232x/amd64-elf.rr232x_lib.o.uu" \
+hptrr_lib.o			optional	hptrr			\
+	dependency	"$S/dev/hptrr/amd64-elf.hptrr_lib.o.uu"		\
+	compile-with	"uudecode < $S/dev/hptrr/amd64-elf.hptrr_lib.o.uu" \
 	no-implicit-rule
 #
 amd64/acpica/OsdEnvironment.c	optional	acpi
@@ -116,9 +116,10 @@ amd64/amd64/mptable.c		optional	mptable
 amd64/amd64/mptable_pci.c	optional	mptable pci
 amd64/amd64/msi.c		optional	pci
 amd64/amd64/nexus.c		standard
-amd64/amd64/pmap.c		standard	nowerror
+amd64/amd64/pmap.c		standard
 amd64/amd64/prof_machdep.c	optional	profiling-routine
 amd64/amd64/sigtramp.S		standard
+amd64/amd64/stack_machdep.c	optional	ddb | stack
 amd64/amd64/support.S		standard
 amd64/amd64/sys_machdep.c	standard
 amd64/amd64/trap.c		standard
@@ -138,7 +139,11 @@ amd64/pci/pci_cfgreg.c		optional	pci
 crypto/blowfish/bf_enc.c	optional	crypto | ipsec 
 crypto/des/des_enc.c		optional	crypto | ipsec | netsmb
 dev/acpica/acpi_if.m		standard
+dev/agp/agp_amd64.c			optional	agp
+dev/agp/agp_i810.c			optional	agp
+dev/agp/agp_intel.c			optional	agp
 dev/arcmsr/arcmsr.c		optional	arcmsr pci
+dev/asmc/asmc.c			optional	asmc isa
 dev/atkbdc/atkbd.c		optional	atkbd atkbdc
 dev/atkbdc/atkbd_atkbdc.c	optional	atkbd atkbdc
 dev/atkbdc/atkbdc.c		optional	atkbdc
@@ -146,6 +151,7 @@ dev/atkbdc/atkbdc_isa.c		optional	atkbdc isa
 dev/atkbdc/atkbdc_subr.c	optional	atkbdc
 dev/atkbdc/psm.c		optional	psm atkbdc
 dev/coretemp/coretemp.c		optional	coretemp
+dev/cpuctl/cpuctl.c		optional	cpuctl
 # There are no systems with isa slots, so all ed isa entries should go..
 dev/ed/if_ed_3c503.c		optional	ed isa ed_3c503
 dev/ed/if_ed_isa.c		optional	ed isa
@@ -178,17 +184,20 @@ dev/hptmv/mv.c			optional	hptmv
 dev/hptmv/gui_lib.c		optional	hptmv
 dev/hptmv/hptproc.c		optional	hptmv
 dev/hptmv/ioctl.c		optional	hptmv
+dev/hptrr/hptrr_os_bsd.c	optional	hptrr
+dev/hptrr/hptrr_osm_bsd.c	optional	hptrr
+dev/hptrr/hptrr_config.c	optional	hptrr
 dev/hwpmc/hwpmc_amd.c		optional	hwpmc
+dev/hwpmc/hwpmc_intel.c		optional	hwpmc
 dev/hwpmc/hwpmc_piv.c		optional	hwpmc
+dev/hwpmc/hwpmc_tsc.c		optional	hwpmc
 dev/hwpmc/hwpmc_x86.c		optional	hwpmc
+dev/k8temp/k8temp.c		optional	k8temp
 dev/kbd/kbd.c			optional	atkbd | sc | ukbd
 dev/mem/memutil.c		optional	mem
 dev/nfe/if_nfe.c		optional	nfe pci
 dev/nve/if_nve.c		optional	nve pci
 dev/nvram/nvram.c		optional	nvram isa
-dev/rr232x/os_bsd.c		optional	rr232x
-dev/rr232x/osm_bsd.c		optional	rr232x
-dev/rr232x/rr232x_config.c	optional	rr232x
 dev/sio/sio.c			optional	sio
 dev/sio/sio_isa.c		optional	sio isa
 dev/sio/sio_pccard.c		optional	sio pccard
@@ -200,12 +209,11 @@ dev/syscons/scterm-sc.c		optional	sc
 dev/syscons/scvgarndr.c		optional	sc vga
 dev/syscons/scvtb.c		optional	sc
 dev/uart/uart_cpu_amd64.c	optional	uart
+dev/wpi/if_wpi.c		optional	wpi
+isa/atrtc.c			standard
 isa/syscons_isa.c		optional	sc
 isa/vga_isa.c			optional	vga
 kern/link_elf_obj.c		standard
-pci/agp_amd64.c			optional	agp
-pci/agp_i810.c			optional	agp
-pci/agp_intel.c			optional	agp
 #
 # IA32 binary support
 #
@@ -214,6 +222,7 @@ amd64/ia32/ia32_reg.c		optional	compat_ia32
 amd64/ia32/ia32_signal.c	optional	compat_ia32
 amd64/ia32/ia32_sigtramp.S	optional	compat_ia32
 amd64/ia32/ia32_syscall.c	optional	compat_ia32
+compat/freebsd32/freebsd32_ioctl.c	optional	compat_ia32
 compat/freebsd32/freebsd32_misc.c	optional	compat_ia32
 compat/freebsd32/freebsd32_syscalls.c	optional	compat_ia32
 compat/freebsd32/freebsd32_sysent.c	optional	compat_ia32

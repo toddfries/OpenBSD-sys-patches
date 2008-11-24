@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)radix.c	8.5 (Berkeley) 5/19/95
- * $FreeBSD: src/sys/net/radix.c,v 1.38 2006/02/07 20:25:39 qingli Exp $
+ * $FreeBSD: src/sys/net/radix.c,v 1.39 2008/04/13 05:45:13 qingli Exp $
  */
 
 /*
@@ -47,6 +47,13 @@
 #include <sys/syslog.h>
 #include <net/radix.h>
 #endif
+
+#include "opt_mpath.h"
+
+#ifdef RADIX_MPATH
+#include <net/radix_mpath.h>
+#endif
+
 
 static int	rn_walktree_from(struct radix_node_head *h, void *a, void *m,
 		    walktree_f_t *f, void *w);
@@ -630,6 +637,21 @@ rn_addroute(v_arg, n_arg, head, treenodes)
 	saved_tt = tt = rn_insert(v, head, &keyduplicated, treenodes);
 	if (keyduplicated) {
 		for (t = tt; tt; t = tt, tt = tt->rn_dupedkey) {
+#ifdef RADIX_MPATH
+			/* permit multipath, if enabled for the family */
+			if (rn_mpath_capable(head) && netmask == tt->rn_mask) {
+				/*
+				 * go down to the end of multipaths, so that
+				 * new entry goes into the end of rn_dupedkey
+				 * chain.
+				 */
+				do {
+					t = tt;
+					tt = tt->rn_dupedkey;
+				} while (tt && t->rn_mask == tt->rn_mask);
+				break;
+			}
+#endif
 			if (tt->rn_mask == netmask)
 				return (0);
 			if (netmask == 0 ||

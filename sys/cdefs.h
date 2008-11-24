@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)cdefs.h	8.8 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/sys/cdefs.h,v 1.93 2006/09/21 01:38:58 kan Exp $
+ * $FreeBSD: src/sys/sys/cdefs.h,v 1.96 2008/10/21 16:46:50 rdivacky Exp $
  */
 
 #ifndef	_SYS_CDEFS_H_
@@ -102,9 +102,6 @@
 #define __CC_SUPPORTS_VARADIC_XXX 1 /* see varargs.h */
 
 #define __CC_SUPPORTS_DYNAMIC_ARRAY_INIT 1
-
-/* XXX: sys/dev/mpt/mpilib/mpi_type.h uses it, someone should review it */
-#define __CC_INT_IS_32BIT 1
 
 #endif /* __GNUC__ || __INTEL_COMPILER */
 
@@ -233,6 +230,18 @@
 #define	__always_inline	__attribute__((__always_inline__))
 #else
 #define	__always_inline
+#endif
+
+#if __GNUC_PREREQ__(4, 2) /* actually 4.1.3 */
+#define	__gnu89_inline	__attribute__((__gnu_inline__)) __inline
+#else
+#define	__gnu89_inline
+#endif
+
+#if __GNUC_PREREQ__(3, 1)
+#define	__noinline	__attribute__ ((__noinline__))
+#else
+#define	__noinline
 #endif
 
 #if __GNUC_PREREQ__(3, 3)
@@ -393,7 +402,7 @@
  * Embed the rcs id of a source file in the resulting library.  Note that in
  * more recent ELF binutils, we use .ident allowing the ID to be stripped.
  * Usage:
- *	__FBSDID("$FreeBSD: src/sys/sys/cdefs.h,v 1.93 2006/09/21 01:38:58 kan Exp $");
+ *	__FBSDID("$FreeBSD: src/sys/sys/cdefs.h,v 1.96 2008/10/21 16:46:50 rdivacky Exp $");
  */
 #ifndef	__FBSDID
 #if !defined(lint) && !defined(STRIP_FBSDID)

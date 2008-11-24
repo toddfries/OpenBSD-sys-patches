@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/ohci_pci.c,v 1.50 2007/06/21 14:42:33 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/ohci_pci.c,v 1.52 2008/10/09 19:22:00 n_hibma Exp $");
 
 /*
  * USB Open Host Controller driver.
@@ -48,8 +48,6 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/ohci_pci.c,v 1.50 2007/06/21 14:42:33 imp Ex
  * PCI probes and OHCI specific code. This was done to facilitate the
  * sharing of code between *BSD's
  */
-
-#include "opt_bus.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -410,3 +408,4 @@ static devclass_t ohci_devclass;
 
 DRIVER_MODULE(ohci, pci, ohci_driver, ohci_devclass, 0, 0);
 DRIVER_MODULE(ohci, cardbus, ohci_driver, ohci_devclass, 0, 0);
+MODULE_DEPEND(ohci, usb, 1, 1, 1);

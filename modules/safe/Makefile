@@ -23,7 +23,7 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 #
-# $FreeBSD: src/sys/modules/safe/Makefile,v 1.4 2007/03/21 03:42:50 sam Exp $
+# $FreeBSD: src/sys/modules/safe/Makefile,v 1.5 2008/09/01 23:59:00 imp Exp $
 #
 
 .PATH:	${.CURDIR}/../../dev/safe
@@ -34,7 +34,7 @@ SRCS   += opt_bus.h cryptodev_if.h
 
 .if !defined(KERNBUILDDIR)
 opt_safe.h:
-	echo "#define SAFE_DEBUG 1" > opt_safe.h
+	echo "#define SAFE_DEBUG 1" > ${.TARGET}
 .endif
 
 .include <bsd.kmod.mk>

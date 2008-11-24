@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_misc.c,v 1.98 2007/10/24 19:03:52 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_misc.c,v 1.101 2008/04/21 21:24:08 rdivacky Exp $");
 
 #include "opt_mac.h"
 
@@ -278,7 +278,7 @@ svr4_sys_getdents64(td, uap)
 	buflen = max(DIRBLKSIZ, nbytes);
 	buflen = min(buflen, MAXBSIZE);
 	buf = malloc(buflen, M_TEMP, M_WAITOK);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 again:
 	aiov.iov_base = buf;
 	aiov.iov_len = buflen;
@@ -396,7 +396,7 @@ again:
 eof:
 	td->td_retval[0] = nbytes - resid;
 out:
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	VFS_UNLOCK_GIANT(vfslocked);
 	fdrop(fp, td);
 	if (cookies)
@@ -447,7 +447,7 @@ svr4_sys_getdents(td, uap)
 
 	buflen = min(MAXBSIZE, uap->nbytes);
 	buf = malloc(buflen, M_TEMP, M_WAITOK);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	off = fp->f_offset;
 again:
 	aiov.iov_base = buf;
@@ -529,7 +529,7 @@ again:
 eof:
 	*retval = uap->nbytes - resid;
 out:
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	VFS_UNLOCK_GIANT(vfslocked);
 	fdrop(fp, td);
 	if (cookiebuf)
@@ -620,7 +620,7 @@ svr4_sys_fchroot(td, uap)
 	VREF(vp);
 	fdrop(fp, td);
 	vfslocked = VFS_LOCK_GIANT(vp->v_mount);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	error = change_dir(vp, td);
 	if (error)
 		goto fail;
@@ -629,7 +629,7 @@ svr4_sys_fchroot(td, uap)
 	if (error)
 		goto fail;
 #endif
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	error = change_root(vp, td);
 	vrele(vp);
 	VFS_UNLOCK_GIANT(vfslocked);
@@ -898,9 +898,7 @@ svr4_sys_ulimit(td, uap)
 
 			if (r == -1)
 				r = 0x7fffffff;
-			mtx_lock(&Giant);	/* XXX */
 			r += (long) vm->vm_daddr;
-			mtx_unlock(&Giant);
 			if (r < 0)
 				r = 0x7fffffff;
 			*retval = r;

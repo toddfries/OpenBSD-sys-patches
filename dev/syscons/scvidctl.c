@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/syscons/scvidctl.c,v 1.39 2007/12/29 23:26:56 wkoszek Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/syscons/scvidctl.c,v 1.40 2008/08/20 08:31:58 ed Exp $");
 
 #include "opt_compat.h"
 #include "opt_syscons.h"
@@ -241,11 +241,8 @@ sc_set_text_mode(scr_stat *scp, struct tty *tp, int mode, int xsize, int ysize,
 	|| tp->t_winsize.ws_row != scp->ysize) {
 	tp->t_winsize.ws_col = scp->xsize;
 	tp->t_winsize.ws_row = scp->ysize;
-	if (tp->t_pgrp != NULL) {
-	    PGRP_LOCK(tp->t_pgrp);
-	    pgsignal(tp->t_pgrp, SIGWINCH, 1);
-	    PGRP_UNLOCK(tp->t_pgrp);
-	}
+
+	tty_signal_pgrp(tp, SIGWINCH);
     }
 
     return 0;
@@ -308,11 +305,8 @@ sc_set_graphics_mode(scr_stat *scp, struct tty *tp, int mode)
 	|| tp->t_winsize.ws_ypixel != scp->ypixel) {
 	tp->t_winsize.ws_xpixel = scp->xpixel;
 	tp->t_winsize.ws_ypixel = scp->ypixel;
-	if (tp->t_pgrp != NULL) {
-	    PGRP_LOCK(tp->t_pgrp);
-	    pgsignal(tp->t_pgrp, SIGWINCH, 1);
-	    PGRP_UNLOCK(tp->t_pgrp);
-	}
+
+	tty_signal_pgrp(tp, SIGWINCH);
     }
 
     return 0;
@@ -475,7 +469,7 @@ sc_set_pixel_mode(scr_stat *scp, struct tty *tp, int xsize, int ysize,
 			 vidd_ioctl((a), (c), (caddr_t)(d)))
 
 int
-sc_vid_ioctl(struct tty *tp, u_long cmd, caddr_t data, int flag, struct thread *td)
+sc_vid_ioctl(struct tty *tp, u_long cmd, caddr_t data, struct thread *td)
 {
     scr_stat *scp;
     video_adapter_t *adp;
@@ -488,7 +482,7 @@ sc_vid_ioctl(struct tty *tp, u_long cmd, caddr_t data, int flag, struct thread *
     int ival;
 #endif
 
-    scp = SC_STAT(tp->t_dev);
+    scp = SC_STAT(tp);
     if (scp == NULL)		/* tp == SC_MOUSE */
 	return ENOIOCTL;
     adp = scp->sc->adp;

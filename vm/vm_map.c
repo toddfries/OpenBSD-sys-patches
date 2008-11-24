@@ -63,7 +63,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_map.c,v 1.389 2007/10/22 05:21:05 alc Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_map.c,v 1.397 2008/06/21 21:02:13 alc Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -197,7 +197,6 @@ vmspace_zfini(void *mem, int size)
 	struct vmspace *vm;
 
 	vm = (struct vmspace *)mem;
-	pmap_release(vmspace_pmap(vm));
 	vm_map_zfini(&vm->vm_map, sizeof(vm->vm_map));
 }
 
@@ -208,8 +207,8 @@ vmspace_zinit(void *mem, int size, int flags)
 
 	vm = (struct vmspace *)mem;
 
+	vm->vm_map.pmap = NULL;
 	(void)vm_map_zinit(&vm->vm_map, sizeof(vm->vm_map), flags);
-	pmap_pinit(vmspace_pmap(vm));
 	return (0);
 }
 
@@ -272,6 +271,10 @@ vmspace_alloc(min, max)
 	struct vmspace *vm;
 
 	vm = uma_zalloc(vmspace_zone, M_WAITOK);
+	if (vm->vm_map.pmap == NULL && !pmap_pinit(vmspace_pmap(vm))) {
+		uma_zfree(vmspace_zone, vm);
+		return (NULL);
+	}
 	CTR1(KTR_VM, "vmspace_alloc: %p", vm);
 	_vm_map_init(&vm->vm_map, min, max);
 	vm->vm_map.pmap = vmspace_pmap(vm);		/* XXX */
@@ -291,7 +294,7 @@ void
 vm_init2(void)
 {
 	uma_zone_set_obj(kmapentzone, &kmapentobj, lmin(cnt.v_page_count,
-	    (VM_MAX_KERNEL_ADDRESS - KERNBASE) / PAGE_SIZE) / 8 +
+	    (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE) / 8 +
 	     maxproc * 2 + maxfiles);
 	vmspace_zone = uma_zcreate("VMSPACE", sizeof(struct vmspace), NULL,
 #ifdef INVARIANTS
@@ -321,6 +324,12 @@ vmspace_dofree(struct vmspace *vm)
 	(void)vm_map_remove(&vm->vm_map, vm->vm_map.min_offset,
 	    vm->vm_map.max_offset);
 
+	/*
+	 * XXX Comment out the pmap_release call for now. The
+	 * vmspace_zone is marked as UMA_ZONE_NOFREE, and bugs cause
+	 * pmap.resident_count to be != 0 on exit sometimes.
+	 */
+/* 	pmap_release(vmspace_pmap(vm)); */
 	uma_zfree(vmspace_zone, vm);
 }
 
@@ -527,12 +536,12 @@ _vm_map_lock_downgrade(vm_map_t map, const char *file, int line)
  *	vm_map_unlock_and_wait:
  */
 int
-vm_map_unlock_and_wait(vm_map_t map, boolean_t user_wait)
+vm_map_unlock_and_wait(vm_map_t map, int timo)
 {
 
 	mtx_lock(&map_sleep_mtx);
 	vm_map_unlock(map);
-	return (msleep(&map->root, &map_sleep_mtx, PDROP | PVM, "vmmaps", 0));
+	return (msleep(&map->root, &map_sleep_mtx, PDROP | PVM, "vmmaps", timo));
 }
 
 /*
@@ -1163,13 +1172,12 @@ found:
 
 int
 vm_map_fixed(vm_map_t map, vm_object_t object, vm_ooffset_t offset,
-    vm_offset_t *addr /* IN/OUT */, vm_size_t length, vm_prot_t prot,
+    vm_offset_t start, vm_size_t length, vm_prot_t prot,
     vm_prot_t max, int cow)
 {
-	vm_offset_t start, end;
+	vm_offset_t end;
 	int result;
 
-	start = *addr;
 	vm_map_lock(map);
 	end = start + length;
 	VM_MAP_RANGE_CHECK(map, start, end);
@@ -1192,7 +1200,7 @@ vm_map_fixed(vm_map_t map, vm_object_t object, vm_ooffset_t offset,
 int
 vm_map_find(vm_map_t map, vm_object_t object, vm_ooffset_t offset,
 	    vm_offset_t *addr,	/* IN/OUT */
-	    vm_size_t length, boolean_t find_space, vm_prot_t prot,
+	    vm_size_t length, int find_space, vm_prot_t prot,
 	    vm_prot_t max, int cow)
 {
 	vm_offset_t start;
@@ -1200,15 +1208,20 @@ vm_map_find(vm_map_t map, vm_object_t object, vm_ooffset_t offset,
 
 	start = *addr;
 	vm_map_lock(map);
-	if (find_space) {
-		if (vm_map_findspace(map, start, length, addr)) {
-			vm_map_unlock(map);
-			return (KERN_NO_SPACE);
+	do {
+		if (find_space != VMFS_NO_SPACE) {
+			if (vm_map_findspace(map, start, length, addr)) {
+				vm_map_unlock(map);
+				return (KERN_NO_SPACE);
+			}
+			if (find_space == VMFS_ALIGNED_SPACE)
+				pmap_align_superpage(object, offset, addr,
+				    length);
+			start = *addr;
 		}
-		start = *addr;
-	}
-	result = vm_map_insert(map, object, offset,
-		start, start + length, prot, max, cow);
+		result = vm_map_insert(map, object, offset, start, start +
+		    length, prot, max, cow);
+	} while (result == KERN_NO_SPACE && find_space == VMFS_ALIGNED_SPACE);
 	vm_map_unlock(map);
 	return (result);
 }
@@ -1450,8 +1463,8 @@ vm_map_submap(
  *
  *	Preload read-only mappings for the given object's resident pages into
  *	the given map.  This eliminates the soft faults on process startup and
- *	immediately after an mmap(2).  Unless the given flags include
- *	MAP_PREFAULT_MADVISE, cached pages are not reactivated and mapped.
+ *	immediately after an mmap(2).  Because these are speculative mappings,
+ *	cached pages are not reactivated and mapped.
  */
 void
 vm_map_pmap_enter(vm_map_t map, vm_offset_t addr, vm_prot_t prot,
@@ -1850,7 +1863,7 @@ vm_map_unwire(vm_map_t map, vm_offset_t start, vm_offset_t end,
 			saved_start = (start >= entry->start) ? start :
 			    entry->start;
 			entry->eflags |= MAP_ENTRY_NEEDS_WAKEUP;
-			if (vm_map_unlock_and_wait(map, user_unwire)) {
+			if (vm_map_unlock_and_wait(map, 0)) {
 				/*
 				 * Allow interruption of user unwiring?
 				 */
@@ -1996,7 +2009,7 @@ vm_map_wire(vm_map_t map, vm_offset_t start, vm_offset_t end,
 			saved_start = (start >= entry->start) ? start :
 			    entry->start;
 			entry->eflags |= MAP_ENTRY_NEEDS_WAKEUP;
-			if (vm_map_unlock_and_wait(map, user_wire)) {
+			if (vm_map_unlock_and_wait(map, 0)) {
 				/*
 				 * Allow interruption of user wiring?
 				 */
@@ -2352,7 +2365,7 @@ vm_map_delete(vm_map_t map, vm_offset_t start, vm_offset_t end)
 			saved_start = entry->start;
 			entry->eflags |= MAP_ENTRY_NEEDS_WAKEUP;
 			last_timestamp = map->timestamp;
-			(void) vm_map_unlock_and_wait(map, FALSE);
+			(void) vm_map_unlock_and_wait(map, 0);
 			vm_map_lock(map);
 			if (last_timestamp + 1 != map->timestamp) {
 				/*
@@ -2584,6 +2597,8 @@ vmspace_fork(struct vmspace *vm1)
 	vm_map_lock(old_map);
 
 	vm2 = vmspace_alloc(old_map->min_offset, old_map->max_offset);
+	if (vm2 == NULL)
+		goto unlock_and_return;
 	vm2->vm_taddr = vm1->vm_taddr;
 	vm2->vm_daddr = vm1->vm_daddr;
 	vm2->vm_maxsaddr = vm1->vm_maxsaddr;
@@ -2675,7 +2690,7 @@ vmspace_fork(struct vmspace *vm1)
 		}
 		old_entry = old_entry->next;
 	}
-
+unlock_and_return:
 	vm_map_unlock(old_map);
 
 	return (vm2);
@@ -2701,7 +2716,9 @@ vm_map_stack(vm_map_t map, vm_offset_t addrbos, vm_size_t max_ssize,
 	cow &= ~orient;
 	KASSERT(orient != 0, ("No stack grow direction"));
 
-	if (addrbos < vm_map_min(map) || addrbos > map->max_offset)
+	if (addrbos < vm_map_min(map) ||
+	    addrbos > vm_map_max(map) ||
+	    addrbos + max_ssize < addrbos)
 		return (KERN_NO_SPACE);
 
 	init_ssize = (max_ssize < sgrowsiz) ? max_ssize : sgrowsiz;
@@ -3003,13 +3020,15 @@ Retry:
  * Unshare the specified VM space for exec.  If other processes are
  * mapped to it, then create a new one.  The new vmspace is null.
  */
-void
+int
 vmspace_exec(struct proc *p, vm_offset_t minuser, vm_offset_t maxuser)
 {
 	struct vmspace *oldvmspace = p->p_vmspace;
 	struct vmspace *newvmspace;
 
 	newvmspace = vmspace_alloc(minuser, maxuser);
+	if (newvmspace == NULL)
+		return (ENOMEM);
 	newvmspace->vm_swrss = oldvmspace->vm_swrss;
 	/*
 	 * This code is written like this for prototype purposes.  The
@@ -3021,30 +3040,34 @@ vmspace_exec(struct proc *p, vm_offset_t minuser, vm_offset_t maxuser)
 	PROC_VMSPACE_LOCK(p);
 	p->p_vmspace = newvmspace;
 	PROC_VMSPACE_UNLOCK(p);
-	if (p == curthread->td_proc)		/* XXXKSE ? */
+	if (p == curthread->td_proc)
 		pmap_activate(curthread);
 	vmspace_free(oldvmspace);
+	return (0);
 }
 
 /*
  * Unshare the specified VM space for forcing COW.  This
  * is called by rfork, for the (RFMEM|RFPROC) == 0 case.
  */
-void
+int
 vmspace_unshare(struct proc *p)
 {
 	struct vmspace *oldvmspace = p->p_vmspace;
 	struct vmspace *newvmspace;
 
 	if (oldvmspace->vm_refcnt == 1)
-		return;
+		return (0);
 	newvmspace = vmspace_fork(oldvmspace);
+	if (newvmspace == NULL)
+		return (ENOMEM);
 	PROC_VMSPACE_LOCK(p);
 	p->p_vmspace = newvmspace;
 	PROC_VMSPACE_UNLOCK(p);
-	if (p == curthread->td_proc)		/* XXXKSE ? */
+	if (p == curthread->td_proc)
 		pmap_activate(curthread);
 	vmspace_free(oldvmspace);
+	return (0);
 }
 
 /*

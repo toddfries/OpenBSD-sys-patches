@@ -27,11 +27,11 @@
  *
  *	from: NetBSD: iommuvar.h,v 1.9 2001/07/20 00:07:13 eeh Exp
  *
- * $FreeBSD: src/sys/sparc64/include/iommuvar.h,v 1.16 2007/08/05 11:56:43 marius Exp $
+ * $FreeBSD: src/sys/sparc64/include/iommuvar.h,v 1.18 2008/11/16 19:53:49 marius Exp $
  */
 
 #ifndef _MACHINE_IOMMUVAR_H_
-#define _MACHINE_IOMMUVAR_H_
+#define	_MACHINE_IOMMUVAR_H_
 
 #define	IO_PAGE_SIZE		PAGE_SIZE_8K
 #define	IO_PAGE_MASK		PAGE_MASK_8K
@@ -45,12 +45,12 @@
 TAILQ_HEAD(iommu_maplruq_head, bus_dmamap);
 
 /*
- * Per-IOMMU state. The parenthesized comments indicate the locking strategy:
+ * Per-IOMMU state; the parenthesized comments indicate the locking strategy:
  *	i - protected by is_mtx.
  *	r - read-only after initialization.
  *	* - comment refers to pointer target / target hardware registers
  *	    (for bus_addr_t).
- * is_maplruq is also locked by is_mtx. Elements of is_tsb may only be
+ * is_maplruq is also locked by is_mtx.  Elements of is_tsb may only be
  * accessed from functions operating on the map owning the corresponding
  * resource, so the locking the user is required to do to protect the
  * map is sufficient.
@@ -62,10 +62,10 @@ struct iommu_state {
 	struct rman		is_dvma_rman;	/* DVMA space rman */
 	struct iommu_maplruq_head is_maplruq;	/* (i) LRU queue */
 	vm_paddr_t		is_ptsb;	/* (r) TSB physical address */
-	u_int64_t		*is_tsb;	/* (*i) TSB virtual address */
+	uint64_t		*is_tsb;	/* (*i) TSB virtual address */
 	int			is_tsbsize;	/* (r) 0 = 8K, ... */
-	u_int64_t		is_pmaxaddr;	/* (r) max. physical address */
-	u_int64_t		is_dvmabase;	/* (r) */
+	uint64_t		is_pmaxaddr;	/* (r) max. physical address */
+	uint64_t		is_dvmabase;	/* (r) */
 	int64_t			is_cr;		/* (r) Control reg value */
 
 	vm_paddr_t		is_flushpa[2];	/* (r) */
@@ -81,7 +81,7 @@ struct iommu_state {
 	 */
 	volatile char		is_flush[STRBUF_FLUSHSYNC_NBYTES * 3 - 1];
 
-	/* copies of our parents state, to allow us to be self contained */
+	/* copies of our parent's state, to allow us to be self contained */
 	bus_space_tag_t		is_bustag;	/* (r) Our bus tag */
 	bus_space_handle_t	is_bushandle;	/* (r) */
 	bus_addr_t		is_iommu;	/* (r, *i) IOMMU registers */
@@ -96,12 +96,16 @@ struct iommu_state {
 	bus_addr_t		is_dva;		/* (r, *r) */
 	/* Tag compare diagnostics access */
 	bus_addr_t		is_dtcmp;	/* (r, *r) */
+	/* behavior flags */
+	u_int			is_flags;	/* (r) */
+#define	IOMMU_RERUN_DISABLE	(1 << 0)
 };
 
 /* interfaces for PCI/SBus code */
-void iommu_init(char *, struct iommu_state *, int, u_int32_t, int);
-void iommu_reset(struct iommu_state *);
-void iommu_decode_fault(struct iommu_state *, vm_offset_t);
+void iommu_init(const char *name, struct iommu_state *is, int tsbsize,
+    uint32_t iovabase, int resvpg);
+void iommu_reset(struct iommu_state *is);
+void iommu_decode_fault(struct iommu_state *is, vm_offset_t phys);
 
 extern struct bus_dma_methods iommu_dma_methods;
 

@@ -38,14 +38,13 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/sa11x0/sa11x0_ost.c,v 1.7 2007/02/26 05:17:47 kevlo Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/sa11x0/sa11x0_ost.c,v 1.8 2008/04/22 19:38:27 phk Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/time.h>
 #include <sys/bus.h>
-#include <sys/clock.h>
 #include <sys/module.h>
 
 #include <machine/bus.h>

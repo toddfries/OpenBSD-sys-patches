@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 1999-2002, 2007 Robert N. M. Watson
+ * Copyright (c) 1999-2002, 2007-2008 Robert N. M. Watson
  * Copyright (c) 2001-2005 Networks Associates Technology, Inc.
  * Copyright (c) 2005 Tom Rhodes
  * Copyright (c) 2006 SPARTA, Inc.
@@ -37,7 +37,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_bsdextended/mac_bsdextended.c,v 1.42 2007/10/29 13:33:05 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac_bsdextended/mac_bsdextended.c,v 1.52 2008/10/30 10:13:53 rwatson Exp $
  */
 
 /*
@@ -61,9 +61,11 @@
 #include <sys/vnode.h>
 #include <sys/sysctl.h>
 #include <sys/syslog.h>
+#include <sys/stat.h>
 
 #include <security/mac/mac_policy.h>
 #include <security/mac_bsdextended/mac_bsdextended.h>
+#include <security/mac_bsdextended/ugidfw_internal.h>
 
 static struct mtx ugidfw_mtx;
 
@@ -151,8 +153,8 @@ sysctl_rule(SYSCTL_HANDLER_ARGS)
 		error = SYSCTL_IN(req, &temprule, sizeof(temprule));
 		if (error)
 			return (error);
-		MALLOC(ruleptr, struct mac_bsdextended_rule *,
-		    sizeof(*ruleptr), M_MACBSDEXTENDED, M_WAITOK | M_ZERO);
+		ruleptr = malloc(sizeof(*ruleptr), M_MACBSDEXTENDED,
+		    M_WAITOK | M_ZERO);
 	}
 
 	mtx_lock(&ugidfw_mtx);
@@ -193,7 +195,7 @@ sysctl_rule(SYSCTL_HANDLER_ARGS)
 out:
 	mtx_unlock(&ugidfw_mtx);
 	if (ruleptr != NULL)
-		FREE(ruleptr, M_MACBSDEXTENDED);
+		free(ruleptr, M_MACBSDEXTENDED);
 	if (req->oldptr && error == 0)
 		error = SYSCTL_OUT(req, &temprule, sizeof(temprule));
 	return (error);
@@ -212,7 +214,12 @@ ugidfw_init(struct mac_policy_conf *mpc)
 static void
 ugidfw_destroy(struct mac_policy_conf *mpc)
 {
+	int i;
 
+	for (i = 0; i < MAC_BSDEXTENDED_MAXRULES; i++) {
+		if (rules[i] != NULL)
+			free(rules[i], M_MACBSDEXTENDED);
+	}
 	mtx_destroy(&ugidfw_mtx);
 }
 
@@ -220,7 +227,7 @@ static int
 ugidfw_rulecheck(struct mac_bsdextended_rule *rule,
     struct ucred *cred, struct vnode *vp, struct vattr *vap, int acc_mode)
 {
-	int match;
+	int mac_granted, match, priv_granted;
 	int i;
 
 	/*
@@ -303,7 +310,7 @@ ugidfw_rulecheck(struct mac_bsdextended_rule *rule,
 	}
 
 	if (rule->mbr_object.mbo_flags & MBO_SUID) {
-		match = (vap->va_mode & VSUID);
+		match = (vap->va_mode & S_ISUID);
 		if (rule->mbr_object.mbo_neg & MBO_SUID)
 			match = !match;
 		if (!match)
@@ -311,7 +318,7 @@ ugidfw_rulecheck(struct mac_bsdextended_rule *rule,
 	}
 
 	if (rule->mbr_object.mbo_flags & MBO_SGID) {
-		match = (vap->va_mode & VSGID);
+		match = (vap->va_mode & S_ISGID);
 		if (rule->mbr_object.mbo_neg & MBO_SGID)
 			match = !match;
 		if (!match)
@@ -371,9 +378,31 @@ ugidfw_rulecheck(struct mac_bsdextended_rule *rule,
 	}
 
 	/*
+	 * MBI_APPEND should not be here as it should get converted to
+	 * MBI_WRITE.
+	 */
+	priv_granted = 0;
+	mac_granted = rule->mbr_mode;
+	if ((acc_mode & MBI_ADMIN) && (mac_granted & MBI_ADMIN) == 0 &&
+	    priv_check_cred(cred, PRIV_VFS_ADMIN, 0) == 0)
+		priv_granted |= MBI_ADMIN;
+	if ((acc_mode & MBI_EXEC) && (mac_granted & MBI_EXEC) == 0 &&
+	    priv_check_cred(cred, (vap->va_type == VDIR) ? PRIV_VFS_LOOKUP :
+	    PRIV_VFS_EXEC, 0) == 0)
+		priv_granted |= MBI_EXEC;
+	if ((acc_mode & MBI_READ) && (mac_granted & MBI_READ) == 0 &&
+	    priv_check_cred(cred, PRIV_VFS_READ, 0) == 0)
+		priv_granted |= MBI_READ;
+	if ((acc_mode & MBI_STAT) && (mac_granted & MBI_STAT) == 0 &&
+	    priv_check_cred(cred, PRIV_VFS_STAT, 0) == 0)
+		priv_granted |= MBI_STAT;
+	if ((acc_mode & MBI_WRITE) && (mac_granted & MBI_WRITE) == 0 &&
+	    priv_check_cred(cred, PRIV_VFS_WRITE, 0) == 0)
+		priv_granted |= MBI_WRITE;
+	/*
 	 * Is the access permitted?
 	 */
-	if ((rule->mbr_mode & acc_mode) != acc_mode) {
+	if (((mac_granted | priv_granted) & acc_mode) != acc_mode) {
 		if (ugidfw_logging)
 			log(LOG_AUTHPRIV, "mac_bsdextended: %d:%d request %d"
 			    " on %d:%d failed. \n", cred->cr_ruid,
@@ -392,17 +421,11 @@ ugidfw_rulecheck(struct mac_bsdextended_rule *rule,
 		return (0);
 }
 
-static int
+int
 ugidfw_check(struct ucred *cred, struct vnode *vp, struct vattr *vap,
     int acc_mode)
 {
 	int error, i;
-
-	/*
-	 * XXXRW: More specific privilege selection needed.
-	 */
-	if (suser_cred(cred, 0) == 0)
-		return (0);
 
 	/*
 	 * Since we do not separately handle append, map append to write.
@@ -428,7 +451,7 @@ ugidfw_check(struct ucred *cred, struct vnode *vp, struct vattr *vap,
 	return (0);
 }
 
-static int
+int
 ugidfw_check_vp(struct ucred *cred, struct vnode *vp, int acc_mode)
 {
 	int error;
@@ -436,282 +459,31 @@ ugidfw_check_vp(struct ucred *cred, struct vnode *vp, int acc_mode)
 
 	if (!ugidfw_enabled)
 		return (0);
-	error = VOP_GETATTR(vp, &vap, cred, curthread);
+	error = VOP_GETATTR(vp, &vap, cred);
 	if (error)
 		return (error);
 	return (ugidfw_check(cred, vp, &vap, acc_mode));
 }
 
-/*
- * Object-specific entry point implementations are sorted alphabetically by
- * object type and then by operation.
- */
-static int
-ugidfw_system_check_acct(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel)
+int
+ugidfw_accmode2mbi(accmode_t accmode)
 {
+	int mbi;
 
-	return (ugidfw_check_vp(cred, vp, MBI_WRITE));
-}
-
-static int
-ugidfw_system_check_auditctl(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_WRITE));
-}
-
-static int
-ugidfw_system_check_swapoff(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_WRITE));
-}
-
-static int
-ugidfw_system_check_swapon(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_WRITE));
-}
-
-static int
-ugidfw_vnode_check_access(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, int acc_mode)
-{
-
-	return (ugidfw_check_vp(cred, vp, acc_mode));
-}
-
-static int
-ugidfw_vnode_check_chdir(struct ucred *cred, struct vnode *dvp,
-    struct label *dvplabel)
-{
-
-	return (ugidfw_check_vp(cred, dvp, MBI_EXEC));
-}
-
-static int
-ugidfw_vnode_check_chroot(struct ucred *cred, struct vnode *dvp,
-    struct label *dvplabel)
-{
-
-	return (ugidfw_check_vp(cred, dvp, MBI_EXEC));
-}
-
-static int
-ugidfw_check_create_vnode(struct ucred *cred, struct vnode *dvp,
-    struct label *dvplabel, struct componentname *cnp, struct vattr *vap)
-{
-
-	return (ugidfw_check_vp(cred, dvp, MBI_WRITE));
-}
-
-static int
-ugidfw_vnode_check_deleteacl(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, acl_type_t type)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_ADMIN));
-}
-
-static int
-ugidfw_vnode_check_deleteextattr(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, int attrnamespace, const char *name)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_WRITE));
-}
-
-static int
-ugidfw_vnode_check_exec(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, struct image_params *imgp,
-    struct label *execlabel)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_READ|MBI_EXEC));
-}
-
-static int
-ugidfw_vnode_check_getacl(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, acl_type_t type)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_STAT));
-}
-
-static int
-ugidfw_vnode_check_getextattr(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, int attrnamespace, const char *name,
-    struct uio *uio)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_READ));
-}
-
-static int
-ugidfw_vnode_check_link(struct ucred *cred, struct vnode *dvp,
-    struct label *dvplabel, struct vnode *vp, struct label *label,
-    struct componentname *cnp)
-{
-	int error;
-
-	error = ugidfw_check_vp(cred, dvp, MBI_WRITE);
-	if (error)
-		return (error);
-	error = ugidfw_check_vp(cred, vp, MBI_WRITE);
-	if (error)
-		return (error);
-	return (0);
-}
-
-static int
-ugidfw_vnode_check_listextattr(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, int attrnamespace)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_READ));
-}
-
-static int
-ugidfw_vnode_check_lookup(struct ucred *cred, struct vnode *dvp,
-    struct label *dvplabel, struct componentname *cnp)
-{
-
-	return (ugidfw_check_vp(cred, dvp, MBI_EXEC));
-}
-
-static int
-ugidfw_vnode_check_open(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, int acc_mode)
-{
-
-	return (ugidfw_check_vp(cred, vp, acc_mode));
-}
-
-static int
-ugidfw_vnode_check_readdir(struct ucred *cred, struct vnode *dvp,
-    struct label *dvplabel)
-{
-
-	return (ugidfw_check_vp(cred, dvp, MBI_READ));
-}
-
-static int
-ugidfw_vnode_check_readdlink(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_READ));
-}
-
-static int
-ugidfw_vnode_check_rename_from(struct ucred *cred, struct vnode *dvp,
-    struct label *dvplabel, struct vnode *vp, struct label *vplabel,
-    struct componentname *cnp)
-{
-	int error;
-
-	error = ugidfw_check_vp(cred, dvp, MBI_WRITE);
-	if (error)
-		return (error);
-	return (ugidfw_check_vp(cred, vp, MBI_WRITE));
-}
-
-static int
-ugidfw_vnode_check_rename_to(struct ucred *cred, struct vnode *dvp,
-    struct label *dvplabel, struct vnode *vp, struct label *vplabel,
-    int samedir, struct componentname *cnp)
-{
-	int error;
-
-	error = ugidfw_check_vp(cred, dvp, MBI_WRITE);
-	if (error)
-		return (error);
-	if (vp != NULL)
-		error = ugidfw_check_vp(cred, vp, MBI_WRITE);
-	return (error);
-}
-
-static int
-ugidfw_vnode_check_revoke(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_ADMIN));
-}
-
-static int
-ugidfw_check_setacl_vnode(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, acl_type_t type, struct acl *acl)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_ADMIN));
-}
-
-static int
-ugidfw_vnode_check_setextattr(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, int attrnamespace, const char *name,
-    struct uio *uio)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_WRITE));
-}
-
-static int
-ugidfw_vnode_check_setflags(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, u_long flags)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_ADMIN));
-}
-
-static int
-ugidfw_vnode_check_setmode(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, mode_t mode)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_ADMIN));
-}
-
-static int
-ugidfw_vnode_check_setowner(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, uid_t uid, gid_t gid)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_ADMIN));
-}
-
-static int
-ugidfw_vnode_check_setutimes(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, struct timespec atime, struct timespec utime)
-{
-
-	return (ugidfw_check_vp(cred, vp, MBI_ADMIN));
-}
-
-static int
-ugidfw_vnode_check_stat(struct ucred *active_cred,
-    struct ucred *file_cred, struct vnode *vp, struct label *vplabel)
-{
-
-	return (ugidfw_check_vp(active_cred, vp, MBI_STAT));
-}
-
-static int
-ugidfw_vnode_check_unlink(struct ucred *cred, struct vnode *dvp,
-    struct label *dvplabel, struct vnode *vp, struct label *vplabel,
-    struct componentname *cnp)
-{
-	int error;
-
-	error = ugidfw_check_vp(cred, dvp, MBI_WRITE);
-	if (error)
-		return (error);
-	return (ugidfw_check_vp(cred, vp, MBI_WRITE));
+	mbi = 0;
+	if (accmode & VEXEC)
+		mbi |= MBI_EXEC;
+	if (accmode & VWRITE)
+		mbi |= MBI_WRITE;
+	if (accmode & VREAD)
+		mbi |= MBI_READ;
+	if (accmode & VADMIN)
+		mbi |= MBI_ADMIN;
+	if (accmode & VSTAT)
+		mbi |= MBI_STAT;
+	if (accmode & VAPPEND)
+		mbi |= MBI_APPEND;
+	return (mbi);
 }
 
 static struct mac_policy_ops ugidfw_ops =
@@ -720,7 +492,6 @@ static struct mac_policy_ops ugidfw_ops =
 	.mpo_init = ugidfw_init,
 	.mpo_system_check_acct = ugidfw_system_check_acct,
 	.mpo_system_check_auditctl = ugidfw_system_check_auditctl,
-	.mpo_system_check_swapoff = ugidfw_system_check_swapoff,
 	.mpo_system_check_swapon = ugidfw_system_check_swapon,
 	.mpo_vnode_check_access = ugidfw_vnode_check_access,
 	.mpo_vnode_check_chdir = ugidfw_vnode_check_chdir,
@@ -751,4 +522,4 @@ static struct mac_policy_ops ugidfw_ops =
 };
 
 MAC_POLICY_SET(&ugidfw_ops, mac_bsdextended, "TrustedBSD MAC/BSD Extended",
-    MPC_LOADTIME_FLAG_UNLOADOK, NULL);
+    MPC_LOADTIME_FLAG_UNLOADOK, NULL, 0);

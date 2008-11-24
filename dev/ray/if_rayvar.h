@@ -28,7 +28,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/ray/if_rayvar.h,v 1.22 2005/08/09 10:19:53 rwatson Exp $
+ * $FreeBSD: src/sys/dev/ray/if_rayvar.h,v 1.23 2008/10/23 15:53:51 des Exp $
  *
  */
 
@@ -249,7 +249,7 @@ static int mib_info[RAY_MIB_MAX+1][3] = RAY_MIB_INFO;
 #define RAY_COM_FREE(com, ncom)	do {					\
     int i;								\
     for (i = 0; i < ncom; i++)						\
-	    FREE(com[i], M_RAYCOM);					\
+	    free(com[i], M_RAYCOM);					\
 } while (0)
 
 /*

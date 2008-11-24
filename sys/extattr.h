@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/extattr.h,v 1.18 2007/03/16 19:18:49 rwatson Exp $
+ * $FreeBSD: src/sys/sys/extattr.h,v 1.19 2008/10/28 13:44:11 trasz Exp $
  */
 /*
  * Developed by the TrustedBSD Project.
@@ -58,13 +58,14 @@
 	EXTATTR_NAMESPACE_SYSTEM_STRING }
 
 #ifdef _KERNEL
+#include <sys/types.h>
 
 #define	EXTATTR_MAXNAMELEN	NAME_MAX
 struct thread;
 struct ucred;
 struct vnode;
 int	extattr_check_cred(struct vnode *vp, int attrnamespace,
-	    struct ucred *cred, struct thread *td, int access);
+	    struct ucred *cred, struct thread *td, accmode_t accmode);
 
 #else
 #include <sys/cdefs.h>

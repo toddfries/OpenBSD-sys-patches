@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/uart/uart_core.c,v 1.23 2007/12/25 17:51:57 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/uart/uart_core.c,v 1.25 2008/08/20 08:31:58 ed Exp $");
 
 #ifndef KLD_MODULE
 #include "opt_comconsole.h"
@@ -46,7 +46,6 @@ __FBSDID("$FreeBSD: src/sys/dev/uart/uart_core.c,v 1.23 2007/12/25 17:51:57 rwat
 #include <machine/bus.h>
 #include <sys/rman.h>
 #include <sys/termios.h>
-#include <sys/tty.h>
 #include <machine/resource.h>
 #include <machine/stdarg.h>
 
@@ -175,9 +174,23 @@ uart_intr_rxready(void *arg)
 #if defined(KDB) && defined(ALT_BREAK_TO_DEBUGGER)
 	if (sc->sc_sysdev != NULL && sc->sc_sysdev->type == UART_DEV_CONSOLE) {
 		while (rxp != sc->sc_rxput) {
-			if (kdb_alt_break(sc->sc_rxbuf[rxp++], &sc->sc_altbrk))
-				kdb_enter(KDB_WHY_BREAK,
-				    "Break sequence on console");
+			int kdb_brk;
+
+			if ((kdb_brk = kdb_alt_break(sc->sc_rxbuf[rxp++],
+			    &sc->sc_altbrk)) != 0) {
+				switch (kdb_brk) {
+				case KDB_REQ_DEBUGGER:
+					kdb_enter(KDB_WHY_BREAK,
+					    "Break sequence on console");
+					break;
+				case KDB_REQ_PANIC:
+					kdb_panic("Panic sequence on console");
+					break;
+				case KDB_REQ_REBOOT:
+					kdb_reboot();
+					break;
+				}
+			}
 			if (rxp == sc->sc_rxbufsz)
 				rxp = 0;
 		}
@@ -452,7 +465,7 @@ uart_bus_attach(device_t dev)
 		sc->sc_polled = 1;
 	}
 
-	sc->sc_rxbufsz = IBUFSIZ;
+	sc->sc_rxbufsz = 384;
 	sc->sc_rxbuf = malloc(sc->sc_rxbufsz * sizeof(*sc->sc_rxbuf),
 	    M_UART, M_WAITOK);
 	sc->sc_txbuf = malloc(sc->sc_txfifosz * sizeof(*sc->sc_txbuf),

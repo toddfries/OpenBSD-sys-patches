@@ -1,5 +1,5 @@
 /*	$NetBSD: pcmciavar.h,v 1.12 2000/02/08 12:51:31 enami Exp $	*/
-/* $FreeBSD: src/sys/dev/pccard/pccardvar.h,v 1.61 2005/09/25 01:38:02 imp Exp $ */
+/* $FreeBSD: src/sys/dev/pccard/pccardvar.h,v 1.62 2008/08/06 07:34:35 imp Exp $ */
 
 /*-
  * Copyright (c) 1997 Marc Horowitz.  All rights reserved.
@@ -175,6 +175,9 @@ pccard_ccr_write_1(device_t dev, uint32_t offset, uint8_t val)
 {
 	return (CARD_CCR_WRITE(device_get_parent(dev), dev, offset, val));
 }
+
+/* Hack */
+int pccard_select_cfe(device_t dev, int entry);
 
 /* ivar interface */
 enum {

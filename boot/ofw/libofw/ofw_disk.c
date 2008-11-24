@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/ofw/libofw/ofw_disk.c,v 1.13 2005/10/25 12:51:49 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/ofw/libofw/ofw_disk.c,v 1.14 2008/10/13 17:14:29 nwhitehorn Exp $");
 
 /*
  * Disk I/O routines using Open Firmware
@@ -155,7 +155,9 @@ ofwd_close(struct open_file *f)
 			if (odp->count == 0) {
 				SLIST_REMOVE(&opened_devs, odp, opened_dev,
 				    link);
+			#if !defined(__powerpc__)
 				OF_close(odp->handle);
+			#endif
 				free(odp);
 			}
 			break;

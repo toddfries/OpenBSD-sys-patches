@@ -67,7 +67,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/swap_pager.c,v 1.296 2007/10/24 19:04:04 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/swap_pager.c,v 1.305 2008/09/29 19:45:12 kib Exp $");
 
 #include "opt_mac.h"
 #include "opt_swap.h"
@@ -237,7 +237,7 @@ static void	swp_sizecheck(void);
 static void	swp_pager_async_iodone(struct buf *bp);
 static int	swapongeom(struct thread *, struct vnode *);
 static int	swaponvp(struct thread *, struct vnode *, u_long);
-static int	swapoff_one(struct swdevt *sp, struct thread *td);
+static int	swapoff_one(struct swdevt *sp, struct ucred *cred);
 
 /*
  * Swap bitmap functions
@@ -1127,7 +1127,7 @@ swap_pager_putpages(vm_object_t object, vm_page_t *m, int count,
 	int n = 0;
 
 	if (count && m[0]->object != object) {
-		panic("swap_pager_getpages: object mismatch %p/%p", 
+		panic("swap_pager_putpages: object mismatch %p/%p", 
 		    object, 
 		    m[0]->object
 		);
@@ -1711,9 +1711,12 @@ retry:
 		if (swap == NULL) {
 			mtx_unlock(&swhash_mtx);
 			VM_OBJECT_UNLOCK(object);
-			if (uma_zone_exhausted(swap_zone))
+			if (uma_zone_exhausted(swap_zone)) {
 				printf("swap zone exhausted, increase kern.maxswzone\n");
-			VM_WAIT;
+				vm_pageout_oom(VM_OOM_SWAPZ);
+				pause("swzonex", 10);
+			} else
+				VM_WAIT;
 			VM_OBJECT_LOCK(object);
 			goto retry;
 		}
@@ -1965,7 +1968,7 @@ swapon(struct thread *td, struct swapon_args *uap)
 		error = swapongeom(td, vp);
 	} else if (vp->v_type == VREG &&
 	    (vp->v_mount->mnt_vfc->vfc_flags & VFCF_NETWORK) != 0 &&
-	    (error = VOP_GETATTR(vp, &attr, td->td_ucred, td)) == 0) {
+	    (error = VOP_GETATTR(vp, &attr, td->td_ucred)) == 0) {
 		/*
 		 * Allow direct swapping to NFS regular files in the same
 		 * way that nfs_mountroot() sets up diskless swapping.
@@ -2018,7 +2021,7 @@ swaponsomething(struct vnode *vp, void *id, u_long nblks, sw_strategy_t *strateg
 	sp->sw_strategy = strategy;
 	sp->sw_close = close;
 
-	sp->sw_blist = blist_create(nblks);
+	sp->sw_blist = blist_create(nblks, M_WAITOK);
 	/*
 	 * Do not free the first two block in order to avoid overwriting
 	 * any bsd label at the front of the partition
@@ -2100,7 +2103,7 @@ swapoff(struct thread *td, struct swapoff_args *uap)
 		error = EINVAL;
 		goto done;
 	}
-	error = swapoff_one(sp, td);
+	error = swapoff_one(sp, td->td_ucred);
 done:
 	swdev_syscall_active = 0;
 	wakeup_one(&swdev_syscall_active);
@@ -2109,7 +2112,7 @@ done:
 }
 
 static int
-swapoff_one(struct swdevt *sp, struct thread *td)
+swapoff_one(struct swdevt *sp, struct ucred *cred)
 {
 	u_long nblks, dvbase;
 #ifdef MAC
@@ -2118,9 +2121,9 @@ swapoff_one(struct swdevt *sp, struct thread *td)
 
 	mtx_assert(&Giant, MA_OWNED);
 #ifdef MAC
-	(void) vn_lock(sp->sw_vp, LK_EXCLUSIVE | LK_RETRY, td);
-	error = mac_system_check_swapoff(td->td_ucred, sp->sw_vp);
-	(void) VOP_UNLOCK(sp->sw_vp, 0, td);
+	(void) vn_lock(sp->sw_vp, LK_EXCLUSIVE | LK_RETRY);
+	error = mac_system_check_swapoff(cred, sp->sw_vp);
+	(void) VOP_UNLOCK(sp->sw_vp, 0);
 	if (error != 0)
 		return (error);
 #endif
@@ -2153,7 +2156,7 @@ swapoff_one(struct swdevt *sp, struct thread *td)
 	 */
 	swap_pager_swapoff(sp);
 
-	sp->sw_close(td, sp);
+	sp->sw_close(curthread, sp);
 	sp->sw_id = NULL;
 	mtx_lock(&sw_dev_mtx);
 	TAILQ_REMOVE(&swtailq, sp, sw_list);
@@ -2189,7 +2192,7 @@ swapoff_all(void)
 			devname = sp->sw_vp->v_rdev->si_name;
 		else
 			devname = "[file]";
-		error = swapoff_one(sp, &thread0);
+		error = swapoff_one(sp, thread0.td_ucred);
 		if (error != 0) {
 			printf("Cannot remove swap device %s (error=%d), "
 			    "skipping.\n", devname, error);
@@ -2339,19 +2342,17 @@ swapgeom_strategy(struct buf *bp, struct swdevt *sp)
 		bufdone(bp);
 		return;
 	}
-	bio = g_alloc_bio();
-#if 0
-	/*
-	 * XXX: We shouldn't really sleep here when we run out of buffers
-	 * XXX: but the alternative is worse right now.
-	 */
+	if (bp->b_iocmd == BIO_WRITE)
+		bio = g_new_bio();
+	else
+		bio = g_alloc_bio();
 	if (bio == NULL) {
 		bp->b_error = ENOMEM;
 		bp->b_ioflags |= BIO_ERROR;
 		bufdone(bp);
 		return;
 	}
-#endif
+
 	bio->bio_caller2 = bp;
 	bio->bio_cmd = bp->b_iocmd;
 	bio->bio_data = bp->b_data;
@@ -2458,7 +2459,7 @@ swapongeom(struct thread *td, struct vnode *vp)
 	int error;
 	struct swh0h0 swh;
 
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 
 	swh.dev = vp->v_rdev;
 	swh.vp = vp;
@@ -2467,7 +2468,7 @@ swapongeom(struct thread *td, struct vnode *vp)
 	error = g_waitfor_event(swapongeom_ev, &swh, M_WAITOK, NULL);
 	if (!error)
 		error = swh.error;
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	return (error);
 }
 
@@ -2527,13 +2528,13 @@ swaponvp(struct thread *td, struct vnode *vp, u_long nblks)
 	}
 	mtx_unlock(&sw_dev_mtx);
     
-	(void) vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	(void) vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 #ifdef MAC
 	error = mac_system_check_swapon(td->td_ucred, vp);
 	if (error == 0)
 #endif
 		error = VOP_OPEN(vp, FREAD | FWRITE, td->td_ucred, td, NULL);
-	(void) VOP_UNLOCK(vp, 0, td);
+	(void) VOP_UNLOCK(vp, 0);
 	if (error)
 		return (error);
 

@@ -25,7 +25,7 @@
  */
 
 #include <machine/asm.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/swtch.S,v 1.34 2007/01/19 11:15:33 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/swtch.S,v 1.37 2008/09/08 21:24:25 marius Exp $");
 
 #include <machine/asmacros.h>
 #include <machine/asi.h>
@@ -169,7 +169,7 @@ ENTRY(cpu_switch)
 
 	/*
 	 * Mark the pmap of the last non-kernel vmspace to run as no longer
-	 * active on this cpu.
+	 * active on this CPU.
 	 */
 	lduw	[%l2 + PM_ACTIVE], %l3
 	lduw	[PCPU(CPUMASK)], %l4
@@ -186,8 +186,8 @@ ENTRY(cpu_switch)
 	stw	%l5, [%l3 + %l4]
 
 	/*
-	 * Find a new tlb context.  If we've run out we have to flush all user
-	 * mappings from the tlb and reset the context numbers.
+	 * Find a new TLB context.  If we've run out we have to flush all
+	 * user mappings from the TLB and reset the context numbers.
 	 */
 3:	lduw	[PCPU(TLB_CTX)], %i3
 	lduw	[PCPU(TLB_CTX_MAX)], %i4
@@ -215,7 +215,7 @@ ENTRY(cpu_switch)
 	stw	%i3, [%i4 + %i5]
 
 	/*
-	 * Mark the pmap as active on this cpu.
+	 * Mark the pmap as active on this CPU.
 	 */
 	lduw	[%i2 + PM_ACTIVE], %i4
 	lduw	[PCPU(CPUMASK)], %i5
@@ -228,20 +228,25 @@ ENTRY(cpu_switch)
 	stx	%i2, [PCPU(PMAP)]
 
 	/*
-	 * Fiddle the hardware bits.  Set the tsb registers and install the
-	 * new context number in the cpu.
+	 * Fiddle the hardware bits.  Set the TSB registers and install the
+	 * new context number in the CPU.
 	 */
 	ldx	[%i2 + PM_TSB], %i4
 	mov	AA_DMMU_TSB, %i5
 	stxa	%i4, [%i5] ASI_DMMU
 	mov	AA_IMMU_TSB, %i5
 	stxa	%i4, [%i5] ASI_IMMU
+	setx	TLB_PCXR_PGSZ_MASK, %i5, %i4
 	mov	AA_DMMU_PCXR, %i5
+	ldxa	[%i5] ASI_DMMU, %i2
+	and	%i2, %i4, %i2
+	or	%i3, %i2, %i3
+	sethi	%hi(KERNBASE), %i4
 	stxa	%i3, [%i5] ASI_DMMU
-	membar	#Sync
+	flush	%i4
 
 	/*
-	 * Done.  Return and load the new process's window from the stack.
+	 * Done, return and load the new process's window from the stack.
 	 */
 5:	ret
 	 restore

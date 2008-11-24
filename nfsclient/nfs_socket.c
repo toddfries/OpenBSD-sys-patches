@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_socket.c,v 1.155 2007/10/12 19:12:21 mohans Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_socket.c,v 1.164 2008/11/03 10:38:00 dfr Exp $");
 
 /*
  * Socket operations for use by nfs
@@ -74,29 +74,33 @@ __FBSDID("$FreeBSD: src/sys/nfsclient/nfs_socket.c,v 1.155 2007/10/12 19:12:21 m
 
 #include <nfs4client/nfs4.h>
 
+#ifdef NFS_LEGACYRPC
+
 #define	TRUE	1
 #define	FALSE	0
-
-extern u_int32_t nfs_xid;
-extern struct mtx nfs_xid_mtx;
 
 static int	nfs_realign_test;
 static int	nfs_realign_count;
 static int	nfs_bufpackets = 4;
 static int	nfs_reconnects;
-static int     nfs3_jukebox_delay = 10;
-static int     nfs_skip_wcc_data_onerr = 1;
+static int	nfs3_jukebox_delay = 10;
+static int	nfs_skip_wcc_data_onerr = 1;
+static int	fake_wchan;
 
 SYSCTL_DECL(_vfs_nfs);
 
-SYSCTL_INT(_vfs_nfs, OID_AUTO, realign_test, CTLFLAG_RW, &nfs_realign_test, 0, "");
-SYSCTL_INT(_vfs_nfs, OID_AUTO, realign_count, CTLFLAG_RW, &nfs_realign_count, 0, "");
-SYSCTL_INT(_vfs_nfs, OID_AUTO, bufpackets, CTLFLAG_RW, &nfs_bufpackets, 0, "");
+SYSCTL_INT(_vfs_nfs, OID_AUTO, realign_test, CTLFLAG_RW, &nfs_realign_test, 0,
+    "Number of realign tests done");
+SYSCTL_INT(_vfs_nfs, OID_AUTO, realign_count, CTLFLAG_RW, &nfs_realign_count, 0,
+    "Number of mbuf realignments done");
+SYSCTL_INT(_vfs_nfs, OID_AUTO, bufpackets, CTLFLAG_RW, &nfs_bufpackets, 0,
+    "Buffer reservation size 2 < x < 64");
 SYSCTL_INT(_vfs_nfs, OID_AUTO, reconnects, CTLFLAG_RD, &nfs_reconnects, 0,
-    "number of times the nfs client has had to reconnect");
+    "Number of times the nfs client has had to reconnect");
 SYSCTL_INT(_vfs_nfs, OID_AUTO, nfs3_jukebox_delay, CTLFLAG_RW, &nfs3_jukebox_delay, 0,
-	   "number of seconds to delay a retry after receiving EJUKEBOX");
-SYSCTL_INT(_vfs_nfs, OID_AUTO, skip_wcc_data_onerr, CTLFLAG_RW, &nfs_skip_wcc_data_onerr, 0, "");
+    "Number of seconds to delay a retry after receiving EJUKEBOX");
+SYSCTL_INT(_vfs_nfs, OID_AUTO, skip_wcc_data_onerr, CTLFLAG_RW, &nfs_skip_wcc_data_onerr, 0,
+    "Disable weak cache consistency checking when server returns an error");
 
 /*
  * There is a congestion window for outstanding rpcs maintained per mount
@@ -264,7 +268,22 @@ nfs_connect(struct nfsmount *nmp, struct nfsreq *rep)
 	int error, rcvreserve, sndreserve;
 	int pktscale;
 	struct sockaddr *saddr;
-	struct thread *td = &thread0; /* only used for socreate and sobind */
+	struct ucred *origcred;
+	struct thread *td = curthread;
+
+	/*
+	 * We need to establish the socket using the credentials of
+	 * the mountpoint.  Some parts of this process (such as
+	 * sobind() and soconnect()) will use the curent thread's
+	 * credential instead of the socket credential.  To work
+	 * around this, temporarily change the current thread's
+	 * credential to that of the mountpoint.
+	 *
+	 * XXX: It would be better to explicitly pass the correct
+	 * credential to sobind() and soconnect().
+	 */
+	origcred = td->td_ucred;
+	td->td_ucred = nmp->nm_mountp->mnt_cred;
 
 	if (nmp->nm_sotype == SOCK_STREAM) {
 		mtx_lock(&nmp->nm_mtx);
@@ -453,6 +472,9 @@ nfs_connect(struct nfsmount *nmp, struct nfsreq *rep)
 	so->so_snd.sb_flags |= SB_NOINTR;
 	SOCKBUF_UNLOCK(&so->so_snd);
 
+	/* Restore current thread's credentials. */
+	td->td_ucred = origcred;
+
 	mtx_lock(&nmp->nm_mtx);
 	/* Initialize other non-zero congestion variables */
 	nfs_init_rtt(nmp);
@@ -463,6 +485,9 @@ nfs_connect(struct nfsmount *nmp, struct nfsreq *rep)
 	return (0);
 
 bad:
+	/* Restore current thread's credentials. */
+	td->td_ucred = origcred;
+
 	nfs_disconnect(nmp);
 	return (error);
 }
@@ -528,7 +553,7 @@ nfs_reconnect(struct nfsreq *rep)
 			mtx_lock(&nmp->nm_mtx);
 			goto unlock_exit;
 		}
-		(void) tsleep(&lbolt, PSOCK, "nfscon", 0);
+		(void) tsleep(&fake_wchan, PSOCK, "nfscon", hz);
 	}
 
   	/*
@@ -1122,7 +1147,7 @@ nfs_request(struct vnode *vp, struct mbuf *mrest, int procnum,
 	nmp = VFSTONFS(vp->v_mount);
 	if ((nmp->nm_flag & NFSMNT_NFSV4) != 0)
 		return nfs4_request(vp, mrest, procnum, td, cred, mrp, mdp, dposp);
-	MALLOC(rep, struct nfsreq *, sizeof(struct nfsreq), M_NFSREQ, M_WAITOK);
+	rep = malloc(sizeof(struct nfsreq), M_NFSREQ, M_WAITOK);
 	bzero(rep, sizeof(struct nfsreq));
 	rep->r_nmp = nmp;
 	rep->r_vp = vp;
@@ -1151,7 +1176,7 @@ nfs_request(struct vnode *vp, struct mbuf *mrest, int procnum,
 	 * For stream protocols, insert a Sun RPC Record Mark.
 	 */
 	if (nmp->nm_sotype == SOCK_STREAM) {
-		M_PREPEND(m, NFSX_UNSIGNED, M_TRYWAIT);
+		M_PREPEND(m, NFSX_UNSIGNED, M_WAIT);
 		*mtod(m, u_int32_t *) = htonl(0x80000000 |
 			 (m->m_pkthdr.len - NFSX_UNSIGNED));
 	}
@@ -1195,7 +1220,7 @@ tryagain:
 		if (nmp->nm_sotype == SOCK_STREAM)
 			nmp->nm_nfstcpstate.sock_send_inprog++;
 		mtx_unlock(&nmp->nm_mtx);
-		m2 = m_copym(m, 0, M_COPYALL, M_TRYWAIT);
+		m2 = m_copym(m, 0, M_COPYALL, M_WAIT);
 		error = nfs_send(nmp->nm_so, nmp->nm_nam, m2, rep);
 		mtx_lock(&nmp->nm_mtx);
 		mtx_lock(&rep->r_mtx);
@@ -1328,13 +1353,9 @@ wait_for_pinned_req:
 				error = 0;
 				waituntil = time_second + nfs3_jukebox_delay;
 				while (time_second < waituntil) {
-					(void) tsleep(&lbolt, PSOCK, "nqnfstry", 0);
+					(void) tsleep(&fake_wchan, PSOCK, "nqnfstry", hz);
 				}
-				mtx_lock(&nfs_xid_mtx);
-				if (++nfs_xid == 0)
-					nfs_xid++;
-				rep->r_xid = *xidp = txdr_unsigned(nfs_xid);
-				mtx_unlock(&nfs_xid_mtx);
+				rep->r_xid = *xidp = txdr_unsigned(nfs_xid_gen());
 				goto tryagain;
 			}
 
@@ -1367,7 +1388,7 @@ wait_for_pinned_req:
 		*dposp = dpos;
 		m_freem(rep->r_mreq);
 		mtx_destroy(&rep->r_mtx);
-		FREE((caddr_t)rep, M_NFSREQ);
+		free((caddr_t)rep, M_NFSREQ);
 		return (0);
 	}
 	m_freem(mrep);
@@ -1414,8 +1435,8 @@ nfs_timer(void *arg)
 			/*
 			 * Terminate request if force-unmount in progress.
 			 * Note that NFS could have vfs_busy'ed the mount,
-			 * causing the unmount to wait for the mnt_lock, making
-			 * this bit of logic necessary.
+			 * causing the unmount to wait and making this bit
+			 * of logic necessary.
 			 */
 			if (rep->r_nmp->nm_mountp->mnt_kern_flag & MNTK_UNMOUNTF) {
 				nfs_softterm(rep);
@@ -1596,7 +1617,7 @@ nfs_nmcancelreqs(nmp)
 		mtx_unlock(&nfs_reqq_mtx);
 		if (req == NULL)
 			return (0);
-		tsleep(&lbolt, PSOCK, "nfscancel", 0);
+		tsleep(&fake_wchan, PSOCK, "nfscancel", hz);
 	}
 	return (EBUSY);
 }
@@ -1957,3 +1978,5 @@ nfs_up(rep, nmp, td, msg, flags)
 		mtx_unlock(&nmp->nm_mtx);
 #endif
 }
+
+#endif /* NFS_LEGACYRPC */

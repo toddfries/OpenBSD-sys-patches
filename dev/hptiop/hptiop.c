@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/hptiop/hptiop.c,v 1.3 2008/02/03 16:07:12 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/hptiop/hptiop.c,v 1.4 2008/09/27 08:51:18 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -178,7 +178,7 @@ static struct cdevsw hptiop_cdevsw = {
 #define hba_from_dev(dev) ((struct hpt_iop_hba *)(dev)->si_drv1)
 #else
 #define hba_from_dev(dev) \
-	((struct hpt_iop_hba *)devclass_get_softc(hptiop_devclass, minor(dev)))
+	((struct hpt_iop_hba *)devclass_get_softc(hptiop_devclass, dev2unit(dev)))
 #endif
 
 #define BUS_SPACE_WRT4_ITL(offset, value) bus_space_write_4(hba->bar0t,\

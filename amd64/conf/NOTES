@@ -4,7 +4,7 @@
 # This file contains machine dependent kernel configuration notes.  For
 # machine independent notes, look in /sys/conf/NOTES.
 #
-# $FreeBSD: src/sys/amd64/conf/NOTES,v 1.70 2007/10/29 22:19:08 peter Exp $
+# $FreeBSD: src/sys/amd64/conf/NOTES,v 1.82 2008/08/08 16:26:53 stas Exp $
 #
 
 #
@@ -80,22 +80,13 @@ cpu		HAMMER			# aka K8, aka Opteron & Athlon64
 
 options 	DEVICE_POLLING
 
+# BPF_JITTER adds support for BPF just-in-time compiler.
+
+options		BPF_JITTER
+
 
 #####################################################################
 # CLOCK OPTIONS
-
-# The following options are used for debugging clock behavior only, and
-# should not be used for production systems.
-
-# CLK_CALIBRATION_LOOP causes clock calibration to be run in a loop at
-# startup until the user presses a key.  (The i8254 clock is always
-# calibrated relative to the RTC (mc146818a) and this option causes the
-# calibration to be repeated.)
-options 	CLK_CALIBRATION_LOOP
-
-# CLK_USE_I8254_CALIBRATION causes the calibrated frequency of the i8254
-# clock to actually be used.
-options 	CLK_USE_I8254_CALIBRATION
 
 # Provide read/write access to the memory in the clock chip.
 device		nvram		# Access to rtc cmos via /dev/nvram
@@ -103,44 +94,6 @@ device		nvram		# Access to rtc cmos via /dev/nvram
 
 #####################################################################
 # MISCELLANEOUS DEVICES AND OPTIONS
-
-# 
-# sio: serial ports (see sio(4)), including support for various
-#      PC Card devices, such as Modem and NICs
-#
-device		sio
-hint.sio.0.at="isa"
-hint.sio.0.port="0x3F8"
-hint.sio.0.flags="0x10"
-hint.sio.0.irq="4"
-
-# `flags' specific to sio(4).
-#	0x10	enable console support for this unit.  Other console flags
-#		(if applicable) are ignored unless this is set.  Enabling
-#		console support does not make the unit the preferred console.
-#		Boot with -h or set boot_serial=YES in the loader.  For sio(4)
-#		specifically, the 0x20 flag can also be set (see above).
-#		Currently, at most one unit can have console support; the
-#		first one (in config file order) with this flag set is
-#		preferred.  Setting this flag for sio0 gives the old behaviour.
-#	0x20	force this unit to be the console (unless there is another
-#		higher priority console).  This replaces the COMCONSOLE option.
-#	0x40	reserve this unit for low level console operations.  Do not
-#		access the device in any normal way.
-#	0x80	use this port for serial line gdb support in ddb.  Also known
-#		as debug port.
-# PnP `flags'
-#	0x1	disable probing of this device.  Used to prevent your modem
-#		from being attached as a PnP modem.
-# Other flags for sio that aren't documented in the man page.
-#	0x20000	enable hardware RTS/CTS and larger FIFOs.  Only works for
-#		ST16650A-compatible UARTs.
-
-# Options for sio:
-options 	COM_ESP			# Code for Hayes ESP.
-options 	COM_MULTIPORT		# Code for some cards with shared IRQs.
-options 	CONSPEED=115200		# Speed for serial console
-					# (default 9600).
 
 device		speaker		#Play IBM BASIC-style noises out your speaker
 hint.speaker.0.at="isa"
@@ -311,21 +264,25 @@ options 	DRM_DEBUG	# Include debug printfs (slow)
 #       (requires miibus)
 # ipw:	Intel PRO/Wireless 2100 IEEE 802.11 adapter
 # iwi:	Intel PRO/Wireless 2200BG/2225BG/2915ABG IEEE 802.11 adapters
+# iwn:	Intel Wireless WiFi Link 4965AGN 802.11 network adapters
 # nfe:	nVidia nForce MCP on-board Ethernet Networking (BSD open source)
 # nve:	nVidia nForce MCP on-board Ethernet Networking
 # ral:	Ralink Technology IEEE 802.11 wireless adapter
 # ural:	Ralink Technology RT2500USB IEEE 802.11 wireless adapter
+# wpi:	Intel 3945ABG Wireless LAN controller
 
 device		ed
 options 	ED_3C503
 options 	ED_HPP
 options 	ED_SIC
 device		iwi
+device		iwn
 device		ipw
 device		nfe		# nVidia nForce MCP on-board Ethernet Networking
 device		nve		# nVidia nForce MCP on-board Ethernet Networking
 device		ral
 device		ural
+device		wpi
 
 device		ath
 device		ath_hal		# Atheros HAL (includes binary component)
@@ -370,14 +327,13 @@ device		aac
 device		aacp	# SCSI Passthrough interface (optional, CAM required)
 
 #
-# Highpoint RocketRAID 182x.  This is really just software RAID on a
-# Marvell SATA chip.
+# Highpoint RocketRAID 182x.
 device		hptmv
 
 #
-# Highpoint RocketRAID 232x.  This is software RAID but with hardware
-# acceleration assistance for RAID_5.
-device		rr232x
+# Highpoint RocketRAID.  Supports RR172x, RR222x, RR2240, RR232x, RR2340,
+# RR2210, RR174x, RR2522, RR231x, RR230x.
+device		hptrr
 
 #
 # Highpoint RocketRaid 3xxx series SATA RAID
@@ -403,8 +359,7 @@ options 	SAFE_RNDTEST	# enable rndtest support
 # ipmi: Intelligent Platform Management Interface
 # smbios: DMI/SMBIOS entry point
 # vpd: Vital Product Data kernel interface
-# cy: Cyclades serial driver
-# digi: Digiboard driver
+# asmc: Apple System Management Controller
 
 # Notes on the Specialix SI/XIO driver:
 #  The host card is memory, not IO mapped.
@@ -412,17 +367,6 @@ options 	SAFE_RNDTEST	# enable rndtest support
 #  The Rev 2 host cards use a 32K chunk, on a 32K boundary.
 #  The cards can use an IRQ of 11, 12 or 15.
 
-device		cy
-options 	CY_PCI_FASTINTR		# Use with cy_pci unless irq is shared
-device		digi
-# BIOS & FEP/OS components of device digi.
-device		digi_CX
-device		digi_CX_PCI
-device		digi_EPCX
-device		digi_EPCX_PCI
-device		digi_Xe
-device		digi_Xem
-device		digi_Xr
 device		ipmi
 # Parallel (8255 PPI) basic I/O (mode 0) port (e.g. Advantech PCL-724)
 device		pbio
@@ -430,9 +374,7 @@ hint.pbio.0.at="isa"
 hint.pbio.0.port="0x360"
 device		smbios
 device		vpd
-# HOT1 Xilinx 6200 card (http://www.vcc.com/)
-device		xrpu
-
+device		asmc
 #
 # Laptop/Notebook options:
 #
@@ -453,122 +395,16 @@ device		ichwd
 # Temperature sensors:
 #
 # coretemp: on-die sensor on Intel Core and newer CPUs
+# k8temp: on-die sensor on AMD K8 CPUs
 #
 device		coretemp
+device		k8temp
 
-#---------------------------------------------------------------------------
-# ISDN4BSD
 #
-# See /usr/share/examples/isdn/ROADMAP for an introduction to isdn4bsd.
+# CPU control pseudo-device. Provides access to MSRs, CPUID info and
+# microcode update feature.
 #
-# i4b passive ISDN cards support contains the following hardware drivers:
-#
-#	isic  - Siemens/Infineon ISDN ISAC/HSCX/IPAC chipset driver
-#	iwic  - Winbond W6692 PCI bus ISDN S/T interface controller
-#	ifpi  - AVM Fritz!Card PCI driver
-#	ifpi2  - AVM Fritz!Card PCI version 2 driver
-#	itjc  - Siemens ISAC / TJNet Tiger300/320 chipset
-#
-# i4b active ISDN cards support contains the following hardware drivers:
-#
-#	iavc  - AVM B1 PCI, AVM B1 ISA, AVM T1
-#
-# Note that the ``options'' (if given) and ``device'' lines must BOTH
-# be uncommented to enable support for a given card !
-#
-# In addition to a hardware driver (and probably an option) the mandatory
-# ISDN protocol stack devices and the mandatory support device must be
-# enabled as well as one or more devices from the optional devices section.
-#
-#---------------------------------------------------------------------------
-#	isic driver (Siemens/Infineon chipsets)
-#
-#XXX#device	isic
-#
-# PCI bus Cards:
-# --------------
-#
-# ELSA MicroLink ISDN/PCI (same as ELSA QuickStep 1000pro PCI)
-options 	ELSA_QS1PCI
-#
-#---------------------------------------------------------------------------
-#	ifpi2 driver for AVM Fritz!Card PCI version 2
-#
-# AVM Fritz!Card PCI version 2
-#XXX#device	ifpi2
-#
-#---------------------------------------------------------------------------
-#	iwic driver for Winbond W6692 chipset
-#
-# ASUSCOM P-IN100-ST-D (and other Winbond W6692 based cards)
-#XXX#device	iwic
-#
-#---------------------------------------------------------------------------
-#	itjc driver for Siemens ISAC / TJNet Tiger300/320 chipset
-#
-# Traverse Technologies NETjet-S
-# Teles PCI-TJ
-#XXX#device	itjc
-#
-#---------------------------------------------------------------------------
-#	iavc driver (AVM active cards, needs i4bcapi driver!)
-#
-#XXX#device	iavc
-#
-#---------------------------------------------------------------------------
-#	ISDN Protocol Stack - mandatory for all hardware drivers
-#
-# Q.921 / layer 2 - i4b passive cards D channel handling
-#XXX#device	i4bq921
-#
-# Q.931 / layer 3 - i4b passive cards D channel handling
-#XXX#device	i4bq931
-#
-# layer 4 - i4b common passive and active card handling
-#XXX#device	i4b
-#
-#---------------------------------------------------------------------------
-#	ISDN devices - mandatory for all hardware drivers
-#
-# userland driver to do ISDN tracing (for passive cards only)
-#XXX#device	i4btrc
-#XXX#options 	NI4BTRC=4
-#
-# userland driver to control the whole thing
-#XXX#device	i4bctl
-#
-#---------------------------------------------------------------------------
-#	ISDN devices - optional
-#
-# userland driver for access to raw B channel
-#XXX#device	i4brbch
-#XXX#options 	NI4BRBCH=4
-#
-# userland driver for telephony
-#XXX#device	i4btel
-#XXX#options 	NI4BTEL=2
-#
-# network driver for IP over raw HDLC ISDN
-#XXX#device	i4bipr
-#XXX#options 	NI4BIPR=4
-# enable VJ header compression detection for ipr i/f
-#XXX#options 	IPR_VJ
-# enable logging of the first n IP packets to isdnd (n=32 here)
-#XXX#options 	IPR_LOG=32
-#
-# network driver for sync PPP over ISDN; requires an equivalent
-# number of sppp device to be configured
-#XXX#device	i4bisppp
-#XXX#options 	NI4BISPPP=4
-#
-# B-channel interface to the netgraph subsystem
-#XXX#device	i4bing
-#XXX#options 	NI4BING=2
-#
-# CAPI driver needed for active ISDN cards (see iavc driver above)
-#XXX#device	i4bcapi
-#
-#---------------------------------------------------------------------------
+device		cpuctl
 
 #
 # System Management Bus (SMB)

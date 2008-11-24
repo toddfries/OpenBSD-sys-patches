@@ -31,7 +31,7 @@
  *
  *	@(#)portal_vfsops.c	8.11 (Berkeley) 5/14/95
  *
- * $FreeBSD: src/sys/fs/portalfs/portal_vfsops.c,v 1.61 2007/10/16 10:54:53 alfred Exp $
+ * $FreeBSD: src/sys/fs/portalfs/portal_vfsops.c,v 1.63 2008/10/23 15:53:51 des Exp $
  */
 
 /*
@@ -122,24 +122,24 @@ portal_mount(struct mount *mp, struct thread *td)
 		return (ESOCKTNOSUPPORT);
 	}
 
-	MALLOC(pn, struct portalnode *, sizeof(struct portalnode),
+	pn = malloc(sizeof(struct portalnode),
 		M_TEMP, M_WAITOK);
 
-	MALLOC(fmp, struct portalmount *, sizeof(struct portalmount),
+	fmp = malloc(sizeof(struct portalmount),
 		M_PORTALFSMNT, M_WAITOK);	/* XXX */
 
 	error = getnewvnode("portal", mp, &portal_vnodeops, &rvp); /* XXX */
 	if (error) {
-		FREE(fmp, M_PORTALFSMNT);
-		FREE(pn, M_TEMP);
+		free(fmp, M_PORTALFSMNT);
+		free(pn, M_TEMP);
 		fdrop(fp, td);
 		return (error);
 	}
 
 	error = insmntque(rvp, mp);	/* XXX: Too early for mpsafe fs */
 	if (error != 0) {
-		FREE(fmp, M_PORTALFSMNT);
-		FREE(pn, M_TEMP);
+		free(fmp, M_PORTALFSMNT);
+		free(pn, M_TEMP);
 		fdrop(fp, td);
 		return (error);
 	}
@@ -224,7 +224,7 @@ portal_root(mp, flags, vpp, td)
 	 */
 	vp = VFSTOPORTAL(mp)->pm_root;
 	VREF(vp);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	*vpp = vp;
 	return (0);
 }

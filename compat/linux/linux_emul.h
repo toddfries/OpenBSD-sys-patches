@@ -25,11 +25,13 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/compat/linux/linux_emul.h,v 1.7 2007/04/02 18:38:13 jkim Exp $
+ * $FreeBSD: src/sys/compat/linux/linux_emul.h,v 1.8 2008/05/13 20:01:27 rdivacky Exp $
  */
 
 #ifndef _LINUX_EMUL_H_
 #define	_LINUX_EMUL_H_
+
+#include <compat/linux/linux_futex.h>
 
 struct linux_emuldata_shared {
 	int	refs;
@@ -51,6 +53,8 @@ struct linux_emuldata {
 	struct linux_emuldata_shared *shared;
 
 	int	pdeath_signal;		/* parent death signal */
+
+	struct	linux_robust_list_head	*robust_futexes;
 
 	LIST_ENTRY(linux_emuldata) threads;	/* list of linux threads */
 };

@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/security/mac/mac_pipe.c,v 1.113 2007/10/24 19:04:00 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/security/mac/mac_pipe.c,v 1.114 2008/08/23 15:26:36 rwatson Exp $");
 
 #include "opt_mac.h"
 
@@ -68,7 +68,10 @@ void
 mac_pipe_init(struct pipepair *pp)
 {
 
-	pp->pp_label = mac_pipe_label_alloc();
+	if (mac_labeled & MPC_OBJECT_PIPE)
+		pp->pp_label = mac_pipe_label_alloc();
+	else
+		pp->pp_label = NULL;
 }
 
 void
@@ -83,8 +86,10 @@ void
 mac_pipe_destroy(struct pipepair *pp)
 {
 
-	mac_pipe_label_free(pp->pp_label);
-	pp->pp_label = NULL;
+	if (pp->pp_label != NULL) {
+		mac_pipe_label_free(pp->pp_label);
+		pp->pp_label = NULL;
+	}
 }
 
 void

@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/kbd/kbd.c,v 1.47 2007/12/29 21:55:23 wkoszek Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/kbd/kbd.c,v 1.49 2008/09/27 08:51:18 ed Exp $");
 
 #include "opt_kbd.h"
 
@@ -34,12 +34,13 @@ __FBSDID("$FreeBSD: src/sys/dev/kbd/kbd.c,v 1.47 2007/12/29 21:55:23 wkoszek Exp
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/clist.h>
 #include <sys/conf.h>
 #include <sys/fcntl.h>
-#include <sys/tty.h>
 #include <sys/poll.h>
 #include <sys/priv.h>
 #include <sys/proc.h>
+#include <sys/selinfo.h>
 #include <sys/sysctl.h>
 #include <sys/uio.h>
 
@@ -47,7 +48,7 @@ __FBSDID("$FreeBSD: src/sys/dev/kbd/kbd.c,v 1.47 2007/12/29 21:55:23 wkoszek Exp
 
 #include <dev/kbd/kbdreg.h>
 
-#define KBD_INDEX(dev)	minor(dev)
+#define KBD_INDEX(dev)	dev2unit(dev)
 
 typedef struct genkbd_softc {
 	int		gkb_flags;	/* flag/status bits */
@@ -459,7 +460,7 @@ kbd_configure(int flags)
  * appropriate subdrivers.
  */
 
-#define KBD_UNIT(dev)	minor(dev)
+#define KBD_UNIT(dev)	dev2unit(dev)
 
 static d_open_t		genkbdopen;
 static d_close_t	genkbdclose;

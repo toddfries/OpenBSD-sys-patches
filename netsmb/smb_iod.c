@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netsmb/smb_iod.c,v 1.18 2007/10/20 23:23:21 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/netsmb/smb_iod.c,v 1.21 2008/03/27 01:23:59 attilio Exp $");
  
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -261,8 +261,8 @@ smb_iod_sendrq(struct smbiod *iod, struct smb_rq *rqp)
 	}
 	SMBSDEBUG("M:%04x, P:%04x, U:%04x, T:%04x\n", rqp->sr_mid, 0, 0, 0);
 	m_dumpm(rqp->sr_rq.mb_top);
-	m = m_copym(rqp->sr_rq.mb_top, 0, M_COPYALL, M_TRYWAIT);
-	error = rqp->sr_lerror = m ? SMB_TRAN_SEND(vcp, m, td) : ENOBUFS;
+	m = m_copym(rqp->sr_rq.mb_top, 0, M_COPYALL, M_WAIT);
+	error = rqp->sr_lerror = SMB_TRAN_SEND(vcp, m, td);
 	if (error == 0) {
 		getnanotime(&rqp->sr_timesent);
 		iod->iod_lastrqsent = rqp->sr_timesent;
@@ -653,6 +653,7 @@ smb_iod_thread(void *arg)
 	struct smbiod *iod = arg;
 
 	mtx_lock(&Giant);
+
 	/*
 	 * Here we assume that the thread structure will be the same
 	 * for an entire kthread (kproc, to be more precise) life.
@@ -662,12 +663,11 @@ smb_iod_thread(void *arg)
 	while ((iod->iod_flags & SMBIOD_SHUTDOWN) == 0) {
 		smb_iod_main(iod);
 		SMBIODEBUG("going to sleep for %d ticks\n", iod->iod_sleeptimo);
-/*		mtx_unlock(&Giant, MTX_DEF);*/
 		if (iod->iod_flags & SMBIOD_SHUTDOWN)
 			break;
 		tsleep(&iod->iod_flags, PWAIT, "90idle", iod->iod_sleeptimo);
 	}
-/*	mtx_lock(&Giant, MTX_DEF);*/
+	mtx_unlock(&Giant);
 	kproc_exit(0);
 }
 

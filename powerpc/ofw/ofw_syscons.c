@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/ofw/ofw_syscons.c,v 1.9 2005/09/28 14:54:07 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/ofw/ofw_syscons.c,v 1.13 2008/10/15 03:38:03 nwhitehorn Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -51,9 +51,9 @@ __FBSDID("$FreeBSD: src/sys/powerpc/ofw/ofw_syscons.c,v 1.9 2005/09/28 14:54:07 
 #include <dev/syscons/syscons.h>
 
 #include <dev/ofw/openfirm.h>
+#include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_pci.h>
 #include <powerpc/ofw/ofw_syscons.h>
-#include <machine/nexusvar.h>
 
 static int ofwfb_ignore_mmap_checks;
 SYSCTL_NODE(_hw, OID_AUTO, ofwfb, CTLFLAG_RD, 0, "ofwfb");
@@ -234,9 +234,16 @@ ofwfb_configure(int flags)
 	chosen = OF_finddevice("/chosen");
 	OF_getprop(chosen, "stdout", &stdout, sizeof(stdout));
         node = OF_instance_to_package(stdout);
-        OF_getprop(node, "device_type", type, sizeof(type));
-        if (strcmp(type, "display") != 0)
-                return (0);
+	if (node == -1) {
+		/*
+		 * The "/chosen/stdout" does not exist try
+		 * using "screen" directly.
+		 */
+		node = OF_finddevice("screen");
+	}
+	OF_getprop(node, "device_type", type, sizeof(type));
+	if (strcmp(type, "display") != 0)
+		return (0);
 
 	/* Only support 8 and 32-bit framebuffers */
 	OF_getprop(node, "depth", &depth, sizeof(depth));
@@ -834,19 +841,15 @@ ofwfb_scidentify(driver_t *driver, device_t parent)
 	 * the device list
 	 */
 	child = BUS_ADD_CHILD(parent, INT_MAX, SC_DRIVER_NAME, 0);
-	if (child != NULL)
-		nexus_set_device_type(child, "syscons");
 }
 
 static int
 ofwfb_scprobe(device_t dev)
 {
-	char *name;
-
-	name = nexus_get_name(dev);
-	if (strcmp(SC_DRIVER_NAME, name) != 0)
-		return (ENXIO);
-
+	/* This is a fake device, so make sure there is no OF node for it */
+	if (ofw_bus_get_node(dev) != -1)
+		return ENXIO;
+	
 	device_set_desc(dev, "System console");
 	return (sc_probe_unit(device_get_unit(dev), 
 	    device_get_flags(dev) | SC_AUTODETECT_KBD));

@@ -31,7 +31,7 @@
 
 #include <sys/cdefs.h>
 #ifdef __FreeBSD__
-__FBSDID("$FreeBSD: src/sys/dev/malo/if_malo.c,v 1.3 2008/04/20 23:10:44 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/malo/if_malo.c,v 1.4 2008/05/12 00:15:29 sam Exp $");
 #endif
 
 #include "opt_malo.h"
@@ -301,7 +301,8 @@ malo_attach(uint16_t devid, struct malo_softc *sc)
 	ic->ic_phytype = IEEE80211_T_OFDM;
 	ic->ic_opmode = IEEE80211_M_STA;
 	ic->ic_caps =
-	      IEEE80211_C_BGSCAN		/* capable of bg scanning */
+	      IEEE80211_C_STA			/* station mode supported */
+	    | IEEE80211_C_BGSCAN		/* capable of bg scanning */
 	    | IEEE80211_C_MONITOR		/* monitor mode */
 	    | IEEE80211_C_SHPREAMBLE		/* short preamble supported */
 	    | IEEE80211_C_SHSLOT		/* short slot time supported */

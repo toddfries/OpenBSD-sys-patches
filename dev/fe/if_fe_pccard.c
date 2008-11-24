@@ -22,7 +22,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/fe/if_fe_pccard.c,v 1.32 2005/11/19 23:26:57 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/fe/if_fe_pccard.c,v 1.34 2008/06/23 18:16:25 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -32,7 +32,6 @@ __FBSDID("$FreeBSD: src/sys/dev/fe/if_fe_pccard.c,v 1.32 2005/11/19 23:26:57 imp
 
 #include <sys/bus.h>
 #include <machine/bus.h>
-#include <machine/resource.h>
 #include <sys/rman.h>
 
 #include <net/ethernet.h>
@@ -175,11 +174,15 @@ fe_pccard_detach(device_t dev)
 	struct fe_softc *sc = device_get_softc(dev);
 	struct ifnet *ifp = sc->ifp;
 
+	FE_LOCK(sc);
 	fe_stop(sc);
+	FE_UNLOCK(sc);
+	callout_drain(&sc->timer);
 	ether_ifdetach(ifp);
 	bus_teardown_intr(dev, sc->irq_res, sc->irq_handle);
 	if_free(ifp);
 	fe_release_resource(dev);
+	mtx_destroy(&sc->lock);
 
 	return 0;
 }

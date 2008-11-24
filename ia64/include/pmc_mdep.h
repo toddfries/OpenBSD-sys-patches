@@ -1,7 +1,7 @@
 /*-
  * This file is in the public domain.
  *
- * $FreeBSD: src/sys/ia64/include/pmc_mdep.h,v 1.2 2005/06/09 19:45:08 jkoshy Exp $
+ * $FreeBSD: src/sys/ia64/include/pmc_mdep.h,v 1.3 2007/12/07 13:45:46 jkoshy Exp $
  */
 
 #ifndef _MACHINE_PMC_MDEP_H_
@@ -18,6 +18,10 @@ union pmc_md_op_pmcallocate {
 #if	_KERNEL
 union pmc_md_pmc {
 };
+
+#define	PMC_TRAPFRAME_TO_PC(TF)	(0)	/* Stubs */
+#define	PMC_TRAPFRAME_TO_FP(TF)	(0)
+#define	PMC_TRAPFRAME_TO_SP(TF)	(0)
 
 #endif
 

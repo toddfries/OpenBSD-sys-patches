@@ -63,7 +63,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_object.c,v 1.386 2007/10/18 23:02:18 alc Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_object.c,v 1.398 2008/10/10 21:23:50 attilio Exp $");
+
+#include "opt_vm.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -90,6 +92,7 @@ __FBSDID("$FreeBSD: src/sys/vm/vm_object.c,v 1.386 2007/10/18 23:02:18 alc Exp $
 #include <vm/swap_pager.h>
 #include <vm/vm_kern.h>
 #include <vm/vm_extern.h>
+#include <vm/vm_reserv.h>
 #include <vm/uma.h>
 
 #define EASY_SCAN_FACTOR       8
@@ -101,8 +104,8 @@ __FBSDID("$FreeBSD: src/sys/vm/vm_object.c,v 1.386 2007/10/18 23:02:18 alc Exp $
  * msync / VM object flushing optimizations
  */
 static int msync_flush_flags = MSYNC_FLUSH_HARDSEQ | MSYNC_FLUSH_SOFTSEQ;
-SYSCTL_INT(_vm, OID_AUTO, msync_flush_flags,
-        CTLFLAG_RW, &msync_flush_flags, 0, "");
+SYSCTL_INT(_vm, OID_AUTO, msync_flush_flags, CTLFLAG_RW, &msync_flush_flags, 0,
+    "Enable sequential iteration optimization");
 
 static int old_msync;
 SYSCTL_INT(_vm, OID_AUTO, old_msync, CTLFLAG_RW, &old_msync, 0,
@@ -170,6 +173,11 @@ vm_object_zdtor(void *mem, int size, void *arg)
 	KASSERT(TAILQ_EMPTY(&object->memq),
 	    ("object %p has resident pages",
 	    object));
+#if VM_NRESERVLEVEL > 0
+	KASSERT(LIST_EMPTY(&object->rvq),
+	    ("object %p has reservations",
+	    object));
+#endif
 	KASSERT(object->cache == NULL,
 	    ("object %p has cached pages",
 	    object));
@@ -220,6 +228,9 @@ _vm_object_allocate(objtype_t type, vm_pindex_t size, vm_object_t object)
 	object->handle = NULL;
 	object->backing_object = NULL;
 	object->backing_object_offset = (vm_ooffset_t) 0;
+#if VM_NRESERVLEVEL > 0
+	LIST_INIT(&object->rvq);
+#endif
 	object->cache = NULL;
 
 	mtx_lock(&vm_object_list_mtx);
@@ -241,10 +252,18 @@ vm_object_init(void)
 	VM_OBJECT_LOCK_INIT(&kernel_object_store, "kernel object");
 	_vm_object_allocate(OBJT_PHYS, OFF_TO_IDX(VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS),
 	    kernel_object);
+#if VM_NRESERVLEVEL > 0
+	kernel_object->flags |= OBJ_COLORED;
+	kernel_object->pg_color = (u_short)atop(VM_MIN_KERNEL_ADDRESS);
+#endif
 
 	VM_OBJECT_LOCK_INIT(&kmem_object_store, "kmem object");
 	_vm_object_allocate(OBJT_PHYS, OFF_TO_IDX(VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS),
 	    kmem_object);
+#if VM_NRESERVLEVEL > 0
+	kmem_object->flags |= OBJ_COLORED;
+	kmem_object->pg_color = (u_short)atop(VM_MIN_KERNEL_ADDRESS);
+#endif
 
 	/*
 	 * The lock portion of struct vm_object must be type stable due
@@ -345,22 +364,11 @@ vm_object_allocate(objtype_t type, vm_pindex_t size)
 void
 vm_object_reference(vm_object_t object)
 {
-	struct vnode *vp;
-
 	if (object == NULL)
 		return;
 	VM_OBJECT_LOCK(object);
-	object->ref_count++;
-	if (object->type == OBJT_VNODE) {
-		int vfslocked;
-
-		vp = object->handle;
-		VM_OBJECT_UNLOCK(object);
-		vfslocked = VFS_LOCK_GIANT(vp->v_mount);
-		vget(vp, LK_RETRY, curthread);
-		VFS_UNLOCK_GIANT(vfslocked);
-	} else
-		VM_OBJECT_UNLOCK(object);
+	vm_object_reference_locked(object);
+	VM_OBJECT_UNLOCK(object);
 }
 
 /*
@@ -376,8 +384,6 @@ vm_object_reference_locked(vm_object_t object)
 	struct vnode *vp;
 
 	VM_OBJECT_LOCK_ASSERT(object, MA_OWNED);
-	KASSERT((object->flags & OBJ_DEAD) == 0,
-	    ("vm_object_reference_locked: dead object referenced"));
 	object->ref_count++;
 	if (object->type == OBJT_VNODE) {
 		vp = object->handle;
@@ -481,7 +487,10 @@ vm_object_deallocate(vm_object_t object)
 			VM_OBJECT_UNLOCK(object);
 			return;
 		} else if (object->ref_count == 1) {
-			if (object->shadow_count == 0) {
+			if (object->shadow_count == 0 &&
+			    object->handle == NULL &&
+			    (object->type == OBJT_DEFAULT ||
+			     object->type == OBJT_SWAP)) {
 				vm_object_set_flag(object, OBJ_ONEMAPPING);
 			} else if ((object->shadow_count == 1) &&
 			    (object->handle == NULL) &&
@@ -585,6 +594,27 @@ doterm:
 }
 
 /*
+ *	vm_object_destroy removes the object from the global object list
+ *      and frees the space for the object.
+ */
+void
+vm_object_destroy(vm_object_t object)
+{
+
+	/*
+	 * Remove the object from the global object list.
+	 */
+	mtx_lock(&vm_object_list_mtx);
+	TAILQ_REMOVE(&vm_object_list, object, object_list);
+	mtx_unlock(&vm_object_list_mtx);
+
+	/*
+	 * Free the space for the object.
+	 */
+	uma_zfree(obj_zone, object);
+}
+
+/*
  *	vm_object_terminate actually destroys the specified object, freeing
  *	up all previously used resources.
  *
@@ -624,7 +654,7 @@ vm_object_terminate(vm_object_t object)
 		vm_object_page_clean(object, 0, 0, OBJPC_SYNC);
 		VM_OBJECT_UNLOCK(object);
 
-		vinvalbuf(vp, V_SAVE, NULL, 0, 0);
+		vinvalbuf(vp, V_SAVE, 0, 0);
 
 		VM_OBJECT_LOCK(object);
 	}
@@ -652,6 +682,10 @@ vm_object_terminate(vm_object_t object)
 	}
 	vm_page_unlock_queues();
 
+#if VM_NRESERVLEVEL > 0
+	if (__predict_false(!LIST_EMPTY(&object->rvq)))
+		vm_reserv_break_all(object);
+#endif
 	if (__predict_false(object->cache != NULL))
 		vm_page_cache_free(object, 0, 0);
 
@@ -661,17 +695,7 @@ vm_object_terminate(vm_object_t object)
 	vm_pager_deallocate(object);
 	VM_OBJECT_UNLOCK(object);
 
-	/*
-	 * Remove the object from the global object list.
-	 */
-	mtx_lock(&vm_object_list_mtx);
-	TAILQ_REMOVE(&vm_object_list, object, object_list);
-	mtx_unlock(&vm_object_list_mtx);
-
-	/*
-	 * Free the space for the object.
-	 */
-	uma_zfree(obj_zone, object);
+	vm_object_destroy(object);
 }
 
 /*
@@ -1023,7 +1047,7 @@ vm_object_sync(vm_object_t object, vm_ooffset_t offset, vm_size_t size,
 		VM_OBJECT_UNLOCK(object);
 		(void) vn_start_write(vp, &mp, V_WAIT);
 		vfslocked = VFS_LOCK_GIANT(vp->v_mount);
-		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, curthread);
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 		flags = (syncio || invalidate) ? OBJPC_SYNC : 0;
 		flags |= invalidate ? OBJPC_INVAL : 0;
 		VM_OBJECT_LOCK(object);
@@ -1032,7 +1056,7 @@ vm_object_sync(vm_object_t object, vm_ooffset_t offset, vm_size_t size,
 		    OFF_TO_IDX(offset + size + PAGE_MASK),
 		    flags);
 		VM_OBJECT_UNLOCK(object);
-		VOP_UNLOCK(vp, 0, curthread);
+		VOP_UNLOCK(vp, 0);
 		VFS_UNLOCK_GIANT(vfslocked);
 		vn_finished_write(mp);
 		VM_OBJECT_LOCK(object);
@@ -1248,7 +1272,13 @@ vm_object_shadow(
 		LIST_INSERT_HEAD(&source->shadow_head, result, shadow_list);
 		source->shadow_count++;
 		source->generation++;
+#if VM_NRESERVLEVEL > 0
+		result->flags |= source->flags & (OBJ_NEEDGIANT | OBJ_COLORED);
+		result->pg_color = (source->pg_color + OFF_TO_IDX(*offset)) &
+		    ((1 << (VM_NFREEORDER - 1)) - 1);
+#else
 		result->flags |= source->flags & OBJ_NEEDGIANT;
+#endif
 		VM_OBJECT_UNLOCK(source);
 	}
 
@@ -1560,6 +1590,14 @@ vm_object_backing_scan(vm_object_t object, int op)
 				continue;
 			}
 
+#if VM_NRESERVLEVEL > 0
+			/*
+			 * Rename the reservation.
+			 */
+			vm_reserv_rename(p, object, backing_object,
+			    backing_offset_index);
+#endif
+
 			/*
 			 * Page does not exist in parent, rename the
 			 * page from the backing object to the main object. 
@@ -1661,6 +1699,14 @@ vm_object_collapse(vm_object_t object)
 			 * object, we can collapse it into the parent.  
 			 */
 			vm_object_backing_scan(object, OBSC_COLLAPSE_WAIT);
+
+#if VM_NRESERVLEVEL > 0
+			/*
+			 * Break any reservations from backing_object.
+			 */
+			if (__predict_false(!LIST_EMPTY(&backing_object->rvq)))
+				vm_reserv_break_all(backing_object);
+#endif
 
 			/*
 			 * Move the pager from backing_object to object.
@@ -1785,10 +1831,22 @@ vm_object_collapse(vm_object_t object)
 /*
  *	vm_object_page_remove:
  *
- *	Removes all physical pages in the given range from the
- *	object's list of pages.  If the range's end is zero, all
- *	physical pages from the range's start to the end of the object
- *	are deleted.
+ *	For the given object, either frees or invalidates each of the
+ *	specified pages.  In general, a page is freed.  However, if a
+ *	page is wired for any reason other than the existence of a
+ *	managed, wired mapping, then it may be invalidated but not
+ *	removed from the object.  Pages are specified by the given
+ *	range ["start", "end") and Boolean "clean_only".  As a
+ *	special case, if "end" is zero, then the range extends from
+ *	"start" to the end of the object.  If "clean_only" is TRUE,
+ *	then only the non-dirty pages within the specified range are
+ *	affected.
+ *
+ *	In general, this operation should only be performed on objects
+ *	that contain managed pages.  There are two exceptions.  First,
+ *	it may be performed on the kernel and kmem objects.  Second,
+ *	it may be used by msync(..., MS_INVALIDATE) to invalidate
+ *	device-backed pages.
  *
  *	The object must be locked.
  */
@@ -1797,6 +1855,7 @@ vm_object_page_remove(vm_object_t object, vm_pindex_t start, vm_pindex_t end,
     boolean_t clean_only)
 {
 	vm_page_t p, next;
+	int wirings;
 
 	VM_OBJECT_LOCK_ASSERT(object, MA_OWNED);
 	if (object->resident_page_count == 0)
@@ -1831,20 +1890,38 @@ again:
 	     p = next) {
 		next = TAILQ_NEXT(p, listq);
 
-		if (p->wire_count != 0) {
-			pmap_remove_all(p);
+		/*
+		 * If the page is wired for any reason besides the
+		 * existence of managed, wired mappings, then it cannot
+		 * be freed.  For example, fictitious pages, which
+		 * represent device memory, are inherently wired and
+		 * cannot be freed.  They can, however, be invalidated
+		 * if "clean_only" is FALSE.
+		 */
+		if ((wirings = p->wire_count) != 0 &&
+		    (wirings = pmap_page_wired_mappings(p)) != p->wire_count) {
+			/* Fictitious pages do not have managed mappings. */
+			if ((p->flags & PG_FICTITIOUS) == 0)
+				pmap_remove_all(p);
+			/* Account for removal of managed, wired mappings. */
+			p->wire_count -= wirings;
 			if (!clean_only)
 				p->valid = 0;
 			continue;
 		}
 		if (vm_page_sleep_if_busy(p, TRUE, "vmopar"))
 			goto again;
+		KASSERT((p->flags & PG_FICTITIOUS) == 0,
+		    ("vm_object_page_remove: page %p is fictitious", p));
 		if (clean_only && p->valid) {
 			pmap_remove_write(p);
 			if (p->valid & p->dirty)
 				continue;
 		}
 		pmap_remove_all(p);
+		/* Account for removal of managed, wired mappings. */
+		if (wirings != 0)
+			p->wire_count -= wirings;
 		vm_page_free(p);
 	}
 	vm_page_unlock_queues();

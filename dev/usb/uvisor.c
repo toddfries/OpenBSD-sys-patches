@@ -1,5 +1,5 @@
 /*	$NetBSD: uvisor.c,v 1.9 2001/01/23 14:04:14 augustss Exp $	*/
-/*      $FreeBSD: src/sys/dev/usb/uvisor.c,v 1.40 2007/07/05 06:28:46 imp Exp $	*/
+/*      $FreeBSD: src/sys/dev/usb/uvisor.c,v 1.41 2008/08/23 23:28:33 imp Exp $	*/
 
 /* Also already merged from NetBSD:
  *	$NetBSD: uvisor.c,v 1.12 2001/11/13 06:24:57 lukem Exp $
@@ -197,7 +197,7 @@ static device_method_t uvisor_methods[] = {
        DEVMETHOD(device_attach, uvisor_attach),
        DEVMETHOD(device_detach, uvisor_detach),
        { 0, 0 }
- };
+};
 
 
 static driver_t uvisor_driver = {

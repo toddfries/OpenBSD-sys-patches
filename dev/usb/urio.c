@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/urio.c,v 1.48 2007/06/21 14:42:34 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/urio.c,v 1.49 2008/09/27 08:51:18 ed Exp $");
 
 
 /*
@@ -126,7 +126,7 @@ struct urio_softc {
 	u_char sc_dying;
 };
 
-#define URIOUNIT(n) (minor(n))
+#define URIOUNIT(n) (dev2unit(n))
 
 #define RIO_RW_TIMEOUT 4000	/* ms */
 

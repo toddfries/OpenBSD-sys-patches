@@ -1,6 +1,7 @@
 /*-
  * Copyright (c) 2003-2004 Networks Associates Technology, Inc.
  * Copyright (c) 2006 SPARTA, Inc.
+ * Copyright (c) 2008 Apple Inc.
  * All rights reserved.
  *
  * This software was developed for the FreeBSD Project in part by Network
@@ -34,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/security/mac/mac_sysv_msg.c,v 1.10 2007/10/24 19:04:01 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/security/mac/mac_sysv_msg.c,v 1.11 2008/08/23 15:26:36 rwatson Exp $");
 
 #include "opt_mac.h"
 
@@ -70,7 +71,10 @@ void
 mac_sysvmsg_init(struct msg *msgptr)
 {
 
-	msgptr->label = mac_sysv_msgmsg_label_alloc();
+	if (mac_labeled & MPC_OBJECT_SYSVMSG)
+		msgptr->label = mac_sysv_msgmsg_label_alloc();
+	else
+		msgptr->label = NULL;
 }
 
 static struct label *
@@ -87,7 +91,10 @@ void
 mac_sysvmsq_init(struct msqid_kernel *msqkptr)
 {
 
-	msqkptr->label = mac_sysv_msgqueue_label_alloc();
+	if (mac_labeled & MPC_OBJECT_SYSVMSQ)
+		msqkptr->label = mac_sysv_msgqueue_label_alloc();
+	else
+		msqkptr->label = NULL;
 }
 
 static void
@@ -102,8 +109,10 @@ void
 mac_sysvmsg_destroy(struct msg *msgptr)
 {
 
-	mac_sysv_msgmsg_label_free(msgptr->label);
-	msgptr->label = NULL;
+	if (msgptr->label != NULL) {
+		mac_sysv_msgmsg_label_free(msgptr->label);
+		msgptr->label = NULL;
+	}
 }
 
 static void
@@ -118,8 +127,10 @@ void
 mac_sysvmsq_destroy(struct msqid_kernel *msqkptr)
 {
 
-	mac_sysv_msgqueue_label_free(msqkptr->label);
-	msqkptr->label = NULL;
+	if (msqkptr->label != NULL) {
+		mac_sysv_msgqueue_label_free(msqkptr->label);
+		msqkptr->label = NULL;
+	}
 }
 
 void

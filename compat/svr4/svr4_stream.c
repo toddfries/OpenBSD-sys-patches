@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_stream.c,v 1.62 2006/08/05 22:04:21 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_stream.c,v 1.64 2008/09/15 15:09:35 ed Exp $");
 
 #include "opt_compat.h"
 #include "opt_ktrace.h"
@@ -1481,8 +1481,6 @@ svr4_do_putmsg(td, uap, fp)
 		 uap->dat, uap->flags);
 #endif /* DEBUG_SVR4 */
 
-	FILE_LOCK_ASSERT(fp, MA_NOTOWNED);
-
 	if (uap->ctl != NULL) {
 	  if ((error = copyin(uap->ctl, &ctl, sizeof(ctl))) != 0) {
 #ifdef DEBUG_SVR4
@@ -1655,8 +1653,6 @@ svr4_do_getmsg(td, uap, fp)
 	retval = td->td_retval;
 	error = 0;
 	afp = NULL;
-
-	FILE_LOCK_ASSERT(fp, MA_NOTOWNED);
 
 	memset(&sc, 0, sizeof(sc));
 
@@ -1989,24 +1985,32 @@ int svr4_sys_send(td, uap)
 	struct thread *td;
 	struct svr4_sys_send_args *uap;
 {
-	struct osend_args osa;
-	osa.s = uap->s;
-	osa.buf = uap->buf;
-	osa.len = uap->len;
-	osa.flags = uap->flags;
-	return osend(td, &osa);
+	struct sendto_args sta;
+
+	sta.s = uap->s;
+	sta.buf = uap->buf;
+	sta.len = uap->len;
+	sta.flags = uap->flags;
+	sta.to = NULL;
+	sta.tolen = 0;
+
+	return (sendto(td, &sta));
 }
 
 int svr4_sys_recv(td, uap)
 	struct thread *td;
 	struct svr4_sys_recv_args *uap;
 {
-	struct orecv_args ora;
-	ora.s = uap->s;
-	ora.buf = uap->buf;
-	ora.len = uap->len;
-	ora.flags = uap->flags;
-	return orecv(td, &ora);
+	struct recvfrom_args rfa;
+
+	rfa.s = uap->s;
+	rfa.buf = uap->buf;
+	rfa.len = uap->len;
+	rfa.flags = uap->flags;
+	rfa.from = NULL;
+	rfa.fromlenaddr = NULL;
+
+	return (recvfrom(td, &rfa));
 }
 
 /* 

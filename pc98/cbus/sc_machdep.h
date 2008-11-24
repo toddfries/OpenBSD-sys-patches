@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/pc98/cbus/sc_machdep.h,v 1.5 2001/07/14 08:07:26 nyan Exp $
+ * $FreeBSD: src/sys/pc98/cbus/sc_machdep.h,v 1.6 2008/04/08 13:10:57 nyan Exp $
  */
 
 #ifndef _PC98_PC98_SC_MACHDEP_H_
@@ -42,10 +42,6 @@
 #endif
 
 #define KANJI			1
-
-#define BELL_DURATION		5
-#define BELL_PITCH_8M		1339
-#define BELL_PITCH_5M		1678
 
 #define	UJIS			0
 #define SJIS			1

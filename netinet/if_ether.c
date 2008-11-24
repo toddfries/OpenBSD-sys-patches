@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/if_ether.c,v 1.164 2007/10/28 15:55:21 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/if_ether.c,v 1.181 2008/11/19 09:39:34 zec Exp $");
 
 #include "opt_inet.h"
 #include "opt_mac.h"
@@ -49,8 +49,10 @@ __FBSDID("$FreeBSD: src/sys/netinet/if_ether.c,v 1.164 2007/10/28 15:55:21 rwats
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/malloc.h>
+#include <sys/proc.h>
 #include <sys/socket.h>
 #include <sys/syslog.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -80,7 +82,12 @@ SYSCTL_DECL(_net_link_ether);
 SYSCTL_NODE(_net_link_ether, PF_INET, inet, CTLFLAG_RW, 0, "");
 
 /* timer values */
-static int arpt_keep = (20*60); /* once resolved, good for 20 more minutes */
+#ifdef VIMAGE_GLOBALS
+static int	arpt_keep; /* once resolved, good for 20 more minutes */
+static int	arp_maxtries;
+static int	useloopback; /* use loopback interface for local traffic */
+static int	arp_proxyall;
+#endif
 
 SYSCTL_INT(_net_link_ether_inet, OID_AUTO, max_age, CTLFLAG_RW, 
 	   &arpt_keep, 0, "ARP entry lifetime in seconds");
@@ -96,18 +103,16 @@ struct llinfo_arp {
 };
 
 static struct	ifqueue arpintrq;
-static int	arp_allocated;
 
-static int	arp_maxtries = 5;
-static int	useloopback = 1; /* use loopback interface for local traffic */
-static int	arp_proxyall = 0;
-
-SYSCTL_INT(_net_link_ether_inet, OID_AUTO, maxtries, CTLFLAG_RW,
-	   &arp_maxtries, 0, "ARP resolution attempts before returning error");
-SYSCTL_INT(_net_link_ether_inet, OID_AUTO, useloopback, CTLFLAG_RW,
-	   &useloopback, 0, "Use the loopback interface for local traffic");
-SYSCTL_INT(_net_link_ether_inet, OID_AUTO, proxyall, CTLFLAG_RW,
-	   &arp_proxyall, 0, "Enable proxy ARP for all suitable requests");
+SYSCTL_V_INT(V_NET, vnet_inet, _net_link_ether_inet, OID_AUTO, maxtries,
+	CTLFLAG_RW, arp_maxtries, 0,
+	"ARP resolution attempts before returning error");
+SYSCTL_V_INT(V_NET, vnet_inet, _net_link_ether_inet, OID_AUTO, useloopback,
+	CTLFLAG_RW, useloopback, 0,
+	"Use the loopback interface for local traffic");
+SYSCTL_V_INT(V_NET, vnet_inet, _net_link_ether_inet, OID_AUTO, proxyall,
+	CTLFLAG_RW, arp_proxyall, 0,
+	"Enable proxy ARP for all suitable requests");
 
 static void	arp_init(void);
 static void	arp_rtrequest(int, struct rtentry *, struct rt_addrinfo *);
@@ -116,7 +121,7 @@ static void	arprequest(struct ifnet *,
 static void	arpintr(struct mbuf *);
 static void	arptimer(void *);
 static struct rtentry
-		*arplookup(u_long, int, int);
+		*arplookup(u_long, int, int, int);
 #ifdef INET
 static void	in_arpinput(struct mbuf *);
 #endif
@@ -138,7 +143,8 @@ arptimer(void *arg)
 	 */
 	RT_UNLOCK(rt);
 
-	rtrequest(RTM_DELETE, rt_key(rt), NULL, rt_mask(rt), 0, NULL);
+	in_rtrequest(RTM_DELETE, rt_key(rt), NULL, rt_mask(rt), 0, NULL,
+	    rt->rt_fibnum);
 }
 
 /*
@@ -147,6 +153,8 @@ arptimer(void *arg)
 static void
 arp_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
 {
+	INIT_VNET_NET(curvnet);
+	INIT_VNET_INET(curvnet);
 	struct sockaddr *gate;
 	struct llinfo_arp *la;
 	static struct sockaddr_dl null_sdl = {sizeof(null_sdl), AF_LINK};
@@ -213,7 +221,6 @@ arp_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
 			log(LOG_DEBUG, "%s: malloc failed\n", __func__);
 			break;
 		}
-		arp_allocated++;
 		/*
 		 * We are storing a route entry outside of radix tree. So,
 		 * it can be found and accessed by other means than radix
@@ -248,7 +255,7 @@ arp_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
 		}
 #endif
 
-		TAILQ_FOREACH(ia, &in_ifaddrhead, ia_link) {
+		TAILQ_FOREACH(ia, &V_in_ifaddrhead, ia_link) {
 			if (ia->ia_ifp == rt->rt_ifp &&
 			    SIN(rt_key(rt))->sin_addr.s_addr ==
 			    (IA_SIN(ia))->sin_addr.s_addr)
@@ -268,9 +275,9 @@ arp_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
 			rt->rt_expire = 0;
 			bcopy(IF_LLADDR(rt->rt_ifp), LLADDR(SDL(gate)),
 			      SDL(gate)->sdl_alen = rt->rt_ifp->if_addrlen);
-			if (useloopback) {
-				rt->rt_ifp = loif;
-				rt->rt_rmx.rmx_mtu = loif->if_mtu;
+			if (V_useloopback) {
+				rt->rt_ifp = V_loif;
+				rt->rt_rmx.rmx_mtu = V_loif->if_mtu;
 			}
 
 		    /*
@@ -344,34 +351,46 @@ arprequest(struct ifnet *ifp, struct in_addr *sip, struct in_addr *tip,
  * Resolve an IP address into an ethernet address.
  * On input:
  *    ifp is the interface we use
- *    dst is the next hop,
  *    rt0 is the route to the final destination (possibly useless)
- *    m is the mbuf
+ *    m is the mbuf. May be NULL if we don't have a packet.
+ *    dst is the next hop,
  *    desten is where we want the address.
  *
  * On success, desten is filled in and the function returns 0;
  * If the packet must be held pending resolution, we return EWOULDBLOCK
  * On other errors, we return the corresponding error code.
+ * Note that m_freem() handles NULL.
  */
 int
 arpresolve(struct ifnet *ifp, struct rtentry *rt0, struct mbuf *m,
     struct sockaddr *dst, u_char *desten)
 {
+	INIT_VNET_INET(ifp->if_vnet);
 	struct llinfo_arp *la = NULL;
 	struct rtentry *rt = NULL;
 	struct sockaddr_dl *sdl;
 	int error;
+	int fibnum = -1;
 
-	if (m->m_flags & M_BCAST) {	/* broadcast */
-		(void)memcpy(desten, ifp->if_broadcastaddr, ifp->if_addrlen);
-		return (0);
-	}
-	if (m->m_flags & M_MCAST && ifp->if_type != IFT_ARCNET) {/* multicast */
-		ETHER_MAP_IP_MULTICAST(&SIN(dst)->sin_addr, desten);
-		return (0);
+	if (m) {
+		if (m->m_flags & M_BCAST) {
+			/* broadcast */
+			(void)memcpy(desten,
+			    ifp->if_broadcastaddr, ifp->if_addrlen);
+			return (0);
+		}
+		if (m->m_flags & M_MCAST && ifp->if_type != IFT_ARCNET) {
+			/* multicast */
+			ETHER_MAP_IP_MULTICAST(&SIN(dst)->sin_addr, desten);
+			return (0);
+		}
+		fibnum = M_GETFIB(m);
 	}
 
 	if (rt0 != NULL) {
+		/* Look for a cached arp (ll) entry. */
+		if (m == NULL)
+			fibnum = rt0->rt_fibnum;
 		error = rt_check(&rt, &rt0, dst);
 		if (error) {
 			m_freem(m);
@@ -381,12 +400,25 @@ arpresolve(struct ifnet *ifp, struct rtentry *rt0, struct mbuf *m,
 		if (la == NULL)
 			RT_UNLOCK(rt);
 	}
+
+	/*
+	 * If we had no mbuf and no route, then hope the caller
+	 * has a fib in mind because we are running out of ideas.
+	 * I think this should not happen in current code.
+	 * (kmacy would know).
+	 */
+	if (fibnum == -1)
+		fibnum = curthread->td_proc->p_fibnum; /* last gasp */
+
 	if (la == NULL) {
 		/*
-		 * We enter this block in case if rt0 was NULL,
+		 * We enter this block if rt0 was NULL,
 		 * or if rt found by rt_check() didn't have llinfo.
+		 * we should get a cloned route, which since it should
+		 * come from the local interface should have a ll entry.
+		 * It may be incomplete but that's ok.
 		 */
-		rt = arplookup(SIN(dst)->sin_addr.s_addr, 1, 0);
+		rt = arplookup(SIN(dst)->sin_addr.s_addr, 1, 0, fibnum);
 		if (rt == NULL) {
 			log(LOG_DEBUG,
 			    "arpresolve: can't allocate route for %s\n",
@@ -449,10 +481,11 @@ arpresolve(struct ifnet *ifp, struct rtentry *rt0, struct mbuf *m,
 	 * response yet.  Replace the held mbuf with this
 	 * latest one.
 	 */
-	if (la->la_hold)
-		m_freem(la->la_hold);
-	la->la_hold = m;
-
+	if (m) {
+		if (la->la_hold)
+			m_freem(la->la_hold);
+		la->la_hold = m;
+	}
 	KASSERT(rt->rt_expire > 0, ("sending ARP request for static entry"));
 
 	/*
@@ -461,7 +494,7 @@ arpresolve(struct ifnet *ifp, struct rtentry *rt0, struct mbuf *m,
 	 * if we have already sent arp_maxtries ARP requests. Retransmit the
 	 * ARP request, but not faster than one request per second.
 	 */
-	if (la->la_asked < arp_maxtries)
+	if (la->la_asked < V_arp_maxtries)
 		error = EWOULDBLOCK;	/* First request. */
 	else
 		error = (rt == rt0) ? EHOSTDOWN : EHOSTUNREACH;
@@ -574,13 +607,23 @@ in_arpinput(struct mbuf *m)
 	u_int8_t *enaddr = NULL;
 	int op, rif_len;
 	int req_len;
-	int bridged = 0;
+	int bridged = 0, is_bridge = 0;
+	u_int fibnum;
+	u_int goodfib = 0;
+	int firstpass = 1;
 #ifdef DEV_CARP
 	int carp_match = 0;
 #endif
+	struct sockaddr_in sin;
+	sin.sin_len = sizeof(struct sockaddr_in);
+	sin.sin_family = AF_INET;
+	sin.sin_addr.s_addr = 0;
+	INIT_VNET_INET(ifp->if_vnet);
 
 	if (ifp->if_bridge)
 		bridged = 1;
+	if (ifp->if_type == IFT_BRIDGE)
+		is_bridge = 1;
 
 	req_len = arphdr_len2(ifp->if_addrlen, sizeof(struct in_addr));
 	if (m->m_len < req_len && (m = m_pullup(m, req_len)) == NULL) {
@@ -621,6 +664,27 @@ in_arpinput(struct mbuf *m)
 		    (ia->ia_ifp == ifp)) &&
 		    isaddr.s_addr == ia->ia_addr.sin_addr.s_addr)
 			goto match;
+
+#define BDG_MEMBER_MATCHES_ARP(addr, ifp, ia)				\
+  (ia->ia_ifp->if_bridge == ifp->if_softc &&				\
+  !bcmp(IF_LLADDR(ia->ia_ifp), IF_LLADDR(ifp), ifp->if_addrlen) &&	\
+  addr == ia->ia_addr.sin_addr.s_addr)
+	/*
+	 * Check the case when bridge shares its MAC address with
+	 * some of its children, so packets are claimed by bridge
+	 * itself (bridge_input() does it first), but they are really
+	 * meant to be destined to the bridge member.
+	 */
+	if (is_bridge) {
+		LIST_FOREACH(ia, INADDR_HASH(itaddr.s_addr), ia_hash) {
+			if (BDG_MEMBER_MATCHES_ARP(itaddr.s_addr, ifp, ia)) {
+				ifp = ia->ia_ifp;
+				goto match;
+			}
+		}
+	}
+#undef BDG_MEMBER_MATCHES_ARP
+
 	/*
 	 * No match, use the first inet address on the receive interface
 	 * as a dummy address for the rest of the function.
@@ -633,7 +697,7 @@ in_arpinput(struct mbuf *m)
 	/*
 	 * If bridging, fall back to using any inet address.
 	 */
-	if (!bridged || (ia = TAILQ_FIRST(&in_ifaddrhead)) == NULL)
+	if (!bridged || (ia = TAILQ_FIRST(&V_in_ifaddrhead)) == NULL)
 		goto drop;
 match:
 	if (!enaddr)
@@ -655,140 +719,192 @@ match:
 	 */
 	if (!bridged && isaddr.s_addr == myaddr.s_addr && myaddr.s_addr != 0) {
 		log(LOG_ERR,
-		   "arp: %*D is using my IP address %s!\n",
+		   "arp: %*D is using my IP address %s on %s!\n",
 		   ifp->if_addrlen, (u_char *)ar_sha(ah), ":",
-		   inet_ntoa(isaddr));
+		   inet_ntoa(isaddr), ifp->if_xname);
 		itaddr = myaddr;
 		goto reply;
 	}
 	if (ifp->if_flags & IFF_STATICARP)
 		goto reply;
-	rt = arplookup(isaddr.s_addr, itaddr.s_addr == myaddr.s_addr, 0);
-	if (rt != NULL) {
+	/*
+	 * We look for any FIB that has this address to find
+	 * the interface etc.
+	 * For sanity checks that are FIB independent we abort the loop.
+	 */
+	for (fibnum = 0; fibnum < rt_numfibs; fibnum++) {
+		rt = arplookup(isaddr.s_addr,
+		    itaddr.s_addr == myaddr.s_addr, 0, fibnum);
+		if (rt == NULL)
+			continue;
+		
+		sdl = SDL(rt->rt_gateway);
+		/* Only call this once */
+		if (firstpass) {
+			sin.sin_addr.s_addr = isaddr.s_addr;
+			EVENTHANDLER_INVOKE(route_arp_update_event, rt,
+			    ar_sha(ah), (struct sockaddr *)&sin);
+		}
+		
 		la = (struct llinfo_arp *)rt->rt_llinfo;
 		if (la == NULL) {
 			RT_UNLOCK(rt);
-			goto reply;
+			continue;
 		}
-	} else
-		goto reply;
 
-	/* The following is not an error when doing bridging. */
-	if (!bridged && rt->rt_ifp != ifp
+		if (firstpass) {
+			/* The following is not an error when doing bridging. */
+			if (!bridged && rt->rt_ifp != ifp
 #ifdef DEV_CARP
-	    && (ifp->if_type != IFT_CARP || !carp_match)
+			    && (ifp->if_type != IFT_CARP || !carp_match)
 #endif
-							) {
-		if (log_arp_wrong_iface)
-			log(LOG_ERR, "arp: %s is on %s but got reply from %*D on %s\n",
-			    inet_ntoa(isaddr),
-			    rt->rt_ifp->if_xname,
-			    ifp->if_addrlen, (u_char *)ar_sha(ah), ":",
-			    ifp->if_xname);
-		RT_UNLOCK(rt);
-		goto reply;
-	}
-	sdl = SDL(rt->rt_gateway);
-	if (sdl->sdl_alen &&
-	    bcmp(ar_sha(ah), LLADDR(sdl), sdl->sdl_alen)) {
-		if (rt->rt_expire) {
-		    if (log_arp_movements)
-		        log(LOG_INFO, "arp: %s moved from %*D to %*D on %s\n",
-			    inet_ntoa(isaddr),
-			    ifp->if_addrlen, (u_char *)LLADDR(sdl), ":",
-			    ifp->if_addrlen, (u_char *)ar_sha(ah), ":",
-			    ifp->if_xname);
-		} else {
-			RT_UNLOCK(rt);
-			if (log_arp_permanent_modify)
-				log(LOG_ERR, "arp: %*D attempts to modify "
-				    "permanent entry for %s on %s\n",
-				    ifp->if_addrlen, (u_char *)ar_sha(ah), ":",
-				    inet_ntoa(isaddr), ifp->if_xname);
-			goto reply;
-		}
-	}
-	/*
-	 * sanity check for the address length.
-	 * XXX this does not work for protocols with variable address
-	 * length. -is
-	 */
-	if (sdl->sdl_alen &&
-	    sdl->sdl_alen != ah->ar_hln) {
-		log(LOG_WARNING,
-		    "arp from %*D: new addr len %d, was %d",
-		    ifp->if_addrlen, (u_char *) ar_sha(ah), ":",
-		    ah->ar_hln, sdl->sdl_alen);
-	}
-	if (ifp->if_addrlen != ah->ar_hln) {
-		log(LOG_WARNING,
-		    "arp from %*D: addr len: new %d, i/f %d (ignored)",
-		    ifp->if_addrlen, (u_char *) ar_sha(ah), ":",
-		    ah->ar_hln, ifp->if_addrlen);
-		RT_UNLOCK(rt);
-		goto reply;
-	}
-	(void)memcpy(LLADDR(sdl), ar_sha(ah),
-	    sdl->sdl_alen = ah->ar_hln);
-	/*
-	 * If we receive an arp from a token-ring station over
-	 * a token-ring nic then try to save the source
-	 * routing info.
-	 */
-	if (ifp->if_type == IFT_ISO88025) {
-		struct iso88025_header *th = NULL;
-		struct iso88025_sockaddr_dl_data *trld;
-
-		th = (struct iso88025_header *)m->m_pkthdr.header;
-		trld = SDL_ISO88025(sdl);
-		rif_len = TR_RCF_RIFLEN(th->rcf);
-		if ((th->iso88025_shost[0] & TR_RII) &&
-		    (rif_len > 2)) {
-			trld->trld_rcf = th->rcf;
-			trld->trld_rcf ^= htons(TR_RCF_DIR);
-			memcpy(trld->trld_route, th->rd, rif_len - 2);
-			trld->trld_rcf &= ~htons(TR_RCF_BCST_MASK);
+			    ) {
+				if (log_arp_wrong_iface)
+					log(LOG_ERR, "arp: %s is on %s "
+						"but got reply from %*D "
+						"on %s\n",
+					    inet_ntoa(isaddr),
+					    rt->rt_ifp->if_xname,
+					    ifp->if_addrlen,
+					    (u_char *)ar_sha(ah), ":",
+					    ifp->if_xname);
+				RT_UNLOCK(rt);
+				break;
+			}
+			if (sdl->sdl_alen &&
+			    bcmp(ar_sha(ah), LLADDR(sdl), sdl->sdl_alen)) {
+				if (rt->rt_expire) {
+				    if (log_arp_movements)
+					log(LOG_INFO,
+					    "arp: %s moved from %*D to %*D "
+					    "on %s\n",
+					    inet_ntoa(isaddr),
+					    ifp->if_addrlen,
+					    (u_char *)LLADDR(sdl), ":",
+					    ifp->if_addrlen,
+					    (u_char *)ar_sha(ah), ":",
+					    ifp->if_xname);
+				} else {
+					RT_UNLOCK(rt);
+					if (log_arp_permanent_modify)
+						log(LOG_ERR,
+						    "arp: %*D attempts to "
+						    "modify permanent entry "
+						    "for %s on %s\n",
+						    ifp->if_addrlen,
+						    (u_char *)ar_sha(ah), ":",
+						    inet_ntoa(isaddr),
+						    ifp->if_xname);
+					break;
+				}
+			}
 			/*
-			 * Set up source routing information for
-			 * reply packet (XXX)
+			 * sanity check for the address length.
+			 * XXX this does not work for protocols
+			 * with variable address length. -is
 			 */
-			m->m_data -= rif_len;
-			m->m_len  += rif_len;
-			m->m_pkthdr.len += rif_len;
-		} else {
-			th->iso88025_shost[0] &= ~TR_RII;
-			trld->trld_rcf = 0;
+			if (sdl->sdl_alen &&
+			    sdl->sdl_alen != ah->ar_hln) {
+				log(LOG_WARNING,
+				    "arp from %*D: new addr len %d, was %d",
+				    ifp->if_addrlen, (u_char *) ar_sha(ah),
+				    ":", ah->ar_hln, sdl->sdl_alen);
+			}
+			if (ifp->if_addrlen != ah->ar_hln) {
+				log(LOG_WARNING,
+				    "arp from %*D: addr len: "
+				    "new %d, i/f %d (ignored)",
+				    ifp->if_addrlen, (u_char *) ar_sha(ah),
+				    ":", ah->ar_hln, ifp->if_addrlen);
+				RT_UNLOCK(rt);
+				break;
+			}
+			firstpass = 0;
+			goodfib = fibnum;
 		}
-		m->m_data -= 8;
-		m->m_len  += 8;
-		m->m_pkthdr.len += 8;
-		th->rcf = trld->trld_rcf;
-	}
-	if (rt->rt_expire) {
-		rt->rt_expire = time_uptime + arpt_keep;
-		callout_reset(&la->la_timer, hz * arpt_keep, arptimer, rt);
-	}
-	la->la_asked = 0;
-	la->la_preempt = arp_maxtries;
-	hold = la->la_hold;
-	la->la_hold = NULL;
-	RT_UNLOCK(rt);
-	if (hold != NULL)
-		(*ifp->if_output)(ifp, hold, rt_key(rt), rt);
 
+		/* Copy in the information received. */
+		(void)memcpy(LLADDR(sdl), ar_sha(ah),
+		    sdl->sdl_alen = ah->ar_hln);
+		/*
+		 * If we receive an arp from a token-ring station over
+		 * a token-ring nic then try to save the source routing info.
+		 * XXXMRT Only minimal Token Ring support for MRT.
+		 * Only do this on the first pass as if modifies the mbuf.
+		 */
+		if (ifp->if_type == IFT_ISO88025) {
+			struct iso88025_header *th = NULL;
+			struct iso88025_sockaddr_dl_data *trld;
+
+			/* force the fib loop to end after this pass */
+			fibnum = rt_numfibs - 1;
+
+			th = (struct iso88025_header *)m->m_pkthdr.header;
+			trld = SDL_ISO88025(sdl);
+			rif_len = TR_RCF_RIFLEN(th->rcf);
+			if ((th->iso88025_shost[0] & TR_RII) &&
+			    (rif_len > 2)) {
+				trld->trld_rcf = th->rcf;
+				trld->trld_rcf ^= htons(TR_RCF_DIR);
+				memcpy(trld->trld_route, th->rd, rif_len - 2);
+				trld->trld_rcf &= ~htons(TR_RCF_BCST_MASK);
+				/*
+				 * Set up source routing information for
+				 * reply packet (XXX)
+				 */
+				m->m_data -= rif_len;
+				m->m_len  += rif_len;
+				m->m_pkthdr.len += rif_len;
+			} else {
+				th->iso88025_shost[0] &= ~TR_RII;
+				trld->trld_rcf = 0;
+			}
+			m->m_data -= 8;
+			m->m_len  += 8;
+			m->m_pkthdr.len += 8;
+			th->rcf = trld->trld_rcf;
+		}
+
+		if (rt->rt_expire) {
+			rt->rt_expire = time_uptime + V_arpt_keep;
+			callout_reset(&la->la_timer, hz * V_arpt_keep,
+			    arptimer, rt);
+		}
+		la->la_asked = 0;
+		la->la_preempt = V_arp_maxtries;
+		hold = la->la_hold;
+		la->la_hold = NULL;
+		RT_UNLOCK(rt);
+		if (hold != NULL)
+			(*ifp->if_output)(ifp, hold, rt_key(rt), rt);
+	} /* end of FIB loop */
 reply:
+
+	/*
+	 * Decide if we have to respond to something.
+	 */
 	if (op != ARPOP_REQUEST)
 		goto drop;
 	if (itaddr.s_addr == myaddr.s_addr) {
-		/* I am the target */
+		/* Shortcut.. the receiving interface is the target. */
 		(void)memcpy(ar_tha(ah), ar_sha(ah), ah->ar_hln);
 		(void)memcpy(ar_sha(ah), enaddr, ah->ar_hln);
 	} else {
-		rt = arplookup(itaddr.s_addr, 0, SIN_PROXY);
+		/* It's not asking for our address. But it still may
+		 * be something we should answer.
+		 *
+		 * XXX MRT
+		 * We assume that link level info is independent of
+		 * the table used and so we use whichever we can and don't
+		 * have a better option.
+		 */
+		/* Have we been asked to proxy for the target. */
+		rt = arplookup(itaddr.s_addr, 0, SIN_PROXY, goodfib);
 		if (rt == NULL) {
+			/* Nope, only intersted now if proxying everything. */
 			struct sockaddr_in sin;
 
-			if (!arp_proxyall)
+			if (!V_arp_proxyall)
 				goto drop;
 
 			bzero(&sin, sizeof sin);
@@ -796,7 +912,8 @@ reply:
 			sin.sin_len = sizeof sin;
 			sin.sin_addr = itaddr;
 
-			rt = rtalloc1((struct sockaddr *)&sin, 0, 0UL);
+			/* XXX MRT use table 0 for arp reply  */
+			rt = in_rtalloc1((struct sockaddr *)&sin, 0, 0UL, 0);
 			if (!rt)
 				goto drop;
 			/*
@@ -820,7 +937,8 @@ reply:
 			 */
 			sin.sin_addr = isaddr;
 
-			rt = rtalloc1((struct sockaddr *)&sin, 0, 0UL);
+			/* XXX MRT use table 0 for arp checks */
+			rt = in_rtalloc1((struct sockaddr *)&sin, 0, 0UL, 0);
 			if (!rt)
 				goto drop;
 			if (rt->rt_ifp != ifp) {
@@ -890,7 +1008,7 @@ drop:
  * Lookup or enter a new address in arptab.
  */
 static struct rtentry *
-arplookup(u_long addr, int create, int proxy)
+arplookup(u_long addr, int create, int proxy, int fibnum)
 {
 	struct rtentry *rt;
 	struct sockaddr_inarp sin;
@@ -902,7 +1020,7 @@ arplookup(u_long addr, int create, int proxy)
 	sin.sin_addr.s_addr = addr;
 	if (proxy)
 		sin.sin_other = SIN_PROXY;
-	rt = rtalloc1((struct sockaddr *)&sin, create, 0UL);
+	rt = in_rtalloc1((struct sockaddr *)&sin, create, 0UL, fibnum);
 	if (rt == 0)
 		return (0);
 
@@ -959,9 +1077,15 @@ arp_ifinit2(struct ifnet *ifp, struct ifaddr *ifa, u_char *enaddr)
 static void
 arp_init(void)
 {
+	INIT_VNET_INET(curvnet);
+
+	V_arpt_keep = (20*60); /* once resolved, good for 20 more minutes */
+	V_arp_maxtries = 5;
+	V_useloopback = 1; /* use loopback interface for local traffic */
+	V_arp_proxyall = 0;
 
 	arpintrq.ifq_maxlen = 50;
 	mtx_init(&arpintrq.ifq_mtx, "arp_inq", NULL, MTX_DEF);
-	netisr_register(NETISR_ARP, arpintr, &arpintrq, NETISR_MPSAFE);
+	netisr_register(NETISR_ARP, arpintr, &arpintrq, 0);
 }
 SYSINIT(arp, SI_SUB_PROTO_DOMAIN, SI_ORDER_ANY, arp_init, 0);

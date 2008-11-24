@@ -29,7 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/semaphore.h,v 1.12 2006/11/11 16:15:35 trhodes Exp $
+ * $FreeBSD: src/sys/sys/semaphore.h,v 1.13 2008/06/26 13:51:25 jhb Exp $
  */
 
 /* semaphore.h: POSIX 1003.1b semaphores */
@@ -37,12 +37,14 @@
 #ifndef _SEMAPHORE_H_
 #define _SEMAPHORE_H_
 
+#include <machine/_limits.h>
+
 /* Opaque type definition. */
 struct sem;
 typedef	struct sem *	sem_t;
 
 #define	SEM_FAILED	((sem_t *)0)
-#define	SEM_VALUE_MAX	(~0U)		/* Equivalent to UINT_MAX. */
+#define	SEM_VALUE_MAX	__INT_MAX
 
 #ifndef _KERNEL
 #include <sys/cdefs.h>

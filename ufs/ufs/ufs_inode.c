@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_inode.c,v 1.69 2007/06/22 13:22:37 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_inode.c,v 1.70 2008/09/16 10:59:35 kib Exp $");
 
 #include "opt_quota.h"
 #include "opt_ufs.h"
@@ -90,8 +90,7 @@ ufs_inactive(ap)
 	ufs_gjournal_close(vp);
 #endif
 	if ((ip->i_effnlink == 0 && DOINGSOFTDEP(vp)) ||
-	    (ip->i_nlink <= 0 &&
-	     (vp->v_mount->mnt_flag & MNT_RDONLY) == 0)) {
+	    (ip->i_nlink <= 0 && !UFS_RDONLY(ip))) {
 	loop:
 		if (vn_start_secondary_write(vp, &mp, V_NOWAIT) != 0) {
 			/* Cannot delete file while file system is suspended */
@@ -121,7 +120,7 @@ ufs_inactive(ap)
 	}
 	if (ip->i_effnlink == 0 && DOINGSOFTDEP(vp))
 		softdep_releasefile(ip);
-	if (ip->i_nlink <= 0 && (vp->v_mount->mnt_flag & MNT_RDONLY) == 0) {
+	if (ip->i_nlink <= 0 && !UFS_RDONLY(ip)) {
 #ifdef QUOTA
 		if (!getinoquota(ip))
 			(void)chkiq(ip, -1, NOCRED, FORCE);

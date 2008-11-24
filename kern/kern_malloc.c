@@ -43,9 +43,10 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_malloc.c,v 1.162 2007/06/27 13:39:38 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_malloc.c,v 1.167 2008/07/05 19:34:33 alc Exp $");
 
 #include "opt_ddb.h"
+#include "opt_kdtrace.h"
 #include "opt_vm.h"
 
 #include <sys/param.h>
@@ -86,6 +87,12 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_malloc.c,v 1.162 2007/06/27 13:39:38 rwats
 
 #include <ddb/ddb.h>
 
+#ifdef KDTRACE_HOOKS
+#include <sys/dtrace_bsd.h>
+
+dtrace_malloc_probe_func_t	dtrace_malloc_probe;
+#endif
+
 /*
  * When realloc() is called, if the new size is sufficiently smaller than
  * the old size, realloc() will allocate a new, smaller block to avoid
@@ -107,7 +114,7 @@ MALLOC_DEFINE(M_IP6OPT, "ip6opt", "IPv6 options");
 MALLOC_DEFINE(M_IP6NDP, "ip6ndp", "IPv6 Neighbor Discovery");
 
 static void kmeminit(void *);
-SYSINIT(kmem, SI_SUB_KMEM, SI_ORDER_FIRST, kmeminit, NULL)
+SYSINIT(kmem, SI_SUB_KMEM, SI_ORDER_FIRST, kmeminit, NULL);
 
 static MALLOC_DEFINE(M_FREE, "free", "should be on free list");
 
@@ -174,19 +181,19 @@ struct {
  */
 static uma_zone_t mt_zone;
 
-u_int vm_kmem_size;
-SYSCTL_UINT(_vm, OID_AUTO, kmem_size, CTLFLAG_RD, &vm_kmem_size, 0,
+u_long vm_kmem_size;
+SYSCTL_ULONG(_vm, OID_AUTO, kmem_size, CTLFLAG_RD, &vm_kmem_size, 0,
     "Size of kernel memory");
 
-u_int vm_kmem_size_min;
-SYSCTL_UINT(_vm, OID_AUTO, kmem_size_min, CTLFLAG_RD, &vm_kmem_size_min, 0,
+static u_long vm_kmem_size_min;
+SYSCTL_ULONG(_vm, OID_AUTO, kmem_size_min, CTLFLAG_RD, &vm_kmem_size_min, 0,
     "Minimum size of kernel memory");
 
-u_int vm_kmem_size_max;
-SYSCTL_UINT(_vm, OID_AUTO, kmem_size_max, CTLFLAG_RD, &vm_kmem_size_max, 0,
+static u_long vm_kmem_size_max;
+SYSCTL_ULONG(_vm, OID_AUTO, kmem_size_max, CTLFLAG_RD, &vm_kmem_size_max, 0,
     "Maximum size of kernel memory");
 
-u_int vm_kmem_size_scale;
+static u_int vm_kmem_size_scale;
 SYSCTL_UINT(_vm, OID_AUTO, kmem_size_scale, CTLFLAG_RD, &vm_kmem_size_scale, 0,
     "Scale factor for kernel memory size");
 
@@ -255,6 +262,17 @@ malloc_type_zone_allocated(struct malloc_type *mtp, unsigned long size,
 	}
 	if (zindx != -1)
 		mtsp->mts_size |= 1 << zindx;
+
+#ifdef KDTRACE_HOOKS
+	if (dtrace_malloc_probe != NULL) {
+		uint32_t probe_id = mtip->mti_probes[DTMALLOC_PROBE_MALLOC];
+		if (probe_id != 0)
+			(dtrace_malloc_probe)(probe_id,
+			    (uintptr_t) mtp, (uintptr_t) mtip,
+			    (uintptr_t) mtsp, size, zindx);
+	}
+#endif
+
 	critical_exit();
 }
 
@@ -283,6 +301,17 @@ malloc_type_freed(struct malloc_type *mtp, unsigned long size)
 	mtsp = &mtip->mti_stats[curcpu];
 	mtsp->mts_memfreed += size;
 	mtsp->mts_numfrees++;
+
+#ifdef KDTRACE_HOOKS
+	if (dtrace_malloc_probe != NULL) {
+		uint32_t probe_id = mtip->mti_probes[DTMALLOC_PROBE_FREE];
+		if (probe_id != 0)
+			(dtrace_malloc_probe)(probe_id,
+			    (uintptr_t) mtp, (uintptr_t) mtip,
+			    (uintptr_t) mtsp, size, 0);
+	}
+#endif
+
 	critical_exit();
 }
 
@@ -560,7 +589,7 @@ kmeminit(void *dummy)
 #if defined(VM_KMEM_SIZE_MIN)
 	vm_kmem_size_min = VM_KMEM_SIZE_MIN;
 #endif
-	TUNABLE_INT_FETCH("vm.kmem_size_min", &vm_kmem_size_min);
+	TUNABLE_ULONG_FETCH("vm.kmem_size_min", &vm_kmem_size_min);
 	if (vm_kmem_size_min > 0 && vm_kmem_size < vm_kmem_size_min) {
 		vm_kmem_size = vm_kmem_size_min;
 	}
@@ -568,16 +597,16 @@ kmeminit(void *dummy)
 #if defined(VM_KMEM_SIZE_MAX)
 	vm_kmem_size_max = VM_KMEM_SIZE_MAX;
 #endif
-	TUNABLE_INT_FETCH("vm.kmem_size_max", &vm_kmem_size_max);
+	TUNABLE_ULONG_FETCH("vm.kmem_size_max", &vm_kmem_size_max);
 	if (vm_kmem_size_max > 0 && vm_kmem_size >= vm_kmem_size_max)
 		vm_kmem_size = vm_kmem_size_max;
 
 	/* Allow final override from the kernel environment */
 #ifndef BURN_BRIDGES
-	if (TUNABLE_INT_FETCH("kern.vm.kmem.size", &vm_kmem_size) != 0)
+	if (TUNABLE_ULONG_FETCH("kern.vm.kmem.size", &vm_kmem_size) != 0)
 		printf("kern.vm.kmem.size is now called vm.kmem_size!\n");
 #endif
-	TUNABLE_INT_FETCH("vm.kmem_size", &vm_kmem_size);
+	TUNABLE_ULONG_FETCH("vm.kmem_size", &vm_kmem_size);
 
 	/*
 	 * Limit kmem virtual size to twice the physical memory.
@@ -589,12 +618,12 @@ kmeminit(void *dummy)
 		vm_kmem_size = 2 * cnt.v_page_count * PAGE_SIZE;
 
 	/*
-	 * Tune settings based on the kernel map's size at this time.
+	 * Tune settings based on the kmem map's size at this time.
 	 */
 	init_param3(vm_kmem_size / PAGE_SIZE);
 
 	kmem_map = kmem_suballoc(kernel_map, &kmembase, &kmemlimit,
-	    vm_kmem_size);
+	    vm_kmem_size, TRUE);
 	kmem_map->system_map = 1;
 
 #ifdef DEBUG_MEMGUARD
@@ -803,6 +832,40 @@ SYSCTL_PROC(_kern, OID_AUTO, malloc_stats, CTLFLAG_RD|CTLTYPE_STRUCT,
 
 SYSCTL_INT(_kern, OID_AUTO, malloc_count, CTLFLAG_RD, &kmemcount, 0,
     "Count of kernel malloc types");
+
+void
+malloc_type_list(malloc_type_list_func_t *func, void *arg)
+{
+	struct malloc_type *mtp, **bufmtp;
+	int count, i;
+	size_t buflen;
+
+	mtx_lock(&malloc_mtx);
+restart:
+	mtx_assert(&malloc_mtx, MA_OWNED);
+	count = kmemcount;
+	mtx_unlock(&malloc_mtx);
+
+	buflen = sizeof(struct malloc_type *) * count;
+	bufmtp = malloc(buflen, M_TEMP, M_WAITOK);
+
+	mtx_lock(&malloc_mtx);
+
+	if (count < kmemcount) {
+		free(bufmtp, M_TEMP);
+		goto restart;
+	}
+
+	for (mtp = kmemstatistics, i = 0; mtp != NULL; mtp = mtp->ks_next, i++)
+		bufmtp[i] = mtp;
+
+	mtx_unlock(&malloc_mtx);
+
+	for (i = 0; i < count; i++)
+		(func)(bufmtp[i], arg);
+
+	free(bufmtp, M_TEMP);
+}
 
 #ifdef DDB
 DB_SHOW_COMMAND(malloc, db_show_malloc)

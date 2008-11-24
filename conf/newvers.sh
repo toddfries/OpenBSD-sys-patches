@@ -28,7 +28,7 @@
 # SUCH DAMAGE.
 #
 #	@(#)newvers.sh	8.1 (Berkeley) 4/20/94
-# $FreeBSD: src/sys/conf/newvers.sh,v 1.73 2007/10/11 04:28:07 kensmith Exp $
+# $FreeBSD: src/sys/conf/newvers.sh,v 1.78 2008/10/03 10:08:36 bz Exp $
 
 TYPE="FreeBSD"
 REVISION="8.0"
@@ -86,10 +86,26 @@ fi
 touch version
 v=`cat version` u=${USER:-root} d=`pwd` h=${HOSTNAME:-`hostname`} t=`date`
 i=`${MAKE:-make} -V KERN_IDENT`
+
+for dir in /bin /usr/bin /usr/local/bin; do
+	if [ -x "${dir}/svnversion" ]; then
+		svnversion=${dir}/svnversion
+		SRCDIR=${d##*obj}
+		SRCDIR=${SRCDIR%%/sys/*}
+		break
+	fi
+done
+
+if [ -n "$svnversion" -a -d "${SRCDIR}/.svn" ] ; then
+	svn=" r`cd $SRCDIR && $svnversion`"
+else
+	svn=""
+fi
+
 cat << EOF > vers.c
 $COPYRIGHT
-#define SCCSSTR "@(#)${VERSION} #${v}: ${t}"
-#define VERSTR "${VERSION} #${v}: ${t}\\n    ${u}@${h}:${d}\\n"
+#define SCCSSTR "@(#)${VERSION} #${v}${svn}: ${t}"
+#define VERSTR "${VERSION} #${v}${svn}: ${t}\\n    ${u}@${h}:${d}\\n"
 #define RELSTR "${RELEASE}"
 
 char sccs[sizeof(SCCSSTR) > 128 ? sizeof(SCCSSTR) : 128] = SCCSSTR;

@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/files.arm,v 1.16 2007/10/25 14:16:07 obrien Exp $
+# $FreeBSD: src/sys/conf/files.arm,v 1.21 2008/11/06 16:20:27 raj Exp $
 crypto/blowfish/bf_enc.c	optional	crypto | ipsec 
 crypto/des/des_enc.c		optional	crypto | ipsec | netsmb
 arm/arm/autoconf.c		standard
@@ -11,9 +11,7 @@ arm/arm/busdma_machdep.c 	standard
 arm/arm/copystr.S		standard
 arm/arm/cpufunc.c		standard
 arm/arm/cpufunc_asm.S		standard
-arm/arm/cpufunc_asm_sa1.S 	standard
 arm/arm/cpufunc_asm_armv4.S 	standard
-arm/arm/cpufunc_asm_sa11x0.S 	standard
 arm/arm/db_disasm.c		optional	ddb
 arm/arm/db_interface.c		optional	ddb
 arm/arm/db_trace.c		optional	ddb
@@ -32,12 +30,12 @@ arm/arm/intr.c			standard
 arm/arm/locore.S		standard	no-obj
 arm/arm/machdep.c		standard
 arm/arm/mem.c			optional	mem
-arm/arm/nexus.c			optional	nexus
-arm/arm/nexus_io.c		optional	nexus
-arm/arm/nexus_io_asm.S		optional	nexus
+arm/arm/minidump_machdep.c	optional	mem
+arm/arm/nexus.c			standard
 arm/arm/pmap.c			standard
 arm/arm/setcpsr.S		standard
 arm/arm/setstack.s		standard
+arm/arm/stack_machdep.c		optional	ddb | stack
 arm/arm/support.S		standard
 arm/arm/swtch.S			standard
 arm/arm/sys_machdep.c		standard
@@ -49,10 +47,10 @@ arm/arm/vm_machdep.c		standard
 arm/fpe-arm/armfpe_glue.S	optional	armfpe
 arm/fpe-arm/armfpe_init.c	optional	armfpe
 arm/fpe-arm/armfpe.S		optional	armfpe
-geom/geom_bsd.c			standard
-geom/geom_bsd_enc.c		standard
-geom/geom_mbr.c			standard
-geom/geom_mbr_enc.c		standard
+geom/geom_bsd.c			optional	geom_bsd
+geom/geom_bsd_enc.c		optional	geom_bsd
+geom/geom_mbr.c			optional	geom_mbr
+geom/geom_mbr_enc.c		optional	geom_mbr
 hal.o				optional	ath_hal		\
 	compile-with		"ATH_HAL_CPU=`echo ${CONF_CFLAGS}|sed 's/.*-mcpu=\([a-zA-Z0-9]*\).*/\1/'`; ATH_ENDIAN=`if (echo ${CC}|grep mbig-endian>/dev/null); then echo be; else echo le; fi;`; uudecode < $S/contrib/dev/ath/public/$$ATH_HAL_CPU-$$ATH_ENDIAN-elf.hal.o.uu" \
 	no-implicit-rule

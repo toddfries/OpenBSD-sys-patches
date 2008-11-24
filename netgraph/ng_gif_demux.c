@@ -62,7 +62,7 @@
  * THIS SOFTWARE, EVEN IF WHISTLE COMMUNICATIONS IS ADVISED OF THE POSSIBILITY
  * OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netgraph/ng_gif_demux.c,v 1.10 2005/01/07 01:45:39 imp Exp $
+ * $FreeBSD: src/sys/netgraph/ng_gif_demux.c,v 1.11 2008/10/23 15:53:51 des Exp $
  */
 
 /*
@@ -233,7 +233,7 @@ ng_gif_demux_constructor(node_p node)
 	priv_p priv;
 
 	/* Allocate and initialize private info */
-	MALLOC(priv, priv_p, sizeof(*priv), M_NETGRAPH_GIF_DEMUX,
+	priv = malloc(sizeof(*priv), M_NETGRAPH_GIF_DEMUX,
 	    M_NOWAIT | M_ZERO);
 	if (priv == NULL)
 		return (ENOMEM);
@@ -371,7 +371,7 @@ ng_gif_demux_shutdown(node_p node)
 {
 	const priv_p priv = NG_NODE_PRIVATE(node);
 
-	FREE(priv, M_NETGRAPH_GIF_DEMUX);
+	free(priv, M_NETGRAPH_GIF_DEMUX);
 	NG_NODE_SET_PRIVATE(node, NULL);
 	NG_NODE_UNREF(node);
 	return (0);

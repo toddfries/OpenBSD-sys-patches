@@ -41,7 +41,7 @@
 /* This file is shared between kernel and userland. */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_share.c,v 1.5 2007/04/12 17:40:44 le Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_share.c,v 1.6 2008/05/22 10:27:03 lulf Exp $");
 
 #include <sys/param.h>
 #ifdef _KERNEL
@@ -525,7 +525,8 @@ gv_new_plex(int max, char *token[])
 				break;
 			}
 			p->state = gv_plexstatei(token[j]);
-		} else if (!strcmp(token[j], "vol")) {
+		} else if (!strcmp(token[j], "vol") ||
+			    !strcmp(token[j], "volume")) {
 			j++;
 			if (j >= max) {
 				errors++;

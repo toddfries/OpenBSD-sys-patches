@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsserver/nfs_srvsock.c,v 1.105 2007/10/25 12:34:13 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsserver/nfs_srvsock.c,v 1.112 2008/11/03 10:38:00 dfr Exp $");
 
 /*
  * Socket operations for use by nfs
@@ -70,6 +70,8 @@ __FBSDID("$FreeBSD: src/sys/nfsserver/nfs_srvsock.c,v 1.105 2007/10/25 12:34:13 
 
 #include <security/mac/mac_framework.h>
 
+#ifdef NFS_LEGACYRPC
+
 #define	TRUE	1
 #define	FALSE	0
 
@@ -104,7 +106,6 @@ static int	nfsrv_getstream(struct nfssvc_sock *, int);
 
 int32_t (*nfsrv3_procs[NFS_NPROCS])(struct nfsrv_descript *nd,
 				struct nfssvc_sock *slp,
-				struct thread *td,
 				struct mbuf **mreqp) = {
 	nfsrv_null,
 	nfsrv_getattr,
@@ -148,7 +149,7 @@ nfs_rephead(int siz, struct nfsrv_descript *nd, int err,
 	nd->nd_repstat = err;
 	if (err && (nd->nd_flag & ND_NFSV3) == 0)	/* XXX recheck */
 		siz = 0;
-	MGETHDR(mreq, M_TRYWAIT, MT_DATA);
+	MGETHDR(mreq, M_WAIT, MT_DATA);
 	mb = mreq;
 	/*
 	 * If this is a big reply, use a cluster else
@@ -157,7 +158,7 @@ nfs_rephead(int siz, struct nfsrv_descript *nd, int err,
 	mreq->m_len = 6 * NFSX_UNSIGNED;
 	siz += RPC_REPLYSIZ;
 	if ((max_hdr + siz) >= MINCLSIZE) {
-		MCLGET(mreq, M_TRYWAIT);
+		MCLGET(mreq, M_WAIT);
 	} else
 		mreq->m_data += min(max_hdr, M_TRAILINGSPACE(mreq));
 	tl = mtod(mreq, u_int32_t *);
@@ -244,9 +245,9 @@ nfs_realign(struct mbuf **pm, int hsiz)	/* XXX COMMON */
 	++nfs_realign_test;
 	while ((m = *pm) != NULL) {
 		if ((m->m_len & 0x3) || (mtod(m, intptr_t) & 0x3)) {
-			MGET(n, M_TRYWAIT, MT_DATA);
+			MGET(n, M_WAIT, MT_DATA);
 			if (m->m_len >= MINCLSIZE) {
-				MCLGET(n, M_TRYWAIT);
+				MCLGET(n, M_WAIT);
 			}
 			n->m_len = 0;
 			break;
@@ -361,7 +362,7 @@ nfs_getreq(struct nfsrv_descript *nd, struct nfsd *nfsd, int has_header)
 		nd->nd_cr->cr_groups[0] = nd->nd_cr->cr_rgid =
 		    nd->nd_cr->cr_svgid = fxdr_unsigned(gid_t, *tl++);
 #ifdef MAC
-		mac_proc_associate_nfsd(nd->nd_cr);
+		mac_cred_associate_nfsd(nd->nd_cr);
 #endif
 		len = fxdr_unsigned(int, *tl);
 		if (len < 0 || len > RPCAUTH_UNIXGIDS) {
@@ -384,6 +385,7 @@ nfs_getreq(struct nfsrv_descript *nd, struct nfsd *nfsd, int has_header)
 		}
 		if (len > 0)
 			nfsm_adv(nfsm_rndup(len));
+		nd->nd_credflavor = RPCAUTH_UNIX;
 	} else {
 		nd->nd_repstat = (NFSERR_AUTHERR | AUTH_REJECTCRED);
 		nd->nd_procnum = NFSPROC_NOOP;
@@ -401,7 +403,7 @@ nfsmout:
  * Socket upcall routine for the nfsd sockets.
  * The caddr_t arg is a pointer to the "struct nfssvc_sock".
  * Essentially do as much as possible non-blocking, else punt and it will
- * be called with M_TRYWAIT from an nfsd.
+ * be called with M_WAIT from an nfsd.
  */
 void
 nfsrv_rcv(struct socket *so, void *arg, int waitflag)
@@ -495,7 +497,7 @@ nfsrv_rcv(struct socket *so, void *arg, int waitflag)
 				    waitflag == M_DONTWAIT ? M_NOWAIT : M_WAITOK);
 				if (!rec) {
 					if (nam)
-						FREE(nam, M_SONAME);
+						free(nam, M_SONAME);
 					m_freem(mp);
 					NFSD_LOCK();
 					continue;
@@ -651,14 +653,17 @@ nfsrv_getstream(struct nfssvc_sock *slp, int waitflag)
 		NFSD_UNLOCK();
 		rec = malloc(sizeof(struct nfsrv_rec), M_NFSRVDESC,
 	            waitflag == M_DONTWAIT ? M_NOWAIT : M_WAITOK);
-		NFSD_LOCK();
-		if (!rec) {
-		    m_freem(slp->ns_frag);
-		} else {
+		if (rec) {
 		    nfs_realign(&slp->ns_frag, 10 * NFSX_UNSIGNED);
 		    rec->nr_address = NULL;
 		    rec->nr_packet = slp->ns_frag;
+		    NFSD_LOCK();
 		    STAILQ_INSERT_TAIL(&slp->ns_rec, rec, nr_link);
+		} else {
+		    NFSD_LOCK();
+		}
+		if (!rec) {
+		    m_freem(slp->ns_frag);
 		}
 		slp->ns_frag = NULL;
 	    }
@@ -691,7 +696,7 @@ nfsrv_dorec(struct nfssvc_sock *slp, struct nfsd *nfsd,
 	m = rec->nr_packet;
 	free(rec, M_NFSRVDESC);
 	NFSD_UNLOCK();
-	MALLOC(nd, struct nfsrv_descript *, sizeof (struct nfsrv_descript),
+	nd = malloc(sizeof (struct nfsrv_descript),
 		M_NFSRVDESC, M_WAITOK);
 	nd->nd_cr = crget();
 	NFSD_LOCK();
@@ -701,7 +706,7 @@ nfsrv_dorec(struct nfssvc_sock *slp, struct nfsd *nfsd,
 	error = nfs_getreq(nd, nfsd, TRUE);
 	if (error) {
 		if (nam) {
-			FREE(nam, M_SONAME);
+			free(nam, M_SONAME);
 		}
 		if (nd->nd_cr != NULL)
 			crfree(nd->nd_cr);
@@ -807,3 +812,5 @@ nfsrv_timer(void *arg)
 	NFSD_UNLOCK();
 	callout_reset(&nfsrv_callout, nfsrv_ticks, nfsrv_timer, NULL);
 }
+
+#endif /* NFS_LEGACYRPC */

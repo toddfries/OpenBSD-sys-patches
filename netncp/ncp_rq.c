@@ -33,7 +33,7 @@
  */ 
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netncp/ncp_rq.c,v 1.15 2005/07/29 13:22:37 imura Exp $");
+__FBSDID("$FreeBSD: src/sys/netncp/ncp_rq.c,v 1.17 2008/10/23 15:53:51 des Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -43,6 +43,8 @@ __FBSDID("$FreeBSD: src/sys/netncp/ncp_rq.c,v 1.15 2005/07/29 13:22:37 imura Exp
 #include <sys/mbuf.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
+#include <sys/socket.h>
+#include <sys/socketvar.h>
 #include <sys/uio.h>
 
 #include <netncp/ncp.h>
@@ -65,7 +67,7 @@ ncp_rq_alloc_any(u_int32_t ptype, u_int8_t fn, struct ncp_conn *ncp,
 	struct ncp_rq *rqp;
 	int error;
 
-	MALLOC(rqp, struct ncp_rq *, sizeof(*rqp), M_NCPRQ, M_WAITOK);
+	rqp = malloc(sizeof(*rqp), M_NCPRQ, M_WAITOK);
 	error = ncp_rq_init_any(rqp, ptype, fn, ncp, td, cred);
 	rqp->nr_flags |= NCPR_ALLOCED;
 	if (error) {
@@ -274,7 +276,9 @@ ncp_request_int(struct ncp_rq *rqp)
 	/*
 	 * Flush out replies on previous reqs
 	 */
-	while (ncp_poll(so, POLLIN) != 0) {
+	tv.tv_sec = 0;
+	tv.tv_usec = 0;
+	while (selsocket(so, POLLIN, &tv, td) == 0) {
 		if (ncp_sock_recv(so, &m, &len) != 0)
 			break;
 		m_freem(m);
@@ -319,7 +323,7 @@ ncp_request_int(struct ncp_rq *rqp)
 		}
 		tv.tv_sec = conn->li.timeout;
 		tv.tv_usec = 0;
-		error = ncp_sock_rselect(so, td, &tv, POLLIN);
+		error = selsocket(so, POLLIN, &tv, td);
 		if (error == EWOULDBLOCK )	/* timeout expired */
 			continue;
 		error = ncp_chkintr(conn, td);
@@ -335,7 +339,9 @@ ncp_request_int(struct ncp_rq *rqp)
 		dosend = 1;	/* resend rq if error */
 		for (;;) {
 			error = 0;
-			if (ncp_poll(so, POLLIN) == 0)
+			tv.tv_sec = 0;
+			tv.tv_usec = 0;
+			if (selsocket(so, POLLIN, &tv, td) != 0)
 				break;
 /*			if (so->so_rcv.sb_cc == 0) {
 				break;

@@ -1,4 +1,5 @@
-#$FreeBSD: src/sys/arm/xscale/i80321/files.i80321,v 1.3 2005/10/03 14:19:55 cognet Exp $
+#$FreeBSD: src/sys/arm/xscale/i80321/files.i80321,v 1.4 2008/04/03 18:22:07 raj Exp $
+arm/arm/bus_space_generic.c		standard
 arm/arm/cpufunc_asm_xscale.S		standard
 arm/arm/irq_dispatch.S			standard
 arm/xscale/i80321/i80321.c		standard

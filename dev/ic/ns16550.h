@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)ns16550.h	7.1 (Berkeley) 5/9/91
- * $FreeBSD: src/sys/dev/ic/ns16550.h,v 1.17 2006/05/23 00:41:12 benno Exp $
+ * $FreeBSD: src/sys/dev/ic/ns16550.h,v 1.18 2008/08/29 12:25:58 nyan Exp $
  */
 
 /*
@@ -211,7 +211,6 @@
 #define	com_rtl		5	/* receiver trigger level (R/W) */
 /* ... */
 
-#ifdef PC98
 /* Hardware extension mode register for RSB-2000/3000. */
 #define	com_emr		com_msr
 #define	EMR_EXBUFF	0x04
@@ -220,4 +219,3 @@
 #define	EMR_RTSFLW	0x20
 #define	EMR_DTRFLW	0x40
 #define	EMR_EFMODE	0x80
-#endif

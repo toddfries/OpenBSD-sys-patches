@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/udf/udf_vfsops.c,v 1.49 2007/10/16 10:54:54 alfred Exp $
+ * $FreeBSD: src/sys/fs/udf/udf_vfsops.c,v 1.56 2008/10/23 20:26:15 des Exp $
  */
 
 /* udf_vfsops.c */
@@ -134,7 +134,7 @@ VFS_SET(udf_vfsops, udf, VFCF_READONLY);
 
 MODULE_VERSION(udf, 1);
 
-static int udf_mountfs(struct vnode *, struct mount *, struct thread *);
+static int udf_mountfs(struct vnode *, struct mount *);
 
 static int
 udf_init(struct vfsconf *foo)
@@ -243,7 +243,7 @@ udf_mount(struct mount *mp, struct thread *td)
 		return (error);
 	}
 
-	if ((error = udf_mountfs(devvp, mp, td))) {
+	if ((error = udf_mountfs(devvp, mp))) {
 		vrele(devvp);
 		return (error);
 	}
@@ -290,7 +290,7 @@ udf_checktag(struct desc_tag *tag, uint16_t id)
 	if (le16toh(tag->id) != id)
 		return (EINVAL);
 
-	for (i = 0; i < 15; i++)
+	for (i = 0; i < 16; i++)
 		cksum = cksum + itag[i];
 	cksum = cksum - itag[4];
 
@@ -301,7 +301,7 @@ udf_checktag(struct desc_tag *tag, uint16_t id)
 }
 
 static int
-udf_mountfs(struct vnode *devvp, struct mount *mp, struct thread *td) {
+udf_mountfs(struct vnode *devvp, struct mount *mp) {
 	struct buf *bp = NULL;
 	struct anchor_vdp avdp;
 	struct udf_mnt *udfmp = NULL;
@@ -324,14 +324,14 @@ udf_mountfs(struct vnode *devvp, struct mount *mp, struct thread *td) {
 	error = g_vfs_open(devvp, &cp, "udf", 0);
 	g_topology_unlock();
 	PICKUP_GIANT();
-	VOP_UNLOCK(devvp, 0, td);
+	VOP_UNLOCK(devvp, 0);
 	if (error)
 		return error;
 
 	bo = &devvp->v_bufobj;
 
 	/* XXX: should be M_WAITOK */
-	MALLOC(udfmp, struct udf_mnt *, sizeof(struct udf_mnt), M_UDFMOUNT,
+	udfmp = malloc(sizeof(struct udf_mnt), M_UDFMOUNT,
 	    M_NOWAIT | M_ZERO);
 	if (udfmp == NULL) {
 		printf("Cannot allocate UDF mount struct\n");
@@ -365,7 +365,7 @@ udf_mountfs(struct vnode *devvp, struct mount *mp, struct thread *td) {
 	    (logical_secsize < cp->provider->sectorsize)) {
 		DROP_GIANT();
 		g_topology_lock();
-		g_vfs_close(cp, td);
+		g_vfs_close(cp);
 		g_topology_unlock();
 		PICKUP_GIANT();
 		return (EINVAL);
@@ -488,12 +488,12 @@ udf_mountfs(struct vnode *devvp, struct mount *mp, struct thread *td) {
 
 bail:
 	if (udfmp != NULL)
-		FREE(udfmp, M_UDFMOUNT);
+		free(udfmp, M_UDFMOUNT);
 	if (bp != NULL)
 		brelse(bp);
 	DROP_GIANT();
 	g_topology_lock();
-	g_vfs_close(cp, td);
+	g_vfs_close(cp);
 	g_topology_unlock();
 	PICKUP_GIANT();
 	return error;
@@ -524,15 +524,15 @@ udf_unmount(struct mount *mp, int mntflags, struct thread *td)
 
 	DROP_GIANT();
 	g_topology_lock();
-	g_vfs_close(udfmp->im_cp, td);
+	g_vfs_close(udfmp->im_cp);
 	g_topology_unlock();
 	PICKUP_GIANT();
 	vrele(udfmp->im_devvp);
 
 	if (udfmp->s_table != NULL)
-		FREE(udfmp->s_table, M_UDFMOUNT);
+		free(udfmp->s_table, M_UDFMOUNT);
 
-	FREE(udfmp, M_UDFMOUNT);
+	free(udfmp, M_UDFMOUNT);
 
 	mp->mnt_data = NULL;
 	MNT_ILOCK(mp);
@@ -613,7 +613,7 @@ udf_vget(struct mount *mp, ino_t ino, int flags, struct vnode **vpp)
 	unode->udfmp = udfmp;
 	vp->v_data = unode;
 
-	lockmgr(vp->v_vnlock, LK_EXCLUSIVE, NULL, td);
+	lockmgr(vp->v_vnlock, LK_EXCLUSIVE, NULL);
 	error = insmntque(vp, mp);
 	if (error != 0) {
 		uma_zfree(udf_zone_node, unode);
@@ -630,6 +630,7 @@ udf_vget(struct mount *mp, ino_t ino, int flags, struct vnode **vpp)
 	devvp = udfmp->im_devvp;
 	if ((error = RDSECTOR(devvp, sector, udfmp->bsize, &bp)) != 0) {
 		printf("Cannot read sector %d\n", sector);
+		vgone(vp);
 		vput(vp);
 		brelse(bp);
 		*vpp = NULL;
@@ -639,16 +640,17 @@ udf_vget(struct mount *mp, ino_t ino, int flags, struct vnode **vpp)
 	fe = (struct file_entry *)bp->b_data;
 	if (udf_checktag(&fe->tag, TAGID_FENTRY)) {
 		printf("Invalid file entry!\n");
+		vgone(vp);
 		vput(vp);
 		brelse(bp);
 		*vpp = NULL;
 		return (ENOMEM);
 	}
 	size = UDF_FENTRY_SIZE + le32toh(fe->l_ea) + le32toh(fe->l_ad);
-	MALLOC(unode->fentry, struct file_entry *, size, M_UDFFENTRY,
-	    M_NOWAIT | M_ZERO);
+	unode->fentry = malloc(size, M_UDFFENTRY, M_NOWAIT | M_ZERO);
 	if (unode->fentry == NULL) {
 		printf("Cannot allocate file entry block\n");
+		vgone(vp);
 		vput(vp);
 		brelse(bp);
 		*vpp = NULL;
@@ -754,8 +756,8 @@ udf_find_partmaps(struct udf_mnt *udfmp, struct logvol_desc *lvd)
 
 		pms = (struct part_map_spare *)pmap;
 		pmap += UDF_PMAP_TYPE2_SIZE;
-		MALLOC(udfmp->s_table, struct udf_sparing_table *,
-		    le32toh(pms->st_size), M_UDFMOUNT, M_NOWAIT | M_ZERO);
+		udfmp->s_table = malloc(le32toh(pms->st_size),
+		    M_UDFMOUNT, M_NOWAIT | M_ZERO);
 		if (udfmp->s_table == NULL)
 			return (ENOMEM);
 
@@ -773,7 +775,7 @@ udf_find_partmaps(struct udf_mnt *udfmp, struct logvol_desc *lvd)
 				brelse(bp);
 			printf("Failed to read Sparing Table at sector %d\n",
 			    le32toh(pms->st_loc[0]));
-			FREE(udfmp->s_table, M_UDFMOUNT);
+			free(udfmp->s_table, M_UDFMOUNT);
 			return (error);
 		}
 		bcopy(bp->b_data, udfmp->s_table, le32toh(pms->st_size));
@@ -781,7 +783,7 @@ udf_find_partmaps(struct udf_mnt *udfmp, struct logvol_desc *lvd)
 
 		if (udf_checktag(&udfmp->s_table->tag, 0)) {
 			printf("Invalid sparing table found\n");
-			FREE(udfmp->s_table, M_UDFMOUNT);
+			free(udfmp->s_table, M_UDFMOUNT);
 			return (EINVAL);
 		}
 

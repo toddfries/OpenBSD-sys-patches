@@ -30,8 +30,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_util.c,v 1.19 2005/02/07 22:02:18 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_util.c,v 1.21 2008/04/08 09:45:48 kib Exp $");
 
+#include <sys/fcntl.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/syscallsubr.h>
@@ -55,5 +56,5 @@ ibcs2_emul_find(struct thread *td, char *path, enum uio_seg pathseg,
 {
 
 	return (kern_alternate_path(td, ibcs2_emul_path, path, pathseg, pbuf,
-	    cflag));
+	    cflag, AT_FDCWD));
 }

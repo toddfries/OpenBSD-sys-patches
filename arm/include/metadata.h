@@ -23,12 +23,12 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/arm/include/metadata.h,v 1.2 2005/01/05 21:58:48 imp Exp $
+ * $FreeBSD: src/sys/arm/include/metadata.h,v 1.3 2008/10/14 10:11:14 raj Exp $
  */
 
 #ifndef _MACHINE_METADATA_H_
 #define	_MACHINE_METADATA_H_
 
-#define	MODINFOMD_SMAP		0x1001
+#define	MODINFOMD_BOOTINFO	0x1001
 
 #endif /* !_MACHINE_METADATA_H_ */

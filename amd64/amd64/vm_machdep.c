@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/vm_machdep.c,v 1.255 2007/06/04 23:57:29 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/vm_machdep.c,v 1.259 2008/10/05 02:03:54 davidxu Exp $");
 
 #include "opt_isa.h"
 #include "opt_cpu.h"
@@ -51,7 +51,6 @@ __FBSDID("$FreeBSD: src/sys/amd64/amd64/vm_machdep.c,v 1.255 2007/06/04 23:57:29
 #include <sys/systm.h>
 #include <sys/bio.h>
 #include <sys/buf.h>
-#include <sys/kse.h>
 #include <sys/kernel.h>
 #include <sys/ktr.h>
 #include <sys/lock.h>
@@ -240,12 +239,17 @@ cpu_thread_swapout(struct thread *td)
 }
 
 void
-cpu_thread_setup(struct thread *td)
+cpu_thread_alloc(struct thread *td)
 {
 
 	td->td_pcb = (struct pcb *)(td->td_kstack +
 	    td->td_kstack_pages * PAGE_SIZE) - 1;
 	td->td_frame = (struct trapframe *)td->td_pcb - 1;
+}
+
+void
+cpu_thread_free(struct thread *td)
+{
 }
 
 /*
@@ -267,24 +271,22 @@ cpu_set_upcall(struct thread *td, struct thread *td0)
 	 * Copy the upcall pcb.  This loads kernel regs.
 	 * Those not loaded individually below get their default
 	 * values here.
-	 *
-	 * XXXKSE It might be a good idea to simply skip this as
-	 * the values of the other registers may be unimportant.
-	 * This would remove any requirement for knowing the KSE
-	 * at this time (see the matching comment below for
-	 * more analysis) (need a good safe default).
 	 */
 	bcopy(td0->td_pcb, pcb2, sizeof(*pcb2));
 	pcb2->pcb_flags &= ~PCB_FPUINITDONE;
 
 	/*
 	 * Create a new fresh stack for the new thread.
-	 * Don't forget to set this stack value into whatever supplies
-	 * the address for the fault handlers.
-	 * The contexts are filled in at the time we actually DO the
-	 * upcall as only then do we know which KSE we got.
 	 */
 	bcopy(td0->td_frame, td->td_frame, sizeof(struct trapframe));
+
+	/* If the current thread has the trap bit set (i.e. a debugger had
+	 * single stepped the process to the system call), we need to clear
+	 * the trap flag from the new frame. Otherwise, the new thread will
+	 * receive a (likely unexpected) SIGTRAP when it executes the first
+	 * instruction after returning to userland.
+	 */
+	td->td_frame->tf_rflags &= ~PSL_T;
 
 	/*
 	 * Set registers for trampoline to user mode.  Leave space for the
@@ -472,10 +474,13 @@ cpu_reset_real()
 
 	/*
 	 * Attempt to force a reset via the Reset Control register at
-	 * I/O port 0xcf9.  Bit 2 forces a system reset when it is
-	 * written as 1.  Bit 1 selects the type of reset to attempt:
-	 * 0 selects a "soft" reset, and 1 selects a "hard" reset.  We
-	 * try to do a "soft" reset first, and then a "hard" reset.
+	 * I/O port 0xcf9.  Bit 2 forces a system reset when it
+	 * transitions from 0 to 1.  Bit 1 selects the type of reset
+	 * to attempt: 0 selects a "soft" reset, and 1 selects a
+	 * "hard" reset.  We try a "hard" reset.  The first write sets
+	 * bit 1 to select a "hard" reset and clears bit 2.  The
+	 * second write forces a 0 -> 1 transition in bit 2 to trigger
+	 * a reset.
 	 */
 	outb(0xcf9, 0x2);
 	outb(0xcf9, 0x6);

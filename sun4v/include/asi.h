@@ -23,7 +23,7 @@
  * SUCH DAMAGE.
  *
  *	from: BSDI: asi.h,v 1.3 1997/08/08 14:31:42 torek
- * $FreeBSD: src/sys/sun4v/include/asi.h,v 1.2 2006/10/09 04:45:18 kmacy Exp $
+ * $FreeBSD: src/sys/sun4v/include/asi.h,v 1.3 2008/09/10 20:07:08 marius Exp $
  */
 
 #ifndef	_MACHINE_ASI_H_
@@ -162,6 +162,7 @@
 #define	ASI_ITLB_DATA_IN_REG			0x54
 #define	ASI_ITLB_DATA_ACCESS_REG		0x55
 #define	ASI_ITLB_TAG_READ_REG			0x56
+#define	ASI_IMMU_DEMAP				0x57
 #define	ASI_DMMU				0x58
 #define	ASI_DTLB_DATA_IN_REG			0x5c
 #define	ASI_DTLB_DATA_ACCESS_REG		0x5d

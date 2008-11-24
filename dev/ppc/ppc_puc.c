@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ppc/ppc_puc.c,v 1.5 2006/04/28 21:21:52 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ppc/ppc_puc.c,v 1.6 2008/09/15 22:26:32 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -57,7 +57,8 @@ static device_method_t ppc_puc_methods[] = {
 	DEVMETHOD(bus_read_ivar,	ppc_read_ivar),
 	DEVMETHOD(bus_setup_intr,	ppc_setup_intr),
 	DEVMETHOD(bus_teardown_intr,	ppc_teardown_intr),
-	DEVMETHOD(bus_alloc_resource,	bus_generic_alloc_resource),
+	DEVMETHOD(bus_alloc_resource,	ppc_alloc_resource),
+	DEVMETHOD(bus_release_resource,	ppc_release_resource),
 
 	/* ppbus interface */
 	DEVMETHOD(ppbus_io,		ppc_io),

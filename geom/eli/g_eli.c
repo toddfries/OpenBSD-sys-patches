@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/eli/g_eli.c,v 1.39 2007/10/20 23:23:19 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/eli/g_eli.c,v 1.41 2008/08/12 20:19:08 pjd Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -663,13 +663,14 @@ g_eli_create(struct gctl_req *req, struct g_class *mp, struct g_provider *bpp,
 		 */
 		if (LIST_EMPTY(&sc->sc_workers)) {
 			error = crypto_newsession(&wr->w_sid, &crie,
-					CRYPTOCAP_F_HARDWARE);
+			    CRYPTOCAP_F_HARDWARE);
 			if (error == 0)
 				sc->sc_crypto = G_ELI_CRYPTO_HW;
 		}
-		if (sc->sc_crypto == G_ELI_CRYPTO_SW)
+		if (sc->sc_crypto == G_ELI_CRYPTO_SW) {
 			error = crypto_newsession(&wr->w_sid, &crie,
-					CRYPTOCAP_F_SOFTWARE);
+			    CRYPTOCAP_F_SOFTWARE);
+		}
 		if (error != 0) {
 			free(wr, M_ELI);
 			if (req != NULL) {
@@ -952,11 +953,13 @@ g_eli_taste(struct g_class *mp, struct g_provider *pp, int flags __unused)
 			    sizeof(md.md_salt));
 			g_eli_crypto_hmac_update(&ctx, passphrase,
 			    strlen(passphrase));
+			bzero(passphrase, sizeof(passphrase));
 		} else if (md.md_iterations > 0) {
 			u_char dkey[G_ELI_USERKEYLEN];
 
 			pkcs5v2_genkey(dkey, sizeof(dkey), md.md_salt,
 			    sizeof(md.md_salt), passphrase, md.md_iterations);
+			bzero(passphrase, sizeof(passphrase));
 			g_eli_crypto_hmac_update(&ctx, dkey, sizeof(dkey));
 			bzero(dkey, sizeof(dkey));
 		}

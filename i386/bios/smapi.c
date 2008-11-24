@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/bios/smapi.c,v 1.14 2007/03/20 20:21:44 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/bios/smapi.c,v 1.15 2008/09/27 08:51:18 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -108,7 +108,7 @@ smapi_ioctl (dev, cmd, data, fflag, td)
 	int error;
 
 	error = 0;
-	sc = devclass_get_softc(smapi_devclass, minor(dev)); 
+	sc = devclass_get_softc(smapi_devclass, dev2unit(dev)); 
         if (sc == NULL) {
                 error = ENXIO;
                 goto fail;

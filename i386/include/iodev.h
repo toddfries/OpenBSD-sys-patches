@@ -23,11 +23,8 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/iodev.h,v 1.1 2004/08/01 11:40:53 markm Exp $
+ * $FreeBSD: src/sys/i386/include/iodev.h,v 1.2 2008/06/25 07:45:31 ed Exp $
  */
-
-#define CDEV_MAJOR	2
-#define CDEV_MINOR_IO	14
 
 d_open_t	ioopen;
 d_close_t	ioclose;

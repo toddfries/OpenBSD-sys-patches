@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netsmb/smb_rq.c,v 1.17 2006/08/22 03:05:51 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/netsmb/smb_rq.c,v 1.19 2008/10/23 15:53:51 des Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -70,7 +70,7 @@ smb_rq_alloc(struct smb_connobj *layer, u_char cmd, struct smb_cred *scred,
 	struct smb_rq *rqp;
 	int error;
 
-	MALLOC(rqp, struct smb_rq *, sizeof(*rqp), M_SMBRQ, M_WAITOK);
+	rqp = malloc(sizeof(*rqp), M_SMBRQ, M_WAITOK);
 	if (rqp == NULL)
 		return ENOMEM;
 	error = smb_rq_init(rqp, layer, cmd, scred);
@@ -383,7 +383,7 @@ smb_t2_alloc(struct smb_connobj *layer, u_short setup, struct smb_cred *scred,
 	struct smb_t2rq *t2p;
 	int error;
 
-	MALLOC(t2p, struct smb_t2rq *, sizeof(*t2p), M_SMBRQ, M_WAITOK);
+	t2p = malloc(sizeof(*t2p), M_SMBRQ, M_WAITOK);
 	if (t2p == NULL)
 		return ENOMEM;
 	error = smb_t2_init(t2p, layer, setup, scred);
@@ -433,9 +433,7 @@ smb_t2_placedata(struct mbuf *mtop, u_int16_t offset, u_int16_t count,
 	struct mbuf *m, *m0;
 	int len;
 
-	m0 = m_split(mtop, offset, M_TRYWAIT);
-	if (m0 == NULL)
-		return EBADRPC;
+	m0 = m_split(mtop, offset, M_WAIT);
 	len = m_length(m0, &m);
 	m->m_len -= len - count;
 	if (mdp->md_top == NULL) {

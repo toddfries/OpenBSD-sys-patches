@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/memguard.c,v 1.6 2005/12/30 11:45:07 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/memguard.c,v 1.7 2008/05/10 23:39:27 alc Exp $");
 
 /*
  * MemGuard is a simple replacement allocator for debugging only
@@ -174,7 +174,7 @@ memguard_init(vm_map_t parent_map, unsigned long size)
 	size *= PAGE_SIZE;
 
 	memguard_map = kmem_suballoc(parent_map, (vm_offset_t *)&base,
-	    (vm_offset_t *)&limit, (vm_size_t)size);
+	    (vm_offset_t *)&limit, (vm_size_t)size, FALSE);
 	memguard_map->system_map = 1;
 	memguard_mapsize = size;
 	memguard_mapused = 0;

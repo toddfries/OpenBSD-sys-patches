@@ -28,7 +28,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net/if_faith.c,v 1.42 2006/08/04 21:27:37 brooks Exp $
+ * $FreeBSD: src/sys/net/if_faith.c,v 1.44 2008/10/02 15:37:58 zec Exp $
  */
 /*
  * derived from
@@ -54,6 +54,7 @@
 #include <sys/queue.h>
 #include <sys/types.h>
 #include <sys/malloc.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_clone.h>
@@ -323,11 +324,12 @@ static int
 faithprefix(in6)
 	struct in6_addr *in6;
 {
+	INIT_VNET_INET6(curvnet);
 	struct rtentry *rt;
 	struct sockaddr_in6 sin6;
 	int ret;
 
-	if (ip6_keepfaith == 0)
+	if (V_ip6_keepfaith == 0)
 		return 0;
 
 	bzero(&sin6, sizeof(sin6));

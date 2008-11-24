@@ -23,7 +23,7 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 #
-# $FreeBSD: src/sys/kern/bus_if.m,v 1.34 2007/02/23 12:19:01 piso Exp $
+# $FreeBSD: src/sys/kern/bus_if.m,v 1.36 2008/11/18 21:01:54 jhb Exp $
 #
 
 #include <sys/bus.h>
@@ -494,6 +494,23 @@ METHOD int child_location_str {
 };
 
 /**
+ * @brief Allow drivers to request that an interrupt be bound to a specific
+ * CPU.
+ * 
+ * @param _dev		the parent device of @p _child
+ * @param _child	the device which allocated the resource
+ * @param _irq		the resource representing the interrupt
+ * @param _cpu		the CPU to bind the interrupt to
+ */
+METHOD int bind_intr {
+	device_t	_dev;
+	device_t	_child;
+	struct resource *_irq;
+	int		_cpu;
+} DEFAULT bus_generic_bind_intr;
+
+
+/**
  * @brief Allow (bus) drivers to specify the trigger mode and polarity
  * of the specified interrupt.
  * 
@@ -527,7 +544,7 @@ METHOD int config_intr {
  */
 METHOD void hinted_child {
 	device_t	_dev;
-	const char *	_dname;
+	const char	*_dname;
 	int		_dunit;
 };
 
@@ -541,3 +558,19 @@ METHOD bus_dma_tag_t get_dma_tag {
 	device_t	_dev;
 	device_t	_child;
 } DEFAULT bus_generic_get_dma_tag;
+
+/**
+ * @brief Allow the bus to determine the unit number of a device.
+ *
+ * @param _dev		the parent device of @p _child
+ * @param _child	the device whose unit is to be wired
+ * @param _name		the name of the device's new devclass
+ * @param _unitp	a pointer to the device's new unit value
+ */
+METHOD void hint_device_unit {
+	device_t	_dev;
+	device_t	_child;
+	const char	*_name;
+	int		*_unitp;
+};
+

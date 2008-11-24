@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_pass.c,v 1.48 2007/05/16 16:54:23 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_pass.c,v 1.49 2008/09/26 14:19:52 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -265,7 +265,7 @@ passregister(struct cam_periph *periph, void *arg)
 	mtx_unlock(periph->sim->mtx);
 	no_tags = (cgd->inq_data.flags & SID_CmdQue) == 0;
 	softc->device_stats = devstat_new_entry("pass",
-			  unit2minor(periph->unit_number), 0,
+			  periph->unit_number, 0,
 			  DEVSTAT_NO_BLOCKSIZE
 			  | (no_tags ? DEVSTAT_NO_ORDERED_TAGS : 0),
 			  softc->pd_type |
@@ -274,7 +274,7 @@ passregister(struct cam_periph *periph, void *arg)
 			  DEVSTAT_PRIORITY_PASS);
 
 	/* Register the device */
-	softc->dev = make_dev(&pass_cdevsw, unit2minor(periph->unit_number),
+	softc->dev = make_dev(&pass_cdevsw, periph->unit_number,
 			      UID_ROOT, GID_OPERATOR, 0600, "%s%d",
 			      periph->periph_name, periph->unit_number);
 	mtx_lock(periph->sim->mtx);

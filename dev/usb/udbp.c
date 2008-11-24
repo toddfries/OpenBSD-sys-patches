@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/udbp.c,v 1.41 2007/07/05 15:25:32 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/udbp.c,v 1.42 2008/10/23 15:53:51 des Exp $");
 
 /* Driver for arbitrary double bulk pipe devices.
  * The driver assumes that there will be the same driver on the other side.
@@ -411,10 +411,10 @@ udbp_attach(device_t self)
 bad:
 #if 0 /* probably done in udbp_detach() */
 		if (sc->sc_bulkout_buffer) {
-			FREE(sc->sc_bulkout_buffer, M_USBDEV);
+			free(sc->sc_bulkout_buffer, M_USBDEV);
 		}
 		if (sc->sc_bulkin_buffer) {
-			FREE(sc->sc_bulkin_buffer, M_USBDEV);
+			free(sc->sc_bulkin_buffer, M_USBDEV);
 		}
 		if (sc->sc_bulkout_xfer) {
 			usbd_free_xfer(sc->sc_bulkout_xfer);

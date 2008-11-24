@@ -37,7 +37,7 @@
  *
  * Author: Julian Elischer <julian@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_UI.c,v 1.20 2005/01/07 01:45:39 imp Exp $
+ * $FreeBSD: src/sys/netgraph/ng_UI.c,v 1.21 2008/10/23 15:53:51 des Exp $
  * $Whistle: ng_UI.c,v 1.14 1999/11/01 09:24:51 julian Exp $
  */
 
@@ -103,7 +103,7 @@ ng_UI_constructor(node_p node)
 	priv_p  priv;
 
 	/* Allocate private structure */
-	MALLOC(priv, priv_p, sizeof(*priv), M_NETGRAPH, M_NOWAIT | M_ZERO);
+	priv = malloc(sizeof(*priv), M_NETGRAPH, M_NOWAIT | M_ZERO);
 	if (priv == NULL) {
 		return (ENOMEM);
 	}
@@ -215,7 +215,7 @@ ng_UI_shutdown(node_p node)
 	const priv_p priv = NG_NODE_PRIVATE(node);
 
 	/* Take down netgraph node */
-	FREE(priv, M_NETGRAPH);
+	free(priv, M_NETGRAPH);
 	NG_NODE_SET_PRIVATE(node, NULL);
 	NG_NODE_UNREF(node);
 	return (0);

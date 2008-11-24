@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/ibcs2/imgact_coff.c,v 1.67 2007/05/31 11:51:51 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/ibcs2/imgact_coff.c,v 1.72 2008/08/28 15:23:18 attilio Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -188,7 +188,7 @@ coff_load_file(struct thread *td, char *name)
     		goto fail;
   	}
 
-  	if ((error = VOP_GETATTR(vp, &attr, td->td_ucred, td)) != 0)
+  	if ((error = VOP_GETATTR(vp, &attr, td->td_ucred)) != 0)
     		goto fail;
 
   	if ((vp->v_mount->mnt_flag & MNT_NOEXEC)
@@ -211,7 +211,7 @@ coff_load_file(struct thread *td, char *name)
 	 * Lose the lock on the vnode. It's no longer needed, and must not
 	 * exist for the pagefault paging to work below.
 	 */
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 
   	if ((error = vm_mmap(kernel_map,
 			    (vm_offset_t *) &ptr,
@@ -285,7 +285,7 @@ coff_load_file(struct thread *td, char *name)
     		panic("%s vm_map_remove failed", __func__);
 
  fail:
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
  unlocked_fail:
 	NDFREE(&nd, NDF_ONLY_PNBUF);
 	vrele(nd.ni_vp);
@@ -307,7 +307,6 @@ exec_coff_imgact(imgp)
 	unsigned long data_offset = 0, data_address = 0, data_size = 0;
 	unsigned long bss_size = 0;
 	caddr_t hole;
-	struct thread *td = curthread;
 
 	if (fhdr->f_magic != I386_COFF ||
 	    !(fhdr->f_flags & F_EXEC)) {
@@ -335,9 +334,11 @@ exec_coff_imgact(imgp)
 	       ((const char*)(imgp->image_header) + sizeof(struct filehdr) +
 		sizeof(struct aouthdr));
 
-	VOP_UNLOCK(imgp->vp, 0, td);
+	VOP_UNLOCK(imgp->vp, 0);
 
-	exec_new_vmspace(imgp, &ibcs2_svr3_sysvec);
+	error = exec_new_vmspace(imgp, &ibcs2_svr3_sysvec);
+	if (error)
+		goto fail;
 	vmspace = imgp->proc->p_vmspace;
 
 	for (i = 0; i < nscns; i++) {
@@ -404,7 +405,7 @@ exec_coff_imgact(imgp)
 				DPRINTF(("%s(%d):  shared library %s\n",
 					 __FILE__, __LINE__, libname));
 				strlcpy(&libbuf[emul_path_len], libname, MAXPATHLEN);
-/* XXXKSE only 1:1 in coff */  	error = coff_load_file(
+			  	error = coff_load_file(
 				    FIRST_THREAD_IN_PROC(imgp->proc), libbuf);
 		      		if (error)
 	      				error = coff_load_file(
@@ -483,7 +484,7 @@ exec_coff_imgact(imgp)
 	DPRINTF(("%s(%d):  returning successfully!\n", __FILE__, __LINE__));
 
 fail:
-	vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY);
 
 	return error;
 }

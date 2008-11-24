@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/pc98/cbus/syscons_cbus.c,v 1.24 2007/02/27 17:22:30 jhb Exp $
+ * $FreeBSD: src/sys/pc98/cbus/syscons_cbus.c,v 1.28 2008/04/08 13:10:57 nyan Exp $
  */
 
 #include "opt_syscons.h"
@@ -38,8 +38,6 @@
 #include <sys/sysctl.h>
 
 #include <machine/clock.h>
-#include <machine/ppireg.h>
-#include <machine/timerreg.h>
 
 #include <pc98/pc98/pc98_machdep.h>
 
@@ -216,10 +214,7 @@ sc_get_bios_values(bios_values_t *values)
 	values->cursor_start = 15;
 	values->cursor_end = 16;
 	values->shift_state = 0;
-	if (pc98_machine_type & M_8M)
-		values->bell_pitch = BELL_PITCH_8M;
-	else
-		values->bell_pitch = BELL_PITCH_5M;
+	values->bell_pitch = BELL_PITCH;
 }
 
 int
@@ -227,16 +222,10 @@ sc_tone(int herz)
 {
 
 	if (herz) {
-		/* enable counter 1 */
-		ppi_spkr_on();
-		/* set command for counter 1, 2 byte write */
 		if (timer_spkr_acquire())
 			return EBUSY;
-		/* set pitch */
-		spkr_set_pitch(timer_freq / herz);
+		timer_spkr_setfreq(herz);
 	} else {
-		/* disable counter 1 */
-		ppi_spkr_off();
 		timer_spkr_release();
 	}
 	return 0;

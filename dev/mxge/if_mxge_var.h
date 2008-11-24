@@ -25,7 +25,7 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
-$FreeBSD: src/sys/dev/mxge/if_mxge_var.h,v 1.20 2008/02/14 16:24:14 gallatin Exp $
+$FreeBSD: src/sys/dev/mxge/if_mxge_var.h,v 1.22 2008/11/22 05:55:56 kmacy Exp $
 
 ***************************************************************************/
 
@@ -39,7 +39,8 @@ $FreeBSD: src/sys/dev/mxge/if_mxge_var.h,v 1.20 2008/02/14 16:24:14 gallatin Exp
 #define MXGE_EEPROM_STRINGS_SIZE 256
 #define MXGE_MAX_SEND_DESC 128
 
-#if (__FreeBSD_version < 800005)
+#if ((__FreeBSD_version > 800000 && __FreeBSD_version < 800005) \
+     || __FreeBSD_version < 700111)
 #define MXGE_VIRT_JUMBOS 1
 #else
 #define MXGE_VIRT_JUMBOS 0
@@ -278,6 +279,8 @@ struct mxge_media_type
 /* implement our own memory barriers, since bus_space_barrier
    cannot handle write-combining regions */
 
+#if __FreeBSD_version < 800053
+
 #if defined (__GNUC__)
   #if #cpu(i386) || defined __i386 || defined i386 || defined __i386__ || #cpu(x86_64) || defined __x86_64__
     #define mb()  __asm__ __volatile__ ("sfence;": : :"memory")
@@ -290,6 +293,8 @@ struct mxge_media_type
   #endif
 #else
   #error "unknown compiler"
+#endif
+
 #endif
 
 static inline void

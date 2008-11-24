@@ -1,5 +1,5 @@
 /*	$NetBSD: usb.h,v 1.69 2002/09/22 23:20:50 augustss Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/usb.h,v 1.47 2007/06/30 02:40:21 imp Exp $    */
+/*	$FreeBSD: src/sys/dev/usb/usb.h,v 1.49 2008/11/13 21:34:34 n_hibma Exp $    */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -271,6 +271,8 @@ typedef struct {
 #define  UE_ISO_SYNC	0x0c
 #define UE_GET_ISO_TYPE(a)	((a) & UE_ISO_TYPE)
 	uWord		wMaxPacketSize;
+#define UE_GET_TRANS(a)		(((a) >> 11) & 0x3)
+#define UE_GET_SIZE(a)		((a) & 0x7ff)
 	uByte		bInterval;
 } UPACKED usb_endpoint_descriptor_t;
 #define USB_ENDPOINT_DESCRIPTOR_SIZE 7
@@ -697,6 +699,7 @@ struct usb_event {
 #define USB_GET_DEVICEINFO	_IOR ('U', 112, struct usb_device_info)
 #define USB_SET_SHORT_XFER	_IOW ('U', 113, int)
 #define USB_SET_TIMEOUT		_IOW ('U', 114, int)
+#define USB_RESET_DEVICE	_IO  ('U', 115)
 
 /* Modem device */
 #define USB_GET_CM_OVER_DATA	_IOR ('U', 130, int)

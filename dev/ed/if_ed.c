@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ed/if_ed.c,v 1.271 2007/03/21 03:38:35 nyan Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ed/if_ed.c,v 1.272 2008/08/06 22:22:27 imp Exp $");
 
 /*
  * Device driver for National Semiconductor DS8390/WD83C690 based ethernet
@@ -380,13 +380,15 @@ ed_detach(device_t dev)
 	struct ifnet *ifp = sc->ifp;
 
 	ED_ASSERT_UNLOCKED(sc);
-	ED_LOCK(sc);
-	if (bus_child_present(dev))
-		ed_stop(sc);
-	ifp->if_drv_flags &= ~IFF_DRV_RUNNING;
-	ED_UNLOCK(sc);
-	callout_drain(&sc->tick_ch);
-	ether_ifdetach(ifp);
+	if (ifp) {
+		ED_LOCK(sc);
+		if (bus_child_present(dev))
+			ed_stop(sc);
+		ifp->if_drv_flags &= ~IFF_DRV_RUNNING;
+		ED_UNLOCK(sc);
+		callout_drain(&sc->tick_ch);
+		ether_ifdetach(ifp);
+	}
 	bus_teardown_intr(dev, sc->irq_res, sc->irq_handle);
 	ed_release_resources(dev);
 	ED_LOCK_DESTROY(sc);

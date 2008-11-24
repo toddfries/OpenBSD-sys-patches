@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/pseudofs/pseudofs.c,v 1.33 2007/10/16 10:54:53 alfred Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/pseudofs/pseudofs.c,v 1.34 2008/10/23 15:53:51 des Exp $");
 
 #include "opt_pseudofs.h"
 
@@ -71,7 +71,7 @@ pfs_alloc_node(struct pfs_info *pi, const char *name, pfs_type_t type)
 	KASSERT(strlen(name) < PFS_NAMELEN,
 	    ("%s(): node name is too long", __func__));
 
-	MALLOC(pn, struct pfs_node *, sizeof *pn,
+	pn = malloc(sizeof *pn,
 	    M_PFSNODES, M_WAITOK|M_ZERO);
 	mtx_init(&pn->pn_mutex, "pfs_node", NULL, MTX_DEF | MTX_DUPOK);
 	strlcpy(pn->pn_name, name, sizeof pn->pn_name);
@@ -290,7 +290,7 @@ pfs_destroy(struct pfs_node *pn)
 	/* destroy the node */
 	pfs_fileno_free(pn);
 	mtx_destroy(&pn->pn_mutex);
-	FREE(pn, M_PFSNODES);
+	free(pn, M_PFSNODES);
 
 	return (0);
 }

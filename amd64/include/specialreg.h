@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)specialreg.h	7.1 (Berkeley) 5/9/91
- * $FreeBSD: src/sys/amd64/include/specialreg.h,v 1.40 2007/08/15 19:26:01 des Exp $
+ * $FreeBSD: src/sys/amd64/include/specialreg.h,v 1.49 2008/10/22 17:36:52 jkim Exp $
  */
 
 #ifndef _MACHINE_SPECIALREG_H_
@@ -113,6 +113,7 @@
 #define	CPUID_PBE	0x80000000
 
 #define	CPUID2_SSE3	0x00000001
+#define	CPUID2_DTES64	0x00000004
 #define	CPUID2_MON	0x00000008
 #define	CPUID2_DS_CPL	0x00000010
 #define	CPUID2_VMX	0x00000020
@@ -125,6 +126,10 @@
 #define	CPUID2_XTPR	0x00004000
 #define	CPUID2_PDCM	0x00008000
 #define	CPUID2_DCA	0x00040000
+#define	CPUID2_SSE41	0x00080000
+#define	CPUID2_SSE42	0x00100000
+#define	CPUID2_X2APIC	0x00200000
+#define	CPUID2_POPCNT	0x00800000
 
 /*
  * Important bits in the AMD extended cpuid flags
@@ -134,6 +139,7 @@
 #define	AMDID_NX	0x00100000
 #define	AMDID_EXT_MMX	0x00400000
 #define	AMDID_FFXSR	0x01000000
+#define	AMDID_PAGE1GB	0x04000000
 #define	AMDID_RDTSCP	0x08000000
 #define	AMDID_LM	0x20000000
 #define	AMDID_EXT_3DNOW	0x40000000
@@ -147,6 +153,21 @@
 #define	AMDID2_PREFETCH	0x00000100
 
 /*
+ * CPUID instruction 1 eax info
+ */
+#define	CPUID_STEPPING		0x0000000f
+#define	CPUID_MODEL		0x000000f0
+#define	CPUID_FAMILY		0x00000f00
+#define	CPUID_EXT_MODEL		0x000f0000
+#define	CPUID_EXT_FAMILY	0x0ff00000
+#define	AMD64_CPU_MODEL(id) \
+    ((((id) & CPUID_MODEL) >> 4) | \
+    (((id) & CPUID_EXT_MODEL) >> 12))
+#define	AMD64_CPU_FAMILY(id) \
+    ((((id) & CPUID_FAMILY) >> 8) + \
+    (((id) & CPUID_EXT_FAMILY) >> 20))
+
+/*
  * CPUID instruction 1 ebx info
  */
 #define	CPUID_BRAND_INDEX	0x000000ff
@@ -155,9 +176,28 @@
 #define	CPUID_LOCAL_APIC_ID	0xff000000
 
 /*
+ * AMD extended function 8000_0007h edx info
+ */
+#define	AMDPM_TS		0x00000001
+#define	AMDPM_FID		0x00000002
+#define	AMDPM_VID		0x00000004
+#define	AMDPM_TTP		0x00000008
+#define	AMDPM_TM		0x00000010
+#define	AMDPM_STC		0x00000020
+#define	AMDPM_100MHZ_STEPS	0x00000040
+#define	AMDPM_HW_PSTATE		0x00000080
+#define	AMDPM_TSC_INVARIANT	0x00000100
+
+/*
  * AMD extended function 8000_0008h ecx info
  */
 #define	AMDID_CMP_CORES		0x000000ff
+
+/*
+ * CPUID manufacturers identifiers
+ */
+#define	INTEL_VENDOR_ID	"GenuineIntel"
+#define	AMD_VENDOR_ID	"AuthenticAMD"
 
 /*
  * Model-specific registers for the i386 family
@@ -255,9 +295,24 @@
 /*
  * Constants related to MTRRs
  */
+#define	MTRR_UNCACHEABLE	0x00
+#define	MTRR_WRITE_COMBINING	0x01
+#define	MTRR_WRITE_THROUGH	0x04
+#define	MTRR_WRITE_PROTECTED	0x05
+#define	MTRR_WRITE_BACK		0x06
 #define	MTRR_N64K		8	/* numbers of fixed-size entries */
 #define	MTRR_N16K		16
 #define	MTRR_N4K		64
+#define	MTRR_CAP_WC		0x0000000000000400UL
+#define	MTRR_CAP_FIXED		0x0000000000000100UL
+#define	MTRR_CAP_VCNT		0x00000000000000ffUL
+#define	MTRR_DEF_ENABLE		0x0000000000000800UL
+#define	MTRR_DEF_FIXED_ENABLE	0x0000000000000400UL
+#define	MTRR_DEF_TYPE		0x00000000000000ffUL
+#define	MTRR_PHYSBASE_PHYSBASE	0x000ffffffffff000UL
+#define	MTRR_PHYSBASE_TYPE	0x00000000000000ffUL
+#define	MTRR_PHYSMASK_PHYSMASK	0x000ffffffffff000UL
+#define	MTRR_PHYSMASK_VALID	0x0000000000000800UL
 
 /* Performance Control Register (5x86 only). */
 #define	PCR0			0x20
@@ -393,5 +448,6 @@
 #define	MSR_IORRMASK1	0xc0010019
 #define	MSR_TOP_MEM	0xc001001a	/* boundary for ram below 4G */
 #define	MSR_TOP_MEM2	0xc001001d	/* boundary for ram above 4G */
+#define	MSR_K8_UCODE_UPDATE	0xc0010020	/* update microcode */
 
 #endif /* !_MACHINE_SPECIALREG_H_ */

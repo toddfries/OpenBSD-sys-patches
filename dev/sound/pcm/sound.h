@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/sound/pcm/sound.h,v 1.78 2007/06/16 03:37:28 ariff Exp $
+ * $FreeBSD: src/sys/dev/sound/pcm/sound.h,v 1.79 2008/08/19 19:45:08 ed Exp $
  */
 
 /*
@@ -41,7 +41,7 @@
 #include <sys/filio.h>
 #include <sys/sockio.h>
 #include <sys/fcntl.h>
-#include <sys/tty.h>
+#include <sys/selinfo.h>
 #include <sys/proc.h>
 #include <sys/kernel.h> /* for DATA_SET */
 #include <sys/module.h>

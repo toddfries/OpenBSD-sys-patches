@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)in_pcb.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/netinet/in_pcb.h,v 1.100 2007/08/06 14:26:01 rwatson Exp $
+ * $FreeBSD: src/sys/netinet/in_pcb.h,v 1.118 2008/11/19 09:39:34 zec Exp $
  */
 
 #ifndef _NETINET_IN_PCB_H_
@@ -36,16 +36,21 @@
 #include <sys/queue.h>
 #include <sys/_lock.h>
 #include <sys/_mutex.h>
+#include <sys/_rwlock.h>
 
 #include <net/route.h>
+
+#ifdef _KERNEL
+#include <sys/rwlock.h>
+#endif
 
 #define	in6pcb		inpcb	/* for KAME src sync over BSD*'s */
 #define	in6p_sp		inp_sp	/* for KAME src sync over BSD*'s */
 struct inpcbpolicy;
 
 /*
- * Struct inpcb is the ommon structure pcb for the Internet Protocol
- * implementation.
+ * struct inpcb is the common protocol control block structure used in most
+ * IP transport protocols.
  *
  * Pointers to local and foreign host table entries, local and foreign socket
  * numbers, and pointers up (to a socket structure) and down (to a
@@ -96,7 +101,7 @@ struct in_endpoints {
 struct in_conninfo {
 	u_int8_t	inc_flags;
 	u_int8_t	inc_len;
-	u_int16_t	inc_pad;	/* XXX alignment for in_endpoints */
+	u_int16_t	inc_fibnum;	/* XXX was pad, 16 bits is plenty */
 	/* protocol dependent part */
 	struct	in_endpoints inc_ie;
 };
@@ -110,23 +115,50 @@ struct in_conninfo {
 
 struct	icmp6_filter;
 
+/*-
+ * struct inpcb captures the network layer state for TCP, UDP, and raw IPv4
+ * and IPv6 sockets.  In the case of TCP, further per-connection state is
+ * hung off of inp_ppcb most of the time.  Almost all fields of struct inpcb
+ * are static after creation or protected by a per-inpcb rwlock, inp_lock.  A
+ * few fields also require the global pcbinfo lock for the inpcb to be held,
+ * when modified, such as the global connection lists and hashes, as well as
+ * binding information (which affects which hash a connection is on).  This
+ * model means that connections can be looked up without holding the
+ * per-connection lock, which is important for performance when attempting to
+ * find the connection for a packet given its IP and port tuple.  Writing to
+ * these fields that write locks be held on both the inpcb and global locks.
+ *
+ * Key:
+ * (c) - Constant after initialization
+ * (i) - Protected by the inpcb lock
+ * (p) - Protected by the pcbinfo lock for the inpcb
+ * (s) - Protected by another subsystem's locks
+ * (x) - Undefined locking
+ *
+ * A few other notes:
+ *
+ * When a read lock is held, stability of the field is guaranteed; to write
+ * to a field, a write lock must generally be held.
+ *
+ * netinet/netinet6-layer code should not assume that the inp_socket pointer
+ * is safe to dereference without inp_lock being held, even for protocols
+ * other than TCP (where the inpcb persists during TIMEWAIT even after the
+ * socket has been freed), or there may be close(2)-related races.
+ *
+ * The inp_vflag field is overloaded, and would otherwise ideally be (c).
+ */
 struct inpcb {
-	LIST_ENTRY(inpcb) inp_hash;	/* hash list */
-	LIST_ENTRY(inpcb) inp_list;	/* list for all PCBs of this proto */
-	u_int32_t	inp_flow;
+	LIST_ENTRY(inpcb) inp_hash;	/* (i/p) hash list */
+	LIST_ENTRY(inpcb) inp_list;	/* (i/p) list for all PCBs for proto */
+	void	*inp_ppcb;		/* (i) pointer to per-protocol pcb */
+	struct	inpcbinfo *inp_pcbinfo;	/* (c) PCB list info */
+	struct	socket *inp_socket;	/* (i)  back pointer to socket */
+	struct	ucred	*inp_cred;	/* (c) cache of socket cred */
 
-	/* Local and foreign ports, local and foreign addr. */
-	struct	in_conninfo inp_inc;
+	u_int32_t	inp_flow;	/* (i) IPv6 flow information */
+	int	inp_flags;		/* (i) generic IP/datagram flags */
 
-	void	*inp_ppcb;		/* pointer to per-protocol pcb */
-	struct	inpcbinfo *inp_pcbinfo;	/* PCB list info */
-	struct	socket *inp_socket;	/* back pointer to socket */
-					/* list for this PCB's local port */
-	struct	label *inp_label;	/* MAC label */
-	int	inp_flags;		/* generic IP/datagram flags */
-
-	struct	inpcbpolicy *inp_sp;    /* for IPSEC */
-	u_char	inp_vflag;		/* IP version flag (v4/v6) */
+	u_char	inp_vflag;		/* (i) IP version flag (v4/v6) */
 #define	INP_IPV4	0x1
 #define	INP_IPV6	0x2
 #define	INP_IPV6PROTO	0x4		/* opened under IPv6 protocol */
@@ -134,15 +166,24 @@ struct inpcb {
 #define	INP_ONESBCAST	0x10		/* send all-ones broadcast */
 #define	INP_DROPPED	0x20		/* protocol drop flag */
 #define	INP_SOCKREF	0x40		/* strong socket reference */
-	u_char	inp_ip_ttl;		/* time to live proto */
-	u_char	inp_ip_p;		/* protocol proto */
-	u_char	inp_ip_minttl;		/* minimum TTL or drop */
+	u_char	inp_ip_ttl;		/* (i) time to live proto */
+	u_char	inp_ip_p;		/* (c) protocol proto */
+	u_char	inp_ip_minttl;		/* (i) minimum TTL or drop */
+	uint32_t inp_ispare1;		/* (x) connection id / queue id */
+	void	*inp_pspare[2];		/* (x) rtentry / general use */
+
+	/* Local and foreign ports, local and foreign addr. */
+	struct	in_conninfo inp_inc;
+
+					/* (i/p) list for PCB's local port */
+	struct	label *inp_label;	/* (i) MAC label */
+	struct	inpcbpolicy *inp_sp;    /* (s) for IPSEC */
 
 	/* Protocol-dependent part; options. */
 	struct {
-		u_char	inp4_ip_tos;		/* type of service proto */
-		struct	mbuf *inp4_options;	/* IP options */
-		struct	ip_moptions *inp4_moptions; /* IP multicast options */
+		u_char	inp4_ip_tos;		/* (i) type of service proto */
+		struct	mbuf *inp4_options;	/* (i) IP options */
+		struct	ip_moptions *inp4_moptions; /* (i) IP multicast options */
 	} inp_depend4;
 #define	inp_fport	inp_inc.inc_fport
 #define	inp_lport	inp_inc.inc_lport
@@ -152,23 +193,23 @@ struct inpcb {
 #define	inp_options	inp_depend4.inp4_options
 #define	inp_moptions	inp_depend4.inp4_moptions
 	struct {
-		/* IP options */
+		/* (i) IP options */
 		struct	mbuf *inp6_options;
-		/* IP6 options for outgoing packets */
+		/* (i) IP6 options for outgoing packets */
 		struct	ip6_pktopts *inp6_outputopts;
-		/* IP multicast options */
+		/* (i) IP multicast options */
 		struct	ip6_moptions *inp6_moptions;
-		/* ICMPv6 code type filter */
+		/* (i) ICMPv6 code type filter */
 		struct	icmp6_filter *inp6_icmp6filt;
-		/* IPV6_CHECKSUM setsockopt */
+		/* (i) IPV6_CHECKSUM setsockopt */
 		int	inp6_cksum;
 		short	inp6_hops;
 	} inp_depend6;
-	LIST_ENTRY(inpcb) inp_portlist;
-	struct	inpcbport *inp_phd;	/* head of this list */
+	LIST_ENTRY(inpcb) inp_portlist;	/* (i/p) */
+	struct	inpcbport *inp_phd;	/* (i/p) head of this list */
 #define inp_zero_size offsetof(struct inpcb, inp_gencnt)
-	inp_gen_t	inp_gencnt;	/* generation count of this instance */
-	struct mtx	inp_mtx;
+	inp_gen_t	inp_gencnt;	/* (c) generation count of this instance */
+	struct rwlock	inp_lock;
 
 #define	in6p_faddr	inp_inc.inc6_faddr
 #define	in6p_laddr	inp_inc.inc6_laddr
@@ -261,27 +302,81 @@ struct inpcbinfo {
 	 * or freed.
 	 */
 	u_quad_t		 ipi_gencnt;
-	struct mtx		 ipi_mtx;
+	struct rwlock		 ipi_lock;
+
+	/*
+	 * vimage 1
+	 * general use 1
+	 */
+	void 			*ipi_pspare[2];
 };
 
 #define INP_LOCK_INIT(inp, d, t) \
-	mtx_init(&(inp)->inp_mtx, (d), (t), MTX_DEF | MTX_RECURSE | MTX_DUPOK)
-#define INP_LOCK_DESTROY(inp)	mtx_destroy(&(inp)->inp_mtx)
-#define INP_LOCK(inp)		mtx_lock(&(inp)->inp_mtx)
-#define INP_UNLOCK(inp)		mtx_unlock(&(inp)->inp_mtx)
-#define INP_LOCK_ASSERT(inp)	mtx_assert(&(inp)->inp_mtx, MA_OWNED)
-#define	INP_UNLOCK_ASSERT(inp)	mtx_assert(&(inp)->inp_mtx, MA_NOTOWNED)
+	rw_init_flags(&(inp)->inp_lock, (t), RW_RECURSE |  RW_DUPOK)
+#define INP_LOCK_DESTROY(inp)	rw_destroy(&(inp)->inp_lock)
+#define INP_RLOCK(inp)		rw_rlock(&(inp)->inp_lock)
+#define INP_WLOCK(inp)		rw_wlock(&(inp)->inp_lock)
+#define INP_TRY_RLOCK(inp)	rw_try_rlock(&(inp)->inp_lock)
+#define INP_TRY_WLOCK(inp)	rw_try_wlock(&(inp)->inp_lock)
+#define INP_RUNLOCK(inp)	rw_runlock(&(inp)->inp_lock)
+#define INP_WUNLOCK(inp)	rw_wunlock(&(inp)->inp_lock)
+#define INP_LOCK_ASSERT(inp)	rw_assert(&(inp)->inp_lock, RA_LOCKED)
+#define	INP_RLOCK_ASSERT(inp)	rw_assert(&(inp)->inp_lock, RA_RLOCKED)
+#define	INP_WLOCK_ASSERT(inp)	rw_assert(&(inp)->inp_lock, RA_WLOCKED)
+#define	INP_UNLOCK_ASSERT(inp)	rw_assert(&(inp)->inp_lock, RA_UNLOCKED)
+
+#ifdef _KERNEL
+/*
+ * These locking functions are for inpcb consumers outside of sys/netinet,
+ * more specifically, they were added for the benefit of TOE drivers. The
+ * macros are reserved for use by the stack.
+ */
+void inp_wlock(struct inpcb *);
+void inp_wunlock(struct inpcb *);
+void inp_rlock(struct inpcb *);
+void inp_runlock(struct inpcb *);
+
+#ifdef INVARIANTS
+void inp_lock_assert(struct inpcb *);
+void inp_unlock_assert(struct inpcb *);
+#else
+static __inline void
+inp_lock_assert(struct inpcb *inp __unused)
+{
+}
+
+static __inline void
+inp_unlock_assert(struct inpcb *inp __unused)
+{
+}
+
+#endif
+
+void	inp_apply_all(void (*func)(struct inpcb *, void *), void *arg);
+int 	inp_ip_tos_get(const struct inpcb *inp);
+void 	inp_ip_tos_set(struct inpcb *inp, int val);
+struct socket *
+	inp_inpcbtosocket(struct inpcb *inp);
+struct tcpcb *
+	inp_inpcbtotcpcb(struct inpcb *inp);
+void 	inp_4tuple_get(struct inpcb *inp, uint32_t *laddr, uint16_t *lp,
+		uint32_t *faddr, uint16_t *fp);
+
+#endif /* _KERNEL */
 
 #define INP_INFO_LOCK_INIT(ipi, d) \
-	mtx_init(&(ipi)->ipi_mtx, (d), NULL, MTX_DEF | MTX_RECURSE)
-#define INP_INFO_LOCK_DESTROY(ipi)  mtx_destroy(&(ipi)->ipi_mtx)
-#define INP_INFO_RLOCK(ipi)	mtx_lock(&(ipi)->ipi_mtx)
-#define INP_INFO_WLOCK(ipi)	mtx_lock(&(ipi)->ipi_mtx)
-#define INP_INFO_RUNLOCK(ipi)	mtx_unlock(&(ipi)->ipi_mtx)
-#define INP_INFO_WUNLOCK(ipi)	mtx_unlock(&(ipi)->ipi_mtx)
-#define INP_INFO_RLOCK_ASSERT(ipi)	mtx_assert(&(ipi)->ipi_mtx, MA_OWNED)
-#define INP_INFO_WLOCK_ASSERT(ipi)	mtx_assert(&(ipi)->ipi_mtx, MA_OWNED)
-#define INP_INFO_UNLOCK_ASSERT(ipi)	mtx_assert(&(ipi)->ipi_mtx, MA_NOTOWNED)
+	rw_init_flags(&(ipi)->ipi_lock, (d), RW_RECURSE)
+#define INP_INFO_LOCK_DESTROY(ipi)  rw_destroy(&(ipi)->ipi_lock)
+#define INP_INFO_RLOCK(ipi)	rw_rlock(&(ipi)->ipi_lock)
+#define INP_INFO_WLOCK(ipi)	rw_wlock(&(ipi)->ipi_lock)
+#define INP_INFO_TRY_RLOCK(ipi)	rw_try_rlock(&(ipi)->ipi_lock)
+#define INP_INFO_TRY_WLOCK(ipi)	rw_try_wlock(&(ipi)->ipi_lock)
+#define INP_INFO_RUNLOCK(ipi)	rw_runlock(&(ipi)->ipi_lock)
+#define INP_INFO_WUNLOCK(ipi)	rw_wunlock(&(ipi)->ipi_lock)
+#define	INP_INFO_LOCK_ASSERT(ipi)	rw_assert(&(ipi)->ipi_lock, RA_LOCKED)
+#define INP_INFO_RLOCK_ASSERT(ipi)	rw_assert(&(ipi)->ipi_lock, RA_RLOCKED)
+#define INP_INFO_WLOCK_ASSERT(ipi)	rw_assert(&(ipi)->ipi_lock, RA_WLOCKED)
+#define INP_INFO_UNLOCK_ASSERT(ipi)	rw_assert(&(ipi)->ipi_lock, RA_UNLOCKED)
 
 #define INP_PCBHASH(faddr, lport, fport, mask) \
 	(((faddr) ^ ((faddr) >> 16) ^ ntohs((lport) ^ (fport))) & (mask))
@@ -354,6 +449,11 @@ extern int	ipport_firstauto;
 extern int	ipport_lastauto;
 extern int	ipport_hifirstauto;
 extern int	ipport_hilastauto;
+extern int	ipport_randomized;
+extern int	ipport_randomcps;
+extern int	ipport_randomtime;
+extern int	ipport_stoprandom;
+extern int	ipport_tcpallocs;
 extern struct callout ipport_tick_callout;
 
 void	in_pcbpurgeif0(struct inpcbinfo *, struct ifnet *);
@@ -372,7 +472,7 @@ void	in_pcbfree(struct inpcb *);
 int	in_pcbinshash(struct inpcb *);
 struct inpcb *
 	in_pcblookup_local(struct inpcbinfo *,
-	    struct in_addr, u_int, int);
+	    struct in_addr, u_short, int, struct ucred *);
 struct inpcb *
 	in_pcblookup_hash(struct inpcbinfo *, struct in_addr, u_int,
 	    struct in_addr, u_int, int, struct ifnet *);

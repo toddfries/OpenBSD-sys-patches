@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)cd9660_node.h	8.6 (Berkeley) 5/14/95
- * $FreeBSD: src/sys/fs/cd9660/cd9660_node.h,v 1.33 2007/02/11 13:54:25 rodrigc Exp $
+ * $FreeBSD: src/sys/fs/cd9660/cd9660_node.h,v 1.34 2008/11/18 23:13:40 jhb Exp $
  */
 
 /*
@@ -58,7 +58,6 @@ typedef	struct	{
 
 struct iso_node {
 	struct	vnode *i_vnode;	/* vnode associated with this inode */
-	u_long	i_flag;		/* see below */
 	ino_t	i_number;	/* the identity of the inode */
 				/* we use the actual starting block of the file */
 	struct	iso_mnt *i_mnt;	/* filesystem associated with this inode */
@@ -77,9 +76,6 @@ struct iso_node {
 
 #define	i_forw		i_chain[0]
 #define	i_back		i_chain[1]
-
-/* flags */
-#define	IN_ACCESS	0x0020		/* inode access time to be updated */
 
 #define VTOI(vp) ((struct iso_node *)(vp)->v_data)
 #define ITOV(ip) ((ip)->i_vnode)

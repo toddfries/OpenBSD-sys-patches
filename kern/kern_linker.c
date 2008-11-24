@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_linker.c,v 1.151 2007/10/24 19:03:54 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_linker.c,v 1.161 2008/10/23 20:26:15 des Exp $");
 
 #include "opt_ddb.h"
 #include "opt_hwpmc_hooks.h"
@@ -162,7 +162,7 @@ linker_init(void *arg)
 	TAILQ_INIT(&linker_files);
 }
 
-SYSINIT(linker, SI_SUB_KLD, SI_ORDER_FIRST, linker_init, 0)
+SYSINIT(linker, SI_SUB_KLD, SI_ORDER_FIRST, linker_init, 0);
 
 static void
 linker_stop_class_add(void *arg)
@@ -171,7 +171,7 @@ linker_stop_class_add(void *arg)
 	linker_no_more_classes = 1;
 }
 
-SYSINIT(linker_class, SI_SUB_KLD, SI_ORDER_ANY, linker_stop_class_add, NULL)
+SYSINIT(linker_class, SI_SUB_KLD, SI_ORDER_ANY, linker_stop_class_add, NULL);
 
 int
 linker_add_class(linker_class_t lc)
@@ -363,7 +363,8 @@ linker_init_kernel_modules(void)
 	linker_file_register_modules(linker_kernel_file);
 }
 
-SYSINIT(linker_kernel, SI_SUB_KLD, SI_ORDER_ANY, linker_init_kernel_modules, 0)
+SYSINIT(linker_kernel, SI_SUB_KLD, SI_ORDER_ANY, linker_init_kernel_modules,
+    0);
 
 static int
 linker_load_file(const char *filename, linker_file_t *result)
@@ -647,6 +648,12 @@ linker_file_unload(linker_file_t file, int flags)
 	return (0);
 }
 
+int
+linker_ctf_get(linker_file_t file, linker_ctf_t *lc)
+{
+	return (LINKER_CTF_GET(file, lc));
+}
+
 static int
 linker_file_add_dependency(linker_file_t file, linker_file_t dep)
 {
@@ -688,6 +695,16 @@ linker_file_lookup_set(linker_file_t file, const char *name,
 	if (!locked)
 		KLD_UNLOCK();
 	return (error);
+}
+
+/*
+ * List all functions in a file.
+ */
+int
+linker_file_function_listall(linker_file_t lf,
+    linker_function_nameval_callback_t callback_func, void *arg)
+{
+	return (LINKER_EACH_FUNCTION_NAMEVAL(lf, callback_func, arg));
 }
 
 caddr_t
@@ -781,18 +798,18 @@ linker_file_lookup_symbol_internal(linker_file_t file, const char *name,
 	return (0);
 }
 
-#ifdef DDB
 /*
- * DDB Helpers.  DDB has to look across multiple files with their own symbol
- * tables and string tables.
+ * Both DDB and stack(9) rely on the kernel linker to provide forward and
+ * backward lookup of symbols.  However, DDB and sometimes stack(9) need to
+ * do this in a lockfree manner.  We provide a set of internal helper
+ * routines to perform these operations without locks, and then wrappers that
+ * optionally lock.
  *
- * Note that we do not obey list locking protocols here.  We really don't need
- * DDB to hang because somebody's got the lock held.  We'll take the chance
- * that the files list is inconsistant instead.
+ * linker_debug_lookup() is ifdef DDB as currently it's only used by DDB.
  */
-
-int
-linker_ddb_lookup(const char *symstr, c_linker_sym_t *sym)
+#ifdef DDB
+static int
+linker_debug_lookup(const char *symstr, c_linker_sym_t *sym)
 {
 	linker_file_t lf;
 
@@ -802,9 +819,10 @@ linker_ddb_lookup(const char *symstr, c_linker_sym_t *sym)
 	}
 	return (ENOENT);
 }
+#endif
 
-int
-linker_ddb_search_symbol(caddr_t value, c_linker_sym_t *sym, long *diffp)
+static int
+linker_debug_search_symbol(caddr_t value, c_linker_sym_t *sym, long *diffp)
 {
 	linker_file_t lf;
 	c_linker_sym_t best, es;
@@ -834,8 +852,8 @@ linker_ddb_search_symbol(caddr_t value, c_linker_sym_t *sym, long *diffp)
 	}
 }
 
-int
-linker_ddb_symbol_values(c_linker_sym_t sym, linker_symval_t *symval)
+static int
+linker_debug_symbol_values(c_linker_sym_t sym, linker_symval_t *symval)
 {
 	linker_file_t lf;
 
@@ -845,7 +863,80 @@ linker_ddb_symbol_values(c_linker_sym_t sym, linker_symval_t *symval)
 	}
 	return (ENOENT);
 }
+
+static int
+linker_debug_search_symbol_name(caddr_t value, char *buf, u_int buflen,
+    long *offset)
+{
+	linker_symval_t symval;
+	c_linker_sym_t sym;
+	int error;
+
+	*offset = 0;
+	error = linker_debug_search_symbol(value, &sym, offset);
+	if (error)
+		return (error);
+	error = linker_debug_symbol_values(sym, &symval);
+	if (error)
+		return (error);
+	strlcpy(buf, symval.name, buflen);
+	return (0);
+}
+
+#ifdef DDB
+/*
+ * DDB Helpers.  DDB has to look across multiple files with their own symbol
+ * tables and string tables.
+ *
+ * Note that we do not obey list locking protocols here.  We really don't need
+ * DDB to hang because somebody's got the lock held.  We'll take the chance
+ * that the files list is inconsistant instead.
+ */
+int
+linker_ddb_lookup(const char *symstr, c_linker_sym_t *sym)
+{
+
+	return (linker_debug_lookup(symstr, sym));
+}
+
+int
+linker_ddb_search_symbol(caddr_t value, c_linker_sym_t *sym, long *diffp)
+{
+
+	return (linker_debug_search_symbol(value, sym, diffp));
+}
+
+int
+linker_ddb_symbol_values(c_linker_sym_t sym, linker_symval_t *symval)
+{
+
+	return (linker_debug_symbol_values(sym, symval));
+}
+
+int
+linker_ddb_search_symbol_name(caddr_t value, char *buf, u_int buflen,
+    long *offset)
+{
+
+	return (linker_debug_search_symbol_name(value, buf, buflen, offset));
+}
 #endif
+
+/*
+ * stack(9) helper for non-debugging environemnts.  Unlike DDB helpers, we do
+ * obey locking protocols, and offer a significantly less complex interface.
+ */
+int
+linker_search_symbol_name(caddr_t value, char *buf, u_int buflen,
+    long *offset)
+{
+	int error;
+
+	KLD_LOCK();
+	error = linker_debug_search_symbol_name(value, buf, buflen, offset);
+	KLD_UNLOCK();
+	return (error);
+}
 
 /*
  * Syscalls.
@@ -1475,7 +1566,7 @@ restart:
 	/* woohoo! we made it! */
 }
 
-SYSINIT(preload, SI_SUB_KLD, SI_ORDER_MIDDLE, linker_preload, 0)
+SYSINIT(preload, SI_SUB_KLD, SI_ORDER_MIDDLE, linker_preload, 0);
 
 /*
  * Search for a not-loaded module by name.
@@ -1547,8 +1638,8 @@ linker_lookup_file(const char *path, int pathlen, const char *name,
 			NDFREE(&nd, NDF_ONLY_PNBUF);
 			type = nd.ni_vp->v_type;
 			if (vap)
-				VOP_GETATTR(nd.ni_vp, vap, td->td_ucred, td);
-			VOP_UNLOCK(nd.ni_vp, 0, td);
+				VOP_GETATTR(nd.ni_vp, vap, td->td_ucred);
+			VOP_UNLOCK(nd.ni_vp, 0);
 			vn_close(nd.ni_vp, FREAD, td->td_ucred, td);
 			VFS_UNLOCK_GIANT(vfslocked);
 			if (type == VREG)
@@ -1600,7 +1691,7 @@ linker_hints_lookup(const char *path, int pathlen, const char *modname,
 	if (nd.ni_vp->v_type != VREG)
 		goto bad;
 	best = cp = NULL;
-	error = VOP_GETATTR(nd.ni_vp, &vattr, cred, td);
+	error = VOP_GETATTR(nd.ni_vp, &vattr, cred);
 	if (error)
 		goto bad;
 	/*
@@ -1617,7 +1708,7 @@ linker_hints_lookup(const char *path, int pathlen, const char *modname,
 	    UIO_SYSSPACE, IO_NODELOCKED, cred, NOCRED, &reclen, td);
 	if (error)
 		goto bad;
-	VOP_UNLOCK(nd.ni_vp, 0, td);
+	VOP_UNLOCK(nd.ni_vp, 0);
 	vn_close(nd.ni_vp, FREAD, cred, td);
 	VFS_UNLOCK_GIANT(vfslocked);
 	nd.ni_vp = NULL;
@@ -1686,7 +1777,7 @@ bad:
 	if (hints)
 		free(hints, M_TEMP);
 	if (nd.ni_vp != NULL) {
-		VOP_UNLOCK(nd.ni_vp, 0, td);
+		VOP_UNLOCK(nd.ni_vp, 0);
 		vn_close(nd.ni_vp, FREAD, cred, td);
 		VFS_UNLOCK_GIANT(vfslocked);
 	}
@@ -1802,14 +1893,13 @@ linker_hwpmc_list_objects(void)
 
  retry:
 	/* allocate nmappings+1 entries */
-	MALLOC(hc.kobase, struct pmckern_map_in *,
-	    (hc.nmappings + 1) * sizeof(struct pmckern_map_in), M_LINKER,
-	    M_WAITOK | M_ZERO);
+	hc.kobase = malloc((hc.nmappings + 1) * sizeof(struct pmckern_map_in),
+	    M_LINKER, M_WAITOK | M_ZERO);
 
 	hc.nobjects = 0;
 	if (linker_file_foreach(linker_hwpmc_list_object, &hc) != 0) {
 		hc.nmappings = hc.nobjects;
-		FREE(hc.kobase, M_LINKER);
+		free(hc.kobase, M_LINKER);
 		goto retry;
 	}
 

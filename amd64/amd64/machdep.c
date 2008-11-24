@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/machdep.c,v 1.676 2007/10/28 21:23:48 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/machdep.c,v 1.690 2008/09/08 09:59:05 kib Exp $");
 
 #include "opt_atalk.h"
 #include "opt_atpic.h"
@@ -53,6 +53,7 @@ __FBSDID("$FreeBSD: src/sys/amd64/amd64/machdep.c,v 1.676 2007/10/28 21:23:48 jh
 #include "opt_maxmem.h"
 #include "opt_msgbuf.h"
 #include "opt_perfmon.h"
+#include "opt_sched.h"
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -61,7 +62,6 @@ __FBSDID("$FreeBSD: src/sys/amd64/amd64/machdep.c,v 1.676 2007/10/28 21:23:48 jh
 #include <sys/buf.h>
 #include <sys/bus.h>
 #include <sys/callout.h>
-#include <sys/clock.h>
 #include <sys/cons.h>
 #include <sys/cpu.h>
 #include <sys/eventhandler.h>
@@ -138,7 +138,6 @@ __FBSDID("$FreeBSD: src/sys/amd64/amd64/machdep.c,v 1.676 2007/10/28 21:23:48 jh
 CTASSERT(offsetof(struct pcpu, pc_curthread) == 0);
 
 extern u_int64_t hammer_time(u_int64_t, u_int64_t);
-extern void dblfault_handler(void);
 
 extern void printcpuinfo(void);	/* XXX header file */
 extern void identify_cpu(void);
@@ -150,11 +149,15 @@ extern void panicifcpuunsupported(void);
 static void cpu_startup(void *);
 static void get_fpcontext(struct thread *td, mcontext_t *mcp);
 static int  set_fpcontext(struct thread *td, const mcontext_t *mcp);
-SYSINIT(cpu, SI_SUB_CPU, SI_ORDER_FIRST, cpu_startup, NULL)
+SYSINIT(cpu, SI_SUB_CPU, SI_ORDER_FIRST, cpu_startup, NULL);
 
 #ifdef DDB
 extern vm_offset_t ksym_start, ksym_end;
 #endif
+
+/* Intel ICH registers */
+#define ICH_PMBASE	0x400
+#define ICH_SMI_EN	ICH_PMBASE + 0x30
 
 int	_udatasel, _ucodesel, _ucode32sel;
 
@@ -193,6 +196,27 @@ static void
 cpu_startup(dummy)
 	void *dummy;
 {
+	char *sysenv;
+
+	/*
+	 * On MacBooks, we need to disallow the legacy USB circuit to
+	 * generate an SMI# because this can cause several problems,
+	 * namely: incorrect CPU frequency detection and failure to
+	 * start the APs.
+	 * We do this by disabling a bit in the SMI_EN (SMI Control and
+	 * Enable register) of the Intel ICH LPC Interface Bridge. 
+	 */
+	sysenv = getenv("smbios.system.product");
+	if (sysenv != NULL) {
+		if (strncmp(sysenv, "MacBook", 7) == 0) {
+			if (bootverbose)
+				printf("Disabling LEGACY_USB_EN bit on "
+				    "Intel ICH.\n");
+			outl(ICH_SMI_EN, inl(ICH_SMI_EN) & ~0x8);
+		}
+		freeenv(sysenv);
+	}
+
 	/*
 	 * Good {morning,afternoon,evening,night}.
 	 */
@@ -333,7 +357,7 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 
 	regs->tf_rsp = (long)sfp;
 	regs->tf_rip = PS_STRINGS - *(p->p_sysent->sv_szsigcode);
-	regs->tf_rflags &= ~PSL_T;
+	regs->tf_rflags &= ~(PSL_T | PSL_D);
 	regs->tf_cs = _ucodesel;
 	PROC_LOCK(p);
 	mtx_lock(&psp->ps_mtx);
@@ -504,62 +528,192 @@ cpu_halt(void)
 		__asm__ ("hlt");
 }
 
-/*
- * Hook to idle the CPU when possible.  In the SMP case we default to
- * off because a halted cpu will not currently pick up a new thread in the
- * run queue until the next timer tick.  If turned on this will result in
- * approximately a 4.2% loss in real time performance in buildworld tests
- * (but improves user and sys times oddly enough), and saves approximately
- * 5% in power consumption on an idle machine (tests w/2xCPU 1.1GHz P3).
- *
- * XXX we need to have a cpu mask of idle cpus and generate an IPI or
- * otherwise generate some sort of interrupt to wake up cpus sitting in HLT.
- * Then we can have our cake and eat it too.
- *
- * XXX I'm turning it on for SMP as well by default for now.  It seems to
- * help lock contention somewhat, and this is critical for HTT. -Peter
- */
-static int	cpu_idle_hlt = 1;
-TUNABLE_INT("machdep.cpu_idle_hlt", &cpu_idle_hlt);
-SYSCTL_INT(_machdep, OID_AUTO, cpu_idle_hlt, CTLFLAG_RW,
-    &cpu_idle_hlt, 0, "Idle loop HLT enable");
+void (*cpu_idle_hook)(void) = NULL;	/* ACPI idle hook. */
 
 static void
-cpu_idle_default(void)
+cpu_idle_hlt(int busy)
 {
 	/*
-	 * we must absolutely guarentee that hlt is the
-	 * absolute next instruction after sti or we
-	 * introduce a timing window.
+	 * we must absolutely guarentee that hlt is the next instruction
+	 * after sti or we introduce a timing window.
 	 */
-	__asm __volatile("sti; hlt");
+	disable_intr();
+  	if (sched_runnable())
+		enable_intr();
+	else
+		__asm __volatile("sti; hlt");
 }
 
-/*
- * Note that we have to be careful here to avoid a race between checking
- * sched_runnable() and actually halting.  If we don't do this, we may waste
- * the time between calling hlt and the next interrupt even though there
- * is a runnable process.
- */
-void
-cpu_idle(void)
+static void
+cpu_idle_acpi(int busy)
 {
+	disable_intr();
+  	if (sched_runnable())
+		enable_intr();
+	else if (cpu_idle_hook)
+		cpu_idle_hook();
+	else
+		__asm __volatile("sti; hlt");
+}
 
+static void
+cpu_idle_spin(int busy)
+{
+	return;
+}
+
+void (*cpu_idle_fn)(int) = cpu_idle_acpi;
+
+void
+cpu_idle(int busy)
+{
 #ifdef SMP
 	if (mp_grab_cpu_hlt())
 		return;
 #endif
-	if (cpu_idle_hlt) {
-		disable_intr();
-  		if (sched_runnable())
-			enable_intr();
-		else
-			(*cpu_idle_hook)();
-	}
+	cpu_idle_fn(busy);
 }
 
-/* Other subsystems (e.g., ACPI) can hook this later. */
-void (*cpu_idle_hook)(void) = cpu_idle_default;
+/*
+ * mwait cpu power states.  Lower 4 bits are sub-states.
+ */
+#define	MWAIT_C0	0xf0
+#define	MWAIT_C1	0x00
+#define	MWAIT_C2	0x10
+#define	MWAIT_C3	0x20
+#define	MWAIT_C4	0x30
+
+#define	MWAIT_DISABLED	0x0
+#define	MWAIT_WOKEN	0x1
+#define	MWAIT_WAITING	0x2
+
+static void
+cpu_idle_mwait(int busy)
+{
+	int *mwait;
+
+	mwait = (int *)PCPU_PTR(monitorbuf);
+	*mwait = MWAIT_WAITING;
+	if (sched_runnable())
+		return;
+	cpu_monitor(mwait, 0, 0);
+	if (*mwait == MWAIT_WAITING)
+		cpu_mwait(0, MWAIT_C1);
+}
+
+static void
+cpu_idle_mwait_hlt(int busy)
+{
+	int *mwait;
+
+	mwait = (int *)PCPU_PTR(monitorbuf);
+	if (busy == 0) {
+		*mwait = MWAIT_DISABLED;
+		cpu_idle_hlt(busy);
+		return;
+	}
+	*mwait = MWAIT_WAITING;
+	if (sched_runnable())
+		return;
+	cpu_monitor(mwait, 0, 0);
+	if (*mwait == MWAIT_WAITING)
+		cpu_mwait(0, MWAIT_C1);
+}
+
+int
+cpu_idle_wakeup(int cpu)
+{
+	struct pcpu *pcpu;
+	int *mwait;
+
+	if (cpu_idle_fn == cpu_idle_spin)
+		return (1);
+	if (cpu_idle_fn != cpu_idle_mwait && cpu_idle_fn != cpu_idle_mwait_hlt)
+		return (0);
+	pcpu = pcpu_find(cpu);
+	mwait = (int *)pcpu->pc_monitorbuf;
+	/*
+	 * This doesn't need to be atomic since missing the race will
+	 * simply result in unnecessary IPIs.
+	 */
+	if (cpu_idle_fn == cpu_idle_mwait_hlt && *mwait == MWAIT_DISABLED)
+		return (0);
+	*mwait = MWAIT_WOKEN;
+
+	return (1);
+}
+
+/*
+ * Ordered by speed/power consumption.
+ */
+struct {
+	void	*id_fn;
+	char	*id_name;
+} idle_tbl[] = {
+	{ cpu_idle_spin, "spin" },
+	{ cpu_idle_mwait, "mwait" },
+	{ cpu_idle_mwait_hlt, "mwait_hlt" },
+	{ cpu_idle_hlt, "hlt" },
+	{ cpu_idle_acpi, "acpi" },
+	{ NULL, NULL }
+};
+
+static int
+idle_sysctl_available(SYSCTL_HANDLER_ARGS)
+{
+	char *avail, *p;
+	int error;
+	int i;
+
+	avail = malloc(256, M_TEMP, M_WAITOK);
+	p = avail;
+	for (i = 0; idle_tbl[i].id_name != NULL; i++) {
+		if (strstr(idle_tbl[i].id_name, "mwait") &&
+		    (cpu_feature2 & CPUID2_MON) == 0)
+			continue;
+		p += sprintf(p, "%s, ", idle_tbl[i].id_name);
+	}
+	error = sysctl_handle_string(oidp, avail, 0, req);
+	free(avail, M_TEMP);
+	return (error);
+}
+
+static int
+idle_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	char buf[16];
+	int error;
+	char *p;
+	int i;
+
+	p = "unknown";
+	for (i = 0; idle_tbl[i].id_name != NULL; i++) {
+		if (idle_tbl[i].id_fn == cpu_idle_fn) {
+			p = idle_tbl[i].id_name;
+			break;
+		}
+	}
+	strncpy(buf, p, sizeof(buf));
+	error = sysctl_handle_string(oidp, buf, sizeof(buf), req);
+	if (error != 0 || req->newptr == NULL)
+		return (error);
+	for (i = 0; idle_tbl[i].id_name != NULL; i++) {
+		if (strstr(idle_tbl[i].id_name, "mwait") &&
+		    (cpu_feature2 & CPUID2_MON) == 0)
+			continue;
+		if (strcmp(idle_tbl[i].id_name, buf))
+			continue;
+		cpu_idle_fn = idle_tbl[i].id_fn;
+		return (0);
+	}
+	return (EINVAL);
+}
+
+SYSCTL_PROC(_machdep, OID_AUTO, idle_available, CTLTYPE_STRING | CTLFLAG_RD,
+    0, 0, idle_sysctl_available, "A", "list of available idle functions");
+
+SYSCTL_PROC(_machdep, OID_AUTO, idle, CTLTYPE_STRING | CTLFLAG_RW, 0, 0,
+    idle_sysctl, "A", "currently selected idle function");
 
 /*
  * Clear registers on exec
@@ -580,6 +734,7 @@ exec_setregs(td, entry, stack, ps_strings)
 	pcb->pcb_fsbase = 0;
 	pcb->pcb_gsbase = 0;
 	critical_exit();
+	pcb->pcb_flags &= ~(PCB_32BIT | PCB_GS32BIT);
 	load_ds(_udatasel);
 	load_es(_udatasel);
 	load_fs(_udatasel);
@@ -648,7 +803,7 @@ cpu_setregs(void)
  * Initialize segments & interrupt table
  */
 
-struct user_segment_descriptor gdt[NGDT * MAXCPU];/* global descriptor table */
+struct user_segment_descriptor gdt[NGDT * MAXCPU];/* global descriptor tables */
 static struct gate_descriptor idt0[NIDT];
 struct gate_descriptor *idt = &idt0[0];	/* interrupt descriptor table */
 
@@ -715,7 +870,7 @@ struct soft_segment_descriptor gdt_segs[] = {
 /* GPROC0_SEL	6 Proc 0 Tss Descriptor */
 {
 	0x0,			/* segment base address */
-	sizeof(struct amd64tss)-1,/* length - all address space */
+	sizeof(struct amd64tss)-1,/* length */
 	SDT_SYSTSS,		/* segment type */
 	SEL_KPL,		/* segment descriptor priority level */
 	1,			/* segment descriptor present */
@@ -823,11 +978,23 @@ ssdtosyssd(ssd, sd)
 
 #if !defined(DEV_ATPIC) && defined(DEV_ISA)
 #include <isa/isavar.h>
-u_int
+#include <isa/isareg.h>
+/*
+ * Return a bitmap of the current interrupt requests.  This is 8259-specific
+ * and is only suitable for use at probe time.
+ * This is only here to pacify sio.  It is NOT FATAL if this doesn't work.
+ * It shouldn't be here.  There should probably be an APIC centric
+ * implementation in the apic driver code, if at all.
+ */
+intrmask_t
 isa_irq_pending(void)
 {
+	u_char irr1;
+	u_char irr2;
 
-	return (0);
+	irr1 = inb(IO_ICU1);
+	irr2 = inb(IO_ICU2);
+	return ((irr2 << 8) | irr1);
 }
 #endif
 
@@ -1137,7 +1304,7 @@ hammer_time(u_int64_t modulep, u_int64_t physfree)
  	 * This may be done better later if it gets more high level
  	 * components in it. If so just link td->td_proc here.
 	 */
-	proc_linkup(&proc0, &thread0);
+	proc_linkup0(&proc0, &thread0);
 
 	preload_metadata = (caddr_t)(uintptr_t)(modulep + KERNBASE);
 	preload_bootstrap_relocate(KERNBASE);
@@ -1180,6 +1347,7 @@ hammer_time(u_int64_t modulep, u_int64_t physfree)
 	PCPU_SET(curthread, &thread0);
 	PCPU_SET(curpcb, thread0.td_pcb);
 	PCPU_SET(tssp, &common_tss[0]);
+	PCPU_SET(gs32p, &gdt[GUGS32_SEL]);
 
 	/*
 	 * Initialize mutexes.
@@ -1253,7 +1421,8 @@ hammer_time(u_int64_t modulep, u_int64_t physfree)
 
 #ifdef KDB
 	if (boothowto & RB_KDB)
-		kdb_enter("Boot flags requested debugger");
+		kdb_enter(KDB_WHY_BOOTFLAGS,
+		    "Boot flags requested debugger");
 #endif
 
 	identify_cpu();		/* Final stage of CPU initialization */
@@ -1299,8 +1468,12 @@ hammer_time(u_int64_t modulep, u_int64_t physfree)
 	_udatasel = GSEL(GUDATA_SEL, SEL_UPL);
 	_ucode32sel = GSEL(GUCODE32_SEL, SEL_UPL);
 
+	load_ds(_udatasel);
+	load_es(_udatasel);
+	load_fs(_udatasel);
+
 	/* setup proc 0's pcb */
-	thread0.td_pcb->pcb_flags = 0; /* XXXKSE */
+	thread0.td_pcb->pcb_flags = 0;
 	thread0.td_pcb->pcb_cr3 = KPML4phys;
 	thread0.td_frame = &proc0_tf;
 

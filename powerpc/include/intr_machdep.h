@@ -22,7 +22,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/include/intr_machdep.h,v 1.9 2007/08/11 19:25:31 marcel Exp $
+ * $FreeBSD: src/sys/powerpc/include/intr_machdep.h,v 1.11 2008/03/07 22:08:42 marcel Exp $
  */
 
 #ifndef	_MACHINE_INTR_MACHDEP_H_
@@ -34,12 +34,15 @@ extern device_t pic;
 
 struct trapframe;
 
-void	powerpc_register_pic(device_t);
+driver_filter_t powerpc_ipi_handler;
+
+void	powerpc_register_pic(device_t, u_int);
 
 void	powerpc_dispatch_intr(u_int, struct trapframe *);
 int	powerpc_enable_intr(void);
 int	powerpc_setup_intr(const char *, u_int, driver_filter_t,
     driver_intr_t, void *, enum intr_type, void **);
 int	powerpc_teardown_intr(void *);
+int	powerpc_config_intr(int, enum intr_trigger, enum intr_polarity);
 
 #endif /* _MACHINE_INTR_MACHDEP_H_ */

@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/vfs_default.c,v 1.138 2007/05/18 13:02:13 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/vfs_default.c,v 1.145 2008/08/28 15:23:18 attilio Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -44,6 +44,7 @@ __FBSDID("$FreeBSD: src/sys/kern/vfs_default.c,v 1.138 2007/05/18 13:02:13 kib E
 #include <sys/kernel.h>
 #include <sys/limits.h>
 #include <sys/lock.h>
+#include <sys/lockf.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
 #include <sys/mutex.h>
@@ -75,7 +76,8 @@ struct vop_vector default_vnodeops = {
 	.vop_default =		NULL,
 	.vop_bypass =		VOP_EOPNOTSUPP,
 
-	.vop_advlock =		VOP_EINVAL,
+	.vop_advlock =		vop_stdadvlock,
+	.vop_advlockasync =	vop_stdadvlockasync,
 	.vop_bmap =		vop_stdbmap,
 	.vop_close =		VOP_NULL,
 	.vop_fsync =		VOP_NULL,
@@ -201,6 +203,47 @@ vop_nostrategy (struct vop_strategy_args *ap)
 }
 
 /*
+ * Advisory record locking support
+ */
+int
+vop_stdadvlock(struct vop_advlock_args *ap)
+{
+	struct vnode *vp;
+	struct ucred *cred;
+	struct vattr vattr;
+	int error;
+
+	vp = ap->a_vp;
+	cred = curthread->td_ucred;
+	vn_lock(vp, LK_SHARED | LK_RETRY);
+	error = VOP_GETATTR(vp, &vattr, cred);
+	VOP_UNLOCK(vp, 0);
+	if (error)
+		return (error);
+
+	return (lf_advlock(ap, &(vp->v_lockf), vattr.va_size));
+}
+
+int
+vop_stdadvlockasync(struct vop_advlockasync_args *ap)
+{
+	struct vnode *vp;
+	struct ucred *cred;
+	struct vattr vattr;
+	int error;
+
+	vp = ap->a_vp;
+	cred = curthread->td_ucred;
+	vn_lock(vp, LK_SHARED | LK_RETRY);
+	error = VOP_GETATTR(vp, &vattr, cred);
+	VOP_UNLOCK(vp, 0);
+	if (error)
+		return (error);
+
+	return (lf_advlockasync(ap, &(vp->v_lockf), vattr.va_size));
+}
+
+/*
  * vop_stdpathconf:
  *
  * Standard implementation of POSIX pathconf, to get information about limits
@@ -256,14 +299,15 @@ vop_stdlock(ap)
 	struct vop_lock1_args /* {
 		struct vnode *a_vp;
 		int a_flags;
-		struct thread *a_td;
 		char *file;
 		int line;
 	} */ *ap;
 {
 	struct vnode *vp = ap->a_vp;
 
-	return (_lockmgr(vp->v_vnlock, ap->a_flags, VI_MTX(vp), ap->a_td, ap->a_file, ap->a_line));
+	return (_lockmgr_args(vp->v_vnlock, ap->a_flags, VI_MTX(vp),
+	    LK_WMESG_DEFAULT, LK_PRIO_DEFAULT, LK_TIMO_DEFAULT, ap->a_file,
+	    ap->a_line));
 }
 
 /* See above. */
@@ -272,13 +316,11 @@ vop_stdunlock(ap)
 	struct vop_unlock_args /* {
 		struct vnode *a_vp;
 		int a_flags;
-		struct thread *a_td;
 	} */ *ap;
 {
 	struct vnode *vp = ap->a_vp;
 
-	return (lockmgr(vp->v_vnlock, ap->a_flags | LK_RELEASE, VI_MTX(vp),
-	    ap->a_td));
+	return (lockmgr(vp->v_vnlock, ap->a_flags | LK_RELEASE, VI_MTX(vp)));
 }
 
 /* See above. */
@@ -286,11 +328,10 @@ int
 vop_stdislocked(ap)
 	struct vop_islocked_args /* {
 		struct vnode *a_vp;
-		struct thread *a_td;
 	} */ *ap;
 {
 
-	return (lockstatus(ap->a_vp->v_vnlock, ap->a_td));
+	return (lockstatus(ap->a_vp->v_vnlock));
 }
 
 /*
@@ -407,12 +448,13 @@ vop_stdfsync(ap)
 	int error = 0;
 	int maxretry = 1000;     /* large, arbitrarily chosen */
 
-	VI_LOCK(vp);
+	bo = &vp->v_bufobj;
+	BO_LOCK(bo);
 loop1:
 	/*
 	 * MARK/SCAN initialization to avoid infinite loops.
 	 */
-        TAILQ_FOREACH(bp, &vp->v_bufobj.bo_dirty.bv_hd, b_bobufs) {
+        TAILQ_FOREACH(bp, &bo->bo_dirty.bv_hd, b_bobufs) {
                 bp->b_vflags &= ~BV_SCANNED;
 		bp->b_error = 0;
 	}
@@ -421,16 +463,16 @@ loop1:
 	 * Flush all dirty buffers associated with a vnode.
 	 */
 loop2:
-	TAILQ_FOREACH_SAFE(bp, &vp->v_bufobj.bo_dirty.bv_hd, b_bobufs, nbp) {
+	TAILQ_FOREACH_SAFE(bp, &bo->bo_dirty.bv_hd, b_bobufs, nbp) {
 		if ((bp->b_vflags & BV_SCANNED) != 0)
 			continue;
 		bp->b_vflags |= BV_SCANNED;
 		if (BUF_LOCK(bp, LK_EXCLUSIVE | LK_NOWAIT, NULL))
 			continue;
-		VI_UNLOCK(vp);
-		KASSERT(bp->b_bufobj == &vp->v_bufobj,
+		BO_UNLOCK(bo);
+		KASSERT(bp->b_bufobj == bo,
 		    ("bp %p wrong b_bufobj %p should be %p",
-		    bp, bp->b_bufobj, &vp->v_bufobj));
+		    bp, bp->b_bufobj, bo));
 		if ((bp->b_flags & B_DELWRI) == 0)
 			panic("fsync: not dirty");
 		if ((vp->v_object != NULL) && (bp->b_flags & B_CLUSTEROK)) {
@@ -439,7 +481,7 @@ loop2:
 			bremfree(bp);
 			bawrite(bp);
 		}
-		VI_LOCK(vp);
+		BO_LOCK(bo);
 		goto loop2;
 	}
 
@@ -450,7 +492,6 @@ loop2:
 	 * retry if dirty blocks still exist.
 	 */
 	if (ap->a_waitfor == MNT_WAIT) {
-		bo = &vp->v_bufobj;
 		bufobj_wwait(bo, 0, 0);
 		if (bo->bo_dirty.bv_cnt > 0) {
 			/*
@@ -466,7 +507,7 @@ loop2:
 			error = EAGAIN;
 		}
 	}
-	VI_UNLOCK(vp);
+	BO_UNLOCK(bo);
 	if (error == EAGAIN)
 		vprint("fsync: giving up on dirty", vp);
 
@@ -573,14 +614,11 @@ vfs_stdsync(mp, waitfor, td)
 	MNT_ILOCK(mp);
 loop:
 	MNT_VNODE_FOREACH(vp, mp, mvp) {
-
-		VI_LOCK(vp);
-		if (vp->v_bufobj.bo_dirty.bv_cnt == 0) {
-			VI_UNLOCK(vp);
+		/* bv_cnt is an acceptable race here. */
+		if (vp->v_bufobj.bo_dirty.bv_cnt == 0)
 			continue;
-		}
+		VI_LOCK(vp);
 		MNT_IUNLOCK(mp);
-
 		if ((error = vget(vp, lockreq, td)) != 0) {
 			MNT_ILOCK(mp);
 			if (error == ENOENT) {
@@ -594,7 +632,7 @@ loop:
 			allerror = error;
 
 		/* Do not turn this into vput.  td is not always curthread. */
-		VOP_UNLOCK(vp, 0, td);
+		VOP_UNLOCK(vp, 0);
 		vrele(vp);
 		MNT_ILOCK(mp);
 	}
@@ -660,7 +698,7 @@ vfs_stdextattrctl(mp, cmd, filename_vp, attrnamespace, attrname, td)
 {
 
 	if (filename_vp != NULL)
-		VOP_UNLOCK(filename_vp, 0, td);
+		VOP_UNLOCK(filename_vp, 0);
 	return (EOPNOTSUPP);
 }
 

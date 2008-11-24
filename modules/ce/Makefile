@@ -1,5 +1,5 @@
 # $Cronyx: sys.modules.ce.Makefile,v 1.2 2005/04/23 20:10:22 rik Exp $
-# $FreeBSD: src/sys/modules/ce/Makefile,v 1.3 2006/03/16 15:18:17 ru Exp $
+# $FreeBSD: src/sys/modules/ce/Makefile,v 1.4 2008/09/01 23:59:00 imp Exp $
 
 .PATH:  ${.CURDIR}/../../dev/ce
 KMOD	= if_ce
@@ -16,12 +16,12 @@ CFLAGS+= ${PROTOS}
 
 .if ${NETGRAPH} != 0
 opt_netgraph.h:
-	echo "#define NETGRAPH ${NETGRAPH}" > opt_netgraph.h
+	echo "#define NETGRAPH ${NETGRAPH}" > ${.TARGET}
 .endif
 
 .if ${NG_CRONYX} != 0
 opt_ng_cronyx.h:
-	echo "#define NETGRAPH_CRONYX 1" > opt_ng_cronyx.h
+	echo "#define NETGRAPH_CRONYX 1" > ${.TARGET}
 .endif
 .endif
 

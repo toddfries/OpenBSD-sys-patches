@@ -15,9 +15,8 @@
 # If you are in doubt as to the purpose or necessity of a line, check first 
 # in NOTES.
 #
-# $FreeBSD: src/sys/arm/conf/IQ31244,v 1.19 2007/02/19 01:03:08 cognet Exp $
+# $FreeBSD: src/sys/arm/conf/IQ31244,v 1.23 2008/10/23 01:51:55 marcel Exp $
 
-machine		arm
 ident		IQ31244
 
 options 	PHYSADDR=0xa0000000
@@ -45,6 +44,7 @@ options 	UFS_ACL			#Support for access control lists
 options 	UFS_DIRHASH		#Improve performance on big directories
 options 	NFSCLIENT		#Network Filesystem Client
 options 	NFSSERVER		#Network Filesystem Server
+options 	NFSLOCKD		#Network Lock Manager
 options 	NFS_ROOT		#NFS usable as /, requires NFSCLIENT
 #options 	MSDOSFS			#MSDOS Filesystem
 options 	CD9660			#ISO 9660 Filesystem
@@ -63,11 +63,8 @@ options		BOOTP_NFSV3
 options		BOOTP_WIRED_TO=em0
 options		BOOTP_COMPAT
 #options		PREEMPTION
-device		genclock
 device		loop
 device		ether
-device		nexus
-device		mem			# Memory and kernel memory devices
 #device		saarm
 device		miibus
 device		rl

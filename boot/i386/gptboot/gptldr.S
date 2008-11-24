@@ -27,7 +27,9 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/boot/i386/gptboot/gptldr.S,v 1.1 2007/10/24 21:32:59 jhb Exp $
+ * $FreeBSD: src/sys/boot/i386/gptboot/gptldr.S,v 1.2 2007/11/26 21:29:58 jhb Exp $
+ *
+ * Partly from: src/sys/boot/i386/boot2/boot1.S 1.31
  */
 
 /* Memory Locations */

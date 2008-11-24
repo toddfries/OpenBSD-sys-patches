@@ -48,7 +48,7 @@
 #include "opt_ddb.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/undefined.c,v 1.15 2007/06/04 21:38:45 attilio Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/undefined.c,v 1.16 2008/10/23 15:53:51 des Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -106,7 +106,7 @@ install_coproc_handler(int coproc, undef_handler_t handler)
 	KASSERT(handler != NULL, ("handler is NULL")); /* Used to be legal. */
 
 	/* XXX: M_TEMP??? */
-	MALLOC(uh, struct undefined_handler *, sizeof(*uh), M_TEMP, M_WAITOK);
+	uh = malloc(sizeof(*uh), M_TEMP, M_WAITOK);
 	uh->uh_handler = handler;
 	install_coproc_handler_static(coproc, uh);
 	return uh;
@@ -125,7 +125,7 @@ remove_coproc_handler(void *cookie)
 	struct undefined_handler *uh = cookie;
 
 	LIST_REMOVE(uh, uh_link);
-	FREE(uh, M_TEMP);
+	free(uh, M_TEMP);
 }
 
 

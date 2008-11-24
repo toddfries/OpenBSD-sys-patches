@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/at91/at91.c,v 1.13 2007/03/06 10:55:57 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/at91/at91.c,v 1.20 2008/10/26 22:53:59 stas Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -46,6 +46,8 @@ __FBSDID("$FreeBSD: src/sys/arm/at91/at91.c,v 1.13 2007/03/06 10:55:57 piso Exp 
 #include <arm/at91/at91var.h>
 
 static struct at91_softc *at91_softc;
+
+static void at91_eoi(void *);
 
 static int
 at91_bs_map(void *t, bus_addr_t bpa, bus_size_t size, int flags,
@@ -166,12 +168,49 @@ struct bus_space at91_bs_tag = {
 	generic_armv4_bs_c_2,
 	NULL,
 	NULL,
+
+	/* read (single) stream */
+	generic_bs_r_1,
+	generic_armv4_bs_r_2,
+	generic_bs_r_4,
+	NULL,
+
+	/* read multiple stream */
+	generic_bs_rm_1,
+	generic_armv4_bs_rm_2,
+	generic_bs_rm_4,
+	NULL,
+
+	/* read region stream */
+	generic_bs_rr_1,
+	generic_armv4_bs_rr_2,
+	generic_bs_rr_4,
+	NULL,
+
+	/* write (single) stream */
+	generic_bs_w_1,
+	generic_armv4_bs_w_2,
+	generic_bs_w_4,
+	NULL,
+
+	/* write multiple stream */
+	generic_bs_wm_1,
+	generic_armv4_bs_wm_2,
+	generic_bs_wm_4,
+	NULL,
+
+	/* write region stream */
+	NULL,
+	generic_armv4_bs_wr_2,
+	generic_bs_wr_4,
+	NULL,
 };
 
 static int
 at91_probe(device_t dev)
 {
 	device_set_desc(dev, "AT91 device bus");
+	arm_post_filter = at91_eoi;
 	return (0);
 }
 
@@ -209,7 +248,7 @@ at91_add_child(device_t dev, int prio, const char *name, int unit,
 	    printf("Can't add child %s%d ordered\n", name, unit);
 	    return;
 	}
-	ivar = malloc(sizeof(*ivar), M_DEVBUF, M_WAITOK | M_ZERO);
+	ivar = malloc(sizeof(*ivar), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (ivar == NULL) {
 		device_delete_child(dev, kid);
 		printf("Can't add alloc ivar\n");
@@ -301,7 +340,7 @@ struct cpu_devs at91rm9200_devs[] =
 	{
 		"at91_udp", 0,
 		AT91RM92_BASE + AT91RM92_UDP_BASE, AT91RM92_UDP_SIZE,
-		AT91RM92_IRQ_UDP
+		AT91RM92_IRQ_UDP, AT91RM92_IRQ_PIOB
 	},
 	{
 		"at91_mci", 0,
@@ -396,6 +435,48 @@ at91_cpu_add_builtin_children(device_t dev, struct at91_softc *sc)
 
 #define NORMDEV 50
 
+/*
+ * Standard priority levels for the system.  0 is lowest and 7 is highest.
+ * These values are the ones Atmel uses for its Linux port, which differ
+ * a little form the ones that are in the standard distribution.  Also,
+ * the ones marked with 'TWEEK' are different based on experience.
+ */
+static int irq_prio[32] =
+{
+	7,	/* Advanced Interrupt Controller (FIQ) */
+	7,	/* System Peripherals */
+	1,	/* Parallel IO Controller A */
+	1,	/* Parallel IO Controller B */
+	1,	/* Parallel IO Controller C */
+	1,	/* Parallel IO Controller D */
+	5,	/* USART 0 */
+	5,	/* USART 1 */
+	5,	/* USART 2 */
+	5,	/* USART 3 */
+	0,	/* Multimedia Card Interface */
+	2,	/* USB Device Port */
+	4,	/* Two-Wire Interface */		/* TWEEK */
+	5,	/* Serial Peripheral Interface */
+	4,	/* Serial Synchronous Controller 0 */
+	6,	/* Serial Synchronous Controller 1 */	/* TWEEK */
+	4,	/* Serial Synchronous Controller 2 */
+	0,	/* Timer Counter 0 */
+	6,	/* Timer Counter 1 */			/* TWEEK */
+	0,	/* Timer Counter 2 */
+	0,	/* Timer Counter 3 */
+	0,	/* Timer Counter 4 */
+	0,	/* Timer Counter 5 */
+	2,	/* USB Host port */
+	3,	/* Ethernet MAC */
+	0,	/* Advanced Interrupt Controller (IRQ0) */
+	0,	/* Advanced Interrupt Controller (IRQ1) */
+	0,	/* Advanced Interrupt Controller (IRQ2) */
+	0,	/* Advanced Interrupt Controller (IRQ3) */
+	0,	/* Advanced Interrupt Controller (IRQ4) */
+	0,	/* Advanced Interrupt Controller (IRQ5) */
+ 	0	/* Advanced Interrupt Controller (IRQ6) */
+};
+
 static int
 at91_attach(device_t dev)
 {
@@ -413,10 +494,6 @@ at91_attach(device_t dev)
 	sc->sc_irq_rman.rm_descr = "AT91 IRQs";
 	sc->sc_mem_rman.rm_type = RMAN_ARRAY;
 	sc->sc_mem_rman.rm_descr = "AT91 Memory";
-#if 0
-	sc->sc_usbmem_rman.rm_type = RMAN_ARRAY;
-	sc->sc_usbmem_rman.rm_descr = "AT91RM9200 USB Memory-mapped regs";
-#endif
 	if (rman_init(&sc->sc_irq_rman) != 0 ||
 	    rman_manage_region(&sc->sc_irq_rman, 1, 31) != 0)
 		panic("at91_attach: failed to set up IRQ rman");
@@ -432,13 +509,11 @@ at91_attach(device_t dev)
 		bus_space_write_4(sc->sc_st, sc->sc_sys_sh, IC_SVR + 
 		    i * 4, i);
 		/* Priority. */
-		/* XXX: Give better priorities to IRQs */
 		bus_space_write_4(sc->sc_st, sc->sc_sys_sh, IC_SMR + i * 4,
-		    0);
+		    irq_prio[i]);
 		if (i < 8)
 			bus_space_write_4(sc->sc_st, sc->sc_sys_sh, IC_EOICR,
 			    1);
-		    
 	}
 	bus_space_write_4(sc->sc_st, sc->sc_sys_sh, IC_SPU, 32);
 	/* No debug. */
@@ -493,16 +568,12 @@ at91_alloc_resource(device_t dev, device_t child, int type, int *rid,
 		    start, end, count, flags, child);
 		break;
 	case SYS_RES_MEMORY:
-#if 0
-		if (start >= 0x00300000 && start <= 0x003fffff)
-			rle->res = rman_reserve_resource(&sc->sc_usbmem_rman,
-			    start, end, count, flags, child);
-		else
-#endif
-			rle->res = rman_reserve_resource(&sc->sc_mem_rman,
-			    start, end, count, flags, child);
-		rman_set_bustag(rle->res, &at91_bs_tag);
-		rman_set_bushandle(rle->res, start);
+		rle->res = rman_reserve_resource(&sc->sc_mem_rman,
+		    start, end, count, flags, child);
+		if (rle->res != NULL) {
+			rman_set_bustag(rle->res, &at91_bs_tag);
+			rman_set_bushandle(rle->res, start);
+		}
 		break;
 	}
 	if (rle->res) {
@@ -647,6 +718,13 @@ arm_unmask_irq(uintptr_t nb)
 	bus_space_write_4(at91_softc->sc_st, at91_softc->sc_sys_sh,
 	    IC_EOICR, 0);
 
+}
+
+static void
+at91_eoi(void *unused)
+{
+	bus_space_write_4(at91_softc->sc_st, at91_softc->sc_sys_sh,
+	    IC_EOICR, 0);
 }
 
 static device_method_t at91_methods[] = {

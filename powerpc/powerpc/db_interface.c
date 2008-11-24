@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/powerpc/powerpc/db_interface.c,v 1.7 2007/06/09 21:55:16 marcel Exp $ */
+/*	$FreeBSD: src/sys/powerpc/powerpc/db_interface.c,v 1.8 2008/08/30 18:50:11 marcel Exp $ */
 /*	$NetBSD: db_interface.c,v 1.20 2002/05/13 20:30:09 matt Exp $ */
 /*	$OpenBSD: db_interface.c,v 1.2 1996/12/28 06:21:50 rahnds Exp $	*/
 
@@ -78,4 +78,8 @@ db_write_bytes(vm_offset_t addr, size_t size, char *data)
 void
 db_show_mdpcpu(struct pcpu *pc)
 {
+
+	db_printf("PPC: hwref   = %#x\n", pc->pc_hwref);
+	db_printf("PPC: ipimask = %#x\n", pc->pc_ipimask);
+	db_printf("PPC: pir     = %#x\n", pc->pc_pir);
 }

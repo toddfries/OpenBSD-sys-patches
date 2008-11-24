@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ufsmount.h	8.6 (Berkeley) 3/30/95
- * $FreeBSD: src/sys/ufs/ufs/ufsmount.h,v 1.37 2006/04/03 22:23:23 tegge Exp $
+ * $FreeBSD: src/sys/ufs/ufs/ufsmount.h,v 1.39 2008/09/16 10:59:35 kib Exp $
  */
 
 #ifndef _UFS_UFS_UFSMOUNT_H_
@@ -61,9 +61,9 @@ struct ufs_extattr_per_mount;
 /* This structure describes the UFS specific mount structure data. */
 struct ufsmount {
 	struct	mount *um_mountp;		/* filesystem vfs structure */
-	struct cdev *um_dev;			/* device mounted */
-	struct g_consumer *um_cp;
-	struct bufobj *um_bo;			/* Buffer cache object */
+	struct	cdev *um_dev;			/* device mounted */
+	struct	g_consumer *um_cp;
+	struct	bufobj *um_bo;			/* Buffer cache object */
 	struct	vnode *um_devvp;		/* block device mounted vnode */
 	u_long	um_fstype;			/* type of filesystem */
 	struct	fs *um_fs;			/* pointer to superblock */
@@ -73,8 +73,8 @@ struct ufsmount {
 	u_long	um_seqinc;			/* inc between seq blocks */
 	struct	mtx um_lock;			/* Protects ufsmount & fs */
 	long	um_numindirdeps;		/* outstanding indirdeps */
-	struct workhead softdep_workitem_pending; /* softdep work queue */
-	struct worklist *softdep_worklist_tail;	/* Tail pointer for above */
+	struct	workhead softdep_workitem_pending; /* softdep work queue */
+	struct	worklist *softdep_worklist_tail; /* Tail pointer for above */
 	int	softdep_on_worklist;		/* Items on the worklist */
 	int	softdep_on_worklist_inprogress;	/* Busy items on worklist */
 	int	softdep_deps;			/* Total dependency count */
@@ -93,6 +93,7 @@ struct ufsmount {
 	int	(*um_valloc)(struct vnode *, int, struct ucred *, struct vnode **);
 	int	(*um_vfree)(struct vnode *, ino_t, int);
 	void	(*um_ifree)(struct ufsmount *, struct inode *);
+	int	(*um_rdonly)(struct inode *);
 };
 
 #define UFS_BALLOC(aa, bb, cc, dd, ee, ff) VFSTOUFS((aa)->v_mount)->um_balloc(aa, bb, cc, dd, ee, ff)
@@ -102,6 +103,7 @@ struct ufsmount {
 #define UFS_VALLOC(aa, bb, cc, dd) VFSTOUFS((aa)->v_mount)->um_valloc(aa, bb, cc, dd)
 #define UFS_VFREE(aa, bb, cc) VFSTOUFS((aa)->v_mount)->um_vfree(aa, bb, cc)
 #define UFS_IFREE(aa, bb) ((aa)->um_ifree(aa, bb))
+#define	UFS_RDONLY(aa) ((aa)->i_ump->um_rdonly(aa))
 
 #define	UFS_LOCK(aa)	mtx_lock(&(aa)->um_lock)
 #define	UFS_UNLOCK(aa)	mtx_unlock(&(aa)->um_lock)

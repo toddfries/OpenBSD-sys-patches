@@ -27,12 +27,13 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
 
-$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_tom.h,v 1.2 2008/02/23 01:06:17 kmacy Exp $
+$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_tom.h,v 1.3 2008/09/24 01:19:08 kmacy Exp $
 
 ***************************************************************************/
 #ifndef CXGB_TOM_H_
 #define CXGB_TOM_H_
 #include <sys/protosw.h>
+#include <netinet/toedev.h>
 
 #define LISTEN_INFO_HASH_SIZE 32 
 

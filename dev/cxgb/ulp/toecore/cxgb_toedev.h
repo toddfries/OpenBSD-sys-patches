@@ -26,13 +26,14 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
-$FreeBSD: src/sys/dev/cxgb/ulp/toecore/cxgb_toedev.h,v 1.2 2008/02/23 01:06:17 kmacy Exp $
+$FreeBSD: src/sys/dev/cxgb/ulp/toecore/cxgb_toedev.h,v 1.3 2008/09/16 02:03:28 kmacy Exp $
 
 ***************************************************************************/
 
 #ifndef _CXGB_TOEDEV_H_
-#define _CXGB_TOEDEV_H_ 
+#define _CXGB_TOEDEV_H_
 #include <netinet/toedev.h>
+
 
 /* offload type ids */
 enum {

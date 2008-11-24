@@ -33,23 +33,23 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/vfs_cache.c,v 1.114 2007/09/21 10:16:56 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/vfs_cache.c,v 1.126 2008/09/24 18:51:33 jhb Exp $");
 
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/kernel.h>
-#include <sys/lock.h>
-#include <sys/mutex.h>
-#include <sys/sysctl.h>
-#include <sys/mount.h>
-#include <sys/vnode.h>
-#include <sys/namei.h>
-#include <sys/malloc.h>
-#include <sys/syscallsubr.h>
-#include <sys/sysproto.h>
-#include <sys/proc.h>
 #include <sys/filedesc.h>
 #include <sys/fnv_hash.h>
+#include <sys/kernel.h>
+#include <sys/lock.h>
+#include <sys/malloc.h>
+#include <sys/mount.h>
+#include <sys/mutex.h>
+#include <sys/namei.h>
+#include <sys/proc.h>
+#include <sys/syscallsubr.h>
+#include <sys/sysctl.h>
+#include <sys/sysproto.h>
+#include <sys/systm.h>
+#include <sys/vnode.h>
 
 #include <vm/uma.h>
 
@@ -199,10 +199,12 @@ sysctl_debug_hashstat_rawnchash(SYSCTL_HANDLER_ARGS)
 
 	/* Scan hash tables for applicable entries */
 	for (ncpp = nchashtbl; n_nchash > 0; n_nchash--, ncpp++) {
+		CACHE_LOCK();
 		count = 0;
 		LIST_FOREACH(ncp, ncpp, nc_hash) {
 			count++;
 		}
+		CACHE_UNLOCK();
 		error = SYSCTL_OUT(req, &count, sizeof(count));
 		if (error)
 			return (error);
@@ -231,9 +233,11 @@ sysctl_debug_hashstat_nchash(SYSCTL_HANDLER_ARGS)
 	/* Scan hash tables for applicable entries */
 	for (ncpp = nchashtbl; n_nchash > 0; n_nchash--, ncpp++) {
 		count = 0;
+		CACHE_LOCK();
 		LIST_FOREACH(ncp, ncpp, nc_hash) {
 			count++;
 		}
+		CACHE_UNLOCK();
 		if (count)
 			used++;
 		if (maxlength < count)
@@ -300,7 +304,9 @@ cache_zap(ncp)
  * succeeds, the vnode is returned in *vpp, and a status of -1 is
  * returned. If the lookup determines that the name does not exist
  * (negative cacheing), a status of ENOENT is returned. If the lookup
- * fails, a status of zero is returned.
+ * fails, a status of zero is returned.  If the directory vnode is
+ * recycled out from under us due to a forced unmount, a status of
+ * EBADF is returned.
  *
  * vpp is locked and ref'd on return.  If we're looking up DOTDOT, dvp is
  * unlocked.  If we're looking up . an extra ref is taken, but the lock is
@@ -314,7 +320,6 @@ cache_lookup(dvp, vpp, cnp)
 	struct componentname *cnp;
 {
 	struct namecache *ncp;
-	struct thread *td;
 	u_int32_t hash;
 	int error, ltype;
 
@@ -322,7 +327,6 @@ cache_lookup(dvp, vpp, cnp)
 		cnp->cn_flags &= ~MAKEENTRY;
 		return (0);
 	}
-	td = cnp->cn_thread;
 retry:
 	CACHE_LOCK();
 	numcalls++;
@@ -425,28 +429,38 @@ success:
 		 * When we lookup "." we still can be asked to lock it
 		 * differently...
 		 */
-		ltype = cnp->cn_lkflags & (LK_SHARED | LK_EXCLUSIVE);
-		if (ltype == VOP_ISLOCKED(*vpp, td))
-			return (-1);
-		else if (ltype == LK_EXCLUSIVE)
-			vn_lock(*vpp, LK_UPGRADE | LK_RETRY, td);
+		ltype = cnp->cn_lkflags & LK_TYPE_MASK;
+		if (ltype != VOP_ISLOCKED(*vpp)) {
+			if (ltype == LK_EXCLUSIVE) {
+				vn_lock(*vpp, LK_UPGRADE | LK_RETRY);
+				if ((*vpp)->v_iflag & VI_DOOMED) {
+					/* forced unmount */
+					vrele(*vpp);
+					*vpp = NULL;
+					return (EBADF);
+				}
+			} else
+				vn_lock(*vpp, LK_DOWNGRADE | LK_RETRY);
+		}
 		return (-1);
 	}
 	ltype = 0;	/* silence gcc warning */
 	if (cnp->cn_flags & ISDOTDOT) {
-		ltype = VOP_ISLOCKED(dvp, td);
-		VOP_UNLOCK(dvp, 0, td);
+		ltype = VOP_ISLOCKED(dvp);
+		VOP_UNLOCK(dvp, 0);
 	}
 	VI_LOCK(*vpp);
 	CACHE_UNLOCK();
-	error = vget(*vpp, cnp->cn_lkflags | LK_INTERLOCK, td);
+	error = vget(*vpp, cnp->cn_lkflags | LK_INTERLOCK, cnp->cn_thread);
 	if (cnp->cn_flags & ISDOTDOT)
-		vn_lock(dvp, ltype | LK_RETRY, td);
-	if ((cnp->cn_flags & ISLASTCN) && (cnp->cn_lkflags & LK_EXCLUSIVE))
-		ASSERT_VOP_ELOCKED(*vpp, "cache_lookup");
+		vn_lock(dvp, ltype | LK_RETRY);
 	if (error) {
 		*vpp = NULL;
 		goto retry;
+	}
+	if ((cnp->cn_flags & ISLASTCN) &&
+	    (cnp->cn_lkflags & LK_TYPE_MASK) == LK_EXCLUSIVE) {
+		ASSERT_VOP_ELOCKED(*vpp, "cache_lookup");
 	}
 	return (-1);
 }
@@ -496,8 +510,39 @@ cache_enter(dvp, vp, cnp)
 
 	hold = 0;
 	zap = 0;
+
+	/*
+	 * Calculate the hash key and setup as much of the new
+	 * namecache entry as possible before acquiring the lock.
+	 */
 	ncp = cache_alloc(cnp->cn_namelen);
+	ncp->nc_vp = vp;
+	ncp->nc_dvp = dvp;
+	len = ncp->nc_nlen = cnp->cn_namelen;
+	hash = fnv_32_buf(cnp->cn_nameptr, len, FNV1_32_INIT);
+	bcopy(cnp->cn_nameptr, ncp->nc_name, len);
+	hash = fnv_32_buf(&dvp, sizeof(dvp), hash);
 	CACHE_LOCK();
+
+	/*
+	 * See if this vnode is already in the cache with this name.
+	 * This can happen with concurrent lookups of the same path
+	 * name.
+	 */
+	if (vp) {
+		struct namecache *n2;
+
+		TAILQ_FOREACH(n2, &vp->v_cache_dst, nc_dst) {
+			if (n2->nc_dvp == dvp &&
+			    n2->nc_nlen == cnp->cn_namelen &&
+			    !bcmp(n2->nc_name, cnp->cn_nameptr, n2->nc_nlen)) {
+				CACHE_UNLOCK();
+				cache_free(ncp);
+				return;
+			}
+		}
+	}	
+
 	numcache++;
 	if (!vp) {
 		numneg++;
@@ -509,16 +554,9 @@ cache_enter(dvp, vp, cnp)
 	}
 
 	/*
-	 * Set the rest of the namecache entry elements, calculate it's
-	 * hash key and insert it into the appropriate chain within
-	 * the cache entries table.
+	 * Insert the new namecache entry into the appropriate chain
+	 * within the cache entries table.
 	 */
-	ncp->nc_vp = vp;
-	ncp->nc_dvp = dvp;
-	len = ncp->nc_nlen = cnp->cn_namelen;
-	hash = fnv_32_buf(cnp->cn_nameptr, len, FNV1_32_INIT);
-	bcopy(cnp->cn_nameptr, ncp->nc_name, len);
-	hash = fnv_32_buf(&dvp, sizeof(dvp), hash);
 	ncpp = NCHHASH(hash);
 	LIST_INSERT_HEAD(ncpp, ncp, nc_hash);
 	if (LIST_EMPTY(&dvp->v_cache_src)) {
@@ -563,7 +601,7 @@ nchinit(void *dummy __unused)
 
 	nchashtbl = hashinit(desiredvnodes * 2, M_VFSCACHE, &nchash);
 }
-SYSINIT(vfs, SI_SUB_VFS, SI_ORDER_SECOND, nchinit, NULL)
+SYSINIT(vfs, SI_SUB_VFS, SI_ORDER_SECOND, nchinit, NULL);
 
 
 /*
@@ -643,9 +681,9 @@ vfs_cache_lookup(ap)
 	error = cache_lookup(dvp, vpp, cnp);
 	if (error == 0)
 		return (VOP_CACHEDLOOKUP(dvp, vpp, cnp));
-	if (error == ENOENT)
-		return (error);
-	return (0);
+	if (error == -1)
+		return (0);
+	return (error);
 }
 
 
@@ -689,12 +727,10 @@ kern___getcwd(struct thread *td, u_char *buf, enum uio_seg bufseg, u_int buflen)
 
 	tmpbuf = malloc(buflen, M_TEMP, M_WAITOK);
 	fdp = td->td_proc->p_fd;
-	mtx_lock(&Giant);
 	FILEDESC_SLOCK(fdp);
 	error = vn_fullpath1(td, fdp->fd_cdir, fdp->fd_rdir, tmpbuf,
 	    &bp, buflen);
 	FILEDESC_SUNLOCK(fdp);
-	mtx_unlock(&Giant);
 
 	if (!error) {
 		if (bufseg == UIO_SYSSPACE)
@@ -748,6 +784,32 @@ vn_fullpath(struct thread *td, struct vnode *vn, char **retbuf, char **freebuf)
 	error = vn_fullpath1(td, vn, fdp->fd_rdir, buf, retbuf, MAXPATHLEN);
 	FILEDESC_SUNLOCK(fdp);
 
+	if (!error)
+		*freebuf = buf;
+	else
+		free(buf, M_TEMP);
+	return (error);
+}
+
+/*
+ * This function is similar to vn_fullpath, but it attempts to lookup the
+ * pathname relative to the global root mount point.  This is required for the
+ * auditing sub-system, as audited pathnames must be absolute, relative to the
+ * global root mount point.
+ */
+int
+vn_fullpath_global(struct thread *td, struct vnode *vn,
+    char **retbuf, char **freebuf)
+{
+	char *buf;
+	int error;
+
+	if (disablefullpath)
+		return (ENODEV);
+	if (vn == NULL)
+		return (EINVAL);
+	buf = malloc(MAXPATHLEN, M_TEMP, M_WAITOK);
+	error = vn_fullpath1(td, vn, rootvnode, buf, retbuf, MAXPATHLEN);
 	if (!error)
 		*freebuf = buf;
 	else
@@ -840,5 +902,24 @@ vn_fullpath1(struct thread *td, struct vnode *vp, struct vnode *rdir,
 	CACHE_UNLOCK();
 
 	*retbuf = bp;
+	return (0);
+}
+
+int
+vn_commname(struct vnode *vp, char *buf, u_int buflen)
+{
+	struct namecache *ncp;
+	int l;
+
+	CACHE_LOCK();
+	ncp = TAILQ_FIRST(&vp->v_cache_dst);
+	if (!ncp) {
+		CACHE_UNLOCK();
+		return (ENOENT);
+	}
+	l = min(ncp->nc_nlen, buflen - 1);
+	memcpy(buf, ncp->nc_name, l);
+	CACHE_UNLOCK();
+	buf[l] = '\0';
 	return (0);
 }

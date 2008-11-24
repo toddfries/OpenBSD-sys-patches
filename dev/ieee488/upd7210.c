@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ieee488/upd7210.c,v 1.10 2006/03/11 15:39:22 phk Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ieee488/upd7210.c,v 1.11 2008/05/29 12:50:45 ed Exp $");
 
 #  define	GPIB_DEBUG
 #  undef	GPIB_DEBUG
@@ -277,7 +277,7 @@ upd7210attach(struct upd7210 *u)
 	struct cdev *dev;
 
 	if (units == NULL)
-		units = new_unrhdr(0, minor2unit(MAXMINOR), NULL);
+		units = new_unrhdr(0, INT_MAX, NULL);
 	u->unit = alloc_unr(units);
 	mtx_init(&u->mutex, "gpib", NULL, MTX_DEF);
 	u->cdev = make_dev(&gpib_l_cdevsw, u->unit,

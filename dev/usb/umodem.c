@@ -2,7 +2,7 @@
 
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/umodem.c,v 1.71 2007/07/29 18:16:43 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/umodem.c,v 1.74 2008/08/31 03:22:19 imp Exp $");
 /*-
  * Copyright (c) 2003, M. Warner Losh <imp@freebsd.org>.
  * All rights reserved.
@@ -187,21 +187,19 @@ static void	umodem_rts(struct umodem_softc *, int);
 static void	umodem_break(struct umodem_softc *, int);
 static void	umodem_set_line_state(struct umodem_softc *);
 static int	umodem_param(void *, int, struct termios *);
-static int	umodem_ioctl(void *, int, u_long, caddr_t, int, struct thread *);
+static int	umodem_ioctl(void *, int, u_long, caddr_t, struct thread *);
 static int	umodem_open(void *, int portno);
 static void	umodem_close(void *, int portno);
 static void	umodem_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
 static void	umodem_notify(void *, int);
 
 static struct ucom_callback umodem_callback = {
-	umodem_get_status,
-	umodem_set,
-	umodem_param,
-	umodem_ioctl,
-	umodem_open,
-	umodem_close,
-	NULL,
-	NULL,
+	.ucom_get_status = umodem_get_status,
+	.ucom_set = umodem_set,
+	.ucom_param = umodem_param,
+	.ucom_ioctl = umodem_ioctl,
+	.ucom_open = umodem_open,
+	.ucom_close = umodem_close
 };
 
 static device_probe_t umodem_match;
@@ -605,13 +603,13 @@ umodem_param(void *addr, int portno, struct termios *t)
 	err = umodem_set_line_coding(sc, &ls);
 	if (err) {
 		DPRINTF(("umodem_param: err=%s\n", usbd_errstr(err)));
-		return (ENOTTY);
+		return (EIO);
 	}
 	return (0);
 }
 
 int
-umodem_ioctl(void *addr, int portno, u_long cmd, caddr_t data, int flag,
+umodem_ioctl(void *addr, int portno, u_long cmd, caddr_t data,
 	     struct thread *p)
 {
 	struct umodem_softc *sc = addr;
@@ -635,7 +633,7 @@ umodem_ioctl(void *addr, int portno, u_long cmd, caddr_t data, int flag,
 
 	default:
 		DPRINTF(("umodemioctl: unknown\n"));
-		error = ENOTTY;
+		error = ENOIOCTL;
 		break;
 	}
 

@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sun4v/sun4v/machdep.c,v 1.15 2007/06/16 22:30:38 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sun4v/sun4v/machdep.c,v 1.18 2008/04/25 05:18:50 jeff Exp $");
 
 #include "opt_compat.h"
 #include "opt_ddb.h"
@@ -364,7 +364,7 @@ sparc64_init(caddr_t mdp, u_long o1, u_long o2, u_long o3, ofw_vec_t *vec)
 	 * Initialize proc0 stuff (p_contested needs to be done early).
 	 */
 
-	proc_linkup(&proc0, &thread0);
+	proc_linkup0(&proc0, &thread0);
 	proc0.p_md.md_sigtramp = NULL;
 	proc0.p_md.md_utrap = NULL;
 	frame0.tf_tstate = TSTATE_IE | TSTATE_PEF | TSTATE_PRIV;
@@ -510,7 +510,7 @@ sparc64_init(caddr_t mdp, u_long o1, u_long o2, u_long o3, ofw_vec_t *vec)
 
 #ifdef KDB
 	if (boothowto & RB_KDB)
-		kdb_enter("Boot flags requested debugger");
+		kdb_enter(KDB_WHY_BOOTFLAGS, "Boot flags requested debugger");
 #endif
 	BVPRINTF("sparc64_init done\n");
 }
@@ -819,7 +819,7 @@ sparc64_shutdown_final(void *dummy, int howto)
 }
 
 void
-cpu_idle(void)
+cpu_idle(int busy)
 {
 
 	if (rdpr(pil) != 0) 
@@ -829,6 +829,13 @@ cpu_idle(void)
 		/* XXX heinous hack begin*/
 	
 	cpu_yield();
+}
+
+int
+cpu_idle_wakeup(int cpu)
+{
+
+	return (0);
 }
 
 int

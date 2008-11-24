@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  * $Id: ng_btsocket_l2cap.c,v 1.16 2003/09/14 23:29:06 max Exp $
- * $FreeBSD: src/sys/netgraph/bluetooth/socket/ng_btsocket_l2cap.c,v 1.25 2007/10/31 16:17:20 emax Exp $
+ * $FreeBSD: src/sys/netgraph/bluetooth/socket/ng_btsocket_l2cap.c,v 1.27 2008/10/23 15:53:51 des Exp $
  */
 
 #include <sys/param.h>
@@ -103,6 +103,8 @@ static struct mtx				ng_btsocket_l2cap_sockets_mtx;
 static LIST_HEAD(, ng_btsocket_l2cap_rtentry)	ng_btsocket_l2cap_rt;
 static struct mtx				ng_btsocket_l2cap_rt_mtx;
 static struct task				ng_btsocket_l2cap_rt_task;
+static struct timeval				ng_btsocket_l2cap_lasttime;
+static int					ng_btsocket_l2cap_curpps;
 
 /* Sysctl tree */
 SYSCTL_DECL(_net_bluetooth_l2cap_sockets);
@@ -127,19 +129,23 @@ SYSCTL_INT(_net_bluetooth_l2cap_sockets_seq, OID_AUTO, queue_drops,
 
 /* Debug */
 #define NG_BTSOCKET_L2CAP_INFO \
-	if (ng_btsocket_l2cap_debug_level >= NG_BTSOCKET_INFO_LEVEL) \
+	if (ng_btsocket_l2cap_debug_level >= NG_BTSOCKET_INFO_LEVEL && \
+	    ppsratecheck(&ng_btsocket_l2cap_lasttime, &ng_btsocket_l2cap_curpps, 1)) \
 		printf
 
 #define NG_BTSOCKET_L2CAP_WARN \
-	if (ng_btsocket_l2cap_debug_level >= NG_BTSOCKET_WARN_LEVEL) \
+	if (ng_btsocket_l2cap_debug_level >= NG_BTSOCKET_WARN_LEVEL && \
+	    ppsratecheck(&ng_btsocket_l2cap_lasttime, &ng_btsocket_l2cap_curpps, 1)) \
 		printf
 
 #define NG_BTSOCKET_L2CAP_ERR \
-	if (ng_btsocket_l2cap_debug_level >= NG_BTSOCKET_ERR_LEVEL) \
+	if (ng_btsocket_l2cap_debug_level >= NG_BTSOCKET_ERR_LEVEL && \
+	    ppsratecheck(&ng_btsocket_l2cap_lasttime, &ng_btsocket_l2cap_curpps, 1)) \
 		printf
 
 #define NG_BTSOCKET_L2CAP_ALERT \
-	if (ng_btsocket_l2cap_debug_level >= NG_BTSOCKET_ALERT_LEVEL) \
+	if (ng_btsocket_l2cap_debug_level >= NG_BTSOCKET_ALERT_LEVEL && \
+	    ppsratecheck(&ng_btsocket_l2cap_lasttime, &ng_btsocket_l2cap_curpps, 1)) \
 		printf
 
 /* 
@@ -1557,7 +1563,7 @@ ng_btsocket_l2cap_default_msg_input(struct ng_mesg *msg, hook_p hook)
 
 		rt = (ng_btsocket_l2cap_rtentry_t *) NG_HOOK_PRIVATE(hook);
 		if (rt == NULL) {
-			MALLOC(rt, ng_btsocket_l2cap_rtentry_p, sizeof(*rt),
+			rt = malloc(sizeof(*rt),
 				M_NETGRAPH_BTSOCKET_L2CAP, M_NOWAIT|M_ZERO);
 			if (rt == NULL) {
 				mtx_unlock(&ng_btsocket_l2cap_rt_mtx);
@@ -1782,7 +1788,7 @@ ng_btsocket_l2cap_rtclean(void *context, int pending)
 			NG_HOOK_UNREF(rt->hook); /* Remove extra reference */
 
 			bzero(rt, sizeof(*rt));
-			FREE(rt, M_NETGRAPH_BTSOCKET_L2CAP);
+			free(rt, M_NETGRAPH_BTSOCKET_L2CAP);
 		}
 
 		rt = rt_next;
@@ -1924,7 +1930,7 @@ ng_btsocket_l2cap_attach(struct socket *so, int proto, struct thread *td)
 	}
 
 	/* Allocate the PCB */
-        MALLOC(pcb, ng_btsocket_l2cap_pcb_p, sizeof(*pcb),
+        pcb = malloc(sizeof(*pcb),
 		M_NETGRAPH_BTSOCKET_L2CAP, M_NOWAIT | M_ZERO);
         if (pcb == NULL)
                 return (ENOMEM);
@@ -2304,7 +2310,7 @@ ng_btsocket_l2cap_detach(struct socket *so)
 
 	mtx_destroy(&pcb->pcb_mtx);
 	bzero(pcb, sizeof(*pcb));
-	FREE(pcb, M_NETGRAPH_BTSOCKET_L2CAP);
+	free(pcb, M_NETGRAPH_BTSOCKET_L2CAP);
 
 	soisdisconnected(so);
 	so->so_pcb = NULL;

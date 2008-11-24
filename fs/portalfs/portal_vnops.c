@@ -31,7 +31,7 @@
  *
  *	@(#)portal_vnops.c	8.14 (Berkeley) 5/21/95
  *
- * $FreeBSD: src/sys/fs/portalfs/portal_vnops.c,v 1.73 2007/03/13 01:50:23 tegge Exp $
+ * $FreeBSD: src/sys/fs/portalfs/portal_vnops.c,v 1.80 2008/10/23 15:53:51 des Exp $
  */
 
 /*
@@ -103,7 +103,6 @@ portal_lookup(ap)
 	struct vnode **vpp = ap->a_vpp;
 	struct vnode *dvp = ap->a_dvp;
 	char *pname = cnp->cn_nameptr;
-	struct thread *td = cnp->cn_thread;
 	struct portalnode *pt;
 	int error;
 	struct vnode *fvp = 0;
@@ -128,12 +127,12 @@ portal_lookup(ap)
 	 * might cause a bogus v_data pointer to get dereferenced
 	 * elsewhere if MALLOC should block.
 	 */
-	MALLOC(pt, struct portalnode *, sizeof(struct portalnode),
+	pt = malloc(sizeof(struct portalnode),
 		M_TEMP, M_WAITOK);
 
 	error = getnewvnode("portal", dvp->v_mount, &portal_vnodeops, &fvp);
 	if (error) {
-		FREE(pt, M_TEMP);
+		free(pt, M_TEMP);
 		goto bad;
 	}
 	fvp->v_type = VREG;
@@ -153,7 +152,7 @@ portal_lookup(ap)
 	pt->pt_fileid = portal_fileid++;
 
 	*vpp = fvp;
-	vn_lock(fvp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(fvp, LK_EXCLUSIVE | LK_RETRY);
 	error = insmntque(fvp, dvp->v_mount);
 	if (error != 0) {
 		*vpp = NULLVP;
@@ -197,7 +196,7 @@ portal_connect(so, so2)
 		    M_NOWAIT);
 	so2 = so3;
 
-	return (uipc_connect2(so, so2));
+	return (soconnect2(so, so2));
 }
 
 static int
@@ -280,7 +279,6 @@ portal_open(ap)
 	 * will happen if the server dies.  Sleep for 5 second intervals
 	 * and keep polling the reference count.   XXX.
 	 */
-	/* XXXRW: Locking? */
 	SOCK_LOCK(so);
 	while ((so->so_state & SS_ISCONNECTING) && so->so_error == 0) {
 		if (fmp->pm_server->f_count == 1) {
@@ -448,14 +446,11 @@ portal_getattr(ap)
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		struct ucred *a_cred;
-		struct thread *a_td;
 	} */ *ap;
 {
 	struct vnode *vp = ap->a_vp;
 	struct vattr *vap = ap->a_vap;
 
-	bzero(vap, sizeof(*vap));
-	vattr_null(vap);
 	vap->va_uid = 0;
 	vap->va_gid = 0;
 	vap->va_size = DEV_BSIZE;
@@ -465,9 +460,10 @@ portal_getattr(ap)
 	vap->va_ctime = vap->va_mtime;
 	vap->va_gen = 0;
 	vap->va_flags = 0;
-	vap->va_rdev = 0;
+	vap->va_rdev = NODEV;
 	/* vap->va_qbytes = 0; */
 	vap->va_bytes = 0;
+	vap->va_filerev = 0;
 	/* vap->va_qsize = 0; */
 	if (vp->v_vflag & VV_ROOT) {
 		vap->va_type = VDIR;
@@ -493,7 +489,6 @@ portal_setattr(ap)
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		struct ucred *a_cred;
-		struct thread *a_td;
 	} */ *ap;
 {
 
@@ -547,7 +542,7 @@ portal_reclaim(ap)
 		free((caddr_t) pt->pt_arg, M_TEMP);
 		pt->pt_arg = 0;
 	}
-	FREE(ap->a_vp->v_data, M_TEMP);
+	free(ap->a_vp->v_data, M_TEMP);
 	ap->a_vp->v_data = 0;
 
 	return (0);

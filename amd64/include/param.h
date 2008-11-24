@@ -36,7 +36,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)param.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/amd64/include/param.h,v 1.20 2006/01/09 06:05:56 imp Exp $
+ * $FreeBSD: src/sys/amd64/include/param.h,v 1.24 2008/10/01 21:59:04 jhb Exp $
  */
 
 /*
@@ -79,8 +79,8 @@
 #define	MACHINE_ARCH	"amd64"
 #endif
 
-#ifdef SMP
-#define MAXCPU		16
+#if defined(SMP) || defined(KLD_MODULE)
+#define MAXCPU		32
 #else
 #define MAXCPU		1
 #endif
@@ -136,7 +136,7 @@
  * the kern.maxbcache /boot/loader.conf variable.
  */
 #ifndef VM_BCACHE_SIZE_MAX
-#define	VM_BCACHE_SIZE_MAX	(400 * 1024 * 1024)
+#define	VM_BCACHE_SIZE_MAX	(1024 * 1024 * 1024)
 #endif
 
 /*
@@ -146,6 +146,7 @@
 #define	trunc_page(x)	((unsigned long)(x) & ~(PAGE_MASK))
 #define trunc_2mpage(x)	((unsigned long)(x) & ~PDRMASK)
 #define round_2mpage(x)	((((unsigned long)(x)) + PDRMASK) & ~PDRMASK)
+#define trunc_1gpage(x)	((unsigned long)(x) & ~PDPMASK)
 
 #define	atop(x)		((unsigned long)(x) >> PAGE_SHIFT)
 #define	ptoa(x)		((unsigned long)(x) << PAGE_SHIFT)

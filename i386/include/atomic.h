@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/atomic.h,v 1.47 2006/12/29 15:48:18 bde Exp $
+ * $FreeBSD: src/sys/i386/include/atomic.h,v 1.49 2008/11/22 05:55:56 kmacy Exp $
  */
 #ifndef _MACHINE_ATOMIC_H_
 #define	_MACHINE_ATOMIC_H_
@@ -31,6 +31,21 @@
 #ifndef _SYS_CDEFS_H_
 #error this file needs sys/cdefs.h as a prerequisite
 #endif
+
+
+#if defined(I686_CPU)
+#define mb()	__asm__ __volatile__ ("mfence;": : :"memory")
+#define wmb()	__asm__ __volatile__ ("sfence;": : :"memory")
+#define rmb()	__asm__ __volatile__ ("lfence;": : :"memory")
+#else
+/*
+ * do we need a serializing instruction?
+ */
+#define mb()
+#define wmb()
+#define rmb()
+#endif
+
 
 /*
  * Various simple operations on memory, each of which is atomic in the
@@ -276,6 +291,13 @@ atomic_cmpset_long(volatile u_long *dst, u_long exp, u_long src)
 
 	return (atomic_cmpset_int((volatile u_int *)dst, (u_int)exp,
 	    (u_int)src));
+}
+
+static __inline u_long
+atomic_fetchadd_long(volatile u_long *p, u_long v)
+{
+
+	return (atomic_fetchadd_int((volatile u_int *)p, (u_int)v));
 }
 
 /* Read the current value and store a zero in the destination. */

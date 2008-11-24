@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/atapi-fd.c,v 1.114 2008/04/17 12:29:35 sos Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/atapi-fd.c,v 1.115 2008/05/08 17:55:44 grehan Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -105,7 +105,7 @@ afd_attach(device_t dev)
     fdp->disk->d_ioctl = afd_ioctl;
     fdp->disk->d_name = "afd";
     fdp->disk->d_drv1 = dev;
-    fdp->disk->d_maxsize = ch->dma.max_iosize;
+    fdp->disk->d_maxsize = ch->dma.max_iosize ? ch->dma.max_iosize : DFLTPHYS;
     fdp->disk->d_unit = device_get_unit(dev);
     disk_create(fdp->disk, DISK_VERSION);
     return 0;

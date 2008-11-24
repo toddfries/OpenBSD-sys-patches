@@ -48,7 +48,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/uma_core.c,v 1.148 2007/10/11 20:11:27 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/uma_core.c,v 1.151 2008/08/23 12:40:07 antoine Exp $");
 
 /* I should really use ktr.. */
 /*
@@ -249,13 +249,6 @@ void uma_print_stats(void);
 static int sysctl_vm_zone_count(SYSCTL_HANDLER_ARGS);
 static int sysctl_vm_zone_stats(SYSCTL_HANDLER_ARGS);
 
-#ifdef WITNESS
-static int nosleepwithlocks = 1;
-#else
-static int nosleepwithlocks = 0;
-#endif
-SYSCTL_INT(_debug, OID_AUTO, nosleepwithlocks, CTLFLAG_RW, &nosleepwithlocks,
-    0, "Convert M_WAITOK to M_NOWAIT to avoid lock-held-across-sleep paths");
 SYSINIT(uma_startup3, SI_SUB_VM_CONF, SI_ORDER_SECOND, uma_startup3, NULL);
 
 SYSCTL_PROC(_vm, OID_AUTO, zone_count, CTLFLAG_RD|CTLTYPE_INT,
@@ -751,6 +744,8 @@ finished:
 
 			if (flags & UMA_SLAB_KMEM)
 				obj = kmem_object;
+			else if (flags & UMA_SLAB_KERNEL)
+				obj = kernel_object;
 			else
 				obj = NULL;
 			for (i = 0; i < keg->uk_ppera; i++)
@@ -871,6 +866,8 @@ slab_zalloc(uma_zone_t zone, int wait)
 
 				if (flags & UMA_SLAB_KMEM)
 					obj = kmem_object;
+				else if (flags & UMA_SLAB_KERNEL)
+					obj = kernel_object;
 				else
 					obj = NULL;
 				for (i = 0; i < keg->uk_ppera; i++)
@@ -1663,7 +1660,7 @@ uma_startup(void *bootmem, int boot_pages)
 
 	bucket_init();
 
-#ifdef UMA_MD_SMALL_ALLOC
+#if defined(UMA_MD_SMALL_ALLOC) && !defined(UMA_MD_SMALL_ALLOC_NEEDS_VM)
 	booted = 1;
 #endif
 

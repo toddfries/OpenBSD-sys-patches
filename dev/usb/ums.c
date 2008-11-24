@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/ums.c,v 1.99 2008/04/30 19:37:54 kaiw Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/ums.c,v 1.102 2008/09/27 08:51:18 ed Exp $");
 
 /*
  * HID spec: http://www.usb.org/developers/devclass_docs/HID1_11.pdf
@@ -81,7 +81,7 @@ SYSCTL_INT(_hw_usb_ums, OID_AUTO, debug, CTLFLAG_RW,
 #define DPRINTFN(n,x)
 #endif
 
-#define UMSUNIT(s)	(minor(s)&0x1f)
+#define UMSUNIT(s)	(dev2unit(s)&0x1f)
 
 #define MS_TO_TICKS(ms) ((ms) * hz / 1000)
 
@@ -283,6 +283,9 @@ ums_attach(device_t self)
 	/* Try the wheel first as the Z activator since it's tradition. */
 	wheel = hid_locate(desc, size, HID_USAGE2(HUP_GENERIC_DESKTOP,
 						  HUG_WHEEL),
+			    hid_input, &sc->sc_loc_z, &flags) ||
+		hid_locate(desc, size, HID_USAGE2(HUP_GENERIC_DESKTOP,
+						  HUG_TWHEEL),
 			    hid_input, &sc->sc_loc_z, &flags);
 
 	if (wheel) {
@@ -359,12 +362,6 @@ ums_attach(device_t self)
 				hid_input, &sc->sc_loc_btn[i-1], 0);
 
 	sc->sc_isize = hid_report_size(desc, size, hid_input, &sc->sc_iid);
-	sc->sc_ibuf = malloc(sc->sc_isize, M_USB, M_NOWAIT);
-	if (!sc->sc_ibuf) {
-		printf("%s: no memory\n", device_get_nameunit(sc->sc_dev));
-		free(sc->sc_loc_btn, M_USB);
-		return ENXIO;
-	}
 
 	/*
 	 * The Microsoft Wireless Notebook Optical Mouse seems to be in worse
@@ -405,6 +402,13 @@ ums_attach(device_t self)
 		sc->sc_loc_btn[0].pos = 0;
 		sc->sc_loc_btn[1].pos = 1;
 		sc->sc_loc_btn[2].pos = 2;
+	}
+
+	sc->sc_ibuf = malloc(sc->sc_isize, M_USB, M_NOWAIT);
+	if (!sc->sc_ibuf) {
+		printf("%s: no memory\n", device_get_nameunit(sc->sc_dev));
+		free(sc->sc_loc_btn, M_USB);
+		return ENXIO;
 	}
 
 	sc->sc_ep_addr = ed->bEndpointAddress;

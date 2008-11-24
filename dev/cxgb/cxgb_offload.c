@@ -1,7 +1,6 @@
-
 /**************************************************************************
 
-Copyright (c) 2007, Chelsio Inc.
+Copyright (c) 2007-2008, Chelsio Inc.
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -31,7 +30,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/cxgb_offload.c,v 1.14 2008/04/19 03:43:06 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/cxgb_offload.c,v 1.16 2008/09/23 03:16:54 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -57,11 +56,7 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/cxgb_offload.c,v 1.14 2008/04/19 03:43:06 k
 #include <sys/taskqueue.h>
 #include <sys/proc.h>
 
-#ifdef CONFIG_DEFINED
 #include <cxgb_include.h>
-#else
-#include <dev/cxgb/cxgb_include.h>
-#endif
 
 #include <net/route.h>
 
@@ -104,7 +99,7 @@ unregister_tdev(struct t3cdev *tdev)
 	mtx_unlock(&cxgb_db_lock);	
 }
 
-#ifdef TOE_ENABLED
+#ifndef TCP_OFFLOAD_DISABLE
 /**
  *	cxgb_register_client - register an offload client
  *	@client: the client

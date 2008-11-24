@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cam/cam_periph.c,v 1.69 2007/05/14 21:48:52 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/cam/cam_periph.c,v 1.70 2008/02/12 11:07:33 raj Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -1615,7 +1615,7 @@ cam_periph_error(union ccb *ccb, cam_flags camflags,
 			ccb->ccb_h.retry_count--;
 			error = ERESTART;
 		} else {
-			action_string = "Retries Exausted";
+			action_string = "Retries Exhausted";
 			error = EIO;
 		}
 		break;

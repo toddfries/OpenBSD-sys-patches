@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)nfsrvcache.h	8.3 (Berkeley) 3/30/95
- * $FreeBSD: src/sys/nfsserver/nfsrvcache.h,v 1.19 2006/06/23 00:42:26 mohans Exp $
+ * $FreeBSD: src/sys/nfsserver/nfsrvcache.h,v 1.20 2008/11/03 10:38:00 dfr Exp $
  */
 
 #ifndef _NFSSERVER_NFSRVCACHE_H_
@@ -43,6 +43,8 @@
  */
 #define NFSRVCACHE_MAX_SIZE	2048
 #define NFSRVCACHE_MIN_SIZE	  64
+
+#ifdef NFS_LEGACYRPC
 
 struct nfsrvcache {
 	TAILQ_ENTRY(nfsrvcache) rc_lru;		/* LRU chain */
@@ -81,5 +83,7 @@ struct nfsrvcache {
 /* free 0x10 */
 #define	RC_INETADDR	0x20
 #define	RC_NAM		0x40
+
+#endif
 
 #endif

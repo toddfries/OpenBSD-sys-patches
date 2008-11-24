@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/procfs.h,v 1.5 2004/07/15 03:52:17 davidxu Exp $
+ * $FreeBSD: src/sys/sys/procfs.h,v 1.7 2008/09/14 16:52:42 marcel Exp $
  */
 
 #ifndef _SYS_PROCFS_H_
@@ -80,6 +80,6 @@ typedef struct prpsinfo {
     char	pr_psargs[PRARGSZ+1];	/* Arguments, null terminated (1) */
 } prpsinfo_t;
 
-typedef void *psaddr_t;		/* An address in the target process. */
+typedef uint64_t psaddr_t;	/* An address in the target process. */
 
 #endif /* _SYS_PROCFS_H_ */

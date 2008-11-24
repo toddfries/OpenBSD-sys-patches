@@ -58,7 +58,7 @@
 #include "opt_ddb.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_rman.c,v 1.57 2007/04/28 07:37:49 jmg Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_rman.c,v 1.60 2008/10/22 18:20:45 marcel Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -718,10 +718,22 @@ rman_make_alignment_flags(uint32_t size)
 	return(RF_ALIGNMENT_LOG2(i));
 }
 
+void
+rman_set_start(struct resource *r, u_long start)
+{
+	r->__r_i->r_start = start;
+}
+
 u_long
 rman_get_start(struct resource *r)
 {
 	return (r->__r_i->r_start);
+}
+
+void
+rman_set_end(struct resource *r, u_long end)
+{
+	r->__r_i->r_end = end;
 }
 
 u_long
@@ -784,34 +796,22 @@ rman_set_rid(struct resource *r, int rid)
 	r->__r_i->r_rid = rid;
 }
 
-void
-rman_set_start(struct resource *r, u_long start)
-{
-	r->__r_i->r_start = start;
-}
-
-void
-rman_set_end(struct resource *r, u_long end)
-{
-	r->__r_i->r_end = end;
-}
-
 int
 rman_get_rid(struct resource *r)
 {
 	return (r->__r_i->r_rid);
 }
 
-struct device *
-rman_get_device(struct resource *r)
-{
-	return (r->__r_i->r_dev);
-}
-
 void
 rman_set_device(struct resource *r, struct device *dev)
 {
 	r->__r_i->r_dev = dev;
+}
+
+struct device *
+rman_get_device(struct resource *r)
+{
+	return (r->__r_i->r_dev);
 }
 
 int
@@ -866,7 +866,8 @@ sysctl_rman(SYSCTL_HANDLER_ARGS)
 	if (res_idx == -1) {
 		bzero(&urm, sizeof(urm));
 		urm.rm_handle = (uintptr_t)rm;
-		strlcpy(urm.rm_descr, rm->rm_descr, RM_TEXTLEN);
+		if (rm->rm_descr != NULL)
+			strlcpy(urm.rm_descr, rm->rm_descr, RM_TEXTLEN);
 		urm.rm_start = rm->rm_start;
 		urm.rm_size = rm->rm_end - rm->rm_start + 1;
 		urm.rm_type = rm->rm_type;
@@ -949,11 +950,12 @@ DB_SHOW_COMMAND(rman, db_show_rman)
 		dump_rman((struct rman *)addr);
 }
 
-DB_SHOW_COMMAND(allrman, db_show_all_rman)
+DB_SHOW_ALL_COMMAND(rman, db_show_all_rman)
 {
 	struct rman *rm;
 
 	TAILQ_FOREACH(rm, &rman_head, rm_link)
 		dump_rman(rm);
 }
+DB_SHOW_ALIAS(allrman, db_show_all_rman);
 #endif

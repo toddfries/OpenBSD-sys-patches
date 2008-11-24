@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/fb/fb.c,v 1.34 2007/12/29 23:26:55 wkoszek Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/fb/fb.c,v 1.35 2008/09/27 08:51:18 ed Exp $");
 
 #include "opt_fb.h"
 
@@ -350,7 +350,7 @@ fbattach(device_t dev)
 
 #endif
 
-#define FB_UNIT(dev)	minor(dev)
+#define FB_UNIT(dev)	dev2unit(dev)
 #define FB_MKMINOR(unit) (u)
 
 #if 0 /* experimental */

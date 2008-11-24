@@ -27,13 +27,16 @@
  * SUCH DAMAGE.
  *
  *	@(#)ip_var.h	8.2 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/netinet/ip_var.h,v 1.101 2007/06/12 16:24:53 bms Exp $
+ * $FreeBSD: src/sys/netinet/ip_var.h,v 1.104 2008/08/25 05:49:16 julian Exp $
  */
 
 #ifndef _NETINET_IP_VAR_H_
 #define	_NETINET_IP_VAR_H_
 
 #include <sys/queue.h>
+#ifdef _KERNEL
+#include <sys/vimage.h>
+#endif
 
 /*
  * Overlay for ip header used by other protocols (tcp, udp).
@@ -209,7 +212,7 @@ int	ipproto_unregister(u_char);
 struct mbuf *
 	ip_reass(struct mbuf *);
 struct in_ifaddr *
-	ip_rtaddr(struct in_addr);
+	ip_rtaddr(struct in_addr, u_int fibnum);
 void	ip_savecontrol(struct inpcb *, struct mbuf **, struct ip *,
 	    struct mbuf *);
 void	ip_slowtimo(void);
@@ -237,10 +240,10 @@ extern int ip_do_randomid;
 static __inline uint16_t
 ip_newid(void)
 {
-	if (ip_do_randomid)
+	if (V_ip_do_randomid)
 		return ip_randomid();
 
-	return htons(ip_id++);
+	return htons(V_ip_id++);
 }
 
 #endif /* _KERNEL */

@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/rpc/rpcclnt.c,v 1.20 2007/08/06 14:26:03 rwatson Exp $ */
+/* $FreeBSD: src/sys/rpc/rpcclnt.c,v 1.24 2008/10/23 15:53:51 des Exp $ */
 /* $Id: rpcclnt.c,v 1.9 2003/11/05 14:59:03 rees Exp $ */
 
 /*-
@@ -101,7 +101,7 @@ struct pool     rpcclnt_pool;
 #define RPCTASKPOOL_LWM 10
 #define RPCTASKPOOL_HWM 40
 #else
-static          MALLOC_DEFINE(M_RPC, "rpcclnt", "rpc state");
+static          MALLOC_DEFINE(M_RPCCLNT, "rpcclnt", "rpc state");
 #endif
 
 #define RPC_RETURN(X) do { RPCDEBUG("returning %d", X); return X; }while(0)
@@ -183,6 +183,7 @@ static u_int32_t rpcclnt_xid = 0;
 static u_int32_t rpcclnt_xid_touched = 0;
 struct rpcstats rpcstats;
 int      rpcclnt_ticks;
+static int fake_wchan;
 
 SYSCTL_NODE(_kern, OID_AUTO, rpc, CTLFLAG_RD, 0, "RPC Subsystem");
 
@@ -597,7 +598,7 @@ rpcclnt_reconnect(rep, td)
 	while ((error = rpcclnt_connect(rpc, td)) != 0) {
 		if (error == EINTR || error == ERESTART)
 			RPC_RETURN(EINTR);
-		tsleep(&lbolt, PSOCK, "rpccon", 0);
+		tsleep(&fake_wchan, PSOCK, "rpccon", hz);
 	}
 
 	/*
@@ -801,7 +802,7 @@ tryagain:
 			goto tryagain;
 		}
 		while (rep->r_flags & R_MUSTRESEND) {
-			m = m_copym(rep->r_mreq, 0, M_COPYALL, M_TRYWAIT);
+			m = m_copym(rep->r_mreq, 0, M_COPYALL, M_WAIT);
 			rpcstats.rpcretries++;
 			error = rpcclnt_send(so, rep->r_rpcclnt->rc_name, m, rep);
 			if (error) {
@@ -1028,7 +1029,7 @@ rpcclnt_reply(myrep, td)
 			m_freem(nam);
 #else
 		if (nam)
-			FREE(nam, M_SONAME);
+			free(nam, M_SONAME);
 #endif
 
 		/*
@@ -1153,7 +1154,7 @@ rpcclnt_request(rpc, mrest, procnum, td, cred, reply)
 #ifdef __OpenBSD__
 	task = pool_get(&rpctask_pool, PR_WAITOK);
 #else
-	MALLOC(task, struct rpctask *, sizeof(struct rpctask), M_RPC, (M_WAITOK | M_ZERO));
+	task = malloc(sizeof(struct rpctask), M_RPCCLNT, (M_WAITOK | M_ZERO));
 #endif
 
 	task->r_rpcclnt = rpc;
@@ -1171,7 +1172,7 @@ rpcclnt_request(rpc, mrest, procnum, td, cred, reply)
 #ifdef __OpenBSD__
 		pool_put(&rpctask_pool, task);
 #else
-		FREE(task, M_RPC);
+		free(task, M_RPCCLNT);
 #endif
 		error = EPROTONOSUPPORT;
 		goto rpcmout;
@@ -1181,7 +1182,7 @@ rpcclnt_request(rpc, mrest, procnum, td, cred, reply)
 	 * For stream protocols, insert a Sun RPC Record Mark.
 	 */
 	if (rpc->rc_sotype == SOCK_STREAM) {
-		M_PREPEND(m, RPCX_UNSIGNED, M_TRYWAIT);
+		M_PREPEND(m, RPCX_UNSIGNED, M_WAIT);
 		*mtod(m, u_int32_t *) = htonl(0x80000000 |
 					 (m->m_pkthdr.len - RPCX_UNSIGNED));
 	}
@@ -1229,7 +1230,7 @@ rpcclnt_request(rpc, mrest, procnum, td, cred, reply)
 			error = rpcclnt_sndlock(&rpc->rc_flag, task);
 		if (!error) {
 			error = rpcclnt_send(rpc->rc_so, rpc->rc_name,
-					     m_copym(m, 0, M_COPYALL, M_TRYWAIT),
+					     m_copym(m, 0, M_COPYALL, M_WAIT),
 					     task);
 			if (rpc->rc_soflags & PR_CONNREQUIRED)
 				rpcclnt_sndunlock(&rpc->rc_flag);
@@ -1293,7 +1294,7 @@ rpcclnt_request(rpc, mrest, procnum, td, cred, reply)
 #ifdef __OpenBSD__
 	pool_put(&rpctask_pool, task);
 #else
-	FREE(task, M_RPC);
+	free(task, M_RPCCLNT);
 #endif
 
 	if (error)
@@ -1750,9 +1751,9 @@ rpcclnt_realign(struct mbuf **pm, int hsiz)
 
 	while ((m = *pm) != NULL) {
 	    if ((m->m_len & 0x3) || (mtod(m, intptr_t) & 0x3)) {
-	        MGET(n, M_TRYWAIT, MT_DATA);
+	        MGET(n, M_WAIT, MT_DATA);
 	        if (m->m_len >= MINCLSIZE) {
-	            MCLGET(n, M_TRYWAIT);
+	            MCLGET(n, M_WAIT);
 	        }
 	        n->m_len = 0;
 	        break;
@@ -1826,9 +1827,9 @@ rpcclnt_buildheader(rc, procid, mrest, mrest_len, xidp, mheadend, cred)
 	struct mbuf *mreq, *mb2;
 	int error;
 
-	MGETHDR(mb, M_TRYWAIT, MT_DATA);
+	MGETHDR(mb, M_WAIT, MT_DATA);
 	if (6 * RPCX_UNSIGNED >= MINCLSIZE) {
-		MCLGET(mb, M_TRYWAIT);
+		MCLGET(mb, M_WAIT);
 	} else if (6 * RPCX_UNSIGNED < MHLEN) {
 		MH_ALIGN(mb, 6 * RPCX_UNSIGNED);
 	} else {
@@ -1908,7 +1909,7 @@ rpcm_disct(mdp, dposp, siz, left, cp2)
 	} else if (siz > MHLEN) {
 		panic("rpc S too big");
 	} else {
-		MGET(mp2, M_TRYWAIT, MT_DATA);
+		MGET(mp2, M_WAIT, MT_DATA);
 		mp2->m_next = mp->m_next;
 		mp->m_next = mp2;
 		mp->m_len -= left;
@@ -2003,7 +2004,7 @@ rpcclnt_cancelreqs(rpc)
 		splx(s);
 		if (task == NULL)
 			return (0);
-		tsleep(&lbolt, PSOCK, "nfscancel", 0);
+		tsleep(&fake_wchan, PSOCK, "nfscancel", hz);
 	}
 	return (EBUSY);
 }
@@ -2024,7 +2025,7 @@ rpcclnt_softterm(struct rpctask * task)
 void
 rpcclnt_create(struct rpcclnt ** rpc)
 {
-	MALLOC(*rpc, struct rpcclnt *, sizeof(struct rpcclnt), M_RPC, M_WAITOK | M_ZERO);
+	*rpc = malloc(sizeof(struct rpcclnt), M_RPCCLNT, M_WAITOK | M_ZERO);
 }
 
 /* called by rpcclnt_put() */
@@ -2032,7 +2033,7 @@ void
 rpcclnt_destroy(struct rpcclnt * rpc)
 {
 	if (rpc != NULL) {
-		FREE(rpc, M_RPC);
+		free(rpc, M_RPCCLNT);
 	} else {
 		RPCDEBUG("attempting to free a NULL rpcclnt (not dereferenced)");
 	}

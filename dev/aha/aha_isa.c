@@ -55,7 +55,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/aha/aha_isa.c,v 1.39 2007/02/23 12:18:30 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/aha/aha_isa.c,v 1.40 2008/10/07 23:55:32 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -231,7 +231,7 @@ aha_isa_attach(device_t dev)
 	filter_arg = NULL;
 	lowaddr = BUS_SPACE_MAXADDR_24BIT;
 
-	if (bus_dma_tag_create(	/* parent	*/ NULL,
+	if (bus_dma_tag_create(	/* parent	*/ bus_get_dma_tag(dev),
 				/* alignemnt	*/ 1,
 				/* boundary	*/ 0,
 				/* lowaddr	*/ lowaddr,

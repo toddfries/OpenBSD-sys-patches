@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/busdma_machdep.c,v 1.83 2007/06/17 04:21:58 mjacob Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/busdma_machdep.c,v 1.86 2008/07/15 03:34:49 alc Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -480,8 +480,6 @@ bus_dmamem_alloc(bus_dma_tag_t dmat, void** vaddr, int flags,
 		mflags = M_NOWAIT;
 	else
 		mflags = M_WAITOK;
-	if (flags & BUS_DMA_ZERO)
-		mflags |= M_ZERO;
 
 	/* If we succeed, no mapping/bouncing will be required */
 	*mapp = NULL;
@@ -489,13 +487,15 @@ bus_dmamem_alloc(bus_dma_tag_t dmat, void** vaddr, int flags,
 	if (dmat->segments == NULL) {
 		dmat->segments = (bus_dma_segment_t *)malloc(
 		    sizeof(bus_dma_segment_t) * dmat->nsegments, M_DEVBUF,
-		    M_NOWAIT);
+		    mflags);
 		if (dmat->segments == NULL) {
 			CTR4(KTR_BUSDMA, "%s: tag %p tag flags 0x%x error %d",
 			    __func__, dmat, dmat->flags, ENOMEM);
 			return (ENOMEM);
 		}
 	}
+	if (flags & BUS_DMA_ZERO)
+		mflags |= M_ZERO;
 
 	/* 
 	 * XXX:
@@ -531,7 +531,7 @@ bus_dmamem_alloc(bus_dma_tag_t dmat, void** vaddr, int flags,
 		pmap_change_attr((vm_offset_t)*vaddr, dmat->maxsize,
 		    PAT_UNCACHEABLE);
 	CTR4(KTR_BUSDMA, "%s: tag %p tag flags 0x%x error %d",
-	    __func__, dmat, dmat->flags, ENOMEM);
+	    __func__, dmat, dmat->flags, 0);
 	return (0);
 }
 
@@ -580,7 +580,6 @@ _bus_dmamap_load_buffer(bus_dma_tag_t dmat,
 	bus_addr_t curaddr, lastaddr, baddr, bmask;
 	vm_offset_t vaddr;
 	bus_addr_t paddr;
-	int needbounce = 0;
 	int seg;
 
 	if (map == NULL)
@@ -599,16 +598,14 @@ _bus_dmamap_load_buffer(bus_dma_tag_t dmat,
 		 * Count the number of bounce pages
 		 * needed in order to complete this transfer
 		 */
-		vaddr = trunc_page((vm_offset_t)buf);
+		vaddr = (vm_offset_t)buf;
 		vendaddr = (vm_offset_t)buf + buflen;
 
 		while (vaddr < vendaddr) {
 			paddr = pmap_kextract(vaddr);
-			if (run_filter(dmat, paddr) != 0) {
-				needbounce = 1;
+			if (run_filter(dmat, paddr) != 0)
 				map->pagesneeded++;
-			}
-			vaddr += PAGE_SIZE;
+			vaddr += (PAGE_SIZE - ((vm_offset_t)vaddr & PAGE_MASK));
 		}
 		CTR1(KTR_BUSDMA, "pagesneeded= %d\n", map->pagesneeded);
 	}
@@ -679,7 +676,7 @@ _bus_dmamap_load_buffer(bus_dma_tag_t dmat,
 			segs[seg].ds_len = sgsize;
 			first = 0;
 		} else {
-			if (needbounce == 0 && curaddr == lastaddr &&
+			if (curaddr == lastaddr &&
 			    (segs[seg].ds_len + sgsize) <= dmat->maxsegsz &&
 			    (dmat->boundary == 0 ||
 			     (segs[seg].ds_addr & bmask) == (curaddr & bmask)))

@@ -29,22 +29,20 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  *	$NetBSD: pcb.h,v 1.4 2000/06/04 11:57:17 tsubai Exp $
- * $FreeBSD: src/sys/powerpc/include/pcb.h,v 1.9 2006/07/26 17:05:11 marcel Exp $
+ * $FreeBSD: src/sys/powerpc/include/pcb.h,v 1.10 2008/03/02 17:05:57 raj Exp $
  */
 
 #ifndef _MACHINE_PCB_H_
 #define	_MACHINE_PCB_H_
 
-typedef int faultbuf[23];
+typedef int faultbuf[25];
 
 struct pcb {
 	register_t	pcb_context[20];	/* non-volatile r14-r31 */
 	register_t	pcb_cr;			/* Condition register */
 	register_t	pcb_sp;			/* stack pointer */
 	register_t	pcb_lr;			/* link register */
-	register_t	pcb_usr;		/* USER_SR segment register */
 	struct		pmap *pcb_pm;		/* pmap of our vmspace */
-	struct		pmap *pcb_pmreal;	 /* real address of above */
 	faultbuf	*pcb_onfault;		/* For use during
 						    copyin/copyout */
 	int		pcb_flags;
@@ -55,6 +53,16 @@ struct pcb {
 	} pcb_fpu;		/* Floating point processor */
 	unsigned int	pcb_fpcpu;		/* which CPU had our FPU
 							stuff. */
+
+	union {
+		struct {
+			register_t	usr;	/* USER_SR segment */
+		} aim;
+		struct {
+			register_t	ctr;
+			register_t	xer;
+		} booke;
+	} pcb_cpu;
 };
 
 #ifdef	_KERNEL

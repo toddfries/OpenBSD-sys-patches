@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpi_support/acpi_fujitsu.c,v 1.5 2007/03/22 18:16:39 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpi_support/acpi_fujitsu.c,v 1.6 2008/09/08 06:29:24 ed Exp $");
 
 #include "opt_acpi.h"
 #include <sys/param.h>
@@ -245,7 +245,7 @@ acpi_fujitsu_attach(device_t dev)
 	AcpiInstallNotifyHandler(sc->handle, ACPI_DEVICE_NOTIFY,
 	    acpi_fujitsu_notify_handler, sc);
 
-	/* Snag our default values for the hotkys / hotkey states. */
+	/* Snag our default values for the hotkeys / hotkey states. */
 	ACPI_SERIAL_BEGIN(fujitsu);
 	if (!acpi_fujitsu_init(sc))
 		device_printf(dev, "Couldn't initialize hotkey states!\n");

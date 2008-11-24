@@ -1,6 +1,6 @@
 /*	$NetBSD: tmpfs_vfsops.c,v 1.10 2005/12/11 12:24:29 christos Exp $	*/
 
-/*
+/*-
  * Copyright (c) 2005 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -48,7 +41,7 @@
  * allocate and release resources.
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/tmpfs/tmpfs_vfsops.c,v 1.11 2007/10/04 17:11:48 delphij Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/tmpfs/tmpfs_vfsops.c,v 1.20 2008/09/03 18:53:48 delphij Exp $");
 
 #include <sys/param.h>
 #include <sys/limits.h>
@@ -151,10 +144,8 @@ tmpfs_node_ctor(void *mem, int size, void *arg, int flags)
 	node->tn_status = 0;
 	node->tn_flags = 0;
 	node->tn_links = 0;
-	node->tn_lockf = NULL;
 	node->tn_vnode = NULL;
 	node->tn_vpstate = 0;
-	node->tn_lookup_dirent = NULL;
 
 	return (0);
 }
@@ -196,7 +187,7 @@ tmpfs_mount(struct mount *mp, struct thread *td)
 	int error;
 	/* Size counters. */
 	ino_t	nodes_max;
-	off_t	size_max;
+	size_t	size_max;
 
 	/* Root node attributes. */
 	uid_t	root_uid;
@@ -216,11 +207,11 @@ tmpfs_mount(struct mount *mp, struct thread *td)
 	}
 
 	printf("WARNING: TMPFS is considered to be a highly experimental "
-		"feature in FreeBSD.\n");
+	    "feature in FreeBSD.\n");
 
-	vn_lock(mp->mnt_vnodecovered, LK_SHARED | LK_RETRY, td);
-	error = VOP_GETATTR(mp->mnt_vnodecovered, &va, mp->mnt_cred, td);
-	VOP_UNLOCK(mp->mnt_vnodecovered, 0, td);
+	vn_lock(mp->mnt_vnodecovered, LK_SHARED | LK_RETRY);
+	error = VOP_GETATTR(mp->mnt_vnodecovered, &va, mp->mnt_cred);
+	VOP_UNLOCK(mp->mnt_vnodecovered, 0);
 	if (error)
 		return (error);
 
@@ -231,14 +222,11 @@ tmpfs_mount(struct mount *mp, struct thread *td)
 	    vfs_scanopt(mp->mnt_optnew, "uid", "%d", &root_uid) != 1)
 		root_uid = va.va_uid;
 	if (mp->mnt_cred->cr_ruid != 0 ||
-	    vfs_scanopt(mp->mnt_optnew, "mode", "%o", &root_mode) != 1)
+	    vfs_scanopt(mp->mnt_optnew, "mode", "%ho", &root_mode) != 1)
 		root_mode = va.va_mode;
-	if(vfs_scanopt(mp->mnt_optnew, "inodes", "%d", &nodes_max) != 1)
+	if (vfs_scanopt(mp->mnt_optnew, "inodes", "%d", &nodes_max) != 1)
 		nodes_max = 0;
-
-	if(vfs_scanopt(mp->mnt_optnew,
-			"size",
-			"%qu", &size_max) != 1)
+	if (vfs_scanopt(mp->mnt_optnew, "size", "%qu", &size_max) != 1)
 		size_max = 0;
 
 	/* Do not allow mounts if we do not have enough memory to preserve
@@ -277,19 +265,15 @@ tmpfs_mount(struct mount *mp, struct thread *td)
 	tmp->tm_pages_max = pages;
 	tmp->tm_pages_used = 0;
 	tmp->tm_ino_unr = new_unrhdr(2, INT_MAX, &tmp->allnode_lock);
-	tmp->tm_dirent_pool = uma_zcreate(
-					"TMPFS dirent",
-					sizeof(struct tmpfs_dirent),
-					NULL, NULL, NULL, NULL,
-					UMA_ALIGN_PTR,
-					0);
-	tmp->tm_node_pool = uma_zcreate(
-					"TMPFS node",
-					sizeof(struct tmpfs_node),
-					tmpfs_node_ctor, tmpfs_node_dtor,
-					tmpfs_node_init, tmpfs_node_fini,
-					UMA_ALIGN_PTR,
-					0);
+	tmp->tm_dirent_pool = uma_zcreate("TMPFS dirent",
+	    sizeof(struct tmpfs_dirent),
+	    NULL, NULL, NULL, NULL,
+	    UMA_ALIGN_PTR, 0);
+	tmp->tm_node_pool = uma_zcreate("TMPFS node",
+	    sizeof(struct tmpfs_node),
+	    tmpfs_node_ctor, tmpfs_node_dtor,
+	    tmpfs_node_init, tmpfs_node_fini,
+	    UMA_ALIGN_PTR, 0);
 
 	/* Allocate the root node. */
 	error = tmpfs_alloc_node(tmp, VDIR, root_uid,

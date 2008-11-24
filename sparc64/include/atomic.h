@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  *
  *	from: FreeBSD: src/sys/i386/include/atomic.h,v 1.20 2001/02/11
- * $FreeBSD: src/sys/sparc64/include/atomic.h,v 1.10 2005/09/27 17:39:11 jhb Exp $
+ * $FreeBSD: src/sys/sparc64/include/atomic.h,v 1.13 2008/11/22 05:55:56 kmacy Exp $
  */
 
 #ifndef	_MACHINE_ATOMIC_H_
@@ -39,6 +39,10 @@
 #else
 #define	__ASI_ATOMIC	ASI_P
 #endif
+
+#define mb()	__asm__ __volatile__ ("membar #MemIssue": : :"memory")
+#define wmb()	mb()
+#define rmb()	mb()
 
 /*
  * Various simple arithmetic on memory which is atomic in the presence
@@ -279,6 +283,7 @@ ATOMIC_GEN(ptr, uintptr_t *, uintptr_t, uintptr_t, 64);
 
 #define	atomic_fetchadd_int	atomic_add_int
 #define	atomic_fetchadd_32	atomic_add_32
+#define	atomic_fetchadd_long	atomic_add_long
 
 #undef ATOMIC_GEN
 #undef atomic_cas

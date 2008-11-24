@@ -28,7 +28,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_cpl_io.c,v 1.10 2008/04/19 03:22:42 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_cpl_io.c,v 1.27 2008/11/19 09:39:34 zec Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -39,11 +39,25 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_cpl_io.c,v 1.10 2008/04/19 03:
 #include <sys/lock.h>
 #include <sys/mbuf.h>
 #include <sys/mutex.h>
+#include <sys/sockstate.h>
+#include <sys/sockopt.h>
 #include <sys/socket.h>
+#include <sys/sockbuf.h>
 #include <sys/sysctl.h>
 #include <sys/syslog.h>
 #include <sys/protosw.h>
 #include <sys/priv.h>
+
+#if __FreeBSD_version >= 800044
+#include <sys/vimage.h>
+#else
+#define V_tcp_do_autosndbuf tcp_do_autosndbuf
+#define V_tcp_autosndbuf_max tcp_autosndbuf_max
+#define V_tcp_do_rfc1323 tcp_do_rfc1323
+#define V_tcp_do_autorcvbuf tcp_do_autorcvbuf
+#define V_tcp_autorcvbuf_max tcp_autorcvbuf_max
+#define V_tcpstat tcpstat
+#endif
 
 #include <net/if.h>
 #include <net/route.h>
@@ -54,8 +68,8 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_cpl_io.c,v 1.10 2008/04/19 03:
 #include <netinet/in_var.h>
 
 
-#include <dev/cxgb/cxgb_osdep.h>
-#include <dev/cxgb/sys/mbufq.h>
+#include <cxgb_osdep.h>
+#include <sys/mbufq.h>
 
 #include <netinet/ip.h>
 #include <netinet/tcp_var.h>
@@ -66,24 +80,24 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_cpl_io.c,v 1.10 2008/04/19 03:
 #include <netinet/tcp_timer.h>
 #include <net/route.h>
 
-#include <dev/cxgb/t3cdev.h>
-#include <dev/cxgb/common/cxgb_firmware_exports.h>
-#include <dev/cxgb/common/cxgb_t3_cpl.h>
-#include <dev/cxgb/common/cxgb_tcb.h>
-#include <dev/cxgb/common/cxgb_ctl_defs.h>
-#include <dev/cxgb/cxgb_offload.h>
+#include <t3cdev.h>
+#include <common/cxgb_firmware_exports.h>
+#include <common/cxgb_t3_cpl.h>
+#include <common/cxgb_tcb.h>
+#include <common/cxgb_ctl_defs.h>
+#include <cxgb_offload.h>
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <machine/bus.h>
-#include <dev/cxgb/sys/mvec.h>
-#include <dev/cxgb/ulp/toecore/cxgb_toedev.h>
-#include <dev/cxgb/ulp/tom/cxgb_defs.h>
-#include <dev/cxgb/ulp/tom/cxgb_tom.h>
-#include <dev/cxgb/ulp/tom/cxgb_t3_ddp.h>
-#include <dev/cxgb/ulp/tom/cxgb_toepcb.h>
-#include <dev/cxgb/ulp/tom/cxgb_tcp.h>
-
-#include <dev/cxgb/ulp/tom/cxgb_tcp_offload.h>
+#include <sys/mvec.h>
+#include <ulp/toecore/cxgb_toedev.h>
+#include <ulp/tom/cxgb_l2t.h>
+#include <ulp/tom/cxgb_defs.h>
+#include <ulp/tom/cxgb_tom.h>
+#include <ulp/tom/cxgb_t3_ddp.h>
+#include <ulp/tom/cxgb_toepcb.h>
+#include <ulp/tom/cxgb_tcp.h>
+#include <ulp/tom/cxgb_tcp_offload.h>
 
 /*
  * For ULP connections HW may add headers, e.g., for digests, that aren't part
@@ -140,11 +154,6 @@ static unsigned int mbuf_wrs[TX_MAX_SEGS + 1] __read_mostly;
 #define TCP_CLOSE	2
 #define TCP_DROP	3
 
-extern int tcp_do_autorcvbuf;
-extern int tcp_do_autosndbuf;
-extern int tcp_autorcvbuf_max;
-extern int tcp_autosndbuf_max;
-
 static void t3_send_reset(struct toepcb *toep);
 static void send_abort_rpl(struct mbuf *m, struct toedev *tdev, int rst_status);
 static inline void free_atid(struct t3cdev *cdev, unsigned int tid);
@@ -173,7 +182,8 @@ SBAPPEND(struct sockbuf *sb, struct mbuf *n)
 			m->m_next, m->m_nextpkt, m->m_flags));
 		m = m->m_next;
 	}
-	sbappend_locked(sb, n);
+	KASSERT(sb->sb_flags & SB_NOCOALESCE, ("NOCOALESCE not set"));
+	sbappendstream_locked(sb, n);
 	m = sb->sb_mb;
 
 	while (m) {
@@ -261,6 +271,7 @@ mk_tid_release(struct mbuf *m, const struct toepcb *toep, unsigned int tid)
 static inline void
 make_tx_data_wr(struct socket *so, struct mbuf *m, int len, struct mbuf *tail)
 {
+	INIT_VNET_INET(so->so_vnet);
 	struct tcpcb *tp = so_sototcpcb(so);
 	struct toepcb *toep = tp->t_toe;
 	struct tx_data_wr *req;
@@ -288,8 +299,8 @@ make_tx_data_wr(struct socket *so, struct mbuf *m, int len, struct mbuf *tail)
  
 		/* Sendbuffer is in units of 32KB.
 		 */
-		if (tcp_do_autosndbuf && snd->sb_flags & SB_AUTOSIZE) 
-			req->param |= htonl(V_TX_SNDBUF(tcp_autosndbuf_max >> 15));
+		if (V_tcp_do_autosndbuf && snd->sb_flags & SB_AUTOSIZE) 
+			req->param |= htonl(V_TX_SNDBUF(V_tcp_autosndbuf_max >> 15));
 		else {
 			req->param |= htonl(V_TX_SNDBUF(snd->sb_hiwat >> 15));
 		}
@@ -413,13 +424,18 @@ t3_push_frames(struct socket *so, int req_completion)
 		snd->sb_sndptroff += bytes;
 		total_bytes += bytes;
 		toep->tp_write_seq += bytes;
-		CTR6(KTR_TOM, "t3_push_frames: wr_avail=%d mbuf_wrs[%d]=%d tail=%p sndptr=%p sndptroff=%d",
-		    toep->tp_wr_avail, count, mbuf_wrs[count], tail, snd->sb_sndptr, snd->sb_sndptroff);	
+		CTR6(KTR_TOM, "t3_push_frames: wr_avail=%d mbuf_wrs[%d]=%d"
+		    " tail=%p sndptr=%p sndptroff=%d",
+		    toep->tp_wr_avail, count, mbuf_wrs[count],
+		    tail, snd->sb_sndptr, snd->sb_sndptroff);	
 		if (tail)
-			CTR4(KTR_TOM, "t3_push_frames: total_bytes=%d tp_m_last=%p tailbuf=%p snd_una=0x%08x",
-			    total_bytes, toep->tp_m_last, tail->m_data, tp->snd_una);
+			CTR4(KTR_TOM, "t3_push_frames: total_bytes=%d"
+			    " tp_m_last=%p tailbuf=%p snd_una=0x%08x",
+			    total_bytes, toep->tp_m_last, tail->m_data,
+			    tp->snd_una);
 		else
-			CTR3(KTR_TOM, "t3_push_frames: total_bytes=%d tp_m_last=%p snd_una=0x%08x",
+			CTR3(KTR_TOM, "t3_push_frames: total_bytes=%d"
+			    " tp_m_last=%p snd_una=0x%08x",
 			    total_bytes, toep->tp_m_last, tp->snd_una);
 
 
@@ -431,14 +447,18 @@ t3_push_frames(struct socket *so, int req_completion)
 		while (i < count && m_get_sgllen(m0)) {
 			if ((count - i) >= 3) {
 				CTR6(KTR_TOM,
-				    "t3_push_frames: pa=0x%zx len=%d pa=0x%zx len=%d pa=0x%zx len=%d",
-				    segs[i].ds_addr, segs[i].ds_len, segs[i + 1].ds_addr, segs[i + 1].ds_len,
+				    "t3_push_frames: pa=0x%zx len=%d pa=0x%zx"
+				    " len=%d pa=0x%zx len=%d",
+				    segs[i].ds_addr, segs[i].ds_len,
+				    segs[i + 1].ds_addr, segs[i + 1].ds_len,
 				    segs[i + 2].ds_addr, segs[i + 2].ds_len);
 				    i += 3;
 			} else if ((count - i) == 2) {
 				CTR4(KTR_TOM, 
-				    "t3_push_frames: pa=0x%zx len=%d pa=0x%zx len=%d",
-				    segs[i].ds_addr, segs[i].ds_len, segs[i + 1].ds_addr, segs[i + 1].ds_len);
+				    "t3_push_frames: pa=0x%zx len=%d pa=0x%zx"
+				    " len=%d",
+				    segs[i].ds_addr, segs[i].ds_len,
+				    segs[i + 1].ds_addr, segs[i + 1].ds_len);
 				    i += 2;
 			} else {
 				CTR2(KTR_TOM, "t3_push_frames: pa=0x%zx len=%d",
@@ -1196,12 +1216,13 @@ install_offload_ops(struct socket *so)
 static __inline int
 select_rcv_wscale(int space)
 {
+	INIT_VNET_INET(so->so_vnet);
 	int wscale = 0;
 
 	if (space > MAX_RCV_WND)
 		space = MAX_RCV_WND;
 
-	if (tcp_do_rfc1323)
+	if (V_tcp_do_rfc1323)
 		for (; space > 65535 && wscale < 14; space >>= 1, ++wscale) ;
 
 	return (wscale);
@@ -1213,6 +1234,7 @@ select_rcv_wscale(int space)
 static unsigned long
 select_rcv_wnd(struct toedev *dev, struct socket *so)
 {
+	INIT_VNET_INET(so->so_vnet);
 	struct tom_data *d = TOM_DATA(dev);
 	unsigned int wnd;
 	unsigned int max_rcv_wnd;
@@ -1220,8 +1242,8 @@ select_rcv_wnd(struct toedev *dev, struct socket *so)
 
 	rcv = so_sockbuf_rcv(so);
 	
-	if (tcp_do_autorcvbuf)
-		wnd = tcp_autorcvbuf_max;
+	if (V_tcp_do_autorcvbuf)
+		wnd = V_tcp_autorcvbuf_max;
 	else
 		wnd = rcv->sb_hiwat;
 
@@ -1449,7 +1471,10 @@ active_open_failed(struct toepcb *toep, struct mbuf *m)
 	} else
 #endif
 	{
-		inp_wlock(inp);			    
+		inp_wlock(inp);
+		/*
+		 * drops the inpcb lock
+		 */
 		fail_act_open(toep, act_open_rpl_status_to_errno(rpl->status));
 	}
 	
@@ -1502,6 +1527,9 @@ act_open_req_arp_failure(struct t3cdev *dev, struct mbuf *m)
 	
 	inp_wlock(inp);
 	if (tp->t_state == TCPS_SYN_SENT || tp->t_state == TCPS_SYN_RECEIVED) {
+		/*
+		 * drops the inpcb lock
+		 */
 		fail_act_open(so, EHOSTUNREACH);
 		printf("freeing %p\n", m);
 		
@@ -1643,16 +1671,18 @@ t3_ip_ctloutput(struct socket *so, struct sockopt *sopt)
 	if (error)
 		return (error);
 
-	if (optval > IPTOS_PREC_CRITIC_ECP && !suser(curthread))
-		return (EPERM);
+	if (optval > IPTOS_PREC_CRITIC_ECP)
+		return (EINVAL);
 
 	inp = so_sotoinpcb(so);
+	inp_wlock(inp);
 	inp_ip_tos_set(inp, optval);
 #if 0	
 	inp->inp_ip_tos = optval;
 #endif
 	t3_set_tos(inp_inpcbtotcpcb(inp)->t_toe);
-	
+	inp_wunlock(inp);
+
 	return (0);
 }
 
@@ -1665,12 +1695,17 @@ t3_tcp_ctloutput(struct socket *so, struct sockopt *sopt)
 	if (sopt->sopt_name != TCP_CONGESTION &&
 	    sopt->sopt_name != TCP_NODELAY)
 		return (EOPNOTSUPP);
-	
+
 	if (sopt->sopt_name == TCP_CONGESTION) {
 		char name[TCP_CA_NAME_MAX];
 		int optlen = sopt->sopt_valsize;
 		struct tcpcb *tp;
 		
+		if (sopt->sopt_dir == SOPT_GET) {
+			KASSERT(0, ("unimplemented"));
+			return (EOPNOTSUPP);
+		}
+
 		if (optlen < 1)
 			return (EINVAL);
 		
@@ -1696,6 +1731,9 @@ t3_tcp_ctloutput(struct socket *so, struct sockopt *sopt)
 		struct inpcb *inp;
 		struct tcpcb *tp;
 
+		if (sopt->sopt_dir == SOPT_GET)
+			return (EOPNOTSUPP);
+	
 		err = sooptcopyin(sopt, &optval, sizeof optval,
 		    sizeof optval);
 
@@ -1703,10 +1741,9 @@ t3_tcp_ctloutput(struct socket *so, struct sockopt *sopt)
 			return (err);
 
 		inp = so_sotoinpcb(so);
-		tp = inp_inpcbtotcpcb(inp);
-		    
 		inp_wlock(inp);
-		
+		tp = inp_inpcbtotcpcb(inp);
+
 		oldval = tp->t_flags;
 		if (optval)
 			tp->t_flags |= TF_NODELAY;
@@ -1715,7 +1752,7 @@ t3_tcp_ctloutput(struct socket *so, struct sockopt *sopt)
 		inp_wunlock(inp);
 
 
-		if (oldval != tp->t_flags)
+		if (oldval != tp->t_flags && (tp->t_toe != NULL))
 			t3_set_nagle(tp->t_toe);
 
 	}
@@ -2329,13 +2366,14 @@ process_ddp_complete(struct toepcb *toep, struct mbuf *m)
 #endif
 	inp_wunlock(tp->t_inpcb);
 
-	KASSERT(m->m_len > 0, ("%s m_len=%d", __FUNCTION__, m->m_len));
+	KASSERT(m->m_len >= 0, ("%s m_len=%d", __FUNCTION__, m->m_len));
 	CTR5(KTR_TOM,
 		  "process_ddp_complete: tp->rcv_nxt 0x%x cur_offset %u "
 		  "ddp_report 0x%x offset %u, len %u",
 		  tp->rcv_nxt, bsp->cur_offset, ddp_report,
 		   G_DDP_OFFSET(ddp_report), m->m_len);
-	
+
+	m->m_cur_offset = bsp->cur_offset;
 	bsp->cur_offset += m->m_len;
 
 	if (!(bsp->flags & DDP_BF_NOFLIP)) {
@@ -2402,25 +2440,6 @@ enter_timewait(struct tcpcb *tp)
 	tp->t_srtt = 0;                        /* defeat tcp_update_metrics */
 	inp_wunlock(tp->t_inpcb);
 	tcp_offload_twstart(tp);
-}
-
-static void
-enter_timewait_disconnect(struct tcpcb *tp)
-{
-	/*
-	 * Bump rcv_nxt for the peer FIN.  We don't do this at the time we
-	 * process peer_close because we don't want to carry the peer FIN in
-	 * the socket's receive queue and if we increment rcv_nxt without
-	 * having the FIN in the receive queue we'll confuse facilities such
-	 * as SIOCINQ.
-	 */
-	inp_wlock(tp->t_inpcb);	
-	tp->rcv_nxt++;
-
-	tp->ts_recent_age = 0;	     /* defeat recycling */
-	tp->t_srtt = 0;                        /* defeat tcp_update_metrics */
-	inp_wunlock(tp->t_inpcb);
-	tcp_offload_twstart_disconnect(tp);
 }
 
 /*
@@ -2518,7 +2537,10 @@ do_peer_fin(struct toepcb *toep, struct mbuf *m)
 		}
 	}
 	if (TCPS_HAVERCVDFIN(tp->t_state) == 0) {
+		CTR1(KTR_TOM,
+		    "waking up waiters for cantrcvmore on %p ", so);	
 		socantrcvmore(so);
+
 		/*
 		 * If connection is half-synchronized
 		 * (ie NEEDSYN flag on) then delay ACK,
@@ -2567,9 +2589,6 @@ do_peer_fin(struct toepcb *toep, struct mbuf *m)
 	}
 	inp_wunlock(tp->t_inpcb);					
 
-	DPRINTF("waking up waiters on %p rcv_notify=%d flags=0x%x\n", so, sb_notify(rcv), rcv->sb_flags);
-
-
 	if (action == TCP_TIMEWAIT) {
 		enter_timewait(tp);
 	} else if (action == TCP_DROP) {
@@ -2577,7 +2596,7 @@ do_peer_fin(struct toepcb *toep, struct mbuf *m)
 	} else if (action == TCP_CLOSE) {
 		tcp_offload_close(tp);		
 	}
-	
+
 #ifdef notyet		
 	/* Do not send POLL_HUP for half duplex close. */
 	if ((sk->sk_shutdown & SEND_SHUTDOWN) ||
@@ -2690,7 +2709,7 @@ process_close_con_rpl(struct toepcb *toep, struct mbuf *m)
 
 
 	if (action == TCP_TIMEWAIT) {
-		enter_timewait_disconnect(tp);
+		enter_timewait(tp);
 	} else if (action == TCP_DROP) {
 		tcp_offload_drop(tp, 0);		
 	} else if (action == TCP_CLOSE) {
@@ -3239,6 +3258,7 @@ syncache_add_accept_req(struct cpl_pass_accept_req *req, struct socket *lso, str
 	/*
 	 * Fill out information for entering us into the syncache
 	 */
+	bzero(&inc, sizeof(inc));
 	inc.inc_fport = th.th_sport = req->peer_port;
 	inc.inc_lport = th.th_dport = req->local_port;
 	th.th_seq = req->rcv_isn;
@@ -3263,7 +3283,7 @@ syncache_add_accept_req(struct cpl_pass_accept_req *req, struct socket *lso, str
 	to.to_mss = mss;
 	to.to_wscale = wsf;
 	to.to_flags = (mss ? TOF_MSS : 0) | (wsf ? TOF_SCALE : 0) | (ts ? TOF_TS : 0) | (sack ? TOF_SACKPERM : 0);
-	syncache_offload_add(&inc, &to, &th, inp, &lso, &cxgb_toe_usrreqs, toep);
+	tcp_offload_syncache_add(&inc, &to, &th, inp, &lso, &cxgb_toe_usrreqs, toep);
 }
 
 
@@ -3424,9 +3444,7 @@ process_pass_accept_req(struct socket *so, struct mbuf *m, struct toedev *tdev,
 				V_TF_DDP_OFF(1) |
 		    TP_DDP_TIMER_WORKAROUND_VAL, 1);
 	} else
-		printf("not offloading\n");
-	
-	
+		DPRINTF("no DDP\n");
 
 	return;
 reject:
@@ -3583,6 +3601,7 @@ syncache_expand_establish_req(struct cpl_pass_establish *req, struct socket **so
 	/*
 	 * Fill out information for entering us into the syncache
 	 */
+	bzero(&inc, sizeof(inc));
 	inc.inc_fport = th.th_sport = req->peer_port;
 	inc.inc_lport = th.th_dport = req->local_port;
 	th.th_seq = req->rcv_isn;
@@ -3606,7 +3625,7 @@ syncache_expand_establish_req(struct cpl_pass_establish *req, struct socket **so
 	    ntohl(req->local_ip), ntohs(req->local_port),
 	    ntohl(req->peer_ip), ntohs(req->peer_port),
 	    mss, wsf, ts, sack);
-	return syncache_offload_expand(&inc, &to, &th, so, m);
+	return tcp_offload_syncache_expand(&inc, &to, &th, so, m);
 }
 
 
@@ -3641,10 +3660,6 @@ do_pass_establish(struct t3cdev *cdev, struct mbuf *m, void *ctx)
 
 	inp_wunlock(tp->t_inpcb);
 
-	snd = so_sockbuf_snd(so);
-	rcv = so_sockbuf_rcv(so);
-
-	
 	so_lock(so);
 	LIST_REMOVE(toep, synq_entry);
 	so_unlock(so);
@@ -3665,7 +3680,9 @@ do_pass_establish(struct t3cdev *cdev, struct mbuf *m, void *ctx)
 	tp = so_sototcpcb(so);
 	inp_wlock(tp->t_inpcb);
 
-	
+	snd = so_sockbuf_snd(so);
+	rcv = so_sockbuf_rcv(so);
+
 	snd->sb_flags |= SB_NOCOALESCE;
 	rcv->sb_flags |= SB_NOCOALESCE;
 
@@ -3762,6 +3779,7 @@ fixup_and_send_ofo(struct toepcb *toep)
 static void
 socket_act_establish(struct socket *so, struct mbuf *m)
 {
+	INIT_VNET_INET(so->so_vnet);
 	struct cpl_act_establish *req = cplhdr(m);
 	u32 rcv_isn = ntohl(req->rcv_isn);	/* real RCV_ISN + 1 */
 	struct tcpcb *tp = so_sototcpcb(so);
@@ -3811,7 +3829,7 @@ socket_act_establish(struct socket *so, struct mbuf *m)
 #endif
 
 	toep->tp_state = tp->t_state;
-	tcpstat.tcps_connects++;
+	V_tcpstat.tcps_connects++;
 				
 }
 

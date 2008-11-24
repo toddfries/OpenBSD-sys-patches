@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/an/if_an.c,v 1.88 2008/01/18 16:34:18 ambrisko Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/an/if_an.c,v 1.89 2008/11/06 08:55:46 bz Exp $");
 
 /*
  * The Aironet 4500/4800 series cards come in PCMCIA, ISA and PCI form.
@@ -2686,8 +2686,10 @@ an_init(void *xsc)
 		}
 	}
 
+#ifdef ANCACHE
 	if (sc->an_have_rssimap)
 		sc->an_config.an_rxmode |= AN_RXMODE_NORMALIZED_RSSI;
+#endif
 
 	/* Set the ssid list */
 	sc->an_ssidlist.an_type = AN_RID_SSIDLIST;

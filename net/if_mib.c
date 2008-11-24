@@ -26,7 +26,7 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net/if_mib.c,v 1.18 2006/01/04 12:57:09 harti Exp $
+ * $FreeBSD: src/sys/net/if_mib.c,v 1.21 2008/10/02 15:37:58 zec Exp $
  */
 
 #include <sys/param.h>
@@ -34,6 +34,7 @@
 #include <sys/kernel.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_mib.h>
@@ -64,12 +65,15 @@
 SYSCTL_DECL(_net_link_generic);
 SYSCTL_NODE(_net_link_generic, IFMIB_SYSTEM, system, CTLFLAG_RW, 0,
 	    "Variables global to all interfaces");
-SYSCTL_INT(_net_link_generic_system, IFMIB_IFCOUNT, ifcount, CTLFLAG_RD,
-	   &if_index, 0, "Number of configured interfaces");
+
+SYSCTL_V_INT(V_NET, vnet_net, _net_link_generic_system, IFMIB_IFCOUNT,
+	     ifcount, CTLFLAG_RD, if_index, 0,
+	     "Number of configured interfaces");
 
 static int
 sysctl_ifdata(SYSCTL_HANDLER_ARGS) /* XXX bad syntax! */
 {
+	INIT_VNET_NET(curvnet);
 	int *name = (int *)arg1;
 	int error;
 	u_int namelen = arg2;
@@ -81,7 +85,7 @@ sysctl_ifdata(SYSCTL_HANDLER_ARGS) /* XXX bad syntax! */
 	if (namelen != 2)
 		return EINVAL;
 
-	if (name[0] <= 0 || name[0] > if_index ||
+	if (name[0] <= 0 || name[0] > V_if_index ||
 	    ifnet_byindex(name[0]) == NULL)
 		return ENOENT;
 
@@ -136,6 +140,7 @@ sysctl_ifdata(SYSCTL_HANDLER_ARGS) /* XXX bad syntax! */
 		error = SYSCTL_IN(req, ifp->if_linkmib, ifp->if_linkmiblen);
 		if (error)
 			return error;
+		break;
 
 	case IFDATA_DRIVERNAME:
 		/* 20 is enough for 64bit ints */

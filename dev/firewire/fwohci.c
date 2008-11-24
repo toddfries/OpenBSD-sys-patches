@@ -31,7 +31,7 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  * 
- * $FreeBSD: src/sys/dev/firewire/fwohci.c,v 1.93 2007/06/08 09:04:30 simokawa Exp $
+ * $FreeBSD: src/sys/dev/firewire/fwohci.c,v 1.95 2008/05/10 13:40:42 simokawa Exp $
  *
  */
 
@@ -1745,6 +1745,8 @@ fwohci_stop(struct fwohci_softc *sc, device_t dev)
 {
 	u_int i;
 
+	fwohci_set_intr(&sc->fc, 0);
+
 /* Now stopping all DMA channel */
 	OWRITE(sc,  OHCI_ARQCTLCLR, OHCI_CNTL_DMA_RUN);
 	OWRITE(sc,  OHCI_ARSCTLCLR, OHCI_CNTL_DMA_RUN);
@@ -1755,9 +1757,6 @@ fwohci_stop(struct fwohci_softc *sc, device_t dev)
 		OWRITE(sc,  OHCI_IRCTLCLR(i), OHCI_CNTL_DMA_RUN);
 		OWRITE(sc,  OHCI_ITCTLCLR(i), OHCI_CNTL_DMA_RUN);
 	}
-
-	if (sc->fc.arq !=0 && sc->fc.arq->maxq > 0)
-		fw_drain_txq(&sc->fc);
 
 #if 0 /* Let dcons(4) be accessed */  
 /* Stop interrupt */
@@ -2601,10 +2600,13 @@ fwohci_add_rx_buf(struct fwohci_dbch *dbch, struct fwohcidb_tr *db_tr,
 
 	ir = &dbch->xferq;
 	if (ir->buf == NULL && (dbch->xferq.flag & FWXFERQ_EXTBUF) == 0) {
-		db_tr->buf = fwdma_malloc_size(dbch->dmat, &db_tr->dma_map,
-			ir->psize, &dbuf[0], BUS_DMA_NOWAIT);
-		if (db_tr->buf == NULL)
-			return(ENOMEM);
+		if (db_tr->buf == NULL) {
+			db_tr->buf = fwdma_malloc_size(dbch->dmat,
+			    &db_tr->dma_map, ir->psize, &dbuf[0],
+			    BUS_DMA_NOWAIT);
+			if (db_tr->buf == NULL)
+				return(ENOMEM);
+		}
 		db_tr->dbcnt = 1;
 		dsiz[0] = ir->psize;
 		bus_dmamap_sync(dbch->dmat, db_tr->dma_map,

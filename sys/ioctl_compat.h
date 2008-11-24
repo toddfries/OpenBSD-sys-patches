@@ -32,18 +32,13 @@
  * SUCH DAMAGE.
  *
  *	@(#)ioctl_compat.h	8.4 (Berkeley) 1/21/94
- * $FreeBSD: src/sys/sys/ioctl_compat.h,v 1.10 2007/04/27 11:19:05 benjsc Exp $
+ * $FreeBSD: src/sys/sys/ioctl_compat.h,v 1.12 2008/07/16 11:20:04 ed Exp $
  */
 
 #ifndef _SYS_IOCTL_COMPAT_H_
 #define	_SYS_IOCTL_COMPAT_H_
 
-#include <sys/ttychars.h>
-#include <sys/ttydev.h>
-
-#ifdef USE_OLD_TTY
-#warning "Old BSD tty API used and depends on COMPAT_43TTY. Use termios.h instead"
-#endif
+#ifdef _KERNEL
 
 struct tchars {
 	char	t_intrc;	/* interrupt */
@@ -66,8 +61,6 @@ struct ltchars {
 /*
  * Structure for TIOCGETP and TIOCSETP ioctls.
  */
-#ifndef _SGTTYB_
-#define	_SGTTYB_
 struct sgttyb {
 	char	sg_ispeed;		/* input speed */
 	char	sg_ospeed;		/* output speed */
@@ -75,17 +68,9 @@ struct sgttyb {
 	char	sg_kill;		/* kill character */
 	short	sg_flags;		/* mode flags */
 };
-#endif
 
-#ifdef USE_OLD_TTY
-# undef  TIOCGETD
-# define TIOCGETD	_IOR('t', 0, int)	/* get line discipline */
-# undef  TIOCSETD
-# define TIOCSETD	_IOW('t', 1, int)	/* set line discipline */
-#else
-# define OTIOCGETD	_IOR('t', 0, int)	/* get line discipline */
-# define OTIOCSETD	_IOW('t', 1, int)	/* set line discipline */
-#endif
+#define	OTIOCGETD	_IOR('t', 0, int)	/* get line discipline */
+#define	OTIOCSETD	_IOW('t', 1, int)	/* set line discipline */
 #define	TIOCHPCL	_IO('t', 2)		/* hang up on last close */
 #define	TIOCGETP	_IOR('t', 8,struct sgttyb)/* get parameters -- gtty */
 #define	TIOCSETP	_IOW('t', 9,struct sgttyb)/* set parameters -- stty */
@@ -161,8 +146,7 @@ struct sgttyb {
 #define	TIOCSLTC	_IOW('t',117,struct ltchars)/* set local special chars*/
 #define	TIOCGLTC	_IOR('t',116,struct ltchars)/* get local special chars*/
 #define OTIOCCONS	_IO('t', 98)	/* for hp300 -- sans int arg */
-#define	OTTYDISC	0
-#define	NETLDISC	1
-#define	NTTYDISC	2
+
+#endif /* _KERNEL */
 
 #endif /* !_SYS_IOCTL_COMPAT_H_ */

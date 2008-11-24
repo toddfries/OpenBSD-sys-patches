@@ -28,13 +28,9 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/common/cxgb_mv88e1xxx.c,v 1.3 2008/02/23 01:06:16 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/common/cxgb_mv88e1xxx.c,v 1.5 2008/09/23 03:16:54 kmacy Exp $");
 
-#ifdef CONFIG_DEFINED
 #include <cxgb_include.h>
-#else
-#include <dev/cxgb/cxgb_include.h>
-#endif
 
 /* Marvell PHY interrupt status bits. */
 #define MV_INTR_JABBER          0x0001
@@ -299,7 +295,7 @@ static struct cphy_ops mv88e1xxx_ops = {
 #endif
 
 int t3_mv88e1xxx_phy_prep(struct cphy *phy, adapter_t *adapter, int phy_addr,
-			   const struct mdio_ops *mdio_ops)
+			  const struct mdio_ops *mdio_ops)
 {
 	int err;
 
@@ -310,9 +306,9 @@ int t3_mv88e1xxx_phy_prep(struct cphy *phy, adapter_t *adapter, int phy_addr,
 
 	/* Configure copper PHY transmitter as class A to reduce EMI. */
 	err = mdio_write(phy, 0, MV88E1XXX_EXTENDED_ADDR, 0xb);
-
 	if (!err)
 		err = mdio_write(phy, 0, MV88E1XXX_EXTENDED_DATA, 0x8004);
+
 	if (!err)
 		err = mv88e1xxx_downshift_set(phy, 1);   /* Enable downshift */
 	return err;

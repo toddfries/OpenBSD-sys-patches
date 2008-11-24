@@ -1,5 +1,5 @@
 /*	$NetBSD: uaudio.c,v 1.91 2004/11/05 17:46:14 kent Exp $	*/
-/*	$FreeBSD: src/sys/dev/sound/usb/uaudio.c,v 1.36 2007/06/20 05:11:37 imp Exp $ */
+/*	$FreeBSD: src/sys/dev/sound/usb/uaudio.c,v 1.37 2008/08/23 18:22:49 imp Exp $ */
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -699,8 +699,8 @@ USB_DETACH(uaudio)
 
 	err = bus_generic_detach(sc->sc_dev);
 
-	if (err == 0) {
-		device_get_children(sc->sc_dev, &devlist, &devcount);
+	if (err == 0 && 
+	    device_get_children(sc->sc_dev, &devlist, &devcount) == 0) {
 		for (i = 0; devlist != NULL && i < devcount; i++) {
 			func = device_get_ivars(devlist[i]);
 			if (func != NULL && func->func == SCF_PCM &&
@@ -710,8 +710,7 @@ USB_DETACH(uaudio)
 				device_delete_child(sc->sc_dev, devlist[i]);
 			}
 		}
-		if (devlist != NULL)
-			free(devlist, M_TEMP);
+		free(devlist, M_TEMP);
 	}
 
 	return err;

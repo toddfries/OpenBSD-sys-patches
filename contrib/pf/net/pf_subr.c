@@ -32,7 +32,7 @@
 #include "opt_inet6.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_subr.c,v 1.4 2007/07/05 15:28:59 mlaier Exp $");
+__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_subr.c,v 1.6 2008/10/02 15:37:58 zec Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -45,6 +45,7 @@ __FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_subr.c,v 1.4 2007/07/05 15:28:59 m
 #include <sys/socketvar.h>
 #include <sys/systm.h>
 #include <sys/time.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -122,14 +123,15 @@ static MD5_CTX isn_ctx;
 u_int32_t
 pf_new_isn(struct pf_state *s)
 {
+	INIT_VNET_INET(curvnet);
 	u_int32_t md5_buffer[4];
 	u_int32_t new_isn;
 	struct pf_state_host *src, *dst;
 
 	/* Seed if this is the first use, reseed if requested. */
-	if (isn_last_reseed == 0) {
-		read_random(&isn_secret, sizeof(isn_secret));
-		isn_last_reseed = ticks;
+	if (V_isn_last_reseed == 0) {
+		read_random(&V_isn_secret, sizeof(V_isn_secret));
+		V_isn_last_reseed = ticks;
 	}
 
 	if (s->direction == PF_IN) {
@@ -141,28 +143,28 @@ pf_new_isn(struct pf_state *s)
 	}
 
 	/* Compute the md5 hash and return the ISN. */
-	MD5Init(&isn_ctx);
-	MD5Update(&isn_ctx, (u_char *) &dst->port, sizeof(u_short));
-	MD5Update(&isn_ctx, (u_char *) &src->port, sizeof(u_short));
+	MD5Init(&V_isn_ctx);
+	MD5Update(&V_isn_ctx, (u_char *) &dst->port, sizeof(u_short));
+	MD5Update(&V_isn_ctx, (u_char *) &src->port, sizeof(u_short));
 #ifdef INET6
 	if (s->af == AF_INET6) {
-		MD5Update(&isn_ctx, (u_char *) &dst->addr,
+		MD5Update(&V_isn_ctx, (u_char *) &dst->addr,
 			  sizeof(struct in6_addr));
-		MD5Update(&isn_ctx, (u_char *) &src->addr,
+		MD5Update(&V_isn_ctx, (u_char *) &src->addr,
 			  sizeof(struct in6_addr));
 	} else
 #endif
 	{
-		MD5Update(&isn_ctx, (u_char *) &dst->addr,
+		MD5Update(&V_isn_ctx, (u_char *) &dst->addr,
 			  sizeof(struct in_addr));
-		MD5Update(&isn_ctx, (u_char *) &src->addr,
+		MD5Update(&V_isn_ctx, (u_char *) &src->addr,
 			  sizeof(struct in_addr));
 	}
-	MD5Update(&isn_ctx, (u_char *) &isn_secret, sizeof(isn_secret));
-	MD5Final((u_char *) &md5_buffer, &isn_ctx);
+	MD5Update(&V_isn_ctx, (u_char *) &V_isn_secret, sizeof(V_isn_secret));
+	MD5Final((u_char *) &md5_buffer, &V_isn_ctx);
 	new_isn = (tcp_seq) md5_buffer[0];
-	isn_offset += ISN_STATIC_INCREMENT +
+	V_isn_offset += ISN_STATIC_INCREMENT +
 		(arc4random() & ISN_RANDOM_INCREMENT);
-	new_isn += isn_offset;
+	new_isn += V_isn_offset;
 	return (new_isn);
 }

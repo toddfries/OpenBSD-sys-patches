@@ -1,6 +1,10 @@
 /*-
- * Copyright (c) 2003-2005 Joseph Koshy
+ * Copyright (c) 2003-2008 Joseph Koshy
+ * Copyright (c) 2007 The FreeBSD Foundation
  * All rights reserved.
+ *
+ * Portions of this software were developed by A. Joseph Koshy under
+ * sponsorship from the FreeBSD Foundation and Google, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,7 +27,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/amd64/include/pmc_mdep.h,v 1.3 2005/06/09 19:45:06 jkoshy Exp $
+ * $FreeBSD: src/sys/amd64/include/pmc_mdep.h,v 1.7 2008/11/09 17:37:54 jkoshy Exp $
  */
 
 /* Machine dependent interfaces */
@@ -31,8 +35,34 @@
 #ifndef _MACHINE_PMC_MDEP_H
 #define	_MACHINE_PMC_MDEP_H 1
 
+#ifdef	_KERNEL
+struct pmc_mdep;
+#endif
+
 #include <dev/hwpmc/hwpmc_amd.h>
 #include <dev/hwpmc/hwpmc_piv.h>
+#include <dev/hwpmc/hwpmc_tsc.h>
+
+/*
+ * Intel processors implementing V2 and later of the Intel performance
+ * measurement architecture have PMCs of the following classes: TSC,
+ * IAF and IAP.
+ */
+#define	PMC_MDEP_CLASS_INDEX_TSC	0
+#define	PMC_MDEP_CLASS_INDEX_K8		1
+#define	PMC_MDEP_CLASS_INDEX_P4		1
+#define	PMC_MDEP_CLASS_INDEX_IAF	1
+#define	PMC_MDEP_CLASS_INDEX_IAP	2
+
+/*
+ * On the amd64 platform we support the following PMCs.
+ *
+ * TSC		The timestamp counter
+ * K8		AMD Athlon64 and Opteron PMCs in 64 bit mode.
+ * PIV		Intel P4/HTT and P4/EMT64
+ * IAP		Intel Core/Core2/Atom CPUs in 64 bits mode.
+ * IAF		Intel fixed-function PMCs in Core2 and later CPUs.
+ */
 
 union pmc_md_op_pmcallocate  {
 	struct pmc_md_amd_op_pmcallocate	pm_amd;
@@ -51,13 +81,41 @@ union pmc_md_pmc {
 	struct pmc_md_p4_pmc	pm_p4;
 };
 
-struct pmc;
+#define	PMC_TRAPFRAME_TO_PC(TF)	((TF)->tf_rip)
+#define	PMC_TRAPFRAME_TO_FP(TF)	((TF)->tf_rbp)
+#define	PMC_TRAPFRAME_TO_USER_SP(TF)	((TF)->tf_rsp)
+#define	PMC_TRAPFRAME_TO_KERNEL_SP(TF)	((TF)->tf_rsp)
+
+#define	PMC_AT_FUNCTION_PROLOGUE_PUSH_BP(I)		\
+	(((I) & 0xffffffff) == 0xe5894855) /* pushq %rbp; movq %rsp,%rbp */
+#define	PMC_AT_FUNCTION_PROLOGUE_MOV_SP_BP(I)		\
+	(((I) & 0x00ffffff) == 0x00e58948) /* movq %rsp,%rbp */
+#define	PMC_AT_FUNCTION_EPILOGUE_RET(I)			\
+	(((I) & 0xFF) == 0xC3)		   /* ret */
+
+#define	PMC_IN_TRAP_HANDLER(PC) 			\
+	((PC) >= (uintptr_t) start_exceptions &&	\
+	 (PC) < (uintptr_t) end_exceptions)
+
+#define	PMC_IN_KERNEL_STACK(S,START,END)		\
+	((S) >= (START) && (S) < (END))
+#define	PMC_IN_KERNEL(va) (((va) >= DMAP_MIN_ADDRESS &&			\
+	(va) < DMAP_MAX_ADDRESS) || ((va) >= VM_MIN_KERNEL_ADDRESS &&	\
+	(va) < VM_MAX_KERNEL_ADDRESS))
+
+#define	PMC_IN_USERSPACE(va) ((va) <= VM_MAXUSER_ADDRESS)
 
 /*
  * Prototypes
  */
 
+void	start_exceptions(void), end_exceptions(void);
 void	pmc_x86_lapic_enable_pmc_interrupt(void);
 
-#endif
+struct pmc_mdep *pmc_amd_initialize(void);
+void	pmc_amd_finalize(struct pmc_mdep *_md);
+struct pmc_mdep *pmc_intel_initialize(void);
+void	pmc_intel_finalize(struct pmc_mdep *_md);
+
+#endif /* _KERNEL */
 #endif /* _MACHINE_PMC_MDEP_H */

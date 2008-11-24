@@ -1,5 +1,5 @@
 /*	$NetBSD: usbdi.h,v 1.64 2004/10/23 13:26:34 augustss Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/usbdi.h,v 1.64 2008/03/20 03:09:59 sam Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/usbdi.h,v 1.65 2008/11/13 21:34:34 n_hibma Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -160,6 +160,7 @@ usb_endpoint_descriptor_t *usbd_find_edesc(usb_config_descriptor_t *,
 
 void usbd_dopoll(usbd_interface_handle);
 void usbd_set_polling(usbd_device_handle, int);
+usbd_status usbd_reset_device(usbd_device_handle);
 
 const char *usbd_errstr(usbd_status);
 

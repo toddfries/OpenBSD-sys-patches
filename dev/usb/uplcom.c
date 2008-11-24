@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/uplcom.c,v 1.51 2007/12/16 12:39:50 stas Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/uplcom.c,v 1.53 2008/08/31 03:08:26 imp Exp $");
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -196,9 +196,6 @@ static	void uplcom_rts(struct uplcom_softc *, int);
 static	void uplcom_break(struct uplcom_softc *, int);
 static	void uplcom_set_line_state(struct uplcom_softc *);
 static	void uplcom_get_status(void *, int, u_char *, u_char *);
-#if 0 /* TODO */
-static	int  uplcom_ioctl(void *, int, u_long, caddr_t, int, usb_proc_ptr);
-#endif
 static	int  uplcom_param(void *, int, struct termios *);
 static	int  uplcom_open(void *, int);
 static	void uplcom_close(void *, int);
@@ -208,7 +205,7 @@ struct ucom_callback uplcom_callback = {
 	uplcom_get_status,
 	uplcom_set,
 	uplcom_param,
-	NULL, /* uplcom_ioctl, TODO */
+	NULL,
 	uplcom_open,
 	uplcom_close,
 	NULL,
@@ -272,6 +269,8 @@ static const struct uplcom_product {
 	{ USB_VENDOR_SITECOM, USB_PRODUCT_SITECOM_SERIAL, -1, TYPE_PL2303 },
 	/* Tripp-Lite U209-000-R */
 	{ USB_VENDOR_TRIPPLITE, USB_PRODUCT_TRIPPLITE_U209, -1, TYPE_PL2303X },
+	/* Belkin F5U257 */
+	{ USB_VENDOR_BELKIN, USB_PRODUCT_BELKIN_F5U257, -1, TYPE_PL2303X },
 	{ 0, 0 }
 };
 
@@ -989,34 +988,3 @@ uplcom_get_status(void *addr, int portno, u_char *lsr, u_char *msr)
 	if (msr != NULL)
 		*msr = sc->sc_msr;
 }
-
-#if 0 /* TODO */
-static int
-uplcom_ioctl(void *addr, int portno, u_long cmd, caddr_t data, int flag,
-	     struct thread *p)
-{
-	struct uplcom_softc *sc = addr;
-	int error = 0;
-
-	if (sc->sc_ucom.sc_dying)
-		return (EIO);
-
-	DPRINTF(("uplcom_ioctl: cmd = 0x%08lx\n", cmd));
-
-	switch (cmd) {
-	case TIOCNOTTY:
-	case TIOCMGET:
-	case TIOCMSET:
-	case USB_GET_CM_OVER_DATA:
-	case USB_SET_CM_OVER_DATA:
-		break;
-
-	default:
-		DPRINTF(("uplcom_ioctl: unknown\n"));
-		error = ENOTTY;
-		break;
-	}
-
-	return (error);
-}
-#endif

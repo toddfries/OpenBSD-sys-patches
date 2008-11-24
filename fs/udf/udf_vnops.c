@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/udf/udf_vnops.c,v 1.66 2007/06/11 20:14:44 remko Exp $
+ * $FreeBSD: src/sys/fs/udf/udf_vnops.c,v 1.72 2008/10/28 13:44:11 trasz Exp $
  */
 
 /* udf_vnops.c */
@@ -139,13 +139,14 @@ udf_access(struct vop_access_args *a)
 {
 	struct vnode *vp;
 	struct udf_node *node;
-	mode_t a_mode, mode;
+	accmode_t accmode;
+	mode_t mode;
 
 	vp = a->a_vp;
 	node = VTON(vp);
-	a_mode = a->a_mode;
+	accmode = a->a_accmode;
 
-	if (a_mode & VWRITE) {
+	if (accmode & VWRITE) {
 		switch (vp->v_type) {
 		case VDIR:
 		case VLNK:
@@ -160,7 +161,7 @@ udf_access(struct vop_access_args *a)
 	mode = udf_permtomode(node);
 
 	return (vaccess(vp->v_type, mode, node->fentry->uid, node->fentry->gid,
-	    a_mode, a->a_cred, NULL));
+	    accmode, a->a_cred, NULL));
 }
 
 static int
@@ -173,9 +174,9 @@ udf_open(struct vop_open_args *ap) {
 	return 0;
 }
 
-static int mon_lens[2][12] = {
-	{31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31},
-	{31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+static const int mon_lens[2][12] = {
+	{0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334},
+	{0, 31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335}
 };
 
 static int
@@ -191,25 +192,25 @@ udf_isaleapyear(int year)
 }
 
 /*
- * XXX This is just a rough hack.  Daylight savings isn't calculated and tv_nsec
- * is ignored.
  * Timezone calculation compliments of Julian Elischer <julian@elischer.org>.
  */
 static void
 udf_timetotimespec(struct timestamp *time, struct timespec *t)
 {
-	int i, lpyear, daysinyear, year;
+	int i, lpyear, daysinyear, year, startyear;
 	union {
 		uint16_t	u_tz_offset;
 		int16_t		s_tz_offset;
 	} tz;
 
-	t->tv_nsec = 0;
-
-	/* DirectCD seems to like using bogus year values */
+	/*
+	 * DirectCD seems to like using bogus year values.
+	 * Don't trust time->month as it will be used for an array index.
+	 */
 	year = le16toh(time->year);
-	if (year < 1970) {
+	if (year < 1970 || time->month < 1 || time->month > 12) {
 		t->tv_sec = 0;
+		t->tv_nsec = 0;
 		return;
 	}
 
@@ -217,24 +218,36 @@ udf_timetotimespec(struct timestamp *time, struct timespec *t)
 	t->tv_sec = time->second;
 	t->tv_sec += time->minute * 60;
 	t->tv_sec += time->hour * 3600;
-	t->tv_sec += time->day * 3600 * 24;
+	t->tv_sec += (time->day - 1) * 3600 * 24;
 
 	/* Calculate the month */
 	lpyear = udf_isaleapyear(year);
-	for (i = 1; i < time->month; i++)
-		t->tv_sec += mon_lens[lpyear][i] * 3600 * 24;
+	t->tv_sec += mon_lens[lpyear][time->month - 1] * 3600 * 24;
 
 	/* Speed up the calculation */
-	if (year > 1979)
+	startyear = 1970;
+	if (year > 2009) {
+		t->tv_sec += 1262304000;
+		startyear += 40;
+	} else if (year > 1999) {
+		t->tv_sec += 946684800;
+		startyear += 30;
+	} else if (year > 1989) {
+		t->tv_sec += 631152000;
+		startyear += 20;
+	} else if (year > 1979) {
 		t->tv_sec += 315532800;
-	if (year > 1989)
-		t->tv_sec += 315619200;
-	if (year > 1999)
-		t->tv_sec += 315532800;
-	for (i = 2000; i < year; i++) {
-		daysinyear = udf_isaleapyear(i) + 365 ;
-		t->tv_sec += daysinyear * 3600 * 24;
+		startyear += 10;
 	}
+
+	daysinyear = (year - startyear) * 365;
+	for (i = startyear; i < year; i++)
+		daysinyear += udf_isaleapyear(i);
+	t->tv_sec += daysinyear * 3600 * 24;
+
+	/* Calculate microseconds */
+	t->tv_nsec = time->centisec * 10000 + time->hund_usec * 100 +
+	    time->usec;
 
 	/*
 	 * Calculate the time zone.  The timezone is 12 bit signed 2's
@@ -244,7 +257,7 @@ udf_timetotimespec(struct timestamp *time, struct timespec *t)
 	tz.u_tz_offset &= 0x0fff;
 	if (tz.u_tz_offset & 0x0800)
 		tz.u_tz_offset |= 0xf000;	/* extend the sign to 16 bits */
-	if ((time->type_tz & 0x1000) && (tz.s_tz_offset != -2047))
+	if ((le16toh(time->type_tz) & 0x1000) && (tz.s_tz_offset != -2047))
 		t->tv_sec -= tz.s_tz_offset * 60;
 
 	return;
@@ -279,7 +292,7 @@ udf_getattr(struct vop_getattr_args *a)
 	udf_timetotimespec(&fentry->atime, &vap->va_atime);
 	udf_timetotimespec(&fentry->mtime, &vap->va_mtime);
 	vap->va_ctime = vap->va_mtime; /* XXX Stored as an Extended Attribute */
-	vap->va_rdev = 0; /* XXX */
+	vap->va_rdev = NODEV;
 	if (vp->v_type & VDIR) {
 		/*
 		 * Directories that are recorded within their ICB will show
@@ -562,7 +575,7 @@ udf_getfid(struct udf_dirstream *ds)
 	 */
 	if (ds->fid_fragment && ds->buf != NULL) {
 		ds->fid_fragment = 0;
-		FREE(ds->buf, M_UDFFID);
+		free(ds->buf, M_UDFFID);
 	}
 
 	fid = (struct fileid_desc*)&ds->data[ds->off];
@@ -587,7 +600,7 @@ udf_getfid(struct udf_dirstream *ds)
 		 * File ID descriptors can only be at most one
 		 * logical sector in size.
 		 */
-		MALLOC(ds->buf, uint8_t*, ds->udfmp->bsize, M_UDFFID,
+		ds->buf = malloc(ds->udfmp->bsize, M_UDFFID,
 		     M_WAITOK | M_ZERO);
 		bcopy(fid, ds->buf, frag_size);
 
@@ -656,7 +669,7 @@ udf_closedir(struct udf_dirstream *ds)
 		brelse(ds->bp);
 
 	if (ds->fid_fragment && ds->buf != NULL)
-		FREE(ds->buf, M_UDFFID);
+		free(ds->buf, M_UDFFID);
 
 	uma_zfree(udf_zone_ds, ds);
 }
@@ -689,7 +702,7 @@ udf_readdir(struct vop_readdir_args *a)
 		 * it left off.
 		 */
 		ncookies = uio->uio_resid / 8;
-		MALLOC(cookies, u_long *, sizeof(u_long) * ncookies,
+		cookies = malloc(sizeof(u_long) * ncookies,
 		    M_TEMP, M_WAITOK);
 		if (cookies == NULL)
 			return (ENOMEM);
@@ -775,7 +788,7 @@ udf_readdir(struct vop_readdir_args *a)
 
 	if (a->a_ncookies != NULL) {
 		if (error)
-			FREE(cookies, M_TEMP);
+			free(cookies, M_TEMP);
 		else {
 			*a->a_ncookies = uiodir.acookies;
 			*a->a_cookies = cookies;
@@ -955,10 +968,10 @@ lookloop:
 	/* Did we have a match? */
 	if (id) {
 		if (flags & ISDOTDOT)
-			VOP_UNLOCK(dvp, 0, a->a_cnp->cn_thread);
+			VOP_UNLOCK(dvp, 0);
 		error = udf_vget(udfmp->im_mountp, id, LK_EXCLUSIVE, &tdp);
 		if (flags & ISDOTDOT)
-			vn_lock(dvp, LK_EXCLUSIVE|LK_RETRY, a->a_cnp->cn_thread);
+			vn_lock(dvp, LK_EXCLUSIVE|LK_RETRY);
 		if (!error) {
 			/*
 			 * Remember where this entry was if it's the final
@@ -1016,7 +1029,7 @@ udf_reclaim(struct vop_reclaim_args *a)
 		vfs_hash_remove(vp);
 
 		if (unode->fentry != NULL)
-			FREE(unode->fentry, M_UDFFENTRY);
+			free(unode->fentry, M_UDFFENTRY);
 		uma_zfree(udf_zone_node, unode);
 		vp->v_data = NULL;
 	}

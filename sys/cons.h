@@ -32,13 +32,15 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)cons.h	7.2 (Berkeley) 5/9/91
- * $FreeBSD: src/sys/sys/cons.h,v 1.40 2006/11/01 04:54:51 jb Exp $
+ * $FreeBSD: src/sys/sys/cons.h,v 1.42 2008/10/27 11:45:31 ed Exp $
  */
 
 #ifndef _MACHINE_CONS_H_
 #define	_MACHINE_CONS_H_
 
 struct consdev;
+struct tty;
+
 typedef	void	cn_probe_t(struct consdev *);
 typedef	void	cn_init_t(struct consdev *);
 typedef	void	cn_term_t(struct consdev *);
@@ -59,10 +61,8 @@ struct consdev {
 				/* kernel "return char if available" interface */
 	cn_putc_t	*cn_putc;
 				/* kernel putchar interface */
-	struct	tty *cn_tp;	/* tty structure for console device */
 	short	cn_pri;		/* pecking order; the higher the better */
 	void	*cn_arg;	/* drivers method argument */
-	int	cn_unit;	/* some drivers prefer this */
 	int	cn_flags;	/* capabilities of this console */
 	char	cn_name[SPECNAMELEN + 1];	/* console (device) name */
 };
@@ -79,6 +79,9 @@ struct consdev {
 #define	CN_FLAG_NOAVAIL	0x00000002	/* Temporarily not available. */
 
 #ifdef _KERNEL
+
+extern	struct msgbuf consmsgbuf; /* Message buffer for constty. */
+extern	struct tty *constty;	/* Temporary virtual console. */
 
 #define CONS_DRIVER(name, probe, init, term, getc, checkc, putc, dbctl)	\
 	static struct consdev name##_consdev = {			\
@@ -108,6 +111,8 @@ int	cngetc(void);
 void	cnputc(int);
 void	cnputs(char *);
 int	cnunavailable(void);
+void	constty_set(struct tty *tp);
+void	constty_clear(void);
 
 #endif /* _KERNEL */
 

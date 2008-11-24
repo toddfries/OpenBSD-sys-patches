@@ -1,6 +1,7 @@
 /*-
  * Copyright (c) 1991 Regents of the University of California.
  * All rights reserved.
+ * Copyright (c) 1998 Matthew Dillon.  All Rights Reserved.
  *
  * This code is derived from software contributed to Berkeley by
  * The Mach Operating System project at Carnegie-Mellon University.
@@ -97,7 +98,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_page.c,v 1.358 2007/10/27 00:09:30 alc Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_page.c,v 1.374 2008/11/06 16:20:27 raj Exp $");
+
+#include "opt_vm.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -118,6 +121,7 @@ __FBSDID("$FreeBSD: src/sys/vm/vm_page.c,v 1.358 2007/10/27 00:09:30 alc Exp $")
 #include <vm/vm_pageout.h>
 #include <vm/vm_pager.h>
 #include <vm/vm_phys.h>
+#include <vm/vm_reserv.h>
 #include <vm/vm_extern.h>
 #include <vm/uma.h>
 #include <vm/uma_int.h>
@@ -129,6 +133,7 @@ __FBSDID("$FreeBSD: src/sys/vm/vm_page.c,v 1.358 2007/10/27 00:09:30 alc Exp $")
  *	page structure.
  */
 
+struct vpgqueues vm_page_queues[PQ_COUNT];
 struct mtx vm_page_queue_mtx;
 struct mtx vm_page_queue_free_mtx;
 
@@ -141,6 +146,15 @@ static int boot_pages = UMA_BOOT_PAGES;
 TUNABLE_INT("vm.boot_pages", &boot_pages);
 SYSCTL_INT(_vm, OID_AUTO, boot_pages, CTLFLAG_RD, &boot_pages, 0,
 	"number of pages allocated for bootstrapping the VM system");
+
+static void vm_page_enqueue(int queue, vm_page_t m);
+
+/* Make sure that u_long is at least 64 bits when PAGE_SIZE is 32K. */
+#if PAGE_SIZE == 32768
+#ifdef CTASSERT
+CTASSERT(sizeof(u_long) >= 8);
+#endif
+#endif
 
 /*
  *	vm_set_page_size:
@@ -201,7 +215,6 @@ vm_offset_t
 vm_page_startup(vm_offset_t vaddr)
 {
 	vm_offset_t mapped;
-	vm_size_t npages;
 	vm_paddr_t page_range;
 	vm_paddr_t new_end;
 	int i;
@@ -216,9 +229,6 @@ vm_page_startup(vm_offset_t vaddr)
 	vm_paddr_t low_water, high_water;
 	int biggestone;
 
-	vm_paddr_t total;
-
-	total = 0;
 	biggestsize = 0;
 	biggestone = 0;
 	nblocks = 0;
@@ -244,8 +254,11 @@ vm_page_startup(vm_offset_t vaddr)
 		if (phys_avail[i + 1] > high_water)
 			high_water = phys_avail[i + 1];
 		++nblocks;
-		total += size;
 	}
+
+#ifdef XEN
+	low_water = 0;
+#endif	
 
 	end = phys_avail[biggestone+1];
 
@@ -258,10 +271,14 @@ vm_page_startup(vm_offset_t vaddr)
 	    MTX_DEF);
 
 	/*
-	 * Initialize the queue headers for the free queue, the active queue
+	 * Initialize the queue headers for the hold queue, the active queue,
 	 * and the inactive queue.
 	 */
-	vm_pageq_init();
+	for (i = 0; i < PQ_COUNT; i++)
+		TAILQ_INIT(&vm_page_queues[i].pl);
+	vm_page_queues[PQ_INACTIVE].cnt = &cnt.v_inactive_count;
+	vm_page_queues[PQ_ACTIVE].cnt = &cnt.v_active_count;
+	vm_page_queues[PQ_HOLD].cnt = &cnt.v_active_count;
 
 	/*
 	 * Allocate memory for use when boot strapping the kernel memory
@@ -274,7 +291,7 @@ vm_page_startup(vm_offset_t vaddr)
 	bzero((void *)mapped, end - new_end);
 	uma_startup((void *)mapped, boot_pages);
 
-#if defined(__amd64__) || defined(__i386__)
+#if defined(__amd64__) || defined(__i386__) || defined(__arm__)
 	/*
 	 * Allocate a bitmap to indicate that a random physical page
 	 * needs to be included in a minidump.
@@ -308,8 +325,6 @@ vm_page_startup(vm_offset_t vaddr)
 #else
 #error "Either VM_PHYSSEG_DENSE or VM_PHYSSEG_SPARSE must be defined."
 #endif
-	npages = (total - (page_range * sizeof(struct vm_page)) -
-	    (end - new_end)) / PAGE_SIZE;
 	end = new_end;
 
 	/*
@@ -325,6 +340,13 @@ vm_page_startup(vm_offset_t vaddr)
 	mapped = pmap_map(&vaddr, new_end, end,
 	    VM_PROT_READ | VM_PROT_WRITE);
 	vm_page_array = (vm_page_t) mapped;
+#if VM_NRESERVLEVEL > 0
+	/*
+	 * Allocate memory for the reservation management system's data
+	 * structures.
+	 */
+	new_end = vm_reserv_startup(&vaddr, new_end, high_water);
+#endif
 #ifdef __amd64__
 	/*
 	 * pmap_map on amd64 comes out of the direct-map, not kvm like i386,
@@ -343,16 +365,6 @@ vm_page_startup(vm_offset_t vaddr)
 	for (i = 0; i < page_range; i++)
 		vm_page_array[i].order = VM_NFREEORDER;
 	vm_page_array_size = page_range;
-
-	/*
-	 * This assertion tests the hypothesis that npages and total are
-	 * redundant.  XXX
-	 */
-	page_range = 0;
-	for (i = 0; phys_avail[i + 1] != 0; i += 2)
-		page_range += atop(phys_avail[i + 1] - phys_avail[i]);
-	KASSERT(page_range == npages,
-	    ("vm_page_startup: inconsistent page counts"));
 
 	/*
 	 * Initialize the physical memory allocator.
@@ -380,6 +392,12 @@ vm_page_startup(vm_offset_t vaddr)
 		}
 	}
 	freeenv(list);
+#if VM_NRESERVLEVEL > 0
+	/*
+	 * Initialize the reservation management system.
+	 */
+	vm_reserv_init();
+#endif
 	return (vaddr);
 }
 
@@ -1043,13 +1061,35 @@ vm_page_alloc(vm_object_t object, vm_pindex_t pindex, int req)
 				mtx_unlock(&vm_page_queue_free_mtx);
 				return (NULL);
 			}
-			vm_phys_unfree_page(m);
+			if (vm_phys_unfree_page(m))
+				vm_phys_set_pool(VM_FREEPOOL_DEFAULT, m, 0);
+#if VM_NRESERVLEVEL > 0
+			else if (!vm_reserv_reactivate_page(m))
+#else
+			else
+#endif
+				panic("vm_page_alloc: cache page %p is missing"
+				    " from the free queue", m);
 		} else if ((req & VM_ALLOC_IFCACHED) != 0) {
 			mtx_unlock(&vm_page_queue_free_mtx);
 			return (NULL);
-		} else
+#if VM_NRESERVLEVEL > 0
+		} else if (object == NULL || object->type == OBJT_DEVICE ||
+		    (object->flags & OBJ_COLORED) == 0 ||
+		    (m = vm_reserv_alloc_page(object, pindex)) == NULL) {
+#else
+		} else {
+#endif
 			m = vm_phys_alloc_pages(object != NULL ?
 			    VM_FREEPOOL_DEFAULT : VM_FREEPOOL_DIRECT, 0);
+#if VM_NRESERVLEVEL > 0
+			if (m == NULL && vm_reserv_reclaim_inactive()) {
+				m = vm_phys_alloc_pages(object != NULL ?
+				    VM_FREEPOOL_DEFAULT : VM_FREEPOOL_DIRECT,
+				    0);
+			}
+#endif
+		}
 	} else {
 		/*
 		 * Not allocatable, give up.
@@ -1187,6 +1227,67 @@ vm_waitpfault(void)
 }
 
 /*
+ *	vm_page_requeue:
+ *
+ *	If the given page is contained within a page queue, move it to the tail
+ *	of that queue.
+ *
+ *	The page queues must be locked.
+ */
+void
+vm_page_requeue(vm_page_t m)
+{
+	int queue = VM_PAGE_GETQUEUE(m);
+	struct vpgqueues *vpq;
+
+	if (queue != PQ_NONE) {
+		vpq = &vm_page_queues[queue];
+		TAILQ_REMOVE(&vpq->pl, m, pageq);
+		TAILQ_INSERT_TAIL(&vpq->pl, m, pageq);
+	}
+}
+
+/*
+ *	vm_pageq_remove:
+ *
+ *	Remove a page from its queue.
+ *
+ *	The queue containing the given page must be locked.
+ *	This routine may not block.
+ */
+void
+vm_pageq_remove(vm_page_t m)
+{
+	int queue = VM_PAGE_GETQUEUE(m);
+	struct vpgqueues *pq;
+
+	if (queue != PQ_NONE) {
+		VM_PAGE_SETQUEUE2(m, PQ_NONE);
+		pq = &vm_page_queues[queue];
+		TAILQ_REMOVE(&pq->pl, m, pageq);
+		(*pq->cnt)--;
+	}
+}
+
+/*
+ *	vm_page_enqueue:
+ *
+ *	Add the given page to the specified queue.
+ *
+ *	The page queues must be locked.
+ */
+static void
+vm_page_enqueue(int queue, vm_page_t m)
+{
+	struct vpgqueues *vpq;
+
+	vpq = &vm_page_queues[queue];
+	VM_PAGE_SETQUEUE2(m, queue);
+	TAILQ_INSERT_TAIL(&vpq->pl, m, pageq);
+	++*vpq->cnt;
+}
+
+/*
  *	vm_page_activate:
  *
  *	Put the specified page on the active list (if appropriate).
@@ -1206,7 +1307,7 @@ vm_page_activate(vm_page_t m)
 		if (m->wire_count == 0 && (m->flags & PG_UNMANAGED) == 0) {
 			if (m->act_count < ACT_INIT)
 				m->act_count = ACT_INIT;
-			vm_pageq_enqueue(PQ_ACTIVE, m);
+			vm_page_enqueue(PQ_ACTIVE, m);
 		}
 	} else {
 		if (m->act_count < ACT_INIT)
@@ -1309,18 +1410,21 @@ vm_page_free_toq(vm_page_t m)
 	}
 	if (m->hold_count != 0) {
 		m->flags &= ~PG_ZERO;
-		vm_pageq_enqueue(PQ_HOLD, m);
+		vm_page_enqueue(PQ_HOLD, m);
 	} else {
-		m->flags |= PG_FREE;
 		mtx_lock(&vm_page_queue_free_mtx);
+		m->flags |= PG_FREE;
 		cnt.v_free_count++;
-		if ((m->flags & PG_ZERO) != 0) {
+#if VM_NRESERVLEVEL > 0
+		if (!vm_reserv_free_page(m))
+#else
+		if (TRUE)
+#endif
 			vm_phys_free_pages(m, 0);
+		if ((m->flags & PG_ZERO) != 0)
 			++vm_page_zero_count;
-		} else {
-			vm_phys_free_pages(m, 0);
+		else
 			vm_page_zero_idle_wakeup();
-		}
 		vm_page_free_wakeup();
 		mtx_unlock(&vm_page_queue_free_mtx);
 	}
@@ -1399,10 +1503,10 @@ vm_page_unwire(vm_page_t m, int activate)
 			if (m->flags & PG_UNMANAGED) {
 				;
 			} else if (activate)
-				vm_pageq_enqueue(PQ_ACTIVE, m);
+				vm_page_enqueue(PQ_ACTIVE, m);
 			else {
 				vm_page_flag_clear(m, PG_WINATCFLS);
-				vm_pageq_enqueue(PQ_INACTIVE, m);
+				vm_page_enqueue(PQ_INACTIVE, m);
 			}
 		}
 	} else {
@@ -1519,10 +1623,13 @@ vm_page_cache(vm_page_t m)
 	pmap_remove_all(m);
 	if (m->dirty != 0)
 		panic("vm_page_cache: page %p is dirty", m);
-	if (m->valid == 0 || object->type == OBJT_DEFAULT) {
+	if (m->valid == 0 || object->type == OBJT_DEFAULT ||
+	    (object->type == OBJT_SWAP &&
+	    !vm_pager_has_page(object, m->pindex, NULL, NULL))) {
 		/*
 		 * Hypothesis: A cache-elgible page belonging to a
-		 * default object must be zero filled.
+		 * default object or swap object but without a backing
+		 * store must be zero filled.
 		 */
 		vm_page_free(m);
 		return;
@@ -1557,10 +1664,9 @@ vm_page_cache(vm_page_t m)
 	 * Insert the page into the object's collection of cached pages
 	 * and the physical memory allocator's cache/free page queues.
 	 */
-	vm_page_flag_set(m, PG_CACHED);
 	vm_page_flag_clear(m, PG_ZERO);
 	mtx_lock(&vm_page_queue_free_mtx);
-	vm_phys_set_pool(VM_FREEPOOL_CACHE, m, 0);
+	m->flags |= PG_CACHED;
 	cnt.v_cache_count++;
 	root = object->cache;
 	if (root == NULL) {
@@ -1581,7 +1687,14 @@ vm_page_cache(vm_page_t m)
 		}
 	}
 	object->cache = m;
-	vm_phys_free_pages(m, 0);
+#if VM_NRESERVLEVEL > 0
+	if (!vm_reserv_free_page(m)) {
+#else
+	if (TRUE) {
+#endif
+		vm_phys_set_pool(VM_FREEPOOL_CACHE, m, 0);
+		vm_phys_free_pages(m, 0);
+	}
 	vm_page_free_wakeup();
 	mtx_unlock(&vm_page_queue_free_mtx);
 
@@ -1638,6 +1751,13 @@ vm_page_dontneed(vm_page_t m)
 			--m->act_count;
 		return;
 	}
+
+	/*
+	 * Clear any references to the page.  Otherwise, the page daemon will
+	 * immediately reactivate the page.
+	 */
+	vm_page_flag_clear(m, PG_REFERENCED);
+	pmap_clear_reference(m);
 
 	if (m->dirty == 0 && pmap_is_modified(m))
 		vm_page_dirty(m);

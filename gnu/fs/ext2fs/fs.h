@@ -33,7 +33,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)fs.h	8.7 (Berkeley) 4/19/94
- * $FreeBSD: src/sys/gnu/fs/ext2fs/fs.h,v 1.18 2005/09/08 06:30:05 truckman Exp $
+ * $FreeBSD: src/sys/gnu/fs/ext2fs/fs.h,v 1.20 2008/01/13 14:44:07 attilio Exp $
  */
 
 /*
@@ -145,8 +145,8 @@ extern u_char *fragtbl[];
  * I think I'll try a VOP_LOCK/VOP_UNLOCK on the device vnode
  */
 #define  DEVVP(inode)		(VFSTOEXT2(ITOV(inode)->v_mount)->um_devvp)
-#define  lock_super(devvp)   	vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, curthread)
-#define  unlock_super(devvp) 	VOP_UNLOCK(devvp, 0, curthread)
+#define  lock_super(devvp)   	vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY)
+#define  unlock_super(devvp) 	VOP_UNLOCK(devvp, 0)
 
 /*
  * Historically, ext2fs kept it's metadata buffers on the LOCKED queue.  Now,

@@ -17,12 +17,11 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/bios/apm.c,v 1.148 2007/10/20 23:23:20 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/bios/apm.c,v 1.152 2008/09/27 08:51:18 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bus.h>
-#include <sys/clock.h>
 #include <sys/conf.h>
 #include <sys/condvar.h>
 #include <sys/eventhandler.h>
@@ -79,7 +78,7 @@ int	apm_evindex;
 #define	SCFLAG_OCTL	0x0000002
 #define	SCFLAG_OPEN	(SCFLAG_ONORMAL|SCFLAG_OCTL)
 
-#define APMDEV(dev)	(minor(dev)&0x0f)
+#define APMDEV(dev)	(dev2unit(dev)&0x0f)
 #define APMDEV_NORMAL	0
 #define APMDEV_CTL	8
 
@@ -485,9 +484,16 @@ apm_do_suspend(void)
 	apm_op_inprog = 0;
 	sc->suspends = sc->suspend_countdown = 0;
 
+	/*
+	 * Be sure to hold Giant across DEVICE_SUSPEND/RESUME since
+	 * non-MPSAFE drivers need this.
+	 */
+	mtx_lock(&Giant);
 	error = DEVICE_SUSPEND(root_bus);
-	if (error)
+	if (error) {
+		mtx_unlock(&Giant);
 		return;
+	}
 
 	apm_execute_hook(hook[APM_HOOK_SUSPEND]);
 	if (apm_suspend_system(PMST_SUSPEND) == 0) {
@@ -498,6 +504,7 @@ apm_do_suspend(void)
 		apm_execute_hook(hook[APM_HOOK_RESUME]);
 		DEVICE_RESUME(root_bus);
 	}
+	mtx_unlock(&Giant);
 	return;
 }
 
@@ -602,7 +609,9 @@ apm_resume(void)
 
 	sc->suspending = 0;
 	apm_execute_hook(hook[APM_HOOK_RESUME]);
+	mtx_lock(&Giant);
 	DEVICE_RESUME(root_bus);
+	mtx_unlock(&Giant);
 	return;
 }
 

@@ -1,6 +1,6 @@
 # Common defines for all of /sys/boot/i386/
 #
-# $FreeBSD: src/sys/boot/i386/Makefile.inc,v 1.12 2006/09/28 10:02:04 ru Exp $
+# $FreeBSD: src/sys/boot/i386/Makefile.inc,v 1.13 2008/06/25 21:33:28 ru Exp $
 
 BINDIR?=	/boot
 
@@ -24,3 +24,5 @@ BTXDIR=		${.CURDIR}/../btx
 BTXLDR=		${BTXDIR}/btxldr/btxldr
 BTXKERN=	${BTXDIR}/btx/btx
 BTXCRT=		${BTXDIR}/lib/crt0.o
+
+.include "../Makefile.inc"

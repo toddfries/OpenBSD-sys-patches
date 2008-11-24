@@ -31,10 +31,10 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mii/ciphy.c,v 1.10 2008/03/03 18:44:32 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mii/ciphy.c,v 1.17 2008/10/23 01:27:15 yongari Exp $");
 
 /*
- * Driver for the Cicada CS8201/CS8204 10/100/1000 copper PHY.
+ * Driver for the Cicada/Vitesse CS/VSC8xxx 10/100/1000 copper PHY.
  */
 
 #include <sys/param.h>
@@ -92,6 +92,8 @@ static const struct mii_phydesc ciphys[] = {
 	MII_PHY_DESC(CICADA, CS8201A),
 	MII_PHY_DESC(CICADA, CS8201B),
 	MII_PHY_DESC(CICADA, CS8204),
+	MII_PHY_DESC(CICADA, VSC8211),
+	MII_PHY_DESC(CICADA, CS8244),
 	MII_PHY_DESC(VITESSE, VSC8601),
 	MII_PHY_END
 };
@@ -263,15 +265,18 @@ setit:
 		if (reg & BMSR_LINK)
 			break;
 
+		/* Announce link loss right after it happens. */
+		if (++sc->mii_ticks == 0)
+			break;
 		/*
-		 * Only retry autonegotiation every 5 seconds.
+		 * Only retry autonegotiation every mii_anegticks seconds.
 		 */
-		if (++sc->mii_ticks <= MII_ANEGTICKS)
+		if (sc->mii_ticks <= sc->mii_anegticks)
 			break;
 
 		sc->mii_ticks = 0;
 		mii_phy_auto(sc);
-		return (0);
+		break;
 	}
 
 	/* Update the media status. */
@@ -336,6 +341,8 @@ ciphy_status(struct mii_softc *sc)
 
 	if (bmsr & CIPHY_AUXCSR_FDX)
 		mii->mii_media_active |= IFM_FDX;
+	else
+		mii->mii_media_active |= IFM_HDX;
 }
 
 static void
@@ -416,6 +423,8 @@ ciphy_fixup(struct mii_softc *sc)
 		}
 
 		break;
+	case MII_MODEL_CICADA_VSC8211:
+	case MII_MODEL_CICADA_CS8244:
 	case MII_MODEL_VITESSE_VSC8601:
 		break;
 	default:

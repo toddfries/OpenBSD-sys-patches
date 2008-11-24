@@ -1,6 +1,6 @@
 /*	$OpenBSD: if_zydreg.h,v 1.19 2006/11/30 19:28:07 damien Exp $	*/
 /*	$NetBSD: if_zydreg.h,v 1.2 2007/06/16 11:18:45 kiyohara Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/if_zydreg.h,v 1.4 2008/04/20 20:35:38 sam Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/if_zydreg.h,v 1.5 2008/09/10 03:40:51 weongyo Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>
@@ -1198,8 +1198,9 @@ struct zyd_softc {
 	usbd_device_handle		sc_udev;
 	usbd_interface_handle		sc_iface;
 	int				sc_flags;
+#define ZYD_FLAG_FWLOADED		(1 << 0)
+#define ZYD_FLAG_DETACHING		(1 << 1)
 	int				sc_if_flags;
-#define ZD1211_FWLOADED (1 << 0)
 	uint8_t				sc_bssid[IEEE80211_ADDR_LEN];
 
 	enum ieee80211_state		sc_state;

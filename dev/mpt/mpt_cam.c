@@ -94,7 +94,7 @@
  * OWNER OR CONTRIBUTOR IS ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mpt/mpt_cam.c,v 1.63 2007/10/20 23:23:17 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mpt/mpt_cam.c,v 1.64 2008/05/02 17:02:35 jkim Exp $");
 
 #include <dev/mpt/mpt.h>
 #include <dev/mpt/mpt_cam.h>
@@ -346,7 +346,7 @@ mpt_cam_attach(struct mpt_softc *mpt)
 	 * Register exactly this bus.
 	 */
 	MPT_LOCK(mpt);
-	if (xpt_bus_register(mpt->sim, mpt->dev, 0) != CAM_SUCCESS) {
+	if (mpt_xpt_bus_register(mpt->sim, mpt->dev, 0) != CAM_SUCCESS) {
 		mpt_prt(mpt, "Bus registration Failed!\n");
 		error = ENOMEM;
 		MPT_UNLOCK(mpt);
@@ -385,7 +385,8 @@ mpt_cam_attach(struct mpt_softc *mpt)
 	 * Register this bus.
 	 */
 	MPT_LOCK(mpt);
-	if (xpt_bus_register(mpt->phydisk_sim, mpt->dev, 1) != CAM_SUCCESS) {
+	if (mpt_xpt_bus_register(mpt->phydisk_sim, mpt->dev, 1) !=
+	    CAM_SUCCESS) {
 		mpt_prt(mpt, "Physical Disk Bus registration Failed!\n");
 		error = ENOMEM;
 		MPT_UNLOCK(mpt);
@@ -3988,7 +3989,7 @@ mpt_recovery_thread(void *arg)
 	mpt->recovery_thread = NULL;
 	wakeup(&mpt->recovery_thread);
 	MPT_UNLOCK(mpt);
-	kproc_exit(0);
+	mpt_kthread_exit(0);
 }
 
 static int

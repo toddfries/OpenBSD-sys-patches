@@ -6,7 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $FreeBSD: src/sys/dev/md/md.c,v 1.174 2008/02/28 18:31:54 philip Exp $
+ * $FreeBSD: src/sys/dev/md/md.c,v 1.176 2008/08/28 15:23:18 attilio Exp $
  *
  */
 
@@ -64,6 +64,7 @@
 #include <sys/fcntl.h>
 #include <sys/kernel.h>
 #include <sys/kthread.h>
+#include <sys/limits.h>
 #include <sys/linker.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -927,7 +928,7 @@ mdcreate_vnode(struct md_s *sc, struct md_ioctl *mdio, struct thread *td)
 	vfslocked = NDHASGIANT(&nd);
 	NDFREE(&nd, NDF_ONLY_PNBUF);
 	if (nd.ni_vp->v_type != VREG ||
-	    (error = VOP_GETATTR(nd.ni_vp, &vattr, td->td_ucred, td))) {
+	    (error = VOP_GETATTR(nd.ni_vp, &vattr, td->td_ucred))) {
 		VOP_UNLOCK(nd.ni_vp, 0);
 		(void)vn_close(nd.ni_vp, flags, td->td_ucred, td);
 		VFS_UNLOCK_GIANT(vfslocked);
@@ -1234,7 +1235,7 @@ g_md_init(struct g_class *mp __unused)
 		md_preloaded(ptr, len);
 		sx_xunlock(&md_sx);
 	}
-	status_dev = make_dev(&mdctl_cdevsw, MAXMINOR, UID_ROOT, GID_WHEEL,
+	status_dev = make_dev(&mdctl_cdevsw, INT_MAX, UID_ROOT, GID_WHEEL,
 	    0600, MDCTL_NAME);
 	g_topology_lock();
 }

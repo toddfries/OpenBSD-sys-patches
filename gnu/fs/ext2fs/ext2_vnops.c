@@ -39,7 +39,7 @@
  *
  *	@(#)ufs_vnops.c	8.7 (Berkeley) 2/3/94
  *	@(#)ufs_vnops.c 8.27 (Berkeley) 5/27/95
- * $FreeBSD: src/sys/gnu/fs/ext2fs/ext2_vnops.c,v 1.110 2007/06/12 00:11:58 rwatson Exp $
+ * $FreeBSD: src/sys/gnu/fs/ext2fs/ext2_vnops.c,v 1.116 2008/10/28 13:44:11 trasz Exp $
  */
 
 #include "opt_suiddir.h"
@@ -83,7 +83,6 @@
 static int ext2_makeinode(int mode, struct vnode *, struct vnode **, struct componentname *);
 
 static vop_access_t	ext2_access;
-static vop_advlock_t	ext2_advlock;
 static int ext2_chmod(struct vnode *, int, struct ucred *, struct thread *);
 static int ext2_chown(struct vnode *, uid_t, gid_t, struct ucred *,
     struct thread *);
@@ -91,7 +90,6 @@ static vop_close_t	ext2_close;
 static vop_create_t	ext2_create;
 static vop_fsync_t	ext2_fsync;
 static vop_getattr_t	ext2_getattr;
-static vop_kqfilter_t	ext2_kqfilter;
 static vop_link_t	ext2_link;
 static vop_mkdir_t	ext2_mkdir;
 static vop_mknod_t	ext2_mknod;
@@ -110,16 +108,11 @@ static vop_write_t	ext2_write;
 static vop_vptofh_t	ext2_vptofh;
 static vop_close_t	ext2fifo_close;
 static vop_kqfilter_t	ext2fifo_kqfilter;
-static int filt_ext2read(struct knote *kn, long hint);
-static int filt_ext2write(struct knote *kn, long hint);
-static int filt_ext2vnode(struct knote *kn, long hint);
-static void filt_ext2detach(struct knote *kn);
 
 /* Global vfs data structures for ext2. */
 struct vop_vector ext2_vnodeops = {
 	.vop_default =		&default_vnodeops,
 	.vop_access =		ext2_access,
-	.vop_advlock =		ext2_advlock,
 	.vop_bmap =		ext2_bmap,
 	.vop_cachedlookup =	ext2_lookup,
 	.vop_close =		ext2_close,
@@ -134,7 +127,6 @@ struct vop_vector ext2_vnodeops = {
 	.vop_open =		ext2_open,
 	.vop_pathconf =		ext2_pathconf,
 	.vop_poll =		vop_stdpoll,
-	.vop_kqfilter =		ext2_kqfilter,
 	.vop_print =		ext2_print,
 	.vop_read =		ext2_read,
 	.vop_readdir =		ext2_readdir,
@@ -291,14 +283,14 @@ static int
 ext2_access(ap)
 	struct vop_access_args /* {
 		struct vnode *a_vp;
-		int  a_mode;
+		accmode_t a_accmode;
 		struct ucred *a_cred;
 		struct thread *a_td;
 	} */ *ap;
 {
 	struct vnode *vp = ap->a_vp;
 	struct inode *ip = VTOI(vp);
-	mode_t mode = ap->a_mode;
+	accmode_t accmode = ap->a_accmode;
 	int error;
 
 	if (vp->v_type == VBLK || vp->v_type == VCHR)
@@ -309,7 +301,7 @@ ext2_access(ap)
 	 * unless the file is a socket, fifo, or a block or
 	 * character device resident on the file system.
 	 */
-	if (mode & VWRITE) {
+	if (accmode & VWRITE) {
 		switch (vp->v_type) {
 		case VDIR:
 		case VLNK:
@@ -323,11 +315,11 @@ ext2_access(ap)
 	}
 
 	/* If immutable bit set, nobody gets to write it. */
-	if ((mode & VWRITE) && (ip->i_flags & (IMMUTABLE | SF_SNAPSHOT)))
+	if ((accmode & VWRITE) && (ip->i_flags & (IMMUTABLE | SF_SNAPSHOT)))
 		return (EPERM);
 
 	error = vaccess(vp->v_type, ip->i_mode, ip->i_uid, ip->i_gid,
-	    ap->a_mode, ap->a_cred, NULL);
+	    ap->a_accmode, ap->a_cred, NULL);
 	return (error);
 }
 
@@ -337,7 +329,6 @@ ext2_getattr(ap)
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		struct ucred *a_cred;
-		struct thread *a_td;
 	} */ *ap;
 {
 	struct vnode *vp = ap->a_vp;
@@ -380,14 +371,13 @@ ext2_setattr(ap)
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		struct ucred *a_cred;
-		struct thread *a_td;
 	} */ *ap;
 {
 	struct vattr *vap = ap->a_vap;
 	struct vnode *vp = ap->a_vp;
 	struct inode *ip = VTOI(vp);
 	struct ucred *cred = ap->a_cred;
-	struct thread *td = ap->a_td;
+	struct thread *td = curthread;
 	int error;
 
 	/*
@@ -767,7 +757,6 @@ ext2_rename(ap)
 	struct vnode *fdvp = ap->a_fdvp;
 	struct componentname *tcnp = ap->a_tcnp;
 	struct componentname *fcnp = ap->a_fcnp;
-	struct thread *td = fcnp->cn_thread;
 	struct inode *ip, *xp, *dp;
 	struct dirtemplate dirbuf;
 	int doingdirectory = 0, oldparent = 0, newparent = 0;
@@ -813,18 +802,18 @@ abortit:
 		goto abortit;
 	}
 
-	if ((error = vn_lock(fvp, LK_EXCLUSIVE, td)) != 0)
+	if ((error = vn_lock(fvp, LK_EXCLUSIVE)) != 0)
 		goto abortit;
 	dp = VTOI(fdvp);
 	ip = VTOI(fvp);
  	if (ip->i_nlink >= LINK_MAX) {
- 		VOP_UNLOCK(fvp, 0, td);
+ 		VOP_UNLOCK(fvp, 0);
  		error = EMLINK;
  		goto abortit;
  	}
 	if ((ip->i_flags & (NOUNLINK | IMMUTABLE | APPEND))
 	    || (dp->i_flags & APPEND)) {
-		VOP_UNLOCK(fvp, 0, td);
+		VOP_UNLOCK(fvp, 0);
 		error = EPERM;
 		goto abortit;
 	}
@@ -835,7 +824,7 @@ abortit:
 		if ((fcnp->cn_namelen == 1 && fcnp->cn_nameptr[0] == '.') ||
 		    dp == ip || (fcnp->cn_flags | tcnp->cn_flags) & ISDOTDOT ||
 		    (ip->i_flag & IN_RENAME)) {
-			VOP_UNLOCK(fvp, 0, td);
+			VOP_UNLOCK(fvp, 0);
 			error = EINVAL;
 			goto abortit;
 		}
@@ -863,7 +852,7 @@ abortit:
 	ip->i_nlink++;
 	ip->i_flag |= IN_CHANGE;
 	if ((error = ext2_update(fvp, 1)) != 0) {
-		VOP_UNLOCK(fvp, 0, td);
+		VOP_UNLOCK(fvp, 0);
 		goto bad;
 	}
 
@@ -878,7 +867,7 @@ abortit:
 	 * call to checkpath().
 	 */
 	error = VOP_ACCESS(fvp, VWRITE, tcnp->cn_cred, tcnp->cn_thread);
-	VOP_UNLOCK(fvp, 0, td);
+	VOP_UNLOCK(fvp, 0);
 	if (oldparent != dp->i_number)
 		newparent = dp->i_number;
 	if (doingdirectory && newparent) {
@@ -1103,7 +1092,7 @@ bad:
 out:
 	if (doingdirectory)
 		ip->i_flag &= ~IN_RENAME;
-	if (vn_lock(fvp, LK_EXCLUSIVE, td) == 0) {
+	if (vn_lock(fvp, LK_EXCLUSIVE) == 0) {
 		ip->i_nlink--;
 		ip->i_flag |= IN_CHANGE;
 		ip->i_flag &= ~IN_RENAME;
@@ -1264,7 +1253,6 @@ ext2_rmdir(ap)
 	struct vnode *vp = ap->a_vp;
 	struct vnode *dvp = ap->a_dvp;
 	struct componentname *cnp = ap->a_cnp;
-	struct thread *td = cnp->cn_thread;
 	struct inode *ip, *dp;
 	int error;
 
@@ -1299,7 +1287,7 @@ ext2_rmdir(ap)
 	dp->i_nlink--;
 	dp->i_flag |= IN_CHANGE;
 	cache_purge(dvp);
-	VOP_UNLOCK(dvp, 0, td);
+	VOP_UNLOCK(dvp, 0);
 	/*
 	 * Truncate inode.  The only stuff left
 	 * in the directory is "." and "..".  The
@@ -1312,9 +1300,10 @@ ext2_rmdir(ap)
 	 * worry about them later.
 	 */
 	ip->i_nlink -= 2;
-	error = ext2_truncate(vp, (off_t)0, IO_SYNC, cnp->cn_cred, td);
+	error = ext2_truncate(vp, (off_t)0, IO_SYNC, cnp->cn_cred,
+	    cnp->cn_thread);
 	cache_purge(ITOV(ip));
-	vn_lock(dvp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(dvp, LK_EXCLUSIVE | LK_RETRY);
 out:
 	return (error);
 }
@@ -1480,7 +1469,7 @@ ext2fifo_kqfilter(ap)
 
 	error = fifo_specops.vop_kqfilter(ap);
 	if (error)
-		error = ext2_kqfilter(ap);
+		error = vfs_kqfilter(ap);
 	return (error);
 }
 
@@ -1519,24 +1508,6 @@ ext2_pathconf(ap)
 		return (EINVAL);
 	}
 	/* NOTREACHED */
-}
-
-/*
- * Advisory record locking support
- */
-static int
-ext2_advlock(ap)
-	struct vop_advlock_args /* {
-		struct vnode *a_vp;
-		caddr_t  a_id;
-		int  a_op;
-		struct flock *a_fl;
-		int  a_flags;
-	} */ *ap;
-{
-	struct inode *ip = VTOI(ap->a_vp);
-
-	return (lf_advlock(ap, &(ip->i_lockf), ip->i_size));
 }
 
 /*
@@ -1672,104 +1643,4 @@ bad:
 	ip->i_flag |= IN_CHANGE;
 	vput(tvp);
 	return (error);
-}
-
-static struct filterops ext2read_filtops = 
-	{ 1, NULL, filt_ext2detach, filt_ext2read };
-static struct filterops ext2write_filtops = 
-	{ 1, NULL, filt_ext2detach, filt_ext2write };
-static struct filterops ext2vnode_filtops = 
-	{ 1, NULL, filt_ext2detach, filt_ext2vnode };
-
-static int
-ext2_kqfilter(ap)
-	struct vop_kqfilter_args /* {
-		struct vnode *a_vp;
-		struct knote *a_kn;
-	} */ *ap;
-{
-	struct vnode *vp = ap->a_vp;
-	struct knote *kn = ap->a_kn;
-
-	switch (kn->kn_filter) {
-	case EVFILT_READ:
-		kn->kn_fop = &ext2read_filtops;
-		break;
-	case EVFILT_WRITE:
-		kn->kn_fop = &ext2write_filtops;
-		break;
-	case EVFILT_VNODE:
-		kn->kn_fop = &ext2vnode_filtops;
-		break;
-	default:
-		return (1);
-	}
-
-	kn->kn_hook = (caddr_t)vp;
-
-	if (vp->v_pollinfo == NULL)
-		v_addpollinfo(vp);
-	if (vp->v_pollinfo == NULL)
-		return ENOMEM;
-	knlist_add(&vp->v_pollinfo->vpi_selinfo.si_note, kn, 0);
-
-	return (0);
-}
-
-static void
-filt_ext2detach(struct knote *kn)
-{
-	struct vnode *vp = (struct vnode *)kn->kn_hook;
-
-	KASSERT(vp->v_pollinfo != NULL, ("Mising v_pollinfo"));
-	knlist_remove(&vp->v_pollinfo->vpi_selinfo.si_note, kn, 0);
-}
-
-/*ARGSUSED*/
-static int
-filt_ext2read(struct knote *kn, long hint)
-{
-	struct vnode *vp = (struct vnode *)kn->kn_hook;
-	struct inode *ip = VTOI(vp);
-
-	/*
-	 * filesystem is gone, so set the EOF flag and schedule 
-	 * the knote for deletion.
-	 */
-	if (hint == NOTE_REVOKE) {
-		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
-		return (1);
-	}
-
-        kn->kn_data = ip->i_size - kn->kn_fp->f_offset;
-        return (kn->kn_data != 0);
-}
-
-/*ARGSUSED*/
-static int
-filt_ext2write(struct knote *kn, long hint)
-{
-
-	/*
-	 * filesystem is gone, so set the EOF flag and schedule 
-	 * the knote for deletion.
-	 */
-	if (hint == NOTE_REVOKE)
-		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
-
-        kn->kn_data = 0;
-        return (1);
-}
-
-static int
-filt_ext2vnode(struct knote *kn, long hint)
-{
-
-	if (kn->kn_sfflags & hint)
-		kn->kn_fflags |= hint;
-	if (hint == NOTE_REVOKE) {
-		kn->kn_flags |= EV_EOF;
-		return (1);
-	}
-	return (kn->kn_fflags != 0);
 }

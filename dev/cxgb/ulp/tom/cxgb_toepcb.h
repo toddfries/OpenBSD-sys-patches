@@ -1,6 +1,5 @@
-
 /*-
- * Copyright (c) 2007, Chelsio Inc.
+ * Copyright (c) 2007-2008, Chelsio Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,18 +24,17 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_toepcb.h,v 1.2 2008/02/23 01:06:17 kmacy Exp $
+ * $FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_toepcb.h,v 1.4 2008/09/23 03:16:54 kmacy Exp $
  */
 #ifndef CXGB_TOEPCB_H_
 #define CXGB_TOEPCB_H_
 #include <sys/bus.h>
 #include <sys/condvar.h>
-#include <dev/cxgb/sys/mbufq.h>
+#include <sys/mbufq.h>
 
 struct toepcb {
 	struct toedev 		*tp_toedev;
 	struct l2t_entry 	*tp_l2t;
-	pr_ctloutput_t 		*tp_ctloutput;
 	unsigned int 		tp_tid;
 	int 			tp_wr_max;
 	int 			tp_wr_avail;

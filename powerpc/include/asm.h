@@ -29,7 +29,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  *	$NetBSD: asm.h,v 1.6.18.1 2000/07/25 08:37:14 kleink Exp $
- * $FreeBSD: src/sys/powerpc/include/asm.h,v 1.10 2005/01/07 02:29:19 imp Exp $
+ * $FreeBSD: src/sys/powerpc/include/asm.h,v 1.11 2008/04/03 17:40:20 marcel Exp $
  */
 
 #ifndef _MACHINE_ASM_H_
@@ -61,7 +61,7 @@
 	.data; .align 2; .globl x; x:
 
 #define	_ENTRY(x) \
-	.text; .align 2; .globl x; .type x,@function; x:
+	.text; .align 4; .globl x; .type x,@function; x:
 
 #ifdef GPROF
 # define	_PROF_PROLOGUE	mflr 0; stw 0,4(1); bl _mcount

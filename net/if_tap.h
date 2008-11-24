@@ -31,7 +31,7 @@
  */
 
 /*
- * $FreeBSD: src/sys/net/if_tap.h,v 1.3 2006/09/27 19:57:01 ru Exp $
+ * $FreeBSD: src/sys/net/if_tap.h,v 1.4 2008/09/08 22:43:55 emax Exp $
  * $Id: if_tap.h,v 0.7 2000/07/12 04:12:51 max Exp $
  */
 
@@ -55,6 +55,7 @@ struct tapinfo {
 #define	TAPGDEBUG		_IOR('t', 89, int)
 #define	TAPSIFINFO		_IOW('t', 91, struct tapinfo)
 #define	TAPGIFINFO		_IOR('t', 92, struct tapinfo)
+#define	TAPGIFNAME		_IOR('t', 93, struct ifreq)
 
 /* VMware ioctl's */
 #define VMIO_SIOCSIFFLAGS	_IOWINT('V', 0)

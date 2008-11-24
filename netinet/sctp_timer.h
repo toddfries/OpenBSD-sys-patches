@@ -30,12 +30,12 @@
 
 /* $KAME: sctp_timer.h,v 1.6 2005/03/06 16:04:18 itojun Exp $	 */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_timer.h,v 1.7 2007/09/13 10:36:42 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_timer.h,v 1.10 2008/10/27 13:53:31 rrs Exp $");
 
 #ifndef __sctp_timer_h__
 #define __sctp_timer_h__
 
-#if defined(_KERNEL)
+#if defined(_KERNEL) || defined(__Userspace__)
 
 #define SCTP_RTT_SHIFT 3
 #define SCTP_RTT_VAR_SHIFT 2

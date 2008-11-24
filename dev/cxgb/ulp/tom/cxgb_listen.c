@@ -28,7 +28,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_listen.c,v 1.4 2008/04/19 03:22:42 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_listen.c,v 1.7 2008/09/24 01:19:08 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -37,8 +37,12 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_listen.c,v 1.4 2008/04/19 03:2
 #include <sys/lock.h>
 #include <sys/mbuf.h>
 #include <sys/mutex.h>
+
+#include <sys/sockopt.h>
+#include <sys/sockstate.h>
+#include <sys/sockbuf.h>
+
 #include <sys/socket.h>
-#include <sys/socketvar.h>
 #include <sys/syslog.h>
 
 #include <net/if.h>
@@ -50,8 +54,8 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_listen.c,v 1.4 2008/04/19 03:2
 #include <netinet/in_var.h>
 
 
-#include <dev/cxgb/cxgb_osdep.h>
-#include <dev/cxgb/sys/mbufq.h>
+#include <cxgb_osdep.h>
+#include <sys/mbufq.h>
 
 #include <netinet/tcp.h>
 #include <netinet/tcp_var.h>
@@ -60,17 +64,18 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_listen.c,v 1.4 2008/04/19 03:2
 #include <netinet/tcp_offload.h>
 #include <net/route.h>
 
-#include <dev/cxgb/t3cdev.h>
-#include <dev/cxgb/common/cxgb_firmware_exports.h>
-#include <dev/cxgb/common/cxgb_t3_cpl.h>
-#include <dev/cxgb/common/cxgb_tcb.h>
-#include <dev/cxgb/common/cxgb_ctl_defs.h>
-#include <dev/cxgb/cxgb_offload.h>
-#include <dev/cxgb/ulp/toecore/cxgb_toedev.h>
-#include <dev/cxgb/ulp/tom/cxgb_defs.h>
-#include <dev/cxgb/ulp/tom/cxgb_tom.h>
-#include <dev/cxgb/ulp/tom/cxgb_t3_ddp.h>
-#include <dev/cxgb/ulp/tom/cxgb_toepcb.h>
+#include <t3cdev.h>
+#include <common/cxgb_firmware_exports.h>
+#include <common/cxgb_t3_cpl.h>
+#include <common/cxgb_tcb.h>
+#include <common/cxgb_ctl_defs.h>
+#include <cxgb_offload.h>
+#include <ulp/toecore/cxgb_toedev.h>
+#include <ulp/tom/cxgb_l2t.h>
+#include <ulp/tom/cxgb_defs.h>
+#include <ulp/tom/cxgb_tom.h>
+#include <ulp/tom/cxgb_t3_ddp.h>
+#include <ulp/tom/cxgb_toepcb.h>
 
 
 static struct listen_info *listen_hash_add(struct tom_data *d, struct socket *so, unsigned int stid);
@@ -235,7 +240,7 @@ t3_listen_start(struct toedev *dev, struct socket *so, struct t3cdev *cdev)
 	struct mbuf *m;
 	struct cpl_pass_open_req *req;
 	struct tom_data *d = TOM_DATA(dev);
-	struct inpcb *inp = sotoinpcb(so);
+	struct inpcb *inp = so_sotoinpcb(so);
 	struct listen_ctx *ctx;
 
 	if (!TOM_TUNABLE(dev, activated))
@@ -252,7 +257,7 @@ t3_listen_start(struct toedev *dev, struct socket *so, struct t3cdev *cdev)
 
 	ctx->tom_data = d;
 	ctx->lso = so;
-	ctx->ulp_mode = TOM_TUNABLE(dev, ddp) && !(so->so_options & SO_NO_DDP) ? ULP_MODE_TCPDDP : 0;
+	ctx->ulp_mode = TOM_TUNABLE(dev, ddp) && !(so_options_get(so) & SO_NO_DDP) ? ULP_MODE_TCPDDP : 0;
 	LIST_INIT(&ctx->synq_head);
 	
 	stid = cxgb_alloc_stid(d->cdev, d->client, ctx);

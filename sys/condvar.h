@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/condvar.h,v 1.14 2007/03/21 22:22:13 jhb Exp $
+ * $FreeBSD: src/sys/sys/condvar.h,v 1.15 2008/03/12 06:31:06 jeff Exp $
  */
 
 #ifndef	_SYS_CONDVAR_H_
@@ -72,7 +72,7 @@ void	cv_broadcastpri(struct cv *cvp, int pri);
 #define	cv_timedwait_sig(cvp, lock, timo)				\
 	_cv_timedwait_sig((cvp), &(lock)->lock_object, (timo))
 
-#define cv_broadcast(cvp)	cv_broadcastpri(cvp, -1)
+#define cv_broadcast(cvp)	cv_broadcastpri(cvp, 0)
 
 #define	cv_wmesg(cvp)		((cvp)->cv_description)
 

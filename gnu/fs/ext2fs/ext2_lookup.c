@@ -38,7 +38,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ufs_lookup.c	8.6 (Berkeley) 4/1/94
- * $FreeBSD: src/sys/gnu/fs/ext2fs/ext2_lookup.c,v 1.52 2005/12/05 11:58:33 ru Exp $
+ * $FreeBSD: src/sys/gnu/fs/ext2fs/ext2_lookup.c,v 1.55 2008/10/23 15:53:51 des Exp $
  */
 
 #include <sys/param.h>
@@ -177,7 +177,7 @@ ext2_readdir(ap)
 	auio.uio_resid = count;
 	auio.uio_segflg = UIO_SYSSPACE;
 	aiov.iov_len = count;
-	MALLOC(dirbuf, caddr_t, count, M_TEMP, M_WAITOK);
+	dirbuf = malloc(count, M_TEMP, M_WAITOK);
 	aiov.iov_base = dirbuf;
 	error = VOP_READ(ap->a_vp, &auio, 0, ap->a_cred);
 	if (error == 0) {
@@ -237,7 +237,7 @@ ext2_readdir(ap)
 
 			if (uio->uio_segflg != UIO_SYSSPACE || uio->uio_iovcnt != 1)
 				panic("ext2_readdir: unexpected uio from NFS server");
-			MALLOC(cookies, u_long *, ncookies * sizeof(u_long), M_TEMP,
+			cookies = malloc(ncookies * sizeof(u_long), M_TEMP,
 			       M_WAITOK);
 			off = startoffset;
 			for (dp = (struct ext2_dir_entry_2 *)dirbuf,
@@ -251,7 +251,7 @@ ext2_readdir(ap)
 			*ap->a_cookies = cookies;
 		}
 	}
-	FREE(dirbuf, M_TEMP);
+	free(dirbuf, M_TEMP);
 	if (ap->a_eofflag)
 		*ap->a_eofflag = VTOI(ap->a_vp)->i_size <= uio->uio_offset;
 	return (error);
@@ -318,7 +318,6 @@ ext2_lookup(ap)
 	struct ucred *cred = cnp->cn_cred;
 	int flags = cnp->cn_flags;
 	int nameiop = cnp->cn_nameiop;
-	struct thread *td = cnp->cn_thread;
 	ino_t saved_ino;
 
 	int	DIRBLKSIZ = VTOI(ap->a_dvp)->i_e2fs->s_blocksize;
@@ -657,9 +656,9 @@ found:
 	pdp = vdp;
 	if (flags & ISDOTDOT) {
 		saved_ino = dp->i_ino;
-		VOP_UNLOCK(pdp, 0, td);	/* race to get the inode */
+		VOP_UNLOCK(pdp, 0);	/* race to get the inode */
 		error = VFS_VGET(vdp->v_mount, saved_ino, LK_EXCLUSIVE, &tdp);
-		vn_lock(pdp, LK_EXCLUSIVE | LK_RETRY, td);
+		vn_lock(pdp, LK_EXCLUSIVE | LK_RETRY);
 		if (error != 0)
 			return (error);
 		*vpp = tdp;

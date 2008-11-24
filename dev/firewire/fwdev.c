@@ -31,7 +31,7 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  * 
- * $FreeBSD: src/sys/dev/firewire/fwdev.c,v 1.52 2007/06/06 14:31:36 simokawa Exp $
+ * $FreeBSD: src/sys/dev/firewire/fwdev.c,v 1.53 2008/09/27 08:51:18 ed Exp $
  *
  */
 
@@ -213,7 +213,7 @@ fw_open (struct cdev *dev, int flags, int fmt, fw_proc *td)
 		int unit = DEV2UNIT(dev);
 		int sub = DEV2SUB(dev);
 
-		make_dev(&firewire_cdevsw, minor(dev),
+		make_dev(&firewire_cdevsw, dev2unit(dev),
 			UID_ROOT, GID_OPERATOR, 0660,
 			"fw%d.%d", unit, sub);
 	}

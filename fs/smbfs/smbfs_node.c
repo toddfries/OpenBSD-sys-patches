@@ -29,7 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/smbfs/smbfs_node.c,v 1.34 2007/05/29 11:28:28 rwatson Exp $
+ * $FreeBSD: src/sys/fs/smbfs/smbfs_node.c,v 1.42 2008/10/23 15:53:51 des Exp $
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -40,6 +40,7 @@
 #include <sys/proc.h>
 #include <sys/queue.h>
 #include <sys/stat.h>
+#include <sys/sx.h>
 #include <sys/sysctl.h>
 #include <sys/time.h>
 #include <sys/vnode.h>
@@ -58,9 +59,8 @@
 #include <fs/smbfs/smbfs_subr.h>
 
 #define	SMBFS_NOHASH(smp, hval)	(&(smp)->sm_hash[(hval) & (smp)->sm_hashlen])
-#define	smbfs_hash_lock(smp, td)	lockmgr(&smp->sm_hashlock, LK_EXCLUSIVE, NULL, td)
-#define	smbfs_hash_unlock(smp, td)	lockmgr(&smp->sm_hashlock, LK_RELEASE, NULL, td)
-
+#define	smbfs_hash_lock(smp)	sx_xlock(&smp->sm_hashlock)
+#define	smbfs_hash_unlock(smp)	sx_xunlock(&smp->sm_hashlock)
 
 extern struct vop_vector smbfs_vnodeops;	/* XXX -> .h file */
 
@@ -192,7 +192,7 @@ smbfs_node_alloc(struct mount *mp, struct vnode *dvp,
 	}
 	hashval = smbfs_hash(name, nmlen);
 retry:
-	smbfs_hash_lock(smp, td);
+	smbfs_hash_lock(smp);
 loop:
 	nhpp = SMBFS_NOHASH(smp, hashval);
 	LIST_FOREACH(np, nhpp, n_hash) {
@@ -201,11 +201,11 @@ loop:
 		    np->n_nmlen != nmlen || bcmp(name, np->n_name, nmlen) != 0)
 			continue;
 		VI_LOCK(vp);
-		smbfs_hash_unlock(smp, td);
+		smbfs_hash_unlock(smp);
 		if (vget(vp, LK_EXCLUSIVE | LK_INTERLOCK, td) != 0)
 			goto retry;
 		/* Force cached attributes to be refreshed if stale. */
-		(void)VOP_GETATTR(vp, &vattr, td->td_ucred, td);
+		(void)VOP_GETATTR(vp, &vattr, td->td_ucred);
 		/*
 		 * If the file type on the server is inconsistent with
 		 * what it was when we created the vnode, kill the
@@ -221,7 +221,7 @@ loop:
 		*vpp = vp;
 		return 0;
 	}
-	smbfs_hash_unlock(smp, td);
+	smbfs_hash_unlock(smp);
 	/*
 	 * If we don't have node attributes, then it is an explicit lookup
 	 * for an existing vnode.
@@ -229,15 +229,15 @@ loop:
 	if (fap == NULL)
 		return ENOENT;
 
-	MALLOC(np, struct smbnode *, sizeof *np, M_SMBNODE, M_WAITOK);
+	np = malloc(sizeof *np, M_SMBNODE, M_WAITOK);
 	error = getnewvnode("smbfs", mp, &smbfs_vnodeops, &vp);
 	if (error) {
-		FREE(np, M_SMBNODE);
+		free(np, M_SMBNODE);
 		return error;
 	}
 	error = insmntque(vp, mp);	/* XXX: Too early for mpsafe fs */
 	if (error != 0) {
-		FREE(np, M_SMBNODE);
+		free(np, M_SMBNODE);
 		return (error);
 	}
 	vp->v_type = fap->fa_attr & SMB_FA_DIR ? VDIR : VREG;
@@ -259,21 +259,21 @@ loop:
 	} else if (vp->v_type == VREG)
 		SMBERROR("new vnode '%s' born without parent ?\n", np->n_name);
 
-	vp->v_vnlock->lk_flags |= LK_CANRECURSE;
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	VN_LOCK_AREC(vp);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 
-	smbfs_hash_lock(smp, td);
+	smbfs_hash_lock(smp);
 	LIST_FOREACH(np2, nhpp, n_hash) {
 		if (np2->n_parent != dvp ||
 		    np2->n_nmlen != nmlen || bcmp(name, np2->n_name, nmlen) != 0)
 			continue;
 		vput(vp);
 /*		smb_name_free(np->n_name);
-		FREE(np, M_SMBNODE);*/
+		free(np, M_SMBNODE);*/
 		goto loop;
 	}
 	LIST_INSERT_HEAD(nhpp, np, n_hash);
-	smbfs_hash_unlock(smp, td);
+	smbfs_hash_unlock(smp);
 	*vpp = vp;
 	return 0;
 }
@@ -308,7 +308,6 @@ smbfs_reclaim(ap)
         } */ *ap;
 {
 	struct vnode *vp = ap->a_vp;
-	struct thread *td = ap->a_td;
 	struct vnode *dvp;
 	struct smbnode *np = VTOSMB(vp);
 	struct smbmount *smp = VTOSMBFS(vp);
@@ -317,7 +316,7 @@ smbfs_reclaim(ap)
 
 	KASSERT((np->n_flag & NOPEN) == 0, ("file not closed before reclaim"));
 
-	smbfs_hash_lock(smp, td);
+	smbfs_hash_lock(smp);
 	/*
 	 * Destroy the vm object and flush associated pages.
 	 */
@@ -333,10 +332,10 @@ smbfs_reclaim(ap)
 		smp->sm_root = NULL;
 	}
 	vp->v_data = NULL;
-	smbfs_hash_unlock(smp, td);
+	smbfs_hash_unlock(smp);
 	if (np->n_name)
 		smbfs_name_free(np->n_name);
-	FREE(np, M_SMBNODE);
+	free(np, M_SMBNODE);
 	if (dvp != NULL) {
 		vrele(dvp);
 		/*
@@ -367,7 +366,7 @@ smbfs_inactive(ap)
 		smb_makescred(&scred, td, cred);
 		smbfs_vinvalbuf(vp, td);
 		if (vp->v_type == VREG) {
-			VOP_GETATTR(vp, &va, cred, td);
+			VOP_GETATTR(vp, &va, cred);
 			smbfs_smb_close(np->n_mount->sm_share, np->n_fid,
 			    &np->n_mtime, &scred);
 		} else if (vp->v_type == VDIR) {
@@ -439,7 +438,7 @@ smbfs_attr_cachelookup(struct vnode *vp, struct vattr *va)
 	va->va_atime = va->va_ctime = va->va_mtime;	/* time file changed */
 	va->va_gen = VNOVAL;		/* generation number of file */
 	va->va_flags = 0;		/* flags defined for file */
-	va->va_rdev = VNOVAL;		/* device the special file represents */
+	va->va_rdev = NODEV;		/* device the special file represents */
 	va->va_bytes = va->va_size;	/* bytes of disk space held by file */
 	va->va_filerev = 0;		/* file modification number */
 	va->va_vaflags = 0;		/* operations flags */

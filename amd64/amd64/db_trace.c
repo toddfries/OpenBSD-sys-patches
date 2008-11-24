@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/db_trace.c,v 1.80 2006/11/17 20:27:00 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/db_trace.c,v 1.82 2007/12/02 20:40:30 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -38,6 +38,7 @@ __FBSDID("$FreeBSD: src/sys/amd64/amd64/db_trace.c,v 1.80 2006/11/17 20:27:00 jh
 #include <machine/md_var.h>
 #include <machine/pcb.h>
 #include <machine/reg.h>
+#include <machine/stack.h>
 
 #include <vm/vm.h>
 #include <vm/vm_param.h>
@@ -177,18 +178,6 @@ db_ss(struct db_variable *vp, db_expr_t *valuep, int op)
 	return (1);
 }
 
-/*
- * Stack trace.
- */
-#define	INKERNEL(va) (((va) >= DMAP_MIN_ADDRESS && (va) < DMAP_MAX_ADDRESS) \
-	    || ((va) >= KERNBASE && (va) < VM_MAX_KERNEL_ADDRESS))
-
-struct amd64_frame {
-	struct amd64_frame	*f_frame;
-	long			f_retaddr;
-	long			f_arg0;
-};
-
 #define NORMAL		0
 #define	TRAP		1
 #define	INTERRUPT	2
@@ -317,7 +306,8 @@ db_nextframe(struct amd64_frame **fp, db_addr_t *ip, struct thread *td)
 	if (name != NULL) {
 		if (strcmp(name, "calltrap") == 0 ||
 		    strcmp(name, "fork_trampoline") == 0 ||
-		    strcmp(name, "nmi_calltrap") == 0)
+		    strcmp(name, "nmi_calltrap") == 0 ||
+		    strcmp(name, "Xdblfault") == 0)
 			frame_type = TRAP;
 		else if (strncmp(name, "Xatpic_intr", 11) == 0 ||
 		    strncmp(name, "Xapic_isr", 9) == 0 ||
@@ -502,32 +492,6 @@ db_trace_thread(struct thread *thr, int count)
 	ctx = kdb_thr_ctx(thr);
 	return (db_backtrace(thr, NULL, (struct amd64_frame *)ctx->pcb_rbp,
 		    ctx->pcb_rip, count));
-}
-
-void
-stack_save(struct stack *st)
-{
-	struct amd64_frame *frame;
-	vm_offset_t callpc;
-	register_t rbp;
-
-	stack_zero(st);
-	__asm __volatile("movq %%rbp,%0" : "=r" (rbp));
-	frame = (struct amd64_frame *)rbp;
-	while (1) {
-		if (!INKERNEL((long)frame))
-			break;
-		callpc = frame->f_retaddr;
-		if (!INKERNEL(callpc))
-			break;
-		if (stack_put(st, callpc) == -1)
-			break;
-		if (frame->f_frame <= frame ||
-		    (vm_offset_t)frame->f_frame >=
-		    (vm_offset_t)rbp + KSTACK_PAGES * PAGE_SIZE)
-			break;
-		frame = frame->f_frame;
-	}
 }
 
 int

@@ -30,7 +30,7 @@
 
 #
 #	@(#)vnode_if.sh	8.1 (Berkeley) 6/10/93
-# $FreeBSD: src/sys/tools/vnode_if.awk,v 1.55 2006/05/30 21:13:28 dds Exp $
+# $FreeBSD: src/sys/tools/vnode_if.awk,v 1.56 2008/11/03 19:57:40 jhb Exp $
 #
 # Script to produce VFS front-end sugar.
 #
@@ -71,9 +71,6 @@ function add_debug_code(name, arg, pos, ind)
 	else
 		star = "";
 	if (lockdata[name, arg, pos] && (lockdata[name, arg, pos] != "-")) {
-		if (arg ~ /^\*/) {
-			printc(ind"if ("substr(arg, 2)" != NULL) {");
-		}
 		printc(ind"ASSERT_VI_UNLOCKED("star"a->a_"arg", \""uname"\");");
 		# Add assertions for locking
 		if (lockdata[name, arg, pos] == "L")
@@ -84,9 +81,6 @@ function add_debug_code(name, arg, pos, ind)
 			printc(ind"ASSERT_VOP_ELOCKED(" star "a->a_"arg", \""uname"\");");
 		else if (0) {
 			# XXX More checks!
-		}
-		if (arg ~ /^\*/) {
-			printc("ind}");
 		}
 	}
 }
@@ -148,7 +142,7 @@ common_head = \
     " * This file is produced automatically.\n" \
     " * Do not modify anything in here by hand.\n" \
     " *\n" \
-    " * Created from $FreeBSD: src/sys/tools/vnode_if.awk,v 1.55 2006/05/30 21:13:28 dds Exp $\n" \
+    " * Created from $FreeBSD: src/sys/tools/vnode_if.awk,v 1.56 2008/11/03 19:57:40 jhb Exp $\n" \
     " */\n" \
     "\n";
 

@@ -1,6 +1,6 @@
 /*	$NetBSD: tmpfs.h,v 1.26 2007/02/22 06:37:00 thorpej Exp $	*/
 
-/*
+/*-
  * Copyright (c) 2005, 2006 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -36,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/tmpfs/tmpfs.h,v 1.11 2007/08/10 11:00:30 delphij Exp $
+ * $FreeBSD: src/sys/fs/tmpfs/tmpfs.h,v 1.15 2008/09/23 14:45:10 obrien Exp $
  */
 
 #ifndef _FS_TMPFS_TMPFS_H_
@@ -219,9 +212,6 @@ struct tmpfs_node {
 	struct timespec		tn_birthtime;
 	unsigned long		tn_gen;
 
-	/* Head of byte-level lock list (used by tmpfs_advlock). */
-	struct lockf *		tn_lockf;
-
 	/* As there is a single vnode for each active file within the
 	 * system, care has to be taken to avoid allocating more than one
 	 * vnode per file.  In order to do this, a bidirectional association
@@ -237,12 +227,6 @@ struct tmpfs_node {
 	 * May be NULL when the node is unused (that is, no vnode has been
 	 * allocated for it or it has been reclaimed). */
 	struct vnode *		tn_vnode;
-
-	/* Pointer to the node returned by tmpfs_lookup() after doing a
-	 * delete or a rename lookup; its value is only valid in these two
-	 * situations.  In case we were looking up . or .., it holds a null
-	 * pointer. */
-	struct tmpfs_dirent *	tn_lookup_dirent;
 
 	/* interlock to protect tn_vpstate */
 	struct mtx	tn_interlock;
@@ -425,6 +409,8 @@ void	tmpfs_dir_attach(struct vnode *, struct tmpfs_dirent *);
 void	tmpfs_dir_detach(struct vnode *, struct tmpfs_dirent *);
 struct tmpfs_dirent *	tmpfs_dir_lookup(struct tmpfs_node *node,
 			    struct componentname *cnp);
+struct tmpfs_dirent *tmpfs_dir_search(struct tmpfs_node *node,
+    struct tmpfs_node *f);
 int	tmpfs_dir_getdotdent(struct tmpfs_node *, struct uio *);
 int	tmpfs_dir_getdotdotdent(struct tmpfs_node *, struct uio *);
 struct tmpfs_dirent *	tmpfs_dir_lookupbycookie(struct tmpfs_node *, off_t);
@@ -459,7 +445,7 @@ int	tmpfs_truncate(struct vnode *, off_t);
  */
 #define TMPFS_DIRENT_MATCHES(de, name, len) \
     (de->td_namelen == (uint16_t)len && \
-    memcmp((de)->td_name, (name), (de)->td_namelen) == 0)
+    bcmp((de)->td_name, (name), (de)->td_namelen) == 0)
 
 /* --------------------------------------------------------------------- */
 

@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_dev.c,v 1.94 2007/05/05 17:02:19 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_dev.c,v 1.99 2008/09/26 14:19:52 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -88,7 +88,7 @@ static void
 g_dev_init(struct g_class *mp)
 {
 
-	unithdr = new_unrhdr(0, minor2unit(MAXMINOR), NULL);
+	unithdr = new_unrhdr(0, INT_MAX, NULL);
 }
 
 void
@@ -139,7 +139,7 @@ g_dev_taste(struct g_class *mp, struct g_provider *pp, int insist __unused)
 	KASSERT(error == 0,
 	    ("g_dev_taste(%s) failed to g_attach, err=%d", pp->name, error));
 	unit = alloc_unr(unithdr);
-	dev = make_dev(&g_dev_cdevsw, unit2minor(unit),
+	dev = make_dev(&g_dev_cdevsw, unit,
 	    UID_ROOT, GID_OPERATOR, 0640, gp->name);
 	if (pp->flags & G_PF_CANDELETE)
 		dev->si_flags |= SI_CANDELETE;
@@ -244,13 +244,15 @@ g_dev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag, struct thread
 {
 	struct g_geom *gp;
 	struct g_consumer *cp;
+	struct g_provider *pp;
 	struct g_kerneldump kd;
-	off_t offset, length;
+	off_t offset, length, chunk;
 	int i, error;
 	u_int u;
 
 	gp = dev->si_drv1;
 	cp = dev->si_drv2;
+	pp = cp->provider;
 
 	error = 0;
 	KASSERT(cp->acr || cp->acw,
@@ -302,17 +304,37 @@ g_dev_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag, struct thread
 		offset = ((off_t *)data)[0];
 		length = ((off_t *)data)[1];
 		if ((offset % cp->provider->sectorsize) != 0 ||
-		    (length % cp->provider->sectorsize) != 0 ||
-		     length <= 0 || length > MAXPHYS) {
+		    (length % cp->provider->sectorsize) != 0 || length <= 0) {
 			printf("%s: offset=%jd length=%jd\n", __func__, offset,
 			    length);
 			error = EINVAL;
 			break;
 		}
-		error = g_delete_data(cp, offset, length);
+		while (length > 0) { 
+			chunk = length;
+			if (chunk > 1024 * cp->provider->sectorsize)
+				chunk = 1024 * cp->provider->sectorsize;
+			error = g_delete_data(cp, offset, chunk);
+			length -= chunk;
+			offset += chunk;
+			if (error)
+				break;
+			/*
+			 * Since the request size is unbounded, the service
+			 * time is likewise.  We make this ioctl interruptible
+			 * by checking for signals for each bio.
+			 */
+			if (SIGPENDING(td))
+				break;
+		}
 		break;
 	case DIOCGIDENT:
 		error = g_io_getattr("GEOM::ident", cp, &i, data);
+		break;
+	case DIOCGPROVIDERNAME:
+		if (pp == NULL)
+			return (ENOENT);
+		strlcpy(data, pp->name, i);
 		break;
 
 	default:

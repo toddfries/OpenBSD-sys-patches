@@ -1,6 +1,6 @@
 /*	$NetBSD: tmpfs_subr.c,v 1.35 2007/07/09 21:10:50 ad Exp $	*/
 
-/*
+/*-
  * Copyright (c) 2005 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +34,7 @@
  * Efficient memory file system supporting functions.
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/tmpfs/tmpfs_subr.c,v 1.12 2007/08/10 11:00:30 delphij Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/tmpfs/tmpfs_subr.c,v 1.19 2008/09/23 14:45:10 obrien Exp $");
 
 #include <sys/param.h>
 #include <sys/namei.h>
@@ -125,6 +118,8 @@ tmpfs_alloc_node(struct tmpfs_mount *tmp, enum vtype type,
 
 	case VDIR:
 		TAILQ_INIT(&nnode->tn_dir.tn_dirhead);
+		MPASS(parent != nnode);
+		MPASS(IMPLIES(parent == NULL, tmp->tm_root == NULL));
 		nnode->tn_dir.tn_parent = (parent == NULL) ? nnode : parent;
 		nnode->tn_dir.tn_readdir_lastn = 0;
 		nnode->tn_dir.tn_readdir_lastp = NULL;
@@ -152,7 +147,7 @@ tmpfs_alloc_node(struct tmpfs_mount *tmp, enum vtype type,
 		break;
 
 	default:
-		MPASS(0);
+		panic("tmpfs_alloc_node: type %p %d", nnode, (int)nnode->tn_type);
 	}
 
 	TMPFS_LOCK(tmp);
@@ -227,8 +222,7 @@ tmpfs_free_node(struct tmpfs_mount *tmp, struct tmpfs_node *node)
 		break;
 
 	default:
-		MPASS(0);
-		break;
+		panic("tmpfs_free_node: type %p %d", node, (int)node->tn_type);
 	}
 
 	free_unr(tmp->tm_ino_unr, node->tn_id);
@@ -359,7 +353,7 @@ loop:
 		goto unlock;
 	MPASS(vp != NULL);
 
-	(void) vn_lock(vp, lkflag | LK_RETRY, td);
+	(void) vn_lock(vp, lkflag | LK_RETRY);
 
 	vp->v_data = node;
 	vp->v_type = node->tn_type;
@@ -370,8 +364,6 @@ loop:
 		/* FALLTHROUGH */
 	case VCHR:
 		/* FALLTHROUGH */
-	case VDIR:
-		/* FALLTHROUGH */
 	case VLNK:
 		/* FALLTHROUGH */
 	case VREG:
@@ -381,9 +373,13 @@ loop:
 	case VFIFO:
 		vp->v_op = &tmpfs_fifoop_entries;
 		break;
+	case VDIR:
+		if (node->tn_dir.tn_parent == node)
+			vp->v_vflag |= VV_ROOT;
+		break;
 
 	default:
-		MPASS(0);
+		panic("tmpfs_alloc_vp: type %p %d", node, (int)node->tn_type);
 	}
 
 	vnode_pager_setsize(vp, node->tn_size);
@@ -408,7 +404,7 @@ unlock:
 out:
 	*vpp = vp;
 
-	MPASS(IFF(error == 0, *vpp != NULL && VOP_ISLOCKED(*vpp, td)));
+	MPASS(IFF(error == 0, *vpp != NULL && VOP_ISLOCKED(*vpp)));
 #ifdef INVARIANTS
 	TMPFS_NODE_LOCK(node);
 	MPASS(*vpp == node->tn_vnode);
@@ -460,7 +456,7 @@ tmpfs_alloc_file(struct vnode *dvp, struct vnode **vpp, struct vattr *vap,
 	struct tmpfs_node *node;
 	struct tmpfs_node *parent;
 
-	MPASS(VOP_ISLOCKED(dvp, cnp->cn_thread));
+	MPASS(VOP_ISLOCKED(dvp));
 	MPASS(cnp->cn_flags & HASBUF);
 
 	tmp = VFS_TO_TMPFS(dvp->v_mount);
@@ -480,6 +476,7 @@ tmpfs_alloc_file(struct vnode *dvp, struct vnode **vpp, struct vattr *vap,
 		}
 
 		parent = dnode;
+		MPASS(parent != NULL);
 	} else
 		parent = NULL;
 
@@ -588,7 +585,7 @@ tmpfs_dir_lookup(struct tmpfs_node *node, struct componentname *cnp)
 	TAILQ_FOREACH(de, &node->tn_dir.tn_dirhead, td_entries) {
 		MPASS(cnp->cn_namelen < 0xffff);
 		if (de->td_namelen == (uint16_t)cnp->cn_namelen &&
-		    memcmp(de->td_name, cnp->cn_nameptr, de->td_namelen) == 0) {
+		    bcmp(de->td_name, cnp->cn_nameptr, de->td_namelen) == 0) {
 			found = 1;
 			break;
 		}
@@ -596,6 +593,20 @@ tmpfs_dir_lookup(struct tmpfs_node *node, struct componentname *cnp)
 	node->tn_status |= TMPFS_NODE_ACCESSED;
 
 	return found ? de : NULL;
+}
+
+struct tmpfs_dirent *
+tmpfs_dir_search(struct tmpfs_node *node, struct tmpfs_node *f)
+{
+	struct tmpfs_dirent *de;
+
+	TMPFS_VALIDATE_DIR(node);
+	node->tn_status |= TMPFS_NODE_ACCESSED;
+	TAILQ_FOREACH(de, &node->tn_dir.tn_dirhead, td_entries) {
+		if (de->td_node == f)
+			return (de);
+	}
+	return (NULL);
 }
 
 /* --------------------------------------------------------------------- */
@@ -777,7 +788,8 @@ tmpfs_dir_getdents(struct tmpfs_node *node, struct uio *uio, off_t *cntp)
 			break;
 
 		default:
-			MPASS(0);
+			panic("tmpfs_dir_getdents: type %p %d",
+			    de->td_node, (int)de->td_node->tn_type);
 		}
 		d.d_namlen = de->td_namelen;
 		MPASS(de->td_namelen < sizeof(d.d_name));
@@ -911,7 +923,7 @@ tmpfs_chflags(struct vnode *vp, int flags, struct ucred *cred, struct thread *p)
 	int error;
 	struct tmpfs_node *node;
 
-	MPASS(VOP_ISLOCKED(vp, p));
+	MPASS(VOP_ISLOCKED(vp));
 
 	node = VP_TO_TMPFS_NODE(vp);
 
@@ -953,7 +965,7 @@ tmpfs_chflags(struct vnode *vp, int flags, struct ucred *cred, struct thread *p)
 	}
 	node->tn_status |= TMPFS_NODE_CHANGED;
 
-	MPASS(VOP_ISLOCKED(vp, p));
+	MPASS(VOP_ISLOCKED(vp));
 
 	return 0;
 }
@@ -971,7 +983,7 @@ tmpfs_chmod(struct vnode *vp, mode_t mode, struct ucred *cred, struct thread *p)
 	int error;
 	struct tmpfs_node *node;
 
-	MPASS(VOP_ISLOCKED(vp, p));
+	MPASS(VOP_ISLOCKED(vp));
 
 	node = VP_TO_TMPFS_NODE(vp);
 
@@ -1011,7 +1023,7 @@ tmpfs_chmod(struct vnode *vp, mode_t mode, struct ucred *cred, struct thread *p)
 
 	node->tn_status |= TMPFS_NODE_CHANGED;
 
-	MPASS(VOP_ISLOCKED(vp, p));
+	MPASS(VOP_ISLOCKED(vp));
 
 	return 0;
 }
@@ -1034,7 +1046,7 @@ tmpfs_chown(struct vnode *vp, uid_t uid, gid_t gid, struct ucred *cred,
 	uid_t ouid;
 	gid_t ogid;
 
-	MPASS(VOP_ISLOCKED(vp, p));
+	MPASS(VOP_ISLOCKED(vp));
 
 	node = VP_TO_TMPFS_NODE(vp);
 
@@ -1084,7 +1096,7 @@ tmpfs_chown(struct vnode *vp, uid_t uid, gid_t gid, struct ucred *cred,
 			node->tn_mode &= ~(S_ISUID | S_ISGID);
 	}
 
-	MPASS(VOP_ISLOCKED(vp, p));
+	MPASS(VOP_ISLOCKED(vp));
 
 	return 0;
 }
@@ -1103,7 +1115,7 @@ tmpfs_chsize(struct vnode *vp, u_quad_t size, struct ucred *cred,
 	int error;
 	struct tmpfs_node *node;
 
-	MPASS(VOP_ISLOCKED(vp, p));
+	MPASS(VOP_ISLOCKED(vp));
 
 	node = VP_TO_TMPFS_NODE(vp);
 
@@ -1141,7 +1153,7 @@ tmpfs_chsize(struct vnode *vp, u_quad_t size, struct ucred *cred,
 	/* tmpfs_truncate will raise the NOTE_EXTEND and NOTE_ATTRIB kevents
 	 * for us, as will update tn_status; no need to do that here. */
 
-	MPASS(VOP_ISLOCKED(vp, p));
+	MPASS(VOP_ISLOCKED(vp));
 
 	return error;
 }
@@ -1160,7 +1172,7 @@ tmpfs_chtimes(struct vnode *vp, struct timespec *atime, struct timespec *mtime,
 	int error;
 	struct tmpfs_node *node;
 
-	MPASS(VOP_ISLOCKED(vp, l));
+	MPASS(VOP_ISLOCKED(vp));
 
 	node = VP_TO_TMPFS_NODE(vp);
 
@@ -1195,7 +1207,7 @@ tmpfs_chtimes(struct vnode *vp, struct timespec *atime, struct timespec *mtime,
 
 	if (birthtime->tv_nsec != VNOVAL && birthtime->tv_nsec != VNOVAL)
 		node->tn_birthtime = *birthtime;
-	MPASS(VOP_ISLOCKED(vp, l));
+	MPASS(VOP_ISLOCKED(vp));
 
 	return 0;
 }

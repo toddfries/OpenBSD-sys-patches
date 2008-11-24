@@ -29,7 +29,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/toecore/toedev.c,v 1.1 2007/12/15 21:54:59 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/toecore/toedev.c,v 1.4 2008/09/24 01:19:08 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -52,13 +52,8 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/toecore/toedev.c,v 1.1 2007/12/15 21:54
 /*
  * XXX 
  */
-#ifdef CONFIG_DEFINED
 #include <cxgb_include.h>
-#else
-#include <dev/cxgb/cxgb_include.h>
-#endif
-
-
+#include <ulp/toecore/cxgb_toedev.h>
 
 static struct mtx offload_db_lock;
 static TAILQ_HEAD(, toedev) offload_dev_list;
@@ -119,6 +114,7 @@ int
 register_tom(struct tom_info *t)
 {
 	mtx_lock(&offload_db_lock);
+	toedev_registration_count++;
 	TAILQ_INSERT_HEAD(&offload_module_list, t, entry);
 	mtx_unlock(&offload_db_lock);
 	return 0;

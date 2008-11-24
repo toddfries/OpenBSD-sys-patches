@@ -44,11 +44,10 @@
  */
 
 #include "opt_msgbuf.h"
-#include "opt_ddb.h"
 #include "opt_at91.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/at91/kb920x_machdep.c,v 1.26 2007/10/25 22:43:17 cognet Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/at91/kb920x_machdep.c,v 1.31 2008/09/05 22:23:41 imp Exp $");
 
 #define _ARM32_BUS_DMA_PRIVATE
 #include <sys/param.h>
@@ -165,7 +164,6 @@ static const struct pmap_devmap kb920x_devmap[] = {
 	 * initialization is done. However, the AT91 resource allocation
 	 * system doesn't know how to use pmap_mapdev() yet.
 	 */
-#if 1
 	{
 		/*
 		 * Add the ohci controller, and anything else that might be
@@ -177,7 +175,6 @@ static const struct pmap_devmap kb920x_devmap[] = {
 		VM_PROT_READ|VM_PROT_WRITE,                             
 		PTE_NOCACHE,
 	},
-#endif
 	{
 		0,
 		0,
@@ -186,12 +183,6 @@ static const struct pmap_devmap kb920x_devmap[] = {
 		0,
 	}
 };
-
-#define SDRAM_START 0xa0000000
-
-#ifdef DDB
-extern vm_offset_t ksym_start, ksym_end;
-#endif
 
 static long
 ramsize(void)
@@ -213,7 +204,7 @@ static long
 board_init(void)
 {
 	/*
-	 * Since the USART supprots RS-485 multidrop mode, it allows the
+	 * Since the USART supports RS-485 multidrop mode, it allows the
 	 * TX pins to float.  However, for RS-232 operations, we don't want
 	 * these pins to float.  Instead, they should be pulled up to avoid
 	 * mismatches.  Linux does something similar when it configures the
@@ -257,62 +248,18 @@ void *
 initarm(void *arg, void *arg2)
 {
 	struct pv_addr  kernel_l1pt;
-	int loop;
+	int loop, i;
 	u_int l1pagetable;
 	vm_offset_t freemempos;
 	vm_offset_t afterkern;
-	int i;
-	uint32_t fake_preload[35];
 	uint32_t memsize;
 	vm_offset_t lastaddr;
-#ifdef DDB
-	vm_offset_t zstart = 0, zend = 0;
-#endif
-
-	i = 0;
 
 	set_cpufuncs();
-
-	fake_preload[i++] = MODINFO_NAME;
-	fake_preload[i++] = strlen("elf kernel") + 1;
-	strcpy((char*)&fake_preload[i++], "elf kernel");
-	i += 2;
-	fake_preload[i++] = MODINFO_TYPE;
-	fake_preload[i++] = strlen("elf kernel") + 1;
-	strcpy((char*)&fake_preload[i++], "elf kernel");
-	i += 2;
-	fake_preload[i++] = MODINFO_ADDR;
-	fake_preload[i++] = sizeof(vm_offset_t);
-	fake_preload[i++] = KERNVIRTADDR;
-	fake_preload[i++] = MODINFO_SIZE;
-	fake_preload[i++] = sizeof(uint32_t);
-	fake_preload[i++] = (uint32_t)&end - KERNVIRTADDR;
-#ifdef DDB
-	if (*(uint32_t *)KERNVIRTADDR == MAGIC_TRAMP_NUMBER) {
-		fake_preload[i++] = MODINFO_METADATA|MODINFOMD_SSYM;
-		fake_preload[i++] = sizeof(vm_offset_t);
-		fake_preload[i++] = *(uint32_t *)(KERNVIRTADDR + 4);
-		fake_preload[i++] = MODINFO_METADATA|MODINFOMD_ESYM;
-		fake_preload[i++] = sizeof(vm_offset_t);
-		fake_preload[i++] = *(uint32_t *)(KERNVIRTADDR + 8);
-		lastaddr = *(uint32_t *)(KERNVIRTADDR + 8);
-		zend = lastaddr;
-		zstart = *(uint32_t *)(KERNVIRTADDR + 4);
-		ksym_start = zstart;
-		ksym_end = zend;
-	} else
-#endif
-		lastaddr = (vm_offset_t)&end;
-		
-	fake_preload[i++] = 0;
-	fake_preload[i] = 0;
-	preload_metadata = (void *)fake_preload;
-
-
+	lastaddr = fake_preload_metadata();
 	pcpu_init(pcpup, 0, sizeof(struct pcpu));
 	PCPU_SET(curthread, &thread0);
 
-#define KERNEL_TEXT_BASE (KERNBASE)
 	freemempos = (lastaddr + PAGE_MASK) & ~PAGE_MASK;
 	/* Define a macro to simplify memory allocation */
 #define valloc_pages(var, np)                   \
@@ -368,7 +315,7 @@ initarm(void *arg, void *arg2)
 		pmap_link_l2pt(l1pagetable, KERNBASE + i * 0x100000,
 		    &kernel_pt_table[KERNEL_PT_KERN + i]);
 	pmap_map_chunk(l1pagetable, KERNBASE, PHYSADDR,
-	   (((uint32_t)(lastaddr) - KERNBASE) + PAGE_SIZE) & ~(PAGE_SIZE - 1),
+	   (((uint32_t)lastaddr - KERNBASE) + PAGE_SIZE) & ~(PAGE_SIZE - 1),
 	    VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
 	afterkern = round_page((lastaddr + L1_S_SIZE) & ~(L1_S_SIZE 
 	    - 1));
@@ -449,7 +396,7 @@ initarm(void *arg, void *arg2)
 	undefined_handler_address = (u_int)undefinedinstruction_bounce;
 	undefined_init();
 				
-	proc_linkup(&proc0, &thread0);
+	proc_linkup0(&proc0, &thread0);
 	thread0.td_kstack = kernelstack.pv_va;
 	thread0.td_pcb = (struct pcb *)
 		(thread0.td_kstack + KSTACK_PAGES * PAGE_SIZE) - 1;

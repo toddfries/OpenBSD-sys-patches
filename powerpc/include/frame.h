@@ -29,7 +29,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  *	$NetBSD: frame.h,v 1.2 1999/01/10 10:13:15 tsubai Exp $
- * $FreeBSD: src/sys/powerpc/include/frame.h,v 1.12 2005/12/22 22:16:08 jhb Exp $
+ * $FreeBSD: src/sys/powerpc/include/frame.h,v 1.13 2008/03/02 17:05:57 raj Exp $
  */
 
 #ifndef	_MACHINE_FRAME_H_
@@ -50,15 +50,25 @@
 struct trapframe {
 	register_t fixreg[32];
 	register_t lr;
-	int cr;
-	int xer;
+	int	cr;
+	int	xer;
 	register_t ctr;
 	register_t srr0;
 	register_t srr1;
-	register_t dar;		/* dar & dsisr are only filled on a DSI trap */
-	int dsisr;
-	int exc;
+	int	exc;
+	union {
+		struct {
+			/* dar & dsisr are only filled on a DSI trap */
+			register_t dar;
+			int	dsisr;
+		} aim;
+		struct {
+			register_t dear;
+			register_t esr;
+		} booke;
+	} cpu;
 };
+
 /*
  * This is to ensure alignment of the stackpointer
  */

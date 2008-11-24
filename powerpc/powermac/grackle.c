@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/powermac/grackle.c,v 1.9 2007/09/30 11:05:16 marius Exp $
+ * $FreeBSD: src/sys/powerpc/powermac/grackle.c,v 1.14 2008/10/14 14:54:14 nwhitehorn Exp $
  */
 
 #include <sys/param.h>
@@ -36,18 +36,18 @@
 
 #include <dev/ofw/openfirm.h>
 #include <dev/ofw/ofw_pci.h>
+#include <dev/ofw/ofw_bus.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 
 #include <machine/bus.h>
 #include <machine/md_var.h>
-#include <machine/nexusvar.h>
+#include <machine/pio.h>
 #include <machine/resource.h>
 
 #include <sys/rman.h>
 
-#include <powerpc/ofw/ofw_pci.h>
 #include <powerpc/powermac/gracklevar.h>
 
 #include <vm/vm.h>
@@ -91,6 +91,11 @@ static void		grackle_write_config(device_t, u_int, u_int, u_int,
 static int		grackle_route_interrupt(device_t, device_t, int);
 
 /*
+ * ofw_bus interface
+ */
+static phandle_t grackle_get_node(device_t bus, device_t dev);
+
+/*
  * Local routines.
  */
 static int		grackle_enable_config(struct grackle_softc *, u_int,
@@ -121,6 +126,9 @@ static device_method_t	grackle_methods[] = {
 	DEVMETHOD(pcib_write_config,	grackle_write_config),
 	DEVMETHOD(pcib_route_interrupt,	grackle_route_interrupt),
 
+	/* ofw_bus interface */
+	DEVMETHOD(ofw_bus_get_node,     grackle_get_node),
+
 	{ 0, 0 }
 };
 
@@ -137,10 +145,10 @@ DRIVER_MODULE(grackle, nexus, grackle_driver, grackle_devclass, 0, 0);
 static int
 grackle_probe(device_t dev)
 {
-	char	*type, *compatible;
+	const char	*type, *compatible;
 
-	type = nexus_get_device_type(dev);
-	compatible = nexus_get_compatible(dev);
+	type = ofw_bus_get_type(dev);
+	compatible = ofw_bus_get_compat(dev);
 
 	if (type == NULL || compatible == NULL)
 		return (ENXIO);
@@ -159,9 +167,9 @@ grackle_attach(device_t dev)
 	phandle_t	node;
 	u_int32_t	busrange[2];
 	struct		grackle_range *rp, *io, *mem[2];
-	int		nmem, i;
+	int		nmem, i, error;
 
-	node = nexus_get_node(dev);
+	node = ofw_bus_get_node(dev);
 	sc = device_get_softc(dev);
 
 	if (OF_getprop(node, "bus-range", busrange, sizeof(busrange)) != 8)
@@ -219,8 +227,7 @@ grackle_attach(device_t dev)
 	if (rman_init(&sc->sc_io_rman) != 0 ||
 	    rman_manage_region(&sc->sc_io_rman, io->pci_lo,
 	    io->pci_lo + io->size_lo) != 0) {
-		device_printf(dev, "failed to set up io range management\n");
-		return (ENXIO);
+		panic("grackle_attach: failed to set up I/O rman");
 	}
 
 	if (nmem == 0) {
@@ -229,25 +236,20 @@ grackle_attach(device_t dev)
 	}
 	sc->sc_mem_rman.rm_type = RMAN_ARRAY;
 	sc->sc_mem_rman.rm_descr = "Grackle PCI Memory";
-	if (rman_init(&sc->sc_mem_rman) != 0) {
-		device_printf(dev,
-		    "failed to init mem range resources\n");
-		return (ENXIO);
+	error = rman_init(&sc->sc_mem_rman);
+	if (error) {
+		device_printf(dev, "rman_init() failed. error = %d\n", error);
+		return (error);
 	}
 	for (i = 0; i < nmem; i++) {
-		if (rman_manage_region(&sc->sc_mem_rman, mem[i]->pci_lo,
-		    mem[i]->pci_lo + mem[i]->size_lo) != 0) {
-			device_printf(dev,
-			    "failed to set up memory range management\n");
-			return (ENXIO);
+		error = rman_manage_region(&sc->sc_mem_rman, mem[i]->pci_lo,
+		    mem[i]->pci_lo + mem[i]->size_lo);
+		if (error) {
+			device_printf(dev, 
+			    "rman_manage_region() failed. error = %d\n", error);
+			return (error);
 		}
 	}
-
-	/*
-	 * Write out the correct PIC interrupt values to config space
-	 * of all devices on the bus.
-	 */
-	ofw_pci_fixup(dev, sc->sc_bus, sc->sc_node);
 
 	device_add_child(dev, "pci", device_get_unit(dev));
 	return (bus_generic_attach(dev));
@@ -363,7 +365,6 @@ grackle_alloc_resource(device_t bus, device_t child, int type, int *rid,
 	struct			grackle_softc *sc;
 	struct			resource *rv;
 	struct			rman *rm;
-	bus_space_tag_t		bt;
 	int			needactivate;
 
 	needactivate = flags & RF_ACTIVE;
@@ -374,18 +375,15 @@ grackle_alloc_resource(device_t bus, device_t child, int type, int *rid,
 	switch (type) {
 	case SYS_RES_MEMORY:
 		rm = &sc->sc_mem_rman;
-		bt = PPC_BUS_SPACE_MEM;
 		break;
 
 	case SYS_RES_IOPORT:
 		rm = &sc->sc_io_rman;
-		bt = PPC_BUS_SPACE_IO;
 		break;
 
 	case SYS_RES_IRQ:
 		return (bus_alloc_resource(bus, type, rid, start, end, count,
 		    flags));
-		break;
 
 	default:
 		device_printf(bus, "unknown resource request from %s\n",
@@ -401,8 +399,6 @@ grackle_alloc_resource(device_t bus, device_t child, int type, int *rid,
 	}
 
 	rman_set_rid(rv, *rid);
-	rman_set_bustag(rv, bt);
-	rman_set_bushandle(rv, rman_get_start(rv));
 
 	if (needactivate) {
 		if (bus_activate_resource(child, type, *rid, rv) != 0) {
@@ -462,6 +458,7 @@ grackle_activate_resource(device_t bus, device_t child, int type, int rid,
 			return (ENOMEM);
 
 		rman_set_virtual(res, p);
+		rman_set_bustag(res, &bs_le_tag);
 		rman_set_bushandle(res, (u_long)p);
 	}
 
@@ -513,6 +510,17 @@ grackle_disable_config(struct grackle_softc *sc)
 	 * accesses from causing config cycles
 	 */
 	out32rb(sc->sc_addr, 0);
+}
+
+static phandle_t
+grackle_get_node(device_t bus, device_t dev)
+{
+	struct grackle_softc *sc;
+
+	sc = device_get_softc(bus);
+	/* We only have one child, the PCI bus, which needs our own node. */
+
+	return sc->sc_node;
 }
 
 /*

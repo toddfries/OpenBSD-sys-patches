@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum.c,v 1.21 2006/03/30 14:01:25 le Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum.c,v 1.22 2008/10/26 17:20:37 lulf Exp $");
 
 #include <sys/param.h>
 #include <sys/bio.h>
@@ -35,6 +35,7 @@ __FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum.c,v 1.21 2006/03/30 14:01:25 l
 #include <sys/malloc.h>
 #include <sys/module.h>
 #include <sys/mutex.h>
+#include <sys/sysctl.h>
 #include <sys/systm.h>
 
 #include <geom/geom.h>
@@ -42,12 +43,12 @@ __FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum.c,v 1.21 2006/03/30 14:01:25 l
 #include <geom/vinum/geom_vinum.h>
 #include <geom/vinum/geom_vinum_share.h>
 
-#if 0
 SYSCTL_DECL(_kern_geom);
 SYSCTL_NODE(_kern_geom, OID_AUTO, vinum, CTLFLAG_RW, 0, "GEOM_VINUM stuff");
-SYSCTL_UINT(_kern_geom_vinum, OID_AUTO, debug, CTLFLAG_RW, &gv_debug, 0,
+u_int g_vinum_debug = 0;
+TUNABLE_INT("kern.geom.vinum.debug", &g_vinum_debug);
+SYSCTL_UINT(_kern_geom_vinum, OID_AUTO, debug, CTLFLAG_RW, &g_vinum_debug, 0,
     "Debug level");
-#endif
 
 int	gv_create(struct g_geom *, struct gctl_req *);
 
@@ -363,7 +364,7 @@ gv_create(struct g_geom *gp, struct gctl_req *req)
 			 */
 			pp = g_provider_by_name(d->device);
 			if (pp == NULL) {
-				printf("geom_vinum: %s: drive disapeared?\n",
+				G_VINUM_DEBUG(0, "%s: drive disappeared?",
 				    d->device);
 				continue;
 			}

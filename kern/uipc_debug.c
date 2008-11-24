@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/uipc_debug.c,v 1.2 2007/05/03 14:42:41 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/uipc_debug.c,v 1.4 2008/07/03 08:35:59 julian Exp $");
 
 #include "opt_ddb.h"
 
@@ -225,11 +225,11 @@ db_print_indent(int indent)
 }
 
 static void
-db_print_domain(struct domain *d, const char *domainname, int indent)
+db_print_domain(struct domain *d, const char *domain_name, int indent)
 {
 
 	db_print_indent(indent);
-	db_printf("%s at %p\n", domainname, d);
+	db_printf("%s at %p\n", domain_name, d);
 
 	indent += 2;
 
@@ -394,13 +394,17 @@ db_print_sockbuf(struct sockbuf *sb, const char *sockbufname, int indent)
 	db_printf("sb_lastrecord: %p\n", sb->sb_lastrecord);
 
 	db_print_indent(indent);
-	db_printf("sb_cc: %d   ", sb->sb_cc);
-	db_printf("sb_hiwat: %d   ", sb->sb_hiwat);
-	db_printf("sb_mbcnt: %d   ", sb->sb_mbcnt);
-	db_printf("sb_mbmax: %d\n", sb->sb_mbmax);
+	db_printf("sb_sndptr: %p   ", sb->sb_sndptr);
+	db_printf("sb_sndptroff: %u\n", sb->sb_sndptroff);
 
 	db_print_indent(indent);
-	db_printf("sb_ctl: %d   ", sb->sb_ctl);
+	db_printf("sb_cc: %u   ", sb->sb_cc);
+	db_printf("sb_hiwat: %u   ", sb->sb_hiwat);
+	db_printf("sb_mbcnt: %u   ", sb->sb_mbcnt);
+	db_printf("sb_mbmax: %u\n", sb->sb_mbmax);
+
+	db_print_indent(indent);
+	db_printf("sb_ctl: %u   ", sb->sb_ctl);
 	db_printf("sb_lowat: %d   ", sb->sb_lowat);
 	db_printf("sb_timeo: %d\n", sb->sb_timeo);
 

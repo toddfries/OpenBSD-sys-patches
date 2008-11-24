@@ -23,7 +23,7 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  *
- * $FreeBSD: src/sys/ddb/db_command.h,v 1.13 2005/01/06 01:34:41 imp Exp $
+ * $FreeBSD: src/sys/ddb/db_command.h,v 1.15 2008/09/25 19:50:14 jhb Exp $
  */
 
 #ifndef _DDB_DB_COMMAND_H_
@@ -37,7 +37,9 @@
  * Command loop declarations.
  */
 
+void	db_command_init(void);
 void	db_command_loop(void);
+void	db_command_script(const char *command);
 
 extern db_addr_t	db_dot;		/* current location */
 extern db_addr_t	db_last_addr;	/* last explicit address typed */

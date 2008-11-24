@@ -33,13 +33,14 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/vfs_acl.c,v 1.54 2007/10/24 19:03:55 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/vfs_acl.c,v 1.58 2008/03/31 12:01:20 kib Exp $");
 
 #include "opt_mac.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/sysproto.h>
+#include <sys/fcntl.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
@@ -91,7 +92,7 @@ vacl_set_acl(struct thread *td, struct vnode *vp, acl_type_t type,
 	if (error != 0)
 		return (error);
 	VOP_LEASE(vp, td, td->td_ucred, LEASE_WRITE);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 #ifdef MAC
 	error = mac_vnode_check_setacl(td->td_ucred, vp, type, &inkernacl);
 	if (error != 0)
@@ -101,7 +102,7 @@ vacl_set_acl(struct thread *td, struct vnode *vp, acl_type_t type,
 #ifdef MAC
 out:
 #endif
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	vn_finished_write(mp);
 	return(error);
 }
@@ -117,7 +118,7 @@ vacl_get_acl(struct thread *td, struct vnode *vp, acl_type_t type,
 	int error;
 
 	VOP_LEASE(vp, td, td->td_ucred, LEASE_WRITE);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 #ifdef MAC
 	error = mac_vnode_check_getacl(td->td_ucred, vp, type);
 	if (error != 0)
@@ -127,7 +128,7 @@ vacl_get_acl(struct thread *td, struct vnode *vp, acl_type_t type,
 #ifdef MAC
 out:
 #endif
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	if (error == 0)
 		error = copyout(&inkernelacl, aclp, sizeof(struct acl));
 	return (error);
@@ -146,7 +147,7 @@ vacl_delete(struct thread *td, struct vnode *vp, acl_type_t type)
 	if (error)
 		return (error);
 	VOP_LEASE(vp, td, td->td_ucred, LEASE_WRITE);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 #ifdef MAC
 	error = mac_vnode_check_deleteacl(td->td_ucred, vp, type);
 	if (error)
@@ -156,7 +157,7 @@ vacl_delete(struct thread *td, struct vnode *vp, acl_type_t type)
 #ifdef MAC
 out:
 #endif
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	vn_finished_write(mp);
 	return (error);
 }
@@ -428,4 +429,4 @@ aclinit(void *dummy __unused)
 	acl_zone = uma_zcreate("ACL UMA zone", sizeof(struct acl),
 	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, 0);
 }
-SYSINIT(acls, SI_SUB_ACL, SI_ORDER_FIRST, aclinit, NULL)
+SYSINIT(acls, SI_SUB_ACL, SI_ORDER_FIRST, aclinit, NULL);

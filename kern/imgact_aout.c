@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/imgact_aout.c,v 1.101 2006/03/16 08:51:59 alc Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/imgact_aout.c,v 1.106 2008/11/22 12:36:15 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/exec.h>
@@ -56,32 +56,39 @@ static int	exec_aout_imgact(struct image_params *imgp);
 static int	aout_fixup(register_t **stack_base, struct image_params *imgp);
 
 struct sysentvec aout_sysvec = {
-	SYS_MAXSYSCALL,
-	sysent,
-	0,
-	0,
-	NULL,
-	0,
-	NULL,
-	NULL,
-	aout_fixup,
-	sendsig,
-	sigcode,
-	&szsigcode,
-	NULL,
-	"FreeBSD a.out",
-	NULL,
-	NULL,
-	MINSIGSTKSZ,
-	PAGE_SIZE,
-	VM_MIN_ADDRESS,
-	VM_MAXUSER_ADDRESS,
-	USRSTACK,
-	PS_STRINGS,
-	VM_PROT_ALL,
-	exec_copyout_strings,
-	exec_setregs,
-	NULL
+	.sv_size	= SYS_MAXSYSCALL,
+	.sv_table	= sysent,
+	.sv_mask	= 0,
+	.sv_sigsize	= 0,
+	.sv_sigtbl	= NULL,
+	.sv_errsize	= 0,
+	.sv_errtbl	= NULL,
+	.sv_transtrap	= NULL,
+	.sv_fixup	= aout_fixup,
+	.sv_sendsig	= sendsig,
+	.sv_sigcode	= sigcode,
+	.sv_szsigcode	= &szsigcode,
+	.sv_prepsyscall	= NULL,
+	.sv_name	= "FreeBSD a.out",
+	.sv_coredump	= NULL,
+	.sv_imgact_try	= NULL,
+	.sv_minsigstksz	= MINSIGSTKSZ,
+	.sv_pagesize	= PAGE_SIZE,
+	.sv_minuser	= VM_MIN_ADDRESS,
+	.sv_maxuser	= VM_MAXUSER_ADDRESS,
+	.sv_usrstack	= USRSTACK,
+	.sv_psstrings	= PS_STRINGS,
+	.sv_stackprot	= VM_PROT_ALL,
+	.sv_copyout_strings	= exec_copyout_strings,
+	.sv_setregs	= exec_setregs,
+	.sv_fixlimit	= NULL,
+	.sv_maxssiz	= NULL,
+	.sv_flags	= SV_ABI_FREEBSD | SV_AOUT |
+#if defined(__i386__)
+	SV_IA32 | SV_ILP32
+#else
+#error Choose SV_XXX flags for the platform
+#endif
 };
 
 static int
@@ -98,7 +105,6 @@ exec_aout_imgact(imgp)
 	struct image_params *imgp;
 {
 	const struct exec *a_out = (const struct exec *) imgp->image_header;
-	struct thread *td = curthread;
 	struct vmspace *vmspace;
 	vm_map_t map;
 	vm_object_t object;
@@ -193,14 +199,16 @@ exec_aout_imgact(imgp)
 	 * However, in cases where the vnode lock is external, such as nullfs,
 	 * v_usecount may become zero.
 	 */
-	VOP_UNLOCK(imgp->vp, 0, td);
+	VOP_UNLOCK(imgp->vp, 0);
 
 	/*
 	 * Destroy old process VM and create a new one (with a new stack)
 	 */
-	exec_new_vmspace(imgp, &aout_sysvec);
+	error = exec_new_vmspace(imgp, &aout_sysvec);
 
-	vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY);
+	if (error)
+		return (error);
 
 	/*
 	 * The vm space can be changed by exec_new_vmspace

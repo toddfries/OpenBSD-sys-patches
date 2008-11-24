@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/ata-disk.c,v 1.210 2008/04/17 12:29:35 sos Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/ata-disk.c,v 1.211 2008/05/08 17:55:44 grehan Exp $");
 
 #include "opt_ata.h"
 #include <sys/param.h>
@@ -125,7 +125,7 @@ ad_attach(device_t dev)
     adp->disk->d_dump = ad_dump;
     adp->disk->d_name = "ad";
     adp->disk->d_drv1 = dev;
-    adp->disk->d_maxsize = ch->dma.max_iosize;
+    adp->disk->d_maxsize = ch->dma.max_iosize ? ch->dma.max_iosize : DFLTPHYS;
     adp->disk->d_sectorsize = DEV_BSIZE;
     adp->disk->d_mediasize = DEV_BSIZE * (off_t)adp->total_secs;
     adp->disk->d_fwsectors = adp->sectors;

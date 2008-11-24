@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mii/e1000phy.c,v 1.20 2007/11/16 10:39:18 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mii/e1000phy.c,v 1.23 2008/10/17 05:26:51 yongari Exp $");
 
 /*
  * driver for the Marvell 88E1000 series external 1000/100/10-BT PHY.
@@ -105,6 +105,7 @@ static const struct mii_phydesc e1000phys[] = {
 	MII_PHY_DESC(MARVELL, E1149),
 	MII_PHY_DESC(MARVELL, E1111),
 	MII_PHY_DESC(MARVELL, E1116),
+	MII_PHY_DESC(MARVELL, E1116R),
 	MII_PHY_DESC(MARVELL, E1118),
 	MII_PHY_DESC(xxMARVELL, E1000),
 	MII_PHY_DESC(xxMARVELL, E1011),
@@ -151,6 +152,20 @@ e1000phy_attach(device_t dev)
 	case MII_MODEL_MARVELL_E1112:
 		if (PHY_READ(sc, E1000_ESSR) & E1000_ESSR_FIBER_LINK)
 			sc->mii_flags |= MIIF_HAVEFIBER;
+		break;
+	case MII_MODEL_MARVELL_E1149:
+		/*
+		 * Some 88E1149 PHY's page select is initialized to
+		 * point to other bank instead of copper/fiber bank
+		 * which in turn resulted in wrong registers were
+		 * accessed during PHY operation. It is believed that
+		 * page 0 should be used for copper PHY so reinitialize
+		 * E1000_EADR to select default copper PHY. If parent
+		 * device know the type of PHY(either copper or fiber),
+		 * that information should be used to select default
+		 * type of PHY.
+		 */
+		PHY_WRITE(sc, E1000_EADR, 0);
 		break;
 	case MII_MODEL_MARVELL_E3082:
 		/* 88E3082 10/100 Fast Ethernet PHY. */
@@ -209,7 +224,7 @@ static void
 e1000phy_reset(struct mii_softc *sc)
 {
 	struct e1000phy_softc *esc;
-	uint16_t reg;
+	uint16_t reg, page;
 
 	esc = (struct e1000phy_softc *)sc;
 	reg = PHY_READ(sc, E1000_SCR);
@@ -218,12 +233,13 @@ e1000phy_reset(struct mii_softc *sc)
 		PHY_WRITE(sc, E1000_SCR, reg);
 		if (esc->mii_model == MII_MODEL_MARVELL_E1112) {
 			/* Select 1000BASE-X only mode. */
+			page = PHY_READ(sc, E1000_EADR);
 			PHY_WRITE(sc, E1000_EADR, 2);
 			reg = PHY_READ(sc, E1000_SCR);
 			reg &= ~E1000_SCR_MODE_MASK;
 			reg |= E1000_SCR_MODE_1000BX;
 			PHY_WRITE(sc, E1000_SCR, reg);
-			PHY_WRITE(sc, E1000_EADR, 1);
+			PHY_WRITE(sc, E1000_EADR, page);
 		}
 	} else {
 		switch (esc->mii_model) {

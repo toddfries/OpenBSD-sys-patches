@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_misc.c,v 1.215 2007/10/24 19:03:52 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_misc.c,v 1.230 2008/11/09 10:45:13 ed Exp $");
 
 #include "opt_compat.h"
 #include "opt_mac.h"
@@ -63,6 +63,8 @@ __FBSDID("$FreeBSD: src/sys/compat/linux/linux_misc.c,v 1.215 2007/10/24 19:03:5
 #include <sys/vmmeter.h>
 #include <sys/vnode.h>
 #include <sys/wait.h>
+#include <sys/cpuset.h>
+#include <sys/vimage.h>
 
 #include <security/mac/mac_framework.h>
 
@@ -74,10 +76,6 @@ __FBSDID("$FreeBSD: src/sys/compat/linux/linux_misc.c,v 1.215 2007/10/24 19:03:5
 #include <vm/vm_object.h>
 #include <vm/swap_pager.h>
 
-#include <compat/linux/linux_sysproto.h>
-#include <compat/linux/linux_emul.h>
-#include <compat/linux/linux_misc.h>
-
 #ifdef COMPAT_LINUX32
 #include <machine/../linux32/linux.h>
 #include <machine/../linux32/linux32_proto.h>
@@ -86,9 +84,13 @@ __FBSDID("$FreeBSD: src/sys/compat/linux/linux_misc.c,v 1.215 2007/10/24 19:03:5
 #include <machine/../linux/linux_proto.h>
 #endif
 
+#include <compat/linux/linux_file.h>
 #include <compat/linux/linux_mib.h>
 #include <compat/linux/linux_signal.h>
 #include <compat/linux/linux_util.h>
+#include <compat/linux/linux_sysproto.h>
+#include <compat/linux/linux_emul.h>
+#include <compat/linux/linux_misc.h>
 
 #ifdef __i386__
 #include <machine/cputypes.h>
@@ -169,17 +171,20 @@ int
 linux_alarm(struct thread *td, struct linux_alarm_args *args)
 {
 	struct itimerval it, old_it;
+	u_int secs;
 	int error;
 
 #ifdef DEBUG
 	if (ldebug(alarm))
 		printf(ARGS(alarm, "%u"), args->secs);
 #endif
+	
+	secs = args->secs;
 
-	if (args->secs > 100000000)
-		return (EINVAL);
+	if (secs > INT_MAX)
+		secs = INT_MAX;
 
-	it.it_value.tv_sec = (long)args->secs;
+	it.it_value.tv_sec = (long) secs;
 	it.it_value.tv_usec = 0;
 	it.it_interval.tv_sec = 0;
 	it.it_interval.tv_usec = 0;
@@ -272,7 +277,7 @@ linux_uselib(struct thread *td, struct linux_uselib_args *args)
 	}
 
 	/* Executable? */
-	error = VOP_GETATTR(vp, &attr, td->td_ucred, td);
+	error = VOP_GETATTR(vp, &attr, td->td_ucred);
 	if (error)
 		goto cleanup;
 
@@ -301,7 +306,7 @@ linux_uselib(struct thread *td, struct linux_uselib_args *args)
 	 * than vn_open().
 	 */
 #ifdef MAC
-	error = mac_vnode_check_open(td->td_ucred, vp, FREAD);
+	error = mac_vnode_check_open(td->td_ucred, vp, VREAD);
 	if (error)
 		goto cleanup;
 #endif
@@ -377,7 +382,7 @@ linux_uselib(struct thread *td, struct linux_uselib_args *args)
 	 * Lock no longer needed
 	 */
 	locked = 0;
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	VFS_UNLOCK_GIANT(vfslocked);
 
 	/*
@@ -458,7 +463,7 @@ linux_uselib(struct thread *td, struct linux_uselib_args *args)
 cleanup:
 	/* Unlock vnode if needed */
 	if (locked) {
-		VOP_UNLOCK(vp, 0, td);
+		VOP_UNLOCK(vp, 0);
 		VFS_UNLOCK_GIANT(vfslocked);
 	}
 
@@ -527,15 +532,8 @@ linux_select(struct thread *td, struct linux_select_args *args)
 	if (ldebug(select))
 		printf(LMSG("real select returns %d"), error);
 #endif
-	if (error) {
-		/*
-		 * See fs/select.c in the Linux kernel.  Without this,
-		 * Maelstrom doesn't work.
-		 */
-		if (error == ERESTART)
-			error = EINTR;
+	if (error)
 		goto select_out;
-	}
 
 	if (args->timeout) {
 		if (td->td_retval[0]) {
@@ -588,6 +586,21 @@ linux_mremap(struct thread *td, struct linux_mremap_args *args)
 		    (unsigned long)args->new_len,
 		    (unsigned long)args->flags);
 #endif
+
+	if (args->flags & ~(LINUX_MREMAP_FIXED | LINUX_MREMAP_MAYMOVE)) {
+		td->td_retval[0] = 0;
+		return (EINVAL);
+	}
+
+	/*
+	 * Check for the page alignment.
+	 * Linux defines PAGE_MASK to be FreeBSD ~PAGE_MASK.
+	 */
+	if (args->addr & PAGE_MASK) {
+		td->td_retval[0] = 0;
+		return (EINVAL);
+	}
+
 	args->new_len = round_page(args->new_len);
 	args->old_len = round_page(args->old_len);
 
@@ -694,6 +707,7 @@ linux_times(struct thread *td, struct linux_times_args *args)
 int
 linux_newuname(struct thread *td, struct linux_newuname_args *args)
 {
+	INIT_VPROCG(TD_TO_VPROCG(td));
 	struct l_new_utsname utsname;
 	char osname[LINUX_MAX_UTSNAME];
 	char osrelease[LINUX_MAX_UTSNAME];
@@ -745,7 +759,9 @@ linux_newuname(struct thread *td, struct linux_newuname_args *args)
 #else /* something other than i386 or amd64 - assume we and Linux agree */
 	strlcpy(utsname.machine, machine, LINUX_MAX_UTSNAME);
 #endif /* __i386__ */
-	strlcpy(utsname.domainname, domainname, LINUX_MAX_UTSNAME);
+	mtx_lock(&hostname_mtx);
+	strlcpy(utsname.domainname, V_domainname, LINUX_MAX_UTSNAME);
+	mtx_unlock(&hostname_mtx);
 
 	return (copyout(&utsname, args->buf, sizeof(utsname)));
 }
@@ -817,6 +833,39 @@ linux_utimes(struct thread *td, struct linux_utimes_args *args)
 	}
 
 	error = kern_utimes(td, fname, UIO_SYSSPACE, tvp, UIO_SYSSPACE);
+	LFREEPATH(fname);
+	return (error);
+}
+
+int
+linux_futimesat(struct thread *td, struct linux_futimesat_args *args)
+{
+	l_timeval ltv[2];
+	struct timeval tv[2], *tvp = NULL;
+	char *fname;
+	int error, dfd;
+
+	dfd = (args->dfd == LINUX_AT_FDCWD) ? AT_FDCWD : args->dfd;
+	LCONVPATHEXIST_AT(td, args->filename, &fname, dfd);
+
+#ifdef DEBUG
+	if (ldebug(futimesat))
+		printf(ARGS(futimesat, "%s, *"), fname);
+#endif
+
+	if (args->utimes != NULL) {
+		if ((error = copyin(args->utimes, ltv, sizeof ltv))) {
+			LFREEPATH(fname);
+			return (error);
+		}
+		tv[0].tv_sec = ltv[0].tv_sec;
+		tv[0].tv_usec = ltv[0].tv_usec;
+		tv[1].tv_sec = ltv[1].tv_sec;
+		tv[1].tv_usec = ltv[1].tv_usec;
+		tvp = tv;
+	}
+
+	error = kern_utimesat(td, dfd, fname, UIO_SYSSPACE, tvp, UIO_SYSSPACE);
 	LFREEPATH(fname);
 	return (error);
 }
@@ -947,6 +996,56 @@ linux_mknod(struct thread *td, struct linux_mknod_args *args)
 	case S_IFREG:
 		error = kern_open(td, path, UIO_SYSSPACE,
 		    O_WRONLY | O_CREAT | O_TRUNC, args->mode);
+		if (error == 0)
+			kern_close(td, td->td_retval[0]);
+		break;
+
+	default:
+		error = EINVAL;
+		break;
+	}
+	LFREEPATH(path);
+	return (error);
+}
+
+int
+linux_mknodat(struct thread *td, struct linux_mknodat_args *args)
+{
+	char *path;
+	int error, dfd;
+
+	dfd = (args->dfd == LINUX_AT_FDCWD) ? AT_FDCWD : args->dfd;
+	LCONVPATHCREAT_AT(td, args->filename, &path, dfd);
+
+#ifdef DEBUG
+	if (ldebug(mknodat))
+		printf(ARGS(mknodat, "%s, %d, %d"), path, args->mode, args->dev);
+#endif
+
+	switch (args->mode & S_IFMT) {
+	case S_IFIFO:
+	case S_IFSOCK:
+		error = kern_mkfifoat(td, dfd, path, UIO_SYSSPACE, args->mode);
+		break;
+
+	case S_IFCHR:
+	case S_IFBLK:
+		error = kern_mknodat(td, dfd, path, UIO_SYSSPACE, args->mode,
+		    args->dev);
+		break;
+
+	case S_IFDIR:
+		error = EPERM;
+		break;
+
+	case 0:
+		args->mode |= S_IFREG;
+		/* FALLTHROUGH */
+	case S_IFREG:
+		error = kern_openat(td, dfd, path, UIO_SYSSPACE,
+		    O_WRONLY | O_CREAT | O_TRUNC, args->mode);
+		if (error == 0)
+			kern_close(td, td->td_retval[0]);
 		break;
 
 	default:
@@ -1583,6 +1682,7 @@ int
 linux_sethostname(struct thread *td, struct linux_sethostname_args *args)
 {
 	int name[2];
+	int error;
 
 #ifdef DEBUG
 	if (ldebug(sethostname))
@@ -1591,8 +1691,31 @@ linux_sethostname(struct thread *td, struct linux_sethostname_args *args)
 
 	name[0] = CTL_KERN;
 	name[1] = KERN_HOSTNAME;
-	return (userland_sysctl(td, name, 2, 0, 0, 0, args->hostname,
-	    args->len, 0, 0));
+	mtx_lock(&Giant);
+	error = userland_sysctl(td, name, 2, 0, 0, 0, args->hostname,
+	    args->len, 0, 0);
+	mtx_unlock(&Giant);
+	return (error);
+}
+
+int
+linux_setdomainname(struct thread *td, struct linux_setdomainname_args *args)
+{
+	int name[2];
+	int error;
+
+#ifdef DEBUG
+	if (ldebug(setdomainname))
+		printf(ARGS(setdomainname, "*, %i"), args->len);
+#endif
+
+	name[0] = CTL_KERN;
+	name[1] = KERN_NISDOMAINNAME;
+	mtx_lock(&Giant);
+	error = userland_sysctl(td, name, 2, 0, 0, 0, args->name,
+	    args->len, 0, 0);
+	mtx_unlock(&Giant);
+	return (error);
 }
 
 int
@@ -1715,22 +1838,57 @@ linux_prctl(struct thread *td, struct linux_prctl_args *args)
 }
 
 /*
- * XXX: fake one.. waiting for real implementation of affinity mask.
+ * Get affinity of a process.
  */
 int
 linux_sched_getaffinity(struct thread *td,
     struct linux_sched_getaffinity_args *args)
 {
 	int error;
-	cpumask_t i = ~0;
+	struct cpuset_getaffinity_args cga;
 
-	if (args->len < sizeof(cpumask_t))
+#ifdef DEBUG
+	if (ldebug(sched_getaffinity))
+		printf(ARGS(sched_getaffinity, "%d, %d, *"), args->pid,
+		    args->len);
+#endif
+	if (args->len < sizeof(cpuset_t))
 		return (EINVAL);
 
-	error = copyout(&i, args->user_mask_ptr, sizeof(cpumask_t));
-	if (error)
-		return (EFAULT);
+	cga.level = CPU_LEVEL_WHICH;
+	cga.which = CPU_WHICH_PID;
+	cga.id = args->pid;
+	cga.cpusetsize = sizeof(cpuset_t);
+	cga.mask = (cpuset_t *) args->user_mask_ptr;
 
-	td->td_retval[0] = sizeof(cpumask_t);
-	return (0);
+	if ((error = cpuset_getaffinity(td, &cga)) == 0)
+		td->td_retval[0] = sizeof(cpuset_t);
+
+	return (error);
+}
+
+/*
+ *  Set affinity of a process.
+ */
+int
+linux_sched_setaffinity(struct thread *td,
+    struct linux_sched_setaffinity_args *args)
+{
+	struct cpuset_setaffinity_args csa;
+
+#ifdef DEBUG
+	if (ldebug(sched_setaffinity))
+		printf(ARGS(sched_setaffinity, "%d, %d, *"), args->pid,
+		    args->len);
+#endif
+	if (args->len < sizeof(cpuset_t))
+		return (EINVAL);
+
+	csa.level = CPU_LEVEL_WHICH;
+	csa.which = CPU_WHICH_PID;
+	csa.id = args->pid;
+	csa.cpusetsize = sizeof(cpuset_t);
+	csa.mask = (cpuset_t *) args->user_mask_ptr;
+
+	return (cpuset_setaffinity(td, &csa));
 }

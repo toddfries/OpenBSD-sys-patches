@@ -31,7 +31,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ip_mroute.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/netinet/ip_mroute.h,v 1.31 2007/02/08 23:05:08 bms Exp $
+ * $FreeBSD: src/sys/netinet/ip_mroute.h,v 1.32 2008/05/09 23:02:57 julian Exp $
  */
 
 #ifndef _NETINET_IP_MROUTE_H_
@@ -359,7 +359,7 @@ struct sockopt;
 extern int	(*ip_mrouter_set)(struct socket *, struct sockopt *);
 extern int	(*ip_mrouter_get)(struct socket *, struct sockopt *);
 extern int	(*ip_mrouter_done)(void);
-extern int	(*mrt_ioctl)(int, caddr_t);
+extern int	(*mrt_ioctl)(int, caddr_t, int);
 
 #endif /* _KERNEL */
 

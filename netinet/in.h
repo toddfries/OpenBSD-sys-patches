@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)in.h	8.3 (Berkeley) 1/3/94
- * $FreeBSD: src/sys/netinet/in.h,v 1.100 2007/06/12 16:24:53 bms Exp $
+ * $FreeBSD: src/sys/netinet/in.h,v 1.103 2008/10/02 15:37:58 zec Exp $
  */
 
 #ifndef _NETINET_IN_H_
@@ -293,8 +293,7 @@ __END_DECLS
  *
  * The value IP_PORTRANGE_HIGH changes the range of candidate port numbers
  * into the "high" range.  These are reserved for client outbound connections
- * which do not want to be filtered by any firewalls.  Note that by default
- * this is the same as IP_PORTRANGE_DEFAULT.
+ * which do not want to be filtered by any firewalls.
  *
  * The value IP_PORTRANGE_LOW changes the range to the "low" are
  * that is (by convention) restricted to privileged processes.  This
@@ -331,8 +330,13 @@ __END_DECLS
 #define	IPPORT_RESERVED		1024
 
 /*
- * Default local port range, used by both IP_PORTRANGE_DEFAULT
- * and IP_PORTRANGE_HIGH.
+ * Default local port range, used by IP_PORTRANGE_DEFAULT
+ */
+#define IPPORT_EPHEMERALFIRST	10000
+#define IPPORT_EPHEMERALLAST	65535 
+ 
+/*
+ * Dynamic port range, used by IP_PORTRANGE_HIGH.
  */
 #define	IPPORT_HIFIRSTAUTO	49152
 #define	IPPORT_HILASTAUTO	65535
@@ -379,6 +383,8 @@ __END_DECLS
 #define	IN_BADCLASS(i)		(((u_int32_t)(i) & 0xf0000000) == 0xf0000000)
 
 #define IN_LINKLOCAL(i)		(((u_int32_t)(i) & 0xffff0000) == 0xa9fe0000)
+#define IN_LOOPBACK(i)		(((u_int32_t)(i) & 0xff000000) == 0x7f000000)
+#define IN_ZERONET(i)		(((u_int32_t)(i) & 0xff000000) == 0)
 
 #define	IN_PRIVATE(i)	((((u_int32_t)(i) & 0xff000000) == 0x0a000000) || \
 			 (((u_int32_t)(i) & 0xfff00000) == 0xac100000) || \
@@ -735,6 +741,10 @@ void	 in_ifdetach(struct ifnet *);
 #define	__KAME_NETINET_IN_H_INCLUDED_
 #include <netinet6/in6.h>
 #undef __KAME_NETINET_IN_H_INCLUDED_
+#endif
+
+#ifdef _KERNEL
+#include <netinet/vinet.h>
 #endif
 
 #endif /* !_NETINET_IN_H_*/

@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netnatm/natm_proto.c,v 1.20 2007/01/08 22:30:39 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/netnatm/natm_proto.c,v 1.21 2008/07/04 00:21:38 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -105,7 +105,7 @@ natm_init(void)
 	natmintrq.ifq_maxlen = natmqmaxlen;
 	NATM_LOCK_INIT();
 	mtx_init(&natmintrq.ifq_mtx, "natm_inq", NULL, MTX_DEF);
-	netisr_register(NETISR_NATM, natmintr, &natmintrq, NETISR_MPSAFE);
+	netisr_register(NETISR_NATM, natmintr, &natmintrq, 0);
 }
 
 DOMAIN_SET(natm);

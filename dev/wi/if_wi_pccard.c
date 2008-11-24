@@ -39,9 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/wi/if_wi_pccard.c,v 1.60 2008/04/20 20:35:38 sam Exp $");
-
-#include "opt_wi.h"
+__FBSDID("$FreeBSD: src/sys/dev/wi/if_wi_pccard.c,v 1.63 2008/08/27 05:39:44 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -123,6 +121,7 @@ static const struct pccard_product wi_pccard_products[] = {
 	PCMCIA_CARD(DLINK, DWL650H),
 	PCMCIA_CARD(ELSA, XI300_IEEE),
 	PCMCIA_CARD(ELSA, XI325_IEEE),
+	PCMCIA_CARD(ELSA, APDL325_IEEE),
 	PCMCIA_CARD(ELSA, XI330_IEEE),
 	PCMCIA_CARD(ELSA, XI800_IEEE),
 	PCMCIA_CARD(ELSA, WIFI_FLASH),
@@ -147,6 +146,7 @@ static const struct pccard_product wi_pccard_products[] = {
 	PCMCIA_CARD(PROXIM, RANGELANDS_8430),
 	PCMCIA_CARD(SAMSUNG, SWL_2000N),
 	PCMCIA_CARD(SIEMENS, SS1021),
+	PCMCIA_CARD(SIEMENS, SS1021A),
 	PCMCIA_CARD(SIMPLETECH, SPECTRUM24_ALT),
 	PCMCIA_CARD(SOCKET, LP_WLAN_CF),
 	PCMCIA_CARD(TDK, LAK_CD011WL),

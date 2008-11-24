@@ -37,7 +37,7 @@
  *
  *	@(#)procfs_vfsops.c	8.7 (Berkeley) 5/10/95
  *
- * $FreeBSD: src/sys/fs/procfs/procfs.c,v 1.16 2007/03/12 12:16:52 des Exp $
+ * $FreeBSD: src/sys/fs/procfs/procfs.c,v 1.19 2008/11/04 19:04:01 jhb Exp $
  */
 
 #include <sys/param.h>
@@ -70,17 +70,13 @@ procfs_doprocfile(PFS_FILL_ARGS)
 	char *fullpath = "unknown";
 	char *freepath = NULL;
 	struct vnode *textvp;
-	int err;
 
+	PROC_LOCK(p);
 	textvp = p->p_textvp;
-	VI_LOCK(textvp);
-	vholdl(textvp);
-	err = vn_lock(textvp, LK_EXCLUSIVE | LK_INTERLOCK, td);
-	vdrop(textvp);
-	if (err)
-		return (err);
+	vhold(textvp);
+	PROC_UNLOCK(p);
 	vn_fullpath(td, textvp, &fullpath, &freepath);
-	VOP_UNLOCK(textvp, 0, td);
+	vdrop(textvp);
 	sbuf_printf(sb, "%s", fullpath);
 	if (freepath)
 		free(freepath, M_TEMP);

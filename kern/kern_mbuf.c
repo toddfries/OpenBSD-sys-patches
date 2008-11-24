@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_mbuf.c,v 1.34 2007/10/26 16:33:47 obrien Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_mbuf.c,v 1.41 2008/11/09 01:53:06 kmacy Exp $");
 
 #include "opt_mac.h"
 #include "opt_param.h"
@@ -104,10 +104,14 @@ struct mbstat mbstat;
 static void
 tunable_mbinit(void *dummy)
 {
+	TUNABLE_INT_FETCH("kern.ipc.nmbclusters", &nmbclusters);
 
 	/* This has to be done before VM init. */
-	nmbclusters = 1024 + maxusers * 64;
-	TUNABLE_INT_FETCH("kern.ipc.nmbclusters", &nmbclusters);
+	if (nmbclusters == 0)
+		nmbclusters = 1024 + maxusers * 64;
+	nmbjumbop = nmbclusters / 2;
+	nmbjumbo9 = nmbjumbop / 2;
+	nmbjumbo16 = nmbjumbo9 / 2;
 }
 SYSINIT(tunable_mbinit, SI_SUB_TUNABLES, SI_ORDER_ANY, tunable_mbinit, NULL);
 
@@ -132,12 +136,70 @@ sysctl_nmbclusters(SYSCTL_HANDLER_ARGS)
 SYSCTL_PROC(_kern_ipc, OID_AUTO, nmbclusters, CTLTYPE_INT|CTLFLAG_RW,
 &nmbclusters, 0, sysctl_nmbclusters, "IU",
     "Maximum number of mbuf clusters allowed");
-SYSCTL_INT(_kern_ipc, OID_AUTO, nmbjumbop, CTLFLAG_RW, &nmbjumbop, 0,
-    "Maximum number of mbuf page size jumbo clusters allowed");
-SYSCTL_INT(_kern_ipc, OID_AUTO, nmbjumbo9, CTLFLAG_RW, &nmbjumbo9, 0,
-    "Maximum number of mbuf 9k jumbo clusters allowed");
-SYSCTL_INT(_kern_ipc, OID_AUTO, nmbjumbo16, CTLFLAG_RW, &nmbjumbo16, 0,
+
+static int
+sysctl_nmbjumbop(SYSCTL_HANDLER_ARGS)
+{
+	int error, newnmbjumbop;
+
+	newnmbjumbop = nmbjumbop;
+	error = sysctl_handle_int(oidp, &newnmbjumbop, 0, req); 
+	if (error == 0 && req->newptr) {
+		if (newnmbjumbop> nmbjumbop) {
+			nmbjumbop = newnmbjumbop;
+			uma_zone_set_max(zone_jumbop, nmbjumbop);
+		} else
+			error = EINVAL;
+	}
+	return (error);
+}
+SYSCTL_PROC(_kern_ipc, OID_AUTO, nmbjumbop, CTLTYPE_INT|CTLFLAG_RW,
+&nmbjumbop, 0, sysctl_nmbjumbop, "IU",
+	 "Maximum number of mbuf page size jumbo clusters allowed");
+
+
+static int
+sysctl_nmbjumbo9(SYSCTL_HANDLER_ARGS)
+{
+	int error, newnmbjumbo9;
+
+	newnmbjumbo9 = nmbjumbo9;
+	error = sysctl_handle_int(oidp, &newnmbjumbo9, 0, req); 
+	if (error == 0 && req->newptr) {
+		if (newnmbjumbo9> nmbjumbo9) {
+			nmbjumbo9 = newnmbjumbo9;
+			uma_zone_set_max(zone_jumbo9, nmbjumbo9);
+		} else
+			error = EINVAL;
+	}
+	return (error);
+}
+SYSCTL_PROC(_kern_ipc, OID_AUTO, nmbjumbo9, CTLTYPE_INT|CTLFLAG_RW,
+&nmbjumbo9, 0, sysctl_nmbjumbo9, "IU",
+	"Maximum number of mbuf 9k jumbo clusters allowed"); 
+
+static int
+sysctl_nmbjumbo16(SYSCTL_HANDLER_ARGS)
+{
+	int error, newnmbjumbo16;
+
+	newnmbjumbo16 = nmbjumbo16;
+	error = sysctl_handle_int(oidp, &newnmbjumbo16, 0, req); 
+	if (error == 0 && req->newptr) {
+		if (newnmbjumbo16> nmbjumbo16) {
+			nmbjumbo16 = newnmbjumbo16;
+			uma_zone_set_max(zone_jumbo16, nmbjumbo16);
+		} else
+			error = EINVAL;
+	}
+	return (error);
+}
+SYSCTL_PROC(_kern_ipc, OID_AUTO, nmbjumbo16, CTLTYPE_INT|CTLFLAG_RW,
+&nmbjumbo16, 0, sysctl_nmbjumbo16, "IU",
     "Maximum number of mbuf 16k jumbo clusters allowed");
+
+
+
 SYSCTL_STRUCT(_kern_ipc, OID_AUTO, mbstat, CTLFLAG_RD, &mbstat, mbstat,
     "Mbuf general information and statistics");
 
@@ -166,6 +228,10 @@ static void	mb_zfini_pack(void *, int);
 
 static void	mb_reclaim(void *);
 static void	mbuf_init(void *);
+static void    *mbuf_jumbo_alloc(uma_zone_t, int, u_int8_t *, int);
+static void	mbuf_jumbo_free(void *, int, u_int8_t);
+
+static MALLOC_DEFINE(M_JUMBOFRAME, "jumboframes", "mbuf jumbo frame buffers");
 
 /* Ensure that MSIZE doesn't break dtom() - it must be a power of 2 */
 CTASSERT((((MSIZE - 1) ^ MSIZE) + 1) >> 1 == MSIZE);
@@ -173,7 +239,7 @@ CTASSERT((((MSIZE - 1) ^ MSIZE) + 1) >> 1 == MSIZE);
 /*
  * Initialize FreeBSD Network buffer allocation.
  */
-SYSINIT(mbuf, SI_SUB_MBUF, SI_ORDER_FIRST, mbuf_init, NULL)
+SYSINIT(mbuf, SI_SUB_MBUF, SI_ORDER_FIRST, mbuf_init, NULL);
 static void
 mbuf_init(void *dummy)
 {
@@ -226,6 +292,8 @@ mbuf_init(void *dummy)
 	    UMA_ALIGN_PTR, UMA_ZONE_REFCNT);
 	if (nmbjumbo9 > 0)
 		uma_zone_set_max(zone_jumbo9, nmbjumbo9);
+	uma_zone_set_allocf(zone_jumbo9, mbuf_jumbo_alloc);
+	uma_zone_set_freef(zone_jumbo9, mbuf_jumbo_free);
 
 	zone_jumbo16 = uma_zcreate(MBUF_JUMBO16_MEM_NAME, MJUM16BYTES,
 	    mb_ctor_clust, mb_dtor_clust,
@@ -237,6 +305,8 @@ mbuf_init(void *dummy)
 	    UMA_ALIGN_PTR, UMA_ZONE_REFCNT);
 	if (nmbjumbo16 > 0)
 		uma_zone_set_max(zone_jumbo16, nmbjumbo16);
+	uma_zone_set_allocf(zone_jumbo16, mbuf_jumbo_alloc);
+	uma_zone_set_freef(zone_jumbo16, mbuf_jumbo_free);
 
 	zone_ext_refcnt = uma_zcreate(MBUF_EXTREFCNT_MEM_NAME, sizeof(u_int),
 	    NULL, NULL,
@@ -271,6 +341,32 @@ mbuf_init(void *dummy)
 	mbstat.m_mcfail = mbstat.m_mpfail = 0;
 	mbstat.sf_iocnt = 0;
 	mbstat.sf_allocwait = mbstat.sf_allocfail = 0;
+}
+
+/*
+ * UMA backend page allocator for the jumbo frame zones.
+ *
+ * Allocates kernel virtual memory that is backed by contiguous physical
+ * pages.
+ */
+static void *
+mbuf_jumbo_alloc(uma_zone_t zone, int bytes, u_int8_t *flags, int wait)
+{
+
+	/* Inform UMA that this allocator uses kernel_map/object. */
+	*flags = UMA_SLAB_KERNEL;
+	return (contigmalloc(bytes, M_JUMBOFRAME, wait, (vm_paddr_t)0,
+	    ~(vm_paddr_t)0, 1, 0));
+}
+
+/*
+ * UMA backend page deallocator for the jumbo frame zones.
+ */
+static void
+mbuf_jumbo_free(void *mem, int size, u_int8_t flags)
+{
+
+	contigfree(mem, size, M_JUMBOFRAME);
 }
 
 /*
@@ -314,8 +410,8 @@ mb_ctor_mbuf(void *mem, int size, void *arg, int how)
 	if (flags & M_PKTHDR) {
 		m->m_data = m->m_pktdat;
 		m->m_pkthdr.rcvif = NULL;
-		m->m_pkthdr.len = 0;
 		m->m_pkthdr.header = NULL;
+		m->m_pkthdr.len = 0;
 		m->m_pkthdr.csum_flags = 0;
 		m->m_pkthdr.csum_data = 0;
 		m->m_pkthdr.tso_segsz = 0;
@@ -369,7 +465,8 @@ mb_dtor_pack(void *mem, int size, void *arg)
 	KASSERT((m->m_flags & M_EXT) == M_EXT, ("%s: M_EXT not set", __func__));
 	KASSERT(m->m_ext.ext_buf != NULL, ("%s: ext_buf == NULL", __func__));
 	KASSERT(m->m_ext.ext_free == NULL, ("%s: ext_free != NULL", __func__));
-	KASSERT(m->m_ext.ext_args == NULL, ("%s: ext_args != NULL", __func__));
+	KASSERT(m->m_ext.ext_arg1 == NULL, ("%s: ext_arg1 != NULL", __func__));
+	KASSERT(m->m_ext.ext_arg2 == NULL, ("%s: ext_arg2 != NULL", __func__));
 	KASSERT(m->m_ext.ext_size == MCLBYTES, ("%s: ext_size != MCLBYTES", __func__));
 	KASSERT(m->m_ext.ext_type == EXT_PACKET, ("%s: ext_type != EXT_PACKET", __func__));
 	KASSERT(*m->m_ext.ref_cnt == 1, ("%s: ref_cnt != 1", __func__));
@@ -439,7 +536,8 @@ mb_ctor_clust(void *mem, int size, void *arg, int how)
 		m->m_data = m->m_ext.ext_buf;
 		m->m_flags |= M_EXT;
 		m->m_ext.ext_free = NULL;
-		m->m_ext.ext_args = NULL;
+		m->m_ext.ext_arg1 = NULL;
+		m->m_ext.ext_arg2 = NULL;
 		m->m_ext.ext_size = size;
 		m->m_ext.ext_type = type;
 		m->m_ext.ref_cnt = refcnt;

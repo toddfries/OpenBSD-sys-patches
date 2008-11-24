@@ -28,7 +28,7 @@
 
 #include "mixer_if.h"
 
-SND_DECLARE_FILE("$FreeBSD: src/sys/dev/sound/pcm/mixer.c,v 1.61 2007/06/16 03:37:28 ariff Exp $");
+SND_DECLARE_FILE("$FreeBSD: src/sys/dev/sound/pcm/mixer.c,v 1.63 2008/11/04 02:31:03 alfred Exp $");
 
 MALLOC_DEFINE(M_MIXER, "mixer", "mixer");
 
@@ -589,7 +589,7 @@ mixer_delete(struct snd_mixer *m)
 	KASSERT(m->type == MIXER_TYPE_SECONDARY,
 	    ("%s(): illegal mixer type=%d", __func__, m->type));
 
-	snd_mtxlock(m->lock);
+	/* mixer uninit can sleep --hps */
 
 	MIXER_UNINIT(m);
 
@@ -644,7 +644,7 @@ mixer_init(device_t dev, kobj_class_t cls, void *devinfo)
 
 	unit = device_get_unit(dev);
 	devunit = snd_mkunit(unit, SND_DEV_CTL, 0);
-	pdev = make_dev(&mixer_cdevsw, unit2minor(devunit),
+	pdev = make_dev(&mixer_cdevsw, devunit,
 		 UID_ROOT, GID_WHEEL, 0666, "mixer%d", unit);
 	pdev->si_drv1 = m;
 	snddev = device_get_softc(dev);
@@ -704,13 +704,23 @@ mixer_uninit(device_t dev)
 		return EBUSY;
 	}
 
+	/* destroy dev can sleep --hps */
+
+	snd_mtxunlock(m->lock);
+
 	pdev->si_drv1 = NULL;
 	destroy_dev(pdev);
+
+	snd_mtxlock(m->lock);
 
 	for (i = 0; i < SOUND_MIXER_NRDEVICES; i++)
 		mixer_set(m, i, 0);
 
 	mixer_setrecsrc(m, SOUND_MASK_MIC);
+
+	snd_mtxunlock(m->lock);
+
+	/* mixer uninit can sleep --hps */
 
 	MIXER_UNINIT(m);
 
@@ -1279,4 +1289,17 @@ mixer_oss_mixerinfo(struct cdev *i_dev, oss_mixerinfo *mi)
 	}
 
 	return (EINVAL);
+}
+
+/*
+ * Allow the sound driver to use the mixer lock to protect its mixer
+ * data:
+ */
+struct mtx *
+mixer_get_lock(struct snd_mixer *m)
+{
+	if (m->lock == NULL) {
+		return (&Giant);
+	}
+	return (m->lock);
 }

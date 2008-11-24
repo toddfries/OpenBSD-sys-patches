@@ -6,7 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $FreeBSD: src/sys/i386/include/smp.h,v 1.90 2007/09/20 20:38:43 attilio Exp $
+ * $FreeBSD: src/sys/i386/include/smp.h,v 1.97 2008/10/24 07:58:38 kmacy Exp $
  *
  */
 
@@ -45,6 +45,10 @@ extern u_long *ipi_rendezvous_counts[MAXCPU];
 extern u_long *ipi_lazypmap_counts[MAXCPU];
 #endif
 
+/* global data in identcpu.c */
+extern int			cpu_cores;
+extern int			cpu_logical;
+
 /* IPI handlers */
 inthand_t
 	IDTVEC(invltlb),	/* TLB shootdowns - global */
@@ -61,13 +65,12 @@ void	cpu_add(u_int apic_id, char boot_cpu);
 void	cpustop_handler(void);
 void	init_secondary(void);
 void	ipi_selected(u_int cpus, u_int ipi);
-void	ipi_all(u_int ipi);
 void	ipi_all_but_self(u_int ipi);
-void	ipi_self(u_int ipi);
+#ifndef XEN
 void 	ipi_bitmap_handler(struct trapframe frame);
+#endif
 u_int	mp_bootaddress(u_int);
 int	mp_grab_cpu_hlt(void);
-void	mp_topology(void);
 void	smp_cache_flush(void);
 void	smp_invlpg(vm_offset_t addr);
 void	smp_masked_invlpg(u_int mask, vm_offset_t addr);
@@ -80,7 +83,14 @@ void	smp_masked_invltlb(u_int mask);
 #ifdef STOP_NMI
 int	ipi_nmi_handler(void);
 #endif
+#ifdef XEN
+void ipi_to_irq_init(void);
 
+#define RESCHEDULE_VECTOR	0
+#define CALL_FUNCTION_VECTOR	1
+#define NR_IPIS			2
+
+#endif
 #endif /* !LOCORE */
 #endif /* SMP */
 

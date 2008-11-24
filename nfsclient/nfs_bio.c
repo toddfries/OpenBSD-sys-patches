@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_bio.c,v 1.165 2007/09/25 21:08:48 mohans Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_bio.c,v 1.168 2008/10/10 21:23:50 attilio Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -390,7 +390,7 @@ nfs_bioread_check_cons(struct vnode *vp, struct thread *td, struct ucred *cred)
 	 * XXX - We can make this cheaper later (by acquiring cheaper locks).
 	 * But for now, this suffices.
 	 */
-	old_lock = nfs_upgrade_vnlock(vp, td);
+	old_lock = nfs_upgrade_vnlock(vp);
 	mtx_lock(&np->n_mtx);
 	if (np->n_flag & NMODIFIED) {
 		mtx_unlock(&np->n_mtx);
@@ -403,7 +403,7 @@ nfs_bioread_check_cons(struct vnode *vp, struct thread *td, struct ucred *cred)
 				goto out;
 		}
 		np->n_attrstamp = 0;
-		error = VOP_GETATTR(vp, &vattr, cred, td);
+		error = VOP_GETATTR(vp, &vattr, cred);
 		if (error)
 			goto out;
 		mtx_lock(&np->n_mtx);
@@ -411,7 +411,7 @@ nfs_bioread_check_cons(struct vnode *vp, struct thread *td, struct ucred *cred)
 		mtx_unlock(&np->n_mtx);
 	} else {
 		mtx_unlock(&np->n_mtx);
-		error = VOP_GETATTR(vp, &vattr, cred, td);
+		error = VOP_GETATTR(vp, &vattr, cred);
 		if (error)
 			return (error);
 		mtx_lock(&np->n_mtx);
@@ -430,7 +430,7 @@ nfs_bioread_check_cons(struct vnode *vp, struct thread *td, struct ucred *cred)
 		mtx_unlock(&np->n_mtx);
 	}
 out:	
-	nfs_downgrade_vnlock(vp, td, old_lock);
+	nfs_downgrade_vnlock(vp, old_lock);
 	return error;
 }
 
@@ -928,7 +928,7 @@ flush_and_restart:
 	 */
 	if (ioflag & IO_APPEND) {
 		np->n_attrstamp = 0;
-		error = VOP_GETATTR(vp, &vattr, cred, td);
+		error = VOP_GETATTR(vp, &vattr, cred);
 		if (error)
 			return (error);
 		mtx_lock(&np->n_mtx);
@@ -1306,7 +1306,7 @@ nfs_vinvalbuf(struct vnode *vp, int flags, struct thread *td, int intrflg)
 		slptimeo = 0;
 	}
 
-	old_lock = nfs_upgrade_vnlock(vp, td);
+	old_lock = nfs_upgrade_vnlock(vp);
 	/*
 	 * Now, flush as required.
 	 */
@@ -1323,18 +1323,18 @@ nfs_vinvalbuf(struct vnode *vp, int flags, struct thread *td, int intrflg)
 			goto out;
 	}
 
-	error = vinvalbuf(vp, flags, td, slpflag, 0);
+	error = vinvalbuf(vp, flags, slpflag, 0);
 	while (error) {
 		if (intrflg && (error = nfs_sigintr(nmp, NULL, td)))
 			goto out;
-		error = vinvalbuf(vp, flags, td, 0, slptimeo);
+		error = vinvalbuf(vp, flags, 0, slptimeo);
 	}
 	mtx_lock(&np->n_mtx);
 	if (np->n_directio_asyncwr == 0)
 		np->n_flag &= ~NMODIFIED;
 	mtx_unlock(&np->n_mtx);
 out:
-	nfs_downgrade_vnlock(vp, td, old_lock);
+	nfs_downgrade_vnlock(vp, old_lock);
 	return error;
 }
 

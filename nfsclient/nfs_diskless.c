@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_diskless.c,v 1.17 2006/12/06 02:15:25 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_diskless.c,v 1.22 2008/10/02 15:37:58 zec Exp $");
 
 #include "opt_bootp.h"
 
@@ -42,8 +42,9 @@ __FBSDID("$FreeBSD: src/sys/nfsclient/nfs_diskless.c,v 1.17 2006/12/06 02:15:25 
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
-
 #include <sys/socket.h>
+#include <sys/vimage.h>
+
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
@@ -148,6 +149,7 @@ nfs_parse_options(const char *envopts, struct nfs_args *nd)
 void
 nfs_setup_diskless(void)
 {
+	INIT_VNET_NET(curvnet);
 	struct nfs_diskless *nd = &nfs_diskless;
 	struct ifnet *ifp;
 	struct ifaddr *ifa;
@@ -176,7 +178,7 @@ nfs_setup_diskless(void)
 	}
 	ifa = NULL;
 	IFNET_RLOCK();
-	TAILQ_FOREACH(ifp, &ifnet, if_link) {
+	TAILQ_FOREACH(ifp, &V_ifnet, if_link) {
 		TAILQ_FOREACH(ifa, &ifp->if_addrhead, ifa_link) {
 			if (ifa->ifa_addr->sa_family == AF_LINK) {
 				sdl = (struct sockaddr_dl *)ifa->ifa_addr;
@@ -204,8 +206,8 @@ match_done:
 	/* set up root mount */
 	nd->root_args.rsize = 8192;		/* XXX tunable? */
 	nd->root_args.wsize = 8192;
-	nd->root_args.sotype = SOCK_DGRAM;
-	nd->root_args.flags = (NFSMNT_WSIZE | NFSMNT_RSIZE | NFSMNT_RESVPORT);
+	nd->root_args.sotype = SOCK_STREAM;
+	nd->root_args.flags = (NFSMNT_NFSV3 | NFSMNT_WSIZE | NFSMNT_RSIZE | NFSMNT_RESVPORT);
 	if (inaddr_to_sockaddr("boot.nfsroot.server", &nd->root_saddr)) {
 		printf("nfs_diskless: no server\n");
 		return;
@@ -332,6 +334,6 @@ nfs_rootconf(void)
 		rootdevnames[0] = "nfs:";
 }
 
-SYSINIT(cpu_rootconf, SI_SUB_ROOT_CONF, SI_ORDER_FIRST, nfs_rootconf, NULL)
+SYSINIT(cpu_rootconf, SI_SUB_ROOT_CONF, SI_ORDER_FIRST, nfs_rootconf, NULL);
 #endif
 

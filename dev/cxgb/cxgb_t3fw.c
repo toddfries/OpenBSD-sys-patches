@@ -2,7 +2,7 @@
  * from: FreeBSD: src/sys/tools/fw_stub.awk,v 1.6 2007/03/02 11:42:53 flz
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/cxgb_t3fw.c,v 1.2 2008/02/26 23:05:05 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/cxgb_t3fw.c,v 1.3 2008/09/23 03:16:54 kmacy Exp $");
 #include <sys/param.h>
 #include <sys/errno.h>
 #include <sys/kernel.h>
@@ -10,9 +10,9 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/cxgb_t3fw.c,v 1.2 2008/02/26 23:05:05 kmacy
 #include <sys/linker.h>
 #include <sys/firmware.h>
 #include <sys/systm.h>
-#include <dev/cxgb/cxgb_t3fw.h>
-#include <dev/cxgb/t3b_protocol_sram.h>
-#include <dev/cxgb/t3b_tp_eeprom.h>
+#include <cxgb_t3fw.h>
+#include <t3b_protocol_sram.h>
+#include <t3b_tp_eeprom.h>
 
 static int
 cxgb_t3fw_modevent(module_t mod, int type, void *unused)

@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia64/efi.c,v 1.5 2004/09/19 03:50:46 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia64/efi.c,v 1.6 2008/09/23 14:45:10 obrien Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -106,7 +106,7 @@ efi_get_table(struct uuid *uuid)
 	count = efi_systbl->st_entries;
 	ct = efi_cfgtbl;
 	while (count--) {
-		if (!memcmp(&ct->ct_uuid, uuid, sizeof(*uuid)))
+		if (!bcmp(&ct->ct_uuid, uuid, sizeof(*uuid)))
 			return ((void *)IA64_PHYS_TO_RR7(ct->ct_data));
 		ct++;
 	}

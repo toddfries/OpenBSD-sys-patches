@@ -3,7 +3,7 @@
 #
 # modified for PC-9801/PC-9821
 #
-# $FreeBSD: src/sys/conf/files.pc98,v 1.357 2007/10/26 13:32:01 nyan Exp $
+# $FreeBSD: src/sys/conf/files.pc98,v 1.368 2008/11/09 17:37:54 jkoshy Exp $
 #
 # The long compile-with and dependency lines are required because of
 # limitations in config: backslash-newline doesn't work in strings, and
@@ -38,11 +38,6 @@ ukbdmap.h			optional	ukbd_dflt_keymap	\
 	no-obj no-implicit-rule before-depend				\
 	clean		"ukbdmap.h"
 #
-trlld.o				optional	oltr			\
-	dependency	"$S/contrib/dev/oltr/i386-elf.trlld.o.uu"	\
-	compile-with	"uudecode < $S/contrib/dev/oltr/i386-elf.trlld.o.uu"	\
-	no-implicit-rule
-#
 hal.o				optional	ath_hal			\
 	dependency	"$S/contrib/dev/ath/public/i386-elf.hal.o.uu"	\
 	compile-with	"uudecode < $S/contrib/dev/ath/public/i386-elf.hal.o.uu" \
@@ -70,7 +65,6 @@ compat/linux/linux_sysctl.c	optional compat_linux
 compat/linux/linux_time.c	optional compat_linux
 compat/linux/linux_uid16.c	optional compat_linux
 compat/linux/linux_util.c	optional compat_linux
-compat/pecoff/imgact_pecoff.c	optional pecoff_support
 compat/svr4/imgact_svr4.c	optional compat_svr4
 compat/svr4/svr4_fcntl.c	optional compat_svr4
 compat/svr4/svr4_filio.c	optional compat_svr4
@@ -88,16 +82,18 @@ compat/svr4/svr4_sysent.c	optional compat_svr4
 compat/svr4/svr4_sysvec.c	optional compat_svr4
 compat/svr4/svr4_termios.c	optional compat_svr4
 compat/svr4/svr4_ttold.c	optional compat_svr4
-contrib/dev/oltr/if_oltr.c	optional oltr
-contrib/dev/oltr/if_oltr_pci.c	optional oltr pci
-contrib/dev/oltr/trlldbm.c	optional oltr
-contrib/dev/oltr/trlldhm.c	optional oltr
-contrib/dev/oltr/trlldmac.c	optional oltr
 bf_enc.o			optional crypto | ipsec	\
 	dependency	"$S/crypto/blowfish/arch/i386/bf_enc.S $S/crypto/blowfish/arch/i386/bf_enc_586.S $S/crypto/blowfish/arch/i386/bf_enc_686.S" \
 	compile-with	"${CC} -c -I$S/crypto/blowfish/arch/i386 ${ASM_CFLAGS} ${WERROR} ${.IMPSRC}" \
 	no-implicit-rule
 crypto/des/arch/i386/des_enc.S	optional crypto | ipsec | netsmb
+dev/agp/agp_ali.c			optional agp
+dev/agp/agp_amd.c			optional agp
+dev/agp/agp_i810.c			optional agp
+dev/agp/agp_intel.c			optional agp
+dev/agp/agp_nvidia.c		optional agp
+dev/agp/agp_sis.c			optional agp
+dev/agp/agp_via.c			optional agp
 dev/aic/aic_cbus.c		optional aic isa
 dev/ar/if_ar.c			optional ar
 dev/ar/if_ar_pci.c		optional ar pci
@@ -114,9 +110,11 @@ dev/ed/if_ed_wd80x3.c		optional ed isa
 dev/fb/fb.c			optional fb | gdc
 dev/fe/if_fe_cbus.c		optional fe isa
 dev/hwpmc/hwpmc_amd.c		optional hwpmc
+dev/hwpmc/hwpmc_intel.c		optional hwpmc
 dev/hwpmc/hwpmc_pentium.c	optional hwpmc
 dev/hwpmc/hwpmc_piv.c		optional hwpmc
 dev/hwpmc/hwpmc_ppro.c		optional hwpmc
+dev/hwpmc/hwpmc_tsc.c		optional hwpmc
 dev/hwpmc/hwpmc_x86.c		optional hwpmc
 dev/io/iodev.c			optional io
 dev/kbd/kbd.c			optional pckbd | sc | ukbd
@@ -177,6 +175,7 @@ i386/i386/nexus.c		standard
 i386/i386/perfmon.c		optional perfmon
 i386/i386/pmap.c		standard
 i386/i386/ptrace_machdep.c	standard
+i386/i386/stack_machdep.c	optional ddb | stack
 i386/i386/support.s		standard
 i386/i386/swtch.s		standard
 i386/i386/sys_machdep.c		standard
@@ -229,83 +228,6 @@ i386/svr4/svr4_locore.s		optional compat_svr4	\
 	warning "COMPAT_SVR4 is broken and should be avoided"
 i386/svr4/svr4_machdep.c	optional compat_svr4
 #
-# isdn4bsd, needed for isic | iwic | ifpi | ifpi2 | ihfc | ifpnp | itjc
-#
-i4b/layer1/i4b_hdlc.c		optional ihfc | itjc
-i4b/layer1/i4b_l1dmux.c		optional ifpi | ifpi2 | ifpnp | \
-					 ihfc | isic | itjc | iwic
-i4b/layer1/i4b_l1lib.c		optional ifpi | ifpi2 | ifpnp | \
-					 ihfc | isic | itjc | iwic
-#
-# isdn4bsd, isic
-#
-i4b/layer1/isic/i4b_asuscom_ipac.c optional isic
-i4b/layer1/isic/i4b_avm_a1.c	optional isic
-i4b/layer1/isic/i4b_bchan.c	optional isic
-i4b/layer1/isic/i4b_ctx_s0P.c	optional isic
-i4b/layer1/isic/i4b_drn_ngo.c	optional isic
-i4b/layer1/isic/i4b_dynalink.c	optional isic
-i4b/layer1/isic/i4b_elsa_qs1i.c	optional isic
-i4b/layer1/isic/i4b_elsa_qs1p.c	optional isic pci
-i4b/layer1/isic/i4b_elsa_pcc16.c optional isic
-i4b/layer1/isic/i4b_hscx.c	optional isic
-i4b/layer1/isic/i4b_isac.c	optional isic
-i4b/layer1/isic/i4b_isic.c	optional isic
-i4b/layer1/isic/i4b_isic_isa.c	optional isic
-i4b/layer1/isic/i4b_isic_pnp.c	optional isic
-i4b/layer1/isic/i4b_itk_ix1.c	optional isic
-i4b/layer1/isic/i4b_l1.c	optional isic
-i4b/layer1/isic/i4b_l1fsm.c	optional isic
-i4b/layer1/isic/i4b_siemens_isurf.c optional isic
-i4b/layer1/isic/i4b_sws.c	optional isic
-i4b/layer1/isic/i4b_tel_s016.c	optional isic
-i4b/layer1/isic/i4b_tel_s0163.c	optional isic
-i4b/layer1/isic/i4b_tel_s08.c	optional isic
-i4b/layer1/isic/i4b_usr_sti.c	optional isic
-i4b/layer1/isic/i4b_diva.c	optional isic
-#
-# isdn4bsd, iwic
-#
-i4b/layer1/iwic/i4b_iwic_pci.c	optional iwic pci
-i4b/layer1/iwic/i4b_iwic_dchan.c optional iwic pci
-i4b/layer1/iwic/i4b_iwic_bchan.c optional iwic pci
-i4b/layer1/iwic/i4b_iwic_fsm.c	optional iwic pci
-i4b/layer1/iwic/i4b_iwic_l1if.c	optional iwic pci
-#
-# isdn4bsd, ifpi
-#
-i4b/layer1/ifpi/i4b_ifpi_pci.c	optional ifpi pci
-i4b/layer1/ifpi/i4b_ifpi_isac.c	optional ifpi pci
-i4b/layer1/ifpi/i4b_ifpi_l1.c	optional ifpi pci
-i4b/layer1/ifpi/i4b_ifpi_l1fsm.c optional ifpi pci
-#
-# isdn4bsd, ifpi2
-#
-i4b/layer1/ifpi2/i4b_ifpi2_pci.c optional ifpi2 pci
-i4b/layer1/ifpi2/i4b_ifpi2_isacsx.c optional ifpi2 pci
-i4b/layer1/ifpi2/i4b_ifpi2_l1.c	optional ifpi2 pci
-i4b/layer1/ifpi2/i4b_ifpi2_l1fsm.c optional ifpi2 pci
-#
-# isdn4bsd, ifpnp
-#
-i4b/layer1/ifpnp/i4b_ifpnp_avm.c optional ifpnp
-i4b/layer1/ifpnp/i4b_ifpnp_isac.c optional ifpnp
-i4b/layer1/ifpnp/i4b_ifpnp_l1.c	 optional ifpnp
-i4b/layer1/ifpnp/i4b_ifpnp_l1fsm.c optional ifpnp
-#
-# isdn4bsd, ihfc
-#
-i4b/layer1/ihfc/i4b_ihfc_l1if.c	optional ihfc
-i4b/layer1/ihfc/i4b_ihfc_pnp.c	optional ihfc
-i4b/layer1/ihfc/i4b_ihfc_drv.c	optional ihfc
-#
-# isdn4bsd, itjc
-#
-i4b/layer1/itjc/i4b_itjc_pci.c	optional itjc
-i4b/layer1/itjc/i4b_itjc_isac.c	optional itjc
-i4b/layer1/itjc/i4b_itjc_l1.c	optional itjc
-i4b/layer1/itjc/i4b_itjc_l1fsm.c optional itjc
-#
 kern/imgact_aout.c		optional compat_aout
 kern/imgact_gzip.c		optional gzip
 libkern/divdi3.c		standard
@@ -326,6 +248,7 @@ pc98/cbus/gdc.c			optional gdc
 pc98/cbus/nmi.c			standard
 pc98/cbus/olpt.c		optional olpt
 pc98/cbus/pckbd.c		optional pckbd
+pc98/cbus/pcrtc.c		standard
 pc98/cbus/pmc.c			optional pmc
 pc98/cbus/scgdcrndr.c		optional sc gdc
 pc98/cbus/scterm-sck.c		optional sc
@@ -340,10 +263,3 @@ pc98/pc98/canbus.c		optional canbus
 pc98/pc98/canbus_if.m		optional canbus
 pc98/pc98/machdep.c		standard
 pc98/pc98/pc98_machdep.c	standard
-pci/agp_ali.c			optional agp
-pci/agp_amd.c			optional agp
-pci/agp_i810.c			optional agp
-pci/agp_intel.c			optional agp
-pci/agp_nvidia.c		optional agp
-pci/agp_sis.c			optional agp
-pci/agp_via.c			optional agp

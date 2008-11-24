@@ -1,6 +1,3 @@
-/*	$FreeBSD: src/sys/netinet6/in6.c,v 1.73 2007/07/05 16:29:39 delphij Exp $	*/
-/*	$KAME: in6.c,v 1.259 2002/01/21 11:37:50 keiichi Exp $	*/
-
 /*-
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
  * All rights reserved.
@@ -28,6 +25,8 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
+ *
+ *	$KAME: in6.c,v 1.259 2002/01/21 11:37:50 keiichi Exp $
  */
 
 /*-
@@ -61,6 +60,9 @@
  *	@(#)in.c	8.2 (Berkeley) 11/15/93
  */
 
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/netinet6/in6.c,v 1.85 2008/10/23 15:53:51 des Exp $");
+
 #include "opt_inet.h"
 #include "opt_inet6.h"
 
@@ -76,6 +78,7 @@
 #include <sys/time.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -125,7 +128,7 @@ static int in6_lifaddr_ioctl __P((struct socket *, u_long, caddr_t,
 	struct ifnet *, struct thread *));
 static int in6_ifinit __P((struct ifnet *, struct in6_ifaddr *,
 	struct sockaddr_in6 *, int));
-static void in6_unlink_ifa __P((struct in6_ifaddr *, struct ifnet *));
+static void in6_unlink_ifa(struct in6_ifaddr *, struct ifnet *);
 
 struct in6_multihead in6_multihead;	/* XXX BSS initialization */
 int	(*faithprefix_p)(struct in6_addr *);
@@ -228,6 +231,7 @@ in6_ifaddloop(struct ifaddr *ifa)
 void
 in6_ifremloop(struct ifaddr *ifa)
 {
+	INIT_VNET_INET6(curvnet);
 	struct in6_ifaddr *ia;
 	struct rtentry *rt;
 	int ia_count = 0;
@@ -247,7 +251,7 @@ in6_ifremloop(struct ifaddr *ifa)
 	 * (probably p2p) interfaces.
 	 * XXX: we should avoid such a configuration in IPv6...
 	 */
-	for (ia = in6_ifaddr; ia; ia = ia->ia_next) {
+	for (ia = V_in6_ifaddr; ia; ia = ia->ia_next) {
 		if (IN6_ARE_ADDR_EQUAL(IFA_IN6(ifa), &ia->ia_addr.sin6_addr)) {
 			ia_count++;
 			if (ia_count > 1)
@@ -319,6 +323,7 @@ int
 in6_control(struct socket *so, u_long cmd, caddr_t data,
     struct ifnet *ifp, struct thread *td)
 {
+	INIT_VNET_INET6(curvnet);
 	struct	in6_ifreq *ifr = (struct in6_ifreq *)data;
 	struct	in6_ifaddr *ia = NULL;
 	struct	in6_aliasreq *ifra = (struct in6_aliasreq *)data;
@@ -399,13 +404,16 @@ in6_control(struct socket *so, u_long cmd, caddr_t data,
 
 	switch (cmd) {
 	case SIOCALIFADDR:
-	case SIOCDLIFADDR:
-		/*
-		 * XXXRW: Is this checked at another layer?  What priv to use
-		 * here?
-		 */
 		if (td != NULL) {
-			error = suser(td);
+			error = priv_check(td, PRIV_NET_ADDIFADDR);
+			if (error)
+				return (error);
+		}
+		return in6_lifaddr_ioctl(so, cmd, data, ifp, td);
+
+	case SIOCDLIFADDR:
+		if (td != NULL) {
+			error = priv_check(td, PRIV_NET_DELIFADDR);
 			if (error)
 				return (error);
 		}
@@ -498,12 +506,9 @@ in6_control(struct socket *so, u_long cmd, caddr_t data,
 		    ifra->ifra_addr.sin6_len != sizeof(struct sockaddr_in6))
 			return (EAFNOSUPPORT);
 
-		/*
-		 * XXXRW: Is this checked at another layer?  What priv to use
-		 * here?
-		 */
 		if (td != NULL) {
-			error = suser(td);
+			error = priv_check(td, (cmd == SIOCDIFADDR_IN6) ? 
+			    PRIV_NET_DELIFADDR : PRIV_NET_ADDIFADDR);
 			if (error)
 				return (error);
 		}
@@ -731,7 +736,7 @@ in6_control(struct socket *so, u_long cmd, caddr_t data,
 			 * (when required).
 			 */
 			if ((ia->ia6_flags & IN6_IFF_AUTOCONF) &&
-			    ip6_use_tempaddr && pr->ndpr_refcnt == 1) {
+			    V_ip6_use_tempaddr && pr->ndpr_refcnt == 1) {
 				int e;
 				if ((e = in6_tmpifadd(ia, 1, 0)) != 0) {
 					log(LOG_NOTICE, "in6_control: failed "
@@ -792,6 +797,8 @@ int
 in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
     struct in6_ifaddr *ia, int flags)
 {
+	INIT_VNET_INET6(ifp->if_vnet);
+	INIT_VPROCG(TD_TO_VPROCG(curthread)); /* XXX V_hostname needs this */
 	int error = 0, hostIsNew = 0, plen = -1;
 	struct in6_ifaddr *oia;
 	struct sockaddr_in6 dst6;
@@ -937,12 +944,12 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 		ia->ia_ifa.ifa_netmask = (struct sockaddr *)&ia->ia_prefixmask;
 
 		ia->ia_ifp = ifp;
-		if ((oia = in6_ifaddr) != NULL) {
+		if ((oia = V_in6_ifaddr) != NULL) {
 			for ( ; oia->ia_next; oia = oia->ia_next)
 				continue;
 			oia->ia_next = ia;
 		} else
-			in6_ifaddr = ia;
+			V_in6_ifaddr = ia;
 
 		ia->ia_ifa.ifa_refcnt = 1;
 		TAILQ_INSERT_TAIL(&ifp->if_addrlist, &ia->ia_ifa, ifa_list);
@@ -1113,32 +1120,6 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 		 */
 		rt = rtalloc1((struct sockaddr *)&mltaddr, 0, 0UL);
 		if (rt) {
-			if (memcmp(&mltaddr.sin6_addr,
-			    &((struct sockaddr_in6 *)rt_key(rt))->sin6_addr,
-			    MLTMASK_LEN)) {
-				RTFREE_LOCKED(rt);
-				rt = NULL;
-			}
-		}
-		if (!rt) {
-			/* XXX: we need RTF_CLONING to fake nd6_rtrequest */
-			error = rtrequest(RTM_ADD, (struct sockaddr *)&mltaddr,
-			    (struct sockaddr *)&ia->ia_addr,
-			    (struct sockaddr *)&mltmask, RTF_UP | RTF_CLONING,
-			    (struct rtentry **)0);
-			if (error)
-				goto cleanup;
-		} else
-			RTFREE_LOCKED(rt);
-
-		/*
-		 * XXX: do we really need this automatic routes?
-		 * We should probably reconsider this stuff.  Most applications
-		 * actually do not need the routes, since they usually specify
-		 * the outgoing interface.
-		 */
-		rt = rtalloc1((struct sockaddr *)&mltaddr, 0, 0UL);
-		if (rt) {
 			/* XXX: only works in !SCOPEDROUTING case. */
 			if (memcmp(&mltaddr.sin6_addr,
 			    &((struct sockaddr_in6 *)rt_key(rt))->sin6_addr,
@@ -1148,6 +1129,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 			}
 		}
 		if (!rt) {
+			/* XXX: we need RTF_CLONING to fake nd6_rtrequest */
 			error = rtrequest(RTM_ADD, (struct sockaddr *)&mltaddr,
 			    (struct sockaddr *)&ia->ia_addr,
 			    (struct sockaddr *)&mltmask, RTF_UP | RTF_CLONING,
@@ -1172,7 +1154,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 		/*
 		 * join node information group address
 		 */
-#define hostnamelen	strlen(hostname)
+#define hostnamelen	strlen(V_hostname)
 		delay = 0;
 		if ((flags & IN6_IFAUPDATE_DADDELAY)) {
 			/*
@@ -1182,8 +1164,10 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 			delay = arc4random() %
 			    (MAX_RTR_SOLICITATION_DELAY * hz);
 		}
-		if (in6_nigroup(ifp, hostname, hostnamelen, &mltaddr.sin6_addr)
-		    == 0) {
+		mtx_lock(&hostname_mtx);
+		if (in6_nigroup(ifp, V_hostname, hostnamelen,
+		    &mltaddr.sin6_addr) == 0) {
+			mtx_unlock(&hostname_mtx);
 			imm = in6_joingroup(ifp, &mltaddr.sin6_addr, &error,
 			    delay); /* XXX jinmei */
 			if (!imm) {
@@ -1197,7 +1181,8 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 				LIST_INSERT_HEAD(&ia->ia6_memberships,
 				    imm, i6mm_chain);
 			}
-		}
+		} else
+			mtx_unlock(&hostname_mtx);
 #undef hostnamelen
 
 		/*
@@ -1227,27 +1212,6 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 				goto cleanup;
 		} else
 			RTFREE_LOCKED(rt);
-
-		/* XXX: again, do we really need the route? */
-		rt = rtalloc1((struct sockaddr *)&mltaddr, 0, 0UL);
-		if (rt) {
-			if (memcmp(&mltaddr.sin6_addr,
-			    &((struct sockaddr_in6 *)rt_key(rt))->sin6_addr,
-			    MLTMASK_LEN)) {
-				RTFREE_LOCKED(rt);
-				rt = NULL;
-			}
-		}
-		if (!rt) {
-			error = rtrequest(RTM_ADD, (struct sockaddr *)&mltaddr,
-			    (struct sockaddr *)&ia->ia_addr,
-			    (struct sockaddr *)&mltmask, RTF_UP | RTF_CLONING,
-			    (struct rtentry **)0);
-			if (error)
-				goto cleanup;
-		} else {
-			RTFREE_LOCKED(rt);
-		}
 
 		imm = in6_joingroup(ifp, &mltaddr.sin6_addr, &error, 0);
 		if (!imm) {
@@ -1363,14 +1327,15 @@ in6_purgeaddr(struct ifaddr *ifa)
 static void
 in6_unlink_ifa(struct in6_ifaddr *ia, struct ifnet *ifp)
 {
+	INIT_VNET_INET6(ifp->if_vnet);
 	struct in6_ifaddr *oia;
 	int	s = splnet();
 
 	TAILQ_REMOVE(&ifp->if_addrlist, &ia->ia_ifa, ifa_list);
 
 	oia = ia;
-	if (oia == (ia = in6_ifaddr))
-		in6_ifaddr = ia->ia_next;
+	if (oia == (ia = V_in6_ifaddr))
+		V_in6_ifaddr = ia->ia_next;
 	else {
 		while (ia->ia_next && (ia->ia_next != oia))
 			ia = ia->ia_next;
@@ -1752,7 +1717,8 @@ in6_ifinit(struct ifnet *ifp, struct in6_ifaddr *ia,
 			rtp = &rt;
 		}
 
-		error = rtrequest(RTM_ADD, (struct sockaddr *)&ia->ia_dstaddr,
+		error = rtrequest(RTM_ADD,
+		    (struct sockaddr *)&ia->ia_dstaddr,
 		    (struct sockaddr *)&ia->ia_addr,
 		    (struct sockaddr *)&ia->ia_prefixmask,
 		    ia->ia_flags | rtflags, rtp);
@@ -1929,12 +1895,13 @@ ip6_sprintf(char *ip6buf, const struct in6_addr *addr)
 int
 in6_localaddr(struct in6_addr *in6)
 {
+	INIT_VNET_INET6(curvnet);
 	struct in6_ifaddr *ia;
 
 	if (IN6_IS_ADDR_LOOPBACK(in6) || IN6_IS_ADDR_LINKLOCAL(in6))
 		return 1;
 
-	for (ia = in6_ifaddr; ia; ia = ia->ia_next) {
+	for (ia = V_in6_ifaddr; ia; ia = ia->ia_next) {
 		if (IN6_ARE_MASKED_ADDR_EQUAL(in6, &ia->ia_addr.sin6_addr,
 		    &ia->ia_prefixmask.sin6_addr)) {
 			return 1;
@@ -1947,9 +1914,10 @@ in6_localaddr(struct in6_addr *in6)
 int
 in6_is_addr_deprecated(struct sockaddr_in6 *sa6)
 {
+	INIT_VNET_INET6(curvnet);
 	struct in6_ifaddr *ia;
 
-	for (ia = in6_ifaddr; ia; ia = ia->ia_next) {
+	for (ia = V_in6_ifaddr; ia; ia = ia->ia_next) {
 		if (IN6_ARE_ADDR_EQUAL(&ia->ia_addr.sin6_addr,
 				       &sa6->sin6_addr) &&
 		    (ia->ia6_flags & IN6_IFF_DEPRECATED) != 0)
@@ -2039,6 +2007,7 @@ in6_prefixlen2mask(struct in6_addr *maskp, int len)
 struct in6_ifaddr *
 in6_ifawithifp(struct ifnet *ifp, struct in6_addr *dst)
 {
+	INIT_VNET_INET6(curvnet);
 	int dst_scope =	in6_addrscope(dst), blen = -1, tlen;
 	struct ifaddr *ifa;
 	struct in6_ifaddr *besta = 0;
@@ -2062,7 +2031,7 @@ in6_ifawithifp(struct ifnet *ifp, struct in6_addr *dst)
 		if (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_DETACHED)
 			continue;
 		if (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_DEPRECATED) {
-			if (ip6_use_deprecated)
+			if (V_ip6_use_deprecated)
 				dep[0] = (struct in6_ifaddr *)ifa;
 			continue;
 		}
@@ -2096,7 +2065,7 @@ in6_ifawithifp(struct ifnet *ifp, struct in6_addr *dst)
 		if (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_DETACHED)
 			continue;
 		if (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_DEPRECATED) {
-			if (ip6_use_deprecated)
+			if (V_ip6_use_deprecated)
 				dep[1] = (struct in6_ifaddr *)ifa;
 			continue;
 		}
@@ -2187,11 +2156,14 @@ in6if_do_dad(struct ifnet *ifp)
 void
 in6_setmaxmtu(void)
 {
+	INIT_VNET_NET(curvnet);
+	INIT_VNET_INET6(curvnet);
 	unsigned long maxmtu = 0;
 	struct ifnet *ifp;
 
 	IFNET_RLOCK();
-	for (ifp = TAILQ_FIRST(&ifnet); ifp; ifp = TAILQ_NEXT(ifp, if_list)) {
+	for (ifp = TAILQ_FIRST(&V_ifnet); ifp;
+	    ifp = TAILQ_NEXT(ifp, if_list)) {
 		/* this function can be called during ifnet initialization */
 		if (!ifp->if_afdata[AF_INET6])
 			continue;
@@ -2201,7 +2173,7 @@ in6_setmaxmtu(void)
 	}
 	IFNET_RUNLOCK();
 	if (maxmtu)	     /* update only when maxmtu is positive */
-		in6_maxmtu = maxmtu;
+		V_in6_maxmtu = maxmtu;
 }
 
 /*
@@ -2349,10 +2321,10 @@ in6_sin_2_v4mapsin6_in_sock(struct sockaddr **nam)
 	struct sockaddr_in *sin_p;
 	struct sockaddr_in6 *sin6_p;
 
-	MALLOC(sin6_p, struct sockaddr_in6 *, sizeof *sin6_p, M_SONAME,
+	sin6_p = malloc(sizeof *sin6_p, M_SONAME,
 	       M_WAITOK);
 	sin_p = (struct sockaddr_in *)*nam;
 	in6_sin_2_v4mapsin6(sin_p, sin6_p);
-	FREE(*nam, M_SONAME);
+	free(*nam, M_SONAME);
 	*nam = (struct sockaddr *)sin6_p;
 }

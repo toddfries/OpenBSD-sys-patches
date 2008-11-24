@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_vfsops.c,v 1.181 2007/10/23 10:39:03 bde Exp $ */
+/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_vfsops.c,v 1.190 2008/10/28 13:44:11 trasz Exp $ */
 /*	$NetBSD: msdosfs_vfsops.c,v 1.51 1997/11/17 15:36:58 ws Exp $	*/
 
 /*-
@@ -52,6 +52,7 @@
 #include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/conf.h>
+#include <sys/fcntl.h>
 #include <sys/iconv.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
@@ -102,8 +103,7 @@ static MALLOC_DEFINE(M_MSDOSFSFAT, "msdosfs_fat", "MSDOSFS file allocation table
 struct iconv_functions *msdosfs_iconv;
 
 static int	update_mp(struct mount *mp, struct thread *td);
-static int	mountmsdosfs(struct vnode *devvp, struct mount *mp,
-		    struct thread *td);
+static int	mountmsdosfs(struct vnode *devvp, struct mount *mp);
 static vfs_fhtovp_t	msdosfs_fhtovp;
 static vfs_mount_t	msdosfs_mount;
 static vfs_root_t	msdosfs_root;
@@ -240,7 +240,7 @@ msdosfs_mount(struct mount *mp, struct thread *td)
 	struct msdosfsmount *pmp = NULL;
 	struct nameidata ndp;
 	int error, flags;
-	mode_t accessmode;
+	accmode_t accmode;
 	char *from;
 
 	if (vfs_filteropt(mp->mnt_optnew, msdosfs_opts))
@@ -312,16 +312,16 @@ msdosfs_mount(struct mount *mp, struct thread *td)
 			 * that user has necessary permissions on the device.
 			 */
 			devvp = pmp->pm_devvp;
-			vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, td);
+			vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY);
 			error = VOP_ACCESS(devvp, VREAD | VWRITE,
 			    td->td_ucred, td);
 			if (error)
 				error = priv_check(td, PRIV_VFS_MOUNT_PERM);
 			if (error) {
-				VOP_UNLOCK(devvp, 0, td);
+				VOP_UNLOCK(devvp, 0);
 				return (error);
 			}
-			VOP_UNLOCK(devvp, 0, td);
+			VOP_UNLOCK(devvp, 0);
 			DROP_GIANT();
 			g_topology_lock();
 			error = g_access(pmp->pm_cp, 0, 1, 0);
@@ -363,10 +363,10 @@ msdosfs_mount(struct mount *mp, struct thread *td)
 	 * If mount by non-root, then verify that user has necessary
 	 * permissions on the device.
 	 */
-	accessmode = VREAD;
+	accmode = VREAD;
 	if ((mp->mnt_flag & MNT_RDONLY) == 0)
-		accessmode |= VWRITE;
-	error = VOP_ACCESS(devvp, accessmode, td->td_ucred, td);
+		accmode |= VWRITE;
+	error = VOP_ACCESS(devvp, accmode, td->td_ucred, td);
 	if (error)
 		error = priv_check(td, PRIV_VFS_MOUNT_PERM);
 	if (error) {
@@ -374,7 +374,7 @@ msdosfs_mount(struct mount *mp, struct thread *td)
 		return (error);
 	}
 	if ((mp->mnt_flag & MNT_UPDATE) == 0) {
-		error = mountmsdosfs(devvp, mp, td);
+		error = mountmsdosfs(devvp, mp);
 #ifdef MSDOSFS_DEBUG		/* only needed for the printf below */
 		pmp = VFSTOMSDOSFS(mp);
 #endif
@@ -404,7 +404,7 @@ msdosfs_mount(struct mount *mp, struct thread *td)
 }
 
 static int
-mountmsdosfs(struct vnode *devvp, struct mount *mp, struct thread *td)
+mountmsdosfs(struct vnode *devvp, struct mount *mp)
 {
 	struct msdosfsmount *pmp;
 	struct buf *bp;
@@ -426,7 +426,7 @@ mountmsdosfs(struct vnode *devvp, struct mount *mp, struct thread *td)
 	error = g_vfs_open(devvp, &cp, "msdosfs", ronly ? 0 : 1);
 	g_topology_unlock();
 	PICKUP_GIANT();
-	VOP_UNLOCK(devvp, 0, td);
+	VOP_UNLOCK(devvp, 0);
 	if (error)
 		return (error);
 
@@ -508,14 +508,13 @@ mountmsdosfs(struct vnode *devvp, struct mount *mp, struct thread *td)
 	/* calculate the ratio of sector size to DEV_BSIZE */
 	pmp->pm_BlkPerSec = pmp->pm_BytesPerSec / DEV_BSIZE;
 
-	/* XXX - We should probably check more values here */
-	if (!pmp->pm_BytesPerSec || !SecPerClust
-		|| !pmp->pm_Heads
-#ifdef PC98
-    		|| !pmp->pm_SecPerTrack || pmp->pm_SecPerTrack > 255) {
-#else
-		|| !pmp->pm_SecPerTrack || pmp->pm_SecPerTrack > 63) {
-#endif
+	/*
+	 * We don't check pm_Heads nor pm_SecPerTrack, because
+	 * these may not be set for EFI file systems. We don't
+	 * use these anyway, so we're unaffected if they are
+	 * invalid.
+	 */
+	if (!pmp->pm_BytesPerSec || !SecPerClust) {
 		error = EINVAL;
 		goto error_exit;
 	}
@@ -754,7 +753,7 @@ error_exit:
 	if (cp != NULL) {
 		DROP_GIANT();
 		g_topology_lock();
-		g_vfs_close(cp, td);
+		g_vfs_close(cp);
 		g_topology_unlock();
 		PICKUP_GIANT();
 	}
@@ -804,7 +803,10 @@ msdosfs_unmount(struct mount *mp, int mntflags, struct thread *td)
 #ifdef MSDOSFS_DEBUG
 	{
 		struct vnode *vp = pmp->pm_devvp;
+		struct bufobj *bo;
 
+		bo = &vp->v_bufobj;
+		BO_LOCK(bo);
 		VI_LOCK(vp);
 		vn_printf(vp,
 		    "msdosfs_umount(): just before calling VOP_CLOSE()\n");
@@ -816,11 +818,12 @@ msdosfs_unmount(struct mount *mp, int mntflags, struct thread *td)
 		    TAILQ_FIRST(&vp->v_bufobj.bo_dirty.bv_hd),
 		    vp->v_bufobj.bo_numoutput, vp->v_type);
 		VI_UNLOCK(vp);
+		BO_UNLOCK(bo);
 	}
 #endif
 	DROP_GIANT();
 	g_topology_lock();
-	g_vfs_close(pmp->pm_cp, td);
+	g_vfs_close(pmp->pm_cp);
 	g_topology_unlock();
 	PICKUP_GIANT();
 	vrele(pmp->pm_devvp);
@@ -918,7 +921,7 @@ loop:
 		error = VOP_FSYNC(vp, waitfor, td);
 		if (error)
 			allerror = error;
-		VOP_UNLOCK(vp, 0, td);
+		VOP_UNLOCK(vp, 0);
 		vrele(vp);
 		MNT_ILOCK(mp);
 	}
@@ -928,11 +931,11 @@ loop:
 	 * Flush filesystem control info.
 	 */
 	if (waitfor != MNT_LAZY) {
-		vn_lock(pmp->pm_devvp, LK_EXCLUSIVE | LK_RETRY, td);
+		vn_lock(pmp->pm_devvp, LK_EXCLUSIVE | LK_RETRY);
 		error = VOP_FSYNC(pmp->pm_devvp, waitfor, td);
 		if (error)
 			allerror = error;
-		VOP_UNLOCK(pmp->pm_devvp, 0, td);
+		VOP_UNLOCK(pmp->pm_devvp, 0);
 	}
 	return (allerror);
 }

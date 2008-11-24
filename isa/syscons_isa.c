@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/isa/syscons_isa.c,v 1.29 2007/02/27 17:22:30 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/isa/syscons_isa.c,v 1.32 2008/03/26 22:02:50 phk Exp $");
 
 #include "opt_syscons.h"
 
@@ -43,8 +43,6 @@ __FBSDID("$FreeBSD: src/sys/isa/syscons_isa.c,v 1.29 2007/02/27 17:22:30 jhb Exp
 
 #include <machine/clock.h>
 #include <machine/md_var.h>
-#include <machine/ppireg.h>
-#include <machine/timerreg.h>
 #include <machine/pc/bios.h>
 
 #include <vm/vm.h>
@@ -272,18 +270,12 @@ sc_get_bios_values(bios_values_t *values)
 int
 sc_tone(int herz)
 {
-#if defined(__i386__) || defined(__amd64__)
+#if defined(HAS_TIMER_SPKR)
 	if (herz) {
-		/* set command for counter 2, 2 byte write */
 		if (timer_spkr_acquire())
 			return EBUSY;
-		/* set pitch */
-		spkr_set_pitch(timer_freq / herz);
-		/* enable counter 2 output to speaker */
-		ppi_spkr_on();
+		timer_spkr_setfreq(herz);
 	} else {
-		/* disable counter 2 output to speaker */
-		ppi_spkr_off();
 		timer_spkr_release();
 	}
 #endif

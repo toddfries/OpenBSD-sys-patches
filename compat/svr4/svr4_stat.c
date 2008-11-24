@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_stat.c,v 1.23 2006/09/02 08:18:22 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_stat.c,v 1.25 2008/08/17 23:27:27 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -43,6 +43,7 @@ __FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_stat.c,v 1.23 2006/09/02 08:18:22 r
 #include <sys/sysctl.h>
 #include <sys/sysproto.h>
 #include <sys/un.h>
+#include <sys/vimage.h>
 
 #include <vm/vm.h>
 
@@ -426,7 +427,7 @@ svr4_sys_systeminfo(td, uap)
 		break;
 
 	case SVR4_SI_HOSTNAME:
-		str = hostname;
+		str = V_hostname;
 		break;
 
 	case SVR4_SI_RELEASE:
@@ -454,7 +455,8 @@ svr4_sys_systeminfo(td, uap)
 		break;
 
 	case SVR4_SI_SRPC_DOMAIN:
-		str = domainname;
+		/* XXXRW: locking? */
+		str = V_domainname;
 		break;
 
 	case SVR4_SI_PLATFORM:

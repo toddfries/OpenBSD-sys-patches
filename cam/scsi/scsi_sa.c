@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_sa.c,v 1.113 2007/06/16 18:20:29 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_sa.c,v 1.114 2008/09/27 08:51:18 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/queue.h>
@@ -175,11 +175,11 @@ typedef enum {
 
 /* units are bits 4-7, 16-21 (1024 units) */
 #define SAUNIT(DEV) \
-	(((minor(DEV) & 0xF0) >> 4) |  ((minor(DEV) & 0x3f0000) >> 16))
+	(((dev2unit(DEV) & 0xF0) >> 4) |  ((dev2unit(DEV) & 0x3f0000) >> 16))
 
-#define SAMODE(z) ((minor(z) & 0x3))
-#define SADENSITY(z) (((minor(z) >> 2) & 0x3))
-#define	SA_IS_CTRL(z) (minor(z) & (1 << 29))
+#define SAMODE(z) ((dev2unit(z) & 0x3))
+#define SADENSITY(z) (((dev2unit(z) >> 2) & 0x3))
+#define	SA_IS_CTRL(z) (dev2unit(z) & (1 << 29))
 
 #define SA_NOT_CTLDEV	0
 #define SA_CTLDEV	1

@@ -25,7 +25,7 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
-$FreeBSD: src/sys/dev/cxgb/common/cxgb_t3_cpl.h,v 1.7 2008/02/23 01:06:16 kmacy Exp $
+$FreeBSD: src/sys/dev/cxgb/common/cxgb_t3_cpl.h,v 1.9 2008/08/11 23:01:34 kmacy Exp $
 
 ***************************************************************************/
 #ifndef T3_CPL_H
@@ -103,6 +103,7 @@ enum CPL_opcode {
 	CPL_RDMA_TERMINATE    = 0xA2,
 	CPL_TRACE_PKT         = 0xA3,
 	CPL_RDMA_EC_STATUS    = 0xA5,
+	CPL_SGE_EC_CR_RETURN  = 0xA6,
 
 	NUM_CPL_CMDS    /* must be last and previous entries must be sorted */
 };
@@ -148,7 +149,8 @@ enum {
 
 enum {
 	CPL_PASS_OPEN_ACCEPT,
-	CPL_PASS_OPEN_REJECT
+	CPL_PASS_OPEN_REJECT,
+	CPL_PASS_OPEN_ACCEPT_TNL
 };
 
 enum {
@@ -171,7 +173,7 @@ enum {                     /* TCP congestion control algorithms */
 	CONG_ALG_HIGHSPEED
 };
 
-enum {			   /* RSS hash type */
+enum {                     /* RSS hash type */
 	RSS_HASH_NONE = 0,
 	RSS_HASH_2_TUPLE = 1,
 	RSS_HASH_4_TUPLE = 2,
@@ -187,13 +189,6 @@ union opcode_tid {
 #define V_OPCODE(x) ((x) << S_OPCODE)
 #define G_OPCODE(x) (((x) >> S_OPCODE) & 0xFF)
 #define G_TID(x)    ((x) & 0xFFFFFF)
-
-#define S_HASHTYPE 22
-#define M_HASHTYPE 0x3
-#define G_HASHTYPE(x) (((x) >> S_HASHTYPE) & M_HASHTYPE) 
-
-#define S_QNUM 0
-#define G_QNUM(x) (((x) >> S_QNUM) & 0xFFFF)
 
 /* tid is assumed to be 24-bits */
 #define MK_OPCODE_TID(opcode, tid) (V_OPCODE(opcode) | (tid))
@@ -232,6 +227,14 @@ struct rss_header {
 	__be32 rss_hash_val;
 };
 
+#define S_HASHTYPE 22
+#define M_HASHTYPE 0x3
+#define G_HASHTYPE(x) (((x) >> S_HASHTYPE) & M_HASHTYPE)
+
+#define S_QNUM 0
+#define M_QNUM 0xFFFF
+#define G_QNUM(x) (((x) >> S_QNUM) & M_QNUM)
+
 #ifndef CHELSIO_FW
 struct work_request_hdr {
 	__be32 wr_hi;
@@ -254,14 +257,16 @@ struct work_request_hdr {
 #define V_WR_BCNTLFLT(x) ((x) << S_WR_BCNTLFLT)
 #define G_WR_BCNTLFLT(x) (((x) >> S_WR_BCNTLFLT) & M_WR_BCNTLFLT)
 
-/* Applicable to BYPASS WRs only: the uP will added a CPL_BARRIER before
+/*
+ * Applicable to BYPASS WRs only: the uP will add a CPL_BARRIER before
  * and after the BYPASS WR if the ATOMIC bit is set.
  */
 #define S_WR_ATOMIC	16
 #define V_WR_ATOMIC(x)	((x) << S_WR_ATOMIC)
 #define F_WR_ATOMIC	V_WR_ATOMIC(1U)
 
-/* Applicable to BYPASS WRs only: the uP will flush buffered non abort
+/*
+ * Applicable to BYPASS WRs only: the uP will flush buffered non abort
  * related WRs.
  */
 #define S_WR_FLUSH	17
@@ -907,6 +912,14 @@ struct cpl_wr_ack {
 	__be32 snd_una;
 };
 
+struct cpl_sge_ec_cr_return {
+	RSS_HDR
+	union opcode_tid ot;
+	__be16 sge_ec_id;
+	__u8 cr;
+	__u8 rsvd;
+};
+
 struct cpl_rdma_ec_status {
 	RSS_HDR
 	union opcode_tid ot;
@@ -959,9 +972,11 @@ struct cpl_rx_data {
 	__u8  dack_mode:2;
 	__u8  psh:1;
 	__u8  heartbeat:1;
-	__u8  :4;
+	__u8  ddp_off:1;
+	__u8  :3;
 #else
-	__u8  :4;
+	__u8  :3;
+	__u8  ddp_off:1;
 	__u8  heartbeat:1;
 	__u8  psh:1;
 	__u8  dack_mode:2;
@@ -1129,6 +1144,17 @@ struct cpl_tx_pkt {
 	__be32 len;
 };
 
+struct cpl_tx_pkt_coalesce {
+	__be32 cntrl;
+	__be32 len;
+	__be64 addr;
+};
+
+struct tx_pkt_coalesce_wr {
+	WR_HDR;
+	struct cpl_tx_pkt_coalesce cpl[0];
+};
+
 struct cpl_tx_pkt_lso {
 	WR_HDR;
 	__be32 cntrl;
@@ -1265,7 +1291,8 @@ struct cpl_l2t_write_req {
 	WR_HDR;
 	union opcode_tid ot;
 	__be32 params;
-	__u8  rsvd[2];
+	__u8  rsvd;
+	__u8  port_idx;
 	__u8  dst_mac[6];
 };
 

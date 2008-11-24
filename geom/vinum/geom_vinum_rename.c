@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_rename.c,v 1.3 2005/11/20 12:14:18 le Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_rename.c,v 1.4 2008/07/19 13:53:11 lulf Exp $");
 
 #include <sys/param.h>
 #include <sys/libkern.h>
@@ -142,6 +142,7 @@ gv_rename_drive(struct gv_softc *sc, struct gctl_req *req, struct gv_drive *d, c
 	}
 
 	strncpy(d->name, newname, GV_MAXDRIVENAME);
+	strncpy(d->hdr->label.name, newname, GV_MAXDRIVENAME);
 
 	/* XXX can we rename providers here? */
 

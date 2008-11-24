@@ -1,8 +1,8 @@
-# $FreeBSD: src/sys/modules/firmware/Makefile,v 1.1 2006/01/29 02:52:41 mlaier Exp $
+# $FreeBSD: src/sys/modules/firmware/Makefile,v 1.2 2008/04/20 16:11:14 antoine Exp $
 
 .PATH: ${.CURDIR}/../../kern
 
 KMOD=	firmware
-SRCS=	subr_firmware.c
+SRCS=	subr_firmware.c vnode_if.h
 
 .include <bsd.kmod.mk>

@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/ia64/ia64/interrupt.c,v 1.61 2007/08/06 05:11:00 marcel Exp $ */
+/* $FreeBSD: src/sys/ia64/ia64/interrupt.c,v 1.70 2008/09/28 18:34:14 marius Exp $ */
 /* $NetBSD: interrupt.c,v 1.23 1998/02/24 07:38:01 thorpej Exp $ */
 
 /*-
@@ -47,6 +47,7 @@
 #include <sys/ktr.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
+#include <sys/sched.h>
 #include <sys/smp.h>
 #include <sys/sysctl.h>
 #include <sys/syslog.h>
@@ -71,10 +72,6 @@ struct evcnt clock_intr_evcnt;	/* event counter for clock intrs. */
 
 #ifdef DDB
 #include <ddb/ddb.h>
-#endif
-
-#ifdef SMP
-extern int mp_ipi_test;
 #endif
 
 static void ia64_dispatch_intr(void *, u_int);
@@ -137,10 +134,10 @@ interrupt(struct trapframe *tf)
 	u_int vector;
 	int count;
 	uint8_t inta;
+
 	ia64_set_fpsr(IA64_FPSR_DEFAULT);
 
 	td = curthread;
-	atomic_add_int(&td->td_intr_nesting_level, 1);
 
 	vector = tf->tf_special.ifa;
 
@@ -194,7 +191,7 @@ interrupt(struct trapframe *tf)
 				adjust_ticks++;
 			count++;
 		}
-		ia64_set_itm(itc + ia64_clock_reload - adj);
+		ia64_set_itm(ia64_get_itc() + ia64_clock_reload - adj);
 		if (count > 0) {
 			adjust_lost += count - 1;
 			if (delta > (ia64_clock_reload >> 3)) {
@@ -228,7 +225,9 @@ interrupt(struct trapframe *tf)
 	} else if (vector == ipi_vector[IPI_RENDEZVOUS]) {
 		rdvs[PCPU_GET(cpuid)]++;
 		CTR1(KTR_SMP, "IPI_RENDEZVOUS, cpuid=%d", PCPU_GET(cpuid));
+		enable_intr();
 		smp_rendezvous_action();
+		disable_intr();
 	} else if (vector == ipi_vector[IPI_STOP]) {
 		cpumask_t mybit = PCPU_GET(cpumask);
 
@@ -238,13 +237,19 @@ interrupt(struct trapframe *tf)
 			cpu_spinwait();
 		atomic_clear_int(&started_cpus, mybit);
 		atomic_clear_int(&stopped_cpus, mybit);
-	} else if (vector == ipi_vector[IPI_TEST]) {
-		CTR1(KTR_SMP, "IPI_TEST, cpuid=%d", PCPU_GET(cpuid));
-		mp_ipi_test++;
+	} else if (vector == ipi_vector[IPI_PREEMPT]) {
+		CTR1(KTR_SMP, "IPI_PREEMPT, cpuid=%d", PCPU_GET(cpuid));
+		__asm __volatile("mov cr.eoi = r0;; srlz.d");
+		enable_intr();
+		sched_preempt(curthread);
+		disable_intr();
+		goto stray;
 #endif
 	} else {
 		ints[PCPU_GET(cpuid)]++;
+		atomic_add_int(&td->td_intr_nesting_level, 1);
 		ia64_dispatch_intr(tf, vector);
+		atomic_subtract_int(&td->td_intr_nesting_level, 1);
 	}
 
 	__asm __volatile("mov cr.eoi = r0;; srlz.d");
@@ -253,8 +258,6 @@ interrupt(struct trapframe *tf)
 		goto next;
 
 stray:
-	atomic_subtract_int(&td->td_intr_nesting_level, 1);
-
 	if (TRAPF_USERMODE(tf)) {
 		enable_intr();
 		userret(td, tf);
@@ -340,11 +343,8 @@ ia64_setup_intr(const char *name, int irq, driver_filter_t filter,
 			return (ENOMEM);
 
 		error = intr_event_create(&i->event, (void *)(uintptr_t)vector,
-		    0, ia64_intr_unmask,
-#ifdef INTR_FILTER
-		    ia64_intr_eoi, ia64_intr_mask,
-#endif
-		    "irq%u:", irq);
+		    0, irq, ia64_intr_mask, ia64_intr_unmask, ia64_intr_eoi,
+		    NULL, "irq%u:", irq);
 		if (error) {
 			free(i, M_DEVBUF);
 			return (error);
@@ -388,10 +388,6 @@ ia64_dispatch_intr(void *frame, u_int vector)
 {
 	struct ia64_intr *i;
 	struct intr_event *ie;			/* our interrupt event */
-#ifndef INTR_FILTER
-	struct intr_handler *ih;
-	int error, thread, ret;
-#endif
 
 	/*
 	 * Find the interrupt thread for this vector.
@@ -404,52 +400,14 @@ ia64_dispatch_intr(void *frame, u_int vector)
 	ie = i->event;
 	KASSERT(ie != NULL, ("%s: interrupt without event", __func__));
 
-#ifdef INTR_FILTER
 	if (intr_event_handle(ie, frame) != 0) {
+		/*
+		 * XXX: The pre-INTR_FILTER code didn't mask stray
+		 * interrupts.
+		 */
 		ia64_intr_mask((void *)(uintptr_t)vector);
 		log(LOG_ERR, "stray irq%u\n", i->irq);
 	}
-#else
-	/*
-	 * As an optimization, if an event has no handlers, don't
-	 * schedule it to run.
-	 */
-	if (TAILQ_EMPTY(&ie->ie_handlers))
-		return;
-
-	/*
-	 * Execute all fast interrupt handlers directly without Giant.  Note
-	 * that this means that any fast interrupt handler must be MP safe.
-	 */
-	ret = 0;
-	thread = 0;
-	critical_enter();
-	TAILQ_FOREACH(ih, &ie->ie_handlers, ih_next) {
-		if (ih->ih_filter == NULL) {
-			thread = 1;
-			continue;
-		}
-		CTR4(KTR_INTR, "%s: exec %p(%p) for %s", __func__,
-		    ih->ih_filter, ih->ih_argument, ih->ih_name);
-		ret = ih->ih_filter(ih->ih_argument);
-		/*
-		 * Wrapper handler special case: see
-		 * i386/intr_machdep.c::intr_execute_handlers()
-		 */
-		if (!thread) {
-			if (ret == FILTER_SCHEDULE_THREAD)
-				thread = 1;
-		}
-	}
-	critical_exit();
-
-	if (thread) {
-		ia64_intr_mask((void *)(uintptr_t)vector);
-		error = intr_event_schedule_thread(ie);
-		KASSERT(error == 0, ("%s: impossible stray", __func__));
-	} else
-		ia64_intr_eoi((void *)(uintptr_t)vector);
-#endif
 }
 
 #ifdef DDB

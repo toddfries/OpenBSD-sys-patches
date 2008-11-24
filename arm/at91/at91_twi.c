@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/at91/at91_twi.c,v 1.10 2007/03/23 22:57:24 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/at91/at91_twi.c,v 1.12 2008/08/04 20:46:15 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -155,6 +155,8 @@ at91_twi_detach(device_t dev)
 	if (sc->iicbus && (rv = device_delete_child(dev, sc->iicbus)) != 0)
 		return (rv);
 
+	AT91_TWI_LOCK_DESTROY(sc);
+
 	return (0);
 }
 
@@ -192,7 +194,7 @@ at91_twi_deactivate(device_t dev)
 	sc->intrhand = 0;
 	bus_generic_detach(sc->dev);
 	if (sc->mem_res)
-		bus_release_resource(dev, SYS_RES_IOPORT,
+		bus_release_resource(dev, SYS_RES_MEMORY,
 		    rman_get_rid(sc->mem_res), sc->mem_res);
 	sc->mem_res = 0;
 	if (sc->irq_res)
@@ -211,6 +213,7 @@ at91_twi_intr(void *xsc)
 	status = RD4(sc, TWI_SR);
 	if (status == 0)
 		return;
+	AT91_TWI_LOCK(sc);
 	sc->flags |= status & (TWI_SR_OVRE | TWI_SR_UNRE | TWI_SR_NACK);
 	if (status & TWI_SR_RXRDY)
 		sc->flags |= TWI_SR_RXRDY;
@@ -220,6 +223,7 @@ at91_twi_intr(void *xsc)
 		sc->flags |= TWI_SR_TXCOMP;
 	WR4(sc, TWI_IDR, status);
 	wakeup(sc);
+	AT91_TWI_UNLOCK(sc);
 	return;
 }
 
@@ -230,6 +234,7 @@ at91_twi_wait(struct at91_twi_softc *sc, uint32_t bit)
 	int counter = 100000;
 	uint32_t sr;
 
+	AT91_TWI_ASSERT_LOCKED(sc);
 	while (!((sr = RD4(sc, TWI_SR)) & bit) && counter-- > 0 &&
 	    !(sr & TWI_SR_NACK))
 		continue;
@@ -247,6 +252,7 @@ at91_twi_rst_card(device_t dev, u_char speed, u_char addr, u_char *oldaddr)
 	int clk;
 
 	sc = device_get_softc(dev);
+	AT91_TWI_LOCK(sc);
 	if (oldaddr)
 		*oldaddr = sc->twi_addr;
 	sc->twi_addr = addr;
@@ -275,6 +281,7 @@ at91_twi_rst_card(device_t dev, u_char speed, u_char addr, u_char *oldaddr)
 	WR4(sc, TWI_CR, TWI_CR_MSEN | TWI_CR_SVDIS);
 	WR4(sc, TWI_CWGR, sc->cwgr);
 	printf("setting cwgr to %#x\n", sc->cwgr);
+	AT91_TWI_UNLOCK(sc);
 
 	return 0;
 }

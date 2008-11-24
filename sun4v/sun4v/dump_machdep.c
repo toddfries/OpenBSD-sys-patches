@@ -24,7 +24,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sun4v/sun4v/dump_machdep.c,v 1.1 2006/10/05 06:14:28 kmacy Exp $
+ * $FreeBSD: src/sys/sun4v/sun4v/dump_machdep.c,v 1.4 2008/10/01 22:08:53 peter Exp $
  */
 
 #include <sys/param.h>
@@ -33,6 +33,7 @@
 #include <sys/cons.h>
 #include <sys/kernel.h>
 #include <sys/kerneldump.h>
+#include <sys/vimage.h>
 
 #include <vm/vm.h>
 #include <vm/vm_param.h>
@@ -56,27 +57,6 @@ static vm_size_t fragsz;
 
 #define	MAXDUMPSZ	(MAXDUMPPGS << PAGE_SHIFT)
 
-/* XXX should be MI */
-static void
-mkdumpheader(struct kerneldumpheader *kdh, uint32_t archver, uint64_t dumplen,
-    uint32_t blksz)
-{
-
-	bzero(kdh, sizeof(*kdh));
-	strncpy(kdh->magic, KERNELDUMPMAGIC, sizeof(kdh->magic));
-	strncpy(kdh->architecture, MACHINE_ARCH, sizeof(kdh->architecture));
-	kdh->version = htod32(KERNELDUMPVERSION);
-	kdh->architectureversion = htod32(archver);
-	kdh->dumplength = htod64(dumplen);
-	kdh->dumptime = htod64(time_second);
-	kdh->blocksize = htod32(blksz);
-	strncpy(kdh->hostname, hostname, sizeof(kdh->hostname));
-	strncpy(kdh->versionstring, version, sizeof(kdh->versionstring));
-	if (panicstr != NULL)
-		strncpy(kdh->panicstring, panicstr, sizeof(kdh->panicstring));
-	kdh->parity = kerneldump_parity(kdh);
-}
-
 static int
 buf_write(struct dumperinfo *di, char *ptr, size_t sz)
 {
@@ -92,7 +72,7 @@ buf_write(struct dumperinfo *di, char *ptr, size_t sz)
 		ptr += len;
 		sz -= len;
 		if (fragsz == DEV_BSIZE) {
-			error = di->dumper(di->priv, buffer, 0, dumplo,
+			error = dump_write(di, buffer, 0, dumplo,
 			    DEV_BSIZE);
 			if (error)
 				return error;
@@ -112,7 +92,7 @@ buf_flush(struct dumperinfo *di)
 	if (fragsz == 0)
 		return (0);
 
-	error = di->dumper(di->priv, buffer, 0, dumplo, DEV_BSIZE);
+	error = dump_write(di, buffer, 0, dumplo, DEV_BSIZE);
 	dumplo += DEV_BSIZE;
 	return (error);
 }
@@ -148,7 +128,7 @@ blk_dump(struct dumperinfo *di, vm_paddr_t pa, vm_size_t size)
 #ifdef notyet
 		va = TLB_PHYS_TO_DIRECT(pa + pos);
 #endif
-		error = di->dumper(di->priv, (void *)va, 0, dumplo, rsz);
+		error = dump_write(di, (void *)va, 0, dumplo, rsz);
 		if (error)
 			break;
 		dumplo += rsz;
@@ -193,12 +173,12 @@ dumpsys(struct dumperinfo *di)
 	/* Determine dump offset on device. */
 	dumplo = di->mediaoffset + di->mediasize - totsize;
 
-	mkdumpheader(&kdh, KERNELDUMP_SPARC64_VERSION, size, di->blocksize);
+	mkdumpheader(&kdh, KERNELDUMPMAGIC, KERNELDUMP_SPARC64_VERSION, size, di->blocksize);
 
 	printf("Dumping %lu MB (%d chunks)\n", (u_long)(size >> 20), nreg);
 
 	/* Dump leader */
-	error = di->dumper(di->priv, &kdh, 0, dumplo, sizeof(kdh));
+	error = dump_write(di, &kdh, 0, dumplo, sizeof(kdh));
 	if (error)
 		goto fail;
 	dumplo += sizeof(kdh);
@@ -234,12 +214,12 @@ dumpsys(struct dumperinfo *di)
 	}
 
 	/* Dump trailer */
-	error = di->dumper(di->priv, &kdh, 0, dumplo, sizeof(kdh));
+	error = dump_write(di, &kdh, 0, dumplo, sizeof(kdh));
 	if (error)
 		goto fail;
 
 	/* Signal completion, signoff and exit stage left. */
-	di->dumper(di->priv, NULL, 0, 0, 0);
+	dump_write(di, NULL, 0, 0, 0);
 	printf("\nDump complete\n");
 	return;
 

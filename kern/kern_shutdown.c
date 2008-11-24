@@ -35,8 +35,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_shutdown.c,v 1.185 2007/10/26 08:00:41 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_shutdown.c,v 1.194 2008/11/23 21:05:22 dwmalone Exp $");
 
+#include "opt_ddb.h"
 #include "opt_kdb.h"
 #include "opt_mac.h"
 #include "opt_panic.h"
@@ -52,6 +53,7 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_shutdown.c,v 1.185 2007/10/26 08:00:41 jul
 #include <sys/eventhandler.h>
 #include <sys/kdb.h>
 #include <sys/kernel.h>
+#include <sys/kerneldump.h>
 #include <sys/kthread.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
@@ -63,6 +65,9 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_shutdown.c,v 1.185 2007/10/26 08:00:41 jul
 #include <sys/smp.h>		/* smp_active */
 #include <sys/sysctl.h>
 #include <sys/sysproto.h>
+#include <sys/vimage.h>
+
+#include <ddb/ddb.h>
 
 #include <machine/cpu.h>
 #include <machine/pcb.h>
@@ -147,7 +152,7 @@ shutdown_conf(void *unused)
 	    SHUTDOWN_PRI_LAST + 200);
 }
 
-SYSINIT(shutdown_conf, SI_SUB_INTRINSIC, SI_ORDER_ANY, shutdown_conf, NULL)
+SYSINIT(shutdown_conf, SI_SUB_INTRINSIC, SI_ORDER_ANY, shutdown_conf, NULL);
 
 /*
  * The system call that results in a reboot.
@@ -233,21 +238,27 @@ doadump(void)
 	 * Give them a clue as to why they can't dump.
 	 */
 	if (dumper.dumper == NULL) {
-		printf("Cannot dump. No dump device defined.\n");
+		printf("Cannot dump. Device not defined or unavailable.\n");
 		return;
 	}
 
 	savectx(&dumppcb);
 	dumptid = curthread->td_tid;
 	dumping++;
-	dumpsys(&dumper);
+#ifdef DDB
+	if (textdump_pending)
+		textdump_dumpsys(&dumper);
+	else
+#endif
+		dumpsys(&dumper);
+	dumping--;
 }
 
 static int
 isbufbusy(struct buf *bp)
 {
 	if (((bp->b_flags & (B_INVAL | B_PERSISTENT)) == 0 &&
-	    BUF_REFCNT(bp) > 0) ||
+	    BUF_ISLOCKED(bp)) ||
 	    ((bp->b_flags & (B_DELWRI | B_INVAL)) == B_DELWRI))
 		return (1);
 	return (0);
@@ -502,6 +513,7 @@ panic(const char *fmt, ...)
 	va_list ap;
 	static char buf[256];
 
+	critical_enter();
 #ifdef SMP
 	/*
 	 * We don't want multiple CPU's to panic at the same time, so we
@@ -544,7 +556,7 @@ panic(const char *fmt, ...)
 	if (newpanic && trace_on_panic)
 		kdb_backtrace();
 	if (debugger_on_panic)
-		kdb_enter("panic");
+		kdb_enter(KDB_WHY_PANIC, "panic");
 #ifdef RESTARTABLE_PANICS
 	/* See if the user aborted the panic, in which case we continue. */
 	if (panicstr == NULL) {
@@ -560,6 +572,7 @@ panic(const char *fmt, ...)
 	/* thread_unlock(td); */
 	if (!sync_on_panic)
 		bootopt |= RB_NOSYNC;
+	critical_exit();
 	boot(bootopt);
 }
 
@@ -653,6 +666,20 @@ set_dumper(struct dumperinfo *di)
 	return (0);
 }
 
+/* Call dumper with bounds checking. */
+int
+dump_write(struct dumperinfo *di, void *virtual, vm_offset_t physical,
+    off_t offset, size_t length)
+{
+
+	if (length != 0 && (offset < di->mediaoffset ||
+	    offset - di->mediaoffset + length > di->mediasize)) {
+		printf("Attempt to write outside dump device boundaries.\n");
+		return (ENXIO);
+	}
+	return (di->dumper(di->priv, virtual, physical, offset, length));
+}
+
 #if defined(__powerpc__)
 void
 dumpsys(struct dumperinfo *di __unused)
@@ -661,3 +688,23 @@ dumpsys(struct dumperinfo *di __unused)
 	printf("Kernel dumps not implemented on this architecture\n");
 }
 #endif
+
+void
+mkdumpheader(struct kerneldumpheader *kdh, char *magic, uint32_t archver,
+    uint64_t dumplen, uint32_t blksz)
+{
+
+	bzero(kdh, sizeof(*kdh));
+	strncpy(kdh->magic, magic, sizeof(kdh->magic));
+	strncpy(kdh->architecture, MACHINE_ARCH, sizeof(kdh->architecture));
+	kdh->version = htod32(KERNELDUMPVERSION);
+	kdh->architectureversion = htod32(archver);
+	kdh->dumplength = htod64(dumplen);
+	kdh->dumptime = htod64(time_second);
+	kdh->blocksize = htod32(blksz);
+	strncpy(kdh->hostname, G_hostname, sizeof(kdh->hostname));
+	strncpy(kdh->versionstring, version, sizeof(kdh->versionstring));
+	if (panicstr != NULL)
+		strncpy(kdh->panicstring, panicstr, sizeof(kdh->panicstring));
+	kdh->parity = kerneldump_parity(kdh);
+}

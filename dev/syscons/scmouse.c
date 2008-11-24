@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/syscons/scmouse.c,v 1.42 2007/05/25 13:13:12 delphij Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/syscons/scmouse.c,v 1.43 2008/08/20 08:31:58 ed Exp $");
 
 #include "opt_syscons.h"
 
@@ -605,8 +605,7 @@ sc_mouse_paste(scr_stat *scp)
 #endif /* SC_NO_CUTPASTE */
 
 int
-sc_mouse_ioctl(struct tty *tp, u_long cmd, caddr_t data, int flag,
-	       struct thread *td)
+sc_mouse_ioctl(struct tty *tp, u_long cmd, caddr_t data, struct thread *td)
 {
     mouse_info_t *mouse;
     mouse_info_t buf;
@@ -616,7 +615,7 @@ sc_mouse_ioctl(struct tty *tp, u_long cmd, caddr_t data, int flag,
     int s;
     int f;
 
-    scp = SC_STAT(tp->t_dev);
+    scp = SC_STAT(tp);
 
     switch (cmd) {
 

@@ -33,7 +33,7 @@
  *
  *      @(#)bpfdesc.h	8.1 (Berkeley) 6/10/93
  *
- * $FreeBSD: src/sys/net/bpfdesc.h,v 1.38 2007/08/06 14:26:00 rwatson Exp $
+ * $FreeBSD: src/sys/net/bpfdesc.h,v 1.40 2008/08/01 22:08:14 antoine Exp $
  */
 
 #ifndef _NET_BPFDESC_H_
@@ -48,10 +48,11 @@
 /*
  * Descriptor associated with each open bpf file.
  */
+struct zbuf;
 struct bpf_d {
 	LIST_ENTRY(bpf_d) bd_next;	/* Linked list of descriptors */
 	/*
-	 * Buffer slots: two malloc buffers store the incoming packets.
+	 * Buffer slots: two memory buffers store the incoming packets.
 	 *   The model has three slots.  Sbuf is always occupied.
 	 *   sbuf (store) - Receive interrupt puts packets here.
 	 *   hbuf (hold) - When sbuf is full, put buffer here and
@@ -74,8 +75,8 @@ struct bpf_d {
 #ifdef BPF_JITTER
 	bpf_jit_filter	*bd_bfilter;	/* binary filter code */
 #endif
-	u_long		bd_rcount;	/* number of packets received */
-	u_long		bd_dcount;	/* number of packets dropped */
+	u_int64_t	bd_rcount;	/* number of packets received */
+	u_int64_t	bd_dcount;	/* number of packets dropped */
 
 	u_char		bd_promisc;	/* true if listening promiscuously */
 	u_char		bd_state;	/* idle, waiting, or timed out */
@@ -90,9 +91,14 @@ struct bpf_d {
 	struct mtx	bd_mtx;		/* mutex for this descriptor */
 	struct callout	bd_callout;	/* for BPF timeouts with select */
 	struct label	*bd_label;	/* MAC label for descriptor */
-	u_long		bd_fcount;	/* number of packets which matched filter */
+	u_int64_t	bd_fcount;	/* number of packets which matched filter */
 	pid_t		bd_pid;		/* PID which created descriptor */
 	int		bd_locked;	/* true if descriptor is locked */
+	u_int		bd_bufmode;	/* Current buffer mode. */
+	u_int64_t	bd_wcount;	/* number of packets written */
+	u_int64_t	bd_wfcount;	/* number of packets that matched write filter */
+	u_int64_t	bd_wdcount;	/* number of packets dropped during a write */
+	u_int64_t	bd_zcopy;	/* number of zero copy operations */
 };
 
 /* Values for bd_state */
@@ -102,27 +108,23 @@ struct bpf_d {
 
 #define BPFD_LOCK(bd)		mtx_lock(&(bd)->bd_mtx)
 #define BPFD_UNLOCK(bd)		mtx_unlock(&(bd)->bd_mtx)
-#define BPFD_LOCK_ASSERT(bd)	mtx_assert(&(bd)->bd_mtx, MA_OWNED);
-
-/* Test whether a BPF is ready for read(). */
-#define	bpf_ready(bd)						 \
-	((bd)->bd_hlen != 0 ||					 \
-	 (((bd)->bd_immediate || (bd)->bd_state == BPF_TIMED_OUT) && \
-	  (bd)->bd_slen != 0))
+#define BPFD_LOCK_ASSERT(bd)	mtx_assert(&(bd)->bd_mtx, MA_OWNED)
 
 /*
  * External representation of the bpf descriptor
  */
 struct xbpf_d {
+	u_int		bd_structsize;	/* Size of this structure. */
 	u_char		bd_promisc;
 	u_char		bd_immediate;
+	u_char		__bd_pad[6];
 	int		bd_hdrcmplt;
 	int		bd_direction;
 	int		bd_feedback;
 	int		bd_async;
-	u_long		bd_rcount;
-	u_long		bd_dcount;
-	u_long		bd_fcount;
+	u_int64_t	bd_rcount;
+	u_int64_t	bd_dcount;
+	u_int64_t	bd_fcount;
 	int		bd_sig;
 	int		bd_slen;
 	int		bd_hlen;
@@ -130,6 +132,16 @@ struct xbpf_d {
 	pid_t		bd_pid;
 	char		bd_ifname[IFNAMSIZ];
 	int		bd_locked;
+	u_int64_t	bd_wcount;
+	u_int64_t	bd_wfcount;
+	u_int64_t	bd_wdcount;
+	u_int64_t	bd_zcopy;
+	int		bd_bufmode;
+	/*
+	 * Allocate 4 64 bit unsigned integers for future expansion so we do
+	 * not have to worry about breaking the ABI.
+	 */
+	u_int64_t	bd_spare[4];
 };
 
 #define BPFIF_LOCK(bif)		mtx_lock(&(bif)->bif_mtx)

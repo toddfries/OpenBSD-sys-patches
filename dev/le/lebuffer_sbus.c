@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/le/lebuffer_sbus.c,v 1.1 2007/01/20 12:53:30 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/le/lebuffer_sbus.c,v 1.2 2008/09/24 21:26:46 marius Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -100,6 +100,8 @@ static device_method_t lebuffer_methods[] = {
 
 DEFINE_CLASS_0(lebuffer, lebuffer_driver, lebuffer_methods, 1);
 DRIVER_MODULE(lebuffer, sbus, lebuffer_driver, lebuffer_devclass, 0, 0);
+MODULE_DEPEND(lebuffer, sbus, 1, 1, 1);
+MODULE_VERSION(lebuffer, 1);
 
 static int
 lebuffer_probe(device_t dev)

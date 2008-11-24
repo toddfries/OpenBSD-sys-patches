@@ -1,6 +1,6 @@
 /**************************************************************************
 
-Copyright (c) 2007, Chelsio Inc.
+Copyright (c) 2007-2008, Chelsio Inc.
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -25,7 +25,7 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
-$FreeBSD: src/sys/dev/cxgb/sys/mbufq.h,v 1.4 2008/02/23 01:06:17 kmacy Exp $
+$FreeBSD: src/sys/dev/cxgb/sys/mbufq.h,v 1.5 2008/09/16 02:03:28 kmacy Exp $
 
 ***************************************************************************/
 

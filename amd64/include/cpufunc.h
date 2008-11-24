@@ -27,7 +27,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/amd64/include/cpufunc.h,v 1.148 2005/05/13 00:05:55 nectar Exp $
+ * $FreeBSD: src/sys/amd64/include/cpufunc.h,v 1.150 2008/08/08 16:26:53 stas Exp $
  */
 
 /*
@@ -514,6 +514,19 @@ load_es(u_int sel)
 	__asm __volatile("movl %0,%%es" : : "rm" (sel));
 }
 
+static inline void
+cpu_monitor(const void *addr, int extensions, int hints)
+{
+	__asm __volatile("monitor;"
+	    : :"a" (addr), "c" (extensions), "d"(hints));
+}
+
+static inline void
+cpu_mwait(int extensions, int hints)
+{
+	__asm __volatile("mwait;" : :"a" (hints), "c" (extensions));
+}
+
 #ifdef _KERNEL
 /* This is defined in <machine/specialreg.h> but is too painful to get to */
 #ifndef	MSR_FSBASE
@@ -776,5 +789,10 @@ void	wrmsr(u_int msr, u_int64_t newval);
 #endif	/* __GNUCLIKE_ASM && __CC_SUPPORTS___INLINE */
 
 void	reset_dbregs(void);
+
+#ifdef _KERNEL
+int	rdmsr_safe(u_int msr, uint64_t *val);
+int	wrmsr_safe(u_int msr, uint64_t newval);
+#endif
 
 #endif /* !_MACHINE_CPUFUNC_H_ */

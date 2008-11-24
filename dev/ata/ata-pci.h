@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/ata/ata-pci.h,v 1.86 2008/04/21 10:51:38 sos Exp $
+ * $FreeBSD: src/sys/dev/ata/ata-pci.h,v 1.94 2008/10/09 12:56:57 sos Exp $
  */
 
 /* structure holding chipset config info */
@@ -50,6 +50,8 @@ struct ata_pci_controller {
     struct ata_chip_id  *chip;
     int                 channels;
     int                 (*chipinit)(device_t);
+    int                 (*suspend)(device_t);
+    int                 (*resume)(device_t);
     int                 (*allocate)(device_t);
     int                 (*locking)(device_t, int);
     void                (*reset)(device_t);
@@ -173,18 +175,30 @@ struct ata_connect_task {
 #define ATA_I82801HB_R1         0x28228086
 #define ATA_I82801HB_AH4        0x28248086
 #define ATA_I82801HB_S2         0x28258086
-#define ATA_I82801HBM_S1        0x28298086
-#define ATA_I82801HBM_S2        0x282a8086
+#define ATA_I82801HBM           0x28508086
+#define ATA_I82801HBM_S1        0x28288086
+#define ATA_I82801HBM_S2        0x28298086
+#define ATA_I82801HBM_S3        0x282a8086
 #define ATA_I82801IB_S1         0x29208086
 #define ATA_I82801IB_AH2        0x29218086
 #define ATA_I82801IB_AH6        0x29228086
 #define ATA_I82801IB_AH4        0x29238086
+#define ATA_I82801IB_R1         0x29258086
 #define ATA_I82801IB_S2         0x29268086
+#define ATA_I82801JIB_S1        0x3a208086
+#define ATA_I82801JIB_AH        0x3a228086
+#define ATA_I82801JIB_R1        0x3a258086
+#define ATA_I82801JIB_S2        0x3a268086
+#define ATA_I82801JD_S1         0x3a008086
+#define ATA_I82801JD_AH         0x3a028086
+#define ATA_I82801JD_R1         0x3a058086
+#define ATA_I82801JD_S2         0x3a068086
 #define ATA_I31244              0x32008086
 
 #define ATA_ITE_ID              0x1283
 #define ATA_IT8211F             0x82111283
 #define ATA_IT8212F             0x82121283
+#define ATA_IT8213F             0x82131283
 
 #define ATA_JMICRON_ID          0x197b
 #define ATA_JMB360              0x2360197b
@@ -304,6 +318,7 @@ struct ata_connect_task {
 #define ATA_SII3112_1           0x02401095
 #define ATA_SII3124		0x31241095
 #define ATA_SII3132		0x31321095
+#define ATA_SII3132_1		0x02421095
 #define ATA_SII0680             0x06801095
 #define ATA_CMD646              0x06461095
 #define ATA_CMD648              0x06481095
@@ -380,83 +395,12 @@ struct ata_connect_task {
 #define ATA_VIA6420             0x31491106
 #define ATA_VIA6421             0x32491106
 
-/* chipset setup related defines */
-#define AHCI            1
-#define ATPOLD          1
-
-#define ALIOLD          0x01
-#define ALINEW          0x02
-#define ALISATA         0x04
-
-#define ATIPATA		0x01
-#define ATISATA		0x02
-#define ATIAHCI		0x04
-
-#define HPT366          0
-#define HPT370          1
-#define HPT372          2
-#define HPT374          3
-#define HPTOLD          0x01
-
-#define MV50XX          50
-#define MV60XX          60
-#define MV61XX          61
-
-#define PROLD           0
-#define PRNEW           1
-#define PRTX            2
-#define PRMIO           3
-#define PRTX4           0x01
-#define PRSX4X          0x02
-#define PRSX6K          0x04
-#define PRPATA          0x08
-#define PRCMBO          0x10
-#define PRCMBO2         0x20
-#define PRSATA          0x40
-#define PRSATA2         0x80
-
-#define SWKS33          0
-#define SWKS66          1
-#define SWKS100         2
-#define SWKSMIO         3
-
-#define SIIMEMIO        1
-#define SIIPRBIO        2
-#define SIIINTR         0x01
-#define SIISETCLK       0x02
-#define SIIBUG          0x04
-#define SII4CH          0x08
-
-#define SIS_SOUTH       1
-#define SISSATA         2
-#define SIS133NEW       3
-#define SIS133OLD       4
-#define SIS100NEW       5
-#define SIS100OLD       6
-#define SIS66           7
-#define SIS33           8
-
-#define VIA33           0
-#define VIA66           1
-#define VIA100          2
-#define VIA133          3
-#define AMDNVIDIA       4
-
-#define AMDCABLE        0x0001
-#define AMDBUG          0x0002
-#define NVIDIA          0x0004
-#define NV4             0x0010
-#define NVQ             0x0020
-#define VIACLK          0x0100
-#define VIABUG          0x0200
-#define VIABAR          0x0400
-#define VIAAHCI         0x0800
-
-
 /* global prototypes ata-pci.c */
 int ata_pci_probe(device_t dev);
 int ata_pci_attach(device_t dev);
 int ata_pci_detach(device_t dev);
+int ata_pci_suspend(device_t dev);
+int ata_pci_resume(device_t dev);
 struct resource * ata_pci_alloc_resource(device_t dev, device_t child, int type, int *rid, u_long start, u_long end, u_long count, u_int flags);
 int ata_pci_release_resource(device_t dev, device_t child, int type, int rid, struct resource *r);
 int ata_pci_setup_intr(device_t dev, device_t child, struct resource *irq, int flags, driver_filter_t *filter, driver_intr_t *function, void *argument, void **cookiep);
@@ -466,32 +410,62 @@ int ata_pci_status(device_t dev);
 void ata_pci_hw(device_t dev);
 void ata_pci_dmainit(device_t dev);
 char *ata_pcivendor2str(device_t dev);
-
-
-/* global prototypes ata-chipset.c */
-int ata_generic_ident(device_t);
-int ata_ahci_ident(device_t);
-int ata_acard_ident(device_t);
-int ata_ali_ident(device_t);
-int ata_amd_ident(device_t);
-int ata_adaptec_ident(device_t);
-int ata_ati_ident(device_t);
-int ata_cyrix_ident(device_t);
-int ata_cypress_ident(device_t);
-int ata_highpoint_ident(device_t);
-int ata_intel_ident(device_t);
-int ata_ite_ident(device_t);
-int ata_jmicron_ident(device_t);
-int ata_marvell_ident(device_t);
-int ata_national_ident(device_t);
-int ata_nvidia_ident(device_t);
-int ata_netcell_ident(device_t);
-int ata_promise_ident(device_t);
-int ata_serverworks_ident(device_t);
-int ata_sii_ident(device_t);
-int ata_sis_ident(device_t);
-int ata_via_ident(device_t);
 int ata_legacy(device_t);
+void ata_generic_intr(void *data);
+int ata_setup_interrupt(device_t dev, void *intr_func);
+void ata_set_desc(device_t dev);
+struct ata_chip_id *ata_match_chip(device_t dev, struct ata_chip_id *index);
+struct ata_chip_id *ata_find_chip(device_t dev, struct ata_chip_id *index, int slot);
+void ata_print_cable(device_t dev, u_int8_t *who);
+int ata_check_80pin(device_t dev, int mode);
+int ata_mode2idx(int mode);
+
+/* global prototypes ata-sata.c */
+void ata_sata_phy_event(void *context, int dummy);
+void ata_sata_phy_check_events(device_t dev);
+int ata_sata_phy_reset(device_t dev);
+void ata_sata_setmode(device_t dev, int mode);
+int ata_request2fis_h2d(struct ata_request *request, u_int8_t *fis);
+void ata_pm_identify(device_t dev);
+
+/* global prototypes from chipsets/ata-*.c */
+int ata_ahci_chipinit(device_t);
+int ata_ahci_allocate(device_t dev);
+void ata_ahci_reset(device_t dev);
+void ata_ahci_dmainit(device_t dev);
+int ata_marvell_edma_chipinit(device_t);
+int ata_sii_chipinit(device_t);
 
 /* global prototypes ata-dma.c */
 void ata_dmainit(device_t);
+
+/* externs */
+extern devclass_t ata_pci_devclass;
+
+/* macro for easy definition of all driver module stuff */
+#define ATA_DECLARE_DRIVER(dname) \
+static device_method_t __CONCAT(dname,_methods)[] = { \
+    DEVMETHOD(device_probe,     __CONCAT(dname,_probe)), \
+    DEVMETHOD(device_attach,    ata_pci_attach), \
+    DEVMETHOD(device_detach,    ata_pci_detach), \
+    DEVMETHOD(device_suspend,   bus_generic_suspend), \
+    DEVMETHOD(device_resume,    bus_generic_resume), \
+    DEVMETHOD(device_shutdown,  bus_generic_shutdown), \
+    DEVMETHOD(bus_alloc_resource,       ata_pci_alloc_resource), \
+    DEVMETHOD(bus_release_resource,     ata_pci_release_resource), \
+    DEVMETHOD(bus_activate_resource,    bus_generic_activate_resource), \
+    DEVMETHOD(bus_deactivate_resource,  bus_generic_deactivate_resource), \
+    DEVMETHOD(bus_setup_intr,           ata_pci_setup_intr), \
+    DEVMETHOD(bus_teardown_intr,        ata_pci_teardown_intr), \
+    { 0, 0 } \
+}; \
+static driver_t __CONCAT(dname,_driver) = { \
+        "atapci", \
+        __CONCAT(dname,_methods), \
+        sizeof(struct ata_pci_controller) \
+}; \
+DRIVER_MODULE(dname, pci, __CONCAT(dname,_driver), ata_pci_devclass, 0, 0); \
+MODULE_VERSION(dname, 1); \
+MODULE_DEPEND(dname, ata, 1, 1, 1); \
+MODULE_DEPEND(dname, atapci, 1, 1, 1);
+

@@ -47,7 +47,7 @@
  *	+1-313-764-2278
  *	netatalk@umich.edu
  *
- * $FreeBSD: src/sys/netatalk/aarp.c,v 1.44 2007/10/28 15:55:21 rwatson Exp $
+ * $FreeBSD: src/sys/netatalk/aarp.c,v 1.46 2008/03/25 09:38:59 ru Exp $
  */
 
 #include "opt_atalk.h"
@@ -354,6 +354,13 @@ at_aarpinput(struct ifnet *ifp, struct mbuf *m)
 		return;
 	}
 
+	/* Don't accept requests from broadcast address. */
+	if (!bcmp(ea->aarp_sha, ifp->if_broadcastaddr, ifp->if_addrlen)) {
+		log(LOG_ERR, "aarp: source link address is broadcast\n");
+		m_freem(m);
+		return;
+	}
+
 	op = ntohs(ea->aarp_op);
 	bcopy(ea->aarp_tpnet, &net, sizeof(net));
 
@@ -626,9 +633,7 @@ aarpprobe(void *arg)
 		    sizeof(eh->ether_dhost));
 		eh->ether_type = htons(sizeof(struct llc) +
 		    sizeof(struct ether_aarp));
-		M_PREPEND(m, sizeof(struct llc), M_TRYWAIT);
-		if (m == NULL)
-			return;
+		M_PREPEND(m, sizeof(struct llc), M_WAIT);
 		llc = mtod(m, struct llc *);
 		llc->llc_dsap = llc->llc_ssap = LLC_SNAP_LSAP;
 		llc->llc_control = LLC_UI;

@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/pc98/boot2/Makefile,v 1.23 2005/05/08 14:17:27 nyan Exp $
+# $FreeBSD: src/sys/boot/pc98/boot2/Makefile,v 1.24 2008/06/26 07:56:16 ru Exp $
 #
 
 PROG=	boot
@@ -12,7 +12,6 @@ CFLAGS=		-Os -mrtd \
 		-fno-unit-at-a-time \
 		-D_KERNEL -DBOOTWAIT=${BOOTWAIT} -DTIMEOUT=${TIMEOUT}
 CFLAGS+=	-DBOOTSEG=${BOOTSEG} -DBOOTSTACK=${BOOTSTACK}
-CFLAGS+=	${CWARNFLAGS}
 CFLAGS+=	-I${.CURDIR}/../../.. -I.
 
 # By default, if a serial port is going to be used as console, use COM1
@@ -110,5 +109,5 @@ i386:
 
 CLEANFILES+=	machine i386
 
-.include "${.CURDIR}/../../../conf/kern.mk"
+CWARNFLAGS!=	${MAKE} -f bsd.own.mk -f ${.CURDIR}/../../../conf/kern.mk -V CWARNFLAGS
 .include <bsd.prog.mk>

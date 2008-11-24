@@ -33,7 +33,7 @@
  * SUCH DAMAGE.
  *
  *	from: if_ethersubr.c,v 1.5 1994/12/13 22:31:45 wollman Exp
- * $FreeBSD: src/sys/net/if_fddisubr.c,v 1.105 2007/10/24 19:03:57 rwatson Exp $
+ * $FreeBSD: src/sys/net/if_fddisubr.c,v 1.109 2008/11/22 07:35:45 kmacy Exp $
  */
 
 #include "opt_atalk.h"
@@ -56,6 +56,7 @@
 #include <net/if_llc.h>
 #include <net/if_types.h>
 
+#include <net/ethernet.h>
 #include <net/netisr.h>
 #include <net/route.h>
 #include <net/bpf.h>
@@ -204,9 +205,7 @@ fddi_output(ifp, m, dst, rt0)
 	    if (aa->aa_flags & AFA_PHASE2) {
 		struct llc llc;
 
-		M_PREPEND(m, LLC_SNAPFRAMELEN, M_TRYWAIT);
-		if (m == 0)
-			senderr(ENOBUFS);
+		M_PREPEND(m, LLC_SNAPFRAMELEN, M_WAIT);
 		llc.llc_dsap = llc.llc_ssap = LLC_SNAP_LSAP;
 		llc.llc_control = LLC_UI;
 		bcopy(at_org_code, llc.llc_snap.org_code, sizeof(at_org_code));
@@ -336,7 +335,7 @@ fddi_output(ifp, m, dst, rt0)
 		}
 	}
 
-	IFQ_HANDOFF(ifp, m, error);
+	error = (ifp->if_transmit)(ifp, m);
 	if (error)
 		ifp->if_oerrors++;
 
@@ -697,7 +696,9 @@ fddi_resolvemulti(ifp, llsa, sa)
 	struct sockaddr *sa;
 {
 	struct sockaddr_dl *sdl;
+#ifdef INET
 	struct sockaddr_in *sin;
+#endif
 #ifdef INET6
 	struct sockaddr_in6 *sin6;
 #endif
@@ -720,7 +721,7 @@ fddi_resolvemulti(ifp, llsa, sa)
 		sin = (struct sockaddr_in *)sa;
 		if (!IN_MULTICAST(ntohl(sin->sin_addr.s_addr)))
 			return (EADDRNOTAVAIL);
-		MALLOC(sdl, struct sockaddr_dl *, sizeof *sdl, M_IFMADDR,
+		sdl = malloc(sizeof *sdl, M_IFMADDR,
 		       M_NOWAIT | M_ZERO);
 		if (sdl == NULL)
 			return (ENOMEM);
@@ -751,7 +752,7 @@ fddi_resolvemulti(ifp, llsa, sa)
 		}
 		if (!IN6_IS_ADDR_MULTICAST(&sin6->sin6_addr))
 			return (EADDRNOTAVAIL);
-		MALLOC(sdl, struct sockaddr_dl *, sizeof *sdl, M_IFMADDR,
+		sdl = malloc(sizeof *sdl, M_IFMADDR,
 		       M_NOWAIT | M_ZERO);
 		if (sdl == NULL)
 			return (ENOMEM);

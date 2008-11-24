@@ -25,7 +25,7 @@
  */
 
 #include <machine/asm.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/locore.S,v 1.22 2005/11/30 16:09:10 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/locore.S,v 1.25 2008/09/03 17:39:19 marius Exp $");
 
 #include <machine/asi.h>
 #include <machine/asmacros.h>
@@ -36,16 +36,16 @@ __FBSDID("$FreeBSD: src/sys/sparc64/sparc64/locore.S,v 1.22 2005/11/30 16:09:10 
 	.register %g2,#ignore
 
 	.globl	kernbase
-	.set	kernbase,KERNBASE
+	.set	kernbase, KERNBASE
 
 /*
  * void _start(caddr_t metadata, u_long o1, u_long o2, u_long o3,
- *	       u_long ofw_vec)
+ *     u_long ofw_vec)
  */
 ENTRY(btext)
 ENTRY(_start)
 	/*
-	 * Initialize misc state to known values.  Interrupts disabled, normal
+	 * Initialize misc. state to known values: interrupts disabled, normal
 	 * globals, windows flushed (cr = 0, cs = nwindows - 1), no clean
 	 * windows, pil 0, and floating point disabled.
 	 */
@@ -54,11 +54,10 @@ ENTRY(_start)
 	wrpr	%g0, 0, %cleanwin
 	wrpr	%g0, 0, %pil
 	wr	%g0, 0, %fprs
-	wrpr	%g0, 0, %tick
 
 	/*
-	 * Get onto our per-cpu panic stack, which precedes the struct pcpu in
-	 * the per-cpu page.
+	 * Get onto our per-CPU panic stack, which precedes the struct pcpu in
+	 * the per-CPU page.
 	 */
 	SET(pcpu0 + (PCPU_PAGES * PAGE_SIZE) - PC_SIZEOF, %l1, %l0)
 	sub	%l0, SPOFF + CCFSZ, %sp
@@ -100,37 +99,37 @@ ENTRY(cpu_setregs)
 	wrpr	%g0, PSTATE_NORMAL, %pstate
 
 	/*
-	 * Normal %g6 points to the current thread's pcb, and %g7 points to
-	 * the per-cpu data structure.
+	 * Normal %g6 points to the current thread's PCB, and %g7 points to
+	 * the per-CPU data structure.
 	 */
 	mov	%o1, PCB_REG
 	mov	%o0, PCPU_REG
 
 	/*
-	 * Alternate globals.
+	 * Switch to alternate globals.
 	 */
 	wrpr	%g0, PSTATE_ALT, %pstate
 
 	/*
-	 * Alternate %g5 points to a per-cpu panic stack, %g6 points to the
-	 * current thread's pcb, and %g7 points to the per-cpu data structure.
+	 * Alternate %g5 points to a per-CPU panic stack, %g6 points to the
+	 * current thread's PCB, and %g7 points to the per-CPU data structure.
 	 */
 	mov	%o0, ASP_REG
 	mov	%o1, PCB_REG
 	mov	%o0, PCPU_REG
 
 	/*
-	 * Interrupt globals.
+	 * Switch to interrupt globals.
 	 */
 	wrpr	%g0, PSTATE_INTR, %pstate
 
 	/*
-	 * Interrupt %g7 points to the per-cpu data structure.
+	 * Interrupt %g7 points to the per-CPU data structure.
 	 */
 	mov	%o0, PCPU_REG
 
 	/*
-	 * Normal globals again.
+	 * Switch to normal globals again.
 	 */
 	wrpr	%g0, PSTATE_NORMAL, %pstate
 

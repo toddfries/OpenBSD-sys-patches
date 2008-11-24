@@ -36,8 +36,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_mib.c,v 1.84 2007/05/31 22:52:12 attilio Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_mib.c,v 1.92 2008/10/02 15:37:58 zec Exp $");
 
+#include "opt_compat.h"
 #include "opt_posix.h"
 #include "opt_config.h"
 
@@ -52,6 +53,7 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_mib.c,v 1.84 2007/05/31 22:52:12 attilio E
 #include <sys/jail.h>
 #include <sys/smp.h>
 #include <sys/unistd.h>
+#include <sys/vimage.h>
 
 SYSCTL_NODE(, 0,	  sysctl, CTLFLAG_RW, 0,
 	"Sysctl internal magic");
@@ -104,7 +106,6 @@ SYSCTL_STRING(_kern, KERN_OSTYPE, ostype, CTLFLAG_RD,
  * NOTICE: The *userland* release date is available in
  * /usr/include/osreldate.h
  */
-extern int osreldate;
 SYSCTL_INT(_kern, KERN_OSRELDATE, osreldate, CTLFLAG_RD,
     &osreldate, 0, "Kernel release date");
 
@@ -154,14 +155,18 @@ SYSCTL_INT(_hw, HW_PAGESIZE, pagesize, CTLFLAG_RD,
 static int
 sysctl_kern_arnd(SYSCTL_HANDLER_ARGS)
 {
-	u_long val;
+	char buf[256];
+	size_t len;
 
-	arc4rand(&val, sizeof(val), 0);
-	return (sysctl_handle_long(oidp, &val, 0, req));
+	len = req->oldlen;
+	if (len > sizeof(buf))
+		len = sizeof(buf);
+	arc4rand(buf, len, 0);
+	return (SYSCTL_OUT(req, buf, len));
 }
 
-SYSCTL_PROC(_kern, KERN_ARND, arandom, CTLFLAG_RD,
-	0, 0, sysctl_kern_arnd, "L", "arc4rand");
+SYSCTL_PROC(_kern, KERN_ARND, arandom, CTLTYPE_OPAQUE | CTLFLAG_RD,
+    NULL, 0, sysctl_kern_arnd, "", "arc4rand");
 
 static int
 sysctl_hw_physmem(SYSCTL_HANDLER_ARGS)
@@ -202,11 +207,21 @@ static char	machine_arch[] = MACHINE_ARCH;
 SYSCTL_STRING(_hw, HW_MACHINE_ARCH, machine_arch, CTLFLAG_RD,
     machine_arch, 0, "System architecture");
 
+#ifndef VIMAGE
 char hostname[MAXHOSTNAMELEN];
+#endif
+
+/*
+ * This mutex is used to protect the hostname and domainname variables, and
+ * perhaps in the future should also protect hostid, hostuid, and others.
+ */
+struct mtx hostname_mtx;
+MTX_SYSINIT(hostname_mtx, &hostname_mtx, "hostname", MTX_DEF);
 
 static int
 sysctl_hostname(SYSCTL_HANDLER_ARGS)
 {
+	INIT_VPROCG(TD_TO_VPROCG(req->td));
 	struct prison *pr;
 	char tmphostname[MAXHOSTNAMELEN];
 	int error;
@@ -236,9 +251,18 @@ sysctl_hostname(SYSCTL_HANDLER_ARGS)
 			bcopy(tmphostname, pr->pr_host, MAXHOSTNAMELEN);
 			mtx_unlock(&pr->pr_mtx);
 		}
-	} else
-		error = sysctl_handle_string(oidp,
-		    hostname, sizeof hostname, req);
+	} else {
+		mtx_lock(&hostname_mtx);
+		bcopy(V_hostname, tmphostname, MAXHOSTNAMELEN);
+		mtx_unlock(&hostname_mtx);
+		error = sysctl_handle_string(oidp, tmphostname,
+		    sizeof tmphostname, req);
+		if (req->newptr != NULL && error == 0) {
+			mtx_lock(&hostname_mtx);
+			bcopy(tmphostname, V_hostname, MAXHOSTNAMELEN);
+			mtx_unlock(&hostname_mtx);
+		}
+	}
 	return (error);
 }
 
@@ -324,15 +348,55 @@ SYSCTL_PROC(_kern, OID_AUTO, conftxt, CTLTYPE_STRING|CTLFLAG_RW,
     0, 0, sysctl_kern_config, "", "Kernel configuration file");
 #endif
 
-char domainname[MAXHOSTNAMELEN];
-SYSCTL_STRING(_kern, KERN_NISDOMAINNAME, domainname, CTLFLAG_RW,
-    &domainname, sizeof(domainname), "Name of the current YP/NIS domain");
+#ifndef VIMAGE
+char domainname[MAXHOSTNAMELEN];	/* Protected by hostname_mtx. */
+#endif
+
+static int
+sysctl_domainname(SYSCTL_HANDLER_ARGS)
+{
+	char tmpdomainname[MAXHOSTNAMELEN];
+	int error;
+
+	mtx_lock(&hostname_mtx);
+	bcopy(V_domainname, tmpdomainname, MAXHOSTNAMELEN);
+	mtx_unlock(&hostname_mtx);
+	error = sysctl_handle_string(oidp, tmpdomainname,
+	    sizeof tmpdomainname, req);
+	if (req->newptr != NULL && error == 0) {
+		mtx_lock(&hostname_mtx);
+		bcopy(tmpdomainname, V_domainname, MAXHOSTNAMELEN);
+		mtx_unlock(&hostname_mtx);
+	}
+	return (error);
+}
+
+SYSCTL_PROC(_kern, KERN_NISDOMAINNAME, domainname, CTLTYPE_STRING|CTLFLAG_RW,
+       0, 0, sysctl_domainname, "A", "Name of the current YP/NIS domain");
 
 u_long hostid;
 SYSCTL_ULONG(_kern, KERN_HOSTID, hostid, CTLFLAG_RW, &hostid, 0, "Host ID");
 char hostuuid[64] = "00000000-0000-0000-0000-000000000000";
 SYSCTL_STRING(_kern, KERN_HOSTUUID, hostuuid, CTLFLAG_RW, hostuuid,
     sizeof(hostuuid), "Host UUID");
+
+SYSCTL_NODE(_kern, OID_AUTO, features, CTLFLAG_RD, 0, "Kernel Features");
+
+#ifdef COMPAT_FREEBSD4
+FEATURE(compat_freebsd4, "Compatible with FreeBSD 4");
+#endif
+
+#ifdef COMPAT_FREEBSD5
+FEATURE(compat_freebsd5, "Compatible with FreeBSD 5");
+#endif
+
+#ifdef COMPAT_FREEBSD6
+FEATURE(compat_freebsd6, "Compatible with FreeBSD 6");
+#endif
+
+#ifdef COMPAT_FREEBSD7
+FEATURE(compat_freebsd7, "Compatible with FreeBSD 7");
+#endif
 
 /*
  * This is really cheating.  These actually live in the libc, something

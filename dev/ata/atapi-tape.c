@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/atapi-tape.c,v 1.107 2008/04/17 12:29:35 sos Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/atapi-tape.c,v 1.109 2008/09/27 08:51:18 ed Exp $");
 
 #include "opt_ata.h"
 #include <sys/param.h>
@@ -142,7 +142,7 @@ ast_attach(device_t dev)
 		      UID_ROOT, GID_OPERATOR, 0640, "ast%d",
 		      device_get_unit(dev));
     device->si_drv1 = dev;
-    device->si_iosize_max = ch->dma.max_iosize;
+    device->si_iosize_max = ch->dma.max_iosize ? ch->dma.max_iosize : DFLTPHYS;
     stp->dev1 = device;
     device = make_dev(&ast_cdevsw, 2 * device_get_unit(dev) + 1,
 		      UID_ROOT, GID_OPERATOR, 0640, "nast%d",
@@ -238,7 +238,7 @@ ast_close(struct cdev *cdev, int flags, int fmt, struct thread *td)
 	ast_write_filemark(dev, ATAPI_WF_WRITE);
 
     /* if minor is even rewind on close */
-    if (!(minor(cdev) & 0x01))
+    if (!(dev2unit(cdev) & 0x01))
 	ast_rewind(dev);
 
     if (stp->cap.lock && count_dev(cdev) == 1)

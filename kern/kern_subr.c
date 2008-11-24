@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_subr.c,v 1.103 2007/06/05 00:00:54 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_subr.c,v 1.105 2008/08/28 19:34:58 ed Exp $");
 
 #include "opt_zero.h"
 
@@ -325,6 +325,9 @@ ureadc(int c, struct uio *uio)
 	struct iovec *iov;
 	char *iov_base;
 
+	WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK, NULL,
+	    "Calling ureadc()");
+
 again:
 	if (uio->uio_iovcnt == 0 || uio->uio_resid == 0)
 		panic("ureadc");
@@ -456,7 +459,7 @@ uio_yield(void)
 	DROP_GIANT();
 	thread_lock(td);
 	sched_prio(td, td->td_user_pri);
-	mi_switch(SW_INVOL, NULL);
+	mi_switch(SW_INVOL | SWT_RELINQUISH, NULL);
 	thread_unlock(td);
 	PICKUP_GIANT();
 }

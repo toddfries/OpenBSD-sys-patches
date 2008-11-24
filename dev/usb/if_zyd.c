@@ -1,6 +1,6 @@
 /*	$OpenBSD: if_zyd.c,v 1.52 2007/02/11 00:08:04 jsg Exp $	*/
 /*	$NetBSD: if_zyd.c,v 1.7 2007/06/21 04:04:29 kiyohara Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/if_zyd.c,v 1.15 2008/05/01 04:55:00 thompsa Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/if_zyd.c,v 1.23 2008/10/27 16:46:50 sam Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>
@@ -116,6 +116,7 @@ static const struct zyd_type {
 	ZYD_ZD1211_DEV(ZYXEL,		AG225H),
 	ZYD_ZD1211_DEV(ZYXEL,		ZYAIRG220),
 	ZYD_ZD1211_DEV(ZYXEL,		G200V2),
+	ZYD_ZD1211_DEV(ZYXEL,		G202),
 
 	ZYD_ZD1211B_DEV(ACCTON,		SMCWUSBG),
 	ZYD_ZD1211B_DEV(ACCTON,		ZD1211B),
@@ -163,7 +164,8 @@ static int	zyd_alloc_tx_list(struct zyd_softc *);
 static void	zyd_free_tx_list(struct zyd_softc *);
 static int	zyd_alloc_rx_list(struct zyd_softc *);
 static void	zyd_free_rx_list(struct zyd_softc *);
-static struct	ieee80211_node *zyd_node_alloc(struct ieee80211_node_table *);
+static struct ieee80211_node *zyd_node_alloc(struct ieee80211vap *,
+			    const uint8_t mac[IEEE80211_ADDR_LEN]);
 static void	zyd_task(void *);
 static int	zyd_newstate(struct ieee80211vap *, enum ieee80211_state, int);
 static int	zyd_cmd(struct zyd_softc *, uint16_t, const void *, int,
@@ -232,6 +234,7 @@ static void	zyd_scantask(void *);
 static void	zyd_scan_start(struct ieee80211com *);
 static void	zyd_scan_end(struct ieee80211com *);
 static void	zyd_set_channel(struct ieee80211com *);
+static void	zyd_wakeup(struct zyd_softc *);
 
 static int
 zyd_match(device_t dev)
@@ -266,7 +269,7 @@ zyd_attachhook(struct zyd_softc *sc)
 		return error;
 	}
 
-	sc->sc_flags |= ZD1211_FWLOADED;
+	sc->sc_flags |= ZYD_FLAG_FWLOADED;
 
 	/* complete the attach process */
 	return zyd_complete_attach(sc);
@@ -390,7 +393,8 @@ zyd_complete_attach(struct zyd_softc *sc)
 
 	/* set device capabilities */
 	ic->ic_caps =
-		  IEEE80211_C_MONITOR		/* monitor mode */
+		  IEEE80211_C_STA		/* station mode */
+		| IEEE80211_C_MONITOR		/* monitor mode */
 		| IEEE80211_C_SHPREAMBLE	/* short preamble supported */
 	        | IEEE80211_C_SHSLOT	/* short slot time supported */
 		| IEEE80211_C_BGSCAN		/* capable of bg scanning */
@@ -455,10 +459,14 @@ zyd_detach(device_t dev)
 	bpfdetach(ifp);
 	ieee80211_ifdetach(ic);
 
+	/* set a flag to indicate we're detaching.  */
+	sc->sc_flags |= ZYD_FLAG_DETACHING;
+
 	usb_rem_task(sc->sc_udev, &sc->sc_scantask);
 	usb_rem_task(sc->sc_udev, &sc->sc_task);
 	callout_stop(&sc->sc_watchdog_ch);
 
+	zyd_wakeup(sc);
 	zyd_close_pipes(sc);
 
 	if_free(ifp);
@@ -697,7 +705,8 @@ zyd_free_rx_list(struct zyd_softc *sc)
 
 /* ARGUSED */
 static struct ieee80211_node *
-zyd_node_alloc(struct ieee80211_node_table *nt __unused)
+zyd_node_alloc(struct ieee80211vap *vap __unused,
+	const uint8_t mac[IEEE80211_ADDR_LEN] __unused)
 {
 	struct zyd_node *zn;
 
@@ -731,11 +740,6 @@ zyd_task(void *arg)
 			IEEE80211_ADDR_COPY(sc->sc_bssid, ni->ni_bssid);
 			zyd_set_bssid(sc, sc->sc_bssid);
 		}
-
-		if (vap->iv_opmode == IEEE80211_M_STA) {
-			/* fake a join to init the tx rate */
-			zyd_newassoc(ni, 1);
-		}
 		break;
 	}
 	default:
@@ -756,7 +760,9 @@ zyd_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 	struct ieee80211com *ic = vap->iv_ic;
 	struct zyd_softc *sc = ic->ic_ifp->if_softc;
 
+	usb_rem_task(sc->sc_udev, &sc->sc_scantask);
 	usb_rem_task(sc->sc_udev, &sc->sc_task);
+	callout_stop(&sc->sc_watchdog_ch);
 
 	/* do it in a process context */
 	sc->sc_state = nstate;
@@ -780,6 +786,9 @@ zyd_cmd(struct zyd_softc *sc, uint16_t code, const void *idata, int ilen,
 	struct rq rq;
 	uint16_t xferflags;
 	usbd_status error;
+
+	if (sc->sc_flags & ZYD_FLAG_DETACHING)
+		return ENXIO;
 
 	if ((xfer = usbd_alloc_xfer(sc->sc_udev)) == NULL)
 		return ENOMEM;
@@ -1986,7 +1995,8 @@ zyd_rx_data(struct zyd_softc *sc, const uint8_t *buf, uint16_t len)
 		if (stat->flags & ZYD_RX_DECRYPTERR)
 			tap->wr_flags |= IEEE80211_RADIOTAP_F_BADFCS;
 		tap->wr_rate = ieee80211_plcp2rate(plcp->signal,
-		    stat->flags & ZYD_RX_OFDM);
+		    (stat->flags & ZYD_RX_OFDM) ?
+			IEEE80211_T_OFDM : IEEE80211_T_CCK);
 		tap->wr_antsignal = stat->rssi + -95;
 		tap->wr_antnoise = -95;		/* XXX */
 		
@@ -2063,6 +2073,29 @@ skip:	/* setup a new transfer */
 	(void)usbd_transfer(xfer);
 }
 
+static uint8_t
+zyd_plcp_signal(int rate)
+{
+	switch (rate) {
+	/* OFDM rates (cf IEEE Std 802.11a-1999, pp. 14 Table 80) */
+	case 12:	return 0xb;
+	case 18:	return 0xf;
+	case 24:	return 0xa;
+	case 36:	return 0xe;
+	case 48:	return 0x9;
+	case 72:	return 0xd;
+	case 96:	return 0x8;
+	case 108:	return 0xc;
+
+	/* CCK rates (NB: not IEEE std, device-specific) */
+	case 2:		return 0x0;
+	case 4:		return 0x1;
+	case 11:	return 0x2;
+	case 22:	return 0x3;
+	}
+	return 0xff;		/* XXX unsupported/unknown rate */
+}
+
 static int
 zyd_tx_mgt(struct zyd_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 {
@@ -2123,7 +2156,7 @@ zyd_tx_mgt(struct zyd_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	    (IEEE80211_FC0_TYPE_CTL | IEEE80211_FC0_SUBTYPE_PS_POLL))
 		desc->flags |= ZYD_TX_FLAG_TYPE(ZYD_TX_TYPE_PS_POLL);
 
-	desc->phy = ieee80211_rate2plcp(rate);
+	desc->phy = zyd_plcp_signal(rate);
 	if (ZYD_RATE_IS_OFDM(rate)) {
 		desc->phy |= ZYD_TX_PHY_OFDM;
 		if (IEEE80211_IS_CHAN_5GHZ(ic->ic_curchan))
@@ -2294,7 +2327,7 @@ zyd_tx_data(struct zyd_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	    (IEEE80211_FC0_TYPE_CTL | IEEE80211_FC0_SUBTYPE_PS_POLL))
 		desc->flags |= ZYD_TX_FLAG_TYPE(ZYD_TX_TYPE_PS_POLL);
 
-	desc->phy = ieee80211_rate2plcp(rate);
+	desc->phy = zyd_plcp_signal(rate);
 	if (ZYD_RATE_IS_OFDM(rate)) {
 		desc->phy |= ZYD_TX_PHY_OFDM;
 		if (IEEE80211_IS_CHAN_5GHZ(ic->ic_curchan))
@@ -2741,6 +2774,16 @@ zyd_scantask(void *arg)
         }
 
         ZYD_UNLOCK(sc);
+}
+
+static void
+zyd_wakeup(struct zyd_softc *sc)
+{
+	struct rq *rqp;
+
+	STAILQ_FOREACH(rqp, &sc->sc_rqh, rq) {
+		wakeup(rqp->odata);		/* wakeup sleeping caller */
+	}
 }
 
 static device_method_t zyd_methods[] = {

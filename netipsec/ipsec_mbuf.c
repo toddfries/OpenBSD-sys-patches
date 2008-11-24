@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netipsec/ipsec_mbuf.c,v 1.13 2007/07/01 11:38:29 gnn Exp $
+ * $FreeBSD: src/sys/netipsec/ipsec_mbuf.c,v 1.15 2008/10/02 15:37:58 zec Exp $
  */
 
 /*
@@ -36,6 +36,7 @@
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
+#include <sys/vimage.h>
 
 #include <net/route.h>
 #include <netinet/in.h>
@@ -53,6 +54,7 @@
 struct mbuf *
 m_makespace(struct mbuf *m0, int skip, int hlen, int *off)
 {
+	INIT_VNET_IPSEC(curvnet);
 	struct mbuf *m;
 	unsigned remain;
 
@@ -88,7 +90,7 @@ m_makespace(struct mbuf *m0, int skip, int hlen, int *off)
 			return (NULL);
 		n->m_next = m->m_next;		/* splice new mbuf */
 		m->m_next = n;
-		ipsec4stat.ips_mbinserted++;
+		V_ipsec4stat.ips_mbinserted++;
 		if (hlen <= M_TRAILINGSPACE(m) + remain) {
 			/*
 			 * New header fits in the old mbuf if we copy
@@ -122,7 +124,7 @@ m_makespace(struct mbuf *m0, int skip, int hlen, int *off)
 				/* splice in second mbuf */
 				n2->m_next = n->m_next;
 				n->m_next = n2;
-				ipsec4stat.ips_mbinserted++;
+				V_ipsec4stat.ips_mbinserted++;
 			} else {
 				memcpy(mtod(n, caddr_t) + hlen,
 				       mtod(m, caddr_t) + skip, remain);
@@ -155,6 +157,7 @@ m_makespace(struct mbuf *m0, int skip, int hlen, int *off)
 caddr_t
 m_pad(struct mbuf *m, int n)
 {
+	INIT_VNET_IPSEC(curvnet);
 	register struct mbuf *m0, *m1;
 	register int len, pad;
 	caddr_t retval;
@@ -227,6 +230,7 @@ m_pad(struct mbuf *m, int n)
 int
 m_striphdr(struct mbuf *m, int skip, int hlen)
 {
+	INIT_VNET_IPSEC(curvnet);
 	struct mbuf *m1;
 	int roff;
 
@@ -238,7 +242,7 @@ m_striphdr(struct mbuf *m, int skip, int hlen)
 	/* Remove the header and associated data from the mbuf. */
 	if (roff == 0) {
 		/* The header was at the beginning of the mbuf */
-		ipsec4stat.ips_input_front++;
+		V_ipsec4stat.ips_input_front++;
 		m_adj(m1, hlen);
 		if ((m1->m_flags & M_PKTHDR) == 0)
 			m->m_pkthdr.len -= hlen;
@@ -250,7 +254,7 @@ m_striphdr(struct mbuf *m, int skip, int hlen)
 		 * so first let's remove the remainder of the header from
 		 * the beginning of the remainder of the mbuf chain, if any.
 		 */
-		ipsec4stat.ips_input_end++;
+		V_ipsec4stat.ips_input_end++;
 		if (roff + hlen > m1->m_len) {
 			/* Adjust the next mbuf by the remainder */
 			m_adj(m1->m_next, roff + hlen - m1->m_len);
@@ -275,7 +279,7 @@ m_striphdr(struct mbuf *m, int skip, int hlen)
 		 * The header lies in the "middle" of the mbuf; copy
 		 * the remainder of the mbuf down over the header.
 		 */
-		ipsec4stat.ips_input_middle++;
+		V_ipsec4stat.ips_input_middle++;
 		bcopy(mtod(m1, u_char *) + roff + hlen,
 		      mtod(m1, u_char *) + roff,
 		      m1->m_len - (roff + hlen));

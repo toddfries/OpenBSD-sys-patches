@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/sound/pcm/mixer.h,v 1.19 2007/06/16 03:37:28 ariff Exp $
+ * $FreeBSD: src/sys/dev/sound/pcm/mixer.h,v 1.20 2008/11/04 02:31:03 alfred Exp $
  */
 
 struct snd_mixer *mixer_create(device_t dev, kobj_class_t cls, void *devinfo,
@@ -56,6 +56,7 @@ void mix_setrealdev(struct snd_mixer *m, u_int32_t dev, u_int32_t realdev);
 u_int32_t mix_getparent(struct snd_mixer *m, u_int32_t dev);
 u_int32_t mix_getchild(struct snd_mixer *m, u_int32_t dev);
 void *mix_getdevinfo(struct snd_mixer *m);
+struct mtx *mixer_get_lock(struct snd_mixer *m);
 
 extern int mixer_count;
 

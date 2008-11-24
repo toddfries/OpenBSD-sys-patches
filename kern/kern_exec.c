@@ -25,11 +25,13 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_exec.c,v 1.309 2007/10/24 19:03:54 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_exec.c,v 1.326 2008/11/05 19:40:36 rodrigc Exp $");
 
 #include "opt_hwpmc_hooks.h"
+#include "opt_kdtrace.h"
 #include "opt_ktrace.h"
 #include "opt_mac.h"
+#include "opt_vm.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -53,12 +55,14 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_exec.c,v 1.309 2007/10/24 19:03:54 rwatson
 #include <sys/pioctl.h>
 #include <sys/namei.h>
 #include <sys/resourcevar.h>
+#include <sys/sdt.h>
 #include <sys/sf_buf.h>
 #include <sys/syscallsubr.h>
 #include <sys/sysent.h>
 #include <sys/shm.h>
 #include <sys/sysctl.h>
 #include <sys/vnode.h>
+#include <sys/stat.h>
 #ifdef KTRACE
 #include <sys/ktrace.h>
 #endif
@@ -81,6 +85,19 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_exec.c,v 1.309 2007/10/24 19:03:54 rwatson
 
 #include <security/audit/audit.h>
 #include <security/mac/mac_framework.h>
+
+#ifdef KDTRACE_HOOKS
+#include <sys/dtrace_bsd.h>
+dtrace_execexit_func_t	dtrace_fasttrap_exec;
+#endif
+
+SDT_PROVIDER_DECLARE(proc);
+SDT_PROBE_DEFINE(proc, kernel, , exec);
+SDT_PROBE_ARGTYPE(proc, kernel, , exec, 0, "char *");
+SDT_PROBE_DEFINE(proc, kernel, , exec_failure);
+SDT_PROBE_ARGTYPE(proc, kernel, , exec_failure, 0, "int");
+SDT_PROBE_DEFINE(proc, kernel, , exec_success);
+SDT_PROBE_ARGTYPE(proc, kernel, , exec_success, 0, "char *");
 
 MALLOC_DEFINE(M_PARGS, "proc-args", "Process arguments");
 
@@ -188,6 +205,28 @@ execve(td, uap)
 }
 
 #ifndef _SYS_SYSPROTO_H_
+struct fexecve_args {
+	int	fd;
+	char	**argv;
+	char	**envv;
+}
+#endif
+int
+fexecve(struct thread *td, struct fexecve_args *uap)
+{
+	int error;
+	struct image_args args;
+
+	error = exec_copyin_args(&args, NULL, UIO_SYSSPACE,
+	    uap->argv, uap->envv);
+	if (error == 0) {
+		args.fd = uap->fd;
+		error = kern_execve(td, &args, NULL);
+	}
+	return (error);
+}
+
+#ifndef _SYS_SYSPROTO_H_
 struct __mac_execve_args {
 	char	*fname;
 	char	**argv;
@@ -283,7 +322,7 @@ do_execve(td, args, mac_p)
 	struct ucred *newcred = NULL, *oldcred;
 	struct uidinfo *euip;
 	register_t *stack_base;
-	int error, len, i;
+	int error, len = 0, i;
 	struct image_params image_params, *imgp;
 	struct vattr attr;
 	int (*img_first)(struct image_params *);
@@ -293,17 +332,18 @@ do_execve(td, args, mac_p)
 	struct vnode *tracevp = NULL;
 	struct ucred *tracecred = NULL;
 #endif
-	struct vnode *textvp = NULL;
+	struct vnode *textvp = NULL, *binvp = NULL;
 	int credential_changing;
 	int vfslocked;
 	int textset;
 #ifdef MAC
-	struct label *interplabel = NULL;
+	struct label *interpvplabel = NULL;
 	int will_transition;
 #endif
 #ifdef HWPMC_HOOKS
 	struct pmckern_procexec pe;
 #endif
+	static const char fexecv_proc_title[] = "(fexecv)";
 
 	vfslocked = 0;
 	imgp = &image_params;
@@ -330,6 +370,7 @@ do_execve(td, args, mac_p)
 	imgp->entry_addr = 0;
 	imgp->vmspace_destroyed = 0;
 	imgp->interpreted = 0;
+	imgp->opened = 0;
 	imgp->interpreter_name = args->buf + PATH_MAX + ARG_MAX;
 	imgp->auxargs = NULL;
 	imgp->vp = NULL;
@@ -354,17 +395,33 @@ do_execve(td, args, mac_p)
 	 * XXXAUDIT: It would be desirable to also audit the name of the
 	 * interpreter if this is an interpreted binary.
 	 */
-	ndp = &nd;
-	NDINIT(ndp, LOOKUP, ISOPEN | LOCKLEAF | FOLLOW | SAVENAME | MPSAFE |
-	    AUDITVNODE1, UIO_SYSSPACE, args->fname, td);
+	if (args->fname != NULL) {
+		ndp = &nd;
+		NDINIT(ndp, LOOKUP, ISOPEN | LOCKLEAF | FOLLOW | SAVENAME
+		    | MPSAFE | AUDITVNODE1, UIO_SYSSPACE, args->fname, td);
+	}
+
+	SDT_PROBE(proc, kernel, , exec, args->fname, 0, 0, 0, 0 );
 
 interpret:
-	error = namei(ndp);
-	if (error)
-		goto exec_fail;
+	if (args->fname != NULL) {
+		error = namei(ndp);
+		if (error)
+			goto exec_fail;
 
-	vfslocked = NDHASGIANT(ndp);
-	imgp->vp = ndp->ni_vp;
+		vfslocked = NDHASGIANT(ndp);
+		binvp  = ndp->ni_vp;
+		imgp->vp = binvp;
+	} else {
+		AUDIT_ARG(fd, args->fd);
+		error = fgetvp(td, args->fd, &binvp);
+		if (error)
+			goto exec_fail;
+		vfslocked = VFS_LOCK_GIANT(binvp->v_mount);
+		vn_lock(binvp, LK_EXCLUSIVE | LK_RETRY);
+		AUDIT_ARG(vnode, binvp, ARG_VNODE1);
+		imgp->vp = binvp;
+	}
 
 	/*
 	 * Check file permissions (also 'opens' file)
@@ -391,6 +448,7 @@ interpret:
 	if (error)
 		goto exec_fail_dealloc;
 
+	imgp->proc->p_osrel = 0;
 	/*
 	 *	If the current process has a special image activator it
 	 *	wants to try first, call it.   For example, emulating shell
@@ -436,12 +494,16 @@ interpret:
 		 */
 		imgp->vp->v_vflag &= ~VV_TEXT;
 		/* free name buffer and old vnode */
-		NDFREE(ndp, NDF_ONLY_PNBUF);
+		if (args->fname != NULL)
+			NDFREE(ndp, NDF_ONLY_PNBUF);
 #ifdef MAC
-		interplabel = mac_vnode_label_alloc();
-		mac_vnode_copy_label(ndp->ni_vp->v_label, interplabel);
+		mac_execve_interpreter_enter(binvp, &interpvplabel);
 #endif
-		vput(ndp->ni_vp);
+		if (imgp->opened) {
+			VOP_CLOSE(binvp, FREAD, td->td_ucred, td);
+			imgp->opened = 0;
+		}
+		vput(binvp);
 		vm_object_deallocate(imgp->object);
 		imgp->object = NULL;
 		VFS_UNLOCK_GIANT(vfslocked);
@@ -449,9 +511,15 @@ interpret:
 		/* set new name to that of the interpreter */
 		NDINIT(ndp, LOOKUP, LOCKLEAF | FOLLOW | SAVENAME | MPSAFE,
 		    UIO_SYSSPACE, imgp->interpreter_name, td);
+		args->fname = imgp->interpreter_name;
 		goto interpret;
 	}
 
+	/*
+	 * NB: We unlock the vnode here because it is believed that none
+	 * of the sv_copyout_strings/sv_fixup operations require the vnode.
+	 */
+	VOP_UNLOCK(imgp->vp, 0);
 	/*
 	 * Copy out strings (args and env) and initialize stack base
 	 */
@@ -489,12 +557,11 @@ interpret:
 	}
 
 	/* close files on exec */
-	VOP_UNLOCK(imgp->vp, 0, td);
 	fdcloseexec(td);
-	vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY);
 
 	/* Get a reference to the vnode prior to locking the proc */
-	VREF(ndp->ni_vp);
+	VREF(binvp);
 
 	/*
 	 * For security and other reasons, signal handlers cannot
@@ -520,9 +587,20 @@ interpret:
 	execsigs(p);
 
 	/* name this process - nameiexec(p, ndp) */
-	len = min(ndp->ni_cnd.cn_namelen,MAXCOMLEN);
-	bcopy(ndp->ni_cnd.cn_nameptr, p->p_comm, len);
+	if (args->fname) {
+		len = min(ndp->ni_cnd.cn_namelen,MAXCOMLEN);
+		bcopy(ndp->ni_cnd.cn_nameptr, p->p_comm, len);
+	} else {
+		len = MAXCOMLEN;
+		if (vn_commname(binvp, p->p_comm, MAXCOMLEN + 1) == 0)
+			len = MAXCOMLEN;
+		else {
+			len = sizeof(fexecv_proc_title);
+			bcopy(fexecv_proc_title, p->p_comm, len);
+		}
+	}
 	p->p_comm[len] = 0;
+	bcopy(p->p_comm, td->td_name, sizeof(td->td_name));
 
 	/*
 	 * mark as execed, wakeup the process that vforked (if any) and tell
@@ -545,13 +623,13 @@ interpret:
 	 */
 	oldcred = p->p_ucred;
 	credential_changing = 0;
-	credential_changing |= (attr.va_mode & VSUID) && oldcred->cr_uid !=
+	credential_changing |= (attr.va_mode & S_ISUID) && oldcred->cr_uid !=
 	    attr.va_uid;
-	credential_changing |= (attr.va_mode & VSGID) && oldcred->cr_gid !=
+	credential_changing |= (attr.va_mode & S_ISGID) && oldcred->cr_gid !=
 	    attr.va_gid;
 #ifdef MAC
 	will_transition = mac_vnode_execve_will_transition(oldcred, imgp->vp,
-	    interplabel, imgp);
+	    interpvplabel, imgp);
 	credential_changing |= will_transition;
 #endif
 
@@ -588,9 +666,9 @@ interpret:
 		 */
 		PROC_UNLOCK(p);
 		setugidsafety(td);
-		VOP_UNLOCK(imgp->vp, 0, td);
+		VOP_UNLOCK(imgp->vp, 0);
 		error = fdcheckstd(td);
-		vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY, td);
+		vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY);
 		if (error != 0)
 			goto done1;
 		PROC_LOCK(p);
@@ -598,14 +676,14 @@ interpret:
 		 * Set the new credentials.
 		 */
 		crcopy(newcred, oldcred);
-		if (attr.va_mode & VSUID)
+		if (attr.va_mode & S_ISUID)
 			change_euid(newcred, euip);
-		if (attr.va_mode & VSGID)
+		if (attr.va_mode & S_ISGID)
 			change_egid(newcred, attr.va_gid);
 #ifdef MAC
 		if (will_transition) {
 			mac_vnode_execve_transition(oldcred, newcred, imgp->vp,
-			    interplabel, imgp);
+			    interpvplabel, imgp);
 		}
 #endif
 		/*
@@ -650,7 +728,16 @@ interpret:
 	 * to locking the proc lock.
 	 */
 	textvp = p->p_textvp;
-	p->p_textvp = ndp->ni_vp;
+	p->p_textvp = binvp;
+
+#ifdef KDTRACE_HOOKS
+	/*
+	 * Tell the DTrace fasttrap provider about the exec if it
+	 * has declared an interest.
+	 */
+	if (dtrace_fasttrap_exec)
+		dtrace_fasttrap_exec(p);
+#endif
 
 	/*
 	 * Notify others that we exec'd, and clear the P_INEXEC flag
@@ -711,7 +798,9 @@ interpret:
 		exec_setregs(td, imgp->entry_addr,
 		    (u_long)(uintptr_t)stack_base, imgp->ps_strings);
 
-	vfs_mark_atime(imgp->vp, td);
+	vfs_mark_atime(imgp->vp, td->td_ucred);
+
+	SDT_PROBE(proc, kernel, , exec_success, args->fname, 0, 0, 0, 0);
 
 done1:
 	/*
@@ -722,7 +811,8 @@ done1:
 		crfree(oldcred);
 	else
 		crfree(newcred);
-	VOP_UNLOCK(imgp->vp, 0, td);
+	VOP_UNLOCK(imgp->vp, 0);
+
 	/*
 	 * Handle deferred decrement of ref counts.
 	 */
@@ -733,8 +823,8 @@ done1:
 		vrele(textvp);
 		VFS_UNLOCK_GIANT(tvfslocked);
 	}
-	if (ndp->ni_vp && error != 0)
-		vrele(ndp->ni_vp);
+	if (binvp && error != 0)
+		vrele(binvp);
 #ifdef KTRACE
 	if (tracevp != NULL) {
 		int tvfslocked;
@@ -746,11 +836,9 @@ done1:
 	if (tracecred != NULL)
 		crfree(tracecred);
 #endif
-	vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY, td);
-	if (oldargs != NULL)
-		pargs_drop(oldargs);
-	if (newargs != NULL)
-		pargs_drop(newargs);
+	vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY);
+	pargs_drop(oldargs);
+	pargs_drop(newargs);
 	if (oldsigacts != NULL)
 		sigacts_free(oldsigacts);
 
@@ -763,7 +851,10 @@ exec_fail_dealloc:
 		exec_unmap_first_page(imgp);
 
 	if (imgp->vp != NULL) {
-		NDFREE(ndp, NDF_ONLY_PNBUF);
+		if (args->fname)
+			NDFREE(ndp, NDF_ONLY_PNBUF);
+		if (imgp->opened)
+			VOP_CLOSE(imgp->vp, FREAD, td->td_ucred, td);
 		vput(imgp->vp);
 	}
 
@@ -785,11 +876,12 @@ exec_fail:
 	p->p_flag &= ~P_INEXEC;
 	PROC_UNLOCK(p);
 
+	SDT_PROBE(proc, kernel, , exec_failure, error, 0, 0, 0, 0);
+
 done2:
 #ifdef MAC
 	mac_execve_exit(imgp);
-	if (interplabel != NULL)
-		mac_vnode_label_free(interplabel);
+	mac_execve_interpreter_exit(interpvplabel);
 #endif
 	VFS_UNLOCK_GIANT(vfslocked);
 	exec_free_args(args);
@@ -818,6 +910,12 @@ exec_map_first_page(imgp)
 	if (object == NULL)
 		return (EACCES);
 	VM_OBJECT_LOCK(object);
+#if VM_NRESERVLEVEL > 0
+	if ((object->flags & OBJ_COLORED) == 0) {
+		object->flags |= OBJ_COLORED;
+		object->pg_color = 0;
+	}
+#endif
 	ma[0] = vm_page_grab(object, 0, VM_ALLOC_NORMAL | VM_ALLOC_RETRY);
 	if ((ma[0]->valid & VM_PAGE_BITS_ALL) != VM_PAGE_BITS_ALL) {
 		initial_pagein = VM_INITIAL_PAGEIN;
@@ -914,7 +1012,9 @@ exec_new_vmspace(imgp, sv)
 		pmap_remove_pages(vmspace_pmap(vmspace));
 		vm_map_remove(map, vm_map_min(map), vm_map_max(map));
 	} else {
-		vmspace_exec(p, sv->sv_minuser, sv->sv_maxuser);
+		error = vmspace_exec(p, sv->sv_minuser, sv->sv_maxuser);
+		if (error)
+			return (error);
 		vmspace = p->p_vmspace;
 		map = &vmspace->vm_map;
 	}
@@ -980,17 +1080,18 @@ exec_copyin_args(struct image_args *args, char *fname,
 	args->begin_argv = args->buf;
 	args->endp = args->begin_argv;
 	args->stringspace = ARG_MAX;
-
-	args->fname = args->buf + ARG_MAX;
-
 	/*
 	 * Copy the file name.
 	 */
-	error = (segflg == UIO_SYSSPACE) ?
-	    copystr(fname, args->fname, PATH_MAX, &length) :
-	    copyinstr(fname, args->fname, PATH_MAX, &length);
-	if (error != 0)
-		goto err_exit;
+	if (fname != NULL) {
+		args->fname = args->buf + ARG_MAX;
+		error = (segflg == UIO_SYSSPACE) ?
+		    copystr(fname, args->fname, PATH_MAX, &length) :
+		    copyinstr(fname, args->fname, PATH_MAX, &length);
+		if (error != 0)
+			goto err_exit;
+	} else
+		args->fname = NULL;
 
 	/*
 	 * extract arguments first
@@ -1183,10 +1284,10 @@ exec_check_permissions(imgp)
 	struct thread *td;
 	int error;
 
-	td = curthread;			/* XXXKSE */
+	td = curthread;
 
 	/* Get file attributes */
-	error = VOP_GETATTR(vp, attr, td->td_ucred, td);
+	error = VOP_GETATTR(vp, attr, td->td_ucred);
 	if (error)
 		return (error);
 
@@ -1234,6 +1335,8 @@ exec_check_permissions(imgp)
 	 * general case).
 	 */
 	error = VOP_OPEN(vp, FREAD, td->td_ucred, td, NULL);
+	if (error == 0)
+		imgp->opened = 1;
 	return (error);
 }
 

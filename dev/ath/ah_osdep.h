@@ -26,7 +26,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGES.
  *
- * $FreeBSD: src/sys/dev/ath/ah_osdep.h,v 1.3 2008/04/20 20:35:35 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ah_osdep.h,v 1.4 2008/05/31 22:44:06 sam Exp $
  */
 #ifndef _ATH_AH_OSDEP_H_
 #define _ATH_AH_OSDEP_H_
@@ -87,8 +87,11 @@ extern	u_int32_t ath_hal_reg_read(struct ath_hal *ah, u_int reg);
 #define	AH_BIG_ENDIAN		4321
 
 #if _BYTE_ORDER == _BIG_ENDIAN
+#define	OS_REG_UNSWAPPED(_reg) \
+	(((_reg) >= 0x4000 && (_reg) < 0x5000) || \
+	 ((_reg) >= 0x7000 && (_reg) < 0x8000))
 #define OS_REG_WRITE(_ah, _reg, _val) do {				\
-	if ( (_reg) >= 0x4000 && (_reg) < 0x5000)			\
+	if (OS_REG_UNSWAPPED(_reg))					\
 		bus_space_write_4((bus_space_tag_t)(_ah)->ah_st,	\
 		    (bus_space_handle_t)(_ah)->ah_sh, (_reg), (_val));	\
 	else								\
@@ -96,12 +99,13 @@ extern	u_int32_t ath_hal_reg_read(struct ath_hal *ah, u_int reg);
 		    (bus_space_handle_t)(_ah)->ah_sh, (_reg), (_val));	\
 } while (0)
 #define OS_REG_READ(_ah, _reg)						\
-	(((_reg) >= 0x4000 && (_reg) < 0x5000) ?			\
+	(OS_REG_UNSWAPPED(_reg) ?					\
 		bus_space_read_4((bus_space_tag_t)(_ah)->ah_st,		\
 		    (bus_space_handle_t)(_ah)->ah_sh, (_reg)) :		\
 		bus_space_read_stream_4((bus_space_tag_t)(_ah)->ah_st,	\
 		    (bus_space_handle_t)(_ah)->ah_sh, (_reg)))
 #else /* _BYTE_ORDER == _LITTLE_ENDIAN */
+#define	OS_REG_UNSWAPPED(_reg)	(0)
 #define	OS_REG_WRITE(_ah, _reg, _val)					\
 	bus_space_write_4((bus_space_tag_t)(_ah)->ah_st,		\
 	    (bus_space_handle_t)(_ah)->ah_sh, (_reg), (_val))

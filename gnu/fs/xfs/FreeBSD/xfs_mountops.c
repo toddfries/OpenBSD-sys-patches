@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/gnu/fs/xfs/FreeBSD/xfs_mountops.c,v 1.10 2007/08/20 15:33:22 cognet Exp $
+ * $FreeBSD: src/sys/gnu/fs/xfs/FreeBSD/xfs_mountops.c,v 1.13 2008/10/10 21:23:50 attilio Exp $
  */
 
 #include <sys/param.h>
@@ -199,6 +199,8 @@ _xfs_mount(struct mount		*mp,
 
 	if (mp->mnt_flag & MNT_UPDATE)
 		return (0);
+	if ((mp->mnt_flag & MNT_RDONLY) == 0)
+		return (EPERM);
 
         xmp = xfsmount_allocate(mp);
         if (xmp == NULL)
@@ -244,7 +246,7 @@ _xfs_mount(struct mount		*mp,
 		if (cp != NULL) {
 			DROP_GIANT();
 			g_topology_lock();
-			g_vfs_close(cp, td);
+			g_vfs_close(cp);
 			g_topology_unlock();
 			PICKUP_GIANT();
 		}
@@ -281,7 +283,7 @@ _xfs_unmount(mp, mntflags, td)
 		if (cp != NULL) {
 			DROP_GIANT();
 			g_topology_lock();
-			g_vfs_close(cp, td);
+			g_vfs_close(cp);
 			g_topology_unlock();
 			PICKUP_GIANT();
 		}
@@ -302,7 +304,7 @@ _xfs_root(mp, flags, vpp, td)
         XVFS_ROOT(MNTTOVFS(mp), &vp, error);
 	if (error == 0) {
 		*vpp = vp->v_vnode;
-		VOP_LOCK(*vpp, flags, curthread);
+		VOP_LOCK(*vpp, flags);
 	}
 	return (error);
 }
@@ -481,9 +483,10 @@ xfs_geom_bufwrite(struct buf *bp)
 }
 
 static int
-xfs_geom_bufsync(struct bufobj *bo, int waitfor, struct thread *td)
+xfs_geom_bufsync(struct bufobj *bo, int waitfor)
 {
-	return bufsync(bo,waitfor,td);
+
+	return (bufsync(bo, waitfor));
 }
 
 static void

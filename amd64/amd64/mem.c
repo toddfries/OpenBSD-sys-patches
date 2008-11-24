@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/mem.c,v 1.121 2004/08/07 06:21:37 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/mem.c,v 1.124 2008/09/27 08:51:18 ed Exp $");
 
 /*
  * Memory special file
@@ -67,6 +67,11 @@ __FBSDID("$FreeBSD: src/sys/amd64/amd64/mem.c,v 1.121 2004/08/07 06:21:37 scottl
 
 #include <machine/memdev.h>
 
+/*
+ * Used in /dev/mem drivers and elsewhere
+ */
+MALLOC_DEFINE(M_MEMDESC, "memdesc", "memory range descriptors");
+
 /* ARGSUSED */
 int
 memrw(struct cdev *dev, struct uio *uio, int flags)
@@ -88,7 +93,7 @@ memrw(struct cdev *dev, struct uio *uio, int flags)
 				panic("memrw");
 			continue;
 		}
-		if (minor(dev) == CDEV_MINOR_MEM) {
+		if (dev2unit(dev) == CDEV_MINOR_MEM) {
 			v = uio->uio_offset;
 kmemphys:
 			o = v & PAGE_MASK;
@@ -96,7 +101,7 @@ kmemphys:
 			error = uiomove((void *)PHYS_TO_DMAP(v), (int)c, uio);
 			continue;
 		}
-		else if (minor(dev) == CDEV_MINOR_KMEM) {
+		else if (dev2unit(dev) == CDEV_MINOR_KMEM) {
 			v = uio->uio_offset;
 
 			if (v >= DMAP_MIN_ADDRESS && v < DMAP_MAX_ADDRESS) {
@@ -114,7 +119,7 @@ kmemphys:
 			addr = trunc_page(v);
 			eaddr = round_page(v + c);
 
-			if (addr < (vm_offset_t)KERNBASE)
+			if (addr < VM_MIN_KERNEL_ADDRESS)
 				return (EFAULT);
 			for (; addr < eaddr; addr += PAGE_SIZE) 
 				if (pmap_extract(kernel_pmap, addr) == 0)
@@ -142,9 +147,9 @@ int
 memmmap(struct cdev *dev, vm_offset_t offset, vm_paddr_t *paddr,
     int prot __unused)
 {
-	if (minor(dev) == CDEV_MINOR_MEM)
+	if (dev2unit(dev) == CDEV_MINOR_MEM)
 		*paddr = offset;
-	else if (minor(dev) == CDEV_MINOR_KMEM)
+	else if (dev2unit(dev) == CDEV_MINOR_KMEM)
         	*paddr = vtophys(offset);
 	/* else panic! */
 	return (0);

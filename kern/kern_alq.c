@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_alq.c,v 1.20 2007/10/24 19:03:54 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_alq.c,v 1.24 2008/07/02 20:44:33 rdivacky Exp $");
 
 #include "opt_mac.h"
 
@@ -224,9 +224,7 @@ alq_shutdown(struct alq *alq)
 	/* Drain IO */
 	while (alq->aq_flags & (AQ_FLUSHING|AQ_ACTIVE)) {
 		alq->aq_flags |= AQ_WANTED;
-		ALQ_UNLOCK(alq);
-		tsleep(alq, PWAIT, "aldclose", 0);
-		ALQ_LOCK(alq);
+		msleep_spin(alq, &alq->aq_mtx, "aldclose", 0);
 	}
 	ALQ_UNLOCK(alq);
 
@@ -294,7 +292,7 @@ alq_doio(struct alq *alq)
 	 */
 	vfslocked = VFS_LOCK_GIANT(vp->v_mount);
 	vn_start_write(vp, &mp, V_WAIT);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	VOP_LEASE(vp, td, alq->aq_cred, LEASE_WRITE);
 	/*
 	 * XXX: VOP_WRITE error checks are ignored.
@@ -303,7 +301,7 @@ alq_doio(struct alq *alq)
 	if (mac_vnode_check_write(alq->aq_cred, NOCRED, vp) == 0)
 #endif
 		VOP_WRITE(vp, &auio, IO_UNIT | IO_APPEND, alq->aq_cred);
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	vn_finished_write(mp);
 	VFS_UNLOCK_GIANT(vfslocked);
 
@@ -327,8 +325,8 @@ static struct kproc_desc ald_kp = {
         &ald_proc
 };
 
-SYSINIT(aldthread, SI_SUB_KTHREAD_IDLE, SI_ORDER_ANY, kproc_start, &ald_kp)
-SYSINIT(ald, SI_SUB_LOCK, SI_ORDER_ANY, ald_startup, NULL)
+SYSINIT(aldthread, SI_SUB_KTHREAD_IDLE, SI_ORDER_ANY, kproc_start, &ald_kp);
+SYSINIT(ald, SI_SUB_LOCK, SI_ORDER_ANY, ald_startup, NULL);
 
 
 /* User visible queue functions */
@@ -363,7 +361,7 @@ alq_open(struct alq **alqp, const char *file, struct ucred *cred, int cmode,
 	vfslocked = NDHASGIANT(&nd);
 	NDFREE(&nd, NDF_ONLY_PNBUF);
 	/* We just unlock so we hold a reference */
-	VOP_UNLOCK(nd.ni_vp, 0, td);
+	VOP_UNLOCK(nd.ni_vp, 0);
 	VFS_UNLOCK_GIANT(vfslocked);
 
 	alq = malloc(sizeof(*alq), M_ALD, M_WAITOK|M_ZERO);
@@ -433,9 +431,7 @@ alq_get(struct alq *alq, int waitok)
 	    (ale = alq->aq_entfree) == NULL &&
 	    (waitok & ALQ_WAITOK)) {
 		alq->aq_flags |= AQ_WANTED;
-		ALQ_UNLOCK(alq);
-		tsleep(alq, PWAIT, "alqget", 0);
-		ALQ_LOCK(alq);
+		msleep_spin(alq, &alq->aq_mtx, "alqget", 0);
 	}
 
 	if (ale != NULL) {

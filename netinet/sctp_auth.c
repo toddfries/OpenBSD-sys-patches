@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_auth.c,v 1.18 2007/09/08 11:35:10 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_auth.c,v 1.20 2008/06/14 07:58:05 rrs Exp $");
 
 #include <netinet/sctp_os.h>
 #include <netinet/sctp.h>
@@ -43,8 +43,8 @@ __FBSDID("$FreeBSD: src/sys/netinet/sctp_auth.c,v 1.18 2007/09/08 11:35:10 rrs E
 #include <netinet/sctp_auth.h>
 
 #ifdef SCTP_DEBUG
-#define SCTP_AUTH_DEBUG		(sctp_debug_on & SCTP_DEBUG_AUTH1)
-#define SCTP_AUTH_DEBUG2	(sctp_debug_on & SCTP_DEBUG_AUTH2)
+#define SCTP_AUTH_DEBUG		(SCTP_BASE_SYSCTL(sctp_debug_on) & SCTP_DEBUG_AUTH1)
+#define SCTP_AUTH_DEBUG2	(SCTP_BASE_SYSCTL(sctp_debug_on) & SCTP_DEBUG_AUTH2)
 #endif				/* SCTP_DEBUG */
 
 
@@ -1807,6 +1807,14 @@ sctp_notify_authentication(struct sctp_tcb *stcb, uint32_t indication,
 	struct sctp_authkey_event *auth;
 	struct sctp_queued_to_read *control;
 
+	if ((stcb == NULL) ||
+	    (stcb->sctp_ep->sctp_flags & SCTP_PCB_FLAGS_SOCKET_GONE) ||
+	    (stcb->sctp_ep->sctp_flags & SCTP_PCB_FLAGS_SOCKET_ALLGONE) ||
+	    (stcb->asoc.state & SCTP_STATE_CLOSED_SOCKET)
+	    ) {
+		/* If the socket is gone we are out of here */
+		return;
+	}
 	if (sctp_is_feature_off(stcb->sctp_ep, SCTP_PCB_FLAGS_AUTHEVNT))
 		/* event not enabled */
 		return;
@@ -1980,7 +1988,7 @@ sctp_validate_init_auth_params(struct mbuf *m, int offset, int limit)
 		    "SCTP: peer sent chunk list w/o AUTH\n");
 		return (-1);
 	}
-	if (!sctp_asconf_auth_nochk && peer_supports_asconf &&
+	if (!SCTP_BASE_SYSCTL(sctp_asconf_auth_nochk) && peer_supports_asconf &&
 	    !peer_supports_auth) {
 		SCTPDBG(SCTP_DEBUG_AUTH1,
 		    "SCTP: peer supports ASCONF but not AUTH\n");

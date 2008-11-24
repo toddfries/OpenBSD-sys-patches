@@ -28,7 +28,7 @@
  */
 
 static const char rcs_id[] =
-    "@(#) $FreeBSD: src/sys/netgraph/netflow/netflow.c,v 1.25 2007/08/06 14:26:01 rwatson Exp $";
+    "@(#) $FreeBSD: src/sys/netgraph/netflow/netflow.c,v 1.32 2008/10/23 20:26:15 des Exp $";
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -237,9 +237,9 @@ static __inline int
 hash_insert(priv_p priv, struct flow_hash_entry  *hsh, struct flow_rec *r,
 	int plen, uint8_t tcp_flags)
 {
-	struct flow_entry	*fle;
-	struct route ro;
-	struct sockaddr_in *sin;
+	struct flow_entry *fle;
+	struct sockaddr_in sin;
+	struct rtentry *rt;
 
 	mtx_assert(&hsh->mtx, MA_OWNED);
 
@@ -265,15 +265,13 @@ hash_insert(priv_p priv, struct flow_hash_entry  *hsh, struct flow_rec *r,
 	 * First we do route table lookup on destination address. So we can
 	 * fill in out_ifx, dst_mask, nexthop, and dst_as in future releases.
 	 */
-	bzero((caddr_t)&ro, sizeof(ro));
-	sin = (struct sockaddr_in *)&ro.ro_dst;
-	sin->sin_len = sizeof(*sin);
-	sin->sin_family = AF_INET;
-	sin->sin_addr = fle->f.r.r_dst;
-	rtalloc_ign(&ro, RTF_CLONING);
-	if (ro.ro_rt != NULL) {
-		struct rtentry *rt = ro.ro_rt;
-
+	bzero(&sin, sizeof(sin));
+	sin.sin_len = sizeof(struct sockaddr_in);
+	sin.sin_family = AF_INET;
+	sin.sin_addr = fle->f.r.r_dst;
+	/* XXX MRT 0 as a default.. need the m here to get fib */
+	rt = rtalloc1_fib((struct sockaddr *)&sin, 0, RTF_CLONING, 0);
+	if (rt != NULL) {
 		fle->f.fle_o_ifx = rt->rt_ifp->if_index;
 
 		if (rt->rt_flags & RTF_GATEWAY &&
@@ -288,20 +286,17 @@ hash_insert(priv_p priv, struct flow_hash_entry  *hsh, struct flow_rec *r,
 			/* Give up. We can't determine mask :( */
 			fle->f.dst_mask = 32;
 
-		RTFREE(ro.ro_rt);
+		RTFREE_LOCKED(rt);
 	}
 
 	/* Do route lookup on source address, to fill in src_mask. */
-
-	bzero((caddr_t)&ro, sizeof(ro));
-	sin = (struct sockaddr_in *)&ro.ro_dst;
-	sin->sin_len = sizeof(*sin);
-	sin->sin_family = AF_INET;
-	sin->sin_addr = fle->f.r.r_src;
-	rtalloc_ign(&ro, RTF_CLONING);
-	if (ro.ro_rt != NULL) {
-		struct rtentry *rt = ro.ro_rt;
-
+	bzero(&sin, sizeof(sin));
+	sin.sin_len = sizeof(struct sockaddr_in);
+	sin.sin_family = AF_INET;
+	sin.sin_addr = fle->f.r.r_src;
+	/* XXX MRT 0 as a default  revisit.  need the mbuf for fib*/
+	rt = rtalloc1_fib((struct sockaddr *)&sin, 0, RTF_CLONING, 0);
+	if (rt != NULL) {
 		if (rt_mask(rt))
 			fle->f.src_mask = bitcount32(((struct sockaddr_in *)
 			    rt_mask(rt))->sin_addr.s_addr);
@@ -309,7 +304,7 @@ hash_insert(priv_p priv, struct flow_hash_entry  *hsh, struct flow_rec *r,
 			/* Give up. We can't determine mask :( */
 			fle->f.src_mask = 32;
 
-		RTFREE(ro.ro_rt);
+		RTFREE_LOCKED(rt);
 	}
 
 	/* Push new flow at the and of hash. */
@@ -336,8 +331,7 @@ ng_netflow_cache_init(priv_p priv)
 	uma_zone_set_max(priv->zone, CACHESIZE);
 
 	/* Allocate hash. */
-	MALLOC(priv->hash, struct flow_hash_entry *,
-	    NBUCKETS * sizeof(struct flow_hash_entry),
+	priv->hash = malloc(NBUCKETS * sizeof(struct flow_hash_entry),
 	    M_NETFLOW_HASH, M_WAITOK | M_ZERO);
 
 	if (priv->hash == NULL) {
@@ -387,15 +381,14 @@ ng_netflow_cache_flush(priv_p priv)
 
 	/* Free hash memory. */
 	if (priv->hash)
-		FREE(priv->hash, M_NETFLOW_HASH);
+		free(priv->hash, M_NETFLOW_HASH);
 
 	mtx_destroy(&priv->export_mtx);
 }
 
 /* Insert packet from into flow cache. */
 int
-ng_netflow_flow_add(priv_p priv, struct ip *ip, iface_p iface,
-	struct ifnet *ifp)
+ng_netflow_flow_add(priv_p priv, struct ip *ip, unsigned int src_if_index)
 {
 	register struct flow_entry	*fle, *fle1;
 	struct flow_hash_entry		*hsh;
@@ -426,12 +419,7 @@ ng_netflow_flow_add(priv_p priv, struct ip *ip, iface_p iface,
 	r.r_ip_p = ip->ip_p;
 	r.r_tos = ip->ip_tos;
 
-	/* Configured in_ifx overrides mbuf's */
-	if (iface->info.ifinfo_index == 0) {
-		if (ifp != NULL)
-			r.r_i_ifx = ifp->if_index;
-	} else
-		r.r_i_ifx = iface->info.ifinfo_index;
+	r.r_i_ifx = src_if_index;
 
 	/*
 	 * XXX NOTE: only first fragment of fragmented TCP, UDP and
@@ -617,6 +605,8 @@ export_send(priv_p priv, item_p item, int flags)
 
 	if (priv->export != NULL)
 		NG_FWD_ITEM_HOOK_FLAGS(error, item, priv->export, flags);
+	else
+		NG_FREE_ITEM(item);
 
 	return (error);
 }
@@ -631,13 +621,8 @@ export_add(item_p item, struct flow_entry *fle)
 	struct netflow_v5_header *header = &dgram->header;
 	struct netflow_v5_record *rec;
 
-	if (header->count == 0 ) {	/* first record */
-		rec = &dgram->r[0];
-		header->count = 1;
-	} else {			/* continue filling datagram */
-		rec = &dgram->r[header->count];
-		header->count ++;
-	}
+	rec = &dgram->r[header->count];
+	header->count ++;
 
 	KASSERT(header->count <= NETFLOW_V5_MAX_RECORDS,
 	    ("ng_netflow: export too big"));

@@ -1,6 +1,6 @@
 /**************************************************************************
 
-Copyright (c) 2007, Chelsio Inc.
+Copyright (c) 2007-2008, Chelsio Inc.
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -28,7 +28,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_ddp.c,v 1.3 2008/04/19 03:22:42 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_ddp.c,v 1.9 2008/09/30 23:45:22 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -42,7 +42,10 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_ddp.c,v 1.3 2008/04/19 03:22:4
 #include <sys/condvar.h>
 #include <sys/mutex.h>
 #include <sys/proc.h>
+#include <sys/sockstate.h>
+#include <sys/sockopt.h>
 #include <sys/socket.h>
+#include <sys/sockbuf.h>
 #include <sys/syslog.h>
 #include <sys/uio.h>
 
@@ -57,22 +60,22 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_ddp.c,v 1.3 2008/04/19 03:22:4
 #include <netinet/in_var.h>
 
 
-#include <dev/cxgb/cxgb_osdep.h>
-#include <dev/cxgb/sys/mbufq.h>
+#include <cxgb_osdep.h>
+#include <sys/mbufq.h>
 
-#include <dev/cxgb/ulp/tom/cxgb_tcp_offload.h>
+#include <ulp/tom/cxgb_tcp_offload.h>
 #include <netinet/tcp.h>
 #include <netinet/tcp_var.h>
 #include <netinet/tcp_fsm.h>
 #include <netinet/tcp_offload.h>
 #include <net/route.h>
 
-#include <dev/cxgb/t3cdev.h>
-#include <dev/cxgb/common/cxgb_firmware_exports.h>
-#include <dev/cxgb/common/cxgb_t3_cpl.h>
-#include <dev/cxgb/common/cxgb_tcb.h>
-#include <dev/cxgb/common/cxgb_ctl_defs.h>
-#include <dev/cxgb/cxgb_offload.h>
+#include <t3cdev.h>
+#include <common/cxgb_firmware_exports.h>
+#include <common/cxgb_t3_cpl.h>
+#include <common/cxgb_tcb.h>
+#include <common/cxgb_ctl_defs.h>
+#include <cxgb_offload.h>
 
 #include <vm/vm.h>
 #include <vm/vm_page.h>
@@ -80,14 +83,14 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_ddp.c,v 1.3 2008/04/19 03:22:4
 #include <vm/vm_extern.h>
 #include <vm/pmap.h>
 
-#include <dev/cxgb/sys/mvec.h>
-#include <dev/cxgb/ulp/toecore/cxgb_toedev.h>
-#include <dev/cxgb/ulp/tom/cxgb_defs.h>
-#include <dev/cxgb/ulp/tom/cxgb_tom.h>
-#include <dev/cxgb/ulp/tom/cxgb_t3_ddp.h>
-#include <dev/cxgb/ulp/tom/cxgb_toepcb.h>
-#include <dev/cxgb/ulp/tom/cxgb_tcp.h>
-#include <dev/cxgb/ulp/tom/cxgb_vm.h>
+#include <sys/mvec.h>
+#include <ulp/toecore/cxgb_toedev.h>
+#include <ulp/tom/cxgb_defs.h>
+#include <ulp/tom/cxgb_tom.h>
+#include <ulp/tom/cxgb_t3_ddp.h>
+#include <ulp/tom/cxgb_toepcb.h>
+#include <ulp/tom/cxgb_tcp.h>
+#include <ulp/tom/cxgb_vm.h>
 
 
 #define MAX_SCHEDULE_TIMEOUT	300
@@ -117,7 +120,7 @@ pages2ppods(unsigned int pages)
  *	a new gather list was allocated it is returned in @newgl.
  */ 
 static int
-t3_pin_pages(bus_dma_tag_t tag, bus_dmamap_t map, vm_offset_t addr,
+t3_pin_pages(bus_dma_tag_t tag, bus_dmamap_t dmamap, vm_offset_t addr,
     size_t len, struct ddp_gather_list **newgl,
     const struct ddp_gather_list *gl)
 {
@@ -125,13 +128,16 @@ t3_pin_pages(bus_dma_tag_t tag, bus_dmamap_t map, vm_offset_t addr,
 	size_t pg_off;
 	unsigned int npages;
 	struct ddp_gather_list *p;
-
+	vm_map_t map;
+	
 	/*
 	 * XXX need x86 agnostic check
 	 */
 	if (addr + len > VM_MAXUSER_ADDRESS)
 		return (EFAULT);
 
+
+	
 	pg_off = addr & PAGE_MASK;
 	npages = (pg_off + len + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	p = malloc(sizeof(struct ddp_gather_list) + npages * sizeof(vm_page_t *),
@@ -139,7 +145,9 @@ t3_pin_pages(bus_dma_tag_t tag, bus_dmamap_t map, vm_offset_t addr,
 	if (p == NULL)
 		return (ENOMEM);
 
-	err = vm_fault_hold_user_pages(addr, p->dgl_pages, npages, VM_HOLD_WRITEABLE);
+	map = &curthread->td_proc->p_vmspace->vm_map;
+	err = vm_fault_hold_user_pages(map, addr, p->dgl_pages, npages,
+	    VM_PROT_READ | VM_PROT_WRITE);
 	if (err)
 		goto free_gl;
 
@@ -677,7 +685,7 @@ err:
 int
 t3_ddp_copy(const struct mbuf *m, int offset, struct uio *uio, int len)
 {
-	int page_off, resid_init, err;
+	int resid_init, err;
 	struct ddp_gather_list *gl = (struct ddp_gather_list *)m->m_ddp_gl;
 	
 	resid_init = uio->uio_resid;
@@ -685,12 +693,14 @@ t3_ddp_copy(const struct mbuf *m, int offset, struct uio *uio, int len)
 	if (!gl->dgl_pages)
 		panic("pages not set\n");
 
+	CTR4(KTR_TOM, "t3_ddp_copy: offset=%d dgl_offset=%d cur_offset=%d len=%d",
+	    offset, gl->dgl_offset, m->m_cur_offset, len);
 	offset += gl->dgl_offset + m->m_cur_offset;
-	page_off = offset & PAGE_MASK;
 	KASSERT(len <= gl->dgl_length,
 	    ("len=%d > dgl_length=%d in ddp_copy\n", len, gl->dgl_length));
 
-	err = uiomove_fromphys(gl->dgl_pages, page_off, len, uio);
+
+	err = uiomove_fromphys(gl->dgl_pages, offset, len, uio);
 	return (err);
 }
 

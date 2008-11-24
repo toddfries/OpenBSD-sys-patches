@@ -46,7 +46,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia64/pmap.c,v 1.191 2007/08/04 19:36:14 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia64/pmap.c,v 1.202 2008/05/22 06:27:46 marcel Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -118,8 +118,6 @@ __FBSDID("$FreeBSD: src/sys/ia64/ia64/pmap.c,v 1.191 2007/08/04 19:36:14 marcel 
 /* XXX move to a header. */
 extern uint64_t ia64_gateway_page[];
 
-MALLOC_DEFINE(M_PMAP, "PMAP", "PMAP Structures");
-
 #ifndef PMAP_SHPGPERPROC
 #define PMAP_SHPGPERPROC 200
 #endif
@@ -132,6 +130,7 @@ MALLOC_DEFINE(M_PMAP, "PMAP", "PMAP Structures");
 
 #define	pmap_accessed(lpte)		((lpte)->pte & PTE_ACCESSED)
 #define	pmap_dirty(lpte)		((lpte)->pte & PTE_DIRTY)
+#define	pmap_exec(lpte)			((lpte)->pte & PTE_AR_RX)
 #define	pmap_managed(lpte)		((lpte)->pte & PTE_MANAGED)
 #define	pmap_ppn(lpte)			((lpte)->pte & PTE_PPN_MASK)
 #define	pmap_present(lpte)		((lpte)->pte & PTE_PRESENT)
@@ -440,7 +439,7 @@ pmap_bootstrap()
 		pte[i].chain = (uintptr_t)(pmap_vhpt_bucket + i);
 		/* Stolen memory is zeroed! */
 		mtx_init(&pmap_vhpt_bucket[i].mutex, "VHPT bucket lock", NULL,
-		    MTX_SPIN);
+		    MTX_NOWITNESS | MTX_SPIN);
 	}
 
 	for (i = 1; i < MAXCPU; i++) {
@@ -545,53 +544,6 @@ pmap_init(void)
 /***************************************************
  * Manipulate TLBs for a pmap
  ***************************************************/
-
-#if 0
-static __inline void
-pmap_invalidate_page_locally(void *arg)
-{
-	vm_offset_t va = (uintptr_t)arg;
-	struct ia64_lpte *pte;
-
-	pte = (struct ia64_lpte *)ia64_thash(va);
-	if (pte->tag == ia64_ttag(va))
-		pte->tag = 1UL << 63;
-	ia64_ptc_l(va, PAGE_SHIFT << 2);
-}
-
-#ifdef SMP
-static void
-pmap_invalidate_page_1(void *arg)
-{
-	void **args = arg;
-	pmap_t oldpmap;
-
-	critical_enter();
-	oldpmap = pmap_switch(args[0]);
-	pmap_invalidate_page_locally(args[1]);
-	pmap_switch(oldpmap);
-	critical_exit();
-}
-#endif
-
-static void
-pmap_invalidate_page(pmap_t pmap, vm_offset_t va)
-{
-
-	KASSERT((pmap == kernel_pmap || pmap == PCPU_GET(current_pmap)),
-		("invalidating TLB for non-current pmap"));
-
-#ifdef SMP
-	if (mp_ncpus > 1) {
-		void *args[2];
-		args[0] = pmap;
-		args[1] = (void *)va;
-		smp_rendezvous(NULL, pmap_invalidate_page_1, NULL, args);
-	} else
-#endif
-	pmap_invalidate_page_locally((void *)va);
-}
-#endif /* 0 */
 
 static void
 pmap_invalidate_page(pmap_t pmap, vm_offset_t va)
@@ -710,7 +662,7 @@ pmap_pinit0(struct pmap *pmap)
  * Initialize a preallocated and zeroed pmap structure,
  * such as one in a vmspace structure.
  */
-void
+int
 pmap_pinit(struct pmap *pmap)
 {
 	int i;
@@ -721,6 +673,7 @@ pmap_pinit(struct pmap *pmap)
 	pmap->pm_active = 0;
 	TAILQ_INIT(&pmap->pm_pvlist);
 	bzero(&pmap->pm_stats, sizeof pmap->pm_stats);
+	return (1);
 }
 
 /***************************************************
@@ -1457,11 +1410,10 @@ pmap_remove_all(vm_page_t m)
 
 #if defined(DIAGNOSTIC)
 	/*
-	 * XXX this makes pmap_page_protect(NONE) illegal for non-managed
-	 * pages!
+	 * XXX This makes pmap_remove_all() illegal for non-managed pages!
 	 */
 	if (m->flags & PG_FICTITIOUS) {
-		panic("pmap_page_protect: illegal for unmanaged page, va: 0x%lx", VM_PAGE_TO_PHYS(m));
+		panic("pmap_remove_all: illegal for unmanaged page, va: 0x%lx", VM_PAGE_TO_PHYS(m));
 	}
 #endif
 	mtx_assert(&vm_page_queue_mtx, MA_OWNED);
@@ -1508,34 +1460,36 @@ pmap_protect(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, vm_prot_t prot)
 	vm_page_lock_queues();
 	PMAP_LOCK(pmap);
 	oldpmap = pmap_switch(pmap);
-	while (sva < eva) {
-		/* 
-		 * If page is invalid, skip this page
-		 */
+	for ( ; sva < eva; sva += PAGE_SIZE) {
+		/* If page is invalid, skip this page */
 		pte = pmap_find_vhpt(sva);
-		if (pte == NULL) {
-			sva += PAGE_SIZE;
+		if (pte == NULL)
 			continue;
-		}
 
-		if (pmap_prot(pte) != prot) {
-			if (pmap_managed(pte)) {
-				vm_offset_t pa = pmap_ppn(pte);
-				vm_page_t m = PHYS_TO_VM_PAGE(pa);
-				if (pmap_dirty(pte)) {
-					vm_page_dirty(m);
-					pmap_clear_dirty(pte);
-				}
-				if (pmap_accessed(pte)) {
-					vm_page_flag_set(m, PG_REFERENCED);
-					pmap_clear_accessed(pte);
-				}
+		/* If there's no change, skip it too */
+		if (pmap_prot(pte) == prot)
+			continue;
+
+		if (pmap_managed(pte)) {
+			vm_offset_t pa = pmap_ppn(pte);
+			vm_page_t m = PHYS_TO_VM_PAGE(pa);
+
+			if (pmap_dirty(pte)) {
+				vm_page_dirty(m);
+				pmap_clear_dirty(pte);
 			}
-			pmap_pte_prot(pmap, pte, prot);
-			pmap_invalidate_page(pmap, sva);
+
+			if (pmap_accessed(pte)) {
+				vm_page_flag_set(m, PG_REFERENCED);
+				pmap_clear_accessed(pte);
+			}
 		}
 
-		sva += PAGE_SIZE;
+		if (prot & VM_PROT_EXECUTE)
+			ia64_invalidate_icache(sva, PAGE_SIZE);
+
+		pmap_pte_prot(pmap, pte, prot);
+		pmap_invalidate_page(pmap, sva);
 	}
 	vm_page_unlock_queues();
 	pmap_switch(oldpmap);
@@ -1555,15 +1509,15 @@ pmap_protect(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, vm_prot_t prot)
  *	insert this page into the given map NOW.
  */
 void
-pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
-    boolean_t wired)
+pmap_enter(pmap_t pmap, vm_offset_t va, vm_prot_t access, vm_page_t m,
+    vm_prot_t prot, boolean_t wired)
 {
 	pmap_t oldpmap;
 	vm_offset_t pa;
 	vm_offset_t opa;
 	struct ia64_lpte origpte;
 	struct ia64_lpte *pte;
-	boolean_t managed;
+	boolean_t icache_inval, managed;
 
 	vm_page_lock_queues();
 	PMAP_LOCK(pmap);
@@ -1596,6 +1550,8 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 	managed = FALSE;
 	pa = VM_PAGE_TO_PHYS(m);
 
+	icache_inval = (prot & VM_PROT_EXECUTE) ? TRUE : FALSE;
+
 	/*
 	 * Mapping has not changed, must be protection or wiring change.
 	 */
@@ -1615,10 +1571,14 @@ pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
 
 		/*
 		 * We might be turning off write access to the page,
-		 * so we go ahead and sense modify status.
+		 * so we go ahead and sense modify status. Otherwise,
+		 * we can avoid I-cache invalidation if the page
+		 * already allowed execution.
 		 */
 		if (managed && pmap_dirty(&origpte))
 			vm_page_dirty(m);
+		else if (pmap_exec(&origpte))
+			icache_inval = FALSE;
 
 		pmap_invalidate_page(pmap, va);
 		goto validate;
@@ -1658,6 +1618,10 @@ validate:
 	 */
 	pmap_pte_prot(pmap, pte, prot);
 	pmap_set_pte(pte, va, pa, wired, managed);
+
+	/* Invalidate the I-cache when needed. */
+	if (icache_inval)
+		ia64_invalidate_icache(va, PAGE_SIZE);
 
 	if ((prot & VM_PROT_WRITE) != 0)
 		vm_page_flag_set(m, PG_WRITEABLE);
@@ -1911,6 +1875,38 @@ pmap_page_exists_quick(pmap_t pmap, vm_page_t m)
 			break;
 	}
 	return (FALSE);
+}
+
+/*
+ *	pmap_page_wired_mappings:
+ *
+ *	Return the number of managed mappings to the given physical page
+ *	that are wired.
+ */
+int
+pmap_page_wired_mappings(vm_page_t m)
+{
+	struct ia64_lpte *pte;
+	pmap_t oldpmap, pmap;
+	pv_entry_t pv;
+	int count;
+
+	count = 0;
+	if ((m->flags & PG_FICTITIOUS) != 0)
+		return (count);
+	mtx_assert(&vm_page_queue_mtx, MA_OWNED);
+	TAILQ_FOREACH(pv, &m->md.pv_list, pv_list) {
+		pmap = pv->pv_pmap;
+		PMAP_LOCK(pmap);
+		oldpmap = pmap_switch(pmap);
+		pte = pmap_find_vhpt(pv->pv_va);
+		KASSERT(pte != NULL, ("pte"));
+		if (pmap_wired(pte))
+			count++;
+		pmap_switch(oldpmap);
+		PMAP_UNLOCK(pmap);
+	}
+	return (count);
 }
 
 /*
@@ -2263,11 +2259,14 @@ out:
 	return (prevpm);
 }
 
-vm_offset_t
-pmap_addr_hint(vm_object_t obj, vm_offset_t addr, vm_size_t size)
+/*
+ *	Increase the starting virtual address of the given mapping if a
+ *	different alignment might result in more superpage mappings.
+ */
+void
+pmap_align_superpage(vm_object_t object, vm_ooffset_t offset,
+    vm_offset_t *addr, vm_size_t size)
 {
-
-	return addr;
 }
 
 #include "opt_ddb.h"

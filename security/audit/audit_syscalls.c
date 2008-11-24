@@ -1,5 +1,5 @@
-/*
- * Copyright (c) 1999-2005 Apple Computer, Inc.
+/*-
+ * Copyright (c) 1999-2005 Apple Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -10,7 +10,7 @@
  * 2.  Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- * 3.  Neither the name of Apple Computer, Inc. ("Apple") nor the names of
+ * 3.  Neither the name of Apple Inc. ("Apple") nor the names of
  *     its contributors may be used to endorse or promote products derived
  *     from this software without specific prior written permission.
  *
@@ -25,9 +25,10 @@
  * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
- *
- * $FreeBSD: src/sys/security/audit/audit_syscalls.c,v 1.22 2007/10/24 19:04:00 rwatson Exp $
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/security/audit/audit_syscalls.c,v 1.34 2008/11/14 01:24:52 rwatson Exp $");
 
 #include "opt_mac.h"
 
@@ -156,7 +157,7 @@ free_out:
 int
 auditon(struct thread *td, struct auditon_args *uap)
 {
-	struct ucred *newcred, *oldcred;
+	struct ucred *cred, *newcred, *oldcred;
 	int error;
 	union auditon_udata udata;
 	struct proc *tp;
@@ -313,44 +314,43 @@ auditon(struct thread *td, struct auditon_args *uap)
 
 	case A_GETPINFO:
 		if (udata.au_aupinfo.ap_pid < 1)
-			return (EINVAL);
+			return (ESRCH);
 		if ((tp = pfind(udata.au_aupinfo.ap_pid)) == NULL)
-			return (EINVAL);
-		if (p_cansee(td, tp) != 0) {
+			return (ESRCH);
+		if ((error = p_cansee(td, tp)) != 0) {
+			PROC_UNLOCK(tp);
+			return (error);
+		}
+		cred = tp->p_ucred;
+		if (cred->cr_audit.ai_termid.at_type == AU_IPv6) {
 			PROC_UNLOCK(tp);
 			return (EINVAL);
 		}
-		if (tp->p_ucred->cr_audit.ai_termid.at_type == AU_IPv6) {
-			PROC_UNLOCK(tp);
-			return (EINVAL);
-		}
-		udata.au_aupinfo.ap_auid =
-		    tp->p_ucred->cr_audit.ai_auid;
+		udata.au_aupinfo.ap_auid = cred->cr_audit.ai_auid;
 		udata.au_aupinfo.ap_mask.am_success =
-		    tp->p_ucred->cr_audit.ai_mask.am_success;
+		    cred->cr_audit.ai_mask.am_success;
 		udata.au_aupinfo.ap_mask.am_failure =
-		    tp->p_ucred->cr_audit.ai_mask.am_failure;
+		    cred->cr_audit.ai_mask.am_failure;
 		udata.au_aupinfo.ap_termid.machine =
-		    tp->p_ucred->cr_audit.ai_termid.at_addr[0];
+		    cred->cr_audit.ai_termid.at_addr[0];
 		udata.au_aupinfo.ap_termid.port =
-		    (dev_t)tp->p_ucred->cr_audit.ai_termid.at_port;
-		udata.au_aupinfo.ap_asid =
-		    tp->p_ucred->cr_audit.ai_asid;
+		    (dev_t)cred->cr_audit.ai_termid.at_port;
+		udata.au_aupinfo.ap_asid = cred->cr_audit.ai_asid;
 		PROC_UNLOCK(tp);
 		break;
 
 	case A_SETPMASK:
 		if (udata.au_aupinfo.ap_pid < 1)
-			return (EINVAL);
+			return (ESRCH);
 		newcred = crget();
 		if ((tp = pfind(udata.au_aupinfo.ap_pid)) == NULL) {
 			crfree(newcred);
-			return (EINVAL);
+			return (ESRCH);
 		}
-		if (p_cansee(td, tp) != 0) {
+		if ((error = p_cansee(td, tp)) != 0) {
 			PROC_UNLOCK(tp);
 			crfree(newcred);
-			return (EINVAL);
+			return (error);
 		}
 		oldcred = tp->p_ucred;
 		crcopy(newcred, oldcred);
@@ -377,35 +377,39 @@ auditon(struct thread *td, struct auditon_args *uap)
 
 	case A_GETPINFO_ADDR:
 		if (udata.au_aupinfo_addr.ap_pid < 1)
-			return (EINVAL);
+			return (ESRCH);
 		if ((tp = pfind(udata.au_aupinfo_addr.ap_pid)) == NULL)
-			return (EINVAL);
-		udata.au_aupinfo_addr.ap_auid =
-		    tp->p_ucred->cr_audit.ai_auid;
+			return (ESRCH);
+		cred = tp->p_ucred;
+		udata.au_aupinfo_addr.ap_auid = cred->cr_audit.ai_auid;
 		udata.au_aupinfo_addr.ap_mask.am_success =
-		    tp->p_ucred->cr_audit.ai_mask.am_success;
+		    cred->cr_audit.ai_mask.am_success;
 		udata.au_aupinfo_addr.ap_mask.am_failure =
-		    tp->p_ucred->cr_audit.ai_mask.am_failure;
-		udata.au_aupinfo_addr.ap_termid =
-		    tp->p_ucred->cr_audit.ai_termid;
-		udata.au_aupinfo_addr.ap_asid =
-		    tp->p_ucred->cr_audit.ai_asid;
+		    cred->cr_audit.ai_mask.am_failure;
+		udata.au_aupinfo_addr.ap_termid = cred->cr_audit.ai_termid;
+		udata.au_aupinfo_addr.ap_asid = cred->cr_audit.ai_asid;
 		PROC_UNLOCK(tp);
 		break;
 
 	case A_GETKAUDIT:
-		return (ENOSYS);
+		audit_get_kinfo(&udata.au_kau_info);
 		break;
 
 	case A_SETKAUDIT:
-		return (ENOSYS);
+		if (udata.au_kau_info.ai_termid.at_type != AU_IPv4 &&
+		    udata.au_kau_info.ai_termid.at_type != AU_IPv6)
+			return (EINVAL);
+		audit_set_kinfo(&udata.au_kau_info);
 		break;
 
 	case A_SENDTRIGGER:
 		if ((udata.au_trigger < AUDIT_TRIGGER_MIN) ||
 		    (udata.au_trigger > AUDIT_TRIGGER_MAX))
 			return (EINVAL);
-		return (send_trigger(udata.au_trigger));
+		return (audit_send_trigger(udata.au_trigger));
+
+	default:
+		return (EINVAL);
 	}
 
 	/*
@@ -496,21 +500,23 @@ int
 getaudit(struct thread *td, struct getaudit_args *uap)
 {
 	struct auditinfo ai;
+	struct ucred *cred;
 	int error;
 
-	if (jailed(td->td_ucred))
+	cred = td->td_ucred;
+	if (jailed(cred))
 		return (ENOSYS);
 	error = priv_check(td, PRIV_AUDIT_GETAUDIT);
 	if (error)
 		return (error);
-	if (td->td_ucred->cr_audit.ai_termid.at_type == AU_IPv6)
-		return (E2BIG);
+	if (cred->cr_audit.ai_termid.at_type == AU_IPv6)
+		return (ERANGE);
 	bzero(&ai, sizeof(ai));
-	ai.ai_auid = td->td_ucred->cr_audit.ai_auid;
-	ai.ai_mask = td->td_ucred->cr_audit.ai_mask;
-	ai.ai_asid = td->td_ucred->cr_audit.ai_asid;
-	ai.ai_termid.machine = td->td_ucred->cr_audit.ai_termid.at_addr[0];
-	ai.ai_termid.port = td->td_ucred->cr_audit.ai_termid.at_port;
+	ai.ai_auid = cred->cr_audit.ai_auid;
+	ai.ai_mask = cred->cr_audit.ai_mask;
+	ai.ai_asid = cred->cr_audit.ai_asid;
+	ai.ai_termid.machine = cred->cr_audit.ai_termid.at_addr[0];
+	ai.ai_termid.port = cred->cr_audit.ai_termid.at_port;
 	return (copyout(&ai, uap->auditinfo, sizeof(ai)));
 }
 
@@ -656,14 +662,14 @@ auditctl(struct thread *td, struct auditctl_args *uap)
 	vp = nd.ni_vp;
 #ifdef MAC
 	error = mac_system_check_auditctl(td->td_ucred, vp);
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	if (error) {
 		vn_close(vp, AUDIT_CLOSE_FLAGS, td->td_ucred, td);
 		VFS_UNLOCK_GIANT(vfslocked);
 		return (error);
 	}
 #else
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 #endif
 	NDFREE(&nd, NDF_ONLY_PNBUF);
 	if (vp->v_type != VREG) {

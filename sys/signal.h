@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)signal.h	8.4 (Berkeley) 5/4/95
- * $FreeBSD: src/sys/sys/signal.h,v 1.56 2006/05/12 05:04:46 jhb Exp $
+ * $FreeBSD: src/sys/sys/signal.h,v 1.58 2008/01/19 21:41:31 das Exp $
  */
 
 #ifndef _SYS_SIGNAL_H_
@@ -72,7 +72,7 @@
 #define	SIGBUS		10	/* bus error */
 #endif
 #define	SIGSEGV		11	/* segmentation violation */
-#if __BSD_VISIBLE
+#if __POSIX_VISIBLE >= 200112 || __XSI_VISIBLE
 #define	SIGSYS		12	/* non-existent system call invoked */
 #endif
 #if __POSIX_VISIBLE || __XSI_VISIBLE
@@ -153,6 +153,9 @@ union sigval {
 	/* Members as suggested by Annex C of POSIX 1003.1b. */
 	int	sival_int;
 	void	*sival_ptr;
+	/* 6.0 compatibility */
+	int     sigval_int;
+	void    *sigval_ptr;
 };
 #endif
 

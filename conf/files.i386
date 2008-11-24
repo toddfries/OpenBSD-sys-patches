@@ -1,7 +1,7 @@
 # This file tells config what files go into building a kernel,
 # files marked standard are always included.
 #
-# $FreeBSD: src/sys/conf/files.i386,v 1.584 2007/10/26 03:23:52 peter Exp $
+# $FreeBSD: src/sys/conf/files.i386,v 1.609 2008/11/09 17:37:54 jkoshy Exp $
 #
 # The long compile-with and dependency lines are required because of
 # limitations in config: backslash-newline doesn't work in strings, and
@@ -46,11 +46,6 @@ ukbdmap.h			optional	ukbd_dflt_keymap	\
 	no-obj no-implicit-rule before-depend				\
 	clean		"ukbdmap.h"
 #
-trlld.o				optional	oltr			\
-	dependency	"$S/contrib/dev/oltr/i386-elf.trlld.o.uu"	\
-	compile-with	"uudecode < $S/contrib/dev/oltr/i386-elf.trlld.o.uu"	\
-	no-implicit-rule
-#
 hal.o				optional	ath_hal			\
 	dependency	"$S/contrib/dev/ath/public/i386-elf.hal.o.uu"	\
 	compile-with	"uudecode < $S/contrib/dev/ath/public/i386-elf.hal.o.uu" \
@@ -77,11 +72,10 @@ hptmvraid.o			optional	hptmv			\
 	compile-with	"uudecode < $S/dev/hptmv/i386-elf.raid.o.uu"	\
 	no-implicit-rule
 #
-rr232x_lib.o			optional	rr232x			\
-	dependency	"$S/dev/rr232x/i386-elf.rr232x_lib.o.uu"	\
-	compile-with	"uudecode < $S/dev/rr232x/i386-elf.rr232x_lib.o.uu" \
+hptrr_lib.o			optional	hptrr			\
+	dependency	"$S/dev/hptrr/i386-elf.hptrr_lib.o.uu"		\
+	compile-with	"uudecode < $S/dev/hptrr/i386-elf.hptrr_lib.o.uu" \
 	no-implicit-rule
-#
 #
 compat/linprocfs/linprocfs.c	optional linprocfs
 compat/linsysfs/linsysfs.c	optional linsysfs
@@ -108,7 +102,6 @@ compat/ndis/subr_ntoskrnl.c	optional ndisapi pci
 compat/ndis/subr_pe.c		optional ndisapi pci
 compat/ndis/subr_usbd.c		optional ndisapi pci
 compat/ndis/winx32_wrap.S	optional ndisapi pci
-compat/pecoff/imgact_pecoff.c	optional pecoff_support
 compat/svr4/imgact_svr4.c	optional compat_svr4
 compat/svr4/svr4_fcntl.c	optional compat_svr4
 compat/svr4/svr4_filio.c	optional compat_svr4
@@ -126,12 +119,6 @@ compat/svr4/svr4_sysent.c	optional compat_svr4
 compat/svr4/svr4_sysvec.c	optional compat_svr4
 compat/svr4/svr4_termios.c	optional compat_svr4
 compat/svr4/svr4_ttold.c	optional compat_svr4
-contrib/dev/oltr/if_oltr.c	optional oltr
-contrib/dev/oltr/if_oltr_isa.c	optional oltr isa
-contrib/dev/oltr/if_oltr_pci.c	optional oltr pci
-contrib/dev/oltr/trlldbm.c	optional oltr
-contrib/dev/oltr/trlldhm.c	optional oltr
-contrib/dev/oltr/trlldmac.c	optional oltr
 bf_enc.o			optional crypto | ipsec	\
 	dependency	"$S/crypto/blowfish/arch/i386/bf_enc.S $S/crypto/blowfish/arch/i386/bf_enc_586.S $S/crypto/blowfish/arch/i386/bf_enc_686.S" \
 	compile-with	"${CC} -c -I$S/crypto/blowfish/arch/i386 ${ASM_CFLAGS} ${WERROR} ${.IMPSRC}" \
@@ -141,13 +128,21 @@ crypto/via/padlock.c		optional padlock
 crypto/via/padlock_cipher.c	optional padlock
 crypto/via/padlock_hash.c	optional padlock
 dev/advansys/adv_isa.c		optional adv isa
+dev/agp/agp_ali.c			optional agp
+dev/agp/agp_amd.c			optional agp
+dev/agp/agp_amd64.c			optional agp
+dev/agp/agp_ati.c			optional agp
+dev/agp/agp_i810.c			optional agp
+dev/agp/agp_intel.c			optional agp
+dev/agp/agp_nvidia.c		optional agp
+dev/agp/agp_sis.c			optional agp
+dev/agp/agp_via.c			optional agp
 dev/aic/aic_isa.c		optional aic isa
 dev/arcmsr/arcmsr.c		optional arcmsr pci
 dev/ar/if_ar.c			optional ar
 dev/ar/if_ar_isa.c		optional ar isa
 dev/ar/if_ar_pci.c		optional ar pci
-dev/arl/if_arl.c		optional arl
-dev/arl/if_arl_isa.c		optional arl isa
+dev/asmc/asmc.c			optional asmc isa
 dev/atkbdc/atkbd.c		optional atkbd atkbdc
 dev/atkbdc/atkbd_atkbdc.c	optional atkbd atkbdc
 dev/atkbdc/atkbdc.c		optional atkbdc
@@ -161,6 +156,7 @@ dev/cm/if_cm_isa.c		optional cm isa
 dev/coretemp/coretemp.c		optional coretemp
 dev/cp/cpddk.c			optional cp
 dev/cp/if_cp.c			optional cp
+dev/cpuctl/cpuctl.c		optional cpuctl
 dev/ctau/ctau.c			optional ctau
 dev/ctau/ctddk.c		optional ctau
 dev/ctau/if_ct.c		optional ctau
@@ -179,15 +175,22 @@ dev/fdc/fdc_acpi.c		optional fdc
 dev/fdc/fdc_isa.c		optional fdc isa
 dev/fdc/fdc_pccard.c		optional fdc pccard
 dev/fe/if_fe_isa.c		optional fe isa
+dev/glxsb/glxsb.c		optional glxsb
+dev/glxsb/glxsb_hash.c		optional glxsb
 dev/hptmv/entry.c		optional hptmv
 dev/hptmv/mv.c			optional hptmv
 dev/hptmv/gui_lib.c		optional hptmv
 dev/hptmv/hptproc.c		optional hptmv
 dev/hptmv/ioctl.c		optional hptmv
+dev/hptrr/hptrr_os_bsd.c	optional hptrr
+dev/hptrr/hptrr_osm_bsd.c	optional hptrr
+dev/hptrr/hptrr_config.c	optional hptrr
 dev/hwpmc/hwpmc_amd.c		optional hwpmc
+dev/hwpmc/hwpmc_intel.c		optional hwpmc
 dev/hwpmc/hwpmc_pentium.c	optional hwpmc
 dev/hwpmc/hwpmc_piv.c		optional hwpmc
 dev/hwpmc/hwpmc_ppro.c		optional hwpmc
+dev/hwpmc/hwpmc_tsc.c		optional hwpmc
 dev/hwpmc/hwpmc_x86.c		optional hwpmc
 dev/ichwd/ichwd.c		optional ichwd
 dev/if_ndis/if_ndis.c		optional ndis
@@ -204,7 +207,8 @@ dev/ipmi/ipmi_smbus.c		optional ipmi smbus
 dev/ipmi/ipmi_smbios.c		optional ipmi
 dev/ipmi/ipmi_ssif.c		optional ipmi smbus
 dev/ipmi/ipmi_pci.c		optional ipmi pci
-dev/kbd/kbd.c			optional atkbd | sc | ukbd | vt
+dev/k8temp/k8temp.c		optional k8temp
+dev/kbd/kbd.c			optional atkbd | sc | ukbd
 dev/le/if_le_isa.c		optional le isa
 dev/mem/memutil.c		optional mem
 dev/mse/mse.c			optional mse
@@ -214,9 +218,6 @@ dev/nve/if_nve.c		optional nve pci
 dev/nvram/nvram.c		optional nvram isa
 dev/pcf/pcf_isa.c		optional pcf
 dev/random/nehemiah.c		optional random
-dev/rr232x/os_bsd.c		optional rr232x
-dev/rr232x/osm_bsd.c		optional rr232x
-dev/rr232x/rr232x_config.c	optional rr232x
 dev/sbni/if_sbni.c		optional sbni
 dev/sbni/if_sbni_isa.c		optional sbni isa
 dev/sbni/if_sbni_pci.c		optional sbni pci
@@ -234,6 +235,7 @@ dev/syscons/scvgarndr.c		optional sc vga
 dev/syscons/scvtb.c		optional sc
 dev/uart/uart_cpu_i386.c	optional uart
 dev/acpica/acpi_if.m		standard
+dev/wpi/if_wpi.c		optional wpi
 i386/acpica/OsdEnvironment.c	optional acpi
 i386/acpica/acpi_machdep.c	optional acpi
 i386/acpica/acpi_wakeup.c	optional acpi
@@ -258,8 +260,8 @@ i386/cpufreq/smist.c		optional cpufreq
 i386/i386/atomic.c		standard		\
 	compile-with	"${CC} -c ${CFLAGS} ${DEFINED_PROF:S/^$/-fomit-frame-pointer/} ${.IMPSRC}"
 i386/i386/autoconf.c		standard
-i386/i386/bios.c		standard
-i386/i386/bioscall.s		standard
+i386/i386/bios.c		optional native
+i386/i386/bioscall.s		optional native
 i386/i386/bpf_jit_machdep.c	optional bpf_jitter
 i386/i386/busdma_machdep.c	standard
 i386/i386/db_disasm.c		optional ddb
@@ -268,7 +270,8 @@ i386/i386/db_trace.c		optional ddb
 i386/i386/dump_machdep.c	standard
 i386/i386/elan-mmcr.c		optional cpu_elan | cpu_soekris
 i386/i386/elf_machdep.c		standard
-i386/i386/exception.s		standard
+i386/i386/exception.s		optional native
+i386/xen/exception.s		optional xen
 i386/i386/gdb_machdep.c		optional gdb
 i386/i386/geode.c		optional cpu_geode
 i386/i386/i686_mem.c		optional mem
@@ -279,24 +282,30 @@ i386/i386/intr_machdep.c	standard
 i386/i386/io.c			optional io
 i386/i386/io_apic.c		optional apic
 i386/i386/k6_mem.c		optional mem
-i386/i386/legacy.c		standard
+i386/i386/legacy.c		optional native
 i386/i386/local_apic.c		optional apic
-i386/i386/locore.s		standard	no-obj
+i386/i386/locore.s		optional native	no-obj
+i386/xen/locore.s		optional xen	no-obj
 i386/i386/longrun.c		optional cpu_enable_longrun
 i386/i386/machdep.c		standard
+i386/xen/xen_machdep.c		optional xen
 i386/i386/mem.c			optional mem
 i386/i386/minidump_machdep.c	standard
 i386/i386/mp_clock.c		optional smp
-i386/i386/mp_machdep.c		optional smp
+i386/i386/mp_machdep.c		optional native smp
+i386/xen/mp_machdep.c		optional xen smp
 i386/i386/mp_watchdog.c		optional mp_watchdog smp
-i386/i386/mpboot.s		optional smp
-i386/i386/mptable.c		optional apic
+i386/i386/mpboot.s		optional smp native
+i386/i386/mptable.c		optional apic native
+i386/xen/mptable.c		optional apic xen
 i386/i386/mptable_pci.c		optional apic pci
 i386/i386/msi.c			optional apic pci
 i386/i386/nexus.c		standard
 i386/i386/perfmon.c		optional perfmon
-i386/i386/pmap.c		standard nowerror
+i386/i386/pmap.c		optional native
+i386/xen/pmap.c			optional xen
 i386/i386/ptrace_machdep.c	standard
+i386/i386/stack_machdep.c	optional ddb | stack
 i386/i386/support.s		standard
 i386/i386/swtch.s		standard
 i386/i386/sys_machdep.c		standard
@@ -324,9 +333,11 @@ i386/ibcs2/ibcs2_util.c		optional ibcs2
 i386/ibcs2/ibcs2_xenix.c	optional ibcs2
 i386/ibcs2/ibcs2_xenix_sysent.c	optional ibcs2
 i386/ibcs2/imgact_coff.c	optional ibcs2
-i386/isa/atpic.c		standard
+i386/isa/atpic.c		optional atpic	
 #i386/isa/atpic_vector.s		standard
-i386/isa/clock.c		standard
+i386/isa/clock.c		optional native
+i386/xen/clock.c		optional xen
+i386/isa/dpms.c			optional dpms
 i386/isa/elcr.c			standard
 i386/isa/elink.c		optional ep | ie
 i386/isa/isa.c			optional isa
@@ -349,89 +360,13 @@ i386/linux/linux_sysent.c	optional compat_linux
 i386/linux/linux_sysvec.c	optional compat_linux
 i386/pci/pci_bus.c		optional pci
 i386/pci/pci_cfgreg.c		optional pci
-i386/pci/pci_pir.c		optional pci
+i386/pci/pci_pir.c		optional pci 
 i386/svr4/svr4_locore.s		optional compat_svr4	\
 	dependency	"svr4_assym.h"	\
 	warning "COMPAT_SVR4 is broken and should be avoided"
 i386/svr4/svr4_machdep.c	optional compat_svr4
 #
-# isdn4bsd, needed for isic | iwic | ifpi | ifpi2 | ihfc | ifpnp | itjc
-#
-i4b/layer1/i4b_hdlc.c		optional ihfc | itjc
-i4b/layer1/i4b_l1dmux.c		optional ifpi | ifpi2 | ifpnp | \
-					 ihfc | isic | itjc | iwic
-i4b/layer1/i4b_l1lib.c		optional ifpi | ifpi2 | ifpnp | \
-					 ihfc | isic | itjc | iwic
-#
-# isdn4bsd, isic
-#
-i4b/layer1/isic/i4b_asuscom_ipac.c optional isic
-i4b/layer1/isic/i4b_avm_a1.c	optional isic
-i4b/layer1/isic/i4b_bchan.c	optional isic
-i4b/layer1/isic/i4b_ctx_s0P.c	optional isic
-i4b/layer1/isic/i4b_drn_ngo.c	optional isic
-i4b/layer1/isic/i4b_dynalink.c	optional isic
-i4b/layer1/isic/i4b_elsa_qs1i.c	optional isic
-i4b/layer1/isic/i4b_elsa_qs1p.c	optional isic pci
-i4b/layer1/isic/i4b_elsa_pcc16.c optional isic
-i4b/layer1/isic/i4b_hscx.c	optional isic
-i4b/layer1/isic/i4b_isac.c	optional isic
-i4b/layer1/isic/i4b_isic.c	optional isic
-i4b/layer1/isic/i4b_isic_isa.c	optional isic
-i4b/layer1/isic/i4b_isic_pnp.c	optional isic
-i4b/layer1/isic/i4b_itk_ix1.c	optional isic
-i4b/layer1/isic/i4b_l1.c	optional isic
-i4b/layer1/isic/i4b_l1fsm.c	optional isic
-i4b/layer1/isic/i4b_siemens_isurf.c optional isic
-i4b/layer1/isic/i4b_sws.c	optional isic
-i4b/layer1/isic/i4b_tel_s016.c	optional isic
-i4b/layer1/isic/i4b_tel_s0163.c	optional isic
-i4b/layer1/isic/i4b_tel_s08.c	optional isic
-i4b/layer1/isic/i4b_usr_sti.c	optional isic
-i4b/layer1/isic/i4b_diva.c	optional isic
-#
-# isdn4bsd, iwic
-#
-i4b/layer1/iwic/i4b_iwic_pci.c	optional iwic pci
-i4b/layer1/iwic/i4b_iwic_dchan.c optional iwic pci
-i4b/layer1/iwic/i4b_iwic_bchan.c optional iwic pci
-i4b/layer1/iwic/i4b_iwic_fsm.c	optional iwic pci
-i4b/layer1/iwic/i4b_iwic_l1if.c	optional iwic pci
-#
-# isdn4bsd, ifpi
-#
-i4b/layer1/ifpi/i4b_ifpi_pci.c	optional ifpi pci
-i4b/layer1/ifpi/i4b_ifpi_isac.c	optional ifpi pci
-i4b/layer1/ifpi/i4b_ifpi_l1.c	optional ifpi pci
-i4b/layer1/ifpi/i4b_ifpi_l1fsm.c optional ifpi pci
-#
-# isdn4bsd, ifpi2
-#
-i4b/layer1/ifpi2/i4b_ifpi2_pci.c optional ifpi2 pci
-i4b/layer1/ifpi2/i4b_ifpi2_isacsx.c optional ifpi2 pci
-i4b/layer1/ifpi2/i4b_ifpi2_l1.c	optional ifpi2 pci
-i4b/layer1/ifpi2/i4b_ifpi2_l1fsm.c optional ifpi2 pci
-#
-# isdn4bsd, ifpnp
-#
-i4b/layer1/ifpnp/i4b_ifpnp_avm.c optional ifpnp
-i4b/layer1/ifpnp/i4b_ifpnp_isac.c optional ifpnp
-i4b/layer1/ifpnp/i4b_ifpnp_l1.c	 optional ifpnp
-i4b/layer1/ifpnp/i4b_ifpnp_l1fsm.c optional ifpnp
-#
-# isdn4bsd, ihfc
-#
-i4b/layer1/ihfc/i4b_ihfc_l1if.c	optional ihfc
-i4b/layer1/ihfc/i4b_ihfc_pnp.c	optional ihfc
-i4b/layer1/ihfc/i4b_ihfc_drv.c	optional ihfc
-#
-# isdn4bsd, itjc
-#
-i4b/layer1/itjc/i4b_itjc_pci.c	optional itjc
-i4b/layer1/itjc/i4b_itjc_isac.c	optional itjc
-i4b/layer1/itjc/i4b_itjc_l1.c	optional itjc
-i4b/layer1/itjc/i4b_itjc_l1fsm.c optional itjc
-#
+isa/atrtc.c			optional atpic
 isa/syscons_isa.c		optional sc
 isa/vga_isa.c			optional vga
 kern/imgact_aout.c		optional compat_aout
@@ -445,15 +380,6 @@ libkern/qdivrem.c		standard
 libkern/ucmpdi2.c		standard
 libkern/udivdi3.c		standard
 libkern/umoddi3.c		standard
-pci/agp_ali.c			optional agp
-pci/agp_amd.c			optional agp
-pci/agp_amd64.c			optional agp
-pci/agp_ati.c			optional agp
-pci/agp_i810.c			optional agp
-pci/agp_intel.c			optional agp
-pci/agp_nvidia.c		optional agp
-pci/agp_sis.c			optional agp
-pci/agp_via.c			optional agp
 i386/xbox/xbox.c		optional xbox
 i386/xbox/xboxfb.c		optional xboxfb
 dev/fb/boot_font.c		optional xboxfb

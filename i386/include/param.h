@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)param.h	5.8 (Berkeley) 6/28/91
- * $FreeBSD: src/sys/i386/include/param.h,v 1.81 2006/01/09 06:05:56 imp Exp $
+ * $FreeBSD: src/sys/i386/include/param.h,v 1.84 2008/10/01 21:59:04 jhb Exp $
  */
 
 /*
@@ -65,11 +65,11 @@
 #endif
 #define MID_MACHINE	MID_I386
 
-#ifdef SMP
-#define MAXCPU		16
+#if defined(SMP) || defined(KLD_MODULE)
+#define MAXCPU		32
 #else
 #define MAXCPU		1
-#endif /* SMP */
+#endif /* SMP || KLD_MODULE */
 
 #define ALIGNBYTES	_ALIGNBYTES
 #define ALIGN(p)	_ALIGN(p)
@@ -82,9 +82,11 @@
 #ifdef PAE
 #define NPGPTD		4
 #define PDRSHIFT	21		/* LOG2(NBPDR) */
+#define NPGPTD_SHIFT	9
 #else
 #define NPGPTD		1
 #define PDRSHIFT	22		/* LOG2(NBPDR) */
+#define NPGPTD_SHIFT	10
 #endif
 
 #define NBPTD		(NPGPTD<<PAGE_SHIFT)

@@ -83,7 +83,7 @@
 #include <machine/asm.h>
 #include <machine/asmacros.h>
 #include <machine/armreg.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/swtch.S,v 1.21 2007/10/13 12:05:03 cognet Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/swtch.S,v 1.25 2008/10/16 19:06:24 raj Exp $");
 
 
 /*
@@ -205,7 +205,7 @@ ENTRY(cpu_throw)
 
 	/* Set the new tp */
 	ldr	r6, [r5, #(TD_MD + MD_TP)]
-	mov	r5, #ARM_TP_ADDRESS
+	ldr	r5, =ARM_TP_ADDRESS
 	strt	r6, [r5]
 
 	/* Hook in a new pcb */
@@ -257,13 +257,14 @@ ENTRY(cpu_switch)
 	strd	r10, [r2, #(PCB_R10)]
 	strd	r12, [r2, #(PCB_R12)]
 #endif
+	str	pc, [r2, #(PCB_PC)]
 									   
 	/*
 	 * NOTE: We can now use r8-r13 until it is time to restore
 	 * them for the new process.
 	 */
 	/* Store the old tp */
-	mov	r3, #ARM_TP_ADDRESS
+	ldr	r3, =ARM_TP_ADDRESS
 	ldrt	r9, [r3]
 	str	r9, [r0, #(TD_MD + MD_TP)]
 

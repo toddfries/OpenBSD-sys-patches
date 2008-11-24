@@ -39,7 +39,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)kernel.h	8.3 (Berkeley) 1/21/94
- * $FreeBSD: src/sys/sys/kernel.h,v 1.136 2007/07/27 11:59:57 rwatson Exp $
+ * $FreeBSD: src/sys/sys/kernel.h,v 1.144 2008/08/20 12:20:22 ed Exp $
  */
 
 #ifndef _SYS_KERNEL_H_
@@ -55,6 +55,7 @@
 /* Global variables for the kernel. */
 
 /* 1.1 */
+extern struct mtx hostname_mtx;
 extern unsigned long hostid;
 extern char hostuuid[64];
 extern char hostname[MAXHOSTNAMELEN];
@@ -68,9 +69,6 @@ extern int stathz;			/* statistics clock's frequency */
 extern int profhz;			/* profiling clock's frequency */
 extern int profprocs;			/* number of process's profiling */
 extern int ticks;
-#ifndef _SOLARIS_C_SOURCE
-extern int lbolt;			/* once a second sleep address */
-#endif
 
 #endif /* _KERNEL */
 
@@ -115,13 +113,17 @@ enum sysinit_sub_id {
 	SI_SUB_EVENTHANDLER	= 0x1C00000,	/* eventhandler init */
 	SI_SUB_KLD		= 0x2000000,	/* KLD and module setup */
 	SI_SUB_CPU		= 0x2100000,	/* CPU resource(s)*/
+	SI_SUB_KDTRACE		= 0x2140000,	/* Kernel dtrace hooks */
 	SI_SUB_MAC		= 0x2180000,	/* TrustedBSD MAC subsystem */
 	SI_SUB_MAC_POLICY	= 0x21C0000,	/* TrustedBSD MAC policies */
 	SI_SUB_MAC_LATE		= 0x21D0000,	/* TrustedBSD MAC subsystem */
 	SI_SUB_INTRINSIC	= 0x2200000,	/* proc 0*/
 	SI_SUB_VM_CONF		= 0x2300000,	/* config VM, set limits*/
+	SI_SUB_DDB_SERVICES	= 0x2380000,	/* capture, scripting, etc. */
 	SI_SUB_RUN_QUEUE	= 0x2400000,	/* set up run queue*/
 	SI_SUB_KTRACE		= 0x2480000,	/* ktrace */
+	SI_SUB_OPENSOLARIS	= 0x2490000,	/* OpenSolaris compatibility */
+	SI_SUB_CYCLIC		= 0x24A0000,	/* Cyclic timers */
 	SI_SUB_AUDIT		= 0x24C0000,	/* audit */
 	SI_SUB_CREATE_INIT	= 0x2500000,	/* create init process*/
 	SI_SUB_SCHED_IDLE	= 0x2600000,	/* required idle procs */
@@ -132,6 +134,9 @@ enum sysinit_sub_id {
 	SI_SUB_DEVFS		= 0x2F00000,	/* devfs ready for devices */
 	SI_SUB_INIT_IF		= 0x3000000,	/* prep for net interfaces */
 	SI_SUB_NETGRAPH		= 0x3010000,	/* Let Netgraph initialize */
+	SI_SUB_DTRACE		= 0x3020000,	/* DTrace subsystem */
+	SI_SUB_DTRACE_PROVIDER	= 0x3048000,	/* DTrace providers */
+	SI_SUB_DTRACE_ANON	= 0x308C000,	/* DTrace anon enabling */
 	SI_SUB_DRIVERS		= 0x3100000,	/* Let Drivers initialize */
 	SI_SUB_CONFIGURE	= 0x3800000,	/* Configure devices */
 	SI_SUB_VFS		= 0x4000000,	/* virtual filesystem*/
@@ -154,7 +159,6 @@ enum sysinit_sub_id {
 	SI_SUB_ROOT_CONF	= 0xb000000,	/* Find root devices */
 	SI_SUB_DUMP_CONF	= 0xb200000,	/* Find dump devices */
 	SI_SUB_RAID		= 0xb380000,	/* Configure GEOM classes */
-	SI_SUB_MOUNT_ROOT	= 0xb400000,	/* root mount*/
 	SI_SUB_SWAP		= 0xc000000,	/* swap */
 	SI_SUB_INTRINSIC_POST	= 0xd000000,	/* proc 0 cleanup*/
 	SI_SUB_SYSCALLS		= 0xd800000,	/* register system calls */
@@ -233,7 +237,7 @@ struct sysinit {
 		func,						\
 		(ident)						\
 	};							\
-	DATA_SET(sysinit_set,uniquifier ## _sys_init);
+	DATA_SET(sysinit_set,uniquifier ## _sys_init)
 
 #define	SYSINIT(uniquifier, subsystem, order, func, ident)	\
 	C_SYSINIT(uniquifier, subsystem, order,			\
@@ -323,6 +327,25 @@ struct tunable_ulong {
 	    &__CONCAT(__tunable_ulong_, __LINE__))
 
 #define	TUNABLE_ULONG_FETCH(path, var)	getenv_ulong((path), (var))
+
+/*
+ * quad
+ */
+extern void tunable_quad_init(void *);
+struct tunable_quad {
+	const char *path;
+	quad_t *var;
+};
+#define	TUNABLE_QUAD(path, var)					\
+	static struct tunable_quad __CONCAT(__tunable_quad_, __LINE__) = { \
+		(path),						\
+		(var),						\
+	};							\
+	SYSINIT(__CONCAT(__Tunable_init_, __LINE__),		\
+	    SI_SUB_TUNABLES, SI_ORDER_MIDDLE, tunable_quad_init, \
+	    &__CONCAT(__tunable_quad_, __LINE__))
+
+#define	TUNABLE_QUAD_FETCH(path, var)	getenv_quad((path), (var))
 
 extern void tunable_str_init(void *);
 struct tunable_str {

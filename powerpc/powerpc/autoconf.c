@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/powerpc/autoconf.c,v 1.16 2007/08/11 19:25:32 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/powerpc/autoconf.c,v 1.18 2008/09/15 01:03:16 marcel Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -75,10 +75,8 @@ configure_final(void *dummy)
 	powerpc_enable_intr();
 
 	/* Enable external interrupts. */
-	mtmsr(mfmsr() | PSL_EE | PSL_RI);
+	mtmsr(mfmsr() | PSL_EE);
 
 	cninit_finish();
 	cold = 0;
 }
-
-

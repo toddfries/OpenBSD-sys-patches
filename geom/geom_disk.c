@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_disk.c,v 1.104 2007/05/05 18:09:17 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_disk.c,v 1.108 2008/10/31 10:11:35 kib Exp $");
 
 #include "opt_geom.h"
 
@@ -179,6 +179,7 @@ g_disk_kerneldump(struct bio *bp, struct disk *dp)
 	di.dumper = dp->d_dump;
 	di.priv = dp;
 	di.blocksize = dp->d_sectorsize;
+	di.maxiosize = dp->d_maxsize;
 	di.mediaoffset = gkd->offset;
 	if ((gkd->offset + gkd->length) > dp->d_mediasize)
 		gkd->length = dp->d_mediasize - gkd->offset;
@@ -516,7 +517,7 @@ sysctl_disks(SYSCTL_HANDLER_ARGS)
 	int error;
 	struct sbuf *sb;
 
-	sb = sbuf_new(NULL, NULL, 0, SBUF_AUTOEXTEND);
+	sb = sbuf_new_auto();
 	g_waitfor_event(g_kern_disks, sb, M_WAITOK, NULL);
 	error = SYSCTL_OUT(req, sbuf_data(sb), sbuf_len(sb) + 1);
 	sbuf_delete(sb);

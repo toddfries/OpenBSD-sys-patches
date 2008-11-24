@@ -31,7 +31,7 @@
  *	@(#)kernfs_vnops.c	8.15 (Berkeley) 5/21/95
  * From: FreeBSD: src/sys/miscfs/kernfs/kernfs_vnops.c 1.43
  *
- * $FreeBSD: src/sys/fs/devfs/devfs_vnops.c,v 1.150 2007/10/24 19:03:53 rwatson Exp $
+ * $FreeBSD: src/sys/fs/devfs/devfs_vnops.c,v 1.169 2008/10/28 13:44:11 trasz Exp $
  */
 
 /*
@@ -73,10 +73,14 @@ static struct fileops devfs_ops_f;
 
 #include <security/mac/mac_framework.h>
 
+static MALLOC_DEFINE(M_CDEVPDATA, "DEVFSP", "Metainfo for cdev-fp data");
+
 struct mtx	devfs_de_interlock;
 MTX_SYSINIT(devfs_de_interlock, &devfs_de_interlock, "devfs interlock", MTX_DEF);
 struct sx	clone_drain_lock;
 SX_SYSINIT(clone_drain_lock, &clone_drain_lock, "clone events drain lock");
+struct mtx	cdevpriv_mtx;
+MTX_SYSINIT(cdevpriv_mtx, &cdevpriv_mtx, "cdevpriv lock", MTX_DEF);
 
 static int
 devfs_fp_check(struct file *fp, struct cdev **devp, struct cdevsw **dswp)
@@ -92,7 +96,93 @@ devfs_fp_check(struct file *fp, struct cdev **devp, struct cdevsw **dswp)
 	    ("devfs: un-referenced struct cdev *(%s)", devtoname(*devp)));
 	if (*dswp == NULL)
 		return (ENXIO);
+	curthread->td_fpop = fp;
 	return (0);
+}
+
+int
+devfs_get_cdevpriv(void **datap)
+{
+	struct file *fp;
+	struct cdev_privdata *p;
+	int error;
+
+	fp = curthread->td_fpop;
+	if (fp == NULL)
+		return (EBADF);
+	p = fp->f_cdevpriv;
+	if (p != NULL) {
+		error = 0;
+		*datap = p->cdpd_data;
+	} else
+		error = ENOENT;
+	return (error);
+}
+
+int
+devfs_set_cdevpriv(void *priv, cdevpriv_dtr_t priv_dtr)
+{
+	struct file *fp;
+	struct cdev_priv *cdp;
+	struct cdev_privdata *p;
+	int error;
+
+	fp = curthread->td_fpop;
+	if (fp == NULL)
+		return (ENOENT);
+	cdp = cdev2priv((struct cdev *)fp->f_data);
+	p = malloc(sizeof(struct cdev_privdata), M_CDEVPDATA, M_WAITOK);
+	p->cdpd_data = priv;
+	p->cdpd_dtr = priv_dtr;
+	p->cdpd_fp = fp;
+	mtx_lock(&cdevpriv_mtx);
+	if (fp->f_cdevpriv == NULL) {
+		LIST_INSERT_HEAD(&cdp->cdp_fdpriv, p, cdpd_list);
+		fp->f_cdevpriv = p;
+		mtx_unlock(&cdevpriv_mtx);
+		error = 0;
+	} else {
+		mtx_unlock(&cdevpriv_mtx);
+		free(p, M_CDEVPDATA);
+		error = EBUSY;
+	}
+	return (error);
+}
+
+void
+devfs_destroy_cdevpriv(struct cdev_privdata *p)
+{
+
+	mtx_assert(&cdevpriv_mtx, MA_OWNED);
+	p->cdpd_fp->f_cdevpriv = NULL;
+	LIST_REMOVE(p, cdpd_list);
+	mtx_unlock(&cdevpriv_mtx);
+	(p->cdpd_dtr)(p->cdpd_data);
+	free(p, M_CDEVPDATA);
+}
+
+void
+devfs_fpdrop(struct file *fp)
+{
+	struct cdev_privdata *p;
+
+	mtx_lock(&cdevpriv_mtx);
+	if ((p = fp->f_cdevpriv) == NULL) {
+		mtx_unlock(&cdevpriv_mtx);
+		return;
+	}
+	devfs_destroy_cdevpriv(p);
+}
+
+void
+devfs_clear_cdevpriv(void)
+{
+	struct file *fp;
+
+	fp = curthread->td_fpop;
+	if (fp == NULL)
+		return;
+	devfs_fpdrop(fp);
 }
 
 /*
@@ -188,7 +278,6 @@ devfs_allocv(struct devfs_dirent *de, struct mount *mp, struct vnode **vpp, stru
 		sx_xunlock(&dmp->dm_lock);
 		return (ENOENT);
 	}
- loop:
 	DEVFS_DE_HOLD(de);
 	DEVFS_DMP_HOLD(dmp);
 	mtx_lock(&devfs_de_interlock);
@@ -204,8 +293,10 @@ devfs_allocv(struct devfs_dirent *de, struct mount *mp, struct vnode **vpp, stru
 				vput(vp);
 			return (ENOENT);
 		}
-		else if (error)
-			goto loop;
+		else if (error) {
+			sx_xunlock(&dmp->dm_lock);
+			return (error);
+		}
 		sx_xunlock(&dmp->dm_lock);
 		*vpp = vp;
 		return (0);
@@ -247,7 +338,7 @@ devfs_allocv(struct devfs_dirent *de, struct mount *mp, struct vnode **vpp, stru
 	} else {
 		vp->v_type = VBAD;
 	}
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY | LK_NOWITNESS);
 	mtx_lock(&devfs_de_interlock);
 	vp->v_data = de;
 	de->de_vnode = vp;
@@ -281,7 +372,7 @@ devfs_access(struct vop_access_args *ap)
 		de = de->de_dir;
 
 	error = vaccess(vp->v_type, de->de_mode, de->de_uid, de->de_gid,
-	    ap->a_mode, ap->a_cred, NULL);
+	    ap->a_accmode, ap->a_cred, NULL);
 	if (!error)
 		return (error);
 	if (error != EACCES)
@@ -360,19 +451,13 @@ devfs_close(struct vop_close_args *ap)
 	}
 	vholdl(vp);
 	VI_UNLOCK(vp);
-	vp_locked = VOP_ISLOCKED(vp, td);
-	VOP_UNLOCK(vp, 0, td);
+	vp_locked = VOP_ISLOCKED(vp);
+	VOP_UNLOCK(vp, 0);
 	KASSERT(dev->si_refcount > 0,
 	    ("devfs_close() on un-referenced struct cdev *(%s)", devtoname(dev)));
-	if (!(dsw->d_flags & D_NEEDGIANT)) {
-		DROP_GIANT();
-		error = dsw->d_close(dev, ap->a_fflag, S_IFCHR, td);
-		PICKUP_GIANT();
-	} else {
-		error = dsw->d_close(dev, ap->a_fflag, S_IFCHR, td);
-	}
+	error = dsw->d_close(dev, ap->a_fflag, S_IFCHR, td);
 	dev_relthread(dev);
-	vn_lock(vp, vp_locked | LK_RETRY, td);
+	vn_lock(vp, vp_locked | LK_RETRY);
 	vdrop(vp);
 	return (error);
 }
@@ -380,8 +465,14 @@ devfs_close(struct vop_close_args *ap)
 static int
 devfs_close_f(struct file *fp, struct thread *td)
 {
+	int error;
+	struct file *fpop;
 
-	return (vnops.fo_close(fp, td));
+	fpop = td->td_fpop;
+	td->td_fpop = fp;
+	error = vnops.fo_close(fp, td);
+	td->td_fpop = fpop;
+	return (error);
 }
 
 /* ARGSUSED */
@@ -410,8 +501,6 @@ devfs_getattr(struct vop_getattr_args *ap)
 		KASSERT(de != NULL,
 		    ("Null dir dirent in devfs_getattr vp=%p", vp));
 	}
-	bzero((caddr_t) vap, sizeof(*vap));
-	vattr_null(vap);
 	vap->va_uid = de->de_uid;
 	vap->va_gid = de->de_gid;
 	vap->va_mode = de->de_mode;
@@ -450,10 +539,11 @@ devfs_getattr(struct vop_getattr_args *ap)
 		fix(dev->si_ctime);
 		vap->va_ctime = dev->si_ctime;
 
-		vap->va_rdev = dev->si_priv->cdp_inode;
+		vap->va_rdev = cdev2priv(dev)->cdp_inode;
 	}
 	vap->va_gen = 0;
 	vap->va_flags = 0;
+	vap->va_filerev = 0;
 	vap->va_nlink = de->de_links;
 	vap->va_fileid = de->de_inode;
 
@@ -471,13 +561,16 @@ devfs_ioctl_f(struct file *fp, u_long com, void *data, struct ucred *cred, struc
 	int error, i;
 	const char *p;
 	struct fiodgname_arg *fgn;
+	struct file *fpop;
 
+	fpop = td->td_fpop;
 	error = devfs_fp_check(fp, &dev, &dsw);
 	if (error)
 		return (error);
 
 	if (com == FIODTYPE) {
 		*(int *)data = dsw->d_flags & D_TYPEMASK;
+		td->td_fpop = fpop;
 		dev_relthread(dev);
 		return (0);
 	} else if (com == FIODGNAME) {
@@ -488,10 +581,12 @@ devfs_ioctl_f(struct file *fp, u_long com, void *data, struct ucred *cred, struc
 			error = EINVAL;
 		else
 			error = copyout(p, fgn->buf, i);
+		td->td_fpop = fpop;
 		dev_relthread(dev);
 		return (error);
 	}
 	error = dsw->d_ioctl(dev, com, data, fp->f_flag, td);
+	td->td_fpop = NULL;
 	dev_relthread(dev);
 	if (error == ENOIOCTL)
 		error = ENOTTY;
@@ -505,8 +600,6 @@ devfs_ioctl_f(struct file *fp, u_long com, void *data, struct ucred *cred, struc
 			return (0);
 		}
 
-		mtx_lock(&Giant);	/* XXX TTY */
-
 		vpold = td->td_proc->p_session->s_ttyvp;
 		VREF(vp);
 		SESS_LOCK(td->td_proc->p_session);
@@ -518,7 +611,6 @@ devfs_ioctl_f(struct file *fp, u_long com, void *data, struct ucred *cred, struc
 		/* Get rid of reference to old control tty */
 		if (vpold)
 			vrele(vpold);
-		mtx_unlock(&Giant);	/* XXX TTY */
 	}
 	return (error);
 }
@@ -530,11 +622,16 @@ devfs_kqfilter_f(struct file *fp, struct knote *kn)
 	struct cdev *dev;
 	struct cdevsw *dsw;
 	int error;
+	struct file *fpop;
+	struct thread *td;
 
+	td = curthread;
+	fpop = td->td_fpop;
 	error = devfs_fp_check(fp, &dev, &dsw);
 	if (error)
 		return (error);
 	error = dsw->d_kqfilter(dev, kn);
+	td->td_fpop = fpop;
 	dev_relthread(dev);
 	return (error);
 }
@@ -587,13 +684,13 @@ devfs_lookupx(struct vop_lookup_args *ap, int *dm_unlock)
 	if (flags & ISDOTDOT) {
 		if ((flags & ISLASTCN) && nameiop != LOOKUP)
 			return (EINVAL);
-		VOP_UNLOCK(dvp, 0, td);
+		VOP_UNLOCK(dvp, 0);
 		de = TAILQ_FIRST(&dd->de_dlist);	/* "." */
 		de = TAILQ_NEXT(de, de_list);		/* ".." */
 		de = de->de_dir;
 		error = devfs_allocv(de, dvp->v_mount, vpp, td);
 		*dm_unlock = 0;
-		vn_lock(dvp, LK_EXCLUSIVE | LK_RETRY, td);
+		vn_lock(dvp, LK_EXCLUSIVE | LK_RETRY);
 		return (error);
 	}
 
@@ -647,7 +744,7 @@ devfs_lookupx(struct vop_lookup_args *ap, int *dm_unlock)
 		}
 
 		dev_lock();
-		dde = &cdev->si_priv->cdp_dirents[dmp->dm_idx];
+		dde = &cdev2priv(cdev)->cdp_dirents[dmp->dm_idx];
 		if (dde != NULL && *dde != NULL)
 			de = *dde;
 		dev_unlock();
@@ -751,6 +848,7 @@ devfs_open(struct vop_open_args *ap)
 	struct file *fp = ap->a_fp;
 	int error;
 	struct cdevsw *dsw;
+	struct file *fpop;
 
 	if (vp->v_type == VBLK)
 		return (ENXIO);
@@ -770,23 +868,19 @@ devfs_open(struct vop_open_args *ap)
 	if (dsw->d_flags & D_TTY)
 		vp->v_vflag |= VV_ISTTY;
 
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 
-	if(!(dsw->d_flags & D_NEEDGIANT)) {
-		DROP_GIANT();
-		if (dsw->d_fdopen != NULL)
-			error = dsw->d_fdopen(dev, ap->a_mode, td, fp);
-		else
-			error = dsw->d_open(dev, ap->a_mode, S_IFCHR, td);
-		PICKUP_GIANT();
-	} else {
-		if (dsw->d_fdopen != NULL)
-			error = dsw->d_fdopen(dev, ap->a_mode, td, fp);
-		else
-			error = dsw->d_open(dev, ap->a_mode, S_IFCHR, td);
-	}
+	fpop = td->td_fpop;
+	td->td_fpop = fp;
+	if (fp != NULL)
+		fp->f_data = dev;
+	if (dsw->d_fdopen != NULL)
+		error = dsw->d_fdopen(dev, ap->a_mode, td, fp);
+	else
+		error = dsw->d_open(dev, ap->a_mode, S_IFCHR, td);
+	td->td_fpop = fpop;
 
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 
 	dev_relthread(dev);
 
@@ -800,12 +894,8 @@ devfs_open(struct vop_open_args *ap)
 	if(fp == NULL)
 		return (error);
 #endif
-	FILE_LOCK(fp);
-	KASSERT(fp->f_ops == &badfileops,
-	     ("Could not vnode bypass device on fdops %p", fp->f_ops));
-	fp->f_data = dev;
-	fp->f_ops = &devfs_ops_f;
-	FILE_UNLOCK(fp);
+	if (fp->f_ops == &badfileops)
+		finit(fp, fp->f_flag, DTYPE_VNODE, dev, &devfs_ops_f);
 	return (error);
 }
 
@@ -838,11 +928,14 @@ devfs_poll_f(struct file *fp, int events, struct ucred *cred, struct thread *td)
 	struct cdev *dev;
 	struct cdevsw *dsw;
 	int error;
+	struct file *fpop;
 
+	fpop = td->td_fpop;
 	error = devfs_fp_check(fp, &dev, &dsw);
 	if (error)
 		return (error);
 	error = dsw->d_poll(dev, events, td);
+	td->td_fpop = fpop;
 	dev_relthread(dev);
 	return(error);
 }
@@ -865,7 +958,9 @@ devfs_read_f(struct file *fp, struct uio *uio, struct ucred *cred, int flags, st
 	struct cdev *dev;
 	int ioflag, error, resid;
 	struct cdevsw *dsw;
+	struct file *fpop;
 
+	fpop = td->td_fpop;
 	error = devfs_fp_check(fp, &dev, &dsw);
 	if (error)
 		return (error);
@@ -880,6 +975,7 @@ devfs_read_f(struct file *fp, struct uio *uio, struct ucred *cred, int flags, st
 	error = dsw->d_read(dev, uio, ioflag);
 	if (uio->uio_resid != resid || (error == 0 && resid != 0))
 		vfs_timestamp(&dev->si_atime);
+	td->td_fpop = fpop;
 	dev_relthread(dev);
 
 	if ((flags & FOF_OFFSET) == 0)
@@ -995,17 +1091,20 @@ devfs_reclaim(struct vop_reclaim_args *ap)
 
 	vnode_destroy_vobject(vp);
 
+	VI_LOCK(vp);
 	dev_lock();
 	dev = vp->v_rdev;
 	vp->v_rdev = NULL;
 
 	if (dev == NULL) {
 		dev_unlock();
+		VI_UNLOCK(vp);
 		return (0);
 	}
 
 	dev->si_usecount -= vp->v_usecount;
 	dev_unlock();
+	VI_UNLOCK(vp);
 	dev_rel(dev);
 	return (0);
 }
@@ -1049,7 +1148,7 @@ devfs_revoke(struct vop_revoke_args *ap)
 	KASSERT((ap->a_flags & REVOKEALL) != 0, ("devfs_revoke !REVOKEALL"));
 
 	dev = vp->v_rdev;
-	cdp = dev->si_priv;
+	cdp = cdev2priv(dev);
  
 	dev_lock();
 	cdp->cdp_inuse++;
@@ -1059,7 +1158,7 @@ devfs_revoke(struct vop_revoke_args *ap)
 	vgone(vp);
 	vdrop(vp);
 
-	VOP_UNLOCK(vp,0,curthread);
+	VOP_UNLOCK(vp,0);
  loop:
 	for (;;) {
 		mtx_lock(&devfs_de_interlock);
@@ -1101,7 +1200,7 @@ devfs_revoke(struct vop_revoke_args *ap)
 	} else
 		dev_unlock();
 
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, curthread);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	return (0);
 }
 
@@ -1140,12 +1239,14 @@ devfs_setattr(struct vop_setattr_args *ap)
 	struct devfs_dirent *de;
 	struct vattr *vap;
 	struct vnode *vp;
+	struct thread *td;
 	int c, error;
 	uid_t uid;
 	gid_t gid;
 
 	vap = ap->a_vap;
 	vp = ap->a_vp;
+	td = curthread;
 	if ((vap->va_type != VNON) ||
 	    (vap->va_nlink != VNOVAL) ||
 	    (vap->va_fsid != VNOVAL) ||
@@ -1174,7 +1275,7 @@ devfs_setattr(struct vop_setattr_args *ap)
 	if (uid != de->de_uid || gid != de->de_gid) {
 		if ((ap->a_cred->cr_uid != de->de_uid) || uid != de->de_uid ||
 		    (gid != de->de_gid && !groupmember(gid, ap->a_cred))) {
-			error = priv_check(ap->a_td, PRIV_VFS_CHOWN);
+			error = priv_check(td, PRIV_VFS_CHOWN);
 			if (error)
 				return (error);
 		}
@@ -1185,7 +1286,7 @@ devfs_setattr(struct vop_setattr_args *ap)
 
 	if (vap->va_mode != (mode_t)VNOVAL) {
 		if (ap->a_cred->cr_uid != de->de_uid) {
-			error = priv_check(ap->a_td, PRIV_VFS_ADMIN);
+			error = priv_check(td, PRIV_VFS_ADMIN);
 			if (error)
 				return (error);
 		}
@@ -1195,9 +1296,9 @@ devfs_setattr(struct vop_setattr_args *ap)
 
 	if (vap->va_atime.tv_sec != VNOVAL || vap->va_mtime.tv_sec != VNOVAL) {
 		/* See the comment in ufs_vnops::ufs_setattr(). */
-		if ((error = VOP_ACCESS(vp, VADMIN, ap->a_cred, ap->a_td)) &&
+		if ((error = VOP_ACCESS(vp, VADMIN, ap->a_cred, td)) &&
 		    ((vap->va_vaflags & VA_UTIMES_NULL) == 0 ||
-		    (error = VOP_ACCESS(vp, VWRITE, ap->a_cred, ap->a_td))))
+		    (error = VOP_ACCESS(vp, VWRITE, ap->a_cred, td))))
 			return (error);
 		if (vap->va_atime.tv_sec != VNOVAL) {
 			if (vp->v_type == VCHR)
@@ -1281,6 +1382,13 @@ devfs_symlink(struct vop_symlink_args *ap)
 	return (devfs_allocv(de, ap->a_dvp->v_mount, ap->a_vpp, td));
 }
 
+static int
+devfs_truncate_f(struct file *fp, off_t length, struct ucred *cred, struct thread *td)
+{
+
+	return (vnops.fo_truncate(fp, length, cred, td));
+}
+
 /* ARGSUSED */
 static int
 devfs_write_f(struct file *fp, struct uio *uio, struct ucred *cred, int flags, struct thread *td)
@@ -1288,7 +1396,9 @@ devfs_write_f(struct file *fp, struct uio *uio, struct ucred *cred, int flags, s
 	struct cdev *dev;
 	int error, ioflag, resid;
 	struct cdevsw *dsw;
+	struct file *fpop;
 
+	fpop = td->td_fpop;
 	error = devfs_fp_check(fp, &dev, &dsw);
 	if (error)
 		return (error);
@@ -1306,6 +1416,7 @@ devfs_write_f(struct file *fp, struct uio *uio, struct ucred *cred, int flags, s
 		vfs_timestamp(&dev->si_ctime);
 		dev->si_mtime = dev->si_ctime;
 	}
+	td->td_fpop = fpop;
 	dev_relthread(dev);
 
 	if ((flags & FOF_OFFSET) == 0)
@@ -1319,12 +1430,13 @@ dev2udev(struct cdev *x)
 {
 	if (x == NULL)
 		return (NODEV);
-	return (x->si_priv->cdp_inode);
+	return (cdev2priv(x)->cdp_inode);
 }
 
 static struct fileops devfs_ops_f = {
 	.fo_read =	devfs_read_f,
 	.fo_write =	devfs_write_f,
+	.fo_truncate =	devfs_truncate_f,
 	.fo_ioctl =	devfs_ioctl_f,
 	.fo_poll =	devfs_poll_f,
 	.fo_kqfilter =	devfs_kqfilter_f,

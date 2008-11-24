@@ -13,7 +13,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/ohci.c,v 1.171 2008/03/20 16:19:25 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/ohci.c,v 1.173 2008/07/17 22:40:23 luoqi Exp $");
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -815,20 +815,19 @@ static usbd_status
 ohci_controller_init(ohci_softc_t *sc)
 {
 	int i;
-	u_int32_t s, ctl, ival, hcr, fm, per, desca;
+	u_int32_t ctl, ival, hcr, fm, per, desca;
 
 	/* Determine in what context we are running. */
 	ctl = OREAD4(sc, OHCI_CONTROL);
 	if (ctl & OHCI_IR) {
 		/* SMM active, request change */
 		DPRINTF(("ohci_init: SMM active, request owner change\n"));
-		s = OREAD4(sc, OHCI_COMMAND_STATUS);
-		OWRITE4(sc, OHCI_COMMAND_STATUS, s | OHCI_OCR);
+		OWRITE4(sc, OHCI_COMMAND_STATUS, OHCI_OCR);
 		for (i = 0; i < 100 && (ctl & OHCI_IR); i++) {
 			usb_delay_ms(&sc->sc_bus, 1);
 			ctl = OREAD4(sc, OHCI_CONTROL);
 		}
-		if ((ctl & OHCI_IR) == 0) {
+		if (ctl & OHCI_IR) {
 			printf("%s: SMM does not respond, resetting\n",
 			       device_get_nameunit(sc->sc_bus.bdev));
 			OWRITE4(sc, OHCI_CONTROL, OHCI_HCFS_RESET);
@@ -1568,9 +1567,13 @@ ohci_device_bulk_done(usbd_xfer_handle xfer)
 static __inline void
 hacksync(usbd_xfer_handle xfer)
 {
-	usbd_pipe_handle pipe = xfer->pipe;
-	bus_dma_tag_t tag = pipe->device->bus->buffer_dmatag;
-	struct usb_dma_mapping *dmap = &xfer->dmamap;
+	bus_dma_tag_t tag;
+	struct usb_dma_mapping *dmap;
+
+	if (xfer->length == 0)
+		return;
+	tag = xfer->pipe->device->bus->buffer_dmatag;
+	dmap = &xfer->dmamap;
 	bus_dmamap_sync(tag, dmap->map, BUS_DMASYNC_PREWRITE);
 }
 

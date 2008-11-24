@@ -28,12 +28,13 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_ipsec.c,v 1.8 2007/10/07 20:44:23 silby Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_ipsec.c,v 1.12 2008/10/02 15:37:58 zec Exp $");
 
 #include "opt_ipsec.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/errno.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
@@ -41,6 +42,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_ipsec.c,v 1.8 2007/10/07 20:44:23 silby E
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/sysctl.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -92,6 +94,8 @@ int
 ip_ipsec_fwd(struct mbuf *m)
 {
 #ifdef IPSEC
+	INIT_VNET_INET(curvnet);
+	INIT_VNET_IPSEC(curvnet);
 	struct m_tag *mtag;
 	struct tdb_ident *tdbi;
 	struct secpolicy *sp;
@@ -120,7 +124,7 @@ ip_ipsec_fwd(struct mbuf *m)
 	KEY_FREESP(&sp);
 	splx(s);
 	if (error) {
-		ipstat.ips_cantforward++;
+		V_ipstat.ips_cantforward++;
 		return 1;
 	}
 #endif /* IPSEC */
@@ -139,6 +143,7 @@ ip_ipsec_input(struct mbuf *m)
 {
 	struct ip *ip = mtod(m, struct ip *);
 #ifdef IPSEC
+	INIT_VNET_IPSEC(curvnet);
 	struct m_tag *mtag;
 	struct tdb_ident *tdbi;
 	struct secpolicy *sp;
@@ -190,9 +195,8 @@ ip_ipsec_input(struct mbuf *m)
  * Returns MTU suggestion for ICMP needfrag reply.
  */
 int
-ip_ipsec_mtu(struct mbuf *m)
+ip_ipsec_mtu(struct mbuf *m, int mtu)
 {
-	int mtu = 0;
 	/*
 	 * If the packet is routed over IPsec tunnel, tell the
 	 * originator the tunnel MTU.
@@ -329,6 +333,17 @@ ip_ipsec_output(struct mbuf **m, struct inpcb *inp, int *flags, int *error,
 
 		/* NB: callee frees mbuf */
 		*error = ipsec4_process_packet(*m, sp->req, *flags, 0);
+		if (*error == EJUSTRETURN) {
+			/*
+			 * We had a SP with a level of 'use' and no SA. We
+			 * will just continue to process the packet without
+			 * IPsec processing and return without error.
+			 */
+			*error = 0;
+			ip->ip_len = ntohs(ip->ip_len);
+			ip->ip_off = ntohs(ip->ip_off);
+			goto done;
+		}
 		/*
 		 * Preserve KAME behaviour: ENOENT can be returned
 		 * when an SA acquire is in progress.  Don't propagate

@@ -63,7 +63,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_kern.c,v 1.128 2007/04/05 20:52:51 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_kern.c,v 1.136 2008/07/18 17:41:31 alc Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -109,8 +109,8 @@ kmem_alloc_nofault(map, size)
 
 	size = round_page(size);
 	addr = vm_map_min(map);
-	result = vm_map_find(map, NULL, 0,
-	    &addr, size, TRUE, VM_PROT_ALL, VM_PROT_ALL, MAP_NOFAULT);
+	result = vm_map_find(map, NULL, 0, &addr, size, VMFS_ANY_SPACE,
+	    VM_PROT_ALL, VM_PROT_ALL, MAP_NOFAULT);
 	if (result != KERN_SUCCESS) {
 		return (0);
 	}
@@ -221,25 +221,22 @@ kmem_free(map, addr, size)
  *	parent		Map to take range from
  *	min, max	Returned endpoints of map
  *	size		Size of range to find
+ *	superpage_align	Request that min is superpage aligned
  */
 vm_map_t
-kmem_suballoc(parent, min, max, size)
-	vm_map_t parent;
-	vm_offset_t *min, *max;
-	vm_size_t size;
+kmem_suballoc(vm_map_t parent, vm_offset_t *min, vm_offset_t *max,
+    vm_size_t size, boolean_t superpage_align)
 {
 	int ret;
 	vm_map_t result;
 
 	size = round_page(size);
 
-	*min = (vm_offset_t) vm_map_min(parent);
-	ret = vm_map_find(parent, NULL, (vm_offset_t) 0,
-	    min, size, TRUE, VM_PROT_ALL, VM_PROT_ALL, 0);
-	if (ret != KERN_SUCCESS) {
-		printf("kmem_suballoc: bad status return of %d.\n", ret);
-		panic("kmem_suballoc");
-	}
+	*min = vm_map_min(parent);
+	ret = vm_map_find(parent, NULL, 0, min, size, superpage_align ?
+	    VMFS_ALIGNED_SPACE : VMFS_ANY_SPACE, VM_PROT_ALL, VM_PROT_ALL, 0);
+	if (ret != KERN_SUCCESS)
+		panic("kmem_suballoc: bad status return of %d", ret);
 	*max = *min + size;
 	result = vm_map_create(vm_map_pmap(parent), *min, *max);
 	if (result == NULL)
@@ -261,14 +258,8 @@ kmem_suballoc(parent, min, max, size)
  * 	(kmem_object).  This, combined with the fact that only malloc uses
  * 	this routine, ensures that we will never block in map or object waits.
  *
- * 	Note that this still only works in a uni-processor environment and
- * 	when called at splhigh().
- *
  * 	We don't worry about expanding the map (adding entries) since entries
  * 	for wired maps are statically allocated.
- *
- *	NOTE:  This routine is not supposed to block if M_NOWAIT is set, but
- *	I have not verified that it actually does not block.
  *
  *	`map' is ONLY allowed to be kmem_map or one of the mbuf submaps to
  *	which we never free.
@@ -296,14 +287,21 @@ kmem_malloc(map, size, flags)
 	vm_map_lock(map);
 	if (vm_map_findspace(map, vm_map_min(map), size, &addr)) {
 		vm_map_unlock(map);
-		if ((flags & M_NOWAIT) == 0) {
-			EVENTHANDLER_INVOKE(vm_lowmem, 0);
-			uma_reclaim();
-			vm_map_lock(map);
-			if (vm_map_findspace(map, vm_map_min(map), size, &addr)) {
+                if ((flags & M_NOWAIT) == 0) {
+			for (i = 0; i < 8; i++) {
+				EVENTHANDLER_INVOKE(vm_lowmem, 0);
+				uma_reclaim();
+				vm_map_lock(map);
+				if (vm_map_findspace(map, vm_map_min(map),
+				    size, &addr) == 0) {
+					break;
+				}
 				vm_map_unlock(map);
+				tsleep(&i, 0, "nokva", (hz / 4) * (i + 1));
+			}
+			if (i == 8) {
 				panic("kmem_malloc(%ld): kmem_map too small: %ld total allocated",
-					(long)size, (long)map->size);
+				    (long)size, (long)map->size);
 			}
 		} else {
 			return (0);
@@ -313,15 +311,6 @@ kmem_malloc(map, size, flags)
 	vm_object_reference(kmem_object);
 	vm_map_insert(map, kmem_object, offset, addr, addr + size,
 		VM_PROT_ALL, VM_PROT_ALL, 0);
-
-	/*
-	 * Note: if M_NOWAIT specified alone, allocate from 
-	 * interrupt-safe queues only (just the free list).  If 
-	 * M_USE_RESERVE is also specified, we can also
-	 * allocate from the cache.  Neither of the latter two
-	 * flags may be specified from an interrupt since interrupts
-	 * are not allowed to mess with the cache queue.
-	 */
 
 	if ((flags & (M_NOWAIT|M_USE_RESERVE)) == M_NOWAIT)
 		pflags = VM_ALLOC_INTERRUPT | VM_ALLOC_WIRED;
@@ -406,7 +395,8 @@ retry:
 		/*
 		 * Because this is kernel_pmap, this call will not block.
 		 */
-		pmap_enter(kernel_pmap, addr + i, m, VM_PROT_ALL, 1);
+		pmap_enter(kernel_pmap, addr + i, VM_PROT_ALL, m, VM_PROT_ALL,
+		    TRUE);
 		vm_page_wakeup(m);
 	}
 	VM_OBJECT_UNLOCK(kmem_object);
@@ -446,7 +436,7 @@ kmem_alloc_wait(map, size)
 			return (0);
 		}
 		map->needs_wakeup = TRUE;
-		vm_map_unlock_and_wait(map, FALSE);
+		vm_map_unlock_and_wait(map, 0);
 	}
 	vm_map_insert(map, NULL, 0, addr, addr + size, VM_PROT_ALL, VM_PROT_ALL, 0);
 	vm_map_unlock(map);
@@ -495,8 +485,12 @@ kmem_init(start, end)
 	/* N.B.: cannot use kgdb to debug, starting with this assignment ... */
 	kernel_map = m;
 	(void) vm_map_insert(m, NULL, (vm_ooffset_t) 0,
-	    VM_MIN_KERNEL_ADDRESS, start, VM_PROT_ALL, VM_PROT_ALL,
-	    MAP_NOFAULT);
+#ifdef __amd64__
+	    KERNBASE,
+#else		     
+	    VM_MIN_KERNEL_ADDRESS,
+#endif
+	    start, VM_PROT_ALL, VM_PROT_ALL, MAP_NOFAULT);
 	/* ... and ending with the completion of the above `insert' */
 	vm_map_unlock(m);
 }

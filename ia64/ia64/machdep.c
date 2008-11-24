@@ -26,12 +26,13 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia64/machdep.c,v 1.225 2007/08/04 19:33:27 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia64/machdep.c,v 1.242 2008/07/07 17:43:56 marcel Exp $");
 
 #include "opt_compat.h"
 #include "opt_ddb.h"
 #include "opt_kstack_pages.h"
 #include "opt_msgbuf.h"
+#include "opt_sched.h"
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -109,8 +110,6 @@ u_int64_t pa_bootinfo;
 struct bootinfo bootinfo;
 
 struct pcpu pcpu0;
-extern char kstack[]; 
-vm_offset_t proc0kstack;
 
 extern u_int64_t kernel_text[], _end[];
 
@@ -122,6 +121,8 @@ struct fpswa_iface *fpswa_iface;
 
 u_int64_t ia64_pal_base;
 u_int64_t ia64_port_base;
+
+static int ia64_inval_icache_needed;
 
 char machine[] = MACHINE;
 SYSCTL_STRING(_hw, HW_MACHINE, machine, CTLFLAG_RD, machine, 0, "");
@@ -139,9 +140,12 @@ extern vm_offset_t ksym_start, ksym_end;
 #endif
 
 static void cpu_startup(void *);
-SYSINIT(cpu, SI_SUB_CPU, SI_ORDER_FIRST, cpu_startup, NULL)
+SYSINIT(cpu, SI_SUB_CPU, SI_ORDER_FIRST, cpu_startup, NULL);
 
-struct msgbuf *msgbufp=0;
+struct msgbuf *msgbufp = NULL;
+
+/* Other subsystems (e.g., ACPI) can hook this later. */
+void (*cpu_idle_hook)(void) = NULL;
 
 long Maxmem = 0;
 long realmem = 0;
@@ -153,20 +157,10 @@ vm_paddr_t phys_avail[PHYSMAP_SIZE + 2];
 /* must be 2 less so 0 0 can signal end of chunks */
 #define PHYS_AVAIL_ARRAY_END ((sizeof(phys_avail) / sizeof(vm_offset_t)) - 2)
 
-void mi_startup(void);		/* XXX should be in a MI header */
-
 struct kva_md_info kmi;
 
 #define	Mhz	1000000L
 #define	Ghz	(1000L*Mhz)
-
-void setPQL2(int *const size, int *const ways);
-
-void
-setPQL2(int *const size, int *const ways)
-{
-	return;
-}
 
 static void
 identifycpu(void)
@@ -222,6 +216,8 @@ identifycpu(void)
 		}
 		break;
 	case 0x20:
+		ia64_inval_icache_needed = 1;
+
 		family_name = "Itanium 2";
 		switch (model) {
 		case 0x00:
@@ -260,7 +256,6 @@ cpu_startup(dummy)
 	 */
 	identifycpu();
 
-	/* startrtclock(); */
 #ifdef PERFMON
 	perfmon_init();
 #endif
@@ -334,22 +329,23 @@ cpu_halt()
 	efi_reset_system();
 }
 
-static void
-cpu_idle_default(void)
+void
+cpu_idle(int busy)
 {
 	struct ia64_pal_result res;
 
-	res = ia64_call_pal_static(PAL_HALT_LIGHT, 0, 0, 0);
+	if (cpu_idle_hook != NULL)
+		(*cpu_idle_hook)();
+	else
+		res = ia64_call_pal_static(PAL_HALT_LIGHT, 0, 0, 0);
 }
 
-void
-cpu_idle()
+int
+cpu_idle_wakeup(int cpu)
 {
-	(*cpu_idle_hook)();
-}
 
-/* Other subsystems (e.g., ACPI) can hook this later. */
-void (*cpu_idle_hook)(void) = cpu_idle_default;
+	return (0);
+}
 
 void
 cpu_reset()
@@ -370,6 +366,12 @@ cpu_switch(struct thread *old, struct thread *new, struct mtx *mtx)
 	if (PCPU_GET(fpcurthread) == old)
 		old->td_frame->tf_special.psr |= IA64_PSR_DFH;
 	if (!savectx(oldpcb)) {
+		old->td_lock = mtx;
+#if defined(SCHED_ULE) && defined(SMP)
+		/* td_lock is volatile */
+		while (new->td_lock == &blocked_lock)
+			;
+#endif
 		newpcb = new->td_pcb;
 		oldpcb->pcb_current_pmap =
 		    pmap_switch(newpcb->pcb_current_pmap);
@@ -550,9 +552,10 @@ calculate_frequencies(void)
 	}
 }
 
-void
+struct ia64_init_return
 ia64_init(void)
 {
+	struct ia64_init_return ret;
 	int phys_avail_cnt;
 	vm_offset_t kernstart, kernend;
 	vm_offset_t kernstartpfn, kernendpfn, pfn0, pfn1;
@@ -789,12 +792,11 @@ ia64_init(void)
 	msgbufp = (struct msgbuf *)pmap_steal_memory(MSGBUF_SIZE);
 	msgbufinit(msgbufp, MSGBUF_SIZE);
 
-	proc_linkup(&proc0, &thread0);
+	proc_linkup0(&proc0, &thread0);
 	/*
 	 * Init mapping for kernel stack for proc 0
 	 */
-	proc0kstack = (vm_offset_t)kstack;
-	thread0.td_kstack = proc0kstack;
+	thread0.td_kstack = pmap_steal_memory(KSTACK_PAGES * PAGE_SIZE);
 	thread0.td_kstack_pages = KSTACK_PAGES;
 
 	mutex_init();
@@ -806,7 +808,7 @@ ia64_init(void)
 	 * and make proc0's trapframe pointer point to it for sanity.
 	 * Initialise proc0's backing store to start after u area.
 	 */
-	cpu_thread_setup(&thread0);
+	cpu_thread_alloc(&thread0);
 	thread0.td_frame->tf_flags = FRAME_SYSCALL;
 	thread0.td_pcb->pcb_special.sp =
 	    (u_int64_t)thread0.td_frame - 16;
@@ -824,25 +826,16 @@ ia64_init(void)
 
 #ifdef KDB
 	if (boothowto & RB_KDB)
-		kdb_enter("Boot flags requested debugger\n");
+		kdb_enter(KDB_WHY_BOOTFLAGS,
+		    "Boot flags requested debugger\n");
 #endif
 
 	ia64_set_tpr(0);
 	ia64_srlz_d();
 
-	/*
-	 * Save our current context so that we have a known (maybe even
-	 * sane) context as the initial context for new threads that are
-	 * forked from us. If any of those threads (including thread0)
-	 * does something wrong, we may be lucky and return here where
-	 * we're ready for them with a nice panic.
-	 */
-	if (!savectx(thread0.td_pcb))
-		mi_startup();
-
-	/* We should not get here. */
-	panic("ia64_init: Whooaa there!");
-	/* NOTREACHED */
+	ret.bspstore = thread0.td_pcb->pcb_special.bspstore;
+	ret.sp = thread0.td_pcb->pcb_special.sp;
+	return (ret);
 }
 
 __volatile void *
@@ -899,12 +892,16 @@ DELAY(int n)
 {
 	u_int64_t start, end, now;
 
+	sched_pin();
+
 	start = ia64_get_itc();
 	end = start + (itc_frequency * n) / 1000000;
 	/* printf("DELAY from 0x%lx to 0x%lx\n", start, end); */
 	do {
 		now = ia64_get_itc();
 	} while (now < end || (now > start && end < start));
+
+	sched_unpin();
 }
 
 /*
@@ -1101,7 +1098,7 @@ ia64_flush_dirty(struct thread *td, struct _special *r)
 	struct iovec iov;
 	struct uio uio;
 	uint64_t bspst, kstk, rnat;
-	int error;
+	int error, locked;
 
 	if (r->ndirty == 0)
 		return (0);
@@ -1122,7 +1119,9 @@ ia64_flush_dirty(struct thread *td, struct _special *r)
 		r->rnat = (bspst > kstk && (bspst & 0x1ffL) < (kstk & 0x1ffL))
 		    ? *(uint64_t*)(kstk | 0x1f8L) : rnat;
 	} else {
-		PHOLD(td->td_proc);
+		locked = PROC_LOCKED(td->td_proc);
+		if (!locked)
+			PHOLD(td->td_proc);
 		iov.iov_base = (void*)(uintptr_t)kstk;
 		iov.iov_len = r->ndirty;
 		uio.uio_iov = &iov;
@@ -1140,7 +1139,8 @@ ia64_flush_dirty(struct thread *td, struct _special *r)
 		 */
 		if (uio.uio_resid != 0 && error == 0)
 			error = ENOSPC;
-		PRELE(td->td_proc);
+		if (!locked)
+			PRELE(td->td_proc);
 	}
 
 	r->bspstore += r->ndirty;
@@ -1210,15 +1210,14 @@ set_mcontext(struct thread *td, const mcontext_t *mc)
 		/*
 		 * We can get an async context passed to us while we
 		 * entered the kernel through a syscall: sigreturn(2)
-		 * and kse_switchin(2) both take contexts that could
-		 * previously be the result of a trap or interrupt.
+		 * takes contexts that could previously be the result of
+		 * a trap or interrupt.
 		 * Hence, we cannot assert that the trapframe is not
 		 * a syscall frame, but we can assert that it's at
 		 * least an expected syscall.
 		 */
 		if (tf->tf_flags & FRAME_SYSCALL) {
-			KASSERT(tf->tf_scratch.gr15 == SYS_sigreturn ||
-			    tf->tf_scratch.gr15 == SYS_kse_switchin, ("foo"));
+			KASSERT(tf->tf_scratch.gr15 == SYS_sigreturn, ("foo"));
 			tf->tf_flags &= ~FRAME_SYSCALL;
 		}
 		tf->tf_scratch = mc->mc_scratch;
@@ -1237,9 +1236,6 @@ set_mcontext(struct thread *td, const mcontext_t *mc)
 	tf->tf_special = s;
 	restore_callee_saved(&mc->mc_preserved);
 	restore_callee_saved_fp(&mc->mc_preserved_fp);
-
-	if (mc->mc_flags & _MC_FLAGS_KSE_SET_MBOX)
-		suword((caddr_t)mc->mc_special.ifa, mc->mc_special.isr);
 
 	return (0);
 }
@@ -1525,8 +1521,20 @@ ia64_highfp_save(struct thread *td)
 	return (1);
 }
 
-int
-sysbeep(int pitch, int period)
+void
+ia64_invalidate_icache(vm_offset_t va, vm_offset_t sz)
 {
-	return (ENODEV);
+	vm_offset_t lim;
+
+	if (!ia64_inval_icache_needed)
+		return;
+
+	lim = va + sz;
+	while (va < lim) {
+		ia64_fc_i(va);
+		va += 32;	/* XXX */
+	}
+
+	ia64_sync_i();
+	ia64_srlz_i();
 }

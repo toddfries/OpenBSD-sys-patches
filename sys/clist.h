@@ -27,21 +27,43 @@
  * SUCH DAMAGE.
  *
  *	@(#)clist.h	8.1 (Berkeley) 6/4/93
- * $FreeBSD: src/sys/sys/clist.h,v 1.11 2004/04/07 04:19:49 imp Exp $
+ * $FreeBSD: src/sys/sys/clist.h,v 1.14 2008/09/21 18:12:18 ed Exp $
  */
 
 #ifndef _SYS_CLIST_H_
 #define _SYS_CLIST_H_
 
+#include <sys/param.h>
+
+/*
+ * Clists are character lists, which is a variable length linked list
+ * of cblocks, with a count of the number of characters in the list.
+ */
+struct clist {
+	int	c_cc;		/* Number of characters in the clist. */
+	int	c_cbcount;	/* Number of cblocks. */
+	int	c_cbmax;	/* Max # cblocks allowed for this clist. */
+	int	c_cbreserved;	/* # cblocks reserved for this clist. */
+	char	*c_cf;		/* Pointer to the first cblock. */
+	char	*c_cl;		/* Pointer to the last cblock. */
+};
+
 struct cblock {
 	struct cblock *c_next;			/* next cblock in queue */
-	unsigned char c_quote[CBQSIZE];		/* quoted characters */
 	unsigned char c_info[CBSIZE];		/* characters */
 };
 
 #ifdef _KERNEL
-extern	struct cblock *cfree;
 extern	int cfreecount;
+
+int	 b_to_q(char *cp, int cc, struct clist *q);
+void	 clist_alloc_cblocks(struct clist *q, int ccmax, int ccres);
+void	 clist_free_cblocks(struct clist *q);
+int	 getc(struct clist *q);
+void	 ndflush(struct clist *q, int cc);
+int	 putc(char c, struct clist *q);
+int	 q_to_b(struct clist *q, char *cp, int cc);
+int	 unputc(struct clist *q);
 #endif
 
 #endif

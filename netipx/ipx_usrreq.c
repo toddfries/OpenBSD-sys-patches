@@ -63,7 +63,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netipx/ipx_usrreq.c,v 1.62 2007/06/13 14:01:43 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/netipx/ipx_usrreq.c,v 1.64 2008/07/25 23:54:07 trhodes Exp $");
 
 #include "opt_ipx.h"
 
@@ -96,10 +96,10 @@ __FBSDID("$FreeBSD: src/sys/netipx/ipx_usrreq.c,v 1.62 2007/06/13 14:01:43 rwats
 
 static int ipxsendspace = IPXSNDQ;
 SYSCTL_INT(_net_ipx_ipx, OID_AUTO, ipxsendspace, CTLFLAG_RW,
-            &ipxsendspace, 0, "");
+            &ipxsendspace, 0, "Send buffer space");
 static int ipxrecvspace = IPXRCVQ;
 SYSCTL_INT(_net_ipx_ipx, OID_AUTO, ipxrecvspace, CTLFLAG_RW,
-            &ipxrecvspace, 0, "");
+            &ipxrecvspace, 0, "Receive buffer space");
 
 static	void ipx_usr_abort(struct socket *so);
 static	int ipx_attach(struct socket *so, int proto, struct thread *td);

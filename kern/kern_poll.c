@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_poll.c,v 1.31 2007/08/06 14:26:00 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_poll.c,v 1.34 2008/08/17 23:27:27 bz Exp $");
 
 #include "opt_device_polling.h"
 
@@ -44,6 +44,7 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_poll.c,v 1.31 2007/08/06 14:26:00 rwatson 
 #include <sys/proc.h>
 #include <sys/resourcevar.h>
 #include <sys/kthread.h>
+#include <sys/vimage.h>
 
 static void netisr_poll(void);		/* the two netisr handlers      */
 static void netisr_pollmore(void);
@@ -262,12 +263,10 @@ init_device_poll(void)
 {
 
 	mtx_init(&poll_mtx, "polling", NULL, MTX_DEF);
-	netisr_register(NETISR_POLL, (netisr_t *)netisr_poll, NULL,
-	    NETISR_MPSAFE);
-	netisr_register(NETISR_POLLMORE, (netisr_t *)netisr_pollmore, NULL,
-	    NETISR_MPSAFE);
+	netisr_register(NETISR_POLL, (netisr_t *)netisr_poll, NULL, 0);
+	netisr_register(NETISR_POLLMORE, (netisr_t *)netisr_pollmore, NULL, 0);
 }
-SYSINIT(device_poll, SI_SUB_CLOCKS, SI_ORDER_MIDDLE, init_device_poll, NULL)
+SYSINIT(device_poll, SI_SUB_CLOCKS, SI_ORDER_MIDDLE, init_device_poll, NULL);
 
 
 /*
@@ -539,7 +538,7 @@ poll_switch(SYSCTL_HANDLER_ARGS)
 	polling = val;
 
 	IFNET_RLOCK();
-	TAILQ_FOREACH(ifp, &ifnet, if_link) {
+	TAILQ_FOREACH(ifp, &V_ifnet, if_link) {
 		if (ifp->if_capabilities & IFCAP_POLLING) {
 			struct ifreq ifr;
 
@@ -593,4 +592,5 @@ static struct kproc_desc idlepoll_kp = {
 	 poll_idle,
 	 &idlepoll
 };
-SYSINIT(idlepoll, SI_SUB_KTHREAD_VM, SI_ORDER_ANY, kproc_start, &idlepoll_kp)
+SYSINIT(idlepoll, SI_SUB_KTHREAD_VM, SI_ORDER_ANY, kproc_start,
+    &idlepoll_kp);

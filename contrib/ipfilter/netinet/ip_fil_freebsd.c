@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/contrib/ipfilter/netinet/ip_fil_freebsd.c,v 1.8 2007/10/30 15:23:26 darrenr Exp $	*/
+/*	$FreeBSD: src/sys/contrib/ipfilter/netinet/ip_fil_freebsd.c,v 1.11 2008/08/17 23:27:27 bz Exp $	*/
 
 /*
  * Copyright (C) 1993-2003 by Darren Reed.
@@ -61,6 +61,12 @@ static const char rcsid[] = "@(#)$Id: ip_fil_freebsd.c,v 2.53.2.50 2007/09/20 12
 # include <sys/selinfo.h>
 #else
 # include <sys/select.h>
+#endif
+#if __FreeBSD_version >= 800044
+# include <sys/vimage.h>
+#else
+#define V_path_mtu_discovery path_mtu_discovery
+#define V_ipforwarding ipforwarding
 #endif
 
 #include <net/if.h>
@@ -234,7 +240,7 @@ int ipfattach()
 	fr_running = 1;
 
 	if (fr_control_forwarding & 1)
-		ipforwarding = 1;
+		V_ipforwarding = 1;
 
 	SPL_X(s);
 #if (__FreeBSD_version >= 300000)
@@ -257,7 +263,7 @@ int ipfdetach()
 	int s;
 #endif
 	if (fr_control_forwarding & 2)
-		ipforwarding = 0;
+		V_ipforwarding = 0;
 
 	SPL_NET(s);
 
@@ -652,11 +658,11 @@ mb_t *m, **mpp;
 		ip->ip_tos = oip->ip_tos;
 		ip->ip_id = fin->fin_ip->ip_id;
 #if (__FreeBSD_version > 460000)
-		ip->ip_off = path_mtu_discovery ? IP_DF : 0;
+		ip->ip_off = V_path_mtu_discovery ? IP_DF : 0;
 #else
 		ip->ip_off = 0;
 #endif
-		ip->ip_ttl = ip_defttl;
+		ip->ip_ttl = V_ip_defttl;
 		ip->ip_sum = 0;
 		hlen = sizeof(*oip);
 		break;
@@ -970,7 +976,7 @@ frdest_t *fdp;
 		dst->sin_addr = fdp->fd_ip;
 
 	dst->sin_len = sizeof(*dst);
-	rtalloc(ro);
+	in_rtalloc(ro, 0);
 
 	if ((ifp == NULL) && (ro->ro_rt != NULL))
 		ifp = ro->ro_rt->rt_ifp;
@@ -1158,7 +1164,7 @@ fr_info_t *fin;
 	dst->sin_len = sizeof(*dst);
 	dst->sin_family = AF_INET;
 	dst->sin_addr = fin->fin_src;
-	rtalloc(&iproute);
+	in_rtalloc(&iproute, 0);
 	if (iproute.ro_rt == NULL)
 		return 0;
 	return (fin->fin_ifp == iproute.ro_rt->rt_ifp);
@@ -1518,6 +1524,8 @@ mb_t *m;
 		}
 #endif
 	} else {
+		fin->fin_ip->ip_len = ntohs(fin->fin_ip->ip_len);
+		fin->fin_ip->ip_off = ntohs(fin->fin_ip->ip_off);
 #if (__FreeBSD_version >= 470102)
 		error = ip_output(m, NULL, NULL, IP_FORWARDING, NULL, NULL);
 #else

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2005 Apple Computer, Inc.
+ * Copyright (c) 1999-2005 Apple Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -10,7 +10,7 @@
  * 2.  Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- * 3.  Neither the name of Apple Computer, Inc. ("Apple") nor the names of
+ * 3.  Neither the name of Apple Inc. ("Apple") nor the names of
  *     its contributors may be used to endorse or promote products derived
  *     from this software without specific prior written permission.
  *
@@ -25,9 +25,10 @@
  * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
- *
- * $FreeBSD: src/sys/security/audit/audit_bsm.c,v 1.22 2007/10/26 01:23:07 csjp Exp $
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/security/audit/audit_bsm.c,v 1.37 2008/11/11 21:57:03 csjp Exp $");
 
 #include <sys/param.h>
 #include <sys/vnode.h>
@@ -72,7 +73,7 @@ kau_init(void)
  * This call reserves memory for the audit record.  Memory must be guaranteed
  * before any auditable event can be generated.  The au_record structure
  * maintains a reference to the memory allocated above and also the list of
- * tokens associated with this record
+ * tokens associated with this record.
  */
 static struct au_record *
 kau_open(void)
@@ -112,13 +113,34 @@ kau_close(struct au_record *rec, struct timespec *ctime, short event)
 	size_t tot_rec_size;
 	token_t *cur, *hdr, *trail;
 	struct timeval tm;
+	size_t hdrsize;
+	struct auditinfo_addr ak;
+	struct in6_addr *ap;
 
-	tot_rec_size = rec->len + AUDIT_HEADER_SIZE + AUDIT_TRAILER_SIZE;
+	audit_get_kinfo(&ak);
+	hdrsize = 0;
+	switch (ak.ai_termid.at_type) {
+	case AU_IPv4:
+		hdrsize = (ak.ai_termid.at_addr[0] == INADDR_ANY) ?
+		    AUDIT_HEADER_SIZE : AUDIT_HEADER_EX_SIZE(&ak);
+		break;
+	case AU_IPv6:
+		ap = (struct in6_addr *)&ak.ai_termid.at_addr[0];
+		hdrsize = (IN6_IS_ADDR_UNSPECIFIED(ap)) ? AUDIT_HEADER_SIZE :
+		    AUDIT_HEADER_EX_SIZE(&ak);
+		break;
+	default:
+		panic("kau_close: invalid address family");
+	}
+	tot_rec_size = rec->len + hdrsize + AUDIT_TRAILER_SIZE;
 	rec->data = malloc(tot_rec_size, M_AUDITBSM, M_WAITOK | M_ZERO);
 
 	tm.tv_usec = ctime->tv_nsec / 1000;
 	tm.tv_sec = ctime->tv_sec;
-	hdr = au_to_header32_tm(tot_rec_size, event, 0, tm);
+	if (hdrsize != AUDIT_HEADER_SIZE)
+		hdr = au_to_header32_ex_tm(tot_rec_size, event, 0, tm, &ak);
+	else
+		hdr = au_to_header32_tm(tot_rec_size, event, 0, tm);
 	TAILQ_INSERT_HEAD(&rec->token_q, hdr, tokens);
 
 	trail = au_to_trailer(tot_rec_size);
@@ -156,50 +178,50 @@ kau_free(struct au_record *rec)
 
 /*
  * XXX: May want turn some (or all) of these macros into functions in order
- * to reduce the generated code sized.
+ * to reduce the generated code size.
  *
  * XXXAUDIT: These macros assume that 'kar', 'ar', 'rec', and 'tok' in the
  * caller are OK with this.
  */
-#define UPATH1_TOKENS do {						\
+#define	UPATH1_TOKENS do {						\
 	if (ARG_IS_VALID(kar, ARG_UPATH1)) {				\
 		tok = au_to_path(ar->ar_arg_upath1);			\
 		kau_write(rec, tok);					\
 	}								\
 } while (0)
 
-#define UPATH2_TOKENS do {						\
+#define	UPATH2_TOKENS do {						\
 	if (ARG_IS_VALID(kar, ARG_UPATH2)) {				\
 		tok = au_to_path(ar->ar_arg_upath2);			\
 		kau_write(rec, tok);					\
 	}								\
 } while (0)
 
-#define VNODE1_TOKENS do {						\
-	if (ARG_IS_VALID(kar, ARG_VNODE1)) {  				\
+#define	VNODE1_TOKENS do {						\
+	if (ARG_IS_VALID(kar, ARG_VNODE1)) {				\
 		tok = au_to_attr32(&ar->ar_arg_vnode1);			\
 		kau_write(rec, tok);					\
 	}								\
 } while (0)
 
-#define UPATH1_VNODE1_TOKENS do {					\
-	if (ARG_IS_VALID(kar, ARG_UPATH1)) {  				\
+#define	UPATH1_VNODE1_TOKENS do {					\
+	if (ARG_IS_VALID(kar, ARG_UPATH1)) {				\
 		UPATH1_TOKENS;						\
 	}								\
-	if (ARG_IS_VALID(kar, ARG_VNODE1)) {  				\
+	if (ARG_IS_VALID(kar, ARG_VNODE1)) {				\
 		tok = au_to_attr32(&ar->ar_arg_vnode1);			\
 		kau_write(rec, tok);					\
 	}								\
 } while (0)
 
-#define VNODE2_TOKENS do {						\
-	if (ARG_IS_VALID(kar, ARG_VNODE2)) {  				\
+#define	VNODE2_TOKENS do {						\
+	if (ARG_IS_VALID(kar, ARG_VNODE2)) {				\
 		tok = au_to_attr32(&ar->ar_arg_vnode2);			\
 		kau_write(rec, tok);					\
 	}								\
 } while (0)
 
-#define FD_VNODE1_TOKENS	do {					\
+#define	FD_VNODE1_TOKENS do {						\
 	if (ARG_IS_VALID(kar, ARG_VNODE1)) {				\
 		if (ARG_IS_VALID(kar, ARG_FD)) {			\
 			tok = au_to_arg32(1, "fd", ar->ar_arg_fd);	\
@@ -216,7 +238,7 @@ kau_free(struct au_record *rec)
 	}								\
 } while (0)
 
-#define PROCESS_PID_TOKENS(argn) do {					\
+#define	PROCESS_PID_TOKENS(argn) do {					\
 	if ((ar->ar_arg_pid > 0) /* Reference a single process */	\
 	    && (ARG_IS_VALID(kar, ARG_PROCESS))) {			\
 		tok = au_to_process32_ex(ar->ar_arg_auid,		\
@@ -229,9 +251,9 @@ kau_free(struct au_record *rec)
 		tok = au_to_arg32(argn, "process", ar->ar_arg_pid);	\
 		kau_write(rec, tok);					\
 	}								\
-} while (0)								\
+} while (0)
 
-#define EXTATTR_TOKENS	do {						\
+#define	EXTATTR_TOKENS do {						\
 	if (ARG_IS_VALID(kar, ARG_VALUE)) {				\
 		switch (ar->ar_arg_value) {				\
 		case EXTATTR_NAMESPACE_USER:				\
@@ -384,7 +406,9 @@ kaudit_to_bsm(struct kaudit_record *kar, struct au_record **pau)
 	ar = &kar->k_ar;
 	rec = kau_open();
 
-	/* Create the subject token */
+	/*
+	 * Create the subject token.
+	 */
 	switch (ar->ar_subj_term_addr.at_type) {
 	case AU_IPv4:
 		tid.port = ar->ar_subj_term_addr.at_port;
@@ -392,8 +416,8 @@ kaudit_to_bsm(struct kaudit_record *kar, struct au_record **pau)
 		subj_tok = au_to_subject32(ar->ar_subj_auid,  /* audit ID */
 		    ar->ar_subj_cred.cr_uid, /* eff uid */
 		    ar->ar_subj_egid,	/* eff group id */
-		    ar->ar_subj_ruid, 	/* real uid */
-		    ar->ar_subj_rgid, 	/* real group id */
+		    ar->ar_subj_ruid,	/* real uid */
+		    ar->ar_subj_rgid,	/* real group id */
 		    ar->ar_subj_pid,	/* process id */
 		    ar->ar_subj_asid,	/* session ID */
 		    &tid);
@@ -429,6 +453,7 @@ kaudit_to_bsm(struct kaudit_record *kar, struct au_record **pau)
 	switch(ar->ar_event) {
 	case AUE_ACCEPT:
 	case AUE_BIND:
+	case AUE_LISTEN:
 	case AUE_CONNECT:
 	case AUE_RECV:
 	case AUE_RECVFROM:
@@ -758,6 +783,13 @@ kaudit_to_bsm(struct kaudit_record *kar, struct au_record **pau)
 		EXTATTR_TOKENS;
 		break;
 
+	case AUE_FEXECVE:
+		if (ARG_IS_VALID(kar, ARG_FD)) {
+			tok = au_to_arg32(1, "fd", ar->ar_arg_fd);
+			kau_write(rec, tok);
+		}
+		/* FALLTHROUGH */
+
 	case AUE_EXECVE:
 		if (ARG_IS_VALID(kar, ARG_ARGV)) {
 			tok = au_to_exec_args(ar->ar_arg_argv,
@@ -815,7 +847,7 @@ kaudit_to_bsm(struct kaudit_record *kar, struct au_record **pau)
 
 	case AUE_FCNTL:
 		if (ar->ar_arg_cmd == F_GETLK || ar->ar_arg_cmd == F_SETLK ||
-			ar->ar_arg_cmd == F_SETLKW) {
+		    ar->ar_arg_cmd == F_SETLKW) {
 			if (ARG_IS_VALID(kar, ARG_CMD)) {
 				tok = au_to_arg32(2, "cmd", ar->ar_arg_cmd);
 				kau_write(rec, tok);
@@ -874,7 +906,7 @@ kaudit_to_bsm(struct kaudit_record *kar, struct au_record **pau)
 				if (ARG_IS_VALID(kar, ARG_FD)) {
 					tok = au_to_arg32(1, "fd",
 					    ar->ar_arg_fd);
-			    		kau_write(rec, tok);
+					kau_write(rec, tok);
 				}
 			}
 		}
@@ -988,7 +1020,7 @@ kaudit_to_bsm(struct kaudit_record *kar, struct au_record **pau)
 		break;
 
 	case AUE_MSGCTL:
-		ar->ar_event = msgctl_to_event(ar->ar_arg_svipc_cmd);
+		ar->ar_event = audit_msgctl_to_event(ar->ar_arg_svipc_cmd);
 		/* Fall through */
 
 	case AUE_MSGRCV:
@@ -1082,7 +1114,7 @@ kaudit_to_bsm(struct kaudit_record *kar, struct au_record **pau)
 		break;
 
 	case AUE_SEMCTL:
-		ar->ar_event = semctl_to_event(ar->ar_arg_svipc_cmd);
+		ar->ar_event = audit_semctl_to_event(ar->ar_arg_svipc_cmd);
 		/* Fall through */
 
 	case AUE_SEMOP:
@@ -1191,7 +1223,8 @@ kaudit_to_bsm(struct kaudit_record *kar, struct au_record **pau)
 		if (ARG_IS_VALID(kar, ARG_GROUPSET)) {
 			for(ctr = 0; ctr < ar->ar_arg_groups.gidset_size; ctr++)
 			{
-				tok = au_to_arg32(1, "setgroups", 							ar->ar_arg_groups.gidset[ctr]);
+				tok = au_to_arg32(1, "setgroups",
+				    ar->ar_arg_groups.gidset[ctr]);
 				kau_write(rec, tok);
 			}
 		}
@@ -1312,8 +1345,8 @@ kaudit_to_bsm(struct kaudit_record *kar, struct au_record **pau)
 			kau_write(rec, tok);
 		}
 		if (ARG_IS_VALID(kar, ARG_POSIX_IPC_PERM)) {
-		/* Create an ipc_perm token */
 			struct ipc_perm perm;
+
 			perm.uid = ar->ar_arg_pipc_perm.pipc_uid;
 			perm.gid = ar->ar_arg_pipc_perm.pipc_gid;
 			perm.cuid = ar->ar_arg_pipc_perm.pipc_uid;
@@ -1347,8 +1380,8 @@ kaudit_to_bsm(struct kaudit_record *kar, struct au_record **pau)
 			kau_write(rec, tok);
 		}
 		if (ARG_IS_VALID(kar, ARG_POSIX_IPC_PERM)) {
-		/* Create an ipc_perm token */
 			struct ipc_perm perm;
+
 			perm.uid = ar->ar_arg_pipc_perm.pipc_uid;
 			perm.gid = ar->ar_arg_pipc_perm.pipc_gid;
 			perm.cuid = ar->ar_arg_pipc_perm.pipc_uid;
@@ -1377,6 +1410,7 @@ kaudit_to_bsm(struct kaudit_record *kar, struct au_record **pau)
 		break;
 
 	case AUE_SYSCTL:
+	case AUE_SYSCTL_NONADMIN:
 		if (ARG_IS_VALID(kar, ARG_CTLNAME | ARG_LEN)) {
 			for (ctr = 0; ctr < ar->ar_arg_len; ctr++) {
 				tok = au_to_arg32(1, "name",
@@ -1414,7 +1448,10 @@ kaudit_to_bsm(struct kaudit_record *kar, struct au_record **pau)
 	default:
 		printf("BSM conversion requested for unknown event %d\n",
 		    ar->ar_event);
-		/* Write the subject token so it is properly freed here. */
+
+		/*
+		 * Write the subject token so it is properly freed here.
+		 */
 		kau_write(rec, subj_tok);
 		kau_free(rec);
 		return (BSM_NOAUDIT);

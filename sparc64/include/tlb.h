@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sparc64/include/tlb.h,v 1.26 2003/04/13 21:54:58 jake Exp $
+ * $FreeBSD: src/sys/sparc64/include/tlb.h,v 1.28 2008/09/08 21:24:25 marius Exp $
  */
 
 #ifndef	_MACHINE_TLB_H_
@@ -51,6 +51,34 @@
 #define	TLB_TAR_VA(va)			((va) & ~TAR_CTX_MASK)
 #define	TLB_TAR_CTX(ctx)		((ctx) & TAR_CTX_MASK)
 
+#define	TLB_CXR_CTX_BITS		(13)
+#define	TLB_CXR_CTX_MASK						\
+	(((1UL << TLB_CXR_CTX_BITS) - 1) << TLB_CXR_CTX_SHIFT)
+#define	TLB_CXR_CTX_SHIFT		(0)
+#define	TLB_CXR_PGSZ_BITS		(3)
+#define	TLB_PCXR_PGSZ_MASK						\
+	((((1UL << TLB_CXR_PGSZ_BITS) - 1) << TLB_PCXR_N_PGSZ0_SHIFT) |	\
+	(((1UL << TLB_CXR_PGSZ_BITS) - 1) << TLB_PCXR_N_PGSZ1_SHIFT) |	\
+	(((1UL << TLB_CXR_PGSZ_BITS) - 1) << TLB_PCXR_P_PGSZ0_SHIFT) |	\
+	(((1UL << TLB_CXR_PGSZ_BITS) - 1) << TLB_PCXR_P_PGSZ1_SHIFT))
+#define	TLB_PCXR_N_PGSZ0_SHIFT		(61)
+#define	TLB_PCXR_N_PGSZ1_SHIFT		(58)
+#define	TLB_PCXR_P_PGSZ0_SHIFT		(16)
+#define	TLB_PCXR_P_PGSZ1_SHIFT		(19)
+#define	TLB_SCXR_PGSZ_MASK						\
+	((((1UL << TLB_CXR_PGSZ_BITS) - 1) << TLB_SCXR_S_PGSZ0_SHIFT) |	\
+	(((1UL << TLB_CXR_PGSZ_BITS) - 1) << TLB_SCXR_S_PGSZ1_SHIFT))
+#define	TLB_SCXR_S_PGSZ1_SHIFT		(19)
+#define	TLB_SCXR_S_PGSZ0_SHIFT		(16)
+
+#define	TLB_TAE_PGSZ_BITS		(3)
+#define	TLB_TAE_PGSZ0_MASK						\
+	(((1UL << TLB_TAE_PGSZ_BITS) - 1) << TLB_TAE_PGSZ0_SHIFT)
+#define	TLB_TAE_PGSZ1_MASK						\
+	(((1UL << TLB_TAE_PGSZ_BITS) - 1) << TLB_TAE_PGSZ1_SHIFT)
+#define	TLB_TAE_PGSZ0_SHIFT		(16)
+#define	TLB_TAE_PGSZ1_SHIFT		(19)
+
 #define	TLB_DEMAP_ID_SHIFT		(4)
 #define	TLB_DEMAP_ID_PRIMARY		(0)
 #define	TLB_DEMAP_ID_SECONDARY		(1)
@@ -59,6 +87,7 @@
 #define	TLB_DEMAP_TYPE_SHIFT		(6)
 #define	TLB_DEMAP_TYPE_PAGE		(0)
 #define	TLB_DEMAP_TYPE_CONTEXT		(1)
+#define	TLB_DEMAP_TYPE_ALL		(2)	/* USIII and beyond only */
 
 #define	TLB_DEMAP_VA(va)		((va) & ~PAGE_MASK)
 #define	TLB_DEMAP_ID(id)		((id) << TLB_DEMAP_ID_SHIFT)
@@ -66,6 +95,7 @@
 
 #define	TLB_DEMAP_PAGE			(TLB_DEMAP_TYPE(TLB_DEMAP_TYPE_PAGE))
 #define	TLB_DEMAP_CONTEXT		(TLB_DEMAP_TYPE(TLB_DEMAP_TYPE_CONTEXT))
+#define	TLB_DEMAP_ALL			(TLB_DEMAP_TYPE(TLB_DEMAP_TYPE_ALL))
 
 #define	TLB_DEMAP_PRIMARY		(TLB_DEMAP_ID(TLB_DEMAP_ID_PRIMARY))
 #define	TLB_DEMAP_SECONDARY		(TLB_DEMAP_ID(TLB_DEMAP_ID_SECONDARY))
@@ -93,6 +123,7 @@
 #define	MMU_SFSR_W			(1UL << MMU_SFSR_W_SHIFT)
 #define	MMU_SFSR_FV			(1UL << MMU_SFSR_FV_SHIFT)
 
+typedef void tlb_flush_nonlocked_t(void);
 typedef void tlb_flush_user_t(void);
 
 struct pmap;
@@ -105,9 +136,13 @@ void	tlb_context_demap(struct pmap *pm);
 void	tlb_page_demap(struct pmap *pm, vm_offset_t va);
 void	tlb_range_demap(struct pmap *pm, vm_offset_t start, vm_offset_t end);
 
+tlb_flush_nonlocked_t cheetah_tlb_flush_nonlocked;
 tlb_flush_user_t cheetah_tlb_flush_user;
+
+tlb_flush_nonlocked_t spitfire_tlb_flush_nonlocked;
 tlb_flush_user_t spitfire_tlb_flush_user;
 
+extern tlb_flush_nonlocked_t *tlb_flush_nonlocked;
 extern tlb_flush_user_t *tlb_flush_user;
 
 #endif /* !_MACHINE_TLB_H_ */

@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_subs.c,v 1.147 2007/10/12 19:12:21 mohans Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_subs.c,v 1.158 2008/11/03 10:38:00 dfr Exp $");
 
 /*
  * These functions support the macros and help fiddle mbuf chains for
@@ -91,7 +91,7 @@ u_int32_t	rpc_call, rpc_vers, rpc_reply, rpc_msgdenied, rpc_autherr,
 u_int32_t	nfs_true, nfs_false;
 
 /* And other global data */
-u_int32_t nfs_xid = 0;
+static u_int32_t nfs_xid = 0;
 static enum vtype nv2tov_type[8]= {
 	VNON, VREG, VDIR, VBLK, VCHR, VLNK, VNON,  VNON
 };
@@ -99,10 +99,12 @@ static enum vtype nv2tov_type[8]= {
 int		nfs_ticks;
 int		nfs_pbuf_freecnt = -1;	/* start out unlimited */
 
+#ifdef NFS_LEGACYRPC
 struct nfs_reqq	nfs_reqq;
 struct mtx nfs_reqq_mtx;
+#endif
 struct nfs_bufq	nfs_bufq;
-struct mtx nfs_xid_mtx;
+static struct mtx nfs_xid_mtx;
 
 /*
  * and the reverse mapping from generic to Version 2 procedure numbers
@@ -135,6 +137,26 @@ int nfsv2_procid[NFS_NPROCS] = {
 
 LIST_HEAD(nfsnodehashhead, nfsnode);
 
+u_int32_t
+nfs_xid_gen(void)
+{
+	uint32_t xid;
+
+	mtx_lock(&nfs_xid_mtx);
+
+	/* Get a pretty random xid to start with */
+	if (!nfs_xid)
+		nfs_xid = random();
+	/*
+	 * Skip zero xid if it should ever happen.
+	 */
+	if (++nfs_xid == 0)
+		nfs_xid++;
+	xid = nfs_xid;
+	mtx_unlock(&nfs_xid_mtx);
+	return xid;
+}
+
 /*
  * Create the header for an rpc request packet
  * The hsiz is the size of the rest of the nfs request header.
@@ -145,9 +167,9 @@ nfsm_reqhead(struct vnode *vp, u_long procid, int hsiz)
 {
 	struct mbuf *mb;
 
-	MGET(mb, M_TRYWAIT, MT_DATA);
+	MGET(mb, M_WAIT, MT_DATA);
 	if (hsiz >= MINCLSIZE)
-		MCLGET(mb, M_TRYWAIT);
+		MCLGET(mb, M_WAIT);
 	mb->m_len = 0;
 	return (mb);
 }
@@ -171,9 +193,9 @@ nfsm_rpchead(struct ucred *cr, int nmflag, int procid, int auth_type,
 	int grpsiz, authsiz;
 
 	authsiz = nfsm_rndup(auth_len);
-	MGETHDR(mb, M_TRYWAIT, MT_DATA);
+	MGETHDR(mb, M_WAIT, MT_DATA);
 	if ((authsiz + 10 * NFSX_UNSIGNED) >= MINCLSIZE) {
-		MCLGET(mb, M_TRYWAIT);
+		MCLGET(mb, M_WAIT);
 	} else if ((authsiz + 10 * NFSX_UNSIGNED) < MHLEN) {
 		MH_ALIGN(mb, authsiz + 10 * NFSX_UNSIGNED);
 	} else {
@@ -188,19 +210,8 @@ nfsm_rpchead(struct ucred *cr, int nmflag, int procid, int auth_type,
 	 */
 	tl = nfsm_build(u_int32_t *, 8 * NFSX_UNSIGNED);
 
-	mtx_lock(&nfs_xid_mtx);
-	/* Get a pretty random xid to start with */
-	if (!nfs_xid)
-		nfs_xid = random();
-	/*
-	 * Skip zero xid if it should ever happen.
-	 */
-	if (++nfs_xid == 0)
-		nfs_xid++;
-
 	*xidpp = tl;
-	*tl++ = txdr_unsigned(nfs_xid);
-	mtx_unlock(&nfs_xid_mtx);
+	*tl++ = txdr_unsigned(nfs_xid_gen());
 	*tl++ = rpc_call;
 	*tl++ = rpc_vers;
 	*tl++ = txdr_unsigned(NFS_PROG);
@@ -277,9 +288,9 @@ nfsm_uiotombuf(struct uio *uiop, struct mbuf **mq, int siz, caddr_t *bpos)
 		while (left > 0) {
 			mlen = M_TRAILINGSPACE(mp);
 			if (mlen == 0) {
-				MGET(mp, M_TRYWAIT, MT_DATA);
+				MGET(mp, M_WAIT, MT_DATA);
 				if (clflg)
-					MCLGET(mp, M_TRYWAIT);
+					MCLGET(mp, M_WAIT);
 				mp->m_len = 0;
 				mp2->m_next = mp;
 				mp2 = mp;
@@ -310,7 +321,7 @@ nfsm_uiotombuf(struct uio *uiop, struct mbuf **mq, int siz, caddr_t *bpos)
 	}
 	if (rem > 0) {
 		if (rem > M_TRAILINGSPACE(mp)) {
-			MGET(mp, M_TRYWAIT, MT_DATA);
+			MGET(mp, M_WAIT, MT_DATA);
 			mp->m_len = 0;
 			mp2->m_next = mp;
 		}
@@ -355,9 +366,9 @@ nfsm_strtmbuf(struct mbuf **mb, char **bpos, const char *cp, long siz)
 	}
 	/* Loop around adding mbufs */
 	while (siz > 0) {
-		MGET(m1, M_TRYWAIT, MT_DATA);
+		MGET(m1, M_WAIT, MT_DATA);
 		if (siz > MLEN)
-			MCLGET(m1, M_TRYWAIT);
+			MCLGET(m1, M_WAIT);
 		m1->m_len = NFSMSIZ(m1);
 		m2->m_next = m1;
 		m2 = m1;
@@ -421,9 +432,11 @@ nfs_init(struct vfsconf *vfsp)
 	/*
 	 * Initialize reply list and start timer
 	 */
+#ifdef NFS_LEGACYRPC
 	TAILQ_INIT(&nfs_reqq);
-	callout_init(&nfs_callout, CALLOUT_MPSAFE);
 	mtx_init(&nfs_reqq_mtx, "NFS reqq lock", NULL, MTX_DEF);
+	callout_init(&nfs_callout, CALLOUT_MPSAFE);
+#endif
 	mtx_init(&nfs_iod_mtx, "NFS iod lock", NULL, MTX_DEF);
 	mtx_init(&nfs_xid_mtx, "NFS xid lock", NULL, MTX_DEF);
 
@@ -437,10 +450,12 @@ nfs_uninit(struct vfsconf *vfsp)
 {
 	int i;
 
+#ifdef NFS_LEGACYRPC
 	callout_stop(&nfs_callout);
 
 	KASSERT(TAILQ_EMPTY(&nfs_reqq),
 	    ("nfs_uninit: request queue not empty"));
+#endif
 
 	/*
 	 * Tell all nfsiod processes to exit. Clear nfs_iodmax, and wakeup
@@ -480,30 +495,30 @@ nfs_dircookie_unlock(struct nfsnode *np)
 }
 
 int
-nfs_upgrade_vnlock(struct vnode *vp, struct thread *td)
+nfs_upgrade_vnlock(struct vnode *vp)
 {
 	int old_lock;
 	
- 	if ((old_lock = VOP_ISLOCKED(vp, td)) != LK_EXCLUSIVE) {
+ 	if ((old_lock = VOP_ISLOCKED(vp)) != LK_EXCLUSIVE) {
  		if (old_lock == LK_SHARED) {
  			/* Upgrade to exclusive lock, this might block */
- 			vn_lock(vp, LK_UPGRADE | LK_RETRY, td);
+ 			vn_lock(vp, LK_UPGRADE | LK_RETRY);
  		} else {
- 			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+ 			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
  		}
   	}
 	return old_lock;
 }
 
 void
-nfs_downgrade_vnlock(struct vnode *vp, struct thread *td, int old_lock)
+nfs_downgrade_vnlock(struct vnode *vp, int old_lock)
 {
 	if (old_lock != LK_EXCLUSIVE) {
  		if (old_lock == LK_SHARED) {
  			/* Downgrade from exclusive lock, this might block */
- 			vn_lock(vp, LK_DOWNGRADE, td);
+ 			vn_lock(vp, LK_DOWNGRADE);
  		} else {
- 			VOP_UNLOCK(vp, 0, td);
+ 			VOP_UNLOCK(vp, 0);
  		}
   	}
 }
@@ -554,7 +569,7 @@ nfs_loadattrcache(struct vnode **vpp, struct mbuf **mdp, caddr_t *dposp,
 
 	md = *mdp;
 	t1 = (mtod(md, caddr_t) + md->m_len) - *dposp;
-	cp2 = nfsm_disct(mdp, dposp, NFSX_FATTR(v3), t1, M_TRYWAIT);
+	cp2 = nfsm_disct(mdp, dposp, NFSX_FATTR(v3), t1, M_WAIT);
 	if (cp2 == NULL)
 		return EBADRPC;
 	fp = (struct nfs_fattr *)cp2;
@@ -721,7 +736,8 @@ nfs_loadattrcache(struct vnode **vpp, struct mbuf **mdp, caddr_t *dposp,
 #include <sys/sysctl.h>
 SYSCTL_DECL(_vfs_nfs);
 static int nfs_acdebug;
-SYSCTL_INT(_vfs_nfs, OID_AUTO, acdebug, CTLFLAG_RW, &nfs_acdebug, 0, "");
+SYSCTL_INT(_vfs_nfs, OID_AUTO, acdebug, CTLFLAG_RW, &nfs_acdebug, 0,
+    "Toggle acdebug (access cache debug) flag");
 #endif
 
 /*
@@ -834,7 +850,7 @@ nfs_getcookie(struct nfsnode *np, off_t off, int add)
 	dp = LIST_FIRST(&np->n_cookies);
 	if (!dp) {
 		if (add) {
-			MALLOC(dp, struct nfsdmap *, sizeof (struct nfsdmap),
+			dp = malloc(sizeof (struct nfsdmap),
 				M_NFSDIROFF, M_WAITOK);
 			dp->ndm_eocookie = 0;
 			LIST_INSERT_HEAD(&np->n_cookies, dp, ndm_list);
@@ -849,7 +865,7 @@ nfs_getcookie(struct nfsnode *np, off_t off, int add)
 				goto out;
 			dp = LIST_NEXT(dp, ndm_list);
 		} else if (add) {
-			MALLOC(dp2, struct nfsdmap *, sizeof (struct nfsdmap),
+			dp2 = malloc(sizeof (struct nfsdmap),
 				M_NFSDIROFF, M_WAITOK);
 			dp2->ndm_eocookie = 0;
 			LIST_INSERT_AFTER(dp, dp2, ndm_list);
@@ -906,28 +922,31 @@ nfs_clearcommit(struct mount *mp)
 {
 	struct vnode *vp, *nvp;
 	struct buf *bp, *nbp;
-	int s;
+	struct bufobj *bo;
 
-	s = splbio();
 	MNT_ILOCK(mp);
 	MNT_VNODE_FOREACH(vp, mp, nvp) {
+		bo = &vp->v_bufobj;
 		VI_LOCK(vp);
 		if (vp->v_iflag & VI_DOOMED) {
 			VI_UNLOCK(vp);
 			continue;
 		}
+		vholdl(vp);
+		VI_UNLOCK(vp);
 		MNT_IUNLOCK(mp);
-		TAILQ_FOREACH_SAFE(bp, &vp->v_bufobj.bo_dirty.bv_hd, b_bobufs, nbp) {
-			if (BUF_REFCNT(bp) == 0 &&
+		BO_LOCK(bo);
+		TAILQ_FOREACH_SAFE(bp, &bo->bo_dirty.bv_hd, b_bobufs, nbp) {
+			if (!BUF_ISLOCKED(bp) &&
 			    (bp->b_flags & (B_DELWRI | B_NEEDCOMMIT))
 				== (B_DELWRI | B_NEEDCOMMIT))
 				bp->b_flags &= ~(B_NEEDCOMMIT | B_CLUSTEROK);
 		}
-		VI_UNLOCK(vp);
+		BO_UNLOCK(bo);
+		vdrop(vp);
 		MNT_ILOCK(mp);
 	}
 	MNT_IUNLOCK(mp);
-	splx(s);
 }
 
 /*

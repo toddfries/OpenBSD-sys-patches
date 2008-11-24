@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/twe/twe_freebsd.c,v 1.44 2007/02/23 12:18:56 piso Exp $
+ * $FreeBSD: src/sys/dev/twe/twe_freebsd.c,v 1.45 2008/09/27 08:51:18 ed Exp $
  */
 
 /*
@@ -81,7 +81,7 @@ static struct cdevsw twe_cdevsw = {
 static int
 twe_open(struct cdev *dev, int flags, int fmt, d_thread_t *td)
 {
-    int			unit = minor(dev);
+    int			unit = dev2unit(dev);
     struct twe_softc	*sc = devclass_get_softc(twe_devclass, unit);
 
     sc->twe_state |= TWE_STATE_OPEN;
@@ -94,7 +94,7 @@ twe_open(struct cdev *dev, int flags, int fmt, d_thread_t *td)
 static int
 twe_close(struct cdev *dev, int flags, int fmt, d_thread_t *td)
 {
-    int			unit = minor(dev);
+    int			unit = dev2unit(dev);
     struct twe_softc	*sc = devclass_get_softc(twe_devclass, unit);
 
     sc->twe_state &= ~TWE_STATE_OPEN;

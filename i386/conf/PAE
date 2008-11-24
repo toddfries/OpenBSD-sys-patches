@@ -1,7 +1,7 @@
 #
 # PAE -- Generic kernel configuration file for FreeBSD/i386 PAE
 #
-# $FreeBSD: src/sys/i386/conf/PAE,v 1.26 2007/10/24 03:53:10 jhb Exp $
+# $FreeBSD: src/sys/i386/conf/PAE,v 1.30 2008/04/20 19:20:38 sam Exp $
 
 include GENERIC
 
@@ -46,6 +46,7 @@ nodevice	asr
 nodevice	dpt
 nodevice	mly
 nodevice	hptmv
+nodevice	hptrr
 
 nodevice	ida
 nodevice	mlx
@@ -75,17 +76,9 @@ nodevice	ie
 nodevice	sn
 nodevice	xe
 
-nodevice	wlan
-nodevice	wlan_wep	# 802.11 WEP support
-nodevice	wlan_ccmp	# 802.11 CCMP support
-nodevice	wlan_tkip	# 802.11 TKIP support
-nodevice	wlan_amrr	# AMRR transmit rate control algorithm
-nodevice	wlan_scan_ap	# 802.11 AP mode scanning
-nodevice	wlan_scan_sta	# 802.11 STA mode scanning
 nodevice	an
 nodevice	ath		# Atheros pci/cardbus NIC's
 nodevice	ath_hal		# Atheros HAL (Hardware Access Layer)
 nodevice	ath_rate_sample	# SampleRate tx rate control for ath
-nodevice	awi
 nodevice	ral
 nodevice	wi

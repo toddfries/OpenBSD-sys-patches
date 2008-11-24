@@ -28,7 +28,7 @@
  * Platform (FreeBSD) dependent common attachment code for Qlogic adapters.
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/isp/isp_freebsd.c,v 1.147 2007/10/20 23:23:16 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/isp/isp_freebsd.c,v 1.148 2008/09/27 08:51:18 ed Exp $");
 #include <dev/isp/isp_freebsd.h>
 #include <sys/unistd.h>
 #include <sys/kthread.h>
@@ -311,7 +311,7 @@ ispioctl(_DEV dev, u_long c, caddr_t addr, int flags, _IOP *td)
 
 	isp = isplist;
 	while (isp) {
-		if (minor(dev) == device_get_unit(isp->isp_dev)) {
+		if (dev2unit(dev) == device_get_unit(isp->isp_dev)) {
 			break;
 		}
 		isp = isp->isp_osinfo.next;

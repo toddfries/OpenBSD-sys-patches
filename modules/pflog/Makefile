@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/pflog/Makefile,v 1.6 2006/03/17 18:54:37 ru Exp $
+# $FreeBSD: src/sys/modules/pflog/Makefile,v 1.7 2008/09/01 23:59:00 imp Exp $
 
 .include <bsd.own.mk>
 
@@ -12,15 +12,15 @@ CFLAGS+=  -I${.CURDIR}/../../contrib/pf
 
 .if !defined(KERNBUILDDIR)
 opt_inet.h:
-	echo "#define INET 1" > opt_inet.h
+	echo "#define INET 1" > ${.TARGET}
 
 .if ${MK_INET6_SUPPORT} != "no"
 opt_inet6.h:
-	echo "#define INET6 1" > opt_inet6.h
+	echo "#define INET6 1" > ${.TARGET}
 .endif
 
 opt_bpf.h:
-	echo "#define DEV_BPF 1" > opt_bpf.h
+	echo "#define DEV_BPF 1" > ${.TARGET}
 .endif
 
 .include <bsd.kmod.mk>

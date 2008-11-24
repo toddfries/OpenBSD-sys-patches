@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/xform.h,v 1.3 2006/03/30 18:57:04 bz Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/xform.h,v 1.4 2007/11/28 22:33:52 bz Exp $	*/
 /*	$OpenBSD: ip_ipsp.h,v 1.119 2002/03/14 01:27:11 millert Exp $	*/
 /*-
  * The authors of this code are John Ioannidis (ji@tla.org),
@@ -57,6 +57,9 @@ struct tdb_ident {
 	u_int32_t spi;
 	union sockaddr_union dst;
 	u_int8_t proto;
+	/* Cache those two for enc(4) in xform_ipip. */
+	u_int8_t alg_auth;
+	u_int8_t alg_enc;
 };
 
 /*

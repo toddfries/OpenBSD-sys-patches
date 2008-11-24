@@ -17,7 +17,7 @@
 # If you are in doubt as to the purpose or necessity of a line, check
 # first in NOTES.
 #
-# $FreeBSD: src/sys/ia64/conf/SKI,v 1.24 2006/06/15 19:58:53 netchild Exp $
+# $FreeBSD: src/sys/ia64/conf/SKI,v 1.26 2008/08/20 08:31:58 ed Exp $
 
 cpu		ITANIUM
 ident		SKI
@@ -35,8 +35,8 @@ options 	KTRACE		# ktrace(1) syscall trace support
 options 	MD_ROOT		# MD usable as root device
 options 	PROCFS		# Process filesystem (/proc)
 options 	PSEUDOFS	# Pseudo-filesystem framework
-options 	SCHED_4BSD	# 4BSD scheduler
-#options 	SCHED_ULE	# ULE scheduler
+#options 	SCHED_4BSD	# 4BSD scheduler
+options 	SCHED_ULE	# ULE scheduler
 options 	SKI		# Include SKI support code
 options 	SOFTUPDATES	# Enable FFS soft updates support
 options 	SYSVMSG		# SYSV-style message queues
@@ -53,7 +53,7 @@ device		pci		# PCI bus support
 device		ether		# Ethernet support
 device		loop		# Network loopback
 device		md		# Memory "disks"
-device		pty		# Pseudo-ttys (telnet etc)
+device		pty		# BSD-style compatibility pseudo ttys
 device		random		# Entropy device
 device		tun		# Packet tunnel.
 

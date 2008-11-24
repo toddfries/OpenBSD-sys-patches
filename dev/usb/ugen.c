@@ -8,7 +8,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/ugen.c,v 1.111 2007/06/28 06:22:40 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/ugen.c,v 1.114 2008/11/13 21:34:34 n_hibma Exp $");
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -50,6 +50,7 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/ugen.c,v 1.111 2007/06/28 06:22:40 imp Exp $
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/clist.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/module.h>
@@ -58,7 +59,6 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/ugen.c,v 1.111 2007/06/28 06:22:40 imp Exp $
 #include <sys/conf.h>
 #include <sys/fcntl.h>
 #include <sys/filio.h>
-#include <sys/tty.h>
 #include <sys/file.h>
 #include <sys/selinfo.h>
 #include <sys/poll.h>
@@ -182,8 +182,8 @@ static usb_config_descriptor_t *ugen_get_cdesc(struct ugen_softc *sc,
 static usbd_status ugen_set_interface(struct ugen_softc *, int, int);
 static int ugen_get_alt_index(struct ugen_softc *sc, int ifaceidx);
 
-#define UGENUNIT(n) ((minor(n) >> 4) & 0xf)
-#define UGENENDPOINT(n) (minor(n) & 0xf)
+#define UGENUNIT(n) ((dev2unit(n) >> 4) & 0xf)
+#define UGENENDPOINT(n) (dev2unit(n) & 0xf)
 #define UGENMINOR(u, e) (((u) << 4) | (e))
 
 static device_probe_t ugen_match;
@@ -1059,8 +1059,8 @@ ugen_isoc_rintr(usbd_xfer_handle xfer, usbd_private_handle addr,
 		sce->cur += count;
 		if(sce->cur >= sce->limit)
 			sce->cur = sce->ibuf + (sce->limit - sce->cur);
-		DPRINTFN(5, ("ugen_isoc_rintr: throwing away %d bytes\n",
-			     count));
+		DPRINTF(("ugen_isoc_rintr: throwing away %d bytes\n",
+			 count));
 	}
 
 	isize = UGETW(sce->edesc->wMaxPacketSize);
@@ -1427,7 +1427,6 @@ ugen_do_ioctl(struct ugen_softc *sc, int endpt, u_long cmd,
 		struct iovec iov;
 		struct uio uio;
 		void *ptr = 0;
-		usbd_status err;
 		int error = 0;
 
 		if (!(flag & FWRITE))
@@ -1484,6 +1483,11 @@ ugen_do_ioctl(struct ugen_softc *sc, int endpt, u_long cmd,
 	case USB_GET_DEVICEINFO:
 		usbd_fill_deviceinfo(sc->sc_udev,
 		    (struct usb_device_info *)addr, 1);
+		break;
+	case USB_RESET_DEVICE:
+		err = usbd_reset_device(sc->sc_udev);
+		if (err)
+			return EIO;
 		break;
 	default:
 		return (EINVAL);

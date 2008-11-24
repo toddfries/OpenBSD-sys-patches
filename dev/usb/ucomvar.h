@@ -1,5 +1,5 @@
 /*	$NetBSD: ucomvar.h,v 1.9 2001/01/23 21:56:17 augustss Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/ucomvar.h,v 1.10 2008/03/25 23:46:24 sam Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/ucomvar.h,v 1.13 2008/09/27 08:51:18 ed Exp $	*/
 
 /*-
  * Copyright (c) 2001-2002, Shunsuke Akiyama <akiyama@jp.FreeBSD.org>.
@@ -82,12 +82,13 @@
 #define UCOMDIALOUT_MASK	0x80000
 #define UCOMCALLUNIT_MASK	0x40000
 
-#define UCOMUNIT(x)		(minor(x) & UCOMUNIT_MASK)
-#define UCOMDIALOUT(x)		(minor(x) & UCOMDIALOUT_MASK)
-#define UCOMCALLUNIT(x)		(minor(x) & UCOMCALLUNIT_MASK)
+#define UCOMUNIT(x)		(dev2unit(x) & UCOMUNIT_MASK)
+#define UCOMDIALOUT(x)		(dev2unit(x) & UCOMDIALOUT_MASK)
+#define UCOMCALLUNIT(x)		(dev2unit(x) & UCOMCALLUNIT_MASK)
 
 #define UCOM_UNK_PORTNO		-1	/* XXX */
 
+struct tty;
 struct ucom_softc;
 
 struct ucom_callback {
@@ -97,11 +98,11 @@ struct ucom_callback {
 #define UCOM_SET_RTS 2
 #define UCOM_SET_BREAK 3
 	int (*ucom_param)(void *, int, struct termios *);
-	int (*ucom_ioctl)(void *, int, u_long, caddr_t, int, struct thread *);
+	int (*ucom_ioctl)(void *, int, u_long, caddr_t, struct thread *);
 	int (*ucom_open)(void *, int);
 	void (*ucom_close)(void *, int);
 	void (*ucom_read)(void *, int, u_char **, u_int32_t *);
-	void (*ucom_write)(void *, int, u_char *, u_char *, u_int32_t *);
+	size_t (*ucom_write)(void *, int, struct tty *, u_char *, u_int32_t);
 };
 
 /* line status register */
@@ -117,6 +118,7 @@ struct ucom_callback {
 
 /* ucom state declarations */
 #define UCS_RXSTOP	0x0001	/* Rx stopped */
+#define UCS_TXBUSY	0x0002	/* Tx busy */
 #define UCS_RTS_IFLOW	0x0008	/* use RTS input flow control */
 
 struct ucom_softc {
@@ -138,6 +140,7 @@ struct ucom_softc {
 	u_int			sc_obufsize;	/* write buffer size */
 	u_int			sc_opkthdrlen;	/* header length of
 						   output packet */
+	u_int			sc_obufactive;	/* Active bytes in buffer */
 
 	struct ucom_callback	*sc_callback;
 	void			*sc_parent;
@@ -159,7 +162,7 @@ struct ucom_softc {
 
 extern devclass_t ucom_devclass;
 
-int ucom_attach_tty(struct ucom_softc *, int, char*, int);
+void ucom_attach_tty(struct ucom_softc *, char*, int);
 int ucom_attach(struct ucom_softc *);
 int ucom_detach(struct ucom_softc *);
 void ucom_status_change(struct ucom_softc *);

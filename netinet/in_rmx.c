@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/in_rmx.c,v 1.57 2007/10/07 20:44:22 silby Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/in_rmx.c,v 1.63 2008/11/19 09:39:34 zec Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -51,6 +51,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/in_rmx.c,v 1.57 2007/10/07 20:44:22 silby Ex
 #include <sys/mbuf.h>
 #include <sys/syslog.h>
 #include <sys/callout.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -110,7 +111,8 @@ in_addroute(void *v_arg, void *n_arg, struct radix_node_head *head,
 		 * Find out if it is because of an
 		 * ARP entry and delete it if so.
 		 */
-		rt2 = rtalloc1((struct sockaddr *)sin, 0, RTF_CLONING);
+		rt2 = in_rtalloc1((struct sockaddr *)sin, 0,
+		    RTF_CLONING, rt->rt_fibnum);
 		if (rt2) {
 			if (rt2->rt_flags & RTF_LLINFO &&
 			    rt2->rt_flags & RTF_HOST &&
@@ -149,18 +151,23 @@ in_matroute(void *v_arg, struct radix_node_head *head)
 	return rn;
 }
 
-static int rtq_reallyold = 60*60;		/* one hour is "really old" */
-SYSCTL_INT(_net_inet_ip, IPCTL_RTEXPIRE, rtexpire, CTLFLAG_RW,
-    &rtq_reallyold, 0, "Default expiration time on dynamically learned routes");
+#ifdef VIMAGE_GLOBALS
+static int rtq_reallyold;
+static int rtq_minreallyold;
+static int rtq_toomany;
+#endif
 
-static int rtq_minreallyold = 10;  /* never automatically crank down to less */
-SYSCTL_INT(_net_inet_ip, IPCTL_RTMINEXPIRE, rtminexpire, CTLFLAG_RW,
-    &rtq_minreallyold, 0,
+SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_ip, IPCTL_RTEXPIRE, rtexpire,
+    CTLFLAG_RW, rtq_reallyold, 0,
+    "Default expiration time on dynamically learned routes");
+
+SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_ip, IPCTL_RTMINEXPIRE,
+    rtminexpire, CTLFLAG_RW, rtq_minreallyold, 0,
     "Minimum time to attempt to hold onto dynamically learned routes");
 
-static int rtq_toomany = 128;		/* 128 cached routes is "too many" */
-SYSCTL_INT(_net_inet_ip, IPCTL_RTMAXCACHE, rtmaxcache, CTLFLAG_RW,
-    &rtq_toomany, 0, "Upper limit on dynamically learned routes");
+SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_ip, IPCTL_RTMAXCACHE,
+    rtmaxcache, CTLFLAG_RW, rtq_toomany, 0,
+    "Upper limit on dynamically learned routes");
 
 /*
  * On last reference drop, mark the route as belong to us so that it can be
@@ -169,6 +176,7 @@ SYSCTL_INT(_net_inet_ip, IPCTL_RTMAXCACHE, rtmaxcache, CTLFLAG_RW,
 static void
 in_clsroute(struct radix_node *rn, struct radix_node_head *head)
 {
+	INIT_VNET_INET(curvnet);
 	struct rtentry *rt = (struct rtentry *)rn;
 
 	RT_LOCK_ASSERT(rt);
@@ -189,9 +197,9 @@ in_clsroute(struct radix_node *rn, struct radix_node_head *head)
 	 * If rtq_reallyold is 0, just delete the route without
 	 * waiting for a timeout cycle to kill it.
 	 */
-	if (rtq_reallyold != 0) {
+	if (V_rtq_reallyold != 0) {
 		rt->rt_flags |= RTPRF_OURS;
-		rt->rt_rmx.rmx_expire = time_uptime + rtq_reallyold;
+		rt->rt_rmx.rmx_expire = time_uptime + V_rtq_reallyold;
 	} else {
 		rtexpunge(rt);
 	}
@@ -214,6 +222,7 @@ struct rtqk_arg {
 static int
 in_rtqkill(struct radix_node *rn, void *rock)
 {
+	INIT_VNET_INET(curvnet);
 	struct rtqk_arg *ap = rock;
 	struct rtentry *rt = (struct rtentry *)rn;
 	int err;
@@ -225,10 +234,10 @@ in_rtqkill(struct radix_node *rn, void *rock)
 			if (rt->rt_refcnt > 0)
 				panic("rtqkill route really not free");
 
-			err = rtrequest(RTM_DELETE,
+			err = in_rtrequest(RTM_DELETE,
 					(struct sockaddr *)rt_key(rt),
 					rt->rt_gateway, rt_mask(rt),
-					rt->rt_flags, 0);
+					rt->rt_flags, 0, rt->rt_fibnum);
 			if (err) {
 				log(LOG_WARNING, "in_rtqkill: error %d\n", err);
 			} else {
@@ -237,9 +246,9 @@ in_rtqkill(struct radix_node *rn, void *rock)
 		} else {
 			if (ap->updating &&
 			    (rt->rt_rmx.rmx_expire - time_uptime >
-			     rtq_reallyold)) {
+			     V_rtq_reallyold)) {
 				rt->rt_rmx.rmx_expire =
-				    time_uptime + rtq_reallyold;
+				    time_uptime + V_rtq_reallyold;
 			}
 			ap->nextstop = lmin(ap->nextstop,
 					    rt->rt_rmx.rmx_expire);
@@ -250,20 +259,41 @@ in_rtqkill(struct radix_node *rn, void *rock)
 }
 
 #define RTQ_TIMEOUT	60*10	/* run no less than once every ten minutes */
-static int rtq_timeout = RTQ_TIMEOUT;
+#ifdef VIMAGE_GLOBALS
+static int rtq_timeout;
 static struct callout rtq_timer;
+#endif
+
+static void in_rtqtimo_one(void *rock);
 
 static void
 in_rtqtimo(void *rock)
 {
+	int fibnum;
+	void *newrock;
+	struct timeval atv;
+
+	KASSERT((rock == (void *)V_rt_tables[0][AF_INET]),
+			("in_rtqtimo: unexpected arg"));
+	for (fibnum = 0; fibnum < rt_numfibs; fibnum++) {
+		if ((newrock = V_rt_tables[fibnum][AF_INET]) != NULL)
+			in_rtqtimo_one(newrock);
+	}
+	atv.tv_usec = 0;
+	atv.tv_sec = V_rtq_timeout;
+	callout_reset(&V_rtq_timer, tvtohz(&atv), in_rtqtimo, rock);
+}
+
+static void
+in_rtqtimo_one(void *rock)
+{
 	struct radix_node_head *rnh = rock;
 	struct rtqk_arg arg;
-	struct timeval atv;
 	static time_t last_adjusted_timeout = 0;
 
 	arg.found = arg.killed = 0;
 	arg.rnh = rnh;
-	arg.nextstop = time_uptime + rtq_timeout;
+	arg.nextstop = time_uptime + V_rtq_timeout;
 	arg.draining = arg.updating = 0;
 	RADIX_NODE_HEAD_LOCK(rnh);
 	rnh->rnh_walktree(rnh, in_rtqkill, &arg);
@@ -277,18 +307,18 @@ in_rtqtimo(void *rock)
 	 * than once in rtq_timeout seconds, to keep from cranking down too
 	 * hard.
 	 */
-	if ((arg.found - arg.killed > rtq_toomany) &&
-	    (time_uptime - last_adjusted_timeout >= rtq_timeout) &&
-	    rtq_reallyold > rtq_minreallyold) {
-		rtq_reallyold = 2 * rtq_reallyold / 3;
-		if (rtq_reallyold < rtq_minreallyold) {
-			rtq_reallyold = rtq_minreallyold;
+	if ((arg.found - arg.killed > V_rtq_toomany) &&
+	    (time_uptime - last_adjusted_timeout >= V_rtq_timeout) &&
+	    V_rtq_reallyold > V_rtq_minreallyold) {
+		V_rtq_reallyold = 2 * V_rtq_reallyold / 3;
+		if (V_rtq_reallyold < V_rtq_minreallyold) {
+			V_rtq_reallyold = V_rtq_minreallyold;
 		}
 
 		last_adjusted_timeout = time_uptime;
 #ifdef DIAGNOSTIC
 		log(LOG_DEBUG, "in_rtqtimo: adjusted rtq_reallyold to %d\n",
-		    rtq_reallyold);
+		    V_rtq_reallyold);
 #endif
 		arg.found = arg.killed = 0;
 		arg.updating = 1;
@@ -297,47 +327,74 @@ in_rtqtimo(void *rock)
 		RADIX_NODE_HEAD_UNLOCK(rnh);
 	}
 
-	atv.tv_usec = 0;
-	atv.tv_sec = arg.nextstop - time_uptime;
-	callout_reset(&rtq_timer, tvtohz(&atv), in_rtqtimo, rock);
 }
 
 void
 in_rtqdrain(void)
 {
-	struct radix_node_head *rnh = rt_tables[AF_INET];
+	VNET_ITERATOR_DECL(vnet_iter);
+	struct radix_node_head *rnh;
 	struct rtqk_arg arg;
+	int 	fibnum;
 
-	arg.found = arg.killed = 0;
-	arg.rnh = rnh;
-	arg.nextstop = 0;
-	arg.draining = 1;
-	arg.updating = 0;
-	RADIX_NODE_HEAD_LOCK(rnh);
-	rnh->rnh_walktree(rnh, in_rtqkill, &arg);
-	RADIX_NODE_HEAD_UNLOCK(rnh);
+	VNET_LIST_RLOCK();
+	VNET_FOREACH(vnet_iter) {
+		CURVNET_SET(vnet_iter);
+		INIT_VNET_NET(vnet_iter);
+		for ( fibnum = 0; fibnum < rt_numfibs; fibnum++) {
+			rnh = V_rt_tables[fibnum][AF_INET];
+			arg.found = arg.killed = 0;
+			arg.rnh = rnh;
+			arg.nextstop = 0;
+			arg.draining = 1;
+			arg.updating = 0;
+			RADIX_NODE_HEAD_LOCK(rnh);
+			rnh->rnh_walktree(rnh, in_rtqkill, &arg);
+			RADIX_NODE_HEAD_UNLOCK(rnh);
+		}
+		CURVNET_RESTORE();
+	}
+	VNET_LIST_RUNLOCK();
 }
 
+static int _in_rt_was_here;
 /*
  * Initialize our routing tree.
  */
 int
 in_inithead(void **head, int off)
 {
+	INIT_VNET_INET(curvnet);
 	struct radix_node_head *rnh;
 
-	if (!rn_inithead(head, off))
+	/* XXX MRT
+	 * This can be called from vfs_export.c too in which case 'off'
+	 * will be 0. We know the correct value so just use that and
+	 * return directly if it was 0.
+	 * This is a hack that replaces an even worse hack on a bad hack
+	 * on a bad design. After RELENG_7 this should be fixed but that
+	 * will change the ABI, so for now do it this way.
+	 */
+	if (!rn_inithead(head, 32))
 		return 0;
 
-	if (head != (void **)&rt_tables[AF_INET])	/* BOGUS! */
-		return 1;	/* only do this for the real routing table */
+	if (off == 0)		/* XXX MRT  see above */
+		return 1;	/* only do the rest for a real routing table */
+
+	V_rtq_reallyold = 60*60; /* one hour is "really old" */
+	V_rtq_minreallyold = 10; /* never automatically crank down to less */
+	V_rtq_toomany = 128;	 /* 128 cached routes is "too many" */
+	V_rtq_timeout = RTQ_TIMEOUT;
 
 	rnh = *head;
 	rnh->rnh_addaddr = in_addroute;
 	rnh->rnh_matchaddr = in_matroute;
 	rnh->rnh_close = in_clsroute;
-	callout_init(&rtq_timer, CALLOUT_MPSAFE);
-	in_rtqtimo(rnh);	/* kick off timeout first time */
+	if (_in_rt_was_here == 0 ) {
+		callout_init(&V_rtq_timer, CALLOUT_MPSAFE);
+		in_rtqtimo(rnh);	/* kick off timeout first time */
+		_in_rt_was_here = 1;
+	}
 	return 1;
 }
 
@@ -351,7 +408,6 @@ in_inithead(void **head, int off)
  * plug back in.
  */
 struct in_ifadown_arg {
-	struct radix_node_head *rnh;
 	struct ifaddr *ifa;
 	int del;
 };
@@ -383,18 +439,77 @@ in_ifadownkill(struct radix_node *rn, void *xap)
 int
 in_ifadown(struct ifaddr *ifa, int delete)
 {
+	INIT_VNET_NET(curvnet);
 	struct in_ifadown_arg arg;
 	struct radix_node_head *rnh;
+	int	fibnum;
 
 	if (ifa->ifa_addr->sa_family != AF_INET)
 		return 1;
 
-	arg.rnh = rnh = rt_tables[AF_INET];
-	arg.ifa = ifa;
-	arg.del = delete;
-	RADIX_NODE_HEAD_LOCK(rnh);
-	rnh->rnh_walktree(rnh, in_ifadownkill, &arg);
-	RADIX_NODE_HEAD_UNLOCK(rnh);
-	ifa->ifa_flags &= ~IFA_ROUTE;		/* XXXlocking? */
+	for ( fibnum = 0; fibnum < rt_numfibs; fibnum++) {
+		rnh = V_rt_tables[fibnum][AF_INET];
+		arg.ifa = ifa;
+		arg.del = delete;
+		RADIX_NODE_HEAD_LOCK(rnh);
+		rnh->rnh_walktree(rnh, in_ifadownkill, &arg);
+		RADIX_NODE_HEAD_UNLOCK(rnh);
+		ifa->ifa_flags &= ~IFA_ROUTE;		/* XXXlocking? */
+	}
 	return 0;
 }
+
+/*
+ * inet versions of rt functions. These have fib extensions and 
+ * for now will just reference the _fib variants.
+ * eventually this order will be reversed,
+ */
+void
+in_rtalloc_ign(struct route *ro, u_long ignflags, u_int fibnum)
+{
+	rtalloc_ign_fib(ro, ignflags, fibnum);
+}
+
+int
+in_rtrequest( int req,
+	struct sockaddr *dst,
+	struct sockaddr *gateway,
+	struct sockaddr *netmask,
+	int flags,
+	struct rtentry **ret_nrt,
+	u_int fibnum)
+{
+	return (rtrequest_fib(req, dst, gateway, netmask, 
+	    flags, ret_nrt, fibnum));
+}
+
+struct rtentry *
+in_rtalloc1(struct sockaddr *dst, int report, u_long ignflags, u_int fibnum)
+{
+	return (rtalloc1_fib(dst, report, ignflags, fibnum));
+}
+
+void
+in_rtredirect(struct sockaddr *dst,
+	struct sockaddr *gateway,
+	struct sockaddr *netmask,
+	int flags,
+	struct sockaddr *src,
+	u_int fibnum)
+{
+	rtredirect_fib(dst, gateway, netmask, flags, src, fibnum);
+}
+ 
+void
+in_rtalloc(struct route *ro, u_int fibnum)
+{
+	rtalloc_ign_fib(ro, 0UL, fibnum);
+}
+
+#if 0
+int	 in_rt_getifa(struct rt_addrinfo *, u_int fibnum);
+int	 in_rtioctl(u_long, caddr_t, u_int);
+int	 in_rtrequest1(int, struct rt_addrinfo *, struct rtentry **, u_int);
+#endif
+
+

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/ia64/ia64/locore.S,v 1.40 2007/05/27 19:02:46 marcel Exp $
+ * $FreeBSD: src/sys/ia64/ia64/locore.S,v 1.41 2008/02/04 02:21:33 marcel Exp $
  */
 
 #include <machine/asm.h>
@@ -108,6 +108,28 @@ ENTRY_NOPROFILE(__start, 1)
 	nop	0
 	nop	0
 	br.call.sptk.many rp=ia64_init
+	;;
+}
+	// We have the new bspstore in r8 and the new sp in r9.
+	// Switch onto the new stack and call mi_startup().
+{
+	mov	ar.rsc = 0
+	;;
+	mov	ar.bspstore = r8
+	mov	sp = r9
+	;;
+}
+{
+	loadrs
+	;;
+	mov	ar.rsc = 3
+	nop	0
+	;;
+}
+{
+	nop	0
+	nop	0
+	br.call.sptk.many rp=mi_startup
 	;;
 }
 	/* NOTREACHED */

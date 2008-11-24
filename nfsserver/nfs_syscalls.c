@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsserver/nfs_syscalls.c,v 1.117 2007/10/12 03:56:27 mohans Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsserver/nfs_syscalls.c,v 1.123 2008/11/03 10:38:00 dfr Exp $");
 
 #include "opt_inet6.h"
 
@@ -73,6 +73,8 @@ __FBSDID("$FreeBSD: src/sys/nfsserver/nfs_syscalls.c,v 1.117 2007/10/12 03:56:27
 #include <nfsserver/nfsm_subs.h>
 #include <nfsserver/nfsrvcache.h>
 
+#ifdef NFS_LEGACYRPC
+
 static MALLOC_DEFINE(M_NFSSVC, "nfss_srvsock", "Nfs server structure");
 
 MALLOC_DEFINE(M_NFSRVDESC, "nfss_srvdesc", "NFS server socket descriptor");
@@ -89,16 +91,18 @@ static int	notstarted = 1;
 
 static int	nfs_privport = 0;
 SYSCTL_INT(_vfs_nfsrv, NFS_NFSPRIVPORT, nfs_privport, CTLFLAG_RW,
-	    &nfs_privport, 0, "");
+    &nfs_privport, 0,
+    "Only allow clients using a privileged port");
 SYSCTL_INT(_vfs_nfsrv, OID_AUTO, gatherdelay, CTLFLAG_RW,
-	    &nfsrvw_procrastinate, 0, "");
+    &nfsrvw_procrastinate, 0,
+    "Delay value for write gathering");
 SYSCTL_INT(_vfs_nfsrv, OID_AUTO, gatherdelay_v3, CTLFLAG_RW,
-	    &nfsrvw_procrastinate_v3, 0, "");
+    &nfsrvw_procrastinate_v3, 0,
+    "Delay in seconds for NFSv3 write gathering");
 
-static int	nfssvc_addsock(struct file *, struct sockaddr *,
-		    struct thread *);
+static int	nfssvc_addsock(struct file *, struct sockaddr *);
 static void	nfsrv_zapsock(struct nfssvc_sock *slp);
-static int	nfssvc_nfsd(struct thread *);
+static int	nfssvc_nfsd(void);
 
 extern u_long sb_max_adj;
 
@@ -128,7 +132,7 @@ nfssvc(struct thread *td, struct nfssvc_args *uap)
 {
 	struct file *fp;
 	struct sockaddr *nam;
-	struct nfsd_args nfsdarg;
+	struct nfsd_addsock_args nfsdarg;
 	int error;
 
 	KASSERT(!mtx_owned(&Giant), ("nfssvc(): called with Giant"));
@@ -166,10 +170,10 @@ nfssvc(struct thread *td, struct nfssvc_args *uap)
 				return (error);
 			}
 		}
-		error = nfssvc_addsock(fp, nam, td);
+		error = nfssvc_addsock(fp, nam);
 		fdrop(fp, td);
-	} else if (uap->flag & NFSSVC_NFSD) {
-		error = nfssvc_nfsd(td);
+	} else if (uap->flag & NFSSVC_OLDNFSD) {
+		error = nfssvc_nfsd();
 	} else {
 		error = ENXIO;
 	}
@@ -182,12 +186,12 @@ nfssvc(struct thread *td, struct nfssvc_args *uap)
  * Adds a socket to the list for servicing by nfsds.
  */
 static int
-nfssvc_addsock(struct file *fp, struct sockaddr *mynam, struct thread *td)
+nfssvc_addsock(struct file *fp, struct sockaddr *mynam)
 {
 	int siz;
 	struct nfssvc_sock *slp;
 	struct socket *so;
-	int error, s;
+	int error;
 
 	so = fp->f_data;
 #if 0
@@ -203,7 +207,7 @@ nfssvc_addsock(struct file *fp, struct sockaddr *mynam, struct thread *td)
 		tslp = nfs_udpsock;
 		if (tslp->ns_flag & SLP_VALID) {
 			if (mynam != NULL)
-				FREE(mynam, M_SONAME);
+				free(mynam, M_SONAME);
 			return (EPERM);
 		}
 	}
@@ -212,7 +216,7 @@ nfssvc_addsock(struct file *fp, struct sockaddr *mynam, struct thread *td)
 	error = soreserve(so, siz, siz);
 	if (error) {
 		if (mynam != NULL)
-			FREE(mynam, M_SONAME);
+			free(mynam, M_SONAME);
 		return (error);
 	}
 
@@ -267,18 +271,13 @@ nfssvc_addsock(struct file *fp, struct sockaddr *mynam, struct thread *td)
 	slp->ns_nam = mynam;
 	fhold(fp);
 	slp->ns_fp = fp;
-	/*
-	 * XXXRW: Socket locking here?
-	 */
-	s = splnet();
+	SOCKBUF_LOCK(&so->so_rcv);
 	so->so_upcallarg = (caddr_t)slp;
 	so->so_upcall = nfsrv_rcv;
-	SOCKBUF_LOCK(&so->so_rcv);
 	so->so_rcv.sb_flags |= SB_UPCALL;
 	SOCKBUF_UNLOCK(&so->so_rcv);
 	slp->ns_flag = (SLP_VALID | SLP_NEEDQ);
 	nfsrv_wakenfsd(slp);
-	splx(s);
 	NFSD_UNLOCK();
 	return (0);
 }
@@ -288,7 +287,7 @@ nfssvc_addsock(struct file *fp, struct sockaddr *mynam, struct thread *td)
  * until it is killed by a signal.
  */
 static int
-nfssvc_nfsd(struct thread *td)
+nfssvc_nfsd()
 {
 	int siz;
 	struct nfssvc_sock *slp;
@@ -308,7 +307,6 @@ nfssvc_nfsd(struct thread *td)
 	s = splnet();
 	NFSD_LOCK();
 
-	nfsd->nfsd_td = td;
 	TAILQ_INSERT_TAIL(&nfsd_head, nfsd, nfsd_chain);
 	nfsrv_numnfsd++;
 
@@ -351,7 +349,7 @@ nfssvc_nfsd(struct thread *td)
 					(void) nfs_slplock(slp, 1);
 					NFSD_UNLOCK();
 					nfsrv_rcv(slp->ns_so, (caddr_t)slp,
-						M_TRYWAIT);
+						M_WAIT);
 					NFSD_LOCK();
 					nfs_slpunlock(slp);
 				}
@@ -455,11 +453,10 @@ nfssvc_nfsd(struct thread *td)
 			if (writes_todo || (!(nd->nd_flag & ND_NFSV3) &&
 			    nd->nd_procnum == NFSPROC_WRITE &&
 			    procrastinate > 0 && !notstarted))
-			    error = nfsrv_writegather(&nd, slp,
-				nfsd->nfsd_td, &mreq);
+			    error = nfsrv_writegather(&nd, slp, &mreq);
 			else
 			    error = (*(nfsrv3_procs[nd->nd_procnum]))(nd,
-				slp, nfsd->nfsd_td, &mreq);
+				slp, &mreq);
 			NFSD_LOCK();
 			if (mreq == NULL)
 				break;
@@ -467,7 +464,7 @@ nfssvc_nfsd(struct thread *td)
 				nfsrvstats.srv_errs++;
 				nfsrv_updatecache(nd, FALSE, mreq);
 				if (nd->nd_nam2)
-					FREE(nd->nd_nam2, M_SONAME);
+					free(nd->nd_nam2, M_SONAME);
 				break;
 			}
 			nfsrvstats.srvrpccnt[nd->nd_procnum]++;
@@ -489,7 +486,7 @@ nfssvc_nfsd(struct thread *td)
 			 * Record Mark.
 			 */
 			if (sotype == SOCK_STREAM) {
-				M_PREPEND(m, NFSX_UNSIGNED, M_TRYWAIT);
+				M_PREPEND(m, NFSX_UNSIGNED, M_WAIT);
 				*mtod(m, u_int32_t *) = htonl(0x80000000 | siz);
 			}
 			NFSD_LOCK();
@@ -504,7 +501,7 @@ nfssvc_nfsd(struct thread *td)
 			    m_freem(m);
 			}
 			if (nd->nd_nam2)
-				FREE(nd->nd_nam2, M_SONAME);
+				free(nd->nd_nam2, M_SONAME);
 			if (nd->nd_mrep)
 				m_freem(nd->nd_mrep);
 			if (error == EPIPE)
@@ -523,13 +520,13 @@ nfssvc_nfsd(struct thread *td)
 		    case RC_DROPIT:
 			m_freem(nd->nd_mrep);
 			if (nd->nd_nam2)
-				FREE(nd->nd_nam2, M_SONAME);
+				free(nd->nd_nam2, M_SONAME);
 			break;
 		    };
 		    if (nd) {
 			if (nd->nd_cr != NULL)
 				crfree(nd->nd_cr);
-			FREE((caddr_t)nd, M_NFSRVDESC);
+			free((caddr_t)nd, M_NFSRVDESC);
 			nd = NULL;
 		    }
 
@@ -597,19 +594,19 @@ nfsrv_zapsock(struct nfssvc_sock *slp)
 		so = slp->ns_so;
 		SOCKBUF_LOCK(&so->so_rcv);
 		so->so_rcv.sb_flags &= ~SB_UPCALL;
-		SOCKBUF_UNLOCK(&so->so_rcv);
 		so->so_upcall = NULL;
 		so->so_upcallarg = NULL;
+		SOCKBUF_UNLOCK(&so->so_rcv);
 		soshutdown(so, SHUT_RDWR);
 		closef(fp, NULL);
 		NFSD_LOCK();
 		if (slp->ns_nam)
-			FREE(slp->ns_nam, M_SONAME);
+			free(slp->ns_nam, M_SONAME);
 		m_freem(slp->ns_raw);
 		while ((rec = STAILQ_FIRST(&slp->ns_rec)) != NULL) {
 			STAILQ_REMOVE_HEAD(&slp->ns_rec, nr_link);
 			if (rec->nr_address)
-				FREE(rec->nr_address, M_SONAME);
+				free(rec->nr_address, M_SONAME);
 			m_freem(rec->nr_packet);
 			free(rec, M_NFSRVDESC);
 		}
@@ -732,3 +729,5 @@ nfsrv_init(int terminating)
 	TAILQ_INSERT_TAIL(&nfssvc_sockhead, nfs_cltpsock, ns_chain);
 #endif
 }
+
+#endif /* NFS_LEGACYRPC */

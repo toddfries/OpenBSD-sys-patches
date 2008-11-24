@@ -35,7 +35,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)param.h	5.8 (Berkeley) 6/28/91
- * $FreeBSD: src/sys/arm/include/param.h,v 1.11 2006/01/09 06:05:56 imp Exp $
+ * $FreeBSD: src/sys/arm/include/param.h,v 1.12 2008/03/27 05:03:25 jb Exp $
  */
 
 /*
@@ -72,11 +72,11 @@
 #endif
 #define	MID_MACHINE	MID_ARM6 
 
-#ifdef SMP
+#if defined(SMP) || defined(KLD_MODULE)
 #define	MAXCPU		2
 #else
 #define	MAXCPU		1
-#endif /* SMP */
+#endif /* SMP || KLD_MODULE */
 
 #define	ALIGNBYTES	_ALIGNBYTES
 #define	ALIGN(p)	_ALIGN(p)

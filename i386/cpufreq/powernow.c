@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/cpufreq/powernow.c,v 1.4 2007/01/23 19:20:30 bruno Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/cpufreq/powernow.c,v 1.8 2008/10/21 00:52:20 jkim Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -758,22 +758,6 @@ pn_decode_pst(device_t dev)
 	return (ENODEV);
 }
 
-/*
- * TODO: this should be done in sys/ARCH/ARCH/identcpu.c
- */
-static int
-cpu_is_powernow_capable(void)
-{
-	u_int regs[4];
-
-	if (strcmp(cpu_vendor, "AuthenticAMD") != 0 ||
-	    cpu_exthigh < 0x80000007)
-		return (FALSE);
-
-	do_cpuid(0x80000007, regs);
-	return (regs[3] & 0x6);
-}
-
 static int
 pn_decode_acpi(device_t dev, device_t perf_dev)
 {
@@ -883,7 +867,7 @@ pn_identify(driver_t *driver, device_t parent)
 {
 	device_t child;
 
-	if (cpu_is_powernow_capable() == 0)
+	if ((amd_pminfo & AMDPM_FID) == 0 || (amd_pminfo & AMDPM_VID) == 0)
 		return;
 	switch (cpu_id & 0xf00) {
 	case 0x600:
@@ -894,7 +878,7 @@ pn_identify(driver_t *driver, device_t parent)
 	}
 	if (device_find_child(parent, "powernow", -1) != NULL)
 		return;
-	if ((child = BUS_ADD_CHILD(parent, 0, "powernow", -1)) == NULL)
+	if ((child = BUS_ADD_CHILD(parent, 10, "powernow", -1)) == NULL)
 		device_printf(parent, "powernow: add child failed\n");
 }
 
@@ -983,6 +967,5 @@ static int
 pn_detach(device_t dev)
 {
 
-	cpufreq_unregister(dev);
-	return (0);
+	return (cpufreq_unregister(dev));
 }

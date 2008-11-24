@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/xform_tcp.c,v 1.5 2006/03/25 13:38:52 gnn Exp $ */
+/*	$FreeBSD: src/sys/netipsec/xform_tcp.c,v 1.6 2008/03/21 18:31:42 bz Exp $ */
 
 /*-
  * Copyright (c) 2003 Bruce M. Simpson <bms@spc.org>
@@ -166,4 +166,4 @@ tcpsignature_attach(void)
 }
 
 SYSINIT(tcpsignature_xform_init, SI_SUB_DRIVERS, SI_ORDER_FIRST,
-    tcpsignature_attach, NULL)
+    tcpsignature_attach, NULL);

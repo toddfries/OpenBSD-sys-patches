@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/initcpu.c,v 1.56 2007/04/06 18:15:02 ru Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/initcpu.c,v 1.58 2008/10/21 00:17:55 jkim Exp $");
 
 #include "opt_cpu.h"
 
@@ -82,6 +82,7 @@ u_int	cpu_feature = 0;	/* Feature flags */
 u_int	cpu_feature2 = 0;	/* Feature flags */
 u_int	amd_feature = 0;	/* AMD feature flags */
 u_int	amd_feature2 = 0;	/* AMD feature flags */
+u_int	amd_pminfo = 0;		/* AMD advanced power management info */
 u_int	via_feature_rng = 0;	/* VIA RNG features */
 u_int	via_feature_xcrypt = 0;	/* VIA ACE features */
 u_int	cpu_high = 0;		/* Highest arg to CPUID */
@@ -683,6 +684,7 @@ initializecpu(void)
 					break;
 				/* fall through. */
 			case 0x6a0:
+			case 0x6d0:
 				init_via();
 				break;
 			default:

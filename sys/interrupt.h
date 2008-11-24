@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/interrupt.h,v 1.37 2007/05/06 17:02:50 piso Exp $
+ * $FreeBSD: src/sys/sys/interrupt.h,v 1.44 2008/09/15 22:19:44 jhb Exp $
  */
 
 #ifndef _SYS_INTERRUPT_H_
@@ -63,6 +63,43 @@ struct intr_handler {
 
 /*
  * Describe an interrupt event.  An event holds a list of handlers.
+ * The 'pre_ithread', 'post_ithread', 'post_filter', and 'assign_cpu'
+ * hooks are used to invoke MD code for certain operations.
+ *
+ * The 'pre_ithread' hook is called when an interrupt thread for
+ * handlers without filters is scheduled.  It is responsible for
+ * ensuring that 1) the system won't be swamped with an interrupt
+ * storm from the associated source while the ithread runs and 2) the
+ * current CPU is able to receive interrupts from other interrupt
+ * sources.  The first is usually accomplished by disabling
+ * level-triggered interrupts until the ithread completes.  The second
+ * is accomplished on some platforms by acknowledging the interrupt
+ * via an EOI.
+ *
+ * The 'post_ithread' hook is invoked when an ithread finishes.  It is
+ * responsible for ensuring that the associated interrupt source will
+ * trigger an interrupt when it is asserted in the future.  Usually
+ * this is implemented by enabling a level-triggered interrupt that
+ * was previously disabled via the 'pre_ithread' hook.
+ *
+ * The 'post_filter' hook is invoked when a filter handles an
+ * interrupt.  It is responsible for ensuring that the current CPU is
+ * able to receive interrupts again.  On some platforms this is done
+ * by acknowledging the interrupts via an EOI.
+ *
+ * The 'assign_cpu' hook is used to bind an interrupt source to a
+ * specific CPU.  If the interrupt cannot be bound, this function may
+ * return an error.
+ *
+ * Note that device drivers may also use interrupt events to manage
+ * multiplexing interrupt interrupt handler into handlers for child
+ * devices.  In that case, the above hooks are not used.  The device
+ * can create an event for its interrupt resource and register child
+ * event handlers with that event.  It can then use
+ * intr_event_execute_handlers() to execute non-filter handlers.
+ * Currently filter handlers are not supported by this, but that can
+ * be added by splitting out the filter loop from intr_event_handle()
+ * if desired.
  */
 struct intr_event {
 	TAILQ_ENTRY(intr_event) ie_list;
@@ -72,15 +109,16 @@ struct intr_event {
 	struct mtx	ie_lock;
 	void		*ie_source;	/* Cookie used by MD code. */
 	struct intr_thread *ie_thread;	/* Thread we are connected to. */
-	void		(*ie_enable)(void *);
-#ifdef INTR_FILTER
-	void		(*ie_eoi)(void *);
-	void		(*ie_disab)(void *);
-#endif
+	void		(*ie_pre_ithread)(void *);
+	void		(*ie_post_ithread)(void *);
+	void		(*ie_post_filter)(void *);
+	int		(*ie_assign_cpu)(void *, u_char);
 	int		ie_flags;
 	int		ie_count;	/* Loop counter. */
 	int		ie_warncnt;	/* Rate-check interrupt storm warns. */
 	struct timeval	ie_warntm;
+	int		ie_irq;		/* Physical irq number if !SOFT. */
+	u_char		ie_cpu;		/* CPU this event is bound to. */
 };
 
 /* Interrupt event flags kept in ie_flags. */
@@ -104,6 +142,8 @@ struct intr_event {
 #define	SWI_TQ		6
 #define	SWI_TQ_GIANT	6
 
+struct proc;
+
 extern struct	intr_event *tty_intr_event;
 extern struct	intr_event *clk_intr_event;
 extern void	*softclock_ih;
@@ -118,34 +158,23 @@ extern char 	intrnames[];	/* string table containing device names */
 #ifdef DDB
 void	db_dump_intr_event(struct intr_event *ie, int handlers);
 #endif
-#ifdef INTR_FILTER
-int     intr_filter_loop(struct intr_event *ie, struct trapframe *frame, 
-			 struct intr_thread **ithd);
-int     intr_event_handle(struct intr_event *ie, struct trapframe *frame);
-#endif
 u_char	intr_priority(enum intr_type flags);
 int	intr_event_add_handler(struct intr_event *ie, const char *name,
 	    driver_filter_t filter, driver_intr_t handler, void *arg, 
 	    u_char pri, enum intr_type flags, void **cookiep);	    
-#ifndef INTR_FILTER
+int	intr_event_bind(struct intr_event *ie, u_char cpu);
 int	intr_event_create(struct intr_event **event, void *source,
-	    int flags, void (*enable)(void *), const char *fmt, ...)
-	    __printflike(5, 6);
-#else
-int	intr_event_create(struct intr_event **event, void *source,
-	    int flags, void (*enable)(void *), void (*eoi)(void *), 
-	    void (*disab)(void *), const char *fmt, ...)
-	    __printflike(7, 8);
-#endif
+	    int flags, int irq, void (*pre_ithread)(void *),
+	    void (*post_ithread)(void *), void (*post_filter)(void *),
+	    int (*assign_cpu)(void *, u_char), const char *fmt, ...)
+	    __printflike(9, 10);
 int	intr_event_destroy(struct intr_event *ie);
+void	intr_event_execute_handlers(struct proc *p, struct intr_event *ie);
+int	intr_event_handle(struct intr_event *ie, struct trapframe *frame);
 int	intr_event_remove_handler(void *cookie);
-#ifndef INTR_FILTER
-int	intr_event_schedule_thread(struct intr_event *ie);
-#else
-int	intr_event_schedule_thread(struct intr_event *ie,
-	    struct intr_thread *ithd);
-#endif
+int	intr_getaffinity(int irq, void *mask);
 void	*intr_handler_source(void *cookie);
+int	intr_setaffinity(int irq, void *mask);
 int	swi_add(struct intr_event **eventp, const char *name,
 	    driver_intr_t handler, void *arg, int pri, enum intr_type flags,
 	    void **cookiep);

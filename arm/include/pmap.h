@@ -44,7 +44,7 @@
  *      from: @(#)pmap.h        7.4 (Berkeley) 5/12/91
  * 	from: FreeBSD: src/sys/i386/include/pmap.h,v 1.70 2000/11/30
  *
- * $FreeBSD: src/sys/arm/include/pmap.h,v 1.27 2007/07/27 14:45:04 cognet Exp $
+ * $FreeBSD: src/sys/arm/include/pmap.h,v 1.30 2008/11/06 16:20:27 raj Exp $
  */
 
 #ifndef _MACHINE_PMAP_H_
@@ -94,16 +94,6 @@ struct	pv_entry;
 
 struct	md_page {
 	int pvh_attrs;
-	u_int uro_mappings;
-	u_int urw_mappings;
-	union {
-		u_short s_mappings[2]; /* Assume kernel count <= 65535 */
-		u_int i_mappings;
-	} k_u;
-#define	kro_mappings	k_u.s_mappings[0]
-#define	krw_mappings	k_u.s_mappings[1]
-#define	k_mappings	k_u.i_mappings
-	int			pv_list_count;
 	TAILQ_HEAD(,pv_entry)	pv_list;
 };
 
@@ -112,9 +102,6 @@ do {									\
 	TAILQ_INIT(&pg->pv_list);					\
 	mtx_init(&(pg)->md_page.pvh_mtx, "MDPAGE Mutex", NULL, MTX_DEV);\
 	(pg)->mdpage.pvh_attrs = 0;					\
-	(pg)->mdpage.uro_mappings = 0;					\
-	(pg)->mdpage.urw_mappings = 0;					\
-	(pg)->mdpage.k_mappings = 0;					\
 } while (/*CONSTCOND*/0)
 
 struct l1_ttable;
@@ -143,7 +130,6 @@ struct	pmap {
 	struct l1_ttable	*pm_l1;
 	struct l2_dtable	*pm_l2[L2_SIZE];
 	pd_entry_t		*pm_pdir;	/* KVA of page directory */
-	int			pm_count;	/* reference count */
 	int			pm_active;	/* active on cpus */
 	struct pmap_statistics	pm_stats;	/* pmap statictics */
 	TAILQ_HEAD(,pv_entry)	pm_pvlist;	/* list of mappings in pmap */
@@ -220,6 +206,7 @@ extern vm_offset_t virtual_end;
 void	pmap_bootstrap(vm_offset_t, vm_offset_t, struct pv_addr *);
 void	pmap_kenter(vm_offset_t va, vm_paddr_t pa);
 void	pmap_kenter_nocache(vm_offset_t va, vm_paddr_t pa);
+void	*pmap_kenter_temp(vm_paddr_t pa, int i);
 void 	pmap_kenter_user(vm_offset_t va, vm_paddr_t pa);
 void	pmap_kremove(vm_offset_t);
 void	*pmap_mapdev(vm_offset_t, vm_size_t);
@@ -506,9 +493,8 @@ void	pmap_use_minicache(vm_offset_t, vm_size_t);
 #define	PVF_WIRED	0x04		/* mapping is wired */
 #define	PVF_WRITE	0x08		/* mapping is writable */
 #define	PVF_EXEC	0x10		/* mapping is executable */
-#define	PVF_UNC		0x20		/* mapping is 'user' non-cacheable */
-#define	PVF_KNC		0x40		/* mapping is 'kernel' non-cacheable */
-#define	PVF_NC		(PVF_UNC|PVF_KNC)
+#define	PVF_NC		0x20		/* mapping is non-cacheable */
+#define	PVF_MWC		0x40		/* mapping is used multiple times in userland */
 
 void vector_page_setprot(int);
 

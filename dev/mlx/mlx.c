@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/dev/mlx/mlx.c,v 1.54 2007/02/23 12:18:46 piso Exp $
+ *	$FreeBSD: src/sys/dev/mlx/mlx.c,v 1.56 2008/09/27 08:51:18 ed Exp $
  */
 
 /*
@@ -711,7 +711,7 @@ mlx_submit_buf(struct mlx_softc *sc, mlx_bio *bp)
 int
 mlx_open(struct cdev *dev, int flags, int fmt, struct thread *td)
 {
-    int			unit = minor(dev);
+    int			unit = dev2unit(dev);
     struct mlx_softc	*sc = devclass_get_softc(mlx_devclass, unit);
 
     sc->mlx_state |= MLX_STATE_OPEN;
@@ -724,7 +724,7 @@ mlx_open(struct cdev *dev, int flags, int fmt, struct thread *td)
 int
 mlx_close(struct cdev *dev, int flags, int fmt, struct thread *td)
 {
-    int			unit = minor(dev);
+    int			unit = dev2unit(dev);
     struct mlx_softc	*sc = devclass_get_softc(mlx_devclass, unit);
 
     sc->mlx_state &= ~MLX_STATE_OPEN;
@@ -737,7 +737,7 @@ mlx_close(struct cdev *dev, int flags, int fmt, struct thread *td)
 int
 mlx_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int32_t flag, struct thread *td)
 {
-    int				unit = minor(dev);
+    int				unit = dev2unit(dev);
     struct mlx_softc		*sc = devclass_get_softc(mlx_devclass, unit);
     struct mlx_rebuild_request	*rb = (struct mlx_rebuild_request *)addr;
     struct mlx_rebuild_status	*rs = (struct mlx_rebuild_status *)addr;
@@ -760,7 +760,7 @@ mlx_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int32_t flag, struct threa
 	    if (sc->mlx_sysdrive[i].ms_disk != 0) {
 		/* looking for the next one we come across? */
 		if (*arg == -1) {
-		    *arg = device_get_unit(sc->mlx_sysdrive[0].ms_disk);
+		    *arg = device_get_unit(sc->mlx_sysdrive[i].ms_disk);
 		    return(0);
 		}
 		/* we want the one after this one */

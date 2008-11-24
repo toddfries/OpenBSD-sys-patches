@@ -30,7 +30,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net/if_iso88025subr.c,v 1.76 2007/10/24 19:03:57 rwatson Exp $
+ * $FreeBSD: src/sys/net/if_iso88025subr.c,v 1.81 2008/11/06 09:18:29 bz Exp $
  *
  */
 
@@ -55,10 +55,12 @@
 #include <sys/sockio.h> 
 
 #include <net/if.h>
+#include <net/if_arp.h>
 #include <net/if_dl.h>
 #include <net/if_llc.h>
 #include <net/if_types.h>
 
+#include <net/ethernet.h>
 #include <net/netisr.h>
 #include <net/route.h>
 #include <net/bpf.h>
@@ -336,9 +338,7 @@ iso88025_output(ifp, m, dst, rt0)
 		bcopy((caddr_t)&(satoipx_addr(dst).x_host), (caddr_t)edst,
 		      ISO88025_ADDR_LEN);
 
-		M_PREPEND(m, 3, M_TRYWAIT);
-		if (m == 0)
-			senderr(ENOBUFS);
+		M_PREPEND(m, 3, M_WAIT);
 		m = m_pullup(m, 3);
 		if (m == 0)
 			senderr(ENOBUFS);
@@ -697,7 +697,9 @@ iso88025_resolvemulti (ifp, llsa, sa)
 	struct sockaddr *sa;
 {
 	struct sockaddr_dl *sdl;
+#ifdef INET
 	struct sockaddr_in *sin;
+#endif
 #ifdef INET6
 	struct sockaddr_in6 *sin6;
 #endif
@@ -722,7 +724,7 @@ iso88025_resolvemulti (ifp, llsa, sa)
 		if (!IN_MULTICAST(ntohl(sin->sin_addr.s_addr))) {
 			return (EADDRNOTAVAIL);
 		}
-		MALLOC(sdl, struct sockaddr_dl *, sizeof *sdl, M_IFMADDR,
+		sdl = malloc(sizeof *sdl, M_IFMADDR,
 		       M_NOWAIT|M_ZERO);
 		if (sdl == NULL)
 			return (ENOMEM);
@@ -752,7 +754,7 @@ iso88025_resolvemulti (ifp, llsa, sa)
 		if (!IN6_IS_ADDR_MULTICAST(&sin6->sin6_addr)) {
 			return (EADDRNOTAVAIL);
 		}
-		MALLOC(sdl, struct sockaddr_dl *, sizeof *sdl, M_IFMADDR,
+		sdl = malloc(sizeof *sdl, M_IFMADDR,
 		       M_NOWAIT|M_ZERO);
 		if (sdl == NULL)
 			return (ENOMEM);

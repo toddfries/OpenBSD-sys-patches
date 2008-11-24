@@ -8,7 +8,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_tc.c,v 1.178 2007/06/04 18:25:07 dwmalone Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_tc.c,v 1.181 2008/03/16 10:58:05 rwatson Exp $");
 
 #include "opt_ntp.h"
 
@@ -833,7 +833,7 @@ inittimecounter(void *dummy)
 	(void)timecounter->tc_get_timecount(timecounter);
 }
 
-SYSINIT(timecounter, SI_SUB_CLOCKS, SI_ORDER_SECOND, inittimecounter, NULL)
+SYSINIT(timecounter, SI_SUB_CLOCKS, SI_ORDER_SECOND, inittimecounter, NULL);
 
 /* Cpu tick handling -------------------------------------------------*/
 
@@ -857,7 +857,7 @@ tc_cpu_ticks(void)
 }
 
 /*
- * This function gets called ever 16 seconds on only one designated
+ * This function gets called every 16 seconds on only one designated
  * CPU in the system from hardclock() via tc_ticktock().
  *
  * Whenever the real time clock is stepped we get called with reset=1
@@ -898,14 +898,14 @@ cpu_tick_calibrate(int reset)
 		    t_delta.sec == 16 && t_delta.frac >= (0x01LL << 56))) {
 			/* too long */
 			if (bootverbose)
-				printf("%ju.%016jx too long\n",
+				printf("t_delta %ju.%016jx too long\n",
 				    (uintmax_t)t_delta.sec,
 				    (uintmax_t)t_delta.frac);
 		} else if (t_delta.sec < 15 ||
 		    (t_delta.sec == 15 && t_delta.frac <= (0xffLL << 56))) {
 			/* too short */
 			if (bootverbose)
-				printf("%ju.%016jx too short\n",
+				printf("t_delta %ju.%016jx too short\n",
 				    (uintmax_t)t_delta.sec,
 				    (uintmax_t)t_delta.frac);
 		} else {

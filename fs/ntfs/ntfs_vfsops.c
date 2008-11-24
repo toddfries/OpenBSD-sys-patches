@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/ntfs/ntfs_vfsops.c,v 1.89 2007/10/16 10:54:53 alfred Exp $
+ * $FreeBSD: src/sys/fs/ntfs/ntfs_vfsops.c,v 1.95 2008/10/23 20:26:15 des Exp $
  */
 
 
@@ -41,6 +41,7 @@
 #include <sys/buf.h>
 #include <sys/fcntl.h>
 #include <sys/malloc.h>
+#include <sys/stat.h>
 #include <sys/systm.h>
 
 #include <geom/geom.h>
@@ -283,7 +284,7 @@ ntfs_mountfs(devvp, mp, td)
 
 	g_topology_unlock();
 	PICKUP_GIANT();
-	VOP_UNLOCK(devvp, 0, td);
+	VOP_UNLOCK(devvp, 0);
 	if (error)
 		return (error);
 
@@ -331,7 +332,7 @@ ntfs_mountfs(devvp, mp, td)
 	if (1 == vfs_scanopt(mp->mnt_optnew, "gid", "%d", &v))
 		ntmp->ntm_gid = v;
 	if (1 == vfs_scanopt(mp->mnt_optnew, "mode", "%d", &v))
-		ntmp->ntm_mode = v;
+		ntmp->ntm_mode = v & ACCESSPERMS;
 	vfs_flagopt(mp->mnt_optnew,
 	    "caseins", &ntmp->ntm_flag, NTFS_MFLAG_CASEINS);
 	vfs_flagopt(mp->mnt_optnew,
@@ -415,8 +416,7 @@ ntfs_mountfs(devvp, mp, td)
 		}
 
 		/* Alloc memory for attribute definitions */
-		MALLOC(ntmp->ntm_ad, struct ntvattrdef *,
-			num * sizeof(struct ntvattrdef),
+		ntmp->ntm_ad = malloc(num * sizeof(struct ntvattrdef),
 			M_NTFSMNT, M_WAITOK);
 
 		ntmp->ntm_adnum = num;
@@ -461,7 +461,7 @@ out:
 
 	DROP_GIANT();
 	g_topology_lock();
-	g_vfs_close(cp, td);
+	g_vfs_close(cp);
 	g_topology_unlock();
 	PICKUP_GIANT();
 	
@@ -505,11 +505,11 @@ ntfs_unmount(
 	if (error)
 		printf("ntfs_unmount: vflush failed(sysnodes): %d\n",error);
 
-	vinvalbuf(ntmp->ntm_devvp, V_SAVE, td, 0, 0);
+	vinvalbuf(ntmp->ntm_devvp, V_SAVE, 0, 0);
 
 	DROP_GIANT();
 	g_topology_lock();
-	g_vfs_close(ntmp->ntm_cp, td);
+	g_vfs_close(ntmp->ntm_cp);
 	g_topology_unlock();
 	PICKUP_GIANT();
 
@@ -525,8 +525,8 @@ ntfs_unmount(
 	MNT_ILOCK(mp);
 	mp->mnt_flag &= ~MNT_LOCAL;
 	MNT_IUNLOCK(mp);
-	FREE(ntmp->ntm_ad, M_NTFSMNT);
-	FREE(ntmp, M_NTFSMNT);
+	free(ntmp->ntm_ad, M_NTFSMNT);
+	free(ntmp, M_NTFSMNT);
 	return (error);
 }
 
@@ -567,7 +567,7 @@ ntfs_calccfree(
 
 	bmsize = VTOF(vp)->f_size;
 
-	MALLOC(tmp, u_int8_t *, bmsize, M_TEMP, M_WAITOK);
+	tmp = malloc(bmsize, M_TEMP, M_WAITOK);
 
 	error = ntfs_readattr(ntmp, VTONT(vp), NTFS_A_DATA, NULL,
 			       0, bmsize, tmp, NULL);
@@ -580,7 +580,7 @@ ntfs_calccfree(
 	*cfreep = cfree;
 
     out:
-	FREE(tmp, M_TEMP);
+	free(tmp, M_TEMP);
 	return(error);
 }
 
@@ -742,7 +742,7 @@ ntfs_vgetex(
 	ntfs_ntput(ip);
 
 	if (lkflags & LK_TYPE_MASK) {
-		error = vn_lock(vp, lkflags, td);
+		error = vn_lock(vp, lkflags);
 		if (error) {
 			vput(vp);
 			return (error);

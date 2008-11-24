@@ -1,5 +1,5 @@
-# $FreeBSD: src/sys/boot/arm/Makefile,v 1.3 2006/10/23 00:05:28 imp Exp $
+# $FreeBSD: src/sys/boot/arm/Makefile,v 1.4 2008/10/14 10:11:14 raj Exp $
 
-SUBDIR=
+SUBDIR=		uboot
 
 .include <bsd.subdir.mk>

@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/mp_machdep.c,v 1.281 2007/08/02 21:17:57 peter Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/mp_machdep.c,v 1.289 2008/09/28 18:34:14 marius Exp $");
 
 #include "opt_apic.h"
 #include "opt_cpu.h"
@@ -78,7 +78,6 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/mp_machdep.c,v 1.281 2007/08/02 21:17:57 p
 #include <machine/psl.h>
 #include <machine/smp.h>
 #include <machine/specialreg.h>
-#include <machine/privatespace.h>
 
 #define WARMBOOT_TARGET		0
 #define WARMBOOT_OFF		(KERNBASE + 0x0467)
@@ -132,23 +131,18 @@ int	mcount_lock;
 
 int	mp_naps;		/* # of Applications processors */
 int	boot_cpu_id = -1;	/* designated BSP */
-extern	int nkpt;
 
-/*
- * CPU topology map datastructures for HTT.
- */
-static struct cpu_group mp_groups[MAXCPU];
-static struct cpu_top mp_top;
+extern	struct pcpu __pcpu[];
 
 /* AP uses this during bootstrap.  Do not staticize.  */
 char *bootSTK;
 static int bootAP;
 
+/* Free these after use */
+void *bootstacks[MAXCPU];
+
 /* Hotwire a 0->4MB V==P mapping */
 extern pt_entry_t *KPTphys;
-
-/* SMP page table page */
-extern pt_entry_t *SMPpt;
 
 struct pcb stoppcbs[MAXCPU];
 
@@ -237,40 +231,38 @@ mem_range_AP_init(void)
 		mem_range_softc.mr_op->initAP(&mem_range_softc);
 }
 
-void
-mp_topology(void)
+struct cpu_group *
+cpu_topo(void)
 {
-	struct cpu_group *group;
-	int apic_id;
-	int groups;
-	int cpu;
-
-	/* Build the smp_topology map. */
-	/* Nothing to do if there is no HTT support. */
-	if (hyperthreading_cpus <= 1)
-		return;
-	group = &mp_groups[0];
-	groups = 1;
-	for (cpu = 0, apic_id = 0; apic_id <= MAX_APIC_ID; apic_id++) {
-		if (!cpu_info[apic_id].cpu_present)
-			continue;
-		/*
-		 * If the current group has members and we're not a logical
-		 * cpu, create a new group.
-		 */
-		if (group->cg_count != 0 &&
-		    (apic_id % hyperthreading_cpus) == 0) {
-			group++;
-			groups++;
-		}
-		group->cg_count++;
-		group->cg_mask |= 1 << cpu;
-		cpu++;
+	if (cpu_cores == 0)
+		cpu_cores = 1;
+	if (cpu_logical == 0)
+		cpu_logical = 1;
+	if (mp_ncpus % (cpu_cores * cpu_logical) != 0) {
+		printf("WARNING: Non-uniform processors.\n");
+		printf("WARNING: Using suboptimal topology.\n");
+		return (smp_topo_none());
 	}
-
-	mp_top.ct_count = groups;
-	mp_top.ct_group = mp_groups;
-	smp_topology = &mp_top;
+	/*
+	 * No multi-core or hyper-threaded.
+	 */
+	if (cpu_logical * cpu_cores == 1)
+		return (smp_topo_none());
+	/*
+	 * Only HTT no multi-core.
+	 */
+	if (cpu_logical > 1 && cpu_cores == 1)
+		return (smp_topo_1level(CG_SHARE_L1, cpu_logical, CG_FLAG_HTT));
+	/*
+	 * Only multi-core no HTT.
+	 */
+	if (cpu_cores > 1 && cpu_logical == 1)
+		return (smp_topo_1level(CG_SHARE_NONE, cpu_cores, 0));
+	/*
+	 * Both HTT and multi-core.
+	 */
+	return (smp_topo_2level(CG_SHARE_NONE, cpu_cores,
+	    CG_SHARE_L1, cpu_logical, CG_FLAG_HTT));
 }
 
 
@@ -458,9 +450,6 @@ cpu_mp_start(void)
 	}
 
 	set_interrupt_apic_ids();
-
-	/* Last, setup the cpu topology now that we have probed CPUs */
-	mp_topology();
 }
 
 
@@ -493,6 +482,7 @@ cpu_mp_announce(void)
 void
 init_secondary(void)
 {
+	struct pcpu *pc;
 	vm_offset_t addr;
 	int	gsel_tss;
 	int	x, myid;
@@ -500,11 +490,18 @@ init_secondary(void)
 
 	/* bootAP is set in start_ap() to our ID. */
 	myid = bootAP;
-	gdt_segs[GPRIV_SEL].ssd_base = (int) &SMP_prvspace[myid];
-	gdt_segs[GPROC0_SEL].ssd_base =
-		(int) &SMP_prvspace[myid].pcpu.pc_common_tss;
-	SMP_prvspace[myid].pcpu.pc_prvspace =
-		&SMP_prvspace[myid].pcpu;
+
+	/* Get per-cpu data */
+	pc = &__pcpu[myid];
+
+	/* prime data page for it to use */
+	pcpu_init(pc, myid, sizeof(struct pcpu));
+	pc->pc_apic_id = cpu_apic_ids[myid];
+	pc->pc_prvspace = pc;
+	pc->pc_curthread = 0;
+
+	gdt_segs[GPRIV_SEL].ssd_base = (int) pc;
+	gdt_segs[GPROC0_SEL].ssd_base = (int) &pc->pc_common_tss;
 
 	for (x = 0; x < NGDT; x++) {
 		ssdtosd(&gdt_segs[x], &gdt[myid * NGDT + x].sd);
@@ -587,7 +584,6 @@ init_secondary(void)
 		printf("SMP: cpuid = %d\n", PCPU_GET(cpuid));
 		printf("SMP: actual apic_id = %d\n", lapic_id());
 		printf("SMP: correct apic_id = %d\n", PCPU_GET(apic_id));
-		printf("PTD[MPPTDI] = %#jx\n", (uintmax_t)PTD[MPPTDI]);
 		panic("cpuid mismatch! boom!!");
 	}
 
@@ -721,17 +717,17 @@ assign_cpu_ids(void)
 /*
  * start each AP in our list
  */
+/* Lowest 1MB is already mapped: don't touch*/
+#define TMPMAP_START 1
 static int
 start_all_aps(void)
 {
 #ifndef PC98
 	u_char mpbiosreason;
 #endif
-	struct pcpu *pc;
-	char *stack;
 	uintptr_t kptbase;
 	u_int32_t mpbioswarmvec;
-	int apic_id, cpu, i, pg;
+	int apic_id, cpu, i;
 
 	mtx_init(&ap_boot_mtx, "ap boot", NULL, MTX_SPIN);
 
@@ -747,8 +743,9 @@ start_all_aps(void)
 
 	/* set up temporary P==V mapping for AP boot */
 	/* XXX this is a hack, we should boot the AP on its own stack/PTD */
+
 	kptbase = (uintptr_t)(void *)KPTphys;
-	for (i = 0; i < NKPT; i++)
+	for (i = TMPMAP_START; i < NKPT; i++)
 		PTD[i] = (pd_entry_t)(PG_V | PG_RW |
 		    ((kptbase + i * PAGE_SIZE) & PG_FRAME));
 	invltlb();
@@ -757,24 +754,8 @@ start_all_aps(void)
 	for (cpu = 1; cpu < mp_ncpus; cpu++) {
 		apic_id = cpu_apic_ids[cpu];
 
-		/* first page of AP's private space */
-		pg = cpu * i386_btop(sizeof(struct privatespace));
-
-		/* allocate a new private data page */
-		pc = (struct pcpu *)kmem_alloc(kernel_map, PAGE_SIZE);
-
-		/* wire it into the private page table page */
-		SMPpt[pg] = (pt_entry_t)(PG_V | PG_RW | vtophys(pc));
-
-		/* allocate and set up an idle stack data page */
-		stack = (char *)kmem_alloc(kernel_map, KSTACK_PAGES * PAGE_SIZE); /* XXXKSE */
-		for (i = 0; i < KSTACK_PAGES; i++)
-			SMPpt[pg + 1 + i] = (pt_entry_t)
-			    (PG_V | PG_RW | vtophys(PAGE_SIZE * i + stack));
-
-		/* prime data page for it to use */
-		pcpu_init(pc, cpu, sizeof(struct pcpu));
-		pc->pc_apic_id = apic_id;
+		/* allocate and set up a boot stack data page */
+		bootstacks[cpu] = (char *)kmem_alloc(kernel_map, KSTACK_PAGES * PAGE_SIZE);
 
 		/* setup a vector to our boot code */
 		*((volatile u_short *) WARMBOOT_OFF) = WARMBOOT_TARGET;
@@ -784,8 +765,7 @@ start_all_aps(void)
 		outb(CMOS_DATA, BIOS_WARM);	/* 'warm-start' */
 #endif
 
-		bootSTK = &SMP_prvspace[cpu].idlekstack[KSTACK_PAGES *
-		    PAGE_SIZE];
+		bootSTK = (char *)bootstacks[cpu] + KSTACK_PAGES * PAGE_SIZE - 4;
 		bootAP = cpu;
 
 		/* attempt to start the Application Processor */
@@ -814,20 +794,8 @@ start_all_aps(void)
 	outb(CMOS_DATA, mpbiosreason);
 #endif
 
-	/*
-	 * Set up the idle context for the BSP.  Similar to above except
-	 * that some was done by locore, some by pmap.c and some is implicit
-	 * because the BSP is cpu#0 and the page is initially zero and also
-	 * because we can refer to variables by name on the BSP..
-	 */
-
-	/* Allocate and setup BSP idle stack */
-	stack = (char *)kmem_alloc(kernel_map, KSTACK_PAGES * PAGE_SIZE);
-	for (i = 0; i < KSTACK_PAGES; i++)
-		SMPpt[1 + i] = (pt_entry_t)
-		    (PG_V | PG_RW | vtophys(PAGE_SIZE * i + stack));
-
-	for (i = 0; i < NKPT; i++)
+	/* Undo V==P hack from above */
+	for (i = TMPMAP_START; i < NKPT; i++)
 		PTD[i] = 0;
 	pmap_invalidate_range(kernel_pmap, 0, NKPT * NBPDR - 1);
 
@@ -1166,16 +1134,10 @@ ipi_bitmap_handler(struct trapframe frame)
 	ipi_bitmap = atomic_readandclear_int(&cpu_ipi_pending[cpu]);
 
 	if (ipi_bitmap & (1 << IPI_PREEMPT)) {
-		struct thread *running_thread = curthread;
 #ifdef COUNT_IPIS
 		(*ipi_preempt_counts[cpu])++;
 #endif
-		thread_lock(running_thread);
-		if (running_thread->td_critnest > 1) 
-			running_thread->td_owepreempt = 1;
-		else 		
-			mi_switch(SW_INVOL | SW_PREEMPT, NULL);
-		thread_unlock(running_thread);
+		sched_preempt(curthread);
 	}
 
 	if (ipi_bitmap & (1 << IPI_AST)) {
@@ -1232,21 +1194,6 @@ ipi_selected(u_int32_t cpus, u_int ipi)
 }
 
 /*
- * send an IPI INTerrupt containing 'vector' to all CPUs, including myself
- */
-void
-ipi_all(u_int ipi)
-{
-
-	if (IPI_IS_BITMAPED(ipi) || (ipi == IPI_STOP && stop_cpus_with_nmi)) {
-		ipi_selected(all_cpus, ipi);
-		return;
-	}
-	CTR2(KTR_SMP, "%s: ipi: %x", __func__, ipi);
-	lapic_ipi_vectored(ipi, APIC_IPI_DEST_ALL);
-}
-
-/*
  * send an IPI to all CPUs EXCEPT myself
  */
 void
@@ -1259,21 +1206,6 @@ ipi_all_but_self(u_int ipi)
 	}
 	CTR2(KTR_SMP, "%s: ipi: %x", __func__, ipi);
 	lapic_ipi_vectored(ipi, APIC_IPI_DEST_OTHERS);
-}
-
-/*
- * send an IPI to myself
- */
-void
-ipi_self(u_int ipi)
-{
-
-	if (IPI_IS_BITMAPED(ipi) || (ipi == IPI_STOP && stop_cpus_with_nmi)) {
-		ipi_selected(PCPU_GET(cpumask), ipi);
-		return;
-	}
-	CTR2(KTR_SMP, "%s: ipi: %x", __func__, ipi);
-	lapic_ipi_vectored(ipi, APIC_IPI_DEST_SELF);
 }
 
 #ifdef STOP_NMI
@@ -1539,5 +1471,5 @@ mp_ipi_intrcnt(void *dummy)
 		intrcnt_add(buf, &ipi_lazypmap_counts[i]);
 	}		
 }
-SYSINIT(mp_ipi_intrcnt, SI_SUB_INTR, SI_ORDER_MIDDLE, mp_ipi_intrcnt, NULL)
+SYSINIT(mp_ipi_intrcnt, SI_SUB_INTR, SI_ORDER_MIDDLE, mp_ipi_intrcnt, NULL);
 #endif

@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/sys/shm.h,v 1.24 2005/08/06 07:20:17 csjp Exp $ */
+/* $FreeBSD: src/sys/sys/shm.h,v 1.25 2008/02/12 20:55:03 csjp Exp $ */
 /*	$NetBSD: shm.h,v 1.15 1994/06/29 06:45:17 cgd Exp $	*/
 
 /*-
@@ -56,7 +56,7 @@
 #define	SHM_LOCK	11
 #define	SHM_UNLOCK	12
 
-/* ipcs shmctl commands */
+/* ipcs shmctl commands for Linux compatability */
 #define	SHM_STAT	13
 #define	SHM_INFO	14
 

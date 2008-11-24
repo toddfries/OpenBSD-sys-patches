@@ -1,7 +1,8 @@
 /*-
- * Copyright (c) 1999-2002, 2007 Robert N. M. Watson
+ * Copyright (c) 1999-2002, 2007-2008 Robert N. M. Watson
  * Copyright (c) 2001-2005 McAfee, Inc.
  * Copyright (c) 2005-2006 SPARTA, Inc.
+ * Copyright (c) 2008 Apple Inc.
  * All rights reserved.
  *
  * This software was developed by Robert Watson for the TrustedBSD Project.
@@ -35,7 +36,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_stub/mac_stub.c,v 1.79 2007/10/29 13:33:06 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac_stub/mac_stub.c,v 1.90 2008/10/28 21:57:32 trasz Exp $
  */
 
 /*
@@ -184,6 +185,12 @@ stub_bpfdesc_create_mbuf(struct bpf_d *d, struct label *dlabel,
 
 }
 
+static void
+stub_cred_associate_nfsd(struct ucred *cred)
+{
+
+}
+
 static int
 stub_cred_check_relabel(struct ucred *cred, struct label *newlabel)
 {
@@ -196,6 +203,18 @@ stub_cred_check_visible(struct ucred *cr1, struct ucred *cr2)
 {
 
 	return (0);
+}
+
+static void
+stub_cred_create_init(struct ucred *cred)
+{
+
+}
+
+static void
+stub_cred_create_swapper(struct ucred *cred)
+{
+
 }
 
 static void
@@ -307,30 +326,59 @@ stub_inpcb_sosetlabel(struct socket *so, struct label *solabel,
 }
 
 static void
-stub_ipq_create(struct mbuf *m, struct label *mlabel, struct ipq *ipq,
-    struct label *ipqlabel)
+stub_ip6q_create(struct mbuf *m, struct label *mlabel, struct ip6q *q6,
+    struct label *q6label)
 {
 
 }
 
 static int
-stub_ipq_match(struct mbuf *m, struct label *mlabel, struct ipq *ipq,
-    struct label *ipqlabel)
+stub_ip6q_match(struct mbuf *m, struct label *mlabel, struct ip6q *q6,
+    struct label *q6label)
 {
 
 	return (1);
 }
 
 static void
-stub_ipq_reassemble(struct ipq *ipq, struct label *ipqlabel,
-    struct mbuf *m, struct label *mlabel)
+stub_ip6q_reassemble(struct ip6q *q6, struct label *q6label, struct mbuf *m,
+    struct label *mlabel)
 {
 
 }
 
 static void
-stub_ipq_update(struct mbuf *m, struct label *mlabel, struct ipq *ipq,
-    struct label *ipqlabel)
+stub_ip6q_update(struct mbuf *m, struct label *mlabel, struct ip6q *q6,
+    struct label *q6label)
+{
+
+}
+
+static void
+stub_ipq_create(struct mbuf *m, struct label *mlabel, struct ipq *q,
+    struct label *qlabel)
+{
+
+}
+
+static int
+stub_ipq_match(struct mbuf *m, struct label *mlabel, struct ipq *q,
+    struct label *qlabel)
+{
+
+	return (1);
+}
+
+static void
+stub_ipq_reassemble(struct ipq *q, struct label *qlabel, struct mbuf *m,
+    struct label *mlabel)
+{
+
+}
+
+static void
+stub_ipq_update(struct mbuf *m, struct label *mlabel, struct ipq *q,
+    struct label *qlabel)
 {
 
 }
@@ -523,16 +571,8 @@ stub_pipe_relabel(struct ucred *cred, struct pipepair *pp,
 }
 
 static int
-stub_posixsem_check_destroy(struct ucred *cred, struct ksem *ks,
-    struct label *kslabel)
-{
-
-	return (0);
-}
-
-static int
-stub_posixsem_check_getvalue(struct ucred *cred, struct ksem *ks,
-    struct label *kslabel)
+stub_posixsem_check_getvalue(struct ucred *active_cred, struct ucred *file_cred,
+    struct ksem *ks, struct label *kslabel)
 {
 
 	return (0);
@@ -547,8 +587,16 @@ stub_posixsem_check_open(struct ucred *cred, struct ksem *ks,
 }
 
 static int
-stub_posixsem_check_post(struct ucred *cred, struct ksem *ks,
-    struct label *kslabel)
+stub_posixsem_check_post(struct ucred *active_cred, struct ucred *file_cred,
+    struct ksem *ks, struct label *kslabel)
+{
+
+	return (0);
+}
+
+static int
+stub_posixsem_check_stat(struct ucred *active_cred, struct ucred *file_cred,
+    struct ksem *ks, struct label *kslabel)
 {
 
 	return (0);
@@ -563,8 +611,8 @@ stub_posixsem_check_unlink(struct ucred *cred, struct ksem *ks,
 }
 
 static int
-stub_posixsem_check_wait(struct ucred *cred, struct ksem *ks,
-    struct label *kslabel)
+stub_posixsem_check_wait(struct ucred *active_cred, struct ucred *file_cred,
+    struct ksem *ks, struct label *kslabel)
 {
 
 	return (0);
@@ -573,6 +621,53 @@ stub_posixsem_check_wait(struct ucred *cred, struct ksem *ks,
 static void
 stub_posixsem_create(struct ucred *cred, struct ksem *ks,
     struct label *kslabel)
+{
+
+}
+
+static int
+stub_posixshm_check_mmap(struct ucred *cred, struct shmfd *shmfd,
+    struct label *shmlabel, int prot, int flags)
+{
+
+	return (0);
+}
+
+static int
+stub_posixshm_check_open(struct ucred *cred, struct shmfd *shmfd,
+    struct label *shmlabel)
+{
+
+	return (0);
+}
+
+static int
+stub_posixshm_check_stat(struct ucred *active_cred, struct ucred *file_cred,
+    struct shmfd *shmfd, struct label *shmlabel)
+{
+
+	return (0);
+}
+
+static int
+stub_posixshm_check_truncate(struct ucred *active_cred,
+    struct ucred *file_cred, struct shmfd *shmfd, struct label *shmlabel)
+{
+
+	return (0);
+}
+
+static int
+stub_posixshm_check_unlink(struct ucred *cred, struct shmfd *shmfd,
+    struct label *shmlabel)
+{
+
+	return (0);
+}
+
+static void
+stub_posixshm_create(struct ucred *cred, struct shmfd *shmfd,
+    struct label *shmlabel)
 {
 
 }
@@ -589,12 +684,6 @@ stub_priv_grant(struct ucred *cred, int priv)
 {
 
 	return (EPERM);
-}
-
-static void
-stub_proc_associate_nfsd(struct ucred *cred)
-{
-
 }
 
 static int
@@ -712,18 +801,6 @@ stub_proc_check_wait(struct ucred *cred, struct proc *p)
 	return (0);
 }
 
-static void
-stub_proc_create_init(struct ucred *cred)
-{
-
-}
-
-static void
-stub_proc_create_swapper(struct ucred *cred)
-{
-
-}
-
 static int
 stub_socket_check_accept(struct ucred *cred, struct socket *so,
     struct label *solabel)
@@ -805,6 +882,14 @@ stub_socket_check_send(struct ucred *cred, struct socket *so,
 static int
 stub_socket_check_stat(struct ucred *cred, struct socket *so,
     struct label *solabel)
+{
+
+	return (0);
+}
+
+static int
+stub_inpcb_check_visible(struct ucred *cred, struct inpcb *inp,
+   struct label *inplabel)
 {
 
 	return (0);
@@ -930,38 +1015,6 @@ stub_system_check_swapon(struct ucred *cred, struct vnode *vp,
 static int
 stub_system_check_sysctl(struct ucred *cred, struct sysctl_oid *oidp,
     void *arg1, int arg2, struct sysctl_req *req)
-{
-
-	return (0);
-}
-
-static int
-stub_vnode_check_access(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, int acc_mode)
-{
-
-	return (0);
-}
-
-static int
-stub_vnode_check_chdir(struct ucred *cred, struct vnode *dvp,
-    struct label *dvplabel)
-{
-
-	return (0);
-}
-
-static int
-stub_vnode_check_chroot(struct ucred *cred, struct vnode *dvp,
-    struct label *dvplabel)
-{
-
-	return (0);
-}
-
-static int
-stub_vnode_check_create(struct ucred *cred, struct vnode *dvp,
-    struct label *dvplabel, struct componentname *cnp, struct vattr *vap)
 {
 
 	return (0);
@@ -1161,6 +1214,38 @@ stub_vnode_associate_singlelabel(struct mount *mp, struct label *mplabel,
 }
 
 static int
+stub_vnode_check_access(struct ucred *cred, struct vnode *vp,
+    struct label *vplabel, accmode_t accmode)
+{
+
+	return (0);
+}
+
+static int
+stub_vnode_check_chdir(struct ucred *cred, struct vnode *dvp,
+    struct label *dvplabel)
+{
+
+	return (0);
+}
+
+static int
+stub_vnode_check_chroot(struct ucred *cred, struct vnode *dvp,
+    struct label *dvplabel)
+{
+
+	return (0);
+}
+
+static int
+stub_vnode_check_create(struct ucred *cred, struct vnode *dvp,
+    struct label *dvplabel, struct componentname *cnp, struct vattr *vap)
+{
+
+	return (0);
+}
+
+static int
 stub_vnode_check_deleteacl(struct ucred *cred, struct vnode *vp,
     struct label *vplabel, acl_type_t type)
 {
@@ -1252,7 +1337,7 @@ stub_vnode_check_mprotect(struct ucred *cred, struct vnode *vp,
 
 static int
 stub_vnode_check_open(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, int acc_mode)
+    struct label *vplabel, accmode_t accmode)
 {
 
 	return (0);
@@ -1454,9 +1539,12 @@ static struct mac_policy_ops stub_ops =
 	.mpo_bpfdesc_destroy_label = stub_destroy_label,
 	.mpo_bpfdesc_init_label = stub_init_label,
 
+	.mpo_cred_associate_nfsd = stub_cred_associate_nfsd,
 	.mpo_cred_check_relabel = stub_cred_check_relabel,
 	.mpo_cred_check_visible = stub_cred_check_visible,
 	.mpo_cred_copy_label = stub_copy_label,
+	.mpo_cred_create_init = stub_cred_create_init,
+	.mpo_cred_create_swapper = stub_cred_create_swapper,
 	.mpo_cred_destroy_label = stub_destroy_label,
 	.mpo_cred_externalize_label = stub_externalize_label,
 	.mpo_cred_init_label = stub_init_label,
@@ -1483,11 +1571,19 @@ static struct mac_policy_ops stub_ops =
 	.mpo_ifnet_relabel = stub_ifnet_relabel,
 
 	.mpo_inpcb_check_deliver = stub_inpcb_check_deliver,
+	.mpo_inpcb_check_visible = stub_inpcb_check_visible,
 	.mpo_inpcb_create = stub_inpcb_create,
 	.mpo_inpcb_create_mbuf = stub_inpcb_create_mbuf,
 	.mpo_inpcb_destroy_label = stub_destroy_label,
 	.mpo_inpcb_init_label = stub_init_label_waitcheck,
 	.mpo_inpcb_sosetlabel = stub_inpcb_sosetlabel,
+
+	.mpo_ip6q_create = stub_ip6q_create,
+	.mpo_ip6q_destroy_label = stub_destroy_label,
+	.mpo_ip6q_init_label = stub_init_label_waitcheck,
+	.mpo_ip6q_match = stub_ip6q_match,
+	.mpo_ip6q_update = stub_ip6q_update,
+	.mpo_ip6q_reassemble = stub_ip6q_reassemble,
 
 	.mpo_ipq_create = stub_ipq_create,
 	.mpo_ipq_destroy_label = stub_destroy_label,
@@ -1540,20 +1636,28 @@ static struct mac_policy_ops stub_ops =
 	.mpo_pipe_internalize_label = stub_internalize_label,
 	.mpo_pipe_relabel = stub_pipe_relabel,
 
-	.mpo_posixsem_check_destroy = stub_posixsem_check_destroy,
 	.mpo_posixsem_check_getvalue = stub_posixsem_check_getvalue,
 	.mpo_posixsem_check_open = stub_posixsem_check_open,
 	.mpo_posixsem_check_post = stub_posixsem_check_post,
+	.mpo_posixsem_check_stat = stub_posixsem_check_stat,
 	.mpo_posixsem_check_unlink = stub_posixsem_check_unlink,
 	.mpo_posixsem_check_wait = stub_posixsem_check_wait,
 	.mpo_posixsem_create = stub_posixsem_create,
 	.mpo_posixsem_destroy_label = stub_destroy_label,
 	.mpo_posixsem_init_label = stub_init_label,
 
+	.mpo_posixshm_check_mmap = stub_posixshm_check_mmap,
+	.mpo_posixshm_check_open = stub_posixshm_check_open,
+	.mpo_posixshm_check_stat = stub_posixshm_check_stat,
+	.mpo_posixshm_check_truncate = stub_posixshm_check_truncate,
+	.mpo_posixshm_check_unlink = stub_posixshm_check_unlink,
+	.mpo_posixshm_create = stub_posixshm_create,
+	.mpo_posixshm_destroy_label = stub_destroy_label,
+	.mpo_posixshm_init_label = stub_init_label,
+
 	.mpo_priv_check = stub_priv_check,
 	.mpo_priv_grant = stub_priv_grant,
 
-	.mpo_proc_associate_nfsd = stub_proc_associate_nfsd,
 	.mpo_proc_check_debug = stub_proc_check_debug,
 	.mpo_proc_check_sched = stub_proc_check_sched,
 	.mpo_proc_check_setaudit = stub_proc_check_setaudit,
@@ -1570,8 +1674,6 @@ static struct mac_policy_ops stub_ops =
 	.mpo_proc_check_setuid = stub_proc_check_setuid,
 	.mpo_proc_check_signal = stub_proc_check_signal,
 	.mpo_proc_check_wait = stub_proc_check_wait,
-	.mpo_proc_create_init = stub_proc_create_init,
-	.mpo_proc_create_swapper = stub_proc_create_swapper,
 
 	.mpo_socket_check_accept = stub_socket_check_accept,
 	.mpo_socket_check_bind = stub_socket_check_bind,
@@ -1698,5 +1800,25 @@ static struct mac_policy_ops stub_ops =
 	.mpo_vnode_setlabel_extattr = stub_vnode_setlabel_extattr,
 };
 
+#define	STUB_OBJECTS	(MPC_OBJECT_CRED |				\
+			 /* XXX: MPC_OBJECT_PROC | */			\
+			 MPC_OBJECT_VNODE |				\
+			 MPC_OBJECT_INPCB |				\
+			 MPC_OBJECT_SOCKET |				\
+			 MPC_OBJECT_DEVFS |				\
+			 MPC_OBJECT_MBUF |				\
+			 MPC_OBJECT_IPQ |				\
+			 MPC_OBJECT_IFNET |				\
+			 MPC_OBJECT_BPFDESC |				\
+			 MPC_OBJECT_PIPE |				\
+			 MPC_OBJECT_MOUNT |				\
+			 MPC_OBJECT_POSIXSEM |				\
+			 MPC_OBJECT_POSIXSHM |				\
+			 MPC_OBJECT_SYSVMSG |				\
+			 MPC_OBJECT_SYSVMSQ |				\
+			 MPC_OBJECT_SYSVSEM |				\
+			 MPC_OBJECT_SYSVSHM |				\
+			 MPC_OBJECT_SYNCACHE)
+
 MAC_POLICY_SET(&stub_ops, mac_stub, "TrustedBSD MAC/Stub",
-    MPC_LOADTIME_FLAG_UNLOADOK, NULL);
+    MPC_LOADTIME_FLAG_UNLOADOK, NULL, STUB_OBJECTS);

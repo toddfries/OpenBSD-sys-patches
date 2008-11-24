@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/pc98/pc98/machdep.c,v 1.396 2007/06/06 13:04:15 nyan Exp $");
+__FBSDID("$FreeBSD: src/sys/pc98/pc98/machdep.c,v 1.405 2008/04/25 05:18:49 jeff Exp $");
 
 #include "opt_atalk.h"
 #include "opt_compat.h"
@@ -60,7 +60,6 @@ __FBSDID("$FreeBSD: src/sys/pc98/pc98/machdep.c,v 1.396 2007/06/06 13:04:15 nyan
 #include <sys/buf.h>
 #include <sys/bus.h>
 #include <sys/callout.h>
-#include <sys/clock.h>
 #include <sys/cons.h>
 #include <sys/cpu.h>
 #include <sys/eventhandler.h>
@@ -125,7 +124,6 @@ __FBSDID("$FreeBSD: src/sys/pc98/pc98/machdep.c,v 1.396 2007/06/06 13:04:15 nyan
 #include <machine/perfmon.h>
 #endif
 #ifdef SMP
-#include <machine/privatespace.h>
 #include <machine/smp.h>
 #endif
 
@@ -159,7 +157,7 @@ static int  set_fpcontext(struct thread *td, const mcontext_t *mcp);
 static void set_fpregs_xmm(struct save87 *, struct savexmm *);
 static void fill_fpregs_xmm(struct savexmm *, struct save87 *);
 #endif /* CPU_ENABLE_SSE */
-SYSINIT(cpu, SI_SUB_CPU, SI_ORDER_FIRST, cpu_startup, NULL)
+SYSINIT(cpu, SI_SUB_CPU, SI_ORDER_FIRST, cpu_startup, NULL);
 
 int	need_pre_dma_flush;	/* If 1, use wbinvd befor DMA transfer. */
 int	need_post_dma_flush;	/* If 1, use invd after DMA transfer. */
@@ -204,9 +202,7 @@ vm_paddr_t dump_avail[PHYSMAP_SIZE + 2];
 struct kva_md_info kmi;
 
 static struct trapframe proc0_tf;
-#ifndef SMP
-static struct pcpu __pcpu;
-#endif
+struct pcpu __pcpu[MAXCPU];
 
 struct mtx icu_lock;
 
@@ -388,7 +384,7 @@ osendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 
 	regs->tf_esp = (int)fp;
 	regs->tf_eip = PS_STRINGS - szosigcode;
-	regs->tf_eflags &= ~PSL_T;
+	regs->tf_eflags &= ~(PSL_T | PSL_D);
 	regs->tf_cs = _ucodesel;
 	regs->tf_ds = _udatasel;
 	regs->tf_es = _udatasel;
@@ -509,7 +505,7 @@ freebsd4_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 
 	regs->tf_esp = (int)sfp;
 	regs->tf_eip = PS_STRINGS - szfreebsd4_sigcode;
-	regs->tf_eflags &= ~PSL_T;
+	regs->tf_eflags &= ~(PSL_T | PSL_D);
 	regs->tf_cs = _ucodesel;
 	regs->tf_ds = _udatasel;
 	regs->tf_es = _udatasel;
@@ -645,7 +641,7 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 
 	regs->tf_esp = (int)sfp;
 	regs->tf_eip = PS_STRINGS - *(p->p_sysent->sv_szsigcode);
-	regs->tf_eflags &= ~PSL_T;
+	regs->tf_eflags &= ~(PSL_T | PSL_D);
 	regs->tf_cs = _ucodesel;
 	regs->tf_ds = _udatasel;
 	regs->tf_es = _udatasel;
@@ -1137,7 +1133,7 @@ cpu_idle_default(void)
  * is a runnable process.
  */
 void
-cpu_idle(void)
+cpu_idle(int busy)
 {
 
 #ifdef SMP
@@ -1152,6 +1148,13 @@ cpu_idle(void)
 		else
 			(*cpu_idle_hook)();
 	}
+}
+
+int
+cpu_idle_wakeup(int cpu)
+{
+
+	return (0);
 }
 
 /* Other subsystems (e.g., ACPI) can hook this later. */
@@ -1584,6 +1587,25 @@ DB_SHOW_COMMAND(idt, db_show_idt)
 		ip++;
 	}
 }
+
+/* Show privileged registers. */
+DB_SHOW_COMMAND(sysregs, db_show_sysregs)
+{
+	uint64_t idtr, gdtr;
+
+	idtr = ridt();
+	db_printf("idtr\t0x%08x/%04x\n",
+	    (u_int)(idtr >> 16), (u_int)idtr & 0xffff);
+	gdtr = rgdt();
+	db_printf("gdtr\t0x%08x/%04x\n",
+	    (u_int)(gdtr >> 16), (u_int)gdtr & 0xffff);
+	db_printf("ldtr\t0x%04x\n", rldt());
+	db_printf("tr\t0x%04x\n", rtr());
+	db_printf("cr0\t0x%08x\n", rcr0());
+	db_printf("cr2\t0x%08x\n", rcr2());
+	db_printf("cr3\t0x%08x\n", rcr3());
+	db_printf("cr4\t0x%08x\n", rcr4());
+}
 #endif
 
 void
@@ -1917,7 +1939,7 @@ init386(first)
  	 * This may be done better later if it gets more high level
  	 * components in it. If so just link td->td_proc here.
 	 */
-	proc_linkup(&proc0, &thread0);
+	proc_linkup0(&proc0, &thread0);
 
 	/*
 	 * Initialize DMAC
@@ -1950,11 +1972,7 @@ init386(first)
 	gdt_segs[GUFS_SEL].ssd_limit = atop(0 - 1);
 	gdt_segs[GUGS_SEL].ssd_limit = atop(0 - 1);
 
-#ifdef SMP
-	pc = &SMP_prvspace[0].pcpu;
-#else
-	pc = &__pcpu;
-#endif
+	pc = &__pcpu[0];
 	gdt_segs[GPRIV_SEL].ssd_limit = atop(0 - 1);
 	gdt_segs[GPRIV_SEL].ssd_base = (int) pc;
 	gdt_segs[GPROC0_SEL].ssd_base = (int) &pc->pc_common_tss;
@@ -2068,7 +2086,7 @@ init386(first)
 
 #ifdef KDB
 	if (boothowto & RB_KDB)
-		kdb_enter("Boot flags requested debugger");
+		kdb_enter(KDB_WHY_BOOTFLAGS, "Boot flags requested debugger");
 #endif
 
 	finishidentcpu();	/* Final stage of CPU initialization */
@@ -2136,7 +2154,7 @@ init386(first)
 	_udatasel = GSEL(GUDATA_SEL, SEL_UPL);
 
 	/* setup proc 0's pcb */
-	thread0.td_pcb->pcb_flags = 0; /* XXXKSE */
+	thread0.td_pcb->pcb_flags = 0;
 	thread0.td_pcb->pcb_cr3 = (int)IdlePTD;
 	thread0.td_pcb->pcb_ext = 0;
 	thread0.td_frame = &proc0_tf;
@@ -2174,7 +2192,7 @@ spinlock_exit(void)
 
 #if defined(I586_CPU) && !defined(NO_F00F_HACK)
 static void f00f_hack(void *unused);
-SYSINIT(f00f_hack, SI_SUB_INTRINSIC, SI_ORDER_FIRST, f00f_hack, NULL)
+SYSINIT(f00f_hack, SI_SUB_INTRINSIC, SI_ORDER_FIRST, f00f_hack, NULL);
 
 static void
 f00f_hack(void *unused)

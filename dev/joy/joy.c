@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/joy/joy.c,v 1.54 2005/11/09 20:26:00 jylefort Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/joy/joy.c,v 1.55 2008/09/27 08:51:18 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -54,8 +54,8 @@ __FBSDID("$FreeBSD: src/sys/dev/joy/joy.c,v 1.54 2005/11/09 20:26:00 jylefort Ex
  * wait until the corresponding bit returns to 0.
  */
 
-#define joypart(d) (minor(d)&1)
-#define UNIT(d) ((minor(d)>>1)&3)
+#define joypart(d) (dev2unit(d)&1)
+#define UNIT(d) ((dev2unit(d)>>1)&3)
 #ifndef JOY_TIMEOUT
 #define JOY_TIMEOUT   2000 /* 2 milliseconds */
 #endif

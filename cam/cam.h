@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/cam/cam.h,v 1.11 2005/01/05 22:34:34 imp Exp $
+ * $FreeBSD: src/sys/cam/cam.h,v 1.12 2008/09/18 14:48:46 sbruno Exp $
  */
 
 #ifndef _CAM_CAM_H
@@ -129,6 +129,7 @@ typedef enum {
 				 * requests for the target at the sim level
 				 * back into the XPT queue.
 				 */
+	CAM_SCSI_IT_NEXUS_LOST,	/* Initiator/Target Nexus lost. */
 	CAM_IDE = 0x33,		/* Initiator Detected Error */
 	CAM_RESRC_UNAVAIL,	/* Resource Unavailable */
 	CAM_UNACKED_EVENT,	/* Unacknowledged Event by Host */

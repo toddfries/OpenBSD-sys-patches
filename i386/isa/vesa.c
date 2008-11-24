@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/isa/vesa.c,v 1.53 2005/12/05 11:58:33 ru Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/isa/vesa.c,v 1.54 2008/03/26 07:32:08 brueffer Exp $");
 
 #include "opt_vga.h"
 #include "opt_vesa.h"
@@ -1384,7 +1384,7 @@ get_palette(video_adapter_t *adp, int base, int count,
 	}
 	free(r, M_DEVBUF);
 
-	/* if error && bits != 6 at this point, we are in in trouble... XXX */
+	/* if error && bits != 6 at this point, we are in trouble... XXX */
 	return error;
 }
 

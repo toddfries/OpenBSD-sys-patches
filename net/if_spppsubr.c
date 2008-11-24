@@ -18,24 +18,14 @@
  *
  * From: Version 2.4, Thu Apr 30 17:17:21 MSD 1997
  *
- * $FreeBSD: src/sys/net/if_spppsubr.c,v 1.127 2007/06/10 04:53:13 mjacob Exp $
+ * $FreeBSD: src/sys/net/if_spppsubr.c,v 1.131 2008/11/05 12:02:25 bz Exp $
  */
 
 #include <sys/param.h>
 
-#if defined(__FreeBSD__) && __FreeBSD__ >= 3
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipx.h"
-#endif
-
-#ifdef NetBSD1_3
-#  if NetBSD1_3 > 6
-#      include "opt_inet.h"
-#      include "opt_inet6.h"
-#      include "opt_iso.h"
-#  endif
-#endif
 
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -43,17 +33,12 @@
 #include <sys/sockio.h>
 #include <sys/socket.h>
 #include <sys/syslog.h>
-#if defined(__FreeBSD__) && __FreeBSD__ >= 3
 #include <sys/random.h>
-#endif
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
+#include <sys/vimage.h>
 
-#if defined (__OpenBSD__)
-#include <sys/md5k.h>
-#else
 #include <sys/md5.h>
-#endif
 
 #include <net/if.h>
 #include <net/netisr.h>
@@ -63,10 +48,6 @@
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <net/slcompress.h>
-
-#if defined (__NetBSD__) || defined (__OpenBSD__)
-#include <machine/cpu.h> /* XXX for softnet */
-#endif
 
 #include <machine/stdarg.h>
 
@@ -81,11 +62,7 @@
 #include <netinet6/scope6_var.h>
 #endif
 
-#if defined (__FreeBSD__) || defined (__OpenBSD__)
-# include <netinet/if_ether.h>
-#else
-# include <net/ethertypes.h>
-#endif
+#include <netinet/if_ether.h>
 
 #ifdef IPX
 #include <netipx/ipx.h>
@@ -94,12 +71,7 @@
 
 #include <net/if_sppp.h>
 
-#if defined(__FreeBSD__) && __FreeBSD__ >= 3
-# define IOCTL_CMD_T	u_long
-#else
-# define IOCTL_CMD_T	int
-#endif
-
+#define IOCTL_CMD_T	u_long
 #define MAXALIVECNT     3               /* max. alive packets */
 
 /*
@@ -260,13 +232,8 @@ struct cp {
 	void	(*scr)(struct sppp *sp);
 };
 
-#if defined(__FreeBSD__) && __FreeBSD__ >= 3 && __FreeBSD_version < 501113
-#define	SPP_FMT		"%s%d: "
-#define	SPP_ARGS(ifp)	(ifp)->if_name, (ifp)->if_unit
-#else
 #define	SPP_FMT		"%s: "
 #define	SPP_ARGS(ifp)	(ifp)->if_xname
-#endif
 
 #define SPPP_LOCK(sp) \
 		do { \
@@ -405,8 +372,10 @@ static void sppp_chap_scr(struct sppp *sp);
 
 static const char *sppp_auth_type_name(u_short proto, u_char type);
 static const char *sppp_cp_type_name(u_char type);
+#ifdef INET
 static const char *sppp_dotted_quad(u_long addr);
 static const char *sppp_ipcp_opt_name(u_char opt);
+#endif
 #ifdef INET6
 static const char *sppp_ipv6cp_opt_name(u_char opt);
 #endif
@@ -421,7 +390,9 @@ static void sppp_phase_network(struct sppp *sp);
 static void sppp_print_bytes(const u_char *p, u_short len);
 static void sppp_print_string(const char *p, u_short len);
 static void sppp_qflush(struct ifqueue *ifq);
+#ifdef INET
 static void sppp_set_ip_addr(struct sppp *sp, u_long src);
+#endif
 #ifdef INET6
 static void sppp_get_ip6_addrs(struct sppp *sp, struct in6_addr *src,
 			       struct in6_addr *dst, struct in6_addr *srcmask);
@@ -556,9 +527,11 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 	struct ppp_header *h;
 	int isr = -1;
 	struct sppp *sp = IFP2SP(ifp);
+	int debug, do_account = 0;
+#ifdef INET
+	int hlen, vjlen;
 	u_char *iphdr;
-	int hlen, vjlen, do_account = 0;
-	int debug;
+#endif
 
 	SPPP_LOCK(sp);
 	debug = ifp->if_flags & IFF_DEBUG;
@@ -833,7 +806,9 @@ sppp_output(struct ifnet *ifp, struct mbuf *m,
 	struct ppp_header *h;
 	struct ifqueue *ifq = NULL;
 	int s, error, rv = 0;
+#ifdef INET
 	int ipproto = PPP_IP;
+#endif
 	int debug = ifp->if_flags & IFF_DEBUG;
 
 	s = splimp();
@@ -1421,11 +1396,7 @@ sppp_cisco_input(struct sppp *sp, struct mbuf *m)
 			++sp->pp_loopcnt;
 
 			/* Generate new local sequence number */
-#if defined(__FreeBSD__) && __FreeBSD__ >= 3
 			sp->pp_seq[IDX_LCP] = random();
-#else
-			sp->pp_seq[IDX_LCP] ^= time.tv_sec ^ time.tv_usec;
-#endif
 			break;
 		}
 		sp->pp_loopcnt = 0;
@@ -2670,11 +2641,7 @@ sppp_lcp_RCN_nak(struct sppp *sp, struct lcp_header *h, int len)
 				if (magic == ~sp->lcp.magic) {
 					if (debug)
 						log(-1, "magic glitch ");
-#if defined(__FreeBSD__) && __FreeBSD__ >= 3
 					sp->lcp.magic = random();
-#else
-					sp->lcp.magic = time.tv_sec + time.tv_usec;
-#endif
 				} else {
 					sp->lcp.magic = magic;
 					if (debug)
@@ -2855,11 +2822,7 @@ sppp_lcp_scr(struct sppp *sp)
 
 	if (sp->lcp.opts & (1 << LCP_OPT_MAGIC)) {
 		if (! sp->lcp.magic)
-#if defined(__FreeBSD__) && __FreeBSD__ >= 3
 			sp->lcp.magic = random();
-#else
-			sp->lcp.magic = time.tv_sec + time.tv_usec;
-#endif
 		opt[i++] = LCP_OPT_MAGIC;
 		opt[i++] = 6;
 		opt[i++] = sp->lcp.magic >> 24;
@@ -2929,6 +2892,7 @@ sppp_lcp_check_and_close(struct sppp *sp)
  *--------------------------------------------------------------------------*
  */
 
+#ifdef INET
 static void
 sppp_ipcp_init(struct sppp *sp)
 {
@@ -3407,6 +3371,78 @@ sppp_ipcp_scr(struct sppp *sp)
 	sp->confid[IDX_IPCP] = ++sp->pp_seq[IDX_IPCP];
 	sppp_cp_send(sp, PPP_IPCP, CONF_REQ, sp->confid[IDX_IPCP], i, &opt);
 }
+#else /* !INET */
+static void
+sppp_ipcp_init(struct sppp *sp)
+{
+}
+
+static void
+sppp_ipcp_up(struct sppp *sp)
+{
+}
+
+static void
+sppp_ipcp_down(struct sppp *sp)
+{
+}
+
+static void
+sppp_ipcp_open(struct sppp *sp)
+{
+}
+
+static void
+sppp_ipcp_close(struct sppp *sp)
+{
+}
+
+static void
+sppp_ipcp_TO(void *cookie)
+{
+}
+
+static int
+sppp_ipcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
+{
+	return (0);
+}
+
+static void
+sppp_ipcp_RCN_rej(struct sppp *sp, struct lcp_header *h, int len)
+{
+}
+
+static void
+sppp_ipcp_RCN_nak(struct sppp *sp, struct lcp_header *h, int len)
+{
+}
+
+static void
+sppp_ipcp_tlu(struct sppp *sp)
+{
+}
+
+static void
+sppp_ipcp_tld(struct sppp *sp)
+{
+}
+
+static void
+sppp_ipcp_tls(struct sppp *sp)
+{
+}
+
+static void
+sppp_ipcp_tlf(struct sppp *sp)
+{
+}
+
+static void
+sppp_ipcp_scr(struct sppp *sp)
+{
+}
+#endif
 
 /*
  *--------------------------------------------------------------------------*
@@ -4382,15 +4418,7 @@ sppp_chap_scr(struct sppp *sp)
 
 	/* Compute random challenge. */
 	ch = (u_long *)sp->myauth.challenge;
-#if defined(__FreeBSD__) && __FreeBSD__ >= 3
 	read_random(&seed, sizeof seed);
-#else
-	{
-	struct timeval tv;
-	microtime(&tv);
-	seed = tv.tv_sec ^ tv.tv_usec;
-	}
-#endif
 	ch[0] = seed ^ random();
 	ch[1] = seed ^ random();
 	ch[2] = seed ^ random();
@@ -4899,17 +4927,7 @@ sppp_get_ip_addrs(struct sppp *sp, u_long *src, u_long *dst, u_long *srcmask)
 	 * aliases don't make any sense on a p2p link anyway.
 	 */
 	si = 0;
-#if defined(__FreeBSD__) && __FreeBSD__ >= 3
 	TAILQ_FOREACH(ifa, &ifp->if_addrhead, ifa_link)
-#elif defined(__NetBSD__) || defined (__OpenBSD__)
-	for (ifa = TAILQ_FIRST(&ifp->if_addrlist);
-	     ifa;
-	     ifa = TAILQ_NEXT(ifa, ifa_list))
-#else
-	for (ifa = ifp->if_addrlist;
-	     ifa;
-	     ifa = ifa->ifa_next)
-#endif
 		if (ifa->ifa_addr->sa_family == AF_INET) {
 			si = (struct sockaddr_in *)ifa->ifa_addr;
 			sm = (struct sockaddr_in *)ifa->ifa_netmask;
@@ -4932,12 +4950,14 @@ sppp_get_ip_addrs(struct sppp *sp, u_long *src, u_long *dst, u_long *srcmask)
 	if (src) *src = ntohl(ssrc);
 }
 
+#ifdef INET
 /*
  * Set my IP address.  Must be called at splimp.
  */
 static void
 sppp_set_ip_addr(struct sppp *sp, u_long src)
 {
+	INIT_VNET_INET(curvnet);
 	STDDCL;
 	struct ifaddr *ifa;
 	struct sockaddr_in *si;
@@ -4948,17 +4968,7 @@ sppp_set_ip_addr(struct sppp *sp, u_long src)
 	 * aliases don't make any sense on a p2p link anyway.
 	 */
 	si = 0;
-#if defined(__FreeBSD__) && __FreeBSD__ >= 3
 	TAILQ_FOREACH(ifa, &ifp->if_addrhead, ifa_link)
-#elif defined(__NetBSD__) || defined (__OpenBSD__)
-	for (ifa = TAILQ_FIRST(&ifp->if_addrlist);
-	     ifa;
-	     ifa = TAILQ_NEXT(ifa, ifa_list))
-#else
-	for (ifa = ifp->if_addrlist;
-	     ifa;
-	     ifa = ifa->ifa_next)
-#endif
 	{
 		if (ifa->ifa_addr->sa_family == AF_INET)
 		{
@@ -4971,17 +4981,6 @@ sppp_set_ip_addr(struct sppp *sp, u_long src)
 	if (ifa && si)
 	{
 		int error;
-#if defined(__NetBSD__) && __NetBSD_Version__ >= 103080000
-		struct sockaddr_in new_sin = *si;
-
-		new_sin.sin_addr.s_addr = htonl(src);
-		error = in_ifinit(ifp, ifatoia(ifa), &new_sin, 1);
-		if(debug && error)
-		{
-			log(LOG_DEBUG, SPP_FMT "sppp_set_ip_addr: in_ifinit "
-			" failed, error=%d\n", SPP_ARGS(ifp), error);
-		}
-#else
 		/* delete old route */
 		error = rtinit(ifa, (int)RTM_DELETE, RTF_HOST);
 		if(debug && error)
@@ -5003,9 +5002,9 @@ sppp_set_ip_addr(struct sppp *sp, u_long src)
 			log(LOG_DEBUG, SPP_FMT "sppp_set_ip_addr: rtinit ADD failed, error=%d",
 		    		SPP_ARGS(ifp), error);
 		}
-#endif
 	}
 }
+#endif
 
 #ifdef INET6
 /*
@@ -5028,17 +5027,7 @@ sppp_get_ip6_addrs(struct sppp *sp, struct in6_addr *src, struct in6_addr *dst,
 	 * aliases don't make any sense on a p2p link anyway.
 	 */
 	si = 0;
-#if defined(__FreeBSD__) && __FreeBSD__ >= 3
 	TAILQ_FOREACH(ifa, &ifp->if_addrhead, ifa_link)
-#elif defined(__NetBSD__) || defined (__OpenBSD__)
-	for (ifa = ifp->if_addrlist.tqh_first;
-	     ifa;
-	     ifa = ifa->ifa_list.tqe_next)
-#else
-	for (ifa = ifp->if_addrlist;
-	     ifa;
-	     ifa = ifa->ifa_next)
-#endif
 		if (ifa->ifa_addr->sa_family == AF_INET6) {
 			si = (struct sockaddr_in6 *)ifa->ifa_addr;
 			sm = (struct sockaddr_in6 *)ifa->ifa_netmask;
@@ -5091,15 +5080,7 @@ sppp_set_ip6_addr(struct sppp *sp, const struct in6_addr *src)
 	 */
 
 	sin6 = NULL;
-#if defined(__FreeBSD__) && __FreeBSD__ >= 3
 	TAILQ_FOREACH(ifa, &ifp->if_addrhead, ifa_link)
-#elif defined(__NetBSD__) || defined (__OpenBSD__)
-	for (ifa = ifp->if_addrlist.tqh_first;
-	     ifa;
-	     ifa = ifa->ifa_list.tqe_next)
-#else
-	for (ifa = ifp->if_addrlist; ifa; ifa = ifa->ifa_next)
-#endif
 	{
 		if (ifa->ifa_addr->sa_family == AF_INET6)
 		{
@@ -5394,6 +5375,7 @@ sppp_lcp_opt_name(u_char opt)
 	return buf;
 }
 
+#ifdef INET
 static const char *
 sppp_ipcp_opt_name(u_char opt)
 {
@@ -5406,6 +5388,7 @@ sppp_ipcp_opt_name(u_char opt)
 	snprintf (buf, sizeof(buf), "ipcp/0x%x", opt);
 	return buf;
 }
+#endif
 
 #ifdef INET6
 static const char *
@@ -5491,6 +5474,7 @@ sppp_print_string(const char *p, u_short len)
 	}
 }
 
+#ifdef INET
 static const char *
 sppp_dotted_quad(u_long addr)
 {
@@ -5502,6 +5486,7 @@ sppp_dotted_quad(u_long addr)
 		(int)(addr & 0xff));
 	return s;
 }
+#endif
 
 static int
 sppp_strnlen(u_char *p, int max)

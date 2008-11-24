@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/at91/uart_dev_at91usart.c,v 1.12 2007/04/02 22:00:21 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/at91/uart_dev_at91usart.c,v 1.17 2008/11/18 12:42:59 stas Exp $");
 
 #include "opt_comconsole.h"
 
@@ -350,9 +350,10 @@ at91_usart_bus_attach(struct uart_softc *sc)
 	/*
 	 * Allocate DMA tags and maps
 	 */
-	err = bus_dma_tag_create(NULL, 1, 0, BUS_SPACE_MAXADDR_32BIT,
-	    BUS_SPACE_MAXADDR, NULL, NULL, USART_BUFFER_SIZE, 1,
-	    USART_BUFFER_SIZE, BUS_DMA_ALLOCNOW, NULL, NULL, &atsc->dmatag);
+	err = bus_dma_tag_create(bus_get_dma_tag(sc->sc_dev), 1, 0,
+	    BUS_SPACE_MAXADDR_32BIT, BUS_SPACE_MAXADDR, NULL, NULL,
+	    USART_BUFFER_SIZE, 1, USART_BUFFER_SIZE, BUS_DMA_ALLOCNOW, NULL,
+	    NULL, &atsc->dmatag);
 	if (err != 0)
 		goto errout;
 	err = bus_dmamap_create(atsc->dmatag, 0, &atsc->tx_map);
@@ -506,9 +507,23 @@ static __inline void
 at91_rx_put(struct uart_softc *sc, int key)
 {
 #if defined(KDB) && defined(ALT_BREAK_TO_DEBUGGER)
+	int kdb_brk;
+
 	if (sc->sc_sysdev != NULL && sc->sc_sysdev->type == UART_DEV_CONSOLE) {
-		if (kdb_alt_break(key, &sc->sc_altbrk))
-			kdb_enter("Break sequence to console");
+		if ((kdb_brk = kdb_alt_break(key, &sc->sc_altbrk)) != 0) {
+			switch (kdb_brk) {
+			case KDB_REQ_DEBUGGER:
+				kdb_enter(KDB_WHY_BREAK,
+				    "Break sequence on console");
+				break;
+			case KDB_REQ_PANIC:
+				kdb_panic("Panic sequence on console");
+				break;
+			case KDB_REQ_REBOOT:
+				kdb_reboot();
+				break;
+			}
+		}
 	}
 #endif
 	uart_rx_put(sc, key);	

@@ -31,16 +31,16 @@
 /* $KAME: sctp_input.h,v 1.6 2005/03/06 16:04:17 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_input.h,v 1.7 2007/07/02 19:22:22 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_input.h,v 1.9 2008/07/09 16:45:30 rrs Exp $");
 
 #ifndef __sctp_input_h__
 #define __sctp_input_h__
 
-#if defined(_KERNEL)
+#if defined(_KERNEL) || defined(__Userspace__)
 void
 sctp_common_input_processing(struct mbuf **, int, int, int,
     struct sctphdr *, struct sctp_chunkhdr *, struct sctp_inpcb *,
-    struct sctp_tcb *, struct sctp_nets *, uint8_t, uint32_t);
+    struct sctp_tcb *, struct sctp_nets *, uint8_t, uint32_t, uint16_t);
 
 struct sctp_stream_reset_out_request *
 sctp_find_stream_reset(struct sctp_tcb *stcb, uint32_t seq,

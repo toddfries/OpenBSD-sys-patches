@@ -59,7 +59,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfs4client/nfs4_vfsops.c,v 1.29 2007/10/20 23:23:22 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/nfs4client/nfs4_vfsops.c,v 1.36 2008/10/23 15:53:51 des Exp $");
 
 #include "opt_bootp.h"
 #include "opt_nfsroot.h"
@@ -126,6 +126,8 @@ static vfs_unmount_t nfs4_unmount;
 static vfs_root_t nfs4_root;
 static vfs_statfs_t nfs4_statfs;
 static vfs_sync_t nfs4_sync;
+
+static int	fake_wchan;
 
 /*
  * nfs vfs operations.
@@ -374,7 +376,7 @@ nfs4_decode_args(struct nfsmount *nmp, struct nfs_args *argp)
 		if (nmp->nm_sotype == SOCK_DGRAM) {
 			while (nfs4_connect(nmp)) {
 				printf("nfs4_decode_args: retrying connect\n");
-				(void)tsleep(&lbolt, PSOCK, "nfscon", 0);
+				(void)tsleep(&fake_wchan, PSOCK, "nfscon", hz);
 			}
 		}
 	}
@@ -553,7 +555,7 @@ mountnfs(struct nfs_args *argp, struct mount *mp, struct sockaddr *nam,
 	if (mp->mnt_flag & MNT_UPDATE) {
 		nmp = VFSTONFS(mp);
 		/* update paths, file handles, etc, here	XXX */
-		FREE(nam, M_SONAME);
+		free(nam, M_SONAME);
 		return (0);
 	} else {
 		nmp = uma_zalloc(nfsmount_zone, M_WAITOK);
@@ -658,7 +660,7 @@ bad:
 	mtx_destroy(&nmp->nm_mtx);
 	nfs4_disconnect(nmp);
 	uma_zfree(nfsmount_zone, nmp);
-	FREE(nam, M_SONAME);
+	free(nam, M_SONAME);
 
 	return (error);
 }
@@ -697,7 +699,7 @@ nfs4_unmount(struct mount *mp, int mntflags, struct thread *td)
 	 * We are now committed to the unmount.
 	 */
 	nfs4_disconnect(nmp);
-	FREE(nmp->nm_nam, M_SONAME);
+	free(nmp->nm_nam, M_SONAME);
 
 	/* XXX there's a race condition here for SMP */
 	wakeup(&nfs4_daemonproc);
@@ -749,8 +751,8 @@ loop:
 	MNT_VNODE_FOREACH(vp, mp, mvp) {
 		VI_LOCK(vp);
 		MNT_IUNLOCK(mp);
-		if (VOP_ISLOCKED(vp, NULL) ||
-		    vp->v_bufobj.bo_dirty.bv_cnt == 0 ||
+		/* XXX racy bv_cnt check. */
+		if (VOP_ISLOCKED(vp) || vp->v_bufobj.bo_dirty.bv_cnt == 0 ||
 		    waitfor == MNT_LAZY) {
 			VI_UNLOCK(vp);
 			MNT_ILOCK(mp);
@@ -764,7 +766,7 @@ loop:
 		error = VOP_FSYNC(vp, waitfor, td);
 		if (error)
 			allerror = error;
-		VOP_UNLOCK(vp, 0, td);
+		VOP_UNLOCK(vp, 0);
 		vrele(vp);
 
 		MNT_ILOCK(mp);
@@ -812,7 +814,8 @@ nfs4_do_setclientid(struct nfsmount *nmp, struct ucred *cred)
 #ifdef NFS4_USE_RPCCLNT
 	ro.ro_dst = *nmp->nm_rpcclnt.rc_name;
 #endif
-	rtalloc(&ro);
+/* XXX MRT NFS uses table 0 */
+	in_rtalloc(&ro, 0);
 	if (ro.ro_rt == NULL) {
 		error = EHOSTUNREACH;
 		goto nfsmout;

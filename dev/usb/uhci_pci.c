@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/uhci_pci.c,v 1.64 2008/04/11 05:50:53 benno Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/uhci_pci.c,v 1.66 2008/10/09 19:22:00 n_hibma Exp $");
 
 /* Universal Host Controller Interface
  *
@@ -47,8 +47,6 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/uhci_pci.c,v 1.64 2008/04/11 05:50:53 benno 
  * PCI probes and UHCI specific code. This was done to facilitate the
  * sharing of code between *BSD's
  */
-
-#include "opt_bus.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -517,3 +515,4 @@ static devclass_t uhci_devclass;
 
 DRIVER_MODULE(uhci, pci, uhci_driver, uhci_devclass, 0, 0);
 DRIVER_MODULE(uhci, cardbus, uhci_driver, uhci_devclass, 0, 0);
+MODULE_DEPEND(uhci, usb, 1, 1, 1);

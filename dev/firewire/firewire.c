@@ -31,7 +31,7 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  * 
- * $FreeBSD: src/sys/dev/firewire/firewire.c,v 1.101 2007/10/20 23:23:14 julian Exp $
+ * $FreeBSD: src/sys/dev/firewire/firewire.c,v 1.104 2008/10/02 15:37:58 zec Exp $
  *
  */
 
@@ -45,6 +45,7 @@
 #include <sys/conf.h>
 #include <sys/sysctl.h>
 #include <sys/kthread.h>
+#include <sys/vimage.h>
 
 #include <sys/kdb.h>
 
@@ -508,6 +509,9 @@ firewire_detach(device_t dev)
 		printf("firewire probe thread didn't die\n");
 	mtx_unlock(&fc->wait_lock);
 
+	if (fc->arq !=0 && fc->arq->maxq > 0)
+		fw_drain_txq(fc);
+
 	if ((err = fwdev_destroydev(sc)) != 0)
 		return err;
 
@@ -518,7 +522,7 @@ firewire_detach(device_t dev)
 	callout_stop(&fc->bmr_callout);
 	callout_stop(&fc->busprobe_callout);
 
-	/* XXX xfree_free and untimeout on all xfers */
+	/* XXX xfer_free and untimeout on all xfers */
 	for (fwdev = STAILQ_FIRST(&fc->devices); fwdev != NULL;
 							fwdev = fwdev_next) {
 		fwdev_next = STAILQ_NEXT(fwdev, link);
@@ -699,7 +703,7 @@ fw_reset_crom(struct firewire_comm *fc)
 	crom_add_simple_text(src, root, &buf->vendor, "FreeBSD Project");
 	crom_add_entry(root, CSRKEY_HW, __FreeBSD_version);
 #endif
-	crom_add_simple_text(src, root, &buf->hw, hostname);
+	crom_add_simple_text(src, root, &buf->hw, G_hostname);
 }
 
 /*

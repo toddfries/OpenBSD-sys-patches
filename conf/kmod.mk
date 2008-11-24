@@ -1,5 +1,5 @@
 #	From: @(#)bsd.prog.mk	5.26 (Berkeley) 6/25/91
-# $FreeBSD: src/sys/conf/kmod.mk,v 1.219 2007/07/11 01:20:37 marcel Exp $
+# $FreeBSD: src/sys/conf/kmod.mk,v 1.224 2008/11/04 03:42:01 alfred Exp $
 #
 # The include file <bsd.kmod.mk> handles building and installing loadable
 # kernel modules.
@@ -79,7 +79,7 @@ CFLAGS:=	${CFLAGS:C/(-x[^M^K^W]+)[MKW]+|-x[MKW]+/\1/}
 . if !empty(CFLAGS:M-O[23s]) && empty(CFLAGS:M-fno-strict-aliasing)
 CFLAGS+=	-fno-strict-aliasing
 . endif
-#WERROR?=	-Werror
+WERROR?=	-Werror
 .endif
 CFLAGS+=	${WERROR}
 CFLAGS+=	-D_KERNEL
@@ -321,7 +321,7 @@ ${_src}:
 .endfor
 .endif
 
-MFILES?= dev/acpica/acpi_if.m dev/ata/ata_if.m dev/eisa/eisa_if.m \
+MFILES?= dev/acpica/acpi_if.m dev/agp/agp_if.m dev/ata/ata_if.m dev/eisa/eisa_if.m \
 	dev/iicbus/iicbb_if.m dev/iicbus/iicbus_if.m \
 	dev/mmc/mmcbr_if.m dev/mmc/mmcbus_if.m \
 	dev/mii/miibus_if.m dev/ofw/ofw_bus_if.m \
@@ -331,9 +331,11 @@ MFILES?= dev/acpica/acpi_if.m dev/ata/ata_if.m dev/eisa/eisa_if.m \
 	dev/sound/pcm/feeder_if.m dev/sound/pcm/mixer_if.m \
 	dev/sound/midi/mpu_if.m dev/sound/midi/mpufoi_if.m \
 	dev/sound/midi/synth_if.m dev/usb/usb_if.m isa/isa_if.m \
-	kern/bus_if.m kern/cpufreq_if.m kern/device_if.m kern/serdev_if.m \
+	dev/usb2/core/usb2_if.m \
+	kern/bus_if.m kern/clock_if.m \
+	kern/cpufreq_if.m kern/device_if.m kern/serdev_if.m \
 	libkern/iconv_converter_if.m opencrypto/cryptodev_if.m \
-	pc98/pc98/canbus_if.m pci/agp_if.m
+	pc98/pc98/canbus_if.m
 
 .for _srcsrc in ${MFILES}
 .for _ext in c h
@@ -422,6 +424,9 @@ acpi_quirks.h: @/tools/acpi_quirks2h.awk @/dev/acpica/acpi_quirks
 .if !empty(SRCS:Massym.s)
 CLEANFILES+=	assym.s genassym.o
 assym.s: genassym.o
+.if defined(KERNBUILDDIR)
+genassym.o: opt_global.h
+.endif
 .if !exists(@)
 assym.s: @
 .else
@@ -438,6 +443,10 @@ genassym.o: @ machine ${SRCS:Mopt_*.h}
 
 lint: ${SRCS}
 	${LINT} ${LINTKERNFLAGS} ${CFLAGS:M-[DILU]*} ${.ALLSRC:M*.c}
+
+.if defined(KERNBUILDDIR)
+${OBJS}: opt_global.h
+.endif
 
 .include <bsd.dep.mk>
 

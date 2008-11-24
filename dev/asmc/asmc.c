@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/asmc/asmc.c,v 1.9 2008/04/12 12:04:09 rpaulo Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/asmc/asmc.c,v 1.10 2008/09/07 18:15:34 rpaulo Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -197,6 +197,13 @@ struct asmc_model asmc_models[] = {
 	  NULL, NULL,
 	  ASMC_MP_TEMPS, ASMC_MP_TEMPNAMES, ASMC_MP_TEMPDESCS
 	},
+
+	{
+	  "MacBookAir1,1", "Apple SMC MacBook Air",
+	  ASMC_SMS_FUNCS, ASMC_FAN_FUNCS, NULL, NULL,
+	  ASMC_MBA_TEMPS, ASMC_MBA_TEMPNAMES, ASMC_MBA_TEMPDESCS
+	},	
+
 	
 	{ NULL, NULL }
 };

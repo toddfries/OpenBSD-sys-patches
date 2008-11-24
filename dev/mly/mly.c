@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/dev/mly/mly.c,v 1.45 2007/06/17 05:55:51 scottl Exp $
+ *	$FreeBSD: src/sys/dev/mly/mly.c,v 1.46 2008/09/27 08:51:18 ed Exp $
  */
 
 #include <sys/param.h>
@@ -2834,7 +2834,7 @@ mly_print_controller(int controller)
 static int
 mly_user_open(struct cdev *dev, int flags, int fmt, struct thread *td)
 {
-    int			unit = minor(dev);
+    int			unit = dev2unit(dev);
     struct mly_softc	*sc = devclass_get_softc(devclass_find("mly"), unit);
 
     sc->mly_state |= MLY_STATE_OPEN;
@@ -2847,7 +2847,7 @@ mly_user_open(struct cdev *dev, int flags, int fmt, struct thread *td)
 static int
 mly_user_close(struct cdev *dev, int flags, int fmt, struct thread *td)
 {
-    int			unit = minor(dev);
+    int			unit = dev2unit(dev);
     struct mly_softc	*sc = devclass_get_softc(devclass_find("mly"), unit);
 
     sc->mly_state &= ~MLY_STATE_OPEN;

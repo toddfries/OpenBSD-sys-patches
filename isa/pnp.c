@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/isa/pnp.c,v 1.21 2005/09/28 15:01:58 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/isa/pnp.c,v 1.22 2008/11/02 18:48:54 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -522,6 +522,8 @@ pnp_create_devices(device_t parent, pnp_id *p, int csn,
 			csnldn->ldn = ldn;
 			ISA_SET_CONFIG_CALLBACK(parent, dev, pnp_set_config,
 			    csnldn);
+			isa_set_pnp_csn(dev, csn);
+			isa_set_pnp_ldn(dev, ldn);
 			ldn++;
 			startres = resp;
 			break;

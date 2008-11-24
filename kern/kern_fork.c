@@ -35,8 +35,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_fork.c,v 1.285 2007/10/24 19:03:54 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_fork.c,v 1.296 2008/10/19 01:35:27 kmacy Exp $");
 
+#include "opt_kdtrace.h"
 #include "opt_ktrace.h"
 #include "opt_mac.h"
 
@@ -63,6 +64,7 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_fork.c,v 1.285 2007/10/24 19:03:54 rwatson
 #include <sys/ktr.h>
 #include <sys/ktrace.h>
 #include <sys/unistd.h>	
+#include <sys/sdt.h>
 #include <sys/sx.h>
 #include <sys/signalvar.h>
 
@@ -75,6 +77,16 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_fork.c,v 1.285 2007/10/24 19:03:54 rwatson
 #include <vm/vm_extern.h>
 #include <vm/uma.h>
 
+#ifdef KDTRACE_HOOKS
+#include <sys/dtrace_bsd.h>
+dtrace_fork_func_t	dtrace_fasttrap_fork;
+#endif
+
+SDT_PROVIDER_DECLARE(proc);
+SDT_PROBE_DEFINE(proc, kernel, , create);
+SDT_PROBE_ARGTYPE(proc, kernel, , create, 0, "struct proc *");
+SDT_PROBE_ARGTYPE(proc, kernel, , create, 1, "struct proc *");
+SDT_PROBE_ARGTYPE(proc, kernel, , create, 2, "int");
 
 #ifndef _SYS_SYSPROTO_H_
 struct fork_args {
@@ -105,10 +117,15 @@ vfork(td, uap)
 	struct thread *td;
 	struct vfork_args *uap;
 {
-	int error;
+	int error, flags;
 	struct proc *p2;
 
-	error = fork1(td, RFFDG | RFPROC | RFPPWAIT | RFMEM, 0, &p2);
+#ifdef XEN
+	flags = RFFDG | RFPROC; /* validate that this is still an issue */
+#else
+	flags = RFFDG | RFPROC | RFPPWAIT | RFMEM;
+#endif		
+	error = fork1(td, flags, 0, &p2);
 	if (error == 0) {
 		td->td_retval[0] = p2->p_pid;
 		td->td_retval[1] = 0;
@@ -195,6 +212,7 @@ fork1(td, flags, pages, procp)
 	struct filedesc_to_leader *fdtol;
 	struct thread *td2;
 	struct sigacts *newsigacts;
+	struct vmspace *vm2;
 	int error;
 
 	/* Can't copy and clear. */
@@ -208,7 +226,6 @@ fork1(td, flags, pages, procp)
 	 * certain parts of a process from itself.
 	 */
 	if ((flags & RFPROC) == 0) {
-#if 0 /* XXX no other OS tries to do this */
 		if (((p1->p_flag & (P_HADTHREADS|P_SYSTEM)) == P_HADTHREADS) &&
 		    (flags & (RFCFDG | RFFDG))) {
 			PROC_LOCK(p1);
@@ -218,9 +235,10 @@ fork1(td, flags, pages, procp)
 			}
 			PROC_UNLOCK(p1);
 		}
-#endif
 
-		vm_forkproc(td, NULL, NULL, flags);
+		error = vm_forkproc(td, NULL, NULL, NULL, flags);
+		if (error)
+			goto norfproc_fail;
 
 		/*
 		 * Close all file descriptors.
@@ -238,52 +256,50 @@ fork1(td, flags, pages, procp)
 		if (flags & RFFDG) 
 			fdunshare(p1, td);
 
-#if 0 /* XXX no other OS tries to do this */
+norfproc_fail:
 		if (((p1->p_flag & (P_HADTHREADS|P_SYSTEM)) == P_HADTHREADS) &&
 		    (flags & (RFCFDG | RFFDG))) {
 			PROC_LOCK(p1);
 			thread_single_end();
 			PROC_UNLOCK(p1);
 		}
-#endif
 		*procp = NULL;
-		return (0);
+		return (error);
 	}
 
-#if 0 /* XXX no other OS tries to do this */
 	/*
-	 * Note 1:1 allows for forking with one thread coming out on the
-	 * other side with the expectation that the process is about to
-	 * exec.
+	 * XXX
+	 * We did have single-threading code here
+	 * however it proved un-needed and caused problems
 	 */
-	if ((p1->p_flag & (P_HADTHREADS|P_SYSTEM)) == P_HADTHREADS) {
-		/*
-		 * Systems processes don't need this.
-		 * Idle the other threads for a second.
-		 * Since the user space is copied, it must remain stable.
-		 * In addition, all threads (from the user perspective)
-		 * need to either be suspended or in the kernel,
-		 * where they will try restart in the parent and will
-		 * be aborted in the child.
-		 * keep threadds at the boundary there.
-		 */
-		PROC_LOCK(p1);
-		if (thread_single(SINGLE_BOUNDARY)) {
-			/* Abort. Someone else is single threading before us. */
-			PROC_UNLOCK(p1);
-			return (ERESTART);
-		}
-		PROC_UNLOCK(p1);
-		/*
-		 * All other activity in this process
-		 * is now suspended at the user boundary,
-		 * (or other safe places if we think of any).
-		 */
-	}
-#endif
 
+	vm2 = NULL;
 	/* Allocate new proc. */
 	newproc = uma_zalloc(proc_zone, M_WAITOK);
+	if (TAILQ_EMPTY(&newproc->p_threads)) {
+		td2 = thread_alloc();
+		if (td2 == NULL) {
+			error = ENOMEM;
+			goto fail1;
+		}
+		proc_linkup(newproc, td2);
+	} else
+		td2 = FIRST_THREAD_IN_PROC(newproc);
+
+	/* Allocate and switch to an alternate kstack if specified. */
+	if (pages != 0) {
+		if (!vm_thread_new_altkstack(td2, pages)) {
+			error = ENOMEM;
+			goto fail1;
+		}
+	}
+	if ((flags & RFMEM) == 0) {
+		vm2 = vmspace_fork(p1->p_vmspace);
+		if (vm2 == NULL) {
+			error = ENOMEM;
+			goto fail1;
+		}
+	}
 #ifdef MAC
 	mac_proc_init(newproc);
 #endif
@@ -410,7 +426,6 @@ again:
 		lastpid = trypid;
 
 	p2 = newproc;
-	td2 = FIRST_THREAD_IN_PROC(newproc);
 	p2->p_state = PRS_NEW;		/* protect against others */
 	p2->p_pid = trypid;
 	/*
@@ -430,6 +445,7 @@ again:
 
 	bcopy(&p1->p_startcopy, &p2->p_startcopy,
 	    __rangeof(struct proc, p_startcopy, p_endcopy));
+	pargs_hold(p2->p_args);
 	PROC_UNLOCK(p1);
 
 	bzero(&p2->p_startzero,
@@ -486,9 +502,6 @@ again:
 	 * Start by zeroing the section of proc that is zero-initialized,
 	 * then copy the section that is copied directly from the parent.
 	 */
-	/* Allocate and switch to an alternate kstack if specified. */
-	if (pages != 0)
-		vm_thread_new_altkstack(td2, pages);
 
 	PROC_LOCK(p2);
 	PROC_LOCK(p1);
@@ -499,6 +512,7 @@ again:
 	bcopy(&td->td_startcopy, &td2->td_startcopy,
 	    __rangeof(struct thread, td_startcopy, td_endcopy));
 
+	bcopy(&p2->p_comm, &td2->td_name, sizeof(td2->td_name));
 	td2->td_sigstk = td->td_sigstk;
 	td2->td_sigmask = td->td_sigmask;
 	td2->td_flags = TDF_INMEM;
@@ -512,7 +526,6 @@ again:
 	if (p1->p_flag & P_PROFIL)
 		startprofclock(p2);
 	td2->td_ucred = crhold(p2->p_ucred);
-	pargs_hold(p2->p_args);
 
 	if (flags & RFSIGSHARE) {
 		p2->p_sigacts = sigacts_hold(p1->p_sigacts);
@@ -630,6 +643,15 @@ again:
 		p2->p_pfsflags = p1->p_pfsflags;
 	}
 
+#ifdef KDTRACE_HOOKS
+	/*
+	 * Tell the DTrace fasttrap provider about the new process
+	 * if it has registered an interest.
+	 */
+	if (dtrace_fasttrap_fork)
+		dtrace_fasttrap_fork(p1, p2);
+#endif
+
 	/*
 	 * This begins the section where we must prevent the parent
 	 * from being swapped.
@@ -660,7 +682,7 @@ again:
 	 * Finish creating the child process.  It will return via a different
 	 * execution path later.  (ie: directly into user mode)
 	 */
-	vm_forkproc(td, p2, td2, flags);
+	vm_forkproc(td, p2, td2, vm2, flags);
 
 	if (flags == (RFFDG | RFPROC)) {
 		PCPU_INC(cnt.v_forks);
@@ -711,13 +733,13 @@ again:
 	 */
 	PROC_LOCK(p1);
 	_PRELE(p1);
+	PROC_UNLOCK(p1);
 
 	/*
 	 * Tell any interested parties about the new process.
 	 */
-	KNOTE_LOCKED(&p1->p_klist, NOTE_FORK | p2->p_pid);
-
-	PROC_UNLOCK(p1);
+	knote_fork(&p1->p_klist, p2->p_pid);
+	SDT_PROBE(proc, kernel, , create, p2, p1, flags, 0, 0);
 
 	/*
 	 * Preserve synchronization semantics of vfork.  If waiting for
@@ -729,17 +751,6 @@ again:
 		msleep(p1, &p2->p_mtx, PWAIT, "ppwait", 0);
 	PROC_UNLOCK(p2);
 
-#if 0 /* XXX no other OS tries to do this */
-	/*
-	 * If other threads are waiting, let them continue now.
-	 */
-	if ((p1->p_flag & (P_HADTHREADS|P_SYSTEM)) == P_HADTHREADS) {
-		PROC_LOCK(p1);
-		thread_single_end();
-		PROC_UNLOCK(p1);
-	}
-
-#endif
 	/*
 	 * Return child proc pointer to parent.
 	 */
@@ -754,12 +765,10 @@ fail:
 #ifdef MAC
 	mac_proc_destroy(newproc);
 #endif
+fail1:
+	if (vm2 != NULL)
+		vmspace_free(vm2);
 	uma_zfree(proc_zone, newproc);
-	if (p1->p_flag & P_HADTHREADS) {
-		PROC_LOCK(p1);
-		thread_single_end();
-		PROC_UNLOCK(p1);
-	}
 	pause("fork", hz / 2);
 	return (error);
 }
@@ -782,8 +791,8 @@ fork_exit(callout, arg, frame)
 	p = td->td_proc;
 	KASSERT(p->p_state == PRS_NORMAL, ("executing process is still new"));
 
-	CTR4(KTR_PROC, "fork_exit: new thread %p (kse %p, pid %d, %s)",
-		td, td->td_sched, p->p_pid, p->p_comm);
+	CTR4(KTR_PROC, "fork_exit: new thread %p (td_sched %p, pid %d, %s)",
+		td, td->td_sched, p->p_pid, td->td_name);
 
 	sched_fork_exit(td);
 	/*
@@ -811,7 +820,7 @@ fork_exit(callout, arg, frame)
 	 */
 	if (p->p_flag & P_KTHREAD) {
 		printf("Kernel thread \"%s\" (pid %d) exited prematurely.\n",
-		    p->p_comm, p->p_pid);
+		    td->td_name, p->p_pid);
 		kproc_exit(0);
 	}
 	mtx_assert(&Giant, MA_NOTOWNED);

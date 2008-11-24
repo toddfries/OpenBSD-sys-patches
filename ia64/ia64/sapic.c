@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/ia64/ia64/sapic.c,v 1.14 2007/07/30 22:29:33 marcel Exp $
+ * $FreeBSD: src/sys/ia64/ia64/sapic.c,v 1.15 2008/04/14 20:34:45 marcel Exp $
  */
 
 #include "opt_ddb.h"
@@ -202,7 +202,7 @@ sapic_enable(struct sapic *sa, u_int irq, u_int vector)
 	sapic_read_rte(sa, irq - sa->sa_base, &rte);
 	rte.rte_destination_id = (lid >> 24) & 255;
 	rte.rte_destination_eid = (lid >> 16) & 255;
-	rte.rte_delivery_mode = SAPIC_DELMODE_LOWPRI;
+	rte.rte_delivery_mode = SAPIC_DELMODE_FIXED;
 	rte.rte_vector = vector;
 	rte.rte_mask = 0;
 	sapic_write_rte(sa, irq - sa->sa_base, &rte);

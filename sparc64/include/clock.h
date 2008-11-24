@@ -23,16 +23,16 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sparc64/include/clock.h,v 1.7 2006/10/02 12:59:58 phk Exp $
+ * $FreeBSD: src/sys/sparc64/include/clock.h,v 1.9 2008/09/03 17:39:19 marius Exp $
  */
 
 #ifndef	_MACHINE_CLOCK_H_
 #define	_MACHINE_CLOCK_H_
 
-extern u_long tick_increment;
-extern u_long tick_freq;
-extern u_long tick_MHz;
+extern void (*delay_func)(int usec);
+extern u_long clock_boot;
 
-int	sysbeep(int, int);
+void delay_boot(int usec);
+void delay_tick(int usec);
 
 #endif /* !_MACHINE_CLOCK_H_ */

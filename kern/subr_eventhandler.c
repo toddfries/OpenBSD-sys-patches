@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_eventhandler.c,v 1.23 2005/02/23 19:32:29 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_eventhandler.c,v 1.24 2008/03/16 10:58:05 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -62,7 +62,7 @@ eventhandler_init(void *dummy __unused)
     atomic_store_rel_int(&eventhandler_lists_initted, 1);
 }
 SYSINIT(eventhandlers, SI_SUB_EVENTHANDLER, SI_ORDER_FIRST, eventhandler_init,
-    NULL)
+    NULL);
 
 /* 
  * Insertion is O(n) due to the priority scan, but optimises to O(1)

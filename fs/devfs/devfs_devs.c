@@ -25,7 +25,7 @@
  *
  * From: FreeBSD: src/sys/miscfs/kernfs/kernfs_vfsops.c 1.36
  *
- * $FreeBSD: src/sys/fs/devfs/devfs_devs.c,v 1.51 2007/10/24 19:03:53 rwatson Exp $
+ * $FreeBSD: src/sys/fs/devfs/devfs_devs.c,v 1.55 2008/09/21 14:02:43 ed Exp $
  */
 
 #include "opt_mac.h"
@@ -117,6 +117,7 @@ devfs_alloc(void)
 {
 	struct cdev_priv *cdp;
 	struct cdev *cdev;
+	struct timespec ts;
 
 	cdp = malloc(sizeof *cdp, M_CDEVP, M_USE_RESERVE | M_ZERO | M_WAITOK);
 
@@ -125,10 +126,12 @@ devfs_alloc(void)
 	cdp->cdp_maxdirent = 0;
 
 	cdev = &cdp->cdp_c;
-	cdev->si_priv = cdp;
 
 	cdev->si_name = cdev->__si_namebuf;
 	LIST_INIT(&cdev->si_children);
+	vfs_timestamp(&ts);
+	cdev->si_atime = cdev->si_mtime = cdev->si_ctime = ts;
+
 	return (cdev);
 }
 
@@ -137,7 +140,7 @@ devfs_free(struct cdev *cdev)
 {
 	struct cdev_priv *cdp;
 
-	cdp = cdev->si_priv;
+	cdp = cdev2priv(cdev);
 	if (cdev->si_cred != NULL)
 		crfree(cdev->si_cred);
 	if (cdp->cdp_inode > 0)
@@ -245,11 +248,9 @@ void
 devfs_delete(struct devfs_mount *dm, struct devfs_dirent *de, int vp_locked)
 {
 	struct vnode *vp;
-	struct thread *td;
 
 	KASSERT((de->de_flags & DE_DOOMED) == 0,
 		("devfs_delete doomed dirent"));
-	td = curthread;
 	de->de_flags |= DE_DOOMED;
 	mtx_lock(&devfs_de_interlock);
 	vp = de->de_vnode;
@@ -259,12 +260,12 @@ devfs_delete(struct devfs_mount *dm, struct devfs_dirent *de, int vp_locked)
 		vholdl(vp);
 		sx_unlock(&dm->dm_lock);
 		if (!vp_locked)
-			vn_lock(vp, LK_EXCLUSIVE | LK_INTERLOCK | LK_RETRY, td);
+			vn_lock(vp, LK_EXCLUSIVE | LK_INTERLOCK | LK_RETRY);
 		else
 			VI_UNLOCK(vp);
 		vgone(vp);
 		if (!vp_locked)
-			VOP_UNLOCK(vp, 0, td);
+			VOP_UNLOCK(vp, 0);
 		vdrop(vp);
 		sx_xlock(&dm->dm_lock);
 	} else
@@ -512,7 +513,7 @@ devfs_create(struct cdev *dev)
 	struct cdev_priv *cdp;
 
 	mtx_assert(&devmtx, MA_OWNED);
-	cdp = dev->si_priv;
+	cdp = cdev2priv(dev);
 	cdp->cdp_flags |= CDP_ACTIVE;
 	cdp->cdp_inode = alloc_unrl(devfs_inos);
 	dev_refl(dev);
@@ -526,7 +527,7 @@ devfs_destroy(struct cdev *dev)
 	struct cdev_priv *cdp;
 
 	mtx_assert(&devmtx, MA_OWNED);
-	cdp = dev->si_priv;
+	cdp = cdev2priv(dev);
 	cdp->cdp_flags &= ~CDP_ACTIVE;
 	devfs_generation++;
 }

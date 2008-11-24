@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_bus.c,v 1.201 2007/07/27 11:59:56 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_bus.c,v 1.212 2008/11/18 21:01:54 jhb Exp $");
 
 #include "opt_bus.h"
 
@@ -307,6 +307,16 @@ device_sysctl_init(device_t dev)
 }
 
 static void
+device_sysctl_update(device_t dev)
+{
+	devclass_t dc = dev->devclass;
+
+	if (dev->sysctl_tree == NULL)
+		return;
+	sysctl_rename_oid(dev->sysctl_tree, dev->nameunit + strlen(dc->name));
+}
+
+static void
 device_sysctl_fini(device_t dev)
 {
 	if (dev->sysctl_tree == NULL)
@@ -496,6 +506,15 @@ devpoll(struct cdev *dev, int events, d_thread_t *td)
 	mtx_unlock(&devsoftc.mtx);
 
 	return (revents);
+}
+
+/**
+ * @brief Return whether the userland process is running
+ */
+boolean_t
+devctl_process_running(void)
+{
+	return (devsoftc.inuse == 1);
 }
 
 /**
@@ -1210,13 +1229,16 @@ devclass_get_count(devclass_t dc)
  * @brief Get the maximum unit number used in a devclass
  *
  * Note that this is one greater than the highest currently-allocated
- * unit.
+ * unit.  If a null devclass_t is passed in, -1 is returned to indicate
+ * that not even the devclass has been allocated yet.
  *
  * @param dc		the devclass to examine
  */
 int
 devclass_get_maxunit(devclass_t dc)
 {
+	if (dc == NULL)
+		return (-1);
 	return (dc->maxunit);
 }
 
@@ -1293,11 +1315,17 @@ devclass_get_sysctl_tree(devclass_t dc)
  * @retval ENOMEM	memory allocation failure
  */
 static int
-devclass_alloc_unit(devclass_t dc, int *unitp)
+devclass_alloc_unit(devclass_t dc, device_t dev, int *unitp)
 {
+	const char *s;
 	int unit = *unitp;
 
 	PDEBUG(("unit %d in devclass %s", unit, DEVCLANAME(dc)));
+
+	/* Ask the parent bus if it wants to wire this device. */
+	if (unit == -1)
+		BUS_HINT_DEVICE_UNIT(device_get_parent(dev), dev, dc->name,
+		    &unit);
 
 	/* If we were given a wired unit number, check for existing device */
 	/* XXX imp XXX */
@@ -1312,8 +1340,18 @@ devclass_alloc_unit(devclass_t dc, int *unitp)
 	} else {
 		/* Unwired device, find the next available slot for it */
 		unit = 0;
-		while (unit < dc->maxunit && dc->devices[unit] != NULL)
-			unit++;
+		for (unit = 0;; unit++) {
+			/* If there is an "at" hint for a unit then skip it. */
+			if (resource_string_value(dc->name, unit, "at", &s) ==
+			    0)
+				continue;
+
+			/* If this device slot is already in use, skip it. */
+			if (unit < dc->maxunit && dc->devices[unit] != NULL)
+				continue;
+
+			break;
+		}
 	}
 
 	/*
@@ -1322,20 +1360,22 @@ devclass_alloc_unit(devclass_t dc, int *unitp)
 	 * this one.
 	 */
 	if (unit >= dc->maxunit) {
-		device_t *newlist;
+		device_t *newlist, *oldlist;
 		int newsize;
 
+		oldlist = dc->devices;
 		newsize = roundup((unit + 1), MINALLOCSIZE / sizeof(device_t));
 		newlist = malloc(sizeof(device_t) * newsize, M_BUS, M_NOWAIT);
 		if (!newlist)
 			return (ENOMEM);
-		bcopy(dc->devices, newlist, sizeof(device_t) * dc->maxunit);
+		if (oldlist != NULL)
+			bcopy(oldlist, newlist, sizeof(device_t) * dc->maxunit);
 		bzero(newlist + dc->maxunit,
 		    sizeof(device_t) * (newsize - dc->maxunit));
-		if (dc->devices)
-			free(dc->devices, M_BUS);
 		dc->devices = newlist;
 		dc->maxunit = newsize;
+		if (oldlist != NULL)
+			free(oldlist, M_BUS);
 	}
 	PDEBUG(("now: unit %d in devclass %s", unit, DEVCLANAME(dc)));
 
@@ -1373,7 +1413,7 @@ devclass_add_device(devclass_t dc, device_t dev)
 	if (!dev->nameunit)
 		return (ENOMEM);
 
-	if ((error = devclass_alloc_unit(dc, &dev->unit)) != 0) {
+	if ((error = devclass_alloc_unit(dc, dev, &dev->unit)) != 0) {
 		free(dev->nameunit, M_BUS);
 		dev->nameunit = NULL;
 		return (error);
@@ -1755,6 +1795,14 @@ device_probe_child(device_t dev, device_t child)
 			 * of pri for the first match.
 			 */
 			if (best == NULL || result > pri) {
+				/*
+				 * Probes that return BUS_PROBE_NOWILDCARD
+				 * or lower only match when they are set
+				 * in stone by the parent bus.
+				 */
+				if (result <= BUS_PROBE_NOWILDCARD &&
+				    child->flags & DF_WILDCARD)
+					continue;
 				best = dl;
 				pri = result;
 				continue;
@@ -2294,7 +2342,7 @@ device_set_driver(device_t dev, driver_t *driver)
 }
 
 /**
- * @brief Probe a device and attach a driver if possible
+ * @brief Probe a device, and return this status.
  *
  * This function is the core of the device autoconfiguration
  * system. Its purpose is to select a suitable driver for a device and
@@ -2318,23 +2366,24 @@ device_set_driver(device_t dev, driver_t *driver)
  * @retval ENXIO	no driver was found
  * @retval ENOMEM	memory allocation failure
  * @retval non-zero	some other unix error code
+ * @retval -1		Device already attached
  */
 int
-device_probe_and_attach(device_t dev)
+device_probe(device_t dev)
 {
 	int error;
 
 	GIANT_REQUIRED;
 
 	if (dev->state >= DS_ALIVE && (dev->flags & DF_REBID) == 0)
-		return (0);
+		return (-1);
 
 	if (!(dev->flags & DF_ENABLED)) {
 		if (bootverbose && device_get_name(dev) != NULL) {
 			device_print_prettyname(dev);
 			printf("not probed (disabled)\n");
 		}
-		return (0);
+		return (-1);
 	}
 	if ((error = device_probe_child(dev->parent, dev)) != 0) {
 		if (!(dev->flags & DF_DONENOMATCH)) {
@@ -2344,9 +2393,27 @@ device_probe_and_attach(device_t dev)
 		}
 		return (error);
 	}
-	error = device_attach(dev);
+	return (0);
+}
 
-	return (error);
+/**
+ * @brief Probe a device and attach a driver if possible
+ *
+ * calls device_probe() and attaches if that was successful.
+ */
+int
+device_probe_and_attach(device_t dev)
+{
+	int error;
+
+	GIANT_REQUIRED;
+
+	error = device_probe(dev);
+	if (error == -1)
+		return (0);
+	else if (error != 0)
+		return (error);
+	return (device_attach(dev));
 }
 
 /**
@@ -2387,6 +2454,7 @@ device_attach(device_t dev)
 		dev->state = DS_NOTPRESENT;
 		return (error);
 	}
+	device_sysctl_update(dev);
 	dev->state = DS_ATTACHED;
 	devadded(dev);
 	return (0);
@@ -2424,7 +2492,8 @@ device_detach(device_t dev)
 	if ((error = DEVICE_DETACH(dev)) != 0)
 		return (error);
 	devremoved(dev);
-	device_printf(dev, "detached\n");
+	if (!device_is_quiet(dev))
+		device_printf(dev, "detached\n");
 	if (dev->parent)
 		BUS_CHILD_DETACHED(dev->parent, dev);
 
@@ -3191,6 +3260,23 @@ bus_generic_deactivate_resource(device_t dev, device_t child, int type,
 }
 
 /**
+ * @brief Helper function for implementing BUS_BIND_INTR().
+ *
+ * This simple implementation of BUS_BIND_INTR() simply calls the
+ * BUS_BIND_INTR() method of the parent of @p dev.
+ */
+int
+bus_generic_bind_intr(device_t dev, device_t child, struct resource *irq,
+    int cpu)
+{
+
+	/* Propagate up the bus hierarchy until someone handles it. */
+	if (dev->parent)
+		return (BUS_BIND_INTR(dev->parent, child, irq, cpu));
+	return (EINVAL);
+}
+
+/**
  * @brief Helper function for implementing BUS_CONFIG_INTR().
  *
  * This simple implementation of BUS_CONFIG_INTR() simply calls the
@@ -3463,25 +3549,24 @@ bus_setup_intr(device_t dev, struct resource *r, int flags,
 {
 	int error;
 
-	if (dev->parent != NULL) {
-		error = BUS_SETUP_INTR(dev->parent, dev, r, flags,
-		    filter, handler, arg, cookiep);
-		if (error == 0) {
-			if (handler != NULL && !(flags & INTR_MPSAFE))
-				device_printf(dev, "[GIANT-LOCKED]\n");
-			if (bootverbose && (flags & INTR_MPSAFE))
-				device_printf(dev, "[MPSAFE]\n");
-			if (filter != NULL) {
-				if (handler == NULL)
-					device_printf(dev, "[FILTER]\n");
-				else 
-					device_printf(dev, "[FILTER+ITHREAD]\n");
-			} else 
-				device_printf(dev, "[ITHREAD]\n");
-		}
-	} else
-		error = EINVAL;
-	return (error);
+	if (dev->parent == NULL)
+		return (EINVAL);
+	error = BUS_SETUP_INTR(dev->parent, dev, r, flags, filter, handler,
+	    arg, cookiep);
+	if (error != 0)
+		return (error);
+	if (handler != NULL && !(flags & INTR_MPSAFE))
+		device_printf(dev, "[GIANT-LOCKED]\n");
+	if (bootverbose && (flags & INTR_MPSAFE))
+		device_printf(dev, "[MPSAFE]\n");
+	if (filter != NULL) {
+		if (handler == NULL)
+			device_printf(dev, "[FILTER]\n");
+		else 
+			device_printf(dev, "[FILTER+ITHREAD]\n");
+	} else 
+		device_printf(dev, "[ITHREAD]\n");
+	return (0);
 }
 
 /**
@@ -3496,6 +3581,20 @@ bus_teardown_intr(device_t dev, struct resource *r, void *cookie)
 	if (dev->parent == NULL)
 		return (EINVAL);
 	return (BUS_TEARDOWN_INTR(dev->parent, dev, r, cookie));
+}
+
+/**
+ * @brief Wrapper function for BUS_BIND_INTR().
+ *
+ * This function simply calls the BUS_BIND_INTR() method of the
+ * parent of @p dev.
+ */
+int
+bus_bind_intr(device_t dev, struct resource *r, int cpu)
+{
+	if (dev->parent == NULL)
+		return (EINVAL);
+	return (BUS_BIND_INTR(dev->parent, dev, r, cpu));
 }
 
 /**

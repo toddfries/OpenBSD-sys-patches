@@ -32,7 +32,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_portacl/mac_portacl.c,v 1.17 2007/10/25 11:31:10 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac_portacl/mac_portacl.c,v 1.19 2008/08/23 15:26:36 rwatson Exp $
  */
 
 /*
@@ -310,7 +310,7 @@ rules_to_string(void)
 	int needcomma;
 	char *temp;
 
-	sb = sbuf_new(NULL, NULL, 0, SBUF_AUTOEXTEND);
+	sb = sbuf_new_auto();
 	needcomma = 0;
 	mtx_lock(&rule_mtx);
 	for (rule = TAILQ_FIRST(&rule_head); rule != NULL;
@@ -490,4 +490,4 @@ static struct mac_policy_ops portacl_ops =
 };
 
 MAC_POLICY_SET(&portacl_ops, mac_portacl, "TrustedBSD MAC/portacl",
-    MPC_LOADTIME_FLAG_UNLOADOK, NULL);
+    MPC_LOADTIME_FLAG_UNLOADOK, NULL, 0);

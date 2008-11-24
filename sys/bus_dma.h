@@ -67,7 +67,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-/* $FreeBSD: src/sys/sys/bus_dma.h,v 1.30 2006/09/03 00:26:17 jmg Exp $ */
+/* $FreeBSD: src/sys/sys/bus_dma.h,v 1.31 2008/03/15 06:44:45 imp Exp $ */
 
 #ifndef _BUS_DMA_H_
 #define _BUS_DMA_H_
@@ -101,7 +101,6 @@
  */
 #define	BUS_DMA_NOWRITE		0x100
 #define	BUS_DMA_NOCACHE		0x200
-#define	BUS_DMA_ISA		0x400	/* map memory for AXP ISA dma */
 
 /* Forwards needed by prototypes below. */
 struct mbuf;

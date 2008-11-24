@@ -24,14 +24,17 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_socksys.c,v 1.22 2006/11/06 13:41:59 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_socksys.c,v 1.24 2008/08/17 23:27:27 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/sysproto.h>
 #include <sys/jail.h>
 #include <sys/kernel.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
 #include <sys/sysctl.h>
+#include <sys/vimage.h>
 
 #include <i386/ibcs2/ibcs2_socksys.h>
 #include <i386/ibcs2/ibcs2_util.h>
@@ -175,11 +178,15 @@ ibcs2_setipdomainname(td, uap)
 	int error, sctl[2], hlen;
 
 	/* W/out a hostname a domain-name is nonsense */
-	if ( strlen(hostname) == 0 )
+	mtx_lock(&hostname_mtx);
+	if ( strlen(V_hostname) == 0 ) {
+		mtx_unlock(&hostname_mtx);
 		return EINVAL;
+	}
 
 	/* Get the host's unqualified name (strip off the domain) */
-	snprintf(hname, sizeof(hname), "%s", hostname);
+	snprintf(hname, sizeof(hname), "%s", V_hostname);
+	mtx_unlock(&hostname_mtx);
 	ptr = index(hname, '.');
 	if ( ptr != NULL ) {
 		ptr++;

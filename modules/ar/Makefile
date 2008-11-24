@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/ar/Makefile,v 1.5 2005/10/14 23:30:07 yar Exp $
+# $FreeBSD: src/sys/modules/ar/Makefile,v 1.6 2008/09/01 23:59:00 imp Exp $
 
 .PATH:  ${.CURDIR}/../../dev/ar
 KMOD    = if_ar
@@ -10,7 +10,7 @@ NETGRAPH?=	0
 
 .if ${NETGRAPH} != 0
 opt_netgraph.h:
-	echo "#define NETGRAPH ${NETGRAPH}" > opt_netgraph.h
+	echo "#define NETGRAPH ${NETGRAPH}" > ${.TARGET}
 .endif
 .endif
 

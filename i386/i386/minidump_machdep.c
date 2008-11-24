@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/minidump_machdep.c,v 1.3 2007/04/06 18:15:02 ru Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/minidump_machdep.c,v 1.8 2008/10/31 10:14:28 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -34,6 +34,7 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/minidump_machdep.c,v 1.3 2007/04/06 18:15:
 #include <sys/kernel.h>
 #include <sys/kerneldump.h>
 #include <sys/msgbuf.h>
+#include <sys/vimage.h>
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <machine/atomic.h>
@@ -78,27 +79,6 @@ is_dumpable(vm_paddr_t pa)
 	return (0);
 }
 
-/* XXX should be MI */
-static void
-mkdumpheader(struct kerneldumpheader *kdh, uint32_t archver, uint64_t dumplen,
-    uint32_t blksz)
-{
-
-	bzero(kdh, sizeof(*kdh));
-	strncpy(kdh->magic, KERNELDUMPMAGIC, sizeof(kdh->magic));
-	strncpy(kdh->architecture, MACHINE_ARCH, sizeof(kdh->architecture));
-	kdh->version = htod32(KERNELDUMPVERSION);
-	kdh->architectureversion = htod32(archver);
-	kdh->dumplength = htod64(dumplen);
-	kdh->dumptime = htod64(time_second);
-	kdh->blocksize = htod32(blksz);
-	strncpy(kdh->hostname, hostname, sizeof(kdh->hostname));
-	strncpy(kdh->versionstring, version, sizeof(kdh->versionstring));
-	if (panicstr != NULL)
-		strncpy(kdh->panicstring, panicstr, sizeof(kdh->panicstring));
-	kdh->parity = kerneldump_parity(kdh);
-}
-
 #define PG2MB(pgs) (((pgs) + (1 << 8) - 1) >> 8)
 
 static int
@@ -109,7 +89,7 @@ blk_flush(struct dumperinfo *di)
 	if (fragsz == 0)
 		return (0);
 
-	error = di->dumper(di->priv, dump_va, 0, dumplo, fragsz);
+	error = dump_write(di, dump_va, 0, dumplo, fragsz);
 	dumplo += fragsz;
 	fragsz = 0;
 	return (error);
@@ -120,7 +100,11 @@ blk_write(struct dumperinfo *di, char *ptr, vm_paddr_t pa, size_t sz)
 {
 	size_t len;
 	int error, i, c;
+	u_int maxdumpsz;
 
+	maxdumpsz = min(di->maxiosize, MAXDUMPPGS * PAGE_SIZE);
+	if (maxdumpsz == 0)	/* seatbelt */
+		maxdumpsz = PAGE_SIZE;
 	error = 0;
 	if ((sz % PAGE_SIZE) != 0) {
 		printf("size not page aligned\n");
@@ -141,7 +125,7 @@ blk_write(struct dumperinfo *di, char *ptr, vm_paddr_t pa, size_t sz)
 			return (error);
 	}
 	while (sz) {
-		len = (MAXDUMPPGS * PAGE_SIZE) - fragsz;
+		len = maxdumpsz - fragsz;
 		if (len > sz)
 			len = sz;
 		counter += len;
@@ -151,7 +135,7 @@ blk_write(struct dumperinfo *di, char *ptr, vm_paddr_t pa, size_t sz)
 			counter &= (1<<24) - 1;
 		}
 		if (ptr) {
-			error = di->dumper(di->priv, ptr, 0, dumplo, len);
+			error = dump_write(di, ptr, 0, dumplo, len);
 			if (error)
 				return (error);
 			dumplo += len;
@@ -163,7 +147,7 @@ blk_write(struct dumperinfo *di, char *ptr, vm_paddr_t pa, size_t sz)
 			fragsz += len;
 			pa += len;
 			sz -= len;
-			if (fragsz == (MAXDUMPPGS * PAGE_SIZE)) {
+			if (fragsz == maxdumpsz) {
 				error = blk_flush(di);
 				if (error)
 					return (error);
@@ -275,13 +259,13 @@ minidumpsys(struct dumperinfo *di)
 	mdhdr.paemode = 1;
 #endif
 
-	mkdumpheader(&kdh, KERNELDUMP_I386_VERSION, dumpsize, di->blocksize);
+	mkdumpheader(&kdh, KERNELDUMPMAGIC, KERNELDUMP_I386_VERSION, dumpsize, di->blocksize);
 
 	printf("Physical memory: %ju MB\n", ptoa((uintmax_t)physmem) / 1048576);
 	printf("Dumping %llu MB:", (long long)dumpsize >> 20);
 
 	/* Dump leader */
-	error = di->dumper(di->priv, &kdh, 0, dumplo, sizeof(kdh));
+	error = dump_write(di, &kdh, 0, dumplo, sizeof(kdh));
 	if (error)
 		goto fail;
 	dumplo += sizeof(kdh);
@@ -359,13 +343,13 @@ minidumpsys(struct dumperinfo *di)
 		goto fail;
 
 	/* Dump trailer */
-	error = di->dumper(di->priv, &kdh, 0, dumplo, sizeof(kdh));
+	error = dump_write(di, &kdh, 0, dumplo, sizeof(kdh));
 	if (error)
 		goto fail;
 	dumplo += sizeof(kdh);
 
 	/* Signal completion, signoff and exit stage left. */
-	di->dumper(di->priv, NULL, 0, 0, 0);
+	dump_write(di, NULL, 0, 0, 0);
 	printf("\nDump complete\n");
 	return;
 

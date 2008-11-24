@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/ufm.c,v 1.36 2007/06/21 14:42:33 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/ufm.c,v 1.37 2008/09/27 08:51:18 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -96,7 +96,7 @@ struct ufm_softc {
 	int sc_refcnt;
 };
 
-#define UFMUNIT(n) (minor(n))
+#define UFMUNIT(n) (dev2unit(n))
 
 static device_probe_t ufm_match;
 static device_attach_t ufm_attach;

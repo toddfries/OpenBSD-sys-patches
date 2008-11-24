@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netgraph/ng_source.c,v 1.30 2007/03/02 14:36:19 emaste Exp $");
+__FBSDID("$FreeBSD: src/sys/netgraph/ng_source.c,v 1.32 2008/09/21 07:33:33 zec Exp $");
 
 /*
  * This node is used for high speed packet geneneration.  It queues
@@ -66,6 +66,7 @@ __FBSDID("$FreeBSD: src/sys/netgraph/ng_source.c,v 1.30 2007/03/02 14:36:19 emas
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/syslog.h>
+#include <sys/vimage.h>
 #include <net/if.h>
 #include <net/if_var.h>
 #include <netgraph/ng_message.h>
@@ -615,7 +616,7 @@ ng_source_store_output_ifp(sc_p sc, char *ifname)
 	ifp = ifunit(ifname);
 
 	if (ifp == NULL) {
-		printf("%s: can't find interface %d\n", __func__, if_index);
+		printf("%s: can't find interface %s\n", __func__, ifname);
 		return (EINVAL);
 	}
 	sc->output_ifp = ifp;

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/concat/g_concat.c,v 1.29 2006/10/31 21:23:50 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/concat/g_concat.c,v 1.30 2008/08/09 11:14:05 des Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -748,7 +748,7 @@ g_concat_ctl_create(struct gctl_req *req, struct g_class *mp)
 	}
 
 	sc = gp->softc;
-	sb = sbuf_new(NULL, NULL, 0, SBUF_AUTOEXTEND);
+	sb = sbuf_new_auto();
 	sbuf_printf(sb, "Can't attach disk(s) to %s:", gp->name);
 	for (attached = 0, no = 1; no < *nargs; no++) {
 		snprintf(param, sizeof(param), "arg%u", no);

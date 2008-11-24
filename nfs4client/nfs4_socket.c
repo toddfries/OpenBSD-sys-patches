@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/nfs4client/nfs4_socket.c,v 1.4 2005/01/07 01:45:50 imp Exp $ */
+/* $FreeBSD: src/sys/nfs4client/nfs4_socket.c,v 1.6 2008/10/23 15:53:51 des Exp $ */
 /* $Id: nfs_socket.c,v 1.12 2003/11/05 14:59:01 rees Exp $ */
 
 /*-
@@ -60,7 +60,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfs4client/nfs4_socket.c,v 1.4 2005/01/07 01:45:50 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/nfs4client/nfs4_socket.c,v 1.6 2008/10/23 15:53:51 des Exp $");
 
 /*
  * Socket operations for use by nfs
@@ -180,7 +180,7 @@ nfs4_connect(struct nfsmount *nmp)
 	struct thread * td = curthread;
 #endif
 
-	MALLOC(auth, struct rpc_auth *, sizeof(struct rpc_auth), M_TEMP, M_WAITOK);
+	auth = malloc(sizeof(struct rpc_auth), M_TEMP, M_WAITOK);
 	auth->auth_type  = RPCAUTH_UNIX;
 
 	/* translate nfs flags -> rpcclnt flags */
@@ -298,7 +298,7 @@ nfs4_request_mnt(struct nfsmount *nmp, struct mbuf *mrest, int procnum,
 			error = 0;
 			waituntil = time_second + trylater_delay;
 			while (time_second < waituntil)
-				(void) tsleep(&lbolt, PSOCK, "nqnfstry", 0);
+				(void) tsleep(&fake_wchan, PSOCK, "nqnfstry", hz);
 			trylater_delay *= nfs_backoff[trylater_cnt];
 			if (trylater_cnt < NFS_NBACKOFF - 1)
 				trylater_cnt++;

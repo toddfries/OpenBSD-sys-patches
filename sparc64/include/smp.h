@@ -23,15 +23,18 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sparc64/include/smp.h,v 1.22 2007/06/16 23:26:00 marius Exp $
+ * $FreeBSD: src/sys/sparc64/include/smp.h,v 1.25 2008/09/18 13:56:30 marius Exp $
  */
 
 #ifndef	_MACHINE_SMP_H_
 #define	_MACHINE_SMP_H_
 
-#define	CPU_CLKSYNC		1
-#define	CPU_INIT		2
-#define	CPU_BOOTSTRAP		3
+#ifdef SMP
+
+#define	CPU_TICKSYNC		1
+#define	CPU_STICKSYNC		2
+#define	CPU_INIT		3
+#define	CPU_BOOTSTRAP		4
 
 #ifndef	LOCORE
 
@@ -51,6 +54,7 @@
 
 #define	IPI_AST		PIL_AST
 #define	IPI_RENDEZVOUS	PIL_RENDEZVOUS
+#define	IPI_PREEMPT	PIL_PREEMPT
 #define	IPI_STOP	PIL_STOP
 
 #define	IPI_RETRIES	5000
@@ -61,6 +65,7 @@ struct cpu_start_args {
 	u_int	csa_state;
 	vm_offset_t csa_pcpu;
 	u_long	csa_tick;
+	u_long	csa_stick;
 	u_long	csa_ver;
 	struct	tte csa_ttes[PCPU_PAGES];
 };
@@ -88,10 +93,6 @@ void	cpu_mp_shutdown(void);
 typedef	void cpu_ipi_selected_t(u_int, u_long, u_long, u_long);
 extern	cpu_ipi_selected_t *cpu_ipi_selected;
 
-void	ipi_selected(u_int cpus, u_int ipi);
-void	ipi_all(u_int ipi);
-void	ipi_all_but_self(u_int ipi);
-
 void	mp_init(void);
 
 extern	struct mtx ipi_mtx;
@@ -114,7 +115,19 @@ extern	char tl_ipi_tlb_context_demap[];
 extern	char tl_ipi_tlb_page_demap[];
 extern	char tl_ipi_tlb_range_demap[];
 
-#ifdef SMP
+static __inline void
+ipi_all_but_self(u_int ipi)
+{
+
+	cpu_ipi_selected(PCPU_GET(other_cpus), 0, (u_long)tl_ipi_level, ipi);
+}
+
+static __inline void
+ipi_selected(u_int cpus, u_int ipi)
+{
+
+	cpu_ipi_selected(cpus, 0, (u_long)tl_ipi_level, ipi);
+}
 
 #if defined(_MACHINE_PMAP_H_) && defined(_SYS_MUTEX_H_)
 
@@ -221,7 +234,11 @@ ipi_wait(void *cookie)
 
 #endif /* _MACHINE_PMAP_H_ && _SYS_MUTEX_H_ */
 
+#endif /* !LOCORE */
+
 #else
+
+#ifndef	LOCORE
 
 static __inline void *
 ipi_dcache_page_inval(void *func, vm_paddr_t pa)
@@ -264,8 +281,26 @@ ipi_wait(void *cookie)
 
 }
 
-#endif /* SMP */
+static __inline void
+tl_ipi_cheetah_dcache_page_inval(void)
+{
+
+}
+
+static __inline void
+tl_ipi_spitfire_dcache_page_inval(void)
+{
+
+}
+
+static __inline void
+tl_ipi_spitfire_icache_page_inval(void)
+{
+
+}
 
 #endif /* !LOCORE */
+
+#endif /* SMP */
 
 #endif /* !_MACHINE_SMP_H_ */

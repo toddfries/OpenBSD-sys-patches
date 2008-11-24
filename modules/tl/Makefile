@@ -1,6 +1,6 @@
-# $FreeBSD: src/sys/modules/tl/Makefile,v 1.16 2005/09/27 18:10:39 mlaier Exp $
+# $FreeBSD: src/sys/modules/tl/Makefile,v 1.17 2008/08/14 20:02:34 imp Exp $
 
-.PATH: ${.CURDIR}/../../pci
+.PATH: ${.CURDIR}/../../dev/tl
 
 KMOD=	if_tl
 SRCS=	if_tl.c device_if.h bus_if.h pci_if.h

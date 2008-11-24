@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia64/mp_machdep.c,v 1.67 2007/08/06 05:15:57 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia64/mp_machdep.c,v 1.71 2008/10/19 20:14:48 marcel Exp $");
 
 #include "opt_kstack_pages.h"
 
@@ -63,7 +63,7 @@ __FBSDID("$FreeBSD: src/sys/ia64/ia64/mp_machdep.c,v 1.67 2007/08/06 05:15:57 ma
 #include <machine/smp.h>
 #include <i386/include/specialreg.h>
 
-MALLOC_DECLARE(M_PMAP);
+MALLOC_DEFINE(M_SMP, "SMP", "SMP related allocations");
 
 void ia64_ap_startup(void);
 
@@ -71,8 +71,6 @@ void ia64_ap_startup(void);
 #define	LID_SAPIC_EID(x)	((int)((x) >> 16) & 0xff)
 #define	LID_SAPIC_SET(id,eid)	(((id & 0xff) << 8 | (eid & 0xff)) << 16);
 #define	LID_SAPIC_MASK		0xffff0000UL
-
-int	mp_ipi_test = 0;
 
 /* Variables used by os_boot_rendez and ia64_ap_startup */
 struct pcpu *ap_pcpu;
@@ -83,6 +81,13 @@ volatile int ap_awake;
 volatile int ap_spin;
 
 static void cpu_mp_unleash(void *);
+
+struct cpu_group *
+cpu_topo(void)
+{
+
+	return smp_topo_none();
+}
 
 void
 ia64_ap_startup(void)
@@ -120,7 +125,7 @@ ia64_ap_startup(void)
 	ia64_mca_save_state(SAL_INFO_MCA);
 	ia64_mca_save_state(SAL_INFO_CMC);
 
-	ap_awake++;
+	atomic_add_int(&ap_awake, 1);
 	while (!smp_started)
 		cpu_spinwait();
 
@@ -202,7 +207,7 @@ cpu_mp_add(u_int acpiid, u_int apicid, u_int apiceid)
 	}
 
 	if (acpiid != 0) {
-		pc = (struct pcpu *)malloc(sizeof(*pc), M_PMAP, M_WAITOK);
+		pc = (struct pcpu *)malloc(sizeof(*pc), M_SMP, M_WAITOK);
 		pcpu_init(pc, acpiid, sizeof(*pc));
 	} else
 		pc = pcpup;
@@ -243,7 +248,7 @@ cpu_mp_start()
 		pc->pc_other_cpus = all_cpus & ~pc->pc_cpumask;
 		if (pc->pc_cpuid > 0) {
 			ap_pcpu = pc;
-			ap_stack = malloc(KSTACK_PAGES * PAGE_SIZE, M_PMAP,
+			ap_stack = malloc(KSTACK_PAGES * PAGE_SIZE, M_SMP,
 			    M_WAITOK);
 			ap_vhpt = pmap_vhpt_base[pc->pc_cpuid];
 			ap_delay = 2000;
@@ -262,9 +267,6 @@ cpu_mp_start()
 			if (!ap_awake)
 				printf("SMP: WARNING: cpu%d did not wake up\n",
 				    pc->pc_cpuid);
-		} else {
-			pc->pc_awake = 1;
-			ipi_self(IPI_TEST);
 		}
 	}
 }
@@ -277,9 +279,6 @@ cpu_mp_unleash(void *dummy)
 
 	if (mp_ncpus <= 1)
 		return;
-
-	if (mp_ipi_test != 1)
-		printf("SMP: WARNING: sending of a test IPI failed\n");
 
 	cpus = 0;
 	smp_cpus = 0;
@@ -319,19 +318,6 @@ ipi_selected(cpumask_t cpus, int ipi)
 }
 
 /*
- * send an IPI to all CPUs, including myself.
- */
-void
-ipi_all(int ipi)
-{
-	struct pcpu *pc;
-
-	SLIST_FOREACH(pc, &cpuhead, pc_allcpu) {
-		ipi_send(pc, ipi);
-	}
-}
-
-/*
  * send an IPI to all CPUs EXCEPT myself.
  */
 void
@@ -343,16 +329,6 @@ ipi_all_but_self(int ipi)
 		if (pc != pcpup)
 			ipi_send(pc, ipi);
 	}
-}
-
-/*
- * send an IPI to myself.
- */
-void
-ipi_self(int ipi)
-{
-
-	ipi_send(pcpup, ipi);
 }
 
 /*

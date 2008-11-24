@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/sys_process.c,v 1.145 2007/10/09 00:03:39 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/sys_process.c,v 1.151 2008/11/05 03:01:23 davidxu Exp $");
 
 #include "opt_compat.h"
 
@@ -216,7 +216,7 @@ proc_rwmem(struct proc *p, struct uio *uio)
 	vm_object_t backing_object, object = NULL;
 	vm_offset_t pageno = 0;		/* page number */
 	vm_prot_t reqprot;
-	int error, writing;
+	int error, fault_flags, writing;
 
 	/*
 	 * Assert that someone has locked this vmspace.  (Should be
@@ -234,6 +234,7 @@ proc_rwmem(struct proc *p, struct uio *uio)
 	writing = uio->uio_rw == UIO_WRITE;
 	reqprot = writing ? (VM_PROT_WRITE | VM_PROT_OVERRIDE_WRITE) :
 	    VM_PROT_READ;
+	fault_flags = writing ? VM_FAULT_DIRTY : VM_FAULT_NORMAL; 
 
 	/*
 	 * Only map in one page at a time.  We don't have to, but it
@@ -268,7 +269,7 @@ proc_rwmem(struct proc *p, struct uio *uio)
 		/*
 		 * Fault the page on behalf of the process
 		 */
-		error = vm_fault(map, pageno, reqprot, VM_FAULT_NORMAL);
+		error = vm_fault(map, pageno, reqprot, fault_flags);
 		if (error) {
 			error = EFAULT;
 			break;
@@ -527,12 +528,10 @@ kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
 			sx_slock(&allproc_lock);
 			FOREACH_PROC_IN_SYSTEM(p) {
 				PROC_LOCK(p);
-				PROC_SLOCK(p);
 				FOREACH_THREAD_IN_PROC(p, td2) {
 					if (td2->td_tid == pid)
 						break;
 				}
-				PROC_SUNLOCK(p);
 				if (td2 != NULL)
 					break; /* proc lock held */
 				PROC_UNLOCK(p);
@@ -701,15 +700,14 @@ kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
 		break;
 
 	case PT_SUSPEND:
+		td2->td_dbgflags |= TDB_SUSPEND;
 		thread_lock(td2);
-		td2->td_flags |= TDF_DBSUSPEND;
+		td2->td_flags |= TDF_NEEDSUSPCHK;
 		thread_unlock(td2);
 		break;
 
 	case PT_RESUME:
-		thread_lock(td2);
-		td2->td_flags &= ~TDF_DBSUSPEND;
-		thread_unlock(td2);
+		td2->td_dbgflags &= ~TDB_SUSPEND;
 		break;
 
 	case PT_STEP:
@@ -783,18 +781,13 @@ kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
 		p->p_xthread = NULL;
 		if ((p->p_flag & (P_STOPPED_SIG | P_STOPPED_TRACE)) != 0) {
 			/* deliver or queue signal */
-			thread_lock(td2);
-			td2->td_flags &= ~TDF_XSIG;
-			thread_unlock(td2);
+			td2->td_dbgflags &= ~TDB_XSIG;
 			td2->td_xsig = data;
 
-			PROC_SLOCK(p);
 			if (req == PT_DETACH) {
 				struct thread *td3;
 				FOREACH_THREAD_IN_PROC(p, td3) {
-					thread_lock(td3);
-					td3->td_flags &= ~TDF_DBSUSPEND; 
-					thread_unlock(td3);
+					td3->td_dbgflags &= ~TDB_SUSPEND; 
 				}
 			}
 			/*
@@ -802,11 +795,7 @@ kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
 			 * you should use PT_SUSPEND to suspend it before
 			 * continuing process.
 			 */
-#ifdef KSE
-			PROC_SUNLOCK(p);
-			thread_continued(p);
 			PROC_SLOCK(p);
-#endif
 			p->p_flag &= ~(P_STOPPED_TRACE|P_STOPPED_SIG|P_WAITED);
 			thread_unsuspend(p);
 			PROC_SUNLOCK(p);
@@ -938,21 +927,11 @@ kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
 		}
 		pl = addr;
 		pl->pl_lwpid = td2->td_tid;
-		if (td2->td_flags & TDF_XSIG)
+		if (td2->td_dbgflags & TDB_XSIG)
 			pl->pl_event = PL_EVENT_SIGNAL;
 		else
 			pl->pl_event = 0;
-#ifdef KSE
-		if (td2->td_pflags & TDP_SA) {
-			pl->pl_flags = PL_FLAG_SA;
-			if (td2->td_upcall && !TD_CAN_UNBIND(td2))
-				pl->pl_flags |= PL_FLAG_BOUND;
-		} else {
-			pl->pl_flags = 0;
-		}
-#else
 		pl->pl_flags = 0;
-#endif
 		pl->pl_sigmask = td2->td_sigmask;
 		pl->pl_siglist = td2->td_siglist;
 		break;
@@ -971,13 +950,11 @@ kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
 		buf = malloc(num * sizeof(lwpid_t), M_TEMP, M_WAITOK);
 		tmp = 0;
 		PROC_LOCK(p);
-		PROC_SLOCK(p);
 		FOREACH_THREAD_IN_PROC(p, td2) {
 			if (tmp >= num)
 				break;
 			buf[tmp++] = td2->td_tid;
 		}
-		PROC_SUNLOCK(p);
 		PROC_UNLOCK(p);
 		error = copyout(buf, addr, tmp * sizeof(lwpid_t));
 		free(buf, M_TEMP);

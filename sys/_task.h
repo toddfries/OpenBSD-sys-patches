@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/_task.h,v 1.4 2005/04/24 16:52:45 sam Exp $
+ * $FreeBSD: src/sys/sys/_task.h,v 1.6 2008/07/18 06:22:57 kmacy Exp $
  */
 
 #ifndef _SYS__TASK_H_

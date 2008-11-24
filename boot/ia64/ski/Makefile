@@ -1,6 +1,7 @@
-# $FreeBSD: src/sys/boot/ia64/ski/Makefile,v 1.20 2006/11/05 22:03:04 marcel Exp $
+# $FreeBSD: src/sys/boot/ia64/ski/Makefile,v 1.21 2008/06/25 21:33:28 ru Exp $
 
 NO_MAN=
+WITHOUT_SSP=
 
 .include <bsd.own.mk>
 

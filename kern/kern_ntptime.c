@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_ntptime.c,v 1.64 2007/06/14 18:37:58 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_ntptime.c,v 1.65 2008/03/16 10:58:05 rwatson Exp $");
 
 #include "opt_ntp.h"
 
@@ -630,7 +630,7 @@ ntp_init()
 #endif /* PPS_SYNC */	   
 }
 
-SYSINIT(ntpclocks, SI_SUB_CLOCKS, SI_ORDER_MIDDLE, ntp_init, NULL)
+SYSINIT(ntpclocks, SI_SUB_CLOCKS, SI_ORDER_MIDDLE, ntp_init, NULL);
 
 /*
  * hardupdate() - local clock update

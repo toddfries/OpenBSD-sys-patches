@@ -1,8 +1,8 @@
 /*	$NetBSD: umodem.c,v 1.45 2002/09/23 05:51:23 simonb Exp $	*/
-
-
+#define UFOMA_HANDSFREE
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/ufoma.c,v 1.10 2007/07/27 12:00:29 takawata Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/ufoma.c,v 1.16 2008/10/23 19:16:57 ed Exp $");
+
 /*-
  * Copyright (c) 2005, Takanori Watanabe
  * Copyright (c) 2003, M. Warner Losh <imp@freebsd.org>.
@@ -88,7 +88,6 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/ufoma.c,v 1.10 2007/07/27 12:00:29 takawata 
 #include <sys/conf.h>
 #include <sys/serial.h>
 #include <sys/tty.h>
-#include <sys/clist.h>
 #include <sys/file.h>
 #include <sys/select.h>
 #include <sys/sysctl.h>
@@ -148,9 +147,9 @@ typedef struct ufoma_mobile_acm_descriptor{
 #define UFOMA_MAX_TIMEOUT 15 /*Standard says 10(sec)*/
 #define UFOMA_CMD_BUF_SIZE 64
 
-#define UMODEMIBUFSIZE 64
-#define UMODEMOBUFSIZE 256
-#define DPRINTF(a)
+#define UMODEMIBUFSIZE 1024
+#define UMODEMOBUFSIZE 1024
+#define DPRINTF(a) 
 
 struct ufoma_softc{
 	struct ucom_softc sc_ucom;
@@ -165,6 +164,7 @@ struct ufoma_softc{
 	int sc_cm_cap;
 	int sc_acm_cap;
 	usb_cdc_line_state_t	sc_line_state;	/* current line state */
+	usb_cdc_line_state_t	sc_line_state_init;	/* pre open line state*/
 	u_char			sc_dtr;		/* current DTR state */
 	u_char			sc_rts;		/* current RTS state */
 
@@ -193,11 +193,14 @@ static void ufoma_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
 static char *ufoma_mode_to_str(int);
 static int ufoma_str_to_mode(char *);
 
-/*Pseudo ucom stuff*/
+#ifdef UFOMA_HANDSFREE
+/*Pseudo ucom stuff(for Handsfree interface)*/
 static int ufoma_init_pseudo_ucom(struct ufoma_softc *);
-static t_open_t ufomaopen;
-static t_close_t ufomaclose;
-static t_oproc_t ufomastart;
+static tsw_open_t ufoma_open;
+static tsw_close_t ufoma_close;
+static tsw_outwakeup_t ufoma_outwakeup;
+static tsw_free_t ufoma_free;
+#endif
 
 /*umodem like stuff*/
 static int ufoma_init_modem(struct ufoma_softc *, struct usb_attach_arg *);
@@ -214,17 +217,14 @@ static void ufoma_rts(struct ufoma_softc *sc, int onoff);
 static int ufoma_sysctl_support(SYSCTL_HANDLER_ARGS);
 static int ufoma_sysctl_current(SYSCTL_HANDLER_ARGS);
 static int ufoma_sysctl_open(SYSCTL_HANDLER_ARGS);
-
+static void ufoma_set_line_state(struct ufoma_softc *sc);
 
 static struct ucom_callback ufoma_callback = {
-	ufoma_get_status,
-	ufoma_set,
-	ufoma_param,
-	NULL,
-	ufoma_ucom_open,
-	ufoma_ucom_close,
-	NULL,
-	NULL,
+	.ucom_get_status = ufoma_get_status,
+	.ucom_set = ufoma_set,
+	.ucom_param = ufoma_param,
+	.ucom_open = ufoma_ucom_open,
+	.ucom_close = ufoma_ucom_close,
 };
 
 
@@ -291,8 +291,9 @@ ufoma_match(device_t self)
 		return (UMATCH_NONE);
 	}
 
-#if 0
-	if(mad->bType != UMCPC_ACM_TYPE_AB5){
+#ifndef UFOMA_HANDSFREE
+	if((mad->bType == UMCPC_ACM_TYPE_AB5)||
+	   (mad->bType == UMCPC_ACM_TYPE_AB6)){
 		return UMATCH_NONE;
 	}
 #endif
@@ -375,19 +376,23 @@ ufoma_attach(device_t self)
 		}
 	}
 	printf("\n");
-
 	if((mad->bType == UMCPC_ACM_TYPE_AB5)
 	   ||(mad->bType == UMCPC_ACM_TYPE_AB6)){
+#ifdef UFOMA_HANDSFREE
 		/*These does not have data interface*/
 		sc->sc_is_ucom = 0;
 		ufoma_init_pseudo_ucom(sc);
+#else
+		/*Should not happen*/
+		goto error;
+#endif
+
 	}else{
 		if(ufoma_init_modem(sc, uaa)){
 			goto error;
 		}
 	}
 	elements = mad->bFunctionLength - sizeof(*mad)+1;
-
 	sc->sc_msgxf = usbd_alloc_xfer(ucom->sc_udev);
 	sc->sc_nummsg = 0;
 
@@ -397,6 +402,7 @@ ufoma_attach(device_t self)
 	bcopy(mad->bMode, &sc->sc_modetable[1], elements);
 	sc->sc_currentmode = UMCPC_ACM_MODE_UNLINKED;
 	sc->sc_modetoactivate = mad->bMode[0];
+
 	/*Sysctls*/
 	sctx = device_get_sysctl_ctx(self);
 	soid = device_get_sysctl_tree(self);
@@ -412,6 +418,7 @@ ufoma_attach(device_t self)
 	SYSCTL_ADD_PROC(sctx, SYSCTL_CHILDREN(soid), OID_AUTO, "openmode",
 			CTLFLAG_RW|CTLTYPE_STRING, sc, 0, ufoma_sysctl_open,
 			"A", "Mode to transit when port is opened");
+
 	return 0;
  error:
 	if(sc->sc_modetable)
@@ -429,10 +436,16 @@ ufoma_detach(device_t self)
 	sc->sc_ucom.sc_dying = 1;
 	usbd_abort_pipe(sc->sc_notify_pipe);
 	usbd_close_pipe(sc->sc_notify_pipe);
-	if(sc->sc_is_ucom)
+	if(sc->sc_is_ucom){
 		ucom_detach(&sc->sc_ucom);
-	else
-		ttyfree(sc->sc_ucom.sc_tty);
+	}
+#ifdef UFOMA_HANDSFREE
+	else{
+		tty_lock(sc->sc_ucom.sc_tty);
+		tty_rel_gone(sc->sc_ucom.sc_tty);
+	}
+
+#endif
 	free(sc->sc_modetable, M_USBDEV);
 	return rv;
 }
@@ -496,15 +509,16 @@ static int ufoma_link_state(struct ufoma_softc *sc)
 	usb_device_request_t req;
 	struct ucom_softc *ucom = &sc->sc_ucom;
 	int err;
-
+	
 	req.bmRequestType = UT_WRITE_VENDOR_INTERFACE;
 	req.bRequest = UMCPC_SET_LINK;
 	USETW(req.wValue, UMCPC_CM_MOBILE_ACM);
 	USETW(req.wIndex, sc->sc_ctl_iface_no);
 	USETW(req.wLength, sc->sc_modetable[0]);	
+
 	err = usbd_do_request(ucom->sc_udev, &req, sc->sc_modetable);
 	if(err){
-		printf("SET_LINK:%d\n", err);
+		printf("SET_LINK:%s\n",usbd_errstr(err));
 		return EIO;
 	}
 	err = tsleep(&sc->sc_currentmode, PZERO|PCATCH, "fmalnk", hz);
@@ -532,7 +546,9 @@ static int ufoma_activate_state(struct ufoma_softc *sc, int state)
 	
 	err = usbd_do_request(ucom->sc_udev, &req, NULL);
 	if(err){
-		printf("%s:ACTIVATE:%s\n", device_get_nameunit(ucom->sc_dev), usbd_errstr(err));
+		printf("%s:ACTIVATE(%x):%s\n", 
+		       device_get_nameunit(ucom->sc_dev), state,
+		       usbd_errstr(err));
 		return EIO;
 	}
 
@@ -547,7 +563,7 @@ static int ufoma_activate_state(struct ufoma_softc *sc, int state)
 	return 0;
 }
 
-
+#ifdef UFOMA_HANDSFREE
 static inline void ufoma_setup_msg_req(struct ufoma_softc *sc, usb_device_request_t *req)
 {
 		req->bmRequestType = UT_READ_CLASS_INTERFACE;
@@ -568,9 +584,15 @@ static void ufoma_msg(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_stat
 	ufoma_setup_msg_req(sc, &req);
 	mtx_lock(&sc->sc_mtx);
 	for(i = 0;i < actlen; i++){
-		if(sc->sc_ucom.sc_tty->t_state & TS_ISOPEN)
-			ttyld_rint(sc->sc_ucom.sc_tty, sc->sc_resbuffer[i]);
+		
+		if(ttydisc_rint(sc->sc_ucom.sc_tty, sc->sc_resbuffer[i], 0) 
+		   == -1){
+			break;
+		}
 	}
+
+	ttydisc_rint_done(sc->sc_ucom.sc_tty);
+
 	sc->sc_nummsg--;
 	if(sc->sc_nummsg){
 		usbd_setup_default_xfer(sc->sc_msgxf, ucom->sc_udev, 
@@ -583,15 +605,19 @@ static void ufoma_msg(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_stat
 	mtx_unlock(&sc->sc_mtx);
 
 }
-
+#endif
 static void ufoma_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 {
 	struct ufoma_softc *sc = priv;
 	unsigned int a;
 	struct ucom_softc *ucom =&sc->sc_ucom;
-	usb_device_request_t req;
-	ufoma_setup_msg_req(sc, &req);
 	u_char mstatus;
+
+#ifdef UFOMA_HANDSFREE
+	usb_device_request_t req;
+
+	ufoma_setup_msg_req(sc, &req);
+#endif
 
 	if (sc->sc_ucom.sc_dying)
 		return;
@@ -616,6 +642,7 @@ static void ufoma_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_sta
 		return;
 	}
 	switch(sc->sc_notify_buf.bNotification){
+#ifdef UFOMA_HANDSFREE
 	case UCDC_N_RESPONSE_AVAILABLE:
 		if(sc->sc_is_ucom){
 			printf("%s:wrong response request?\n", device_get_nameunit(ucom->sc_dev));
@@ -632,6 +659,7 @@ static void ufoma_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_sta
 		sc->sc_nummsg++;
 		mtx_unlock(&sc->sc_mtx);
 		break;
+#endif
 	case UCDC_N_SERIAL_STATE:
 		if(!sc->sc_is_ucom){
 			printf("%s:wrong sereal request?\n",device_get_nameunit(ucom->sc_dev));
@@ -670,27 +698,34 @@ static void ufoma_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_sta
 	}
 }
 
+#ifdef UFOMA_HANDSFREE
+struct ttydevsw ufomatty_class ={
+	.tsw_flags = TF_INITLOCK|TF_CALLOUT,
+	.tsw_open = ufoma_open,
+	.tsw_close = ufoma_close,
+	.tsw_outwakeup = ufoma_outwakeup,
+	.tsw_free = ufoma_free
+};
+static void ufoma_free(void *sc)
+{
+	
+}
 static int ufoma_init_pseudo_ucom(struct ufoma_softc *sc)
 {
 	struct tty *tp;
 	struct ucom_softc *ucom = &sc->sc_ucom;
-	tp = ucom->sc_tty = ttyalloc();
-	tp->t_sc = sc;
-	tp->t_oproc = ufomastart;
-	tp->t_stop = nottystop;
-	tp->t_open = ufomaopen;
-	tp->t_close = ufomaclose;
-	ttycreate(tp, TS_CALLOUT, "U%d", device_get_unit(ucom->sc_dev));
+	tp = ucom->sc_tty = tty_alloc(&ufomatty_class, sc, &Giant);
+	tty_makedev(tp, NULL, "U%d", device_get_unit(ucom->sc_dev));
 
 	return 0;
 }
 
 
-static int ufomaopen(struct tty * tty, struct cdev *cdev)
+static int ufoma_open(struct tty * tty)
 {
 
-	struct ufoma_softc *sc = tty->t_sc;
-	
+	struct ufoma_softc *sc = tty_softc(tty);
+
 	if(sc->sc_ucom.sc_dying)
 		return (ENXIO);
 	
@@ -704,51 +739,75 @@ static int ufomaopen(struct tty * tty, struct cdev *cdev)
 	return 	ufoma_ucom_open(sc, 0);
 }
 
-static void ufomaclose(struct tty *tty)
+static void ufoma_close(struct tty *tty)
 {
-	struct ufoma_softc *sc = tty->t_sc;
+	struct ufoma_softc *sc = tty_softc(tty);
+
 	ufoma_ucom_close(sc, 0);
 }
 
-static void ufomastart(struct tty *tp)
+static void ufoma_outwakeup(struct tty *tp)
 {
-	struct ufoma_softc *sc = tp->t_sc;
+	struct ufoma_softc *sc = tty_softc(tp);
 	struct ucom_softc *ucom = &sc->sc_ucom;
 	usb_device_request_t req;
-	int x;
-	uByte c;
-	x = spltty();
-	if(tp->t_state  & (TS_TIMEOUT | TS_TTSTOP)){
-		ttwwakeup(tp);
-		return;
-	}
+	int len,i;
+	unsigned char buf[128];
 
-	tp->t_state |= TS_BUSY;
-	while(tp->t_outq.c_cc != 0){
-		c = getc(&tp->t_outq);
-		req.bmRequestType = UT_WRITE_CLASS_INTERFACE;
-		req.bRequest = UCDC_SEND_ENCAPSULATED_COMMAND;
-		USETW(req.wIndex, sc->sc_ctl_iface_no);
-		USETW(req.wValue, 0);
-		USETW(req.wLength, 1);
-		usbd_do_request(ucom->sc_udev, &req, &c);
+	uByte c;
+	if(ucom->sc_dying)
+		return;
+	if(ucom->sc_state &UCS_TXBUSY)
+		return;
+
+	ucom->sc_state |= UCS_TXBUSY;
+	for(;;){
+		len = ttydisc_getc(tp, buf, sizeof(buf));
+		if(len == 0){
+			break;
+		}
+
+		for(i=0; i < len; i++){
+			req.bmRequestType = UT_WRITE_CLASS_INTERFACE;
+			c  = buf[i];
+			req.bRequest = UCDC_SEND_ENCAPSULATED_COMMAND;
+			USETW(req.wIndex, sc->sc_ctl_iface_no);
+			USETW(req.wValue, 0);
+			USETW(req.wLength, 1);
+			usbd_do_request(ucom->sc_udev, &req, &c);
+		}
 	}
-	tp->t_state &= ~TS_BUSY;
-	ttwwakeup(tp);
-	splx(x);
+	ucom->sc_state &= ~(UCS_TXBUSY);
+
 }
+#endif
+
 
 static int ufoma_ucom_open(void *p, int portno)
 {
 	struct ufoma_softc *sc = p;
+	int res;
+	
 	if(sc->sc_currentmode == UMCPC_ACM_MODE_UNLINKED){
-		ufoma_link_state(sc);
+		if((res = ufoma_link_state(sc))){
+			return res;
+		}
 	}
+	
 	sc->sc_cmdbp = 0;
 	if(sc->sc_currentmode == UMCPC_ACM_MODE_DEACTIVATED){
-		ufoma_activate_state(sc, sc->sc_modetoactivate);
+		if((res = ufoma_activate_state(sc, sc->sc_modetoactivate))){
+			return res;
+		}
 	}
-
+	mtx_lock(&sc->sc_mtx);
+	sc->sc_isopen = 1;
+	mtx_unlock(&sc->sc_mtx);
+	/*Now line coding should be set.*/
+	if(sc->sc_is_ucom){
+		ufoma_set_line_state(sc);
+		ufoma_set_line_coding(sc, NULL);
+	}
 	return 0;
 }
 
@@ -756,6 +815,9 @@ static void ufoma_ucom_close(void *p, int portno)
 {
 	struct ufoma_softc *sc = p;
 	ufoma_activate_state(sc, UMCPC_ACM_MODE_DEACTIVATED);
+	mtx_lock(&sc->sc_mtx);
+	sc->sc_isopen = 0;
+	mtx_unlock(&sc->sc_mtx);
 	return ;
 }
 
@@ -815,6 +877,16 @@ ufoma_set_line_state(struct ufoma_softc *sc)
 	usb_device_request_t req;
 	struct ucom_softc *ucom = &sc->sc_ucom;
 	int ls;
+	int err;
+
+	if(!sc->sc_isopen){
+		return ; /*Set it later*/
+	}
+
+	/*Don't send line state emulation request for OBEX port*/
+	if(sc->sc_currentmode == UMCPC_ACM_MODE_OBEX){
+		return;
+	}
 
 	ls = (sc->sc_dtr ? UCDC_LINE_DTR : 0) |
 	     (sc->sc_rts ? UCDC_LINE_RTS : 0);
@@ -824,7 +896,11 @@ ufoma_set_line_state(struct ufoma_softc *sc)
 	USETW(req.wIndex, sc->sc_ctl_iface_no);
 	USETW(req.wLength, 0);
 
-	(void)usbd_do_request(ucom->sc_udev, &req, 0);
+	err = usbd_do_request(ucom->sc_udev, &req, 0);
+	if(err){
+		printf("LINE_STATE:%s\n", usbd_errstr(err));
+	}
+
 
 }
 
@@ -859,13 +935,25 @@ ufoma_set_line_coding(struct ufoma_softc *sc, usb_cdc_line_state_t *state)
 	usbd_status err;
 	usb_device_request_t req;
 	struct ucom_softc *ucom = &sc->sc_ucom;
+	if(!sc->sc_isopen){
+		sc->sc_line_state_init = *state;
+		return (USBD_NORMAL_COMPLETION);
+	}
 
 	DPRINTF(("ufoma_set_line_coding: rate=%d fmt=%d parity=%d bits=%d\n",
 		 UGETDW(state->dwDTERate), state->bCharFormat,
 		 state->bParityType, state->bDataBits));
-
-	if (memcmp(state, &sc->sc_line_state, UCDC_LINE_STATE_LENGTH) == 0) {
+	if(state == NULL){
+		state = &sc->sc_line_state_init;
+	}else if (memcmp(state, &sc->sc_line_state, 
+			 UCDC_LINE_STATE_LENGTH) == 0) {
 		DPRINTF(("ufoma_set_line_coding: already set\n"));
+		return (USBD_NORMAL_COMPLETION);
+	}
+
+	/*Don't send line state emulation request for OBEX port*/
+	if(sc->sc_currentmode == UMCPC_ACM_MODE_OBEX){
+		sc->sc_line_state = *state;
 		return (USBD_NORMAL_COMPLETION);
 	}
 
@@ -927,7 +1015,7 @@ ufoma_param(void *addr, int portno, struct termios *t)
 	err = ufoma_set_line_coding(sc, &ls);
 	if (err) {
 		DPRINTF(("ufoma_param: err=%s\n", usbd_errstr(err)));
-		return (ENOTTY);
+		return (EIO);
 	}
 
 	return (0);

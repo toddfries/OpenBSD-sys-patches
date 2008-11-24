@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)resource.h	8.4 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/sys/resource.h,v 1.31 2007/06/01 01:12:45 jeff Exp $
+ * $FreeBSD: src/sys/sys/resource.h,v 1.33 2008/08/20 08:31:58 ed Exp $
  */
 
 #ifndef _SYS_RESOURCE_H_
@@ -93,8 +93,9 @@ struct rusage {
 #define	RLIMIT_SBSIZE	9		/* maximum size of all socket buffers */
 #define RLIMIT_VMEM	10		/* virtual process size (inclusive of mmap) */
 #define	RLIMIT_AS	RLIMIT_VMEM	/* standard name for RLIMIT_VMEM */
+#define	RLIMIT_NPTS	11		/* pseudo-terminals */
 
-#define	RLIM_NLIMITS	11		/* number of resource limits */
+#define	RLIM_NLIMITS	12		/* number of resource limits */
 
 #define	RLIM_INFINITY	((rlim_t)(((uint64_t)1 << 63) - 1))
 /* XXX Missing: RLIM_SAVED_MAX, RLIM_SAVED_CUR */
@@ -154,7 +155,7 @@ struct loadavg {
 #ifdef _KERNEL
 
 extern struct loadavg averunnable;
-extern long cp_time[CPUSTATES];
+void	read_cpu_time(long *cp_time);	/* Writes array of CPUSTATES */
 
 #else
 

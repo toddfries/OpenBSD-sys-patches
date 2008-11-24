@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_lookup.c,v 1.52 2007/10/19 12:23:25 bde Exp $ */
+/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_lookup.c,v 1.54 2008/01/13 14:44:04 attilio Exp $ */
 /*	$NetBSD: msdosfs_lookup.c,v 1.37 1997/11/17 15:36:54 ws Exp $	*/
 
 /*-
@@ -108,7 +108,6 @@ msdosfs_lookup(ap)
 	u_char dosfilename[12];
 	int flags = cnp->cn_flags;
 	int nameiop = cnp->cn_nameiop;
-	struct thread *td = cnp->cn_thread;
 	int unlen;
 
 	int wincnt = 1;
@@ -520,9 +519,9 @@ foundroot:
 	 */
 	pdp = vdp;
 	if (flags & ISDOTDOT) {
-		VOP_UNLOCK(pdp, 0, td);
+		VOP_UNLOCK(pdp, 0);
 		error = deget(pmp, cluster, blkoff,  &tdp);
-		vn_lock(pdp, LK_EXCLUSIVE | LK_RETRY, td); 
+		vn_lock(pdp, LK_EXCLUSIVE | LK_RETRY); 
 		if (error)
 			return (error);
 		*vpp = DETOV(tdp);

@@ -27,13 +27,13 @@
 #define _HPTIOP_H
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/hptiop/hptiop.h,v 1.2 2008/02/03 16:07:12 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/hptiop/hptiop.h,v 1.3 2008/10/04 10:39:31 antoine Exp $");
 
 #define DBG 0
 
 #ifdef DBG
-int hpt_dbg_level = 0;
-#define KdPrint(x)  do { if (hpt_dbg_level) printf x; } while (0)
+int hpt_iop_dbg_level = 0;
+#define KdPrint(x)  do { if (hpt_iop_dbg_level) printf x; } while (0)
 #define HPT_ASSERT(x) assert(x)
 #else
 #define KdPrint(x)

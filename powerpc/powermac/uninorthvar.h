@@ -22,7 +22,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/powermac/uninorthvar.h,v 1.4 2005/01/07 02:29:20 imp Exp $
+ * $FreeBSD: src/sys/powerpc/powermac/uninorthvar.h,v 1.5 2008/10/14 14:54:14 nwhitehorn Exp $
  */
 
 #ifndef	_POWERPC_POWERMAC_UNINORTHVAR_H_
@@ -33,6 +33,16 @@ struct uninorth_range {
 	u_int32_t	pci_mid;
 	u_int32_t	pci_lo;
 	u_int32_t	host;
+	u_int32_t	size_hi;
+	u_int32_t	size_lo;
+};
+
+struct uninorth_range64 {
+	u_int32_t	pci_hi;
+	u_int32_t	pci_mid;
+	u_int32_t	pci_lo;
+	u_int32_t	host_hi;
+	u_int32_t	host_lo;
 	u_int32_t	size_hi;
 	u_int32_t	size_lo;
 };
@@ -51,6 +61,8 @@ struct uninorth_softc {
 	bus_space_tag_t		sc_iot;
 	bus_space_tag_t		sc_memt;
 	bus_dma_tag_t		sc_dmat;
+
+	int			sc_u3;
 };
 
 struct unin_chip_softc {

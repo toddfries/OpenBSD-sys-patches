@@ -1,4 +1,34 @@
 /*-
+ * Copyright (C) 2006 Semihalf, Marian Balakowicz <m8@semihalf.com>
+ * All rights reserved.
+ *
+ * Adapted for Freescale's e500 core CPUs.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN
+ * NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+ * TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/powerpc/include/pmap.h,v 1.22 2008/09/23 03:02:57 nwhitehorn Exp $
+ */
+/*-
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
  * Copyright (C) 1995, 1996 TooLs GmbH.
  * All rights reserved.
@@ -28,8 +58,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- *	$NetBSD: pmap.h,v 1.17 2000/03/30 16:18:24 jdolecek Exp $
- * $FreeBSD: src/sys/powerpc/include/pmap.h,v 1.20 2006/12/05 04:01:52 grehan Exp $
+ *	from: $NetBSD: pmap.h,v 1.17 2000/03/30 16:18:24 jdolecek Exp $
  */
 
 #ifndef	_MACHINE_PMAP_H_
@@ -40,6 +69,9 @@
 #include <sys/_mutex.h>
 #include <machine/sr.h>
 #include <machine/pte.h>
+#include <machine/tlb.h>
+
+#if defined(AIM)
 
 #if !defined(NPMAPS)
 #define	NPMAPS		32768
@@ -50,6 +82,8 @@ struct	pmap {
 	u_int		pm_sr[16];
 	u_int		pm_active;
 	u_int		pm_context;
+
+	struct pmap	*pmap_phys;
 	struct		pmap_statistics	pm_stats;
 };
 
@@ -58,21 +92,57 @@ typedef	struct pmap *pmap_t;
 struct pvo_entry {
 	LIST_ENTRY(pvo_entry) pvo_vlink;	/* Link to common virt page */
 	LIST_ENTRY(pvo_entry) pvo_olink;	/* Link to overflow entry */
-	struct		pte pvo_pte;		/* PTE */
+	union {
+		struct	pte pte;		/* 32 bit PTE */
+		struct	lpte lpte;		/* 64 bit PTE */
+	} pvo_pte;
 	pmap_t		pvo_pmap;		/* Owning pmap */
 	vm_offset_t	pvo_vaddr;		/* VA of entry */
 };
 LIST_HEAD(pvo_head, pvo_entry);
 
 struct	md_page {
-	u_int	mdpg_attrs;
+	u_int64_t mdpg_attrs;
 	struct	pvo_head mdpg_pvoh;
 };
 
+#define	pmap_page_is_mapped(m)	(!LIST_EMPTY(&(m)->md.mdpg_pvoh))
+
+#else
+
+struct pmap {
+	struct mtx pm_mtx;		/* pmap mutex */
+	tlbtid_t pm_tid;		/* TID to identify this pmap entries in TLB */
+	u_int pm_active;		/* active on cpus */
+	int pm_refs;			/* ref count */
+	struct pmap_statistics pm_stats;/* pmap statistics */
+
+	/* Page table directory, array of pointers to page tables. */
+	pte_t *pm_pdir[PDIR_NENTRIES];
+
+	/* List of allocated ptbl bufs (ptbl kva regions). */
+	TAILQ_HEAD(, ptbl_buf) ptbl_list;
+};
+typedef	struct pmap *pmap_t;
+
+struct pv_entry {
+	pmap_t pv_pmap;
+	vm_offset_t pv_va;
+	TAILQ_ENTRY(pv_entry) pv_link;
+};
+typedef struct pv_entry *pv_entry_t;
+
+struct md_page {
+	TAILQ_HEAD(, pv_entry) pv_list;
+};
+
+#define MEM_REGIONS	8
+#define	pmap_page_is_mapped(m)	(!TAILQ_EMPTY(&(m)->md.pv_list))
+
+#endif /* AIM */
+
 extern	struct pmap kernel_pmap_store;
 #define	kernel_pmap	(&kernel_pmap_store)
-
-#define	pmap_page_is_mapped(m)	(!LIST_EMPTY(&(m)->md.mdpg_pvoh))
 
 #ifdef _KERNEL
 
@@ -91,11 +161,11 @@ void		pmap_bootstrap(vm_offset_t, vm_offset_t);
 void		pmap_kenter(vm_offset_t va, vm_offset_t pa);
 void		pmap_kremove(vm_offset_t);
 void		*pmap_mapdev(vm_offset_t, vm_size_t);
+boolean_t	pmap_page_executable(vm_page_t);
 void		pmap_unmapdev(vm_offset_t, vm_size_t);
 void		pmap_deactivate(struct thread *);
 vm_offset_t	pmap_kextract(vm_offset_t);
 int		pmap_dev_direct_mapped(vm_offset_t, vm_size_t);
-boolean_t	pmap_page_executable(vm_page_t);
 boolean_t	pmap_mmu_install(char *name, int prio);
 
 #define	vtophys(va)	pmap_kextract((vm_offset_t)(va))

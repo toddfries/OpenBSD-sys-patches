@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/vfs_export.c,v 1.341 2007/02/15 22:08:35 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/vfs_export.c,v 1.345 2008/11/03 10:38:00 dfr Exp $");
 
 #include <sys/param.h>
 #include <sys/dirent.h>
@@ -68,6 +68,8 @@ struct netcred {
 	struct	radix_node netc_rnodes[2];
 	int	netc_exflags;
 	struct	ucred netc_anon;
+	int	netc_numsecflavors;
+	int	netc_secflavors[MAXSECFLAVORS];
 };
 
 /*
@@ -120,6 +122,9 @@ vfs_hang_addrlist(struct mount *mp, struct netexport *nep,
 		np->netc_anon.cr_ngroups = argp->ex_anon.cr_ngroups;
 		bcopy(argp->ex_anon.cr_groups, np->netc_anon.cr_groups,
 		    sizeof(np->netc_anon.cr_groups));
+		np->netc_numsecflavors = argp->ex_numsecflavors;
+		bcopy(argp->ex_secflavors, np->netc_secflavors,
+		    sizeof(np->netc_secflavors));
 		refcount_init(&np->netc_anon.cr_ref, 1);
 		MNT_ILOCK(mp);
 		mp->mnt_flag |= MNT_DEFEXPORTED;
@@ -161,12 +166,25 @@ vfs_hang_addrlist(struct mount *mp, struct netexport *nep,
 		 * Seems silly to initialize every AF when most are not used,
 		 * do so on demand here
 		 */
-		for (dom = domains; dom; dom = dom->dom_next)
+		for (dom = domains; dom; dom = dom->dom_next) {
+			KASSERT(((i == AF_INET) || (i == AF_INET6)), 
+			    ("unexpected protocol in vfs_hang_addrlist"));
 			if (dom->dom_family == i && dom->dom_rtattach) {
-				dom->dom_rtattach((void **) &nep->ne_rtable[i],
-				    dom->dom_rtoffset);
+				/*
+				 * XXX MRT 
+				 * The INET and INET6 domains know the
+				 * offset already. We don't need to send it
+				 * So we just use it as a flag to say that
+				 * we are or are not setting up a real routing
+				 * table. Only IP and IPV6 need have this
+				 * be 0 so all other protocols can stay the 
+				 * same (ABI compatible).
+				 */ 
+				dom->dom_rtattach(
+				    (void **) &nep->ne_rtable[i], 0);
 				break;
 			}
+		}
 		if ((rnh = nep->ne_rtable[i]) == NULL) {
 			error = ENOBUFS;
 			vfs_mount_error(mp, "%s %s %d",
@@ -190,6 +208,9 @@ vfs_hang_addrlist(struct mount *mp, struct netexport *nep,
 	np->netc_anon.cr_ngroups = argp->ex_anon.cr_ngroups;
 	bcopy(argp->ex_anon.cr_groups, np->netc_anon.cr_groups,
 	    sizeof(np->netc_anon.cr_groups));
+	np->netc_numsecflavors = argp->ex_numsecflavors;
+	bcopy(argp->ex_secflavors, np->netc_secflavors,
+	    sizeof(np->netc_secflavors));
 	refcount_init(&np->netc_anon.cr_ref, 1);
 	return (0);
 out:
@@ -240,8 +261,13 @@ vfs_export(struct mount *mp, struct export_args *argp)
 	struct netexport *nep;
 	int error;
 
+	if (argp->ex_numsecflavors < 0
+	    || argp->ex_numsecflavors >= MAXSECFLAVORS)
+		return (EINVAL);
+
 	nep = mp->mnt_export;
 	error = 0;
+	lockmgr(&mp->mnt_explock, LK_EXCLUSIVE, NULL);
 	if (argp->ex_flags & MNT_DELEXPORT) {
 		if (nep == NULL) {
 			error = ENOENT;
@@ -281,6 +307,7 @@ vfs_export(struct mount *mp, struct export_args *argp)
 	}
 
 out:
+	lockmgr(&mp->mnt_explock, LK_RELEASE, NULL);
 	/*
 	 * Once we have executed the vfs_export() command, we do
 	 * not want to keep the "export" option around in the
@@ -315,7 +342,7 @@ vfs_setpublicfs(struct mount *mp, struct netexport *nep,
 		if (nfs_pub.np_valid) {
 			nfs_pub.np_valid = 0;
 			if (nfs_pub.np_index != NULL) {
-				FREE(nfs_pub.np_index, M_TEMP);
+				free(nfs_pub.np_index, M_TEMP);
 				nfs_pub.np_index = NULL;
 			}
 		}
@@ -346,7 +373,7 @@ vfs_setpublicfs(struct mount *mp, struct netexport *nep,
 	 * If an indexfile was specified, pull it in.
 	 */
 	if (argp->ex_indexfile != NULL) {
-		MALLOC(nfs_pub.np_index, char *, MAXNAMLEN + 1, M_TEMP,
+		nfs_pub.np_index = malloc(MAXNAMLEN + 1, M_TEMP,
 		    M_WAITOK);
 		error = copyinstr(argp->ex_indexfile, nfs_pub.np_index,
 		    MAXNAMLEN, (size_t *)0);
@@ -362,7 +389,7 @@ vfs_setpublicfs(struct mount *mp, struct netexport *nep,
 			}
 		}
 		if (error) {
-			FREE(nfs_pub.np_index, M_TEMP);
+			free(nfs_pub.np_index, M_TEMP);
 			return (error);
 		}
 	}
@@ -426,15 +453,21 @@ vfs_export_lookup(struct mount *mp, struct sockaddr *nam)
 
 int 
 vfs_stdcheckexp(struct mount *mp, struct sockaddr *nam, int *extflagsp,
-    struct ucred **credanonp)
+    struct ucred **credanonp, int *numsecflavors, int **secflavors)
 {
 	struct netcred *np;
 
+	lockmgr(&mp->mnt_explock, LK_SHARED, NULL);
 	np = vfs_export_lookup(mp, nam);
+	lockmgr(&mp->mnt_explock, LK_RELEASE, NULL);
 	if (np == NULL)
 		return (EACCES);
 	*extflagsp = np->netc_exflags;
 	*credanonp = &np->netc_anon;
+	if (numsecflavors)
+		*numsecflavors = np->netc_numsecflavors;
+	if (secflavors)
+		*secflavors = np->netc_secflavors;
 	return (0);
 }
 

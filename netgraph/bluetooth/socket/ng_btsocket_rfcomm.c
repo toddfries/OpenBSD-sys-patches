@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  * $Id: ng_btsocket_rfcomm.c,v 1.28 2003/09/14 23:29:06 max Exp $
- * $FreeBSD: src/sys/netgraph/bluetooth/socket/ng_btsocket_rfcomm.c,v 1.27 2007/10/29 19:06:47 emax Exp $
+ * $FreeBSD: src/sys/netgraph/bluetooth/socket/ng_btsocket_rfcomm.c,v 1.29 2008/10/23 15:53:51 des Exp $
  */
 
 #include <sys/param.h>
@@ -71,19 +71,23 @@ MALLOC_DEFINE(M_NETGRAPH_BTSOCKET_RFCOMM, "netgraph_btsocks_rfcomm",
 
 /* Debug */
 #define NG_BTSOCKET_RFCOMM_INFO \
-	if (ng_btsocket_rfcomm_debug_level >= NG_BTSOCKET_INFO_LEVEL) \
+	if (ng_btsocket_rfcomm_debug_level >= NG_BTSOCKET_INFO_LEVEL && \
+	    ppsratecheck(&ng_btsocket_rfcomm_lasttime, &ng_btsocket_rfcomm_curpps, 1)) \
 		printf
 
 #define NG_BTSOCKET_RFCOMM_WARN \
-	if (ng_btsocket_rfcomm_debug_level >= NG_BTSOCKET_WARN_LEVEL) \
+	if (ng_btsocket_rfcomm_debug_level >= NG_BTSOCKET_WARN_LEVEL && \
+	    ppsratecheck(&ng_btsocket_rfcomm_lasttime, &ng_btsocket_rfcomm_curpps, 1)) \
 		printf
 
 #define NG_BTSOCKET_RFCOMM_ERR \
-	if (ng_btsocket_rfcomm_debug_level >= NG_BTSOCKET_ERR_LEVEL) \
+	if (ng_btsocket_rfcomm_debug_level >= NG_BTSOCKET_ERR_LEVEL && \
+	    ppsratecheck(&ng_btsocket_rfcomm_lasttime, &ng_btsocket_rfcomm_curpps, 1)) \
 		printf
 
 #define NG_BTSOCKET_RFCOMM_ALERT \
-	if (ng_btsocket_rfcomm_debug_level >= NG_BTSOCKET_ALERT_LEVEL) \
+	if (ng_btsocket_rfcomm_debug_level >= NG_BTSOCKET_ALERT_LEVEL && \
+	    ppsratecheck(&ng_btsocket_rfcomm_lasttime, &ng_btsocket_rfcomm_curpps, 1)) \
 		printf
 
 #define	ALOT	0x7fff
@@ -191,6 +195,8 @@ static LIST_HEAD(, ng_btsocket_rfcomm_session)	ng_btsocket_rfcomm_sessions;
 static struct mtx				ng_btsocket_rfcomm_sessions_mtx;
 static LIST_HEAD(, ng_btsocket_rfcomm_pcb)	ng_btsocket_rfcomm_sockets;
 static struct mtx				ng_btsocket_rfcomm_sockets_mtx;
+static struct timeval				ng_btsocket_rfcomm_lasttime;
+static int					ng_btsocket_rfcomm_curpps;
 
 /* Sysctl tree */
 SYSCTL_DECL(_net_bluetooth_rfcomm_sockets);
@@ -399,7 +405,7 @@ ng_btsocket_rfcomm_attach(struct socket *so, int proto, struct thread *td)
 	}
 
 	/* Allocate the PCB */
-        MALLOC(pcb, ng_btsocket_rfcomm_pcb_p, sizeof(*pcb),
+        pcb = malloc(sizeof(*pcb),
 		M_NETGRAPH_BTSOCKET_RFCOMM, M_NOWAIT | M_ZERO);
         if (pcb == NULL)
                 return (ENOMEM);
@@ -745,7 +751,7 @@ ng_btsocket_rfcomm_detach(struct socket *so)
 
 	mtx_destroy(&pcb->pcb_mtx);
 	bzero(pcb, sizeof(*pcb));
-	FREE(pcb, M_NETGRAPH_BTSOCKET_RFCOMM);
+	free(pcb, M_NETGRAPH_BTSOCKET_RFCOMM);
 
 	soisdisconnected(so);
 	so->so_pcb = NULL;
@@ -1063,7 +1069,7 @@ ng_btsocket_rfcomm_sessions_task(void *ctx, int pending)
 
 			mtx_destroy(&s->session_mtx);
 			bzero(s, sizeof(*s));
-			FREE(s, M_NETGRAPH_BTSOCKET_RFCOMM);
+			free(s, M_NETGRAPH_BTSOCKET_RFCOMM);
 		} else
 			mtx_unlock(&s->session_mtx);
 
@@ -1264,7 +1270,7 @@ ng_btsocket_rfcomm_session_create(ng_btsocket_rfcomm_session_p *sp,
 	mtx_assert(&ng_btsocket_rfcomm_sessions_mtx, MA_OWNED);
 
 	/* Allocate the RFCOMM session */
-        MALLOC(s, ng_btsocket_rfcomm_session_p, sizeof(*s),
+        s = malloc(sizeof(*s),
 		M_NETGRAPH_BTSOCKET_RFCOMM, M_NOWAIT | M_ZERO);
         if (s == NULL)
                 return (ENOMEM);
@@ -1384,7 +1390,7 @@ bad:
 
 	mtx_destroy(&s->session_mtx);
 	bzero(s, sizeof(*s));
-	FREE(s, M_NETGRAPH_BTSOCKET_RFCOMM);
+	free(s, M_NETGRAPH_BTSOCKET_RFCOMM);
 
 	return (error);
 } /* ng_btsocket_rfcomm_session_create */

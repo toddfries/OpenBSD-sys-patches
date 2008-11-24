@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ddb/db_examine.c,v 1.34 2007/10/27 20:19:11 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/ddb/db_examine.c,v 1.35 2008/03/07 18:09:07 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -165,6 +165,12 @@ db_examine(addr, fmt, count)
 				    else
 					db_printf("\\%03o", (int)value);
 				}
+				break;
+			    case 'S':	/* symbol */
+				value = db_get_value(addr, sizeof(void *),
+				    FALSE);
+				addr += sizeof(void *);
+				db_printsym(value, DB_STGY_ANY);
 				break;
 			    case 'i':	/* instruction */
 				addr = db_disasm(addr, FALSE);

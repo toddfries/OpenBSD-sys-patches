@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/uipc_cow.c,v 1.26 2005/10/23 07:41:56 alc Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/uipc_cow.c,v 1.27 2008/02/01 19:36:25 phk Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -160,8 +160,8 @@ socow_setup(struct mbuf *m0, struct uio *uio)
 	/* 
 	 * attach to mbuf
 	 */
-	MEXTADD(m0, sf_buf_kva(sf), PAGE_SIZE, socow_iodone, sf, M_RDONLY,
-	    EXT_SFBUF);
+	MEXTADD(m0, sf_buf_kva(sf), PAGE_SIZE, socow_iodone,
+	    (void*)sf_buf_kva(sf), sf, M_RDONLY, EXT_SFBUF);
 	m0->m_len = PAGE_SIZE - offset;
 	m0->m_data = (caddr_t)sf_buf_kva(sf) + offset;
 	socow_stats.success++;

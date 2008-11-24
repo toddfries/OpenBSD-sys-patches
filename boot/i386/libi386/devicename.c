@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/i386/libi386/devicename.c,v 1.9 2007/10/24 21:32:59 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/i386/libi386/devicename.c,v 1.11 2008/11/17 20:49:29 pjd Exp $");
 
 #include <stand.h>
 #include <string.h>
@@ -150,6 +150,8 @@ i386_parsedev(struct i386_devdesc **dev, const char *devspec, const char **path)
 		    cp++;
 		}
 	    }
+	} else {
+		cp = np;
 	}
 	if (*cp && (*cp != ':')) {
 	    err = EINVAL;
@@ -165,6 +167,7 @@ i386_parsedev(struct i386_devdesc **dev, const char *devspec, const char **path)
 
     case DEVT_CD:
     case DEVT_NET:
+    case DEVT_ZFS:
 	unit = 0;
 
 	if (*np && (*np != ':')) {
@@ -173,6 +176,8 @@ i386_parsedev(struct i386_devdesc **dev, const char *devspec, const char **path)
 		err = EUNIT;
 		goto fail;
 	    }
+	} else {
+		cp = np;
 	}
 	if (*cp && (*cp != ':')) {
 	    err = EINVAL;
@@ -234,6 +239,7 @@ i386_fmtdev(void *vdev)
 	break;
 
     case DEVT_NET:
+    case DEVT_ZFS:
 	sprintf(buf, "%s%d:", dev->d_dev->dv_name, dev->d_unit);
 	break;
     }

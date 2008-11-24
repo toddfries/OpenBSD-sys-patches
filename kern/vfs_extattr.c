@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/vfs_extattr.c,v 1.432 2007/10/24 19:03:55 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/vfs_extattr.c,v 1.435 2008/03/31 12:01:20 kib Exp $");
 
 #include "opt_mac.h"
 
@@ -37,6 +37,7 @@ __FBSDID("$FreeBSD: src/sys/kern/vfs_extattr.c,v 1.432 2007/10/24 19:03:55 rwats
 #include <sys/mount.h>
 #include <sys/mutex.h>
 #include <sys/sysproto.h>
+#include <sys/fcntl.h>
 #include <sys/namei.h>
 #include <sys/filedesc.h>
 #include <sys/limits.h>
@@ -162,7 +163,7 @@ extattr_set_vp(struct vnode *vp, int attrnamespace, const char *attrname,
 	if (error)
 		return (error);
 	VOP_LEASE(vp, td, td->td_ucred, LEASE_WRITE);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 
 	aiov.iov_base = data;
 	aiov.iov_len = nbytes;
@@ -192,7 +193,7 @@ extattr_set_vp(struct vnode *vp, int attrnamespace, const char *attrname,
 	td->td_retval[0] = cnt;
 
 done:
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	vn_finished_write(mp);
 	return (error);
 }
@@ -328,7 +329,7 @@ extattr_get_vp(struct vnode *vp, int attrnamespace, const char *attrname,
 
 	VFS_ASSERT_GIANT(vp->v_mount);
 	VOP_LEASE(vp, td, td->td_ucred, LEASE_READ);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 
 	/*
 	 * Slightly unusual semantics: if the user provides a NULL data
@@ -374,7 +375,7 @@ extattr_get_vp(struct vnode *vp, int attrnamespace, const char *attrname,
 		td->td_retval[0] = size;
 
 done:
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	return (error);
 }
 
@@ -509,7 +510,7 @@ extattr_delete_vp(struct vnode *vp, int attrnamespace, const char *attrname,
 	if (error)
 		return (error);
 	VOP_LEASE(vp, td, td->td_ucred, LEASE_WRITE);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 
 #ifdef MAC
 	error = mac_vnode_check_deleteextattr(td->td_ucred, vp, attrnamespace,
@@ -526,7 +527,7 @@ extattr_delete_vp(struct vnode *vp, int attrnamespace, const char *attrname,
 #ifdef MAC
 done:
 #endif
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	vn_finished_write(mp);
 	return (error);
 }
@@ -651,7 +652,7 @@ extattr_list_vp(struct vnode *vp, int attrnamespace, void *data,
 
 	VFS_ASSERT_GIANT(vp->v_mount);
 	VOP_LEASE(vp, td, td->td_ucred, LEASE_READ);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 
 	auiop = NULL;
 	sizep = NULL;
@@ -691,7 +692,7 @@ extattr_list_vp(struct vnode *vp, int attrnamespace, void *data,
 		td->td_retval[0] = size;
 
 done:
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	return (error);
 }
 

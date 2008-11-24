@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/agp/agp.c,v 1.58 2007/11/12 21:51:36 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/agp/agp.c,v 1.60 2008/09/27 08:51:18 ed Exp $");
 
 #include "opt_bus.h"
 
@@ -80,7 +80,7 @@ static struct cdevsw agp_cdevsw = {
 };
 
 static devclass_t agp_devclass;
-#define KDEV2DEV(kdev)	devclass_get_device(agp_devclass, minor(kdev))
+#define KDEV2DEV(kdev)	devclass_get_device(agp_devclass, dev2unit(kdev))
 
 /* Helper functions for implementing chipset mini drivers. */
 
@@ -118,7 +118,8 @@ agp_find_display(void)
 		bus = devclass_get_device(pci, busnum);
 		if (!bus)
 			continue;
-		device_get_children(bus, &kids, &numkids);
+		if (device_get_children(bus, &kids, &numkids) != 0)
+			continue;
 		for (i = 0; i < numkids; i++) {
 			dev = kids[i];
 			if (pci_get_class(dev) == PCIC_DISPLAY

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/iicbus/iicsmb.c,v 1.14 2006/09/11 20:52:41 jhb Exp $
+ * $FreeBSD: src/sys/dev/iicbus/iicsmb.c,v 1.16 2008/08/04 21:03:06 jhb Exp $
  *
  */
 
@@ -46,12 +46,13 @@
  */
 
 #include <sys/param.h>
-#include <sys/kernel.h>
-#include <sys/systm.h>
-#include <sys/module.h>
 #include <sys/bus.h>
+#include <sys/kernel.h>
+#include <sys/lock.h>
+#include <sys/module.h>
+#include <sys/mutex.h>
+#include <sys/systm.h>
 #include <sys/uio.h>
-
 
 #include <dev/iicbus/iiconf.h>
 #include <dev/iicbus/iicbus.h>
@@ -74,6 +75,7 @@ struct iicsmb_softc {
 	char low;			/* low byte received first */
 	char high;			/* high byte */
 
+	struct mtx lock;
 	device_t smbus;
 };
 
@@ -138,7 +140,9 @@ static driver_t iicsmb_driver = {
 static void
 iicsmb_identify(driver_t *driver, device_t parent)
 {
-	BUS_ADD_CHILD(parent, 0, "iicsmb", -1);
+
+	if (device_find_child(parent, "iicsmb", -1) == NULL)
+		BUS_ADD_CHILD(parent, 0, "iicsmb", -1);
 }
 
 static int
@@ -152,6 +156,8 @@ static int
 iicsmb_attach(device_t dev)
 {
 	struct iicsmb_softc *sc = (struct iicsmb_softc *)device_get_softc(dev);
+
+	mtx_init(&sc->lock, "iicsmb", NULL, MTX_DEF);
 
 	sc->smbus = device_add_child(dev, "smbus", -1);
 
@@ -170,6 +176,7 @@ iicsmb_detach(device_t dev)
 	if (sc->smbus) {
 		device_delete_child(dev, sc->smbus);
 	}
+	mtx_destroy(&sc->lock);
 
 	return (0);
 }
@@ -184,6 +191,7 @@ iicsmb_intr(device_t dev, int event, char *buf)
 {
 	struct iicsmb_softc *sc = (struct iicsmb_softc *)device_get_softc(dev);
 
+	mtx_lock(&sc->lock);
 	switch (event) {
 	case INTR_GENERAL:
 	case INTR_START:
@@ -242,6 +250,7 @@ end:
 	default:
 		panic("%s: unknown event (%d)!", __func__, event);
 	}
+	mtx_unlock(&sc->lock);
 
 	return;
 }
@@ -294,7 +303,7 @@ iicsmb_quick(device_t dev, u_char slave, int how)
 
 	if (!error)
 		error = iicbus_stop(parent);
-
+		
 	return (error);
 }
 

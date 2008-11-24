@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/dev/usb/if_rum.c,v 1.20 2008/05/01 04:55:00 thompsa Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/if_rum.c,v 1.26 2008/08/19 01:44:56 kevlo Exp $	*/
 
 /*-
  * Copyright (c) 2005-2007 Damien Bergamini <damien.bergamini@free.fr>
@@ -18,7 +18,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/if_rum.c,v 1.20 2008/05/01 04:55:00 thompsa Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/if_rum.c,v 1.26 2008/08/19 01:44:56 kevlo Exp $");
 
 /*-
  * Ralink Technology RT2501USB/RT2601USB chipset driver
@@ -97,6 +97,8 @@ static const struct usb_devno rum_devs[] = {
 	{ USB_VENDOR_DICKSMITH,         USB_PRODUCT_DICKSMITH_RT2573 },
 	{ USB_VENDOR_DLINK2,		USB_PRODUCT_DLINK2_DWLG122C1 },
 	{ USB_VENDOR_DLINK2,            USB_PRODUCT_DLINK2_WUA1340 },
+	{ USB_VENDOR_DLINK2,            USB_PRODUCT_DLINK2_DWA111 },
+	{ USB_VENDOR_DLINK2,            USB_PRODUCT_DLINK2_DWA110 },
 	{ USB_VENDOR_GIGABYTE,          USB_PRODUCT_GIGABYTE_GNWB01GS },
 	{ USB_VENDOR_GIGABYTE,          USB_PRODUCT_GIGABYTE_GNWI05GS },
 	{ USB_VENDOR_GIGASET,           USB_PRODUCT_GIGASET_RT2573 },
@@ -195,7 +197,8 @@ static int		rum_prepare_beacon(struct rum_softc *,
 			    struct ieee80211vap *);
 static int		rum_raw_xmit(struct ieee80211_node *, struct mbuf *,
 			    const struct ieee80211_bpf_params *);
-static struct ieee80211_node *rum_node_alloc(struct ieee80211_node_table *);
+static struct ieee80211_node *rum_node_alloc(struct ieee80211vap *,
+			    const uint8_t mac[IEEE80211_ADDR_LEN]);
 static void		rum_newassoc(struct ieee80211_node *, int);
 static void		rum_scan_start(struct ieee80211com *);
 static void		rum_scan_end(struct ieee80211com *);
@@ -490,7 +493,8 @@ rum_attach(device_t self)
 
 	/* set device capabilities */
 	ic->ic_caps =
-	      IEEE80211_C_IBSS		/* IBSS mode supported */
+	      IEEE80211_C_STA		/* station mode supported */
+	    | IEEE80211_C_IBSS		/* IBSS mode supported */
 	    | IEEE80211_C_MONITOR	/* monitor mode supported */
 	    | IEEE80211_C_HOSTAP	/* HostAp mode supported */
 	    | IEEE80211_C_TXPMGT	/* tx power management */
@@ -723,7 +727,7 @@ rum_alloc_rx_list(struct rum_softc *sc)
 
 	return 0;
 
-fail:	rum_free_tx_list(sc);
+fail:	rum_free_rx_list(sc);
 	return error;
 }
 
@@ -936,7 +940,8 @@ rum_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 		tap->wr_flags = IEEE80211_RADIOTAP_F_FCS;
 		tap->wr_rate = ieee80211_plcp2rate(desc->rate,
-		    le32toh(desc->flags) & RT2573_RX_OFDM);
+		    (desc->flags & htole32(RT2573_RX_OFDM)) ?
+			IEEE80211_T_OFDM : IEEE80211_T_CCK);
 		tap->wr_chan_freq = htole16(ic->ic_curchan->ic_freq);
 		tap->wr_chan_flags = htole16(ic->ic_curchan->ic_flags);
 		tap->wr_antenna = sc->rx_ant;
@@ -963,6 +968,29 @@ skip:	/* setup a new transfer */
 	usbd_transfer(xfer);
 }
 
+static uint8_t
+rum_plcp_signal(int rate)
+{
+	switch (rate) {
+	/* OFDM rates (cf IEEE Std 802.11a-1999, pp. 14 Table 80) */
+	case 12:	return 0xb;
+	case 18:	return 0xf;
+	case 24:	return 0xa;
+	case 36:	return 0xe;
+	case 48:	return 0x9;
+	case 72:	return 0xd;
+	case 96:	return 0x8;
+	case 108:	return 0xc;
+
+	/* CCK rates (NB: not IEEE std, device-specific) */
+	case 2:		return 0x0;
+	case 4:		return 0x1;
+	case 11:	return 0x2;
+	case 22:	return 0x3;
+	}
+	return 0xff;		/* XXX unsupported/unknown rate */
+}
+
 static void
 rum_setup_tx_desc(struct rum_softc *sc, struct rum_tx_desc *desc,
     uint32_t flags, uint16_t xflags, int len, int rate)
@@ -982,7 +1010,7 @@ rum_setup_tx_desc(struct rum_softc *sc, struct rum_tx_desc *desc,
 	    RT2573_LOGCWMIN(4) | RT2573_LOGCWMAX(10));
 
 	/* setup PLCP fields */
-	desc->plcp_signal  = ieee80211_rate2plcp(rate);
+	desc->plcp_signal  = rum_plcp_signal(rate);
 	desc->plcp_service = 4;
 
 	len += IEEE80211_CRC_LEN;
@@ -2369,7 +2397,8 @@ rum_amrr_update(usbd_xfer_handle xfer, usbd_private_handle priv,
 
 /* ARGUSED */
 static struct ieee80211_node *
-rum_node_alloc(struct ieee80211_node_table *nt __unused)
+rum_node_alloc(struct ieee80211vap *vap __unused,
+	const uint8_t mac[IEEE80211_ADDR_LEN] __unused)
 {
 	struct rum_node *rn;
 

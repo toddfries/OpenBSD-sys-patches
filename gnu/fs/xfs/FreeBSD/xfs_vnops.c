@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/gnu/fs/xfs/FreeBSD/xfs_vnops.c,v 1.6 2007/02/15 22:08:34 pjd Exp $
+ * $FreeBSD: src/sys/gnu/fs/xfs/FreeBSD/xfs_vnops.c,v 1.13 2008/10/28 13:44:11 trasz Exp $
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -180,14 +180,14 @@ static int
 _xfs_access(
     	struct vop_access_args /* {
 		struct vnode *a_vp;
-		int  a_mode;
+		accmode_t a_accmode;
 		struct ucred *a_cred;
 		struct thread *a_td;
 	} */ *ap)
 {
 	int error;
 
-	XVOP_ACCESS(VPTOXFSVP(ap->a_vp), ap->a_mode, ap->a_cred, error);
+	XVOP_ACCESS(VPTOXFSVP(ap->a_vp), ap->a_accmode, ap->a_cred, error);
 	return (error);
 }
 
@@ -230,7 +230,6 @@ _xfs_getattr(
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		struct ucred *a_cred;
-		struct thread *a_td;
 	} */ *ap)
 {
 	struct vnode	*vp = ap->a_vp;
@@ -241,7 +240,6 @@ _xfs_getattr(
 	/* extract the xfs vnode from the private data */
 	//xfs_vnode_t	*xvp = (xfs_vnode_t *)vp->v_data;
 
-	VATTR_NULL(vap);
 	memset(&va,0,sizeof(xfs_vattr_t));
 	va.va_mask = XFS_AT_STAT|XFS_AT_GENCOUNT|XFS_AT_XFLAGS;
 
@@ -274,15 +272,9 @@ _xfs_getattr(
 
 	/*
 	 * Fields with no direct equivalent in XFS
-	 * leave initialized by VATTR_NULL
 	 */
-#if 0
 	vap->va_filerev = 0;
-	vap->va_birthtime = va.va_ctime;
-	vap->va_vaflags = 0;
 	vap->va_flags = 0;
-	vap->va_spare = 0;
-#endif
 
 	return (0);
 }
@@ -293,7 +285,6 @@ _xfs_setattr(
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		struct ucred *a_cred;
-		struct thread *a_td;
 	} */ *ap)
 {
 	struct vnode *vp = ap->a_vp;
@@ -751,7 +742,7 @@ _xfs_create(
 
 	if (error == 0) {
 		*ap->a_vpp = xvp->v_vnode;
-		VOP_LOCK(xvp->v_vnode, LK_EXCLUSIVE, td);
+		VOP_LOCK(xvp->v_vnode, LK_EXCLUSIVE);
 	}
 
 	return (error);
@@ -886,7 +877,7 @@ _xfs_symlink(
 
 	if (error == 0) {
 		*ap->a_vpp = xvp->v_vnode;
-		VOP_LOCK(xvp->v_vnode, LK_EXCLUSIVE, td);
+		VOP_LOCK(xvp->v_vnode, LK_EXCLUSIVE);
 	}
 
 	return (error);
@@ -922,7 +913,7 @@ _xfs_mknod(
 
 	if (error == 0) {
 		*ap->a_vpp = xvp->v_vnode;
-		VOP_LOCK(xvp->v_vnode, LK_EXCLUSIVE, td);
+		VOP_LOCK(xvp->v_vnode, LK_EXCLUSIVE);
 	}
 
 	return (error);
@@ -956,7 +947,7 @@ _xfs_mkdir(
 
 	if (error == 0) {
 		*ap->a_vpp = xvp->v_vnode;
-		VOP_LOCK(xvp->v_vnode, LK_EXCLUSIVE, td);
+		VOP_LOCK(xvp->v_vnode, LK_EXCLUSIVE);
 	}
 
 	return (error);
@@ -1231,13 +1222,13 @@ _xfs_advlock(
 #ifdef notyet
 	switch (ap->a_op) {
 	    case F_SETLK:
-		error = lf_advlock(ap, &np->n_lockf, size);
+		error = lf_advlock(ap, &vp->v_lockf, size);
 		break;
 	    case F_UNLCK:
-		lf_advlock(ap, &np->n_lockf, size);
+		lf_advlock(ap, &vp->v_lockf, size);
 		break;
 	    case F_GETLK:
-		error = lf_advlock(ap, &np->n_lockf, size);
+		error = lf_advlock(ap, &vp->v_lockf, size);
 		break;
 	    default:
 		return (EINVAL);
@@ -1294,7 +1285,7 @@ _xfs_cachedlookup(
 	tvp = cvp->v_vnode;
 
 	if (nameiop == DELETE && islastcn) {
-		if ((error = vn_lock(tvp, LK_EXCLUSIVE, td))) {
+		if ((error = vn_lock(tvp, LK_EXCLUSIVE))) {
 			vrele(tvp);
 			goto err_out;
 		}
@@ -1310,7 +1301,7 @@ _xfs_cachedlookup(
 	 }
 
 	if (nameiop == RENAME && islastcn) {
-		if ((error = vn_lock(tvp, LK_EXCLUSIVE, td))) {
+		if ((error = vn_lock(tvp, LK_EXCLUSIVE))) {
 			vrele(tvp);
 			goto err_out;
 		}
@@ -1322,10 +1313,10 @@ _xfs_cachedlookup(
 	}
 
 	if (flags & ISDOTDOT) {
-		VOP_UNLOCK(dvp, 0, td);
-		error = vn_lock(tvp, cnp->cn_lkflags, td);
+		VOP_UNLOCK(dvp, 0);
+		error = vn_lock(tvp, cnp->cn_lkflags);
 		if (error) {
-			vn_lock(dvp, LK_EXCLUSIVE | LK_RETRY, td);
+			vn_lock(dvp, LK_EXCLUSIVE | LK_RETRY);
 			vrele(tvp);
 			goto err_out;
 		}
@@ -1334,7 +1325,7 @@ _xfs_cachedlookup(
 		*vpp = tvp;
 		KASSERT(tvp == dvp, ("not same directory"));
 	} else {
-		if ((error = vn_lock(tvp, cnp->cn_lkflags, td))) {
+		if ((error = vn_lock(tvp, cnp->cn_lkflags))) {
 			vrele(tvp);
 			goto err_out;
 		}

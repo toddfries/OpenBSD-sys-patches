@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/NOTES,v 1.1454 2007/09/26 21:14:17 marius Exp $
+# $FreeBSD: src/sys/conf/NOTES,v 1.1516 2008/11/12 09:52:06 yongari Exp $
 #
 # NOTES -- Lines that can be cut/pasted into kernel and hints configs.
 #
@@ -126,8 +126,7 @@ options 	MAXPHYS=(128*1024)
 
 
 # This allows you to actually store this configuration file into
-# the kernel binary itself, where it may be later read by saying:
-#    strings -n 3 /boot/kernel/kernel | sed -n 's/^___//p' > MYKERNEL
+# the kernel binary itself. See config(8) for more details.
 #
 options 	INCLUDE_CONFIG_FILE     # Include this file in kernel
 
@@ -141,13 +140,17 @@ options 	GEOM_FOX		# Redundant path mitigation
 options 	GEOM_GATE		# Userland services.
 options 	GEOM_JOURNAL		# Journaling.
 options 	GEOM_LABEL		# Providers labelization.
+options 	GEOM_LINUX_LVM		# Linux LVM2 volumes
 options 	GEOM_MBR		# DOS/MBR partitioning
 options 	GEOM_MIRROR		# Disk mirroring.
 options 	GEOM_MULTIPATH		# Disk multipath
 options 	GEOM_NOP		# Test class.
 options 	GEOM_PART_APM		# Apple partitioning
+options 	GEOM_PART_BSD		# BSD disklabel
 options 	GEOM_PART_GPT		# GPT partitioning
 options 	GEOM_PART_MBR		# MBR partitioning
+options 	GEOM_PART_PC98		# PC-9800 disk partitioning
+options 	GEOM_PART_VTOC8		# SMI VTOC8 disk label
 options 	GEOM_PC98		# NEC PC9800 partitioning
 options 	GEOM_RAID3		# RAID3 functionality.
 options 	GEOM_SHSEC		# Shared secret.
@@ -183,7 +186,11 @@ options 	ROOTDEVNAME=\"ufs:da0s2e\"
 # which leads to better responsiveness even on uniprocessor machines.  This
 # will eventually become the default scheduler.
 #
+# SCHED_STATS is a debugging option which keeps some stats in the sysctl
+# tree at 'kern.sched.stats' and is useful for debugging scheduling decisions.
+#
 options 	SCHED_4BSD
+options		SCHED_STATS
 #options 	SCHED_ULE
 
 #####################################################################
@@ -205,12 +212,6 @@ options 	NO_ADAPTIVE_MUTEXES
 # CPU.  This behaviour is enabled by default, so this option can be used
 # to disable it.
 options 	NO_ADAPTIVE_RWLOCKS
-
-# ADAPTIVE_GIANT causes the Giant lock to also be made adaptive when
-# running without NO_ADAPTIVE_MUTEXES.  Normally, because Giant is assumed
-# to be held for extended periods, contention on Giant will cause a thread
-# to sleep rather than spinning.
-options 	ADAPTIVE_GIANT
 
 # ADAPTIVE_SX changes the behavior of sx locks to spin if the thread
 # that currently owns the lock is executing on another CPU.  Note that
@@ -241,9 +242,9 @@ options 	SX_NOINLINE
 
 # SMP Debugging Options:
 #
-# PREEMPTION allows the threads that are in the kernel to be preempted
-#	  by higher priority threads.  It helps with interactivity and
-#	  allows interrupt threads to run sooner rather than waiting.
+# PREEMPTION allows the threads that are in the kernel to be preempted by
+#	  higher priority [interrupt] threads.  It helps with interactivity
+#	  and allows interrupt threads to run sooner rather than waiting.
 #	  WARNING! Only tested on amd64 and i386.
 # FULL_PREEMPTION instructs the kernel to preempt non-realtime kernel
 #	  threads.  Its sole use is to expose race conditions and other
@@ -253,7 +254,8 @@ options 	SX_NOINLINE
 #	  Relies on the PREEMPTION option.  DON'T TURN THIS ON.
 # MUTEX_DEBUG enables various extra assertions in the mutex code.
 # SLEEPQUEUE_PROFILING enables rudimentary profiling of the hash table
-#	  used to hold active sleep queues.
+#	  used to hold active sleep queues as well as sleep wait message
+#	  frequency.
 # TURNSTILE_PROFILING enables rudimentary profiling of the hash table
 #	  used to hold active lock queues.
 # WITNESS enables the witness code which detects deadlocks and cycles
@@ -306,6 +308,9 @@ options 	COMPAT_FREEBSD5
 # Enable FreeBSD6 compatibility syscalls
 options 	COMPAT_FREEBSD6
 
+# Enable FreeBSD7 compatibility syscalls
+options 	COMPAT_FREEBSD7
+
 #
 # These three options provide support for System V Interface
 # Definition-style interprocess communication, in the form of shared
@@ -351,6 +356,12 @@ options 	DDB_NUMSYM
 # Enable the remote gdb debugger backend.
 #
 options 	GDB
+
+#
+# Enable the kernel DTrace hooks which are required to load the DTrace
+# kernel modules.
+#
+options 	KDTRACE_HOOKS
 
 #
 # SYSCTL_DEBUG enables a 'sysctl' debug tree that can be used to dump the
@@ -471,6 +482,13 @@ options 	REGRESSION
 #
 options 	COMPILING_LINT
 
+#
+# STACK enables the stack(9) facility, allowing the capture of kernel stack
+# for the purpose of procinfo(1), etc.  stack(9) will also be compiled in
+# automatically if DDB(4) is compiled into the kernel.
+#
+options 	STACK
+
 
 #####################################################################
 # PERFORMANCE MONITORING OPTIONS
@@ -496,6 +514,8 @@ options 	HWPMC_HOOKS		# Other necessary kernel hooks
 #
 options 	INET			#Internet communications protocols
 options 	INET6			#IPv6 communications protocols
+
+options		ROUTETABLES=2		# max 16. 1 is back compatible.
 
 # In order to enable IPSEC you MUST also add device crypto to 
 # your kernel configuration
@@ -604,7 +624,7 @@ options 	SCTP_LTRACE_ERRORS
 # broken or changes with CPU throttling then you must also have the ALTQ_NOPCC
 # option.
 options 	ALTQ
-options 	ALTQ_CBQ	# Class Bases Queueing
+options 	ALTQ_CBQ	# Class Based Queueing
 options 	ALTQ_RED	# Random Early Detection
 options 	ALTQ_RIO	# RED In/Out
 options 	ALTQ_HFSC	# Hierarchical Packet Scheduler
@@ -628,7 +648,6 @@ options 	NETGRAPH_ATMLLC
 options 	NETGRAPH_ATM_ATMPIF
 options 	NETGRAPH_BLUETOOTH		# ng_bluetooth(4)
 options 	NETGRAPH_BLUETOOTH_BT3C		# ng_bt3c(4)
-options 	NETGRAPH_BLUETOOTH_H4		# ng_h4(4)
 options 	NETGRAPH_BLUETOOTH_HCI		# ng_hci(4)
 options 	NETGRAPH_BLUETOOTH_L2CAP	# ng_l2cap(4)
 options 	NETGRAPH_BLUETOOTH_SOCKET	# ng_btsocket(4)
@@ -671,7 +690,6 @@ options 	NETGRAPH_SPPP
 options 	NETGRAPH_TAG
 options 	NETGRAPH_TCPMSS
 options 	NETGRAPH_TEE
-options 	NETGRAPH_TTY
 options 	NETGRAPH_UI
 options 	NETGRAPH_VJC
 
@@ -695,7 +713,7 @@ device		mn	# Munich32x/Falc54 Nx64kbit/sec cards.
 #  according to IEEE 802.1Q.  It requires `device miibus'.
 #  The `wlan' device provides generic code to support 802.11
 #  drivers, including host AP mode; it is MANDATORY for the wi,
-#  ath, and awi drivers and will eventually be required by all 802.11 drivers.
+#  and ath drivers and will eventually be required by all 802.11 drivers.
 #  The `wlan_wep', `wlan_tkip', and `wlan_ccmp' devices provide
 #  support for WEP, TKIP, and AES-CCMP crypto protocols optionally
 #  used with 802.11 devices that depend on the `wlan' module.
@@ -750,14 +768,14 @@ device		mn	# Munich32x/Falc54 Nx64kbit/sec cards.
 device		ether			#Generic Ethernet
 device		vlan			#VLAN support (needs miibus)
 device		wlan			#802.11 support
+options		IEEE80211_DEBUG		#enable debugging msgs
+options		IEEE80211_AMPDU_AGE	#age frames in AMPDU reorder q's
 device		wlan_wep		#802.11 WEP support
 device		wlan_ccmp		#802.11 CCMP support
 device		wlan_tkip		#802.11 TKIP support
 device		wlan_xauth		#802.11 external authenticator support
 device		wlan_acl		#802.11 MAC ACL support
 device		wlan_amrr		#AMRR transmit rate control algorithm
-device		wlan_scan_ap		#802.11 AP mode scanning
-device		wlan_scan_sta		#802.11 STA mode scanning
 device		token			#Generic TokenRing
 device		fddi			#Generic FDDI
 device		arcnet			#Generic Arcnet
@@ -768,7 +786,6 @@ device		disc			#Discard device based on loopback
 device		edsc			#Ethernet discard device
 device		tap			#Virtual Ethernet driver
 device		tun			#Tunnel driver (ppp(8), nos-tun(8))
-device		sl			#Serial Line IP
 device		gre			#IP over IP tunneling
 device		if_bridge		#Bridge interface
 device		pf			#PF OpenBSD packet-filter firewall
@@ -776,10 +793,6 @@ device		pflog			#logging support interface for PF
 device		pfsync			#synchronization interface for PF
 device		carp			#Common Address Redundancy Protocol
 device		enc			#IPsec interface
-device		ppp			#Point-to-point protocol
-options 	PPP_BSDCOMP		#PPP BSD-compress support
-options 	PPP_DEFLATE		#PPP zlib/deflate/gzip support
-options 	PPP_FILTER		#enable bpf filtering (needs bpf)
 device		lagg			#Link aggregation interface
 
 device		ef			# Multiple ethernet frames support
@@ -830,8 +843,7 @@ device		stf			#6to4 IPv6 over IPv4 encapsulation
 # crafting the ruleset.
 #
 # IPFIREWALL_NAT adds support for in kernel nat in ipfw, and it requires
-# LIBALIAS. To build an ipfw kld with nat support enabled, add 
-# "CFLAGS+= -DIPFIREWALL_NAT" to your make.conf.
+# LIBALIAS.
 #
 # IPSTEALTH enables code to support stealth forwarding (i.e., forwarding
 # packets without touching the TTL).  This can be useful to hide firewalls
@@ -859,10 +871,16 @@ options 	TCPDEBUG
 # The MBUF_STRESS_TEST option enables options which create
 # various random failures / extreme cases related to mbuf
 # functions.  See mbuf(9) for a list of available test cases.
+# MBUF_PROFILING enables code to profile the mbuf chains
+# exiting the system (via participating interfaces) and
+# return a logarithmic histogram of monitored parameters
+# (e.g. packet size, wasted space, number of mbufs in chain).
 options 	MBUF_STRESS_TEST
+options		MBUF_PROFILING
 
 # Statically Link in accept filters
 options 	ACCEPT_FILTER_DATA
+options 	ACCEPT_FILTER_DNS
 options 	ACCEPT_FILTER_HTTP
 
 # TCP_SIGNATURE adds support for RFC 2385 (TCP-MD5) digests. These are
@@ -871,12 +889,12 @@ options 	ACCEPT_FILTER_HTTP
 # This is enabled on a per-socket basis using the TCP_MD5SIG socket option.
 # This requires the use of 'device crypto', 'options IPSEC'
 # or 'device cryptodev'.
-#options 	TCP_SIGNATURE		#include support for RFC 2385
+options 	TCP_SIGNATURE		#include support for RFC 2385
 
 # DUMMYNET enables the "dummynet" bandwidth limiter.  You need IPFIREWALL
 # as well.  See dummynet(4) and ipfw(8) for more info.  When you run
-# DUMMYNET it is advisable to also have "options HZ=1000" to achieve a
-# smoother scheduling of the traffic.
+# DUMMYNET it is advisable to also have at least "options HZ=1000" to achieve
+# a smooth scheduling of the traffic.
 options 	DUMMYNET
 
 # Zero copy sockets support.  This enables "zero copy" for sending and
@@ -885,38 +903,6 @@ options 	DUMMYNET
 # page size of your architecture and that support header splitting.  See
 # zero_copy(9) for more details.
 options 	ZERO_COPY_SOCKETS
-
-#
-# ATM (HARP version) options
-#
-# XXX: These have been disabled in FreeBSD 7.0 as they are not MPSAFE.
-#
-# ATM_CORE includes the base ATM functionality code.  This must be included
-#	for ATM support.
-#
-# ATM_IP includes support for running IP over ATM.
-#
-# At least one (and usually only one) of the following signalling managers
-# must be included (note that all signalling managers include PVC support):
-# ATM_SIGPVC includes support for the PVC-only signalling manager `sigpvc'.
-# ATM_SPANS includes support for the `spans' signalling manager, which runs
-#	the FORE Systems's proprietary SPANS signalling protocol.
-# ATM_UNI includes support for the `uni30' and `uni31' signalling managers,
-#	which run the ATM Forum UNI 3.x signalling protocols.
-#
-# The `hfa' driver provides support for the FORE Systems, Inc.
-# PCA-200E ATM PCI Adapter.
-#
-# The `harp' pseudo-driver makes all NATM interface drivers available to HARP.
-#
-#options 	ATM_CORE		#core ATM protocol family
-#options 	ATM_IP			#IP over ATM support
-#options 	ATM_SIGPVC		#SIGPVC signalling manager
-#options 	ATM_SPANS		#SPANS signalling manager
-#options 	ATM_UNI			#UNI signalling manager
-
-#device		hfa			#FORE PCA-200E ATM PCI
-#device		harp			#Pseudo-interface for NATM
 
 
 #####################################################################
@@ -947,6 +933,7 @@ options 	FDESCFS			#File descriptor filesystem
 options 	HPFS			#OS/2 File system
 options 	MSDOSFS			#MS DOS File System (FAT, FAT32)
 options 	NFSSERVER		#Network File System server
+options		NFSLOCKD		#Network Lock Manager
 options 	NTFS			#NT File System
 options 	NULLFS			#NULL filesystem
 # Broken (depends on NCP):
@@ -1105,13 +1092,13 @@ options 	MAC_TEST
 # CLOCK OPTIONS
 
 # The granularity of operation is controlled by the kernel option HZ whose
-# default value (100) means a granularity of 10ms (1s/HZ).
-# Some subsystems, such as DUMMYNET, might benefit from a smaller
-# granularity such as 1ms or less, for a smoother scheduling of packets.
-# Consider, however, that reducing the granularity too much might
-# cause excessive overhead in clock interrupt processing,
-# potentially causing ticks to be missed and thus actually reducing
-# the accuracy of operation.
+# default value (1000 on most architectures) means a granularity of 1ms
+# (1s/HZ).  Historically, the default was 100, but finer granularity is
+# required for DUMMYNET and other systems on modern hardware.  There are
+# reasonable arguments that HZ should, in fact, be 100 still; consider,
+# that reducing the granularity too much might cause excessive overhead in
+# clock interrupt processing, potentially causing ticks to be missed and thus
+# actually reducing the accuracy of operation.
 
 options 	HZ=100
 
@@ -1288,11 +1275,7 @@ options 	SES_ENABLE_PASSTHROUGH
 #####################################################################
 # MISCELLANEOUS DEVICES AND OPTIONS
 
-# The `pty' device usually turns out to be ``effectively mandatory'',
-# as it is required for `telnetd', `rlogind', `screen', `emacs', and
-# `xterm', among others.
-
-device		pty		#Pseudo ttys
+device		pty		#BSD-style compatibility pseudo ttys
 device		nmdm		#back-to-back tty devices
 device		md		#Memory/malloc disk
 device		snp		#Snoop device - to look at pty/vty/etc..
@@ -1304,9 +1287,6 @@ options 	LIBICONV
 
 # Size of the kernel message buffer.  Should be N * pagesize.
 options 	MSGBUF_SIZE=40960
-
-# Maximum size of a tty or pty input buffer.
-options 	TTYHOG=8193
 
 
 #####################################################################
@@ -1600,6 +1580,7 @@ device		mly
 device		ida		# Compaq Smart RAID
 device		mlx		# Mylex DAC960
 device		amr		# AMI MegaRAID
+device 		amrp		# SCSI Passthrough interface (optional, CAM req.)
 device		mfi		# LSI MegaRAID SAS
 device		mfip		# LSI MegaRAID SAS passthrough, requires CAM
 options 	MFI_DEBUG
@@ -1706,7 +1687,8 @@ options 	BREAK_TO_DEBUGGER	# A BREAK on a serial console goes to
 
 # Solaris implements a new BREAK which is initiated by a character
 # sequence CR ~ ^b which is similar to a familiar pattern used on
-# Sun servers by the Remote Console.
+# Sun servers by the Remote Console.  There are FreeBSD extentions:
+# CR ~ ^p requests force panic and CR ~ ^r requests a clean reboot.
 options 	ALT_BREAK_TO_DEBUGGER
 
 # Serial Communications Controller
@@ -1724,7 +1706,7 @@ device		puc
 # MII bus support is required for some PCI 10/100 ethernet NICs,
 # namely those which use MII-compliant transceivers or implement
 # transceiver control interfaces that operate like an MII. Adding
-# "device miibus0" to the kernel config pulls in support for
+# "device miibus" to the kernel config pulls in support for
 # the generic miibus API and all of the PHY drivers, including a
 # generic one for PHYs that aren't specifically handled by an
 # individual driver.
@@ -1732,8 +1714,11 @@ device		miibus
 
 # an:   Aironet 4500/4800 802.11 wireless adapters. Supports the PCMCIA,
 #       PCI and ISA varieties.
-# awi:  Support for IEEE 802.11 PC Card devices using the AMD Am79C930 and
-#       Harris (Intersil) Chipset with PCnetMobile firmware by AMD.
+# ae:   Support for gigabit ethernet adapters based on the Attansic/Atheros
+#       L2 PCI-Express FastEthernet controllers.
+# age:  Support for gigabit ethernet adapters based on the Attansic/Atheros
+#       L1 PCI express gigabit ethernet controllers.
+# ale:  Support for Atheros AR8121/AR8113/AR8114 PCIe ethernet controllers.
 # bce:	Broadcom NetXtreme II (BCM5706/BCM5708) PCI/PCIe Gigabit Ethernet
 #       adapters.
 # bfe:	Broadcom BCM4401 Ethernet adapter.
@@ -1743,7 +1728,6 @@ device		miibus
 #	the embedded gigE NICs on Dell PowerEdge 2550 servers.
 # cm:	Arcnet SMC COM90c26 / SMC COM90c56
 #	(and SMC COM90c66 in '56 compatibility mode) adapters.
-# cnw:  Xircom CNW/Netware Airsurfer PC Card adapter
 # dc:   Support for PCI fast ethernet adapters based on the DEC/Intel 21143
 #       and various workalikes including:
 #       the ADMtek AL981 Comet and AN985 Centaur, the ASIX Electronics
@@ -1757,6 +1741,7 @@ device		miibus
 #       KNE110TX.
 # de:   Digital Equipment DC21040
 # em:   Intel Pro/1000 Gigabit Ethernet 82542, 82543, 82544 based adapters.
+# igb:  Intel Pro/1000 PCI Express Gigabit Ethernet: 82575 and later adapters.
 # ep:   3Com 3C509, 3C529, 3C556, 3C562D, 3C563D, 3C572, 3C574X, 3C579, 3C589
 #       and PC Card devices using these chipsets.
 # ex:   Intel EtherExpress Pro/10 and other i82595-based adapters,
@@ -1768,6 +1753,7 @@ device		miibus
 #	(hint of prefer_iomap can be done to prefer I/O instead of Mem mapping)
 # gem:  Apple GMAC/Sun ERI/Sun GEM
 # hme:  Sun HME (Happy Meal Ethernet)
+# jme:  JMicron JMC260 Fast Ethernet/JMC250 Gigabit Ethernet based adapters.
 # le:   AMD Am7900 LANCE and Am79C9xx PCnet
 # lge:	Support for PCI gigabit ethernet adapters based on the Level 1
 #	LXT1001 NetCellerator chipset. This includes the D-Link DGE-500SX,
@@ -1789,6 +1775,7 @@ device		miibus
 #	pcn(4) driver is left out of the kernel. The le(4) driver does not
 #	support the additional features like the MII bus and burst mode of
 #	the PCnet-FAST and greater chipsets though.
+# re:   RealTek 8139C+/8169/816xS/811xS/8101E PCI/PCIe Ethernet adapter
 # rl:   Support for PCI fast ethernet adapters based on the RealTek 8129/8139
 #       chipset.  Note that the RealTek driver defaults to using programmed
 #       I/O to do register accesses because memory mapped mode seems to cause
@@ -1804,7 +1791,6 @@ device		miibus
 #       card which is 32-bit.
 # sis:  Support for NICs based on the Silicon Integrated Systems SiS 900,
 #       SiS 7016 and NS DP83815 PCI fast ethernet controller chips.
-# sbsh:	Support for Granch SBNI16 SHDSL modem PCI adapters
 # sk:   Support for the SysKonnect SK-984x series PCI gigabit ethernet NICs.
 #       This includes the SK-9841 and SK-9842 single port cards (single mode
 #       and multimode fiber) and the SK-9843 and SK-9844 dual port cards
@@ -1868,32 +1854,37 @@ hint.sn.0.at="isa"
 hint.sn.0.port="0x300"
 hint.sn.0.irq="10"
 device		an
-device		awi
-device		cnw
 device		wi
 device		xe
 
 # PCI Ethernet NICs that use the common MII bus controller code.
+device		ae		# Attansic/Atheros L2 FastEthernet
+device		age		# Attansic/Atheros L1 Gigabit Ethernet
+device		ale		# Atheros AR8121/AR8113/AR8114 Ethernet
 device		bce		# Broadcom BCM5706/BCM5708 Gigabit Ethernet
 device		bfe		# Broadcom BCM440x 10/100 Ethernet
 device		bge		# Broadcom BCM570xx Gigabit Ethernet
 device		cxgb		# Chelsio T3 10 Gigabit Ethernet
+device		cxgb_t3fw	# Chelsio T3 10 Gigabit Ethernet firmware
 device		dc		# DEC/Intel 21143 and various workalikes
+device		et		# Agere ET1310 10/100/Gigabit Ethernet
 device		fxp		# Intel EtherExpress PRO/100B (82557, 82558)
 hint.fxp.0.prefer_iomap="0"
 device		gem		# Apple GMAC/Sun ERI/Sun GEM
 device		hme		# Sun HME (Happy Meal Ethernet)
+device		jme		# JMicron JMC250 Gigabit/JMC260 Fast Ethernet
 device		lge		# Level 1 LXT1001 gigabit Ethernet
+device		msk		# Marvell/SysKonnect Yukon II Gigabit Ethernet
 device		my		# Myson Fast Ethernet (MTD80X, MTD89X)
 device		nge		# NatSemi DP83820 gigabit Ethernet
+device		re		# RealTek 8139C+/8169/8169S/8110S
 device		rl		# RealTek 8129/8139
 device		pcn		# AMD Am79C97x PCI 10/100 NICs
 device		sf		# Adaptec AIC-6915 (``Starfire'')
-device		sbsh		# Granch SBNI16 SHDSL modem
 device		sis		# Silicon Integrated Systems SiS 900/SiS 7016
 device		sk		# SysKonnect SK-984x & SK-982x gigabit Ethernet
 device		ste		# Sundance ST201 (D-Link DFE-550TX)
-device		ti		# Alteon Networks Tigon I/II gigabit Ethernet
+device		stge		# Sundance/Tamarack TC9021 gigabit Ethernet
 device		tl		# Texas Instruments ThunderLAN
 device		tx		# SMC EtherPower II (83c170 ``EPIC'')
 device		vr		# VIA Rhine, Rhine II
@@ -1902,9 +1893,13 @@ device		xl		# 3Com 3c90x (``Boomerang'', ``Cyclone'')
 
 # PCI Ethernet NICs.
 device		de		# DEC/Intel DC21x4x (``Tulip'')
+device		em		# Intel Pro/1000 Gigabit Ethernet
+device		igb		# Intel Pro/1000 PCIE Gigabit Ethernet
+#device		ixgbe		# Intel Pro/10Gbe PCIE Ethernet
 device		le		# AMD Am7900 LANCE and Am79C9xx PCnet
 device		mxge		# Myricom Myri-10G 10GbE NIC
 device		nxge		# Neterion Xframe 10GbE Server/Storage Adapter
+device		ti		# Alteon Networks Tigon I/II gigabit Ethernet
 device		txp		# 3Com 3cR990 (``Typhoon'')
 device		vx		# 3Com 3c590, 3c595 (``Vortex'')
 
@@ -2105,6 +2100,7 @@ device	tnt4882
 # rc: RISCom/8 multiport card
 # rp: Comtrol Rocketport(ISA/PCI) - single card
 # si: Specialix SI/XIO 4-32 port terminal multiplexor
+# cmx: OmniKey CardMan 4040 pccard smartcard reader
 
 # Notes on the Comtrol Rocketport driver:
 #
@@ -2148,18 +2144,7 @@ hint.scd.0.port="0x230"
 device		joy			# PnP aware, hints for non-PnP only
 hint.joy.0.at="isa"
 hint.joy.0.port="0x201"
-device		rc
-hint.rc.0.at="isa"
-hint.rc.0.port="0x220"
-hint.rc.0.irq="12"
-device		rp
-hint.rp.0.at="isa"
-hint.rp.0.port="0x280"
-device		si
-options 	SI_DEBUG
-hint.si.0.at="isa"
-hint.si.0.maddr="0xd0000"
-hint.si.0.irq="12"
+device		cmx
 
 #
 # The 'bktr' device is a PCI video capture device using the Brooktree
@@ -2221,7 +2206,7 @@ hint.si.0.irq="12"
 # I2C slaves connected to the external connector of some cards.
 #
 device		bktr
-
+ 
 #
 # PC Card/PCMCIA and Cardbus
 #
@@ -2235,10 +2220,13 @@ device		cardbus
 #
 # MMC/SD
 #
-# mmc: mmc bus
-# mmcsd: mmc memory and sd cards.
-#device		mmc
-#device		mmcsd
+# mmc 		MMC/SD bus
+# mmcsd		MMC/SD memory card
+# sdhci		Generic PCI SD Host Controller
+#
+device		mmc
+device		mmcsd
+device		sdhci
 
 #
 # SMB bus
@@ -2298,6 +2286,14 @@ device		ic
 device		iic
 device		iicsmb		# smb over i2c bridge
 
+# I2C peripheral devices
+#
+# ds133x	Dallas Semiconductor DS1337, DS1338 and DS1339 RTC
+# ds1672	Dallas Semiconductor DS1672 RTC
+#
+device		ds133x
+device		ds1672
+
 # Parallel-Port Bus
 #
 # Parallel port bus support is provided by the `ppbus' device.
@@ -2351,6 +2347,7 @@ options 	BOOTP_NFSROOT	# NFS mount root filesystem using BOOTP info
 options 	BOOTP_NFSV3	# Use NFS v3 to NFS mount root
 options 	BOOTP_COMPAT	# Workaround for broken bootp daemons.
 options 	BOOTP_WIRED_TO=fxp0 # Use interface fxp0 for BOOTP
+options		BOOTP_BLOCKSIZE=8192 # Override NFS block size
 
 #
 # Add software watchdog routines.
@@ -2426,18 +2423,20 @@ device		uscanner
 #
 # USB serial support
 device		ucom
+# USB support for 3G modem cards by Option, Novatel, Huawei and Sierra
+device		u3g
 # USB support for Technologies ARK3116 based serial adapters
 device		uark
 # USB support for Belkin F5U103 and compatible serial adapters
 device		ubsa
-# USB support for BWCT console serial adapters
-device		ubser
 # USB support for serial adapters based on the FT8U100AX and FT8U232AM
 device		uftdi
 # USB support for some Windows CE based serial communication.
 device		uipaq
 # USB support for Prolific PL-2303 serial adapters
 device		uplcom
+# USB support for Silicon Laboratories CP2101/CP2102 based USB serial adapters
+device		uslcom
 # USB Visor and Palm devices
 device		uvisor
 # USB serial support for DDI pocket's PHS
@@ -2451,7 +2450,6 @@ device		aue
 
 # ASIX Electronics AX88172 USB 2.0 ethernet driver. Used in the
 # LinkSys USB200M and various other adapters.
-
 device		axe
 
 #
@@ -2478,10 +2476,21 @@ device		rue
 # Davicom DM9601E USB to fast ethernet. Supports the Corega FEther USB-TXC.
 device		udav
 
+#
+# ZyDas ZD1211/ZD1211B wireless ethernet driver
+device		zyd
+#
+# Ralink Technology RT2500USB chispet driver
+device		ural
+#
+# Ralink Technology RT2501USB/RT2601USB chispet driver
+device		rum
 
+# 
 # debugging options for the USB subsystem
 #
 options 	USB_DEBUG
+options		U3G_DEBUG
 
 # options for ukbd:
 options 	UKBD_DFLT_KEYMAP	# specify the built-in keymap

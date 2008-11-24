@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/imgact_elf.c,v 1.178 2007/05/14 22:40:04 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/imgact_elf.c,v 1.188 2008/10/08 11:11:36 kib Exp $");
 
 #include "opt_compat.h"
 
@@ -105,6 +105,10 @@ SYSCTL_INT(_debug, OID_AUTO, __elfN(legacy_coredump), CTLFLAG_RW,
     &elf_legacy_coredump, 0, "");
 
 static Elf_Brandinfo *elf_brand_list[MAX_BRANDS];
+
+#define	trunc_page_ps(va, ps)	((va) & ~(ps - 1))
+#define	round_page_ps(va, ps)	(((va) + (ps - 1)) & ~(ps - 1))
+#define	aligned(a, t)	(trunc_page_ps((u_long)(a), sizeof(t)) == (u_long)(a))
 
 int
 __elfN(insert_brand_entry)(Elf_Brandinfo *entry)
@@ -360,9 +364,6 @@ __elfN(load_section)(struct vmspace *vmspace,
 		return (ENOEXEC);
 	}
 
-#define trunc_page_ps(va, ps)	((va) & ~(ps - 1))
-#define round_page_ps(va, ps)	(((va) + (ps - 1)) & ~(ps - 1))
-
 	map_addr = trunc_page_ps((vm_offset_t)vmaddr, pagesize);
 	file_addr = trunc_page_ps(offset, pagesize);
 
@@ -479,9 +480,6 @@ __elfN(load_file)(struct proc *p, const char *file, u_long *addr,
 	u_long base_addr = 0;
 	int vfslocked, error, i, numsegs;
 
-	if (curthread->td_proc != p)
-		panic("elf_load_file - thread");	/* XXXKSE DIAGNOSTIC */
-
 	tempdata = malloc(sizeof(*tempdata), M_TEMP, M_WAITOK);
 	nd = &tempdata->nd;
 	attr = &tempdata->attr;
@@ -497,7 +495,6 @@ __elfN(load_file)(struct proc *p, const char *file, u_long *addr,
 	imgp->object = NULL;
 	imgp->execlabel = NULL;
 
-	/* XXXKSE */
 	NDINIT(nd, LOOKUP, MPSAFE|LOCKLEAF|FOLLOW, UIO_SYSSPACE, file,
 	    curthread);
 	vfslocked = 0;
@@ -549,6 +546,10 @@ __elfN(load_file)(struct proc *p, const char *file, u_long *addr,
 	}
 
 	phdr = (const Elf_Phdr *)(imgp->image_header + hdr->e_phoff);
+	if (!aligned(phdr, Elf_Addr)) {
+		error = ENOEXEC;
+		goto fail;
+	}
 
 	for (i = 0, numsegs = 0; i < hdr->e_phnum; i++) {
 		if (phdr[i].p_type == PT_LOAD) {	/* Loadable segment */
@@ -592,11 +593,13 @@ fail:
 	return (error);
 }
 
+static const char FREEBSD_ABI_VENDOR[] = "FreeBSD";
+
 static int
 __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 {
 	const Elf_Ehdr *hdr = (const Elf_Ehdr *)imgp->image_header;
-	const Elf_Phdr *phdr;
+	const Elf_Phdr *phdr, *pnote = NULL;
 	Elf_Auxargs *elf_auxargs;
 	struct vmspace *vmspace;
 	vm_prot_t prot;
@@ -605,10 +608,11 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 	u_long seg_size, seg_addr;
 	u_long addr, entry = 0, proghdr = 0;
 	int error = 0, i;
-	const char *interp = NULL;
+	const char *interp = NULL, *newinterp = NULL;
 	Elf_Brandinfo *brand_info;
+	const Elf_Note *note, *note_end;
 	char *path;
-	struct thread *td = curthread;
+	const char *note_name;
 	struct sysentvec *sv;
 
 	/*
@@ -632,6 +636,8 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 		return (ENOEXEC);
 	}
 	phdr = (const Elf_Phdr *)(imgp->image_header + hdr->e_phoff);
+	if (!aligned(phdr, Elf_Addr))
+		return (ENOEXEC);
 	for (i = 0; i < hdr->e_phnum; i++) {
 		if (phdr[i].p_type == PT_INTERP) {
 			/* Path to interpreter */
@@ -654,7 +660,7 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 		return (ENOEXEC);
 	sv = brand_info->sysvec;
 	if (interp != NULL && brand_info->interp_newpath != NULL)
-		interp = brand_info->interp_newpath;
+		newinterp = brand_info->interp_newpath;
 
 	/*
 	 * Avoid a possible deadlock if the current address space is destroyed
@@ -664,12 +670,14 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 	 * However, in cases where the vnode lock is external, such as nullfs,
 	 * v_usecount may become zero.
 	 */
-	VOP_UNLOCK(imgp->vp, 0, td);
+	VOP_UNLOCK(imgp->vp, 0);
 
-	exec_new_vmspace(imgp, sv);
+	error = exec_new_vmspace(imgp, sv);
 	imgp->proc->p_sysent = sv;
 
-	vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY);
+	if (error)
+		return (error);
 
 	vmspace = imgp->proc->p_vmspace;
 
@@ -745,6 +753,9 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 		case PT_PHDR: 	/* Program header table info */
 			proghdr = phdr[i].p_vaddr;
 			break;
+		case PT_NOTE:
+			pnote = &phdr[i];
+			break;
 		default:
 			break;
 		}
@@ -786,7 +797,8 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 	imgp->entry_addr = entry;
 
 	if (interp != NULL) {
-		VOP_UNLOCK(imgp->vp, 0, td);
+		int have_interp = FALSE;
+		VOP_UNLOCK(imgp->vp, 0);
 		if (brand_info->emul_path != NULL &&
 		    brand_info->emul_path[0] != '\0') {
 			path = malloc(MAXPATHLEN, M_TEMP, M_WAITOK);
@@ -796,13 +808,19 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 			    &imgp->entry_addr, sv->sv_pagesize);
 			free(path, M_TEMP);
 			if (error == 0)
-				interp = NULL;
+				have_interp = TRUE;
 		}
-		if (interp != NULL) {
+		if (!have_interp && newinterp != NULL) {
+			error = __elfN(load_file)(imgp->proc, newinterp, &addr,
+			    &imgp->entry_addr, sv->sv_pagesize);
+			if (error == 0)
+				have_interp = TRUE;
+		}
+		if (!have_interp) {
 			error = __elfN(load_file)(imgp->proc, interp, &addr,
 			    &imgp->entry_addr, sv->sv_pagesize);
 		}
-		vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY, td);
+		vn_lock(imgp->vp, LK_EXCLUSIVE | LK_RETRY);
 		if (error != 0) {
 			uprintf("ELF interpreter %s not found\n", interp);
 			return (error);
@@ -825,6 +843,41 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 
 	imgp->auxargs = elf_auxargs;
 	imgp->interpreted = 0;
+
+	/*
+	 * Try to fetch the osreldate for FreeBSD binary from the ELF
+	 * OSABI-note. Only the first page of the image is searched,
+	 * the same as for headers.
+	 */
+	if (pnote != NULL && pnote->p_offset < PAGE_SIZE &&
+	    pnote->p_offset + pnote->p_filesz < PAGE_SIZE ) {
+		note = (const Elf_Note *)(imgp->image_header + pnote->p_offset);
+		if (!aligned(note, Elf32_Addr)) {
+			free(imgp->auxargs, M_TEMP);
+			imgp->auxargs = NULL;
+			return (ENOEXEC);
+		}
+		note_end = (const Elf_Note *)(imgp->image_header + pnote->p_offset +
+		    pnote->p_filesz);
+		while (note < note_end) {
+			if (note->n_namesz == sizeof(FREEBSD_ABI_VENDOR) &&
+			    note->n_descsz == sizeof(int32_t) &&
+			    note->n_type == 1 /* ABI_NOTETYPE */) {
+				note_name = (const char *)(note + 1);
+				if (strncmp(FREEBSD_ABI_VENDOR, note_name,
+				    sizeof(FREEBSD_ABI_VENDOR)) == 0) {
+					imgp->proc->p_osrel = *(const int32_t *)
+					    (note_name +
+					    round_page_ps(sizeof(FREEBSD_ABI_VENDOR),
+						sizeof(Elf32_Addr)));
+					break;
+				}
+			}
+			note = (const Elf_Note *)((const char *)(note + 1) +
+			    round_page_ps(note->n_namesz, sizeof(Elf32_Addr)) +
+			    round_page_ps(note->n_descsz, sizeof(Elf32_Addr)));
+		}
+	}
 
 	return (error);
 }
@@ -892,8 +945,6 @@ static void __elfN(puthdr)(struct thread *, void *, size_t *, int);
 static void __elfN(putnote)(void *, size_t *, const char *, int,
     const void *, size_t);
 
-extern int osreldate;
-
 int
 __elfN(coredump)(td, vp, limit)
 	struct thread *td;
@@ -945,7 +996,7 @@ __elfN(coredump)(td, vp, limit)
 			    (caddr_t)(uintptr_t)php->p_vaddr,
 			    php->p_filesz, offset, UIO_USERSPACE,
 			    IO_UNIT | IO_DIRECT, cred, NOCRED, NULL,
-			    curthread); /* XXXKSE */
+			    curthread);
 			if (error != 0)
 				break;
 			offset += php->p_filesz;
@@ -1093,7 +1144,7 @@ __elfN(corehdr)(td, vp, cred, numsegs, hdr, hdrsize)
 	/* Write it to the core file. */
 	return (vn_rdwr_inchunks(UIO_WRITE, vp, hdr, hdrsize, (off_t)0,
 	    UIO_SYSSPACE, IO_UNIT | IO_DIRECT, cred, NOCRED, NULL,
-	    td)); /* XXXKSE */
+	    td));
 }
 
 #if defined(COMPAT_IA32) && __ELF_WORD_SIZE == 32

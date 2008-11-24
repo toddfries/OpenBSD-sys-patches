@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/identcpu.c,v 1.12 2007/10/18 05:33:05 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/identcpu.c,v 1.14 2008/10/13 18:16:54 raj Exp $");
 #include <sys/systm.h>
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -75,7 +75,8 @@ enum cpu_class {
 	CPU_CLASS_ARM10EJ,
 	CPU_CLASS_SA1,
 	CPU_CLASS_XSCALE,
-	CPU_CLASS_ARM11J
+	CPU_CLASS_ARM11J,
+	CPU_CLASS_MARVELL
 };
 
 static const char * const generic_steppings[16] = {
@@ -304,6 +305,15 @@ const struct cpuidtab cpuids[] = {
 	{ CPU_ID_ARM1136JSR1,	CPU_CLASS_ARM11J,	"ARM1136J-S R1",
 	  generic_steppings },
 
+	{ CPU_ID_MV88FR131,	CPU_CLASS_MARVELL,	"Feroceon 88FR131",
+	  generic_steppings },
+
+	{ CPU_ID_MV88FR571_VD,	CPU_CLASS_MARVELL,	"Feroceon 88FR571-VD",
+	  generic_steppings },
+
+	{ CPU_ID_MV88FR571_41,	CPU_CLASS_MARVELL,	"Early Feroceon 88FR571",
+	  generic_steppings },
+
 	{ 0, CPU_CLASS_NONE, NULL, NULL }
 };
 
@@ -355,14 +365,6 @@ static const char * const wtnames[] = {
 	"write-back-locking-C",
 	"**unknown 15**",
 };
-
-void setPQL2(int *const size, int *const ways);
-
-void
-setPQL2(int *const size, int *const ways)
-{
-	return;
-}
 
 
 extern int ctrl;

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_fw_pfil.c,v 1.25 2007/10/07 20:44:23 silby Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_fw_pfil.c,v 1.28 2008/08/17 23:27:27 bz Exp $");
 
 #if !defined(KLD_MODULE)
 #include "opt_ipfw.h"
@@ -47,6 +47,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_fw_pfil.c,v 1.25 2007/10/07 20:44:23 silb
 #include <sys/socketvar.h>
 #include <sys/sysctl.h>
 #include <sys/ucred.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -104,16 +105,6 @@ ipfw_check_in(void *arg, struct mbuf **m0, struct ifnet *ifp, int dir,
 
 	bzero(&args, sizeof(args));
 
-	dn_tag = m_tag_find(*m0, PACKET_TAG_DUMMYNET, NULL);
-	if (dn_tag != NULL){
-		struct dn_pkt_tag *dt;
-
-		dt = (struct dn_pkt_tag *)(dn_tag+1);
-		args.rule = dt->rule;
-
-		m_tag_delete(*m0, dn_tag);
-	}
-
 	ng_tag = (struct ng_ipfw_tag *)m_tag_locate(*m0, NGM_IPFW_COOKIE, 0,
 	    NULL);
 	if (ng_tag != NULL) {
@@ -124,6 +115,16 @@ ipfw_check_in(void *arg, struct mbuf **m0, struct ifnet *ifp, int dir,
 	}
 
 again:
+	dn_tag = m_tag_find(*m0, PACKET_TAG_DUMMYNET, NULL);
+	if (dn_tag != NULL){
+		struct dn_pkt_tag *dt;
+
+		dt = (struct dn_pkt_tag *)(dn_tag+1);
+		args.rule = dt->rule;
+
+		m_tag_delete(*m0, dn_tag);
+	}
+
 	args.m = *m0;
 	args.inp = inp;
 	ipfw = ipfw_chk(&args);
@@ -160,10 +161,11 @@ again:
 		if (!DUMMYNET_LOADED)
 			goto drop;
 		if (mtod(*m0, struct ip *)->ip_v == 4)
-			ip_dn_io_ptr(*m0, DN_TO_IP_IN, &args);
+			ip_dn_io_ptr(m0, DN_TO_IP_IN, &args);
 		else if (mtod(*m0, struct ip *)->ip_v == 6)
-			ip_dn_io_ptr(*m0, DN_TO_IP6_IN, &args);
-		*m0 = NULL;
+			ip_dn_io_ptr(m0, DN_TO_IP6_IN, &args);
+		if (*m0 != NULL)
+			goto again;
 		return 0;		/* packet consumed */
 
 	case IP_FW_TEE:
@@ -225,16 +227,6 @@ ipfw_check_out(void *arg, struct mbuf **m0, struct ifnet *ifp, int dir,
 
 	bzero(&args, sizeof(args));
 
-	dn_tag = m_tag_find(*m0, PACKET_TAG_DUMMYNET, NULL);
-	if (dn_tag != NULL) {
-		struct dn_pkt_tag *dt;
-
-		dt = (struct dn_pkt_tag *)(dn_tag+1);
-		args.rule = dt->rule;
-
-		m_tag_delete(*m0, dn_tag);
-	}
-
 	ng_tag = (struct ng_ipfw_tag *)m_tag_locate(*m0, NGM_IPFW_COOKIE, 0,
 	    NULL);
 	if (ng_tag != NULL) {
@@ -245,6 +237,16 @@ ipfw_check_out(void *arg, struct mbuf **m0, struct ifnet *ifp, int dir,
 	}
 
 again:
+	dn_tag = m_tag_find(*m0, PACKET_TAG_DUMMYNET, NULL);
+	if (dn_tag != NULL) {
+		struct dn_pkt_tag *dt;
+
+		dt = (struct dn_pkt_tag *)(dn_tag+1);
+		args.rule = dt->rule;
+
+		m_tag_delete(*m0, dn_tag);
+	}
+
 	args.m = *m0;
 	args.oif = ifp;
 	args.inp = inp;
@@ -286,10 +288,11 @@ again:
 		if (!DUMMYNET_LOADED)
 			break;
 		if (mtod(*m0, struct ip *)->ip_v == 4)
-			ip_dn_io_ptr(*m0, DN_TO_IP_OUT, &args);
+			ip_dn_io_ptr(m0, DN_TO_IP_OUT, &args);
 		else if (mtod(*m0, struct ip *)->ip_v == 6)
-			ip_dn_io_ptr(*m0, DN_TO_IP6_OUT, &args);
-		*m0 = NULL;
+			ip_dn_io_ptr(m0, DN_TO_IP6_OUT, &args);
+		if (*m0 != NULL)
+			goto again;
 		return 0;		/* packet consumed */
 
 		break;
@@ -496,14 +499,14 @@ ipfw_chg_hook(SYSCTL_HANDLER_ARGS)
 	if (enable == *(int *)arg1)
 		return (0);
 
-	if (arg1 == &fw_enable) {
+	if (arg1 == &V_fw_enable) {
 		if (enable)
 			error = ipfw_hook();
 		else
 			error = ipfw_unhook();
 	}
 #ifdef INET6
-	if (arg1 == &fw6_enable) {
+	if (arg1 == &V_fw6_enable) {
 		if (enable)
 			error = ipfw6_hook();
 		else
@@ -564,5 +567,5 @@ static moduledata_t ipfwmod = {
 	ipfw_modevent,
 	0
 };
-DECLARE_MODULE(ipfw, ipfwmod, SI_SUB_PROTO_IFATTACHDOMAIN, SI_ORDER_ANY);
+DECLARE_MODULE(ipfw, ipfwmod, SI_SUB_PROTO_IFATTACHDOMAIN, SI_ORDER_ANY - 256);
 MODULE_VERSION(ipfw, 2);

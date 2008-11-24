@@ -1,7 +1,11 @@
 /*-
  * Copyright (c) 1989, 1990 William F. Jolitz.
  * Copyright (c) 1990 The Regents of the University of California.
+ * Copyright (c) 2007 The FreeBSD Foundation
  * All rights reserved.
+ *
+ * Portions of this software were developed by A. Joseph Koshy under
+ * sponsorship from the FreeBSD Foundation and Google, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,11 +31,13 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/amd64/amd64/exception.S,v 1.129 2006/12/23 03:30:50 davidxu Exp $
+ * $FreeBSD: src/sys/amd64/amd64/exception.S,v 1.133 2008/08/18 08:47:27 kib Exp $
  */
 
 #include "opt_atpic.h"
 #include "opt_compat.h"
+#include "opt_hwpmc_hooks.h"
+#include "opt_kdtrace.h"
 
 #include <machine/asmacros.h>
 #include <machine/psl.h>
@@ -39,7 +45,25 @@
 
 #include "assym.s"
 
+#ifdef KDTRACE_HOOKS
+	.bss
+	.globl	dtrace_invop_jump_addr
+	.align	8
+	.type	dtrace_invop_jump_addr, @object
+        .size	dtrace_invop_jump_addr, 8
+dtrace_invop_jump_addr:
+	.zero	8
+	.globl	dtrace_invop_calltrap_addr
+	.align	8
+	.type	dtrace_invop_calltrap_addr, @object
+        .size	dtrace_invop_calltrap_addr, 8
+dtrace_invop_calltrap_addr:
+	.zero	8
+#endif
 	.text
+#ifdef HWPMC_HOOKS
+	ENTRY(start_exceptions)
+#endif
 
 /*****************************************************************************/
 /* Trap handling                                                             */
@@ -162,6 +186,30 @@ alltraps_pushregs_no_rdi:
 	movq	%r14,TF_R14(%rsp)
 	movq	%r15,TF_R15(%rsp)
 	FAKE_MCOUNT(TF_RIP(%rsp))
+#ifdef KDTRACE_HOOKS
+	/*
+	 * DTrace Function Boundary Trace (fbt) probes are triggered
+	 * by int3 (0xcc) which causes the #BP (T_BPTFLT) breakpoint
+	 * interrupt. For all other trap types, just handle them in
+	 * the usual way.
+	 */
+	cmpq	$T_BPTFLT,TF_TRAPNO(%rsp)
+	jne	calltrap
+
+	/* Check if there is no DTrace hook registered. */
+	cmpq	$0,dtrace_invop_jump_addr
+	je	calltrap
+
+	/*
+	 * Set our jump address for the jump back in the event that
+	 * the breakpoint wasn't caused by DTrace at all.
+	 */
+	movq	$calltrap, dtrace_invop_calltrap_addr(%rip)
+
+	/* Jump to the code hooked in by DTrace. */
+	movq	dtrace_invop_jump_addr, %rax
+	jmpq	*dtrace_invop_jump_addr
+#endif
 	.globl	calltrap
 	.type	calltrap,@function
 calltrap:
@@ -187,10 +235,28 @@ alltraps_noen:
 IDTVEC(dblfault)
 	subq	$TF_ERR,%rsp
 	movq	$T_DOUBLEFLT,TF_TRAPNO(%rsp)
+	movq	$0,TF_ADDR(%rsp)
+	movq	$0,TF_ERR(%rsp)
+	movq	%rdi,TF_RDI(%rsp)
+	movq	%rsi,TF_RSI(%rsp)
+	movq	%rdx,TF_RDX(%rsp)
+	movq	%rcx,TF_RCX(%rsp)
+	movq	%r8,TF_R8(%rsp)
+	movq	%r9,TF_R9(%rsp)
+	movq	%rax,TF_RAX(%rsp)
+	movq	%rbx,TF_RBX(%rsp)
+	movq	%rbp,TF_RBP(%rsp)
+	movq	%r10,TF_R10(%rsp)
+	movq	%r11,TF_R11(%rsp)
+	movq	%r12,TF_R12(%rsp)
+	movq	%r13,TF_R13(%rsp)
+	movq	%r14,TF_R14(%rsp)
+	movq	%r15,TF_R15(%rsp)
 	testb	$SEL_RPL_MASK,TF_CS(%rsp) /* Did we come from kernel? */
 	jz	1f			/* already running with kernel GS.base */
 	swapgs
-1:	call	dblfault_handler
+1:	movq	%rsp, %rdi
+	call	dblfault_handler
 2:	hlt
 	jmp	2b
 
@@ -330,6 +396,9 @@ IDTVEC(fast_syscall32)
  * execute the NMI handler with interrupts disabled to prevent a
  * nested interrupt from executing an 'iretq' instruction and
  * inadvertently taking the processor out of NMI mode.
+ *
+ * Third, the NMI handler runs on its own stack (tss_ist1), shared
+ * with the double fault handler.
  */
 
 IDTVEC(nmi)
@@ -368,6 +437,61 @@ nmi_calltrap:
 	movq	%rsp, %rdi
 	call	trap
 	MEXITCOUNT
+#ifdef HWPMC_HOOKS
+	/*
+	 * Check if the current trap was from user mode and if so
+	 * whether the current thread needs a user call chain to be
+	 * captured. We are still in NMI mode at this point.
+	 */
+	testb	$SEL_RPL_MASK,TF_CS(%rsp)
+	jz	nocallchain
+	movq	PCPU(CURTHREAD),%rax	/* curthread present? */
+	orq	%rax,%rax
+	jz	nocallchain
+	testl	$TDP_CALLCHAIN,TD_PFLAGS(%rax) /* flagged for capture? */
+	jz	nocallchain
+	/*
+	 * A user callchain is to be captured, so:
+	 * - Move execution to the regular kernel stack, to allow for
+	 *   nested NMI interrupts.
+	 * - Take the processor out of "NMI" mode by faking an "iret".
+	 * - Enable interrupts, so that copyin() can work.
+	 */
+	movq	%rsp,%rsi	/* source stack pointer */
+	movq	$TF_SIZE,%rcx
+	movq	PCPU(RSP0),%rbx
+	subq	%rcx,%rbx
+	movq	%rbx,%rdi	/* destination stack pointer */
+
+	shrq	$3,%rcx		/* trap frame size in long words */
+	cld
+	rep
+	movsq			/* copy trapframe */
+
+	movl	%ss,%eax
+	pushq	%rax		/* tf_ss */
+	pushq	%rbx		/* tf_rsp (on kernel stack) */
+	pushfq			/* tf_rflags */
+	movl	%cs,%eax
+	pushq	%rax		/* tf_cs */
+	pushq	$outofnmi	/* tf_rip */
+	iretq
+outofnmi:
+	/*
+	 * At this point the processor has exited NMI mode and is running
+	 * with interrupts turned off on the normal kernel stack.
+	 * We turn interrupts back on, and take the usual 'doreti' exit
+	 * path.
+	 *
+	 * If a pending NMI gets recognized at or after this point, it 
+	 * will cause a kernel callchain to be traced.  Since this path
+	 * is only taken for NMI interrupts from user space, our `swapgs'
+	 * state is correct for taking the doreti path.
+	 */
+	sti
+	jmp	doreti
+nocallchain:
+#endif
 	testl	%ebx,%ebx
 	jz	nmi_restoreregs
 	swapgs
@@ -512,13 +636,10 @@ doreti_iret:
 	.globl	doreti_iret_fault
 doreti_iret_fault:
 	subq	$TF_RIP,%rsp		/* space including tf_err, tf_trapno */
-	testb	$SEL_RPL_MASK,TF_CS(%rsp) /* Did we come from kernel? */
-	jz	1f			/* already running with kernel GS.base */
-	swapgs
-1:	testl	$PSL_I,TF_RFLAGS(%rsp)
-	jz	2f
+	testl	$PSL_I,TF_RFLAGS(%rsp)
+	jz	1f
 	sti
-2:	movq	%rdi,TF_RDI(%rsp)
+1:	movq	%rdi,TF_RDI(%rsp)
 	movq	%rsi,TF_RSI(%rsp)
 	movq	%rdx,TF_RDX(%rsp)
 	movq	%rcx,TF_RCX(%rsp)
@@ -538,3 +659,6 @@ doreti_iret_fault:
 	movq	$0,TF_ADDR(%rsp)
 	FAKE_MCOUNT(TF_RIP(%rsp))
 	jmp	calltrap
+#ifdef HWPMC_HOOKS
+	ENTRY(end_exceptions)
+#endif

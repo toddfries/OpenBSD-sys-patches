@@ -33,12 +33,13 @@
  * SUCH DAMAGE.
  *
  *	@(#)union_vfsops.c	8.20 (Berkeley) 5/20/95
- * $FreeBSD: src/sys/fs/unionfs/union_vfsops.c,v 1.87 2007/10/16 10:54:54 alfred Exp $
+ * $FreeBSD: src/sys/fs/unionfs/union_vfsops.c,v 1.94 2008/11/04 18:54:44 jhb Exp $
  */
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kdb.h>
+#include <sys/fcntl.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -190,8 +191,8 @@ unionfs_domount(struct mount *mp, struct thread *td)
 	if (ufile == 0 && udir != 0)
 		ufile = udir;
 
-	vn_lock(mp->mnt_vnodecovered, LK_SHARED | LK_RETRY, td);
-	error = VOP_GETATTR(mp->mnt_vnodecovered, &va, mp->mnt_cred, td);
+	vn_lock(mp->mnt_vnodecovered, LK_SHARED | LK_RETRY);
+	error = VOP_GETATTR(mp->mnt_vnodecovered, &va, mp->mnt_cred);
 	if (!error) {
 		if (udir == 0)
 			udir = va.va_mode;
@@ -200,7 +201,7 @@ unionfs_domount(struct mount *mp, struct thread *td)
 		uid = va.va_uid;
 		gid = va.va_gid;
 	}
-	VOP_UNLOCK(mp->mnt_vnodecovered, 0, td);
+	VOP_UNLOCK(mp->mnt_vnodecovered, 0);
 	if (error)
 		return (error);
 
@@ -267,7 +268,7 @@ unionfs_domount(struct mount *mp, struct thread *td)
 	/*
 	 * Find upper node
 	 */
-	NDINIT(ndp, LOOKUP, FOLLOW | WANTPARENT | LOCKLEAF, UIO_SYSSPACE, target, td);
+	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, target, td);
 	if ((error = namei(ndp)))
 		return (error);
 
@@ -277,9 +278,6 @@ unionfs_domount(struct mount *mp, struct thread *td)
 	lowerrootvp = mp->mnt_vnodecovered;
 	upperrootvp = ndp->ni_vp;
 
-	vrele(ndp->ni_dvp);
-	ndp->ni_dvp = NULLVP;
-
 	/* create unionfs_mount */
 	ump = (struct unionfs_mount *)malloc(sizeof(struct unionfs_mount),
 	    M_UNIONFSMNT, M_WAITOK | M_ZERO);
@@ -288,8 +286,8 @@ unionfs_domount(struct mount *mp, struct thread *td)
 	 * Save reference
 	 */
 	if (below) {
-		VOP_UNLOCK(upperrootvp, 0, td);
-		vn_lock(lowerrootvp, LK_EXCLUSIVE | LK_RETRY, td);
+		VOP_UNLOCK(upperrootvp, 0);
+		vn_lock(lowerrootvp, LK_EXCLUSIVE | LK_RETRY);
 		ump->um_lowervp = upperrootvp;
 		ump->um_uppervp = lowerrootvp;
 	} else {
@@ -326,7 +324,7 @@ unionfs_domount(struct mount *mp, struct thread *td)
 		error = VOP_WHITEOUT(ump->um_uppervp, &fakecn, LOOKUP);
 		if (error) {
 			if (below) {
-				VOP_UNLOCK(ump->um_uppervp, 0, td);
+				VOP_UNLOCK(ump->um_uppervp, 0);
 				vrele(upperrootvp);
 			} else
 				vput(ump->um_uppervp);
@@ -339,7 +337,7 @@ unionfs_domount(struct mount *mp, struct thread *td)
 	/*
 	 * Unlock the node
 	 */
-	VOP_UNLOCK(ump->um_uppervp, 0, td);
+	VOP_UNLOCK(ump->um_uppervp, 0);
 
 	/*
 	 * Get the unionfs root vnode.
@@ -425,11 +423,11 @@ unionfs_root(struct mount *mp, int flags, struct vnode **vpp, struct thread *td)
 	vp = ump->um_rootvp;
 
 	UNIONFSDEBUG("unionfs_root: rootvp=%p locked=%x\n",
-	    vp, VOP_ISLOCKED(vp, td));
+	    vp, VOP_ISLOCKED(vp));
 
 	vref(vp);
 	if (flags & LK_TYPE_MASK)
-		vn_lock(vp, flags, td);
+		vn_lock(vp, flags);
 
 	*vpp = vp;
 
@@ -520,7 +518,7 @@ unionfs_fhtovp(struct mount *mp, struct fid *fidp, struct vnode **vpp)
 
 static int
 unionfs_checkexp(struct mount *mp, struct sockaddr *nam, int *extflagsp,
-		 struct ucred **credanonp)
+    struct ucred **credanonp, int *numsecflavors, int **secflavors)
 {
 	return (EOPNOTSUPP);
 }

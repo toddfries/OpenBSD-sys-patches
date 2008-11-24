@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_io.c,v 1.76 2007/10/26 06:55:00 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_io.c,v 1.78 2008/09/18 15:02:19 sbruno Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -582,7 +582,7 @@ g_io_schedule_up(struct thread *tp __unused)
 			g_bioq_unlock(&g_bio_run_up);
 			THREAD_NO_SLEEPING();
 			CTR4(KTR_GEOM, "g_up biodone bp %p provider %s off "
-			    "%ld len %ld", bp, bp->bio_to->name,
+			    "%jd len %ld", bp, bp->bio_to->name,
 			    bp->bio_offset, bp->bio_length);
 			biodone(bp);
 			THREAD_SLEEPING_OK();
@@ -652,9 +652,8 @@ g_delete_data(struct g_consumer *cp, off_t offset, off_t length)
 	struct bio *bp;
 	int error;
 
-	KASSERT(length > 0 && length >= cp->provider->sectorsize &&
-	    length <= MAXPHYS, ("g_delete_data(): invalid length %jd",
-	    (intmax_t)length));
+	KASSERT(length > 0 && length >= cp->provider->sectorsize,
+	    ("g_delete_data(): invalid length %jd", (intmax_t)length));
 
 	bp = g_alloc_bio();
 	bp->bio_cmd = BIO_DELETE;

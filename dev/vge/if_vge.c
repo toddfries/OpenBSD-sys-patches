@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/vge/if_vge.c,v 1.32 2007/11/22 02:45:00 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/vge/if_vge.c,v 1.33 2008/11/13 04:11:01 yongari Exp $");
 
 /*
  * VIA Networking Technologies VT612x PCI gigabit ethernet NIC driver.
@@ -2226,15 +2226,17 @@ vge_ioctl(ifp, command, data)
 			}
 		}
 #endif /* DEVICE_POLLING */
-		if (mask & IFCAP_HWCSUM) {
-			ifp->if_capenable |= ifr->ifr_reqcap & (IFCAP_HWCSUM);
-			if (ifp->if_capenable & IFCAP_TXCSUM)
-				ifp->if_hwassist = VGE_CSUM_FEATURES;
+		if ((mask & IFCAP_TXCSUM) != 0 &&
+		    (ifp->if_capabilities & IFCAP_TXCSUM) != 0) {
+			ifp->if_capenable ^= IFCAP_TXCSUM;
+			if ((ifp->if_capenable & IFCAP_TXCSUM) != 0)
+				ifp->if_hwassist |= VGE_CSUM_FEATURES;
 			else
-				ifp->if_hwassist = 0;
-			if (ifp->if_drv_flags & IFF_DRV_RUNNING)
-				vge_init(sc);
+				ifp->if_hwassist &= ~VGE_CSUM_FEATURES;
 		}
+		if ((mask & IFCAP_RXCSUM) != 0 &&
+		    (ifp->if_capabilities & IFCAP_RXCSUM) != 0)
+			ifp->if_capenable ^= IFCAP_RXCSUM;
 	    }
 		break;
 	default:

@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/drm_linux_list.h,v 1.4 2005/11/28 23:13:52 anholt Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/drm_linux_list.h,v 1.5 2008/10/13 17:52:41 rnoland Exp $");
 
 struct list_head {
 	struct list_head *next, *prev;
@@ -69,6 +69,6 @@ list_del(struct list_head *entry) {
 
 #define list_for_each_safe(entry, temp, head)			\
     for (entry = (head)->next, temp = (entry)->next;		\
-	temp != head; 						\
-	entry = temp, temp = temp->next)
+	entry != head; 						\
+	entry = temp, temp = entry->next)
 

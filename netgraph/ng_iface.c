@@ -37,7 +37,7 @@
  *
  * Author: Archie Cobbs <archie@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_iface.c,v 1.47 2006/06/02 23:14:40 sam Exp $
+ * $FreeBSD: src/sys/netgraph/ng_iface.c,v 1.54 2008/11/22 07:35:45 kmacy Exp $
  * $Whistle: ng_iface.c,v 1.33 1999/11/01 09:24:51 julian Exp $
  */
 
@@ -69,6 +69,7 @@
 #include <sys/socket.h>
 #include <sys/syslog.h>
 #include <sys/libkern.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -382,7 +383,7 @@ ng_iface_output(struct ifnet *ifp, struct mbuf *m,
 			return (ENOBUFS);
 		}
 		*(sa_family_t *)m->m_data = dst->sa_family;
-		IFQ_HANDOFF(ifp, m, error);
+		error = (ifp->if_transmit)(ifp, m);
 	} else
 		error = ng_iface_send(ifp, m, dst->sa_family);
 
@@ -505,16 +506,17 @@ ng_iface_print_ioctl(struct ifnet *ifp, int command, caddr_t data)
 static int
 ng_iface_constructor(node_p node)
 {
+	INIT_VNET_NETGRAPH(curvnet);
 	struct ifnet *ifp;
 	priv_p priv;
 
 	/* Allocate node and interface private structures */
-	MALLOC(priv, priv_p, sizeof(*priv), M_NETGRAPH_IFACE, M_NOWAIT|M_ZERO);
+	priv = malloc(sizeof(*priv), M_NETGRAPH_IFACE, M_NOWAIT|M_ZERO);
 	if (priv == NULL)
 		return (ENOMEM);
 	ifp = if_alloc(IFT_PROPVIRTUAL);
 	if (ifp == NULL) {
-		FREE(priv, M_NETGRAPH_IFACE);
+		free(priv, M_NETGRAPH_IFACE);
 		return (ENOMEM);
 	}
 
@@ -523,7 +525,7 @@ ng_iface_constructor(node_p node)
 	priv->ifp = ifp;
 
 	/* Get an interface unit number */
-	priv->unit = alloc_unr(ng_iface_unit);
+	priv->unit = alloc_unr(V_ng_iface_unit);
 
 	/* Link together node and private info */
 	NG_NODE_SET_PRIVATE(node, priv);
@@ -573,6 +575,7 @@ ng_iface_newhook(node_p node, hook_p hook, const char *name)
 	if (*hookptr != NULL)
 		return (EISCONN);
 	*hookptr = hook;
+	NG_HOOK_HI_STACK(hook);
 	return (0);
 }
 
@@ -764,14 +767,21 @@ ng_iface_rcvdata(hook_p hook, item_p item)
 static int
 ng_iface_shutdown(node_p node)
 {
+	INIT_VNET_NETGRAPH(curvnet);
 	const priv_p priv = NG_NODE_PRIVATE(node);
 
+	/*
+	 * The ifnet may be in a different vnet than the netgraph node, 
+	 * hence we have to change the current vnet context here.
+	 */
+	CURVNET_SET_QUIET(priv->ifp->if_vnet);
 	bpfdetach(priv->ifp);
 	if_detach(priv->ifp);
 	if_free(priv->ifp);
+	CURVNET_RESTORE();
 	priv->ifp = NULL;
-	free_unr(ng_iface_unit, priv->unit);
-	FREE(priv, M_NETGRAPH_IFACE);
+	free_unr(V_ng_iface_unit, priv->unit);
+	free(priv, M_NETGRAPH_IFACE);
 	NG_NODE_SET_PRIVATE(node, NULL);
 	NG_NODE_UNREF(node);
 	return (0);
@@ -803,10 +813,10 @@ ng_iface_mod_event(module_t mod, int event, void *data)
 
 	switch (event) {
 	case MOD_LOAD:
-		ng_iface_unit = new_unrhdr(0, 0xffff, NULL);
+		V_ng_iface_unit = new_unrhdr(0, 0xffff, NULL);
 		break;
 	case MOD_UNLOAD:
-		delete_unrhdr(ng_iface_unit);
+		delete_unrhdr(V_ng_iface_unit);
 		break;
 	default:
 		error = EOPNOTSUPP;

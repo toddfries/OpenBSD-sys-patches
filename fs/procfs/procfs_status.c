@@ -34,7 +34,7 @@
  *
  * From:
  *	$Id: procfs_status.c,v 3.1 1993/12/15 09:40:17 jsp Exp $
- * $FreeBSD: src/sys/fs/procfs/procfs_status.c,v 1.62 2007/09/17 05:31:39 jeff Exp $
+ * $FreeBSD: src/sys/fs/procfs/procfs_status.c,v 1.63 2008/03/12 10:11:57 jeff Exp $
  */
 
 #include <sys/param.h>
@@ -112,20 +112,13 @@ procfs_doprocstatus(PFS_FILL_ARGS)
 		sbuf_printf(sb, "noflags");
 	}
 
-#ifdef KSE
-	if (p->p_flag & P_SA)
-		wmesg = "-kse- ";
-	else
-#endif
-	{
-		tdfirst = FIRST_THREAD_IN_PROC(p);
-		if (tdfirst->td_wchan != NULL) {
-			KASSERT(tdfirst->td_wmesg != NULL,
-			    ("wchan %p has no wmesg", tdfirst->td_wchan));
-			wmesg = tdfirst->td_wmesg;
-		} else
-			wmesg = "nochan";
-	}
+	tdfirst = FIRST_THREAD_IN_PROC(p);
+	if (tdfirst->td_wchan != NULL) {
+		KASSERT(tdfirst->td_wmesg != NULL,
+		    ("wchan %p has no wmesg", tdfirst->td_wchan));
+		wmesg = tdfirst->td_wmesg;
+	} else
+		wmesg = "nochan";
 
 	if (p->p_flag & P_INMEM) {
 		struct timeval start, ut, st;

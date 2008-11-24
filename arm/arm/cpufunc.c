@@ -45,7 +45,7 @@
  * Created      : 30/01/97
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/cpufunc.c,v 1.20 2007/10/31 07:27:31 kevlo Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/cpufunc.c,v 1.23 2008/10/13 18:16:54 raj Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -333,6 +333,11 @@ struct cpu_functions armv5_ec_cpufuncs = {
 	armv5_ec_idcache_wbinv_all,	/* idcache_wbinv_all	*/
 	armv5_ec_idcache_wbinv_range,	/* idcache_wbinv_range	*/
 
+	cpufunc_nullop,                 /* l2cache_wbinv_all    */
+	(void *)cpufunc_nullop,         /* l2cache_wbinv_range  */
+      	(void *)cpufunc_nullop,         /* l2cache_inv_range    */
+	(void *)cpufunc_nullop,         /* l2cache_wb_range     */
+				 
 	/* Other functions */
 
 	cpufunc_nullop,			/* flush_prefetchbuf	*/
@@ -351,6 +356,66 @@ struct cpu_functions armv5_ec_cpufuncs = {
 
 	arm10_setup			/* cpu setup		*/
 
+};
+
+struct cpu_functions feroceon_cpufuncs = {
+	/* CPU functions */
+
+	cpufunc_id,			/* id			*/
+	cpufunc_nullop,			/* cpwait		*/
+
+	/* MMU functions */
+
+	cpufunc_control,		/* control		*/
+	cpufunc_domains,		/* Domain		*/
+	feroceon_setttb,		/* Setttb		*/
+	cpufunc_faultstatus,		/* Faultstatus		*/
+	cpufunc_faultaddress,		/* Faultaddress		*/
+
+	/* TLB functions */
+
+	armv4_tlb_flushID,		/* tlb_flushID		*/
+	arm10_tlb_flushID_SE,		/* tlb_flushID_SE	*/
+	armv4_tlb_flushI,		/* tlb_flushI		*/
+	arm10_tlb_flushI_SE,		/* tlb_flushI_SE	*/
+	armv4_tlb_flushD,		/* tlb_flushD		*/
+	armv4_tlb_flushD_SE,		/* tlb_flushD_SE	*/
+
+	/* Cache operations */
+
+	armv5_ec_icache_sync_all,	/* icache_sync_all	*/
+	armv5_ec_icache_sync_range,	/* icache_sync_range	*/
+
+	armv5_ec_dcache_wbinv_all,	/* dcache_wbinv_all	*/
+	feroceon_dcache_wbinv_range,	/* dcache_wbinv_range	*/
+	feroceon_dcache_inv_range,	/* dcache_inv_range	*/
+	feroceon_dcache_wb_range,	/* dcache_wb_range	*/
+
+	armv5_ec_idcache_wbinv_all,	/* idcache_wbinv_all	*/
+	feroceon_idcache_wbinv_range,	/* idcache_wbinv_all	*/
+
+	feroceon_l2cache_wbinv_all,	/* l2cache_wbinv_all    */
+	feroceon_l2cache_wbinv_range,	/* l2cache_wbinv_range  */
+	feroceon_l2cache_inv_range,	/* l2cache_inv_range    */
+	feroceon_l2cache_wb_range,	/* l2cache_wb_range     */
+
+	/* Other functions */
+
+	cpufunc_nullop,			/* flush_prefetchbuf	*/
+	armv4_drain_writebuf,		/* drain_writebuf	*/
+	cpufunc_nullop,			/* flush_brnchtgt_C	*/
+	(void *)cpufunc_nullop,		/* flush_brnchtgt_E	*/
+
+	(void *)cpufunc_nullop,		/* sleep		*/
+
+	/* Soft functions */
+
+	cpufunc_null_fixup,		/* dataabt_fixup	*/
+	cpufunc_null_fixup,		/* prefetchabt_fixup	*/
+
+	arm10_context_switch,		/* context_switch	*/
+
+	arm10_setup			/* cpu setup		*/
 };
 #endif /* CPU_ARM9E || CPU_ARM10 */
 
@@ -928,13 +993,40 @@ set_cpufuncs()
 	}
 #endif /* CPU_ARM9 */
 #if defined(CPU_ARM9E) || defined(CPU_ARM10)
-	if (cputype == CPU_ID_ARM926EJS ||
-	    cputype == CPU_ID_ARM1026EJS) {
-		cpufuncs = armv5_ec_cpufuncs;
+	if (cputype == CPU_ID_ARM926EJS || cputype == CPU_ID_ARM1026EJS ||
+	    cputype == CPU_ID_MV88FR131 || cputype == CPU_ID_MV88FR571_VD ||
+	    cputype == CPU_ID_MV88FR571_41) {
+		if (cputype == CPU_ID_MV88FR131 ||
+		    cputype == CPU_ID_MV88FR571_VD ||
+		    cputype == CPU_ID_MV88FR571_41) {
+
+			cpufuncs = feroceon_cpufuncs;
+			/*
+			 * Workaround for Marvell MV78100 CPU: Cache prefetch
+			 * mechanism may affect the cache coherency validity,
+			 * so it needs to be disabled.
+			 *
+			 * Refer to errata document MV-S501058-00C.pdf (p. 3.1
+			 * L2 Prefetching Mechanism) for details.
+			 */
+			if (cputype == CPU_ID_MV88FR571_VD ||
+			    cputype == CPU_ID_MV88FR571_41) {
+				feroceon_control_ext(0xffffffff,
+				    FC_DCACHE_STREAM_EN | FC_WR_ALLOC_EN |
+				    FC_BRANCH_TARG_BUF_DIS | FC_L2CACHE_EN |
+				    FC_L2_PREF_DIS);
+			} else {
+				feroceon_control_ext(0xffffffff,
+				    FC_DCACHE_STREAM_EN | FC_WR_ALLOC_EN |
+				    FC_BRANCH_TARG_BUF_DIS | FC_L2CACHE_EN);
+			}
+		} else
+			cpufuncs = armv5_ec_cpufuncs;
+
 		cpu_reset_needs_v4_MMU_disable = 1;	/* V4 or higher */
 		get_cachetype_cp15();
 		pmap_pte_init_generic();
-		return 0;
+		goto out;
 	}
 #endif /* CPU_ARM9E || CPU_ARM10 */
 #ifdef CPU_ARM10
@@ -1793,6 +1885,9 @@ arm10_setup(args)
 
 	/* Now really make sure they are clean.  */
 	__asm __volatile ("mcr\tp15, 0, r0, c7, c7, 0" : : );
+
+	if (vector_page == ARM_VECTORS_HIGH)
+		cpuctrl |= CPU_CONTROL_VECRELOC;
 
 	/* Set the control register */
 	ctrl = cpuctrl;

@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/linux/linux_machdep.c,v 1.78 2007/07/20 08:35:18 attilio Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/linux/linux_machdep.c,v 1.81 2008/11/11 14:55:59 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -758,21 +758,22 @@ linux_mmap_common(struct thread *td, struct l_mmap_argv *linux_args)
 			PROC_UNLOCK(p);
 		}
 
-		/* This gives us our maximum stack size */
-		if (linux_args->len > STACK_SIZE - GUARD_SIZE)
-			bsd_args.len = linux_args->len;
-		else
-			bsd_args.len  = STACK_SIZE - GUARD_SIZE;
-
-		/* 
-		 * This gives us a new BOS.  If we're using VM_STACK, then
-		 * mmap will just map the top SGROWSIZ bytes, and let
-		 * the stack grow down to the limit at BOS.  If we're
-		 * not using VM_STACK we map the full stack, since we
-		 * don't have a way to autogrow it.
+		/*
+		 * This gives us our maximum stack size and a new BOS.
+		 * If we're using VM_STACK, then mmap will just map
+		 * the top SGROWSIZ bytes, and let the stack grow down
+		 * to the limit at BOS.  If we're not using VM_STACK
+		 * we map the full stack, since we don't have a way
+		 * to autogrow it.
 		 */
-		bsd_args.addr = (caddr_t)PTRIN(linux_args->addr) -
-		    bsd_args.len;
+		if (linux_args->len > STACK_SIZE - GUARD_SIZE) {
+			bsd_args.addr = (caddr_t)PTRIN(linux_args->addr);
+			bsd_args.len = linux_args->len;
+		} else {
+			bsd_args.addr = (caddr_t)PTRIN(linux_args->addr) -
+			    (STACK_SIZE - GUARD_SIZE - linux_args->len);
+			bsd_args.len = STACK_SIZE - GUARD_SIZE;
+		}
 	} else {
 		bsd_args.addr = (caddr_t)PTRIN(linux_args->addr);
 		bsd_args.len  = linux_args->len;
@@ -812,29 +813,19 @@ int
 linux_pipe(struct thread *td, struct linux_pipe_args *args)
 {
 	int error;
-	int reg_edx;
+	int fildes[2];
 
 #ifdef DEBUG
 	if (ldebug(pipe))
 		printf(ARGS(pipe, "*"));
 #endif
 
-	reg_edx = td->td_retval[1];
-	error = pipe(td, 0);
-	if (error) {
-		td->td_retval[1] = reg_edx;
+	error = kern_pipe(td, fildes);
+	if (error)
 		return (error);
-	}
 
-	error = copyout(td->td_retval, args->pipefds, 2*sizeof(int));
-	if (error) {
-		td->td_retval[1] = reg_edx;
-		return (error);
-	}
-
-	td->td_retval[1] = reg_edx;
-	td->td_retval[0] = 0;
-	return (0);
+	/* XXX: Close descriptors on error. */
+	return (copyout(fildes, args->pipefds, sizeof fildes));
 }
 
 int
@@ -873,6 +864,7 @@ linux_modify_ldt(struct thread *td, struct linux_modify_ldt_args *uap)
 	struct i386_ldt_args ldt;
 	struct l_descriptor ld;
 	union descriptor desc;
+	int size, written;
 
 	if (uap->ptr == NULL)
 		return (EINVAL);
@@ -884,6 +876,14 @@ linux_modify_ldt(struct thread *td, struct linux_modify_ldt_args *uap)
 		ldt.num = uap->bytecount / sizeof(union descriptor);
 		error = i386_get_ldt(td, &ldt);
 		td->td_retval[0] *= sizeof(union descriptor);
+		break;
+	case 0x02: /* read_default_ldt = 0 */
+		size = 5*sizeof(struct l_desc_struct);
+		if (size > uap->bytecount)
+			size = uap->bytecount;
+		for (written = error = 0; written < size && error == 0; written++)
+			error = subyte((char *)uap->ptr + written, 0);
+		td->td_retval[0] = written;
 		break;
 	case 0x01: /* write_ldt */
 	case 0x11: /* write_ldt */

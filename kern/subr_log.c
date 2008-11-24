@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_log.c,v 1.64 2005/02/27 22:01:09 phk Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_log.c,v 1.65 2008/03/16 10:58:05 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -250,4 +250,4 @@ log_drvinit(void *unused)
 	make_dev(&log_cdevsw, 0, UID_ROOT, GID_WHEEL, 0600, "klog");
 }
 
-SYSINIT(logdev,SI_SUB_DRIVERS,SI_ORDER_MIDDLE,log_drvinit,NULL)
+SYSINIT(logdev,SI_SUB_DRIVERS,SI_ORDER_MIDDLE,log_drvinit,NULL);

@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/ukbd.c,v 1.76 2007/12/29 21:55:24 wkoszek Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/ukbd.c,v 1.77 2008/10/09 20:51:25 n_hibma Exp $");
 
 /*
  * HID spec: http://www.usb.org/developers/devclass_docs/HID1_11.pdf
@@ -1534,5 +1534,5 @@ ukbd_driver_load(module_t mod, int what, void *arg)
 			kbd_delete_driver(&ukbd_kbd_driver);
 			break;
 	}
-	return usbd_driver_load(mod, what, 0);
+	return usbd_driver_load(mod, what, arg);
 }

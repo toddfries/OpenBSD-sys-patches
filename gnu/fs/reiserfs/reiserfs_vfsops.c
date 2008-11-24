@@ -4,7 +4,7 @@
  * 
  * Ported to FreeBSD by Jean-Sébastien Pédron <jspedron@club-internet.fr>
  * 
- * $FreeBSD: src/sys/gnu/fs/reiserfs/reiserfs_vfsops.c,v 1.10 2007/10/16 10:54:55 alfred Exp $
+ * $FreeBSD: src/sys/gnu/fs/reiserfs/reiserfs_vfsops.c,v 1.13 2008/10/28 13:44:11 trasz Exp $
  */
 
 #include <gnu/fs/reiserfs/reiserfs_fs.h>
@@ -74,7 +74,7 @@ reiserfs_mount(struct mount *mp, struct thread *td)
 {
 	size_t size;
 	int error, len;
-	mode_t accessmode;
+	accmode_t accmode;
 	char *path, *fspec;
 	struct vnode *devvp;
 	struct vfsoptlist *opts;
@@ -124,10 +124,10 @@ reiserfs_mount(struct mount *mp, struct thread *td)
 
 	/* If mount by non-root, then verify that user has necessary
 	 * permissions on the device. */
-	accessmode = VREAD;
+	accmode = VREAD;
 	if ((mp->mnt_flag & MNT_RDONLY) == 0)
-		accessmode |= VWRITE;
-	error = VOP_ACCESS(devvp, accessmode, td->td_ucred, td);
+		accmode |= VWRITE;
+	error = VOP_ACCESS(devvp, accmode, td->td_ucred, td);
 	if (error)
 		error = priv_check(td, PRIV_VFS_MOUNT_PERM);
 	if (error) {
@@ -449,7 +449,7 @@ reiserfs_mountfs(struct vnode *devvp, struct mount *mp, struct thread *td)
 
 	error = vinvalbuf(devvp, V_SAVE, td->td_ucred, td, 0, 0);
 	if (error) {
-		VOP_UNLOCK(devvp, 0, td);
+		VOP_UNLOCK(devvp, 0);
 		return (error);
 	}
 
@@ -458,7 +458,7 @@ reiserfs_mountfs(struct vnode *devvp, struct mount *mp, struct thread *td)
 	 * for now
 	 */
 	error = VOP_OPEN(devvp, FREAD, FSCRED, td, NULL);
-	VOP_UNLOCK(devvp, 0, td);
+	VOP_UNLOCK(devvp, 0);
 	if (error)
 		return (error);
 #else
@@ -467,7 +467,7 @@ reiserfs_mountfs(struct vnode *devvp, struct mount *mp, struct thread *td)
 	error = g_vfs_open(devvp, &cp, "reiserfs", /* read-only */ 0);
 	g_topology_unlock();
 	PICKUP_GIANT();
-	VOP_UNLOCK(devvp, 0, td);
+	VOP_UNLOCK(devvp, 0);
 	if (error)
 		return (error);
 
@@ -929,7 +929,7 @@ get_root_node(struct reiserfs_mount *rmp, struct reiserfs_node **root)
 
 	/* Allocate the node structure */
 	reiserfs_log(LOG_DEBUG, "malloc(struct reiserfs_node)\n");
-	MALLOC(ip, struct reiserfs_node *, sizeof(struct reiserfs_node),
+	ip = malloc(sizeof(struct reiserfs_node),
 	    M_REISERFSNODE, M_WAITOK | M_ZERO);
 
 	/* Fill the structure */

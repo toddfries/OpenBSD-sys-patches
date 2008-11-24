@@ -38,7 +38,7 @@
  *
  * Prototypes for cpu, mmu and tlb related functions.
  *
- * $FreeBSD: src/sys/arm/include/cpufunc.h,v 1.13 2007/10/18 05:33:06 imp Exp $
+ * $FreeBSD: src/sys/arm/include/cpufunc.h,v 1.14 2008/10/13 18:16:54 raj Exp $
  */
 
 #ifndef _MACHINE_CPUFUNC_H_
@@ -376,6 +376,18 @@ extern unsigned arm10_dcache_sets_max;
 extern unsigned arm10_dcache_sets_inc;
 extern unsigned arm10_dcache_index_max;
 extern unsigned arm10_dcache_index_inc;
+
+u_int	feroceon_control_ext 		(u_int, u_int);
+void	feroceon_setttb			(u_int);
+void	feroceon_dcache_wbinv_range	(vm_offset_t, vm_size_t);
+void	feroceon_dcache_inv_range	(vm_offset_t, vm_size_t);
+void	feroceon_dcache_wb_range	(vm_offset_t, vm_size_t);
+void	feroceon_idcache_wbinv_range	(vm_offset_t, vm_size_t);
+
+void	feroceon_l2cache_wbinv_range	(vm_offset_t, vm_size_t);
+void	feroceon_l2cache_inv_range	(vm_offset_t, vm_size_t);
+void	feroceon_l2cache_wb_range	(vm_offset_t, vm_size_t);
+void	feroceon_l2cache_wbinv_all	(void);
 #endif
 
 #ifdef CPU_ARM11

@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_idle.c,v 1.53 2007/10/27 00:52:26 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_idle.c,v 1.54 2008/03/16 10:58:05 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -41,7 +41,7 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_idle.c,v 1.53 2007/10/27 00:52:26 julian E
 #endif
 
 static void idle_setup(void *dummy);
-SYSINIT(idle_setup, SI_SUB_SCHED_IDLE, SI_ORDER_FIRST, idle_setup, NULL)
+SYSINIT(idle_setup, SI_SUB_SCHED_IDLE, SI_ORDER_FIRST, idle_setup, NULL);
 
 /*
  * Set up per-cpu idle process contexts.  The AP's shouldn't be running or

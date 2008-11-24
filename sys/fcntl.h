@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)fcntl.h	8.3 (Berkeley) 1/21/94
- * $FreeBSD: src/sys/sys/fcntl.h,v 1.16 2004/04/07 04:19:49 imp Exp $
+ * $FreeBSD: src/sys/sys/fcntl.h,v 1.22 2008/06/26 10:21:54 dfr Exp $
  */
 
 #ifndef _SYS_FCNTL_H_
@@ -105,6 +105,23 @@ typedef	__pid_t		pid_t;
 #ifdef _KERNEL
 #define	FHASLOCK	0x4000		/* descriptor holds advisory lock */
 #endif
+/* Defined by POSIX Extended API Set Part 2 */
+#if __BSD_VISIBLE
+/*
+ * Magic value that specify the use of the current working directory
+ * to determine the target of relative file paths in the openat() and
+ * similar syscalls.
+ */
+#define	AT_FDCWD		-100
+
+/*
+ * Miscellaneous flags for the *at() syscalls.
+ */
+#define	AT_EACCESS		0x100	/* Check access using effective user and group ID */
+#define	AT_SYMLINK_NOFOLLOW	0x200   /* Do not follow symbolic links */
+#define	AT_SYMLINK_FOLLOW	0x400	/* Follow symbolic link */
+#define	AT_REMOVEDIR		0x800	/* Remove directory instead of file */
+#endif
 
 /* Defined by POSIX 1003.1; BSD default, but must be distinct from O_RDONLY. */
 #define	O_NOCTTY	0x8000		/* don't assign controlling terminal */
@@ -112,6 +129,15 @@ typedef	__pid_t		pid_t;
 #if __BSD_VISIBLE
 /* Attempt to bypass buffer cache */
 #define O_DIRECT	0x00010000
+#endif
+
+/* Defined by POSIX Extended API Set Part 2 */
+#if __BSD_VISIBLE
+#define	O_DIRECTORY	0x00020000	/* Fail if not directory */
+#define	O_EXEC		0x00040000	/* Open for execute only */
+#endif
+#ifdef	_KERNEL
+#define	FEXEC		O_EXEC
 #endif
 
 /*
@@ -124,9 +150,21 @@ typedef	__pid_t		pid_t;
 #define	OFLAGS(fflags)	((fflags) - 1)
 
 /* bits to save after open */
-#define	FMASK		(FREAD|FWRITE|FAPPEND|FASYNC|FFSYNC|FNONBLOCK|O_DIRECT)
+#define	FMASK	(FREAD|FWRITE|FAPPEND|FASYNC|FFSYNC|FNONBLOCK|O_DIRECT|FEXEC)
 /* bits settable by fcntl(F_SETFL, ...) */
+#define	FCNTLFLAGS	(FAPPEND|FASYNC|FFSYNC|FNONBLOCK|O_DIRECT)
+
+#if defined(COMPAT_FREEBSD7) || defined(COMPAT_FREEBSD6) || \
+    defined(COMPAT_FREEBSD5) || defined(COMPAT_FREEBSD4)
+/*
+ * Set by shm_open(3) in older libc's to get automatic MAP_ASYNC
+ * behavior for POSIX shared memory objects (which are otherwise
+ * implemented as plain files).
+ */
+#define	FPOSIXSHM	O_NOFOLLOW
+#undef FCNTLFLAGS
 #define	FCNTLFLAGS	(FAPPEND|FASYNC|FFSYNC|FNONBLOCK|FPOSIXSHM|O_DIRECT)
+#endif
 #endif
 
 /*
@@ -150,13 +188,6 @@ typedef	__pid_t		pid_t;
  * different meaning for fcntl(2).
  */
 #if __BSD_VISIBLE
-
-/*
- * Set by shm_open(3) to get automatic MAP_ASYNC behavior
- * for POSIX shared memory objects (which are otherwise
- * implemented as plain files).
- */
-#define	FPOSIXSHM	O_NOFOLLOW
 #endif
 
 /*
@@ -173,9 +204,14 @@ typedef	__pid_t		pid_t;
 #define	F_GETOWN	5		/* get SIGIO/SIGURG proc/pgrp */
 #define F_SETOWN	6		/* set SIGIO/SIGURG proc/pgrp */
 #endif
-#define	F_GETLK		7		/* get record locking information */
-#define	F_SETLK		8		/* set record locking information */
-#define	F_SETLKW	9		/* F_SETLK; wait if blocked */
+#define	F_OGETLK	7		/* get record locking information */
+#define	F_OSETLK	8		/* set record locking information */
+#define	F_OSETLKW	9		/* F_SETLK; wait if blocked */
+#define	F_DUP2FD	10		/* duplicate file descriptor to arg */
+#define	F_GETLK		11		/* get record locking information */
+#define	F_SETLK		12		/* set record locking information */
+#define	F_SETLKW	13		/* F_SETLK; wait if blocked */
+#define	F_SETLK_REMOTE	14		/* debugging support for remote locks */
 
 /* file descriptor flags (F_GETFD, F_SETFD) */
 #define	FD_CLOEXEC	1		/* close-on-exec flag */
@@ -184,10 +220,14 @@ typedef	__pid_t		pid_t;
 #define	F_RDLCK		1		/* shared or read lock */
 #define	F_UNLCK		2		/* unlock */
 #define	F_WRLCK		3		/* exclusive or write lock */
+#define	F_UNLCKSYS	4		/* purge locks for a given system ID */ 
+#define	F_CANCEL	5		/* cancel an async lock request */
 #ifdef _KERNEL
 #define	F_WAIT		0x010		/* Wait until lock is granted */
 #define	F_FLOCK		0x020	 	/* Use flock(2) semantics for lock */
 #define	F_POSIX		0x040	 	/* Use POSIX semantics for lock */
+#define	F_REMOTE	0x080		/* Lock owner is remote NFS client */
+#define F_NOINTR	0x100		/* Ignore signals when waiting */
 #endif
 
 /*
@@ -195,6 +235,19 @@ typedef	__pid_t		pid_t;
  * information passed to system by user
  */
 struct flock {
+	off_t	l_start;	/* starting offset */
+	off_t	l_len;		/* len = 0 means until end of file */
+	pid_t	l_pid;		/* lock owner */
+	short	l_type;		/* lock type: read/write, etc. */
+	short	l_whence;	/* type of l_start */
+	int	l_sysid;	/* remote system id or zero for local */
+};
+
+/*
+ * Old advisory file segment locking data type,
+ * before adding l_sysid.
+ */
+struct oflock {
 	off_t	l_start;	/* starting offset */
 	off_t	l_len;		/* len = 0 means until end of file */
 	pid_t	l_pid;		/* lock owner */
@@ -220,6 +273,7 @@ __BEGIN_DECLS
 int	open(const char *, int, ...);
 int	creat(const char *, mode_t);
 int	fcntl(int, int, ...);
+int	openat(int, const char *, int, ...);
 #if __BSD_VISIBLE
 int	flock(int, int);
 #endif

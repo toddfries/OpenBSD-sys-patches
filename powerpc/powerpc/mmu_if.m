@@ -23,7 +23,7 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 #
-# $FreeBSD: src/sys/powerpc/powerpc/mmu_if.m,v 1.7 2006/12/05 04:01:52 grehan Exp $
+# $FreeBSD: src/sys/powerpc/powerpc/mmu_if.m,v 1.9 2008/05/18 04:16:56 alc Exp $
 #
 
 #include <sys/param.h>
@@ -100,10 +100,10 @@ CODE {
 		return;
 	}
 
-	static vm_offset_t mmu_null_addr_hint(mmu_t mmu, vm_object_t object,
-	    vm_offset_t va, vm_size_t size)
+	static void mmu_null_align_superpage(mmu_t mmu, vm_object_t object,
+	    vm_ooffset_t offset, vm_offset_t *addr, vm_size_t size)
 	{
-		return (va);
+		return;
 	}
 };
 
@@ -431,6 +431,21 @@ METHOD void page_init {
 
 
 /**
+ * @brief Count the number of managed mappings to the given physical
+ * page that are wired.
+ *
+ * @param _pg		physical page
+ *
+ * @retval int		the number of wired, managed mappings to the
+ *			given physical page
+ */
+METHOD int page_wired_mappings {
+	mmu_t		_mmu;
+	vm_page_t	_pg;
+};
+
+
+/**
  * @brief Initialise a physical map data structure
  *
  * @param _pmap		physical map
@@ -644,15 +659,17 @@ METHOD void deactivate {
  * return the given tentative start address.
  *
  * @param _obj		VM backing object
+ * @param _offset	starting offset with the VM object
  * @param _addr		initial guess at virtual address
  * @param _size		size of virtual address range
  */
-METHOD vm_offset_t addr_hint {
+METHOD void align_superpage {
 	mmu_t		_mmu;
 	vm_object_t	_obj;
-	vm_offset_t	_addr;
+	vm_ooffset_t	_offset;
+	vm_offset_t	*_addr;
 	vm_size_t	_size;
-} DEFAULT mmu_null_addr_hint;
+} DEFAULT mmu_null_align_superpage;
 
 
 

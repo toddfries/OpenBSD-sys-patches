@@ -23,7 +23,7 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/powermac_nvram/powermac_nvram.c,v 1.2 2007/12/19 18:00:48 marcel Exp $
+ * $FreeBSD: src/sys/dev/powermac_nvram/powermac_nvram.c,v 1.4 2008/10/14 14:54:14 nwhitehorn Exp $
  */
 
 #include <sys/param.h>
@@ -35,17 +35,15 @@
 #include <sys/uio.h>
 
 #include <dev/ofw/openfirm.h>
-#include <dev/ofw/ofw_pci.h>
+#include <dev/ofw/ofw_bus.h>
 
 #include <machine/bus.h>
 #include <machine/md_var.h>
-#include <machine/nexusvar.h>
 #include <machine/pio.h>
 #include <machine/resource.h>
 
 #include <sys/rman.h>
 
-#include <powerpc/ofw/ofw_pci.h>
 #include <dev/powermac_nvram/powermac_nvramvar.h>
 
 #include <vm/vm.h>
@@ -91,7 +89,7 @@ DRIVER_MODULE(powermac_nvram, nexus, powermac_nvram_driver, powermac_nvram_devcl
  * Cdev methods.
  */
 
-#define	NVRAM_UNIT(dev)		minor(dev)
+#define	NVRAM_UNIT(dev)		dev2unit(dev)
 #define	NVRAM_SOFTC(unit)	((struct powermac_nvram_softc *) \
      devclass_get_softc(powermac_nvram_devclass, unit))
 
@@ -113,10 +111,10 @@ static struct cdevsw powermac_nvram_cdevsw = {
 static int
 powermac_nvram_probe(device_t dev)
 {
-	char	*type, *compatible;
+	const char	*type, *compatible;
 
-	type = nexus_get_device_type(dev);
-	compatible = nexus_get_compatible(dev);
+	type = ofw_bus_get_type(dev);
+	compatible = ofw_bus_get_compat(dev);
 
 	if (type == NULL || compatible == NULL)
 		return ENXIO;
@@ -136,7 +134,7 @@ powermac_nvram_attach(device_t dev)
 	u_int32_t reg[2];
 	int gen0, gen1;
 
-	node = nexus_get_node(dev);
+	node = ofw_bus_get_node(dev);
 	sc = device_get_softc(dev);
 
 	if (OF_getprop(node, "reg", reg, sizeof(reg)) < 8)

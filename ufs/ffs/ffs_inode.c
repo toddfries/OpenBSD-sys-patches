@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ffs/ffs_inode.c,v 1.108 2007/06/01 01:12:45 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ffs/ffs_inode.c,v 1.113 2008/10/23 15:53:51 des Exp $");
 
 #include "opt_quota.h"
 
@@ -147,6 +147,7 @@ ffs_truncate(vp, length, flags, cred, td)
 	ufs2_daddr_t bn, lbn, lastblock, lastiblock[NIADDR], indir_lbn[NIADDR];
 	ufs2_daddr_t oldblks[NDADDR + NIADDR], newblks[NDADDR + NIADDR];
 	ufs2_daddr_t count, blocksreleased = 0, datablocks;
+	struct bufobj *bo;
 	struct fs *fs;
 	struct buf *bp;
 	struct ufsmount *ump;
@@ -158,6 +159,7 @@ ffs_truncate(vp, length, flags, cred, td)
 	ip = VTOI(vp);
 	fs = ip->i_fs;
 	ump = ip->i_ump;
+	bo = &vp->v_bufobj;
 
 	ASSERT_VOP_LOCKED(vp, "ffs_truncate");
 
@@ -202,7 +204,7 @@ ffs_truncate(vp, length, flags, cred, td)
 #ifdef QUOTA
 			(void) chkdq(ip, -extblocks, NOCRED, 0);
 #endif
-			vinvalbuf(vp, V_ALT, td, 0, 0);
+			vinvalbuf(vp, V_ALT, 0, 0);
 			ip->i_din2->di_extsize = 0;
 			for (i = 0; i < NXADDR; i++) {
 				oldblks[i] = ip->i_din2->di_extb[i];
@@ -226,7 +228,7 @@ ffs_truncate(vp, length, flags, cred, td)
 	if (vp->v_type == VLNK &&
 	    (ip->i_size < vp->v_mount->mnt_maxsymlinklen ||
 	     datablocks == 0)) {
-#ifdef DIAGNOSTIC
+#ifdef INVARIANTS
 		if (length != 0)
 			panic("ffs_truncate: partial truncate of symlink");
 #endif
@@ -278,7 +280,7 @@ ffs_truncate(vp, length, flags, cred, td)
 			softdep_setup_freeblocks(ip, length, needextclean ?
 			    IO_EXT | IO_NORMAL : IO_NORMAL);
 			ASSERT_VOP_LOCKED(vp, "ffs_truncate1");
-			vinvalbuf(vp, needextclean ? 0 : V_NORMAL, td, 0, 0);
+			vinvalbuf(vp, needextclean ? 0 : V_NORMAL, 0, 0);
 			vnode_pager_setsize(vp, 0);
 			ip->i_flag |= IN_CHANGE | IN_UPDATE;
 			return (ffs_update(vp, 0));
@@ -479,21 +481,20 @@ ffs_truncate(vp, length, flags, cred, td)
 		}
 	}
 done:
-#ifdef DIAGNOSTIC
+#ifdef INVARIANTS
 	for (level = SINGLE; level <= TRIPLE; level++)
 		if (newblks[NDADDR + level] != DIP(ip, i_ib[level]))
 			panic("ffs_truncate1");
 	for (i = 0; i < NDADDR; i++)
 		if (newblks[i] != DIP(ip, i_db[i]))
 			panic("ffs_truncate2");
-	VI_LOCK(vp);
+	BO_LOCK(bo);
 	if (length == 0 &&
 	    (fs->fs_magic != FS_UFS2_MAGIC || ip->i_din2->di_extsize == 0) &&
-	    (vp->v_bufobj.bo_dirty.bv_cnt > 0 ||
-	     vp->v_bufobj.bo_clean.bv_cnt > 0))
+	    (bo->bo_dirty.bv_cnt > 0 || bo->bo_clean.bv_cnt > 0))
 		panic("ffs_truncate3");
-	VI_UNLOCK(vp);
-#endif /* DIAGNOSTIC */
+	BO_UNLOCK(bo);
+#endif /* INVARIANTS */
 	/*
 	 * Put back the real size.
 	 */
@@ -582,7 +583,7 @@ ffs_indirtrunc(ip, lbn, dbn, lastbn, level, countp)
 	else
 		bap2 = (ufs2_daddr_t *)bp->b_data;
 	if (lastbn != -1) {
-		MALLOC(copy, caddr_t, fs->fs_bsize, M_TEMP, M_WAITOK);
+		copy = malloc(fs->fs_bsize, M_TEMP, M_WAITOK);
 		bcopy((caddr_t)bp->b_data, copy, (u_int)fs->fs_bsize);
 		for (i = last + 1; i < NINDIR(fs); i++)
 			if (ip->i_ump->um_fstype == UFS1)
@@ -636,7 +637,7 @@ ffs_indirtrunc(ip, lbn, dbn, lastbn, level, countp)
 		}
 	}
 	if (copy != NULL) {
-		FREE(copy, M_TEMP);
+		free(copy, M_TEMP);
 	} else {
 		bp->b_flags |= B_INVAL | B_NOCACHE;
 		brelse(bp);
@@ -645,3 +646,11 @@ ffs_indirtrunc(ip, lbn, dbn, lastbn, level, countp)
 	*countp = blocksreleased;
 	return (allerror);
 }
+
+int
+ffs_rdonly(struct inode *ip)
+{
+
+	return (ip->i_ump->um_fs->fs_ronly != 0);
+}
+

@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/uart/Makefile,v 1.16 2006/10/16 22:11:53 jb Exp $
+# $FreeBSD: src/sys/modules/uart/Makefile,v 1.17 2008/11/22 21:24:07 marcel Exp $
 
 .PATH: ${.CURDIR}/../../dev/uart
 
@@ -11,7 +11,8 @@ KMOD=	uart
 SRCS=	uart_bus_acpi.c ${uart_bus_ebus} uart_bus_isa.c uart_bus_pccard.c \
 	uart_bus_pci.c uart_bus_puc.c uart_bus_scc.c \
 	uart_core.c uart_dbg.c \
-	uart_dev_ns8250.c uart_dev_sab82532.c uart_dev_z8530.c \
+	uart_dev_ns8250.c uart_dev_quicc.c uart_dev_sab82532.c \
+	uart_dev_z8530.c \
 	uart_if.c uart_if.h uart_subr.c uart_tty.c
 .if ${MACHINE} == "sun4v"
 SRCS+=	uart_cpu_sparc64.c

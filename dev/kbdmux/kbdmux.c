@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  * $Id: kbdmux.c,v 1.4 2005/07/14 17:38:35 max Exp $
- * $FreeBSD: src/sys/dev/kbdmux/kbdmux.c,v 1.16 2007/12/29 21:55:23 wkoszek Exp $
+ * $FreeBSD: src/sys/dev/kbdmux/kbdmux.c,v 1.18 2008/09/22 22:08:43 emax Exp $
  */
 
 #include "opt_compat.h"
@@ -36,6 +36,7 @@
 
 #include <sys/param.h>
 #include <sys/bus.h>
+#include <sys/clist.h>
 #include <sys/conf.h>
 #include <sys/consio.h>
 #include <sys/fcntl.h>
@@ -52,7 +53,6 @@
 #include <sys/selinfo.h>
 #include <sys/systm.h>
 #include <sys/taskqueue.h>
-#include <sys/tty.h>
 #include <sys/uio.h>
 #include <dev/kbd/kbdreg.h>
 #include <dev/kbd/kbdtables.h>
@@ -104,10 +104,10 @@ MALLOC_DEFINE(M_KBDMUX, KEYBOARD_NAME, "Keyboard multiplexor");
 
 #define KBDMUX_LOCK_DESTROY(s)
 
-#define KBDMUX_LOCK(s)
-
-#define KBDMUX_UNLOCK(s)
-
+#define KBDMUX_LOCK(s) \
+	mtx_lock(&Giant)
+#define KBDMUX_UNLOCK(s) \
+	mtx_unlock(&Giant)
 #define KBDMUX_LOCK_ASSERT(s, w)
 
 #define KBDMUX_SLEEP(s, f, d, t) \

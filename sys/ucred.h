@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ucred.h	8.4 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/sys/ucred.h,v 1.55 2007/06/07 22:27:15 rwatson Exp $
+ * $FreeBSD: src/sys/sys/ucred.h,v 1.56 2007/12/07 01:46:13 kmacy Exp $
  */
 
 #ifndef _SYS_UCRED_H_
@@ -55,6 +55,7 @@ struct ucred {
 	struct uidinfo	*cr_uidinfo;	/* per euid resource consumption */
 	struct uidinfo	*cr_ruidinfo;	/* per ruid resource consumption */
 	struct prison	*cr_prison;	/* jail(2) */
+	void 		*cr_pspare[3];	/* vimage 2; general use 1 */
 #define	cr_endcopy	cr_label
 	struct label	*cr_label;	/* MAC label */
 	struct auditinfo_addr	cr_audit;	/* Audit properties. */

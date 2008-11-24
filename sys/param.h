@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)param.h	8.3 (Berkeley) 4/4/95
- * $FreeBSD: src/sys/sys/param.h,v 1.313 2007/10/25 17:39:19 erwin Exp $
+ * $FreeBSD: src/sys/sys/param.h,v 1.373 2008/11/22 05:55:56 kmacy Exp $
  */
 
 #ifndef _SYS_PARAM_H_
@@ -57,7 +57,7 @@
  *		is created, otherwise 1.
  */
 #undef __FreeBSD_version
-#define __FreeBSD_version 800003	/* Master, propagated to newvers */
+#define __FreeBSD_version 800054	/* Master, propagated to newvers */
 
 #ifndef LOCORE
 #include <sys/types.h>
@@ -193,9 +193,8 @@
 #define	NODEV	(dev_t)(-1)	/* non-existent device */
 
 #define	CBLOCK	128		/* Clist block size, must be a power of 2. */
-#define CBQSIZE	(CBLOCK/NBBY)	/* Quote bytes/cblock - can do better. */
 				/* Data chars/clist. */
-#define	CBSIZE	(CBLOCK - sizeof(struct cblock *) - CBQSIZE)
+#define	CBSIZE	(CBLOCK - sizeof(struct cblock *))
 #define	CROUND	(CBLOCK - 1)	/* Clist rounding. */
 
 /*
@@ -238,10 +237,12 @@
 #define MAXSYMLINKS	32
 
 /* Bit map related macros. */
-#define	setbit(a,i)	((a)[(i)/NBBY] |= 1<<((i)%NBBY))
-#define	clrbit(a,i)	((a)[(i)/NBBY] &= ~(1<<((i)%NBBY)))
-#define	isset(a,i)	((a)[(i)/NBBY] & (1<<((i)%NBBY)))
-#define	isclr(a,i)	(((a)[(i)/NBBY] & (1<<((i)%NBBY))) == 0)
+#define	setbit(a,i)	(((unsigned char *)(a))[(i)/NBBY] |= 1<<((i)%NBBY))
+#define	clrbit(a,i)	(((unsigned char *)(a))[(i)/NBBY] &= ~(1<<((i)%NBBY)))
+#define	isset(a,i)							\
+	(((const unsigned char *)(a))[(i)/NBBY] & (1<<((i)%NBBY)))
+#define	isclr(a,i)							\
+	((((const unsigned char *)(a))[(i)/NBBY] & (1<<((i)%NBBY))) == 0)
 
 /* Macros for counting and rounding. */
 #ifndef howmany
@@ -304,19 +305,10 @@ __END_DECLS
 	((db) << (PAGE_SHIFT - DEV_BSHIFT))
 
 /*
- * Solaris compatibility definitions.
+ * Given the pointer x to the member m of the struct s, return
+ * a pointer to the containing structure.
  */
-#ifdef _SOLARIS_C_SOURCE
-#define	PAGESIZE	PAGE_SIZE
-
-/*
- * The OpenSolaris version is set according to the version last imported
- * from http://dlc.sun.com/osol/on/downloads/current/. In FreeBSD header
- * files it can be used to determine the level of compatibility that the
- * FreeBSD headers provide to OpenSolaris code. Perhaps one day there
- * will be a really, really Single Unix Specification.
- */
-#define __OpenSolaris_version 20060731
-#endif
+#define	member2struct(s, m, x)						\
+	((struct s *)(void *)((char *)(x) - offsetof(struct s, m)))
 
 #endif	/* _SYS_PARAM_H_ */

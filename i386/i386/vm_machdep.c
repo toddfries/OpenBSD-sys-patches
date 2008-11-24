@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/vm_machdep.c,v 1.283 2007/07/07 16:59:01 attilio Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/vm_machdep.c,v 1.292 2008/10/05 02:03:54 davidxu Exp $");
 
 #include "opt_isa.h"
 #include "opt_npx.h"
@@ -53,7 +53,6 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/vm_machdep.c,v 1.283 2007/07/07 16:59:01 a
 #include <sys/systm.h>
 #include <sys/bio.h>
 #include <sys/buf.h>
-#include <sys/kse.h>
 #include <sys/kernel.h>
 #include <sys/ktr.h>
 #include <sys/lock.h>
@@ -89,6 +88,9 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/vm_machdep.c,v 1.283 2007/07/07 16:59:01 a
 #include <vm/vm_map.h>
 #include <vm/vm_param.h>
 
+#ifdef XEN
+#include <machine/xen/hypervisor.h>
+#endif
 #ifdef PC98
 #include <pc98/cbus/cbus.h>
 #else
@@ -110,7 +112,7 @@ static u_int	cpu_reset_proxyid;
 static volatile u_int	cpu_reset_proxy_active;
 #endif
 static void	sf_buf_init(void *arg);
-SYSINIT(sock_sf, SI_SUB_MBUF, SI_ORDER_ANY, sf_buf_init, NULL)
+SYSINIT(sock_sf, SI_SUB_MBUF, SI_ORDER_ANY, sf_buf_init, NULL);
 
 LIST_HEAD(sf_head, sf_buf);
 
@@ -156,17 +158,17 @@ cpu_fork(td1, p2, td2, flags)
 		if ((flags & RFMEM) == 0) {
 			/* unshare user LDT */
 			struct mdproc *mdp1 = &p1->p_md;
-			struct proc_ldt *pldt;
+			struct proc_ldt *pldt, *pldt1;
 
 			mtx_lock_spin(&dt_lock);
-			if ((pldt = mdp1->md_ldt) != NULL &&
-			    pldt->ldt_refcnt > 1) {
-				pldt = user_ldt_alloc(mdp1, pldt->ldt_len);
+			if ((pldt1 = mdp1->md_ldt) != NULL &&
+			    pldt1->ldt_refcnt > 1) {
+				pldt = user_ldt_alloc(mdp1, pldt1->ldt_len);
 				if (pldt == NULL)
 					panic("could not copy LDT");
 				mdp1->md_ldt = pldt;
 				set_user_ldt(mdp1);
-				user_ldt_free(td1);
+				user_ldt_deref(pldt1);
 			} else
 				mtx_unlock_spin(&dt_lock);
 		}
@@ -265,8 +267,14 @@ cpu_fork(td1, p2, td2, flags)
 
 	/* Setup to release spin count in fork_exit(). */
 	td2->td_md.md_spinlock_count = 1;
+	/*
+	 * XXX XEN need to check on PSL_USER is handled
+	 */
+#ifdef XEN
+	td2->td_md.md_saved_flags = 0;
+#else	
 	td2->td_md.md_saved_flags = PSL_KERNEL | PSL_I;
-
+#endif
 	/*
 	 * Now, cpu_switch() can schedule the new process.
 	 * pcb_esp is loaded pointing to the cpu_switch() stack frame
@@ -338,7 +346,6 @@ cpu_thread_clean(struct thread *td)
 
 	pcb = td->td_pcb; 
 	if (pcb->pcb_ext != NULL) {
-		/* XXXKSE  XXXSMP  not SMP SAFE.. what locks do we have? */
 		/* if (pcb->pcb_ext->ext_refcount-- == 1) ?? */
 		/*
 		 * XXX do we need to move the TSS off the allocated pages
@@ -361,13 +368,20 @@ cpu_thread_swapout(struct thread *td)
 }
 
 void
-cpu_thread_setup(struct thread *td)
+cpu_thread_alloc(struct thread *td)
 {
 
 	td->td_pcb = (struct pcb *)(td->td_kstack +
 	    td->td_kstack_pages * PAGE_SIZE) - 1;
 	td->td_frame = (struct trapframe *)((caddr_t)td->td_pcb - 16) - 1;
 	td->td_pcb->pcb_ext = NULL; 
+}
+
+void
+cpu_thread_free(struct thread *td)
+{
+
+	cpu_thread_clean(td);
 }
 
 /*
@@ -389,25 +403,22 @@ cpu_set_upcall(struct thread *td, struct thread *td0)
 	 * Copy the upcall pcb.  This loads kernel regs.
 	 * Those not loaded individually below get their default
 	 * values here.
-	 *
-	 * XXXKSE It might be a good idea to simply skip this as
-	 * the values of the other registers may be unimportant.
-	 * This would remove any requirement for knowing the KSE
-	 * at this time (see the matching comment below for
-	 * more analysis) (need a good safe default).
 	 */
 	bcopy(td0->td_pcb, pcb2, sizeof(*pcb2));
 	pcb2->pcb_flags &= ~(PCB_NPXTRAP|PCB_NPXINITDONE);
 
 	/*
 	 * Create a new fresh stack for the new thread.
-	 * The -16 is so we can expand the trapframe if we go to vm86.
-	 * Don't forget to set this stack value into whatever supplies
-	 * the address for the fault handlers.
-	 * The contexts are filled in at the time we actually DO the
-	 * upcall as only then do we know which KSE we got.
 	 */
 	bcopy(td0->td_frame, td->td_frame, sizeof(struct trapframe));
+
+	/* If the current thread has the trap bit set (i.e. a debugger had
+	 * single stepped the process to the system call), we need to clear
+	 * the trap flag from the new frame. Otherwise, the new thread will
+	 * receive a (likely unexpected) SIGTRAP when it executes the first
+	 * instruction after returning to userland.
+	 */
+	td->td_frame->tf_eflags &= ~PSL_T;
 
 	/*
 	 * Set registers for trampoline to user mode.  Leave space for the
@@ -432,14 +443,18 @@ cpu_set_upcall(struct thread *td, struct thread *td0)
 	 * pcb2->pcb_savefpu:	cloned above.
 	 * pcb2->pcb_flags:	cloned above.
 	 * pcb2->pcb_onfault:	cloned above (always NULL here?).
-	 * pcb2->pcb_gs:	cloned above.  XXXKSE ???
+	 * pcb2->pcb_gs:	cloned above.
 	 * pcb2->pcb_ext:	cleared below.
 	 */
 	pcb2->pcb_ext = NULL;
 
 	/* Setup to release spin count in fork_exit(). */
 	td->td_md.md_spinlock_count = 1;
+#ifdef XEN	
+	td->td_md.md_saved_flags = 0;	
+#else
 	td->td_md.md_saved_flags = PSL_KERNEL | PSL_I;
+#endif
 }
 
 /*
@@ -600,6 +615,9 @@ cpu_reset_real()
 #endif
 
 	disable_intr();
+#ifdef XEN
+	HYPERVISOR_shutdown(SHUTDOWN_poweroff);
+#endif 
 #ifdef CPU_ELAN
 	if (elan_mmcr != NULL)
 		elan_mmcr->RESCFG = 1;
@@ -633,10 +651,13 @@ cpu_reset_real()
 
 	/*
 	 * Attempt to force a reset via the Reset Control register at
-	 * I/O port 0xcf9.  Bit 2 forces a system reset when it is
-	 * written as 1.  Bit 1 selects the type of reset to attempt:
-	 * 0 selects a "soft" reset, and 1 selects a "hard" reset.  We
-	 * try to do a "soft" reset first, and then a "hard" reset.
+	 * I/O port 0xcf9.  Bit 2 forces a system reset when it
+	 * transitions from 0 to 1.  Bit 1 selects the type of reset
+	 * to attempt: 0 selects a "soft" reset, and 1 selects a
+	 * "hard" reset.  We try a "hard" reset.  The first write sets
+	 * bit 1 to select a "hard" reset and clears bit 2.  The
+	 * second write forces a 0 -> 1 transition in bit 2 to trigger
+	 * a reset.
 	 */
 	outb(0xcf9, 0x2);
 	outb(0xcf9, 0x6);
@@ -765,7 +786,12 @@ sf_buf_alloc(struct vm_page *m, int flags)
 	 */
 	ptep = vtopte(sf->kva);
 	opte = *ptep;
+#ifdef XEN
+       PT_SET_MA(sf->kva, xpmap_ptom(VM_PAGE_TO_PHYS(m)) | pgeflag
+	   | PG_RW | PG_V);
+#else
 	*ptep = VM_PAGE_TO_PHYS(m) | pgeflag | PG_RW | PG_V;
+#endif
 
 	/*
 	 * Avoid unnecessary TLB invalidations: If the sf_buf's old
@@ -815,6 +841,14 @@ sf_buf_free(struct sf_buf *sf)
 	if (sf->ref_count == 0) {
 		TAILQ_INSERT_TAIL(&sf_buf_freelist, sf, free_entry);
 		nsfbufsused--;
+#ifdef XEN
+/*
+ * Xen doesn't like having dangling R/W mappings
+ */
+		pmap_qremove(sf->kva, 1);
+		sf->m = NULL;
+		LIST_REMOVE(sf, list_entry);
+#endif
 		if (sf_buf_alloc_want > 0)
 			wakeup_one(&sf_buf_freelist);
 	}

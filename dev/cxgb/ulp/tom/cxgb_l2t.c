@@ -28,7 +28,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_l2t.c,v 1.1 2008/04/19 03:22:42 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_l2t.c,v 1.4 2008/09/24 01:19:08 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -42,7 +42,6 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_l2t.c,v 1.1 2008/04/19 03:22:4
 #endif
 
 #include <sys/socket.h>
-#include <sys/socketvar.h>
 #include <net/if.h>
 #include <net/ethernet.h>
 #include <net/if_vlan_var.h>
@@ -51,11 +50,8 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_l2t.c,v 1.1 2008/04/19 03:22:4
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 
-#ifdef CONFIG_DEFINED
 #include <cxgb_include.h>
-#else
-#include <dev/cxgb/cxgb_include.h>
-#endif
+#include <ulp/tom/cxgb_l2t.h>
 
 #define VLAN_NONE 0xfff
 #define SDL(s) ((struct sockaddr_dl *)s) 

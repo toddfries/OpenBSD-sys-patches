@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/security/mac/mac_sysv_shm.c,v 1.8 2007/10/24 19:04:01 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/security/mac/mac_sysv_shm.c,v 1.9 2008/08/23 15:26:36 rwatson Exp $");
 
 #include "opt_mac.h"
 
@@ -70,7 +70,10 @@ void
 mac_sysvshm_init(struct shmid_kernel *shmsegptr)
 {
 
-	shmsegptr->label = mac_sysv_shm_label_alloc();
+	if (mac_labeled & MPC_OBJECT_SYSVSHM)
+		shmsegptr->label = mac_sysv_shm_label_alloc();
+	else
+		shmsegptr->label = NULL;
 }
 
 static void
@@ -85,8 +88,10 @@ void
 mac_sysvshm_destroy(struct shmid_kernel *shmsegptr)
 {
 
-	mac_sysv_shm_label_free(shmsegptr->label);
-	shmsegptr->label = NULL;
+	if (shmsegptr->label != NULL) {
+		mac_sysv_shm_label_free(shmsegptr->label);
+		shmsegptr->label = NULL;
+	}
 }
 
 void

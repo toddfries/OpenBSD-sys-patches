@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)if_ethersubr.c	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/net/if_ethersubr.c,v 1.239 2007/10/24 19:03:57 rwatson Exp $
+ * $FreeBSD: src/sys/net/if_ethersubr.c,v 1.252 2008/11/22 07:35:45 kmacy Exp $
  */
 
 #include "opt_atalk.h"
@@ -37,6 +37,7 @@
 #include "opt_mac.h"
 #include "opt_netgraph.h"
 #include "opt_carp.h"
+#include "opt_mbuf_profiling.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -48,6 +49,7 @@
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/sysctl.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_arp.h>
@@ -99,6 +101,11 @@ extern u_char	aarp_org_code[3];
 
 #include <security/mac/mac_framework.h>
 
+#ifdef CTASSERT
+CTASSERT(sizeof (struct ether_header) == ETHER_ADDR_LEN * 2 + 2);
+CTASSERT(sizeof (struct ether_addr) == ETHER_ADDR_LEN);
+#endif
+
 /* netgraph node hooks for ng_ether(4) */
 void	(*ng_ether_input_p)(struct ifnet *ifp, struct mbuf **mp);
 void	(*ng_ether_input_orphan_p)(struct ifnet *ifp, struct mbuf *m);
@@ -135,7 +142,9 @@ MALLOC_DEFINE(M_ARPCOM, "arpcom", "802.* interface internals");
 int
 ether_ipfw_chk(struct mbuf **m0, struct ifnet *dst,
 	struct ip_fw **rule, int shared);
+#ifdef VIMAGE_GLOBALS
 static int ether_ipfw;
+#endif
 #endif
 
 /*
@@ -162,6 +171,7 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 		senderr(error);
 #endif
 
+	M_PROFILE(m);
 	if (ifp->if_flags & IFF_MONITOR)
 		senderr(ENETDOWN);
 	if (!((ifp->if_flags & IFF_UP) &&
@@ -383,11 +393,11 @@ bad:			if (m != NULL)
 int
 ether_output_frame(struct ifnet *ifp, struct mbuf *m)
 {
-	int error;
 #if defined(INET) || defined(INET6)
+	INIT_VNET_NET(ifp->if_vnet);
 	struct ip_fw *rule = ip_dn_claim_rule(m);
 
-	if (IPFW_LOADED && ether_ipfw != 0) {
+	if (IPFW_LOADED && V_ether_ipfw != 0) {
 		if (ether_ipfw_chk(&m, ifp, &rule, 0) == 0) {
 			if (m) {
 				m_freem(m);
@@ -402,8 +412,7 @@ ether_output_frame(struct ifnet *ifp, struct mbuf *m)
 	 * Queue message on interface, update output statistics if
 	 * successful, and start output if interface not yet active.
 	 */
-	IFQ_HANDOFF(ifp, m, error);
-	return (error);
+	return ((ifp->if_transmit)(ifp, m));
 }
 
 #if defined(INET) || defined(INET6)
@@ -416,13 +425,14 @@ int
 ether_ipfw_chk(struct mbuf **m0, struct ifnet *dst,
 	struct ip_fw **rule, int shared)
 {
+	INIT_VNET_IPFW(dst->if_vnet);
 	struct ether_header *eh;
 	struct ether_header save_eh;
 	struct mbuf *m;
 	int i;
 	struct ip_fw_args args;
 
-	if (*rule != NULL && fw_one_pass)
+	if (*rule != NULL && V_fw_one_pass)
 		return 1; /* dummynet packet, already partially processed */
 
 	/*
@@ -491,7 +501,7 @@ ether_ipfw_chk(struct mbuf **m0, struct ifnet *dst,
 			 */
 			*m0 = NULL ;
 		}
-		ip_dn_io_ptr(m, dst ? DN_TO_ETH_OUT: DN_TO_ETH_DEMUX, &args);
+		ip_dn_io_ptr(&m, dst ? DN_TO_ETH_OUT: DN_TO_ETH_DEMUX, &args);
 		return 0;
 	}
 	/*
@@ -708,11 +718,12 @@ ether_demux(struct ifnet *ifp, struct mbuf *m)
 	KASSERT(ifp != NULL, ("%s: NULL interface pointer", __func__));
 
 #if defined(INET) || defined(INET6)
+	INIT_VNET_NET(ifp->if_vnet);
 	/*
 	 * Allow dummynet and/or ipfw to claim the frame.
 	 * Do not do this for PROMISC frames in case we are re-entered.
 	 */
-	if (IPFW_LOADED && ether_ipfw != 0 && !(m->m_flags & M_PROMISC)) {
+	if (IPFW_LOADED && V_ether_ipfw != 0 && !(m->m_flags & M_PROMISC)) {
 		struct ip_fw *rule = ip_dn_claim_rule(m);
 
 		if (ether_ipfw_chk(&m, NULL, &rule, 0) == 0) {
@@ -908,8 +919,6 @@ ether_ifattach(struct ifnet *ifp, const u_int8_t *lla)
 			break; 
 	if (i != ifp->if_addrlen)
 		if_printf(ifp, "Ethernet address: %6D\n", lla, ":");
-	if (ifp->if_flags & IFF_NEEDSGIANT)
-		if_printf(ifp, "if_start running deferred for Giant\n");
 }
 
 /*
@@ -931,8 +940,8 @@ ether_ifdetach(struct ifnet *ifp)
 SYSCTL_DECL(_net_link);
 SYSCTL_NODE(_net_link, IFT_ETHER, ether, CTLFLAG_RW, 0, "Ethernet");
 #if defined(INET) || defined(INET6)
-SYSCTL_INT(_net_link_ether, OID_AUTO, ipfw, CTLFLAG_RW,
-	    &ether_ipfw,0,"Pass ether pkts through firewall");
+SYSCTL_V_INT(V_NET, vnet_net, _net_link_ether, OID_AUTO, ipfw, CTLFLAG_RW,
+	     ether_ipfw, 0, "Pass ether pkts through firewall");
 #endif
 
 #if 0
@@ -952,11 +961,12 @@ ether_crc32_le(const uint8_t *buf, size_t len)
 	crc = 0xffffffff;	/* initial value */
 
 	for (i = 0; i < len; i++) {
-		for (data = *buf++, bit = 0; bit < 8; bit++, data >>= 1)
+		for (data = *buf++, bit = 0; bit < 8; bit++, data >>= 1) {
 			carry = (crc ^ data) & 1;
 			crc >>= 1;
 			if (carry)
 				crc = (crc ^ ETHER_CRC_POLY_LE);
+		}
 	}
 
 	return (crc);
@@ -1114,7 +1124,7 @@ ether_resolvemulti(struct ifnet *ifp, struct sockaddr **llsa,
 		sin = (struct sockaddr_in *)sa;
 		if (!IN_MULTICAST(ntohl(sin->sin_addr.s_addr)))
 			return EADDRNOTAVAIL;
-		MALLOC(sdl, struct sockaddr_dl *, sizeof *sdl, M_IFMADDR,
+		sdl = malloc(sizeof *sdl, M_IFMADDR,
 		       M_NOWAIT|M_ZERO);
 		if (sdl == NULL)
 			return ENOMEM;
@@ -1143,7 +1153,7 @@ ether_resolvemulti(struct ifnet *ifp, struct sockaddr **llsa,
 		}
 		if (!IN6_IS_ADDR_MULTICAST(&sin6->sin6_addr))
 			return EADDRNOTAVAIL;
-		MALLOC(sdl, struct sockaddr_dl *, sizeof *sdl, M_IFMADDR,
+		sdl = malloc(sizeof *sdl, M_IFMADDR,
 		       M_NOWAIT|M_ZERO);
 		if (sdl == NULL)
 			return (ENOMEM);

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/hpfs/hpfs_vfsops.c,v 1.61 2007/10/16 10:54:52 alfred Exp $
+ * $FreeBSD: src/sys/fs/hpfs/hpfs_vfsops.c,v 1.66 2008/10/23 15:53:51 des Exp $
  */
 
 
@@ -236,7 +236,7 @@ hpfs_mountfs(devvp, mp, td)
 	error = g_vfs_open(devvp, &cp, "hpfs", ronly ? 0 : 1);
 	g_topology_unlock();
 	PICKUP_GIANT();
-	VOP_UNLOCK(devvp, 0, td);
+	VOP_UNLOCK(devvp, 0);
 	if (error)
 		return (error);
 
@@ -323,7 +323,11 @@ failed:
 	if (bp)
 		brelse (bp);
 	mp->mnt_data = NULL;
-	g_vfs_close(cp, td);
+	DROP_GIANT();
+	g_topology_lock();
+	g_vfs_close(cp);
+	g_topology_unlock();
+	PICKUP_GIANT();
 	return (error);
 }
 
@@ -352,8 +356,12 @@ hpfs_unmount(
 		return (error);
 	}
 
-	vinvalbuf(hpmp->hpm_devvp, V_SAVE, td, 0, 0);
-	g_vfs_close(hpmp->hpm_cp, td);
+	vinvalbuf(hpmp->hpm_devvp, V_SAVE, 0, 0);
+	DROP_GIANT();
+	g_topology_lock();
+	g_vfs_close(hpmp->hpm_cp);
+	g_topology_unlock();
+	PICKUP_GIANT();
 	vrele(hpmp->hpm_devvp);
 
 	dprintf(("hpfs_umount: freeing memory...\n"));
@@ -363,7 +371,7 @@ hpfs_unmount(
 	MNT_ILOCK(mp);
 	mp->mnt_flag &= ~MNT_LOCAL;
 	MNT_IUNLOCK(mp);
-	FREE(hpmp, M_HPFSMNT);
+	free(hpmp, M_HPFSMNT);
 
 	return (0);
 }
@@ -445,7 +453,6 @@ hpfs_vget(
 	struct hpfsnode *hp;
 	struct buf *bp;
 	int error;
-	struct thread *td;
 
 	dprintf(("hpfs_vget(0x%x): ",ino));
 
@@ -469,13 +476,13 @@ hpfs_vget(
 	 * at that time is little, and anyway - we'll
 	 * check for it).
 	 */
-	MALLOC(hp, struct hpfsnode *, sizeof(struct hpfsnode), 
+	hp = malloc(sizeof(struct hpfsnode), 
 		M_HPFSNO, M_WAITOK);
 
 	error = getnewvnode("hpfs", mp, &hpfs_vnodeops, &vp);
 	if (error) {
 		printf("hpfs_vget: can't get new vnode\n");
-		FREE(hp, M_HPFSNO);
+		free(hp, M_HPFSNO);
 		return (error);
 	}
 
@@ -499,14 +506,13 @@ hpfs_vget(
 	hp->h_mode = hpmp->hpm_mode;
 	hp->h_devvp = hpmp->hpm_devvp;
 
-	td = curthread;
-	lockmgr(vp->v_vnlock, LK_EXCLUSIVE, NULL, td);
+	lockmgr(vp->v_vnlock, LK_EXCLUSIVE, NULL);
 	error = insmntque(vp, mp);
 	if (error != 0) {
 		free(hp, M_HPFSNO);
 		return (error);
 	}
-	error = vfs_hash_insert(vp, ino, flags, td, vpp, NULL, NULL);
+	error = vfs_hash_insert(vp, ino, flags, curthread, vpp, NULL, NULL);
 	if (error || *vpp != NULL)
 		return (error);
 

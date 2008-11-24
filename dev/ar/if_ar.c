@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ar/if_ar.c,v 1.75 2007/03/21 03:38:34 nyan Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ar/if_ar.c,v 1.76 2008/10/23 15:53:51 des Exp $");
 
 /*
  * Programming assumptions and other issues.
@@ -365,7 +365,7 @@ ar_detach(device_t device)
 	 * deallocate any system resources we may have
 	 * allocated on behalf of this driver.
 	 */
-	FREE(hc->sc, M_DEVBUF);
+	free(hc->sc, M_DEVBUF);
 	hc->sc = NULL;
 	hc->mem_start = NULL;
 	return (ar_deallocate_resources(device));
@@ -1071,7 +1071,7 @@ arc_init(struct ar_hardc *hc)
 	u_char isr, mar;
 	u_long memst;
 
-	MALLOC(sc, struct ar_softc *, hc->numports * sizeof(struct ar_softc),
+	sc = malloc(hc->numports * sizeof(struct ar_softc),
 		M_DEVBUF, M_WAITOK | M_ZERO);
 	if (sc == NULL)
 		return;

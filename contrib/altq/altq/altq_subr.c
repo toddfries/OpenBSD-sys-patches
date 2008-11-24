@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/contrib/altq/altq/altq_subr.c,v 1.10 2007/07/12 17:00:51 njl Exp $	*/
+/*	$FreeBSD: src/sys/contrib/altq/altq/altq_subr.c,v 1.14 2008/10/23 15:53:51 des Exp $	*/
 /*	$KAME: altq_subr.c,v 1.21 2003/11/06 06:32:53 kjc Exp $	*/
 
 /*
@@ -29,11 +29,9 @@
 
 #if defined(__FreeBSD__) || defined(__NetBSD__)
 #include "opt_altq.h"
-#if (__FreeBSD__ != 2)
 #include "opt_inet.h"
 #ifdef __FreeBSD__
 #include "opt_inet6.h"
-#endif
 #endif
 #endif /* __FreeBSD__ || __NetBSD__ */
 
@@ -77,6 +75,7 @@
 #include <sys/bus.h>
 #include <sys/cpu.h>
 #include <sys/eventhandler.h>
+#include <sys/vimage.h>
 #include <machine/clock.h>
 #endif
 #if defined(__i386__)
@@ -398,13 +397,13 @@ tbr_set(ifq, profile)
 			return (ENOENT);
 		}
 		ifq->altq_tbr = NULL;
-		FREE(tbr, M_DEVBUF);
+		free(tbr, M_DEVBUF);
 		IFQ_UNLOCK(ifq);
 		return (0);
 	}
 
 	IFQ_UNLOCK(ifq);
-	MALLOC(tbr, struct tb_regulator *, sizeof(struct tb_regulator),
+	tbr = malloc(sizeof(struct tb_regulator),
 	       M_DEVBUF, M_WAITOK);
 	if (tbr == NULL) {		/* can not happen */
 		IFQ_UNLOCK(ifq);
@@ -427,7 +426,7 @@ tbr_set(ifq, profile)
 	ifq->altq_tbr = tbr;	/* set the new tbr */
 
 	if (otbr != NULL)
-		FREE(otbr, M_DEVBUF);
+		free(otbr, M_DEVBUF);
 	else {
 		if (tbr_timer == 0) {
 			CALLOUT_RESET(&tbr_callout, 1, tbr_timeout, (void *)0);
@@ -460,7 +459,7 @@ tbr_timeout(arg)
 #if defined(__FreeBSD__) && (__FreeBSD_version >= 500000)
 	IFNET_RLOCK();
 #endif
-	for (ifp = TAILQ_FIRST(&ifnet); ifp; ifp = TAILQ_NEXT(ifp, if_list)) {
+	for (ifp = TAILQ_FIRST(&V_ifnet); ifp; ifp = TAILQ_NEXT(ifp, if_list)) {
 		/* read from if_snd unlocked */
 		if (!TBR_IS_ENABLED(&ifp->if_snd))
 			continue;
@@ -909,6 +908,12 @@ tsc_freq_changed(void *arg, const struct cf_level *level, int status)
 	/* If there was an error during the transition, don't do anything. */
 	if (status != 0)
 		return;
+
+#if (__FreeBSD_version >= 800050) && (defined(__amd64__) || defined(__i386__))
+	/* If TSC is P-state invariant, don't do anything. */
+	if (tsc_is_invariant)
+		return;
+#endif
 
 	/* Total setting for this level gives the new frequency in MHz. */
 	init_machclk();
@@ -1397,7 +1402,7 @@ acc_add_filter(classifier, filter, class, phandle)
 		return (EINVAL);
 #endif
 
-	MALLOC(afp, struct acc_filter *, sizeof(struct acc_filter),
+	afp = malloc(sizeof(struct acc_filter),
 	       M_DEVBUF, M_WAITOK);
 	if (afp == NULL)
 		return (ENOMEM);
@@ -1524,7 +1529,7 @@ acc_delete_filter(classifier, handle)
 	LIST_REMOVE(afp, f_chain);
 	splx(s);
 
-	FREE(afp, M_DEVBUF);
+	free(afp, M_DEVBUF);
 
 	/* todo: update filt_bmask */
 
@@ -1554,7 +1559,7 @@ acc_discard_filters(classifier, class, all)
 			LIST_FOREACH(afp, &classifier->acc_filters[i], f_chain)
 				if (all || afp->f_class == class) {
 					LIST_REMOVE(afp, f_chain);
-					FREE(afp, M_DEVBUF);
+					free(afp, M_DEVBUF);
 					/* start again from the head */
 					break;
 				}
@@ -1976,7 +1981,7 @@ ip4f_init(void)
 
 	TAILQ_INIT(&ip4f_list);
 	for (i=0; i<IP4F_TABSIZE; i++) {
-		MALLOC(fp, struct ip4_frag *, sizeof(struct ip4_frag),
+		fp = malloc(sizeof(struct ip4_frag),
 		       M_DEVBUF, M_NOWAIT);
 		if (fp == NULL) {
 			printf("ip4f_init: can't alloc %dth entry!\n", i);

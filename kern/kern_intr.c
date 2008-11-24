@@ -25,13 +25,14 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_intr.c,v 1.153 2007/10/29 20:45:31 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_intr.c,v 1.169 2008/09/23 14:25:56 obrien Exp $");
 
 #include "opt_ddb.h"
 
 #include <sys/param.h>
 #include <sys/bus.h>
 #include <sys/conf.h>
+#include <sys/cpuset.h>
 #include <sys/rtprio.h>
 #include <sys/systm.h>
 #include <sys/interrupt.h>
@@ -46,7 +47,9 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_intr.c,v 1.153 2007/10/29 20:45:31 julian 
 #include <sys/random.h>
 #include <sys/resourcevar.h>
 #include <sys/sched.h>
+#include <sys/smp.h>
 #include <sys/sysctl.h>
+#include <sys/syslog.h>
 #include <sys/unistd.h>
 #include <sys/vmmeter.h>
 #include <machine/atomic.h>
@@ -78,7 +81,6 @@ struct	intr_entropy {
 
 struct	intr_event *clk_intr_event;
 struct	intr_event *tty_intr_event;
-void	*softclock_ih;
 void	*vm_ih;
 struct proc *intrproc;
 
@@ -91,12 +93,19 @@ SYSCTL_INT(_hw, OID_AUTO, intr_storm_threshold, CTLFLAG_RW,
     "Number of consecutive interrupts before storm protection is enabled");
 static TAILQ_HEAD(, intr_event) event_list =
     TAILQ_HEAD_INITIALIZER(event_list);
+static struct mtx event_lock;
+MTX_SYSINIT(intr_event_list, &event_lock, "intr event list", MTX_DEF);
 
 static void	intr_event_update(struct intr_event *ie);
 #ifdef INTR_FILTER
+static int	intr_event_schedule_thread(struct intr_event *ie,
+		    struct intr_thread *ithd);
+static int	intr_filter_loop(struct intr_event *ie,
+		    struct trapframe *frame, struct intr_thread **ithd);
 static struct intr_thread *ithread_create(const char *name,
 			      struct intr_handler *ih);
 #else
+static int	intr_event_schedule_thread(struct intr_event *ie);
 static struct intr_thread *ithread_create(const char *name);
 #endif
 static void	ithread_destroy(struct intr_thread *ithread);
@@ -237,40 +246,10 @@ intr_event_update(struct intr_event *ie)
 	CTR2(KTR_INTR, "%s: updated %s", __func__, ie->ie_fullname);
 }
 
-#ifndef INTR_FILTER
 int
-intr_event_create(struct intr_event **event, void *source, int flags,
-    void (*enable)(void *), const char *fmt, ...)
-{
-	struct intr_event *ie;
-	va_list ap;
-
-	/* The only valid flag during creation is IE_SOFT. */
-	if ((flags & ~IE_SOFT) != 0)
-		return (EINVAL);
-	ie = malloc(sizeof(struct intr_event), M_ITHREAD, M_WAITOK | M_ZERO);
-	ie->ie_source = source;
-	ie->ie_enable = enable;
-	ie->ie_flags = flags;
-	TAILQ_INIT(&ie->ie_handlers);
-	mtx_init(&ie->ie_lock, "intr event", NULL, MTX_DEF);
-
-	va_start(ap, fmt);
-	vsnprintf(ie->ie_name, sizeof(ie->ie_name), fmt, ap);
-	va_end(ap);
-	strlcpy(ie->ie_fullname, ie->ie_name, sizeof(ie->ie_fullname));
-	mtx_pool_lock(mtxpool_sleep, &event_list);
-	TAILQ_INSERT_TAIL(&event_list, ie, ie_list);
-	mtx_pool_unlock(mtxpool_sleep, &event_list);
-	if (event != NULL)
-		*event = ie;
-	CTR2(KTR_INTR, "%s: created %s", __func__, ie->ie_name);
-	return (0);
-}
-#else
-int
-intr_event_create(struct intr_event **event, void *source, int flags,
-    void (*enable)(void *), void (*eoi)(void *), void (*disab)(void *), 
+intr_event_create(struct intr_event **event, void *source, int flags, int irq,
+    void (*pre_ithread)(void *), void (*post_ithread)(void *),
+    void (*post_filter)(void *), int (*assign_cpu)(void *, u_char),
     const char *fmt, ...)
 {
 	struct intr_event *ie;
@@ -281,10 +260,13 @@ intr_event_create(struct intr_event **event, void *source, int flags,
 		return (EINVAL);
 	ie = malloc(sizeof(struct intr_event), M_ITHREAD, M_WAITOK | M_ZERO);
 	ie->ie_source = source;
-	ie->ie_enable = enable;
-	ie->ie_eoi = eoi;
-	ie->ie_disab = disab;
+	ie->ie_pre_ithread = pre_ithread;
+	ie->ie_post_ithread = post_ithread;
+	ie->ie_post_filter = post_filter;
+	ie->ie_assign_cpu = assign_cpu;
 	ie->ie_flags = flags;
+	ie->ie_irq = irq;
+	ie->ie_cpu = NOCPU;
 	TAILQ_INIT(&ie->ie_handlers);
 	mtx_init(&ie->ie_lock, "intr event", NULL, MTX_DEF);
 
@@ -292,28 +274,141 @@ intr_event_create(struct intr_event **event, void *source, int flags,
 	vsnprintf(ie->ie_name, sizeof(ie->ie_name), fmt, ap);
 	va_end(ap);
 	strlcpy(ie->ie_fullname, ie->ie_name, sizeof(ie->ie_fullname));
-	mtx_pool_lock(mtxpool_sleep, &event_list);
+	mtx_lock(&event_lock);
 	TAILQ_INSERT_TAIL(&event_list, ie, ie_list);
-	mtx_pool_unlock(mtxpool_sleep, &event_list);
+	mtx_unlock(&event_lock);
 	if (event != NULL)
 		*event = ie;
 	CTR2(KTR_INTR, "%s: created %s", __func__, ie->ie_name);
 	return (0);
 }
-#endif
+
+/*
+ * Bind an interrupt event to the specified CPU.  Note that not all
+ * platforms support binding an interrupt to a CPU.  For those
+ * platforms this request will fail.  For supported platforms, any
+ * associated ithreads as well as the primary interrupt context will
+ * be bound to the specificed CPU.  Using a cpu id of NOCPU unbinds
+ * the interrupt event.
+ */
+int
+intr_event_bind(struct intr_event *ie, u_char cpu)
+{
+	cpuset_t mask;
+	lwpid_t id;
+	int error;
+
+	/* Need a CPU to bind to. */
+	if (cpu != NOCPU && CPU_ABSENT(cpu))
+		return (EINVAL);
+
+	if (ie->ie_assign_cpu == NULL)
+		return (EOPNOTSUPP);
+	/*
+	 * If we have any ithreads try to set their mask first since this
+	 * can fail.
+	 */
+	mtx_lock(&ie->ie_lock);
+	if (ie->ie_thread != NULL) {
+		CPU_ZERO(&mask);
+		if (cpu == NOCPU)
+			CPU_COPY(cpuset_root, &mask);
+		else
+			CPU_SET(cpu, &mask);
+		id = ie->ie_thread->it_thread->td_tid;
+		mtx_unlock(&ie->ie_lock);
+		error = cpuset_setthread(id, &mask);
+		if (error)
+			return (error);
+	} else
+		mtx_unlock(&ie->ie_lock);
+	error = ie->ie_assign_cpu(ie->ie_source, cpu);
+	if (error)
+		return (error);
+	mtx_lock(&ie->ie_lock);
+	ie->ie_cpu = cpu;
+	mtx_unlock(&ie->ie_lock);
+
+	return (error);
+}
+
+static struct intr_event *
+intr_lookup(int irq)
+{
+	struct intr_event *ie;
+
+	mtx_lock(&event_lock);
+	TAILQ_FOREACH(ie, &event_list, ie_list)
+		if (ie->ie_irq == irq &&
+		    (ie->ie_flags & IE_SOFT) == 0 &&
+		    TAILQ_FIRST(&ie->ie_handlers) != NULL)
+			break;
+	mtx_unlock(&event_lock);
+	return (ie);
+}
+
+int
+intr_setaffinity(int irq, void *m)
+{
+	struct intr_event *ie;
+	cpuset_t *mask;
+	u_char cpu;
+	int n;
+
+	mask = m;
+	cpu = NOCPU;
+	/*
+	 * If we're setting all cpus we can unbind.  Otherwise make sure
+	 * only one cpu is in the set.
+	 */
+	if (CPU_CMP(cpuset_root, mask)) {
+		for (n = 0; n < CPU_SETSIZE; n++) {
+			if (!CPU_ISSET(n, mask))
+				continue;
+			if (cpu != NOCPU)
+				return (EINVAL);
+			cpu = (u_char)n;
+		}
+	}
+	ie = intr_lookup(irq);
+	if (ie == NULL)
+		return (ESRCH);
+	intr_event_bind(ie, cpu);
+	return (0);
+}
+
+int
+intr_getaffinity(int irq, void *m)
+{
+	struct intr_event *ie;
+	cpuset_t *mask;
+
+	mask = m;
+	ie = intr_lookup(irq);
+	if (ie == NULL)
+		return (ESRCH);
+	CPU_ZERO(mask);
+	mtx_lock(&ie->ie_lock);
+	if (ie->ie_cpu == NOCPU)
+		CPU_COPY(cpuset_root, mask);
+	else
+		CPU_SET(ie->ie_cpu, mask);
+	mtx_unlock(&ie->ie_lock);
+	return (0);
+}
 
 int
 intr_event_destroy(struct intr_event *ie)
 {
 
+	mtx_lock(&event_lock);
 	mtx_lock(&ie->ie_lock);
 	if (!TAILQ_EMPTY(&ie->ie_handlers)) {
 		mtx_unlock(&ie->ie_lock);
+		mtx_unlock(&event_lock);
 		return (EBUSY);
 	}
-	mtx_pool_lock(mtxpool_sleep, &event_list);
 	TAILQ_REMOVE(&event_list, ie, ie_list);
-	mtx_pool_unlock(mtxpool_sleep, &event_list);
 #ifndef notyet
 	if (ie->ie_thread != NULL) {
 		ithread_destroy(ie->ie_thread);
@@ -321,6 +416,7 @@ intr_event_destroy(struct intr_event *ie)
 	}
 #endif
 	mtx_unlock(&ie->ie_lock);
+	mtx_unlock(&event_lock);
 	mtx_destroy(&ie->ie_lock);
 	free(ie, M_ITHREAD);
 	return (0);
@@ -659,7 +755,7 @@ ok:
 	return (0);
 }
 
-int
+static int
 intr_event_schedule_thread(struct intr_event *ie)
 {
 	struct intr_entropy entropy;
@@ -816,7 +912,7 @@ ok:
 	return (0);
 }
 
-int
+static int
 intr_event_schedule_thread(struct intr_event *ie, struct intr_thread *it)
 {
 	struct intr_entropy entropy;
@@ -891,21 +987,25 @@ swi_add(struct intr_event **eventp, const char *name, driver_intr_t handler,
 		if (!(ie->ie_flags & IE_SOFT))
 			return (EINVAL);
 	} else {
-#ifdef INTR_FILTER
-		error = intr_event_create(&ie, NULL, IE_SOFT,
-		    NULL, NULL, NULL, "swi%d:", pri);
-#else
-		error = intr_event_create(&ie, NULL, IE_SOFT,
-		    NULL, "swi%d:", pri);
-#endif
+		error = intr_event_create(&ie, NULL, IE_SOFT, 0,
+		    NULL, NULL, NULL, NULL, "swi%d:", pri);
 		if (error)
 			return (error);
 		if (eventp != NULL)
 			*eventp = ie;
 	}
-	return (intr_event_add_handler(ie, name, NULL, handler, arg,
-		    (pri * RQ_PPQ) + PI_SOFT, flags, cookiep));
-		    /* XXKSE.. think of a better way to get separate queues */
+	error = intr_event_add_handler(ie, name, NULL, handler, arg,
+	    (pri * RQ_PPQ) + PI_SOFT, flags, cookiep);
+	if (error)
+		return (error);
+	if (pri == SWI_CLOCK) {
+		struct proc *p;
+		p = ie->ie_thread->it_thread->td_proc;
+		PROC_LOCK(p);
+		p->p_flag |= P_NOLOAD;
+		PROC_UNLOCK(p);
+	}
+	return (0);
 }
 
 /*
@@ -985,16 +1085,16 @@ priv_ithread_execute_handler(struct proc *p, struct intr_handler *ih)
 }
 #endif
 
-static void
-ithread_execute_handlers(struct proc *p, struct intr_event *ie)
+/*
+ * This is a public function for use by drivers that mux interrupt
+ * handlers for child devices from their interrupt handler.
+ */
+void
+intr_event_execute_handlers(struct proc *p, struct intr_event *ie)
 {
 	struct intr_handler *ih, *ihn;
 
-	/* Interrupt handlers should not sleep. */
-	if (!(ie->ie_flags & IE_SOFT))
-		THREAD_NO_SLEEPING();
 	TAILQ_FOREACH_SAFE(ih, &ie->ie_handlers, ih_next, ihn) {
-
 		/*
 		 * If this handler is marked for death, remove it from
 		 * the list of handlers and wake up the sleeper.
@@ -1035,6 +1135,16 @@ ithread_execute_handlers(struct proc *p, struct intr_event *ie)
 		if (!(ih->ih_flags & IH_MPSAFE))
 			mtx_unlock(&Giant);
 	}
+}
+
+static void
+ithread_execute_handlers(struct proc *p, struct intr_event *ie)
+{
+
+	/* Interrupt handlers should not sleep. */
+	if (!(ie->ie_flags & IE_SOFT))
+		THREAD_NO_SLEEPING();
+	intr_event_execute_handlers(p, ie);
 	if (!(ie->ie_flags & IE_SOFT))
 		THREAD_SLEEPING_OK();
 
@@ -1064,8 +1174,8 @@ ithread_execute_handlers(struct proc *p, struct intr_event *ie)
 	 * Now that all the handlers have had a chance to run, reenable
 	 * the interrupt source.
 	 */
-	if (ie->ie_enable != NULL)
-		ie->ie_enable(ie->ie_source);
+	if (ie->ie_post_ithread != NULL)
+		ie->ie_post_ithread(ie->ie_source);
 }
 
 #ifndef INTR_FILTER
@@ -1130,10 +1240,99 @@ ithread_loop(void *arg)
 		if (!ithd->it_need && !(ithd->it_flags & IT_DEAD)) {
 			TD_SET_IWAIT(td);
 			ie->ie_count = 0;
-			mi_switch(SW_VOL, NULL);
+			mi_switch(SW_VOL | SWT_IWAIT, NULL);
 		}
 		thread_unlock(td);
 	}
+}
+
+/*
+ * Main interrupt handling body.
+ *
+ * Input:
+ * o ie:                        the event connected to this interrupt.
+ * o frame:                     some archs (i.e. i386) pass a frame to some.
+ *                              handlers as their main argument.
+ * Return value:
+ * o 0:                         everything ok.
+ * o EINVAL:                    stray interrupt.
+ */
+int
+intr_event_handle(struct intr_event *ie, struct trapframe *frame)
+{
+	struct intr_handler *ih;
+	struct thread *td;
+	int error, ret, thread;
+
+	td = curthread;
+
+	/* An interrupt with no event or handlers is a stray interrupt. */
+	if (ie == NULL || TAILQ_EMPTY(&ie->ie_handlers))
+		return (EINVAL);
+
+	/*
+	 * Execute fast interrupt handlers directly.
+	 * To support clock handlers, if a handler registers
+	 * with a NULL argument, then we pass it a pointer to
+	 * a trapframe as its argument.
+	 */
+	td->td_intr_nesting_level++;
+	thread = 0;
+	ret = 0;
+	critical_enter();
+	TAILQ_FOREACH(ih, &ie->ie_handlers, ih_next) {
+		if (ih->ih_filter == NULL) {
+			thread = 1;
+			continue;
+		}
+		CTR4(KTR_INTR, "%s: exec %p(%p) for %s", __func__,
+		    ih->ih_filter, ih->ih_argument == NULL ? frame :
+		    ih->ih_argument, ih->ih_name);
+		if (ih->ih_argument == NULL)
+			ret = ih->ih_filter(frame);
+		else
+			ret = ih->ih_filter(ih->ih_argument);
+		/* 
+		 * Wrapper handler special handling:
+		 *
+		 * in some particular cases (like pccard and pccbb), 
+		 * the _real_ device handler is wrapped in a couple of
+		 * functions - a filter wrapper and an ithread wrapper.
+		 * In this case (and just in this case), the filter wrapper 
+		 * could ask the system to schedule the ithread and mask
+		 * the interrupt source if the wrapped handler is composed
+		 * of just an ithread handler.
+		 *
+		 * TODO: write a generic wrapper to avoid people rolling 
+		 * their own
+		 */
+		if (!thread) {
+			if (ret == FILTER_SCHEDULE_THREAD)
+				thread = 1;
+		}
+	}
+
+	if (thread) {
+		if (ie->ie_pre_ithread != NULL)
+			ie->ie_pre_ithread(ie->ie_source);
+	} else {
+		if (ie->ie_post_filter != NULL)
+			ie->ie_post_filter(ie->ie_source);
+	}
+	
+	/* Schedule the ithread if needed. */
+	if (thread) {
+		error = intr_event_schedule_thread(ie);
+#ifndef XEN		
+		KASSERT(error == 0, ("bad stray interrupt"));
+#else
+		if (error != 0)
+			log(LOG_WARNING, "bad stray interrupt");
+#endif		
+	}
+	critical_exit();
+	td->td_intr_nesting_level--;
+	return (0);
 }
 #else
 /*
@@ -1204,7 +1403,7 @@ ithread_loop(void *arg)
 		if (!ithd->it_need && !(ithd->it_flags & IT_DEAD)) {
 			TD_SET_IWAIT(td);
 			ie->ie_count = 0;
-			mi_switch(SW_VOL, NULL);
+			mi_switch(SW_VOL | SWT_IWAIT, NULL);
 		}
 		thread_unlock(td);
 	}
@@ -1233,7 +1432,7 @@ ithread_loop(void *arg)
  * scheduled.
  */
 
-int
+static int
 intr_filter_loop(struct intr_event *ie, struct trapframe *frame, 
 		 struct intr_thread **ithd) 
 {
@@ -1309,19 +1508,13 @@ intr_event_handle(struct intr_event *ie, struct trapframe *frame)
 	td->td_intr_nesting_level++;
 	thread = 0;
 	critical_enter();
-	thread = intr_filter_loop(ie, frame, &ithd);
-	
-	/*
-	 * If the interrupt was fully served, send it an EOI but leave
-	 * it unmasked. Otherwise, mask the source as well as sending
-	 * it an EOI.
-	 */
+	thread = intr_filter_loop(ie, frame, &ithd);	
 	if (thread & FILTER_HANDLED) {
-		if (ie->ie_eoi != NULL)
-			ie->ie_eoi(ie->ie_source);
+		if (ie->ie_post_filter != NULL)
+			ie->ie_post_filter(ie->ie_source);
 	} else {
-		if (ie->ie_disab != NULL)
-			ie->ie_disab(ie->ie_source);
+		if (ie->ie_pre_ithread != NULL)
+			ie->ie_pre_ithread(ie->ie_source);
 	}
 	critical_exit();
 	
@@ -1501,19 +1694,12 @@ DB_SHOW_COMMAND(intr, db_show_intr)
 static void
 start_softintr(void *dummy)
 {
-	struct proc *p;
 
-	if (swi_add(&clk_intr_event, "clock", softclock, NULL, SWI_CLOCK,
-		INTR_MPSAFE, &softclock_ih) ||
-	    swi_add(NULL, "vm", swi_vm, NULL, SWI_VM, INTR_MPSAFE, &vm_ih))
-		panic("died while creating standard software ithreads");
-
-	p = clk_intr_event->ie_thread->it_thread->td_proc;
-	PROC_LOCK(p);
-	p->p_flag |= P_NOLOAD;
-	PROC_UNLOCK(p);
+	if (swi_add(NULL, "vm", swi_vm, NULL, SWI_VM, INTR_MPSAFE, &vm_ih))
+		panic("died while creating vm swi ithread");
 }
-SYSINIT(start_softintr, SI_SUB_SOFTINTR, SI_ORDER_FIRST, start_softintr, NULL)
+SYSINIT(start_softintr, SI_SUB_SOFTINTR, SI_ORDER_FIRST, start_softintr,
+    NULL);
 
 /*
  * Sysctls used by systat and others: hw.intrnames and hw.intrcnt.

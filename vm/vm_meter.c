@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_meter.c,v 1.96 2007/07/27 20:01:21 alc Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_meter.c,v 1.99 2008/08/20 01:05:56 julian Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -76,6 +76,7 @@ SYSCTL_UINT(_vm, OID_AUTO, v_free_severe,
 static int
 sysctl_vm_loadavg(SYSCTL_HANDLER_ARGS)
 {
+	
 #ifdef SCTL_MASK32
 	u_int32_t la[4];
 
@@ -95,7 +96,6 @@ SYSCTL_PROC(_vm, VM_LOADAVG, loadavg, CTLTYPE_STRUCT|CTLFLAG_RD,
 static int
 vmtotal(SYSCTL_HANDLER_ARGS)
 {
-/* XXXKSE almost completely broken */
 	struct proc *p;
 	struct vmtotal total;
 	vm_map_entry_t entry;
@@ -131,33 +131,27 @@ vmtotal(SYSCTL_HANDLER_ARGS)
 	FOREACH_PROC_IN_SYSTEM(p) {
 		if (p->p_flag & P_SYSTEM)
 			continue;
+		PROC_LOCK(p);
 		PROC_SLOCK(p);
 		switch (p->p_state) {
 		case PRS_NEW:
 			PROC_SUNLOCK(p);
+			PROC_UNLOCK(p);
 			continue;
 			break;
 		default:
+			PROC_SUNLOCK(p);
 			FOREACH_THREAD_IN_PROC(p, td) {
-				/* Need new statistics  XXX */
 				thread_lock(td);
 				switch (td->td_state) {
 				case TDS_INHIBITED:
-					/*
-					 * XXX stats no longer synchronized.
-					 */
-					if (TD_ON_LOCK(td) ||
-					    (td->td_inhibitors ==
-					    TDI_SWAPPED)) {
+					if (TD_IS_SWAPPED(td))
 						total.t_sw++;
-					} else if (TD_IS_SLEEPING(td) ||
-					   TD_AWAITING_INTR(td) ||
-					   TD_IS_SUSPENDED(td)) {
-						if (td->td_priority <= PZERO)
-							total.t_dw++;
-						else
-							total.t_sl++;
-					}
+					else if (TD_IS_SLEEPING(td) &&
+					    td->td_priority <= PZERO)
+						total.t_dw++;
+					else
+						total.t_sl++;
 					break;
 
 				case TDS_CAN_RUN:
@@ -174,7 +168,7 @@ vmtotal(SYSCTL_HANDLER_ARGS)
 				thread_unlock(td);
 			}
 		}
-		PROC_SUNLOCK(p);
+		PROC_UNLOCK(p);
 		/*
 		 * Note active objects.
 		 */

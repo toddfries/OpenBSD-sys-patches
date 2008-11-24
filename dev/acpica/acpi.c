@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi.c,v 1.248 2008/04/07 18:35:11 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi.c,v 1.254 2008/11/18 21:01:54 jhb Exp $");
 
 #include "opt_acpi.h"
 #include <sys/param.h>
@@ -48,6 +48,9 @@ __FBSDID("$FreeBSD: src/sys/dev/acpica/acpi.c,v 1.248 2008/04/07 18:35:11 jhb Ex
 #include <sys/sbuf.h>
 #include <sys/smp.h>
 
+#if defined(__i386__) || defined(__amd64__)
+#include <machine/pci_cfgreg.h>
+#endif
 #include <machine/resource.h>
 #include <machine/bus.h>
 #include <sys/rman.h>
@@ -152,6 +155,11 @@ static int	acpi_child_location_str_method(device_t acdev, device_t child,
 					       char *buf, size_t buflen);
 static int	acpi_child_pnpinfo_str_method(device_t acdev, device_t child,
 					      char *buf, size_t buflen);
+#if defined(__i386__) || defined(__amd64__)
+static void	acpi_enable_pcie(void);
+#endif
+static void	acpi_hint_device_unit(device_t acdev, device_t child,
+		    const char *name, int *unitp);
 
 static device_method_t acpi_methods[] = {
     /* Device interface */
@@ -181,6 +189,7 @@ static device_method_t acpi_methods[] = {
     DEVMETHOD(bus_deactivate_resource,	bus_generic_deactivate_resource),
     DEVMETHOD(bus_setup_intr,		bus_generic_setup_intr),
     DEVMETHOD(bus_teardown_intr,	bus_generic_teardown_intr),
+    DEVMETHOD(bus_hint_device_unit,	acpi_hint_device_unit),
 
     /* ACPI bus */
     DEVMETHOD(acpi_id_probe,		acpi_device_id_probe),
@@ -251,7 +260,7 @@ SYSCTL_INT(_debug_acpi, OID_AUTO, suspend_bounce, CTLFLAG_RW,
 /*
  * ACPI can only be loaded as a module by the loader; activating it after
  * system bootstrap time is not useful, and can be fatal to the system.
- * It also cannot be unloaded, since the entire system bus heirarchy hangs
+ * It also cannot be unloaded, since the entire system bus hierarchy hangs
  * off it.
  */
 static int
@@ -447,6 +456,11 @@ acpi_attach(device_t dev)
 		      AcpiFormatException(status));
 	goto out;
     }
+
+#if defined(__i386__) || defined(__amd64__)
+    /* Handle MCFG table if present. */
+    acpi_enable_pcie();
+#endif
 
     /* Install the default address space handlers. */
     status = AcpiInstallAddressSpaceHandler(ACPI_ROOT_OBJECT,
@@ -654,7 +668,9 @@ acpi_suspend(device_t dev)
      * device has an _SxD method for the next sleep state, use that power
      * state instead.
      */
-    device_get_children(dev, &devlist, &numdevs);
+    error = device_get_children(dev, &devlist, &numdevs);
+    if (error)
+	return (error);
     for (i = 0; i < numdevs; i++) {
 	/* If the device is not attached, we've powered it down elsewhere. */
 	child = devlist[i];
@@ -681,7 +697,7 @@ static int
 acpi_resume(device_t dev)
 {
     ACPI_HANDLE handle;
-    int i, numdevs;
+    int i, numdevs, error;
     device_t child, *devlist;
 
     GIANT_REQUIRED;
@@ -690,7 +706,9 @@ acpi_resume(device_t dev)
      * Put all devices in D0 before resuming them.  Call _S0D on each one
      * since some systems expect this.
      */
-    device_get_children(dev, &devlist, &numdevs);
+    error = device_get_children(dev, &devlist, &numdevs);
+    if (error)
+	return (error);
     for (i = 0; i < numdevs; i++) {
 	child = devlist[i];
 	handle = acpi_get_handle(child);
@@ -774,8 +792,9 @@ acpi_print_child(device_t bus, device_t child)
 static void
 acpi_probe_nomatch(device_t bus, device_t child)
 {
-
-    /* pci_set_powerstate(child, PCI_POWERSTATE_D3); */
+#ifdef ACPI_ENABLE_POWERDOWN_NODRIVER
+    pci_set_powerstate(child, PCI_POWERSTATE_D3);
+#endif
 }
 
 /*
@@ -790,13 +809,18 @@ acpi_driver_added(device_t dev, driver_t *driver)
     int i, numdevs;
 
     DEVICE_IDENTIFY(driver, dev);
-    device_get_children(dev, &devlist, &numdevs);
+    if (device_get_children(dev, &devlist, &numdevs))
+	    return;
     for (i = 0; i < numdevs; i++) {
 	child = devlist[i];
 	if (device_get_state(child) == DS_NOTPRESENT) {
-	    /* pci_set_powerstate(child, PCI_POWERSTATE_D0); */
+#ifdef ACPI_ENABLE_POWERDOWN_NODRIVER
+	    pci_set_powerstate(child, PCI_POWERSTATE_D0);
 	    if (device_probe_and_attach(child) != 0)
-		; /* pci_set_powerstate(child, PCI_POWERSTATE_D3); */
+		pci_set_powerstate(child, PCI_POWERSTATE_D3);
+#else
+	    device_probe_and_attach(child);
+#endif
 	}
     }
     free(devlist, M_TEMP);
@@ -926,6 +950,89 @@ acpi_get_rlist(device_t dev, device_t child)
 
     ad = device_get_ivars(child);
     return (&ad->ad_rl);
+}
+
+static int
+acpi_match_resource_hint(device_t dev, int type, long value)
+{
+    struct acpi_device *ad = device_get_ivars(dev);
+    struct resource_list *rl = &ad->ad_rl;
+    struct resource_list_entry *rle;
+
+    STAILQ_FOREACH(rle, rl, link) {
+	if (rle->type != type)
+	    continue;
+	if (rle->start <= value && rle->end >= value)
+	    return (1);
+    }
+    return (0);
+}
+
+/*
+ * Wire device unit numbers based on resource matches in hints.
+ */
+static void
+acpi_hint_device_unit(device_t acdev, device_t child, const char *name,
+    int *unitp)
+{
+    const char *s;
+    long value;
+    int line, matches, unit;
+
+    /*
+     * Iterate over all the hints for the devices with the specified
+     * name to see if one's resources are a subset of this device.
+     */
+    line = 0;
+    for (;;) {
+	if (resource_find_dev(&line, name, &unit, "at", NULL) != 0)
+	    break;
+
+	/* Must have an "at" for acpi or isa. */
+	resource_string_value(name, unit, "at", &s);
+	if (!(strcmp(s, "acpi0") == 0 || strcmp(s, "acpi") == 0 ||
+	    strcmp(s, "isa0") == 0 || strcmp(s, "isa") == 0))
+	    continue;
+
+	/*
+	 * Check for matching resources.  We must have at least one,
+	 * and all resources specified have to match.
+	 *
+	 * XXX: We may want to revisit this to be more lenient and wire
+	 * as long as it gets one match.
+	 */
+	matches = 0;
+	if (resource_long_value(name, unit, "port", &value) == 0) {
+	    if (acpi_match_resource_hint(child, SYS_RES_IOPORT, value))
+		matches++;
+	    else
+		continue;
+	}
+	if (resource_long_value(name, unit, "maddr", &value) == 0) {
+	    if (acpi_match_resource_hint(child, SYS_RES_MEMORY, value))
+		matches++;
+	    else
+		continue;
+	}
+	if (resource_long_value(name, unit, "irq", &value) == 0) {
+	    if (acpi_match_resource_hint(child, SYS_RES_IRQ, value))
+		matches++;
+	    else
+		continue;
+	}
+	if (resource_long_value(name, unit, "drq", &value) == 0) {
+	    if (acpi_match_resource_hint(child, SYS_RES_DRQ, value))
+		matches++;
+	    else
+		continue;
+	}
+
+	if (matches > 0) {
+	    /* We have a winner! */
+	    *unitp = unit;
+	    break;
+	}
+    }
 }
 
 /*
@@ -1466,6 +1573,36 @@ acpi_isa_pnp_probe(device_t bus, device_t child, struct isa_pnp_id *ids)
     return_VALUE (result);
 }
 
+#if defined(__i386__) || defined(__amd64__)
+/*
+ * Look for a MCFG table.  If it is present, use the settings for
+ * domain (segment) 0 to setup PCI config space access via the memory
+ * map.
+ */
+static void
+acpi_enable_pcie(void)
+{
+	ACPI_TABLE_HEADER *hdr;
+	ACPI_MCFG_ALLOCATION *alloc, *end;
+	ACPI_STATUS status;
+
+	status = AcpiGetTable(ACPI_SIG_MCFG, 1, &hdr);
+	if (ACPI_FAILURE(status))
+		return;
+
+	end = (ACPI_MCFG_ALLOCATION *)((char *)hdr + hdr->Length);
+	alloc = (ACPI_MCFG_ALLOCATION *)((ACPI_TABLE_MCFG *)hdr + 1);
+	while (alloc < end) {
+		if (alloc->PciSegment == 0) {
+			pcie_cfgregopen(alloc->Address, alloc->StartBusNumber,
+			    alloc->EndBusNumber);
+			return;
+		}
+		alloc++;
+	}
+}
+#endif
+
 /*
  * Scan all of the ACPI namespace and attach child devices.
  *
@@ -1531,8 +1668,7 @@ acpi_probe_order(ACPI_HANDLE handle, int *order)
      * 1. I/O port and memory system resource holders
      * 2. Embedded controllers (to handle early accesses)
      * 3. PCI Link Devices
-     * ACPI_DEV_BASE_ORDER. Host-PCI bridges
-     * ACPI_DEV_BASE_ORDER + 10. CPUs
+     * 100000. CPUs
      */
     AcpiGetType(handle, &type);
     if (acpi_MatchHid(handle, "PNP0C01") || acpi_MatchHid(handle, "PNP0C02"))
@@ -1541,10 +1677,8 @@ acpi_probe_order(ACPI_HANDLE handle, int *order)
 	*order = 2;
     else if (acpi_MatchHid(handle, "PNP0C0F"))
 	*order = 3;
-    else if (acpi_MatchHid(handle, "PNP0A03"))
-	*order = ACPI_DEV_BASE_ORDER;
     else if (type == ACPI_TYPE_PROCESSOR)
-	*order = ACPI_DEV_BASE_ORDER + 10;
+	*order = 100000;
 }
 
 /*
@@ -1594,10 +1728,8 @@ acpi_probe_child(ACPI_HANDLE handle, UINT32 level, void *context, void **status)
 	     * placeholder so that the probe/attach passes will run
 	     * breadth-first.  Orders less than ACPI_DEV_BASE_ORDER
 	     * are reserved for special objects (i.e., system
-	     * resources).  Orders between ACPI_DEV_BASE_ORDER and 100
-	     * are used for Host-PCI bridges (and effectively all
-	     * their children) and CPUs.  Larger values are used for
-	     * all other devices.
+	     * resources).  CPU devices have a very high order to
+	     * ensure they are probed after other devices.
 	     */
 	    ACPI_DEBUG_PRINT((ACPI_DB_OBJECTS, "scanning '%s'\n", handle_str));
 	    order = level * 10 + 100;

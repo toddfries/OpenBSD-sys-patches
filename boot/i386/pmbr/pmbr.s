@@ -27,7 +27,9 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 #
-# $FreeBSD: src/sys/boot/i386/pmbr/pmbr.s,v 1.1 2007/10/24 21:32:59 jhb Exp $
+# $FreeBSD: src/sys/boot/i386/pmbr/pmbr.s,v 1.2 2007/11/26 21:29:59 jhb Exp $
+#
+# Partly from: src/sys/boot/i386/mbr/mbr.s 1.7
 
 # A 512 byte PMBR boot manager that looks for a FreeBSD boot GPT partition
 # and boots it.

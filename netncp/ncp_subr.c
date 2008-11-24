@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netncp/ncp_subr.c,v 1.14 2005/01/07 01:45:49 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/netncp/ncp_subr.c,v 1.15 2008/10/23 15:53:51 des Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -73,7 +73,7 @@ ncp_str_dup(char *s) {
 		len++;
 		if (bt == 0) break;
 	}
-	MALLOC(p, char*, len, M_NCPDATA, M_WAITOK);
+	p = malloc(len, M_NCPDATA, M_WAITOK);
 	copyin(s, p, len);
 	return p;
 }

@@ -51,7 +51,7 @@
 #include <dev/usb/sl811hsvar.h>
 #include "pccarddevs.h"
 
-__FBSDID("$FreeBSD: src/sys/dev/usb/slhci_pccard.c,v 1.4 2007/06/19 10:28:08 delphij Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/slhci_pccard.c,v 1.5 2008/10/09 19:22:00 n_hibma Exp $");
 
 static void	slhci_pccard_intr(void *arg);
 
@@ -199,6 +199,8 @@ static driver_t	slhci_pccard_driver = {
 	slhci_pccard_methods,
 	sizeof(struct slhci_softc),
 };
+
 devclass_t	slhci_devclass;
-MODULE_DEPEND(slhci, usb, 1, 1, 1);
+
 DRIVER_MODULE(slhci, pccard, slhci_pccard_driver, slhci_devclass, 0, 0);
+MODULE_DEPEND(slhci, usb, 1, 1, 1);

@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_powerpc.c,v 1.2 2007/12/07 17:21:53 jkoshy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_powerpc.c,v 1.3 2008/11/22 12:34:49 jkoshy Exp $");
 
 #include <sys/param.h>
 #include <sys/pmc.h>
@@ -37,6 +37,12 @@ struct pmc_mdep *
 pmc_md_initialize()
 {
 	return NULL;
+}
+
+void
+pmc_md_finalize(struct pmc_mdep *md)
+{
+	(void) md;
 }
 
 int

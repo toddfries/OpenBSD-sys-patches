@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/pc98/pc98/busiosubr.c,v 1.5 2005/01/07 02:29:17 imp Exp $ */
+/* $FreeBSD: src/sys/pc98/pc98/busiosubr.c,v 1.7 2008/09/07 04:44:24 nyan Exp $ */
 /*	$NecBSD: busiosubr.c,v 1.30.4.4 1999/08/28 02:25:35 honda Exp $	*/
 /*	$NetBSD$	*/
 
@@ -221,6 +221,31 @@ i386_memio_free(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 }
 
 int
+i386_memio_map_load(bus_space_tag_t t, bus_space_handle_t bsh,
+		    bus_size_t size, bus_space_iat_t iat, u_int flags __unused)
+{
+	int i;
+
+	if (size > bsh->bsh_maxiatsz) {
+		printf("i386_memio_map_load: map size too large\n");
+		return EINVAL;
+	}
+
+	for (i = 0; i < bsh->bsh_maxiatsz; i++) {
+		if (i < size)
+			bsh->bsh_iat[i] = iat[i];
+		else
+			bsh->bsh_iat[i] = 0;
+		bsh->bsh_iat[i] += bsh->bsh_base;
+	}
+
+	bsh->bsh_iatsz = size;
+	bsh->bsh_bam = t->bs_ra;	/* relocate access */
+
+	return 0;
+}
+
+int
 i386_memio_subregion(bus_space_tag_t t, bus_space_handle_t pbsh,
 		     bus_size_t offset, bus_size_t size,
 		     bus_space_handle_t *tbshp)
@@ -278,4 +303,29 @@ i386_memio_subregion(bus_space_tag_t t, bus_space_handle_t pbsh,
 		bsh->bsh_bam = t->bs_ra;	/* relocate access */
 	*tbshp = bsh;
 	return error;
+}
+
+int
+i386_memio_compare(bus_space_tag_t t1, bus_space_handle_t bsh1,
+		   bus_space_tag_t t2, bus_space_handle_t bsh2)
+{
+	int i;
+
+	if (t1->bs_tag != t2->bs_tag)
+		return (1);
+	if (bsh1->bsh_base != bsh2->bsh_base)
+		return (1);
+	if (bsh1->bsh_sz != bsh2->bsh_sz)
+		return (1);
+	if (bsh1->bsh_bam.bs_read_1 != bsh2->bsh_bam.bs_read_1)	/* XXX */
+		return (1);
+
+	if (bsh1->bsh_iatsz != bsh2->bsh_iatsz)
+		return (1);
+	for (i = 0; i < bsh1->bsh_iatsz; i++) {
+		if (bsh1->bsh_iat[i] != bsh2->bsh_iat[i])
+			return (1);
+	}
+
+	return (0);
 }

@@ -56,7 +56,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/amr/amr.c,v 1.85 2008/01/24 07:26:53 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/amr/amr.c,v 1.88 2008/11/03 00:53:54 scottl Exp $");
 
 /*
  * Driver for the AMI MegaRaid family of controllers.
@@ -87,13 +87,6 @@ __FBSDID("$FreeBSD: src/sys/dev/amr/amr.c,v 1.85 2008/01/24 07:26:53 scottl Exp 
 #include <dev/amr/amrvar.h>
 #define AMR_DEFINE_TABLES
 #include <dev/amr/amr_tables.h>
-
-/*
- * The CAM interface appears to be completely broken.  Disable it.
- */
-#ifndef AMR_ENABLE_CAM
-#define AMR_ENABLE_CAM 1
-#endif
 
 SYSCTL_NODE(_hw, OID_AUTO, amr, CTLFLAG_RD, 0, "AMR driver parameters");
 
@@ -202,6 +195,7 @@ MALLOC_DEFINE(M_AMR, "amr", "AMR memory");
 int
 amr_attach(struct amr_softc *sc)
 {
+    device_t child;
 
     debug_called(1);
 
@@ -259,14 +253,16 @@ amr_attach(struct amr_softc *sc)
      */
     amr_init_sysctl(sc);
 
-#if AMR_ENABLE_CAM != 0
     /*
      * Attach our 'real' SCSI channels to CAM.
      */
-    if (amr_cam_attach(sc))
-	return(ENXIO);
-    debug(2, "CAM attach done");
-#endif
+    child = device_add_child(sc->amr_dev, "amrp", -1);
+    sc->amr_pass = child;
+    if (child != NULL) {
+	device_set_softc(child, sc);
+	device_set_desc(child, "SCSI Passthrough Bus");
+	bus_generic_attach(sc->amr_dev);
+    }
 
     /*
      * Create the control device.
@@ -391,10 +387,9 @@ amr_free(struct amr_softc *sc)
 {
     struct amr_command_cluster	*acc;
 
-#if AMR_ENABLE_CAM != 0
     /* detach from CAM */
-    amr_cam_detach(sc); 
-#endif
+    if (sc->amr_pass != NULL)
+	device_delete_child(sc->amr_dev, sc->amr_pass);
 
     /* cancel status timeout */
     untimeout(amr_periodic, sc, sc->amr_timeout);
@@ -438,7 +433,7 @@ amr_submit_bio(struct amr_softc *sc, struct bio *bio)
 static int
 amr_open(struct cdev *dev, int flags, int fmt, d_thread_t *td)
 {
-    int			unit = minor(dev);
+    int			unit = dev2unit(dev);
     struct amr_softc	*sc = devclass_get_softc(devclass_find("amr"), unit);
 
     debug_called(1);
@@ -494,7 +489,7 @@ amr_prepare_ld_delete(struct amr_softc *sc)
 static int
 amr_close(struct cdev *dev, int flags, int fmt, d_thread_t *td)
 {
-    int			unit = minor(dev);
+    int			unit = dev2unit(dev);
     struct amr_softc	*sc = devclass_get_softc(devclass_find("amr"), unit);
 
     debug_called(1);
@@ -1240,11 +1235,9 @@ amr_startio(struct amr_softc *sc)
 	if (ac == NULL)
 	    (void)amr_bio_command(sc, &ac);
 
-#if AMR_ENABLE_CAM != 0
 	/* if that failed, build a command from a ccb */
-	if (ac == NULL)
-	    (void)amr_cam_command(sc, &ac);
-#endif
+	if ((ac == NULL) && (sc->amr_cam_command != NULL))
+	    sc->amr_cam_command(sc, &ac);
 
 	/* if we don't have anything to do, give up */
 	if (ac == NULL)
@@ -2082,8 +2075,11 @@ amr_quartz_submit_command(struct amr_command *ac)
     int			i = 0;
   
     mtx_lock(&sc->amr_hw_lock);
-    while (sc->amr_mailbox->mb_busy && (i++ < 10))
+    while (sc->amr_mailbox->mb_busy && (i++ < 10)) {
         DELAY(1);
+	/* This is a no-op read that flushes pending mailbox updates */
+	AMR_QGET_ODB(sc);
+    }
     if (sc->amr_mailbox->mb_busy) {
 	mtx_unlock(&sc->amr_hw_lock);
 	if (ac->ac_retries++ > 1000) {

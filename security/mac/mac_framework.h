@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 1999-2002, 2007 Robert N. M. Watson
+ * Copyright (c) 1999-2002, 2007-2008 Robert N. M. Watson
  * Copyright (c) 2001-2005 Networks Associates Technology, Inc.
  * Copyright (c) 2005-2006 SPARTA, Inc.
  * All rights reserved.
@@ -35,7 +35,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac/mac_framework.h,v 1.95 2007/10/28 17:55:55 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac/mac_framework.h,v 1.106 2008/10/28 13:44:11 trasz Exp $
  */
 
 /*
@@ -43,8 +43,8 @@
  * interact with the TrustedBSD MAC Framework.
  */
 
-#ifndef _SYS_SECURITY_MAC_MAC_FRAMEWORK_H_
-#define	_SYS_SECURITY_MAC_MAC_FRAMEWORK_H_
+#ifndef _SECURITY_MAC_MAC_FRAMEWORK_H_
+#define	_SECURITY_MAC_MAC_FRAMEWORK_H_
 
 #ifndef _KERNEL
 #error "no user-serviceable parts inside"
@@ -60,6 +60,7 @@ struct ifnet;
 struct ifreq;
 struct image_params;
 struct inpcb;
+struct ip6q;
 struct ipq;
 struct ksem;
 struct label;
@@ -71,6 +72,7 @@ struct msg;
 struct msqid_kernel;
 struct proc;
 struct semid_kernel;
+struct shmfd;
 struct shmid_kernel;
 struct sockaddr;
 struct socket;
@@ -86,6 +88,7 @@ struct vnode;
 struct vop_setlabel_args;
 
 #include <sys/acl.h>			/* XXX acl_type_t */
+#include <sys/types.h>			/* accmode_t */
 
 /*
  * Entry points to the TrustedBSD MAC Framework from the remainder of the
@@ -101,8 +104,11 @@ void	mac_bpfdesc_create_mbuf(struct bpf_d *d, struct mbuf *m);
 void	mac_bpfdesc_destroy(struct bpf_d *);
 void	mac_bpfdesc_init(struct bpf_d *);
 
+void	mac_cred_associate_nfsd(struct ucred *cred);
 int	mac_cred_check_visible(struct ucred *cr1, struct ucred *cr2);
 void	mac_cred_copy(struct ucred *cr1, struct ucred *cr2);
+void	mac_cred_create_init(struct ucred *cred);
+void	mac_cred_create_swapper(struct ucred *cred);
 void	mac_cred_destroy(struct ucred *);
 void	mac_cred_init(struct ucred *);
 
@@ -130,18 +136,26 @@ int	mac_ifnet_ioctl_set(struct ucred *cred, struct ifreq *ifr,
 	    struct ifnet *ifp);
 
 int	mac_inpcb_check_deliver(struct inpcb *inp, struct mbuf *m);
+int	mac_inpcb_check_visible(struct ucred *cred, struct inpcb *inp);
 void	mac_inpcb_create(struct socket *so, struct inpcb *inp);
 void	mac_inpcb_create_mbuf(struct inpcb *inp, struct mbuf *m);
 void	mac_inpcb_destroy(struct inpcb *);
 int	mac_inpcb_init(struct inpcb *, int);
 void	mac_inpcb_sosetlabel(struct socket *so, struct inpcb *inp);
 
-void	mac_ipq_create(struct mbuf *m, struct ipq *ipq);
-void	mac_ipq_destroy(struct ipq *);
-int	mac_ipq_init(struct ipq *, int);
-int	mac_ipq_match(struct mbuf *m, struct ipq *ipq);
-void	mac_ipq_reassemble(struct ipq *ipq, struct mbuf *m);
-void	mac_ipq_update(struct mbuf *m, struct ipq *ipq);
+void	mac_ip6q_create(struct mbuf *m, struct ip6q *q6);
+void	mac_ip6q_destroy(struct ip6q *q6);
+int	mac_ip6q_init(struct ip6q *q6, int);
+int	mac_ip6q_match(struct mbuf *m, struct ip6q *q6);
+void	mac_ip6q_reassemble(struct ip6q *q6, struct mbuf *m);
+void	mac_ip6q_update(struct mbuf *m, struct ip6q *q6);
+
+void	mac_ipq_create(struct mbuf *m, struct ipq *q);
+void	mac_ipq_destroy(struct ipq *q);
+int	mac_ipq_init(struct ipq *q, int);
+int	mac_ipq_match(struct mbuf *m, struct ipq *q);
+void	mac_ipq_reassemble(struct ipq *q, struct mbuf *m);
+void	mac_ipq_update(struct mbuf *m, struct ipq *q);
 
 int	mac_kenv_check_dump(struct ucred *cred);
 int	mac_kenv_check_get(struct ucred *cred, char *name);
@@ -188,20 +202,35 @@ void	mac_pipe_init(struct pipepair *);
 int	mac_pipe_label_set(struct ucred *cred, struct pipepair *pp,
 	    struct label *label);
 
-int	mac_posixsem_check_destroy(struct ucred *cred, struct ksem *ks);
-int	mac_posixsem_check_getvalue(struct ucred *cred,struct ksem *ks);
+int	mac_posixsem_check_getvalue(struct ucred *active_cred,
+	    struct ucred *file_cred, struct ksem *ks);
 int	mac_posixsem_check_open(struct ucred *cred, struct ksem *ks);
-int	mac_posixsem_check_post(struct ucred *cred, struct ksem *ks);
+int	mac_posixsem_check_post(struct ucred *active_cred,
+	    struct ucred *file_cred, struct ksem *ks);
+int	mac_posixsem_check_stat(struct ucred *active_cred,
+	    struct ucred *file_cred, struct ksem *ks);
 int	mac_posixsem_check_unlink(struct ucred *cred, struct ksem *ks);
-int	mac_posixsem_check_wait(struct ucred *cred, struct ksem *ks);
+int	mac_posixsem_check_wait(struct ucred *active_cred,
+	    struct ucred *file_cred, struct ksem *ks);
 void 	mac_posixsem_create(struct ucred *cred, struct ksem *ks);
 void	mac_posixsem_destroy(struct ksem *);
 void	mac_posixsem_init(struct ksem *);
 
+int	mac_posixshm_check_mmap(struct ucred *cred, struct shmfd *shmfd,
+	    int prot, int flags);
+int	mac_posixshm_check_open(struct ucred *cred, struct shmfd *shmfd);
+int	mac_posixshm_check_stat(struct ucred *active_cred,
+	    struct ucred *file_cred, struct shmfd *shmfd);
+int	mac_posixshm_check_truncate(struct ucred *active_cred,
+	    struct ucred *file_cred, struct shmfd *shmfd);
+int	mac_posixshm_check_unlink(struct ucred *cred, struct shmfd *shmfd);
+void 	mac_posixshm_create(struct ucred *cred, struct shmfd *shmfd);
+void	mac_posixshm_destroy(struct shmfd *);
+void	mac_posixshm_init(struct shmfd *);
+
 int	mac_priv_check(struct ucred *cred, int priv);
 int	mac_priv_grant(struct ucred *cred, int priv);
 
-void	mac_proc_associate_nfsd(struct ucred *cred);
 int	mac_proc_check_debug(struct ucred *cred, struct proc *p);
 int	mac_proc_check_sched(struct ucred *cred, struct proc *p);
 int	mac_proc_check_setaudit(struct ucred *cred, struct auditinfo *ai);
@@ -229,12 +258,14 @@ int	mac_proc_check_setuid(struct proc *p,  struct ucred *cred,
 int	mac_proc_check_signal(struct ucred *cred, struct proc *p,
 	    int signum);
 int	mac_proc_check_wait(struct ucred *cred, struct proc *p);
-void	mac_proc_create_init(struct ucred *cred);
-void	mac_proc_create_swapper(struct ucred *cred);
 void	mac_proc_destroy(struct proc *);
+void	mac_proc_init(struct proc *);
+void	mac_proc_vm_revoke(struct thread *td);
 int	mac_execve_enter(struct image_params *imgp, struct mac *mac_p);
 void	mac_execve_exit(struct image_params *imgp);
-void	mac_proc_init(struct proc *);
+void	mac_execve_interpreter_enter(struct vnode *interpvp,
+	    struct label **interplabel);
+void	mac_execve_interpreter_exit(struct label *interpvplabel);
 
 int	mac_socket_check_accept(struct ucred *cred, struct socket *so);
 int	mac_socket_check_bind(struct ucred *cred, struct socket *so,
@@ -335,7 +366,7 @@ void	mac_thread_userret(struct thread *td);
 int	mac_vnode_associate_extattr(struct mount *mp, struct vnode *vp);
 void	mac_vnode_associate_singlelabel(struct mount *mp, struct vnode *vp);
 int	mac_vnode_check_access(struct ucred *cred, struct vnode *vp,
-	    int acc_mode);
+	    accmode_t accmode);
 int	mac_vnode_check_chdir(struct ucred *cred, struct vnode *dvp);
 int	mac_vnode_check_chroot(struct ucred *cred, struct vnode *dvp);
 int	mac_vnode_check_create(struct ucred *cred, struct vnode *dvp,
@@ -361,7 +392,7 @@ int	mac_vnode_check_mmap(struct ucred *cred, struct vnode *vp, int prot,
 int	mac_vnode_check_mprotect(struct ucred *cred, struct vnode *vp,
 	    int prot);
 int	mac_vnode_check_open(struct ucred *cred, struct vnode *vp,
-	    int acc_mode);
+	    accmode_t accmode);
 int	mac_vnode_check_poll(struct ucred *active_cred,
 	    struct ucred *file_cred, struct vnode *vp);
 int	mac_vnode_check_read(struct ucred *active_cred,
@@ -405,17 +436,10 @@ int	mac_vnode_execve_will_transition(struct ucred *cred,
 void	mac_vnode_relabel(struct ucred *cred, struct vnode *vp,
 	    struct label *newlabel);
 
-struct label	*mac_cred_label_alloc(void);
-void		 mac_cred_label_free(struct label *);
-struct label	*mac_vnode_label_alloc(void);
-void		 mac_vnode_label_free(struct label *);
-
-void	mac_cred_mmapped_drop_perms(struct thread *td, struct ucred *cred);
-
 /*
  * Calls to help various file systems implement labeling functionality using
  * their existing EA implementation.
  */
 int	vop_stdsetlabel_ea(struct vop_setlabel_args *ap);
 
-#endif /* !_SYS_SECURITY_MAC_MAC_FRAMEWORK_H_ */
+#endif /* !_SECURITY_MAC_MAC_FRAMEWORK_H_ */

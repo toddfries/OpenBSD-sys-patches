@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/md_var.h,v 1.76 2006/07/12 19:46:08 mr Exp $
+ * $FreeBSD: src/sys/i386/include/md_var.h,v 1.77 2008/10/21 00:17:55 jkim Exp $
  */
 
 #ifndef _MACHINE_MD_VAR_H_
@@ -49,6 +49,7 @@ extern	u_int	cpu_feature;
 extern	u_int	cpu_feature2;
 extern	u_int	amd_feature;
 extern	u_int	amd_feature2;
+extern	u_int	amd_pminfo;
 extern	u_int	via_feature_rng;
 extern	u_int	via_feature_xcrypt;
 extern	u_int	cpu_fxsr;

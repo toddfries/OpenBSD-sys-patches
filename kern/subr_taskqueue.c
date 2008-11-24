@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_taskqueue.c,v 1.40 2007/10/20 23:23:21 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_taskqueue.c,v 1.45 2008/07/18 07:10:33 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,13 +56,15 @@ struct taskqueue {
 	void			*tq_context;
 	struct task		*tq_running;
 	struct mtx		tq_mutex;
-	struct proc		**tq_pproc;
-	int			tq_pcount;
+	struct thread		**tq_threads;
+	int			tq_tcount;
 	int			tq_spin;
 	int			tq_flags;
 };
 
 #define	TQ_FLAGS_ACTIVE		(1 << 0)
+#define	TQ_FLAGS_BLOCKED	(1 << 1)
+#define	TQ_FLAGS_PENDING	(1 << 2)
 
 static __inline void
 TQ_LOCK(struct taskqueue *tq)
@@ -141,10 +143,10 @@ taskqueue_create(const char *name, int mflags,
  * Signal a taskqueue thread to terminate.
  */
 static void
-taskqueue_terminate(struct proc **pp, struct taskqueue *tq)
+taskqueue_terminate(struct thread **pp, struct taskqueue *tq)
 {
 
-	while (tq->tq_pcount > 0) {
+	while (tq->tq_tcount > 0) {
 		wakeup(tq);
 		TQ_SLEEP(tq, pp, &tq->tq_mutex, PWAIT, "taskqueue_destroy", 0);
 	}
@@ -161,9 +163,9 @@ taskqueue_free(struct taskqueue *queue)
 	TQ_LOCK(queue);
 	queue->tq_flags &= ~TQ_FLAGS_ACTIVE;
 	taskqueue_run(queue);
-	taskqueue_terminate(queue->tq_pproc, queue);
+	taskqueue_terminate(queue->tq_threads, queue);
 	mtx_destroy(&queue->tq_mutex);
-	free(queue->tq_pproc, M_TASKQUEUE);
+	free(queue->tq_threads, M_TASKQUEUE);
 	free(queue, M_TASKQUEUE);
 }
 
@@ -224,11 +226,36 @@ taskqueue_enqueue(struct taskqueue *queue, struct task *task)
 	}
 
 	task->ta_pending = 1;
-	queue->tq_enqueue(queue->tq_context);
+	if ((queue->tq_flags & TQ_FLAGS_BLOCKED) == 0)
+		queue->tq_enqueue(queue->tq_context);
+	else
+		queue->tq_flags |= TQ_FLAGS_PENDING;
 
 	TQ_UNLOCK(queue);
 
 	return 0;
+}
+
+void
+taskqueue_block(struct taskqueue *queue)
+{
+
+	TQ_LOCK(queue);
+	queue->tq_flags |= TQ_FLAGS_BLOCKED;
+	TQ_UNLOCK(queue);
+}
+
+void
+taskqueue_unblock(struct taskqueue *queue)
+{
+
+	TQ_LOCK(queue);
+	queue->tq_flags &= ~TQ_FLAGS_BLOCKED;
+	if (queue->tq_flags & TQ_FLAGS_PENDING) {
+		queue->tq_flags &= ~TQ_FLAGS_PENDING;
+		queue->tq_enqueue(queue->tq_context);
+	}
+	TQ_UNLOCK(queue);
 }
 
 void
@@ -314,45 +341,47 @@ taskqueue_start_threads(struct taskqueue **tqp, int count, int pri,
 			const char *name, ...)
 {
 	va_list ap;
-	struct taskqueue *tq;
 	struct thread *td;
-	char ktname[MAXCOMLEN];
+	struct taskqueue *tq;
 	int i, error;
+	char ktname[MAXCOMLEN];
 
 	if (count <= 0)
 		return (EINVAL);
+
 	tq = *tqp;
 
 	va_start(ap, name);
 	vsnprintf(ktname, MAXCOMLEN, name, ap);
 	va_end(ap);
 
-	tq->tq_pproc = malloc(sizeof(struct proc *) * count, M_TASKQUEUE,
+	tq->tq_threads = malloc(sizeof(struct thread *) * count, M_TASKQUEUE,
 	    M_NOWAIT | M_ZERO);
-	if (tq->tq_pproc == NULL) {
+	if (tq->tq_threads == NULL) {
 		printf("%s: no memory for %s threads\n", __func__, ktname);
 		return (ENOMEM);
 	}
 
 	for (i = 0; i < count; i++) {
 		if (count == 1)
-			error = kproc_create(taskqueue_thread_loop, tqp,
-			    &tq->tq_pproc[i], RFSTOPPED, 0, ktname);
+			error = kthread_add(taskqueue_thread_loop, tqp, NULL,
+			    &tq->tq_threads[i], RFSTOPPED, 0, ktname);
 		else
-			error = kproc_create(taskqueue_thread_loop, tqp,
-			    &tq->tq_pproc[i], RFSTOPPED, 0, "%s_%d", ktname, i);
+			error = kthread_add(taskqueue_thread_loop, tqp, NULL,
+			    &tq->tq_threads[i], RFSTOPPED, 0,
+			    "%s_%d", ktname, i);
 		if (error) {
 			/* should be ok to continue, taskqueue_free will dtrt */
-			printf("%s: kproc_create(%s): error %d",
-				__func__, ktname, error);
-			tq->tq_pproc[i] = NULL;		/* paranoid */
+			printf("%s: kthread_add(%s): error %d", __func__,
+			    ktname, error);
+			tq->tq_threads[i] = NULL;		/* paranoid */
 		} else
-			tq->tq_pcount++;
+			tq->tq_tcount++;
 	}
 	for (i = 0; i < count; i++) {
-		if (tq->tq_pproc[i] == NULL)
+		if (tq->tq_threads[i] == NULL)
 			continue;
-		td = FIRST_THREAD_IN_PROC(tq->tq_pproc[i]);
+		td = tq->tq_threads[i];
 		thread_lock(td);
 		sched_prio(td, pri);
 		sched_add(td, SRQ_BORING);
@@ -376,10 +405,10 @@ taskqueue_thread_loop(void *arg)
 	} while ((tq->tq_flags & TQ_FLAGS_ACTIVE) != 0);
 
 	/* rendezvous with thread that asked us to terminate */
-	tq->tq_pcount--;
-	wakeup_one(tq->tq_pproc);
+	tq->tq_tcount--;
+	wakeup_one(tq->tq_threads);
 	TQ_UNLOCK(tq);
-	kproc_exit(0);
+	kthread_exit();
 }
 
 void

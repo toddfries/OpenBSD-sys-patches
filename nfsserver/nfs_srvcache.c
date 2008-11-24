@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsserver/nfs_srvcache.c,v 1.44 2007/03/17 18:18:08 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsserver/nfs_srvcache.c,v 1.47 2008/11/03 10:38:00 dfr Exp $");
 
 /*
  * Reference: Chet Juszczak, "Improving the Performance and Correctness
@@ -56,6 +56,8 @@ __FBSDID("$FreeBSD: src/sys/nfsserver/nfs_srvcache.c,v 1.44 2007/03/17 18:18:08 
 #include <nfs/nfsproto.h>
 #include <nfsserver/nfs.h>
 #include <nfsserver/nfsrvcache.h>
+
+#ifdef NFS_LEGACYRPC
 
 static long numnfsrvcache;
 static long desirednfsrvcache;
@@ -227,7 +229,7 @@ loop:
 				nfsrvstats.srvcache_nonidemdonehits++;
 				NFSD_UNLOCK();
 				*repp = m_copym(rp->rc_reply, 0, M_COPYALL,
-						M_TRYWAIT);
+						M_WAIT);
 				NFSD_LOCK();
 				ret = RC_REPLY;
 			} else {
@@ -265,7 +267,7 @@ loop:
 		if (rp->rc_flag & RC_REPMBUF)
 			m_freem(rp->rc_reply);
 		if (rp->rc_flag & RC_NAM)
-			FREE(rp->rc_nam, M_SONAME);
+			free(rp->rc_nam, M_SONAME);
 		rp->rc_flag &= (RC_LOCKED | RC_WANTED);
 	}
 	TAILQ_INSERT_TAIL(&nfsrvlruhead, rp, rc_lru);
@@ -348,7 +350,7 @@ loop:
 				} else {
 					NFSD_UNLOCK();
 					rp->rc_reply = m_copym(repmbuf,
-						0, M_COPYALL, M_TRYWAIT);
+						0, M_COPYALL, M_WAIT);
 					NFSD_LOCK();
 					rp->rc_flag |= RC_REPMBUF;
 				}
@@ -385,3 +387,5 @@ nfsrv_cleancache(void)
 	}
 	numnfsrvcache = 0;
 }
+
+#endif /* NFS_LEGACYRPC */

@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_ctl.c,v 1.39 2007/03/30 16:32:08 delphij Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_ctl.c,v 1.40 2008/08/09 11:14:05 des Exp $");
 
 #include "opt_geom.h"
 
@@ -464,7 +464,7 @@ g_ctl_ioctl_ctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag, struct th
 
 	req = (void *)data;
 	req->nerror = 0;
-	req->serror = sbuf_new(NULL, NULL, 0, SBUF_AUTOEXTEND);
+	req->serror = sbuf_new_auto();
 	/* It is an error if we cannot return an error text */
 	if (req->lerror < 2)
 		return (EINVAL);

@@ -55,7 +55,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sun4v/sun4v/mp_machdep.c,v 1.8 2007/07/06 00:41:53 peter Exp $");
+__FBSDID("$FreeBSD: src/sys/sun4v/sun4v/mp_machdep.c,v 1.10 2008/03/10 01:32:48 jeff Exp $");
 
 #include "opt_trap_trace.h"
 
@@ -239,6 +239,13 @@ int
 cpu_mp_probe(void)
 {
 	return (mp_maxid > 0);
+}
+
+struct cpu_group *
+cpu_topo(void)
+{
+
+	return smp_topo_none();
 }
 
 static int
@@ -454,14 +461,7 @@ cpu_ipi_stop(struct trapframe *tf)
 void
 cpu_ipi_preempt(struct trapframe *tf)
 {
-	struct thread *running_thread = curthread;
-
-	thread_lock(running_thread);
-	if (running_thread->td_critnest > 1)
-		running_thread->td_owepreempt = 1;
-	else
-		mi_switch(SW_INVOL | SW_PREEMPT, NULL);
-	thread_unlock(running_thread);
+	sched_preempt(curthread);
 }
 
 void

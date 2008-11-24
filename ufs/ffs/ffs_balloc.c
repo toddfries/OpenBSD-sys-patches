@@ -60,7 +60,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ffs/ffs_balloc.c,v 1.50 2005/02/08 17:23:39 phk Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ffs/ffs_balloc.c,v 1.54 2008/07/23 14:32:44 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -102,7 +102,9 @@ ffs_balloc_ufs1(struct vnode *vp, off_t startoffset, int size,
 	ufs2_daddr_t newb;
 	ufs1_daddr_t *bap, pref;
 	ufs1_daddr_t *allocib, *blkp, *allocblk, allociblk[NIADDR + 1];
+	ufs2_daddr_t *lbns_remfree, lbns[NIADDR + 1];
 	int unwindidx = -1;
+	int saved_inbdflush;
 
 	ip = VTOI(vp);
 	dp = ip->i_din1;
@@ -220,10 +222,13 @@ ffs_balloc_ufs1(struct vnode *vp, off_t startoffset, int size,
 	pref = 0;
 	if ((error = ufs_getlbns(vp, lbn, indirs, &num)) != 0)
 		return(error);
-#ifdef DIAGNOSTIC
+#ifdef INVARIANTS
 	if (num < 1)
 		panic ("ffs_balloc_ufs1: ufs_getlbns returned indirect block");
 #endif
+	saved_inbdflush = ~TDP_INBDFLUSH | (curthread->td_pflags &
+	    TDP_INBDFLUSH);
+	curthread->td_pflags |= TDP_INBDFLUSH;
 	/*
 	 * Fetch the first indirect block allocating if necessary.
 	 */
@@ -231,14 +236,18 @@ ffs_balloc_ufs1(struct vnode *vp, off_t startoffset, int size,
 	nb = dp->di_ib[indirs[0].in_off];
 	allocib = NULL;
 	allocblk = allociblk;
+	lbns_remfree = lbns;
 	if (nb == 0) {
 		UFS_LOCK(ump);
 		pref = ffs_blkpref_ufs1(ip, lbn, 0, (ufs1_daddr_t *)0);
 	        if ((error = ffs_alloc(ip, lbn, pref, (int)fs->fs_bsize,
-		    cred, &newb)) != 0)
+		    cred, &newb)) != 0) {
+			curthread->td_pflags &= saved_inbdflush;
 			return (error);
+		}
 		nb = newb;
 		*allocblk++ = nb;
+		*lbns_remfree++ = indirs[1].in_lbn;
 		bp = getblk(vp, indirs[1].in_lbn, fs->fs_bsize, 0, 0, 0);
 		bp->b_blkno = fsbtodb(fs, nb);
 		vfs_bio_clrbuf(bp);
@@ -289,6 +298,7 @@ ffs_balloc_ufs1(struct vnode *vp, off_t startoffset, int size,
 		}
 		nb = newb;
 		*allocblk++ = nb;
+		*lbns_remfree++ = indirs[i].in_lbn;
 		nbp = getblk(vp, indirs[i].in_lbn, fs->fs_bsize, 0, 0, 0);
 		nbp->b_blkno = fsbtodb(fs, nb);
 		vfs_bio_clrbuf(nbp);
@@ -325,6 +335,7 @@ ffs_balloc_ufs1(struct vnode *vp, off_t startoffset, int size,
 	 * If asked only for the indirect block, then return it.
 	 */
 	if (flags & BA_METAONLY) {
+		curthread->td_pflags &= saved_inbdflush;
 		*bpp = bp;
 		return (0);
 	}
@@ -342,6 +353,7 @@ ffs_balloc_ufs1(struct vnode *vp, off_t startoffset, int size,
 		}
 		nb = newb;
 		*allocblk++ = nb;
+		*lbns_remfree++ = lbn;
 		nbp = getblk(vp, lbn, fs->fs_bsize, 0, 0, 0);
 		nbp->b_blkno = fsbtodb(fs, nb);
 		if (flags & BA_CLRBUF)
@@ -361,6 +373,7 @@ ffs_balloc_ufs1(struct vnode *vp, off_t startoffset, int size,
 				bp->b_flags |= B_CLUSTEROK;
 			bdwrite(bp);
 		}
+		curthread->td_pflags &= saved_inbdflush;
 		*bpp = nbp;
 		return (0);
 	}
@@ -382,9 +395,11 @@ ffs_balloc_ufs1(struct vnode *vp, off_t startoffset, int size,
 		nbp = getblk(vp, lbn, fs->fs_bsize, 0, 0, 0);
 		nbp->b_blkno = fsbtodb(fs, nb);
 	}
+	curthread->td_pflags &= saved_inbdflush;
 	*bpp = nbp;
 	return (0);
 fail:
+	curthread->td_pflags &= saved_inbdflush;
 	/*
 	 * If we have failed to allocate any blocks, simply return the error.
 	 * This is the usual case and avoids the need to fsync the file.
@@ -403,9 +418,18 @@ fail:
 	 * have an error to return to the user.
 	 */
 	(void) ffs_syncvnode(vp, MNT_WAIT);
-	for (deallocated = 0, blkp = allociblk; blkp < allocblk; blkp++) {
-		ffs_blkfree(ump, fs, ip->i_devvp, *blkp, fs->fs_bsize,
-		    ip->i_number);
+	for (deallocated = 0, blkp = allociblk, lbns_remfree = lbns;
+	     blkp < allocblk; blkp++, lbns_remfree++) {
+		/*
+		 * We shall not leave the freed blocks on the vnode
+		 * buffer object lists.
+		 */
+		bp = getblk(vp, *lbns_remfree, fs->fs_bsize, 0, 0, GB_NOCREAT);
+		if (bp != NULL) {
+			bp->b_flags |= (B_INVAL | B_RELBUF);
+			bp->b_flags &= ~B_ASYNC;
+			brelse(bp);
+		}
 		deallocated += fs->fs_bsize;
 	}
 	if (allocib != NULL) {
@@ -441,6 +465,14 @@ fail:
 		ip->i_flag |= IN_CHANGE | IN_UPDATE;
 	}
 	(void) ffs_syncvnode(vp, MNT_WAIT);
+	/*
+	 * After the buffers are invalidated and on-disk pointers are
+	 * cleared, free the blocks.
+	 */
+	for (blkp = allociblk; blkp < allocblk; blkp++) {
+		ffs_blkfree(ump, fs, ip->i_devvp, *blkp, fs->fs_bsize,
+		    ip->i_number);
+	}
 	return (error);
 }
 
@@ -464,8 +496,10 @@ ffs_balloc_ufs2(struct vnode *vp, off_t startoffset, int size,
 	struct indir indirs[NIADDR + 2];
 	ufs2_daddr_t nb, newb, *bap, pref;
 	ufs2_daddr_t *allocib, *blkp, *allocblk, allociblk[NIADDR + 1];
+	ufs2_daddr_t *lbns_remfree, lbns[NIADDR + 1];
 	int deallocated, osize, nsize, num, i, error;
 	int unwindidx = -1;
+	int saved_inbdflush;
 
 	ip = VTOI(vp);
 	dp = ip->i_din2;
@@ -692,10 +726,13 @@ ffs_balloc_ufs2(struct vnode *vp, off_t startoffset, int size,
 	pref = 0;
 	if ((error = ufs_getlbns(vp, lbn, indirs, &num)) != 0)
 		return(error);
-#ifdef DIAGNOSTIC
+#ifdef INVARIANTS
 	if (num < 1)
 		panic ("ffs_balloc_ufs2: ufs_getlbns returned indirect block");
 #endif
+	saved_inbdflush = ~TDP_INBDFLUSH | (curthread->td_pflags &
+	    TDP_INBDFLUSH);
+	curthread->td_pflags |= TDP_INBDFLUSH;
 	/*
 	 * Fetch the first indirect block allocating if necessary.
 	 */
@@ -703,14 +740,18 @@ ffs_balloc_ufs2(struct vnode *vp, off_t startoffset, int size,
 	nb = dp->di_ib[indirs[0].in_off];
 	allocib = NULL;
 	allocblk = allociblk;
+	lbns_remfree = lbns;
 	if (nb == 0) {
 		UFS_LOCK(ump);
 		pref = ffs_blkpref_ufs2(ip, lbn, 0, (ufs2_daddr_t *)0);
 	        if ((error = ffs_alloc(ip, lbn, pref, (int)fs->fs_bsize,
-		    cred, &newb)) != 0)
+		    cred, &newb)) != 0) {
+			curthread->td_pflags &= saved_inbdflush;
 			return (error);
+		}
 		nb = newb;
 		*allocblk++ = nb;
+		*lbns_remfree++ = indirs[1].in_lbn;
 		bp = getblk(vp, indirs[1].in_lbn, fs->fs_bsize, 0, 0, 0);
 		bp->b_blkno = fsbtodb(fs, nb);
 		vfs_bio_clrbuf(bp);
@@ -761,6 +802,7 @@ ffs_balloc_ufs2(struct vnode *vp, off_t startoffset, int size,
 		}
 		nb = newb;
 		*allocblk++ = nb;
+		*lbns_remfree++ = indirs[i].in_lbn;
 		nbp = getblk(vp, indirs[i].in_lbn, fs->fs_bsize, 0, 0, 0);
 		nbp->b_blkno = fsbtodb(fs, nb);
 		vfs_bio_clrbuf(nbp);
@@ -797,6 +839,7 @@ ffs_balloc_ufs2(struct vnode *vp, off_t startoffset, int size,
 	 * If asked only for the indirect block, then return it.
 	 */
 	if (flags & BA_METAONLY) {
+		curthread->td_pflags &= saved_inbdflush;
 		*bpp = bp;
 		return (0);
 	}
@@ -814,6 +857,7 @@ ffs_balloc_ufs2(struct vnode *vp, off_t startoffset, int size,
 		}
 		nb = newb;
 		*allocblk++ = nb;
+		*lbns_remfree++ = lbn;
 		nbp = getblk(vp, lbn, fs->fs_bsize, 0, 0, 0);
 		nbp->b_blkno = fsbtodb(fs, nb);
 		if (flags & BA_CLRBUF)
@@ -833,6 +877,7 @@ ffs_balloc_ufs2(struct vnode *vp, off_t startoffset, int size,
 				bp->b_flags |= B_CLUSTEROK;
 			bdwrite(bp);
 		}
+		curthread->td_pflags &= saved_inbdflush;
 		*bpp = nbp;
 		return (0);
 	}
@@ -860,9 +905,11 @@ ffs_balloc_ufs2(struct vnode *vp, off_t startoffset, int size,
 		nbp = getblk(vp, lbn, fs->fs_bsize, 0, 0, 0);
 		nbp->b_blkno = fsbtodb(fs, nb);
 	}
+	curthread->td_pflags &= saved_inbdflush;
 	*bpp = nbp;
 	return (0);
 fail:
+	curthread->td_pflags &= saved_inbdflush;
 	/*
 	 * If we have failed to allocate any blocks, simply return the error.
 	 * This is the usual case and avoids the need to fsync the file.
@@ -881,9 +928,18 @@ fail:
 	 * have an error to return to the user.
 	 */
 	(void) ffs_syncvnode(vp, MNT_WAIT);
-	for (deallocated = 0, blkp = allociblk; blkp < allocblk; blkp++) {
-		ffs_blkfree(ump, fs, ip->i_devvp, *blkp, fs->fs_bsize,
-		    ip->i_number);
+	for (deallocated = 0, blkp = allociblk, lbns_remfree = lbns;
+	     blkp < allocblk; blkp++, lbns_remfree++) {
+		/*
+		 * We shall not leave the freed blocks on the vnode
+		 * buffer object lists.
+		 */
+		bp = getblk(vp, *lbns_remfree, fs->fs_bsize, 0, 0, GB_NOCREAT);
+		if (bp != NULL) {
+			bp->b_flags |= (B_INVAL | B_RELBUF);
+			bp->b_flags &= ~B_ASYNC;
+			brelse(bp);
+		}
 		deallocated += fs->fs_bsize;
 	}
 	if (allocib != NULL) {
@@ -919,5 +975,13 @@ fail:
 		ip->i_flag |= IN_CHANGE | IN_UPDATE;
 	}
 	(void) ffs_syncvnode(vp, MNT_WAIT);
+	/*
+	 * After the buffers are invalidated and on-disk pointers are
+	 * cleared, free the blocks.
+	 */
+	for (blkp = allociblk; blkp < allocblk; blkp++) {
+		ffs_blkfree(ump, fs, ip->i_devvp, *blkp, fs->fs_bsize,
+		    ip->i_number);
+	}
 	return (error);
 }

@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/cd9660/cd9660_lookup.c,v 1.43 2007/02/11 13:54:25 rodrigc Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/cd9660/cd9660_lookup.c,v 1.45 2008/01/13 14:44:02 attilio Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -115,7 +115,6 @@ cd9660_lookup(ap)
 	struct componentname *cnp = ap->a_cnp;
 	int flags = cnp->cn_flags;
 	int nameiop = cnp->cn_nameiop;
-	struct thread *td = cnp->cn_thread;
 
 	bp = NULL;
 	*vpp = NULL;
@@ -349,12 +348,12 @@ found:
 	 */
 	if (flags & ISDOTDOT) {
 		saved_ino = dp->i_ino;
-		VOP_UNLOCK(pdp, 0, td);	/* race to get the inode */
+		VOP_UNLOCK(pdp, 0);	/* race to get the inode */
 		error = cd9660_vget_internal(vdp->v_mount, saved_ino,
 					     LK_EXCLUSIVE, &tdp,
 					     saved_ino != ino, ep);
 		brelse(bp);
-		vn_lock(pdp, LK_EXCLUSIVE | LK_RETRY, td);
+		vn_lock(pdp, LK_EXCLUSIVE | LK_RETRY);
 		if (error)
 			return (error);
 		*vpp = tdp;

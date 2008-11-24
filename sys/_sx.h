@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * $FreeBSD: src/sys/sys/_sx.h,v 1.1 2007/03/31 23:23:42 jhb Exp $
+ * $FreeBSD: src/sys/sys/_sx.h,v 1.2 2008/05/15 20:10:06 attilio Exp $
  */
 
 #ifndef	_SYS__SX_H_
@@ -37,7 +37,6 @@
 struct sx {
 	struct lock_object	lock_object;
 	volatile uintptr_t	sx_lock;
-	volatile unsigned	sx_recurse;
 };
 
 #endif	/* !_SYS__SX_H_ */

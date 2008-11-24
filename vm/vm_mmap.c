@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_mmap.c,v 1.215 2007/10/24 19:04:04 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_mmap.c,v 1.225 2008/10/22 16:50:12 rwatson Exp $");
 
 #include "opt_compat.h"
 #include "opt_hwpmc_hooks.h"
@@ -93,7 +93,8 @@ struct sbrk_args {
 #endif
 
 static int max_proc_mmap;
-SYSCTL_INT(_vm, OID_AUTO, max_proc_mmap, CTLFLAG_RW, &max_proc_mmap, 0, "");
+SYSCTL_INT(_vm, OID_AUTO, max_proc_mmap, CTLFLAG_RW, &max_proc_mmap, 0,
+    "Maximum number of memory-mapped files per process");
 
 /*
  * Set the maximum number of vm_map_entry structures per process.  Roughly
@@ -104,7 +105,8 @@ SYSCTL_INT(_vm, OID_AUTO, max_proc_mmap, CTLFLAG_RW, &max_proc_mmap, 0, "");
  * multi-threaded processes are not unduly inconvenienced.
  */
 static void vmmapentry_rsrc_init(void *);
-SYSINIT(vmmersrc, SI_SUB_KVM_RSRC, SI_ORDER_FIRST, vmmapentry_rsrc_init, NULL)
+SYSINIT(vmmersrc, SI_SUB_KVM_RSRC, SI_ORDER_FIRST, vmmapentry_rsrc_init,
+    NULL);
 
 static void
 vmmapentry_rsrc_init(dummy)
@@ -118,6 +120,8 @@ static int vm_mmap_vnode(struct thread *, vm_size_t, vm_prot_t, vm_prot_t *,
     int *, struct vnode *, vm_ooffset_t, vm_object_t *);
 static int vm_mmap_cdev(struct thread *, vm_size_t, vm_prot_t, vm_prot_t *,
     int *, struct cdev *, vm_ooffset_t, vm_object_t *);
+static int vm_mmap_shm(struct thread *, vm_size_t, vm_prot_t, vm_prot_t *,
+    int *, struct shmfd *, vm_ooffset_t, vm_object_t *);
 
 /*
  * MPSAFE
@@ -183,10 +187,6 @@ ogetpagesize(td, uap)
  * memory-based, such as a video framebuffer, can be mmap'd.  Otherwise
  * there would be no cache coherency between a descriptor and a VM mapping
  * both to the same character device.
- *
- * Block devices can be mmap'd no matter what they represent.  Cache coherency
- * is maintained as long as you do not write directly to the underlying
- * character device.
  */
 #ifndef _SYS_SYSPROTO_H_
 struct mmap_args {
@@ -300,16 +300,29 @@ mmap(td, uap)
 		pos = 0;
 	} else {
 		/*
-		 * Mapping file, get fp for validation. Obtain vnode and make
-		 * sure it is of appropriate type.
-		 * don't let the descriptor disappear on us if we block
+		 * Mapping file, get fp for validation and
+		 * don't let the descriptor disappear on us if we block.
 		 */
 		if ((error = fget(td, uap->fd, &fp)) != 0)
 			goto done;
+		if (fp->f_type == DTYPE_SHM) {
+			handle = fp->f_data;
+			handle_type = OBJT_SWAP;
+			maxprot = VM_PROT_NONE;
+
+			/* FREAD should always be set. */
+			if (fp->f_flag & FREAD)
+				maxprot |= VM_PROT_EXECUTE | VM_PROT_READ;
+			if (fp->f_flag & FWRITE)
+				maxprot |= VM_PROT_WRITE;
+			goto map;
+		}
 		if (fp->f_type != DTYPE_VNODE) {
 			error = ENODEV;
 			goto done;
 		}
+#if defined(COMPAT_FREEBSD7) || defined(COMPAT_FREEBSD6) || \
+    defined(COMPAT_FREEBSD5) || defined(COMPAT_FREEBSD4)
 		/*
 		 * POSIX shared-memory objects are defined to have
 		 * kernel persistence, and are not defined to support
@@ -320,6 +333,7 @@ mmap(td, uap)
 		 */
 		if (fp->f_flag & FPOSIXSHM)
 			flags |= MAP_NOSYNC;
+#endif
 		vp = fp->f_vnode;
 		/*
 		 * Ensure that file and memory protections are
@@ -360,6 +374,7 @@ mmap(td, uap)
 		handle = (void *)vp;
 		handle_type = OBJT_VNODE;
 	}
+map:
 
 	/*
 	 * Do not allow more then a certain number of vm_map_entry structures
@@ -372,8 +387,10 @@ mmap(td, uap)
 		goto done;
 	}
 
+	td->td_fpop = fp;
 	error = vm_mmap(&vms->vm_map, &addr, size, prot, maxprot,
 	    flags, handle_type, handle, pos);
+	td->td_fpop = NULL;
 #ifdef HWPMC_HOOKS
 	/* inform hwpmc(4) if an executable is being mapped */
 	if (error == 0 && handle_type == OBJT_VNODE &&
@@ -555,13 +572,6 @@ munmap(td, uap)
 	if (addr < vm_map_min(map) || addr + size > vm_map_max(map))
 		return (EINVAL);
 	vm_map_lock(map);
-	/*
-	 * Make sure entire range is allocated.
-	 */
-	if (!vm_map_check_protection(map, addr, addr + size, VM_PROT_NONE)) {
-		vm_map_unlock(map);
-		return (EINVAL);
-	}
 #ifdef HWPMC_HOOKS
 	/*
 	 * Inform hwpmc if the address range being unmapped contains
@@ -1142,10 +1152,13 @@ vm_mmap_vnode(struct thread *td, vm_size_t objsize,
 	void *handle;
 	vm_object_t obj;
 	struct mount *mp;
+	struct cdevsw *dsw;
+	struct ucred *cred;
 	int error, flags, type;
 	int vfslocked;
 
 	mp = vp->v_mount;
+	cred = td->td_ucred;
 	vfslocked = VFS_LOCK_GIANT(mp);
 	if ((error = vget(vp, LK_EXCLUSIVE, td)) != 0) {
 		VFS_UNLOCK_GIANT(vfslocked);
@@ -1172,13 +1185,19 @@ vm_mmap_vnode(struct thread *td, vm_size_t objsize,
 		type = OBJT_DEVICE;
 		handle = vp->v_rdev;
 
-		/* XXX: lack thredref on device */
-		if(vp->v_rdev->si_devsw->d_flags & D_MMAP_ANON) {
+		dsw = dev_refthread(handle);
+		if (dsw == NULL) {
+			error = ENXIO;
+			goto done;
+		}
+		if (dsw->d_flags & D_MMAP_ANON) {
+			dev_relthread(handle);
 			*maxprotp = VM_PROT_ALL;
 			*flagsp |= MAP_ANON;
 			error = 0;
 			goto done;
 		}
+		dev_relthread(handle);
 		/*
 		 * cdevs does not provide private mappings of any kind.
 		 */
@@ -1199,11 +1218,10 @@ vm_mmap_vnode(struct thread *td, vm_size_t objsize,
 		error = EINVAL;
 		goto done;
 	}
-	if ((error = VOP_GETATTR(vp, &va, td->td_ucred, td))) {
+	if ((error = VOP_GETATTR(vp, &va, cred)))
 		goto done;
-	}
 #ifdef MAC
-	error = mac_vnode_check_mmap(td->td_ucred, vp, prot, flags);
+	error = mac_vnode_check_mmap(cred, vp, prot, flags);
 	if (error != 0)
 		goto done;
 #endif
@@ -1233,7 +1251,7 @@ vm_mmap_vnode(struct thread *td, vm_size_t objsize,
 	}
 	*objp = obj;
 	*flagsp = flags;
-	vfs_mark_atime(vp, td);
+	vfs_mark_atime(vp, cred);
 
 done:
 	vput(vp);
@@ -1255,16 +1273,21 @@ vm_mmap_cdev(struct thread *td, vm_size_t objsize,
     struct cdev *cdev, vm_ooffset_t foff, vm_object_t *objp)
 {
 	vm_object_t obj;
+	struct cdevsw *dsw;
 	int flags;
 
 	flags = *flagsp;
 
-	/* XXX: lack thredref on device */
-	if (cdev->si_devsw->d_flags & D_MMAP_ANON) {
+	dsw = dev_refthread(cdev);
+	if (dsw == NULL)
+		return (ENXIO);
+	if (dsw->d_flags & D_MMAP_ANON) {
+		dev_relthread(cdev);
 		*maxprotp = VM_PROT_ALL;
 		*flagsp |= MAP_ANON;
 		return (0);
 	}
+	dev_relthread(cdev);
 	/*
 	 * cdevs does not provide private mappings of any kind.
 	 */
@@ -1287,6 +1310,35 @@ vm_mmap_cdev(struct thread *td, vm_size_t objsize,
 		return (EINVAL);
 	*objp = obj;
 	*flagsp = flags;
+	return (0);
+}
+
+/*
+ * vm_mmap_shm()
+ *
+ * MPSAFE
+ *
+ * Helper function for vm_mmap.  Perform sanity check specific for mmap
+ * operations on shm file descriptors.
+ */
+int
+vm_mmap_shm(struct thread *td, vm_size_t objsize,
+    vm_prot_t prot, vm_prot_t *maxprotp, int *flagsp,
+    struct shmfd *shmfd, vm_ooffset_t foff, vm_object_t *objp)
+{
+	int error;
+
+	if ((*maxprotp & VM_PROT_WRITE) == 0 &&
+	    (prot & PROT_WRITE) != 0)
+		return (EACCES);
+#ifdef MAC
+	error = mac_posixshm_check_mmap(td->td_ucred, shmfd, prot, *flagsp);
+	if (error != 0)
+		return (error);
+#endif
+	error = shm_mmap(shmfd, objsize, foff, objp);
+	if (error)
+		return (error);
 	return (0);
 }
 
@@ -1354,6 +1406,10 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 		error = vm_mmap_vnode(td, size, prot, &maxprot, &flags,
 		    handle, foff, &object);
 		break;
+	case OBJT_SWAP:
+		error = vm_mmap_shm(td, size, prot, &maxprot, &flags,
+		    handle, foff, &object);
+		break;
 	case OBJT_DEFAULT:
 		if (handle == NULL) {
 			error = 0;
@@ -1393,17 +1449,15 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 		maxprot |= VM_PROT_EXECUTE;
 #endif
 
-	if (fitit)
-		*addr = pmap_addr_hint(object, *addr, size);
-
 	if (flags & MAP_STACK)
 		rv = vm_map_stack(map, *addr, size, prot, maxprot,
 		    docow | MAP_STACK_GROWS_DOWN);
 	else if (fitit)
-		rv = vm_map_find(map, object, foff, addr, size, TRUE,
-				 prot, maxprot, docow);
+		rv = vm_map_find(map, object, foff, addr, size,
+		    object != NULL && object->type == OBJT_DEVICE ?
+		    VMFS_ALIGNED_SPACE : VMFS_ANY_SPACE, prot, maxprot, docow);
 	else
-		rv = vm_map_fixed(map, object, foff, addr, size,
+		rv = vm_map_fixed(map, object, foff, *addr, size,
 				 prot, maxprot, docow);
 
 	if (rv != KERN_SUCCESS) {

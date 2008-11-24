@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netgraph/ng_eiface.c,v 1.39 2007/07/26 10:54:33 glebius Exp $
+ * $FreeBSD: src/sys/netgraph/ng_eiface.c,v 1.42 2008/10/23 15:53:51 des Exp $
  */
 
 #include <sys/param.h>
@@ -38,6 +38,7 @@
 #include <sys/sockio.h>
 #include <sys/socket.h>
 #include <sys/syslog.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -332,12 +333,13 @@ ng_eiface_print_ioctl(struct ifnet *ifp, int command, caddr_t data)
 static int
 ng_eiface_constructor(node_p node)
 {
+	INIT_VNET_NETGRAPH(curvnet);
 	struct ifnet *ifp;
 	priv_p priv;
 	u_char eaddr[6] = {0,0,0,0,0,0};
 
 	/* Allocate node and interface private structures */
-	MALLOC(priv, priv_p, sizeof(*priv), M_NETGRAPH, M_NOWAIT | M_ZERO);
+	priv = malloc(sizeof(*priv), M_NETGRAPH, M_NOWAIT | M_ZERO);
 	if (priv == NULL)
 		return (ENOMEM);
 
@@ -351,7 +353,7 @@ ng_eiface_constructor(node_p node)
 	ifp->if_softc = priv;
 
 	/* Get an interface unit number */
-	priv->unit = alloc_unr(ng_eiface_unit);
+	priv->unit = alloc_unr(V_ng_eiface_unit);
 
 	/* Link together node and private info */
 	NG_NODE_SET_PRIVATE(node, priv);
@@ -544,13 +546,20 @@ ng_eiface_rcvdata(hook_p hook, item_p item)
 static int
 ng_eiface_rmnode(node_p node)
 {
+	INIT_VNET_NETGRAPH(curvnet);
 	const priv_p priv = NG_NODE_PRIVATE(node);
 	struct ifnet *const ifp = priv->ifp;
 
+	/*
+	 * the ifnet may be in a different vnet than the netgraph node, 
+	 * hence we have to change the current vnet context here.
+	 */
+	CURVNET_SET_QUIET(ifp->if_vnet);
 	ether_ifdetach(ifp);
 	if_free(ifp);
-	free_unr(ng_eiface_unit, priv->unit);
-	FREE(priv, M_NETGRAPH);
+	CURVNET_RESTORE();
+	free_unr(V_ng_eiface_unit, priv->unit);
+	free(priv, M_NETGRAPH);
 	NG_NODE_SET_PRIVATE(node, NULL);
 	NG_NODE_UNREF(node);
 	return (0);
@@ -578,10 +587,10 @@ ng_eiface_mod_event(module_t mod, int event, void *data)
 
 	switch (event) {
 	case MOD_LOAD:
-		ng_eiface_unit = new_unrhdr(0, 0xffff, NULL);
+		V_ng_eiface_unit = new_unrhdr(0, 0xffff, NULL);
 		break;
 	case MOD_UNLOAD:
-		delete_unrhdr(ng_eiface_unit);
+		delete_unrhdr(V_ng_eiface_unit);
 		break;
 	default:
 		error = EOPNOTSUPP;

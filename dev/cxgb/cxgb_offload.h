@@ -1,7 +1,7 @@
 
 /**************************************************************************
 
-Copyright (c) 2007, Chelsio Inc.
+Copyright (c) 2007-2008, Chelsio Inc.
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -26,26 +26,17 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
-$FreeBSD: src/sys/dev/cxgb/cxgb_offload.h,v 1.9 2008/04/19 03:22:41 kmacy Exp $
+$FreeBSD: src/sys/dev/cxgb/cxgb_offload.h,v 1.12 2008/09/24 01:19:08 kmacy Exp $
 
 ***************************************************************************/
 
 #ifndef _CXGB_OFFLOAD_H
 #define _CXGB_OFFLOAD_H
 
-#ifdef CONFIG_DEFINED
 #include <common/cxgb_version.h>
 #include <cxgb_config.h>
-#include <ulp/tom/cxgb_l2t.h>
 #include <common/cxgb_tcb.h>
 #include <t3cdev.h>
-#else
-#include <dev/cxgb/common/cxgb_version.h>
-#include <dev/cxgb/cxgb_config.h>
-#include <dev/cxgb/ulp/tom/cxgb_l2t.h>
-#include <dev/cxgb/common/cxgb_tcb.h>
-#include <dev/cxgb/t3cdev.h>
-#endif
 
 MALLOC_DECLARE(M_CXGB);
 
@@ -79,6 +70,7 @@ void cxgb_remove_clients(struct t3cdev *tdev);
 typedef int (*cxgb_cpl_handler_func)(struct t3cdev *dev,
 				      struct mbuf *m, void *ctx);
 
+struct l2t_entry;
 struct cxgb_client {
 	char 			*name;
 	void 			(*add) (struct t3cdev *);

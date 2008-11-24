@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/ficl/Makefile,v 1.45 2007/10/15 14:20:24 nyan Exp $
+# $FreeBSD: src/sys/boot/ficl/Makefile,v 1.46 2008/10/14 10:11:14 raj Exp $
 #
 .PATH: ${.CURDIR}/${MACHINE_ARCH:S/amd64/i386/}
 BASE_SRCS=	dict.c ficl.c fileaccess.c float.c loader.c math64.c \
@@ -14,7 +14,7 @@ CFLAGS+=	-mno-mmx -mno-3dnow -mno-sse -mno-sse2
 .if ${MACHINE_ARCH} == "i386"
 CFLAGS+=	-mno-sse3
 .endif
-.if ${MACHINE_ARCH} == "powerpc"
+.if ${MACHINE_ARCH} == "powerpc" || ${MACHINE_ARCH} == "arm"
 CFLAGS+=	-msoft-float
 .endif
 .if ${MACHINE} == "pc98"

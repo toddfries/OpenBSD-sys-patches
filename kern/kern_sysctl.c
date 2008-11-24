@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_sysctl.c,v 1.178 2007/10/24 19:03:54 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_sysctl.c,v 1.179 2007/11/30 21:29:08 peter Exp $");
 
 #include "opt_compat.h"
 #include "opt_mac.h"
@@ -412,6 +412,25 @@ sysctl_add_oid(struct sysctl_ctx_list *clist, struct sysctl_oid_list *parent,
 	/* Register this oid */
 	sysctl_register_oid(oidp);
 	return (oidp);
+}
+
+/*
+ * Rename an existing oid.
+ */
+void
+sysctl_rename_oid(struct sysctl_oid *oidp, const char *name)
+{
+	ssize_t len;
+	char *newname;
+	void *oldname;
+
+	oldname = (void *)(uintptr_t)(const void *)oidp->oid_name;
+	len = strlen(name);
+	newname = malloc(len + 1, M_SYSCTLOID, M_WAITOK);
+	bcopy(name, newname, len + 1);
+	newname[len] = '\0';
+	oidp->oid_name = newname;
+	free(oldname, M_SYSCTLOID);
 }
 
 /*

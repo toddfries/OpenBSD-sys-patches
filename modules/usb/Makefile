@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/usb/Makefile,v 1.18 2005/06/04 10:58:39 schweikh Exp $
+# $FreeBSD: src/sys/modules/usb/Makefile,v 1.20 2008/10/09 20:00:17 n_hibma Exp $
 
 S=	${.CURDIR}/../..
 
@@ -18,10 +18,5 @@ SRCS=	bus_if.h device_if.h usb_if.h usb_if.c \
 	usbdi.c usbdi.h usbdivar.h \
 	usbdi_util.c usbdi_util.h \
 	usb_ethersubr.c usbdevs.h
-
-SRCS+=	uhci_pci.c uhci.c uhcireg.h uhcivar.h
-SRCS+=	ohci_pci.c ohci.c ohcireg.h ohcivar.h
-SRCS+=	ehci_pci.c ehci.c ehcireg.h ehcivar.h
-SRCS+=	opt_bus.h pci_if.h
 
 .include <bsd.kmod.mk>

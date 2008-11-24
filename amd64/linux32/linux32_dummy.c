@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/linux32/linux32_dummy.c,v 1.9 2007/04/18 18:08:12 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/linux32/linux32_dummy.c,v 1.13 2008/05/13 20:01:26 rdivacky Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -57,7 +57,6 @@ DUMMY(rt_sigqueueinfo);
 DUMMY(capget);
 DUMMY(capset);
 DUMMY(sendfile);
-DUMMY(truncate64);
 DUMMY(setfsuid);
 DUMMY(setfsgid);
 DUMMY(pivot_root);
@@ -96,21 +95,13 @@ DUMMY(inotify_init);
 DUMMY(inotify_add_watch);
 DUMMY(inotify_rm_watch);
 DUMMY(migrate_pages);
-DUMMY(mkdirat);
-DUMMY(mknodat);
-DUMMY(fchownat);
-DUMMY(futimesat);
-DUMMY(fstatat64);
-DUMMY(unlinkat);
-DUMMY(renameat);
-DUMMY(linkat);
-DUMMY(symlinkat);
-DUMMY(readlinkat);
-DUMMY(fchmodat);
-DUMMY(faccessat);
 DUMMY(pselect6);
 DUMMY(ppoll);
 DUMMY(unshare);
+DUMMY(splice);
+DUMMY(sync_file_range);
+DUMMY(tee);
+DUMMY(vmsplice);
 
 #define DUMMY_XATTR(s)						\
 int								\

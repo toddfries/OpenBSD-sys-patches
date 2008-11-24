@@ -45,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_gre.c,v 1.25 2007/10/07 20:44:23 silby Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_gre.c,v 1.26 2008/07/04 21:01:30 gonzo Exp $");
 
 #include "opt_inet.h"
 #include "opt_atalk.h"
@@ -214,7 +214,7 @@ gre_input2(struct mbuf *m ,int hlen, u_char proto)
 
 	m->m_pkthdr.rcvif = GRE2IFP(sc);
 
-	netisr_dispatch(isr, m);
+	netisr_queue(isr, m);
 
 	/* Packet is done, no further processing needed. */
 	return (NULL);
@@ -298,7 +298,7 @@ gre_mobile_input(struct mbuf *m, int hlen)
 
 	m->m_pkthdr.rcvif = GRE2IFP(sc);
 
-	netisr_dispatch(NETISR_IP, m);
+	netisr_queue(NETISR_IP, m);
 }
 
 /*

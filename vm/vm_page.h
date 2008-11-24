@@ -57,7 +57,7 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  *
- * $FreeBSD: src/sys/vm/vm_page.h,v 1.152 2007/09/27 04:21:59 alc Exp $
+ * $FreeBSD: src/sys/vm/vm_page.h,v 1.155 2008/09/26 18:44:40 emaste Exp $
  */
 
 /*
@@ -150,19 +150,11 @@ struct vm_page {
 #define	VPO_SWAPINPROG	0x0200	/* swap I/O in progress on page */
 #define	VPO_NOSYNC	0x0400	/* do not collect for syncer */
 
-/* Make sure that u_long is at least 64 bits when PAGE_SIZE is 32K. */
-#if PAGE_SIZE == 32768
-#ifdef CTASSERT
-CTASSERT(sizeof(u_long) >= 8);
-#endif
-#endif
-
 #define PQ_NONE		0
 #define	PQ_INACTIVE	1
 #define	PQ_ACTIVE	2
 #define	PQ_HOLD		3
 #define	PQ_COUNT	4
-#define	PQ_MAXCOUNT	4
 
 /* Returns the real queue a page is on. */
 #define VM_PAGE_GETQUEUE(m)	((m)->queue)
@@ -181,7 +173,7 @@ struct vpgqueues {
 	int	*cnt;
 };
 
-extern struct vpgqueues vm_page_queues[PQ_MAXCOUNT];
+extern struct vpgqueues vm_page_queues[PQ_COUNT];
 extern struct mtx vm_page_queue_free_mtx;
 
 /*
@@ -311,10 +303,7 @@ void vm_page_free_zero(vm_page_t m);
 void vm_page_dirty(vm_page_t m);
 void vm_page_wakeup(vm_page_t m);
 
-void vm_pageq_init(void);
-void vm_pageq_enqueue(int queue, vm_page_t m);
 void vm_pageq_remove(vm_page_t m);
-void vm_pageq_requeue(vm_page_t m);
 
 void vm_page_activate (vm_page_t);
 vm_page_t vm_page_alloc (vm_object_t, vm_pindex_t, int);
@@ -331,6 +320,7 @@ void vm_page_insert (vm_page_t, vm_object_t, vm_pindex_t);
 vm_page_t vm_page_lookup (vm_object_t, vm_pindex_t);
 void vm_page_remove (vm_page_t);
 void vm_page_rename (vm_page_t, vm_object_t, vm_pindex_t);
+void vm_page_requeue(vm_page_t m);
 void vm_page_sleep(vm_page_t m, const char *msg);
 vm_page_t vm_page_splay(vm_pindex_t, vm_page_t);
 vm_offset_t vm_page_startup(vm_offset_t vaddr);

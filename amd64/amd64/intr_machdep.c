@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/amd64/amd64/intr_machdep.c,v 1.34 2007/06/04 21:38:44 attilio Exp $
+ * $FreeBSD: src/sys/amd64/amd64/intr_machdep.c,v 1.41 2008/04/11 03:26:39 jeff Exp $
  */
 
 /*
@@ -48,6 +48,7 @@
 #include <sys/lock.h>
 #include <sys/mutex.h>
 #include <sys/proc.h>
+#include <sys/smp.h>
 #include <sys/syslog.h>
 #include <sys/systm.h>
 #include <sys/sx.h>
@@ -76,18 +77,14 @@ static struct sx intr_table_lock;
 static struct mtx intrcnt_lock;
 static STAILQ_HEAD(, pic) pics;
 
-#ifdef INTR_FILTER
-static void intr_eoi_src(void *arg);
-static void intr_disab_eoi_src(void *arg);
-static void intr_event_stray(void *cookie);
-#endif
-
 #ifdef SMP
 static int assign_cpu;
 
 static void	intr_assign_next_cpu(struct intsrc *isrc);
 #endif
 
+static int	intr_assign_cpu(void *arg, u_char cpu);
+static void	intr_disable_src(void *arg);
 static void	intr_init(void *__dummy);
 static int	intr_pic_registered(struct pic *pic);
 static void	intrcnt_setname(const char *name, int index);
@@ -142,14 +139,10 @@ intr_register_source(struct intsrc *isrc)
 	vector = isrc->is_pic->pic_vector(isrc);
 	if (interrupt_sources[vector] != NULL)
 		return (EEXIST);
-#ifdef INTR_FILTER
-	error = intr_event_create(&isrc->is_event, isrc, 0,
-	    (mask_fn)isrc->is_pic->pic_enable_source,
-	    intr_eoi_src, intr_disab_eoi_src, "irq%d:", vector);
-#else
-	error = intr_event_create(&isrc->is_event, isrc, 0,
-	    (mask_fn)isrc->is_pic->pic_enable_source, "irq%d:", vector);
-#endif
+	error = intr_event_create(&isrc->is_event, isrc, 0, vector,
+	    intr_disable_src, (mask_fn)isrc->is_pic->pic_enable_source,
+	    (mask_fn)isrc->is_pic->pic_eoi_source, intr_assign_cpu, "irq%d:",
+	    vector);
 	if (error)
 		return (error);
 	sx_xlock(&intr_table_lock);
@@ -233,12 +226,20 @@ intr_config_intr(int vector, enum intr_trigger trig, enum intr_polarity pol)
 	return (isrc->is_pic->pic_config_intr(isrc, trig, pol));
 }
 
-#ifdef INTR_FILTER
+static void
+intr_disable_src(void *arg)
+{
+	struct intsrc *isrc;
+
+	isrc = arg;
+	isrc->is_pic->pic_disable_source(isrc, PIC_EOI);
+}
+
 void
 intr_execute_handlers(struct intsrc *isrc, struct trapframe *frame)
 {
-	struct thread *td;
 	struct intr_event *ie;
+	struct thread *td;
 	int vector;
 
 	td = curthread;
@@ -262,82 +263,11 @@ intr_execute_handlers(struct intsrc *isrc, struct trapframe *frame)
 	if (vector == 0)
 		clkintr_pending = 1;
 
-	if (intr_event_handle(ie, frame) != 0)
-		intr_event_stray(isrc);
-}
-
-static void
-intr_event_stray(void *cookie)
-{
-	struct intsrc *isrc;
-
-	isrc = cookie;
 	/*
 	 * For stray interrupts, mask and EOI the source, bump the
 	 * stray count, and log the condition.
 	 */
-	isrc->is_pic->pic_disable_source(isrc, PIC_EOI);
-	(*isrc->is_straycount)++;
-	if (*isrc->is_straycount < MAX_STRAY_LOG)
-		log(LOG_ERR, "stray irq%d\n", isrc->is_pic->pic_vector(isrc));
-	else if (*isrc->is_straycount == MAX_STRAY_LOG)
-		log(LOG_CRIT,
-		    "too many stray irq %d's: not logging anymore\n",
-		    isrc->is_pic->pic_vector(isrc));
-}
-
-static void
-intr_eoi_src(void *arg)
-{
-	struct intsrc *isrc;
-
-	isrc = arg;
-	isrc->is_pic->pic_eoi_source(isrc);
-}
-
-static void
-intr_disab_eoi_src(void *arg)
-{
-	struct intsrc *isrc;
-
-	isrc = arg;
-	isrc->is_pic->pic_disable_source(isrc, PIC_EOI);
-}
-#else
-void
-intr_execute_handlers(struct intsrc *isrc, struct trapframe *frame)
-{
-	struct thread *td;
-	struct intr_event *ie;
-	struct intr_handler *ih;
-	int error, vector, thread, ret;
-
-	td = curthread;
-
-	/*
-	 * We count software interrupts when we process them.  The
-	 * code here follows previous practice, but there's an
-	 * argument for counting hardware interrupts when they're
-	 * processed too.
-	 */
-	(*isrc->is_count)++;
-	PCPU_INC(cnt.v_intr);
-
-	ie = isrc->is_event;
-
-	/*
-	 * XXX: We assume that IRQ 0 is only used for the ISA timer
-	 * device (clk).
-	 */
-	vector = isrc->is_pic->pic_vector(isrc);
-	if (vector == 0)
-		clkintr_pending = 1;
-
-	/*
-	 * For stray interrupts, mask and EOI the source, bump the
-	 * stray count, and log the condition.
-	 */
-	if (ie == NULL || TAILQ_EMPTY(&ie->ie_handlers)) {
+	if (intr_event_handle(ie, frame) != 0) {
 		isrc->is_pic->pic_disable_source(isrc, PIC_EOI);
 		(*isrc->is_straycount)++;
 		if (*isrc->is_straycount < MAX_STRAY_LOG)
@@ -346,60 +276,8 @@ intr_execute_handlers(struct intsrc *isrc, struct trapframe *frame)
 			log(LOG_CRIT,
 			    "too many stray irq %d's: not logging anymore\n",
 			    vector);
-		return;
 	}
-
-	/*
-	 * Execute fast interrupt handlers directly.
-	 * To support clock handlers, if a handler registers
-	 * with a NULL argument, then we pass it a pointer to
-	 * a trapframe as its argument.
-	 */
-	td->td_intr_nesting_level++;
-	ret = 0;
-	thread = 0;
-	critical_enter();
-	TAILQ_FOREACH(ih, &ie->ie_handlers, ih_next) {
-		if (ih->ih_filter == NULL) {
-			thread = 1;
-			continue;
-		}
-		CTR4(KTR_INTR, "%s: exec %p(%p) for %s", __func__,
-		    ih->ih_filter, ih->ih_argument == NULL ? frame :
-		    ih->ih_argument, ih->ih_name);
-		if (ih->ih_argument == NULL)
-			ret = ih->ih_filter(frame);
-		else
-			ret = ih->ih_filter(ih->ih_argument);
-		/*
-		 * Wrapper handler special case: see
-		 * i386/intr_machdep.c::intr_execute_handlers()
-		 */
-		if (!thread) {
-			if (ret == FILTER_SCHEDULE_THREAD)
-				thread = 1;
-		}
-	}
-
-	/*
-	 * If there are any threaded handlers that need to run,
-	 * mask the source as well as sending it an EOI.  Otherwise,
-	 * just send it an EOI but leave it unmasked.
-	 */
-	if (thread)
-		isrc->is_pic->pic_disable_source(isrc, PIC_EOI);
-	else
-		isrc->is_pic->pic_eoi_source(isrc);
-	critical_exit();
-
-	/* Schedule the ithread if needed. */
-	if (thread) {
-		error = intr_event_schedule_thread(ie);
-		KASSERT(error == 0, ("bad stray interrupt"));
-	}
-	td->td_intr_nesting_level--;
 }
-#endif
 
 void
 intr_resume(void)
@@ -428,6 +306,28 @@ intr_suspend(void)
 			pic->pic_suspend(pic);
 	}
 	sx_xunlock(&intr_table_lock);
+}
+
+static int
+intr_assign_cpu(void *arg, u_char cpu)
+{
+#ifdef SMP
+	struct intsrc *isrc;	
+
+	/*
+	 * Don't do anything during early boot.  We will pick up the
+	 * assignment once the APs are started.
+	 */
+	if (assign_cpu && cpu != NOCPU) {
+		isrc = arg;
+		sx_xlock(&intr_table_lock);
+		isrc->is_pic->pic_assign_cpu(isrc, cpu_apic_ids[cpu]);
+		sx_xunlock(&intr_table_lock);
+	}
+	return (0);
+#else
+	return (EOPNOTSUPP);
+#endif
 }
 
 static void
@@ -484,7 +384,7 @@ intr_init(void *dummy __unused)
 	sx_init(&intr_table_lock, "intr sources");
 	mtx_init(&intrcnt_lock, "intrcnt", NULL, MTX_SPIN);
 }
-SYSINIT(intr_init, SI_SUB_INTR, SI_ORDER_FIRST, intr_init, NULL)
+SYSINIT(intr_init, SI_SUB_INTR, SI_ORDER_FIRST, intr_init, NULL);
 
 #ifndef DEV_ATPIC
 /* Initialize the two 8259A's to a known-good shutdown state. */
@@ -536,25 +436,33 @@ DB_SHOW_COMMAND(irqs, db_show_irqs)
 
 /* The BSP is always a valid target. */
 static cpumask_t intr_cpus = (1 << 0);
-static int current_cpu, num_cpus = 1;
+static int current_cpu;
 
 static void
 intr_assign_next_cpu(struct intsrc *isrc)
 {
-	struct pic *pic;
-	u_int apic_id;
 
 	/*
 	 * Assign this source to a local APIC in a round-robin fashion.
 	 */
-	pic = isrc->is_pic;
-	apic_id = cpu_apic_ids[current_cpu];
-	pic->pic_assign_cpu(isrc, apic_id);
+	isrc->is_pic->pic_assign_cpu(isrc, cpu_apic_ids[current_cpu]);
 	do {
 		current_cpu++;
-		if (current_cpu >= num_cpus)
+		if (current_cpu > mp_maxid)
 			current_cpu = 0;
 	} while (!(intr_cpus & (1 << current_cpu)));
+}
+
+/* Attempt to bind the specified IRQ to the specified CPU. */
+int
+intr_bind(u_int vector, u_char cpu)
+{
+	struct intsrc *isrc;
+
+	isrc = intr_lookup_source(vector);
+	if (isrc == NULL)
+		return (EINVAL);
+	return (intr_event_bind(isrc->is_event, cpu));
 }
 
 /*
@@ -572,7 +480,6 @@ intr_add_cpu(u_int cpu)
 		    cpu_apic_ids[cpu]);
 
 	intr_cpus |= (1 << cpu);
-	num_cpus++;
 }
 
 /*
@@ -586,7 +493,7 @@ intr_shuffle_irqs(void *arg __unused)
 	int i;
 
 	/* Don't bother on UP. */
-	if (num_cpus <= 1)
+	if (mp_ncpus == 1)
 		return;
 
 	/* Round-robin assign a CPU to each enabled source. */
@@ -594,10 +501,21 @@ intr_shuffle_irqs(void *arg __unused)
 	assign_cpu = 1;
 	for (i = 0; i < NUM_IO_INTS; i++) {
 		isrc = interrupt_sources[i];
-		if (isrc != NULL && isrc->is_handlers > 0)
-			intr_assign_next_cpu(isrc);
+		if (isrc != NULL && isrc->is_handlers > 0) {
+			/*
+			 * If this event is already bound to a CPU,
+			 * then assign the source to that CPU instead
+			 * of picking one via round-robin.
+			 */
+			if (isrc->is_event->ie_cpu != NOCPU)
+				isrc->is_pic->pic_assign_cpu(isrc,
+				    cpu_apic_ids[isrc->is_event->ie_cpu]);
+			else
+				intr_assign_next_cpu(isrc);
+		}
 	}
 	sx_xunlock(&intr_table_lock);
 }
-SYSINIT(intr_shuffle_irqs, SI_SUB_SMP, SI_ORDER_SECOND, intr_shuffle_irqs, NULL)
+SYSINIT(intr_shuffle_irqs, SI_SUB_SMP, SI_ORDER_SECOND, intr_shuffle_irqs,
+    NULL);
 #endif

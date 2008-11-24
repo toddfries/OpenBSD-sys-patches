@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)buf.h	8.9 (Berkeley) 3/30/95
- * $FreeBSD: src/sys/sys/buf.h,v 1.196 2007/03/08 06:44:34 julian Exp $
+ * $FreeBSD: src/sys/sys/buf.h,v 1.207 2008/03/28 12:30:12 attilio Exp $
  */
 
 #ifndef _SYS_BUF_H_
@@ -88,7 +88,7 @@ typedef unsigned char b_xflags_t;
  *	completes, b_resid is usually 0 indicating 100% success.
  *
  *	All fields are protected by the buffer lock except those marked:
- *		V - Protected by owning vnode lock
+ *		V - Protected by owning bufobj lock
  *		Q - Protected by the buf queue lock
  *		D - Protected by an dependency implementation specific lock
  */
@@ -260,74 +260,77 @@ extern const char *buf_wmesg;		/* Default buffer lock message */
 /*
  * Initialize a lock.
  */
-#define BUF_LOCKINIT(bp) \
+#define BUF_LOCKINIT(bp)						\
 	lockinit(&(bp)->b_lock, PRIBIO + 4, buf_wmesg, 0, 0)
 /*
  *
  * Get a lock sleeping non-interruptably until it becomes available.
  */
-static __inline int BUF_LOCK(struct buf *, int, struct mtx *);
-static __inline int
-BUF_LOCK(struct buf *bp, int locktype, struct mtx *interlock)
-{
-	int s, ret;
+#define	BUF_LOCK(bp, locktype, interlock)				\
+	_lockmgr_args(&(bp)->b_lock, (locktype), (interlock),		\
+	    LK_WMESG_DEFAULT, LK_PRIO_DEFAULT, LK_TIMO_DEFAULT,		\
+	    LOCK_FILE, LOCK_LINE)
 
-	s = splbio();
-	mtx_lock(bp->b_lock.lk_interlock);
-	locktype |= LK_INTERNAL;
-	bp->b_lock.lk_wmesg = buf_wmesg;
-	bp->b_lock.lk_prio = PRIBIO + 4;
-	ret = lockmgr(&(bp)->b_lock, locktype, interlock, curthread);
-	splx(s);
-	return ret;
-}
 /*
  * Get a lock sleeping with specified interruptably and timeout.
  */
-static __inline int BUF_TIMELOCK(struct buf *, int, struct mtx *,
-    char *, int, int);
-static __inline int
-BUF_TIMELOCK(struct buf *bp, int locktype, struct mtx *interlock,
-    char *wmesg, int catch, int timo)
-{
-	int s, ret;
+#define	BUF_TIMELOCK(bp, locktype, interlock, wmesg, catch, timo)	\
+	_lockmgr_args(&(bp)->b_lock, (locktype) | LK_TIMELOCK,		\
+	    (interlock), (wmesg), (PRIBIO + 4) | (catch), (timo),	\
+	    LOCK_FILE, LOCK_LINE)
 
-	s = splbio();
-	mtx_lock(bp->b_lock.lk_interlock);
-	locktype |= LK_INTERNAL | LK_TIMELOCK;
-	bp->b_lock.lk_wmesg = wmesg;
-	bp->b_lock.lk_prio = (PRIBIO + 4) | catch;
-	bp->b_lock.lk_timo = timo;
-	ret = lockmgr(&(bp)->b_lock, (locktype), interlock, curthread);
-	splx(s);
-	return ret;
-}
 /*
  * Release a lock. Only the acquiring process may free the lock unless
  * it has been handed off to biodone.
  */
-static __inline void BUF_UNLOCK(struct buf *);
-static __inline void
-BUF_UNLOCK(struct buf *bp)
-{
-	int s;
+#define	BUF_UNLOCK(bp) do {						\
+	KASSERT(((bp)->b_flags & B_REMFREE) == 0,			\
+	    ("BUF_UNLOCK %p while B_REMFREE is still set.", (bp)));	\
+									\
+	(void)_lockmgr_args(&(bp)->b_lock, LK_RELEASE, NULL,		\
+	    LK_WMESG_DEFAULT, LK_PRIO_DEFAULT, LK_TIMO_DEFAULT,		\
+	    LOCK_FILE, LOCK_LINE);					\
+} while (0)
 
-	s = splbio();
-	KASSERT((bp->b_flags & B_REMFREE) == 0,
-	    ("BUF_UNLOCK %p while B_REMFREE is still set.", bp));
-	lockmgr(&(bp)->b_lock, LK_RELEASE, NULL, curthread);
-	splx(s);
-}
+/*
+ * Check if a buffer lock is recursed.
+ */
+#define	BUF_LOCKRECURSED(bp)						\
+	lockmgr_recursed(&(bp)->b_lock)
 
+/*
+ * Check if a buffer lock is currently held.
+ */
+#define	BUF_ISLOCKED(bp)						\
+	lockstatus(&(bp)->b_lock)
 /*
  * Free a buffer lock.
  */
-#define BUF_LOCKFREE(bp) 			\
-do {						\
-	if (BUF_REFCNT(bp) > 0)			\
-		panic("free locked buf");	\
-	lockdestroy(&(bp)->b_lock);		\
-} while (0)
+#define BUF_LOCKFREE(bp) 						\
+	lockdestroy(&(bp)->b_lock)
+
+/*
+ * Buffer lock assertions.
+ */
+#if defined(INVARIANTS) && defined(INVARIANT_SUPPORT)
+#define	BUF_ASSERT_LOCKED(bp)						\
+	_lockmgr_assert(&(bp)->b_lock, KA_LOCKED, LOCK_FILE, LOCK_LINE)
+#define	BUF_ASSERT_SLOCKED(bp)						\
+	_lockmgr_assert(&(bp)->b_lock, KA_SLOCKED, LOCK_FILE, LOCK_LINE)
+#define	BUF_ASSERT_XLOCKED(bp)						\
+	_lockmgr_assert(&(bp)->b_lock, KA_XLOCKED, LOCK_FILE, LOCK_LINE)
+#define	BUF_ASSERT_UNLOCKED(bp)						\
+	_lockmgr_assert(&(bp)->b_lock, KA_UNLOCKED, LOCK_FILE, LOCK_LINE)
+#define	BUF_ASSERT_HELD(bp)
+#define	BUF_ASSERT_UNHELD(bp)
+#else
+#define	BUF_ASSERT_LOCKED(bp)
+#define	BUF_ASSERT_SLOCKED(bp)
+#define	BUF_ASSERT_XLOCKED(bp)
+#define	BUF_ASSERT_UNLOCKED(bp)
+#define	BUF_ASSERT_HELD(bp)
+#define	BUF_ASSERT_UNHELD(bp)
+#endif
 
 #ifdef _SYS_PROC_H_	/* Avoid #include <sys/proc.h> pollution */
 /*
@@ -336,50 +339,15 @@ do {						\
  * original owning process can no longer acquire it recursively, but must
  * wait until the I/O is completed and the lock has been freed by biodone.
  */
-static __inline void BUF_KERNPROC(struct buf *);
-static __inline void
-BUF_KERNPROC(struct buf *bp)
-{
-	struct thread *td = curthread;
-
-	if (!TD_IS_IDLETHREAD(td) && bp->b_lock.lk_lockholder == td)
-		td->td_locks--;
-	bp->b_lock.lk_lockholder = LK_KERNPROC;
-}
+#define	BUF_KERNPROC(bp)						\
+	_lockmgr_disown(&(bp)->b_lock, LOCK_FILE, LOCK_LINE)
 #endif
-/*
- * Find out the number of references to a lock.
- */
-static __inline int BUF_REFCNT(struct buf *);
-static __inline int
-BUF_REFCNT(struct buf *bp)
-{
-	int s, ret;
-
-	/*
-	 * When the system is panicing, the lock manager grants all lock
-	 * requests whether or not the lock is available. To avoid "unlocked
-	 * buffer" panics after a crash, we just claim that all buffers
-	 * are locked when cleaning up after a system panic.
-	 */
-	if (panicstr != NULL)
-		return (1);
-	s = splbio();
-	ret = lockcount(&(bp)->b_lock);
-	splx(s);
-	return ret;
-}
-
 
 /*
- * Find out the number of waiters on a lock.
+ * Find out if the lock has waiters or not.
  */
-static __inline int BUF_LOCKWAITERS(struct buf *);
-static __inline int
-BUF_LOCKWAITERS(struct buf *bp)
-{
-	return (lockwaiters(&bp->b_lock));
-}
+#define	BUF_LOCKWAITERS(bp)						\
+	lockmgr_waiters(&(bp)->b_lock)
 
 #endif /* _KERNEL */
 

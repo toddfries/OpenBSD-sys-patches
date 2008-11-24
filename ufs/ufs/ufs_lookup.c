@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_lookup.c,v 1.83 2007/03/14 08:50:27 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_lookup.c,v 1.93 2008/11/22 13:11:11 kib Exp $");
 
 #include "opt_ffs_broken_fixme.h"
 #include "opt_ufs.h"
@@ -137,6 +137,8 @@ ufs_lookup(ap)
 	int entryoffsetinblock;		/* offset of ep in bp's buffer */
 	enum {NONE, COMPACT, FOUND} slotstatus;
 	doff_t slotoffset;		/* offset of area with free space */
+	doff_t i_diroff;		/* cached i_diroff value. */
+	doff_t i_offset;		/* cached i_offset value. */
 	int slotsize;			/* size of area at slotoffset */
 	int slotfreespace;		/* amount of space free in slot */
 	int slotneeded;			/* size of the entry we're seeking */
@@ -153,8 +155,10 @@ ufs_lookup(ap)
 	struct ucred *cred = cnp->cn_cred;
 	int flags = cnp->cn_flags;
 	int nameiop = cnp->cn_nameiop;
-	struct thread *td = cnp->cn_thread;
-	ino_t saved_ino;
+	ino_t ino;
+	int ltype;
+	int pdoomed;
+	struct mount *mp;
 
 	bp = NULL;
 	slotoffset = -1;
@@ -166,6 +170,15 @@ ufs_lookup(ap)
 
 	vdp = ap->a_dvp;
 	dp = VTOI(vdp);
+
+	/*
+	 * Create a vm object if vmiodirenable is enabled.
+	 * Alternatively we could call vnode_create_vobject
+	 * in VFS_VGET but we could end up creating objects
+	 * that are never used.
+	 */
+	vnode_create_vobject(vdp, DIP(dp, i_size), cnp->cn_thread);
+
 	/*
 	 * We now have a segment name to search for, and a directory to search.
 	 *
@@ -174,6 +187,8 @@ ufs_lookup(ap)
 	 * we watch for a place to put the new file in
 	 * case it doesn't already exist.
 	 */
+	ino = 0;
+	i_diroff = dp->i_diroff;
 	slotstatus = FOUND;
 	slotfreespace = slotsize = slotneeded = 0;
 	if ((nameiop == CREATE || nameiop == RENAME) &&
@@ -207,13 +222,13 @@ ufs_lookup(ap)
 		numdirpasses = 1;
 		entryoffsetinblock = 0; /* silence compiler warning */
 		switch (ufsdirhash_lookup(dp, cnp->cn_nameptr, cnp->cn_namelen,
-		    &dp->i_offset, &bp, nameiop == DELETE ? &prevoff : NULL)) {
+		    &i_offset, &bp, nameiop == DELETE ? &prevoff : NULL)) {
 		case 0:
 			ep = (struct direct *)((char *)bp->b_data +
-			    (dp->i_offset & bmask));
+			    (i_offset & bmask));
 			goto foundentry;
 		case ENOENT:
-			dp->i_offset = roundup2(dp->i_size, DIRBLKSIZ);
+			i_offset = roundup2(dp->i_size, DIRBLKSIZ);
 			goto notfound;
 		default:
 			/* Something failed; just do a linear search. */
@@ -232,33 +247,32 @@ ufs_lookup(ap)
 	 * profiling time and hence has been removed in the interest
 	 * of simplicity.
 	 */
-	if (nameiop != LOOKUP || dp->i_diroff == 0 ||
-	    dp->i_diroff >= dp->i_size) {
+	if (nameiop != LOOKUP || i_diroff == 0 || i_diroff >= dp->i_size) {
 		entryoffsetinblock = 0;
-		dp->i_offset = 0;
+		i_offset = 0;
 		numdirpasses = 1;
 	} else {
-		dp->i_offset = dp->i_diroff;
-		if ((entryoffsetinblock = dp->i_offset & bmask) &&
-		    (error = UFS_BLKATOFF(vdp, (off_t)dp->i_offset, NULL, &bp)))
+		i_offset = i_diroff;
+		if ((entryoffsetinblock = i_offset & bmask) &&
+		    (error = UFS_BLKATOFF(vdp, (off_t)i_offset, NULL, &bp)))
 			return (error);
 		numdirpasses = 2;
 		nchstats.ncs_2passes++;
 	}
-	prevoff = dp->i_offset;
+	prevoff = i_offset;
 	endsearch = roundup2(dp->i_size, DIRBLKSIZ);
 	enduseful = 0;
 
 searchloop:
-	while (dp->i_offset < endsearch) {
+	while (i_offset < endsearch) {
 		/*
 		 * If necessary, get the next directory block.
 		 */
-		if ((dp->i_offset & bmask) == 0) {
+		if ((i_offset & bmask) == 0) {
 			if (bp != NULL)
 				brelse(bp);
 			error =
-			    UFS_BLKATOFF(vdp, (off_t)dp->i_offset, NULL, &bp);
+			    UFS_BLKATOFF(vdp, (off_t)i_offset, NULL, &bp);
 			if (error)
 				return (error);
 			entryoffsetinblock = 0;
@@ -285,9 +299,9 @@ searchloop:
 		    (dirchk && ufs_dirbadentry(vdp, ep, entryoffsetinblock))) {
 			int i;
 
-			ufs_dirbad(dp, dp->i_offset, "mangled entry");
+			ufs_dirbad(dp, i_offset, "mangled entry");
 			i = DIRBLKSIZ - (entryoffsetinblock & (DIRBLKSIZ - 1));
-			dp->i_offset += i;
+			i_offset += i;
 			entryoffsetinblock += i;
 			continue;
 		}
@@ -306,15 +320,15 @@ searchloop:
 			if (size > 0) {
 				if (size >= slotneeded) {
 					slotstatus = FOUND;
-					slotoffset = dp->i_offset;
+					slotoffset = i_offset;
 					slotsize = ep->d_reclen;
 				} else if (slotstatus == NONE) {
 					slotfreespace += size;
 					if (slotoffset == -1)
-						slotoffset = dp->i_offset;
+						slotoffset = i_offset;
 					if (slotfreespace >= slotneeded) {
 						slotstatus = COMPACT;
-						slotsize = dp->i_offset +
+						slotsize = i_offset +
 						      ep->d_reclen - slotoffset;
 					}
 				}
@@ -348,24 +362,22 @@ foundentry:
 				if (vdp->v_mount->mnt_maxsymlinklen > 0 &&
 				    ep->d_type == DT_WHT) {
 					slotstatus = FOUND;
-					slotoffset = dp->i_offset;
+					slotoffset = i_offset;
 					slotsize = ep->d_reclen;
-					dp->i_reclen = slotsize;
 					enduseful = dp->i_size;
 					ap->a_cnp->cn_flags |= ISWHITEOUT;
 					numdirpasses--;
 					goto notfound;
 				}
-				dp->i_ino = ep->d_ino;
-				dp->i_reclen = ep->d_reclen;
+				ino = ep->d_ino;
 				goto found;
 			}
 		}
-		prevoff = dp->i_offset;
-		dp->i_offset += ep->d_reclen;
+		prevoff = i_offset;
+		i_offset += ep->d_reclen;
 		entryoffsetinblock += ep->d_reclen;
 		if (ep->d_ino)
-			enduseful = dp->i_offset;
+			enduseful = i_offset;
 	}
 notfound:
 	/*
@@ -374,8 +386,8 @@ notfound:
 	 */
 	if (numdirpasses == 2) {
 		numdirpasses--;
-		dp->i_offset = 0;
-		endsearch = dp->i_diroff;
+		i_offset = 0;
+		endsearch = i_diroff;
 		goto searchloop;
 	}
 	if (bp != NULL)
@@ -453,9 +465,9 @@ found:
 	 * Check that directory length properly reflects presence
 	 * of this entry.
 	 */
-	if (dp->i_offset + DIRSIZ(OFSFMT(vdp), ep) > dp->i_size) {
-		ufs_dirbad(dp, dp->i_offset, "i_size too small");
-		dp->i_size = dp->i_offset + DIRSIZ(OFSFMT(vdp), ep);
+	if (i_offset + DIRSIZ(OFSFMT(vdp), ep) > dp->i_size) {
+		ufs_dirbad(dp, i_offset, "i_size too small");
+		dp->i_size = i_offset + DIRSIZ(OFSFMT(vdp), ep);
 		DIP_SET(dp, i_size, dp->i_size);
 		dp->i_flag |= IN_CHANGE | IN_UPDATE;
 	}
@@ -467,13 +479,15 @@ found:
 	 * in the cache as to where the entry was found.
 	 */
 	if ((flags & ISLASTCN) && nameiop == LOOKUP)
-		dp->i_diroff = dp->i_offset &~ (DIRBLKSIZ - 1);
+		dp->i_diroff = i_offset &~ (DIRBLKSIZ - 1);
 
 	/*
 	 * If deleting, and at end of pathname, return
 	 * parameters which can be used to remove file.
 	 */
 	if (nameiop == DELETE && (flags & ISLASTCN)) {
+		if (flags & LOCKPARENT)
+			ASSERT_VOP_ELOCKED(vdp, __FUNCTION__);
 		/*
 		 * Write access to directory required to delete files.
 		 */
@@ -485,17 +499,23 @@ found:
 		 * and distance past previous entry (if there
 		 * is a previous entry in this block) in dp->i_count.
 		 * Save directory inode pointer in ndp->ni_dvp for dirremove().
+		 *
+		 * Technically we shouldn't be setting these in the
+		 * WANTPARENT case (first lookup in rename()), but any
+		 * lookups that will result in directory changes will
+		 * overwrite these.
 		 */
+		dp->i_offset = i_offset;
 		if ((dp->i_offset & (DIRBLKSIZ - 1)) == 0)
 			dp->i_count = 0;
 		else
 			dp->i_count = dp->i_offset - prevoff;
-		if (dp->i_number == dp->i_ino) {
+		if (dp->i_number == ino) {
 			VREF(vdp);
 			*vpp = vdp;
 			return (0);
 		}
-		if ((error = VFS_VGET(vdp->v_mount, dp->i_ino,
+		if ((error = VFS_VGET(vdp->v_mount, ino,
 		    LK_EXCLUSIVE, &tdp)) != 0)
 			return (error);
 		/*
@@ -527,9 +547,10 @@ found:
 		 * Careful about locking second inode.
 		 * This can only occur if the target is ".".
 		 */
-		if (dp->i_number == dp->i_ino)
+		dp->i_offset = i_offset;
+		if (dp->i_number == ino)
 			return (EISDIR);
-		if ((error = VFS_VGET(vdp->v_mount, dp->i_ino,
+		if ((error = VFS_VGET(vdp->v_mount, ino,
 		    LK_EXCLUSIVE, &tdp)) != 0)
 			return (error);
 		*vpp = tdp;
@@ -558,20 +579,52 @@ found:
 	 */
 	pdp = vdp;
 	if (flags & ISDOTDOT) {
-		saved_ino = dp->i_ino;
-		VOP_UNLOCK(pdp, 0, td);	/* race to get the inode */
-		error = VFS_VGET(pdp->v_mount, saved_ino,
-		    cnp->cn_lkflags, &tdp);
-		vn_lock(pdp, LK_EXCLUSIVE | LK_RETRY, td);
+		ltype = VOP_ISLOCKED(pdp);
+		mp = pdp->v_mount;
+		for (;;) {
+			error = vfs_busy(mp, MBF_NOWAIT);
+			if (error == 0)
+				break;
+			VOP_UNLOCK(pdp, 0);
+			pause("ufs_dd", 1);
+			vn_lock(pdp, ltype | LK_RETRY);
+			VI_LOCK(pdp);
+			pdoomed = pdp->v_iflag & VI_DOOMED;
+			VI_UNLOCK(pdp);
+			if (pdoomed)
+				return (ENOENT);
+		}
+		VOP_UNLOCK(pdp, 0);	/* race to get the inode */
+		error = VFS_VGET(mp, ino, cnp->cn_lkflags, &tdp);
+		vfs_unbusy(mp);
+		vn_lock(pdp, ltype | LK_RETRY);
+		VI_LOCK(pdp);
+		pdoomed = pdp->v_iflag & VI_DOOMED;
+		VI_UNLOCK(pdp);
+		if (pdoomed) {
+			if (error == 0)
+				vput(tdp);
+			error = ENOENT;
+		}
 		if (error)
 			return (error);
 		*vpp = tdp;
-	} else if (dp->i_number == dp->i_ino) {
+	} else if (dp->i_number == ino) {
 		VREF(vdp);	/* we want ourself, ie "." */
+		/*
+		 * When we lookup "." we still can be asked to lock it
+		 * differently.
+		 */
+		ltype = cnp->cn_lkflags & LK_TYPE_MASK;
+		if (ltype != VOP_ISLOCKED(vdp)) {
+			if (ltype == LK_EXCLUSIVE)
+				vn_lock(vdp, LK_UPGRADE | LK_RETRY);
+			else /* if (ltype == LK_SHARED) */
+				vn_lock(vdp, LK_DOWNGRADE | LK_RETRY);
+		}
 		*vpp = vdp;
 	} else {
-		error = VFS_VGET(pdp->v_mount, dp->i_ino,
-		    cnp->cn_lkflags, &tdp);
+		error = VFS_VGET(pdp->v_mount, ino, cnp->cn_lkflags, &tdp);
 		if (error)
 			return (error);
 		*vpp = tdp;
@@ -660,7 +713,7 @@ ufs_makedirentry(ip, cnp, newdirp)
 	struct direct *newdirp;
 {
 
-#ifdef DIAGNOSTIC
+#ifdef INVARIANTS
 	if ((cnp->cn_flags & SAVENAME) == 0)
 		panic("ufs_makedirentry: missing name");
 #endif
@@ -784,10 +837,10 @@ ufs_direnter(dvp, tvp, dirp, cnp, newdirbp)
 			if ((error = bwrite(bp)))
 				return (error);
 			if (tvp != NULL)
-				VOP_UNLOCK(tvp, 0, td);
+				VOP_UNLOCK(tvp, 0);
 			error = VOP_FSYNC(dvp, MNT_WAIT, td);
 			if (tvp != NULL)
-				vn_lock(tvp, LK_EXCLUSIVE | LK_RETRY, td);
+				vn_lock(tvp, LK_EXCLUSIVE | LK_RETRY);
 			return (error);
 		}
 		if (DOINGASYNC(dvp)) {
@@ -942,7 +995,7 @@ ufs_direnter(dvp, tvp, dirp, cnp, newdirbp)
 	 */
 	if (error == 0 && dp->i_endoff && dp->i_endoff < dp->i_size) {
 		if (tvp != NULL)
-			VOP_UNLOCK(tvp, 0, td);
+			VOP_UNLOCK(tvp, 0);
 #ifdef UFS_DIRHASH
 		if (dp->i_dirhash != NULL)
 			ufsdirhash_dirtrunc(dp, dp->i_endoff);
@@ -950,7 +1003,7 @@ ufs_direnter(dvp, tvp, dirp, cnp, newdirbp)
 		(void) UFS_TRUNCATE(dvp, (off_t)dp->i_endoff,
 		    IO_NORMAL | IO_SYNC, cr, td);
 		if (tvp != NULL)
-			vn_lock(tvp, LK_EXCLUSIVE | LK_RETRY, td);
+			vn_lock(tvp, LK_EXCLUSIVE | LK_RETRY);
 	}
 	return (error);
 }
@@ -975,7 +1028,7 @@ ufs_dirremove(dvp, ip, flags, isrmdir)
 	int isrmdir;
 {
 	struct inode *dp;
-	struct direct *ep;
+	struct direct *ep, *rep;
 	struct buf *bp;
 	int error;
 
@@ -996,14 +1049,19 @@ ufs_dirremove(dvp, ip, flags, isrmdir)
 	if ((error = UFS_BLKATOFF(dvp,
 	    (off_t)(dp->i_offset - dp->i_count), (char **)&ep, &bp)) != 0)
 		return (error);
+
+	/* Set 'rep' to the entry being removed. */
+	if (dp->i_count == 0)
+		rep = ep;
+	else
+		rep = (struct direct *)((char *)ep + ep->d_reclen);
 #ifdef UFS_DIRHASH
 	/*
 	 * Remove the dirhash entry. This is complicated by the fact
 	 * that `ep' is the previous entry when dp->i_count != 0.
 	 */
 	if (dp->i_dirhash != NULL)
-		ufsdirhash_remove(dp, (dp->i_count == 0) ? ep :
-		   (struct direct *)((char *)ep + ep->d_reclen), dp->i_offset);
+		ufsdirhash_remove(dp, rep, dp->i_offset);
 #endif
 	if (dp->i_count == 0) {
 		/*
@@ -1014,7 +1072,7 @@ ufs_dirremove(dvp, ip, flags, isrmdir)
 		/*
 		 * Collapse new free space into previous entry.
 		 */
-		ep->d_reclen += dp->i_reclen;
+		ep->d_reclen += rep->d_reclen;
 	}
 #ifdef UFS_DIRHASH
 	if (dp->i_dirhash != NULL)

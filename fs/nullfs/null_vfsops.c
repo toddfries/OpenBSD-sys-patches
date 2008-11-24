@@ -32,7 +32,7 @@
  *	@(#)null_vfsops.c	8.2 (Berkeley) 1/21/94
  *
  * @(#)lofs_vfsops.c	1.2 (Berkeley) 6/18/92
- * $FreeBSD: src/sys/fs/nullfs/null_vfsops.c,v 1.84 2007/10/16 10:54:53 alfred Exp $
+ * $FreeBSD: src/sys/fs/nullfs/null_vfsops.c,v 1.89 2008/03/31 12:01:19 kib Exp $
  */
 
 /*
@@ -42,6 +42,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/fcntl.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -107,8 +108,8 @@ nullfs_mount(struct mount *mp, struct thread *td)
 	 * (XXX) VOP_ISLOCKED is needed?
 	 */
 	if ((mp->mnt_vnodecovered->v_op == &null_vnodeops) &&
-		VOP_ISLOCKED(mp->mnt_vnodecovered, NULL)) {
-		VOP_UNLOCK(mp->mnt_vnodecovered, 0, td);
+		VOP_ISLOCKED(mp->mnt_vnodecovered)) {
+		VOP_UNLOCK(mp->mnt_vnodecovered, 0);
 		isvnunlocked = 1;
 	}
 	/*
@@ -120,8 +121,8 @@ nullfs_mount(struct mount *mp, struct thread *td)
 	/*
 	 * Re-lock vnode.
 	 */
-	if (isvnunlocked && !VOP_ISLOCKED(mp->mnt_vnodecovered, NULL))
-		vn_lock(mp->mnt_vnodecovered, LK_EXCLUSIVE | LK_RETRY, td);
+	if (isvnunlocked && !VOP_ISLOCKED(mp->mnt_vnodecovered))
+		vn_lock(mp->mnt_vnodecovered, LK_EXCLUSIVE | LK_RETRY);
 
 	if (error)
 		return (error);
@@ -158,7 +159,7 @@ nullfs_mount(struct mount *mp, struct thread *td)
 	 * Make sure the node alias worked
 	 */
 	if (error) {
-		VOP_UNLOCK(vp, 0, td);
+		VOP_UNLOCK(vp, 0);
 		vrele(lowerrootvp);
 		free(xmp, M_NULLFSMNT);	/* XXX */
 		return (error);
@@ -175,7 +176,7 @@ nullfs_mount(struct mount *mp, struct thread *td)
 	/*
 	 * Unlock the node (either the lower or the alias)
 	 */
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 
 	if (NULLVPTOLOWERVP(nullm_rootvp)->v_mount->mnt_flag & MNT_LOCAL) {
 		MNT_ILOCK(mp);
@@ -247,10 +248,10 @@ nullfs_root(mp, flags, vpp, td)
 	VREF(vp);
 
 #ifdef NULLFS_DEBUG
-	if (VOP_ISLOCKED(vp, NULL))
+	if (VOP_ISLOCKED(vp))
 		panic("root vnode is locked.\n");
 #endif
-	vn_lock(vp, flags | LK_RETRY, td);
+	vn_lock(vp, flags | LK_RETRY);
 	*vpp = vp;
 	return 0;
 }

@@ -26,7 +26,7 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net/if_vlan.c,v 1.125 2007/10/18 21:22:15 thompsa Exp $
+ * $FreeBSD: src/sys/net/if_vlan.c,v 1.130 2008/11/22 07:35:45 kmacy Exp $
  */
 
 /*
@@ -55,6 +55,7 @@
 #include <sys/sockio.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
+#include <sys/vimage.h>
 
 #include <net/bpf.h>
 #include <net/ethernet.h>
@@ -421,6 +422,8 @@ vlan_setmulti(struct ifnet *ifp)
 	sc = ifp->if_softc;
 	ifp_p = PARENT(sc);
 
+	CURVNET_SET_QUIET(ifp_p->if_vnet);
+
 	bzero((char *)&sdl, sizeof(sdl));
 	sdl.sdl_len = sizeof(sdl);
 	sdl.sdl_family = AF_LINK;
@@ -455,6 +458,7 @@ vlan_setmulti(struct ifnet *ifp)
 			return (error);
 	}
 
+	CURVNET_RESTORE();
 	return (0);
 }
 
@@ -572,13 +576,14 @@ MODULE_DEPEND(if_vlan, miibus, 1, 1, 1);
 static struct ifnet *
 vlan_clone_match_ethertag(struct if_clone *ifc, const char *name, int *tag)
 {
+	INIT_VNET_NET(curvnet);
 	const char *cp;
 	struct ifnet *ifp;
 	int t = 0;
 
 	/* Check for <etherif>.<vlan> style interface names. */
 	IFNET_RLOCK();
-	TAILQ_FOREACH(ifp, &ifnet, if_link) {
+	TAILQ_FOREACH(ifp, &V_ifnet, if_link) {
 		if (ifp->if_type != IFT_ETHER)
 			continue;
 		if (strncmp(ifp->if_xname, name, strlen(ifp->if_xname)) != 0)
@@ -863,7 +868,7 @@ vlan_start(struct ifnet *ifp)
 		 * Send it, precisely as ether_output() would have.
 		 * We are already running at splimp.
 		 */
-		IFQ_HANDOFF(p, m, error);
+		error = (p->if_transmit)(p, m);
 		if (!error)
 			ifp->if_opackets++;
 		else
@@ -1062,6 +1067,8 @@ exists:
 	ifp->if_drv_flags |= IFF_DRV_RUNNING;
 done:
 	TRUNK_UNLOCK(trunk);
+	if (error == 0)
+		EVENTHANDLER_INVOKE(vlan_config, p, ifv->ifv_tag);
 	VLAN_UNLOCK();
 
 	return (error);
@@ -1084,18 +1091,20 @@ vlan_unconfig_locked(struct ifnet *ifp)
 	struct ifvlantrunk *trunk;
 	struct vlan_mc_entry *mc;
 	struct ifvlan *ifv;
+	struct ifnet  *parent;
 	int error;
 
 	VLAN_LOCK_ASSERT();
 
 	ifv = ifp->if_softc;
 	trunk = ifv->ifv_trunk;
+	parent = NULL;
 
-	if (trunk) {
+	if (trunk != NULL) {
 		struct sockaddr_dl sdl;
-		struct ifnet *p = trunk->parent;
 
 		TRUNK_LOCK(trunk);
+		parent = trunk->parent;
 
 		/*
 		 * Since the interface is being unconfigured, we need to
@@ -1105,14 +1114,14 @@ vlan_unconfig_locked(struct ifnet *ifp)
 		bzero((char *)&sdl, sizeof(sdl));
 		sdl.sdl_len = sizeof(sdl);
 		sdl.sdl_family = AF_LINK;
-		sdl.sdl_index = p->if_index;
+		sdl.sdl_index = parent->if_index;
 		sdl.sdl_type = IFT_ETHER;
 		sdl.sdl_alen = ETHER_ADDR_LEN;
 
 		while ((mc = SLIST_FIRST(&ifv->vlan_mc_listhead)) != NULL) {
 			bcopy((char *)&mc->mc_addr, LLADDR(&sdl),
 			    ETHER_ADDR_LEN);
-			error = if_delmulti(p, (struct sockaddr *)&sdl);
+			error = if_delmulti(parent, (struct sockaddr *)&sdl);
 			if (error)
 				return (error);
 			SLIST_REMOVE_HEAD(&ifv->vlan_mc_listhead, mc_entries);
@@ -1152,6 +1161,14 @@ vlan_unconfig_locked(struct ifnet *ifp)
 	ifp->if_mtu = ETHERMTU;
 	ifp->if_link_state = LINK_STATE_UNKNOWN;
 	ifp->if_drv_flags &= ~IFF_DRV_RUNNING;
+
+	/*
+	 * Only dispatch an event if vlan was
+	 * attached, otherwise there is nothing
+	 * to cleanup anyway.
+	 */
+	if (parent != NULL)
+		EVENTHANDLER_INVOKE(vlan_unconfig, parent, ifv->ifv_tag);
 
 	return (0);
 }

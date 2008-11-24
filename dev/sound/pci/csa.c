@@ -48,7 +48,7 @@
 
 #include <gnu/dev/sound/pci/csaimg.h>
 
-SND_DECLARE_FILE("$FreeBSD: src/sys/dev/sound/pci/csa.c,v 1.37 2007/03/17 19:37:09 ariff Exp $");
+SND_DECLARE_FILE("$FreeBSD: src/sys/dev/sound/pci/csa.c,v 1.38 2008/08/23 18:27:10 imp Exp $");
 
 /* This is the pci device id. */
 #define CS4610_PCI_ID 0x60011013
@@ -123,7 +123,8 @@ clkrun_hack(int run)
 
 	for (i = 0, busp = pci_devices; i < pci_count; i++, busp++) {
 		pci_childcount = 0;
-		device_get_children(*busp, &pci_children, &pci_childcount);
+		if (device_get_children(*busp, &pci_children, &pci_childcount))
+			continue;
 		for (j = 0, childp = pci_children; j < pci_childcount; j++, childp++) {
 			if (pci_get_vendor(*childp) == 0x8086 && pci_get_device(*childp) == 0x7113) {
 				port = (pci_read_config(*childp, 0x41, 1) << 8) + 0x10;

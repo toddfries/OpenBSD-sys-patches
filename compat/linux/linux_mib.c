@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_mib.c,v 1.29 2007/01/14 16:07:01 netchild Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_mib.c,v 1.30 2008/06/03 17:50:13 rdivacky Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -82,8 +82,8 @@ SYSCTL_PROC(_compat_linux, OID_AUTO, osname,
 	    0, 0, linux_sysctl_osname, "A",
 	    "Linux kernel OS name");
 
-static char	linux_osrelease[LINUX_MAX_UTSNAME] = "2.4.2";
-static int	linux_use_linux26 = 0;
+static char	linux_osrelease[LINUX_MAX_UTSNAME] = "2.6.16";
+static int	linux_use_linux26 = 1;
 
 static int
 linux_sysctl_osrelease(SYSCTL_HANDLER_ARGS)

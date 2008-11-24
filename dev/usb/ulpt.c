@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/ulpt.c,v 1.80 2007/06/21 14:42:34 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/ulpt.c,v 1.81 2008/09/27 08:51:18 ed Exp $");
 
 /*
  * Printer Class spec: http://www.usb.org/developers/data/devclass/usbprint109.PDF
@@ -163,8 +163,8 @@ void ulpt_tick(void *xsc);
 void ieee1284_print_id(char *);
 #endif
 
-#define	ULPTUNIT(s)	(minor(s) & 0x1f)
-#define	ULPTFLAGS(s)	(minor(s) & 0xe0)
+#define	ULPTUNIT(s)	(dev2unit(s) & 0x1f)
+#define	ULPTFLAGS(s)	(dev2unit(s) & 0xe0)
 
 static device_probe_t ulpt_match;
 static device_attach_t ulpt_attach;

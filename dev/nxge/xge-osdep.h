@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/nxge/xge-osdep.h,v 1.2 2007/10/29 14:19:30 rwatson Exp $
+ * $FreeBSD: src/sys/dev/nxge/xge-osdep.h,v 1.3 2008/11/22 05:55:56 kmacy Exp $
  */
 
 #ifndef XGE_OSDEP_H
@@ -242,8 +242,12 @@ typedef xge_pci_info_t             *pci_cfg_h;
 	mtx_unlock_flags(lockp, flags);                                        \
 }
 
+#if __FreeBSD_version > 800053
 /* Write memory barrier */
+#define xge_os_wmb()		wmb()	
+#else
 #define xge_os_wmb()
+#endif
 
 /* Delay (in micro seconds) */
 #define xge_os_udelay(us)            DELAY(us)

@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_param.c,v 1.74 2007/10/16 10:40:53 alfred Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_param.c,v 1.79 2008/10/27 08:09:05 sobomax Exp $");
 
 #include "opt_param.h"
 #include "opt_maxusers.h"
@@ -56,6 +56,13 @@ __FBSDID("$FreeBSD: src/sys/kern/subr_param.c,v 1.74 2007/10/16 10:40:53 alfred 
 #    define	HZ 1000
 #  else
 #    define	HZ 100
+#  endif
+#  ifndef HZ_VM
+#    define	HZ_VM 10
+#  endif
+#else
+#  ifndef HZ_VM
+#    define	HZ_VM HZ
 #  endif
 #endif
 #define	NPROC (20 + 16 * maxusers)
@@ -86,14 +93,23 @@ u_long	dflssiz;			/* initial stack size limit */
 u_long	maxssiz;			/* max stack size */
 u_long	sgrowsiz;			/* amount to grow stack */
 
-SYSCTL_INT(_kern, OID_AUTO, maxswzone, CTLFLAG_RD, &maxswzone, 0, "");
-SYSCTL_INT(_kern, OID_AUTO, maxbcache, CTLFLAG_RD, &maxbcache, 0, "");
-SYSCTL_ULONG(_kern, OID_AUTO, maxtsiz, CTLFLAG_RD, &maxtsiz, 0, "");
-SYSCTL_ULONG(_kern, OID_AUTO, dfldsiz, CTLFLAG_RD, &dfldsiz, 0, "");
-SYSCTL_ULONG(_kern, OID_AUTO, maxdsiz, CTLFLAG_RD, &maxdsiz, 0, "");
-SYSCTL_ULONG(_kern, OID_AUTO, dflssiz, CTLFLAG_RD, &dflssiz, 0, "");
-SYSCTL_ULONG(_kern, OID_AUTO, maxssiz, CTLFLAG_RD, &maxssiz, 0, "");
-SYSCTL_ULONG(_kern, OID_AUTO, sgrowsiz, CTLFLAG_RD, &sgrowsiz, 0, "");
+SYSCTL_INT(_kern, OID_AUTO, hz, CTLFLAG_RDTUN, &hz, 0, "ticks/second");
+SYSCTL_INT(_kern, OID_AUTO, maxswzone, CTLFLAG_RDTUN, &maxswzone, 0,
+    "max swmeta KVA storage");
+SYSCTL_INT(_kern, OID_AUTO, maxbcache, CTLFLAG_RDTUN, &maxbcache, 0,
+    "max buffer cache KVA storage");
+SYSCTL_ULONG(_kern, OID_AUTO, maxtsiz, CTLFLAG_RDTUN, &maxtsiz, 0,
+    "max text size");
+SYSCTL_ULONG(_kern, OID_AUTO, dfldsiz, CTLFLAG_RDTUN, &dfldsiz, 0,
+    "initial data size limit");
+SYSCTL_ULONG(_kern, OID_AUTO, maxdsiz, CTLFLAG_RDTUN, &maxdsiz, 0,
+    "max data size");
+SYSCTL_ULONG(_kern, OID_AUTO, dflssiz, CTLFLAG_RDTUN, &dflssiz, 0,
+    "initial stack size limit");
+SYSCTL_ULONG(_kern, OID_AUTO, maxssiz, CTLFLAG_RDTUN, &maxssiz, 0,
+    "max stack size");
+SYSCTL_ULONG(_kern, OID_AUTO, sgrowsiz, CTLFLAG_RDTUN, &sgrowsiz, 0,
+    "amount to grow stack");
 
 /*
  * These have to be allocated somewhere; allocating
@@ -102,6 +118,30 @@ SYSCTL_ULONG(_kern, OID_AUTO, sgrowsiz, CTLFLAG_RD, &sgrowsiz, 0, "");
  */
 struct	buf *swbuf;
 
+static const char *const vm_pnames[] = {
+	"VMware Virtual Platform",	/* VMWare VM */
+	"Virtual Machine",		/* Microsoft VirtualPC */
+	"VirtualBox",			/* Sun xVM VirtualBox */
+	"Parallels Virtual Platform",	/* Parallels VM */
+	NULL
+};
+
+static int
+detect_virtual(void)
+{
+	char *sysenv;
+	int i;
+
+	sysenv = getenv("smbios.system.product");
+	if (sysenv != NULL) {
+		for (i = 0; vm_pnames[i] != NULL; i++) {
+			if (strcmp(sysenv, vm_pnames[i]) == 0)
+				return 1;
+		}
+	}
+	return 0;
+}
+
 /*
  * Boot time overrides that are not scaled against main memory
  */
@@ -109,8 +149,15 @@ void
 init_param1(void)
 {
 
-	hz = HZ;
+	hz = -1;
 	TUNABLE_INT_FETCH("kern.hz", &hz);
+	if (hz == -1) {
+		if (detect_virtual()) {
+			hz = HZ_VM;
+		} else {
+			hz = HZ;
+		}
+	}
 	tick = 1000000 / hz;
 
 #ifdef VM_SWZONE_SIZE_MAX
@@ -182,14 +229,14 @@ init_param2(long physpages)
 }
 
 /*
- * Boot time overrides that are scaled against the kernel map
+ * Boot time overrides that are scaled against the kmem map
  */
 void
 init_param3(long kmempages)
 {
 
 	/*
-	 * The default for maxpipekva is max(5% of the kernel map, 512KB).
+	 * The default for maxpipekva is max(5% of the kmem map, 512KB).
 	 * See sys_pipe.c for more details.
 	 */
 	maxpipekva = (kmempages / 20) * PAGE_SIZE;

@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_ioctl.c,v 1.31 2005/01/06 23:22:04 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_ioctl.c,v 1.32 2008/08/20 08:31:58 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -88,6 +88,11 @@ ibcs2_stty(struct thread *td, struct ibcs2_stty_args *args)
  * iBCS2 ioctl calls.
  */
 
+struct speedtab {
+	int sp_speed;			/* Speed. */
+	int sp_code;			/* Code. */
+};
+
 static struct speedtab sptab[] = {
 	{ 0, 0 },
 	{ 50, 1 },
@@ -128,6 +133,16 @@ static u_long s2btab[] = {
 	38400,
 };
 
+static int
+ttspeedtab(int speed, struct speedtab *table)
+{
+
+	for ( ; table->sp_speed != -1; table++)
+		if (table->sp_speed == speed)
+			return (table->sp_code);
+	return (-1);
+}
+
 static void
 stios2btios(st, bt)
 	struct ibcs2_termios *st;
@@ -154,7 +169,7 @@ stios2btios(st, bt)
 	l = st->c_oflag;	r = 0;
 	if (l & IBCS2_OPOST)	r |= OPOST;
 	if (l & IBCS2_ONLCR)	r |= ONLCR;
-	if (l & IBCS2_TAB3)	r |= OXTABS;
+	if (l & IBCS2_TAB3)	r |= TAB3;
 	bt->c_oflag = r;
 
 	l = st->c_cflag;	r = 0;
@@ -248,7 +263,7 @@ btios2stios(bt, st)
 	l = bt->c_oflag;	r = 0;
 	if (l & OPOST)		r |= IBCS2_OPOST;
 	if (l & ONLCR)		r |= IBCS2_ONLCR;
-	if (l & OXTABS)		r |= IBCS2_TAB3;
+	if (l & TAB3)		r |= IBCS2_TAB3;
 	st->c_oflag = r;
 
 	l = bt->c_cflag;	r = 0;

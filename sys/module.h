@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/module.h,v 1.22 2006/04/17 19:44:44 jhb Exp $
+ * $FreeBSD: src/sys/sys/module.h,v 1.24 2008/03/16 10:58:01 rwatson Exp $
  */
 
 #ifndef _SYS_MODULE_H_
@@ -114,9 +114,22 @@ struct mod_metadata {
 	MODULE_METADATA(_md_##module##_on_##mdepend, MDT_DEPEND,	\
 	    &_##module##_depend_on_##mdepend, #mdepend)
 
+/*
+ * Every kernel has a 'kernel' module with the version set to
+ * __FreeBSD_version.  We embed a MODULE_DEPEND() inside every module
+ * that depends on the 'kernel' module.  It uses the current value of
+ * __FreeBSD_version as the minimum and preferred versions.  For the
+ * maximum version it rounds the version up to the end of its branch
+ * (i.e. M99999 for M.x).  This allows a module built on M.x to work
+ * on M.y systems where y >= x, but fail on M.z systems where z < x.
+ */
+#define	MODULE_KERNEL_MAXVER	(roundup(__FreeBSD_version, 100000) - 1)
+
 #define	DECLARE_MODULE(name, data, sub, order)				\
+	MODULE_DEPEND(name, kernel, __FreeBSD_version,			\
+	    __FreeBSD_version, MODULE_KERNEL_MAXVER);			\
 	MODULE_METADATA(_md_##name, MDT_MODULE, &data, #name);		\
-	SYSINIT(name##module, sub, order, module_register_init, &data)	\
+	SYSINIT(name##module, sub, order, module_register_init, &data);	\
 	struct __hack
 
 #define	MODULE_VERSION(module, version)					\

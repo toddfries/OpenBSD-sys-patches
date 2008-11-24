@@ -31,7 +31,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)pcb.h	5.10 (Berkeley) 5/12/91
- * $FreeBSD: src/sys/amd64/include/pcb.h,v 1.63 2007/03/30 00:06:21 jkim Exp $
+ * $FreeBSD: src/sys/amd64/include/pcb.h,v 1.66 2008/09/08 09:59:05 kib Exp $
  */
 
 #ifndef _AMD64_PCB_H_
@@ -55,6 +55,7 @@ struct pcb {
 	register_t	pcb_rip;
 	register_t	pcb_fsbase;
 	register_t	pcb_gsbase;
+	u_long		pcb_flags;
 	u_int32_t	pcb_ds;
 	u_int32_t	pcb_es;
 	u_int32_t	pcb_fs;
@@ -67,16 +68,15 @@ struct pcb {
 	u_int64_t	pcb_dr7;
 
 	struct	savefpu	pcb_save;
-	u_long	pcb_flags;
 #define	PCB_DBREGS	0x02	/* process using debug registers */
 #define	PCB_FPUINITDONE	0x08	/* fpu state is initialized */
+#define	PCB_GS32BIT	0x20	/* linux gs switch */
 #define	PCB_32BIT	0x40	/* process has 32 bit context (segs etc) */
 #define	PCB_FULLCTX	0x80	/* full context restore on sysret */
 
 	caddr_t	pcb_onfault;	/* copyin/out fault recovery */
 
 	/* 32-bit segment descriptor */
-	struct user_segment_descriptor	*pcb_gs32p;
 	struct user_segment_descriptor	pcb_gs32sd;
 };
 

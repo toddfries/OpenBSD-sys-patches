@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/psim/openpic_iobus.c,v 1.7 2007/08/11 19:25:32 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/psim/openpic_iobus.c,v 1.11 2008/10/14 14:54:14 nwhitehorn Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -46,7 +46,6 @@ __FBSDID("$FreeBSD: src/sys/powerpc/psim/openpic_iobus.c,v 1.7 2007/08/11 19:25:
 #include <machine/intr.h>
 #include <machine/intr_machdep.h>
 #include <machine/md_var.h>
-#include <machine/nexusvar.h>
 #include <machine/pio.h>
 #include <machine/resource.h>
 
@@ -71,9 +70,11 @@ static device_method_t  openpic_iobus_methods[] = {
 	DEVMETHOD(device_attach,	openpic_attach),
 
 	/* PIC interface */
+	DEVMETHOD(pic_config,		openpic_config),
 	DEVMETHOD(pic_dispatch,		openpic_dispatch),
 	DEVMETHOD(pic_enable,		openpic_enable),
 	DEVMETHOD(pic_eoi,		openpic_eoi),
+	DEVMETHOD(pic_ipi,		openpic_ipi),
 	DEVMETHOD(pic_mask,		openpic_mask),
 	DEVMETHOD(pic_unmask,		openpic_unmask),
 
@@ -91,6 +92,7 @@ DRIVER_MODULE(openpic, iobus, openpic_iobus_driver, openpic_devclass, 0, 0);
 static int
 openpic_iobus_probe(device_t dev)
 {
+	struct openpic_softc *sc;
 	char *name;
 
 	name = iobus_get_name(dev);
@@ -102,5 +104,9 @@ openpic_iobus_probe(device_t dev)
 	 * probe, so don't do it again here
 	 */
 	device_set_desc(dev, OPENPIC_DEVSTR);
+
+	sc = device_get_softc(dev);
+	sc->sc_psim = 1;
+
 	return (0);
 }

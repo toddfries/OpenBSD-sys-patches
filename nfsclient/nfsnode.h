@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)nfsnode.h	8.9 (Berkeley) 5/14/95
- * $FreeBSD: src/sys/nfsclient/nfsnode.h,v 1.60 2007/03/09 04:02:37 mohans Exp $
+ * $FreeBSD: src/sys/nfsclient/nfsnode.h,v 1.63 2008/06/26 10:21:54 dfr Exp $
  */
 
 #ifndef _NFSCLIENT_NFSNODE_H_
@@ -113,7 +113,6 @@ struct nfsnode {
 	nfsfh_t			*n_fhp;		/* NFS File Handle */
 	struct vnode		*n_vnode;	/* associated vnode */
 	struct vnode		*n_dvp;		/* parent vnode */
-	struct lockf		*n_lockf;	/* Locking record of file */
 	int			n_error;	/* Save write error value */
 	union {
 		struct timespec	nf_atim;	/* Special file times */
@@ -188,6 +187,9 @@ extern	struct vop_vector	nfs4_vnodeops;
 extern struct buf_ops buf_ops_nfs;
 extern struct buf_ops buf_ops_nfs4;
 
+extern vop_advlock_t *nfs_advlock_p;
+extern vop_reclaim_t *nfs_reclaim_p;
+
 /*
  * Prototypes for NFS vnode operations
  */
@@ -205,8 +207,8 @@ nfsuint64 *nfs_getcookie(struct nfsnode *, off_t, int);
 uint64_t *nfs4_getcookie(struct nfsnode *, off_t, int);
 void	nfs_invaldir(struct vnode *);
 void	nfs4_invaldir(struct vnode *);
-int	nfs_upgrade_vnlock(struct vnode *vp, struct thread *td);
-void	nfs_downgrade_vnlock(struct vnode *vp, struct thread *td, int old_lock);
+int	nfs_upgrade_vnlock(struct vnode *vp);
+void	nfs_downgrade_vnlock(struct vnode *vp, int old_lock);
 void	nfs_printf(const char *fmt, ...);
 
 void nfs_dircookie_lock(struct nfsnode *np);

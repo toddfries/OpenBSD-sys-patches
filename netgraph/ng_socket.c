@@ -37,7 +37,7 @@
  *
  * Author: Julian Elischer <julian@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_socket.c,v 1.83 2007/10/19 15:04:17 mav Exp $
+ * $FreeBSD: src/sys/netgraph/ng_socket.c,v 1.86 2008/11/22 16:55:55 mav Exp $
  * $Whistle: ng_socket.c,v 1.28 1999/11/01 09:24:52 julian Exp $
  */
 
@@ -259,9 +259,8 @@ ngc_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *addr,
 	if (msg->header.typecookie == NGM_GENERIC_COOKIE &&
 	    msg->header.cmd == NGM_MKPEER) {
 		struct ngm_mkpeer *const mkp = (struct ngm_mkpeer *) msg->data;
-		struct ng_type *type;
 
-		if ((type = ng_findtype(mkp->type)) == NULL) {
+		if (ng_findtype(mkp->type) == NULL) {
 			char filename[NG_TYPESIZ + 3];
 			int fileid;
 
@@ -275,7 +274,7 @@ ngc_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *addr,
 			}
 
 			/* See if type has been loaded successfully. */
-			if ((type = ng_findtype(mkp->type)) == NULL) {
+			if (ng_findtype(mkp->type) == NULL) {
 				free(msg, M_NETGRAPH_MSG);
 				(void)kern_kldunload(curthread, fileid,
 				    LINKER_UNLOAD_NORMAL);
@@ -689,7 +688,7 @@ ng_internalize(struct mbuf *control, struct thread *td)
 		vn = fp->f_data;
 		if (vn && (vn->v_type == VCHR)) {
 			/* for a VCHR, actually reference the FILE */
-			fp->f_count++;
+			fhold(fp);
 			/* XXX then what :) */
 			/* how to pass on to other modules? */
 		} else {
@@ -919,7 +918,7 @@ ngs_rcvmsg(node_p node, item_p item, hook_p lasthook)
 	if (sbappendaddr(&so->so_rcv, (struct sockaddr *)&addr, m, NULL) == 0) {
 		TRAP_ERROR;
 		m_freem(m);
-		error = so->so_error = ENOBUFS;
+		return (ENOBUFS);
 	}
 	sorwakeup(so);
 	

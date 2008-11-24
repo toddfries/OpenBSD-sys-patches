@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/i386/support.s,v 1.119 2007/08/22 05:06:14 jkoshy Exp $
+ * $FreeBSD: src/sys/i386/i386/support.s,v 1.121 2008/08/15 20:51:31 kmacy Exp $
  */
 
 #include "opt_npx.h"
@@ -1459,10 +1459,12 @@ END(bcmp)
  */
 /* void lgdt(struct region_descriptor *rdp); */
 ENTRY(lgdt)
+#ifndef XEN
 	/* reload the descriptor table */
 	movl	4(%esp),%eax
 	lgdt	(%eax)
-
+#endif
+	
 	/* flush the prefetch q */
 	jmp	1f
 	nop
@@ -1568,3 +1570,52 @@ NON_GPROF_ENTRY(__bb_init_func)
 	movl	%edx,16(%eax)
 	movl	%eax,bbhead
 	NON_GPROF_RET
+
+/*
+ * Support for reading MSRs in the safe manner.
+ */
+ENTRY(rdmsr_safe)
+/* int rdmsr_safe(u_int msr, uint64_t *data) */
+	movl	PCPU(CURPCB),%ecx
+	movl	$msr_onfault,PCB_ONFAULT(%ecx)
+
+	movl	4(%esp),%ecx
+	rdmsr
+	movl	8(%esp),%ecx
+	movl	%eax,(%ecx)
+	movl	%edx,4(%ecx)
+	xorl	%eax,%eax
+
+	movl	PCPU(CURPCB),%ecx
+	movl	%eax,PCB_ONFAULT(%ecx)
+
+	ret
+
+/*
+ * Support for writing MSRs in the safe manner.
+ */
+ENTRY(wrmsr_safe)
+/* int wrmsr_safe(u_int msr, uint64_t data) */
+	movl	PCPU(CURPCB),%ecx
+	movl	$msr_onfault,PCB_ONFAULT(%ecx)
+
+	movl	4(%esp),%ecx
+	movl	8(%esp),%eax
+	movl	12(%esp),%edx
+	wrmsr
+	xorl	%eax,%eax
+
+	movl	PCPU(CURPCB),%ecx
+	movl	%eax,PCB_ONFAULT(%ecx)
+
+	ret
+
+/*
+ * MSR operations fault handler
+ */
+	ALIGN_TEXT
+msr_onfault:
+	movl	PCPU(CURPCB),%ecx
+	movl	$0,PCB_ONFAULT(%ecx)
+	movl	$EFAULT,%eax
+	ret

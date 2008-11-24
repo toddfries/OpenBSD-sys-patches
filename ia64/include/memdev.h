@@ -23,10 +23,9 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/ia64/include/memdev.h,v 1.2 2004/08/01 18:51:44 markm Exp $
+ * $FreeBSD: src/sys/ia64/include/memdev.h,v 1.3 2008/06/25 07:45:31 ed Exp $
  */
 
-#define CDEV_MAJOR	2
 #define	CDEV_MINOR_MEM	0
 #define	CDEV_MINOR_KMEM	1
 

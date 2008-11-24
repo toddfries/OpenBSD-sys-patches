@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/machdep.c,v 1.659 2007/10/28 21:23:49 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/machdep.c,v 1.675 2008/09/10 07:11:08 kmacy Exp $");
 
 #include "opt_apic.h"
 #include "opt_atalk.h"
@@ -62,7 +62,6 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/machdep.c,v 1.659 2007/10/28 21:23:49 jhb 
 #include <sys/buf.h>
 #include <sys/bus.h>
 #include <sys/callout.h>
-#include <sys/clock.h>
 #include <sys/cons.h>
 #include <sys/cpu.h>
 #include <sys/eventhandler.h>
@@ -115,6 +114,7 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/machdep.c,v 1.659 2007/10/28 21:23:49 jhb 
 #include <machine/cputypes.h>
 #include <machine/intr_machdep.h>
 #include <machine/md_var.h>
+#include <machine/metadata.h>
 #include <machine/pc/bios.h>
 #include <machine/pcb.h>
 #include <machine/pcb_ext.h>
@@ -127,7 +127,6 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/machdep.c,v 1.659 2007/10/28 21:23:49 jhb 
 #include <machine/perfmon.h>
 #endif
 #ifdef SMP
-#include <machine/privatespace.h>
 #include <machine/smp.h>
 #endif
 
@@ -141,6 +140,25 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/machdep.c,v 1.659 2007/10/28 21:23:49 jhb 
 int arch_i386_is_xbox = 0;
 uint32_t arch_i386_xbox_memsize = 0;
 #endif
+
+#ifdef XEN
+/* XEN includes */
+#include <machine/xen/xen-os.h>
+#include <machine/xen/hypervisor.h>
+#include <machine/xen/xen-os.h>
+#include <machine/xen/xenvar.h>
+#include <machine/xen/xenfunc.h>
+#include <machine/xen/xen_intr.h>
+
+void Xhypervisor_callback(void);
+void failsafe_callback(void);
+
+extern trap_info_t trap_table[];
+struct proc_ldt default_proc_ldt;
+extern int init_first;
+int running_xen = 1;
+extern unsigned long physfree;
+#endif /* XEN */
 
 /* Sanity check for __curthread() */
 CTASSERT(offsetof(struct pcpu, pc_curthread) == 0);
@@ -168,11 +186,15 @@ static int  set_fpcontext(struct thread *td, const mcontext_t *mcp);
 static void set_fpregs_xmm(struct save87 *, struct savexmm *);
 static void fill_fpregs_xmm(struct savexmm *, struct save87 *);
 #endif /* CPU_ENABLE_SSE */
-SYSINIT(cpu, SI_SUB_CPU, SI_ORDER_FIRST, cpu_startup, NULL)
+SYSINIT(cpu, SI_SUB_CPU, SI_ORDER_FIRST, cpu_startup, NULL);
 
 #ifdef DDB
 extern vm_offset_t ksym_start, ksym_end;
 #endif
+
+/* Intel ICH registers */
+#define ICH_PMBASE	0x400
+#define ICH_SMI_EN	ICH_PMBASE + 0x30
 
 int	_udatasel, _ucodesel;
 u_int	basemem;
@@ -188,6 +210,10 @@ static void freebsd4_sendsig(sig_t catcher, ksiginfo_t *, sigset_t *mask);
 
 long Maxmem = 0;
 long realmem = 0;
+
+#ifdef PAE
+FEATURE(pae, "Physical Address Extensions");
+#endif
 
 /*
  * The number of PHYSMAP entries must be one less than the number of
@@ -207,9 +233,7 @@ vm_paddr_t dump_avail[PHYSMAP_SIZE + 2];
 struct kva_md_info kmi;
 
 static struct trapframe proc0_tf;
-#ifndef SMP
-static struct pcpu __pcpu;
-#endif
+struct pcpu __pcpu[MAXCPU];
 
 struct mtx icu_lock;
 
@@ -219,6 +243,27 @@ static void
 cpu_startup(dummy)
 	void *dummy;
 {
+	char *sysenv;
+	
+	/*
+	 * On MacBooks, we need to disallow the legacy USB circuit to
+	 * generate an SMI# because this can cause several problems,
+	 * namely: incorrect CPU frequency detection and failure to
+	 * start the APs.
+	 * We do this by disabling a bit in the SMI_EN (SMI Control and
+	 * Enable register) of the Intel ICH LPC Interface Bridge.
+	 */
+	sysenv = getenv("smbios.system.product");
+	if (sysenv != NULL) {
+		if (strncmp(sysenv, "MacBook", 7) == 0) {
+			if (bootverbose)
+				printf("Disabling LEGACY_USB_EN bit on "
+				    "Intel ICH.\n");
+			outl(ICH_SMI_EN, inl(ICH_SMI_EN) & ~0x8);
+		}
+		freeenv(sysenv);
+	}
+
 	/*
 	 * Good {morning,afternoon,evening,night}.
 	 */
@@ -261,8 +306,9 @@ cpu_startup(dummy)
 	 */
 	bufinit();
 	vm_pager_bufferinit();
-
+#ifndef XEN
 	cpu_setregs();
+#endif
 }
 
 /*
@@ -391,7 +437,7 @@ osendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 
 	regs->tf_esp = (int)fp;
 	regs->tf_eip = PS_STRINGS - szosigcode;
-	regs->tf_eflags &= ~PSL_T;
+	regs->tf_eflags &= ~(PSL_T | PSL_D);
 	regs->tf_cs = _ucodesel;
 	regs->tf_ds = _udatasel;
 	regs->tf_es = _udatasel;
@@ -512,7 +558,7 @@ freebsd4_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 
 	regs->tf_esp = (int)sfp;
 	regs->tf_eip = PS_STRINGS - szfreebsd4_sigcode;
-	regs->tf_eflags &= ~PSL_T;
+	regs->tf_eflags &= ~(PSL_T | PSL_D);
 	regs->tf_cs = _ucodesel;
 	regs->tf_ds = _udatasel;
 	regs->tf_es = _udatasel;
@@ -648,7 +694,7 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 
 	regs->tf_esp = (int)sfp;
 	regs->tf_eip = PS_STRINGS - *(p->p_sysent->sv_szsigcode);
-	regs->tf_eflags &= ~PSL_T;
+	regs->tf_eflags &= ~(PSL_T | PSL_D);
 	regs->tf_cs = _ucodesel;
 	regs->tf_ds = _udatasel;
 	regs->tf_es = _udatasel;
@@ -1092,6 +1138,29 @@ cpu_est_clockrate(int cpu_id, uint64_t *rate)
 	return (0);
 }
 
+
+void (*cpu_idle_hook)(void) = NULL;	/* ACPI idle hook. */
+
+#ifdef XEN
+
+void
+cpu_halt(void)
+{
+	HYPERVISOR_shutdown(SHUTDOWN_poweroff);
+}
+
+int scheduler_running;
+
+static void
+cpu_idle_hlt(int busy)
+{
+
+	scheduler_running = 1;
+	enable_intr();
+	idle_block();
+}
+
+#else
 /*
  * Shutdown the CPU as much as possible
  */
@@ -1102,63 +1171,195 @@ cpu_halt(void)
 		__asm__ ("hlt");
 }
 
-/*
- * Hook to idle the CPU when possible.  In the SMP case we default to
- * off because a halted cpu will not currently pick up a new thread in the
- * run queue until the next timer tick.  If turned on this will result in
- * approximately a 4.2% loss in real time performance in buildworld tests
- * (but improves user and sys times oddly enough), and saves approximately
- * 5% in power consumption on an idle machine (tests w/2xCPU 1.1GHz P3).
- *
- * XXX we need to have a cpu mask of idle cpus and generate an IPI or
- * otherwise generate some sort of interrupt to wake up cpus sitting in HLT.
- * Then we can have our cake and eat it too.
- *
- * XXX I'm turning it on for SMP as well by default for now.  It seems to
- * help lock contention somewhat, and this is critical for HTT. -Peter
- */
-static int	cpu_idle_hlt = 1;
-TUNABLE_INT("machdep.cpu_idle_hlt", &cpu_idle_hlt);
-SYSCTL_INT(_machdep, OID_AUTO, cpu_idle_hlt, CTLFLAG_RW,
-    &cpu_idle_hlt, 0, "Idle loop HLT enable");
-
 static void
-cpu_idle_default(void)
+cpu_idle_hlt(int busy)
 {
 	/*
-	 * we must absolutely guarentee that hlt is the
-	 * absolute next instruction after sti or we
-	 * introduce a timing window.
+	 * we must absolutely guarentee that hlt is the next instruction
+	 * after sti or we introduce a timing window.
 	 */
-	__asm __volatile("sti; hlt");
+	disable_intr();
+  	if (sched_runnable())
+		enable_intr();
+	else
+		__asm __volatile("sti; hlt");
+}
+#endif
+
+static void
+cpu_idle_acpi(int busy)
+{
+	disable_intr();
+  	if (sched_runnable())
+		enable_intr();
+	else if (cpu_idle_hook)
+		cpu_idle_hook();
+	else
+		__asm __volatile("sti; hlt");
 }
 
-/*
- * Note that we have to be careful here to avoid a race between checking
- * sched_runnable() and actually halting.  If we don't do this, we may waste
- * the time between calling hlt and the next interrupt even though there
- * is a runnable process.
- */
-void
-cpu_idle(void)
+static void
+cpu_idle_spin(int busy)
 {
+	return;
+}
 
-#ifdef SMP
+#ifdef XEN
+void (*cpu_idle_fn)(int) = cpu_idle_hlt;
+#else
+void (*cpu_idle_fn)(int) = cpu_idle_acpi;
+#endif
+
+void
+cpu_idle(int busy)
+{
+#if defined(SMP) && !defined(XEN)
 	if (mp_grab_cpu_hlt())
 		return;
 #endif
-
-	if (cpu_idle_hlt) {
-		disable_intr();
-  		if (sched_runnable())
-			enable_intr();
-		else
-			(*cpu_idle_hook)();
-	}
+	cpu_idle_fn(busy);
 }
 
-/* Other subsystems (e.g., ACPI) can hook this later. */
-void (*cpu_idle_hook)(void) = cpu_idle_default;
+/*
+ * mwait cpu power states.  Lower 4 bits are sub-states.
+ */
+#define	MWAIT_C0	0xf0
+#define	MWAIT_C1	0x00
+#define	MWAIT_C2	0x10
+#define	MWAIT_C3	0x20
+#define	MWAIT_C4	0x30
+
+#define	MWAIT_DISABLED	0x0
+#define	MWAIT_WOKEN	0x1
+#define	MWAIT_WAITING	0x2
+
+static void
+cpu_idle_mwait(int busy)
+{
+	int *mwait;
+
+	mwait = (int *)PCPU_PTR(monitorbuf);
+	*mwait = MWAIT_WAITING;
+	if (sched_runnable())
+		return;
+	cpu_monitor(mwait, 0, 0);
+	if (*mwait == MWAIT_WAITING)
+		cpu_mwait(0, MWAIT_C1);
+}
+
+static void
+cpu_idle_mwait_hlt(int busy)
+{
+	int *mwait;
+
+	mwait = (int *)PCPU_PTR(monitorbuf);
+	if (busy == 0) {
+		*mwait = MWAIT_DISABLED;
+		cpu_idle_hlt(busy);
+		return;
+	}
+	*mwait = MWAIT_WAITING;
+	if (sched_runnable())
+		return;
+	cpu_monitor(mwait, 0, 0);
+	if (*mwait == MWAIT_WAITING)
+		cpu_mwait(0, MWAIT_C1);
+}
+
+int
+cpu_idle_wakeup(int cpu)
+{
+	struct pcpu *pcpu;
+	int *mwait;
+
+	if (cpu_idle_fn == cpu_idle_spin)
+		return (1);
+	if (cpu_idle_fn != cpu_idle_mwait && cpu_idle_fn != cpu_idle_mwait_hlt)
+		return (0);
+	pcpu = pcpu_find(cpu);
+	mwait = (int *)pcpu->pc_monitorbuf;
+	/*
+	 * This doesn't need to be atomic since missing the race will
+	 * simply result in unnecessary IPIs.
+	 */
+	if (cpu_idle_fn == cpu_idle_mwait_hlt && *mwait == MWAIT_DISABLED)
+		return (0);
+	*mwait = MWAIT_WOKEN;
+
+	return (1);
+}
+
+/*
+ * Ordered by speed/power consumption.
+ */
+struct {
+	void	*id_fn;
+	char	*id_name;
+} idle_tbl[] = {
+	{ cpu_idle_spin, "spin" },
+	{ cpu_idle_mwait, "mwait" },
+	{ cpu_idle_mwait_hlt, "mwait_hlt" },
+	{ cpu_idle_hlt, "hlt" },
+	{ cpu_idle_acpi, "acpi" },
+	{ NULL, NULL }
+};
+
+static int
+idle_sysctl_available(SYSCTL_HANDLER_ARGS)
+{
+	char *avail, *p;
+	int error;
+	int i;
+
+	avail = malloc(256, M_TEMP, M_WAITOK);
+	p = avail;
+	for (i = 0; idle_tbl[i].id_name != NULL; i++) {
+		if (strstr(idle_tbl[i].id_name, "mwait") &&
+		    (cpu_feature2 & CPUID2_MON) == 0)
+			continue;
+		p += sprintf(p, "%s, ", idle_tbl[i].id_name);
+	}
+	error = sysctl_handle_string(oidp, avail, 0, req);
+	free(avail, M_TEMP);
+	return (error);
+}
+
+static int
+idle_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	char buf[16];
+	int error;
+	char *p;
+	int i;
+
+	p = "unknown";
+	for (i = 0; idle_tbl[i].id_name != NULL; i++) {
+		if (idle_tbl[i].id_fn == cpu_idle_fn) {
+			p = idle_tbl[i].id_name;
+			break;
+		}
+	}
+	strncpy(buf, p, sizeof(buf));
+	error = sysctl_handle_string(oidp, buf, sizeof(buf), req);
+	if (error != 0 || req->newptr == NULL)
+		return (error);
+	for (i = 0; idle_tbl[i].id_name != NULL; i++) {
+		if (strstr(idle_tbl[i].id_name, "mwait") &&
+		    (cpu_feature2 & CPUID2_MON) == 0)
+			continue;
+		if (strcmp(idle_tbl[i].id_name, buf))
+			continue;
+		cpu_idle_fn = idle_tbl[i].id_fn;
+		return (0);
+	}
+	return (EINVAL);
+}
+
+SYSCTL_PROC(_machdep, OID_AUTO, idle_available, CTLTYPE_STRING | CTLFLAG_RD,
+    0, 0, idle_sysctl_available, "A", "list of available idle functions");
+
+SYSCTL_PROC(_machdep, OID_AUTO, idle, CTLTYPE_STRING | CTLFLAG_RW, 0, 0,
+    idle_sysctl, "A", "currently selected idle function");
 
 /*
  * Clear registers on exec
@@ -1282,10 +1483,16 @@ SYSCTL_ULONG(_machdep, OID_AUTO, guessed_bootdev,
  */
 
 int _default_ldt;
+
+#ifdef XEN
+union descriptor *gdt;
+union descriptor *ldt;
+#else
 union descriptor gdt[NGDT * MAXCPU];	/* global descriptor table */
+union descriptor ldt[NLDT];		/* local descriptor table */
+#endif
 static struct gate_descriptor idt0[NIDT];
 struct gate_descriptor *idt = &idt0[0];	/* interrupt descriptor table */
-union descriptor ldt[NLDT];		/* local descriptor table */
 struct region_descriptor r_gdt, r_idt;	/* table descriptors */
 struct mtx dt_lock;			/* lock for GDT and LDT */
 
@@ -1310,7 +1517,7 @@ struct soft_segment_descriptor gdt_segs[] = {
 {	0x0,			/* segment base address  */
 	0x0,			/* length */
 	0,			/* segment type */
-	0,			/* segment descriptor priority level */
+	SEL_KPL,		/* segment descriptor priority level */
 	0,			/* segment descriptor present */
 	0, 0,
 	0,			/* default 32 vs 16 bit size */
@@ -1319,7 +1526,7 @@ struct soft_segment_descriptor gdt_segs[] = {
 {	0x0,			/* segment base address  */
 	0xfffff,		/* length - all address space */
 	SDT_MEMRWA,		/* segment type */
-	0,			/* segment descriptor priority level */
+	SEL_KPL,		/* segment descriptor priority level */
 	1,			/* segment descriptor present */
 	0, 0,
 	1,			/* default 32 vs 16 bit size */
@@ -1346,7 +1553,7 @@ struct soft_segment_descriptor gdt_segs[] = {
 {	0x0,			/* segment base address  */
 	0xfffff,		/* length - all address space */
 	SDT_MEMERA,		/* segment type */
-	0,			/* segment descriptor priority level */
+	SEL_KPL,		/* segment descriptor priority level */
 	1,			/* segment descriptor present */
 	0, 0,
 	1,			/* default 32 vs 16 bit size */
@@ -1355,7 +1562,7 @@ struct soft_segment_descriptor gdt_segs[] = {
 {	0x0,			/* segment base address  */
 	0xfffff,		/* length - all address space */
 	SDT_MEMRWA,		/* segment type */
-	0,			/* segment descriptor priority level */
+	SEL_KPL,		/* segment descriptor priority level */
 	1,			/* segment descriptor present */
 	0, 0,
 	1,			/* default 32 vs 16 bit size */
@@ -1382,11 +1589,12 @@ struct soft_segment_descriptor gdt_segs[] = {
 {	0x400,			/* segment base address */
 	0xfffff,		/* length */
 	SDT_MEMRWA,		/* segment type */
-	0,			/* segment descriptor priority level */
+	SEL_KPL,			/* segment descriptor priority level */
 	1,			/* segment descriptor present */
 	0, 0,
 	1,			/* default 32 vs 16 bit size */
 	1  			/* limit granularity (byte/page units)*/ },
+#ifndef XEN
 /* GPROC0_SEL	9 Proc 0 Tss Descriptor */
 {
 	0x0,			/* segment base address */
@@ -1478,6 +1686,7 @@ struct soft_segment_descriptor gdt_segs[] = {
 	0, 0,
 	0,			/* default 32 vs 16 bit size */
 	0  			/* limit granularity (byte/page units)*/ },
+#endif /* !XEN */
 };
 
 static struct soft_segment_descriptor ldt_segs[] = {
@@ -1622,6 +1831,57 @@ sdtossd(sd, ssd)
 	ssd->ssd_gran  = sd->sd_gran;
 }
 
+static int
+add_smap_entry(struct bios_smap *smap, vm_paddr_t *physmap, int *physmap_idxp)
+{
+	int i, physmap_idx;
+
+	physmap_idx = *physmap_idxp;
+	
+	if (boothowto & RB_VERBOSE)
+		printf("SMAP type=%02x base=%016llx len=%016llx\n",
+		    smap->type, smap->base, smap->length);
+
+	if (smap->type != SMAP_TYPE_MEMORY)
+		return (1);
+
+	if (smap->length == 0)
+		return (1);
+
+#ifndef PAE
+	if (smap->base >= 0xffffffff) {
+		printf("%uK of memory above 4GB ignored\n",
+		    (u_int)(smap->length / 1024));
+		return (1);
+	}
+#endif
+
+	for (i = 0; i <= physmap_idx; i += 2) {
+		if (smap->base < physmap[i + 1]) {
+			if (boothowto & RB_VERBOSE)
+				printf(
+	"Overlapping or non-monotonic memory region, ignoring second region\n");
+			return (1);
+		}
+	}
+
+	if (smap->base == physmap[physmap_idx + 1]) {
+		physmap[physmap_idx + 1] += smap->length;
+		return (1);
+	}
+
+	physmap_idx += 2;
+	*physmap_idxp = physmap_idx;
+	if (physmap_idx == PHYSMAP_SIZE) {
+		printf(
+		"Too many segments in the physical address map, giving up\n");
+		return (0);
+	}
+	physmap[physmap_idx] = smap->base;
+	physmap[physmap_idx + 1] = smap->base + smap->length;
+	return (1);
+}
+
 /*
  * Populate the (physmap) array with base/bound pairs describing the
  * available physical memory in the system, then test this memory and
@@ -1646,8 +1906,10 @@ getmemsize(int first)
 	struct vm86context vmc;
 	vm_paddr_t pa, physmap[PHYSMAP_SIZE];
 	pt_entry_t *pte;
-	struct bios_smap *smap;
+	struct bios_smap *smap, *smapbase, *smapend;
+	u_int32_t smapsize;
 	quad_t dcons_addr, dcons_size;
+	caddr_t kmdp;
 
 	has_smap = 0;
 #ifdef XBOX
@@ -1662,7 +1924,16 @@ getmemsize(int first)
 		goto physmap_done;
 	}
 #endif
-
+#if defined(XEN)
+	has_smap = 0;
+	Maxmem = xen_start_info->nr_pages - init_first;
+	physmem = Maxmem;
+	basemem = 0;
+	physmap[0] = init_first << PAGE_SHIFT;
+	physmap[1] = ptoa(Maxmem) - round_page(MSGBUF_SIZE);
+	physmap_idx = 0;
+	goto physmap_done;
+#endif	
 	hasbrokenint12 = 0;
 	TUNABLE_INT_FETCH("hw.hasbrokenint12", &hasbrokenint12);
 	bzero(&vmf, sizeof(vmf));
@@ -1725,69 +1996,54 @@ getmemsize(int first)
 
 int15e820:
 	/*
-	 * map page 1 R/W into the kernel page table so we can use it
-	 * as a buffer.  The kernel will unmap this page later.
+	 * Fetch the memory map with INT 15:E820.  First, check to see
+	 * if the loader supplied it and use that if so.  Otherwise,
+	 * use vm86 to invoke the BIOS call directly.
 	 */
-	pmap_kenter(KERNBASE + (1 << PAGE_SHIFT), 1 << PAGE_SHIFT);
-
-	/*
-	 * get memory map with INT 15:E820
-	 */
-	vmc.npages = 0;
-	smap = (void *)vm86_addpage(&vmc, 1, KERNBASE + (1 << PAGE_SHIFT));
-	vm86_getptr(&vmc, (vm_offset_t)smap, &vmf.vmf_es, &vmf.vmf_di);
-
 	physmap_idx = 0;
-	vmf.vmf_ebx = 0;
-	do {
-		vmf.vmf_eax = 0xE820;
-		vmf.vmf_edx = SMAP_SIG;
-		vmf.vmf_ecx = sizeof(struct bios_smap);
-		i = vm86_datacall(0x15, &vmf, &vmc);
-		if (i || vmf.vmf_eax != SMAP_SIG)
-			break;
-		if (boothowto & RB_VERBOSE)
-			printf("SMAP type=%02x base=%016llx len=%016llx\n",
-			    smap->type, smap->base, smap->length);
+	smapbase = NULL;
+	kmdp = preload_search_by_type("elf kernel");
+	if (kmdp == NULL)
+		kmdp = preload_search_by_type("elf32 kernel");
+	if (kmdp != NULL)
+		smapbase = (struct bios_smap *)preload_search_info(kmdp,
+		    MODINFO_METADATA | MODINFOMD_SMAP);
+	if (smapbase != NULL) {
+		/* subr_module.c says:
+		 * "Consumer may safely assume that size value precedes data."
+		 * ie: an int32_t immediately precedes smap.
+		 */
+		smapsize = *((u_int32_t *)smapbase - 1);
+		smapend = (struct bios_smap *)((uintptr_t)smapbase + smapsize);
 		has_smap = 1;
 
-		if (smap->type != SMAP_TYPE_MEMORY)
-			continue;
+		for (smap = smapbase; smap < smapend; smap++)
+			if (!add_smap_entry(smap, physmap, &physmap_idx))
+				break;
+	} else {
+		/*
+		 * map page 1 R/W into the kernel page table so we can use it
+		 * as a buffer.  The kernel will unmap this page later.
+		 */
+		pmap_kenter(KERNBASE + (1 << PAGE_SHIFT), 1 << PAGE_SHIFT);
+		vmc.npages = 0;
+		smap = (void *)vm86_addpage(&vmc, 1, KERNBASE +
+		    (1 << PAGE_SHIFT));
+		vm86_getptr(&vmc, (vm_offset_t)smap, &vmf.vmf_es, &vmf.vmf_di);
 
-		if (smap->length == 0)
-			continue;
-
-#ifndef PAE
-		if (smap->base >= 0xffffffff) {
-			printf("%uK of memory above 4GB ignored\n",
-			    (u_int)(smap->length / 1024));
-			continue;
-		}
-#endif
-
-		for (i = 0; i <= physmap_idx; i += 2) {
-			if (smap->base < physmap[i + 1]) {
-				if (boothowto & RB_VERBOSE)
-					printf(
-	"Overlapping or non-monotonic memory region, ignoring second region\n");
-				continue;
-			}
-		}
-
-		if (smap->base == physmap[physmap_idx + 1]) {
-			physmap[physmap_idx + 1] += smap->length;
-			continue;
-		}
-
-		physmap_idx += 2;
-		if (physmap_idx == PHYSMAP_SIZE) {
-			printf(
-		"Too many segments in the physical address map, giving up\n");
-			break;
-		}
-		physmap[physmap_idx] = smap->base;
-		physmap[physmap_idx + 1] = smap->base + smap->length;
-	} while (vmf.vmf_ebx != 0);
+		vmf.vmf_ebx = 0;
+		do {
+			vmf.vmf_eax = 0xE820;
+			vmf.vmf_edx = SMAP_SIG;
+			vmf.vmf_ecx = sizeof(struct bios_smap);
+			i = vm86_datacall(0x15, &vmf, &vmc);
+			if (i || vmf.vmf_eax != SMAP_SIG)
+				break;
+			has_smap = 1;
+			if (!add_smap_entry(smap, physmap, &physmap_idx))
+				break;
+		} while (vmf.vmf_ebx != 0);
+	}
 
 	/*
 	 * Perform "base memory" related probes & setup based on SMAP
@@ -1839,7 +2095,7 @@ int15e820:
 		vmf.vmf_ah = 0x88;
 		vm86_intcall(0x15, &vmf);
 		extmem = vmf.vmf_ax;
-#else
+#elif !defined(XEN)
 		/*
 		 * Prefer the RTC value for extended memory.
 		 */
@@ -1930,6 +2186,7 @@ physmap_done:
 	    getenv_quad("dcons.size", &dcons_size) == 0)
 		dcons_addr = 0;
 
+#ifndef XEN
 	/*
 	 * physmap is in bytes, so when converting to page boundaries,
 	 * round up the start address and round down the end address.
@@ -2047,7 +2304,11 @@ do_next:
 	}
 	*pte = 0;
 	invltlb();
-
+#else
+	phys_avail[0] = physfree;
+	phys_avail[1] = xen_start_info->nr_pages*PAGE_SIZE;
+#endif
+	
 	/*
 	 * XXX
 	 * The last chunk must contain at least one page plus the message
@@ -2070,8 +2331,227 @@ do_next:
 	for (off = 0; off < round_page(MSGBUF_SIZE); off += PAGE_SIZE)
 		pmap_kenter((vm_offset_t)msgbufp + off, phys_avail[pa_indx] +
 		    off);
+
+	PT_UPDATES_FLUSH();
 }
 
+#ifdef XEN
+#define MTOPSIZE (1<<(14 + PAGE_SHIFT))
+
+void
+init386(first)
+	int first;
+{
+	unsigned long gdtmachpfn;
+	int error, gsel_tss, metadata_missing, x;
+	struct pcpu *pc;
+	struct callback_register event = {
+		.type = CALLBACKTYPE_event,
+		.address = {GSEL(GCODE_SEL, SEL_KPL), (unsigned long)Xhypervisor_callback },
+	};
+	struct callback_register failsafe = {
+		.type = CALLBACKTYPE_failsafe,
+		.address = {GSEL(GCODE_SEL, SEL_KPL), (unsigned long)failsafe_callback },
+	};
+
+	thread0.td_kstack = proc0kstack;
+	thread0.td_pcb = (struct pcb *)
+	   (thread0.td_kstack + KSTACK_PAGES * PAGE_SIZE) - 1;
+
+	/*
+ 	 * This may be done better later if it gets more high level
+ 	 * components in it. If so just link td->td_proc here.
+	 */
+	proc_linkup0(&proc0, &thread0);
+
+	metadata_missing = 0;
+	if (xen_start_info->mod_start) {
+		preload_metadata = (caddr_t)xen_start_info->mod_start;
+		preload_bootstrap_relocate(KERNBASE);
+	} else {
+		metadata_missing = 1;
+	}
+	if (envmode == 1)
+		kern_envp = static_env;
+	else if ((caddr_t)xen_start_info->cmd_line)
+	        kern_envp = xen_setbootenv((caddr_t)xen_start_info->cmd_line);
+
+	boothowto |= xen_boothowto(kern_envp);
+	
+	/* Init basic tunables, hz etc */
+	init_param1();
+
+	/*
+	 * XEN occupies a portion of the upper virtual address space 
+	 * At its base it manages an array mapping machine page frames 
+	 * to physical page frames - hence we need to be able to 
+	 * access 4GB - (64MB  - 4MB + 64k) 
+	 */
+	gdt_segs[GPRIV_SEL].ssd_limit = atop(HYPERVISOR_VIRT_START + MTOPSIZE);
+	gdt_segs[GUFS_SEL].ssd_limit = atop(HYPERVISOR_VIRT_START + MTOPSIZE);
+	gdt_segs[GUGS_SEL].ssd_limit = atop(HYPERVISOR_VIRT_START + MTOPSIZE);
+	gdt_segs[GCODE_SEL].ssd_limit = atop(HYPERVISOR_VIRT_START + MTOPSIZE);
+	gdt_segs[GDATA_SEL].ssd_limit = atop(HYPERVISOR_VIRT_START + MTOPSIZE);
+	gdt_segs[GUCODE_SEL].ssd_limit = atop(HYPERVISOR_VIRT_START + MTOPSIZE);
+	gdt_segs[GUDATA_SEL].ssd_limit = atop(HYPERVISOR_VIRT_START + MTOPSIZE);
+	gdt_segs[GBIOSLOWMEM_SEL].ssd_limit = atop(HYPERVISOR_VIRT_START + MTOPSIZE);
+
+	pc = &__pcpu[0];
+	gdt_segs[GPRIV_SEL].ssd_base = (int) pc;
+	gdt_segs[GPROC0_SEL].ssd_base = (int) &pc->pc_common_tss;
+
+	PT_SET_MA(gdt, xpmap_ptom(VTOP(gdt)) | PG_V | PG_RW);
+	bzero(gdt, PAGE_SIZE);
+	for (x = 0; x < NGDT; x++)
+		ssdtosd(&gdt_segs[x], &gdt[x].sd);
+
+	mtx_init(&dt_lock, "descriptor tables", NULL, MTX_SPIN);
+
+	gdtmachpfn = vtomach(gdt) >> PAGE_SHIFT;
+	PT_SET_MA(gdt, xpmap_ptom(VTOP(gdt)) | PG_V);
+	PANIC_IF(HYPERVISOR_set_gdt(&gdtmachpfn, 512) != 0);	
+	lgdt(&r_gdt);
+	gdtset = 1;
+
+	if ((error = HYPERVISOR_set_trap_table(trap_table)) != 0) {
+		panic("set_trap_table failed - error %d\n", error);
+	}
+	
+	error = HYPERVISOR_callback_op(CALLBACKOP_register, &event);
+	if (error == 0)
+		error = HYPERVISOR_callback_op(CALLBACKOP_register, &failsafe);
+#if	CONFIG_XEN_COMPAT <= 0x030002
+	if (error == -ENOXENSYS)
+		HYPERVISOR_set_callbacks(GSEL(GCODE_SEL, SEL_KPL),
+		    (unsigned long)Xhypervisor_callback,
+		    GSEL(GCODE_SEL, SEL_KPL), (unsigned long)failsafe_callback);
+#endif
+	pcpu_init(pc, 0, sizeof(struct pcpu));
+	PCPU_SET(prvspace, pc);
+	PCPU_SET(curthread, &thread0);
+	PCPU_SET(curpcb, thread0.td_pcb);
+
+	/*
+	 * Initialize mutexes.
+	 *
+	 * icu_lock: in order to allow an interrupt to occur in a critical
+	 * 	     section, to set pcpu->ipending (etc...) properly, we
+	 *	     must be able to get the icu lock, so it can't be
+	 *	     under witness.
+	 */
+	mutex_init();
+	mtx_init(&icu_lock, "icu", NULL, MTX_SPIN | MTX_NOWITNESS | MTX_NOPROFILE);
+
+	/* make ldt memory segments */
+	PT_SET_MA(ldt, xpmap_ptom(VTOP(ldt)) | PG_V | PG_RW);
+	bzero(ldt, PAGE_SIZE);
+	ldt_segs[LUCODE_SEL].ssd_limit = atop(0 - 1);
+	ldt_segs[LUDATA_SEL].ssd_limit = atop(0 - 1);
+	for (x = 0; x < sizeof ldt_segs / sizeof ldt_segs[0]; x++)
+		ssdtosd(&ldt_segs[x], &ldt[x].sd);
+
+	default_proc_ldt.ldt_base = (caddr_t)ldt;
+	default_proc_ldt.ldt_len = 6;
+	_default_ldt = (int)&default_proc_ldt;
+	PCPU_SET(currentldt, _default_ldt)
+	PT_SET_MA(ldt, *vtopte((unsigned long)ldt) & ~PG_RW);
+	xen_set_ldt((unsigned long) ldt, (sizeof ldt_segs / sizeof ldt_segs[0]));
+	
+#if defined(XEN_PRIVILEGED)
+	/*
+	 * Initialize the i8254 before the console so that console
+	 * initialization can use DELAY().
+	 */
+	i8254_init();
+#endif
+	
+	/*
+	 * Initialize the console before we print anything out.
+	 */
+	cninit();
+
+	if (metadata_missing)
+		printf("WARNING: loader(8) metadata is missing!\n");
+
+#ifdef DEV_ISA
+	elcr_probe();
+	atpic_startup();
+#endif
+
+#ifdef DDB
+	ksym_start = bootinfo.bi_symtab;
+	ksym_end = bootinfo.bi_esymtab;
+#endif
+
+	kdb_init();
+
+#ifdef KDB
+	if (boothowto & RB_KDB)
+		kdb_enter(KDB_WHY_BOOTFLAGS, "Boot flags requested debugger");
+#endif
+
+	finishidentcpu();	/* Final stage of CPU initialization */
+	setidt(IDT_UD, &IDTVEC(ill),  SDT_SYS386TGT, SEL_KPL,
+	    GSEL(GCODE_SEL, SEL_KPL));
+	setidt(IDT_GP, &IDTVEC(prot),  SDT_SYS386TGT, SEL_KPL,
+	    GSEL(GCODE_SEL, SEL_KPL));
+	initializecpu();	/* Initialize CPU registers */
+
+	/* make an initial tss so cpu can get interrupt stack on syscall! */
+	/* Note: -16 is so we can grow the trapframe if we came from vm86 */
+	PCPU_SET(common_tss.tss_esp0, thread0.td_kstack +
+	    KSTACK_PAGES * PAGE_SIZE - sizeof(struct pcb) - 16);
+	PCPU_SET(common_tss.tss_ss0, GSEL(GDATA_SEL, SEL_KPL));
+	gsel_tss = GSEL(GPROC0_SEL, SEL_KPL);
+	HYPERVISOR_stack_switch(GSEL(GDATA_SEL, SEL_KPL),
+	    PCPU_GET(common_tss.tss_esp0));
+	
+	/* pointer to selector slot for %fs/%gs */
+	PCPU_SET(fsgs_gdt, &gdt[GUFS_SEL].sd);
+
+	dblfault_tss.tss_esp = dblfault_tss.tss_esp0 = dblfault_tss.tss_esp1 =
+	    dblfault_tss.tss_esp2 = (int)&dblfault_stack[sizeof(dblfault_stack)];
+	dblfault_tss.tss_ss = dblfault_tss.tss_ss0 = dblfault_tss.tss_ss1 =
+	    dblfault_tss.tss_ss2 = GSEL(GDATA_SEL, SEL_KPL);
+#ifdef PAE
+	dblfault_tss.tss_cr3 = (int)IdlePDPT;
+#else
+	dblfault_tss.tss_cr3 = (int)IdlePTD;
+#endif
+	dblfault_tss.tss_eip = (int)dblfault_handler;
+	dblfault_tss.tss_eflags = PSL_KERNEL;
+	dblfault_tss.tss_ds = dblfault_tss.tss_es =
+	    dblfault_tss.tss_gs = GSEL(GDATA_SEL, SEL_KPL);
+	dblfault_tss.tss_fs = GSEL(GPRIV_SEL, SEL_KPL);
+	dblfault_tss.tss_cs = GSEL(GCODE_SEL, SEL_KPL);
+	dblfault_tss.tss_ldt = GSEL(GLDT_SEL, SEL_KPL);
+
+	vm86_initialize();
+	getmemsize(first);
+	init_param2(physmem);
+
+	/* now running on new page tables, configured,and u/iom is accessible */
+
+	msgbufinit(msgbufp, MSGBUF_SIZE);
+	/* transfer to user mode */
+
+	_ucodesel = GSEL(GUCODE_SEL, SEL_UPL);
+	_udatasel = GSEL(GUDATA_SEL, SEL_UPL);
+
+	/* setup proc 0's pcb */
+	thread0.td_pcb->pcb_flags = 0;
+#ifdef PAE
+	thread0.td_pcb->pcb_cr3 = (int)IdlePDPT;
+#else
+	thread0.td_pcb->pcb_cr3 = (int)IdlePTD;
+#endif
+	thread0.td_pcb->pcb_ext = 0;
+	thread0.td_frame = &proc0_tf;
+	thread0.td_pcb->pcb_fsd = PCPU_GET(fsgs_gdt)[0];
+	thread0.td_pcb->pcb_gsd = PCPU_GET(fsgs_gdt)[1];
+}
+
+#else
 void
 init386(first)
 	int first;
@@ -2088,7 +2568,7 @@ init386(first)
  	 * This may be done better later if it gets more high level
  	 * components in it. If so just link td->td_proc here.
 	 */
-	proc_linkup(&proc0, &thread0);
+	proc_linkup0(&proc0, &thread0);
 
 	metadata_missing = 0;
 	if (bootinfo.bi_modulep) {
@@ -2116,11 +2596,7 @@ init386(first)
 	gdt_segs[GUFS_SEL].ssd_limit = atop(0 - 1);
 	gdt_segs[GUGS_SEL].ssd_limit = atop(0 - 1);
 
-#ifdef SMP
-	pc = &SMP_prvspace[0].pcpu;
-#else
-	pc = &__pcpu;
-#endif
+	pc = &__pcpu[0];
 	gdt_segs[GPRIV_SEL].ssd_limit = atop(0 - 1);
 	gdt_segs[GPRIV_SEL].ssd_base = (int) pc;
 	gdt_segs[GPROC0_SEL].ssd_base = (int) &pc->pc_common_tss;
@@ -2257,7 +2733,7 @@ init386(first)
 
 #ifdef KDB
 	if (boothowto & RB_KDB)
-		kdb_enter("Boot flags requested debugger");
+		kdb_enter(KDB_WHY_BOOTFLAGS, "Boot flags requested debugger");
 #endif
 
 	finishidentcpu();	/* Final stage of CPU initialization */
@@ -2338,6 +2814,7 @@ init386(first)
 	thread0.td_pcb->pcb_ext = 0;
 	thread0.td_frame = &proc0_tf;
 }
+#endif
 
 void
 cpu_pcpu_init(struct pcpu *pcpu, int cpuid, size_t size)
@@ -2372,7 +2849,7 @@ spinlock_exit(void)
 
 #if defined(I586_CPU) && !defined(NO_F00F_HACK)
 static void f00f_hack(void *unused);
-SYSINIT(f00f_hack, SI_SUB_INTRINSIC, SI_ORDER_FIRST, f00f_hack, NULL)
+SYSINIT(f00f_hack, SI_SUB_INTRINSIC, SI_ORDER_FIRST, f00f_hack, NULL);
 
 static void
 f00f_hack(void *unused)

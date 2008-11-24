@@ -37,7 +37,7 @@
 #include <machine/asm.h>
 #include <machine/armreg.h>
 #include <machine/pte.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/locore.S,v 1.17 2007/09/27 20:52:17 cognet Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/locore.S,v 1.21 2008/10/14 10:11:14 raj Exp $");
 
 /* What size should this really be ? It is only used by initarm() */
 #define INIT_ARM_STACK_SIZE	2048
@@ -66,10 +66,17 @@ __FBSDID("$FreeBSD: src/sys/arm/arm/locore.S,v 1.17 2007/09/27 20:52:17 cognet E
 ENTRY_NP(btext)
 
 ASENTRY_NP(_start)
+
+/*
+ * Move metadata ptr to r12 (ip)
+ */
+
+	mov	ip, r0
+
 #if defined (FLASHADDR) && defined(LOADERRAMADDR)
 	/* Check if we're running from flash. */
 	ldr	r7, =FLASHADDR
-	/* 
+	/*
 	 * If we're running with MMU disabled, test against the
 	 * physical address instead.
 	 */
@@ -88,7 +95,7 @@ flash_lower:
 	bls	from_ram
 do_copy:
 	ldr	r9, =KERNBASE
-	adr	r1, _start 
+	adr	r1, _start
 	ldr	r0, Lreal_start
 	ldr	r2, Lend
 	sub	r2, r2, r0
@@ -105,7 +112,7 @@ from_ram:
 	adr	r7, Lunmapped
 	bic     r7, r7, #0xff000000
 	orr     r7, r7, #PHYSADDR
-			
+
 
 disable_mmu:
 	/* Disable MMU for a while */
@@ -170,7 +177,9 @@ mmu_done:
 	ldr	pc, .Lvirt_done
 
 virt_done:
-	mov	fp, #0		/* trace back starts here */
+	mov	r0, ip			/* Load argument: metadata ptr */
+
+	mov	fp, #0			/* trace back starts here */
 	bl	_C_LABEL(initarm)	/* Off we go */
 
 	/* init arm will return the new stack pointer. */
@@ -180,7 +189,7 @@ virt_done:
 
 	adr	r0, .Lmainreturned
 	b	_C_LABEL(panic)
-	/* NOTEACHED */
+	/* NOTREACHED */
 #ifdef STARTUP_PAGETABLE_ADDR
 #define MMU_INIT(va,pa,n_sec,attr) \
 	.word	n_sec					    ; \
@@ -229,9 +238,6 @@ svcstk:
 	.text
 	.align	0
 
-#ifndef OFW
-	/* OFW based systems will used OF_boot() */
-
 .Lcpufuncs:
 	.word	_C_LABEL(cpufuncs)
 
@@ -248,6 +254,8 @@ ENTRY_NP(cpu_halt)
 	ldr	r0, .Lcpufuncs
 	mov	lr, pc
 	ldr	pc, [r0, #CF_IDCACHE_WBINV_ALL]
+	mov	lr, pc
+	ldr	pc, [r0, #CF_L2CACHE_WBINV_ALL]
 
 	/*
 	 * Load the cpu_reset_needs_v4_MMU_disable flag to determine if it's
@@ -260,7 +268,7 @@ ENTRY_NP(cpu_halt)
 	mov	r2, #0
 
 	/*
- 	 * MMU & IDC off, 32 bit program & data space
+	 * MMU & IDC off, 32 bit program & data space
 	 * Hurl ourselves into the ROM
 	 */
 	mov	r0, #(CPU_CONTROL_32BP_ENABLE | CPU_CONTROL_32BD_ENABLE)
@@ -285,44 +293,6 @@ ENTRY_NP(cpu_halt)
 .Lcpu_reset_needs_v4_MMU_disable:
 	.word	_C_LABEL(cpu_reset_needs_v4_MMU_disable)
 
-#endif	/* OFW */
-
-#ifdef IPKDB
-/*
- * Execute(inst, psr, args, sp)
- *
- * Execute INSTruction with PSR and ARGS[0] - ARGS[3] making
- * available stack at SP for next undefined instruction trap.
- *
- * Move the instruction onto the stack and jump to it.
- */
-ENTRY_NP(Execute)
-	mov	ip, sp
-	stmfd	sp!, {r2, r4-r7, fp, ip, lr, pc}
-	sub	fp, ip, #4
-	mov	ip, r3
-	ldr	r7, .Lreturn
-	stmfd	sp!, {r0, r7}
-	adr	r7, #.LExec
-	mov	r5, r1
-	mrs	r4, cpsr
-	ldmia	r2, {r0-r3}
-	mov	r6, sp
-	mov	sp, ip
-	msr	cpsr_all, r5
-	mov	pc, r6
-.LExec:
-	mrs	r5, cpsr
-/* XXX Cannot switch thus easily back from user mode */
-	msr	cpsr_all, r4
-	add	sp, r6, #8
-	ldmfd	sp!, {r6}
-	stmia	r6, {r0-r3}
-	mov	r0, r5
-	ldmdb	fp, {r4-r7, fp, sp, pc}
-.Lreturn:
-	mov	pc, r7
-#endif
 
 /*
  * setjump + longjmp

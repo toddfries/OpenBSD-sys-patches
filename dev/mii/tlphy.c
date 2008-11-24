@@ -67,7 +67,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mii/tlphy.c,v 1.22 2006/12/02 19:36:25 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mii/tlphy.c,v 1.24 2008/08/23 15:29:28 imp Exp $");
 
 /*
  * Driver for Texas Instruments's ThunderLAN PHYs
@@ -162,8 +162,8 @@ tlphy_attach(device_t dev)
 	sc->sc_mii.mii_pdata = mii;
 
 	capmask = 0xFFFFFFFF;
-	if (mii->mii_instance) {
-		device_get_children(sc->sc_mii.mii_dev, &devlist, &devs);
+	if (mii->mii_instance &&
+	    device_get_children(sc->sc_mii.mii_dev, &devlist, &devs) == 0) {
 		for (i = 0; i < devs; i++) {
 			if (strcmp(device_get_name(devlist[i]), "tlphy")) {
 				other = device_get_softc(devlist[i]);

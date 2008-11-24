@@ -29,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/compat/ndis/ntoskrnl_var.h,v 1.43 2006/08/17 22:50:32 imp Exp $
+ * $FreeBSD: src/sys/compat/ndis/ntoskrnl_var.h,v 1.45 2008/09/13 17:34:18 thompsa Exp $
  */
 
 #ifndef _NTOSKRNL_VAR_H_
@@ -117,12 +117,14 @@ typedef struct mdl mdl, ndis_buffer;
 
 /* Note: assumes x86 page size of 4K. */
 
+#ifndef PAGE_SHIFT
 #if PAGE_SIZE == 4096
 #define PAGE_SHIFT	12
 #elif PAGE_SIZE == 8192
 #define PAGE_SHIFT	13
 #else
 #error PAGE_SHIFT undefined!
+#endif
 #endif
 
 #define SPAN_PAGES(ptr, len)					\
@@ -1309,6 +1311,7 @@ extern int ntoskrnl_libinit(void);
 extern int ntoskrnl_libfini(void);
 
 extern void ntoskrnl_intr(void *);
+extern void ntoskrnl_time(uint64_t *);
 
 extern uint16_t ExQueryDepthSList(slist_header *);
 extern slist_entry

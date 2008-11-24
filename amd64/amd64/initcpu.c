@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/initcpu.c,v 1.50 2006/06/19 22:59:28 davidxu Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/initcpu.c,v 1.51 2008/10/21 00:17:55 jkim Exp $");
 
 #include "opt_cpu.h"
 
@@ -53,6 +53,7 @@ u_int	cpu_feature;		/* Feature flags */
 u_int	cpu_feature2;		/* Feature flags */
 u_int	amd_feature;		/* AMD feature flags */
 u_int	amd_feature2;		/* AMD feature flags */
+u_int	amd_pminfo;		/* AMD advanced power management info */
 u_int	cpu_high;		/* Highest arg to CPUID */
 u_int	cpu_exthigh;		/* Highest arg to extended CPUID */
 u_int	cpu_id;			/* Stepping ID */

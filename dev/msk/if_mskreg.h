@@ -93,7 +93,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/*$FreeBSD: src/sys/dev/msk/if_mskreg.h,v 1.12 2008/02/29 03:38:12 yongari Exp $*/
+/*$FreeBSD: src/sys/dev/msk/if_mskreg.h,v 1.13 2008/09/25 07:31:45 yongari Exp $*/
 
 /*
  * SysKonnect PCI vendor ID
@@ -2158,6 +2158,7 @@ struct msk_stat_desc {
 
 #define MSK_TX_RING_CNT		256
 #define MSK_RX_RING_CNT		256
+#define	MSK_RX_BUF_ALIGN	8
 #define MSK_JUMBO_RX_RING_CNT	MSK_RX_RING_CNT
 #define	MSK_STAT_RING_CNT	((1 + 3) * (MSK_TX_RING_CNT + MSK_RX_RING_CNT))
 #define MSK_MAXTXSEGS		32
@@ -2307,6 +2308,7 @@ struct msk_softc {
 	uint32_t		msk_coppertype;
 	uint32_t		msk_intrmask;
 	uint32_t		msk_intrhwemask;
+	uint32_t		msk_pflags;
 	int			msk_suspended;
 	int			msk_clock;
 	int			msk_msi;
@@ -2348,6 +2350,8 @@ struct msk_if_softc {
 	int			msk_phytype;
 	int			msk_phyaddr;
 	int			msk_link;
+	uint32_t		msk_flags;
+#define	MSK_FLAG_RAMBUF		0x0010
 	struct callout		msk_tick_ch;
 	int			msk_watchdog_timer;
 	uint32_t		msk_txq;	/* Tx. Async Queue offset */

@@ -35,7 +35,7 @@
  *
  *	from: NetBSD: hmereg.h,v 1.16 2003/11/02 11:07:45 wiz Exp
  *
- * $FreeBSD: src/sys/dev/hme/if_hmereg.h,v 1.7 2005/10/25 03:56:21 yongari Exp $
+ * $FreeBSD: src/sys/dev/hme/if_hmereg.h,v 1.8 2008/04/24 23:12:03 marius Exp $
  */
 
 /*
@@ -311,8 +311,6 @@
 	(((sz) << 0) & HME_XD_TXLENMSK)
 #define HME_XD_DECODE_TSIZE(flags)	\
 	(((flags) & HME_XD_TXLENMSK) >> 0)
-
-#define PCI_HME_BASEADDR	0x10
 
 #define	HME_MINRXALIGN		0x10
 #define	HME_RXOFFS		2

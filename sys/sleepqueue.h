@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/sleepqueue.h,v 1.12 2007/03/31 23:23:42 jhb Exp $
+ * $FreeBSD: src/sys/sys/sleepqueue.h,v 1.16 2008/08/07 20:47:01 jhb Exp $
  */
 
 #ifndef _SYS_SLEEPQUEUE_H_
@@ -64,7 +64,11 @@
  * sleep can be interrupted by calling sleepq_abort().  A thread can also
  * be removed from a specified sleep queue using the sleepq_remove()
  * function.  Note that the sleep queue chain must first be locked via
- * sleepq_lock() when calling sleepq_signal() and sleepq_broadcast().
+ * sleepq_lock() before calling sleepq_abort(), sleepq_broadcast(), or
+ * sleepq_signal().  These routines each return a boolean that will be true
+ * if at least one swapped-out thread was resumed.  In that case, the caller
+ * is responsible for waking up the swapper by calling kick_proc0() after
+ * releasing the sleep queeu chain lock.
  *
  * Each thread allocates a sleep queue at thread creation via sleepq_alloc()
  * and releases it at thread destruction via sleepq_free().  Note that
@@ -87,25 +91,26 @@ struct thread;
 #define	SLEEPQ_CONDVAR		0x01		/* Used for a cv. */
 #define	SLEEPQ_PAUSE		0x02		/* Used by pause. */
 #define	SLEEPQ_SX		0x03		/* Used by an sx lock. */
+#define	SLEEPQ_LK		0x04		/* Used by a lockmgr. */
 #define	SLEEPQ_INTERRUPTIBLE	0x100		/* Sleep is interruptible. */
 
 void	init_sleepqueues(void);
-void	sleepq_abort(struct thread *td, int intrval);
+int	sleepq_abort(struct thread *td, int intrval);
 void	sleepq_add(void *wchan, struct lock_object *lock, const char *wmesg,
 	    int flags, int queue);
 struct sleepqueue *sleepq_alloc(void);
-void	sleepq_broadcast(void *wchan, int flags, int pri, int queue);
+int	sleepq_broadcast(void *wchan, int flags, int pri, int queue);
 void	sleepq_free(struct sleepqueue *sq);
 void	sleepq_lock(void *wchan);
 struct sleepqueue *sleepq_lookup(void *wchan);
 void	sleepq_release(void *wchan);
 void	sleepq_remove(struct thread *td, void *wchan);
-void	sleepq_signal(void *wchan, int flags, int pri, int queue);
+int	sleepq_signal(void *wchan, int flags, int pri, int queue);
 void	sleepq_set_timeout(void *wchan, int timo);
-int	sleepq_timedwait(void *wchan);
-int	sleepq_timedwait_sig(void *wchan);
-void	sleepq_wait(void *wchan);
-int	sleepq_wait_sig(void *wchan);
+int	sleepq_timedwait(void *wchan, int pri);
+int	sleepq_timedwait_sig(void *wchan, int pri);
+void	sleepq_wait(void *wchan, int pri);
+int	sleepq_wait_sig(void *wchan, int pri);
 
 #endif	/* _KERNEL */
 #endif	/* !_SYS_SLEEPQUEUE_H_ */

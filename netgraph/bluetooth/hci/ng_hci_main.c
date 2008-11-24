@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  * $Id: ng_hci_main.c,v 1.2 2003/03/18 00:09:36 max Exp $
- * $FreeBSD: src/sys/netgraph/bluetooth/hci/ng_hci_main.c,v 1.6 2005/01/07 01:45:43 imp Exp $
+ * $FreeBSD: src/sys/netgraph/bluetooth/hci/ng_hci_main.c,v 1.7 2008/10/23 15:53:51 des Exp $
  */
 
 #include <sys/param.h>
@@ -109,7 +109,7 @@ ng_hci_constructor(node_p node)
 {
 	ng_hci_unit_p	unit = NULL;
 
-	MALLOC(unit, ng_hci_unit_p, sizeof(*unit), M_NETGRAPH_HCI,
+	unit = malloc(sizeof(*unit), M_NETGRAPH_HCI,
 		M_NOWAIT | M_ZERO);
 	if (unit == NULL)
 		return (ENOMEM);
@@ -170,7 +170,7 @@ ng_hci_shutdown(node_p node)
 	NG_BT_MBUFQ_DESTROY(&unit->cmdq);
 
 	bzero(unit, sizeof(*unit));
-	FREE(unit, M_NETGRAPH_HCI);
+	free(unit, M_NETGRAPH_HCI);
 
 	return (0);
 } /* ng_hci_shutdown */

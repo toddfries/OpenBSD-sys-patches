@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_event.c,v 1.113 2007/07/14 21:23:30 rodrigc Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_event.c,v 1.124 2008/10/23 20:26:15 des Exp $");
 
 #include "opt_ktrace.h"
 
@@ -105,6 +105,7 @@ static void	kqueue_fo_release(int filt);
 
 static fo_rdwr_t	kqueue_read;
 static fo_rdwr_t	kqueue_write;
+static fo_truncate_t	kqueue_truncate;
 static fo_ioctl_t	kqueue_ioctl;
 static fo_poll_t	kqueue_poll;
 static fo_kqfilter_t	kqueue_kqfilter;
@@ -114,6 +115,7 @@ static fo_close_t	kqueue_close;
 static struct fileops kqueueops = {
 	.fo_read = kqueue_read,
 	.fo_write = kqueue_write,
+	.fo_truncate = kqueue_truncate,
 	.fo_ioctl = kqueue_ioctl,
 	.fo_poll = kqueue_poll,
 	.fo_kqfilter = kqueue_kqfilter,
@@ -401,30 +403,82 @@ filt_proc(struct knote *kn, long hint)
 		return (1);
 	}
 
-	/*
-	 * process forked, and user wants to track the new process,
-	 * so attach a new knote to it, and immediately report an
-	 * event with the parent's pid.
-	 */
-	if ((event == NOTE_FORK) && (kn->kn_sfflags & NOTE_TRACK)) {
-		struct kevent kev;
-		int error;
+	return (kn->kn_fflags != 0);
+}
+
+/*
+ * Called when the process forked. It mostly does the same as the
+ * knote(), activating all knotes registered to be activated when the
+ * process forked. Additionally, for each knote attached to the
+ * parent, check whether user wants to track the new process. If so
+ * attach a new knote to it, and immediately report an event with the
+ * child's pid.
+ */
+void
+knote_fork(struct knlist *list, int pid)
+{
+	struct kqueue *kq;
+	struct knote *kn;
+	struct kevent kev;
+	int error;
+
+	if (list == NULL)
+		return;
+	list->kl_lock(list->kl_lockarg);
+
+	SLIST_FOREACH(kn, &list->kl_list, kn_selnext) {
+		if ((kn->kn_status & KN_INFLUX) == KN_INFLUX)
+			continue;
+		kq = kn->kn_kq;
+		KQ_LOCK(kq);
+		if ((kn->kn_status & KN_INFLUX) == KN_INFLUX) {
+			KQ_UNLOCK(kq);
+			continue;
+		}
 
 		/*
-		 * register knote with new process.
+		 * The same as knote(), activate the event.
 		 */
-		kev.ident = hint & NOTE_PDATAMASK;	/* pid */
+		if ((kn->kn_sfflags & NOTE_TRACK) == 0) {
+			kn->kn_status |= KN_HASKQLOCK;
+			if (kn->kn_fop->f_event(kn, NOTE_FORK | pid))
+				KNOTE_ACTIVATE(kn, 1);
+			kn->kn_status &= ~KN_HASKQLOCK;
+			KQ_UNLOCK(kq);
+			continue;
+		}
+
+		/*
+		 * The NOTE_TRACK case. In addition to the activation
+		 * of the event, we need to register new event to
+		 * track the child. Drop the locks in preparation for
+		 * the call to kqueue_register().
+		 */
+		kn->kn_status |= KN_INFLUX;
+		KQ_UNLOCK(kq);
+		list->kl_unlock(list->kl_lockarg);
+
+		/*
+		 * Activate existing knote and register a knote with
+		 * new process.
+		 */
+		kev.ident = pid;
 		kev.filter = kn->kn_filter;
 		kev.flags = kn->kn_flags | EV_ADD | EV_ENABLE | EV_FLAG1;
 		kev.fflags = kn->kn_sfflags;
-		kev.data = kn->kn_id;			/* parent */
-		kev.udata = kn->kn_kevent.udata;	/* preserve udata */
-		error = kqueue_register(kn->kn_kq, &kev, NULL, 0);
+		kev.data = kn->kn_id;		/* parent */
+		kev.udata = kn->kn_kevent.udata;/* preserve udata */
+		error = kqueue_register(kq, &kev, NULL, 0);
+		if (kn->kn_fop->f_event(kn, NOTE_FORK | pid))
+			KNOTE_ACTIVATE(kn, 0);
 		if (error)
 			kn->kn_fflags |= NOTE_TRACKERR;
+		KQ_LOCK(kq);
+		kn->kn_status &= ~KN_INFLUX;
+		KQ_UNLOCK_FLUX(kq);
+		list->kl_lock(list->kl_lockarg);
 	}
-
-	return (kn->kn_fflags != 0);
+	list->kl_unlock(list->kl_lockarg);
 }
 
 static int
@@ -452,7 +506,7 @@ filt_timerexpire(void *knx)
 
 	if ((kn->kn_flags & EV_ONESHOT) != EV_ONESHOT) {
 		calloutp = (struct callout *)kn->kn_hook;
-		callout_reset(calloutp, timertoticks(kn->kn_sdata),
+		callout_reset_curcpu(calloutp, timertoticks(kn->kn_sdata),
 		    filt_timerexpire, kn);
 	}
 }
@@ -475,12 +529,11 @@ filt_timerattach(struct knote *kn)
 
 	kn->kn_flags |= EV_CLEAR;		/* automatically set */
 	kn->kn_status &= ~KN_DETACHED;		/* knlist_add usually sets it */
-	MALLOC(calloutp, struct callout *, sizeof(*calloutp),
-	    M_KQUEUE, M_WAITOK);
+	calloutp = malloc(sizeof(*calloutp), M_KQUEUE, M_WAITOK);
 	callout_init(calloutp, CALLOUT_MPSAFE);
 	kn->kn_hook = calloutp;
-	callout_reset(calloutp, timertoticks(kn->kn_sdata), filt_timerexpire,
-	    kn);
+	callout_reset_curcpu(calloutp, timertoticks(kn->kn_sdata),
+	    filt_timerexpire, kn);
 
 	return (0);
 }
@@ -493,7 +546,7 @@ filt_timerdetach(struct knote *kn)
 
 	calloutp = (struct callout *)kn->kn_hook;
 	callout_drain(calloutp);
-	FREE(calloutp, M_KQUEUE);
+	free(calloutp, M_KQUEUE);
 	atomic_add_int(&kq_ncallouts, -1);
 	kn->kn_status |= KN_DETACHED;	/* knlist_remove usually clears it */
 }
@@ -531,12 +584,7 @@ kqueue(struct thread *td, struct kqueue_args *uap)
 	SLIST_INSERT_HEAD(&fdp->fd_kqlist, kq, kq_list);
 	FILEDESC_XUNLOCK(fdp);
 
-	FILE_LOCK(fp);
-	fp->f_flag = FREAD | FWRITE;
-	fp->f_type = DTYPE_KQUEUE;
-	fp->f_data = kq;
-	fp->f_ops = &kqueueops;
-	FILE_UNLOCK(fp);
+	finit(fp, FREAD | FWRITE, DTYPE_KQUEUE, kq, &kqueueops);
 	fdrop(fp, td);
 
 	td->td_retval[0] = fd;
@@ -990,24 +1038,17 @@ kqueue_acquire(struct file *fp, struct kqueue **kqp)
 
 	error = 0;
 
-	FILE_LOCK(fp);
-	do {
-		kq = fp->f_data;
-		if (fp->f_type != DTYPE_KQUEUE || kq == NULL) {
-			error = EBADF;
-			break;
-		}
-		*kqp = kq;
-		KQ_LOCK(kq);
-		if ((kq->kq_state & KQ_CLOSING) == KQ_CLOSING) {
-			KQ_UNLOCK(kq);
-			error = EBADF;
-			break;
-		}
-		kq->kq_refcnt++;
+	kq = fp->f_data;
+	if (fp->f_type != DTYPE_KQUEUE || kq == NULL)
+		return (EBADF);
+	*kqp = kq;
+	KQ_LOCK(kq);
+	if ((kq->kq_state & KQ_CLOSING) == KQ_CLOSING) {
 		KQ_UNLOCK(kq);
-	} while (0);
-	FILE_UNLOCK(fp);
+		return (EBADF);
+	}
+	kq->kq_refcnt++;
+	KQ_UNLOCK(kq);
 
 	return error;
 }
@@ -1067,19 +1108,18 @@ kqueue_expand(struct kqueue *kq, struct filterops *fops, uintptr_t ident,
 			size = kq->kq_knlistsize;
 			while (size <= fd)
 				size += KQEXTENT;
-			MALLOC(list, struct klist *,
-			    size * sizeof list, M_KQUEUE, mflag);
+			list = malloc(size * sizeof list, M_KQUEUE, mflag);
 			if (list == NULL)
 				return ENOMEM;
 			KQ_LOCK(kq);
 			if (kq->kq_knlistsize > fd) {
-				FREE(list, M_KQUEUE);
+				free(list, M_KQUEUE);
 				list = NULL;
 			} else {
 				if (kq->kq_knlist != NULL) {
 					bcopy(kq->kq_knlist, list,
 					    kq->kq_knlistsize * sizeof list);
-					FREE(kq->kq_knlist, M_KQUEUE);
+					free(kq->kq_knlist, M_KQUEUE);
 					kq->kq_knlist = NULL;
 				}
 				bzero((caddr_t)list +
@@ -1144,7 +1184,7 @@ kqueue_scan(struct kqueue *kq, int maxevents, struct kevent_copyops *k_ops,
 	struct kevent *kevp;
 	struct timeval atv, rtv, ttv;
 	struct knote *kn, *marker;
-	int count, timeout, nkev, error;
+	int count, timeout, nkev, error, influx;
 	int haskqglobal;
 
 	count = maxevents;
@@ -1214,12 +1254,17 @@ start:
 	}
 
 	TAILQ_INSERT_TAIL(&kq->kq_head, marker, kn_tqe);
+	influx = 0;
 	while (count) {
 		KQ_OWNED(kq);
 		kn = TAILQ_FIRST(&kq->kq_head);
 
 		if ((kn->kn_status == KN_MARKER && kn != marker) ||
 		    (kn->kn_status & KN_INFLUX) == KN_INFLUX) {
+			if (influx) {
+				influx = 0;
+				KQ_FLUX_WAKEUP(kq);
+			}
 			kq->kq_state |= KQ_FLUXWAIT;
 			error = msleep(kq, &kq->kq_lock, PSOCK,
 			    "kqflxwt", 0);
@@ -1269,6 +1314,7 @@ start:
 				    ~(KN_QUEUED | KN_ACTIVE | KN_INFLUX);
 				kq->kq_count--;
 				KN_LIST_UNLOCK(kn);
+				influx = 1;
 				continue;
 			}
 			*kevp = kn->kn_kevent;
@@ -1284,6 +1330,7 @@ start:
 			
 			kn->kn_status &= ~(KN_INFLUX);
 			KN_LIST_UNLOCK(kn);
+			influx = 1;
 		}
 
 		/* we are returning a copy to the user */
@@ -1292,6 +1339,7 @@ start:
 		count--;
 
 		if (nkev == KQ_NEVENTS) {
+			influx = 0;
 			KQ_UNLOCK_FLUX(kq);
 			error = k_ops->k_copyout(k_ops->arg, keva, nkev);
 			nkev = 0;
@@ -1332,6 +1380,15 @@ kqueue_write(struct file *fp, struct uio *uio, struct ucred *active_cred,
 	 int flags, struct thread *td)
 {
 	return (ENXIO);
+}
+
+/*ARGSUSED*/
+static int
+kqueue_truncate(struct file *fp, off_t length, struct ucred *active_cred,
+	struct thread *td)
+{
+
+	return (EINVAL);
 }
 
 /*ARGSUSED*/
@@ -1400,7 +1457,8 @@ kqueue_poll(struct file *fp, int events, struct ucred *active_cred,
 			revents |= events & (POLLIN | POLLRDNORM);
 		} else {
 			selrecord(td, &kq->kq_sel);
-			kq->kq_state |= KQ_SEL;
+			if (SEL_WAITING(&kq->kq_sel))
+				kq->kq_state |= KQ_SEL;
 		}
 	}
 	kqueue_release(kq, 1);
@@ -1455,8 +1513,11 @@ kqueue_close(struct file *fp, struct thread *td)
 
 	for (i = 0; i < kq->kq_knlistsize; i++) {
 		while ((kn = SLIST_FIRST(&kq->kq_knlist[i])) != NULL) {
-			KASSERT((kn->kn_status & KN_INFLUX) == 0,
-			    ("KN_INFLUX set when not suppose to be"));
+			if ((kn->kn_status & KN_INFLUX) == KN_INFLUX) {
+				kq->kq_state |= KQ_FLUXWAIT;
+				msleep(kq, &kq->kq_lock, PSOCK, "kqclo1", 0);
+				continue;
+			}
 			kn->kn_status |= KN_INFLUX;
 			KQ_UNLOCK(kq);
 			if (!(kn->kn_status & KN_DETACHED))
@@ -1468,8 +1529,12 @@ kqueue_close(struct file *fp, struct thread *td)
 	if (kq->kq_knhashmask != 0) {
 		for (i = 0; i <= kq->kq_knhashmask; i++) {
 			while ((kn = SLIST_FIRST(&kq->kq_knhash[i])) != NULL) {
-				KASSERT((kn->kn_status & KN_INFLUX) == 0,
-				    ("KN_INFLUX set when not suppose to be"));
+				if ((kn->kn_status & KN_INFLUX) == KN_INFLUX) {
+					kq->kq_state |= KQ_FLUXWAIT;
+					msleep(kq, &kq->kq_lock, PSOCK,
+					       "kqclo2", 0);
+					continue;
+				}
 				kn->kn_status |= KN_INFLUX;
 				KQ_UNLOCK(kq);
 				if (!(kn->kn_status & KN_DETACHED))
@@ -1486,8 +1551,9 @@ kqueue_close(struct file *fp, struct thread *td)
 	}
 
 	if ((kq->kq_state & KQ_SEL) == KQ_SEL) {
-		kq->kq_state &= ~KQ_SEL;
 		selwakeuppri(&kq->kq_sel, PSOCK);
+		if (!SEL_WAITING(&kq->kq_sel))
+			kq->kq_state &= ~KQ_SEL;
 	}
 
 	KQ_UNLOCK(kq);
@@ -1522,8 +1588,9 @@ kqueue_wakeup(struct kqueue *kq)
 		wakeup(kq);
 	}
 	if ((kq->kq_state & KQ_SEL) == KQ_SEL) {
-		kq->kq_state &= ~KQ_SEL;
 		selwakeuppri(&kq->kq_sel, PSOCK);
+		if (!SEL_WAITING(&kq->kq_sel))
+			kq->kq_state &= ~KQ_SEL;
 	}
 	if (!knlist_empty(&kq->kq_sel.si_note))
 		kqueue_schedtask(kq);
@@ -1920,7 +1987,7 @@ knote_init(void)
 	knote_zone = uma_zcreate("KNOTE", sizeof(struct knote), NULL, NULL,
 	    NULL, NULL, UMA_ALIGN_PTR, 0);
 }
-SYSINIT(knote, SI_SUB_PSEUDO, SI_ORDER_ANY, knote_init, NULL)
+SYSINIT(knote, SI_SUB_PSEUDO, SI_ORDER_ANY, knote_init, NULL);
 
 static struct knote *
 knote_alloc(int waitok)

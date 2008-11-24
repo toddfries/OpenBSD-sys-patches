@@ -35,7 +35,7 @@
  *
  *	@(#)stdarg.h	8.2 (Berkeley) 9/27/93
  *	$NetBSD: stdarg.h,v 1.11 2000/07/23 21:36:56 mycroft Exp $
- * $FreeBSD: src/sys/sun4v/include/stdarg.h,v 1.1 2006/10/05 06:14:26 kmacy Exp $
+ * $FreeBSD: src/sys/sun4v/include/stdarg.h,v 1.2 2007/11/19 07:34:57 jb Exp $
  */
 
 #ifndef _MACHINE_STDARG_H_
@@ -52,7 +52,7 @@ typedef	__va_list	va_list;
 #ifdef __GNUCLIKE_BUILTIN_STDARG
 
 #define	va_start(ap, last) \
-	__builtin_stdarg_start((ap), (last))
+	__builtin_va_start((ap), (last))
 
 #define	va_arg(ap, type) \
 	__builtin_va_arg((ap), type)

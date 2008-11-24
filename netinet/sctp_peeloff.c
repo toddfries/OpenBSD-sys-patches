@@ -32,7 +32,7 @@
 /* $KAME: sctp_peeloff.c,v 1.13 2005/03/06 16:04:18 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_peeloff.c,v 1.16 2007/09/08 11:35:10 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_peeloff.c,v 1.18 2008/06/14 07:58:05 rrs Exp $");
 #include <netinet/sctp_os.h>
 #include <netinet/sctp_pcb.h>
 #include <netinet/sctputil.h>
@@ -134,7 +134,7 @@ sctp_do_peeloff(struct socket *head, struct socket *so, sctp_assoc_t assoc_id)
 	atomic_add_int(&stcb->asoc.refcnt, 1);
 	SCTP_TCB_UNLOCK(stcb);
 
-	sctp_pull_off_control_to_new_inp(inp, n_inp, stcb, M_WAITOK);
+	sctp_pull_off_control_to_new_inp(inp, n_inp, stcb, SBL_WAIT);
 	atomic_subtract_int(&stcb->asoc.refcnt, 1);
 
 	return (0);
@@ -212,7 +212,7 @@ sctp_get_peeloff(struct socket *head, sctp_assoc_t assoc_id, int *error)
 	/* We remove it right away */
 
 #ifdef SCTP_LOCK_LOGGING
-	if (sctp_logging_level & SCTP_LOCK_LOGGING_ENABLE) {
+	if (SCTP_BASE_SYSCTL(sctp_logging_level) & SCTP_LOCK_LOGGING_ENABLE) {
 		sctp_log_lock(inp, (struct sctp_tcb *)NULL, SCTP_LOG_LOCK_SOCK);
 	}
 #endif
@@ -230,7 +230,7 @@ sctp_get_peeloff(struct socket *head, sctp_assoc_t assoc_id, int *error)
 	 * And now the final hack. We move data in the pending side i.e.
 	 * head to the new socket buffer. Let the GRUBBING begin :-0
 	 */
-	sctp_pull_off_control_to_new_inp(inp, n_inp, stcb, M_WAITOK);
+	sctp_pull_off_control_to_new_inp(inp, n_inp, stcb, SBL_WAIT);
 	atomic_subtract_int(&stcb->asoc.refcnt, 1);
 	return (newso);
 }

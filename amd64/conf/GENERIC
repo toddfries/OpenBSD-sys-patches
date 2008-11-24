@@ -16,7 +16,7 @@
 # If you are in doubt as to the purpose or necessity of a line, check first
 # in NOTES.
 #
-# $FreeBSD: src/sys/amd64/conf/GENERIC,v 1.487 2007/10/26 02:35:42 imp Exp $
+# $FreeBSD: src/sys/amd64/conf/GENERIC,v 1.509 2008/11/12 09:52:06 yongari Exp $
 
 cpu		HAMMER
 ident		GENERIC
@@ -30,7 +30,7 @@ options 	SCHED_ULE		# ULE scheduler
 options 	PREEMPTION		# Enable kernel thread preemption
 options 	INET			# InterNETworking
 options 	INET6			# IPv6 communications protocols
-options 	SCTP			# Stream Control Transmission Protocol 
+options 	SCTP			# Stream Control Transmission Protocol
 options 	FFS			# Berkeley Fast Filesystem
 options 	SOFTUPDATES		# Enable FFS soft updates support
 options 	UFS_ACL			# Support for access control lists
@@ -39,6 +39,7 @@ options 	UFS_GJOURNAL		# Enable gjournal-based UFS journaling
 options 	MD_ROOT			# MD is a potential root device
 options 	NFSCLIENT		# Network Filesystem Client
 options 	NFSSERVER		# Network Filesystem Server
+options 	NFSLOCKD		# Network Lock Manager
 options 	NFS_ROOT		# NFS usable as /, requires NFSCLIENT
 options 	NTFS			# NT File System
 options 	MSDOSFS			# MSDOS Filesystem
@@ -52,16 +53,18 @@ options 	COMPAT_IA32		# Compatible with i386 binaries
 options 	COMPAT_FREEBSD4		# Compatible with FreeBSD4
 options 	COMPAT_FREEBSD5		# Compatible with FreeBSD5
 options 	COMPAT_FREEBSD6		# Compatible with FreeBSD6
+options 	COMPAT_FREEBSD7		# Compatible with FreeBSD7
 options 	SCSI_DELAY=5000		# Delay (in ms) before probing SCSI
 options 	KTRACE			# ktrace(1) support
+options 	STACK			# stack(9) support
 options 	SYSVSHM			# SYSV-style shared memory
 options 	SYSVMSG			# SYSV-style message queues
 options 	SYSVSEM			# SYSV-style semaphores
 options 	_KPOSIX_PRIORITY_SCHEDULING # POSIX P1003_1B real-time extensions
 options 	KBD_INSTALL_CDEV	# install a CDEV entry in /dev
-options 	ADAPTIVE_GIANT		# Giant mutex is adaptive.
 options 	STOP_NMI		# Stop CPUS using NMI instead of IPI
 options 	AUDIT			# Security event auditing
+options 	HWPMC_HOOKS		# Necessary kernel hooks for hwpmc(4)
 
 # Debugging for use in -current
 options 	KDB			# Enable kernel debugger support.
@@ -115,7 +118,6 @@ device		adw		# Advansys wide SCSI adapters
 device		aic		# Adaptec 15[012]x SCSI adapters, AIC-6[23]60.
 device		bt		# Buslogic/Mylex MultiMaster SCSI adapters
 
-
 # SCSI peripherals
 device		scbus		# SCSI bus (required for SCSI)
 device		ch		# SCSI media changers
@@ -131,7 +133,7 @@ device		arcmsr		# Areca SATA II RAID
 device		ciss		# Compaq Smart RAID 5*
 device		dpt		# DPT Smartcache III, IV - See NOTES for options
 device		hptmv		# Highpoint RocketRAID 182x
-device		rr232x		# Highpoint RocketRAID 232x
+device		hptrr		# Highpoint RocketRAID 17xx, 22xx, 23xx, 25xx
 device		iir		# Intel Integrated RAID
 device		ips		# IBM (Adaptec) ServeRAID
 device		mly		# Mylex AcceleRAID/eXtremeRAID
@@ -170,7 +172,6 @@ device		pccard		# PC Card (16-bit) bus
 device		cardbus		# CardBus (32-bit) bus
 
 # Serial (COM) ports
-device		sio		# 8250, 16[45]50 based serial ports
 device		uart		# Generic UART driver
 
 # Parallel port
@@ -188,20 +189,27 @@ device		ppi		# Parallel port interface device
 
 # PCI Ethernet NICs.
 device		de		# DEC/Intel DC21x4x (``Tulip'')
-device		em		# Intel PRO/1000 adapter Gigabit Ethernet Card
+device		em		# Intel PRO/1000 Gigabit Ethernet Family
+device		igb		# Intel PRO/1000 PCIE Server Gigabit Family
 device		ixgb		# Intel PRO/10GbE Ethernet Card
 device		le		# AMD Am7900 LANCE and Am79C9xx PCnet
+device		ti		# Alteon Networks Tigon I/II gigabit Ethernet
 device		txp		# 3Com 3cR990 (``Typhoon'')
 device		vx		# 3Com 3c590, 3c595 (``Vortex'')
 
 # PCI Ethernet NICs that use the common MII bus controller code.
 # NOTE: Be sure to keep the 'device miibus' line in order to use these NICs!
 device		miibus		# MII bus support
+device		ae		# Attansic/Atheros L2 FastEthernet
+device		age		# Attansic/Atheros L1 Gigabit Ethernet
+device		ale		# Atheros AR8121/AR8113/AR8114 Ethernet
 device		bce		# Broadcom BCM5706/BCM5708 Gigabit Ethernet
 device		bfe		# Broadcom BCM440x 10/100 Ethernet
 device		bge		# Broadcom BCM570xx Gigabit Ethernet
 device		dc		# DEC/Intel 21143 and various workalikes
+device		et		# Agere ET1310 10/100/Gigabit Ethernet
 device		fxp		# Intel EtherExpress PRO/100B (82557, 82558)
+device		jme		# JMicron JMC250 Gigabit/JMC260 Fast Ethernet
 device		lge		# Level 1 LXT1001 gigabit Ethernet
 device		msk		# Marvell/SysKonnect Yukon II Gigabit Ethernet
 device		nfe		# nVidia nForce MCP on-board Ethernet
@@ -214,7 +222,6 @@ device		sf		# Adaptec AIC-6915 (``Starfire'')
 device		sis		# Silicon Integrated Systems SiS 900/SiS 7016
 device		sk		# SysKonnect SK-984x & SK-982x gigabit Ethernet
 device		ste		# Sundance ST201 (D-Link DFE-550TX)
-device		ti		# Alteon Networks Tigon I/II gigabit Ethernet
 device		tl		# Texas Instruments ThunderLAN
 device		tx		# SMC EtherPower II (83c170 ``EPIC'')
 device		vge		# VIA VT612x gigabit Ethernet
@@ -234,17 +241,16 @@ device		xe		# Xircom pccard Ethernet
 
 # Wireless NIC cards
 device		wlan		# 802.11 support
+options		IEEE80211_DEBUG	# enable debug msgs
+options		IEEE80211_AMPDU_AGE	# age frames in AMPDU reorder q's
 device		wlan_wep	# 802.11 WEP support
 device		wlan_ccmp	# 802.11 CCMP support
 device		wlan_tkip	# 802.11 TKIP support
 device		wlan_amrr	# AMRR transmit rate control algorithm
-device		wlan_scan_ap	# 802.11 AP mode scanning
-device		wlan_scan_sta	# 802.11 STA mode scanning
 device		an		# Aironet 4500/4800 802.11 wireless NICs.
 device		ath		# Atheros pci/cardbus NIC's
 device		ath_hal		# Atheros HAL (Hardware Access Layer)
 device		ath_rate_sample	# SampleRate tx rate control for ath
-device		awi		# BayStack 660 and others
 device		ral		# Ralink Technology RT2500 wireless NICs.
 device		wi		# WaveLAN/Intersil/Symbol 802.11 wireless NICs.
 
@@ -252,10 +258,8 @@ device		wi		# WaveLAN/Intersil/Symbol 802.11 wireless NICs.
 device		loop		# Network loopback
 device		random		# Entropy device
 device		ether		# Ethernet support
-device		sl		# Kernel SLIP
-device		ppp		# Kernel PPP
 device		tun		# Packet tunnel.
-device		pty		# Pseudo-ttys (telnet etc)
+device		pty		# BSD-style compatibility pseudo ttys
 device		md		# Memory "disks"
 device		gif		# IPv6 and IPv4 tunneling
 device		faith		# IPv6-to-IPv4 relaying (translation)
@@ -286,10 +290,10 @@ device		uscanner	# Scanners
 device		ucom		# Generic com ttys
 device		uark		# Technologies ARK3116 based serial adapters
 device		ubsa		# Belkin F5U103 and compatible serial adapters
-device		ubser		# BWCT console serial adapters
 device		uftdi		# For FTDI usb serial adapters
 device		uipaq		# Some WinCE based devices
 device		uplcom		# Prolific PL-2303 serial adapters
+device		uslcom		# SI Labs CP2101/CP2102 serial adapters
 device		uvisor		# Visor and Palm devices
 device		uvscom		# USB serial support for DDI pocket's PHS
 # USB Ethernet, requires miibus

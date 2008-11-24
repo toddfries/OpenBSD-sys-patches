@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 1999-2002, 2007 Robert N. M. Watson
+ * Copyright (c) 1999-2002, 2007-2008 Robert N. M. Watson
  * Copyright (c) 2001-2005 McAfee, Inc.
  * Copyright (c) 2006 SPARTA, Inc.
  * All rights reserved.
@@ -35,7 +35,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_biba/mac_biba.c,v 1.117 2007/10/29 13:33:04 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac_biba/mac_biba.c,v 1.126 2008/10/28 13:44:11 trasz Exp $
  */
 
 /*
@@ -121,8 +121,8 @@ SYSCTL_INT(_security_mac_biba, OID_AUTO, max_compartments, CTLFLAG_RD,
     &max_compartments, 0, "Maximum supported compartments");
 
 static int	ptys_equal = 0;
-SYSCTL_INT(_security_mac_biba, OID_AUTO, ptys_equal, CTLFLAG_RW,
-    &ptys_equal, 0, "Label pty devices as biba/equal on create");
+SYSCTL_INT(_security_mac_biba, OID_AUTO, ptys_equal, CTLFLAG_RW, &ptys_equal,
+    0, "Label pty devices as biba/equal on create");
 TUNABLE_INT("security.mac.biba.ptys_equal", &ptys_equal);
 
 static int	interfaces_equal;
@@ -638,12 +638,10 @@ biba_parse_element(struct mac_biba_element *element, char *string)
 	char *compartment, *end, *grade;
 	int value;
 
-	if (strcmp(string, "high") == 0 ||
-	    strcmp(string, "hi") == 0) {
+	if (strcmp(string, "high") == 0 || strcmp(string, "hi") == 0) {
 		element->mbe_type = MAC_BIBA_TYPE_HIGH;
 		element->mbe_grade = MAC_BIBA_TYPE_UNDEF;
-	} else if (strcmp(string, "low") == 0 ||
-	    strcmp(string, "lo") == 0) {
+	} else if (strcmp(string, "low") == 0 || strcmp(string, "lo") == 0) {
 		element->mbe_type = MAC_BIBA_TYPE_LOW;
 		element->mbe_grade = MAC_BIBA_TYPE_UNDEF;
 	} else if (strcmp(string, "equal") == 0 ||
@@ -665,9 +663,8 @@ biba_parse_element(struct mac_biba_element *element, char *string)
 		element->mbe_grade = value;
 
 		/*
-		 * Optional compartment piece of the element.  If none
-		 * are included, we assume that the label has no
-		 * compartments.
+		 * Optional compartment piece of the element.  If none are
+		 * included, we assume that the label has no compartments.
 		 */
 		if (string == NULL)
 			return (0);
@@ -688,8 +685,8 @@ biba_parse_element(struct mac_biba_element *element, char *string)
 }
 
 /*
- * Note: destructively consumes the string, make a local copy before
- * calling if that's a problem.
+ * Note: destructively consumes the string, make a local copy before calling
+ * if that's a problem.
  */
 static int
 biba_parse(struct mac_biba *mb, char *string)
@@ -818,6 +815,17 @@ biba_bpfdesc_create_mbuf(struct bpf_d *d, struct label *dlabel,
 	biba_copy_effective(source, dest);
 }
 
+static void
+biba_cred_associate_nfsd(struct ucred *cred)
+{
+	struct mac_biba *label;
+
+	label = SLOT(cred->cr_label);
+	biba_set_effective(label, MAC_BIBA_TYPE_LOW, 0, NULL);
+	biba_set_range(label, MAC_BIBA_TYPE_LOW, 0, NULL, MAC_BIBA_TYPE_HIGH,
+	    0, NULL);
+}
+
 static int
 biba_cred_check_relabel(struct ucred *cred, struct label *newlabel)
 {
@@ -895,6 +903,30 @@ biba_cred_check_visible(struct ucred *u1, struct ucred *u2)
 		return (ESRCH);
 
 	return (0);
+}
+
+static void
+biba_cred_create_init(struct ucred *cred)
+{
+	struct mac_biba *dest;
+
+	dest = SLOT(cred->cr_label);
+
+	biba_set_effective(dest, MAC_BIBA_TYPE_HIGH, 0, NULL);
+	biba_set_range(dest, MAC_BIBA_TYPE_LOW, 0, NULL, MAC_BIBA_TYPE_HIGH,
+	    0, NULL);
+}
+
+static void
+biba_cred_create_swapper(struct ucred *cred)
+{
+	struct mac_biba *dest;
+
+	dest = SLOT(cred->cr_label);
+
+	biba_set_effective(dest, MAC_BIBA_TYPE_EQUAL, 0, NULL);
+	biba_set_range(dest, MAC_BIBA_TYPE_LOW, 0, NULL, MAC_BIBA_TYPE_HIGH,
+	    0, NULL);
 }
 
 static void
@@ -1118,6 +1150,24 @@ biba_inpcb_check_deliver(struct inpcb *inp, struct label *inplabel,
 	return (biba_equal_effective(p, i) ? 0 : EACCES);
 }
 
+static int
+biba_inpcb_check_visible(struct ucred *cred, struct inpcb *inp,
+    struct label *inplabel)
+{
+	struct mac_biba *subj, *obj;
+
+	if (!biba_enabled)
+		return (0);
+
+	subj = SLOT(cred->cr_label);
+	obj = SLOT(inplabel);
+
+	if (!biba_dominate_effective(obj, subj))
+		return (ENOENT);
+
+	return (0);
+}
+
 static void
 biba_inpcb_create(struct socket *so, struct label *solabel,
     struct inpcb *inp, struct label *inplabel)
@@ -1155,36 +1205,36 @@ biba_inpcb_sosetlabel(struct socket *so, struct label *solabel,
 }
 
 static void
-biba_ipq_create(struct mbuf *m, struct label *mlabel, struct ipq *ipq,
-    struct label *ipqlabel)
+biba_ip6q_create(struct mbuf *m, struct label *mlabel, struct ip6q *q6,
+    struct label *q6label)
 {
 	struct mac_biba *source, *dest;
 
 	source = SLOT(mlabel);
-	dest = SLOT(ipqlabel);
+	dest = SLOT(q6label);
 
 	biba_copy_effective(source, dest);
 }
 
 static int
-biba_ipq_match(struct mbuf *m, struct label *mlabel, struct ipq *ipq,
-    struct label *ipqlabel)
+biba_ip6q_match(struct mbuf *m, struct label *mlabel, struct ip6q *q6,
+    struct label *q6label)
 {
 	struct mac_biba *a, *b;
 
-	a = SLOT(ipqlabel);
+	a = SLOT(q6label);
 	b = SLOT(mlabel);
 
 	return (biba_equal_effective(a, b));
 }
 
 static void
-biba_ipq_reassemble(struct ipq *ipq, struct label *ipqlabel, struct mbuf *m,
+biba_ip6q_reassemble(struct ip6q *q6, struct label *q6label, struct mbuf *m,
     struct label *mlabel)
 {
 	struct mac_biba *source, *dest;
 
-	source = SLOT(ipqlabel);
+	source = SLOT(q6label);
 	dest = SLOT(mlabel);
 
 	/* Just use the head, since we require them all to match. */
@@ -1192,8 +1242,53 @@ biba_ipq_reassemble(struct ipq *ipq, struct label *ipqlabel, struct mbuf *m,
 }
 
 static void
-biba_ipq_update(struct mbuf *m, struct label *mlabel, struct ipq *ipq,
-    struct label *ipqlabel)
+biba_ip6q_update(struct mbuf *m, struct label *mlabel, struct ip6q *q6,
+    struct label *q6label)
+{
+
+	/* NOOP: we only accept matching labels, so no need to update */
+}
+
+static void
+biba_ipq_create(struct mbuf *m, struct label *mlabel, struct ipq *q,
+    struct label *qlabel)
+{
+	struct mac_biba *source, *dest;
+
+	source = SLOT(mlabel);
+	dest = SLOT(qlabel);
+
+	biba_copy_effective(source, dest);
+}
+
+static int
+biba_ipq_match(struct mbuf *m, struct label *mlabel, struct ipq *q,
+    struct label *qlabel)
+{
+	struct mac_biba *a, *b;
+
+	a = SLOT(qlabel);
+	b = SLOT(mlabel);
+
+	return (biba_equal_effective(a, b));
+}
+
+static void
+biba_ipq_reassemble(struct ipq *q, struct label *qlabel, struct mbuf *m,
+    struct label *mlabel)
+{
+	struct mac_biba *source, *dest;
+
+	source = SLOT(qlabel);
+	dest = SLOT(mlabel);
+
+	/* Just use the head, since we require them all to match. */
+	biba_copy_effective(source, dest);
+}
+
+static void
+biba_ipq_update(struct mbuf *m, struct label *mlabel, struct ipq *q,
+    struct label *qlabel)
 {
 
 	/* NOOP: we only accept matching labels, so no need to update */
@@ -1504,7 +1599,7 @@ biba_pipe_relabel(struct ucred *cred, struct pipepair *pp,
 }
 
 static int
-biba_posixsem_check_write(struct ucred *cred, struct ksem *ks,
+biba_posixsem_check_openunlink(struct ucred *cred, struct ksem *ks,
     struct label *kslabel)
 {
 	struct mac_biba *subj, *obj;
@@ -1522,15 +1617,33 @@ biba_posixsem_check_write(struct ucred *cred, struct ksem *ks,
 }
 
 static int
-biba_posixsem_check_rdonly(struct ucred *cred, struct ksem *ks,
-    struct label *kslabel)
+biba_posixsem_check_write(struct ucred *active_cred, struct ucred *file_cred,
+    struct ksem *ks, struct label *kslabel)
 {
 	struct mac_biba *subj, *obj;
 
 	if (!biba_enabled)
 		return (0);
 
-	subj = SLOT(cred->cr_label);
+	subj = SLOT(active_cred->cr_label);
+	obj = SLOT(kslabel);
+
+	if (!biba_dominate_effective(subj, obj))
+		return (EACCES);
+
+	return (0);
+}
+
+static int
+biba_posixsem_check_rdonly(struct ucred *active_cred, struct ucred *file_cred,
+    struct ksem *ks, struct label *kslabel)
+{
+	struct mac_biba *subj, *obj;
+
+	if (!biba_enabled)
+		return (0);
+
+	subj = SLOT(active_cred->cr_label);
 	obj = SLOT(kslabel);
 
 	if (!biba_dominate_effective(obj, subj))
@@ -1740,17 +1853,6 @@ biba_priv_check(struct ucred *cred, int priv)
 	return (0);
 }
 
-static void
-biba_proc_associate_nfsd(struct ucred *cred)
-{
-	struct mac_biba *label;
-
-	label = SLOT(cred->cr_label);
-	biba_set_effective(label, MAC_BIBA_TYPE_LOW, 0, NULL);
-	biba_set_range(label, MAC_BIBA_TYPE_LOW, 0, NULL, MAC_BIBA_TYPE_HIGH,
-	    0, NULL);
-}
-
 static int
 biba_proc_check_debug(struct ucred *cred, struct proc *p)
 {
@@ -1824,30 +1926,6 @@ biba_socket_check_deliver(struct socket *so, struct label *solabel,
 	s = SLOT(solabel);
 
 	return (biba_equal_effective(p, s) ? 0 : EACCES);
-}
-
-static void
-biba_proc_create_init(struct ucred *cred)
-{
-	struct mac_biba *dest;
-
-	dest = SLOT(cred->cr_label);
-
-	biba_set_effective(dest, MAC_BIBA_TYPE_HIGH, 0, NULL);
-	biba_set_range(dest, MAC_BIBA_TYPE_LOW, 0, NULL, MAC_BIBA_TYPE_HIGH,
-	    0, NULL);
-}
-
-static void
-biba_proc_create_swapper(struct ucred *cred)
-{
-	struct mac_biba *dest;
-
-	dest = SLOT(cred->cr_label);
-
-	biba_set_effective(dest, MAC_BIBA_TYPE_EQUAL, 0, NULL);
-	biba_set_range(dest, MAC_BIBA_TYPE_LOW, 0, NULL, MAC_BIBA_TYPE_HIGH,
-	    0, NULL);
 }
 
 static int
@@ -2804,7 +2882,7 @@ biba_vnode_check_mmap(struct ucred *cred, struct vnode *vp,
 
 static int
 biba_vnode_check_open(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, int acc_mode)
+    struct label *vplabel, accmode_t accmode)
 {
 	struct mac_biba *subj, *obj;
 
@@ -2815,11 +2893,11 @@ biba_vnode_check_open(struct ucred *cred, struct vnode *vp,
 	obj = SLOT(vplabel);
 
 	/* XXX privilege override for admin? */
-	if (acc_mode & (VREAD | VEXEC | VSTAT)) {
+	if (accmode & (VREAD | VEXEC | VSTAT)) {
 		if (!biba_dominate_effective(obj, subj))
 			return (EACCES);
 	}
-	if (acc_mode & (VWRITE | VAPPEND | VADMIN)) {
+	if (accmode & (VWRITE | VAPPEND | VADMIN)) {
 		if (!biba_dominate_effective(subj, obj))
 			return (EACCES);
 	}
@@ -3256,9 +3334,12 @@ static struct mac_policy_ops mac_biba_ops =
 	.mpo_bpfdesc_destroy_label = biba_destroy_label,
 	.mpo_bpfdesc_init_label = biba_init_label,
 
+	.mpo_cred_associate_nfsd = biba_cred_associate_nfsd,
 	.mpo_cred_check_relabel = biba_cred_check_relabel,
 	.mpo_cred_check_visible = biba_cred_check_visible,
 	.mpo_cred_copy_label = biba_copy_label,
+	.mpo_cred_create_init = biba_cred_create_init,
+	.mpo_cred_create_swapper = biba_cred_create_swapper,
 	.mpo_cred_destroy_label = biba_destroy_label,
 	.mpo_cred_externalize_label = biba_externalize_label,
 	.mpo_cred_init_label = biba_init_label,
@@ -3285,11 +3366,19 @@ static struct mac_policy_ops mac_biba_ops =
 	.mpo_ifnet_relabel = biba_ifnet_relabel,
 
 	.mpo_inpcb_check_deliver = biba_inpcb_check_deliver,
+	.mpo_inpcb_check_visible = biba_inpcb_check_visible,
 	.mpo_inpcb_create = biba_inpcb_create,
 	.mpo_inpcb_create_mbuf = biba_inpcb_create_mbuf,
 	.mpo_inpcb_destroy_label = biba_destroy_label,
 	.mpo_inpcb_init_label = biba_init_label_waitcheck,
 	.mpo_inpcb_sosetlabel = biba_inpcb_sosetlabel,
+
+	.mpo_ip6q_create = biba_ip6q_create,
+	.mpo_ip6q_destroy_label = biba_destroy_label,
+	.mpo_ip6q_init_label = biba_init_label_waitcheck,
+	.mpo_ip6q_match = biba_ip6q_match,
+	.mpo_ip6q_reassemble = biba_ip6q_reassemble,
+	.mpo_ip6q_update = biba_ip6q_update,
 
 	.mpo_ipq_create = biba_ipq_create,
 	.mpo_ipq_destroy_label = biba_destroy_label,
@@ -3334,11 +3423,11 @@ static struct mac_policy_ops mac_biba_ops =
 	.mpo_pipe_internalize_label = biba_internalize_label,
 	.mpo_pipe_relabel = biba_pipe_relabel,
 
-	.mpo_posixsem_check_destroy = biba_posixsem_check_write,
 	.mpo_posixsem_check_getvalue = biba_posixsem_check_rdonly,
-	.mpo_posixsem_check_open = biba_posixsem_check_write,
+	.mpo_posixsem_check_open = biba_posixsem_check_openunlink,
 	.mpo_posixsem_check_post = biba_posixsem_check_write,
-	.mpo_posixsem_check_unlink = biba_posixsem_check_write,
+	.mpo_posixsem_check_stat = biba_posixsem_check_rdonly,
+	.mpo_posixsem_check_unlink = biba_posixsem_check_openunlink,
 	.mpo_posixsem_check_wait = biba_posixsem_check_write,
 	.mpo_posixsem_create = biba_posixsem_create,
 	.mpo_posixsem_destroy_label = biba_destroy_label,
@@ -3346,12 +3435,9 @@ static struct mac_policy_ops mac_biba_ops =
 
 	.mpo_priv_check = biba_priv_check,
 
-	.mpo_proc_associate_nfsd = biba_proc_associate_nfsd,
 	.mpo_proc_check_debug = biba_proc_check_debug,
 	.mpo_proc_check_sched = biba_proc_check_sched,
 	.mpo_proc_check_signal = biba_proc_check_signal,
-	.mpo_proc_create_init = biba_proc_create_init,
-	.mpo_proc_create_swapper = biba_proc_create_swapper,
 
 	.mpo_socket_check_deliver = biba_socket_check_deliver,
 	.mpo_socket_check_relabel = biba_socket_check_relabel,
@@ -3459,5 +3545,25 @@ static struct mac_policy_ops mac_biba_ops =
 	.mpo_vnode_setlabel_extattr = biba_vnode_setlabel_extattr,
 };
 
+#define	BIBA_OBJECTS	(MPC_OBJECT_CRED |				\
+			 /* MPC_OBJECT_PROC | */			\
+			 MPC_OBJECT_VNODE |				\
+			 MPC_OBJECT_INPCB |				\
+			 MPC_OBJECT_SOCKET |				\
+			 MPC_OBJECT_DEVFS |				\
+			 MPC_OBJECT_MBUF |				\
+			 MPC_OBJECT_IPQ |				\
+			 MPC_OBJECT_IFNET |				\
+			 MPC_OBJECT_BPFDESC |				\
+			 MPC_OBJECT_PIPE |				\
+			 MPC_OBJECT_MOUNT |				\
+			 MPC_OBJECT_POSIXSEM |				\
+			 /* MPC_OBJECT_POSIXSHM | */			\
+			 MPC_OBJECT_SYSVMSG |				\
+			 MPC_OBJECT_SYSVMSQ |				\
+			 MPC_OBJECT_SYSVSEM |				\
+			 MPC_OBJECT_SYSVSHM |				\
+			 MPC_OBJECT_SYNCACHE)
+
 MAC_POLICY_SET(&mac_biba_ops, mac_biba, "TrustedBSD MAC/Biba",
-    MPC_LOADTIME_FLAG_NOTLATE | MPC_LOADTIME_FLAG_LABELMBUFS, &biba_slot);
+    MPC_LOADTIME_FLAG_NOTLATE, &biba_slot, BIBA_OBJECTS);

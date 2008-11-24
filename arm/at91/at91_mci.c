@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/at91/at91_mci.c,v 1.4 2007/09/16 07:48:58 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/at91/at91_mci.c,v 1.10 2008/11/18 12:42:59 stas Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -175,9 +175,9 @@ at91_mci_attach(device_t dev)
 	/*
 	 * Allocate DMA tags and maps
 	 */
-	err = bus_dma_tag_create(NULL, 1, 0, BUS_SPACE_MAXADDR_32BIT,
-	    BUS_SPACE_MAXADDR, NULL, NULL, MAXPHYS, 1, MAXPHYS,
-	    BUS_DMA_ALLOCNOW, NULL, NULL, &sc->dmatag);
+	err = bus_dma_tag_create(bus_get_dma_tag(dev), 1, 0,
+	    BUS_SPACE_MAXADDR_32BIT, BUS_SPACE_MAXADDR, NULL, NULL, MAXPHYS, 1,
+	    MAXPHYS, BUS_DMA_ALLOCNOW, NULL, NULL, &sc->dmatag);
 	if (err != 0)
 		goto out;
 
@@ -298,14 +298,7 @@ at91_mci_update_ios(device_t brdev, device_t reqdev)
 	else
 		WR4(sc, MCI_SDCR, RD4(sc, MCI_SDCR) & ~MCI_SDCR_SDCBUS);
 	WR4(sc, MCI_MR, (RD4(sc, MCI_MR) & ~MCI_MR_CLKDIV) | clkdiv);
-#if 0
-	if (sc->vcc_pin) {
-		if (sc->power_mode == MMC_POWER_OFF)
-			gpio_set(sc->vcc_pin, 0);
-		else
-			gpio_set(sc->vcc_pin, 1);
-	}
-#endif
+	/* XXX We need to turn the device on/off here with a GPIO pin */
 	return (0);
 }
 
@@ -462,7 +455,7 @@ at91_mci_request(device_t brdev, device_t reqdev, struct mmc_request *req)
 static int
 at91_mci_get_ro(device_t brdev, device_t reqdev)
 {
-	return (-1);
+	return (0);
 }
 
 static int
@@ -649,6 +642,9 @@ at91_mci_read_ivar(device_t bus, device_t child, int which, u_char *result)
 	case MMCBR_IVAR_VDD:
 		*(int *)result = sc->host.ios.vdd;
 		break;
+	case MMCBR_IVAR_MAX_DATA:
+		*(int *)result = 1;
+		break;
 	}
 	return (0);
 }
@@ -685,9 +681,11 @@ at91_mci_write_ivar(device_t bus, device_t child, int which, uintptr_t value)
 	case MMCBR_IVAR_VDD:
 		sc->host.ios.vdd = value;
 		break;
+	/* These are read-only */
 	case MMCBR_IVAR_HOST_OCR:
 	case MMCBR_IVAR_F_MIN:
 	case MMCBR_IVAR_F_MAX:
+	case MMCBR_IVAR_MAX_DATA:
 		return (EINVAL);
 	}
 	return (0);

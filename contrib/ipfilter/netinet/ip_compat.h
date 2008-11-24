@@ -4,7 +4,7 @@
  * See the IPFILTER.LICENCE file for details on licencing.
  *
  * @(#)ip_compat.h	1.8 1/14/96
- * $FreeBSD: src/sys/contrib/ipfilter/netinet/ip_compat.h,v 1.35 2007/10/30 15:23:26 darrenr Exp $
+ * $FreeBSD: src/sys/contrib/ipfilter/netinet/ip_compat.h,v 1.38 2008/10/23 15:53:51 des Exp $
  * Id: ip_compat.h,v 2.142.2.57 2007/10/10 09:51:42 darrenr Exp $
  */
 
@@ -204,6 +204,8 @@ typedef unsigned int	u_32_t;
 # define	U_32_T	1
 
 # ifdef _KERNEL
+#  define	NEED_LOCAL_RAND	1
+#  define	ipf_random		arc4random
 #  define	KRWLOCK_T		krwlock_t
 #  define	KMUTEX_T		kmutex_t
 
@@ -334,6 +336,7 @@ typedef mblk_t mb_t;
 typedef	struct uio	uio_t;
 # endif
 typedef	int		ioctlcmd_t;
+typedef	uint8_t		u_int8_t;
 
 # define OS_RECOGNISED 1
 
@@ -564,6 +567,8 @@ typedef struct {
 # endif
 
 # ifdef _KERNEL
+#  define	NEED_LOCAL_RAND	1
+#  define	ipf_random		arc4random
 #  define	ATOMIC_INC(x)		{ MUTEX_ENTER(&ipf_rw); \
 					  (x)++; MUTEX_EXIT(&ipf_rw); }
 #  define	ATOMIC_DEC(x)		{ MUTEX_ENTER(&ipf_rw); \
@@ -660,6 +665,8 @@ typedef struct mbuf mb_t;
 # include <sys/sysmacros.h>
 
 # ifdef _KERNEL
+#  define	NEED_LOCAL_RAND		1
+#  define	ipf_random		arc4random
 #  define	KMUTEX_T		simple_lock_data_t
 #  define	KRWLOCK_T		lock_data_t
 #  include <net/net_globals.h>
@@ -781,6 +788,8 @@ typedef unsigned int    u_32_t;
 typedef	char *	caddr_t;
 # endif
 
+# define	ipf_random	arc4random
+
 # ifdef _KERNEL
 #  if (__NetBSD_Version__ >= 399001400)
 #   define	KMALLOCS(a, b, c)	(a) = (b)malloc((c), _M_IPF, M_NOWAIT)
@@ -820,6 +829,11 @@ typedef	u_int32_t	u_32_t;
 /*                                F R E E B S D                            */
 /* ----------------------------------------------------------------------- */
 #ifdef __FreeBSD__
+# if  (__FreeBSD_version < 400000)
+#  define	NEED_LOCAL_RAND	1
+# else
+#  define	ipf_random	arc4random
+# endif
 # if defined(_KERNEL)
 #  if (__FreeBSD_version >= 500000)                          
 #   include "opt_bpf.h"
@@ -1648,12 +1662,23 @@ MALLOC_DECLARE(M_IPFILTER);
 #    endif /* M_IPFILTER */
 #   endif /* M_PFIL */
 #  endif /* IPFILTER_M_IPFILTER */
-#  define	KMALLOC(a, b)	MALLOC((a), b, sizeof(*(a)), _M_IPF, M_NOWAIT)
-#  if !defined(KMALLOCS)
-#   define	KMALLOCS(a, b, c)	MALLOC((a), b, (c), _M_IPF, M_NOWAIT)
+#  if defined(__FreeBSD__) && __FreeBSD_version >= 800051
+#   define	KMALLOC(a, b)	do {			\
+	a = (b)malloc(sizeof(*(a)), _M_IPF, M_NOWAIT); \
+    } while (0)
+#   define	KMALLOCS(a, b, c)	do { \
+	a = (b)malloc((c), _M_IPF, ((c) > 4096) ? M_WAITOK : M_NOWAIT); \
+    } while (0)
+#   define	KFREE(x)	free((x), _M_IPF)
+#   define	KFREES(x,s)	free((x), _M_IPF)
+#  else
+#   define	KMALLOC(a, b)	MALLOC((a), b, sizeof(*(a)), _M_IPF, M_NOWAIT)
+#   if !defined(KMALLOCS)
+#    define	KMALLOCS(a, b, c)	MALLOC((a), b, (c), _M_IPF, M_NOWAIT)
+#   endif
+#   define	KFREE(x)	FREE((x), _M_IPF)
+#   define	KFREES(x,s)	FREE((x), _M_IPF)
 #  endif
-#  define	KFREE(x)	FREE((x), _M_IPF)
-#  define	KFREES(x,s)	FREE((x), _M_IPF)
 #  define	UIOMOVE(a,b,c,d)	uiomove((caddr_t)a,b,d)
 #  define	SLEEP(id, n)	tsleep((id), PPAUSE|PCATCH, n, 0)
 #  define	WAKEUP(id,x)	wakeup(id+x)
@@ -1695,7 +1720,7 @@ MALLOC_DECLARE(M_IPFILTER);
 # endif
 
 # ifndef	GET_MINOR
-#  define	GET_MINOR(x)	minor(x)
+#  define	GET_MINOR(x)	dev2unit(x)
 # endif
 # define	PANIC(x,y)	if (x) panic y
 #endif /* _KERNEL */

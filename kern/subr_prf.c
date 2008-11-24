@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_prf.c,v 1.130 2007/03/08 06:44:34 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_prf.c,v 1.132 2008/11/17 23:57:40 delphij Exp $");
 
 #include "opt_ddb.h"
 #include "opt_printf.h"
@@ -136,7 +136,7 @@ uprintf(const char *fmt, ...)
 	if (td == NULL || TD_IS_IDLETHREAD(td))
 		return (0);
 
-	mtx_lock(&Giant);
+	sx_slock(&proctree_lock);
 	p = td->td_proc;
 	PROC_LOCK(p);
 	if ((p->p_flag & P_CONTROLT) == 0) {
@@ -154,10 +154,12 @@ uprintf(const char *fmt, ...)
 	}
 	pca.flags = TOTTY;
 	va_start(ap, fmt);
+	tty_lock(pca.tty);
 	retval = kvprintf(fmt, putchar, &pca, 10, ap);
+	tty_unlock(pca.tty);
 	va_end(ap);
 out:
-	mtx_unlock(&Giant);
+	sx_sunlock(&proctree_lock);
 	return (retval);
 }
 
@@ -174,19 +176,17 @@ tprintf(struct proc *p, int pri, const char *fmt, ...)
 	struct putchar_arg pca;
 	struct session *sess = NULL;
 
-	mtx_lock(&Giant);
+	sx_slock(&proctree_lock);
 	if (pri != -1)
 		flags |= TOLOG;
 	if (p != NULL) {
 		PROC_LOCK(p);
 		if (p->p_flag & P_CONTROLT && p->p_session->s_ttyvp) {
 			sess = p->p_session;
-			SESS_LOCK(sess);
+			sess_hold(sess);
 			PROC_UNLOCK(p);
-			SESSHOLD(sess);
 			tp = sess->s_ttyp;
-			SESS_UNLOCK(sess);
-			if (ttycheckoutq(tp, 0))
+			if (tp != NULL && tty_checkoutq(tp))
 				flags |= TOTTY;
 			else
 				tp = NULL;
@@ -197,12 +197,16 @@ tprintf(struct proc *p, int pri, const char *fmt, ...)
 	pca.tty = tp;
 	pca.flags = flags;
 	va_start(ap, fmt);
+	if (pca.tty != NULL)
+		tty_lock(pca.tty);
 	kvprintf(fmt, putchar, &pca, 10, ap);
+	if (pca.tty != NULL)
+		tty_unlock(pca.tty);
 	va_end(ap);
 	if (sess != NULL)
-		SESSRELE(sess);
+		sess_release(sess);
 	msgbuftrigger = 1;
-	mtx_unlock(&Giant);
+	sx_sunlock(&proctree_lock);
 }
 
 /*
@@ -413,7 +417,7 @@ putchar(int c, void *arg)
 			putcons(c, ap);
 	} else {
 		if ((flags & TOTTY) && tp != NULL)
-			tputchar(c, tp);
+			tty_putchar(tp, c);
 		if (flags & TOCONS) {
 			if (constty != NULL)
 				msgbuf_addchar(&consmsgbuf, c);
@@ -810,7 +814,7 @@ handle_sign:
 			else if (lflag)
 				num = va_arg(ap, long);
 			else if (zflag)
-				num = va_arg(ap, size_t);
+				num = va_arg(ap, ssize_t);
 			else if (hflag)
 				num = (short)va_arg(ap, int);
 			else if (cflag)

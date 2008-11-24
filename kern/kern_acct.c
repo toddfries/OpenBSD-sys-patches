@@ -68,7 +68,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_acct.c,v 1.97 2007/10/24 19:03:54 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_acct.c,v 1.100 2008/08/21 15:02:17 ed Exp $");
 
 #include "opt_mac.h"
 
@@ -220,13 +220,13 @@ acct(struct thread *td, struct acct_args *uap)
 #ifdef MAC
 		error = mac_system_check_acct(td->td_ucred, nd.ni_vp);
 		if (error) {
-			VOP_UNLOCK(nd.ni_vp, 0, td);
+			VOP_UNLOCK(nd.ni_vp, 0);
 			vn_close(nd.ni_vp, flags, td->td_ucred, td);
 			VFS_UNLOCK_GIANT(vfslocked);
 			return (error);
 		}
 #endif
-		VOP_UNLOCK(nd.ni_vp, 0, td);
+		VOP_UNLOCK(nd.ni_vp, 0);
 		if (nd.ni_vp->v_type != VREG) {
 			vn_close(nd.ni_vp, flags, td->td_ucred, td);
 			VFS_UNLOCK_GIANT(vfslocked);
@@ -366,16 +366,25 @@ acct_process(struct thread *td)
 	 * Get process accounting information.
 	 */
 
+	sx_slock(&proctree_lock);
 	PROC_LOCK(p);
-	/* (1) The name of the command that ran */
+
+	/* (1) The terminal from which the process was started */
+	if ((p->p_flag & P_CONTROLT) && p->p_pgrp->pg_session->s_ttyp)
+		acct.ac_tty = tty_udev(p->p_pgrp->pg_session->s_ttyp);
+	else
+		acct.ac_tty = NODEV;
+	sx_sunlock(&proctree_lock);
+
+	/* (2) The name of the command that ran */
 	bcopy(p->p_comm, acct.ac_comm, sizeof acct.ac_comm);
 
-	/* (2) The amount of user and system time that was used */
+	/* (3) The amount of user and system time that was used */
 	rufetchcalc(p, &ru, &ut, &st);
 	acct.ac_utime = encode_timeval(ut);
 	acct.ac_stime = encode_timeval(st);
 
-	/* (3) The elapsed time the command ran (and its starting time) */
+	/* (4) The elapsed time the command ran (and its starting time) */
 	tmp = boottime;
 	timevaladd(&tmp, &p->p_stats->p_start);
 	acct.ac_btime = tmp.tv_sec;
@@ -383,7 +392,7 @@ acct_process(struct thread *td)
 	timevalsub(&tmp, &p->p_stats->p_start);
 	acct.ac_etime = encode_timeval(tmp);
 
-	/* (4) The average amount of memory used */
+	/* (5) The average amount of memory used */
 	tmp = ut;
 	timevaladd(&tmp, &st);
 	/* Convert tmp (i.e. u + s) into hz units to match ru_i*. */
@@ -394,20 +403,12 @@ acct_process(struct thread *td)
 	else
 		acct.ac_mem = 0;
 
-	/* (5) The number of disk I/O operations done */
+	/* (6) The number of disk I/O operations done */
 	acct.ac_io = encode_long(ru.ru_inblock + ru.ru_oublock);
 
-	/* (6) The UID and GID of the process */
+	/* (7) The UID and GID of the process */
 	acct.ac_uid = p->p_ucred->cr_ruid;
 	acct.ac_gid = p->p_ucred->cr_rgid;
-
-	/* (7) The terminal from which the process was started */
-	SESS_LOCK(p->p_session);
-	if ((p->p_flag & P_CONTROLT) && p->p_pgrp->pg_session->s_ttyp)
-		acct.ac_tty = dev2udev(p->p_pgrp->pg_session->s_ttyp->t_dev);
-	else
-		acct.ac_tty = NODEV;
-	SESS_UNLOCK(p->p_session);
 
 	/* (8) The boolean flags that tell how the process terminated, etc. */
 	acct.ac_flagx = p->p_acflag;

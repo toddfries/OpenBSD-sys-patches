@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)resourcevar.h	8.4 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/sys/resourcevar.h,v 1.52 2007/06/09 21:48:44 attilio Exp $
+ * $FreeBSD: src/sys/sys/resourcevar.h,v 1.54 2008/08/20 08:31:58 ed Exp $
  */
 
 #ifndef	_SYS_RESOURCEVAR_H_
@@ -84,20 +84,17 @@ struct plimit {
  *
  * Locking guide:
  * (a) Constant from inception
- * (b) Locked by ui_mtxp
+ * (b) Lockless, updated using atomics
  * (c) Locked by global uihashtbl_mtx
  */
 struct uidinfo {
 	LIST_ENTRY(uidinfo) ui_hash;	/* (c) hash chain of uidinfos */
-	rlim_t	ui_sbsize;		/* (b) socket buffer space consumed */
+	long	ui_sbsize;		/* (b) socket buffer space consumed */
 	long	ui_proccnt;		/* (b) number of processes */
+	long	ui_ptscnt;		/* (b) number of pseudo-terminals */
 	uid_t	ui_uid;			/* (a) uid */
 	u_int	ui_ref;			/* (b) reference count */
-	struct mtx *ui_mtxp;		/* protect all counts/limits */
 };
-
-#define	UIDINFO_LOCK(ui)	mtx_lock((ui)->ui_mtxp)
-#define	UIDINFO_UNLOCK(ui)	mtx_unlock((ui)->ui_mtxp)
 
 struct proc;
 struct rusage_ext;
@@ -107,9 +104,10 @@ void	 addupc_intr(struct thread *td, uintfptr_t pc, u_int ticks);
 void	 addupc_task(struct thread *td, uintfptr_t pc, u_int ticks);
 void	 calccru(struct proc *p, struct timeval *up, struct timeval *sp);
 void	 calcru(struct proc *p, struct timeval *up, struct timeval *sp);
-int	 chgproccnt(struct uidinfo *uip, int diff, int maxval);
+int	 chgproccnt(struct uidinfo *uip, int diff, rlim_t maxval);
 int	 chgsbsize(struct uidinfo *uip, u_int *hiwat, u_int to,
 	    rlim_t maxval);
+int	 chgptscnt(struct uidinfo *uip, int diff, rlim_t maxval);
 int	 fuswintr(void *base);
 struct plimit
 	*lim_alloc(void);

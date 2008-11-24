@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/pci/ofw_pcib.c,v 1.8 2007/06/18 21:46:07 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/pci/ofw_pcib.c,v 1.9 2008/04/17 12:38:00 marius Exp $");
 
 #include "opt_ofw_pci.h"
 
@@ -86,9 +86,6 @@ static device_method_t ofw_pcib_methods[] = {
 
 	/* ofw_bus interface */
 	DEVMETHOD(ofw_bus_get_node,	ofw_pcib_gen_get_node),
-
-	/* ofw_pci interface */
-	DEVMETHOD(ofw_pci_adjust_busrange,	ofw_pcib_gen_adjust_busrange),
 
 	{ 0, 0 }
 };

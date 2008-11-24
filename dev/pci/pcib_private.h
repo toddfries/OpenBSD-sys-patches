@@ -27,7 +27,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/pci/pcib_private.h,v 1.13 2007/09/30 11:05:15 marius Exp $
+ * $FreeBSD: src/sys/dev/pci/pcib_private.h,v 1.14 2008/08/16 20:18:40 imp Exp $
  */
 
 #ifndef __PCIB_PRIVATE_H__
@@ -48,9 +48,10 @@ struct pcib_softc
 #define	PCIB_SUBTRACTIVE	0x1
 #define	PCIB_DISABLE_MSI	0x2
     uint16_t	command;	/* command register */
-    uint32_t	domain;		/* domain number */
-    uint8_t	secbus;		/* secondary bus number */
-    uint8_t	subbus;		/* subordinate bus number */
+    u_int	domain;		/* domain number */
+    u_int	pribus;		/* primary bus number */
+    u_int	secbus;		/* secondary bus number */
+    u_int	subbus;		/* subordinate bus number */
     pci_addr_t	pmembase;	/* base address of prefetchable memory */
     pci_addr_t	pmemlimit;	/* topmost address of prefetchable memory */
     pci_addr_t	membase;	/* base address of memory window */

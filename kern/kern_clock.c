@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_clock.c,v 1.202 2007/09/17 05:27:20 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_clock.c,v 1.209 2008/04/02 11:20:30 jeff Exp $");
 
 #include "opt_kdb.h"
 #include "opt_device_polling.h"
@@ -79,10 +79,7 @@ extern void hardclock_device_poll(void);
 #endif /* DEVICE_POLLING */
 
 static void initclocks(void *dummy);
-SYSINIT(clocks, SI_SUB_CLOCKS, SI_ORDER_FIRST, initclocks, NULL)
-
-/* Some of these don't belong here, but it's easiest to concentrate them. */
-long cp_time[CPUSTATES];
+SYSINIT(clocks, SI_SUB_CLOCKS, SI_ORDER_FIRST, initclocks, NULL);
 
 /* Spin-lock protecting profiling statistics. */
 static struct mtx time_lock;
@@ -91,10 +88,14 @@ static int
 sysctl_kern_cp_time(SYSCTL_HANDLER_ARGS)
 {
 	int error;
+	long cp_time[CPUSTATES];
 #ifdef SCTL_MASK32
 	int i;
 	unsigned int cp_time32[CPUSTATES];
+#endif
 
+	read_cpu_time(cp_time);
+#ifdef SCTL_MASK32
 	if (req->flags & SCTL_MASK32) {
 		if (!req->oldptr)
 			return SYSCTL_OUT(req, 0, sizeof(cp_time32));
@@ -113,6 +114,67 @@ sysctl_kern_cp_time(SYSCTL_HANDLER_ARGS)
 
 SYSCTL_PROC(_kern, OID_AUTO, cp_time, CTLTYPE_LONG|CTLFLAG_RD,
     0,0, sysctl_kern_cp_time, "LU", "CPU time statistics");
+
+static long empty[CPUSTATES];
+
+static int
+sysctl_kern_cp_times(SYSCTL_HANDLER_ARGS)
+{
+	struct pcpu *pcpu;
+	int error;
+	int c;
+	long *cp_time;
+#ifdef SCTL_MASK32
+	unsigned int cp_time32[CPUSTATES];
+	int i;
+#endif
+
+	if (!req->oldptr) {
+#ifdef SCTL_MASK32
+		if (req->flags & SCTL_MASK32)
+			return SYSCTL_OUT(req, 0, sizeof(cp_time32) * (mp_maxid + 1));
+		else
+#endif
+			return SYSCTL_OUT(req, 0, sizeof(long) * CPUSTATES * (mp_maxid + 1));
+	}
+	for (error = 0, c = 0; error == 0 && c <= mp_maxid; c++) {
+		if (!CPU_ABSENT(c)) {
+			pcpu = pcpu_find(c);
+			cp_time = pcpu->pc_cp_time;
+		} else {
+			cp_time = empty;
+		}
+#ifdef SCTL_MASK32
+		if (req->flags & SCTL_MASK32) {
+			for (i = 0; i < CPUSTATES; i++)
+				cp_time32[i] = (unsigned int)cp_time[i];
+			error = SYSCTL_OUT(req, cp_time32, sizeof(cp_time32));
+		} else
+#endif
+			error = SYSCTL_OUT(req, cp_time, sizeof(long) * CPUSTATES);
+	}
+	return error;
+}
+
+SYSCTL_PROC(_kern, OID_AUTO, cp_times, CTLTYPE_LONG|CTLFLAG_RD,
+    0,0, sysctl_kern_cp_times, "LU", "per-CPU time statistics");
+
+void
+read_cpu_time(long *cp_time)
+{
+	struct pcpu *pc;
+	int i, j;
+
+	/* Sum up global cp_time[]. */
+	bzero(cp_time, sizeof(long) * CPUSTATES);
+	for (i = 0; i <= mp_maxid; i++) {
+		if (CPU_ABSENT(i))
+			continue;
+		pc = pcpu_find(i);
+		for (j = 0; j < CPUSTATES; j++)
+			cp_time[j] += pc->pc_cp_time[j];
+	}
+}
 
 #ifdef SW_WATCHDOG
 #include <sys/watchdog.h>
@@ -230,6 +292,7 @@ hardclock_cpu(int usermode)
 	if (PMC_CPU_HAS_SAMPLES(PCPU_GET(cpuid)))
 		PMC_CALL_HOOK_UNLOCKED(curthread, PMC_FN_DO_SAMPLES, NULL);
 #endif
+	callout_tick();
 }
 
 /*
@@ -238,10 +301,9 @@ hardclock_cpu(int usermode)
 void
 hardclock(int usermode, uintfptr_t pc)
 {
-	int need_softclock = 0;
 
+	atomic_add_int((volatile int *)&ticks, 1);
 	hardclock_cpu(usermode);
-
 	tc_ticktock();
 	/*
 	 * If no separate statistics clock is available, run it from here.
@@ -252,30 +314,9 @@ hardclock(int usermode, uintfptr_t pc)
 		profclock(usermode, pc);
 		statclock(usermode);
 	}
-
 #ifdef DEVICE_POLLING
 	hardclock_device_poll();	/* this is very short and quick */
 #endif /* DEVICE_POLLING */
-
-	/*
-	 * Process callouts at a very low cpu priority, so we don't keep the
-	 * relatively high clock interrupt priority any longer than necessary.
-	 */
-	mtx_lock_spin_flags(&callout_lock, MTX_QUIET);
-	ticks++;
-	if (!TAILQ_EMPTY(&callwheel[ticks & callwheelmask])) {
-		need_softclock = 1;
-	} else if (softticks + 1 == ticks)
-		++softticks;
-	mtx_unlock_spin_flags(&callout_lock, MTX_QUIET);
-
-	/*
-	 * swi_sched acquires the thread lock, so we don't want to call it
-	 * with callout_lock held; incorrect locking order.
-	 */
-	if (need_softclock)
-		swi_sched(softclock_ih, 0);
-
 #ifdef SW_WATCHDOG
 	if (watchdog_enabled > 0 && --watchdog_ticks <= 0)
 		watchdog_fire();
@@ -405,24 +446,21 @@ statclock(int usermode)
 	struct thread *td;
 	struct proc *p;
 	long rss;
+	long *cp_time;
 
 	td = curthread;
 	p = td->td_proc;
 
-	thread_lock_flags(td, MTX_QUIET);
+	cp_time = (long *)PCPU_PTR(cp_time);
 	if (usermode) {
 		/*
 		 * Charge the time as appropriate.
 		 */
-#ifdef KSE
-		if (p->p_flag & P_SA)
-			thread_statclock(1);
-#endif
 		td->td_uticks++;
 		if (p->p_nice > NZERO)
-			atomic_add_long(&cp_time[CP_NICE], 1);
+			cp_time[CP_NICE]++;
 		else
-			atomic_add_long(&cp_time[CP_USER], 1);
+			cp_time[CP_USER]++;
 	} else {
 		/*
 		 * Came from kernel mode, so we were:
@@ -439,18 +477,14 @@ statclock(int usermode)
 		if ((td->td_pflags & TDP_ITHREAD) ||
 		    td->td_intr_nesting_level >= 2) {
 			td->td_iticks++;
-			atomic_add_long(&cp_time[CP_INTR], 1);
+			cp_time[CP_INTR]++;
 		} else {
-#ifdef KSE
-			if (p->p_flag & P_SA)
-				thread_statclock(0);
-#endif
 			td->td_pticks++;
 			td->td_sticks++;
 			if (!TD_IS_IDLETHREAD(td))
-				atomic_add_long(&cp_time[CP_SYS], 1);
+				cp_time[CP_SYS]++;
 			else
-				atomic_add_long(&cp_time[CP_IDLE], 1);
+				cp_time[CP_IDLE]++;
 		}
 	}
 
@@ -465,7 +499,8 @@ statclock(int usermode)
 	if (ru->ru_maxrss < rss)
 		ru->ru_maxrss = rss;
 	CTR4(KTR_SCHED, "statclock: %p(%s) prio %d stathz %d",
-	    td, td->td_proc->p_comm, td->td_priority, (stathz)?stathz:hz);
+	    td, td->td_name, td->td_priority, (stathz)?stathz:hz);
+	thread_lock_flags(td, MTX_QUIET);
 	sched_clock(td);
 	thread_unlock(td);
 }
@@ -573,7 +608,7 @@ watchdog_fire(void)
 
 #if defined(KDB) && !defined(KDB_UNATTENDED)
 	kdb_backtrace();
-	kdb_enter("watchdog timeout");
+	kdb_enter(KDB_WHY_WATCHDOG, "watchdog timeout");
 #else
 	panic("watchdog timeout");
 #endif

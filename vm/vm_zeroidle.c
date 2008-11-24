@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_zeroidle.c,v 1.50 2007/10/20 23:23:23 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_zeroidle.c,v 1.53 2008/08/03 14:26:15 trhodes Exp $");
 
 #include <opt_sched.h>
 
@@ -57,8 +57,8 @@ static int idlezero_enable_default = 0;
 TUNABLE_INT("vm.idlezero_enable", &idlezero_enable_default);
 /* Defer setting the enable flag until the kthread is running. */
 static int idlezero_enable = 0;
-SYSCTL_INT(_vm, OID_AUTO, idlezero_enable, CTLFLAG_RW, &idlezero_enable, 0, "");
-
+SYSCTL_INT(_vm, OID_AUTO, idlezero_enable, CTLFLAG_RW, &idlezero_enable, 0,
+    "Allow the kernel to use idle cpu cycles to zero-out pages");
 /*
  * Implement the pre-zeroed page mechanism.
  */
@@ -127,7 +127,7 @@ vm_pagezero(void __unused *arg)
 #ifndef PREEMPTION
 			if (sched_runnable()) {
 				thread_lock(curthread);
-				mi_switch(SW_VOL, NULL);
+				mi_switch(SW_VOL | SWT_IDLE, NULL);
 				thread_unlock(curthread);
 			}
 #endif
@@ -164,4 +164,4 @@ pagezero_start(void __unused *arg)
 	sched_add(td, SRQ_BORING);
 	thread_unlock(td);
 }
-SYSINIT(pagezero, SI_SUB_KTHREAD_VM, SI_ORDER_ANY, pagezero_start, NULL)
+SYSINIT(pagezero, SI_SUB_KTHREAD_VM, SI_ORDER_ANY, pagezero_start, NULL);

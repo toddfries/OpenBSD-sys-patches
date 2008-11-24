@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/at91/at91_spi.c,v 1.6 2007/02/27 17:15:39 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/at91/at91_spi.c,v 1.7 2008/10/07 17:23:16 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -97,9 +97,9 @@ at91_spi_attach(device_t dev)
 	/*
 	 * Allocate DMA tags and maps
 	 */
-	err = bus_dma_tag_create(NULL, 1, 0, BUS_SPACE_MAXADDR_32BIT,
-	    BUS_SPACE_MAXADDR, NULL, NULL, 2058, 1, 2048, BUS_DMA_ALLOCNOW,
-	    NULL, NULL, &sc->dmatag);
+	err = bus_dma_tag_create(bus_get_dma_tag(dev), 1, 0,
+	    BUS_SPACE_MAXADDR_32BIT, BUS_SPACE_MAXADDR, NULL, NULL, 2058, 1,
+	    2048, BUS_DMA_ALLOCNOW, NULL, NULL, &sc->dmatag);
 	if (err != 0)
 		goto out;
 	for (i = 0; i < 4; i++) {

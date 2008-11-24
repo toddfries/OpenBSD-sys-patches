@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_logging.c,v 1.9 2007/12/07 08:20:15 jkoshy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_logging.c,v 1.11 2008/11/09 17:07:58 svn Exp $");
 
 #include <sys/param.h>
 #include <sys/file.h>
@@ -973,8 +973,8 @@ pmclog_initialize()
 
 	/* create global pool of log buffers */
 	for (n = 0; n < pmc_nlogbuffers; n++) {
-		MALLOC(plb, struct pmclog_buffer *, 1024 * pmclog_buffer_size,
-		    M_PMC, M_ZERO|M_WAITOK);
+		plb = malloc(1024 * pmclog_buffer_size, M_PMC,
+		    M_WAITOK|M_ZERO);
 		PMCLOG_INIT_BUFFER_DESCRIPTOR(plb);
 		TAILQ_INSERT_HEAD(&pmc_bufferlist, plb, plb_next);
 	}
@@ -999,6 +999,6 @@ pmclog_shutdown()
 
 	while ((plb = TAILQ_FIRST(&pmc_bufferlist)) != NULL) {
 		TAILQ_REMOVE(&pmc_bufferlist, plb, plb_next);
-		FREE(plb, M_PMC);
+		free(plb, M_PMC);
 	}
 }

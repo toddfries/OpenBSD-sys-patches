@@ -27,11 +27,12 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/linux/linux_sysvec.c,v 1.150 2007/09/20 13:46:26 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/linux/linux_sysvec.c,v 1.157 2008/11/22 12:36:15 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/exec.h>
+#include <sys/fcntl.h>
 #include <sys/imgact.h>
 #include <sys/imgact_aout.h>
 #include <sys/imgact_elf.h>
@@ -239,8 +240,7 @@ elf_linux_fixup(register_t **stack_base, struct image_params *imgp)
 	Elf32_Auxargs *args;
 	register_t *pos;
 
-	KASSERT(curthread->td_proc == imgp->proc &&
-	    (curthread->td_proc->p_flag & P_SA) == 0,
+	KASSERT(curthread->td_proc == imgp->proc,
 	    ("unsafe elf_linux_fixup(), should be curproc"));
 	args = (Elf32_Auxargs *)imgp->auxargs;
 	pos = *stack_base + (imgp->args->argc + imgp->args->envc + 2);
@@ -323,9 +323,7 @@ linux_rt_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	frame.sf_ucontext = &fp->sf_sc;
 
 	/* Fill in POSIX parts */
-	frame.sf_si.lsi_signo = sig;
-	frame.sf_si.lsi_code = code;
-	frame.sf_si.lsi_addr = ksi->ksi_addr;
+	ksiginfo_to_lsiginfo(ksi, &frame.sf_si, sig);
 
 	/*
 	 * Build the signal context to be used by sigreturn.
@@ -389,7 +387,7 @@ linux_rt_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	regs->tf_esp = (int)fp;
 	regs->tf_eip = PS_STRINGS - *(p->p_sysent->sv_szsigcode) +
 	    linux_sznonrtsigcode;
-	regs->tf_eflags &= ~(PSL_T | PSL_VM);
+	regs->tf_eflags &= ~(PSL_T | PSL_VM | PSL_D);
 	regs->tf_cs = _ucodesel;
 	regs->tf_ds = _udatasel;
 	regs->tf_es = _udatasel;
@@ -508,7 +506,7 @@ linux_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	 */
 	regs->tf_esp = (int)fp;
 	regs->tf_eip = PS_STRINGS - *(p->p_sysent->sv_szsigcode);
-	regs->tf_eflags &= ~(PSL_T | PSL_VM);
+	regs->tf_eflags &= ~(PSL_T | PSL_VM | PSL_D);
 	regs->tf_cs = _ucodesel;
 	regs->tf_ds = _udatasel;
 	regs->tf_es = _udatasel;
@@ -777,7 +775,7 @@ exec_linux_imgact_try(struct image_params *imgp)
 	     */
 	    if ((error = exec_shell_imgact(imgp)) == 0) {
 		    linux_emul_convpath(FIRST_THREAD_IN_PROC(imgp->proc),
-			imgp->interpreter_name, UIO_SYSSPACE, &rpath, 0);
+			imgp->interpreter_name, UIO_SYSSPACE, &rpath, 0, AT_FDCWD);
 		    if (rpath != NULL) {
 			    len = strlen(rpath) + 1;
 
@@ -813,90 +811,94 @@ exec_linux_setregs(struct thread *td, u_long entry,
 }
 
 struct sysentvec linux_sysvec = {
-	LINUX_SYS_MAXSYSCALL,
-	linux_sysent,
-	0,
-	LINUX_SIGTBLSZ,
-	bsd_to_linux_signal,
-	ELAST + 1,
-	bsd_to_linux_errno,
-	translate_traps,
-	linux_fixup,
-	linux_sendsig,
-	linux_sigcode,
-	&linux_szsigcode,
-	linux_prepsyscall,
-	"Linux a.out",
-	NULL,
-	exec_linux_imgact_try,
-	LINUX_MINSIGSTKSZ,
-	PAGE_SIZE,
-	VM_MIN_ADDRESS,
-	VM_MAXUSER_ADDRESS,
-	USRSTACK,
-	PS_STRINGS,
-	VM_PROT_ALL,
-	exec_copyout_strings,
-	exec_linux_setregs,
-	NULL
+	.sv_size	= LINUX_SYS_MAXSYSCALL,
+	.sv_table	= linux_sysent,
+	.sv_mask	= 0,
+	.sv_sigsize	= LINUX_SIGTBLSZ,
+	.sv_sigtbl	= bsd_to_linux_signal,
+	.sv_errsize	= ELAST + 1,
+	.sv_errtbl	= bsd_to_linux_errno,
+	.sv_transtrap	= translate_traps,
+	.sv_fixup	= linux_fixup,
+	.sv_sendsig	= linux_sendsig,
+	.sv_sigcode	= linux_sigcode,
+	.sv_szsigcode	= &linux_szsigcode,
+	.sv_prepsyscall	= linux_prepsyscall,
+	.sv_name	= "Linux a.out",
+	.sv_coredump	= NULL,
+	.sv_imgact_try	= exec_linux_imgact_try,
+	.sv_minsigstksz	= LINUX_MINSIGSTKSZ,
+	.sv_pagesize	= PAGE_SIZE,
+	.sv_minuser	= VM_MIN_ADDRESS,
+	.sv_maxuser	= VM_MAXUSER_ADDRESS,
+	.sv_usrstack	= USRSTACK,
+	.sv_psstrings	= PS_STRINGS,
+	.sv_stackprot	= VM_PROT_ALL,
+	.sv_copyout_strings = exec_copyout_strings,
+	.sv_setregs	= exec_linux_setregs,
+	.sv_fixlimit	= NULL,
+	.sv_maxssiz	= NULL,
+	.sv_flags	= SV_ABI_LINUX | SV_AOUT | SV_IA32 | SV_ILP32
 };
 
 struct sysentvec elf_linux_sysvec = {
-	LINUX_SYS_MAXSYSCALL,
-	linux_sysent,
-	0,
-	LINUX_SIGTBLSZ,
-	bsd_to_linux_signal,
-	ELAST + 1,
-	bsd_to_linux_errno,
-	translate_traps,
-	elf_linux_fixup,
-	linux_sendsig,
-	linux_sigcode,
-	&linux_szsigcode,
-	linux_prepsyscall,
-	"Linux ELF",
-	elf32_coredump,
-	exec_linux_imgact_try,
-	LINUX_MINSIGSTKSZ,
-	PAGE_SIZE,
-	VM_MIN_ADDRESS,
-	VM_MAXUSER_ADDRESS,
-	USRSTACK,
-	PS_STRINGS,
-	VM_PROT_ALL,
-	exec_copyout_strings,
-	exec_linux_setregs,
-	NULL
+	.sv_size	= LINUX_SYS_MAXSYSCALL,
+	.sv_table	= linux_sysent,
+	.sv_mask	= 0,
+	.sv_sigsize	= LINUX_SIGTBLSZ,
+	.sv_sigtbl	= bsd_to_linux_signal,
+	.sv_errsize	= ELAST + 1,
+	.sv_errtbl	= bsd_to_linux_errno,
+	.sv_transtrap	= translate_traps,
+	.sv_fixup	= elf_linux_fixup,
+	.sv_sendsig	= linux_sendsig,
+	.sv_sigcode	= linux_sigcode,
+	.sv_szsigcode	= &linux_szsigcode,
+	.sv_prepsyscall	= linux_prepsyscall,
+	.sv_name	= "Linux ELF",
+	.sv_coredump	= elf32_coredump,
+	.sv_imgact_try	= exec_linux_imgact_try,
+	.sv_minsigstksz	= LINUX_MINSIGSTKSZ,
+	.sv_pagesize	= PAGE_SIZE,
+	.sv_minuser	= VM_MIN_ADDRESS,
+	.sv_maxuser	= VM_MAXUSER_ADDRESS,
+	.sv_usrstack	= USRSTACK,
+	.sv_psstrings	= PS_STRINGS,
+	.sv_stackprot	= VM_PROT_ALL,
+	.sv_copyout_strings = exec_copyout_strings,
+	.sv_setregs	= exec_linux_setregs,
+	.sv_fixlimit	= NULL,
+	.sv_maxssiz	= NULL,
+	.sv_flags	= SV_ABI_LINUX | SV_IA32 | SV_ILP32
 };
 
 static Elf32_Brandinfo linux_brand = {
-					ELFOSABI_LINUX,
-					EM_386,
-					"Linux",
-					"/compat/linux",
-					"/lib/ld-linux.so.1",
-					&elf_linux_sysvec,
-					NULL,
-					BI_CAN_EXEC_DYN,
-				 };
+	.brand		= ELFOSABI_LINUX,
+	.machine	= EM_386,
+	.compat_3_brand	= "Linux",
+	.emul_path	= "/compat/linux",
+	.interp_path	= "/lib/ld-linux.so.1",
+	.sysvec		= &elf_linux_sysvec,
+	.interp_newpath	= NULL,
+	.flags		= BI_CAN_EXEC_DYN,
+};
 
 static Elf32_Brandinfo linux_glibc2brand = {
-					ELFOSABI_LINUX,
-					EM_386,
-					"Linux",
-					"/compat/linux",
-					"/lib/ld-linux.so.2",
-					&elf_linux_sysvec,
-					NULL,
-					BI_CAN_EXEC_DYN,
-				 };
+	.brand		= ELFOSABI_LINUX,
+	.machine	= EM_386,
+	.compat_3_brand	= "Linux",
+	.emul_path	= "/compat/linux",
+	.interp_path	= "/lib/ld-linux.so.2",
+	.sysvec		= &elf_linux_sysvec,
+	.interp_newpath	= NULL,
+	.flags		= BI_CAN_EXEC_DYN,
+};
 
 Elf32_Brandinfo *linux_brandlist[] = {
-					&linux_brand,
-					&linux_glibc2brand,
-					NULL
-				};
+	&linux_brand,
+	&linux_glibc2brand,
+	NULL
+};
 
 static int
 linux_elf_modevent(module_t mod, int type, void *data)

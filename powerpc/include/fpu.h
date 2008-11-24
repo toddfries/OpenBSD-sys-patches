@@ -29,7 +29,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  *	$NetBSD: fpu.h,v 1.2 1999/12/07 15:14:56 danw Exp $
- * $FreeBSD: src/sys/powerpc/include/fpu.h,v 1.3 2003/02/05 11:37:59 benno Exp $
+ * $FreeBSD: src/sys/powerpc/include/fpu.h,v 1.4 2007/12/16 00:45:56 marcel Exp $
  */
 
 #ifndef	_MACHINE_FPU_H_
@@ -70,13 +70,9 @@
 
 #ifdef _KERNEL
 
-/* List of PowerPC architectures that support FPUs. */
-#if defined(OEA)
-#define PPC_HAVE_FPU
-
 void    enable_fpu(struct thread *);
 void    save_fpu(struct thread *);
-#endif /* PPC_HAVE_FPU */
+
 #endif /* _KERNEL */
 
 #endif	/* _MACHINE_FPU_H_ */

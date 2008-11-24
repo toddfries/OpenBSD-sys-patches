@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/elf_trampoline.c,v 1.18 2007/07/27 14:42:25 cognet Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/elf_trampoline.c,v 1.22 2008/10/13 20:07:13 raj Exp $");
 #include <machine/asm.h>
 #include <sys/param.h>
 #include <sys/elf32.h>
@@ -32,8 +32,6 @@ __FBSDID("$FreeBSD: src/sys/arm/arm/elf_trampoline.c,v 1.18 2007/07/27 14:42:25 
 #include <machine/pte.h>
 #include <machine/cpufunc.h>
 #include <machine/armreg.h>
-
-#include <stdlib.h>
 
 /*
  * Since we are compiled outside of the normal kernel build process, we
@@ -47,6 +45,7 @@ extern char kernel_end[];
 
 extern void *_end;
 
+void _start(void);
 void __start(void);
 void __startC(void);
 
@@ -58,6 +57,8 @@ void __startC(void);
 #define cpu_idcache_wbinv_all	arm8_cache_purgeID
 #elif defined(CPU_ARM9)
 #define cpu_idcache_wbinv_all	arm9_idcache_wbinv_all
+#elif defined(CPU_ARM9E)
+#define cpu_idcache_wbinv_all	armv5_ec_idcache_wbinv_all
 #elif defined(CPU_ARM10)
 #define cpu_idcache_wbinv_all	arm10_idcache_wbinv_all
 #elif defined(CPU_SA110) || defined(CPU_SA1110) || defined(CPU_SA1100) || \
@@ -72,6 +73,8 @@ void __startC(void);
 #endif
 #ifdef CPU_XSCALE_81342
 #define cpu_l2cache_wbinv_all	xscalec3_l2cache_purge
+#elif defined(SOC_MV_KIRKWOOD) || defined(SOC_MV_DISCOVERY)
+#define cpu_l2cache_wbinv_all	feroceon_l2cache_wbinv_all
 #else
 #define cpu_l2cache_wbinv_all()	
 #endif

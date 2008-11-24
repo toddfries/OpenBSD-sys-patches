@@ -1,7 +1,7 @@
 #
 # DEFAULTS -- Default kernel configuration file for FreeBSD/ia64
 #
-# $FreeBSD: src/sys/ia64/conf/DEFAULTS,v 1.11 2007/06/13 05:07:41 marcel Exp $
+# $FreeBSD: src/sys/ia64/conf/DEFAULTS,v 1.15 2008/04/21 10:09:54 phk Exp $
 
 machine		ia64
 
@@ -14,9 +14,6 @@ device		mem		# Memory and kernel memory devices
 # UART chips on this platform
 device		uart_ns8250
 
-options 	GEOM_BSD
+options 	GEOM_PART_BSD
 options 	GEOM_PART_GPT
 options 	GEOM_PART_MBR
-
-# KSE support went from being default to a kernel option
-options 	KSE

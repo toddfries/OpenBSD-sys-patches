@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_ktrace.c,v 1.122 2007/10/24 19:03:54 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_ktrace.c,v 1.126 2008/02/23 01:01:48 des Exp $");
 
 #include "opt_ktrace.h"
 #include "opt_mac.h"
@@ -51,6 +51,8 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_ktrace.c,v 1.122 2007/10/24 19:03:54 rwats
 #include <sys/proc.h>
 #include <sys/unistd.h>
 #include <sys/vnode.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/ktrace.h>
 #include <sys/sx.h>
 #include <sys/sysctl.h>
@@ -107,7 +109,8 @@ static int data_lengths[] = {
 	sizeof(struct ktr_genio),		/* KTR_GENIO */
 	sizeof(struct ktr_psig),		/* KTR_PSIG */
 	sizeof(struct ktr_csw),			/* KTR_CSW */
-	0					/* KTR_USER */
+	0,					/* KTR_USER */
+	0,					/* KTR_STRUCT */
 };
 
 static STAILQ_HEAD(, ktr_request) ktr_free;
@@ -280,7 +283,7 @@ ktr_getrequest(int type)
 		microtime(&req->ktr_header.ktr_time);
 		req->ktr_header.ktr_pid = p->p_pid;
 		req->ktr_header.ktr_tid = td->td_tid;
-		bcopy(p->p_comm, req->ktr_header.ktr_comm, MAXCOMLEN + 1);
+		bcopy(td->td_name, req->ktr_header.ktr_comm, MAXCOMLEN + 1);
 		req->ktr_buffer = NULL;
 		req->ktr_header.ktr_len = 0;
 	} else {
@@ -552,6 +555,33 @@ ktrcsw(out, user)
 	kc->user = user;
 	ktr_enqueuerequest(curthread, req);
 }
+
+void
+ktrstruct(name, namelen, data, datalen)
+	const char *name;
+	size_t namelen;
+	void *data;
+	size_t datalen;
+{
+	struct ktr_request *req;
+	char *buf = NULL;
+	size_t buflen;
+
+	if (!data)
+		datalen = 0;
+	buflen = namelen + 1 + datalen;
+	buf = malloc(buflen, M_KTRACE, M_WAITOK);
+	bcopy(name, buf, namelen);
+	buf[namelen] = '\0';
+	bcopy(data, buf + namelen + 1, datalen);
+	if ((req = ktr_getrequest(KTR_STRUCT)) == NULL) {
+		free(buf, M_KTRACE);
+		return;
+	}
+	req->ktr_buffer = buf;
+	req->ktr_header.ktr_len = buflen;
+	ktr_submitrequest(curthread, req);
+}
 #endif /* KTRACE */
 
 /* Interface and common routines */
@@ -604,7 +634,7 @@ ktrace(td, uap)
 		vfslocked = NDHASGIANT(&nd);
 		NDFREE(&nd, NDF_ONLY_PNBUF);
 		vp = nd.ni_vp;
-		VOP_UNLOCK(vp, 0, td);
+		VOP_UNLOCK(vp, 0);
 		if (vp->v_type != VREG) {
 			(void) vn_close(vp, FREAD|FWRITE, td->td_ucred, td);
 			VFS_UNLOCK_GIANT(vfslocked);
@@ -924,14 +954,14 @@ ktr_writerequest(struct thread *td, struct ktr_request *req)
 
 	vfslocked = VFS_LOCK_GIANT(vp->v_mount);
 	vn_start_write(vp, &mp, V_WAIT);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	(void)VOP_LEASE(vp, td, cred, LEASE_WRITE);
 #ifdef MAC
 	error = mac_vnode_check_write(cred, NOCRED, vp);
 	if (error == 0)
 #endif
 		error = VOP_WRITE(vp, &auio, IO_UNIT | IO_APPEND, cred);
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	vn_finished_write(mp);
 	vrele(vp);
 	VFS_UNLOCK_GIANT(vfslocked);

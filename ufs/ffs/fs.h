@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)fs.h	8.13 (Berkeley) 3/21/95
- * $FreeBSD: src/sys/ufs/ffs/fs.h,v 1.49 2006/10/31 21:48:53 pjd Exp $
+ * $FreeBSD: src/sys/ufs/ffs/fs.h,v 1.50 2008/05/24 20:44:14 rodrigc Exp $
  */
 
 #ifndef _UFS_FFS_FS_H_
@@ -103,8 +103,8 @@
  * 2^32 with only two levels of indirection, MINBSIZE is set to 4096.
  * MINBSIZE must be big enough to hold a cylinder group block,
  * thus changes to (struct cg) must keep its size within MINBSIZE.
- * Note that super blocks are always of size SBSIZE,
- * and that both SBSIZE and MAXBSIZE must be >= MINBSIZE.
+ * Note that super blocks are always of size SBLOCKSIZE,
+ * and that both SBLOCKSIZE and MAXBSIZE must be >= MINBSIZE.
  */
 #define MINBSIZE	4096
 

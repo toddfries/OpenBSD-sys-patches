@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/pci/intpm.c,v 1.40 2007/10/15 16:18:20 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/pci/intpm.c,v 1.42 2008/06/06 18:29:56 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -110,6 +110,8 @@ intsmb_attach(device_t dev)
 	int error, rid, value;
 	char *str;
 
+	sc->dev = dev;
+
 	mtx_init(&sc->lock, device_get_nameunit(dev), "intsmb", MTX_DEF);
 
 	rid = PCI_BASE_ADDR_SMB;
@@ -158,8 +160,8 @@ intsmb_attach(device_t dev)
 		goto fail;
 	}
 
-	error = bus_setup_intr(dev, sc->irq_res, INTR_TYPE_MISC, NULL, 
-	    intsmb_rawintr, sc, &sc->irq_hand);
+	error = bus_setup_intr(dev, sc->irq_res, INTR_TYPE_MISC | INTR_MPSAFE,
+	    NULL, intsmb_rawintr, sc, &sc->irq_hand);
 	if (error) {
 		device_printf(dev, "Failed to map intr\n");
 		goto fail;
@@ -410,7 +412,7 @@ intsmb_stop_poll(struct intsmb_softc *sc)
 			sc->isbusy = 0;
 			error = intsmb_error(status);
 			if (error == 0 && !(status & PIIX4_SMBHSTSTAT_INTR))
-				device_printf(sc->dev, "unknown cause why?");
+				device_printf(sc->dev, "unknown cause why?\n");
 			return (error);
 		}
 	}

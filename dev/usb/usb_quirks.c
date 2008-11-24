@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/usb_quirks.c,v 1.65 2008/03/14 15:59:30 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/usb_quirks.c,v 1.69 2008/11/12 13:32:19 cperciva Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -90,6 +90,10 @@ static const struct usbd_quirk_entry {
    ANY, { UQ_MS_BAD_CLASS | UQ_MS_LEADING_BYTE }},
  { USB_VENDOR_MICROSOFT, USB_PRODUCT_MICROSOFT_WLINTELLIMOUSE,
    ANY, { UQ_MS_LEADING_BYTE }},
+ { USB_VENDOR_MICROSOFT, USB_PRODUCT_MICROSOFT_COMFORT3000,
+   ANY, { UQ_MS_BAD_CLASS | UQ_MS_LEADING_BYTE }},
+ { USB_VENDOR_SONY, USB_PRODUCT_SONY_RF_RECEIVER,
+   ANY,{ UQ_MS_BAD_CLASS }},
 
  /* Devices which should be ignored by uhid */
  { USB_VENDOR_APC, USB_PRODUCT_APC_UPS,
@@ -98,6 +102,8 @@ static const struct usbd_quirk_entry {
 	ANY, { UQ_HID_IGNORE }},
  { USB_VENDOR_BELKIN, USB_PRODUCT_BELKIN_F6C550AVR,
 	ANY, { UQ_HID_IGNORE }},
+ { USB_VENDOR_CYBERPOWER, USB_PRODUCT_CYBERPOWER_1500CAVRLCD,
+	ANY, { UQ_HID_IGNORE }},
  { USB_VENDOR_DELORME, USB_PRODUCT_DELORME_EARTHMATE,
 	ANY, { UQ_HID_IGNORE }},
  { USB_VENDOR_ITUNERNET, USB_PRODUCT_ITUNERNET_USBLCD2X20,
@@ -105,6 +111,10 @@ static const struct usbd_quirk_entry {
  { USB_VENDOR_MGE, USB_PRODUCT_MGE_UPS1,
 	ANY, { UQ_HID_IGNORE }},
  { USB_VENDOR_MGE, USB_PRODUCT_MGE_UPS2,
+	ANY, { UQ_HID_IGNORE }},
+ { USB_VENDOR_APPLE, USB_PRODUCT_APPLE_IPHONE,
+	ANY, { UQ_HID_IGNORE }},
+ { USB_VENDOR_APPLE, USB_PRODUCT_APPLE_IPHONE_3G,
 	ANY, { UQ_HID_IGNORE }},
 
  /* Devices which should be ignored by both ukbd and uhid */

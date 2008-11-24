@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)if.c	8.5 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/net/if_clone.c,v 1.11 2006/07/09 06:04:00 sam Exp $
+ * $FreeBSD: src/sys/net/if_clone.c,v 1.12 2008/09/20 19:38:37 thompsa Exp $
  */
 
 #include <sys/param.h>
@@ -53,7 +53,6 @@
 static void	if_clone_free(struct if_clone *ifc);
 static int	if_clone_createif(struct if_clone *ifc, char *name, size_t len,
 		    caddr_t params);
-static int	if_clone_destroyif(struct if_clone *ifc, struct ifnet *ifp);
 
 static struct mtx	if_cloners_mtx;
 static int		if_cloners_count;
@@ -199,7 +198,7 @@ if_clone_destroy(const char *name)
 /*
  * Destroy a clone network interface.
  */
-static int
+int
 if_clone_destroyif(struct if_clone *ifc, struct ifnet *ifp)
 {
 	int err;

@@ -35,9 +35,10 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_exit.c,v 1.306 2007/10/26 08:00:41 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_exit.c,v 1.315 2008/10/15 06:31:37 davidxu Exp $");
 
 #include "opt_compat.h"
+#include "opt_kdtrace.h"
 #include "opt_ktrace.h"
 #include "opt_mac.h"
 
@@ -65,6 +66,7 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_exit.c,v 1.306 2007/10/26 08:00:41 julian 
 #include <sys/ptrace.h>
 #include <sys/acct.h>		/* for acct_process() function prototype */
 #include <sys/filedesc.h>
+#include <sys/sdt.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
 #ifdef KTRACE
@@ -81,6 +83,15 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_exit.c,v 1.306 2007/10/26 08:00:41 julian 
 #include <vm/vm_map.h>
 #include <vm/vm_page.h>
 #include <vm/uma.h>
+
+#ifdef KDTRACE_HOOKS
+#include <sys/dtrace_bsd.h>
+dtrace_execexit_func_t	dtrace_fasttrap_exit;
+#endif
+
+SDT_PROVIDER_DECLARE(proc);
+SDT_PROBE_DEFINE(proc, kernel, , exit);
+SDT_PROBE_ARGTYPE(proc, kernel, , exit, 0, "int");
 
 /* Required to be non-static for SysVR4 emulator */
 MALLOC_DEFINE(M_ZOMBIE, "zombie", "zombie proc status");
@@ -108,9 +119,8 @@ void
 exit1(struct thread *td, int rv)
 {
 	struct proc *p, *nq, *q;
-	struct tty *tp;
-	struct vnode *ttyvp;
 	struct vnode *vtmp;
+	struct vnode *ttyvp = NULL;
 #ifdef KTRACE
 	struct vnode *tracevp;
 	struct ucred *tracecred;
@@ -118,12 +128,7 @@ exit1(struct thread *td, int rv)
 	struct plimit *plim;
 	int locked;
 
-	/*
-	 * Drop Giant if caller has it.  Eventually we should warn about
-	 * being called with Giant held.
-	 */ 
-	while (mtx_owned(&Giant))
-		mtx_unlock(&Giant);
+	mtx_assert(&Giant, MA_NOTOWNED);
 
 	p = td->td_proc;
 	if (p == initproc) {
@@ -292,56 +297,48 @@ exit1(struct thread *td, int rv)
 
 	vmspace_exit(td);
 
-	mtx_lock(&Giant);	/* XXX TTY */
 	sx_xlock(&proctree_lock);
 	if (SESS_LEADER(p)) {
 		struct session *sp;
 
 		sp = p->p_session;
-		if (sp->s_ttyvp) {
+
+		SESS_LOCK(sp);
+		ttyvp = sp->s_ttyvp;
+		sp->s_ttyvp = NULL;
+		SESS_UNLOCK(sp);
+
+		if (ttyvp != NULL) {
 			/*
 			 * Controlling process.
-			 * Signal foreground pgrp,
-			 * drain controlling terminal
-			 * and revoke access to controlling terminal.
+			 * Signal foreground pgrp and revoke access to
+			 * controlling terminal.
+			 *
+			 * There is no need to drain the terminal here,
+			 * because this will be done on revocation.
 			 */
-			if (sp->s_ttyp && (sp->s_ttyp->t_session == sp)) {
-				tp = sp->s_ttyp;
-				if (sp->s_ttyp->t_pgrp) {
-					PGRP_LOCK(sp->s_ttyp->t_pgrp);
-					pgsignal(sp->s_ttyp->t_pgrp, SIGHUP, 1);
-					PGRP_UNLOCK(sp->s_ttyp->t_pgrp);
-				}
-				/* XXX tp should be locked. */
-				sx_xunlock(&proctree_lock);
-				(void) ttywait(tp);
-				sx_xlock(&proctree_lock);
+			if (sp->s_ttyp != NULL) {
+				struct tty *tp = sp->s_ttyp;
+
+				tty_lock(tp);
+				tty_signal_pgrp(tp, SIGHUP);
+				tty_unlock(tp);
+
 				/*
 				 * The tty could have been revoked
 				 * if we blocked.
 				 */
-				if (sp->s_ttyvp) {
-					ttyvp = sp->s_ttyvp;
-					SESS_LOCK(p->p_session);
-					sp->s_ttyvp = NULL;
-					SESS_UNLOCK(p->p_session);
+				if (ttyvp->v_type != VBAD) {
 					sx_xunlock(&proctree_lock);
-					VOP_LOCK(ttyvp, LK_EXCLUSIVE, td);
+					VOP_LOCK(ttyvp, LK_EXCLUSIVE);
 					VOP_REVOKE(ttyvp, REVOKEALL);
-					vput(ttyvp);
+					VOP_UNLOCK(ttyvp, 0);
 					sx_xlock(&proctree_lock);
 				}
 			}
-			if (sp->s_ttyvp) {
-				ttyvp = sp->s_ttyvp;
-				SESS_LOCK(p->p_session);
-				sp->s_ttyvp = NULL;
-				SESS_UNLOCK(p->p_session);
-				vrele(ttyvp);
-			}
 			/*
-			 * s_ttyp is not zero'd; we use this to indicate
-			 * that the session once had a controlling terminal.
+			 * s_ttyp is not zero'd; we use this to indicate that
+			 * the session once had a controlling terminal.
 			 * (for logging and informational purposes)
 			 */
 		}
@@ -352,7 +349,10 @@ exit1(struct thread *td, int rv)
 	fixjobc(p, p->p_pgrp, 0);
 	sx_xunlock(&proctree_lock);
 	(void)acct_process(td);
-	mtx_unlock(&Giant);	
+
+	/* Release the TTY now we've unlocked everything. */
+	if (ttyvp != NULL)
+		vrele(ttyvp);
 #ifdef KTRACE
 	/*
 	 * Disable tracing, then drain any pending records and release
@@ -438,7 +438,11 @@ exit1(struct thread *td, int rv)
 		 * since their existence means someone is screwing up.
 		 */
 		if (q->p_flag & P_TRACED) {
+			struct thread *temp;
+
 			q->p_flag &= ~(P_TRACED | P_STOPPED_TRACE);
+			FOREACH_THREAD_IN_PROC(q, temp)
+				temp->td_dbgflags &= ~TDB_SUSPEND;
 			psignal(q, SIGKILL);
 		}
 		PROC_UNLOCK(q);
@@ -448,10 +452,29 @@ exit1(struct thread *td, int rv)
 	PROC_LOCK(p);
 	p->p_xstat = rv;
 	p->p_xthread = td;
+
+#ifdef KDTRACE_HOOKS
+	/*
+	 * Tell the DTrace fasttrap provider about the exit if it
+	 * has declared an interest.
+	 */
+	if (dtrace_fasttrap_exit)
+		dtrace_fasttrap_exit(p);
+#endif
+
 	/*
 	 * Notify interested parties of our demise.
 	 */
 	KNOTE_LOCKED(&p->p_klist, NOTE_EXIT);
+
+#ifdef KDTRACE_HOOKS
+	int reason = CLD_EXITED;
+	if (WCOREDUMP(rv))
+		reason = CLD_DUMPED;
+	else if (WIFSIGNALED(rv))
+		reason = CLD_KILLED;
+	SDT_PROBE(proc, kernel, , exit, reason, 0, 0, 0, 0);
+#endif
 
 	/*
 	 * Just delete all entries in the p_klist. At this point we won't
@@ -515,9 +538,7 @@ exit1(struct thread *td, int rv)
 	 * proc lock.
 	 */
 	wakeup(p->p_pptr);
-	PROC_SLOCK(p->p_pptr);
 	sched_exit(p->p_pptr, td);
-	PROC_SUNLOCK(p->p_pptr);
 	PROC_SLOCK(p);
 	p->p_state = PRS_ZOMBIE;
 	PROC_UNLOCK(p->p_pptr);
@@ -577,11 +598,13 @@ abort2(struct thread *td, struct abort2_args *uap)
 	/* Prevent from DoSes from user-space. */
 	if (uap->nargs < 0 || uap->nargs > 16)
 		goto out;
-	if (uap->args == NULL)
-		goto out;
-	error = copyin(uap->args, uargs, uap->nargs * sizeof(void *));
-	if (error != 0)
-		goto out;
+	if (uap->nargs > 0) {
+		if (uap->args == NULL)
+			goto out;
+		error = copyin(uap->args, uargs, uap->nargs * sizeof(void *));
+		if (error != 0)
+			goto out;
+	}
 	/*
 	 * Limit size of 'reason' string to 128. Will fit even when
 	 * maximal number of arguments was chosen to be logged.
@@ -593,7 +616,7 @@ abort2(struct thread *td, struct abort2_args *uap)
 	} else {
 		sbuf_printf(sb, "(null)");
 	}
-	if (uap->nargs) {
+	if (uap->nargs > 0) {
 		sbuf_printf(sb, "(");
 		for (i = 0;i < uap->nargs; i++)
 			sbuf_printf(sb, "%s%p", i == 0 ? "" : ", ", uargs[i]);
@@ -671,7 +694,7 @@ kern_wait(struct thread *td, pid_t pid, int *status, int options,
 		pid = -q->p_pgid;
 		PROC_UNLOCK(q);
 	}
-	if (options &~ (WUNTRACED|WNOHANG|WCONTINUED|WLINUXCLONE))
+	if (options &~ (WUNTRACED|WNOHANG|WCONTINUED|WNOWAIT|WLINUXCLONE))
 		return (EINVAL);
 loop:
 	if (q->p_flag & P_STATCHILD) {
@@ -718,15 +741,27 @@ loop:
 			td->td_retval[0] = p->p_pid;
 			if (status)
 				*status = p->p_xstat;	/* convert to int */
+			if (options & WNOWAIT) {
+
+				/*
+				 *  Only poll, returning the status.
+				 *  Caller does not wish to release the proc
+				 *  struct just yet.
+				 */
+				PROC_UNLOCK(p);
+				sx_xunlock(&proctree_lock);
+				return (0);
+			}
+
 			PROC_LOCK(q);
 			sigqueue_take(p->p_ksi);
 			PROC_UNLOCK(q);
+			PROC_UNLOCK(p);
 
 			/*
 			 * If we got the child via a ptrace 'attach',
 			 * we need to give it back to the old parent.
 			 */
-			PROC_UNLOCK(p);
 			if (p->p_oppid && (t = pfind(p->p_oppid)) != NULL) {
 				PROC_LOCK(p);
 				p->p_oppid = 0;

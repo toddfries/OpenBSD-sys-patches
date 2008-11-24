@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sun4v/sun4v/pmap.c,v 1.39 2007/06/16 04:57:05 alc Exp $");
+__FBSDID("$FreeBSD: src/sys/sun4v/sun4v/pmap.c,v 1.44 2008/05/18 04:16:56 alc Exp $");
 
 #include "opt_kstack_pages.h"
 #include "opt_msgbuf.h"
@@ -424,10 +424,14 @@ pmap_activate(struct thread *td)
 	critical_exit();
 }
 
-vm_offset_t 
-pmap_addr_hint(vm_object_t object, vm_offset_t va, vm_size_t size)
+/*
+ *	Increase the starting virtual address of the given mapping if a
+ *	different alignment might result in more superpage mappings.
+ */
+void
+pmap_align_superpage(vm_object_t object, vm_ooffset_t offset,
+    vm_offset_t *addr, vm_size_t size)
 {
-	return (va);
 }
 
 /*
@@ -1039,8 +1043,8 @@ pmap_add_tte(pmap_t pmap, vm_offset_t va, vm_page_t m, tte_t *tte_data, int wire
  * will be wired down.
  */
 void
-pmap_enter(pmap_t pmap, vm_offset_t va, vm_page_t m, vm_prot_t prot,
-	   boolean_t wired)
+pmap_enter(pmap_t pmap, vm_offset_t va, vm_prot_t access, vm_page_t m,
+    vm_prot_t prot, boolean_t wired)
 {
 	vm_paddr_t pa, opa;
 	uint64_t tte_data, otte_data;
@@ -1669,6 +1673,34 @@ pmap_page_init(vm_page_t m)
 	TAILQ_INIT(&m->md.pv_list);
 	m->md.pv_list_count = 0;
 }
+
+/*
+ * Return the number of managed mappings to the given physical page
+ * that are wired.
+ */
+int
+pmap_page_wired_mappings(vm_page_t m)
+{
+	pmap_t pmap;
+	pv_entry_t pv;
+	uint64_t tte_data;
+	int count;
+
+	count = 0;
+	if ((m->flags & PG_FICTITIOUS) != 0)
+		return (count);
+	mtx_assert(&vm_page_queue_mtx, MA_OWNED);
+	TAILQ_FOREACH(pv, &m->md.pv_list, pv_list) {
+		pmap = pv->pv_pmap;
+		PMAP_LOCK(pmap);
+		tte_data = tte_hash_lookup(pmap->pm_hash, pv->pv_va);
+		if ((tte_data & VTD_WIRED) != 0)
+			count++;
+		PMAP_UNLOCK(pmap);
+	}
+	return (count);
+}
+
 /*
  * Lower the permission for all mappings to a given page.
  */
@@ -1703,7 +1735,7 @@ pmap_pinit0(pmap_t pmap)
  * Initialize a preallocated and zeroed pmap structure, such as one in a
  * vmspace structure.
  */
-void
+int
 pmap_pinit(pmap_t pmap)
 {
 	int i;
@@ -1723,6 +1755,7 @@ pmap_pinit(pmap_t pmap)
 	TAILQ_INIT(&pmap->pm_pvlist);
 	PMAP_LOCK_INIT(pmap);
 	bzero(&pmap->pm_stats, sizeof pmap->pm_stats);
+	return (1);
 }
 
 /*

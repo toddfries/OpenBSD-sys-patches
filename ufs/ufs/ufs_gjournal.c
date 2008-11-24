@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_gjournal.c,v 1.2 2007/05/28 00:28:15 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_gjournal.c,v 1.3 2008/04/07 18:12:37 pjd Exp $");
 
 #include "opt_ufs.h"
 
@@ -82,7 +82,7 @@ ufs_gjournal_modref(struct vnode *vp, int count)
 		cgbno = fsbtodb(fs, cgtod(fs, cg));
 	}
 	if ((u_int)ino >= fs->fs_ipg * fs->fs_ncg)
-		panic("ffs_freefile: range: dev = %s, ino = %lu, fs = %s",
+		panic("ufs_gjournal_modref: range: dev = %s, ino = %lu, fs = %s",
 		    devtoname(dev), (u_long)ino, fs->fs_fsmnt);
 	if ((error = bread(devvp, cgbno, (int)fs->fs_cgsize, NOCRED, &bp))) {
 		brelse(bp);

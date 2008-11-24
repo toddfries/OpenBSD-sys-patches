@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2005 Apple Computer, Inc.
+ * Copyright (c) 1999-2008 Apple Inc.
  * Copyright (c) 2005 Robert N. M. Watson
  * All rights reserved.
  *
@@ -11,7 +11,7 @@
  * 2.  Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- * 3.  Neither the name of Apple Computer, Inc. ("Apple") nor the names of
+ * 3.  Neither the name of Apple Inc. ("Apple") nor the names of
  *     its contributors may be used to endorse or promote products derived
  *     from this software without specific prior written permission.
  *
@@ -26,9 +26,10 @@
  * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
- *
- * $FreeBSD: src/sys/security/audit/audit_bsm_klib.c,v 1.8 2007/10/29 18:07:48 rwatson Exp $
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/security/audit/audit_bsm_klib.c,v 1.20 2008/11/04 22:30:24 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/fcntl.h>
@@ -37,7 +38,9 @@
 #include <sys/malloc.h>
 #include <sys/mount.h>
 #include <sys/proc.h>
+#include <sys/rwlock.h>
 #include <sys/sem.h>
+#include <sys/sbuf.h>
 #include <sys/syscall.h>
 #include <sys/sysctl.h>
 #include <sys/sysent.h>
@@ -52,7 +55,7 @@
  * Hash table functions for the audit event number to event class mask
  * mapping.
  */
-#define EVCLASSMAP_HASH_TABLE_SIZE 251
+#define	EVCLASSMAP_HASH_TABLE_SIZE	251
 struct evclass_elem {
 	au_event_t event;
 	au_class_t class;
@@ -63,8 +66,14 @@ struct evclass_list {
 };
 
 static MALLOC_DEFINE(M_AUDITEVCLASS, "audit_evclass", "Audit event class");
-static struct mtx		evclass_mtx;
+static struct rwlock		evclass_lock;
 static struct evclass_list	evclass_hash[EVCLASSMAP_HASH_TABLE_SIZE];
+
+#define	EVCLASS_LOCK_INIT()	rw_init(&evclass_lock, "evclass_lock")
+#define	EVCLASS_RLOCK()		rw_rlock(&evclass_lock)
+#define	EVCLASS_RUNLOCK()	rw_runlock(&evclass_lock)
+#define	EVCLASS_WLOCK()		rw_wlock(&evclass_lock)
+#define	EVCLASS_WUNLOCK()	rw_wunlock(&evclass_lock)
 
 /*
  * Look up the class for an audit event in the class mapping table.
@@ -76,7 +85,7 @@ au_event_class(au_event_t event)
 	struct evclass_elem *evc;
 	au_class_t class;
 
-	mtx_lock(&evclass_mtx);
+	EVCLASS_RLOCK();
 	evcl = &evclass_hash[event % EVCLASSMAP_HASH_TABLE_SIZE];
 	class = 0;
 	LIST_FOREACH(evc, &evcl->head, entry) {
@@ -86,7 +95,7 @@ au_event_class(au_event_t event)
 		}
 	}
 out:
-	mtx_unlock(&evclass_mtx);
+	EVCLASS_RUNLOCK();
 	return (class);
 }
 
@@ -109,12 +118,12 @@ au_evclassmap_insert(au_event_t event, au_class_t class)
 	 */
 	evc_new = malloc(sizeof(*evc), M_AUDITEVCLASS, M_WAITOK);
 
-	mtx_lock(&evclass_mtx);
+	EVCLASS_WLOCK();
 	evcl = &evclass_hash[event % EVCLASSMAP_HASH_TABLE_SIZE];
 	LIST_FOREACH(evc, &evcl->head, entry) {
 		if (evc->event == event) {
 			evc->class = class;
-			mtx_unlock(&evclass_mtx);
+			EVCLASS_WUNLOCK();
 			free(evc_new, M_AUDITEVCLASS);
 			return;
 		}
@@ -123,7 +132,7 @@ au_evclassmap_insert(au_event_t event, au_class_t class)
 	evc->event = event;
 	evc->class = class;
 	LIST_INSERT_HEAD(&evcl->head, evc, entry);
-	mtx_unlock(&evclass_mtx);
+	EVCLASS_WUNLOCK();
 }
 
 void
@@ -131,7 +140,7 @@ au_evclassmap_init(void)
 {
 	int i;
 
-	mtx_init(&evclass_mtx, "evclass_mtx", NULL, MTX_DEF);
+	EVCLASS_LOCK_INIT();
 	for (i = 0; i < EVCLASSMAP_HASH_TABLE_SIZE; i++)
 		LIST_INIT(&evclass_hash[i].head);
 
@@ -180,7 +189,7 @@ au_preselect(au_event_t event, au_class_t class, au_mask_t *mask_p, int sorf)
  * Convert sysctl names and present arguments to events.
  */
 au_event_t
-ctlname_to_sysctlevent(int name[], uint64_t valid_arg)
+audit_ctlname_to_sysctlevent(int name[], uint64_t valid_arg)
 {
 
 	/* can't parse it - so return the worst case */
@@ -229,7 +238,7 @@ ctlname_to_sysctlevent(int name[], uint64_t valid_arg)
 	case KERN_IOV_MAX:
 	case KERN_MAXID:
 		return ((valid_arg & ARG_VALUE) ?
-			AUE_SYSCTL : AUE_SYSCTL_NONADMIN);
+		    AUE_SYSCTL : AUE_SYSCTL_NONADMIN);
 
 	default:
 		return (AUE_SYSCTL);
@@ -242,7 +251,7 @@ ctlname_to_sysctlevent(int name[], uint64_t valid_arg)
  * auditing purposes.
  */
 au_event_t
-flags_and_error_to_openevent(int oflags, int error)
+audit_flags_and_error_to_openevent(int oflags, int error)
 {
 	au_event_t aevent;
 
@@ -338,7 +347,7 @@ flags_and_error_to_openevent(int oflags, int error)
  * Convert a MSGCTL command to a specific event.
  */
 int
-msgctl_to_event(int cmd)
+audit_msgctl_to_event(int cmd)
 {
 
 	switch (cmd) {
@@ -361,7 +370,7 @@ msgctl_to_event(int cmd)
  * Convert a SEMCTL command to a specific event.
  */
 int
-semctl_to_event(int cmd)
+audit_semctl_to_event(int cmd)
 {
 
 	switch (cmd) {
@@ -396,7 +405,7 @@ semctl_to_event(int cmd)
 		return (AUE_SEMCTL_STAT);
 
 	default:
-		/* We will audit a bad command */
+		/* We will audit a bad command. */
 		return (AUE_SEMCTL);
 	}
 }
@@ -475,73 +484,97 @@ auditon_command_event(int cmd)
  * directory is NULL, we could use 'rootvnode' to obtain the root directory,
  * but this results in a volfs name written to the audit log. So we will
  * leave the filename starting with '/' in the audit log in this case.
- *
- * XXXRW: Since we combine two paths here, ideally a buffer of size
- * MAXPATHLEN * 2 would be passed in.
  */
 void
-canon_path(struct thread *td, char *path, char *cpath)
+audit_canon_path(struct thread *td, char *path, char *cpath)
 {
-	char *bufp;
-	char *retbuf, *freebuf;
-	struct vnode *vnp;
+	struct vnode *cvnp, *rvnp;
+	char *rbuf, *fbuf, *copy;
 	struct filedesc *fdp;
-	int cisr, error, vfslocked;
+	struct sbuf sbf;
+	int error, cwir;
 
-	WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK, NULL,
-	    "canon_path() at %s:%d", __FILE__, __LINE__);
+	WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK, NULL, "%s: at %s:%d",
+	    __func__,  __FILE__, __LINE__);
 
+	copy = path;
+	rvnp = cvnp = NULL;
 	fdp = td->td_proc->p_fd;
-	bufp = path;
-	cisr = 0;
 	FILEDESC_SLOCK(fdp);
-	if (*(path) == '/') {
-		while (*(bufp) == '/')
-			bufp++;			/* Skip leading '/'s. */
-		/*
-		 * If no process root, or it is the same as the system root,
-		 * audit the path as passed in with a single '/'.
-		 */
-		if ((fdp->fd_rdir == NULL) ||
-		    (fdp->fd_rdir == rootvnode)) {
-			vnp = NULL;
-			bufp--;			/* Restore one '/'. */
-		} else {
-			vnp = fdp->fd_rdir;	/* Use process root. */
-			vref(vnp);
-		}
-	} else {
-		vnp = fdp->fd_cdir;	/* Prepend the current dir. */
-		cisr = (fdp->fd_rdir == fdp->fd_cdir);
-		vref(vnp);
-		bufp = path;
+	/*
+	 * Make sure that we handle the chroot(2) case.  If there is an
+	 * alternate root directory, prepend it to the audited pathname.
+	 */
+	if (fdp->fd_rdir != NULL && fdp->fd_rdir != rootvnode) {
+		rvnp = fdp->fd_rdir;
+		vhold(rvnp);
 	}
+	/*
+	 * If the supplied path is relative, make sure we capture the current
+	 * working directory so we can prepend it to the supplied relative
+	 * path.
+	 */
+	if (*path != '/') {
+		cvnp = fdp->fd_cdir;
+		vhold(cvnp);
+	}
+	cwir = (fdp->fd_rdir == fdp->fd_cdir);
 	FILEDESC_SUNLOCK(fdp);
-	if (vnp != NULL) {
-		/*
-		 * XXX: vn_fullpath() on FreeBSD is "less reliable" than
-		 * vn_getpath() on Darwin, so this will need more attention
-		 * in the future.  Also, the question and string bounding
-		 * here seems a bit questionable and will also require
-		 * attention.
-		 */
-		vfslocked = VFS_LOCK_GIANT(vnp->v_mount);
-		vn_lock(vnp, LK_EXCLUSIVE | LK_RETRY, td);
-		error = vn_fullpath(td, vnp, &retbuf, &freebuf);
-		if (error == 0) {
-			/* Copy and free buffer allocated by vn_fullpath().
-			 * If the current working directory was the same as
-			 * the root directory, and the path was a relative
-			 * pathname, do not separate the two components with
-			 * the '/' character.
-			 */
-			snprintf(cpath, MAXPATHLEN, "%s%s%s", retbuf,
-			    cisr ? "" : "/", bufp);
-			free(freebuf, M_TEMP);
-		} else
+	/*
+	 * NB: We require that the supplied array be at least MAXPATHLEN bytes
+	 * long.  If this is not the case, then we can run into serious trouble.
+	 */
+	(void) sbuf_new(&sbf, cpath, MAXPATHLEN, SBUF_FIXEDLEN);
+	/*
+	 * Strip leading forward slashes.
+	 */
+	while (*copy == '/')
+		copy++;
+	/*
+	 * Make sure we handle chroot(2) and prepend the global path to these
+	 * environments.
+	 *
+	 * NB: vn_fullpath(9) on FreeBSD is less reliable than vn_getpath(9)
+	 * on Darwin.  As a result, this may need some additional attention
+	 * in the future.
+	 */
+	if (rvnp != NULL) {
+		error = vn_fullpath_global(td, rvnp, &rbuf, &fbuf);
+		vdrop(rvnp);
+		if (error) {
 			cpath[0] = '\0';
-		vput(vnp);
-		VFS_UNLOCK_GIANT(vfslocked);
-	} else
-		strlcpy(cpath, bufp, MAXPATHLEN);
+			if (cvnp != NULL)
+				vdrop(cvnp);
+			return;
+		}
+		(void) sbuf_cat(&sbf, rbuf);
+		free(fbuf, M_TEMP);
+	}
+	if (cvnp != NULL) {
+		error = vn_fullpath(td, cvnp, &rbuf, &fbuf);
+		vdrop(cvnp);
+		if (error) {
+			cpath[0] = '\0';
+			return;
+		}
+		(void) sbuf_cat(&sbf, rbuf);
+		free(fbuf, M_TEMP);
+	}
+	if (cwir == 0 || (cwir != 0 && cvnp == NULL))
+		(void) sbuf_putc(&sbf, '/');
+	/*
+	 * Now that we have processed any alternate root and relative path
+	 * names, add the supplied pathname.
+	 */
+        (void) sbuf_cat(&sbf, copy);
+	/*
+	 * One or more of the previous sbuf operations could have resulted in
+	 * the supplied buffer being overflowed.  Check to see if this is the
+	 * case.
+	 */
+	if (sbuf_overflowed(&sbf) != 0) {
+		cpath[0] = '\0';
+		return;
+	}
+	sbuf_finish(&sbf);
 }

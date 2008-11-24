@@ -48,7 +48,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_rtc.c,v 1.9 2006/10/02 18:23:37 phk Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_rtc.c,v 1.10 2008/04/22 19:38:28 phk Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -62,6 +62,11 @@ __FBSDID("$FreeBSD: src/sys/kern/subr_rtc.c,v 1.9 2006/10/02 18:23:37 phk Exp $"
 
 static device_t clock_dev = NULL;
 static long clock_res;
+
+/* XXX: should be kern. now, it's no longer machdep.  */
+static int disable_rtc_set;
+SYSCTL_INT(_machdep, OID_AUTO, disable_rtc_set,
+	CTLFLAG_RW, &disable_rtc_set, 0, "");
 
 void
 clock_register(device_t dev, long res)	/* res has units of microseconds */
@@ -118,6 +123,7 @@ inittodr(time_t base)
 		    "will not be set accurately\n");
 		return;
 	}
+	/* XXX: We should poll all registered RTCs in case of failure */
 	error = CLOCK_GETTIME(clock_dev, &ts);
 	if (error != 0 && error != EINVAL) {
 		printf("warning: clock_gettime failed (%d), the system time "
@@ -158,6 +164,7 @@ resettodr()
 
 	getnanotime(&ts);
 	ts.tv_sec -= utc_offset();
+	/* XXX: We should really set all registered RTCs */
 	if ((error = CLOCK_SETTIME(clock_dev, &ts)) != 0) {
 		printf("warning: clock_settime failed (%d), time-of-day clock "
 		    "not adjusted to system time\n", error);

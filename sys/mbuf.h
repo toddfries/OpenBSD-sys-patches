@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)mbuf.h	8.5 (Berkeley) 2/19/95
- * $FreeBSD: src/sys/sys/mbuf.h,v 1.217 2007/10/06 21:42:39 kmacy Exp $
+ * $FreeBSD: src/sys/sys/mbuf.h,v 1.227 2008/11/22 08:46:16 kmacy Exp $
  */
 
 #ifndef _SYS_MBUF_H_
@@ -115,6 +115,9 @@ struct pkthdr {
 	/* variables for ip and tcp reassembly */
 	void		*header;	/* pointer to packet header */
 	int		 len;		/* total packet length */
+	uint32_t	 flowid;	/* packet's 4-tuple system 
+					 * flow identifier
+					 */
 	/* variables for hardware checksum */
 	int		 csum_flags;	/* flags regarding checksum */
 	int		 csum_data;	/* data field used by csum routines */
@@ -131,7 +134,8 @@ struct m_ext {
 	caddr_t		 ext_buf;	/* start of buffer */
 	void		(*ext_free)	/* free routine if not the usual */
 			    (void *, void *);
-	void		*ext_args;	/* optional argument pointer */
+	void		*ext_arg1;	/* optional argument pointer */
+	void		*ext_arg2;	/* optional argument pointer */
 	u_int		 ext_size;	/* size of buffer, for ext_free */
 	volatile u_int	*ref_cnt;	/* pointer to ref count info */
 	int		 ext_type;	/* type of external storage */
@@ -169,30 +173,48 @@ struct mbuf {
 /*
  * mbuf flags.
  */
-#define	M_EXT		0x0001	/* has associated external storage */
-#define	M_PKTHDR	0x0002	/* start of record */
-#define	M_EOR		0x0004	/* end of record */
-#define	M_RDONLY	0x0008	/* associated data is marked read-only */
-#define	M_PROTO1	0x0010	/* protocol-specific */
-#define	M_PROTO2	0x0020	/* protocol-specific */
-#define	M_PROTO3	0x0040	/* protocol-specific */
-#define	M_PROTO4	0x0080	/* protocol-specific */
-#define	M_PROTO5	0x0100	/* protocol-specific */
-#define	M_NOTIFICATION	M_PROTO5/* SCTP notification */
-#define	M_SKIP_FIREWALL	0x4000	/* skip firewall processing */
-#define	M_FREELIST	0x8000	/* mbuf is on the free list */
+#define	M_EXT		0x00000001 /* has associated external storage */
+#define	M_PKTHDR	0x00000002 /* start of record */
+#define	M_EOR		0x00000004 /* end of record */
+#define	M_RDONLY	0x00000008 /* associated data is marked read-only */
+#define	M_PROTO1	0x00000010 /* protocol-specific */
+#define	M_PROTO2	0x00000020 /* protocol-specific */
+#define	M_PROTO3	0x00000040 /* protocol-specific */
+#define	M_PROTO4	0x00000080 /* protocol-specific */
+#define	M_PROTO5	0x00000100 /* protocol-specific */
+#define	M_BCAST		0x00000200 /* send/received as link-level broadcast */
+#define	M_MCAST		0x00000400 /* send/received as link-level multicast */
+#define	M_FRAG		0x00000800 /* packet is a fragment of a larger packet */
+#define	M_FIRSTFRAG	0x00001000 /* packet is first fragment */
+#define	M_LASTFRAG	0x00002000 /* packet is last fragment */
+#define	M_SKIP_FIREWALL	0x00004000 /* skip firewall processing */
+#define	M_FREELIST	0x00008000 /* mbuf is on the free list */
+#define	M_VLANTAG	0x00010000 /* ether_vtag is valid */
+#define	M_PROMISC	0x00020000 /* packet was not for us */
+#define	M_NOFREE	0x00040000 /* do not free mbuf, embedded in cluster */
+#define	M_PROTO6	0x00080000 /* protocol-specific */
+#define	M_PROTO7	0x00100000 /* protocol-specific */
+#define	M_PROTO8	0x00200000 /* protocol-specific */
+/*
+ * For RELENG_{6,7} steal these flags for limited multiple routing table
+ * support. In RELENG_8 and beyond, use just one flag and a tag.
+ */
+#define	M_FIB		0xF0000000 /* steal some bits to store fib number. */
+
+#define	M_NOTIFICATION	M_PROTO5    /* SCTP notification */
 
 /*
- * mbuf pkthdr flags (also stored in m_flags).
+ * Flags to purge when crossing layers.
  */
-#define	M_BCAST		0x0200	/* send/received as link-level broadcast */
-#define	M_MCAST		0x0400	/* send/received as link-level multicast */
-#define	M_FRAG		0x0800	/* packet is a fragment of a larger packet */
-#define	M_FIRSTFRAG	0x1000	/* packet is first fragment */
-#define	M_LASTFRAG	0x2000	/* packet is last fragment */
-#define	M_VLANTAG	0x10000	/* ether_vtag is valid */
-#define	M_PROMISC	0x20000	/* packet was not for us */
-#define	M_NOFREE	0x40000	/* do not free mbuf - it is embedded in the cluster */
+#define	M_PROTOFLAGS \
+    (M_PROTO1|M_PROTO2|M_PROTO3|M_PROTO4|M_PROTO5|M_PROTO6|M_PROTO7|M_PROTO8)
+
+/*
+ * Flags preserved when copying m_pkthdr.
+ */
+#define	M_COPYFLAGS \
+    (M_PKTHDR|M_EOR|M_RDONLY|M_PROTOFLAGS|M_SKIP_FIREWALL|M_BCAST|M_MCAST|\
+     M_FRAG|M_FIRSTFRAG|M_LASTFRAG|M_VLANTAG|M_PROMISC|M_FIB)
 
 /*
  * External buffer types: identify ext_buf type.
@@ -208,19 +230,6 @@ struct mbuf {
 #define	EXT_MOD_TYPE	200	/* custom module's ext_buf type */
 #define	EXT_DISPOSABLE	300	/* can throw this buffer away w/page flipping */
 #define	EXT_EXTREF	400	/* has externally maintained ref_cnt ptr */
-
-/*
- * Flags copied when copying m_pkthdr.
- */
-#define	M_COPYFLAGS	(M_PKTHDR|M_EOR|M_RDONLY|M_PROTO1|M_PROTO1|M_PROTO2|\
-			    M_PROTO3|M_PROTO4|M_PROTO5|M_SKIP_FIREWALL|\
-			    M_BCAST|M_MCAST|M_FRAG|M_FIRSTFRAG|M_LASTFRAG|\
-			    M_VLANTAG|M_PROMISC)
-
-/*
- * Flags to purge when crossing layers.
- */
-#define	M_PROTOFLAGS	(M_PROTO1|M_PROTO2|M_PROTO3|M_PROTO4|M_PROTO5)
 
 /*
  * Flags indicating hw checksum support and sw checksum requirements.  This
@@ -276,7 +285,7 @@ struct mbstat {
 	u_long	m_mlen;		/* length of data in an mbuf */
 	u_long	m_mhlen;	/* length of data in a header mbuf */
 
-	/* Number of mbtypes (gives # elems in mbtypes[] array: */
+	/* Number of mbtypes (gives # elems in mbtypes[] array) */
 	short	m_numtypes;
 
 	/* XXX: Sendfile stats should eventually move to their own struct */
@@ -290,11 +299,11 @@ struct mbstat {
  *
  * The flag to use is as follows:
  * - M_DONTWAIT or M_NOWAIT from an interrupt handler to not block allocation.
- * - M_WAIT or M_WAITOK or M_TRYWAIT from wherever it is safe to block.
+ * - M_WAIT or M_WAITOK from wherever it is safe to block.
  *
  * M_DONTWAIT/M_NOWAIT means that we will not block the thread explicitly and
  * if we cannot allocate immediately we may return NULL, whereas
- * M_WAIT/M_WAITOK/M_TRYWAIT means that if we cannot allocate resources we
+ * M_WAIT/M_WAITOK means that if we cannot allocate resources we
  * will block until they are available, and thus never return NULL.
  *
  * XXX Eventually just phase this out to use M_WAITOK/M_NOWAIT.
@@ -312,7 +321,7 @@ struct mbstat {
 #define	MBUF_MEM_NAME		"mbuf"
 #define	MBUF_CLUSTER_MEM_NAME	"mbuf_cluster"
 #define	MBUF_PACKET_MEM_NAME	"mbuf_packet"
-#define	MBUF_JUMBOP_MEM_NAME	"mbuf_jumbo_pagesize"
+#define	MBUF_JUMBOP_MEM_NAME	"mbuf_jumbo_page"
 #define	MBUF_JUMBO9_MEM_NAME	"mbuf_jumbo_9k"
 #define	MBUF_JUMBO16_MEM_NAME	"mbuf_jumbo_16k"
 #define	MBUF_TAG_MEM_NAME	"mbuf_tag"
@@ -496,8 +505,11 @@ m_getjcl(int how, short type, int flags, int size)
 static __inline void
 m_free_fast(struct mbuf *m)
 {
-	KASSERT(SLIST_EMPTY(&m->m_pkthdr.tags), ("doing fast free of mbuf with tags"));
-
+#ifdef INVARIANTS
+	if (m->m_flags & M_PKTHDR)
+		KASSERT(SLIST_EMPTY(&m->m_pkthdr.tags), ("doing fast free of mbuf with tags"));
+#endif
+	
 	uma_zfree_arg(zone_mbuf, m, (void *)MB_NOTAGS);
 }
 
@@ -583,7 +595,7 @@ m_cljset(struct mbuf *m, void *cl, int type)
 	}
 
 	m->m_data = m->m_ext.ext_buf = cl;
-	m->m_ext.ext_free = m->m_ext.ext_args = NULL;
+	m->m_ext.ext_free = m->m_ext.ext_arg1 = m->m_ext.ext_arg2 = NULL;
 	m->m_ext.ext_size = size;
 	m->m_ext.ext_type = type;
 	m->m_ext.ref_cnt = uma_find_refcnt(zone, cl);
@@ -615,8 +627,8 @@ m_last(struct mbuf *m)
 #define	MGET(m, how, type)	((m) = m_get((how), (type)))
 #define	MGETHDR(m, how, type)	((m) = m_gethdr((how), (type)))
 #define	MCLGET(m, how)		m_clget((m), (how))
-#define	MEXTADD(m, buf, size, free, args, flags, type) 			\
-    m_extadd((m), (caddr_t)(buf), (size), (free), (args), (flags), (type))
+#define	MEXTADD(m, buf, size, free, arg1, arg2, flags, type)		\
+    m_extadd((m), (caddr_t)(buf), (size), (free),(arg1),(arg2),(flags), (type))
 #define	m_getm(m, len, how, type)					\
     m_getm2((m), (len), (how), (type), M_PKTHDR)
 
@@ -631,7 +643,7 @@ m_last(struct mbuf *m)
 
 /* Check if the supplied mbuf has a packet header, or else panic. */
 #define	M_ASSERTPKTHDR(m)						\
-	KASSERT(m != NULL && m->m_flags & M_PKTHDR,			\
+	KASSERT((m) != NULL && (m)->m_flags & M_PKTHDR,			\
 	    ("%s: no mbuf packet header!", __func__))
 
 /*
@@ -742,7 +754,8 @@ int		 m_apply(struct mbuf *, int, int,
 int		 m_append(struct mbuf *, int, c_caddr_t);
 void		 m_cat(struct mbuf *, struct mbuf *);
 void		 m_extadd(struct mbuf *, caddr_t, u_int,
-		    void (*)(void *, void *), void *, int, int);
+		    void (*)(void *, void *), void *, void *, int, int);
+struct mbuf	*m_collapse(struct mbuf *, int, int);
 void		 m_copyback(struct mbuf *, int, int, c_caddr_t);
 void		 m_copydata(const struct mbuf *, int, int, caddr_t);
 struct mbuf	*m_copym(struct mbuf *, int, int, int);
@@ -952,6 +965,27 @@ m_tag_find(struct mbuf *m, int type, struct m_tag *start)
 	    m_tag_locate(m, MTAG_ABI_COMPAT, type, start));
 }
 
+/* XXX temporary FIB methods probably eventually use tags.*/
+#define M_FIBSHIFT    28
+#define M_FIBMASK	0x0F
+
+/* get the fib from an mbuf and if it is not set, return the default */
+#define M_GETFIB(_m) \
+    ((((_m)->m_flags & M_FIB) >> M_FIBSHIFT) & M_FIBMASK)
+
+#define M_SETFIB(_m, _fib) do {						\
+	_m->m_flags &= ~M_FIB;					   	\
+	_m->m_flags |= (((_fib) << M_FIBSHIFT) & M_FIB);  \
+} while (0) 
+
 #endif /* _KERNEL */
+
+#ifdef MBUF_PROFILING
+ void m_profile(struct mbuf *m);
+ #define M_PROFILE(m) m_profile(m)
+#else
+ #define M_PROFILE(m)
+#endif
+
 
 #endif /* !_SYS_MBUF_H_ */

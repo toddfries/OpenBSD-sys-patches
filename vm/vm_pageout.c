@@ -73,7 +73,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_pageout.c,v 1.292 2007/09/25 06:25:06 alc Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_pageout.c,v 1.301 2008/11/16 21:57:54 kib Exp $");
 
 #include "opt_vm.h"
 #include <sys/param.h>
@@ -123,7 +123,8 @@ static struct kproc_desc page_kp = {
 	vm_pageout,
 	&pageproc
 };
-SYSINIT(pagedaemon, SI_SUB_KTHREAD_PAGE, SI_ORDER_FIRST, kproc_start, &page_kp)
+SYSINIT(pagedaemon, SI_SUB_KTHREAD_PAGE, SI_ORDER_FIRST, kproc_start,
+    &page_kp);
 
 #if !defined(NO_SWAPPING)
 /* the kernel process "vm_daemon"*/
@@ -135,7 +136,7 @@ static struct kproc_desc vm_kp = {
 	vm_daemon,
 	&vmproc
 };
-SYSINIT(vmdaemon, SI_SUB_KTHREAD_VM, SI_ORDER_FIRST, kproc_start, &vm_kp)
+SYSINIT(vmdaemon, SI_SUB_KTHREAD_VM, SI_ORDER_FIRST, kproc_start, &vm_kp);
 #endif
 
 
@@ -182,9 +183,9 @@ SYSCTL_INT(_vm, OID_AUTO, pageout_stats_interval,
 
 #if defined(NO_SWAPPING)
 SYSCTL_INT(_vm, VM_SWAPPING_ENABLED, swap_enabled,
-	CTLFLAG_RD, &vm_swap_enabled, 0, "");
+	CTLFLAG_RD, &vm_swap_enabled, 0, "Enable entire process swapout");
 SYSCTL_INT(_vm, OID_AUTO, swap_idle_enabled,
-	CTLFLAG_RD, &vm_swap_idle_enabled, 0, "");
+	CTLFLAG_RD, &vm_swap_idle_enabled, 0, "Allow swapout on idle criteria");
 #else
 SYSCTL_INT(_vm, VM_SWAPPING_ENABLED, swap_enabled,
 	CTLFLAG_RW, &vm_swap_enabled, 0, "Enable entire process swapout");
@@ -206,6 +207,8 @@ SYSCTL_INT(_vm, OID_AUTO, pageout_lock_miss,
 int vm_pageout_page_count = VM_PAGEOUT_PAGE_COUNT;
 
 int vm_page_max_wired;		/* XXX max # of wired pages system-wide */
+SYSCTL_INT(_vm, OID_AUTO, max_wired,
+	CTLFLAG_RW, &vm_page_max_wired, 0, "System-wide limit to wired page count");
 
 #if !defined(NO_SWAPPING)
 static void vm_pageout_map_deactivate_pages(vm_map_t, long);
@@ -228,7 +231,7 @@ static void vm_pageout_page_stats(void);
  * This function depends on both the lock portion of struct vm_object
  * and normal struct vm_page being type stable.
  */
-static boolean_t
+boolean_t
 vm_pageout_fallback_object_lock(vm_page_t m, vm_page_t *next)
 {
 	struct vm_page marker;
@@ -564,14 +567,14 @@ vm_pageout_object_deactivate_pages(pmap, first_object, desired)
 						pmap_remove_all(p);
 						vm_page_deactivate(p);
 					} else {
-						vm_pageq_requeue(p);
+						vm_page_requeue(p);
 					}
 				} else {
 					vm_page_activate(p);
 					vm_page_flag_clear(p, PG_REFERENCED);
 					if (p->act_count < (ACT_MAX - ACT_ADVANCE))
 						p->act_count += ACT_ADVANCE;
-					vm_pageq_requeue(p);
+					vm_page_requeue(p);
 				}
 			} else if (p->queue == PQ_INACTIVE) {
 				pmap_remove_all(p);
@@ -678,9 +681,6 @@ vm_pageout_scan(int pass)
 	struct vm_page marker;
 	int page_shortage, maxscan, pcount;
 	int addl_page_shortage, addl_page_shortage_init;
-	struct proc *p, *bigproc;
-	struct thread *td;
-	vm_offset_t size, bigsize;
 	vm_object_t object;
 	int actcount;
 	int vnodes_skipped = 0;
@@ -760,7 +760,7 @@ rescan0:
 		 * A held page may be undergoing I/O, so skip it.
 		 */
 		if (m->hold_count) {
-			vm_pageq_requeue(m);
+			vm_page_requeue(m);
 			addl_page_shortage++;
 			continue;
 		}
@@ -875,7 +875,7 @@ rescan0:
 			 * the thrash point for a heavily loaded machine.
 			 */
 			vm_page_flag_set(m, PG_WINATCFLS);
-			vm_pageq_requeue(m);
+			vm_page_requeue(m);
 		} else if (maxlaunder > 0) {
 			/*
 			 * We always want to try to flush some dirty pages if
@@ -903,7 +903,7 @@ rescan0:
 			 */
 			if (!swap_pageouts_ok || (object->flags & OBJ_DEAD)) {
 				VM_OBJECT_UNLOCK(object);
-				vm_pageq_requeue(m);
+				vm_page_requeue(m);
 				continue;
 			}
 
@@ -944,8 +944,7 @@ rescan0:
 				vp = object->handle;
 				if (vp->v_type == VREG &&
 				    vn_start_write(vp, &mp, V_NOWAIT) != 0) {
-					KASSERT(mp == NULL,
-					    ("vm_pageout_scan: mp != NULL"));
+					mp = NULL;
 					++pageout_lock_miss;
 					if (object->flags & OBJ_MIGHTBEDIRTY)
 						vnodes_skipped++;
@@ -996,7 +995,7 @@ rescan0:
 				 * be undergoing I/O, so skip it
 				 */
 				if (m->hold_count) {
-					vm_pageq_requeue(m);
+					vm_page_requeue(m);
 					if (object->flags & OBJ_MIGHTBEDIRTY)
 						vnodes_skipped++;
 					goto unlock_and_continue;
@@ -1077,7 +1076,7 @@ unlock_and_continue:
 		    (m->oflags & VPO_BUSY) ||
 		    (m->hold_count != 0)) {
 			VM_OBJECT_UNLOCK(object);
-			vm_pageq_requeue(m);
+			vm_page_requeue(m);
 			m = next;
 			continue;
 		}
@@ -1114,7 +1113,7 @@ unlock_and_continue:
 		 * page activation count stats.
 		 */
 		if (actcount && (object->ref_count != 0)) {
-			vm_pageq_requeue(m);
+			vm_page_requeue(m);
 		} else {
 			m->act_count -= min(m->act_count, ACT_DECLINE);
 			if (vm_pageout_algorithm ||
@@ -1131,7 +1130,7 @@ unlock_and_continue:
 					vm_page_deactivate(m);
 				}
 			} else {
-				vm_pageq_requeue(m);
+				vm_page_requeue(m);
 			}
 		}
 		VM_OBJECT_UNLOCK(object);
@@ -1171,7 +1170,22 @@ unlock_and_continue:
 	 * doing this on the first pass in order to give ourselves a
 	 * chance to flush out dirty vnode-backed pages and to allow
 	 * active pages to be moved to the inactive queue and reclaimed.
-	 *
+	 */
+	if (pass != 0 &&
+	    ((swap_pager_avail < 64 && vm_page_count_min()) ||
+	     (swap_pager_full && vm_paging_target() > 0)))
+		vm_pageout_oom(VM_OOM_MEM);
+}
+
+
+void
+vm_pageout_oom(int shortage)
+{
+	struct proc *p, *bigproc;
+	vm_offset_t size, bigsize;
+	struct thread *td;
+
+	/*
 	 * We keep the process bigproc locked once we find it to keep anyone
 	 * from messing with it; however, there is a possibility of
 	 * deadlock if process B is bigproc and one of it's child processes
@@ -1179,79 +1193,72 @@ unlock_and_continue:
 	 * lock while walking this list.  To avoid this, we don't block on
 	 * the process lock but just skip a process if it is already locked.
 	 */
-	if (pass != 0 &&
-	    ((swap_pager_avail < 64 && vm_page_count_min()) ||
-	     (swap_pager_full && vm_paging_target() > 0))) {
-		bigproc = NULL;
-		bigsize = 0;
-		sx_slock(&allproc_lock);
-		FOREACH_PROC_IN_SYSTEM(p) {
-			int breakout;
+	bigproc = NULL;
+	bigsize = 0;
+	sx_slock(&allproc_lock);
+	FOREACH_PROC_IN_SYSTEM(p) {
+		int breakout;
 
-			if (PROC_TRYLOCK(p) == 0)
-				continue;
-			/*
-			 * If this is a system or protected process, skip it.
-			 */
-			if ((p->p_flag & P_SYSTEM) || (p->p_pid == 1) ||
-			    (p->p_flag & P_PROTECTED) ||
-			    ((p->p_pid < 48) && (swap_pager_avail != 0))) {
-				PROC_UNLOCK(p);
-				continue;
-			}
-			/*
-			 * If the process is in a non-running type state,
-			 * don't touch it.  Check all the threads individually.
-			 */
-			PROC_SLOCK(p);
-			breakout = 0;
-			FOREACH_THREAD_IN_PROC(p, td) {
-				thread_lock(td);
-				if (!TD_ON_RUNQ(td) &&
-				    !TD_IS_RUNNING(td) &&
-				    !TD_IS_SLEEPING(td)) {
-					thread_unlock(td);
-					breakout = 1;
-					break;
-				}
+		if (PROC_TRYLOCK(p) == 0)
+			continue;
+		/*
+		 * If this is a system or protected process, skip it.
+		 */
+		if ((p->p_flag & P_SYSTEM) || (p->p_pid == 1) ||
+		    (p->p_flag & P_PROTECTED) ||
+		    ((p->p_pid < 48) && (swap_pager_avail != 0))) {
+			PROC_UNLOCK(p);
+			continue;
+		}
+		/*
+		 * If the process is in a non-running type state,
+		 * don't touch it.  Check all the threads individually.
+		 */
+		breakout = 0;
+		FOREACH_THREAD_IN_PROC(p, td) {
+			thread_lock(td);
+			if (!TD_ON_RUNQ(td) &&
+			    !TD_IS_RUNNING(td) &&
+			    !TD_IS_SLEEPING(td)) {
 				thread_unlock(td);
+				breakout = 1;
+				break;
 			}
-			PROC_SUNLOCK(p);
-			if (breakout) {
-				PROC_UNLOCK(p);
-				continue;
-			}
-			/*
-			 * get the process size
-			 */
-			if (!vm_map_trylock_read(&p->p_vmspace->vm_map)) {
-				PROC_UNLOCK(p);
-				continue;
-			}
-			size = vmspace_swap_count(p->p_vmspace);
-			vm_map_unlock_read(&p->p_vmspace->vm_map);
+			thread_unlock(td);
+		}
+		if (breakout) {
+			PROC_UNLOCK(p);
+			continue;
+		}
+		/*
+		 * get the process size
+		 */
+		if (!vm_map_trylock_read(&p->p_vmspace->vm_map)) {
+			PROC_UNLOCK(p);
+			continue;
+		}
+		size = vmspace_swap_count(p->p_vmspace);
+		vm_map_unlock_read(&p->p_vmspace->vm_map);
+		if (shortage == VM_OOM_MEM)
 			size += vmspace_resident_count(p->p_vmspace);
-			/*
-			 * if the this process is bigger than the biggest one
-			 * remember it.
-			 */
-			if (size > bigsize) {
-				if (bigproc != NULL)
-					PROC_UNLOCK(bigproc);
-				bigproc = p;
-				bigsize = size;
-			} else
-				PROC_UNLOCK(p);
-		}
-		sx_sunlock(&allproc_lock);
-		if (bigproc != NULL) {
-			killproc(bigproc, "out of swap space");
-			PROC_SLOCK(bigproc);
-			sched_nice(bigproc, PRIO_MIN);
-			PROC_SUNLOCK(bigproc);
-			PROC_UNLOCK(bigproc);
-			wakeup(&cnt.v_free_count);
-		}
+		/*
+		 * if the this process is bigger than the biggest one
+		 * remember it.
+		 */
+		if (size > bigsize) {
+			if (bigproc != NULL)
+				PROC_UNLOCK(bigproc);
+			bigproc = p;
+			bigsize = size;
+		} else
+			PROC_UNLOCK(p);
+	}
+	sx_sunlock(&allproc_lock);
+	if (bigproc != NULL) {
+		killproc(bigproc, "out of swap space");
+		sched_nice(bigproc, PRIO_MIN);
+		PROC_UNLOCK(bigproc);
+		wakeup(&cnt.v_free_count);
 	}
 }
 
@@ -1281,7 +1288,8 @@ vm_pageout_page_stats()
 	pcount = cnt.v_active_count;
 	fullintervalcount += vm_pageout_stats_interval;
 	if (fullintervalcount < vm_pageout_full_stats_interval) {
-		tpcount = (vm_pageout_stats_max * cnt.v_active_count) / cnt.v_page_count;
+		tpcount = (int64_t)vm_pageout_stats_max * cnt.v_active_count /
+		    cnt.v_page_count;
 		if (pcount > tpcount)
 			pcount = tpcount;
 	} else {
@@ -1316,7 +1324,7 @@ vm_pageout_page_stats()
 		    (m->oflags & VPO_BUSY) ||
 		    (m->hold_count != 0)) {
 			VM_OBJECT_UNLOCK(object);
-			vm_pageq_requeue(m);
+			vm_page_requeue(m);
 			m = next;
 			continue;
 		}
@@ -1332,7 +1340,7 @@ vm_pageout_page_stats()
 			m->act_count += ACT_ADVANCE + actcount;
 			if (m->act_count > ACT_MAX)
 				m->act_count = ACT_MAX;
-			vm_pageq_requeue(m);
+			vm_page_requeue(m);
 		} else {
 			if (m->act_count == 0) {
 				/*
@@ -1348,7 +1356,7 @@ vm_pageout_page_stats()
 				vm_page_deactivate(m);
 			} else {
 				m->act_count -= min(m->act_count, ACT_DECLINE);
-				vm_pageq_requeue(m);
+				vm_page_requeue(m);
 			}
 		}
 		VM_OBJECT_UNLOCK(object);
@@ -1557,7 +1565,6 @@ vm_daemon()
 			 * if the process is in a non-running type state,
 			 * don't touch it.
 			 */
-			PROC_SLOCK(p);
 			breakout = 0;
 			FOREACH_THREAD_IN_PROC(p, td) {
 				thread_lock(td);
@@ -1570,7 +1577,6 @@ vm_daemon()
 				}
 				thread_unlock(td);
 			}
-			PROC_SUNLOCK(p);
 			if (breakout) {
 				PROC_UNLOCK(p);
 				continue;

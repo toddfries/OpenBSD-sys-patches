@@ -1,4 +1,6 @@
-# $FreeBSD: src/sys/boot/pc98/loader/Makefile,v 1.41 2006/11/02 00:26:45 marcel Exp $
+# $FreeBSD: src/sys/boot/pc98/loader/Makefile,v 1.42 2008/06/25 21:33:28 ru Exp $
+
+WITHOUT_SSP=
 
 .include <bsd.own.mk>
 

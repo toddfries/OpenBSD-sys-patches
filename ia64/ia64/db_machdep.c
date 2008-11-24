@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia64/db_machdep.c,v 1.5 2007/10/16 02:59:03 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia64/db_machdep.c,v 1.6 2007/12/02 20:40:33 rwatson Exp $");
 
 #include <opt_xtrace.h>
 
@@ -595,18 +595,6 @@ db_trace_thread(struct thread *td, int count)
 
 	ctx = kdb_thr_ctx(td);
 	return (db_backtrace(td, ctx, count));
-}
-
-void
-stack_save(struct stack *st)
-{
-
-	stack_zero(st);
-	/*
-	 * Nothing for now.
-	 * Is libuwx reentrant?
-	 * Can unw_create* sleep?
-	 */
 }
 
 #ifdef EXCEPTION_TRACING

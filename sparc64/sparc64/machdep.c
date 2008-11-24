@@ -32,11 +32,11 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)machdep.c	7.4 (Berkeley) 6/3/91
- * 	from: FreeBSD: src/sys/i386/i386/machdep.c,v 1.477 2001/08/27
+ *	from: FreeBSD: src/sys/i386/i386/machdep.c,v 1.477 2001/08/27
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/machdep.c,v 1.138 2007/06/16 23:26:00 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/machdep.c,v 1.148 2008/11/16 19:30:17 marius Exp $");
 
 #include "opt_compat.h"
 #include "opt_ddb.h"
@@ -133,18 +133,6 @@ struct kva_md_info kmi;
 u_long ofw_vec;
 u_long ofw_tba;
 
-/*
- * Note: timer quality for CPU's is set low to try and prevent them from
- * being chosen as the primary timecounter.  The CPU counters are not
- * synchronized among the CPU's so in MP machines this causes problems
- * when calculating the time.  With this value the CPU's should only be
- * chosen as the primary timecounter as a last resort.
- */
-
-#define	UP_TICK_QUALITY	1000
-#define	MP_TICK_QUALITY	-100
-static struct timecounter tick_tc;
-
 char sparc64_model[32];
 
 static int cpu_use_vis = 1;
@@ -152,9 +140,8 @@ static int cpu_use_vis = 1;
 cpu_block_copy_t *cpu_block_copy;
 cpu_block_zero_t *cpu_block_zero;
 
-static timecounter_get_t tick_get_timecount;
 void sparc64_init(caddr_t mdp, u_long o1, u_long o2, u_long o3,
-		  ofw_vec_t *vec);
+    ofw_vec_t *vec);
 void sparc64_shutdown_final(void *dummy, int howto);
 
 static void cpu_startup(void *);
@@ -180,22 +167,6 @@ cpu_startup(void *arg)
 	vm_paddr_t physsz;
 	int i;
 
-	tick_tc.tc_get_timecount = tick_get_timecount;
-	tick_tc.tc_poll_pps = NULL;
-	tick_tc.tc_counter_mask = ~0u;
-	tick_tc.tc_frequency = tick_freq;
-	tick_tc.tc_name = "tick";
-	tick_tc.tc_quality = UP_TICK_QUALITY;
-#ifdef SMP
-	/*
-	 * We do not know if each CPU's tick counter is synchronized.
-	 */
-	if (cpu_mp_probe())
-		tick_tc.tc_quality = MP_TICK_QUALITY;
-#endif
-
-	tc_init(&tick_tc);
-
 	physsz = 0;
 	for (i = 0; i < sparc64_nmemreg; i++)
 		physsz += sparc64_memreg[i].mr_size;
@@ -217,7 +188,7 @@ cpu_startup(void *arg)
 	if (bootverbose)
 		printf("machine: %s\n", sparc64_model);
 
-	cpu_identify(rdpr(ver), tick_freq, PCPU_GET(cpuid));
+	cpu_identify(rdpr(ver), PCPU_GET(clock), curcpu);
 }
 
 void
@@ -262,32 +233,47 @@ spinlock_exit(void)
 		wrpr(pil, td->td_md.md_saved_pil, 0);
 }
 
-unsigned
-tick_get_timecount(struct timecounter *tc)
-{
-	return ((unsigned)rd(tick));
-}
-
 void
 sparc64_init(caddr_t mdp, u_long o1, u_long o2, u_long o3, ofw_vec_t *vec)
 {
-	phandle_t child;
-	phandle_t root;
+	char type[8];
+	char *env;
 	struct pcpu *pc;
 	vm_offset_t end;
 	caddr_t kmdp;
-	u_int clock;
-	char *env;
-	char type[8];
+	phandle_t child;
+	phandle_t root;
+	uint32_t portid;
 
 	end = 0;
 	kmdp = NULL;
 
 	/*
-	 * Find out what kind of cpu we have first, for anything that changes
+	 * Find out what kind of CPU we have first, for anything that changes
 	 * behaviour.
 	 */
 	cpu_impl = VER_IMPL(rdpr(ver));
+
+	/*
+	 * Do CPU-specific Initialization.
+	 */
+	if (cpu_impl >= CPU_IMPL_ULTRASPARCIII)
+		cheetah_init();
+
+	/*
+	 * Clear (S)TICK timer (including NPT).
+	 */
+	tick_clear();
+
+	/*
+	 * UltraSparc II[e,i] based systems come up with the tick interrupt
+	 * enabled and a handler that resets the tick counter, causing DELAY()
+	 * to not work properly when used early in boot.
+	 * UltraSPARC III based systems come up with the system tick interrupt
+	 * enabled, causing an interrupt storm on startup since they are not
+	 * handled.
+	 */
+	tick_stop();
 
 	/*
 	 * Initialize Open Firmware (needed for console).
@@ -314,23 +300,57 @@ sparc64_init(caddr_t mdp, u_long o1, u_long o2, u_long o3, ofw_vec_t *vec)
 
 	init_param1();
 
-	root = OF_peer(0);
-	for (child = OF_child(root); child != 0; child = OF_peer(child)) {
-		OF_getprop(child, "device_type", type, sizeof(type));
-		if (strcmp(type, "cpu") == 0)
-			break;
-	}
+	/*
+	 * Prime our per-CPU data page for use.  Note, we are using it for
+	 * our stack, so don't pass the real size (PAGE_SIZE) to pcpu_init
+	 * or it'll zero it out from under us.
+	 */
+	pc = (struct pcpu *)(pcpu0 + (PCPU_PAGES * PAGE_SIZE)) - 1;
+	pcpu_init(pc, 0, sizeof(struct pcpu));
+	pc->pc_addr = (vm_offset_t)pcpu0;
+	pc->pc_mid = UPA_CR_GET_MID(ldxa(0, ASI_UPA_CONFIG_REG));
+	pc->pc_tlb_ctx = TLB_CTX_USER_MIN;
+	pc->pc_tlb_ctx_min = TLB_CTX_USER_MIN;
+	pc->pc_tlb_ctx_max = TLB_CTX_USER_MAX;
 
 	/*
-	 * Initialize the tick counter.  Must be before the console is inited
-	 * in order to provide the low-level console drivers with a working
-	 * DELAY().
+	 * Determine the OFW node and frequency of the BSP (and ensure the
+	 * BSP is in the device tree in the first place).
 	 */
-	OF_getprop(child, "clock-frequency", &clock, sizeof(clock));
-	tick_init(clock);
+	pc->pc_node = 0;
+	root = OF_peer(0);
+	for (child = OF_child(root); child != 0; child = OF_peer(child)) {
+		if (OF_getprop(child, "device_type", type, sizeof(type)) <= 0)
+			continue;
+		if (strcmp(type, "cpu") != 0)
+			continue;
+		if (OF_getprop(child, cpu_impl < CPU_IMPL_ULTRASPARCIII ?
+		    "upa-portid" : "portid", &portid, sizeof(portid)) <= 0)
+			continue;
+		if (portid == pc->pc_mid) {
+			pc->pc_node = child;
+			break;
+		}
+	}
+	if (pc->pc_node == 0)
+		OF_exit();
+	if (OF_getprop(child, "clock-frequency", &pc->pc_clock,
+	    sizeof(pc->pc_clock)) <= 0)
+		OF_exit();
+
+	/*
+	 * Provide a DELAY() that works before PCPU_REG is set.  We can't
+	 * set PCPU_REG without also taking over the trap table or the
+	 * firmware will overwrite it.  Unfortunately, it's way to early
+	 * to also take over the trap table at this point.
+	 */
+	clock_boot = pc->pc_clock;
+	delay_func = delay_boot;
 
 	/*
 	 * Initialize the console before printing anything.
+	 * NB: the low-level console drivers require a working DELAY() at
+	 * this point.
 	 */
 	cninit();
 
@@ -340,7 +360,7 @@ sparc64_init(caddr_t mdp, u_long o1, u_long o2, u_long o3, ofw_vec_t *vec)
 	 */
 	if (mdp == NULL || kmdp == NULL) {
 		printf("sparc64_init: no loader metadata.\n"
-		       "This probably means you are not using loader(8).\n");
+		    "This probably means you are not using loader(8).\n");
 		panic("sparc64_init");
 	}
 
@@ -349,12 +369,13 @@ sparc64_init(caddr_t mdp, u_long o1, u_long o2, u_long o3, ofw_vec_t *vec)
 	 */
 	if (end == 0) {
 		printf("sparc64_init: warning, kernel end not specified.\n"
-		       "Attempting to continue anyway.\n");
+		    "Attempting to continue anyway.\n");
 		end = (vm_offset_t)_end;
 	}
 
-	cache_init(child);
-	uma_set_align(cache.dc_linesize - 1);
+	cache_init(pc);
+	cache_enable();
+	uma_set_align(pc->pc_cache.dc_linesize - 1);
 
 	cpu_block_copy = bcopy;
 	cpu_block_zero = bzero;
@@ -366,6 +387,12 @@ sparc64_init(caddr_t mdp, u_long o1, u_long o2, u_long o3, ofw_vec_t *vec)
 		case CPU_IMPL_ULTRASPARCII:
 		case CPU_IMPL_ULTRASPARCIIi:
 		case CPU_IMPL_ULTRASPARCIIe:
+		case CPU_IMPL_ULTRASPARCIII:	/* NB: we've disabled P$. */
+		case CPU_IMPL_ULTRASPARCIIIp:
+		case CPU_IMPL_ULTRASPARCIIIi:
+		case CPU_IMPL_ULTRASPARCIV:
+		case CPU_IMPL_ULTRASPARCIVp:
+		case CPU_IMPL_ULTRASPARCIIIip:
 			cpu_block_copy = spitfire_block_copy;
 			cpu_block_zero = spitfire_block_zero;
 			break;
@@ -397,9 +424,9 @@ sparc64_init(caddr_t mdp, u_long o1, u_long o2, u_long o3, ofw_vec_t *vec)
 	intr_init1();
 
 	/*
-	 * Initialize proc0 stuff (p_contested needs to be done early).
+	 * Initialize proc0, set kstack0, frame0, curthread and curpcb.
 	 */
-	proc_linkup(&proc0, &thread0);
+	proc_linkup0(&proc0, &thread0);
 	proc0.p_md.md_sigtramp = NULL;
 	proc0.p_md.md_utrap = NULL;
 	thread0.td_kstack = kstack0;
@@ -407,27 +434,28 @@ sparc64_init(caddr_t mdp, u_long o1, u_long o2, u_long o3, ofw_vec_t *vec)
 	    (thread0.td_kstack + KSTACK_PAGES * PAGE_SIZE) - 1;
 	frame0.tf_tstate = TSTATE_IE | TSTATE_PEF | TSTATE_PRIV;
 	thread0.td_frame = &frame0;
-
-	/*
-	 * Prime our per-cpu data page for use.  Note, we are using it for our
-	 * stack, so don't pass the real size (PAGE_SIZE) to pcpu_init or
-	 * it'll zero it out from under us.
-	 */
-	pc = (struct pcpu *)(pcpu0 + (PCPU_PAGES * PAGE_SIZE)) - 1;
-	pcpu_init(pc, 0, sizeof(struct pcpu));
 	pc->pc_curthread = &thread0;
 	pc->pc_curpcb = thread0.td_pcb;
-	pc->pc_mid = UPA_CR_GET_MID(ldxa(0, ASI_UPA_CONFIG_REG));
-	pc->pc_addr = (vm_offset_t)pcpu0;
-	pc->pc_node = child;
-	pc->pc_tlb_ctx = TLB_CTX_USER_MIN;
-	pc->pc_tlb_ctx_min = TLB_CTX_USER_MIN;
-	pc->pc_tlb_ctx_max = TLB_CTX_USER_MAX;
 
 	/*
 	 * Initialize global registers.
 	 */
 	cpu_setregs(pc);
+
+	/*
+	 * Take over the trap table via the PROM.  Using the PROM for this
+	 * is necessary in order to set obp-control-relinquished to true
+	 * within the PROM so obtaining /virtual-memory/translations doesn't
+	 * trigger a fatal reset error or worse things further down the road.
+	 * XXX it should be possible to use this soley instead of writing
+	 * %tba in cpu_setregs().  Doing so causes a hang however.
+	 */
+	sun4u_set_traptable(tl0_base);
+
+	/*
+	 * It's now safe to use the real DELAY().
+	 */
+	delay_func = delay_tick;
 
 	/*
 	 * Initialize the message buffer (after setting trap table).
@@ -448,13 +476,14 @@ sparc64_init(caddr_t mdp, u_long o1, u_long o2, u_long o3, ofw_vec_t *vec)
 
 #ifdef KDB
 	if (boothowto & RB_KDB)
-		kdb_enter("Boot flags requested debugger");
+		kdb_enter(KDB_WHY_BOOTFLAGS, "Boot flags requested debugger");
 #endif
 }
 
 void
 set_openfirm_callback(ofw_vec_t *vec)
 {
+
 	ofw_tba = rdpr(tba);
 	ofw_vec = (u_long)vec;
 }
@@ -469,8 +498,8 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	struct thread *td;
 	struct frame *fp;
 	struct proc *p;
-	int oonstack;
 	u_long sp;
+	int oonstack;
 	int sig;
 
 	oonstack = 0;
@@ -503,8 +532,8 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	get_mcontext(td, &sf.sf_uc.uc_mcontext, 0);
 	sf.sf_uc.uc_sigmask = *mask;
 	sf.sf_uc.uc_stack = td->td_sigstk;
-	sf.sf_uc.uc_stack.ss_flags = (td->td_pflags & TDP_ALTSTACK)
-	    ? ((oonstack) ? SS_ONSTACK : 0) : SS_DISABLE;
+	sf.sf_uc.uc_stack.ss_flags = (td->td_pflags & TDP_ALTSTACK) ?
+	    ((oonstack) ? SS_ONSTACK : 0) : SS_DISABLE;
 
 	/* Allocate and validate space for the signal handler context. */
 	if ((td->td_pflags & TDP_ALTSTACK) != 0 && !oonstack &&
@@ -699,12 +728,17 @@ cpu_shutdown(void *args)
 	openfirmware_exit(args);
 }
 
-/* Get current clock frequency for the given cpu id. */
+/* Get current clock frequency for the given CPU ID. */
 int
 cpu_est_clockrate(int cpu_id, uint64_t *rate)
 {
+	struct pcpu *pc;
 
-	return (ENXIO);
+	pc = pcpu_find(cpu_id);
+	if (pc == NULL || rate == NULL)
+		return (EINVAL);
+	*rate = pc->pc_clock;
+	return (0);
 }
 
 /*
@@ -744,15 +778,23 @@ sparc64_shutdown_final(void *dummy, int howto)
 	/* Turn the power off? */
 	if ((howto & RB_POWEROFF) != 0)
 		cpu_shutdown(&args);
-	/* In case of halt, return to the firmware */
+	/* In case of halt, return to the firmware. */
 	if ((howto & RB_HALT) != 0)
 		cpu_halt();
 }
 
 void
-cpu_idle(void)
+cpu_idle(int busy)
 {
-	/* Insert code to halt (until next interrupt) for the idle loop */
+
+	/* Insert code to halt (until next interrupt) for the idle loop. */
+}
+
+int
+cpu_idle_wakeup(int cpu)
+{
+
+	return (0);
 }
 
 int
@@ -767,6 +809,7 @@ ptrace_set_pc(struct thread *td, u_long addr)
 int
 ptrace_single_step(struct thread *td)
 {
+
 	/* TODO; */
 	return (0);
 }
@@ -774,6 +817,7 @@ ptrace_single_step(struct thread *td)
 int
 ptrace_clear_single_step(struct thread *td)
 {
+
 	/* TODO; */
 	return (0);
 }

@@ -31,7 +31,7 @@
  *
  *	from: @(#)cpu.h 5.4 (Berkeley) 5/9/91
  *	from: FreeBSD: src/sys/i386/include/cpu.h,v 1.62 2001/06/29
- * $FreeBSD: src/sys/sun4v/include/cpu.h,v 1.1 2006/10/05 06:14:25 kmacy Exp $
+ * $FreeBSD: src/sys/sun4v/include/cpu.h,v 1.2 2008/03/26 13:03:51 phk Exp $
  */
 
 #ifndef	_MACHINE_CPU_H_
@@ -47,27 +47,6 @@ extern void cpu_yield(void);
 #define	cpu_getstack(td)	((td)->td_frame->tf_sp)
 #define	cpu_setstack(td, sp)	((td)->td_frame->tf_sp = (sp))
 #define	cpu_spinwait()          
-
-
-
-/*
- * CTL_MACHDEP definitions.
- */
-#define CPU_CONSDEV		1	/* dev_t: console terminal device */
-#define	CPU_ADJKERNTZ		2	/* int:	timezone offset	(seconds) */
-#define	CPU_DISRTCSET		3	/* int: disable resettodr() call */
-#define CPU_BOOTINFO		4	/* struct: bootinfo */
-#define	CPU_WALLCLOCK		5	/* int:	indicates wall CMOS clock */
-#define	CPU_MAXID		6	/* number of valid machdep ids */
-
-#define CTL_MACHDEP_NAMES { \
-	{ 0, 0 }, \
-	{ "console_device", CTLTYPE_STRUCT }, \
-	{ "adjkerntz", CTLTYPE_INT }, \
-	{ "disable_rtc_set", CTLTYPE_INT }, \
-	{ "bootinfo", CTLTYPE_STRUCT }, \
-	{ "wall_cmos_clock", CTLTYPE_INT }, \
-}
 
 #ifdef _KERNEL
 

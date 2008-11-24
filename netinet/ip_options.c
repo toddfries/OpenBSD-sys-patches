@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_options.c,v 1.7 2007/10/24 19:03:59 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_options.c,v 1.13 2008/10/02 15:37:58 zec Exp $");
 
 #include "opt_ipstealth.h"
 #include "opt_mac.h"
@@ -45,6 +45,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_options.c,v 1.7 2007/10/24 19:03:59 rwats
 #include <sys/kernel.h>
 #include <sys/syslog.h>
 #include <sys/sysctl.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -97,6 +98,7 @@ static void	save_rte(struct mbuf *m, u_char *, struct in_addr);
 int
 ip_dooptions(struct mbuf *m, int pass)
 {
+	INIT_VNET_INET(curvnet);
 	struct ip *ip = mtod(m, struct ip *);
 	u_char *cp;
 	struct in_ifaddr *ia;
@@ -150,7 +152,7 @@ ip_dooptions(struct mbuf *m, int pass)
 		case IPOPT_LSRR:
 		case IPOPT_SSRR:
 #ifdef IPSTEALTH
-			if (ipstealth && pass > 0)
+			if (V_ipstealth && pass > 0)
 				break;
 #endif
 			if (optlen < IPOPT_OFFSET + sizeof(*cp)) {
@@ -189,11 +191,11 @@ ip_dooptions(struct mbuf *m, int pass)
 				break;
 			}
 #ifdef IPSTEALTH
-			if (ipstealth)
+			if (V_ipstealth)
 				goto dropit;
 #endif
 			if (!ip_dosourceroute) {
-				if (ipforwarding) {
+				if (V_ipforwarding) {
 					char buf[16]; /* aaa.bbb.ccc.ddd\0 */
 					/*
 					 * Acting as a router, so generate
@@ -215,7 +217,7 @@ nosourcerouting:
 #ifdef IPSTEALTH
 dropit:
 #endif
-					ipstat.ips_cantforward++;
+					V_ipstat.ips_cantforward++;
 					m_freem(m);
 					return (1);
 				}
@@ -233,7 +235,8 @@ dropit:
 			    if ((ia = (INA)ifa_ifwithdstaddr((SA)&ipaddr)) == NULL)
 				ia = (INA)ifa_ifwithnet((SA)&ipaddr);
 			} else
-				ia = ip_rtaddr(ipaddr.sin_addr);
+/* XXX MRT 0 for routing */
+				ia = ip_rtaddr(ipaddr.sin_addr, M_GETFIB(m));
 			if (ia == NULL) {
 				type = ICMP_UNREACH;
 				code = ICMP_UNREACH_SRCFAIL;
@@ -251,7 +254,7 @@ dropit:
 
 		case IPOPT_RR:
 #ifdef IPSTEALTH
-			if (ipstealth && pass == 0)
+			if (V_ipstealth && pass == 0)
 				break;
 #endif
 			if (optlen < IPOPT_OFFSET + sizeof(*cp)) {
@@ -276,7 +279,7 @@ dropit:
 			 * same).
 			 */
 			if ((ia = (INA)ifa_ifwithaddr((SA)&ipaddr)) == NULL &&
-			    (ia = ip_rtaddr(ipaddr.sin_addr)) == NULL) {
+			    (ia = ip_rtaddr(ipaddr.sin_addr, M_GETFIB(m))) == NULL) {
 				type = ICMP_UNREACH;
 				code = ICMP_UNREACH_HOST;
 				goto bad;
@@ -288,7 +291,7 @@ dropit:
 
 		case IPOPT_TS:
 #ifdef IPSTEALTH
-			if (ipstealth && pass == 0)
+			if (V_ipstealth && pass == 0)
 				break;
 #endif
 			code = cp - (u_char *)ip;
@@ -355,14 +358,14 @@ dropit:
 			cp[IPOPT_OFFSET] += sizeof(n_time);
 		}
 	}
-	if (forward && ipforwarding) {
+	if (forward && V_ipforwarding) {
 		ip_forward(m, 1);
 		return (1);
 	}
 	return (0);
 bad:
 	icmp_error(m, type, code, 0, 0);
-	ipstat.ips_badoptions++;
+	V_ipstat.ips_badoptions++;
 	return (1);
 }
 
@@ -507,9 +510,6 @@ ip_insertoptions(struct mbuf *m, struct mbuf *opt, int *phlen)
 		}
 		M_MOVE_PKTHDR(n, m);
 		n->m_pkthdr.rcvif = NULL;
-#ifdef MAC
-		mac_mbuf_copy(m, n);
-#endif
 		n->m_pkthdr.len += optlen;
 		m->m_len -= sizeof(struct ip);
 		m->m_data += sizeof(struct ip);
@@ -589,7 +589,7 @@ ip_pcbopts(struct inpcb *inp, int optname, struct mbuf *m)
 	struct mbuf **pcbopt;
 	u_char opt;
 
-	INP_LOCK_ASSERT(inp);
+	INP_WLOCK_ASSERT(inp);
 
 	pcbopt = &inp->inp_options;
 
@@ -651,6 +651,7 @@ ip_pcbopts(struct inpcb *inp, int optname, struct mbuf *m)
 			 * in actual IP option, but is stored before the
 			 * options.
 			 */
+			/* XXX-BZ PRIV_NETINET_SETHDROPTS? */
 			if (optlen < IPOPT_MINOFF - 1 + sizeof(struct in_addr))
 				goto bad;
 			m->m_len -= sizeof(struct in_addr);

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/linker.h,v 1.47 2007/10/22 04:12:57 jb Exp $
+ * $FreeBSD: src/sys/sys/linker.h,v 1.51 2008/05/23 00:49:38 jb Exp $
  */
 
 #ifndef _SYS_LINKER_H_
@@ -58,6 +58,8 @@ typedef struct linker_symval {
     caddr_t		value;
     size_t		size;
 } linker_symval_t;
+
+typedef int (*linker_function_nameval_callback_t)(linker_file_t, int, linker_symval_t *, void *);
 
 struct common_symbol {
     STAILQ_ENTRY(common_symbol) link;
@@ -154,6 +156,12 @@ int linker_file_lookup_set(linker_file_t _file, const char *_name,
 			   void *_start, void *_stop, int *_count);
 
 /*
+ * List all functions in a file.
+ */
+int linker_file_function_listall(linker_file_t, 
+				 linker_function_nameval_callback_t, void *);
+
+/*
  * Functions soley for use by the linker class handlers.
  */
 int linker_add_class(linker_class_t _cls);
@@ -168,6 +176,14 @@ int linker_ddb_lookup(const char *_symstr, c_linker_sym_t *_sym);
 int linker_ddb_search_symbol(caddr_t _value, c_linker_sym_t *_sym,
 			     long *_diffp);
 int linker_ddb_symbol_values(c_linker_sym_t _sym, linker_symval_t *_symval);
+int linker_ddb_search_symbol_name(caddr_t value, char *buf, u_int buflen,
+				  long *offset);
+
+/*
+ * stack(9) helper for situations where kernel locking is required.
+ */
+int linker_search_symbol_name(caddr_t value, char *buf, u_int buflen,
+    long *offset);
 
 
 /* HWPMC helper */
@@ -251,6 +267,20 @@ int	elf_reloc_local(linker_file_t _lf, Elf_Addr base, const void *_rel, int _typ
 const Elf_Sym *elf_get_sym(linker_file_t _lf, Elf_Size _symidx);
 const char *elf_get_symname(linker_file_t _lf, Elf_Size _symidx);
 
+typedef struct linker_ctf {
+	const uint8_t 	*ctftab;	/* Decompressed CTF data. */
+	int 		ctfcnt;		/* Number of CTF data bytes. */
+	const Elf_Sym	*symtab;	/* Ptr to the symbol table. */
+	int		nsym;		/* Number of symbols. */
+	const char	*strtab;	/* Ptr to the string table. */
+	int 		strcnt;		/* Number of string bytes. */
+	uint32_t	**ctfoffp;	/* Ptr to array of obj/fnc offsets. */
+	uint32_t	**typoffp;	/* Ptr to array of type offsets. */
+	long		*typlenp;	/* Ptr to number of type data entries. */
+} linker_ctf_t;
+
+int	linker_ctf_get(linker_file_t, linker_ctf_t *);
+
 int elf_cpu_load_file(linker_file_t);
 int elf_cpu_unload_file(linker_file_t);
 
@@ -260,10 +290,10 @@ int elf_cpu_unload_file(linker_file_t);
 
 /*
  * This is version 1 of the KLD file status structure. It is identified
- * by it's _size_ in the version field.
+ * by its _size_ in the version field.
  */
 struct kld_file_stat_1 {
-    int		version;	/* set to sizeof(linker_file_stat) */
+    int		version;	/* set to sizeof(struct kld_file_stat_1) */
     char        name[MAXPATHLEN];
     int		refs;
     int		id;
@@ -273,7 +303,7 @@ struct kld_file_stat_1 {
 #endif /* _KERNEL */
 
 struct kld_file_stat {
-    int		version;	/* set to sizeof(linker_file_stat) */
+    int		version;	/* set to sizeof(struct kld_file_stat) */
     char        name[MAXPATHLEN];
     int		refs;
     int		id;

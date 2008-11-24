@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/sysv_sem.c,v 1.90 2007/10/24 19:03:55 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/sysv_sem.c,v 1.91 2008/06/19 18:08:42 gonzo Exp $");
 
 #include "opt_sysvipc.h"
 #include "opt_mac.h"
@@ -1165,6 +1165,13 @@ semop(td, uap)
 			error = EIDRM;
 			goto done2;
 		}
+
+		/*
+		 * Renew the semaphore's pointer after wakeup since
+		 * during msleep sem_base may have been modified and semptr
+		 * is not valid any more
+		 */
+		semptr = &semakptr->u.sem_base[sopptr->sem_num];
 
 		/*
 		 * The semaphore is still alive.  Readjust the count of

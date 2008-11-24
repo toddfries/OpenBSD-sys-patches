@@ -6,7 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $FreeBSD: src/sys/sys/disk.h,v 1.42 2007/05/05 17:02:19 pjd Exp $
+ * $FreeBSD: src/sys/sys/disk.h,v 1.43 2008/09/07 13:54:57 lulf Exp $
  *
  */
 
@@ -96,6 +96,12 @@ void disk_err(struct bio *bp, const char *what, int blkdone, int nl);
 	 *   ident of the underlying provider,
 	 * - ident is an ASCII string (is printable),
 	 * - ident is optional and applications can't relay on its presence.
+	 */
+
+#define DIOCGPROVIDERNAME _IOR('d', 138, char[MAXPATHLEN])
+	/*-
+	 * Store the provider name, given a device path, in a buffer. The buffer
+	 * must be at least MAXPATHLEN bytes long.
 	 */
 
 #endif /* _SYS_DISK_H_ */

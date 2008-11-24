@@ -25,11 +25,12 @@
  * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * $FreeBSD: src/sys/kern/kern_priv.c,v 1.4 2007/07/02 14:03:29 rwatson Exp $
  */
 
 #include "opt_mac.h"
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/kern/kern_priv.c,v 1.6 2008/09/17 15:49:44 attilio Exp $");
 
 #include <sys/param.h>
 #include <sys/jail.h>
@@ -131,25 +132,4 @@ priv_check(struct thread *td, int priv)
 	KASSERT(td == curthread, ("priv_check: td != curthread"));
 
 	return (priv_check_cred(td->td_ucred, priv, 0));
-}
-
-/*
- * Historical suser() wrapper functions, which now simply request PRIV_ROOT.
- * These will be removed in the near future, and exist solely because
- * the kernel and modules are not yet fully adapted to the new model.
- */
-int
-suser_cred(struct ucred *cred, int flags)
-{
-
-	return (priv_check_cred(cred, PRIV_ROOT, flags));
-}
-
-int
-suser(struct thread *td)
-{
-
-	KASSERT(td == curthread, ("suser: td != curthread"));
-
-	return (suser_cred(td->td_ucred, 0));
 }

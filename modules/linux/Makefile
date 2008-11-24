@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/linux/Makefile,v 1.72 2007/05/23 15:45:52 kib Exp $
+# $FreeBSD: src/sys/modules/linux/Makefile,v 1.73 2008/09/01 23:59:00 imp Exp $
 
 .if ${MACHINE_ARCH} == "amd64"
 SFX= 32
@@ -54,7 +54,7 @@ linux${SFX}_genassym.o: linux${SFX}_genassym.c linux.h @ machine
 
 .if !defined(KERNBUILDDIR)
 opt_inet6.h:
-	echo "#define INET6 1" > opt_inet6.h
+	echo "#define INET6 1" > ${.TARGET}
 .endif
 
 .include <bsd.kmod.mk>

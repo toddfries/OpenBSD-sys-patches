@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/include/cpufunc.h,v 1.21 2004/08/07 00:20:00 grehan Exp $
+ * $FreeBSD: src/sys/powerpc/include/cpufunc.h,v 1.28 2008/10/30 21:02:00 sobomax Exp $
  */
 
 #ifndef _MACHINE_CPUFUNC_H_
@@ -44,20 +44,20 @@ powerpc_mb(void)
 #include <sys/types.h>
 
 #include <machine/psl.h>
+#include <machine/spr.h>
 
 struct thread;
 
 #ifdef KDB
-void ppc_db_trap(void);
-#endif
-
+void breakpoint(void);
+#else
 static __inline void
 breakpoint(void)
 {
-#ifdef KDB
-	ppc_db_trap();
-#endif
+
+	return;
 }
+#endif
 
 /* CPU register mangling inlines */
 
@@ -136,6 +136,13 @@ isync(void)
 	__asm __volatile ("isync");
 }
 
+static __inline void
+powerpc_sync(void)
+{
+
+	__asm __volatile ("sync");
+}
+
 static __inline register_t
 intr_disable(void)
 {
@@ -153,19 +160,12 @@ intr_restore(register_t msr)
 	mtmsr(msr);
 }
 
-static __inline void
-restore_intr(unsigned int msr)
-{
-
-	mtmsr(msr);
-}
-
 static __inline struct pcpu *
 powerpc_get_pcpup(void)
 {
 	struct pcpu	*ret;
 
-	__asm ("mfsprg %0, 0" : "=r"(ret));
+	__asm __volatile("mfsprg %0, 0" : "=r"(ret));
 
 	return(ret);
 }

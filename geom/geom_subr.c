@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_subr.c,v 1.91 2007/05/05 16:33:44 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_subr.c,v 1.97 2008/08/09 11:14:05 des Exp $");
 
 #include "opt_ddb.h"
 
@@ -249,6 +249,72 @@ g_modevent(module_t mod, int type, void *data)
 	return (error);
 }
 
+static void
+g_retaste_event(void *arg, int flag)
+{
+	struct g_class *cp, *mp;
+	struct g_geom *gp, *gp2;
+	struct g_hh00 *hh;
+	struct g_provider *pp;
+
+	g_topology_assert();
+	if (flag == EV_CANCEL)  /* XXX: can't happen ? */
+		return;
+	if (g_shutdown)
+		return;
+
+	hh = arg;
+	mp = hh->mp;
+	hh->error = 0;
+	if (hh->post) {
+		g_free(hh);
+		hh = NULL;
+	}
+	g_trace(G_T_TOPOLOGY, "g_retaste(%s)", mp->name);
+
+	LIST_FOREACH(cp, &g_classes, class) {
+		LIST_FOREACH(gp, &cp->geom, geom) {
+			LIST_FOREACH(pp, &gp->provider, provider) {
+				if (pp->acr || pp->acw || pp->ace)
+					continue;
+				LIST_FOREACH(gp2, &mp->geom, geom) {
+					if (!strcmp(pp->name, gp2->name))
+						break;
+				}
+				if (gp2 != NULL)
+					g_wither_geom(gp2, ENXIO);
+				mp->taste(mp, pp, 0);
+				g_topology_assert();
+			}
+		}
+	}
+}
+
+int
+g_retaste(struct g_class *mp)
+{
+	struct g_hh00 *hh;
+	int error;
+
+	if (mp->taste == NULL)
+		return (EINVAL);
+
+	hh = g_malloc(sizeof *hh, M_WAITOK | M_ZERO);
+	hh->mp = mp;
+
+	if (cold) {
+		hh->post = 1;
+		error = g_post_event(g_retaste_event, hh, M_WAITOK, NULL);
+	} else {
+		error = g_waitfor_event(g_retaste_event, hh, M_WAITOK, NULL);
+		if (error == 0)
+			error = hh->error;
+		g_free(hh);
+	}
+
+	return (error);
+}
+
 struct g_geom *
 g_new_geomf(struct g_class *mp, const char *fmt, ...)
 {
@@ -258,7 +324,7 @@ g_new_geomf(struct g_class *mp, const char *fmt, ...)
 
 	g_topology_assert();
 	G_VALID_CLASS(mp);
-	sb = sbuf_new(NULL, NULL, 0, SBUF_AUTOEXTEND);
+	sb = sbuf_new_auto();
 	va_start(ap, fmt);
 	sbuf_vprintf(sb, fmt, ap);
 	va_end(ap);
@@ -465,6 +531,8 @@ g_new_provider_event(void *arg, int flag)
 		return;
 	pp = arg;
 	G_VALID_PROVIDER(pp);
+	KASSERT(!(pp->flags & G_PF_WITHER),
+	    ("g_new_provider_event but withered"));
 	LIST_FOREACH(mp, &g_classes, class) {
 		if (mp->taste == NULL)
 			continue;
@@ -498,7 +566,7 @@ g_new_providerf(struct g_geom *gp, const char *fmt, ...)
 	KASSERT(!(gp->flags & G_GEOM_WITHER),
 	    ("new provider on WITHERing geom(%s) (class %s)",
 	    gp->name, gp->class->name));
-	sb = sbuf_new(NULL, NULL, 0, SBUF_AUTOEXTEND);
+	sb = sbuf_new_auto();
 	va_start(ap, fmt);
 	sbuf_vprintf(sb, fmt, ap);
 	va_end(ap);
@@ -554,7 +622,7 @@ g_destroy_provider(struct g_provider *pp)
 	    ("g_destroy_provider but attached"));
 	KASSERT (pp->acr == 0, ("g_destroy_provider with acr"));
 	KASSERT (pp->acw == 0, ("g_destroy_provider with acw"));
-	KASSERT (pp->acw == 0, ("g_destroy_provider with ace"));
+	KASSERT (pp->ace == 0, ("g_destroy_provider with ace"));
 	g_cancel_event(pp);
 	LIST_REMOVE(pp, provider);
 	gp = pp->geom;
@@ -1090,8 +1158,11 @@ db_show_geom_provider(int indent, struct g_provider *pp)
 		printf("\n");
 	}
 	if (!LIST_EMPTY(&pp->consumers)) {
-		LIST_FOREACH(cp, &pp->consumers, consumers)
+		LIST_FOREACH(cp, &pp->consumers, consumers) {
 			db_show_geom_consumer(indent + 2, cp);
+			if (db_pager_quit)
+				break;
+		}
 	}
 }
 
@@ -1122,12 +1193,18 @@ db_show_geom_geom(int indent, struct g_geom *gp)
 		printf("\n");
 	}
 	if (!LIST_EMPTY(&gp->provider)) {
-		LIST_FOREACH(pp, &gp->provider, provider)
+		LIST_FOREACH(pp, &gp->provider, provider) {
 			db_show_geom_provider(indent + 2, pp);
+			if (db_pager_quit)
+				break;
+		}
 	}
 	if (!LIST_EMPTY(&gp->consumer)) {
-		LIST_FOREACH(cp, &gp->consumer, consumer)
+		LIST_FOREACH(cp, &gp->consumer, consumer) {
 			db_show_geom_consumer(indent + 2, cp);
+			if (db_pager_quit)
+				break;
+		}
 	}
 }
 
@@ -1137,8 +1214,11 @@ db_show_geom_class(struct g_class *mp)
 	struct g_geom *gp;
 
 	printf("class: %s (%p)\n", mp->name, mp);
-	LIST_FOREACH(gp, &mp->geom, geom)
+	LIST_FOREACH(gp, &mp->geom, geom) {
 		db_show_geom_geom(2, gp);
+		if (db_pager_quit)
+			break;
+	}
 }
 
 /*
@@ -1153,6 +1233,8 @@ DB_SHOW_COMMAND(geom, db_show_geom)
 		LIST_FOREACH(mp, &g_classes, class) {
 			db_show_geom_class(mp);
 			printf("\n");
+			if (db_pager_quit)
+				break;
 		}
 	} else {
 		switch (g_valid_obj((void *)addr)) {

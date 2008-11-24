@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/vx/if_vx_eisa.c,v 1.27 2007/02/23 12:18:59 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/vx/if_vx_eisa.c,v 1.28 2008/08/25 05:20:17 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -69,13 +69,13 @@ vx_match(eisa_id_t type)
 {
 	switch (type) {
 	case EISA_DEVICE_ID_3COM_3C592:
-		return "3Com 3C592 Network Adapter";
+		return "3Com 3C592";
 	case EISA_DEVICE_ID_3COM_3C597_TX:
-		return "3Com 3C597-TX Network Adapter";
+		return "3Com 3C597-TX";
 	case EISA_DEVICE_ID_3COM_3C597_T4:
-		return "3Com 3C597-T4 Network Adapter";
+		return "3Com 3C597-T4";
 	case EISA_DEVICE_ID_3COM_3C597_MII:
-		return "3Com 3C597-MII Network Adapter";
+		return "3Com 3C597-MII";
 	default:
 		break;
 	}

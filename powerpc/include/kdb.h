@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/include/kdb.h,v 1.4 2007/06/09 21:55:16 marcel Exp $
+ * $FreeBSD: src/sys/powerpc/include/kdb.h,v 1.5 2008/03/02 17:05:57 raj Exp $
  */
 
 #ifndef _MACHINE_KDB_H_
@@ -33,22 +33,15 @@
 #include <machine/frame.h>
 #include <machine/md_var.h>
 #include <machine/psl.h>
+#include <machine/spr.h>
 
-static __inline void
-kdb_cpu_clear_singlestep(void)
-{
-	kdb_frame->srr1 &= ~PSL_SE;
-}
-
-static __inline void
-kdb_cpu_set_singlestep(void)
-{
-	kdb_frame->srr1 |= PSL_SE;
-}
+void kdb_cpu_clear_singlestep(void);
+void kdb_cpu_set_singlestep(void);
 
 static __inline void
 kdb_cpu_sync_icache(unsigned char *addr, size_t size)
 {
+
 	__syncicache(addr, size);
 }
 

@@ -29,7 +29,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)fifo_vnops.c	8.10 (Berkeley) 5/27/95
- * $FreeBSD: src/sys/fs/fifofs/fifo_vnops.c,v 1.138 2007/07/26 16:58:09 pjd Exp $
+ * $FreeBSD: src/sys/fs/fifofs/fifo_vnops.c,v 1.145 2008/10/23 15:53:51 des Exp $
  */
 
 #include <sys/param.h>
@@ -43,7 +43,7 @@
 #include <sys/mutex.h>
 #include <sys/malloc.h>
 #include <sys/poll.h>
-#include <sys/proc.h> /* XXXKSE */
+#include <sys/proc.h>
 #include <sys/signalvar.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
@@ -61,10 +61,12 @@ static fo_poll_t        fifo_poll_f;
 static fo_kqfilter_t    fifo_kqfilter_f;
 static fo_stat_t        fifo_stat_f;
 static fo_close_t       fifo_close_f;
+static fo_truncate_t    fifo_truncate_f;
 
 struct fileops fifo_ops_f = {
 	.fo_read =      fifo_read_f,
 	.fo_write =     fifo_write_f,
+	.fo_truncate =  fifo_truncate_f,
 	.fo_ioctl =     fifo_ioctl_f,
 	.fo_poll =      fifo_poll_f,
 	.fo_kqfilter =  fifo_kqfilter_f,
@@ -152,7 +154,7 @@ fifo_cleanup(struct vnode *vp)
 		vp->v_fifoinfo = NULL;
 		(void)soclose(fip->fi_readsock);
 		(void)soclose(fip->fi_writesock);
-		FREE(fip, M_VNODE);
+		free(fip, M_VNODE);
 	}
 }
 
@@ -183,7 +185,7 @@ fifo_open(ap)
 	if (fp == NULL)
 		return (EINVAL);
 	if ((fip = vp->v_fifoinfo) == NULL) {
-		MALLOC(fip, struct fifoinfo *, sizeof(*fip), M_VNODE, M_WAITOK);
+		fip = malloc(sizeof(*fip), M_VNODE, M_WAITOK);
 		error = socreate(AF_LOCAL, &rso, SOCK_STREAM, 0, cred, td);
 		if (error)
 			goto fail1;
@@ -252,10 +254,10 @@ fail1:
 	}
 	if ((ap->a_mode & O_NONBLOCK) == 0) {
 		if ((ap->a_mode & FREAD) && fip->fi_writers == 0) {
-			VOP_UNLOCK(vp, 0, td);
+			VOP_UNLOCK(vp, 0);
 			error = msleep(&fip->fi_readers, &fifo_mtx,
 			    PDROP | PCATCH | PSOCK, "fifoor", 0);
-			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 			if (error) {
 				fip->fi_readers--;
 				if (fip->fi_readers == 0) {
@@ -272,10 +274,10 @@ fail1:
 			 */
 		}
 		if ((ap->a_mode & FWRITE) && fip->fi_readers == 0) {
-			VOP_UNLOCK(vp, 0, td);
+			VOP_UNLOCK(vp, 0);
 			error = msleep(&fip->fi_writers, &fifo_mtx,
 			    PDROP | PCATCH | PSOCK, "fifoow", 0);
-			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 			if (error) {
 				fip->fi_writers--;
 				if (fip->fi_writers == 0) {
@@ -294,11 +296,8 @@ fail1:
 	}
 	mtx_unlock(&fifo_mtx);
 	KASSERT(fp != NULL, ("can't fifo/vnode bypass"));
-	FILE_LOCK(fp);
 	KASSERT(fp->f_ops == &badfileops, ("not badfileops in fifo_open"));
-	fp->f_data = fip;
-	fp->f_ops = &fifo_ops_f;
-	FILE_UNLOCK(fp);
+	finit(fp, fp->f_flag, DTYPE_FIFO, fip, &fifo_ops_f);
 	return (0);
 }
 
@@ -706,17 +705,14 @@ static int
 fifo_read_f(struct file *fp, struct uio *uio, struct ucred *cred, int flags, struct thread *td)
 {
 	struct fifoinfo *fip;
-	int error, sflags;
+	int sflags;
 
 	fip = fp->f_data;
 	KASSERT(uio->uio_rw == UIO_READ,("fifo_read mode"));
 	if (uio->uio_resid == 0)
 		return (0);
 	sflags = (fp->f_flag & FNONBLOCK) ? MSG_NBIO : 0;
-	mtx_lock(&Giant);
-	error = soreceive(fip->fi_readsock, NULL, uio, NULL, NULL, &sflags);
-	mtx_unlock(&Giant);
-	return (error);
+	return (soreceive(fip->fi_readsock, NULL, uio, NULL, NULL, &sflags));
 }
 
 static int
@@ -727,16 +723,20 @@ fifo_stat_f(struct file *fp, struct stat *sb, struct ucred *cred, struct thread 
 }
 
 static int
+fifo_truncate_f(struct file *fp, off_t length, struct ucred *cred, struct thread *td)
+{
+
+	return (vnops.fo_truncate(fp, length, cred, td));
+}
+
+static int
 fifo_write_f(struct file *fp, struct uio *uio, struct ucred *cred, int flags, struct thread *td)
 {
 	struct fifoinfo *fip;
-	int error, sflags;
+	int sflags;
 
 	fip = fp->f_data;
 	KASSERT(uio->uio_rw == UIO_WRITE,("fifo_write mode"));
 	sflags = (fp->f_flag & FNONBLOCK) ? MSG_NBIO : 0;
-	mtx_lock(&Giant);
-	error = sosend(fip->fi_writesock, NULL, uio, 0, NULL, sflags, td);
-	mtx_unlock(&Giant);
-	return (error);
+	return (sosend(fip->fi_writesock, NULL, uio, 0, NULL, sflags, td));
 }

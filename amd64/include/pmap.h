@@ -39,7 +39,7 @@
  *
  *	from: hp300: @(#)pmap.h	7.2 (Berkeley) 12/16/90
  *	from: @(#)pmap.h	7.4 (Berkeley) 5/12/91
- * $FreeBSD: src/sys/amd64/include/pmap.h,v 1.138 2006/12/05 11:31:33 ru Exp $
+ * $FreeBSD: src/sys/amd64/include/pmap.h,v 1.148 2008/08/04 08:04:09 alc Exp $
  */
 
 #ifndef _MACHINE_PMAP_H_
@@ -57,7 +57,7 @@
 #define	PG_NC_PCD	0x010	/* PCD	Cache disable		*/
 #define PG_A		0x020	/* A	Accessed		*/
 #define	PG_M		0x040	/* D	Dirty			*/
-#define	PG_PS		0x080	/* PS	Page size (0=4k,1=4M)	*/
+#define	PG_PS		0x080	/* PS	Page size (0=4k,1=2M)	*/
 #define	PG_PTE_PAT	0x080	/* PAT	PAT index		*/
 #define	PG_G		0x100	/* G	Global			*/
 #define	PG_AVAIL1	0x200	/*    /	Available for system	*/
@@ -74,6 +74,17 @@
 #define	PG_PS_FRAME	(0x000fffffffe00000ul)
 #define	PG_PROT		(PG_RW|PG_U)	/* all protection bits . */
 #define PG_N		(PG_NC_PWT|PG_NC_PCD)	/* Non-cacheable */
+
+/* Page level cache control fields used to determine the PAT type */
+#define PG_PDE_CACHE	(PG_PDE_PAT | PG_NC_PWT | PG_NC_PCD)
+#define PG_PTE_CACHE	(PG_PTE_PAT | PG_NC_PWT | PG_NC_PCD)
+
+/*
+ * Promotion to a 2MB (PDE) page mapping requires that the corresponding 4KB
+ * (PTE) page mappings have identical settings for the following fields:
+ */
+#define	PG_PTE_PROMOTE	(PG_NX | PG_MANAGED | PG_W | PG_G | PG_PTE_PAT | \
+	    PG_M | PG_A | PG_NC_PCD | PG_NC_PWT | PG_U | PG_RW | PG_V)
 
 /*
  * Page Protection Exception bits
@@ -104,13 +115,11 @@
 
 /* Initial number of kernel page tables. */
 #ifndef NKPT
-/* 240 page tables needed to map 16G (120B "struct vm_page", 2M page tables). */
-#define	NKPT		240
+#define	NKPT		32
 #endif
 
 #define NKPML4E		1		/* number of kernel PML4 slots */
-#define NKPDPE		1		/* number of kernel PDP slots */
-#define	NKPDE		(NKPDPE*NPDEPG)	/* number of kernel PD slots */
+#define NKPDPE		howmany(NKPT, NPDEPG)/* number of kernel PDP slots */
 
 #define	NUPML4E		(NPML4EPG/2)	/* number of userland PML4 pages */
 #define	NUPDPE		(NUPML4E*NPDPEPG)/* number of userland PDP pages */
@@ -231,7 +240,6 @@ struct	pv_entry;
 struct	pv_chunk;
 
 struct md_page {
-	int pv_list_count;
 	TAILQ_HEAD(,pv_entry)	pv_list;
 };
 
@@ -242,6 +250,7 @@ struct pmap {
 	u_int			pm_active;	/* active on cpus */
 	/* spare u_int here due to padding */
 	struct pmap_statistics	pm_stats;	/* pmap statistics */
+	vm_page_t		pm_root;	/* spare page table pages */
 };
 
 typedef struct pmap	*pmap_t;
@@ -302,20 +311,19 @@ extern vm_paddr_t dump_avail[];
 extern vm_offset_t virtual_avail;
 extern vm_offset_t virtual_end;
 
-#define	pmap_page_is_mapped(m)	(!TAILQ_EMPTY(&(m)->md.pv_list))
 #define	pmap_unmapbios(va, sz)	pmap_unmapdev((va), (sz))
 
 void	pmap_bootstrap(vm_paddr_t *);
 int	pmap_change_attr(vm_offset_t, vm_size_t, int);
 void	pmap_init_pat(void);
 void	pmap_kenter(vm_offset_t va, vm_paddr_t pa);
-void	pmap_kenter_attr(vm_offset_t va, vm_paddr_t pa, int mode);
 void	*pmap_kenter_temporary(vm_paddr_t pa, int i);
 vm_paddr_t pmap_kextract(vm_offset_t);
 void	pmap_kremove(vm_offset_t);
 void	*pmap_mapbios(vm_paddr_t, vm_size_t);
 void	*pmap_mapdev(vm_paddr_t, vm_size_t);
 void	*pmap_mapdev_attr(vm_paddr_t, vm_size_t, int);
+boolean_t pmap_page_is_mapped(vm_page_t m);
 void	pmap_unmapdev(vm_offset_t, vm_size_t);
 void	pmap_invalidate_page(pmap_t, vm_offset_t);
 void	pmap_invalidate_range(pmap_t, vm_offset_t, vm_offset_t);

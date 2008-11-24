@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia64/dump_machdep.c,v 1.13 2005/07/02 19:57:31 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia64/dump_machdep.c,v 1.16 2008/10/01 22:08:53 peter Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -33,6 +33,7 @@ __FBSDID("$FreeBSD: src/sys/ia64/ia64/dump_machdep.c,v 1.13 2005/07/02 19:57:31 
 #include <sys/cons.h>
 #include <sys/kernel.h>
 #include <sys/kerneldump.h>
+#include <sys/vimage.h>
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <machine/efi.h>
@@ -59,27 +60,6 @@ static off_t dumplo, fileofs;
 static char buffer[DEV_BSIZE];
 static size_t fragsz;
 
-/* XXX should be MI */
-static void
-mkdumpheader(struct kerneldumpheader *kdh, uint32_t archver, uint64_t dumplen,
-    uint32_t blksz)
-{
-
-	bzero(kdh, sizeof(*kdh));
-	strncpy(kdh->magic, KERNELDUMPMAGIC, sizeof(kdh->magic));
-	strncpy(kdh->architecture, MACHINE_ARCH, sizeof(kdh->architecture));
-	kdh->version = htod32(KERNELDUMPVERSION);
-	kdh->architectureversion = htod32(archver);
-	kdh->dumplength = htod64(dumplen);
-	kdh->dumptime = htod64(time_second);
-	kdh->blocksize = htod32(blksz);
-	strncpy(kdh->hostname, hostname, sizeof(kdh->hostname));
-	strncpy(kdh->versionstring, version, sizeof(kdh->versionstring));
-	if (panicstr != NULL)
-		strncpy(kdh->panicstring, panicstr, sizeof(kdh->panicstring));
-	kdh->parity = kerneldump_parity(kdh);
-}
-
 static int
 buf_write(struct dumperinfo *di, char *ptr, size_t sz)
 {
@@ -95,7 +75,7 @@ buf_write(struct dumperinfo *di, char *ptr, size_t sz)
 		ptr += len;
 		sz -= len;
 		if (fragsz == DEV_BSIZE) {
-			error = di->dumper(di->priv, buffer, 0, dumplo,
+			error = dump_write(di, buffer, 0, dumplo,
 			    DEV_BSIZE);
 			if (error)
 				return error;
@@ -115,7 +95,7 @@ buf_flush(struct dumperinfo *di)
 	if (fragsz == 0)
 		return (0);
 
-	error = di->dumper(di->priv, buffer, 0, dumplo, DEV_BSIZE);
+	error = dump_write(di, buffer, 0, dumplo, DEV_BSIZE);
 	dumplo += DEV_BSIZE;
 	fragsz = 0;
 	return (error);
@@ -146,7 +126,7 @@ cb_dumpdata(struct efi_md *mdp, int seqnr, void *arg)
 			printf("%c\b", "|/-\\"[twiddle++ & 3]);
 			counter &= (1<<24) - 1;
 		}
-		error = di->dumper(di->priv, (void*)pa, 0, dumplo, sz);
+		error = dump_write(di, (void*)pa, 0, dumplo, sz);
 		if (error)
 			break;
 		dumplo += sz;
@@ -260,13 +240,13 @@ dumpsys(struct dumperinfo *di)
 	dumplo = di->mediaoffset + di->mediasize - dumpsize;
 	dumplo -= sizeof(kdh) * 2;
 
-	mkdumpheader(&kdh, KERNELDUMP_IA64_VERSION, dumpsize, di->blocksize);
+	mkdumpheader(&kdh, KERNELDUMPMAGIC, KERNELDUMP_IA64_VERSION, dumpsize, di->blocksize);
 
 	printf("Dumping %llu MB (%d chunks)\n", (long long)dumpsize >> 20,
 	    ehdr.e_phnum);
 
 	/* Dump leader */
-	error = di->dumper(di->priv, &kdh, 0, dumplo, sizeof(kdh));
+	error = dump_write(di, &kdh, 0, dumplo, sizeof(kdh));
 	if (error)
 		goto fail;
 	dumplo += sizeof(kdh);
@@ -297,12 +277,12 @@ dumpsys(struct dumperinfo *di)
 		goto fail;
 
 	/* Dump trailer */
-	error = di->dumper(di->priv, &kdh, 0, dumplo, sizeof(kdh));
+	error = dump_write(di, &kdh, 0, dumplo, sizeof(kdh));
 	if (error)
 		goto fail;
 
 	/* Signal completion, signoff and exit stage left. */
-	di->dumper(di->priv, NULL, 0, 0, 0);
+	dump_write(di, NULL, 0, 0, 0);
 	printf("\nDump complete\n");
 	return;
 

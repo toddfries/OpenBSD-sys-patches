@@ -25,10 +25,11 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_uid16.c,v 1.22 2007/06/12 00:11:57 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_uid16.c,v 1.23 2008/03/31 12:01:19 kib Exp $");
 
 #include "opt_compat.h"
 
+#include <sys/fcntl.h>
 #include <sys/param.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>

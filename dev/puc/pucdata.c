@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/puc/pucdata.c,v 1.60 2008/01/12 19:14:29 maxim Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/puc/pucdata.c,v 1.67 2008/10/25 10:55:49 des Exp $");
 
 /*
  * PCI "universal" communications card driver configuration data (used to
@@ -596,6 +596,12 @@ const struct puc_cfg puc_pci_devices[] = {
 	 * I/O Flex PCI I/O Card Model-223 with 4 serial and 1 parallel ports.
 	 */
 
+	{   0x1415, 0x9501, 0x131f, 0x2050,
+	    "SIIG Cyber 4 PCI 16550",
+	    DEFAULT_RCLK * 10,
+	    PUC_PORT_4S, 0x10, 0, 8,
+	},
+
 	{   0x1415, 0x9501, 0x131f, 0x2051,
 	    "SIIG Cyber 4S PCI 16C650 (20x family)",
 	    DEFAULT_RCLK * 10,
@@ -624,6 +630,12 @@ const struct puc_cfg puc_pci_devices[] = {
 	    "Oxford Semiconductor OX16PCI952 UARTs",
 	    DEFAULT_RCLK,
 	    PUC_PORT_2S, 0x10, 4, 0,
+	},
+
+	{   0x14d2, 0x8010, 0xffff, 0,
+	    "VScom PCI-100L",
+	    DEFAULT_RCLK * 8,
+	    PUC_PORT_1S, 0x14, 0, 0,
 	},
 
 	{   0x14d2, 0x8020, 0xffff, 0,
@@ -694,6 +706,12 @@ const struct puc_cfg puc_pci_devices[] = {
 	    PUC_PORT_4S, 0x10, 4, 0,
 	},
 
+	{   0x14db, 0x2152, 0xffff, 0,
+	    "Avlab Low Profile PCI 4 Serial",
+	    DEFAULT_RCLK,
+	    PUC_PORT_4S, 0x10, 4, 0,
+	},
+
 	{   0x1592, 0x0781, 0xffff, 0,
 	    "Syba Tech Ltd. PCI-4S2P-550-ECP",
 	    DEFAULT_RCLK,
@@ -705,6 +723,12 @@ const struct puc_cfg puc_pci_devices[] = {
 	    "Decision Computer Inc, PCCOM 4-port serial",
 	    DEFAULT_RCLK,
 	    PUC_PORT_4S, 0x1c, 0, 8,
+	},
+
+	{   0x6666, 0x0002, 0xffff, 0,
+	    "Decision Computer Inc, PCCOM 8-port serial",
+	    DEFAULT_RCLK,
+	    PUC_PORT_8S, 0x1c, 0, 8,
 	},
 
 	{   0x6666, 0x0004, 0xffff, 0,
@@ -1116,7 +1140,7 @@ puc_config_timedia(struct puc_softc *sc, enum puc_cfg_cmd cmd, int port,
 		*res = (port == 1 || port == 3) ? 8 : 0;
 		return (0);
 	case PUC_CFG_GET_RID:
-		*res = 0x10 + ((port > 3) ? port - 2 : port >> 1);
+		*res = 0x10 + ((port > 3) ? port - 2 : port >> 1) * 4;
 		return (0);
 	case PUC_CFG_GET_TYPE:
 		*res = PUC_TYPE_SERIAL;

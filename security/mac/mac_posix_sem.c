@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/security/mac/mac_posix_sem.c,v 1.11 2007/10/24 19:04:01 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/security/mac/mac_posix_sem.c,v 1.15 2008/08/23 15:26:36 rwatson Exp $");
 
 #include "opt_mac.h"
 #include "opt_posix.h"
@@ -64,7 +64,10 @@ void
 mac_posixsem_init(struct ksem *ks)
 {
 
-	ks->ks_label = mac_posixsem_label_alloc();
+	if (mac_labeled & MPC_OBJECT_POSIXSEM)
+		ks->ks_label = mac_posixsem_label_alloc();
+	else
+		ks->ks_label = NULL;
 }
 
 static void
@@ -72,14 +75,17 @@ mac_posixsem_label_free(struct label *label)
 {
 
 	MAC_PERFORM(posixsem_destroy_label, label);
+	mac_labelzone_free(label);
 }
 
 void
 mac_posixsem_destroy(struct ksem *ks)
 {
 
-	mac_posixsem_label_free(ks->ks_label);
-	ks->ks_label = NULL;
+	if (ks->ks_label != NULL) {
+		mac_posixsem_label_free(ks->ks_label);
+		ks->ks_label = NULL;
+	}
 }
 
 void
@@ -87,16 +93,6 @@ mac_posixsem_create(struct ucred *cred, struct ksem *ks)
 {
 
 	MAC_PERFORM(posixsem_create, cred, ks, ks->ks_label);
-}
-
-int
-mac_posixsem_check_destroy(struct ucred *cred, struct ksem *ks)
-{
-	int error;
-
-	MAC_CHECK(posixsem_check_destroy, cred, ks, ks->ks_label);
-
-	return (error);
 }
 
 int
@@ -110,21 +106,37 @@ mac_posixsem_check_open(struct ucred *cred, struct ksem *ks)
 }
 
 int
-mac_posixsem_check_getvalue(struct ucred *cred, struct ksem *ks)
+mac_posixsem_check_getvalue(struct ucred *active_cred, struct ucred *file_cred,
+    struct ksem *ks)
 {
 	int error;
 
-	MAC_CHECK(posixsem_check_getvalue, cred, ks, ks->ks_label);
+	MAC_CHECK(posixsem_check_getvalue, active_cred, file_cred, ks,
+	    ks->ks_label);
 
 	return (error);
 }
 
 int
-mac_posixsem_check_post(struct ucred *cred, struct ksem *ks)
+mac_posixsem_check_post(struct ucred *active_cred, struct ucred *file_cred,
+    struct ksem *ks)
 {
 	int error;
 
-	MAC_CHECK(posixsem_check_post, cred, ks, ks->ks_label);
+	MAC_CHECK(posixsem_check_post, active_cred, file_cred, ks,
+	    ks->ks_label);
+
+	return (error);
+}
+
+int
+mac_posixsem_check_stat(struct ucred *active_cred, struct ucred *file_cred,
+    struct ksem *ks)
+{
+	int error;
+
+	MAC_CHECK(posixsem_check_stat, active_cred, file_cred, ks,
+	    ks->ks_label);
 
 	return (error);
 }
@@ -140,11 +152,13 @@ mac_posixsem_check_unlink(struct ucred *cred, struct ksem *ks)
 }
 
 int
-mac_posixsem_check_wait(struct ucred *cred, struct ksem *ks)
+mac_posixsem_check_wait(struct ucred *active_cred, struct ucred *file_cred,
+    struct ksem *ks)
 {
 	int error;
 
-	MAC_CHECK(posixsem_check_wait, cred, ks, ks->ks_label);
+	MAC_CHECK(posixsem_check_wait, active_cred, file_cred, ks,
+	    ks->ks_label);
 
 	return (error);
 }

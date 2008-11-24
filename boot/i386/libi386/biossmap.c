@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/i386/libi386/biossmap.c,v 1.7 2007/10/28 21:23:49 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/i386/libi386/biossmap.c,v 1.8 2008/06/07 03:07:32 jhb Exp $");
 
 /*
  * Obtain memory configuration information from the BIOS
@@ -39,7 +39,10 @@ __FBSDID("$FreeBSD: src/sys/boot/i386/libi386/biossmap.c,v 1.7 2007/10/28 21:23:
 #include "libi386.h"
 #include "btxv86.h"
 
-static struct bios_smap smap;
+static struct {
+	struct bios_smap _smap_entry;
+	char pad[8];		/* Bad BIOS writer, no cookie! */
+} smap;
 
 static struct bios_smap *smapbase;
 static int smaplen;

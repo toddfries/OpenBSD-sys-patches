@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/eli/g_eli_crypto.c,v 1.5 2007/09/01 06:33:01 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/eli/g_eli_crypto.c,v 1.6 2007/11/19 08:59:32 jb Exp $");
 
 #include <sys/param.h>
 #ifdef _KERNEL
@@ -158,6 +158,7 @@ g_eli_crypto_cipher(u_int algo, int enc, u_char *data, size_t datasize,
 	case CRYPTO_BLF_CBC:
 		type = EVP_bf_cbc();
 		break;
+#ifndef OPENSSL_NO_CAMELLIA
 	case CRYPTO_CAMELLIA_CBC:
 		switch (keysize) {
 		case 128:
@@ -173,6 +174,7 @@ g_eli_crypto_cipher(u_int algo, int enc, u_char *data, size_t datasize,
 			return (EINVAL);
 		}
 		break;
+#endif
 	case CRYPTO_3DES_CBC:
 		type = EVP_des_ede3_cbc();
 		break;

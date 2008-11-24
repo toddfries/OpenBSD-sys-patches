@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005 Apple Computer, Inc.
+ * Copyright (c) 2005 Apple Inc.
  * Copyright (c) 2005 SPARTA, Inc.
  * All rights reserved.
  *
@@ -31,7 +31,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * P4: //depot/projects/trustedbsd/audit3/sys/bsm/audit_internal.h#18
- * $FreeBSD: src/sys/bsm/audit_internal.h,v 1.8 2007/07/22 12:28:12 rwatson Exp $
+ * $FreeBSD: src/sys/bsm/audit_internal.h,v 1.10 2008/11/11 21:57:03 csjp Exp $
  */
 
 #ifndef _AUDIT_INTERNAL_H
@@ -72,7 +72,9 @@ typedef	struct au_record	au_record_t;
  * token structures may contain pointers of whose contents we do not know the
  * size (e.g text tokens).
  */
+#define	AUDIT_HEADER_EX_SIZE(a)	((a)->ai_termid.at_type+18+sizeof(u_int32_t))
 #define	AUDIT_HEADER_SIZE	18
+#define	MAX_AUDIT_HEADER_SIZE	(5*sizeof(u_int32_t)+18)
 #define	AUDIT_TRAILER_SIZE	7
 
 /*

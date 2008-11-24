@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_getcwd.c,v 1.28 2007/10/24 19:03:52 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_getcwd.c,v 1.31 2008/10/28 13:44:11 trasz Exp $");
 
 #include "opt_compat.h"
 #include "opt_mac.h"
@@ -142,7 +142,7 @@ linux_getcwd_scandir(lvpp, uvpp, bpp, bufp, td)
 	 * current directory is still locked.
 	 */
 	if (bufp != NULL) {
-		error = VOP_GETATTR(lvp, &va, td->td_ucred, td);
+		error = VOP_GETATTR(lvp, &va, td->td_ucred);
 		if (error) {
 			vput(lvp);
 			*lvpp = NULL;
@@ -307,7 +307,7 @@ linux_getcwd_common (lvp, rvp, bpp, bufp, limit, flags, td)
 	struct vnode *uvp = NULL;
 	char *bp = NULL;
 	int error;
-	int perms = VEXEC;
+	accmode_t accmode = VEXEC;
 
 	if (rvp == NULL) {
 		rvp = fdp->fd_rdir;
@@ -325,7 +325,7 @@ linux_getcwd_common (lvp, rvp, bpp, bufp, limit, flags, td)
 	 *	uvp is either NULL, or locked and held.
 	 */
 
-	error = vn_lock(lvp, LK_EXCLUSIVE | LK_RETRY, td);
+	error = vn_lock(lvp, LK_EXCLUSIVE | LK_RETRY);
 	if (error != 0)
 		panic("vn_lock LK_RETRY returned error %d", error);
 	if (bufp)
@@ -352,10 +352,10 @@ linux_getcwd_common (lvp, rvp, bpp, bufp, limit, flags, td)
 		 * whether or not caller cares.
 		 */
 		if (flags & GETCWD_CHECK_ACCESS) {
-			error = VOP_ACCESS(lvp, perms, td->td_ucred, td);
+			error = VOP_ACCESS(lvp, accmode, td->td_ucred, td);
 			if (error)
 				goto out;
-			perms = VEXEC|VREAD;
+			accmode = VEXEC|VREAD;
 		}
 		
 		/*
@@ -378,7 +378,7 @@ linux_getcwd_common (lvp, rvp, bpp, bufp, limit, flags, td)
 				goto out;
 			}
 			VREF(lvp);
-			error = vn_lock(lvp, LK_EXCLUSIVE | LK_RETRY, td);
+			error = vn_lock(lvp, LK_EXCLUSIVE | LK_RETRY);
 			if (error != 0)
 				panic("vn_lock LK_RETRY returned %d", error);
 		}

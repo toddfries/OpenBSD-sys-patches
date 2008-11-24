@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netinet/ip6.h,v 1.15 2005/07/20 10:30:52 ume Exp $	*/
+/*	$FreeBSD: src/sys/netinet/ip6.h,v 1.17 2008/10/02 15:37:58 zec Exp $	*/
 /*	$KAME: ip6.h,v 1.18 2001/03/29 05:34:30 itojun Exp $	*/
 
 /*-
@@ -275,24 +275,24 @@ do {									\
 	if (((m)->m_flags & M_LOOP) &&					\
 	    ((m)->m_len < (off) + (hlen)) &&				\
 	    (((m) = m_pullup((m), (off) + (hlen))) == NULL)) {		\
-		ip6stat.ip6s_exthdrtoolong++;				\
+		V_ip6stat.ip6s_exthdrtoolong++;				\
 		return ret;						\
 	} else if ((m)->m_flags & M_EXT) {				\
 		if ((m)->m_len < (off) + (hlen)) {			\
-			ip6stat.ip6s_exthdrtoolong++;			\
+			V_ip6stat.ip6s_exthdrtoolong++;			\
 			m_freem(m);					\
 			return ret;					\
 		}							\
 	} else {							\
 		if ((m)->m_len < (off) + (hlen)) {			\
-			ip6stat.ip6s_exthdrtoolong++;			\
+			V_ip6stat.ip6s_exthdrtoolong++;			\
 			m_freem(m);					\
 			return ret;					\
 		}							\
 	}								\
     } else {								\
 	if ((m)->m_len < (off) + (hlen)) {				\
-		ip6stat.ip6s_tooshort++;				\
+		V_ip6stat.ip6s_tooshort++;				\
 		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_truncated);	\
 		m_freem(m);						\
 		return ret;						\
@@ -346,6 +346,9 @@ do {									\
 		}							\
 	}								\
 } while (/*CONSTCOND*/ 0)
+
+#include <netinet6/vinet6.h>
+
 #endif /*_KERNEL*/
 
 #endif /* not _NETINET_IP6_H_ */

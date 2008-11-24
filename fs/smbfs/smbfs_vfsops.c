@@ -29,7 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/smbfs/smbfs_vfsops.c,v 1.42 2007/10/16 10:54:53 alfred Exp $
+ * $FreeBSD: src/sys/fs/smbfs/smbfs_vfsops.c,v 1.46 2008/11/02 23:20:27 rwatson Exp $
  */
 
 #include <sys/param.h>
@@ -44,6 +44,7 @@
 #include <sys/stat.h>
 #include <sys/malloc.h>
 #include <sys/module.h>
+#include <sys/sx.h>
 
 
 #include <netsmb/smb.h>
@@ -172,13 +173,13 @@ smbfs_mount(struct mount *mp, struct thread *td)
 		return error;
 	}
 	vcp = SSTOVC(ssp);
-	smb_share_unlock(ssp, 0, td);
+	smb_share_unlock(ssp, 0);
 	mp->mnt_stat.f_iosize = SSTOVC(ssp)->vc_txmax;
 
 #ifdef SMBFS_USEZONE
 	smp = zalloc(smbfsmount_zone);
 #else
-	MALLOC(smp, struct smbmount*, sizeof(*smp), M_SMBFSDATA,
+	smp = malloc(sizeof(*smp), M_SMBFSDATA,
 	    M_WAITOK|M_USE_RESERVE);
 #endif
         if (smp == NULL) {
@@ -192,7 +193,7 @@ smbfs_mount(struct mount *mp, struct thread *td)
 	smp->sm_hash = hashinit(desiredvnodes, M_SMBFSHASH, &smp->sm_hashlen);
 	if (smp->sm_hash == NULL)
 		goto bad;
-	lockinit(&smp->sm_hashlock, PVFS, "smbfsh", 0, 0);
+	sx_init(&smp->sm_hashlock, "smbfsh");
 	smp->sm_share = ssp;
 	smp->sm_root = NULL;
 	if (1 != vfs_scanopt(mp->mnt_optnew,
@@ -253,7 +254,7 @@ smbfs_mount(struct mount *mp, struct thread *td)
 		vfs_mount_error(mp, "smbfs_root error: %d", error);
 		goto bad;
 	}
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	SMBVDEBUG("root.v_usecount = %d\n", vrefcnt(vp));
 
 #ifdef DIAGNOSTICS
@@ -264,7 +265,7 @@ bad:
         if (smp) {
 		if (smp->sm_hash)
 			free(smp->sm_hash, M_SMBFSHASH);
-		lockdestroy(&smp->sm_hashlock);
+		sx_destroy(&smp->sm_hashlock);
 #ifdef SMBFS_USEZONE
 		zfree(smbfsmount_zone, smp);
 #else
@@ -304,7 +305,7 @@ smbfs_unmount(struct mount *mp, int mntflags, struct thread *td)
 	if (error)
 		return error;
 	smb_makescred(&scred, td, td->td_ucred);
-	error = smb_share_lock(smp->sm_share, LK_EXCLUSIVE, td);
+	error = smb_share_lock(smp->sm_share, LK_EXCLUSIVE);
 	if (error)
 		return error;
 	smb_share_put(smp->sm_share, &scred);
@@ -312,7 +313,7 @@ smbfs_unmount(struct mount *mp, int mntflags, struct thread *td)
 
 	if (smp->sm_hash)
 		free(smp->sm_hash, M_SMBFSHASH);
-	lockdestroy(&smp->sm_hashlock);
+	sx_destroy(&smp->sm_hashlock);
 #ifdef SMBFS_USEZONE
 	zfree(smbfsmount_zone, smp);
 #else

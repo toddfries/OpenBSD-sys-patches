@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)stat.h	8.12 (Berkeley) 6/16/95
- * $FreeBSD: src/sys/sys/stat.h,v 1.42 2006/08/04 23:47:30 jb Exp $
+ * $FreeBSD: src/sys/sys/stat.h,v 1.44 2008/03/31 12:14:04 kib Exp $
  */
 
 #ifndef _SYS_STAT_H_
@@ -304,14 +304,6 @@ struct nstat {
 
 #endif /* __BSD_VISIBLE */
 
-/*
- * Solaris compatibility definitions.
- */
-#ifdef _SOLARIS_C_SOURCE
-#define	stat64	stat
-#define	fstat64	fstat
-#endif
-
 #ifndef _KERNEL
 __BEGIN_DECLS
 #if __BSD_VISIBLE
@@ -338,6 +330,12 @@ int	mknod(const char *, mode_t, dev_t);
 #endif
 int	stat(const char * __restrict, struct stat * __restrict);
 mode_t	umask(mode_t);
+#if __BSD_VISIBLE
+int	fstatat(int, const char *, struct stat *, int);
+int	mkdirat(int, const char *, mode_t);
+int	mkfifoat(int, const char *, mode_t);
+int	mknodat(int, const char *, mode_t, dev_t);
+#endif
 __END_DECLS
 #endif /* !_KERNEL */
 

@@ -19,7 +19,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/vfs_aio.c,v 1.234 2007/10/20 23:23:21 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/vfs_aio.c,v 1.239 2008/06/21 11:34:34 gonzo Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -118,6 +118,8 @@ static uint64_t jobseqno;
 #ifndef AIOD_LIFETIME_DEFAULT
 #define AIOD_LIFETIME_DEFAULT	(30 * hz)
 #endif
+
+FEATURE(aio, "Asynchronous I/O");
 
 static SYSCTL_NODE(_vfs, OID_AUTO, aio, CTLFLAG_RW, 0, "Async IO management");
 
@@ -530,7 +532,7 @@ aio_init_aioinfo(struct proc *p)
 		uma_zfree(kaio_zone, ki);
 	}
 
-	while (num_aio_procs < target_aio_procs)
+	while (num_aio_procs < MIN(target_aio_procs, max_aio_procs))
 		aio_newproc(NULL);
 }
 
@@ -764,7 +766,7 @@ aio_fsync_vnode(struct thread *td, struct vnode *vp)
 	vfslocked = VFS_LOCK_GIANT(vp->v_mount);
 	if ((error = vn_start_write(vp, &mp, V_WAIT | PCATCH)) != 0)
 		goto drop;
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	if (vp->v_object != NULL) {
 		VM_OBJECT_LOCK(vp->v_object);
 		vm_object_page_clean(vp->v_object, 0, 0, 0);
@@ -772,7 +774,7 @@ aio_fsync_vnode(struct thread *td, struct vnode *vp)
 	}
 	error = VOP_FSYNC(vp, MNT_WAIT, td);
 
-	VOP_UNLOCK(vp, 0, td);
+	VOP_UNLOCK(vp, 0);
 	vn_finished_write(mp);
 drop:
 	VFS_UNLOCK_GIANT(vfslocked);
@@ -2251,6 +2253,7 @@ filt_aioattach(struct knote *kn)
 	 */
 	if ((kn->kn_flags & EV_FLAG1) == 0)
 		return (EPERM);
+	kn->kn_ptr.p_aio = aiocbe;
 	kn->kn_flags &= ~EV_FLAG1;
 
 	knlist_add(&aiocbe->klist, kn, 0);
@@ -2262,7 +2265,7 @@ filt_aioattach(struct knote *kn)
 static void
 filt_aiodetach(struct knote *kn)
 {
-	struct aiocblist *aiocbe = (struct aiocblist *)kn->kn_sdata;
+	struct aiocblist *aiocbe = kn->kn_ptr.p_aio;
 
 	if (!knlist_empty(&aiocbe->klist))
 		knlist_remove(&aiocbe->klist, kn, 0);
@@ -2273,7 +2276,7 @@ filt_aiodetach(struct knote *kn)
 static int
 filt_aio(struct knote *kn, long hint)
 {
-	struct aiocblist *aiocbe = (struct aiocblist *)kn->kn_sdata;
+	struct aiocblist *aiocbe = kn->kn_ptr.p_aio;
 
 	kn->kn_data = aiocbe->uaiocb._aiocb_private.error;
 	if (aiocbe->jobstate != JOBST_JOBFINISHED)
@@ -2295,6 +2298,7 @@ filt_lioattach(struct knote *kn)
 	 */
 	if ((kn->kn_flags & EV_FLAG1) == 0)
 		return (EPERM);
+	kn->kn_ptr.p_lio = lj;
 	kn->kn_flags &= ~EV_FLAG1;
 
 	knlist_add(&lj->klist, kn, 0);
@@ -2306,7 +2310,7 @@ filt_lioattach(struct knote *kn)
 static void
 filt_liodetach(struct knote *kn)
 {
-	struct aioliojob * lj = (struct aioliojob *)kn->kn_sdata;
+	struct aioliojob * lj = kn->kn_ptr.p_lio;
 
 	if (!knlist_empty(&lj->klist))
 		knlist_remove(&lj->klist, kn, 0);
@@ -2317,7 +2321,7 @@ filt_liodetach(struct knote *kn)
 static int
 filt_lio(struct knote *kn, long hint)
 {
-	struct aioliojob * lj = (struct aioliojob *)kn->kn_sdata;
+	struct aioliojob * lj = kn->kn_ptr.p_lio;
 
 	return (lj->lioj_flags & LIOJ_KEVENT_POSTED);
 }

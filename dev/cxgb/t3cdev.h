@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2007, Chelsio Inc.
+ * Copyright (c) 2007-2008, Chelsio Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,7 +24,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/cxgb/t3cdev.h,v 1.3 2008/02/23 01:06:16 kmacy Exp $
+ * $FreeBSD: src/sys/dev/cxgb/t3cdev.h,v 1.4 2008/05/05 01:41:53 kmacy Exp $
  */
 #ifndef _T3CDEV_H_
 #define _T3CDEV_H_

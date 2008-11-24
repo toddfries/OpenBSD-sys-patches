@@ -25,13 +25,13 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
-$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_l2t.h,v 1.1 2008/04/19 03:22:42 kmacy Exp $
+$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_l2t.h,v 1.2 2008/09/23 03:16:54 kmacy Exp $
 
 ***************************************************************************/
 #ifndef _CHELSIO_L2T_H
 #define _CHELSIO_L2T_H
 
-#include <dev/cxgb/ulp/toecore/cxgb_toedev.h>
+#include <ulp/toecore/cxgb_toedev.h>
 #include <sys/lock.h>
 
 #if __FreeBSD_version > 700000

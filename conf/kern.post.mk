@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/kern.post.mk,v 1.100 2007/03/23 21:55:59 imp Exp $
+# $FreeBSD: src/sys/conf/kern.post.mk,v 1.103 2008/07/05 06:12:14 jb Exp $
 
 # Part of a unified Makefile for building kernels.  This part includes all
 # the definitions that need to be after all the % directives except %RULES
@@ -86,18 +86,15 @@ ${FULLKERNEL}: ${SYSTEM_DEP} vers.o
 	@rm -f ${.TARGET}
 	@echo linking ${.TARGET}
 	${SYSTEM_LD}
+.if defined(CTFMERGE)
+	${SYSTEM_CTFMERGE}
+.endif
 .if !defined(DEBUG)
 	${OBJCOPY} --strip-debug ${.TARGET}
 .endif
 	${SYSTEM_LD_TAIL}
 .if defined(MFS_IMAGE)
-	@dd if="${MFS_IMAGE}" ibs=8192 of="${FULLKERNEL}"		\
-	   obs=`strings -at d "${FULLKERNEL}" |				\
-	         grep "MFS Filesystem goes here" | awk '{print $$1}'`	\
-	   oseek=1 conv=notrunc 2>/dev/null &&				\
-	 strings ${FULLKERNEL} |					\
-	 grep 'MFS Filesystem had better STOP here' > /dev/null ||	\
-	 (rm ${FULLKERNEL} && echo 'MFS image too large' && false)
+	@sh ${S}/tools/embed_mfs.sh ${FULLKERNEL} ${MFS_IMAGE}
 .endif
 
 .if !exists(${.OBJDIR}/.depend)
@@ -239,6 +236,9 @@ kernel-reinstall:
 
 config.o env.o hints.o vers.o vnode_if.o:
 	${NORMAL_C}
+.if defined(CTFCONVERT)
+	${CTFCONVERT} ${CTFFLAGS} ${.TARGET}
+.endif
 
 config.ln env.ln hints.ln vers.ln vnode_if.ln:
 	${NORMAL_LINT}

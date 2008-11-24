@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/ipsec.h,v 1.13 2007/07/01 11:38:29 gnn Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/ipsec.h,v 1.20 2008/11/19 09:39:34 zec Exp $	*/
 /*	$KAME: ipsec.h,v 1.53 2001/11/20 08:32:38 itojun Exp $	*/
 
 /*-
@@ -44,9 +44,15 @@
 
 #include <net/pfkeyv2.h>
 #include <netipsec/keydb.h>
-#include <netipsec/ipsec_osdep.h>
 
 #ifdef _KERNEL
+
+#define	IPSEC_ASSERT(_c,_m) KASSERT(_c, _m)
+
+#define	IPSEC_IS_PRIVILEGED_SO(_so) \
+	((_so)->so_cred != NULL && \
+	 priv_check_cred((_so)->so_cred, PRIV_NETINET_IPSEC, 0) \
+	 == 0)
 
 /*
  * Security Policy Index
@@ -345,14 +351,15 @@ extern int ip4_ipsec_ecn;
 extern int ip4_esp_randpad;
 extern int crypto_support;
 
-#define ipseclog(x)	do { if (ipsec_debug) log x; } while (0)
+#define ipseclog(x)	do { if (V_ipsec_debug) log x; } while (0)
 /* for openbsd compatibility */
-#define	DPRINTF(x)	do { if (ipsec_debug) printf x; } while (0)
+#define	DPRINTF(x)	do { if (V_ipsec_debug) printf x; } while (0)
 
 extern	struct ipsecrequest *ipsec_newisr(void);
 extern	void ipsec_delisr(struct ipsecrequest *);
 
 struct tdb_ident;
+extern void ipsec_init(void);
 extern struct secpolicy *ipsec_getpolicy __P((struct tdb_ident*, u_int));
 struct inpcb;
 extern struct secpolicy *ipsec4_checkpolicy __P((struct mbuf *, u_int, u_int,
@@ -370,7 +377,7 @@ extern u_int ipsec_get_reqlevel __P((struct ipsecrequest *));
 extern int ipsec_in_reject __P((struct secpolicy *, struct mbuf *));
 
 extern int ipsec4_set_policy __P((struct inpcb *inp, int optname,
-	caddr_t request, size_t len, int priv));
+	caddr_t request, size_t len, struct ucred *cred));
 extern int ipsec4_get_policy __P((struct inpcb *inpcb, caddr_t request,
 	size_t len, struct mbuf **mp));
 extern int ipsec4_delete_pcbpolicy __P((struct inpcb *));
@@ -410,8 +417,15 @@ extern	void m_checkalignment(const char* where, struct mbuf *m0,
 extern	struct mbuf *m_makespace(struct mbuf *m0, int skip, int hlen, int *off);
 extern	caddr_t m_pad(struct mbuf *m, int n);
 extern	int m_striphdr(struct mbuf *m, int skip, int hlen);
-extern	int ipsec_filter(struct mbuf **, int);
-extern	void ipsec_bpf(struct mbuf *, struct secasvar *, int);
+
+#ifdef DEV_ENC
+#define	ENC_BEFORE	0x0001
+#define	ENC_AFTER	0x0002
+#define	ENC_IN		0x0100
+#define	ENC_OUT		0x0200
+extern	int ipsec_filter(struct mbuf **, int, int);
+extern	void ipsec_bpf(struct mbuf *, struct secasvar *, int, int);
+#endif
 #endif /* _KERNEL */
 
 #ifndef _KERNEL
@@ -420,6 +434,9 @@ extern int ipsec_get_policylen __P((caddr_t));
 extern char *ipsec_dump_policy __P((caddr_t, char *));
 
 extern const char *ipsec_strerror __P((void));
-#endif /* !_KERNEL */
+
+#else
+#include <netipsec/vipsec.h>
+#endif /* ! KERNEL */
 
 #endif /* _NETIPSEC_IPSEC_H_ */

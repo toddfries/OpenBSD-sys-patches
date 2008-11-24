@@ -63,7 +63,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netipx/ipx_pcb.c,v 1.49 2007/05/11 10:38:34 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/netipx/ipx_pcb.c,v 1.50 2008/10/23 15:53:51 des Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -91,7 +91,7 @@ ipx_pcballoc(struct socket *so, struct ipxpcbhead *head, struct thread *td)
 	KASSERT(so->so_pcb == NULL, ("ipx_pcballoc: so_pcb != NULL"));
 	IPX_LIST_LOCK_ASSERT();
 
-	MALLOC(ipxp, struct ipxpcb *, sizeof *ipxp, M_PCB, M_NOWAIT | M_ZERO);
+	ipxp = malloc(sizeof *ipxp, M_PCB, M_NOWAIT | M_ZERO);
 	if (ipxp == NULL)
 		return (ENOBUFS);
 	IPX_LOCK_INIT(ipxp);
@@ -317,7 +317,7 @@ ipx_pcbfree(struct ipxpcb *ipxp)
 		RTFREE(ipxp->ipxp_route.ro_rt);
 	LIST_REMOVE(ipxp, ipxp_list);
 	IPX_LOCK_DESTROY(ipxp);
-	FREE(ipxp, M_PCB);
+	free(ipxp, M_PCB);
 }
 
 void

@@ -5,7 +5,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/uhid.c,v 1.96 2007/06/21 14:42:33 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/uhid.c,v 1.98 2008/09/27 08:51:18 ed Exp $");
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -55,6 +55,7 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/uhid.c,v 1.96 2007/06/21 14:42:33 imp Exp $"
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/clist.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -67,11 +68,11 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/uhid.c,v 1.96 2007/06/21 14:42:33 imp Exp $"
 #include <sys/bus.h>
 #include <sys/ioccom.h>
 #include <sys/conf.h>
-#include <sys/tty.h>
 #include <sys/selinfo.h>
 #include <sys/proc.h>
 #include <sys/poll.h>
 #include <sys/sysctl.h>
+#include <sys/ttycom.h>
 #include <sys/uio.h>
 
 #include <dev/usb/usb.h>
@@ -136,7 +137,7 @@ struct uhid_softc {
 	struct cdev *dev;
 };
 
-#define	UHIDUNIT(dev)	(minor(dev))
+#define	UHIDUNIT(dev)	(dev2unit(dev))
 #define	UHID_CHUNK	128	/* chunk size for read */
 #define	UHID_BSIZE	1020	/* buffer size */
 

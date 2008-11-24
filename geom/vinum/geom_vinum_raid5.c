@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_raid5.c,v 1.10 2004/11/26 11:59:51 le Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_raid5.c,v 1.11 2008/10/26 17:20:37 lulf Exp $");
 
 #include <sys/param.h>
 #include <sys/bio.h>
@@ -208,7 +208,7 @@ gv_rebuild_raid5(struct gv_plex *p, struct gv_raid5_packet *wp, struct bio *bp,
 		if (!(bp->bio_cflags & GV_BIO_REBUILD))
 			return (ENXIO);
 
-		printf("GEOM_VINUM: sd %s is reviving\n", broken->name);
+		G_VINUM_DEBUG(1, "sd %s is reviving", broken->name);
 		gv_set_sd_state(broken, GV_SD_REVIVING, GV_SETSTATE_FORCE);
 		break;
 

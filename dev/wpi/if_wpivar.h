@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/dev/wpi/if_wpivar.h,v 1.3 2008/04/20 20:35:39 sam Exp $	*/
+/*	$FreeBSD: src/sys/dev/wpi/if_wpivar.h,v 1.4 2008/05/16 04:15:54 thompsa Exp $	*/
 
 /*-
  * Copyright (c) 2006,2007
@@ -222,6 +222,7 @@ struct wpi_softc {
 	struct task		sc_radioofftask;/* disable rf transmitter task*/
 	struct task		sc_opstask;	/* operation handling task */
 	struct task		sc_restarttask;	/* reset firmware task */
+	struct task		sc_bmiss_task;	/* beacon miss */
 
        /* Eeprom info */
 	uint8_t			cap;

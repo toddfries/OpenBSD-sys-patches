@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/aac/aac_pci.c,v 1.67 2008/03/24 19:23:33 emaste Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/aac/aac_pci.c,v 1.69 2008/09/12 18:15:12 emaste Exp $");
 
 /*
  * PCI bus interface and resource allocation.
@@ -245,7 +245,15 @@ struct aac_ident
 	{0x9005, 0x0285, 0x9005, 0x02d0, AAC_HWIF_I960RX, 0,
 	 "Adaptec RAID 52445"},
 	{0x9005, 0x0285, 0x9005, 0x02d1, AAC_HWIF_I960RX, 0,
-        "Adaptec RAID 5405"},
+	 "Adaptec RAID 5405"},
+	{0x9005, 0x0285, 0x9005, 0x02d4, AAC_HWIF_I960RX, 0,
+	 "Adaptec RAID 2045"},
+	{0x9005, 0x0285, 0x9005, 0x02d5, AAC_HWIF_I960RX, 0,
+	 "Adaptec RAID 2405"},
+	{0x9005, 0x0285, 0x9005, 0x02d6, AAC_HWIF_I960RX, 0,
+	 "Adaptec RAID 2445"},
+	{0x9005, 0x0285, 0x9005, 0x02d7, AAC_HWIF_I960RX, 0,
+	 "Adaptec RAID 2805"},
 	{0x9005, 0x0286, 0x1014, 0x9580, AAC_HWIF_RKT, 0,
 	 "IBM ServeRAID-8k"},
 	{0x9005, 0x0285, 0x1014, 0x034d, AAC_HWIF_I960RX, 0,

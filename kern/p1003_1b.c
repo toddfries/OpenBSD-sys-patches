@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/p1003_1b.c,v 1.36 2007/10/08 23:45:23 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/p1003_1b.c,v 1.38 2008/03/12 10:11:59 jeff Exp $");
 
 #include "opt_posix.h"
 
@@ -63,7 +63,7 @@ int
 syscall_not_present(struct thread *td, const char *s, struct nosys_args *uap)
 {
 	log(LOG_ERR, "cmd %s pid %d tried to use non-present %s\n",
-			td->td_proc->p_comm, td->td_proc->p_pid, s);
+			td->td_name, td->td_proc->p_pid, s);
 
 	/* a " return nosys(p, uap); " here causes a core dump.
 	 */
@@ -156,7 +156,7 @@ sched_getparam(struct thread *td, struct sched_getparam_args *uap)
 		if (targetp == NULL) {
 			return (ESRCH);
 		}
-		targettd = FIRST_THREAD_IN_PROC(targetp); /* XXXKSE */
+		targettd = FIRST_THREAD_IN_PROC(targetp);
 	}
 
 	e = p_cansee(td, targetp);
@@ -223,7 +223,7 @@ sched_getscheduler(struct thread *td, struct sched_getscheduler_args *uap)
 			e = ESRCH;
 			goto done2;
 		}
-		targettd = FIRST_THREAD_IN_PROC(targetp); /* XXXKSE */
+		targettd = FIRST_THREAD_IN_PROC(targetp);
 	}
 
 	e = p_cansee(td, targetp);

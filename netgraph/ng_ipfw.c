@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netgraph/ng_ipfw.c,v 1.9 2006/02/14 15:22:24 ru Exp $
+ * $FreeBSD: src/sys/netgraph/ng_ipfw.c,v 1.10 2008/10/23 15:53:51 des Exp $
  */
 
 #include <sys/param.h>
@@ -162,7 +162,7 @@ ng_ipfw_newhook(node_p node, hook_p hook, const char *name)
 		return (EINVAL);
 
 	/* Allocate memory for this hook's private data */
-	MALLOC(hpriv, hpriv_p, sizeof(*hpriv), M_NETGRAPH, M_NOWAIT | M_ZERO);
+	hpriv = malloc(sizeof(*hpriv), M_NETGRAPH, M_NOWAIT | M_ZERO);
 	if (hpriv== NULL)
 		return (ENOMEM);
 
@@ -331,7 +331,7 @@ ng_ipfw_disconnect(hook_p hook)
 {
 	const hpriv_p hpriv = NG_HOOK_PRIVATE(hook);
 
-	FREE(hpriv, M_NETGRAPH);
+	free(hpriv, M_NETGRAPH);
 	NG_HOOK_SET_PRIVATE(hook, NULL);
 
 	return (0);

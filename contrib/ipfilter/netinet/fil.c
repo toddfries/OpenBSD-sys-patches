@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/contrib/ipfilter/netinet/fil.c,v 1.54 2007/10/30 15:23:26 darrenr Exp $	*/
+/*	$FreeBSD: src/sys/contrib/ipfilter/netinet/fil.c,v 1.56 2008/08/17 23:27:27 bz Exp $	*/
 
 /*
  * Copyright (C) 1993-2003 by Darren Reed.
@@ -17,7 +17,7 @@
 #include <sys/time.h>
 #if defined(__NetBSD__)
 # if (NetBSD >= 199905) && !defined(IPFILTER_LKM) && defined(_KERNEL)
-#  if (__NetBSD_Version__ < 399001400)
+#  if (__NetBSD_Version__ < 301000000)
 #   include "opt_ipfilter_log.h"
 #  else
 #   include "opt_ipfilter.h"
@@ -32,6 +32,9 @@
 #  endif
 #  if (__FreeBSD_version == 400019)
 #   define CSUM_DELAY_DATA
+#  endif
+#  if (__FreeBSD_version >= 800044)
+#   include <sys/vimage.h>
 #  endif
 # endif
 # include <sys/filio.h>
@@ -155,7 +158,7 @@ struct file;
 
 #if !defined(lint)
 static const char sccsid[] = "@(#)fil.c	1.36 6/5/96 (C) 1993-2000 Darren Reed";
-static const char rcsid[] = "@(#)$FreeBSD: src/sys/contrib/ipfilter/netinet/fil.c,v 1.54 2007/10/30 15:23:26 darrenr Exp $";
+static const char rcsid[] = "@(#)$FreeBSD: src/sys/contrib/ipfilter/netinet/fil.c,v 1.56 2008/08/17 23:27:27 bz Exp $";
 /* static const char rcsid[] = "@(#)$Id: fil.c,v 2.243.2.125 2007/10/10 09:27:20 darrenr Exp $"; */
 #endif
 
@@ -2307,8 +2310,7 @@ u_32_t *passp;
 	if (FR_ISAUTH(pass)) {
 		if (fr_newauth(fin->fin_m, fin) != 0) {
 #ifdef	_KERNEL
-			if ((pass & FR_RETMASK) == 0)
-				fin->fin_m = *fin->fin_mp = NULL;
+			fin->fin_m = *fin->fin_mp = NULL;
 #else
 			;
 #endif
@@ -2600,7 +2602,8 @@ int out;
 	 * Here rather than fr_firewall because fr_checkauth may decide
 	 * to return a packet for "keep state"
 	 */
-	if ((pass & FR_KEEPSTATE) && !(fin->fin_flx & FI_STATE)) {
+	if ((pass & FR_KEEPSTATE) && (fin->fin_m != NULL) &&
+	    !(fin->fin_flx & FI_STATE)) {
 		if (fr_addstate(fin, NULL, 0) != NULL) {
 			ATOMIC_INCL(frstats[out].fr_ads);
 		} else {

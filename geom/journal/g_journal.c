@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/journal/g_journal.c,v 1.14 2007/10/20 23:23:19 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/journal/g_journal.c,v 1.17 2008/11/02 10:15:42 attilio Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -101,13 +101,13 @@ SYSCTL_UINT(_kern_geom_journal, OID_AUTO, force_switch, CTLFLAG_RW,
     &g_journal_force_switch, 0, "Force switch when journal is N% full");
 SYSCTL_UINT(_kern_geom_journal, OID_AUTO, parallel_flushes, CTLFLAG_RW,
     &g_journal_parallel_flushes, 0,
-    "Number of flush I/O requests send in parallel");
+    "Number of flush I/O requests to send in parallel");
 SYSCTL_UINT(_kern_geom_journal, OID_AUTO, accept_immediately, CTLFLAG_RW,
     &g_journal_accept_immediately, 0,
-    "Number of I/O requests accepted immediatelly");
+    "Number of I/O requests accepted immediately");
 SYSCTL_UINT(_kern_geom_journal, OID_AUTO, parallel_copies, CTLFLAG_RW,
     &g_journal_parallel_copies, 0,
-    "Number of copy I/O requests send in parallel");
+    "Number of copy I/O requests to send in parallel");
 static int
 g_journal_record_entries_sysctl(SYSCTL_HANDLER_ARGS)
 {
@@ -1202,7 +1202,7 @@ g_journal_copy_write_done(struct bio *bp)
 	sc->sc_copy_in_progress--;
 
 	if (bp->bio_error != 0) {
-		GJ_LOGREQ(0, bp, "[copy] Error while writting data (error=%d)",
+		GJ_LOGREQ(0, bp, "[copy] Error while writing data (error=%d)",
 		    bp->bio_error);
 	}
 	GJQ_REMOVE(sc->sc_copy_queue, bp);
@@ -1354,7 +1354,7 @@ g_journal_flush_done(struct bio *bp)
 	sc->sc_flush_in_progress--;
 
 	if (bp->bio_error != 0) {
-		GJ_LOGREQ(0, bp, "[flush] Error while writting data (error=%d)",
+		GJ_LOGREQ(0, bp, "[flush] Error while writing data (error=%d)",
 		    bp->bio_error);
 	}
 	gj_free(bp->bio_data, bp->bio_length);
@@ -2843,7 +2843,7 @@ g_journal_switch_wait(struct g_journal_softc *sc)
 }
 
 static void
-g_journal_do_switch(struct g_class *classp, struct thread *td)
+g_journal_do_switch(struct g_class *classp)
 {
 	struct g_journal_softc *sc;
 	const struct g_journal_desc *desc;
@@ -2879,7 +2879,7 @@ g_journal_do_switch(struct g_class *classp, struct thread *td)
 		desc = g_journal_find_desc(mp->mnt_stat.f_fstypename);
 		if (desc == NULL)
 			continue;
-		if (vfs_busy(mp, LK_NOWAIT, &mountlist_mtx, td))
+		if (vfs_busy(mp, MBF_NOWAIT | MBF_MNTLSTLOCK))
 			continue;
 		/* mtx_unlock(&mountlist_mtx) was done inside vfs_busy() */
 
@@ -2973,7 +2973,7 @@ g_journal_do_switch(struct g_class *classp, struct thread *td)
 		vfs_write_resume(mp);
 next:
 		mtx_lock(&mountlist_mtx);
-		vfs_unbusy(mp, td);
+		vfs_unbusy(mp);
 	}
 	mtx_unlock(&mountlist_mtx);
 
@@ -3011,7 +3011,6 @@ next:
 static void
 g_journal_switcher(void *arg)
 {
-	struct thread *td = curthread;
 	struct g_class *mp;
 	struct bintime bt;
 	int error;
@@ -3033,7 +3032,7 @@ g_journal_switcher(void *arg)
 			    g_journal_cache_limit);
 		}
 		GJ_TIMER_START(1, &bt);
-		g_journal_do_switch(mp, td);
+		g_journal_do_switch(mp);
 		GJ_TIMER_STOP(1, &bt, "Entire switch time");
 		if (g_journal_sync_requested > 0) {
 			g_journal_sync_requested = 0;

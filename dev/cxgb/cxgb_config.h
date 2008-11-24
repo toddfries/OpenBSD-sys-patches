@@ -1,6 +1,6 @@
 /**************************************************************************
 
-Copyright (c) 2007, Chelsio Inc.
+Copyright (c) 2007-2008, Chelsio Inc.
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -26,14 +26,15 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
 
-$FreeBSD: src/sys/dev/cxgb/cxgb_config.h,v 1.6 2007/12/17 08:17:49 kmacy Exp $
+$FreeBSD: src/sys/dev/cxgb/cxgb_config.h,v 1.11 2008/11/23 07:30:07 kmacy Exp $
 
 ***************************************************************************/
 #ifndef _CXGB_CONFIG_H_
 #define _CXGB_CONFIG_H_
 
-#ifndef CONFIG_DEFINED
-#define CONFIG_CHELSIO_T3_CORE
-#endif
+#define	CONFIG_CHELSIO_T3_CORE
 
+#if __FreeBSD_version > 800053
+#define	IFNET_MULTIQUEUE
+#endif
 #endif

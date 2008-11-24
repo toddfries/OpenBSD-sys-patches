@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ip.h	8.2 (Berkeley) 6/1/94
- * $FreeBSD: src/sys/netinet/ip.h,v 1.32 2007/10/19 12:46:15 rpaulo Exp $
+ * $FreeBSD: src/sys/netinet/ip.h,v 1.33 2008/09/26 18:30:11 emaste Exp $
  */
 
 #ifndef _NETINET_IP_H_
@@ -68,10 +68,6 @@ struct ip {
 	u_short	ip_sum;			/* checksum */
 	struct	in_addr ip_src,ip_dst;	/* source and dest address */
 } __packed __aligned(4);
-
-#ifdef CTASSERT
-CTASSERT(sizeof (struct ip) == 20);
-#endif
 
 #define	IP_MAXPACKET	65535		/* maximum packet size */
 

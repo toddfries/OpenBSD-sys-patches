@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iwi/if_iwi.c,v 1.60 2008/04/20 20:35:37 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iwi/if_iwi.c,v 1.63 2008/06/07 18:38:02 sam Exp $");
 
 /*-
  * Intel(R) PRO/Wireless 2200BG/2225BG/2915ABG driver
@@ -147,7 +147,8 @@ static int	iwi_alloc_rx_ring(struct iwi_softc *, struct iwi_rx_ring *,
 		    int);
 static void	iwi_reset_rx_ring(struct iwi_softc *, struct iwi_rx_ring *);
 static void	iwi_free_rx_ring(struct iwi_softc *, struct iwi_rx_ring *);
-static struct	ieee80211_node *iwi_node_alloc(struct ieee80211_node_table *);
+static struct ieee80211_node *iwi_node_alloc(struct ieee80211vap *,
+		    const uint8_t [IEEE80211_ADDR_LEN]);
 static void	iwi_node_free(struct ieee80211_node *);
 static void	iwi_media_status(struct ifnet *, struct ifmediareq *);
 static int	iwi_newstate(struct ieee80211vap *, enum ieee80211_state, int);
@@ -388,7 +389,8 @@ iwi_attach(device_t dev)
 
 	/* set device capabilities */
 	ic->ic_caps =
-	      IEEE80211_C_IBSS		/* IBSS mode supported */
+	      IEEE80211_C_STA		/* station mode supported */
+	    | IEEE80211_C_IBSS		/* IBSS mode supported */
 	    | IEEE80211_C_MONITOR	/* monitor mode supported */
 	    | IEEE80211_C_PMGT		/* power save supported */
 	    | IEEE80211_C_SHPREAMBLE	/* short preamble supported */
@@ -902,14 +904,14 @@ iwi_resume(device_t dev)
 }
 
 static struct ieee80211_node *
-iwi_node_alloc(struct ieee80211_node_table *nt)
+iwi_node_alloc(struct ieee80211vap *vap, const uint8_t mac[IEEE80211_ADDR_LEN])
 {
 	struct iwi_node *in;
 
 	in = malloc(sizeof (struct iwi_node), M_80211_NODE, M_NOWAIT | M_ZERO);
 	if (in == NULL)
 		return NULL;
-
+	/* XXX assign sta table entry for adhoc */
 	in->in_station = -1;
 
 	return &in->in_node;
@@ -2052,9 +2054,9 @@ iwi_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int error = 0, startall = 0;
 	IWI_LOCK_DECL;
 
-	IWI_LOCK(sc);
 	switch (cmd) {
 	case SIOCSIFFLAGS:
+		IWI_LOCK(sc);
 		if (ifp->if_flags & IFF_UP) {
 			if (!(ifp->if_drv_flags & IFF_DRV_RUNNING)) {
 				iwi_init_locked(sc);
@@ -2064,19 +2066,20 @@ iwi_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if (ifp->if_drv_flags & IFF_DRV_RUNNING)
 				iwi_stop_locked(sc);
 		}
+		IWI_UNLOCK(sc);
+		if (startall)
+			ieee80211_start_all(ic);
 		break;
 	case SIOCGIFMEDIA:
-	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &ic->ic_media, cmd);
 		break;
-	default:
+	case SIOCGIFADDR:
 		error = ether_ioctl(ifp, cmd, data);
 		break;
+	default:
+		error = EINVAL;
+		break;
 	}
-	IWI_UNLOCK(sc);
-
-	if (startall)
-		ieee80211_start_all(ic);
 	return error;
 }
 

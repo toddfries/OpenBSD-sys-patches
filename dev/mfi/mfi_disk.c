@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mfi/mfi_disk.c,v 1.7 2007/08/13 19:29:17 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mfi/mfi_disk.c,v 1.8 2008/11/17 23:30:19 jhb Exp $");
 
 #include "opt_mfi.h"
 
@@ -136,7 +136,8 @@ mfi_disk_attach(device_t dev)
 
 	sc->ld_disk = disk_alloc();
 	sc->ld_disk->d_drv1 = sc;
-	sc->ld_disk->d_maxsize = sc->ld_controller->mfi_max_io * secsize;
+	sc->ld_disk->d_maxsize = min(sc->ld_controller->mfi_max_io * secsize,
+	    (sc->ld_controller->mfi_max_sge - 1) * PAGE_SIZE);
 	sc->ld_disk->d_name = "mfid";
 	sc->ld_disk->d_open = mfi_disk_open;
 	sc->ld_disk->d_close = mfi_disk_close;

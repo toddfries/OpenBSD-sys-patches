@@ -1,17 +1,16 @@
-# $FreeBSD: src/sys/conf/kern.pre.mk,v 1.92 2007/08/08 19:12:06 marcel Exp $
+# $FreeBSD: src/sys/conf/kern.pre.mk,v 1.101 2008/09/23 03:16:54 kmacy Exp $
 
 # Part of a unified Makefile for building kernels.  This part contains all
 # of the definitions that need to be before %BEFORE_DEPEND.
 
-SRCCONF?=	/etc/src.conf
-.if exists(${SRCCONF})
-.include "${SRCCONF}"
-.endif
+.include <bsd.own.mk>
 
 # Can be overridden by makeoptions or /etc/make.conf
 KERNEL_KO?=	kernel
 KERNEL?=	kernel
 KODIR?=		/boot/${KERNEL}
+LDSCRIPT_NAME?=	ldscript.$M
+LDSCRIPT?=	$S/conf/${LDSCRIPT_NAME}
 
 M=	${MACHINE_ARCH}
 
@@ -79,6 +78,12 @@ INCLUDES+= -I$S/dev/twa
 # ...  and XFS
 INCLUDES+= -I$S/gnu/fs/xfs/FreeBSD -I$S/gnu/fs/xfs/FreeBSD/support -I$S/gnu/fs/xfs
 
+# ...  and OpenSolaris
+INCLUDES+= -I$S/contrib/opensolaris/compat
+
+# ... and the same for cxgb
+INCLUDES+= -I$S/dev/cxgb
+
 .endif
 
 CFLAGS=	${COPTFLAGS} ${C_DIALECT} ${DEBUG} ${CWARNFLAGS}
@@ -87,11 +92,7 @@ CFLAGS+= ${INCLUDES} -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.
 CFLAGS+= -fno-common -finline-limit=${INLINE_LIMIT}
 CFLAGS+= --param inline-unit-growth=100
 CFLAGS+= --param large-function-growth=1000
-.if ${MACHINE_ARCH} == "amd64" || ${MACHINE} == "i386" || \
-    ${MACHINE_ARCH} == "ia64" || ${MACHINE_ARCH} == "powerpc" || \
-    ${MACHINE_ARCH} == "sparc64"
 WERROR?= -Werror
-.endif
 .endif
 
 # XXX LOCORE means "don't declare C stuff" not "for locore.s".
@@ -126,6 +127,12 @@ NORMAL_C_NOWERROR= ${CC} -c ${CFLAGS} ${PROF} ${.IMPSRC}
 NORMAL_M= ${AWK} -f $S/tools/makeobjops.awk ${.IMPSRC} -c ; \
 	  ${CC} -c ${CFLAGS} ${WERROR} ${PROF} ${.PREFIX}.c
 
+.if defined(CTFCONVERT)
+NORMAL_CTFCONVERT= ${CTFCONVERT} ${CTFFLAGS} ${.TARGET}
+.else
+NORMAL_CTFCONVERT=
+.endif
+
 NORMAL_LINT=	${LINT} ${LINTFLAGS} ${CFLAGS:M-[DIU]*} ${.IMPSRC}
 
 GEN_CFILES= $S/$M/$M/genassym.c ${MFILES:T:S/.m$/.c/}
@@ -134,12 +141,16 @@ SYSTEM_DEP= Makefile ${SYSTEM_OBJS}
 SYSTEM_OBJS= locore.o ${MDOBJS} ${OBJS}
 SYSTEM_OBJS+= ${SYSTEM_CFILES:.c=.o}
 SYSTEM_OBJS+= hack.So
-SYSTEM_LD= @${LD} -Bdynamic -T $S/conf/ldscript.$M \
+.if defined(CTFMERGE)
+SYSTEM_CTFMERGE= ${CTFMERGE} ${CTFFLAGS} -o ${.TARGET} ${SYSTEM_OBJS} vers.o
+LD+= -g
+.endif
+SYSTEM_LD= @${LD} -Bdynamic -T ${LDSCRIPT} \
 	-warn-common -export-dynamic -dynamic-linker /red/herring \
 	-o ${.TARGET} -X ${SYSTEM_OBJS} vers.o
 SYSTEM_LD_TAIL= @${OBJCOPY} --strip-symbol gcc2_compiled. ${.TARGET} ; \
 	${SIZE} ${.TARGET} ; chmod 755 ${.TARGET}
-SYSTEM_DEP+= $S/conf/ldscript.$M
+SYSTEM_DEP+= ${LDSCRIPT}
 
 # MKMODULESENV is set here so that port makefiles can augment
 # them.

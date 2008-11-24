@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)protosw.h	8.1 (Berkeley) 6/2/93
- * $FreeBSD: src/sys/sys/protosw.h,v 1.57 2006/07/24 15:20:08 rwatson Exp $
+ * $FreeBSD: src/sys/sys/protosw.h,v 1.59 2008/10/02 18:12:42 rwatson Exp $
  */
 
 #ifndef _SYS_PROTOSW_H_
@@ -201,7 +201,6 @@ struct uio;
  * See uipc_domain.c:net_init_domain()
  */
 struct pr_usrreqs {
-	double	__Break_the_struct_layout_for_now;
 	void	(*pru_abort)(struct socket *so);
 	int	(*pru_accept)(struct socket *so, struct sockaddr **nam);
 	int	(*pru_attach)(struct socket *so, int proto, struct thread *td);
@@ -226,7 +225,8 @@ struct pr_usrreqs {
 #define	PRUS_EOF	0x2
 #define	PRUS_MORETOCOME	0x4
 	int	(*pru_sense)(struct socket *so, struct stat *sb);
-	int	(*pru_shutdown)(struct socket *so);
+        int	(*pru_shutdown)(struct socket *so);
+	int	(*pru_flush)(struct socket *so, int direction);  
 	int	(*pru_sockaddr)(struct socket *so, struct sockaddr **nam);
 	int	(*pru_sosend)(struct socket *so, struct sockaddr *addr,
 		    struct uio *uio, struct mbuf *top, struct mbuf *control,

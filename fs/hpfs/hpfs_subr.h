@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/hpfs/hpfs_subr.h,v 1.3 2004/12/06 20:14:20 phk Exp $
+ * $FreeBSD: src/sys/fs/hpfs/hpfs_subr.h,v 1.5 2008/01/24 12:34:26 attilio Exp $
  */
 
 #define	hpfs_bmmarkfree(hpmp, bn,bl) hpfs_bmmark(hpmp, bn, bl, 1)
@@ -78,8 +78,10 @@ int		hpfs_breadstruct (struct hpfsmount *, lsn_t, u_int, u_int32_t,
 	hpfs_breadstruct(hpmp, lsn, D_BSIZE, D_MAGIC, bpp)
 
 #if 0
-#define	hpfs_hplock(hp, p)	lockmgr(&(hp)->h_intlock, LK_EXCLUSIVE, (p), NULL)
-#define	hpfs_hpunlock(hp, p)	lockmgr(&(hp)->h_intlock, LK_RELEASE, (p), NULL)
+#define	hpfs_hplock(hp, p)						\
+	lockmgr(&(hp)->h_intlock, LK_EXCLUSIVE, (p))
+#define	hpfs_hpunlock(hp, p)						\
+	lockmgr(&(hp)->h_intlock, LK_RELEASE, (p))
 #endif
 
 int		hpfs_hpbmap (struct hpfsnode *, daddr_t, daddr_t *, int *);

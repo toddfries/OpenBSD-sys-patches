@@ -53,7 +53,7 @@
  * SUCH DAMAGE.
  *
  *
- *      $FreeBSD: src/sys/dev/amr/amrvar.h,v 1.35 2008/01/24 07:26:53 scottl Exp $
+ *      $FreeBSD: src/sys/dev/amr/amrvar.h,v 1.36 2008/11/03 00:53:54 scottl Exp $
  */
 
 #include <geom/geom_disk.h>
@@ -253,6 +253,8 @@ struct amr_softc
     int 			support_ext_cdb;	/* greater than 10 byte cdb support */
 
     /* misc glue */
+    device_t			amr_pass;
+    int				(*amr_cam_command)(struct amr_softc *sc, struct amr_command **acp);
     struct intr_config_hook	amr_ich;		/* wait-for-interrupts probe hook */
     struct callout_handle	amr_timeout;		/* periodic status check */
     int				amr_allow_vol_config;
@@ -275,13 +277,6 @@ extern void		amr_startio(struct amr_softc *sc);
  */
 extern struct amr_command	*amr_alloccmd(struct amr_softc *sc);
 extern void			amr_releasecmd(struct amr_command *ac);
-
-/*
- * CAM interface
- */
-extern int		amr_cam_attach(struct amr_softc *sc);
-extern void		amr_cam_detach(struct amr_softc *sc);
-extern int		amr_cam_command(struct amr_softc *sc, struct amr_command **acp);
 
 /*
  * MegaRAID logical disk driver

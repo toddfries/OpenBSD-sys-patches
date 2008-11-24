@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_sockio.c,v 1.18 2006/08/04 21:15:09 brooks Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_sockio.c,v 1.21 2008/10/02 15:37:58 zec Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -36,8 +36,9 @@ __FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_sockio.c,v 1.18 2006/08/04 21:15:09
 #include <sys/filedesc.h>
 #include <sys/sockio.h>
 #include <sys/socket.h>
-#include <net/if.h>
+#include <sys/vimage.h>
 
+#include <net/if.h>
 
 #include <compat/svr4/svr4.h>
 #include <compat/svr4/svr4_util.h>
@@ -87,6 +88,7 @@ svr4_sock_ioctl(fp, td, retval, fd, cmd, data)
 	switch (cmd) {
 	case SVR4_SIOCGIFNUM:
 		{
+			INIT_VNET_NET(curvnet);
 			struct ifnet *ifp;
 			struct ifaddr *ifa;
 			int ifnum = 0;
@@ -103,7 +105,7 @@ svr4_sock_ioctl(fp, td, retval, fd, cmd, data)
 			 * entry per physical interface?
 			 */
 			IFNET_RLOCK();
-			TAILQ_FOREACH(ifp, &ifnet, if_link)
+			TAILQ_FOREACH(ifp, &V_ifnet, if_link)
 				if (TAILQ_EMPTY(&ifp->if_addrhead))
 					ifnum++;
 				else

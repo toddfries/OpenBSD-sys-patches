@@ -39,7 +39,7 @@
  * Authors: Archie Cobbs <archie@freebsd.org>
  *	    Julian Elischer <julian@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_ether.c,v 1.62 2007/03/20 00:36:10 bms Exp $
+ * $FreeBSD: src/sys/netgraph/ng_ether.c,v 1.64 2008/10/23 15:53:51 des Exp $
  */
 
 /*
@@ -54,6 +54,7 @@
 #include <sys/errno.h>
 #include <sys/syslog.h>
 #include <sys/socket.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -291,7 +292,7 @@ ng_ether_attach(struct ifnet *ifp)
 	}
 
 	/* Allocate private data */
-	MALLOC(priv, priv_p, sizeof(*priv), M_NETGRAPH, M_NOWAIT | M_ZERO);
+	priv = malloc(sizeof(*priv), M_NETGRAPH, M_NOWAIT | M_ZERO);
 	if (priv == NULL) {
 		log(LOG_ERR, "%s: can't %s for %s\n",
 		    __func__, "allocate memory", ifp->if_xname);
@@ -682,7 +683,7 @@ ng_ether_shutdown(node_p node)
 		 * Assume the ifp has already been freed.
 		 */
 		NG_NODE_SET_PRIVATE(node, NULL);
-		FREE(priv, M_NETGRAPH);		
+		free(priv, M_NETGRAPH);		
 		NG_NODE_UNREF(node);	/* free node itself */
 		return (0);
 	}
@@ -752,7 +753,7 @@ ng_ether_mod_event(module_t mod, int event, void *data)
 
 		/* Create nodes for any already-existing Ethernet interfaces */
 		IFNET_RLOCK();
-		TAILQ_FOREACH(ifp, &ifnet, if_link) {
+		TAILQ_FOREACH(ifp, &V_ifnet, if_link) {
 			if (ifp->if_type == IFT_ETHER
 			    || ifp->if_type == IFT_L2VLAN)
 				ng_ether_attach(ifp);

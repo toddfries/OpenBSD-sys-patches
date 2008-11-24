@@ -22,7 +22,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ctau/if_ct.c,v 1.35 2007/10/12 06:03:43 kevlo Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ctau/if_ct.c,v 1.37 2008/09/27 08:51:18 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -949,8 +949,8 @@ static int ct_sioctl (struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	if (! (ifp->if_flags & IFF_DEBUG))
 		d->chan->debug = 0;
-	else if (! d->chan->debug)
-		d->chan->debug = 1;
+	else
+		d->chan->debug = d->chan->debug_shadow;
 
 	switch (cmd) {
 	default:	   CT_DEBUG2 (d, ("ioctl 0x%lx\n", cmd)); return 0;
@@ -1218,7 +1218,7 @@ static int ct_open (struct cdev *dev, int oflags, int devtype, struct thread *td
 {
 	drv_t *d;
 
-	if (minor(dev) >= NCTAU*NCHAN || ! (d = channel[minor(dev)]))
+	if (dev2unit(dev) >= NCTAU*NCHAN || ! (d = channel[dev2unit(dev)]))
 		return ENXIO;
 		
 	CT_DEBUG2 (d, ("ct_open\n"));
@@ -1227,7 +1227,7 @@ static int ct_open (struct cdev *dev, int oflags, int devtype, struct thread *td
 
 static int ct_close (struct cdev *dev, int fflag, int devtype, struct thread *td)
 {
-	drv_t *d = channel [minor(dev)];
+	drv_t *d = channel [dev2unit(dev)];
 
 	if (!d)
 		return 0;
@@ -1265,7 +1265,7 @@ static int ct_modem_status (ct_chan_t *c)
  */
 static int ct_ioctl (struct cdev *dev, u_long cmd, caddr_t data, int flag, struct thread *td)
 {
-	drv_t *d = channel [minor (dev)];
+	drv_t *d = channel [dev2unit (dev)];
 	bdrv_t *bd;
 	ct_chan_t *c;
 	struct serial_statistics *st;
@@ -1529,12 +1529,17 @@ static int ct_ioctl (struct cdev *dev, u_long cmd, caddr_t data, int flag, struc
 		error = priv_check (td, PRIV_DRIVER);
 		if (error)
 			return error;
-		c->debug = *(int*)data;
 #ifndef	NETGRAPH
-		if (d->chan->debug)
-			d->ifp->if_flags |= IFF_DEBUG;
-		else
-			d->ifp->if_flags &= (~IFF_DEBUG);
+		/*
+		 * The debug_shadow is always greater than zero for logic 
+		 * simplicity.  For switching debug off the IFF_DEBUG is
+		 * responsible.
+		 */
+		c->debug_shadow = (*(int*)data) ? (*(int*)data) : 1;
+		if (d->ifp->if_flags & IFF_DEBUG)
+			c->debug = c->debug_shadow;
+#else
+		c->debug = *(int*)data;
 #endif
 		return 0;
 

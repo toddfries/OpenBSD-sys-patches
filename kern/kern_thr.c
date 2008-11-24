@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_thr.c,v 1.62 2007/08/16 05:26:41 davidxu Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_thr.c,v 1.73 2008/11/22 12:36:15 kib Exp $");
 
 #include "opt_compat.h"
 #include "opt_posix.h"
@@ -57,14 +57,12 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_thr.c,v 1.62 2007/08/16 05:26:41 davidxu E
 
 #ifdef COMPAT_IA32
 
-extern struct sysentvec ia32_freebsd_sysvec;
-
 static inline int
 suword_lwpid(void *addr, lwpid_t lwpid)
 {
 	int error;
 
-	if (curproc->p_sysent != &ia32_freebsd_sysvec)
+	if (SV_CURPROC_FLAG(SV_LP64))
 		error = suword(addr, lwpid);
 	else
 		error = suword32(addr, lwpid);
@@ -76,6 +74,7 @@ suword_lwpid(void *addr, lwpid_t lwpid)
 #endif
 
 extern int max_threads_per_proc;
+extern int max_threads_hits;
 
 static int create_thread(struct thread *td, mcontext_t *ctx,
 			 void (*start_func)(void *), void *arg,
@@ -126,6 +125,8 @@ kern_thr_new(struct thread *td, struct thr_param *param)
 	rtpp = NULL;
 	if (param->rtp != 0) {
 		error = copyin(param->rtp, &rtp, sizeof(struct rtprio));
+		if (error)
+			return (error);
 		rtpp = &rtp;
 	}
 	error = create_thread(td, NULL, param->start_func, param->arg,
@@ -152,8 +153,10 @@ create_thread(struct thread *td, mcontext_t *ctx,
 	p = td->td_proc;
 
 	/* Have race condition but it is cheap. */
-	if (p->p_numthreads >= max_threads_per_proc)
+	if (p->p_numthreads >= max_threads_per_proc) {
+		++max_threads_hits;
 		return (EPROCLIM);
+	}
 
 	if (rtp != NULL) {
 		switch(rtp->type) {
@@ -175,6 +178,8 @@ create_thread(struct thread *td, mcontext_t *ctx,
 
 	/* Initialize our td */
 	newtd = thread_alloc();
+	if (newtd == NULL)
+		return (ENOMEM);
 
 	/*
 	 * Try the copyout as soon as we allocate the td so we don't
@@ -227,13 +232,14 @@ create_thread(struct thread *td, mcontext_t *ctx,
 	PROC_LOCK(td->td_proc);
 	td->td_proc->p_flag |= P_HADTHREADS;
 	newtd->td_sigmask = td->td_sigmask;
-	PROC_SLOCK(p);
 	thread_link(newtd, p); 
+	bcopy(p->p_comm, newtd->td_name, sizeof(newtd->td_name));
 	thread_lock(td);
 	/* let the scheduler know about these things. */
 	sched_fork_thread(td, newtd);
 	thread_unlock(td);
-	PROC_SUNLOCK(p);
+	if (P_SHOULDSTOP(p))
+		newtd->td_flags |= TDF_ASTPENDING | TDF_NEEDSUSPCHK;
 	PROC_UNLOCK(p);
 	thread_lock(newtd);
 	if (rtp != NULL) {
@@ -244,8 +250,7 @@ create_thread(struct thread *td, mcontext_t *ctx,
 		} /* ignore timesharing class */
 	}
 	TD_SET_CAN_RUN(newtd);
-	/* if ((flags & THR_SUSPENDED) == 0) */
-		sched_add(newtd, SRQ_BORING);
+	sched_add(newtd, SRQ_BORING);
 	thread_unlock(newtd);
 
 	return (error);
@@ -274,7 +279,7 @@ thr_exit(struct thread *td, struct thr_exit_args *uap)
 	/* Signal userland that it can free the stack. */
 	if ((void *)uap->state != NULL) {
 		suword_lwpid(uap->state, 1);
-		kern_umtx_wake(td, uap->state, INT_MAX);
+		kern_umtx_wake(td, uap->state, INT_MAX, 0);
 	}
 
 	PROC_LOCK(p);

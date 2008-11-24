@@ -40,7 +40,7 @@
  *
  * From:
  *	$Id: procfs_regs.c,v 3.2 1993/12/15 09:40:17 jsp Exp $
- * $FreeBSD: src/sys/fs/procfs/procfs_dbregs.c,v 1.27 2007/04/15 13:24:03 des Exp $
+ * $FreeBSD: src/sys/fs/procfs/procfs_dbregs.c,v 1.28 2008/03/12 10:11:57 jeff Exp $
  */
 
 #include "opt_compat.h"
@@ -105,7 +105,6 @@ procfs_doprocdbregs(PFS_FILL_ARGS)
 		return (EPERM);
 	}
 
-	/* XXXKSE: */
 	td2 = FIRST_THREAD_IN_PROC(p);
 #ifdef COMPAT_IA32
 	if (td->td_proc->p_sysent == &ia32_freebsd_sysvec) {

@@ -32,7 +32,7 @@
  */
 
 /*-
- * Copyright (c) 2002, Jeffrey Roberson <jeff@freebsd.org>
+ * Copyright (c) 2002-2008, Jeffrey Roberson <jeff@freebsd.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -56,7 +56,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/sched.h,v 1.33 2007/06/12 19:49:39 jeff Exp $
+ * $FreeBSD: src/sys/sys/sched.h,v 1.39 2008/04/17 04:20:10 jeff Exp $
  */
 
 #ifndef _SCHED_H_
@@ -82,11 +82,6 @@ int	sched_runnable(void);
 void	sched_exit(struct proc *p, struct thread *childtd);
 void	sched_fork(struct thread *td, struct thread *childtd);
 void	sched_fork_exit(struct thread *td);
-
-/*
- * KSE Groups contain scheduling priority information.  They record the
- * behavior of groups of KSEs and threads.
- */
 void	sched_class(struct thread *td, int class);
 void	sched_nice(struct proc *p, int nice);
 
@@ -100,7 +95,7 @@ void	sched_lend_prio(struct thread *td, u_char prio);
 void	sched_lend_user_prio(struct thread *td, u_char pri);
 fixpt_t	sched_pctcpu(struct thread *td);
 void	sched_prio(struct thread *td, u_char prio);
-void	sched_sleep(struct thread *td);
+void	sched_sleep(struct thread *td, int prio);
 void	sched_switch(struct thread *td, struct thread *newtd, int flags);
 void	sched_throw(struct thread *td);
 void	sched_unlend_prio(struct thread *td, u_char prio);
@@ -108,6 +103,7 @@ void	sched_unlend_user_prio(struct thread *td, u_char pri);
 void	sched_user_prio(struct thread *td, u_char prio);
 void	sched_userret(struct thread *td);
 void	sched_wakeup(struct thread *td);
+void	sched_preempt(struct thread *td);
 
 /*
  * Threads are moved on and off of run queues
@@ -129,6 +125,7 @@ static __inline void sched_pin(void);
 void	sched_unbind(struct thread *td);
 static __inline void sched_unpin(void);
 int	sched_is_bound(struct thread *td);
+void	sched_affinity(struct thread *td);
 
 /*
  * These procedures tell the process data structure allocation code how
@@ -157,24 +154,26 @@ sched_unpin(void)
 #define	SRQ_PREEMPTED	0x0008		/* has been preempted.. be kind */
 #define	SRQ_BORROWING	0x0010		/* Priority updated due to prio_lend */
 
-/* Switch stats. */
+/* Scheduler stats. */
 #ifdef SCHED_STATS
-extern long switch_preempt;
-extern long switch_owepreempt;
-extern long switch_turnstile;
-extern long switch_sleepq;
-extern long switch_sleepqtimo;
-extern long switch_relinquish;
-extern long switch_needresched;
+extern long sched_switch_stats[SWT_COUNT];
+
+#define	SCHED_STAT_DEFINE_VAR(name, ptr, descr)				\
+    SYSCTL_LONG(_kern_sched_stats, OID_AUTO, name, CTLFLAG_RD, ptr, 0, descr)
+#define	SCHED_STAT_DEFINE(name, descr)					\
+    unsigned long name;							\
+    SCHED_STAT_DEFINE_VAR(name, &name, descr)
 #define SCHED_STAT_INC(var)     atomic_add_long(&(var), 1)
 #else
+#define	SCHED_STAT_DEFINE_VAR(name, descr, ptr)
+#define	SCHED_STAT_DEFINE(name, descr)
 #define SCHED_STAT_INC(var)
 #endif
 
-/* temporarily here */
+/*
+ * Fixup scheduler state for proc0 and thread0
+ */
 void schedinit(void);
-void sched_newproc(struct proc *p, struct thread *td);
-void sched_newthread(struct thread *td);
 #endif /* _KERNEL */
 
 /* POSIX 1003.1b Process Scheduling */

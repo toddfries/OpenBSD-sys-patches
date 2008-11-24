@@ -51,7 +51,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vnode_pager.c,v 1.237 2007/10/22 06:23:46 alc Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vnode_pager.c,v 1.245 2008/08/28 15:23:18 attilio Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -112,17 +112,17 @@ vnode_create_vobject(struct vnode *vp, off_t isize, struct thread *td)
 			VM_OBJECT_UNLOCK(object);
 			return (0);
 		}
-		VOP_UNLOCK(vp, 0, td);
+		VOP_UNLOCK(vp, 0);
 		vm_object_set_flag(object, OBJ_DISCONNECTWNT);
 		msleep(object, VM_OBJECT_MTX(object), PDROP | PVM, "vodead", 0);
-		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 	}
 
 	if (size == 0) {
 		if (vn_isdisk(vp, NULL)) {
 			size = IDX_TO_OFF(INT_MAX);
 		} else {
-			if (VOP_GETATTR(vp, &va, td->td_ucred, td) != 0)
+			if (VOP_GETATTR(vp, &va, td->td_ucred))
 				return (0);
 			size = va.va_size;
 		}
@@ -198,12 +198,11 @@ vnode_pager_alloc(void *handle, vm_ooffset_t size, vm_prot_t prot,
 
 	vp = (struct vnode *) handle;
 
-	ASSERT_VOP_ELOCKED(vp, "vnode_pager_alloc");
-
 	/*
 	 * If the object is being terminated, wait for it to
 	 * go away.
 	 */
+retry:
 	while ((object = vp->v_object) != NULL) {
 		VM_OBJECT_LOCK(object);
 		if ((object->flags & OBJ_DEAD) == 0)
@@ -217,7 +216,7 @@ vnode_pager_alloc(void *handle, vm_ooffset_t size, vm_prot_t prot,
 
 	if (object == NULL) {
 		/*
-		 * And an object of the appropriate size
+		 * Add an object of the appropriate size
 		 */
 		object = vm_object_allocate(OBJT_VNODE, OFF_TO_IDX(round_page(size)));
 
@@ -226,7 +225,17 @@ vnode_pager_alloc(void *handle, vm_ooffset_t size, vm_prot_t prot,
 		object->handle = handle;
 		if (VFS_NEEDSGIANT(vp->v_mount))
 			vm_object_set_flag(object, OBJ_NEEDGIANT);
+		VI_LOCK(vp);
+		if (vp->v_object != NULL) {
+			/*
+			 * Object has been created while we were sleeping
+			 */
+			VI_UNLOCK(vp);
+			vm_object_destroy(object);
+			goto retry;
+		}
 		vp->v_object = object;
+		VI_UNLOCK(vp);
 	} else {
 		object->ref_count++;
 		VM_OBJECT_UNLOCK(object);
@@ -395,21 +404,6 @@ vnode_pager_setsize(vp, nsize)
 			pmap_zero_page_area(m, base, size);
 
 			/*
-			 * XXX work around SMP data integrity race
-			 * by unmapping the page from user processes.
-			 * The garbage we just cleared may be mapped
-			 * to a user process running on another cpu
-			 * and this code is not running through normal
-			 * I/O channels which handle SMP issues for
-			 * us, so unmap page to synchronize all cpus.
-			 *
-			 * XXX should vm_pager_unmap_page() have
-			 * dealt with this?
-			 */
-			vm_page_lock_queues();
-			pmap_remove_all(m);
-
-			/*
 			 * Clear out partial-page dirty bits.  This
 			 * has the side effect of setting the valid
 			 * bits, but that is ok.  There are a bunch
@@ -422,6 +416,7 @@ vnode_pager_setsize(vp, nsize)
 			 * bits.  This would prevent bogus_page
 			 * replacement from working properly.
 			 */
+			vm_page_lock_queues();
 			vm_page_set_validclean(m, base, size);
 			if (m->dirty != 0)
 				m->dirty = VM_PAGE_BITS_ALL;
@@ -1184,6 +1179,7 @@ vnode_pager_lock(vm_object_t first_object)
 {
 	struct vnode *vp;
 	vm_object_t backing_object, object;
+	int locked, lockf;
 
 	VM_OBJECT_LOCK_ASSERT(first_object, MA_OWNED);
 	for (object = first_object; object != NULL; object = backing_object) {
@@ -1201,13 +1197,19 @@ vnode_pager_lock(vm_object_t first_object)
 			return NULL;
 		}
 		vp = object->handle;
+		locked = VOP_ISLOCKED(vp);
 		VI_LOCK(vp);
 		VM_OBJECT_UNLOCK(object);
 		if (first_object != object)
 			VM_OBJECT_UNLOCK(first_object);
 		VFS_ASSERT_GIANT(vp->v_mount);
-		if (vget(vp, LK_CANRECURSE | LK_INTERLOCK |
-		    LK_RETRY | LK_SHARED, curthread)) {
+		if (locked == LK_EXCLUSIVE)
+			lockf = LK_CANRECURSE | LK_INTERLOCK | LK_RETRY |
+			    LK_EXCLUSIVE;
+		else
+			lockf = LK_CANRECURSE | LK_INTERLOCK | LK_RETRY |
+			    LK_SHARED;
+		if (vget(vp, lockf, curthread)) {
 			VM_OBJECT_LOCK(first_object);
 			if (object != first_object)
 				VM_OBJECT_LOCK(object);

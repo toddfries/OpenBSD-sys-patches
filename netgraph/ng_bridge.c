@@ -37,7 +37,7 @@
  *
  * Author: Archie Cobbs <archie@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_bridge.c,v 1.31 2005/02/09 15:14:44 ru Exp $
+ * $FreeBSD: src/sys/netgraph/ng_bridge.c,v 1.34 2008/10/23 20:26:15 des Exp $
  */
 
 /*
@@ -67,6 +67,7 @@
 #include <sys/syslog.h>
 #include <sys/socket.h>
 #include <sys/ctype.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/ethernet.h>
@@ -297,16 +298,16 @@ ng_bridge_constructor(node_p node)
 	priv_p priv;
 
 	/* Allocate and initialize private info */
-	MALLOC(priv, priv_p, sizeof(*priv), M_NETGRAPH_BRIDGE, M_NOWAIT | M_ZERO);
+	priv = malloc(sizeof(*priv), M_NETGRAPH_BRIDGE, M_NOWAIT | M_ZERO);
 	if (priv == NULL)
 		return (ENOMEM);
 	ng_callout_init(&priv->timer);
 
 	/* Allocate and initialize hash table, etc. */
-	MALLOC(priv->tab, struct ng_bridge_bucket *,
-	    MIN_BUCKETS * sizeof(*priv->tab), M_NETGRAPH_BRIDGE, M_NOWAIT | M_ZERO);
+	priv->tab = malloc(MIN_BUCKETS * sizeof(*priv->tab),
+	    M_NETGRAPH_BRIDGE, M_NOWAIT | M_ZERO);
 	if (priv->tab == NULL) {
-		FREE(priv, M_NETGRAPH_BRIDGE);
+		free(priv, M_NETGRAPH_BRIDGE);
 		return (ENOMEM);
 	}
 	priv->numBuckets = MIN_BUCKETS;
@@ -358,8 +359,8 @@ ng_bridge_newhook(node_p node, hook_p hook, const char *name)
 			return (EINVAL);
 		if (priv->links[linkNum] != NULL)
 			return (EISCONN);
-		MALLOC(priv->links[linkNum], struct ng_bridge_link *,
-		    sizeof(*priv->links[linkNum]), M_NETGRAPH_BRIDGE, M_NOWAIT|M_ZERO);
+		priv->links[linkNum] = malloc(sizeof(*priv->links[linkNum]),
+		    M_NETGRAPH_BRIDGE, M_NOWAIT|M_ZERO);
 		if (priv->links[linkNum] == NULL)
 			return (ENOMEM);
 		priv->links[linkNum]->hook = hook;
@@ -631,7 +632,7 @@ ng_bridge_rcvdata(hook_p hook, item_p item)
 
 	/* Run packet through ipfw processing, if enabled */
 #if 0
-	if (priv->conf.ipfw[linkNum] && fw_enable && ip_fw_chk_ptr != NULL) {
+	if (priv->conf.ipfw[linkNum] && V_fw_enable && ip_fw_chk_ptr != NULL) {
 		/* XXX not implemented yet */
 	}
 #endif
@@ -766,8 +767,8 @@ ng_bridge_shutdown(node_p node)
 	ng_uncallout(&priv->timer, node);
 	NG_NODE_SET_PRIVATE(node, NULL);
 	NG_NODE_UNREF(node);
-	FREE(priv->tab, M_NETGRAPH_BRIDGE);
-	FREE(priv, M_NETGRAPH_BRIDGE);
+	free(priv->tab, M_NETGRAPH_BRIDGE);
+	free(priv, M_NETGRAPH_BRIDGE);
 	return (0);
 }
 
@@ -790,7 +791,7 @@ ng_bridge_disconnect(hook_p hook)
 
 	/* Free associated link information */
 	KASSERT(priv->links[linkNum] != NULL, ("%s: no link", __func__));
-	FREE(priv->links[linkNum], M_NETGRAPH_BRIDGE);
+	free(priv->links[linkNum], M_NETGRAPH_BRIDGE);
 	priv->links[linkNum] = NULL;
 	priv->numLinks--;
 
@@ -849,8 +850,7 @@ ng_bridge_put(priv_p priv, const u_char *addr, int linkNum)
 #endif
 
 	/* Allocate and initialize new hashtable entry */
-	MALLOC(hent, struct ng_bridge_hent *,
-	    sizeof(*hent), M_NETGRAPH_BRIDGE, M_NOWAIT);
+	hent = malloc(sizeof(*hent), M_NETGRAPH_BRIDGE, M_NOWAIT);
 	if (hent == NULL)
 		return (0);
 	bcopy(addr, hent->host.addr, ETHER_ADDR_LEN);
@@ -894,8 +894,8 @@ ng_bridge_rehash(priv_p priv)
 	newMask = newNumBuckets - 1;
 
 	/* Allocate and initialize new table */
-	MALLOC(newTab, struct ng_bridge_bucket *,
-	    newNumBuckets * sizeof(*newTab), M_NETGRAPH_BRIDGE, M_NOWAIT | M_ZERO);
+	newTab = malloc(newNumBuckets * sizeof(*newTab),
+	    M_NETGRAPH_BRIDGE, M_NOWAIT | M_ZERO);
 	if (newTab == NULL)
 		return;
 
@@ -919,7 +919,7 @@ ng_bridge_rehash(priv_p priv)
 		    ng_bridge_nodename(priv->node),
 		    priv->numBuckets, newNumBuckets);
 	}
-	FREE(priv->tab, M_NETGRAPH_BRIDGE);
+	free(priv->tab, M_NETGRAPH_BRIDGE);
 	priv->numBuckets = newNumBuckets;
 	priv->hashMask = newMask;
 	priv->tab = newTab;
@@ -947,7 +947,7 @@ ng_bridge_remove_hosts(priv_p priv, int linkNum)
 
 			if (linkNum == -1 || hent->host.linkNum == linkNum) {
 				*hptr = SLIST_NEXT(hent, next);
-				FREE(hent, M_NETGRAPH_BRIDGE);
+				free(hent, M_NETGRAPH_BRIDGE);
 				priv->numHosts--;
 			} else
 				hptr = &SLIST_NEXT(hent, next);
@@ -985,7 +985,7 @@ ng_bridge_timeout(node_p node, hook_p hook, void *arg1, int arg2)
 			/* Remove hosts we haven't heard from in a while */
 			if (++hent->host.staleness >= priv->conf.maxStaleness) {
 				*hptr = SLIST_NEXT(hent, next);
-				FREE(hent, M_NETGRAPH_BRIDGE);
+				free(hent, M_NETGRAPH_BRIDGE);
 				priv->numHosts--;
 			} else {
 				if (hent->host.age < 0xffff)

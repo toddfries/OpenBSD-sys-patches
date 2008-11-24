@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425.c,v 1.8 2007/05/29 18:10:42 jhay Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425.c,v 1.10 2008/09/11 20:43:38 cognet Exp $");
 
 #define _ARM32_BUS_DMA_PRIVATE
 #include <sys/param.h>
@@ -143,22 +143,27 @@ ixp425_irq2gpio_bit(int irq)
 void
 arm_mask_irq(uintptr_t nb)
 {
+	int i;
+	
+	i = disable_interrupts(I32_bit);
 	intr_enabled &= ~(1 << nb);
 	ixp425_set_intrmask();
+	restore_interrupts(i);
 	/*XXX; If it's a GPIO interrupt, ACK it know. Can it be a problem ?*/
 	if ((1 << nb) & IXP425_INT_GPIOMASK)
 		IXPREG(IXP425_GPIO_VBASE + IXP425_GPIO_GPISR) =
 		    ixp425_irq2gpio_bit(nb);
-
-		
 }
 
 void
 arm_unmask_irq(uintptr_t nb)
 {
-
+	int i;
+	
+	i = disable_interrupts(I32_bit);
 	intr_enabled |= (1 << nb);
 	ixp425_set_intrmask();
+	restore_interrupts(i);
 }
 
 static __inline uint32_t
@@ -234,7 +239,7 @@ ixp425_attach(device_t dev)
 	sc->sc_mem_rman.rm_descr = "IXP425 Memory";
 	if (rman_init(&sc->sc_mem_rman) != 0 ||
 	    rman_manage_region(&sc->sc_mem_rman, 0, ~0) != 0)
-		panic("ixp425_attach: failed to set up IRQ rman");
+		panic("ixp425_attach: failed to set up memory rman");
 
 	BUS_ADD_CHILD(dev, 0, "pcib", 0);
 	BUS_ADD_CHILD(dev, 0, "ixpclk", 0);

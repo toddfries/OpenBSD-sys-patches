@@ -9,13 +9,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed for the NetBSD Project by
- *      Wasabi Systems, Inc.
- * 4. The name of Wasabi Systems, Inc. may not be used to endorse
- *    or promote products derived from this software without specific prior
- *    written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY WASABI SYSTEMS, INC. ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -31,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425_iic.c,v 1.1 2006/11/19 23:55:23 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425_iic.c,v 1.3 2008/08/04 20:46:15 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -113,9 +106,11 @@ ixpiic_getscl(device_t dev)
 	struct ixpiic_softc *sc = ixpiic_sc;
 	uint32_t reg;
 
+	mtx_lock(&Giant);
 	GPIO_CONF_SET(sc, IXP425_GPIO_GPOER, GPIO_I2C_SCL_BIT);
 
 	reg = GPIO_CONF_READ_4(sc, IXP425_GPIO_GPINR);
+	mtx_unlock(&Giant);
 	return (reg & GPIO_I2C_SCL_BIT);
 }
 
@@ -125,9 +120,11 @@ ixpiic_getsda(device_t dev)
 	struct ixpiic_softc *sc = ixpiic_sc;
 	uint32_t reg;
 
+	mtx_lock(&Giant);
 	GPIO_CONF_SET(sc, IXP425_GPIO_GPOER, GPIO_I2C_SDA_BIT);
 
 	reg = GPIO_CONF_READ_4(sc, IXP425_GPIO_GPINR);
+	mtx_unlock(&Giant);
 	return (reg & GPIO_I2C_SDA_BIT);
 }
 
@@ -136,11 +133,13 @@ ixpiic_setsda(device_t dev, char val)
 {
 	struct ixpiic_softc *sc = ixpiic_sc;
 
+	mtx_lock(&Giant);
 	GPIO_CONF_CLR(sc, IXP425_GPIO_GPOUTR, GPIO_I2C_SDA_BIT);
 	if (val)
 		GPIO_CONF_SET(sc, IXP425_GPIO_GPOER, GPIO_I2C_SDA_BIT);
 	else
 		GPIO_CONF_CLR(sc, IXP425_GPIO_GPOER, GPIO_I2C_SDA_BIT);
+	mtx_unlock(&Giant);
 	DELAY(I2C_DELAY);
 }
 
@@ -149,11 +148,13 @@ ixpiic_setscl(device_t dev, char val)
 {
 	struct ixpiic_softc *sc = ixpiic_sc;
 
+	mtx_lock(&Giant);
 	GPIO_CONF_CLR(sc, IXP425_GPIO_GPOUTR, GPIO_I2C_SCL_BIT);
 	if (val)
 		GPIO_CONF_SET(sc, IXP425_GPIO_GPOER, GPIO_I2C_SCL_BIT);
 	else
 		GPIO_CONF_CLR(sc, IXP425_GPIO_GPOER, GPIO_I2C_SCL_BIT);
+	mtx_unlock(&Giant);
 	DELAY(I2C_DELAY);
 }
 
@@ -191,3 +192,4 @@ static driver_t ixpiic_driver = {
 static devclass_t ixpiic_devclass;
 
 DRIVER_MODULE(ixpiic, ixp, ixpiic_driver, ixpiic_devclass, 0, 0);
+DRIVER_MODULE(iicbb, ixpiic, iicbb_driver, iicbb_devclass, 0, 0);

@@ -37,7 +37,7 @@
 #include "opt_inet6.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_if.c,v 1.12 2007/10/24 20:57:17 mlaier Exp $");
+__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_if.c,v 1.17 2008/10/02 15:37:58 zec Exp $");
 #endif
 
 #include <sys/param.h>
@@ -54,6 +54,7 @@ __FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_if.c,v 1.12 2007/10/24 20:57:17 ml
 #include <sys/device.h>
 #endif
 #include <sys/time.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -121,6 +122,8 @@ RB_GENERATE(pfi_ifhead, pfi_kif, pfik_tree, pfi_if_compare);
 void
 pfi_initialize(void)
 {
+	INIT_VNET_NET(curvnet);
+
 	if (pfi_all != NULL)	/* already initialized */
 		return;
 
@@ -141,9 +144,9 @@ pfi_initialize(void)
 	struct ifnet *ifp;
 
 	IFNET_RLOCK();
-	TAILQ_FOREACH(ifg, &ifg_head, ifg_next)
+	TAILQ_FOREACH(ifg, &V_ifg_head, ifg_next)
 		pfi_attach_ifgroup(ifg);
-	TAILQ_FOREACH(ifp, &ifnet, if_link)
+	TAILQ_FOREACH(ifp, &V_ifnet, if_link)
 		pfi_attach_ifnet(ifp);
 	IFNET_RUNLOCK();
 
@@ -161,6 +164,36 @@ pfi_initialize(void)
 	    pfi_ifaddr_event, NULL, EVENTHANDLER_PRI_ANY);
 #endif
 }
+
+#ifdef __FreeBSD__
+void
+pfi_cleanup(void)
+{
+	struct pfi_kif *p;
+
+	PF_UNLOCK();
+	EVENTHANDLER_DEREGISTER(ifnet_arrival_event, pfi_attach_cookie);
+	EVENTHANDLER_DEREGISTER(ifnet_departure_event, pfi_detach_cookie);
+	EVENTHANDLER_DEREGISTER(group_attach_event, pfi_attach_group_cookie);
+	EVENTHANDLER_DEREGISTER(group_change_event, pfi_change_group_cookie);
+	EVENTHANDLER_DEREGISTER(group_detach_event, pfi_detach_group_cookie);
+	EVENTHANDLER_DEREGISTER(ifaddr_event, pfi_ifaddr_event_cookie);
+	PF_LOCK();
+
+	pfi_all = NULL;
+	while ((p = RB_MIN(pfi_ifhead, &pfi_ifs))) {
+		if (p->pfik_rules || p->pfik_states) {
+			printf("pfi_cleanup: dangling refs for %s\n",
+			    p->pfik_name);
+		}
+
+		RB_REMOVE(pfi_ifhead, &pfi_ifs, p);
+		free(p, PFI_MTYPE);
+	}
+
+	free(pfi_buffer, PFI_MTYPE);
+}
+#endif
 
 struct pfi_kif *
 pfi_kif_get(const char *kif_name)
@@ -183,7 +216,18 @@ pfi_kif_get(const char *kif_name)
 
 	bzero(kif, sizeof(*kif));
 	strlcpy(kif->pfik_name, kif_name, sizeof(kif->pfik_name));
+#ifdef __FreeBSD__
+	/*
+	 * It seems that the value of time_second is in unintialzied state
+	 * when pf sets interface statistics clear time in boot phase if pf
+	 * was statically linked to kernel. Instead of setting the bogus
+	 * time value have pfi_get_ifaces handle this case. In
+	 * pfi_get_ifaces it uses boottime.tv_sec if it sees the time is 0.
+	 */
+	kif->pfik_tzero = time_second > 1 ? time_second : 0;
+#else
 	kif->pfik_tzero = time_second;
+#endif
 	TAILQ_INIT(&kif->pfik_dynaddrs);
 
 	RB_INSERT(pfi_ifhead, &pfi_ifs, kif);
@@ -540,6 +584,18 @@ pfi_instance_add(struct ifnet *ifp, int net, int flags)
 		af = ia->ifa_addr->sa_family;
 		if (af != AF_INET && af != AF_INET6)
 			continue;
+#ifdef __FreeBSD__
+		/*
+		 * XXX: For point-to-point interfaces, (ifname:0) and IPv4,
+		 *	jump over addresses without a proper route to work
+		 *	around a problem with ppp not fully removing the
+		 *	address used during IPCP.
+		 */
+		if ((ifp->if_flags & IFF_POINTOPOINT) &&
+		    !(ia->ifa_flags & IFA_ROUTE) &&
+		    (flags & PFI_AFLAG_NOALIAS) && (af == AF_INET))
+			continue;
+#endif
 		if ((flags & PFI_AFLAG_BROADCAST) && af == AF_INET6)
 			continue;
 		if ((flags & PFI_AFLAG_BROADCAST) &&
@@ -840,6 +896,9 @@ pfi_attach_ifnet_event(void *arg __unused, struct ifnet *ifp)
 {
 	PF_LOCK();
 	pfi_attach_ifnet(ifp);
+#ifdef ALTQ
+	pf_altq_ifnet_event(ifp, 0);
+#endif
 	PF_UNLOCK();
 }
 
@@ -848,6 +907,9 @@ pfi_detach_ifnet_event(void *arg __unused, struct ifnet *ifp)
 {
 	PF_LOCK();
 	pfi_detach_ifnet(ifp);
+#ifdef ALTQ
+	pf_altq_ifnet_event(ifp, 1);
+#endif
 	PF_UNLOCK();
 }
 

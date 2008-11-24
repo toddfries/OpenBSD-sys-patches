@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/sound/midi/sequencer.c,v 1.27 2007/10/20 23:23:18 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/sound/midi/sequencer.c,v 1.30 2008/09/27 08:51:18 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -40,7 +40,6 @@ __FBSDID("$FreeBSD: src/sys/dev/sound/midi/sequencer.c,v 1.27 2007/10/20 23:23:1
 #include <sys/lock.h>
 #include <sys/sockio.h>
 #include <sys/fcntl.h>
-#include <sys/tty.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
 
@@ -92,8 +91,8 @@ __FBSDID("$FreeBSD: src/sys/dev/sound/midi/sequencer.c,v 1.27 2007/10/20 23:23:1
 #define PCMMKMINOR(u, d, c) \
 	    ((((c) & 0xff) << 16) | (((u) & 0x0f) << 4) | ((d) & 0x0f))
 #define MIDIMKMINOR(u, d, c) PCMMKMINOR(u, d, c)
-#define MIDIUNIT(y) ((minor(y) >> 4) & 0x0f)
-#define MIDIDEV(y) (minor(y) & 0x0f)
+#define MIDIUNIT(y) ((dev2unit(y) >> 4) & 0x0f)
+#define MIDIDEV(y) (dev2unit(y) & 0x0f)
 
 /* These are the entries to the sequencer driver. */
 static d_open_t seq_open;
@@ -459,7 +458,6 @@ restart:
 done:
 	cv_broadcast(&scp->th_cv);
 	mtx_unlock(&scp->seq_lock);
-	mtx_lock(&Giant);
 	SEQ_DEBUG(2, printf("seq_eventthread finished\n"));
 	kproc_exit(0);
 }

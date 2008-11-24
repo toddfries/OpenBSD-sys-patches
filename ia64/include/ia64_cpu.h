@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/ia64/include/ia64_cpu.h,v 1.23 2007/08/05 18:19:38 marcel Exp $
+ * $FreeBSD: src/sys/ia64/include/ia64_cpu.h,v 1.24 2008/07/07 17:43:56 marcel Exp $
  */
 
 #ifndef _MACHINE_IA64_CPU_H_
@@ -195,6 +195,12 @@ static __inline void
 ia64_fc(u_int64_t va)
 {
 	__asm __volatile("fc %0" :: "r"(va));
+}
+
+static __inline void
+ia64_fc_i(u_int64_t va)
+{
+	__asm __volatile("fc.i %0" :: "r"(va));
 }
 
 /*

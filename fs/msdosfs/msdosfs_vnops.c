@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_vnops.c,v 1.181 2007/10/19 12:23:25 bde Exp $ */
+/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_vnops.c,v 1.190 2008/10/28 13:44:11 trasz Exp $ */
 /*	$NetBSD: msdosfs_vnops.c,v 1.68 1998/02/10 14:10:04 mrg Exp $	*/
 
 /*-
@@ -82,7 +82,6 @@
 /*
  * Prototypes for MSDOSFS vnode operations
  */
-static vop_advlock_t	msdosfs_advlock;
 static vop_create_t	msdosfs_create;
 static vop_mknod_t	msdosfs_mknod;
 static vop_open_t	msdosfs_open;
@@ -250,7 +249,7 @@ static int
 msdosfs_access(ap)
 	struct vop_access_args /* {
 		struct vnode *a_vp;
-		int a_mode;
+		accmode_t a_accmode;
 		struct ucred *a_cred;
 		struct thread *a_td;
 	} */ *ap;
@@ -258,7 +257,8 @@ msdosfs_access(ap)
 	struct vnode *vp = ap->a_vp;
 	struct denode *dep = VTODE(ap->a_vp);
 	struct msdosfsmount *pmp = dep->de_pmp;
-	mode_t file_mode, mode = ap->a_mode;
+	mode_t file_mode;
+	accmode_t accmode = ap->a_accmode;
 
 	file_mode = (S_IXUSR|S_IXGRP|S_IXOTH) | (S_IRUSR|S_IRGRP|S_IROTH) |
 	    ((dep->de_Attributes & ATTR_READONLY) ? 0 : (S_IWUSR|S_IWGRP|S_IWOTH));
@@ -268,7 +268,7 @@ msdosfs_access(ap)
 	 * Disallow writing to directories and regular files if the
 	 * filesystem is read-only.
 	 */
-	if (mode & VWRITE) {
+	if (accmode & VWRITE) {
 		switch (vp->v_type) {
 		case VDIR:
 		case VREG:
@@ -281,7 +281,7 @@ msdosfs_access(ap)
 	}
 
 	return (vaccess(vp->v_type, file_mode, pmp->pm_uid, pmp->pm_gid,
-	    ap->a_mode, ap->a_cred, NULL));
+	    ap->a_accmode, ap->a_cred, NULL));
 }
 
 static int
@@ -290,7 +290,6 @@ msdosfs_getattr(ap)
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		struct ucred *a_cred;
-		struct thread *a_td;
 	} */ *ap;
 {
 	struct denode *dep = VTODE(ap->a_vp);
@@ -336,7 +335,7 @@ msdosfs_getattr(ap)
 	vap->va_uid = pmp->pm_uid;
 	vap->va_gid = pmp->pm_gid;
 	vap->va_nlink = 1;
-	vap->va_rdev = 0;
+	vap->va_rdev = NODEV;
 	vap->va_size = dep->de_FileSize;
 	fattime2timespec(dep->de_MDate, dep->de_MTime, 0, 0, &vap->va_mtime);
 	vap->va_ctime = vap->va_mtime;
@@ -367,7 +366,6 @@ msdosfs_setattr(ap)
 		struct vnode *a_vp;
 		struct vattr *a_vap;
 		struct ucred *a_cred;
-		struct thread *a_td;
 	} */ *ap;
 {
 	struct vnode *vp = ap->a_vp;
@@ -375,11 +373,12 @@ msdosfs_setattr(ap)
 	struct msdosfsmount *pmp = dep->de_pmp;
 	struct vattr *vap = ap->a_vap;
 	struct ucred *cred = ap->a_cred;
+	struct thread *td = curthread;
 	int error = 0;
 
 #ifdef MSDOSFS_DEBUG
-	printf("msdosfs_setattr(): vp %p, vap %p, cred %p, p %p\n",
-	    ap->a_vp, vap, cred, ap->a_td);
+	printf("msdosfs_setattr(): vp %p, vap %p, cred %p\n",
+	    ap->a_vp, vap, cred);
 #endif
 
 	/*
@@ -481,7 +480,7 @@ msdosfs_setattr(ap)
 			 */
 			break;
 		}
-		error = detrunc(dep, vap->va_size, 0, cred, ap->a_td);
+		error = detrunc(dep, vap->va_size, 0, cred, td);
 		if (error)
 			return error;
 	}
@@ -489,12 +488,11 @@ msdosfs_setattr(ap)
 		if (vp->v_mount->mnt_flag & MNT_RDONLY)
 			return (EROFS);
 		if (vap->va_vaflags & VA_UTIMES_NULL) {
-			error = VOP_ACCESS(vp, VADMIN, cred, ap->a_td); 
+			error = VOP_ACCESS(vp, VADMIN, cred, td); 
 			if (error)
-				error = VOP_ACCESS(vp, VWRITE, cred,
-				    ap->a_td);
+				error = VOP_ACCESS(vp, VWRITE, cred, td);
 		} else
-			error = VOP_ACCESS(vp, VADMIN, cred, ap->a_td);
+			error = VOP_ACCESS(vp, VADMIN, cred, td);
 		if (vp->v_type != VDIR) {
 			if ((pmp->pm_flags & MSDOSFSMNT_NOWIN95) == 0 &&
 			    vap->va_atime.tv_sec != VNOVAL) {
@@ -982,9 +980,8 @@ msdosfs_rename(ap)
 	struct vnode *tvp = ap->a_tvp;
 	struct componentname *tcnp = ap->a_tcnp;
 	struct componentname *fcnp = ap->a_fcnp;
-	struct thread *td = fcnp->cn_thread;
 	struct denode *ip, *xp, *dp, *zp;
-	u_char toname[11], oldname[11];
+	u_char toname[12], oldname[11];
 	u_long from_diroffset, to_diroffset;
 	u_char to_count;
 	int doingdirectory = 0, newparent = 0;
@@ -1032,7 +1029,7 @@ abortit:
 		goto abortit;
 	}
 
-	error = vn_lock(fvp, LK_EXCLUSIVE, td);
+	error = vn_lock(fvp, LK_EXCLUSIVE);
 	if (error)
 		goto abortit;
 	dp = VTODE(fdvp);
@@ -1053,7 +1050,7 @@ abortit:
 		    (fcnp->cn_flags & ISDOTDOT) ||
 		    (tcnp->cn_flags & ISDOTDOT) ||
 		    (ip->de_flag & DE_RENAME)) {
-			VOP_UNLOCK(fvp, 0, td);
+			VOP_UNLOCK(fvp, 0);
 			error = EINVAL;
 			goto abortit;
 		}
@@ -1084,7 +1081,7 @@ abortit:
 	 * call to doscheckpath().
 	 */
 	error = VOP_ACCESS(fvp, VWRITE, tcnp->cn_cred, tcnp->cn_thread);
-	VOP_UNLOCK(fvp, 0, td);
+	VOP_UNLOCK(fvp, 0);
 	if (VTODE(fdvp)->de_StartCluster != VTODE(tdvp)->de_StartCluster)
 		newparent = 1;
 	if (doingdirectory && newparent) {
@@ -1153,7 +1150,7 @@ abortit:
 	if ((fcnp->cn_flags & SAVESTART) == 0)
 		panic("msdosfs_rename: lost from startdir");
 	if (!newparent)
-		VOP_UNLOCK(tdvp, 0, td);
+		VOP_UNLOCK(tdvp, 0);
 	if (relookup(fdvp, &fvp, fcnp) == 0)
 		vrele(fdvp);
 	if (fvp == NULL) {
@@ -1163,7 +1160,7 @@ abortit:
 		if (doingdirectory)
 			panic("rename: lost dir entry");
 		if (newparent)
-			VOP_UNLOCK(tdvp, 0, td);
+			VOP_UNLOCK(tdvp, 0);
 		vrele(tdvp);
 		vrele(ap->a_fvp);
 		return 0;
@@ -1183,9 +1180,9 @@ abortit:
 	if (xp != ip) {
 		if (doingdirectory)
 			panic("rename: lost dir entry");
-		VOP_UNLOCK(fvp, 0, td);
+		VOP_UNLOCK(fvp, 0);
 		if (newparent)
-			VOP_UNLOCK(fdvp, 0, td);
+			VOP_UNLOCK(fdvp, 0);
 		vrele(ap->a_fvp);
 		xp = NULL;
 	} else {
@@ -1208,8 +1205,8 @@ abortit:
 		if (error) {
 			bcopy(oldname, ip->de_Name, 11);
 			if (newparent)
-				VOP_UNLOCK(fdvp, 0, td);
-			VOP_UNLOCK(fvp, 0, td);
+				VOP_UNLOCK(fdvp, 0);
+			VOP_UNLOCK(fvp, 0);
 			goto bad;
 		}
 		ip->de_refcnt++;
@@ -1218,8 +1215,8 @@ abortit:
 		if (error) {
 			/* XXX should downgrade to ro here, fs is corrupt */
 			if (newparent)
-				VOP_UNLOCK(fdvp, 0, td);
-			VOP_UNLOCK(fvp, 0, td);
+				VOP_UNLOCK(fdvp, 0);
+			VOP_UNLOCK(fvp, 0);
 			goto bad;
 		}
 		if (!doingdirectory) {
@@ -1228,8 +1225,8 @@ abortit:
 			if (error) {
 				/* XXX should downgrade to ro here, fs is corrupt */
 				if (newparent)
-					VOP_UNLOCK(fdvp, 0, td);
-				VOP_UNLOCK(fvp, 0, td);
+					VOP_UNLOCK(fdvp, 0);
+				VOP_UNLOCK(fvp, 0);
 				goto bad;
 			}
 			if (ip->de_dirclust == MSDOSFSROOT)
@@ -1239,7 +1236,7 @@ abortit:
 		}
 		reinsert(ip);
 		if (newparent)
-			VOP_UNLOCK(fdvp, 0, td);
+			VOP_UNLOCK(fdvp, 0);
 	}
 
 	/*
@@ -1258,7 +1255,7 @@ abortit:
 		if (error) {
 			/* XXX should downgrade to ro here, fs is corrupt */
 			brelse(bp);
-			VOP_UNLOCK(fvp, 0, td);
+			VOP_UNLOCK(fvp, 0);
 			goto bad;
 		}
 		dotdotp = (struct direntry *)bp->b_data + 1;
@@ -1269,12 +1266,12 @@ abortit:
 			bdwrite(bp);
 		else if ((error = bwrite(bp)) != 0) {
 			/* XXX should downgrade to ro here, fs is corrupt */
-			VOP_UNLOCK(fvp, 0, td);
+			VOP_UNLOCK(fvp, 0);
 			goto bad;
 		}
 	}
 
-	VOP_UNLOCK(fvp, 0, td);
+	VOP_UNLOCK(fvp, 0);
 bad:
 	if (xp)
 		vput(tvp);
@@ -1473,14 +1470,14 @@ msdosfs_rmdir(ap)
 	 * the name cache.
 	 */
 	cache_purge(dvp);
-	VOP_UNLOCK(dvp, 0, td);
+	VOP_UNLOCK(dvp, 0);
 	/*
 	 * Truncate the directory that is being deleted.
 	 */
 	error = detrunc(ip, (u_long)0, IO_SYNC, cnp->cn_cred, td);
 	cache_purge(vp);
 
-	vn_lock(dvp, LK_EXCLUSIVE | LK_RETRY, td);
+	vn_lock(dvp, LK_EXCLUSIVE | LK_RETRY);
 out:
 	return (error);
 }
@@ -1565,7 +1562,7 @@ msdosfs_readdir(ap)
 
 	if (ap->a_ncookies) {
 		ncookies = uio->uio_resid / 16;
-		MALLOC(cookies, u_long *, ncookies * sizeof(u_long), M_TEMP,
+		cookies = malloc(ncookies * sizeof(u_long), M_TEMP,
 		       M_WAITOK);
 		*ap->a_cookies = cookies;
 		*ap->a_ncookies = ncookies;
@@ -1949,21 +1946,6 @@ msdosfs_pathconf(ap)
 }
 
 static int
-msdosfs_advlock(ap)
-	struct vop_advlock_args /* {
-		struct vnode *a_vp;
-		u_char a_id;
-		int a_op;
-		struct flock *a_fl;
-		int a_flags;
-	} */ *ap;
-{
-	struct denode *dep = VTODE(ap->a_vp);
-
-	return (lf_advlock(ap, &dep->de_lockf, dep->de_FileSize));
-}
-
-static int
 msdosfs_vptofh(ap)
 	struct vop_vptofh_args /* {
 		struct vnode *a_vp;
@@ -1987,7 +1969,6 @@ struct vop_vector msdosfs_vnodeops = {
 	.vop_default =		&default_vnodeops,
 
 	.vop_access =		msdosfs_access,
-	.vop_advlock =		msdosfs_advlock,
 	.vop_bmap =		msdosfs_bmap,
 	.vop_cachedlookup =	msdosfs_lookup,
 	.vop_open =		msdosfs_open,

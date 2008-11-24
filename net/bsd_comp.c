@@ -37,7 +37,7 @@
 /*
  * This version is for use with mbufs on BSD-derived systems.
  *
- * $FreeBSD: src/sys/net/bsd_comp.c,v 1.25 2007/10/24 19:03:57 rwatson Exp $
+ * $FreeBSD: src/sys/net/bsd_comp.c,v 1.26 2008/10/23 15:53:51 des Exp $
  */
 
 #include "opt_mac.h"
@@ -346,7 +346,7 @@ bsd_alloc(options, opt_len, decomp)
 
     maxmaxcode = MAXCODE(bits);
     newlen = sizeof(*db) + (hsize-1) * (sizeof(db->dict[0]));
-    MALLOC(db, struct bsd_db *, newlen, M_DEVBUF, M_NOWAIT);
+    db = malloc(newlen, M_DEVBUF, M_NOWAIT);
     if (!db)
 	return NULL;
     bzero(db, sizeof(*db) - sizeof(db->dict));
@@ -354,7 +354,7 @@ bsd_alloc(options, opt_len, decomp)
     if (!decomp) {
 	db->lens = NULL;
     } else {
-	MALLOC(db->lens, u_int16_t *, (maxmaxcode+1) * sizeof(db->lens[0]),
+	db->lens = malloc((maxmaxcode+1) * sizeof(db->lens[0]),
 	       M_DEVBUF, M_NOWAIT);
 	if (!db->lens) {
 	    free(db, M_DEVBUF);

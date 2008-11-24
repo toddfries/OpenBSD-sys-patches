@@ -27,7 +27,7 @@
 # SUCH DAMAGE.
 #
 
-# $FreeBSD: src/sys/boot/i386/cdboot/cdboot.s,v 1.17 2007/02/23 21:07:44 remko Exp $
+# $FreeBSD: src/sys/boot/i386/cdboot/cdboot.s,v 1.19 2008/03/26 07:32:08 brueffer Exp $
 
 #
 # This program is a freestanding boot program to load an a.out binary
@@ -174,7 +174,7 @@ lookup_path:	push %si			# Save file name pointer
 lookup_found:					# Found a loader file
 #
 # Load the binary into the buffer.  Due to real mode addressing limitations
-# we have to read it in in 64k chunks.
+# we have to read it in 64k chunks.
 #
 		mov DIR_SIZE(%bx),%eax		# Read file length
 		add $SECTOR_SIZE-1,%eax		# Convert length to sectors
@@ -585,7 +585,7 @@ msg_bootinfo:	.asciz	"Building the boot loader arguments\r\n"
 msg_relocate:	.asciz	"Relocating the loader and the BTX\r\n"
 msg_jump:	.asciz	"Starting the BTX loader\r\n"
 msg_badread:	.ascii  "Read Error: 0x"
-hex_error:	.ascii	"00\r\n"
+hex_error:	.asciz	"00\r\n"
 msg_novd:	.asciz  "Could not find Primary Volume Descriptor\r\n"
 msg_lookup:	.asciz  "Looking up "
 msg_lookup2:	.asciz  "... "

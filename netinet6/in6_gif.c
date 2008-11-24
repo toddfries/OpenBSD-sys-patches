@@ -1,6 +1,3 @@
-/*	$FreeBSD: src/sys/netinet6/in6_gif.c,v 1.29 2007/07/05 16:29:39 delphij Exp $	*/
-/*	$KAME: in6_gif.c,v 1.49 2001/05/14 14:02:17 itojun Exp $	*/
-
 /*-
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
  * All rights reserved.
@@ -28,7 +25,12 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
+ *
+ *	$KAME: in6_gif.c,v 1.49 2001/05/14 14:02:17 itojun Exp $
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/netinet6/in6_gif.c,v 1.33 2008/10/02 15:37:58 zec Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -42,8 +44,8 @@
 #include <sys/queue.h>
 #include <sys/syslog.h>
 #include <sys/protosw.h>
-
 #include <sys/malloc.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -85,6 +87,7 @@ in6_gif_output(struct ifnet *ifp,
     int family,			/* family of the packet to be encapsulate */
     struct mbuf *m)
 {
+	INIT_VNET_GIF(ifp->if_vnet);
 	struct gif_softc *sc = ifp->if_softc;
 	struct sockaddr_in6 *dst = (struct sockaddr_in6 *)&sc->gif_ro6.ro_dst;
 	struct sockaddr_in6 *sin6_src = (struct sockaddr_in6 *)sc->gif_psrc;
@@ -173,7 +176,7 @@ in6_gif_output(struct ifnet *ifp,
 	ip6->ip6_vfc	|= IPV6_VERSION;
 	ip6->ip6_plen	= htons((u_short)m->m_pkthdr.len);
 	ip6->ip6_nxt	= proto;
-	ip6->ip6_hlim	= ip6_gif_hlim;
+	ip6->ip6_hlim	= V_ip6_gif_hlim;
 	ip6->ip6_src	= sin6_src->sin6_addr;
 	/* bidirectional configured tunnel mode */
 	if (!IN6_IS_ADDR_UNSPECIFIED(&sin6_dst->sin6_addr))
@@ -244,6 +247,7 @@ in6_gif_output(struct ifnet *ifp,
 int
 in6_gif_input(struct mbuf **mp, int *offp, int proto)
 {
+	INIT_VNET_INET6(curvnet);
 	struct mbuf *m = *mp;
 	struct ifnet *gifp = NULL;
 	struct gif_softc *sc;
@@ -256,14 +260,14 @@ in6_gif_input(struct mbuf **mp, int *offp, int proto)
 	sc = (struct gif_softc *)encap_getarg(m);
 	if (sc == NULL) {
 		m_freem(m);
-		ip6stat.ip6s_nogif++;
+		V_ip6stat.ip6s_nogif++;
 		return IPPROTO_DONE;
 	}
 
 	gifp = GIF2IFP(sc);
 	if (gifp == NULL || (gifp->if_flags & IFF_UP) == 0) {
 		m_freem(m);
-		ip6stat.ip6s_nogif++;
+		V_ip6stat.ip6s_nogif++;
 		return IPPROTO_DONE;
 	}
 
@@ -318,7 +322,7 @@ in6_gif_input(struct mbuf **mp, int *offp, int proto)
 		break;
 
 	default:
-		ip6stat.ip6s_nogif++;
+		V_ip6stat.ip6s_nogif++;
 		m_freem(m);
 		return IPPROTO_DONE;
 	}

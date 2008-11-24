@@ -29,7 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/nwfs/nwfs_io.c,v 1.46 2007/06/01 14:33:10 kib Exp $
+ * $FreeBSD: src/sys/fs/nwfs/nwfs_io.c,v 1.48 2008/10/10 21:23:50 attilio Exp $
  *
  */
 #include <sys/param.h>
@@ -178,11 +178,11 @@ nwfs_readvnode(struct vnode *vp, struct uio *uiop, struct ucred *cred) {
 	biosize = NWFSTOCONN(nmp)->buffer_size;
 	if (np->n_flag & NMODIFIED) {
 		nwfs_attr_cacheremove(vp);
-		error = VOP_GETATTR(vp, &vattr, cred, td);
+		error = VOP_GETATTR(vp, &vattr, cred);
 		if (error) return (error);
 		np->n_mtime = vattr.va_mtime.tv_sec;
 	} else {
-		error = VOP_GETATTR(vp, &vattr, cred, td);
+		error = VOP_GETATTR(vp, &vattr, cred);
 		if (error) return (error);
 		if (np->n_mtime != vattr.va_mtime.tv_sec) {
 			error = nwfs_vinvalbuf(vp, td);
@@ -228,7 +228,7 @@ nwfs_writevnode(vp, uiop, cred, ioflag)
 		 * the correct size. */
 #ifdef notyet
 			nwfs_attr_cacheremove(vp);
-			error = VOP_GETATTR(vp, &vattr, cred, td);
+			error = VOP_GETATTR(vp, &vattr, cred);
 			if (error) return (error);
 #endif
 			uiop->uio_offset = np->n_size;
@@ -618,7 +618,7 @@ nwfs_vinvalbuf(vp, td)
 		VM_OBJECT_UNLOCK(vp->v_bufobj.bo_object);
 	}
 
-	error = vinvalbuf(vp, V_SAVE, td, PCATCH, 0);
+	error = vinvalbuf(vp, V_SAVE, PCATCH, 0);
 	while (error) {
 		if (error == ERESTART || error == EINTR) {
 			np->n_flag &= ~NFLUSHINPROG;
@@ -628,7 +628,7 @@ nwfs_vinvalbuf(vp, td)
 			}
 			return EINTR;
 		}
-		error = vinvalbuf(vp, V_SAVE, td, PCATCH, 0);
+		error = vinvalbuf(vp, V_SAVE, PCATCH, 0);
 	}
 	np->n_flag &= ~(NMODIFIED | NFLUSHINPROG);
 	if (np->n_flag & NFLUSHWANT) {

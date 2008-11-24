@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/common/Makefile.inc,v 1.23 2006/11/02 00:26:44 marcel Exp $
+# $FreeBSD: src/sys/boot/common/Makefile.inc,v 1.24 2008/10/14 10:11:14 raj Exp $
 
 SRCS+=	boot.c commands.c console.c devopen.c interp.c 
 SRCS+=	interp_backslash.c interp_parse.c ls.c misc.c 
@@ -9,7 +9,7 @@ SRCS+=	load_elf32.c load_elf32_obj.c reloc_elf32.c
 SRCS+=	load_elf64.c load_elf64_obj.c reloc_elf64.c
 .elif ${MACHINE} == "pc98"
 SRCS+=	load_elf32.c load_elf32_obj.c reloc_elf32.c
-.elif ${MACHINE_ARCH} == "powerpc"
+.elif ${MACHINE_ARCH} == "powerpc" || ${MACHINE_ARCH} == "arm"
 SRCS+=	load_elf32.c reloc_elf32.c
 .elif ${MACHINE_ARCH} == "sparc64" || ${MACHINE_ARCH} == "ia64"
 SRCS+=	load_elf64.c reloc_elf64.c

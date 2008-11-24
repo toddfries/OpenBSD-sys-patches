@@ -1,6 +1,6 @@
 /*	$NetBSD: tmpfs_vnops.c,v 1.39 2007/07/23 15:41:01 jmmv Exp $	*/
 
-/*
+/*-
  * Copyright (c) 2005, 2006 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -41,7 +34,7 @@
  * tmpfs vnode interface.
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/tmpfs/tmpfs_vnops.c,v 1.11 2007/08/16 11:00:07 delphij Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/tmpfs/tmpfs_vnops.c,v 1.25 2008/10/28 13:44:11 trasz Exp $");
 
 #include <sys/param.h>
 #include <sys/fcntl.h>
@@ -97,21 +90,18 @@ tmpfs_lookup(struct vop_cachedlookup_args *v)
 	if (cnp->cn_flags & ISDOTDOT) {
 		int ltype = 0;
 
-		ltype = VOP_ISLOCKED(dvp, td);
+		ltype = VOP_ISLOCKED(dvp);
 		vhold(dvp);
-		VOP_UNLOCK(dvp, 0, td);
+		VOP_UNLOCK(dvp, 0);
 		/* Allocate a new vnode on the matching entry. */
 		error = tmpfs_alloc_vp(dvp->v_mount, dnode->tn_dir.tn_parent,
 		    cnp->cn_lkflags, vpp, td);
 
-		vn_lock(dvp, ltype | LK_RETRY, td);
+		vn_lock(dvp, ltype | LK_RETRY);
 		vdrop(dvp);
-
-		dnode->tn_dir.tn_parent->tn_lookup_dirent = NULL;
 	} else if (cnp->cn_namelen == 1 && cnp->cn_nameptr[0] == '.') {
 		VREF(dvp);
 		*vpp = dvp;
-		dnode->tn_lookup_dirent = NULL;
 		error = 0;
 	} else {
 		de = tmpfs_dir_lookup(dnode, cnp);
@@ -178,7 +168,6 @@ tmpfs_lookup(struct vop_cachedlookup_args *v)
 					*vpp = NULL;
 					goto out;
 				}
-				tnode->tn_lookup_dirent = de;
 				cnp->cn_flags |= SAVENAME;
 			} else {
 				error = tmpfs_alloc_vp(dvp->v_mount, tnode,
@@ -196,7 +185,7 @@ tmpfs_lookup(struct vop_cachedlookup_args *v)
 out:
 	/* If there were no errors, *vpp cannot be null and it must be
 	 * locked. */
-	MPASS(IFF(error == 0, *vpp != NULLVP && VOP_ISLOCKED(*vpp, td)));
+	MPASS(IFF(error == 0, *vpp != NULLVP && VOP_ISLOCKED(*vpp)));
 
 	return error;
 }
@@ -243,7 +232,7 @@ tmpfs_open(struct vop_open_args *v)
 	int error;
 	struct tmpfs_node *node;
 
-	MPASS(VOP_ISLOCKED(vp, v->a_td));
+	MPASS(VOP_ISLOCKED(vp));
 
 	node = VP_TO_TMPFS_NODE(vp);
 
@@ -261,7 +250,7 @@ tmpfs_open(struct vop_open_args *v)
 		vnode_create_vobject(vp, node->tn_size, v->a_td);
 	}
 
-	MPASS(VOP_ISLOCKED(vp, v->a_td));
+	MPASS(VOP_ISLOCKED(vp));
 	return error;
 }
 
@@ -274,7 +263,7 @@ tmpfs_close(struct vop_close_args *v)
 
 	struct tmpfs_node *node;
 
-	MPASS(VOP_ISLOCKED(vp, v->a_td));
+	MPASS(VOP_ISLOCKED(vp));
 
 	node = VP_TO_TMPFS_NODE(vp);
 
@@ -293,13 +282,13 @@ int
 tmpfs_access(struct vop_access_args *v)
 {
 	struct vnode *vp = v->a_vp;
-	int mode = v->a_mode;
+	accmode_t accmode = v->a_accmode;
 	struct ucred *cred = v->a_cred;
 
 	int error;
 	struct tmpfs_node *node;
 
-	MPASS(VOP_ISLOCKED(vp, v->a_td));
+	MPASS(VOP_ISLOCKED(vp));
 
 	node = VP_TO_TMPFS_NODE(vp);
 
@@ -309,7 +298,7 @@ tmpfs_access(struct vop_access_args *v)
 	case VLNK:
 		/* FALLTHROUGH */
 	case VREG:
-		if (mode & VWRITE && vp->v_mount->mnt_flag & MNT_RDONLY) {
+		if (accmode & VWRITE && vp->v_mount->mnt_flag & MNT_RDONLY) {
 			error = EROFS;
 			goto out;
 		}
@@ -329,16 +318,16 @@ tmpfs_access(struct vop_access_args *v)
 		goto out;
 	}
 
-	if (mode & VWRITE && node->tn_flags & IMMUTABLE) {
+	if (accmode & VWRITE && node->tn_flags & IMMUTABLE) {
 		error = EPERM;
 		goto out;
 	}
 
 	error = vaccess(vp->v_type, node->tn_mode, node->tn_uid,
-	    node->tn_gid, mode, cred, NULL);
+	    node->tn_gid, accmode, cred, NULL);
 
 out:
-	MPASS(VOP_ISLOCKED(vp, v->a_td));
+	MPASS(VOP_ISLOCKED(vp));
 
 	return error;
 }
@@ -354,8 +343,6 @@ tmpfs_getattr(struct vop_getattr_args *v)
 	struct tmpfs_node *node;
 
 	node = VP_TO_TMPFS_NODE(vp);
-
-	VATTR_NULL(vap);
 
 	tmpfs_update(vp);
 
@@ -375,11 +362,9 @@ tmpfs_getattr(struct vop_getattr_args *v)
 	vap->va_gen = node->tn_gen;
 	vap->va_flags = node->tn_flags;
 	vap->va_rdev = (vp->v_type == VBLK || vp->v_type == VCHR) ?
-		node->tn_rdev : VNOVAL;
+		node->tn_rdev : NODEV;
 	vap->va_bytes = round_page(node->tn_size);
-	vap->va_filerev = VNOVAL;
-	vap->va_vaflags = 0;
-	vap->va_spare = VNOVAL; /* XXX */
+	vap->va_filerev = 0;
 
 	return 0;
 }
@@ -394,11 +379,11 @@ tmpfs_setattr(struct vop_setattr_args *v)
 	struct vnode *vp = v->a_vp;
 	struct vattr *vap = v->a_vap;
 	struct ucred *cred = v->a_cred;
-	struct thread *l = v->a_td;
+	struct thread *td = curthread;
 
 	int error;
 
-	MPASS(VOP_ISLOCKED(vp, l));
+	MPASS(VOP_ISLOCKED(vp));
 
 	error = 0;
 
@@ -414,17 +399,16 @@ tmpfs_setattr(struct vop_setattr_args *v)
 		error = EINVAL;
 
 	if (error == 0 && (vap->va_flags != VNOVAL))
-		error = tmpfs_chflags(vp, vap->va_flags, cred, l);
+		error = tmpfs_chflags(vp, vap->va_flags, cred, td);
 
 	if (error == 0 && (vap->va_size != VNOVAL))
-		error = tmpfs_chsize(vp, vap->va_size, cred, l);
+		error = tmpfs_chsize(vp, vap->va_size, cred, td);
 
 	if (error == 0 && (vap->va_uid != VNOVAL || vap->va_gid != VNOVAL))
-		error = tmpfs_chown(vp, vap->va_uid, vap->va_gid, cred,
-		    l);
+		error = tmpfs_chown(vp, vap->va_uid, vap->va_gid, cred, td);
 
 	if (error == 0 && (vap->va_mode != (mode_t)VNOVAL))
-		error = tmpfs_chmod(vp, vap->va_mode, cred, l);
+		error = tmpfs_chmod(vp, vap->va_mode, cred, td);
 
 	if (error == 0 && ((vap->va_atime.tv_sec != VNOVAL &&
 	    vap->va_atime.tv_nsec != VNOVAL) ||
@@ -433,14 +417,14 @@ tmpfs_setattr(struct vop_setattr_args *v)
 	    (vap->va_birthtime.tv_sec != VNOVAL &&
 	    vap->va_birthtime.tv_nsec != VNOVAL)))
 		error = tmpfs_chtimes(vp, &vap->va_atime, &vap->va_mtime,
-			&vap->va_birthtime, vap->va_vaflags, cred, l);
+			&vap->va_birthtime, vap->va_vaflags, cred, td);
 
 	/* Update the node times.  We give preference to the error codes
 	 * generated by this function rather than the ones that may arise
 	 * from tmpfs_update. */
 	tmpfs_update(vp);
 
-	MPASS(VOP_ISLOCKED(vp, l));
+	MPASS(VOP_ISLOCKED(vp));
 
 	return error;
 }
@@ -533,7 +517,7 @@ tmpfs_read(struct vop_read_args *v)
 	size_t len;
 	int resid;
 
-	int error;
+	int error = 0;
 
 	node = VP_TO_TMPFS_NODE(vp);
 
@@ -580,6 +564,8 @@ tmpfs_mappedwrite(vm_object_t vobj, vm_object_t tobj, size_t len, struct uio *ui
 	caddr_t		va;
 	int		error;
 
+	error = 0;
+	
 	addr = uio->uio_offset;
 	idx = OFF_TO_IDX(addr);
 	offset = addr & PAGE_MASK;
@@ -754,7 +740,7 @@ tmpfs_fsync(struct vop_fsync_args *v)
 {
 	struct vnode *vp = v->a_vp;
 
-	MPASS(VOP_ISLOCKED(vp, v->a_td));
+	MPASS(VOP_ISLOCKED(vp));
 
 	tmpfs_update(vp);
 
@@ -775,8 +761,8 @@ tmpfs_remove(struct vop_remove_args *v)
 	struct tmpfs_node *dnode;
 	struct tmpfs_node *node;
 
-	MPASS(VOP_ISLOCKED(dvp, v->a_cnp->cn_thread));
-	MPASS(VOP_ISLOCKED(vp, v->a_cnp->cn_thread));
+	MPASS(VOP_ISLOCKED(dvp));
+	MPASS(VOP_ISLOCKED(vp));
 
 	if (vp->v_type == VDIR) {
 		error = EISDIR;
@@ -786,7 +772,7 @@ tmpfs_remove(struct vop_remove_args *v)
 	dnode = VP_TO_TMPFS_DIR(dvp);
 	node = VP_TO_TMPFS_NODE(vp);
 	tmp = VFS_TO_TMPFS(vp->v_mount);
-	de = node->tn_lookup_dirent;
+	de = tmpfs_dir_search(dnode, node);
 	MPASS(de != NULL);
 
 	/* Files marked as immutable or append-only cannot be deleted. */
@@ -828,7 +814,7 @@ tmpfs_link(struct vop_link_args *v)
 	struct tmpfs_dirent *de;
 	struct tmpfs_node *node;
 
-	MPASS(VOP_ISLOCKED(dvp, cnp->cn_thread));
+	MPASS(VOP_ISLOCKED(dvp));
 	MPASS(cnp->cn_flags & HASBUF);
 	MPASS(dvp != vp); /* XXX When can this be false? */
 
@@ -901,15 +887,12 @@ tmpfs_rename(struct vop_rename_args *v)
 	struct tmpfs_node *tnode;
 	struct tmpfs_node *tdnode;
 
-	MPASS(VOP_ISLOCKED(tdvp, tcnp->cn_thread));
-	MPASS(IMPLIES(tvp != NULL, VOP_ISLOCKED(tvp, tcnp->cn_thread)));
+	MPASS(VOP_ISLOCKED(tdvp));
+	MPASS(IMPLIES(tvp != NULL, VOP_ISLOCKED(tvp)));
 	MPASS(fcnp->cn_flags & HASBUF);
 	MPASS(tcnp->cn_flags & HASBUF);
 
-	fdnode = VP_TO_TMPFS_DIR(fdvp);
-	fnode = VP_TO_TMPFS_NODE(fvp);
   	tnode = (tvp == NULL) ? NULL : VP_TO_TMPFS_NODE(tvp);
-	de = fnode->tn_lookup_dirent;
 
 	/* Disallow cross-device renames.
 	 * XXX Why isn't this done by the caller? */
@@ -927,11 +910,22 @@ tmpfs_rename(struct vop_rename_args *v)
 		goto out;
 	}
 
+	/* If we need to move the directory between entries, lock the
+	 * source so that we can safely operate on it. */
+	if (tdvp != fdvp) {
+		error = vn_lock(fdvp, LK_EXCLUSIVE | LK_RETRY);
+		if (error != 0)
+			goto out;
+	}
+	fdnode = VP_TO_TMPFS_DIR(fdvp);
+	fnode = VP_TO_TMPFS_NODE(fvp);
+	de = tmpfs_dir_search(fdnode, fnode);
+
 	/* Avoid manipulating '.' and '..' entries. */
 	if (de == NULL) {
 		MPASS(fvp->v_type == VDIR);
 		error = EINVAL;
-		goto out;
+		goto out_locked;
 	}
 	MPASS(de->td_node == fnode);
 
@@ -946,32 +940,24 @@ tmpfs_rename(struct vop_rename_args *v)
 		if ((tnode->tn_flags & (NOUNLINK | IMMUTABLE | APPEND)) ||
 		    (tdnode->tn_flags & (APPEND | IMMUTABLE))) {
 			error = EPERM;
-			goto out;
+			goto out_locked;
 		}
 
 		if (fnode->tn_type == VDIR && tnode->tn_type == VDIR) {
 			if (tnode->tn_size > 0) {
 				error = ENOTEMPTY;
-				goto out;
+				goto out_locked;
 			}
 		} else if (fnode->tn_type == VDIR && tnode->tn_type != VDIR) {
 			error = ENOTDIR;
-			goto out;
+			goto out_locked;
 		} else if (fnode->tn_type != VDIR && tnode->tn_type == VDIR) {
 			error = EISDIR;
-			goto out;
+			goto out_locked;
 		} else {
 			MPASS(fnode->tn_type != VDIR &&
 				tnode->tn_type != VDIR);
 		}
-	}
-
-	/* If we need to move the directory between entries, lock the
-	 * source so that we can safely operate on it. */
-	if (fdnode != tdnode) {
-		error = vn_lock(fdvp, LK_EXCLUSIVE | LK_RETRY, tcnp->cn_thread);
-		if (error != 0)
-			goto out;
 	}
 
 	if ((fnode->tn_flags & (NOUNLINK | IMMUTABLE | APPEND))
@@ -983,7 +969,7 @@ tmpfs_rename(struct vop_rename_args *v)
 	/* Ensure that we have enough memory to hold the new name, if it
 	 * has to be changed. */
 	if (fcnp->cn_namelen != tcnp->cn_namelen ||
-	    memcmp(fcnp->cn_nameptr, tcnp->cn_nameptr, fcnp->cn_namelen) != 0) {
+	    bcmp(fcnp->cn_nameptr, tcnp->cn_nameptr, fcnp->cn_namelen) != 0) {
 		newname = malloc(tcnp->cn_namelen, M_TMPFSNAME, M_WAITOK);
 	} else
 		newname = NULL;
@@ -1045,7 +1031,7 @@ tmpfs_rename(struct vop_rename_args *v)
 	 * from the target directory. */
 	if (tvp != NULL) {
 		/* Remove the old entry from the target directory. */
-		de = tnode->tn_lookup_dirent;
+		de = tmpfs_dir_search(tdnode, tnode);
 		tmpfs_dir_detach(tdvp, de);
 
 		/* Free the directory entry we just deleted.  Note that the
@@ -1058,7 +1044,7 @@ tmpfs_rename(struct vop_rename_args *v)
 
 out_locked:
 	if (fdnode != tdnode)
-		VOP_UNLOCK(fdvp, 0, tcnp->cn_thread);
+		VOP_UNLOCK(fdvp, 0);
 
 out:
 	/* Release target nodes. */
@@ -1107,8 +1093,8 @@ tmpfs_rmdir(struct vop_rmdir_args *v)
 	struct tmpfs_node *dnode;
 	struct tmpfs_node *node;
 
-	MPASS(VOP_ISLOCKED(dvp, v->a_cnp->cn_thread));
-	MPASS(VOP_ISLOCKED(vp, v->a_cnp->cn_thread));
+	MPASS(VOP_ISLOCKED(dvp));
+	MPASS(VOP_ISLOCKED(vp));
 
 	tmp = VFS_TO_TMPFS(dvp->v_mount);
 	dnode = VP_TO_TMPFS_DIR(dvp);
@@ -1133,7 +1119,7 @@ tmpfs_rmdir(struct vop_rmdir_args *v)
 
 	/* Get the directory entry associated with node (vp).  This was
 	 * filled by tmpfs_lookup while looking up the entry. */
-	de = node->tn_lookup_dirent;
+	de = tmpfs_dir_search(dnode, node);
 	MPASS(TMPFS_DIRENT_MATCHES(de,
 	    v->a_cnp->cn_nameptr,
 	    v->a_cnp->cn_namelen));
@@ -1316,7 +1302,7 @@ tmpfs_inactive(struct vop_inactive_args *v)
 
 	struct tmpfs_node *node;
 
-	MPASS(VOP_ISLOCKED(vp, l));
+	MPASS(VOP_ISLOCKED(vp));
 
 	node = VP_TO_TMPFS_NODE(vp);
 
@@ -1431,22 +1417,6 @@ tmpfs_pathconf(struct vop_pathconf_args *v)
 	return error;
 }
 
-/* --------------------------------------------------------------------- */
-
-static int
-tmpfs_advlock(struct vop_advlock_args *v)
-{
-	struct vnode *vp = v->a_vp;
-
-	struct tmpfs_node *node;
-
-	node = VP_TO_TMPFS_NODE(vp);
-
-	return lf_advlock(v, &node->tn_lockf, node->tn_size);
-}
-
-/* --------------------------------------------------------------------- */
-
 static int
 tmpfs_vptofh(struct vop_vptofh_args *ap)
 {
@@ -1494,7 +1464,6 @@ struct vop_vector tmpfs_vnodeop_entries = {
 	.vop_reclaim =			tmpfs_reclaim,
 	.vop_print =			tmpfs_print,
 	.vop_pathconf =			tmpfs_pathconf,
-	.vop_advlock =			tmpfs_advlock,
 	.vop_vptofh =			tmpfs_vptofh,
 	.vop_bmap =			VOP_EOPNOTSUPP,
 };

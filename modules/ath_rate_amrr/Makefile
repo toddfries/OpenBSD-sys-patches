@@ -33,14 +33,14 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 # THE POSSIBILITY OF SUCH DAMAGES.
 #
-# $FreeBSD: src/sys/modules/ath_rate_amrr/Makefile,v 1.5 2007/06/29 19:52:31 sam Exp $
+# $FreeBSD: src/sys/modules/ath_rate_amrr/Makefile,v 1.8 2008/09/01 23:59:00 imp Exp $
 #
 
 .PATH: ${.CURDIR}/../../dev/ath/ath_rate/amrr
 
 KMOD=	ath_rate
 SRCS=	amrr.c
-SRCS+=	device_if.h bus_if.h pci_if.h opt_inet.h opt_ah.h
+SRCS+=	device_if.h bus_if.h pci_if.h opt_inet.h opt_ah.h opt_wlan.h
 
 HAL=	${.CURDIR}/../../contrib/dev/ath
 CFLAGS+=  -I. -I${.CURDIR}/../../dev/ath -I${HAL}
@@ -58,5 +58,11 @@ ATH_MODULE_ARCH=${MACHINE_ARCH}
 
 opt_ah.h: ${HAL}/public/${ATH_MODULE_ARCH}-elf.opt_ah.h
 	cp ${HAL}/public/${ATH_MODULE_ARCH}-elf.opt_ah.h ${.TARGET}
+
+.if !defined(KERNBUILDDIR)
+opt_wlan.h:
+#	echo "#define IEEE80211_DEBUG 1" > ${.TARGET}
+	echo > ${.TARGET}
+.endif
 
 .include <bsd.kmod.mk>

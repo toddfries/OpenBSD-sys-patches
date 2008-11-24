@@ -27,7 +27,7 @@
 #include "opt_compat.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_module.c,v 1.52 2007/03/04 22:36:46 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_module.c,v 1.55 2008/03/16 10:58:05 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -90,7 +90,7 @@ module_init(void *arg)
 	    SHUTDOWN_PRI_DEFAULT);
 }
 
-SYSINIT(module, SI_SUB_KLD, SI_ORDER_FIRST, module_init, 0)
+SYSINIT(module, SI_SUB_KLD, SI_ORDER_FIRST, module_init, 0);
 
 static void
 module_shutdown(void *arg1, int arg2)
@@ -414,8 +414,11 @@ modfind(struct thread *td, struct modfind_args *uap)
 	return (error);
 }
 
+MODULE_VERSION(kernel, __FreeBSD_version);
+
 #ifdef COMPAT_IA32
 #include <sys/mount.h>
+#include <sys/socket.h>
 #include <compat/freebsd32/freebsd32_util.h>
 #include <compat/freebsd32/freebsd32.h>
 #include <compat/freebsd32/freebsd32_proto.h>

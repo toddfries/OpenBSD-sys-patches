@@ -57,7 +57,7 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  *
- * $FreeBSD: src/sys/vm/vm_object.h,v 1.114 2007/09/25 06:25:06 alc Exp $
+ * $FreeBSD: src/sys/vm/vm_object.h,v 1.116 2008/05/20 19:05:43 ups Exp $
  */
 
 /*
@@ -100,6 +100,7 @@ struct vm_object {
 	struct vm_object *backing_object; /* object that I'm a shadow of */
 	vm_ooffset_t backing_object_offset;/* Offset in backing object */
 	TAILQ_ENTRY(vm_object) pager_object_list; /* list of all objects of this pager type */
+	LIST_HEAD(, vm_reserv) rvq;	/* list of reservations */
 	vm_page_t cache;		/* root of the cache page splay tree */
 	void *handle;
 	union {
@@ -143,6 +144,7 @@ struct vm_object {
 #define OBJ_PIPWNT	0x0040		/* paging in progress wanted */
 #define OBJ_MIGHTBEDIRTY 0x0100		/* object might be dirty */
 #define OBJ_CLEANING	0x0200
+#define	OBJ_COLORED	0x1000		/* pg_color is defined */
 #define	OBJ_ONEMAPPING	0x2000		/* One USE (a single, non-forked) mapping flag */
 #define	OBJ_DISCONNECTWNT 0x4000	/* disconnect from vnode wanted */
 #define	OBJ_NEEDGIANT	0x8000		/* object requires Giant */
@@ -200,6 +202,7 @@ void _vm_object_allocate (objtype_t, vm_pindex_t, vm_object_t);
 boolean_t vm_object_coalesce(vm_object_t, vm_ooffset_t, vm_size_t, vm_size_t);
 void vm_object_collapse (vm_object_t);
 void vm_object_deallocate (vm_object_t);
+void vm_object_destroy (vm_object_t);
 void vm_object_terminate (vm_object_t);
 void vm_object_set_writeable_dirty (vm_object_t);
 void vm_object_init (void);

@@ -31,7 +31,7 @@
  *	@(#)kernfs_vfsops.c	8.10 (Berkeley) 5/14/95
  * From: FreeBSD: src/sys/miscfs/kernfs/kernfs_vfsops.c 1.36
  *
- * $FreeBSD: src/sys/fs/devfs/devfs_vfsops.c,v 1.52 2006/09/26 04:12:45 tegge Exp $
+ * $FreeBSD: src/sys/fs/devfs/devfs_vfsops.c,v 1.53 2008/01/13 14:44:03 attilio Exp $
  */
 
 #include <sys/param.h>
@@ -100,7 +100,7 @@ devfs_mount(struct mount *mp, struct thread *td)
 		return (error);
 	}
 
-	VOP_UNLOCK(rvp, 0, td);
+	VOP_UNLOCK(rvp, 0);
 
 	vfs_mountedfrom(mp, "devfs");
 

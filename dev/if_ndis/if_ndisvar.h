@@ -29,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/if_ndis/if_ndisvar.h,v 1.30 2008/04/20 20:35:36 sam Exp $
+ * $FreeBSD: src/sys/dev/if_ndis/if_ndisvar.h,v 1.34 2008/10/04 04:15:39 weongyo Exp $
  */
 
 #define NDIS_DEFAULT_NODENAME	"FreeBSD NDIS node"
@@ -87,7 +87,7 @@ TAILQ_HEAD(nch, ndis_cfglist);
 
 #define NDIS_TXPKTS 64
 #define NDIS_INC(x)		\
-	(x)->ndis_txidx = ((x)->ndis_txidx + 1) % NDIS_TXPKTS
+	(x)->ndis_txidx = ((x)->ndis_txidx + 1) % (x)->ndis_maxpkts
 
 
 #define NDIS_EVENTS 4
@@ -129,7 +129,7 @@ struct ndis_softc {
 	struct resource		*ndis_res_cm;	/* common mem (pccard) */
 	struct resource_list	ndis_rl;
 	int			ndis_rescnt;
-	kspin_lock		ndis_spinlock;
+	struct mtx		ndis_mtx;
 	uint8_t			ndis_irql;
 	device_t		ndis_dev;
 	int			ndis_unit;
@@ -177,11 +177,13 @@ struct ndis_softc {
 
 	struct taskqueue	*ndis_tq;		/* private task queue */
 	struct task		ndis_scantask;
+	struct task		ndis_authtask;
+	struct task		ndis_assoctask;
 	int			(*ndis_newstate)(struct ieee80211com *,
 				    enum ieee80211_state, int);
+	int			ndis_tx_timer;
+	int			ndis_hang_timer;
 };
 
-#define NDIS_LOCK(_sc)		KeAcquireSpinLock(&(_sc)->ndis_spinlock, \
-				    &(_sc)->ndis_irql);
-#define NDIS_UNLOCK(_sc)	KeReleaseSpinLock(&(_sc)->ndis_spinlock, \
-				    (_sc)->ndis_irql);
+#define NDIS_LOCK(_sc)		mtx_lock(&(_sc)->ndis_mtx)
+#define NDIS_UNLOCK(_sc)	mtx_unlock(&(_sc)->ndis_mtx)

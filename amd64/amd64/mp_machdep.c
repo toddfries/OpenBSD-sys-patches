@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/mp_machdep.c,v 1.287 2007/08/02 21:17:58 peter Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/mp_machdep.c,v 1.294 2008/09/28 18:34:14 marius Exp $");
 
 #include "opt_cpu.h"
 #include "opt_kstack_pages.h"
@@ -79,15 +79,8 @@ int	mcount_lock;
 
 int	mp_naps;		/* # of Applications processors */
 int	boot_cpu_id = -1;	/* designated BSP */
-extern	int nkpt;
 
 extern  struct pcpu __pcpu[];
-
-/*
- * CPU topology map datastructures for HTT.
- */
-static struct cpu_group mp_groups[MAXCPU];
-static struct cpu_top mp_top;
 
 /* AP uses this during bootstrap.  Do not staticize.  */
 char *bootSTK;
@@ -104,6 +97,8 @@ extern pt_entry_t *KPTphys;
 
 /* SMP page table page */
 extern pt_entry_t *SMPpt;
+
+extern int  _udatasel;
 
 struct pcb stoppcbs[MAXCPU];
 
@@ -182,40 +177,38 @@ mem_range_AP_init(void)
 		mem_range_softc.mr_op->initAP(&mem_range_softc);
 }
 
-void
-mp_topology(void)
+struct cpu_group *
+cpu_topo(void)
 {
-	struct cpu_group *group;
-	int apic_id;
-	int groups;
-	int cpu;
-
-	/* Build the smp_topology map. */
-	/* Nothing to do if there is no HTT support. */
-	if (hyperthreading_cpus <= 1)
-		return;
-	group = &mp_groups[0];
-	groups = 1;
-	for (cpu = 0, apic_id = 0; apic_id <= MAX_APIC_ID; apic_id++) {
-		if (!cpu_info[apic_id].cpu_present)
-			continue;
-		/*
-		 * If the current group has members and we're not a logical
-		 * cpu, create a new group.
-		 */
-		if (group->cg_count != 0 &&
-		    (apic_id % hyperthreading_cpus) == 0) {
-			group++;
-			groups++;
-		}
-		group->cg_count++;
-		group->cg_mask |= 1 << cpu;
-		cpu++;
+	if (cpu_cores == 0)
+		cpu_cores = 1;
+	if (cpu_logical == 0)
+		cpu_logical = 1;
+	if (mp_ncpus % (cpu_cores * cpu_logical) != 0) {
+		printf("WARNING: Non-uniform processors.\n");
+		printf("WARNING: Using suboptimal topology.\n");
+		return (smp_topo_none());
 	}
-
-	mp_top.ct_count = groups;
-	mp_top.ct_group = mp_groups;
-	smp_topology = &mp_top;
+	/*
+	 * No multi-core or hyper-threaded.
+	 */
+	if (cpu_logical * cpu_cores == 1)
+		return (smp_topo_none());
+	/*
+	 * Only HTT no multi-core.
+	 */
+	if (cpu_logical > 1 && cpu_cores == 1)
+		return (smp_topo_1level(CG_SHARE_L1, cpu_logical, CG_FLAG_HTT));
+	/*
+	 * Only multi-core no HTT.
+	 */
+	if (cpu_cores > 1 && cpu_logical == 1)
+		return (smp_topo_1level(CG_SHARE_NONE, cpu_cores, 0));
+	/*
+	 * Both HTT and multi-core.
+	 */
+	return (smp_topo_2level(CG_SHARE_NONE, cpu_cores,
+	    CG_SHARE_L1, cpu_logical, CG_FLAG_HTT));
 }
 
 /*
@@ -409,9 +402,6 @@ cpu_mp_start(void)
 	}
 
 	set_interrupt_apic_ids();
-
-	/* Last, setup the cpu topology now that we have probed CPUs */
-	mp_topology();
 }
 
 
@@ -446,7 +436,8 @@ init_secondary(void)
 {
 	struct pcpu *pc;
 	u_int64_t msr, cr0;
-	int cpu, gsel_tss;
+	int cpu, gsel_tss, x;
+	struct region_descriptor ap_gdt;
 
 	/* Set by the startup code for us to use */
 	cpu = bootAP;
@@ -457,11 +448,17 @@ init_secondary(void)
 	common_tss[cpu].tss_iobase = sizeof(struct amd64tss);
 	common_tss[cpu].tss_ist1 = (long)&doublefault_stack[PAGE_SIZE];
 
+	/* Prepare private GDT */
 	gdt_segs[GPROC0_SEL].ssd_base = (long) &common_tss[cpu];
 	ssdtosyssd(&gdt_segs[GPROC0_SEL],
-	   (struct system_segment_descriptor *)&gdt[GPROC0_SEL]);
-
-	lgdt(&r_gdt);			/* does magic intra-segment return */
+	   (struct system_segment_descriptor *)&gdt[NGDT * cpu + GPROC0_SEL]);
+	for (x = 0; x < NGDT; x++) {
+		if (x != GPROC0_SEL && x != (GPROC0_SEL + 1))
+			ssdtosd(&gdt_segs[x], &gdt[NGDT * cpu + x]);
+	}
+	ap_gdt.rd_limit = NGDT * sizeof(gdt[0]) - 1;
+	ap_gdt.rd_base =  (long) &gdt[NGDT * cpu];
+	lgdt(&ap_gdt);			/* does magic intra-segment return */
 
 	/* Get per-cpu data */
 	pc = &__pcpu[cpu];
@@ -473,6 +470,7 @@ init_secondary(void)
 	pc->pc_curthread = 0;
 	pc->pc_tssp = &common_tss[cpu];
 	pc->pc_rsp0 = 0;
+	pc->pc_gs32p = &gdt[NGDT * cpu + GUGS32_SEL];
 
 	wrmsr(MSR_FSBASE, 0);		/* User value */
 	wrmsr(MSR_GSBASE, (u_int64_t)pc);
@@ -576,7 +574,9 @@ init_secondary(void)
 	 */
 
 	load_cr4(rcr4() | CR4_PGE);
-
+	load_ds(_udatasel);
+	load_es(_udatasel);
+	load_fs(_udatasel);
 	mtx_unlock_spin(&ap_boot_mtx);
 
 	/* wait until all the AP's are up */
@@ -961,15 +961,8 @@ ipi_bitmap_handler(struct trapframe frame)
 
 	ipi_bitmap = atomic_readandclear_int(&cpu_ipi_pending[cpu]);
 
-	if (ipi_bitmap & (1 << IPI_PREEMPT)) {
-		struct thread *running_thread = curthread;
-		thread_lock(running_thread);
-		if (running_thread->td_critnest > 1) 
-			running_thread->td_owepreempt = 1;
-		else 		
-			mi_switch(SW_INVOL | SW_PREEMPT, NULL);
-		thread_unlock(running_thread);
-	}
+	if (ipi_bitmap & (1 << IPI_PREEMPT))
+		sched_preempt(curthread);
 
 	/* Nothing to do for AST */
 }
@@ -1020,21 +1013,6 @@ ipi_selected(u_int32_t cpus, u_int ipi)
 }
 
 /*
- * send an IPI INTerrupt containing 'vector' to all CPUs, including myself
- */
-void
-ipi_all(u_int ipi)
-{
-
-	if (IPI_IS_BITMAPED(ipi) || (ipi == IPI_STOP && stop_cpus_with_nmi)) {
-		ipi_selected(all_cpus, ipi);
-		return;
-	}
-	CTR2(KTR_SMP, "%s: ipi: %x", __func__, ipi);
-	lapic_ipi_vectored(ipi, APIC_IPI_DEST_ALL);
-}
-
-/*
  * send an IPI to all CPUs EXCEPT myself
  */
 void
@@ -1047,21 +1025,6 @@ ipi_all_but_self(u_int ipi)
 	}
 	CTR2(KTR_SMP, "%s: ipi: %x", __func__, ipi);
 	lapic_ipi_vectored(ipi, APIC_IPI_DEST_OTHERS);
-}
-
-/*
- * send an IPI to myself
- */
-void
-ipi_self(u_int ipi)
-{
-
-	if (IPI_IS_BITMAPED(ipi) || (ipi == IPI_STOP && stop_cpus_with_nmi)) {
-		ipi_selected(PCPU_GET(cpumask), ipi);
-		return;
-	}
-	CTR2(KTR_SMP, "%s: ipi: %x", __func__, ipi);
-	lapic_ipi_vectored(ipi, APIC_IPI_DEST_SELF);
 }
 
 #ifdef STOP_NMI

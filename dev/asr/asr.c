@@ -163,7 +163,7 @@
 
 #include	<dev/asr/sys_info.h>
 
-__FBSDID("$FreeBSD: src/sys/dev/asr/asr.c,v 1.85 2007/06/17 05:55:48 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/asr/asr.c,v 1.86 2008/09/27 08:51:18 ed Exp $");
 
 #define	ASR_VERSION	1
 #define	ASR_REVISION	'1'
@@ -3113,7 +3113,7 @@ typedef U32   DPT_RTN_T;
 #undef SCSI_RESET	/* Conflicts with "scsi/scsiconf.h" defintion */
 #include	"dev/asr/osd_unix.h"
 
-#define	asr_unit(dev)	  minor(dev)
+#define	asr_unit(dev)	  dev2unit(dev)
 
 static u_int8_t ASR_ctlr_held;
 

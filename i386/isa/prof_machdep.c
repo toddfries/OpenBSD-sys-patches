@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/isa/prof_machdep.c,v 1.30 2007/03/26 18:03:29 njl Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/isa/prof_machdep.c,v 1.34 2008/10/21 00:38:00 jkim Exp $");
 
 #ifdef GUPROF
 #include "opt_i586_guprof.h"
@@ -90,8 +90,6 @@ __mcount:							\n\
 	.p2align 4,0x90						\n\
 	.globl	.mcount						\n\
 .mcount:							\n\
-	.globl	__cyg_profile_func_enter			\n\
-__cyg_profile_func_enter:					\n\
 	cmpl	$GMON_PROF_OFF,_gmonparam+GM_STATE		\n\
 	je	.mcount_exit					\n\
 	#							\n\
@@ -115,7 +113,7 @@ __cyg_profile_func_enter:					\n\
 	addl	$8,%esp						\n\
 	popfl							\n\
 .mcount_exit:							\n\
-	ret							\n\
+	ret	$0						\n\
 ");
 #else /* !__GNUCLIKE_ASM */
 #error "this file needs to be ported to your compiler"
@@ -145,8 +143,6 @@ GMON_PROF_HIRES	=	4					\n\
 	.p2align 4,0x90						\n\
 	.globl	.mexitcount					\n\
 .mexitcount:							\n\
-	.globl	__cyg_profile_func_exit				\n\
-__cyg_profile_func_exit:					\n\
 	cmpl	$GMON_PROF_HIRES,_gmonparam+GM_STATE		\n\
 	jne	.mexitcount_exit				\n\
 	pushl	%edx						\n\
@@ -161,7 +157,7 @@ __cyg_profile_func_exit:					\n\
 	popl	%eax						\n\
 	popl	%edx						\n\
 .mexitcount_exit:						\n\
-	ret							\n\
+	ret	$0						\n\
 ");
 #endif /* __GNUCLIKE_ASM */
 
@@ -232,7 +228,7 @@ cputime()
 	delta = prev_count - count;
 	prev_count = count;
 	if ((int) delta <= 0)
-		return (delta + (timer0_max_count << CPUTIME_CLOCK_I8254_SHIFT));
+		return (delta + (i8254_max_count << CPUTIME_CLOCK_I8254_SHIFT));
 	return (delta);
 }
 
@@ -297,7 +293,7 @@ startguprof(gp)
 			cputime_clock = CPUTIME_CLOCK_TSC;
 #endif
 	}
-	gp->profrate = timer_freq << CPUTIME_CLOCK_I8254_SHIFT;
+	gp->profrate = i8254_freq << CPUTIME_CLOCK_I8254_SHIFT;
 #if defined(I586_CPU) || defined(I686_CPU)
 	if (cputime_clock == CPUTIME_CLOCK_TSC) {
 		gp->profrate = tsc_freq >> 1;
@@ -357,8 +353,11 @@ static void
 tsc_freq_changed(void *arg, const struct cf_level *level, int status)
 {
 
-	/* If there was an error during the transition, don't do anything. */
-	if (status != 0)
+	/*
+	 * If there was an error during the transition or
+	 * TSC is P-state invariant, don't do anything.
+	 */
+	if (status != 0 || tsc_is_invariant)
 		return;
 	if (cputime_prof_active && cputime_clock == CPUTIME_CLOCK_TSC)
 		printf("warning: cpu freq changed while profiling active\n");

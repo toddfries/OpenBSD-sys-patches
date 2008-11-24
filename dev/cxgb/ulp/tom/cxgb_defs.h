@@ -27,7 +27,7 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
 
-$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_defs.h,v 1.4 2008/04/19 03:22:42 kmacy Exp $
+$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_defs.h,v 1.5 2008/09/19 21:12:19 kmacy Exp $
 
 ***************************************************************************/
 #ifndef CXGB_DEFS_H_
@@ -49,6 +49,7 @@ $FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_defs.h,v 1.4 2008/04/19 03:22:42 kmacy E
 struct toepcb;
 struct listen_ctx;
 
+void cxgb_log_tcb(struct adapter *sc, unsigned int tid);
 typedef void (*defer_handler_t)(struct toedev *dev, struct mbuf *m);
 
 void t3tom_register_cpl_handler(unsigned int opcode, cxgb_cpl_handler_func h);

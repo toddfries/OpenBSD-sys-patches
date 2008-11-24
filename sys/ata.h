@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2000 - 2006 Søren Schmidt <sos@FreeBSD.org>
+ * Copyright (c) 2000 - 2008 Søren Schmidt <sos@FreeBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/ata.h,v 1.37 2007/10/12 22:18:56 scottl Exp $
+ * $FreeBSD: src/sys/sys/ata.h,v 1.40 2008/04/10 13:01:17 sos Exp $
  */
 
 #ifndef _SYS_ATA_H_
@@ -38,6 +38,7 @@ struct ata_params {
 #define ATA_PROTO_ATAPI                 0x8000
 #define ATA_PROTO_ATAPI_12              0x8000
 #define ATA_PROTO_ATAPI_16              0x8001
+#define ATA_PROTO_CFA                   0x848a
 #define ATA_ATAPI_TYPE_MASK             0x1f00
 #define ATA_ATAPI_TYPE_DIRECT           0x0000  /* disk/floppy */
 #define ATA_ATAPI_TYPE_TAPE             0x0100  /* streaming tape */
@@ -238,7 +239,7 @@ struct ata_params {
 #define ATA_READ48                      0x24    /* read 48bit LBA */
 #define ATA_READ_DMA48                  0x25    /* read DMA 48bit LBA */
 #define ATA_READ_DMA_QUEUED48           0x26    /* read DMA QUEUED 48bit LBA */
-#define ATA_READ_NATIVE_MAX_ADDDRESS48  0x27    /* read native max addr 48bit */
+#define ATA_READ_NATIVE_MAX_ADDRESS48   0x27    /* read native max addr 48bit */
 #define ATA_READ_MUL48                  0x29    /* read multi 48bit LBA */
 #define ATA_WRITE                       0x30    /* write */
 #define ATA_WRITE48                     0x34    /* write 48bit LBA */
@@ -266,8 +267,10 @@ struct ata_params {
 #define ATA_STANDBY_CMD                 0xe2    /* standby */
 #define ATA_IDLE_CMD                    0xe3    /* idle */
 #define ATA_READ_BUFFER                 0xe4    /* read buffer */
+#define ATA_READ_PM                     0xe4    /* read portmultiplier */
 #define ATA_SLEEP                       0xe6    /* sleep */
 #define ATA_FLUSHCACHE                  0xe7    /* flush cache to disk */
+#define ATA_WRITE_PM                    0xe8    /* write portmultiplier */
 #define ATA_FLUSHCACHE48                0xea    /* flush cache to disk */
 #define ATA_ATA_IDENTIFY                0xec    /* get ATA params */
 #define ATA_SETFEATURES                 0xef    /* features command */
@@ -281,7 +284,7 @@ struct ata_params {
 #define         ATA_SF_ENAB_SRVIRQ      0x5e    /* enable service interrupt */
 #define         ATA_SF_DIS_SRVIRQ       0xde    /* disable service interrupt */
 #define ATA_SECURITY_FREEE_LOCK         0xf5    /* freeze security config */
-#define ATA_READ_NATIVE_MAX_ADDDRESS    0xf8    /* read native max address */
+#define ATA_READ_NATIVE_MAX_ADDRESS     0xf8    /* read native max address */
 #define ATA_SET_MAX_ADDRESS             0xf9    /* set max address */
 
 
@@ -431,6 +434,9 @@ struct ata_ioc_request {
 #define IOCATAGPARM             _IOR('a', 101, struct ata_params)
 #define IOCATAGMODE             _IOR('a', 102, int)
 #define IOCATASMODE             _IOW('a', 103, int)
+
+#define IOCATAGSPINDOWN		_IOR('a', 104, int)
+#define IOCATASSPINDOWN		_IOW('a', 105, int)
 
 
 struct ata_ioc_raid_config {

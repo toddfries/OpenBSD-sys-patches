@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/umtx.h,v 1.29 2007/06/06 07:35:08 davidxu Exp $
+ * $FreeBSD: src/sys/sys/umtx.h,v 1.33 2008/06/24 07:32:12 davidxu Exp $
  *
  */
 
@@ -66,6 +66,23 @@ struct ucond {
 	uint32_t		c_spare[2];	/* Spare space */
 };
 
+struct urwlock {
+	volatile int32_t	rw_state;
+	uint32_t		rw_flags;
+	uint32_t		rw_blocked_readers;
+	uint32_t		rw_blocked_writers;
+	uint32_t		rw_spare[4];
+};
+
+/* urwlock flags */
+#define URWLOCK_PREFER_READER	0x0002
+
+#define URWLOCK_WRITE_OWNER	0x80000000U
+#define URWLOCK_WRITE_WAITERS	0x40000000U
+#define URWLOCK_READ_WAITERS	0x20000000U
+#define URWLOCK_MAX_READERS	0x1fffffffU
+#define URWLOCK_READER_COUNT(c)	((c) & URWLOCK_MAX_READERS)
+
 /* op code for _umtx_op */
 #define	UMTX_OP_LOCK		0
 #define	UMTX_OP_UNLOCK		1
@@ -78,7 +95,15 @@ struct ucond {
 #define	UMTX_OP_CV_WAIT		8
 #define	UMTX_OP_CV_SIGNAL	9
 #define	UMTX_OP_CV_BROADCAST	10
-#define	UMTX_OP_MAX		11
+#define	UMTX_OP_WAIT_UINT	11
+#define	UMTX_OP_RW_RDLOCK	12
+#define	UMTX_OP_RW_WRLOCK	13
+#define	UMTX_OP_RW_UNLOCK	14
+#define	UMTX_OP_WAIT_UINT_PRIVATE	15
+#define	UMTX_OP_WAKE_PRIVATE		16
+#define	UMTX_OP_MUTEX_WAIT		17
+#define	UMTX_OP_MUTEX_WAKE		18
+#define	UMTX_OP_MAX		19
 
 /* flags for UMTX_OP_CV_WAIT */
 #define UMTX_CHECK_UNPARKING	0x01
@@ -169,11 +194,11 @@ struct thread;
 
 struct umtx_q *umtxq_alloc(void);
 void umtxq_free(struct umtx_q *);
-int kern_umtx_wake(struct thread *td, void *uaddr, int n_wake);
-void umtx_pi_adjust(struct thread *td, u_char oldpri);
-void umtx_thread_init(struct thread *td);
-void umtx_thread_fini(struct thread *td);
-void umtx_thread_alloc(struct thread *td);
-void umtx_thread_exit(struct thread *td);
+int kern_umtx_wake(struct thread *, void *, int, int);
+void umtx_pi_adjust(struct thread *, u_char);
+void umtx_thread_init(struct thread *);
+void umtx_thread_fini(struct thread *);
+void umtx_thread_alloc(struct thread *);
+void umtx_thread_exit(struct thread *);
 #endif /* !_KERNEL */
 #endif /* !_SYS_UMTX_H_ */

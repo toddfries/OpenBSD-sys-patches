@@ -3,6 +3,7 @@
  * Copyright (c) 2001 Ilmar S. Habibulin
  * Copyright (c) 2001-2005 Networks Associates Technology, Inc.
  * Copyright (c) 2005-2006 SPARTA, Inc.
+ * Copyright (c) 2008 Apple Inc.
  * All rights reserved.
  *
  * This software was developed by Robert Watson and Ilmar Habibulin for the
@@ -39,11 +40,12 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/security/mac/mac_syscalls.c,v 1.133 2007/10/24 19:04:01 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/security/mac/mac_syscalls.c,v 1.138 2008/10/28 12:49:07 rwatson Exp $");
 
 #include "opt_mac.h"
 
 #include <sys/param.h>
+#include <sys/fcntl.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -159,6 +161,9 @@ __mac_set_proc(struct thread *td, struct __mac_set_proc_args *uap)
 	char *buffer;
 	int error;
 
+	if (!(mac_labeled & MPC_OBJECT_CRED))
+		return (EINVAL);
+
 	error = copyin(uap->mac_p, &mac, sizeof(mac));
 	if (error)
 		return (error);
@@ -198,17 +203,9 @@ __mac_set_proc(struct thread *td, struct __mac_set_proc_args *uap)
 	mac_cred_relabel(newcred, intlabel);
 	p->p_ucred = newcred;
 
-	/*
-	 * Grab additional reference for use while revoking mmaps, prior to
-	 * releasing the proc lock and sharing the cred.
-	 */
-	crhold(newcred);
 	PROC_UNLOCK(p);
-
-	mac_cred_mmapped_drop_perms(td, newcred);
-
-	crfree(newcred);	/* Free revocation reference. */
 	crfree(oldcred);
+	mac_proc_vm_revoke(td);
 
 out:
 	mac_cred_label_free(intlabel);
@@ -252,12 +249,14 @@ __mac_get_fd(struct thread *td, struct __mac_get_fd_args *uap)
 	switch (fp->f_type) {
 	case DTYPE_FIFO:
 	case DTYPE_VNODE:
+		if (!(mac_labeled & MPC_OBJECT_VNODE))
+			return (EINVAL);
 		vp = fp->f_vnode;
 		intlabel = mac_vnode_label_alloc();
 		vfslocked = VFS_LOCK_GIANT(vp->v_mount);
-		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 		mac_vnode_copy_label(vp->v_label, intlabel);
-		VOP_UNLOCK(vp, 0, td);
+		VOP_UNLOCK(vp, 0);
 		VFS_UNLOCK_GIANT(vfslocked);
 		error = mac_vnode_externalize_label(intlabel, elements,
 		    buffer, mac.m_buflen);
@@ -265,6 +264,8 @@ __mac_get_fd(struct thread *td, struct __mac_get_fd_args *uap)
 		break;
 
 	case DTYPE_PIPE:
+		if (!(mac_labeled & MPC_OBJECT_PIPE))
+			return (EINVAL);
 		pipe = fp->f_data;
 		intlabel = mac_pipe_label_alloc();
 		PIPE_LOCK(pipe);
@@ -276,6 +277,8 @@ __mac_get_fd(struct thread *td, struct __mac_get_fd_args *uap)
 		break;
 
 	case DTYPE_SOCKET:
+		if (!(mac_labeled & MPC_OBJECT_SOCKET))
+			return (EINVAL);
 		so = fp->f_data;
 		intlabel = mac_socket_label_alloc(M_WAITOK);
 		SOCK_LOCK(so);
@@ -307,6 +310,9 @@ __mac_get_file(struct thread *td, struct __mac_get_file_args *uap)
 	struct label *intlabel;
 	struct mac mac;
 	int vfslocked, error;
+
+	if (!(mac_labeled & MPC_OBJECT_VNODE))
+		return (EINVAL);
 
 	error = copyin(uap->mac_p, &mac, sizeof(mac));
 	if (error)
@@ -357,6 +363,9 @@ __mac_get_link(struct thread *td, struct __mac_get_link_args *uap)
 	struct label *intlabel;
 	struct mac mac;
 	int vfslocked, error;
+
+	if (!(mac_labeled & MPC_OBJECT_VNODE))
+		return (EINVAL);
 
 	error = copyin(uap->mac_p, &mac, sizeof(mac));
 	if (error)
@@ -434,6 +443,8 @@ __mac_set_fd(struct thread *td, struct __mac_set_fd_args *uap)
 	switch (fp->f_type) {
 	case DTYPE_FIFO:
 	case DTYPE_VNODE:
+		if (!(mac_labeled & MPC_OBJECT_VNODE))
+			return (EINVAL);
 		intlabel = mac_vnode_label_alloc();
 		error = mac_vnode_internalize_label(intlabel, buffer);
 		if (error) {
@@ -448,15 +459,17 @@ __mac_set_fd(struct thread *td, struct __mac_set_fd_args *uap)
 			mac_vnode_label_free(intlabel);
 			break;
 		}
-		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, td);
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 		error = vn_setlabel(vp, intlabel, td->td_ucred);
-		VOP_UNLOCK(vp, 0, td);
+		VOP_UNLOCK(vp, 0);
 		vn_finished_write(mp);
 		VFS_UNLOCK_GIANT(vfslocked);
 		mac_vnode_label_free(intlabel);
 		break;
 
 	case DTYPE_PIPE:
+		if (!(mac_labeled & MPC_OBJECT_PIPE))
+			return (EINVAL);
 		intlabel = mac_pipe_label_alloc();
 		error = mac_pipe_internalize_label(intlabel, buffer);
 		if (error == 0) {
@@ -470,6 +483,8 @@ __mac_set_fd(struct thread *td, struct __mac_set_fd_args *uap)
 		break;
 
 	case DTYPE_SOCKET:
+		if (!(mac_labeled & MPC_OBJECT_SOCKET))
+			return (EINVAL);
 		intlabel = mac_socket_label_alloc(M_WAITOK);
 		error = mac_socket_internalize_label(intlabel, buffer);
 		if (error == 0) {
@@ -498,6 +513,9 @@ __mac_set_file(struct thread *td, struct __mac_set_file_args *uap)
 	struct mac mac;
 	char *buffer;
 	int vfslocked, error;
+
+	if (!(mac_labeled & MPC_OBJECT_VNODE))
+		return (EINVAL);
 
 	error = copyin(uap->mac_p, &mac, sizeof(mac));
 	if (error)
@@ -549,6 +567,9 @@ __mac_set_link(struct thread *td, struct __mac_set_link_args *uap)
 	struct mac mac;
 	char *buffer;
 	int vfslocked, error;
+
+	if (!(mac_labeled & MPC_OBJECT_VNODE))
+		return (EINVAL);
 
 	error = copyin(uap->mac_p, &mac, sizeof(mac));
 	if (error)

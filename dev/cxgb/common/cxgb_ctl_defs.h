@@ -6,7 +6,7 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the LICENSE file included in this
  * release for licensing terms and conditions.
  *
- * $FreeBSD: src/sys/dev/cxgb/common/cxgb_ctl_defs.h,v 1.4 2008/02/23 01:06:16 kmacy Exp $
+ * $FreeBSD: src/sys/dev/cxgb/common/cxgb_ctl_defs.h,v 1.5 2008/11/12 04:45:09 kmacy Exp $
  */
 
 #ifndef _CXGB3_OFFLOAD_CTL_DEFS_H
@@ -85,7 +85,7 @@ struct ddp_params {
 
 struct adap_ports {
 	unsigned int nports;     /* number of ports on this adapter */
-	struct net_device *lldevs[2];
+	struct net_device *lldevs[MAX_NPORTS];
 };
 
 /*

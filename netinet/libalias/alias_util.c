@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/libalias/alias_util.c,v 1.20 2006/12/15 12:50:06 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/libalias/alias_util.c,v 1.22 2007/12/06 09:31:13 des Exp $");
 
 
 /*
@@ -131,10 +131,10 @@ TcpChecksum(struct ip *pip)
 		sum += oddbyte;
 	}
 /* "Pseudo-header" data */
-	ptr = (u_short *) & (pip->ip_dst);
+	ptr = (void *)&pip->ip_dst;
 	sum += *ptr++;
 	sum += *ptr;
-	ptr = (u_short *) & (pip->ip_src);
+	ptr = (void *)&pip->ip_src;
 	sum += *ptr++;
 	sum += *ptr;
 	sum += htons((u_short) ntcp);

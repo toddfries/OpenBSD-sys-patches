@@ -34,7 +34,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)conf.h	8.5 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/sys/conf.h,v 1.233 2007/07/03 17:42:37 kib Exp $
+ * $FreeBSD: src/sys/sys/conf.h,v 1.246 2008/11/17 20:49:29 pjd Exp $
  */
 
 #ifndef _SYS_CONF_H_
@@ -46,14 +46,13 @@
 #include <sys/queue.h>
 #endif
 
-struct tty;
 struct snapdata;
 struct devfs_dirent;
 struct cdevsw;
 struct file;
 
 struct cdev {
-	struct cdev_priv	*si_priv;
+	void		*__si_reserved;
 	u_int		si_flags;
 #define SI_ALIAS	0x0002	/* carrier of alias name */
 #define SI_NAMED	0x0004	/* make_dev{_alias} has been called */
@@ -71,7 +70,7 @@ struct cdev {
 	gid_t		si_gid;
 	mode_t		si_mode;
 	struct ucred	*si_cred;	/* cached clone-time credential */
-	u_int		si_drv0;
+	int		si_drv0;
 	int		si_refcount;
 	LIST_ENTRY(cdev)	si_list;
 	LIST_ENTRY(cdev)	si_clone;
@@ -85,13 +84,11 @@ struct cdev {
 	u_long		si_usecount;
 	u_long		si_threadcount;
 	union {
-		struct tty *__sit_tty;
 		struct snapdata *__sid_snapdata;
 	} __si_u;
 	char		__si_namebuf[SPECNAMELEN + 1];
 };
 
-#define si_tty		__si_u.__sit_tty
 #define si_snapdata	__si_u.__sid_snapdata
 
 #ifdef _KERNEL
@@ -171,6 +168,7 @@ typedef int dumper_t(
 #define D_MMAP_ANON	0x00100000	/* special treatment in vm_mmap.c */
 #define D_PSEUDO	0x00200000	/* make_dev() can return NULL */
 #define D_NEEDGIANT	0x00400000	/* driver want Giant */
+#define	D_NEEDMINOR	0x00800000	/* driver uses clone_create() */
 
 /*
  * Version numbers.
@@ -213,12 +211,15 @@ struct cdevsw {
 	LIST_ENTRY(cdevsw)	d_list;
 	LIST_HEAD(, cdev)	d_devs;
 	int			d_spare3;
-	struct cdevsw		*d_gianttrick;
+	union {
+		struct cdevsw		*gianttrick;
+		SLIST_ENTRY(cdevsw)	postfree_list;
+	} __d_giant;
 };
+#define	d_gianttrick		__d_giant.gianttrick
+#define	d_postfree_list		__d_giant.postfree_list
 
 #define NUMCDEVSW 256
-
-#define MAXMINOR	0xffff00ffU
 
 struct module;
 
@@ -257,35 +258,46 @@ void	dev_ref(struct cdev *dev);
 void	dev_refl(struct cdev *dev);
 void	dev_rel(struct cdev *dev);
 void	dev_strategy(struct cdev *dev, struct buf *bp);
-struct cdev *make_dev(struct cdevsw *_devsw, int _minor, uid_t _uid, gid_t _gid,
+struct cdev *make_dev(struct cdevsw *_devsw, int _unit, uid_t _uid, gid_t _gid,
 		int _perms, const char *_fmt, ...) __printflike(6, 7);
-struct cdev *make_dev_cred(struct cdevsw *_devsw, int _minor,
+struct cdev *make_dev_cred(struct cdevsw *_devsw, int _unit,
 		struct ucred *_cr, uid_t _uid, gid_t _gid, int _perms,
 		const char *_fmt, ...) __printflike(7, 8);
 #define MAKEDEV_REF     0x1
 #define MAKEDEV_WHTOUT	0x2
 struct cdev *make_dev_credf(int _flags,
-		struct cdevsw *_devsw, int _minornr,
+		struct cdevsw *_devsw, int _unit,
 		struct ucred *_cr, uid_t _uid, gid_t _gid, int _mode,
 		const char *_fmt, ...) __printflike(8, 9);
 struct cdev *make_dev_alias(struct cdev *_pdev, const char *_fmt, ...) __printflike(2, 3);
-int	dev2unit(struct cdev *_dev);
 void	dev_lock(void);
 void	dev_unlock(void);
-int	unit2minor(int _unit);
-u_int	minor2unit(u_int _minor);
 void	setconf(void);
+
+#define	dev2unit(d)	((d) ? (d)->si_drv0 : NODEV)
+#define	minor(d)	((d) ? (d)->si_drv0 : NODEV)
+#define	unit2minor(u)	(u)
+#define	minor2unit(m)	(m)
+
+typedef	void (*cdevpriv_dtr_t)(void *data);
+int	devfs_get_cdevpriv(void **datap);
+int	devfs_set_cdevpriv(void *priv, cdevpriv_dtr_t dtr);
+void	devfs_clear_cdevpriv(void);
+void	devfs_fpdrop(struct file *fp);	/* XXX This is not public KPI */
 
 #define		UID_ROOT	0
 #define		UID_BIN		3
 #define		UID_UUCP	66
+#define		UID_NOBODY	65534
 
 #define		GID_WHEEL	0
 #define		GID_KMEM	2
+#define		GID_TTY		4
 #define		GID_OPERATOR	5
 #define		GID_BIN		7
 #define		GID_GAMES	13
 #define		GID_DIALER	68
+#define		GID_NOBODY	65534
 
 typedef void (*dev_clone_fn)(void *arg, struct ucred *cred, char *name,
 	    int namelen, struct cdev **result);
@@ -299,22 +311,15 @@ struct dumperinfo {
 	dumper_t *dumper;	/* Dumping function. */
 	void    *priv;		/* Private parts. */
 	u_int   blocksize;	/* Size of block in bytes. */
+	u_int	maxiosize;	/* Max size allowed for an individual I/O */
 	off_t   mediaoffset;	/* Initial offset in bytes. */
 	off_t   mediasize;	/* Space available in bytes. */
 };
 
 int set_dumper(struct dumperinfo *);
+int dump_write(struct dumperinfo *, void *, vm_offset_t, off_t, size_t);
 void dumpsys(struct dumperinfo *);
 extern int dumping;		/* system is dumping */
-
-/* D_TTY related functions */
-d_close_t	 ttyclose;
-d_ioctl_t	 ttyioctl;
-d_kqfilter_t	 ttykqfilter;
-d_open_t	 ttyopen;
-d_poll_t	 ttypoll;
-d_read_t	 ttyread;
-d_write_t	 ttywrite;
 
 #endif /* _KERNEL */
 

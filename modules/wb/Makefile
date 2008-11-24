@@ -1,6 +1,6 @@
-# $FreeBSD: src/sys/modules/wb/Makefile,v 1.13 2005/09/27 18:10:41 mlaier Exp $
+# $FreeBSD: src/sys/modules/wb/Makefile,v 1.14 2008/08/14 21:26:29 imp Exp $
 
-.PATH: ${.CURDIR}/../../pci
+.PATH: ${.CURDIR}/../../dev/wb
 
 KMOD=	if_wb
 SRCS=	if_wb.c device_if.h

@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	From: @(#)if.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/net/if_var.h,v 1.115 2007/05/16 18:37:37 brooks Exp $
+ * $FreeBSD: src/sys/net/if_var.h,v 1.123 2008/11/22 05:55:56 kmacy Exp $
  */
 
 #ifndef	_NET_IF_VAR_H_
@@ -161,8 +161,7 @@ struct ifnet {
 	int	(*if_resolvemulti)	/* validate/resolve multicast */
 		(struct ifnet *, struct sockaddr **, struct sockaddr *);
 	struct	ifaddr	*if_addr;	/* pointer to link-level address */
-	void	*if_spare2;		/* spare pointer 2 */
-	void	*if_spare3;		/* spare pointer 3 */
+	void	*if_llsoftc;		/* link layer softc */
 	int	if_drv_flags;		/* driver-managed status flags */
 	u_int	if_spare_flags2;	/* spare flags 2 */
 	struct  ifaltq if_snd;		/* output queue (includes altq) */
@@ -187,6 +186,12 @@ struct ifnet {
 					/* protected by if_addr_mtx */
 	void	*if_pf_kif;
 	void	*if_lagg;		/* lagg glue */
+	void	*if_pspare[8];		/* multiq/TOE 3; vimage 3; general use 4 */
+	void	(*if_qflush)	/* flush any queues */
+		(struct ifnet *);
+	int	(*if_transmit)	/* initiate output routine */
+		(struct ifnet *, struct mbuf *);
+	int	if_ispare[2];		/* general use 2 */
 };
 
 typedef void if_init_f_t(void *);
@@ -635,6 +640,7 @@ extern	struct mtx ifnet_lock;
     mtx_init(&ifnet_lock, "ifnet", NULL, MTX_DEF | MTX_RECURSE)
 #define	IFNET_WLOCK()		mtx_lock(&ifnet_lock)
 #define	IFNET_WUNLOCK()		mtx_unlock(&ifnet_lock)
+#define	IFNET_WLOCK_ASSERT()	mtx_assert(&ifnet_lock, MA_OWNED)
 #define	IFNET_RLOCK()		IFNET_WLOCK()
 #define	IFNET_RUNLOCK()		IFNET_WUNLOCK()
 
@@ -643,17 +649,17 @@ struct ifindex_entry {
 	struct cdev *ife_dev;
 };
 
-#define ifnet_byindex(idx)	ifindex_table[(idx)].ife_ifnet
+struct ifnet	*ifnet_byindex(u_short idx);
+
 /*
  * Given the index, ifaddr_byindex() returns the one and only
  * link-level ifaddr for the interface. You are not supposed to use
  * it to traverse the list of addresses associated to the interface.
  */
-#define ifaddr_byindex(idx)	ifnet_byindex(idx)->if_addr
-#define ifdev_byindex(idx)	ifindex_table[(idx)].ife_dev
+struct ifaddr	*ifaddr_byindex(u_short idx);
+struct cdev	*ifdev_byindex(u_short idx);
 
 extern	struct ifnethead ifnet;
-extern	struct ifindex_entry *ifindex_table;
 extern	int ifqmaxlen;
 extern	struct ifnet *loif;	/* first loopback interface */
 extern	int if_index;
@@ -668,6 +674,7 @@ int	if_delmulti(struct ifnet *, struct sockaddr *);
 void	if_delmulti_ifma(struct ifmultiaddr *);
 void	if_detach(struct ifnet *);
 void	if_purgeaddrs(struct ifnet *);
+void	if_purgemaddrs(struct ifnet *);
 void	if_down(struct ifnet *);
 struct ifmultiaddr *
 	if_findmulti(struct ifnet *, struct sockaddr *);
@@ -683,11 +690,16 @@ int	ifioctl(struct socket *, u_long, caddr_t, struct thread *);
 int	ifpromisc(struct ifnet *, int);
 struct	ifnet *ifunit(const char *);
 
+void	ifq_attach(struct ifaltq *, struct ifnet *ifp);
+void	ifq_detach(struct ifaltq *);
+
 struct	ifaddr *ifa_ifwithaddr(struct sockaddr *);
 struct	ifaddr *ifa_ifwithbroadaddr(struct sockaddr *);
 struct	ifaddr *ifa_ifwithdstaddr(struct sockaddr *);
 struct	ifaddr *ifa_ifwithnet(struct sockaddr *);
 struct	ifaddr *ifa_ifwithroute(int, struct sockaddr *, struct sockaddr *);
+struct	ifaddr *ifa_ifwithroute_fib(int, struct sockaddr *, struct sockaddr *, u_int);
+
 struct	ifaddr *ifaof_ifpforaddr(struct sockaddr *, struct ifnet *);
 
 int	if_simloop(struct ifnet *ifp, struct mbuf *m, int af, int hlen);
@@ -707,6 +719,8 @@ typedef	void poll_handler_t(struct ifnet *ifp, enum poll_cmd cmd, int count);
 int    ether_poll_register(poll_handler_t *h, struct ifnet *ifp);
 int    ether_poll_deregister(struct ifnet *ifp);
 #endif /* DEVICE_POLLING */
+
+#include <net/vnet.h>
 
 #endif /* _KERNEL */
 

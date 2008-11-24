@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/dev/ipw/if_ipw.c,v 1.35 2008/04/20 20:35:37 sam Exp $	*/
+/*	$FreeBSD: src/sys/dev/ipw/if_ipw.c,v 1.38 2008/05/12 00:15:28 sam Exp $	*/
 
 /*-
  * Copyright (c) 2004-2006
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ipw/if_ipw.c,v 1.35 2008/04/20 20:35:37 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ipw/if_ipw.c,v 1.38 2008/05/12 00:15:28 sam Exp $");
 
 /*-
  * Intel(R) PRO/Wireless 2100 MiniPCI driver
@@ -305,7 +305,9 @@ ipw_attach(device_t dev)
 	ic->ic_phytype = IEEE80211_T_DS;
 
 	/* set device capabilities */
-	ic->ic_caps = IEEE80211_C_IBSS		/* IBSS mode supported */
+	ic->ic_caps =
+		  IEEE80211_C_STA		/* station mode supported */
+		| IEEE80211_C_IBSS		/* IBSS mode supported */
 		| IEEE80211_C_MONITOR		/* monitor mode supported */
 		| IEEE80211_C_PMGT		/* power save supported */
 		| IEEE80211_C_SHPREAMBLE	/* short preamble supported */
@@ -1847,9 +1849,9 @@ ipw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int error = 0, startall = 0;
 	IPW_LOCK_DECL;
 
-	IPW_LOCK(sc);
 	switch (cmd) {
 	case SIOCSIFFLAGS:
+		IPW_LOCK(sc);
 		if (ifp->if_flags & IFF_UP) {
 			if (!(ifp->if_drv_flags & IFF_DRV_RUNNING)) {
 				ipw_init_locked(sc);
@@ -1859,18 +1861,20 @@ ipw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if (ifp->if_drv_flags & IFF_DRV_RUNNING)
 				ipw_stop_locked(sc);
 		}
+		IPW_UNLOCK(sc);
+		if (startall)
+			ieee80211_start_all(ic);
 		break;
 	case SIOCGIFMEDIA:
-	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &ic->ic_media, cmd);
 		break;
-	default:
+	case SIOCGIFADDR:
 		error = ether_ioctl(ifp, cmd, data);
+		break;
+	default:
+		error = EINVAL;
+		break;
 	}
-	IPW_UNLOCK(sc);
-
-	if (startall)
-		ieee80211_start_all(ic);
 	return error;
 }
 
@@ -2402,7 +2406,8 @@ ipw_init(void *priv)
 	ipw_init_locked(sc);
 	IPW_UNLOCK(sc);
 
-	ieee80211_start_all(ic);
+	if (ifp->if_drv_flags & IFF_DRV_RUNNING)
+		ieee80211_start_all(ic);		/* start all vap's */
 }
 
 static void

@@ -29,7 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netsmb/smb_conn.h,v 1.11 2005/01/07 01:45:49 imp Exp $
+ * $FreeBSD: src/sys/netsmb/smb_conn.h,v 1.14 2008/11/02 23:15:32 rwatson Exp $
  */
 
 /*
@@ -164,6 +164,7 @@ struct smb_share_info {
 
 #ifdef _KERNEL
 
+#include <sys/lock.h>
 #include <sys/lockmgr.h>
 #include <netsmb/smb_subr.h>
 
@@ -252,7 +253,6 @@ struct smb_vc {
 	uid_t		vc_uid;		/* user id of connection */
 	gid_t		vc_grp;		/* group of connection */
 	mode_t		vc_mode;	/* access mode */
-	struct tnode *	vc_tnode;	/* backing object */
 	u_short		vc_smbuid;	/* unique vc id assigned by server */
 
 	u_char		vc_hflags;	/* or'ed with flags in the smb header */
@@ -363,8 +363,8 @@ void smb_co_ref(struct smb_connobj *cp);
 void smb_co_rele(struct smb_connobj *cp, struct smb_cred *scred);
 int  smb_co_get(struct smb_connobj *cp, int flags, struct smb_cred *scred);
 void smb_co_put(struct smb_connobj *cp, struct smb_cred *scred);
-int  smb_co_lock(struct smb_connobj *cp, int flags, struct thread *td);
-void smb_co_unlock(struct smb_connobj *cp, int flags, struct thread *td);
+int  smb_co_lock(struct smb_connobj *cp, int flags);
+void smb_co_unlock(struct smb_connobj *cp, int flags);
 
 /*
  * session level functions
@@ -377,8 +377,8 @@ int  smb_vc_get(struct smb_vc *vcp, int flags, struct smb_cred *scred);
 void smb_vc_put(struct smb_vc *vcp, struct smb_cred *scred);
 void smb_vc_ref(struct smb_vc *vcp);
 void smb_vc_rele(struct smb_vc *vcp, struct smb_cred *scred);
-int  smb_vc_lock(struct smb_vc *vcp, int flags, struct thread *td);
-void smb_vc_unlock(struct smb_vc *vcp, int flags, struct thread *td);
+int  smb_vc_lock(struct smb_vc *vcp, int flags);
+void smb_vc_unlock(struct smb_vc *vcp, int flags);
 int  smb_vc_lookupshare(struct smb_vc *vcp, struct smb_sharespec *shspec,
 	struct smb_cred *scred, struct smb_share **sspp);
 const char * smb_vc_getpass(struct smb_vc *vcp);
@@ -394,8 +394,8 @@ void smb_share_ref(struct smb_share *ssp);
 void smb_share_rele(struct smb_share *ssp, struct smb_cred *scred);
 int  smb_share_get(struct smb_share *ssp, int flags, struct smb_cred *scred);
 void smb_share_put(struct smb_share *ssp, struct smb_cred *scred);
-int  smb_share_lock(struct smb_share *ssp, int flags, struct thread *td);
-void smb_share_unlock(struct smb_share *ssp, int flags, struct thread *td);
+int  smb_share_lock(struct smb_share *ssp, int flags);
+void smb_share_unlock(struct smb_share *ssp, int flags);
 void smb_share_invalidate(struct smb_share *ssp);
 int  smb_share_valid(struct smb_share *ssp);
 const char * smb_share_getpass(struct smb_share *ssp);

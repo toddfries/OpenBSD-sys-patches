@@ -1,6 +1,6 @@
-# $FreeBSD: src/sys/modules/agp/Makefile,v 1.18 2006/09/05 16:55:13 anholt Exp $
+# $FreeBSD: src/sys/modules/agp/Makefile,v 1.19 2007/11/12 21:51:37 jhb Exp $
 
-.PATH: ${.CURDIR}/../../pci
+.PATH: ${.CURDIR}/../../dev/agp
 
 KMOD=	agp
 SRCS=	agp.c agp_if.c
@@ -16,7 +16,7 @@ SRCS+=	agp_amd64.c agp_i810.c
 .endif
 SRCS+=	device_if.h bus_if.h agp_if.h pci_if.h
 SRCS+=	opt_bus.h
-MFILES=	kern/device_if.m kern/bus_if.m pci/agp_if.m dev/pci/pci_if.m
+MFILES=	kern/device_if.m kern/bus_if.m dev/agp/agp_if.m dev/pci/pci_if.m
 WERROR=
 
 EXPORT_SYMS=	agp_find_device		\

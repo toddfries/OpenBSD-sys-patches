@@ -2,6 +2,7 @@
 
 /*
  * Copyright (c) 2005, 2006 Reyk Floeter <reyk@openbsd.org>
+ * Copyright (c) 2007 Andrew Thompson <thompsa@FreeBSD.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -17,7 +18,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
+__FBSDID("$FreeBSD: src/sys/net/if_lagg.c,v 1.32 2008/11/22 07:35:45 kmacy Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -88,6 +89,7 @@ static void	lagg_port_setlladdr(void *, int);
 static int	lagg_port_create(struct lagg_softc *, struct ifnet *);
 static int	lagg_port_destroy(struct lagg_port *, int);
 static struct mbuf *lagg_input(struct ifnet *, struct mbuf *);
+static void	lagg_linkstate(struct lagg_softc *);
 static void	lagg_port_state(struct ifnet *, int);
 static int	lagg_port_ioctl(struct ifnet *, u_long, caddr_t);
 static int	lagg_port_output(struct ifnet *, struct mbuf *,
@@ -491,6 +493,7 @@ lagg_port_create(struct lagg_softc *sc, struct ifnet *ifp)
 
 	/* Update lagg capabilities */
 	lagg_capabilities(sc);
+	lagg_linkstate(sc);
 
 	/* Add multicast addresses and interface flags to this port */
 	lagg_ether_cmdmulti(lp, 1);
@@ -596,6 +599,7 @@ lagg_port_destroy(struct lagg_port *lp, int runpd)
 
 	/* Update lagg capabilities */
 	lagg_capabilities(sc);
+	lagg_linkstate(sc);
 
 	return (0);
 }
@@ -742,8 +746,12 @@ lagg_port2req(struct lagg_port *lp, struct lagg_reqport *rp)
 
 		case LAGG_PROTO_LACP:
 			/* LACP has a different definition of active */
-			if (lacp_port_isactive(lp))
+			if (lacp_isactive(lp))
 				rp->rp_flags |= LAGG_PORT_ACTIVE;
+			if (lacp_iscollecting(lp))
+				rp->rp_flags |= LAGG_PORT_COLLECTING;
+			if (lacp_isdistributing(lp))
+				rp->rp_flags |= LAGG_PORT_DISTRIBUTING;
 			break;
 	}
 
@@ -1108,6 +1116,13 @@ lagg_start(struct ifnet *ifp)
 	int error = 0;
 
 	LAGG_RLOCK(sc);
+	/* We need a Tx algorithm and at least one port */
+	if (sc->sc_proto == LAGG_PROTO_NONE || sc->sc_count == 0) {
+		IF_DRAIN(&ifp->if_snd);
+		LAGG_RUNLOCK(sc);
+		return;
+	}
+
 	for (;; error = 0) {
 		IFQ_DEQUEUE(&ifp->if_snd, m);
 		if (m == NULL)
@@ -1115,19 +1130,13 @@ lagg_start(struct ifnet *ifp)
 
 		ETHER_BPF_MTAP(ifp, m);
 
-		if (sc->sc_proto != LAGG_PROTO_NONE)
-			error = (*sc->sc_start)(sc, m);
-		else
-			m_freem(m);
-
+		error = (*sc->sc_start)(sc, m);
 		if (error == 0)
 			ifp->if_opackets++;
 		else
 			ifp->if_oerrors++;
 	}
 	LAGG_RUNLOCK(sc);
-
-	return;
 }
 
 static struct mbuf *
@@ -1152,6 +1161,11 @@ lagg_input(struct ifnet *ifp, struct mbuf *m)
 	if (m != NULL) {
 		scifp->if_ipackets++;
 		scifp->if_ibytes += m->m_pkthdr.len;
+
+		if (scifp->if_flags & IFF_MONITOR) {
+			m_freem(m);
+			m = NULL;
+		}
 	}
 
 	LAGG_RUNLOCK(sc);
@@ -1188,6 +1202,22 @@ lagg_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 }
 
 static void
+lagg_linkstate(struct lagg_softc *sc)
+{
+	struct lagg_port *lp;
+	int new_link = LINK_STATE_DOWN;
+
+	/* Our link is considered up if at least one of our ports is active */
+	SLIST_FOREACH(lp, &sc->sc_ports, lp_entries) {
+		if (lp->lp_link_state == LINK_STATE_UP) {
+			new_link = LINK_STATE_UP;
+			break;
+		}
+	}
+	if_link_state_change(sc->sc_ifp, new_link);
+}
+
+static void
 lagg_port_state(struct ifnet *ifp, int state)
 {
 	struct lagg_port *lp = (struct lagg_port *)ifp->if_lagg;
@@ -1199,6 +1229,7 @@ lagg_port_state(struct ifnet *ifp, int state)
 		return;
 
 	LAGG_WLOCK(sc);
+	lagg_linkstate(sc);
 	if (sc->sc_linkstate != NULL)
 		(*sc->sc_linkstate)(lp);
 	LAGG_WUNLOCK(sc);
@@ -1339,12 +1370,8 @@ out:
 int
 lagg_enqueue(struct ifnet *ifp, struct mbuf *m)
 {
-	int error = 0;
 
-	IFQ_HANDOFF(ifp, m, error);
-	if (error)
-		ifp->if_oerrors++;
-	return (error);
+	return (ifp->if_transmit)(ifp, m);
 }
 
 /*
@@ -1454,8 +1481,8 @@ lagg_fail_input(struct lagg_softc *sc, struct lagg_port *lp, struct mbuf *m)
 		return (m);
 	}
 
-	if (sc->sc_primary->lp_link_state == LINK_STATE_DOWN) {
-		tmp_tp = lagg_link_active(sc, NULL);
+	if (!LAGG_PORTACTIVE(sc->sc_primary)) {
+		tmp_tp = lagg_link_active(sc, sc->sc_primary);
 		/*
 		 * If tmp_tp is null, we've recieved a packet when all
 		 * our links are down. Weird, but process it anyways.
@@ -1551,14 +1578,10 @@ lagg_lb_start(struct lagg_softc *sc, struct mbuf *m)
 	struct lagg_lb *lb = (struct lagg_lb *)sc->sc_psc;
 	struct lagg_port *lp = NULL;
 	uint32_t p = 0;
-	int idx;
 
 	p = lagg_hashmbuf(m, lb->lb_key);
-	if ((idx = p % sc->sc_count) >= LAGG_MAX_PORTS) {
-		m_freem(m);
-		return (EINVAL);
-	}
-	lp = lb->lb_ports[idx];
+	p %= sc->sc_count;
+	lp = lb->lb_ports[p];
 
 	/*
 	 * Check the port's link state. This will return the next active
@@ -1674,16 +1697,16 @@ lagg_lacp_input(struct lagg_softc *sc, struct lagg_port *lp, struct mbuf *m)
 
 	/* Tap off LACP control messages */
 	if (etype == ETHERTYPE_SLOW) {
-		lacp_input(lp, m);
-		return (NULL);
+		m = lacp_input(lp, m);
+		if (m == NULL)
+			return (NULL);
 	}
 
 	/*
 	 * If the port is not collecting or not in the active aggregator then
 	 * free and return.
 	 */
-	if ((lp->lp_flags & LAGG_PORT_COLLECTING) == 0 ||
-	    lacp_port_isactive(lp) == 0) {
+	if (lacp_iscollecting(lp) == 0 || lacp_isactive(lp) == 0) {
 		m_freem(m);
 		return (NULL);
 	}

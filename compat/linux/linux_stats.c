@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_stats.c,v 1.88 2007/09/18 19:50:33 dwmalone Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_stats.c,v 1.93 2008/08/20 08:31:58 ed Exp $");
 
 #include "opt_compat.h"
 #include "opt_mac.h"
@@ -44,6 +44,7 @@ __FBSDID("$FreeBSD: src/sys/compat/linux/linux_stats.c,v 1.88 2007/09/18 19:50:3
 #include <sys/stat.h>
 #include <sys/syscallsubr.h>
 #include <sys/systm.h>
+#include <sys/tty.h>
 #include <sys/vnode.h>
 #include <sys/conf.h>
 #include <sys/fcntl.h>
@@ -57,6 +58,7 @@ __FBSDID("$FreeBSD: src/sys/compat/linux/linux_stats.c,v 1.88 2007/09/18 19:50:3
 #endif
 
 #include <compat/linux/linux_util.h>
+#include <compat/linux/linux_file.h>
 
 #include <security/mac/mac_framework.h>
 
@@ -108,15 +110,25 @@ translate_fd_major_minor(struct thread *td, int fd, struct stat *buf)
 	if (fp->f_vnode != NULL &&
 	    fp->f_vnode->v_un.vu_cdev != NULL &&
 	    linux_driver_get_major_minor(fp->f_vnode->v_un.vu_cdev->si_name,
-					 &major, &minor) == 0)
+					 &major, &minor) == 0) {
 		buf->st_rdev = (major << 8 | minor);
+	} else if (fp->f_type == DTYPE_PTS) {
+		struct tty *tp = fp->f_data;
+
+		/* Convert the numbers for the slave device. */
+		if (linux_driver_get_major_minor(tp->t_dev->si_name,
+					 &major, &minor) == 0) {
+			buf->st_rdev = (major << 8 | minor);
+		}
+	}
 	fdrop(fp, td);
 }
 
 static void
-translate_path_major_minor(struct thread *td, char *path, struct stat *buf)
+translate_path_major_minor_at(struct thread *td, char *path,
+    struct stat *buf, int dfd)
 {
-	struct proc *p = td->td_proc;	
+	struct proc *p = td->td_proc;
 	struct filedesc *fdp = p->p_fd;
 	int fd;
 	int temp;
@@ -124,12 +136,18 @@ translate_path_major_minor(struct thread *td, char *path, struct stat *buf)
 	if (!S_ISCHR(buf->st_mode) && !S_ISBLK(buf->st_mode))
 		return;
 	temp = td->td_retval[0];
-	if (kern_open(td, path, UIO_SYSSPACE, O_RDONLY, 0) != 0)
+	if (kern_openat(td, dfd, path, UIO_SYSSPACE, O_RDONLY, 0) != 0)
 		return;
 	fd = td->td_retval[0];
 	td->td_retval[0] = temp;
 	translate_fd_major_minor(td, fd, buf);
 	fdclose(fdp, fdp->fd_ofiles[fd], fd, td);
+}
+
+static inline void
+translate_path_major_minor(struct thread *td, char *path, struct stat *buf)
+{
+	translate_path_major_minor_at(td, path, buf, AT_FDCWD);
 }
 
 static int
@@ -170,19 +188,8 @@ linux_newstat(struct thread *td, struct linux_newstat_args *args)
 #endif
 
 	error = kern_stat(td, path, UIO_SYSSPACE, &buf);
-	if (!error) {
-		if (strlen(path) > strlen("/dev/pts/") &&
-		    !strncmp(path, "/dev/pts/", strlen("/dev/pts/")) &&
-		    path[9] >= '0' && path[9] <= '9') {
-			/*
-			 * Linux checks major and minors of the slave device
-			 * to make sure it's a pty device, so let's make him
-			 * believe it is.
-			 */
-			buf.st_rdev = (136 << 8);
-		} else
-			translate_path_major_minor(td, path, &buf);
-	}
+	if (!error)
+		translate_path_major_minor(td, path, &buf);
 	LFREEPATH(path);
 	if (error)
 		return (error);
@@ -263,15 +270,22 @@ int
 linux_stat(struct thread *td, struct linux_stat_args *args)
 {
 	struct stat buf;
+	char *path;
 	int error;
+
+	LCONVPATHEXIST(td, args->path, &path);
+
 #ifdef DEBUG
 	if (ldebug(stat))
-	printf(ARGS(stat, "%s, *"), args->path);
+		printf(ARGS(stat, "%s, *"), path);
 #endif
-	error = kern_stat(td, args->path, UIO_SYSSPACE, &buf);
-	if (error)
+	error = kern_stat(td, path, UIO_SYSSPACE, &buf);
+	if (error) {
+		LFREEPATH(path);
 		return (error);
-	translate_path_major_minor(td, args->path, &buf);
+	}
+	translate_path_major_minor(td, path, &buf);
+	LFREEPATH(path);
 	return(stat_copyout(&buf, args->up));
 }
 
@@ -279,16 +293,22 @@ int
 linux_lstat(struct thread *td, struct linux_lstat_args *args)
 {
 	struct stat buf;
+	char *path;
 	int error;
+
+	LCONVPATHEXIST(td, args->path, &path);
 
 #ifdef DEBUG
 	if (ldebug(lstat))
-	printf(ARGS(lstat, "%s, *"), args->path);
+		printf(ARGS(lstat, "%s, *"), path);
 #endif
-	error = kern_lstat(td, args->path, UIO_SYSSPACE, &buf);
-	if (error)
+	error = kern_lstat(td, path, UIO_SYSSPACE, &buf);
+	if (error) {
+		LFREEPATH(path);
 		return (error);
-	translate_path_major_minor(td, args->path, &buf);
+	}
+	translate_path_major_minor(td, path, &buf);
+	LFREEPATH(path);
 	return(stat_copyout(&buf, args->up));
 }
 
@@ -507,19 +527,8 @@ linux_stat64(struct thread *td, struct linux_stat64_args *args)
 #endif
 
 	error = kern_stat(td, filename, UIO_SYSSPACE, &buf);
-	if (!error) {
-		if (strlen(filename) > strlen("/dev/pts/") &&
-		    !strncmp(filename, "/dev/pts/", strlen("/dev/pts/")) &&
-		    filename[9] >= '0' && filename[9] <= '9') {
-			/*
-			 * Linux checks major and minors of the slave device
-			 * to make sure it's a pty deivce, so let's make him
-			 * believe it is.
-			 */
-			buf.st_rdev = (136 << 8);
-		} else
-			translate_path_major_minor(td, filename, &buf);
-	}
+	if (!error)
+		translate_path_major_minor(td, filename, &buf);
 	LFREEPATH(filename);
 	if (error)
 		return (error);
@@ -564,6 +573,35 @@ linux_fstat64(struct thread *td, struct linux_fstat64_args *args)
 	translate_fd_major_minor(td, args->fd, &buf);
 	if (!error)
 		error = stat64_copyout(&buf, args->statbuf);
+
+	return (error);
+}
+
+int
+linux_fstatat64(struct thread *td, struct linux_fstatat64_args *args)
+{
+	char *path;
+	int error, dfd, flag;
+	struct stat buf;
+
+	if (args->flag & ~LINUX_AT_SYMLINK_NOFOLLOW)
+		return (EINVAL);
+	flag = (args->flag & LINUX_AT_SYMLINK_NOFOLLOW) ?
+	    AT_SYMLINK_NOFOLLOW : 0;
+
+	dfd = (args->dfd == LINUX_AT_FDCWD) ? AT_FDCWD : args->dfd;
+	LCONVPATHEXIST_AT(td, args->pathname, &path, dfd);
+
+#ifdef DEBUG
+	if (ldebug(fstatat64))
+		printf(ARGS(fstatat64, "%i, %s, %i"), args->dfd, path, args->flag);
+#endif
+
+	error = kern_statat(td, flag, dfd, path, UIO_SYSSPACE, &buf);
+	translate_path_major_minor_at(td, args->pathname, &buf, dfd);
+	if (!error)
+		error = stat64_copyout(&buf, args->statbuf);
+	LFREEPATH(path);
 
 	return (error);
 }

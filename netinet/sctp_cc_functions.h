@@ -28,12 +28,12 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_cc_functions.h,v 1.2 2007/09/10 17:06:25 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_cc_functions.h,v 1.3 2008/07/09 16:45:30 rrs Exp $");
 
 #ifndef __sctp_cc_functions_h__
 #define __sctp_cc_functions_h__
 
-#if defined(_KERNEL)
+#if defined(_KERNEL) || defined(__Userspace__)
 
 void
 sctp_set_initial_cc_param(struct sctp_tcb *stcb,

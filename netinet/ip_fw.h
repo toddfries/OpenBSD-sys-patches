@@ -22,11 +22,25 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netinet/ip_fw.h,v 1.110 2007/05/04 11:15:41 bz Exp $
+ * $FreeBSD: src/sys/netinet/ip_fw.h,v 1.119 2008/10/10 14:33:47 rwatson Exp $
  */
 
 #ifndef _IPFW2_H
 #define _IPFW2_H
+
+/*
+ * The default rule number.  By the design of ip_fw, the default rule
+ * is the last one, so its number can also serve as the highest number
+ * allowed for a rule.  The ip_fw code relies on both meanings of this
+ * constant. 
+ */
+#define	IPFW_DEFAULT_RULE	65535
+
+/*
+ * The number of ipfw tables.  The maximum allowed table number is the
+ * (IPFW_TABLES_MAX - 1).
+ */
+#define	IPFW_TABLES_MAX		128
 
 /*
  * The kernel representation of ipfw rules is made of a list of
@@ -161,6 +175,9 @@ enum ipfw_opcodes {		/* arguments (4 byte each)	*/
 	O_TAG,   		/* arg1=tag number */
 	O_TAGGED,		/* arg1=tag number */
 
+	O_SETFIB,		/* arg1=FIB number */
+	O_FIB,			/* arg1=FIB desired fib number */
+
 	O_LAST_OPCODE		/* not an opcode!		*/
 };
 
@@ -206,7 +223,7 @@ enum ipfw_opcodes {		/* arguments (4 byte each)	*/
  */
 typedef struct	_ipfw_insn {	/* template for instructions */
 	enum ipfw_opcodes	opcode:8;
-	u_int8_t	len;	/* numer of 32-byte words */
+	u_int8_t	len;	/* number of 32-bit words */
 #define	F_NOT		0x80
 #define	F_OR		0x40
 #define	F_LEN_MASK	0x3f
@@ -310,18 +327,25 @@ typedef struct  _ipfw_insn_log {
 	u_int32_t log_left;	/* how many left to log 	*/
 } ipfw_insn_log;
 
+/*
+ * Data structures required by both ipfw(8) and ipfw(4) but not part of the
+ * management API are protected by IPFW_INTERNAL.
+ */
+#ifdef IPFW_INTERNAL
 /* Server pool support (LSNAT). */
 struct cfg_spool {
 	LIST_ENTRY(cfg_spool)   _next;          /* chain of spool instances */
 	struct in_addr          addr;
 	u_short                 port;
 };
+#endif
 
 /* Redirect modes id. */
 #define REDIR_ADDR      0x01
 #define REDIR_PORT      0x02
 #define REDIR_PROTO     0x04
 
+#ifdef IPFW_INTERNAL
 /* Nat redirect configuration. */
 struct cfg_redir {
 	LIST_ENTRY(cfg_redir)   _next;          /* chain of redir instances */
@@ -341,8 +365,11 @@ struct cfg_redir {
 	/* chain of spool instances */
 	LIST_HEAD(spool_chain, cfg_spool) spool_chain;
 };
+#endif
 
 #define NAT_BUF_LEN     1024
+
+#ifdef IPFW_INTERNAL
 /* Nat configuration data struct. */
 struct cfg_nat {
 	/* chain of nat instances */
@@ -357,6 +384,7 @@ struct cfg_nat {
 	/* chain of redir instances */
 	LIST_HEAD(redir_chain, cfg_redir) redir_chain;  
 };
+#endif
 
 #define SOF_NAT         sizeof(struct cfg_nat)
 #define SOF_REDIR       sizeof(struct cfg_redir)
@@ -454,6 +482,7 @@ struct ipfw_flow_id {
 	u_int32_t	src_ip;
 	u_int16_t	dst_port;
 	u_int16_t	src_port;
+	u_int8_t	fib;
 	u_int8_t	proto;
 	u_int8_t	flags;	/* protocol-specific flags */
 	uint8_t		addr_type; /* 4 = ipv4, 6 = ipv6, 1=ether ? */
@@ -601,19 +630,131 @@ int ipfw_chk(struct ip_fw_args *);
 
 int ipfw_init(void);
 void ipfw_destroy(void);
+#ifdef NOTYET
+void ipfw_nat_destroy(void);
+#endif
 
 typedef int ip_fw_ctl_t(struct sockopt *);
 extern ip_fw_ctl_t *ip_fw_ctl_ptr;
+
+#ifndef VIMAGE
 extern int fw_one_pass;
 extern int fw_enable;
 #ifdef INET6
 extern int fw6_enable;
+#endif
 #endif
 
 /* For kernel ipfw_ether and ipfw_bridge. */
 typedef	int ip_fw_chk_t(struct ip_fw_args *args);
 extern	ip_fw_chk_t	*ip_fw_chk_ptr;
 #define	IPFW_LOADED	(ip_fw_chk_ptr != NULL)
+
+#ifdef IPFW_INTERNAL
+
+struct ip_fw_chain {
+	struct ip_fw	*rules;		/* list of rules */
+	struct ip_fw	*reap;		/* list of rules to reap */
+	LIST_HEAD(, cfg_nat) nat;       /* list of nat entries */
+	struct radix_node_head *tables[IPFW_TABLES_MAX];
+	struct rwlock	rwmtx;
+};
+#define	IPFW_LOCK_INIT(_chain) \
+	rw_init(&(_chain)->rwmtx, "IPFW static rules")
+#define	IPFW_LOCK_DESTROY(_chain)	rw_destroy(&(_chain)->rwmtx)
+#define	IPFW_WLOCK_ASSERT(_chain)	rw_assert(&(_chain)->rwmtx, RA_WLOCKED)
+
+#define IPFW_RLOCK(p) rw_rlock(&(p)->rwmtx)
+#define IPFW_RUNLOCK(p) rw_runlock(&(p)->rwmtx)
+#define IPFW_WLOCK(p) rw_wlock(&(p)->rwmtx)
+#define IPFW_WUNLOCK(p) rw_wunlock(&(p)->rwmtx)
+
+#define LOOKUP_NAT(l, i, p) do {					\
+		LIST_FOREACH((p), &(l.nat), _next) {			\
+			if ((p)->id == (i)) {				\
+				break;					\
+			} 						\
+		}							\
+	} while (0)
+
+typedef int ipfw_nat_t(struct ip_fw_args *, struct cfg_nat *, struct mbuf *);
+typedef int ipfw_nat_cfg_t(struct sockopt *);
+#endif
+
+/*
+ * Stack virtualization support.
+ */
+#ifdef VIMAGE
+struct vnet_ipfw {
+	int	_fw_one_pass;
+	int	_fw_enable;
+	int	_fw6_enable;
+	u_int32_t _set_disable;
+	int	_fw_deny_unknown_exthdrs;
+	int	_fw_verbose;
+	int	_verbose_limit;
+	int	_fw_debug;
+	int	_autoinc_step;
+	ipfw_dyn_rule **_ipfw_dyn_v;
+	struct ip_fw_chain _layer3_chain;
+	u_int32_t _dyn_buckets;
+	u_int32_t _curr_dyn_buckets;
+	u_int32_t _dyn_ack_lifetime;
+	u_int32_t _dyn_syn_lifetime;
+	u_int32_t _dyn_fin_lifetime;
+	u_int32_t _dyn_rst_lifetime;
+	u_int32_t _dyn_udp_lifetime;
+	u_int32_t _dyn_short_lifetime;
+	u_int32_t _dyn_keepalive_interval;
+	u_int32_t _dyn_keepalive_period;
+	u_int32_t _dyn_keepalive;
+	u_int32_t _static_count;
+	u_int32_t _static_len;
+	u_int32_t _dyn_count;
+	u_int32_t _dyn_max;
+	u_int64_t _norule_counter;
+	struct callout _ipfw_timeout;
+	eventhandler_tag _ifaddr_event_tag;
+};
+#endif
+
+/*
+ * Symbol translation macros
+ */
+#define	INIT_VNET_IPFW(vnet) \
+	INIT_FROM_VNET(vnet, VNET_MOD_IPFW, struct vnet_ipfw, vnet_ipfw)
+ 
+#define	VNET_IPFW(sym)		VSYM(vnet_ipfw, sym)
+ 
+#define	V_fw_one_pass		VNET_IPFW(fw_one_pass)
+#define	V_fw_enable		VNET_IPFW(fw_enable)
+#define	V_fw6_enable		VNET_IPFW(fw6_enable)
+#define	V_set_disable		VNET_IPFW(set_disable)
+#define	V_fw_deny_unknown_exthdrs VNET_IPFW(fw_deny_unknown_exthdrs)
+#define	V_fw_verbose		VNET_IPFW(fw_verbose)
+#define	V_verbose_limit		VNET_IPFW(verbose_limit)
+#define	V_fw_debug		VNET_IPFW(fw_debug)
+#define	V_autoinc_step		VNET_IPFW(autoinc_step)
+#define	V_ipfw_dyn_v		VNET_IPFW(ipfw_dyn_v)
+#define	V_layer3_chain		VNET_IPFW(layer3_chain)
+#define	V_dyn_buckets		VNET_IPFW(dyn_buckets)
+#define	V_curr_dyn_buckets	VNET_IPFW(curr_dyn_buckets)
+#define	V_dyn_ack_lifetime	VNET_IPFW(dyn_ack_lifetime)
+#define	V_dyn_syn_lifetime	VNET_IPFW(dyn_syn_lifetime)
+#define	V_dyn_fin_lifetime	VNET_IPFW(dyn_fin_lifetime)
+#define	V_dyn_rst_lifetime	VNET_IPFW(dyn_rst_lifetime)
+#define	V_dyn_udp_lifetime	VNET_IPFW(dyn_udp_lifetime)
+#define	V_dyn_short_lifetime	VNET_IPFW(dyn_short_lifetime)
+#define	V_dyn_keepalive_interval VNET_IPFW(dyn_keepalive_interval)
+#define	V_dyn_keepalive_period	VNET_IPFW(dyn_keepalive_period)
+#define	V_dyn_keepalive		VNET_IPFW(dyn_keepalive)
+#define	V_static_count		VNET_IPFW(static_count)
+#define	V_static_len		VNET_IPFW(static_len)
+#define	V_dyn_count		VNET_IPFW(dyn_count)
+#define	V_dyn_max		VNET_IPFW(dyn_max)
+#define	V_norule_counter	VNET_IPFW(norule_counter)
+#define	V_ipfw_timeout		VNET_IPFW(ipfw_timeout)
+#define	V_ifaddr_event_tag	VNET_IPFW(ifaddr_event_tag)
 
 #endif /* _KERNEL */
 #endif /* _IPFW2_H */

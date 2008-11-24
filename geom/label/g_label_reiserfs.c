@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/label/g_label_reiserfs.c,v 1.2 2005/08/23 18:55:38 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/label/g_label_reiserfs.c,v 1.3 2007/11/16 19:43:26 maxim Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -39,7 +39,7 @@ __FBSDID("$FreeBSD: src/sys/geom/label/g_label_reiserfs.c,v 1.2 2005/08/23 18:55
 #define REISERFS_OLD_DISK_OFFSET 8 * 1024
 #define REISERFS_SUPER_MAGIC	"ReIsEr"
 
-typedef struct resiserfs_sb {
+typedef struct reiserfs_sb {
 	uint8_t		fake1[52];
 	char		s_magic[10];
 	uint8_t		fake2[10];

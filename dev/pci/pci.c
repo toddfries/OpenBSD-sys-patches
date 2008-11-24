@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/pci/pci.c,v 1.357 2008/02/01 20:31:09 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/pci/pci.c,v 1.366 2008/11/13 19:57:33 mav Exp $");
 
 #include "opt_bus.h"
 
@@ -432,7 +432,7 @@ pci_read_device(device_t pcib, int d, int b, int s, int f, size_t size)
 
 	devlist_entry = NULL;
 
-	if (REG(PCIR_DEVVENDOR, 4) != -1) {
+	if (REG(PCIR_DEVVENDOR, 4) != 0xfffffffful) {
 		devlist_entry = malloc(size, M_DEVBUF, M_WAITOK | M_ZERO);
 		if (devlist_entry == NULL)
 			return (NULL);
@@ -562,11 +562,12 @@ pci_read_extcap(device_t pcib, pcicfgregs *cfg)
 						    cfg->domain, cfg->bus,
 						    cfg->slot, cfg->func,
 						    (long long)addr);
-				}
+				} else
+					addr = MSI_INTEL_ADDR_BASE;
 
-				/* Enable MSI -> HT mapping. */
-				val |= PCIM_HTCMD_MSI_ENABLE;
-				WREG(ptr + PCIR_HT_COMMAND, val, 2);
+				cfg->ht.ht_msimap = ptr;
+				cfg->ht.ht_msictrl = val;
+				cfg->ht.ht_msiaddr = addr;
 				break;
 			}
 			break;
@@ -1095,6 +1096,9 @@ pci_enable_msix(device_t dev, u_int index, uint64_t address, uint32_t data)
 	bus_write_4(msix->msix_table_res, offset, address & 0xffffffff);
 	bus_write_4(msix->msix_table_res, offset + 4, address >> 32);
 	bus_write_4(msix->msix_table_res, offset + 8, data);
+
+	/* Enable MSI -> HT mapping. */
+	pci_ht_map_msi(dev, address);
 }
 
 void
@@ -1534,6 +1538,34 @@ pci_msix_count_method(device_t dev, device_t child)
 }
 
 /*
+ * HyperTransport MSI mapping control
+ */
+void
+pci_ht_map_msi(device_t dev, uint64_t addr)
+{
+	struct pci_devinfo *dinfo = device_get_ivars(dev);
+	struct pcicfg_ht *ht = &dinfo->cfg.ht;
+
+	if (!ht->ht_msimap)
+		return;
+
+	if (addr && !(ht->ht_msictrl & PCIM_HTCMD_MSI_ENABLE) &&
+	    ht->ht_msiaddr >> 20 == addr >> 20) {
+		/* Enable MSI -> HT mapping. */
+		ht->ht_msictrl |= PCIM_HTCMD_MSI_ENABLE;
+		pci_write_config(dev, ht->ht_msimap + PCIR_HT_COMMAND,
+		    ht->ht_msictrl, 2);
+	}
+
+	if (!addr && ht->ht_msictrl & PCIM_HTCMD_MSI_ENABLE) {
+		/* Disable MSI -> HT mapping. */
+		ht->ht_msictrl &= ~PCIM_HTCMD_MSI_ENABLE;
+		pci_write_config(dev, ht->ht_msimap + PCIR_HT_COMMAND,
+		    ht->ht_msictrl, 2);
+	}
+}
+
+/*
  * Support for MSI message signalled interrupts.
  */
 void
@@ -1558,6 +1590,9 @@ pci_enable_msi(device_t dev, uint64_t address, uint16_t data)
 	msi->msi_ctrl |= PCIM_MSICTRL_MSI_ENABLE;
 	pci_write_config(dev, msi->msi_location + PCIR_MSI_CTRL, msi->msi_ctrl,
 	    2);
+
+	/* Enable MSI -> HT mapping. */
+	pci_ht_map_msi(dev, address);
 }
 
 void
@@ -1565,6 +1600,9 @@ pci_disable_msi(device_t dev)
 {
 	struct pci_devinfo *dinfo = device_get_ivars(dev);
 	struct pcicfg_msi *msi = &dinfo->cfg.msi;
+
+	/* Disable MSI -> HT mapping. */
+	pci_ht_map_msi(dev, 0);
 
 	/* Disable MSI in the control register. */
 	msi->msi_ctrl &= ~PCIM_MSICTRL_MSI_ENABLE;
@@ -2341,7 +2379,7 @@ pci_add_map(device_t pcib, device_t bus, device_t dev,
 
 	count = 1 << ln2size;
 	if (base == 0 || base == pci_mapbase(testval)) {
-		start = 0;	/* Let the parent deside */
+		start = 0;	/* Let the parent decide. */
 		end = ~0ULL;
 	} else {
 		start = base;
@@ -2350,22 +2388,24 @@ pci_add_map(device_t pcib, device_t bus, device_t dev,
 	resource_list_add(rl, type, reg, start, end, count);
 
 	/*
-	 * Not quite sure what to do on failure of allocating the resource
-	 * since I can postulate several right answers.
+	 * Try to allocate the resource for this BAR from our parent
+	 * so that this resource range is already reserved.  The
+	 * driver for this device will later inherit this resource in
+	 * pci_alloc_resource().
 	 */
 	res = resource_list_alloc(rl, bus, dev, type, &reg, start, end, count,
 	    prefetch ? RF_PREFETCHABLE : 0);
-	if (res == NULL)
-		return (barlen);
-	start = rman_get_start(res);
-	if ((u_long)start != start) {
-		/* Wait a minute!  this platform can't do this address. */
-		device_printf(bus,
-		    "pci%d:%d.%d.%x bar %#x start %#jx, too many bits.",
-		    pci_get_domain(dev), b, s, f, reg, (uintmax_t)start);
-		resource_list_release(rl, bus, dev, type, reg, res);
-		return (barlen);
-	}
+	if (res == NULL) {
+		/*
+		 * If the allocation fails, clear the BAR and delete
+		 * the resource list entry to force
+		 * pci_alloc_resource() to allocate resources from the
+		 * parent.
+		 */
+		resource_list_delete(rl, type, reg);
+		start = 0;
+	} else
+		start = rman_get_start(res);
 	pci_write_config(dev, reg, start, 4);
 	if (ln2range == 64)
 		pci_write_config(dev, reg + 4, start >> 32, 4);
@@ -2605,9 +2645,7 @@ pci_attach(device_t dev)
 	if (bootverbose)
 		device_printf(dev, "domain=%d, physical bus=%d\n",
 		    domain, busno);
-
 	pci_add_children(dev, domain, busno, sizeof(struct pci_devinfo));
-
 	return (bus_generic_attach(dev));
 }
 
@@ -2625,7 +2663,8 @@ pci_suspend(device_t dev)
 	acpi_dev = NULL;
 	if (pci_do_power_resume)
 		acpi_dev = devclass_get_device(devclass_find("acpi"), 0);
-	device_get_children(dev, &devlist, &numdevs);
+	if ((error = device_get_children(dev, &devlist, &numdevs)) != 0)
+		return (error);
 	for (i = 0; i < numdevs; i++) {
 		child = devlist[i];
 		dinfo = (struct pci_devinfo *) device_get_ivars(child);
@@ -2662,7 +2701,7 @@ pci_suspend(device_t dev)
 int
 pci_resume(device_t dev)
 {
-	int i, numdevs;
+	int i, numdevs, error;
 	device_t acpi_dev, child, *devlist;
 	struct pci_devinfo *dinfo;
 
@@ -2672,7 +2711,8 @@ pci_resume(device_t dev)
 	acpi_dev = NULL;
 	if (pci_do_power_resume)
 		acpi_dev = devclass_get_device(devclass_find("acpi"), 0);
-	device_get_children(dev, &devlist, &numdevs);
+	if ((error = device_get_children(dev, &devlist, &numdevs)) != 0)
+		return (error);
 	for (i = 0; i < numdevs; i++) {
 		/*
 		 * Notify ACPI we're going to D0 but ignore the result.  If
@@ -2721,7 +2761,8 @@ pci_driver_added(device_t dev, driver_t *driver)
 	if (bootverbose)
 		device_printf(dev, "driver added\n");
 	DEVICE_IDENTIFY(driver, dev);
-	device_get_children(dev, &devlist, &numdevs);
+	if (device_get_children(dev, &devlist, &numdevs) != 0)
+		return;
 	for (i = 0; i < numdevs; i++) {
 		child = devlist[i];
 		if (device_get_state(child) != DS_NOTPRESENT)
@@ -2908,6 +2949,9 @@ static struct
 	{PCIC_STORAGE,		PCIS_STORAGE_FLOPPY,	"floppy disk"},
 	{PCIC_STORAGE,		PCIS_STORAGE_IPI,	"IPI"},
 	{PCIC_STORAGE,		PCIS_STORAGE_RAID,	"RAID"},
+	{PCIC_STORAGE,		PCIS_STORAGE_ATA_ADMA,	"ATA (ADMA)"},
+	{PCIC_STORAGE,		PCIS_STORAGE_SATA,	"SATA"},
+	{PCIC_STORAGE,		PCIS_STORAGE_SAS,	"SAS"},
 	{PCIC_NETWORK,		-1,			"network"},
 	{PCIC_NETWORK,		PCIS_NETWORK_ETHERNET,	"ethernet"},
 	{PCIC_NETWORK,		PCIS_NETWORK_TOKENRING,	"token ring"},
@@ -2922,6 +2966,7 @@ static struct
 	{PCIC_MULTIMEDIA,	PCIS_MULTIMEDIA_VIDEO,	"video"},
 	{PCIC_MULTIMEDIA,	PCIS_MULTIMEDIA_AUDIO,	"audio"},
 	{PCIC_MULTIMEDIA,	PCIS_MULTIMEDIA_TELE,	"telephony"},
+	{PCIC_MULTIMEDIA,	PCIS_MULTIMEDIA_HDA,	"HDA"},
 	{PCIC_MEMORY,		-1,			"memory"},
 	{PCIC_MEMORY,		PCIS_MEMORY_RAM,	"RAM"},
 	{PCIC_MEMORY,		PCIS_MEMORY_FLASH,	"flash"},
@@ -2946,6 +2991,7 @@ static struct
 	{PCIC_BASEPERIPH,	PCIS_BASEPERIPH_TIMER,	"timer"},
 	{PCIC_BASEPERIPH,	PCIS_BASEPERIPH_RTC,	"realtime clock"},
 	{PCIC_BASEPERIPH,	PCIS_BASEPERIPH_PCIHOT,	"PCI hot-plug controller"},
+	{PCIC_BASEPERIPH,	PCIS_BASEPERIPH_SDHC,	"SD host controller"},
 	{PCIC_INPUTDEV,		-1,			"input device"},
 	{PCIC_INPUTDEV,		PCIS_INPUTDEV_KEYBOARD,	"keyboard"},
 	{PCIC_INPUTDEV,		PCIS_INPUTDEV_DIGITIZER,"digitizer"},

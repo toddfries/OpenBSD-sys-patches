@@ -89,7 +89,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/sys_pipe.c,v 1.192 2007/10/24 19:03:55 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/sys_pipe.c,v 1.199 2008/11/11 14:55:59 ed Exp $");
 
 #include "opt_mac.h"
 
@@ -108,6 +108,7 @@ __FBSDID("$FreeBSD: src/sys/kern/sys_pipe.c,v 1.192 2007/10/24 19:03:55 rwatson 
 #include <sys/poll.h>
 #include <sys/selinfo.h>
 #include <sys/signalvar.h>
+#include <sys/syscallsubr.h>
 #include <sys/sysctl.h>
 #include <sys/sysproto.h>
 #include <sys/pipe.h>
@@ -140,6 +141,7 @@ __FBSDID("$FreeBSD: src/sys/kern/sys_pipe.c,v 1.192 2007/10/24 19:03:55 rwatson 
  */
 static fo_rdwr_t	pipe_read;
 static fo_rdwr_t	pipe_write;
+static fo_truncate_t	pipe_truncate;
 static fo_ioctl_t	pipe_ioctl;
 static fo_poll_t	pipe_poll;
 static fo_kqfilter_t	pipe_kqfilter;
@@ -149,6 +151,7 @@ static fo_close_t	pipe_close;
 static struct fileops pipeops = {
 	.fo_read = pipe_read,
 	.fo_write = pipe_write,
+	.fo_truncate = pipe_truncate,
 	.fo_ioctl = pipe_ioctl,
 	.fo_poll = pipe_poll,
 	.fo_kqfilter = pipe_kqfilter,
@@ -263,8 +266,8 @@ pipe_zone_ctor(void *mem, int size, void *arg, int flags)
 	 * one at a time.  When both are free'd, then the whole pair
 	 * is released.
 	 */
-	rpipe->pipe_present = 1;
-	wpipe->pipe_present = 1;
+	rpipe->pipe_present = PIPE_ACTIVE;
+	wpipe->pipe_present = PIPE_ACTIVE;
 
 	/*
 	 * Eventually, the MAC Framework may initialize the label
@@ -305,13 +308,8 @@ pipe_zone_fini(void *mem, int size)
  * The pipe system call for the DTYPE_PIPE type of pipes.  If we fail, let
  * the zone pick up the pieces via pipeclose().
  */
-/* ARGSUSED */
 int
-pipe(td, uap)
-	struct thread *td;
-	struct pipe_args /* {
-		int	dummy;
-	} */ *uap;
+kern_pipe(struct thread *td, int fildes[2])
 {
 	struct filedesc *fdp = td->td_proc->p_fd;
 	struct file *rf, *wf;
@@ -355,7 +353,7 @@ pipe(td, uap)
 		return (error);
 	}
 	/* An extra reference on `rf' has been held for us by falloc(). */
-	td->td_retval[0] = fd;
+	fildes[0] = fd;
 
 	/*
 	 * Warning: once we've gotten past allocation of the fd for the
@@ -363,30 +361,37 @@ pipe(td, uap)
 	 * to avoid races against processes which manage to dup() the read
 	 * side while we are blocked trying to allocate the write side.
 	 */
-	FILE_LOCK(rf);
-	rf->f_flag = FREAD | FWRITE;
-	rf->f_type = DTYPE_PIPE;
-	rf->f_data = rpipe;
-	rf->f_ops = &pipeops;
-	FILE_UNLOCK(rf);
+	finit(rf, FREAD | FWRITE, DTYPE_PIPE, rpipe, &pipeops);
 	error = falloc(td, &wf, &fd);
 	if (error) {
-		fdclose(fdp, rf, td->td_retval[0], td);
+		fdclose(fdp, rf, fildes[0], td);
 		fdrop(rf, td);
 		/* rpipe has been closed by fdrop(). */
 		pipeclose(wpipe);
 		return (error);
 	}
 	/* An extra reference on `wf' has been held for us by falloc(). */
-	FILE_LOCK(wf);
-	wf->f_flag = FREAD | FWRITE;
-	wf->f_type = DTYPE_PIPE;
-	wf->f_data = wpipe;
-	wf->f_ops = &pipeops;
-	FILE_UNLOCK(wf);
+	finit(wf, FREAD | FWRITE, DTYPE_PIPE, wpipe, &pipeops);
 	fdrop(wf, td);
-	td->td_retval[1] = fd;
+	fildes[1] = fd;
 	fdrop(rf, td);
+
+	return (0);
+}
+
+/* ARGSUSED */
+int
+pipe(struct thread *td, struct pipe_args *uap)
+{
+	int error;
+	int fildes[2];
+
+	error = kern_pipe(td, fildes);
+	if (error)
+		return (error);
+	
+	td->td_retval[0] = fildes[0];
+	td->td_retval[1] = fildes[1];
 
 	return (0);
 }
@@ -524,8 +529,9 @@ pipeselwakeup(cpipe)
 
 	PIPE_LOCK_ASSERT(cpipe, MA_OWNED);
 	if (cpipe->pipe_state & PIPE_SEL) {
-		cpipe->pipe_state &= ~PIPE_SEL;
 		selwakeuppri(&cpipe->pipe_sel, PSOCK);
+		if (!SEL_WAITING(&cpipe->pipe_sel))
+			cpipe->pipe_state &= ~PIPE_SEL;
 	}
 	if ((cpipe->pipe_state & PIPE_ASYNC) && cpipe->pipe_sigio)
 		pgsigio(&cpipe->pipe_sigio, SIGIO, 0);
@@ -880,6 +886,7 @@ retry:
 			wpipe->pipe_state &= ~PIPE_WANTR;
 			wakeup(wpipe);
 		}
+		pipeselwakeup(wpipe);
 		wpipe->pipe_state |= PIPE_WANTW;
 		pipeunlock(wpipe);
 		error = msleep(wpipe, PIPE_MTX(wpipe),
@@ -895,6 +902,7 @@ retry:
 			wpipe->pipe_state &= ~PIPE_WANTR;
 			wakeup(wpipe);
 		}
+		pipeselwakeup(wpipe);
 		wpipe->pipe_state |= PIPE_WANTW;
 		pipeunlock(wpipe);
 		error = msleep(wpipe, PIPE_MTX(wpipe),
@@ -980,7 +988,8 @@ pipe_write(fp, uio, active_cred, flags, td)
 	/*
 	 * detect loss of pipe read side, issue SIGPIPE if lost.
 	 */
-	if ((!wpipe->pipe_present) || (wpipe->pipe_state & PIPE_EOF)) {
+	if (wpipe->pipe_present != PIPE_ACTIVE ||
+	    (wpipe->pipe_state & PIPE_EOF)) {
 		pipeunlock(wpipe);
 		PIPE_UNLOCK(rpipe);
 		return (EPIPE);
@@ -1080,6 +1089,8 @@ pipe_write(fp, uio, active_cred, flags, td)
 				wpipe->pipe_state &= ~PIPE_WANTR;
 				wakeup(wpipe);
 			}
+			pipeselwakeup(wpipe);
+			wpipe->pipe_state |= PIPE_WANTW;
 			pipeunlock(wpipe);
 			error = msleep(wpipe, PIPE_MTX(rpipe), PRIBIO | PCATCH,
 			    "pipbww", 0);
@@ -1235,6 +1246,18 @@ pipe_write(fp, uio, active_cred, flags, td)
 	return (error);
 }
 
+/* ARGSUSED */
+static int
+pipe_truncate(fp, length, active_cred, td)
+	struct file *fp;
+	off_t length;
+	struct ucred *active_cred;
+	struct thread *td;
+{
+
+	return (EINVAL);
+}
+
 /*
  * we implement a very minimal set of ioctls for compatibility with sockets.
  */
@@ -1337,25 +1360,28 @@ pipe_poll(fp, events, active_cred, td)
 			revents |= events & (POLLIN | POLLRDNORM);
 
 	if (events & (POLLOUT | POLLWRNORM))
-		if (!wpipe->pipe_present || (wpipe->pipe_state & PIPE_EOF) ||
+		if (wpipe->pipe_present != PIPE_ACTIVE ||
+		    (wpipe->pipe_state & PIPE_EOF) ||
 		    (((wpipe->pipe_state & PIPE_DIRECTW) == 0) &&
 		     (wpipe->pipe_buffer.size - wpipe->pipe_buffer.cnt) >= PIPE_BUF))
 			revents |= events & (POLLOUT | POLLWRNORM);
 
 	if ((rpipe->pipe_state & PIPE_EOF) ||
-	    (!wpipe->pipe_present) ||
+	    wpipe->pipe_present != PIPE_ACTIVE ||
 	    (wpipe->pipe_state & PIPE_EOF))
 		revents |= POLLHUP;
 
 	if (revents == 0) {
 		if (events & (POLLIN | POLLRDNORM)) {
 			selrecord(td, &rpipe->pipe_sel);
-			rpipe->pipe_state |= PIPE_SEL;
+			if (SEL_WAITING(&rpipe->pipe_sel))
+				rpipe->pipe_state |= PIPE_SEL;
 		}
 
 		if (events & (POLLOUT | POLLWRNORM)) {
 			selrecord(td, &wpipe->pipe_sel);
-			wpipe->pipe_state |= PIPE_SEL;
+			if (SEL_WAITING(&wpipe->pipe_sel))
+				wpipe->pipe_state |= PIPE_SEL;
 		}
 	}
 #ifdef MAC
@@ -1482,7 +1508,7 @@ pipeclose(cpipe)
 	 * Disconnect from peer, if any.
 	 */
 	ppipe = cpipe->pipe_peer;
-	if (ppipe->pipe_present != 0) {
+	if (ppipe->pipe_present == PIPE_ACTIVE) {
 		pipeselwakeup(ppipe);
 
 		ppipe->pipe_state |= PIPE_EOF;
@@ -1499,16 +1525,23 @@ pipeclose(cpipe)
 	PIPE_UNLOCK(cpipe);
 	pipe_free_kmem(cpipe);
 	PIPE_LOCK(cpipe);
-	cpipe->pipe_present = 0;
+	cpipe->pipe_present = PIPE_CLOSING;
 	pipeunlock(cpipe);
+
+	/*
+	 * knlist_clear() may sleep dropping the PIPE_MTX. Set the
+	 * PIPE_FINALIZED, that allows other end to free the
+	 * pipe_pair, only after the knotes are completely dismantled.
+	 */
 	knlist_clear(&cpipe->pipe_sel.si_note, 1);
+	cpipe->pipe_present = PIPE_FINALIZED;
 	knlist_destroy(&cpipe->pipe_sel.si_note);
 
 	/*
 	 * If both endpoints are now closed, release the memory for the
 	 * pipe pair.  If not, unlock.
 	 */
-	if (ppipe->pipe_present == 0) {
+	if (ppipe->pipe_present == PIPE_FINALIZED) {
 		PIPE_UNLOCK(cpipe);
 #ifdef MAC
 		mac_pipe_destroy(pp);
@@ -1532,7 +1565,7 @@ pipe_kqfilter(struct file *fp, struct knote *kn)
 		break;
 	case EVFILT_WRITE:
 		kn->kn_fop = &pipe_wfiltops;
-		if (!cpipe->pipe_peer->pipe_present) {
+		if (cpipe->pipe_peer->pipe_present != PIPE_ACTIVE) {
 			/* other end of pipe has been closed */
 			PIPE_UNLOCK(cpipe);
 			return (EPIPE);
@@ -1555,13 +1588,8 @@ filt_pipedetach(struct knote *kn)
 	struct pipe *cpipe = (struct pipe *)kn->kn_fp->f_data;
 
 	PIPE_LOCK(cpipe);
-	if (kn->kn_filter == EVFILT_WRITE) {
-		if (!cpipe->pipe_peer->pipe_present) {
-			PIPE_UNLOCK(cpipe);
-			return;
-		}
+	if (kn->kn_filter == EVFILT_WRITE)
 		cpipe = cpipe->pipe_peer;
-	}
 	knlist_remove(&cpipe->pipe_sel.si_note, kn, 1);
 	PIPE_UNLOCK(cpipe);
 }
@@ -1580,7 +1608,8 @@ filt_piperead(struct knote *kn, long hint)
 		kn->kn_data = rpipe->pipe_map.cnt;
 
 	if ((rpipe->pipe_state & PIPE_EOF) ||
-	    (!wpipe->pipe_present) || (wpipe->pipe_state & PIPE_EOF)) {
+	    wpipe->pipe_present != PIPE_ACTIVE ||
+	    (wpipe->pipe_state & PIPE_EOF)) {
 		kn->kn_flags |= EV_EOF;
 		PIPE_UNLOCK(rpipe);
 		return (1);
@@ -1598,7 +1627,8 @@ filt_pipewrite(struct knote *kn, long hint)
 	struct pipe *wpipe = rpipe->pipe_peer;
 
 	PIPE_LOCK(rpipe);
-	if ((!wpipe->pipe_present) || (wpipe->pipe_state & PIPE_EOF)) {
+	if (wpipe->pipe_present != PIPE_ACTIVE ||
+	    (wpipe->pipe_state & PIPE_EOF)) {
 		kn->kn_data = 0;
 		kn->kn_flags |= EV_EOF;
 		PIPE_UNLOCK(rpipe);

@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)signalvar.h	8.6 (Berkeley) 2/19/95
- * $FreeBSD: src/sys/sys/signalvar.h,v 1.77 2006/10/05 01:56:11 davidxu Exp $
+ * $FreeBSD: src/sys/sys/signalvar.h,v 1.78 2007/11/05 11:36:16 kib Exp $
  */
 
 #ifndef _SYS_SIGNALVAR_H_
@@ -299,6 +299,7 @@ struct mtx;
 
 extern int sugid_coredump;	/* Sysctl variable kern.sugid_coredump */
 extern struct mtx	sigio_lock;
+extern int kern_logsigexit;	/* Sysctl variable kern.logsigexit */
 
 /*
  * Lock the pointers for a sigio object in the underlying objects of
