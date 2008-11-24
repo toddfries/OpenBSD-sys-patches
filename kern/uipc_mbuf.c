@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.95 2008/11/24 12:57:37 dlg Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.98 2008/11/24 19:17:16 dlg Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -84,6 +84,10 @@
 #include <sys/protosw.h>
 #include <sys/pool.h>
 
+#include <sys/socket.h>
+#include <sys/socketvar.h>
+#include <net/if.h>
+
 #include <machine/cpu.h>
 
 #include <uvm/uvm_extern.h>
@@ -95,8 +99,7 @@ struct	pool mbpool;		/* mbuf pool */
 struct	mclsizes mclsizes[] = {
 	{  MCLBYTES, 4, 1 }, /* must be at slot 0 */
 	{  4 * 1024, 4, 2 },
-#ifdef notyet
-	/* pool allocator cannot cope with >PAGESIZE objects */
+#if art_doesnt_suck
 	{  8 * 1024, 4, 2 },
 	{  9 * 1024, 4, 2 },
 	{ 12 * 1024, 4, 2 },
