@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.447 2008/11/22 21:26:48 oga Exp $
+#	$OpenBSD: files,v 1.449 2008/11/24 04:46:59 tedu Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -303,10 +303,8 @@ file	dev/ic/gem.c			gem
 
 # 8250/16[45]50-based "com" ports
 device	com: tty
-device	pccom: tty			# XXX
 file	dev/ic/com.c			com & (com | com_cardbus | com_gsc |
 					       com_isapnp)	needs-flag
-file	dev/ic/com_subr.c		com | pccom
 
 # PC-like keyboard controller
 define	pckbcslot {[slot = -1]}
@@ -453,6 +451,7 @@ file	dev/softraid.c			softraid	needs-flag
 file	dev/softraid_raid0.c		softraid
 file	dev/softraid_raid1.c		softraid
 file	dev/softraid_crypto.c		softraid & crypto
+file	dev/softraid_aoe.c		softraid & ether & aoe
 
 # legitimate pseudo-devices
 pseudo-device vnd: disk
@@ -787,6 +786,7 @@ file net/if_gre.c			gre			needs-count
 file net/if_trunk.c			trunk			needs-count
 file net/trunklacp.c			trunk
 file net/if_mpe.c			mpe			needs-count
+file net/if_aoe.c			ether & aoe
 file net80211/ieee80211.c		wlan
 file net80211/ieee80211_amrr.c		wlan
 file net80211/ieee80211_crypto.c	wlan

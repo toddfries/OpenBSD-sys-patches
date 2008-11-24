@@ -138,9 +138,6 @@ drm_addmap(struct drm_device * dev, unsigned long offset, unsigned long size,
 
 	switch (map->type) {
 	case _DRM_REGISTERS:
-		map->handle = drm_ioremap(dev, map);
-		if (map->handle == NULL)
-			return (EINVAL);
 		if (!(map->flags & _DRM_WRITE_COMBINING))
 			break;
 		/* FALLTHROUGH */
@@ -206,7 +203,7 @@ drm_addmap(struct drm_device * dev, unsigned long offset, unsigned long size,
 		align = map->size;
 		if ((align & (align - 1)) != 0)
 			align = PAGE_SIZE;
-		map->dmah = drm_pci_alloc(dev->pa.pa_dmat, map->size, align,
+		map->dmah = drm_pci_alloc(dev->dmat, map->size, align,
 		    0xfffffffful);
 		if (map->dmah == NULL) {
 			drm_free(map, sizeof(*map), DRM_MEM_MAPS);
@@ -219,7 +216,7 @@ drm_addmap(struct drm_device * dev, unsigned long offset, unsigned long size,
 			/* Prevent a 2nd X Server from creating a 2nd lock */
 			if (dev->lock.hw_lock != NULL) {
 				DRM_UNLOCK();
-				drm_pci_free(dev->pa.pa_dmat, map->dmah);
+				drm_pci_free(dev->dmat, map->dmah);
 				drm_free(map, sizeof(*map), DRM_MEM_MAPS);
 				return (EBUSY);
 			}
@@ -289,7 +286,6 @@ drm_rmmap_locked(struct drm_device *dev, drm_local_map_t *map)
 
 	switch (map->type) {
 	case _DRM_REGISTERS:
-		drm_ioremapfree(map);
 		/* FALLTHROUGH */
 	case _DRM_FRAME_BUFFER:
 		if (map->mtrr) {
@@ -301,11 +297,13 @@ drm_rmmap_locked(struct drm_device *dev, drm_local_map_t *map)
 		}
 		break;
 	case _DRM_AGP:
+		/* FALLTHROUGH */
 	case _DRM_SCATTER_GATHER:
 		break;
 	case _DRM_SHM:
+		/* FALLTHROUGH */
 	case _DRM_CONSISTENT:
-		drm_pci_free(dev->pa.pa_dmat, map->dmah);
+		drm_pci_free(dev->dmat, map->dmah);
 		break;
 	default:
 		DRM_ERROR("Bad map type %d\n", map->type);
@@ -419,7 +417,10 @@ drm_do_addbufs_agp(struct drm_device *dev, struct drm_buf_desc *request)
 
 	entry = &dma->bufs[order];
 
-	entry->buflist = drm_calloc(count, sizeof(*entry->buflist),
+	if (dev->driver->buf_priv_size == 0)
+		return (ENOMEM);
+
+	entry->buflist = drm_calloc(count, dev->driver->buf_priv_size,
 	    DRM_MEM_BUFS);
 	if (entry->buflist == NULL)
 		return ENOMEM;
@@ -439,15 +440,6 @@ drm_do_addbufs_agp(struct drm_device *dev, struct drm_buf_desc *request)
 		buf->bus_address = agp_offset + offset;
 		buf->pending = 0;
 		buf->file_priv = NULL;
-
-		buf->dev_private = drm_calloc(1, dev->driver->buf_priv_size,
-		    DRM_MEM_BUFS);
-		if (buf->dev_private == NULL) {
-			/* Set count correctly so we free the proper amount. */
-			entry->buf_count = count;
-			drm_cleanup_buf(dev, entry);
-			return ENOMEM;
-		}
 
 		offset += alignment;
 		entry->buf_count++;
@@ -517,7 +509,10 @@ drm_do_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *request)
 
 	entry = &dma->bufs[order];
 
-	entry->buflist = drm_calloc(count, sizeof(*entry->buflist),
+	if (dev->driver->buf_priv_size == 0)
+		return (EINVAL);
+
+	entry->buflist = drm_calloc(count, dev->driver->buf_priv_size,
 	    DRM_MEM_BUFS);
 	entry->seglist = drm_calloc(count, sizeof(*entry->seglist),
 	    DRM_MEM_BUFS);
@@ -551,7 +546,7 @@ drm_do_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *request)
 	page_count = 0;
 
 	while (entry->buf_count < count) {
-		drm_dma_handle_t *dmah = drm_pci_alloc(dev->pa.pa_dmat, size,
+		drm_dma_handle_t *dmah = drm_pci_alloc(dev->dmat, size,
 		    alignment, 0xfffffffful);
 		if (dmah == NULL) {
 			/* Set count correctly so we free the proper amount. */
@@ -584,20 +579,6 @@ drm_do_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *request)
 			buf->bus_address = dmah->busaddr + offset;
 			buf->pending = 0;
 			buf->file_priv = NULL;
-
-			buf->dev_private = drm_calloc(1,
-			    dev->driver->buf_priv_size, DRM_MEM_BUFS);
-			if (buf->dev_private == NULL) {
-				/* Set count so we free the proper amount. */
-				entry->buf_count = count;
-				entry->seg_count = count;
-				drm_cleanup_buf(dev, entry);
-				drm_free(temp_pagelist, (dma->page_count +
-				    (count << page_order)) *
-				    sizeof(*dma->pagelist),
-				    DRM_MEM_BUFS);
-				return ENOMEM;
-			}
 
 			DRM_DEBUG("buffer %d\n",
 			    entry->buf_count);
@@ -680,7 +661,10 @@ drm_do_addbufs_sg(struct drm_device *dev, struct drm_buf_desc *request)
 
 	entry = &dma->bufs[order];
 
-	entry->buflist = drm_calloc(count, sizeof(*entry->buflist),
+	if (dev->driver->buf_priv_size == 0)
+		return (ENOMEM);
+
+	entry->buflist = drm_calloc(count, dev->driver->buf_priv_size,
 	    DRM_MEM_BUFS);
 	if (entry->buflist == NULL)
 		return ENOMEM;
@@ -700,15 +684,6 @@ drm_do_addbufs_sg(struct drm_device *dev, struct drm_buf_desc *request)
 		buf->bus_address = agp_offset + offset;
 		buf->pending = 0;
 		buf->file_priv = NULL;
-
-		buf->dev_private = drm_calloc(1, dev->driver->buf_priv_size,
-		    DRM_MEM_BUFS);
-		if (buf->dev_private == NULL) {
-			/* Set count correctly so we free the proper amount. */
-			entry->buf_count = count;
-			drm_cleanup_buf(dev, entry);
-			return ENOMEM;
-		}
 
 		DRM_DEBUG("buffer %d\n", entry->buf_count);
 

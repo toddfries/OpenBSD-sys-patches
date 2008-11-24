@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.105 2008/11/18 21:52:39 marco Exp $ */
+/*	$OpenBSD: mpi.c,v 1.107 2008/11/23 16:20:06 marco Exp $ */
 
 /*
  * Copyright (c) 2005, 2006 David Gwynne <dlg@openbsd.org>
@@ -160,7 +160,6 @@ void		mpi_refresh_sensors(void *);
 #define DEVNAME(s)		((s)->sc_dev.dv_xname)
 
 #define	dwordsof(s)		(sizeof(s) / sizeof(u_int32_t))
-#define	sizeofa(s)		(sizeof(s) / sizeof((s)[0]))
 
 #define mpi_read_db(s)		mpi_read((s), MPI_DOORBELL)
 #define mpi_write_db(s, v)	mpi_write((s), MPI_DOORBELL, (v))
@@ -287,7 +286,6 @@ mpi_attach(struct mpi_softc *sc)
 	/* enable interrupts */
 	mpi_write(sc, MPI_INTR_MASK, MPI_INTR_MASK_DOORBELL);
 
-#ifdef notyet
 #if NBIO > 0
 	if (sc->sc_flags & MPI_F_RAID) {
 		if (bio_register(&sc->sc_dev, mpi_ioctl) != 0)
@@ -318,7 +316,6 @@ mpi_attach(struct mpi_softc *sc)
 #endif /* SMALL_KERNEL */
 done:
 #endif /* NBIO > 0 */
-#endif /* notyet */
 
 	return (0);
 

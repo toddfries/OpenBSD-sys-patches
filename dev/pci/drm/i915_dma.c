@@ -144,7 +144,7 @@ static int i915_dma_cleanup(struct drm_device * dev)
 
 	/* Clear the HWS virtual address at teardown */
 	if (I915_NEED_GFX_HWS(dev_priv))
-		i915_free_hws(dev_priv, dev->pa.pa_dmat);
+		i915_free_hws(dev_priv, dev->dmat);
 
 	return 0;
 }
@@ -714,6 +714,9 @@ int i915_getparam(struct drm_device *dev, void *data,
 	case I915_PARAM_CHIPSET_ID:
 		value = dev_priv->pci_device;
 		break;
+	case I915_PARAM_HAS_GEM:
+		value = 0;
+		break;
 	default:
 		DRM_ERROR("Unknown parameter %d\n", param->param);
 		return EINVAL;
@@ -811,25 +814,8 @@ void i915_driver_lastclose(struct drm_device * dev)
 	i915_dma_cleanup(dev);
 }
 
-void i915_driver_preclose(struct drm_device * dev, struct drm_file *file_priv)
+void i915_driver_close(struct drm_device * dev, struct drm_file *file_priv)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	i915_mem_release(dev, file_priv, dev_priv->agp_heap);
-}
-
-
-/**
- * Determine if the device really is AGP or not.
- *
- * All Intel graphics chipsets are treated as AGP, even if they are really
- * PCI-e.
- *
- * \param dev   The device to be tested.
- *
- * \returns
- * A value of 1 is always retured to indictate every i9x5 is AGP.
- */
-int i915_driver_device_is_agp(struct drm_device * dev)
-{
-	return 1;
 }

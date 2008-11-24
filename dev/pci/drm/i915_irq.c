@@ -231,7 +231,7 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 		dev_priv->sarea_priv->last_dispatch = READ_BREADCRUMB(dev_priv);
 
 	if (iir & I915_USER_INTERRUPT) {
-		DRM_WAKEUP(&dev_priv);
+		DRM_WAKEUP(dev_priv);
 	}
 
 	if (pipea_stats & I915_VBLANK_INTERRUPT_STATUS)
@@ -400,7 +400,8 @@ int i915_vblank_pipe_get(struct drm_device *dev, void *data,
 
 /* drm_dma.h hooks
 */
-void i915_driver_irq_preinstall(struct drm_device * dev)
+int
+i915_driver_irq_install(struct drm_device *dev)
 {
 	drm_i915_private_t *dev_priv = (drm_i915_private_t *) dev->dev_private;
 
@@ -410,16 +411,11 @@ void i915_driver_irq_preinstall(struct drm_device * dev)
 	I915_WRITE(IMR, 0xffffffff);
 	I915_WRITE(IER, 0x0);
 	(void)I915_READ(IER);
-}
 
-int i915_driver_irq_postinstall(struct drm_device * dev)
-{
-	drm_i915_private_t *dev_priv = (drm_i915_private_t *) dev->dev_private;
-	int ret, num_pipes = 2;
-
-	ret = drm_vblank_init(dev, num_pipes);
-	if (ret)
-		return ret;
+	dev_priv->irqh = pci_intr_establish(dev_priv->pc, dev_priv->ih, IPL_BIO,
+	    drm_irq_handler_wrap, dev, dev_priv->dev.dv_xname);
+	if (dev_priv->irqh == NULL)
+		return (ENOENT);
 
 	dev->max_vblank_count = 0xffffff; /* only 24 bits of frame count */
 
@@ -457,4 +453,6 @@ void i915_driver_irq_uninstall(struct drm_device * dev)
 	I915_WRITE(PIPEASTAT, I915_READ(PIPEASTAT) & 0x8000ffff);
 	I915_WRITE(PIPEBSTAT, I915_READ(PIPEBSTAT) & 0x8000ffff);
 	I915_WRITE(IIR, I915_READ(IIR));
+
+	pci_intr_disestablish(dev_priv->pc, dev_priv->irqh);
 }
