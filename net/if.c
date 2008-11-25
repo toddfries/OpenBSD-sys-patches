@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.177 2008/11/24 12:57:37 dlg Exp $	*/
+/*	$OpenBSD: if.c,v 1.181 2008/11/25 16:32:41 dlg Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -2019,24 +2019,26 @@ sysctl_ifq(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 void
 m_clinitifp(struct ifnet *ifp)
 {
-	extern struct mclsizes mclsizes[];
+	extern u_int mclsizes[];
 	int i;
 
 	/* Initialize high water marks for use of cluster pools */
-	for (i = 0; i < MCLPOOLS; i++)
-		ifp->if_mclstat.mclpool[i].mcl_hwm = mclsizes[i].hwm;
+	for (i = 0; i < MCLPOOLS; i++) {
+		ifp->if_mclstat.mclpool[i].mcl_hwm = 4;
+		ifp->if_mclstat.mclpool[i].mcl_size = mclsizes[i];
+	}
 }
 
 int
 m_cldrop(struct ifnet *ifp, int pi)
 {
 	struct mclstat *mcls = &ifp->if_mclstat;
-	extern struct mclsizes mclsizes[];
 
-	if (mcls->mclpool[pi].mcl_alive <= 2 && ISSET(ifp->if_flags, IFF_UP)) {
+	if (mcls->mclpool[pi].mcl_alive <= 2 &&
+	    mcls->mclpool[pi].mcl_hwm < 32768 &&
+	    ISSET(ifp->if_flags, IFF_RUNNING)) {
 		/* About to run out, so increase the watermark */
-		mcls->mclpool[pi].mcl_hwm +=
-		    mcls->mclpool[pi].mcl_hwm / mclsizes[pi].factor;
+		mcls->mclpool[pi].mcl_hwm++;
 	} else if (mcls->mclpool[pi].mcl_alive >= mcls->mclpool[pi].mcl_hwm)
 		return (1);		/* No more packets given */
 
@@ -2050,14 +2052,17 @@ m_clcount(struct ifnet *ifp, int pi)
 }
 
 void
-m_cluncount(struct mbuf *m)
+m_cluncount(struct mbuf *m, int all)
 {
-	struct mbuf_ext *me = &m->m_ext;
+	struct mbuf_ext *me;
 
-	if (((m->m_flags & (M_EXT|M_CLUSTER)) != (M_EXT|M_CLUSTER)) ||
-	    (me->ext_ifp == NULL))
-		return;
+	do {
+		me = &m->m_ext;
+		if (((m->m_flags & (M_EXT|M_CLUSTER)) != (M_EXT|M_CLUSTER)) ||
+		    (me->ext_ifp == NULL))
+			continue;
 
-	me->ext_ifp->if_mclstat.mclpool[me->ext_backend].mcl_alive--;
-	me->ext_ifp = NULL;
+		me->ext_ifp->if_mclstat.mclpool[me->ext_backend].mcl_alive--;
+		me->ext_ifp = NULL;
+	} while (all && (m = m->m_next));
 }
