@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.437 2008/10/09 19:04:18 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.439 2008/11/22 18:12:32 art Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -2340,11 +2340,17 @@ void
 signotify(struct proc *p)
 {
 	aston(p);
-#ifdef MULTIPROCESSOR
-	if (p->p_cpu != curcpu() && p->p_cpu != NULL)
-		i386_send_ipi(p->p_cpu, I386_IPI_NOP);
-#endif
+	cpu_unidle(p->p_cpu);
 }
+
+#ifdef MULTIPROCESSOR
+void
+cpu_unidle(struct cpu_info *ci)
+{
+	if (ci != curcpu())
+		i386_send_ipi(ci, I386_IPI_NOP);
+}
+#endif
 
 int	waittime = -1;
 struct pcb dumppcb;
@@ -2655,11 +2661,10 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	    SDT_MEMERA, SEL_UPL, 1, 1);
 
 	/*
-	 * And update the GDT and LDT since we return to the user process
+	 * And update the GDT since we return to the user process
 	 * by leaving the syscall (we don't do another pmap_activate()).
 	 */
-	curcpu()->ci_gdt[GUCODE_SEL].sd = pcb->pcb_ldt[LUCODE_SEL].sd =
-	    pmap->pm_codeseg;
+	curcpu()->ci_gdt[GUCODE_SEL].sd = pmap->pm_codeseg;
 
 	/*
 	 * And reset the hiexec marker in the pmap.
@@ -2673,17 +2678,17 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	} else
 		pcb->pcb_savefpu.sv_87.sv_env.en_cw = __OpenBSD_NPXCW__;
 
-	tf->tf_fs = LSEL(LUDATA_SEL, SEL_UPL);
-	tf->tf_gs = LSEL(LUDATA_SEL, SEL_UPL);
-	tf->tf_es = LSEL(LUDATA_SEL, SEL_UPL);
-	tf->tf_ds = LSEL(LUDATA_SEL, SEL_UPL);
+	tf->tf_fs = GSEL(GUDATA_SEL, SEL_UPL);
+	tf->tf_gs = GSEL(GUDATA_SEL, SEL_UPL);
+	tf->tf_es = GSEL(GUDATA_SEL, SEL_UPL);
+	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_ebp = 0;
 	tf->tf_ebx = (int)PS_STRINGS;
 	tf->tf_eip = pack->ep_entry;
-	tf->tf_cs = LSEL(LUCODE_SEL, SEL_UPL);
+	tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
 	tf->tf_eflags = PSL_USERSET;
 	tf->tf_esp = stack;
-	tf->tf_ss = LSEL(LUDATA_SEL, SEL_UPL);
+	tf->tf_ss = GSEL(GUDATA_SEL, SEL_UPL);
 
 	retval[1] = 0;
 }
@@ -2875,8 +2880,6 @@ init386(paddr_t first_avail)
 	/* make ldt gates and memory segments */
 	setgate(&ldt[LSYS5CALLS_SEL].gd, &IDTVEC(osyscall), 1, SDT_SYS386CGT,
 	    SEL_UPL, GCODE_SEL);
-	ldt[LUCODE_SEL] = gdt[GUCODE_SEL];
-	ldt[LUDATA_SEL] = gdt[GUDATA_SEL];
 	ldt[LBSDICALLS_SEL] = ldt[LSYS5CALLS_SEL];
 
 	/* exceptions */
@@ -3246,16 +3249,14 @@ cpu_initclocks(void)
 void
 need_resched(struct cpu_info *ci)
 {
-	struct proc *p;
-
 	ci->ci_want_resched = 1;
 
-	/*
-	 * Need to catch the curproc in case it's cleared just
-	 * between the check and the aston().
-	 */
-	if ((p = ci->ci_curproc) != NULL)
-		aston(p);
+	/* There's a risk we'll be called before the idle threads start */
+	if (ci->ci_curproc) {
+		aston(ci->ci_curproc);
+		if (ci != curcpu())
+			cpu_unidle(ci);
+	}
 }
 
 /* Allocate an IDT vector slot within the given range.

@@ -75,6 +75,15 @@ typedef struct {
 } drm_mga_buf_priv_t;
 
 typedef struct drm_mga_private {
+	struct device		 dev;
+	struct device		*drmdev;
+
+	pci_chipset_tag_t	 pc;
+	pci_intr_handle_t	 ih;
+	void			*irqh;
+
+	struct vga_pci_bar	*regs;
+
 	drm_mga_primary_buffer_t prim;
 	drm_mga_sarea_t *sarea_priv;
 
@@ -107,21 +116,10 @@ typedef struct drm_mga_private {
 	 */
 	u32 wagp_enable;
 
-	/**
-	 * \name MMIO region parameters.
-	 *
-	 * \sa drm_mga_private_t::mmio
-	 */
-	/*@{*/
-	u32 mmio_base;			/**< Bus address of base of MMIO. */
-	u32 mmio_size;			/**< Size of the MMIO region. */
-	/*@}*/
-
 	u32 clear_cmd;
 	u32 maccess;
 
 	atomic_t vbl_received;		/**< Number of vblanks received. */
-	wait_queue_head_t fence_queue;
 	atomic_t last_fence_retired;
 	u32 next_fence_to_post;
 
@@ -139,7 +137,6 @@ typedef struct drm_mga_private {
 	unsigned int texture_size;
 
 	drm_local_map_t *sarea;
-	drm_local_map_t *mmio;
 	drm_local_map_t *status;
 	drm_local_map_t *warp;
 	drm_local_map_t *primary;
@@ -160,8 +157,6 @@ extern int mga_dma_reset(struct drm_device *dev, void *data,
 			 struct drm_file *file_priv);
 extern int mga_dma_buffers(struct drm_device *dev, void *data,
 			   struct drm_file *file_priv);
-extern int mga_driver_load(struct drm_device *dev, unsigned long flags);
-extern int mga_driver_unload(struct drm_device * dev);
 extern void mga_driver_lastclose(struct drm_device * dev);
 extern int mga_driver_dma_quiescent(struct drm_device * dev);
 extern int mga_dma_swap(struct drm_device *, void *, struct drm_file *);
@@ -194,8 +189,7 @@ extern u32 mga_get_vblank_counter(struct drm_device *dev, int crtc);
 extern int mga_driver_fence_wait(struct drm_device * dev, unsigned int *sequence);
 extern int mga_driver_vblank_wait(struct drm_device * dev, unsigned int *sequence);
 extern irqreturn_t mga_driver_irq_handler(DRM_IRQ_ARGS);
-extern void mga_driver_irq_preinstall(struct drm_device * dev);
-extern int mga_driver_irq_postinstall(struct drm_device * dev);
+extern int mga_driver_irq_install(struct drm_device * dev);
 extern void mga_driver_irq_uninstall(struct drm_device * dev);
 extern long mga_compat_ioctl(struct file *filp, unsigned int cmd,
 			     unsigned long arg);
@@ -220,10 +214,14 @@ static inline u32 _MGA_READ(u32 * addr)
 	return *(volatile u32 *)addr;
 }
 #else
-#define MGA_READ8( reg )	DRM_READ8(dev_priv->mmio, (reg))
-#define MGA_READ( reg )		DRM_READ32(dev_priv->mmio, (reg))
-#define MGA_WRITE8( reg, val )  DRM_WRITE8(dev_priv->mmio, (reg), (val))
-#define MGA_WRITE( reg, val )	DRM_WRITE32(dev_priv->mmio, (reg), (val))
+#define MGA_READ8(reg)		bus_space_read_1(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg))
+#define MGA_READ(reg)		bus_space_read_4(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg))
+#define MGA_WRITE8(reg,val)	bus_space_write_1(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg), (val))
+#define MGA_WRITE(reg,val)	bus_space_write_4(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg), (val))
 #endif
 
 #define DWGREG0		0x1c00

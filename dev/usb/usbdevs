@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.387 2008/10/23 17:13:55 deraadt Exp $
+$OpenBSD: usbdevs,v 1.390 2008/11/25 08:54:40 jasper Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -405,6 +405,7 @@ vendor MICRODIA		0x0c45	Microdia
 vendor SEALEVEL		0x0c52	Sealevel System
 vendor EASYDISK		0x0c76	EasyDisk
 vendor KYOCERA2		0x0c88	Kyocera
+vendor TERRATEC		0x0ccd	TerraTec Electronic GmbH
 vendor ZCOM		0x0cde	Z-Com
 vendor ATHEROS2		0x0cf3	Atheros Communications
 vendor POSIFLEX		0x0d3a	Posiflex Technologies
@@ -481,6 +482,7 @@ vendor AZUREWAVE	0x13d3	AsureWave
 vendor NOVATEL		0x1410	Novatel
 vendor WISTRONNEWEB	0x1435	Wistron NeWeb
 vendor RADIOSHACK	0x1453	Radio Shack
+vendor OPENMOKO		0x1457	OpenMoko
 vendor HUAWEI3COM	0x1472	Huawei 3Com
 vendor SILICOM		0x1485	Silicom
 vendor RALINK		0x148f	Ralink Technology
@@ -824,6 +826,7 @@ product ATHEROS2 AR5523_2	0x0003	AR5523
 product ATHEROS2 AR5523_2_NF	0x0004	AR5523
 product ATHEROS2 AR5523_3	0x0005	AR5523
 product ATHEROS2 AR5523_3_NF	0x0006	AR5523
+product ATHEROS2 AR9170		0x9170	AR9170
 
 /* ATI products */
 product ATI2 205		0xa001	USB Cable 205
@@ -1148,6 +1151,7 @@ product DLINK2 WUA1340		0x3c04	WUA-1340
 product DLINK2 DWA111		0x3c06	DWA-111
 product DLINK2 DWA110		0x3c07	DWA-110
 product DLINK2 RT2870		0x3c09	RT2870
+product DLINK2 AR9170		0x3c10	AR9170
 
 /* D-Link(3) products */
 product DLINK3 KVM221		0x020f	KVM-221
@@ -2072,6 +2076,7 @@ product	NETGEAR WG111V2_2	0x4240	PrismGT USB 2.0 WLAN
 product NETGEAR WG111U		0x4300	WG111U
 product NETGEAR WG111U_NF	0x4301	WG111U
 product NETGEAR WG111V2		0x6a00	WG111v2
+product NETGEAR AR9170		0x9010	AR9170
 
 /* Netgear(2) products */
 product NETGEAR2 MA101		0x4100	MA101
@@ -2339,6 +2344,9 @@ product QUICKSHOT STRIKEPAD	0x6238	USB StrikePad
 
 /* Radio Shack products */
 product RADIOSHACK PL2303	0x4026	PL2303 Serial
+
+/* OpenMoko products */
+product OPENMOKO N1793D		0x5118	Neo1973 Debug
 
 /* Rainbow Technologies products */
 product	RAINBOW IKEY2000	0x1200	i-Key 2000
@@ -2744,6 +2752,9 @@ product TENDA TWL541U		0x1fab	TWL541U WLAN
 
 /* Ten X Technology, Inc. */
 product TENX MISSILE		0x0202	Missile Launcher
+
+/* TerraTec Electronic GmbH */
+product	TERRATEC AUREON		0x0077	Aureon Dual USB
 
 /* Dream Cheeky */
 product DREAMCHEEKY ROCKETBABY	0x0701	Missile Launcher

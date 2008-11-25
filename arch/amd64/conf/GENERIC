@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.245 2008/10/24 06:10:25 brad Exp $
+#	$OpenBSD: GENERIC,v 1.248 2008/11/24 22:31:18 uwe Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -245,6 +245,10 @@ scsibus* at sdmmc?		# SCSI emulation
 #wskbd*	at btkbd? mux 1
 #wsmouse* at btms? mux 0
 
+# Bluetooth audio support
+#btsco*	at bthub?
+#audio*	at btsco?
+
 isadma0	at isa?
 
 option	WSDISPLAY_COMPAT_USL		# VT handling
@@ -263,16 +267,26 @@ wskbd*		at pckbd? mux 1
 wsmouse*	at pms? mux 0
 wsmouse*	at pmsi? mux 0
 
-agp*		at vga?		# AGP bridge
+intagp*		at vga?		# intel integrated graphics
+agp*		at intagp?
+
 #option		DRM_DEBUG
 inteldrm*	at vga? 	# Intel i915, i945 DRM driver
+drm*		at inteldrm?
 #machdrm*	at vga?		# mach64 (3D Rage Pro, Rage) DRM driver
+#drm*		at machdrm?
 #mgadrm*	at vga?		# Matrox G[24]00, G[45]50 DRM driver
+#drm*		at mgadrm?
 #ragedrm*	at vga?		# ATI Rage 128 DRM driver
+#drm*		at ragedrm?
 radeondrm*	at vga? 	# ATI Radeon DRM driver
+drm*		at radeondrm?
 #savagedrm*	at vga?		# S3 Savage DRM driver
+#drm*		at savagedrm?
 #sisdrm*	at vga?		# SiS DRM driver
+#drm*		at sisdrm?
 #tdfxdrm*	at vga?		# 3dfx (voodoo) DRM driver
+#drm*		at tdfxdrm?
 
 pcppi0		at isa?
 

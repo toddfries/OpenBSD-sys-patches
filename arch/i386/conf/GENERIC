@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.638 2008/10/24 06:10:25 brad Exp $
+#	$OpenBSD: GENERIC,v 1.641 2008/11/24 22:31:19 uwe Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -308,6 +308,10 @@ scsibus* at sdmmc?		# SCSI emulation
 #wskbd*	at btkbd? mux 1
 #wsmouse* at btms? mux 0
 
+# Bluetooth audio support
+#btsco*	at bthub?
+#audio*	at btsco?
+
 npx0	at isa? port 0xf0 irq 13	# math coprocessor
 isadma0	at isa?
 isapnp0	at isa?
@@ -330,16 +334,37 @@ wskbd*		at pckbd? mux 1
 wsmouse*	at pms? mux 0
 wsmouse*	at pmsi? mux 0
 
-agp*		at vga?		# AGP bridges
+intagp*		at vga?		# intel integrated graphics agp
+aliagp*		at pchb?
+amdagp*		at pchb?
+intelagp*	at pchb?
+sisagp*		at pchb?
+viaagp*		at pchb?
+
+agp*		at intagp?	# AGP bridges
+agp*		at aliagp?	# AGP bridges
+agp*		at amdagp?	# AGP bridges
+agp*		at intelagp?	# AGP bridges
+agp*		at sisagp?	# AGP bridges
+agp*		at viaagp?	# AGP bridges
+
 #option		DRM_DEBUG
 inteldrm*	at vga? 	# Intel i915, i945 DRM driver
+drm*		at inteldrm?
 #machdrm*	at vga?		# mach64 (3D Rage Pro, Rage) DRM driver
+#drm*		at machdrm?
 #mgadrm*	at vga?		# Matrox G[24]00, G[45]50 DRM driver
+#drm*		at mgadrm?
 #ragedrm*	at vga?		# ATI Rage 128 DRM driver
+#drm*		at ragedrm?
 radeondrm*	at vga? 	# ATI Radeon DRM driver
+drm*		at radeondrm?
 #savagedrm*	at vga?		# S3 Savage DRM driver
+#drm*		at savagedrm?
 #sisdrm*	at vga?		# SiS DRM driver
+#drm*		at sisdrm?
 #tdfxdrm*	at vga?		# 3dfx (voodoo) DRM driver
+#drm*		at tdfxdrm?
 
 #option		VESABIOSVERBOSE
 #option		VESAFB		# VESA bios framebuffer support for X11
