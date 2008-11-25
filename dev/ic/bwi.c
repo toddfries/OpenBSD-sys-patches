@@ -76,7 +76,7 @@
 
 #define BWI_DEBUG
 #ifdef BWI_DEBUG
-int bwi_debug = 1;
+int bwi_debug = 0;
 #define DPRINTF(l, x...)	do { if ((l) <= bwi_debug) printf(x); } while (0)
 #else
 #define DPRINTF(l, x...)
