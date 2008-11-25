@@ -308,8 +308,8 @@ wskbd*	at btkbd? mux 1
 wsmouse* at btms? mux 0
 
 # Bluetooth audio support
-#btsco*	at bthub?
-#audio*	at btsco?
+btsco*	at bthub?
+audio*	at btsco?
 
 # I2C bus support
 iic*		at kiic?
