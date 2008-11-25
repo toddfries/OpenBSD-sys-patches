@@ -1,4 +1,4 @@
-/*	$OpenBSD: btsco.c,v 1.1 2008/11/24 22:31:19 uwe Exp $	*/
+/*	$OpenBSD: btsco.c,v 1.3 2008/11/25 17:28:03 ratchov Exp $	*/
 /*	$NetBSD: btsco.c,v 1.22 2008/08/06 15:01:23 plunky Exp $	*/
 
 /*-
@@ -744,11 +744,8 @@ static int
 btsco_set_params(void *hdl, int setmode, int usemode,
     audio_params_t *play, audio_params_t *rec)
 {
-/*	struct btsco_softc *sc = hdl;	*/
-	const struct audio_format *f;
-#if 0
-	int rv;
-#endif
+	int i, mode;
+	struct audio_params *p;
 
 	DPRINTF("setmode 0x%x usemode 0x%x\n", setmode, usemode);
 	DPRINTF("rate %d, precision %d, channels %d encoding %d\n",
@@ -759,22 +756,21 @@ btsco_set_params(void *hdl, int setmode, int usemode,
 	 * and select the appropriate one to use. Currently only one is
 	 * supported: 0x0060 == 8000Hz, mono, 16-bit, slinear_le
 	 */
-	f = &btsco_format;
-
-#if 0
-	if (setmode & AUMODE_PLAY) {
-		rv = auconv_set_converter(f, 1, AUMODE_PLAY, play, TRUE, pfil);
-		if (rv < 0)
-			return EINVAL;
+	for (i = 0; i < 2; i++) {
+		if (i) {
+			mode = AUMODE_REC;
+			p = rec;
+		} else {
+			mode = AUMODE_PLAY;
+			p = play;
+		}
+		if (!(setmode & mode))
+			continue;
+		p->sample_rate = 8000;
+		p->encoding = slinear_le;
+		p->precision = 16;
+		p->channels = 1;
 	}
-
-	if (setmode & AUMODE_RECORD) {
-		rv = auconv_set_converter(f, 1, AUMODE_RECORD, rec, TRUE, rfil);
-		if (rv < 0)
-			return EINVAL;
-	}
-#endif
-
 	return 0;
 }
 
@@ -1002,7 +998,7 @@ btsco_query_devinfo(void *hdl, mixer_devinfo_t *di)
 
 	switch(di->index) {
 	case BTSCO_VGS:
-		di->mixer_class = BTSCO_INPUT_CLASS;
+		di->mixer_class = BTSCO_OUTPUT_CLASS;
 		di->next = di->prev = AUDIO_MIXER_LAST;
 		strlcpy(di->label.name, AudioNspeaker,
 		    sizeof(di->label.name));
@@ -1029,6 +1025,14 @@ btsco_query_devinfo(void *hdl, mixer_devinfo_t *di)
 		di->mixer_class = BTSCO_INPUT_CLASS;
 		di->next = di->prev = AUDIO_MIXER_LAST;
 		strlcpy(di->label.name, AudioCinputs,
+		    sizeof(di->label.name));
+		di->type = AUDIO_MIXER_CLASS;
+		break;
+
+	case BTSCO_OUTPUT_CLASS:
+		di->mixer_class = BTSCO_OUTPUT_CLASS;
+		di->next = di->prev = AUDIO_MIXER_LAST;
+		strlcpy(di->label.name, AudioCoutputs,
 		    sizeof(di->label.name));
 		di->type = AUDIO_MIXER_CLASS;
 		break;
