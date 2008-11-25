@@ -745,7 +745,7 @@ pool_do_put(struct pool *pp, void *v)
 	 */
 	if (ph->ph_nmissing == 0) {
 		pp->pr_nidle++;
-		if (pp->pr_nidle > pp->pr_maxpages) {
+		if (1 || pp->pr_nidle > pp->pr_maxpages) {
 			pr_rmpage(pp, ph, NULL);
 		} else {
 			LIST_REMOVE(ph, ph_pagelist);
