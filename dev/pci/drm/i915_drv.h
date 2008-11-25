@@ -77,12 +77,22 @@ struct mem_block {
 };
 
 typedef struct drm_i915_private {
-	struct vga_pci_bar *regs;
+	struct device		 dev;
+	struct device		*drmdev;
+	bus_dma_tag_t		 dmat;
+
+	u_long			 flags;
+	u_int16_t		 pci_device;
+
+	pci_chipset_tag_t	 pc;
+	pci_intr_handle_t	 ih;
+	void			*irqh;
+
+	struct vga_pci_bar	*regs;
 	drm_local_map_t *sarea;
 
 	drm_i915_sarea_t *sarea_priv;
 	drm_i915_ring_buffer_t ring;
-
 	drm_dma_handle_t *status_page_dmah;
 	void *hw_status_page;
 	dma_addr_t dma_status_page;
@@ -96,7 +106,6 @@ typedef struct drm_i915_private {
 	int current_page;
 	int page_flipping;
 
-	wait_queue_head_t irq_queue;
 	atomic_t irq_received;
 	/* Protects user_irq_refcount and irq_mask reg */
 	DRM_SPINTYPE user_irq_lock;
@@ -106,7 +115,6 @@ typedef struct drm_i915_private {
 	u_int32_t irq_mask_reg;
 	u_int32_t pipestat[2];
 
-	u_long flags;
 	int tex_lru_log_granularity;
 	int allow_batchbuffer;
 	struct mem_block *agp_heap;
@@ -222,10 +230,8 @@ typedef struct drm_i915_private {
 
 				/* i915_dma.c */
 extern void i915_kernel_lost_context(struct drm_device * dev);
-extern int i915_driver_load(struct drm_device *, unsigned long flags);
-extern int i915_driver_unload(struct drm_device *);
 extern void i915_driver_lastclose(struct drm_device * dev);
-extern void i915_driver_preclose(struct drm_device *dev,
+extern void i915_driver_close(struct drm_device *dev,
 				 struct drm_file *file_priv);
 extern int i915_driver_device_is_agp(struct drm_device * dev);
 extern long i915_compat_ioctl(struct file *filp, unsigned int cmd,
@@ -238,6 +244,9 @@ extern int i915_dispatch_batchbuffer(struct drm_device * dev,
 				     drm_i915_batchbuffer_t * batch);
 extern int i915_quiescent(struct drm_device *dev);
 
+int	i915_init_phys_hws(drm_i915_private_t *, bus_dma_tag_t);
+void	i915_free_hws(drm_i915_private_t *, bus_dma_tag_t);
+
 /* i915_irq.c */
 extern int i915_irq_emit(struct drm_device *dev, void *data,
 			 struct drm_file *file_priv);
@@ -245,8 +254,7 @@ extern int i915_irq_wait(struct drm_device *dev, void *data,
 			 struct drm_file *file_priv);
 
 extern irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS);
-extern void i915_driver_irq_preinstall(struct drm_device * dev);
-extern int i915_driver_irq_postinstall(struct drm_device * dev);
+extern int i915_driver_irq_install(struct drm_device * dev);
 extern void i915_driver_irq_uninstall(struct drm_device * dev);
 extern int i915_vblank_pipe_get(struct drm_device *dev, void *data,
 				struct drm_file *file_priv);

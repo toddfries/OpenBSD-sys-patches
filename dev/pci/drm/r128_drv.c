@@ -36,11 +36,12 @@
 #include "r128_drm.h"
 #include "r128_drv.h"
 
-int	r128drm_probe(struct device *, void *, void *);
-void	r128drm_attach(struct device *, struct device *, void *);
+int	ragedrm_probe(struct device *, void *, void *);
+void	ragedrm_attach(struct device *, struct device *, void *);
+int	ragedrm_detach(struct device *, int);
 int	ragedrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-static drm_pci_id_list_t r128_pciidlist[] = {
+static drm_pci_id_list_t ragedrm_pciidlist[] = {
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_LE},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MOBILITY_M3},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_MF},
@@ -81,16 +82,16 @@ static drm_pci_id_list_t r128_pciidlist[] = {
 	{0, 0, 0}
 };
 
-static const struct drm_driver_info r128_driver = {
+static const struct drm_driver_info ragedrm_driver = {
 	.buf_priv_size		= sizeof(drm_r128_buf_priv_t),
 	.ioctl			= ragedrm_ioctl,
-	.preclose		= r128_driver_preclose,
+	.close			= r128_driver_close,
 	.lastclose		= r128_driver_lastclose,
+	.vblank_pipes		= 1,
 	.get_vblank_counter	= r128_get_vblank_counter,
 	.enable_vblank 		= r128_enable_vblank,
 	.disable_vblank		= r128_disable_vblank,
-	.irq_preinstall		= r128_driver_irq_preinstall,
-	.irq_postinstall	= r128_driver_irq_postinstall,
+	.irq_install		= r128_driver_irq_install,
 	.irq_uninstall		= r128_driver_irq_uninstall,
 	.irq_handler		= r128_driver_irq_handler,
 	.dma_ioctl		= r128_cce_buffers,
@@ -107,24 +108,64 @@ static const struct drm_driver_info r128_driver = {
 };
 
 int
-r128drm_probe(struct device *parent, void *match, void *aux)
+ragedrm_probe(struct device *parent, void *match, void *aux)
 {
-	return drm_probe((struct pci_attach_args *)aux, r128_pciidlist);
+	return drm_pciprobe((struct pci_attach_args *)aux, ragedrm_pciidlist);
 }
 
 void
-r128drm_attach(struct device *parent, struct device *self, void *aux)
+ragedrm_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pci_attach_args *pa = aux;
-	struct drm_device *dev = (struct drm_device *)self;
+	drm_r128_private_t	*dev_priv = (drm_r128_private_t *)self;
+	struct pci_attach_args	*pa = aux;
+	struct vga_pci_bar	*bar;
+	int			 is_agp;
 
-	dev->driver = &r128_driver;
-	return drm_attach(parent, self, pa, r128_pciidlist);
+	dev_priv->pc = pa->pa_pc;
+
+	bar = vga_pci_bar_info((struct vga_pci_softc *)parent, 2);
+	if (bar == NULL) {
+		printf(": can't get BAR info\n");
+		return;
+	}
+
+	dev_priv->regs = vga_pci_bar_map((struct vga_pci_softc *)parent, 
+	    bar->addr, 0, 0);
+	if (dev_priv->regs == NULL) {
+		printf(": can't map mmio space\n");
+		return;
+	}
+
+	if (pci_intr_map(pa, &dev_priv->ih) != 0) {
+		printf(": couldn't map interrupt\n");
+		return;
+	}
+
+	is_agp = pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP,
+	    NULL, NULL);
+
+	dev_priv->drmdev = drm_attach_pci(&ragedrm_driver, pa, is_agp, self);
+}
+
+int
+ragedrm_detach(struct device *self, int flags)
+{
+	drm_r128_private_t	*dev_priv = (drm_r128_private_t *)self;
+
+	if (dev_priv->drmdev != NULL) {
+		config_detach(dev_priv->drmdev, flags);
+		dev_priv->drmdev = NULL;
+	}
+
+	if (dev_priv->regs != NULL)
+		vga_pci_bar_unmap(dev_priv->regs);
+
+	return (0);
 }
 
 struct cfattach ragedrm_ca = {
-	sizeof(struct drm_device), r128drm_probe, r128drm_attach,
-	drm_detach, drm_activate
+	sizeof(drm_r128_private_t), ragedrm_probe, ragedrm_attach,
+	ragedrm_detach
 };
 
 struct cfdriver ragedrm_cd = {

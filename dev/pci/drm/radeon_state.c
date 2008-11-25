@@ -33,18 +33,76 @@
 #include "radeon_drm.h"
 #include "radeon_drv.h"
 
+typedef struct {
+	unsigned int start;
+	unsigned int finish;
+	unsigned int prim;
+	unsigned int numverts;
+	unsigned int offset;
+	unsigned int vc_format;
+} drm_radeon_tcl_prim_t;
+
+int	radeon_check_and_fixup_offset(drm_radeon_private_t *, struct drm_file *,
+	    u32 *);
+int	radeon_check_and_fixup_packets(drm_radeon_private_t *,
+	    struct drm_file *, int, u32 *);
+int	radeon_check_and_fixup_packet3(drm_radeon_private_t *,
+	    struct drm_file *, drm_radeon_kcmd_buffer_t *, unsigned int *);
+void	radeon_emit_clip_rect(drm_radeon_private_t *, struct drm_clip_rect *);
+int	radeon_emit_state(drm_radeon_private_t *, struct drm_file *,
+	    drm_radeon_context_regs_t *, drm_radeon_texture_regs_t *,
+	    unsigned int);
+int	radeon_emit_state2(drm_radeon_private_t *, struct drm_file *,
+	    drm_radeon_state_t *);
+void	radeon_clear_box(drm_radeon_private_t *, int, int, int, int,
+	    int, int, int);
+void	radeon_cp_performance_boxes(drm_radeon_private_t *);
+void	radeon_cp_dispatch_clear(struct drm_device *, drm_radeon_clear_t *,
+	    drm_radeon_clear_rect_t *);
+void	radeon_cp_dispatch_swap(struct drm_device *);
+void	radeon_cp_dispatch_flip(struct drm_device *);
+int	bad_prim_vertex_nr(int, int);
+void	radeon_cp_dispatch_vertex(struct drm_device *, struct drm_buf *,
+	    drm_radeon_tcl_prim_t *);
+void	radeon_cp_discard_buffer(struct drm_device *, struct drm_buf *);
+void	radeon_cp_dispatch_indirect(struct drm_device *, struct drm_buf *,
+	    int, int);
+void	radeon_cp_dispatch_indices(struct drm_device *, struct drm_buf *,
+	    drm_radeon_tcl_prim_t *);
+int	radeon_cp_dispatch_texture(struct drm_device *, struct drm_file *,
+	    drm_radeon_texture_t *, drm_radeon_tex_image_t *);
+void	radeon_cp_dispatch_stipple(struct drm_device *, u32 *);
+int	radeon_emit_wait(struct drm_device *, int);
+void	radeon_apply_surface_regs(int, drm_radeon_private_t *);
+int	alloc_surface(drm_radeon_surface_alloc_t *, drm_radeon_private_t *,
+	    struct drm_file *);
+int	free_surface(struct drm_file *, drm_radeon_private_t *, int);
+void	radeon_surfaces_release(struct drm_file *, drm_radeon_private_t *);
+int	radeon_do_init_pageflip(struct drm_device *);
+int	radeon_emit_packets(drm_radeon_private_t *, struct drm_file *,
+	    drm_radeon_cmd_header_t, drm_radeon_kcmd_buffer_t *);
+int	radeon_emit_scalars(drm_radeon_private_t *, drm_radeon_cmd_header_t,
+	    drm_radeon_kcmd_buffer_t *);
+int	radeon_emit_scalars2(drm_radeon_private_t *, drm_radeon_cmd_header_t,
+	    drm_radeon_kcmd_buffer_t *);
+int	radeon_emit_vectors(drm_radeon_private_t *, drm_radeon_cmd_header_t,
+	    drm_radeon_kcmd_buffer_t *);
+int	radeon_emit_veclinear(drm_radeon_private_t *, drm_radeon_cmd_header_t,
+	    drm_radeon_kcmd_buffer_t *);
+int	radeon_emit_packet3(struct drm_device *, struct drm_file *,
+	    drm_radeon_kcmd_buffer_t *);
+int	radeon_emit_packet3_cliprect(struct drm_device *, struct drm_file *,
+	    drm_radeon_kcmd_buffer_t *, int);
 /* ================================================================
  * Helper functions for client state checking and fixup
  */
 
-static __inline__ int radeon_check_and_fixup_offset(drm_radeon_private_t *
-						    dev_priv,
-						    struct drm_file *file_priv,
-						    u32 * offset)
+int radeon_check_and_fixup_offset(drm_radeon_private_t *dev_priv,
+    struct drm_file *file_priv, u32 *offset)
 {
 	u64 off = *offset;
 	u32 fb_end = dev_priv->fb_location + dev_priv->fb_size - 1;
-	struct drm_radeon_driver_file_fields *radeon_priv;
+	struct drm_radeon_file	*radeon_priv;
 
 	/* Hrm ... the story of the offset ... So this function converts
 	 * the various ideas of what userland clients might have for an
@@ -71,7 +129,7 @@ static __inline__ int radeon_check_and_fixup_offset(drm_radeon_private_t *
 	 * magic offset we get from SETPARAM or calculated from fb_location
 	 */
 	if (off < (dev_priv->fb_size + dev_priv->gart_size)) {
-		radeon_priv = file_priv->driver_priv;
+		radeon_priv = (struct drm_radeon_file *)file_priv;
 		off += radeon_priv->radeon_fb_delta;
 	}
 
@@ -88,10 +146,9 @@ static __inline__ int radeon_check_and_fixup_offset(drm_radeon_private_t *
 	return EINVAL;
 }
 
-static __inline__ int radeon_check_and_fixup_packets(drm_radeon_private_t *
-						     dev_priv,
-						     struct drm_file *file_priv,
-						     int id, u32 *data)
+int
+radeon_check_and_fixup_packets(drm_radeon_private_t *dev_priv,
+    struct drm_file *file_priv, int id, u32 *data)
 {
 	switch (id) {
 
@@ -262,12 +319,10 @@ static __inline__ int radeon_check_and_fixup_packets(drm_radeon_private_t *
 	return 0;
 }
 
-static __inline__ int radeon_check_and_fixup_packet3(drm_radeon_private_t *
-						     dev_priv,
-						     struct drm_file *file_priv,
-						     drm_radeon_kcmd_buffer_t *
-						     cmdbuf,
-						     unsigned int *cmdsz)
+int
+radeon_check_and_fixup_packet3(drm_radeon_private_t *dev_priv,
+    struct drm_file *file_priv, drm_radeon_kcmd_buffer_t *cmdbuf,
+    unsigned int *cmdsz)
 {
 	u32 *cmd = (u32 *) cmdbuf->buf;
 	u32 offset, narrays;
@@ -426,8 +481,8 @@ static __inline__ int radeon_check_and_fixup_packet3(drm_radeon_private_t *
  * CP hardware state programming functions
  */
 
-static __inline__ void radeon_emit_clip_rect(drm_radeon_private_t * dev_priv,
-					     struct drm_clip_rect * box)
+void
+radeon_emit_clip_rect(drm_radeon_private_t *dev_priv, struct drm_clip_rect *box)
 {
 	RING_LOCALS;
 
@@ -444,11 +499,10 @@ static __inline__ void radeon_emit_clip_rect(drm_radeon_private_t * dev_priv,
 
 /* Emit 1.1 state
  */
-static int radeon_emit_state(drm_radeon_private_t * dev_priv,
-			     struct drm_file *file_priv,
-			     drm_radeon_context_regs_t * ctx,
-			     drm_radeon_texture_regs_t * tex,
-			     unsigned int dirty)
+int
+radeon_emit_state(drm_radeon_private_t * dev_priv, struct drm_file *file_priv,
+    drm_radeon_context_regs_t * ctx, drm_radeon_texture_regs_t * tex,
+    unsigned int dirty)
 {
 	RING_LOCALS;
 	DRM_DEBUG("dirty=0x%08x\n", dirty);
@@ -613,9 +667,9 @@ static int radeon_emit_state(drm_radeon_private_t * dev_priv,
 
 /* Emit 1.2 state
  */
-static int radeon_emit_state2(drm_radeon_private_t * dev_priv,
-			      struct drm_file *file_priv,
-			      drm_radeon_state_t * state)
+int
+radeon_emit_state2(drm_radeon_private_t * dev_priv, struct drm_file *file_priv,
+    drm_radeon_state_t * state)
 {
 	RING_LOCALS;
 
@@ -744,8 +798,9 @@ static struct {
  * Performance monitoring functions
  */
 
-static void radeon_clear_box(drm_radeon_private_t * dev_priv,
-			     int x, int y, int w, int h, int r, int g, int b)
+void
+radeon_clear_box(drm_radeon_private_t * dev_priv, int x, int y, int w,
+    int h, int r, int g, int b)
 {
 	u32 color;
 	RING_LOCALS;
@@ -793,7 +848,8 @@ static void radeon_clear_box(drm_radeon_private_t * dev_priv,
 	ADVANCE_RING();
 }
 
-static void radeon_cp_performance_boxes(drm_radeon_private_t * dev_priv)
+void
+radeon_cp_performance_boxes(drm_radeon_private_t *dev_priv)
 {
 	/* Collapse various things into a wait flag -- trying to
 	 * guess if userspase slept -- better just to have them tell us.
@@ -850,9 +906,9 @@ static void radeon_cp_performance_boxes(drm_radeon_private_t * dev_priv)
  * CP command dispatch functions
  */
 
-static void radeon_cp_dispatch_clear(struct drm_device * dev,
-				     drm_radeon_clear_t * clear,
-				     drm_radeon_clear_rect_t * depth_boxes)
+void
+radeon_cp_dispatch_clear(struct drm_device * dev, drm_radeon_clear_t * clear,
+    drm_radeon_clear_rect_t * depth_boxes)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	drm_radeon_sarea_t *sarea_priv = dev_priv->sarea_priv;
@@ -1344,7 +1400,8 @@ static void radeon_cp_dispatch_clear(struct drm_device * dev,
 	ADVANCE_RING();
 }
 
-static void radeon_cp_dispatch_swap(struct drm_device * dev)
+void
+radeon_cp_dispatch_swap(struct drm_device *dev)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	drm_radeon_sarea_t *sarea_priv = dev_priv->sarea_priv;
@@ -1421,7 +1478,8 @@ static void radeon_cp_dispatch_swap(struct drm_device * dev)
 	ADVANCE_RING();
 }
 
-static void radeon_cp_dispatch_flip(struct drm_device * dev)
+void
+radeon_cp_dispatch_flip(struct drm_device *dev)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	struct drm_sarea *sarea = (struct drm_sarea *) dev_priv->sarea->handle;
@@ -1467,7 +1525,8 @@ static void radeon_cp_dispatch_flip(struct drm_device * dev)
 	ADVANCE_RING();
 }
 
-static int bad_prim_vertex_nr(int primitive, int nr)
+int
+bad_prim_vertex_nr(int primitive, int nr)
 {
 	switch (primitive & RADEON_PRIM_TYPE_MASK) {
 	case RADEON_PRIM_TYPE_NONE:
@@ -1490,18 +1549,9 @@ static int bad_prim_vertex_nr(int primitive, int nr)
 	}
 }
 
-typedef struct {
-	unsigned int start;
-	unsigned int finish;
-	unsigned int prim;
-	unsigned int numverts;
-	unsigned int offset;
-	unsigned int vc_format;
-} drm_radeon_tcl_prim_t;
-
-static void radeon_cp_dispatch_vertex(struct drm_device * dev,
-				      struct drm_buf * buf,
-				      drm_radeon_tcl_prim_t * prim)
+void
+radeon_cp_dispatch_vertex(struct drm_device * dev, struct drm_buf * buf,
+    drm_radeon_tcl_prim_t * prim)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	drm_radeon_sarea_t *sarea_priv = dev_priv->sarea_priv;
@@ -1545,7 +1595,8 @@ static void radeon_cp_dispatch_vertex(struct drm_device * dev,
 	} while (i < nbox);
 }
 
-static void radeon_cp_discard_buffer(struct drm_device * dev, struct drm_buf * buf)
+void
+radeon_cp_discard_buffer(struct drm_device * dev, struct drm_buf * buf)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	drm_radeon_buf_priv_t *buf_priv = buf->dev_private;
@@ -1562,8 +1613,9 @@ static void radeon_cp_discard_buffer(struct drm_device * dev, struct drm_buf * b
 	buf->used = 0;
 }
 
-static void radeon_cp_dispatch_indirect(struct drm_device * dev,
-					struct drm_buf * buf, int start, int end)
+void
+radeon_cp_dispatch_indirect(struct drm_device *dev, struct drm_buf *buf,
+    int start, int end)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	RING_LOCALS;
@@ -1596,9 +1648,9 @@ static void radeon_cp_dispatch_indirect(struct drm_device * dev,
 	}
 }
 
-static void radeon_cp_dispatch_indices(struct drm_device * dev,
-				       struct drm_buf * elt_buf,
-				       drm_radeon_tcl_prim_t * prim)
+void
+radeon_cp_dispatch_indices(struct drm_device *dev, struct drm_buf *elt_buf,
+    drm_radeon_tcl_prim_t * prim)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	drm_radeon_sarea_t *sarea_priv = dev_priv->sarea_priv;
@@ -1654,10 +1706,9 @@ static void radeon_cp_dispatch_indices(struct drm_device * dev,
 
 #define RADEON_MAX_TEXTURE_SIZE RADEON_BUFFER_SIZE
 
-static int radeon_cp_dispatch_texture(struct drm_device * dev,
-				      struct drm_file *file_priv,
-				      drm_radeon_texture_t * tex,
-				      drm_radeon_tex_image_t * image)
+int
+radeon_cp_dispatch_texture(struct drm_device *dev, struct drm_file *file_priv,
+    drm_radeon_texture_t *tex, drm_radeon_tex_image_t *image)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	struct drm_buf *buf;
@@ -1897,7 +1948,8 @@ static int radeon_cp_dispatch_texture(struct drm_device * dev,
 	return 0;
 }
 
-static void radeon_cp_dispatch_stipple(struct drm_device * dev, u32 * stipple)
+void
+radeon_cp_dispatch_stipple(struct drm_device *dev, u32 *stipple)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	int i;
@@ -1917,12 +1969,9 @@ static void radeon_cp_dispatch_stipple(struct drm_device * dev, u32 * stipple)
 	ADVANCE_RING();
 }
 
-static void radeon_apply_surface_regs(int surf_index,
-				      drm_radeon_private_t *dev_priv)
+void
+radeon_apply_surface_regs(int surf_index, drm_radeon_private_t *dev_priv)
 {
-	if (!dev_priv->mmio)
-		return;
-
 	radeon_do_cp_idle(dev_priv);
 
 	RADEON_WRITE(RADEON_SURFACE0_INFO + 16 * surf_index,
@@ -1944,9 +1993,9 @@ static void radeon_apply_surface_regs(int surf_index,
  * freed, we suddenly need two surfaces to store A and C, which might
  * not always be available.
  */
-static int alloc_surface(drm_radeon_surface_alloc_t *new,
-			 drm_radeon_private_t *dev_priv,
-			 struct drm_file *file_priv)
+int
+alloc_surface(drm_radeon_surface_alloc_t *new, drm_radeon_private_t *dev_priv,
+    struct drm_file *file_priv)
 {
 	struct radeon_virt_surface *s;
 	int i;
@@ -2040,9 +2089,9 @@ static int alloc_surface(drm_radeon_surface_alloc_t *new,
 	return -1;
 }
 
-static int free_surface(struct drm_file *file_priv,
-			drm_radeon_private_t * dev_priv,
-			int lower)
+int
+free_surface(struct drm_file *file_priv, drm_radeon_private_t * dev_priv,
+    int lower)
 {
 	struct radeon_virt_surface *s;
 	int i;
@@ -2077,8 +2126,9 @@ static int free_surface(struct drm_file *file_priv,
 	return 1;
 }
 
-static void radeon_surfaces_release(struct drm_file *file_priv,
-				    drm_radeon_private_t * dev_priv)
+void
+radeon_surfaces_release(struct drm_file *file_priv,
+    drm_radeon_private_t *dev_priv)
 {
 	int i;
 	for (i = 0; i < 2 * RADEON_MAX_SURFACES; i++) {
@@ -2150,7 +2200,8 @@ int radeon_cp_clear(struct drm_device *dev, void *data, struct drm_file *file_pr
 
 /* Not sure why this isn't set all the time:
  */
-static int radeon_do_init_pageflip(struct drm_device * dev)
+int
+radeon_do_init_pageflip(struct drm_device *dev)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	RING_LOCALS;
@@ -2608,10 +2659,9 @@ int radeon_cp_vertex2(struct drm_device *dev, void *data, struct drm_file *file_
 	return 0;
 }
 
-static int radeon_emit_packets(drm_radeon_private_t * dev_priv,
-			       struct drm_file *file_priv,
-			       drm_radeon_cmd_header_t header,
-			       drm_radeon_kcmd_buffer_t *cmdbuf)
+int
+radeon_emit_packets(drm_radeon_private_t * dev_priv, struct drm_file *file_priv,
+    drm_radeon_cmd_header_t header, drm_radeon_kcmd_buffer_t *cmdbuf)
 {
 	int id = (int)header.packet.packet_id;
 	int sz, reg;
@@ -2644,9 +2694,9 @@ static int radeon_emit_packets(drm_radeon_private_t * dev_priv,
 	return 0;
 }
 
-static __inline__ int radeon_emit_scalars(drm_radeon_private_t *dev_priv,
-					  drm_radeon_cmd_header_t header,
-					  drm_radeon_kcmd_buffer_t *cmdbuf)
+int
+radeon_emit_scalars(drm_radeon_private_t *dev_priv,
+    drm_radeon_cmd_header_t header, drm_radeon_kcmd_buffer_t *cmdbuf)
 {
 	int sz = header.scalars.count;
 	int start = header.scalars.offset;
@@ -2666,12 +2716,11 @@ static __inline__ int radeon_emit_scalars(drm_radeon_private_t *dev_priv,
 
 /* God this is ugly
  */
-static __inline__ int radeon_emit_scalars2(drm_radeon_private_t *dev_priv,
-					   drm_radeon_cmd_header_t header,
-					   drm_radeon_kcmd_buffer_t *cmdbuf)
+int
+radeon_emit_scalars2(drm_radeon_private_t *dev_priv,
+    drm_radeon_cmd_header_t header, drm_radeon_kcmd_buffer_t *cmdbuf)
 {
-	int sz = header.scalars.count;
-	int start = ((unsigned int)header.scalars.offset) + 0x100;
+	int sz = header.scalars.count; int start = ((unsigned int)header.scalars.offset) + 0x100;
 	int stride = header.scalars.stride;
 	RING_LOCALS;
 
@@ -2686,9 +2735,9 @@ static __inline__ int radeon_emit_scalars2(drm_radeon_private_t *dev_priv,
 	return 0;
 }
 
-static __inline__ int radeon_emit_vectors(drm_radeon_private_t *dev_priv,
-					  drm_radeon_cmd_header_t header,
-					  drm_radeon_kcmd_buffer_t *cmdbuf)
+int
+radeon_emit_vectors(drm_radeon_private_t *dev_priv,
+    drm_radeon_cmd_header_t header, drm_radeon_kcmd_buffer_t *cmdbuf)
 {
 	int sz = header.vectors.count;
 	int start = header.vectors.offset;
@@ -2708,9 +2757,9 @@ static __inline__ int radeon_emit_vectors(drm_radeon_private_t *dev_priv,
 	return 0;
 }
 
-static __inline__ int radeon_emit_veclinear(drm_radeon_private_t *dev_priv,
-					  drm_radeon_cmd_header_t header,
-					  drm_radeon_kcmd_buffer_t *cmdbuf)
+int
+radeon_emit_veclinear(drm_radeon_private_t *dev_priv,
+    drm_radeon_cmd_header_t header, drm_radeon_kcmd_buffer_t *cmdbuf)
 {
 	int sz = header.veclinear.count * 4;
 	int start = header.veclinear.addr_lo | (header.veclinear.addr_hi << 8);
@@ -2734,9 +2783,9 @@ static __inline__ int radeon_emit_veclinear(drm_radeon_private_t *dev_priv,
 	return 0;
 }
 
-static int radeon_emit_packet3(struct drm_device * dev,
-			       struct drm_file *file_priv,
-			       drm_radeon_kcmd_buffer_t *cmdbuf)
+int
+radeon_emit_packet3(struct drm_device * dev, struct drm_file *file_priv,
+    drm_radeon_kcmd_buffer_t *cmdbuf)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	unsigned int cmdsz;
@@ -2760,10 +2809,9 @@ static int radeon_emit_packet3(struct drm_device * dev,
 	return 0;
 }
 
-static int radeon_emit_packet3_cliprect(struct drm_device *dev,
-					struct drm_file *file_priv,
-					drm_radeon_kcmd_buffer_t *cmdbuf,
-					int orig_nbox)
+int
+radeon_emit_packet3_cliprect(struct drm_device *dev, struct drm_file *file_priv,
+    drm_radeon_kcmd_buffer_t *cmdbuf, int orig_nbox)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	struct drm_clip_rect box;
@@ -2822,7 +2870,8 @@ static int radeon_emit_packet3_cliprect(struct drm_device *dev,
 	return 0;
 }
 
-static int radeon_emit_wait(struct drm_device * dev, int flags)
+int
+radeon_emit_wait(struct drm_device *dev, int flags)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	RING_LOCALS;
@@ -3054,7 +3103,7 @@ int radeon_cp_getparam(struct drm_device *dev, void *data, struct drm_file *file
 		value = dev_priv->gart_vm_start;
 		break;
 	case RADEON_PARAM_REGISTER_HANDLE:
-		value = dev_priv->mmio->offset;
+		value = 0;
 		break;
 	case RADEON_PARAM_STATUS_HANDLE:
 		value = dev_priv->ring_rptr_offset;
@@ -3117,7 +3166,7 @@ int radeon_cp_setparam(struct drm_device *dev, void *data, struct drm_file *file
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	drm_radeon_setparam_t *sp = data;
-	struct drm_radeon_driver_file_fields *radeon_priv;
+	struct drm_radeon_file	*radeon_priv;
 
 	if (!dev_priv) {
 		DRM_ERROR("called with no initialization\n");
@@ -3126,7 +3175,7 @@ int radeon_cp_setparam(struct drm_device *dev, void *data, struct drm_file *file
 
 	switch (sp->param) {
 	case RADEON_SETPARAM_FB_LOCATION:
-		radeon_priv = file_priv->driver_priv;
+		radeon_priv = (struct drm_radeon_file *)file_priv;
 		radeon_priv->radeon_fb_delta = dev_priv->fb_location -
 		    sp->value;
 		break;
@@ -3177,27 +3226,24 @@ int radeon_cp_setparam(struct drm_device *dev, void *data, struct drm_file *file
  *
  * DRM infrastructure takes care of reclaiming dma buffers.
  */
-void radeon_driver_preclose(struct drm_device *dev,
+void radeon_driver_close(struct drm_device *dev,
 			    struct drm_file *file_priv)
 {
-	if (dev->dev_private) {
-		drm_radeon_private_t *dev_priv = dev->dev_private;
-		dev_priv->page_flipping = 0;
-		radeon_mem_release(file_priv, dev_priv->gart_heap);
-		radeon_mem_release(file_priv, dev_priv->fb_heap);
-		radeon_surfaces_release(file_priv, dev_priv);
-	}
+	drm_radeon_private_t *dev_priv = dev->dev_private;
+
+	dev_priv->page_flipping = 0;
+	radeon_mem_release(file_priv, dev_priv->gart_heap);
+	radeon_mem_release(file_priv, dev_priv->fb_heap);
+	radeon_surfaces_release(file_priv, dev_priv);
 }
 
 void radeon_driver_lastclose(struct drm_device *dev)
 {
-	if (dev->dev_private) {
-		drm_radeon_private_t *dev_priv = dev->dev_private;
+	drm_radeon_private_t *dev_priv = dev->dev_private;
 
-		if (dev_priv->sarea_priv &&
-		    dev_priv->sarea_priv->pfCurrentPage != 0)
-			radeon_cp_dispatch_flip(dev);
-	}
+	if (dev_priv->sarea_priv &&
+	    dev_priv->sarea_priv->pfCurrentPage != 0)
+		radeon_cp_dispatch_flip(dev);
 
 	radeon_do_release(dev);
 }
@@ -3205,29 +3251,12 @@ void radeon_driver_lastclose(struct drm_device *dev)
 int radeon_driver_open(struct drm_device *dev, struct drm_file *file_priv)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
-	struct drm_radeon_driver_file_fields *radeon_priv;
+	struct drm_radeon_file *radeon_priv =
+	    (struct drm_radeon_file *)file_priv;
 
 	DRM_DEBUG("\n");
-	radeon_priv =
-	    (struct drm_radeon_driver_file_fields *)
-	    drm_alloc(sizeof(*radeon_priv), DRM_MEM_FILES);
 
-	if (!radeon_priv)
-		return ENOMEM;
-
-	file_priv->driver_priv = radeon_priv;
-
-	if (dev_priv)
-		radeon_priv->radeon_fb_delta = dev_priv->fb_location;
-	else
-		radeon_priv->radeon_fb_delta = 0;
+	radeon_priv->radeon_fb_delta = dev_priv->fb_location;
 	return 0;
 }
 
-void radeon_driver_postclose(struct drm_device *dev, struct drm_file *file_priv)
-{
-	struct drm_radeon_driver_file_fields *radeon_priv =
-	    file_priv->driver_priv;
-
-	drm_free(radeon_priv, sizeof(*radeon_priv), DRM_MEM_FILES);
-}

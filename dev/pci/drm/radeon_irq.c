@@ -35,7 +35,13 @@
 #include "radeon_drm.h"
 #include "radeon_drv.h"
 
-void radeon_irq_set_state(struct drm_device *dev, u32 mask, int state)
+void	r500_vbl_irq_set_state(struct drm_device *, u32, int);
+u_int32_t	radeon_acknowledge_irqs(drm_radeon_private_t *, u32 *);
+int	radeon_emit_irq(struct drm_device *);
+int	radeon_wait_irq(struct drm_device *, int);
+
+void
+radeon_irq_set_state(struct drm_device *dev, u32 mask, int state)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 
@@ -47,7 +53,8 @@ void radeon_irq_set_state(struct drm_device *dev, u32 mask, int state)
 	RADEON_WRITE(RADEON_GEN_INT_CNTL, dev_priv->irq_enable_reg);
 }
 
-static void r500_vbl_irq_set_state(struct drm_device *dev, u32 mask, int state)
+void
+r500_vbl_irq_set_state(struct drm_device *dev, u32 mask, int state)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 
@@ -127,7 +134,8 @@ void radeon_disable_vblank(struct drm_device *dev, int crtc)
 	}
 }
 
-static __inline__ u32 radeon_acknowledge_irqs(drm_radeon_private_t * dev_priv, u32 *r500_disp_int)
+u_int32_t
+radeon_acknowledge_irqs(drm_radeon_private_t *dev_priv, u32 *r500_disp_int)
 {
 	u32 irqs = RADEON_READ(RADEON_GEN_INT_STATUS);
 	u32 irq_mask = RADEON_SW_INT_TEST;
@@ -199,7 +207,7 @@ irqreturn_t radeon_driver_irq_handler(DRM_IRQ_ARGS)
 
 	/* SW interrupt */
 	if (stat & RADEON_SW_INT_TEST)
-		DRM_WAKEUP(&dev_priv->swi_queue);
+		DRM_WAKEUP(dev_priv);
 
 	/* VBLANK interrupt */
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_RS690) {
@@ -216,7 +224,8 @@ irqreturn_t radeon_driver_irq_handler(DRM_IRQ_ARGS)
 	return IRQ_HANDLED;
 }
 
-static int radeon_emit_irq(struct drm_device * dev)
+int
+radeon_emit_irq(struct drm_device * dev)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	unsigned int ret;
@@ -234,7 +243,8 @@ static int radeon_emit_irq(struct drm_device * dev)
 	return ret;
 }
 
-static int radeon_wait_irq(struct drm_device * dev, int swi_nr)
+int
+radeon_wait_irq(struct drm_device * dev, int swi_nr)
 {
 	drm_radeon_private_t *dev_priv =
 	    (drm_radeon_private_t *) dev->dev_private;
@@ -245,7 +255,7 @@ static int radeon_wait_irq(struct drm_device * dev, int swi_nr)
 
 	dev_priv->stats.boxes |= RADEON_BOX_WAIT_IDLE;
 
-	DRM_WAIT_ON(ret, dev_priv->swi_queue, 3 * DRM_HZ,
+	DRM_WAIT_ON(ret, dev_priv, 3 * DRM_HZ,
 		    RADEON_READ(RADEON_LAST_SWI_REG) >= swi_nr);
 
 	return ret;
@@ -320,7 +330,8 @@ int radeon_irq_wait(struct drm_device *dev, void *data, struct drm_file *file_pr
 
 /* drm_dma.h hooks
 */
-void radeon_driver_irq_preinstall(struct drm_device * dev)
+int
+radeon_driver_irq_install(struct drm_device * dev)
 {
 	drm_radeon_private_t *dev_priv =
 	    (drm_radeon_private_t *) dev->dev_private;
@@ -333,20 +344,13 @@ void radeon_driver_irq_preinstall(struct drm_device * dev)
 
 	/* Clear bits if they're already high */
 	radeon_acknowledge_irqs(dev_priv, &dummy);
-}
 
-int radeon_driver_irq_postinstall(struct drm_device * dev)
-{
-	drm_radeon_private_t *dev_priv =
-	    (drm_radeon_private_t *) dev->dev_private;
-	int ret;
+	dev_priv->irqh = pci_intr_establish(dev_priv->pc, dev_priv->ih, IPL_BIO,
+	    drm_irq_handler_wrap, dev, dev_priv->dev.dv_xname);
+	if (dev_priv->irqh == NULL)
+		return (ENOENT);
 
 	atomic_set(&dev_priv->swi_emitted, 0);
-	DRM_INIT_WAITQUEUE(&dev_priv->swi_queue);
-
-	ret = drm_vblank_init(dev, 2);
-	if (ret)
-		return ret;
 
 	dev->max_vblank_count = 0x001fffff;
 
@@ -355,7 +359,8 @@ int radeon_driver_irq_postinstall(struct drm_device * dev)
 	return 0;
 }
 
-void radeon_driver_irq_uninstall(struct drm_device * dev)
+void
+radeon_driver_irq_uninstall(struct drm_device * dev)
 {
 	drm_radeon_private_t *dev_priv =
 	    (drm_radeon_private_t *) dev->dev_private;
@@ -368,6 +373,8 @@ void radeon_driver_irq_uninstall(struct drm_device * dev)
 		RADEON_WRITE(R500_DxMODE_INT_MASK, 0);
 	/* Disable *all* interrupts */
 	RADEON_WRITE(RADEON_GEN_INT_CNTL, 0);
+
+	pci_intr_disestablish(dev_priv->pc, dev_priv->irqh);
 }
 
 
