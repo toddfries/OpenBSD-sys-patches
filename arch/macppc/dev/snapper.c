@@ -85,7 +85,7 @@ struct audio_hw_if snapper_hw_if = {
 	NULL,
 	i2s_query_encoding,
 	i2s_set_params,
-	i2s_round_blocksize,
+	NULL,
 	NULL,
 	NULL,
 	NULL,
