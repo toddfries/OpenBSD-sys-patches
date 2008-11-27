@@ -1,4 +1,4 @@
-/*	$OpenBSD: gem.c,v 1.82 2008/11/07 18:03:52 brad Exp $	*/
+/*	$OpenBSD: gem.c,v 1.83 2008/11/26 18:34:31 kettenis Exp $	*/
 /*	$NetBSD: gem.c,v 1.1 2001/09/16 00:11:43 eeh Exp $ */
 
 /*
