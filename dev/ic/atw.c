@@ -1,4 +1,4 @@
-/*	$OpenBSD: atw.c,v 1.63 2008/10/03 00:58:39 brad Exp $	*/
+/*	$OpenBSD: atw.c,v 1.64 2008/11/28 02:44:17 brad Exp $	*/
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-

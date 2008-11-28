@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_et.c,v 1.15 2008/11/04 19:20:22 chl Exp $	*/
+/*	$OpenBSD: if_et.c,v 1.16 2008/11/28 02:44:17 brad Exp $	*/
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
  * 

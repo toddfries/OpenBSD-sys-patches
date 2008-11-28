@@ -1,4 +1,4 @@
-/*	$OpenBSD: mtd8xx.c,v 1.15 2008/10/14 18:01:53 naddy Exp $	*/
+/*	$OpenBSD: mtd8xx.c,v 1.16 2008/11/28 02:44:17 brad Exp $	*/
 
 /*
  * Copyright (c) 2003 Oleg Safiullin <form@pdp11.org.ru>

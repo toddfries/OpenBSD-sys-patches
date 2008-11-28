@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wb.c,v 1.42 2008/11/25 11:01:35 claudio Exp $	*/
+/*	$OpenBSD: if_wb.c,v 1.43 2008/11/28 02:44:18 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998

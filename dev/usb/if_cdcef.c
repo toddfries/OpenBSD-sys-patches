@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cdcef.c,v 1.21 2008/10/02 20:21:14 brad Exp $	*/
+/*	$OpenBSD: if_cdcef.c,v 1.22 2008/11/28 02:44:18 brad Exp $	*/
 
 /*
  * Copyright (c) 2007 Dale Rahn <drahn@openbsd.org>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dp8390.c,v 1.40 2008/10/03 20:25:29 brad Exp $	*/
+/*	$OpenBSD: dp8390.c,v 1.41 2008/11/28 02:44:17 brad Exp $	*/
 /*	$NetBSD: dp8390.c,v 1.13 1998/07/05 06:49:11 jonathan Exp $	*/
 
 /*

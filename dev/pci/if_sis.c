@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.84 2008/11/10 07:23:43 cnst Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.85 2008/11/28 02:44:18 brad Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.

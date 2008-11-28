@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_msk.c,v 1.67 2008/10/14 18:01:53 naddy Exp $	*/
+/*	$OpenBSD: if_msk.c,v 1.68 2008/11/28 02:44:18 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000

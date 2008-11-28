@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_kue.c,v 1.57 2008/10/02 20:21:14 brad Exp $ */
+/*	$OpenBSD: if_kue.c,v 1.58 2008/11/28 02:44:18 brad Exp $ */
 /*	$NetBSD: if_kue.c,v 1.50 2002/07/16 22:00:31 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000

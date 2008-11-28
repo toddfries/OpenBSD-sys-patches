@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_udav.c,v 1.42 2008/10/02 20:21:14 brad Exp $ */
+/*	$OpenBSD: if_udav.c,v 1.43 2008/11/28 02:44:18 brad Exp $ */
 /*	$NetBSD: if_udav.c,v 1.3 2004/04/23 17:25:25 itojun Exp $	*/
 /*	$nabe: if_udav.c,v 1.3 2003/08/21 16:57:19 nabe Exp $	*/
 /*

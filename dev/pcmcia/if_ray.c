@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ray.c,v 1.36 2008/11/21 16:53:05 oga Exp $	*/
+/*	$OpenBSD: if_ray.c,v 1.37 2008/11/28 02:44:18 brad Exp $	*/
 /*	$NetBSD: if_ray.c,v 1.21 2000/07/05 02:35:54 onoe Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tsec.c,v 1.13 2008/10/15 19:12:19 blambert Exp $	*/
+/*	$OpenBSD: if_tsec.c,v 1.14 2008/11/28 02:44:17 brad Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis

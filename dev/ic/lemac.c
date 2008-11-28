@@ -1,4 +1,4 @@
-/* $OpenBSD: lemac.c,v 1.11 2008/10/02 20:21:13 brad Exp $ */
+/* $OpenBSD: lemac.c,v 1.12 2008/11/28 02:44:17 brad Exp $ */
 /* $NetBSD: lemac.c,v 1.20 2001/06/13 10:46:02 wiz Exp $ */
 
 /*-

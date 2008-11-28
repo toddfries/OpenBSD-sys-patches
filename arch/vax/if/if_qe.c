@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_qe.c,v 1.23 2008/10/08 23:53:08 brad Exp $	*/
+/*	$OpenBSD: if_qe.c,v 1.24 2008/11/28 02:44:17 brad Exp $	*/
 /*      $NetBSD: if_qe.c,v 1.51 2002/06/08 12:28:37 ragge Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.

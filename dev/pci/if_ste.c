@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ste.c,v 1.42 2008/10/02 20:21:14 brad Exp $ */
+/*	$OpenBSD: if_ste.c,v 1.43 2008/11/28 02:44:18 brad Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.

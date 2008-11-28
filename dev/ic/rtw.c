@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtw.c,v 1.70 2008/08/27 10:29:53 damien Exp $	*/
+/*	$OpenBSD: rtw.c,v 1.71 2008/11/28 02:44:17 brad Exp $	*/
 /*	$NetBSD: rtw.c,v 1.29 2004/12/27 19:49:16 dyoung Exp $ */
 
 /*-
