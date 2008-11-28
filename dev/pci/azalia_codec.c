@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.67 2008/11/19 21:49:44 naddy Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.69 2008/11/27 23:30:58 jakemsr Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -49,7 +49,6 @@
 #define AzaliaNclfe	"clfe"
 #define AzaliaNside	"side"
 
-#define ALC260_FUJITSU_ID	0x132610cf
 #define REALTEK_ALC660		0x10ec0660
 #define ALC660_ASUS_G2K		0x13391043
 #define REALTEK_ALC880		0x10ec0880
@@ -71,10 +70,9 @@
 #define STAC9205_DELL_V1500	0x02281028
 
 int	azalia_generic_codec_init_dacgroup(codec_t *);
-int	azalia_generic_codec_add_dacgroup(codec_t *, int, uint32_t);
-int	azalia_generic_codec_find_pin(const codec_t *, int, int, uint32_t);
-int	azalia_generic_codec_find_dac(const codec_t *, int, int);
-
+int	azalia_generic_codec_fnode(codec_t *, nid_t, int, int);
+int	azalia_generic_codec_add_convgroup(codec_t *, convgroupset_t *,
+    uint32_t, uint32_t);
 int	azalia_generic_mixer_init(codec_t *);
 int	azalia_generic_mixer_autoinit(codec_t *);
 
@@ -94,31 +92,19 @@ int	azalia_generic_set_port(codec_t *, mixer_ctrl_t *);
 int	azalia_generic_get_port(codec_t *, mixer_ctrl_t *);
 int	azalia_gpio_unmute(codec_t *, int);
 
-int	azalia_alc260_init_dacgroup(codec_t *);
 int	azalia_alc260_mixer_init(codec_t *);
-int	azalia_alc662_init_dacgroup(codec_t *);
-int	azalia_alc861_init_dacgroup(codec_t *);
 int	azalia_alc88x_mixer_init(codec_t *);
-int	azalia_alc880_init_dacgroup(codec_t *);
-int	azalia_alc882_init_dacgroup(codec_t *);
-int	azalia_alc883_init_dacgroup(codec_t *);
-int	azalia_alc885_init_dacgroup(codec_t *);
-int	azalia_alc888_init_dacgroup(codec_t *);
 int	azalia_ad1984_init_dacgroup(codec_t *);
 int	azalia_ad1984_mixer_init(codec_t *);
 int	azalia_ad1984_set_port(codec_t *, mixer_ctrl_t *);
 int	azalia_ad1984_get_port(codec_t *, mixer_ctrl_t *);
-int	azalia_ad1988_init_dacgroup(codec_t *);
 int	azalia_cmi9880_init_dacgroup(codec_t *);
 int	azalia_cmi9880_mixer_init(codec_t *);
 int	azalia_stac9200_mixer_init(codec_t *);
-int	azalia_stac9205_init_dacgroup(codec_t *);
-int	azalia_stac9221_mixer_init(codec_t *);
 int	azalia_stac9221_init_dacgroup(codec_t *);
+int	azalia_stac9221_mixer_init(codec_t *);
 int	azalia_stac9221_set_port(codec_t *, mixer_ctrl_t *);
 int	azalia_stac9221_get_port(codec_t *, mixer_ctrl_t *);
-int	azalia_stac9227_init_dacgroup(codec_t *);
-int	azalia_stac9271_init_dacgroup(codec_t *);
 int	azalia_stac7661_init_dacgroup(codec_t *);
 int	azalia_stac7661_mixer_init(codec_t *);
 int	azalia_stac7661_set_port(codec_t *, mixer_ctrl_t *);
@@ -141,7 +127,6 @@ azalia_codec_init_vtbl(codec_t *this)
 	case 0x10ec0260:
 		this->name = "Realtek ALC260";
 		this->mixer_init = azalia_alc260_mixer_init;
-		this->init_dacgroup = azalia_alc260_init_dacgroup;
 		break;
 	case 0x10ec0268:
 		this->name = "Realtek ALC268";
@@ -151,36 +136,29 @@ azalia_codec_init_vtbl(codec_t *this)
 		break;
 	case 0x10ec0662:
 		this->name = "Realtek ALC662-GR";
-		this->init_dacgroup = azalia_alc662_init_dacgroup;
 		break;
 	case 0x10ec0861:
 		this->name = "Realtek ALC861";
-		this->init_dacgroup = azalia_alc861_init_dacgroup;
 		break;
 	case 0x10ec0880:
 		this->name = "Realtek ALC880";
-		this->init_dacgroup = azalia_alc880_init_dacgroup;
 		this->mixer_init = azalia_alc88x_mixer_init;
 		break;
 	case 0x10ec0882:
 		this->name = "Realtek ALC882";
-		this->init_dacgroup = azalia_alc882_init_dacgroup;
 		this->mixer_init = azalia_alc88x_mixer_init;
 		break;
 	case 0x10ec0883:
 		/* ftp://209.216.61.149/pc/audio/ALC883_DataSheet_1.3.pdf */
 		this->name = "Realtek ALC883";
-		this->init_dacgroup = azalia_alc883_init_dacgroup;
 		this->mixer_init = azalia_alc88x_mixer_init;
 		break;
 	case 0x10ec0885:
 		this->name = "Realtek ALC885";
-		this->init_dacgroup = azalia_alc885_init_dacgroup;
 		this->mixer_init = azalia_alc88x_mixer_init;
 		break;
 	case 0x10ec0888:
 		this->name = "Realtek ALC888";
-		this->init_dacgroup = azalia_alc888_init_dacgroup;
 		this->mixer_init = azalia_alc88x_mixer_init;
 		break;
 	case 0x11d41983:
@@ -198,12 +176,10 @@ azalia_codec_init_vtbl(codec_t *this)
 	case 0x11d41988:
 		/* http://www.analog.com/en/prod/0,2877,AD1988A,00.html */
 		this->name = "Analog Devices AD1988A";
-		this->init_dacgroup = azalia_ad1988_init_dacgroup;
 		break;
 	case 0x11d4198b:
 		/* http://www.analog.com/en/prod/0,2877,AD1988B,00.html */
 		this->name = "Analog Devices AD1988B";
-		this->init_dacgroup = azalia_ad1988_init_dacgroup;
 		break;
 	case 0x14f15045:
 		this->name = "Conexant CX20549";  /* Venice */
@@ -221,31 +197,24 @@ azalia_codec_init_vtbl(codec_t *this)
 		break;
 	case 0x83847616:
 		this->name = "Sigmatel STAC9228X";
-		this->init_dacgroup = azalia_stac9227_init_dacgroup;
 		break;
 	case 0x83847617:
 		this->name = "Sigmatel STAC9228D";
-		this->init_dacgroup = azalia_stac9227_init_dacgroup;
 		break;
 	case 0x83847618:
 		this->name = "Sigmatel STAC9227X";
-		this->init_dacgroup = azalia_stac9227_init_dacgroup;
 		break;
 	case 0x83847620:
 		this->name = "Sigmatel STAC9274";
-		this->init_dacgroup = azalia_stac9271_init_dacgroup;
 		break;
 	case 0x83847621:
 		this->name = "Sigmatel STAC9274D";
-		this->init_dacgroup = azalia_stac9271_init_dacgroup;
 		break;
 	case 0x83847626:
 		this->name = "Sigmatel STAC9271X";
-		this->init_dacgroup = azalia_stac9271_init_dacgroup;
 		break;
 	case 0x83847627:
 		this->name = "Sigmatel STAC9271D";
-		this->init_dacgroup = azalia_stac9271_init_dacgroup;
 		break;
 	case 0x83847632:
 		this->name = "Sigmatel STAC9202";
@@ -280,7 +249,6 @@ azalia_codec_init_vtbl(codec_t *this)
 		break;
 	case 0x83847683:
 		this->name = "Sigmatel STAC9221D";
-		this->init_dacgroup = azalia_stac9221_init_dacgroup;
 		break;
 	case 0x83847690:
 		/* http://www.idt.com/products/getDoc.cfm?docID=17812077 */
@@ -292,19 +260,15 @@ azalia_codec_init_vtbl(codec_t *this)
 		break;
 	case 0x838476a0:
 		this->name = "Sigmatel STAC9205X";
-		this->init_dacgroup = azalia_stac9205_init_dacgroup;
 		break;
 	case 0x838476a1:
 		this->name = "Sigmatel STAC9205D";
-		this->init_dacgroup = azalia_stac9205_init_dacgroup;
 		break;
 	case 0x838476a2:
 		this->name = "Sigmatel STAC9204X";
-		this->init_dacgroup = azalia_stac9205_init_dacgroup;
 		break;
 	case 0x838476a3:
 		this->name = "Sigmatel STAC9204D";
-		this->init_dacgroup = azalia_stac9205_init_dacgroup;
 		break;
 	}
 	return 0;
@@ -317,153 +281,155 @@ azalia_codec_init_vtbl(codec_t *this)
 int
 azalia_generic_codec_init_dacgroup(codec_t *this)
 {
-	int i, j, assoc, group;
-
-	/*
-	 * grouping DACs
-	 *   [0] the lowest assoc DACs
-	 *   [1] the lowest assoc digital outputs
-	 *   [2] the 2nd assoc DACs
-	 *      :
-	 */
 	this->dacs.ngroups = 0;
-	for (assoc = 0; assoc < CORB_CD_ASSOCIATION_MAX; assoc++) {
-		azalia_generic_codec_add_dacgroup(this, assoc, 0);
-		azalia_generic_codec_add_dacgroup(this, assoc, COP_AWCAP_DIGITAL);
-	}
-
-	/* find DACs which do not connect with any pins by default */
-	FOR_EACH_WIDGET(this, i) {
-		boolean_t found;
-
-		if (this->w[i].type != COP_AWTYPE_AUDIO_OUTPUT)
-			continue;
-		found = FALSE;
-		for (group = 0; group < this->dacs.ngroups; group++) {
-			for (j = 0; j < this->dacs.groups[group].nconv; j++) {
-				if (i == this->dacs.groups[group].conv[j]) {
-					found = TRUE;
-					group = this->dacs.ngroups;
-					break;
-				}
-			}
-		}
-		if (found)
-			continue;
-		if (this->dacs.ngroups >= 32)
-			break;
-		this->dacs.groups[this->dacs.ngroups].nconv = 1;
-		this->dacs.groups[this->dacs.ngroups].conv[0] = i;
-		this->dacs.ngroups++;
-	}
+	azalia_generic_codec_add_convgroup(this, &this->dacs,
+	    COP_AWTYPE_AUDIO_OUTPUT, 0);
+	azalia_generic_codec_add_convgroup(this, &this->dacs,
+	    COP_AWTYPE_AUDIO_OUTPUT, COP_AWCAP_DIGITAL);
 	this->dacs.cur = 0;
 
-	/* enumerate ADCs */
 	this->adcs.ngroups = 0;
-	FOR_EACH_WIDGET(this, i) {
-		if (this->w[i].type != COP_AWTYPE_AUDIO_INPUT)
-			continue;
-		this->adcs.groups[this->adcs.ngroups].nconv = 1;
-		this->adcs.groups[this->adcs.ngroups].conv[0] = i;
-		this->adcs.ngroups++;
-		if (this->adcs.ngroups >= 32)
-			break;
-	}
+	azalia_generic_codec_add_convgroup(this, &this->adcs,
+	    COP_AWTYPE_AUDIO_INPUT, 0);
+	azalia_generic_codec_add_convgroup(this, &this->adcs,
+	    COP_AWTYPE_AUDIO_INPUT, COP_AWCAP_DIGITAL);
 	this->adcs.cur = 0;
+
 	return 0;
 }
 
 int
-azalia_generic_codec_add_dacgroup(codec_t *this, int assoc, uint32_t digital)
+azalia_generic_codec_add_convgroup(codec_t *this, convgroupset_t *group,
+    uint32_t type, uint32_t digital)
 {
-	int i, j, n, dac, seq;
+	nid_t all_convs[HDA_MAX_CHANNELS];
+	int nall_convs;
+	nid_t convs[HDA_MAX_CHANNELS];
+	int nconvs;
+	int assoc, seq;
+	nid_t conv;
+	int i, j, k, l;
 
-	n = 0;
-	for (seq = 0 ; seq < CORB_CD_SEQUENCE_MAX; seq++) {
-		i = azalia_generic_codec_find_pin(this, assoc, seq, digital);
-		if (i < 0)
-			continue;
-		dac = azalia_generic_codec_find_dac(this, i, 0);
-		if (dac < 0)
-			continue;
-		/* duplication check */
-		for (j = 0; j < n; j++) {
-			if (this->dacs.groups[this->dacs.ngroups].conv[j] == dac)
-				break;
-		}
-		if (j < n)	/* this group already has <dac> */
-			continue;
-		this->dacs.groups[this->dacs.ngroups].conv[n++] = dac;
-	}
-	if (n <= 0)		/* no such DACs */
-		return 0;
-	this->dacs.groups[this->dacs.ngroups].nconv = n;
+	DPRINTF(("%s: looking for %s %s\n", __func__,
+	    digital ? "digital" : "analog",
+	    (type == COP_AWTYPE_AUDIO_OUTPUT) ? "DACs" : "ADCs"));
 
-	/* check if the same combination is already registered */
-	for (i = 0; i < this->dacs.ngroups; i++) {
-		if (n != this->dacs.groups[i].nconv)
-			continue;
-		for (j = 0; j < n; j++) {
-			if (this->dacs.groups[this->dacs.ngroups].conv[j] !=
-			    this->dacs.groups[i].conv[j])
-				break;
-		}
-		if (j >= n) /* matched */
-			return 0;
-	}
-	/* found no equivalent group */
-	this->dacs.ngroups++;
-	return 0;
-}
-
-int
-azalia_generic_codec_find_pin(const codec_t *this, int assoc, int seq, uint32_t digital)
-{
-	int i;
-
+	nall_convs = 0;
 	FOR_EACH_WIDGET(this, i) {
-		if (this->w[i].type != COP_AWTYPE_PIN_COMPLEX)
-			continue;
-		if ((this->w[i].d.pin.cap & COP_PINCAP_OUTPUT) == 0)
-			continue;
-		if ((this->w[i].widgetcap & COP_AWCAP_DIGITAL) != digital)
-			continue;
-		if (this->w[i].d.pin.association != assoc)
-			continue;
-		if (this->w[i].d.pin.sequence == seq) {
-			return i;
+		if (this->w[i].type == type &&
+		    (this->w[i].widgetcap & COP_AWCAP_DIGITAL) == digital &&
+		    nall_convs < HDA_MAX_CHANNELS)
+			all_convs[nall_convs++] = this->w[i].nid;
+	}
+
+	nconvs = 0;
+	for (assoc = 0; assoc <= CORB_CD_ASSOCIATION_MAX; assoc++) {
+		for (seq = 0; seq <= CORB_CD_SEQUENCE_MAX; seq++) {
+			FOR_EACH_WIDGET(this, i) {
+				const widget_t *w;
+
+				w = &this->w[i];
+				if (!w->enable)
+					continue;
+				if (w->type != COP_AWTYPE_PIN_COMPLEX)
+					continue;
+				if ((w->widgetcap &
+				    COP_AWCAP_DIGITAL) != digital)
+					continue;
+				if (w->d.pin.sequence != seq ||
+				    w->d.pin.association != assoc)
+					continue;
+				if (type == COP_AWTYPE_AUDIO_OUTPUT) {
+					if (!(w->d.pin.cap & COP_PINCAP_OUTPUT))
+						continue;
+				} else {
+					if (!(w->d.pin.cap & COP_PINCAP_INPUT))
+						continue;
+				}
+				DPRINTF(("\tpin=%2.2x, assoc=%d, seq=%d:",
+				    w->nid, assoc, seq));
+				for (j = 0; j < nall_convs; j++) {
+					conv = all_convs[j];
+					for (k = 0; k < nconvs; k++) {
+						if (convs[k] == conv)
+							break;
+					}
+					if (k < nconvs)
+						continue;
+					if (type == COP_AWTYPE_AUDIO_OUTPUT) {
+						k = azalia_generic_codec_fnode
+						    (this, conv, i, 0);
+						if (k < 0 ||
+						    this->w[k].nid != conv)
+							continue;
+					} else {
+						FOR_EACH_WIDGET(this, l)
+							if (this->w[l].nid ==
+							    conv)
+								break;
+						k = azalia_generic_codec_fnode
+						    (this, w->nid, l, 0);
+						if (k < 0 || this->w[k].nid !=
+						    w->nid)
+							continue;
+					}
+					convs[nconvs++] = conv;
+					DPRINTF(("%2.2x", conv));
+					if (nconvs >= nall_convs ||
+					    nconvs >= HDA_MAX_CHANNELS) {
+						DPRINTF(("\n"));
+						goto done;
+					}
+				}
+				DPRINTF(("\n"));
+			}
 		}
 	}
-	return -1;
+done:
+	for (i = 0; i < nconvs; i++)
+		group->groups[group->ngroups].conv[i] = convs[i];
+	if (nconvs > 0) {
+		group->groups[group->ngroups].nconv = i;
+		group->ngroups++;
+	}
+
+	return 0;
 }
 
 int
-azalia_generic_codec_find_dac(const codec_t *this, int index, int depth)
+azalia_generic_codec_fnode(codec_t *this, nid_t node, int index, int depth)
 {
 	const widget_t *w;
-	int i, j, ret;
+	int i, j, k, ret;
 
 	w = &this->w[index];
-	if (w->type == COP_AWTYPE_AUDIO_OUTPUT)
+	if (w->nid == node) {
+		DPRINTF((" depth=%d:", depth));
 		return index;
-	if (++depth > 50) {
+	}
+	/* back at the beginning or a bad end */
+	if (depth > 0 &&
+	    (w->type == COP_AWTYPE_PIN_COMPLEX ||
+	    w->type == COP_AWTYPE_AUDIO_OUTPUT ||
+	    w->type == COP_AWTYPE_AUDIO_INPUT))
 		return -1;
-	}
-	if (w->selected >= 0) {
-		j = w->connections[w->selected];
-		if (VALID_WIDGET_NID(j, this)) {
-			ret = azalia_generic_codec_find_dac(this, j, depth);
-			if (ret >= 0)
-				return ret;
-		}
-	}
+	if (++depth >= 10)
+		return -1;
 	for (i = 0; i < w->nconnections; i++) {
 		j = w->connections[i];
 		if (!VALID_WIDGET_NID(j, this))
 			continue;
-		ret = azalia_generic_codec_find_dac(this, j, depth);
-		if (ret >= 0)
-			return ret;
+		FOR_EACH_WIDGET(this, k)
+			if (this->w[k].nid == j)
+				break;
+		if (k < this->wend) {
+			if (this->w[k].enable) {
+				ret = azalia_generic_codec_fnode(this, node,
+				    k, depth);
+				if (ret >= 0)
+					return ret;
+			}
+		}
 	}
 	return -1;
 }
@@ -545,14 +511,8 @@ azalia_generic_mixer_init(codec_t *this)
 		const widget_t *w;
 
 		w = &this->w[i];
-
-		/* skip unconnected pins */
-		if (w->type == COP_AWTYPE_PIN_COMPLEX) {
-			uint8_t conn =
-			    (w->d.pin.config & CORB_CD_PORT_MASK) >> 30;
-			if (conn == 1)	/* no physical connection */
-				continue;
-		}
+		if (!w->enable)
+			continue;
 
 		/* converters (DACc/ADCs)
 		 * not mixer widgets, but keep track of connections to
@@ -562,15 +522,13 @@ azalia_generic_mixer_init(codec_t *this)
 			/* adcs */
 			if (w->type == COP_AWTYPE_AUDIO_INPUT) {
 				for (j = 0; j < w->nconnections; j++) {
-					uint8_t conn;
+					const widget_t *ww;
 
 					if (!VALID_WIDGET_NID(w->connections[j],
 					    this))
 						continue;
-					/* skip unconnected pins */
-					PIN_STATUS(&this->w[w->connections[j]],
-					    conn);
-					if (conn == 1)
+					ww = &this->w[w->connections[j]];
+					if (!ww->enable)
 						continue;
 					for (k = 0; k < naconns; k++) {
 						if (aconns[k] ==
@@ -587,15 +545,13 @@ azalia_generic_mixer_init(codec_t *this)
 			/* dacs */
 			if (w->type == COP_AWTYPE_AUDIO_OUTPUT) {
 				for (j = 0; j < w->nconnections; j++) {
-					uint8_t conn;
+					const widget_t *ww;
 
 					if (!VALID_WIDGET_NID(w->connections[j],
 					    this))
 						continue;
-					/* skip unconnected pins */
-					PIN_STATUS(&this->w[w->connections[j]],
-					    conn);
-					if (conn == 1)
+					ww = &this->w[w->connections[j]];
+					if (!ww->enable)
 						continue;
 					for (k = 0; k < ndconns; k++) {
 						if (dconns[k] ==
@@ -612,8 +568,7 @@ azalia_generic_mixer_init(codec_t *this)
 		}
 
 		/* selector */
-		if (w->type != COP_AWTYPE_AUDIO_MIXER &&
-		    w->type != COP_AWTYPE_POWER && w->nconnections >= 2) {
+		if (w->type != COP_AWTYPE_AUDIO_MIXER && w->nconnections >= 2) {
 			MIXER_REG_PROLOG;
 			snprintf(d->label.name, sizeof(d->label.name),
 			    "%s_source", w->name);
@@ -626,14 +581,12 @@ azalia_generic_mixer_init(codec_t *this)
 				d->mixer_class = AZ_CLASS_OUTPUT;
 			m->target = MI_TARGET_CONNLIST;
 			for (j = 0, k = 0; j < w->nconnections && k < 32; j++) {
-				uint8_t conn;
+				const widget_t *ww;
 
 				if (!VALID_WIDGET_NID(w->connections[j], this))
 					continue;
-				/* skip unconnected pins */
-				PIN_STATUS(&this->w[w->connections[j]],
-				    conn);
-				if (conn == 1)
+				ww = &this->w[w->connections[j]];
+				if (!ww->enable)
 					continue;
 				d->un.e.member[k].ord = j;
 				strlcpy(d->un.e.member[k].label.name,
@@ -713,16 +666,15 @@ azalia_generic_mixer_init(codec_t *this)
 				    AudioNon, MAX_AUDIO_DEV_LEN);
 				this->nmixers++;
 			} else {
-				uint8_t conn;
-
 				for (j = 0; j < w->nconnections; j++) {
+					const widget_t *ww;
+
 					MIXER_REG_PROLOG;
-					if (!VALID_WIDGET_NID(w->connections[j], this))
+					if (!VALID_WIDGET_NID(w->connections[j],
+					    this))
 						continue;
-					/* skip unconnected pins */
-					PIN_STATUS(&this->w[w->connections[j]],
-					    conn);
-					if (conn == 1)
+					ww = &this->w[w->connections[j]];
+					if (!ww->enable)
 						continue;
 					snprintf(d->label.name, sizeof(d->label.name),
 					    "%s_%s_mute", w->name,
@@ -772,16 +724,15 @@ azalia_generic_mixer_init(codec_t *this)
 				    MIXER_DELTA(COP_AMPCAP_NUMSTEPS(w->inamp_cap));
 				this->nmixers++;
 			} else {
-				uint8_t conn;
-
 				for (j = 0; j < w->nconnections; j++) {
+					const widget_t *ww;
+
 					MIXER_REG_PROLOG;
-					if (!VALID_WIDGET_NID(w->connections[j], this))
+					if (!VALID_WIDGET_NID(w->connections[j],
+					    this))
 						continue;
-					/* skip unconnected pins */
-					PIN_STATUS(&this->w[w->connections[j]],
-					    conn);
-					if (conn == 1)
+					ww = &this->w[w->connections[j]];
+					if (!ww->enable)
 						continue;
 					snprintf(d->label.name, sizeof(d->label.name),
 					    "%s_%s", w->name,
@@ -1052,77 +1003,6 @@ azalia_generic_mixer_default(codec_t *this)
 int
 azalia_generic_mixer_pin_sense(codec_t *this)
 {
-	typedef enum {
-		PIN_DIR_IN,
-		PIN_DIR_OUT,
-		PIN_DIR_MIC
-	} pintype_t;
-	const widget_t *w;
-	int i;
-
-	FOR_EACH_WIDGET(this, i) {
-		pintype_t pintype = PIN_DIR_IN;
-
-		w = &this->w[i];
-		if (w->type != COP_AWTYPE_PIN_COMPLEX)
-			continue;
-		if (!(w->d.pin.cap & COP_PINCAP_INPUT))
-			pintype = PIN_DIR_OUT;
-		if (!(w->d.pin.cap & COP_PINCAP_OUTPUT))
-			pintype = PIN_DIR_IN;
-
-		switch (w->d.pin.device) {
-		case CORB_CD_LINEOUT:
-		case CORB_CD_SPEAKER:
-		case CORB_CD_HEADPHONE:
-		case CORB_CD_SPDIFOUT:
-		case CORB_CD_DIGITALOUT:
-			pintype = PIN_DIR_OUT;
-			break;
-		case CORB_CD_CD:
-		case CORB_CD_LINEIN:
-			pintype = PIN_DIR_IN;
-			break;
-		case CORB_CD_MICIN:
-			pintype = PIN_DIR_MIC;
-			break;
-		}
-
-		switch (pintype) {
-		case PIN_DIR_IN:
-			this->comresp(this, w->nid,
-			    CORB_SET_PIN_WIDGET_CONTROL,
-			    CORB_PWC_INPUT, NULL);
-			break;
-		case PIN_DIR_OUT:
-			this->comresp(this, w->nid,
-			    CORB_SET_PIN_WIDGET_CONTROL,
-			    CORB_PWC_OUTPUT, NULL);
-			break;
-		case PIN_DIR_MIC:
-			this->comresp(this, w->nid,
-			    CORB_SET_PIN_WIDGET_CONTROL,
-			    CORB_PWC_INPUT|CORB_PWC_VREF_80, NULL);
-			break;
-		}
-
-		if (w->d.pin.cap & COP_PINCAP_EAPD) {
-			uint32_t result;
-			int err;
-
-			err = this->comresp(this, w->nid,
-			    CORB_GET_EAPD_BTL_ENABLE, 0, &result);
-			if (err)
-				continue;
-			result &= 0xff;
-			result |= CORB_EAPD_EAPD;
-			err = this->comresp(this, w->nid,
-			    CORB_SET_EAPD_BTL_ENABLE, result, &result);
-			if (err)
-				continue;
-		}
-	}
-
 	/* GPIO quirks */
 
 	if (this->vid == SIGMATEL_STAC9221 && this->subid == STAC9221_APPLE_ID) {
@@ -1813,63 +1693,6 @@ azalia_alc260_mixer_init(codec_t *this)
 	return 0;
 }
 
-int
-azalia_alc260_init_dacgroup(codec_t *this)
-{
-	static const convgroupset_t dacs = {
-		-1, 2,
-		{{1, {0x02}},	/* analog 2ch */
-		 {1, {0x03}}}};	/* digital */
-	static const convgroupset_t adcs = {
-		-1, 3,
-		{{1, {0x04}},	/* analog 2ch */
-		 {1, {0x05}},	/* analog 2ch */
-		 {1, {0x06}}}};	/* digital */
-
-	this->dacs = dacs;
-	this->adcs = adcs;
-	return 0;
-}
-
-/* ----------------------------------------------------------------
- * Realtek ALC662-GR
- * ---------------------------------------------------------------- */
-
-int
-azalia_alc662_init_dacgroup(codec_t *this)
-{
-	static const convgroupset_t dacs = {
-		-1, 1,
-		{{3, {0x02, 0x03, 0x04}}}}; /* analog 6ch */
-	static const convgroupset_t adcs = {
-		-1, 1,
-		{{2, {0x09, 0x08}}}};	/* analog 4ch */
-
-	this->dacs = dacs;
-	this->adcs = adcs;
-	return 0;
-}
-
-/* ----------------------------------------------------------------
- * Realtek ALC861
- * ---------------------------------------------------------------- */
-
-int
-azalia_alc861_init_dacgroup(codec_t *this)
-{
-	static const convgroupset_t dacs = {
-		-1, 2,
-		{{4, {0x03, 0x04, 0x05, 0x06}}, /* analog 8ch */
-		 {1, {0x07}}}};	/* digital */
-	static const convgroupset_t adcs = {
-		-1, 1,
-		{{1, {0x08}}}};	/* analog 2ch */
-
-	this->dacs = dacs;
-	this->adcs = adcs;
-	return 0;
-}
-
 /* ----------------------------------------------------------------
  * Realtek ALC88x mixer init - volume control is on the mixer
  * instead of the DAC.
@@ -1882,113 +1705,6 @@ azalia_alc88x_mixer_init(codec_t *this)
 	azalia_generic_mixer_create_virtual(this, 0x0c, -1);
 	azalia_generic_mixer_pin_sense(this);
 
-	return 0;
-}
-
-/* ----------------------------------------------------------------
- * Realtek ALC880
- * ---------------------------------------------------------------- */
-
-int
-azalia_alc880_init_dacgroup(codec_t *this)
-{
-	static const convgroupset_t dacs = {
-		-1, 2,
-		{{4, {0x02, 0x03, 0x04, 0x05}}, /* analog 8ch */
-		 {1, {0x06}}}};	/* digital */
-	static const convgroupset_t adcs = {
-		-1, 2,
-		{{3, {0x07, 0x08, 0x09}}, /* analog 6ch */
-		 {1, {0x0a}}}};	/* digital */
-
-	this->dacs = dacs;
-	this->adcs = adcs;
-	return 0;
-}
-
-/* ----------------------------------------------------------------
- * Realtek ALC882
- * ---------------------------------------------------------------- */
-
-int
-azalia_alc882_init_dacgroup(codec_t *this)
-{
-	static const convgroupset_t dacs = {
-		-1, 2,
-		{{5, {0x02, 0x03, 0x04, 0x05, 0x25}}, /* analog 10ch */
-		 {1, {0x06}}}};	/* digital */
-	static const convgroupset_t adcs = {
-		-1, 2,
-		{{3, {0x07, 0x08, 0x09}}, /* analog 6ch */
-		 {1, {0x0a}}}};	/* digital */
-
-	this->dacs = dacs;
-	this->adcs = adcs;
-	return 0;
-}
-
-/* ----------------------------------------------------------------
- * Realtek ALC883
- * ALC882 without adc07 and mix24.
- * ---------------------------------------------------------------- */
-
-int
-azalia_alc883_init_dacgroup(codec_t *this)
-{
-	static const convgroupset_t dacs = {
-		-1, 2,
-		{{5, {0x02, 0x03, 0x04, 0x05, 0x25}}, /* analog 10ch */
-		 {1, {0x06}}}}; /* digital */
-	static const convgroupset_t adcs = {
-		-1, 2,
-		{{2, {0x08, 0x09}}, /* analog 4ch */
-		 {1, {0x0a}}}}; /* digital */
-
-	this->dacs = dacs;
-	this->adcs = adcs;
-	return 0;
-}
-
-/* ----------------------------------------------------------------
- * Realtek ALC885
- * ---------------------------------------------------------------- */
-
-int
-azalia_alc885_init_dacgroup(codec_t *this)
-{
-	static const convgroupset_t dacs = {
-		-1, 2,
-		{{5, {0x02, 0x03, 0x04, 0x05, 0x25}}, /* analog 10ch */
-		 {1, {0x06}}}};	/* digital */
-	static const convgroupset_t adcs = {
-		-1, 2,
-		{{3, {0x07, 0x08, 0x09}},	/* analog 6ch */
-		 {1, {0x0a}}}};	/* digital */
-
-	this->dacs = dacs;
-	this->adcs = adcs;
-	return 0;
-}
-
-/* ----------------------------------------------------------------
- * Realtek ALC888
- * ---------------------------------------------------------------- */
-
-int
-azalia_alc888_init_dacgroup(codec_t *this)
-{
-	static const convgroupset_t dacs = {
-		-1, 2,
-		{{5, {0x02, 0x03, 0x04, 0x05, 0x25}}, /* analog 10ch */
-		 {1, {0x06}}}};	/* digital */
-		/* ALC888S has another SPDIF-out 0x10 */
-	static const convgroupset_t adcs = {
-		-1, 2,
-		{{2, {0x08, 0x09}},	/* analog 4ch */
-		 {1, {0x0a}}}};	/* digital */
-
-	this->dacs = dacs;
-	this->adcs = adcs;
 	return 0;
 }
 
@@ -2138,28 +1854,6 @@ azalia_ad1984_get_port(codec_t *this, mixer_ctrl_t *mc)
 		return azalia_generic_mixer_get(this, m->nid,
 		    MI_TARGET_OUTAMP, mc);
 	return azalia_generic_mixer_get(this, m->nid, m->target, mc);
-}
-
-/* ----------------------------------------------------------------
- * Analog Devices AD1988A/AD1988B
- * ---------------------------------------------------------------- */
-
-int
-azalia_ad1988_init_dacgroup(codec_t *this)
-{
-	static const convgroupset_t dacs = {
-		-1, 3,
-		{{4, {0x04, 0x05, 0x06, 0x0a}},	/* analog 8ch */
-		 {1, {0x02}},	/* digital */
-		 {1, {0x03}}}};	/* another analog */
-	static const convgroupset_t adcs = {
-		-1, 2,
-		{{2, {0x08, 0x09, 0x0f}}, /* analog 6ch */
-		 {1, {0x07}}}};	/* digital */
-
-	this->dacs = dacs;
-	this->adcs = adcs;
-	return 0;
 }
 
 /* ----------------------------------------------------------------
@@ -2445,62 +2139,6 @@ azalia_stac9221_get_port(codec_t *this, mixer_ctrl_t *mc)
 		    MI_TARGET_OUTAMP, mc);
 	return azalia_generic_mixer_get(this, m->nid, m->target, mc);
 }
-
-
-int
-azalia_stac9205_init_dacgroup(codec_t *this)
-{
-	/* volume knob at nid 24 */
-	static const convgroupset_t dacs = {
-		-1, 1,
-		{{2, {0x10, 0x11}}}};
-
-	/* vols: 1d:1b, 1e:1a */
-	static const convgroupset_t adcs = {
-		-1, 1,
-		{{2, {0x1d, 0x1e}}}};
-
-	this->dacs = dacs;
-	this->adcs = adcs;
-	return 0;
-}
-
-int
-azalia_stac9227_init_dacgroup(codec_t *this)
-{
-	/* volume knob at nid 24 */
-	static const convgroupset_t dacs = {
-		-1, 1,
-		{{4, {0x02, 0x03, 0x04, 0x05}}}};
-
-	/* vols: 07:18, 08:19, 09:1a */
-	static const convgroupset_t adcs = {
-		-1, 1,
-		{{3, {0x07, 0x08, 0x09}}}};
-
-	this->dacs = dacs;
-	this->adcs = adcs;
-	return 0;
-}
-
-int
-azalia_stac9271_init_dacgroup(codec_t *this)
-{
-	/* volume knob at nid 24 */
-	static const convgroupset_t dacs = {
-		-1, 1,
-		{{5, {0x02, 0x03, 0x04, 0x05, 0x06}}}};
-
-	/* vols: 07:18, 08:19, 09:1a */
-	static const convgroupset_t adcs = {
-		-1, 1,
-		{{3, {0x07, 0x08, 0x09}}}};
-
-	this->dacs = dacs;
-	this->adcs = adcs;
-	return 0;
-}
-
 
 /* ----------------------------------------------------------------
  * Sony VAIO FE and SZ
