@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.113 2008/11/24 15:14:33 claudio Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.118 2008/11/26 17:36:23 dlg Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -301,9 +301,11 @@ struct mbuf {
  * from must have M_PKTHDR set, and to must be empty.
  */
 #define M_DUP_PKTHDR(to, from) do {					\
-	(to)->m_flags = (from)->m_flags & M_COPYFLAGS;			\
+	(to)->m_flags = ((to)->m_flags & (M_EXT | M_CLUSTER));		\
+	(to)->m_flags |= (from)->m_flags & M_COPYFLAGS;			\
 	M_DUP_HDR((to), (from));					\
-	(to)->m_data = (to)->m_pktdat;					\
+	if (((to)->m_flags & M_EXT) == 0)				\
+		(to)->m_data = (to)->m_pktdat;				\
 } while (/* CONSTCOND */ 0)
 
 /*
@@ -311,9 +313,11 @@ struct mbuf {
  * from must have M_PKTHDR set, and to must be empty.
  */
 #define	M_MOVE_PKTHDR(to, from) do {					\
-	(to)->m_flags = (from)->m_flags & M_COPYFLAGS;			\
+	(to)->m_flags = ((to)->m_flags & (M_EXT | M_CLUSTER));		\
+	(to)->m_flags |= (from)->m_flags & M_COPYFLAGS;			\
 	M_MOVE_HDR((to), (from));					\
-	(to)->m_data = (to)->m_pktdat;					\
+	if (((to)->m_flags & M_EXT) == 0)				\
+		(to)->m_data = (to)->m_pktdat;				\
 } while (/* CONSTCOND */ 0)
 
 /*
@@ -393,7 +397,6 @@ struct mbstat {
 struct	mclsizes {
 	u_int	size;
 	u_int	hwm;
-	u_int	factor;
 };
 
 extern	struct mbstat mbstat;
@@ -414,6 +417,7 @@ struct	mbuf *m_get(int, int);
 struct	mbuf *m_getclr(int, int);
 struct	mbuf *m_gethdr(int, int);
 struct	mbuf *m_inithdr(struct mbuf *);
+int	      m_defrag(struct mbuf *, int);
 struct	mbuf *m_prepend(struct mbuf *, int, int);
 struct	mbuf *m_pulldown(struct mbuf *, int, int, int *);
 struct	mbuf *m_pullup(struct mbuf *, int);
@@ -424,9 +428,10 @@ struct  mbuf *m_getptr(struct mbuf *, int, int *);
 int	m_leadingspace(struct mbuf *);
 int	m_trailingspace(struct mbuf *);
 void	m_clget(struct mbuf *, int, struct ifnet *, u_int);
+void	m_clsetlwm(struct ifnet *, u_int, u_int);
 int	m_cldrop(struct ifnet *, int);
 void	m_clcount(struct ifnet *, int);
-void	m_cluncount(struct mbuf *);
+void	m_cluncount(struct mbuf *, int);
 void	m_adj(struct mbuf *, int);
 void	m_copyback(struct mbuf *, int, int, const void *);
 void	m_freem(struct mbuf *);

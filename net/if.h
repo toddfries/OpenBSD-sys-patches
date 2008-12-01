@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.97 2008/11/24 14:26:54 deraadt Exp $	*/
+/*	$OpenBSD: if.h,v 1.100 2008/11/30 00:14:42 brad Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -152,6 +152,8 @@ struct	mclstat {
 	struct {
 		u_short	mcl_alive;
 		u_short mcl_hwm;
+		u_short mcl_size;
+		u_short mcl_lwm;
 	}	mclpool[MCLPOOLS];
 };
 
@@ -225,8 +227,8 @@ struct ifnet {				/* and the entries */
 	int	(*if_ioctl)(struct ifnet *, u_long, caddr_t);
 					/* init routine */
 	int	(*if_init)(struct ifnet *);
-					/* XXX bus reset routine */
-	int	(*if_reset)(struct ifnet *);
+					/* stop routine */
+	int	(*if_stop)(struct ifnet *, int);
 					/* timer routine */
 	void	(*if_watchdog)(struct ifnet *);
 	struct	ifaltq if_snd;		/* output queue (includes altq) */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cdcef.c,v 1.21 2008/10/02 20:21:14 brad Exp $	*/
+/*	$OpenBSD: if_cdcef.c,v 1.23 2008/11/29 10:24:33 matthieu Exp $	*/
 
 /*
  * Copyright (c) 2007 Dale Rahn <drahn@openbsd.org>
@@ -125,6 +125,8 @@ struct usbf_function_methods cdcef_methods = {
 #endif
 
 #define DEVNAME(sc)	((sc)->sc_dev.bdev.dv_xname)
+
+extern int ticks;
 
 /*
  * USB function match/attach/detach
@@ -473,7 +475,6 @@ cdcef_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct cdcef_softc	*sc = ifp->if_softc;
 	struct ifaddr		*ifa = (struct ifaddr *)data;
-	struct ifreq		*ifr = (struct ifreq *)data;
 	int			 s, error = 0;
 
 	s = splnet();
@@ -489,13 +490,6 @@ cdcef_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU)
-			error = EINVAL;
-		else
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (!(ifp->if_flags & IFF_RUNNING))
@@ -507,19 +501,12 @@ cdcef_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = 0;
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET)
-			error = 0;
-		break;
-
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
 	}
+
+	if (error == ENETRESET)
+		error = 0;
 
 	splx(s);
 	return (error);

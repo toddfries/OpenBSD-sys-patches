@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpi.c,v 1.73 2008/11/22 08:23:52 brad Exp $	*/
+/*	$OpenBSD: if_wpi.c,v 1.76 2008/11/25 22:20:11 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006-2008
@@ -176,7 +176,7 @@ int
 wpi_match(struct device *parent, void *match, void *aux)
 {
 	return pci_matchbyid((struct pci_attach_args *)aux, wpi_devices,
-	    sizeof wpi_devices / sizeof wpi_devices[0]);
+	    nitems(wpi_devices));
 }
 
 void
@@ -562,6 +562,7 @@ wpi_dma_contig_alloc(bus_dma_tag_t tag, struct wpi_dma_info *dma, void **kvap,
 		goto fail;
 
 	memset(dma->vaddr, 0, size);
+	bus_dmamap_sync(tag, dma->map, 0, size, BUS_DMASYNC_PREWRITE);
 
 	dma->paddr = dma->map->dm_segs[0].ds_addr;
 	if (kvap != NULL)
@@ -578,6 +579,8 @@ wpi_dma_contig_free(struct wpi_dma_info *dma)
 {
 	if (dma->map != NULL) {
 		if (dma->vaddr != NULL) {
+			bus_dmamap_sync(dma->tag, dma->map, 0, dma->size,
+			    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 			bus_dmamap_unload(dma->tag, dma->map);
 			bus_dmamem_unmap(dma->tag, dma->vaddr, dma->size);
 			bus_dmamem_free(dma->tag, &dma->seg, 1);
@@ -785,6 +788,8 @@ wpi_alloc_tx_ring(struct wpi_softc *sc, struct wpi_tx_ring *ring, int qid)
 
 	/* Update shared area with ring's physical address. */
 	sc->shared->txbase[qid] = htole32(ring->desc_dma.paddr);
+	bus_dmamap_sync(sc->sc_dmat, sc->shared_dma.map, 0,
+	    sizeof (struct wpi_shared), BUS_DMASYNC_PREWRITE);
 
 	/*
 	 * We only use rings 0 through 4 (4 EDCA + cmd) so there is no need
@@ -846,6 +851,8 @@ wpi_reset_tx_ring(struct wpi_softc *sc, struct wpi_tx_ring *ring)
 		struct wpi_tx_data *data = &ring->data[i];
 
 		if (data->m != NULL) {
+			bus_dmamap_sync(sc->sc_dmat, data->map, 0,
+			    data->map->dm_mapsize, BUS_DMASYNC_POSTWRITE);
 			bus_dmamap_unload(sc->sc_dmat, data->map);
 			m_freem(data->m);
 			data->m = NULL;
@@ -870,6 +877,8 @@ wpi_free_tx_ring(struct wpi_softc *sc, struct wpi_tx_ring *ring)
 		struct wpi_tx_data *data = &ring->data[i];
 
 		if (data->m != NULL) {
+			bus_dmamap_sync(sc->sc_dmat, data->map, 0,
+			    data->map->dm_mapsize, BUS_DMASYNC_POSTWRITE);
 			bus_dmamap_unload(sc->sc_dmat, data->map);
 			m_freem(data->m);
 		}
@@ -1203,6 +1212,9 @@ wpi_rx_done(struct wpi_softc *sc, struct wpi_rx_desc *desc,
 	uint32_t flags;
 
 	stat = (struct wpi_rx_stat *)(desc + 1);
+	bus_dmamap_sync(sc->sc_dmat, ring->buf_dma.map,
+	    (caddr_t)stat - ring->buf_dma.vaddr, WPI_RBUF_SIZE,
+	    BUS_DMASYNC_POSTREAD);
 
 	if (stat->len > WPI_STAT_MAXLEN) {
 		printf("%s: invalid RX statistic header\n",
@@ -1365,6 +1377,8 @@ wpi_tx_done(struct wpi_softc *sc, struct wpi_rx_desc *desc)
 		ifp->if_opackets++;
 
 	/* Unmap and free mbuf. */
+	bus_dmamap_sync(sc->sc_dmat, data->map, 0, data->map->dm_mapsize,
+	    BUS_DMASYNC_POSTWRITE);
 	bus_dmamap_unload(sc->sc_dmat, data->map);
 	m_freem(data->m);
 	data->m = NULL;
@@ -1394,6 +1408,8 @@ wpi_cmd_done(struct wpi_softc *sc, struct wpi_rx_desc *desc)
 
 	/* If the command was mapped in an mbuf, free it. */
 	if (data->m != NULL) {
+		bus_dmamap_sync(sc->sc_dmat, data->map, 0,
+		    data->map->dm_mapsize, BUS_DMASYNC_POSTWRITE);
 		bus_dmamap_unload(sc->sc_dmat, data->map);
 		m_freem(data->m);
 		data->m = NULL;
@@ -1408,10 +1424,17 @@ wpi_notif_intr(struct wpi_softc *sc)
 	struct ifnet *ifp = &ic->ic_if;
 	uint32_t hw;
 
+	bus_dmamap_sync(sc->sc_dmat, sc->shared_dma.map, 0,
+	    sizeof (struct wpi_shared), BUS_DMASYNC_POSTREAD);
+
 	hw = letoh32(sc->shared->next);
 	while (sc->rxq.cur != hw) {
 		struct wpi_rx_data *data = &sc->rxq.data[sc->rxq.cur];
 		struct wpi_rx_desc *desc = (void *)data->m->m_ext.ext_buf;
+
+		bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+		    (caddr_t)desc - sc->rxq.buf_dma.vaddr, sizeof (*desc),
+		    BUS_DMASYNC_POSTREAD);
 
 		DPRINTFN(4, ("rx notification qid=%x idx=%d flags=%x type=%d "
 		    "len=%d\n", desc->qid, desc->idx, desc->flags, desc->type,
@@ -1437,6 +1460,9 @@ wpi_notif_intr(struct wpi_softc *sc)
 			    (struct wpi_ucode_info *)(desc + 1);
 
 			/* The microcontroller is ready. */
+			bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+			    (caddr_t)uc - sc->rxq.buf_dma.vaddr,
+			    sizeof (*uc), BUS_DMASYNC_POSTREAD);
 			DPRINTF(("microcode alive notification version %x "
 			    "alive %x\n", letoh32(uc->version),
 			    letoh32(uc->valid)));
@@ -1456,6 +1482,9 @@ wpi_notif_intr(struct wpi_softc *sc)
 			uint32_t *status = (uint32_t *)(desc + 1);
 
 			/* Enabled/disabled notification. */
+			bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+			    (caddr_t)status - sc->rxq.buf_dma.vaddr,
+			    sizeof (*status), BUS_DMASYNC_POSTREAD);
 			DPRINTF(("state changed to %x\n", letoh32(*status)));
 
 			if (letoh32(*status) & 1) {
@@ -1474,6 +1503,9 @@ wpi_notif_intr(struct wpi_softc *sc)
 			struct wpi_start_scan *scan =
 			    (struct wpi_start_scan *)(desc + 1);
 
+			bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+			    (caddr_t)scan - sc->rxq.buf_dma.vaddr,
+			    sizeof (*scan), BUS_DMASYNC_POSTREAD);
 			DPRINTFN(2, ("scanning channel %d status %x\n",
 			    scan->chan, letoh32(scan->status)));
 
@@ -1486,6 +1518,9 @@ wpi_notif_intr(struct wpi_softc *sc)
 			struct wpi_stop_scan *scan =
 			    (struct wpi_stop_scan *)(desc + 1);
 
+			bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+			    (caddr_t)scan - sc->rxq.buf_dma.vaddr,
+			    sizeof (*scan), BUS_DMASYNC_POSTREAD);
 			DPRINTF(("scan finished nchan=%d status=%d chan=%d\n",
 			    scan->nchan, scan->status, scan->chan));
 
@@ -1640,7 +1675,6 @@ wpi_tx(struct wpi_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	struct ieee80211_frame *wh;
 	struct ieee80211_key *k = NULL;
 	enum ieee80211_edca_ac ac;
-	struct mbuf *m1;
 	uint32_t flags;
 	uint16_t qos;
 	u_int hdrlen;
@@ -1816,24 +1850,10 @@ wpi_tx(struct wpi_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	}
 	if (error != 0) {
 		/* Too many DMA segments, linearize mbuf. */
-		MGETHDR(m1, M_DONTWAIT, MT_DATA);
-		if (m1 == NULL) {
+		if (m_defrag(m, M_DONTWAIT) != 0) {
 			m_freem(m);
 			return ENOMEM;
 		}
-		if (m->m_pkthdr.len > MHLEN) {
-			MCLGET(m1, M_DONTWAIT);
-			if (!(m1->m_flags & M_EXT)) {
-				m_freem(m);
-				m_freem(m1);
-				return ENOMEM;
-			}
-		}
-		m_copydata(m, 0, m->m_pkthdr.len, mtod(m1, caddr_t));
-		m1->m_len = m1->m_pkthdr.len = m->m_pkthdr.len;
-		m_freem(m);
-		m = m1;
-
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m,
 		    BUS_DMA_NOWAIT);
 		if (error != 0) {
@@ -1865,6 +1885,15 @@ wpi_tx(struct wpi_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 		desc->segs[i].len  =
 		    htole32(data->map->dm_segs[i - 1].ds_len);
 	}
+
+	bus_dmamap_sync(sc->sc_dmat, data->map, 0, data->map->dm_mapsize,
+	    BUS_DMASYNC_PREWRITE);
+	bus_dmamap_sync(sc->sc_dmat, ring->cmd_dma.map,
+	    (caddr_t)cmd - ring->cmd_dma.vaddr, sizeof (*cmd),
+	    BUS_DMASYNC_PREWRITE);
+	bus_dmamap_sync(sc->sc_dmat, ring->desc_dma.map,
+	    (caddr_t)desc - ring->desc_dma.vaddr, sizeof (*desc),
+	    BUS_DMASYNC_PREWRITE);
 
 	/* Kick TX ring. */
 	ring->cur = (ring->cur + 1) % WPI_TX_RING_COUNT;
@@ -2077,6 +2106,18 @@ wpi_cmd(struct wpi_softc *sc, int code, const void *buf, int size, int async)
 	desc->flags = htole32(WPI_PAD32(size) << 28 | 1 << 24);
 	desc->segs[0].addr = htole32(paddr);
 	desc->segs[0].len  = htole32(totlen);
+
+	if (size > sizeof cmd->data) {
+		bus_dmamap_sync(sc->sc_dmat, data->map, 0, totlen,
+		    BUS_DMASYNC_PREWRITE);
+	} else {
+		bus_dmamap_sync(sc->sc_dmat, ring->cmd_dma.map,
+		    (caddr_t)cmd - ring->cmd_dma.vaddr, totlen,
+		    BUS_DMASYNC_PREWRITE);
+	}
+	bus_dmamap_sync(sc->sc_dmat, ring->desc_dma.map,
+	    (caddr_t)desc - ring->desc_dma.vaddr, sizeof (*desc),
+	    BUS_DMASYNC_PREWRITE);
 
 	/* Kick command ring. */
 	ring->cur = (ring->cur + 1) % WPI_TX_RING_COUNT;
@@ -2870,8 +2911,12 @@ wpi_load_firmware(struct wpi_softc *sc)
 
 	/* Copy initialization sections into pre-allocated DMA-safe memory. */
 	memcpy(dma->vaddr, fw->init.data, fw->init.datasz);
+	bus_dmamap_sync(sc->sc_dmat, dma->map, 0, fw->init.datasz,
+	    BUS_DMASYNC_PREWRITE);
 	memcpy(dma->vaddr + WPI_FW_DATA_MAXSZ,
 	    fw->init.text, fw->init.textsz);
+	bus_dmamap_sync(sc->sc_dmat, dma->map, WPI_FW_DATA_MAXSZ,
+	    fw->init.textsz, BUS_DMASYNC_PREWRITE);
 
 	/* Tell adapter where to find initialization sections. */
 	if ((error = wpi_nic_lock(sc)) != 0)
@@ -2902,8 +2947,12 @@ wpi_load_firmware(struct wpi_softc *sc)
 
 	/* Copy runtime sections into pre-allocated DMA-safe memory. */
 	memcpy(dma->vaddr, fw->main.data, fw->main.datasz);
+	bus_dmamap_sync(sc->sc_dmat, dma->map, 0, fw->main.datasz,
+	    BUS_DMASYNC_PREWRITE);
 	memcpy(dma->vaddr + WPI_FW_DATA_MAXSZ,
 	    fw->main.text, fw->main.textsz);
+	bus_dmamap_sync(sc->sc_dmat, dma->map, WPI_FW_DATA_MAXSZ,
+	    fw->main.textsz, BUS_DMASYNC_PREWRITE);
 
 	/* Tell adapter where to find runtime sections. */
 	if ((error = wpi_nic_lock(sc)) != 0)
