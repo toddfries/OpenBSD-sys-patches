@@ -1,4 +1,4 @@
-/*	$OpenBSD: am7990.c,v 1.42 2008/10/02 20:21:13 brad Exp $	*/
+/*	$OpenBSD: am7990.c,v 1.43 2008/11/28 02:44:17 brad Exp $	*/
 /*	$NetBSD: am7990.c,v 1.22 1996/10/13 01:37:19 christos Exp $	*/
 
 /*-

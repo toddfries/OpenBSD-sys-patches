@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.57 2008/10/14 18:01:53 naddy Exp $	*/
+/*	$OpenBSD: hme.c,v 1.58 2008/11/28 02:44:17 brad Exp $	*/
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)

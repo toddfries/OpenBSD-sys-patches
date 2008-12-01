@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.52 2008/11/26 13:30:29 kettenis Exp $	*/
+/*	$OpenBSD: hme.c,v 1.53 2008/11/28 02:44:17 brad Exp $	*/
 /*	$NetBSD: hme.c,v 1.21 2001/07/07 15:59:37 thorpej Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tl.c,v 1.45 2008/10/02 20:21:14 brad Exp $	*/
+/*	$OpenBSD: if_tl.c,v 1.46 2008/11/28 02:44:18 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998

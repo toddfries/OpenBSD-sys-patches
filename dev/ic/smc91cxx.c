@@ -1,4 +1,4 @@
-/*	$OpenBSD: smc91cxx.c,v 1.29 2008/10/03 20:25:29 brad Exp $	*/
+/*	$OpenBSD: smc91cxx.c,v 1.30 2008/11/28 02:44:17 brad Exp $	*/
 /*	$NetBSD: smc91cxx.c,v 1.11 1998/08/08 23:51:41 mycroft Exp $	*/
 
 /*-

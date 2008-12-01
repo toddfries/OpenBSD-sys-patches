@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.79 2008/10/14 18:01:53 naddy Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.80 2008/11/28 02:44:18 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998

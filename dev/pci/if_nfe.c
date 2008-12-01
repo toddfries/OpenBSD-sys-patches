@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nfe.c,v 1.86 2008/11/09 15:08:26 naddy Exp $	*/
+/*	$OpenBSD: if_nfe.c,v 1.87 2008/11/28 02:44:18 brad Exp $	*/
 
 /*-
  * Copyright (c) 2006, 2007 Damien Bergamini <damien.bergamini@free.fr>

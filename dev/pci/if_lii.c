@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lii.c,v 1.20 2008/10/07 16:03:37 jsing Exp $	*/
+/*	$OpenBSD: if_lii.c,v 1.21 2008/11/28 02:44:18 brad Exp $	*/
 
 /*
  *  Copyright (c) 2007 The NetBSD Foundation.

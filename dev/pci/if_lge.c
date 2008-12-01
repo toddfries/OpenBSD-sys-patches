@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lge.c,v 1.49 2008/10/22 00:01:59 brad Exp $	*/
+/*	$OpenBSD: if_lge.c,v 1.50 2008/11/28 02:44:18 brad Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001

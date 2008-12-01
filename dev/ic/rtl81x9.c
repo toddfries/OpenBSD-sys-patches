@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9.c,v 1.61 2008/10/14 18:01:53 naddy Exp $ */
+/*	$OpenBSD: rtl81x9.c,v 1.62 2008/11/28 02:44:17 brad Exp $ */
 
 /*
  * Copyright (c) 1997, 1998

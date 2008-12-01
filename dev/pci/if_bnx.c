@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bnx.c,v 1.70 2008/11/09 15:08:26 naddy Exp $	*/
+/*	$OpenBSD: if_bnx.c,v 1.71 2008/11/28 02:44:17 brad Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation
