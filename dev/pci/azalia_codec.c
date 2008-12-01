@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.72 2008/11/28 04:03:37 jakemsr Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.79 2008/11/30 22:01:34 jakemsr Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -333,15 +333,18 @@ azalia_generic_codec_add_convgroup(codec_t *this, convgroupset_t *group,
 	    digital ? "digital" : "analog",
 	    (type == COP_AWTYPE_AUDIO_OUTPUT) ? "DACs" : "ADCs"));
 
+	nconvs = 0;
 	nall_convs = 0;
+
 	FOR_EACH_WIDGET(this, i) {
 		if (this->w[i].type == type &&
 		    (this->w[i].widgetcap & COP_AWCAP_DIGITAL) == digital &&
 		    nall_convs < HDA_MAX_CHANNELS)
 			all_convs[nall_convs++] = this->w[i].nid;
 	}
+	if (nall_convs == 0)
+		goto done;
 
-	nconvs = 0;
 	for (assoc = 0; assoc <= CORB_CD_ASSOCIATION_MAX; assoc++) {
 		for (seq = 0; seq <= CORB_CD_SEQUENCE_MAX; seq++) {
 			FOR_EACH_WIDGET(this, i) {
@@ -378,8 +381,7 @@ azalia_generic_codec_add_convgroup(codec_t *this, convgroupset_t *group,
 					if (type == COP_AWTYPE_AUDIO_OUTPUT) {
 						k = azalia_generic_codec_fnode
 						    (this, conv, i, 0);
-						if (k < 0 ||
-						    this->w[k].nid != conv)
+						if (k < 0)
 							continue;
 					} else {
 						l = azalia_nid_to_index(this,
@@ -388,8 +390,7 @@ azalia_generic_codec_add_convgroup(codec_t *this, convgroupset_t *group,
 							continue;
 						k = azalia_generic_codec_fnode
 						    (this, w->nid, l, 0);
-						if (k < 0 || this->w[k].nid !=
-						    w->nid)
+						if (k < 0)
 							continue;
 					}
 					convs[nconvs++] = conv;
@@ -524,27 +525,31 @@ azalia_generic_mixer_init(codec_t *this)
 		if (!w->enable)
 			continue;
 
-		/* usable adcs - connections should be in AZ_CLASS_RECORD */
-		if (w->type == COP_AWTYPE_AUDIO_INPUT) {
+		/* Widgets that are the sole input to an ADC should be in
+		 * AZ_CLASS_RECORD.
+		 */
+		if (w->type == COP_AWTYPE_AUDIO_INPUT &&
+		    this->adcs.ngroups > 0) {
 			const convgroupset_t *group;
 
 			group = &this->adcs;
+			k = 0;
 			for (j = 0; j < group->groups[group->cur].nconv; j++)
 				if (group->groups[group->cur].conv[j] == w->nid)
 					break;
-			if (j == group->groups[group->cur].nconv)
-				continue;
-
-			for (j = 0; j < w->nconnections && naconns < 32; j++) {
+			if (j < group->groups[group->cur].nconv)
+				k = w->nconnections;
+			if (k == 1) {
 				k = azalia_nid_to_index(this,
-				    w->connections[j]);
-				if (k == -1)
-					continue;
-				for (l = 0; l < naconns; l++)
-					if (aconns[l] == this->w[k].nid)
-						break;
-				if (l == naconns)
-					aconns[naconns++] = this->w[k].nid;
+				    w->connections[0]);
+				if (k != -1) {
+					for (l = 0; l < naconns; l++)
+						if (aconns[l] == this->w[k].nid)
+							break;
+					if (l == naconns)
+						aconns[naconns++] =
+						    this->w[k].nid;
+				}
 			}
 		}
 
@@ -682,7 +687,8 @@ azalia_generic_mixer_init(codec_t *this)
 					l++;
 				}
 				d->un.s.num_mem = l;
-				this->nmixers++;
+				if (l != 0)
+					this->nmixers++;
 			}
 		}
 
@@ -707,18 +713,14 @@ azalia_generic_mixer_init(codec_t *this)
 				this->nmixers++;
 			} else {
 				for (j = 0; j < w->nconnections; j++) {
-					const widget_t *ww;
-
+					k = azalia_nid_to_index(this,
+					    w->connections[j]);
+					if (k == -1)
+						continue;
 					MIXER_REG_PROLOG;
-					if (!VALID_WIDGET_NID(w->connections[j],
-					    this))
-						continue;
-					ww = &this->w[w->connections[j]];
-					if (!ww->enable)
-						continue;
-					snprintf(d->label.name, sizeof(d->label.name),
-					    "%s_%s", w->name,
-					    this->w[w->connections[j]].name);
+					snprintf(d->label.name,
+					    sizeof(d->label.name), "%s_%s",
+					    w->name, this->w[k].name);
 					d->type = AUDIO_MIXER_VALUE;
 					if (w->type == COP_AWTYPE_AUDIO_INPUT)
 						d->mixer_class = AZ_CLASS_RECORD;
@@ -829,7 +831,7 @@ azalia_generic_mixer_init(codec_t *this)
 		    this->w[j].name);
 		d->type = AUDIO_MIXER_ENUM;
 		d->mixer_class = AZ_CLASS_OUTPUT;
-		m->target = AZ_TARGET_PINSENSE;
+		m->target = MI_TARGET_PINSENSE;
 		d->un.e.num_mem = 2;
 		d->un.e.member[0].ord = 0;
 		strlcpy(d->un.e.member[0].label.name, "unplugged",
@@ -1042,9 +1044,14 @@ azalia_generic_mixer_create_virtual(codec_t *this, int pdac, int padc)
 {
 	mixer_item_t *m;
 	mixer_devinfo_t *d;
-	convgroup_t *cgdac = &this->dacs.groups[0];
-	convgroup_t *cgadc = &this->adcs.groups[0];
+	convgroup_t *cgdac;
+	convgroup_t *cgadc;
 	int i, err, madc, mmaster;
+
+	if (this->dacs.ngroups > 0)
+		cgdac = &this->dacs.groups[0];
+	if (this->adcs.ngroups > 0)
+		cgadc = &this->adcs.groups[0];
 
 	/* Clear mixer indexes, to make generic_mixer_fix_index happy */
 	for (i = 0; i < this->nmixers; i++) {
@@ -1282,7 +1289,7 @@ azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target,
 	}
 
 	/* sense pin */
-	else if (target == AZ_TARGET_PINSENSE) {
+	else if (target == MI_TARGET_PINSENSE) {
 		err = this->comresp(this, nid, CORB_GET_PIN_SENSE,
 		    0, &result);
 		if (err)
@@ -1530,8 +1537,11 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 			return EBUSY;
 		if (mc->un.ord >= this->dacs.ngroups)
 			return EINVAL;
-		return azalia_codec_construct_format(this,
-		    mc->un.ord, this->adcs.cur);
+		if (mc->un.ord != this->dacs.cur)
+			return azalia_codec_construct_format(this,
+			    mc->un.ord, this->adcs.cur);
+		else
+			return 0;
 	}
 
 	/* ADC selection */
@@ -1540,8 +1550,11 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 			return EBUSY;
 		if (mc->un.ord >= this->adcs.ngroups)
 			return EINVAL;
-		return azalia_codec_construct_format(this,
-		    this->dacs.cur, mc->un.ord);
+		if (mc->un.ord != this->adcs.cur)
+			return azalia_codec_construct_format(this,
+			    this->dacs.cur, mc->un.ord);
+		else
+			return 0;
 	}
 
 	/* Volume knob */
@@ -1597,7 +1610,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 			return err;
 	}
 
-	else if (target == AZ_TARGET_PINSENSE) {
+	else if (target == MI_TARGET_PINSENSE) {
 		/* do nothing, control is read only */
 	}
 
