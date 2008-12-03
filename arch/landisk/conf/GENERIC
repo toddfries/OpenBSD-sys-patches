@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.19 2008/11/30 19:20:50 maja Exp $
+# $OpenBSD: GENERIC,v 1.20 2008/12/01 23:48:46 todd Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
