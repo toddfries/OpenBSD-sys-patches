@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.197 2008/11/26 00:14:48 dlg Exp $ */
+/* $OpenBSD: if_em.c,v 1.200 2008/12/03 00:59:48 dlg Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -169,7 +169,7 @@ void em_realign(struct em_softc *, struct mbuf *, u_int16_t *);
 #else
 #define em_realign(a, b, c) /* a, b, c */
 #endif
-void em_rxfill(struct em_softc *);
+int  em_rxfill(struct em_softc *);
 void em_rxeof(struct em_softc *, int);
 void em_receive_checksum(struct em_softc *, struct em_rx_desc *,
 			 struct mbuf *);
@@ -555,13 +555,7 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			arp_ifinit(&sc->interface_data, ifa);
 #endif /* INET */
 		break;
-	case SIOCSIFMTU:
-		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFMTU (Set Interface MTU)");
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
+
 	case SIOCSIFFLAGS:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFFLAGS (Set Interface Flags)");
 		if (ifp->if_flags & IFF_UP) {
@@ -584,24 +578,7 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		sc->if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		IOCTL_DEBUGOUT("ioctl rcv'd: SIOC(ADD|DEL)MULTI");
-		error = (command == SIOCADDMULTI)
-			? ether_addmulti(ifr, &sc->interface_data)
-			: ether_delmulti(ifr, &sc->interface_data);
 
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING) {
-				em_disable_intr(sc);
-				em_set_multi(sc);
-				if (sc->hw.mac_type == em_82542_rev2_0)
-					em_initialize_receive_unit(sc);
-				em_enable_intr(sc);
-			}
-			error = 0;
-		}
-		break;
 	case SIOCSIFMEDIA:
 		/* Check SOL/IDER usage */
 		if (em_check_phy_reset_block(&sc->hw)) {
@@ -613,8 +590,20 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCxIFMEDIA (Get/Set Interface Media)");
 		error = ifmedia_ioctl(ifp, ifr, &sc->media, command);
 		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->interface_data, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING) {
+			em_disable_intr(sc);
+			em_set_multi(sc);
+			if (sc->hw.mac_type == em_82542_rev2_0)
+				em_initialize_receive_unit(sc);
+			em_enable_intr(sc);
+		}
+		error = 0;
 	}
 
 	splx(s);
@@ -815,7 +804,11 @@ em_intr(void *arg)
 
 		if (ifp->if_flags & IFF_RUNNING) {
 			em_rxeof(sc, -1);
-			em_rxfill(sc);
+			if (em_rxfill(sc)) {
+				/* Advance the Rx Queue #0 "Tail Pointer". */
+				E1000_WRITE_REG(&sc->hw, RDT,
+				    sc->last_rx_desc_filled);
+			}
 			em_txeof(sc);
 		}
 
@@ -2422,8 +2415,8 @@ em_setup_receive_structures(struct em_softc *sc)
 	sc->last_rx_desc_filled = sc->num_rx_desc - 1;
 
 	em_rxfill(sc);
-	if (sc->num_rx_desc < 1) {
-		printf("%s: unable to fill and rx descriptors\n",
+	if (sc->rx_ndescs < 1) {
+		printf("%s: unable to fill any rx descriptors\n",
 		    sc->sc_dv.dv_xname);
 	}
 
@@ -2506,7 +2499,7 @@ em_initialize_receive_unit(struct em_softc *sc)
 
 	/* Setup the HW Rx Head and Tail Descriptor Pointers */
 	E1000_WRITE_REG(&sc->hw, RDH, 0);
-	E1000_WRITE_REG(&sc->hw, RDT, sc->num_rx_desc - 1);
+	E1000_WRITE_REG(&sc->hw, RDT, sc->last_rx_desc_filled);
 }
 
 /*********************************************************************
@@ -2597,9 +2590,10 @@ em_realign(struct em_softc *sc, struct mbuf *m, u_int16_t *prev_len_adj)
 }
 #endif /* __STRICT_ALIGNMENT */
 
-void
+int
 em_rxfill(struct em_softc *sc)
 {
+	int post = 0;
 	int i;
 
 	i = sc->last_rx_desc_filled;
@@ -2612,10 +2606,10 @@ em_rxfill(struct em_softc *sc)
 			break;
 
 		sc->last_rx_desc_filled = i;
+		post = 1;
 	}
 
-	/* Advance the E1000's Receive Queue #0  "Tail Pointer". */
-	E1000_WRITE_REG(&sc->hw, RDT, sc->last_rx_desc_filled);
+	return (post);
 }
 
 /*********************************************************************
@@ -2675,8 +2669,11 @@ em_rxeof(struct em_softc *sc, int count)
 		m = pkt->m_head;
 		pkt->m_head = NULL;
 
-		if (m == NULL)
-			printf("omg teh nulls\n");
+		if (m == NULL) {
+			panic("em_rxeof: NULL mbuf in slot %d "
+			    "(nrx %d, filled %d)", i, sc->rx_ndescs,
+			    sc->last_rx_desc_filled);
+		}
 
 		sc->rx_ndescs--;
 

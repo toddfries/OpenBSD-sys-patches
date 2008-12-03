@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1437 2008/11/23 09:49:11 deraadt Exp 
+ *	OpenBSD: pcidevs,v 1.1440 2008/12/02 17:13:30 damien Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -3510,6 +3510,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4850,
 	    "Radeon HD 4850",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4650,
+	    "Radeon HD 4650",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2400_XT,
@@ -9032,6 +9036,14 @@ static const struct pci_known_product pci_known_products[] = {
 	    "WiFi Link 5350AGN",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5150AGN_1,
+	    "WiFi Link 5150AGN",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5150AGN_2,
+	    "WiFi Link 5150AGN",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_TURBO_MEMORY,
 	    "Turbo Memory",
 	},
@@ -9398,6 +9410,22 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_JMB368,
 	    "JMB368 IDE",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_SD,
+	    "SD Host Controller",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_SDMMC,
+	    "SD/MMC",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_MS,
+	    "Memory Stick",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_XD,
+	    "xD",
 	},
 	{
 	    PCI_VENDOR_KTI, PCI_PRODUCT_KTI_KTIE,

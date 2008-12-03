@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.390 2008/11/25 08:54:40 jasper Exp $
+$OpenBSD: usbdevs,v 1.394 2008/12/01 22:26:27 martin Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -252,6 +252,7 @@ vendor AGFA		0x06bd	AGFA-Gevaert
 vendor ASIAMD		0x06be	Asia Microelectronic Development
 vendor BIZLINK		0x06c4	Bizlink International
 vendor KEYSPAN		0x06cd	Keyspan
+vendor LIEBERT		0x06da	Liebert
 vendor AASHIMA		0x06d6	Aashima Technology
 vendor MULTITECH	0x06e0	MultiTech
 vendor ADS		0x06e1	ADS Technologies
@@ -1151,7 +1152,7 @@ product DLINK2 WUA1340		0x3c04	WUA-1340
 product DLINK2 DWA111		0x3c06	DWA-111
 product DLINK2 DWA110		0x3c07	DWA-110
 product DLINK2 RT2870		0x3c09	RT2870
-product DLINK2 AR9170		0x3c10	AR9170
+product DLINK2 DWA160		0x3c10	DWA-160
 
 /* D-Link(3) products */
 product DLINK3 KVM221		0x020f	KVM-221
@@ -1574,6 +1575,7 @@ product HTC SMARTPHONE		0x0a51	SmartPhone
 /* HUAWEI products */
 product HUAWEI E618		0x1001	HUAWEI Mobile E618
 product HUAWEI E220		0x1003	HUAWEI Mobile E220
+product HUAWEI E510		0x1411	HUAWEI Mobile E510
 
 /* HUMAX products */
 product HUMAX PVRSMART		0x138c	PVR-SMART
@@ -1798,6 +1800,9 @@ product LEXAR 2662WAR		0xa002	2662W-AR
 
 /* Lexmark products */
 product LEXMARK S2450		0x0009	Optra S 2450
+
+/* Liebert products */
+product LIEBERT POWERSURE_PXT	0xffff	PowerSure Personal XT
 
 /* Linksys products */
 product LINKSYS4 USB1000	0x0039	USB1000
@@ -2376,7 +2381,16 @@ product RIM PEARL_DUAL		0x0004	RIM Mass Storage Device
 product RIM PEARL		0x0006	Blackberry pearl
 
 /* Ricoh products */
-product RICOH CAMERA		0x1832	Camera
+product RICOH VGPVCC2		0x1830	VGP-VCC2 Camera
+product RICOH VGPVCC3		0x1832	VGP-VCC3 Camera
+product RICOH VGPVCC2_2		0x1833	VGP-VCC2 Camera
+product RICOH VGPVCC2_3		0x1834	VGP-VCC2 Camera
+product RICOH VGPVCC5		0x1835	VGP-VCC5 Camera
+product RICOH VGPVCC4		0x1836	VGP-VCC4 Camera
+product RICOH VGPVCC4_2		0x1837	VGP-VCC4 Camera
+product RICOH VGPVCC6		0x1839	VGP-VCC6 Camera
+product RICOH VGPVCC7		0x183a	VGP-VCC7 Camera
+product RICOH VGPVCC8		0x183b	VGP-VCC8 Camera
 
 /* Roland products */
 product ROLAND UA100		0x0000	UA-100 Audio I/F
