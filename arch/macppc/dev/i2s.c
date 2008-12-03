@@ -473,9 +473,9 @@ i2s_round_blocksize(h, size)
 	void *h;
 	int size;
 {
-	if (size < NBPG)
-		size = NBPG;
-	return size & ~PGOFSET;
+	if (size < 32)
+		size = 32;
+	return size;
 }
 
 int
