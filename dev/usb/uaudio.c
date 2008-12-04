@@ -64,12 +64,12 @@
 
 #include <dev/usb/uaudioreg.h>
 
-#define UAUDIO_DEBUG
-#define UAUDIO_MULTIPLE_ENDPOINTS
+/* #define UAUDIO_DEBUG */
+/* #define UAUDIO_MULTIPLE_ENDPOINTS */
 #ifdef UAUDIO_DEBUG
 #define DPRINTF(x)	do { if (uaudiodebug) printf x; } while (0)
 #define DPRINTFN(n,x)	do { if (uaudiodebug>(n)) printf x; } while (0)
-int	uaudiodebug = 1;
+int	uaudiodebug = 0;
 #else
 #define DPRINTF(x)
 #define DPRINTFN(n,x)
@@ -1555,16 +1555,6 @@ uaudio_process_as(struct uaudio_softc *sc, const char *buf, int *offsp,
 
 	/* We can't handle endpoints that need a sync pipe yet. */
 	sync = FALSE;
-#if 0
-	if (dir == UE_DIR_IN && type == UE_ISO_ADAPT) {
-		sync = TRUE;
-#ifndef UAUDIO_MULTIPLE_ENDPOINTS
-		printf("%s: ignored input endpoint of type adaptive\n",
-		       sc->sc_dev.dv_xname);
-		return (USBD_NORMAL_COMPLETION);
-#endif
-	}
-#endif
 	if (dir != UE_DIR_IN && type == UE_ISO_ASYNC) {
 		sync = TRUE;
 #ifndef UAUDIO_MULTIPLE_ENDPOINTS
@@ -1582,13 +1572,12 @@ uaudio_process_as(struct uaudio_softc *sc, const char *buf, int *offsp,
 	offs += sed->bLength;
 	if (offs > size)
 		return (USBD_INVAL);
-#if 0
+
 	if (sync && id->bNumEndpoints <= 1) {
 		printf("%s: a sync-pipe endpoint but no other endpoint\n",
 		       sc->sc_dev.dv_xname);
 		return USBD_INVAL;
 	}
-#endif
 	if (!sync && id->bNumEndpoints > 1) {
 		printf("%s: non sync-pipe endpoint but multiple endpoints\n",
 		       sc->sc_dev.dv_xname);
