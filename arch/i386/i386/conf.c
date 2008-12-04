@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.127 2008/06/14 21:31:46 mbalmer Exp $	*/
+/*	$OpenBSD: conf.c,v 1.129 2008/11/23 18:19:02 deraadt Exp $	*/
 /*	$NetBSD: conf.c,v 1.75 1996/05/03 19:40:20 christos Exp $	*/
 
 /*
@@ -176,13 +176,8 @@ cdev_decl(cztty);
 cdev_decl(nvram);
 #include "agp.h"
 cdev_decl(agp);
-#include "drmbase.h"
+#include "drm.h"
 cdev_decl(drm);
-
-/* XXX -- this needs to be supported by config(8)! */
-#if (NCOM > 0) && (NPCCOM > 0)
-#error com and pccom are mutually exclusive.  Sorry.
-#endif
 
 #include "wsdisplay.h"
 #include "wskbd.h"
@@ -209,11 +204,7 @@ struct cdevsw	cdevsw[] =
 	cdev_tty_init(NPTY,pts),	/* 5: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),	/* 6: pseudo-tty master */
 	cdev_log_init(1,log),		/* 7: /dev/klog */
-#if NPCCOM > 0
-	cdev_tty_init(NPCCOM,com),	/* 8: serial port */
-#else
 	cdev_tty_init(NCOM,com),	/* 8: serial port */
-#endif
 	cdev_disk_init(NFD,fd),		/* 9: floppy disk */
 	cdev_notdef(),			/* 10 */
 	cdev_notdef(),			/* 11 */
@@ -313,7 +304,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 85: ACPI (deprecated) */
 	cdev_bthub_init(NBTHUB,bthub),	/* 86: bthub */
 	cdev_agp_init(NAGP,agp),	/* 87: agp */
-	cdev_drm_init(NDRMBASE,drm),	/* 88: drm */
+	cdev_drm_init(NDRM,drm),	/* 88: drm */
 	cdev_amdmsr_init(NAMDMSR,amdmsr)	/* 89: amdmsr */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
@@ -462,7 +453,7 @@ struct	consdev constab[] = {
 #if NWSDISPLAY > 0
 	cons_init(ws),
 #endif
-#if NCOM + NPCCOM > 0
+#if NCOM
 	cons_init(com),
 #endif
 	{ 0 },

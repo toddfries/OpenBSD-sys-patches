@@ -1,4 +1,4 @@
-/*	$OpenBSD: uaudio.c,v 1.59 2008/06/26 05:42:18 ray Exp $ */
+/*	$OpenBSD: uaudio.c,v 1.61 2008/11/21 17:55:02 robert Exp $ */
 /*	$NetBSD: uaudio.c,v 1.90 2004/10/29 17:12:53 kent Exp $	*/
 
 /*
@@ -1058,7 +1058,7 @@ void
 uaudio_add_feature(struct uaudio_softc *sc, const struct io_terminal *iot, int id)
 {
 	const struct usb_audio_feature_unit *d = iot[id].d.fu;
-	uByte *ctls = d->bmaControls;
+	uByte *ctls = (uByte *)d->bmaControls;
 	int ctlsize = d->bControlSize;
 	int nchan = (d->bLength - 7) / ctlsize;
 	u_int fumask, mmask, cmask;
@@ -1555,14 +1555,6 @@ uaudio_process_as(struct uaudio_softc *sc, const char *buf, int *offsp,
 
 	/* We can't handle endpoints that need a sync pipe yet. */
 	sync = FALSE;
-	if (dir == UE_DIR_IN && type == UE_ISO_ADAPT) {
-		sync = TRUE;
-#ifndef UAUDIO_MULTIPLE_ENDPOINTS
-		printf("%s: ignored input endpoint of type adaptive\n",
-		       sc->sc_dev.dv_xname);
-		return (USBD_NORMAL_COMPLETION);
-#endif
-	}
 	if (dir != UE_DIR_IN && type == UE_ISO_ASYNC) {
 		sync = TRUE;
 #ifndef UAUDIO_MULTIPLE_ENDPOINTS
@@ -1576,7 +1568,7 @@ uaudio_process_as(struct uaudio_softc *sc, const char *buf, int *offsp,
 	if (sed->bDescriptorType != UDESC_CS_ENDPOINT ||
 	    sed->bDescriptorSubtype != AS_GENERAL)
 		return (USBD_INVAL);
-	DPRINTF((" streadming_endpoint: offset=%d bLength=%d\n", offs, sed->bLength));
+	DPRINTF((" streaming_endpoint: offset=%d bLength=%d\n", offs, sed->bLength));
 	offs += sed->bLength;
 	if (offs > size)
 		return (USBD_INVAL);

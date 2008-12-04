@@ -1,4 +1,4 @@
-/* $OpenBSD: acpiac.c,v 1.25 2008/07/23 00:20:35 fgsch Exp $ */
+/* $OpenBSD: acpiac.c,v 1.26 2008/11/06 23:41:28 marco Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -54,7 +54,7 @@ acpiac_match(struct device *parent, void *match, void *aux)
 	struct cfdata *cf = match;
 
 	/* sanity */
-	return acpi_matchhids(aa, acpiac_hids, cf->cf_driver->cd_name);
+	return (acpi_matchhids(aa, acpiac_hids, cf->cf_driver->cd_name));
 }
 
 void

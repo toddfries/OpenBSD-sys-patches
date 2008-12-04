@@ -37,7 +37,6 @@
 
 #include "drmP.h"
 
-int	drm_alloc_resource(struct drm_device *, int);
 int	drm_do_addbufs_agp(struct drm_device *, drm_buf_desc_t *);
 int	drm_do_addbufs_pci(struct drm_device *, drm_buf_desc_t *);
 int	drm_do_addbufs_sg(struct drm_device *, drm_buf_desc_t *);
@@ -58,49 +57,6 @@ drm_order(unsigned long size)
 		++order;
 
 	return order;
-}
-
-/* Allocation of PCI memory resources (framebuffer, registers, etc.) for
- * drm_get_resource_*.  Note that they are not RF_ACTIVE, so there's no virtual
- * address for accessing them.  Cleaned up at unload.
- */
-int
-drm_alloc_resource(struct drm_device *dev, int resource)
-{
-	if (resource >= DRM_MAX_PCI_RESOURCE) {
-		DRM_ERROR("Resource %d too large\n", resource);
-		return 1;
-	}
-
-	if (dev->pcir[resource] != NULL)
-		return 0;
-
-	dev->pcir[resource] = vga_pci_bar_info(dev->vga_softc, resource);
-	if (dev->pcir[resource] == NULL) {
-		DRM_ERROR("Can't get bar info for resource 0x%x\n", resource);
-		return 1;
-	}
-
-	return 0;
-}
-
-
-unsigned long
-drm_get_resource_start(struct drm_device *dev, unsigned int resource)
-{
-	if (drm_alloc_resource(dev, resource) != 0)
-		return 0;
-
-	return dev->pcir[resource]->base;
-}
-
-unsigned long
-drm_get_resource_len(struct drm_device *dev, unsigned int resource)
-{
-	if (drm_alloc_resource(dev, resource) != 0)
-		return 0;
-
-	return dev->pcir[resource]->maxsize;
 }
 
 int
@@ -182,9 +138,6 @@ drm_addmap(struct drm_device * dev, unsigned long offset, unsigned long size,
 
 	switch (map->type) {
 	case _DRM_REGISTERS:
-		map->handle = drm_ioremap(dev, map);
-		if (map->handle == NULL)
-			return (EINVAL);
 		if (!(map->flags & _DRM_WRITE_COMBINING))
 			break;
 		/* FALLTHROUGH */
@@ -250,7 +203,8 @@ drm_addmap(struct drm_device * dev, unsigned long offset, unsigned long size,
 		align = map->size;
 		if ((align & (align - 1)) != 0)
 			align = PAGE_SIZE;
-		map->dmah = drm_pci_alloc(dev, map->size, align, 0xfffffffful);
+		map->dmah = drm_pci_alloc(dev->dmat, map->size, align,
+		    0xfffffffful);
 		if (map->dmah == NULL) {
 			drm_free(map, sizeof(*map), DRM_MEM_MAPS);
 			return (ENOMEM);
@@ -262,7 +216,7 @@ drm_addmap(struct drm_device * dev, unsigned long offset, unsigned long size,
 			/* Prevent a 2nd X Server from creating a 2nd lock */
 			if (dev->lock.hw_lock != NULL) {
 				DRM_UNLOCK();
-				drm_pci_free(dev, map->dmah);
+				drm_pci_free(dev->dmat, map->dmah);
 				drm_free(map, sizeof(*map), DRM_MEM_MAPS);
 				return (EBUSY);
 			}
@@ -332,7 +286,6 @@ drm_rmmap_locked(struct drm_device *dev, drm_local_map_t *map)
 
 	switch (map->type) {
 	case _DRM_REGISTERS:
-		drm_ioremapfree(map);
 		/* FALLTHROUGH */
 	case _DRM_FRAME_BUFFER:
 		if (map->mtrr) {
@@ -344,11 +297,13 @@ drm_rmmap_locked(struct drm_device *dev, drm_local_map_t *map)
 		}
 		break;
 	case _DRM_AGP:
+		/* FALLTHROUGH */
 	case _DRM_SCATTER_GATHER:
 		break;
 	case _DRM_SHM:
+		/* FALLTHROUGH */
 	case _DRM_CONSISTENT:
-		drm_pci_free(dev, map->dmah);
+		drm_pci_free(dev->dmat, map->dmah);
 		break;
 	default:
 		DRM_ERROR("Bad map type %d\n", map->type);
@@ -594,8 +549,8 @@ drm_do_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *request)
 	page_count = 0;
 
 	while (entry->buf_count < count) {
-		drm_dma_handle_t *dmah = drm_pci_alloc(dev, size, alignment,
-		    0xfffffffful);
+		drm_dma_handle_t *dmah = drm_pci_alloc(dev->dmat, size,
+		    alignment, 0xfffffffful);
 		if (dmah == NULL) {
 			/* Set count correctly so we free the proper amount. */
 			entry->buf_count = count;
@@ -968,8 +923,10 @@ drm_mapbufs(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	if (request->count < dma->buf_count)
 		goto done;
 
-	if ((dev->driver->use_agp && (dma->flags & _DRM_DMA_USE_AGP)) ||
-	    (dev->driver->use_sg && (dma->flags & _DRM_DMA_USE_SG))) {
+	if ((dev->driver->flags & DRIVER_AGP &&
+	    (dma->flags & _DRM_DMA_USE_AGP)) ||
+	    (dev->driver->flags & DRIVER_SG &&
+	    (dma->flags & _DRM_DMA_USE_SG))) {
 		drm_local_map_t *map = dev->agp_buffer_map;
 
 		if (map == NULL) {

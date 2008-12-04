@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_quirks.c,v 1.48 2008/09/08 16:58:32 martynas Exp $ */
+/*	$OpenBSD: usb_quirks.c,v 1.50 2008/11/29 21:54:46 deraadt Exp $ */
 /*	$NetBSD: usb_quirks.c,v 1.45 2003/05/10 17:47:14 hamajima Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_quirks.c,v 1.30 2003/01/02 04:15:55 imp Exp $	*/
 
@@ -111,6 +111,10 @@ const struct usbd_quirk_entry {
    						    0x101, { UQ_AU_INP_ASYNC }},
  { USB_VENDOR_PLANTRONICS, USB_PRODUCT_PLANTRONICS_HEADSET,
    						    0x004, { UQ_AU_INP_ASYNC }},
+
+ { USB_VENDOR_TERRATEC, USB_PRODUCT_TERRATEC_AUREON,
+   						    ANY, { UQ_BAD_HID }},
+
  /* XXX These should have a revision number, but I don't know what they are. */
  { USB_VENDOR_HP, USB_PRODUCT_HP_895C,		    ANY,   { UQ_BROKEN_BIDIR }},
  { USB_VENDOR_HP, USB_PRODUCT_HP_880C,		    ANY,   { UQ_BROKEN_BIDIR }},
@@ -138,6 +142,7 @@ const struct usbd_quirk_entry {
  { USB_VENDOR_MGE, USB_PRODUCT_MGE_UPS2,	    ANY,   { UQ_BAD_HID }},
  { USB_VENDOR_CYBERPOWER, USB_PRODUCT_CYBERPOWER_1500,	ANY,	{ UQ_BAD_HID }},
  { USB_VENDOR_MUSTEK2, USB_PRODUCT_MUSTEK2_PM800,	ANY,	{ UQ_BAD_HID }},
+ { USB_VENDOR_LIEBERT, USB_PRODUCT_LIEBERT_POWERSURE_PXT, ANY, { UQ_BAD_HID }},
 
   /* MS keyboards do weird things */
   { USB_VENDOR_MICROSOFT, USB_PRODUCT_MICROSOFT_WLNOTEBOOK,

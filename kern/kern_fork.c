@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.99 2008/11/03 03:03:35 deraadt Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.101 2008/11/11 02:13:14 tedu Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -181,7 +181,10 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	int s;
 	extern void endtsleep(void *);
 	extern void realitexpire(void *);
-	struct  ptrace_state *newptstat;
+	struct  ptrace_state *newptstat = NULL;
+#if NSYSTRACE > 0
+	void *newstrp = NULL;
+#endif
 
 	/*
 	 * Although process entries are dynamically created, we still keep
@@ -384,7 +387,12 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 		forkstat.sizkthread += vm->vm_dsize + vm->vm_ssize;
 	}
 
-	newptstat = malloc(sizeof(struct ptrace_state), M_SUBPROC, M_WAITOK);
+	if (p2->p_flag & P_TRACED && flags & FORK_FORK)
+		newptstat = malloc(sizeof(*newptstat), M_SUBPROC, M_WAITOK);
+#if NSYSTRACE > 0
+	if (ISSET(p1->p_flag, P_SYSTRACE))
+		newstrp = systrace_getproc();
+#endif
 
 	/* Find an unused pid satisfying 1 <= lastpid <= PID_MAX */
 	do {
@@ -415,8 +423,8 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	}
 
 #if NSYSTRACE > 0
-	if (ISSET(p1->p_flag, P_SYSTRACE))
-		systrace_fork(p1, p2);
+	if (newstrp)
+		systrace_fork(p1, p2, newstrp);
 #endif
 
 	/*

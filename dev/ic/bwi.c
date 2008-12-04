@@ -1,4 +1,4 @@
-/*	$OpenBSD: bwi.c,v 1.82 2008/10/15 19:12:19 blambert Exp $	*/
+/*	$OpenBSD: bwi.c,v 1.83 2008/11/26 18:01:43 dlg Exp $	*/
 
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
@@ -76,7 +76,7 @@
 
 #define BWI_DEBUG
 #ifdef BWI_DEBUG
-int bwi_debug = 1;
+int bwi_debug = 0;
 #define DPRINTF(l, x...)	do { if ((l) <= bwi_debug) printf(x); } while (0)
 #else
 #define DPRINTF(l, x...)
@@ -99,6 +99,8 @@ int bwi_debug = 1;
 #define IEEE80211_CW_MIN_1	15	/* OFDM aCWmin, ERP aCWmin(1) */
 
 #define __unused __attribute__((__unused__))
+
+extern int ticks;
 
 /* XXX end porting goop */
 

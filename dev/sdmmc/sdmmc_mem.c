@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc_mem.c,v 1.7 2007/03/18 22:07:16 uwe Exp $	*/
+/*	$OpenBSD: sdmmc_mem.c,v 1.9 2008/12/02 23:49:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

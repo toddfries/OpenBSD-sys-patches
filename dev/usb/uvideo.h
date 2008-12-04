@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.h,v 1.31 2008/08/27 17:31:48 mglocker Exp $ */
+/*	$OpenBSD: uvideo.h,v 1.35 2008/11/30 15:20:33 mglocker Exp $ */
 
 /*
  * Copyright (c) 2007 Robert Nagy <robert@openbsd.org>
@@ -308,14 +308,21 @@ struct usb_video_probe_commit {
  * USB Video Payload MJPEG
  */
 /* Table 2-1: Stream Header Format for the Motion-JPEG */
-#define	UVIDEO_STREAM_FID	(1 << 0)
-#define	UVIDEO_STREAM_EOF	(1 << 1)
-#define	UVIDEO_STREAM_PTS	(1 << 2)
-#define	UVIDEO_STREAM_SCR	(1 << 3)
-#define	UVIDEO_STREAM_RES	(1 << 4)
-#define	UVIDEO_STREAM_STI	(1 << 5)
-#define	UVIDEO_STREAM_ERR	(1 << 6)
-#define	UVIDEO_STREAM_EOH	(1 << 7)
+#define UVIDEO_SH_MAX_LEN	12
+#define UVIDEO_SH_MIN_LEN	2
+struct usb_video_stream_header {
+	uByte	bLength;
+	uByte	bFlags;
+#define	UVIDEO_SH_FLAG_FID	(1 << 0)
+#define	UVIDEO_SH_FLAG_EOF	(1 << 1)
+#define	UVIDEO_SH_FLAG_PTS	(1 << 2)
+#define	UVIDEO_SH_FLAG_SCR	(1 << 3)
+#define	UVIDEO_SH_FLAG_RES	(1 << 4)
+#define	UVIDEO_SH_FLAG_STI	(1 << 5)
+#define	UVIDEO_SH_FLAG_ERR	(1 << 6)
+#define	UVIDEO_SH_FLAG_EOH	(1 << 7)
+	/* TODO complete struct */
+} __packed;
 
 /* Table 3-1: Motion-JPEG Video Format Descriptor */
 struct usb_video_format_mjpeg_desc {
@@ -418,19 +425,34 @@ struct uvideo_format_desc {
 	} u;
 } __packed;
 
-#define UVIDEO_NFRAMES_MAX	40
-struct uvideo_vs_iface {
+#define UVIDEO_NFRAMES_MAX	640
+struct uvideo_isoc_xfer {
 	struct uvideo_softc	*sc;
 	usbd_xfer_handle	 xfer;
 	void			*buf;
+	uint16_t		 size[UVIDEO_NFRAMES_MAX];
+};
+
+struct uvideo_bulk_xfer {
+	struct uvideo_softc	*sc;
+	usbd_xfer_handle	 xfer;
+	void			*buf;
+	uint16_t		 size;
+};
+
+#define UVIDEO_IXFERS		3
+struct uvideo_vs_iface {
 	usbd_interface_handle  	 ifaceh;
 	int			 endpoint;
 	usbd_pipe_handle	 pipeh;
-	uint16_t		 size[UVIDEO_NFRAMES_MAX];
 	int			 numalts;
 	int			 curalt;
 	uint32_t		 max_packet_size;
 	int			 iface;
+	int			 bulk_endpoint;
+	int			 bulk_running;
+	struct uvideo_isoc_xfer	 ixfer[UVIDEO_IXFERS];
+	struct uvideo_bulk_xfer	 bxfer;
 };
 
 struct uvideo_frame_buffer {
@@ -529,32 +551,13 @@ struct uvideo_controls {
 struct uvideo_softc {
 	struct device				 sc_dev;
 	usbd_device_handle			 sc_udev;
-	usbd_interface_handle			 sc_iface;
-	int					 sc_iface_number;
-	int					 sc_product;
-	int					 sc_vendor;
-
-	int					 sc_intr_number;
-	usbd_pipe_handle			 sc_intr_pipe;
-	u_char					*sc_ibuf;
-	int					 sc_isize;
-	int					 sc_vc_iface;
 
 	struct device				*sc_videodev;
 
-	struct vs_info				*sc_alts;
-	int					 sc_nalts;
-	int					 sc_nullalt;
-	int					 sc_video_rev;
 	int					 sc_enabled;
 	int					 sc_dying;
-	int					 sc_mode;
 	int					 sc_max_fbuf_size;
 	int					 sc_negotiated_flag;
-
-	u_int16_t				 uvc_version;
-	u_int32_t				 clock_frequency;
-	u_int32_t				 quirks;
 
 	struct uvideo_frame_buffer		 sc_frame_buffer;
 

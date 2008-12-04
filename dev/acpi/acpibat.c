@@ -1,4 +1,4 @@
-/* $OpenBSD: acpibat.c,v 1.52 2008/08/14 14:31:31 robert Exp $ */
+/* $OpenBSD: acpibat.c,v 1.53 2008/11/06 23:41:28 marco Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -56,7 +56,7 @@ acpibat_match(struct device *parent, void *match, void *aux)
 	struct cfdata		*cf = match;
 
 	/* sanity */
-	return acpi_matchhids(aa, acpibat_hids, cf->cf_driver->cd_name);
+	return (acpi_matchhids(aa, acpibat_hids, cf->cf_driver->cd_name));
 }
 
 void

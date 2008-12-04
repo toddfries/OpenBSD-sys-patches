@@ -1,4 +1,4 @@
-/*	$OpenBSD: umsm.c,v 1.34 2008/10/08 17:17:15 yuo Exp $	*/
+/*	$OpenBSD: umsm.c,v 1.40 2008/12/01 22:26:27 martin Exp $	*/
 
 /*
  * Copyright (c) 2008 Yojiro UO <yuo@nui.org>
@@ -41,7 +41,7 @@
 #endif
 
 #ifdef UMSM_DEBUG
-int     umsmdebug = 1;
+int     umsmdebug = 0;
 #define DPRINTFN(n, x)  do { if (umsmdebug > (n)) printf x; } while (0)
 #else
 #define DPRINTFN(n, x)
@@ -116,7 +116,8 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_ANYDATA,	USB_PRODUCT_ANYDATA_ADU_500A }, 0},
 	{{ USB_VENDOR_DELL,	USB_PRODUCT_DELL_W5500 }, 0},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E220 }, DEV_HUAWEI},
-	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E618 }, 0},
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E510 }, DEV_HUAWEI},
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E618 }, DEV_HUAWEI},
 	{{ USB_VENDOR_KYOCERA2,	USB_PRODUCT_KYOCERA2_KPC650 }, 0},
 	{{ USB_VENDOR_NOVATEL1,	USB_PRODUCT_NOVATEL1_FLEXPACKGPS }, 0},
 	{{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_EXPRESSCARD }, 0},
@@ -125,9 +126,11 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_U720 }, 0},
 	{{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_XU870 }, 0},
 	{{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_ES620 }, 0},
+	{{ USB_VENDOR_OPTION,	USB_PRODUCT_OPTION_GT3GFUSION }, 0},
 	{{ USB_VENDOR_OPTION,	USB_PRODUCT_OPTION_GT3GPLUS }, 0},
 	{{ USB_VENDOR_OPTION,	USB_PRODUCT_OPTION_GSICON72 }, DEV_UMASS1},
 	{{ USB_VENDOR_OPTION,	USB_PRODUCT_OPTION_GTHSDPA225 }, DEV_UMASS2},
+	{{ USB_VENDOR_OPTION,	USB_PRODUCT_OPTION_GTMAX36 }, 0},
 	{{ USB_VENDOR_OPTION,	USB_PRODUCT_OPTION_SCORPION }, 0},
 	{{ USB_VENDOR_QUALCOMM,	USB_PRODUCT_QUALCOMM_MSM_DRIVER }, DEV_UMASS1},
 	{{ USB_VENDOR_QUALCOMM,	USB_PRODUCT_QUALCOMM_MSM_HSDPA }, 0},
@@ -180,7 +183,7 @@ umsm_match(struct device *parent, void *match, void *aux)
 
 		if (id == NULL || id->bInterfaceClass == UICLASS_MASS) {
 			/*
-			 * Some high-speed modem requre special care.
+			 * Some high-speed modems require special care.
 			 */
 			if (flag & DEV_HUAWEI) {
 				if  (uaa->ifaceno != 2) 
@@ -216,13 +219,13 @@ umsm_attach(struct device *parent, struct device *self, void *aux)
 	id = usbd_get_interface_descriptor(sc->sc_iface);
 
 	/*
-	 * Some 3G modem devices have multiple interface and some 
-	 * of them are umass class. Don't claim ownership in such case.
+	 * Some 3G modems have multiple interfaces and some of them
+	 * are umass class. Don't claim ownership in such case.
 	 */
 	if (id == NULL || id->bInterfaceClass == UICLASS_MASS) {
 		/*
-		 * Some 3G modems require special request to
-		 * enable it's modem function.
+		 * Some 3G modems require a special request to
+		 * enable their modem function.
 		 */
 		if ((sc->sc_flag & DEV_HUAWEI) && uaa->ifaceno == 0) {
                         umsm_huawei_changemode(uaa->device);

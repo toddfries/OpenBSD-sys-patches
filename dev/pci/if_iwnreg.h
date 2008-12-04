@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwnreg.h,v 1.13 2008/11/03 17:19:54 damien Exp $	*/
+/*	$OpenBSD: if_iwnreg.h,v 1.19 2008/12/02 17:17:50 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -35,13 +35,6 @@
 
 /* Base Address Register. */
 #define IWN_PCI_BAR0	PCI_MAPREG_START
-
-/* Possible flags for PCIe Device Control Register (see PCIe 7.8.4) */
-#define PCI_PCIE_DCSR_ENA_NO_SNOOP	(1 << 11)
-
-/* Possible flags for PCIe Link Control Register (see PCIe 7.8.7) */
-#define PCI_PCIE_LCSR_ASPM_L0S	(1 << 0)
-#define PCI_PCIE_LCSR_ASPM_L1	(1 << 1)
 
 /*
  * Control and status registers.
@@ -87,6 +80,7 @@
 #define IWN_FH_RX_STATUS		0x1c44
 #define IWN_FH_TX_CONFIG(qid)		(0x1d00 + (qid) * 32)
 #define IWN_FH_TXBUF_STATUS(qid)	(0x1d08 + (qid) * 32)
+#define IWN_FH_TX_CHICKEN		0x1e98
 #define IWN_FH_TX_STATUS		0x1eb0
 
 /*
@@ -242,6 +236,9 @@
 #define IWN_FH_TXBUF_STATUS_TBIDX(x)	((x) << 12)
 #define IWN_FH_TXBUF_STATUS_TFBD_VALID	3
 
+/* Possible flags for register IWN_FH_TX_CHICKEN. */
+#define IWN_FH_TX_CHICKEN_SCHED_RETRY	(1 << 1)
+
 /* Possible flags for register IWN_FH_TX_STATUS. */
 #define IWN_FH_TX_STATUS_IDLE(chnl)					\
 	(1 << ((chnl) + 24) | 1 << ((chnl) + 16))
@@ -250,6 +247,7 @@
 #define IWN_FH_RX_CONFIG_ENA		(1 << 31)
 #define IWN_FH_RX_CONFIG_NRBD(x)	((x) << 20)
 #define IWN_FH_RX_CONFIG_RB_SIZE_8K	(1 << 16)
+#define IWN_FH_RX_CONFIG_SINGLE_FRAME	(1 << 15)
 #define IWN_FH_RX_CONFIG_IRQ_DST_HOST	(1 << 12)
 #define IWN_FH_RX_CONFIG_RB_TIMEOUT(x)	((x) << 4)
 #define IWN_FH_RX_CONFIG_IGN_RXF_EMPTY	(1 <<  2)
@@ -585,7 +583,7 @@ struct iwn_cmd_data {
 #define IWN_TX_NEED_RTS		(1 <<  1)
 #define IWN_TX_NEED_CTS		(1 <<  2)
 #define IWN_TX_NEED_ACK		(1 <<  3)
-#define IWN_TX_MRR_INDEX	(1 <<  4)
+#define IWN_TX_LINKQ		(1 <<  4)
 #define IWN_TX_IMM_BA		(1 <<  6)
 #define IWN_TX_FULL_TXOP	(1 <<  7)
 #define IWN_TX_BT_DISABLE	(1 << 12)	/* bluetooth coexistence */
@@ -595,7 +593,7 @@ struct iwn_cmd_data {
 #define IWN_TX_NEED_PADDING	(1 << 20)
 
 	uint32_t	scratch;
-	uint8_t		rate;
+	uint8_t		plcp;
 	uint8_t		rflags;
 	uint16_t	xrflags;
 
@@ -606,7 +604,7 @@ struct iwn_cmd_data {
 #define IWN_CIPHER_TKIP		3
 #define IWN_CIPHER_WEP104	9
 
-	uint8_t		ridx;
+	uint8_t		linkq;
 	uint8_t		reserved2;
 	uint8_t		key[16];
 	uint16_t	fnext;
@@ -639,13 +637,9 @@ struct iwn_cmd_link_quality {
 	uint8_t		ampdu_max;
 	uint32_t	reserved2;
 	struct {
-		uint8_t		rate;
+		uint8_t		plcp;
 		uint8_t		rflags;
 		uint16_t	xrflags;
-#define IWN_CCK1	 0
-#define IWN_CCK11	 3
-#define IWN_OFDM6	 4
-#define IWN_OFDM54	11
 	} __packed	retry[IWN_MAX_TX_RETRIES];
 	uint32_t	reserved3;
 } __packed;
@@ -822,35 +816,38 @@ struct iwn_sensitivity_cmd {
 struct iwn_phy_calib {
 	uint8_t	code;
 #define IWN4965_PHY_CALIB_DIFF_GAIN		 7
+#define IWN5000_PHY_CALIB_DC			 8
 #define IWN5000_PHY_CALIB_LO			 9
-#define IWN5000_PHY_CALIB_LO_TX_IQ		11
+#define IWN5000_PHY_CALIB_TX_IQ			11
 #define IWN5000_PHY_CALIB_CRYSTAL		15
-#define IWN5000_PHY_CALIB_LO_TX_IQ_PERD		17
+#define IWN5000_PHY_CALIB_BASE_BAND		16
+#define IWN5000_PHY_CALIB_TX_IQ_PERD		17
 #define IWN5000_PHY_CALIB_RESET_NOISE_GAIN	18
 #define IWN5000_PHY_CALIB_NOISE_GAIN		19
 
 	uint8_t	group;
 	uint8_t	ngroups;
-	uint8_t	valid;
+	uint8_t	isvalid;
 } __packed;
 
 struct iwn5000_phy_calib_crystal {
 	uint8_t	code;
 	uint8_t	group;
 	uint8_t	ngroups;
-	uint8_t	valid;
+	uint8_t	isvalid;
 
-	uint8_t	data[2];
+	uint8_t	cap_pin[2];
+	uint8_t	reserved[2];
 } __packed;
 
 struct iwn_phy_calib_gain {
 	uint8_t	code;
 	uint8_t	group;
 	uint8_t	ngroups;
-	uint8_t	valid;
+	uint8_t	isvalid;
 
 	int8_t	gain[3];
-	uint8_t	reserved2;
+	uint8_t	reserved;
 } __packed;
 
 /* Structure for command IWN_CMD_SPECTRUM_MEASUREMENT. */
@@ -1219,7 +1216,9 @@ struct iwn_firmware_hdr {
 #define IWN5000_EEPROM_BAND5	0x03a
 #define IWN5000_EEPROM_BAND6	0x041
 #define IWN5000_EEPROM_BAND7	0x049
-#define IWN5000_EEPROM_CRYSTAL	0x094
+#define IWN5000_EEPROM_CRYSTAL	0x128
+#define IWN5000_EEPROM_TEMP	0x12a
+#define IWN5000_EEPROM_VOLT	0x12b
 
 /* Possible flags for IWN_EEPROM_RFCFG. */
 #define IWN_RFCFG_TYPE(x)	(((x) >>  0) & 0x3)
@@ -1298,9 +1297,28 @@ static const struct iwn_chan_band {
 	{ 11, { 36, 44, 52, 60, 100, 108, 116, 124, 132, 149, 157 } }
 };
 
-static const uint8_t iwn_ridx_to_plcp[] = {
-	10, 20, 55, 110, /* CCK */
-	0xd, 0xf, 0x5, 0x7, 0x9, 0xb, 0x1, 0x3, 0x3 /* OFDM R1-R4 */
+/* HW rate indices. */
+#define IWN_RIDX_CCK1	0
+#define IWN_RIDX_OFDM6	4
+
+static const struct iwn_rate {
+	uint8_t	rate;
+	uint8_t	plcp;
+	uint8_t	flags;
+} iwn_rates[IWN_RIDX_MAX + 1] = {
+	{   2,  10, IWN_RFLAG_CCK },
+	{   4,  20, IWN_RFLAG_CCK },
+	{  11,  55, IWN_RFLAG_CCK },
+	{  22, 110, IWN_RFLAG_CCK },
+	{  12, 0xd, 0 },
+	{  18, 0xf, 0 },
+	{  24, 0x5, 0 },
+	{  36, 0x7, 0 },
+	{  48, 0x9, 0 },
+	{  72, 0xb, 0 },
+	{  96, 0x1, 0 },
+	{ 108, 0x3, 0 },
+	{ 120, 0x3, 0 }
 };
 
 #define IWN4965_MAX_PWR_INDEX	107
