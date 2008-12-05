@@ -4114,6 +4114,10 @@ const struct usb_known_product usb_known_products[] = {
 	    "SB5100 Cable Modem",
 	},
 	{
+	    USB_VENDOR_MOTU, USB_PRODUCT_MOTU_FLMIDI,
+	    "FastLane MIDI I/F",
+	},
+	{
 	    USB_VENDOR_MULTITECH, USB_PRODUCT_MULTITECH_ATLAS,
 	    "MT5634ZBA modem",
 	},
@@ -7744,6 +7748,10 @@ const struct usb_known_vendor usb_known_vendors[] = {
 	{
 	    USB_VENDOR_STSN,
 	    "STSN",
+	},
+	{
+	    USB_VENDOR_MOTU,
+	    "Motu",
 	},
 	{
 	    USB_VENDOR_ZOOM,
