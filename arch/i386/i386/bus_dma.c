@@ -1,13 +1,11 @@
-/*	$OpenBSD: bus_dma.c,v 1.13 2008/12/03 15:46:06 oga Exp $	*/
-/*	$NetBSD: bus_dma.c,v 1.3 2003/05/07 21:33:58 fvdl Exp $	*/
-
+/*	$OpenBSD: bus_dma.c,v 1.2 2008/12/04 19:25:38 oga Exp $	*/
 /*-
- * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
+ * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Charles M. Hannum and by Jason R. Thorpe of the Numerical Aerospace
- * Simulation Facility, NASA Ames Research Center.
+ * by Jason R. Thorpe of the Numerical Aerospace Simulation Facility,
+ * NASA Ames Research Center.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,33 +29,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-
-/*
- * The following is included because _bus_dma_uiomove is derived from
- * uiomove() in kern_subr.c.
- */
-
-/*
- * Copyright (c) 1982, 1986, 1991, 1993
- *	The Regents of the University of California.  All rights reserved.
- * (c) UNIX System Laboratories, Inc.
- * All or some portions of this file are derived from material licensed
- * to the University of California by American Telephone and Telegraph
- * Co. or Unix System Laboratories, Inc. and are reproduced herein with
- * the permission of UNIX System Laboratories, Inc.
+/*-
+ * Copyright (c) 1993, 1994, 1995, 1996 Charles M. Hannum.  All rights reserved.
+ * Copyright (c) 1992 Terrence R. Lambert.
+ * Copyright (c) 1982, 1987, 1990 The Regents of the University of California.
+ * All rights reserved.
  *
- * Copyright (c) 1992, 1993
- *	The Regents of the University of California.  All rights reserved.
- *
- * This software was developed by the Computer Systems Engineering group
- * at Lawrence Berkeley Laboratory under DARPA contract BG 91-66 and
- * contributed to Berkeley.
- *
- * All advertising materials mentioning features or use of this software
- * must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Lawrence Berkeley Laboratory.
+ * This code is derived from software contributed to Berkeley by
+ * William Jolitz.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -67,11 +46,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -86,6 +61,7 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
+ *
  */
 
 #include <sys/param.h>
@@ -103,21 +79,10 @@
 
 #include <uvm/uvm_extern.h>
 
-#include "ioapic.h"
+extern paddr_t avail_end;
 
-#if NIOAPIC > 0
-#include <machine/i82093var.h>
-#include <machine/mpbiosvar.h>
-#endif
-
-extern	paddr_t avail_end;
-
-int _bus_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
-    struct proc *, int, paddr_t *, int *, int);
-
-#define	IDTVEC(name)	__CONCAT(X,name)
-typedef void (vector)(void);
-extern vector *IDTVEC(intr)[];
+int	_bus_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *,
+    bus_size_t, struct proc *, int, paddr_t *, int *, int);
 
 /*
  * Common function for DMA map creation.  May be called by bus-specific
@@ -146,8 +111,7 @@ _bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
 	mapsize = sizeof(struct bus_dmamap) +
 	    (sizeof(bus_dma_segment_t) * (nsegments - 1));
 	if ((mapstore = malloc(mapsize, M_DEVBUF,
-	    (flags & BUS_DMA_NOWAIT) ?
-	        (M_NOWAIT|M_ZERO) : (M_WAITOK|M_ZERO))) == NULL)
+	    ((flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK) | M_ZERO)) == NULL)
 		return (ENOMEM);
 
 	map = (struct bus_dmamap *)mapstore;
@@ -269,6 +233,9 @@ _bus_dmamap_load_uio(bus_dma_tag_t t, bus_dmamap_t map, struct uio *uio,
 	resid = uio->uio_resid;
 	iov = uio->uio_iov;
 
+	if (resid > map->_dm_size)
+		return (EINVAL);
+
 	if (uio->uio_segflg == UIO_USERSPACE) {
 		p = uio->uio_procp;
 #ifdef DIAGNOSTIC
@@ -347,18 +314,6 @@ _bus_dmamap_unload(bus_dma_tag_t t, bus_dmamap_t map)
 	 */
 	map->dm_mapsize = 0;
 	map->dm_nsegs = 0;
-}
-
-/*
- * Common function for DMA map synchronization.  May be called
- * by bus-specific DMA map synchronization functions.
- */
-void
-_bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
-    bus_size_t size, int op)
-{
-
-	/* Nothing to do here. */
 }
 
 /*
@@ -595,12 +550,15 @@ _bus_dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	size = round_page(size);
 
 	TAILQ_INIT(&mlist);
-
 	/*
 	 * Allocate pages from the VM system.
+	 * For non-ISA mappings first try higher memory segments.
 	 */
-	error = uvm_pglistalloc(size, low, high, alignment, boundary,
-	    &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
+	if (high <= ISA_DMA_BOUNCE_THRESHOLD || (error = uvm_pglistalloc(size,
+	    round_page(ISA_DMA_BOUNCE_THRESHOLD), high, alignment, boundary,
+	    &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0)))
+		error = uvm_pglistalloc(size, low, high, alignment, boundary,
+		    &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
 	if (error)
 		return (error);
 
@@ -635,9 +593,7 @@ _bus_dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 		}
 		lastaddr = curaddr;
 	}
-
 	*rsegs = curseg + 1;
 
 	return (0);
 }
-

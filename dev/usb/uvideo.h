@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.h,v 1.35 2008/11/30 15:20:33 mglocker Exp $ */
+/*	$OpenBSD: uvideo.h,v 1.39 2008/12/05 10:44:52 mglocker Exp $ */
 
 /*
  * Copyright (c) 2007 Robert Nagy <robert@openbsd.org>
@@ -304,6 +304,10 @@ struct usb_video_probe_commit {
     0x4e, 0x56, 0x31, 0x32, 0x00, 0x00, 0x10, 0x00,	\
     0x80, 0x00, 0x00, 0xaa, 0x00, 0x38,	0x9b, 0x71 }
 
+#define	UVIDEO_FORMAT_GUID_UYVY	{			\
+    0x55, 0x59, 0x56, 0x59, 0x00, 0x00, 0x10, 0x00,	\
+    0x80, 0x00, 0x00, 0xaa, 0x00, 0x38,	0x9b, 0x71 }
+
 /*
  * USB Video Payload MJPEG
  */
@@ -425,7 +429,7 @@ struct uvideo_format_desc {
 	} u;
 } __packed;
 
-#define UVIDEO_NFRAMES_MAX	640
+#define UVIDEO_NFRAMES_MAX	40
 struct uvideo_isoc_xfer {
 	struct uvideo_softc	*sc;
 	usbd_xfer_handle	 xfer;
@@ -443,12 +447,12 @@ struct uvideo_bulk_xfer {
 #define UVIDEO_IXFERS		3
 struct uvideo_vs_iface {
 	usbd_interface_handle  	 ifaceh;
-	int			 endpoint;
 	usbd_pipe_handle	 pipeh;
+	int			 iface;
 	int			 numalts;
 	int			 curalt;
-	uint32_t		 max_packet_size;
-	int			 iface;
+	int			 endpoint;
+	uint32_t		 psize;
 	int			 bulk_endpoint;
 	int			 bulk_running;
 	struct uvideo_isoc_xfer	 ixfer[UVIDEO_IXFERS];

@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_pool.c,v 1.70 2008/11/25 13:05:51 art Exp $	*/
+/*	$OpenBSD: subr_pool.c,v 1.72 2008/12/04 12:40:35 art Exp $	*/
 /*	$NetBSD: subr_pool.c,v 1.61 2001/09/26 07:14:56 chs Exp $	*/
 
 /*-
