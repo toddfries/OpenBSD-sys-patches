@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.173 2008/06/12 16:15:05 claudio Exp $	*/
+/*	$OpenBSD: if.c,v 1.183 2008/11/26 19:07:33 deraadt Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -147,9 +147,28 @@ struct if_clone	*if_clone_lookup(const char *, int *);
 void	if_congestion_clear(void *);
 int	if_group_egress_build(void);
 
+void	m_clinitifp(struct ifnet *);
+
 TAILQ_HEAD(, ifg_group) ifg_head;
 LIST_HEAD(, if_clone) if_cloners = LIST_HEAD_INITIALIZER(if_cloners);
 int if_cloners_count;
+
+int m_clticks;
+struct timeout m_cltick_tmo;
+
+/*
+ * Record when the last timeout has been run.  If the delta is
+ * too high, m_cldrop() will notice and decrease the interface
+ * high water marks.
+ */
+static void
+m_cltick(void *arg)
+{
+	extern int ticks;
+
+	m_clticks = ticks;
+	timeout_add(&m_cltick_tmo, 1);
+}
 
 /*
  * Network interface utility routines.
@@ -165,6 +184,9 @@ ifinit()
 	timeout_set(&if_slowtim, if_slowtimo, &if_slowtim);
 
 	if_slowtimo(&if_slowtim);
+
+	timeout_set(&m_cltick_tmo, m_cltick, NULL);
+	m_cltick(NULL);
 }
 
 static int if_index = 0;
@@ -455,6 +477,8 @@ if_attach(struct ifnet *ifp)
 	TAILQ_INSERT_TAIL(&ifnet, ifp, if_list);
 #endif
 
+	m_clinitifp(ifp);
+
 	if_attachsetup(ifp);
 }
 
@@ -636,6 +660,7 @@ do { \
 	/* Announce that the interface is gone. */
 	rt_ifannouncemsg(ifp, IFAN_DEPARTURE);
 
+	ifindex2ifnet[ifp->if_index] = NULL;
 	splx(s);
 }
 
@@ -1065,6 +1090,9 @@ if_down(struct ifnet *ifp)
 		bstp_ifstate(ifp);
 #endif
 	rt_ifmsg(ifp);
+#ifndef SMALL_KERNEL
+	rt_if_track(ifp);
+#endif
 }
 
 /*
@@ -1101,6 +1129,12 @@ if_up(struct ifnet *ifp)
 #ifdef INET6
 	in6_if_up(ifp);
 #endif
+
+#ifndef SMALL_KERNEL
+	rt_if_track(ifp);
+#endif
+
+	m_clinitifp(ifp);
 }
 
 /*
@@ -1111,6 +1145,9 @@ void
 if_link_state_change(struct ifnet *ifp)
 {
 	rt_ifmsg(ifp);
+#ifndef SMALL_KERNEL
+	rt_if_track(ifp);
+#endif
 	dohooks(ifp->if_linkstatehooks, 0);
 }
 
@@ -1913,7 +1950,7 @@ if_group_egress_build(void)
 			if (rt->rt_ifp)
 				if_addgroup(rt->rt_ifp, IFG_EGRESS);
 #ifndef SMALL_KERNEL
-			rn = rn_mpath_next(rn);
+			rn = rn_mpath_next(rn, 0);
 #else
 			rn = NULL;
 #endif
@@ -1928,7 +1965,7 @@ if_group_egress_build(void)
 			if (rt->rt_ifp)
 				if_addgroup(rt->rt_ifp, IFG_EGRESS);
 #ifndef SMALL_KERNEL
-			rn = rn_mpath_next(rn);
+			rn = rn_mpath_next(rn, 0);
 #else
 			rn = NULL;
 #endif
@@ -1997,4 +2034,97 @@ sysctl_ifq(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return (EOPNOTSUPP);
 	}
 	/* NOTREACHED */
+}
+
+void
+m_clinitifp(struct ifnet *ifp)
+{
+	extern u_int mclsizes[];
+	int i;
+
+	/* Initialize high water marks for use of cluster pools */
+	for (i = 0; i < MCLPOOLS; i++) {
+		ifp->if_mclstat.mclpool[i].mcl_hwm = MAX(4,
+		    ifp->if_mclstat.mclpool[i].mcl_lwm);
+		ifp->if_mclstat.mclpool[i].mcl_size = mclsizes[i];
+	}
+}
+
+void
+m_clsetlwm(struct ifnet *ifp, u_int pktlen, u_int lwm)
+{
+	extern u_int mclsizes[];
+	int i;
+
+	for (i = 0; i < MCLPOOLS; i++) {
+                if (pktlen <= mclsizes[i])
+			break;
+        }
+	if (i >= MCLPOOLS)
+		return;
+
+	ifp->if_mclstat.mclpool[i].mcl_lwm = lwm;
+}
+
+int
+m_cldrop(struct ifnet *ifp, int pi)
+{
+	static int livelock, liveticks;
+	struct mclstat *mcls;
+	extern int ticks;
+	int i;
+
+	if (livelock == 0 && ticks - m_clticks > 2) {
+		struct ifnet *aifp;
+
+		/*
+		 * Timeout did not run, so we are in some kind of livelock.
+		 * Decrease the cluster allocation high water marks on all
+		 * interfaces and prevent them from growth for the very near
+		 * future.
+		 */
+		livelock = 1;
+		liveticks = ticks;
+		TAILQ_FOREACH(aifp, &ifnet, if_list) {
+			mcls = &aifp->if_mclstat;
+			for (i = 0; i < nitems(mcls->mclpool); i++)
+				mcls->mclpool[i].mcl_hwm =
+				    max(mcls->mclpool[i].mcl_hwm / 2,
+				    mcls->mclpool[i].mcl_lwm);
+		}
+	} else if (livelock && ticks - liveticks > 5)
+		livelock = 0;	/* Let the high water marks grow again */
+
+	mcls = &ifp->if_mclstat;
+	if (mcls->mclpool[pi].mcl_alive <= 2 &&
+	    mcls->mclpool[pi].mcl_hwm < 32768 &&
+	    ISSET(ifp->if_flags, IFF_RUNNING) && livelock == 0) {
+		/* About to run out, so increase the watermark */
+		mcls->mclpool[pi].mcl_hwm++;
+	} else if (mcls->mclpool[pi].mcl_alive >= mcls->mclpool[pi].mcl_hwm)
+		return (1);		/* No more packets given */
+
+	return (0);
+}
+
+void
+m_clcount(struct ifnet *ifp, int pi)
+{
+	ifp->if_mclstat.mclpool[pi].mcl_alive++;
+}
+
+void
+m_cluncount(struct mbuf *m, int all)
+{
+	struct mbuf_ext *me;
+
+	do {
+		me = &m->m_ext;
+		if (((m->m_flags & (M_EXT|M_CLUSTER)) != (M_EXT|M_CLUSTER)) ||
+		    (me->ext_ifp == NULL))
+			continue;
+
+		me->ext_ifp->if_mclstat.mclpool[me->ext_backend].mcl_alive--;
+		me->ext_ifp = NULL;
+	} while (all && (m = m->m_next));
 }

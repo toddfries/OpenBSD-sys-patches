@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.94 2008/04/10 23:15:45 dlg Exp $	*/
+/*	$OpenBSD: if.h,v 1.100 2008/11/30 00:14:42 brad Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -146,6 +146,17 @@ struct	ifqueue {
 	struct	timeout *ifq_congestion;
 };
 
+#define MCLPOOLS	7		/* number of cluster pools */
+
+struct	mclstat {
+	struct {
+		u_short	mcl_alive;
+		u_short mcl_hwm;
+		u_short mcl_size;
+		u_short mcl_lwm;
+	}	mclpool[MCLPOOLS];
+};
+
 /*
  * Values for if_link_state.
  */
@@ -216,14 +227,16 @@ struct ifnet {				/* and the entries */
 	int	(*if_ioctl)(struct ifnet *, u_long, caddr_t);
 					/* init routine */
 	int	(*if_init)(struct ifnet *);
-					/* XXX bus reset routine */
-	int	(*if_reset)(struct ifnet *);
+					/* stop routine */
+	int	(*if_stop)(struct ifnet *, int);
 					/* timer routine */
 	void	(*if_watchdog)(struct ifnet *);
 	struct	ifaltq if_snd;		/* output queue (includes altq) */
 	struct sockaddr_dl *if_sadl;	/* pointer to our sockaddr_dl */
 
 	void	*if_afdata[AF_MAX];
+
+	struct mclstat if_mclstat;	/* mbuf cluster pool stats */
 };
 #define	if_mtu		if_data.ifi_mtu
 #define	if_type		if_data.ifi_type
@@ -306,7 +319,7 @@ do {									\
 		(ifq)->ifq_tail->m_nextpkt = m;				\
 	(ifq)->ifq_tail = m;						\
 	(ifq)->ifq_len++;						\
-} while (0)
+} while (/* CONSTCOND */0)
 #define	IF_PREPEND(ifq, m)						\
 do {									\
 	(m)->m_nextpkt = (ifq)->ifq_head;				\
@@ -314,7 +327,7 @@ do {									\
 		(ifq)->ifq_tail = (m);					\
 	(ifq)->ifq_head = (m);						\
 	(ifq)->ifq_len++;						\
-} while (0)
+} while (/* CONSTCOND */0)
 #define	IF_DEQUEUE(ifq, m)						\
 do {									\
 	(m) = (ifq)->ifq_head;						\
@@ -324,7 +337,7 @@ do {									\
 		(m)->m_nextpkt = 0;					\
 		(ifq)->ifq_len--;					\
 	}								\
-} while (0)
+} while (/* CONSTCOND */0)
 
 #define	IF_INPUT_ENQUEUE(ifq, m)					\
 do {									\
@@ -335,7 +348,7 @@ do {									\
 			if_congestion(ifq);				\
 	} else								\
 		IF_ENQUEUE(ifq, m);					\
-} while (0)
+} while (/* CONSTCOND */0)
 
 #define	IF_POLL(ifq, m)		((m) = (ifq)->ifq_head)
 #define	IF_PURGE(ifq)							\
@@ -349,7 +362,7 @@ do {									\
 		else							\
 			m_freem(__m0);					\
 	}								\
-} while (0)
+} while (/* CONSTCOND */0)
 #define	IF_IS_EMPTY(ifq)	((ifq)->ifq_len == 0)
 
 #define	IFQ_MAXLEN	256
@@ -644,7 +657,7 @@ do { \
 		ifafree(ifa); \
 	else \
 		(ifa)->ifa_refcnt--; \
-} while (0)
+} while (/* CONSTCOND */0)
 
 #ifdef ALTQ
 #define	ALTQ_DECL(x)		x
@@ -664,7 +677,7 @@ do {									\
 	}								\
 	if ((err))							\
 		(ifq)->ifq_drops++;					\
-} while (0)
+} while (/* CONSTCOND */0)
 
 #define	IFQ_DEQUEUE(ifq, m)						\
 do {									\
@@ -674,7 +687,7 @@ do {									\
 		ALTQ_DEQUEUE((ifq), (m));				\
 	else								\
 		IF_DEQUEUE((ifq), (m));					\
-} while (0)
+} while (/* CONSTCOND */0)
 
 #define	IFQ_POLL(ifq, m)						\
 do {									\
@@ -684,7 +697,7 @@ do {									\
 		ALTQ_POLL((ifq), (m));					\
 	else								\
 		IF_POLL((ifq), (m));					\
-} while (0)
+} while (/* CONSTCOND */0)
 
 #define	IFQ_PURGE(ifq)							\
 do {									\
@@ -692,10 +705,12 @@ do {									\
 		ALTQ_PURGE((ifq));					\
 	else								\
 		IF_PURGE((ifq));					\
-} while (0)
+} while (/* CONSTCOND */0)
 
 #define	IFQ_SET_READY(ifq)						\
-	do { ((ifq)->altq_flags |= ALTQF_READY); } while (0)
+do {									\
+	((ifq)->altq_flags |= ALTQF_READY);				\
+} while (/* CONSTCOND */0)
 
 #define	IFQ_CLASSIFY(ifq, m, af, pa)					\
 do {									\
@@ -706,7 +721,7 @@ do {									\
 		(pa)->pattr_af = (af);					\
 		(pa)->pattr_hdr = mtod((m), caddr_t);			\
 	}								\
-} while (0)
+} while (/* CONSTCOND */0)
 
 #else /* !ALTQ */
 #define	ALTQ_DECL(x)		/* nothing */
@@ -722,7 +737,7 @@ do {									\
 	}								\
 	if ((err))							\
 		(ifq)->ifq_drops++;					\
-} while (0)
+} while (/* CONSTCOND */0)
 
 #define	IFQ_DEQUEUE(ifq, m)	IF_DEQUEUE((ifq), (m))
 

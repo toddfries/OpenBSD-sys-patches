@@ -83,7 +83,7 @@ irqreturn_t mga_driver_irq_handler(DRM_IRQ_ARGS)
 		}
 
 		atomic_inc(&dev_priv->last_fence_retired);
-		DRM_WAKEUP(&dev_priv->fence_queue);
+		DRM_WAKEUP(dev_priv);
 		handled = 1;
 	}
 
@@ -132,7 +132,7 @@ int mga_driver_fence_wait(struct drm_device * dev, unsigned int *sequence)
 	 * by about a day rather than she wants to wait for years
 	 * using fences.
 	 */
-	DRM_WAIT_ON(ret, dev_priv->fence_queue, 3 * DRM_HZ,
+	DRM_WAIT_ON(ret, dev_priv, 3 * DRM_HZ,
 		    (((cur_fence = atomic_read(&dev_priv->last_fence_retired))
 		      - *sequence) <= (1 << 23)));
 
@@ -141,7 +141,8 @@ int mga_driver_fence_wait(struct drm_device * dev, unsigned int *sequence)
 	return ret;
 }
 
-void mga_driver_irq_preinstall(struct drm_device * dev)
+int
+mga_driver_irq_install(struct drm_device * dev)
 {
 	drm_mga_private_t *dev_priv = (drm_mga_private_t *) dev->dev_private;
 
@@ -149,18 +150,11 @@ void mga_driver_irq_preinstall(struct drm_device * dev)
 	MGA_WRITE(MGA_IEN, 0);
 	/* Clear bits if they're already high */
 	MGA_WRITE(MGA_ICLEAR, ~0);
-}
 
-int mga_driver_irq_postinstall(struct drm_device * dev)
-{
-	drm_mga_private_t *dev_priv = (drm_mga_private_t *) dev->dev_private;
-	int ret;
-
-	ret = drm_vblank_init(dev, 1);
-	if (ret)
-		return ret;
-
-	DRM_INIT_WAITQUEUE(&dev_priv->fence_queue);
+	dev_priv->irqh = pci_intr_establish(dev_priv->pc, dev_priv->ih, IPL_BIO,
+	    drm_irq_handler_wrap, dev, dev_priv->dev.dv_xname);
+	if (dev_priv->irqh == NULL)
+		return (ENOENT);
 
 	/* Turn on soft trap interrupt.  Vertical blank interrupts are enabled
 	 * in mga_enable_vblank.
@@ -169,14 +163,13 @@ int mga_driver_irq_postinstall(struct drm_device * dev)
 	return 0;
 }
 
-void mga_driver_irq_uninstall(struct drm_device * dev)
+void
+mga_driver_irq_uninstall(struct drm_device * dev)
 {
 	drm_mga_private_t *dev_priv = (drm_mga_private_t *) dev->dev_private;
-	if (!dev_priv)
-		return;
 
 	/* Disable *all* interrupts */
 	MGA_WRITE(MGA_IEN, 0);
 
-	dev->irq_enabled = 0;
+	pci_intr_disestablish(dev_priv->pc, dev_priv->irqh);
 }

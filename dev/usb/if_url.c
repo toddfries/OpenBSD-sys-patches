@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_url.c,v 1.52 2008/10/03 20:25:29 brad Exp $ */
+/*	$OpenBSD: if_url.c,v 1.54 2008/11/28 02:44:18 brad Exp $ */
 /*	$NetBSD: if_url.c,v 1.6 2002/09/29 10:19:21 martin Exp $	*/
 /*
  * Copyright (c) 2001, 2002
@@ -281,6 +281,8 @@ url_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_watchdog = url_watchdog;
 
 	IFQ_SET_READY(&ifp->if_snd);
+
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 	/*
 	 * Do ifmedia setup.
@@ -1114,13 +1116,6 @@ url_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU)
-			error = EINVAL;
-		else
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1139,25 +1134,21 @@ url_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		error = 0;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-			ether_addmulti(ifr, &sc->sc_ac) :
-			ether_delmulti(ifr, &sc->sc_ac);
 
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				url_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		mii = GET_MII(sc);
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, cmd);
 		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			url_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);

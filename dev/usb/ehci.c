@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.95 2008/10/30 08:11:13 mglocker Exp $ */
+/*	$OpenBSD: ehci.c,v 1.97 2008/11/29 08:52:03 mglocker Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -567,6 +567,10 @@ ehci_intr1(ehci_softc_t *sc)
 	}
 
 	intrs = EHCI_STS_INTRS(EOREAD4(sc, EHCI_USBSTS));
+	if (intrs == 0xffffffff) {
+		sc->sc_dying = 1;
+		return (0);
+	}
 	if (!intrs)
 		return (0);
 
@@ -872,6 +876,9 @@ ehci_idone(struct ehci_xfer *ex)
 
 				status = letoh32(itd->itd.itd_ctl[i]);
 				len = EHCI_ITD_GET_LEN(status);
+				if (EHCI_ITD_GET_STATUS(status) != 0)
+					len = 0; /*No valid data on error*/
+
 				xfer->frlengths[nframes++] = len;
 				actlen += len;
 			}
@@ -3802,11 +3809,12 @@ ehci_device_isoc_start(usbd_xfer_handle xfer)
 			if (page_offs >= dma_buf->block->size)
 				break;
 
-			int page = DMAADDR(dma_buf, page_offs);
+			long long page = DMAADDR(dma_buf, page_offs);
 			page = EHCI_PAGE(page);
 			itd->itd.itd_bufr[j] =
-			    htole32(EHCI_ITD_SET_BPTR(page) | 
-			    EHCI_LINK_ITD);
+			    htole32(EHCI_ITD_SET_BPTR(page));
+			itd->itd.itd_bufr_hi[j] =
+			    htole32(page >> 32);
 		}
 
 		/*

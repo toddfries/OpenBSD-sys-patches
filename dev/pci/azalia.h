@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.h,v 1.20 2008/11/05 03:20:35 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.h,v 1.26 2008/11/30 08:36:57 jakemsr Exp $	*/
 /*	$NetBSD: azalia.h,v 1.6 2006/01/16 14:15:26 kent Exp $	*/
 
 /*-
@@ -401,6 +401,8 @@
 #define		CORB_CD_ASSOCIATION(x)	((x >> 4) & 0xf)
 #define		CORB_CD_ASSOCIATION_MAX	0x0f
 #define		CORB_CD_MISC_MASK	0x00000f00
+#define		CORB_CD_MISC(x)		((x >> 8) & 0xf)
+#define			CORB_CD_PRESENCEOV	0x1
 #define		CORB_CD_COLOR(x)	((x >> 12) & 0xf)
 #define			CORB_CD_COLOR_UNKNOWN	0x0
 #define			CORB_CD_BLACK	0x1
@@ -474,6 +476,7 @@
 
 #define CORB_NID_ROOT		0
 #define HDA_MAX_CHANNELS	16
+#define HDA_MAX_SENSE_PINS	16
 
 /* memory-mapped types */
 typedef struct {
@@ -512,6 +515,7 @@ typedef int nid_t;
 
 typedef struct {
 	nid_t nid;
+	int enable;
 	uint32_t widgetcap;
 	int type;		/* = bit20-24 of widgetcap */
 	int nconnections;
@@ -556,20 +560,13 @@ typedef struct {
 #define MI_TARGET_SPDIF		0x107
 #define MI_TARGET_SPDIF_CC	0x108
 #define MI_TARGET_EAPD		0x109
+#define MI_TARGET_MUTESET	0x10a
+#define MI_TARGET_PINSENSE	0x10b
 } mixer_item_t;
 
 #define VALID_WIDGET_NID(nid, codec)	(nid == (codec)->audiofunc || \
 					 (nid >= (codec)->wstart &&   \
 					  nid < (codec)->wend))
-
-#define PIN_STATUS(wid, conn)						\
-	do {								\
-		if ((wid)->type != COP_AWTYPE_PIN_COMPLEX)		\
-			(conn) = 0;					\
-		else							\
-			(conn) =					\
-			    ((wid)->d.pin.config & CORB_CD_PORT_MASK) >> 30; \
-	} while (0)
 
 typedef struct {
 	int nconv;
@@ -615,6 +612,9 @@ typedef struct codec_t {
 	int nformats;
 	struct audio_encoding* encs;
 	int nencs;
+
+	nid_t sense_pins[HDA_MAX_SENSE_PINS];
+	int nsense_pins;
 
 	uint32_t *extra;
 	u_int rate;

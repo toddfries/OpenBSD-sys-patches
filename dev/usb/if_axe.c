@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.89 2008/11/02 10:46:10 jsg Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.91 2008/11/28 02:44:18 brad Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>
@@ -708,6 +708,8 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 
 	IFQ_SET_READY(&ifp->if_snd);
 
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
 	/* Initialize MII/media info. */
 	mii = &sc->axe_mii;
 	mii->mii_ifp = ifp;
@@ -1350,13 +1352,6 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 #endif
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1383,22 +1378,7 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		sc->axe_if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				axe_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		mii = GET_MII(sc);
@@ -1407,6 +1387,12 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	default:
 		error = ether_ioctl(ifp, &sc->arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			axe_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);

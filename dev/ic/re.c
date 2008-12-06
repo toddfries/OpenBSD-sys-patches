@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.96 2008/10/16 19:18:03 naddy Exp $	*/
+/*	$OpenBSD: re.c,v 1.103 2008/11/30 06:01:45 brad Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -230,6 +230,7 @@ static const struct re_revision {
 	{ RL_HWREV_8168C,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168C_SPIN2,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168CP,	"RTL8168CP/8111CP" },
+	{ RL_HWREV_8168D,	"RTL8168D/8111D" },
 	{ RL_HWREV_8169,	"RTL8169" },
 	{ RL_HWREV_8169_8110SB,	"RTL8169/8110SB" },
 	{ RL_HWREV_8169_8110SBL, "RTL8169SBL" },
@@ -865,6 +866,7 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	case RL_HWREV_8168C:
 	case RL_HWREV_8168C_SPIN2:
 	case RL_HWREV_8168CP:
+	case RL_HWREV_8168D:
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
 		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
 		    RL_FLAG_HWIM;
@@ -1059,16 +1061,16 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		goto fail_7;
 	}
 
-        /* Create DMA maps for RX buffers */
-        for (i = 0; i < RL_RX_DESC_CNT; i++) {
-                error = bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES,
-                    0, 0, &sc->rl_ldata.rl_rxsoft[i].rxs_dmamap);
-                if (error) {
-                        printf("%s: can't create DMA map for RX\n",
-                            sc->sc_dev.dv_xname);
+	/* Create DMA maps for RX buffers */
+	for (i = 0; i < RL_RX_DESC_CNT; i++) {
+		error = bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES,
+		    0, 0, &sc->rl_ldata.rl_rxsoft[i].rxs_dmamap);
+		if (error) {
+			printf("%s: can't create DMA map for RX\n",
+			    sc->sc_dev.dv_xname);
 			goto fail_8;
-                }
-        }
+		}
+	}
 
 	ifp = &sc->sc_arpcom.ac_if;
 	ifp->if_softc = sc;
@@ -1471,7 +1473,7 @@ re_rxeof(struct rl_softc *sc)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		ether_input_mbuf(ifp, m);
 	}
@@ -1627,12 +1629,30 @@ re_intr(void *arg)
 
 	if (sc->rl_imtype == RL_IMTYPE_SIM) {
 		if ((sc->rl_flags & RL_FLAG_TIMERINTR)) {
-			if ((tx | rx) == 0)
+			if ((tx | rx) == 0) {
+				/*
+				 * Nothing needs to be processed, fallback
+				 * to use TX/RX interrupts.
+				 */
 				re_setup_intr(sc, 1, RL_IMTYPE_NONE);
-			else
+
+				/*
+				 * Recollect, mainly to avoid the possible
+				 * race introduced by changing interrupt
+				 * masks.
+				 */
+				re_rxeof(sc);
+				tx = re_txeof(sc);
+			} else
 				CSR_WRITE_4(sc, RL_TIMERCNT, 1); /* reload */
-		} else if (tx | rx)
+		} else if (tx | rx) {
+			/*
+			 * Assume that using simulated interrupt moderation
+			 * (hardware timer based) could reduce the interrupt
+			 * rate.
+			 */
 			re_setup_intr(sc, 1, RL_IMTYPE_SIM);
+		}
 	}
 
 	if (tx && !IFQ_IS_EMPTY(&ifp->if_snd))
@@ -1875,7 +1895,7 @@ re_start(struct ifnet *ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 	}
 
@@ -2090,12 +2110,6 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			arp_ifinit(&sc->sc_arpcom, ifa);
 #endif /* INET */
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING)
@@ -2108,27 +2122,18 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		sc->if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				re_iff(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			re_iff(sc);
+		error = 0;
 	}
 
 	splx(s);

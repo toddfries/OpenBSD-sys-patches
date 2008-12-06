@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.625 2008/10/28 22:57:01 mpf Exp $ */
+/*	$OpenBSD: pf.c,v 1.627 2008/11/24 13:22:09 mikeb Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -1183,7 +1183,7 @@ pf_tbladdr_setup(struct pf_ruleset *rs, struct pf_addr_wrap *aw)
 {
 	if (aw->type != PF_ADDR_TABLE)
 		return (0);
-	if ((aw->p.tbl = pfr_attach_table(rs, aw->v.tblname)) == NULL)
+	if ((aw->p.tbl = pfr_attach_table(rs, aw->v.tblname, 1)) == NULL)
 		return (1);
 	return (0);
 }
@@ -5153,7 +5153,7 @@ pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kif *kif)
 
 			if (kif->pfik_ifp == ifp)
 				ret = 1;
-			rn = rn_mpath_next(rn);
+			rn = rn_mpath_next(rn, 0);
 		} while (check_mpath == 1 && rn != NULL && ret == 0);
 	} else
 		ret = 0;

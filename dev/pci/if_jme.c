@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jme.c,v 1.12 2008/10/29 01:55:53 brad Exp $	*/
+/*	$OpenBSD: if_jme.c,v 1.14 2008/12/01 09:12:59 jsg Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -549,6 +549,8 @@ jme_attach(struct device *parent, struct device *self, void *aux)
 			    CHIPMODE_FPGA_REV_SHIFT);
 		}
 	}
+
+	sc->jme_revfm = (reg & CHIPMODE_REVFM_MASK) >> CHIPMODE_REVFM_SHIFT;
 
 	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_JMICRON_JMC250 &&
 	    PCI_REVISION(pa->pa_class) == JME_REV_JMC250_A2)
@@ -1242,7 +1244,7 @@ jme_start(struct ifnet *ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf != NULL)
-			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 	}
 
@@ -1438,6 +1440,15 @@ jme_mac_config(struct jme_softc *sc)
 	default:
 		break;
 	}
+
+	if (sc->jme_revfm >= 2) {
+		/* set clock sources for tx mac and offload engine */
+		if (IFM_SUBTYPE(mii->mii_media_active) == IFM_1000_T)
+			ghc |= GHC_TCPCK_1000 | GHC_TXCK_1000;
+		else
+			ghc |= GHC_TCPCK_10_100 | GHC_TXCK_10_100;
+	}
+
 	CSR_WRITE_4(sc, JME_GHC, ghc);
 	CSR_WRITE_4(sc, JME_RXMAC, rxmac);
 	CSR_WRITE_4(sc, JME_TXMAC, txmac);
@@ -1715,7 +1726,8 @@ jme_rxpkt(struct jme_softc *sc)
 
 #if NBPFILTER > 0
 			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+				bpf_mtap_ether(ifp->if_bpf, m,
+				    BPF_DIRECTION_IN);
 #endif
 
 			ifp->if_ipackets++;

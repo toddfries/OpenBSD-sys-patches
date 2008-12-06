@@ -1,4 +1,4 @@
-/*	$OpenBSD: gem.c,v 1.79 2008/10/02 20:21:13 brad Exp $	*/
+/*	$OpenBSD: gem.c,v 1.84 2008/11/28 02:44:17 brad Exp $	*/
 /*	$NetBSD: gem.c,v 1.1 2001/09/16 00:11:43 eeh Exp $ */
 
 /*
@@ -772,9 +772,9 @@ gem_init(struct ifnet *ifp)
 
 	/* Enable DMA */
 	v = gem_ringsize(GEM_NTXDESC /*XXX*/);
-	bus_space_write_4(t, h, GEM_TX_CONFIG,
-		v|GEM_TX_CONFIG_TXDMA_EN|
-		((0x4ff<<10)&GEM_TX_CONFIG_TXFIFO_TH));
+	v |= ((sc->sc_variant == GEM_SUN_ERI ? 0x100 : 0x04ff) << 10) &
+	    GEM_TX_CONFIG_TXFIFO_TH;
+	bus_space_write_4(t, h, GEM_TX_CONFIG, v | GEM_TX_CONFIG_TXDMA_EN);
 	bus_space_write_4(t, h, GEM_TX_KICK, 0);
 
 	/* step 10. ERX Configuration */
@@ -891,6 +891,22 @@ gem_init_regs(struct gem_softc *sc)
 	bus_space_write_4(t, h, GEM_MAC_SEND_PAUSE_CMD, 0);
 
 	/*
+	 * Set the internal arbitration to "infinite" bursts of the
+	 * maximum length of 31 * 64 bytes so DMA transfers aren't
+	 * split up in cache line size chunks. This greatly improves
+	 * especially RX performance.
+	 * Enable silicon bug workarounds for the Apple variants.
+	 */
+	v = GEM_CONFIG_TXDMA_LIMIT | GEM_CONFIG_RXDMA_LIMIT;
+	if (sc->sc_pci)
+		v |= GEM_CONFIG_BURST_INF;
+	else
+		v |= GEM_CONFIG_BURST_64;
+	if (sc->sc_variant != GEM_SUN_GEM && sc->sc_variant != GEM_SUN_ERI)
+		v |= GEM_CONFIG_RONPAULBIT | GEM_CONFIG_BUG2FIX;
+	bus_space_write_4(t, h, GEM_CONFIG, v);
+
+	/*
 	 * Set the station address.
 	 */
 	bus_space_write_4(t, h, GEM_MAC_ADDR0, 
@@ -910,7 +926,6 @@ gem_rint(struct gem_softc *sc)
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	bus_space_tag_t t = sc->sc_bustag;
 	bus_space_handle_t h = sc->sc_h1;
-	struct ether_header *eh;
 	struct gem_rxsoft *rxs;
 	struct mbuf *m;
 	u_int64_t rxstat;
@@ -971,7 +986,6 @@ gem_rint(struct gem_softc *sc)
 		m->m_data += 2; /* We're already off by two */
 
 		ifp->if_ipackets++;
-		eh = mtod(m, struct ether_header *);
 		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = len;
 
@@ -1436,48 +1450,17 @@ gem_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if ((ifp->if_flags & IFF_RUNNING) &&
-			    ((ifp->if_flags ^ sc->sc_if_flags) &
-			     (IFF_ALLMULTI | IFF_PROMISC)) != 0)
+			if (ifp->if_flags & IFF_RUNNING)
 				gem_setladrf(sc);
-			else {
-				if ((ifp->if_flags & IFF_RUNNING) == 0)
-					gem_init(ifp);
-			}
+			else
+				gem_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				gem_stop(ifp, 1);
 		}
-		sc->sc_if_flags = ifp->if_flags;
-
 #ifdef GEM_DEBUG
 		sc->sc_debug = (ifp->if_flags & IFF_DEBUG) != 0 ? 1 : 0;
 #endif
-		break;
-
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
-			error = EINVAL;
-		} else if (ifp->if_mtu != ifr->ifr_mtu) {
-			ifp->if_mtu = ifr->ifr_mtu;
-		}
-		break;
-
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				gem_setladrf(sc);
-			error = 0;
-		}
 		break;
 
 	case SIOCGIFMEDIA:
@@ -1487,6 +1470,12 @@ gem_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			gem_setladrf(sc);
+		error = 0;
 	}
 
 	splx(s);
@@ -1634,7 +1623,7 @@ void
 gem_start(struct ifnet *ifp)
 {
 	struct gem_softc *sc = ifp->if_softc;
-	struct mbuf *m, *m0;
+	struct mbuf *m;
 	u_int64_t flags;
 	bus_dmamap_t map;
 	u_int32_t cur, frag, i;
@@ -1655,7 +1644,6 @@ gem_start(struct ifnet *ifp)
 
 		cur = frag = sc->sc_tx_prod;
 		map = sc->sc_txd[cur].sd_map;
-		m0 = NULL;
 
 		error = bus_dmamap_load_mbuf(sc->sc_dmatag, map, m,
 		    BUS_DMA_NOWAIT);
@@ -1663,41 +1651,22 @@ gem_start(struct ifnet *ifp)
 			goto drop;
 		if (error != 0) {
 			/* Too many fragments, linearize. */
-			MGETHDR(m0, M_DONTWAIT, MT_DATA);
-			if (m0 == NULL)
+			if (m_defrag(m, M_DONTWAIT))
 				goto drop;
-			if (m->m_pkthdr.len > MHLEN) {
-				MCLGET(m0, M_DONTWAIT);
-				if (!(m0->m_flags & M_EXT)) {
-					m_freem(m0);
-					goto drop;
-				}
-			}
-			m_copydata(m, 0, m->m_pkthdr.len, mtod(m0, caddr_t));
-			m0->m_pkthdr.len = m0->m_len = m->m_pkthdr.len;
-			error = bus_dmamap_load_mbuf(sc->sc_dmatag, map, m0,
+			error = bus_dmamap_load_mbuf(sc->sc_dmatag, map, m,
 			    BUS_DMA_NOWAIT);
-			if (error != 0) {
-				m_freem(m0);
+			if (error != 0)
 				goto drop;
-			}
 		}
 
 		if ((sc->sc_tx_cnt + map->dm_nsegs) > (GEM_NTXDESC - 2)) {
 			bus_dmamap_unload(sc->sc_dmatag, map);
 			ifp->if_flags |= IFF_OACTIVE;
-			if (m0 != NULL)
-				m_free(m0);
 			break;
 		}
 
 		/* We are now committed to transmitting the packet. */
-
 		IFQ_DEQUEUE(&ifp->if_snd, m);
-		if (m0 != NULL) {
-			m_free(m);
-			m = m0;
-		}
 
 #if NBPFILTER > 0
 		/*
