@@ -3002,23 +3002,9 @@ init386(paddr_t first_avail)
 				e = 0xfffff000;
 			}
 
-			/*
-			 * skip first 10 pages
-			 * It is not entirely clear to me what those
-			 * pages are used for. Here's a list of what we know:
-			 * 0 - ?
-			 * 1 - ?
-			 * 2 - ?
-			 * 3 - ?
-			 * 4 - ?
-			 * 5 - ?
-			 * 6 - ?
-			 * 7 - MP_TRAMPOLINE
-			 * 8 - ACPI_TRAMPOLINE
-			 * 9 - free
-			 */
-			if (a < 10 * NBPG)
-				a = 10 * NBPG;
+			/* skip first eight pages */
+			if (a < 8 * NBPG)
+				a = 8 * NBPG;
 
 			/* skip shorter than page regions */
 			if (a >= e || (e - a) < NBPG) {
