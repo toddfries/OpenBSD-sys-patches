@@ -768,6 +768,7 @@ struct rl_list_data {
 	struct rl_txq		rl_txq[RL_TX_QLEN];
 	int			rl_txq_considx;
 	int			rl_txq_prodidx;
+	int			rl_txq_free;
 
 	bus_dmamap_t		rl_tx_list_map;
 	struct rl_desc		*rl_tx_list;

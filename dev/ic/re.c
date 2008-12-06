@@ -160,8 +160,6 @@ int redebug = 0;
 
 static inline void re_set_bufaddr(struct rl_desc *, bus_addr_t);
 
-int	re_encap(struct rl_softc *, struct mbuf *, int *);
-
 int	re_newbuf(struct rl_softc *, int, struct mbuf *);
 int	re_rx_list_init(struct rl_softc *);
 int	re_tx_list_init(struct rl_softc *);
@@ -1015,7 +1013,7 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	for (i = 0; i < RL_TX_QLEN; i++) {
 		error = bus_dmamap_create(sc->sc_dmat,
 		    RL_JUMBO_FRAMELEN,
-		    RL_TX_DESC_CNT(sc) - RL_NTXDESC_RSVD, RL_TDESC_CMD_FRAGLEN,
+		    RL_TX_DESC_CNT(sc), RL_JUMBO_FRAMELEN,
 		    0, 0, &sc->rl_ldata.rl_txq[i].txq_dmamap);
 		if (error) {
 			printf("%s: can't create DMA map for TX\n",
@@ -1276,6 +1274,7 @@ re_tx_list_init(struct rl_softc *sc)
 	    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
 	sc->rl_ldata.rl_txq_prodidx = 0;
 	sc->rl_ldata.rl_txq_considx = 0;
+	sc->rl_ldata.rl_txq_free = RL_TX_QLEN;
 	sc->rl_ldata.rl_tx_free = RL_TX_DESC_CNT(sc);
 	sc->rl_ldata.rl_tx_nextfree = 0;
 
@@ -1486,20 +1485,16 @@ re_rxeof(struct rl_softc *sc)
 int
 re_txeof(struct rl_softc *sc)
 {
-	struct ifnet	*ifp;
+	struct ifnet	*ifp = &sc->sc_arpcom.ac_if;
 	struct rl_txq	*txq;
 	uint32_t	txstat;
 	int		idx, descidx, tx = 0;
 
-	ifp = &sc->sc_arpcom.ac_if;
-
-	for (idx = sc->rl_ldata.rl_txq_considx;; idx = RL_NEXT_TXQ(sc, idx)) {
+	for (idx = sc->rl_ldata.rl_txq_considx;
+	    sc->rl_ldata.rl_txq_free < RL_TX_QLEN;
+	    idx = RL_NEXT_TXQ(sc, idx), sc->rl_ldata.rl_txq_free++) {
 		txq = &sc->rl_ldata.rl_txq[idx];
-
-		if (txq->txq_mbuf == NULL) {
-			KASSERT(idx == sc->rl_ldata.rl_txq_prodidx);
-			break;
-		}
+		KASSERT(txq->txq_mbuf != NULL);
 
 		descidx = txq->txq_descidx;
 		RL_TXDESCSYNC(sc, descidx,
@@ -1530,7 +1525,7 @@ re_txeof(struct rl_softc *sc)
 
 	sc->rl_ldata.rl_txq_considx = idx;
 
-	if (sc->rl_ldata.rl_tx_free > RL_NTXDESC_RSVD)
+	if (sc->rl_ldata.rl_txq_free > RL_NTXDESC_RSVD)
 		ifp->if_flags &= ~IFF_OACTIVE;
 
 	/*
@@ -1540,7 +1535,7 @@ re_txeof(struct rl_softc *sc)
 	 * to restart the channel here to flush them out. This only
 	 * seems to be required with the PCIe devices.
 	 */
-	if (sc->rl_ldata.rl_tx_free < RL_TX_DESC_CNT(sc))
+	if (sc->rl_ldata.rl_txq_free < RL_TX_QLEN)
 		CSR_WRITE_1(sc, sc->rl_txstart, RL_TXSTART_START);
 	else
 		ifp->if_timer = 0;
@@ -1569,8 +1564,7 @@ re_tick(void *xsc)
 		if (mii->mii_media_status & IFM_ACTIVE &&
 		    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
 			sc->rl_flags |= RL_FLAG_LINK;
-			if (!IFQ_IS_EMPTY(&ifp->if_snd))
-				re_start(ifp);
+			re_start(ifp);
 		}
 	}
 	splx(s);
@@ -1655,190 +1649,10 @@ re_intr(void *arg)
 		}
 	}
 
-	if (tx && !IFQ_IS_EMPTY(&ifp->if_snd))
+	if (tx)
 		re_start(ifp);
 
 	return (claimed);
-}
-
-int
-re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
-{
-	bus_dmamap_t	map;
-	int		error, seg, nsegs, uidx, startidx, curidx, lastidx, pad;
-	struct rl_desc	*d;
-	u_int32_t	cmdstat, vlanctl = 0, csum_flags = 0;
-	struct rl_txq	*txq;
-
-	if (sc->rl_ldata.rl_tx_free <= RL_NTXDESC_RSVD)
-		return (EFBIG);
-
-	/*
-	 * Set up checksum offload. Note: checksum offload bits must
-	 * appear in all descriptors of a multi-descriptor transmit
-	 * attempt. This is according to testing done with an 8169
-	 * chip. This is a requirement.
-	 */
-
-	/*
-	 * Set RL_TDESC_CMD_IPCSUM if any checksum offloading
-	 * is requested.  Otherwise, RL_TDESC_CMD_TCPCSUM/
-	 * RL_TDESC_CMD_UDPCSUM does not take affect.
-	 */
-
-	if ((m->m_pkthdr.csum_flags &
-	    (M_IPV4_CSUM_OUT|M_TCPV4_CSUM_OUT|M_UDPV4_CSUM_OUT)) != 0) {
-		if (sc->rl_flags & RL_FLAG_DESCV2) {
-			vlanctl |= RL_TDESC_CMD_IPCSUMV2;
-			if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
-				vlanctl |= RL_TDESC_CMD_TCPCSUMV2;
-			if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
-				vlanctl |= RL_TDESC_CMD_UDPCSUMV2;
-		} else {
-			csum_flags |= RL_TDESC_CMD_IPCSUM;
-			if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
-				csum_flags |= RL_TDESC_CMD_TCPCSUM;
-			if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
-				csum_flags |= RL_TDESC_CMD_UDPCSUM;
-		}
-	}
-
-	txq = &sc->rl_ldata.rl_txq[*idx];
-	map = txq->txq_dmamap;
-	error = bus_dmamap_load_mbuf(sc->sc_dmat, map, m,
-	    BUS_DMA_WRITE|BUS_DMA_NOWAIT);
-	if (error) {
-		/* XXX try to defrag if EFBIG? */
-		printf("%s: can't map mbuf (error %d)\n",
-		    sc->sc_dev.dv_xname, error);
-		return (error);
-	}
-
-	nsegs = map->dm_nsegs;
-	pad = 0;
-	if ((sc->rl_flags & RL_FLAG_DESCV2) == 0 &&
-	    m->m_pkthdr.len <= RL_IP4CSUMTX_PADLEN &&
-	    (csum_flags & RL_TDESC_CMD_IPCSUM) != 0) {
-		pad = 1;
-		nsegs++;
-	}
-
-	if (nsegs > sc->rl_ldata.rl_tx_free - RL_NTXDESC_RSVD) {
-		error = EFBIG;
-		goto fail_unload;
-	}
-
-	/*
-	 * Make sure that the caches are synchronized before we
-	 * ask the chip to start DMA for the packet data.
-	 */
-	bus_dmamap_sync(sc->sc_dmat, map, 0, map->dm_mapsize,
-		BUS_DMASYNC_PREWRITE);
-
-	/*
-	 * Set up hardware VLAN tagging. Note: vlan tag info must
-	 * appear in all descriptors of a multi-descriptor
-	 * transmission attempt.
-	 */
-#if NVLAN > 0
-	if (m->m_flags & M_VLANTAG)
-		vlanctl |= swap16(m->m_pkthdr.ether_vtag) |
-		    RL_TDESC_VLANCTL_TAG;
-#endif
-
-	/*
-	 * Map the segment array into descriptors. Note that we set the
-	 * start-of-frame and end-of-frame markers for either TX or RX, but
-	 * they really only have meaning in the TX case. (In the RX case,
-	 * it's the chip that tells us where packets begin and end.)
-	 * We also keep track of the end of the ring and set the
-	 * end-of-ring bits as needed, and we set the ownership bits
-	 * in all except the very first descriptor. (The caller will
-	 * set this descriptor later when it start transmission or
-	 * reception.)
-	 */
-	curidx = startidx = sc->rl_ldata.rl_tx_nextfree;
-	lastidx = -1;
-	for (seg = 0; seg < map->dm_nsegs;
-	    seg++, curidx = RL_NEXT_TX_DESC(sc, curidx)) {
-		d = &sc->rl_ldata.rl_tx_list[curidx];
-		RL_TXDESCSYNC(sc, curidx,
-		    BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
-		cmdstat = letoh32(d->rl_cmdstat);
-		RL_TXDESCSYNC(sc, curidx, BUS_DMASYNC_PREREAD);
-		if (cmdstat & RL_TDESC_STAT_OWN) {
-			printf("%s: tried to map busy TX descriptor\n",
-			    sc->sc_dev.dv_xname);
-			for (; seg > 0; seg --) {
-				uidx = (curidx + RL_TX_DESC_CNT(sc) - seg) %
-				    RL_TX_DESC_CNT(sc);
-				sc->rl_ldata.rl_tx_list[uidx].rl_cmdstat = 0;
-				RL_TXDESCSYNC(sc, uidx,
-				    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
-			}
-			error = ENOBUFS;
-			goto fail_unload;
-		}
-
-		d->rl_vlanctl = htole32(vlanctl);
-		re_set_bufaddr(d, map->dm_segs[seg].ds_addr);
-		cmdstat = csum_flags | map->dm_segs[seg].ds_len;
-		if (seg == 0)
-			cmdstat |= RL_TDESC_CMD_SOF;
-		else
-			cmdstat |= RL_TDESC_CMD_OWN;
-		if (curidx == (RL_TX_DESC_CNT(sc) - 1))
-			cmdstat |= RL_TDESC_CMD_EOR;
-		if (seg == nsegs - 1) {
-			cmdstat |= RL_TDESC_CMD_EOF;
-			lastidx = curidx;
-		}
-		d->rl_cmdstat = htole32(cmdstat);
-		RL_TXDESCSYNC(sc, curidx,
-		    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
-	}
-	if (pad) {
-		bus_addr_t paddaddr;
-
-		d = &sc->rl_ldata.rl_tx_list[curidx];
-		d->rl_vlanctl = htole32(vlanctl);
-		paddaddr = RL_TXPADDADDR(sc);
-		re_set_bufaddr(d, paddaddr);
-		cmdstat = csum_flags |
-		    RL_TDESC_CMD_OWN | RL_TDESC_CMD_EOF |
-		    (RL_IP4CSUMTX_PADLEN + 1 - m->m_pkthdr.len);
-		if (curidx == (RL_TX_DESC_CNT(sc) - 1))
-			cmdstat |= RL_TDESC_CMD_EOR;
-		d->rl_cmdstat = htole32(cmdstat);
-		RL_TXDESCSYNC(sc, curidx,
-		    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
-		lastidx = curidx;
-		curidx = RL_NEXT_TX_DESC(sc, curidx);
-	}
-	KASSERT(lastidx != -1);
-
-	/* Transfer ownership of packet to the chip. */
-
-	sc->rl_ldata.rl_tx_list[startidx].rl_cmdstat |=
-	    htole32(RL_TDESC_CMD_OWN);
-	RL_TXDESCSYNC(sc, startidx, BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
-
-	/* update info of TX queue and descriptors */
-	txq->txq_mbuf = m;
-	txq->txq_descidx = lastidx;
-	txq->txq_nsegs = nsegs;
-
-	sc->rl_ldata.rl_tx_free -= nsegs;
-	sc->rl_ldata.rl_tx_nextfree = curidx;
-
-	*idx = RL_NEXT_TXQ(sc, *idx);
-
-	return (0);
-
-fail_unload:
-	bus_dmamap_unload(sc->sc_dmat, map);
-
-	return (error);
 }
 
 /*
@@ -1848,46 +1662,201 @@ fail_unload:
 void
 re_start(struct ifnet *ifp)
 {
-	struct rl_softc	*sc;
-	int		idx, queued = 0;
+	struct rl_softc	*sc = ifp->if_softc;
+	struct mbuf *m;
+	bus_dmamap_t map;
+	struct rl_txq *txq;
+	struct rl_desc *d;
+	u_int32_t cmdstat, csum_flags = 0, vlanctl = 0;
+	int error, idx, nsegs, ofree, pad, seg;
+	int startdesc, curdesc, lastdesc;
 
-	sc = ifp->if_softc;
-
-	if (ifp->if_flags & IFF_OACTIVE)
+	if ((ifp->if_flags & (IFF_RUNNING | IFF_OACTIVE)) != IFF_RUNNING)
 		return;
 	if ((sc->rl_flags & RL_FLAG_LINK) == 0)
 		return;
+	if (IFQ_IS_EMPTY(&ifp->if_snd))
+		return;
 
-	idx = sc->rl_ldata.rl_txq_prodidx;
-	for (;;) {
-		struct mbuf *m;
-		int error;
+	ofree = sc->rl_ldata.rl_txq_free;
+
+	for (idx = sc->rl_ldata.rl_txq_prodidx;; idx = RL_NEXT_TXQ(sc, idx)) {
+		if (sc->rl_ldata.rl_txq_free == 0 ||
+		    sc->rl_ldata.rl_tx_free == 0) {
+			/* no more free slots left */
+			ifp->if_flags |= IFF_OACTIVE;
+			break;
+		}
 
 		IFQ_POLL(&ifp->if_snd, m);
 		if (m == NULL)
 			break;
 
-		if (sc->rl_ldata.rl_txq[idx].txq_mbuf != NULL) {
-			KASSERT(idx == sc->rl_ldata.rl_txq_considx);
+		/*
+		 * Set up checksum offload. Note: checksum offload bits must
+		 * appear in all descriptors of a multi-descriptor transmit
+		 * attempt. This is according to testing done with an 8169
+		 * chip. This is a requirement.
+		 */
+
+		/*
+		 * Set RL_TDESC_CMD_IPCSUM if any checksum offloading
+		 * is requested.  Otherwise, RL_TDESC_CMD_TCPCSUM/
+		 * RL_TDESC_CMD_UDPCSUM does not take affect.
+		 */
+
+		if ((m->m_pkthdr.csum_flags &
+		    (M_IPV4_CSUM_OUT|M_TCPV4_CSUM_OUT|M_UDPV4_CSUM_OUT)) != 0) {
+			if (sc->rl_flags & RL_FLAG_DESCV2) {
+				vlanctl |= RL_TDESC_CMD_IPCSUMV2;
+				if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+					vlanctl |= RL_TDESC_CMD_TCPCSUMV2;
+				if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+					vlanctl |= RL_TDESC_CMD_UDPCSUMV2;
+			} else {
+				csum_flags |= RL_TDESC_CMD_IPCSUM;
+				if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+					csum_flags |= RL_TDESC_CMD_TCPCSUM;
+				if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+					csum_flags |= RL_TDESC_CMD_UDPCSUM;
+			}
+		}
+
+		txq = &sc->rl_ldata.rl_txq[idx];
+		map = txq->txq_dmamap;
+
+		error = bus_dmamap_load_mbuf(sc->sc_dmat, map, m,
+		    BUS_DMA_WRITE|BUS_DMA_NOWAIT);
+		if (error != 0 && error != EFBIG)
+			goto drop;
+		if (error != 0) {
+			if (m_defrag(m, M_DONTWAIT))
+				goto drop;
+			error = bus_dmamap_load_mbuf(sc->sc_dmat, map, m,
+			    BUS_DMA_WRITE|BUS_DMA_NOWAIT);
+			if (error != 0)
+				goto drop;
+		}
+
+		nsegs = map->dm_nsegs;
+		pad = 0;
+		if ((sc->rl_flags & RL_FLAG_DESCV2) == 0 &&
+		    m->m_pkthdr.len <= RL_IP4CSUMTX_PADLEN &&
+		    (csum_flags & RL_TDESC_CMD_IPCSUM) != 0) { 
+			pad = 1;
+			nsegs++;
+		} 
+
+		if (nsegs > sc->rl_ldata.rl_tx_free) {
+			/*
+			 * Not enough free descriptors to transmit this packet.
+			 */
+			bus_dmamap_unload(sc->sc_dmat, map);
 			ifp->if_flags |= IFF_OACTIVE;
 			break;
 		}
 
-		error = re_encap(sc, m, &idx);
-		if (error == EFBIG &&
-		    sc->rl_ldata.rl_tx_free == RL_TX_DESC_CNT(sc)) {
-			IFQ_DEQUEUE(&ifp->if_snd, m);
-			m_freem(m);
-			ifp->if_oerrors++;
-			continue;
-		}
-		if (error) {
-			ifp->if_flags |= IFF_OACTIVE;
-			break;
-		}
-
+		/* We are now committed to transmitting the packet. */
 		IFQ_DEQUEUE(&ifp->if_snd, m);
-		queued++;
+
+		/*
+		 * Make sure that the caches are synchronized before we
+		 * ask the chip to start DMA for the packet data.
+		 */
+		bus_dmamap_sync(sc->sc_dmat, map, 0, map->dm_mapsize,
+		    BUS_DMASYNC_PREWRITE);
+
+		/*
+		 * Set up hardware VLAN tagging. Note: vlan tag info must
+		 * appear in all descriptors of a multi-descriptor
+		 * transmission attempt.
+		 */
+#if NVLAN > 0
+		if (m->m_flags & M_VLANTAG)
+			vlanctl |= swap16(m->m_pkthdr.ether_vtag) |
+			    RL_TDESC_VLANCTL_TAG;
+#endif
+
+		/*
+		 * Map the segment array into descriptors.
+		 * Note that we set the start-of-frame and
+		 * end-of-frame markers for either TX or RX,
+		 * but they really only have meaning in the TX case.
+		 * (In the RX case, it's the chip that tells us
+		 *  where packets begin and end.)
+		 * We also keep track of the end of the ring
+		 * and set the end-of-ring bits as needed,
+		 * and we set the ownership bits in all except
+		 * the very first descriptor. (The caller will
+		 * set this descriptor later when it start
+		 * transmission or reception.)
+		 */
+		curdesc = startdesc = sc->rl_ldata.rl_tx_nextfree;
+		lastdesc = -1;
+		for (seg = 0; seg < map->dm_nsegs;
+		    seg++, curdesc = RL_NEXT_TX_DESC(sc, curdesc)) {
+			d = &sc->rl_ldata.rl_tx_list[curdesc];
+			RL_TXDESCSYNC(sc, curdesc,
+			    BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
+			cmdstat = letoh32(d->rl_cmdstat);
+			RL_TXDESCSYNC(sc, curdesc, BUS_DMASYNC_PREREAD);
+			if (cmdstat & RL_TDESC_STAT_OWN) {
+				printf("%s: tried to map busy TX descriptor\n",
+				    sc->sc_dev.dv_xname);
+			}
+
+			d->rl_vlanctl = htole32(vlanctl);
+			re_set_bufaddr(d, map->dm_segs[seg].ds_addr);
+			cmdstat = csum_flags | map->dm_segs[seg].ds_len;
+			if (seg == 0)
+				cmdstat |= RL_TDESC_CMD_SOF;
+			else
+				cmdstat |= RL_TDESC_CMD_OWN;
+			if (curdesc == (RL_TX_DESC_CNT(sc) - 1))
+				cmdstat |= RL_TDESC_CMD_EOR;
+			if (seg == nsegs - 1) {
+				cmdstat |= RL_TDESC_CMD_EOF;
+				lastdesc = curdesc;
+			}
+			d->rl_cmdstat = htole32(cmdstat);
+			RL_TXDESCSYNC(sc, curdesc,
+			    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
+		}
+		if (pad) {
+			bus_addr_t paddaddr;
+
+			d = &sc->rl_ldata.rl_tx_list[curdesc];
+			d->rl_vlanctl = htole32(vlanctl);
+			paddaddr = RL_TXPADDADDR(sc);
+			re_set_bufaddr(d, paddaddr);
+			cmdstat = csum_flags |
+			    RL_TDESC_CMD_OWN | RL_TDESC_CMD_EOF |
+			    (RL_IP4CSUMTX_PADLEN + 1 - m->m_pkthdr.len);
+			if (curdesc == (RL_TX_DESC_CNT(sc) - 1))
+				cmdstat |= RL_TDESC_CMD_EOR;
+			d->rl_cmdstat = htole32(cmdstat);
+			RL_TXDESCSYNC(sc, curdesc,
+			    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
+			lastdesc = curdesc;
+			curdesc = RL_NEXT_TX_DESC(sc, curdesc);
+		}
+		KASSERT(lastdesc != -1);
+
+		/* Transfer ownership of packet to the chip. */
+
+		sc->rl_ldata.rl_tx_list[startdesc].rl_cmdstat |=
+		    htole32(RL_TDESC_CMD_OWN);
+		RL_TXDESCSYNC(sc, startdesc,
+		    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
+
+		/* update info of TX queue and descriptors */
+		txq->txq_mbuf = m;
+		txq->txq_descidx = lastdesc;
+		txq->txq_nsegs = nsegs;
+
+		sc->rl_ldata.rl_txq_free--;
+		sc->rl_ldata.rl_tx_free -= nsegs;
+		sc->rl_ldata.rl_tx_nextfree = curdesc;
 
 #if NBPFILTER > 0
 		/*
@@ -1899,17 +1868,29 @@ re_start(struct ifnet *ifp)
 #endif
 	}
 
-	if (queued == 0)
-		return;
+	if (sc->rl_ldata.rl_txq_free < ofree) {
+		/*
+		 * TX packets are enqueued.
+		 */
+		sc->rl_ldata.rl_txq_prodidx = idx;
 
-	sc->rl_ldata.rl_txq_prodidx = idx;
+		/*
+		 * Start the transmitter to poll.
+		 */
+		CSR_WRITE_1(sc, sc->rl_txstart, RL_TXSTART_START);
 
-	CSR_WRITE_1(sc, sc->rl_txstart, RL_TXSTART_START);
+		/*
+		 * Set a timeout in case the chip goes out to lunch.
+		 */
+		ifp->if_timer = 5;
+	}
 
-	/*
-	 * Set a timeout in case the chip goes out to lunch.
-	 */
-	ifp->if_timer = 5;
+	return;
+
+ drop:
+	IFQ_DEQUEUE(&ifp->if_snd, m);
+	m_freem(m);
+	ifp->if_oerrors++;
 }
 
 int
