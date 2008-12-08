@@ -1,4 +1,4 @@
-/*	$OpenBSD: isa_machdep.c,v 1.15 2008/12/03 15:46:06 oga Exp $	*/
+/*	$OpenBSD: isa_machdep.c,v 1.17 2008/12/06 19:59:38 tedu Exp $	*/
 /*	$NetBSD: isa_machdep.c,v 1.22 1997/06/12 23:57:32 thorpej Exp $	*/
 
 #define ISA_DMA_STATS
