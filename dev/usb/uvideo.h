@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.h,v 1.40 2008/12/08 18:33:24 mglocker Exp $ */
+/*	$OpenBSD: uvideo.h,v 1.41 2008/12/08 22:02:39 deraadt Exp $ */
 
 /*
  * Copyright (c) 2007 Robert Nagy <robert@openbsd.org>
