@@ -1,4 +1,4 @@
-/*	$OpenBSD: snapper.c,v 1.31 2008/08/25 03:16:22 todd Exp $	*/
+/*	$OpenBSD: snapper.c,v 1.34 2008/11/06 10:01:50 todd Exp $	*/
 /*	$NetBSD: snapper.c,v 1.1 2003/12/27 02:19:34 grant Exp $	*/
 
 /*-
@@ -67,6 +67,7 @@ void snapper_set_volume(struct snapper_softc *, int, int);
 void snapper_set_bass(struct snapper_softc *, int);
 void snapper_set_treble(struct snapper_softc *, int);
 void snapper_set_input(struct snapper_softc *, int);
+void snapper_get_default_params(void *, int, struct audio_params *);
 
 int tas3004_write(struct snapper_softc *, u_int, const void *);
 int tas3004_init(struct snapper_softc *);
@@ -105,7 +106,7 @@ struct audio_hw_if snapper_hw_if = {
 	i2s_get_props,
 	i2s_trigger_output,
 	i2s_trigger_input,
-	NULL
+	snapper_get_default_params
 };
 
 struct audio_device snapper_device = {
@@ -561,8 +562,9 @@ snapper_set_bass(struct snapper_softc *sc, int value)
 void
 snapper_set_input(struct snapper_softc *sc, int mask)
 {
-	int val = 0;
-	switch(mask) {
+	uint8_t val = 0;
+
+	switch (mask) {
 	case    1 << 0: /* microphone */
 		val = DEQ_ACR_ADM | DEQ_ACR_LRB | DEQ_ACR_INP_B;
 		break;
@@ -576,7 +578,7 @@ snapper_set_input(struct snapper_softc *sc, int mask)
 const struct tas3004_reg tas3004_initdata = {
 	{ DEQ_MCR1_SC_64 | DEQ_MCR1_SM_I2S | DEQ_MCR1_W_20 },	/* MCR1 */
 	{ 1, 0, 0, 0, 0, 0 },					/* DRC */
-	{ 0, 0, 0, 0, 0, 0 },					/* VOLUME */
+	{ 0x00, 0xd7, 0x66, 0x00, 0xd7, 0x66 },			/* VOLUME */
 	{ 0x72 },						/* TREBLE */
 	{ 0x72 },						/* BASS */
 	{ 0x10, 0x00, 0x00, 0, 0, 0, 0, 0, 0 },			/* MIXER_L */
@@ -599,7 +601,7 @@ const struct tas3004_reg tas3004_initdata = {
 	{ 0x10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },	/* BIQUAD */
 	{ 0, 0, 0 },						/* LLB_GAIN */
 	{ 0, 0, 0 },						/* RLB_GAIN */
-	{ 0 },							/* ACR */
+	{ DEQ_ACR_ADM | DEQ_ACR_LRB | DEQ_ACR_INP_B },		/* ACR */
 	{ 0 }							/* MCR2 */
 };
 
@@ -683,6 +685,7 @@ tas3004_init(struct snapper_softc *sc)
 	DEQ_WRITE(sc, DEQ_RB3, tas3004_initdata.RB3);
 	DEQ_WRITE(sc, DEQ_RB4, tas3004_initdata.RB4);
 	DEQ_WRITE(sc, DEQ_RB5, tas3004_initdata.RB5);
+	DEQ_WRITE(sc, DEQ_RB6, tas3004_initdata.RB6);
 	DEQ_WRITE(sc, DEQ_MCR1, tas3004_initdata.MCR1);
 	DEQ_WRITE(sc, DEQ_MCR2, tas3004_initdata.MCR2);
 	DEQ_WRITE(sc, DEQ_DRC, tas3004_initdata.DRC);
@@ -722,7 +725,13 @@ snapper_init(struct snapper_softc *sc)
 	if (tas3004_init(sc))
 		return;
 
-	snapper_set_volume(sc, 80, 80);
+	snapper_set_volume(sc, 190, 190);
+	snapper_set_treble(sc, 128); /* 0 dB */
+	snapper_set_bass(sc, 128); /* 0 dB */
+
+	/* Mic in, reflects tas3004_initdata.ACR */
+	sc->sc_record_source = 1 << 1;
+	snapper_set_input(sc, sc->sc_record_source);
 }
 
 int
@@ -730,4 +739,10 @@ snapper_getdev(void *h, struct audio_device *retp)
 {
 	*retp = snapper_device;
 	return (0);
+}
+
+void
+snapper_get_default_params(void *addr, int mode, struct audio_params *params)
+{
+	i2s_get_default_params(params);
 }

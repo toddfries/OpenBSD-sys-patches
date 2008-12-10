@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jmereg.h,v 1.1 2008/09/26 10:35:15 jsg Exp $	*/
+/*	$OpenBSD: if_jmereg.h,v 1.4 2008/12/01 09:12:59 jsg Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -336,6 +336,14 @@
 #define	JME_GHC			0x0054
 #define	GHC_LOOPBACK		0x80000000
 #define	GHC_RESET		0x40000000
+/* Tx offload engine clock source */
+#define GHC_TCPCK_10_100	0x00800000
+#define GHC_TCPCK_1000		0x00400000
+#define GHC_TCPCK_MASK		0x00c00000
+/* Tx MAC clock source */
+#define GHC_TXCK_10_100		0x00200000
+#define GHC_TXCK_1000		0x00100000
+#define GHC_TXCK_MASK		0x00300000
 #define	GHC_FULL_DUPLEX		0x00000040
 #define	GHC_SPEED_UNKNOWN	0x00000000
 #define	GHC_SPEED_10		0x00000010
@@ -555,8 +563,10 @@
 #define	GPREG0_PHY_ADDR_SHIFT	0
 #define	GPREG0_PHY_ADDR		1
 
-/* General purpose register 1. reserved for future use. */
+/* General purpose register 1. */
 #define	JME_GPREG1		0x080C
+#define GPREG1_HALF_PATCH	0x00000020 /* 250A2 only, for 10/100 mode */
+#define GPREG1_RSS_PATCH	0x00000040 /* 250A2 only, for 10/100 mode */
 
 /* MSIX entry number of interrupt source. */
 #define	JME_MSINUM_BASE		0x0810
@@ -689,7 +699,7 @@
 #define	PCCRX_COAL_TO_MAX	65535
 
 #define	PCCRX_COAL_PKT_MIN	1
-#define	PCCRX_COAL_PKT_DEFAULT	2
+#define	PCCRX_COAL_PKT_DEFAULT	64
 #define	PCCRX_COAL_PKT_MAX	255
 
 /* Packet completion coalescing control of Tx queue. */
@@ -708,11 +718,11 @@
 #define	PCCTX_COAL_TXQ0		0x00000001
 
 #define	PCCTX_COAL_TO_MIN	1
-#define	PCCTX_COAL_TO_DEFAULT	100
+#define	PCCTX_COAL_TO_DEFAULT	65535
 #define	PCCTX_COAL_TO_MAX	65535
 
 #define	PCCTX_COAL_PKT_MIN	1
-#define	PCCTX_COAL_PKT_DEFAULT	8
+#define	PCCTX_COAL_PKT_DEFAULT	64
 #define	PCCTX_COAL_PKT_MAX	255
 
 /* Chip mode and FPGA version. */
@@ -722,6 +732,8 @@
 #define	CHIPMODE_NOT_FPGA	0
 #define	CHIPMODE_REV_MASK	0x0000FF00
 #define	CHIPMODE_REV_SHIFT	8
+#define	CHIPMODE_REVFM_MASK	0x00000F00
+#define	CHIPMODE_REVFM_SHIFT	8
 #define	CHIPMODE_MODE_48P	0x0000000C
 #define	CHIPMODE_MODE_64P	0x00000004
 #define	CHIPMODE_MODE_128P_MAC	0x00000003

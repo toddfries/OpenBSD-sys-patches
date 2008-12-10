@@ -1,4 +1,4 @@
-/*	$OpenBSD: gpiovar.h,v 1.3 2006/01/14 12:33:49 grange Exp $	*/
+/*	$OpenBSD: gpiovar.h,v 1.5 2008/11/26 14:51:20 mbalmer Exp $	*/
 
 /*
  * Copyright (c) 2004, 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -60,12 +60,24 @@ struct gpio_attach_args {
 	void *			ga_gpio;
 	int			ga_offset;
 	u_int32_t		ga_mask;
+	char			*ga_dvname;
 };
 
 /* GPIO pin map */
 struct gpio_pinmap {
 	int *	pm_map;			/* pin map */
 	int	pm_size;		/* map size */
+};
+
+struct gpio_dev {
+	struct device		*sc_dev;	/* the gpio device */
+	LIST_ENTRY(gpio_dev)	 sc_next;
+};
+
+struct gpio_name {
+	char			gp_name[GPIOPINMAXNAME];
+	int			gp_pin;
+	LIST_ENTRY(gpio_name)	gp_next;
 };
 
 int	gpio_pin_map(void *, int, u_int32_t, struct gpio_pinmap *);

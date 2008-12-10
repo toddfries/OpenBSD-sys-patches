@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.13 2008/06/26 05:42:09 ray Exp $	*/
+/*	$OpenBSD: intr.h,v 1.15 2008/12/06 19:59:38 tedu Exp $	*/
 /*	$NetBSD: intr.h,v 1.2 2003/05/04 22:01:56 fvdl Exp $	*/
 
 /*-

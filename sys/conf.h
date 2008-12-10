@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.90 2008/06/14 21:31:46 mbalmer Exp $	*/
+/*	$OpenBSD: conf.h,v 1.92 2008/12/03 23:39:32 dlg Exp $	*/
 /*	$NetBSD: conf.h,v 1.33 1996/05/03 20:03:32 christos Exp $	*/
 
 /*-
@@ -305,6 +305,14 @@ extern struct cdevsw cdevsw[];
 	0, dev_init(c,n,poll), (dev_type_mmap((*))) enodev, \
 	0, D_KQFILTER, dev_init(c,n,kqfilter) }
 
+/* open, close, ioctl, poll, kqfilter -- XXX should be generic device */
+#define cdev_vscsi_init(c,n) { \
+	dev_init(c,n,open), dev_init(c,n,close), \
+	(dev_type_read((*))) enodev, (dev_type_write((*))) enodev, \
+	dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
+	0, dev_init(c,n,poll), (dev_type_mmap((*))) enodev, \
+	0, D_KQFILTER, dev_init(c,n,kqfilter) }
+
 /* open, close, read, write, ioctl, poll, kqfilter, cloning -- XXX should be generic device */
 #define cdev_bpf_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
@@ -513,9 +521,9 @@ void	randomattach(void);
 
 /* open, close, read, ioctl, poll, mmap, nokqfilter */
 #define      cdev_drm_init(c,n)        { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
+	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
 	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
+	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
 	dev_init(c,n,mmap), 0, D_CLONE }
 
 /* open, close, ioctl */
@@ -666,6 +674,7 @@ cdev_decl(crypto);
 cdev_decl(systrace);
 
 cdev_decl(bio);
+cdev_decl(vscsi);
 cdev_decl(bthub);
 
 cdev_decl(gpr);

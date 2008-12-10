@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.76 2008/10/14 18:27:29 guenther Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.80 2008/11/06 21:47:50 deraadt Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -177,7 +177,6 @@ exit1(struct proc *p, int rv, int flags)
 
 	/*
 	 * Close open files and release open-file table.
-	 * This may block!
 	 */
 	fdfree(p);
 
@@ -388,17 +387,13 @@ reaper(void)
 
 	for (;;) {
 		mtx_enter(&deadproc_mutex);
-		p = LIST_FIRST(&deadproc);
-		if (p == NULL) {
-			/* No work for us; go to sleep until someone exits. */
-			mtx_leave(&deadproc_mutex);
-			(void) tsleep(&deadproc, PVM, "reaper", 0);
-			continue;
-		}
+		while ((p = LIST_FIRST(&deadproc)) == NULL)
+			msleep(&deadproc, &deadproc_mutex, PVM, "reaper", 0);
 
 		/* Remove us from the deadproc list. */
 		LIST_REMOVE(p, p_hash);
 		mtx_leave(&deadproc_mutex);
+
 		KERNEL_PROC_LOCK(curproc);
 
 		/*

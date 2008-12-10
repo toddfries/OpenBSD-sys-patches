@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.1 2005/04/01 10:40:48 mickey Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.3 2008/12/06 19:59:38 tedu Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff

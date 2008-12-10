@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.221 2008/09/29 22:43:58 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.225 2008/12/01 23:48:47 todd Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -222,6 +222,7 @@ cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 cdce*	at uhub?		# CDC Ethernet
 udav*	at uhub?		# Davicom DM9601 based Ethernet
+mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 ural*	at uhub?		# Ralink RT2500USB
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
@@ -246,17 +247,16 @@ uvideo* at uhub?
 video*  at uvideo?
 
 # Bluetooth controllers
-#ubt*	at uhub?		# USB Bluetooth
+ubt*	at uhub?		# USB Bluetooth
+bthub*	at ubt?
 
-# Bluetooth bus support
-#bthub*	at ubt?
-
-# Bluetooth HID support
-#bthidev* at bthub?
-#btkbd*	at bthidev?
-#btms*	at bthidev?
-#wskbd*	at btkbd? mux 1
-#wsmouse* at btms? mux 0
+bthidev* at bthub?		# Bluetooth HID support
+btkbd*	at bthidev?
+btms*	at bthidev?
+wskbd*	at btkbd? mux 1
+wsmouse* at btms? mux 0
+btsco*	at bthub?		# Bluetooth audio support
+audio*	at btsco?
 
 # CardBus bus support
 cardbus* at cardslot?

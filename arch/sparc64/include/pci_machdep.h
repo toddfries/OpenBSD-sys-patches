@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.19 2008/01/19 11:13:43 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.21 2008/12/06 19:59:38 tedu Exp $	*/
 /* $NetBSD: pci_machdep.h,v 1.7 2001/07/20 00:07:14 eeh Exp $ */
 
 /*

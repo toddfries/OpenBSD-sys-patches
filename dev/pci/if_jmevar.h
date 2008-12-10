@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jmevar.h,v 1.2 2008/10/20 19:36:54 brad Exp $	*/
+/*	$OpenBSD: if_jmevar.h,v 1.4 2008/12/01 09:12:59 jsg Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -175,6 +175,7 @@ struct jme_softc {
 	bus_dma_tag_t		sc_dmat;
 	pci_chipset_tag_t	jme_pct;
 	pcitag_t		jme_pcitag;
+	uint8_t			jme_revfm;
 
 	int			jme_irq_rid;
 	struct resource		*jme_irq_res;
@@ -192,7 +193,10 @@ struct jme_softc {
 #define	JME_CAP_PMCAP		0x0004
 #define	JME_CAP_FASTETH		0x0008
 #define	JME_CAP_JUMBO		0x0010
-#define JME_CAP_EXTFIFO		0x0020
+
+	uint32_t		jme_workaround;
+#define JME_WA_CRCERRORS	0x0001
+#define JME_WA_PACKETLOSS	0x0002
 
 	uint32_t		jme_flags;
 #define	JME_FLAG_MSI		0x0001

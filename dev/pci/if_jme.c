@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jme.c,v 1.11 2008/10/21 19:41:13 brad Exp $	*/
+/*	$OpenBSD: if_jme.c,v 1.14 2008/12/01 09:12:59 jsg Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -549,6 +549,12 @@ jme_attach(struct device *parent, struct device *self, void *aux)
 			    CHIPMODE_FPGA_REV_SHIFT);
 		}
 	}
+
+	sc->jme_revfm = (reg & CHIPMODE_REVFM_MASK) >> CHIPMODE_REVFM_SHIFT;
+
+	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_JMICRON_JMC250 &&
+	    PCI_REVISION(pa->pa_class) == JME_REV_JMC250_A2)
+		sc->jme_workaround |= JME_WA_CRCERRORS | JME_WA_PACKETLOSS;
 
 	/* Reset the ethernet controller. */
 	jme_reset(sc);
@@ -1238,7 +1244,7 @@ jme_start(struct ifnet *ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf != NULL)
-			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 	}
 
@@ -1356,8 +1362,8 @@ void
 jme_mac_config(struct jme_softc *sc)
 {
 	struct mii_data *mii;
-	uint32_t ghc, rxmac, txmac, txpause;
-	int phyconf = JMPHY_CONF_DEFFIFO;
+	uint32_t ghc, rxmac, txmac, txpause, gp1;
+	int phyconf = JMPHY_CONF_DEFFIFO, hdx = 0;
 
 	mii = &sc->sc_miibus;
 
@@ -1394,14 +1400,26 @@ jme_mac_config(struct jme_softc *sc)
 		    TXTRHD_RT_PERIOD_ENB | TXTRHD_RT_LIMIT_ENB);
 	}
 
-	/* Reprogram Tx/Rx MACs with resolved speed/duplex. */
+	/*
+	 * Reprogram Tx/Rx MACs with resolved speed/duplex.
+	 */
+	gp1 = CSR_READ_4(sc, JME_GPREG1);
+	gp1 &= ~GPREG1_HALF_PATCH;
+
+	if ((IFM_OPTIONS(mii->mii_media_active) & IFM_FDX) == 0)
+		hdx = 1;
+
 	switch (IFM_SUBTYPE(mii->mii_media_active)) {
 	case IFM_10_T:
 		ghc |= GHC_SPEED_10;
+		if (hdx)
+			gp1 |= GPREG1_HALF_PATCH;
 		break;
 
 	case IFM_100_TX:
 		ghc |= GHC_SPEED_100;
+		if (hdx)
+			gp1 |= GPREG1_HALF_PATCH;
 
 		/*
 		 * Use extended FIFO depth to workaround CRC errors
@@ -1415,22 +1433,33 @@ jme_mac_config(struct jme_softc *sc)
 			break;
 
 		ghc |= GHC_SPEED_1000;
-		if ((IFM_OPTIONS(mii->mii_media_active) & IFM_FDX) == 0)
+		if (hdx)
 			txmac |= TXMAC_CARRIER_EXT | TXMAC_FRAME_BURST;
 		break;
 
 	default:
 		break;
 	}
+
+	if (sc->jme_revfm >= 2) {
+		/* set clock sources for tx mac and offload engine */
+		if (IFM_SUBTYPE(mii->mii_media_active) == IFM_1000_T)
+			ghc |= GHC_TCPCK_1000 | GHC_TXCK_1000;
+		else
+			ghc |= GHC_TCPCK_10_100 | GHC_TXCK_10_100;
+	}
+
 	CSR_WRITE_4(sc, JME_GHC, ghc);
 	CSR_WRITE_4(sc, JME_RXMAC, rxmac);
 	CSR_WRITE_4(sc, JME_TXMAC, txmac);
 	CSR_WRITE_4(sc, JME_TXPFC, txpause);
 
-	if (sc->jme_caps & JME_CAP_EXTFIFO) {
+	if (sc->jme_workaround & JME_WA_CRCERRORS) {
 		jme_miibus_writereg(&sc->sc_dev, sc->jme_phyaddr,
 				    JMPHY_CONF, phyconf);
 	}
+	if (sc->jme_workaround & JME_WA_PACKETLOSS)
+		CSR_WRITE_4(sc, JME_GPREG1, gp1);
 }
 
 int
@@ -1697,7 +1726,8 @@ jme_rxpkt(struct jme_softc *sc)
 
 #if NBPFILTER > 0
 			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+				bpf_mtap_ether(ifp->if_bpf, m,
+				    BPF_DIRECTION_IN);
 #endif
 
 			ifp->if_ipackets++;

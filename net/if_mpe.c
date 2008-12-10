@@ -1,4 +1,4 @@
-/* $OpenBSD: if_mpe.c,v 1.11 2008/10/18 12:30:40 michele Exp $ */
+/* $OpenBSD: if_mpe.c,v 1.14 2008/11/06 20:53:10 michele Exp $ */
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@spootnik.org>
@@ -38,10 +38,10 @@
 #endif
 
 #ifdef INET6
+#include <netinet/ip6.h>
 #ifndef INET
 #include <netinet/in.h>
 #endif
-#include <netinet6/nd6.h>
 #endif /* INET6 */
 
 #include "bpfilter.h"
@@ -68,6 +68,9 @@ int	mpe_clone_destroy(struct ifnet *);
 LIST_HEAD(, mpe_softc)	mpeif_list;
 struct if_clone	mpe_cloner =
     IF_CLONE_INITIALIZER("mpe", mpe_clone_create, mpe_clone_destroy);
+
+extern int	mpls_mapttl_ip;
+extern int	mpls_mapttl_ip6;
 
 void
 mpeattach(int nmpe)
@@ -165,7 +168,7 @@ mpestart(struct ifnet *ifp)
 			continue;
 		}
 		m->m_pkthdr.rcvif = ifp;
-		mpls_input(m);
+		mpls_output(m);
 	}
 }
 
@@ -277,21 +280,43 @@ mpeioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 void
 mpe_input(struct mbuf *m, struct ifnet *ifp, struct sockaddr_mpls *smpls,
-    u_int32_t ttl)
+    u_int8_t ttl)
 {
-	int		 s;
+	struct ip	*ip;
+	int		 s, hlen;
 
-	/* fixup ttl */
 	/* label -> AF lookup */
+
+	if (mpls_mapttl_ip) {
+		if (m->m_len < sizeof (struct ip) &&
+		    (m = m_pullup(m, sizeof(struct ip))) == NULL)
+			return;
+		ip = mtod(m, struct ip *);
+		hlen = ip->ip_hl << 2;
+		if (m->m_len < hlen) {
+			if ((m = m_pullup(m, hlen)) == NULL)
+				return;
+			ip = mtod(m, struct ip *);
+		}
+
+		if (in_cksum(m, hlen) != 0) {
+			m_free(m);
+			return;
+		}
+
+		/* set IP ttl from MPLS ttl */
+		ip->ip_ttl = ttl;
+
+		/* recalculate checksum */
+		ip->ip_sum = 0;
+		ip->ip_sum = in_cksum(m, hlen);
+	}
 	
 #if NBPFILTER > 0
 	if (ifp && ifp->if_bpf)
 		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 	s = splnet();
-	/*
-	 * assume we only get fed ipv4 packets for now.
-	 */
 	IF_ENQUEUE(&ipintrq, m);
 	schednetisr(NETISR_IP);
 	splx(s);
@@ -299,21 +324,29 @@ mpe_input(struct mbuf *m, struct ifnet *ifp, struct sockaddr_mpls *smpls,
 
 void
 mpe_input6(struct mbuf *m, struct ifnet *ifp, struct sockaddr_mpls *smpls,
-    u_int32_t ttl)
+    u_int8_t ttl)
 {
-	int		 s;
+	struct ip6_hdr *ip6hdr;
+	int s;
 
-	/* fixup ttl */
 	/* label -> AF lookup */
-	
+
+	if (mpls_mapttl_ip6) {
+		if (m->m_len < sizeof (struct ip6_hdr) &&
+		    (m = m_pullup(m, sizeof(struct ip6_hdr))) == NULL)
+			return;
+
+		ip6hdr = mtod(m, struct ip6_hdr *);
+
+		/* set IPv6 ttl from MPLS ttl */
+		ip6hdr->ip6_hlim = ttl;
+	}
+
 #if NBPFILTER > 0
 	if (ifp && ifp->if_bpf)
 		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 	s = splnet();
-	/*
-	 * assume we only get fed ipv4 packets for now.
-	 */
 	IF_ENQUEUE(&ip6intrq, m);
 	schednetisr(NETISR_IPV6);
 	splx(s);

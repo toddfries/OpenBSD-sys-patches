@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpivar.h,v 1.22 2007/03/17 10:25:39 dlg Exp $ */
+/*	$OpenBSD: mpivar.h,v 1.24 2008/11/01 18:42:26 marco Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -16,7 +16,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
 
 /* #define MPI_DEBUG */
 #ifdef MPI_DEBUG
@@ -131,6 +130,18 @@ struct mpi_softc {
 
 	size_t			sc_fw_len;
 	struct mpi_dmamem	*sc_fw;
+
+	/* scsi ioctl from sd device */
+	int			(*sc_ioctl)(struct device *, u_long, caddr_t);
+
+	struct rwlock		sc_lock;
+	struct mpi_cfg_hdr	sc_cfg_hdr;
+	struct mpi_cfg_ioc_pg2	*sc_vol_page;
+	struct mpi_cfg_raid_vol	*sc_vol_list;
+	struct mpi_cfg_raid_vol_pg0 *sc_rpg0;
+
+	struct ksensor		*sc_sensors;
+	struct ksensordev	sc_sensordev;
 };
 
 int	mpi_attach(struct mpi_softc *);

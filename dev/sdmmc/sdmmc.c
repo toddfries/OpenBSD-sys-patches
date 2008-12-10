@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc.c,v 1.14 2007/09/11 13:39:34 gilles Exp $	*/
+/*	$OpenBSD: sdmmc.c,v 1.16 2008/12/02 23:49:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
