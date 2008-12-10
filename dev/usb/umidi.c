@@ -157,7 +157,7 @@ umidi_match(struct device *parent, void *match, void *aux)
 	if (uaa->iface == NULL)
 		return UMATCH_NONE;
 
-	printf(".. class=%d, subclass=%d, iface=%d\n",
+	DPRINTF(".. class=%d, subclass=%d, iface=%d\n",
     			uaa->vendor,
     			uaa->product,
 			uaa->ifaceno);
@@ -168,7 +168,7 @@ umidi_match(struct device *parent, void *match, void *aux)
 	    id->bInterfaceSubClass==UISUBCLASS_MIDISTREAM)
 		return UMATCH_IFACECLASS_IFACESUBCLASS;
 	if (id != NULL) {
-		printf(".. ifclass=0x%x, ifsubclass=0x%x\n",
+		DPRINTF(".. ifclass=0x%x, ifsubclass=0x%x\n",
 			id->bInterfaceClass,
 			id->bInterfaceSubClass);
 	}
@@ -179,7 +179,7 @@ umidi_match(struct device *parent, void *match, void *aux)
 
 	if (uaa->vendor == USB_VENDOR_MOTU && uaa->product == USB_PRODUCT_MOTU_FLMIDI) {
 		if (id != NULL) {
-			printf(".. class=%d, subclass=%d, iface=%d\n",
+			DPRINTF(".. class=%d, subclass=%d, iface=%d\n",
 	    			id->bInterfaceClass,
 	    			id->bInterfaceSubClass,
 				uaa->ifaceno);
@@ -205,7 +205,7 @@ umidi_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_quirk =
 	    umidi_search_quirk(uaa->vendor, uaa->product, uaa->ifaceno);
-	printf("%s: ", sc->sc_dev.dv_xname);
+	DPRINTF("%s: ", sc->sc_dev.dv_xname);
 	umidi_print_quirk(sc->sc_quirk);
 
 
@@ -218,7 +218,7 @@ umidi_attach(struct device *parent, struct device *self, void *aux)
 		free_all_endpoints(sc);
 		goto error;
 	}
-	printf("%s: out=%d, in=%d\n",
+	DPRINTF("%s: out=%d, in=%d\n",
 	       sc->sc_dev.dv_xname,
 	       sc->sc_out_num_jacks, sc->sc_in_num_jacks);
 
@@ -248,7 +248,7 @@ umidi_attach(struct device *parent, struct device *self, void *aux)
 
 	return;
 error:
-	printf("%s: disabled.\n", sc->sc_dev.dv_xname);
+	DPRINTF("%s: disabled.\n", sc->sc_dev.dv_xname);
 	sc->sc_dying = 1;
 }
 
