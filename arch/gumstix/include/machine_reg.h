@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_reg.h,v 1.8 2006/11/25 18:10:29 uwe Exp $	*/
+/*	$OpenBSD: machine_reg.h,v 1.1 2008/11/26 14:18:11 drahn Exp $	*/
 /*	$NetBSD: lubbock_reg.h,v 1.1 2003/06/18 10:51:15 bsh Exp $ */
 
 /*
@@ -30,21 +30,26 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _ZAURUS_REG_H
-#define _ZAURUS_REG_H
+#ifndef _GUMSTIX_REG_H
+#define _GUMSTIX_REG_H
 
 #include <arm/xscale/pxa2x0reg.h>
 
 /*
  * Logical mapping for onboard/integrated peripherals
  */
-#define	ZAURUS_IO_AREA_VBASE	0xfd000000
-#define ZAURUS_GPIO_VBASE	0xfd000000
-#define ZAURUS_CLKMAN_VBASE 	0xfd100000
-#define ZAURUS_INTCTL_VBASE 	0xfd200000
-#define ZAURUS_SCOOP0_VBASE	0xfd300000
-#define ZAURUS_SCOOP1_VBASE	0xfd400000
-#define ZAURUS_VBASE_FREE	0xfd500000
+#define	GUMSTIX_IO_AREA_VBASE	0xfd000000
+#define GUMSTIX_GPIO_VBASE	0xfd000000
+#define GUMSTIX_CLKMAN_VBASE 	0xfd100000
+#define GUMSTIX_INTCTL_VBASE 	0xfd200000
+#define GUMSTIX_FFUART_VBASE	0xfd300000
+#define GUMSTIX_BTUART_VBASE	0xfd400000
+#define GUMSTIX_STUART_VBASE	0xfd500000
+#define GUMSTIX_VBASE_FREE	0xfd600000
+/*
+#define GUMSTIX_SCOOP0_VBASE	0xfd300000
+#define GUMSTIX_SCOOP1_VBASE	0xfd400000
+*/
 /* FFUART, BTUART and/or STUART are mapped to this area when
    used for console or kgdb port */
 
@@ -60,6 +65,7 @@
 /*
  * Magic numbers for the C860 (PXA255) and C3000 (PXA27x).
  */
+#if 0
 
 /* physical adresses of companion chips */
 #define C3000_SCOOP0_BASE	0x10800000 /* XXX same as C860 */
@@ -80,4 +86,10 @@
 #define C3000_USB_PULLUP_PIN	45	/* show/hide device presence */
 #define GPIO_HP_IN_C3000	116	/* headphone jack */
 
-#endif /* _ZAURUS_REG_H */
+#endif
+
+#define PXA_USB_DEVICE_PIN	35	/* indicate connection type */
+#define PXA_USB_CONNECT_PIN	41	/* connection interrupt */
+#define PXA_USB_PULLUP_PIN	45	/* show/hide device presence */
+
+#endif /* _GUMSTIX_REG_H */

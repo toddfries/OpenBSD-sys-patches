@@ -478,17 +478,17 @@ static drm_pci_id_list_t radeondrm_pciidlist[] = {
 
 static const struct drm_driver_info radeondrm_driver = {
 	.buf_priv_size		= sizeof(drm_radeon_buf_priv_t),
+	.file_priv_size		= sizeof(struct drm_radeon_file),
 	.firstopen		= radeon_driver_firstopen,
 	.open			= radeon_driver_open,
 	.ioctl			= radeondrm_ioctl,
-	.preclose		= radeon_driver_preclose,
-	.postclose		= radeon_driver_postclose,
+	.close			= radeon_driver_close,
 	.lastclose		= radeon_driver_lastclose,
+	.vblank_pipes		= 2,
 	.get_vblank_counter	= radeon_get_vblank_counter,
 	.enable_vblank		= radeon_enable_vblank,
 	.disable_vblank		= radeon_disable_vblank,
-	.irq_preinstall		= radeon_driver_irq_preinstall,
-	.irq_postinstall	= radeon_driver_irq_postinstall,
+	.irq_install		= radeon_driver_irq_install,
 	.irq_uninstall		= radeon_driver_irq_uninstall,
 	.irq_handler		= radeon_driver_irq_handler,
 	.dma_ioctl		= radeon_cp_buffers,
@@ -517,10 +517,12 @@ radeondrm_attach(struct device *parent, struct device *self, void *aux)
 	struct pci_attach_args	*pa = aux;
 	struct vga_pci_bar	*bar;
 	drm_pci_id_list_t	*id_entry;
+	int			 is_agp;
 
 	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
 	    PCI_PRODUCT(pa->pa_id), radeondrm_pciidlist);
 	dev_priv->flags = id_entry->driver_private;
+	dev_priv->pc = pa->pa_pc;
 
 	bar = vga_pci_bar_info((struct vga_pci_softc *)parent, 0);
 	if (bar == NULL) {
@@ -528,7 +530,7 @@ radeondrm_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	dev_priv->fb_aper_offset = bar->base;
-	dev_priv->fb_aper_size = bar->size;
+	dev_priv->fb_aper_size = bar->maxsize;
 
 	bar = vga_pci_bar_info((struct vga_pci_softc *)parent, 2);
 	if (bar == NULL) {
@@ -537,11 +539,17 @@ radeondrm_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	dev_priv->regs = vga_pci_bar_map((struct vga_pci_softc *)parent, 
-	    bar->addr, bar->size, 0);
+	    bar->addr, 0, 0);
 	if (dev_priv->regs == NULL) {
 		printf(": can't map mmio space\n");
 		return;
 	}
+
+	if (pci_intr_map(pa, &dev_priv->ih) != 0) {
+		printf(": couldn't map interrupt\n");
+		return;
+	}
+	printf(": %s\n", pci_intr_string(pa->pa_pc, dev_priv->ih));
 
 	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
 	case CHIP_R100:
@@ -576,7 +584,10 @@ radeondrm_attach(struct device *parent, struct device *self, void *aux)
 		  ((dev_priv->flags & RADEON_IS_AGP) ? "AGP" :
 		  (((dev_priv->flags & RADEON_IS_PCIE) ? "PCIE" : "PCI"))));
 
-	dev_priv->drmdev = drm_attach_mi(&radeondrm_driver, pa, self);
+	is_agp = pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP,
+	    NULL, NULL);
+
+	dev_priv->drmdev = drm_attach_pci(&radeondrm_driver, pa, is_agp, self);
 }
 
 int
@@ -619,7 +630,7 @@ radeondrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 		case DRM_IOCTL_RADEON_RESET:
 			return (radeon_engine_reset(dev, data, file_priv));
 		case DRM_IOCTL_RADEON_FULLSCREEN:
-			return (radeon_fullscreen(dev, data, file_priv));
+			return (0); /* oh so deprecated */
 		case DRM_IOCTL_RADEON_SWAP:
 			return (radeon_cp_swap(dev, data, file_priv));
 		case DRM_IOCTL_RADEON_CLEAR:

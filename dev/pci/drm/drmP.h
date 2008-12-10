@@ -148,7 +148,8 @@ enum {
 #define DRM_AGP_MEM		struct agp_memory_info
 
 /* D_CLONE only supports one device, this will be fixed eventually */
-#define drm_get_device_from_kdev(_kdev) drm_cd.cd_devs[0]
+#define drm_get_device_from_kdev(_kdev)	\
+	(drm_cd.cd_ndevs > 0 ? drm_cd.cd_devs[0] : NULL)
 #if 0
 #define drm_get_device_from_kdev(_kdev)			\
 	(minor(_kdev) < drm_cd.cd_ndevs) ? drm_cd.cd_devs[minor(_kdev)] : NULL
@@ -236,7 +237,7 @@ DRM_SPINLOCK(&dev->irq_lock);				\
 while ( ret == 0 ) {					\
 	if (condition)					\
 		break;					\
-	ret = msleep(&(queue), &dev->irq_lock,	 	\
+	ret = msleep((queue), &dev->irq_lock,	 	\
 	     PZERO | PCATCH, "drmwtq", (timeout));	\
 }							\
 DRM_SPINUNLOCK(&dev->irq_lock)
@@ -312,7 +313,6 @@ typedef struct drm_buf_entry {
 typedef TAILQ_HEAD(drm_file_list, drm_file) drm_file_list_t;
 struct drm_file {
 	TAILQ_ENTRY(drm_file)	 link;
-	void			*driver_priv;
 	int			 authenticated;
 	unsigned long		 ioctl_count;
 	dev_t			 kdev;
@@ -440,8 +440,7 @@ struct drm_driver_info {
 	int	(*open)(struct drm_device *, struct drm_file *);
 	int	(*ioctl)(struct drm_device*, u_long, caddr_t,
 		    struct drm_file *);
-	void	(*preclose)(struct drm_device *, struct drm_file *);
-	void	(*postclose)(struct drm_device *, struct drm_file *);
+	void	(*close)(struct drm_device *, struct drm_file *);
 	void	(*lastclose)(struct drm_device *);
 	void	(*reclaim_buffers_locked)(struct drm_device *,
 		    struct drm_file *);
@@ -449,28 +448,16 @@ struct drm_driver_info {
 	int	(*dma_quiescent)(struct drm_device *);
 	int	(*context_ctor)(struct drm_device *, int);
 	int	(*context_dtor)(struct drm_device *, int);
-	void	(*irq_preinstall)(struct drm_device *);
-	int	(*irq_postinstall)(struct drm_device *);
+	int	(*irq_install)(struct drm_device *);
 	void	(*irq_uninstall)(struct drm_device *);
 	irqreturn_t	(*irq_handler)(DRM_IRQ_ARGS);
+	int	vblank_pipes;
 	u_int32_t (*get_vblank_counter)(struct drm_device *, int);
 	int	(*enable_vblank)(struct drm_device *, int);
 	void	(*disable_vblank)(struct drm_device *, int);
 
-	/**
-	 * Called by \c drm_device_is_agp.  Typically used to determine if a
-	 * card is really attached to AGP or not.
-	 *
-	 * \param dev  DRM device handle
-	 *
-	 * \returns 
-	 * One of three values is returned depending on whether or not the
-	 * card is absolutely \b not AGP (return of 0), absolutely \b is AGP
-	 * (return of 1), or may or may not be AGP (return of 2).
-	 */
-	int	(*device_is_agp) (struct drm_device * dev);
-
-	int	buf_priv_size;
+	size_t	buf_priv_size;
+	size_t	file_priv_size;
 
 	int	major;
 	int	minor;
@@ -497,6 +484,9 @@ struct drm_device {
 	struct device	  device; /* softc is an extension of struct device */
 
 	const struct drm_driver_info *driver;
+
+	bus_dma_tag_t			dmat;
+	bus_space_tag_t			bst;
 
 	char		  *unique;	/* Unique identifier: e.g., busid  */
 	int		  unique_len;	/* Length of unique field	   */
@@ -529,14 +519,6 @@ struct drm_device {
 				/* Context support */
 	int		  irq;		/* Interrupt used by board	   */
 	int		  irq_enabled;	/* True if the irq handler is enabled */
-	struct pci_attach_args  pa;
-	int		  unit;		/* drm unit number */
-	void		  *irqh;	/* Handle from bus_setup_intr      */
-
-	int		  pci_domain;
-	int		  pci_bus;
-	int		  pci_slot;
-	int		  pci_func;
 
 	/* VBLANK support */
 	int			 num_crtcs;		/* number of crtcs */
@@ -561,16 +543,20 @@ struct drm_device {
 
 struct drm_attach_args {
 	const struct drm_driver_info	*driver;
-	struct pci_attach_args		*pa;
-	struct vga_pci_softc		*vga;
+	char				*busid;
+	bus_dma_tag_t			 dmat;
+	bus_space_tag_t			 bst;
+	size_t				 busid_len;
+	int				 is_agp;
+	u_int8_t			 irq;
 };
 
 extern int	drm_debug_flag;
 
 /* Device setup support (drm_drv.c) */
 int	drm_pciprobe(struct pci_attach_args *, drm_pci_id_list_t * );
-struct device	*drm_attach_mi(const struct drm_driver_info *,
-		     struct pci_attach_args *pa, struct device *);
+struct device	*drm_attach_pci(const struct drm_driver_info *, 
+		     struct pci_attach_args *, int, struct device *);
 dev_type_ioctl(drmioctl);
 dev_type_open(drmopen);
 dev_type_close(drmclose);
@@ -585,12 +571,15 @@ drm_pci_id_list_t *drm_find_description(int , int , drm_pci_id_list_t *);
 struct drm_file	*drm_find_file_by_minor(struct drm_device *, int);
 
 /* Memory management support (drm_memory.c) */
-void	drm_mem_init(void);
-void	drm_mem_uninit(void);
-void	*drm_alloc(size_t, int);
-void	*drm_calloc(size_t, size_t, int);
-void	*drm_realloc(void *, size_t, size_t, int);
-void	drm_free(void *, size_t, int);
+void	*_drm_alloc(size_t);
+#define	drm_alloc(size, area)	_drm_alloc(size)
+void	*_drm_calloc(size_t, size_t);
+#define	drm_calloc(nmemb, size, area) _drm_calloc(nmemb, size)
+void	*_drm_realloc(void *, size_t, size_t);
+#define	drm_realloc(old, oldsz, size, area) _drm_realloc(old, oldsz, size)
+void	_drm_free(void *);
+#define	drm_free(ptr, size, area) do { _drm_free(ptr); (void)(size); \
+} while( /*CONSTCOND*/ 0)
 void	*drm_ioremap(struct drm_device *, drm_local_map_t *);
 void	drm_ioremapfree(drm_local_map_t *);
 int	drm_mtrr_add(unsigned long, size_t, int);
@@ -634,10 +623,7 @@ void	drm_reclaim_buffers(struct drm_device *, struct drm_file *);
 /* IRQ support (drm_irq.c) */
 int	drm_irq_install(struct drm_device *);
 int	drm_irq_uninstall(struct drm_device *);
-irqreturn_t drm_irq_handler(DRM_IRQ_ARGS);
-void	drm_driver_irq_preinstall(struct drm_device *);
-void	drm_driver_irq_postinstall(struct drm_device *);
-void	drm_driver_irq_uninstall(struct drm_device *);
+irqreturn_t	drm_irq_handler_wrap(DRM_IRQ_ARGS);
 void	drm_vblank_cleanup(struct drm_device *);
 int	drm_vblank_init(struct drm_device *, int);
 u_int32_t drm_vblank_count(struct drm_device *, int);
@@ -647,7 +633,6 @@ int	drm_modeset_ctl(struct drm_device *, void *, struct drm_file *);
 void	drm_handle_vblank(struct drm_device *, int);
 
 /* AGP/PCI Express/GART support (drm_agpsupport.c) */
-int	drm_device_is_agp(struct drm_device *);
 struct drm_agp_head *drm_agp_init(void);
 void	drm_agp_takedown(struct drm_device *);
 int	drm_agp_acquire(struct drm_device *);
@@ -682,11 +667,7 @@ int	drm_setversion(struct drm_device *, void *, struct drm_file *);
 /* Misc. IOCTL support (drm_ioctl.c) */
 int	drm_irq_by_busid(struct drm_device *, void *, struct drm_file *);
 int	drm_getunique(struct drm_device *, void *, struct drm_file *);
-int	drm_setunique(struct drm_device *, void *, struct drm_file *);
 int	drm_getmap(struct drm_device *, void *, struct drm_file *);
-int	drm_getclient(struct drm_device *, void *, struct drm_file *);
-int	drm_getstats(struct drm_device *, void *, struct drm_file *);
-int	drm_noop(struct drm_device *, void *, struct drm_file *);
 
 /* Context IOCTL support (drm_context.c) */
 int	drm_resctx(struct drm_device *, void *, struct drm_file *);

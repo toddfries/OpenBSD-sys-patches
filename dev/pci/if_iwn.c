@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwn.c,v 1.37 2008/11/22 08:23:52 brad Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.42 2008/12/03 17:17:08 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -71,6 +71,8 @@ static const struct pci_matchid iwn_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_4965AGN_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5100AGN_1 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5100AGN_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5150AGN_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5150AGN_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5300AGN_1 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5300AGN_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5350AGN_1 },
@@ -252,7 +254,6 @@ static const struct iwn_hal iwn4965_hal = {
 	iwn4965_tx_done,
 	iwn4965_ampdu_tx_start,
 	iwn4965_ampdu_tx_stop,
-	"iwn-4965",
 	&iwn4965_sensitivity_limits,
 	IWN4965_NTXQUEUES,
 	IWN4965_ID_BROADCAST,
@@ -280,7 +281,6 @@ static const struct iwn_hal iwn5000_hal = {
 	iwn5000_tx_done,
 	iwn5000_ampdu_tx_start,
 	iwn5000_ampdu_tx_stop,
-	"iwn-5000",
 	&iwn5000_sensitivity_limits,
 	IWN5000_NTXQUEUES,
 	IWN5000_ID_BROADCAST,
@@ -304,7 +304,7 @@ int
 iwn_match(struct device *parent, void *match, void *aux)
 {
 	return pci_matchbyid((struct pci_attach_args *)aux, iwn_devices,
-	    sizeof iwn_devices / sizeof iwn_devices[0]);
+	    nitems(iwn_devices));
 }
 
 void
@@ -508,6 +508,7 @@ iwn_hal_attach(struct iwn_softc *sc)
 	switch (sc->hw_type) {
 	case IWN_HW_REV_TYPE_4965:
 		sc->sc_hal = &iwn4965_hal;
+		sc->fwname = "iwn-4965";
 		sc->critical_temp = IWN_CTOK(110);
 		sc->txantmsk = IWN_ANT_A | IWN_ANT_B;
 		sc->rxantmsk = IWN_ANT_ABC;
@@ -516,6 +517,7 @@ iwn_hal_attach(struct iwn_softc *sc)
 		break;
 	case IWN_HW_REV_TYPE_5100:
 		sc->sc_hal = &iwn5000_hal;
+		sc->fwname = "iwn-5000";
 		sc->critical_temp = 110;
 		sc->txantmsk = IWN_ANT_B;
 		sc->rxantmsk = IWN_ANT_A | IWN_ANT_B;
@@ -524,7 +526,8 @@ iwn_hal_attach(struct iwn_softc *sc)
 		break;
 	case IWN_HW_REV_TYPE_5150:
 		sc->sc_hal = &iwn5000_hal;
-		sc->critical_temp = IWN_CTOK(110);
+		sc->fwname = "iwn-5150";
+		/* NB: critical temperature will be read from EEPROM. */
 		sc->txantmsk = IWN_ANT_A;
 		sc->rxantmsk = IWN_ANT_A | IWN_ANT_B;
 		sc->ntxchains = 1;
@@ -533,6 +536,7 @@ iwn_hal_attach(struct iwn_softc *sc)
 	case IWN_HW_REV_TYPE_5300:
 	case IWN_HW_REV_TYPE_5350:
 		sc->sc_hal = &iwn5000_hal;
+		sc->fwname = "iwn-5000";
 		sc->critical_temp = 110;
 		sc->txantmsk = sc->rxantmsk = IWN_ANT_ABC;
 		sc->ntxchains = sc->nrxchains = 3;
@@ -793,6 +797,7 @@ iwn_dma_contig_alloc(bus_dma_tag_t tag, struct iwn_dma_info *dma, void **kvap,
 		goto fail;
 
 	memset(dma->vaddr, 0, size);
+	bus_dmamap_sync(tag, dma->map, 0, size, BUS_DMASYNC_PREWRITE);
 
 	dma->paddr = dma->map->dm_segs[0].ds_addr;
 	if (kvap != NULL)
@@ -809,6 +814,8 @@ iwn_dma_contig_free(struct iwn_dma_info *dma)
 {
 	if (dma->map != NULL) {
 		if (dma->vaddr != NULL) {
+			bus_dmamap_sync(dma->tag, dma->map, 0, dma->size,
+			    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 			bus_dmamap_unload(dma->tag, dma->map);
 			bus_dmamem_unmap(dma->tag, dma->vaddr, dma->size);
 			bus_dmamem_free(dma->tag, &dma->seg, 1);
@@ -978,6 +985,10 @@ iwn_alloc_rx_ring(struct iwn_softc *sc, struct iwn_rx_ring *ring)
 		/* Set physical address of RX buffer (256-byte aligned.) */
 		ring->desc[i] = htole32(rbuf->paddr >> 8);
 	}
+
+	bus_dmamap_sync(sc->sc_dmat, ring->desc_dma.map,
+	    0, ring->desc_dma.size, BUS_DMASYNC_PREWRITE);
+
 	return 0;
 
 fail:	iwn_free_rx_ring(sc, ring);
@@ -1098,6 +1109,8 @@ iwn_reset_tx_ring(struct iwn_softc *sc, struct iwn_tx_ring *ring)
 		struct iwn_tx_data *data = &ring->data[i];
 
 		if (data->m != NULL) {
+			bus_dmamap_sync(sc->sc_dmat, data->map, 0,
+			    data->map->dm_mapsize, BUS_DMASYNC_POSTWRITE);
 			bus_dmamap_unload(sc->sc_dmat, data->map);
 			m_freem(data->m);
 			data->m = NULL;
@@ -1105,6 +1118,8 @@ iwn_reset_tx_ring(struct iwn_softc *sc, struct iwn_tx_ring *ring)
 	}
 	/* Clear TX descriptors. */
 	memset(ring->desc, 0, ring->desc_dma.size);
+	bus_dmamap_sync(sc->sc_dmat, ring->desc_dma.map, 0,
+	    ring->desc_dma.size, BUS_DMASYNC_PREWRITE);
 	sc->qfullmsk &= ~(1 << ring->qid);
 	ring->queued = 0;
 	ring->cur = 0;
@@ -1122,6 +1137,8 @@ iwn_free_tx_ring(struct iwn_softc *sc, struct iwn_tx_ring *ring)
 		struct iwn_tx_data *data = &ring->data[i];
 
 		if (data->m != NULL) {
+			bus_dmamap_sync(sc->sc_dmat, data->map, 0,
+			    data->map->dm_mapsize, BUS_DMASYNC_POSTWRITE);
 			bus_dmamap_unload(sc->sc_dmat, data->map);
 			m_freem(data->m);
 		}
@@ -1245,12 +1262,13 @@ iwn4965_print_power_group(struct iwn_softc *sc, int i)
 void
 iwn5000_read_eeprom(struct iwn_softc *sc)
 {
+	int32_t temp, volt, delta;
 	uint32_t base, addr;
 	uint16_t val;
 	int i;
 
 	/* Read regulatory domain (4 ASCII characters.) */
-	iwn_read_prom_data(sc, IWN5000_EEPROM_REG, &val, sizeof val);
+	iwn_read_prom_data(sc, IWN5000_EEPROM_REG, &val, 2);
 	base = letoh16(val);
 	iwn_read_prom_data(sc, base + IWN5000_EEPROM_DOMAIN,
 	    sc->eeprom_domain, 4);
@@ -1261,12 +1279,25 @@ iwn5000_read_eeprom(struct iwn_softc *sc)
 		iwn_read_eeprom_channels(sc, i, addr);
 	}
 
-	/* Read crystal calibration. */
-	iwn_read_prom_data(sc, IWN5000_EEPROM_CAL, &val, sizeof val);
+	iwn_read_prom_data(sc, IWN5000_EEPROM_CAL, &val, 2);
 	base = letoh16(val);
-	iwn_read_prom_data(sc, base + IWN5000_EEPROM_CRYSTAL,
-	    &sc->eeprom_crystal, sizeof (uint32_t));
-	DPRINTF(("crystal calibration 0x%08x\n", sc->eeprom_crystal));
+	if (sc->hw_type == IWN_HW_REV_TYPE_5150) {
+		/* Compute critical temperature (in Kelvin.) */
+		iwn_read_prom_data(sc, base + IWN5000_EEPROM_TEMP, &val, 2);
+		temp = letoh16(val);
+		iwn_read_prom_data(sc, base + IWN5000_EEPROM_VOLT, &val, 2);
+		volt = letoh16(val);
+		delta = temp - (volt / -5);
+		sc->critical_temp = (IWN_CTOK(110) - delta) * -5;
+		DPRINTF(("temp=%d volt=%d delta=%dK\n",
+		    temp, volt, delta));
+	} else {
+		/* Read crystal calibration. */
+		iwn_read_prom_data(sc, base + IWN5000_EEPROM_CRYSTAL,
+		    &sc->eeprom_crystal, sizeof (uint32_t));
+		DPRINTF(("crystal calibration 0x%08x\n",
+		    letoh32(sc->eeprom_crystal)));
+	}
 }
 
 void
@@ -1357,11 +1388,24 @@ iwn_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
 int
 iwn_media_change(struct ifnet *ifp)
 {
+	struct iwn_softc *sc = ifp->if_softc;
+	struct ieee80211com *ic = &sc->sc_ic;
+	uint8_t rate, ridx;
 	int error;
 
 	error = ieee80211_media_change(ifp);
 	if (error != ENETRESET)
 		return error;
+
+	if (ic->ic_fixed_rate != -1) {
+		rate = ic->ic_sup_rates[ic->ic_curmode].
+		    rs_rates[ic->ic_fixed_rate] & IEEE80211_RATE_VAL;
+		/* Map 802.11 rate to HW rate index. */
+		for (ridx = 0; ridx <= IWN_RIDX_MAX; ridx++)
+			if (iwn_rates[ridx].rate == rate)
+				break;
+		sc->fixed_ridx = ridx;
+	}
 
 	if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) ==
 	    (IFF_UP | IFF_RUNNING)) {
@@ -1519,11 +1563,14 @@ iwn_ccmp_decap(struct iwn_softc *sc, struct mbuf *m, struct ieee80211_key *k)
 void
 iwn_rx_phy(struct iwn_softc *sc, struct iwn_rx_desc *desc)
 {
-	struct iwn_rx_stat *stat;
+	struct iwn_rx_stat *stat = (struct iwn_rx_stat *)(desc + 1);
 
 	DPRINTFN(2, ("received PHY stats\n"));
+	bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+	    (caddr_t)stat - sc->rxq.buf_dma.vaddr, sizeof (*stat),
+	    BUS_DMASYNC_POSTREAD);
+
 	/* Save RX statistics, they will be used on MPDU_RX_DONE. */
-	stat = (struct iwn_rx_stat *)(desc + 1);
 	memcpy(&sc->last_rx_stat, stat, sizeof (*stat));
 	sc->last_rx_valid = 1;
 }
@@ -1561,6 +1608,10 @@ iwn_rx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 		stat = &sc->last_rx_stat;
 	} else
 		stat = (struct iwn_rx_stat *)(desc + 1);
+
+	bus_dmamap_sync(sc->sc_dmat, ring->buf_dma.map,
+	    (caddr_t)(desc + 1) - ring->buf_dma.vaddr, IWN_RBUF_SIZE,
+	    BUS_DMASYNC_POSTREAD);
 
 	if (stat->cfg_phy_len > IWN_STAT_MAXLEN) {
 		printf("%s: invalid RX statistic header\n",
@@ -1649,6 +1700,9 @@ iwn_rx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 
 		/* Update RX descriptor. */
 		ring->desc[ring->cur] = htole32(rbuf->paddr >> 8);
+		bus_dmamap_sync(sc->sc_dmat, ring->desc_dma.map,
+		    ring->cur * sizeof (uint32_t), sizeof (uint32_t),
+		    BUS_DMASYNC_PREWRITE);
 	} else {
 		/* No free rbufs, copy frame into an mbuf. */
 		m = m_copym2(m, 0, M_COPYALL, M_DONTWAIT);
@@ -1723,37 +1777,42 @@ void
 iwn5000_rx_calib_results(struct iwn_softc *sc, struct iwn_rx_desc *desc)
 {
 	struct iwn_phy_calib *calib = (struct iwn_phy_calib *)(desc + 1);
-	u_int idx, len;
-
-	/* No initial calibration required for 5150! */
-	if (sc->hw_type == IWN_HW_REV_TYPE_5150)
-		return;
+	int len, idx = -1;
 
 	/* Runtime firmware should not send such a notification. */
 	if (!(sc->sc_flags & IWN_FLAG_FIRST_BOOT))
 		return;
 
+	len = (letoh32(desc->len) & 0x3fff) - 4;
+	bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+	    (caddr_t)calib - sc->rxq.buf_dma.vaddr, len,
+	    BUS_DMASYNC_POSTREAD);
+
 	switch (calib->code) {
-	case IWN5000_PHY_CALIB_LO:
-		idx = 0;
+	case IWN5000_PHY_CALIB_DC:
+		if (sc->hw_type == IWN_HW_REV_TYPE_5150)
+			idx = 0;
 		break;
-	case IWN5000_PHY_CALIB_TX_IQ:
+	case IWN5000_PHY_CALIB_LO:
 		idx = 1;
 		break;
-	case IWN5000_PHY_CALIB_TX_IQ_PERD:
+	case IWN5000_PHY_CALIB_TX_IQ:
 		idx = 2;
 		break;
-	case IWN5000_PHY_CALIB_BASE_BAND:
-		idx = 3;
+	case IWN5000_PHY_CALIB_TX_IQ_PERD:
+		if (sc->hw_type != IWN_HW_REV_TYPE_5150)
+			idx = 3;
 		break;
-	default:
-		/* Ignore other results. */
-		return;
+	case IWN5000_PHY_CALIB_BASE_BAND:
+		idx = 4;
+		break;
 	}
+	if (idx == -1)	/* Ignore other results. */
+		return;
+
 	/* Save calibration result. */
 	if (sc->calibcmd[idx].buf != NULL)
 		free(sc->calibcmd[idx].buf, M_DEVBUF);
-	len = (letoh32(desc->len) & 0x3fff) - 4;
 	sc->calibcmd[idx].buf = malloc(len, M_DEVBUF, M_NOWAIT);
 	if (sc->calibcmd[idx].buf == NULL) {
 		DPRINTF(("not enough memory for calibration result %d\n",
@@ -1782,6 +1841,10 @@ iwn_rx_statistics(struct iwn_softc *sc, struct iwn_rx_desc *desc)
 	/* Ignore statistics received during a scan. */
 	if (ic->ic_state != IEEE80211_S_RUN)
 		return;
+
+	bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+	    (caddr_t)stats - sc->rxq.buf_dma.vaddr, sizeof (*stats),
+	    BUS_DMASYNC_POSTREAD);
 
 	DPRINTFN(3, ("received statistics (cmd=%d)\n", desc->type));
 	sc->calib_cnt = 0;	/* Reset TX power calibration timeout. */
@@ -1828,6 +1891,9 @@ iwn4965_tx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc)
 {
 	struct iwn4965_tx_stat *stat = (struct iwn4965_tx_stat *)(desc + 1);
 
+	bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+	    (caddr_t)stat - sc->rxq.buf_dma.vaddr, sizeof (*stat),
+	    BUS_DMASYNC_POSTREAD);
 	iwn_tx_done(sc, desc, stat->retrycnt, letoh32(stat->status) & 0xff);
 }
 
@@ -1838,6 +1904,10 @@ iwn5000_tx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc)
 
 	/* Reset TX scheduler slot. */
 	iwn5000_reset_sched(sc, desc->qid & 0xf, desc->idx);
+
+	bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+	    (caddr_t)stat - sc->rxq.buf_dma.vaddr, sizeof (*stat),
+	    BUS_DMASYNC_POSTREAD);
 	iwn_tx_done(sc, desc, stat->retrycnt, letoh16(stat->status) & 0xff);
 }
 
@@ -1865,6 +1935,8 @@ iwn_tx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc, int retrycnt,
 		ifp->if_opackets++;
 
 	/* Unmap and free mbuf. */
+	bus_dmamap_sync(sc->sc_dmat, data->map, 0, data->map->dm_mapsize,
+	    BUS_DMASYNC_POSTWRITE);
 	bus_dmamap_unload(sc->sc_dmat, data->map);
 	m_freem(data->m);
 	data->m = NULL;
@@ -1898,6 +1970,8 @@ iwn_cmd_done(struct iwn_softc *sc, struct iwn_rx_desc *desc)
 
 	/* If the command was mapped in an mbuf, free it. */
 	if (data->m != NULL) {
+		bus_dmamap_sync(sc->sc_dmat, data->map, 0,
+		    data->map->dm_mapsize, BUS_DMASYNC_POSTWRITE);
 		bus_dmamap_unload(sc->sc_dmat, data->map);
 		m_freem(data->m);
 		data->m = NULL;
@@ -1915,10 +1989,17 @@ iwn_notif_intr(struct iwn_softc *sc)
 	struct ifnet *ifp = &ic->ic_if;
 	uint16_t hw;
 
+	bus_dmamap_sync(sc->sc_dmat, sc->rxq.stat_dma.map,
+	    0, sc->rxq.stat_dma.size, BUS_DMASYNC_POSTREAD);
+
 	hw = letoh16(sc->rxq.stat->closed_count) & 0xfff;
 	while (sc->rxq.cur != hw) {
 		struct iwn_rx_data *data = &sc->rxq.data[sc->rxq.cur];
 		struct iwn_rx_desc *desc = (void *)data->m->m_ext.ext_buf;
+
+		bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+		    (caddr_t)desc - sc->rxq.buf_dma.vaddr, sizeof (*desc),
+		    BUS_DMASYNC_POSTREAD);
 
 		DPRINTFN(4, ("notification qid=%d idx=%d flags=%x type=%d\n",
 		    desc->qid & 0xf, desc->idx, desc->flags, desc->type));
@@ -1951,6 +2032,10 @@ iwn_notif_intr(struct iwn_softc *sc)
 		{
 			struct iwn_beacon_missed *miss =
 			    (struct iwn_beacon_missed *)(desc + 1);
+
+			bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+			    (caddr_t)miss - sc->rxq.buf_dma.vaddr,
+			    sizeof (*miss), BUS_DMASYNC_POSTREAD);
 			/*
 			 * If more than 5 consecutive beacons are missed,
 			 * reinitialize the sensitivity state machine.
@@ -1968,6 +2053,9 @@ iwn_notif_intr(struct iwn_softc *sc)
 			    (struct iwn_ucode_info *)(desc + 1);
 
 			/* The microcontroller is ready. */
+			bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+			    (caddr_t)uc - sc->rxq.buf_dma.vaddr,
+			    sizeof (*uc), BUS_DMASYNC_POSTREAD);
 			DPRINTF(("microcode alive notification version=%d.%d "
 			    "subtype=%x alive=%x\n", uc->major, uc->minor,
 			    uc->subtype, letoh32(uc->valid)));
@@ -1990,6 +2078,9 @@ iwn_notif_intr(struct iwn_softc *sc)
 			uint32_t *status = (uint32_t *)(desc + 1);
 
 			/* Enabled/disabled notification. */
+			bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+			    (caddr_t)status - sc->rxq.buf_dma.vaddr,
+			    sizeof (*status), BUS_DMASYNC_POSTREAD);
 			DPRINTF(("state changed to %x\n", letoh32(*status)));
 
 			if (letoh32(*status) & 1) {
@@ -2008,6 +2099,9 @@ iwn_notif_intr(struct iwn_softc *sc)
 			struct iwn_start_scan *scan =
 			    (struct iwn_start_scan *)(desc + 1);
 
+			bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+			    (caddr_t)scan - sc->rxq.buf_dma.vaddr,
+			    sizeof (*scan), BUS_DMASYNC_POSTREAD);
 			DPRINTFN(2, ("scanning channel %d status %x\n",
 			    scan->chan, letoh32(scan->status)));
 
@@ -2020,6 +2114,9 @@ iwn_notif_intr(struct iwn_softc *sc)
 			struct iwn_stop_scan *scan =
 			    (struct iwn_stop_scan *)(desc + 1);
 
+			bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
+			    (caddr_t)scan - sc->rxq.buf_dma.vaddr,
+			    sizeof (*scan), BUS_DMASYNC_POSTREAD);
 			DPRINTF(("scan finished nchan=%d status=%d chan=%d\n",
 			    scan->nchan, scan->status, scan->chan));
 
@@ -2079,7 +2176,6 @@ iwn_wakeup_intr(struct iwn_softc *sc)
 void
 iwn_fatal_intr(struct iwn_softc *sc)
 {
-#define N(a)	(sizeof (a) / sizeof ((a)[0]))
 	const struct iwn_hal *hal = sc->sc_hal;
 	struct iwn_fw_dump dump;
 	int i;
@@ -2109,7 +2205,7 @@ iwn_fatal_intr(struct iwn_softc *sc)
 	}
 	printf("firmware error log:\n");
 	printf("  error type      = \"%s\" (0x%08X)\n",
-	    (dump.id < N(iwn_fw_errmsg)) ?
+	    (dump.id < nitems(iwn_fw_errmsg)) ?
 		iwn_fw_errmsg[dump.id] : "UNKNOWN",
 	    dump.id);
 	printf("  program counter = 0x%08X\n", dump.pc);
@@ -2131,7 +2227,6 @@ iwn_fatal_intr(struct iwn_softc *sc)
 	}
 	printf("  rx ring: cur=%d\n", sc->rxq.cur);
 	printf("  802.11 state %d\n", sc->sc_ic.ic_state);
-#undef N
 }
 
 int
@@ -2208,8 +2303,15 @@ iwn4965_update_sched(struct iwn_softc *sc, int qid, int idx, uint8_t id,
 	uint16_t *w = &sc->sched[qid * IWN4965_SCHED_COUNT + idx];
 
 	*w = htole16(len + 8);
-	if (idx < IWN_SCHED_WINSZ)
+	bus_dmamap_sync(sc->sc_dmat, sc->sched_dma.map,
+	    (caddr_t)w - sc->sched_dma.vaddr, sizeof (uint16_t),
+	    BUS_DMASYNC_PREWRITE);
+	if (idx < IWN_SCHED_WINSZ) {
 		*(w + IWN_TX_RING_COUNT) = *w;
+		bus_dmamap_sync(sc->sc_dmat, sc->sched_dma.map,
+		    (caddr_t)(w + IWN_TX_RING_COUNT) - sc->sched_dma.vaddr,
+		    sizeof (uint16_t), BUS_DMASYNC_PREWRITE);
+	}
 }
 
 void
@@ -2219,8 +2321,15 @@ iwn5000_update_sched(struct iwn_softc *sc, int qid, int idx, uint8_t id,
 	uint16_t *w = &sc->sched[qid * IWN5000_SCHED_COUNT + idx];
 
 	*w = htole16(id << 12 | (len + 8));
-	if (idx < IWN_SCHED_WINSZ)
+	bus_dmamap_sync(sc->sc_dmat, sc->sched_dma.map,
+	    (caddr_t)w - sc->sched_dma.vaddr, sizeof (uint16_t),
+	    BUS_DMASYNC_PREWRITE);
+	if (idx < IWN_SCHED_WINSZ) {
 		*(w + IWN_TX_RING_COUNT) = *w;
+		bus_dmamap_sync(sc->sc_dmat, sc->sched_dma.map,
+		    (caddr_t)(w + IWN_TX_RING_COUNT) - sc->sched_dma.vaddr,
+		    sizeof (uint16_t), BUS_DMASYNC_PREWRITE);
+	}
 }
 
 void
@@ -2229,8 +2338,15 @@ iwn5000_reset_sched(struct iwn_softc *sc, int qid, int idx)
 	uint16_t *w = &sc->sched[qid * IWN5000_SCHED_COUNT + idx];
 
 	*w = (*w & htole16(0xf000)) | htole16(1);
-	if (idx < IWN_SCHED_WINSZ)
+	bus_dmamap_sync(sc->sc_dmat, sc->sched_dma.map,
+	    (caddr_t)w - sc->sched_dma.vaddr, sizeof (uint16_t),
+	    BUS_DMASYNC_PREWRITE);
+	if (idx < IWN_SCHED_WINSZ) {
 		*(w + IWN_TX_RING_COUNT) = *w;
+		bus_dmamap_sync(sc->sc_dmat, sc->sched_dma.map,
+		    (caddr_t)(w + IWN_TX_RING_COUNT) - sc->sched_dma.vaddr,
+		    sizeof (uint16_t), BUS_DMASYNC_PREWRITE);
+	}
 }
 
 int
@@ -2248,7 +2364,6 @@ iwn_tx(struct iwn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	struct ieee80211_frame *wh;
 	struct ieee80211_key *k = NULL;
 	enum ieee80211_edca_ac ac;
-	struct mbuf *m1;
 	uint32_t flags;
 	uint16_t qos;
 	u_int hdrlen;
@@ -2273,11 +2388,13 @@ iwn_tx(struct iwn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	desc = &ring->desc[ring->cur];
 	data = &ring->data[ring->cur];
 
-	/* Chose a TX rate index. */
+	/* Choose a TX rate index. */
 	if (IEEE80211_IS_MULTICAST(wh->i_addr1) ||
 	    type != IEEE80211_FC0_TYPE_DATA) {
 		ridx = (ic->ic_curmode == IEEE80211_MODE_11A) ?
 		    IWN_RIDX_OFDM6 : IWN_RIDX_CCK1;
+	} else if (ic->ic_fixed_rate != -1) {
+		ridx = sc->fixed_ridx;
 	} else
 		ridx = wn->ridx[ni->ni_txrate];
 	rinfo = &iwn_rates[ridx];
@@ -2463,24 +2580,10 @@ iwn_tx(struct iwn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	}
 	if (error != 0) {
 		/* Too many DMA segments, linearize mbuf. */
-		MGETHDR(m1, M_DONTWAIT, MT_DATA);
-		if (m1 == NULL) {
+		if (m_defrag(m, M_DONTWAIT) != 0) {
 			m_freem(m);
 			return ENOMEM;
 		}
-		if (m->m_pkthdr.len > MHLEN) {
-			MCLGET(m1, M_DONTWAIT);
-			if (!(m1->m_flags & M_EXT)) {
-				m_freem(m);
-				m_freem(m1);
-				return ENOMEM;
-			}
-		}
-		m_copydata(m, 0, m->m_pkthdr.len, mtod(m1, caddr_t));
-		m1->m_len = m1->m_pkthdr.len = m->m_pkthdr.len;
-		m_freem(m);
-		m = m1;
-
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m,
 		    BUS_DMA_NOWAIT);
 		if (error != 0) {
@@ -2507,6 +2610,15 @@ iwn_tx(struct iwn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 		IWN_SET_DESC_SEG(desc, i, data->map->dm_segs[i - 1].ds_addr,
 		    data->map->dm_segs[i - 1].ds_len);
 	}
+
+	bus_dmamap_sync(sc->sc_dmat, data->map, 0, data->map->dm_mapsize,
+	    BUS_DMASYNC_PREWRITE);
+	bus_dmamap_sync(sc->sc_dmat, ring->cmd_dma.map,
+	    (caddr_t)cmd - ring->cmd_dma.vaddr, sizeof (*cmd),
+	    BUS_DMASYNC_PREWRITE);
+	bus_dmamap_sync(sc->sc_dmat, ring->desc_dma.map,
+	    (caddr_t)desc - ring->desc_dma.vaddr, sizeof (*desc),
+	    BUS_DMASYNC_PREWRITE);
 
 	/* Update TX scheduler. */
 	hal->update_sched(sc, ring->qid, ring->cur, tx->id, totlen);
@@ -2722,6 +2834,18 @@ iwn_cmd(struct iwn_softc *sc, int code, const void *buf, int size, int async)
 
 	IWN_SET_DESC_NSEGS(desc, 1);
 	IWN_SET_DESC_SEG(desc, 0, paddr, totlen);
+
+	if (size > sizeof cmd->data) {
+		bus_dmamap_sync(sc->sc_dmat, data->map, 0, totlen,
+		    BUS_DMASYNC_PREWRITE);
+	} else {
+		bus_dmamap_sync(sc->sc_dmat, ring->cmd_dma.map,
+		    (caddr_t)cmd - ring->cmd_dma.vaddr, totlen,
+		    BUS_DMASYNC_PREWRITE);
+	}
+	bus_dmamap_sync(sc->sc_dmat, ring->desc_dma.map,
+	    (caddr_t)desc - ring->desc_dma.vaddr, sizeof (*desc),
+	    BUS_DMASYNC_PREWRITE);
 
 	/* Update TX scheduler. */
 	hal->update_sched(sc, ring->qid, ring->cur, 0, 0);
@@ -4253,7 +4377,7 @@ iwn5000_send_calibration(struct iwn_softc *sc)
 {
 	int idx, error;
 
-	for (idx = 0; idx < 4; idx++) {
+	for (idx = 0; idx < 5; idx++) {
 		if (sc->calibcmd[idx].buf == NULL)
 			continue;	/* No results available. */
 		DPRINTF(("send calibration result idx=%d len=%d\n",
@@ -4481,8 +4605,12 @@ iwn4965_load_firmware(struct iwn_softc *sc)
 
 	/* Copy initialization sections into pre-allocated DMA-safe memory. */
 	memcpy(dma->vaddr, fw->init.data, fw->init.datasz);
+	bus_dmamap_sync(sc->sc_dmat, dma->map, 0, fw->init.datasz,
+	    BUS_DMASYNC_PREWRITE);
 	memcpy(dma->vaddr + IWN4965_FW_DATA_MAXSZ,
 	    fw->init.text, fw->init.textsz);
+	bus_dmamap_sync(sc->sc_dmat, dma->map, IWN4965_FW_DATA_MAXSZ,
+	    fw->init.textsz, BUS_DMASYNC_PREWRITE);
 
 	/* Tell adapter where to find initialization sections. */
 	if ((error = iwn_nic_lock(sc)) != 0)
@@ -4517,8 +4645,12 @@ iwn4965_load_firmware(struct iwn_softc *sc)
 
 	/* Copy runtime sections into pre-allocated DMA-safe memory. */
 	memcpy(dma->vaddr, fw->main.data, fw->main.datasz);
+	bus_dmamap_sync(sc->sc_dmat, dma->map, 0, fw->main.datasz,
+	    BUS_DMASYNC_PREWRITE);
 	memcpy(dma->vaddr + IWN4965_FW_DATA_MAXSZ,
 	    fw->main.text, fw->main.textsz);
+	bus_dmamap_sync(sc->sc_dmat, dma->map, IWN4965_FW_DATA_MAXSZ,
+	    fw->main.textsz, BUS_DMASYNC_PREWRITE);
 
 	/* Tell adapter where to find runtime sections. */
 	if ((error = iwn_nic_lock(sc)) != 0)
@@ -4543,6 +4675,7 @@ iwn5000_load_firmware_section(struct iwn_softc *sc, uint32_t dst,
 
 	/* Copy firmware section into pre-allocated DMA-safe memory. */
 	memcpy(dma->vaddr, section, size);
+	bus_dmamap_sync(sc->sc_dmat, dma->map, 0, size, BUS_DMASYNC_PREWRITE);
 
 	if ((error = iwn_nic_lock(sc)) != 0)
 		return error;
@@ -4608,9 +4741,9 @@ iwn_read_firmware(struct iwn_softc *sc)
 	int error;
 
 	/* Read firmware image from filesystem. */
-	if ((error = loadfirmware(hal->fwname, &fw->data, &size)) != 0) {
+	if ((error = loadfirmware(sc->fwname, &fw->data, &size)) != 0) {
 		printf("%s: error, %d, could not read firmware %s\n",
-		    sc->sc_dev.dv_xname, error, hal->fwname);
+		    sc->sc_dev.dv_xname, error, sc->fwname);
 		return error;
 	}
 	if (size < sizeof (*hdr)) {

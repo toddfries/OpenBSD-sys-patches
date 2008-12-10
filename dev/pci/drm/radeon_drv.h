@@ -190,8 +190,9 @@ typedef struct drm_radeon_depth_clear_t {
 	u32 se_cntl;
 } drm_radeon_depth_clear_t;
 
-struct drm_radeon_driver_file_fields {
-	int64_t radeon_fb_delta;
+struct drm_radeon_file {
+	struct drm_file	file_priv;
+	int64_t		radeon_fb_delta;
 };
 
 struct mem_block {
@@ -223,6 +224,10 @@ struct radeon_virt_surface {
 typedef struct drm_radeon_private {
 	struct device		 dev;
 	struct device		*drmdev;
+
+	pci_chipset_tag_t	 pc;
+	pci_intr_handle_t	 ih;
+	void			*irqh;
 
 	struct vga_pci_bar	*regs;
 	drm_radeon_ring_buffer_t ring;
@@ -398,17 +403,14 @@ extern u32 radeon_get_vblank_counter(struct drm_device *dev, int crtc);
 extern int radeon_enable_vblank(struct drm_device *dev, int crtc);
 extern void radeon_disable_vblank(struct drm_device *dev, int crtc);
 extern irqreturn_t radeon_driver_irq_handler(DRM_IRQ_ARGS);
-extern void radeon_driver_irq_preinstall(struct drm_device * dev);
-extern int radeon_driver_irq_postinstall(struct drm_device * dev);
+extern int radeon_driver_irq_install(struct drm_device * dev);
 extern void radeon_driver_irq_uninstall(struct drm_device * dev);
 extern int radeon_vblank_crtc_get(struct drm_device *dev);
 extern int radeon_vblank_crtc_set(struct drm_device *dev, int64_t value);
 
 extern int radeon_driver_firstopen(struct drm_device *dev);
-extern void radeon_driver_preclose(struct drm_device * dev,
+extern void radeon_driver_close(struct drm_device * dev,
 				   struct drm_file *file_priv);
-extern void radeon_driver_postclose(struct drm_device * dev,
-				    struct drm_file *file_priv);
 extern void radeon_driver_lastclose(struct drm_device * dev);
 extern int radeon_driver_open(struct drm_device * dev,
 			      struct drm_file * file_priv);

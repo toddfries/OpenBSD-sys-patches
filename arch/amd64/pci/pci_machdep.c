@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.14 2008/06/26 05:42:09 ray Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.19 2008/12/07 14:33:26 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.3 2003/05/07 21:33:58 fvdl Exp $	*/
 
 /*-
@@ -83,7 +83,7 @@
 
 #include <uvm/uvm_extern.h>
 
-#define _X86_BUS_DMA_PRIVATE
+#define _BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <machine/pio.h>
@@ -155,7 +155,7 @@ struct {
  * PCI doesn't have any special needs; just use the generic versions
  * of these functions.
  */
-struct x86_bus_dma_tag pci_bus_dma_tag = {
+struct bus_dma_tag pci_bus_dma_tag = {
 	NULL,			/* _may_bounce */
 	_bus_dmamap_create,
 	_bus_dmamap_destroy,
@@ -398,8 +398,8 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 {
 	int pin = pa->pa_intrpin;
 	int line = pa->pa_intrline;
-#if NIOAPIC > 0
 	int rawpin = pa->pa_rawintrpin;
+#if NIOAPIC > 0
 	pci_chipset_tag_t pc = pa->pa_pc;
 	int bus, dev, func;
 	int mppin;
@@ -415,19 +415,23 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 		goto bad;
 	}
 
+	ihp->tag = pa->pa_tag;
+	ihp->line = line;
+	ihp->pin = rawpin;
+
 #if NIOAPIC > 0
 	pci_decompose_tag(pc, pa->pa_tag, &bus, &dev, &func);
 	if (mp_busses != NULL) {
 		mppin = (dev << 2)|(rawpin - 1);
-		if (intr_find_mpmapping(bus, mppin, ihp) == 0) {
-			*ihp |= line;
+		if (intr_find_mpmapping(bus, mppin, &ihp->line) == 0) {
+			ihp->line |= line;
 			return 0;
 		}
 		if (pa->pa_bridgetag) {
 			int pin = PPB_INTERRUPT_SWIZZLE(rawpin, dev);
-			if (pa->pa_bridgeih[pin - 1] != -1) {
-				*ihp = pa->pa_bridgeih[pin - 1];
-				*ihp |= line;
+			if (pa->pa_bridgeih[pin - 1].line != -1) {
+				ihp->line = pa->pa_bridgeih[pin - 1].line;
+				ihp->line |= line;
 				return 0;
 			}
 		}
@@ -467,14 +471,14 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 #if NIOAPIC > 0
 	if (mp_busses != NULL) {
 		if (mp_isa_bus != NULL &&
-		    intr_find_mpmapping(mp_isa_bus->mb_idx, line, ihp) == 0) {
-			*ihp |= line;
+		    intr_find_mpmapping(mp_isa_bus->mb_idx, line, &ihp->line) == 0) {
+			ihp->line |= line;
 			return 0;
 		}
 #if NEISA > 0
 		if (mp_eisa_bus != NULL &&
-		    intr_find_mpmapping(mp_eisa_bus->mb_idx, line, ihp) == 0) {
-			*ihp |= line;
+		    intr_find_mpmapping(mp_eisa_bus->mb_idx, line, &ihp->line) == 0) {
+			ihp->line |= line;
 			return 0;
 		}
 #endif
@@ -484,11 +488,10 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 	}
 #endif
 
-	*ihp = line;
 	return 0;
 
 bad:
-	*ihp = -1;
+	ihp->line = -1;
 	return 1;
 }
 
@@ -497,46 +500,54 @@ pci_intr_string(pci_chipset_tag_t pc, pci_intr_handle_t ih)
 {
 	static char irqstr[64];
 
-	if (ih == 0)
-		panic("pci_intr_string: bogus handle 0x%x", ih);
-
+	if (ih.line == 0)
+		panic("pci_intr_string: bogus handle 0x%x", ih.line);
 
 #if NIOAPIC > 0
-	if (ih & APIC_INT_VIA_APIC)
+	if (ih.line & APIC_INT_VIA_APIC)
 		snprintf(irqstr, sizeof(irqstr), "apic %d int %d (irq %d)",
-		    APIC_IRQ_APIC(ih),
-		    APIC_IRQ_PIN(ih),
-		    ih&0xff);
+		    APIC_IRQ_APIC(ih.line),
+		    APIC_IRQ_PIN(ih.line),
+		    pci_intr_line(ih));
 	else
-		snprintf(irqstr, sizeof(irqstr), "irq %d", ih&0xff);
+		snprintf(irqstr, sizeof(irqstr), "irq %d", pci_intr_line(ih));
 #else
-
-	snprintf(irqstr, sizeof(irqstr), "irq %d", ih&0xff);
+	snprintf(irqstr, sizeof(irqstr), "irq %d", pci_intr_line(ih));
 #endif
 	return (irqstr);
-
 }
+
+#include "acpiprt.h"
+#if NACPIPRT > 0
+void	acpiprt_route_interrupt(int bus, int dev, int pin);
+#endif
 
 void *
 pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
     int (*func)(void *), void *arg, char *what)
 {
 	int pin, irq;
+	int bus, dev;
 	struct pic *pic;
 
+	pci_decompose_tag(pc, ih.tag, &bus, &dev, NULL);
+#if NACPIPRT > 0
+	acpiprt_route_interrupt(bus, dev, ih.pin);
+#endif
+
 	pic = &i8259_pic;
-	pin = irq = ih;
+	pin = irq = ih.line;
 
 #if NIOAPIC > 0
-	if (ih & APIC_INT_VIA_APIC) {
-		pic = (struct pic *)ioapic_find(APIC_IRQ_APIC(ih));
+	if (ih.line & APIC_INT_VIA_APIC) {
+		pic = (struct pic *)ioapic_find(APIC_IRQ_APIC(ih.line));
 		if (pic == NULL) {
 			printf("pci_intr_establish: bad ioapic %d\n",
-			    APIC_IRQ_APIC(ih));
+			    APIC_IRQ_APIC(ih.line));
 			return NULL;
 		}
-		pin = APIC_IRQ_PIN(ih);
-		irq = APIC_IRQ_LEGACY_IRQ(ih);
+		pin = APIC_IRQ_PIN(ih.line);
+		irq = APIC_IRQ_LEGACY_IRQ(ih.line);
 		if (irq < 0 || irq >= NUM_LEGACY_IRQS)
 			irq = -1;
 	}
@@ -595,4 +606,3 @@ pci_bus_flags(void)
 	rval &= ~(PCI_FLAGS_MEM_ENABLED);
 	return (rval);
 }
-

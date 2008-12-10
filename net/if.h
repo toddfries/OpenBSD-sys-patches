@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.95 2008/11/07 05:50:33 deraadt Exp $	*/
+/*	$OpenBSD: if.h,v 1.100 2008/11/30 00:14:42 brad Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -146,6 +146,17 @@ struct	ifqueue {
 	struct	timeout *ifq_congestion;
 };
 
+#define MCLPOOLS	7		/* number of cluster pools */
+
+struct	mclstat {
+	struct {
+		u_short	mcl_alive;
+		u_short mcl_hwm;
+		u_short mcl_size;
+		u_short mcl_lwm;
+	}	mclpool[MCLPOOLS];
+};
+
 /*
  * Values for if_link_state.
  */
@@ -216,14 +227,16 @@ struct ifnet {				/* and the entries */
 	int	(*if_ioctl)(struct ifnet *, u_long, caddr_t);
 					/* init routine */
 	int	(*if_init)(struct ifnet *);
-					/* XXX bus reset routine */
-	int	(*if_reset)(struct ifnet *);
+					/* stop routine */
+	int	(*if_stop)(struct ifnet *, int);
 					/* timer routine */
 	void	(*if_watchdog)(struct ifnet *);
 	struct	ifaltq if_snd;		/* output queue (includes altq) */
 	struct sockaddr_dl *if_sadl;	/* pointer to our sockaddr_dl */
 
 	void	*if_afdata[AF_MAX];
+
+	struct mclstat if_mclstat;	/* mbuf cluster pool stats */
 };
 #define	if_mtu		if_data.ifi_mtu
 #define	if_type		if_data.ifi_type

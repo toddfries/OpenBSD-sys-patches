@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.101 2008/11/17 01:25:31 brad Exp $	*/
+/*	$OpenBSD: re.c,v 1.103 2008/11/30 06:01:45 brad Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -230,6 +230,7 @@ static const struct re_revision {
 	{ RL_HWREV_8168C,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168C_SPIN2,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168CP,	"RTL8168CP/8111CP" },
+	{ RL_HWREV_8168D,	"RTL8168D/8111D" },
 	{ RL_HWREV_8169,	"RTL8169" },
 	{ RL_HWREV_8169_8110SB,	"RTL8169/8110SB" },
 	{ RL_HWREV_8169_8110SBL, "RTL8169SBL" },
@@ -865,6 +866,7 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	case RL_HWREV_8168C:
 	case RL_HWREV_8168C_SPIN2:
 	case RL_HWREV_8168CP:
+	case RL_HWREV_8168D:
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
 		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
 		    RL_FLAG_HWIM;
@@ -2108,12 +2110,6 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			arp_ifinit(&sc->sc_arpcom, ifa);
 #endif /* INET */
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING)
@@ -2126,27 +2122,18 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		sc->if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				re_iff(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			re_iff(sc);
+		error = 0;
 	}
 
 	splx(s);

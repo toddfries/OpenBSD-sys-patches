@@ -73,8 +73,13 @@ sisdrm_attach(struct device *parent, struct device *self, void *aux)
 {
 	drm_sis_private_t	*dev_priv = (drm_sis_private_t *)self;
 	struct pci_attach_args	*pa = aux;
+	int			 is_agp;
 
-	dev_priv->drmdev = drm_attach_mi(&sis_driver, pa, self);
+	is_agp = pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP,
+	    NULL, NULL);
+	printf("\n");
+
+	dev_priv->drmdev = drm_attach_pci(&sis_driver, pa, is_agp, self);
 }
 
 int

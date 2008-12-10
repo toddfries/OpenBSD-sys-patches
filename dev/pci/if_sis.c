@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.84 2008/11/10 07:23:43 cnst Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.86 2008/12/04 23:05:32 oga Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -319,22 +319,15 @@ void
 sis_read_cmos(struct sis_softc *sc, struct pci_attach_args *pa,
     caddr_t dest, int off, int cnt)
 {
-	bus_space_tag_t btag;
 	u_int32_t reg;
 	int i;
 
 	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, 0x48);
 	pci_conf_write(pa->pa_pc, pa->pa_tag, 0x48, reg | 0x40);
 
-#if defined(__amd64__)
-	btag = X86_BUS_SPACE_IO;
-#elif defined(__i386__)
-	btag = I386_BUS_SPACE_IO;
-#endif
-
 	for (i = 0; i < cnt; i++) {
-		bus_space_write_1(btag, 0x0, 0x70, i + off);
-		*(dest + i) = bus_space_read_1(btag, 0x0, 0x71);
+		bus_space_write_1(pa->pa_iot, 0x0, 0x70, i + off);
+		*(dest + i) = bus_space_read_1(pa->pa_iot, 0x0, 0x71);
 	}
 
 	pci_conf_write(pa->pa_pc, pa->pa_tag, 0x48, reg & ~0x40);
@@ -1887,8 +1880,8 @@ int
 sis_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct sis_softc	*sc = ifp->if_softc;
+	struct ifaddr		*ifa = (struct ifaddr *) data;
 	struct ifreq		*ifr = (struct ifreq *) data;
-	struct ifaddr		*ifa = (struct ifaddr *)data;
 	struct mii_data		*mii;
 	int			s, error = 0;
 
@@ -1904,6 +1897,7 @@ sis_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			arp_ifinit(&sc->arpcom, ifa);
 #endif
 		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1925,35 +1919,21 @@ sis_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		sc->sc_if_flags = ifp->if_flags;
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				sis_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		mii = &sc->sc_mii;
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			sis_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);

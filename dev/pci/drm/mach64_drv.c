@@ -71,11 +71,11 @@ static const struct drm_driver_info machdrm_driver = {
 	.buf_priv_size		= 1, /* No dev_priv */
 	.ioctl			= machdrm_ioctl,
 	.lastclose		= mach64_driver_lastclose,
+	.vblank_pipes		= 1,
 	.get_vblank_counter	= mach64_get_vblank_counter,
 	.enable_vblank		= mach64_enable_vblank,
 	.disable_vblank		= mach64_disable_vblank,
-	.irq_preinstall		= mach64_driver_irq_preinstall,
-	.irq_postinstall	= mach64_driver_irq_postinstall,
+	.irq_install		= mach64_driver_irq_install,
 	.irq_uninstall		= mach64_driver_irq_uninstall,
 	.irq_handler		= mach64_driver_irq_handler,
 	.dma_ioctl		= mach64_dma_buffers,
@@ -90,7 +90,6 @@ static const struct drm_driver_info machdrm_driver = {
 	.flags			= DRIVER_AGP | DRIVER_MTRR | DRIVER_PCI_DMA |
 				    DRIVER_DMA | DRIVER_SG | DRIVER_IRQ,
 };
-
 int
 machdrm_probe(struct device *parent, void *match, void *aux)
 {
@@ -103,6 +102,9 @@ machdrm_attach(struct device *parent, struct device *self, void *aux)
 	drm_mach64_private_t	*dev_priv = (drm_mach64_private_t *)self;
 	struct pci_attach_args	*pa = aux;
 	struct vga_pci_bar	*bar;
+	int			 is_agp;
+
+	dev_priv->pc = pa->pa_pc;
 
 	bar = vga_pci_bar_info((struct vga_pci_softc *)parent, 2);
 	if (bar == NULL) {
@@ -111,13 +113,22 @@ machdrm_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	dev_priv->regs = vga_pci_bar_map((struct vga_pci_softc *)parent, 
-	    bar->addr, bar->size, 0);
+	    bar->addr, 0, 0);
 	if (dev_priv->regs == NULL) {
 		printf(": can't map mmio space\n");
 		return;
 	}
 
-	dev_priv->drmdev = drm_attach_mi(&machdrm_driver, pa, self);
+	if (pci_intr_map(pa, &dev_priv->ih) != 0) {
+		printf(": couldn't map interrupt\n");
+		return;
+	}
+	printf(": %s\n", pci_intr_string(pa->pa_pc, dev_priv->ih));
+
+	is_agp = pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP,
+	    NULL, NULL);
+
+	dev_priv->drmdev = drm_attach_pci(&machdrm_driver, pa, is_agp, self);
 }
 
 int

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.h,v 1.34 2008/11/10 13:15:51 mglocker Exp $ */
+/*	$OpenBSD: uvideo.h,v 1.41 2008/12/08 22:02:39 deraadt Exp $ */
 
 /*
  * Copyright (c) 2007 Robert Nagy <robert@openbsd.org>
@@ -304,6 +304,10 @@ struct usb_video_probe_commit {
     0x4e, 0x56, 0x31, 0x32, 0x00, 0x00, 0x10, 0x00,	\
     0x80, 0x00, 0x00, 0xaa, 0x00, 0x38,	0x9b, 0x71 }
 
+#define	UVIDEO_FORMAT_GUID_UYVY	{			\
+    0x55, 0x59, 0x56, 0x59, 0x00, 0x00, 0x10, 0x00,	\
+    0x80, 0x00, 0x00, 0xaa, 0x00, 0x38,	0x9b, 0x71 }
+
 /*
  * USB Video Payload MJPEG
  */
@@ -426,20 +430,33 @@ struct uvideo_format_desc {
 } __packed;
 
 #define UVIDEO_NFRAMES_MAX	40
-struct uvideo_vs_iface {
+struct uvideo_isoc_xfer {
 	struct uvideo_softc	*sc;
 	usbd_xfer_handle	 xfer;
 	void			*buf;
-	usbd_interface_handle  	 ifaceh;
-	int			 endpoint;
-	usbd_pipe_handle	 pipeh;
 	uint16_t		 size[UVIDEO_NFRAMES_MAX];
+};
+
+struct uvideo_bulk_xfer {
+	struct uvideo_softc	*sc;
+	usbd_xfer_handle	 xfer;
+	void			*buf;
+	uint16_t		 size;
+};
+
+#define UVIDEO_IXFERS		3
+struct uvideo_vs_iface {
+	usbd_interface_handle  	 ifaceh;
+	usbd_pipe_handle	 pipeh;
+	int			 iface;
 	int			 numalts;
 	int			 curalt;
-	uint32_t		 max_packet_size;
-	int			 iface;
+	int			 endpoint;
+	uint32_t		 psize;
 	int			 bulk_endpoint;
 	int			 bulk_running;
+	struct uvideo_isoc_xfer	 ixfer[UVIDEO_IXFERS];
+	struct uvideo_bulk_xfer	 bxfer;
 };
 
 struct uvideo_frame_buffer {
@@ -582,4 +599,6 @@ struct uvideo_softc {
 	int					*sc_uplayer_fsize;
 	uint8_t					*sc_uplayer_fbuffer;
 	void					 (*sc_uplayer_intr)(void *);
+
+	struct uvideo_devs			*sc_ucode;
 };

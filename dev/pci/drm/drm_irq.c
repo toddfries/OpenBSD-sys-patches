@@ -35,7 +35,6 @@
 #include "drmP.h"
 #include "drm.h"
 
-irqreturn_t	drm_irq_handler_wrap(DRM_IRQ_ARGS);
 void		drm_update_vblank_count(struct drm_device *, int);
 void		vblank_disable(void *);
 
@@ -44,12 +43,11 @@ drm_irq_by_busid(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	struct drm_irq_busid	*irq = data;
 
-	if ((irq->busnum >> 8) != dev->pci_domain ||
-	    (irq->busnum & 0xff) != dev->pci_bus ||
-	    irq->devnum != dev->pci_slot ||
-	    irq->funcnum != dev->pci_func)
-		return EINVAL;
-
+	/*
+	 * This is only ever called by root as part of a stupid interface.
+	 * just hand over the irq without checking the busid. If all clients
+	 * can be forced to use interface 1.2 then this can die.
+	 */
 	irq->irq = dev->irq;
 
 	DRM_DEBUG("%d:%d:%d => IRQ %d\n", irq->busnum, irq->devnum,
@@ -74,9 +72,7 @@ drm_irq_handler_wrap(DRM_IRQ_ARGS)
 int
 drm_irq_install(struct drm_device *dev)
 {
-	int retcode;
-	pci_intr_handle_t ih;
-	const char *istr;
+	int	ret;
 
 	if (dev->irq == 0 || dev->dev_private == NULL)
 		return (EINVAL);
@@ -93,33 +89,16 @@ drm_irq_install(struct drm_device *dev)
 
 	mtx_init(&dev->irq_lock, IPL_BIO);
 
-	/* Before installing handler */
-	dev->driver->irq_preinstall(dev);
-
-	/* Install handler */
-	if (pci_intr_map(&dev->pa, &ih) != 0) {
-		retcode = ENOENT;
+	if ((ret = dev->driver->irq_install(dev)) != 0)
 		goto err;
-	}
-	istr = pci_intr_string(dev->pa.pa_pc, ih);
-	dev->irqh = pci_intr_establish(dev->pa.pa_pc, ih, IPL_BIO,
-	    drm_irq_handler_wrap, dev, dev->device.dv_xname);
-	if (!dev->irqh) {
-		retcode = ENOENT;
-		goto err;
-	}
-	DRM_DEBUG("%s: interrupting at %s\n", dev->device.dv_xname, istr);
 
-	/* After installing handler */
-	dev->driver->irq_postinstall(dev);
-
-	return 0;
+	return (0);
 err:
 	DRM_LOCK();
 	dev->irq_enabled = 0;
 	DRM_SPINUNINIT(&dev->irq_lock);
 	DRM_UNLOCK();
-	return retcode;
+	return (ret);
 }
 
 int
@@ -139,9 +118,6 @@ drm_irq_uninstall(struct drm_device *dev)
 
 	dev->driver->irq_uninstall(dev);
 
-	pci_intr_disestablish(dev->pa.pa_pc, dev->irqh);
-
-	drm_vblank_cleanup(dev);
 	DRM_SPINUNINIT(&dev->irq_lock);
 
 	return 0;
@@ -259,18 +235,20 @@ drm_vblank_get(struct drm_device *dev, int crtc)
 {
 	int ret = 0;
 
-	DRM_SPINLOCK(&dev->vbl_lock);
+	if (dev->irq_enabled == 0)
+		return (EINVAL);
 
+	DRM_SPINLOCK(&dev->vbl_lock);
 	atomic_add(1, &dev->vblank[crtc].vbl_refcount);
 	if (dev->vblank[crtc].vbl_refcount == 1 &&
 	    dev->vblank[crtc].vbl_enabled == 0) {
-		ret = dev->driver->enable_vblank(dev, crtc);
-		if (ret) {
-			atomic_dec(&dev->vblank[crtc].vbl_refcount);
-		} else {
+		if ((ret = dev->driver->enable_vblank(dev, crtc)) == 0) {
 			dev->vblank[crtc].vbl_enabled = 1;
 			drm_update_vblank_count(dev, crtc);
+		} else {
+			atomic_dec(&dev->vblank[crtc].vbl_refcount);
 		}
+
 	}
 	DRM_SPINUNLOCK(&dev->vbl_lock);
 
@@ -280,6 +258,9 @@ drm_vblank_get(struct drm_device *dev, int crtc)
 void
 drm_vblank_put(struct drm_device *dev, int crtc)
 {
+	if (dev->irq_enabled == 0)
+		return;
+
 	DRM_SPINLOCK(&dev->vbl_lock);
 	/* Last user schedules interrupt disable */
 	atomic_dec(&dev->vblank[crtc].vbl_refcount);

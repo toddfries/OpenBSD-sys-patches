@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1436 2008/11/22 04:15:06 oga Exp 
+ *	OpenBSD: pcidevs,v 1.1442 2008/12/04 05:29:33 brad Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -3512,6 +3512,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Radeon HD 4850",
 	},
 	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4650,
+	    "Radeon HD 4650",
+	},
+	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2400_XT,
 	    "Radeon HD 2400 XT",
 	},
@@ -3534,6 +3538,14 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2600_PRO,
 	    "Radeon HD 2600 Pro",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3650_M,
+	    "Mobility Radeon HD 3650",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3650_AGP,
+	    "Radeon HD 3650 AGP",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3650,
@@ -8548,6 +8560,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "GM45 Host",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_PCIE,
+	    "GM45 PCIE",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_IGD_1,
 	    "GM45 Video",
 	},
@@ -8562,6 +8578,14 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_HECI_2,
 	    "GM45 HECI",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_PT_IDER,
+	    "GM45 PT IDER",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_AMT_SOL,
+	    "GM45 AMT SOL",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q45_HB,
@@ -9024,6 +9048,14 @@ static const struct pci_known_product pci_known_products[] = {
 	    "WiFi Link 5350AGN",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5150AGN_1,
+	    "WiFi Link 5150AGN",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5150AGN_2,
+	    "WiFi Link 5150AGN",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_TURBO_MEMORY,
 	    "Turbo Memory",
 	},
@@ -9390,6 +9422,22 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_JMB368,
 	    "JMB368 IDE",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_SD,
+	    "SD Host Controller",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_SDMMC,
+	    "SD/MMC",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_MS,
+	    "Memory Stick",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_XD,
+	    "xD",
 	},
 	{
 	    PCI_VENDOR_KTI, PCI_PRODUCT_KTI_KTIE,
@@ -14546,6 +14594,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_5513,
 	    "5513 EIDE",
+	},
+	{
+	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_5518,
+	    "5518 EIDE",
 	},
 	{
 	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_5571,

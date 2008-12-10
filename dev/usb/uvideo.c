@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.91 2008/11/10 11:54:39 mglocker Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.104 2008/12/09 06:01:41 brad Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -62,14 +62,15 @@ void		uvideo_disable(void *);
 int		uvideo_open(void *, int, int *, uint8_t *, void (*)(void *),
 		    void *arg);
 int		uvideo_close(void *);
-int             uvideo_match(struct device *, void *, void *);
-void            uvideo_attach(struct device *, struct device *, void *);
-int             uvideo_detach(struct device *, int);
-int             uvideo_activate(struct device *, enum devact);
+int		uvideo_match(struct device *, void *, void *);
+void		uvideo_attach(struct device *, struct device *, void *);
+void		uvideo_attach_hook(void *);
+int		uvideo_detach(struct device *, int);
+int		uvideo_activate(struct device *, enum devact);
 
 usbd_status	uvideo_vc_parse_desc(struct uvideo_softc *);
 usbd_status	uvideo_vc_parse_desc_header(struct uvideo_softc *,
-	 	    const usb_descriptor_t *);
+		    const usb_descriptor_t *);
 usbd_status	uvideo_vc_parse_desc_pu(struct uvideo_softc *,
 		    const usb_descriptor_t *);
 usbd_status	uvideo_vc_get_ctrl(struct uvideo_softc *, uint8_t *, uint8_t,
@@ -105,20 +106,26 @@ usbd_status	uvideo_vs_get_probe(struct uvideo_softc *, uint8_t *, uint8_t);
 usbd_status	uvideo_vs_set_commit(struct uvideo_softc *, uint8_t *);
 usbd_status	uvideo_vs_alloc_frame(struct uvideo_softc *);
 void		uvideo_vs_free_frame(struct uvideo_softc *);
-usbd_status	uvideo_vs_alloc(struct uvideo_softc *);
-void		uvideo_vs_free(struct uvideo_softc *);
+usbd_status	uvideo_vs_alloc_isoc(struct uvideo_softc *);
+usbd_status	uvideo_vs_alloc_bulk(struct uvideo_softc *);
+void		uvideo_vs_free_isoc(struct uvideo_softc *);
+void		uvideo_vs_free_bulk(struct uvideo_softc *);
 usbd_status	uvideo_vs_open(struct uvideo_softc *);
 void		uvideo_vs_close(struct uvideo_softc *);
 usbd_status	uvideo_vs_init(struct uvideo_softc *);
 int		uvideo_vs_start_bulk(struct uvideo_softc *);
 void		uvideo_vs_start_bulk_thread(void *);
 void		uvideo_vs_start_isoc(struct uvideo_softc *);
+void		uvideo_vs_start_isoc_ixfer(struct uvideo_softc *,
+		    struct uvideo_isoc_xfer *);
 void		uvideo_vs_cb(usbd_xfer_handle, usbd_private_handle,
 		    usbd_status);
 usbd_status	uvideo_vs_decode_stream_header(struct uvideo_softc *,
 		    uint8_t *, int); 
 void		uvideo_mmap_queue(struct uvideo_softc *, uint8_t *, int);
 void		uvideo_read(struct uvideo_softc *, uint8_t *, int);
+usbd_status	uvideo_usb_control(struct uvideo_softc *sc, uint8_t rt, uint8_t r,
+		    uint16_t value, uint8_t *data, size_t length);
 
 #ifdef UVIDEO_DEBUG
 void		uvideo_dump_desc_all(struct uvideo_softc *);
@@ -186,6 +193,11 @@ caddr_t		uvideo_mappage(void *, off_t, int);
 int		uvideo_get_bufsize(void *);
 int		uvideo_start_read(void *);
 
+/*
+ * Firmware
+ */
+usbd_status	uvideo_ucode_loader_ricoh(struct uvideo_softc *);
+
 struct cfdriver uvideo_cd = {
 	NULL, "uvideo", DV_DULL
 };
@@ -225,14 +237,25 @@ struct video_hw_if uvideo_hw_if = {
 };
 
 /*
- * Some devices do not report themselfs as UVC compatible although
- * they are.  They report UICLASS_VENDOR in the bInterfaceClass
- * instead of UICLASS_VIDEO.  Give those devices a chance to attach
- * by looking up their USB ID.
+ * Devices which either fail to declare themselves as UICLASS_VIDEO,
+ * or which need firmware uploads or other quirk handling later on.
  */
-static const struct usb_devno uvideo_quirk_devs [] = {
-	{ USB_VENDOR_LOGITECH,	USB_PRODUCT_LOGITECH_QUICKCAMOEM_1 }
+struct uvideo_devs {
+	struct usb_devno uv_dev;
+	char		*ucode_name;
+	usbd_status	(*ucode_loader)(struct uvideo_softc *);
+} uvideo_devs[] = {
+	{
+	    { USB_VENDOR_RICOH, USB_PRODUCT_RICOH_VGPVCC7 },
+	    "r5u87x-05ca-183a.fw",
+	    uvideo_ucode_loader_ricoh
+	},
+	{	/* Incorrectly reports as UICLASS_VENDOR */
+	    { USB_VENDOR_LOGITECH, USB_PRODUCT_LOGITECH_QUICKCAMOEM_1 },
+	    NULL, NULL
+	}
 };
+#define uvideo_lookup(v, p) ((struct uvideo_devs *)usb_lookup(uvideo_devs, v, p))
 
 int
 uvideo_enable(void *v)
@@ -301,7 +324,10 @@ uvideo_close(void *addr)
 	uvideo_vs_close(sc);
 
 	/* free video stream xfer buffer */
-	uvideo_vs_free(sc);
+	if (sc->sc_vs_cur->bulk_endpoint)
+		uvideo_vs_free_bulk(sc);
+	else
+		uvideo_vs_free_isoc(sc);
 
 	/* free video stream frame buffer */
 	uvideo_vs_free_frame(sc);
@@ -328,7 +354,7 @@ uvideo_match(struct device *parent, void *match, void *aux)
 	    id->bInterfaceSubClass == UISUBCLASS_VIDEOCONTROL)
 		return (UMATCH_VENDOR_PRODUCT_CONF_IFACE);
 
-	if (usb_lookup(uvideo_quirk_devs, uaa->vendor, uaa->product) != NULL &&
+	if (uvideo_lookup(uaa->vendor, uaa->product) != NULL &&
 	    id->bInterfaceClass == UICLASS_VENDOR &&
 	    id->bInterfaceSubClass == UISUBCLASS_VIDEOCONTROL)
 		return (UMATCH_VENDOR_PRODUCT_CONF_IFACE);
@@ -365,6 +391,27 @@ uvideo_attach(struct device *parent, struct device *self, void *aux)
 	error = uvideo_vs_parse_desc(sc, uaa, cdesc);
 	if (error != USBD_NORMAL_COMPLETION)
 		return;
+
+	/* if the device needs ucode do mountroothook */
+	sc->sc_ucode = uvideo_lookup(uaa->vendor, uaa->product);
+
+	if ((sc->sc_ucode && sc->sc_ucode->ucode_name) && rootvp == NULL)
+		mountroothook_establish(uvideo_attach_hook, sc);
+	else
+		uvideo_attach_hook(sc);
+}
+
+void
+uvideo_attach_hook(void *arg)
+{
+	struct uvideo_softc *sc = arg;
+	usbd_status error;
+
+	if (sc->sc_ucode && sc->sc_ucode->ucode_name) {
+		error = (sc->sc_ucode->ucode_loader)(sc);
+		if (error != USBD_NORMAL_COMPLETION)
+			return;
+	}
 
 	/* set default video stream interface */
 	error = usbd_set_interface(sc->sc_vs_cur->ifaceh, 0);
@@ -780,8 +827,14 @@ uvideo_vs_parse_desc_format_mjpeg(struct uvideo_softc *sc,
 
 	sc->sc_fmtgrp[sc->sc_fmtgrp_idx].format =
 	    (struct uvideo_format_desc *)d;
-	sc->sc_fmtgrp[sc->sc_fmtgrp_idx].format_dfidx =
-	    sc->sc_fmtgrp[sc->sc_fmtgrp_idx].format->u.mjpeg.bDefaultFrameIndex;
+	if (d->bDefaultFrameIndex > d->bNumFrameDescriptors ||
+	    d->bDefaultFrameIndex < 1) {
+		/* sanitize wrong bDefaultFrameIndex value */
+		sc->sc_fmtgrp[sc->sc_fmtgrp_idx].format_dfidx = 1;
+	} else {
+		sc->sc_fmtgrp[sc->sc_fmtgrp_idx].format_dfidx =
+		    d->bDefaultFrameIndex;
+	}
 	sc->sc_fmtgrp[sc->sc_fmtgrp_idx].pixelformat = V4L2_PIX_FMT_MJPEG;
 
 	if (sc->sc_fmtgrp_cur == NULL)
@@ -816,13 +869,21 @@ uvideo_vs_parse_desc_format_uncompressed(struct uvideo_softc *sc,
 
 	sc->sc_fmtgrp[sc->sc_fmtgrp_idx].format =
 	    (struct uvideo_format_desc *)d;
-	sc->sc_fmtgrp[sc->sc_fmtgrp_idx].format_dfidx =
-	    sc->sc_fmtgrp[sc->sc_fmtgrp_idx].format->u.uc.bDefaultFrameIndex;
+	if (d->bDefaultFrameIndex > d->bNumFrameDescriptors ||
+	    d->bDefaultFrameIndex < 1) {
+		/* sanitize wrong bDefaultFrameIndex value */
+		sc->sc_fmtgrp[sc->sc_fmtgrp_idx].format_dfidx = 1;
+	} else {
+		sc->sc_fmtgrp[sc->sc_fmtgrp_idx].format_dfidx =
+		    d->bDefaultFrameIndex;
+	}
 	i = sc->sc_fmtgrp_idx;
 	if (!strcmp(sc->sc_fmtgrp[i].format->u.uc.guidFormat, "YUY2")) {
 		sc->sc_fmtgrp[i].pixelformat = V4L2_PIX_FMT_YUYV;
 	} else if (!strcmp(sc->sc_fmtgrp[i].format->u.uc.guidFormat, "NV12")) {
 		sc->sc_fmtgrp[i].pixelformat = V4L2_PIX_FMT_NV12;
+	} else if (!strcmp(sc->sc_fmtgrp[i].format->u.uc.guidFormat, "UYVY")) {
+		sc->sc_fmtgrp[i].pixelformat = V4L2_PIX_FMT_UYVY;
 	} else {
 		sc->sc_fmtgrp[i].pixelformat = 0;
 	}
@@ -894,16 +955,7 @@ uvideo_vs_parse_desc_frame_mjpeg(struct uvideo_softc *sc,
 	fmtidx = sc->sc_fmtgrp_idx;
 	sc->sc_fmtgrp[fmtidx].frame[d->bFrameIndex] = d;
 
-	/*
-	 * If bDefaultFrameIndex is not set by the device
-	 * use the first bFrameIndex available, otherwise
-	 * set it to the default one.
-	 */
-	if (sc->sc_fmtgrp[fmtidx].format->u.mjpeg.bDefaultFrameIndex == 0) {
-		sc->sc_fmtgrp[fmtidx].frame_cur =
-		    sc->sc_fmtgrp[fmtidx].frame[1];
-	} else if (sc->sc_fmtgrp[fmtidx].format->u.mjpeg.bDefaultFrameIndex ==
-	    d->bFrameIndex) {
+	if (sc->sc_fmtgrp[fmtidx].format_dfidx == d->bFrameIndex) {
 		sc->sc_fmtgrp[fmtidx].frame_cur =
 		    sc->sc_fmtgrp[fmtidx].frame[d->bFrameIndex];
 	}
@@ -936,16 +988,7 @@ uvideo_vs_parse_desc_frame_uncompressed(struct uvideo_softc *sc,
 	sc->sc_fmtgrp[fmtidx].frame[d->bFrameIndex] =
 	    (struct usb_video_frame_mjpeg_desc *)d;
 
-	/*
-	 * If bDefaultFrameIndex is not set by the device
-	 * use the first bFrameIndex available, otherwise
-	 * set it to the default one.
-	 */
-	if (sc->sc_fmtgrp[fmtidx].format->u.uc.bDefaultFrameIndex == 0) {
-		sc->sc_fmtgrp[fmtidx].frame_cur =
-		    sc->sc_fmtgrp[fmtidx].frame[1];
-	} else if (sc->sc_fmtgrp[fmtidx].format->u.uc.bDefaultFrameIndex ==
-	    d->bFrameIndex) {
+	if (sc->sc_fmtgrp[fmtidx].format_dfidx == d->bFrameIndex) {
 		sc->sc_fmtgrp[fmtidx].frame_cur =
 		    sc->sc_fmtgrp[fmtidx].frame[d->bFrameIndex];
 	}
@@ -1008,12 +1051,12 @@ uvideo_vs_parse_desc_alt(struct uvideo_softc *sc, struct usb_attach_arg *uaa,
 			goto next;
 
 		/* save endpoint with largest bandwidth */
-		if (UGETW(ed->wMaxPacketSize) > vs->max_packet_size) {
+		if (UGETW(ed->wMaxPacketSize) > vs->psize) {
 			vs->ifaceh = uaa->ifaces[iface];
 			vs->endpoint = ed->bEndpointAddress;
 			vs->numalts = numalts;
 			vs->curalt = id->bAlternateSetting;
-			vs->max_packet_size = UGETW(ed->wMaxPacketSize);
+			vs->psize = UGETW(ed->wMaxPacketSize);
 			vs->iface = iface;
 		}
 next:
@@ -1040,6 +1083,7 @@ uvideo_vs_set_alt(struct uvideo_softc *sc, usbd_interface_handle ifaceh,
 	usb_endpoint_descriptor_t *ed;
 	int i;
 	usbd_status error;
+	uint32_t psize;
 
 	i = 0;
 	usb_desc_iter_init(sc->sc_udev, &iter);
@@ -1062,10 +1106,12 @@ uvideo_vs_set_alt(struct uvideo_softc *sc, usbd_interface_handle ifaceh,
 		i++;
 
 		/* save endpoint with requested bandwidth */
-		if (UGETW(ed->wMaxPacketSize) >= max_packet_size) {
+		psize = UGETW(ed->wMaxPacketSize);
+		psize = UE_GET_SIZE(psize) * (1 + UE_GET_TRANS(psize));
+		if (psize == max_packet_size) {
 			sc->sc_vs_cur->endpoint = ed->bEndpointAddress;
 			sc->sc_vs_cur->curalt = id->bAlternateSetting;
-			sc->sc_vs_cur->max_packet_size = max_packet_size;
+			sc->sc_vs_cur->psize = psize;
 			DPRINTF(1, "%s: set alternate iface to ", DEVNAME(sc));
 			DPRINTF(1, "bAlternateSetting=0x%02x\n",
 			    id->bAlternateSetting);
@@ -1171,19 +1217,14 @@ uvideo_vs_negotiation(struct uvideo_softc *sc, int commit)
 		return (USBD_INVAL);
 	}
 
-	/* get probe */
-	bzero(probe_data, sizeof(probe_data));
-	error = uvideo_vs_get_probe(sc, probe_data, GET_CUR);
-	if (error != USBD_NORMAL_COMPLETION)
-		return (error);
-
 	/* set probe */
+	bzero(probe_data, sizeof(probe_data));
+	USETW(pc->bmHint, 0x1);
 	pc->bFormatIndex = sc->sc_fmtgrp_cur->format->bFormatIndex;
 	pc->bFrameIndex = sc->sc_fmtgrp_cur->format_dfidx;
+	/* dwFrameInterval: 30fps=333333, 15fps=666666, 10fps=1000000 */
 	USETDW(pc->dwFrameInterval,
 	    UGETDW(sc->sc_fmtgrp_cur->frame_cur->dwDefaultFrameInterval));
-	USETDW(pc->dwMaxVideoFrameSize, 0);
-	USETDW(pc->dwMaxPayloadTransferSize, 0);
 	error = uvideo_vs_set_probe(sc, probe_data);
 	if (error != USBD_NORMAL_COMPLETION)
 		return (error);
@@ -1236,7 +1277,8 @@ uvideo_vs_set_probe(struct uvideo_softc *sc, uint8_t *probe_data)
 	DPRINTF(1, "bmHint=0x%02x\n", UGETW(pc->bmHint));
 	DPRINTF(1, "bFormatIndex=0x%02x\n", pc->bFormatIndex);
 	DPRINTF(1, "bFrameIndex=0x%02x\n", pc->bFrameIndex);
-	DPRINTF(1, "dwFrameInterval=%d (ns)\n", UGETDW(pc->dwFrameInterval));
+	DPRINTF(1, "dwFrameInterval=%d (100ns units)\n",
+	    UGETDW(pc->dwFrameInterval));
 	DPRINTF(1, "wKeyFrameRate=%d\n", UGETW(pc->wKeyFrameRate));
 	DPRINTF(1, "wPFrameRate=%d\n", UGETW(pc->wPFrameRate));
 	DPRINTF(1, "wCompQuality=%d\n", UGETW(pc->wCompQuality));
@@ -1280,7 +1322,8 @@ uvideo_vs_get_probe(struct uvideo_softc *sc, uint8_t *probe_data,
 	DPRINTF(1, "bmHint=0x%02x\n", UGETW(pc->bmHint));
 	DPRINTF(1, "bFormatIndex=0x%02x\n", pc->bFormatIndex);
 	DPRINTF(1, "bFrameIndex=0x%02x\n", pc->bFrameIndex);
-	DPRINTF(1, "dwFrameInterval=%d (ns)\n", UGETDW(pc->dwFrameInterval));
+	DPRINTF(1, "dwFrameInterval=%d (100ns units)\n",
+	    UGETDW(pc->dwFrameInterval));
 	DPRINTF(1, "wKeyFrameRate=%d\n", UGETW(pc->wKeyFrameRate));
 	DPRINTF(1, "wPFrameRate=%d\n", UGETW(pc->wPFrameRate));
 	DPRINTF(1, "wCompQuality=%d\n", UGETW(pc->wCompQuality));
@@ -1367,49 +1410,98 @@ uvideo_vs_free_frame(struct uvideo_softc *sc)
 }
 
 usbd_status
-uvideo_vs_alloc(struct uvideo_softc *sc)
+uvideo_vs_alloc_isoc(struct uvideo_softc *sc)
 {
-	int size;
+	int size, i;
 
 	DPRINTF(1, "%s: %s\n", DEVNAME(sc), __func__);
 
-	sc->sc_vs_cur->sc = sc;
+	for (i = 0; i < UVIDEO_IXFERS; i++) {
+		sc->sc_vs_cur->ixfer[i].sc = sc;
 
-	sc->sc_vs_cur->xfer = usbd_alloc_xfer(sc->sc_udev);	
-	if (sc->sc_vs_cur->xfer == NULL) {
-		printf("%s: could not allocate VS xfer!\n", DEVNAME(sc));
-		return (USBD_NOMEM);	
+		sc->sc_vs_cur->ixfer[i].xfer = usbd_alloc_xfer(sc->sc_udev);	
+		if (sc->sc_vs_cur->ixfer[i].xfer == NULL) {
+			printf("%s: could not allocate isoc VS xfer!\n",
+			    DEVNAME(sc));
+			return (USBD_NOMEM);	
+		}
+
+		size = sc->sc_vs_cur->psize * sc->sc_nframes;
+
+		sc->sc_vs_cur->ixfer[i].buf =
+		    usbd_alloc_buffer(sc->sc_vs_cur->ixfer[i].xfer, size);
+		if (sc->sc_vs_cur->ixfer[i].buf == NULL) {
+			printf("%s: could not allocate isoc VS buffer!\n",
+			    DEVNAME(sc));
+			return (USBD_NOMEM);
+		}
+		DPRINTF(1, "%s: allocated %d bytes isoc VS xfer buffer\n",
+		    DEVNAME(sc), size);
 	}
 
-	if (sc->sc_vs_cur->bulk_endpoint)
-		size = UGETDW(sc->sc_desc_probe.dwMaxPayloadTransferSize);
-	else
-		size = sc->sc_vs_cur->max_packet_size * sc->sc_nframes;
+	return (USBD_NORMAL_COMPLETION);
+}
 
-	sc->sc_vs_cur->buf = usbd_alloc_buffer(sc->sc_vs_cur->xfer, size);
-	if (sc->sc_vs_cur->buf == NULL) {
-		printf("%s: could not allocate VS buffer!\n", DEVNAME(sc));
+usbd_status
+uvideo_vs_alloc_bulk(struct uvideo_softc *sc)
+{
+	int size;
+
+	sc->sc_vs_cur->bxfer.sc = sc;
+
+	sc->sc_vs_cur->bxfer.xfer = usbd_alloc_xfer(sc->sc_udev);
+	if (sc->sc_vs_cur->bxfer.xfer == NULL) {
+		printf("%s: could not allocate bulk VS xfer!\n",
+		    DEVNAME(sc));
 		return (USBD_NOMEM);
 	}
-	DPRINTF(1, "%s: allocated %d bytes VS xfer buffer\n",
+
+	size = UGETDW(sc->sc_desc_probe.dwMaxPayloadTransferSize);
+
+	sc->sc_vs_cur->bxfer.buf =
+	    usbd_alloc_buffer(sc->sc_vs_cur->bxfer.xfer, size);
+	if (sc->sc_vs_cur->bxfer.buf == NULL) {
+		printf("%s: could not allocate bulk VS buffer!\n",
+		    DEVNAME(sc));
+		return (USBD_NOMEM);
+	}
+	DPRINTF(1, "%s: allocated %d bytes bulk VS xfer buffer\n",
 	    DEVNAME(sc), size);
 
 	return (USBD_NORMAL_COMPLETION);
 }
 
 void
-uvideo_vs_free(struct uvideo_softc *sc)
+uvideo_vs_free_isoc(struct uvideo_softc *sc)
 {
+	int i;
+
 	DPRINTF(1, "%s: %s\n", DEVNAME(sc), __func__);
 
-	if (sc->sc_vs_cur->buf != NULL) {
-		usbd_free_buffer(sc->sc_vs_cur->xfer);
-		sc->sc_vs_cur->buf = NULL;
+	for (i = 0; i < UVIDEO_IXFERS; i++) {
+		if (sc->sc_vs_cur->ixfer[i].buf != NULL) {
+			usbd_free_buffer(sc->sc_vs_cur->ixfer[i].xfer);
+			sc->sc_vs_cur->ixfer[i].buf = NULL;
+		}
+
+		if (sc->sc_vs_cur->ixfer[i].xfer != NULL) {
+			usbd_free_xfer(sc->sc_vs_cur->ixfer[i].xfer);
+			sc->sc_vs_cur->ixfer[i].xfer = NULL;
+		}
+	}
+}
+
+void
+uvideo_vs_free_bulk(struct uvideo_softc *sc)
+{
+	if (sc->sc_vs_cur->bxfer.buf != NULL) {
+		usbd_free_buffer(sc->sc_vs_cur->bxfer.xfer);
+		sc->sc_vs_cur->bxfer.buf = NULL;
 	}
 
-	if (sc->sc_vs_cur->xfer != NULL) {
-		usbd_free_xfer(sc->sc_vs_cur->xfer);
-		sc->sc_vs_cur->xfer = NULL;
+	if (sc->sc_vs_cur->bxfer.xfer != NULL) {
+		usbd_free_xfer(sc->sc_vs_cur->bxfer.xfer);
+		sc->sc_vs_cur->bxfer.xfer = NULL;
 	}
 }
 
@@ -1418,6 +1510,7 @@ uvideo_vs_open(struct uvideo_softc *sc)
 {
 	usb_endpoint_descriptor_t *ed;
 	usbd_status error;
+	uint32_t dwMaxVideoFrameSize;
 
 	DPRINTF(1, "%s: %s\n", DEVNAME(sc), __func__);
 
@@ -1447,7 +1540,7 @@ uvideo_vs_open(struct uvideo_softc *sc)
 	    ed->bEndpointAddress,
 	    sc->sc_vs_cur->endpoint,
 	    UGETW(ed->wMaxPacketSize),
-	    sc->sc_vs_cur->max_packet_size);
+	    sc->sc_vs_cur->psize);
 
 	error = usbd_open_pipe(
 	    sc->sc_vs_cur->ifaceh,
@@ -1463,11 +1556,12 @@ uvideo_vs_open(struct uvideo_softc *sc)
 	/* calculate optimal isoc xfer size */
 	if (strncmp(sc->sc_udev->bus->bdev.dv_xname, "ohci", 4) == 0) {
 		/* ohci workaround */
-		sc->sc_nframes = 6400 /
-		    sc->sc_vs_cur->max_packet_size;
+		sc->sc_nframes = 6400 / sc->sc_vs_cur->psize;
 	} else {
-		sc->sc_nframes = UGETDW(sc->sc_desc_probe.dwMaxVideoFrameSize) /
-		    sc->sc_vs_cur->max_packet_size;
+		dwMaxVideoFrameSize =
+		    UGETDW(sc->sc_desc_probe.dwMaxVideoFrameSize);
+		sc->sc_nframes = (dwMaxVideoFrameSize + sc->sc_vs_cur->psize -
+		    1) / sc->sc_vs_cur->psize;
 	}
 	if (sc->sc_nframes > UVIDEO_NFRAMES_MAX)
 		sc->sc_nframes = UVIDEO_NFRAMES_MAX;
@@ -1509,7 +1603,10 @@ uvideo_vs_init(struct uvideo_softc *sc)
 		return (USBD_INVAL);
 
 	/* allocate video stream xfer buffer */
-	error = uvideo_vs_alloc(sc);
+	if (sc->sc_vs_cur->bulk_endpoint)
+		error = uvideo_vs_alloc_bulk(sc);
+	else
+		error = uvideo_vs_alloc_isoc(sc);
 	if (error != USBD_NORMAL_COMPLETION)
 		return (USBD_INVAL);
 
@@ -1553,11 +1650,11 @@ uvideo_vs_start_bulk_thread(void *arg)
 		size = UGETDW(sc->sc_desc_probe.dwMaxPayloadTransferSize);
 
 		error = usbd_bulk_transfer(
-		    sc->sc_vs_cur->xfer,
+		    sc->sc_vs_cur->bxfer.xfer,
 		    sc->sc_vs_cur->pipeh,
 		    USBD_NO_COPY | USBD_SHORT_XFER_OK,
 		    USBD_NO_TIMEOUT,
-		    sc->sc_vs_cur->buf,
+		    sc->sc_vs_cur->bxfer.buf,
 		    &size,
 		    "vid_bulk");
 		if (error != USBD_NORMAL_COMPLETION) {
@@ -1568,8 +1665,8 @@ uvideo_vs_start_bulk_thread(void *arg)
 
 		DPRINTF(2, "%s: *** buffer len = %d\n", DEVNAME(sc), size);
 
-		(void)uvideo_vs_decode_stream_header(sc, sc->sc_vs_cur->buf,
-		    size);
+		(void)uvideo_vs_decode_stream_header(sc,
+		    sc->sc_vs_cur->bxfer.buf, size);
 	}
 
 	kthread_exit(0);
@@ -1580,32 +1677,47 @@ uvideo_vs_start_isoc(struct uvideo_softc *sc)
 {
 	int i;
 
+	for (i = 0; i < UVIDEO_IXFERS; i++)
+		uvideo_vs_start_isoc_ixfer(sc, &sc->sc_vs_cur->ixfer[i]);
+}
+
+void
+uvideo_vs_start_isoc_ixfer(struct uvideo_softc *sc,
+    struct uvideo_isoc_xfer *ixfer)
+{
+	int i;
+	usbd_status error;
+
 	DPRINTF(2, "%s: %s\n", DEVNAME(sc), __func__);
 
 	if (sc->sc_dying)
 		return;
 
 	for (i = 0; i < sc->sc_nframes; i++)
-		sc->sc_vs_cur->size[i] = sc->sc_vs_cur->max_packet_size;
+		ixfer->size[i] = sc->sc_vs_cur->psize;
 
 	usbd_setup_isoc_xfer(
-	    sc->sc_vs_cur->xfer,
+	    ixfer->xfer,
 	    sc->sc_vs_cur->pipeh,
-	    sc->sc_vs_cur,
-	    sc->sc_vs_cur->size,
+	    ixfer,
+	    ixfer->size,
 	    sc->sc_nframes,
 	    USBD_NO_COPY | USBD_SHORT_XFER_OK,
 	    uvideo_vs_cb);
 
-	(void)usbd_transfer(sc->sc_vs_cur->xfer);
+	error = usbd_transfer(ixfer->xfer);
+	if (error && error != USBD_IN_PROGRESS) {
+		DPRINTF(1, "%s: usbd_transfer error=%s!\n",
+		    DEVNAME(sc), usbd_errstr(error));
+	}
 }
 
 void
 uvideo_vs_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
     usbd_status status)
 {
-	struct uvideo_vs_iface *vs = priv;
-	struct uvideo_softc *sc = vs->sc;
+	struct uvideo_isoc_xfer *ixfer = priv;
+	struct uvideo_softc *sc = ixfer->sc;
 	int len, i, frame_size;
 	uint8_t *frame;
 	usbd_status error;
@@ -1616,7 +1728,7 @@ uvideo_vs_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 		DPRINTF(1, "%s: %s: %s\n", DEVNAME(sc), __func__,
 		    usbd_errstr(status));
 		return;
-        }
+	}
 	usbd_get_xfer_status(xfer, NULL, NULL, &len, NULL);
 
 	DPRINTF(2, "%s: *** buffer len = %d\n", DEVNAME(sc), len);
@@ -1624,8 +1736,8 @@ uvideo_vs_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 		goto skip;
 
 	for (i = 0; i < sc->sc_nframes; i++) {
-		frame = vs->buf + (i * vs->max_packet_size);
-		frame_size = vs->size[i];
+		frame = ixfer->buf + (i * sc->sc_vs_cur->psize);
+		frame_size = ixfer->size[i];
 
 		if (frame_size == 0)
 			/* frame is empty */
@@ -1637,7 +1749,7 @@ uvideo_vs_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 	}
 
 skip:	/* setup new transfer */
-	uvideo_vs_start_isoc(sc);
+	uvideo_vs_start_isoc_ixfer(sc, ixfer);
 }
 
 usbd_status
@@ -2369,6 +2481,11 @@ uvideo_enum_fmt(void *v, struct v4l2_fmtdesc *fmtdesc)
 			(void)strlcpy(fmtdesc->description, "NV12",
 			    sizeof(fmtdesc->description));
 			fmtdesc->pixelformat = V4L2_PIX_FMT_NV12;
+		} else if (sc->sc_fmtgrp[idx].pixelformat ==
+		    V4L2_PIX_FMT_UYVY) {
+			(void)strlcpy(fmtdesc->description, "UYVY",
+			    sizeof(fmtdesc->description));
+			fmtdesc->pixelformat = V4L2_PIX_FMT_UYVY;
 		} else {
 			(void)strlcpy(fmtdesc->description, "Unknown UC Format",
 			    sizeof(fmtdesc->description));
@@ -2895,4 +3012,100 @@ uvideo_start_read(void *v)
 		uvideo_vs_start_isoc(sc);
 
 	return (0);
+}
+
+usbd_status
+uvideo_usb_control(struct uvideo_softc *sc, uint8_t rt, uint8_t r,
+    uint16_t value, uint8_t *data, size_t length)
+{
+	usb_device_request_t	req;
+	usbd_status		err;
+
+	req.bmRequestType = rt;
+	req.bRequest = r;
+	USETW(req.wIndex, 0);
+	USETW(req.wValue, value);
+	USETW(req.wLength, length);
+
+	err = usbd_do_request(sc->sc_udev, &req, data);
+	if (err != USBD_NORMAL_COMPLETION)
+		return (err);
+
+	return (USBD_NORMAL_COMPLETION);
+}
+
+usbd_status
+uvideo_ucode_loader_ricoh(struct uvideo_softc *sc)
+{
+	usbd_status error;
+	uint8_t *ucode, len, cbuf;
+	size_t ucode_size;
+	uint16_t addr;
+	int offset = 0, remain;
+
+	/* get device microcode status */
+	cbuf = 0;
+	error = uvideo_usb_control(sc, UT_READ_VENDOR_DEVICE,
+	    0xa4, 0, &cbuf, sizeof cbuf);
+	if (error != USBD_NORMAL_COMPLETION) {
+		printf("%s: ucode status error=%s!\n",
+		    DEVNAME(sc), usbd_errstr(error));
+		return (USBD_INVAL);
+	}
+	if (cbuf) {
+		DPRINTF(1, "%s: microcode already loaded\n", DEVNAME(sc));
+		return (USBD_NORMAL_COMPLETION);
+	} else {
+		DPRINTF(1, "%s: microcode not loaded\n", DEVNAME(sc));
+	}
+
+	/* open microcode file */
+	error = loadfirmware(sc->sc_ucode->ucode_name, &ucode, &ucode_size);
+	if (error != 0) {
+		printf("%s: loadfirmware error=%d!\n", DEVNAME(sc), error);
+		return (USBD_INVAL);
+	}
+
+	/* upload microcode */
+	remain = ucode_size;
+	while (remain > 0) {
+		if (remain < 3) {
+			printf("%s: ucode file incomplete!\n", DEVNAME(sc));
+			free(ucode, M_DEVBUF);
+			return (USBD_INVAL);
+		}
+
+		len = ucode[offset];
+		addr = ucode[offset + 1] | (ucode[offset + 2] << 8);
+		offset += 3;
+		remain -= 3;
+
+		error = uvideo_usb_control(sc, UT_WRITE_VENDOR_DEVICE,
+		    0xa0, addr, &ucode[offset], len);
+		if (error != USBD_NORMAL_COMPLETION) {
+			printf("%s: ucode upload error=%s!\n",
+			    DEVNAME(sc), usbd_errstr(error));
+			free(ucode, M_DEVBUF);
+			return (USBD_INVAL);
+		}
+		DPRINTF(1, "%s: uploaded %d bytes ucode to addr 0x%x\n",
+		    DEVNAME(sc), len, addr);
+
+		offset += len;
+		remain -= len;
+	}
+	free(ucode, M_DEVBUF);
+
+	/* activate microcode */
+	cbuf = 0;
+	error = uvideo_usb_control(sc, UT_WRITE_VENDOR_DEVICE,
+	    0xa1, 0, &cbuf, sizeof cbuf);
+	if (error != USBD_NORMAL_COMPLETION) {
+		printf("%s: ucode activate error=%s!\n",
+		    DEVNAME(sc), usbd_errstr(error));
+		return (USBD_INVAL);
+	}
+	DPRINTF(1, "%s: ucode activated\n", DEVNAME(sc));
+
+	return (USBD_NORMAL_COMPLETION);
 }

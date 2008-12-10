@@ -92,14 +92,13 @@ static drm_pci_id_list_t inteldrm_pciidlist[] = {
 static const struct drm_driver_info inteldrm_driver = {
 	.buf_priv_size		= 1,	/* No dev_priv */
 	.ioctl			= inteldrm_ioctl,
-	.preclose		= i915_driver_preclose,
+	.close			= i915_driver_close,
 	.lastclose		= i915_driver_lastclose,
-	.device_is_agp		= i915_driver_device_is_agp,
+	.vblank_pipes		= 2,
 	.get_vblank_counter	= i915_get_vblank_counter,
 	.enable_vblank		= i915_enable_vblank,
 	.disable_vblank		= i915_disable_vblank,
-	.irq_preinstall		= i915_driver_irq_preinstall,
-	.irq_postinstall	= i915_driver_irq_postinstall,
+	.irq_install		= i915_driver_irq_install,
 	.irq_uninstall		= i915_driver_irq_uninstall,
 	.irq_handler		= i915_driver_irq_handler,
 
@@ -132,6 +131,7 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	    PCI_PRODUCT(pa->pa_id), inteldrm_pciidlist);
 	dev_priv->flags = id_entry->driver_private;
 	dev_priv->pci_device = PCI_PRODUCT(pa->pa_id);
+	dev_priv->pc = pa->pa_pc;
 
 	/* Add register map (needed for suspend/resume) */
 	bar = vga_pci_bar_info((struct vga_pci_softc *)parent,
@@ -142,9 +142,14 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	dev_priv->regs = vga_pci_bar_map((struct vga_pci_softc *)parent, 
-	    bar->addr, bar->size, 0);
+	    bar->addr, 0, 0);
 	if (dev_priv->regs == NULL) {
 		printf(": can't map mmio space\n");
+		return;
+	}
+
+	if (pci_intr_map(pa, &dev_priv->ih) != 0) {
+		printf(": couldn't map interrupt\n");
 		return;
 	}
 
@@ -156,9 +161,12 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 
+	printf(": %s\n", pci_intr_string(pa->pa_pc, dev_priv->ih));
+
 	mtx_init(&dev_priv->user_irq_lock, IPL_BIO);
 
-	dev_priv->drmdev = drm_attach_mi(&inteldrm_driver, pa, self);
+	/* All intel chipsets need to be treated as agp, so just pass one */
+	dev_priv->drmdev = drm_attach_pci(&inteldrm_driver, pa, 1, self);
 }
 
 int

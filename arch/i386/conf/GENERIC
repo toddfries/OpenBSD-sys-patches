@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.640 2008/11/22 21:26:47 oga Exp $
+#	$OpenBSD: GENERIC,v 1.644 2008/12/01 23:48:46 todd Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -294,19 +294,18 @@ sdmmc*	at sdhc?		# SD/MMC bus
 scsibus* at sdmmc?		# SCSI emulation
 
 # Bluetooth controllers
-#sbt*	at sdmmc?		# SDIO Bluetooth
-#ubt*	at uhub?		# USB Bluetooth
+sbt*	at sdmmc?		# SDIO Bluetooth
+bthub*	at sbt?
+ubt*	at uhub?		# USB Bluetooth
+bthub*	at ubt?
 
-# Bluetooth bus support
-#bthub*	at sbt?
-#bthub*	at ubt?
-
-# Bluetooth HID support
-#bthidev* at bthub?
-#btkbd*	at bthidev?
-#btms*	at bthidev?
-#wskbd*	at btkbd? mux 1
-#wsmouse* at btms? mux 0
+bthidev* at bthub?		# Bluetooth HID support
+btkbd*	at bthidev?
+btms*	at bthidev?
+wskbd*	at btkbd? mux 1
+wsmouse* at btms? mux 0
+btsco*	at bthub?		# Bluetooth audio support
+audio*	at btsco?
 
 npx0	at isa? port 0xf0 irq 13	# math coprocessor
 isadma0	at isa?
@@ -796,9 +795,11 @@ scsibus* at iopsp?
 
 # GPIO ``pin bus'' drivers
 #gpioiic* at gpio? offset 0 mask 0x3	# I2C bus bit-banging
-#iic*	at gpioiic?
+gpioiic* at gpio?
+iic*	at gpioiic?
 #gpioow* at gpio? offset 0 mask 0x1	# 1-Wire bus bit-banging
-#onewire* at gpioow?
+gpioow*	at gpio?
+onewire* at gpioow?
 
 # 1-Wire devices
 option ONEWIREVERBOSE

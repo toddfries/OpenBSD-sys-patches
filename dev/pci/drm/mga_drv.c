@@ -106,16 +106,15 @@ static const struct drm_driver_info mga_driver = {
 	.buf_priv_size		= sizeof(drm_mga_buf_priv_t),
 	.ioctl			= mgadrm_ioctl,
 	.lastclose		= mga_driver_lastclose,
+	.vblank_pipes		= 1,
 	.enable_vblank		= mga_enable_vblank,
 	.disable_vblank		= mga_disable_vblank,
 	.get_vblank_counter	= mga_get_vblank_counter,
-	.irq_preinstall		= mga_driver_irq_preinstall,
-	.irq_postinstall	= mga_driver_irq_postinstall,
+	.irq_install		= mga_driver_irq_install,
 	.irq_uninstall		= mga_driver_irq_uninstall,
 	.irq_handler		= mga_driver_irq_handler,
 	.dma_ioctl		= mga_dma_buffers,
 	.dma_quiescent		= mga_driver_dma_quiescent,
-	.device_is_agp		= mga_driver_device_is_agp,
 
 	.name			= DRIVER_NAME,
 	.desc			= DRIVER_DESC,
@@ -141,8 +140,10 @@ mgadrm_attach(struct device *parent, struct device *self, void *aux)
 	struct pci_attach_args	*pa = aux;
 	struct vga_pci_bar	*bar;
 	drm_pci_id_list_t	*id_entry;
+	int			 is_agp;
 
 	dev_priv->usec_timeout = MGA_DEFAULT_USEC_TIMEOUT;
+	dev_priv->pc = pa->pa_pc;
 
 	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
 	    PCI_PRODUCT(pa->pa_id), mgadrm_pciidlist);
@@ -154,13 +155,30 @@ mgadrm_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	dev_priv->regs = vga_pci_bar_map((struct vga_pci_softc *)parent, 
-	    bar->addr, bar->size, 0);
+	    bar->addr, 0, 0);
 	if (dev_priv->regs == NULL) {
 		printf(": can't map mmio space\n");
 		return;
 	}
 
-	dev_priv->drmdev = drm_attach_mi(&mga_driver, pa, self);
+	dev_priv->regs = vga_pci_bar_map((struct vga_pci_softc *)parent, 
+	    bar->addr, 0, 0);
+	if (dev_priv->regs == NULL) {
+		printf(": can't map mmio space\n");
+		return;
+	}
+
+	if (pci_intr_map(pa, &dev_priv->ih) != 0) {
+		printf(": couldn't map interrupt\n");
+		return;
+	}
+	printf(": %s\n", pci_intr_string(pa->pa_pc, dev_priv->ih));
+
+	/* XXX pcie */
+	is_agp = pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP,
+	    NULL, NULL);
+
+	dev_priv->drmdev = drm_attach_pci(&mga_driver, pa, is_agp, self);
 }
 
 int
