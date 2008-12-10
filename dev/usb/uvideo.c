@@ -1576,7 +1576,7 @@ uvideo_vs_open(struct uvideo_softc *sc)
 	/* calculate optimal isoc xfer size */
 	if (strncmp(sc->sc_udev->bus->bdev.dv_xname, "ohci", 4) == 0) {
 		/* ohci workaround */
-		sc->sc_nframes = 6400 / sc->sc_vs_cur->psize;
+		sc->sc_nframes = 8;
 	} else {
 		dwMaxVideoFrameSize =
 		    UGETDW(sc->sc_desc_probe.dwMaxVideoFrameSize);
