@@ -157,10 +157,10 @@ umidi_match(struct device *parent, void *match, void *aux)
 	if (uaa->iface == NULL)
 		return UMATCH_NONE;
 
-	DPRINTF(".. class=%d, subclass=%d, iface=%d\n",
+	DPRINTF((".. class=%d, subclass=%d, iface=%d\n",
     			uaa->vendor,
     			uaa->product,
-			uaa->ifaceno);
+			uaa->ifaceno));
 	/* XXX should 'id' be returned to a pool/freed? does it leak memory? */
 	id = usbd_get_interface_descriptor(uaa->iface);
 	if (id!=NULL &&
@@ -168,9 +168,9 @@ umidi_match(struct device *parent, void *match, void *aux)
 	    id->bInterfaceSubClass==UISUBCLASS_MIDISTREAM)
 		return UMATCH_IFACECLASS_IFACESUBCLASS;
 	if (id != NULL) {
-		DPRINTF(".. ifclass=0x%x, ifsubclass=0x%x\n",
+		DPRINTF((".. ifclass=0x%x, ifsubclass=0x%x\n",
 			id->bInterfaceClass,
-			id->bInterfaceSubClass);
+			id->bInterfaceSubClass));
 	}
 
 	if (umidi_search_quirk(uaa->vendor, uaa->product, uaa->ifaceno))
@@ -179,10 +179,10 @@ umidi_match(struct device *parent, void *match, void *aux)
 
 	if (uaa->vendor == USB_VENDOR_MOTU && uaa->product == USB_PRODUCT_MOTU_FLMIDI) {
 		if (id != NULL) {
-			DPRINTF(".. class=%d, subclass=%d, iface=%d\n",
+			DPRINTF((".. class=%d, subclass=%d, iface=%d\n",
 	    			id->bInterfaceClass,
 	    			id->bInterfaceSubClass,
-				uaa->ifaceno);
+				uaa->ifaceno));
 		}
 		return UMATCH_IFACECLASS_IFACESUBCLASS;
 	}
@@ -205,7 +205,7 @@ umidi_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_quirk =
 	    umidi_search_quirk(uaa->vendor, uaa->product, uaa->ifaceno);
-	DPRINTF("%s: ", sc->sc_dev.dv_xname);
+	DPRINTF(("%s: ", sc->sc_dev.dv_xname));
 	umidi_print_quirk(sc->sc_quirk);
 
 
@@ -218,9 +218,9 @@ umidi_attach(struct device *parent, struct device *self, void *aux)
 		free_all_endpoints(sc);
 		goto error;
 	}
-	DPRINTF("%s: out=%d, in=%d\n",
+	DPRINTF(("%s: out=%d, in=%d\n",
 	       sc->sc_dev.dv_xname,
-	       sc->sc_out_num_jacks, sc->sc_in_num_jacks);
+	       sc->sc_out_num_jacks, sc->sc_in_num_jacks));
 
 	err = assign_all_jacks_automatically(sc);
 	if (err!=USBD_NORMAL_COMPLETION) {
@@ -248,7 +248,7 @@ umidi_attach(struct device *parent, struct device *self, void *aux)
 
 	return;
 error:
-	DPRINTF("%s: disabled.\n", sc->sc_dev.dv_xname);
+	printf("%s: disabled.\n", sc->sc_dev.dv_xname);
 	sc->sc_dying = 1;
 }
 
