@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upgt.c,v 1.39 2008/10/14 18:01:53 naddy Exp $ */
+/*	$OpenBSD: if_upgt.c,v 1.41 2008/11/27 14:05:18 kevlo Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -49,7 +49,6 @@
 #include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
-#include <net80211/ieee80211_amrr.h>
 #include <net80211/ieee80211_radiotap.h>
 
 #include <dev/usb/usb.h>
@@ -174,7 +173,6 @@ static const struct usb_devno upgt_devs_2[] = {
 	{ USB_VENDOR_GLOBESPAN,		USB_PRODUCT_GLOBESPAN_PRISM_GT_1 },
 	{ USB_VENDOR_GLOBESPAN,		USB_PRODUCT_GLOBESPAN_PRISM_GT_2 },
 	{ USB_VENDOR_INTERSIL,		USB_PRODUCT_INTERSIL_PRISM_GT },
-	{ USB_VENDOR_NETGEAR,		USB_PRODUCT_NETGEAR_WG111V2_2 },
 	{ USB_VENDOR_SMC,		USB_PRODUCT_SMC_2862WG },
 	{ USB_VENDOR_WISTRONNEWEB,	USB_PRODUCT_WISTRONNEWEB_UR045G },
 	{ USB_VENDOR_XYRATEX,		USB_PRODUCT_XYRATEX_PRISM_GT_1 },

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.121 2008/10/11 20:31:48 miod Exp $ */
+/* $OpenBSD: softraid.c,v 1.125 2008/11/25 23:05:17 marco Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -37,6 +37,12 @@
 #include <sys/stat.h>
 #include <sys/conf.h>
 #include <sys/uio.h>
+#include <sys/workq.h>
+
+#ifdef AOE
+#include <sys/mbuf.h>
+#include <net/if_aoe.h>
+#endif /* AOE */
 
 #include <crypto/cryptodev.h>
 
@@ -1083,7 +1089,7 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 	}
 
 	if (sr && not_sr) {
-		printf("%s: not all chunks are of the native metadata format",
+		printf("%s: not all chunks are of the native metadata format\n",
 		     DEVNAME(sc));
 		goto bad;
 	}
@@ -1397,6 +1403,18 @@ sr_wu_get(struct sr_discipline *sd)
 	return (wu);
 }
 
+void
+sr_scsi_done(struct sr_discipline *sd, struct scsi_xfer *xs)
+{
+	int			s;
+
+	DNPRINTF(SR_D_DIS, "%s: sr_scsi_done: xs %p\n", DEVNAME(sd->sd_sc), xs);
+
+	s = splbio();
+	scsi_done(xs);
+	splx(s);
+}
+
 int
 sr_scsi_cmd(struct scsi_xfer *xs)
 {
@@ -1438,6 +1456,19 @@ sr_scsi_cmd(struct scsi_xfer *xs)
 
 	xs->error = XS_NOERROR;
 	wu->swu_xs = xs;
+
+	/* the midlayer will query LUNs so report sense to stop scanning */
+	if (link->target != 0 || link->lun != 0) {
+		DNPRINTF(SR_D_CMD, "%s: bad target:lun %d:%d\n",
+		    DEVNAME(sc), link->target, link->lun);
+		sd->sd_scsi_sense.error_code = SSD_ERRCODE_CURRENT |
+		    SSD_ERRCODE_VALID;
+		sd->sd_scsi_sense.flags = SKEY_ILLEGAL_REQUEST;
+		sd->sd_scsi_sense.add_sense_code = 0x25;
+		sd->sd_scsi_sense.add_sense_code_qual = 0x00;
+		sd->sd_scsi_sense.extra_len = 4;
+		goto stuffup;
+	}
 
 	switch (xs->cmd->opcode) {
 	case READ_COMMAND:
@@ -1513,11 +1544,9 @@ stuffup:
 		xs->flags |= ITSDONE;
 	}
 complete:
-	s = splbio();
-	scsi_done(xs);
-	splx(s);
 	if (wu)
 		sr_wu_put(wu);
+	sr_scsi_done(sd, xs);
 	return (COMPLETE);
 }
 int
@@ -1815,6 +1844,22 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 			strlcpy(sd->sd_name, "RAID 1", sizeof(sd->sd_name));
 			vol_size = ch_entry->src_meta.scmi.scm_coerced_size;
 			break;
+#ifdef AOE
+#ifdef notyet
+		case 'A':
+			/* target */
+			if (no_chunk != 1)
+				goto unwind;
+			strlcpy(sd->sd_name, "AOE TARGET", sizeof(sd->sd_name));
+			break;
+#endif /* notyet */
+		case 'a':
+			/* initiator */
+			if (no_chunk != 1)
+				goto unwind;
+			strlcpy(sd->sd_name, "AOE INITIATOR", sizeof(sd->sd_name));
+			break;
+#endif /* AOE */
 #ifdef CRYPTO
 		case 'C':
 			DNPRINTF(SR_D_IOCTL,
@@ -1970,6 +2015,49 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 		sd->sd_set_chunk_state = sr_raid1_set_chunk_state;
 		sd->sd_set_vol_state = sr_raid1_set_vol_state;
 		break;
+#ifdef AOE
+#ifdef notyet
+	case 'A':
+		/* fill out discipline members */
+		sd->sd_type = SR_MD_AOE;
+		sd->sd_max_ccb_per_wu = no_chunk;
+		sd->sd_max_wu = SR_RAIDAOE_NOWU;
+
+		/* setup discipline pointers */
+		sd->sd_alloc_resources = sr_aoe_start_server;
+		sd->sd_free_resources = sr_aoe_free_resources;
+		sd->sd_scsi_inquiry = sr_raid_inquiry;
+		sd->sd_scsi_read_cap = sr_raid_read_cap;
+		sd->sd_scsi_tur = sr_raid_tur;
+		sd->sd_scsi_req_sense = sr_raid_request_sense;
+		sd->sd_scsi_start_stop = sr_raid_start_stop;
+		sd->sd_scsi_sync = sr_raid_sync;
+		sd->sd_scsi_rw = sr_aoe_rw;
+		sd->sd_set_chunk_state = sr_raid_set_chunk_state;
+		sd->sd_set_vol_state = sr_raid_set_vol_state;
+		break;
+#endif /* notyet */
+	case 'a':
+		/* fill out discipline members */
+		sd->sd_type = SR_MD_AOE;
+		sd->sd_max_ccb_per_wu = no_chunk;
+		sd->sd_max_wu = SR_RAIDAOE_NOWU;
+
+		/* setup discipline pointers */
+		sd->sd_alloc_resources = sr_aoe_alloc_resources;
+		sd->sd_free_resources = sr_aoe_free_resources;
+		sd->sd_scsi_inquiry = sr_raid_inquiry;
+		sd->sd_scsi_read_cap = sr_raid_read_cap;
+		sd->sd_scsi_tur = sr_raid_tur;
+		sd->sd_scsi_req_sense = sr_raid_request_sense;
+		sd->sd_scsi_start_stop = sr_raid_start_stop;
+		sd->sd_scsi_sync = sr_raid_sync;
+		sd->sd_scsi_rw = sr_aoe_rw;
+		/* XXX reuse raid 1 functions for now FIXME */
+		sd->sd_set_chunk_state = sr_raid1_set_chunk_state;
+		sd->sd_set_vol_state = sr_raid1_set_vol_state;
+		break;
+#endif
 #ifdef CRYPTO
 	case 'C':
 		/* fill out discipline members */

@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.386 2008/10/03 15:09:52 deraadt Exp $
+$OpenBSD: usbdevs,v 1.398 2008/12/10 18:09:45 deraadt Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -252,6 +252,7 @@ vendor AGFA		0x06bd	AGFA-Gevaert
 vendor ASIAMD		0x06be	Asia Microelectronic Development
 vendor BIZLINK		0x06c4	Bizlink International
 vendor KEYSPAN		0x06cd	Keyspan
+vendor LIEBERT		0x06da	Liebert
 vendor AASHIMA		0x06d6	Aashima Technology
 vendor MULTITECH	0x06e0	MultiTech
 vendor ADS		0x06e1	ADS Technologies
@@ -405,6 +406,7 @@ vendor MICRODIA		0x0c45	Microdia
 vendor SEALEVEL		0x0c52	Sealevel System
 vendor EASYDISK		0x0c76	EasyDisk
 vendor KYOCERA2		0x0c88	Kyocera
+vendor TERRATEC		0x0ccd	TerraTec Electronic GmbH
 vendor ZCOM		0x0cde	Z-Com
 vendor ATHEROS2		0x0cf3	Atheros Communications
 vendor POSIFLEX		0x0d3a	Posiflex Technologies
@@ -481,6 +483,7 @@ vendor AZUREWAVE	0x13d3	AsureWave
 vendor NOVATEL		0x1410	Novatel
 vendor WISTRONNEWEB	0x1435	Wistron NeWeb
 vendor RADIOSHACK	0x1453	Radio Shack
+vendor OPENMOKO		0x1457	OpenMoko
 vendor HUAWEI3COM	0x1472	Huawei 3Com
 vendor SILICOM		0x1485	Silicom
 vendor RALINK		0x148f	Ralink Technology
@@ -617,6 +620,7 @@ product ACCTON RT2870_2		0x6618	RT2870
 product ACCTON RT2870_3		0x7522	RT2870
 product ACCTON RT2870_4		0xa618	RT2870
 product ACCTON ZD1211B		0xe501	ZD1211B
+product ACCTON WN7512		0xf522	WN7512
 
 /* Aceeca products */
 product ACEECA MEZ1000		0x0001	MEZ1000 RDA
@@ -767,6 +771,8 @@ product APPLE SPEAKERS		0x1101	Speakers
 product APPLE ETHERNET		0x1402	Ethernet A1277
 product APPLE BLUETOOTH2	0x8205	Bluetooth
 product APPLE BLUETOOTH		0x8300	Bluetooth
+product APPLE ISIGHT_1		0x8501	iSight
+product APPLE ISIGHT		0x8502	iSight
 
 /* Araneus Information Systems products */
 product ARANEUS ALEA		0x0001	True Random Number Generator
@@ -824,6 +830,8 @@ product ATHEROS2 AR5523_2	0x0003	AR5523
 product ATHEROS2 AR5523_2_NF	0x0004	AR5523
 product ATHEROS2 AR5523_3	0x0005	AR5523
 product ATHEROS2 AR5523_3_NF	0x0006	AR5523
+product ATHEROS2 TG121N		0x1001	TG121N
+product ATHEROS2 AR9170		0x9170	AR9170
 
 /* ATI products */
 product ATI2 205		0xa001	USB Cable 205
@@ -1017,6 +1025,7 @@ product CONCEPTRONIC2 C54RU2	0x3c22	C54RU
 product CONCEPTRONIC2 RT2870_1	0x3c06	RT2870
 product CONCEPTRONIC2 RT2870_2	0x3c07	RT2870
 product CONCEPTRONIC2 RT2870_3	0x3c23	RT2870
+product CONCEPTRONIC2 RT2573	0x3c24	RT2573M
 product CONCEPTRONIC2 RT2870_4	0x3c25	RT2870
 product CONCEPTRONIC2 RT2870_5	0x3c27	RT2870
 product CONCEPTRONIC2 RT2870_6	0x3c28	RT2870
@@ -1148,6 +1157,7 @@ product DLINK2 WUA1340		0x3c04	WUA-1340
 product DLINK2 DWA111		0x3c06	DWA-111
 product DLINK2 DWA110		0x3c07	DWA-110
 product DLINK2 RT2870		0x3c09	RT2870
+product DLINK2 DWA160A		0x3c10	DWA-160A
 
 /* D-Link(3) products */
 product DLINK3 KVM221		0x020f	KVM-221
@@ -1570,6 +1580,7 @@ product HTC SMARTPHONE		0x0a51	SmartPhone
 /* HUAWEI products */
 product HUAWEI E618		0x1001	HUAWEI Mobile E618
 product HUAWEI E220		0x1003	HUAWEI Mobile E220
+product HUAWEI E510		0x1411	HUAWEI Mobile E510
 
 /* HUMAX products */
 product HUMAX PVRSMART		0x138c	PVR-SMART
@@ -1667,6 +1678,7 @@ product IODATA USBWNG54US	0x0928	USB WN-G54/US
 product IODATA USBWNG54US_NF	0x0929	USB WN-G54/US
 product IODATA ETGUS2		0x0930	ETG-US2
 product IODATA FT232R		0x093c	FT232R
+product IODATA WNGDNUS2		0x093f	WN-GDN/US2
 product IODATA USBRSAQ		0x0a03	RSAQ1 Serial
 product IODATA2 USB2SC		0x0a09	USB2.0-SCSI Bridge USB2-SC
 product IODATA USBRSAQ5		0x0a0e	RSAQ5 Serial
@@ -1794,6 +1806,9 @@ product LEXAR 2662WAR		0xa002	2662W-AR
 
 /* Lexmark products */
 product LEXMARK S2450		0x0009	Optra S 2450
+
+/* Liebert products */
+product LIEBERT POWERSURE_PXT	0xffff	PowerSure Personal XT
 
 /* Linksys products */
 product LINKSYS4 USB1000	0x0039	USB1000
@@ -1996,6 +2011,7 @@ product MOBILITY EASIDOCK	0x0304	EasiDock Ethernet
 
 /* MosChip products */
 product MOSCHIP MCS7703		0x7703	MCS7703 Serial
+product MOSCHIP MCS7730		0x7730	MCS7730 Ethernet
 product MOSCHIP MCS7830		0x7830	MCS7830 Ethernet
 
 /* Motorola products */
@@ -2071,6 +2087,8 @@ product	NETGEAR WG111V2_2	0x4240	PrismGT USB 2.0 WLAN
 product NETGEAR WG111U		0x4300	WG111U
 product NETGEAR WG111U_NF	0x4301	WG111U
 product NETGEAR WG111V2		0x6a00	WG111v2
+product NETGEAR WN111V2		0x9001	WN111V2
+product NETGEAR WNDA3100	0x9010	WNDA3100
 
 /* Netgear(2) products */
 product NETGEAR2 MA101		0x4100	MA101
@@ -2246,6 +2264,7 @@ product PILOTECH CRW600		0x0001	CRW-600 6-in-1
 product PLANEX GW_US11H		0x14ea	GW-US11H WLAN
 product PLANEX2 GW_US11S	0x3220	GW-US11S WLAN
 product PLANEX2 GW_US54GXS	0x5303	GW-US54GXS WLAN
+product PLANEX2 GW_US300	0x5304	GW-US300
 product PLANEX2 GWUS54HP	0xab01	GW-US54HP
 product PLANEX3 GU1000T		0xab11	GU-1000T
 product PLANEX3 GWUS54MINI	0xab13	GW-US54Mini
@@ -2339,6 +2358,9 @@ product QUICKSHOT STRIKEPAD	0x6238	USB StrikePad
 /* Radio Shack products */
 product RADIOSHACK PL2303	0x4026	PL2303 Serial
 
+/* OpenMoko products */
+product OPENMOKO N1793D		0x5118	Neo1973 Debug
+
 /* Rainbow Technologies products */
 product	RAINBOW IKEY2000	0x1200	i-Key 2000
 
@@ -2367,7 +2389,16 @@ product RIM PEARL_DUAL		0x0004	RIM Mass Storage Device
 product RIM PEARL		0x0006	Blackberry pearl
 
 /* Ricoh products */
-product RICOH CAMERA		0x1832	Camera
+product RICOH VGPVCC2		0x1830	VGP-VCC2 Camera
+product RICOH VGPVCC3		0x1832	VGP-VCC3 Camera
+product RICOH VGPVCC2_2		0x1833	VGP-VCC2 Camera
+product RICOH VGPVCC2_3		0x1834	VGP-VCC2 Camera
+product RICOH VGPVCC5		0x1835	VGP-VCC5 Camera
+product RICOH VGPVCC4		0x1836	VGP-VCC4 Camera
+product RICOH VGPVCC4_2		0x1837	VGP-VCC4 Camera
+product RICOH VGPVCC6		0x1839	VGP-VCC6 Camera
+product RICOH VGPVCC7		0x183a	VGP-VCC7 Camera
+product RICOH VGPVCC8		0x183b	VGP-VCC8 Camera
 
 /* Roland products */
 product ROLAND UA100		0x0000	UA-100 Audio I/F
@@ -2597,6 +2628,7 @@ product SITECOMEU RT2870_2	0x002b	RT2870
 product SITECOMEU RT2870_3	0x002c	RT2870
 product SITECOMEU RT2870_4	0x002d	RT2870
 product SITECOMEU LN028		0x061c	LN-028
+product SITECOMEU LN030		0x0021	LN-030
 product SITECOMEU WL113		0x9071	WL-113
 product SITECOMEU ZD1211B	0x9075	ZD1211B
 product SITECOMEU WL172		0x90ac	WL-172
@@ -2742,6 +2774,9 @@ product TENDA TWL541U		0x1fab	TWL541U WLAN
 
 /* Ten X Technology, Inc. */
 product TENX MISSILE		0x0202	Missile Launcher
+
+/* TerraTec Electronic GmbH */
+product	TERRATEC AUREON		0x0077	Aureon Dual USB
 
 /* Dream Cheeky */
 product DREAMCHEEKY ROCKETBABY	0x0701	Missile Launcher
@@ -2940,7 +2975,9 @@ product ZCOM AR5523		0x0012	AR5523
 product ZCOM AR5523_NF		0x0013	AR5523
 product ZCOM ZD1211B		0x001a	ZD1211B
 product ZCOM RT2870_1		0x0022	RT2870
+product ZCOM UB81		0x0023	UB81
 product ZCOM RT2870_2		0x0025	RT2870
+product ZCOM UB82		0x0026	UB82
 
 /* Zinwell products */
 product ZINWELL RT2570		0x0260	RT2570
@@ -2952,6 +2989,7 @@ product ZOOM 2986L		0x9700	2986L Fax Modem
 product ZYDAS ZD1201		0x1201	ZD1201
 product ZYDAS ZD1211		0x1211	ZD1211
 product ZYDAS ZD1211B		0x1215	ZD1211B
+product ZYDAS ZD1221		0x1221	ZD1221
 
 /* ZyXEL Communication Co. products */
 product ZYXEL OMNI56K		0x1500	Omni 56K Plus

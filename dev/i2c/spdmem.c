@@ -1,4 +1,4 @@
-/*	$OpenBSD: spdmem.c,v 1.26 2008/05/21 12:51:45 jsg Exp $	*/
+/*	$OpenBSD: spdmem.c,v 1.28 2008/11/24 05:28:57 cnst Exp $	*/
 /* $NetBSD: spdmem.c,v 1.3 2007/09/20 23:09:59 xtraeme Exp $ */
 
 /*
@@ -255,9 +255,9 @@ void
 spdmem_sdram_decode(struct spdmem_softc *sc, struct spdmem *s)
 {
 	const char *type;
-	int dimm_size, cycle_time, d_clk, p_clk, bits;
+	int dimm_size, p_clk;
 	int num_banks, per_chip;
-	uint8_t config, rows, cols;
+	uint8_t rows, cols;
 
 	type = spdmem_basic_types[s->sm_type];
 
@@ -265,8 +265,6 @@ spdmem_sdram_decode(struct spdmem_softc *sc, struct spdmem *s)
 		type = spdmem_superset_types[SPDMEM_SUPERSET_SDR_PEM];
 	if (s->sm_data[SPDMEM_SDR_SUPERSET] == SPDMEM_SUPERSET_ESDRAM)
 		type = spdmem_superset_types[SPDMEM_SUPERSET_ESDRAM];
-
-	dimm_size = 0;
 
 	num_banks = s->sm_data[SPDMEM_SDR_BANKS];
 	per_chip = s->sm_data[SPDMEM_SDR_BANKS_PER_CHIP];
@@ -291,42 +289,24 @@ spdmem_sdram_decode(struct spdmem_softc *sc, struct spdmem *s)
 		printf(" %s",
 		    spdmem_parity_types[s->sm_data[SPDMEM_FPM_CONFIG]]);
 
-	/* cycle_time is expressed in units of 0.01 ns */
-	cycle_time = (s->sm_data[SPDMEM_DDR_CYCLE] >> 4) * 100 +
-	    (s->sm_data[SPDMEM_DDR_CYCLE] & 0x0f) * 10;
-
-	if (cycle_time != 0) {
-		/*
-		 * cycle time is scaled by a factor of 100 to avoid using
-		 * floating point.  Calculate memory speed as the number
-		 * of cycles per microsecond.
-		 */
-		d_clk = 100 * 1000;
-		config = s->sm_data[SPDMEM_FPM_CONFIG];
-		bits = s->sm_data[SPDMEM_DDR_DATAWIDTH] |
-		    (s->sm_data[SPDMEM_DDR_DATAWIDTH + 1] << 8);
-		if (config == 1 || config == 2)
-			bits -= 8;
-
-		p_clk = 66;
-		if (s->sm_len >= 128) {
-			switch (spdmem_read(sc, SPDMEM_SDR_FREQUENCY)) {
-			case SPDMEM_SDR_FREQ_100:
-			case SPDMEM_SDR_FREQ_133:
-				/* We need to check ns to decide here */
-				if (s->sm_data[SPDMEM_SDR_CYCLE] < 0x80)
-					p_clk = 133;
-				else
-					p_clk = 100;
-				break;
-			case SPDMEM_SDR_FREQ_66:
-			default:
-				p_clk = 66;
-				break;
-			}
+	p_clk = 66;
+	if (s->sm_len >= 128) {
+		switch (spdmem_read(sc, SPDMEM_SDR_FREQUENCY)) {
+		case SPDMEM_SDR_FREQ_100:
+		case SPDMEM_SDR_FREQ_133:
+			/* We need to check ns to decide here */
+			if (s->sm_data[SPDMEM_SDR_CYCLE] < 0x80)
+				p_clk = 133;
+			else
+				p_clk = 100;
+			break;
+		case SPDMEM_SDR_FREQ_66:
+		default:
+			p_clk = 66;
+			break;
 		}
-		printf(" PC%d", p_clk);
 	}
+	printf(" PC%d", p_clk);
 
 	/* Print CAS latency */
 	if (s->sm_len < 128)
@@ -384,8 +364,6 @@ spdmem_ddr_decode(struct spdmem_softc *sc, struct spdmem *s)
 	if (s->sm_data[SPDMEM_DDR_SUPERSET] == SPDMEM_SUPERSET_DDR_ESDRAM)
 		type = spdmem_superset_types[SPDMEM_SUPERSET_DDR_ESDRAM];
 
-	dimm_size = 0;
-
 	num_banks = s->sm_data[SPDMEM_SDR_BANKS];
 	per_chip = s->sm_data[SPDMEM_SDR_BANKS_PER_CHIP];
 	rows = s->sm_data[SPDMEM_SDR_ROWS] & 0x0f;
@@ -418,7 +396,7 @@ spdmem_ddr_decode(struct spdmem_softc *sc, struct spdmem *s)
 		 * cycle time is scaled by a factor of 100 to avoid using
 		 * floating point.  Calculate memory speed as the number
 		 * of cycles per microsecond.
-		 * DDR2 uses dual-pumped clock
+		 * DDR uses dual-pumped clock
 		 */
 		d_clk = 100 * 1000 * 2;
 		config = s->sm_data[SPDMEM_FPM_CONFIG];
@@ -454,8 +432,6 @@ spdmem_ddr2_decode(struct spdmem_softc *sc, struct spdmem *s)
 	uint8_t config;
 
 	type = spdmem_basic_types[s->sm_type];
-
-	dimm_size = 0;
 
 	num_ranks = (s->sm_data[SPDMEM_DDR2_RANKS] & 0x7) + 1;
 	density = (s->sm_data[SPDMEM_DDR2_RANK_DENSITY] & 0xf0) |

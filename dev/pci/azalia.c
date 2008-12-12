@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.60 2008/10/16 19:16:58 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.79 2008/11/30 20:06:41 jakemsr Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -57,9 +57,6 @@ typedef struct audio_params audio_params_t;
 #ifndef BUS_DMA_NOCACHE
 #define	BUS_DMA_NOCACHE 0
 #endif
-#define	auconv_delete_encodings(x...)
-#define	auconv_query_encoding(x...)	(EINVAL)
-#define	auconv_create_encodings(x...)	(0)
 
 struct audio_format {
 	void *driver_data;
@@ -109,9 +106,14 @@ struct audio_format {
 	u_int frequency[AUFMT_MAX_FREQUENCIES];
 };
 
-#define	AUFMT_INVALIDATE(fmt)	(fmt)->mode |= 0x80000000
-#define	AUFMT_VALIDATE(fmt)	(fmt)->mode &= 0x7fffffff
-#define	AUFMT_IS_VALID(fmt)	(((fmt)->mode & 0x80000000) == 0)
+
+#ifdef AZALIA_DEBUG
+# define DPRINTFN(n,x)	do { if (az_debug > (n)) printf x; } while (0/*CONSTCOND*/)
+int az_debug = 0;
+#else
+# define DPRINTFN(n,x)	do {} while (0/*CONSTCOND*/)
+#endif
+
 
 /* ----------------------------------------------------------------
  * ICH6/ICH7 constant values
@@ -238,10 +240,13 @@ int	azalia_codec_disconnect_stream(codec_t *, int);
 int	azalia_widget_init(widget_t *, const codec_t *, int);
 int	azalia_widget_label_widgets(codec_t *);
 int	azalia_widget_init_audio(widget_t *, const codec_t *);
-int	azalia_widget_print_audio(const widget_t *, const char *);
 int	azalia_widget_init_pin(widget_t *, const codec_t *);
-int	azalia_widget_print_pin(const widget_t *);
 int	azalia_widget_init_connection(widget_t *, const codec_t *);
+int	azalia_widget_check_conn(codec_t *, int, int);
+#ifdef AZALIA_DEBUG
+int	azalia_widget_print_audio(const widget_t *, const char *);
+int	azalia_widget_print_pin(const widget_t *);
+#endif
 
 int	azalia_stream_init(stream_t *, azalia_t *, int, int, int);
 int	azalia_stream_delete(stream_t *, azalia_t *);
@@ -274,8 +279,11 @@ int	azalia_trigger_input(void *, void *, void *, int,
 	void (*)(void *), void *, audio_params_t *);
 
 int	azalia_params2fmt(const audio_params_t *, uint16_t *);
-int azalia_create_encodings(struct audio_format *, int,
-    struct audio_encoding_set **);
+int	azalia_create_encodings(codec_t *);
+
+int	azalia_match_format(codec_t *, int, audio_params_t *);
+int	azalia_set_params_sub(codec_t *, int, audio_params_t *);
+
 
 /* variables */
 struct cfattach azalia_ca = {
@@ -349,12 +357,6 @@ static const char *pin_chass[4] = {
 /* ================================================================
  * PCI functions
  * ================================================================ */
-
-#define PCI_ID_CODE0(v, p)	PCI_ID_CODE(PCI_VENDOR_##v, PCI_PRODUCT_##v##_##p)
-#define PCIID_NVIDIA_MCP51	PCI_ID_CODE0(NVIDIA, MCP51_HDA)
-#define PCIID_NVIDIA_MCP55	PCI_ID_CODE0(NVIDIA, MCP55_HDA)
-#define PCIID_ALI_M5461		PCI_ID_CODE0(ALI, M5461)
-#define PCIID_VIATECH_HDA	PCI_ID_CODE0(VIATECH, HDA)
 
 #define ATI_PCIE_SNOOP_REG		0x42
 #define ATI_PCIE_SNOOP_MASK		0xf8
@@ -713,7 +715,7 @@ azalia_attach_intr(struct device *self)
 	/* Use the first audio codec */
 	az->codecno = c;
 
-	printf("%s: codec[s]: ", XNAME(az));
+	printf("%s: codecs: ", XNAME(az));
 	for (i = 0; i < az->ncodecs; i++) {
 		azalia_print_codec(&az->codecs[i]);
 		if (i < az->ncodecs - 1)
@@ -733,11 +735,13 @@ azalia_attach_intr(struct device *self)
 		goto err_exit;
 
 	az->audiodev = audio_attach_mi(&azalia_hw_if, az, &az->dev);
+
 	return;
 err_exit:
 	azalia_pci_detach(self, 0);
 	return;
 }
+
 
 int
 azalia_init_corb(azalia_t *az)
@@ -1210,11 +1214,15 @@ azalia_codec_init(codec_t *this)
 	if (this->audiofunc < 0) {
 		DPRINTF(("%s: codec[%d]: No audio function groups\n",
 		    XNAME(this->az), addr));
+		this->comresp(this, this->audiofunc, CORB_SET_POWER_STATE,
+		    CORB_PS_D3, &result);
+		DELAY(100);
 		return -1;
 	}
 
 	/* power the audio function */
-	this->comresp(this, this->audiofunc, CORB_SET_POWER_STATE, CORB_PS_D0, &result);
+	this->comresp(this, this->audiofunc, CORB_SET_POWER_STATE,
+	    CORB_PS_D0, &result);
 	DELAY(100);
 
 	/* check widgets in the audio function */
@@ -1277,8 +1285,19 @@ azalia_codec_init(codec_t *this)
 			return err;
 	}
 	err = azalia_widget_label_widgets(this);
-		if (err)
-			return err;
+	if (err)
+		return err;
+	/* Find widgets without any enabled inputs and disable them.
+	 * Must be done after all widgets are initialized and
+	 * their connections created.
+	 */
+	FOR_EACH_WIDGET(this, i) {
+		if (this->w[i].type == COP_AWTYPE_AUDIO_MIXER ||
+		    this->w[i].type == COP_AWTYPE_AUDIO_SELECTOR) {
+			if (!azalia_widget_check_conn(this, i, 0))
+				this->w[i].enable = 0;
+		}
+	}
 	err = this->init_dacgroup(this);
 	if (err)
 		return err;
@@ -1290,11 +1309,15 @@ azalia_codec_init(codec_t *this)
 		}
 		DPRINTF(("\n"));
 	}
+	for (i = 0; i < this->adcs.ngroups; i++) {
+		DPRINTF(("%s: adcgroup[%d]:", __func__, i));
+		for (n = 0; n < this->adcs.groups[i].nconv; n++) {
+			DPRINTF((" %2.2x", this->adcs.groups[i].conv[n]));
+		}
+		DPRINTF(("\n"));
+	}
 #endif
 
-	/* set invalid values for azalia_codec_construct_format() to work */
-	this->dacs.cur = -1;
-	this->adcs.cur = -1;
 	err = azalia_codec_construct_format(this, 0, 0);
 	if (err)
 		return err;
@@ -1307,13 +1330,18 @@ azalia_codec_delete(codec_t *this)
 {
 	if (this->mixer_delete != NULL)
 		this->mixer_delete(this);
+
 	if (this->formats != NULL) {
 		free(this->formats, M_DEVBUF);
 		this->formats = NULL;
 	}
-	DPRINTF(("delete_encodings...\n"));
-	auconv_delete_encodings(this->encodings);
-	this->encodings = NULL;
+	this->nformats = 0;
+	if (this->encs != NULL) {
+		free(this->encs, M_DEVBUF);
+		this->encs = NULL;
+	}
+	this->nencs = 0;
+
 	return 0;
 }
 
@@ -1322,66 +1350,70 @@ azalia_codec_construct_format(codec_t *this, int newdac, int newadc)
 {
 	const convgroup_t *group;
 	uint32_t bits_rates;
-	int pvariation, rvariation;
+	int variation;
 	int nbits, c, chan, i, err;
 	nid_t nid;
 
-	this->dacs.cur = newdac;
-	group = &this->dacs.groups[this->dacs.cur];
-	bits_rates = this->w[group->conv[0]].d.audio.bits_rates;
-	nbits = 0;
-	if (bits_rates & COP_PCM_B8)
-		nbits++;
-	if (bits_rates & COP_PCM_B16)
-		nbits++;
-	if (bits_rates & COP_PCM_B20)
-		nbits++;
-	if (bits_rates & COP_PCM_B24)
-		nbits++;
-	if (bits_rates & COP_PCM_B32)
-		nbits++;
-	if (nbits == 0) {
-		printf("%s: %s/%d invalid PCM format: 0x%8.8x\n",
-		    XNAME(this->az), __FILE__, __LINE__, bits_rates);
-		return -1;
-	}
-	pvariation = group->nconv * nbits;
+	variation = 0;
 
-	this->adcs.cur = newadc;
-	group = &this->adcs.groups[this->adcs.cur];
-	bits_rates = this->w[group->conv[0]].d.audio.bits_rates;
-	nbits = 0;
-	if (bits_rates & COP_PCM_B8)
-		nbits++;
-	if (bits_rates & COP_PCM_B16)
-		nbits++;
-	if (bits_rates & COP_PCM_B20)
-		nbits++;
-	if (bits_rates & COP_PCM_B24)
-		nbits++;
-	if (bits_rates & COP_PCM_B32)
-		nbits++;
-	if (nbits == 0) {
-		printf("%s: %s/%d invalid PCM format: 0x%8.8x\n",
-		    XNAME(this->az), __FILE__, __LINE__, bits_rates);
-		return -1;
+	if (this->dacs.ngroups > 0 && newdac < this->dacs.ngroups &&
+	    newdac >= 0) {
+		this->dacs.cur = newdac;
+		group = &this->dacs.groups[this->dacs.cur];
+		bits_rates = this->w[group->conv[0]].d.audio.bits_rates;
+		nbits = 0;
+		if (bits_rates & COP_PCM_B8)
+			nbits++;
+		if (bits_rates & COP_PCM_B16)
+			nbits++;
+		if (bits_rates & COP_PCM_B20)
+			nbits++;
+		if (bits_rates & COP_PCM_B24)
+			nbits++;
+		if (bits_rates & COP_PCM_B32)
+			nbits++;
+		if (nbits == 0) {
+			printf("%s: invalid DAC PCM format: 0x%8.8x\n",
+			    XNAME(this->az), bits_rates);
+			return -1;
+		}
+		variation += group->nconv * nbits;
 	}
-	rvariation = group->nconv * nbits;
 
-	if (bits_rates & COP_PCM_R441)
-		this->rate = 44100;
-	else if (bits_rates & COP_PCM_R480)
-		this->rate = 48000;
-	else {
-		printf("%s: %s/%d invalid PCM format: 0x%8.8x\n",
-		    XNAME(this->az), __FILE__, __LINE__, bits_rates);
+	if (this->adcs.ngroups > 0 && newadc < this->adcs.ngroups &&
+	    newadc >= 0) {
+		this->adcs.cur = newadc;
+		group = &this->adcs.groups[this->adcs.cur];
+		bits_rates = this->w[group->conv[0]].d.audio.bits_rates;
+		nbits = 0;
+		if (bits_rates & COP_PCM_B8)
+			nbits++;
+		if (bits_rates & COP_PCM_B16)
+			nbits++;
+		if (bits_rates & COP_PCM_B20)
+			nbits++;
+		if (bits_rates & COP_PCM_B24)
+			nbits++;
+		if (bits_rates & COP_PCM_B32)
+			nbits++;
+		if (nbits == 0) {
+			printf("%s: invalid ADC PCM format: 0x%8.8x\n",
+			    XNAME(this->az), bits_rates);
+			return -1;
+		}
+		variation += group->nconv * nbits;
+	}
+
+	if (variation == 0) {
+		DPRINTF(("%s: no converter groups\n", XNAME(this->az)));
 		return -1;
 	}
+
 	if (this->formats != NULL)
 		free(this->formats, M_DEVBUF);
 	this->nformats = 0;
-	this->formats = malloc(sizeof(struct audio_format) *
-	    (pvariation + rvariation), M_DEVBUF, M_NOWAIT | M_ZERO);
+	this->formats = malloc(sizeof(struct audio_format) * variation,
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (this->formats == NULL) {
 		printf("%s: out of memory in %s\n",
 		    XNAME(this->az), __func__);
@@ -1389,29 +1421,38 @@ azalia_codec_construct_format(codec_t *this, int newdac, int newadc)
 	}
 
 	/* register formats for playback */
-	group = &this->dacs.groups[this->dacs.cur];
-	nid = group->conv[0];
-	chan = 0;
-	bits_rates = this->w[nid].d.audio.bits_rates;
-	for (c = 0; c < group->nconv; c++) {
-		for (chan = 0, i = 0; i <= c; i++)
-			chan += WIDGET_CHANNELS(&this->w[group->conv[c]]);
-		azalia_codec_add_bits(this, chan, bits_rates, AUMODE_PLAY);
+	if (this->dacs.ngroups > 0) {
+		group = &this->dacs.groups[this->dacs.cur];
+		for (c = 0; c < group->nconv; c++) {
+			chan = 0;
+			bits_rates = ~0;
+			for (i = 0; i <= c; i++) {
+				nid = group->conv[i];
+				chan += WIDGET_CHANNELS(&this->w[nid]);
+				bits_rates &= this->w[nid].d.audio.bits_rates;
+			}
+			azalia_codec_add_bits(this, chan, bits_rates,
+			    AUMODE_PLAY);
+		}
 	}
 
 	/* register formats for recording */
-	group = &this->adcs.groups[this->adcs.cur];
-	nid = group->conv[0];
-	chan = 0;
-	bits_rates = this->w[nid].d.audio.bits_rates;
-	for (c = 0; c < group->nconv; c++) {
-		for (chan = 0, i = 0; i <= c; i++)
-			chan += WIDGET_CHANNELS(&this->w[group->conv[c]]);
-		azalia_codec_add_bits(this, chan, bits_rates, AUMODE_RECORD);
+	if (this->adcs.ngroups > 0) {
+		group = &this->adcs.groups[this->adcs.cur];
+		for (c = 0; c < group->nconv; c++) {
+			chan = 0;
+			bits_rates = ~0;
+			for (i = 0; i <= c; i++) {
+				nid = group->conv[i];
+				chan += WIDGET_CHANNELS(&this->w[nid]);
+				bits_rates &= this->w[nid].d.audio.bits_rates;
+			}
+			azalia_codec_add_bits(this, chan, bits_rates,
+			    AUMODE_RECORD);
+		}
 	}
 
-	err = azalia_create_encodings(this->formats, this->nformats,
-	    &this->encodings);
+	err = azalia_create_encodings(this);
 	if (err)
 		return err;
 	return 0;
@@ -1466,6 +1507,7 @@ azalia_codec_add_format(codec_t *this, int chan, int valid, int prec,
 	default:
 		f->channel_mask = 0;
 	}
+	f->frequency_type = 0;
 	if (rates & COP_PCM_R80)
 		f->frequency[f->frequency_type++] = 8000;
 	if (rates & COP_PCM_R110)
@@ -1517,7 +1559,7 @@ azalia_codec_connect_stream(codec_t *this, int dir, uint16_t fmt, int number)
 	nid_t nid;
 	boolean_t flag222;
 
-	DPRINTF(("%s: fmt=0x%4.4x number=%d\n", __func__, fmt, number));
+	DPRINTFN(1, ("%s: fmt=0x%4.4x number=%d\n", __func__, fmt, number));
 	err = 0;
 	if (dir == AUMODE_RECORD)
 		group = &this->adcs.groups[this->adcs.cur];
@@ -1540,12 +1582,15 @@ azalia_codec_connect_stream(codec_t *this, int dir, uint16_t fmt, int number)
 			nid = group->conv[1];
 		}
 
-		err = this->comresp(this, nid, CORB_SET_CONVERTER_FORMAT, fmt, NULL);
-		if (err)
-			goto exit;
-		stream_chan = (number << 4) | startchan;
 		if (startchan >= nchan)
 			stream_chan = 0; /* stream#0 */
+		else
+			stream_chan = (number << 4) | startchan;
+
+		err = this->comresp(this, nid, CORB_SET_CONVERTER_FORMAT,
+				    fmt, NULL);
+		if (err)
+			goto exit;
 		err = this->comresp(this, nid, CORB_SET_CONVERTER_STREAM_CHANNEL,
 				    stream_chan, NULL);
 		if (err)
@@ -1562,7 +1607,7 @@ azalia_codec_connect_stream(codec_t *this, int dir, uint16_t fmt, int number)
 	}
 
 exit:
-	DPRINTF(("%s: leave with %d\n", __func__, err));
+	DPRINTFN(1, ("%s: leave with %d\n", __func__, err));
 	return err;
 }
 
@@ -1615,22 +1660,32 @@ azalia_widget_init(widget_t *this, const codec_t *codec, nid_t nid)
 	this->widgetcap = result;
 	this->type = COP_AWCAP_TYPE(result);
 	if (this->widgetcap & COP_AWCAP_POWER) {
-		codec->comresp(codec, nid, CORB_SET_POWER_STATE, CORB_PS_D0, &result);
+		codec->comresp(codec, nid, CORB_SET_POWER_STATE,
+		    CORB_PS_D0, &result);
 		DELAY(100);
 	}
-	if ((this->type == COP_AWTYPE_AUDIO_OUTPUT) ||
-	    (this->type == COP_AWTYPE_AUDIO_INPUT))
-		azalia_widget_init_audio(this, codec);
-	if (this->type == COP_AWTYPE_PIN_COMPLEX)
-		azalia_widget_init_pin(this, codec);
-	if (this->type == COP_AWTYPE_VOLUME_KNOB) {
-		err = codec->comresp(codec, this->nid,
-		    CORB_GET_PARAMETER,
-		    COP_VOLUME_KNOB_CAPABILITIES, &result);
-		if (!err)
-			this->d.volume.cap = result;
-	}
 
+	this->enable = 1;
+	switch (this->type) {
+	case COP_AWTYPE_AUDIO_OUTPUT:
+		/* FALLTHROUGH */
+	case COP_AWTYPE_AUDIO_INPUT:
+		azalia_widget_init_audio(this, codec);
+		break;
+	case COP_AWTYPE_PIN_COMPLEX:
+		azalia_widget_init_pin(this, codec);
+		break;
+	case COP_AWTYPE_VOLUME_KNOB:
+		err = codec->comresp(codec, this->nid, CORB_GET_PARAMETER,
+		    COP_VOLUME_KNOB_CAPABILITIES, &result);
+		if (err)
+			return err;
+		this->d.volume.cap = result;
+		break;
+	case COP_AWTYPE_POWER:
+		this->enable = 0;
+		break;
+	}
 
 	/* amplifier information */
 	if (this->widgetcap & COP_AWCAP_INAMP) {
@@ -1744,7 +1799,7 @@ azalia_widget_init_audio(widget_t *this, const codec_t *codec)
 			return err;
 		this->d.audio.encodings = result;
 		if (result == 0) { /* quirk for CMI9880.
-				    * This must not occuur usually... */
+				    * This must not occur usually... */
 			this->d.audio.encodings =
 			    codec->w[codec->audiofunc].d.audio.encodings;
 			this->d.audio.bits_rates =
@@ -1776,6 +1831,7 @@ azalia_widget_init_audio(widget_t *this, const codec_t *codec)
     "\x09""96kHz\x08""88.2kHz\x07""48kHz\x06""44.1kHz\x05""32kHz\x04"	\
     "22.05kHz\x03""16kHz\x02""11.025kHz\x01""8kHz"
 
+#ifdef AZALIA_DEBUG
 int
 azalia_widget_print_audio(const widget_t *this, const char *lead)
 {
@@ -1785,10 +1841,18 @@ azalia_widget_print_audio(const widget_t *this, const char *lead)
 	    BITSRATES_BITS);
 	return 0;
 }
+#endif
 
 int
 azalia_widget_init_pin(widget_t *this, const codec_t *codec)
 {
+	typedef enum {
+		PIN_DIR_IN,
+		PIN_DIR_OUT,
+		PIN_DIR_MIC
+	} pintype_t;
+	pintype_t pintype = PIN_DIR_IN;
+	codec_t *wcodec;
 	uint32_t result;
 	int err;
 
@@ -1808,27 +1872,81 @@ azalia_widget_init_pin(widget_t *this, const codec_t *codec)
 		return err;
 	this->d.pin.cap = result;
 
-	/* input pin */
-	if ((this->d.pin.cap & COP_PINCAP_INPUT) &&
-	    (this->d.pin.cap & COP_PINCAP_OUTPUT) == 0) {
-		err = codec->comresp(codec, this->nid,
-		    CORB_GET_PIN_WIDGET_CONTROL, 0, &result);
-		if (err == 0) {
-			result &= ~CORB_PWC_OUTPUT;
-			result |= CORB_PWC_INPUT;
-			codec->comresp(codec, this->nid,
-			    CORB_SET_PIN_WIDGET_CONTROL, result, NULL);
-		}
+	if (!(this->d.pin.cap & COP_PINCAP_INPUT))
+		pintype = PIN_DIR_OUT;
+	if (!(this->d.pin.cap & COP_PINCAP_OUTPUT))
+		pintype = PIN_DIR_IN;
+
+	switch (this->d.pin.device) {
+	case CORB_CD_LINEOUT:
+	case CORB_CD_SPEAKER:
+	case CORB_CD_HEADPHONE:
+	case CORB_CD_SPDIFOUT:
+	case CORB_CD_DIGITALOUT:
+		pintype = PIN_DIR_OUT;
+		break;
+	case CORB_CD_CD:
+	case CORB_CD_LINEIN:
+	case CORB_CD_SPDIFIN:
+	case CORB_CD_DIGITALIN:
+		pintype = PIN_DIR_IN;
+		break;
+	case CORB_CD_MICIN:
+		pintype = PIN_DIR_MIC;
+		break;
 	}
-	/* output pin, or bidirectional pin */
-	if (this->d.pin.cap & COP_PINCAP_OUTPUT) {
+
+	/* Disable unconnected pins */
+	if (CORB_CD_PORT(this->d.pin.config) == CORB_CD_NONE)
+		this->enable = 0;
+
+	/* Workaround broken machines which have their actual
+	   output on ports marked conn=none (e.g. MacBookPro1,2).
+	   Should not harm correct codec configurations. */
+	if (!this->enable)
+		pintype = PIN_DIR_OUT;
+
+	switch (pintype) {
+	case PIN_DIR_IN:
+		codec->comresp(codec, this->nid, CORB_SET_PIN_WIDGET_CONTROL,
+		    CORB_PWC_INPUT, NULL);
+		break;
+	case PIN_DIR_OUT:
+		codec->comresp(codec, this->nid, CORB_SET_PIN_WIDGET_CONTROL,
+		    CORB_PWC_OUTPUT, NULL);
+		break;
+	case PIN_DIR_MIC:
+		codec->comresp(codec, this->nid, CORB_SET_PIN_WIDGET_CONTROL,
+		    CORB_PWC_INPUT|CORB_PWC_VREF_80, NULL);
+		break;
+	}
+
+	/* EAPD pin */
+	if (this->d.pin.cap & COP_PINCAP_EAPD) {
+		err = codec->comresp(codec, this->nid, CORB_GET_EAPD_BTL_ENABLE,
+		    0, &result);
+		if (err)
+			return err;
+		result &= 0xff;
+		result |= CORB_EAPD_EAPD;
+		err = codec->comresp(codec, this->nid, CORB_SET_EAPD_BTL_ENABLE,
+		    result, &result);
+		if (err)
+			return err;
+	}
+	/* sense pin */
+	if (codec->nsense_pins < HDA_MAX_SENSE_PINS &&
+	    this->d.pin.cap & COP_PINCAP_PRESENCE &&
+	    CORB_CD_PORT(this->d.pin.config) == CORB_CD_JACK) {
+		/* check override bit */
 		err = codec->comresp(codec, this->nid,
-		    CORB_GET_PIN_WIDGET_CONTROL, 0, &result);
-		if (err == 0) {
-			result &= ~CORB_PWC_INPUT;
-			result |= CORB_PWC_OUTPUT;
-			codec->comresp(codec, this->nid,
-			    CORB_SET_PIN_WIDGET_CONTROL, result, NULL);
+		    CORB_GET_CONFIGURATION_DEFAULT, 0, &result);
+		if (err)
+			return err;
+		if (!(CORB_CD_MISC(result) & CORB_CD_PRESENCEOV)) {
+			wcodec = &codec->az->codecs[codec->az->codecno];
+			wcodec->sense_pins[codec->nsense_pins] = this->nid;
+			wcodec->nsense_pins++;
 		}
 	}
 	return 0;
@@ -1838,6 +1956,7 @@ azalia_widget_init_pin(widget_t *this, const codec_t *codec)
     "\13VREFGND\12VREF50\11VREFHIZ\07BALANCE\06INPUT" \
     "\05OUTPUT\04HEADPHONE\03PRESENCE\02TRIGGER\01IMPEDANCE"
 
+#ifdef AZALIA_DEBUG
 int
 azalia_widget_print_pin(const widget_t *this)
 {
@@ -1874,6 +1993,7 @@ azalia_widget_print_pin(const widget_t *this)
 
 	return 0;
 }
+#endif
 
 int
 azalia_widget_init_connection(widget_t *this, const codec_t *codec)
@@ -1938,6 +2058,36 @@ azalia_widget_init_connection(widget_t *this, const codec_t *codec)
 	}
 	return 0;
 }
+
+int
+azalia_widget_check_conn(codec_t *codec, int index, int depth)
+{
+	const widget_t *w;
+	int i;
+
+	w = &codec->w[index];
+
+	if (depth > 0 &&
+	    (w->type == COP_AWTYPE_PIN_COMPLEX ||
+	    w->type == COP_AWTYPE_AUDIO_OUTPUT ||
+	    w->type == COP_AWTYPE_AUDIO_INPUT)) {
+		if (w->enable)
+			return 1;
+		else
+			return 0;
+	}
+	if (++depth >= 10)
+		return 0;
+	for (i = 0; i < w->nconnections; i++) {
+		if (!VALID_WIDGET_NID(w->connections[i], codec) ||
+		    !codec->w[w->connections[i]].enable)
+			continue;
+		if (azalia_widget_check_conn(codec, w->connections[i], depth))
+			return 1;
+	}
+	return 0;
+}
+
 
 /* ================================================================
  * Stream functions
@@ -2136,7 +2286,7 @@ azalia_open(void *v, int flags)
 	azalia_t *az;
 	codec_t *codec;
 
-	DPRINTF(("%s: flags=0x%x\n", __func__, flags));
+	DPRINTFN(1, ("%s: flags=0x%x\n", __func__, flags));
 	az = v;
 	codec = &az->codecs[az->codecno];
 	codec->running++;
@@ -2149,7 +2299,7 @@ azalia_close(void *v)
 	azalia_t *az;
 	codec_t *codec;
 
-	DPRINTF(("%s\n", __func__));
+	DPRINTFN(1, ("%s\n", __func__));
 	az = v;
 	codec = &az->codecs[az->codecno];
 	codec->running--;
@@ -2160,37 +2310,16 @@ azalia_query_encoding(void *v, audio_encoding_t *enc)
 {
 	azalia_t *az;
 	codec_t *codec;
-	int i, j;
 
 	az = v;
 	codec = &az->codecs[az->codecno];
-	for (j = 0, i = 0; j < codec->nformats; j++) {
-		if (codec->formats[j].validbits !=
-		    codec->formats[j].precision)
-			continue;
-		if (i == enc->index) {
-			enc->encoding = codec->formats[j].encoding;
-			enc->precision = codec->formats[j].precision;
-			switch (enc->encoding) {
-			case AUDIO_ENCODING_SLINEAR_LE:
-				strlcpy(enc->name, enc->precision == 8 ?
-				    AudioEslinear : AudioEslinear_le,
-				    sizeof enc->name);
-				break;
-			case AUDIO_ENCODING_ULINEAR_LE:
-				strlcpy(enc->name, enc->precision == 8 ?
-				    AudioEulinear : AudioEulinear_le,
-				    sizeof enc->name);
-				break;
-			default:
-				strlcpy(enc->name, "unknown", sizeof enc->name);
-				break;
-			}
-			return (0);
-		}
-		i++;
-	}
-	return (EINVAL);
+
+	if (enc->index >= codec->nencs)
+		return (EINVAL);
+
+	*enc = codec->encs[enc->index];
+
+	return (0);
 }
 
 void
@@ -2205,99 +2334,159 @@ azalia_get_default_params(void *addr, int mode, struct audio_params *params)
 }
 
 int
+azalia_match_format(codec_t *codec, int mode, audio_params_t *par)
+{
+	int i;
+
+	for (i = 0; i < codec->nformats; i++) {
+		if (mode != codec->formats[i].mode)
+			continue;
+		if (par->encoding != codec->formats[i].encoding)
+			continue;
+		if (par->precision != codec->formats[i].precision)
+			continue;
+		if (par->channels != codec->formats[i].channels)
+			continue;
+		break;
+	}
+
+	return (i);
+}
+
+int
+azalia_set_params_sub(codec_t *codec, int mode, audio_params_t *par)
+{
+	void (*swcode)(void *, u_char *, int) = NULL;
+	char *cmode;
+	int i, j;
+	uint ochan, oenc, opre;
+
+	if (mode == AUMODE_PLAY)
+		cmode = "play";
+	else
+		cmode = "record";
+
+	ochan = par->channels;
+	oenc = par->encoding;
+	opre = par->precision;
+
+	if ((mode == AUMODE_PLAY && codec->dacs.ngroups == 0) ||
+	    (mode == AUMODE_RECORD && codec->adcs.ngroups == 0)) {
+		azalia_get_default_params(NULL, mode, par);
+		return 0;
+	}
+
+	i = azalia_match_format(codec, mode, par);
+	if (i == codec->nformats && par->channels == 1) {
+		/* find a 2 channel format and emulate mono */
+		par->channels = 2;
+		i = azalia_match_format(codec, mode, par);
+		if (i != codec->nformats) {
+			par->factor = 2;
+			if (mode == AUMODE_RECORD)
+				swcode = linear16_decimator;
+			else
+				swcode = noswap_bytes_mts;
+			par->channels = 1;
+		}
+	}
+	par->channels = ochan;
+	if (i == codec->nformats && (par->precision != 16 || par->encoding !=
+	    AUDIO_ENCODING_SLINEAR_LE)) {
+		/* try with default encoding/precision */
+		par->encoding = AUDIO_ENCODING_SLINEAR_LE;
+		par->precision = 16;
+		i = azalia_match_format(codec, mode, par);
+	}
+	if (i == codec->nformats && par->channels == 1) {
+		/* find a 2 channel format and emulate mono */
+		par->channels = 2;
+		i = azalia_match_format(codec, mode, par);
+		if (i != codec->nformats) {
+			par->factor = 2;
+			if (mode == AUMODE_RECORD)
+				swcode = linear16_decimator;
+			else
+				swcode = noswap_bytes_mts;
+			par->channels = 1;
+		}
+	}
+	par->channels = ochan;
+	if (i == codec->nformats && par->channels != 2) {
+		/* try with default channels */
+		par->encoding = oenc;
+		par->precision = opre;
+		par->channels = 2;
+		i = azalia_match_format(codec, mode, par);
+	}
+	/* try with default everything */
+	if (i == codec->nformats) {
+		par->encoding = AUDIO_ENCODING_SLINEAR_LE;
+		par->precision = 16;
+		par->channels = 2;
+		i = azalia_match_format(codec, mode, par);
+		if (i == codec->nformats) {
+			DPRINTF(("%s: can't find %s format %u/%u/%u\n",
+			    __func__, cmode, par->encoding,
+			    par->precision, par->channels));
+			return EINVAL;
+		}
+	}
+	if (codec->formats[i].frequency_type == 0) {
+		DPRINTF(("%s: matched %s format %d has 0 frequencies\n",
+		    __func__, cmode, i));
+		return EINVAL;
+	}
+
+	for (j = 0; j < codec->formats[i].frequency_type; j++) {
+		if (par->sample_rate != codec->formats[i].frequency[j])
+			continue;
+		break;
+	}
+	if (j == codec->formats[i].frequency_type) {
+		/* try again with default */
+		par->sample_rate = 48000;
+		for (j = 0; j < codec->formats[i].frequency_type; j++) {
+			if (par->sample_rate != codec->formats[i].frequency[j])
+				continue;
+			break;
+		}
+		if (j == codec->formats[i].frequency_type) {
+			DPRINTF(("%s: can't find %s rate %u\n",
+			    __func__, cmode, par->sample_rate));
+			return EINVAL;
+		}
+	}
+	par->sw_code = swcode;
+
+	return (0);
+}
+
+int
 azalia_set_params(void *v, int smode, int umode, audio_params_t *p,
     audio_params_t *r)
 {
 	azalia_t *az;
 	codec_t *codec;
-	void (*pswcode)(void *, u_char *, int) = NULL;
-	void (*rswcode)(void *, u_char *, int) = NULL;
-	int i, j;
+	int ret;
 
 	az = v;
 	codec = &az->codecs[az->codecno];
-	if (smode & AUMODE_RECORD && r != NULL) {
-		for (i = 0; i < codec->nformats; i++) {
-			if (r->encoding != codec->formats[i].encoding)
-				continue;
-			if (r->precision != codec->formats[i].precision)
-				continue;
-			if (r->channels != codec->formats[i].channels)
-				continue;
-			break;
-		}
-		/* find a 2 channel format and emulate mono */
-		if (i == codec->nformats && r->channels == 1) {
-			r->factor = 2;
-			rswcode = linear16_decimator;
-			for (i = 0; i < codec->nformats; i++) {
-				if (r->encoding != codec->formats[i].encoding)
-					continue;
-				if (r->precision != codec->formats[i].precision)
-					continue;
-				if (codec->formats[i].channels != 2)
-					continue;
-				break;
-			}
-		}
-
-		if (i == codec->nformats) {
-			DPRINTF(("%s: can't find record format %u/%u/%u\n",
-			    __func__, r->encoding, r->precision, r->channels));
-			return (EINVAL);
-		}
-		for (j = 0; j < codec->formats[i].frequency_type; j++) {
-			if (r->sample_rate != codec->formats[i].frequency[j])
-				continue;
-			break;
-		}
-		if (j == codec->formats[i].frequency_type) {
-			DPRINTF(("%s: can't find record rate %u\n",
-			    __func__, r->sample_rate));
-			return (EINVAL);
-		}
-		r->sw_code = rswcode;
+	if (codec->nformats == 0) {
+		DPRINTF(("%s: codec has no formats\n", __func__));
+		return EINVAL;
 	}
+
+	if (smode & AUMODE_RECORD && r != NULL) {
+		ret = azalia_set_params_sub(codec, AUMODE_RECORD, r);
+		if (ret)
+			return (ret);
+	}
+
 	if (smode & AUMODE_PLAY && p != NULL) {
-		for (i = 0; i < codec->nformats; i++) {
-			if (p->encoding != codec->formats[i].encoding)
-				continue;
-			if (p->precision != codec->formats[i].precision)
-				continue;
-			if (p->channels != codec->formats[i].channels)
-				continue;
-			break;
-		}
-		/* find a 2 channel format and emulate mono */
-		if (i == codec->nformats && p->channels == 1) {
-			p->factor = 2;
-			pswcode = noswap_bytes_mts;
-			for (i = 0; i < codec->nformats; i++) {
-				if (p->encoding != codec->formats[i].encoding)
-					continue;
-				if (p->precision != codec->formats[i].precision)
-					continue;
-				if (codec->formats[i].channels != 2)
-					continue;
-				break;
-			}
-		}
-		if (i == codec->nformats) {
-			DPRINTF(("%s: can't find playback format %u/%u/%u\n",
-			    __func__, p->encoding, p->precision, p->channels));
-			return (EINVAL);
-		}
-		for (j = 0; j < codec->formats[i].frequency_type; j++) {
-			if (p->sample_rate != codec->formats[i].frequency[j])
-				continue;
-			break;
-		}
-		if (j == codec->formats[i].frequency_type) {
-			DPRINTF(("%s: can't find playback rate %u\n",
-			    __func__, p->sample_rate));
-			return (EINVAL);
-		}
-		p->sw_code = pswcode;
+		ret = azalia_set_params_sub(codec, AUMODE_PLAY, p);
+		if (ret)
+			return (ret);
 	}
 
 	return (0);
@@ -2326,7 +2515,7 @@ azalia_round_blocksize(void *v, int blk)
 		if (blk & 0x7f)
 			blk = (blk + 0x7f) & ~0x7f;
 	}
-	DPRINTF(("%s: resultant block size = %d\n", __func__, blk));
+	DPRINTFN(1,("%s: resultant block size = %d\n", __func__, blk));
 	return blk;
 }
 
@@ -2335,7 +2524,7 @@ azalia_halt_output(void *v)
 {
 	azalia_t *az;
 
-	DPRINTF(("%s\n", __func__));
+	DPRINTFN(1, ("%s\n", __func__));
 	az = v;
 	return azalia_stream_halt(&az->pstream);
 }
@@ -2345,7 +2534,7 @@ azalia_halt_input(void *v)
 {
 	azalia_t *az;
 
-	DPRINTF(("%s\n", __func__));
+	DPRINTFN(1, ("%s\n", __func__));
 	az = v;
 	return azalia_stream_halt(&az->rstream);
 }
@@ -2460,12 +2649,19 @@ azalia_trigger_output(void *v, void *start, void *end, int blk,
 	int err;
 	uint16_t fmt;
 
+	az = v;
+
+	if (az->codecs[az->codecno].dacs.ngroups == 0) {
+		DPRINTF(("%s: can't play without a DAC\n", __func__));
+		return ENXIO;
+	}
+
 	err = azalia_params2fmt(param, &fmt);
 	if (err)
 		return EINVAL;
 
-	az = v;
-	return azalia_stream_start(&az->pstream, start, end, blk, intr, arg, fmt);
+	return azalia_stream_start(&az->pstream, start, end, blk, intr,
+	    arg, fmt);
 }
 
 int
@@ -2476,16 +2672,23 @@ azalia_trigger_input(void *v, void *start, void *end, int blk,
 	int err;
 	uint16_t fmt;
 
-	DPRINTF(("%s: this=%p start=%p end=%p blk=%d {enc=%u %uch %u/%ubit %uHz}\n",
+	DPRINTFN(1, ("%s: this=%p start=%p end=%p blk=%d {enc=%u %uch %ubit %uHz}\n",
 	    __func__, v, start, end, blk, param->encoding, param->channels,
-	    param->precision, param->precision, param->sample_rate));
+	    param->precision, param->sample_rate));
+
+	az = v;
+
+	if (az->codecs[az->codecno].adcs.ngroups == 0) {
+		DPRINTF(("%s: can't record without an ADC\n", __func__));
+		return ENXIO;
+	}
 
 	err = azalia_params2fmt(param, &fmt);
 	if (err)
 		return EINVAL;
 
-	az = v;
-	return azalia_stream_start(&az->rstream, start, end, blk, intr, arg, fmt);
+	return azalia_stream_start(&az->rstream, start, end, blk, intr,
+	    arg, fmt);
 }
 
 /* --------------------------------
@@ -2583,24 +2786,64 @@ azalia_params2fmt(const audio_params_t *param, uint16_t *fmt)
 }
 
 int
-azalia_create_encodings(struct audio_format *formats, int nformats,
-    struct audio_encoding_set **encodings)
+azalia_create_encodings(codec_t *this)
 {
-#if 0
-	int i;
-	u_int j;
+	struct audio_format f;
+	int encs[16];
+	int enc, nencs;
+	int i, j;
 
-	for (i = 0; i < nformats; i++) {
-		printf("format(%d): encoding %u vbits %u prec %u chans %u cmask 0x%x\n",
-		    i, formats[i].encoding, formats[i].validbits,
-		    formats[i].precision, formats[i].channels,
-		    formats[i].channel_mask);
-		printf("format(%d) rates:", i);
-		for (j = 0; j < formats[i].frequency_type; j++) {
-			printf(" %u", formats[i].frequency[j]);
+	nencs = 0;
+	for (i = 0; i < this->nformats && nencs < 16; i++) {
+		f = this->formats[i];
+		if (f.validbits != f.precision)
+			continue;
+		enc = f.precision << 8 | f.encoding;
+		for (j = 0; j < nencs; j++) {
+			if (encs[j] == enc)
+				break;
 		}
-		printf("\n");
+		if (j < nencs)
+			continue;
+		encs[j] = enc;
+		nencs++;
 	}
-#endif
+
+	if (this->encs != NULL)
+		free(this->encs, M_DEVBUF);
+	this->nencs = 0;
+	this->encs = malloc(sizeof(struct audio_encoding) * nencs,
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
+	if (this->encs == NULL) {
+		printf("%s: out of memory in %s\n",
+		    XNAME(this->az), __func__);
+		return ENOMEM;
+	}
+
+	this->nencs = nencs;
+	for (i = 0; i < this->nencs; i++) {
+		this->encs[i].index = i;
+		this->encs[i].encoding = encs[i] & 0xff;
+		this->encs[i].precision = encs[i] >> 8;
+		this->encs[i].flags = 0;
+		switch (this->encs[i].encoding) {
+		case AUDIO_ENCODING_SLINEAR_LE:
+			strlcpy(this->encs[i].name,
+			    this->encs[i].precision == 8 ?
+			    AudioEslinear : AudioEslinear_le,
+			    sizeof this->encs[i].name);
+			break;
+		case AUDIO_ENCODING_ULINEAR_LE:
+			strlcpy(this->encs[i].name,
+			    this->encs[i].precision == 8 ?
+			    AudioEulinear : AudioEulinear_le,
+			    sizeof this->encs[i].name);
+			break;
+		default:
+			DPRINTF(("%s: unknown format\n", __func__));
+			break;
+		}
+	}
+
 	return (0);
 }

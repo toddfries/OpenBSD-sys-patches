@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.40 2008/06/26 05:42:11 ray Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.42 2008/12/07 14:33:26 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.28 1997/06/06 23:29:17 thorpej Exp $	*/
 
 /*-
@@ -82,7 +82,7 @@
 
 #include <uvm/uvm_extern.h>
 
-#define _I386_BUS_DMA_PRIVATE
+#define _BUS_DMA_PRIVATE
 #include <machine/bus.h>
 #include <machine/pio.h>
 #include <machine/i8259.h>
@@ -145,7 +145,7 @@ struct {
  * PCI doesn't have any special needs; just use the generic versions
  * of these functions.
  */
-struct i386_bus_dma_tag pci_bus_dma_tag = {
+struct bus_dma_tag pci_bus_dma_tag = {
 	NULL,			/* _cookie */
 	_bus_dmamap_create, 
 	_bus_dmamap_destroy,
@@ -426,6 +426,7 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 		goto bad;
 	}
 
+	ihp->tag = pa->pa_intrtag;
 	ihp->line = line;
 	ihp->pin = pin;
 
@@ -550,12 +551,23 @@ pci_intr_string(pci_chipset_tag_t pc, pci_intr_handle_t ih)
 	return (irqstr);
 }
 
+#include "acpiprt.h"
+#if NACPIPRT > 0
+void	acpiprt_route_interrupt(int bus, int dev, int pin);
+#endif
+
 void *
 pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
     int (*func)(void *), void *arg, char *what)
 {
 	void *ret;
+	int bus, dev;
 	int l = ih.line & APIC_INT_LINE_MASK;
+
+	pci_decompose_tag(pc, ih.tag, &bus, &dev, NULL);
+#if NACPIPRT > 0
+	acpiprt_route_interrupt(bus, dev, ih.pin);
+#endif
 
 #if NIOAPIC > 0
 	if (l != -1 && ih.line & APIC_INT_VIA_APIC)

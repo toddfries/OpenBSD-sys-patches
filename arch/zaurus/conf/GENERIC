@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.68 2008/02/24 21:49:37 uwe Exp $
+#	$OpenBSD: GENERIC,v 1.71 2008/12/01 23:48:47 todd Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -210,19 +210,18 @@ sdmmc*		at pxammc?		# SD/MMC bus
 scsibus*	at sdmmc?		# SCSI emulation
 
 # Bluetooth controllers
-#sbt*	at sdmmc?			# SDIO Bluetooth
-#ubt*	at uhub?			# USB Bluetooth
+sbt*	at sdmmc?			# SDIO Bluetooth
+bthub*	at sbt?
+ubt*	at uhub?			# USB Bluetooth
+bthub*	at ubt?
 
-# Bluetooth bus support
-#bthub*	at sbt?
-#bthub*	at ubt?
-
-# Bluetooth HID support
-#bthidev* at bthub?
-#btkbd*	at bthidev?
-#btms*	at bthidev?
-#wskbd*	at btkbd? mux 1
-#wsmouse* at btms? mux 0
+bthidev* at bthub?			# Bluetooth HID support
+btkbd*	at bthidev?
+btms*	at bthidev?
+wskbd*	at btkbd? mux 1
+wsmouse* at btms? mux 0
+btsco*	at bthub?			# Bluetooth audio support
+audio*	at btsco?
 
 # 1-Wire devices
 option ONEWIREVERBOSE

@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.636 2008/10/15 15:05:04 oga Exp $
+#	$OpenBSD: GENERIC,v 1.644 2008/12/01 23:48:46 todd Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -259,6 +259,7 @@ kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 cdce*	at uhub?		# CDC Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 udav*	at uhub?		# Davicom DM9601 based Ethernet
+mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
@@ -293,19 +294,18 @@ sdmmc*	at sdhc?		# SD/MMC bus
 scsibus* at sdmmc?		# SCSI emulation
 
 # Bluetooth controllers
-#sbt*	at sdmmc?		# SDIO Bluetooth
-#ubt*	at uhub?		# USB Bluetooth
+sbt*	at sdmmc?		# SDIO Bluetooth
+bthub*	at sbt?
+ubt*	at uhub?		# USB Bluetooth
+bthub*	at ubt?
 
-# Bluetooth bus support
-#bthub*	at sbt?
-#bthub*	at ubt?
-
-# Bluetooth HID support
-#bthidev* at bthub?
-#btkbd*	at bthidev?
-#btms*	at bthidev?
-#wskbd*	at btkbd? mux 1
-#wsmouse* at btms? mux 0
+bthidev* at bthub?		# Bluetooth HID support
+btkbd*	at bthidev?
+btms*	at bthidev?
+wskbd*	at btkbd? mux 1
+wsmouse* at btms? mux 0
+btsco*	at bthub?		# Bluetooth audio support
+audio*	at btsco?
 
 npx0	at isa? port 0xf0 irq 13	# math coprocessor
 isadma0	at isa?
@@ -329,16 +329,37 @@ wskbd*		at pckbd? mux 1
 wsmouse*	at pms? mux 0
 wsmouse*	at pmsi? mux 0
 
-agp*		at vga?		# AGP bridges
+intagp*		at vga?		# intel integrated graphics agp
+aliagp*		at pchb?
+amdagp*		at pchb?
+intelagp*	at pchb?
+sisagp*		at pchb?
+viaagp*		at pchb?
+
+agp*		at intagp?	# AGP bridges
+agp*		at aliagp?	# AGP bridges
+agp*		at amdagp?	# AGP bridges
+agp*		at intelagp?	# AGP bridges
+agp*		at sisagp?	# AGP bridges
+agp*		at viaagp?	# AGP bridges
+
 #option		DRM_DEBUG
 inteldrm*	at vga? 	# Intel i915, i945 DRM driver
+drm*		at inteldrm?
 #machdrm*	at vga?		# mach64 (3D Rage Pro, Rage) DRM driver
+#drm*		at machdrm?
 #mgadrm*	at vga?		# Matrox G[24]00, G[45]50 DRM driver
+#drm*		at mgadrm?
 #ragedrm*	at vga?		# ATI Rage 128 DRM driver
+#drm*		at ragedrm?
 radeondrm*	at vga? 	# ATI Radeon DRM driver
+drm*		at radeondrm?
 #savagedrm*	at vga?		# S3 Savage DRM driver
+#drm*		at savagedrm?
 #sisdrm*	at vga?		# SiS DRM driver
+#drm*		at sisdrm?
 #tdfxdrm*	at vga?		# 3dfx (voodoo) DRM driver
+#drm*		at tdfxdrm?
 
 #option		VESABIOSVERBOSE
 #option		VESAFB		# VESA bios framebuffer support for X11
@@ -657,6 +678,7 @@ eso*	at pci?				# ESS Solo-1 PCI AudioDrive
 sv*	at pci?				# S3 SonicVibes (S3 617)
 neo*	at pci?				# NeoMagic 256AV/ZX
 cmpci*	at pci?				# C-Media CMI8338/8738
+auacer*	at pci?				# Acer Labs M5455
 auglx*	at pci?				# AMD Geode CS5536 Audio
 auich*	at pci? flags 0x0000		# i82801 ICH AC'97 audio
 auixp*	at pci?				# ATI IXP AC'97 Audio
@@ -718,6 +740,8 @@ audio*	at neo?
 audio*	at cmpci?
 audio*	at clcs?
 audio*	at clct?
+audio*	at auacer?
+audio*	at auglx?
 audio*	at auich?
 audio*	at auixp?
 audio*	at autri?
@@ -728,7 +752,6 @@ audio*	at maestro?
 audio*	at esa?
 audio*	at yds?
 audio*	at emu?
-audio*	at auglx?
 
 bktr0	at pci?
 
@@ -772,9 +795,11 @@ scsibus* at iopsp?
 
 # GPIO ``pin bus'' drivers
 #gpioiic* at gpio? offset 0 mask 0x3	# I2C bus bit-banging
-#iic*	at gpioiic?
+gpioiic* at gpio?
+iic*	at gpioiic?
 #gpioow* at gpio? offset 0 mask 0x1	# 1-Wire bus bit-banging
-#onewire* at gpioow?
+gpioow*	at gpio?
+onewire* at gpioow?
 
 # 1-Wire devices
 option ONEWIREVERBOSE

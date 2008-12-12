@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.4 2005/10/05 21:48:34 tdeval Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.8 2008/12/06 19:59:38 tedu Exp $	*/
 /*	$NetBSD: pci_machdep.h,v 1.1 2003/02/26 21:26:11 fvdl Exp $	*/
 
 /*
@@ -55,16 +55,20 @@ union x86_pci_tag_u {
 	} mode2;
 };
 
-extern struct x86_bus_dma_tag pci_bus_dma_tag;
+extern struct bus_dma_tag pci_bus_dma_tag;
 
 /*
  * Types provided to machine-independent PCI code
  */
 typedef void *pci_chipset_tag_t;
 typedef union x86_pci_tag_u pcitag_t;
-typedef int pci_intr_handle_t;
 
-#define	pci_intr_line(ih)	((ih) & 0xff)
+typedef struct {
+	pcitag_t tag;
+	int line, pin;
+} pci_intr_handle_t;
+
+#define	pci_intr_line(ih)	((ih.line) & 0xff)
 
 /*
  * i386-specific PCI variables and functions.

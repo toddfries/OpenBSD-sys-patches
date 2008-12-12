@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.444 2008/10/15 23:23:51 deraadt Exp $
+#	$OpenBSD: files,v 1.450 2008/12/03 23:39:32 dlg Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -97,16 +97,15 @@ file	dev/ic/pcdisplay_chars.c	pcdisplayops
 define	mk48txx
 file	dev/ic/mk48txx.c		mk48txx
 
-# AGP
-define agpbus {}
-include "dev/pci/files.agp"
+# agp integrated graphics attaches at vga. defines are in dev/pci/files.agp
+define agpint {}
 
 # DRM - Direct Rendering Manager: /dev/drm
-define drm {}
+define drmdev {}
 include "dev/pci/drm/files.drm"
 
 # VGA graphics
-device	vga: wsemuldisplaydev, pcdisplayops, drm, agpbus
+device	vga: wsemuldisplaydev, pcdisplayops, drmdev, agpint
 file	dev/ic/vga.c			vga & (vga_pci | vga_isa) needs-flag
 file	dev/ic/vga_subr.c		vga & (vga_pci | vga_isa) needs-flag
 
@@ -191,6 +190,7 @@ file	dev/ic/mfi.c			mfi
 device	isp: scsi
 file	dev/ic/isp.c			isp
 file	dev/ic/isp_openbsd.c		isp
+file	dev/ic/isp_library.c		isp
 
 # LSI Logic Fusion-MPT Message Passing Interface
 device	mpi: scsi
@@ -303,10 +303,8 @@ file	dev/ic/gem.c			gem
 
 # 8250/16[45]50-based "com" ports
 device	com: tty
-device	pccom: tty			# XXX
 file	dev/ic/com.c			com & (com | com_cardbus | com_gsc |
 					       com_isapnp)	needs-flag
-file	dev/ic/com_subr.c		com | pccom
 
 # PC-like keyboard controller
 define	pckbcslot {[slot = -1]}
@@ -415,6 +413,7 @@ define	cbbus {[slot = -1]}		# CardBus attachment
 define	pcmciaslot {[slot = -1]}	# PCMCIA slot itself
 define	sdmmcbus {}			# SD/MMC attachment
 define	btbus {}			# Bluetooth host controller
+define	agpbus {}			# AGP bridge
 
 # UHCI USB controller
 device	uhci: usbus
@@ -445,6 +444,11 @@ file	dev/ipmi.c			ipmi	needs-flag
 device	vmt
 file	dev/vmt.c			vmt	needs-flag
 
+# Virtual SCSI
+device	vscsi: scsi
+attach	vscsi at root
+file	dev/vscsi.c			vscsi	needs-flag
+
 # Software RAID
 device	softraid: scsi
 attach	softraid at root
@@ -452,6 +456,7 @@ file	dev/softraid.c			softraid	needs-flag
 file	dev/softraid_raid0.c		softraid
 file	dev/softraid_raid1.c		softraid
 file	dev/softraid_crypto.c		softraid & crypto
+file	dev/softraid_aoe.c		softraid & ether & aoe
 
 # legitimate pseudo-devices
 pseudo-device vnd: disk
@@ -786,6 +791,7 @@ file net/if_gre.c			gre			needs-count
 file net/if_trunk.c			trunk			needs-count
 file net/trunklacp.c			trunk
 file net/if_mpe.c			mpe			needs-count
+file net/if_aoe.c			ether & aoe
 file net80211/ieee80211.c		wlan
 file net80211/ieee80211_amrr.c		wlan
 file net80211/ieee80211_crypto.c	wlan

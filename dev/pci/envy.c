@@ -1,4 +1,4 @@
-/*	$OpenBSD: envy.c,v 1.9 2008/04/30 17:31:26 ratchov Exp $	*/
+/*	$OpenBSD: envy.c,v 1.12 2008/12/09 22:49:59 ratchov Exp $	*/
 /*
  * Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
  *
@@ -397,7 +397,7 @@ envy_lineout_setsrc(struct envy_softc *sc, int out, int src) {
 		sel = ENVY_MT_OUTSRC_MON;
 	}
 	shift = (out  & 1) ? (out & ~1) + 8 : out;
-	mask = ENVY_MT_INSEL_MASK << shift;
+	mask = ENVY_MT_OUTSRC_MASK << shift;
 	reg = bus_space_read_2(sc->mt_iot, sc->mt_ioh, ENVY_MT_OUTSRC);
 	reg = (reg & ~mask) | (sel << shift);
 	bus_space_write_2(sc->mt_iot, sc->mt_ioh, ENVY_MT_OUTSRC, reg);
@@ -688,7 +688,7 @@ envy_set_params(void *self, int setmode, int usemode,
 	if (setmode == (AUMODE_PLAY | AUMODE_RECORD) &&
 	    p->sample_rate != r->sample_rate) {
 		DPRINTF("%s: play/rec rates mismatch\n", DEVNAME(sc));
-		return EINVAL;
+		r->sample_rate = p->sample_rate;
 	}
 	rate = (setmode & AUMODE_PLAY) ? p->sample_rate : r->sample_rate;
 	for (i = 0; envy_rates[i].rate < rate; i++) {
@@ -1045,5 +1045,5 @@ envy_set_port(void *self, struct mixer_ctrl *ctl)
 int
 envy_get_props(void *self)
 {
-	return AUDIO_PROP_FULLDUPLEX;
+	return AUDIO_PROP_FULLDUPLEX | AUDIO_PROP_INDEPENDENT;
 }
