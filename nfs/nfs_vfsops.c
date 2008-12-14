@@ -113,7 +113,7 @@ nfs_statfs(mp, sbp, p)
 	struct nfs_statfs *sfp = NULL;
 	u_int32_t *tl;
 	int32_t t1;
-	caddr_t dpos;
+	caddr_t dpos, cp2;
 	struct nfsmount *nmp = VFSTONFS(mp);
 	int error = 0, v3 = (nmp->nm_flag & NFSMNT_NFSV3), retattr;
 	struct mbuf *mreq, *mrep = NULL, *md, *mb;
@@ -186,7 +186,7 @@ nfs_fsinfo(nmp, vp, cred, p)
 	struct nfsv3_fsinfo *fsp;
 	int32_t t1;
 	u_int32_t *tl, pref, max;
-	caddr_t dpos;
+	caddr_t dpos, cp2;
 	int error = 0, retattr;
 	struct mbuf *mreq, *mrep, *md, *mb;
 
