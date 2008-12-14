@@ -48,9 +48,12 @@
 #include <sys/poll.h>
 
 #include <dev/usb/usb.h>
+#include <machine/bus.h>
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdi_util.h>
+#include <dev/usb/usbdivar.h>
 #include <dev/usb/usbdevs.h>
+#include <dev/usb/usb.h>
 
 #ifdef UGEN_DEBUG
 #define DPRINTF(x)	do { if (ugendebug) printf x; } while (0)
@@ -1245,6 +1248,9 @@ ugen_do_ioctl(struct ugen_softc *sc, int endpt, u_long cmd,
 	case USB_GET_DEVICEINFO:
 		usbd_fill_deviceinfo(sc->sc_udev,
 				     (struct usb_device_info *)addr, 1);
+		break;
+	case USB_RESET_PORT:
+		usb_needs_reattach(sc->sc_udev);
 		break;
 	default:
 		return (EINVAL);
