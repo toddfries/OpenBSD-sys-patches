@@ -223,7 +223,7 @@ int nfsm_mbuftouio(struct mbuf **, struct uio *, int, caddr_t *);
 void nfsm_uiotombuf(struct mbuf **, struct uio *, size_t);
 void nfsm_strtombuf(struct mbuf **, void *, size_t);
 void nfsm_buftombuf(struct mbuf **, void *, size_t);
-void *nfsm_disct(struct mbuf **, int, int *, caddr_t *);
+int nfsm_disct(struct mbuf **, caddr_t *, int, int, caddr_t *);
 int nfs_adv(struct mbuf **, caddr_t *, int, int);
 int nfsm_strtmbuf(struct mbuf **, char **, char *, long);
 int nfs_vfs_init(struct vfsconf *);
