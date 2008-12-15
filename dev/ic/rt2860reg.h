@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860reg.h,v 1.9 2008/07/21 19:41:44 damien Exp $	*/
+/*	$OpenBSD: rt2860reg.h,v 1.13 2008/12/14 18:41:57 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007
@@ -282,7 +282,7 @@
 #define RT2860_NULL0_MODE	(1 << 15)
 #define RT2860_NULL1_MODE	(1 << 14)
 #define RT2860_RX_DROP_MODE	(1 << 13)
-#define RT2860_TX0Q_MANUAL	(1 << 12)	
+#define RT2860_TX0Q_MANUAL	(1 << 12)
 #define RT2860_TX1Q_MANUAL	(1 << 11)
 #define RT2860_TX2Q_MANUAL	(1 << 10)
 #define RT2860_RX0Q_MANUAL	(1 <<  9)
@@ -786,21 +786,48 @@ struct rt2860_rxwi {
 #define RT2860_EEPROM_RPWR		0x6f
 #define RT2860_EEPROM_BBP_BASE		0x78
 
+#define RT2860_RIDX_CCK1	 0
+#define RT2860_RIDX_CCK11	 3
+#define RT2860_RIDX_OFDM6	 4
+#define RT2860_RIDX_MAX		11
+static const struct rt2860_rate {
+	uint8_t		rate;
+	uint8_t		mcs;
+	enum		ieee80211_phytype phy;
+	uint8_t		ctl_ridx;
+	uint16_t	sp_ack_dur;
+	uint16_t	lp_ack_dur;
+} rt2860_rates[] = {
+	{   2, 0, IEEE80211_T_DS,   0, 304, 304 },
+	{   4, 1, IEEE80211_T_DS,   1, 248, 152 },
+	{  11, 2, IEEE80211_T_DS,   2, 213, 117 },
+	{  22, 3, IEEE80211_T_DS,   3, 203, 107 },
+	{  12, 0, IEEE80211_T_OFDM, 4,  50,  50 },
+	{  18, 1, IEEE80211_T_OFDM, 4,  42,  42 },
+	{  24, 2, IEEE80211_T_OFDM, 6,  38,  38 },
+	{  36, 3, IEEE80211_T_OFDM, 6,  34,  34 },
+	{  48, 4, IEEE80211_T_OFDM, 8,  34,  34 },
+	{  72, 5, IEEE80211_T_OFDM, 8,  30,  30 },
+	{  96, 6, IEEE80211_T_OFDM, 8,  30,  30 },
+	{ 108, 7, IEEE80211_T_OFDM, 8,  30,  30 }
+};
 
 /*
  * Control and status registers access macros.
  */
-static inline u_int32_t
-RAL_READ(struct rt2860_softc *sc, bus_size_t reg)
-{
-	(void)bus_space_read_4(sc->sc_st, sc->sc_sh, RT2860_ASIC_VER_ID);
-	return bus_space_read_4(sc->sc_st, sc->sc_sh, reg);
-}
+#define RAL_READ(sc, reg)						\
+	bus_space_read_4((sc)->sc_st, (sc)->sc_sh, (reg))
 
-#define RAL_WRITE(sc, reg, val)	do {					\
-	bus_space_read_4((sc)->sc_st, (sc)->sc_sh, RT2860_ASIC_VER_ID);	\
-	bus_space_write_4((sc)->sc_st, (sc)->sc_sh, (reg), (val));	\
-} while (/* CONSTCOND */0)
+#define RAL_WRITE(sc, reg, val)						\
+	bus_space_write_4((sc)->sc_st, (sc)->sc_sh, (reg), (val))
+
+#define RAL_BARRIER_WRITE(sc)						\
+	bus_space_barrier((sc)->sc_st, (sc)->sc_sh, 0, 0x1800,		\
+	    BUS_SPACE_BARRIER_WRITE)
+
+#define RAL_BARRIER_READ_WRITE(sc)					\
+	bus_space_barrier((sc)->sc_st, (sc)->sc_sh, 0, 0x1800,		\
+	    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE)
 
 #define RAL_WRITE_REGION_1(sc, offset, datap, count)			\
 	bus_space_write_region_1((sc)->sc_st, (sc)->sc_sh, (offset),	\
@@ -811,10 +838,11 @@ RAL_READ(struct rt2860_softc *sc, bus_size_t reg)
 	    (val), (count))
 
 /*
- * EEPROM access macro
+ * EEPROM access macro.
  */
 #define RT2860_EEPROM_CTL(sc, val) do {					\
 	RAL_WRITE((sc), RT2860_PCI_EECTRL, (val));			\
+	RAL_BARRIER_READ_WRITE((sc));					\
 	DELAY(RT2860_EEPROM_DELAY);					\
 } while (/* CONSTCOND */0)
 
@@ -827,7 +855,7 @@ RAL_READ(struct rt2860_softc *sc, bus_size_t reg)
 	{ RT2860_HT_BASIC_RATE,		0x00008003 },	\
 	{ RT2860_MAC_SYS_CTRL,		0x00000000 },	\
 	{ RT2860_BKOFF_SLOT_CFG,	0x00000209 },	\
-	{ RT2860_TX_SW_CFG0,		0x00040a06 },	\
+	{ RT2860_TX_SW_CFG0,		0x00000000 },	\
 	{ RT2860_TX_SW_CFG1,		0x00080606 },	\
 	{ RT2860_TX_LINK_CFG,		0x00001020 },	\
 	{ RT2860_TX_TIMEOUT_CFG,	0x000a2090 },	\
@@ -858,15 +886,17 @@ RAL_READ(struct rt2860_softc *sc, bus_size_t reg)
 	{  65, 0x2c },	\
 	{  66, 0x38 },	\
 	{  69, 0x12 },	\
+	{  70, 0x0a },	\
 	{  73, 0x10 },	\
 	{  81, 0x37 },	\
 	{  82, 0x62 },	\
 	{  83, 0x6a },	\
-	{  84, 0x19 },	\
+	{  84, 0x99 },	\
 	{  86, 0x00 },	\
 	{  91, 0x04 },	\
 	{  92, 0x00 },	\
-	{ 105, 0x01 }
+	{ 103, 0x00 },	\
+	{ 105, 0x05 }
 
 /*
  * Default settings for RF registers; values derived from the reference driver.
