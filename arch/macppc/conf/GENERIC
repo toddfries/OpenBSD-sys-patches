@@ -183,6 +183,8 @@ puc*		at pci?		# PCI "universal" comm device
 #puc*		at cardbus?
 com*		at puc?
 
+cac*	at pci?			# Compaq Smart ARRAY [234]* RAID controllers
+scsibus* at cac?
 #scsibus*	at adv?
 scsibus*	at ahc?
 #scsibus*	at ami?
