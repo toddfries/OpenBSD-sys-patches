@@ -197,7 +197,6 @@ int		uvideo_start_read(void *);
  * Firmware
  */
 usbd_status	uvideo_ucode_loader_ricoh(struct uvideo_softc *);
-usbd_status	uvideo_ucode_loader_apple_isight(struct uvideo_softc *);
 
 struct cfdriver uvideo_cd = {
 	NULL, "uvideo", DV_DULL
@@ -3107,94 +3106,6 @@ uvideo_ucode_loader_ricoh(struct uvideo_softc *sc)
 	cbuf = 0;
 	error = uvideo_usb_control(sc, UT_WRITE_VENDOR_DEVICE,
 	    0xa1, 0, &cbuf, sizeof cbuf);
-	if (error != USBD_NORMAL_COMPLETION) {
-		printf("%s: ucode activate error=%s!\n",
-		    DEVNAME(sc), usbd_errstr(error));
-		return (USBD_INVAL);
-	}
-	DPRINTF(1, "%s: ucode activated\n", DEVNAME(sc));
-
-	return (USBD_NORMAL_COMPLETION);
-}
-
-usbd_status
-uvideo_ucode_loader_apple_isight(struct uvideo_softc *sc)
-{
-	usbd_status error;
-	uint8_t *ucode, *code, *buf, cbuf;
-	size_t ucode_size;
-
-	/*
-	 * XXX need a way to determine that firmware is already
-	 * loaded, and then do nothing
-	 */
-
-	cbuf = 1;
-	error = uvideo_usb_control(sc, UT_WRITE_VENDOR_DEVICE,
-	    0xa0, 0xe600, &cbuf, sizeof cbuf);
-	if (error) {
-		printf("%s: failed to init firmware loading state: %s\n",
-		    DEVNAME(sc), usbd_errstr(error));
-		return (error);
-	}
-
-	/* open microcode file */
-	error = loadfirmware(sc->sc_ucode->ucode_name, &ucode, &ucode_size);
-	if (error != 0) {
-		printf("%s: loadfirmware error=%d!\n", DEVNAME(sc), error);
-		return (USBD_INVAL);
-	}
-
-	buf = malloc(50, M_DEVBUF, M_NOWAIT);
-	code = ucode;
-
-	while (ucode + 4 <= code + ucode_size) {
-		uint16_t	len, reqst;
-
-		len = (code[0] << 8 | code[1]);
-		reqst = (code[2] << 8 | code[3]);
-		code += 4;
-
-		printf("%s: read chunk len=0x%2x\n", DEVNAME(sc), len);
-
-		if (len == 0x22b)
-//		if (len == 0x8001)
-			break;
-		else if (!len)
-			continue;
-
-		for (; len > 0; reqst += 50) {
-			size_t		llen = min(len, 50);
-
-			len -= llen;
-			if (code + llen > code + ucode_size) {
-				printf("%s: invalid firmware!", DEVNAME(sc));
-				free(ucode, M_DEVBUF);
-				free(buf, M_DEVBUF);
-				return (USBD_INVAL);
-			}
-			memcpy(buf, code, llen);
-			code += llen;
-
-			error = uvideo_usb_control(sc, UT_WRITE_VENDOR_DEVICE,
-			    0xa0, reqst, buf, llen);
-			if (error) {
-				printf("%s failed to upload chunk: %s\n",
-				    DEVNAME(sc), usbd_errstr(error));
-				free(ucode, M_DEVBUF);
-				free(buf, M_DEVBUF);
-				return (USBD_INVAL);
-			}
-			printf("%s: uploaded chunk: len=%d, val=0x%x\n",
-			    DEVNAME(sc), llen, reqst);
-		}
-	}
-	free(buf, M_DEVBUF);
-	free(code, M_DEVBUF);
-
-	cbuf = 0;
-	error = uvideo_usb_control(sc, UT_WRITE_VENDOR_DEVICE,
-	    0xa0, 0xe600, &cbuf, sizeof cbuf);
 	if (error != USBD_NORMAL_COMPLETION) {
 		printf("%s: ucode activate error=%s!\n",
 		    DEVNAME(sc), usbd_errstr(error));
