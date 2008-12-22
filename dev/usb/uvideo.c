@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.104 2008/12/09 06:01:41 brad Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.110 2008/12/17 18:14:46 mglocker Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -240,22 +240,35 @@ struct video_hw_if uvideo_hw_if = {
  * Devices which either fail to declare themselves as UICLASS_VIDEO,
  * or which need firmware uploads or other quirk handling later on.
  */
+#define UVIDEO_FLAG_ISIGHT_STREAM_HEADER	0x1
 struct uvideo_devs {
-	struct usb_devno uv_dev;
-	char		*ucode_name;
-	usbd_status	(*ucode_loader)(struct uvideo_softc *);
+	struct usb_devno	 uv_dev;
+	char			*ucode_name;
+	usbd_status		 (*ucode_loader)(struct uvideo_softc *);
+	int			 flags;
 } uvideo_devs[] = {
 	{
 	    { USB_VENDOR_RICOH, USB_PRODUCT_RICOH_VGPVCC7 },
 	    "r5u87x-05ca-183a.fw",
-	    uvideo_ucode_loader_ricoh
+	    uvideo_ucode_loader_ricoh,
+	    0
 	},
-	{	/* Incorrectly reports as UICLASS_VENDOR */
+	{   /* Incorrectly reports as UICLASS_VENDOR */
 	    { USB_VENDOR_LOGITECH, USB_PRODUCT_LOGITECH_QUICKCAMOEM_1 },
-	    NULL, NULL
+	    NULL,
+	    NULL,
+	    0
+	},
+	{
+	    /* Has a own streaming header format */
+	    { USB_VENDOR_APPLE, USB_PRODUCT_APPLE_ISIGHT_1 },
+	    NULL,
+	    NULL,
+	    UVIDEO_FLAG_ISIGHT_STREAM_HEADER
 	}
 };
-#define uvideo_lookup(v, p) ((struct uvideo_devs *)usb_lookup(uvideo_devs, v, p))
+#define uvideo_lookup(v, p) \
+	((struct uvideo_devs *)usb_lookup(uvideo_devs, v, p))
 
 int
 uvideo_enable(void *v)
@@ -354,9 +367,7 @@ uvideo_match(struct device *parent, void *match, void *aux)
 	    id->bInterfaceSubClass == UISUBCLASS_VIDEOCONTROL)
 		return (UMATCH_VENDOR_PRODUCT_CONF_IFACE);
 
-	if (uvideo_lookup(uaa->vendor, uaa->product) != NULL &&
-	    id->bInterfaceClass == UICLASS_VENDOR &&
-	    id->bInterfaceSubClass == UISUBCLASS_VIDEOCONTROL)
+	if (uvideo_lookup(uaa->vendor, uaa->product) != NULL)
 		return (UMATCH_VENDOR_PRODUCT_CONF_IFACE);
 
 	return (UMATCH_NONE);
@@ -392,10 +403,11 @@ uvideo_attach(struct device *parent, struct device *self, void *aux)
 	if (error != USBD_NORMAL_COMPLETION)
 		return;
 
-	/* if the device needs ucode do mountroothook */
-	sc->sc_ucode = uvideo_lookup(uaa->vendor, uaa->product);
+	/* maybe the device has quirks */
+	sc->sc_quirk = uvideo_lookup(uaa->vendor, uaa->product);
 
-	if ((sc->sc_ucode && sc->sc_ucode->ucode_name) && rootvp == NULL)
+	/* if the device needs ucode do mountroothook */
+	if ((sc->sc_quirk && sc->sc_quirk->ucode_name) && rootvp == NULL)
 		mountroothook_establish(uvideo_attach_hook, sc);
 	else
 		uvideo_attach_hook(sc);
@@ -407,8 +419,8 @@ uvideo_attach_hook(void *arg)
 	struct uvideo_softc *sc = arg;
 	usbd_status error;
 
-	if (sc->sc_ucode && sc->sc_ucode->ucode_name) {
-		error = (sc->sc_ucode->ucode_loader)(sc);
+	if (sc->sc_quirk && sc->sc_quirk->ucode_name) {
+		error = (sc->sc_quirk->ucode_loader)(sc);
 		if (error != USBD_NORMAL_COMPLETION)
 			return;
 	}
@@ -966,6 +978,10 @@ uvideo_vs_parse_desc_frame_mjpeg(struct uvideo_softc *sc,
 	    sc->sc_fmtgrp[fmtidx].format->bNumFrameDescriptors)
 		sc->sc_fmtgrp_idx++;
 
+	/* store max value */
+	if (UGETDW(d->dwMaxVideoFrameBufferSize) > sc->sc_max_fbuf_size)
+		sc->sc_max_fbuf_size = UGETDW(d->dwMaxVideoFrameBufferSize);
+
 	return (USBD_NORMAL_COMPLETION);
 }
 
@@ -998,6 +1014,10 @@ uvideo_vs_parse_desc_frame_uncompressed(struct uvideo_softc *sc,
 	if (d->bFrameIndex ==
 	    sc->sc_fmtgrp[fmtidx].format->bNumFrameDescriptors)
 		sc->sc_fmtgrp_idx++;
+
+	/* store max value */
+	if (UGETDW(d->dwMaxVideoFrameBufferSize) > sc->sc_max_fbuf_size)
+		sc->sc_max_fbuf_size = UGETDW(d->dwMaxVideoFrameBufferSize);
 
 	return (USBD_NORMAL_COMPLETION);
 }
@@ -2975,20 +2995,6 @@ int
 uvideo_get_bufsize(void *v)
 {
 	struct uvideo_softc *sc = v;
-	struct usb_video_probe_commit *pc;
-	uint8_t probe_data[34];
-	usbd_status error;
-
-	pc = (struct usb_video_probe_commit *)probe_data;
-
-	/* find the maximum frame size */
-	bzero(probe_data, sizeof(probe_data));
-	error = uvideo_vs_get_probe(sc, probe_data, GET_MAX);
-	if (error != USBD_NORMAL_COMPLETION) {
-		return (EINVAL);
-	}
-
-	sc->sc_max_fbuf_size = UGETDW(pc->dwMaxVideoFrameSize);
 
 	return (sc->sc_max_fbuf_size);
 }
@@ -3060,7 +3066,7 @@ uvideo_ucode_loader_ricoh(struct uvideo_softc *sc)
 	}
 
 	/* open microcode file */
-	error = loadfirmware(sc->sc_ucode->ucode_name, &ucode, &ucode_size);
+	error = loadfirmware(sc->sc_quirk->ucode_name, &ucode, &ucode_size);
 	if (error != 0) {
 		printf("%s: loadfirmware error=%d!\n", DEVNAME(sc), error);
 		return (USBD_INVAL);
