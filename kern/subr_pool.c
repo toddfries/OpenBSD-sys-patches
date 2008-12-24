@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_pool.c,v 1.72 2008/12/04 12:40:35 art Exp $	*/
+/*	$OpenBSD: subr_pool.c,v 1.75 2008/12/23 08:15:06 dlg Exp $	*/
 /*	$NetBSD: subr_pool.c,v 1.61 2001/09/26 07:14:56 chs Exp $	*/
 
 /*-
@@ -72,6 +72,7 @@ struct pool_item_header {
 				ph_node;	/* Off-page page headers */
 	int			ph_nmissing;	/* # of chunks in use */
 	caddr_t			ph_page;	/* this page's address */
+	caddr_t			ph_colored;	/* page's colored address */
 	int			ph_pagesize;
 };
 
@@ -845,6 +846,7 @@ pool_prime_page(struct pool *pp, caddr_t storage, struct pool_item_header *ph)
 	 */
 	if (ioff != 0)
 		cp = (caddr_t)(cp + (align - ioff));
+	ph->ph_colored = cp;
 
 	/*
 	 * Insert remaining chunks on the bucket list.
@@ -1267,6 +1269,43 @@ pool_chk(struct pool *pp, const char *label)
 		r += pool_chk_page(pp, label, ph);
 
 	return (r);
+}
+
+void
+pool_walk(struct pool *pp, void (*func)(void *))
+{
+	struct pool_item_header *ph;
+	struct pool_item *pi;
+	caddr_t cp;
+	int n;
+
+	LIST_FOREACH(ph, &pp->pr_fullpages, ph_pagelist) {
+		cp = ph->ph_colored;
+		n = ph->ph_nmissing;
+
+		while (n--) {
+			func(cp);
+			cp += pp->pr_size;
+		}
+	}
+
+	LIST_FOREACH(ph, &pp->pr_partpages, ph_pagelist) {
+		cp = ph->ph_colored;
+		n = ph->ph_nmissing;
+
+		do {
+			TAILQ_FOREACH(pi, &ph->ph_itemlist, pi_list) {
+				if (cp == (caddr_t)pi)
+					break;
+			}
+			if (cp != (caddr_t)pi) {
+				func(cp);
+				n--;
+			}
+
+			cp += pp->pr_size;
+		} while (n > 0);
+	}
 }
 #endif
 
