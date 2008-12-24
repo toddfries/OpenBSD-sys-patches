@@ -216,7 +216,7 @@
 /*
  * Config registers for 852GM/855GM/865G device 0
  */
-#define AGP_I855_GCC1			0x52
+#define AGP_I855_GCC1			0x50
 #define AGP_I855_GCC1_DEV2		0x08
 #define AGP_I855_GCC1_DEV2_ENABLED	0x00
 #define AGP_I855_GCC1_DEV2_DISABLED	0x08
