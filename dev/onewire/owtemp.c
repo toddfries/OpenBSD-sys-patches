@@ -41,6 +41,7 @@
 #define DS1920_SP_TEMP_MSB		1
 #define DS1920_SP_TH			2
 #define DS1920_SP_TL			3
+#define DS18B20_SP_CoNFIG		4
 #define DS1920_SP_COUNT_REMAIN		6
 #define DS1920_SP_COUNT_PERC		7
 #define DS1920_SP_CRC			8
@@ -77,7 +78,8 @@ struct cfdriver owtemp_cd = {
 };
 
 static const struct onewire_matchfam owtemp_fams[] = {
-	{ ONEWIRE_FAMILY_DS1920 }
+	{ ONEWIRE_FAMILY_DS1920 },
+	{ ONEWIRE_FAMILY_DS18B20 }
 };
 
 int
@@ -172,17 +174,23 @@ owtemp_update(void *arg)
 	if (onewire_crc(data, 8) == data[DS1920_SP_CRC]) {
 		temp = data[DS1920_SP_TEMP_MSB] << 8 |
 		    data[DS1920_SP_TEMP_LSB];
-		count_perc = data[DS1920_SP_COUNT_PERC];
-		count_remain = data[DS1920_SP_COUNT_REMAIN];
-
-		if (count_perc != 0) {
-			/* High resolution algorithm */
-			temp &= ~0x0001;
-			val = temp * 500000 - 250000 +
-			    ((count_perc - count_remain) * 1000000) /
-			    count_perc;
+		if ((sc->rom&0xff) == ONEWIRE_FAMILY_DS18B20) {
+			/* DS18B20 decoding */
+			/* default 12 bit 0.0625 C resolution */
+			val = temp * (1000000 / 16);
 		} else {
-			val = temp * 500000;
+			count_perc = data[DS1920_SP_COUNT_PERC];
+			count_remain = data[DS1920_SP_COUNT_REMAIN];
+
+			if (count_perc != 0) {
+				/* High resolution algorithm */
+				temp &= ~0x0001;
+				val = temp * 500000 - 250000 +
+				    ((count_perc - count_remain) * 1000000) /
+				    count_perc;
+			} else {
+				val = temp * 500000;
+			}
 		}
 		sc->sc_sensor.value = 273150000 + val;
 	}
