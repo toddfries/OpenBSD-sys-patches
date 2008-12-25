@@ -41,7 +41,7 @@
 #define DS1920_SP_TEMP_MSB		1
 #define DS1920_SP_TH			2
 #define DS1920_SP_TL			3
-#define DS18B20_SP_CoNFIG		4
+#define DS18B20_SP_CONFIG		4
 #define DS1920_SP_COUNT_REMAIN		6
 #define DS1920_SP_COUNT_PERC		7
 #define DS1920_SP_CRC			8
@@ -173,12 +173,13 @@ owtemp_update(void *arg)
 	onewire_read_block(sc->sc_onewire, data, 9);
 	if (onewire_crc(data, 8) == data[DS1920_SP_CRC]) {
 		temp = data[DS1920_SP_TEMP_MSB] << 8 |
-		    data[DS1920_SP_TEMP_LSB];
-		if ((sc->rom&0xff) == ONEWIRE_FAMILY_DS18B20) {
+			data[DS1920_SP_TEMP_LSB];
+		if ( (sc->sc_rom&0xff) == ONEWIRE_FAMILY_DS18B20) {
 			/* DS18B20 decoding */
 			/* default 12 bit 0.0625 C resolution */
 			val = temp * (1000000 / 16);
 		} else {
+			/* DS1920 decoding */
 			count_perc = data[DS1920_SP_COUNT_PERC];
 			count_remain = data[DS1920_SP_COUNT_REMAIN];
 
