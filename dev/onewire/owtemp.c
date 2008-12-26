@@ -173,10 +173,12 @@ owtemp_update(void *arg)
 	onewire_read_block(sc->sc_onewire, data, 9);
 	if (onewire_crc(data, 8) == data[DS1920_SP_CRC]) {
 		temp = data[DS1920_SP_TEMP_MSB] << 8 |
-			data[DS1920_SP_TEMP_LSB];
-		if ( (sc->sc_rom&0xff) == ONEWIRE_FAMILY_DS18B20) {
-			/* DS18B20 decoding */
-			/* default 12 bit 0.0625 C resolution */
+		    data[DS1920_SP_TEMP_LSB];
+		if (ONEWIRE_ROM_FAMILY(sc->sc_rom) == ONEWIRE_FAMILY_DS18B20) {
+			/*
+			 * DS18B20 decoding
+			 * default 12 bit 0.0625 C resolution
+			 */
 			val = temp * (1000000 / 16);
 		} else {
 			/* DS1920 decoding */
