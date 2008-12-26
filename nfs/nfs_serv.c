@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_serv.c,v 1.58 2008/07/06 16:54:48 thib Exp $	*/
+/*	$OpenBSD: nfs_serv.c,v 1.60 2008/12/24 16:53:20 thib Exp $	*/
 /*     $NetBSD: nfs_serv.c,v 1.34 1997/05/12 23:37:12 fvdl Exp $       */
 
 /*
@@ -537,7 +537,14 @@ nfsrv_read(nfsd, slp, procp, mrq)
 		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
 		off = (off_t)fxdr_unsigned(u_int32_t, *tl);
 	}
-	nfsm_srvstrsiz(reqlen, NFS_SRVMAXDATA(nfsd));
+
+	nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
+	reqlen = fxdr_unsigned(int32_t, *tl);
+	if (reqlen > (NFS_SRVMAXDATA(nfsd)) || reqlen <= 0) {
+		error = EBADRPC;
+		nfsm_reply(0);
+	}
+
 	error = nfsrv_fhtovp(fhp, 1, &vp, cred, slp, nam, &rdonly);
 	if (error) {
 		nfsm_reply(2 * NFSX_UNSIGNED);
@@ -1885,7 +1892,7 @@ nfsrv_link(nfsd, slp, procp, mrq)
 	nfsm_srvmtofh(fhp);
 	nfsm_srvmtofh(dfhp);
 	nfsm_srvnamesiz(len);
-	error = nfsrv_fhtovp(fhp, FALSE, &vp, cred, slp, nam, &rdonly);
+	error = nfsrv_fhtovp(fhp, 0, &vp, cred, slp, nam, &rdonly);
 	if (error) {
 		nfsm_reply(NFSX_POSTOPATTR(v3) + NFSX_WCCDATA(v3));
 		nfsm_srvpostop_attr(nfsd, getret, &at, &mb);
