@@ -1,4 +1,4 @@
-/*	$OpenBSD: owtemp.c,v 1.10 2008/10/25 00:27:09 deraadt Exp $	*/
+/*	$OpenBSD: owtemp.c,v 1.11 2008/12/26 18:17:25 todd Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>

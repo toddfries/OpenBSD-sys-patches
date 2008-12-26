@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_i810.c,v 1.43 2008/12/23 22:01:38 oga Exp $	*/
+/*	$OpenBSD: agp_i810.c,v 1.44 2008/12/24 05:42:58 oga Exp $	*/
 
 /*-
  * Copyright (c) 2000 Doug Rabson
