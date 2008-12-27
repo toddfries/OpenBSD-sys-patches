@@ -1441,6 +1441,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 			    ETHER_ADDR_LEN);
 			bcopy((caddr_t)ifr->ifr_addr.sa_data,
 			    LLADDR(sdl), ETHER_ADDR_LEN);
+			error = ENETRESET;
 			break;
 		default:
 			return (ENODEV);
