@@ -1,4 +1,4 @@
-/*	$OpenBSD: vbusvar.h,v 1.3 2008/12/30 21:23:33 kettenis Exp $	*/
+/*	$OpenBSD: cbusvar.h,v 1.1 2008/12/30 21:34:07 kettenis Exp $	*/
 /*
  * Copyright (c) 2008 Mark Kettenis
  *
@@ -15,23 +15,22 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#ifndef _SPARC64_DEV_VBUSVAR_H_
-#define _SPARC64_DEV_VBUSVAR_H_
+#ifndef _SPARC64_DEV_CBUSVAR_H_
+#define _SPARC64_DEV_CBUSVAR_H_
 
-struct vbus_attach_args {
-	char		*va_name;
-	int		va_node;
+struct cbus_attach_args {
+	char		*ca_name;
+	int		ca_node;
 
-	bus_space_tag_t	va_bustag;
-	bus_dma_tag_t	va_dmatag;
+	bus_space_tag_t	ca_bustag;
+	bus_dma_tag_t	ca_dmatag;
 
-	u_int32_t	*va_reg;
-	u_int32_t	*va_intr;
+	u_int32_t	*ca_reg;
+	int		ca_nreg;
 
-	int		va_nreg;
-	int		va_nintr;
+	u_int64_t	ca_id;
+	u_int64_t	ca_tx_ino;
+	u_int64_t	ca_rx_ino;
 };
-
-int vbus_intr_map(int, int, uint64_t *);
 
 #endif

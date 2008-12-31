@@ -1,4 +1,4 @@
-/*	$OpenBSD: hypervisor.h,v 1.3 2008/08/10 13:55:19 kettenis Exp $	*/
+/*	$OpenBSD: hypervisor.h,v 1.6 2008/12/31 11:37:08 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -31,11 +31,7 @@ int64_t	hv_api_get_version(uint64_t api_group,
  * Domain services
  */
 
-int64_t	hv_mach_set_soft_state(uint64_t software_state,
-	    paddr_t software_description_ptr);
-
-#define SIS_NORMAL	0x1
-#define SIS_TRANSITION	0x2
+int64_t hv_mach_desc(paddr_t buffer, psize_t *length);
 
 /*
  * CPU services
@@ -122,6 +118,16 @@ int64_t	hv_cons_putchar(int64_t ch);
 int64_t	hv_api_putchar(int64_t ch);
 
 /*
+ * Domain state services
+ */
+
+int64_t	hv_soft_state_set(uint64_t software_state,
+	    paddr_t software_description_ptr);
+
+#define SIS_NORMAL	0x1
+#define SIS_TRANSITION	0x2
+
+/*
  * PCI I/O services
  */
 
@@ -144,6 +150,32 @@ int64_t	hv_pci_config_put(uint64_t devhandle, uint64_t pci_device,
 
 #define PCI_MAP_ATTR_READ  0x01		/* From memory */
 #define PCI_MAP_ATTR_WRITE 0x02		/* To memory */
+
+/*
+ * Logical Domain Channel services
+ */
+
+int64_t hv_ldc_tx_qconf(uint64_t ldc_id, paddr_t base_raddr,
+	    uint64_t nentries);
+int64_t hv_ldc_tx_qinfo(uint64_t ldc_id, paddr_t *base_raddr,
+	    uint64_t *nentries);
+int64_t hv_ldc_tx_get_state(uint64_t ldc_id, uint64_t *head_offset,
+	    uint64_t *tail_offset, uint64_t *channel_state);
+int64_t hv_ldc_tx_set_tail(uint64_t ldc_id, uint64_t tail_offset);
+int64_t hv_ldc_rx_qconf(uint64_t ldc_id, paddr_t base_raddr,
+	    uint64_t nentries);
+int64_t hv_ldc_rx_qinfo(uint64_t ldc_id, paddr_t *base_raddr,
+	    uint64_t *nentries);
+int64_t hv_ldc_rx_get_state(uint64_t ldc_id, uint64_t *head_offset,
+	    uint64_t *tail_offset, uint64_t *channel_state);
+int64_t hv_ldc_rx_set_head(uint64_t ldc_id, uint64_t head_offset);
+
+#define LDC_CHANNEL_DOWN	0
+#define LDC_CHANNEL_UP		1
+
+/*
+ * Cryptographic services
+ */
 
 int64_t	hv_rng_get_diag_control(void);
 int64_t	hv_rng_ctl_read(paddr_t raddr, uint64_t *state, uint64_t *delta);

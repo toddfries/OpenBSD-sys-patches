@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifb.c,v 1.2 2008/03/23 20:20:11 miod Exp $	*/
+/*	$OpenBSD: ifb.c,v 1.11 2008/12/29 22:25:16 miod Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008 Miodrag Vallat.
@@ -18,7 +18,7 @@
 
 /*
  * Least-effort driver for the Sun Expert3D cards (based on the
- * ``Wildcat'' chips.
+ * ``Wildcat'' chips).
  *
  * There is no public documentation for these chips available.
  * Since they are no longer supported by 3DLabs (which got bought by
@@ -74,19 +74,37 @@
  * - a 8MB memory mapping, which purpose is unknown, in the third BAR.
  *
  * In the state the PROM leaves us in, the 8MB frame buffer windows map
- * the video memory as interleaved stripes:
- * - frame buffer #0 will map horizontal pixels 00-1f, 60-9f, e0-11f, etc.
- * - frame buffer #1 will map horizontal pixels 20-5f, a0-df, 120-15f, etc.
- * However the non-visible parts of each stripe can still be addressed
- * (probably for fast screen switching).
+ * the video memory as interleaved stripes, of which the non-visible parts
+ * can still be addressed (probably for fast screen switching).
  *
- * Unfortunately, since we do not know how to reconfigured the stripes
+ * Unfortunately, since we do not know how to reconfigure the stripes
  * to provide at least a linear frame buffer, we have to write to both
- * windows and have them provide the complete image. This however leads
- * to parasite overlays appearing sometimes in the screen...
+ * windows and have them provide the complete image.
+ *
+ * Moreover, high pixel values in the overlay planes (such as 0xff or 0xfe)
+ * seem to enable other planes with random contents, so we'll limit ourselves
+ * to 7bpp opration.
  */
 
+/*
+ * The Expert3D has an extra BAR that is not present on the -Lite
+ * version.  This register contains bits that tell us how many BARs to
+ * skip before we get to the BARs that interest us.
+ */
+#define IFB_PCI_CFG			0x5c
+#define IFB_PCI_CFG_BAR_OFFSET(x)	((x & 0x000000e0) >> 3)
+
 #define	IFB_REG_OFFSET			0x8000
+
+/*
+ * 0000 magic
+ * This register seems to be used to issue commands to the
+ * acceleration hardware.
+ *
+ */
+#define IFB_REG_MAGIC			0x0000
+#define IFB_REG_MAGIC_DIR_BACKWARDS_Y		(0x08 | 0x02)
+#define IFB_REG_MAGIC_DIR_BACKWARDS_X		(0x04 | 0x01)
 
 /*
  * 0040 component configuration
@@ -97,6 +115,14 @@
  * The high two bytes are texture related.
  */
 #define	IFB_REG_COMPONENT_SELECT	0x0040
+
+/*
+ * 0044 status
+ * This register has a bit that signals completion of commands issued
+ * to the acceleration hardware.
+ */
+#define IFB_REG_STATUS			0x0044
+#define IFB_REG_STATUS_DONE			0x00000004
 
 /*
  * 0058 magnifying configuration
@@ -178,6 +204,8 @@
 #define	IFB_REG_DPMS_STANDBY			0x00000002
 #define	IFB_REG_DPMS_ON				0x00000003
 
+#define IFB_COORDS(x, y)	((x) | (y) << 16)
+
 struct ifb_softc {
 	struct sunfb sc_sunfb;
 	int sc_nscreens;
@@ -202,23 +230,19 @@ struct ifb_softc {
 
 int	ifb_ioctl(void *, u_long, caddr_t, int, struct proc *);
 paddr_t	ifb_mmap(void *, off_t, int);
-int	ifb_alloc_screen(void *, const struct wsscreen_descr *, void **,
-	    int *, int *, long *);
-void	ifb_free_screen(void *, void *);
-int	ifb_show_screen(void *, void *, int,
-	    void (*cb)(void *, int, int), void *);
 void	ifb_burner(void *, u_int, u_int);
 
 struct wsdisplay_accessops ifb_accessops = {
 	ifb_ioctl,
 	ifb_mmap,
-	ifb_alloc_screen,
-	ifb_free_screen,
-	ifb_show_screen,
-	NULL,
-	NULL,
-	NULL,
-	ifb_burner
+	NULL,	/* alloc_screen */
+	NULL,	/* free_screen */
+	NULL,	/* show_screen */
+	NULL,	/* load_font */
+	NULL,	/* scrollback */
+	NULL,	/* getchar */
+	ifb_burner,
+	NULL	/* pollc */
 };
 
 int	ifbmatch(struct device *, void *, void *);
@@ -232,12 +256,15 @@ struct cfdriver ifb_cd = {
 	NULL, "ifb", DV_DULL
 };
 
-int	ifb_mapregs(struct ifb_softc *, struct pci_attach_args *);
-int	ifb_is_console(int);
 int	ifb_getcmap(struct ifb_softc *, struct wsdisplay_cmap *);
+int	ifb_is_console(int);
+int	ifb_mapregs(struct ifb_softc *, struct pci_attach_args *);
 int	ifb_putcmap(struct ifb_softc *, struct wsdisplay_cmap *);
 void	ifb_setcolor(void *, u_int, u_int8_t, u_int8_t, u_int8_t);
+void	ifb_setcolormap(struct sunfb *,
+	    void (*)(void *, u_int, u_int8_t, u_int8_t, u_int8_t));
 
+void	ifb_copyrect(struct ifb_softc *, int, int, int, int, int, int);
 void	ifb_putchar(void *, int, int, u_int, long);
 void	ifb_copycols(void *, int, int, int, int);
 void	ifb_erasecols(void *, int, int, int, long);
@@ -245,31 +272,10 @@ void	ifb_copyrows(void *, int, int, int);
 void	ifb_eraserows(void *, int, int, long);
 void	ifb_do_cursor(struct rasops_info *);
 
-const struct pci_matchid ifb_devices[] = {
-    { PCI_VENDOR_INTERGRAPH, PCI_PRODUCT_INTERGRAPH_EXPERT3D },
-    { PCI_VENDOR_3DLABS,     PCI_PRODUCT_3DLABS_WILDCAT_6210 },
-    { PCI_VENDOR_3DLABS,     PCI_PRODUCT_3DLABS_WILDCAT_5110 },/* Sun XVR-500 */
-    { PCI_VENDOR_3DLABS,     PCI_PRODUCT_3DLABS_WILDCAT_7210 },
-};
-
 int
 ifbmatch(struct device *parent, void *cf, void *aux)
 {
-	struct pci_attach_args *paa = aux;
-	int node;
-	char *name;
-
-	if (pci_matchbyid(paa, ifb_devices,
-	    sizeof(ifb_devices) / sizeof(ifb_devices[0])) != 0)
-		return 1;
-
-	node = PCITAG_NODE(paa->pa_tag);
-	name = getpropstring(node, "name");
-	if (strcmp(name, "SUNW,Expert3D") == 0 ||
-	    strcmp(name, "SUNW,Expert3D-Lite") == 0)
-		return 1;
-
-	return 0;
+	return ifb_ident(aux);
 }
 
 void    
@@ -320,8 +326,7 @@ ifbattach(struct device *parent, struct device *self, void *aux)
 	ri->ri_bits = NULL;
 	ri->ri_hw = sc;
 
-	/* do NOT pass RI_CLEAR yet */
-	fbwscons_init(&sc->sc_sunfb, RI_BSWAP);
+	fbwscons_init(&sc->sc_sunfb, RI_BSWAP, sc->sc_console);
 	ri->ri_flg &= ~RI_FULLCLEAR;	/* due to the way we handle updates */
 
 	if (!sc->sc_console) {
@@ -342,7 +347,8 @@ ifbattach(struct device *parent, struct device *self, void *aux)
 	ri->ri_ops.putchar = ifb_putchar;
 	ri->ri_do_cursor = ifb_do_cursor;
 
-	fbwscons_setcolormap(&sc->sc_sunfb, ifb_setcolor);
+	ifb_setcolormap(&sc->sc_sunfb, ifb_setcolor);
+
 	if (sc->sc_console)
 		fbwscons_console_init(&sc->sc_sunfb, -1);
 	fbwscons_attach(&sc->sc_sunfb, &ifb_accessops, sc->sc_console);
@@ -357,12 +363,12 @@ ifb_ioctl(void *v, u_long cmd, caddr_t data, int flags, struct proc *p)
 
 	switch (cmd) {
 	case WSDISPLAYIO_GTYPE:
-		*(u_int *)data = WSDISPLAY_TYPE_UNKNOWN;
+		*(u_int *)data = WSDISPLAY_TYPE_IFB;
 		break;
 
 	case WSDISPLAYIO_SMODE:
 		if (*(u_int *)data == WSDISPLAYIO_MODE_EMUL)
-			fbwscons_setcolormap(&sc->sc_sunfb, ifb_setcolor);
+			ifb_setcolormap(&sc->sc_sunfb, ifb_setcolor);
 		break;
 	case WSDISPLAYIO_GINFO:
 		wdf = (void *)data;
@@ -374,7 +380,7 @@ ifb_ioctl(void *v, u_long cmd, caddr_t data, int flags, struct proc *p)
 	case WSDISPLAYIO_LINEBYTES:
 		*(u_int *)data = sc->sc_sunfb.sf_linebytes;
 		break;
-		
+
 	case WSDISPLAYIO_GETCMAP:
 		return ifb_getcmap(sc, (struct wsdisplay_cmap *)data);
 	case WSDISPLAYIO_PUTCMAP:
@@ -475,37 +481,48 @@ ifb_setcolor(void *v, u_int index, u_int8_t r, u_int8_t g, u_int8_t b)
 	    (((u_int)b) << 22) | (((u_int)g) << 12) | (((u_int)r) << 2));
 }
 
-int
-ifb_alloc_screen(void *v, const struct wsscreen_descr *type, void **cookiep,
-    int *curxp, int *curyp, long *attrp)
-{
-	struct ifb_softc *sc = v;
-
-	if (sc->sc_nscreens > 0)
-		return ENOMEM;
-
-	*cookiep = &sc->sc_sunfb.sf_ro;
-	*curyp = 0;
-	*curxp = 0;
-	sc->sc_sunfb.sf_ro.ri_ops.alloc_attr(&sc->sc_sunfb.sf_ro,
-	    WSCOL_BLACK, WSCOL_WHITE, WSATTR_WSCOLORS, attrp);
-	sc->sc_nscreens++;
-	return 0;
-}
-
+/* similar in spirit to fbwscons_setcolormap() */
 void
-ifb_free_screen(void *v, void *cookie)
+ifb_setcolormap(struct sunfb *sf,
+    void (*setcolor)(void *, u_int, u_int8_t, u_int8_t, u_int8_t))
 {
-	struct ifb_softc *sc = v;
+	struct rasops_info *ri = &sf->sf_ro;
+	int i;
+	const u_char *color;
 
-	sc->sc_nscreens--;
-}
+	/*
+	 * Compensate for overlay plane limitations. Since we'll operate
+	 * in 7bpp mode, our basic colors will use positions 00 to 0f,
+	 * and the inverted colors will use positions 7f to 70.
+	 */
 
-int
-ifb_show_screen(void *v, void *cookie, int waitok,
-    void (*cb)(void *, int, int), void *cbarg)
-{
-	return 0;
+	for (i = 0x00; i < 0x10; i++) {
+		color = &rasops_cmap[i * 3];
+		setcolor(sf, i, color[0], color[1], color[2]);
+	}
+	for (i = 0x70; i < 0x80; i++) {
+		color = &rasops_cmap[(0xf0 | i) * 3];
+		setcolor(sf, i, color[0], color[1], color[2]);
+	}
+
+	/*
+	 * Proper operation apparently needs black to be 01, always.
+	 * Replace black, red and white with white, black and red.
+	 * Kind of ugly, but it works.
+	 */
+	ri->ri_devcmap[WSCOL_WHITE] = 0x00000000;
+	ri->ri_devcmap[WSCOL_BLACK] = 0x01010101;
+	ri->ri_devcmap[WSCOL_RED] = 0x07070707;
+
+	color = &rasops_cmap[(WSCOL_WHITE + 8) * 3];	/* real white */
+	setcolor(sf, 0, color[0], color[1], color[2]);
+	setcolor(sf, 0x7f ^ 0, ~color[0], ~color[1], ~color[2]);
+	color = &rasops_cmap[WSCOL_BLACK * 3];
+	setcolor(sf, 1, color[0], color[1], color[2]);
+	setcolor(sf, 0x7f ^ 1, ~color[0], ~color[1], ~color[2]);
+	color = &rasops_cmap[WSCOL_RED * 3];
+	setcolor(sf, 7, color[0], color[1], color[2]);
+	setcolor(sf, 0x7f ^ 7, ~color[0], ~color[1], ~color[2]);
 }
 
 paddr_t
@@ -549,13 +566,16 @@ int
 ifb_mapregs(struct ifb_softc *sc, struct pci_attach_args *pa)
 {
 	u_int32_t cf;
-	int rc;
+	int bar, rc;
 
-	cf = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_MAPREG_START);
+	cf = pci_conf_read(pa->pa_pc, pa->pa_tag, IFB_PCI_CFG);
+	bar = PCI_MAPREG_START + IFB_PCI_CFG_BAR_OFFSET(cf);
+
+	cf = pci_conf_read(pa->pa_pc, pa->pa_tag, bar);
 	if (PCI_MAPREG_TYPE(cf) == PCI_MAPREG_TYPE_IO)
 		rc = EINVAL;
 	else {
-		rc = pci_mapreg_map(pa, PCI_MAPREG_START, cf,
+		rc = pci_mapreg_map(pa, bar, cf,
 		    BUS_SPACE_MAP_LINEAR, NULL, &sc->sc_mem_h,
 		    &sc->sc_membase, &sc->sc_memlen, 0);
 	}
@@ -565,11 +585,11 @@ ifb_mapregs(struct ifb_softc *sc, struct pci_attach_args *pa)
 		return rc;
 	}
 
-	cf = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_MAPREG_START + 4);
+	cf = pci_conf_read(pa->pa_pc, pa->pa_tag, bar + 4);
 	if (PCI_MAPREG_TYPE(cf) == PCI_MAPREG_TYPE_IO)
 		rc = EINVAL;
 	else {
-		rc = pci_mapreg_map(pa, PCI_MAPREG_START + 4, cf,
+		rc = pci_mapreg_map(pa, bar + 4, cf,
 		    0, NULL, &sc->sc_reg_h, NULL, NULL, 0x9000);
 	}
 	if (rc != 0) {
@@ -599,10 +619,14 @@ ifb_copycols(void *cookie, int row, int src, int dst, int num)
 	struct rasops_info *ri = cookie;
 	struct ifb_softc *sc = ri->ri_hw;
 
-	ri->ri_bits = (void *)sc->sc_fb8bank0_vaddr;
-	sc->sc_old_ops.copycols(cookie, row, src, dst, num);
-	ri->ri_bits = (void *)sc->sc_fb8bank1_vaddr;
-	sc->sc_old_ops.copycols(cookie, row, src, dst, num);
+	num *= ri->ri_font->fontwidth;
+	src *= ri->ri_font->fontwidth;
+	dst *= ri->ri_font->fontwidth;
+	row *= ri->ri_font->fontheight;
+
+	ifb_copyrect(sc, ri->ri_xorigin + src, ri->ri_yorigin + row,
+	    ri->ri_xorigin + dst, ri->ri_yorigin + row,
+	    num, ri->ri_font->fontheight);
 }
 
 void
@@ -623,10 +647,12 @@ ifb_copyrows(void *cookie, int src, int dst, int num)
 	struct rasops_info *ri = cookie;
 	struct ifb_softc *sc = ri->ri_hw;
 
-	ri->ri_bits = (void *)sc->sc_fb8bank0_vaddr;
-	sc->sc_old_ops.copyrows(cookie, src, dst, num);
-	ri->ri_bits = (void *)sc->sc_fb8bank1_vaddr;
-	sc->sc_old_ops.copyrows(cookie, src, dst, num);
+	num *= ri->ri_font->fontheight;
+	src *= ri->ri_font->fontheight;
+	dst *= ri->ri_font->fontheight;
+
+	ifb_copyrect(sc, ri->ri_xorigin, ri->ri_yorigin + src,
+	    ri->ri_xorigin, ri->ri_yorigin + dst, ri->ri_emuwidth, num);
 }
 
 void
@@ -634,20 +660,180 @@ ifb_eraserows(void *cookie, int row, int num, long attr)
 {
 	struct rasops_info *ri = cookie;
 	struct ifb_softc *sc = ri->ri_hw;
+	int bg, fg, done, cnt;
 
-	ri->ri_bits = (void *)sc->sc_fb8bank0_vaddr;
-	sc->sc_old_ops.eraserows(cookie, row, num, attr);
-	ri->ri_bits = (void *)sc->sc_fb8bank1_vaddr;
-	sc->sc_old_ops.eraserows(cookie, row, num, attr);
+	/*
+	 * Perform the first line with plain rasops code (adapted below)...
+	 */
+
+	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
+
+	memset((void *)(sc->sc_fb8bank0_vaddr + row * ri->ri_yscale),
+	    ri->ri_devcmap[bg], ri->ri_emustride);
+	memset((void *)(sc->sc_fb8bank1_vaddr + row * ri->ri_yscale),
+	    ri->ri_devcmap[bg], ri->ri_emustride);
+
+	/*
+	 * ...then copy it over and over until the whole area is done.
+	 */
+
+	row *= ri->ri_font->fontheight;
+	num *= ri->ri_font->fontheight;
+	row += ri->ri_yorigin;
+
+	for (done = 1, num -= done; num != 0;) {
+		cnt = min(done, num);
+
+		ifb_copyrect(sc, ri->ri_xorigin, row,
+		    ri->ri_xorigin, row + done, ri->ri_emuwidth, cnt);
+
+		done += cnt;
+		num -= cnt;
+	}
 }
+
+void
+ifb_copyrect(struct ifb_softc *sc, int sx, int sy, int dx, int dy, int w, int h)
+{
+	int i, dir = 0;
+
+	if (sy < dy /* && sy + h > dy */) {
+		sy += h - 1;
+		dy += h;
+		dir |= IFB_REG_MAGIC_DIR_BACKWARDS_Y;
+	}
+	if (sx < dx /* && sx + w > dx */) {
+		sx += w - 1;
+		dx += w;
+		dir |= IFB_REG_MAGIC_DIR_BACKWARDS_X;
+	}
+
+	/* Lots of magic numbers. */
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 2);
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 1);
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0x540101ff);
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0x61000001);
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0);
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0x6301c080);
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0x80000000);
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0x00330000);
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0xff);
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0);
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0x64000303);
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0);
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0);
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0x00030000);
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0x2200010d);
+
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0x33f01000 | dir);
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, IFB_COORDS(dx, dy));
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, IFB_COORDS(w, h));
+	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, IFB_COORDS(sx, sy));
+
+	for (i = 1000000; i > 0; i--) {
+		if (bus_space_read_4(sc->sc_mem_t, sc->sc_reg_h,
+		    IFB_REG_OFFSET + IFB_REG_STATUS) & IFB_REG_STATUS_DONE)
+			break;
+		DELAY(1);
+	}
+}
+
+/*
+ * Similar to rasops_do_cursor(), but using a 7bit pixel mask.
+ */
+
+#define	CURSOR_MASK	0x7f7f7f7f
 
 void
 ifb_do_cursor(struct rasops_info *ri)
 {
 	struct ifb_softc *sc = ri->ri_hw;
+	int full1, height, cnt, slop1, slop2, row, col;
+	int ovl_offset = sc->sc_fb8bank1_vaddr - sc->sc_fb8bank0_vaddr;
+	u_char *dp0, *dp1, *rp;
+
+	row = ri->ri_crow;
+	col = ri->ri_ccol;
 
 	ri->ri_bits = (void *)sc->sc_fb8bank0_vaddr;
-	sc->sc_old_cursor(ri);
-	ri->ri_bits = (void *)sc->sc_fb8bank1_vaddr;
-	sc->sc_old_cursor(ri);
+	rp = ri->ri_bits + row * ri->ri_yscale + col * ri->ri_xscale;
+	height = ri->ri_font->fontheight;
+	slop1 = (4 - ((long)rp & 3)) & 3;
+
+	if (slop1 > ri->ri_xscale)
+		slop1 = ri->ri_xscale;
+
+	slop2 = (ri->ri_xscale - slop1) & 3;
+	full1 = (ri->ri_xscale - slop1 - slop2) >> 2;
+
+	if ((slop1 | slop2) == 0) {
+		/* A common case */
+		while (height--) {
+			dp0 = rp;
+			dp1 = dp0 + ovl_offset;
+			rp += ri->ri_stride;
+
+			for (cnt = full1; cnt; cnt--) {
+				*(int32_t *)dp0 ^= CURSOR_MASK;
+				*(int32_t *)dp1 ^= CURSOR_MASK;
+				dp0 += 4;
+				dp1 += 4;
+			}
+		}
+	} else {
+		/* XXX this is stupid.. use masks instead */
+		while (height--) {
+			dp0 = rp;
+			dp1 = dp0 + ovl_offset;
+			rp += ri->ri_stride;
+
+			if (slop1 & 1) {
+				*dp0++ ^= (u_char)CURSOR_MASK;
+				*dp1++ ^= (u_char)CURSOR_MASK;
+			}
+
+			if (slop1 & 2) {
+				*(int16_t *)dp0 ^= (int16_t)CURSOR_MASK;
+				*(int16_t *)dp1 ^= (int16_t)CURSOR_MASK;
+				dp0 += 2;
+				dp1 += 2;
+			}
+
+			for (cnt = full1; cnt; cnt--) {
+				*(int32_t *)dp0 ^= CURSOR_MASK;
+				*(int32_t *)dp1 ^= CURSOR_MASK;
+				dp0 += 4;
+				dp1 += 4;
+			}
+
+			if (slop2 & 1) {
+				*dp0++ ^= (u_char)CURSOR_MASK;
+				*dp1++ ^= (u_char)CURSOR_MASK;
+			}
+
+			if (slop2 & 2) {
+				*(int16_t *)dp0 ^= (int16_t)CURSOR_MASK;
+				*(int16_t *)dp1 ^= (int16_t)CURSOR_MASK;
+			}
+		}
+	}
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.96 2008/12/25 22:15:05 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.103 2008/12/31 12:54:43 jakemsr Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -238,6 +238,8 @@ int	azalia_codec_connect_stream(codec_t *, int, uint16_t, int);
 int	azalia_codec_disconnect_stream(codec_t *, int);
 void	azalia_codec_print_audiofunc(const codec_t *);
 void	azalia_codec_print_groups(const codec_t *);
+int	azalia_codec_init_hp_spkr(codec_t *);
+int	azalia_codec_find_defdac(codec_t *, int, int);
 
 int	azalia_widget_init(widget_t *, const codec_t *, int);
 int	azalia_widget_label_widgets(codec_t *);
@@ -1286,6 +1288,8 @@ azalia_codec_init(codec_t *this)
 	    sizeof(this->w[CORB_NID_ROOT].name));
 	strlcpy(this->w[this->audiofunc].name, "hdaudio",
 	    sizeof(this->w[this->audiofunc].name));
+
+	this->speaker = -1;
 	FOR_EACH_WIDGET(this, i) {
 		err = azalia_widget_init(&this->w[i], this, i);
 		if (err)
@@ -1313,17 +1317,89 @@ azalia_codec_init(codec_t *this)
 	err = this->init_dacgroup(this);
 	if (err)
 		return err;
+
+	azalia_codec_print_groups(this);
+
 	err = azalia_widget_label_widgets(this);
 	if (err)
 		return err;
-
-	azalia_codec_print_groups(this);
 
 	err = azalia_codec_construct_format(this, 0, 0);
 	if (err)
 		return err;
 
-	return this->mixer_init(this);
+	err = this->mixer_init(this);
+	if (err)
+		return err;
+
+	err = azalia_codec_init_hp_spkr(this);
+	if (err)
+		return err;
+
+	return 0;
+}
+
+int
+azalia_codec_init_hp_spkr(codec_t *this)
+{
+	int i;
+
+	this->hp_dac = -1;
+	this->spkr_dac = -1;
+
+	if (this->speaker != -1)
+		this->spkr_dac = azalia_codec_find_defdac(this,
+		    this->speaker, 0);
+
+	if (this->headphones == -1) {
+		FOR_EACH_WIDGET(this, i) {
+			if (this->w[i].type != COP_AWTYPE_PIN_COMPLEX)
+				continue;
+			if (this->w[i].d.pin.device == CORB_CD_LINEOUT &&
+			    (this->w[i].d.pin.cap & COP_PINCAP_HEADPHONE)) {
+				this->headphones = i;
+				break;
+			}
+		}
+	}
+
+	if (this->headphones != -1)
+		this->hp_dac = azalia_codec_find_defdac(this,
+		    this->headphones, 0);
+
+	return 0;
+}
+
+int
+azalia_codec_find_defdac(codec_t *this, int index, int depth)
+{
+	const widget_t *w;
+	int ret;
+
+	w = &this->w[index];
+	if (w->enable == 0)
+		return -1;
+
+	if (w->type == COP_AWTYPE_AUDIO_OUTPUT)
+		return index;
+
+	if (depth > 0 &&
+	    (w->type == COP_AWTYPE_PIN_COMPLEX ||
+	    w->type == COP_AWTYPE_AUDIO_INPUT))
+		return -1;
+	if (++depth >= 10)
+		return -1;
+
+	if (w->nconnections > 0) {
+		index = w->connections[w->selected];
+		if (VALID_WIDGET_NID(index, this)) {
+			ret = azalia_codec_find_defdac(this, index, depth);
+			if (ret >= 0)
+				return ret;
+		}
+	}
+
+	return -1;
 }
 
 int
@@ -1561,60 +1637,74 @@ int
 azalia_codec_connect_stream(codec_t *this, int dir, uint16_t fmt, int number)
 {
 	const convgroup_t *group;
-	uint32_t v;
-	int i, err, startchan, nchan;
-	nid_t nid;
-	boolean_t flag222;
+	widget_t *w;
+	uint32_t digital, stream_chan;
+	int i, err, curchan, nchan, widchan;
 
-	DPRINTFN(1, ("%s: fmt=0x%4.4x number=%d\n", __func__, fmt, number));
 	err = 0;
+	nchan = (fmt & HDA_SD_FMT_CHAN) + 1;
+
 	if (dir == AUMODE_RECORD)
 		group = &this->adcs.groups[this->adcs.cur];
 	else
 		group = &this->dacs.groups[this->dacs.cur];
-	flag222 = group->nconv >= 3 &&
-	    (WIDGET_CHANNELS(&this->w[group->conv[0]]) == 2) &&
-	    (WIDGET_CHANNELS(&this->w[group->conv[1]]) == 2) &&
-	    (WIDGET_CHANNELS(&this->w[group->conv[2]]) == 2);
-	nchan = (fmt & HDA_SD_FMT_CHAN) + 1;
-	startchan = 0;
+
+	curchan = 0;
 	for (i = 0; i < group->nconv; i++) {
-		uint32_t stream_chan;
-		nid = group->conv[i];
+		w = &this->w[group->conv[i]];
+		widchan = WIDGET_CHANNELS(w);
 
-		/* surround and c/lfe handling */
-		if (nchan >= 6 && flag222 && i == 1) {
-			nid = group->conv[2];
-		} else if (nchan >= 6 && flag222 && i == 2) {
-			nid = group->conv[1];
+		stream_chan = (number << 4);
+		if (curchan < nchan) {
+			stream_chan |= curchan;
+		} else if (w->nid == this->spkr_dac ||
+		    w->nid == this->hp_dac) {
+			stream_chan |= 0;	/* first channel(s) */
+		} else
+			stream_chan = 0;	/* idle stream */
+
+		if (stream_chan == 0) {
+			DPRINTFN(0, ("%s: %2.2x is idle\n", __func__, w->nid));
+		} else {
+			DPRINTFN(0, ("%s: %2.2x on stream chan %d\n", __func__,
+			    w->nid, stream_chan & ~(number << 4)));
 		}
 
-		if (startchan >= nchan)
-			stream_chan = 0; /* stream#0 */
-		else
-			stream_chan = (number << 4) | startchan;
-
-		err = this->comresp(this, nid, CORB_SET_CONVERTER_FORMAT,
-				    fmt, NULL);
-		if (err)
-			goto exit;
-		err = this->comresp(this, nid, CORB_SET_CONVERTER_STREAM_CHANNEL,
-				    stream_chan, NULL);
-		if (err)
-			goto exit;
-		if (this->w[nid].widgetcap & COP_AWCAP_DIGITAL) {
-			/* enable S/PDIF */
-			this->comresp(this, nid, CORB_GET_DIGITAL_CONTROL,
-			    0, &v);
-			v = (v & 0xff) | CORB_DCC_DIGEN;
-			this->comresp(this, nid, CORB_SET_DIGITAL_CONTROL_L,
-			    v, NULL);
+		err = this->comresp(this, w->nid,
+		    CORB_SET_CONVERTER_FORMAT, fmt, NULL);
+		if (err) {
+			DPRINTF(("%s: nid %2.2x fmt %2.2x: %d\n",
+			    __func__, w->nid, fmt, err));
+			break;
 		}
-		startchan += WIDGET_CHANNELS(&this->w[nid]);
+		err = this->comresp(this, w->nid,
+		    CORB_SET_CONVERTER_STREAM_CHANNEL, stream_chan, NULL);
+		if (err) {
+			DPRINTF(("%s: nid %2.2x chan %d: %d\n",
+			    __func__, w->nid, stream_chan, err));
+			break;
+		}
+
+		if (w->widgetcap & COP_AWCAP_DIGITAL) {
+			err = this->comresp(this, w->nid,
+			    CORB_GET_DIGITAL_CONTROL, 0, &digital);
+			if (err) {
+				DPRINTF(("%s: nid %2.2x get digital: %d\n",
+				    __func__, w->nid, err));
+				break;
+			}
+			digital = (digital & 0xff) | CORB_DCC_DIGEN;
+			err = this->comresp(this, w->nid,
+			    CORB_SET_DIGITAL_CONTROL_L, digital, NULL);
+			if (err) {
+				DPRINTF(("%s: nid %2.2x set digital: %d\n",
+				    __func__, w->nid, err));
+				break;
+			}
+		}
+		curchan += widchan;
 	}
 
-exit:
-	DPRINTFN(1, ("%s: leave with %d\n", __func__, err));
 	return err;
 }
 
@@ -1737,8 +1827,7 @@ azalia_widget_sole_conn(codec_t *this, nid_t nid)
 	FOR_EACH_WIDGET(this, i) {
 		if (this->w[i].type == COP_AWTYPE_PIN_COMPLEX &&
 		    this->w[i].nconnections == 1 &&
-		    this->w[i].connections[0] == nid &&
-		    azalia_widget_enabled(this, this->w[i].connections[0])) {
+		    this->w[i].connections[0] == nid) {
 			if (j != -1)
 				return -1;
 			j = i;
@@ -1853,8 +1942,9 @@ azalia_widget_label_widgets(codec_t *codec)
 		}
 	}
 
-	/* Rename mixers and selectors that connect to only one other
-	 * widget as the widget they are connected to.
+	/* Mixers and selectors that connect to only one other widget are
+	 * functionally part of the widget they are connected to.  Show that
+	 * relationship in the name.
 	 */
 	FOR_EACH_WIDGET(codec, i) {
 		if (codec->w[i].type != COP_AWTYPE_AUDIO_MIXER &&
@@ -1883,6 +1973,16 @@ azalia_widget_label_widgets(codec_t *codec)
 			}
 		}
 		if (j >= 0) {
+			/* As part of a disabled widget, this widget
+			 * should be disabled as well.
+			 */
+			if (codec->w[j].enable == 0) {
+				codec->w[i].enable = 0;
+				snprintf(codec->w[i].name,
+				    sizeof(codec->w[i].name), "%s",
+				    "u-wid%2.2x", i);
+				continue;
+			}
 			snprintf(codec->w[i].name, sizeof(codec->w[i].name),
 			    "%s", codec->w[j].name);
 			if (codec->w[j].mixer_class == AZ_CLASS_RECORD)
@@ -1962,6 +2062,14 @@ azalia_widget_init_pin(widget_t *this, const codec_t *codec)
 		return err;
 	this->d.pin.cap = result;
 
+	if (this->d.pin.device == CORB_CD_MICIN &&
+	    CORB_CD_PORT(this->d.pin.config) == CORB_CD_FIXED)
+		this->d.pin.cap &= ~(COP_PINCAP_OUTPUT);
+
+	if (this->d.pin.device == CORB_CD_SPEAKER &&
+	    CORB_CD_PORT(this->d.pin.config) == CORB_CD_FIXED)
+		this->d.pin.cap &= ~(COP_PINCAP_INPUT);
+
 	switch (this->d.pin.device) {
 	case CORB_CD_LINEOUT:
 	case CORB_CD_SPEAKER:
@@ -1986,10 +2094,6 @@ azalia_widget_init_pin(widget_t *this, const codec_t *codec)
 	if (pintype == PIN_DIR_OUT && !(this->d.pin.cap & COP_PINCAP_OUTPUT))
 		pintype = PIN_DIR_IN;
 
-	/* Disable unconnected pins */
-	if (CORB_CD_PORT(this->d.pin.config) == CORB_CD_NONE)
-		this->enable = 0;
-
 	switch (pintype) {
 	case PIN_DIR_IN:
 		codec->comresp(codec, this->nid, CORB_SET_PIN_WIDGET_CONTROL,
@@ -2005,7 +2109,6 @@ azalia_widget_init_pin(widget_t *this, const codec_t *codec)
 		break;
 	}
 
-	/* EAPD pin */
 	if (this->d.pin.cap & COP_PINCAP_EAPD) {
 		err = codec->comresp(codec, this->nid, CORB_GET_EAPD_BTL_ENABLE,
 		    0, &result);
@@ -2018,7 +2121,16 @@ azalia_widget_init_pin(widget_t *this, const codec_t *codec)
 		if (err)
 			return err;
 	}
-	/* sense pin */
+
+	/* Disable unconnected pins */
+	if (CORB_CD_PORT(this->d.pin.config) == CORB_CD_NONE) {
+		this->enable = 0;
+		return 0;
+	}
+
+	/* need a non const codec pointer */
+	wcodec = &codec->az->codecs[codec->az->codecno];
+
 	if (codec->nsense_pins < HDA_MAX_SENSE_PINS &&
 	    this->d.pin.cap & COP_PINCAP_PRESENCE &&
 	    CORB_CD_PORT(this->d.pin.config) == CORB_CD_JACK) {
@@ -2028,11 +2140,31 @@ azalia_widget_init_pin(widget_t *this, const codec_t *codec)
 		if (err)
 			return err;
 		if (!(CORB_CD_MISC(result) & CORB_CD_PRESENCEOV)) {
-			wcodec = &codec->az->codecs[codec->az->codecno];
 			wcodec->sense_pins[codec->nsense_pins] = this->nid;
 			wcodec->nsense_pins++;
 		}
 	}
+
+	if (this->d.pin.device == CORB_CD_HEADPHONE &&
+	    (this->d.pin.cap & COP_PINCAP_OUTPUT) &&
+	    (CORB_CD_PORT(this->d.pin.config) == CORB_CD_JACK ||
+	    CORB_CD_PORT(this->d.pin.config) == CORB_CD_BOTH)) {
+		if (codec->headphones == -1 ||
+		    (this->d.pin.association <
+		    codec->w[codec->headphones].d.pin.association))
+			wcodec->headphones = this->nid;
+	}
+
+	if (this->d.pin.device == CORB_CD_SPEAKER &&
+	    (this->d.pin.cap & COP_PINCAP_OUTPUT) &&
+	    (CORB_CD_PORT(this->d.pin.config) == CORB_CD_FIXED ||
+	    CORB_CD_PORT(this->d.pin.config) == CORB_CD_BOTH)) {
+		if (codec->speaker == -1 ||
+		    (this->d.pin.association <
+		    codec->w[codec->speaker].d.pin.association))
+			wcodec->speaker = this->nid;
+	}
+
 	return 0;
 }
 
@@ -2919,20 +3051,17 @@ azalia_params2fmt(const audio_params_t *param, uint16_t *fmt)
 	uint16_t ret;
 
 	ret = 0;
-#ifdef DIAGNOSTIC
 	if (param->channels > HDA_MAX_CHANNELS) {
 		printf("%s: too many channels: %u\n", __func__,
 		    param->channels);
 		return EINVAL;
 	}
-#endif
-	/* allow any number of channels in a native format */
-	if (param->sw_code == NULL)
-		ret |= param->channels - 1;
 
-	/* emulated mono uses 2 channel formats */
-	else
+	/* Only mono is emulated, and it is emulated from stereo. */
+	if (param->sw_code != NULL)
 		ret |= 1;
+	else
+		ret |= param->channels - 1;
 
 	switch (param->precision) {
 	case 8:
