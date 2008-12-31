@@ -1,4 +1,4 @@
-/*	$OpenBSD: hvcall.S,v 1.3 2008/08/10 13:55:19 kettenis Exp $	*/
+/*	$OpenBSD: hvcall.S,v 1.6 2008/12/31 11:37:08 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -27,8 +27,6 @@
 #define MACH_EXIT		0x00
 #define MACH_DESC		0x01
 #define MACH_SIR		0x02
-#define MACH_SET_SOFT_STATE	0x03
-#define MACH_GET_SOFT_STATE	0x04
 #define MACH_SET_WATCHDOG	0x05
 
 #define CPU_START		0x10
@@ -65,6 +63,9 @@
 #define CONS_GETCHAR		0x60
 #define CONS_PUTCHAR		0x61
 
+#define SOFT_STATE_SET		0x70
+#define SOFT_STATE_GET		0x71
+
 #define INTR_DEVINO2SYSINO	0xa0
 #define INTR_GETENABLED		0xa1
 #define INTR_SETENABLED		0xa2
@@ -79,6 +80,15 @@
 #define PCI_IOMMU_GETBYPASS	0xb3
 #define PCI_CONFIG_GET		0xb4
 #define PCI_CONFIG_PUT		0xb5
+
+#define LDC_TX_QCONF		0xe0
+#define LDC_TX_QINFO		0xe1
+#define LDC_TX_GET_STATE	0xe2
+#define LDC_TX_SET_QTAIL	0xe3
+#define LDC_RX_QCONF		0xe4
+#define LDC_RX_QINFO		0xe5
+#define LDC_RX_GET_STATE	0xe6
+#define LDC_RX_SET_QHEAD	0xe7
 
 #define RNG_GET_DIAG_CONTROL	0x130
 #define RNG_CTL_READ		0x131
@@ -107,11 +117,13 @@ ENTRY(hv_api_get_version)
 	retl
 	 stx	%o2, [%o4]
 
-ENTRY(hv_mach_set_soft_state)
-	mov	MACH_SET_SOFT_STATE, %o5
+ENTRY(hv_mach_desc)
+	mov	%o1, %o2
+	ldx	[%o2], %o1
+	mov	MACH_DESC, %o5
 	ta	FAST_TRAP
 	retl
-	 nop
+	 stx	%o1, [%o2]
 
 ENTRY(hv_cpu_yield)
 	mov	CPU_YIELD, %o5
@@ -246,6 +258,12 @@ ENTRY(hv_cons_putchar)
 	retl
 	 nop
 
+ENTRY(hv_soft_state_set)
+	mov	SOFT_STATE_SET, %o5
+	ta	FAST_TRAP
+	retl
+	 nop
+
 ENTRY(hv_intr_devino_to_sysino)
 	mov	INTR_DEVINO2SYSINO, %o5
 	ta	FAST_TRAP
@@ -332,6 +350,70 @@ ENTRY(hv_pci_config_put)
 	ta	FAST_TRAP
 	retl
 	 stx	%o1, [%g5]
+
+ENTRY(hv_ldc_tx_qconf)
+	mov	LDC_TX_QCONF, %o5
+	ta	FAST_TRAP
+	retl
+	 nop
+
+ENTRY(hv_ldc_tx_qinfo)
+	mov	%o2, %o4
+	mov	%o1, %o3
+	mov	LDC_TX_QINFO, %o5
+	ta	FAST_TRAP
+	stx	%o1, [%o3]
+	retl
+	 stx	%o2, [%o4]
+
+ENTRY(hv_ldc_tx_get_state)
+	mov	%o3, %g5
+	mov	%o2, %g4
+	mov	%o1, %o4
+	mov	LDC_TX_GET_STATE, %o5
+	ta	FAST_TRAP
+	stx	%o1, [%o4]
+	stx	%o2, [%g4]
+	retl
+	 stx	%o3, [%g5]
+
+ENTRY(hv_ldc_tx_set_qtail)
+	mov	LDC_TX_SET_QTAIL, %o5
+	ta	FAST_TRAP
+	retl
+	 nop
+
+ENTRY(hv_ldc_rx_qconf)
+	mov	LDC_RX_QCONF, %o5
+	ta	FAST_TRAP
+	retl
+	 nop
+
+ENTRY(hv_ldc_rx_qinfo)
+	mov	%o2, %o4
+	mov	%o1, %o3
+	mov	LDC_RX_QINFO, %o5
+	ta	FAST_TRAP
+	stx	%o1, [%o3]
+	retl
+	 stx	%o2, [%o4]
+
+ENTRY(hv_ldc_rx_get_state)
+	mov	%o3, %g5
+	mov	%o2, %g4
+	mov	%o1, %o4
+	mov	LDC_RX_GET_STATE, %o5
+	ta	FAST_TRAP
+	stx	%o1, [%o4]
+	stx	%o2, [%g4]
+	retl
+	 stx	%o3, [%g5]
+
+ENTRY(hv_ldc_rx_set_qhead)
+	mov	LDC_RX_SET_QHEAD, %o5
+	ta	FAST_TRAP
+	retl
+	 nop
 
 ENTRY(hv_rng_get_diag_control)
 	mov	RNG_GET_DIAG_CONTROL, %o5

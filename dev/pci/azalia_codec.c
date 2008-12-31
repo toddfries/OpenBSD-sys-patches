@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.97 2008/12/26 10:07:48 jakemsr Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.100 2008/12/31 13:35:58 jakemsr Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -66,9 +66,11 @@ int	azalia_generic_codec_init_dacgroup(codec_t *);
 int	azalia_generic_codec_fnode(codec_t *, nid_t, int, int);
 int	azalia_generic_codec_add_convgroup(codec_t *, convgroupset_t *,
     uint32_t, uint32_t);
+
+int	azalia_generic_unsol(codec_t *, int);
+
 int	azalia_generic_mixer_init(codec_t *);
 int	azalia_generic_mixer_autoinit(codec_t *);
-
 int	azalia_generic_mixer_fix_indexes(codec_t *);
 int	azalia_generic_mixer_default(codec_t *);
 int	azalia_generic_mixer_create_virtual(codec_t *, int, int);
@@ -109,7 +111,7 @@ azalia_codec_init_vtbl(codec_t *this)
 	this->mixer_delete = azalia_generic_mixer_delete;
 	this->set_port = azalia_generic_set_port;
 	this->get_port = azalia_generic_get_port;
-	this->unsol_event = NULL;
+	this->unsol_event = azalia_generic_unsol;
 	switch (this->vid) {
 	case 0x10ec0260:
 		this->name = "Realtek ALC260";
@@ -441,6 +443,42 @@ azalia_generic_codec_fnode(codec_t *this, nid_t node, int index, int depth)
 	return -1;
 }
 
+int
+azalia_generic_unsol(codec_t *this, int tag)
+{
+	mixer_ctrl_t mc;
+	uint32_t result;
+	int i, err;
+
+	tag = CORB_UNSOL_TAG(tag);
+	switch (tag) {
+	case AZ_TAG_SPKR:
+		mc.type = AUDIO_MIXER_ENUM;
+		mc.un.ord = 0;
+		for (i = 0; mc.un.ord == 0 && i < this->nsense_pins; i++) {
+			if (!(this->spkr_muters & (1 <<i)))
+				continue;
+			err = this->comresp(this, this->sense_pins[i],
+			    CORB_GET_PIN_WIDGET_CONTROL, 0, &result);
+			if (err || !(result & CORB_PWC_OUTPUT))
+				continue;
+			err = this->comresp(this, this->sense_pins[i],
+			    CORB_GET_PIN_SENSE, 0, &result);
+			if (!err && (result & CORB_PS_PRESENCE))
+				mc.un.ord = 1;
+		}
+		azalia_generic_mixer_set(this, this->speaker,
+		    MI_TARGET_OUTAMP, &mc);
+		break;
+	default:
+		DPRINTF(("%s: unknown tag %d\n", __func__, tag));
+		break;
+	}
+
+	return 0;
+}
+
+
 /* ----------------------------------------------------------------
  * Generic mixer functions
  * ---------------------------------------------------------------- */
@@ -455,6 +493,7 @@ azalia_generic_mixer_init(codec_t *this)
 	 * mixer	"mixer%2.2x"
 	 * selector	"sel%2.2x"
 	 */
+	const widget_t *w, *ww;
 	mixer_item_t *m;
 	int err, i, j, k;
 
@@ -510,7 +549,6 @@ azalia_generic_mixer_init(codec_t *this)
 	m->nid = i
 
 	FOR_EACH_WIDGET(this, i) {
-		const widget_t *w;
 
 		w = &this->w[i];
 		if (!w->enable)
@@ -763,6 +801,35 @@ azalia_generic_mixer_init(codec_t *this)
 		this->nmixers++;
 	}
 
+	/* spkr mute by jack sense */
+	w = &this->w[this->speaker];
+	if (this->nsense_pins > 0 && this->speaker != -1 &&
+	    (w->widgetcap & COP_AWCAP_OUTAMP) &&
+	    (w->outamp_cap & COP_AMPCAP_MUTE)) {
+		MIXER_REG_PROLOG;
+		m->nid = w->nid;
+		snprintf(d->label.name, sizeof(d->label.name),
+		    "%s_muters", w->name);
+		m->target = MI_TARGET_SENSESET;
+		d->type = AUDIO_MIXER_SET;
+		d->mixer_class = AZ_CLASS_OUTPUT;
+		this->spkr_muters = 0;
+		for (i = 0, j = 0; i < this->nsense_pins; i++) {
+			ww = &this->w[this->sense_pins[i]];
+			if (!(w->d.pin.cap & COP_PINCAP_OUTPUT))
+				continue;
+			if (!(w->widgetcap & COP_AWCAP_UNSOL))
+				continue;
+			d->un.s.member[j].mask = 1 << i;
+			this->spkr_muters |= (1 << i);
+			strlcpy(d->un.s.member[j++].label.name, ww->name,
+			    MAX_AUDIO_DEV_LEN);
+		}
+		d->un.s.num_mem = j;
+		if (j != 0)
+			this->nmixers++;
+	}
+
 	/* if the codec has multiple DAC groups, create "inputs.usingdac" */
 	if (this->dacs.ngroups > 1) {
 		MIXER_REG_PROLOG;
@@ -932,6 +999,17 @@ azalia_generic_mixer_default(codec_t *this)
 		}
 		azalia_generic_mixer_set(this, m->nid, m->target, &mc);
 	}
+
+	/* turn on jack sense unsolicited responses */
+	for (i = 0; i < this->nsense_pins; i++) {
+		if (this->spkr_muters & (1 << i)) {
+			this->comresp(this, this->sense_pins[i],
+			    CORB_SET_UNSOLICITED_RESPONSE,
+			    CORB_UNSOL_ENABLE | AZ_TAG_SPKR, NULL);
+		}
+	}
+	if (this->spkr_muters != 0 && this->unsol_event != NULL)
+		this->unsol_event(this, AZ_TAG_SPKR);
 
 	return 0;
 }
@@ -1259,6 +1337,16 @@ azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target,
 		}
 	}
 
+	else if (target == MI_TARGET_SENSESET && mc->type == AUDIO_MIXER_SET) {
+
+		if (nid == this->speaker) {
+			mc->un.mask = this->spkr_muters;
+		} else {
+			DPRINTF(("%s: invalid senseset nid\n"));
+			return EINVAL;
+		}
+	}
+
 	else {
 		printf("%s: internal error in %s: target=%x\n",
 		    XNAME(this), __func__, target);
@@ -1437,17 +1525,27 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 		    CORB_GET_PIN_WIDGET_CONTROL, 0, &result);
 		if (err)
 			return err;
+		value = result;
 		if (mc->un.ord == 0) {
-			result &= ~CORB_PWC_OUTPUT;
-			result |= CORB_PWC_INPUT;
+			value &= ~CORB_PWC_OUTPUT;
+			value |= CORB_PWC_INPUT;
 		} else {
-			result &= ~CORB_PWC_INPUT;
-			result |= CORB_PWC_OUTPUT;
+			value &= ~CORB_PWC_INPUT;
+			value |= CORB_PWC_OUTPUT;
 		}
 		err = this->comresp(this, nid,
-		    CORB_SET_PIN_WIDGET_CONTROL, result, &result);
+		    CORB_SET_PIN_WIDGET_CONTROL, value, &result);
 		if (err)
 			return err;
+
+		for (i = 0; i < this->nsense_pins; i++) {
+			if (this->sense_pins[i] == nid)
+				break;
+		}
+		if (i < this->nsense_pins) {
+			if (this->unsol_event != NULL)
+				this->unsol_event(this, AZ_TAG_SPKR);
+		}
 	}
 
 	/* pin headphone-boost */
@@ -1601,6 +1699,18 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 				if (err)
 					return err;
 			}
+		}
+	}
+
+	else if (target == MI_TARGET_SENSESET && mc->type == AUDIO_MIXER_SET) {
+
+		if (nid == this->speaker) {
+			this->spkr_muters = mc->un.mask;
+			if (this->unsol_event != NULL)
+				this->unsol_event(this, AZ_TAG_SPKR);
+		} else {
+			DPRINTF(("%s: invalid senseset nid\n"));
+			return EINVAL;
 		}
 	}
 
@@ -1845,15 +1955,21 @@ azalia_stac9202_mixer_init(codec_t *this)
 int
 azalia_stac9221_init_widget(const codec_t *codec, widget_t *w, nid_t nid)
 {
-	/* put hp and spkr dacs first in the dacgroup for MacBookPro1,2 */
+	/* Apple didn't follow the HDA spec for associations */
 	if (codec->subid == STAC9221_APPLE_ID) {
-		if (nid == 0xa && w->d.pin.color == CORB_CD_WHITE) {
+		if (nid == 0xa &&
+		    (w->d.pin.color == CORB_CD_WHITE ||
+		    w->d.pin.color == CORB_CD_GREEN)) {
 			w->d.pin.association = 1;
 			w->d.pin.sequence = 0;
 		}
-		if (nid == 0xc && w->d.pin.color == CORB_CD_WHITE) {
+		if (nid == 0xc && w->d.pin.device == CORB_CD_SPEAKER) {
 			w->d.pin.association = 1;
 			w->d.pin.sequence = 1;
+		}
+		if (nid == 0xf && w->d.pin.color == CORB_CD_BLUE) {
+			w->d.pin.association = 2;
+			w->d.pin.sequence = 0;
 		}
 	}
 	return 0;

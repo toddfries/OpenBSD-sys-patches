@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.h,v 1.29 2008/12/23 04:12:19 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.h,v 1.31 2008/12/31 13:13:39 jakemsr Exp $	*/
 /*	$NetBSD: azalia.h,v 1.6 2006/01/16 14:15:26 kent Exp $	*/
 
 /*-
@@ -486,6 +486,8 @@
 #define HDA_MAX_CHANNELS	16
 #define HDA_MAX_SENSE_PINS	16
 
+#define AZ_TAG_SPKR		0x01
+
 #define AZ_CLASS_INPUT	0
 #define AZ_CLASS_OUTPUT	1
 #define AZ_CLASS_RECORD	2
@@ -575,6 +577,7 @@ typedef struct {
 #define MI_TARGET_EAPD		0x109
 #define MI_TARGET_MUTESET	0x10a
 #define MI_TARGET_PINSENSE	0x10b
+#define MI_TARGET_SENSESET	0x10c
 } mixer_item_t;
 
 #define VALID_WIDGET_NID(nid, codec)	(nid == (codec)->audiofunc || \
@@ -625,6 +628,12 @@ typedef struct codec_t {
 	int nformats;
 	struct audio_encoding* encs;
 	int nencs;
+
+	int headphones;
+	int speaker;
+	int hp_dac;
+	int spkr_dac;
+	int spkr_muters;
 
 	nid_t sense_pins[HDA_MAX_SENSE_PINS];
 	int nsense_pins;
