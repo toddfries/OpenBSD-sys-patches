@@ -1,4 +1,4 @@
-/*	$NetBSD: rump_vfs.c,v 1.2 2008/11/21 06:09:52 pooka Exp $	*/
+/*	$NetBSD: rump_vfs.c,v 1.8 2008/12/31 00:57:45 pooka Exp $	*/
 
 /*
  * Copyright (c) 2008 Antti Kantee.  All Rights Reserved.
@@ -28,8 +28,12 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD");
+
 #include <sys/param.h>
 #include <sys/buf.h>
+#include <sys/conf.h>
 #include <sys/filedesc.h>
 #include <sys/module.h>
 #include <sys/namei.h>
@@ -54,6 +58,8 @@ static LIST_HEAD(, fakeblk) fakeblks = LIST_HEAD_INITIALIZER(fakeblks);
 
 static struct cwdinfo rump_cwdi;
 
+static void rump_rcvp_lwpset(struct vnode *, struct vnode *, struct lwp *);
+
 static void
 pvfs_init(struct proc *p)
 {
@@ -68,12 +74,19 @@ pvfs_rele(struct proc *p)
 	cwdfree(p->p_cwdi);
 }
 
+static const struct bdevsw rumpblk_bdevsw;
+static const struct cdevsw rumpblk_cdevsw;
+
 void
 rump_vfs_init()
 {
+	int rumpblk = RUMPBLK;
 
 	syncdelay = 0;
 	dovfsusermount = 1;
+
+	devsw_attach("rumpblk", &rumpblk_bdevsw, &rumpblk,
+	    &rumpblk_cdevsw, &rumpblk);
 
 	cache_cpu_init(&rump_cpu);
 	vfsinit();
@@ -88,6 +101,7 @@ rump_vfs_init()
 
 	rw_init(&rump_cwdi.cwdi_lock);
 	rump_cwdi.cwdi_cdir = rootvnode;
+	vref(rump_cwdi.cwdi_cdir);
 	proc0.p_cwdi = &rump_cwdi;
 }
 
@@ -105,6 +119,7 @@ rump_mnt_init(struct vfsops *vfsops, int mntflags)
 	mutex_init(&mp->mnt_updating, MUTEX_DEFAULT, IPL_NONE);
 	mutex_init(&mp->mnt_renamelock, MUTEX_DEFAULT, IPL_NONE);
 	mp->mnt_refcnt = 1;
+	mp->mnt_vnodecovered = rootvnode;
 
 	mount_initspecific(mp);
 
@@ -128,11 +143,11 @@ rump_mnt_mount(struct mount *mp, const char *path, void *data, size_t *dlen)
 
 	/*
 	 * XXX: set a root for lwp0.  This is strictly not correct,
-	 * but makes things works for single fs case without having
+	 * but makes things work for single fs case without having
 	 * to manually call rump_rcvp_set().
 	 */
 	VFS_ROOT(mp, &rvp);
-	rump_rcvp_set(rvp, rvp);
+	rump_rcvp_lwpset(rvp, rvp, &lwp0);
 	vput(rvp);
 
 	return rv;
@@ -141,6 +156,11 @@ rump_mnt_mount(struct mount *mp, const char *path, void *data, size_t *dlen)
 void
 rump_mnt_destroy(struct mount *mp)
 {
+
+	/* See rcvp XXX above */
+	rump_cwdi.cwdi_rdir = NULL;
+	vref(rootvnode);
+	rump_cwdi.cwdi_cdir = rootvnode;
 
 	mount_finispecific(mp);
 	kmem_free(mp, sizeof(*mp));
@@ -506,10 +526,9 @@ rump_biodone(void *arg, size_t count, int error)
 	rump_intr_exit();
 }
 
-void
-rump_rcvp_set(struct vnode *rvp, struct vnode *cvp)
+static void
+rump_rcvp_lwpset(struct vnode *rvp, struct vnode *cvp, struct lwp *l)
 {
-	struct lwp *l = curlwp;
 	struct cwdinfo *cwdi = l->l_proc->p_cwdi;
 
 	KASSERT(cvp);
@@ -525,6 +544,13 @@ rump_rcvp_set(struct vnode *rvp, struct vnode *cvp)
 	vref(cvp);
 	cwdi->cwdi_cdir = cvp;
 	rw_exit(&cwdi->cwdi_lock);
+}
+
+void
+rump_rcvp_set(struct vnode *rvp, struct vnode *cvp)
+{
+
+	rump_rcvp_lwpset(rvp, cvp, curlwp);
 }
 
 struct vnode *

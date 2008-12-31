@@ -1,4 +1,4 @@
-/*	$NetBSD: tsarm_start.S,v 1.2 2005/12/11 12:17:11 christos Exp $ */
+/*	$NetBSD: tsarm_start.S,v 1.5 2008/12/14 03:00:59 kenh Exp $ */
 
 /*
  * Copyright (c) 2003

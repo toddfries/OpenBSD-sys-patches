@@ -1,4 +1,4 @@
-/*	$NetBSD: ext2fs_lookup.c,v 1.56 2008/11/23 10:09:25 mrg Exp $	*/
+/*	$NetBSD: ext2fs_lookup.c,v 1.58 2008/12/17 20:51:38 cegger Exp $	*/
 
 /*
  * Modified for NetBSD 1.2E
@@ -48,7 +48,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ext2fs_lookup.c,v 1.56 2008/11/23 10:09:25 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ext2fs_lookup.c,v 1.58 2008/12/17 20:51:38 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -209,8 +209,8 @@ ext2fs_readdir(void *v)
 		/* we need to correct uio_offset */
 		uio->uio_offset = off;
 	}
-	FREE(dirbuf, M_TEMP);
-	FREE(dstd, M_TEMP);
+	free(dirbuf, M_TEMP);
+	free(dstd, M_TEMP);
 	*ap->a_eofflag = ext2fs_size(VTOI(ap->a_vp)) <= uio->uio_offset;
 	if (ap->a_ncookies) {
 		if (error) {
@@ -768,7 +768,7 @@ ext2fs_direnter(struct inode *ip, struct vnode *dvp, struct componentname *cnp)
 		newdir.e2d_type = inot2ext2dt(IFTODT(ip->i_e2fs_mode));
 	} else {
 		newdir.e2d_type = 0;
-	};
+	}
 	memcpy(newdir.e2d_name, cnp->cn_nameptr, (unsigned)cnp->cn_namelen + 1);
 	newentrysize = EXT2FS_DIRSIZ(cnp->cn_namelen);
 	if (dp->i_count == 0) {

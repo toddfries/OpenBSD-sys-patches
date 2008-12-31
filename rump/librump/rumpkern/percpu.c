@@ -1,4 +1,4 @@
-/*	$NetBSD: percpu.c,v 1.2 2008/10/11 16:23:24 pooka Exp $	*/
+/*	$NetBSD: percpu.c,v 1.4 2008/12/29 22:16:15 pooka Exp $	*/
 
 /*
  * Copyright (c) 2008 Antti Kantee.  All Rights Reserved.
@@ -25,12 +25,15 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: percpu.c,v 1.4 2008/12/29 22:16:15 pooka Exp $");
+
 #include <sys/param.h>
 #include <sys/kmem.h>
 #include <sys/mutex.h>
 #include <sys/percpu.h>
 
-#include <machine/cpu.h>
+#include "rump_private.h"
 
 /*
  * A poor-man's userspace percpu emulation.  Since we can't disable

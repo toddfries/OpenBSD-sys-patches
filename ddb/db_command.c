@@ -1,4 +1,4 @@
-/*	$NetBSD: db_command.c,v 1.122 2008/11/16 19:34:29 pooka Exp $	*/
+/*	$NetBSD: db_command.c,v 1.125 2008/12/07 00:51:15 cegger Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1991,1990 Carnegie Mellon University
@@ -58,7 +58,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: db_command.c,v 1.122 2008/11/16 19:34:29 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: db_command.c,v 1.125 2008/12/07 00:51:15 cegger Exp $");
 
 #include "opt_aio.h"
 #include "opt_ddb.h"
@@ -83,6 +83,7 @@ __KERNEL_RCSID(0, "$NetBSD: db_command.c,v 1.122 2008/11/16 19:34:29 pooka Exp $
 #include <sys/sleepq.h>
 #include <sys/cpu.h>
 #include <sys/buf.h>
+#include <sys/module.h>
 
 /*include queue macros*/
 #include <sys/queue.h>
@@ -214,6 +215,8 @@ static void	db_uvmexp_print_cmd(db_expr_t, bool, db_expr_t, const char *);
 static void	db_uvmhist_print_cmd(db_expr_t, bool, db_expr_t, const char *);
 #endif
 static void	db_vnode_print_cmd(db_expr_t, bool, db_expr_t, const char *);
+static void	db_vmem_print_cmd(db_expr_t, bool, db_expr_t, const char *);
+static void	db_show_all_vmems(db_expr_t, bool, db_expr_t, const char *);
 
 static const struct db_command db_show_cmds[] = {
 	/*added from all sub cmds*/
@@ -248,6 +251,8 @@ static const struct db_command db_show_cmds[] = {
 	{ DDB_ADD_CMD("malloc",	db_malloc_print_cmd,0,NULL,NULL,NULL) },
 	{ DDB_ADD_CMD("map",	db_map_print_cmd,	0,
 	    "Print the vm_map at address.", "[/f] address",NULL) },
+	{ DDB_ADD_CMD("module", db_show_module_cmd,	0,
+	    "Print kernel modules", NULL, NULL) },
 	{ DDB_ADD_CMD("mount",	db_mount_print_cmd,	0,
 	    "Print the mount structure at address.", "[/f] address",NULL) },
 	{ DDB_ADD_CMD("mqueue", db_show_mqueue_cmd,	0,
@@ -277,6 +282,10 @@ static const struct db_command db_show_cmds[] = {
 #endif
 	{ DDB_ADD_CMD("vnode",	db_vnode_print_cmd,	0,
 	    "Print the vnode at address.", "[/f] address",NULL) },
+	{ DDB_ADD_CMD("vmem", db_vmem_print_cmd,	0,
+	    "Print the vmem usage.", "[/a] address", NULL) },
+	{ DDB_ADD_CMD("vmems", db_show_all_vmems,	0,
+	    "Show all vmems.", NULL, NULL) },
 	{ DDB_ADD_CMD("watches",	db_listwatch_cmd, 	0,
 	    "Display all watchpoints.", NULL,NULL) },
 	{ DDB_ADD_CMD(NULL,		NULL,			0,NULL,NULL,NULL) }
@@ -1174,6 +1183,22 @@ db_vnode_print_cmd(db_expr_t addr, bool have_addr,
 	vfs_vnode_print((struct vnode *)(uintptr_t) addr, full, db_printf);
 }
 
+/*ARGSUSED*/
+static void
+db_vmem_print_cmd(db_expr_t addr, bool have_addr,
+    db_expr_t count, const char *modif)
+{
+	vmem_print((uintptr_t) addr, modif, db_printf);
+}
+
+/*ARGSUSED*/
+static void
+db_show_all_vmems(db_expr_t addr, bool have_addr,
+    db_expr_t count, const char *modif)
+{
+	vmem_print((uintptr_t)addr, "a", db_printf);
+}
+
 static void
 db_mount_print_cmd(db_expr_t addr, bool have_addr,
     db_expr_t count, const char *modif)
@@ -1239,7 +1264,7 @@ db_lock_print_cmd(db_expr_t addr, bool have_addr,
     db_expr_t count, const char *modif)
 {
 
-	lockdebug_lock_print((void *)addr, db_printf);
+	lockdebug_lock_print((void *)(uintptr_t)addr, db_printf);
 }
 
 /*
@@ -1401,4 +1426,5 @@ db_whatis_cmd(db_expr_t address, bool have_addr,
 	pool_whatis(addr, db_printf);
 	vmem_whatis(addr, db_printf);
 	uvm_whatis(addr, db_printf);
+	module_whatis(addr, db_printf);
 }

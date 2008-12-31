@@ -1,4 +1,4 @@
-# $NetBSD: GENERIC,v 1.272 2008/11/12 12:36:03 ad Exp $
+# $NetBSD: GENERIC,v 1.274 2008/12/07 08:26:02 tsutsui Exp $
 #
 # GENERIC machine description file
 # 
@@ -22,7 +22,7 @@ include		"arch/macppc/conf/std.macppc"
 
 options 	INCLUDE_CONFIG_FILE	# embed config file in kernel binary
 
-#ident 		"GENERIC-$Revision: 1.272 $"
+#ident 		"GENERIC-$Revision: 1.274 $"
 
 maxusers	32
 
@@ -110,7 +110,6 @@ file-system	TMPFS		# Efficient memory file-system
 # File system options
 options 	QUOTA		# UFS quotas
 #options 	FFS_EI		# FFS Endian Independant support
-options 	SOFTDEP		# FFS soft updates support.
 options 	WAPBL		# File system journaling support - Experimental
 #options 	UFS_DIRHASH	# UFS Large Directory Hashing - Experimental
 options 	NFSSERVER	# Network File System server
@@ -172,8 +171,6 @@ options 	WS_DEFAULT_FG=WSCOL_BLACK
 options 	WS_DEFAULT_BG=WSCOL_LIGHT_WHITE
 options 	WS_KERNEL_FG=WSCOL_GREEN
 options 	WS_KERNEL_BG=WSCOL_LIGHT_WHITE
-
-#options 	FONT_GALLANT12x22
 
 #options 	WSDISPLAY_COMPAT_RAWKBD		# can get raw scancodes
 options 	FONT_GALLANT12x22

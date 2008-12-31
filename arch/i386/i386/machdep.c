@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.652 2008/11/20 10:53:09 ad Exp $	*/
+/*	$NetBSD: machdep.c,v 1.654 2008/12/15 22:20:52 cegger Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 2000, 2004, 2006, 2008 The NetBSD Foundation, Inc.
@@ -65,7 +65,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.652 2008/11/20 10:53:09 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.654 2008/12/15 22:20:52 cegger Exp $");
 
 #include "opt_beep.h"
 #include "opt_compat_ibcs2.h"
@@ -1262,18 +1262,18 @@ init386_ksyms(void)
 #endif
 
 #if defined(MULTIBOOT)
-	if (multiboot_ksyms_init())
+	if (multiboot_ksyms_addsyms_elf())
 		return;
 #endif
 
 	if ((symtab = lookup_bootinfo(BTINFO_SYMTAB)) == NULL) {
-		ksyms_init(*(int *)&end, ((int *)&end) + 1, esym);
+		ksyms_addsyms_elf(*(int *)&end, ((int *)&end) + 1, esym);
 		return;
 	}
 
 	symtab->ssym += KERNBASE;
 	symtab->esym += KERNBASE;
-	ksyms_init(symtab->nsym, (int *)symtab->ssym, (int *)symtab->esym);
+	ksyms_addsyms_elf(symtab->nsym, (int *)symtab->ssym, (int *)symtab->esym);
 #endif
 }
 
@@ -1424,7 +1424,7 @@ init386(paddr_t first_avail)
 	bim = lookup_bootinfo(BTINFO_MEMMAP);
 	if ((biosmem_implicit || (biosbasemem == 0 && biosextmem == 0)) &&
 	    bim != NULL && bim->num > 0)
-		initx86_parse_memmap(bim);
+		initx86_parse_memmap(bim, iomem_ex);
 
 	/*
 	 * If the loop above didn't find any valid segment, fall back to

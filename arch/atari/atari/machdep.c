@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.152 2008/11/12 12:35:57 ad Exp $	*/
+/*	$NetBSD: machdep.c,v 1.154 2008/11/30 18:21:32 martin Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990 The Regents of the University of California.
@@ -77,7 +77,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.152 2008/11/12 12:35:57 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.154 2008/11/30 18:21:32 martin Exp $");
 
 #include "opt_ddb.h"
 #include "opt_compat_netbsd.h"
@@ -204,9 +204,9 @@ consinit(void)
 		extern int *esym;
 
 #ifndef __ELF__
-		ksyms_init(*(int *)&end, ((int *)&end) + 1, esym);
+		ksyms_addsyms_elf(*(int *)&end, ((int *)&end) + 1, esym);
 #else
-		ksyms_init((int)esym - (int)&end - sizeof(Elf32_Ehdr),
+		ksyms_addsyms_elf((int)esym - (int)&end - sizeof(Elf32_Ehdr),
 			(void *)&end, esym);
 #endif
 	}
@@ -575,7 +575,7 @@ dumpsys(void)
 		 */
 		n = nbytes - i;
 		if (n && (n % (1024*1024)) == 0)
-			printf("%d ", n / (1024 * 1024));
+			printf_nolog("%d ", n / (1024 * 1024));
 
 		/*
 		 * Limit transfer to BYTES_PER_DUMP

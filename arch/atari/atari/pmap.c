@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.c,v 1.106 2008/11/15 21:30:50 abs Exp $	*/
+/*	$NetBSD: pmap.c,v 1.109 2008/12/19 18:49:38 cegger Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -100,7 +100,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.106 2008/11/15 21:30:50 abs Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.109 2008/12/19 18:49:38 cegger Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -269,7 +269,8 @@ u_int		*Sysmap, *Sysptmap;
 u_int		*Segtabzero, *Segtabzeropa;
 vsize_t		Sysptsize = VM_KERNEL_PT_PAGES;
 
-struct pmap	kernel_pmap_store;
+static struct pmap	kernel_pmap_store;
+struct pmap		*const kernel_pmap_ptr = &kernel_pmap_store;
 struct vm_map	*pt_map;
 struct vm_map_kernel pt_map_store;
 
@@ -746,8 +747,7 @@ pmap_create()
 		printf("pmap_create\n");
 #endif
 
-	pmap = malloc(sizeof *pmap, M_VMPMAP, M_WAITOK);
-	bzero(pmap, sizeof(*pmap));
+	pmap = malloc(sizeof(*pmap), M_VMPMAP, M_WAITOK|M_ZERO);
 	pmap_pinit(pmap);
 	return (pmap);
 }

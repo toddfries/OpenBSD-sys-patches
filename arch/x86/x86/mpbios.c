@@ -1,4 +1,4 @@
-/*	$NetBSD: mpbios.c,v 1.49 2008/11/09 15:34:14 cegger Exp $	*/
+/*	$NetBSD: mpbios.c,v 1.51 2008/12/23 15:31:20 cegger Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -96,7 +96,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mpbios.c,v 1.49 2008/11/09 15:34:14 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mpbios.c,v 1.51 2008/12/23 15:31:20 cegger Exp $");
 
 #include "acpi.h"
 #include "lapic.h"
@@ -108,7 +108,7 @@ __KERNEL_RCSID(0, "$NetBSD: mpbios.c,v 1.49 2008/11/09 15:34:14 cegger Exp $");
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
+#include <sys/kmem.h>
 #include <sys/bus.h>
 #include <sys/reboot.h>
 
@@ -615,10 +615,10 @@ mpbios_scan(device_t self, int *ncpup)
 			position += mp_conf[type].length;
 		}
 
-		mp_busses = malloc(sizeof(struct mp_bus)*mp_nbus,
-		    M_DEVBUF, M_NOWAIT | M_ZERO);
-		mp_intrs = malloc(sizeof(struct mp_intr_map)*intr_cnt,
-		    M_DEVBUF, M_NOWAIT | M_ZERO);
+		mp_busses = kmem_zalloc(sizeof(struct mp_bus)*mp_nbus,
+			KM_NOSLEEP);
+		mp_intrs = kmem_zalloc(sizeof(struct mp_intr_map)*intr_cnt,
+			KM_NOSLEEP);
 		mp_nintr = intr_cnt;
 
 		/* re-walk the table, recording info of interest */
@@ -1158,11 +1158,11 @@ mpbios_int(const uint8_t *ent, int enttype, struct mp_intr_map *mpi)
 
 		(*(mpb->mb_intr_print))(dev);
 
-		printf(" (type %s",
-		    bitmask_snprintf(type, inttype_fmt, buf, sizeof(buf)));
+		snprintb(buf, sizeof(buf), inttype_fmt, type);
+		printf(" (type %s", buf);
 
-		printf(" flags %s)\n",
-		    bitmask_snprintf(flags, flagtype_fmt, buf, sizeof(buf)));
+		snprintb(buf, sizeof(buf), flagtype_fmt, flags);
+		printf(" flags %s)\n", buf);
 	}
 }
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_synch.c,v 1.255 2008/11/15 10:54:32 skrll Exp $	*/
+/*	$NetBSD: kern_synch.c,v 1.258 2008/12/21 13:26:58 ad Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2004, 2006, 2007, 2008 The NetBSD Foundation, Inc.
@@ -68,7 +68,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_synch.c,v 1.255 2008/11/15 10:54:32 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_synch.c,v 1.258 2008/12/21 13:26:58 ad Exp $");
 
 #include "opt_kstack.h"
 #include "opt_perfctrs.h"
@@ -129,7 +129,6 @@ kcondvar_t	lbolt;			/* once a second sleep address */
 /* Preemption event counters */
 static struct evcnt kpreempt_ev_crit;
 static struct evcnt kpreempt_ev_klock;
-static struct evcnt kpreempt_ev_ipl;
 static struct evcnt kpreempt_ev_immed;
 
 /*
@@ -154,8 +153,6 @@ sched_init(void)
 	   "kpreempt", "defer: critical section");
 	evcnt_attach_dynamic(&kpreempt_ev_klock, EVCNT_TYPE_MISC, NULL,
 	   "kpreempt", "defer: kernel_lock");
-	evcnt_attach_dynamic(&kpreempt_ev_ipl, EVCNT_TYPE_MISC, NULL,
-	   "kpreempt", "defer: IPL");
 	evcnt_attach_dynamic(&kpreempt_ev_immed, EVCNT_TYPE_MISC, NULL,
 	   "kpreempt", "immediate");
 
@@ -377,7 +374,6 @@ preempt(void)
  */
 static char	in_critical_section;
 static char	kernel_lock_held;
-static char	spl_raised;
 static char	is_softint;
 
 bool
@@ -437,10 +433,6 @@ kpreempt(uintptr_t where)
 			 * interrupt to retry later.
 			 */
 			splx(s);
-			if ((dop & DOPREEMPT_COUNTED) == 0) {
-				kpreempt_ev_ipl.ev_count++;
-			}
-			failed = (uintptr_t)&spl_raised;
 			break;
 		}
 		/* Do it! */
@@ -925,7 +917,6 @@ setrunnable(struct lwp *l)
 {
 	struct proc *p = l->l_proc;
 	struct cpu_info *ci;
-	sigset_t *ss;
 
 	KASSERT((l->l_flag & LW_IDLE) == 0);
 	KASSERT(mutex_owned(p->p_lock));
@@ -938,14 +929,8 @@ setrunnable(struct lwp *l)
 		 * If we're being traced (possibly because someone attached us
 		 * while we were stopped), check for a signal from the debugger.
 		 */
-		if ((p->p_slflag & PSL_TRACED) != 0 && p->p_xstat != 0) {
-			if ((sigprop[p->p_xstat] & SA_TOLWP) != 0)
-				ss = &l->l_sigpend.sp_set;
-			else
-				ss = &p->p_sigpend.sp_set;
-			sigaddset(ss, p->p_xstat);
+		if ((p->p_slflag & PSL_TRACED) != 0 && p->p_xstat != 0)
 			signotify(l);
-		}
 		p->p_nrlwps++;
 		break;
 	case LSSUSPENDED:

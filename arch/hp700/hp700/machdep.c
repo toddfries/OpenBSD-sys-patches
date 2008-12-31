@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.50 2008/11/12 12:36:00 ad Exp $	*/
+/*	$NetBSD: machdep.c,v 1.55 2008/12/16 22:35:23 christos Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2002 The NetBSD Foundation, Inc.
@@ -63,7 +63,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.50 2008/11/12 12:36:00 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.55 2008/12/16 22:35:23 christos Exp $");
 
 #include "opt_cputype.h"
 #include "opt_ddb.h"
@@ -92,6 +92,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.50 2008/11/12 12:36:00 ad Exp $");
 #include <sys/sysctl.h>
 #include <sys/core.h>
 #include <sys/kcore.h>
+#include <sys/module.h>
 #include <sys/extent.h>
 #include <sys/ksyms.h>
 #include <sys/mount.h>
@@ -817,12 +818,12 @@ do {									\
 
 #if NKSYMS || defined(DDB) || defined(MODULAR)
 	if ((bi_sym = lookup_bootinfo(BTINFO_SYMTAB)) != NULL)
-                ksyms_init(bi_sym->nsym, (int *)bi_sym->ssym,
+                ksyms_addsyms_elf(bi_sym->nsym, (int *)bi_sym->ssym,
                     (int *)bi_sym->esym);
         else {
 		extern int end;
 
-		ksyms_init(esym - (int)&end, &end, (int*)esym);
+		ksyms_addsyms_elf(esym - (int)&end, &end, (int*)esym);
 	}
 #endif
 
@@ -1441,8 +1442,8 @@ hppa_machine_check(int check_type)
 	int error;
 #define	PIM_WORD(name, word, bits)			\
 do {							\
-	bitmask_snprintf(word, bits, bitmask_buffer,	\
-		sizeof(bitmask_buffer));		\
+	snprintb(bitmask_buffer, sizeof(bitmask_buffer),\
+	    bits, word);				\
 	printf("%s %s", name, bitmask_buffer);		\
 } while (/* CONSTCOND */ 0)
 
@@ -1632,7 +1633,7 @@ dumpsys(void)
 			/* Print out how many MBs we are to go. */
 			n = bytes - i;
 			if (n && (n % (1024*1024)) == 0)
-				printf("%d ", n / (1024 * 1024));
+				printf_nolog("%d ", n / (1024 * 1024));
 
 			/* Limit size for next transfer. */
 
@@ -1808,3 +1809,14 @@ consinit(void)
 		cninit();
 	}
 }
+
+#ifdef MODULAR
+/*
+ * Push any modules loaded by the boot loader.
+ */
+void
+module_init_md(void)
+{
+}
+#endif /* MODULAR */
+

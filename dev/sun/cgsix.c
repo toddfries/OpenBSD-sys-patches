@@ -1,4 +1,4 @@
-/*	$NetBSD: cgsix.c,v 1.38 2008/06/11 21:25:31 drochner Exp $ */
+/*	$NetBSD: cgsix.c,v 1.42 2008/12/29 14:42:15 jdc Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -78,7 +78,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cgsix.c,v 1.38 2008/06/11 21:25:31 drochner Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cgsix.c,v 1.42 2008/12/29 14:42:15 jdc Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -116,8 +116,9 @@ __KERNEL_RCSID(0, "$NetBSD: cgsix.c,v 1.38 2008/06/11 21:25:31 drochner Exp $");
 
 #include <dev/sun/cgsixreg.h>
 #include <dev/sun/cgsixvar.h>
+#include "wsdisplay.h"
 
-static void	cg6_unblank(struct device *);
+static void	cg6_unblank(device_t);
 static void	cg6_blank(struct cgsix_softc *, int);
 
 extern struct cfdriver cgsix_cd;
@@ -547,7 +548,6 @@ cg6attach(struct cgsix_softc *sc, const char *name, int isconsole)
 	struct rasops_info *ri = &cg6_console_screen.scr_ri;
 	unsigned long defattr;
 #endif
-	volatile struct cg6_fbc *fbc = sc->sc_fbc;
 	
 	fb->fb_driver = &cg6_fbdriver;
 
@@ -603,12 +603,12 @@ cg6attach(struct cgsix_softc *sc, const char *name, int isconsole)
 	sc->sc_stride = fb->fb_type.fb_width;
 	sc->sc_height = fb->fb_type.fb_height;
 
-	printf("%s: framebuffer size: %d MB\n", device_xname(&sc->sc_dev), 
+	printf("%s: framebuffer size: %d MB\n", device_xname(sc->sc_dev), 
 	    sc->sc_ramsize >> 20);
-	printf("%s: FBC: %08x\n", device_xname(&sc->sc_dev), fbc->fbc_mode);
 
 #if NWSDISPLAY
 	/* setup rasops and so on for wsdisplay */
+	memcpy(sc->sc_default_cmap, rasops_cmap, 768);
 	wsfont_init();
 	cg6_ras_init(sc);
 	sc->sc_mode = WSDISPLAYIO_MODE_EMUL;
@@ -658,7 +658,7 @@ cg6attach(struct cgsix_softc *sc, const char *name, int isconsole)
 	aa.console = isconsole;
 	aa.accessops = &cgsix_accessops;
 	aa.accesscookie = &sc->vd;
-	config_found(&sc->sc_dev, &aa, wsemuldisplaydevprint);
+	config_found(sc->sc_dev, &aa, wsemuldisplaydevprint);
 #else
 	bt_initcmap(&sc->sc_cmap, 256);	
 	cg6_loadcmap(sc, 0, 256);
@@ -680,7 +680,8 @@ cgsixopen(dev_t dev, int flags, int mode, struct lwp *l)
 int
 cgsixclose(dev_t dev, int flags, int mode, struct lwp *l)
 {
-	struct cgsix_softc *sc = device_lookup_private(&cgsix_cd, minor(dev));
+	device_t dv = device_lookup(&cgsix_cd, minor(dev));
+	struct cgsix_softc *sc = device_private(dv);
 
 	cg6_reset(sc);
 
@@ -692,7 +693,6 @@ cgsixclose(dev_t dev, int flags, int mode, struct lwp *l)
 	
 	cg6_loadcmap(sc, 0, 256);
 #endif
-
 	return 0;
 }
 
@@ -1013,7 +1013,7 @@ cg6_blank(struct cgsix_softc *sc, int flag)
  * is running
  */
 static void
-cg6_unblank(struct device *dev)
+cg6_unblank(device_t dev)
 {
 	struct cgsix_softc *sc = device_private(dev);
 
@@ -1107,14 +1107,14 @@ static void
 cg6_setup_palette(struct cgsix_softc *sc)
 {
 	int i, j;
-	
+
 	j = 0;
 	for (i = 0; i < 256; i++) {
-		sc->sc_cmap.cm_map[i][0] = rasops_cmap[j];
+		sc->sc_cmap.cm_map[i][0] = sc->sc_default_cmap[j];
 		j++;
-		sc->sc_cmap.cm_map[i][1] = rasops_cmap[j];
+		sc->sc_cmap.cm_map[i][1] = sc->sc_default_cmap[j];
 		j++;
-		sc->sc_cmap.cm_map[i][2] = rasops_cmap[j];
+		sc->sc_cmap.cm_map[i][2] = sc->sc_default_cmap[j];
 		j++;
 	}
 	cg6_loadcmap(sc, 0, 256);
@@ -1256,6 +1256,9 @@ cgsix_init_screen(void *cookie, struct vcons_screen *scr,
 	ri->ri_height = sc->sc_height;
 	ri->ri_stride = sc->sc_stride;
 	ri->ri_flg = RI_CENTER;
+	/* Use software for initial screen clear on old revisions */
+	if (sc->sc_fhcrev < 2)
+		ri->ri_flg |= RI_CLEAR;
 
 	ri->ri_bits = sc->sc_fb.fb_pixels;
 	

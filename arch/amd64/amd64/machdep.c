@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.112 2008/11/19 18:35:58 ad Exp $	*/
+/*	$NetBSD: machdep.c,v 1.115 2008/12/18 11:45:40 cegger Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997, 1998, 2000, 2006, 2007, 2008
@@ -112,7 +112,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.112 2008/11/19 18:35:58 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.115 2008/12/18 11:45:40 cegger Exp $");
 
 /* #define XENDEBUG_LOW  */
 
@@ -137,7 +137,6 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.112 2008/11/19 18:35:58 ad Exp $");
 #include <sys/exec.h>
 #include <sys/reboot.h>
 #include <sys/conf.h>
-#include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/msgbuf.h>
 #include <sys/mount.h>
@@ -328,7 +327,7 @@ cpu_startup(void)
 				       msgbuf_p_seg[y].paddr + x * PAGE_SIZE,
 				       VM_PROT_READ | UVM_PROT_WRITE);
 	}
-			  
+
 	pmap_update(pmap_kernel());
 
 	initmsgbuf((void *)msgbuf_vaddr, round_page(sz));
@@ -1220,15 +1219,15 @@ init_x86_64_ksyms(void)
 	if (symtab) {
 		tssym = (vaddr_t)symtab->ssym + KERNBASE;
 		tesym = (vaddr_t)symtab->esym + KERNBASE;
-		ksyms_init(symtab->nsym, (void *)tssym, (void *)tesym);
+		ksyms_addsyms_elf(symtab->nsym, (void *)tssym, (void *)tesym);
 	} else
-		ksyms_init(*(long *)(void *)&end,
+		ksyms_addsyms_elf(*(long *)(void *)&end,
 		    ((long *)(void *)&end) + 1, esym);
 #else  /* XEN */
 	esym = xen_start_info.mod_start ?
 	    (void *)xen_start_info.mod_start :
 	    (void *)xen_start_info.mfn_list;
-	ksyms_init(*(int *)(void *)&end,
+	ksyms_addsyms_elf(*(int *)(void *)&end,
 	    ((int *)(void *)&end) + 1, esym);
 #endif /* XEN */
 #endif
@@ -1326,7 +1325,7 @@ init_x86_64(paddr_t first_avail)
 	 */
 	bim = lookup_bootinfo(BTINFO_MEMMAP);
 	if (bim != NULL && bim->num > 0)
-		initx86_parse_memmap(bim);
+		initx86_parse_memmap(bim, iomem_ex);
 
 #endif	/* ! REALBASEMEM && ! REALEXTMEM */
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: specfs.c,v 1.1 2008/11/19 14:10:49 pooka Exp $	*/
+/*	$NetBSD: specfs.c,v 1.3 2008/12/29 17:41:19 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -27,6 +27,9 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: specfs.c,v 1.3 2008/12/29 17:41:19 pooka Exp $");
+
 #include <sys/param.h>
 #include <sys/buf.h>
 #include <sys/vnode.h>
@@ -52,8 +55,6 @@ static int rump_specbmap(void *);
 static int rump_specputpages(void *);
 static int rump_specstrategy(void *);
 static int rump_specsimpleul(void *);
-
-kmutex_t specfs_lock;
 
 int (**spec_vnodeop_p)(void *);
 const struct vnodeopv_entry_desc rumpspec_vnodeop_entries[] = {

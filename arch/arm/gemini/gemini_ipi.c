@@ -3,10 +3,11 @@
 # error IPI needs GEMINI_MASTER or GEMINI_SLAVE
 #endif
 #include "locators.h"
+#include "geminiipm.h"
 
 #include <sys/cdefs.h>
 
-__KERNEL_RCSID(0, "$NetBSD: gemini_ipi.c,v 1.1 2008/11/20 08:02:48 cliff Exp $");
+__KERNEL_RCSID(0, "$NetBSD: gemini_ipi.c,v 1.4 2008/12/06 05:22:39 cliff Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -86,6 +87,10 @@ gemini_ipi_attach(struct device *parent, struct device *self, void *aux)
 
 	aprint_normal("\n");
 	aprint_naive("\n");
+
+#if NGEMINIIPM > 0
+	config_found(self, __UNCONST("geminiipm"), NULL);
+#endif
 }
 
 static inline int

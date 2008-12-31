@@ -1,4 +1,4 @@
-/*	$NetBSD: malloc.h,v 1.99 2007/11/11 23:22:25 matt Exp $	*/
+/*	$NetBSD: malloc.h,v 1.102 2008/12/21 17:49:56 cegger Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993
@@ -41,6 +41,8 @@
 #endif
 
 
+#ifdef _KERNEL
+
 /*
  * flags to malloc
  */
@@ -49,8 +51,6 @@
 #define	M_ZERO		0x0002	/* zero the allocation */
 #define	M_CANFAIL	0x0004	/* can fail if requested memory can't ever
 				 * be allocated */
-#ifdef _KERNEL
-
 #include <sys/mallocvar.h>
 /*
  * The following are standard, built-in malloc types that are
@@ -90,10 +90,6 @@ struct kmembuckets {
 };
 
 #ifdef _KERNEL
-#define	MALLOC(space, cast, size, type, flags) \
-	(space) = (cast)malloc((u_long)(size), (type), (flags))
-#define	FREE(addr, type) free((void *)(addr), (type))
-
 #ifdef MALLOCLOG
 void	*_malloc(unsigned long, struct malloc_type *, int, const char *, long);
 void	_free(void *, struct malloc_type *, const char *, long);

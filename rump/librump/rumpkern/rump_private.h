@@ -1,4 +1,4 @@
-/*	$NetBSD: rump_private.h,v 1.15 2008/11/19 14:10:49 pooka Exp $	*/
+/*	$NetBSD: rump_private.h,v 1.20 2008/12/29 22:16:15 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -43,6 +43,7 @@
 #include <uvm/uvm_page.h>
 
 #include <rump/rump.h>
+#include <rump/rumpuser.h>
 
 #if 0
 #define DPRINTF(x) printf x
@@ -54,7 +55,7 @@ struct lwp;
 extern kauth_cred_t rump_cred;
 extern struct vmspace rump_vmspace;
 
-extern kmutex_t rump_giantlock;
+extern struct rumpuser_mtx *rump_giantlock;
 
 #define UIO_VMSPACE_SYS (&rump_vmspace)
 
@@ -74,16 +75,12 @@ extern int rump_threads;
 
 void abort(void) __dead;
 
-struct ubc_window;
-int	rump_ubc_magic_uiomove(void *, size_t, struct uio *, int *,
-			       struct ubc_window *);
-
 void		rumpvm_init(void);
 void		rump_sleepers_init(void);
 struct vm_page	*rumpvm_makepage(struct uvm_object *, voff_t);
 
 void		rumpvm_enterva(vaddr_t addr, struct vm_page *);
-void		rumpvm_flushva(void);
+void		rumpvm_flushva(struct uvm_object *);
 
 lwpid_t		rump_nextlid(void);
 
@@ -93,5 +90,9 @@ typedef void	(*rump_proc_vfs_init_fn)(struct proc *);
 typedef void	(*rump_proc_vfs_release_fn)(struct proc *);
 rump_proc_vfs_init_fn rump_proc_vfs_init;
 rump_proc_vfs_release_fn rump_proc_vfs_release;
+
+extern struct cpu_info rump_cpu;
+
+#define RUMPBLK	254
 
 #endif /* _SYS_RUMP_PRIVATE_H_ */

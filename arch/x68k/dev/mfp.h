@@ -1,4 +1,4 @@
-/*	$NetBSD: mfp.h,v 1.5 2005/12/11 12:19:37 christos Exp $	*/
+/*	$NetBSD: mfp.h,v 1.7 2008/12/18 05:56:42 isaki Exp $	*/
 
 /*
  *
@@ -130,7 +130,7 @@ struct mfp_softc {
 
 /* XXX */
 #include <arch/x68k/dev/intiovar.h>
-#define mfp_base	INTIO_ADDR(MFP_ADDR)
+#define mfp_base	((volatile uint8_t *)IIOV(MFP_ADDR))
 #define mfp_set_aer(a) \
 	mfp_base[MFP_AER] = ((u_int8_t) (a))
 #define mfp_set_ddr(a) \
@@ -205,6 +205,8 @@ struct mfp_softc {
 
 #define mfp_bit_set_gpip(bits) mfp_bit_set(MFP_GPIP, (bits))
 #define mfp_bit_clear_gpip(bits) mfp_bit_clear(MFP_GPIP, (bits))
+#define mfp_bit_set_aer(bits) mfp_bit_set(MFP_AER, (bits))
+#define mfp_bit_clear_aer(bits) mfp_bit_clear(MFP_AER, (bits))
 #define mfp_bit_set_iera(bits) mfp_bit_set(MFP_IERA, (bits))
 #define mfp_bit_clear_iera(bits) mfp_bit_clear(MFP_IERA, (bits))
 #define mfp_bit_set_ierb(bits) mfp_bit_set(MFP_IERB, (bits))

@@ -1,4 +1,4 @@
-/*	$NetBSD: mem.c,v 1.11 2008/11/15 11:06:49 ad Exp $	*/
+/*	$NetBSD: mem.c,v 1.13 2008/12/19 18:49:37 cegger Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -73,7 +73,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.11 2008/11/15 11:06:49 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mem.c,v 1.13 2008/12/19 18:49:37 cegger Exp $");
+
+#ifdef _KERNEL_OPT
+#include "opt_compat_netbsd.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -162,16 +166,17 @@ mmrw(dev, uio, flags)
 				uio->uio_resid = 0;
 			return (0);
 
+#ifdef COMPAT_16
 		case _DEV_ZERO_oARM:
+#endif
 		case DEV_ZERO:
 			if (uio->uio_rw == UIO_WRITE) {
 				uio->uio_resid = 0;
 				return (0);
 			}
 			if (zeropage == NULL) {
-				zeropage = (void *)
-				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK);
-				bzero(zeropage, PAGE_SIZE);
+				zeropage = 
+				    malloc(PAGE_SIZE, M_TEMP, M_WAITOK|M_ZERO);
 			}
 			c = min(iov->iov_len, PAGE_SIZE);
 			error = uiomove(zeropage, c, uio);

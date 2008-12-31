@@ -1,4 +1,4 @@
-/*	$NetBSD: in.c,v 1.128 2008/11/07 00:20:18 dyoung Exp $	*/
+/*	$NetBSD: in.c,v 1.130 2008/12/21 19:07:35 roy Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -91,7 +91,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: in.c,v 1.128 2008/11/07 00:20:18 dyoung Exp $");
+__KERNEL_RCSID(0, "$NetBSD: in.c,v 1.130 2008/12/21 19:07:35 roy Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet_conf.h"
@@ -393,11 +393,9 @@ in_control(struct socket *so, u_long cmd, void *data, struct ifnet *ifp,
 			return (EPERM);
 
 		if (ia == 0) {
-			MALLOC(ia, struct in_ifaddr *, sizeof(*ia),
-			       M_IFADDR, M_WAITOK);
+			ia = malloc(sizeof(*ia), M_IFADDR, M_WAITOK|M_ZERO);
 			if (ia == 0)
 				return (ENOBUFS);
-			bzero((void *)ia, sizeof *ia);
 			TAILQ_INSERT_TAIL(&in_ifaddrhead, ia, ia_list);
 			IFAREF(&ia->ia_ifa);
 			ifa_insert(ifp, &ia->ia_ifa);
@@ -1006,6 +1004,12 @@ in_addprefix(struct in_ifaddr *target, int flags)
 	error = rtinit(&target->ia_ifa, RTM_ADD, flags);
 	if (error == 0)
 		target->ia_flags |= IFA_ROUTE;
+	else if (error == EEXIST) {
+		/* 
+		 * the fact the route already exists is not an error.
+		 */ 
+		error = 0;
+	}
 	return error;
 }
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap_bootstrap.c,v 1.19 2007/10/17 19:55:54 garbled Exp $	*/
+/*	$NetBSD: pmap_bootstrap.c,v 1.21 2008/12/28 05:15:59 tsutsui Exp $	*/
 
 /* 
  * Copyright (c) 1991, 1993
@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pmap_bootstrap.c,v 1.19 2007/10/17 19:55:54 garbled Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmap_bootstrap.c,v 1.21 2008/12/28 05:15:59 tsutsui Exp $");
 
 #include <sys/param.h>
 
@@ -48,7 +48,8 @@ __KERNEL_RCSID(0, "$NetBSD: pmap_bootstrap.c,v 1.19 2007/10/17 19:55:54 garbled 
 
 #include <uvm/uvm_extern.h>
 
-#define RELOC(v, t)	*((t*)((u_int)&(v) + firstpa))
+#define RELOC(v, t)	*((t*)((uintptr_t)&(v) + firstpa))
+#define RELOCPTR(v, t)	((t)((uintptr_t)RELOC((v), t) + firstpa))
 
 extern char *etext;
 extern int Sysptsize;
@@ -168,14 +169,8 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 	 * each mapping 256kb.  Note that there may be additional "segment
 	 * table" pages depending on how large MAXKL2SIZE is.
 	 *
-	 * Portions of the last segment of KVA space (0xFFF00000 -
-	 * 0xFFFFFFFF) are mapped for a couple of purposes.  0xFFF00000
-	 * for UPAGES is used for mapping the current process u-area
-	 * (u + kernel stack).  The very last page (0xFFFFF000) is mapped
-	 * to the last physical page of RAM to give us a region in which
-	 * PA == VA.  We use the first part of this page for enabling
-	 * and disabling mapping.  The last part of this page also contains
-	 * info left by the boot ROM.
+	 * Portions of the last segment of KVA space (0xFFC00000 -
+	 * 0xFFFFFFFF) are mapped for a the kernel page tables.
 	 *
 	 * XXX cramming two levels of mapping into the single "segment"
 	 * table on the 68040 is intended as a temporary hack to get things
@@ -443,7 +438,9 @@ pmap_bootstrap(paddr_t nextpa, paddr_t firstpa)
 	 * just initialize pointers.
 	 */
 	{
-		struct pmap *kpm = &RELOC(kernel_pmap_store, struct pmap);
+		struct pmap *kpm;
+
+		kpm = RELOCPTR(kernel_pmap_ptr, struct pmap *);
 
 		kpm->pm_stab = RELOC(Sysseg, st_entry_t *);
 		kpm->pm_ptab = RELOC(Sysmap, pt_entry_t *);

@@ -1,4 +1,4 @@
-/*	$NetBSD: rumpuser.h,v 1.2 2008/11/18 12:39:35 pooka Exp $	*/
+/*	$NetBSD: rumpuser.h,v 1.4 2008/12/17 20:16:28 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -84,7 +84,7 @@ int  rumpuser_thrinit(void);
 int  rumpuser_bioinit(rump_biodone_fn);
 void rumpuser_thrdestroy(void);
 
-int  rumpuser_thread_create(void *(*f)(void *), void *);
+int  rumpuser_thread_create(void *(*f)(void *), void *, const char *);
 void rumpuser_thread_exit(void);
 
 struct rumpuser_mtx;
@@ -154,5 +154,8 @@ int  rumpuser_net_socket(int, int, int, int *);
 int  rumpuser_net_sendmsg(int, const struct msghdr *, int, int *);
 int  rumpuser_net_recvmsg(int, struct msghdr *, int, int *);
 int  rumpuser_net_connect(int, const struct sockaddr *, int, int *);
+int  rumpuser_net_bind(int, const struct sockaddr *, int, int *);
+int  rumpuser_net_accept(int, struct sockaddr *, int *, int *);
+int  rumpuser_net_listen(int, int, int *);
 
 #endif /* _RUMP_RUMPUSER_H_ */

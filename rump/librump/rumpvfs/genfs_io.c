@@ -1,4 +1,4 @@
-/*	$NetBSD: genfs_io.c,v 1.2 2008/11/21 18:02:17 pooka Exp $	*/
+/*	$NetBSD: genfs_io.c,v 1.5 2008/12/18 00:24:13 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -27,6 +27,9 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: genfs_io.c,v 1.5 2008/12/18 00:24:13 pooka Exp $");
 
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -349,7 +352,7 @@ genfs_do_putpages(struct vnode *vp, off_t startoff, off_t endoff, int flags,
 		memcpy(curva, (void *)pg->uanon, PAGE_SIZE);
 		rumpvm_enterva((vaddr_t)curva, pg);
 
-		pg->flags |= PG_CLEAN;
+		pg->flags |= PG_CLEAN | PG_BUSY;
 	}
 	KASSERT(curoff > smallest);
 
@@ -415,7 +418,7 @@ genfs_do_putpages(struct vnode *vp, off_t startoff, off_t endoff, int flags,
 		if (!async)
 			putiobuf(bp);
 	}
-	rumpvm_flushva();
+	rumpvm_flushva(uobj);
 
 	mutex_enter(&uobj->vmobjlock);
 	goto restart;

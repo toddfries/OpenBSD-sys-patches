@@ -1,4 +1,4 @@
-/*	$NetBSD: linux32_time.c,v 1.23 2008/11/19 18:36:04 ad Exp $ */
+/*	$NetBSD: linux32_time.c,v 1.27 2008/12/29 22:21:49 njoly Exp $ */
 
 /*-
  * Copyright (c) 2006 Emmanuel Dreyfus, all rights reserved.
@@ -33,7 +33,7 @@
 
 #include <sys/cdefs.h>
 
-__KERNEL_RCSID(0, "$NetBSD: linux32_time.c,v 1.23 2008/11/19 18:36:04 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: linux32_time.c,v 1.27 2008/12/29 22:21:49 njoly Exp $");
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -132,7 +132,7 @@ int
 linux32_sys_time(struct lwp *l, const struct linux32_sys_time_args *uap, register_t *retval)
 {
 	/* {
-		syscallcarg(linux32_timep_t) t;
+		syscallarg(linux32_timep_t) t;
 	} */
         struct timeval atv;
         linux32_time_t tt;
@@ -151,12 +151,6 @@ linux32_sys_time(struct lwp *l, const struct linux32_sys_time_args *uap, registe
         return 0;
 }
 
-
-static inline linux32_clock_t
-timeval_to_clock_t(struct timeval *tv)
-{
-	return tv->tv_sec * hz + tv->tv_usec / (1000000 / hz);
-}
 
 #define	CONVTCK(r)	(r.tv_sec * hz + r.tv_usec / (1000000 / hz))
 
@@ -205,7 +199,7 @@ linux32_sys_stime(struct lwp *l, const struct linux32_sys_stime_args *uap, regis
 	linux32_time_t tt32;
 	int error;
 	
-	if ((error = copyin(&tt32, SCARG_P32(uap, t), sizeof tt32)) != 0)
+	if ((error = copyin(SCARG_P32(uap, t), &tt32, sizeof tt32)) != 0)
 		return error;
 
 	ts.tv_sec = (long)tt32;
@@ -357,4 +351,37 @@ linux32_sys_clock_getres(struct lwp *l,
 	return copyout(&lts, SCARG_P32(uap, tp), sizeof lts);
 
 	return 0;
+}
+
+int
+linux32_sys_clock_nanosleep(struct lwp *l, 
+    const struct linux32_sys_clock_nanosleep_args *uap, register_t *retval)
+{
+	/* {
+		syscallarg(clockid_t) which;
+		syscallarg(int) flags;
+		syscallarg(linux32_timespecp_t) rqtp;
+		syscallarg(linux32_timespecp_t) rmtp;
+	} */
+	struct linux32_timespec lrqts, lrmts;
+	struct timespec rqts, rmts;
+	int error, error1;
+
+	if (SCARG(uap, flags) != 0)
+		return EINVAL;          /* XXX deal with TIMER_ABSTIME */
+	if (SCARG(uap, which) != LINUX_CLOCK_REALTIME)
+		return EINVAL;
+
+	error = copyin(SCARG_P32(uap, rqtp), &lrqts, sizeof lrqts);
+	if (error != 0)
+		return error;
+	linux32_to_native_timespec(&rqts, &lrqts);
+
+	error = nanosleep1(l, &rqts, SCARG_P32(uap, rmtp) ? &rmts : 0);
+	if (SCARG_P32(uap, rmtp) == NULL || (error != 0 && error != EINTR))
+		return error;
+
+	native_to_linux32_timespec(&lrmts, &rmts);
+	error1 = copyout(&lrmts, SCARG_P32(uap, rmtp), sizeof lrmts);
+	return error1 ? error1 : error;
 }

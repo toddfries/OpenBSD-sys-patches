@@ -30,9 +30,9 @@
 /altq_red.c/1.28/Fri Nov 21 05:12:14 2008//
 /altq_rio.c/1.19/Fri Nov 21 05:12:14 2008//
 /altq_rmclass.c/1.21/Fri Nov 21 05:12:15 2008//
-/altq_subr.c/1.25/Fri Nov 21 05:12:15 2008//
-/altq_var.h/1.11/Fri Nov 21 05:12:15 2008//
 /altq_wfq.c/1.19/Fri Nov 21 05:12:15 2008//
 /altq_wfq.h/1.6/Fri Nov 21 05:12:15 2008//
 /if_altq.h/1.12/Fri Nov 21 05:12:15 2008//
+/altq_subr.c/1.27/Wed Dec 31 23:23:22 2008//
+/altq_var.h/1.12/Wed Dec 31 23:23:22 2008//
 D

@@ -1,4 +1,4 @@
-/*	$NetBSD: rumpuser_pth.c,v 1.19 2008/11/18 12:39:35 pooka Exp $	*/
+/*	$NetBSD: rumpuser_pth.c,v 1.21 2008/12/18 00:21:52 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -27,6 +27,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+
+#include <sys/cdefs.h>
+#if !defined(lint)
+__RCSID("$NetBSD: rumpuser_pth.c,v 1.21 2008/12/18 00:21:52 pooka Exp $");
+#endif /* !lint */
 
 #ifdef __linux__
 #define _XOPEN_SOURCE 500
@@ -143,11 +148,18 @@ rumpuser_thrdestroy()
 }
 
 int
-rumpuser_thread_create(void *(*f)(void *), void *arg)
+rumpuser_thread_create(void *(*f)(void *), void *arg, const char *thrname)
 {
 	pthread_t ptid;
+	int rv;
 
-	return pthread_create(&ptid, NULL, f, arg);
+	rv = pthread_create(&ptid, NULL, f, arg);
+#ifdef __NetBSD__
+	if (rv == 0 && thrname)
+		pthread_setname_np(ptid, thrname, NULL);
+#endif
+
+	return rv;
 }
 
 void

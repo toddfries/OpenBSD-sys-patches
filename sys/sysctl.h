@@ -1,4 +1,4 @@
-/*	$NetBSD: sysctl.h,v 1.178 2008/11/12 12:36:28 ad Exp $	*/
+/*	$NetBSD: sysctl.h,v 1.180 2008/12/29 15:35:02 pooka Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -1094,7 +1094,6 @@ extern struct ctldebug debug15, debug16, debug17, debug18, debug19;
 	__link_set_add_text(sysctl_funcs, name);		\
 	static void name(struct sysctllog **clog)
 #endif /* !SYSCTL_DEBUG_SETUP */
-typedef void (*sysctl_setup_func)(struct sysctllog **);
 
 #endif /* !_MODULE */
 
@@ -1178,6 +1177,7 @@ int	sysctl_kern_vnode(SYSCTLFN_PROTO);
 int	sysctl_net_inet_ip_ports(SYSCTLFN_PROTO);
 int	sysctl_consdev(SYSCTLFN_PROTO);
 int	sysctl_root_device(SYSCTLFN_PROTO);
+int	sysctl_vfs_generic_fstypes(SYSCTLFN_PROTO);
 
 /*
  * primitive helper stubs

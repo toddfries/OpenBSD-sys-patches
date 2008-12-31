@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.c,v 1.59 2008/11/06 19:29:46 cegger Exp $	*/
+/*	$NetBSD: cpu.c,v 1.61 2008/12/23 15:41:21 cegger Exp $	*/
 
 /*-
  * Copyright (c) 2000, 2006, 2007, 2008 The NetBSD Foundation, Inc.
@@ -62,7 +62,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.59 2008/11/06 19:29:46 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.61 2008/12/23 15:41:21 cegger Exp $");
 
 #include "opt_ddb.h"
 #include "opt_mpbios.h"		/* for MPDEBUG */
@@ -76,7 +76,7 @@ __KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.59 2008/11/06 19:29:46 cegger Exp $");
 #include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
+#include <sys/kmem.h>
 #include <sys/cpu.h>
 #include <sys/atomic.h>
 #include <sys/reboot.h>
@@ -289,15 +289,14 @@ cpu_attach(device_t parent, device_t self, void *aux)
 			return;
 		}
 		aprint_naive(": Application Processor\n");
-		ptr = (uintptr_t)malloc(sizeof(*ci) + CACHE_LINE_SIZE - 1,
-		    M_DEVBUF, M_WAITOK);
+		ptr = (uintptr_t)kmem_alloc(sizeof(*ci) + CACHE_LINE_SIZE - 1,
+		    KM_SLEEP);
 		ci = (struct cpu_info *)((ptr + CACHE_LINE_SIZE - 1) &
 		    ~(CACHE_LINE_SIZE - 1));
 		memset(ci, 0, sizeof(*ci));
 		ci->ci_curldt = -1;
 #ifdef TRAPLOG
-		ci->ci_tlog_base = malloc(sizeof(struct tlog),
-		    M_DEVBUF, M_WAITOK);
+		ci->ci_tlog_base = kmem_zalloc(sizeof(struct tlog), KM_SLEEP);
 #endif
 	} else {
 		aprint_naive(": %s Processor\n",
@@ -513,7 +512,7 @@ cpu_boot_secondary_processors(void)
 	u_long i;
 
 	/* Now that we know the number of CPUs, patch the text segment. */
-	x86_patch();
+	x86_patch(false);
 
 	for (i=0; i < maxcpus; i++) {
 		ci = cpu_lookup(i);

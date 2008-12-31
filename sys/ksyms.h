@@ -1,4 +1,4 @@
-/*	$NetBSD: ksyms.h,v 1.20 2008/11/16 15:28:15 ad Exp $	*/
+/*	$NetBSD: ksyms.h,v 1.22 2008/12/05 21:38:10 ad Exp $	*/
 
 /*
  * Copyright (c) 2001, 2003 Anders Magnusson (ragge@ludd.luth.se).
@@ -56,9 +56,10 @@ struct ksyms_symtab {
 #define	SYMTAB		1
 #define	STRTAB		2
 #define	SHSTRTAB	3
-#define NSECHDR		4
+#define	SHBSS		4
+#define NSECHDR		5
 
-#define	NPRGHDR		2
+#define	NPRGHDR		1
 #define	SHSTRSIZ	32
 
 struct ksyms_hdr {
@@ -105,8 +106,9 @@ int ksyms_getval(const char *, const char *, unsigned long *, int);
 int ksyms_getval_unlocked(const char *, const char *, unsigned long *, int);
 int ksyms_addsymtab(const char *, void *, vsize_t, char *, vsize_t);
 int ksyms_delsymtab(const char *);
-void ksyms_init(int, void *, void *);
-void ksyms_init_explicit(void *, void *, size_t, void *, size_t);
+void ksyms_init(void);
+void ksyms_addsyms_elf(int, void *, void *);
+void ksyms_addsyms_explicit(void *, void *, size_t, void *, size_t);
 int ksyms_sift(char *, char *, int);
 void ksyms_modload(const char *, void *, vsize_t, char *, vsize_t);
 void ksyms_modunload(const char *);

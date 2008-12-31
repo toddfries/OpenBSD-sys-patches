@@ -1,4 +1,4 @@
-/*	$NetBSD: ffs_inode.c,v 1.99 2008/08/30 08:25:53 hannken Exp $	*/
+/*	$NetBSD: ffs_inode.c,v 1.101 2008/12/23 11:32:08 cegger Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -61,7 +61,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ffs_inode.c,v 1.99 2008/08/30 08:25:53 hannken Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ffs_inode.c,v 1.101 2008/12/23 11:32:08 cegger Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_ffs.h"
@@ -118,8 +118,12 @@ ffs_update(struct vnode *vp, const struct timespec *acc,
 	void *cp;
 	int waitfor, flags;
 
+	KASSERT(vp != NULL);
+	KASSERT(vp->v_mount != NULL);
+
 	if (vp->v_mount->mnt_flag & MNT_RDONLY)
 		return (0);
+	KASSERT(VTOI(vp) != NULL);
 	ip = VTOI(vp);
 	FFS_ITIMES(ip, acc, mod, NULL);
 	if (updflags & UPDATE_CLOSE)
@@ -707,7 +711,7 @@ ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn, daddr_t lastbn,
 	}
 
 	if (copy != NULL) {
-		FREE(copy, M_TEMP);
+		free(copy, M_TEMP);
 	} else {
 		brelse(bp, BC_INVAL);
 	}

@@ -1,4 +1,4 @@
-/*	$NetBSD: systm.h,v 1.230 2008/11/12 14:29:31 ad Exp $	*/
+/*	$NetBSD: systm.h,v 1.232 2008/12/19 17:11:57 pgoyette Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1988, 1991, 1993
@@ -227,8 +227,6 @@ void	uprintf_locked(const char *, ...)
 void	ttyprintf(struct tty *, const char *, ...)
     __attribute__((__format__(__printf__,2,3)));
 
-char	*bitmask_snprintf(u_quad_t, const char *, char *, size_t);
-
 int	format_bytes(char *, size_t, uint64_t);
 
 void	tablefull(const char *, const char *);
@@ -333,7 +331,10 @@ void	dopowerhooks(int);
  * these to be executed just before (*mountroot)() if the passed device is
  * selected as the root device.
  */
-extern int (*mountroot)(void);
+
+#define	ROOT_FSTYPE_ANY	"?"
+
+extern const char *rootfstype;
 void	*mountroothook_establish(void (*)(struct device *), struct device *);
 void	mountroothook_disestablish(void *);
 void	mountroothook_destroy(void);

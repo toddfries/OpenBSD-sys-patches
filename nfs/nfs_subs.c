@@ -1,4 +1,4 @@
-/*	$NetBSD: nfs_subs.c,v 1.210 2008/11/19 18:36:09 ad Exp $	*/
+/*	$NetBSD: nfs_subs.c,v 1.212 2008/12/17 20:51:38 cegger Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -70,7 +70,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nfs_subs.c,v 1.210 2008/11/19 18:36:09 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nfs_subs.c,v 1.212 2008/12/17 20:51:38 cegger Exp $");
 
 #ifdef _KERNEL_OPT
 #include "fs_nfs.h"
@@ -139,8 +139,6 @@ const enum vtype nv3tov_type[8] =
 	{ VNON, VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO };
 int nfs_ticks;
 int nfs_commitsize;
-
-MALLOC_DEFINE(M_NFSDIROFF, "NFS diroff", "NFS directory cookies");
 
 /* NFS client/server stats. */
 struct nfsstats nfsstats;
@@ -1985,7 +1983,7 @@ nfs_cookieheuristic(vp, flagp, l, cred)
 	off_t *cookies = NULL, *cop;
 	int error, eof, nc, len;
 
-	MALLOC(tbuf, void *, NFS_DIRFRAGSIZ, M_TEMP, M_WAITOK);
+	tbuf = malloc(NFS_DIRFRAGSIZ, M_TEMP, M_WAITOK);
 
 	aiov.iov_base = tbuf;
 	aiov.iov_len = NFS_DIRFRAGSIZ;
@@ -2000,7 +1998,7 @@ nfs_cookieheuristic(vp, flagp, l, cred)
 
 	len = NFS_DIRFRAGSIZ - auio.uio_resid;
 	if (error || len == 0) {
-		FREE(tbuf, M_TEMP);
+		free(tbuf, M_TEMP);
 		if (cookies)
 			free(cookies, M_TEMP);
 		return;
@@ -2025,7 +2023,7 @@ nfs_cookieheuristic(vp, flagp, l, cred)
 		cp += dp->d_reclen;
 	}
 
-	FREE(tbuf, M_TEMP);
+	free(tbuf, M_TEMP);
 	free(cookies, M_TEMP);
 }
 #endif /* NFS */

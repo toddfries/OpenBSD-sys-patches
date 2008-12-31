@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_exec.c,v 1.282 2008/11/19 18:36:06 ad Exp $	*/
+/*	$NetBSD: kern_exec.c,v 1.284 2008/12/17 20:51:36 cegger Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -59,7 +59,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_exec.c,v 1.282 2008/11/19 18:36:06 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_exec.c,v 1.284 2008/12/17 20:51:36 cegger Exp $");
 
 #include "opt_ktrace.h"
 #include "opt_syscall_debug.h"
@@ -1197,7 +1197,7 @@ execve1(struct lwp *l, const char *path, char * const *args,
 	uvm_deallocate(&vm->vm_map, VM_MIN_ADDRESS,
 		VM_MAXUSER_ADDRESS - VM_MIN_ADDRESS);
 	if (pack.ep_emul_arg)
-		FREE(pack.ep_emul_arg, M_TEMP);
+		free(pack.ep_emul_arg, M_TEMP);
 	PNBUF_PUT(nid.ni_cnd.cn_pnbuf);
 	pool_put(&exec_pool, argp);
 	kmem_free(pack.ep_hdr, pack.ep_hdrlen);
@@ -1270,7 +1270,9 @@ exec_add(struct execsw *esp, int count)
 	struct exec_entry	*it;
 	int			i;
 
-	KASSERT(count > 0);
+	if (count == 0) {
+		return 0;
+	}
 
 	/* Check for duplicates. */
 	rw_enter(&exec_lock, RW_WRITER);
@@ -1311,7 +1313,9 @@ exec_remove(struct execsw *esp, int count)
 	const struct proclist_desc *pd;
 	proc_t			*p;
 
-	KASSERT(count > 0);
+	if (count == 0) {
+		return 0;
+	}
 
 	/* Abort if any are busy. */
 	rw_enter(&exec_lock, RW_WRITER);

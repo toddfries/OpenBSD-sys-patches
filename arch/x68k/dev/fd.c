@@ -1,4 +1,4 @@
-/*	$NetBSD: fd.c,v 1.85 2008/06/29 09:44:11 isaki Exp $	*/
+/*	$NetBSD: fd.c,v 1.88 2008/12/18 03:18:27 isaki Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -64,7 +64,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: fd.c,v 1.85 2008/06/29 09:44:11 isaki Exp $");
+__KERNEL_RCSID(0, "$NetBSD: fd.c,v 1.88 2008/12/18 03:18:27 isaki Exp $");
 
 #include "rnd.h"
 #include "opt_ddb.h"
@@ -699,7 +699,7 @@ void
 fdstart(struct fd_softc *fd)
 {
 	struct fdc_softc *fdc = device_private(device_parent(fd->sc_dev));
-	int active = fdc->sc_drives.tqh_first != 0;
+	int active = !TAILQ_EMPTY(&fdc->sc_drives);
 
 	/* Link into controller queue. */
 	fd->sc_active = 1;
@@ -722,7 +722,7 @@ fdfinish(struct fd_softc *fd, struct buf *bp)
 	 * startup delay whenever we switch.
 	 */
 	(void)BUFQ_GET(fd->sc_q);
-	if (fd->sc_drivechain.tqe_next && ++fd->sc_ops >= 8) {
+	if (TAILQ_NEXT(fd, sc_drivechain) && ++fd->sc_ops >= 8) {
 		fd->sc_ops = 0;
 		TAILQ_REMOVE(&fdc->sc_drives, fd, sc_drivechain);
 		if (BUFQ_PEEK(fd->sc_q) != NULL) {
@@ -801,7 +801,7 @@ fd_motor_on(void *arg)
 
 	s = splbio();
 	fd->sc_flags &= ~FD_MOTOR_WAIT;
-	if ((fdc->sc_drives.tqh_first == fd) && (fdc->sc_state == MOTORWAIT))
+	if ((TAILQ_FIRST(&fdc->sc_drives) == fd) && (fdc->sc_state == MOTORWAIT))
 		(void) fdcintr(fdc);
 	splx(s);
 }
@@ -936,11 +936,42 @@ fdcstart(struct fdc_softc *fdc)
 	(void) fdcintr(fdc);
 }
 
+
+static void
+fdcpstatus(int n, struct fdc_softc *fdc)
+{
+	char bits[64];
+
+	switch (n) {
+	case 0:
+		printf("\n");
+		break;
+	case 2:
+		snprintb(bits, sizeof(bits), NE7_ST0BITS, fdc->sc_status[0]);
+		printf(" (st0 %s cyl %d)\n", bits, fdc->sc_status[1]);
+		break;
+	case 7:
+		snprintb(bits, sizeof(bits), NE7_ST0BITS, fdc->sc_status[0]);
+		printf(" (st0 %s", bits);
+		snprintb(bits, sizeof(bits), NE7_ST1BITS, fdc->sc_status[1]);
+		printf(" st1 %s", bits);
+		snprintb(bits, sizeof(bits), NE7_ST2BITS, fdc->sc_status[2]);
+		printf(" st2 %s", bits);
+		printf(" cyl %d head %d sec %d)\n",
+		    fdc->sc_status[3], fdc->sc_status[4], fdc->sc_status[5]);
+		break;
+#ifdef DIAGNOSTIC
+	default:
+		printf("\nfdcstatus: weird size");
+		break;
+#endif
+	}
+}
+
 void
 fdcstatus(device_t dv, int n, const char *s)
 {
 	struct fdc_softc *fdc = device_private(device_parent(dv));
-	char bits[64];
 
 	if (n == 0) {
 		out_fdc(fdc->sc_iot, fdc->sc_ioh, NE7CMD_SENSEI);
@@ -949,39 +980,14 @@ fdcstatus(device_t dv, int n, const char *s)
 	}
 
 	printf("%s: %s: state %d", device_xname(dv), s, fdc->sc_state);
-
-	switch (n) {
-	case 0:
-		printf("\n");
-		break;
-	case 2:
-		printf(" (st0 %s cyl %d)\n",
-		    bitmask_snprintf(fdc->sc_status[0], NE7_ST0BITS,
-		    bits, sizeof(bits)), fdc->sc_status[1]);
-		break;
-	case 7:
-		printf(" (st0 %s", bitmask_snprintf(fdc->sc_status[0],
-		    NE7_ST0BITS, bits, sizeof(bits)));
-		printf(" st1 %s", bitmask_snprintf(fdc->sc_status[1],
-		    NE7_ST1BITS, bits, sizeof(bits)));
-		printf(" st2 %s", bitmask_snprintf(fdc->sc_status[2],
-		    NE7_ST2BITS, bits, sizeof(bits)));
-		printf(" cyl %d head %d sec %d)\n",
-		    fdc->sc_status[3], fdc->sc_status[4], fdc->sc_status[5]);
-		break;
-#ifdef DIAGNOSTIC
-	default:
-		printf(" fdcstatus: weird size: %d\n", n);
-		break;
-#endif
-	}
+	fdcpstatus(n, fdc);
 }
 
 void
 fdctimeout(void *arg)
 {
 	struct fdc_softc *fdc = arg;
-	struct fd_softc *fd = fdc->sc_drives.tqh_first;
+	struct fd_softc *fd = TAILQ_FIRST(&fdc->sc_drives);
 	int s;
 
 	s = splbio();
@@ -1025,7 +1031,7 @@ fdcintr(void *arg)
 	struct fd_type *type;
 
 loop:
-	fd = fdc->sc_drives.tqh_first;
+	fd = TAILQ_FIRST(&fdc->sc_drives);
 	if (fd == NULL) {
 		DPRINTF(("fdcintr: set DEVIDLE\n"));
 		if (fdc->sc_state == DEVIDLE) {
@@ -1454,10 +1460,9 @@ fdcretry(struct fdc_softc *fdc)
 {
 	struct fd_softc *fd;
 	struct buf *bp;
-	char bits[64];
 
 	DPRINTF(("fdcretry:\n"));
-	fd = fdc->sc_drives.tqh_first;
+	fd = TAILQ_FIRST(&fdc->sc_drives);
 	bp = BUFQ_PEEK(fd->sc_q);
 
 	switch (fdc->sc_errors) {
@@ -1479,19 +1484,7 @@ fdcretry(struct fdc_softc *fdc)
 	default:
 		diskerr(bp, "fd", "hard error", LOG_PRINTF,
 			fd->sc_skip, (struct disklabel *)NULL);
-		printf(" (st0 %s", bitmask_snprintf(fdc->sc_status[0],
-						    NE7_ST0BITS, bits,
-						    sizeof(bits)));
-		printf(" st1 %s", bitmask_snprintf(fdc->sc_status[1],
-						   NE7_ST1BITS, bits,
-						   sizeof(bits)));
-		printf(" st2 %s", bitmask_snprintf(fdc->sc_status[2],
-						   NE7_ST2BITS, bits,
-						   sizeof(bits)));
-		printf(" cyl %d head %d sec %d)\n",
-		       fdc->sc_status[3],
-		       fdc->sc_status[4],
-		       fdc->sc_status[5]);
+		fdcpstatus(7, fdc);
 
 		bp->b_error = EIO;
 		fdfinish(fd, bp);

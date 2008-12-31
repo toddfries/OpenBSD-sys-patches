@@ -1,4 +1,4 @@
-/*	$NetBSD: rump.c,v 1.76 2008/11/21 06:09:51 pooka Exp $	*/
+/*	$NetBSD: rump.c,v 1.79 2008/12/29 17:45:55 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -27,10 +27,14 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: rump.c,v 1.79 2008/12/29 17:45:55 pooka Exp $");
+
 #include <sys/param.h>
 #include <sys/atomic.h>
 #include <sys/buf.h>
 #include <sys/callout.h>
+#include <sys/conf.h>
 #include <sys/cpu.h>
 #include <sys/filedesc.h>
 #include <sys/iostat.h>
@@ -60,7 +64,7 @@ struct proclist allproc;
 char machine[] = "rump";
 static kauth_cred_t rump_susercred;
 
-kmutex_t rump_giantlock;
+struct rumpuser_mtx *rump_giantlock;
 
 sigset_t sigcantmask;
 
@@ -134,7 +138,7 @@ _rump_init(int rump_version)
 		rump_threads = *buf != '0';
 	}
 
-	rumpuser_mutex_recursive_init(&rump_giantlock.kmtx_mtx);
+	rumpuser_mutex_recursive_init(&rump_giantlock);
 
 	rumpvm_init();
 	rump_sleepers_init();
@@ -174,6 +178,7 @@ _rump_init(int rump_version)
 	module_init();
 	sysctl_init();
 	softint_init(&rump_cpu);
+	devsw_init();
 
 	/* these do nothing if not present */
 	rump_vfs_init();

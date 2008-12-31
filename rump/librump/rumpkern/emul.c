@@ -1,4 +1,4 @@
-/*	$NetBSD: emul.c,v 1.55 2008/11/17 08:43:41 pooka Exp $	*/
+/*	$NetBSD: emul.c,v 1.65 2008/12/30 00:36:38 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -27,6 +27,9 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/cdefs.h>
+__KERNEL_RCSID(0, "$NetBSD: emul.c,v 1.65 2008/12/30 00:36:38 pooka Exp $");
+
 #define malloc(a,b,c) __wrap_malloc(a,b,c)
 
 #include <sys/param.h>
@@ -50,6 +53,7 @@
 #include <sys/tprintf.h>
 #include <sys/timetc.h>
 
+#include <machine/bswap.h>
 #include <machine/stdarg.h>
 
 #include <rump/rumpuser.h>
@@ -72,6 +76,7 @@ const int schedppq = 1;
 int hardclock_ticks;
 bool mp_online = false;
 struct vm_map *mb_map;
+struct timeval boottime;
 
 char hostname[MAXHOSTNAMELEN];
 size_t hostnamelen;
@@ -90,6 +95,21 @@ const char *domainname;
 int domainnamelen;
 
 const struct filterops seltrue_filtops;
+
+#define DEVSW_SIZE 255
+const struct bdevsw *bdevsw0[DEVSW_SIZE]; /* XXX storage size */
+const struct bdevsw **bdevsw = bdevsw0;
+const int sys_cdevsws = DEVSW_SIZE;
+int max_cdevsws = DEVSW_SIZE;
+
+const struct cdevsw *cdevsw0[DEVSW_SIZE]; /* XXX storage size */
+const struct cdevsw **cdevsw = cdevsw0;
+const int sys_bdevsws = DEVSW_SIZE;
+int max_bdevsws = DEVSW_SIZE;
+
+struct devsw_conv devsw_conv0;
+struct devsw_conv *devsw_conv = &devsw_conv0;
+int max_devsw_convs = 0;
 
 void
 panic(const char *fmt, ...)
@@ -236,18 +256,9 @@ uiomove(void *buf, size_t n, struct uio *uio)
 	struct iovec *iov;
 	uint8_t *b = buf;
 	size_t cnt;
-	int rv;
 
 	if (uio->uio_vmspace != UIO_VMSPACE_SYS)
 		panic("%s: vmspace != UIO_VMSPACE_SYS", __func__);
-
-	/*
-	 * See if rump ubc code claims the offset.  This is of course
-	 * a blatant violation of abstraction levels, but let's keep
-	 * me simple & stupid for now.
-	 */
-	if (rump_ubc_magic_uiomove(buf, n, uio, &rv, NULL))
-		return rv;
 
 	while (n && uio->uio_resid) {
 		iov = uio->uio_iov;
@@ -281,13 +292,6 @@ uio_setup_sysspace(struct uio *uio)
 {
 
 	uio->uio_vmspace = UIO_VMSPACE_SYS;
-}
-
-const struct bdevsw *
-bdevsw_lookup(dev_t dev)
-{
-
-	return (const struct bdevsw *)1;
 }
 
 devclass_t
@@ -368,20 +372,6 @@ getmicrotime(struct timeval *tv)
 	rumpuser_gettimeofday(tv, &error);
 }
 
-void
-bdev_strategy(struct buf *bp)
-{
-
-	panic("%s: not supported", __func__);
-}
-
-int
-bdev_type(dev_t dev)
-{
-
-	return D_DISK;
-}
-
 struct kthdesc {
 	void (*f)(void *);
 	void *arg;
@@ -400,6 +390,8 @@ threadbouncer(void *arg)
 	rumpuser_set_curlwp(k->mylwp);
 	kmem_free(k, sizeof(struct kthdesc));
 
+	if ((curlwp->l_pflag & LP_MPSAFE) == 0)
+		KERNEL_LOCK(1, NULL);
 	f(thrarg);
 	panic("unreachable, should kthread_exit()");
 }
@@ -408,6 +400,9 @@ int
 kthread_create(pri_t pri, int flags, struct cpu_info *ci,
 	void (*func)(void *), void *arg, lwp_t **newlp, const char *fmt, ...)
 {
+	char thrstore[MAXCOMLEN];
+	const char *thrname = NULL;
+	va_list ap;
 	struct kthdesc *k;
 	struct lwp *l;
 	int rv;
@@ -444,7 +439,15 @@ kthread_create(pri_t pri, int flags, struct cpu_info *ci,
 	k->f = func;
 	k->arg = arg;
 	k->mylwp = l = rump_setup_curlwp(0, rump_nextlid(), 0);
-	rv = rumpuser_thread_create(threadbouncer, k);
+	if (flags & KTHREAD_MPSAFE)
+		l->l_pflag |= LP_MPSAFE;
+	if (fmt) {
+		va_start(ap, fmt);
+		vsnprintf(thrstore, sizeof(thrname), fmt, ap);
+		va_end(ap);
+		thrname = thrstore;
+	}
+	rv = rumpuser_thread_create(threadbouncer, k, thrname);
 	if (rv)
 		return rv;
 
@@ -457,6 +460,9 @@ void
 kthread_exit(int ecode)
 {
 
+	if ((curlwp->l_pflag & LP_MPSAFE) == 0)
+		KERNEL_UNLOCK_ONE(NULL);
+	rump_clear_curlwp();
 	rumpuser_thread_exit();
 }
 
@@ -626,21 +632,6 @@ assert_sleepable(void)
 	/* always sleepable, although we should improve this */
 }
 
-int
-devsw_attach(const char *devname, const struct bdevsw *bdev, int *bmajor,
-	const struct cdevsw *cdev, int *cmajor)
-{
-
-	panic("%s: not implemented", __func__);
-}
-
-int
-devsw_detach(const struct bdevsw *bdev, const struct cdevsw *cdev)
-{
-
-	panic("%s: not implemented", __func__);
-}
-
 void
 tc_setclock(struct timespec *ts)
 {
@@ -661,3 +652,30 @@ proc_crmod_leave(kauth_cred_t c1, kauth_cred_t c2, bool sugid)
 
 	panic("%s: not implemented", __func__);
 }
+
+/*
+ * Byteswap is in slightly bad taste linked directly against libc.
+ * In case our machine uses namespace-renamed symbols, provide
+ * an escape route.  We really should be including libkern, but
+ * leave that to a later date.
+ */
+#ifdef __BSWAP_RENAME
+#undef bswap16
+#undef bswap32
+uint16_t __bswap16(uint16_t);
+uint32_t __bswap32(uint32_t);
+
+uint16_t
+bswap16(uint16_t v)
+{
+
+	return __bswap16(v);
+}
+
+uint32_t
+bswap32(uint32_t v)
+{
+
+	return __bswap32(v);
+}
+#endif /* __BSWAP_RENAME */

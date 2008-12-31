@@ -1,4 +1,4 @@
-/* $NetBSD: udf_vfsops.c,v 1.52 2008/10/29 18:09:47 reinoud Exp $ */
+/* $NetBSD: udf_vfsops.c,v 1.54 2008/12/16 16:27:05 reinoud Exp $ */
 
 /*
  * Copyright (c) 2006, 2008 Reinoud Zandijk
@@ -28,12 +28,11 @@
 
 #include <sys/cdefs.h>
 #ifndef lint
-__KERNEL_RCSID(0, "$NetBSD: udf_vfsops.c,v 1.52 2008/10/29 18:09:47 reinoud Exp $");
+__KERNEL_RCSID(0, "$NetBSD: udf_vfsops.c,v 1.54 2008/12/16 16:27:05 reinoud Exp $");
 #endif /* not lint */
 
 
 #if defined(_KERNEL_OPT)
-#include "opt_quota.h"
 #include "opt_compat_netbsd.h"
 #endif
 
@@ -764,7 +763,7 @@ udf_root(struct mount *mp, struct vnode **vpp)
 		return error;
 
 	vp = root_dir->vnode;
-	root_dir->vnode->v_vflag |= VV_ROOT;
+	KASSERT(vp->v_vflag & VV_ROOT);
 
 	*vpp = vp;
 	return 0;

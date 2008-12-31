@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.17 2008/11/23 15:29:42 martin Exp $
+#	$NetBSD: Makefile,v 1.23 2008/12/31 21:22:02 agc Exp $
 
 # For all platforms
 
@@ -17,20 +17,23 @@ SUBDIR+=	ext2fs
 SUBDIR+=	exec_script
 SUBDIR+=	fdesc
 SUBDIR+=	ffs
-SUBDIR+=	filecorefs
+SUBDIR+=	filecore
 SUBDIR+=	fss
 SUBDIR+=	hfs
 SUBDIR+=	kernfs
 SUBDIR+=	ksem
+SUBDIR+=	layerfs
 SUBDIR+=	lfs
 SUBDIR+=	mfs
-SUBDIR+=	msdosfs
+SUBDIR+=	msdos
 SUBDIR+=	nfs
 SUBDIR+=	nfsserver
 SUBDIR+=	ntfs
-SUBDIR+=	nullfs
+SUBDIR+=	null
 SUBDIR+=	overlay
 SUBDIR+=	portal
+SUBDIR+=	ppp_bsdcomp
+SUBDIR+=	ppp_deflate
 SUBDIR+=	procfs
 SUBDIR+=	ptyfs
 SUBDIR+=	puffs
@@ -39,15 +42,21 @@ SUBDIR+=	miniroot
 SUBDIR+=	smbfs
 SUBDIR+=	tmpfs
 SUBDIR+=	udf
-SUBDIR+=	umapfs
+SUBDIR+=	umap
 SUBDIR+=	union
 .if (defined(NOTYET))
 SUBDIR+=	unionfs
 .endif
 
 # Machine dependent section
-.if ${MACHINE} != "alpha"
+.if ${MACHINE_ARCH} != "alpha"
 SUBDIR+=	exec_elf32
+.endif
+
+.if ${MACHINE_ARCH} == "alpha" || \
+    ${MACHINE_ARCH} == "sparc64" || \
+    ${MACHINE_ARCH} == "x86_64"
+SUBDIR+=	exec_elf64
 .endif
 
 .if ${MACHINE} == "amd64"
@@ -56,7 +65,6 @@ SUBDIR+=	compat_linux
 SUBDIR+=	compat_linux32
 SUBDIR+=	compat_netbsd32
 SUBDIR+=	drm
-SUBDIR+=	exec_elf64
 SUBDIR+=	i915drm
 .endif
 
@@ -70,6 +78,13 @@ SUBDIR+=	drm
 SUBDIR+=	exec_aout
 SUBDIR+=	i915drm
 SUBDIR+=	radeondrm
+.endif
+
+.include <bsd.own.mk>
+
+# we need our device mapper for LVM
+.if (${MKLVM} != "no")
+SUBDIR+= dm
 .endif
 
 .include <bsd.subdir.mk>

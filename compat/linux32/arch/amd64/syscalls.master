@@ -1,4 +1,4 @@
-	$NetBSD: syscalls.master,v 1.40 2008/11/19 18:36:04 ad Exp $
+	$NetBSD: syscalls.master,v 1.44 2008/12/12 23:36:18 njoly Exp $
 
 ; NetBSD i386 COMPAT_LINUX32 system call name/number "master" file.
 ; (See syscalls.conf to see what it is processed into.)
@@ -242,7 +242,7 @@
 138	NOARGS	setfsuid16 { int linux32_sys_setfsuid(uid_t uid); }
 139	NOARGS	setfsgid16 { int linux32_sys_setfsgid(gid_t gid); }
 140	STD	{ int linux32_sys_llseek(int fd, u_int32_t ohigh, \
-		    u_int32_t olow, netbsd32_caddr_t res, int whence); }
+		    u_int32_t olow, netbsd32_voidp res, int whence); }
 141	STD	{ int linux32_sys_getdents(int fd, \
 		    linux32_direntp_t dent, unsigned int count); }
 142	STD	{ int linux32_sys_select(int nfds, \
@@ -273,8 +273,8 @@
 		    int policy, linux32_sched_paramp_t sp); }
 157	STD	{ int linux32_sys_sched_getscheduler(pid_t pid); }
 158	NOARGS	{ int linux_sys_sched_yield(void); }
-159	UNIMPL	sched_get_priority_max
-160	UNIMPL	sched_get_priority_min
+159	STD	{ int linux32_sys_sched_get_priority_max(int policy); }
+160	STD	{ int linux32_sys_sched_get_priority_min(int policy); }
 161	UNIMPL	sched_rr_get_interval
 162	STD	{ int linux32_sys_nanosleep(linux32_timespecp_t rqtp, \
 		    linux32_timespecp_t rmtp); }
@@ -355,10 +355,12 @@
 207	NOARGS	{ int netbsd32___posix_fchown(int fd, uid_t uid, gid_t gid); }
 208	STD	{ int linux32_sys_setresuid(uid_t ruid, uid_t euid, \
 		    uid_t suid); }
-209	UNIMPL	getresuid
+209	STD	{ int linux32_sys_getresuid(linux32_uidp_t ruid, \
+		    linux32_uidp_t euid, linux32_uidp_t suid); }
 210	STD	{ int linux32_sys_setresgid(gid_t rgid, gid_t egid, \
 		    gid_t sgid); }
-211	UNIMPL	getresgid
+211	STD	{ int linux32_sys_getresgid(linux32_gidp_t rgid, \
+		    linux32_gidp_t egid, linux32_gidp_t sgid); }
 212	NOARGS	{ int netbsd32___posix_chown(netbsd32_charp path, \
 		    uid_t uid, gid_t gid); }
 213 	NOARGS	{ int netbsd32_setuid(uid_t uid); }
@@ -424,7 +426,8 @@
 		    linux32_timespecp_t tp); }
 266	STD	{ int linux32_sys_clock_getres(clockid_t which, \
 		    linux32_timespecp_t tp); }
-267	UNIMPL	clock_nanosleep
+267	STD	{ int linux32_sys_clock_nanosleep(clockid_t which, int flags, \
+		    linux32_timespecp_t rqtp, linux32_timespecp_t rmtp); }
 268	UNIMPL	statfs64
 269	UNIMPL	fstatfs64
 270	UNIMPL	tgkill

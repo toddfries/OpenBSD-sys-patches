@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.64 2008/11/17 02:05:13 uwe Exp $	*/
+/*	$NetBSD: machdep.c,v 1.66 2008/12/19 17:11:57 pgoyette Exp $	*/
 
 /*-
  * Copyright (c) 2001, 2002, 2004 The NetBSD Foundation, Inc.
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.64 2008/11/17 02:05:13 uwe Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.66 2008/12/19 17:11:57 pgoyette Exp $");
 
 #include "opt_md.h"
 #include "opt_ddb.h"
@@ -243,7 +243,7 @@ machine_startup(int argc, char *argv[], struct bootinfo *bi)
 			p = cp + 2;
 #ifdef NFS
 			if (strcmp(p, "nfs") == 0)
-				mountroot = nfs_mountroot;
+				rootfstype = MOUNT_NFS;
 			else
 				makebootdev(p);
 #else /* NFS */
@@ -295,7 +295,7 @@ machine_startup(int argc, char *argv[], struct bootinfo *bi)
 
 #if NKSYMS || defined(DDB) || defined(MODULAR)
 	if (symbolsize) {
-		ksyms_init(symbolsize, &end, end + symbolsize);
+		ksyms_addsyms_elf(symbolsize, &end, end + symbolsize);
 		_DPRINTF("symbol size = %d byte\n", symbolsize);
 	}
 #endif

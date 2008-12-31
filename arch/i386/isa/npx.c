@@ -1,4 +1,4 @@
-/*	$NetBSD: npx.c,v 1.132 2008/11/11 15:53:53 ad Exp $	*/
+/*	$NetBSD: npx.c,v 1.134 2008/11/25 21:53:50 bouyer Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -96,7 +96,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: npx.c,v 1.132 2008/11/11 15:53:53 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: npx.c,v 1.134 2008/11/25 21:53:50 bouyer Exp $");
 
 #if 0
 #define IPRINTF(x)	printf x
@@ -573,6 +573,7 @@ npxdna(struct cpu_info *ci)
 		 */
 		if (fl == l) {
 			KASSERT(l->l_addr->u_pcb.pcb_fpcpu == ci);
+			ci->ci_fpused = 1;
 			clts();
 			splx(s);
 			return 1;
@@ -679,6 +680,7 @@ npxsave_cpu(bool save)
 	stts();
 	l->l_addr->u_pcb.pcb_fpcpu = NULL;
 	ci->ci_fpcurlwp = NULL;
+	ci->ci_fpused = 1;
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.c,v 1.61 2008/10/29 07:31:18 skrll Exp $	*/
+/*	$NetBSD: pmap.c,v 1.64 2008/12/11 19:30:14 pooka Exp $	*/
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -63,7 +63,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.61 2008/10/29 07:31:18 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.64 2008/12/11 19:30:14 pooka Exp $");
 
 #define	PMAP_NOOPNAMES
 

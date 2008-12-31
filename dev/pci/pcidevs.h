@@ -1,10 +1,10 @@
-/*	$NetBSD: pcidevs.h,v 1.968 2008/11/18 16:12:21 matt Exp $	*/
+/*	$NetBSD: pcidevs.h,v 1.973 2008/12/27 10:36:09 tsutsui Exp $	*/
 
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	NetBSD: pcidevs,v 1.966 2008/11/18 16:12:03 matt Exp
+ *	NetBSD: pcidevs,v 1.971 2008/12/27 10:35:08 tsutsui Exp
  */
 
 /*
@@ -2528,12 +2528,16 @@
 #define	PCI_PRODUCT_INTEL_82801IH_LPC	0x2912		/* 82801IH LPC Interface Bridge */
 #define	PCI_PRODUCT_INTEL_82801IO_LPC	0x2914		/* 82801IO LPC Interface Bridge */
 #define	PCI_PRODUCT_INTEL_82801IR_LPC	0x2916		/* 82801IR LPC Interface Bridge */
+#define	PCI_PRODUCT_INTEL_82801IEM_LPC	0x2917		/* 82801IEM LPC Interface Bridge */
 #define	PCI_PRODUCT_INTEL_82801IB_LPC	0x2918		/* 82801IB LPC Interface Bridge */
+#define	PCI_PRODUCT_INTEL_82801IM_LPC	0x2919		/* 82801IM LPC Interface Bridge */
 #define	PCI_PRODUCT_INTEL_82801I_SATA_1	0x2920		/* 82801I SATA Controller w/ 4 ports */
 #define	PCI_PRODUCT_INTEL_82801I_SATA_2	0x2921		/* 82801I SATA Controller w/ 2 ports */
 #define	PCI_PRODUCT_INTEL_82801I_SATA_AHCI6	0x2922		/* 82801I AHCI SATA Controller w/ 6 ports */
 #define	PCI_PRODUCT_INTEL_82801I_SATA_AHCI4	0x2923		/* 82801I AHCI SATA Controller w/ 4 ports */
 #define	PCI_PRODUCT_INTEL_82801I_SATA_3	0x2926		/* 82801I SATA Controller w/ 2 ports */
+#define	PCI_PRODUCT_INTEL_82801I_SATA_4	0x2928		/* 82801I Mobile AHCI SATA Controller with 2 ports */
+#define	PCI_PRODUCT_INTEL_82801I_SATA_5	0x2929		/* 82801I Mobile AHCI SATA Controller with 4 ports */
 #define	PCI_PRODUCT_INTEL_82801I_SMB	0x2930		/* 82801I SMBus Controller */
 #define	PCI_PRODUCT_INTEL_82801I_THERMAL	0x2932		/* 82801I Thermal Controller */
 #define	PCI_PRODUCT_INTEL_82801I_USB_1	0x2934		/* 82801I USB UHCI Controller */
@@ -2585,6 +2589,15 @@
 #define	PCI_PRODUCT_INTEL_82965PM_MEI	0x2a04		/* 82965PM MEI Controller */
 #define	PCI_PRODUCT_INTEL_82965PM_IDE	0x2a06		/* 82965PM IDE Interface */
 #define	PCI_PRODUCT_INTEL_82965PM_KT	0x2a07		/* 82965PM Serial Interface */
+#define	PCI_PRODUCT_INTEL_82GM45_HB	0x2a40		/* 82GM45 Host Bridge */
+#define	PCI_PRODUCT_INTEL_82GM45_IGD	0x2a42		/* 82GM45 Integrated Graphics Device */
+#define	PCI_PRODUCT_INTEL_82GM45_IGD_1	0x2a43		/* 82GM45 Integrated Graphics Device */
+#define	PCI_PRODUCT_INTEL_82IGD_E_HB	0x2e00		/* 82IGD_E Host Bridge */
+#define	PCI_PRODUCT_INTEL_82IGD_E_IGD	0x2e02		/* 82IGD_E Integrated Graphics */
+#define	PCI_PRODUCT_INTEL_82Q45_HB	0x2e10		/* 82Q45 Host Bridge */
+#define	PCI_PRODUCT_INTEL_82Q45_IGD	0x2e12		/* 82Q45 Integrated Graphics Device */
+#define	PCI_PRODUCT_INTEL_82G45_HB	0x2e20		/* 82G45 Host Bridge */
+#define	PCI_PRODUCT_INTEL_82G45_IGD	0x2e22		/* 82G45 Integrated Graphics Device */
 #define	PCI_PRODUCT_INTEL_31244	0x3200		/* 31244 Serial ATA Controller */
 #define	PCI_PRODUCT_INTEL_82855PM_DDR	0x3340		/* 82855PM MCH Host Controller */
 #define	PCI_PRODUCT_INTEL_82855PM_AGP	0x3341		/* 82855PM Host-AGP Bridge */
@@ -2626,6 +2639,12 @@
 #define	PCI_PRODUCT_INTEL_PRO_WL_3945ABG_2	0x4227		/* PRO/Wireless LAN 3945ABG Mini-PCI Adapter */
 #define	PCI_PRODUCT_INTEL_PRO_WL_4965AGN_1	0x4229		/* PRO/Wireless LAN 4965AGN Mini-PCI Adapter */
 #define	PCI_PRODUCT_INTEL_PRO_WL_4965AGN_2	0x4230		/* PRO/Wireless LAN 4965AGN Mini-PCI Adapter */
+#define	PCI_PRODUCT_INTEL_PRO_WL_5100AGN_1	0x4232		/* Pro/Wireless LAN 5100AGN Mini-PCI Adapter */
+#define	PCI_PRODUCT_INTEL_PRO_WL_5300AGN_1	0x4235		/* Pro/Wireless LAN 5300AGN Mini-PCI Adapter */
+#define	PCI_PRODUCT_INTEL_PRO_WL_5300AGN_2	0x4236		/* Pro/Wireless LAN 5300AGN Mini-PCI Adapter */
+#define	PCI_PRODUCT_INTEL_PRO_WL_5100AGN_2	0x4237		/* Pro/Wireless LAN 5100AGN Mini-PCI Adapter */
+#define	PCI_PRODUCT_INTEL_PRO_WL_5350AGN_1	0x423a		/* Pro/Wireless LAN 5350AGN Mini-PCI Adapter */
+#define	PCI_PRODUCT_INTEL_PRO_WL_5350AGN_2	0x423b		/* Pro/Wireless LAN 5350AGN Mini-PCI Adapter */
 #define	PCI_PRODUCT_INTEL_80312_ATU	0x530d		/* 80310 ATU */
 #define	PCI_PRODUCT_INTEL_82371SB_ISA	0x7000		/* 82371SB (PIIX3) PCI-ISA Bridge */
 #define	PCI_PRODUCT_INTEL_82371SB_IDE	0x7010		/* 82371SB (PIIX3) IDE Interface */
@@ -2770,6 +2789,8 @@
 #define	PCI_PRODUCT_LUCENT_USBHC	0x5801		/* USB Host Controller */
 #define	PCI_PRODUCT_LUCENT_EVDO	0x5802		/* Sierra Wireless AirCard 580 */
 #define	PCI_PRODUCT_LUCENT_FW322_323	0x5811		/* FW322/323 IEEE 1394 Host Controller */
+#define	PCI_PRODUCT_LUCENT_ET1310	0xed00		/* ET1310 10/100/1000 Ethernet */
+#define	PCI_PRODUCT_LUCENT_ET1301	0xed0a		/* ET1301 10/100 Ethernet */
 
 /* Macronix */
 #define	PCI_PRODUCT_MACRONIX_MX98713	0x0512		/* MX98713 (PMAC) 10/100 Ethernet */
@@ -4043,6 +4064,7 @@
 #define	PCI_PRODUCT_VIATECH_VT3351_HB_4351	0x4351		/* VT3351 Host Bridge */
 #define	PCI_PRODUCT_VIATECH_CX700M2_IDE	0x5324		/* CX700M2/VX700 IDE Controller */
 #define	PCI_PRODUCT_VIATECH_VT3351_IOAPIC	0x5351		/* VT3351 I/O APIC Interrupt Controller */
+#define	PCI_PRODUCT_VIATECH_VT8237S_SATA	0x5372		/* VT8237S Integrated SATA Controller */
 #define	PCI_PRODUCT_VIATECH_VT86C100A	0x6100		/* VT86C100A (Rhine-II) 10/100 Ethernet */
 #define	PCI_PRODUCT_VIATECH_VT8378_IG	0x7205		/* VT8378 KM400 UniChrome Integrated Graphics */
 #define	PCI_PRODUCT_VIATECH_KT880_5	0x7269		/* KT880 CPU to PCI Bridge */
