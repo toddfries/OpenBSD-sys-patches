@@ -77,6 +77,7 @@
 #include <sys/endian.h>
 #include <sys/malloc.h>
 #include <sys/pool.h>
+#include <sys/sensors.h>
 
 #include <machine/bus.h>
 
@@ -90,7 +91,6 @@
 #if NBIO > 0
 #include <dev/biovar.h>
 #endif
-#include <sys/sensors.h>
 
 struct cfdriver cac_cd = {
 	NULL, "cac", DV_DULL
