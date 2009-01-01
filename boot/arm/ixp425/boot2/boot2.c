@@ -15,7 +15,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/arm/ixp425/boot2/boot2.c,v 1.2 2008/10/07 17:27:37 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/arm/ixp425/boot2/boot2.c,v 1.3 2008/12/20 03:26:09 sam Exp $");
 
 #include <sys/param.h>
 #include <sys/disklabel.h>
@@ -163,7 +163,7 @@ main(void)
 	p_memset((char *)dmadat, 0, 32 * 1024);
 	bt = board_init();
 
-	printf("FreeBSD ARM (%s) boot2 v%d.%d\n", bt, 0, 3);
+	printf("FreeBSD ARM (%s) boot2 v%d.%d\n", bt, 0, 4);
 
 	autoboot = 1;
 

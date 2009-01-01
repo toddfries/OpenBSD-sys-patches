@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/uboot/common/main.c,v 1.5 2008/09/03 17:48:41 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/uboot/common/main.c,v 1.6 2008/12/17 15:58:07 raj Exp $");
 
 #include <stand.h>
 
@@ -216,6 +216,7 @@ COMMAND_SET(reboot, "reboot", "reboot the system", command_reboot);
 static int
 command_reboot(int argc, char *argv[])
 {
+
 	printf("Resetting...\n");
 	ub_reset();
 

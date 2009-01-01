@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>                  /* RCS ID & Copyright macro defns */
-__FBSDID("$FreeBSD: src/sys/powerpc/booke/interrupt.c,v 1.1 2008/03/03 17:17:00 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/booke/interrupt.c,v 1.2 2008/12/17 15:31:15 raj Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -92,7 +92,6 @@ dump_frame(struct trapframe *frame)
 	}
 	printf("\n");
 }
-
 
 void powerpc_crit_interrupt(struct trapframe *framep)
 {

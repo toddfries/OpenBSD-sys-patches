@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/powermac/macio.c,v 1.27 2008/10/26 19:37:38 nwhitehorn Exp $
+ * $FreeBSD: src/sys/powerpc/powermac/macio.c,v 1.28 2008/12/15 15:31:10 nwhitehorn Exp $
  */
 
 /*
@@ -106,6 +106,8 @@ static device_method_t macio_methods[] = {
         DEVMETHOD(bus_activate_resource, macio_activate_resource),
         DEVMETHOD(bus_deactivate_resource, macio_deactivate_resource),
         DEVMETHOD(bus_get_resource_list, macio_get_resource_list),	
+
+	DEVMETHOD(bus_child_pnpinfo_str, ofw_bus_gen_child_pnpinfo_str),
 
 	/* ofw_bus interface */
 	DEVMETHOD(ofw_bus_get_devinfo,	macio_get_devinfo),

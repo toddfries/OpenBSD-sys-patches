@@ -26,7 +26,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/cpuset.h,v 1.7 2008/04/11 03:26:41 jeff Exp $
+ * $FreeBSD: src/sys/sys/cpuset.h,v 1.8 2008/11/29 14:32:14 bz Exp $
  */
 
 #ifndef _SYS_CPUSET_H_
@@ -132,6 +132,7 @@ typedef	struct _cpuset {
 #define	CPU_WHICH_PID		2	/* Specifies a process id. */
 #define	CPU_WHICH_CPUSET	3	/* Specifies a set id. */
 #define	CPU_WHICH_IRQ		4	/* Specifies an irq #. */
+#define	CPU_WHICH_JAIL		5	/* Specifies a jail id. */
 
 /*
  * Reserved cpuset identifiers.
@@ -168,11 +169,15 @@ struct cpuset {
 #define CPU_SET_RDONLY  0x0002  /* No modification allowed. */
 
 extern cpuset_t *cpuset_root;
+struct proc;
+struct thread;
 
 struct cpuset *cpuset_thread0(void);
 struct cpuset *cpuset_ref(struct cpuset *);
 void	cpuset_rel(struct cpuset *);
 int	cpuset_setthread(lwpid_t id, cpuset_t *);
+int	cpuset_create_root(struct thread *, struct cpuset **);
+int	cpuset_setproc_update_set(struct proc *, struct cpuset *);
 
 #else
 __BEGIN_DECLS

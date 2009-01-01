@@ -46,7 +46,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #endif
 #ifdef	__FreeBSD__
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/isp/isp.c,v 1.149 2007/07/10 07:55:04 mjacob Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/isp/isp.c,v 1.150 2008/12/15 21:42:38 marius Exp $");
 #include <dev/isp/isp_freebsd.h>
 #endif
 #ifdef	__OpenBSD__
@@ -335,6 +335,23 @@ isp_reset(ispsoftc_t *isp)
 		/*
 		 * XXX: Should probably do some bus sensing.
 		 */
+	} else if (IS_ULTRA3(isp)) {
+		sdparam *sdp = isp->isp_param;
+
+		isp->isp_clock = 100;
+
+		if (IS_10160(isp))
+			btype = "10160";
+		else if (IS_12160(isp))
+			btype = "12160";
+		else
+			btype = "<UNKLVD>";
+		sdp->isp_lvdmode = 1;
+
+		if (IS_DUALBUS(isp)) {
+			sdp++;
+			sdp->isp_lvdmode = 1;
+		}
 	} else if (IS_ULTRA2(isp)) {
 		static const char m[] = "bus %d is in %s Mode";
 		uint16_t l;
@@ -346,10 +363,6 @@ isp_reset(ispsoftc_t *isp)
 			btype = "1280";
 		else if (IS_1080(isp))
 			btype = "1080";
-		else if (IS_10160(isp))
-			btype = "10160";
-		else if (IS_12160(isp))
-			btype = "12160";
 		else
 			btype = "<UNKLVD>";
 

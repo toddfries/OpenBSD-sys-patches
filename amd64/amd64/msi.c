@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/msi.c,v 1.7 2007/10/24 21:16:22 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/msi.c,v 1.8 2008/11/26 19:25:13 jkim Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -46,6 +46,7 @@ __FBSDID("$FreeBSD: src/sys/amd64/amd64/msi.c,v 1.7 2007/10/24 21:16:22 jhb Exp 
 #include <sys/sx.h>
 #include <sys/systm.h>
 #include <machine/apicreg.h>
+#include <machine/cputypes.h>
 #include <machine/md_var.h>
 #include <machine/frame.h>
 #include <machine/intr_machdep.h>
@@ -211,8 +212,8 @@ msi_init(void)
 {
 
 	/* Check if we have a supported CPU. */
-	if (!(strcmp(cpu_vendor, "GenuineIntel") == 0 ||
-	      strcmp(cpu_vendor, "AuthenticAMD") == 0))
+	if (!(cpu_vendor_id == CPU_VENDOR_INTEL ||
+	    cpu_vendor_id == CPU_VENDOR_AMD))
 		return;
 
 	msi_enabled = 1;

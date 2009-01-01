@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/tcp_output.c,v 1.157 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/tcp_output.c,v 1.159 2008/12/02 21:37:28 bz Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -51,6 +51,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_output.c,v 1.157 2008/11/19 09:39:34 zec
 #include <sys/sysctl.h>
 #include <sys/vimage.h>
 
+#include <net/if.h>
 #include <net/route.h>
 
 #include <netinet/in.h>
@@ -74,6 +75,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_output.c,v 1.157 2008/11/19 09:39:34 zec
 #ifdef TCPDEBUG
 #include <netinet/tcp_debug.h>
 #endif
+#include <netinet/vinet.h>
 
 #ifdef IPSEC
 #include <netipsec/ipsec.h>
@@ -1172,7 +1174,7 @@ timer:
     {
 	ip->ip_len = m->m_pkthdr.len;
 #ifdef INET6
-	if (INP_CHECK_SOCKAF(so, AF_INET6))
+	if (tp->t_inpcb->inp_vflag & INP_IPV6PROTO)
 		ip->ip_ttl = in6_selecthlim(tp->t_inpcb, NULL);
 #endif /* INET6 */
 	/*

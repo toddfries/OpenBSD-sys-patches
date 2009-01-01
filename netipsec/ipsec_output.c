@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netipsec/ipsec_output.c,v 1.22 2008/10/02 15:37:58 zec Exp $
+ * $FreeBSD: src/sys/netipsec/ipsec_output.c,v 1.23 2008/12/02 21:37:28 bz Exp $
  */
 
 /*
@@ -65,6 +65,7 @@
 #include <netinet/in_pcb.h>
 #ifdef INET6
 #include <netinet/icmp6.h>
+#include <netinet6/vinet6.h>
 #endif
 
 #include <netipsec/ipsec.h>

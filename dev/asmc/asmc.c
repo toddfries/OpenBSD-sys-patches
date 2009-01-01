@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/asmc/asmc.c,v 1.10 2008/09/07 18:15:34 rpaulo Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/asmc/asmc.c,v 1.11 2008/11/29 14:20:36 rpaulo Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -254,6 +254,9 @@ asmc_match(device_t dev)
 	char *model;
 
 	model = getenv("smbios.system.product");
+	if (model == NULL)
+		return (NULL);
+
 	for (i = 0; asmc_models[i].smc_model; i++) {
 		if (!strncmp(model, asmc_models[i].smc_model, strlen(model))) {
 			freeenv(model);

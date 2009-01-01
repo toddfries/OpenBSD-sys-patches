@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netinet/ip6.h,v 1.17 2008/10/02 15:37:58 zec Exp $	*/
+/*	$FreeBSD: src/sys/netinet/ip6.h,v 1.18 2008/12/02 21:37:28 bz Exp $	*/
 /*	$KAME: ip6.h,v 1.18 2001/03/29 05:34:30 itojun Exp $	*/
 
 /*-
@@ -346,8 +346,6 @@ do {									\
 		}							\
 	}								\
 } while (/*CONSTCOND*/ 0)
-
-#include <netinet6/vinet6.h>
 
 #endif /*_KERNEL*/
 

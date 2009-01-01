@@ -31,7 +31,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/i386/exception.s,v 1.121 2008/05/25 14:50:47 attilio Exp $
+ * $FreeBSD: src/sys/i386/i386/exception.s,v 1.122 2008/12/13 13:07:12 jkoshy Exp $
  */
 
 #include "opt_apic.h"
@@ -438,9 +438,18 @@ doreti_nmi:
 	iret
 outofnmi:
 	/*
-	 * Clear interrupts and jump to AST handling code.
+	 * Call the callchain capture hook after turning interrupts back on.
 	 */
+	movl	pmc_hook,%ecx
+	orl	%ecx,%ecx
+	jz	doreti_exit
+	pushl	%esp			/* frame pointer */
+	pushl	$PMC_FN_USER_CALLCHAIN	/* command */
+	movl	PCPU(CURTHREAD),%eax
+	pushl	%eax			/* curthread */
 	sti
+	call	*%ecx
+	addl	$12,%esp
 	jmp	doreti_ast
 	ENTRY(end_exceptions)
 #endif

@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_move.c,v 1.3 2006/02/08 21:32:45 le Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_move.c,v 1.4 2008/11/25 19:13:58 lulf Exp $");
 
 #include <sys/param.h>
 #include <sys/libkern.h>
@@ -56,7 +56,15 @@ gv_move(struct g_geom *gp, struct gctl_req *req)
 	sc = gp->softc;
 
 	argc = gctl_get_paraml(req, "argc", sizeof(*argc));
+	if (argc == NULL) {
+		gctl_error(req, "no arguments given");
+		return;
+	}
 	flags = gctl_get_paraml(req, "flags", sizeof(*flags));
+	if (flags == NULL) {
+		gctl_error(req, "no flags given");
+		return;
+	}
 	destination = gctl_get_param(req, "destination", NULL);
 	if (destination == NULL) {
 		gctl_error(req, "no destination given");

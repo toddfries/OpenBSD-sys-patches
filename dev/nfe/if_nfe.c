@@ -21,7 +21,7 @@
 /* Driver for NVIDIA nForce MCP Fast Ethernet and Gigabit Ethernet */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/nfe/if_nfe.c,v 1.30 2008/10/03 03:58:16 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/nfe/if_nfe.c,v 1.31 2008/12/20 00:04:04 yongari Exp $");
 
 #ifdef HAVE_KERNEL_OPTION_HEADERS
 #include "opt_device_polling.h"
@@ -3080,7 +3080,7 @@ nfe_sysctl_node(struct nfe_softc *sc)
 	    &stats->rx_unicast, "Unicast Frames");
 	NFE_SYSCTL_STAT_ADD32(ctx, child, "multicast",
 	    &stats->rx_multicast, "Multicast Frames");
-	NFE_SYSCTL_STAT_ADD32(ctx, child, "brocadcast",
+	NFE_SYSCTL_STAT_ADD32(ctx, child, "broadcast",
 	    &stats->rx_broadcast, "Broadcast Frames");
 	if ((sc->nfe_flags & NFE_MIB_V2) != 0) {
 		NFE_SYSCTL_STAT_ADD64(ctx, child, "octets",

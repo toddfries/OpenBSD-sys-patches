@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/in_rmx.c,v 1.63 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/in_rmx.c,v 1.67 2008/12/15 06:10:57 qingli Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -55,9 +55,12 @@ __FBSDID("$FreeBSD: src/sys/netinet/in_rmx.c,v 1.63 2008/11/19 09:39:34 zec Exp 
 
 #include <net/if.h>
 #include <net/route.h>
+#include <net/vnet.h>
+
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 #include <netinet/ip_var.h>
+#include <netinet/vinet.h>
 
 extern int	in_inithead(void **head, int off);
 
@@ -72,8 +75,8 @@ in_addroute(void *v_arg, void *n_arg, struct radix_node_head *head,
 {
 	struct rtentry *rt = (struct rtentry *)treenodes;
 	struct sockaddr_in *sin = (struct sockaddr_in *)rt_key(rt);
-	struct radix_node *ret;
 
+	RADIX_NODE_HEAD_WLOCK_ASSERT(head);
 	/*
 	 * A little bit of help for both IP output and input:
 	 *   For host routes, we make sure that RTF_BROADCAST
@@ -103,31 +106,7 @@ in_addroute(void *v_arg, void *n_arg, struct radix_node_head *head,
 	if (!rt->rt_rmx.rmx_mtu && rt->rt_ifp)
 		rt->rt_rmx.rmx_mtu = rt->rt_ifp->if_mtu;
 
-	ret = rn_addroute(v_arg, n_arg, head, treenodes);
-	if (ret == NULL && rt->rt_flags & RTF_HOST) {
-		struct rtentry *rt2;
-		/*
-		 * We are trying to add a host route, but can't.
-		 * Find out if it is because of an
-		 * ARP entry and delete it if so.
-		 */
-		rt2 = in_rtalloc1((struct sockaddr *)sin, 0,
-		    RTF_CLONING, rt->rt_fibnum);
-		if (rt2) {
-			if (rt2->rt_flags & RTF_LLINFO &&
-			    rt2->rt_flags & RTF_HOST &&
-			    rt2->rt_gateway &&
-			    rt2->rt_gateway->sa_family == AF_LINK) {
-				rtexpunge(rt2);
-				RTFREE_LOCKED(rt2);
-				ret = rn_addroute(v_arg, n_arg, head,
-						  treenodes);
-			} else
-				RTFREE_LOCKED(rt2);
-		}
-	}
-
-	return ret;
+	return (rn_addroute(v_arg, n_arg, head, treenodes));
 }
 
 /*
@@ -184,13 +163,10 @@ in_clsroute(struct radix_node *rn, struct radix_node_head *head)
 	if (!(rt->rt_flags & RTF_UP))
 		return;			/* prophylactic measures */
 
-	if ((rt->rt_flags & (RTF_LLINFO | RTF_HOST)) != RTF_HOST)
-		return;
-
 	if (rt->rt_flags & RTPRF_OURS)
 		return;
 
-	if (!(rt->rt_flags & (RTF_WASCLONED | RTF_DYNAMIC)))
+	if (!(rt->rt_flags & RTF_DYNAMIC))
 		return;
 
 	/*
@@ -287,6 +263,7 @@ in_rtqtimo(void *rock)
 static void
 in_rtqtimo_one(void *rock)
 {
+	INIT_VNET_INET(curvnet);
 	struct radix_node_head *rnh = rock;
 	struct rtqk_arg arg;
 	static time_t last_adjusted_timeout = 0;
@@ -341,6 +318,7 @@ in_rtqdrain(void)
 	VNET_FOREACH(vnet_iter) {
 		CURVNET_SET(vnet_iter);
 		INIT_VNET_NET(vnet_iter);
+
 		for ( fibnum = 0; fibnum < rt_numfibs; fibnum++) {
 			rnh = V_rt_tables[fibnum][AF_INET];
 			arg.found = arg.killed = 0;
@@ -429,7 +407,6 @@ in_ifadownkill(struct radix_node *rn, void *xap)
 		 * the routes that rtrequest() would have in any case,
 		 * so that behavior is not needed there.
 		 */
-		rt->rt_flags &= ~RTF_CLONING;
 		rtexpunge(rt);
 	}
 	RT_UNLOCK(rt);

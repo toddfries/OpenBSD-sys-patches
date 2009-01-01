@@ -26,7 +26,7 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net/if_mib.c,v 1.21 2008/10/02 15:37:58 zec Exp $
+ * $FreeBSD: src/sys/net/if_mib.c,v 1.22 2008/12/02 21:37:28 bz Exp $
  */
 
 #include <sys/param.h>
@@ -38,6 +38,7 @@
 
 #include <net/if.h>
 #include <net/if_mib.h>
+#include <net/vnet.h>
 
 /*
  * A sysctl(3) MIB for generic interface information.  This information

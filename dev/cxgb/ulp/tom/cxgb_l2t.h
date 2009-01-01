@@ -25,7 +25,7 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
-$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_l2t.h,v 1.2 2008/09/23 03:16:54 kmacy Exp $
+$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_l2t.h,v 1.3 2008/12/15 06:10:57 qingli Exp $
 
 ***************************************************************************/
 #ifndef _CHELSIO_L2T_H
@@ -68,7 +68,7 @@ struct l2t_entry {
 	int ifindex;                  /* neighbor's net_device's ifindex */
 	uint16_t smt_idx;             /* SMT index */
 	uint16_t vlan;                /* VLAN TCI (id: bits 0-11, prio: 13-15 */
-	struct rtentry *neigh;        /* associated neighbour */
+	struct llentry *neigh;        /* associated neighbour */
 	struct l2t_entry *first;      /* start of hash chain */
 	struct l2t_entry *next;       /* next l2t_entry on chain */
 	struct mbuf *arpq_head;       /* queue of packets awaiting resolution */

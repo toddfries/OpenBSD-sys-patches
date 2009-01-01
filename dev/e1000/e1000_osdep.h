@@ -30,7 +30,7 @@
   POSSIBILITY OF SUCH DAMAGE.
 
 ******************************************************************************/
-/*$FreeBSD: src/sys/dev/e1000/e1000_osdep.h,v 1.1 2008/07/30 21:56:53 jfv Exp $*/
+/*$FreeBSD: src/sys/dev/e1000/e1000_osdep.h,v 1.2 2008/11/26 23:57:23 jfv Exp $*/
 
 
 #ifndef _FREEBSD_OS_H_
@@ -92,6 +92,10 @@ typedef int32_t		s32;
 typedef int16_t		s16;
 typedef int8_t		s8;
 typedef boolean_t	bool;
+
+#define __le16		u16
+#define __le32		u32
+#define __le64		u64
 
 struct e1000_osdep
 {

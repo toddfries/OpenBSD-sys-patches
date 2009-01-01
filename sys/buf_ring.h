@@ -25,7 +25,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/buf_ring.h,v 1.2 2008/11/23 00:20:51 kmacy Exp $
+ * $FreeBSD: src/sys/sys/buf_ring.h,v 1.4 2008/12/17 04:00:43 kmacy Exp $
  *
  ***************************************************************************/
 
@@ -48,10 +48,11 @@ struct buf_ring {
 	volatile uint32_t	br_prod_tail;	
 	int              	br_prod_size;
 	int              	br_prod_mask;
+	uint64_t		br_drops;
 	/*
 	 * Pad out to next L2 cache line
 	 */
-	uint64_t	  	_pad0[14];
+	uint64_t	  	_pad0[13];
 
 	volatile uint32_t	br_cons_head;
 	volatile uint32_t	br_cons_tail;
@@ -92,7 +93,7 @@ buf_ring_enqueue(struct buf_ring *br, void *buf)
 		
 		if (prod_next == cons_tail) {
 			critical_exit();
-			return (ENOSPC);
+			return (ENOBUFS);
 		}
 		
 		success = atomic_cmpset_int(&br->br_prod_head, prod_head,

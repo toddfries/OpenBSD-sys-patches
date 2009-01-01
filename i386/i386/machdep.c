@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/machdep.c,v 1.675 2008/09/10 07:11:08 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/machdep.c,v 1.676 2008/12/29 06:31:03 kmacy Exp $");
 
 #include "opt_apic.h"
 #include "opt_atalk.h"
@@ -144,11 +144,11 @@ uint32_t arch_i386_xbox_memsize = 0;
 #ifdef XEN
 /* XEN includes */
 #include <machine/xen/xen-os.h>
-#include <machine/xen/hypervisor.h>
+#include <xen/hypervisor.h>
 #include <machine/xen/xen-os.h>
 #include <machine/xen/xenvar.h>
 #include <machine/xen/xenfunc.h>
-#include <machine/xen/xen_intr.h>
+#include <xen/xen_intr.h>
 
 void Xhypervisor_callback(void);
 void failsafe_callback(void);

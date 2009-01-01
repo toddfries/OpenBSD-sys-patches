@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/Makefile,v 1.37 2008/11/17 20:49:29 pjd Exp $
+# $FreeBSD: src/sys/boot/Makefile,v 1.38 2008/12/14 02:57:41 nyan Exp $
 
 .include <bsd.own.mk>
 
@@ -12,7 +12,7 @@ SUBDIR+=		ficl
 .endif
 
 # Build EFI library.
-.if ${MACHINE_ARCH} == "amd64" || ${MACHINE_ARCH} == "i386" || ${MACHINE_ARCH} == "ia64"
+.if ${MACHINE_ARCH} == "amd64" || ${MACHINE} == "i386" || ${MACHINE_ARCH} == "ia64"
 SUBDIR+=		efi
 .endif
 

@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum.c,v 1.22 2008/10/26 17:20:37 lulf Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum.c,v 1.23 2008/11/25 19:13:58 lulf Exp $");
 
 #include <sys/param.h>
 #include <sys/bio.h>
@@ -165,12 +165,20 @@ gv_create(struct g_geom *gp, struct gctl_req *req)
 	plexes = gctl_get_paraml(req, "plexes", sizeof(*plexes));
 	subdisks = gctl_get_paraml(req, "subdisks", sizeof(*subdisks));
 	drives = gctl_get_paraml(req, "drives", sizeof(*drives));
+	if (volumes == NULL || plexes == NULL || subdisks == NULL ||
+	    drives == NULL) {
+		gctl_error(req, "number of objects not given");
+		return (-1);
+	}
 
 	/* First, handle drive definitions ... */
 	for (i = 0; i < *drives; i++) {
 		snprintf(buf, sizeof(buf), "drive%d", i);
 		d2 = gctl_get_paraml(req, buf, sizeof(*d2));
-
+		if (d2 == NULL) {
+			gctl_error(req, "no drive definition given");
+			return (-1);
+		}
 		d = gv_find_drive(sc, d2->name);
 		if (d != NULL) {
 			gctl_error(req, "drive '%s' is already known",
@@ -205,7 +213,10 @@ gv_create(struct g_geom *gp, struct gctl_req *req)
 		error = 0;
 		snprintf(buf, sizeof(buf), "volume%d", i);
 		v2 = gctl_get_paraml(req, buf, sizeof(*v2));
-
+		if (v2 == NULL) {
+			gctl_error(req, "no volume definition given");
+			return (-1);
+		}
 		v = gv_find_vol(sc, v2->name);
 		if (v != NULL) {
 			gctl_error(req, "volume '%s' is already known",
@@ -226,7 +237,10 @@ gv_create(struct g_geom *gp, struct gctl_req *req)
 		error = 0;
 		snprintf(buf, sizeof(buf), "plex%d", i);
 		p2 = gctl_get_paraml(req, buf, sizeof(*p2));
-
+		if (p2 == NULL) {
+			gctl_error(req, "no plex definition given");
+			return (-1);
+		}
 		p = gv_find_plex(sc, p2->name);
 		if (p != NULL) {
 			gctl_error(req, "plex '%s' is already known", p->name);
@@ -260,7 +274,10 @@ gv_create(struct g_geom *gp, struct gctl_req *req)
 		error = 0;
 		snprintf(buf, sizeof(buf), "sd%d", i);
 		s2 = gctl_get_paraml(req, buf, sizeof(*s2));
-
+		if (s2 == NULL) {
+			gctl_error(req, "no subdisk definition given");
+			return (-1);
+		}
 		s = gv_find_sd(sc, s2->name);
 		if (s != NULL) {
 			gctl_error(req, "subdisk '%s' is already known",
@@ -405,7 +422,10 @@ gv_config(struct gctl_req *req, struct g_class *mp, char const *verb)
 	/* Return configuration in string form. */
 	} else if (!strcmp(verb, "getconfig")) {
 		comment = gctl_get_param(req, "comment", NULL);
-
+		if (comment == NULL) {
+			gctl_error(req, "no comment parameter given");
+			return;
+		}
 		sb = sbuf_new(NULL, NULL, GV_CFG_LEN, SBUF_FIXEDLEN);
 		gv_format_config(sc, sb, 0, comment);
 		sbuf_finish(sb);

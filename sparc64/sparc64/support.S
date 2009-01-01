@@ -25,7 +25,7 @@
  */
 
 #include <machine/asm.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/support.S,v 1.35 2008/11/16 19:28:55 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/support.S,v 1.36 2008/12/20 00:33:10 nwhitehorn Exp $");
 
 #include <sys/errno.h>
 
@@ -745,9 +745,9 @@ ENTRY(setjmp)
 END(setjmp)
 
 /*
- * void openfirmware(cell_t args[])
+ * void ofw_entry(cell_t args[])
  */
-ENTRY(openfirmware)
+ENTRY(ofw_entry)
 	save	%sp, -CCFSZ, %sp
 	SET(ofw_vec, %l7, %l6)
 	ldx	[%l6], %l6
@@ -758,12 +758,12 @@ ENTRY(openfirmware)
 	wrpr	%l7, 0, %pil
 	ret
 	 restore %o0, %g0, %o0
-END(openfirmware)
+END(ofw_entry)
 
 /*
- * void openfirmware_exit(cell_t args[])
+ * void ofw_exit(cell_t args[])
  */
-ENTRY(openfirmware_exit)
+ENTRY(ofw_exit)
 	save	%sp, -CCFSZ, %sp
 	flushw
 	wrpr	%g0, PIL_TICK, %pil
@@ -783,7 +783,7 @@ ENTRY(openfirmware_exit)
 	call	%l6
 	 mov	%i0, %o0
 	! never to return
-END(openfirmware_exit)
+END(ofw_exit)
 
 #ifdef GPROF
 

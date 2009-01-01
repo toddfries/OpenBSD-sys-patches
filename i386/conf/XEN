@@ -1,7 +1,7 @@
 #
 # XEN -- Kernel configuration for i386 XEN DomU
 #
-# $FreeBSD: src/sys/i386/conf/XEN,v 1.6 2008/11/14 07:05:51 kmacy Exp $
+# $FreeBSD: src/sys/i386/conf/XEN,v 1.8 2008/12/29 06:31:03 kmacy Exp $
 
 cpu		I686_CPU
 ident		XEN
@@ -9,9 +9,9 @@ ident		XEN
 makeoptions	DEBUG=-g		# Build kernel with gdb(1) debug symbols
 makeoptions	MODULES_OVERRIDE=""
 
-#options 	SCHED_ULE		# ULE scheduler
-#options 	PREEMPTION		# Enable kernel thread preemption
-options		SCHED_4BSD		 
+options 	SCHED_ULE		# ULE scheduler
+options 	PREEMPTION		# Enable kernel thread preemption
+#options		SCHED_4BSD		 
 
 options 	INET			# InterNETworking
 options 	INET6			# IPv6 communications protocols
@@ -31,7 +31,7 @@ options 	PROCFS			# Process filesystem (requires PSEUDOFS)
 options 	PSEUDOFS		# Pseudo-filesystem framework
 options 	GEOM_PART_GPT		# GUID Partition Tables.
 options 	GEOM_LABEL		# Provides labelization
-options 	COMPAT_43TTY		# BSD 4.3 TTY compat [KEEP THIS!]
+options 	COMPAT_43TTY		# BSD 4.3 TTY compat (sgtty)
 options 	COMPAT_FREEBSD4		# Compatible with FreeBSD4
 options 	COMPAT_FREEBSD5		# Compatible with FreeBSD5
 options 	COMPAT_FREEBSD6		# Compatible with FreeBSD6

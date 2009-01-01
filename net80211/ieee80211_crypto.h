@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net80211/ieee80211_crypto.h,v 1.18 2008/09/21 23:16:19 sam Exp $
+ * $FreeBSD: src/sys/net80211/ieee80211_crypto.h,v 1.19 2008/12/15 22:31:54 sam Exp $
  */
 #ifndef _NET80211_IEEE80211_CRYPTO_H_
 #define _NET80211_IEEE80211_CRYPTO_H_
@@ -218,7 +218,7 @@ static __inline void
 ieee80211_crypto_resetkey(struct ieee80211vap *vap,
 	struct ieee80211_key *k, ieee80211_keyix ix)
 {
-	k->wk_cipher = &ieee80211_cipher_none;;
+	k->wk_cipher = &ieee80211_cipher_none;
 	k->wk_private = k->wk_cipher->ic_attach(vap, k);
 	k->wk_keyix = k->wk_rxkeyix = ix;
 	k->wk_flags = IEEE80211_KEY_XMIT | IEEE80211_KEY_RECV;

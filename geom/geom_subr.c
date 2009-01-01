@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_subr.c,v 1.97 2008/08/09 11:14:05 des Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_subr.c,v 1.98 2008/12/08 17:09:02 lulf Exp $");
 
 #include "opt_ddb.h"
 
@@ -370,7 +370,7 @@ g_destroy_geom(struct g_geom *gp)
 }
 
 /*
- * This function is called (repeatedly) until the has withered away.
+ * This function is called (repeatedly) until the geom has withered away.
  */
 void
 g_wither_geom(struct g_geom *gp, int error)

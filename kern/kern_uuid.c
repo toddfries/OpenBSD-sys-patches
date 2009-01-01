@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_uuid.c,v 1.15 2008/10/02 15:37:58 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_uuid.c,v 1.16 2008/12/02 21:37:28 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/endian.h>
@@ -42,6 +42,7 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_uuid.c,v 1.15 2008/10/02 15:37:58 zec Exp 
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
+#include <net/vnet.h>
 
 /*
  * See also:

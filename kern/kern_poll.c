@@ -26,25 +26,25 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_poll.c,v 1.34 2008/08/17 23:27:27 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_poll.c,v 1.37 2008/12/11 16:09:31 bz Exp $");
 
 #include "opt_device_polling.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/kthread.h>
+#include <sys/proc.h>
+#include <sys/resourcevar.h>
 #include <sys/socket.h>			/* needed by net/if.h		*/
 #include <sys/sockio.h>
 #include <sys/sysctl.h>
 #include <sys/syslog.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>			/* for IFF_* flags		*/
 #include <net/netisr.h>			/* for NETISR_POLL		*/
-
-#include <sys/proc.h>
-#include <sys/resourcevar.h>
-#include <sys/kthread.h>
-#include <sys/vimage.h>
+#include <net/vnet.h>
 
 static void netisr_poll(void);		/* the two netisr handlers      */
 static void netisr_pollmore(void);
@@ -521,6 +521,7 @@ ether_poll_deregister(struct ifnet *ifp)
 static int
 poll_switch(SYSCTL_HANDLER_ARGS)
 {
+	INIT_VNET_NET(curvnet);
 	struct ifnet *ifp;
 	int error;
 	int val = polling;

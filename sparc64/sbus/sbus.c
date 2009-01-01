@@ -99,7 +99,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sbus/sbus.c,v 1.49 2008/08/23 15:20:33 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sbus/sbus.c,v 1.50 2008/12/15 15:31:10 nwhitehorn Exp $");
 
 /*
  * SBus support.
@@ -226,6 +226,7 @@ static device_method_t sbus_methods[] = {
 	DEVMETHOD(bus_get_resource_list, sbus_get_resource_list),
 	DEVMETHOD(bus_get_resource,	bus_generic_rl_get_resource),
 	DEVMETHOD(bus_get_dma_tag,	sbus_get_dma_tag),
+	DEVMETHOD(bus_child_pnpinfo_str, ofw_bus_gen_child_pnpinfo_str),
 
 	/* ofw_bus interface */
 	DEVMETHOD(ofw_bus_get_devinfo,	sbus_get_devinfo),

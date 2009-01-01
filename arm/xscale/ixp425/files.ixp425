@@ -1,4 +1,4 @@
-#$FreeBSD: src/sys/arm/xscale/ixp425/files.ixp425,v 1.5 2008/04/03 18:22:08 raj Exp $
+#$FreeBSD: src/sys/arm/xscale/ixp425/files.ixp425,v 1.7 2008/12/23 17:40:02 sam Exp $
 arm/arm/bus_space_generic.c		standard
 arm/arm/cpufunc_asm_xscale.S		standard
 arm/arm/irq_dispatch.S			standard
@@ -44,3 +44,5 @@ IxNpeMicrocode.dat			optional npe_fw			\
 # Q-Manager support
 #
 arm/xscale/ixp425/ixp425_qmgr.c		optional qmgr
+#
+dev/usb/ehci_ixp4xx.c			optional ehci

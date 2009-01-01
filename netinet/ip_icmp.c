@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_icmp.c,v 1.127 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_icmp.c,v 1.128 2008/12/02 21:37:28 bz Exp $");
 
 #include "opt_ipsec.h"
 #include "opt_mac.h"
@@ -61,6 +61,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_icmp.c,v 1.127 2008/11/19 09:39:34 zec Ex
 #include <netinet/tcp_var.h>
 #include <netinet/tcpip.h>
 #include <netinet/icmp_var.h>
+#include <netinet/vinet.h>
 
 #ifdef IPSEC
 #include <netipsec/ipsec.h>

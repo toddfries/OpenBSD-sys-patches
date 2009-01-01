@@ -31,7 +31,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/ntfs/ntfs_vnops.c,v 1.66 2008/11/02 11:49:19 trasz Exp $
+ * $FreeBSD: src/sys/fs/ntfs/ntfs_vnops.c,v 1.67 2008/12/16 21:13:11 trasz Exp $
  *
  */
 
@@ -339,7 +339,7 @@ ntfs_strategy(ap)
 		}
 	}
 	bufdone(bp);
-	return (error);
+	return (0);
 }
 
 static int

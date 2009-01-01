@@ -31,7 +31,7 @@
 /* $KAME: sctp_asconf.h,v 1.8 2005/03/06 16:04:16 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_asconf.h,v 1.12 2008/07/09 16:45:30 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_asconf.h,v 1.13 2008/12/06 13:19:54 rrs Exp $");
 
 #ifndef _NETINET_SCTP_ASCONF_H_
 #define _NETINET_SCTP_ASCONF_H_
@@ -85,6 +85,10 @@ extern void
      sctp_assoc_immediate_retrans(struct sctp_tcb *, struct sctp_nets *);
 extern void
      sctp_net_immediate_retrans(struct sctp_tcb *, struct sctp_nets *);
+
+extern void
+sctp_asconf_send_nat_state_update(struct sctp_tcb *stcb,
+    struct sctp_nets *net);
 
 extern int
     sctp_is_addr_pending(struct sctp_tcb *, struct sctp_ifa *);

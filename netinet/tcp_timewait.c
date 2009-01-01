@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/tcp_timewait.c,v 1.292 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/tcp_timewait.c,v 1.296 2008/12/17 12:52:34 bz Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -88,6 +88,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_timewait.c,v 1.292 2008/11/19 09:39:34 z
 #include <netinet/tcp_debug.h>
 #endif
 #include <netinet6/ip6protosw.h>
+#include <netinet/vinet.h>
 
 #include <machine/in_cksum.h>
 
@@ -150,8 +151,8 @@ SYSCTL_PROC(_net_inet_tcp, OID_AUTO, maxtcptw, CTLTYPE_INT|CTLFLAG_RW,
     &maxtcptw, 0, sysctl_maxtcptw, "IU",
     "Maximum number of compressed TCP TIME_WAIT entries");
 
-SYSCTL_INT(_net_inet_tcp, OID_AUTO, nolocaltimewait, CTLFLAG_RW,
-    &nolocaltimewait, 0,
+SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp, OID_AUTO, nolocaltimewait,
+    CTLFLAG_RW, nolocaltimewait, 0,
     "Do not create compressed TCP TIME_WAIT entries for local connections");
 
 void
@@ -514,14 +515,8 @@ tcp_twclose(struct tcptw *tw, int reuse)
 			 */
 			INP_WUNLOCK(inp);
 		}
-	} else {
-#ifdef INET6
-		if (inp->inp_vflag & INP_IPV6PROTO)
-			in6_pcbfree(inp);
-		else
-#endif
-			in_pcbfree(inp);
-	}
+	} else
+		in_pcbfree(inp);
 	V_tcpstat.tcps_closed++;
 	crfree(tw->tw_cred);
 	tw->tw_cred = NULL;
@@ -543,7 +538,7 @@ tcp_twrespond(struct tcptw *tw, int flags)
 	struct tcpopt to;
 #ifdef INET6
 	struct ip6_hdr *ip6 = NULL;
-	int isipv6 = inp->inp_inc.inc_isipv6;
+	int isipv6 = inp->inp_inc.inc_flags & INC_ISIPV6;
 #endif
 
 	INP_WLOCK_ASSERT(inp);

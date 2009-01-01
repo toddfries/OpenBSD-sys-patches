@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/raw_ip.c,v 1.199 2008/11/19 19:19:30 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/raw_ip.c,v 1.203 2008/12/16 03:18:59 kmacy Exp $");
 
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
@@ -46,6 +46,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/raw_ip.c,v 1.199 2008/11/19 19:19:30 julian 
 #include <sys/priv.h>
 #include <sys/proc.h>
 #include <sys/protosw.h>
+#include <sys/rwlock.h>
 #include <sys/signalvar.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
@@ -58,6 +59,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/raw_ip.c,v 1.199 2008/11/19 19:19:30 julian 
 
 #include <net/if.h>
 #include <net/route.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -69,6 +71,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/raw_ip.c,v 1.199 2008/11/19 19:19:30 julian 
 
 #include <netinet/ip_fw.h>
 #include <netinet/ip_dummynet.h>
+#include <netinet/vinet.h>
 
 #ifdef IPSEC
 #include <netipsec/ipsec.h>
@@ -273,12 +276,11 @@ rip_input(struct mbuf *m, int off)
 			continue;
 		if (inp->inp_faddr.s_addr != ip->ip_src.s_addr)
 			continue;
-		if (jailed(inp->inp_cred) &&
-		    (htonl(prison_getip(inp->inp_cred)) !=
-		    ip->ip_dst.s_addr)) {
-			continue;
+		if (jailed(inp->inp_cred)) {
+			if (!prison_check_ip4(inp->inp_cred, &ip->ip_dst))
+				continue;
 		}
-		if (last) {
+		if (last != NULL) {
 			struct mbuf *n;
 
 			n = m_copy(m, 0, (int)M_COPYALL);
@@ -304,12 +306,11 @@ rip_input(struct mbuf *m, int off)
 		if (inp->inp_faddr.s_addr &&
 		    inp->inp_faddr.s_addr != ip->ip_src.s_addr)
 			continue;
-		if (jailed(inp->inp_cred) &&
-		    (htonl(prison_getip(inp->inp_cred)) !=
-		    ip->ip_dst.s_addr)) {
-			continue;
+		if (jailed(inp->inp_cred)) {
+			if (!prison_check_ip4(inp->inp_cred, &ip->ip_dst))
+				continue;
 		}
-		if (last) {
+		if (last != NULL) {
 			struct mbuf *n;
 
 			n = m_copy(m, 0, (int)M_COPYALL);
@@ -369,11 +370,15 @@ rip_output(struct mbuf *m, struct socket *so, u_long dst)
 			ip->ip_off = 0;
 		ip->ip_p = inp->inp_ip_p;
 		ip->ip_len = m->m_pkthdr.len;
-		if (jailed(inp->inp_cred))
-			ip->ip_src.s_addr =
-			    htonl(prison_getip(inp->inp_cred));
-		else
+		if (jailed(inp->inp_cred)) {
+			if (prison_getip4(inp->inp_cred, &ip->ip_src)) {
+				INP_RUNLOCK(inp);
+				m_freem(m);
+				return (EPERM);
+			}
+		} else {
 			ip->ip_src = inp->inp_laddr;
+		}
 		ip->ip_dst.s_addr = dst;
 		ip->ip_ttl = inp->inp_ip_ttl;
 	} else {
@@ -383,13 +388,10 @@ rip_output(struct mbuf *m, struct socket *so, u_long dst)
 		}
 		INP_RLOCK(inp);
 		ip = mtod(m, struct ip *);
-		if (jailed(inp->inp_cred)) {
-			if (ip->ip_src.s_addr !=
-			    htonl(prison_getip(inp->inp_cred))) {
-				INP_RUNLOCK(inp);
-				m_freem(m);
-				return (EPERM);
-			}
+		if (!prison_check_ip4(inp->inp_cred, &ip->ip_src)) {
+			INP_RUNLOCK(inp);
+			m_freem(m);
+			return (EPERM);
 		}
 
 		/*
@@ -805,13 +807,8 @@ rip_bind(struct socket *so, struct sockaddr *nam, struct thread *td)
 	if (nam->sa_len != sizeof(*addr))
 		return (EINVAL);
 
-	if (jailed(td->td_ucred)) {
-		if (addr->sin_addr.s_addr == INADDR_ANY)
-			addr->sin_addr.s_addr =
-			    htonl(prison_getip(td->td_ucred));
-		if (htonl(prison_getip(td->td_ucred)) != addr->sin_addr.s_addr)
-			return (EADDRNOTAVAIL);
-	}
+	if (!prison_check_ip4(td->td_ucred, &addr->sin_addr))
+		return (EADDRNOTAVAIL);
 
 	if (TAILQ_EMPTY(&V_ifnet) ||
 	    (addr->sin_family != AF_INET && addr->sin_family != AF_IMPLINK) ||
@@ -967,6 +964,7 @@ rip_pcblist(SYSCTL_HANDLER_ARGS)
 		INP_RLOCK(inp);
 		if (inp->inp_gencnt <= gencnt) {
 			struct xinpcb xi;
+
 			bzero(&xi, sizeof(xi));
 			xi.xi_len = sizeof xi;
 			/* XXX should avoid extra copy */

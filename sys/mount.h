@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)mount.h	8.21 (Berkeley) 5/20/95
- * $FreeBSD: src/sys/sys/mount.h,v 1.238 2008/11/17 20:49:29 pjd Exp $
+ * $FreeBSD: src/sys/sys/mount.h,v 1.240 2008/12/16 23:16:10 attilio Exp $
  */
 
 #ifndef _SYS_MOUNT_H_
@@ -316,6 +316,7 @@ void          __mnt_vnode_markerfree(struct vnode **mvp, struct mount *mp);
 #define MNTK_SOFTDEP	0x00000004	/* async disabled by softdep */
 #define MNTK_NOINSMNTQ	0x00000008	/* insmntque is not allowed */
 #define	MNTK_DRAINING	0x00000010	/* lock draining is happening */
+#define	MNTK_REFEXPIRE	0x00000020	/* refcount expiring is happening */
 #define MNTK_UNMOUNT	0x01000000	/* unmount in progress */
 #define	MNTK_MWAIT	0x02000000	/* waiting for unmount to finish */
 #define	MNTK_SUSPEND	0x08000000	/* request write suspension */
@@ -717,6 +718,7 @@ int	vfs_donmount(struct thread *td, int fsflags, struct uio *fsoptions);
 void	vfs_getnewfsid(struct mount *);
 struct cdev *vfs_getrootfsid(struct mount *);
 struct	mount *vfs_getvfs(fsid_t *);      /* return vfs given fsid */
+struct	mount *vfs_busyfs(fsid_t *);
 int	vfs_modevent(module_t, int, void *);
 void	vfs_mount_error(struct mount *, const char *, ...);
 void	vfs_mountroot(void);			/* mount our root filesystem */

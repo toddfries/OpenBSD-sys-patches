@@ -28,13 +28,13 @@
  *
  *	from: NetBSD: psychoreg.h,v 1.8 2001/09/10 16:17:06 eeh Exp
  *
- * $FreeBSD: src/sys/sparc64/pci/ofw_pci.h,v 1.13 2008/08/22 20:28:19 marius Exp $
+ * $FreeBSD: src/sys/sparc64/pci/ofw_pci.h,v 1.14 2008/12/15 15:31:10 nwhitehorn Exp $
  */
 
 #ifndef _SPARC64_PCI_OFW_PCI_H_
 #define	_SPARC64_PCI_OFW_PCI_H_
 
-#include <machine/ofw_bus.h>
+#include <dev/ofw/ofw_bus_subr.h>
 
 typedef uint32_t ofw_pci_intr_t;
 

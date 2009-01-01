@@ -30,7 +30,7 @@
   POSSIBILITY OF SUCH DAMAGE.
 
 ******************************************************************************/
-/*$FreeBSD: src/sys/dev/e1000/e1000_api.h,v 1.1 2008/07/30 21:56:53 jfv Exp $*/
+/*$FreeBSD: src/sys/dev/e1000/e1000_api.h,v 1.2 2008/11/26 23:57:23 jfv Exp $*/
 
 #ifndef _E1000_API_H_
 #define _E1000_API_H_
@@ -54,7 +54,6 @@ s32  e1000_setup_init_funcs(struct e1000_hw *hw, bool init_device);
 s32  e1000_init_mac_params(struct e1000_hw *hw);
 s32  e1000_init_nvm_params(struct e1000_hw *hw);
 s32  e1000_init_phy_params(struct e1000_hw *hw);
-void e1000_remove_device(struct e1000_hw *hw);
 s32  e1000_get_bus_info(struct e1000_hw *hw);
 void e1000_clear_vfta(struct e1000_hw *hw);
 void e1000_write_vfta(struct e1000_hw *hw, u32 offset, u32 value);
@@ -90,6 +89,7 @@ s32  e1000_write_8bit_ctrl_reg(struct e1000_hw *hw, u32 reg,
 s32  e1000_get_phy_info(struct e1000_hw *hw);
 void e1000_release_phy(struct e1000_hw *hw);
 s32  e1000_acquire_phy(struct e1000_hw *hw);
+s32  e1000_cfg_on_link_up(struct e1000_hw *hw);
 s32  e1000_phy_hw_reset(struct e1000_hw *hw);
 s32  e1000_phy_commit(struct e1000_hw *hw);
 void e1000_power_up_phy(struct e1000_hw *hw);

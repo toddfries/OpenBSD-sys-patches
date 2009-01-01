@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/include/elf.h,v 1.8 2006/10/04 21:37:10 jb Exp $
+ * $FreeBSD: src/sys/powerpc/include/elf.h,v 1.9 2008/12/17 06:56:58 imp Exp $
  */
 
 #ifndef _MACHINE_ELF_H_
@@ -79,9 +79,6 @@ __ElfType(Auxinfo);
 #define	AT_UCACHEBSIZE	12	/* Cache block size, or `0' if cache not unified. */
 
 #define	AT_COUNT	13	/* Count of defined aux entry types. */
-
-/* Used in John Polstra's testbed stuff. */
-#define	AT_DEBUG	14	/* Debugging level. */
 
 /*
  * Relocation types.

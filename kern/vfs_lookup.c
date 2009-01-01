@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/vfs_lookup.c,v 1.116 2008/11/17 20:49:29 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/vfs_lookup.c,v 1.117 2008/12/18 11:58:12 kib Exp $");
 
 #include "opt_ktrace.h"
 #include "opt_mac.h"
@@ -814,6 +814,10 @@ success:
 	if ((cnp->cn_flags & (ISLASTCN | LOCKSHARED | LOCKLEAF)) ==
 	    (ISLASTCN | LOCKLEAF) && VOP_ISLOCKED(dp) != LK_EXCLUSIVE) {
 		vn_lock(dp, LK_UPGRADE | LK_RETRY);
+		if (dp->v_iflag & VI_DOOMED) {
+			error = ENOENT;
+			goto bad2;
+		}
 	}
 	if (vfslocked && dvfslocked)
 		VFS_UNLOCK_GIANT(dvfslocked);	/* Only need one */

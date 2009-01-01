@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/atomic.h,v 1.49 2008/11/22 05:55:56 kmacy Exp $
+ * $FreeBSD: src/sys/i386/include/atomic.h,v 1.51 2008/12/06 21:33:44 kib Exp $
  */
 #ifndef _MACHINE_ATOMIC_H_
 #define	_MACHINE_ATOMIC_H_
@@ -32,20 +32,9 @@
 #error this file needs sys/cdefs.h as a prerequisite
 #endif
 
-
-#if defined(I686_CPU)
-#define mb()	__asm__ __volatile__ ("mfence;": : :"memory")
-#define wmb()	__asm__ __volatile__ ("sfence;": : :"memory")
-#define rmb()	__asm__ __volatile__ ("lfence;": : :"memory")
-#else
-/*
- * do we need a serializing instruction?
- */
-#define mb()
-#define wmb()
-#define rmb()
-#endif
-
+#define	mb()	__asm __volatile("lock; addl $0,(%%esp)" : : : "memory")
+#define	wmb()	__asm __volatile("lock; addl $0,(%%esp)" : : : "memory")
+#define	rmb()	__asm __volatile("lock; addl $0,(%%esp)" : : : "memory")
 
 /*
  * Various simple operations on memory, each of which is atomic in the

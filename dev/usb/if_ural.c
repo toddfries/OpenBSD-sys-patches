@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/dev/usb/if_ural.c,v 1.75 2008/07/30 00:38:10 thompsa Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/if_ural.c,v 1.76 2008/12/06 21:19:26 thompsa Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2006
@@ -18,7 +18,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/if_ural.c,v 1.75 2008/07/30 00:38:10 thompsa Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/if_ural.c,v 1.76 2008/12/06 21:19:26 thompsa Exp $");
 
 /*-
  * Ralink Technology RT2500USB chipset driver
@@ -1544,11 +1544,11 @@ ural_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ural_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = ifp->if_l2com;
 	struct ifreq *ifr = (struct ifreq *) data;
-	int error = 0, startall = 1;
+	int error = 0, startall = 0;
 
-	RAL_LOCK(sc);
 	switch (cmd) {
 	case SIOCSIFFLAGS:
+		RAL_LOCK(sc);
 		if (ifp->if_flags & IFF_UP) {
 			if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0) {
 				ural_init_locked(sc);
@@ -1559,6 +1559,9 @@ ural_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if (ifp->if_drv_flags & IFF_DRV_RUNNING)
 				ural_stop(sc);
 		}
+		RAL_UNLOCK(sc);
+		if (startall)
+			ieee80211_start_all(ic);
 		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
@@ -1568,10 +1571,6 @@ ural_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ether_ioctl(ifp, cmd, data);
 		break;
 	}
-	RAL_UNLOCK(sc);
-
-	if (startall)
-		ieee80211_start_all(ic);
 	return error;
 }
 

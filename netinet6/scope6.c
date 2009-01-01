@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/scope6.c,v 1.21 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/scope6.c,v 1.22 2008/12/02 21:37:28 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -43,12 +43,14 @@ __FBSDID("$FreeBSD: src/sys/netinet6/scope6.c,v 1.21 2008/11/19 09:39:34 zec Exp
 
 #include <net/route.h>
 #include <net/if.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
-#include <netinet/ip6.h>
 
+#include <netinet/ip6.h>
 #include <netinet6/in6_var.h>
 #include <netinet6/scope6_var.h>
+#include <netinet6/vinet6.h>
 
 
 /*

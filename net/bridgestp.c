@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net/bridgestp.c,v 1.42 2008/10/02 15:37:58 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/net/bridgestp.c,v 1.43 2008/12/02 21:37:28 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,6 +56,7 @@ __FBSDID("$FreeBSD: src/sys/net/bridgestp.c,v 1.42 2008/10/02 15:37:58 zec Exp $
 #include <net/if_types.h>
 #include <net/if_llc.h>
 #include <net/if_media.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>

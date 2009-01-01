@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/NOTES,v 1.1516 2008/11/12 09:52:06 yongari Exp $
+# $FreeBSD: src/sys/conf/NOTES,v 1.1517 2008/12/15 06:10:57 qingli Exp $
 #
 # NOTES -- Lines that can be cut/pasted into kernel and hints configs.
 #
@@ -1958,7 +1958,7 @@ device		fatm			#Fore PCA200E
 device		hatm			#Fore/Marconi HE155/622
 device		patm			#IDT77252 cards (ProATM and IDT)
 device		utopia			#ATM PHY driver
-options 	NATM			#native ATM
+#options 	NATM			#native ATM
 
 options 	LIBMBPOOL		#needed by patm, iatm
 

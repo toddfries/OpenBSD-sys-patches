@@ -1,9 +1,9 @@
-# $FreeBSD: src/sys/modules/if_ef/Makefile,v 1.14 2006/08/14 13:28:52 des Exp $
+# $FreeBSD: src/sys/modules/if_ef/Makefile,v 1.15 2008/12/02 21:37:28 bz Exp $
 
 .PATH: ${.CURDIR}/../../net
 
 KMOD=	if_ef
-SRCS=	if_ef.c opt_ipx.h opt_inet.h opt_ef.h
+SRCS=	if_ef.c opt_ipx.h opt_inet.h opt_ef.h opt_route.h
 
 .if defined(EFDEBUG)
 CFLAGS+= -DEF_DEBUG

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_conf.c,v 1.224 2008/09/27 13:19:09 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_conf.c,v 1.225 2008/11/27 16:47:25 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -862,6 +862,7 @@ void
 destroy_dev(struct cdev *dev)
 {
 
+	WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK, NULL, "destroy_dev");
 	dev_lock();
 	destroy_devl(dev);
 	dev_unlock_and_free();

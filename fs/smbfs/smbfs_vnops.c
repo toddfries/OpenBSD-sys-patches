@@ -29,7 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/smbfs/smbfs_vnops.c,v 1.71 2008/10/28 13:44:11 trasz Exp $
+ * $FreeBSD: src/sys/fs/smbfs/smbfs_vnops.c,v 1.72 2008/12/16 21:13:11 trasz Exp $
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -864,7 +864,7 @@ smbfs_strategy (ap)
 
 	if ((bp->b_flags & B_ASYNC) == 0 )
 		error = smbfs_doio(ap->a_vp, bp, cr, td);
-	return error;
+	return (0);
 }
 
 int

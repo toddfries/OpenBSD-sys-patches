@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_crypto_wep.c,v 1.14 2008/10/23 19:57:13 des Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_crypto_wep.c,v 1.15 2008/12/18 23:00:09 sam Exp $");
 
 /*
  * IEEE 802.11 WEP crypto support.
@@ -87,7 +87,7 @@ wep_attach(struct ieee80211vap *vap, struct ieee80211_key *k)
 {
 	struct wep_ctx *ctx;
 
-	MALLOC(ctx, struct wep_ctx *, sizeof(struct wep_ctx),
+	ctx = (struct wep_ctx *) malloc(sizeof(struct wep_ctx),
 		M_80211_CRYPTO, M_NOWAIT | M_ZERO);
 	if (ctx == NULL) {
 		vap->iv_stats.is_crypto_nomem++;
@@ -106,7 +106,7 @@ wep_detach(struct ieee80211_key *k)
 {
 	struct wep_ctx *ctx = k->wk_private;
 
-	FREE(ctx, M_80211_CRYPTO);
+	free(ctx, M_80211_CRYPTO);
 	KASSERT(nrefs > 0, ("imbalanced attach/detach"));
 	nrefs--;			/* NB: we assume caller locking */
 }

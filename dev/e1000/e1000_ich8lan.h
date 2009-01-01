@@ -30,7 +30,7 @@
   POSSIBILITY OF SUCH DAMAGE.
 
 ******************************************************************************/
-/*$FreeBSD: src/sys/dev/e1000/e1000_ich8lan.h,v 1.1 2008/07/30 21:56:53 jfv Exp $*/
+/*$FreeBSD: src/sys/dev/e1000/e1000_ich8lan.h,v 1.2 2008/11/26 23:57:23 jfv Exp $*/
 
 #ifndef _E1000_ICH8LAN_H_
 #define _E1000_ICH8LAN_H_
@@ -53,8 +53,6 @@
 
 #define FLASH_GFPREG_BASE_MASK           0x1FFF
 #define FLASH_SECTOR_ADDR_SHIFT          12
-
-#define E1000_SHADOW_RAM_WORDS           2048
 
 #define ICH_FLASH_SEG_SIZE_256           256
 #define ICH_FLASH_SEG_SIZE_4K            4096

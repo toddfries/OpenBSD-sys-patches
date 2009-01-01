@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/dest6.c,v 1.14 2008/10/02 15:37:58 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/dest6.c,v 1.15 2008/12/02 21:37:28 bz Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -55,6 +55,7 @@ __FBSDID("$FreeBSD: src/sys/netinet6/dest6.c,v 1.14 2008/10/02 15:37:58 zec Exp 
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet/icmp6.h>
+#include <netinet6/vinet6.h>
 
 /*
  * Destination options header processing.

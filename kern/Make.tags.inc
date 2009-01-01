@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/kern/Make.tags.inc,v 1.21 2008/05/25 22:11:29 rwatson Exp $
+# $FreeBSD: src/sys/kern/Make.tags.inc,v 1.22 2008/12/01 14:34:42 kensmith Exp $
 #	@(#)Make.tags.inc	8.1 (Berkeley) 6/11/93
 
 SYS?=	${.CURDIR}/..
@@ -16,7 +16,6 @@ COMM=	${SYS}/dev/advansys/*.[ch] \
 	${SYS}/dev/buslogic/*.[ch] \
 	${SYS}/dev/dpt/*.[ch] \
 	${SYS}/dev/en/*.[ch] \
-	${SYS}/dev/hfa/*.[ch] \
 	${SYS}/dev/iicbus/*.[ch] \
 	${SYS}/dev/isp/*.[ch] \
 	${SYS}/dev/pdq/*.[ch] \

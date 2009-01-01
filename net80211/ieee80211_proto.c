@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_proto.c,v 1.50 2008/10/23 19:57:13 des Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_proto.c,v 1.51 2008/12/18 23:00:09 sam Exp $");
 
 /*
  * IEEE 802.11 protocol support.
@@ -214,7 +214,7 @@ ieee80211_proto_vdetach(struct ieee80211vap *vap)
 {
 #define	FREEAPPIE(ie) do { \
 	if (ie != NULL) \
-		FREE(ie, M_80211_NODE_IE); \
+		free(ie, M_80211_NODE_IE); \
 } while (0)
 	/*
 	 * Detach operating mode module.

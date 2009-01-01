@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/wlan/Makefile,v 1.12 2008/09/15 22:46:12 sam Exp $
+# $FreeBSD: src/sys/modules/wlan/Makefile,v 1.13 2008/12/02 21:37:28 bz Exp $
 
 .PATH: ${.CURDIR}/../../net80211
 
@@ -10,7 +10,8 @@ SRCS=	ieee80211.c ieee80211_crypto.c ieee80211_crypto_none.c ieee80211_dfs.c \
 	ieee80211_regdomain.c ieee80211_ht.c \
 	ieee80211_adhoc.c ieee80211_hostap.c ieee80211_monitor.c \
 	ieee80211_sta.c ieee80211_wds.c ieee80211_ddb.c
-SRCS+=	bus_if.h device_if.h opt_inet.h opt_ipx.h opt_wlan.h opt_ddb.h
+SRCS+=	bus_if.h device_if.h opt_inet.h opt_ipx.h opt_wlan.h opt_ddb.h \
+	opt_route.h
 
 .if !defined(KERNBUILDDIR)
 opt_wlan.h:

@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)resource.h	8.4 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/sys/resource.h,v 1.33 2008/08/20 08:31:58 ed Exp $
+ * $FreeBSD: src/sys/sys/resource.h,v 1.34 2008/12/11 18:32:05 ed Exp $
  */
 
 #ifndef _SYS_RESOURCE_H_
@@ -106,7 +106,7 @@ struct rusage {
  */
 
 #ifdef _RLIMIT_IDENT
-static char *rlimit_ident[] = {
+static char *rlimit_ident[RLIM_NLIMITS] = {
 	"cpu",
 	"fsize",
 	"data",
@@ -118,6 +118,7 @@ static char *rlimit_ident[] = {
 	"nofile",
 	"sbsize",
 	"vmem",
+	"npts",
 };
 #endif
 

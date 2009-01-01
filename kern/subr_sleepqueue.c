@@ -60,7 +60,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_sleepqueue.c,v 1.62 2008/11/05 03:01:23 davidxu Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_sleepqueue.c,v 1.63 2008/12/01 01:54:55 davidxu Exp $");
 
 #include "opt_sleepqueue_profiling.h"
 #include "opt_ddb.h"
@@ -424,6 +424,10 @@ sleepq_catch_signals(void *wchan, int pri)
 	PROC_UNLOCK(p);
 	thread_lock(td);
 	PROC_SUNLOCK(p);
+	if (ret == 0) {
+		sleepq_switch(wchan, pri);
+		return (0);
+	}
 	/*
 	 * There were pending signals and this thread is still
 	 * on the sleep queue, remove it from the sleep queue.

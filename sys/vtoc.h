@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/vtoc.h,v 1.1 2008/03/02 00:52:49 marcel Exp $
+ * $FreeBSD: src/sys/sys/vtoc.h,v 1.2 2008/12/14 23:12:36 marcel Exp $
  */
 
 #ifndef _SYS_VTOC_H_
@@ -72,7 +72,7 @@ struct vtoc8 {
 	struct {
 		uint16_t	tag;
 		uint16_t	flag;
-	} part[VTOC8_NPARTS];
+	} part[VTOC8_NPARTS] __packed;
 	uint16_t	__alignment;
 	uint32_t	bootinfo[3];
 	uint32_t	sanity;

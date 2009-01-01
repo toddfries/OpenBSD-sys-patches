@@ -30,7 +30,7 @@
   POSSIBILITY OF SUCH DAMAGE.
 
 ******************************************************************************/
-/*$FreeBSD: src/sys/dev/ixgbe/ixgbe_api.h,v 1.5 2008/07/30 18:15:18 jfv Exp $*/
+/*$FreeBSD: src/sys/dev/ixgbe/ixgbe_api.h,v 1.6 2008/11/26 23:41:18 jfv Exp $*/
 
 #ifndef _IXGBE_API_H_
 #define _IXGBE_API_H_
@@ -110,5 +110,7 @@ s32 ixgbe_get_phy_firmware_version(struct ixgbe_hw *hw,
 s32 ixgbe_read_analog_reg8(struct ixgbe_hw *hw, u32 reg, u8 *val);
 s32 ixgbe_write_analog_reg8(struct ixgbe_hw *hw, u32 reg, u8 val);
 s32 ixgbe_init_uta_tables(struct ixgbe_hw *hw);
+s32 ixgbe_read_i2c_eeprom(struct ixgbe_hw *hw, u8 byte_offset, u8 *eeprom_data);
+u32 ixgbe_get_supported_physical_layer(struct ixgbe_hw *hw);
 
 #endif /* _IXGBE_API_H_ */

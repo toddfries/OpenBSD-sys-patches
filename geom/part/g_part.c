@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/part/g_part.c,v 1.26 2008/09/29 02:39:02 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/part/g_part.c,v 1.27 2008/12/01 00:07:17 marcel Exp $");
 
 #include <sys/param.h>
 #include <sys/bio.h>
@@ -535,8 +535,8 @@ g_part_ctl_bootcode(struct gctl_req *req, struct g_part_parms *gpp)
 		error = ENODEV;
 		goto fail;
 	}
-	if (gpp->gpp_codesize != sz) {
-		error = EINVAL;
+	if (gpp->gpp_codesize > sz) {
+		error = EFBIG;
 		goto fail;
 	}
 

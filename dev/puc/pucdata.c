@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/puc/pucdata.c,v 1.67 2008/10/25 10:55:49 des Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/puc/pucdata.c,v 1.68 2008/12/27 15:22:22 rik Exp $");
 
 /*
  * PCI "universal" communications card driver configuration data (used to
@@ -630,6 +630,12 @@ const struct puc_cfg puc_pci_devices[] = {
 	    "Oxford Semiconductor OX16PCI952 UARTs",
 	    DEFAULT_RCLK,
 	    PUC_PORT_2S, 0x10, 4, 0,
+	},
+
+	{   0x1415, 0x9538, 0xffff, 0,
+	    "Oxford Semiconductor OX16PCI958 UARTs",
+	    DEFAULT_RCLK * 10,
+	    PUC_PORT_8S, 0x18, 0, 8,
 	},
 
 	{   0x14d2, 0x8010, 0xffff, 0,

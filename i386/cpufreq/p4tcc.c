@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/cpufreq/p4tcc.c,v 1.17 2008/08/13 16:09:40 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/cpufreq/p4tcc.c,v 1.18 2008/11/26 09:46:35 sobomax Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -188,9 +188,12 @@ p4tcc_attach(device_t dev)
 	case 0x0a:
 	case 0x12:
 	case 0x13:
+	case 0x62:	/* Pentium D B1: errata AA21 */
+	case 0x64:	/* Pentium D C1: errata AA21 */
+	case 0x65:	/* Pentium D D0: errata AA21 */
 		/*
 		 * These CPU models hang when set to 12.5% or 25%.
-		 * See Errata N44 and P18l.
+		 * See Errata N44, P18l and AA21.
 		 */
 		sc->set_count -= 2;
 		break;

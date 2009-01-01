@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/tcp_reass.c,v 1.357 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/tcp_reass.c,v 1.358 2008/12/02 21:37:28 bz Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -73,6 +73,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_reass.c,v 1.357 2008/11/19 09:39:34 zec 
 #ifdef TCPDEBUG
 #include <netinet/tcp_debug.h>
 #endif /* TCPDEBUG */
+#include <netinet/vinet.h>
 
 #ifdef VIMAGE_GLOBALS
 static int tcp_reass_maxseg;

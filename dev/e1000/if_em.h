@@ -30,7 +30,7 @@
   POSSIBILITY OF SUCH DAMAGE.
 
 ******************************************************************************/
-/*$FreeBSD: src/sys/dev/e1000/if_em.h,v 1.1 2008/07/30 21:56:53 jfv Exp $*/
+/*$FreeBSD: src/sys/dev/e1000/if_em.h,v 1.2 2008/11/26 23:57:23 jfv Exp $*/
 
 
 #ifndef _EM_H_DEFINED_
@@ -338,6 +338,9 @@ struct adapter {
 	struct task     rx_task;
 	struct task     tx_task;
 	struct taskqueue *tq;           /* private task queue */
+
+	eventhandler_tag vlan_attach;
+	eventhandler_tag vlan_detach;
 
 	/* Management and WOL features */
 	int		wol;

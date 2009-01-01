@@ -1,5 +1,5 @@
 /*	$NetBSD: usbdi.h,v 1.64 2004/10/23 13:26:34 augustss Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/usbdi.h,v 1.65 2008/11/13 21:34:34 n_hibma Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/usbdi.h,v 1.66 2008/12/20 03:02:32 sam Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -256,7 +256,8 @@ struct usb_attach_arg {
 #define USBD_SHOW_DEVICE_CLASS		0x1
 #define USBD_SHOW_INTERFACE_CLASS	0x2
 
-int usbd_driver_load(module_t mod, int what, void *arg);
+struct module;
+int usbd_driver_load(struct module *mod, int what, void *arg);
 
 static inline int
 usb_get_port(device_t dev)

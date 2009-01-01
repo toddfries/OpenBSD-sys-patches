@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/sis/if_sis.c,v 1.4 2008/08/23 15:34:31 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/sis/if_sis.c,v 1.5 2008/12/09 04:30:47 yongari Exp $");
 
 /*
  * SiS 900/SiS 7016 fast ethernet PCI NIC driver. Datasheets are
@@ -1432,7 +1432,11 @@ sis_rxeof(struct sis_softc *sc)
 		 * it should simply get re-used next time this descriptor
 	 	 * comes up in the ring.
 		 */
-		if (!(rxstat & SIS_CMDSTS_PKT_OK)) {
+		if ((ifp->if_capenable & IFCAP_VLAN_MTU) != 0 &&
+		    total_len <= (ETHER_MAX_LEN + ETHER_VLAN_ENCAP_LEN -
+		    ETHER_CRC_LEN))
+			rxstat &= ~SIS_RXSTAT_GIANT;
+		if (SIS_RXSTAT_ERROR(rxstat) != 0) {
 			ifp->if_ierrors++;
 			if (rxstat & SIS_RXSTAT_COLL)
 				ifp->if_collisions++;

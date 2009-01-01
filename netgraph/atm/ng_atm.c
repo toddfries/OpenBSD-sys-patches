@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netgraph/atm/ng_atm.c,v 1.17 2008/10/02 15:37:58 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netgraph/atm/ng_atm.c,v 1.18 2008/12/02 21:37:28 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -54,6 +54,7 @@ __FBSDID("$FreeBSD: src/sys/netgraph/atm/ng_atm.c,v 1.17 2008/10/02 15:37:58 zec
 #include <net/if_var.h>
 #include <net/if_media.h>
 #include <net/if_atm.h>
+#include <net/vnet.h>
 
 #include <netgraph/ng_message.h>
 #include <netgraph/netgraph.h>

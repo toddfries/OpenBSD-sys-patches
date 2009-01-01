@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net/ieee8023ad_lacp.c,v 1.15 2008/03/16 19:25:30 thompsa Exp $");
+__FBSDID("$FreeBSD: src/sys/net/ieee8023ad_lacp.c,v 1.16 2008/12/17 20:58:10 thompsa Exp $");
 
 #include <sys/param.h>
 #include <sys/callout.h>
@@ -901,6 +901,7 @@ lacp_aggregator_bandwidth(struct lacp_aggregator *la)
 static void
 lacp_select_active_aggregator(struct lacp_softc *lsc)
 {
+	struct lagg_softc *sc = lsc->lsc_softc;
 	struct lacp_aggregator *la;
 	struct lacp_aggregator *best_la = NULL;
 	uint64_t best_speed = 0;
@@ -956,6 +957,7 @@ lacp_select_active_aggregator(struct lacp_softc *lsc)
 #endif /* defined(LACP_DEBUG) */
 
 	if (lsc->lsc_active_aggregator != best_la) {
+		sc->sc_ifp->if_baudrate = best_speed;
 		lsc->lsc_active_aggregator = best_la;
 		lacp_update_portmap(lsc);
 		if (best_la) {

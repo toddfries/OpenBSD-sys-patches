@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/ehci_mbus.c,v 1.1 2008/10/14 07:05:20 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/ehci_mbus.c,v 1.2 2008/12/20 17:55:37 sam Exp $");
 
 #include "opt_bus.h"
 
@@ -47,8 +47,10 @@ __FBSDID("$FreeBSD: src/sys/dev/usb/ehci_mbus.c,v 1.1 2008/10/14 07:05:20 raj Ex
 #include <sys/bus.h>
 #include <sys/queue.h>
 #include <sys/lockmgr.h>
-#include <machine/bus.h>
 #include <sys/rman.h>
+#include <sys/endian.h>
+
+#include <machine/bus.h>
 #include <machine/resource.h>
 
 #include <dev/usb/usb.h>

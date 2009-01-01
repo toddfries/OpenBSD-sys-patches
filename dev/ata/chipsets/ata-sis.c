@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-sis.c,v 1.1 2008/10/09 12:56:57 sos Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-sis.c,v 1.2 2008/12/18 21:13:46 mav Exp $");
 
 #include "opt_ata.h"
 #include <sys/param.h>
@@ -104,6 +104,9 @@ ata_sis_probe(device_t dev)
      { 0, 0, 0, 0, 0, 0 }};
     char buffer[64];
     int found = 0;
+
+    if (pci_get_class(dev) != PCIC_STORAGE)
+	return (ENXIO);
 
     if (pci_get_vendor(dev) != ATA_SIS_ID)
 	return ENXIO;

@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/random/randomdev.c,v 1.61 2006/11/06 13:41:55 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/random/randomdev.c,v 1.62 2008/11/24 17:39:39 cperciva Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -90,6 +90,7 @@ random_close(struct cdev *dev __unused, int flags, int fmt __unused,
 	    && (securelevel_gt(td->td_ucred, 0) == 0)) {
 		(*random_systat.reseed)();
 		random_systat.seeded = 1;
+		arc4rand(NULL, 0, 1);	/* Reseed arc4random as well. */
 	}
 
 	return (0);

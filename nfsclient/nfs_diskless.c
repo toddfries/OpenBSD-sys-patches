@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_diskless.c,v 1.22 2008/10/02 15:37:58 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_diskless.c,v 1.23 2008/12/02 21:37:28 bz Exp $");
 
 #include "opt_bootp.h"
 
@@ -50,6 +50,8 @@ __FBSDID("$FreeBSD: src/sys/nfsclient/nfs_diskless.c,v 1.22 2008/10/02 15:37:58 
 #include <net/if_types.h>
 #include <net/if_var.h>
 #include <net/ethernet.h>
+#include <net/vnet.h>
+
 #include <netinet/in.h>
 #include <rpc/rpcclnt.h>
 #include <nfs/rpcv2.h>

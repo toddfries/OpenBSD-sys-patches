@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ath/ath_rate/amrr/amrr.c,v 1.17 2008/10/27 17:03:24 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ath/ath_rate/amrr/amrr.c,v 1.18 2008/12/01 16:53:01 sam Exp $");
 
 /*
  * AMRR rate control. See:
@@ -78,7 +78,7 @@ __FBSDID("$FreeBSD: src/sys/dev/ath/ath_rate/amrr/amrr.c,v 1.17 2008/10/27 17:03
 
 #include <dev/ath/if_athvar.h>
 #include <dev/ath/ath_rate/amrr/amrr.h>
-#include <contrib/dev/ath/ah_desc.h>
+#include <dev/ath/ath_hal/ah_desc.h>
 
 static	int ath_rateinterval = 1000;		/* rate ctl interval (ms)  */
 static	int ath_rate_max_success_threshold = 10;

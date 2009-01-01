@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  * 
  * $DragonFly: src/sys/dev/netif/mii_layer/truephy.c,v 1.3 2008/02/10 07:29:27 sephe Exp $
- * $FreeBSD: src/sys/dev/mii/truephy.c,v 1.1 2008/06/20 19:30:44 delphij Exp $
+ * $FreeBSD: src/sys/dev/mii/truephy.c,v 1.2 2008/11/28 23:44:13 bz Exp $
  */
 
 #include <sys/param.h>
@@ -57,7 +57,8 @@
 
 #include "miibus_if.h"
 
-#define FRAMELEN(mtu)	(ETHER_HDR_LEN + ETHER_VLAN_ENCAP_LEN + (mtu) + ETHER_CRC_LEN)
+#define	TRUEPHY_FRAMELEN(mtu)	\
+    (ETHER_HDR_LEN + ETHER_VLAN_ENCAP_LEN + (mtu) + ETHER_CRC_LEN)
 
 static int	truephy_service(struct mii_softc *, struct mii_data *, int);
 static int	truephy_attach(device_t);
@@ -298,7 +299,7 @@ truephy_reset(struct mii_softc *sc)
 
 	mii_phy_reset(sc);
 
-	if (FRAMELEN(sc->mii_pdata->mii_ifp->if_mtu) > 2048) {
+	if (TRUEPHY_FRAMELEN(sc->mii_pdata->mii_ifp->if_mtu) > 2048) {
 		int conf;
 
 		conf = PHY_READ(sc, TRUEPHY_CONF);

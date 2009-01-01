@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/in_mcast.c,v 1.10 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/in_mcast.c,v 1.12 2008/12/15 06:10:57 qingli Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -53,6 +53,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/in_mcast.c,v 1.10 2008/11/19 09:39:34 zec Ex
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/route.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -60,6 +61,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/in_mcast.c,v 1.10 2008/11/19 09:39:34 zec Ex
 #include <netinet/in_var.h>
 #include <netinet/ip_var.h>
 #include <netinet/igmp_var.h>
+#include <netinet/vinet.h>
 
 #ifndef __SOCKUNION_DECLARED
 union sockunion {
@@ -1034,7 +1036,7 @@ inp_join_group(struct inpcb *inp, struct sockopt *sopt)
 
 			ro.ro_rt = NULL;
 			*(struct sockaddr_in *)&ro.ro_dst = gsa->sin;
-			in_rtalloc_ign(&ro, RTF_CLONING,
+			in_rtalloc_ign(&ro, 0,
 			   inp->inp_inc.inc_fibnum);
 			if (ro.ro_rt != NULL) {
 				ifp = ro.ro_rt->rt_ifp;

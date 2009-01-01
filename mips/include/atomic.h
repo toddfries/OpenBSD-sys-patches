@@ -24,7 +24,7 @@
  * SUCH DAMAGE.
  *
  *	from: src/sys/alpha/include/atomic.h,v 1.21.2.3 2005/10/06 18:12:05 jhb
- * $FreeBSD: src/sys/mips/include/atomic.h,v 1.1 2008/04/13 07:22:52 imp Exp $
+ * $FreeBSD: src/sys/mips/include/atomic.h,v 1.2 2008/11/29 05:16:14 imp Exp $
  */
 
 #ifndef _MACHINE_ATOMIC_H_
@@ -50,6 +50,10 @@ mips_sync(void)
 			".set reorder\n"
 			: : : "memory");
 }
+
+#define mb()	mips_sync()
+#define wmb()	mips_sync()
+#define rmb()	mips_sync()
 
 /*
  * Various simple arithmetic on memory which is atomic in the presence

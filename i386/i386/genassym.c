@@ -33,10 +33,11 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/genassym.c,v 1.163 2008/08/15 20:51:31 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/genassym.c,v 1.165 2008/12/29 06:31:03 kmacy Exp $");
 
 #include "opt_apic.h"
 #include "opt_compat.h"
+#include "opt_hwpmc_hooks.h"
 #include "opt_kstack_pages.h"
 
 #include <sys/param.h>
@@ -44,6 +45,9 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/genassym.c,v 1.163 2008/08/15 20:51:31 kma
 #include <sys/assym.h>
 #include <sys/bio.h>
 #include <sys/buf.h>
+#ifdef	HWPMC_HOOKS
+#include <sys/pmckern.h>
+#endif
 #include <sys/proc.h>
 #include <sys/errno.h>
 #include <sys/mount.h>
@@ -230,7 +234,11 @@ ASSYM(BUS_SPACE_HANDLE_IAT, offsetof(struct bus_space_handle, bsh_iat));
 #endif
 
 #ifdef XEN
-#include <machine/xen/hypervisor.h>
+#include <xen/hypervisor.h>
 ASSYM(PC_CR3, offsetof(struct pcpu, pc_cr3));
 ASSYM(HYPERVISOR_VIRT_START, __HYPERVISOR_VIRT_START);
+#endif
+
+#ifdef	HWPMC_HOOKS
+ASSYM(PMC_FN_USER_CALLCHAIN, PMC_FN_USER_CALLCHAIN);
 #endif

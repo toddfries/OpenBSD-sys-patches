@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/trap.c,v 1.94 2008/09/04 20:52:54 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/trap.c,v 1.95 2008/12/20 00:33:10 nwhitehorn Exp $");
 
 #include "opt_ddb.h"
 #include "opt_ktr.h"
@@ -71,6 +71,7 @@ __FBSDID("$FreeBSD: src/sys/sparc64/sparc64/trap.c,v 1.94 2008/09/04 20:52:54 ma
 #include <security/audit/audit.h>
 
 #include <dev/ofw/openfirm.h>
+#include <machine/ofw_machdep.h>
 
 #include <vm/vm.h>
 #include <vm/pmap.h>
@@ -248,7 +249,7 @@ sun4u_set_traptable(void *tba_addr)
 	};
 
 	args.tba_addr = (cell_t)tba_addr;
-	openfirmware(&args);
+	ofw_entry(&args);
 }
 
 void

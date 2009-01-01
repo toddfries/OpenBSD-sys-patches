@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/libalias/alias_db.c,v 1.75 2008/08/30 20:58:34 csjp Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/libalias/alias_db.c,v 1.76 2008/12/10 23:12:39 zec Exp $");
 
 /*
     Alias_db.c encapsulates all data structures used for storing
@@ -146,7 +146,9 @@ __FBSDID("$FreeBSD: src/sys/netinet/libalias/alias_db.c,v 1.75 2008/08/30 20:58:
 #include <machine/stdarg.h>
 #include <sys/param.h>
 #include <sys/kernel.h>
+#include <sys/lock.h>
 #include <sys/module.h>
+#include <sys/rwlock.h>
 #include <sys/syslog.h>
 #else
 #include <stdarg.h>

@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/coretemp/coretemp.c,v 1.8 2008/05/14 10:02:25 rpaulo Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/coretemp/coretemp.c,v 1.9 2008/11/26 19:25:13 jkim Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -45,6 +45,7 @@ __FBSDID("$FreeBSD: src/sys/dev/coretemp/coretemp.c,v 1.8 2008/05/14 10:02:25 rp
 
 #include <machine/specialreg.h>
 #include <machine/cpufunc.h>
+#include <machine/cputypes.h>
 #include <machine/md_var.h>
 
 struct coretemp_softc {
@@ -94,7 +95,7 @@ coretemp_identify(driver_t *driver, device_t parent)
 		return;
 
 	/* Check that CPUID 0x06 is supported and the vendor is Intel.*/
-	if (cpu_high < 6 || strcmp(cpu_vendor, "GenuineIntel"))
+	if (cpu_high < 6 || cpu_vendor_id != CPU_VENDOR_INTEL)
 		return;
 	/*
 	 * CPUID 0x06 returns 1 if the processor has on-die thermal

@@ -1,5 +1,5 @@
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb2/controller/at91dci_atmelarm.c,v 1.2 2008/11/10 20:54:31 thompsa Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb2/controller/at91dci_atmelarm.c,v 1.4 2008/12/23 17:36:25 thompsa Exp $");
 
 /*-
  * Copyright (c) 2007-2008 Hans Petter Selasky. All rights reserved.
@@ -87,7 +87,6 @@ at91_vbus_interrupt(struct at91_udp_softc *sc)
 	vbus_val = at91_pio_gpio_get(VBUS_BASE, VBUS_MASK);
 	(sc->sc_dci.sc_bus.methods->vbus_interrupt)
 	    (&sc->sc_dci.sc_bus, vbus_val);
-	return;
 }
 
 static void
@@ -97,7 +96,6 @@ at91_udp_clocks_on(void *arg)
 
 	at91_pmc_clock_enable(sc->sc_iclk);
 	at91_pmc_clock_enable(sc->sc_fclk);
-	return;
 }
 
 static void
@@ -107,21 +105,18 @@ at91_udp_clocks_off(void *arg)
 
 	at91_pmc_clock_disable(sc->sc_fclk);
 	at91_pmc_clock_disable(sc->sc_iclk);
-	return;
 }
 
 static void
 at91_udp_pull_up(void *arg)
 {
 	at91_pio_gpio_set(PULLUP_BASE, PULLUP_MASK);
-	return;
 }
 
 static void
 at91_udp_pull_down(void *arg)
 {
 	at91_pio_gpio_clear(PULLUP_BASE, PULLUP_MASK);
-	return;
 }
 
 static int
@@ -152,6 +147,7 @@ at91_udp_attach(device_t dev)
 
 	/* get all DMA memory */
 
+	sc->sc_dci.sc_bus.parent = dev;
 	if (usb2_bus_mem_alloc_all(&sc->sc_dci.sc_bus,
 	    USB_GET_DMA_TAG(dev), NULL)) {
 		return (ENOMEM);

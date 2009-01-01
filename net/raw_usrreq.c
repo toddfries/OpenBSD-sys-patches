@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)raw_usrreq.c	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/net/raw_usrreq.c,v 1.48 2008/10/02 15:37:58 zec Exp $
+ * $FreeBSD: src/sys/net/raw_usrreq.c,v 1.49 2008/12/02 21:37:28 bz Exp $
  */
 
 #include <sys/param.h>
@@ -48,6 +48,7 @@
 
 #include <net/if.h>
 #include <net/raw_cb.h>
+#include <net/vnet.h>
 
 MTX_SYSINIT(rawcb_mtx, &rawcb_mtx, "rawcb", MTX_DEF);
 

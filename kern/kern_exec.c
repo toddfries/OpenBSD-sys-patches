@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_exec.c,v 1.326 2008/11/05 19:40:36 rodrigc Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_exec.c,v 1.327 2008/12/05 20:50:24 kib Exp $");
 
 #include "opt_hwpmc_hooks.h"
 #include "opt_kdtrace.h"
@@ -609,7 +609,7 @@ interpret:
 	p->p_flag |= P_EXEC;
 	if (p->p_pptr && (p->p_flag & P_PPWAIT)) {
 		p->p_flag &= ~P_PPWAIT;
-		wakeup(p->p_pptr);
+		cv_broadcast(&p->p_pwait);
 	}
 
 	/*

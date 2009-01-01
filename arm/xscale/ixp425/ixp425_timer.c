@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425_timer.c,v 1.2 2007/02/23 12:18:28 piso Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425_timer.c,v 1.3 2008/12/20 03:26:09 sam Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -86,14 +86,14 @@ static struct timecounter ixp425_timer_timecounter = {
 	NULL, 				/* no poll_pps */
 	~0u, 				/* counter_mask */
 	COUNTS_PER_SEC,			/* frequency */
-	"IXP425 Timer", 		/* name */
+	"IXP4XX Timer", 		/* name */
 	1000,				/* quality */
 };
 
 static int
 ixpclk_probe(device_t dev)
 {
-	device_set_desc(dev, "IXP425 Timer");
+	device_set_desc(dev, "IXP4XX Timer");
 	return (0);
 }
 

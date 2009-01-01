@@ -74,7 +74,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_fastfwd.c,v 1.45 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_fastfwd.c,v 1.47 2008/12/15 06:10:57 qingli Exp $");
 
 #include "opt_ipfw.h"
 #include "opt_ipstealth.h"
@@ -103,6 +103,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_fastfwd.c,v 1.45 2008/11/19 09:39:34 zec 
 #include <netinet/ip_var.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/ip_options.h>
+#include <netinet/vinet.h>
 
 #include <machine/in_cksum.h>
 
@@ -127,7 +128,7 @@ ip_findroute(struct route *ro, struct in_addr dest, struct mbuf *m)
 	dst->sin_family = AF_INET;
 	dst->sin_len = sizeof(*dst);
 	dst->sin_addr.s_addr = dest.s_addr;
-	in_rtalloc_ign(ro, RTF_CLONING, M_GETFIB(m));
+	in_rtalloc_ign(ro, 0, M_GETFIB(m));
 
 	/*
 	 * Route there and interface still up?

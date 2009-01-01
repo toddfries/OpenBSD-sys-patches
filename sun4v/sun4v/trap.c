@@ -37,7 +37,7 @@
  *
  *      from: @(#)trap.c        7.4 (Berkeley) 5/13/91
  * 	from: FreeBSD: src/sys/i386/i386/trap.c,v 1.197 2001/07/19
- * $FreeBSD: src/sys/sun4v/sun4v/trap.c,v 1.17 2007/12/25 17:52:01 rwatson Exp $
+ * $FreeBSD: src/sys/sun4v/sun4v/trap.c,v 1.18 2008/12/20 00:33:10 nwhitehorn Exp $
  */
 
 #include "opt_ddb.h"
@@ -261,7 +261,7 @@ set_mmfsa_traptable(void *tba_addr, uint64_t mmfsa_ra)
 
 	args.tba_addr = (cell_t)tba_addr;
 	args.mmfsa_ra = mmfsa_ra;
-	openfirmware(&args);
+	ofw_entry(&args);
 }
 
 void 

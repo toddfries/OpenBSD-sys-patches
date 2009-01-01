@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/mips/machdep.c,v 1.5 2008/10/12 02:31:09 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/mips/machdep.c,v 1.6 2008/11/30 08:40:04 imp Exp $");
 
 #include "opt_ddb.h"
 #include "opt_md.h"
@@ -168,8 +168,6 @@ cpu_startup(void *dummy)
 	/*
 	 * Good {morning,afternoon,evening,night}.
 	 */
-	printf("%s", version);
-
 	printf("real memory  = %lu (%luK bytes)\n", ptoa(Maxmem),
 	    ptoa(Maxmem) / 1024);
 	realmem = Maxmem;

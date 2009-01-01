@@ -95,9 +95,10 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/uipc_socket.c,v 1.322 2008/11/22 12:36:15 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/uipc_socket.c,v 1.325 2008/12/10 22:17:09 bz Exp $");
 
 #include "opt_inet.h"
+#include "opt_inet6.h"
 #include "opt_mac.h"
 #include "opt_zero.h"
 #include "opt_compat.h"
@@ -235,10 +236,13 @@ SYSCTL_PROC(_kern_ipc, OID_AUTO, maxsockets, CTLTYPE_INT|CTLFLAG_RW,
     "Maximum number of sockets avaliable");
 
 /*
- * Initialise maxsockets.
+ * Initialise maxsockets.  This SYSINIT must be run after
+ * tunable_mbinit().
  */
-static void init_maxsockets(void *ignored)
+static void
+init_maxsockets(void *ignored)
 {
+
 	TUNABLE_INT_FETCH("kern.ipc.maxsockets", &maxsockets);
 	maxsockets = imax(maxsockets, imax(maxfiles, nmbclusters));
 }
@@ -346,6 +350,9 @@ socreate(int dom, struct socket **aso, int type, int proto,
 	if (jailed(cred) && jail_socket_unixiproute_only &&
 	    prp->pr_domain->dom_family != PF_LOCAL &&
 	    prp->pr_domain->dom_family != PF_INET &&
+#ifdef INET6
+	    prp->pr_domain->dom_family != PF_INET6 &&
+#endif
 	    prp->pr_domain->dom_family != PF_ROUTE) {
 		return (EPROTONOSUPPORT);
 	}

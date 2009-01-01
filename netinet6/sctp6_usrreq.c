@@ -30,7 +30,7 @@
 /*	$KAME: sctp6_usrreq.c,v 1.38 2005/08/24 08:08:56 suz Exp $	*/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/sctp6_usrreq.c,v 1.46 2008/07/09 16:45:30 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/sctp6_usrreq.c,v 1.47 2008/12/06 13:19:54 rrs Exp $");
 
 #include <netinet/sctp_os.h>
 #include <sys/proc.h>
@@ -286,6 +286,9 @@ sctp6_notify_mbuf(struct sctp_inpcb *inp, struct icmp6_hdr *icmp6,
 	/* Adjust destination size limit */
 	if (net->mtu > nxtsz) {
 		net->mtu = nxtsz;
+		if (net->port) {
+			net->mtu -= sizeof(struct udphdr);
+		}
 	}
 	/* now what about the ep? */
 	if (stcb->asoc.smallest_mtu > nxtsz) {

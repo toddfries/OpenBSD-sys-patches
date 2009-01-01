@@ -1,5 +1,5 @@
 #
-# $FreeBSD: src/sys/mips/conf/SENTRY5,v 1.6 2008/10/23 02:16:38 marcel Exp $
+# $FreeBSD: src/sys/mips/conf/SENTRY5,v 1.7 2008/12/01 16:53:01 sam Exp $
 #
 # The Broadcom Sentry5 series of processors and boards is very commonly
 # used in COTS hardware including the Netgear WGT634U.
@@ -79,7 +79,8 @@ device		miibus			# attachments
 # pci devices
 # notyet:
 #device		ath			# in pci slot
-#device		ath_hal			# in pci slot
+#device		ath_hal			# pci chip support
+#options		AH_SUPPORT_AR5416	# enable AR5416 tx/rx descriptors
 
 device		usb			# USB Bus (required)
 device		uhci			# UHCI PCI->USB interface

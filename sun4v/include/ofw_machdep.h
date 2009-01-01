@@ -22,17 +22,22 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
  * USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sun4v/include/ofw_machdep.h,v 1.1 2006/10/05 06:14:26 kmacy Exp $
+ * $FreeBSD: src/sys/sun4v/include/ofw_machdep.h,v 1.2 2008/12/20 15:11:00 nwhitehorn Exp $
  */
 
 #ifndef _MACHINE_OFW_MACHDEP_H_
 #define _MACHINE_OFW_MACHDEP_H_
 
 #include <sys/bus.h>
+#include <machine/bus.h>
+#include <dev/ofw/openfirm.h>
+
+typedef uint64_t cell_t;
 
 int  OF_decode_addr(phandle_t, int, int *, bus_addr_t *);
 void OF_getetheraddr(device_t, u_char *);
 void cpu_shutdown(void *);
-void openfirmware_exit(void *);
+int  ofw_entry(void *);
+void ofw_exit(void *);
 
 #endif /* _MACHINE_OFW_MACHDEP_H_ */

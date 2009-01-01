@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/kern.pre.mk,v 1.101 2008/09/23 03:16:54 kmacy Exp $
+# $FreeBSD: src/sys/conf/kern.pre.mk,v 1.102 2008/12/01 16:53:01 sam Exp $
 
 # Part of a unified Makefile for building kernels.  This part contains all
 # of the definitions that need to be before %BEFORE_DEPEND.
@@ -66,8 +66,8 @@ INCLUDES+= -I$S/contrib/ipfilter
 # ... and the same for pf
 INCLUDES+= -I$S/contrib/pf
 
-# ... and the same for Atheros HAL
-INCLUDES+= -I$S/dev/ath
+# ... and the same for ath
+INCLUDES+= -I$S/dev/ath -I$S/dev/ath/ath_hal
 
 # ... and the same for the NgATM stuff
 INCLUDES+= -I$S/contrib/ngatm

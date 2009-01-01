@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net/bpf.c,v 1.202 2008/10/23 15:53:51 des Exp $");
+__FBSDID("$FreeBSD: src/sys/net/bpf.c,v 1.203 2008/11/26 22:32:07 zec Exp $");
 
 #include "opt_bpf.h"
 #include "opt_mac.h"
@@ -56,6 +56,7 @@ __FBSDID("$FreeBSD: src/sys/net/bpf.c,v 1.202 2008/10/23 15:53:51 des Exp $");
 #include <sys/sockio.h>
 #include <sys/ttycom.h>
 #include <sys/uio.h>
+#include <sys/vimage.h>
 
 #include <sys/event.h>
 #include <sys/file.h>
@@ -566,7 +567,9 @@ bpf_detachd(struct bpf_d *d)
 	 */
 	if (d->bd_promisc) {
 		d->bd_promisc = 0;
+		CURVNET_SET(ifp->if_vnet);
 		error = ifpromisc(ifp, 0);
+		CURVNET_RESTORE();
 		if (error != 0 && error != ENXIO) {
 			/*
 			 * ENXIO can happen if a pccard is unplugged
@@ -872,7 +875,9 @@ bpfwrite(struct cdev *dev, struct uio *uio, int ioflag)
 
 #ifdef MAC
 	BPFD_LOCK(d);
+	CURVNET_SET(ifp->if_vnet);
 	mac_bpfdesc_create_mbuf(d, m);
+	CURVNET_RESTORE();
 	if (mc != NULL)
 		mac_bpfdesc_create_mbuf(d, mc);
 	BPFD_UNLOCK(d);
@@ -993,6 +998,7 @@ bpfioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flags,
 			return (EPERM);
 		}
 	}
+	CURVNET_SET(TD_TO_VNET(td));
 	switch (cmd) {
 
 	default:
@@ -1322,6 +1328,7 @@ bpfioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flags,
 	case BIOCROTZBUF:
 		return (bpf_ioctl_rotzbuf(td, d, (struct bpf_zbuf *)addr));
 	}
+	CURVNET_RESTORE();
 	return (error);
 }
 

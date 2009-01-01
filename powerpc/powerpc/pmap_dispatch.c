@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/powerpc/pmap_dispatch.c,v 1.15 2008/08/31 20:08:13 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/powerpc/pmap_dispatch.c,v 1.16 2008/12/20 00:33:10 nwhitehorn Exp $");
 
 /*
  * Dispatch MI pmap calls to the appropriate MMU implementation
@@ -37,9 +37,8 @@ __FBSDID("$FreeBSD: src/sys/powerpc/powerpc/pmap_dispatch.c,v 1.15 2008/08/31 20
  * the highest priority call will be installed as the default
  * MMU handler when pmap_bootstrap() is called.
  *
- * It is required that kobj_machdep_init() be called before
- * pmap_bootstrap() to allow the kobj subsystem to initialise. This
- * in turn requires that mutex_init() has been called.
+ * It is required that mutex_init() be called before pmap_bootstrap(), 
+ * as the PMAP layer makes extensive use of mutexes.
  */
 
 #include <sys/param.h>

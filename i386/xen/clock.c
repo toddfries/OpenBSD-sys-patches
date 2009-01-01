@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/xen/clock.c,v 1.5 2008/10/25 20:42:10 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/xen/clock.c,v 1.6 2008/12/29 06:31:03 kmacy Exp $");
 
 /* #define DELAYDEBUG */
 /*
@@ -78,11 +78,11 @@ __FBSDID("$FreeBSD: src/sys/i386/xen/clock.c,v 1.5 2008/10/25 20:42:10 kmacy Exp
 #include <i386/isa/isa.h>
 #include <isa/rtc.h>
 
-#include <machine/xen/xen_intr.h>
+#include <xen/xen_intr.h>
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <machine/pmap.h>
-#include <machine/xen/hypervisor.h>
+#include <xen/hypervisor.h>
 #include <machine/xen/xen-os.h>
 #include <machine/xen/xenfunc.h>
 #include <xen/interface/vcpu.h>
@@ -791,18 +791,20 @@ static struct vcpu_set_periodic_timer xen_set_periodic_tick;
 void
 cpu_initclocks(void)
 {
-	int time_irq;
-
+	unsigned int time_irq;
+	int error;
+	
 	xen_set_periodic_tick.period_ns = NS_PER_TICK;
 
 	HYPERVISOR_vcpu_op(VCPUOP_set_periodic_timer, 0,
 			   &xen_set_periodic_tick);
-
-        if ((time_irq = bind_virq_to_irqhandler(VIRQ_TIMER, 0, "clk", 
-		                                clkintr, NULL,
-						INTR_TYPE_CLK | INTR_FAST)) < 0) {
+	
+        error = bind_virq_to_irqhandler(VIRQ_TIMER, 0, "clk", 
+	    clkintr, NULL, NULL,
+	    INTR_TYPE_CLK | INTR_FAST, &time_irq);
+	if (error)
 		panic("failed to register clock interrupt\n");
-	}
+
 
 	/* should fast clock be enabled ? */
 	
@@ -811,18 +813,19 @@ cpu_initclocks(void)
 int
 ap_cpu_initclocks(int cpu)
 {
-	int time_irq;
+	unsigned int time_irq;
+	int error;
 
 	xen_set_periodic_tick.period_ns = NS_PER_TICK;
 
 	HYPERVISOR_vcpu_op(VCPUOP_set_periodic_timer, cpu,
 			   &xen_set_periodic_tick);
-
-        if ((time_irq = bind_virq_to_irqhandler(VIRQ_TIMER, cpu, "clk", 
-						clkintr2, NULL,
-						INTR_TYPE_CLK | INTR_FAST)) < 0) {
+        error = bind_virq_to_irqhandler(VIRQ_TIMER, 0, "clk", 
+	    clkintr, NULL, NULL,
+	    INTR_TYPE_CLK | INTR_FAST, &time_irq);
+	if (error)
 		panic("failed to register clock interrupt\n");
-	}
+
 
 	return (0);
 }

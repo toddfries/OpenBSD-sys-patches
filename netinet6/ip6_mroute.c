@@ -79,7 +79,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/ip6_mroute.c,v 1.51 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/ip6_mroute.c,v 1.52 2008/12/02 21:37:28 bz Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -107,10 +107,12 @@ __FBSDID("$FreeBSD: src/sys/netinet6/ip6_mroute.c,v 1.51 2008/11/19 09:39:34 zec
 #include <net/if_types.h>
 #include <net/raw_cb.h>
 #include <net/route.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 #include <netinet/icmp6.h>
+#include <netinet/vinet.h>
 
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
@@ -120,6 +122,7 @@ __FBSDID("$FreeBSD: src/sys/netinet6/ip6_mroute.c,v 1.51 2008/11/19 09:39:34 zec
 #include <netinet6/ip6protosw.h>
 #include <netinet6/pim6.h>
 #include <netinet6/pim6_var.h>
+#include <netinet6/vinet6.h>
 
 static MALLOC_DEFINE(M_MRTABLE6, "mf6c", "multicast forwarding cache entry");
 

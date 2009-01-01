@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/busdma_machdep.c,v 1.39 2008/10/13 18:59:59 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/busdma_machdep.c,v 1.40 2008/11/30 22:58:27 stas Exp $");
 
 /*
  * ARM bus dma support routines
@@ -673,9 +673,8 @@ _bus_dmamap_count_pages(bus_dma_tag_t dmat, bus_dmamap_t map, void *buf,
 	bus_addr_t paddr;
 
 	if ((map->pagesneeded == 0)) {
-		CTR4(KTR_BUSDMA, "lowaddr= %d Maxmem= %d, boundary= %d, "
-		    "alignment= %d", dmat->lowaddr, ptoa((vm_paddr_t)Maxmem),
-		    dmat->boundary, dmat->alignment);
+		CTR3(KTR_BUSDMA, "lowaddr= %d, boundary= %d, alignment= %d",
+		    dmat->lowaddr, dmat->boundary, dmat->alignment);
 		CTR2(KTR_BUSDMA, "map= %p, pagesneeded= %d",
 		    map, map->pagesneeded);
 		/*

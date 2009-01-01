@@ -41,7 +41,7 @@
 #include "opt_inet6.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf.c,v 1.58 2008/10/04 15:06:34 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf.c,v 1.60 2008/12/15 06:10:57 qingli Exp $");
 #endif
 
 #ifdef __FreeBSD__
@@ -120,6 +120,9 @@ __FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf.c,v 1.58 2008/10/04 15:06:34 bz Ex
 #include <netinet/udp_var.h>
 #include <netinet/icmp_var.h>
 #include <netinet/if_ether.h>
+#ifdef __FreeBSD__
+#include <netinet/vinet.h>
+#endif
 
 #ifndef __FreeBSD__
 #include <dev/rndvar.h>
@@ -139,6 +142,7 @@ __FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf.c,v 1.58 2008/10/04 15:06:34 bz Ex
 #ifdef __FreeBSD__
 #include <netinet6/ip6_var.h>
 #include <netinet6/in6_pcb.h>
+#include <netinet6/vinet6.h>
 #endif
 #endif /* INET6 */
 
@@ -3158,7 +3162,7 @@ pf_calc_mss(struct pf_addr *addr, sa_family_t af, u_int16_t offer)
 #ifdef RTF_PRCLONING
 		rtalloc_ign(&ro, (RTF_CLONING | RTF_PRCLONING));
 #else /* !RTF_PRCLONING */
-		in_rtalloc_ign(&ro, RTF_CLONING, 0);
+		in_rtalloc_ign(&ro, 0, 0);
 #endif
 #else /* ! __FreeBSD__ */
 		rtalloc_noclone(&ro, NO_CLONING);
@@ -3179,7 +3183,7 @@ pf_calc_mss(struct pf_addr *addr, sa_family_t af, u_int16_t offer)
 		rtalloc_ign((struct route *)&ro6,
 		    (RTF_CLONING | RTF_PRCLONING));
 #else /* !RTF_PRCLONING */
-		rtalloc_ign((struct route *)&ro6, RTF_CLONING);
+		rtalloc_ign((struct route *)&ro6, 0);
 #endif
 #else /* ! __FreeBSD__ */
 		rtalloc_noclone((struct route *)&ro6, NO_CLONING);
@@ -5982,9 +5986,9 @@ pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kif *kif)
 #ifdef __FreeBSD__
 /* XXX MRT not always INET */ /* stick with table 0 though */
 	if (af == AF_INET)
-		in_rtalloc_ign((struct route *)&ro, RTF_CLONING, 0);
+		in_rtalloc_ign((struct route *)&ro, 0, 0);
 	else
-		rtalloc_ign((struct route *)&ro, RTF_CLONING);
+		rtalloc_ign((struct route *)&ro, 0);
 #else /* ! __FreeBSD__ */
 	rtalloc_noclone((struct route *)&ro, NO_CLONING);
 #endif
@@ -6064,9 +6068,9 @@ pf_rtlabel_match(struct pf_addr *addr, sa_family_t af, struct pf_addr_wrap *aw)
 	rtalloc_ign((struct route *)&ro, (RTF_CLONING|RTF_PRCLONING));
 # else /* !RTF_PRCLONING */
 	if (af == AF_INET)
-		in_rtalloc_ign((struct route *)&ro, RTF_CLONING, 0);
+		in_rtalloc_ign((struct route *)&ro, 0, 0);
 	else
-		rtalloc_ign((struct route *)&ro, RTF_CLONING);
+		rtalloc_ign((struct route *)&ro, 0);
 # endif
 #else /* ! __FreeBSD__ */
 	rtalloc_noclone((struct route *)&ro, NO_CLONING);

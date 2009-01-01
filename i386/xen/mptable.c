@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/xen/mptable.c,v 1.1 2008/09/10 07:11:08 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/xen/mptable.c,v 1.2 2008/12/29 06:31:03 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -45,7 +45,7 @@ __FBSDID("$FreeBSD: src/sys/i386/xen/mptable.c,v 1.1 2008/09/10 07:11:08 kmacy E
 #include <machine/mptable.h>
 #include <machine/specialreg.h>
 
-#include <machine/xen/hypervisor.h>
+#include <xen/hypervisor.h>
 #include <machine/xen/xen-os.h>
 #include <machine/smp.h>
 #include <xen/interface/vcpu.h>

@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_output.c,v 1.289 2008/11/19 19:19:30 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_output.c,v 1.293 2008/12/15 06:10:57 qingli Exp $");
 
 #include "opt_ipfw.h"
 #include "opt_ipsec.h"
@@ -59,6 +59,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_output.c,v 1.289 2008/11/19 19:19:30 juli
 #ifdef RADIX_MPATH
 #include <net/radix_mpath.h>
 #endif
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -67,6 +68,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_output.c,v 1.289 2008/11/19 19:19:30 juli
 #include <netinet/in_var.h>
 #include <netinet/ip_var.h>
 #include <netinet/ip_options.h>
+#include <netinet/vinet.h>
 
 #ifdef IPSEC
 #include <netinet/ip_ipsec.h>
@@ -565,7 +567,6 @@ passout:
 		 * to avoid confusing lower layers.
 		 */
 		m->m_flags &= ~(M_PROTOFLAGS);
-
 		error = (*ifp->if_output)(ifp, m,
 				(struct sockaddr *)dst, ro->ro_rt);
 		goto done;

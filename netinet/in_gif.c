@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/in_gif.c,v 1.42 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/in_gif.c,v 1.43 2008/12/02 21:37:28 bz Exp $");
 
 #include "opt_mrouting.h"
 #include "opt_inet.h"
@@ -59,6 +59,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/in_gif.c,v 1.42 2008/11/19 09:39:34 zec Exp 
 #include <netinet/in_var.h>
 #include <netinet/ip_encap.h>
 #include <netinet/ip_ecn.h>
+#include <netinet/vinet.h>
 
 #ifdef INET6
 #include <netinet/ip6.h>

@@ -71,7 +71,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/tcp_sack.c,v 1.45 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/tcp_sack.c,v 1.47 2008/12/10 23:12:39 zec Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -119,6 +119,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_sack.c,v 1.45 2008/11/19 09:39:34 zec Ex
 #ifdef TCPDEBUG
 #include <netinet/tcp_debug.h>
 #endif /* TCPDEBUG */
+#include <netinet/vinet.h>
 
 #include <machine/in_cksum.h>
 
@@ -134,7 +135,6 @@ int tcp_sack_globalholes;
 SYSCTL_NODE(_net_inet_tcp, OID_AUTO, sack, CTLFLAG_RW, 0, "TCP SACK");
 SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp_sack, OID_AUTO, enable,
     CTLFLAG_RW, tcp_do_sack, 0, "Enable/Disable TCP SACK support");
-TUNABLE_INT("net.inet.tcp.sack.enable", &tcp_do_sack);
 
 SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp_sack, OID_AUTO, maxholes,
     CTLFLAG_RW, tcp_sack_maxholes, 0, 

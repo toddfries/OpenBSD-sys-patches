@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net80211/ieee80211_node.h,v 1.41 2008/10/26 01:04:46 sam Exp $
+ * $FreeBSD: src/sys/net80211/ieee80211_node.h,v 1.42 2008/12/15 00:47:24 sam Exp $
  */
 #ifndef _NET80211_IEEE80211_NODE_H_
 #define _NET80211_IEEE80211_NODE_H_
@@ -117,6 +117,7 @@ struct ieee80211_node {
 #define	IEEE80211_NODE_RIFS	0x004000	/* RIFS enabled */
 #define	IEEE80211_NODE_SGI20	0x008000	/* Short GI in HT20 enabled */
 #define	IEEE80211_NODE_SGI40	0x010000	/* Short GI in HT40 enabled */
+#define	IEEE80211_NODE_ASSOCID	0x020000	/* xmit requires associd */
 	uint16_t		ni_associd;	/* association ID */
 	uint16_t		ni_vlan;	/* vlan tag */
 	uint16_t		ni_txpower;	/* current transmit power */

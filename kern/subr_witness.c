@@ -85,7 +85,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_witness.c,v 1.262 2008/10/23 20:26:15 des Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_witness.c,v 1.263 2008/12/07 21:15:43 kmacy Exp $");
 
 #include "opt_ddb.h"
 #include "opt_hwpmc_hooks.h"
@@ -505,7 +505,7 @@ static struct witness_order_list_entry order_lists[] = {
 	 * Routing
 	 */
 	{ "so_rcv", &lock_class_mtx_sleep },
-	{ "radix node head", &lock_class_mtx_sleep },
+	{ "radix node head", &lock_class_rw },
 	{ "rtentry", &lock_class_mtx_sleep },
 	{ "ifaddr", &lock_class_mtx_sleep },
 	{ NULL, NULL },

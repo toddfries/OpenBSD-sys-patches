@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/cxgb/Makefile,v 1.16 2008/09/24 01:19:08 kmacy Exp $
+# $FreeBSD: src/sys/modules/cxgb/Makefile,v 1.17 2008/12/15 06:10:57 qingli Exp $
 SUBDIR= cxgb
 SUBDIR+= ${_toecore}
 SUBDIR+= ${_tom}
@@ -25,7 +25,7 @@ _toe_header = ${_sysdir}/netinet/toedev.h
 
 .if exists(${_toe_header})
 _toecore = toecore
-_tom = tom
+#_tom = tom
 .endif
 
 .if ${MACHINE_ARCH} == "i386" && exists(${_toe_header})

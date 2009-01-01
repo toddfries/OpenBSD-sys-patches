@@ -22,7 +22,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net80211/ieee80211_dfs.h,v 1.1 2008/04/20 20:35:43 sam Exp $
+ * $FreeBSD: src/sys/net80211/ieee80211_dfs.h,v 1.2 2008/12/15 01:26:33 sam Exp $
  */
 #ifndef _NET80211_IEEE80211_DFS_H_
 #define _NET80211_IEEE80211_DFS_H_
@@ -32,7 +32,7 @@
  */
 
 struct ieee80211_dfs_state {
-	int		nol_event[IEEE80211_CHAN_MAX+1];
+	int		nol_event[IEEE80211_CHAN_MAX];
 	struct callout	nol_timer;		/* NOL list processing */
 	struct callout	cac_timer;		/* CAC timer */
 	struct timeval	lastevent;		/* time of last radar event */

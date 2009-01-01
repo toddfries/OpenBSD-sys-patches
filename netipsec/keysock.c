@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/keysock.c,v 1.25 2008/11/19 09:39:34 zec Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/keysock.c,v 1.28 2008/12/02 21:37:28 bz Exp $	*/
 /*	$KAME: keysock.c,v 1.25 2001/08/13 20:07:41 itojun Exp $	*/
 
 /*-
@@ -55,6 +55,7 @@
 #include <net/if.h>
 #include <net/raw_cb.h>
 #include <net/route.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 
@@ -66,17 +67,12 @@
 
 #include <machine/stdarg.h>
 
-struct key_cb {
-	int key_count;
-	int any_count;
-};
-
 #ifdef VIMAGE_GLOBALS
 static struct key_cb key_cb;
 struct pfkeystat pfkeystat;
 #endif
 
-static struct sockaddr key_src = { 2, PF_KEY, };
+static struct sockaddr key_src = { 2, PF_KEY };
 
 static int key_sendup0 __P((struct rawcb *, struct mbuf *, int));
 
@@ -166,7 +162,7 @@ key_sendup0(rp, m, promisc)
 		V_pfkeystat.in_msgtype[pmsg->sadb_msg_type]++;
 	}
 
-	if (!sbappendaddr(&rp->rcb_socket->so_rcv, (struct sockaddr *)&V_key_src,
+	if (!sbappendaddr(&rp->rcb_socket->so_rcv, (struct sockaddr *)&key_src,
 	    m, NULL)) {
 		V_pfkeystat.in_nomem++;
 		m_freem(m);

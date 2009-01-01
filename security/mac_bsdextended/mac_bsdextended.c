@@ -37,7 +37,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_bsdextended/mac_bsdextended.c,v 1.52 2008/10/30 10:13:53 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac_bsdextended/mac_bsdextended.c,v 1.53 2008/11/29 14:32:14 bz Exp $
  */
 
 /*
@@ -57,6 +57,7 @@
 #include <sys/mount.h>
 #include <sys/mutex.h>
 #include <sys/priv.h>
+#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/vnode.h>
 #include <sys/sysctl.h>

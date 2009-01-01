@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/vm_machdep.c,v 1.292 2008/10/05 02:03:54 davidxu Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/vm_machdep.c,v 1.293 2008/12/29 06:31:03 kmacy Exp $");
 
 #include "opt_isa.h"
 #include "opt_npx.h"
@@ -89,7 +89,7 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/vm_machdep.c,v 1.292 2008/10/05 02:03:54 d
 #include <vm/vm_param.h>
 
 #ifdef XEN
-#include <machine/xen/hypervisor.h>
+#include <xen/hypervisor.h>
 #endif
 #ifdef PC98
 #include <pc98/cbus/cbus.h>

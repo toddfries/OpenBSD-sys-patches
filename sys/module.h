@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/module.h,v 1.24 2008/03/16 10:58:01 rwatson Exp $
+ * $FreeBSD: src/sys/sys/module.h,v 1.25 2008/12/05 13:40:25 jhb Exp $
  */
 
 #ifndef _SYS_MODULE_H_
@@ -154,11 +154,13 @@ void	module_register_init(const void *);
 int	module_register(const struct moduledata *, struct linker_file *);
 module_t	module_lookupbyname(const char *);
 module_t	module_lookupbyid(int);
+int	module_quiesce(module_t);
 void	module_reference(module_t);
 void	module_release(module_t);
-int	module_unload(module_t, int flags);
+int	module_unload(module_t);
 int	module_getid(module_t);
 module_t	module_getfnext(module_t);
+const char *	module_getname(module_t);
 void	module_setspecific(module_t, modspecific_t *);
 struct linker_file *module_file(module_t);
 

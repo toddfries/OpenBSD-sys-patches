@@ -43,7 +43,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/uipc_mqueue.c,v 1.38 2008/10/28 13:44:11 trasz Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/uipc_mqueue.c,v 1.39 2008/11/28 14:53:18 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -793,7 +793,8 @@ mqfs_search(struct mqfs_node *pd, const char *name, int len)
 
 	sx_assert(&pd->mn_info->mi_lock, SX_LOCKED);
 	LIST_FOREACH(pn, &pd->mn_children, mn_sibling) {
-		if (strncmp(pn->mn_name, name, len) == 0)
+		if (strncmp(pn->mn_name, name, len) == 0 &&
+		    pn->mn_name[len] == '\0')
 			return (pn);
 	}
 	return (NULL);

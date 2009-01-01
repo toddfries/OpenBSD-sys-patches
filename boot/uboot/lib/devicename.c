@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/uboot/lib/devicename.c,v 1.3 2008/11/19 17:34:28 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/uboot/lib/devicename.c,v 1.4 2008/12/17 15:58:07 raj Exp $");
 
 #include <sys/disklabel.h>
 
@@ -35,7 +35,8 @@ __FBSDID("$FreeBSD: src/sys/boot/uboot/lib/devicename.c,v 1.3 2008/11/19 17:34:2
 #include "bootstrap.h"
 #include "libuboot.h"
 
-static int uboot_parsedev(struct uboot_devdesc **dev, const char *devspec, const char **path);
+static int uboot_parsedev(struct uboot_devdesc **dev, const char *devspec,
+    const char **path);
 
 /*
  * Point (dev) at an allocated device specifier for the device matching the
@@ -178,11 +179,11 @@ uboot_parsedev(struct uboot_devdesc **dev, const char *devspec,
 	} else {
 		*dev = idev;
 	}
-	return(0);
+	return (0);
 
 fail:
 	free(idev);
-	return(err);
+	return (err);
 }
 
 
@@ -191,7 +192,7 @@ uboot_fmtdev(void *vdev)
 {
 	struct uboot_devdesc *dev = (struct uboot_devdesc *)vdev;
 	char *cp;
-	static char buf[128];	/* XXX device length constant? */
+	static char buf[128];
 
 	switch(dev->d_type) {
 	case DEVT_NONE:
@@ -220,12 +221,12 @@ uboot_fmtdev(void *vdev)
 int
 uboot_setcurrdev(struct env_var *ev, int flags, const void *value)
 {
-	struct uboot_devdesc	*ncurr;
-	int			 rv;
+	struct uboot_devdesc *ncurr;
+	int rv;
 
 	if ((rv = uboot_parsedev(&ncurr, value, NULL)) != 0)
-		return(rv);
+		return (rv);
 	free(ncurr);
 	env_setenv(ev->ev_name, flags | EV_NOHOOK, value, NULL, NULL);
-	return(0);
+	return (0);
 }

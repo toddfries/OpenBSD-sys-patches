@@ -1,7 +1,7 @@
-# $FreeBSD: src/sys/modules/netgraph/gif/Makefile,v 1.3 2005/10/14 23:30:12 yar Exp $
+# $FreeBSD: src/sys/modules/netgraph/gif/Makefile,v 1.4 2008/12/02 21:37:28 bz Exp $
 
 KMOD=	ng_gif
-SRCS= 	ng_gif.c opt_inet.h opt_inet6.h
+SRCS= 	ng_gif.c opt_inet.h opt_inet6.h opt_route.h
 
 .if !defined(KERNBUILDDIR)
 opt_inet.h:

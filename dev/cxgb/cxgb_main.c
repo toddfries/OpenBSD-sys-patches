@@ -28,7 +28,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/cxgb_main.c,v 1.73 2008/11/23 07:30:07 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/cxgb_main.c,v 1.78 2008/12/18 14:21:35 gnn Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -90,6 +90,7 @@ static void cxgb_stop_locked(struct port_info *);
 static void cxgb_set_rxmode(struct port_info *);
 static int cxgb_ioctl(struct ifnet *, unsigned long, caddr_t);
 static int cxgb_media_change(struct ifnet *);
+static int cxgb_ifm_type(int);
 static void cxgb_media_status(struct ifnet *, struct ifmediareq *);
 static int setup_sge_qsets(adapter_t *);
 static void cxgb_async_intr(void *);
@@ -281,6 +282,7 @@ struct cxgb_ident {
 	{PCI_VENDOR_ID_CHELSIO, 0x0031, 3, "T3B20"},
 	{PCI_VENDOR_ID_CHELSIO, 0x0032, 1, "T3B02"},
 	{PCI_VENDOR_ID_CHELSIO, 0x0033, 4, "T3B04"},
+	{PCI_VENDOR_ID_CHELSIO, 0x0035, 6, "N310E"},
 	{0, 0, 0, NULL}
 };
 
@@ -402,6 +404,8 @@ cxgb_controller_attach(device_t dev)
 	int msi_needed, reg;
 #endif
 	int must_load = 0;
+	char buf[80];
+
 	sc = device_get_softc(dev);
 	sc->dev = dev;
 	sc->msi_count = 0;
@@ -442,12 +446,14 @@ cxgb_controller_attach(device_t dev)
 		return (ENXIO);
 	}
 	sc->udbs_rid = PCIR_BAR(2);
-	if ((sc->udbs_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY,
-           &sc->udbs_rid, RF_ACTIVE)) == NULL) {
+	sc->udbs_res = NULL;
+	if (is_offload(sc) &&
+	    ((sc->udbs_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY,
+		   &sc->udbs_rid, RF_ACTIVE)) == NULL)) {
 		device_printf(dev, "Cannot allocate BAR region 1\n");
 		error = ENXIO;
 		goto out;
-       }
+	}
 
 	snprintf(sc->lockbuf, ADAPTER_LOCK_NAME_LEN, "cxgb controller lock %d",
 	    device_get_unit(dev));
@@ -613,6 +619,11 @@ cxgb_controller_attach(device_t dev)
 	snprintf(&sc->fw_version[0], sizeof(sc->fw_version), "%d.%d.%d",
 	    G_FW_VERSION_MAJOR(vers), G_FW_VERSION_MINOR(vers),
 	    G_FW_VERSION_MICRO(vers));
+
+	snprintf(buf, sizeof(buf), "%s\t E/C: %s S/N: %s", 
+		 ai->desc,
+		 sc->params.vpd.ec, sc->params.vpd.sn);
+	device_set_desc_copy(dev, buf);
 
 	device_printf(sc->dev, "Firmware Version %s\n", &sc->fw_version[0]);
 	callout_reset(&sc->cxgb_tick_ch, CXGB_TICKS(sc), cxgb_tick, sc);
@@ -966,7 +977,7 @@ cxgb_port_attach(device_t dev)
 	} else if (!strcmp(p->phy.desc, "10GBASE-SR")) {
 		media_flags = IFM_ETHER | IFM_10G_SR | IFM_FDX;
 	} else if (!strcmp(p->phy.desc, "10GBASE-R")) {
-		media_flags = IFM_ETHER | IFM_10G_LR | IFM_FDX;
+		media_flags = cxgb_ifm_type(p->phy.modtype);
 	} else if (!strcmp(p->phy.desc, "10/100/1000BASE-T")) {
 		ifmedia_add(&p->media, IFM_ETHER | IFM_10_T, 0, NULL);
 		ifmedia_add(&p->media, IFM_ETHER | IFM_10_T | IFM_FDX,
@@ -982,6 +993,9 @@ cxgb_port_attach(device_t dev)
 		/*
 		 * XXX: This is not very accurate.  Fix when common code
 		 * returns more specific value - eg 1000BASE-SX, LX, etc.
+		 *
+		 * XXX: In the meantime, don't lie. Consider setting IFM_AUTO
+		 * instead of SX.
 		 */
 		media_flags = IFM_ETHER | IFM_1000_SX | IFM_FDX;
 	} else {
@@ -989,7 +1003,13 @@ cxgb_port_attach(device_t dev)
 		return (ENXIO);
 	}
 	if (media_flags) {
-		ifmedia_add(&p->media, media_flags, 0, NULL);
+		/*
+		 * Note the modtype on which we based our flags.  If modtype
+		 * changes, we'll redo the ifmedia for this ifp.  modtype may
+		 * change when transceivers are plugged in/out, and in other
+		 * situations.
+		 */
+		ifmedia_add(&p->media, media_flags, p->phy.modtype, NULL);
 		ifmedia_set(&p->media, media_flags);
 	} else {
 		ifmedia_add(&p->media, IFM_ETHER | IFM_AUTO, 0, NULL);
@@ -1817,7 +1837,7 @@ cxgb_init_locked(struct port_info *p)
 	cxgb_link_start(p);
 	t3_link_changed(sc, p->port_id);
 #endif
-	ifp->if_baudrate = p->link_config.speed * 1000000;
+	ifp->if_baudrate = IF_Mbps(p->link_config.speed);
 
 	device_printf(sc->dev, "enabling interrupts on port=%d\n", p->port_id);
 	t3_port_intr_enable(sc, p->port_id);
@@ -1980,7 +2000,9 @@ cxgb_ioctl(struct ifnet *ifp, unsigned long command, caddr_t data)
 		break;
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
+		PORT_LOCK(p);
 		error = ifmedia_ioctl(ifp, ifr, &p->media, command);
+		PORT_UNLOCK(p);
 		break;
 	case SIOCSIFCAP:
 		PORT_LOCK(p);
@@ -2056,10 +2078,64 @@ cxgb_media_change(struct ifnet *ifp)
 	return (ENXIO);
 }
 
+/*
+ * Translates from phy->modtype to IFM_TYPE.
+ */
+static int
+cxgb_ifm_type(int phymod)
+{
+	int rc = IFM_ETHER | IFM_FDX;
+
+	switch (phymod) {
+	case phy_modtype_sr:
+		rc |= IFM_10G_SR;
+		break;
+	case phy_modtype_lr:
+		rc |= IFM_10G_LR;
+		break;
+	case phy_modtype_lrm:
+#ifdef IFM_10G_LRM
+		rc |= IFM_10G_LRM;
+#endif
+		break;
+	case phy_modtype_twinax:
+#ifdef IFM_10G_TWINAX
+		rc |= IFM_10G_TWINAX;
+#endif
+		break;
+	case phy_modtype_twinax_long:
+#ifdef IFM_10G_TWINAX_LONG
+		rc |= IFM_10G_TWINAX_LONG;
+#endif
+		break;
+	case phy_modtype_none:
+		rc = IFM_ETHER | IFM_NONE;
+		break;
+	case phy_modtype_unknown:
+		break;
+	}
+
+	return (rc);
+}
+
 static void
 cxgb_media_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 {
 	struct port_info *p = ifp->if_softc;
+	struct ifmedia_entry *cur = p->media.ifm_cur;
+	int m;
+
+	if (cur->ifm_data != p->phy.modtype) { 
+		/* p->media about to be rebuilt, must hold lock */
+		PORT_LOCK_ASSERT_OWNED(p);
+
+		m = cxgb_ifm_type(p->phy.modtype);
+		ifmedia_removeall(&p->media);
+		ifmedia_add(&p->media, m, p->phy.modtype, NULL); 
+		ifmedia_set(&p->media, m);
+		cur = p->media.ifm_cur; /* ifmedia_set modified ifm_cur */
+		ifmr->ifm_current = m;
+	}
 
 	ifmr->ifm_status = IFM_AVALID;
 	ifmr->ifm_active = IFM_ETHER;
@@ -2078,6 +2154,9 @@ cxgb_media_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 			break;
 	case 1000:
 		ifmr->ifm_active |= IFM_1000_T;
+		break;
+	case 10000:
+		ifmr->ifm_active |= IFM_SUBTYPE(cur->ifm_media);
 		break;
 	}
 	
@@ -2130,7 +2209,7 @@ check_link_status(adapter_t *sc)
 
 		if (!(p->phy.caps & SUPPORTED_IRQ)) 
 			t3_link_changed(sc, i);
-		p->ifp->if_baudrate = p->link_config.speed * 1000000;
+		p->ifp->if_baudrate = IF_Mbps(p->link_config.speed);
 	}
 }
 
@@ -2185,7 +2264,7 @@ cxgb_tick(void *arg)
 	if(sc->flags & CXGB_SHUTDOWN)
 		return;
 
-	taskqueue_enqueue(sc->tq, &sc->tick_task);
+	taskqueue_enqueue(sc->tq, &sc->tick_task);	
 	callout_reset(&sc->cxgb_tick_ch, CXGB_TICKS(sc), cxgb_tick, sc);
 }
 
@@ -2203,6 +2282,7 @@ cxgb_tick_handler(void *arg, int count)
 	if (p->linkpoll_period)
 		check_link_status(sc);
 
+	
 	sc->check_task_cnt++;
 
 	/*
@@ -2214,17 +2294,59 @@ cxgb_tick_handler(void *arg, int count)
 	if (p->rev == T3_REV_B2 && p->nports < 4 && sc->open_device_map) 
 		check_t3b2_mac(sc);
 
-	/* Update MAC stats if it's time to do so */
-	if (!p->linkpoll_period ||
-	    (sc->check_task_cnt * p->linkpoll_period) / 10 >=
-	    p->stats_update_period) {
-		for_each_port(sc, i) {
-			struct port_info *port = &sc->port[i];
-			PORT_LOCK(port);
-			t3_mac_update_stats(&port->mac);
-			PORT_UNLOCK(port);
-		}
-		sc->check_task_cnt = 0;
+	for (i = 0; i < sc->params.nports; i++) {
+		struct port_info *pi = &sc->port[i];
+		struct ifnet *ifp = pi->ifp;
+		struct mac_stats *mstats = &pi->mac.stats;
+		PORT_LOCK(pi);
+		t3_mac_update_stats(&pi->mac);
+		PORT_UNLOCK(pi);
+
+		
+		ifp->if_opackets =
+		    mstats->tx_frames_64 +
+		    mstats->tx_frames_65_127 +
+		    mstats->tx_frames_128_255 +
+		    mstats->tx_frames_256_511 +
+		    mstats->tx_frames_512_1023 +
+		    mstats->tx_frames_1024_1518 +
+		    mstats->tx_frames_1519_max;
+		
+		ifp->if_ipackets =
+		    mstats->rx_frames_64 +
+		    mstats->rx_frames_65_127 +
+		    mstats->rx_frames_128_255 +
+		    mstats->rx_frames_256_511 +
+		    mstats->rx_frames_512_1023 +
+		    mstats->rx_frames_1024_1518 +
+		    mstats->rx_frames_1519_max;
+
+		ifp->if_obytes = mstats->tx_octets;
+		ifp->if_ibytes = mstats->rx_octets;
+		ifp->if_omcasts = mstats->tx_mcast_frames;
+		ifp->if_imcasts = mstats->rx_mcast_frames;
+		
+		ifp->if_collisions =
+		    mstats->tx_total_collisions;
+
+		ifp->if_iqdrops = mstats->rx_cong_drops;
+		
+		ifp->if_oerrors =
+		    mstats->tx_excess_collisions +
+		    mstats->tx_underrun +
+		    mstats->tx_len_errs +
+		    mstats->tx_mac_internal_errs +
+		    mstats->tx_excess_deferral +
+		    mstats->tx_fcs_errs;
+		ifp->if_ierrors =
+		    mstats->rx_jabber +
+		    mstats->rx_data_errs +
+		    mstats->rx_sequence_errs +
+		    mstats->rx_runt + 
+		    mstats->rx_too_long +
+		    mstats->rx_mac_internal_errs +
+		    mstats->rx_short +
+		    mstats->rx_fcs_errs;
 	}
 }
 

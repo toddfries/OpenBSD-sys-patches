@@ -1,5 +1,5 @@
 /*	$NetBSD: ucomvar.h,v 1.9 2001/01/23 21:56:17 augustss Exp $	*/
-/*	$FreeBSD: src/sys/dev/usb/ucomvar.h,v 1.13 2008/09/27 08:51:18 ed Exp $	*/
+/*	$FreeBSD: src/sys/dev/usb/ucomvar.h,v 1.14 2008/12/14 20:03:46 phk Exp $	*/
 
 /*-
  * Copyright (c) 2001-2002, Shunsuke Akiyama <akiyama@jp.FreeBSD.org>.
@@ -166,3 +166,4 @@ void ucom_attach_tty(struct ucom_softc *, char*, int);
 int ucom_attach(struct ucom_softc *);
 int ucom_detach(struct ucom_softc *);
 void ucom_status_change(struct ucom_softc *);
+void ucomrxchars(struct ucom_softc *sc, u_char *cp, u_int32_t cc);

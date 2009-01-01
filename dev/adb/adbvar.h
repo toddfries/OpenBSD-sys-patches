@@ -22,7 +22,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/adb/adbvar.h,v 1.2 2008/10/30 15:27:13 nwhitehorn Exp $
+ * $FreeBSD: src/sys/dev/adb/adbvar.h,v 1.3 2008/12/06 23:26:02 nwhitehorn Exp $
  */
 
 #ifndef	_POWERPC_ADBVAR_H_
@@ -40,7 +40,6 @@ struct adb_softc {
 	device_t	parent;
 
 	struct intr_config_hook enum_hook;
-	struct mtx	sc_sync_mtx;
 	
 	volatile int 	sync_packet;
 	volatile int	packet_reply;

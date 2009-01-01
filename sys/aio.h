@@ -13,7 +13,7 @@
  * bad that happens because of using this software isn't the responsibility
  * of the author.  This software is distributed AS-IS.
  *
- * $FreeBSD: src/sys/sys/aio.h,v 1.32 2006/03/23 08:47:28 davidxu Exp $
+ * $FreeBSD: src/sys/sys/aio.h,v 1.33 2008/12/10 19:45:58 jhb Exp $
  */
 
 #ifndef _SYS_AIO_H_
@@ -69,7 +69,8 @@ typedef struct aiocb {
 	off_t	aio_offset;		/* File offset for I/O */
 	volatile void *aio_buf;         /* I/O buffer in process space */
 	size_t	aio_nbytes;		/* Number of bytes for I/O */
-	char 	__spare__[sizeof(int) * 2 + sizeof(void *)]; /* osigevent. */
+	int	__spare__[2];
+	void	*__spare2__;
 	int	aio_lio_opcode;		/* LIO opcode */
 	int	aio_reqprio;		/* Request priority -- ignored */
 	struct	__aiocb_private	_aiocb_private;

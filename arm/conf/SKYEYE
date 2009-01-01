@@ -16,7 +16,7 @@
 # If you are in doubt as to the purpose or necessity of a line, check first 
 # in NOTES.
 #
-# $FreeBSD: src/sys/arm/conf/SKYEYE,v 1.11 2008/10/23 01:51:55 marcel Exp $
+# $FreeBSD: src/sys/arm/conf/SKYEYE,v 1.12 2008/11/30 17:53:19 sam Exp $
 
 ident		KB920X
 
@@ -26,6 +26,7 @@ options		PHYSADDR=0xc0000000
 include		"../at91/std.kb920x"
 #To statically compile in device wiring instead of /boot/device.hints
 #hints		"GENERIC.hints"		#Default places to look for devices.
+makeoptions	MODULES_OVERRIDE=""
 
 makeoptions	DEBUG=-g		#Build kernel with gdb(1) debug symbols
 makeoptions	CONF_CFLAGS=-mcpu=arm9

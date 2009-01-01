@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net/radix_mpath.c,v 1.8 2008/11/11 09:40:27 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/net/radix_mpath.c,v 1.9 2008/12/15 06:10:57 qingli Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -266,8 +266,8 @@ rtalloc_mpath_fib(struct route *ro, u_int32_t hash, u_int fibnum)
 	 * be done for sendto(3) case?
 	 */
 	if (ro->ro_rt && ro->ro_rt->rt_ifp && (ro->ro_rt->rt_flags & RTF_UP))
-		return;				 /* XXX */
-	ro->ro_rt = rtalloc1_fib(&ro->ro_dst, 1, RTF_CLONING, fibnum);
+		return;				 
+	ro->ro_rt = rtalloc1_fib(&ro->ro_dst, 1, 0, fibnum);
 
 	/* if the route does not exist or it is not multipath, don't care */
 	if (ro->ro_rt == NULL)

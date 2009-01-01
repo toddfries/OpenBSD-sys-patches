@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/pci/apb.c,v 1.15 2008/04/17 12:38:00 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/pci/apb.c,v 1.16 2008/12/15 15:31:10 nwhitehorn Exp $");
 
 /*
  * Support for the Sun APB (Advanced PCI Bridge) PCI-PCI bridge.
@@ -53,7 +53,6 @@ __FBSDID("$FreeBSD: src/sys/sparc64/pci/apb.c,v 1.15 2008/04/17 12:38:00 marius 
 #include <dev/ofw/openfirm.h>
 
 #include <machine/bus.h>
-#include <machine/ofw_bus.h>
 #include <machine/resource.h>
 
 #include <dev/pci/pcireg.h>

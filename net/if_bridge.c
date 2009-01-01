@@ -75,7 +75,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net/if_bridge.c,v 1.118 2008/10/02 15:37:58 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/net/if_bridge.c,v 1.120 2008/12/10 23:12:39 zec Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -100,6 +100,7 @@ __FBSDID("$FreeBSD: src/sys/net/if_bridge.c,v 1.118 2008/10/02 15:37:58 zec Exp 
 #include <sys/proc.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
+#include <sys/rwlock.h>
 #include <sys/vimage.h>
 
 #include <net/bpf.h>
@@ -115,9 +116,11 @@ __FBSDID("$FreeBSD: src/sys/net/if_bridge.c,v 1.118 2008/10/02 15:37:58 zec Exp 
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
+#include <netinet/vinet.h>
 #ifdef INET6
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
+#include <netinet6/vinet6.h>
 #endif
 #ifdef DEV_CARP
 #include <netinet/ip_carp.h>
@@ -3039,7 +3042,7 @@ bridge_pfil(struct mbuf **mp, struct ifnet *bifp, struct ifnet *ifp, int dir)
 	}
 
 	if (IPFW_LOADED && pfil_ipfw != 0 && dir == PFIL_OUT && ifp != NULL) {
-		INIT_VNET_IPFW(curvnet);
+		INIT_VNET_INET(curvnet);
 
 		error = -1;
 		args.rule = ip_dn_claim_rule(*mp);

@@ -50,7 +50,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_ccd.c,v 1.156 2008/08/09 11:14:05 des Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_ccd.c,v 1.157 2008/11/25 20:28:33 lulf Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -709,8 +709,20 @@ g_ccd_create(struct gctl_req *req, struct g_class *mp)
 
 	g_topology_assert();
 	unit = gctl_get_paraml(req, "unit", sizeof (*unit));
+	if (unit == NULL) {
+		gctl_error(req, "unit parameter not given");
+		return;
+	}
 	ileave = gctl_get_paraml(req, "ileave", sizeof (*ileave));
+	if (ileave == NULL) {
+		gctl_error(req, "ileave parameter not given");
+		return;
+	}
 	nprovider = gctl_get_paraml(req, "nprovider", sizeof (*nprovider));
+	if (nprovider == NULL) {
+		gctl_error(req, "nprovider parameter not given");
+		return;
+	}
 
 	/* Check for duplicate unit */
 	LIST_FOREACH(gp, &mp->geom, geom) {
@@ -838,7 +850,11 @@ g_ccd_list(struct gctl_req *req, struct g_class *mp)
 	struct g_geom *gp;
 	int i, unit, *up;
 
-	up = gctl_get_paraml(req, "unit", sizeof (int));
+	up = gctl_get_paraml(req, "unit", sizeof (*up));
+	if (up == NULL) {
+		gctl_error(req, "unit parameter not given");
+		return;
+	}
 	unit = *up;
 	sb = sbuf_new_auto();
 	LIST_FOREACH(gp, &mp->geom, geom) {

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_cpu.c,v 1.30 2008/05/05 19:13:52 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_cpu.c,v 1.31 2008/12/16 01:24:05 mav Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -144,7 +144,9 @@ static int
 cpufreq_attach(device_t dev)
 {
 	struct cpufreq_softc *sc;
+	struct pcpu *pc;
 	device_t parent;
+	uint64_t rate;
 	int numdevs;
 
 	CF_DEBUG("initializing %s\n", device_get_nameunit(dev));
@@ -156,7 +158,12 @@ cpufreq_attach(device_t dev)
 	CF_MTX_INIT(&sc->lock);
 	sc->curr_level.total_set.freq = CPUFREQ_VAL_UNKNOWN;
 	SLIST_INIT(&sc->saved_freq);
-	sc->max_mhz = CPUFREQ_VAL_UNKNOWN;
+	/* Try to get current CPU freq to use it as maximum later if needed */
+	pc = cpu_get_pcpu(dev);
+	if (cpu_est_clockrate(pc->pc_cpuid, &rate) == 0)
+		sc->max_mhz = rate / 1000000;
+	else
+		sc->max_mhz = CPUFREQ_VAL_UNKNOWN;
 
 	/*
 	 * Only initialize one set of sysctls for all CPUs.  In the future,

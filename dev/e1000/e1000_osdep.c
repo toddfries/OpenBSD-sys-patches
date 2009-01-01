@@ -30,7 +30,7 @@
   POSSIBILITY OF SUCH DAMAGE.
 
 ******************************************************************************/
-/*$FreeBSD: src/sys/dev/e1000/e1000_osdep.c,v 1.1 2008/07/30 21:56:53 jfv Exp $*/
+/*$FreeBSD: src/sys/dev/e1000/e1000_osdep.c,v 1.2 2008/11/26 23:57:23 jfv Exp $*/
 
 #include "e1000_api.h"
 
@@ -78,24 +78,4 @@ e1000_read_pcie_cap_reg(struct e1000_hw *hw, uint32_t reg, uint16_t *value)
 	    reg, &result);
 	*value = (u16)result;
 	return (E1000_SUCCESS);
-}
-
-int32_t
-e1000_alloc_zeroed_dev_spec_struct(struct e1000_hw *hw, uint32_t size)
-{
-	int32_t error = 0;
-
-	hw->dev_spec = malloc(size, M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (hw->dev_spec == NULL)
-		error = ENOMEM;
-
-	return (error);
-}
-
-void
-e1000_free_dev_spec_struct(struct e1000_hw *hw)
-{
-	if (hw->dev_spec != NULL)
-		free(hw->dev_spec, M_DEVBUF);
-	return;
 }

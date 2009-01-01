@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_rwlock.c,v 1.41 2008/09/10 19:13:30 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_rwlock.c,v 1.42 2008/12/08 21:46:55 kmacy Exp $");
 
 #include "opt_ddb.h"
 #include "opt_no_adaptive_rwlocks.h"
@@ -189,6 +189,14 @@ rw_sysinit(void *arg)
 	struct rw_args *args = arg;
 
 	rw_init(args->ra_rw, args->ra_desc);
+}
+
+void
+rw_sysinit_flags(void *arg)
+{
+	struct rw_args_flags *args = arg;
+
+	rw_init_flags(args->ra_rw, args->ra_desc, args->ra_flags);
 }
 
 int

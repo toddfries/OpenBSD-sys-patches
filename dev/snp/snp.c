@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/snp/snp.c,v 1.111 2008/11/05 15:04:03 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/snp/snp.c,v 1.112 2008/12/13 21:17:46 mav Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -35,6 +35,7 @@ __FBSDID("$FreeBSD: src/sys/dev/snp/snp.c,v 1.111 2008/11/05 15:04:03 ed Exp $")
 #include <sys/malloc.h>
 #include <sys/module.h>
 #include <sys/poll.h>
+#include <sys/proc.h>
 #include <sys/snoop.h>
 #include <sys/sx.h>
 #include <sys/systm.h>
@@ -246,7 +247,7 @@ snp_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int flags,
 			sx_xunlock(&snp_register_lock);
 			return (EBUSY);
 		}
-		error = ttyhook_register(&ss->snp_tty, td, *(int *)data,
+		error = ttyhook_register(&ss->snp_tty, td->td_proc, *(int *)data,
 		    &snp_hook, ss);
 		sx_xunlock(&snp_register_lock);
 		if (error != 0)

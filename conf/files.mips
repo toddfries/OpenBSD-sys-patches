@@ -18,7 +18,7 @@
 # Copyright (c) 2001, 2004-2005, Juniper Networks, Inc.
 # All rights reserved.
 # JNPR: files.mips,v 1.11 2007/08/09 12:25:35 katta
-# $FreeBSD: src/sys/conf/files.mips,v 1.5 2008/10/23 02:16:38 marcel Exp $
+# $FreeBSD: src/sys/conf/files.mips,v 1.6 2008/12/01 16:53:01 sam Exp $
 #
 # The long compile-with and dependency lines are required because of
 # limitations in config: backslash-newline doesn't work in strings, and
@@ -75,13 +75,6 @@ geom/geom_bsd.c			optional	geom_bsd
 geom/geom_bsd_enc.c		optional	geom_bsd
 geom/geom_mbr.c			optional	geom_mbr
 geom/geom_mbr_enc.c		optional	geom_mbr
-hal.o				optional	ath_hal		\
-	compile-with		"ATH_HAL_CPU=mips; ATH_ENDIAN=`if ([ x${TARGET_BIG_ENDIAN} = x ]); then echo le; else echo be; fi;`; uudecode < $S/contrib/dev/ath/public/$$ATH_HAL_CPU-$$ATH_ENDIAN-elf.hal.o.uu" \
-	no-implicit-rule
-opt_ah.h			optional	ath_hal		\
-	compile-with		"ATH_HAL_CPU=mips; ATH_ENDIAN=`if ([ x${TARGET_BIG_ENDIAN} = x ]); then echo le; else echo be; fi;`; rm -f opt_ah.h; cp $S/contrib/dev/ath/public/$$ATH_HAL_CPU-$$ATH_ENDIAN-elf.opt_ah.h opt_ah.h" \
-	no-obj no-implicit-rule before-depend			\
-	clean		"opt_ah.h"
 libkern/ashldi3.c		standard
 libkern/ashrdi3.c		standard
 libkern/divdi3.c		standard

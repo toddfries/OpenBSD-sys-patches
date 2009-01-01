@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/uipc_domain.c,v 1.52 2008/03/16 10:58:05 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/uipc_domain.c,v 1.54 2008/12/25 11:32:38 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/socket.h>
@@ -110,15 +110,42 @@ protosw_init(struct protosw *pr)
 	    pr->pr_domain->dom_name,
 	    (int)(pr - pr->pr_domain->dom_protosw)));
 
+	/*
+	 * Protocol switch methods fall into three categories: mandatory,
+	 * mandatory but protosw_init() provides a default, and optional.
+	 *
+	 * For true protocols (i.e., pru_attach != NULL), KASSERT truly
+	 * mandatory methods with no defaults, and initialize defaults for
+	 * other mandatory methods if the protocol hasn't defined an
+	 * implementation (NULL function pointer).
+	 */
+#if 0
+	if (pu->pru_attach != NULL) {
+		KASSERT(pu->pru_abort != NULL,
+		    ("protosw_init: %ssw[%d] pru_abort NULL",
+		    pr->pr_domain->dom_name,
+		    (int)(pr - pr->pr_domain->dom_protosw)));
+		KASSERT(pu->pru_send != NULL,
+		    ("protosw_init: %ssw[%d] pru_send NULL",
+		    pr->pr_domain->dom_name,
+		    (int)(pr - pr->pr_domain->dom_protosw)));
+	}
+#endif
+
 #define DEFAULT(foo, bar)	if ((foo) == NULL)  (foo) = (bar)
 	DEFAULT(pu->pru_accept, pru_accept_notsupp);
+	DEFAULT(pu->pru_bind, pru_bind_notsupp);
 	DEFAULT(pu->pru_connect, pru_connect_notsupp);
 	DEFAULT(pu->pru_connect2, pru_connect2_notsupp);
 	DEFAULT(pu->pru_control, pru_control_notsupp);
+	DEFAULT(pu->pru_disconnect, pru_disconnect_notsupp);
 	DEFAULT(pu->pru_listen, pru_listen_notsupp);
+	DEFAULT(pu->pru_peeraddr, pru_peeraddr_notsupp);
 	DEFAULT(pu->pru_rcvd, pru_rcvd_notsupp);
 	DEFAULT(pu->pru_rcvoob, pru_rcvoob_notsupp);
 	DEFAULT(pu->pru_sense, pru_sense_null);
+	DEFAULT(pu->pru_shutdown, pru_shutdown_notsupp);
+	DEFAULT(pu->pru_sockaddr, pru_sockaddr_notsupp);
 	DEFAULT(pu->pru_sosend, sosend_generic);
 	DEFAULT(pu->pru_soreceive, soreceive_generic);
 	DEFAULT(pu->pru_sopoll, sopoll_generic);

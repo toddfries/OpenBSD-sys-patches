@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/gnu/fs/xfs/FreeBSD/xfs_vnops.c,v 1.13 2008/10/28 13:44:11 trasz Exp $
+ * $FreeBSD: src/sys/gnu/fs/xfs/FreeBSD/xfs_vnops.c,v 1.14 2008/12/16 21:13:11 trasz Exp $
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -1136,7 +1136,7 @@ _xfs_strategy(
 			bp->b_error = error;
 			bp->b_ioflags |= BIO_ERROR;
 			bufdone(bp);
-			return (error);
+			return (0);
 		}
 		if ((long)bp->b_blkno == -1)
 			vfs_bio_clrbuf(bp);

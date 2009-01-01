@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_list.c,v 1.3 2005/01/06 18:27:30 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_list.c,v 1.4 2008/11/25 19:13:58 lulf Exp $");
 
 #include <sys/param.h>
 #include <sys/libkern.h>
@@ -62,6 +62,10 @@ gv_list(struct g_geom *gp, struct gctl_req *req)
 	}
 
 	flags = gctl_get_paraml(req, "flags", sizeof(*flags));
+	if (flags == NULL) {
+		gctl_error(req, "no flags given");
+		return;
+	}
 
 	sc = gp->softc;
 
@@ -69,6 +73,10 @@ gv_list(struct g_geom *gp, struct gctl_req *req)
 
 	/* Figure out which command was given. */
 	cmd = gctl_get_param(req, "cmd", NULL);
+	if (cmd == NULL) {
+		gctl_error(req, "no command given");
+		return;
+	}
 
 	/* List specific objects or everything. */
 	if (!strcmp(cmd, "list") || !strcmp(cmd, "l")) {

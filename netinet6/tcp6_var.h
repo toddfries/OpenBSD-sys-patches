@@ -56,7 +56,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)tcp_var.h	8.4 (Berkeley) 5/24/95
- * $FreeBSD: src/sys/netinet6/tcp6_var.h,v 1.8 2007/12/10 16:03:39 obrien Exp $
+ * $FreeBSD: src/sys/netinet6/tcp6_var.h,v 1.9 2008/12/11 16:26:38 bz Exp $
  */
 
 #ifndef _NETINET_TCP6_VAR_H_
@@ -67,7 +67,9 @@
 SYSCTL_DECL(_net_inet6_tcp6);
 #endif
 
+#ifdef VIMAGE_GLOBALS
 extern	int tcp_v6mssdflt;	/* XXX */
+#endif
 
 struct	ip6_hdr;
 void	tcp6_ctlinput __P((int, struct sockaddr *, void *));

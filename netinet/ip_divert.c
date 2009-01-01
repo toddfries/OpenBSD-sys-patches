@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_divert.c,v 1.139 2008/11/19 19:19:30 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_divert.c,v 1.142 2008/12/10 23:12:39 zec Exp $");
 
 #if !defined(KLD_MODULE)
 #include "opt_inet.h"
@@ -52,6 +52,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_divert.c,v 1.139 2008/11/19 19:19:30 juli
 #include <sys/priv.h>
 #include <sys/proc.h>
 #include <sys/protosw.h>
+#include <sys/rwlock.h>
 #include <sys/signalvar.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
@@ -74,6 +75,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_divert.c,v 1.139 2008/11/19 19:19:30 juli
 #include <netinet/ip_divert.h>
 #include <netinet/ip_var.h>
 #include <netinet/ip_fw.h>
+#include <netinet/vinet.h>
 
 #include <security/mac/mac_framework.h>
 
@@ -166,7 +168,7 @@ div_init(void)
 	V_divcbinfo.ipi_zone = uma_zcreate("divcb", sizeof(struct inpcb),
 	    NULL, NULL, div_inpcb_init, div_inpcb_fini, UMA_ALIGN_PTR,
 	    UMA_ZONE_NOFREE);
-	uma_zone_set_max(divcbinfo.ipi_zone, maxsockets);
+	uma_zone_set_max(V_divcbinfo.ipi_zone, maxsockets);
 	EVENTHANDLER_REGISTER(maxsockets_change, div_zone_change,
 		NULL, EVENTHANDLER_PRI_ANY);
 }
@@ -581,6 +583,7 @@ div_ctlinput(int cmd, struct sockaddr *sa, void *vip)
 static int
 div_pcblist(SYSCTL_HANDLER_ARGS)
 {
+	INIT_VNET_INET(curvnet);
 	int error, i, n;
 	struct inpcb *inp, **inp_list;
 	inp_gen_t gencnt;

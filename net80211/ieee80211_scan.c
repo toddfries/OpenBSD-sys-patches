@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_scan.c,v 1.9 2008/10/23 19:57:13 des Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_scan.c,v 1.10 2008/12/18 23:00:09 sam Exp $");
 
 /*
  * IEEE 802.11 scanning support.
@@ -96,7 +96,7 @@ ieee80211_scan_attach(struct ieee80211com *ic)
 {
 	struct scan_state *ss;
 
-	MALLOC(ss, struct scan_state *, sizeof(struct scan_state),
+	ss = (struct scan_state *) malloc(sizeof(struct scan_state),
 		M_80211_SCAN, M_NOWAIT | M_ZERO);
 	if (ss == NULL) {
 		ic->ic_scan = NULL;
@@ -122,7 +122,7 @@ ieee80211_scan_detach(struct ieee80211com *ic)
 		}
 		ic->ic_flags &= ~IEEE80211_F_SCAN;
 		ic->ic_scan = NULL;
-		FREE(SCAN_PRIVATE(ss), M_80211_SCAN);
+		free(SCAN_PRIVATE(ss), M_80211_SCAN);
 	}
 }
 

@@ -54,7 +54,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/mpc85xx/nexus.c,v 1.1 2008/03/03 17:17:00 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/mpc85xx/nexus.c,v 1.2 2008/12/17 15:31:15 raj Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -70,13 +70,9 @@ __FBSDID("$FreeBSD: src/sys/powerpc/mpc85xx/nexus.c,v 1.1 2008/03/03 17:17:00 ra
  */
 static int	nexus_probe(device_t);
 static int	nexus_activate_resource(device_t, device_t, int, int,
-		    struct resource *);
+    struct resource *);
 static int	nexus_deactivate_resource(device_t, device_t, int, int,
-		    struct resource *);
-
-/*
- * Local routines
- */
+    struct resource *);
 
 static device_method_t nexus_methods[] = {
 	/* Device interface */

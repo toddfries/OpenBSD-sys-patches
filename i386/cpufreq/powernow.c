@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/cpufreq/powernow.c,v 1.8 2008/10/21 00:52:20 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/cpufreq/powernow.c,v 1.9 2008/11/26 22:33:55 jkim Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -865,7 +865,6 @@ pn_decode_acpi(device_t dev, device_t perf_dev)
 static void
 pn_identify(driver_t *driver, device_t parent)
 {
-	device_t child;
 
 	if ((amd_pminfo & AMDPM_FID) == 0 || (amd_pminfo & AMDPM_VID) == 0)
 		return;
@@ -878,7 +877,7 @@ pn_identify(driver_t *driver, device_t parent)
 	}
 	if (device_find_child(parent, "powernow", -1) != NULL)
 		return;
-	if ((child = BUS_ADD_CHILD(parent, 10, "powernow", -1)) == NULL)
+	if (BUS_ADD_CHILD(parent, 10, "powernow", -1) == NULL)
 		device_printf(parent, "powernow: add child failed\n");
 }
 

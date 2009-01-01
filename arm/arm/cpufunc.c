@@ -45,7 +45,7 @@
  * Created      : 30/01/97
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/cpufunc.c,v 1.23 2008/10/13 18:16:54 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/cpufunc.c,v 1.24 2008/12/20 03:26:09 sam Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -1211,7 +1211,7 @@ set_cpufuncs()
 #endif /* CPU_XSCALE_PXA2X0 */
 #ifdef CPU_XSCALE_IXP425
 	if (cputype == CPU_ID_IXP425_533 || cputype == CPU_ID_IXP425_400 ||
-            cputype == CPU_ID_IXP425_266) {
+            cputype == CPU_ID_IXP425_266 || cputype == CPU_ID_IXP435) {
 
 		cpufuncs = xscale_cpufuncs;
 #if defined(PERFCTRS)

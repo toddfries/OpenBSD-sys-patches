@@ -15,7 +15,7 @@
 # If you are in doubt as to the purpose or necessity of a line, check first 
 # in NOTES.
 #
-# $FreeBSD: src/sys/arm/conf/SIMICS,v 1.17 2008/10/23 01:51:55 marcel Exp $
+# $FreeBSD: src/sys/arm/conf/SIMICS,v 1.18 2008/11/30 17:53:19 sam Exp $
 
 ident		SIMICS
 
@@ -25,6 +25,7 @@ options PHYSADDR=0xc0000000
 include		"../sa11x0/std.sa11x0"
 #To statically compile in device wiring instead of /boot/device.hints
 #hints		"GENERIC.hints"		#Default places to look for devices.
+makeoptions	MODULES_OVERRIDE=""
 
 makeoptions	DEBUG=-g		#Build kernel with gdb(1) debug symbols
 makeoptions	CONF_CFLAGS=-mcpu=strongarm

@@ -25,7 +25,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/xen/xenfunc.h,v 1.3 2008/10/21 06:38:05 kmacy Exp $
+ * $FreeBSD: src/sys/i386/include/xen/xenfunc.h,v 1.4 2008/12/29 06:31:03 kmacy Exp $
  */
 
 
@@ -33,7 +33,7 @@
 #define _XEN_XENFUNC_H_
 
 #include <machine/xen/xen-os.h>
-#include <machine/xen/hypervisor.h>
+#include <xen/hypervisor.h>
 #include <machine/xen/xenpmap.h>
 #include <machine/segments.h>
 #include <sys/pcpu.h>

@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_sockio.c,v 1.21 2008/10/02 15:37:58 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_sockio.c,v 1.22 2008/12/02 21:37:28 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -39,6 +39,7 @@ __FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_sockio.c,v 1.21 2008/10/02 15:37:58
 #include <sys/vimage.h>
 
 #include <net/if.h>
+#include <net/vnet.h>
 
 #include <compat/svr4/svr4.h>
 #include <compat/svr4/svr4_util.h>

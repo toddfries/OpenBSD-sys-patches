@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb2/controller/usb2_bus.h,v 1.2 2008/11/10 20:54:31 thompsa Exp $ */
+/* $FreeBSD: src/sys/dev/usb2/controller/usb2_bus.h,v 1.3 2008/12/23 17:36:25 thompsa Exp $ */
 /*-
  * Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
  *
@@ -59,6 +59,7 @@ struct usb2_bus {
 	struct usb2_perm perm;
 	struct usb2_xfer_queue intr_q;
 
+	device_t parent;
 	device_t bdev;			/* filled by HC driver */
 
 	struct usb2_dma_parent_tag dma_parent_tag[1];

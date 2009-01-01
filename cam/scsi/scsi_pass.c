@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_pass.c,v 1.49 2008/09/26 14:19:52 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_pass.c,v 1.50 2008/12/21 06:20:11 scottl Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -346,12 +346,12 @@ passopen(struct cdev *dev, int flags, int fmt, struct thread *td)
 
 	if ((softc->flags & PASS_FLAG_OPEN) == 0) {
 		softc->flags |= PASS_FLAG_OPEN;
+		cam_periph_unlock(periph);
 	} else {
 		/* Device closes aren't symmertical, so fix up the refcount */
+		cam_periph_unlock(periph);
 		cam_periph_release(periph);
 	}
-
-	cam_periph_unlock(periph);
 
 	return (error);
 }

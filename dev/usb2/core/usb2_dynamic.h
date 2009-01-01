@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb2/core/usb2_dynamic.h,v 1.1 2008/11/04 02:31:03 alfred Exp $ */
+/* $FreeBSD: src/sys/dev/usb2/core/usb2_dynamic.h,v 1.2 2008/12/11 23:13:02 thompsa Exp $ */
 /*-
  * Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
  *
@@ -35,11 +35,16 @@ struct usb2_device_request;
 
 /* typedefs */
 
-typedef usb2_error_t (usb2_temp_setup_by_index_t)(struct usb2_device *udev, uint16_t index);
-typedef uint8_t (usb2_test_quirk_t)(const struct usb2_lookup_info *info, uint16_t quirk);
-typedef int (usb2_quirk_ioctl_t)(unsigned long cmd, caddr_t data, int fflag, struct thread *td);
-typedef void (usb2_temp_get_desc_t)(struct usb2_device *udev, struct usb2_device_request *req, const void **pPtr, uint16_t *pLength);
-typedef void (usb2_temp_unsetup_t)(struct usb2_device *udev);
+typedef usb2_error_t	(usb2_temp_setup_by_index_t)(struct usb2_device *udev,
+			    uint16_t index);
+typedef uint8_t		(usb2_test_quirk_t)(const struct usb2_lookup_info *info,
+			    uint16_t quirk);
+typedef int		(usb2_quirk_ioctl_t)(unsigned long cmd, caddr_t data,
+			    int fflag, struct thread *td);
+typedef void		(usb2_temp_get_desc_t)(struct usb2_device *udev,
+			    struct usb2_device_request *req, const void **pPtr,
+			    uint16_t *pLength);
+typedef void		(usb2_temp_unsetup_t)(struct usb2_device *udev);
 
 /* global function pointers */
 

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_output.c,v 1.70 2008/11/22 07:35:45 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_output.c,v 1.72 2008/12/31 21:21:46 sam Exp $");
 
 #include "opt_inet.h"
 #include "opt_wlan.h"
@@ -203,10 +203,8 @@ ieee80211_start(struct ifnet *ifp)
 			continue;
 		}
 		/* XXX AUTH'd */
-		/* XXX mark vap to identify if associd is required */
 		if (ni->ni_associd == 0 &&
-		    (vap->iv_opmode == IEEE80211_M_STA ||
-		     vap->iv_opmode == IEEE80211_M_HOSTAP || IS_DWDS(vap))) {
+		    (ni->ni_flags & IEEE80211_NODE_ASSOCID)) {
 			IEEE80211_DISCARD_MAC(vap, IEEE80211_MSG_OUTPUT,
 			    eh->ether_dhost, NULL,
 			    "sta not associated (type 0x%04x)",
@@ -268,7 +266,7 @@ ieee80211_start(struct ifnet *ifp)
 		m->m_pkthdr.rcvif = (void *)ni;
 
 		/* XXX defer if_start calls? */
-		error = (parent->if_transmit)(parent, m);
+		error = parent->if_transmit(parent, m);
 		if (error != 0) {
 			/* NB: IFQ_HANDOFF reclaims mbuf */
 			ieee80211_free_node(ni);

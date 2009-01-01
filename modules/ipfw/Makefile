@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/ipfw/Makefile,v 1.26 2007/07/03 12:46:06 mlaier Exp $
+# $FreeBSD: src/sys/modules/ipfw/Makefile,v 1.27 2008/12/02 21:37:28 bz Exp $
 
 .include <bsd.own.mk>
 
@@ -6,7 +6,7 @@
 
 KMOD=	ipfw
 SRCS=	ip_fw2.c ip_fw_pfil.c
-SRCS+=	opt_inet6.h opt_ipsec.h opt_mac.h
+SRCS+=	opt_inet6.h opt_ipsec.h opt_mac.h opt_route.h
 
 CFLAGS+= -DIPFIREWALL
 CFLAGS+= -I${.CURDIR}/../../contrib/pf

@@ -27,7 +27,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/amd64/linux32/linux.h,v 1.20 2008/11/16 15:45:41 kib Exp $
+ * $FreeBSD: src/sys/amd64/linux32/linux.h,v 1.22 2008/11/29 17:14:06 kib Exp $
  */
 
 #ifndef _AMD64_LINUX_H_
@@ -717,6 +717,22 @@ struct l_sockaddr {
 	char		sa_data[14];
 } __packed;
 
+struct l_msghdr {
+	l_uintptr_t	msg_name;
+	l_int		msg_namelen;
+	l_uintptr_t	msg_iov;
+	l_size_t	msg_iovlen;
+	l_uintptr_t	msg_control;
+	l_size_t	msg_controllen;
+	l_uint		msg_flags;
+};
+
+struct l_cmsghdr {
+	l_size_t	cmsg_len;
+	l_int		cmsg_level;
+	l_int		cmsg_type;
+};
+
 struct l_ifmap {
 	l_ulong		mem_start;
 	l_ulong		mem_end;
@@ -884,6 +900,16 @@ struct l_user_desc {
 #define	LINUX_THREADING_FLAGS					\
 	(LINUX_CLONE_VM | LINUX_CLONE_FS | LINUX_CLONE_FILES |	\
 	LINUX_CLONE_SIGHAND | LINUX_CLONE_THREAD)
+
+struct iovec;
+
+struct l_iovec32 {
+	uint32_t	iov_base;
+	l_size_t	iov_len;
+};
+
+int linux32_copyiniov(struct l_iovec32 *iovp32, l_ulong iovcnt,
+			    struct iovec **iovp, int error);
 
 /* robust futexes */
 struct linux_robust_list {

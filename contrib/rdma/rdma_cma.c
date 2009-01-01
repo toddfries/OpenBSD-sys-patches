@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/contrib/rdma/rdma_cma.c,v 1.3 2008/10/02 15:37:58 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/contrib/rdma/rdma_cma.c,v 1.4 2008/12/02 21:37:28 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/condvar.h>
@@ -51,6 +51,7 @@ __FBSDID("$FreeBSD: src/sys/contrib/rdma/rdma_cma.c,v 1.3 2008/10/02 15:37:58 ze
 #include <net/if.h>
 #include <netinet/in.h>
 #include <netinet/in_pcb.h>
+#include <netinet/vinet.h>
 
 #include <contrib/rdma/rdma_cm.h>
 #include <contrib/rdma/ib_cache.h>

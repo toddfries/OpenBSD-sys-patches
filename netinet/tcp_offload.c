@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/tcp_offload.c,v 1.7 2008/10/02 15:37:58 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/tcp_offload.c,v 1.8 2008/12/02 21:37:28 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -50,6 +50,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_offload.c,v 1.7 2008/10/02 15:37:58 zec 
 #include <netinet/tcp_var.h>
 #include <netinet/tcp_offload.h>
 #include <netinet/toedev.h>
+#include <netinet/vinet.h>
 
 uint32_t toedev_registration_count;
 

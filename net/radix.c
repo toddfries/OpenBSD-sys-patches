@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)radix.c	8.5 (Berkeley) 5/19/95
- * $FreeBSD: src/sys/net/radix.c,v 1.39 2008/04/13 05:45:13 qingli Exp $
+ * $FreeBSD: src/sys/net/radix.c,v 1.42 2008/12/16 11:01:36 kmacy Exp $
  */
 
 /*
@@ -38,6 +38,7 @@
 #ifdef	_KERNEL
 #include <sys/lock.h>
 #include <sys/mutex.h>
+#include <sys/rwlock.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/domain.h>
@@ -1086,6 +1087,7 @@ rn_walktree(h, f, w)
 	 * while applying the function f to it, so we need to calculate
 	 * the successor node in advance.
 	 */
+
 	/* First time through node, go left */
 	while (rn->rn_bit >= 0)
 		rn = rn->rn_left;

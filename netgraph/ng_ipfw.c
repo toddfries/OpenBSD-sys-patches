@@ -23,16 +23,18 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netgraph/ng_ipfw.c,v 1.10 2008/10/23 15:53:51 des Exp $
+ * $FreeBSD: src/sys/netgraph/ng_ipfw.c,v 1.11 2008/12/10 23:12:39 zec Exp $
  */
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/lock.h>
 #include <sys/mbuf.h>
 #include <sys/malloc.h>
 #include <sys/ctype.h>
 #include <sys/errno.h>
+#include <sys/rwlock.h>
 #include <sys/socket.h>
 #include <sys/syslog.h>
 

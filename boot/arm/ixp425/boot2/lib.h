@@ -21,7 +21,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/boot/arm/ixp425/boot2/lib.h,v 1.1 2008/10/06 19:38:10 jhay Exp $
+ * $FreeBSD: src/sys/boot/arm/ixp425/boot2/lib.h,v 1.2 2008/12/20 03:26:09 sam Exp $
  */
 
 #ifndef ARM_BOOT_LIB_H
@@ -60,5 +60,6 @@ u_int32_t swap32(u_int32_t);
 const char *board_init(void);
 void clr_board(void);
 int avila_read(char*, unsigned, unsigned);
+u_int cpu_id(void);
 
 #endif /* !ARM_BOOT_LIB_H */

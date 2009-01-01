@@ -26,7 +26,7 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net/if_vlan.c,v 1.130 2008/11/22 07:35:45 kmacy Exp $
+ * $FreeBSD: src/sys/net/if_vlan.c,v 1.131 2008/12/02 21:37:28 bz Exp $
  */
 
 /*
@@ -64,6 +64,7 @@
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/if_vlan_var.h>
+#include <net/vnet.h>
 
 #define VLANNAME	"vlan"
 #define	VLAN_DEF_HWIDTH	4

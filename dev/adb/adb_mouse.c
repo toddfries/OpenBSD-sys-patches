@@ -22,7 +22,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/adb/adb_mouse.c,v 1.3 2008/11/02 19:08:10 ed Exp $
+ * $FreeBSD: src/sys/dev/adb/adb_mouse.c,v 1.4 2008/12/06 23:26:02 nwhitehorn Exp $
  */
 
 #include <sys/cdefs.h>
@@ -181,7 +181,7 @@ adb_mouse_attach(device_t dev)
 		sc->mode.resolution = 200;
 		break;
 	case 4:
-		adb_read_register(dev,1,&r1_len,r1);
+		r1_len = adb_read_register(dev,1,r1);
 		if (r1_len < 8)
 			break;
 

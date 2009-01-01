@@ -21,11 +21,12 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/boot/arm/ixp425/boot2/arm_init.S,v 1.1 2008/10/06 19:38:10 jhay Exp $
+ * $FreeBSD: src/sys/boot/arm/ixp425/boot2/arm_init.S,v 1.2 2008/12/20 03:26:09 sam Exp $
  */
 
-start:
+#include <machine/asm.h>
 
+ASENTRY_NP(start)
 /* Initialise bss and sp */
 	nop
 	adr	r1, .Lstart
@@ -47,4 +48,9 @@ infiniteLoop:
 	.word	_edata
 	.word	_end
 	.word	BOOT_STACK
+
+ENTRY(cpu_id)
+	mrc	p15, 0, r0, c0, c0, 0
+	RET
+
 /* End */

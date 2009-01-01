@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_id.c,v 1.10 2008/02/06 15:40:30 silby Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_id.c,v 1.12 2008/12/02 21:37:28 bz Exp $");
 
 /*
  * IP ID generation is a fascinating topic.

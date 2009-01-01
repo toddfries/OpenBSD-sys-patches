@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/k8temp/k8temp.c,v 1.8 2008/09/03 13:34:31 rpaulo Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/k8temp/k8temp.c,v 1.9 2008/11/29 14:26:22 rpaulo Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -187,7 +187,11 @@ k8temp_attach(device_t dev)
 	 */
 	sc->sc_ich.ich_func = k8temp_intrhook;
 	sc->sc_ich.ich_arg = dev;
-	config_intrhook_establish(&sc->sc_ich);
+	if (config_intrhook_establish(&sc->sc_ich) != 0) {
+		device_printf(dev, "config_intrhook_establish "
+		    "failed!\n");
+		return (ENXIO);
+	}
 	
 	/*
 	 * dev.k8temp.N tree.

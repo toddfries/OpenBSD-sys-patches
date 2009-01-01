@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/compat/freebsd32/freebsd32.h,v 1.7 2007/12/06 23:11:27 jhb Exp $
+ * $FreeBSD: src/sys/compat/freebsd32/freebsd32.h,v 1.8 2008/11/29 14:32:14 bz Exp $
  */
 
 #ifndef _COMPAT_FREEBSD32_FREEBSD32_H_
@@ -151,6 +151,24 @@ struct stat32 {
 	struct timespec32 st_birthtimespec;
 	unsigned int :(8 / 2) * (16 - (int)sizeof(struct timespec32));
 	unsigned int :(8 / 2) * (16 - (int)sizeof(struct timespec32));
+};
+
+struct jail32_v0 {
+	u_int32_t	version;
+	uint32_t	path;
+	uint32_t	hostname;
+	u_int32_t	ip_number;
+};
+
+struct jail32 {
+	uint32_t	version;
+	uint32_t	path;
+	uint32_t	hostname;
+	uint32_t	jailname;
+	uint32_t	ip4s;
+	uint32_t	ip6s;
+	uint32_t	ip4;
+	uint32_t	ip6;
 };
 
 struct sigaction32 {

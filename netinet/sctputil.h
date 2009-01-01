@@ -32,7 +32,7 @@
 /* $KAME: sctputil.h,v 1.15 2005/03/06 16:04:19 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctputil.h,v 1.33 2008/07/09 16:45:30 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctputil.h,v 1.34 2008/12/06 13:19:54 rrs Exp $");
 #ifndef __sctputil_h__
 #define __sctputil_h__
 
@@ -77,7 +77,7 @@ struct sctp_ifa *
 
 uint32_t sctp_select_initial_TSN(struct sctp_pcb *);
 
-uint32_t sctp_select_a_tag(struct sctp_inpcb *, int);
+uint32_t sctp_select_a_tag(struct sctp_inpcb *, uint16_t lport, uint16_t rport, int);
 
 int sctp_init_asoc(struct sctp_inpcb *, struct sctp_tcb *, int, uint32_t, uint32_t);
 
@@ -168,6 +168,8 @@ sctp_report_all_outbound(struct sctp_tcb *, int, int
 
 int sctp_expand_mapping_array(struct sctp_association *, uint32_t);
 
+/* EY nr_sack version of the above method, expands nr_mapping_array */
+int sctp_expand_nr_mapping_array(struct sctp_association *, uint32_t);
 void 
 sctp_abort_notification(struct sctp_tcb *, int, int
 #if !defined(__APPLE__) && !defined(SCTP_SO_LOCK_TESTING)

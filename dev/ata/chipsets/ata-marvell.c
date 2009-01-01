@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-marvell.c,v 1.2 2008/10/17 16:03:37 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-marvell.c,v 1.3 2008/11/25 00:39:03 rpaulo Exp $");
 
 #include "opt_ata.h"
 #include <sys/param.h>
@@ -103,6 +103,7 @@ ata_marvell_probe(device_t dev)
      { ATA_M88SX6041, 0, 4, MV_60XX, ATA_SA300, "88SX6041" },
      { ATA_M88SX6081, 0, 8, MV_60XX, ATA_SA300, "88SX6081" },
      { ATA_M88SX6101, 0, 1, MV_61XX, ATA_UDMA6, "88SX6101" },
+     { ATA_M88SX6121, 0, 1, MV_61XX, ATA_UDMA6, "88SX6121" },
      { ATA_M88SX6145, 0, 2, MV_61XX, ATA_UDMA6, "88SX6145" },
      { 0, 0, 0, 0, 0, 0}};
 

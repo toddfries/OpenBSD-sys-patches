@@ -1,5 +1,5 @@
 #
-# $FreeBSD: src/sys/modules/usb2/Makefile,v 1.1 2008/11/04 02:31:03 alfred Exp $
+# $FreeBSD: src/sys/modules/usb2/Makefile,v 1.4 2008/12/27 12:23:22 weongyo Exp $
 #
 # Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
 #
@@ -53,10 +53,11 @@ SUBDIR += input_ms
 SUBDIR += misc
 SUBDIR += misc_dbp
 SUBDIR += misc_fm
-SUBDIR += ndis
+#SUBDIR += ndis
 SUBDIR += quirk
 SUBDIR += scanner
 SUBDIR += serial
+#SUBDIR += serial_3g
 SUBDIR += serial_ark
 SUBDIR += serial_bsa
 SUBDIR += serial_bser

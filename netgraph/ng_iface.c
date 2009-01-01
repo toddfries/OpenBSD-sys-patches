@@ -37,7 +37,7 @@
  *
  * Author: Archie Cobbs <archie@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_iface.c,v 1.54 2008/11/22 07:35:45 kmacy Exp $
+ * $FreeBSD: src/sys/netgraph/ng_iface.c,v 1.55 2008/12/10 23:12:39 zec Exp $
  * $Whistle: ng_iface.c,v 1.33 1999/11/01 09:24:51 julian Exp $
  */
 
@@ -208,7 +208,9 @@ static struct ng_type typestruct = {
 };
 NETGRAPH_INIT(iface, &typestruct);
 
+#ifdef VIMAGE_GLOBALS
 static struct unrhdr	*ng_iface_unit;
+#endif
 
 /************************************************************************
 			HELPER STUFF

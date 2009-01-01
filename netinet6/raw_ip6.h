@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	$KAME: raw_ip6.h,v 1.2 2001/05/27 13:28:35 itojun Exp $
- * $FreeBSD: src/sys/netinet6/raw_ip6.h,v 1.3 2007/12/10 16:03:39 obrien Exp $
+ * $FreeBSD: src/sys/netinet6/raw_ip6.h,v 1.4 2008/12/13 19:13:03 bz Exp $
  */
 
 #ifndef _NETINET6_RAW_IP6_H_
@@ -48,7 +48,9 @@ struct rip6stat {
 };
 
 #ifdef _KERNEL
+#ifdef VIMAGE_GLOBALS
 extern struct rip6stat rip6stat;
+#endif
 #endif
 
 #endif

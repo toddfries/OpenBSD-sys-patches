@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/pccbb/pccbbvar.h,v 1.32 2007/09/30 11:05:15 marius Exp $
+ * $FreeBSD: src/sys/dev/pccbb/pccbbvar.h,v 1.33 2008/12/05 05:20:08 imp Exp $
  */
 
 /*
@@ -67,8 +67,6 @@ struct cbb_softc {
 	unsigned int	secbus;
 	unsigned int	subbus;
 	struct mtx	mtx;
-	struct cv	cv;
-	struct cv	powercv;
 	int		cardok;
 	u_int32_t	flags;
 #define	CBB_16BIT_CARD		0x20000000
@@ -89,7 +87,7 @@ struct cbb_softc {
 	device_t	cbdev;
 	struct proc	*event_thread;
 	void (*chipinit)(struct cbb_softc *);
-	volatile int	powerintr;
+	int	powerintr;
 };
 
 /* result of detect_card */

@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2005-2007 Daniel Braniss <danny@cs.huji.ac.il>
+ * Copyright (c) 2005-2008 Daniel Braniss <danny@cs.huji.ac.il>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iscsi/initiator/isc_subr.c,v 1.1 2007/07/24 15:35:02 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iscsi/initiator/isc_subr.c,v 1.2 2008/11/25 07:17:11 scottl Exp $");
 
 #include "opt_iscsi_initiator.h"
 
@@ -57,8 +57,6 @@ __FBSDID("$FreeBSD: src/sys/dev/iscsi/initiator/isc_subr.c,v 1.1 2007/07/24 15:3
 
 #include <dev/iscsi/initiator/iscsi.h>
 #include <dev/iscsi/initiator/iscsivar.h>
-
-MALLOC_DEFINE(M_PDU, "iSCSI pdu", "iSCSI driver");
 
 static char *
 i_strdupin(char *s, size_t maxlen)

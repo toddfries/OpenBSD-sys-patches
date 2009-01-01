@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)in.h	8.3 (Berkeley) 1/3/94
- * $FreeBSD: src/sys/netinet/in.h,v 1.103 2008/10/02 15:37:58 zec Exp $
+ * $FreeBSD: src/sys/netinet/in.h,v 1.104 2008/12/02 21:37:28 bz Exp $
  */
 
 #ifndef _NETINET_IN_H_
@@ -741,10 +741,6 @@ void	 in_ifdetach(struct ifnet *);
 #define	__KAME_NETINET_IN_H_INCLUDED_
 #include <netinet6/in6.h>
 #undef __KAME_NETINET_IN_H_INCLUDED_
-#endif
-
-#ifdef _KERNEL
-#include <netinet/vinet.h>
 #endif
 
 #endif /* !_NETINET_IN_H_*/

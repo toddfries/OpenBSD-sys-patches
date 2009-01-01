@@ -29,7 +29,7 @@
 #include "opt_compat.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_ioctl.c,v 1.145 2008/10/23 15:53:51 des Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_ioctl.c,v 1.146 2008/12/02 21:37:28 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,6 +63,7 @@ __FBSDID("$FreeBSD: src/sys/compat/linux/linux_ioctl.c,v 1.145 2008/10/23 15:53:
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
+#include <net/vnet.h>
 
 #ifdef COMPAT_LINUX32
 #include <machine/../linux32/linux.h>

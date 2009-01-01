@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)if_loop.c	8.2 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/net/if_loop.c,v 1.121 2008/11/19 09:39:34 zec Exp $
+ * $FreeBSD: src/sys/net/if_loop.c,v 1.123 2008/12/02 21:37:28 bz Exp $
  */
 
 /*
@@ -57,6 +57,7 @@
 #include <net/netisr.h>
 #include <net/route.h>
 #include <net/bpf.h>
+#include <net/vnet.h>
 
 #ifdef	INET
 #include <netinet/in.h>
@@ -105,6 +106,9 @@ IFC_SIMPLE_DECLARE(lo, 1);
 static void
 lo_clone_destroy(struct ifnet *ifp)
 {
+#ifdef INVARIANTS
+	INIT_VNET_NET(ifp->if_vnet);
+#endif
 
 	/* XXX: destroying lo0 will lead to panics. */
 	KASSERT(V_loif != ifp, ("%s: destroying lo0", __func__));
@@ -141,6 +145,7 @@ lo_clone_create(struct if_clone *ifc, int unit, caddr_t params)
 static int
 loop_modevent(module_t mod, int type, void *data)
 {
+	INIT_VNET_NET(curvnet);
 
 	switch (type) {
 	case MOD_LOAD:

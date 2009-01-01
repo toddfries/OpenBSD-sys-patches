@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/ofw/ofw_syscons.h,v 1.4 2005/02/25 02:29:01 grehan Exp $
+ * $FreeBSD: src/sys/powerpc/ofw/ofw_syscons.h,v 1.5 2008/12/13 20:13:22 nwhitehorn Exp $
  */
 
 #ifndef _OFW_SYSCONS_H_
@@ -51,6 +51,7 @@ struct ofwfb_softc {
 
 	vi_blank_display_t *sc_blank;
 	vi_putc_t	*sc_putc;
+	vi_putm_t	*sc_putm;
 	vi_set_border_t	*sc_set_border;
 
 #define OFWSC_MAXADDR	8

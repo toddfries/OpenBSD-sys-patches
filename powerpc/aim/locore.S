@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/powerpc/aim/locore.S,v 1.29 2008/10/27 02:36:03 marcel Exp $ */
+/* $FreeBSD: src/sys/powerpc/aim/locore.S,v 1.30 2008/12/20 00:33:10 nwhitehorn Exp $ */
 /* $NetBSD: locore.S,v 1.24 2000/05/31 05:09:17 thorpej Exp $ */
 
 /*-
@@ -129,14 +129,6 @@ kernel_text:
 	.text
 	.globl	__start
 __start:
-#ifdef	FIRMWORKSBUGS
-	mfmsr	0
-	andi.	0,0,PSL_IR|PSL_DR
-	beq	1f
-
-	bl	ofwr_init
-1:
-#endif
 	li	8,0
 	li	9,0x100
 	mtctr	9
@@ -154,7 +146,6 @@ __start:
 
 	lis	8,openfirmware_entry@ha
 	stw	5,openfirmware_entry@l(8) /* save client interface handler */
-	mr	3,5
 
 	lis	1,(tmpstk+TMPSTKSZ-16)@ha
 	addi	1,1,(tmpstk+TMPSTKSZ-16)@l
@@ -172,7 +163,7 @@ __start:
 	mfsprg3 0
 	stw	0,16(9)			/* ofmsr[4] = sprg3 */
 	
-	bl	OF_init
+	bl	OF_initial_setup
 
 	lis	4,end@ha
 	addi	4,4,end@l

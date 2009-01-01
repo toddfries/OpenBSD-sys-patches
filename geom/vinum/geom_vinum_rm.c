@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_rm.c,v 1.15 2008/10/26 17:20:37 lulf Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_rm.c,v 1.16 2008/11/25 19:13:58 lulf Exp $");
 
 #include <sys/param.h>
 #include <sys/libkern.h>
@@ -59,10 +59,15 @@ gv_remove(struct g_geom *gp, struct gctl_req *req)
 	int i, type, err;
 
 	argc = gctl_get_paraml(req, "argc", sizeof(*argc));
-	flags = gctl_get_paraml(req, "flags", sizeof(*flags));
 
 	if (argc == NULL || *argc == 0) {
 		gctl_error(req, "no arguments given");
+		return;
+	}
+
+	flags = gctl_get_paraml(req, "flags", sizeof(*flags));
+	if (flags == NULL) {
+		gctl_error(req, "no flags given");
 		return;
 	}
 

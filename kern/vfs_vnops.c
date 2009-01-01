@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/vfs_vnops.c,v 1.273 2008/11/16 21:56:29 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/vfs_vnops.c,v 1.274 2008/11/29 12:40:14 pjd Exp $");
 
 #include "opt_mac.h"
 
@@ -881,7 +881,8 @@ _vn_lock(struct vnode *vp, int flags, char *file, int line)
 		error = VOP_LOCK1(vp, flags, file, line);
 		flags &= ~LK_INTERLOCK;	/* Interlock is always dropped. */
 		KASSERT((flags & LK_RETRY) == 0 || error == 0,
-		    ("LK_RETRY set with incompatible flags %d\n", flags));
+		    ("LK_RETRY set with incompatible flags (0x%x) or an error occured (%d)",
+		    flags, error));
 		/*
 		 * Callers specify LK_RETRY if they wish to get dead vnodes.
 		 * If RETRY is not set, we return ENOENT instead.

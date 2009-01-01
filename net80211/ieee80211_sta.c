@@ -25,7 +25,7 @@
 
 #include <sys/cdefs.h>
 #ifdef __FreeBSD__
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_sta.c,v 1.11 2008/10/30 16:22:04 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_sta.c,v 1.12 2008/12/18 23:00:09 sam Exp $");
 #endif
 
 /*
@@ -1018,7 +1018,7 @@ sta_auth_shared(struct ieee80211_node *ni, struct ieee80211_frame *wh,
 	switch (seq) {
 	case IEEE80211_AUTH_SHARED_PASS:
 		if (ni->ni_challenge != NULL) {
-			FREE(ni->ni_challenge, M_80211_NODE);
+			free(ni->ni_challenge, M_80211_NODE);
 			ni->ni_challenge = NULL;
 		}
 		if (status != 0) {

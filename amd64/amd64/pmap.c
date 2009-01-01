@@ -77,7 +77,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/pmap.c,v 1.645 2008/08/09 05:46:13 alc Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/pmap.c,v 1.646 2008/12/06 19:37:52 alc Exp $");
 
 /*
  *	Manages physical address maps.
@@ -180,7 +180,7 @@ pt_entry_t pg_nx;
 
 SYSCTL_NODE(_vm, OID_AUTO, pmap, CTLFLAG_RD, 0, "VM/pmap parameters");
 
-static int pg_ps_enabled;
+static int pg_ps_enabled = 1;
 SYSCTL_INT(_vm_pmap, OID_AUTO, pg_ps_enabled, CTLFLAG_RD, &pg_ps_enabled, 0,
     "Are large page mappings enabled?");
 

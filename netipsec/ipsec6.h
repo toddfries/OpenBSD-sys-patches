@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/ipsec6.h,v 1.5 2008/07/20 17:51:58 trhodes Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/ipsec6.h,v 1.6 2008/11/27 10:43:08 bz Exp $	*/
 /*	$KAME: ipsec.h,v 1.44 2001/03/23 08:08:47 itojun Exp $	*/
 
 /*-
@@ -50,7 +50,6 @@ extern int ip6_ipsec_ecn;
 
 struct inpcb;
 
-extern int ipsec6_delete_pcbpolicy __P((struct inpcb *));
 extern int ipsec6_set_policy __P((struct inpcb *inp, int optname,
 	caddr_t request, size_t len, struct ucred *cred));
 extern int ipsec6_get_policy

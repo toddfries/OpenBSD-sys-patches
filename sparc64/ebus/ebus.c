@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/ebus/ebus.c,v 1.27 2008/08/23 15:44:13 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/ebus/ebus.c,v 1.28 2008/12/15 15:31:10 nwhitehorn Exp $");
 
 /*
  * UltraSPARC 5 and beyond EBus support
@@ -51,7 +51,6 @@ __FBSDID("$FreeBSD: src/sys/sparc64/ebus/ebus.c,v 1.27 2008/08/23 15:44:13 mariu
 #include <dev/ofw/ofw_bus_subr.h>
 #include <dev/ofw/openfirm.h>
 
-#include <machine/ofw_bus.h>
 #include <machine/resource.h>
 
 #include <dev/pci/pcireg.h>
@@ -118,6 +117,7 @@ static device_method_t ebus_methods[] = {
 	DEVMETHOD(bus_deactivate_resource, bus_generic_deactivate_resource),
 	DEVMETHOD(bus_release_resource,	ebus_release_resource),
 	DEVMETHOD(bus_get_resource,	bus_generic_rl_get_resource),
+	DEVMETHOD(bus_child_pnpinfo_str, ofw_bus_gen_child_pnpinfo_str),
 
 	/* ofw_bus interface */
 	DEVMETHOD(ofw_bus_get_devinfo,	ebus_get_devinfo),

@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/vfs_default.c,v 1.145 2008/08/28 15:23:18 attilio Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/vfs_default.c,v 1.146 2008/12/12 00:57:38 marcus Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -98,6 +98,7 @@ struct vop_vector default_vnodeops = {
 	.vop_revoke =		VOP_PANIC,
 	.vop_strategy =		vop_nostrategy,
 	.vop_unlock =		vop_stdunlock,
+	.vop_vptocnp =		VOP_ENOENT,
 	.vop_vptofh =		vop_stdvptofh,
 };
 
@@ -135,6 +136,13 @@ vop_einval(struct vop_generic_args *ap)
 {
 
 	return (EINVAL);
+}
+
+int
+vop_enoent(struct vop_generic_args *ap)
+{
+
+	return (ENOENT);
 }
 
 int

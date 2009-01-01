@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)if_ether.h	8.3 (Berkeley) 5/2/95
- * $FreeBSD: src/sys/netinet/if_ether.h,v 1.34 2007/12/31 23:48:06 julian Exp $
+ * $FreeBSD: src/sys/netinet/if_ether.h,v 1.35 2008/12/15 06:10:57 qingli Exp $
  */
 
 #ifndef _NETINET_IF_ETHER_H_
@@ -109,8 +109,11 @@ struct sockaddr_inarp {
 extern u_char	ether_ipmulticast_min[ETHER_ADDR_LEN];
 extern u_char	ether_ipmulticast_max[ETHER_ADDR_LEN];
 
+struct llentry;
+
 int	arpresolve(struct ifnet *ifp, struct rtentry *rt,
-		struct mbuf *m, struct sockaddr *dst, u_char *desten);
+		    struct mbuf *m, struct sockaddr *dst, u_char *desten,
+		    struct llentry **lle);
 void	arp_ifinit(struct ifnet *, struct ifaddr *);
 void	arp_ifinit2(struct ifnet *, struct ifaddr *, u_char *);
 #endif

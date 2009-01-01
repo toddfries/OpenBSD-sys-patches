@@ -31,7 +31,7 @@
 /* $KAME: sctp_indata.h,v 1.9 2005/03/06 16:04:17 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_indata.h,v 1.10 2008/07/09 16:45:30 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_indata.h,v 1.11 2008/12/06 13:19:54 rrs Exp $");
 
 #ifndef __sctp_indata_h__
 #define __sctp_indata_h__
@@ -97,6 +97,16 @@ sctp_express_handle_sack(struct sctp_tcb *stcb, uint32_t cumack,
 
 void
 sctp_handle_sack(struct mbuf *m, int offset, struct sctp_sack_chunk *, struct sctp_tcb *,
+    struct sctp_nets *, int *, int, uint32_t);
+
+/* EY does "exactly" the same as sctp_express_handle_sack */
+void
+sctp_express_handle_nr_sack(struct sctp_tcb *stcb, uint32_t cumack,
+    uint32_t rwnd, int nonce_sum_flag, int *abort_now);
+
+/* EY nr_sack version of sctp_handle_sack */
+void
+sctp_handle_nr_sack(struct mbuf *m, int offset, struct sctp_nr_sack_chunk *, struct sctp_tcb *,
     struct sctp_nets *, int *, int, uint32_t);
 
 /* draft-ietf-tsvwg-usctp */

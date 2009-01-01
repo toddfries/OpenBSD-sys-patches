@@ -4,7 +4,7 @@
  * 
  * Ported to FreeBSD by Jean-Sébastien Pédron <jspedron@club-internet.fr>
  * 
- * $FreeBSD: src/sys/gnu/fs/reiserfs/reiserfs_vnops.c,v 1.3 2008/10/28 13:44:11 trasz Exp $
+ * $FreeBSD: src/sys/gnu/fs/reiserfs/reiserfs_vnops.c,v 1.4 2008/12/16 21:13:11 trasz Exp $
  */
 
 #include <gnu/fs/reiserfs/reiserfs_fs.h>
@@ -350,8 +350,13 @@ reiserfs_strategy(struct vop_strategy_args /* {
 		bp->b_ioflags |= BIO_ERROR;
 	}
 
+	if (error) {
+		bp->b_ioflags |= BIO_ERROR;
+		bp->b_error = error;
+	}
+
 	bufdone(bp);
-	return (error);
+	return (0);
 }
 
 /*

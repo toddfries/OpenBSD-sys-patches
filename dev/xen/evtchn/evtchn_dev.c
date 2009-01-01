@@ -7,7 +7,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/xen/evtchn/evtchn_dev.c,v 1.1 2008/08/12 20:01:57 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/xen/evtchn/evtchn_dev.c,v 1.2 2008/12/29 06:31:03 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -26,13 +26,13 @@ __FBSDID("$FreeBSD: src/sys/dev/xen/evtchn/evtchn_dev.c,v 1.1 2008/08/12 20:01:5
 #include <machine/cpufunc.h>
 #include <machine/intr_machdep.h>
 #include <machine/xen-os.h>
-#include <machine/xen_intr.h>
+#include <xen/xen_intr.h>
 #include <machine/bus.h>
 #include <sys/rman.h>
 #include <machine/resource.h>
 #include <machine/synch_bitops.h>
 
-#include <machine/hypervisor.h>
+#include <xen/hypervisor.h>
 
 
 typedef struct evtchn_sotfc {

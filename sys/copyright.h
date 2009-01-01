@@ -1,5 +1,5 @@
 /*-
- * Copyright (C) 1992-2008 The FreeBSD Project. All rights reserved.
+ * Copyright (C) 1992-2009 The FreeBSD Project. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -22,7 +22,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/copyright.h,v 1.28 2008/08/23 01:20:36 imp Exp $
+ * $FreeBSD: src/sys/sys/copyright.h,v 1.29 2008/12/30 04:48:59 imp Exp $
  */
 
 
@@ -30,7 +30,7 @@
   
 /* FreeBSD */
 #define COPYRIGHT_FreeBSD \
-	"Copyright (c) 1992-2008 The FreeBSD Project.\n"
+	"Copyright (c) 1992-2009 The FreeBSD Project.\n"
 
 /* Foundation */
 #define	TRADEMARK_Foundation \

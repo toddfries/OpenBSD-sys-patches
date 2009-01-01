@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/key.c,v 1.37 2008/11/19 09:39:34 zec Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/key.c,v 1.40 2008/12/15 21:50:54 bz Exp $	*/
 /*	$KAME: key.c,v 1.191 2001/06/27 10:46:49 sakane Exp $	*/
 
 /*-
@@ -75,9 +75,11 @@
 
 #ifdef INET
 #include <netinet/in_pcb.h>
+#include <netinet/vinet.h>
 #endif
 #ifdef INET6
 #include <netinet6/in6_pcb.h>
+#include <netinet6/vinet6.h>
 #endif /* INET6 */
 
 #include <net/pfkeyv2.h>
@@ -189,11 +191,11 @@ static const u_int saorder_state_valid_prefer_old[] = {
 static const u_int saorder_state_valid_prefer_new[] = {
 	SADB_SASTATE_MATURE, SADB_SASTATE_DYING,
 };
-static u_int saorder_state_alive[] = {
+static const u_int saorder_state_alive[] = {
 	/* except DEAD */
 	SADB_SASTATE_MATURE, SADB_SASTATE_DYING, SADB_SASTATE_LARVAL
 };
-static u_int saorder_state_any[] = {
+static const u_int saorder_state_any[] = {
 	SADB_SASTATE_MATURE, SADB_SASTATE_DYING,
 	SADB_SASTATE_LARVAL, SADB_SASTATE_DEAD
 };
@@ -1158,8 +1160,13 @@ key_freeso(struct socket *so)
 	IPSEC_ASSERT(so != NULL, ("null so"));
 
 	switch (so->so_proto->pr_domain->dom_family) {
+#if defined(INET) || defined(INET6)
 #ifdef INET
 	case PF_INET:
+#endif
+#ifdef INET6
+	case PF_INET6:
+#endif
 	    {
 		struct inpcb *pcb = sotoinpcb(so);
 
@@ -1170,30 +1177,7 @@ key_freeso(struct socket *so)
 		key_freesp_so(&pcb->inp_sp->sp_out);
 	    }
 		break;
-#endif
-#ifdef INET6
-	case PF_INET6:
-	    {
-#ifdef HAVE_NRL_INPCB
-		struct inpcb *pcb  = sotoinpcb(so);
-
-		/* Does it have a PCB ? */
-		if (pcb == NULL)
-			return;
-		key_freesp_so(&pcb->inp_sp->sp_in);
-		key_freesp_so(&pcb->inp_sp->sp_out);
-#else
-		struct in6pcb *pcb  = sotoin6pcb(so);
-
-		/* Does it have a PCB ? */
-		if (pcb == NULL)
-			return;
-		key_freesp_so(&pcb->in6p_sp->sp_in);
-		key_freesp_so(&pcb->in6p_sp->sp_out);
-#endif
-	    }
-		break;
-#endif /* INET6 */
+#endif /* INET || INET6 */
 	default:
 		ipseclog((LOG_DEBUG, "%s: unknown address family=%d.\n",
 		    __func__, so->so_proto->pr_domain->dom_family));
@@ -2699,9 +2683,9 @@ key_delsah(sah)
 
 	/* searching all SA registerd in the secindex. */
 	for (stateidx = 0;
-	     stateidx < _ARRAYLEN(V_saorder_state_any);
+	     stateidx < _ARRAYLEN(saorder_state_any);
 	     stateidx++) {
-		u_int state = V_saorder_state_any[stateidx];
+		u_int state = saorder_state_any[stateidx];
 		LIST_FOREACH_SAFE(sav, &sah->savtree[state], chain, nextsav) {
 			if (sav->refcnt == 0) {
 				/* sanity check */
@@ -2985,10 +2969,10 @@ key_getsavbyspi(sah, spi)
 	SAHTREE_LOCK_ASSERT();
 	/* search all status */
 	for (stateidx = 0;
-	     stateidx < _ARRAYLEN(V_saorder_state_alive);
+	     stateidx < _ARRAYLEN(saorder_state_alive);
 	     stateidx++) {
 
-		state = V_saorder_state_alive[stateidx];
+		state = saorder_state_alive[stateidx];
 		LIST_FOREACH(sav, &sah->savtree[state], chain) {
 
 			/* sanity check */
@@ -4336,6 +4320,7 @@ key_timehandler(void)
 	VNET_ITERATOR_DECL(vnet_iter);
 	time_t now = time_second;
 
+	VNET_LIST_RLOCK();
 	VNET_FOREACH(vnet_iter) {
 		CURVNET_SET(vnet_iter);
 		key_flush_spd(now);
@@ -4344,6 +4329,7 @@ key_timehandler(void)
 		key_flush_spacq(now);
 		CURVNET_RESTORE();
 	}
+	VNET_LIST_RUNLOCK();
 
 #ifndef IPSEC_DEBUG2
 	/* do exchange to tick time !! */
@@ -5313,9 +5299,9 @@ key_delete_all(so, m, mhp, proto)
 
 		/* Delete all non-LARVAL SAs. */
 		for (stateidx = 0;
-		     stateidx < _ARRAYLEN(V_saorder_state_alive);
+		     stateidx < _ARRAYLEN(saorder_state_alive);
 		     stateidx++) {
-			state = V_saorder_state_alive[stateidx];
+			state = saorder_state_alive[stateidx];
 			if (state == SADB_SASTATE_LARVAL)
 				continue;
 			for (sav = LIST_FIRST(&sah->savtree[state]);
@@ -6518,9 +6504,9 @@ key_flush(so, m, mhp)
 			continue;
 
 		for (stateidx = 0;
-		     stateidx < _ARRAYLEN(V_saorder_state_alive);
+		     stateidx < _ARRAYLEN(saorder_state_alive);
 		     stateidx++) {
-			state = V_saorder_state_any[stateidx];
+			state = saorder_state_any[stateidx];
 			for (sav = LIST_FIRST(&sah->savtree[state]);
 			     sav != NULL;
 			     sav = nextsav) {
@@ -6603,9 +6589,9 @@ key_dump(so, m, mhp)
 			continue;
 
 		for (stateidx = 0;
-		     stateidx < _ARRAYLEN(V_saorder_state_any);
+		     stateidx < _ARRAYLEN(saorder_state_any);
 		     stateidx++) {
-			state = V_saorder_state_any[stateidx];
+			state = saorder_state_any[stateidx];
 			LIST_FOREACH(sav, &sah->savtree[state], chain) {
 				cnt++;
 			}
@@ -6633,9 +6619,9 @@ key_dump(so, m, mhp)
 		}
 
 		for (stateidx = 0;
-		     stateidx < _ARRAYLEN(V_saorder_state_any);
+		     stateidx < _ARRAYLEN(saorder_state_any);
 		     stateidx++) {
-			state = V_saorder_state_any[stateidx];
+			state = saorder_state_any[stateidx];
 			LIST_FOREACH(sav, &sah->savtree[state], chain) {
 				n = key_setdumpsa(sav, SADB_DUMP, satype,
 				    --cnt, mhp->msg->sadb_msg_pid);

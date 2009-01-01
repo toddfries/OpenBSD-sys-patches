@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_lookup.c,v 1.93 2008/11/22 13:11:11 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_lookup.c,v 1.94 2008/12/02 11:12:50 kib Exp $");
 
 #include "opt_ffs_broken_fixme.h"
 #include "opt_ufs.h"
@@ -157,7 +157,6 @@ ufs_lookup(ap)
 	int nameiop = cnp->cn_nameiop;
 	ino_t ino;
 	int ltype;
-	int pdoomed;
 	struct mount *mp;
 
 	bp = NULL;
@@ -588,20 +587,14 @@ found:
 			VOP_UNLOCK(pdp, 0);
 			pause("ufs_dd", 1);
 			vn_lock(pdp, ltype | LK_RETRY);
-			VI_LOCK(pdp);
-			pdoomed = pdp->v_iflag & VI_DOOMED;
-			VI_UNLOCK(pdp);
-			if (pdoomed)
+			if (pdp->v_iflag & VI_DOOMED)
 				return (ENOENT);
 		}
 		VOP_UNLOCK(pdp, 0);	/* race to get the inode */
 		error = VFS_VGET(mp, ino, cnp->cn_lkflags, &tdp);
 		vfs_unbusy(mp);
 		vn_lock(pdp, ltype | LK_RETRY);
-		VI_LOCK(pdp);
-		pdoomed = pdp->v_iflag & VI_DOOMED;
-		VI_UNLOCK(pdp);
-		if (pdoomed) {
+		if (pdp->v_iflag & VI_DOOMED) {
 			if (error == 0)
 				vput(tdp);
 			error = ENOENT;

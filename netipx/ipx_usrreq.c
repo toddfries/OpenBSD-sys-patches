@@ -63,7 +63,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netipx/ipx_usrreq.c,v 1.64 2008/07/25 23:54:07 trhodes Exp $");
+__FBSDID("$FreeBSD: src/sys/netipx/ipx_usrreq.c,v 1.65 2008/12/11 10:29:35 rwatson Exp $");
 
 #include "opt_ipx.h"
 
@@ -412,6 +412,7 @@ ipx_ctloutput(struct socket *so, struct sockopt *sopt)
 
 		case SO_IPX_CHECKSUM:
 			mask = IPXP_CHECKSUM;
+			goto set_head;
 
 		case SO_HEADERS_ON_OUTPUT:
 			mask = IPXP_RAWOUT;

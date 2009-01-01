@@ -65,7 +65,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/mld6.c,v 1.38 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/mld6.c,v 1.39 2008/12/02 21:37:28 bz Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -91,6 +91,7 @@ __FBSDID("$FreeBSD: src/sys/netinet6/mld6.c,v 1.38 2008/11/19 09:39:34 zec Exp $
 #include <netinet6/scope6_var.h>
 #include <netinet/icmp6.h>
 #include <netinet6/mld6_var.h>
+#include <netinet6/vinet6.h>
 
 /*
  * Protocol constants

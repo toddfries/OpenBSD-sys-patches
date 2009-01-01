@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/apicvar.h,v 1.27 2008/10/24 07:58:38 kmacy Exp $
+ * $FreeBSD: src/sys/i386/include/apicvar.h,v 1.28 2008/12/11 15:56:30 jhb Exp $
  */
 
 #ifndef _MACHINE_APICVAR_H_
@@ -211,6 +211,7 @@ void	lapic_create(u_int apic_id, int boot_cpu);
 void	lapic_disable(void);
 void	lapic_dump(const char *str);
 void	lapic_eoi(void);
+u_int	lapic_error(void);
 int	lapic_id(void);
 void	lapic_init(vm_paddr_t addr);
 int	lapic_intr_pending(u_int vector);

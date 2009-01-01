@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/ipsec_input.c,v 1.24 2008/10/02 15:37:58 zec Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/ipsec_input.c,v 1.25 2008/12/02 21:37:28 bz Exp $	*/
 /*	$OpenBSD: ipsec_input.c,v 1.63 2003/02/20 18:35:43 deraadt Exp $	*/
 /*-
  * The authors of this code are John Ioannidis (ji@tla.org),
@@ -74,6 +74,7 @@
 #include <netinet/in_pcb.h>
 #ifdef INET6
 #include <netinet/icmp6.h>
+#include <netinet6/vinet6.h>
 #endif
 
 #include <netipsec/ipsec.h>

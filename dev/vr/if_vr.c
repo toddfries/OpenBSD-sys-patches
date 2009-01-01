@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/vr/if_vr.c,v 1.133 2008/11/17 00:50:59 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/vr/if_vr.c,v 1.134 2008/12/12 01:26:11 yongari Exp $");
 
 /*
  * VIA Rhine fast ethernet PCI NIC driver
@@ -133,7 +133,7 @@ static struct vr_type {
 	    0,
 	    "VIA VT6105 Rhine III 10/100BaseTX" },
 	{ VIA_VENDORID, VIA_DEVICEID_RHINE_III_M,
-	    VR_Q_CSUM | VR_Q_CAM,
+	    VR_Q_CSUM,
 	    "VIA VT6105M Rhine III 10/100BaseTX" },
 	{ DELTA_VENDORID, DELTA_DEVICEID_RHINE_II,
 	    VR_Q_NEEDALIGN,

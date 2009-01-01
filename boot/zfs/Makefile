@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/zfs/Makefile,v 1.2 2008/11/22 14:24:55 dfr Exp $
+# $FreeBSD: src/sys/boot/zfs/Makefile,v 1.3 2008/12/06 14:45:03 ps Exp $
 
 LIB=		zfsboot
 INTERNALLIB=
@@ -29,7 +29,7 @@ CFLAGS+=	-Wformat -Wall
 .if ${MACHINE_ARCH} == "amd64"
 CLEANFILES+=    machine
 machine:
-	ln -sf ${.CURDIR}/../../../i386/include machine
+	ln -sf ${.CURDIR}/../../i386/include machine
 .endif
 
 .include <bsd.lib.mk>

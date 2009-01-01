@@ -40,7 +40,7 @@
  *	from: @(#)vm_machdep.c	7.3 (Berkeley) 5/13/91
  *	Utah $Hdr: vm_machdep.c 1.16.1.1 89/06/23$
  * 	from: FreeBSD: src/sys/i386/i386/vm_machdep.c,v 1.167 2001/07/12
- * $FreeBSD: src/sys/sparc64/sparc64/vm_machdep.c,v 1.78 2008/03/16 10:58:08 rwatson Exp $
+ * $FreeBSD: src/sys/sparc64/sparc64/vm_machdep.c,v 1.79 2008/12/20 00:33:10 nwhitehorn Exp $
  */
 
 #include "opt_pmap.h"
@@ -334,7 +334,7 @@ cpu_reset(void)
 		bspec[sizeof(bspec) - 1] = '\0';
 	}
 
-	openfirmware_exit(&args);
+	ofw_exit(&args);
 }
 
 /*

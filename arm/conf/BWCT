@@ -15,18 +15,19 @@
 # If you are in doubt as to the purpose or necessity of a line, check first 
 # in NOTES.
 #
-# $FreeBSD: src/sys/arm/conf/BWCT,v 1.6 2008/10/23 01:51:55 marcel Exp $
+# $FreeBSD: src/sys/arm/conf/BWCT,v 1.8 2008/11/30 17:53:19 sam Exp $
 
 ident		BWCT
 
 options	VERBOSE_INIT_ARM
 
 options		AT91_BWCT
-include		"../at91/std.kb920x"
+include		"../at91/std.bwct"
 
 #To statically compile in device wiring instead of /boot/device.hints
 #hints		"hints.at91rm9200"
 hints		"BWCT.hints"
+makeoptions	MODULES_OVERRIDE=""
 
 #makeoptions	DEBUG=-g		#Build kernel with gdb(1) debug symbols
 options		DDB

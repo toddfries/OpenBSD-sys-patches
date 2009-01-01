@@ -1,7 +1,7 @@
 #
 # DEFAULTS -- Default kernel configuration file for FreeBSD/i386
 #
-# $FreeBSD: src/sys/i386/conf/DEFAULTS,v 1.14 2008/08/15 20:58:57 kmacy Exp $
+# $FreeBSD: src/sys/i386/conf/DEFAULTS,v 1.15 2008/12/17 17:43:22 marcel Exp $
 
 machine		i386
 
@@ -20,8 +20,8 @@ device		io		# I/O device
 device		uart_ns8250
 
 # Default partitioning schemes
-options 	GEOM_BSD
-options 	GEOM_MBR
+options 	GEOM_PART_BSD
+options 	GEOM_PART_MBR
 
 # enable support for native hardware
 options 	NATIVE

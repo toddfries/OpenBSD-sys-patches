@@ -75,7 +75,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/xen/pmap.c,v 1.6 2008/09/25 07:03:09 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/xen/pmap.c,v 1.7 2008/12/29 06:31:03 kmacy Exp $");
 
 /*
  *	Manages physical address maps.
@@ -154,7 +154,7 @@ __FBSDID("$FreeBSD: src/sys/i386/xen/pmap.c,v 1.6 2008/09/25 07:03:09 kmacy Exp 
 #endif
 
 #include <xen/interface/xen.h>
-#include <machine/xen/hypervisor.h>
+#include <xen/hypervisor.h>
 #include <machine/xen/hypercall.h>
 #include <machine/xen/xenvar.h>
 #include <machine/xen/xenfunc.h>

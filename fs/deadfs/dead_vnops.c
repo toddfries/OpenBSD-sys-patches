@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)dead_vnops.c	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/fs/deadfs/dead_vnops.c,v 1.50 2007/01/22 11:25:22 kib Exp $
+ * $FreeBSD: src/sys/fs/deadfs/dead_vnops.c,v 1.51 2008/12/12 00:59:36 marcus Exp $
  */
 
 #include <sys/param.h>
@@ -78,6 +78,7 @@ struct vop_vector dead_vnodeops = {
 	.vop_rmdir =		VOP_PANIC,
 	.vop_setattr =		VOP_EBADF,
 	.vop_symlink =		VOP_PANIC,
+	.vop_vptocnp =		VOP_EBADF,
 	.vop_write =		dead_write,
 };
 

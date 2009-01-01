@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/mp_machdep.c,v 1.289 2008/09/28 18:34:14 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/mp_machdep.c,v 1.290 2008/11/26 19:25:13 jkim Exp $");
 
 #include "opt_apic.h"
 #include "opt_cpu.h"
@@ -72,6 +72,7 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/mp_machdep.c,v 1.289 2008/09/28 18:34:14 m
 #include <vm/vm_extern.h>
 
 #include <machine/apicreg.h>
+#include <machine/cputypes.h>
 #include <machine/md_var.h>
 #include <machine/mp_watchdog.h>
 #include <machine/pcb.h>
@@ -422,8 +423,7 @@ cpu_mp_start(void)
 	 * First determine if this is an Intel processor which claims
 	 * to have hyperthreading support.
 	 */
-	if ((cpu_feature & CPUID_HTT) &&
-	    (strcmp(cpu_vendor, "GenuineIntel") == 0)) {
+	if ((cpu_feature & CPUID_HTT) && cpu_vendor_id == CPU_VENDOR_INTEL) {
 		/*
 		 * If the "deterministic cache parameters" cpuid calls
 		 * are available, use them.

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/part/g_part_mbr.c,v 1.9 2008/06/18 01:13:34 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/part/g_part_mbr.c,v 1.10 2008/12/01 00:07:17 marcel Exp $");
 
 #include <sys/param.h>
 #include <sys/bio.h>
@@ -213,9 +213,14 @@ static int
 g_part_mbr_bootcode(struct g_part_table *basetable, struct g_part_parms *gpp)
 {
 	struct g_part_mbr_table *table;
+	size_t codesz;
 
+	codesz = DOSPARTOFF;
 	table = (struct g_part_mbr_table *)basetable;
-	bcopy(gpp->gpp_codeptr, table->mbr, DOSPARTOFF);
+	bzero(table->mbr, codesz);
+	codesz = MIN(codesz,  gpp->gpp_codesize);
+	if (codesz > 0)
+		bcopy(gpp->gpp_codeptr, table->mbr, codesz);
 	return (0);
 }
 

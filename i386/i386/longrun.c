@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/longrun.c,v 1.3 2004/12/12 05:53:57 njl Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/longrun.c,v 1.4 2008/11/26 19:25:13 jkim Exp $");
 
 #include "opt_cpu.h"
 
@@ -46,6 +46,7 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/longrun.c,v 1.3 2004/12/12 05:53:57 njl Ex
 #include <sys/sysctl.h>
 #include <sys/types.h>
 
+#include <machine/cputypes.h>
 #include <machine/md_var.h>
 #include <machine/specialreg.h>
 
@@ -262,8 +263,8 @@ tmx86_longrun_profile_sysctl(SYSCTL_HANDLER_ARGS)
 static void
 setup_tmx86_longrun(void *dummy __unused)
 {
-	if (strcmp(cpu_vendor, "GenuineTMx86") != 0 &&
-	    strcmp(cpu_vendor, "TransmetaCPU") != 0)
+
+	if (cpu_vendor_id != CPU_VENDOR_TRANSMETA)
 		return;
 
 	crusoe_longrun = tmx86_get_longrun_mode();

@@ -18,7 +18,7 @@
  *
  * From: Version 2.4, Thu Apr 30 17:17:21 MSD 1997
  *
- * $FreeBSD: src/sys/net/if_spppsubr.c,v 1.131 2008/11/05 12:02:25 bz Exp $
+ * $FreeBSD: src/sys/net/if_spppsubr.c,v 1.132 2008/12/02 21:37:28 bz Exp $
  */
 
 #include <sys/param.h>
@@ -56,6 +56,7 @@
 #ifdef INET
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
+#include <netinet/vinet.h>
 #endif
 
 #ifdef INET6

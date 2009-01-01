@@ -1,7 +1,7 @@
 # This file tells config what files go into building a kernel,
 # files marked standard are always included.
 #
-# $FreeBSD: src/sys/conf/files.i386,v 1.609 2008/11/09 17:37:54 jkoshy Exp $
+# $FreeBSD: src/sys/conf/files.i386,v 1.611 2008/12/01 16:53:01 sam Exp $
 #
 # The long compile-with and dependency lines are required because of
 # limitations in config: backslash-newline doesn't work in strings, and
@@ -45,16 +45,6 @@ ukbdmap.h			optional	ukbd_dflt_keymap	\
 	compile-with	"/usr/sbin/kbdcontrol -L ${UKBD_DFLT_KEYMAP} | sed -e 's/^static keymap_t.* = /static keymap_t key_map = /' -e 's/^static accentmap_t.* = /static accentmap_t accent_map = /' > ukbdmap.h"			\
 	no-obj no-implicit-rule before-depend				\
 	clean		"ukbdmap.h"
-#
-hal.o				optional	ath_hal			\
-	dependency	"$S/contrib/dev/ath/public/i386-elf.hal.o.uu"	\
-	compile-with	"uudecode < $S/contrib/dev/ath/public/i386-elf.hal.o.uu" \
-	no-implicit-rule
-opt_ah.h			optional	ath_hal			\
-	dependency	"$S/contrib/dev/ath/public/i386-elf.opt_ah.h"	\
-	compile-with	"rm -f opt_ah.h; cp $S/contrib/dev/ath/public/i386-elf.opt_ah.h opt_ah.h" \
-	no-obj no-implicit-rule before-depend				\
-	clean		"opt_ah.h"
 #
 nvenetlib.o			optional	nve pci			\
 	dependency	"$S/contrib/dev/nve/i386/nvenetlib.o.bz2.uu"	\
@@ -187,6 +177,7 @@ dev/hptrr/hptrr_osm_bsd.c	optional hptrr
 dev/hptrr/hptrr_config.c	optional hptrr
 dev/hwpmc/hwpmc_amd.c		optional hwpmc
 dev/hwpmc/hwpmc_intel.c		optional hwpmc
+dev/hwpmc/hwpmc_core.c		optional hwpmc
 dev/hwpmc/hwpmc_pentium.c	optional hwpmc
 dev/hwpmc/hwpmc_piv.c		optional hwpmc
 dev/hwpmc/hwpmc_ppro.c		optional hwpmc

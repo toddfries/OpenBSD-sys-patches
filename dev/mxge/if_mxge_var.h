@@ -25,7 +25,7 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
-$FreeBSD: src/sys/dev/mxge/if_mxge_var.h,v 1.22 2008/11/22 05:55:56 kmacy Exp $
+$FreeBSD: src/sys/dev/mxge/if_mxge_var.h,v 1.23 2008/11/24 19:00:57 gallatin Exp $
 
 ***************************************************************************/
 
@@ -283,13 +283,13 @@ struct mxge_media_type
 
 #if defined (__GNUC__)
   #if #cpu(i386) || defined __i386 || defined i386 || defined __i386__ || #cpu(x86_64) || defined __x86_64__
-    #define mb()  __asm__ __volatile__ ("sfence;": : :"memory")
+    #define wmb()  __asm__ __volatile__ ("sfence;": : :"memory")
   #elif #cpu(sparc64) || defined sparc64 || defined __sparcv9 
-    #define mb()  __asm__ __volatile__ ("membar #MemIssue": : :"memory")
+    #define wmb()  __asm__ __volatile__ ("membar #MemIssue": : :"memory")
   #elif #cpu(sparc) || defined sparc || defined __sparc__
-    #define mb()  __asm__ __volatile__ ("stbar;": : :"memory")
+    #define wmb()  __asm__ __volatile__ ("stbar;": : :"memory")
   #else
-    #define mb() 	/* XXX just to make this compile */
+    #define wmb() 	/* XXX just to make this compile */
   #endif
 #else
   #error "unknown compiler"

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/ttyhook.h,v 1.1 2008/09/22 19:25:14 ed Exp $
+ * $FreeBSD: src/sys/sys/ttyhook.h,v 1.2 2008/12/13 21:17:46 mav Exp $
  */
 
 #ifndef _SYS_TTYHOOK_H_
@@ -66,7 +66,7 @@ struct ttyhook {
 	th_close_t		*th_close;
 };
 
-int	ttyhook_register(struct tty **, struct thread *, int,
+int	ttyhook_register(struct tty **, struct proc *, int,
     struct ttyhook *, void *);
 void	ttyhook_unregister(struct tty *);
 #define	ttyhook_softc(tp)		((tp)->t_hooksoftc)

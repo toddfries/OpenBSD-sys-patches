@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/local_apic.c,v 1.48 2008/10/27 21:45:18 sobomax Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/local_apic.c,v 1.50 2008/12/11 15:56:30 jhb Exp $");
 
 #include "opt_hwpmc_hooks.h"
 #include "opt_kdtrace.h"
@@ -299,6 +299,7 @@ lapic_setup(int boot)
 	/* Program LINT[01] LVT entries. */
 	lapic->lvt_lint0 = lvt_mode(la, LVT_LINT0, lapic->lvt_lint0);
 	lapic->lvt_lint1 = lvt_mode(la, LVT_LINT1, lapic->lvt_lint1);
+
 #ifdef	HWPMC_HOOKS
 	/* Program the PMC LVT entry if present. */
 	if (maxlvt >= LVT_PMC)
@@ -323,7 +324,7 @@ lapic_setup(int boot)
 
 	/* XXX: Error and thermal LVTs */
 
-	if (strcmp(cpu_vendor, "AuthenticAMD") == 0) {
+	if (cpu_vendor_id == CPU_VENDOR_AMD) {
 		/*
 		 * Detect the presence of C1E capability mostly on latest
 		 * dual-cores (or future) k8 family.  This feature renders
@@ -642,6 +643,18 @@ lapic_eoi(void)
 {
 
 	lapic->eoi = 0;
+}
+
+/*
+ * Read the contents of the error status register.  We have to write
+ * to the register first before reading from it.
+ */
+u_int
+lapic_error(void)
+{
+
+	lapic->esr = 0;
+	return (lapic->esr);
 }
 
 void

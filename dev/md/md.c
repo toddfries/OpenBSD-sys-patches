@@ -6,7 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $FreeBSD: src/sys/dev/md/md.c,v 1.176 2008/08/28 15:23:18 attilio Exp $
+ * $FreeBSD: src/sys/dev/md/md.c,v 1.177 2008/12/16 20:59:27 trasz Exp $
  *
  */
 
@@ -374,8 +374,11 @@ g_md_access(struct g_provider *pp, int r, int w, int e)
 	struct md_s *sc;
 
 	sc = pp->geom->softc;
-	if (sc == NULL)
+	if (sc == NULL) {
+		if (r <= 0 && w <= 0 && e <= 0)
+			return (0);
 		return (ENXIO);
+	}
 	r += pp->acr;
 	w += pp->acw;
 	e += pp->ace;

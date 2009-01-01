@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/in_proto.c,v 1.89 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/in_proto.c,v 1.91 2008/12/15 06:10:57 qingli Exp $");
 
 #include "opt_ipx.h"
 #include "opt_mrouting.h"
@@ -46,6 +46,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/in_proto.c,v 1.89 2008/11/19 09:39:34 zec Ex
 #include <sys/kernel.h>
 #include <sys/socket.h>
 #include <sys/domain.h>
+#include <sys/proc.h>
 #include <sys/protosw.h>
 #include <sys/queue.h>
 #include <sys/sysctl.h>
@@ -58,6 +59,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/in_proto.c,v 1.89 2008/11/19 09:39:34 zec Ex
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
+#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/ip_icmp.h>
@@ -363,7 +365,9 @@ struct domain inetdomain = {
 	.dom_rtattach =		in_inithead,
 #endif
 	.dom_rtoffset =		32,
-	.dom_maxrtkey =		sizeof(struct sockaddr_in)
+	.dom_maxrtkey =		sizeof(struct sockaddr_in),
+	.dom_ifattach =		in_domifattach,
+	.dom_ifdetach =		in_domifdetach
 };
 
 DOMAIN_SET(inet);

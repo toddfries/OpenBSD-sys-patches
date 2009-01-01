@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/drm_drv.c,v 1.14 2008/10/23 20:23:03 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/drm_drv.c,v 1.15 2008/12/18 21:58:57 rnoland Exp $");
 
 /** @file drm_drv.c
  * The catch-all file for DRM device support, including module setup/teardown,
@@ -151,6 +151,10 @@ int drm_probe(device_t dev, drm_pci_id_list_t *idlist)
 	vendor = pci_get_vendor(dev);
 	device = pci_get_device(dev);
 #endif
+
+	if (pci_get_class(dev) != PCIC_DISPLAY
+	    || pci_get_subclass(dev) != PCIS_DISPLAY_VGA)
+		return ENXIO;
 
 	id_entry = drm_find_description(vendor, device, idlist);
 	if (id_entry != NULL) {

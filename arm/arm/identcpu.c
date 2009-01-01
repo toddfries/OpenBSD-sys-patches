@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/identcpu.c,v 1.14 2008/10/13 18:16:54 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/identcpu.c,v 1.15 2008/12/20 03:26:09 sam Exp $");
 #include <sys/systm.h>
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -298,6 +298,10 @@ const struct cpuidtab cpuids[] = {
 	{ CPU_ID_IXP425_400,	CPU_CLASS_XSCALE,	"IXP425 400MHz",
 	  ixp425_steppings },
 	{ CPU_ID_IXP425_266,	CPU_CLASS_XSCALE,	"IXP425 266MHz",
+	  ixp425_steppings },
+
+	/* XXX ixp435 steppings? */
+	{ CPU_ID_IXP435,	CPU_CLASS_XSCALE,	"IXP435",
 	  ixp425_steppings },
 
 	{ CPU_ID_ARM1136JS,	CPU_CLASS_ARM11J,	"ARM1136J-S",

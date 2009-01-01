@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/security/audit/audit_syscalls.c,v 1.34 2008/11/14 01:24:52 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/security/audit/audit_syscalls.c,v 1.35 2008/11/30 19:58:03 csjp Exp $");
 
 #include "opt_mac.h"
 
@@ -510,7 +510,7 @@ getaudit(struct thread *td, struct getaudit_args *uap)
 	if (error)
 		return (error);
 	if (cred->cr_audit.ai_termid.at_type == AU_IPv6)
-		return (ERANGE);
+		return (E2BIG);
 	bzero(&ai, sizeof(ai));
 	ai.ai_auid = cred->cr_audit.ai_auid;
 	ai.ai_mask = cred->cr_audit.ai_mask;

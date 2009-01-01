@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_prot.c,v 1.214 2008/10/23 15:53:51 des Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_prot.c,v 1.215 2008/12/12 12:06:28 kib Exp $");
 
 #include "opt_compat.h"
 #include "opt_inet.h"
@@ -1679,7 +1679,7 @@ p_candebug(struct thread *td, struct proc *p)
 	 * should be moved to the caller's of p_candebug().
 	 */
 	if ((p->p_flag & P_INEXEC) != 0)
-		return (EAGAIN);
+		return (EBUSY);
 
 	return (0);
 }

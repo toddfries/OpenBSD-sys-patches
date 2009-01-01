@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb2/core/usb2_generic.h,v 1.2 2008/11/19 08:56:35 alfred Exp $ */
+/* $FreeBSD: src/sys/dev/usb2/core/usb2_generic.h,v 1.3 2008/11/25 08:04:40 alfred Exp $ */
 /*-
  * Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
  *
@@ -29,6 +29,5 @@
 
 extern struct usb2_fifo_methods usb2_ugen_methods;
 int	ugen_do_request(struct usb2_fifo *f, struct usb2_ctl_request *ur);
-int	ugen_fs_uninit(struct usb2_fifo *f);
 
 #endif					/* _USB2_GENERIC_H_ */

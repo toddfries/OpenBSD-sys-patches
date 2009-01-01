@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/isa/ofw_isa.c,v 1.11 2005/12/03 19:52:20 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/isa/ofw_isa.c,v 1.12 2008/12/15 15:31:10 nwhitehorn Exp $");
 
 /*
  * Helper functions which can be used in both ISA and EBus code.
@@ -41,10 +41,10 @@ __FBSDID("$FreeBSD: src/sys/sparc64/isa/ofw_isa.c,v 1.11 2005/12/03 19:52:20 mar
 #include <sys/bus.h>
 
 #include <dev/ofw/openfirm.h>
+#include <dev/ofw/ofw_bus_subr.h>
 
 #include <machine/bus.h>
 #include <machine/resource.h>
-#include <machine/ofw_bus.h>
 
 #include <sparc64/pci/ofw_pci.h>
 #include <sparc64/isa/ofw_isa.h>

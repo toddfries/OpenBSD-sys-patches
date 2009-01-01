@@ -1,5 +1,5 @@
 /*	$OpenBSD: if_upgt.c,v 1.35 2008/04/16 18:32:15 damien Exp $ */
-/*	$FreeBSD: src/sys/dev/usb/if_upgt.c,v 1.1 2008/08/11 03:57:31 weongyo Exp $ */
+/*	$FreeBSD: src/sys/dev/usb/if_upgt.c,v 1.2 2008/12/01 10:04:39 kevlo Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -194,7 +194,6 @@ static const struct usb_devno upgt_devs_2[] = {
 	{ USB_VENDOR_GLOBESPAN,		USB_PRODUCT_GLOBESPAN_PRISM_GT_1 },
 	{ USB_VENDOR_GLOBESPAN,		USB_PRODUCT_GLOBESPAN_PRISM_GT_2 },
 	{ USB_VENDOR_INTERSIL,		USB_PRODUCT_INTERSIL_PRISM_GT },
-	{ USB_VENDOR_NETGEAR,		USB_PRODUCT_NETGEAR_WG111V2_2 },
 	{ USB_VENDOR_SMC,		USB_PRODUCT_SMC_2862WG },
 	{ USB_VENDOR_WISTRONNEWEB,	USB_PRODUCT_WISTRONNEWEB_UR045G },
 	{ USB_VENDOR_XYRATEX,		USB_PRODUCT_XYRATEX_PRISM_GT_1 },

@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsserver/nfs_srvsubs.c,v 1.161 2008/11/12 09:36:35 dfr Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsserver/nfs_srvsubs.c,v 1.162 2008/11/29 13:34:59 kib Exp $");
 
 /*
  * These functions support the macros and help fiddle mbuf chains for
@@ -1119,14 +1119,16 @@ nfsrv_fhtovp(fhandle_t *fhp, int lockflag, struct vnode **vpp, int *vfslockedp,
 		fhp = &nfs_pub.np_handle;
 	}
 
-	mp = vfs_getvfs(&fhp->fh_fsid);
+	mp = vfs_busyfs(&fhp->fh_fsid);
 	if (!mp)
 		return (ESTALE);
 	vfslocked = VFS_LOCK_GIANT(mp);
 	error = VFS_CHECKEXP(mp, nam, &exflags, &credanon,
 	    &numsecflavors, &secflavors);
-	if (error)
+	if (error) {
+		vfs_unbusy(mp);
 		goto out;
+	}
 	if (numsecflavors == 0) {
 		/*
 		 * This can happen if the system is running with an
@@ -1159,10 +1161,12 @@ nfsrv_fhtovp(fhandle_t *fhp, int lockflag, struct vnode **vpp, int *vfslockedp,
 		}
 		if (!mountreq) {
 			error = NFSERR_AUTHERR | AUTH_TOOWEAK;
+			vfs_unbusy(mp);
 			goto out;
 		}
 	}
 	error = VFS_FHTOVP(mp, &fhp->fh_fid, vpp);
+	vfs_unbusy(mp);
 	if (error)
 		goto out;
 #ifdef MNT_EXNORESPORT
@@ -1196,7 +1200,6 @@ nfsrv_fhtovp(fhandle_t *fhp, int lockflag, struct vnode **vpp, int *vfslockedp,
 	if (!lockflag)
 		VOP_UNLOCK(*vpp, 0);
 out:
-	vfs_rel(mp);
 	if (error) {
 		VFS_UNLOCK_GIANT(vfslocked);
 	} else

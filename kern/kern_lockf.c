@@ -59,7 +59,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_lockf.c,v 1.66 2008/10/24 16:04:10 dfr Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_lockf.c,v 1.67 2008/11/27 04:40:37 ganbold Exp $");
 
 #include "opt_debug_lockf.h"
 
@@ -1342,7 +1342,6 @@ static int
 lf_setlock(struct lockf *state, struct lockf_entry *lock, struct vnode *vp,
     void **cookiep)
 {
-	struct lockf_entry *block;
 	static char lockstr[] = "lockf";
 	int priority, error;
 
@@ -1362,7 +1361,7 @@ lf_setlock(struct lockf *state, struct lockf_entry *lock, struct vnode *vp,
 	/*
 	 * Scan lock list for this file looking for locks that would block us.
 	 */
-	while ((block = lf_getblock(state, lock))) {
+	while (lf_getblock(state, lock)) {
 		/*
 		 * Free the structure and return if nonblocking.
 		 */

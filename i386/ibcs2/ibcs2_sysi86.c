@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_sysi86.c,v 1.23 2006/11/06 13:41:59 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_sysi86.c,v 1.24 2008/12/29 12:58:45 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/lock.h>
@@ -74,15 +74,11 @@ ibcs2_sysi86(struct thread *td, struct ibcs2_sysi86_args *args)
 
 	case SETNAME:  {  /* set hostname given string w/ len <= 7 chars */
 	        int name[2];
-	        int error;
 
 		name[0] = CTL_KERN;
 		name[1] = KERN_HOSTNAME;
-		mtx_lock(&Giant);
-		error = userland_sysctl(td, name, 2, 0, 0, 0, 
-		    args->arg, 7, 0, 0);
-		mtx_unlock(&Giant);
-		return (error);
+		return (userland_sysctl(td, name, 2, 0, 0, 0, 
+		    args->arg, 7, 0, 0));
 	}
 
 	case SI86_MEM:	/* size of physical memory */

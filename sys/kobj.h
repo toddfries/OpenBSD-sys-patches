@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/sys/kobj.h,v 1.11 2006/08/24 21:09:39 rik Exp $
+ *	$FreeBSD: src/sys/sys/kobj.h,v 1.12 2008/12/20 00:33:10 nwhitehorn Exp $
  */
 
 #ifndef _SYS_KOBJ_H_
@@ -245,10 +245,5 @@ kobj_method_t* kobj_lookup_method(kobj_class_t cls,
  * Default method implementation. Returns ENXIO.
  */
 int kobj_error_method(void);
-
-/*
- * Machine-dependent initialisation call for boot-time kobj clients
- */
-void kobj_machdep_init(void);
 
 #endif /* !_SYS_KOBJ_H_ */

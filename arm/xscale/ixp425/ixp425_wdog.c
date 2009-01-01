@@ -22,10 +22,10 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425_wdog.c,v 1.2 2007/03/27 21:03:36 n_hibma Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425_wdog.c,v 1.3 2008/12/20 03:26:09 sam Exp $");
 
 /*
- * IXP425 Watchdog Timer Support.
+ * IXP4XX Watchdog Timer Support.
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -88,7 +88,7 @@ ixp425_watchdog(void *arg, u_int cmd, int *error)
 static int
 ixpwdog_probe(device_t dev)
 {
-	device_set_desc(dev, "IXP425 Watchdog Timer");
+	device_set_desc(dev, "IXP4XX Watchdog Timer");
 	return (0);
 }
 

@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ofw/openpromio.c,v 1.8 2007/12/20 00:31:04 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ofw/openpromio.c,v 1.9 2008/12/20 00:33:10 nwhitehorn Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -174,7 +174,7 @@ openprom_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int flags,
 			error = OF_getprop(node, prop, buf, proplen);
 			break;
 		case OPROMNXTPROP:
-			error = OF_nextprop(node, prop, buf);
+			error = OF_nextprop(node, prop, buf, OPROMMAXPARAM);
 			proplen = strlen(buf);
 			break;
 		}

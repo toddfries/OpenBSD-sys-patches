@@ -25,7 +25,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/imgact_elf.h,v 1.29 2005/12/26 21:23:56 sobomax Exp $
+ * $FreeBSD: src/sys/sys/imgact_elf.h,v 1.30 2008/12/17 16:54:29 peter Exp $
  */
 
 #ifndef _SYS_IMGACT_ELF_H_
@@ -52,7 +52,6 @@ typedef struct {
 	Elf_Size	base;
 	Elf_Size	flags;
 	Elf_Size	entry;
-	Elf_Size	trace;
 } __ElfN(Auxargs);
 
 typedef struct {

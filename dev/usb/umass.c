@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/dev/usb/umass.c,v 1.171 2008/10/14 08:41:54 n_hibma Exp $
+ *	$FreeBSD: src/sys/dev/usb/umass.c,v 1.172 2008/12/24 06:59:07 sam Exp $
  *	$NetBSD: umass.c,v 1.28 2000/04/02 23:46:53 augustss Exp $
  */
 
@@ -197,7 +197,7 @@ typedef struct {
 	uByte		bCDBLength;
 #	define CBWCDBLENGTH	16
 	uByte		CBWCDB[CBWCDBLENGTH];
-} umass_bbb_cbw_t;
+} __packed umass_bbb_cbw_t;
 #define	UMASS_BBB_CBW_SIZE	31
 
 /* Command Status Wrapper */
@@ -212,7 +212,7 @@ typedef struct {
 #	define CSWSTATUS_GOOD	0x0
 #	define CSWSTATUS_FAILED	0x1
 #	define CSWSTATUS_PHASE	0x2
-} umass_bbb_csw_t;
+} __packed umass_bbb_csw_t;
 #define	UMASS_BBB_CSW_SIZE	13
 
 /* CBI features */

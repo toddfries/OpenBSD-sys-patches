@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_ipc.c,v 1.54 2007/01/14 16:34:43 netchild Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_ipc.c,v 1.55 2008/11/26 16:38:43 rdivacky Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -672,12 +672,28 @@ linux_msgctl(struct thread *td, struct linux_msgctl_args *args)
 	return (error);
     }
 
+/* 
+ * TODO: implement this 
+ * case LINUX_MSG_STAT:
+ */
+    case LINUX_IPC_STAT:
+	/* NOTHING */
+	break;
+
     case LINUX_IPC_SET:
 	error = linux_msqid_pullup(args->cmd & LINUX_IPC_64,
 	    &linux_msqid, PTRIN(args->buf));
 	if (error)
 	    return (error);
 	linux_to_bsd_msqid_ds(&linux_msqid, &bsd_msqid);
+	break;
+
+    case LINUX_IPC_RMID:
+	/* NOTHING */
+	break;
+
+    default:
+	return (EINVAL);
 	break;
     }
 

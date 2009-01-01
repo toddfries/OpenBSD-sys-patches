@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_sysvec.c,v 1.48 2008/11/22 12:36:15 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/svr4/svr4_sysvec.c,v 1.49 2008/12/17 13:13:35 kib Exp $");
 
 /* XXX we use functions that might not exist. */
 #include "opt_compat.h"
@@ -218,8 +218,6 @@ svr4_fixup(register_t **stack_base, struct image_params *imgp)
 	args = (Elf32_Auxargs *)imgp->auxargs;
 	pos = *stack_base + (imgp->args->argc + imgp->args->envc + 2);  
     
-	if (args->trace)
-		AUXARGS_ENTRY(pos, AT_DEBUG, 1);
 	if (args->execfd != -1)
 		AUXARGS_ENTRY(pos, AT_EXECFD, args->execfd);
 	AUXARGS_ENTRY(pos, AT_PHDR, args->phdr);

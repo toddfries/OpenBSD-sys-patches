@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpi_support/acpi_asus.c,v 1.39 2008/11/04 11:52:50 rpaulo Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpi_support/acpi_asus.c,v 1.40 2008/12/27 20:48:11 stas Exp $");
 
 /*
  * Driver for extra ACPI-controlled gadgets (hotkeys, leds, etc) found on
@@ -976,7 +976,7 @@ acpi_asus_sysctl_set(struct acpi_asus_softc *sc, int method, int arg)
 {
 	ACPI_STATUS		status = AE_OK;
 	ACPI_OBJECT_LIST 	acpiargs;
-	ACPI_OBJECT		acpiarg[0];
+	ACPI_OBJECT		acpiarg[1];
 
 	ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
 	ACPI_SERIAL_ASSERT(asus);

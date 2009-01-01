@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_bsd.c,v 1.79 2007/12/06 09:20:27 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_bsd.c,v 1.80 2008/12/01 15:02:00 ivoras Exp $");
 
 #include <sys/param.h>
 #include <sys/endian.h>
@@ -136,7 +136,8 @@ g_bsd_modify(struct g_geom *gp, u_char *label)
 	}
 	
 	if (rawoffset != 0 && (off_t)rawoffset != ms->mbroffset)
-		printf("WARNING: Expected rawoffset %jd, found %jd\n",
+		printf("WARNING: %s expected rawoffset %jd, found %jd\n",
+		    gp->name,
 		    (intmax_t)ms->mbroffset/dl.d_secsize,
 		    (intmax_t)rawoffset/dl.d_secsize);
 

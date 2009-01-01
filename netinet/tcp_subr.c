@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/tcp_subr.c,v 1.322 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/tcp_subr.c,v 1.331 2008/12/17 12:52:34 bz Exp $");
 
 #include "opt_compat.h"
 #include "opt_inet.h"
@@ -94,7 +94,9 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_subr.c,v 1.322 2008/11/19 09:39:34 zec E
 #ifdef TCPDEBUG
 #include <netinet/tcp_debug.h>
 #endif
+#include <netinet/vinet.h>
 #include <netinet6/ip6protosw.h>
+#include <netinet6/vinet6.h>
 
 #ifdef IPSEC
 #include <netipsec/ipsec.h>
@@ -130,7 +132,7 @@ static int	tcp_inflight_stab;
 static int
 sysctl_net_inet_tcp_mss_check(SYSCTL_HANDLER_ARGS)
 {
-	INIT_VNET_INET(TD_TO_VNET(curthread));
+	INIT_VNET_INET(curvnet);
 	int error, new;
 
 	new = V_tcp_mssdflt;
@@ -144,15 +146,16 @@ sysctl_net_inet_tcp_mss_check(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
-SYSCTL_PROC(_net_inet_tcp, TCPCTL_MSSDFLT, mssdflt, CTLTYPE_INT|CTLFLAG_RW,
-	   &tcp_mssdflt, 0, &sysctl_net_inet_tcp_mss_check, "I",
-	   "Default TCP Maximum Segment Size");
+SYSCTL_V_PROC(V_NET, vnet_inet, _net_inet_tcp, TCPCTL_MSSDFLT, mssdflt,
+    CTLTYPE_INT|CTLFLAG_RW, tcp_mssdflt, 0,
+    &sysctl_net_inet_tcp_mss_check, "I",
+    "Default TCP Maximum Segment Size");
 
 #ifdef INET6
 static int
 sysctl_net_inet_tcp_mss_v6_check(SYSCTL_HANDLER_ARGS)
 {
-	INIT_VNET_INET6(TD_TO_VNET(curthread));
+	INIT_VNET_INET(curvnet);
 	int error, new;
 
 	new = V_tcp_v6mssdflt;
@@ -166,9 +169,10 @@ sysctl_net_inet_tcp_mss_v6_check(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
-SYSCTL_PROC(_net_inet_tcp, TCPCTL_V6MSSDFLT, v6mssdflt, CTLTYPE_INT|CTLFLAG_RW,
-	   &tcp_v6mssdflt, 0, &sysctl_net_inet_tcp_mss_v6_check, "I",
-	   "Default TCP Maximum Segment Size for IPv6");
+SYSCTL_V_PROC(V_NET, vnet_inet, _net_inet_tcp, TCPCTL_V6MSSDFLT, v6mssdflt,
+    CTLTYPE_INT|CTLFLAG_RW, tcp_v6mssdflt, 0,
+    &sysctl_net_inet_tcp_mss_v6_check, "I",
+   "Default TCP Maximum Segment Size for IPv6");
 #endif
 
 /*
@@ -225,9 +229,9 @@ static int	tcp_inflight_debug = 0;
 SYSCTL_INT(_net_inet_tcp_inflight, OID_AUTO, debug, CTLFLAG_RW,
     &tcp_inflight_debug, 0, "Debug TCP inflight calculations");
 
-SYSCTL_PROC(_net_inet_tcp_inflight, OID_AUTO, rttthresh, CTLTYPE_INT|CTLFLAG_RW,
-    &tcp_inflight_rttthresh, 0, sysctl_msec_to_ticks, "I",
-    "RTT threshold below which inflight will deactivate itself");
+SYSCTL_V_PROC(V_NET, vnet_inet, _net_inet_tcp_inflight, OID_AUTO, rttthresh,
+    CTLTYPE_INT|CTLFLAG_RW, tcp_inflight_rttthresh, 0, sysctl_msec_to_ticks,
+    "I", "RTT threshold below which inflight will deactivate itself");
 
 SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_tcp_inflight, OID_AUTO, min,
     CTLFLAG_RW, tcp_inflight_min, 0, "Lower-bound for TCP inflight window");
@@ -355,6 +359,8 @@ tcp_init(void)
 	V_tcp_inflight_rttthresh = TCPTV_INFLIGHT_RTTTHRESH;
 	tcp_finwait2_timeout = TCPTV_FINWAIT2_TIMEOUT;
 
+	TUNABLE_INT_FETCH("net.inet.tcp.sack.enable", &V_tcp_do_sack);
+
 	INP_INFO_LOCK_INIT(&V_tcbinfo, "tcp");
 	LIST_INIT(&V_tcb);
 	V_tcbinfo.ipi_listhead = &V_tcb;
@@ -428,7 +434,7 @@ tcpip_fillheaders(struct inpcb *inp, void *ip_ptr, void *tcp_ptr)
 
 		ip6 = (struct ip6_hdr *)ip_ptr;
 		ip6->ip6_flow = (ip6->ip6_flow & ~IPV6_FLOWINFO_MASK) |
-			(inp->in6p_flowinfo & IPV6_FLOWINFO_MASK);
+			(inp->inp_flow & IPV6_FLOWINFO_MASK);
 		ip6->ip6_vfc = (ip6->ip6_vfc & ~IPV6_VERSION_MASK) |
 			(IPV6_VERSION & IPV6_VERSION_MASK);
 		ip6->ip6_nxt = IPPROTO_TCP;
@@ -947,6 +953,9 @@ static struct inpcb *
 tcp_notify(struct inpcb *inp, int error)
 {
 	struct tcpcb *tp;
+#ifdef INVARIANTS
+	INIT_VNET_INET(inp->inp_vnet); /* V_tcbinfo WLOCK ASSERT */
+#endif
 
 	INP_INFO_WLOCK_ASSERT(&V_tcbinfo);
 	INP_WLOCK_ASSERT(inp);
@@ -1297,7 +1306,6 @@ tcp_ctlinput(int cmd, struct sockaddr *sa, void *vip)
 					     * value (if given) and then notify.
 					     */
 					    bzero(&inc, sizeof(inc));
-					    inc.inc_flags = 0;	/* IPv4 */
 					    inc.inc_faddr = faddr;
 					    inc.inc_fibnum =
 						inp->inp_inc.inc_fibnum;
@@ -1334,13 +1342,11 @@ tcp_ctlinput(int cmd, struct sockaddr *sa, void *vip)
 			if (inp != NULL)
 				INP_WUNLOCK(inp);
 		} else {
+			bzero(&inc, sizeof(inc));
 			inc.inc_fport = th->th_dport;
 			inc.inc_lport = th->th_sport;
 			inc.inc_faddr = faddr;
 			inc.inc_laddr = ip->ip_src;
-#ifdef INET6
-			inc.inc_isipv6 = 0;
-#endif
 			syncache_unreach(&inc, th);
 		}
 		INP_INFO_WUNLOCK(&V_tcbinfo);
@@ -1410,11 +1416,12 @@ tcp6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 		    (struct sockaddr *)ip6cp->ip6c_src,
 		    th.th_sport, cmd, NULL, notify);
 
+		bzero(&inc, sizeof(inc));
 		inc.inc_fport = th.th_dport;
 		inc.inc_lport = th.th_sport;
 		inc.inc6_faddr = ((struct sockaddr_in6 *)sa)->sin6_addr;
 		inc.inc6_laddr = ip6cp->ip6c_src->sin6_addr;
-		inc.inc_isipv6 = 1;
+		inc.inc_flags |= INC_ISIPV6;
 		INP_INFO_WLOCK(&V_tcbinfo);
 		syncache_unreach(&inc, &th);
 		INP_INFO_WUNLOCK(&V_tcbinfo);
@@ -1477,13 +1484,13 @@ tcp6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 static u_char isn_secret[32];
 static int isn_last_reseed;
 static u_int32_t isn_offset, isn_offset_old;
-static MD5_CTX isn_ctx;
 #endif
 
 tcp_seq
 tcp_new_isn(struct tcpcb *tp)
 {
 	INIT_VNET_INET(tp->t_vnet);
+	MD5_CTX isn_ctx;
 	u_int32_t md5_buffer[4];
 	tcp_seq new_isn;
 
@@ -1499,25 +1506,25 @@ tcp_new_isn(struct tcpcb *tp)
 	}
 
 	/* Compute the md5 hash and return the ISN. */
-	MD5Init(&V_isn_ctx);
-	MD5Update(&V_isn_ctx, (u_char *) &tp->t_inpcb->inp_fport, sizeof(u_short));
-	MD5Update(&V_isn_ctx, (u_char *) &tp->t_inpcb->inp_lport, sizeof(u_short));
+	MD5Init(&isn_ctx);
+	MD5Update(&isn_ctx, (u_char *) &tp->t_inpcb->inp_fport, sizeof(u_short));
+	MD5Update(&isn_ctx, (u_char *) &tp->t_inpcb->inp_lport, sizeof(u_short));
 #ifdef INET6
 	if ((tp->t_inpcb->inp_vflag & INP_IPV6) != 0) {
-		MD5Update(&V_isn_ctx, (u_char *) &tp->t_inpcb->in6p_faddr,
+		MD5Update(&isn_ctx, (u_char *) &tp->t_inpcb->in6p_faddr,
 			  sizeof(struct in6_addr));
-		MD5Update(&V_isn_ctx, (u_char *) &tp->t_inpcb->in6p_laddr,
+		MD5Update(&isn_ctx, (u_char *) &tp->t_inpcb->in6p_laddr,
 			  sizeof(struct in6_addr));
 	} else
 #endif
 	{
-		MD5Update(&V_isn_ctx, (u_char *) &tp->t_inpcb->inp_faddr,
+		MD5Update(&isn_ctx, (u_char *) &tp->t_inpcb->inp_faddr,
 			  sizeof(struct in_addr));
-		MD5Update(&V_isn_ctx, (u_char *) &tp->t_inpcb->inp_laddr,
+		MD5Update(&isn_ctx, (u_char *) &tp->t_inpcb->inp_laddr,
 			  sizeof(struct in_addr));
 	}
-	MD5Update(&V_isn_ctx, (u_char *) &V_isn_secret, sizeof(V_isn_secret));
-	MD5Final((u_char *) &md5_buffer, &V_isn_ctx);
+	MD5Update(&isn_ctx, (u_char *) &V_isn_secret, sizeof(V_isn_secret));
+	MD5Final((u_char *) &md5_buffer, &isn_ctx);
 	new_isn = (tcp_seq) md5_buffer[0];
 	V_isn_offset += ISN_STATIC_INCREMENT +
 		(arc4random() & ISN_RANDOM_INCREMENT);
@@ -1650,7 +1657,7 @@ tcp_maxmtu(struct in_conninfo *inc, int *flags)
 		dst->sin_family = AF_INET;
 		dst->sin_len = sizeof(*dst);
 		dst->sin_addr = inc->inc_faddr;
-		in_rtalloc_ign(&sro, RTF_CLONING, inc->inc_fibnum);
+		in_rtalloc_ign(&sro, 0, inc->inc_fibnum);
 	}
 	if (sro.ro_rt != NULL) {
 		ifp = sro.ro_rt->rt_ifp;
@@ -1685,7 +1692,7 @@ tcp_maxmtu6(struct in_conninfo *inc, int *flags)
 		sro6.ro_dst.sin6_family = AF_INET6;
 		sro6.ro_dst.sin6_len = sizeof(struct sockaddr_in6);
 		sro6.ro_dst.sin6_addr = inc->inc6_faddr;
-		rtalloc_ign((struct route *)&sro6, RTF_CLONING);
+		rtalloc_ign((struct route *)&sro6, 0);
 	}
 	if (sro6.ro_rt != NULL) {
 		ifp = sro6.ro_rt->rt_ifp;
@@ -1940,6 +1947,7 @@ int
 tcp_signature_compute(struct mbuf *m, int _unused, int len, int optlen,
     u_char *buf, u_int direction)
 {
+	INIT_VNET_IPSEC(curvnet);
 	union sockaddr_union dst;
 	struct ippseudo ippseudo;
 	MD5_CTX ctx;
@@ -2253,7 +2261,7 @@ tcp_log_addrs(struct in_conninfo *inc, struct tcphdr *th, void *ip4hdr,
 	strcat(s, "TCP: [");
 	sp = s + strlen(s);
 
-	if (inc && inc->inc_isipv6 == 0) {
+	if (inc && ((inc->inc_flags & INC_ISIPV6) == 0)) {
 		inet_ntoa_r(inc->inc_faddr, sp);
 		sp = s + strlen(s);
 		sprintf(sp, "]:%i to [", ntohs(inc->inc_fport));

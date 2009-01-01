@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_freebsd.c,v 1.23 2008/10/23 19:57:13 des Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_freebsd.c,v 1.24 2008/12/18 23:00:09 sam Exp $");
 
 /*
  * IEEE 802.11 support (FreeBSD-specific code)
@@ -234,7 +234,7 @@ ieee80211_sysctl_vattach(struct ieee80211vap *vap)
 	struct sysctl_oid *oid;
 	char num[14];			/* sufficient for 32 bits */
 
-	MALLOC(ctx, struct sysctl_ctx_list *, sizeof(struct sysctl_ctx_list),
+	ctx = (struct sysctl_ctx_list *) malloc(sizeof(struct sysctl_ctx_list),
 		M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (ctx == NULL) {
 		if_printf(ifp, "%s: cannot allocate sysctl context!\n",
@@ -310,7 +310,7 @@ ieee80211_sysctl_vdetach(struct ieee80211vap *vap)
 
 	if (vap->iv_sysctl != NULL) {
 		sysctl_ctx_free(vap->iv_sysctl);
-		FREE(vap->iv_sysctl, M_DEVBUF);
+		free(vap->iv_sysctl, M_DEVBUF);
 		vap->iv_sysctl = NULL;
 	}
 }

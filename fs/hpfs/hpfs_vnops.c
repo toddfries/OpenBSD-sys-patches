@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/hpfs/hpfs_vnops.c,v 1.76 2008/10/28 13:44:11 trasz Exp $
+ * $FreeBSD: src/sys/fs/hpfs/hpfs_vnops.c,v 1.77 2008/12/16 21:13:11 trasz Exp $
  */
 
 #include <sys/param.h>
@@ -661,7 +661,7 @@ hpfs_strategy(ap)
 			bp->b_error = error;
 			bp->b_ioflags |= BIO_ERROR;
 			bufdone(bp);
-			return (error);
+			return (0);
 		}
 		if ((long)bp->b_blkno == -1)
 			vfs_bio_clrbuf(bp);

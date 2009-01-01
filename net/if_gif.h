@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/net/if_gif.h,v 1.21 2008/10/02 15:37:58 zec Exp $	*/
+/*	$FreeBSD: src/sys/net/if_gif.h,v 1.22 2008/12/10 23:12:39 zec Exp $	*/
 /*	$KAME: if_gif.h,v 1.17 2000/09/11 11:36:41 sumikawa Exp $	*/
 
 /*-
@@ -113,7 +113,7 @@ int gif_encapcheck(const struct mbuf *, int, int, void *);
 /*
  * Virtualization support
  */
-#ifdef VIMAGE
+
 struct vnet_gif {
 	LIST_HEAD(, gif_softc) _gif_softc_list;
 	int	_max_gif_nesting;
@@ -121,6 +121,11 @@ struct vnet_gif {
 	int	_ip_gif_ttl;
 	int	_ip6_gif_hlim;
 };
+
+#ifndef VIMAGE
+#ifndef VIMAGE_GLOBALS
+extern struct vnet_gif vnet_gif_0;
+#endif
 #endif
 
 #define	INIT_VNET_GIF(vnet) \

@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net80211/_ieee80211.h,v 1.16 2008/10/25 23:24:49 sam Exp $
+ * $FreeBSD: src/sys/net80211/_ieee80211.h,v 1.17 2008/12/15 01:26:33 sam Exp $
  */
 #ifndef _NET80211__IEEE80211_H_
 #define _NET80211__IEEE80211_H_
@@ -137,7 +137,7 @@ struct ieee80211_channel {
 	uint8_t		ic_extieee;	/* HT40 extension channel number */
 };
 
-#define	IEEE80211_CHAN_MAX	255
+#define	IEEE80211_CHAN_MAX	256
 #define	IEEE80211_CHAN_BYTES	32	/* howmany(IEEE80211_CHAN_MAX, NBBY) */
 #define	IEEE80211_CHAN_ANY	0xffff	/* token for ``any channel'' */
 #define	IEEE80211_CHAN_ANYC \

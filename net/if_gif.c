@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/net/if_gif.c,v 1.73 2008/11/19 09:39:34 zec Exp $	*/
+/*	$FreeBSD: src/sys/net/if_gif.c,v 1.74 2008/12/10 23:12:39 zec Exp $	*/
 /*	$KAME: if_gif.c,v 1.87 2001/10/19 08:50:27 itojun Exp $	*/
 
 /*-
@@ -94,6 +94,12 @@
  */
 static struct mtx gif_mtx;
 static MALLOC_DEFINE(M_GIF, "gif", "Generic Tunnel Interface");
+
+#ifndef VIMAGE
+#ifndef VIMAGE_GLOBALS
+struct vnet_gif vnet_gif_0;
+#endif
+#endif
 
 #ifdef VIMAGE_GLOBALS
 static LIST_HEAD(, gif_softc) gif_softc_list;

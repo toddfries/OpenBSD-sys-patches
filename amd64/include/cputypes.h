@@ -24,7 +24,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/amd64/include/cputypes.h,v 1.19 2005/01/05 20:17:20 imp Exp $
+ * $FreeBSD: src/sys/amd64/include/cputypes.h,v 1.20 2008/11/26 19:25:13 jkim Exp $
  */
 
 #ifndef _MACHINE_CPUTYPES_H_
@@ -33,15 +33,21 @@
 /*
  * Classes of processor.
  */
-#define	CPUCLASS_X86	0	/* X86 */
-#define	CPUCLASS_K8	1	/* K8 AMD64 class */
+#define	CPUCLASS_X86		0	/* X86 */
+#define	CPUCLASS_K8		1	/* K8 AMD64 class */
 
 /*
  * Kinds of processor.
  */
-#define	CPU_X86		0	/* Intel */
-#define	CPU_CLAWHAMMER	1	/* AMD Clawhammer */
-#define	CPU_SLEDGEHAMMER 2	/* AMD Sledgehammer */
+#define	CPU_X86			0	/* Intel */
+#define	CPU_CLAWHAMMER		1	/* AMD Clawhammer */
+#define	CPU_SLEDGEHAMMER	2	/* AMD Sledgehammer */
+
+/*
+ * Vendors of processor.
+ */
+#define	CPU_VENDOR_AMD		0x1022		/* AMD */
+#define	CPU_VENDOR_INTEL	0x8086		/* Intel */
 
 #ifndef LOCORE
 extern int	cpu;

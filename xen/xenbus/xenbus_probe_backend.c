@@ -37,7 +37,7 @@
 #endif
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/xen/xenbus/xenbus_probe_backend.c,v 1.3 2008/08/20 02:42:08 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/xen/xenbus/xenbus_probe_backend.c,v 1.5 2008/12/29 06:31:03 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -57,11 +57,11 @@ __FBSDID("$FreeBSD: src/sys/xen/xenbus/xenbus_probe_backend.c,v 1.3 2008/08/20 0
 #include <sys/sx.h>
 
 #include <machine/xen/xen-os.h>
-#include <machine/xen/hypervisor.h>
+#include <xen/hypervisor.h>
 #include <machine/xen/xenbus.h>
-#include <machine/xen/evtchn.h>
 #include <machine/stdarg.h>
 
+#include <xen/evtchn.h>
 #include <xen/xenbus/xenbus_comms.h>
 
 #define BUG_ON        PANIC_IF

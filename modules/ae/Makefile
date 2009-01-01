@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/ae/Makefile,v 1.1 2008/10/03 10:31:31 stas Exp $
+# $FreeBSD: src/sys/modules/ae/Makefile,v 1.3 2008/12/02 21:37:28 bz Exp $
 
 .PATH: ${.CURDIR}/../../dev/ae
 

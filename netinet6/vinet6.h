@@ -27,24 +27,25 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netinet6/vinet6.h,v 1.2 2008/11/19 09:39:34 zec Exp $
+ * $FreeBSD: src/sys/netinet6/vinet6.h,v 1.7 2008/12/15 06:10:57 qingli Exp $
  */
 
 #ifndef _NETINET6_VINET6_H_
 #define _NETINET6_VINET6_H_
 
-#ifdef VIMAGE
-#include <sys/socket.h>
-#include <netinet/ip6.h>
-#include <net/if.h>
-#include <netinet6/ip6_var.h>
-#include <netinet6/raw_ip6.h>
+#include <sys/callout.h>
+#include <sys/queue.h>
+#include <sys/types.h>
+
+#include <net/if_var.h>
+
 #include <netinet/icmp6.h>
-#include <netinet6/scope6_var.h>
-#include <netinet6/in6_ifattach.h>
-#include <netinet6/in6_var.h>
+#include <netinet/in.h>
+
+#include <netinet6/ip6_var.h>
 #include <netinet6/nd6.h>
-#include <netinet/in_pcb.h>
+#include <netinet6/raw_ip6.h>
+#include <netinet6/scope6_var.h>
 
 struct vnet_inet6 {
 	struct in6_ifaddr *		_in6_ifaddr;
@@ -76,7 +77,7 @@ struct vnet_inet6 {
 
 	int				_nd6_inuse;
 	int				_nd6_allocated;
-	struct llinfo_nd6		_llinfo_nd6;
+	int				_nd6_onlink_ns_rfc4861;
 	struct nd_drhead		_nd_defrouter;
 	struct nd_prhead 		_nd_prefix;
 	struct ifnet *			_nd6_defifp;
@@ -88,7 +89,7 @@ struct vnet_inet6 {
 	int				_dad_init;
 
 	int				_icmp6errpps_count;
-	int				_icmp6errppslim_last;
+	struct timeval			_icmp6errppslim_last;
 
 	int 				_ip6_forwarding;
 	int				_ip6_sendredirects;
@@ -108,7 +109,6 @@ struct vnet_inet6 {
 	int				_ip6_keepfaith;
 	int				_ip6stealth;
 	time_t				_ip6_log_time;
-	int				_nd6_onlink_ns_rfc4861;
 
 	int				_pmtu_expire;
 	int				_pmtu_probe;
@@ -154,14 +154,17 @@ struct vnet_inet6 {
 
 	struct ip6_pktopts		_ip6_opts;
 };
-#endif
 
+#ifndef VIMAGE
+#ifndef VIMAGE_GLOBALS
+extern struct vnet_inet6 vnet_inet6_0;
+#endif
+#endif
 
 #define	INIT_VNET_INET6(vnet) \
 	INIT_FROM_VNET(vnet, VNET_MOD_INET6, struct vnet_inet6, vnet_inet6)
 
 #define	VNET_INET6(sym)		VSYM(vnet_inet6, sym)
-
 
 /*
  * Symbol translation macros

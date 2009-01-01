@@ -1,7 +1,7 @@
 # Makefile.arm -- with config changes.
 # Copyright 1990 W. Jolitz
 #	from: @(#)Makefile.i386	7.1 5/10/91
-# $FreeBSD: src/sys/conf/Makefile.arm,v 1.40 2008/10/13 20:07:13 raj Exp $
+# $FreeBSD: src/sys/conf/Makefile.arm,v 1.41 2008/11/30 17:53:19 sam Exp $
 #
 # Makefile for FreeBSD
 #
@@ -18,9 +18,6 @@
 
 # Which version of config(8) is required.
 %VERSREQ=	600004
-
-# Temporary stuff while we're still embryonic
-NO_MODULES=
 
 STD8X16FONT?=	iso
 
@@ -121,6 +118,8 @@ ${KERNEL_KO}.tramp: ${KERNEL_KO} $S/$M/$M/inckern.S $S/$M/$M/elf_trampoline.c
 	${KERNEL_KO}.gz.tramp.bin
 	rm ${KERNEL_KO}.tmp.gz ${KERNEL_KO}.tramp.noheader opt_kernname.h \
 	inflate-tramp.o tmphack.S
+
+MKMODULESENV+=	MACHINE=${MACHINE}
 
 %BEFORE_DEPEND
 

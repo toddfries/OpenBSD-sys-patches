@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/cd9660/cd9660_node.c,v 1.59 2008/11/18 23:13:40 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/cd9660/cd9660_node.c,v 1.60 2008/11/27 06:21:04 kientzle Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -241,7 +241,7 @@ cd9660_tstamp_conv7(pi,pu,ftype)
 	minute = pi[4];
 	second = pi[5];
 	if(ftype != ISO_FTYPE_HIGH_SIERRA)
-		tz = pi[6];
+		tz = ((signed char *)pi)[6]; /* Timezone value is signed. */
 	else
 		/* original high sierra misses timezone data */
 		tz = 0;

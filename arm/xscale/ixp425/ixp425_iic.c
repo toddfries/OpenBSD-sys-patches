@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425_iic.c,v 1.3 2008/08/04 20:46:15 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/xscale/ixp425/ixp425_iic.c,v 1.4 2008/12/20 03:26:09 sam Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,7 +63,7 @@ static struct ixpiic_softc *ixpiic_sc = NULL;
 static int
 ixpiic_probe(device_t dev)
 {
-	device_set_desc(dev, "IXP425 GPIO-Based I2C Interface");
+	device_set_desc(dev, "IXP4XX GPIO-Based I2C Interface");
 	return (0);
 }
 

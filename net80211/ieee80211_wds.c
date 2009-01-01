@@ -25,7 +25,7 @@
 
 #include <sys/cdefs.h>
 #ifdef __FreeBSD__
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_wds.c,v 1.5 2008/11/22 07:35:45 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_wds.c,v 1.6 2008/12/31 21:21:46 sam Exp $");
 #endif
 
 /*
@@ -278,7 +278,7 @@ ieee80211_dwds_mcast(struct ieee80211vap *vap0, struct mbuf *m)
 		mcopy->m_flags |= M_MCAST | M_WDS;
 		mcopy->m_pkthdr.rcvif = (void *) ni;
 
-		err = (parent->if_transmit)(parent, mcopy);
+		err = parent->if_transmit(parent, mcopy);
 		if (err) {
 			/* NB: IFQ_HANDOFF reclaims mbuf */
 			ifp->if_oerrors++;

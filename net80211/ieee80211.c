@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211.c,v 1.57 2008/10/25 23:43:08 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211.c,v 1.58 2008/12/15 01:26:33 sam Exp $");
 
 /*
  * IEEE 802.11 generic handler
@@ -118,7 +118,7 @@ ieee80211_chan_init(struct ieee80211com *ic)
 	struct ieee80211_channel *c;
 	int i;
 
-	KASSERT(0 < ic->ic_nchans && ic->ic_nchans < IEEE80211_CHAN_MAX,
+	KASSERT(0 < ic->ic_nchans && ic->ic_nchans <= IEEE80211_CHAN_MAX,
 		("invalid number of channels specified: %u", ic->ic_nchans));
 	memset(ic->ic_chan_avail, 0, sizeof(ic->ic_chan_avail));
 	memset(ic->ic_modecaps, 0, sizeof(ic->ic_modecaps));
@@ -126,8 +126,6 @@ ieee80211_chan_init(struct ieee80211com *ic)
 	for (i = 0; i < ic->ic_nchans; i++) {
 		c = &ic->ic_channels[i];
 		KASSERT(c->ic_flags != 0, ("channel with no flags"));
-		KASSERT(c->ic_ieee < IEEE80211_CHAN_MAX,
-			("channel with bogus ieee number %u", c->ic_ieee));
 		setbit(ic->ic_chan_avail, c->ic_ieee);
 		/*
 		 * Identify mode capabilities.

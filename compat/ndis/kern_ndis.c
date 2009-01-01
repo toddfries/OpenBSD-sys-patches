@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/ndis/kern_ndis.c,v 1.98 2008/07/23 10:49:27 weongyo Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/ndis/kern_ndis.c,v 1.100 2008/12/27 09:42:17 weongyo Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -64,6 +64,9 @@ __FBSDID("$FreeBSD: src/sys/compat/ndis/kern_ndis.c,v 1.98 2008/07/23 10:49:27 w
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_ioctl.h>
+
+#include <dev/usb/usb.h>
+#include <dev/usb/usbdi.h>
 
 #include <compat/ndis/pe_var.h>
 #include <compat/ndis/cfg_var.h>
@@ -144,7 +147,6 @@ ndis_modevent(module_t mod, int cmd, void *arg)
 		}
 
 		TAILQ_INIT(&ndis_devhead);
-
 		break;
 	case MOD_SHUTDOWN:
 		if (TAILQ_FIRST(&ndis_devhead) == NULL) {
@@ -1196,6 +1198,33 @@ ndis_shutdown_nic(arg)
 	TAILQ_REMOVE(&ndis_devhead, sc->ndis_block, link);
 
 	return(0);
+}
+
+int
+ndis_pnpevent_nic(arg, type)
+	void			*arg;
+	int			type;
+{
+	device_t		dev;
+	struct ndis_softc	*sc;
+	ndis_handle		adapter;
+	ndis_pnpevent_handler	pnpeventfunc;
+
+	dev = arg;
+	sc = device_get_softc(arg);
+	NDIS_LOCK(sc);
+	adapter = sc->ndis_block->nmb_miniportadapterctx;
+	pnpeventfunc = sc->ndis_chars->nmc_pnpevent_handler;
+	NDIS_UNLOCK(sc);
+	if (adapter == NULL || pnpeventfunc == NULL)
+		return(EIO);
+
+	if (sc->ndis_chars->nmc_rsvd0 == NULL)
+		MSCALL4(pnpeventfunc, adapter, type, NULL, 0);
+	else
+		MSCALL4(pnpeventfunc, sc->ndis_chars->nmc_rsvd0, type, NULL, 0);
+
+	return (0);
 }
 
 int

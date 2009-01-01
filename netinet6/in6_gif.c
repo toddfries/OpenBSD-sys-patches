@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/in6_gif.c,v 1.33 2008/10/02 15:37:58 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/in6_gif.c,v 1.34 2008/12/02 21:37:28 bz Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -66,6 +66,7 @@ __FBSDID("$FreeBSD: src/sys/netinet6/in6_gif.c,v 1.33 2008/10/02 15:37:58 zec Ex
 #include <netinet/ip_ecn.h>
 #ifdef INET6
 #include <netinet6/ip6_ecn.h>
+#include <netinet6/vinet6.h>
 #endif
 
 #include <net/if_gif.h>

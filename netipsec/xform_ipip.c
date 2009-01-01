@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/xform_ipip.c,v 1.20 2008/11/19 09:39:34 zec Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/xform_ipip.c,v 1.21 2008/12/02 21:37:28 bz Exp $	*/
 /*	$OpenBSD: ip_ipip.c,v 1.25 2002/06/10 18:04:55 itojun Exp $ */
 /*-
  * The authors of this code are John Ioannidis (ji@tla.org),
@@ -56,6 +56,7 @@
 #include <net/pfil.h>
 #include <net/route.h>
 #include <net/netisr.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -64,15 +65,15 @@
 #include <netinet/ip_ecn.h>
 #include <netinet/ip_var.h>
 #include <netinet/ip_encap.h>
+#ifdef MROUTING
+#include <netinet/ip_mroute.h>
+#endif
+#include <netinet/vinet.h>
 
 #include <netipsec/ipsec.h>
 #include <netipsec/xform.h>
 
 #include <netipsec/ipip_var.h>
-
-#ifdef MROUTING
-#include <netinet/ip_mroute.h>
-#endif
 
 #ifdef INET6
 #include <netinet/ip6.h>

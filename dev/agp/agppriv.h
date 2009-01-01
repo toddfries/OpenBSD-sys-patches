@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/dev/agp/agppriv.h,v 1.8 2007/11/12 21:51:37 jhb Exp $
+ *	$FreeBSD: src/sys/dev/agp/agppriv.h,v 1.10 2008/12/21 22:30:37 rnoland Exp $
  */
 
 #ifndef _PCI_AGPPRIV_H_
@@ -36,15 +36,12 @@
 #include <sys/agpio.h>
 #include <dev/agp/agpvar.h>
 
-#define AGP_DEBUGxx
-
 #ifdef AGP_DEBUG
-#define AGP_DPF(x...) do {			\
-    printf("agp: ");				\
-    printf(##x);				\
+#define AGP_DPF(fmt, ...) do {				\
+    printf("agp: " fmt, ##__VA_ARGS__);			\
 } while (0)
 #else
-#define AGP_DPF(x...) do {} while (0)
+#define AGP_DPF(fmt, ...) do {} while (0)
 #endif
 
 #include "agp_if.h"

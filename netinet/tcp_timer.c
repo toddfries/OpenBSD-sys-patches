@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/tcp_timer.c,v 1.104 2008/10/02 15:37:58 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/tcp_timer.c,v 1.105 2008/12/02 21:37:28 bz Exp $");
 
 #include "opt_inet6.h"
 #include "opt_tcpdebug.h"
@@ -47,6 +47,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_timer.c,v 1.104 2008/10/02 15:37:58 zec 
 #include <sys/systm.h>
 #include <sys/vimage.h>
 
+#include <net/if.h>
 #include <net/route.h>
 
 #include <netinet/in.h>
@@ -64,6 +65,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/tcp_timer.c,v 1.104 2008/10/02 15:37:58 zec 
 #ifdef TCPDEBUG
 #include <netinet/tcp_debug.h>
 #endif
+#include <netinet/vinet.h>
 
 int	tcp_keepinit;
 SYSCTL_PROC(_net_inet_tcp, TCPCTL_KEEPINIT, keepinit, CTLTYPE_INT|CTLFLAG_RW,

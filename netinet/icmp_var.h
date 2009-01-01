@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)icmp_var.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/netinet/icmp_var.h,v 1.26 2007/07/19 22:34:24 rwatson Exp $
+ * $FreeBSD: src/sys/netinet/icmp_var.h,v 1.27 2008/12/13 19:13:03 bz Exp $
  */
 
 #ifndef _NETINET_ICMP_VAR_H_
@@ -74,7 +74,9 @@ struct	icmpstat {
 
 #ifdef _KERNEL
 SYSCTL_DECL(_net_inet_icmp);
+#ifdef VIMAGE_GLOBALS
 extern struct icmpstat icmpstat;	/* icmp statistics */
+#endif
 extern int badport_bandlim(int);
 #define BANDLIM_UNLIMITED -1
 #define BANDLIM_ICMP_UNREACH 0

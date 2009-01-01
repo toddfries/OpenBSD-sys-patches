@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/contrib/altq/altq/altq_subr.c,v 1.14 2008/10/23 15:53:51 des Exp $	*/
+/*	$FreeBSD: src/sys/contrib/altq/altq/altq_subr.c,v 1.15 2008/12/02 21:37:28 bz Exp $	*/
 /*	$KAME: altq_subr.c,v 1.21 2003/11/06 06:32:53 kjc Exp $	*/
 
 /*
@@ -51,6 +51,7 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>

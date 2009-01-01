@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/cardbus/cardbusvar.h,v 1.17 2008/11/21 03:03:57 imp Exp $
+ * $FreeBSD: src/sys/dev/cardbus/cardbusvar.h,v 1.18 2008/12/02 04:54:31 imp Exp $
  */
 
 /*
@@ -60,7 +60,6 @@ struct cardbus_devinfo
 	} funce;
 	uint32_t	fepresent;	/* bit mask of funce values present */
 	struct cdev 	*sc_cisdev;
-	struct cdev 	*sc_cisdev_compat;
 	struct cis_buffer sc_cis;
 };
 

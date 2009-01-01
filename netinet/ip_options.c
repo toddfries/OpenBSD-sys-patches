@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_options.c,v 1.13 2008/10/02 15:37:58 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_options.c,v 1.14 2008/12/02 21:37:28 bz Exp $");
 
 #include "opt_ipstealth.h"
 #include "opt_mac.h"
@@ -63,6 +63,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_options.c,v 1.13 2008/10/02 15:37:58 zec 
 #include <netinet/ip_options.h>
 #include <netinet/ip_icmp.h>
 #include <machine/in_cksum.h>
+#include <netinet/vinet.h>
 
 #include <sys/socketvar.h>
 

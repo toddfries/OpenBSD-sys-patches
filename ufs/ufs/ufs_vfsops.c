@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_vfsops.c,v 1.50 2008/11/02 10:15:42 attilio Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_vfsops.c,v 1.51 2008/12/18 12:01:53 kib Exp $");
 
 #include "opt_quota.h"
 #include "opt_ufs.h"
@@ -118,9 +118,6 @@ ufs_quotactl(mp, cmds, id, arg, td)
 	if ((u_int)type >= MAXQUOTAS)
 		return (EINVAL);
 
-	if (vfs_busy(mp, MBF_NOWAIT))
-		return (0);
-
 	switch (cmd) {
 	case Q_QUOTAON:
 		error = quotaon(td, mp, type, arg);
@@ -150,7 +147,6 @@ ufs_quotactl(mp, cmds, id, arg, td)
 		error = EINVAL;
 		break;
 	}
-	vfs_unbusy(mp);
 	return (error);
 #endif
 }

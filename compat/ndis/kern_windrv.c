@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/ndis/kern_windrv.c,v 1.14 2007/05/20 22:03:57 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/ndis/kern_windrv.c,v 1.16 2008/12/28 13:50:58 ganbold Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -55,6 +55,9 @@ __FBSDID("$FreeBSD: src/sys/compat/ndis/kern_windrv.c,v 1.14 2007/05/20 22:03:57
 #ifdef __i386__
 #include <machine/segments.h>
 #endif
+
+#include <dev/usb/usb.h>
+#include <dev/usb/usbdi.h>
 
 #include <compat/ndis/pe_var.h>
 #include <compat/ndis/cfg_var.h>
@@ -349,9 +352,11 @@ windrv_load(mod, img, len, bustype, devlist, regvals)
 	if (pe_patch_imports(img, "NDIS", ndis_functbl))
 		return(ENOEXEC);
 
-	/* Dynamically link the HAL.dll routines -- also required. */
-	if (pe_patch_imports(img, "HAL", hal_functbl))
-		return(ENOEXEC);
+	/* Dynamically link the HAL.dll routines -- optional. */
+	if (pe_get_import_descriptor(img, &imp_desc, "HAL") == 0) {
+		if (pe_patch_imports(img, "HAL", hal_functbl))
+			return(ENOEXEC);
+	}
 
 	/* Dynamically link ntoskrnl.exe -- optional. */
 	if (pe_get_import_descriptor(img, &imp_desc, "ntoskrnl") == 0) {
@@ -878,12 +883,9 @@ static void
 x86_oldldt(dummy)
 	void			*dummy;
 {
-	struct thread		*t;
 	struct x86desc		*gdt;
 	struct gdt		gtable;
 	uint16_t		ltable;
-
-	t = curthread;
 
 	mtx_lock_spin(&dt_lock);
 

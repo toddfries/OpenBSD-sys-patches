@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  * $Id: ng_hci_main.c,v 1.2 2003/03/18 00:09:36 max Exp $
- * $FreeBSD: src/sys/netgraph/bluetooth/hci/ng_hci_main.c,v 1.7 2008/10/23 15:53:51 des Exp $
+ * $FreeBSD: src/sys/netgraph/bluetooth/hci/ng_hci_main.c,v 1.8 2008/12/24 00:00:52 emax Exp $
  */
 
 #include <sys/param.h>
@@ -728,7 +728,7 @@ ng_hci_drv_rcvdata(hook_p hook, item_p item)
 
 		if ((unit->state & NG_HCI_UNIT_READY) != NG_HCI_UNIT_READY ||
 		    unit->sco == NULL || NG_HOOK_NOT_VALID(unit->sco)) {
-			NG_HCI_WARN(
+			NG_HCI_INFO(
 "%s: %s - could not forward HCI SCO data packet, state=%#x, hook=%p\n",
 				__func__, NG_NODE_NAME(unit->node), 
 				unit->state, unit->sco);

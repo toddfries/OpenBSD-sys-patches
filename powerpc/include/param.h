@@ -35,7 +35,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)param.h	5.8 (Berkeley) 6/28/91
- * $FreeBSD: src/sys/powerpc/include/param.h,v 1.17 2008/03/27 05:03:25 jb Exp $
+ * $FreeBSD: src/sys/powerpc/include/param.h,v 1.18 2008/12/15 15:31:10 nwhitehorn Exp $
  */
 
 /*
@@ -55,6 +55,9 @@
 #endif
 
 #ifndef _NO_NAMESPACE_POLLUTION
+
+/* Needed to display interrupts on OFW PCI */
+#define __PCI_REROUTE_INTERRUPT
 
 #ifndef _MACHINE_PARAM_H_
 #define	_MACHINE_PARAM_H_

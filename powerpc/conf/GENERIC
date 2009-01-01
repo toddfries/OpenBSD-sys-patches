@@ -16,7 +16,7 @@
 # If you are in doubt as to the purpose or necessity of a line, check first 
 # in NOTES.
 #
-# $FreeBSD: src/sys/powerpc/conf/GENERIC,v 1.83 2008/10/26 19:37:38 nwhitehorn Exp $
+# $FreeBSD: src/sys/powerpc/conf/GENERIC,v 1.84 2008/12/02 19:09:08 ed Exp $
 
 cpu		AIM
 ident		GENERIC
@@ -50,7 +50,7 @@ options 	PROCFS			#Process filesystem (requires PSEUDOFS)
 options 	PSEUDOFS		#Pseudo-filesystem framework
 options 	GEOM_PART_GPT		#GUID Partition Tables.
 options 	GEOM_LABEL		#Provides labelization
-options 	COMPAT_43TTY		#BSD 4.3 TTY compat [KEEP THIS!]
+options 	COMPAT_43TTY		#BSD 4.3 TTY compat (sgtty)
 options 	COMPAT_FREEBSD4		#Keep this for a while
 options 	COMPAT_FREEBSD5		#Compatible with FreeBSD5
 options 	COMPAT_FREEBSD6		#Compatible with FreeBSD6

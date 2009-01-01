@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/frag6.c,v 1.40 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/frag6.c,v 1.41 2008/12/02 21:37:28 bz Exp $");
 
 #include "opt_mac.h"
 
@@ -57,6 +57,7 @@ __FBSDID("$FreeBSD: src/sys/netinet6/frag6.c,v 1.40 2008/11/19 09:39:34 zec Exp 
 #include <netinet/icmp6.h>
 #include <netinet/in_systm.h>	/* for ECN definitions */
 #include <netinet/ip.h>		/* for ECN definitions */
+#include <netinet6/vinet6.h>
 
 #include <security/mac/mac_framework.h>
 

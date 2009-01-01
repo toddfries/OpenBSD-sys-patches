@@ -29,7 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/nwfs/nwfs_vnops.c,v 1.46 2008/10/28 13:44:11 trasz Exp $
+ * $FreeBSD: src/sys/fs/nwfs/nwfs_vnops.c,v 1.47 2008/12/16 21:13:11 trasz Exp $
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -804,7 +804,7 @@ static int nwfs_strategy (ap)
 	 */
 	if ((bp->b_flags & B_ASYNC) == 0 )
 		error = nwfs_doio(ap->a_vp, bp, cr, td);
-	return (error);
+	return (0);
 }
 
 

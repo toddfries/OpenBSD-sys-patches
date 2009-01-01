@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/powerpc/uboot/conf.c,v 1.2 2008/02/23 18:36:13 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/powerpc/uboot/conf.c,v 1.3 2008/12/17 15:58:07 raj Exp $");
 
 #include <stand.h>
 #include "bootstrap.h"
@@ -94,8 +94,8 @@ struct netif_driver *netif_drivers[] = {
  */
 
 struct file_format *file_formats[] = {
-    &uboot_elf,
-    NULL
+	&uboot_elf,
+	NULL
 };
 
 /* 
@@ -104,6 +104,6 @@ struct file_format *file_formats[] = {
 extern struct console uboot_console;
 
 struct console *consoles[] = {
-    &uboot_console,
-    NULL
+	&uboot_console,
+	NULL
 };

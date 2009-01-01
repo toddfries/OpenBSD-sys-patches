@@ -23,11 +23,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/boot/zfs/zfs.c,v 1.2 2008/11/19 16:39:01 dfr Exp $
+ *	$FreeBSD: src/sys/boot/zfs/zfs.c,v 1.4 2008/12/11 16:48:35 ps Exp $
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/zfs/zfs.c,v 1.2 2008/11/19 16:39:01 dfr Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/zfs/zfs.c,v 1.4 2008/12/11 16:48:35 ps Exp $");
 
 /*
  *	Stand-alone file reading package.
@@ -474,7 +474,6 @@ zfs_dev_open(struct open_file *f, ...)
 	 * the pool.
 	 */
 	unit = dev->d_unit;
-	free(dev);
 	
 	i = 0;
 	STAILQ_FOREACH(spa, &zfs_pools, spa_link) {
@@ -487,6 +486,7 @@ zfs_dev_open(struct open_file *f, ...)
 	}
 
 	f->f_devdata = spa;
+	free(dev);
 	return (0);
 }
 

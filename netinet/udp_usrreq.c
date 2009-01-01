@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/udp_usrreq.c,v 1.241 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/udp_usrreq.c,v 1.245 2008/12/10 23:12:39 zec Exp $");
 
 #include "opt_ipfw.h"
 #include "opt_inet6.h"
@@ -81,6 +81,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/udp_usrreq.c,v 1.241 2008/11/19 09:39:34 zec
 #endif
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
+#include <netinet/vinet.h>
 
 #ifdef IPSEC
 #include <netipsec/ipsec.h>
@@ -113,7 +114,8 @@ int	udp_log_in_vain = 0;
 SYSCTL_INT(_net_inet_udp, OID_AUTO, log_in_vain, CTLFLAG_RW,
     &udp_log_in_vain, 0, "Log all incoming UDP packets");
 
-SYSCTL_INT(_net_inet_udp, OID_AUTO, blackhole, CTLFLAG_RW, &udp_blackhole, 0,
+SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_udp, OID_AUTO, blackhole,
+    CTLFLAG_RW, udp_blackhole, 0,
     "Do not send port unreachables for refused connects");
 
 u_long	udp_sendspace = 9216;		/* really max datagram size */
@@ -939,9 +941,10 @@ udp_output(struct inpcb *inp, struct mbuf *m, struct sockaddr *addr,
 		 * Jail may rewrite the destination address, so let it do
 		 * that before we use it.
 		 */
-		if (jailed(td->td_ucred))
-			prison_remote_ip(td->td_ucred, 0,
-			    &sin->sin_addr.s_addr);
+		if (prison_remote_ip4(td->td_ucred, &sin->sin_addr) != 0) {
+			error = EINVAL;
+			goto release;
+		}
 
 		/*
 		 * If a local address or port hasn't yet been selected, or if
@@ -1193,8 +1196,11 @@ udp_connect(struct socket *so, struct sockaddr *nam, struct thread *td)
 		return (EISCONN);
 	}
 	sin = (struct sockaddr_in *)nam;
-	if (jailed(td->td_ucred))
-		prison_remote_ip(td->td_ucred, 0, &sin->sin_addr.s_addr);
+	if (prison_remote_ip4(td->td_ucred, &sin->sin_addr) != 0) {
+		INP_WUNLOCK(inp);
+		INP_INFO_WUNLOCK(&V_udbinfo);
+		return (EAFNOSUPPORT);
+	}
 	error = in_pcbconnect(inp, nam, td->td_ucred);
 	if (error == 0)
 		soisconnected(so);

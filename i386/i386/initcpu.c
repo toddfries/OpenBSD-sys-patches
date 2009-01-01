@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/initcpu.c,v 1.58 2008/10/21 00:17:55 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/initcpu.c,v 1.59 2008/11/26 19:25:13 jkim Exp $");
 
 #include "opt_cpu.h"
 
@@ -90,6 +90,7 @@ u_int	cpu_id = 0;		/* Stepping ID */
 u_int	cpu_procinfo = 0;	/* HyperThreading Info / Brand Index / CLFUSH */
 u_int	cpu_procinfo2 = 0;	/* Multicore info */
 char	cpu_vendor[20] = "";	/* CPU Origin code */
+u_int	cpu_vendor_id = 0;	/* CPU vendor ID */
 
 SYSCTL_UINT(_hw, OID_AUTO, via_feature_rng, CTLFLAG_RD,
 	&via_feature_rng, 0, "VIA C3/C7 RNG feature available in CPU");

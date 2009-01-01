@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/mips/conf/IDT,v 1.6 2008/10/23 02:16:38 marcel Exp $
+# $FreeBSD: src/sys/mips/conf/IDT,v 1.7 2008/12/01 16:53:01 sam Exp $
 
 cpu		CPU_MIPS4KC
 ident		RB532
@@ -44,7 +44,8 @@ device		wlan		# 802.11 support
 device		wlan_wep	# 802.11 WEP support
 device		wlan_tkip	# 802.11 TKIP support
 device		ath		# Atheros pci/cardbus NIC's
-device		ath_hal		# Atheros HAL (Hardware Access Layer)
+device		ath_hal		# pci/cardbus chip support
+options		AH_SUPPORT_AR5416	# enable AR5416 tx/rx descriptors
 device		ath_rate_sample	# SampleRate tx rate control for ath
 options		ATH_DEBUG
 

@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/aac/aac_pci.c,v 1.69 2008/09/12 18:15:12 emaste Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/aac/aac_pci.c,v 1.70 2008/11/27 20:26:02 emaste Exp $");
 
 /*
  * PCI bus interface and resource allocation.
@@ -168,8 +168,6 @@ struct aac_ident
 	 "ICP ICP9014RO SCSI RAID"},
 	{0x9005, 0x0285, 0x9005, 0x0294, AAC_HWIF_I960RX, 0,
 	 "Adaptec SATA RAID 2026ZCR"},
-	{0x9005, 0x0285, 0x103c, 0x3227, AAC_HWIF_I960RX, 0,
-	 "Adaptec SATA RAID 2610SA"},
 	{0x9005, 0x0285, 0x9005, 0x0296, AAC_HWIF_I960RX, 0,
 	 "Adaptec SCSI RAID 2240S"},
 	{0x9005, 0x0285, 0x9005, 0x0297, AAC_HWIF_I960RX, 0,

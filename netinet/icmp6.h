@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netinet/icmp6.h,v 1.21 2007/05/17 21:20:23 jinmei Exp $	*/
+/*	$FreeBSD: src/sys/netinet/icmp6.h,v 1.22 2008/12/13 19:13:03 bz Exp $	*/
 /*	$KAME: icmp6.h,v 1.46 2001/04/27 15:09:48 itojun Exp $	*/
 
 /*-
@@ -707,8 +707,10 @@ do { \
 		} \
 } while (/*CONSTCOND*/ 0)
 
+#ifdef VIMAGE_GLOBALS
 extern int	icmp6_rediraccept;	/* accept/process redirects */
 extern int	icmp6_redirtimeout;	/* cache time for redirect routes */
+#endif
 
 #define ICMP6_NODEINFO_FQDNOK		0x1
 #define ICMP6_NODEINFO_NODEADDROK	0x2

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cfe/cfe_console.c,v 1.5 2008/10/27 11:45:31 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cfe/cfe_console.c,v 1.6 2008/12/27 11:38:41 bz Exp $");
 
 #include "opt_comconsole.h"
 
@@ -62,7 +62,6 @@ static struct ttydevsw cfe_ttydevsw = {
 };
 
 static int			conhandle = -1;
-static struct tty		*cfe_tp = NULL;
 /* XXX does cfe have to poll? */
 static int			polltime;
 static struct callout_handle	cfe_timeouthandle

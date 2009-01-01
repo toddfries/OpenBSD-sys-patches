@@ -35,7 +35,7 @@
 #include "opt_inet6.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_table.c,v 1.9 2007/10/24 20:57:17 mlaier Exp $");
+__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_table.c,v 1.10 2008/12/07 21:15:43 kmacy Exp $");
 #endif
 
 #include <sys/param.h>
@@ -43,6 +43,8 @@ __FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_table.c,v 1.9 2007/10/24 20:57:17 
 #include <sys/socket.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
+#include <sys/lock.h>
+#include <sys/rwlock.h>
 #ifdef __FreeBSD__
 #include <sys/malloc.h>
 #endif

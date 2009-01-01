@@ -61,7 +61,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/in6_proto.c,v 1.53 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/in6_proto.c,v 1.57 2008/12/11 16:26:38 bz Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -74,6 +74,7 @@ __FBSDID("$FreeBSD: src/sys/netinet6/in6_proto.c,v 1.53 2008/11/19 09:39:34 zec 
 #include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/proc.h>
 #include <sys/protosw.h>
 #include <sys/kernel.h>
 #include <sys/domain.h>
@@ -128,6 +129,7 @@ __FBSDID("$FreeBSD: src/sys/netinet6/in6_proto.c,v 1.53 2008/11/19 09:39:34 zec 
 #endif /* IPSEC */
 
 #include <netinet6/ip6protosw.h>
+#include <netinet6/vinet6.h>
 
 /*
  * TCP/IP protocol family: IP6, ICMP6, UDP, TCP.
@@ -388,9 +390,7 @@ int	ip6_keepfaith;
 time_t	ip6_log_time;
 int	ip6stealth;
 int	nd6_onlink_ns_rfc4861;
-#endif
 
-#ifdef VIMAGE_GLOBALS
 /* icmp6 */
 /*
  * BSDI4 defines these variables in in_proto.c...
@@ -517,9 +517,6 @@ SYSCTL_V_OID(V_NET, vnet_inet6, _net_inet6_ip6, IPV6CTL_TEMPVLTIME, tempvltime,
    	sysctl_ip6_tempvltime, "I", "");
 SYSCTL_V_INT(V_NET, vnet_inet6, _net_inet6_ip6, IPV6CTL_V6ONLY,
 	v6only,	CTLFLAG_RW,	ip6_v6only,			0, "");
-#ifndef VIMAGE
-TUNABLE_INT("net.inet6.ip6.auto_linklocal", &ip6_auto_linklocal);
-#endif
 SYSCTL_V_INT(V_NET, vnet_inet6, _net_inet6_ip6, IPV6CTL_AUTO_LINKLOCAL,
 	auto_linklocal, CTLFLAG_RW, ip6_auto_linklocal,	0, "");
 SYSCTL_V_STRUCT(V_NET, vnet_inet6, _net_inet6_ip6, IPV6CTL_RIP6STATS,
@@ -563,6 +560,6 @@ SYSCTL_V_INT(V_NET, vnet_inet6, _net_inet6_icmp6, ICMPV6CTL_ND6_MAXNUDHINT,
 SYSCTL_V_INT(V_NET, vnet_inet6, _net_inet6_icmp6, ICMPV6CTL_ND6_DEBUG,
 	nd6_debug, CTLFLAG_RW,	nd6_debug,		0, "");
 
-SYSCTL_INT(_net_inet6_icmp6, ICMPV6CTL_ND6_ONLINKNSRFC4861,
-	nd6_onlink_ns_rfc4861, CTLFLAG_RW, &nd6_onlink_ns_rfc4861, 0,
+SYSCTL_V_INT(V_NET, vnet_inet6, _net_inet6_icmp6, ICMPV6CTL_ND6_ONLINKNSRFC4861,
+	nd6_onlink_ns_rfc4861, CTLFLAG_RW, nd6_onlink_ns_rfc4861, 0,
 	"Accept 'on-link' nd6 NS in compliance with RFC 4861.");

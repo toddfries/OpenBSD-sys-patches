@@ -1,5 +1,5 @@
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/xen/console/xencons_ring.c,v 1.2 2008/08/15 04:00:44 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/xen/console/xencons_ring.c,v 1.3 2008/12/29 06:31:03 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/module.h>
@@ -15,19 +15,20 @@ __FBSDID("$FreeBSD: src/sys/dev/xen/console/xencons_ring.c,v 1.2 2008/08/15 04:0
 #include <sys/bus.h>
 #include <machine/stdarg.h>
 #include <machine/xen/xen-os.h>
-#include <machine/xen/hypervisor.h>
-#include <machine/xen/xen_intr.h>
+#include <xen/hypervisor.h>
+#include <xen/xen_intr.h>
 #include <sys/cons.h>
 
 
 #include <dev/xen/console/xencons_ring.h>
-#include <machine/xen/evtchn.h>
+#include <xen/evtchn.h>
 #include <xen/interface/io/console.h>
 
 
 #define console_evtchn	console.domU.evtchn
 extern char *console_page;
- 
+extern struct mtx              cn_mtx;
+
 static inline struct xencons_interface *
 xencons_interface(void)
 {
@@ -82,6 +83,7 @@ xencons_handle_input(void *unused)
 	struct xencons_interface *intf;
 	XENCONS_RING_IDX cons, prod;
 
+	mtx_lock(&cn_mtx);
 	intf = xencons_interface();
 
 	cons = intf->in_cons;
@@ -99,6 +101,7 @@ xencons_handle_input(void *unused)
 	notify_remote_via_evtchn(xen_start_info->console_evtchn);
 
 	xencons_tx();
+	mtx_unlock(&cn_mtx);
 }
 
 void 

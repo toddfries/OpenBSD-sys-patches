@@ -30,7 +30,7 @@
   POSSIBILITY OF SUCH DAMAGE.
 
 ******************************************************************************/
-/*$FreeBSD: src/sys/dev/ixgbe/ixgbe_osdep.h,v 1.4 2008/05/16 18:46:30 jfv Exp $*/
+/*$FreeBSD: src/sys/dev/ixgbe/ixgbe_osdep.h,v 1.5 2008/11/26 23:41:18 jfv Exp $*/
 
 #ifndef _IXGBE_OS_H_
 #define _IXGBE_OS_H_
@@ -78,16 +78,21 @@
 #endif
 
 #define FALSE               0
+#define false               0 /* shared code requires this */
 #define TRUE                1
+#define true                1
 #define CMD_MEM_WRT_INVALIDATE          0x0010  /* BIT_4 */
 #define PCI_COMMAND_REGISTER            PCIR_COMMAND
 
-typedef uint8_t  u8;
-typedef uint16_t u16;
-typedef uint32_t u32;
-typedef int32_t	 s32;
-typedef uint64_t u64;
-typedef boolean_t bool;
+#define IXGBE_HTONL	htonl
+
+typedef uint8_t		u8;
+typedef int8_t		s8;
+typedef uint16_t	u16;
+typedef uint32_t	u32;
+typedef int32_t		s32;
+typedef uint64_t	u64;
+typedef boolean_t	bool;
 
 #define le16_to_cpu 
 

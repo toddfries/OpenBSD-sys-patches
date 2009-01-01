@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/initcpu.c,v 1.51 2008/10/21 00:17:55 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/initcpu.c,v 1.52 2008/11/26 19:25:13 jkim Exp $");
 
 #include "opt_cpu.h"
 
@@ -60,6 +60,7 @@ u_int	cpu_id;			/* Stepping ID */
 u_int	cpu_procinfo;		/* HyperThreading Info / Brand Index / CLFUSH */
 u_int	cpu_procinfo2;		/* Multicore info */
 char	cpu_vendor[20];		/* CPU Origin code */
+u_int	cpu_vendor_id;		/* CPU vendor ID */
 u_int	cpu_fxsr;		/* SSE enabled */
 u_int	cpu_mxcsr_mask;		/* Valid bits in mxcsr */
 

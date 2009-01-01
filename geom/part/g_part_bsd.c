@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/part/g_part_bsd.c,v 1.10 2008/11/18 05:55:58 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/part/g_part_bsd.c,v 1.12 2008/12/26 20:27:32 obrien Exp $");
 
 #include <sys/param.h>
 #include <sys/bio.h>
@@ -241,9 +241,10 @@ g_part_bsd_dumpto(struct g_part_table *table, struct g_part_entry *baseentry)
 {
 	struct g_part_bsd_entry *entry;
 
-	/* Allow dumping to a swap partition only. */
+	/* Allow dumping to a swap partition or an unused partition. */
 	entry = (struct g_part_bsd_entry *)baseentry;
-	return ((entry->part.p_fstype == FS_SWAP) ? 1 : 0);
+	return ((entry->part.p_fstype == FS_UNUSED ||
+	    entry->part.p_fstype == FS_SWAP) ? 1 : 0);
 }
 
 static int
@@ -336,9 +337,10 @@ g_part_bsd_read(struct g_part_table *basetable, struct g_consumer *cp)
 		goto invalid_label;
 	if (heads != basetable->gpt_heads && !basetable->gpt_fixgeom)
 		basetable->gpt_heads = heads;
-	if (sectors != basetable->gpt_sectors ||
-	    heads != basetable->gpt_heads)
-		printf("GEOM: %s: geometry does not match label.\n", pp->name);
+	if (sectors != basetable->gpt_sectors || heads != basetable->gpt_heads)
+		printf("GEOM: %s: geometry does not match label"
+		    " (%uh,%us != %uh,%us).\n", pp->name, heads, sectors,
+		    basetable->gpt_heads, basetable->gpt_sectors);
 
 	chs = le32dec(buf + 60);
 	if (chs < 1)

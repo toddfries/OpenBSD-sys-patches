@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_quota.c,v 1.98 2008/08/05 10:25:55 des Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_quota.c,v 1.100 2008/12/08 11:04:17 kib Exp $");
 
 #include "opt_ffs.h"
 
@@ -1151,7 +1151,7 @@ hfound:		DQI_LOCK(dq);
 			return (EUSERS);
 		}
 		if (dq->dq_cnt || (dq->dq_flags & DQ_MOD))
-			panic("dqget: free dquot isn't");
+			panic("dqget: free dquot isn't %p", dq);
 		TAILQ_REMOVE(&dqfreelist, dq, dq_freelist);
 		if (dq->dq_ump != NULL)
 			LIST_REMOVE(dq, dq_hash);
@@ -1262,7 +1262,7 @@ dqrele(struct vnode *vp, struct dquot *dq)
 		return;
 	}
 	DQH_UNLOCK();
-
+sync:
 	(void) dqsync(vp, dq);
 
 	DQH_LOCK();
@@ -1270,6 +1270,18 @@ dqrele(struct vnode *vp, struct dquot *dq)
 	{
 		DQH_UNLOCK();
 		return;
+	}
+
+	/*
+	 * The dq may become dirty after it is synced but before it is
+	 * put to the free list. Checking the DQ_MOD there without
+	 * locking dq should be safe since no other references to the
+	 * dq exist.
+	 */
+	if ((dq->dq_flags & DQ_MOD) != 0) {
+		dq->dq_cnt++;
+		DQH_UNLOCK();
+		goto sync;
 	}
 	TAILQ_INSERT_TAIL(&dqfreelist, dq, dq_freelist);
 	DQH_UNLOCK();

@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/powerpc/conf/NOTES,v 1.18 2008/06/08 01:58:11 marcel Exp $
+# $FreeBSD: src/sys/powerpc/conf/NOTES,v 1.19 2008/12/08 02:38:13 nwhitehorn Exp $
 #
 # This file contains machine dependent kernel configuration notes.  For
 # machine independent notes, look in /sys/conf/NOTES.
@@ -26,6 +26,9 @@ device		pci
 
 device		bm		# Apple BMAC (Big Mac Ethernet)
 device		ofwd		# Open Firmware disks
+device		adb		# Apple Desktop Bus
+device		cuda		# VIA-CUDA ADB interface
+device		pmu		# Apple Power Management Unit
 
 
 #####################################################################

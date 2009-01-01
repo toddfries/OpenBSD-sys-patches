@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_vnops.c,v 1.293 2008/10/28 13:44:11 trasz Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsclient/nfs_vnops.c,v 1.294 2008/12/02 21:37:28 bz Exp $");
 
 /*
  * vnode op calls for Sun NFS version 2 and 3
@@ -83,6 +83,7 @@ __FBSDID("$FreeBSD: src/sys/nfsclient/nfs_vnops.c,v 1.293 2008/10/28 13:44:11 tr
 #include <net/if.h>
 #include <netinet/in.h>
 #include <netinet/in_var.h>
+#include <netinet/vinet.h>
 
 /* Defs */
 #define	TRUE	1

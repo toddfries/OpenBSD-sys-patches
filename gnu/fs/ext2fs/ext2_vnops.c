@@ -39,7 +39,7 @@
  *
  *	@(#)ufs_vnops.c	8.7 (Berkeley) 2/3/94
  *	@(#)ufs_vnops.c 8.27 (Berkeley) 5/27/95
- * $FreeBSD: src/sys/gnu/fs/ext2fs/ext2_vnops.c,v 1.116 2008/10/28 13:44:11 trasz Exp $
+ * $FreeBSD: src/sys/gnu/fs/ext2fs/ext2_vnops.c,v 1.117 2008/12/16 21:13:11 trasz Exp $
  */
 
 #include "opt_suiddir.h"
@@ -1399,7 +1399,7 @@ ext2_strategy(ap)
 			bp->b_error = error;
 			bp->b_ioflags |= BIO_ERROR;
 			bufdone(bp);
-			return (error);
+			return (0);
 		}
 		if ((long)bp->b_blkno == -1)
 			vfs_bio_clrbuf(bp);

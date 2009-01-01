@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/md_var.h,v 1.77 2008/10/21 00:17:55 jkim Exp $
+ * $FreeBSD: src/sys/i386/include/md_var.h,v 1.78 2008/11/26 19:25:13 jkim Exp $
  */
 
 #ifndef _MACHINE_MD_VAR_H_
@@ -59,6 +59,7 @@ extern	u_int	cpu_mxcsr_mask;
 extern	u_int	cpu_procinfo;
 extern	u_int	cpu_procinfo2;
 extern	char	cpu_vendor[];
+extern	u_int	cpu_vendor_id;
 extern	u_int	cyrix_did;
 extern	char	kstack[];
 extern	char	sigcode[];

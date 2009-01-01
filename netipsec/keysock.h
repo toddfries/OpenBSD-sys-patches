@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/keysock.h,v 1.3 2006/01/21 10:44:34 bz Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/keysock.h,v 1.4 2008/11/28 23:30:51 zec Exp $	*/
 /*	$KAME: keysock.h,v 1.8 2000/03/27 05:11:06 sumikawa Exp $	*/
 
 /*-
@@ -56,6 +56,11 @@ struct pfkeystat {
 	u_quad_t in_nomem;		/* memory allocation failure */
 	/* others */
 	u_quad_t sockerr;		/* # of socket related errors */
+};
+
+struct key_cb {
+	int key_count;
+	int any_count;
 };
 
 #define KEY_SENDUP_ONE		0

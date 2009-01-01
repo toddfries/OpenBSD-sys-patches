@@ -28,7 +28,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_cpl_io.c,v 1.27 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_cpl_io.c,v 1.29 2008/12/17 12:52:34 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -78,6 +78,9 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/tom/cxgb_cpl_io.c,v 1.27 2008/11/19 09:
 #include <netinet/tcp_seq.h>
 #include <netinet/tcp_syncache.h>
 #include <netinet/tcp_timer.h>
+#if __FreeBSD_version >= 800056
+#include <netinet/vinet.h>
+#endif
 #include <net/route.h>
 
 #include <t3cdev.h>
@@ -3266,8 +3269,6 @@ syncache_add_accept_req(struct cpl_pass_accept_req *req, struct socket *lso, str
 
 	toep->tp_iss = toep->tp_delack_seq = toep->tp_rcv_wup = toep->tp_copied_seq = rcv_isn + 1;
 
-	
-	inc.inc_isipv6 = 0;
 	inc.inc_len = 0;
 	inc.inc_faddr.s_addr = req->peer_ip;
 	inc.inc_laddr.s_addr = req->local_ip;
@@ -3607,7 +3608,6 @@ syncache_expand_establish_req(struct cpl_pass_establish *req, struct socket **so
 	th.th_seq = req->rcv_isn;
 	th.th_flags = TH_ACK;
 	
-	inc.inc_isipv6 = 0;
 	inc.inc_len = 0;
 	inc.inc_faddr.s_addr = req->peer_ip;
 	inc.inc_laddr.s_addr = req->local_ip;

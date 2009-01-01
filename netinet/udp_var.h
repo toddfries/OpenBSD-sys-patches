@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)udp_var.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/netinet/udp_var.h,v 1.33 2007/07/10 09:30:46 rwatson Exp $
+ * $FreeBSD: src/sys/netinet/udp_var.h,v 1.34 2008/12/11 16:26:38 bz Exp $
  */
 
 #ifndef _NETINET_UDP_VAR_H_
@@ -94,12 +94,15 @@ struct udpstat {
 SYSCTL_DECL(_net_inet_udp);
 
 extern struct pr_usrreqs	udp_usrreqs;
+
+#ifdef VIMAGE_GLOBALS
 extern struct inpcbhead		udb;
 extern struct inpcbinfo		udbinfo;
-extern u_long			udp_sendspace;
-extern u_long			udp_recvspace;
 extern struct udpstat		udpstat;
 extern int			udp_blackhole;
+#endif
+extern u_long			udp_sendspace;
+extern u_long			udp_recvspace;
 extern int			udp_log_in_vain;
 
 void		 udp_ctlinput(int, struct sockaddr *, void *);

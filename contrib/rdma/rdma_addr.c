@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/contrib/rdma/rdma_addr.c,v 1.1 2008/05/05 18:35:54 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/contrib/rdma/rdma_addr.c,v 1.2 2008/12/15 06:10:57 qingli Exp $");
 
 #include <sys/param.h>
 #include <sys/condvar.h>
@@ -163,6 +163,7 @@ static void addr_send_arp(struct sockaddr_in *dst_in)
 	struct route iproute;
 	struct sockaddr_in *dst = (struct sockaddr_in *)&iproute.ro_dst;
 	char dmac[ETHER_ADDR_LEN];
+	struct llentry *lle;
 
 	bzero(&iproute, sizeof iproute);
 	*dst = *dst_in;
@@ -172,7 +173,7 @@ static void addr_send_arp(struct sockaddr_in *dst_in)
 		return;
 
 	arpresolve(iproute.ro_rt->rt_ifp, iproute.ro_rt, NULL, 
-		   rt_key(iproute.ro_rt), dmac);
+		   rt_key(iproute.ro_rt), dmac, &lle);
 
 	RTFREE(iproute.ro_rt);
 }
@@ -186,6 +187,7 @@ static int addr_resolve_remote(struct sockaddr_in *src_in,
 	struct route iproute;
 	struct sockaddr_in *dst = (struct sockaddr_in *)&iproute.ro_dst;
 	char dmac[ETHER_ADDR_LEN];
+	struct llentry *lle;
 
 	bzero(&iproute, sizeof iproute);
 	*dst = *dst_in;
@@ -202,7 +204,7 @@ static int addr_resolve_remote(struct sockaddr_in *src_in,
 		goto put;
 	}
  	ret = arpresolve(iproute.ro_rt->rt_ifp, iproute.ro_rt, NULL, 
-		rt_key(iproute.ro_rt), dmac);
+		rt_key(iproute.ro_rt), dmac, &lle);
 	if (ret) {
 		goto put;
 	}

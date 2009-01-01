@@ -28,7 +28,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net/if_faith.c,v 1.44 2008/10/02 15:37:58 zec Exp $
+ * $FreeBSD: src/sys/net/if_faith.c,v 1.45 2008/12/02 21:37:28 bz Exp $
  */
 /*
  * derived from
@@ -77,6 +77,7 @@
 #include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
+#include <netinet6/vinet6.h>
 #endif
 
 #define FAITHNAME	"faith"

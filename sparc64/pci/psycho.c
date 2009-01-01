@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/pci/psycho.c,v 1.80 2008/09/18 19:45:22 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/pci/psycho.c,v 1.81 2008/12/15 15:31:10 nwhitehorn Exp $");
 
 /*
  * Support for `Hummingbird' (UltraSPARC IIe), `Psycho' and `Psycho+'
@@ -64,7 +64,6 @@ __FBSDID("$FreeBSD: src/sys/sparc64/pci/psycho.c,v 1.80 2008/09/18 19:45:22 mari
 #include <machine/bus_private.h>
 #include <machine/iommureg.h>
 #include <machine/iommuvar.h>
-#include <machine/ofw_bus.h>
 #include <machine/resource.h>
 #include <machine/ver.h>
 

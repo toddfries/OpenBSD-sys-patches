@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/k6_mem.c,v 1.14 2008/03/13 09:52:48 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/k6_mem.c,v 1.15 2008/11/26 19:25:13 jkim Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -33,6 +33,7 @@ __FBSDID("$FreeBSD: src/sys/i386/i386/k6_mem.c,v 1.14 2008/03/13 09:52:48 kib Ex
 #include <sys/malloc.h>
 #include <sys/memrange.h>
 
+#include <machine/cputypes.h>
 #include <machine/md_var.h>
 #include <machine/specialreg.h>
 
@@ -175,7 +176,7 @@ static void
 k6_mem_drvinit(void *unused)
 {
 
-	if (strcmp(cpu_vendor, "AuthenticAMD") != 0)
+	if (cpu_vendor_id != CPU_VENDOR_AMD)
 		return;
 	if ((cpu_id & 0xf00) != 0x500)
 		return;

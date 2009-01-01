@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/route6.c,v 1.17 2008/10/02 15:37:58 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/route6.c,v 1.18 2008/12/02 21:37:28 bz Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -51,6 +51,7 @@ __FBSDID("$FreeBSD: src/sys/netinet6/route6.c,v 1.17 2008/10/02 15:37:58 zec Exp
 #include <netinet6/scope6_var.h>
 
 #include <netinet/icmp6.h>
+#include <netinet6/vinet6.h>
 
 #if 0
 static int ip6_rthdr0 __P((struct mbuf *, struct ip6_hdr *,

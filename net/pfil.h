@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/net/pfil.h,v 1.17 2007/11/25 12:41:47 mlaier Exp $ */
+/*	$FreeBSD: src/sys/net/pfil.h,v 1.18 2008/12/13 12:03:21 rwatson Exp $ */
 /*	$NetBSD: pfil.h,v 1.22 2003/06/23 12:57:08 martin Exp $	*/
 
 /*-
@@ -49,7 +49,8 @@ struct inpcb;
  */
 struct packet_filter_hook {
         TAILQ_ENTRY(packet_filter_hook) pfil_link;
-	int	(*pfil_func)(void *, struct mbuf **, struct ifnet *, int, struct inpcb *);
+	int	(*pfil_func)(void *, struct mbuf **, struct ifnet *, int,
+	    struct inpcb *);
 	void	*pfil_arg;
 	int	pfil_flags;
 };

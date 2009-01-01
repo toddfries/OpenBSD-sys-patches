@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_vnops.c,v 1.190 2008/10/28 13:44:11 trasz Exp $ */
+/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_vnops.c,v 1.191 2008/12/16 21:13:11 trasz Exp $ */
 /*	$NetBSD: msdosfs_vnops.c,v 1.68 1998/02/10 14:10:04 mrg Exp $	*/
 
 /*-
@@ -1880,7 +1880,7 @@ msdosfs_strategy(ap)
 			bp->b_error = error;
 			bp->b_ioflags |= BIO_ERROR;
 			bufdone(bp);
-			return (error);
+			return (0);
 		}
 		if ((long)bp->b_blkno == -1)
 			vfs_bio_clrbuf(bp);

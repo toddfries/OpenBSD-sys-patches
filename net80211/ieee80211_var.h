@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net80211/ieee80211_var.h,v 1.65 2008/11/23 01:51:14 sam Exp $
+ * $FreeBSD: src/sys/net80211/ieee80211_var.h,v 1.66 2008/12/15 01:26:33 sam Exp $
  */
 #ifndef _NET80211_IEEE80211_VAR_H_
 #define _NET80211_IEEE80211_VAR_H_
@@ -156,7 +156,7 @@ struct ieee80211com {
 	 *    (e.g. for dynamic turbo)
 	 */
 	int			ic_nchans;	/* # entries in ic_channels */
-	struct ieee80211_channel ic_channels[IEEE80211_CHAN_MAX+1];
+	struct ieee80211_channel ic_channels[IEEE80211_CHAN_MAX];
 	uint8_t			ic_chan_avail[IEEE80211_CHAN_BYTES];
 	uint8_t			ic_chan_active[IEEE80211_CHAN_BYTES];
 	uint8_t			ic_chan_scan[IEEE80211_CHAN_BYTES];

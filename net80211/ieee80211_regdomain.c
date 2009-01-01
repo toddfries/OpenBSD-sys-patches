@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_regdomain.c,v 1.5 2008/10/25 23:28:24 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_regdomain.c,v 1.6 2008/12/15 01:26:33 sam Exp $");
 
 /*
  * IEEE 802.11 regdomain support.
@@ -338,7 +338,7 @@ ieee80211_setregdomain(struct ieee80211vap *vap,
 		    reg->rd.isocc[0], reg->rd.isocc[1]);
 		return EINVAL;
 	}
-	if (reg->chaninfo.ic_nchans >= IEEE80211_CHAN_MAX) {
+	if (reg->chaninfo.ic_nchans > IEEE80211_CHAN_MAX) {
 		IEEE80211_DPRINTF(vap, IEEE80211_MSG_IOCTL,
 		    "%s: too many channels %u, max %u\n", __func__,
 		    reg->chaninfo.ic_nchans, IEEE80211_CHAN_MAX);

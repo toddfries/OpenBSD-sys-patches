@@ -26,7 +26,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGES.
  *
- * $FreeBSD: src/sys/dev/ath/if_athvar.h,v 1.74 2008/11/24 01:31:10 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/if_athvar.h,v 1.76 2008/12/07 19:26:34 sam Exp $
  */
 
 /*
@@ -35,8 +35,8 @@
 #ifndef _DEV_ATH_ATHVAR_H
 #define _DEV_ATH_ATHVAR_H
 
-#include <contrib/dev/ath/ah.h>
-#include <contrib/dev/ath/ah_desc.h>
+#include <dev/ath/ath_hal/ah.h>
+#include <dev/ath/ath_hal/ah_desc.h>
 #include <net80211/ieee80211_radiotap.h>
 #include <dev/ath/if_athioctl.h>
 #include <dev/ath/if_athrate.h>
@@ -248,7 +248,8 @@ struct ath_softc {
 				sc_swbmiss  : 1,/* sta mode using sw bmiss */
 				sc_stagbeacons:1,/* use staggered beacons */
 				sc_wmetkipmic:1,/* can do WME+TKIP MIC */
-				sc_resume_up: 1;/* on resume, start all vaps */
+				sc_resume_up: 1,/* on resume, start all vaps */
+				sc_resetcal : 1;/* reset cal state next trip */
 	uint32_t		sc_eerd;	/* regdomain from EEPROM */
 	uint32_t		sc_eecc;	/* country code from EEPROM */
 						/* rate tables */
@@ -334,8 +335,8 @@ struct ath_softc {
 	int			sc_nbcnvaps;	/* # vaps with beacons */
 
 	struct callout		sc_cal_ch;	/* callout handle for cals */
-	int			sc_calinterval;	/* current polling interval */
-	int			sc_caltries;	/* cals at current interval */
+	int			sc_lastlongcal;	/* last long cal completed */
+	int			sc_lastcalreset;/* last cal reset done */
 	HAL_NODE_STATS		sc_halstats;	/* station-mode rssi stats */
 };
 
@@ -438,6 +439,16 @@ void	ath_intr(void *);
 	((*(_ah)->ah_setChannel)((_ah), (_chan)))
 #define	ath_hal_calibrate(_ah, _chan, _iqcal) \
 	((*(_ah)->ah_perCalibration)((_ah), (_chan), (_iqcal)))
+#if HAL_ABI_VERSION >= 0x08111000
+#define	ath_hal_calibrateN(_ah, _chan, _lcal, _isdone) \
+	((*(_ah)->ah_perCalibrationN)((_ah), (_chan), 0x1, (_lcal), (_isdone)))
+#define	ath_hal_calreset(_ah, _chan) \
+	((*(_ah)->ah_resetCalValid)((_ah), (_chan)))
+#else
+#define	ath_hal_calibrateN(_ah, _chan, _lcal, _isdone) \
+	ath_hal_calibrate(_ah, _chan, _isdone)
+#define	ath_hal_calreset(_ah, _chan)	(0)
+#endif
 #define	ath_hal_setledstate(_ah, _state) \
 	((*(_ah)->ah_setLedState)((_ah), (_state)))
 #define	ath_hal_beaconinit(_ah, _nextb, _bperiod) \

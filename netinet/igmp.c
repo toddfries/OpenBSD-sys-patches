@@ -45,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/igmp.c,v 1.60 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/igmp.c,v 1.61 2008/12/02 21:37:28 bz Exp $");
 
 #include "opt_mac.h"
 
@@ -61,6 +61,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/igmp.c,v 1.60 2008/11/19 09:39:34 zec Exp $"
 
 #include <net/if.h>
 #include <net/route.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_var.h>
@@ -70,6 +71,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/igmp.c,v 1.60 2008/11/19 09:39:34 zec Exp $"
 #include <netinet/ip_options.h>
 #include <netinet/igmp.h>
 #include <netinet/igmp_var.h>
+#include <netinet/vinet.h>
 
 #include <machine/in_cksum.h>
 

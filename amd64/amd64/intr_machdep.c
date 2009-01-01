@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/amd64/amd64/intr_machdep.c,v 1.41 2008/04/11 03:26:39 jeff Exp $
+ * $FreeBSD: src/sys/amd64/amd64/intr_machdep.c,v 1.42 2008/12/02 14:19:53 ganbold Exp $
  */
 
 /*
@@ -239,10 +239,7 @@ void
 intr_execute_handlers(struct intsrc *isrc, struct trapframe *frame)
 {
 	struct intr_event *ie;
-	struct thread *td;
 	int vector;
-
-	td = curthread;
 
 	/*
 	 * We count software interrupts when we process them.  The

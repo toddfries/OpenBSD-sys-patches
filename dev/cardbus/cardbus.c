@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cardbus/cardbus.c,v 1.67 2008/11/17 01:32:29 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cardbus/cardbus.c,v 1.68 2008/12/31 07:41:42 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -207,7 +207,7 @@ cardbus_attach_card(device_t cbdev)
 	}
 	if (cardattached > 0)
 		return (0);
-	POWER_DISABLE_SOCKET(brdev, cbdev);
+/*	POWER_DISABLE_SOCKET(brdev, cbdev); */
 	return (ENOENT);
 }
 
@@ -269,6 +269,7 @@ cardbus_driver_added(device_t cbdev, driver_t *driver)
 	}
 	if (i > 0 && i == numdevs)
 		POWER_ENABLE_SOCKET(device_get_parent(cbdev), cbdev);
+	/* XXX Should I wait for power to become good? */
 	for (i = 0; i < numdevs; i++) {
 		dev = devlist[i];
 		if (device_get_state(dev) != DS_NOTPRESENT)

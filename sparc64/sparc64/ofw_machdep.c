@@ -25,7 +25,7 @@
  */
  
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/ofw_machdep.c,v 1.16 2007/01/18 18:32:26 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/sparc64/sparc64/ofw_machdep.c,v 1.17 2008/12/15 15:31:10 nwhitehorn Exp $");
 
 /*
  * Some Open Firmware helper functions that are likely machine dependent.
@@ -43,7 +43,6 @@ __FBSDID("$FreeBSD: src/sys/sparc64/sparc64/ofw_machdep.c,v 1.16 2007/01/18 18:3
 
 #include <machine/bus.h>
 #include <machine/idprom.h>
-#include <machine/ofw_bus.h>
 #include <machine/ofw_machdep.h>
 
 void

@@ -1,5 +1,5 @@
 /*	$NetBSD: if_gre.c,v 1.49 2003/12/11 00:22:29 itojun Exp $ */
-/*	 $FreeBSD: src/sys/net/if_gre.c,v 1.52 2008/10/02 15:37:58 zec Exp $ */
+/*	 $FreeBSD: src/sys/net/if_gre.c,v 1.53 2008/12/02 21:37:28 bz Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -79,6 +79,7 @@
 #include <netinet/ip_gre.h>
 #include <netinet/ip_var.h>
 #include <netinet/ip_encap.h>
+#include <netinet/vinet.h>
 #else
 #error "Huh? if_gre without inet?"
 #endif

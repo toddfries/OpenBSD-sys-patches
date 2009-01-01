@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/powermac/gracklevar.h,v 1.2 2005/01/07 02:29:20 imp Exp $
+ * $FreeBSD: src/sys/powerpc/powermac/gracklevar.h,v 1.3 2008/12/15 15:31:10 nwhitehorn Exp $
  */
 
 #ifndef	_POWERPC_POWERMAC_GRACKLEVAR_H_
@@ -52,6 +52,9 @@ struct grackle_softc {
 	struct			rman sc_mem_rman;
 	bus_space_tag_t		sc_memt;
 	bus_dma_tag_t		sc_dmat;
+	int			sc_icells;
+
+	struct ofw_bus_iinfo	sc_pci_iinfo;
 };
 
 /*

@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb2/quirk/usb2_quirk.c,v 1.1 2008/11/04 02:31:03 alfred Exp $ */
+/* $FreeBSD: src/sys/dev/usb2/quirk/usb2_quirk.c,v 1.3 2008/12/11 23:17:48 thompsa Exp $ */
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc. All rights reserved.
  * Copyright (c) 1998 Lennart Augustsson. All rights reserved.
@@ -107,6 +107,7 @@ static struct usb2_quirk_entry usb2_quirks[USB_DEV_QUIRKS_MAX] = {
 	{USB_QUIRK_ENTRY(USB_VENDOR_MICROSOFT, USB_PRODUCT_MICROSOFT_WLNOTEBOOK, 0x0000, 0xFFFF, UQ_MS_BAD_CLASS, UQ_MS_LEADING_BYTE, UQ_NONE)},
 	{USB_QUIRK_ENTRY(USB_VENDOR_MICROSOFT, USB_PRODUCT_MICROSOFT_WLNOTEBOOK2, 0x0000, 0xFFFF, UQ_MS_BAD_CLASS, UQ_MS_LEADING_BYTE, UQ_NONE)},
 	{USB_QUIRK_ENTRY(USB_VENDOR_MICROSOFT, USB_PRODUCT_MICROSOFT_WLINTELLIMOUSE, 0x0000, 0xFFFF, UQ_MS_LEADING_BYTE, UQ_NONE)},
+	{USB_QUIRK_ENTRY(USB_VENDOR_MICROSOFT, USB_PRODUCT_MICROSOFT_COMFORT3000, 0x0000, 0xFFFF, UQ_MS_BAD_CLASS, UQ_MS_LEADING_BYTE, UQ_NONE)},
 	{USB_QUIRK_ENTRY(USB_VENDOR_METAGEEK, USB_PRODUCT_METAGEEK_WISPY24X, 0x0000, 0xFFFF, UQ_KBD_IGNORE, UQ_HID_IGNORE, UQ_NONE)},
 };
 
@@ -355,7 +356,6 @@ usb2_quirk_init(void *arg)
 	/* register our function */
 	usb2_test_quirk_p = &usb2_test_quirk_by_info;
 	usb2_quirk_ioctl_p = &usb2_quirk_ioctl;
-	return;
 }
 
 static void
@@ -365,7 +365,6 @@ usb2_quirk_uninit(void *arg)
 
 	/* destroy mutex */
 	mtx_destroy(&usb2_quirk_mtx);
-	return;
 }
 
 SYSINIT(usb2_quirk_init, SI_SUB_LOCK, SI_ORDER_FIRST, usb2_quirk_init, NULL);

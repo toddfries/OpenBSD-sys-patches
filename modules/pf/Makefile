@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/pf/Makefile,v 1.14 2008/09/01 23:59:00 imp Exp $
+# $FreeBSD: src/sys/modules/pf/Makefile,v 1.15 2008/12/02 21:37:28 bz Exp $
 
 .include <bsd.own.mk>
 
@@ -9,7 +9,7 @@ KMOD=	pf
 SRCS = 	pf.c pf_if.c pf_subr.c pf_osfp.c pf_ioctl.c pf_norm.c pf_table.c \
 	pf_ruleset.c \
 	in4_cksum.c \
-	opt_pf.h opt_inet.h opt_inet6.h opt_bpf.h opt_mac.h
+	opt_pf.h opt_inet.h opt_inet6.h opt_bpf.h opt_mac.h opt_route.h
 
 CFLAGS+=  -I${.CURDIR}/../../contrib/pf
 

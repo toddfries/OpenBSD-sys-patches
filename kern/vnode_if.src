@@ -27,7 +27,7 @@
 # SUCH DAMAGE.
 #
 #	@(#)vnode_if.src	8.12 (Berkeley) 5/14/95
-# $FreeBSD: src/sys/kern/vnode_if.src,v 1.94 2008/10/28 13:44:11 trasz Exp $
+# $FreeBSD: src/sys/kern/vnode_if.src,v 1.95 2008/12/12 00:57:38 marcus Exp $
 #
 
 #
@@ -594,4 +594,14 @@ vop_setlabel {
 vop_vptofh {
 	IN struct vnode *vp;
 	IN struct fid *fhp;
+};
+
+%% vptocnp		vp	L L L
+%% vptocnp		vpp	- U -
+
+vop_vptocnp {
+	IN struct vnode *vp;
+	OUT struct vnode **vpp;
+	INOUT char *buf;
+	INOUT int *buflen;
 };

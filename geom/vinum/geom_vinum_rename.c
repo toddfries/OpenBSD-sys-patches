@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_rename.c,v 1.4 2008/07/19 13:53:11 lulf Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/vinum/geom_vinum_rename.c,v 1.5 2008/11/25 19:13:58 lulf Exp $");
 
 #include <sys/param.h>
 #include <sys/libkern.h>
@@ -65,6 +65,10 @@ gv_rename(struct g_geom *gp, struct gctl_req *req)
 	sc = gp->softc;
 
 	flags = gctl_get_paraml(req, "flags", sizeof(*flags));
+	if (flags == NULL) {
+		gctl_error(req, "no flags given");
+		return;
+	}
 
 	newname = gctl_get_param(req, "newname", NULL);
 	if (newname == NULL) {

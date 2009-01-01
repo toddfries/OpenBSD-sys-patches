@@ -55,7 +55,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/aim/machdep.c,v 1.118 2008/09/24 00:28:46 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/aim/machdep.c,v 1.119 2008/12/20 00:33:10 nwhitehorn Exp $");
 
 #include "opt_compat.h"
 #include "opt_ddb.h"
@@ -291,7 +291,17 @@ powerpc_init(u_int startkernel, u_int endkernel, u_int basekernel, void *mdp)
 
 	__asm __volatile("mtsprg 0, %0" :: "r"(pc));
 
+	/*
+	 * Init mutexes, which we use heavily in PMAP
+	 */
+
 	mutex_init();
+
+	/*
+	 * Install the OF client interface
+	 */
+
+	OF_bootstrap();
 
 	/*
 	 * Initialize the console before printing anything.
@@ -306,8 +316,6 @@ powerpc_init(u_int startkernel, u_int endkernel, u_int basekernel, void *mdp)
 	}
 
 	kdb_init();
-
-	kobj_machdep_init();
 
 	/*
 	 * XXX: Initialize the interrupt tables.

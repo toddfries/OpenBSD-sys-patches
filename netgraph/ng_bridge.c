@@ -37,7 +37,7 @@
  *
  * Author: Archie Cobbs <archie@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_bridge.c,v 1.34 2008/10/23 20:26:15 des Exp $
+ * $FreeBSD: src/sys/netgraph/ng_bridge.c,v 1.35 2008/12/10 23:12:39 zec Exp $
  */
 
 /*
@@ -61,9 +61,11 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/errno.h>
+#include <sys/rwlock.h>
 #include <sys/syslog.h>
 #include <sys/socket.h>
 #include <sys/ctype.h>

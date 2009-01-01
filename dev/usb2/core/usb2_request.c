@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb2/core/usb2_request.c,v 1.3 2008/11/19 08:56:35 alfred Exp $ */
+/* $FreeBSD: src/sys/dev/usb2/core/usb2_request.c,v 1.5 2008/12/11 23:17:48 thompsa Exp $ */
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc. All rights reserved.
  * Copyright (c) 1998 Lennart Augustsson. All rights reserved.
@@ -83,7 +83,6 @@ usb2_do_request_callback(struct usb2_xfer *xfer)
 		usb2_cv_signal(xfer->udev->default_cv);
 		break;
 	}
-	return;
 }
 
 /*------------------------------------------------------------------------*
@@ -168,7 +167,6 @@ tr_setup:
 	/* store current pipe */
 	xfer->udev->pipe_curr = pipe;
 	USB_BUS_UNLOCK(xfer->udev->bus);
-	return;
 }
 
 /*------------------------------------------------------------------------*
@@ -1325,16 +1323,17 @@ usb2_req_get_config(struct usb2_device *udev, struct mtx *mtx, uint8_t *pconf)
 usb2_error_t
 usb2_req_re_enumerate(struct usb2_device *udev, struct mtx *mtx)
 {
-	struct usb2_device_descriptor ddesc;
 	struct usb2_device *parent_hub;
 	usb2_error_t err;
 	uint8_t old_addr;
 
+	if (udev->flags.usb2_mode != USB_MODE_HOST) {
+		return (USB_ERR_INVAL);
+	}
 	old_addr = udev->address;
 	parent_hub = udev->parent_hub;
 	if (parent_hub == NULL) {
-		err = USB_ERR_INVAL;
-		goto done;
+		return (USB_ERR_INVAL);
 	}
 	err = usb2_req_reset_port(parent_hub, mtx, udev->port_no);
 	if (err) {
@@ -1346,6 +1345,9 @@ usb2_req_re_enumerate(struct usb2_device *udev, struct mtx *mtx)
 	 * address zero:
 	 */
 	udev->address = USB_START_ADDR;
+
+	/* reset "bMaxPacketSize" */
+	udev->ddesc.bMaxPacketSize = USB_MAX_IPACKET;
 
 	/*
 	 * Restore device address:
@@ -1364,7 +1366,15 @@ usb2_req_re_enumerate(struct usb2_device *udev, struct mtx *mtx)
 	usb2_pause_mtx(mtx, USB_SET_ADDRESS_SETTLE);
 
 	/* get the device descriptor */
-	err = usb2_req_get_device_desc(udev, mtx, &ddesc);
+	err = usb2_req_get_desc(udev, mtx, &udev->ddesc,
+	    USB_MAX_IPACKET, USB_MAX_IPACKET, 0, UDESC_DEVICE, 0, 0);
+	if (err) {
+		DPRINTFN(0, "getting device descriptor "
+		    "at addr %d failed!\n", udev->address);
+		goto done;
+	}
+	/* get the full device descriptor */
+	err = usb2_req_get_device_desc(udev, mtx, &udev->ddesc);
 	if (err) {
 		DPRINTFN(0, "addr=%d, getting device "
 		    "descriptor failed!\n", old_addr);

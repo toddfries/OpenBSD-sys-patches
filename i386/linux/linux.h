@@ -25,7 +25,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/linux/linux.h,v 1.82 2008/11/16 15:45:41 kib Exp $
+ * $FreeBSD: src/sys/i386/linux/linux.h,v 1.83 2008/11/29 17:14:06 kib Exp $
  */
 
 #ifndef _I386_LINUX_H_
@@ -691,6 +691,22 @@ union l_semun {
 struct l_sockaddr {
 	l_ushort	sa_family;
 	char		sa_data[14];
+};
+
+struct l_msghdr {
+	l_uintptr_t	msg_name;
+	l_int		msg_namelen;
+	l_uintptr_t	msg_iov;
+	l_size_t	msg_iovlen;
+	l_uintptr_t	msg_control;
+	l_size_t	msg_controllen;
+	l_uint		msg_flags;
+};
+
+struct l_cmsghdr {
+	l_size_t	cmsg_len;
+	l_int		cmsg_level;
+	l_int		cmsg_type;
 };
 
 struct l_ifmap {

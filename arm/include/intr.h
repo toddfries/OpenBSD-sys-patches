@@ -32,13 +32,14 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/arm/include/intr.h,v 1.11 2008/10/13 20:07:13 raj Exp $
+ * $FreeBSD: src/sys/arm/include/intr.h,v 1.12 2008/12/20 03:26:09 sam Exp $
  *
  */
 
 #ifndef _MACHINE_INTR_H_
 #define _MACHINE_INTR_H_
 
+/* XXX move to std.* files? */
 #ifdef CPU_XSCALE_81342
 #define NIRQ		128
 #elif defined(CPU_XSCALE_PXA2X0)
@@ -46,7 +47,8 @@
 #define	NIRQ		IRQ_GPIO_MAX
 #elif defined(SOC_MV_DISCOVERY)
 #define NIRQ		96
-#elif defined(CPU_ARM9) || defined(SOC_MV_KIRKWOOD)
+#elif defined(CPU_ARM9) || defined(SOC_MV_KIRKWOOD) || \
+    defined(CPU_XSCALE_IXP435)
 #define NIRQ		64
 #else
 #define NIRQ		32

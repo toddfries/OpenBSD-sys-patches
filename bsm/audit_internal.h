@@ -1,5 +1,5 @@
-/*
- * Copyright (c) 2005 Apple Inc.
+/*-
+ * Copyright (c) 2005-2008 Apple Inc.
  * Copyright (c) 2005 SPARTA, Inc.
  * All rights reserved.
  *
@@ -30,8 +30,8 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * P4: //depot/projects/trustedbsd/audit3/sys/bsm/audit_internal.h#18
- * $FreeBSD: src/sys/bsm/audit_internal.h,v 1.10 2008/11/11 21:57:03 csjp Exp $
+ * P4: //depot/projects/trustedbsd/openbsm/sys/bsm/audit_internal.h#2
+ * $FreeBSD: src/sys/bsm/audit_internal.h,v 1.12 2008/12/31 11:12:24 rwatson Exp $
  */
 
 #ifndef _AUDIT_INTERNAL_H

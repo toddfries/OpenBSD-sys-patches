@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/i386/zfsboot/Makefile,v 1.1 2008/11/17 20:49:29 pjd Exp $
+# $FreeBSD: src/sys/boot/i386/zfsboot/Makefile,v 1.2 2008/12/17 18:12:01 dfr Exp $
 
 .PATH:		${.CURDIR}/../boot2
 
@@ -80,7 +80,7 @@ zfsboot.bin: zfsboot.out
 	objcopy -S -O binary zfsboot.out ${.TARGET}
 
 zfsboot.out: ${BTXCRT} zfsboot.o sio.o
-	${LD} ${LDFLAGS} -Ttext ${ORG2} -o ${.TARGET} ${.ALLSRC}
+	${LD} ${LDFLAGS} -Ttext ${ORG2} -o ${.TARGET} ${.ALLSRC} ${LIBSTAND}
 
 zfsboot.o: zfsboot.s
 

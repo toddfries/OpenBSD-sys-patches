@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_dummynet.c,v 1.116 2008/05/22 08:10:31 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_dummynet.c,v 1.117 2008/12/10 23:12:39 zec Exp $");
 
 #define	DUMMYNET_DEBUG
 
@@ -62,9 +62,11 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_dummynet.c,v 1.116 2008/05/22 08:10:31 rw
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
+#include <sys/lock.h>
 #include <sys/module.h>
 #include <sys/priv.h>
 #include <sys/proc.h>
+#include <sys/rwlock.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/time.h>

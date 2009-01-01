@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net/if_atmsubr.c,v 1.48 2008/09/14 08:19:48 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/net/if_atmsubr.c,v 1.49 2008/12/15 06:10:57 qingli Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -153,22 +153,11 @@ atm_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 		case AF_INET:
 		case AF_INET6:
 		{
-			struct rtentry *rt = NULL;
-			/*  
-			 * check route
-			 */
-			if (rt0 != NULL) {
-				error = rt_check(&rt, &rt0, dst);
-				if (error)
-					goto bad;
-				RT_UNLOCK(rt);
-			}
-
 			if (dst->sa_family == AF_INET6)
 			        etype = ETHERTYPE_IPV6;
 			else
 			        etype = ETHERTYPE_IP;
-			if (!atmresolve(rt, m, dst, &atmdst)) {
+			if (!atmresolve(rt0, m, dst, &atmdst)) {
 				m = NULL; 
 				/* XXX: atmresolve already free'd it */
 				senderr(EHOSTUNREACH);

@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsclient/bootp_subr.c,v 1.74 2008/08/17 23:27:27 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsclient/bootp_subr.c,v 1.75 2008/12/02 21:37:28 bz Exp $");
 
 #include "opt_bootp.h"
 
@@ -65,6 +65,7 @@ __FBSDID("$FreeBSD: src/sys/nfsclient/bootp_subr.c,v 1.74 2008/08/17 23:27:27 bz
 #include <netinet/in.h>
 #include <net/if_types.h>
 #include <net/if_dl.h>
+#include <net/vnet.h>
 
 #include <rpc/rpcclnt.h>
 

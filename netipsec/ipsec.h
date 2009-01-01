@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/ipsec.h,v 1.20 2008/11/19 09:39:34 zec Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/ipsec.h,v 1.22 2008/12/27 09:36:22 bz Exp $	*/
 /*	$KAME: ipsec.h,v 1.53 2001/11/20 08:32:38 itojun Exp $	*/
 
 /*-
@@ -364,8 +364,6 @@ extern struct secpolicy *ipsec_getpolicy __P((struct tdb_ident*, u_int));
 struct inpcb;
 extern struct secpolicy *ipsec4_checkpolicy __P((struct mbuf *, u_int, u_int,
 	int *, struct inpcb *));
-extern struct secpolicy *ipsec_getpolicybysock(struct mbuf *, u_int,
-	struct inpcb *, int *);
 extern struct secpolicy * ipsec_getpolicybyaddr(struct mbuf *, u_int,
 	int, int *);
 
@@ -380,7 +378,7 @@ extern int ipsec4_set_policy __P((struct inpcb *inp, int optname,
 	caddr_t request, size_t len, struct ucred *cred));
 extern int ipsec4_get_policy __P((struct inpcb *inpcb, caddr_t request,
 	size_t len, struct mbuf **mp));
-extern int ipsec4_delete_pcbpolicy __P((struct inpcb *));
+extern int ipsec_delete_pcbpolicy __P((struct inpcb *));
 extern int ipsec4_in_reject __P((struct mbuf *, struct inpcb *));
 
 struct secas;

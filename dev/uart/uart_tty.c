@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/uart/uart_tty.c,v 1.31 2008/10/23 19:11:44 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/uart/uart_tty.c,v 1.32 2008/12/27 16:03:34 kan Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -374,7 +374,8 @@ uart_tty_attach(struct uart_softc *sc)
 	return (0);
 }
 
-int uart_tty_detach(struct uart_softc *sc)
+int
+uart_tty_detach(struct uart_softc *sc)
 {
 	struct tty *tp;
 

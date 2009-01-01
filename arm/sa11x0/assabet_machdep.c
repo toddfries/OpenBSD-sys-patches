@@ -47,7 +47,7 @@
 
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/sa11x0/assabet_machdep.c,v 1.25 2008/04/08 10:24:41 kevlo Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/sa11x0/assabet_machdep.c,v 1.26 2008/12/01 10:16:25 stas Exp $");
 
 #include "opt_md.h"
 
@@ -375,7 +375,7 @@ initarm(void *arg, void *arg2)
 	 * but since we are boot strapping the addresses used for the read
 	 * may have just been remapped and thus the cache could be out
 	 * of sync. A re-clean after the switch will cure this.
-	 * After booting there are no gross reloations of the kernel thus
+	 * After booting there are no gross relocations of the kernel thus
 	 * this problem will not occur after initarm().
 	 */
 	cpu_idcache_wbinv_all();

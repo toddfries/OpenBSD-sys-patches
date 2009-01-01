@@ -51,7 +51,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/mfi/mfi.c,v 1.46 2008/11/14 23:32:31 ambrisko Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/mfi/mfi.c,v 1.47 2008/12/15 17:11:40 ambrisko Exp $");
 
 #include "opt_mfi.h"
 
@@ -296,7 +296,8 @@ mfi_attach(struct mfi_softc *sc)
 	uint32_t status;
 	int error, commsz, framessz, sensesz;
 	int frames, unit, max_fw_sge;
-    device_printf(sc->mfi_dev, "Megaraid SAS driver Ver 2.00 \n");
+
+	device_printf(sc->mfi_dev, "Megaraid SAS driver Ver 3.00 \n");
 
 	mtx_init(&sc->mfi_io_lock, "MFI I/O lock", NULL, MTX_DEF);
 	sx_init(&sc->mfi_config_lock, "MFI config");

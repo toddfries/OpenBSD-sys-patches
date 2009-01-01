@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net/if_ef.c,v 1.42 2008/10/02 15:37:58 zec Exp $
+ * $FreeBSD: src/sys/net/if_ef.c,v 1.43 2008/12/02 21:37:28 bz Exp $
  */
 
 #include "opt_inet.h"
@@ -50,6 +50,7 @@
 #include <net/netisr.h>
 #include <net/route.h>
 #include <net/bpf.h>
+#include <net/vnet.h>
 
 #ifdef INET
 #include <netinet/in.h>

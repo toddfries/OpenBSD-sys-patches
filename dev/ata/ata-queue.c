@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/ata-queue.c,v 1.74 2008/10/27 09:26:24 sos Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/ata-queue.c,v 1.75 2008/11/27 03:37:46 peter Exp $");
 
 #include "opt_ata.h"
 #include <sys/param.h>
@@ -357,7 +357,7 @@ ata_completed(void *context, int dummy)
 			      "\6MEDIA_CHANGED\5NID_NOT_FOUND"
 			      "\4MEDIA_CHANGE_REQEST"
 			      "\3ABORTED\2NO_MEDIA\1ILLEGAL_LENGTH");
-		if ((request->flags & ATA_R_DMA) &&
+		if ((request->flags & ATA_R_DMA) && request->dma &&
 		    (request->dma->status & ATA_BMSTAT_ERROR))
 		    printf(" dma=0x%02x", request->dma->status);
 		if (!(request->flags & (ATA_R_ATAPI | ATA_R_CONTROL)))

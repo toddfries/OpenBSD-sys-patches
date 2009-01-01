@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/in6_ifattach.c,v 1.48 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/in6_ifattach.c,v 1.53 2008/12/12 02:07:45 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -46,11 +46,13 @@ __FBSDID("$FreeBSD: src/sys/netinet6/in6_ifattach.c,v 1.48 2008/11/19 09:39:34 z
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/route.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/in_pcb.h>
+#include <netinet/vinet.h>
 
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
@@ -60,15 +62,14 @@ __FBSDID("$FreeBSD: src/sys/netinet6/in6_ifattach.c,v 1.48 2008/11/19 09:39:34 z
 #include <netinet6/ip6_var.h>
 #include <netinet6/nd6.h>
 #include <netinet6/scope6_var.h>
+#include <netinet6/vinet6.h>
 
 #ifdef VIMAGE_GLOBALS
 unsigned long in6_maxmtu;
 int ip6_auto_linklocal;
 struct callout in6_tmpaddrtimer_ch;
-#endif
-
-extern struct inpcbinfo udbinfo;
 extern struct inpcbinfo ripcbinfo;
+#endif
 
 static int get_rand_ifid(struct ifnet *, struct in6_addr *);
 static int generate_tmp_ifid(u_int8_t *, const u_int8_t *, u_int8_t *);
@@ -833,7 +834,7 @@ in6_ifdetach(struct ifnet *ifp)
 	/* XXX grab lock first to avoid LOR */
 	if (V_rt_tables[0][AF_INET6] != NULL) {
 		RADIX_NODE_HEAD_LOCK(V_rt_tables[0][AF_INET6]);
-		rt = rtalloc1((struct sockaddr *)&sin6, 0, 0UL);
+		rt = rtalloc1((struct sockaddr *)&sin6, 0, RTF_RNH_LOCKED);
 		if (rt) {
 			if (rt->rt_ifp == ifp)
 				rtexpunge(rt);

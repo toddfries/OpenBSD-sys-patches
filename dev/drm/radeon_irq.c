@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/radeon_irq.c,v 1.8 2008/08/23 20:59:12 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/radeon_irq.c,v 1.9 2008/12/23 22:53:57 rnoland Exp $");
 
 #include "dev/drm/drmP.h"
 #include "dev/drm/drm.h"
@@ -47,7 +47,8 @@ void radeon_irq_set_state(struct drm_device *dev, u32 mask, int state)
 	else
 		dev_priv->irq_enable_reg &= ~mask;
 
-	RADEON_WRITE(RADEON_GEN_INT_CNTL, dev_priv->irq_enable_reg);
+	if (dev->irq_enabled)
+		RADEON_WRITE(RADEON_GEN_INT_CNTL, dev_priv->irq_enable_reg);
 }
 
 static void r500_vbl_irq_set_state(struct drm_device *dev, u32 mask, int state)
@@ -59,7 +60,8 @@ static void r500_vbl_irq_set_state(struct drm_device *dev, u32 mask, int state)
 	else
 		dev_priv->r500_disp_irq_reg &= ~mask;
 
-	RADEON_WRITE(R500_DxMODE_INT_MASK, dev_priv->r500_disp_irq_reg);
+	if (dev->irq_enabled)
+		RADEON_WRITE(R500_DxMODE_INT_MASK, dev_priv->r500_disp_irq_reg);
 }
 
 int radeon_enable_vblank(struct drm_device *dev, int crtc)

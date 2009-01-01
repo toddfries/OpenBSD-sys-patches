@@ -39,7 +39,7 @@
 #include "opt_ddb.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/mv/mv_machdep.c,v 1.2 2008/11/06 16:25:12 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/mv/mv_machdep.c,v 1.3 2008/12/01 10:16:25 stas Exp $");
 
 #define _ARM32_BUS_DMA_PRIVATE
 #include <sys/param.h>
@@ -579,7 +579,7 @@ initarm(void *mdp, void *unused __unused)
 	 * but since we are boot strapping the addresses used for the read
 	 * may have just been remapped and thus the cache could be out
 	 * of sync. A re-clean after the switch will cure this.
-	 * After booting there are no gross reloations of the kernel thus
+	 * After booting there are no gross relocations of the kernel thus
 	 * this problem will not occur after initarm().
 	 */
 	cpu_idcache_wbinv_all();

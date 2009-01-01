@@ -1,7 +1,7 @@
 /*	$NetBSD: openfirmio.c,v 1.4 2002/09/06 13:23:19 gehenna Exp $ */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ofw/openfirmio.c,v 1.14 2006/09/01 20:12:12 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ofw/openfirmio.c,v 1.15 2008/12/20 00:33:10 nwhitehorn Exp $");
 
 /*-
  * Copyright (c) 1992, 1993
@@ -221,7 +221,7 @@ openfirm_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int flags,
 			if (error)
 				break;
 		}
-		ok = OF_nextprop(node, name, newname);
+		ok = OF_nextprop(node, name, newname, sizeof(newname));
 		if (ok == 0) {
 			error = ENOENT;
 			break;

@@ -55,7 +55,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/sun4v/sun4v/mp_machdep.c,v 1.10 2008/03/10 01:32:48 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/sun4v/sun4v/mp_machdep.c,v 1.11 2008/12/20 00:33:10 nwhitehorn Exp $");
 
 #include "opt_trap_trace.h"
 
@@ -272,7 +272,7 @@ start_ap_bycpuid(int cpuid, void *func, u_long arg)
 	args.cpuid = cpuid;
 	args.func = (cell_t)func;
 	args.arg = (cell_t)arg;
-	openfirmware(&args);
+	ofw_entry(&args);
 	return (int)args.result;
 	
 }

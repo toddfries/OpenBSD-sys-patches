@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_input.c,v 1.345 2008/11/19 09:39:34 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_input.c,v 1.349 2008/12/15 06:10:57 qingli Exp $");
 
 #include "opt_bootp.h"
 #include "opt_ipfw.h"
@@ -49,6 +49,8 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_input.c,v 1.345 2008/11/19 09:39:34 zec E
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/kernel.h>
+#include <sys/lock.h>
+#include <sys/rwlock.h>
 #include <sys/syslog.h>
 #include <sys/sysctl.h>
 #include <sys/vimage.h>
@@ -60,6 +62,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_input.c,v 1.345 2008/11/19 09:39:34 zec E
 #include <net/if_dl.h>
 #include <net/route.h>
 #include <net/netisr.h>
+#include <net/vnet.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -70,6 +73,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_input.c,v 1.345 2008/11/19 09:39:34 zec E
 #include <netinet/ip_icmp.h>
 #include <netinet/ip_options.h>
 #include <machine/in_cksum.h>
+#include <netinet/vinet.h>
 #ifdef DEV_CARP
 #include <netinet/ip_carp.h>
 #endif
@@ -89,6 +93,12 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_input.c,v 1.345 2008/11/19 09:39:34 zec E
 CTASSERT(sizeof(struct ip) == 20);
 #endif
 
+#ifndef VIMAGE
+#ifndef VIMAGE_GLOBALS
+struct vnet_inet vnet_inet_0;
+#endif
+#endif
+
 #ifdef VIMAGE_GLOBALS
 static int	ipsendredirects;
 static int	ip_checkinterface;
@@ -104,7 +114,7 @@ struct ipstat ipstat;
 static int ip_rsvp_on;
 struct socket *ip_rsvpd;
 int	rsvp_on;
-static TAILQ_HEAD(ipqhead, ipq) ipq[IPREASS_NHASH];
+static struct ipqhead ipq[IPREASS_NHASH];
 static int	maxnipq;	/* Administrative limit on # reass queues. */
 static int	maxfragsperpacket;
 int	ipstealth;
@@ -168,7 +178,9 @@ SYSCTL_INT(_net_inet_ip, IPCTL_INTRQDROPS, intr_queue_drops, CTLFLAG_RD,
 SYSCTL_V_STRUCT(V_NET, vnet_inet, _net_inet_ip, IPCTL_STATS, stats, CTLFLAG_RW,
     ipstat, ipstat, "IP statistics (struct ipstat, netinet/ip_var.h)");
 
+#ifdef VIMAGE_GLOBALS
 static uma_zone_t ipq_zone;
+#endif
 static struct mtx ipqlock;
 
 #define	IPQ_LOCK()	mtx_lock(&ipqlock)
@@ -205,7 +217,9 @@ SYSCTL_V_INT(V_NET, vnet_inet, _net_inet_ip, OID_AUTO, stealth, CTLFLAG_RW,
  */
 ip_fw_chk_t *ip_fw_chk_ptr = NULL;
 ip_dn_io_t *ip_dn_io_ptr = NULL;
-int fw_one_pass = 1;
+#ifdef VIMAGE_GLOBALS
+int fw_one_pass;
+#endif
 
 static void	ip_freef(struct ipqhead *, struct ipq *);
 
@@ -243,6 +257,8 @@ ip_init(void)
 	V_ipport_randomcps = 10;	/* user controlled via sysctl */
 	V_ipport_randomtime = 45;	/* user controlled via sysctl */
 	V_ipport_stoprandom = 0;	/* toggled by ipport_tick */
+
+	V_fw_one_pass = 1;
 
 #ifdef NOTYET
 	/* XXX global static but not instantiated in this file */
@@ -1270,7 +1286,7 @@ ip_rtaddr(struct in_addr dst, u_int fibnum)
 	sin->sin_family = AF_INET;
 	sin->sin_len = sizeof(*sin);
 	sin->sin_addr = dst;
-	in_rtalloc_ign(&sro, RTF_CLONING, fibnum);
+	in_rtalloc_ign(&sro, 0, fibnum);
 
 	if (sro.ro_rt == NULL)
 		return (NULL);
@@ -1396,7 +1412,7 @@ ip_forward(struct mbuf *m, int srcrt)
 		sin->sin_family = AF_INET;
 		sin->sin_len = sizeof(*sin);
 		sin->sin_addr = ip->ip_dst;
-		in_rtalloc_ign(&ro, RTF_CLONING, M_GETFIB(m));
+		in_rtalloc_ign(&ro, 0, M_GETFIB(m));
 
 		rt = ro.ro_rt;
 
