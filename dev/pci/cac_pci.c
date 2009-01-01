@@ -39,6 +39,7 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/queue.h>
+#include <sys/sensors.h>
 
 #include <machine/endian.h>
 #include <machine/bus.h>
