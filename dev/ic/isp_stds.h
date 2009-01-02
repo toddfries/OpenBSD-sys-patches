@@ -109,14 +109,14 @@ typedef struct {
 
 typedef struct {
 	uint8_t		ct_revision;
-	uint8_t		ct_portid[3];
+	uint8_t		ct_in_id[3];
 	uint8_t		ct_fcs_type;
 	uint8_t		ct_fcs_subtype;
 	uint8_t		ct_options;
-	uint8_t		ct_res0;
-	uint16_t	ct_response;
-	uint16_t	ct_resid;
-	uint8_t		ct_res1;
+	uint8_t		ct_reserved0;
+	uint16_t	ct_cmd_resp;
+	uint16_t	ct_bcnt_resid;
+	uint8_t		ct_reserved1;
 	uint8_t		ct_reason;
 	uint8_t		ct_explanation;
 	uint8_t		ct_vunique;
