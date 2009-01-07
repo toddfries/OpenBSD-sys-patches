@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860reg.h,v 1.14 2008/12/29 13:27:27 damien Exp $	*/
+/*	$OpenBSD: rt2860reg.h,v 1.16 2009/01/06 18:56:07 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007
@@ -352,6 +352,12 @@
 #define RT2860_MTX2_INT		(1 <<  1)
 #define RT2860_MRX0_INT		(1 <<  0)
 
+/* possible flags for register TXRXQ_PCNT */
+#define RT2860_RX0Q_PCNT_MASK	0xff000000
+#define RT2860_TX2Q_PCNT_MASK	0x00ff0000
+#define RT2860_TX1Q_PCNT_MASK	0x0000ff00
+#define RT2860_TX0Q_PCNT_MASK	0x000000ff
+
 /* possible flags for register CAP_CTRL */
 #define RT2860_CAP_ADC_FEQ		(1 << 31)
 #define RT2860_CAP_START		(1 << 30)
@@ -666,6 +672,26 @@
 #define RT2860_LED_RADIO	(1 << 13)
 #define RT2860_LED_LINK_2GHZ	(1 << 14)
 #define RT2860_LED_LINK_5GHZ	(1 << 15)
+
+
+/* possible flags for RT3020 RF register 1 */
+#define RT3070_RF_BLOCK	(1 << 0)
+#define RT3070_RX0_PD	(1 << 2)
+#define RT3070_TX0_PD	(1 << 3)
+#define RT3070_RX1_PD	(1 << 4)
+#define RT3070_TX1_PD	(1 << 5)
+
+/* possible flags for RT3020 RF register 15 */
+#define RT3070_TX_LO2	(1 << 3)
+
+/* possible flags for RT3020 RF register 17 */
+#define RT3070_TX_LO1	(1 << 3)
+
+/* possible flags for RT3020 RF register 20 */
+#define RT3070_RX_LO1	(1 << 3)
+
+/* possible flags for RT3020 RF register 21 */
+#define RT3070_RX_LO2	(1 << 3)
 
 
 /* RT2860 TX descriptor */
