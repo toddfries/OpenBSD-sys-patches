@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.112 2009/01/05 09:40:26 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.114 2009/01/11 11:47:00 jakemsr Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -1418,12 +1418,12 @@ azalia_codec_init_volgroups(codec_t *this)
 		cap = w->outamp_cap;
 		j = 0;
 		/* azalia_codec_find_defdac only goes 10 connections deep.
-		 * Start the connection depth at 8 so it doesn't go more
-		 * than 2 connections deep.
+		 * Start the connection depth at 7 so it doesn't go more
+		 * than 3 connections deep.
 		 */
 		if (w->type == COP_AWTYPE_AUDIO_MIXER ||
 		    w->type == COP_AWTYPE_AUDIO_SELECTOR)
-			j = 8;
+			j = 7;
 		dac = azalia_codec_find_defdac(this, w->nid, j);
 		if (dac == -1)
 			continue;
@@ -1448,7 +1448,7 @@ azalia_codec_init_volgroups(codec_t *this)
 			j = 0;
 			if (w->type == COP_AWTYPE_AUDIO_MIXER ||
 			    w->type == COP_AWTYPE_AUDIO_SELECTOR)
-				j = 8;
+				j = 7;
 			dac = azalia_codec_find_defdac(this, w->nid, j);
 			if (dac == -1)
 				continue;
@@ -1666,6 +1666,9 @@ azalia_codec_construct_format(codec_t *this, int newdac, int newadc)
 		for (c = 0; c < group->nconv; c++) {
 			chan = 0;
 			bits_rates = ~0;
+			if (this->w[group->conv[0]].widgetcap &
+			    COP_AWCAP_DIGITAL)
+				bits_rates &= ~(COP_PCM_B32);
 			for (i = 0; i <= c; i++) {
 				nid = group->conv[i];
 				chan += WIDGET_CHANNELS(&this->w[nid]);
@@ -1682,6 +1685,9 @@ azalia_codec_construct_format(codec_t *this, int newdac, int newadc)
 		for (c = 0; c < group->nconv; c++) {
 			chan = 0;
 			bits_rates = ~0;
+			if (this->w[group->conv[0]].widgetcap &
+			    COP_AWCAP_DIGITAL)
+				bits_rates &= ~(COP_PCM_B32);
 			for (i = 0; i <= c; i++) {
 				nid = group->conv[i];
 				chan += WIDGET_CHANNELS(&this->w[nid]);

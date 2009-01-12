@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.108 2008/11/22 12:40:39 pedro Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.110 2009/01/11 17:40:00 oga Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*-
