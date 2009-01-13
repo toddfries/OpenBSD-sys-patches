@@ -1,6 +1,6 @@
 /*-
  * Copyright (c) 2001 Atsushi Onoe
- * Copyright (c) 2002-2008 Sam Leffler, Errno Consulting
+ * Copyright (c) 2002-2009 Sam Leffler, Errno Consulting
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_ioctl.c,v 1.70 2008/12/18 23:00:09 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_ioctl.c,v 1.72 2009/01/11 18:59:14 sam Exp $");
 
 /*
  * IEEE 802.11 ioctl support (FreeBSD-specific)
@@ -62,6 +62,9 @@ __FBSDID("$FreeBSD: src/sys/net80211/ieee80211_ioctl.c,v 1.70 2008/12/18 23:00:0
 #include <net80211/ieee80211_ioctl.h>
 #include <net80211/ieee80211_regdomain.h>
 #include <net80211/ieee80211_input.h>
+#ifdef IEEE80211_SUPPORT_TDMA
+#include <net80211/ieee80211_tdma.h>
+#endif
 
 #define	IS_UP_AUTO(_vap) \
 	(IFNET_IS_UP_RUNNING(vap->iv_ifp) && \
@@ -1089,6 +1092,14 @@ ieee80211_ioctl_get80211(struct ieee80211vap *vap, u_long cmd,
 			ireq->i_val =
 			    (vap->iv_flags_ext & IEEE80211_FEXT_RIFS) != 0;
 		break;
+#ifdef IEEE80211_SUPPORT_TDMA
+	case IEEE80211_IOC_TDMA_SLOT:
+	case IEEE80211_IOC_TDMA_SLOTCNT:
+	case IEEE80211_IOC_TDMA_SLOTLEN:
+	case IEEE80211_IOC_TDMA_BINTERVAL:
+		error = ieee80211_tdma_ioctl_get80211(vap, ireq);
+		break;
+#endif
 	default:
 		error = EINVAL;
 		break;
@@ -2685,6 +2696,7 @@ ieee80211_ioctl_set80211(struct ieee80211vap *vap, u_long cmd, struct ieee80211r
 			break;
 		case 3:
 			if ((vap->iv_caps & IEEE80211_C_WPA) != IEEE80211_C_WPA)
+				return EOPNOTSUPP;
 			flags |= IEEE80211_F_WPA1 | IEEE80211_F_WPA2;
 			break;
 		default:	/*  Can't set any -> error */
@@ -3105,6 +3117,14 @@ ieee80211_ioctl_set80211(struct ieee80211vap *vap, u_long cmd, struct ieee80211r
 		if (isvapht(vap))
 			error = ERESTART;
 		break;
+#ifdef IEEE80211_SUPPORT_TDMA
+	case IEEE80211_IOC_TDMA_SLOT:
+	case IEEE80211_IOC_TDMA_SLOTCNT:
+	case IEEE80211_IOC_TDMA_SLOTLEN:
+	case IEEE80211_IOC_TDMA_BINTERVAL:
+		error = ieee80211_tdma_ioctl_set80211(vap, ireq);
+		break;
+#endif
 	default:
 		error = EINVAL;
 		break;

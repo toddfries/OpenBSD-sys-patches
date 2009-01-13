@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/iicbus/iicsmb.c,v 1.16 2008/08/04 21:03:06 jhb Exp $
+ * $FreeBSD: src/sys/dev/iicbus/iicsmb.c,v 1.17 2009/01/06 17:23:37 nwhitehorn Exp $
  *
  */
 
@@ -149,7 +149,7 @@ static int
 iicsmb_probe(device_t dev)
 {
 	device_set_desc(dev, "SMBus over I2C bridge");
-	return (0);
+	return (BUS_PROBE_NOWILDCARD);
 }
 
 static int

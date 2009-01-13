@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/pcn/if_pcn.c,v 1.1 2008/08/14 20:34:46 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/pcn/if_pcn.c,v 1.2 2009/01/03 10:56:10 brueffer Exp $");
 
 /*
  * AMD Am79c972 fast ethernet PCI NIC driver. Datasheets are available
@@ -1446,7 +1446,7 @@ pcn_watchdog(ifp)
 	pcn_init_locked(sc);
 
 	if (ifp->if_snd.ifq_head != NULL)
-		pcn_start(ifp);
+		pcn_start_locked(ifp);
 
 	PCN_UNLOCK(sc);
 

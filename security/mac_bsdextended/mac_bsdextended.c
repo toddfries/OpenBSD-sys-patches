@@ -37,7 +37,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_bsdextended/mac_bsdextended.c,v 1.53 2008/11/29 14:32:14 bz Exp $
+ * $FreeBSD: src/sys/security/mac_bsdextended/mac_bsdextended.c,v 1.54 2009/01/10 10:58:41 rwatson Exp $
  */
 
 /*
@@ -523,4 +523,4 @@ static struct mac_policy_ops ugidfw_ops =
 };
 
 MAC_POLICY_SET(&ugidfw_ops, mac_bsdextended, "TrustedBSD MAC/BSD Extended",
-    MPC_LOADTIME_FLAG_UNLOADOK, NULL, 0);
+    MPC_LOADTIME_FLAG_UNLOADOK, NULL);

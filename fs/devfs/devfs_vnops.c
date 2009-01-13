@@ -31,7 +31,7 @@
  *	@(#)kernfs_vnops.c	8.15 (Berkeley) 5/21/95
  * From: FreeBSD: src/sys/miscfs/kernfs/kernfs_vnops.c 1.43
  *
- * $FreeBSD: src/sys/fs/devfs/devfs_vnops.c,v 1.171 2008/12/12 11:10:10 kib Exp $
+ * $FreeBSD: src/sys/fs/devfs/devfs_vnops.c,v 1.172 2009/01/08 19:13:34 trasz Exp $
  */
 
 /*
@@ -540,12 +540,28 @@ devfs_close_f(struct file *fp, struct thread *td)
 	return (error);
 }
 
-/* ARGSUSED */
 static int
 devfs_fsync(struct vop_fsync_args *ap)
 {
-	if (!vn_isdisk(ap->a_vp, NULL))
+	int error;
+	struct bufobj *bo;
+	struct devfs_dirent *de;
+
+	if (!vn_isdisk(ap->a_vp, &error)) {
+		bo = &ap->a_vp->v_bufobj;
+		de = ap->a_vp->v_data;
+		if (error == ENXIO && bo->bo_dirty.bv_cnt > 0) {
+			printf("Device %s went missing before all of the data "
+			    "could be written to it; expect data loss.\n",
+			    de->de_dirent->d_name);
+
+			error = vop_stdfsync(ap);
+			if (bo->bo_dirty.bv_cnt != 0 || error != 0)
+				panic("devfs_fsync: vop_stdfsync failed.");
+		}
+
 		return (0);
+	}
 
 	return (vop_stdfsync(ap));
 }

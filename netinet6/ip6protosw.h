@@ -59,7 +59,7 @@
  *
  *	@(#)protosw.h	8.1 (Berkeley) 6/2/93
  *	BSDI protosw.h,v 2.3 1996/10/11 16:02:40 pjd Exp
- * $FreeBSD: src/sys/netinet6/ip6protosw.h,v 1.14 2007/12/10 16:03:39 obrien Exp $
+ * $FreeBSD: src/sys/netinet6/ip6protosw.h,v 1.15 2009/01/04 21:13:51 rwatson Exp $
  */
 
 #ifndef _NETINET6_IP6PROTOSW_H_
@@ -125,11 +125,6 @@ struct ip6protosw {
 			__P((int, struct sockaddr *, void *));
 	int	(*pr_ctloutput)		/* control output (from above) */
 			__P((struct socket *, struct sockopt *));
-
-/* user-protocol hook */
-	int	(*pr_usrreq)		/* user request: see list below */
-			__P((struct socket *, int, struct mbuf *,
-			     struct mbuf *, struct mbuf *, struct thread *));
 
 /* utility hooks */
 	void	(*pr_init)		/* initialization hook */

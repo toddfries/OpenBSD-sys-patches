@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)in_pcb.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/netinet/in_pcb.h,v 1.124 2008/12/17 13:00:18 bz Exp $
+ * $FreeBSD: src/sys/netinet/in_pcb.h,v 1.125 2009/01/09 16:02:19 adrian Exp $
  */
 
 #ifndef _NETINET_IN_PCB_H_
@@ -411,6 +411,8 @@ void 	inp_4tuple_get(struct inpcb *inp, uint32_t *laddr, uint16_t *lp,
 #define	INP_FAITH		0x200	/* accept FAITH'ed connections */
 #define	INP_RECVTTL		0x400	/* receive incoming IP TTL */
 #define	INP_DONTFRAG		0x800	/* don't fragment packet */
+#define	INP_NONLOCALOK		0x1000	/* Allow bind to spoof any address */
+					/* - requires options IP_NONLOCALBIND */
 
 #define IN6P_IPV6_V6ONLY	0x008000 /* restrict AF_INET6 socket for v6 */
 

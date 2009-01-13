@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb2/core/usb2_dynamic.h,v 1.2 2008/12/11 23:13:02 thompsa Exp $ */
+/* $FreeBSD: src/sys/dev/usb2/core/usb2_dynamic.h,v 1.3 2009/01/04 00:12:01 alfred Exp $ */
 /*-
  * Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
  *
@@ -37,6 +37,8 @@ struct usb2_device_request;
 
 typedef usb2_error_t	(usb2_temp_setup_by_index_t)(struct usb2_device *udev,
 			    uint16_t index);
+typedef usb2_error_t	(usb2_test_huawei_autoinst_t)(struct usb2_device *udev, 
+			    struct usb2_attach_arg *uaa);
 typedef uint8_t		(usb2_test_quirk_t)(const struct usb2_lookup_info *info,
 			    uint16_t quirk);
 typedef int		(usb2_quirk_ioctl_t)(unsigned long cmd, caddr_t data,
@@ -52,11 +54,13 @@ extern usb2_temp_get_desc_t *usb2_temp_get_desc_p;
 extern usb2_temp_setup_by_index_t *usb2_temp_setup_by_index_p;
 extern usb2_temp_unsetup_t *usb2_temp_unsetup_p;
 extern usb2_test_quirk_t *usb2_test_quirk_p;
+extern usb2_test_huawei_autoinst_t *usb2_test_huawei_autoinst_p;
 extern usb2_quirk_ioctl_t *usb2_quirk_ioctl_p;
 extern devclass_t usb2_devclass_ptr;
 
 /* function prototypes */
 
+void	usb2_test_huawei_unload(void *);
 void	usb2_temp_unload(void *);
 void	usb2_quirk_unload(void *);
 void	usb2_bus_unload(void *);

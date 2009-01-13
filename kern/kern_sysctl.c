@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_sysctl.c,v 1.184 2008/12/29 19:24:00 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_sysctl.c,v 1.185 2009/01/01 00:19:51 ed Exp $");
 
 #include "opt_compat.h"
 #include "opt_mac.h"
@@ -1371,8 +1371,11 @@ __sysctl(struct thread *td, struct sysctl_args *uap)
 		uap->new, uap->newlen, &j, 0);
 	if (error && error != ENOMEM)
 		return (error);
-	if (uap->oldlenp)
-		error = copyout(&j, uap->oldlenp, sizeof(j));
+	if (uap->oldlenp) {
+		int i = copyout(&j, uap->oldlenp, sizeof(j));
+		if (i)
+			return (i);
+	}
 	return (error);
 }
 

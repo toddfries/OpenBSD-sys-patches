@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/pc98/cbus/scterm-sck.c,v 1.18 2008/08/20 08:31:58 ed Exp $
+ * $FreeBSD: src/sys/pc98/cbus/scterm-sck.c,v 1.19 2009/01/01 13:26:53 ed Exp $
  */
 
 #include "opt_syscons.h"
@@ -37,9 +37,7 @@
 #include <machine/pc/display.h>
 
 #include <dev/syscons/syscons.h>
-#include <dev/syscons/sctermvar.h>
-
-#ifndef SC_DUMB_TERMINAL
+#include <pc98/cbus/sctermvar.h>
 
 #define MAX_ESC_PAR	5
 
@@ -1212,5 +1210,3 @@ mask2attr(term_stat *tcp)
 
 	return (attr << 8);
 }
-
-#endif /* SC_DUMB_TERMINAL */

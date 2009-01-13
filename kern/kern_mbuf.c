@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_mbuf.c,v 1.43 2008/12/18 15:56:12 ru Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_mbuf.c,v 1.44 2009/01/01 20:03:01 rwatson Exp $");
 
 #include "opt_mac.h"
 #include "opt_param.h"
@@ -420,6 +420,7 @@ mb_ctor_mbuf(void *mem, int size, void *arg, int how)
 		m->m_pkthdr.csum_data = 0;
 		m->m_pkthdr.tso_segsz = 0;
 		m->m_pkthdr.ether_vtag = 0;
+		m->m_pkthdr.flowid = 0;
 		SLIST_INIT(&m->m_pkthdr.tags);
 #ifdef MAC
 		/* If the label init fails, fail the alloc */
@@ -644,6 +645,7 @@ mb_ctor_pack(void *mem, int size, void *arg, int how)
 		m->m_pkthdr.csum_data = 0;
 		m->m_pkthdr.tso_segsz = 0;
 		m->m_pkthdr.ether_vtag = 0;
+		m->m_pkthdr.flowid = 0;
 		SLIST_INIT(&m->m_pkthdr.tags);
 #ifdef MAC
 		/* If the label init fails, fail the alloc */

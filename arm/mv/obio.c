@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/mv/obio.c,v 1.4 2008/11/19 11:57:16 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/mv/obio.c,v 1.5 2009/01/08 18:31:43 raj Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -131,8 +131,7 @@ mbus_print_child(device_t dev, device_t child)
 	if (od == NULL)
 		panic("Unknown device on %s", device_get_nameunit(dev));
 
-	rv = 0;
-	rv += bus_print_child_header(dev, child);
+	rv = bus_print_child_header(dev, child);
 
 	rv += resource_list_print_type(&od->od_resources, "at mem",
 	    SYS_RES_MEMORY, "0x%08lx");

@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb2/core/usb2_hub.h,v 1.2 2008/12/11 23:13:02 thompsa Exp $ */
+/* $FreeBSD: src/sys/dev/usb2/core/usb2_hub.h,v 1.3 2009/01/04 00:12:01 alfred Exp $ */
 /*-
  * Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
  *
@@ -74,5 +74,7 @@ struct usb2_device *usb2_bus_port_get_device(struct usb2_bus *bus,
 	    struct usb2_port *up);
 void	usb2_needs_explore(struct usb2_bus *bus, uint8_t do_probe);
 void	usb2_needs_explore_all(void);
+void	usb2_bus_power_update(struct usb2_bus *bus);
+void	usb2_bus_powerd(struct usb2_bus *bus);
 
 #endif					/* _USB2_HUB_H_ */

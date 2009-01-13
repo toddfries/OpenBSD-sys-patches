@@ -39,7 +39,7 @@
 #include "opt_ddb.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/mv/mv_machdep.c,v 1.3 2008/12/01 10:16:25 stas Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/mv/mv_machdep.c,v 1.4 2009/01/08 18:31:43 raj Exp $");
 
 #define _ARM32_BUS_DMA_PRIVATE
 #include <sys/param.h>
@@ -549,6 +549,11 @@ initarm(void *mdp, void *unused __unused)
 	print_bootinfo();
 	print_kernel_section_addr();
 	print_kenv();
+
+	/*
+	 * Re-initialise MPP
+	 */
+	platform_mpp_init();
 
 	/*
 	 * Re-initialise decode windows

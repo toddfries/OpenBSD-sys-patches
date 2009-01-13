@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/crypto/via/padlock_hash.c,v 1.2 2006/07/25 19:04:26 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/crypto/via/padlock_hash.c,v 1.3 2009/01/12 19:23:46 jkim Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -34,7 +34,7 @@ __FBSDID("$FreeBSD: src/sys/crypto/via/padlock_hash.c,v 1.2 2006/07/25 19:04:26 
 #include <sys/malloc.h>
 #include <sys/libkern.h>
 #include <sys/endian.h>
-#if defined(__i386__) && !defined(PC98)
+#if defined(__amd64__) || (defined(__i386__) && !defined(PC98))
 #include <machine/cpufunc.h>
 #include <machine/cputypes.h>
 #include <machine/md_var.h>

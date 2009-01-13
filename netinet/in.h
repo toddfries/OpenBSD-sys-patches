@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)in.h	8.3 (Berkeley) 1/3/94
- * $FreeBSD: src/sys/netinet/in.h,v 1.104 2008/12/02 21:37:28 bz Exp $
+ * $FreeBSD: src/sys/netinet/in.h,v 1.106 2009/01/09 17:18:17 adrian Exp $
  */
 
 #ifndef _NETINET_IN_H_
@@ -441,6 +441,8 @@ __END_DECLS
 #define	IP_FAITH		22   /* bool; accept FAITH'ed connections */
 
 #define	IP_ONESBCAST		23   /* bool: send all-ones broadcast */
+#define	IP_NONLOCALOK		24   /* bool: allow bind to spoof non-local addresses;
+					requires kernel compile option IP_NONLOCALBIND */
 
 #define	IP_FW_TABLE_ADD		40   /* add entry */
 #define	IP_FW_TABLE_DEL		41   /* delete entry */

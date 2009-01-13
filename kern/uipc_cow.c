@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/uipc_cow.c,v 1.27 2008/02/01 19:36:25 phk Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/uipc_cow.c,v 1.28 2009/01/03 13:24:08 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -129,7 +129,11 @@ socow_setup(struct mbuf *m0, struct uio *uio)
 	 * set up COW
 	 */
 	vm_page_lock_queues();
-	vm_page_cowsetup(pp);
+	if (vm_page_cowsetup(pp) != 0) {
+		vm_page_unhold(pp);
+		vm_page_unlock_queues();
+		return (0);
+	}
 
 	/*
 	 * wire the page for I/O

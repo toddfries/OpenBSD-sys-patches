@@ -32,7 +32,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_portacl/mac_portacl.c,v 1.19 2008/08/23 15:26:36 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac_portacl/mac_portacl.c,v 1.20 2009/01/10 10:58:41 rwatson Exp $
  */
 
 /*
@@ -490,4 +490,4 @@ static struct mac_policy_ops portacl_ops =
 };
 
 MAC_POLICY_SET(&portacl_ops, mac_portacl, "TrustedBSD MAC/portacl",
-    MPC_LOADTIME_FLAG_UNLOADOK, NULL, 0);
+    MPC_LOADTIME_FLAG_UNLOADOK, NULL);

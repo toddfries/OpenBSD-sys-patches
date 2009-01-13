@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/tty.c,v 1.302 2008/12/20 09:36:40 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/tty.c,v 1.304 2009/01/02 23:39:29 ed Exp $");
 
 #include "opt_compat.h"
 
@@ -307,6 +307,14 @@ static int
 ttydev_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 {
 	struct tty *tp = dev->si_drv1;
+
+	/*
+	 * Don't actually close the device if it is being used as the
+	 * console.
+	 */
+	if (dev_console_filename != NULL &&
+	    strcmp(dev_console_filename, tty_devname(tp)) == 0)
+		return (0);
 
 	tty_lock(tp);
 

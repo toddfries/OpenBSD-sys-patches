@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iicbus/ds1672.c,v 1.2 2008/09/08 15:49:07 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iicbus/ds1672.c,v 1.3 2009/01/06 17:23:37 nwhitehorn Exp $");
 /*
  * Dallas Semiconductor DS1672 RTC sitting on the I2C bus.
  */
@@ -61,7 +61,7 @@ ds1672_probe(device_t dev)
 {
 	/* XXX really probe? */
 	device_set_desc(dev, "Dallas Semiconductor DS1672 RTC");
-	return (0);
+	return (BUS_PROBE_NOWILDCARD);
 }
 
 static int

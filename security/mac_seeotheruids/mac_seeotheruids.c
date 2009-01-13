@@ -35,7 +35,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_seeotheruids/mac_seeotheruids.c,v 1.20 2008/10/17 15:11:12 bz Exp $
+ * $FreeBSD: src/sys/security/mac_seeotheruids/mac_seeotheruids.c,v 1.21 2009/01/10 10:58:41 rwatson Exp $
  */
 
 /*
@@ -186,4 +186,4 @@ static struct mac_policy_ops seeotheruids_ops =
 };
 
 MAC_POLICY_SET(&seeotheruids_ops, mac_seeotheruids,
-    "TrustedBSD MAC/seeotheruids", MPC_LOADTIME_FLAG_UNLOADOK, NULL, 0);
+    "TrustedBSD MAC/seeotheruids", MPC_LOADTIME_FLAG_UNLOADOK, NULL);

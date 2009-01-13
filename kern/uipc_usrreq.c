@@ -56,7 +56,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/uipc_usrreq.c,v 1.224 2008/12/30 16:09:57 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/uipc_usrreq.c,v 1.225 2009/01/01 20:03:22 rwatson Exp $");
 
 #include "opt_ddb.h"
 #include "opt_mac.h"
@@ -1229,14 +1229,14 @@ unp_connect(struct socket *so, struct sockaddr *nam, struct thread *td)
 			unp3->unp_addr = (struct sockaddr_un *) sa;
 			sa = NULL;
 		}
+
 		/*
-		 * unp_peercred management:
-		 *
 		 * The connecter's (client's) credentials are copied from its
 		 * process structure at the time of connect() (which is now).
 		 */
 		cru2x(td->td_ucred, &unp3->unp_peercred);
 		unp3->unp_flags |= UNP_HAVEPC;
+
 		/*
 		 * The receiver's (server's) credentials are copied from the
 		 * unp_peercred member of socket on which the former called

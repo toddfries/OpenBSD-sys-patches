@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/uipc_debug.c,v 1.4 2008/07/03 08:35:59 julian Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/uipc_debug.c,v 1.5 2009/01/04 19:16:36 rwatson Exp $");
 
 #include "opt_ddb.h"
 
@@ -322,7 +322,6 @@ db_print_protosw(struct protosw *pr, const char *prname, int indent)
 
 	db_print_indent(indent);
 	db_printf("pr_ctloutput: %p   ", pr->pr_ctloutput);
-	db_printf("pr_ousrreq: %p   ", pr->pr_ousrreq);
 	db_printf("pr_init: %p\n", pr->pr_init);
 
 	db_print_indent(indent);
@@ -331,7 +330,6 @@ db_print_protosw(struct protosw *pr, const char *prname, int indent)
 	db_printf("pr_drain: %p\n", pr->pr_drain);
 
 	db_print_indent(indent);
-	db_printf("pr_ousrreq: %p\n", pr->pr_ousrreq);
 }
 
 static void

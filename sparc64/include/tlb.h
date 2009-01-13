@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sparc64/include/tlb.h,v 1.28 2008/09/08 21:24:25 marius Exp $
+ * $FreeBSD: src/sys/sparc64/include/tlb.h,v 1.29 2009/01/01 14:01:21 marius Exp $
  */
 
 #ifndef	_MACHINE_TLB_H_
@@ -129,6 +129,8 @@ typedef void tlb_flush_user_t(void);
 struct pmap;
 struct tlb_entry;
 
+extern int dtlb_slots;
+extern int itlb_slots;
 extern int kernel_tlb_slots;
 extern struct tlb_entry *kernel_tlbs;
 

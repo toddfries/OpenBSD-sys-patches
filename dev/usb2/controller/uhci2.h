@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb2/controller/uhci2.h,v 1.1 2008/11/04 02:31:03 alfred Exp $ */
+/* $FreeBSD: src/sys/dev/usb2/controller/uhci2.h,v 1.2 2009/01/04 00:12:01 alfred Exp $ */
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -300,7 +300,8 @@ typedef struct uhci_softc {
 
 	uint8_t	sc_addr;		/* device address */
 	uint8_t	sc_conf;		/* device configuration */
-	uint8_t	sc_isreset;
+	uint8_t	sc_isreset;		/* bits set if a root hub is reset */
+	uint8_t	sc_isresumed;		/* bits set if a port was resumed */
 	uint8_t	sc_saved_sof;
 	uint8_t	sc_hub_idata[1];
 

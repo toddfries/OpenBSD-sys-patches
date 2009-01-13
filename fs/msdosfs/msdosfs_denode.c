@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_denode.c,v 1.100 2008/10/23 15:53:51 des Exp $ */
+/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_denode.c,v 1.101 2009/01/11 17:11:01 trasz Exp $ */
 /*	$NetBSD: msdosfs_denode.c,v 1.28 1998/02/10 14:10:00 mrg Exp $	*/
 
 /*-
@@ -168,6 +168,7 @@ deget(pmp, dirclust, diroffset, depp)
 	ldep->de_dirclust = dirclust;
 	ldep->de_diroffset = diroffset;
 	ldep->de_inode = inode;
+	ldep->de_dev = pmp->pm_devvp->v_rdev;
 	fc_purge(ldep, 0);	/* init the fat cache for this denode */
 
 	lockmgr(nvp->v_vnlock, LK_EXCLUSIVE, NULL);

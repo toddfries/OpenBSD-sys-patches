@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)file.h	8.3 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/sys/file.h,v 1.81 2008/08/20 08:31:58 ed Exp $
+ * $FreeBSD: src/sys/sys/file.h,v 1.82 2009/01/01 02:29:17 obrien Exp $
  */
 
 #ifndef _SYS_FILE_H_
@@ -119,7 +119,7 @@ struct file {
 	struct ucred	*f_cred;	/* associated credentials. */
 	struct vnode 	*f_vnode;	/* NULL or applicable vnode */
 	short		f_type;		/* descriptor type */
-	short     	f_vnread_flags; /* (f) Sleep lock for f_offset */
+	short		f_vnread_flags; /* (f) Sleep lock for f_offset */
 	volatile u_int	f_flag;		/* see fcntl.h */
 	volatile u_int 	f_count;	/* reference count */
 	/*

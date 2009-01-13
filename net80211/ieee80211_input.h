@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2007-2008 Sam Leffler, Errno Consulting
+ * Copyright (c) 2007-2009 Sam Leffler, Errno Consulting
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -22,7 +22,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net80211/ieee80211_input.h,v 1.1 2008/04/20 20:35:43 sam Exp $
+ * $FreeBSD: src/sys/net80211/ieee80211_input.h,v 1.2 2009/01/08 17:12:47 sam Exp $
  */
 #ifndef _NET80211_IEEE80211_INPUT_H_
 #define _NET80211_IEEE80211_INPUT_H_
@@ -122,6 +122,12 @@ static __inline int
 isatherosoui(const uint8_t *frm)
 {
 	return frm[1] > 3 && LE_READ_4(frm+2) == ((ATH_OUI_TYPE<<24)|ATH_OUI);
+}
+
+static __inline int
+istdmaoui(const uint8_t *frm)
+{
+	return frm[1] > 3 && LE_READ_4(frm+2) == ((TDMA_OUI_TYPE<<24)|TDMA_OUI);
 }
 
 static __inline int

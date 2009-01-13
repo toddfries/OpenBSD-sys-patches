@@ -38,7 +38,7 @@
  *
  * Author: Archie Cobbs <archie@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_vjc.c,v 1.27 2008/10/23 15:53:51 des Exp $
+ * $FreeBSD: src/sys/netgraph/ng_vjc.c,v 1.28 2009/01/08 17:51:15 mav Exp $
  * $Whistle: ng_vjc.c,v 1.17 1999/11/01 09:24:52 julian Exp $
  */
 
@@ -248,6 +248,9 @@ ng_vjc_constructor(node_p node)
 		return (ENOMEM);
 
 	NG_NODE_SET_PRIVATE(node, priv);
+
+	/* slcompress is not thread-safe. Protect it's state here. */
+	NG_NODE_FORCE_WRITER(node);
 
 	/* Done */
 	return (0);

@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2007-2008 Sam Leffler, Errno Consulting
+ * Copyright (c) 2007-2009 Sam Leffler, Errno Consulting
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_ddb.c,v 1.17 2008/12/15 01:26:33 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_ddb.c,v 1.18 2009/01/08 17:12:47 sam Exp $");
 
 #include "opt_ddb.h"
 #include "opt_wlan.h"
@@ -76,7 +76,7 @@ __FBSDID("$FreeBSD: src/sys/net80211/ieee80211_ddb.c,v 1.17 2008/12/15 01:26:33 
 	"\20\1STA\7FF\10TURBOP\11IBSS\12PMGT" \
 	"\13HOSTAP\14AHDEMO\15SWRETRY\16TXPMGT\17SHSLOT\20SHPREAMBLE" \
 	"\21MONITOR\22DFS\30WPA1\31WPA2\32BURST\33WME\34WDS\36BGSCAN" \
-	"\37TXFRAG"
+	"\37TXFRAG\40TDMA"
 
 #define	IEEE80211_C_CRYPTO_BITS \
 	"\20\1WEP\2TKIP\3AES\4AES_CCM\5TKIPMIC\6CKIP\12PMGT"

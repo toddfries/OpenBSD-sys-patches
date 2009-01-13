@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/fxp/if_fxp.c,v 1.282 2008/12/18 01:36:46 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/fxp/if_fxp.c,v 1.283 2009/01/08 04:26:44 yongari Exp $");
 
 /*
  * Intel EtherExpress Pro/100B PCI Fast Ethernet driver
@@ -2545,7 +2545,8 @@ fxp_new_rfabuf(struct fxp_softc *sc, struct fxp_rx *rxp)
 		return (error);
 	}
 
-	bus_dmamap_unload(sc->fxp_mtag, rxp->rx_map);
+	if (rxp->rx_mbuf != NULL)
+		bus_dmamap_unload(sc->fxp_mtag, rxp->rx_map);
 	tmp_map = sc->spare_map;
 	sc->spare_map = rxp->rx_map;
 	rxp->rx_map = tmp_map;

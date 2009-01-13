@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb2/core/usb2_generic.c,v 1.5 2008/12/11 23:17:48 thompsa Exp $ */
+/* $FreeBSD: src/sys/dev/usb2/core/usb2_generic.c,v 1.6 2009/01/04 00:12:01 alfred Exp $ */
 /*-
  * Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
  *
@@ -1711,24 +1711,21 @@ ugen_set_power_mode(struct usb2_fifo *f, int mode)
 		break;
 
 	case USB_POWER_MODE_ON:
-		/* enable port */
-		err = usb2_req_set_port_feature(udev->parent_hub,
-		    NULL, udev->port_no, UHF_PORT_ENABLE);
-
-		/* FALLTHROUGH */
-
 	case USB_POWER_MODE_SAVE:
+		break;
+
 	case USB_POWER_MODE_RESUME:
-		/* TODO: implement USB power save */
 		err = usb2_req_clear_port_feature(udev->parent_hub,
 		    NULL, udev->port_no, UHF_PORT_SUSPEND);
+		mode = USB_POWER_MODE_SAVE;
 		break;
 
 	case USB_POWER_MODE_SUSPEND:
-		/* TODO: implement USB power save */
 		err = usb2_req_set_port_feature(udev->parent_hub,
 		    NULL, udev->port_no, UHF_PORT_SUSPEND);
+		mode = USB_POWER_MODE_SAVE;
 		break;
+
 	default:
 		return (EINVAL);
 	}
@@ -1736,7 +1733,8 @@ ugen_set_power_mode(struct usb2_fifo *f, int mode)
 	if (err)
 		return (ENXIO);		/* I/O failure */
 
-	udev->power_mode = mode;	/* update copy of power mode */
+	/* set new power mode */
+	usb2_set_power_mode(udev, mode);
 
 	return (0);			/* success */
 }

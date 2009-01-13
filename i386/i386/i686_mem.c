@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/i686_mem.c,v 1.29 2008/11/26 19:25:13 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/i686_mem.c,v 1.30 2009/01/12 22:01:49 jkim Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -678,9 +678,17 @@ i686_mem_drvinit(void *unused)
 		return;
 	if ((cpu_id & 0xf00) != 0x600 && (cpu_id & 0xf00) != 0xf00)
 		return;
-	if (cpu_vendor_id != CPU_VENDOR_INTEL &&
-	    cpu_vendor_id != CPU_VENDOR_AMD)
+	switch (cpu_vendor_id) {
+	case CPU_VENDOR_INTEL:
+	case CPU_VENDOR_AMD:
+		break;
+	case CPU_VENDOR_CENTAUR:
+		if (cpu_exthigh >= 0x80000008)
+			break;
+		/* FALLTHROUGH */
+	default:
 		return;
+	}
 	mem_range_softc.mr_op = &i686_mrops;
 }
 SYSINIT(i686memdev, SI_SUB_DRIVERS, SI_ORDER_FIRST, i686_mem_drvinit, NULL);

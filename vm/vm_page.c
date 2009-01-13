@@ -98,7 +98,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_page.c,v 1.374 2008/11/06 16:20:27 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_page.c,v 1.375 2009/01/03 13:24:08 kib Exp $");
 
 #include "opt_vm.h"
 
@@ -106,6 +106,7 @@ __FBSDID("$FreeBSD: src/sys/vm/vm_page.c,v 1.374 2008/11/06 16:20:27 raj Exp $")
 #include <sys/systm.h>
 #include <sys/lock.h>
 #include <sys/kernel.h>
+#include <sys/limits.h>
 #include <sys/malloc.h>
 #include <sys/mutex.h>
 #include <sys/proc.h>
@@ -2112,13 +2113,16 @@ vm_page_cowclear(vm_page_t m)
 	 */ 
 }
 
-void
+int
 vm_page_cowsetup(vm_page_t m)
 {
 
 	mtx_assert(&vm_page_queue_mtx, MA_OWNED);
+	if (m->cow == USHRT_MAX - 1)
+		return (EBUSY);
 	m->cow++;
 	pmap_remove_write(m);
+	return (0);
 }
 
 #include "opt_ddb.h"

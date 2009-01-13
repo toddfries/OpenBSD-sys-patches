@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/crypto/via/padlock.c,v 1.21 2008/11/17 19:00:36 philip Exp $");
+__FBSDID("$FreeBSD: src/sys/crypto/via/padlock.c,v 1.22 2009/01/12 19:23:46 jkim Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -35,7 +35,7 @@ __FBSDID("$FreeBSD: src/sys/crypto/via/padlock.c,v 1.21 2008/11/17 19:00:36 phil
 #include <sys/rwlock.h>
 #include <sys/malloc.h>
 #include <sys/libkern.h>
-#if defined(__i386__) && !defined(PC98)
+#if defined(__amd64__) || (defined(__i386__) && !defined(PC98))
 #include <machine/cpufunc.h>
 #include <machine/cputypes.h>
 #include <machine/md_var.h>
@@ -85,7 +85,7 @@ padlock_probe(device_t dev)
 {
 	char capp[256];
 
-#if defined(__i386__) && !defined(PC98)
+#if defined(__amd64__) || (defined(__i386__) && !defined(PC98))
 	/* If there is no AES support, we has nothing to do here. */
 	if (!(via_feature_xcrypt & VIA_HAS_AES)) {
 		device_printf(dev, "No ACE support.\n");

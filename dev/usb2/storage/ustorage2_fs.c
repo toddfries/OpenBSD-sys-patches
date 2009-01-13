@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb2/storage/ustorage2_fs.c,v 1.2 2008/12/11 23:17:48 thompsa Exp $ */
+/* $FreeBSD: src/sys/dev/usb2/storage/ustorage2_fs.c,v 1.3 2009/01/04 00:12:01 alfred Exp $ */
 /*-
  * Copyright (C) 2003-2005 Alan Stern
  * Copyright (C) 2008 Hans Petter Selasky
@@ -1301,6 +1301,7 @@ ustorage_fs_mode_select(struct ustorage_fs_softc *sc)
 static uint8_t
 ustorage_fs_synchronize_cache(struct ustorage_fs_softc *sc)
 {
+#if 0
 	struct ustorage_fs_lun *currlun = sc->sc_transfer.currlun;
 	uint8_t rc;
 
@@ -1311,6 +1312,7 @@ ustorage_fs_synchronize_cache(struct ustorage_fs_softc *sc)
 	if (rc) {
 		currlun->sense_data = SS_WRITE_ERROR;
 	}
+#endif
 	return (0);
 }
 

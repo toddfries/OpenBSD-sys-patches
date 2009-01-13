@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)udp_var.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/netinet/udp_var.h,v 1.34 2008/12/11 16:26:38 bz Exp $
+ * $FreeBSD: src/sys/netinet/udp_var.h,v 1.35 2009/01/06 12:13:40 rrs Exp $
  */
 
 #ifndef _NETINET_UDP_VAR_H_
@@ -110,6 +110,10 @@ void		 udp_init(void);
 void		 udp_input(struct mbuf *, int);
 struct inpcb	*udp_notify(struct inpcb *inp, int errno);
 int		 udp_shutdown(struct socket *so);
+
+
+typedef void(*udp_tun_func_t)(struct mbuf *, int off, struct inpcb *);
+int udp_set_kernel_tunneling(struct socket *so, udp_tun_func_t f);
 #endif
 
 #endif

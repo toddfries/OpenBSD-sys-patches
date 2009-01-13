@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ath/if_ath_pci.c,v 1.22 2008/12/01 16:53:01 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ath/if_ath_pci.c,v 1.23 2009/01/06 01:58:45 sam Exp $");
 
 /*
  * PCI/Cardbus front-end for the Atheros Wireless LAN controller driver.
@@ -254,4 +254,3 @@ DRIVER_MODULE(if_ath, pci, ath_pci_driver, ath_devclass, 0, 0);
 DRIVER_MODULE(if_ath, cardbus, ath_pci_driver, ath_devclass, 0, 0);
 MODULE_VERSION(if_ath, 1);
 MODULE_DEPEND(if_ath, wlan, 1, 1, 1);		/* 802.11 media layer */
-MODULE_DEPEND(if_ath, ath_rate, 1, 1, 1);	/* rate control algorithm */

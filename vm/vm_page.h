@@ -57,7 +57,7 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  *
- * $FreeBSD: src/sys/vm/vm_page.h,v 1.155 2008/09/26 18:44:40 emaste Exp $
+ * $FreeBSD: src/sys/vm/vm_page.h,v 1.156 2009/01/03 13:24:08 kib Exp $
  */
 
 /*
@@ -111,12 +111,12 @@ struct vm_page {
 	vm_paddr_t phys_addr;		/* physical address of page */
 	struct md_page md;		/* machine dependant stuff */
 	uint8_t	queue;			/* page queue index */
-	int8_t segind;  
+	int8_t segind;
 	u_short	flags;			/* see below */
 	uint8_t	order;			/* index of the buddy queue */
 	uint8_t pool;
-	u_short wire_count;		/* wired down maps refs (P) */
-	u_int cow;			/* page cow mapping count */
+	u_short cow;			/* page cow mapping count */
+	u_int wire_count;		/* wired down maps refs (P) */
 	short hold_count;		/* page hold count */
 	u_short oflags;			/* page flags (O) */
 	u_char	act_count;		/* page usage count */
@@ -336,7 +336,7 @@ void vm_page_zero_invalid(vm_page_t m, boolean_t setvalid);
 void vm_page_free_toq(vm_page_t m);
 void vm_page_zero_idle_wakeup(void);
 void vm_page_cowfault (vm_page_t);
-void vm_page_cowsetup (vm_page_t);
+int vm_page_cowsetup(vm_page_t);
 void vm_page_cowclear (vm_page_t);
 
 /*

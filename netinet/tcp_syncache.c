@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/tcp_syncache.c,v 1.165 2008/12/17 12:52:34 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/tcp_syncache.c,v 1.166 2009/01/11 20:01:43 rwatson Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -1070,8 +1070,6 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 		 * have an initialized label we can use.
 		 */
 		mac_syncache_destroy(&maclabel);
-		KASSERT(sc->sc_label != NULL,
-		    ("%s: label not initialized", __func__));
 #endif
 		/* Retransmit SYN|ACK and reset retransmit count. */
 		if ((s = tcp_log_addrs(&sc->sc_inc, th, NULL, NULL))) {

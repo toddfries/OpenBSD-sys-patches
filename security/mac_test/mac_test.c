@@ -36,7 +36,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_test/mac_test.c,v 1.103 2008/10/28 13:44:11 trasz Exp $
+ * $FreeBSD: src/sys/security/mac_test/mac_test.c,v 1.105 2009/01/10 10:58:41 rwatson Exp $
  */
 
 /*
@@ -3139,25 +3139,5 @@ static struct mac_policy_ops test_ops =
 	.mpo_vnode_setlabel_extattr = test_vnode_setlabel_extattr,
 };
 
-#define	TEST_OBJECTS	(MPC_OBJECT_CRED |				\
-			 MPC_OBJECT_PROC |				\
-			 MPC_OBJECT_VNODE |				\
-			 MPC_OBJECT_INPCB |				\
-			 MPC_OBJECT_SOCKET |				\
-			 MPC_OBJECT_DEVFS |				\
-			 MPC_OBJECT_MBUF |				\
-			 MPC_OBJECT_IPQ |				\
-			 MPC_OBJECT_IFNET |				\
-			 MPC_OBJECT_BPFDESC |				\
-			 MPC_OBJECT_PIPE |				\
-			 MPC_OBJECT_MOUNT |				\
-			 MPC_OBJECT_POSIXSEM |				\
-			 MPC_OBJECT_POSIXSHM |				\
-			 MPC_OBJECT_SYSVMSG |				\
-			 MPC_OBJECT_SYSVMSQ |				\
-			 MPC_OBJECT_SYSVSEM |				\
-			 MPC_OBJECT_SYSVSHM |				\
-			 MPC_OBJECT_SYNCACHE)
-
 MAC_POLICY_SET(&test_ops, mac_test, "TrustedBSD MAC/Test",
-    MPC_LOADTIME_FLAG_UNLOADOK, &test_slot, TEST_OBJECTS);
+    MPC_LOADTIME_FLAG_UNLOADOK, &test_slot);

@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/uhci_pci.c,v 1.66 2008/10/09 19:22:00 n_hibma Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/uhci_pci.c,v 1.67 2009/01/06 09:03:02 trasz Exp $");
 
 /* Universal Host Controller Interface
  *
@@ -388,6 +388,12 @@ uhci_pci_attach(device_t self)
 		sc->sc_bus.usbrev = USBREV_UNKNOWN;
 		break;
 	}
+
+	/*
+	 * Quirk for Parallels Desktop 4.0.
+	 */
+	if (pci_get_devid(self) == PCI_UHCI_DEVICEID_ICH6_A)
+		sc->sc_bus.usbrev = USBREV_2_0;
 
 	err = bus_setup_intr(self, sc->irq_res, INTR_TYPE_BIO,
 	    NULL, (driver_intr_t *) uhci_intr, sc, &sc->ih);

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_vfs.c,v 1.13 2008/12/16 17:04:52 trasz Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_vfs.c,v 1.14 2009/01/11 13:51:04 trasz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -70,6 +70,16 @@ g_vfs_done(struct bio *bip)
 {
 	struct buf *bp;
 	int vfslocked;
+
+	/*
+	 * Provider ('bio_to') could have withered away sometime
+	 * between incrementing the 'nend' in g_io_deliver() and now,
+	 * making 'bio_to' a dangling pointer.  We cannot do that
+	 * in g_wither_geom(), as it would require going over
+	 * the 'g_bio_run_up' list, resetting the pointer.
+	 */
+	if (bip->bio_from->provider == NULL)
+		bip->bio_to = NULL;
 
 	if (bip->bio_error) {
 		printf("g_vfs_done():");
@@ -136,7 +146,7 @@ g_vfs_orphan(struct g_consumer *cp)
 	g_detach(cp);
 
 	/*
-	 * Do not destroy the geom. Filesystem will do this during unmount.
+	 * Do not destroy the geom.  Filesystem will do that during unmount.
 	 */
 }
 

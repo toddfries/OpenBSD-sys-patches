@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/ata-queue.c,v 1.75 2008/11/27 03:37:46 peter Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/ata-queue.c,v 1.76 2009/01/12 17:18:58 obrien Exp $");
 
 #include "opt_ata.h"
 #include <sys/param.h>
@@ -434,7 +434,8 @@ ata_completed(void *context, int dummy)
 		printf("\n");
 	}
 
-	if ((request->u.atapi.sense.key & ATA_SENSE_KEY_MASK ?
+	if (!request->result &&
+	     (request->u.atapi.sense.key & ATA_SENSE_KEY_MASK ?
 	     request->u.atapi.sense.key & ATA_SENSE_KEY_MASK : 
 	     request->error))
 	    request->result = EIO;

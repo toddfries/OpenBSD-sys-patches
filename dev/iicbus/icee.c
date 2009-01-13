@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iicbus/icee.c,v 1.4 2008/08/05 08:38:33 stas Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iicbus/icee.c,v 1.5 2009/01/06 17:23:37 nwhitehorn Exp $");
 /*
  * Generic IIC eeprom support, modeled after the AT24C family of products.
  */
@@ -86,7 +86,7 @@ icee_probe(device_t dev)
 {
 	/* XXX really probe? -- not until we know the size... */
 	device_set_desc(dev, "I2C EEPROM");
-	return (0);
+	return (BUS_PROBE_NOWILDCARD);
 }
 
 static int

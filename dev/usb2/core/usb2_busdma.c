@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb2/core/usb2_busdma.c,v 1.5 2008/12/11 23:17:48 thompsa Exp $ */
+/* $FreeBSD: src/sys/dev/usb2/core/usb2_busdma.c,v 1.6 2009/01/04 00:12:01 alfred Exp $ */
 /*-
  * Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
  *
@@ -29,12 +29,15 @@
 #include <dev/usb2/include/usb2_standard.h>
 #include <dev/usb2/include/usb2_defs.h>
 
+#define	USB_DEBUG_VAR usb2_debug
+
 #include <dev/usb2/core/usb2_core.h>
 #include <dev/usb2/core/usb2_busdma.h>
 #include <dev/usb2/core/usb2_process.h>
 #include <dev/usb2/core/usb2_transfer.h>
 #include <dev/usb2/core/usb2_device.h>
 #include <dev/usb2/core/usb2_util.h>
+#include <dev/usb2/core/usb2_debug.h>
 
 #include <dev/usb2/controller/usb2_controller.h>
 #include <dev/usb2/controller/usb2_bus.h>
@@ -418,7 +421,16 @@ usb2_pc_common_mem_cb(void *arg, bus_dma_segment_t *segs,
 	pc->page_offset_buf = rem;
 	pc->page_offset_end += rem;
 	nseg--;
-
+#if (USB_DEBUG != 0)
+	if (rem != (USB_P2U(pc->buffer) & (USB_PAGE_SIZE - 1))) {
+		/*
+		 * This check verifies that the physical address is correct:
+		 */
+		DPRINTFN(0, "Page offset was not preserved!\n");
+		error = 1;
+		goto done;
+	}
+#endif
 	while (nseg > 0) {
 		nseg--;
 		segs++;
@@ -788,7 +800,16 @@ usb2_pc_common_mem_cb(struct usb2_page_cache *pc, bus_dma_segment_t *segs,
 		ext_seg = 0;
 	}
 	nseg--;
-
+#if (USB_DEBUG != 0)
+	if (rem != (USB_P2U(pc->buffer) & (USB_PAGE_SIZE - 1))) {
+		/*
+		 * This check verifies that the physical address is correct:
+		 */
+		DPRINTFN(0, "Page offset was not preserved!\n");
+		error = 1;
+		goto done;
+	}
+#endif
 	while (nseg > 0) {
 		nseg--;
 		segs++;

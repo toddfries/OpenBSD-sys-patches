@@ -5,7 +5,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb2/image/uscanner2.c,v 1.3 2008/12/11 23:17:48 thompsa Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb2/image/uscanner2.c,v 1.5 2009/01/11 19:41:38 thompsa Exp $");
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -55,7 +55,6 @@ __FBSDID("$FreeBSD: src/sys/dev/usb2/image/uscanner2.c,v 1.3 2008/12/11 23:17:48
 #include <dev/usb2/core/usb2_core.h>
 #include <dev/usb2/core/usb2_debug.h>
 #include <dev/usb2/core/usb2_process.h>
-#include <dev/usb2/core/usb2_config_td.h>
 #include <dev/usb2/core/usb2_request.h>
 #include <dev/usb2/core/usb2_lookup.h>
 #include <dev/usb2/core/usb2_util.h>
@@ -266,6 +265,7 @@ static const struct usb2_device_id uscanner_devs[] = {
 	{USB_VPI(USB_VENDOR_HP, USB_PRODUCT_HP_4100C, 0)},
 	{USB_VPI(USB_VENDOR_HP, USB_PRODUCT_HP_4200C, 0)},
 	{USB_VPI(USB_VENDOR_HP, USB_PRODUCT_HP_4300C, 0)},
+	{USB_VPI(USB_VENDOR_HP, USB_PRODUCT_HP_4470C, 0)},
 	{USB_VPI(USB_VENDOR_HP, USB_PRODUCT_HP_4670V, 0)},
 	{USB_VPI(USB_VENDOR_HP, USB_PRODUCT_HP_S20, 0)},
 	{USB_VPI(USB_VENDOR_HP, USB_PRODUCT_HP_5200C, 0)},

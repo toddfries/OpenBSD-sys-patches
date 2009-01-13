@@ -1,6 +1,6 @@
 /*-
  * Copyright (c) 2001 Atsushi Onoe
- * Copyright (c) 2002-2008 Sam Leffler, Errno Consulting
+ * Copyright (c) 2002-2009 Sam Leffler, Errno Consulting
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211.c,v 1.58 2008/12/15 01:26:33 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211.c,v 1.59 2009/01/08 17:12:47 sam Exp $");
 
 /*
  * IEEE 802.11 generic handler
@@ -362,6 +362,21 @@ ieee80211_vap_setup(struct ieee80211com *ic, struct ieee80211vap *vap,
 		if (flags & IEEE80211_CLONE_WDSLEGACY)
 			vap->iv_flags_ext |= IEEE80211_FEXT_WDSLEGACY;
 		break;
+#ifdef IEEE80211_SUPPORT_TDMA
+	case IEEE80211_M_AHDEMO:
+		if (flags & IEEE80211_CLONE_TDMA) {
+			/* NB: checked before clone operation allowed */
+			KASSERT(ic->ic_caps & IEEE80211_C_TDMA,
+			    ("not TDMA capable, ic_caps 0x%x", ic->ic_caps));
+			/*
+			 * Propagate TDMA capability to mark vap; this
+			 * cannot be removed and is used to distinguish
+			 * regular ahdemo operation from ahdemo+tdma.
+			 */
+			vap->iv_caps |= IEEE80211_C_TDMA;
+		}
+		break;
+#endif
 	}
 	/* auto-enable s/w beacon miss support */
 	if (flags & IEEE80211_CLONE_NOBEACONS)

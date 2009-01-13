@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/msi.c,v 1.8 2008/11/26 19:25:13 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/msi.c,v 1.9 2009/01/12 19:17:35 jkim Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -51,6 +51,7 @@ __FBSDID("$FreeBSD: src/sys/amd64/amd64/msi.c,v 1.8 2008/11/26 19:25:13 jkim Exp
 #include <machine/frame.h>
 #include <machine/intr_machdep.h>
 #include <machine/apicvar.h>
+#include <machine/specialreg.h>
 #include <dev/pci/pcivar.h>
 
 /* Fields in address for Intel MSI messages. */
@@ -212,9 +213,18 @@ msi_init(void)
 {
 
 	/* Check if we have a supported CPU. */
-	if (!(cpu_vendor_id == CPU_VENDOR_INTEL ||
-	    cpu_vendor_id == CPU_VENDOR_AMD))
+	switch (cpu_vendor_id) {
+	case CPU_VENDOR_INTEL:
+	case CPU_VENDOR_AMD:
+		break;
+	case CPU_VENDOR_CENTAUR:
+		if (AMD64_CPU_FAMILY(cpu_id) == 0x6 &&
+		    AMD64_CPU_MODEL(cpu_id) >= 0xf)
+			break;
+		/* FALLTHROUGH */
+	default:
 		return;
+	}
 
 	msi_enabled = 1;
 	intr_register_pic(&msi_pic);

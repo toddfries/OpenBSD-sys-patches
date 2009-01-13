@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb2/controller/ohci2_pci.c,v 1.3 2008/12/23 17:36:25 thompsa Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb2/controller/ohci2_pci.c,v 1.4 2009/01/03 14:33:48 marius Exp $");
 
 /*
  * USB Open Host Controller driver.
@@ -210,6 +210,13 @@ ohci_pci_attach(device_t self)
 	sc->sc_dev = self;
 
 	pci_enable_busmaster(self);
+
+	/*
+	 * Some Sun PCIO-2 USB controllers have their intpin register
+	 * bogusly set to 0, although it should be 4.  Correct that.
+	 */
+	if (pci_get_devid(self) == 0x1103108e && pci_get_intpin(self) == 0)
+		pci_set_intpin(self, 4);
 
 	rid = PCI_CBMEM;
 	sc->sc_io_res = bus_alloc_resource_any(self, SYS_RES_MEMORY, &rid,

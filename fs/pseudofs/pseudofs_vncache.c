@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/pseudofs/pseudofs_vncache.c,v 1.44 2008/12/29 13:25:58 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/pseudofs/pseudofs_vncache.c,v 1.45 2009/01/09 22:06:48 marcus Exp $");
 
 #include "opt_pseudofs.h"
 
@@ -212,6 +212,7 @@ retry2:
 			if (vget(vp, LK_EXCLUSIVE | LK_INTERLOCK, curthread) == 0) {
 				++pfs_vncache_hits;
 				vgone(*vpp);
+				vput(*vpp);
 				*vpp = vp;
 				cache_purge(vp);
 				return (0);

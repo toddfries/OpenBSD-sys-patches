@@ -35,7 +35,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_mls/mac_mls.c,v 1.108 2008/10/28 13:44:11 trasz Exp $
+ * $FreeBSD: src/sys/security/mac_mls/mac_mls.c,v 1.110 2009/01/10 10:58:41 rwatson Exp $
  */
 
 /*
@@ -3162,25 +3162,5 @@ static struct mac_policy_ops mls_ops =
 	.mpo_vnode_setlabel_extattr = mls_vnode_setlabel_extattr,
 };
 
-#define	MLS_OBJECTS	(MPC_OBJECT_CRED |				\
-			 /* MPC_OBJECT_PROC | */			\
-			 MPC_OBJECT_VNODE |				\
-			 MPC_OBJECT_INPCB |				\
-			 MPC_OBJECT_SOCKET |				\
-			 MPC_OBJECT_DEVFS |				\
-			 MPC_OBJECT_MBUF |				\
-			 MPC_OBJECT_IPQ |				\
-			 MPC_OBJECT_IFNET |				\
-			 MPC_OBJECT_BPFDESC |				\
-			 MPC_OBJECT_PIPE |				\
-			 MPC_OBJECT_MOUNT |				\
-			 MPC_OBJECT_POSIXSEM |				\
-			 /* MPC_OBJECT_POSIXSHM | */			\
-			 MPC_OBJECT_SYSVMSG |				\
-			 MPC_OBJECT_SYSVMSQ |				\
-			 MPC_OBJECT_SYSVSEM |				\
-			 MPC_OBJECT_SYSVSHM |				\
-			 MPC_OBJECT_SYNCACHE)
-
 MAC_POLICY_SET(&mls_ops, mac_mls, "TrustedBSD MAC/MLS",
-    MPC_LOADTIME_FLAG_NOTLATE, &mls_slot, MLS_OBJECTS);
+    MPC_LOADTIME_FLAG_NOTLATE, &mls_slot);

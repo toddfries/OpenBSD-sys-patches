@@ -30,7 +30,7 @@
   POSSIBILITY OF SUCH DAMAGE.
 
 ******************************************************************************/
-/*$FreeBSD: src/sys/dev/e1000/if_igb.c,v 1.7 2008/11/27 02:18:43 jfv Exp $*/
+/*$FreeBSD: src/sys/dev/e1000/if_igb.c,v 1.8 2009/01/13 00:10:50 gnn Exp $*/
 
 #ifdef HAVE_KERNEL_OPTION_HEADERS
 #include "opt_device_polling.h"
@@ -279,7 +279,7 @@ TUNABLE_INT("hw.igb.enable_aim", &igb_enable_aim);
 static int igb_low_latency = IGB_LOW_LATENCY;
 TUNABLE_INT("hw.igb.low_latency", &igb_low_latency);
 static int igb_ave_latency = IGB_AVE_LATENCY;
-TUNABLE_INT("hw.igb.ave_latency", &igb_low_latency);
+TUNABLE_INT("hw.igb.ave_latency", &igb_ave_latency);
 static int igb_bulk_latency = IGB_BULK_LATENCY;
 TUNABLE_INT("hw.igb.bulk_latency", &igb_bulk_latency);
                 

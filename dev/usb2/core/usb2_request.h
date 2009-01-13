@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb2/core/usb2_request.h,v 1.2 2008/12/11 23:13:02 thompsa Exp $ */
+/* $FreeBSD: src/sys/dev/usb2/core/usb2_request.h,v 1.3 2009/01/04 00:12:01 alfred Exp $ */
 /*-
  * Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
  *
@@ -89,6 +89,8 @@ usb2_error_t usb2_req_set_report(struct usb2_device *udev, struct mtx *mtx,
 		    void *data, uint16_t len, uint8_t iface_index,
 		    uint8_t type, uint8_t id);
 usb2_error_t usb2_req_re_enumerate(struct usb2_device *udev, struct mtx *mtx);
+usb2_error_t usb2_req_clear_device_feature(struct usb2_device *udev, struct mtx *mtx, uint16_t sel);
+usb2_error_t usb2_req_set_device_feature(struct usb2_device *udev, struct mtx *mtx, uint16_t sel);
 
 #define	usb2_do_request(u,m,r,d) \
   usb2_do_request_flags(u,m,r,d,0,NULL,USB_DEFAULT_TIMEOUT)

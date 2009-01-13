@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_sa.c,v 1.114 2008/09/27 08:51:18 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_sa.c,v 1.115 2009/01/10 17:22:49 trasz Exp $");
 
 #include <sys/param.h>
 #include <sys/queue.h>
@@ -1377,17 +1377,16 @@ sacleanup(struct cam_periph *periph)
 
 	softc = (struct sa_softc *)periph->softc;
 
+	xpt_print(periph->path, "removing device entry\n");
 	devstat_remove_entry(softc->device_stats);
-
+	cam_periph_unlock(periph);
 	destroy_dev(softc->devs.ctl_dev);
-
 	for (i = 0; i < SA_NUM_MODES; i++) {
 		destroy_dev(softc->devs.mode_devs[i].r_dev);
 		destroy_dev(softc->devs.mode_devs[i].nr_dev);
 		destroy_dev(softc->devs.mode_devs[i].er_dev);
 	}
-
-	xpt_print(periph->path, "removing device entry\n");
+	cam_periph_lock(periph);
 	free(softc, M_SCSISA);
 }
 

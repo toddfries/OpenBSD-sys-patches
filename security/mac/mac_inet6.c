@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/security/mac/mac_inet6.c,v 1.2 2008/10/26 22:45:18 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/security/mac/mac_inet6.c,v 1.3 2009/01/10 09:17:16 rwatson Exp $");
 
 #include "opt_mac.h"
 
@@ -80,7 +80,7 @@ int
 mac_ip6q_init(struct ip6q *q6, int flag)
 {
 
-	if (mac_labeled & MPC_OBJECT_IPQ) {
+	if (mac_labeled & MPC_OBJECT_IP6Q) {
 		q6->ip6q_label = mac_ip6q_label_alloc(flag);
 		if (q6->ip6q_label == NULL)
 			return (ENOMEM);

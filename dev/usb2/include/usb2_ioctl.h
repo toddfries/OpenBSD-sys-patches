@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb2/include/usb2_ioctl.h,v 1.2 2008/11/19 08:56:35 alfred Exp $ */
+/* $FreeBSD: src/sys/dev/usb2/include/usb2_ioctl.h,v 1.3 2009/01/04 00:12:01 alfred Exp $ */
 /*-
  * Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
  * Copyright (c) 1998 The NetBSD Foundation, Inc. All rights reserved.
@@ -38,13 +38,6 @@
 
 #define	USB_DEVICE_NAME "usb"
 #define	USB_GENERIC_NAME "ugen"
-
-/* definition of USB power mode */
-#define	USB_POWER_MODE_OFF 0		/* turn off device */
-#define	USB_POWER_MODE_ON 1		/* always on */
-#define	USB_POWER_MODE_SAVE 2		/* automatic suspend and resume */
-#define	USB_POWER_MODE_SUSPEND 3	/* force suspend */
-#define	USB_POWER_MODE_RESUME 4		/* force resume */
 
 struct usb2_read_dir {
 	void   *urd_data;

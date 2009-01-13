@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2005-2008 Sam Leffler, Errno Consulting
+ * Copyright (c) 2005-2009 Sam Leffler, Errno Consulting
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -22,7 +22,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net80211/ieee80211_scan.h,v 1.4 2008/04/20 20:35:44 sam Exp $
+ * $FreeBSD: src/sys/net80211/ieee80211_scan.h,v 1.5 2009/01/08 17:12:47 sam Exp $
  */
 #ifndef _NET80211_IEEE80211_SCAN_H_
 #define _NET80211_IEEE80211_SCAN_H_
@@ -209,6 +209,7 @@ struct ieee80211_scanparams {
 	uint8_t		*htcap;
 	uint8_t		*htinfo;
 	uint8_t		*ath;
+	uint8_t		*tdma;
 };
 
 /*

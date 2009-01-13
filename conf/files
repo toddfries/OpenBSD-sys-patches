@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/files,v 1.1360 2008/12/31 13:56:31 rwatson Exp $
+# $FreeBSD: src/sys/conf/files,v 1.1363 2009/01/08 17:12:47 sam Exp $
 #
 # The long compile-with and dependency lines are required because of
 # limitations in config: backslash-newline doesn't work in strings, and
@@ -75,6 +75,11 @@ pccarddevs.h			standard				   \
 	compile-with	"${AWK} -f $S/tools/pccarddevs2h.awk $S/dev/pccard/pccarddevs" \
 	no-obj no-implicit-rule before-depend				   \
 	clean		"pccarddevs.h"
+teken_state.h		optional sc					   \
+	dependency	"$S/dev/syscons/teken/gensequences $S/dev/syscons/teken/sequences" \
+	compile-with	"${AWK} -f $S/dev/syscons/teken/gensequences $S/dev/syscons/teken/sequences > teken_state.h" \
+	no-obj no-implicit-rule before-depend				   \
+	clean		"teken_state.h"
 usbdevs.h			optional usb				   \
 	dependency	"$S/tools/usbdevs2h.awk $S/dev/usb/usbdevs" \
 	compile-with	"${AWK} -f $S/tools/usbdevs2h.awk $S/dev/usb/usbdevs -h" \
@@ -1332,7 +1337,6 @@ dev/sound/isa/sbc.c		optional snd_sbc isa
 dev/sound/isa/sndbuf_dma.c	optional sound isa
 dev/sound/pci/als4000.c		optional snd_als4000 pci
 dev/sound/pci/atiixp.c		optional snd_atiixp pci
-#dev/sound/pci/au88x0.c		optional snd_au88x0 pci
 dev/sound/pci/cmi.c		optional snd_cmi pci
 dev/sound/pci/cs4281.c		optional snd_cs4281 pci
 dev/sound/pci/csa.c		optional snd_csa pci \
@@ -1424,7 +1428,6 @@ dev/syscons/logo/logo_saver.c	optional logo_saver
 dev/syscons/rain/rain_saver.c	optional rain_saver
 dev/syscons/schistory.c		optional sc
 dev/syscons/scmouse.c		optional sc
-dev/syscons/scterm-dumb.c	optional sc
 dev/syscons/scterm.c		optional sc
 dev/syscons/scvidctl.c		optional sc
 dev/syscons/snake/snake_saver.c	optional snake_saver
@@ -2229,6 +2232,7 @@ net80211/ieee80211_rssadapt.c	optional wlan_rssadapt
 net80211/ieee80211_scan.c	optional wlan
 net80211/ieee80211_scan_sta.c	optional wlan
 net80211/ieee80211_sta.c	optional wlan
+net80211/ieee80211_tdma.c	optional wlan
 net80211/ieee80211_wds.c	optional wlan
 net80211/ieee80211_xauth.c	optional wlan_xauth
 netatalk/aarp.c			optional netatalk

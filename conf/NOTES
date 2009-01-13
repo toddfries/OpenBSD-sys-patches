@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/NOTES,v 1.1517 2008/12/15 06:10:57 qingli Exp $
+# $FreeBSD: src/sys/conf/NOTES,v 1.1521 2009/01/11 11:36:00 maxim Exp $
 #
 # NOTES -- Lines that can be cut/pasted into kernel and hints configs.
 #
@@ -632,6 +632,14 @@ options 	ALTQ_CDNR	# Traffic conditioner
 options 	ALTQ_PRIQ	# Priority Queueing
 options 	ALTQ_NOPCC	# Required if the TSC is unusable
 options 	ALTQ_DEBUG
+
+# IP optional behaviour.
+# IP_NONLOCALBIND disables the check that bind() usually makes that the
+# address is one that is assigned to an interface on this machine.
+# It allows transparent proxies to pretend to be other machines.
+# How the packet GET to that machine is a problem solved elsewhere,
+# smart routers, ipfw fwd, etc.
+options        IP_NONLOCALBIND		# Allow impersonation for proxies.
 
 # netgraph(4). Enable the base netgraph code with the NETGRAPH option.
 # Individual node types can be enabled with the corresponding option
@@ -1984,8 +1992,6 @@ device		sound
 # snd_ad1816:		Analog Devices AD1816 ISA PnP/non-PnP.
 # snd_als4000:		Avance Logic ALS4000 PCI.
 # snd_atiixp:		ATI IXP 200/300/400 PCI.
-# snd_au88x0		Aureal Vortex 1/2/Advantage PCI. This driver
-#			lacks support for playback and recording.
 # snd_audiocs:		Crystal Semiconductor CS4231 SBus/EBus. Only
 #			for sparc64.
 # snd_cmi:		CMedia CMI8338/CMI8738 PCI.
@@ -2004,7 +2010,7 @@ device		sound
 # snd_gusc:		Gravis UltraSound ISA PnP/non-PnP.
 # snd_hda:		Intel High Definition Audio (Controller) and
 #			compatible.
-# snd_ich:		Intel ICH PCI and some more audio controllers
+# snd_ich:		Intel ICH AC'97 and some more audio controllers
 #			embedded in a chipset, for example nVidia
 #			nForce controllers.
 # snd_maestro:		ESS Technology Maestro-1/2x PCI.
@@ -2029,7 +2035,6 @@ device		sound
 device		snd_ad1816
 device		snd_als4000
 device		snd_atiixp
-#device		snd_au88x0
 #device		snd_audiocs
 device		snd_cmi
 device		snd_cs4281

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iicbus/if_ic.c,v 1.27 2008/08/04 21:14:24 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iicbus/if_ic.c,v 1.28 2009/01/06 17:23:37 nwhitehorn Exp $");
 
 /*
  * I2C bus IP driver
@@ -153,7 +153,7 @@ ic_alloc_buffers(struct ic_softc *sc, int mtu)
 static int
 icprobe(device_t dev)
 {
-	return (0);
+	return (BUS_PROBE_NOWILDCARD);
 }
 
 /*

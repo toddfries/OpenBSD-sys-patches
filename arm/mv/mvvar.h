@@ -34,7 +34,7 @@
  *
  * from: FreeBSD: //depot/projects/arm/src/sys/arm/xscale/pxa2x0/pxa2x0var.h, rev 1
  *
- * $FreeBSD: src/sys/arm/mv/mvvar.h,v 1.3 2008/11/19 11:57:16 raj Exp $
+ * $FreeBSD: src/sys/arm/mv/mvvar.h,v 1.5 2009/01/09 10:20:51 raj Exp $
  */
 
 #ifndef _MVVAR_H_
@@ -63,7 +63,11 @@ struct obio_device {
 	struct resource_list od_resources;
 };
 
-typedef int (*obio_get_irq_t)(u_int bus, u_int slot, u_int func, u_int pin);
+struct obio_pci_irq_map {
+	int		opim_slot;
+	int		opim_pin;
+	int		opim_irq;
+};
 
 struct obio_pci {
 	int		op_type;
@@ -82,8 +86,14 @@ struct obio_pci {
 	int		op_mem_win_target;
 	int		op_mem_win_attr;
 
-	obio_get_irq_t	op_get_irq;	/* IRQ Mapping callback */
-	int		op_irq;		/* used if callback is NULL */
+	const struct obio_pci_irq_map	*op_pci_irq_map;
+	int		op_irq;		/* used if IRQ map table is NULL */
+};
+
+struct gpio_config {
+	int		gc_gpio;	/* GPIO number */
+	uint32_t	gc_flags;	/* GPIO flags */
+	int		gc_output;	/* GPIO output value */
 };
 
 struct decode_win {
@@ -95,12 +105,15 @@ struct decode_win {
 };
 
 extern const struct obio_pci mv_pci_info[];
+extern const struct gpio_config mv_gpio_config[];
 extern bus_space_tag_t obio_tag;
 extern struct obio_device obio_devices[];
 extern const struct decode_win *cpu_wins;
 extern const struct decode_win *idma_wins;
+extern const struct decode_win *xor_wins;
 extern int cpu_wins_no;
 extern int idma_wins_no;
+extern int xor_wins_no;
 
 /* Function prototypes */
 int mv_gpio_setup_intrhandler(const char *name, driver_filter_t *filt,
@@ -112,6 +125,7 @@ void mv_gpio_out(uint32_t pin, uint8_t val, uint8_t enable);
 uint8_t mv_gpio_in(uint32_t pin);
 
 int platform_pmap_init(void);
+void platform_mpp_init(void);
 int soc_decode_win(void);
 void soc_id(uint32_t *dev, uint32_t *rev);
 void soc_identify(void);
@@ -126,6 +140,10 @@ int win_cpu_can_remap(int);
 void decode_win_idma_dump(void);
 void decode_win_idma_setup(void);
 int decode_win_idma_valid(void);
+
+void decode_win_xor_dump(void);
+void decode_win_xor_setup(void);
+int decode_win_xor_valid(void);
 
 int ddr_is_active(int i);
 uint32_t ddr_base(int i);

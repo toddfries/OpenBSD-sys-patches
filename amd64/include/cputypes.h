@@ -24,7 +24,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/amd64/include/cputypes.h,v 1.20 2008/11/26 19:25:13 jkim Exp $
+ * $FreeBSD: src/sys/amd64/include/cputypes.h,v 1.21 2009/01/05 21:51:49 jkim Exp $
  */
 
 #ifndef _MACHINE_CPUTYPES_H_
@@ -47,7 +47,9 @@
  * Vendors of processor.
  */
 #define	CPU_VENDOR_AMD		0x1022		/* AMD */
+#define	CPU_VENDOR_IDT		0x111d		/* Centaur/IDT/VIA */
 #define	CPU_VENDOR_INTEL	0x8086		/* Intel */
+#define	CPU_VENDOR_CENTAUR	CPU_VENDOR_IDT
 
 #ifndef LOCORE
 extern int	cpu;

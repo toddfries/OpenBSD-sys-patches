@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb2/controller/musb2_otg.c,v 1.6 2008/12/23 19:59:21 thompsa Exp $ */
+/* $FreeBSD: src/sys/dev/usb2/controller/musb2_otg.c,v 1.7 2009/01/04 00:12:01 alfred Exp $ */
 /*-
  * Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
  *
@@ -233,12 +233,6 @@ musbotg_wakeup_peer(struct usb2_xfer *xfer)
 	temp = MUSB2_READ_1(sc, MUSB2_REG_POWER);
 	temp &= ~MUSB2_MASK_RESUME;
 	MUSB2_WRITE_1(sc, MUSB2_REG_POWER, temp);
-}
-
-static void
-musbotg_rem_wakeup_set(struct usb2_device *udev, uint8_t is_on)
-{
-	DPRINTFN(4, "is_on=%u\n", is_on);
 }
 
 static void
@@ -2891,5 +2885,4 @@ struct usb2_bus_methods musbotg_bus_methods =
 	.set_stall = &musbotg_set_stall,
 	.clear_stall = &musbotg_clear_stall,
 	.vbus_interrupt = &musbotg_vbus_interrupt,
-	.rem_wakeup_set = &musbotg_rem_wakeup_set,
 };

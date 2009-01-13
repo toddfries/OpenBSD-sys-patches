@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/dev/usb2/controller/uss820dci.c,v 1.5 2008/12/23 19:59:21 thompsa Exp $ */
+/* $FreeBSD: src/sys/dev/usb2/controller/uss820dci.c,v 1.6 2009/01/04 00:12:01 alfred Exp $ */
 /*-
  * Copyright (c) 2008 Hans Petter Selasky <hselasky@freebsd.org>
  * All rights reserved.
@@ -220,29 +220,6 @@ uss820dci_wakeup_peer(struct uss820dci_softc *sc)
 		return;
 	}
 	DPRINTFN(0, "not supported\n");
-}
-
-static void
-uss820dci_rem_wakeup_set(struct usb2_device *udev, uint8_t is_on)
-{
-	struct uss820dci_softc *sc;
-	uint8_t temp;
-
-	DPRINTFN(5, "is_on=%u\n", is_on);
-
-	USB_BUS_LOCK_ASSERT(udev->bus, MA_OWNED);
-
-	sc = USS820_DCI_BUS2SC(udev->bus);
-
-	temp = USS820_READ_1(sc, USS820_SCR);
-
-	if (is_on) {
-		temp |= USS820_SCR_RWUPE;
-	} else {
-		temp &= ~USS820_SCR_RWUPE;
-	}
-
-	USS820_WRITE_1(sc, USS820_SCR, temp);
 }
 
 static void
@@ -1375,6 +1352,7 @@ uss820dci_init(struct uss820dci_softc *sc)
 	USS820_WRITE_1(sc, USS820_SCR,
 	    USS820_SCR_T_IRQ |
 	    USS820_SCR_IE_RESET |
+	/* USS820_SCR_RWUPE | */
 	    USS820_SCR_IE_SUSP |
 	    USS820_SCR_IRQPOL);
 
@@ -2518,5 +2496,4 @@ struct usb2_bus_methods uss820dci_bus_methods =
 	.get_hw_ep_profile = &uss820dci_get_hw_ep_profile,
 	.set_stall = &uss820dci_set_stall,
 	.clear_stall = &uss820dci_clear_stall,
-	.rem_wakeup_set = &uss820dci_rem_wakeup_set,
 };

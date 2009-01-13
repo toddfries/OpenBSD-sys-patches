@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)route.h	8.4 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/net/route.h,v 1.78 2008/12/26 19:45:24 qingli Exp $
+ * $FreeBSD: src/sys/net/route.h,v 1.79 2009/01/12 11:24:32 qingli Exp $
  */
 
 #ifndef _NET_ROUTE_H_
@@ -173,7 +173,8 @@ struct ortentry {
 /*			0x80		   unused, was RTF_DELCLONE */
 /*			0x100		   unused, was RTF_CLONING */
 #define RTF_XRESOLVE	0x200		/* external daemon resolves name */
-/*			0x400		   unused, was RTF_LLINFO */
+#define RTF_LLINFO	0x400		/* DEPRECATED - exists ONLY for backward 
+					   compatibility */
 #define RTF_LLDATA	0x400		/* used by apps to add/del L2 entries */
 #define RTF_STATIC	0x800		/* manually added */
 #define RTF_BLACKHOLE	0x1000		/* just discard pkts (during updates) */

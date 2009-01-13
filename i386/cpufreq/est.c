@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/cpufreq/est.c,v 1.22 2008/11/26 19:25:13 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/cpufreq/est.c,v 1.23 2009/01/05 21:51:49 jkim Exp $");
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -54,10 +54,6 @@ __FBSDID("$FreeBSD: src/sys/i386/cpufreq/est.c,v 1.22 2008/11/26 19:25:13 jkim E
 /* Register and bit for enabling SpeedStep. */
 #define MSR_MISC_ENABLE		0x1a0
 #define MSR_SS_ENABLE		(1<<16)
-
-#ifndef CPU_VENDOR_CENTAUR
-#define	CPU_VENDOR_CENTAUR	0x111d
-#endif
 
 /* Frequency and MSR control values. */
 typedef struct {

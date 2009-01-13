@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iicbus/ad7418.c,v 1.3 2008/08/13 09:20:52 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iicbus/ad7418.c,v 1.4 2009/01/06 17:23:37 nwhitehorn Exp $");
 /*
  * Analog Devices AD7418 chip sitting on the I2C bus.
  */
@@ -82,7 +82,7 @@ ad7418_probe(device_t dev)
 {
 	/* XXX really probe? */
 	device_set_desc(dev, "Analog Devices AD7418 ADC");
-	return (0);
+	return (BUS_PROBE_NOWILDCARD);
 }
 
 static int

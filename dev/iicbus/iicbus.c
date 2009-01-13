@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iicbus/iicbus.c,v 1.25 2008/08/04 21:03:06 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iicbus/iicbus.c,v 1.26 2009/01/06 17:23:37 nwhitehorn Exp $");
 
 /*
  * Autoconfiguration and support routines for the Philips serial I2C bus
@@ -53,7 +53,9 @@ iicbus_probe(device_t dev)
 {
 
 	device_set_desc(dev, "Philips I2C bus");
-	return (0);
+
+	/* Allow other subclasses to override this driver. */
+	return (-1000);
 }
 
 #if SCAN_IICBUS

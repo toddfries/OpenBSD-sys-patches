@@ -36,7 +36,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_partition/mac_partition.c,v 1.29 2008/10/28 11:33:06 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac_partition/mac_partition.c,v 1.30 2009/01/10 10:58:41 rwatson Exp $
  */
 
 /*
@@ -316,4 +316,4 @@ static struct mac_policy_ops partition_ops =
 };
 
 MAC_POLICY_SET(&partition_ops, mac_partition, "TrustedBSD MAC/Partition",
-    MPC_LOADTIME_FLAG_UNLOADOK, &partition_slot, MPC_OBJECT_CRED);
+    MPC_LOADTIME_FLAG_UNLOADOK, &partition_slot);

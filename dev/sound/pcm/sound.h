@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/sound/pcm/sound.h,v 1.79 2008/08/19 19:45:08 ed Exp $
+ * $FreeBSD: src/sys/dev/sound/pcm/sound.h,v 1.80 2009/01/10 18:19:22 mav Exp $
  */
 
 /*
@@ -601,6 +601,7 @@ struct snddev_info {
 };
 
 void	sound_oss_sysinfo(oss_sysinfo *);
+int	sound_oss_card_info(oss_card_info *);
 
 #ifdef	PCM_DEBUG_MTX
 #define	pcm_lock(d) mtx_lock(((struct snddev_info *)(d))->lock)

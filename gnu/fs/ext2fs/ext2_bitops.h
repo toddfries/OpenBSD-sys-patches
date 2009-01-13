@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/gnu/fs/ext2fs/ext2_bitops.h,v 1.3 2006/04/13 19:37:32 cracauer Exp $
+ * $FreeBSD: src/sys/gnu/fs/ext2fs/ext2_bitops.h,v 1.4 2009/01/04 15:56:49 kib Exp $
  */
 
 #ifndef _SYS_GNU_EXT2FS_EXT2_BITOPS_H_
@@ -84,7 +84,7 @@ find_next_zero_bit(void *data, size_t sz, size_t ofs)
 		mask = ~0U << (ofs & 31);
 		bit = *p | ~mask;
 		if (bit != ~0U)
-			return (ffs(~bit) + ofs - 1);
+			return (ffs(~bit) + (ofs & ~31U) - 1);
 		p++;
 		ofs = (ofs + 31U) & ~31U;
 	}

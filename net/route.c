@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)route.c	8.3.1.1 (Berkeley) 2/23/95
- * $FreeBSD: src/sys/net/route.c,v 1.149 2008/12/16 04:41:39 kmacy Exp $
+ * $FreeBSD: src/sys/net/route.c,v 1.150 2009/01/02 22:51:30 qingli Exp $
  */
 /************************************************************************
  * Note: In this file a 'fib' is a "forwarding information base"	*
@@ -350,7 +350,7 @@ rtfree(struct rtentry *rt)
 	 */
 	RT_REMREF(rt);
 	if (rt->rt_refcnt > 0) {
-		log(LOG_DEBUG, "%s: %p has %d refs\t", __func__, rt, rt->rt_refcnt);
+		log(LOG_DEBUG, "%s: %p has %d refs\n", __func__, rt, rt->rt_refcnt);
 		goto done;
 	}
 

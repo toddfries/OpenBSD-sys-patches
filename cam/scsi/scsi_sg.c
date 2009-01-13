@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_sg.c,v 1.11 2008/12/21 06:20:11 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_sg.c,v 1.12 2009/01/10 17:22:49 trasz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -200,11 +200,12 @@ sgcleanup(struct cam_periph *periph)
 	struct sg_softc *softc;
 
 	softc = (struct sg_softc *)periph->softc;
-	devstat_remove_entry(softc->device_stats);
-	destroy_dev(softc->dev);
-	if (bootverbose) {
+	if (bootverbose)
 		xpt_print(periph->path, "removing device entry\n");
-	}
+	devstat_remove_entry(softc->device_stats);
+	cam_periph_unlock(periph);
+	destroy_dev(softc->dev);
+	cam_periph_lock(periph);
 	free(softc, M_DEVBUF);
 }
 

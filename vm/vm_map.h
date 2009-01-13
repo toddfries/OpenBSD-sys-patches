@@ -57,7 +57,7 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  *
- * $FreeBSD: src/sys/vm/vm_map.h,v 1.125 2008/12/31 05:44:05 alc Exp $
+ * $FreeBSD: src/sys/vm/vm_map.h,v 1.126 2009/01/01 00:31:46 alc Exp $
  */
 
 /*
@@ -269,6 +269,7 @@ int _vm_map_trylock(vm_map_t map, const char *file, int line);
 int _vm_map_trylock_read(vm_map_t map, const char *file, int line);
 int _vm_map_lock_upgrade(vm_map_t map, const char *file, int line);
 void _vm_map_lock_downgrade(vm_map_t map, const char *file, int line);
+int vm_map_locked(vm_map_t map);
 int vm_map_unlock_and_wait(vm_map_t map, int timo);
 void vm_map_wakeup(vm_map_t map);
 

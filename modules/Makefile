@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/Makefile,v 1.598 2008/12/14 22:26:57 sam Exp $
+# $FreeBSD: src/sys/modules/Makefile,v 1.599 2009/01/12 19:23:46 jkim Exp $
 
 .include <bsd.own.mk>
 
@@ -552,6 +552,11 @@ _nvram=		nvram
 _nxge=		nxge
 .if ${MK_CDDL} != "no" || defined(ALL_MODULES)
 _opensolaris=	opensolaris
+.endif
+.if ${MK_CRYPT} != "no" || defined(ALL_MODULES)
+.if exists(${.CURDIR}/../crypto/via)
+_padlock=	padlock
+.endif
 .endif
 _pccard=	pccard
 _rdma=		rdma	

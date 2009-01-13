@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/atapi-cam.c,v 1.57 2008/04/17 12:29:35 sos Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/atapi-cam.c,v 1.58 2009/01/08 17:26:51 trasz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -254,6 +254,10 @@ atapi_cam_detach(device_t dev)
     struct atapi_xpt_softc *scp = device_get_softc(dev);
 
     mtx_lock(&scp->state_lock);
+    if (xpt_sim_opened(scp->sim)) {
+	    mtx_unlock(&scp->state_lock);
+	    return (EBUSY);
+    }
     xpt_freeze_simq(scp->sim, 1 /*count*/);
     scp->flags |= DETACHING;
     mtx_unlock(&scp->state_lock);

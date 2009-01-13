@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_jail.c,v 1.90 2008/12/30 20:39:47 pho Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_jail.c,v 1.91 2009/01/04 12:18:18 bz Exp $");
 
 #include "opt_ddb.h"
 #include "opt_inet.h"
@@ -329,11 +329,9 @@ jail_copyin_ips(struct jail *j)
 e_free_ip:
 #ifdef INET6
 	free(ip6, M_PRISON);
-	j->ip6 = NULL;
 #endif
 #ifdef INET
 	free(ip4, M_PRISON);
-	j->ip4 = NULL;
 #endif
 	return (error);
 }

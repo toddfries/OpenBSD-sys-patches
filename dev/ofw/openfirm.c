@@ -56,7 +56,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ofw/openfirm.c,v 1.22 2008/12/20 00:33:10 nwhitehorn Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ofw/openfirm.c,v 1.23 2009/01/03 19:38:47 nwhitehorn Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -217,6 +217,23 @@ ssize_t
 OF_getprop(phandle_t package, const char *propname, void *buf, size_t buflen)
 {
 	return (OFW_GETPROP(ofw_obj, package, propname, buf, buflen));
+}
+
+/*
+ * Resursively search the node and its parent for the given property, working
+ * downward from the node to the device tree root.  Returns the value of the
+ * first match.
+ */
+ssize_t
+OF_searchprop(phandle_t node, char *propname, void *buf, size_t len)
+{
+	ssize_t rv;
+
+	for (; node != 0; node = OF_parent(node)) {
+		if ((rv = OF_getprop(node, propname, buf, len)) != -1)
+			return (rv);
+	}
+	return (-1);
 }
 
 /*

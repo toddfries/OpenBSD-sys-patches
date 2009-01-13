@@ -1,5 +1,5 @@
 /*	$NetBSD: pcmciavar.h,v 1.12 2000/02/08 12:51:31 enami Exp $	*/
-/* $FreeBSD: src/sys/dev/pccard/pccardvar.h,v 1.62 2008/08/06 07:34:35 imp Exp $ */
+/* $FreeBSD: src/sys/dev/pccard/pccardvar.h,v 1.63 2009/01/05 20:58:41 imp Exp $ */
 
 /*-
  * Copyright (c) 1997 Marc Horowitz.  All rights reserved.
@@ -68,6 +68,10 @@ struct pccard_mem_handle {
 	bus_addr_t	cardaddr;	/* Absolute address on card */
 	int		kind;
 };
+
+/* Bits for kind */
+#define	PCCARD_MEM_16BIT	1	/* 1 -> 16bit 0 -> 8bit */
+#define PCCARD_MEM_ATTR		2	/* 1 -> attribute mem 0 -> common */
 
 #define	PCCARD_WIDTH_AUTO	0
 #define	PCCARD_WIDTH_IO8	1

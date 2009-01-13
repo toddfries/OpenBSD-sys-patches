@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_ses.c,v 1.39 2008/09/27 08:51:18 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_ses.c,v 1.40 2009/01/10 17:22:49 trasz Exp $");
 
 #include <sys/param.h>
 #include <sys/queue.h>
@@ -227,9 +227,10 @@ sescleanup(struct cam_periph *periph)
 
 	softc = (struct ses_softc *)periph->softc;
 
-	destroy_dev(softc->ses_dev);
-
 	xpt_print(periph->path, "removing device entry\n");
+	cam_periph_unlock(periph);
+	destroy_dev(softc->ses_dev);
+	cam_periph_lock(periph);
 	free(softc, M_SCSISES);
 }
 

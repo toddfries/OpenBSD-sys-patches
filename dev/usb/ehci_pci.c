@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/usb/ehci_pci.c,v 1.37 2008/12/20 03:02:32 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/usb/ehci_pci.c,v 1.38 2009/01/06 09:03:02 trasz Exp $");
 
 /*
  * USB Enhanced Host Controller Driver, a.k.a. USB 2.0 controller.
@@ -313,6 +313,14 @@ ehci_pci_attach(device_t self)
 		if (pci_get_devid(self) == PCI_EHCI_DEVICEID_CS5536) {
 			sc->sc_bus.usbrev = USBREV_2_0;
 			device_printf(self, "Quirk for CS5536 USB 2.0 enabled\n");
+			break;
+		}
+
+		/*
+		 * Quirk for Parallels Desktop 4.0.
+		 */
+		if (pci_get_devid(self) == PCI_EHCI_DEVICEID_ICH6) {
+			sc->sc_bus.usbrev = USBREV_2_0;
 			break;
 		}
 		sc->sc_bus.usbrev = USBREV_UNKNOWN;

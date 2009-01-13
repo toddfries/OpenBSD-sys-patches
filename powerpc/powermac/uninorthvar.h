@@ -22,7 +22,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/powermac/uninorthvar.h,v 1.6 2008/12/15 15:31:10 nwhitehorn Exp $
+ * $FreeBSD: src/sys/powerpc/powermac/uninorthvar.h,v 1.7 2009/01/03 19:38:47 nwhitehorn Exp $
  */
 
 #ifndef	_POWERPC_POWERMAC_UNINORTHVAR_H_
@@ -64,7 +64,6 @@ struct uninorth_softc {
 	struct ofw_bus_iinfo	sc_pci_iinfo;
 
 	int			sc_u3;
-	int			sc_icells;
 };
 
 struct unin_chip_softc {

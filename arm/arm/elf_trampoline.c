@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/elf_trampoline.c,v 1.22 2008/10/13 20:07:13 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/elf_trampoline.c,v 1.23 2009/01/09 10:45:04 raj Exp $");
 #include <machine/asm.h>
 #include <sys/param.h>
 #include <sys/elf32.h>
@@ -74,7 +74,7 @@ void __startC(void);
 #ifdef CPU_XSCALE_81342
 #define cpu_l2cache_wbinv_all	xscalec3_l2cache_purge
 #elif defined(SOC_MV_KIRKWOOD) || defined(SOC_MV_DISCOVERY)
-#define cpu_l2cache_wbinv_all	feroceon_l2cache_wbinv_all
+#define cpu_l2cache_wbinv_all	sheeva_l2cache_wbinv_all
 #else
 #define cpu_l2cache_wbinv_all()	
 #endif

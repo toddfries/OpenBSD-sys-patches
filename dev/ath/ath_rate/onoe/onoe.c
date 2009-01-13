@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ath/ath_rate/onoe/onoe.c,v 1.19 2008/12/01 16:53:01 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ath/ath_rate/onoe/onoe.c,v 1.20 2009/01/06 01:36:36 sam Exp $");
 
 /*
  * Atsushi Onoe's rate control algorithm.
@@ -39,7 +39,6 @@ __FBSDID("$FreeBSD: src/sys/dev/ath/ath_rate/onoe/onoe.c,v 1.19 2008/12/01 16:53
 #include <sys/param.h>
 #include <sys/systm.h> 
 #include <sys/sysctl.h>
-#include <sys/module.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
@@ -403,29 +402,3 @@ ath_rate_detach(struct ath_ratectrl *arc)
 
 	free(osc, M_DEVBUF);
 }
-
-/*
- * Module glue.
- */
-static int
-onoe_modevent(module_t mod, int type, void *unused)
-{
-	switch (type) {
-	case MOD_LOAD:
-		if (bootverbose)
-			printf("ath_rate: <Atsushi Onoe's rate control algorithm>\n");
-		return 0;
-	case MOD_UNLOAD:
-		return 0;
-	}
-	return EINVAL;
-}
-
-static moduledata_t onoe_mod = {
-	"ath_rate",
-	onoe_modevent,
-	0
-};
-DECLARE_MODULE(ath_rate, onoe_mod, SI_SUB_DRIVERS, SI_ORDER_FIRST);
-MODULE_VERSION(ath_rate, 1);
-MODULE_DEPEND(ath_rate, wlan, 1, 1, 1);
