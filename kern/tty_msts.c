@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_msts.c,v 1.9 2009/01/01 02:10:54 stevesk Exp $ */
+/*	$OpenBSD: tty_msts.c,v 1.12 2009/01/12 16:45:38 stevesk Exp $ */
 
 /*
  * Copyright (c) 2008 Marc Balmer <mbalmer@openbsd.org>
@@ -217,7 +217,7 @@ msts_scan(struct msts *np, struct tty *tp)
 	char *fld[MAXFLDS], *cs;
 
 	/* split into fields */
-	fld[fldcnt++] = &np->cbuf[0];	/* message type */
+	fld[fldcnt++] = &np->cbuf[0];
 	for (cs = NULL, n = 0; n < np->pos && cs == NULL; n++) {
 		switch (np->cbuf[n]) {
 		case 3:		/* ASCII <ETX> */
@@ -229,8 +229,8 @@ msts_scan(struct msts *np, struct tty *tp)
 				np->cbuf[n] = '\0';
 				fld[fldcnt++] = &np->cbuf[n + 1];
 			} else {
-				DPRINTF(("nr of fields in %s sentence exceeds "
-				    "maximum of %d\n", fld[0], MAXFLDS));
+				DPRINTF(("nr of fields in sentence exceeds "
+				    "maximum of %d\n", MAXFLDS));
 				return;
 			}
 			break;
@@ -273,7 +273,6 @@ msts_decode(struct msts *np, struct tty *tp, char *fld[], int fldcnt)
 		np->time.status = SENSOR_S_OK;
 		timeout_add_sec(&np->msts_tout, TRUSTTIME);
 	}
-	np->gapno = 0;
 #endif
 
 	np->time.value = np->ts.tv_sec * 1000000000LL +
@@ -309,7 +308,7 @@ msts_decode(struct msts *np, struct tty *tp, char *fld[], int fldcnt)
 }
 
 /*
- * Convert date field from MSTS to nanoseconds since midnight.
+ * Convert date field from MSTS to nanoseconds since the epoch.
  * The string must be of the form D:DD.MM.YY .
  * Return 0 on success, -1 if illegal characters are encountered.
  */
