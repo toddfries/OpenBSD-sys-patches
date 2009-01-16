@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsock.c,v 1.79 2008/12/12 21:52:04 claudio Exp $	*/
+/*	$OpenBSD: rtsock.c,v 1.81 2009/01/08 12:47:45 michele Exp $	*/
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -183,6 +183,10 @@ route_output(struct mbuf *m, ...)
 	struct socket		*so;
 	struct rawcb		*rp = NULL;
 	struct sockaddr_rtlabel	 sa_rt;
+#ifdef MPLS
+	struct sockaddr_mpls	 sa_mpls;
+	struct sockaddr_mpls	*psa_mpls;
+#endif
 	const char		*label;
 	va_list			 ap;
 	u_int			 tableid;
@@ -255,7 +259,7 @@ route_output(struct mbuf *m, ...)
 		}
 	}
 
-	/* make sure that kernel only bits are not set */
+	/* make sure that kernel-only bits are not set */
 	rtm->rtm_priority &= RTP_MASK;
 
 	if (rtm->rtm_priority != 0) {
@@ -270,6 +274,9 @@ route_output(struct mbuf *m, ...)
 		prio = RTP_STATIC;
 	else
 		prio = RTP_DEFAULT;
+
+	/* write back the priority the kernel used */
+	 rtm->rtm_priority = prio;
 
 	bzero(&info, sizeof(info));
 	info.rti_addrs = rtm->rtm_addrs;
@@ -418,7 +425,16 @@ report:
 				info.rti_info[RTAX_LABEL] =
 				    (struct sockaddr *)&sa_rt;
 			}
-
+#ifdef MPLS
+			if (rt->rt_mpls) {
+				bzero(&sa_mpls, sizeof(sa_mpls));
+				sa_mpls.smpls_family = AF_MPLS;
+				sa_mpls.smpls_len = sizeof(sa_mpls);
+				sa_mpls.smpls_label = rt->rt_mpls;
+				info.rti_info[RTAX_SRC] =
+				    (struct sockaddr *)&sa_mpls;
+			}
+#endif
 			ifpaddr = 0;
 			ifaaddr = 0;
 			if (rtm->rtm_addrs & (RTA_IFP | RTA_IFA) &&
@@ -506,6 +522,13 @@ report:
 				rt->rt_labelid =
 				    rtlabel_name2id(rtlabel);
 			}
+#ifdef MPLS
+			if (info.rti_info[RTAX_SRC] != NULL) {
+				psa_mpls = (struct sockaddr_mpls *)
+				    info.rti_info[RTAX_SRC];
+				rt->rt_mpls = psa_mpls->smpls_label;
+			}
+#endif
 			if_group_routechange(dst, netmask);
 			/* FALLTHROUGH */
 		case RTM_LOCK:
@@ -919,6 +942,9 @@ sysctl_dumpentry(struct radix_node *rn, void *v)
 	struct rtentry		*rt = (struct rtentry *)rn;
 	int			 error = 0, size;
 	struct rt_addrinfo	 info;
+#ifdef MPLS
+	struct sockaddr_mpls	 sa_mpls;
+#endif
 	struct sockaddr_rtlabel	 sa_rt;
 	const char		*label;
 
@@ -946,6 +972,15 @@ sysctl_dumpentry(struct radix_node *rn, void *v)
 			    (struct sockaddr *)&sa_rt;
 		}
 	}
+#ifdef MPLS
+	if (rt->rt_mpls) {
+		bzero(&sa_mpls, sizeof(sa_mpls));
+		sa_mpls.smpls_family = AF_MPLS;
+		sa_mpls.smpls_len = sizeof(sa_mpls);
+		sa_mpls.smpls_label = rt->rt_mpls;
+		info.rti_info[RTAX_SRC] = (struct sockaddr *)&sa_mpls;
+	}
+#endif
 
 	size = rt_msg2(RTM_GET, RTM_VERSION, &info, NULL, w);
 	if (w->w_where && w->w_tmem && w->w_needed <= 0) {

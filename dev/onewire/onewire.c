@@ -1,4 +1,4 @@
-/*	$OpenBSD: onewire.c,v 1.9 2008/04/07 22:50:41 miod Exp $	*/
+/*	$OpenBSD: onewire.c,v 1.10 2009/01/02 05:27:12 miod Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>

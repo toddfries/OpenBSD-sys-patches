@@ -1,7 +1,7 @@
-/*	$OpenBSD: ifb.c,v 1.11 2008/12/29 22:25:16 miod Exp $	*/
+/*	$OpenBSD: ifb.c,v 1.14 2009/01/04 00:05:52 miod Exp $	*/
 
 /*
- * Copyright (c) 2007, 2008 Miodrag Vallat.
+ * Copyright (c) 2007, 2008, 2009 Miodrag Vallat.
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -56,6 +56,10 @@
 #include <dev/rasops/rasops.h>
 
 #include <machine/fbvar.h>
+
+#ifdef APERTURE
+extern int allowaperture;
+#endif
 
 /*
  * Parts of the following hardware knowledge come from David S. Miller's
@@ -204,23 +208,37 @@
 #define	IFB_REG_DPMS_STANDBY			0x00000002
 #define	IFB_REG_DPMS_ON				0x00000003
 
+/*
+ * (some) ROP codes
+ */
+
+#define	IFB_ROP_CLEAR	0x00000000	/* clear bits in rop mask */
+#define	IFB_ROP_SRC	0x00330000	/* copy src bits matching rop mask */
+#define	IFB_ROP_XOR	0x00cc0000	/* xor src bits with rop mask */
+#define	IFB_ROP_SET	0x00ff0000	/* set bits in rop mask */
+
 #define IFB_COORDS(x, y)	((x) | (y) << 16)
+
+#define	IFB_PIXELMASK	0x7f	/* 7bpp */
 
 struct ifb_softc {
 	struct sunfb sc_sunfb;
-	int sc_nscreens;
 
 	bus_space_tag_t sc_mem_t;
 	pcitag_t sc_pcitag;
 
 	bus_space_handle_t sc_mem_h;
-	bus_addr_t sc_membase;
+	bus_addr_t sc_membase, sc_fb8bank0_base, sc_fb8bank1_base;
 	bus_size_t sc_memlen;
 	vaddr_t	sc_memvaddr, sc_fb8bank0_vaddr, sc_fb8bank1_vaddr;
-	bus_space_handle_t sc_reg_h;
 
-	struct wsdisplay_emulops sc_old_ops;
-	void (*sc_old_cursor)(struct rasops_info *);
+	bus_space_handle_t sc_reg_h;
+	bus_addr_t sc_regbase;
+	bus_size_t sc_reglen;
+
+	u_int	sc_mode;
+
+	void (*sc_old_putchar)(void *, int, int, u_int, long);
 
 	int sc_console;
 	u_int8_t sc_cmap_red[256];
@@ -265,6 +283,11 @@ void	ifb_setcolormap(struct sunfb *,
 	    void (*)(void *, u_int, u_int8_t, u_int8_t, u_int8_t));
 
 void	ifb_copyrect(struct ifb_softc *, int, int, int, int, int, int);
+void	ifb_fillrect(struct ifb_softc *, int, int, int, int, int);
+void	ifb_rop(struct ifb_softc *, int, int, int, int, int, int, uint32_t,
+	    int32_t);
+void	ifb_rop_wait(struct ifb_softc *);
+
 void	ifb_putchar(void *, int, int, u_int, long);
 void	ifb_copycols(void *, int, int, int, int);
 void	ifb_erasecols(void *, int, int, int, long);
@@ -294,13 +317,16 @@ ifbattach(struct device *parent, struct device *self, void *aux)
 	if (ifb_mapregs(sc, paa))
 		return;
 
+	sc->sc_fb8bank0_base = bus_space_read_4(sc->sc_mem_t, sc->sc_reg_h,
+	      IFB_REG_OFFSET + IFB_REG_FB8_0);
+	sc->sc_fb8bank1_base = bus_space_read_4(sc->sc_mem_t, sc->sc_reg_h,
+	      IFB_REG_OFFSET + IFB_REG_FB8_1);
+
 	sc->sc_memvaddr = (vaddr_t)bus_space_vaddr(sc->sc_mem_t, sc->sc_mem_h);
 	sc->sc_fb8bank0_vaddr = sc->sc_memvaddr +
-	    bus_space_read_4(sc->sc_mem_t, sc->sc_reg_h,
-	      IFB_REG_OFFSET + IFB_REG_FB8_0) - sc->sc_membase;
+	    sc->sc_fb8bank0_base - sc->sc_membase;
 	sc->sc_fb8bank1_vaddr = sc->sc_memvaddr +
-	    bus_space_read_4(sc->sc_mem_t, sc->sc_reg_h,
-	      IFB_REG_OFFSET + IFB_REG_FB8_1) - sc->sc_membase;
+	    sc->sc_fb8bank1_base - sc->sc_membase;
 
 	node = PCITAG_NODE(paa->pa_tag);
 	sc->sc_console = ifb_is_console(node);
@@ -327,19 +353,20 @@ ifbattach(struct device *parent, struct device *self, void *aux)
 	ri->ri_hw = sc;
 
 	fbwscons_init(&sc->sc_sunfb, RI_BSWAP, sc->sc_console);
-	ri->ri_flg &= ~RI_FULLCLEAR;	/* due to the way we handle updates */
 
-	if (!sc->sc_console) {
-		bzero((void *)sc->sc_fb8bank0_vaddr, sc->sc_sunfb.sf_fbsize);
-		bzero((void *)sc->sc_fb8bank1_vaddr, sc->sc_sunfb.sf_fbsize);
-	}
+	/*
+	 * Clear the unwanted pixel planes: all if non console (thus
+	 * white background), and all planes above 7bpp otherwise.
+	 */
+	ifb_rop(sc, 0, 0, 0, 0, sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height,
+	    IFB_ROP_CLEAR, sc->sc_console ? ~IFB_PIXELMASK : ~0);
+	ifb_rop_wait(sc);
 
 	/* pick centering delta */
 	sc->sc_fb8bank0_vaddr += ri->ri_bits - ri->ri_origbits;
 	sc->sc_fb8bank1_vaddr += ri->ri_bits - ri->ri_origbits;
 
-	sc->sc_old_ops = ri->ri_ops;	/* structure copy */
-	sc->sc_old_cursor = ri->ri_do_cursor;
+	sc->sc_old_putchar = ri->ri_ops.putchar;
 	ri->ri_ops.copyrows = ifb_copyrows;
 	ri->ri_ops.copycols = ifb_copycols;
 	ri->ri_ops.eraserows = ifb_eraserows;
@@ -348,6 +375,7 @@ ifbattach(struct device *parent, struct device *self, void *aux)
 	ri->ri_do_cursor = ifb_do_cursor;
 
 	ifb_setcolormap(&sc->sc_sunfb, ifb_setcolor);
+	sc->sc_mode = WSDISPLAYIO_MODE_EMUL;
 
 	if (sc->sc_console)
 		fbwscons_console_init(&sc->sc_sunfb, -1);
@@ -360,6 +388,7 @@ ifb_ioctl(void *v, u_long cmd, caddr_t data, int flags, struct proc *p)
 	struct ifb_softc *sc = v;
 	struct wsdisplay_fbinfo *wdf;
 	struct pcisel *sel;
+	int mode;
 
 	switch (cmd) {
 	case WSDISPLAYIO_GTYPE:
@@ -367,8 +396,10 @@ ifb_ioctl(void *v, u_long cmd, caddr_t data, int flags, struct proc *p)
 		break;
 
 	case WSDISPLAYIO_SMODE:
-		if (*(u_int *)data == WSDISPLAYIO_MODE_EMUL)
+		mode = *(u_int *)data;
+		if (mode == WSDISPLAYIO_MODE_EMUL)
 			ifb_setcolormap(&sc->sc_sunfb, ifb_setcolor);
+		sc->sc_mode = mode;
 		break;
 	case WSDISPLAYIO_GINFO:
 		wdf = (void *)data;
@@ -516,18 +547,55 @@ ifb_setcolormap(struct sunfb *sf,
 
 	color = &rasops_cmap[(WSCOL_WHITE + 8) * 3];	/* real white */
 	setcolor(sf, 0, color[0], color[1], color[2]);
-	setcolor(sf, 0x7f ^ 0, ~color[0], ~color[1], ~color[2]);
+	setcolor(sf, IFB_PIXELMASK ^ 0, ~color[0], ~color[1], ~color[2]);
 	color = &rasops_cmap[WSCOL_BLACK * 3];
 	setcolor(sf, 1, color[0], color[1], color[2]);
-	setcolor(sf, 0x7f ^ 1, ~color[0], ~color[1], ~color[2]);
+	setcolor(sf, IFB_PIXELMASK ^ 1, ~color[0], ~color[1], ~color[2]);
 	color = &rasops_cmap[WSCOL_RED * 3];
 	setcolor(sf, 7, color[0], color[1], color[2]);
-	setcolor(sf, 0x7f ^ 7, ~color[0], ~color[1], ~color[2]);
+	setcolor(sf, IFB_PIXELMASK ^ 7, ~color[0], ~color[1], ~color[2]);
 }
 
 paddr_t
 ifb_mmap(void *v, off_t off, int prot)
 {
+	struct ifb_softc *sc = (struct ifb_softc *)v;
+
+	switch (sc->sc_mode) {
+	case WSDISPLAYIO_MODE_MAPPED:
+		/*
+		 * In mapped mode, provide access to the two overlays,
+		 * followed by the control registers, at the following
+		 * addresses:
+		 * 00000000	overlay 0, size up to 2MB (visible fb size)
+		 * 01000000	overlay 1, size up to 2MB (visible fb size)
+		 * 02000000	control registers
+		 */
+		off -= 0x00000000;
+		if (off >= 0 && off < round_page(sc->sc_sunfb.sf_fbsize)) {
+			return bus_space_mmap(sc->sc_mem_t,
+			    sc->sc_fb8bank0_base,
+			    off, prot, BUS_SPACE_MAP_LINEAR);
+		}
+		off -= 0x01000000;
+		if (off >= 0 && off < round_page(sc->sc_sunfb.sf_fbsize)) {
+			return bus_space_mmap(sc->sc_mem_t,
+			    sc->sc_fb8bank1_base,
+			    off, prot, BUS_SPACE_MAP_LINEAR);
+		}
+#ifdef APERTURE
+		off -= 0x01000000;
+		if (allowaperture != 0) {
+			if (off >= 0 && off < round_page(sc->sc_reglen)) {
+				return bus_space_mmap(sc->sc_mem_t,
+				    sc->sc_regbase,
+				    off, prot, BUS_SPACE_MAP_LINEAR);
+			}
+		}
+#endif
+		break;
+	}
+
 	return -1;
 }
 
@@ -590,7 +658,8 @@ ifb_mapregs(struct ifb_softc *sc, struct pci_attach_args *pa)
 		rc = EINVAL;
 	else {
 		rc = pci_mapreg_map(pa, bar + 4, cf,
-		    0, NULL, &sc->sc_reg_h, NULL, NULL, 0x9000);
+		    0, NULL, &sc->sc_reg_h,
+		     &sc->sc_regbase, &sc->sc_reglen, 0x9000);
 	}
 	if (rc != 0) {
 		printf("%s: can't map register space\n",
@@ -608,9 +677,9 @@ ifb_putchar(void *cookie, int row, int col, u_int uc, long attr)
 	struct ifb_softc *sc = ri->ri_hw;
 
 	ri->ri_bits = (void *)sc->sc_fb8bank0_vaddr;
-	sc->sc_old_ops.putchar(cookie, row, col, uc, attr);
+	sc->sc_old_putchar(cookie, row, col, uc, attr);
 	ri->ri_bits = (void *)sc->sc_fb8bank1_vaddr;
-	sc->sc_old_ops.putchar(cookie, row, col, uc, attr);
+	sc->sc_old_putchar(cookie, row, col, uc, attr);
 }
 
 void
@@ -634,11 +703,16 @@ ifb_erasecols(void *cookie, int row, int col, int num, long attr)
 {
 	struct rasops_info *ri = cookie;
 	struct ifb_softc *sc = ri->ri_hw;
+	int bg, fg;
 
-	ri->ri_bits = (void *)sc->sc_fb8bank0_vaddr;
-	sc->sc_old_ops.erasecols(cookie, row, col, num, attr);
-	ri->ri_bits = (void *)sc->sc_fb8bank1_vaddr;
-	sc->sc_old_ops.erasecols(cookie, row, col, num, attr);
+	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
+
+	row *= ri->ri_font->fontheight;
+	col *= ri->ri_font->fontwidth;
+	num *= ri->ri_font->fontwidth;
+
+	ifb_fillrect(sc, ri->ri_xorigin + col, ri->ri_yorigin + row,
+	    num, ri->ri_font->fontheight, ri->ri_devcmap[bg]);
 }
 
 void
@@ -660,43 +734,66 @@ ifb_eraserows(void *cookie, int row, int num, long attr)
 {
 	struct rasops_info *ri = cookie;
 	struct ifb_softc *sc = ri->ri_hw;
-	int bg, fg, done, cnt;
-
-	/*
-	 * Perform the first line with plain rasops code (adapted below)...
-	 */
+	int bg, fg;
+	int x, y, w;
 
 	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
 
-	memset((void *)(sc->sc_fb8bank0_vaddr + row * ri->ri_yscale),
-	    ri->ri_devcmap[bg], ri->ri_emustride);
-	memset((void *)(sc->sc_fb8bank1_vaddr + row * ri->ri_yscale),
-	    ri->ri_devcmap[bg], ri->ri_emustride);
-
-	/*
-	 * ...then copy it over and over until the whole area is done.
-	 */
-
-	row *= ri->ri_font->fontheight;
-	num *= ri->ri_font->fontheight;
-	row += ri->ri_yorigin;
-
-	for (done = 1, num -= done; num != 0;) {
-		cnt = min(done, num);
-
-		ifb_copyrect(sc, ri->ri_xorigin, row,
-		    ri->ri_xorigin, row + done, ri->ri_emuwidth, cnt);
-
-		done += cnt;
-		num -= cnt;
+	if ((num == ri->ri_rows) && ISSET(ri->ri_flg, RI_FULLCLEAR)) {
+		num = ri->ri_height;
+		x = y = 0;
+		w = ri->ri_width;
+	} else {
+		num *= ri->ri_font->fontheight;
+		x = ri->ri_xorigin;
+		y = ri->ri_yorigin + row * ri->ri_font->fontheight;
+		w = ri->ri_emuwidth;
 	}
+	ifb_fillrect(sc, x, y, w, num, ri->ri_devcmap[bg]);
 }
 
 void
 ifb_copyrect(struct ifb_softc *sc, int sx, int sy, int dx, int dy, int w, int h)
 {
-	int i, dir = 0;
+	ifb_rop(sc, sx, sy, dx, dy, w, h, IFB_ROP_SRC, IFB_PIXELMASK);
+	ifb_rop_wait(sc);
+}
 
+void
+ifb_fillrect(struct ifb_softc *sc, int x, int y, int w, int h, int bg)
+{
+	int32_t mask;
+
+	/* pixels to set... */
+	mask = IFB_PIXELMASK & bg;
+	if (mask != 0) {
+		ifb_rop(sc, x, y, x, y, w, h, IFB_ROP_SET, mask);
+		ifb_rop_wait(sc);
+	}
+
+	/* pixels to clear... */
+	mask = IFB_PIXELMASK & ~bg;
+	if (mask != 0) {
+		ifb_rop(sc, x, y, x, y, w, h, IFB_ROP_CLEAR, mask);
+		ifb_rop_wait(sc);
+	}
+}
+
+/*
+ * Perform a raster operation on both overlay planes.
+ * Puzzled by all the magic numbers in there? So are we. Isn't a dire
+ * lack of documentation wonderful?
+ */
+void
+ifb_rop(struct ifb_softc *sc, int sx, int sy, int dx, int dy, int w, int h,
+    uint32_t rop, int32_t planemask)
+{
+	int dir = 0;
+
+	/*
+	 * Compute rop direction. This only really matters for
+	 * screen-to-screen copies.
+	 */
 	if (sy < dy /* && sy + h > dy */) {
 		sy += h - 1;
 		dy += h;
@@ -708,11 +805,12 @@ ifb_copyrect(struct ifb_softc *sc, int sx, int sy, int dx, int dy, int w, int h)
 		dir |= IFB_REG_MAGIC_DIR_BACKWARDS_X;
 	}
 
-	/* Lots of magic numbers. */
+	/* Which one of those below is your magic number for today? */
 	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
 	    IFB_REG_OFFSET + IFB_REG_MAGIC, 2);
 	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
 	    IFB_REG_OFFSET + IFB_REG_MAGIC, 1);
+	/* the ``0101'' part is probably a component selection */
 	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
 	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0x540101ff);
 	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
@@ -724,15 +822,20 @@ ifb_copyrect(struct ifb_softc *sc, int sx, int sy, int dx, int dy, int w, int h)
 	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
 	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0x80000000);
 	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
-	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0x00330000);
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, rop);
 	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
-	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0xff);
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, planemask);
 	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
 	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0);
 	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
 	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0x64000303);
+	/*
+	 * This value is a pixel offset within the destination area. It is
+	 * probably used to define complex polygon shapes, with the
+	 * last pixel in the list being back to (0,0).
+	 */
 	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
-	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0);
+	    IFB_REG_OFFSET + IFB_REG_MAGIC, IFB_COORDS(0, 0));
 	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
 	    IFB_REG_OFFSET + IFB_REG_MAGIC, 0);
 	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
@@ -748,6 +851,12 @@ ifb_copyrect(struct ifb_softc *sc, int sx, int sy, int dx, int dy, int w, int h)
 	    IFB_REG_OFFSET + IFB_REG_MAGIC, IFB_COORDS(w, h));
 	bus_space_write_4(sc->sc_mem_t, sc->sc_reg_h,
 	    IFB_REG_OFFSET + IFB_REG_MAGIC, IFB_COORDS(sx, sy));
+}
+
+void
+ifb_rop_wait(struct ifb_softc *sc)
+{
+	int i;
 
 	for (i = 1000000; i > 0; i--) {
 		if (bus_space_read_4(sc->sc_mem_t, sc->sc_reg_h,
@@ -757,83 +866,16 @@ ifb_copyrect(struct ifb_softc *sc, int sx, int sy, int dx, int dy, int w, int h)
 	}
 }
 
-/*
- * Similar to rasops_do_cursor(), but using a 7bit pixel mask.
- */
-
-#define	CURSOR_MASK	0x7f7f7f7f
-
 void
 ifb_do_cursor(struct rasops_info *ri)
 {
 	struct ifb_softc *sc = ri->ri_hw;
-	int full1, height, cnt, slop1, slop2, row, col;
-	int ovl_offset = sc->sc_fb8bank1_vaddr - sc->sc_fb8bank0_vaddr;
-	u_char *dp0, *dp1, *rp;
+	int y, x;
 
-	row = ri->ri_crow;
-	col = ri->ri_ccol;
+	y = ri->ri_yorigin + ri->ri_crow * ri->ri_font->fontheight;
+	x = ri->ri_xorigin + ri->ri_ccol * ri->ri_font->fontwidth;
 
-	ri->ri_bits = (void *)sc->sc_fb8bank0_vaddr;
-	rp = ri->ri_bits + row * ri->ri_yscale + col * ri->ri_xscale;
-	height = ri->ri_font->fontheight;
-	slop1 = (4 - ((long)rp & 3)) & 3;
-
-	if (slop1 > ri->ri_xscale)
-		slop1 = ri->ri_xscale;
-
-	slop2 = (ri->ri_xscale - slop1) & 3;
-	full1 = (ri->ri_xscale - slop1 - slop2) >> 2;
-
-	if ((slop1 | slop2) == 0) {
-		/* A common case */
-		while (height--) {
-			dp0 = rp;
-			dp1 = dp0 + ovl_offset;
-			rp += ri->ri_stride;
-
-			for (cnt = full1; cnt; cnt--) {
-				*(int32_t *)dp0 ^= CURSOR_MASK;
-				*(int32_t *)dp1 ^= CURSOR_MASK;
-				dp0 += 4;
-				dp1 += 4;
-			}
-		}
-	} else {
-		/* XXX this is stupid.. use masks instead */
-		while (height--) {
-			dp0 = rp;
-			dp1 = dp0 + ovl_offset;
-			rp += ri->ri_stride;
-
-			if (slop1 & 1) {
-				*dp0++ ^= (u_char)CURSOR_MASK;
-				*dp1++ ^= (u_char)CURSOR_MASK;
-			}
-
-			if (slop1 & 2) {
-				*(int16_t *)dp0 ^= (int16_t)CURSOR_MASK;
-				*(int16_t *)dp1 ^= (int16_t)CURSOR_MASK;
-				dp0 += 2;
-				dp1 += 2;
-			}
-
-			for (cnt = full1; cnt; cnt--) {
-				*(int32_t *)dp0 ^= CURSOR_MASK;
-				*(int32_t *)dp1 ^= CURSOR_MASK;
-				dp0 += 4;
-				dp1 += 4;
-			}
-
-			if (slop2 & 1) {
-				*dp0++ ^= (u_char)CURSOR_MASK;
-				*dp1++ ^= (u_char)CURSOR_MASK;
-			}
-
-			if (slop2 & 2) {
-				*(int16_t *)dp0 ^= (int16_t)CURSOR_MASK;
-				*(int16_t *)dp1 ^= (int16_t)CURSOR_MASK;
-			}
-		}
-	}
+	ifb_rop(sc, x, y, x, y, ri->ri_font->fontwidth, ri->ri_font->fontheight,
+	    IFB_ROP_XOR, IFB_PIXELMASK);
+	ifb_rop_wait(sc);
 }

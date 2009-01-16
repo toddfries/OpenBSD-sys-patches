@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.173 2008/10/16 19:12:51 naddy Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.174 2009/01/06 21:23:18 claudio Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -1653,7 +1653,7 @@ bridge_localbroadcast(struct bridge_softc *sc, struct ifnet *ifp,
 	 * corresponding address has been specified.
 	 */
 	etype = ntohs(eh->ether_type);
-	if (etype == ETHERTYPE_IP) {
+	if (!(m->m_flags & M_VLANTAG) && etype == ETHERTYPE_IP) {
 		struct in_ifaddr *ia;
 		IFP_TO_IA(ifp, ia);
 		if (!ia)
