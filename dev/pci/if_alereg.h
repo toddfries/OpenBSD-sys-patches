@@ -902,23 +902,26 @@ struct ale_hw_stats {
  * Software state per device.
  */
 struct ale_softc {
-	struct arpcom		arpcom;
-	device_t		ale_dev;
+	struct device		sc_dev;
+	struct arpcom		sc_arpcom;
+
+	bus_space_tag_t		sc_mem_bt;
+	bus_space_handle_t	sc_mem_bh;
+	bus_size_t		sc_mem_size;
+	bus_dma_tag_t		sc_dmat;
+	pci_chipset_tag_t	sc_pct;
+	pcitag_t		sc_pcitag;
 
 	int			ale_mem_rid;
 	struct resource		*ale_mem_res;
-	bus_space_tag_t		ale_mem_bt;
-	bus_space_handle_t	ale_mem_bh;
 
-	int			ale_irq_rid;
-	struct resource		*ale_irq_res;
-	void			*ale_irq_handle;
+	void			*sc_irq_handle;
 
-	int			ale_phyaddr;
-	device_t		ale_miibus;
-
+	struct mii_data		sc_miibus;
 	int			ale_rev;
 	int			ale_chip_rev;
+	int			ale_phyaddr;
+
 	uint8_t			ale_eaddr[ETHER_ADDR_LEN];
 	uint32_t		ale_dma_rd_burst;
 	uint32_t		ale_dma_wr_burst;
@@ -936,7 +939,7 @@ struct ale_softc {
 #define	ALE_FLAG_DETACH		0x4000
 #define	ALE_FLAG_LINK		0x8000
 
-	struct callout		ale_tick_ch;
+	struct timeout		ale_tick_ch;
 	struct ale_hw_stats	ale_stats;
 	struct ale_chain_data	ale_cdata;
 	int			ale_if_flags;
@@ -945,21 +948,19 @@ struct ale_softc {
 	int			ale_max_frame_size;
 	int			ale_pagesize;
 
-	struct sysctl_ctx_list	ale_sysctl_ctx;
-	struct sysctl_oid	*ale_sysctl_tree;
 };
 
 /* Register access macros. */
 #define	CSR_WRITE_4(sc, reg, val)	\
-	bus_space_write_4((sc)->ale_mem_bt, (sc)->ale_mem_bh, (reg), (val))
+	bus_space_write_4((sc)->sc_mem_bt, (sc)->sc_mem_bh, (reg), (val))
 #define	CSR_WRITE_2(sc, reg, val)	\
-	bus_space_write_2((sc)->ale_mem_bt, (sc)->ale_mem_bh, (reg), (val))
+	bus_space_write_2((sc)->sc_mem_bt, (sc)->sc_mem_bh, (reg), (val))
 #define	CSR_WRITE_1(sc, reg, val)	\
-	bus_space_write_1((sc)->ale_mem_bt, (sc)->ale_mem_bh, (reg), (val))
+	bus_space_write_1((sc)->sc_mem_bt, (sc)->sc_mem_bh, (reg), (val))
 #define	CSR_READ_2(sc, reg)		\
-	bus_space_read_2((sc)->ale_mem_bt, (sc)->ale_mem_bh, (reg))
+	bus_space_read_2((sc)->sc_mem_bt, (sc)->sc_mem_bh, (reg))
 #define	CSR_READ_4(sc, reg)		\
-	bus_space_read_4((sc)->ale_mem_bt, (sc)->ale_mem_bh, (reg))
+	bus_space_read_4((sc)->sc_mem_bt, (sc)->sc_mem_bh, (reg))
 
 #define	ALE_TX_TIMEOUT		5
 #define	ALE_RESET_TIMEOUT	100
