@@ -1,4 +1,4 @@
-/*	$OpenBSD: sunkbdvar.h,v 1.13 2009/01/11 18:59:54 miod Exp $	*/
+/*	$OpenBSD: sunkbdvar.h,v 1.15 2009/01/12 21:11:58 miod Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -37,6 +37,7 @@ struct sunkbd_softc {
 	struct device	sc_dev;
 
 	int		(*sc_sendcmd)(void *, u_int8_t *, u_int);
+	void		(*sc_decode)(u_int8_t, u_int *, int *);
 
 	int		sc_leds;		/* LED status */
 	int		sc_id;			/* keyboard type */

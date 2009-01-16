@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldc.c,v 1.1 2009/01/10 17:13:28 kettenis Exp $	*/
+/*	$OpenBSD: ldc.c,v 1.3 2009/01/16 16:58:09 kettenis Exp $	*/
 /*
  * Copyright (c) 2009 Mark Kettenis
  *
@@ -137,6 +137,7 @@ ldc_rx_ctrl_rtr(struct ldc_conn *lc, struct ldc_pkt *lp)
 		}
 		DPRINTF(("CTRL/INFO/RTR\n"));
 		ldc_send_rdx(lc);
+		lc->lc_start(lc);
 		break;
 
 	case LDC_ACK:
