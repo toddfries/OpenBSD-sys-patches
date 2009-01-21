@@ -1,7 +1,7 @@
-/*	$OpenBSD: owtemp.c,v 1.11 2008/12/26 18:17:25 todd Exp $	*/
+/*	$OpenBSD: owtemp.c,v 1.13 2009/01/18 09:12:04 grange Exp $	*/
 
 /*
- * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
+ * Copyright (c) 2006, 2009 Alexander Yurchenko <grange@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -79,7 +79,8 @@ struct cfdriver owtemp_cd = {
 
 static const struct onewire_matchfam owtemp_fams[] = {
 	{ ONEWIRE_FAMILY_DS1920 },
-	{ ONEWIRE_FAMILY_DS18B20 }
+	{ ONEWIRE_FAMILY_DS18B20 },
+	{ ONEWIRE_FAMILY_DS1822 }
 };
 
 int
@@ -174,7 +175,8 @@ owtemp_update(void *arg)
 	if (onewire_crc(data, 8) == data[DS1920_SP_CRC]) {
 		temp = data[DS1920_SP_TEMP_MSB] << 8 |
 		    data[DS1920_SP_TEMP_LSB];
-		if (ONEWIRE_ROM_FAMILY(sc->sc_rom) == ONEWIRE_FAMILY_DS18B20) {
+		if (ONEWIRE_ROM_FAMILY(sc->sc_rom) == ONEWIRE_FAMILY_DS18B20 ||
+		    ONEWIRE_ROM_FAMILY(sc->sc_rom) == ONEWIRE_FAMILY_DS1822) {
 			/*
 			 * DS18B20 decoding
 			 * default 12 bit 0.0625 C resolution
