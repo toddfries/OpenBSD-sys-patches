@@ -1,4 +1,4 @@
-/*	$OpenBSD: hypervisor.h,v 1.8 2008/12/31 22:01:42 kettenis Exp $	*/
+/*	$OpenBSD: hypervisor.h,v 1.10 2009/01/02 15:35:54 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -102,6 +102,23 @@ int64_t	hv_intr_settarget(uint64_t sysino, uint64_t cpuid);
 #define INTR_RECEIVED	1
 #define INTR_DELIVERED	2
 
+int64_t	hv_vintr_getcookie(uint64_t devhandle, uint64_t devino,
+	    uint64_t *cookie_value);
+int64_t	hv_vintr_setcookie(uint64_t devhandle, uint64_t devino,
+	    uint64_t cookie_value);
+int64_t	hv_vintr_getenabled(uint64_t devhandle, uint64_t devino,
+	    uint64_t *intr_enabled);
+int64_t	hv_vintr_setenabled(uint64_t devhandle, uint64_t devino,
+	    uint64_t intr_enabled);
+int64_t	hv_vintr_getstate(uint64_t devhandle, uint64_t devino,
+	    uint64_t *intr_state);
+int64_t	hv_vintr_setstate(uint64_t devhandle, uint64_t devino,
+	    uint64_t intr_state);
+int64_t	hv_vintr_gettarget(uint64_t devhandle, uint64_t devino,
+	    uint64_t *cpuid);
+int64_t	hv_vintr_settarget(uint64_t devhandle, uint64_t devino,
+	    uint64_t cpuid);
+
 /*
  * Time of day services
  */
@@ -173,6 +190,16 @@ int64_t hv_ldc_rx_set_qhead(uint64_t ldc_id, uint64_t head_offset);
 #define LDC_CHANNEL_DOWN	0
 #define LDC_CHANNEL_UP		1
 #define LDC_CHANNEL_RESET	2
+
+int64_t	hv_ldc_set_map_table(uint64_t ldc_id, paddr_t base_raddr,
+	    uint64_t nentries);
+int64_t	hv_ldc_get_map_table(uint64_t ldc_id, paddr_t *base_raddr,
+	    uint64_t *nentries);
+int64_t hv_ldc_copy(uint64_t ldc_id, uint64_t flags, uint64_t cookie,
+	    paddr_t raddr, psize_t length, paddr_t *ret_length);
+
+#define LDC_COPY_IN		0
+#define LDC_COPY_OUT		1
 
 /*
  * Cryptographic services
