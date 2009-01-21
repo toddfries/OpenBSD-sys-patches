@@ -128,7 +128,7 @@ struct cfattach age_ca = {
 };
 
 struct cfdriver age_cd = {
-	 NULL, "age", DV_IFNET
+	NULL, "age", DV_IFNET
 };
 
 int agedebug = 0;

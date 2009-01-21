@@ -812,7 +812,7 @@ struct age_stats {
  * Software state per device.
  */
 struct age_softc {
-	struct device 		sc_dev;
+	struct device		sc_dev;
 	struct arpcom		sc_arpcom;
 
 	bus_space_tag_t		sc_mem_bt;
@@ -857,13 +857,13 @@ struct age_softc {
 };
 
 /* Register access macros. */
-#define CSR_WRITE_4(sc, reg, val)	\
+#define	CSR_WRITE_4(sc, reg, val)	\
 	bus_space_write_4((sc)->sc_mem_bt, (sc)->sc_mem_bh, (reg), (val))
-#define CSR_WRITE_2(sc, reg, val)	\
+#define	CSR_WRITE_2(sc, reg, val)	\
 	bus_space_write_2((sc)->sc_mem_bt, (sc)->sc_mem_bh, (reg), (val))
-#define CSR_READ_2(sc, reg)		\
+#define	CSR_READ_2(sc, reg)		\
 	bus_space_read_2((sc)->sc_mem_bt, (sc)->sc_mem_bh, (reg))
-#define CSR_READ_4(sc, reg)		\
+#define	CSR_READ_4(sc, reg)		\
 	bus_space_read_4((sc)->sc_mem_bt, (sc)->sc_mem_bh, (reg))
 
 

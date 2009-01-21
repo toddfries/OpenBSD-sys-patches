@@ -638,8 +638,8 @@ attach	age at pci
 file	dev/pci/if_age.c		age
 
 # Attansic/Atheros L1E Gigabit Ethernet
-device	age: ether, ifnet, mii, ifmedia, mii_phy
-attach	age at pci
+device	ale: ether, ifnet, mii, ifmedia, mii_phy
+attach	ale at pci
 file	dev/pci/if_ale.c		ale
 
 # AMD-76x PM and SMBus controller

@@ -51,10 +51,7 @@
 
 #include <net/if.h>
 #include <net/if_dl.h>
-#include <net/if_llc.h>
 #include <net/if_media.h>
-
-#include <netinet/ip.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -73,6 +70,9 @@
 
 #include <dev/rndvar.h>
 
+#include <dev/mii/mii.h>
+#include <dev/mii/miivar.h>
+
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
@@ -80,8 +80,8 @@
 #include <dev/pci/if_alereg.h>
 
 int	ale_match(struct device *, void *, void *);
-int	ale_attach(struct device *);
-int	ale_detach(struct device *);
+void	ale_attach(struct device *, struct device *, void *);
+int	ale_detach(struct device *, int);
 int	ale_shutdown(struct device *);
 int	ale_suspend(struct device *);
 int	ale_resume(struct device *);
@@ -90,14 +90,14 @@ int	ale_miibus_readreg(struct device *, int, int);
 void	ale_miibus_writereg(struct device *, int, int, int);
 void	ale_miibus_statchg(struct device *);
 
-void	ale_init(void *);
+int	ale_init(struct ifnet *);
+int	ale_ioctl(struct ifnet *, u_long, caddr_t);
 void	ale_start(struct ifnet *);
-int	ale_ioctl(struct ifnet *, u_long, caddr_t, struct ucred *);
 void	ale_watchdog(struct ifnet *);
 int	ale_mediachange(struct ifnet *);
 void	ale_mediastatus(struct ifnet *, struct ifmediareq *);
 
-void	ale_intr(void *);
+int	ale_intr(void *);
 int	ale_rxeof(struct ale_softc *sc);
 void	ale_rx_update_page(struct ale_softc *, struct ale_rx_page **,
 		    uint32_t, uint32_t *);
@@ -106,6 +106,8 @@ void	ale_txeof(struct ale_softc *);
 
 int	ale_dma_alloc(struct ale_softc *);
 void	ale_dma_free(struct ale_softc *);
+void	ale_get_macaddr(struct ale_softc *, uint8_t[]);
+void	ale_phy_reset(struct ale_softc *);
 int	ale_check_boundary(struct ale_softc *);
 void	ale_dmamap_cb(void *, bus_dma_segment_t *, int, int);
 void	ale_dmamap_buf_cb(void *, bus_dma_segment_t *, int,
@@ -116,9 +118,7 @@ void	ale_init_tx_ring(struct ale_softc *);
 
 void	ale_stop(struct ale_softc *);
 void	ale_tick(void *);
-void	ale_get_macaddr(struct ale_softc *);
 void	ale_mac_config(struct ale_softc *);
-void	ale_phy_reset(struct ale_softc *);
 void	ale_reset(struct ale_softc *);
 void	ale_rxfilter(struct ale_softc *);
 void	ale_rxvlan(struct ale_softc *);
@@ -130,10 +130,7 @@ void	ale_setlinkspeed(struct ale_softc *);
 void	ale_setwol(struct ale_softc *);
 #endif
 
-void	ale_sysctl_node(struct ale_softc *);
-int	sysctl_hw_ale_int_mod(SYSCTL_HANDLER_ARGS);
-
-const struct pci_matchid ale_devices[] = {
+const struct pci_matchid sc_devices[] = {
 	{ PCI_VENDOR_ATTANSIC, PCI_PRODUCT_ATTANSIC_L1E }
 };
 
@@ -153,11 +150,11 @@ int aledebug = 0;
 int
 ale_match(struct device *dev, void *match, void *aux)
 {
-	return pci_matchbyid((struct pci_attach_args *)aux, ale_devices,
-		sizeof (ale_devices) / sizeof (ale_devices[0]));
+	return pci_matchbyid((struct pci_attach_args *)aux, sc_devices,
+		sizeof (sc_devices) / sizeof (sc_devices[0]));
 }
 
-int
+void
 ale_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct ale_softc *sc = (struct ale_softc *)self;
@@ -169,7 +166,6 @@ ale_attach(struct device *parent, struct device *self, void *aux)
 	pcireg_t memtype;
 	int error = 0;
 	uint32_t rxf_len, txf_len;
-	uint8_t pcie_ptr;
 
 	/*
 	 * Allocate IO memory
@@ -177,7 +173,7 @@ ale_attach(struct device *parent, struct device *self, void *aux)
 	memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag, ALE_PCIR_BAR);
 	if (pci_mapreg_map(pa, ALE_PCIR_BAR, memtype, 0, &sc->sc_mem_bt,
 	    &sc->sc_mem_bh, NULL, &sc->sc_mem_size, 0)) {
-		printf": could not map mem space\n");
+		printf(": could not map mem space\n");
 		return;
 	}
 
@@ -339,7 +335,7 @@ ale_attach(struct device *parent, struct device *self, void *aux)
 
 fail:
 	ale_detach(&sc->sc_dev, 0);
-	return (error);
+	return;
 }
 
 int
@@ -507,20 +503,70 @@ ale_mediachange(struct ifnet *ifp)
 	return (error);
 }
 
+int
+ale_intr(void *arg)
+{
+	struct ale_softc *sc = arg;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	uint32_t status;
+
+	status = CSR_READ_4(sc, ALE_INTR_STATUS);
+	if ((status & ALE_INTRS) == 0)
+		return (0);
+
+	/* Acknowledge and disable interrupts. */
+	CSR_WRITE_4(sc, ALE_INTR_STATUS, status | INTR_DIS_INT);
+
+	if ((ifp->if_flags & IFF_RUNNING) != 0) {
+		int error;
+
+		error = ale_rxeof(sc);
+		if (error) {
+			sc->ale_stats.reset_brk_seq++;
+			ale_init(ifp);
+			return (0);
+		}
+
+		if ((status & (INTR_DMA_RD_TO_RST | INTR_DMA_WR_TO_RST)) != 0) {
+			if ((status & INTR_DMA_RD_TO_RST) != 0)
+				printf("%s: DMA read error! -- resetting\n",
+				    sc->sc_dev.dv_xname);
+			if ((status & INTR_DMA_WR_TO_RST) != 0)
+				printf("DMA write error! -- resetting\n",
+				    sc->sc_dev.dv_xname);
+			ale_init(ifp);
+			return (0);
+		}
+
+		ale_txeof(sc);
+		if (!IFQ_IS_EMPTY(&ifp->if_snd))
+			ale_start(ifp);
+	}
+
+	/* Re-enable interrupts. */
+	CSR_WRITE_4(sc, ALE_INTR_STATUS, 0x7FFFFFFF);
+
+	return (1);
+}
+
 void
-ale_get_macaddr(struct ale_softc *sc)
+ale_get_macaddr(struct ale_softc *sc, uint8_t eaddr[])
 {
 	uint32_t ea[2], reg;
-	int i, vpdc;
+	int vpd_error, vpdc;
 
 	reg = CSR_READ_4(sc, ALE_SPI_CTRL);
 	if ((reg & SPI_VPD_ENB) != 0) {
+		/* Get VPD stored in TWSI EEPROM. */
 		reg &= ~SPI_VPD_ENB;
 		CSR_WRITE_4(sc, ALE_SPI_CTRL, reg);
 	}
 
-	vpdc = pci_get_vpdcap_ptr(sc->ale_dev);
-	if (vpdc) {
+	vpd_error = 0;
+	ea[0] = ea[1] = 0;
+	if ((vpd_error = pci_get_capability(sc->sc_pct, sc->sc_pcitag,
+	    PCI_CAP_VPD, &vpdc, NULL))) {
+		int i;
 		/*
 		 * PCI VPD capability found, let TWSI reload EEPROM.
 		 * This will set ethernet address of controller.
@@ -544,12 +590,12 @@ ale_get_macaddr(struct ale_softc *sc)
 
 	ea[0] = CSR_READ_4(sc, ALE_PAR0);
 	ea[1] = CSR_READ_4(sc, ALE_PAR1);
-	sc->ale_eaddr[0] = (ea[1] >> 8) & 0xFF;
-	sc->ale_eaddr[1] = (ea[1] >> 0) & 0xFF;
-	sc->ale_eaddr[2] = (ea[0] >> 24) & 0xFF;
-	sc->ale_eaddr[3] = (ea[0] >> 16) & 0xFF;
-	sc->ale_eaddr[4] = (ea[0] >> 8) & 0xFF;
-	sc->ale_eaddr[5] = (ea[0] >> 0) & 0xFF;
+	eaddr[0] = (ea[1] >> 8) & 0xFF;
+	eaddr[1] = (ea[1] >> 0) & 0xFF;
+	eaddr[2] = (ea[0] >> 24) & 0xFF;
+	eaddr[3] = (ea[0] >> 16) & 0xFF;
+	eaddr[4] = (ea[0] >> 8) & 0xFF;
+	eaddr[5] = (ea[0] >> 0) & 0xFF;
 }
 
 void
@@ -565,38 +611,39 @@ ale_phy_reset(struct ale_softc *sc)
 	    GPHY_CTRL_SEL_ANA_RESET | GPHY_CTRL_PHY_PLL_ON);
 	DELAY(1000);
 
+#if 0
 #define	ATPHY_DBG_ADDR		0x1D
 #define	ATPHY_DBG_DATA		0x1E
-
 	/* Enable hibernation mode. */
-	ale_miibus_writereg(sc->ale_dev, sc->ale_phyaddr,
+	ale_miibus_writereg(sc->sc_dev, sc->ale_phyaddr,
 	    ATPHY_DBG_ADDR, 0x0B);
-	ale_miibus_writereg(sc->ale_dev, sc->ale_phyaddr,
+	ale_miibus_writereg(sc->sc_dev, sc->ale_phyaddr,
 	    ATPHY_DBG_DATA, 0xBC00);
 	/* Set Class A/B for all modes. */
-	ale_miibus_writereg(sc->ale_dev, sc->ale_phyaddr,
+	ale_miibus_writereg(sc->sc_dev, sc->ale_phyaddr,
 	    ATPHY_DBG_ADDR, 0x00);
-	ale_miibus_writereg(sc->ale_dev, sc->ale_phyaddr,
+	ale_miibus_writereg(sc->sc_dev, sc->ale_phyaddr,
 	    ATPHY_DBG_DATA, 0x02EF);
 	/* Enable 10BT power saving. */
-	ale_miibus_writereg(sc->ale_dev, sc->ale_phyaddr,
+	ale_miibus_writereg(sc->sc_dev, sc->ale_phyaddr,
 	    ATPHY_DBG_ADDR, 0x12);
-	ale_miibus_writereg(sc->ale_dev, sc->ale_phyaddr,
+	ale_miibus_writereg(sc->sc_dev, sc->ale_phyaddr,
 	    ATPHY_DBG_DATA, 0x4C04);
 	/* Adjust 1000T power. */
-	ale_miibus_writereg(sc->ale_dev, sc->ale_phyaddr,
+	ale_miibus_writereg(sc->sc_dev, sc->ale_phyaddr,
 	    ATPHY_DBG_ADDR, 0x04);
-	ale_miibus_writereg(sc->ale_dev, sc->ale_phyaddr,
+	ale_miibus_writereg(sc->sc_dev, sc->ale_phyaddr,
 	    ATPHY_DBG_ADDR, 0x8BBB);
 	/* 10BT center tap voltage. */
-	ale_miibus_writereg(sc->ale_dev, sc->ale_phyaddr,
+	ale_miibus_writereg(sc->sc_dev, sc->ale_phyaddr,
 	    ATPHY_DBG_ADDR, 0x05);
-	ale_miibus_writereg(sc->ale_dev, sc->ale_phyaddr,
+	ale_miibus_writereg(sc->sc_dev, sc->ale_phyaddr,
 	    ATPHY_DBG_ADDR, 0x2C46);
 
 #undef	ATPHY_DBG_ADDR
 #undef	ATPHY_DBG_DATA
 	DELAY(1000);
+#endif
 }
 
 struct ale_dmamap_arg {
@@ -610,8 +657,6 @@ ale_dmamap_cb(void *arg, bus_dma_segment_t *segs, int nsegs, int error)
 
 	if (error != 0)
 		return;
-
-	KASSERT(nsegs == 1, ("%s: %d segments returned!", __func__, nsegs));
 
 	ctx = (struct ale_dmamap_arg *)arg;
 	ctx->ale_busaddr = segs[0].ds_addr;
@@ -1083,10 +1128,10 @@ ale_setlinkspeed(struct ale_softc *sc)
 			break;
 		}
 	}
-	ale_miibus_writereg(sc->ale_dev, sc->ale_phyaddr, MII_100T2CR, 0);
-	ale_miibus_writereg(sc->ale_dev, sc->ale_phyaddr,
+	ale_miibus_writereg(sc->sc_dev, sc->ale_phyaddr, MII_100T2CR, 0);
+	ale_miibus_writereg(sc->sc_dev, sc->ale_phyaddr,
 	    MII_ANAR, ANAR_TX_FD | ANAR_TX | ANAR_10_FD | ANAR_10 | ANAR_CSMA);
-	ale_miibus_writereg(sc->ale_dev, sc->ale_phyaddr,
+	ale_miibus_writereg(sc->sc_dev, sc->ale_phyaddr,
 	    MII_BMCR, BMCR_RESET | BMCR_AUTOEN | BMCR_STARTNEG);
 	DELAY(1000);
 	if (aneg != 0) {
@@ -1134,7 +1179,7 @@ ale_setwol(struct ale_softc *sc)
 
 	ALE_LOCK_ASSERT(sc);
 
-	if (pci_find_extcap(sc->ale_dev, PCIY_PMG, &pmc) != 0) {
+	if (pci_find_extcap(sc->sc_dev, PCIY_PMG, &pmc) != 0) {
 		/* Disable WOL. */
 		CSR_WRITE_4(sc, ALE_WOL_CFG, 0);
 		reg = CSR_READ_4(sc, ALE_PCIE_PHYMISC);
@@ -1226,7 +1271,7 @@ ale_resume(struct device *dev)
 	}
 
 #ifdef notyet
-	if (pci_find_extcap(sc->ale_dev, PCIY_PMG, &pmc) == 0) {
+	if (pci_find_extcap(sc->sc_dev, PCIY_PMG, &pmc) == 0) {
 		uint16_t pmstat;
 		int pmc;
 
@@ -1682,50 +1727,6 @@ ale_stats_update(struct ale_softc *sc)
 }
 
 void
-ale_intr(void *xsc)
-{
-	struct ale_softc *sc = xsc;
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-	uint32_t status;
-
-	status = CSR_READ_4(sc, ALE_INTR_STATUS);
-	if ((status & ALE_INTRS) == 0)
-		return;
-
-	/* Acknowledge and disable interrupts. */
-	CSR_WRITE_4(sc, ALE_INTR_STATUS, status | INTR_DIS_INT);
-
-	if ((ifp->if_flags & IFF_RUNNING) != 0) {
-		int error;
-
-		error = ale_rxeof(sc);
-		if (error) {
-			sc->ale_stats.reset_brk_seq++;
-			ale_init(sc);
-			return;
-		}
-
-		if ((status & (INTR_DMA_RD_TO_RST | INTR_DMA_WR_TO_RST)) != 0) {
-			if ((status & INTR_DMA_RD_TO_RST) != 0)
-				printf("%s: DMA read error! -- resetting\n",
-				    sc->sc_dev.dv_xname);
-			if ((status & INTR_DMA_WR_TO_RST) != 0)
-				printf("DMA write error! -- resetting\n",
-				    sc->sc_dev.dv-xname);
-			ale_init(sc);
-			return;
-		}
-
-		ale_txeof(sc);
-		if (!ifq_is_empty(&ifp->if_snd))
-			if_devstart(ifp);
-	}
-
-	/* Re-enable interrupts. */
-	CSR_WRITE_4(sc, ALE_INTR_STATUS, 0x7FFFFFFF);
-}
-
-void
 ale_txeof(struct ale_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
@@ -2028,8 +2029,8 @@ ale_reset(struct ale_softc *sc)
 		    reg);
 }
 
-void
-ale_init(void *xsc)
+int
+ale_init(struct ifnet *ifp)
 {
 	struct ale_softc *sc = xsc;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
@@ -2393,13 +2394,12 @@ ale_init_rx_pages(struct ale_softc *sc)
 void
 ale_rxvlan(struct ale_softc *sc)
 {
-	struct ifnet *ifp;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	uint32_t reg;
 
-	ifp = &sc->sc_arpcom.ac_if;
 	reg = CSR_READ_4(sc, ALE_MAC_CFG);
 	reg &= ~MAC_CFG_VLAN_TAG_STRIP;
-	if ((ifp->if_capenable & IFCAP_VLAN_HWTAGGING) != 0)
+	if (ifp->if_capenable & IFCAP_VLAN_HWTAGGING)
 		reg |= MAC_CFG_VLAN_TAG_STRIP;
 	CSR_WRITE_4(sc, ALE_MAC_CFG, reg);
 }
