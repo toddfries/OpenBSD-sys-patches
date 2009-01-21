@@ -477,7 +477,7 @@ int
 tumbler_set_volume(struct tumbler_softc *sc, int left, int right)
 {
 	u_char vol[6];
-	int nentries = sizeof(tumbler_volumetab) / sizeof(tumbler_volumetab[0];
+	int nentries = sizeof(tumbler_volumetab) / sizeof(tumbler_volumetab[0]);
 	int l, r;
 
 	sc->sc_vol_l = left;
