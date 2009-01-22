@@ -1,4 +1,4 @@
-/*	$OpenBSD: fb.c,v 1.18 2008/12/27 17:23:01 miod Exp $	*/
+/*	$OpenBSD: fb.c,v 1.21 2009/01/19 20:21:33 miod Exp $	*/
 /*	$NetBSD: fb.c,v 1.23 1997/07/07 23:30:22 pk Exp $ */
 
 /*
@@ -220,6 +220,17 @@ fbwscons_init(struct sunfb *sf, int flags, int isconsole)
 			 * 80x34 console window.
 			 */
 			fw = 12; fh = 22;
+			wt = wl = 0;
+		} else {
+			/*
+			 * Make sure window-top and window-left
+			 * values are consistent with the font metrics.
+			 */
+			if (wt <= 0 || wt > sf->sf_width - cols * fw ||
+			    wl <= 0 || wl > sf->sf_height - rows * fh)
+				wt = wl = 0;
+		}
+		if (wt == 0 /* || wl == 0 */) {
 			ri->ri_flg |= RI_CENTER;
 
 			/*
@@ -250,7 +261,7 @@ fbwscons_init(struct sunfb *sf, int flags, int isconsole)
 
 	/* ifb(4) doesn't set ri_bits at the moment */
 	if (ri->ri_bits == NULL)
-		ri->ri_flg &= ~RI_CLEAR;
+		ri->ri_flg &= ~(RI_CLEAR | RI_CLEARMARGINS);
 
 	rasops_init(ri, rows, cols);
 

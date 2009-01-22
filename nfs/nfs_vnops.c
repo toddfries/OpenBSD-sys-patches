@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vnops.c,v 1.105 2008/12/24 02:43:52 thib Exp $	*/
+/*	$OpenBSD: nfs_vnops.c,v 1.108 2009/01/19 23:40:36 thib Exp $	*/
 /*	$NetBSD: nfs_vnops.c,v 1.62.4.1 1996/07/08 20:26:52 jtc Exp $	*/
 
 /*
@@ -398,7 +398,7 @@ nfs_open(v)
 		if (error == EINTR)
 			return (error);
 		uvm_vnp_uncache(vp);
-		np->n_attrstamp = 0;
+		NFS_INVALIDATE_ATTRCACHE(np);
 		if (vp->v_type == VDIR)
 			np->n_direofoffset = 0;
 		error = VOP_GETATTR(vp, &vattr, ap->a_cred, ap->a_p);
@@ -419,7 +419,8 @@ nfs_open(v)
 			np->n_mtime = vattr.va_mtime.tv_sec;
 		}
 	}
-	np->n_attrstamp = 0; /* For Open/Close consistency */
+	/* For open/close consistency. */
+	NFS_INVALIDATE_ATTRCACHE(np);
 	return (0);
 }
 
@@ -466,7 +467,7 @@ nfs_close(v)
 		    np->n_flag &= ~NMODIFIED;
 		} else
 		    error = nfs_vinvalbuf(vp, V_SAVE, ap->a_cred, ap->a_p);
-		np->n_attrstamp = 0;
+		NFS_INVALIDATE_ATTRCACHE(np);
 	    }
 	    if (np->n_flag & NWRITEERR) {
 		np->n_flag &= ~NWRITEERR;
@@ -1046,7 +1047,7 @@ nfs_writerpc(vp, uiop, iomode, must_commit)
 	int error = 0, len, tsiz, wccflag = NFSV3_WCCRATTR, rlen, commit;
 	int v3 = NFS_ISV3(vp), committed = NFSV3WRITE_FILESYNC;
 
-#ifndef DIAGNOSTIC
+#ifdef DIAGNOSTIC
 	if (uiop->uio_iovcnt != 1)
 		panic("nfs: writerpc iovcnt > 1");
 #endif
@@ -1095,7 +1096,9 @@ nfs_writerpc(vp, uiop, iomode, must_commit)
 					break;
 				} else if (rlen < len) {
 					backup = len - rlen;
-					(char *)uiop->uio_iov->iov_base -= backup;
+					uiop->uio_iov->iov_base =
+					    (char *)uiop->uio_iov->iov_base -
+					    backup;
 					uiop->uio_iov->iov_len += backup;
 					uiop->uio_offset -= backup;
 					uiop->uio_resid += backup;
@@ -1222,7 +1225,7 @@ nfsmout:
 	pool_put(&namei_pool, cnp->cn_pnbuf);
 	VTONFS(dvp)->n_flag |= NMODIFIED;
 	if (!wccflag)
-		VTONFS(dvp)->n_attrstamp = 0;
+		NFS_INVALIDATE_ATTRCACHE(VTONFS(dvp));
 	vrele(dvp);
 	return (error);
 }
@@ -1344,7 +1347,7 @@ nfsmout:
 	pool_put(&namei_pool, cnp->cn_pnbuf);
 	VTONFS(dvp)->n_flag |= NMODIFIED;
 	if (!wccflag)
-		VTONFS(dvp)->n_attrstamp = 0;
+		NFS_INVALIDATE_ATTRCACHE(VTONFS(dvp));
 	VN_KNOTE(ap->a_dvp, NOTE_WRITE);
 	vrele(dvp);
 	return (error);
@@ -1373,7 +1376,7 @@ nfs_remove(v)
 	int error = 0;
 	struct vattr vattr;
 
-#ifndef DIAGNOSTIC
+#ifdef DIAGNOSTIC
 	if ((cnp->cn_flags & HASBUF) == 0)
 		panic("nfs_remove: no name");
 	if (vp->v_usecount < 1)
@@ -1412,7 +1415,7 @@ nfs_remove(v)
 	} else if (!np->n_sillyrename)
 		error = nfs_sillyrename(dvp, vp, cnp);
 	pool_put(&namei_pool, cnp->cn_pnbuf);
-	np->n_attrstamp = 0;
+	NFS_INVALIDATE_ATTRCACHE(np);
 	vrele(dvp);
 	vrele(vp);
 
@@ -1464,7 +1467,7 @@ nfs_removerpc(dvp, name, namelen, cred, proc)
 nfsmout: 
 	VTONFS(dvp)->n_flag |= NMODIFIED;
 	if (!wccflag)
-		VTONFS(dvp)->n_attrstamp = 0;
+		NFS_INVALIDATE_ATTRCACHE(VTONFS(dvp));
 	return (error);
 }
 
@@ -1484,7 +1487,7 @@ nfs_rename(v)
 	struct componentname *fcnp = ap->a_fcnp;
 	int error;
 
-#ifndef DIAGNOSTIC
+#ifdef DIAGNOSTIC
 	if ((tcnp->cn_flags & HASBUF) == 0 ||
 	    (fcnp->cn_flags & HASBUF) == 0)
 		panic("nfs_rename: no name");
@@ -1587,9 +1590,9 @@ nfsmout:
 	VTONFS(fdvp)->n_flag |= NMODIFIED;
 	VTONFS(tdvp)->n_flag |= NMODIFIED;
 	if (!fwccflag)
-		VTONFS(fdvp)->n_attrstamp = 0;
+		NFS_INVALIDATE_ATTRCACHE(VTONFS(fdvp));
 	if (!twccflag)
-		VTONFS(tdvp)->n_attrstamp = 0;
+		NFS_INVALIDATE_ATTRCACHE(VTONFS(tdvp));
 	return (error);
 }
 
@@ -1644,9 +1647,9 @@ nfsmout:
 	pool_put(&namei_pool, cnp->cn_pnbuf);
 	VTONFS(dvp)->n_flag |= NMODIFIED;
 	if (!attrflag)
-		VTONFS(vp)->n_attrstamp = 0;
+		NFS_INVALIDATE_ATTRCACHE(VTONFS(vp));
 	if (!wccflag)
-		VTONFS(dvp)->n_attrstamp = 0;
+		NFS_INVALIDATE_ATTRCACHE(VTONFS(dvp));
 
 	VN_KNOTE(vp, NOTE_LINK);
 	VN_KNOTE(dvp, NOTE_WRITE);
@@ -1705,7 +1708,7 @@ nfsmout:
 	pool_put(&namei_pool, cnp->cn_pnbuf);
 	VTONFS(dvp)->n_flag |= NMODIFIED;
 	if (!wccflag)
-		VTONFS(dvp)->n_attrstamp = 0;
+		NFS_INVALIDATE_ATTRCACHE(VTONFS(dvp));
 	VN_KNOTE(dvp, NOTE_WRITE);
 	vrele(dvp);
 	return (error);
@@ -1760,7 +1763,7 @@ nfs_mkdir(v)
 nfsmout: 
 	VTONFS(dvp)->n_flag |= NMODIFIED;
 	if (!wccflag)
-		VTONFS(dvp)->n_attrstamp = 0;
+		NFS_INVALIDATE_ATTRCACHE(VTONFS(dvp));
 
 	if (error == 0 && newvp == NULL) {
 		error = nfs_lookitup(dvp, cnp->cn_nameptr, len, cnp->cn_cred,
@@ -1822,7 +1825,7 @@ nfsmout:
 	pool_put(&namei_pool, cnp->cn_pnbuf);
 	VTONFS(dvp)->n_flag |= NMODIFIED;
 	if (!wccflag)
-		VTONFS(dvp)->n_attrstamp = 0;
+		NFS_INVALIDATE_ATTRCACHE(VTONFS(dvp));
 
 	VN_KNOTE(dvp, NOTE_WRITE|NOTE_LINK);
 	VN_KNOTE(vp, NOTE_DELETE);
@@ -2032,7 +2035,7 @@ nfs_readdirrpc(struct vnode *vp,
 	int attrflag;
 	int v3 = NFS_ISV3(vp);
 
-#ifndef DIAGNOSTIC
+#ifdef DIAGNOSTIC
 	if (uiop->uio_iovcnt != 1 || 
 		(uiop->uio_resid & (NFS_DIRBLKSIZ - 1)))
 		panic("nfs readdirrpc bad uio");
@@ -2123,7 +2126,9 @@ nfs_readdirrpc(struct vnode *vp,
 				if (blksiz == NFS_READDIRBLKSIZ)
 					blksiz = 0;
 				uiop->uio_resid -= NFS_DIRHDSIZ;
-				(char *)uiop->uio_iov->iov_base += NFS_DIRHDSIZ;
+				uiop->uio_iov->iov_base =
+				    (char *)uiop->uio_iov->iov_base +
+				    NFS_DIRHDSIZ;
 				uiop->uio_iov->iov_len -= NFS_DIRHDSIZ;
 				nfsm_mtouio(uiop, len);
 				cp = uiop->uio_iov->iov_base;
@@ -2171,7 +2176,8 @@ nfs_readdirrpc(struct vnode *vp,
 	if (blksiz > 0) {
 		left = NFS_READDIRBLKSIZ - blksiz;
 		dp->d_reclen += left;
-		(char *)uiop->uio_iov->iov_base += left;
+		uiop->uio_iov->iov_base = (char *)uiop->uio_iov->iov_base +
+		    left;
 		uiop->uio_iov->iov_len -= left;
 		uiop->uio_resid -= left;
 	}
@@ -2218,7 +2224,7 @@ nfs_readdirplusrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 	int error = 0, tlen, more_dirs = 1, blksiz = 0, doit, bigenough = 1, i;
 	int attrflag, fhsize;
 
-#ifndef DIAGNOSTIC
+#ifdef DIAGNOSTIC
 	if (uiop->uio_iovcnt != 1 || 
 		(uiop->uio_resid & (NFS_DIRBLKSIZ - 1)))
 		panic("nfs readdirplusrpc bad uio");
@@ -2275,7 +2281,8 @@ nfs_readdirplusrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 			left = NFS_READDIRBLKSIZ - blksiz;
 			if ((tlen + NFS_DIRHDSIZ) > left) {
 				dp->d_reclen += left;
-				(char *)uiop->uio_iov->iov_base += left;
+				uiop->uio_iov->iov_base =
+				    (char *)uiop->uio_iov->iov_base + left;
 				uiop->uio_iov->iov_len -= left;
 				uiop->uio_resid -= left;
 				blksiz = 0;
@@ -2294,7 +2301,9 @@ nfs_readdirplusrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 				if (blksiz == NFS_READDIRBLKSIZ)
 					blksiz = 0;
 				uiop->uio_resid -= NFS_DIRHDSIZ;
-				(char *)uiop->uio_iov->iov_base += NFS_DIRHDSIZ;
+				uiop->uio_iov->iov_base =
+				    (char *)uiop->uio_iov->iov_base +
+				    NFS_DIRHDSIZ;
 				uiop->uio_iov->iov_len -= NFS_DIRHDSIZ;
 				cnp->cn_nameptr = uiop->uio_iov->iov_base;
 				cnp->cn_namelen = len;
@@ -2390,7 +2399,8 @@ nfs_readdirplusrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 	if (blksiz > 0) {
 		left = NFS_READDIRBLKSIZ - blksiz;
 		dp->d_reclen += left;
-		(char *)uiop->uio_iov->iov_base += left;
+		uiop->uio_iov->iov_base = (char *)uiop->uio_iov->iov_base +
+		    left;
 		uiop->uio_iov->iov_len -= left;
 		uiop->uio_resid -= left;
 	}
