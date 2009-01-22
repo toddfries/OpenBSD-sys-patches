@@ -298,7 +298,7 @@ uvm_pagermapin(struct vm_page **pps, int npages, int flags)
 			return 0;
 		}
 	}
-	pmap_update(vm_map_pmap(pager_map));
+	pmap_update(pmap_kernel());
 	UVMHIST_LOG(maphist, "<- done (KVA=0x%lx)", kva,0,0,0);
 	return kva;
 }
