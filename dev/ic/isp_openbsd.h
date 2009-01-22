@@ -74,6 +74,7 @@ struct isposinfo {
 	int			mboxwaiting;
 	u_int32_t		islocked;
 	u_int32_t		onintstack;
+#if	!(defined(__sparc__) && !defined(__sparcv9__))
 	bus_space_tag_t		bus_tag;
 	bus_space_handle_t	bus_handle;
 	bus_dma_tag_t		dmatag;
@@ -82,6 +83,7 @@ struct isposinfo {
 #define	isp_cdmap		isp_osinfo.cdmap
 #define	isp_bus_tag		isp_osinfo.bus_tag
 #define	isp_bus_handle		isp_osinfo.bus_handle
+#endif
 	uint32_t		: 5,
 		simqfrozen	: 3,
 		hysteresis	: 8,
@@ -133,6 +135,7 @@ struct isposinfo {
 
 #define MAXISPREQUEST(isp)      ((IS_FC(isp) || IS_ULTRA2(isp))? 1024 : 256)
 
+#if	!(defined(__sparc__) && !defined(__sparcv9__))
 #define	MEMORYBARRIER(isp, type, offset, size)			\
 switch (type) {							\
 case SYNC_REQUEST:						\
@@ -172,6 +175,9 @@ case SYNC_REG:							\
 default:							\
 	break;							\
 }
+#else
+#define	MEMORYBARRIER(isp, type, offset, size)
+#endif
 
 #define	MBOX_ACQUIRE			isp_mbox_acquire
 #define MBOX_WAIT_COMPLETE		isp_mbox_wait_complete
@@ -200,7 +206,11 @@ default:							\
 #endif
 
 #define	XS_T			struct scsi_xfer
+#if	!(defined(__sparc__) && !defined(__sparcv9__))
 #define	XS_DMA_ADDR_T		bus_addr_t
+#else
+#define	XS_DMA_ADDR_T		u_int32_t
+#endif
 #define	XS_CHANNEL(xs)		(((xs)->sc_link->flags & SDEV_2NDBUS)? 1 : 0)
 #define	XS_ISP(xs)		(xs)->sc_link->adapter_softc
 #define	XS_LUN(xs)		((int) (xs)->sc_link->lun)
