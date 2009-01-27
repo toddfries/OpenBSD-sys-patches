@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_node.h,v 1.34 2008/12/14 10:17:24 damien Exp $	*/
+/*	$OpenBSD: ieee80211_node.h,v 1.37 2009/01/26 21:55:58 damien Exp $	*/
 /*	$NetBSD: ieee80211_node.h,v 1.9 2004/04/30 22:57:32 dyoung Exp $	*/
 
 /*-
@@ -96,6 +96,40 @@ enum {
 	RSNA_KEYERROR
 };
 
+struct ieee80211_rxinfo {
+	u_int32_t		rxi_flags;
+	u_int32_t		rxi_tstamp;
+	int			rxi_rssi;
+};
+#define IEEE80211_RXI_HWDEC		0x00000001
+#define IEEE80211_RXI_AMPDU_DONE	0x00000002
+
+/* Block Acknowledgement Record */
+struct ieee80211_ba {
+	struct ieee80211_node	*ba_ni;	/* backpointer for callbacks */
+	struct {
+		struct mbuf		*m;
+		struct ieee80211_rxinfo	rxi;
+	}			*ba_buf;
+	struct timeout		ba_to;
+	int			ba_timeout_val;
+#define IEEE80211_BA_MIN_TIMEOUT	(10 * 1000)		/* 10msec */
+#define IEEE80211_BA_MAX_TIMEOUT	(10 * 1000 * 1000)	/* 10sec */
+
+	int			ba_state;
+#define IEEE80211_BA_INIT	0
+#define IEEE80211_BA_REQUESTED	1
+#define IEEE80211_BA_AGREED	2
+
+	u_int16_t		ba_winstart;
+	u_int16_t		ba_winend;
+	u_int16_t		ba_winsize;
+#define IEEE80211_BA_MAX_WINSZ	128	/* maximum we will accept */
+
+	u_int16_t		ba_head;
+	u_int8_t		ba_token;
+};
+
 /*
  * Node specific information.  Note that drivers are expected
  * to derive from this structure to add device-specific per-node
@@ -103,7 +137,9 @@ enum {
  * the ieee80211com structure.
  */
 struct ieee80211_node {
-	RB_ENTRY(ieee80211_node)	ni_node;
+	/* ni_macaddr must be the first field for RB_FIND() */
+	u_int8_t		ni_macaddr[IEEE80211_ADDR_LEN];
+	u_int8_t		ni_bssid[IEEE80211_ADDR_LEN];
 
 	struct ieee80211com	*ni_ic;		/* back-pointer */
 
@@ -113,10 +149,6 @@ struct ieee80211_node {
 	/* hardware */
 	u_int32_t		ni_rstamp;	/* recv timestamp */
 	u_int8_t		ni_rssi;	/* recv ssi */
-
-	/* header */
-	u_int8_t		ni_macaddr[IEEE80211_ADDR_LEN];
-	u_int8_t		ni_bssid[IEEE80211_ADDR_LEN];
 
 	/* beacon, probe response */
 	u_int8_t		ni_tstamp[8];	/* from last rcv'd beacon */
@@ -144,10 +176,10 @@ struct ieee80211_node {
 	struct ifqueue		ni_savedq;	/* packets queued for pspoll */
 
 	/* RSN */
+	struct timeout		ni_eapol_to;
 	u_int			ni_rsn_state;
 	u_int			ni_rsn_gstate;
 	u_int			ni_rsn_retries;
-	struct timeout		ni_rsn_timeout;
 	u_int			ni_rsnprotos;
 	u_int			ni_rsnakms;
 	u_int			ni_rsnciphers;
@@ -167,6 +199,16 @@ struct ieee80211_node {
 	struct ieee80211_ptk	ni_ptk;
 	u_int8_t		ni_key_count;
 	int			ni_port_valid;
+
+	/* SA Query */
+	u_int8_t		ni_sa_query_trid[16];
+	struct timeout		ni_sa_query_to;
+	int			ni_sa_query_count;
+
+#ifdef notyet
+	/* HT-immediate Block Ack */
+	struct ieee80211_ba	ni_ba[IEEE80211_NUM_TID];
+#endif
 
 	/* others */
 	u_int16_t		ni_associd;	/* assoc response */
@@ -192,6 +234,11 @@ struct ieee80211_node {
 #define IEEE80211_NODE_MFP		0x0080	/* MFP negotiated */
 #define IEEE80211_NODE_PMK		0x0100	/* ni_pmk set */
 #define IEEE80211_NODE_PMKID		0x0200	/* ni_pmkid set */
+#define IEEE80211_NODE_HT		0x0400	/* HT negotiated */
+#define IEEE80211_NODE_SA_QUERY		0x0800	/* SA Query in progress */
+#define IEEE80211_NODE_SA_QUERY_FAILED	0x1000	/* last SA Query failed */
+
+	RB_ENTRY(ieee80211_node)	ni_node;
 };
 
 RB_HEAD(ieee80211_tree, ieee80211_node);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vnops.c,v 1.108 2009/01/19 23:40:36 thib Exp $	*/
+/*	$OpenBSD: nfs_vnops.c,v 1.111 2009/01/24 23:37:56 thib Exp $	*/
 /*	$NetBSD: nfs_vnops.c,v 1.62.4.1 1996/07/08 20:26:52 jtc Exp $	*/
 
 /*
@@ -78,6 +78,8 @@
 #include <net/if.h>
 #include <netinet/in.h>
 #include <netinet/in_var.h>
+
+#include <dev/rndvar.h>
 
 void nfs_cache_enter(struct vnode *, struct vnode *, struct componentname *);
 
@@ -404,19 +406,19 @@ nfs_open(v)
 		error = VOP_GETATTR(vp, &vattr, ap->a_cred, ap->a_p);
 		if (error)
 			return (error);
-		np->n_mtime = vattr.va_mtime.tv_sec;
+		np->n_mtime = vattr.va_mtime;
 	} else {
 		error = VOP_GETATTR(vp, &vattr, ap->a_cred, ap->a_p);
 		if (error)
 			return (error);
-		if (np->n_mtime != vattr.va_mtime.tv_sec) {
+		if (timespeccmp(&np->n_mtime, &vattr.va_mtime, !=)) {
 			if (vp->v_type == VDIR)
 				np->n_direofoffset = 0;
 			error = nfs_vinvalbuf(vp, V_SAVE, ap->a_cred, ap->a_p);
 			if (error == EINTR)
 				return (error);
 			uvm_vnp_uncache(vp);
-			np->n_mtime = vattr.va_mtime.tv_sec;
+			np->n_mtime = vattr.va_mtime;
 		}
 	}
 	/* For open/close consistency. */
@@ -1129,7 +1131,7 @@ nfs_writerpc(vp, uiop, iomode, must_commit)
 		} else
 		    nfsm_loadattr(vp, (struct vattr *)0);
 		if (wccflag)
-		    VTONFS(vp)->n_mtime = VTONFS(vp)->n_vattr.va_mtime.tv_sec;
+		    VTONFS(vp)->n_mtime = VTONFS(vp)->n_vattr.va_mtime;
 		m_freem(mrep);
 		tsiz -= len;
 	}
@@ -1251,10 +1253,6 @@ nfs_mknod(v)
 	return (error);
 }
 
-static u_long create_verf;
-/*
- * nfs file create call
- */
 int
 nfs_create(v)
 	void *v;
@@ -1279,10 +1277,9 @@ nfs_create(v)
 	if (vap->va_type == VSOCK)
 		return (nfs_mknodrpc(dvp, ap->a_vpp, cnp, vap));
 
-#ifdef VA_EXCLUSIVE
 	if (vap->va_vaflags & VA_EXCLUSIVE)
 		fmode |= O_EXCL;
-#endif
+
 again:
 	nfsstats.rpccnt[NFSPROC_CREATE]++;
 	mb = mreq = nfsm_reqhead(NFSX_FH(v3) + 2 * NFSX_UNSIGNED +
@@ -1294,11 +1291,8 @@ again:
 		if (fmode & O_EXCL) {
 			*tl = txdr_unsigned(NFSV3CREATE_EXCLUSIVE);
 			tl = nfsm_build(&mb, NFSX_V3CREATEVERF);
-			if (TAILQ_FIRST(&in_ifaddr))
-				*tl++ = TAILQ_FIRST(&in_ifaddr)->ia_addr.sin_addr.s_addr;
-			else
-				*tl++ = create_verf;
-			*tl = ++create_verf;
+			*tl++ = arc4random();
+			*tl = arc4random();
 		} else {
 			*tl = txdr_unsigned(NFSV3CREATE_UNCHECKED);
 			nfsm_v3attrbuild(&mb, vap, 0);
@@ -1894,7 +1888,7 @@ nfs_readdir(v)
 	if (np->n_direofoffset != 0 && 
 	    uio->uio_offset == np->n_direofoffset) {
 		if (VOP_GETATTR(vp, &vattr, ap->a_cred, uio->uio_procp) == 0 &&
-		    np->n_mtime == vattr.va_mtime.tv_sec) {
+		    timespeccmp(&np->n_mtime, &vattr.va_mtime, ==)) {
 			nfsstats.direofcache_hits++;
 			*ap->a_eofflag = 1;
 			return (0);
