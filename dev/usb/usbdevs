@@ -1093,6 +1093,7 @@ product CYBERPOWER 1500		0x0501	1500
 /* CyberTAN Technology products */
 product CYBERTAN GIGASET108	0x160c	Siemens Gigaset 108
 product CYBERTAN TG54USB	0x1666	TG54USB
+product CYBERTAN GIGASET54	0x1667	Siemens Gigaset 54
 product CYBERTAN RT2870		0x1828	RT2870
 
 /* Cypress Semiconductor products */

@@ -1414,6 +1414,10 @@ const struct usb_known_product usb_known_products[] = {
 	    "TG54USB",
 	},
 	{
+	    USB_VENDOR_CYBERTAN, USB_PRODUCT_CYBERTAN_GIGASET54,
+	    "Siemens Gigaset 54",
+	},
+	{
 	    USB_VENDOR_CYBERTAN, USB_PRODUCT_CYBERTAN_RT2870,
 	    "RT2870",
 	},

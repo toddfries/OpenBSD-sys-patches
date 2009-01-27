@@ -1100,6 +1100,7 @@
 /* CyberTAN Technology products */
 #define	USB_PRODUCT_CYBERTAN_GIGASET108	0x160c		/* Siemens Gigaset 108 */
 #define	USB_PRODUCT_CYBERTAN_TG54USB	0x1666		/* TG54USB */
+#define	USB_PRODUCT_CYBERTAN_GIGASET54	0x1667		/* Siemens Gigaset 54 */
 #define	USB_PRODUCT_CYBERTAN_RT2870	0x1828		/* RT2870 */
 
 /* Cypress Semiconductor products */
