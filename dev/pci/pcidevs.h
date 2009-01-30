@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1451 2009/01/27 19:17:37 oga Exp 
+ *	OpenBSD: pcidevs,v 1.1453 2009/01/29 00:54:49 marco Exp 
  */
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
@@ -1682,11 +1682,13 @@
 #define	PCI_PRODUCT_CREATIVELABS_SBLIVE2	0x0006		/* SoundBlaster Live (Dell) */
 #define	PCI_PRODUCT_CREATIVELABS_AUDIGYLS	0x0007		/* SoundBlaster Audigy LS */
 #define	PCI_PRODUCT_CREATIVELABS_AUDIGY2	0x0008		/* SoundBlaster Audigy 2 */
+#define	PCI_PRODUCT_CREATIVELABS_XFI_XTREME	0x0009		/* SoundBlaster X-Fi Xtreme */
 #define	PCI_PRODUCT_CREATIVELABS_FIWIRE	0x4001		/* Firewire */
 #define	PCI_PRODUCT_CREATIVELABS_SBJOY	0x7002		/* PCI Gameport Joystick */
 #define	PCI_PRODUCT_CREATIVELABS_AUDIGIN	0x7003		/* SoundBlaster Audigy Digital */
 #define	PCI_PRODUCT_CREATIVELABS_SBJOY2	0x7004		/* PCI Gameport Joystick */
 #define	PCI_PRODUCT_CREATIVELABS_SBJOY3	0x7005		/* PCI Gameport Joystick */
+#define	PCI_PRODUCT_CREATIVELABS_PPB	0x7006		/* PCIE-PCI */
 #define	PCI_PRODUCT_CREATIVELABS_EV1938	0x8938		/* Ectiva 1938 */
 
 /* Cyclades products */
@@ -3451,6 +3453,8 @@
 #define	PCI_PRODUCT_SYMBIOS_63C815	0x1000		/* 63C815 */
 #define	PCI_PRODUCT_SYMBIOS_1030R	0x1030		/* 53c1030R */
 #define	PCI_PRODUCT_SYMBIOS_MEGARAID	0x1960		/* MegaRAID */
+#define	PCI_PRODUCT_SYMBIOS_SAS2108_1	0x0078		/* MegaRAID SAS2108 CRYPTO GEN2 */
+#define	PCI_PRODUCT_SYMBIOS_SAS2108_2	0x0079		/* MegaRAID SAS2108 GEN2 */
 
 /* Packet Engines products */
 #define	PCI_PRODUCT_SYMBIOS_PE_GNIC	0x0702		/* Packet Engines G-NIC */

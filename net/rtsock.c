@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsock.c,v 1.81 2009/01/08 12:47:45 michele Exp $	*/
+/*	$OpenBSD: rtsock.c,v 1.83 2009/01/28 22:18:44 michele Exp $	*/
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -92,6 +92,9 @@ struct walkarg {
 	caddr_t	w_where, w_tmem;
 };
 
+int	route_ctloutput(int, struct socket *, int, int, struct mbuf **);
+void	route_input(struct mbuf *m0, ...);
+
 struct mbuf	*rt_msg1(int, struct rt_addrinfo *);
 int		 rt_msg2(int, int, struct rt_addrinfo *, caddr_t,
 		     struct walkarg *);
@@ -109,6 +112,13 @@ struct rt_msghdr *rtmsg_3to4(struct mbuf *, int *);
 #define ifaaddr	info.rti_info[RTAX_IFA]
 #define brdaddr	info.rti_info[RTAX_BRD]
 
+struct routecb {
+	struct rawcb	rcb;
+	unsigned int	msgfilter;
+};
+#define	sotoroutecb(so)	((struct routecb *)(so)->so_pcb)
+
+
 int
 route_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
     struct mbuf *control, struct proc *p)
@@ -117,8 +127,12 @@ route_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 	struct rawcb	*rp = sotorawcb(so);
 	int		 s;
 
+	/*
+	 * use the rawcb but allocate a rooutecb, this code does not care
+	 * about the additional fields and works directly on the raw socket.
+	 */
 	if (req == PRU_ATTACH) {
-		rp = malloc(sizeof(*rp), M_PCB, M_WAITOK|M_ZERO);
+		rp = malloc(sizeof(struct routecb), M_PCB, M_WAITOK|M_ZERO);
 		so->so_pcb = rp;
 	}
 	if (req == PRU_DETACH && rp) {
@@ -169,6 +183,131 @@ route_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 }
 
 int
+route_ctloutput(int op, struct socket *so, int level, int optname,
+    struct mbuf **mp)
+{
+	struct routecb *rop = sotoroutecb(so);
+	struct mbuf *m = *mp;
+	int error = 0;
+
+	if (level != AF_ROUTE) {
+		error = EINVAL;
+		if (op == PRCO_SETOPT && *mp)
+			m_free(*mp);
+		return (error);
+	}
+
+	switch (op) {
+	case PRCO_SETOPT:
+		switch (optname) {
+		case ROUTE_MSGFILTER:
+			if (m == NULL || m->m_len != sizeof(unsigned int))
+				error = EINVAL;
+			else
+				rop->msgfilter = *mtod(m, unsigned int *);
+			break;
+		default:
+			error = ENOPROTOOPT;
+			break;
+		}
+		if (m)
+			m_free(m);
+		break;
+	case PRCO_GETOPT:
+		switch (optname) {
+		case ROUTE_MSGFILTER:
+			*mp = m = m_get(M_WAIT, MT_SOOPTS);   
+			m->m_len = sizeof(int);
+			*mtod(m, unsigned int *) = rop->msgfilter;
+			break;
+		default:
+			error = ENOPROTOOPT;
+			break;
+		}
+	}
+	return (error);
+}
+
+void
+route_input(struct mbuf *m0, ...)
+{
+	struct rawcb *rp;
+	struct routecb *rop;
+	struct mbuf *m = m0;
+	int sockets = 0;
+	struct socket *last;
+	va_list ap;
+	struct sockproto *proto;
+	struct sockaddr *sosrc, *sodst;
+	
+	va_start(ap, m0);
+	proto = va_arg(ap, struct sockproto *);
+	sosrc = va_arg(ap, struct sockaddr *);
+	sodst = va_arg(ap, struct sockaddr *);
+	va_end(ap);
+
+	/* ensure that we can access the rtm_type via mtod() */
+	if (m->m_len < offsetof(struct rt_msghdr, rtm_type) + 1) {
+		m_freem(m);
+		return;
+	}
+
+	last = 0;
+	LIST_FOREACH(rp, &rawcb, rcb_list) {
+		if (rp->rcb_proto.sp_family != proto->sp_family)
+			continue;
+		if (rp->rcb_proto.sp_protocol  &&
+		    rp->rcb_proto.sp_protocol != proto->sp_protocol)
+			continue;
+		/*
+		 * We assume the lower level routines have
+		 * placed the address in a canonical format
+		 * suitable for a structure comparison.
+		 *
+		 * Note that if the lengths are not the same
+		 * the comparison will fail at the first byte.
+		 */
+#define	equal(a1, a2) \
+  (bcmp((caddr_t)(a1), (caddr_t)(a2), a1->sa_len) == 0)
+		if (rp->rcb_laddr && !equal(rp->rcb_laddr, sodst))
+			continue;
+		if (rp->rcb_faddr && !equal(rp->rcb_faddr, sosrc))
+			continue;
+
+		/* filter messages that the process does not want */
+		rop = (struct routecb *)rp;
+		if (rop->msgfilter != 0 && !(rop->msgfilter & (1 <<
+		    mtod(m, struct rt_msghdr *)->rtm_type)))
+			continue;
+
+		if (last) {
+			struct mbuf *n;
+			if ((n = m_copy(m, 0, (int)M_COPYALL)) != NULL) {
+				if (sbappendaddr(&last->so_rcv, sosrc,
+				    n, (struct mbuf *)0) == 0)
+					/* should notify about lost packet */
+					m_freem(n);
+				else {
+					sorwakeup(last);
+					sockets++;
+				}
+			}
+		}
+		last = rp->rcb_socket;
+	}
+	if (last) {
+		if (sbappendaddr(&last->so_rcv, sosrc,
+		    m, (struct mbuf *)0) == 0)
+			m_freem(m);
+		else {
+			sorwakeup(last);
+			sockets++;
+		}
+	} else
+		m_freem(m);
+}
+
+int
 route_output(struct mbuf *m, ...)
 {
 	struct rt_msghdr	*rtm = NULL;
@@ -185,7 +324,6 @@ route_output(struct mbuf *m, ...)
 	struct sockaddr_rtlabel	 sa_rt;
 #ifdef MPLS
 	struct sockaddr_mpls	 sa_mpls;
-	struct sockaddr_mpls	*psa_mpls;
 #endif
 	const char		*label;
 	va_list			 ap;
@@ -426,11 +564,12 @@ report:
 				    (struct sockaddr *)&sa_rt;
 			}
 #ifdef MPLS
-			if (rt->rt_mpls) {
+			if (rt->rt_flags & RTF_MPLS) {
 				bzero(&sa_mpls, sizeof(sa_mpls));
 				sa_mpls.smpls_family = AF_MPLS;
 				sa_mpls.smpls_len = sizeof(sa_mpls);
-				sa_mpls.smpls_label = rt->rt_mpls;
+				sa_mpls.smpls_label = ((struct rt_mpls *)
+				    rt->rt_llinfo)->mpls_label;
 				info.rti_info[RTAX_SRC] =
 				    (struct sockaddr *)&sa_mpls;
 			}
@@ -522,13 +661,7 @@ report:
 				rt->rt_labelid =
 				    rtlabel_name2id(rtlabel);
 			}
-#ifdef MPLS
-			if (info.rti_info[RTAX_SRC] != NULL) {
-				psa_mpls = (struct sockaddr_mpls *)
-				    info.rti_info[RTAX_SRC];
-				rt->rt_mpls = psa_mpls->smpls_label;
-			}
-#endif
+
 			if_group_routechange(dst, netmask);
 			/* FALLTHROUGH */
 		case RTM_LOCK:
@@ -581,7 +714,7 @@ flush:
 		Free(rtm);
 	}
 	if (m)
-		raw_input(m, &route_proto, &route_src, &route_dst);
+		route_input(m, &route_proto, &route_src, &route_dst);
 	if (rp)
 		rp->rcb_proto.sp_family = PF_ROUTE;
 
@@ -814,7 +947,7 @@ rt_missmsg(int type, struct rt_addrinfo *rtinfo, int flags,
 		route_proto.sp_protocol = 0;
 	else
 		route_proto.sp_protocol = sa->sa_family;
-	raw_input(m, &route_proto, &route_src, &route_dst);
+	route_input(m, &route_proto, &route_src, &route_dst);
 }
 
 /*
@@ -838,7 +971,7 @@ rt_ifmsg(struct ifnet *ifp)
 	ifm->ifm_data = ifp->if_data;
 	ifm->ifm_addrs = 0;
 	route_proto.sp_protocol = 0;
-	raw_input(m, &route_proto, &route_src, &route_dst);
+	route_input(m, &route_proto, &route_src, &route_dst);
 }
 
 /*
@@ -905,7 +1038,7 @@ rt_newaddrmsg(int cmd, struct ifaddr *ifa, int error, struct rtentry *rt)
 			route_proto.sp_protocol = 0;
 		else
 			route_proto.sp_protocol = sa->sa_family;
-		raw_input(m, &route_proto, &route_src, &route_dst);
+		route_input(m, &route_proto, &route_src, &route_dst);
 	}
 }
 
@@ -929,7 +1062,7 @@ rt_ifannouncemsg(struct ifnet *ifp, int what)
 	strlcpy(ifan->ifan_name, ifp->if_xname, sizeof(ifan->ifan_name));
 	ifan->ifan_what = what;
 	route_proto.sp_protocol = 0;
-	raw_input(m, &route_proto, &route_src, &route_dst);
+	route_input(m, &route_proto, &route_src, &route_dst);
 }
 
 /*
@@ -973,11 +1106,12 @@ sysctl_dumpentry(struct radix_node *rn, void *v)
 		}
 	}
 #ifdef MPLS
-	if (rt->rt_mpls) {
+	if (rt->rt_flags & RTF_MPLS) {
 		bzero(&sa_mpls, sizeof(sa_mpls));
 		sa_mpls.smpls_family = AF_MPLS;
 		sa_mpls.smpls_len = sizeof(sa_mpls);
-		sa_mpls.smpls_label = rt->rt_mpls;
+		sa_mpls.smpls_label = ((struct rt_mpls *)
+		    rt->rt_llinfo)->mpls_label;
 		info.rti_info[RTAX_SRC] = (struct sockaddr *)&sa_mpls;
 	}
 #endif
@@ -987,6 +1121,12 @@ sysctl_dumpentry(struct radix_node *rn, void *v)
 		struct rt_msghdr *rtm = (struct rt_msghdr *)w->w_tmem;
 
 		rtm->rtm_flags = rt->rt_flags;
+#ifdef MPLS
+		if (dst->sa_family == AF_MPLS) {
+			rtm->rtm_flags |=
+			    ((struct rt_mpls *)rt->rt_llinfo)->mpls_operation;
+		}
+#endif
 		rtm->rtm_priority = rt->rt_priority;
 		rt_getmetrics(&rt->rt_rmx, &rtm->rtm_rmx);
 		rtm->rtm_rmx.rmx_refcnt = rt->rt_refcnt;
@@ -1003,6 +1143,12 @@ sysctl_dumpentry(struct radix_node *rn, void *v)
 		struct rt_omsghdr *rtm = (struct rt_omsghdr *)w->w_tmem;
 
 		rtm->rtm_flags = rt->rt_flags;
+#ifdef MPLS
+		if (dst->sa_family == AF_MPLS) {
+			rtm->rtm_flags |=
+			    ((struct rt_mpls *)rt->rt_llinfo)->mpls_operation;
+		}
+#endif
 		rtm->rtm_rmx.rmx_locks = rt->rt_rmx.rmx_locks;
 		rtm->rtm_rmx.rmx_mtu = rt->rt_rmx.rmx_mtu;
 		rtm->rtm_index = rt->rt_ifp->if_index;
@@ -1229,7 +1375,7 @@ extern	struct domain routedomain;		/* or at least forward */
 
 struct protosw routesw[] = {
 { SOCK_RAW,	&routedomain,	0,		PR_ATOMIC|PR_ADDR,
-  raw_input,	route_output,	raw_ctlinput,	0,
+  route_input,	route_output,	raw_ctlinput,	route_ctloutput,
   route_usrreq,
   raw_init,	0,		0,		0,
   sysctl_rtable,

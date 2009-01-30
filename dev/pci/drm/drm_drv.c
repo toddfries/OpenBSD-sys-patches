@@ -1,4 +1,5 @@
 /*-
+ * Copyright 2003 Eric Anholt
  * Copyright 1999, 2000 Precision Insight, Inc., Cedar Park, Texas.
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
@@ -54,6 +55,9 @@ int	 drm_probe(struct device *, void *, void *);
 int	 drm_detach(struct device *, int);
 int	 drm_activate(struct device *, enum devact);
 int	 drmprint(void *, const char *);
+
+int	 drm_getunique(struct drm_device *, void *, struct drm_file *);
+int	 drm_setversion(struct drm_device *, void *, struct drm_file *);
 
 /*
  * attach drm to a pci-based driver.
@@ -130,7 +134,6 @@ drm_attach(struct device *parent, struct device *self, void *aux)
 	dev->unique_len = da->busid_len;
 
 	rw_init(&dev->dev_lock, "drmdevlk");
-	mtx_init(&dev->drw_lock, IPL_NONE);
 	mtx_init(&dev->lock.spinlock, IPL_NONE);
 
 	TAILQ_INIT(&dev->maplist);
@@ -308,7 +311,6 @@ drm_lastclose(struct drm_device *dev)
 		drm_irq_uninstall(dev);
 
 	drm_agp_takedown(dev);
-	drm_drawable_free_all(dev);
 	drm_dma_takedown(dev);
 
 	DRM_LOCK();
@@ -571,16 +573,16 @@ drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags,
 		return (drm_getunique(dev, data, file_priv));
 	case DRM_IOCTL_GET_MAGIC:
 		return (drm_getmagic(dev, data, file_priv));
-	case DRM_IOCTL_GET_MAP:
-		return (drm_getmap(dev, data, file_priv));
 	case DRM_IOCTL_WAIT_VBLANK:
 		return (drm_wait_vblank(dev, data, file_priv));
 	case DRM_IOCTL_MODESET_CTL:
 		return (drm_modeset_ctl(dev, data, file_priv));
 
 	/* removed */
+	case DRM_IOCTL_GET_MAP:
+		/* FALLTHROUGH */
 	case DRM_IOCTL_GET_CLIENT:
-		/*FALLTHROUGH*/
+		/* FALLTHROUGH */
 	case DRM_IOCTL_GET_STATS:
 		return (EINVAL);
 	/*
@@ -639,10 +641,6 @@ drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags,
 			return (drm_addctx(dev, data, file_priv));
 		case DRM_IOCTL_RM_CTX:
 			return (drm_rmctx(dev, data, file_priv));
-		case DRM_IOCTL_ADD_DRAW:
-			return (drm_adddraw(dev, data, file_priv));
-		case DRM_IOCTL_RM_DRAW:
-			return (drm_rmdraw(dev, data, file_priv));
 		case DRM_IOCTL_ADD_BUFS:
 			return (drm_addbufs_ioctl(dev, data, file_priv));
 		case DRM_IOCTL_CONTROL:
@@ -665,8 +663,15 @@ drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags,
 			return (drm_sg_alloc_ioctl(dev, data, file_priv));
 		case DRM_IOCTL_SG_FREE:
 			return (drm_sg_free(dev, data, file_priv));
+		case DRM_IOCTL_ADD_DRAW:
+		case DRM_IOCTL_RM_DRAW:
 		case DRM_IOCTL_UPDATE_DRAW:
-			return (drm_update_draw(dev, data, file_priv));
+			/*
+			 * Support removed from kernel since it's not used.
+			 * just return zero until userland stops calling this
+			 * ioctl.
+			 */
+			return (0);
 		case DRM_IOCTL_SET_UNIQUE:
 		/*
 		 * Deprecated in DRM version 1.1, and will return EBUSY
@@ -694,4 +699,154 @@ drm_getsarea(struct drm_device *dev)
 	}
 	DRM_UNLOCK();
 	return (map);
+}
+
+paddr_t
+drmmmap(dev_t kdev, off_t offset, int prot)
+{
+	struct drm_device	*dev = drm_get_device_from_kdev(kdev);
+	drm_local_map_t		*map;
+	struct drm_file		*priv;
+	enum drm_map_type	 type;
+
+	DRM_LOCK();
+	priv = drm_find_file_by_minor(dev, minor(kdev));
+	DRM_UNLOCK();
+	if (priv == NULL) {
+		DRM_ERROR("can't find authenticator\n");
+		return (-1);
+	}
+
+	if (!priv->authenticated)
+		return (-1);
+
+	if (dev->dma && offset >= 0 && offset < ptoa(dev->dma->page_count)) {
+		drm_device_dma_t *dma = dev->dma;
+
+		DRM_SPINLOCK(&dev->dma_lock);
+
+		if (dma->pagelist != NULL) {
+			paddr_t phys = dma->pagelist[offset >> PAGE_SHIFT];
+
+			DRM_SPINUNLOCK(&dev->dma_lock);
+			return (atop(phys));
+		} else {
+			DRM_SPINUNLOCK(&dev->dma_lock);
+			return (-1);
+		}
+	}
+
+	/*
+	 * A sequential search of a linked list is
+ 	 * fine here because: 1) there will only be
+	 * about 5-10 entries in the list and, 2) a
+	 * DRI client only has to do this mapping
+	 * once, so it doesn't have to be optimized
+	 * for performance, even if the list was a
+	 * bit longer.
+	 */
+	DRM_LOCK();
+	TAILQ_FOREACH(map, &dev->maplist, link) {
+		if (offset >= map->ext &&
+		    offset < map->ext + map->size) {
+			offset -= map->ext;
+			break;
+		}
+	}
+
+	if (map == NULL) {
+		DRM_UNLOCK();
+		DRM_DEBUG("can't find map\n");
+		return (-1);
+	}
+	if (((map->flags & _DRM_RESTRICTED) && priv->master == 0)) {
+		DRM_UNLOCK();
+		DRM_DEBUG("restricted map\n");
+		return (-1);
+	}
+	type = map->type;
+	DRM_UNLOCK();
+
+	switch (type) {
+	case _DRM_FRAME_BUFFER:
+	case _DRM_REGISTERS:
+	case _DRM_AGP:
+		return (atop(offset + map->offset));
+		break;
+	/* XXX unify all the bus_dmamem_mmap bits */
+	case _DRM_SCATTER_GATHER:
+		return (bus_dmamem_mmap(dev->dmat, dev->sg->mem->sg_segs,
+		    dev->sg->mem->sg_nsegs, map->offset - dev->sg->handle +
+		    offset, prot, BUS_DMA_NOWAIT));
+	case _DRM_SHM:
+	case _DRM_CONSISTENT:
+		return (bus_dmamem_mmap(dev->dmat, &map->dmah->seg, 1,
+		    offset, prot, BUS_DMA_NOWAIT));
+	default:
+		DRM_ERROR("bad map type %d\n", type);
+		return (-1);	/* This should never happen. */
+	}
+	/* NOTREACHED */
+}
+
+/*
+ * Beginning in revision 1.1 of the DRM interface, getunique will return
+ * a unique in the form pci:oooo:bb:dd.f (o=domain, b=bus, d=device, f=function)
+ * before setunique has been called.  The format for the bus-specific part of
+ * the unique is not defined for any other bus.
+ */
+int
+drm_getunique(struct drm_device *dev, void *data, struct drm_file *file_priv)
+{
+	struct drm_unique	 *u = data;
+
+	if (u->unique_len >= dev->unique_len) {
+		if (DRM_COPY_TO_USER(u->unique, dev->unique, dev->unique_len))
+			return EFAULT;
+	}
+	u->unique_len = dev->unique_len;
+
+	return 0;
+}
+
+#define DRM_IF_MAJOR	1
+#define DRM_IF_MINOR	2
+
+int
+drm_setversion(struct drm_device *dev, void *data, struct drm_file *file_priv)
+{
+	struct drm_set_version	ver, *sv = data;
+	int			if_version;
+
+	/* Save the incoming data, and set the response before continuing
+	 * any further.
+	 */
+	ver = *sv;
+	sv->drm_di_major = DRM_IF_MAJOR;
+	sv->drm_di_minor = DRM_IF_MINOR;
+	sv->drm_dd_major = dev->driver->major;
+	sv->drm_dd_minor = dev->driver->minor;
+
+	/*
+	 * We no longer support interface versions less than 1.1, so error
+	 * out if the xserver is too old. 1.1 always ties the drm to a
+	 * certain busid, this was done on attach
+	 */
+	if (ver.drm_di_major != -1) {
+		if (ver.drm_di_major != DRM_IF_MAJOR || ver.drm_di_minor < 1 ||
+		    ver.drm_di_minor > DRM_IF_MINOR) {
+			return EINVAL;
+		}
+		if_version = DRM_IF_VERSION(ver.drm_di_major, ver.drm_dd_minor);
+		dev->if_version = DRM_MAX(if_version, dev->if_version);
+	}
+
+	if (ver.drm_dd_major != -1) {
+		if (ver.drm_dd_major != dev->driver->major ||
+		    ver.drm_dd_minor < 0 ||
+		    ver.drm_dd_minor > dev->driver->minor)
+			return EINVAL;
+	}
+
+	return 0;
 }
