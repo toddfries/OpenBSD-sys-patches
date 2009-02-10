@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_node.c,v 1.52 2009/01/27 17:02:29 damien Exp $	*/
+/*	$OpenBSD: ieee80211_node.c,v 1.55 2009/01/29 17:19:10 damien Exp $	*/
 /*	$NetBSD: ieee80211_node.c,v 1.14 2004/05/09 09:18:47 dyoung Exp $	*/
 
 /*-
@@ -180,11 +180,12 @@ ieee80211_node_detach(struct ifnet *ifp)
 		ic->ic_bss = NULL;
 	}
 	ieee80211_free_allnodes(ic);
+#ifndef IEEE80211_STA_ONLY
 	if (ic->ic_aid_bitmap != NULL)
 		free(ic->ic_aid_bitmap, M_DEVBUF);
 	if (ic->ic_tim_bitmap != NULL)
 		free(ic->ic_tim_bitmap, M_DEVBUF);
-
+#endif
 	timeout_del(&ic->ic_rsn_timeout);
 }
 
@@ -812,9 +813,21 @@ ieee80211_dup_bss(struct ieee80211com *ic, const u_int8_t *macaddr)
 struct ieee80211_node *
 ieee80211_find_node(struct ieee80211com *ic, const u_int8_t *macaddr)
 {
-	/* XXX ugly, but avoids a full node structure in the stack */
-	return (RB_FIND(ieee80211_tree, &ic->ic_tree,
-	    (struct ieee80211_node *)macaddr));
+	struct ieee80211_node *ni;
+	int cmp;
+
+	/* similar to RB_FIND except we compare keys, not nodes */
+	ni = RB_ROOT(&ic->ic_tree);
+	while (ni != NULL) {
+		cmp = memcmp(macaddr, ni->ni_macaddr, IEEE80211_ADDR_LEN);
+		if (cmp < 0)
+			ni = RB_LEFT(ni, ni_node);
+		else if (cmp > 0)
+			ni = RB_RIGHT(ni, ni_node);
+		else
+			break;
+	}
+	return ni;
 }
 
 /*
@@ -1038,8 +1051,8 @@ ieee80211_free_node(struct ieee80211com *ic, struct ieee80211_node *ni)
 #ifndef IEEE80211_STA_ONLY
 	timeout_del(&ni->ni_eapol_to);
 	timeout_del(&ni->ni_sa_query_to);
-#endif
 	IEEE80211_AID_CLR(ni->ni_associd, ic->ic_aid_bitmap);
+#endif
 	RB_REMOVE(ieee80211_tree, &ic->ic_tree, ni);
 	ic->ic_nnodes--;
 #ifndef IEEE80211_STA_ONLY
@@ -1380,13 +1393,13 @@ ieee80211_node_join(struct ieee80211com *ic, struct ieee80211_node *ni,
 void
 ieee80211_node_leave_ht(struct ieee80211com *ic, struct ieee80211_node *ni)
 {
-	struct ieee80211_ba *ba;
+	struct ieee80211_rx_ba *ba;
 	u_int8_t tid;
 	int i;
 
 	/* free all Block Ack records */
 	for (tid = 0; tid < IEEE80211_NUM_TID; tid++) {
-		ba = &ni->ni_ba[tid];
+		ba = &ni->ni_rx_ba[tid];
 		if (ba->ba_buf != NULL) {
 			for (i = 0; i < IEEE80211_BA_MAX_WINSZ; i++)
 				if (ba->ba_buf[i].m != NULL)

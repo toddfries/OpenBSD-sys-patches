@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.168 2008/07/14 13:37:39 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.170 2009/02/04 17:22:23 miod Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff
@@ -632,8 +632,9 @@ cpu_startup(void)
 	printf(version);
 
 	printf("%s\n", cpu_model);
-	printf("real mem = %u (%u reserved for PROM, %u used by OpenBSD)\n",
-	    ptoa(physmem), ptoa(resvmem), ptoa(resvphysmem - resvmem));
+	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem) / 1024 / 1024);
+	printf("rsvd mem = %u (%uKB)\n", ptoa(resvmem), ptoa(resvmem) / 1024);
 
 	/*
 	 * Determine how many buffers to allocate.
@@ -662,7 +663,8 @@ cpu_startup(void)
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	printf("avail mem = %lu\n", ptoa(uvmexp.free));
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free) / 1024 / 1024);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -843,16 +845,48 @@ btlb_insert(space, va, pa, lenp, prot)
 {
 	static u_int32_t mask;
 	register vsize_t len;
-	register int error, i;
+	register int error, i, btlb_max;
 
 	if (!pdc_btlb.min_size && !pdc_btlb.max_size)
 		return -(ENXIO);
+
+	/*
+	 * On PCXS processors with split BTLB, we should theoretically
+	 * insert in the IBTLB (if executable mapping requested), and
+	 * into the DBTLB. The PDC documentation is very clear that
+	 * slot numbers are, in order, IBTLB, then DBTLB, then combined
+	 * BTLB.
+	 *
+	 * However it also states that ``successful completion may not mean
+	 * that the entire address range specified in the call has been
+	 * mapped in the block TLB. For both fixed range slots and variable
+	 * range slots, complete coverage of the address range specified
+	 * is not guaranteed. Only a portion of the address range specified
+	 * may get mapped as a result''.
+	 *
+	 * On an HP 9000/720 with PDC ROM v1.2, it turns out that IBTLB
+	 * entries are inserted as expected, but no DBTLB gets inserted
+	 * at all, despite PDC returning success.
+	 *
+	 * So play it dumb, and do not attempt to insert DBTLB entries at
+	 * all on split BTLB systems. Callers are supposed to be able to
+	 * cope with this.
+	 */
+
+	if (pdc_btlb.finfo.num_c == 0) {
+		if ((prot & TLB_EXECUTE) == 0)
+			return -(EINVAL);
+
+		btlb_max = pdc_btlb.finfo.num_i;
+	} else {
+		btlb_max = pdc_btlb.finfo.num_c;
+	}
 
 	/* align size */
 	for (len = pdc_btlb.min_size << PGSHIFT; len < *lenp; len <<= 1);
 	len >>= PGSHIFT;
 	i = ffs(~mask) - 1;
-	if (len > pdc_btlb.max_size || i < 0) {
+	if (len > pdc_btlb.max_size || i < 0 || i >= btlb_max) {
 #ifdef BTLBDEBUG
 		printf("btln_insert: too big (%u < %u < %u)\n",
 		    pdc_btlb.min_size, len, pdc_btlb.max_size);
@@ -877,7 +911,8 @@ btlb_insert(space, va, pa, lenp, prot)
 		prot |= TLB_UNCACHABLE;
 
 #ifdef BTLBDEBUG
-	printf("btlb_insert(%d): %x:%x=%x[%x,%x]\n", i, space, va, pa, len, prot);
+	printf("btlb_insert(%d): %x:%x=%x[%x,%x]\n",
+	    i, space, va, pa, len, prot);
 #endif
 	if ((error = (*cpu_dbtlb_ins)(i, space, va, pa, len, prot)) < 0)
 		return -(EINVAL);

@@ -71,7 +71,6 @@
 #include "drm.h"
 #include "drm_linux_list.h"
 #include "drm_atomic.h"
-#include "drm_internal.h"
 
 #define DRM_KERNEL_CONTEXT    0	 /* Change drm_resctx if changed	  */
 #define DRM_RESERVED_CONTEXTS 1	 /* Change drm_resctx if changed	  */
@@ -418,6 +417,16 @@ struct drm_vblank {
 	int		vbl_inmodeset;	/* is the DDX currently modesetting */
 };
 
+/* Heap implementation for radeon and i915 legacy */
+TAILQ_HEAD(drm_heap, drm_mem);
+
+struct drm_mem {
+	TAILQ_ENTRY(drm_mem)	 link;
+	struct drm_file		*file_priv; /* NULL: free, other: real files */
+	int			 start;
+	int			 size;
+};
+
 /* location of GART table */
 #define DRM_ATI_GART_MAIN 1
 #define DRM_ATI_GART_FB   2
@@ -500,7 +509,6 @@ struct drm_device {
 	DRM_SPINTYPE	  dma_lock;	/* protects dev->dma */
 	DRM_SPINTYPE	  irq_lock;	/* protects irq condition checks */
 	struct rwlock	  dev_lock;	/* protects everything else */
-	DRM_SPINTYPE	  drw_lock;
 
 				/* Usage Counters */
 	int		  open_count;	/* Outstanding files open	   */
@@ -539,10 +547,6 @@ struct drm_device {
 	atomic_t		*ctx_bitmap;
 	void			*dev_private;
 	drm_local_map_t		*agp_buffer_map;
-
-	u_int		  drw_no;
-	/* RB tree of drawable infos */
-	RB_HEAD(drawable_tree, bsd_drm_drawable_info) drw_head;
 };
 
 struct drm_attach_args {
@@ -564,8 +568,6 @@ struct device	*drm_attach_pci(const struct drm_driver_info *,
 dev_type_ioctl(drmioctl);
 dev_type_open(drmopen);
 dev_type_close(drmclose);
-dev_type_read(drmread);
-dev_type_poll(drmpoll);
 dev_type_mmap(drmmmap);
 extern drm_local_map_t	*drm_getsarea(struct drm_device *);
 
@@ -588,6 +590,15 @@ void	*drm_ioremap(struct drm_device *, drm_local_map_t *);
 void	drm_ioremapfree(drm_local_map_t *);
 int	drm_mtrr_add(unsigned long, size_t, int);
 int	drm_mtrr_del(int, unsigned long, size_t, int);
+
+/* Heap interface (DEPRECATED) */
+int	drm_init_heap(struct drm_heap *, int, int);
+struct drm_mem *
+	drm_alloc_block(struct drm_heap *, int, int, struct drm_file *);
+struct drm_mem *
+	drm_find_block(struct drm_heap *, int);
+void	drm_free_block(struct drm_heap *, struct drm_mem *);
+
 
 int	drm_ctxbitmap_init(struct drm_device *);
 void	drm_ctxbitmap_cleanup(struct drm_device *);
@@ -666,26 +677,12 @@ int	drm_ati_pcigart_cleanup(struct drm_device *,
 int	drm_lock(struct drm_device *, void *, struct drm_file *);
 int	drm_unlock(struct drm_device *, void *, struct drm_file *);
 int	drm_version(struct drm_device *, void *, struct drm_file *);
-int	drm_setversion(struct drm_device *, void *, struct drm_file *);
-
-/* Misc. IOCTL support (drm_ioctl.c) */
-int	drm_irq_by_busid(struct drm_device *, void *, struct drm_file *);
-int	drm_getunique(struct drm_device *, void *, struct drm_file *);
-int	drm_getmap(struct drm_device *, void *, struct drm_file *);
 
 /* Context IOCTL support (drm_context.c) */
 int	drm_resctx(struct drm_device *, void *, struct drm_file *);
 int	drm_addctx(struct drm_device *, void *, struct drm_file *);
 int	drm_getctx(struct drm_device *, void *, struct drm_file *);
 int	drm_rmctx(struct drm_device *, void *, struct drm_file *);
-
-/* Drawable IOCTL support (drm_drawable.c) */
-int	drm_adddraw(struct drm_device *, void *, struct drm_file *);
-int	drm_rmdraw(struct drm_device *, void *, struct drm_file *);
-int	drm_update_draw(struct drm_device *, void *, struct drm_file *);
-void	drm_drawable_free_all(struct drm_device *);
-struct drm_drawable_info	*drm_get_drawable_info(struct drm_device *,
-				    unsigned int);
 
 /* Authentication IOCTL support (drm_auth.c) */
 int	drm_getmagic(struct drm_device *, void *, struct drm_file *);
@@ -706,6 +703,7 @@ int	drm_dma(struct drm_device *, void *, struct drm_file *);
 /* IRQ support (drm_irq.c) */
 int	drm_control(struct drm_device *, void *, struct drm_file *);
 int	drm_wait_vblank(struct drm_device *, void *, struct drm_file *);
+int	drm_irq_by_busid(struct drm_device *, void *, struct drm_file *);
 
 /* AGP/GART support (drm_agpsupport.c) */
 int	drm_agp_acquire_ioctl(struct drm_device *, void *, struct drm_file *);

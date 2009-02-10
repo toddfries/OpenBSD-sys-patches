@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.95 2009/01/07 13:23:24 jsg Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.98 2009/02/10 18:35:44 damien Exp $
 
 machine		amd64		# architecture, used by config; REQUIRED
 
@@ -124,6 +124,7 @@ upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 #ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
+run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
 zyd*	at uhub?		# Zydas ZD1211/ZD1211B
 upgt*	at uhub?		# Conexant/Intersil PrismGT SoftMAC USB
 
@@ -178,7 +179,7 @@ scsibus* at gdt?
 #scsibus* at aac?
 ami*	at pci?			# AMI MegaRAID controllers
 scsibus* at ami?
-mfi*	at pci?				# LSI MegaRAID SAS controllers
+mfi*	at pci?			# LSI MegaRAID SAS controllers
 scsibus* at mfi?
 #cac*	at pci?			# Compaq Smart ARRAY [234]* RAID controllers
 #scsibus* at cac?
@@ -188,6 +189,8 @@ twe*	at pci?			# 3ware Escalade RAID controllers
 scsibus* at twe?
 #iha*	at pci?			# Initio Ultra/UltraWide SCSI controllers
 #scsibus* at iha?
+ips*	at pci?			# IBM ServeRAID controllers
+scsibus* at ips?
 isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
 scsibus* at isp?
 #aic*	at pcmcia?		# PCMCIA based aic SCSI controllers

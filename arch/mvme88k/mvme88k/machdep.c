@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.214 2008/10/30 22:07:18 miod Exp $	*/
+/* $OpenBSD: machdep.c,v 1.217 2009/02/08 21:59:21 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -214,26 +214,12 @@ getcpuspeed(struct mvmeprom_brdid *brdid)
 	int speed = 0;
 	u_int i, c;
 
-	for (i = 0; i < 4; i++) {
-		c = (u_int)brdid->speed[i];
-		if (c == ' ')
-			c = '0';
-		else if (c > '9' || c < '0') {
-			speed = 0;
-			break;
-		}
-		speed = speed * 10 + (c - '0');
-	}
-	speed = speed / 100;
-
 	switch (brdtyp) {
 #ifdef MVME187
 	case BRD_187:
 	case BRD_8120:
-		if (speed == 25 || speed == 33)
-			return speed;
-		speed = 25;
-		break;
+		/* we already computed the speed in m187_bootstrap() */
+		return cpuspeed;
 #endif
 #ifdef MVME188
 	case BRD_188:
@@ -246,6 +232,18 @@ getcpuspeed(struct mvmeprom_brdid *brdid)
 		if ((u_int)brdid->rev < 0x50) {
 			speed = 20;
 		} else {
+			for (i = 0; i < 4; i++) {
+				c = (u_int)brdid->speed[i];
+				if (c == ' ')
+					c = '0';
+				else if (c > '9' || c < '0') {
+					speed = 0;
+					break;
+				}
+				speed = speed * 10 + (c - '0');
+			}
+			speed = speed / 100;
+
 			if (speed == 20 || speed == 25)
 				return speed;
 			speed = 25;
@@ -712,6 +710,20 @@ secondary_pre_main()
 		for (;;) ;
 	}
 
+	/*
+	 * On 88110 processors, allocate UPAGES contiguous pages for
+	 * the NMI handling stack.
+	 */
+	if (CPU_IS88110) {
+		ci->ci_nmi_stack = uvm_km_zalloc(kernel_map, USPACE);
+		if (ci->ci_nmi_stack == (vaddr_t)NULL) {
+			printf("cpu%d: unable to allocate NMI stack\n",
+			    ci->ci_cpuid);
+			__cpu_simple_unlock(&cpu_boot_mutex);
+			for (;;) ;
+		}
+	}
+
 	return (init_stack);
 }
 
@@ -991,6 +1003,13 @@ mvme_bootstrap()
 	master_cpu = cmmu_init();
 	set_cpu_number(master_cpu);
 	SET(curcpu()->ci_flags, CIF_ALIVE | CIF_PRIMARY);
+
+#ifdef M88110
+	if (CPU_IS88110) {
+		extern caddr_t nmi_stack;
+		curcpu()->ci_nmi_stack = (vaddr_t)&nmi_stack;
+	}
+#endif
 
 #ifdef M88100
 	if (CPU_IS88100) {
