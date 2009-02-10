@@ -1491,7 +1491,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			    s->kif->pfik_name)) {
 #if NPFSYNC > 0
 				/* don't send out individual delete messages */
-				s->sync_flags = PFSTATE_NOSYNC;
+				SET(s->state_flags, PFSTATE_NOSYNC);
 #endif
 				pf_unlink_state(s);
 				killed++;
@@ -1516,11 +1516,6 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			if (psk->psk_pfcmp.creatorid == 0)
 				psk->psk_pfcmp.creatorid = pf_status.hostid;
 			if ((s = pf_find_state_byid(&psk->psk_pfcmp))) {
-#if NPFSYNC > 0
-				/* send immediate delete of state */
-				pfsync_delete_state(s);
-				s->sync_flags |= PFSTATE_NOSYNC;
-#endif
 				pf_unlink_state(s);
 				psk->psk_killed = 1;
 			}
@@ -1566,11 +1561,6 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			    !strcmp(psk->psk_label, s->rule.ptr->label))) &&
 			    (!psk->psk_ifname[0] || !strcmp(psk->psk_ifname,
 			    s->kif->pfik_name))) {
-#if NPFSYNC > 0
-				/* send immediate delete of state */
-				pfsync_delete_state(s);
-				s->sync_flags |= PFSTATE_NOSYNC;
-#endif
 				pf_unlink_state(s);
 				killed++;
 			}
