@@ -27,6 +27,7 @@
 #include "ppp.h"
 #include "bridge.h"
 #include "pppoe.h"
+#include "pfsync.h"
 #endif
 
 /*
@@ -63,5 +64,8 @@
 #endif
 #if NBLUETOOTH > 0
 	DONETISR(NETISR_BT,btintr);
+#endif
+#if NPFSYNC > 0
+	DONETISR(NETISR_PFSYNC,pfsyncintr);
 #endif
 	DONETISR(NETISR_TX,nettxintr);

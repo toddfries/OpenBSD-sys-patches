@@ -38,6 +38,7 @@
  */
 
 #include "pf.h"
+#include "pfsync.h"
 
 #include <sys/param.h>
 #include <sys/mbuf.h>
@@ -50,6 +51,10 @@
 
 #if NPF > 0
 #include <net/pfvar.h>
+#endif
+
+#if NPFSYNC > 0
+#include <net/if_pfsync.h>
 #endif
 
 #ifdef INET
@@ -788,6 +793,11 @@ tdb_free(struct tdb *tdbp)
 		(*(tdbp->tdb_xform->xf_zeroize))(tdbp);
 		tdbp->tdb_xform = NULL;
 	}
+
+#if NPFSYNC > 0
+	/* Cleanup pfsync references */
+	pfsync_delete_tdb(tdbp);
+#endif
 
 	/* Cleanup inp references. */
 	for (inp = TAILQ_FIRST(&tdbp->tdb_inp_in); inp;

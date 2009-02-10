@@ -56,6 +56,7 @@
 #define	NETISR_IP	2		/* same as AF_INET */
 #define	NETISR_TX	3		/* for if_snd processing */
 #define	NETISR_MPLS	4		/* AF_MPLS would overflow */
+#define	NETISR_PFSYNC	5		/* for pfsync "immediate" tx */
 #define	NETISR_ATALK	16		/* same as AF_APPLETALK */
 #define	NETISR_ARP	18		/* same as AF_LINK */
 #define	NETISR_IPV6	24		/* same as AF_INET6 */
@@ -82,6 +83,7 @@ void	bridgeintr(void);
 void	pppoeintr(void);
 void	btintr(void);
 void	mplsintr(void);
+void	pfsyncintr(void);
 
 #include <machine/atomic.h>
 #define	schednetisr(anisr)						\
