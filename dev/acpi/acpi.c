@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.127 2009/01/17 17:17:11 krw Exp $ */
+/* $OpenBSD: acpi.c,v 1.129 2009/02/10 02:13:19 jordan Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -658,7 +658,7 @@ acpi_loadtables(struct acpi_softc *sc, struct acpi_rsdp *rsdp)
 	int i, ntables;
 	size_t len;
 
-	if (rsdp->rsdp_revision == 2) {
+	if (rsdp->rsdp_revision == 2 && rsdp->rsdp_xsdt) {
 		struct acpi_xsdt *xsdt;
 
 		if (acpi_map(rsdp->rsdp_xsdt, sizeof(*hdr), &handle)) {
@@ -1658,7 +1658,7 @@ acpi_enter_sleep_state(struct acpi_softc *sc, int state)
 	u_int16_t rega, regb;
 	int retries;
 
-	if (state == ACPI_STATE_S0)
+	if (sc == NULL || state == ACPI_STATE_S0)
 		return;
 	if (sc->sc_sleeptype[state].slp_typa == -1 ||
 	    sc->sc_sleeptype[state].slp_typb == -1) {

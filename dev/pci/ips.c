@@ -1,7 +1,7 @@
-/*	$OpenBSD: ips.c,v 1.31 2009/01/09 21:47:08 grange Exp $	*/
+/*	$OpenBSD: ips.c,v 1.42 2009/02/10 12:43:03 grange Exp $	*/
 
 /*
- * Copyright (c) 2006, 2007 Alexander Yurchenko <grange@openbsd.org>
+ * Copyright (c) 2006, 2007, 2009 Alexander Yurchenko <grange@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -20,10 +20,13 @@
  * IBM (Adaptec) ServeRAID controller driver.
  */
 
+#include "bio.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/device.h>
+#include <sys/ioctl.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/timeout.h>
@@ -34,6 +37,8 @@
 #include <scsi/scsi_all.h>
 #include <scsi/scsi_disk.h>
 #include <scsi/scsiconf.h>
+
+#include <dev/biovar.h>
 
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcireg.h>
@@ -65,6 +70,10 @@ int ips_debug = IPS_D_ERR;
 #define IPS_CMDSZ		sizeof(struct ips_cmd)
 #define IPS_SGSZ		sizeof(struct ips_sg)
 #define IPS_SECSZ		512
+#define IPS_NVRAMPGSZ		128
+#define IPS_SQSZ		(IPS_MAXCMDS * sizeof(u_int32_t))
+
+#define	IPS_TIMEOUT		5	/* seconds */
 
 /* Command codes */
 #define IPS_CMD_READ		0x02
@@ -89,6 +98,7 @@ int ips_debug = IPS_D_ERR;
 #define IPS_CMD_GETVERINFO	0xc6
 #define IPS_CMD_FFDC		0xd7
 #define IPS_CMD_SG		0x80
+#define IPS_CMD_RWNVRAM		0xbc
 
 /* Register definitions */
 #define IPS_REG_HIS		0x08	/* host interrupt status */
@@ -98,6 +108,11 @@ int ips_debug = IPS_D_ERR;
 #define IPS_REG_CCC		0x14	/* command channel control */
 #define IPS_REG_CCC_SEM			0x0008	/* semaphore */
 #define IPS_REG_CCC_START		0x101a	/* start command */
+#define IPS_REG_SQH		0x20	/* status queue head */
+#define IPS_REG_SQT		0x24	/* status queue tail */
+#define IPS_REG_SQE		0x28	/* status queue end */
+#define IPS_REG_SQS		0x2c	/* status queue start */
+
 #define IPS_REG_OIS		0x30	/* outbound interrupt status */
 #define IPS_REG_OIS_PEND		0x0008	/* interrupt is pending */
 #define IPS_REG_OIM		0x34	/* outbound interrupt mask */
@@ -141,8 +156,8 @@ struct ips_adapterinfo {
 	u_int8_t	wrongaddrcnt;
 	u_int8_t	unidentcnt;
 	u_int8_t	nvramdevchgcnt;
-	u_int8_t	codeblkver[8];
-	u_int8_t	bootblkver[8];
+	u_int8_t	firmware[8];
+	u_int8_t	bios[8];
 	u_int32_t	drivesize[IPS_MAXDRIVES];
 	u_int8_t	cmdcnt;
 	u_int8_t	maxphysdevs;
@@ -165,8 +180,30 @@ struct ips_driveinfo {
 		u_int8_t	__reserved;
 		u_int8_t	raid;
 		u_int8_t	state;
+#define IPS_DS_FREE	0x00
+#define IPS_DS_OFFLINE	0x02
+#define IPS_DS_ONLINE	0x03
+#define IPS_DS_DEGRADED	0x04
+#define IPS_DS_SYS	0x06
+#define IPS_DS_CRS	0x24
+
 		u_int32_t	seccnt;
 	}		drive[IPS_MAXDRIVES];
+};
+
+struct ips_pg5 {
+	u_int32_t	signature;
+	u_int8_t	__reserved1;
+	u_int8_t	slot;
+	u_int16_t	type;
+	u_int8_t	bioshi[4];
+	u_int8_t	bioslo[4];
+	u_int16_t	__reserved2;
+	u_int8_t	__reserved3;
+	u_int8_t	os;
+	u_int8_t	driverhi[4];
+	u_int8_t	driverlo[4];
+	u_int8_t	__reserved4[100];
 };
 
 /* Command control block */
@@ -205,6 +242,7 @@ struct ips_softc {
 	struct device		sc_dev;
 
 	struct scsi_link	sc_scsi_link;
+	struct scsibus_softc *	sc_scsibus;
 
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
@@ -221,12 +259,21 @@ struct ips_softc {
 	int			sc_nccbs;
 	struct ips_ccbq		sc_ccbq_free;
 	struct ips_ccbq		sc_ccbq_run;
+
+	struct dmamem		sc_sqm;
+	paddr_t			sc_sqtail;
+	u_int32_t *		sc_sqbuf;
+	int			sc_sqidx;
 };
 
 int	ips_match(struct device *, void *, void *);
 void	ips_attach(struct device *, struct device *, void *);
 
 int	ips_scsi_cmd(struct scsi_xfer *);
+
+int	ips_ioctl(struct device *, u_long, caddr_t);
+int	ips_ioctl_inq(struct ips_softc *, struct bioc_inq *);
+int	ips_ioctl_vol(struct ips_softc *, struct bioc_vol *);
 
 int	ips_cmd(struct ips_softc *, int, int, u_int32_t, void *, size_t, int,
 	    struct scsi_xfer *);
@@ -238,6 +285,7 @@ void	ips_timeout(void *);
 int	ips_getadapterinfo(struct ips_softc *, struct ips_adapterinfo *);
 int	ips_getdriveinfo(struct ips_softc *, struct ips_driveinfo *);
 int	ips_flush(struct ips_softc *);
+int	ips_readnvram(struct ips_softc *, void *, int);
 
 void	ips_copperhead_exec(struct ips_softc *, struct ips_ccb *);
 void	ips_copperhead_init(struct ips_softc *);
@@ -293,7 +341,11 @@ static const struct pci_matchid ips_ids[] = {
 };
 
 static const struct ips_chipset {
-	const char *	ic_name;
+	enum {
+		IPS_CHIP_COPPERHEAD = 0,
+		IPS_CHIP_MORPHEUS
+	}		ic_id;
+
 	int		ic_bar;
 
 	void		(*ic_exec)(struct ips_softc *, struct ips_ccb *);
@@ -304,7 +356,7 @@ static const struct ips_chipset {
 	u_int32_t	(*ic_status)(struct ips_softc *);
 } ips_chips[] = {
 	{
-		"Copperhead",
+		IPS_CHIP_COPPERHEAD,
 		0x14,
 		ips_copperhead_exec,
 		ips_copperhead_init,
@@ -314,7 +366,7 @@ static const struct ips_chipset {
 		ips_copperhead_status
 	},
 	{
-		"Morpheus",
+		IPS_CHIP_MORPHEUS,
 		0x10,
 		ips_morpheus_exec,
 		ips_morpheus_init,
@@ -325,17 +377,32 @@ static const struct ips_chipset {
 	}
 };
 
-enum {
-	IPS_CHIP_COPPERHEAD = 0,
-	IPS_CHIP_MORPHEUS
-};
-
 #define ips_exec(s, c)	(s)->sc_chip->ic_exec((s), (c))
 #define ips_init(s)	(s)->sc_chip->ic_init((s))
 #define ips_intren(s)	(s)->sc_chip->ic_intren((s))
 #define ips_isintr(s)	(s)->sc_chip->ic_isintr((s))
 #define ips_reset(s)	(s)->sc_chip->ic_reset((s))
 #define ips_status(s)	(s)->sc_chip->ic_status((s))
+
+static const char *ips_names[] = {
+	"II",
+	"onboard",
+	"onboard",
+	"3H",
+	"3L",
+	"4H",
+	"4M",
+	"4L",
+	"4Mx",
+	"4Lx",
+	"5i",
+	"5i",
+	"6M",
+	"6i",
+	"7t",
+	"7k",
+	"7M"
+};
 
 int
 ips_match(struct device *parent, void *match, void *aux)
@@ -352,6 +419,7 @@ ips_attach(struct device *parent, struct device *self, void *aux)
 	struct ips_ccb ccb0;
 	struct scsibus_attach_args saa;
 	struct ips_adapterinfo ai;
+	struct ips_pg5 pg5;
 	pcireg_t maptype;
 	bus_size_t iosize;
 	pci_intr_handle_t ih;
@@ -392,6 +460,25 @@ ips_attach(struct device *parent, struct device *self, void *aux)
 		goto fail1;
 	}
 
+	/* Allocate status queue for the Copperhead chipset */
+	if (sc->sc_chip->ic_id == IPS_CHIP_COPPERHEAD) {
+		if (ips_dmamem_alloc(&sc->sc_sqm, sc->sc_dmat, IPS_SQSZ)) {
+			printf(": can't allocate status queue\n");
+			goto fail2;
+		}
+		sc->sc_sqtail = sc->sc_sqm.dm_paddr;
+		sc->sc_sqbuf = sc->sc_sqm.dm_vaddr;
+		sc->sc_sqidx = 0;
+		bus_space_write_4(sc->sc_iot, sc->sc_ioh, IPS_REG_SQS,
+		    sc->sc_sqm.dm_paddr);
+		bus_space_write_4(sc->sc_iot, sc->sc_ioh, IPS_REG_SQE,
+		    sc->sc_sqm.dm_paddr + IPS_SQSZ);
+		bus_space_write_4(sc->sc_iot, sc->sc_ioh, IPS_REG_SQH,
+		    sc->sc_sqm.dm_paddr + sizeof(u_int32_t));
+		bus_space_write_4(sc->sc_iot, sc->sc_ioh, IPS_REG_SQT,
+		    sc->sc_sqm.dm_paddr);
+	}
+
 	/* Bootstrap CCB queue */
 	sc->sc_nccbs = 1;
 	sc->sc_ccb = &ccb0;
@@ -402,7 +489,7 @@ ips_attach(struct device *parent, struct device *self, void *aux)
 	    IPS_MAXFER, 0, BUS_DMA_NOWAIT | BUS_DMA_ALLOCNOW,
 	    &ccb0.c_dmam)) {
 		printf(": can't bootstrap CCB queue\n");
-		goto fail2;
+		goto fail3;
 	}
 	TAILQ_INIT(&sc->sc_ccbq_free);
 	TAILQ_INIT(&sc->sc_ccbq_run);
@@ -412,16 +499,20 @@ ips_attach(struct device *parent, struct device *self, void *aux)
 	if (ips_getadapterinfo(sc, &ai)) {
 		printf(": can't get adapter info\n");
 		bus_dmamap_destroy(sc->sc_dmat, ccb0.c_dmam);
-		goto fail2;
+		goto fail3;
 	}
 
 	/* Get logical drives info */
 	if (ips_getdriveinfo(sc, &sc->sc_di)) {
 		printf(": can't get logical drives info\n");
 		bus_dmamap_destroy(sc->sc_dmat, ccb0.c_dmam);
-		goto fail2;
+		goto fail3;
 	}
 	sc->sc_nunits = sc->sc_di.drivecnt;
+
+	/* Read NVRAM page 5 for additional info */
+	bzero(&pg5, sizeof(pg5));
+	ips_readnvram(sc, &pg5, 5);
 
 	bus_dmamap_destroy(sc->sc_dmat, ccb0.c_dmam);
 
@@ -429,7 +520,7 @@ ips_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_nccbs = ai.cmdcnt;
 	if ((sc->sc_ccb = ips_ccb_alloc(sc, sc->sc_nccbs)) == NULL) {
 		printf(": can't allocate CCB queue\n");
-		goto fail2;
+		goto fail3;
 	}
 	TAILQ_INIT(&sc->sc_ccbq_free);
 	TAILQ_INIT(&sc->sc_ccbq_run);
@@ -440,7 +531,7 @@ ips_attach(struct device *parent, struct device *self, void *aux)
 	/* Install interrupt handler */
 	if (pci_intr_map(pa, &ih)) {
 		printf(": can't map interrupt\n");
-		goto fail3;
+		goto fail4;
 	}
 	intrstr = pci_intr_string(pa->pa_pc, ih);
 	if (pci_intr_establish(pa->pa_pc, ih, IPL_BIO, ips_intr, sc,
@@ -449,21 +540,22 @@ ips_attach(struct device *parent, struct device *self, void *aux)
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
-		goto fail3;
+		goto fail4;
 	}
 	printf(": %s\n", intrstr);
 
 	/* Display adapter info */
-	printf("%s", sc->sc_dev.dv_xname);
-	printf(": %s", sc->sc_chip->ic_name);
+	printf("%s: ServeRAID", sc->sc_dev.dv_xname);
+	if (pg5.type > 1 && pg5.type - 2 < sizeof(ips_names) /
+	    sizeof(ips_names[0]))
+		printf(" %s", ips_names[pg5.type - 2]);
 	printf(", firmware %c%c%c%c%c%c%c",
-	    ai.codeblkver[0], ai.codeblkver[1], ai.codeblkver[2],
-	    ai.codeblkver[3], ai.codeblkver[4], ai.codeblkver[5],
-	    ai.codeblkver[6]);
-	printf(", bootblock %c%c%c%c%c%c%c",
-	    ai.bootblkver[0], ai.bootblkver[1], ai.bootblkver[2],
-	    ai.bootblkver[3], ai.bootblkver[4], ai.bootblkver[5],
-	    ai.bootblkver[6]);
+	    ai.firmware[0], ai.firmware[1], ai.firmware[2],
+	    ai.firmware[3], ai.firmware[4], ai.firmware[5],
+	    ai.firmware[6]);
+	printf(", bios %c%c%c%c%c%c%c",
+	    ai.bios[0], ai.bios[1], ai.bios[2], ai.bios[3], ai.bios[4],
+	    ai.bios[5], ai.bios[6]);
 	printf(", %d CCBs, %d units", sc->sc_nccbs, sc->sc_nunits);
 	printf("\n");
 
@@ -478,14 +570,24 @@ ips_attach(struct device *parent, struct device *self, void *aux)
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &sc->sc_scsi_link;
-	config_found(self, &saa, scsiprint);
+	sc->sc_scsibus = (struct scsibus_softc *)config_found(self, &saa,
+	    scsiprint);
 
 	/* Enable interrupts */
 	ips_intren(sc);
 
+#if NBIO > 0
+	/* Install ioctl handler */
+	if (bio_register(&sc->sc_dev, ips_ioctl))
+		printf("%s: no ioctl support\n", sc->sc_dev.dv_xname);
+#endif
+
 	return;
-fail3:
+fail4:
 	ips_ccb_free(sc, sc->sc_ccb, sc->sc_nccbs);
+fail3:
+	if (sc->sc_chip->ic_id == IPS_CHIP_COPPERHEAD)
+		ips_dmamem_free(&sc->sc_sqm);
 fail2:
 	ips_dmamem_free(&sc->sc_cmdm);
 fail1:
@@ -622,6 +724,98 @@ ips_scsi_cmd(struct scsi_xfer *xs)
 	return (COMPLETE);
 }
 
+#if NBIO > 0
+int
+ips_ioctl(struct device *dev, u_long cmd, caddr_t addr)
+{
+	struct ips_softc *sc = (struct ips_softc *)dev;
+
+	DPRINTF(IPS_D_INFO, ("%s: ioctl %lu\n", sc->sc_dev.dv_xname, cmd));
+
+	switch (cmd) {
+	case BIOCINQ:
+		return (ips_ioctl_inq(sc, (struct bioc_inq *)addr));
+	case BIOCVOL:
+		return (ips_ioctl_vol(sc, (struct bioc_vol *)addr));
+	default:
+		return (ENOTTY);
+	}
+}
+
+int
+ips_ioctl_inq(struct ips_softc *sc, struct bioc_inq *bi)
+{
+	struct ips_adapterinfo ai;
+
+	if (ips_getadapterinfo(sc, &ai))
+		return (EIO);
+
+	strlcpy(bi->bi_dev, sc->sc_dev.dv_xname, sizeof(bi->bi_dev));
+	bi->bi_novol = sc->sc_nunits;
+	bi->bi_nodisk = ai.drivecnt;
+
+	return (0);
+}
+
+int
+ips_ioctl_vol(struct ips_softc *sc, struct bioc_vol *bv)
+{
+	struct ips_driveinfo di;
+	struct ips_drive *drive;
+	struct device *dev;
+	struct scsi_link *link;
+	int id = bv->bv_volid, vol, i;
+
+	if (id >= sc->sc_nunits)
+		return (EINVAL);
+
+	if (ips_getdriveinfo(sc, &di))
+		return (EIO);
+	drive = &di.drive[id];
+
+	switch (drive->state) {
+	case IPS_DS_ONLINE:
+		bv->bv_status = BIOC_SVONLINE;
+		break;
+	case IPS_DS_DEGRADED:
+		bv->bv_status = BIOC_SVDEGRADED;
+		break;
+	case IPS_DS_OFFLINE:
+		bv->bv_status = BIOC_SVOFFLINE;
+		break;
+	default:
+		bv->bv_status = BIOC_SVINVALID;
+	}
+
+	bv->bv_size = (u_quad_t)drive->seccnt * IPS_SECSZ;
+	bv->bv_level = drive->raid;
+	bv->bv_nodisk = 0; /* XXX */
+
+	for (i = 0, vol = -1; i < sc->sc_nunits; i++) {
+		link = sc->sc_scsibus->sc_link[i][0];
+		if (link == NULL)
+			continue;
+
+		/* skip if not a virtual disk */
+		if (!(link->flags & SDEV_VIRTUAL))
+			continue;
+
+		vol++;
+		/* are we it? */
+		if (vol == id) {
+			dev = link->device_softc;
+			memcpy(bv->bv_vendor, link->inqdata.vendor,
+			    sizeof bv->bv_vendor);
+			bv->bv_vendor[sizeof(bv->bv_vendor) - 1] = '\0';
+			strlcpy(bv->bv_dev, dev->dv_xname, sizeof(bv->bv_dev));
+			break;
+		}
+	}
+
+	return (0);
+}
+#endif	/* NBIO > 0 */
+
 int
 ips_cmd(struct ips_softc *sc, int code, int drive, u_int32_t lba, void *data,
     size_t size, int flags, struct scsi_xfer *xs)
@@ -629,7 +823,7 @@ ips_cmd(struct ips_softc *sc, int code, int drive, u_int32_t lba, void *data,
 	struct ips_cmd *cmd;
 	struct ips_sg *sg;
 	struct ips_ccb *ccb;
-	int nsegs, i, error = 0;
+	int nsegs, i, s, error = 0;
 
 	DPRINTF(IPS_D_XFER, ("%s: cmd code 0x%02x, drive %d, lba %u, "
 	    "size %lu, flags 0x%02x\n", sc->sc_dev.dv_xname, code, drive, lba,
@@ -646,6 +840,7 @@ ips_cmd(struct ips_softc *sc, int code, int drive, u_int32_t lba, void *data,
 
 	/* Fill in command frame */
 	cmd = ccb->c_cmdva;
+	bzero(cmd, sizeof(*cmd));
 	cmd->code = code;
 	cmd->id = ccb->c_id;
 	cmd->drive = drive;
@@ -699,11 +894,13 @@ ips_cmd(struct ips_softc *sc, int code, int drive, u_int32_t lba, void *data,
 
 	if (flags & IPS_CCB_POLL) {
 		/* Wait for command to complete */
+		s = splbio();
 		error = ips_poll(sc, ccb);
+		splx(s);
 	} else {
 		/* Set watchdog timer */
 		timeout_set(&xs->stimeout, ips_timeout, ccb);
-		timeout_add_msec(&xs->stimeout, xs->timeout);
+		timeout_add_sec(&xs->stimeout, IPS_TIMEOUT);
 	}
 
 	return (error);
@@ -769,7 +966,7 @@ ips_done(struct ips_softc *sc, struct ips_ccb *ccb)
 	}
 
 	if (ccb->c_stat) {
-		printf("%s: ", sc->sc_dev.dv_xname);
+		sc_print_addr(xs->sc_link);
 		if (ccb->c_stat == 1) {
 			printf("recovered error\n");
 		} else {
@@ -871,6 +1068,13 @@ ips_flush(struct ips_softc *sc)
 	return (ips_cmd(sc, IPS_CMD_FLUSH, 0, 0, NULL, 0, IPS_CCB_POLL, NULL));
 }
 
+int
+ips_readnvram(struct ips_softc *sc, void *buf, int page)
+{
+	return (ips_cmd(sc, IPS_CMD_RWNVRAM, page, 0, buf, IPS_NVRAMPGSZ,
+	    IPS_CCB_READ | IPS_CCB_POLL, NULL));
+}
+
 void
 ips_copperhead_exec(struct ips_softc *sc, struct ips_ccb *ccb)
 {
@@ -927,8 +1131,25 @@ ips_copperhead_reset(struct ips_softc *sc)
 u_int32_t
 ips_copperhead_status(struct ips_softc *sc)
 {
-	/* XXX: not implemented */
-	return (0);
+	u_int32_t sqhead, sqtail, status;
+
+	sqhead = bus_space_read_4(sc->sc_iot, sc->sc_ioh, IPS_REG_SQH);
+	DPRINTF(IPS_D_XFER, ("%s: sqhead 0x%08x, sqtail 0x%08x\n",
+	    sc->sc_dev.dv_xname, sqhead, sc->sc_sqtail));
+
+	sqtail = sc->sc_sqtail + sizeof(u_int32_t);
+	if (sqtail == sc->sc_sqm.dm_paddr + IPS_SQSZ)
+		sqtail = sc->sc_sqm.dm_paddr;
+	if (sqtail == sqhead)
+		return (0xffffffff);
+
+	sc->sc_sqtail = sqtail;
+	if (++sc->sc_sqidx == IPS_MAXCMDS)
+		sc->sc_sqidx = 0;
+	status = sc->sc_sqbuf[sc->sc_sqidx];
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh, IPS_REG_SQT, sqtail);
+
+	return (status);
 }
 
 void

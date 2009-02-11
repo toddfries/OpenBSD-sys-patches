@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_input.c,v 1.107 2009/01/26 19:09:41 damien Exp $	*/
+/*	$OpenBSD: ieee80211_input.c,v 1.109 2009/02/08 15:34:39 damien Exp $	*/
 
 /*-
  * Copyright (c) 2001 Atsushi Onoe
@@ -62,6 +62,8 @@
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_priv.h>
 
+struct	mbuf *ieee80211_defrag(struct ieee80211com *, struct mbuf *, int);
+void	ieee80211_defrag_timeout(void *);
 #ifndef IEEE80211_NO_HT
 void	ieee80211_input_ba(struct ifnet *, struct mbuf *,
 	    struct ieee80211_node *, int, struct ieee80211_rxinfo *);
@@ -364,7 +366,8 @@ ieee80211_input(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni,
 		    hasqos && (qos & IEEE80211_QOS_ACK_POLICY_MASK) ==
 		    IEEE80211_QOS_ACK_POLICY_BA) {
 			/* check if we have a BA agreement for this RA/TID */
-			if (ni->ni_ba[tid].ba_state != IEEE80211_BA_AGREED) {
+			if (ni->ni_rx_ba[tid].ba_state !=
+			    IEEE80211_BA_AGREED) {
 				DPRINTF(("no BA agreement for %s, TID %d\n",
 				    ether_sprintf(ni->ni_macaddr), tid));
 				/* send a DELBA with reason code UNKNOWN-BA */
@@ -549,6 +552,97 @@ ieee80211_input(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni,
 	}
 }
 
+/*
+ * Handle defragmentation (see 9.5 and Annex C).  We support the concurrent
+ * reception of fragments of three fragmented MSDUs or MMPDUs.
+ */
+struct mbuf *
+ieee80211_defrag(struct ieee80211com *ic, struct mbuf *m, int hdrlen)
+{
+	const struct ieee80211_frame *owh, *wh;
+	struct ieee80211_defrag *df;
+	u_int16_t rxseq, seq;
+	u_int8_t frag;
+	int i;
+
+	wh = mtod(m, struct ieee80211_frame *);
+	rxseq = letoh16(*(const u_int16_t *)wh->i_seq);
+	seq = rxseq >> IEEE80211_SEQ_SEQ_SHIFT;
+	frag = rxseq & IEEE80211_SEQ_FRAG_MASK;
+
+	if (frag == 0 && !(wh->i_fc[1] & IEEE80211_FC1_MORE_FRAG))
+		return m;	/* not fragmented */
+
+	if (frag == 0) {
+		/* first fragment, setup entry in the fragment cache */
+		if (++ic->ic_defrag_cur == IEEE80211_DEFRAG_SIZE)
+			ic->ic_defrag_cur = 0;
+		df = &ic->ic_defrag[ic->ic_defrag_cur];
+		if (df->df_m != NULL)
+			m_freem(df->df_m);	/* discard old entry */
+		df->df_seq = seq;
+		df->df_frag = 0;
+		df->df_m = m;
+		/* start receive MSDU timer of aMaxReceiveLifetime */
+		timeout_add_sec(&df->df_to, 1);
+		return NULL;	/* MSDU or MMPDU not yet complete */
+	}
+
+	/* find matching entry in the fragment cache */
+	for (i = 0; i < IEEE80211_DEFRAG_SIZE; i++) {
+		df = &ic->ic_defrag[i];
+		if (df->df_m == NULL)
+			continue;
+		if (df->df_seq != seq || df->df_frag + 1 != frag)
+			continue;
+		owh = mtod(df->df_m, struct ieee80211_frame *);
+		/* frame type, source and destination must match */
+		if (((wh->i_fc[0] ^ owh->i_fc[0]) & IEEE80211_FC0_TYPE_MASK) ||
+		    !IEEE80211_ADDR_EQ(wh->i_addr1, owh->i_addr1) ||
+		    !IEEE80211_ADDR_EQ(wh->i_addr2, owh->i_addr2))
+			continue;
+		/* matching entry found */
+		break;
+	}
+	if (i == IEEE80211_DEFRAG_SIZE) {
+		/* no matching entry found, discard fragment */
+		ic->ic_if.if_ierrors++;
+		m_freem(m);
+		return NULL;
+	}
+
+	df->df_frag = frag;
+	/* strip 802.11 header and concatenate fragment */
+	m_adj(m, hdrlen);
+	m_cat(df->df_m, m);
+	df->df_m->m_pkthdr.len += m->m_pkthdr.len;
+
+	if (wh->i_fc[1] & IEEE80211_FC1_MORE_FRAG)
+		return NULL;	/* MSDU or MMPDU not yet complete */
+
+	/* MSDU or MMPDU complete */
+	timeout_del(&df->df_to);
+	m = df->df_m;
+	df->df_m = NULL;
+	return m;
+}
+
+/*
+ * Receive MSDU defragmentation timer exceeds aMaxReceiveLifetime.
+ */
+void
+ieee80211_defrag_timeout(void *arg)
+{
+	struct ieee80211_defrag *df = arg;
+	int s = splnet();
+
+	/* discard all received fragments */
+	m_freem(df->df_m);
+	df->df_m = NULL;
+
+	splx(s);
+}
+
 #ifndef IEEE80211_NO_HT
 /*
  * Process a received data MPDU related to a specific HT-immediate Block Ack
@@ -558,7 +652,7 @@ void
 ieee80211_input_ba(struct ifnet *ifp, struct mbuf *m,
     struct ieee80211_node *ni, int tid, struct ieee80211_rxinfo *rxi)
 {
-	struct ieee80211_ba *ba = &ni->ni_ba[tid];
+	struct ieee80211_rx_ba *ba = &ni->ni_rx_ba[tid];
 	struct ieee80211_frame *wh;
 	int idx, count;
 	u_int16_t sn;
@@ -622,14 +716,14 @@ ieee80211_input_ba(struct ifnet *ifp, struct mbuf *m,
 
 /*
  * Change the value of WinStartB (move window forward) upon reception of a
- * Block Ack Request frame or an ADDBA Request (PBAC).
+ * BlockAckReq frame or an ADDBA Request (PBAC).
  */
 void
 ieee80211_ba_move_window(struct ieee80211com *ic, struct ieee80211_node *ni,
     u_int8_t tid, u_int16_t ssn)
 {
 	struct ifnet *ifp = &ic->ic_if;
-	struct ieee80211_ba *ba = &ni->ni_ba[tid];
+	struct ieee80211_rx_ba *ba = &ni->ni_rx_ba[tid];
 	int count;
 
 	/* assert(WinStartB <= SSN) */
@@ -747,7 +841,7 @@ ieee80211_deliver_data(struct ieee80211com *ic, struct mbuf *m,
  * always possible because 802.11 header length may vary (non-QoS+LLC
  * is 32 bytes while QoS+LLC is 34 bytes).  Some devices are smart and
  * add 2 padding bytes after the 802.11 header in the QoS case so this
- * function is there for brain-dead devices only.
+ * function is there for stupid drivers/devices only.
  */
 struct mbuf *
 ieee80211_align_mbuf(struct mbuf *m)
@@ -1210,7 +1304,7 @@ ieee80211_save_ie(const u_int8_t *frm, u_int8_t **ie)
  * [tlv] HT Operation (802.11n)
  */
 void
-ieee80211_recv_probe_resp(struct ieee80211com *ic, struct mbuf *m0,
+ieee80211_recv_probe_resp(struct ieee80211com *ic, struct mbuf *m,
     struct ieee80211_node *ni, struct ieee80211_rxinfo *rxi, int isprobe)
 {
 	const struct ieee80211_frame *wh;
@@ -1244,13 +1338,13 @@ ieee80211_recv_probe_resp(struct ieee80211com *ic, struct mbuf *m0,
 	}
 #endif
 	/* make sure all mandatory fixed fields are present */
-	if (m0->m_len < sizeof(*wh) + 12) {
+	if (m->m_len < sizeof(*wh) + 12) {
 		DPRINTF(("frame too short\n"));
 		return;
 	}
-	wh = mtod(m0, struct ieee80211_frame *);
+	wh = mtod(m, struct ieee80211_frame *);
 	frm = (const u_int8_t *)&wh[1];
-	efrm = mtod(m0, u_int8_t *) + m0->m_len;
+	efrm = mtod(m, u_int8_t *) + m->m_len;
 
 	tstamp  = frm; frm += 8;
 	bintval = LE_READ_2(frm); frm += 2;
@@ -1533,7 +1627,7 @@ ieee80211_recv_probe_resp(struct ieee80211com *ic, struct mbuf *m0,
  * [tlv] HT Capabilities (802.11n)
  */
 void
-ieee80211_recv_probe_req(struct ieee80211com *ic, struct mbuf *m0,
+ieee80211_recv_probe_req(struct ieee80211com *ic, struct mbuf *m,
     struct ieee80211_node *ni, struct ieee80211_rxinfo *rxi)
 {
 	const struct ieee80211_frame *wh;
@@ -1545,9 +1639,9 @@ ieee80211_recv_probe_req(struct ieee80211com *ic, struct mbuf *m0,
 	    ic->ic_state != IEEE80211_S_RUN)
 		return;
 
-	wh = mtod(m0, struct ieee80211_frame *);
+	wh = mtod(m, struct ieee80211_frame *);
 	frm = (const u_int8_t *)&wh[1];
-	efrm = mtod(m0, u_int8_t *) + m0->m_len;
+	efrm = mtod(m, u_int8_t *) + m->m_len;
 
 	ssid = rates = xrates = htcaps = NULL;
 	while (frm + 2 <= efrm) {
@@ -1625,7 +1719,7 @@ ieee80211_recv_probe_req(struct ieee80211com *ic, struct mbuf *m0,
  * [2] Status code
  */
 void
-ieee80211_recv_auth(struct ieee80211com *ic, struct mbuf *m0,
+ieee80211_recv_auth(struct ieee80211com *ic, struct mbuf *m,
     struct ieee80211_node *ni, struct ieee80211_rxinfo *rxi)
 {
 	const struct ieee80211_frame *wh;
@@ -1633,11 +1727,11 @@ ieee80211_recv_auth(struct ieee80211com *ic, struct mbuf *m0,
 	u_int16_t algo, seq, status;
 
 	/* make sure all mandatory fixed fields are present */
-	if (m0->m_len < sizeof(*wh) + 6) {
+	if (m->m_len < sizeof(*wh) + 6) {
 		DPRINTF(("frame too short\n"));
 		return;
 	}
-	wh = mtod(m0, struct ieee80211_frame *);
+	wh = mtod(m, struct ieee80211_frame *);
 	frm = (const u_int8_t *)&wh[1];
 
 	algo   = LE_READ_2(frm); frm += 2;
@@ -1678,7 +1772,7 @@ ieee80211_recv_auth(struct ieee80211com *ic, struct mbuf *m0,
  * [tlv] HT Capabilities (802.11n)
  */
 void
-ieee80211_recv_assoc_req(struct ieee80211com *ic, struct mbuf *m0,
+ieee80211_recv_assoc_req(struct ieee80211com *ic, struct mbuf *m,
     struct ieee80211_node *ni, struct ieee80211_rxinfo *rxi, int reassoc)
 {
 	const struct ieee80211_frame *wh;
@@ -1694,13 +1788,13 @@ ieee80211_recv_assoc_req(struct ieee80211com *ic, struct mbuf *m0,
 		return;
 
 	/* make sure all mandatory fixed fields are present */
-	if (m0->m_len < sizeof(*wh) + (reassoc ? 10 : 4)) {
+	if (m->m_len < sizeof(*wh) + (reassoc ? 10 : 4)) {
 		DPRINTF(("frame too short\n"));
 		return;
 	}
-	wh = mtod(m0, struct ieee80211_frame *);
+	wh = mtod(m, struct ieee80211_frame *);
 	frm = (const u_int8_t *)&wh[1];
-	efrm = mtod(m0, u_int8_t *) + m0->m_len;
+	efrm = mtod(m, u_int8_t *) + m->m_len;
 
 	if (!IEEE80211_ADDR_EQ(wh->i_addr3, ic->ic_bss->ni_bssid)) {
 		DPRINTF(("ignore other bss from %s\n",
@@ -1972,7 +2066,7 @@ ieee80211_recv_assoc_req(struct ieee80211com *ic, struct mbuf *m0,
  * [tlv] HT Operation (802.11n)
  */
 void
-ieee80211_recv_assoc_resp(struct ieee80211com *ic, struct mbuf *m0,
+ieee80211_recv_assoc_resp(struct ieee80211com *ic, struct mbuf *m,
     struct ieee80211_node *ni, int reassoc)
 {
 	struct ifnet *ifp = &ic->ic_if;
@@ -1989,13 +2083,13 @@ ieee80211_recv_assoc_resp(struct ieee80211com *ic, struct mbuf *m0,
 	}
 
 	/* make sure all mandatory fixed fields are present */
-	if (m0->m_len < sizeof(*wh) + 6) {
+	if (m->m_len < sizeof(*wh) + 6) {
 		DPRINTF(("frame too short\n"));
 		return;
 	}
-	wh = mtod(m0, struct ieee80211_frame *);
+	wh = mtod(m, struct ieee80211_frame *);
 	frm = (const u_int8_t *)&wh[1];
-	efrm = mtod(m0, u_int8_t *) + m0->m_len;
+	efrm = mtod(m, u_int8_t *) + m->m_len;
 
 	capinfo = LE_READ_2(frm); frm += 2;
 	status =  LE_READ_2(frm); frm += 2;
@@ -2115,7 +2209,7 @@ ieee80211_recv_assoc_resp(struct ieee80211com *ic, struct mbuf *m0,
  * [2] Reason code
  */
 void
-ieee80211_recv_deauth(struct ieee80211com *ic, struct mbuf *m0,
+ieee80211_recv_deauth(struct ieee80211com *ic, struct mbuf *m,
     struct ieee80211_node *ni)
 {
 	const struct ieee80211_frame *wh;
@@ -2123,11 +2217,11 @@ ieee80211_recv_deauth(struct ieee80211com *ic, struct mbuf *m0,
 	u_int16_t reason;
 
 	/* make sure all mandatory fixed fields are present */
-	if (m0->m_len < sizeof(*wh) + 2) {
+	if (m->m_len < sizeof(*wh) + 2) {
 		DPRINTF(("frame too short\n"));
 		return;
 	}
-	wh = mtod(m0, struct ieee80211_frame *);
+	wh = mtod(m, struct ieee80211_frame *);
 	frm = (const u_int8_t *)&wh[1];
 
 	reason = LE_READ_2(frm);
@@ -2161,7 +2255,7 @@ ieee80211_recv_deauth(struct ieee80211com *ic, struct mbuf *m0,
  * [2] Reason code
  */
 void
-ieee80211_recv_disassoc(struct ieee80211com *ic, struct mbuf *m0,
+ieee80211_recv_disassoc(struct ieee80211com *ic, struct mbuf *m,
     struct ieee80211_node *ni)
 {
 	const struct ieee80211_frame *wh;
@@ -2169,11 +2263,11 @@ ieee80211_recv_disassoc(struct ieee80211com *ic, struct mbuf *m0,
 	u_int16_t reason;
 
 	/* make sure all mandatory fixed fields are present */
-	if (m0->m_len < sizeof(*wh) + 2) {
+	if (m->m_len < sizeof(*wh) + 2) {
 		DPRINTF(("frame too short\n"));
 		return;
 	}
-	wh = mtod(m0, struct ieee80211_frame *);
+	wh = mtod(m, struct ieee80211_frame *);
 	frm = (const u_int8_t *)&wh[1];
 
 	reason = LE_READ_2(frm);
@@ -2218,7 +2312,7 @@ ieee80211_recv_addba_req(struct ieee80211com *ic, struct mbuf *m,
 {
 	const struct ieee80211_frame *wh;
 	const u_int8_t *frm;
-	struct ieee80211_ba *ba;
+	struct ieee80211_rx_ba *ba;
 	u_int16_t params, ssn, bufsz, timeout, status;
 	u_int8_t token, tid;
 
@@ -2242,11 +2336,11 @@ ieee80211_recv_addba_req(struct ieee80211com *ic, struct mbuf *m,
 	timeout = LE_READ_2(&frm[5]);
 	ssn = LE_READ_2(&frm[7]) >> 4;
 
-	ba = &ni->ni_ba[tid];
-	/* check if we already have a BA agreement for this RA/TID */
+	ba = &ni->ni_rx_ba[tid];
+	/* check if we already have a Block Ack agreement for this RA/TID */
 	if (ba->ba_state == IEEE80211_BA_AGREED) {
 		/* XXX should we update the timeout value? */
-		/* reset BA inactivity timer */
+		/* reset Block Ack inactivity timer */
 		timeout_add_usec(&ba->ba_to, ba->ba_timeout_val);
 
 		/* check if it's a Protected Block Ack agreement */
@@ -2254,7 +2348,7 @@ ieee80211_recv_addba_req(struct ieee80211com *ic, struct mbuf *m,
 		    !(ni->ni_rsncaps & IEEE80211_RSNCAP_PBAC))
 			return;	/* not a PBAC, ignore */
 
-		/* PBAC: treat the ADDBA Request like a BAR */
+		/* PBAC: treat the ADDBA Request like a BlockAckReq */
 		if (SEQ_LT(ba->ba_winstart, ssn))
 			ieee80211_ba_move_window(ic, ni, tid, ssn);
 		return;
@@ -2283,13 +2377,12 @@ ieee80211_recv_addba_req(struct ieee80211com *ic, struct mbuf *m,
 
 	/* setup Block Ack agreement */
 	ba->ba_state = IEEE80211_BA_INIT;
-	ba->ba_token = token;	/* save Dialog Token for ADDBA Resp */
 	ba->ba_timeout_val = timeout * IEEE80211_DUR_TU;
 	if (ba->ba_timeout_val < IEEE80211_BA_MIN_TIMEOUT)
 		ba->ba_timeout_val = IEEE80211_BA_MIN_TIMEOUT;
 	else if (ba->ba_timeout_val > IEEE80211_BA_MAX_TIMEOUT)
 		ba->ba_timeout_val = IEEE80211_BA_MAX_TIMEOUT;
-	timeout_set(&ba->ba_to, ieee80211_ba_timeout, ba);
+	timeout_set(&ba->ba_to, ieee80211_rx_ba_timeout, ba);
 	ba->ba_winsize = bufsz;
 	if (ba->ba_winsize == 0 || ba->ba_winsize > IEEE80211_BA_MAX_WINSZ)
 		ba->ba_winsize = IEEE80211_BA_MAX_WINSZ;
@@ -2305,8 +2398,8 @@ ieee80211_recv_addba_req(struct ieee80211com *ic, struct mbuf *m,
 	ba->ba_head = 0;
 
 	/* notify drivers of this new Block Ack agreement */
-	if (ic->ic_htimmba_start != NULL &&
-	    ic->ic_htimmba_start(ic, ni, tid) != 0) {
+	if (ic->ic_ampdu_rx_start != NULL &&
+	    ic->ic_ampdu_rx_start(ic, ni, tid) != 0) {
 		/* driver failed to setup, rollback */
 		free(ba->ba_buf, M_DEVBUF);
 		ba->ba_buf = NULL;
@@ -2320,7 +2413,7 @@ ieee80211_recv_addba_req(struct ieee80211com *ic, struct mbuf *m,
  resp:
 	/* MLME-ADDBA.response */
 	IEEE80211_SEND_ACTION(ic, ni, IEEE80211_CATEG_BA,
-	    IEEE80211_ACTION_ADDBA_RESP, status << 16 | tid);
+	    IEEE80211_ACTION_ADDBA_RESP, status << 16 | token << 8 | tid);
 }
 
 /*-
@@ -2338,7 +2431,7 @@ ieee80211_recv_addba_resp(struct ieee80211com *ic, struct mbuf *m,
 {
 	const struct ieee80211_frame *wh;
 	const u_int8_t *frm;
-	struct ieee80211_ba *ba;
+	struct ieee80211_tx_ba *ba;
 	u_int16_t status, params, bufsz, timeout;
 	u_int8_t token, tid;
 
@@ -2363,7 +2456,7 @@ ieee80211_recv_addba_resp(struct ieee80211com *ic, struct mbuf *m,
 	 * Ignore if no ADDBA request has been sent for this RA/TID or
 	 * if we already have a Block Ack agreement.
 	 */
-	ba = &ni->ni_ba[tid];
+	ba = &ni->ni_tx_ba[tid];
 	if (ba->ba_state != IEEE80211_BA_REQUESTED) {
 		DPRINTF(("no matching ADDBA req found\n"));
 		return;
@@ -2385,11 +2478,12 @@ ieee80211_recv_addba_resp(struct ieee80211com *ic, struct mbuf *m,
 	ba->ba_state = IEEE80211_BA_AGREED;
 
 	/* notify drivers of this new Block Ack agreement */
-	if (ic->ic_htimmba_start != NULL)
-		(void)ic->ic_htimmba_start(ic, ni, tid);
+	if (ic->ic_ampdu_tx_start != NULL)
+		(void)ic->ic_ampdu_tx_start(ic, ni, tid);
 
 	/* start Block Ack inactivity timeout */
-	timeout_add_usec(&ba->ba_to, ba->ba_timeout_val);
+	if (ba->ba_timeout_val != 0)
+		timeout_add_usec(&ba->ba_to, ba->ba_timeout_val);
 }
 
 /*-
@@ -2405,7 +2499,6 @@ ieee80211_recv_delba(struct ieee80211com *ic, struct mbuf *m,
 {
 	const struct ieee80211_frame *wh;
 	const u_int8_t *frm;
-	struct ieee80211_ba *ba;
 	u_int16_t params, reason;
 	u_int8_t tid;
 	int i;
@@ -2424,29 +2517,46 @@ ieee80211_recv_delba(struct ieee80211com *ic, struct mbuf *m,
 	DPRINTF(("received DELBA from %s, TID %d, reason %d\n",
 	    ether_sprintf(ni->ni_macaddr), tid, reason));
 
-	ba = &ni->ni_ba[tid];
-	if (ba->ba_state != IEEE80211_BA_AGREED &&
-	    ba->ba_state != IEEE80211_BA_REQUESTED) {
-		DPRINTF(("no matching BA agreement found\n"));
-		return;
-	}
-	/* MLME-DELBA.indication */
+	if (params & IEEE80211_DELBA_INITIATOR) {
+		/* MLME-DELBA.indication(Originator) */
+		struct ieee80211_rx_ba *ba = &ni->ni_rx_ba[tid];
 
-	/* notify drivers of the end of the Block Ack agreement */
-	if (ic->ic_htimmba_stop != NULL)
-		ic->ic_htimmba_stop(ic, ni, tid);
+		if (ba->ba_state != IEEE80211_BA_AGREED) {
+			DPRINTF(("no matching Block Ack agreement\n"));
+			return;
+		}
+		/* notify drivers of the end of the Block Ack agreement */
+		if (ic->ic_ampdu_rx_stop != NULL)
+			ic->ic_ampdu_rx_stop(ic, ni, tid);
 
-	ba->ba_state = IEEE80211_BA_INIT;
-	/* stop Block Ack inactivity timer */
-	timeout_del(&ba->ba_to);
-	if (ba->ba_buf != NULL) {
-		/* free all MSDUs stored in reordering buffer */
-		for (i = 0; i < IEEE80211_BA_MAX_WINSZ; i++)
-			if (ba->ba_buf[i].m != NULL)
-				m_freem(ba->ba_buf[i].m);
-		/* free reordering buffer */
-		free(ba->ba_buf, M_DEVBUF);
-		ba->ba_buf = NULL;
+		ba->ba_state = IEEE80211_BA_INIT;
+		/* stop Block Ack inactivity timer */
+		timeout_del(&ba->ba_to);
+
+		if (ba->ba_buf != NULL) {
+			/* free all MSDUs stored in reordering buffer */
+			for (i = 0; i < IEEE80211_BA_MAX_WINSZ; i++)
+				if (ba->ba_buf[i].m != NULL)
+					m_freem(ba->ba_buf[i].m);
+			/* free reordering buffer */
+			free(ba->ba_buf, M_DEVBUF);
+			ba->ba_buf = NULL;
+		}
+	} else {
+		/* MLME-DELBA.indication(Recipient) */
+		struct ieee80211_tx_ba *ba = &ni->ni_tx_ba[tid];
+
+		if (ba->ba_state != IEEE80211_BA_AGREED) {
+			DPRINTF(("no matching Block Ack agreement\n"));
+			return;
+		}
+		/* notify drivers of the end of the Block Ack agreement */
+		if (ic->ic_ampdu_tx_stop != NULL)
+			ic->ic_ampdu_tx_stop(ic, ni, tid);
+
+		ba->ba_state = IEEE80211_BA_INIT;
+		/* stop Block Ack inactivity timer */
+		timeout_del(&ba->ba_to);
 	}
 }
 #endif	/* !IEEE80211_NO_HT */
@@ -2684,7 +2794,7 @@ ieee80211_recv_pspoll(struct ieee80211com *ic, struct mbuf *m,
 
 #ifndef IEEE80211_NO_HT
 /*
- * Process an incoming Block Ack Request control frame (see 7.2.1.7).
+ * Process an incoming BlockAckReq control frame (see 7.2.1.7).
  */
 void
 ieee80211_recv_bar(struct ieee80211com *ic, struct mbuf *m,
@@ -2696,7 +2806,7 @@ ieee80211_recv_bar(struct ieee80211com *ic, struct mbuf *m,
 	u_int8_t tid, ntids;
 
 	if (!(ni->ni_flags & IEEE80211_NODE_HT)) {
-		DPRINTF(("received BAR from non-HT STA %s\n",
+		DPRINTF(("received BlockAckReq from non-HT STA %s\n",
 		    ether_sprintf(ni->ni_macaddr)));
 		return;
 	}
@@ -2707,7 +2817,7 @@ ieee80211_recv_bar(struct ieee80211com *ic, struct mbuf *m,
 	wh = mtod(m, struct ieee80211_frame_min *);
 	frm = (const u_int8_t *)&wh[1];
 
-	/* read BAR Control field */
+	/* read BlockAckReq Control field */
 	ctl = LE_READ_2(&frm[0]);
 	tid = ctl >> 12;
 
@@ -2720,7 +2830,7 @@ ieee80211_recv_bar(struct ieee80211com *ic, struct mbuf *m,
 			DPRINTF(("MTBAR frame too short\n"));
 			return;
 		}
-		frm += 2;	/* skip BAR Control field */
+		frm += 2;	/* skip BlockAckReq Control field */
 		while (ntids-- > 0) {
 			/* read MTBAR Information field */
 			tid = LE_READ_2(&frm[0]) >> 12;
@@ -2736,14 +2846,14 @@ ieee80211_recv_bar(struct ieee80211com *ic, struct mbuf *m,
 }
 
 /*
- * Process a Block Ack Request for a specific TID (see 9.10.7.6.3).
+ * Process a BlockAckReq for a specific TID (see 9.10.7.6.3).
  * This is the common back-end for all BlockAckReq frame variants.
  */
 void
 ieee80211_bar_tid(struct ieee80211com *ic, struct ieee80211_node *ni,
     u_int8_t tid, u_int16_t ssn)
 {
-	struct ieee80211_ba *ba = &ni->ni_ba[tid];
+	struct ieee80211_rx_ba *ba = &ni->ni_rx_ba[tid];
 
 	/* check if we have a Block Ack agreement for RA/TID */
 	if (ba->ba_state != IEEE80211_BA_AGREED) {
@@ -2770,4 +2880,3 @@ ieee80211_bar_tid(struct ieee80211com *ic, struct ieee80211_node *ni,
 		ieee80211_ba_move_window(ic, ni, tid, ssn);
 }
 #endif	/* !IEEE80211_NO_HT */
-

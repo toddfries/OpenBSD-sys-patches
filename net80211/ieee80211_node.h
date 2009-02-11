@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_node.h,v 1.37 2009/01/26 21:55:58 damien Exp $	*/
+/*	$OpenBSD: ieee80211_node.h,v 1.39 2009/01/28 18:55:18 damien Exp $	*/
 /*	$NetBSD: ieee80211_node.h,v 1.9 2004/04/30 22:57:32 dyoung Exp $	*/
 
 /*-
@@ -105,12 +105,8 @@ struct ieee80211_rxinfo {
 #define IEEE80211_RXI_AMPDU_DONE	0x00000002
 
 /* Block Acknowledgement Record */
-struct ieee80211_ba {
+struct ieee80211_tx_ba {
 	struct ieee80211_node	*ba_ni;	/* backpointer for callbacks */
-	struct {
-		struct mbuf		*m;
-		struct ieee80211_rxinfo	rxi;
-	}			*ba_buf;
 	struct timeout		ba_to;
 	int			ba_timeout_val;
 #define IEEE80211_BA_MIN_TIMEOUT	(10 * 1000)		/* 10msec */
@@ -126,8 +122,22 @@ struct ieee80211_ba {
 	u_int16_t		ba_winsize;
 #define IEEE80211_BA_MAX_WINSZ	128	/* maximum we will accept */
 
-	u_int16_t		ba_head;
 	u_int8_t		ba_token;
+};
+
+struct ieee80211_rx_ba {
+	struct ieee80211_node	*ba_ni;	/* backpointer for callbacks */
+	struct {
+		struct mbuf		*m;
+		struct ieee80211_rxinfo	rxi;
+	}			*ba_buf;
+	struct timeout		ba_to;
+	int			ba_timeout_val;
+	int			ba_state;
+	u_int16_t		ba_winstart;
+	u_int16_t		ba_winend;
+	u_int16_t		ba_winsize;
+	u_int16_t		ba_head;
 };
 
 /*
@@ -137,9 +147,7 @@ struct ieee80211_ba {
  * the ieee80211com structure.
  */
 struct ieee80211_node {
-	/* ni_macaddr must be the first field for RB_FIND() */
-	u_int8_t		ni_macaddr[IEEE80211_ADDR_LEN];
-	u_int8_t		ni_bssid[IEEE80211_ADDR_LEN];
+	RB_ENTRY(ieee80211_node)	ni_node;
 
 	struct ieee80211com	*ni_ic;		/* back-pointer */
 
@@ -149,6 +157,10 @@ struct ieee80211_node {
 	/* hardware */
 	u_int32_t		ni_rstamp;	/* recv timestamp */
 	u_int8_t		ni_rssi;	/* recv ssi */
+
+	/* header */
+	u_int8_t		ni_macaddr[IEEE80211_ADDR_LEN];
+	u_int8_t		ni_bssid[IEEE80211_ADDR_LEN];
 
 	/* beacon, probe response */
 	u_int8_t		ni_tstamp[8];	/* from last rcv'd beacon */
@@ -206,8 +218,9 @@ struct ieee80211_node {
 	int			ni_sa_query_count;
 
 #ifdef notyet
-	/* HT-immediate Block Ack */
-	struct ieee80211_ba	ni_ba[IEEE80211_NUM_TID];
+	/* Block Ack records */
+	struct ieee80211_tx_ba	ni_tx_ba[IEEE80211_NUM_TID];
+	struct ieee80211_rx_ba	ni_rx_ba[IEEE80211_NUM_TID];
 #endif
 
 	/* others */
@@ -237,8 +250,6 @@ struct ieee80211_node {
 #define IEEE80211_NODE_HT		0x0400	/* HT negotiated */
 #define IEEE80211_NODE_SA_QUERY		0x0800	/* SA Query in progress */
 #define IEEE80211_NODE_SA_QUERY_FAILED	0x1000	/* last SA Query failed */
-
-	RB_ENTRY(ieee80211_node)	ni_node;
 };
 
 RB_HEAD(ieee80211_tree, ieee80211_node);

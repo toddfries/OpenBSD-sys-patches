@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_spppsubr.c,v 1.70 2008/06/09 07:07:16 djm Exp $	*/
+/*	$OpenBSD: if_spppsubr.c,v 1.72 2009/02/06 22:07:04 grange Exp $	*/
 /*
  * Synchronous PPP/Cisco link level subroutines.
  * Keepalive protocol implemented in both Cisco and PPP modes.
@@ -307,7 +307,7 @@ HIDE void sppp_cp_timeout(void *arg);
 HIDE void sppp_cp_change_state(const struct cp *cp, struct sppp *sp,
 				 int newstate);
 HIDE void sppp_auth_send(const struct cp *cp,
-			   struct sppp *sp, unsigned int type, u_char id,
+			   struct sppp *sp, unsigned int type, u_int id,
 			   ...);
 
 HIDE void sppp_up_event(const struct cp *cp, struct sppp *sp);
@@ -4407,7 +4407,7 @@ sppp_pap_scr(struct sppp *sp)
 
 HIDE void
 sppp_auth_send(const struct cp *cp, struct sppp *sp,
-		unsigned int type, u_char id, ...)
+		unsigned int type, u_int id, ...)
 {
 	STDDCL;
 	struct ppp_header *h;
@@ -4866,7 +4866,7 @@ sppp_params(struct sppp *sp, u_long cmd, void *data)
 		return EFAULT;
 
 	switch (spr.cmd) {
-	case (int)SPPPIOGDEFS:
+	case SPPPIOGDEFS:
 		if (cmd != SIOCGIFGENERIC)
 			return EINVAL;
 		/*
@@ -4887,7 +4887,7 @@ sppp_params(struct sppp *sp, u_long cmd, void *data)
 		bzero(spr.defs.hisauth.challenge, AUTHKEYLEN);
 		return copyout(&spr, (caddr_t)ifr->ifr_data, sizeof spr);
 
-	case (int)SPPPIOSDEFS:
+	case SPPPIOSDEFS:
 		if (cmd != SIOCSIFGENERIC)
 			return EINVAL;
 		/*

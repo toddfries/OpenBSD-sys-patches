@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.13 2009/01/17 23:44:46 guenther Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.15 2009/02/03 11:24:19 mikeb Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.1 2003/04/26 18:39:33 fvdl Exp $	*/
 
 /*-
@@ -160,6 +160,7 @@ cpu_exit(struct proc *p)
 		mtrr_clean(p);
 
 	pmap_deactivate(p);
+	tss_free(p->p_md.md_tss_sel);
 	sched_exit(p);
 }
 
@@ -171,8 +172,6 @@ cpu_exit(struct proc *p)
 void
 cpu_wait(struct proc *p)
 {
-	/* Nuke the TSS. */
-	tss_free(p->p_md.md_tss_sel);
 }
 
 /*
@@ -252,7 +251,7 @@ vmapbuf(struct buf *bp, vsize_t len)
 
 	if ((bp->b_flags & B_PHYS) == 0)
 		panic("vmapbuf");
-	faddr = trunc_page((vaddr_t)bp->b_saveaddr = bp->b_data);
+	faddr = trunc_page((vaddr_t)(bp->b_saveaddr = bp->b_data));
 	off = (vaddr_t)bp->b_data - faddr;
 	len = round_page(off + len);
 	taddr= uvm_km_valloc_wait(phys_map, len);

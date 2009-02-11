@@ -2358,7 +2358,6 @@ int radeon_cp_indices(struct drm_device *dev, void *data, struct drm_file *file_
 	struct drm_buf *buf;
 	drm_radeon_indices_t *elts = data;
 	drm_radeon_tcl_prim_t prim;
-	int count;
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
@@ -2397,7 +2396,6 @@ int radeon_cp_indices(struct drm_device *dev, void *data, struct drm_file *file_
 		return EINVAL;
 	}
 
-	count = (elts->end - elts->start) / sizeof(u16);
 	elts->start -= RADEON_INDEX_PRIM_OFFSET;
 
 	if (elts->start & 0x7) {
@@ -3232,8 +3230,8 @@ radeon_driver_close(struct drm_device *dev, struct drm_file *file_priv)
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 
 	dev_priv->page_flipping = 0;
-	radeon_mem_release(file_priv, dev_priv->gart_heap);
-	radeon_mem_release(file_priv, dev_priv->fb_heap);
+	radeon_mem_release(file_priv, &dev_priv->gart_heap);
+	radeon_mem_release(file_priv, &dev_priv->fb_heap);
 	if (dev_priv->cp_running)
 		radeon_surfaces_release(file_priv, dev_priv);
 }
