@@ -15,7 +15,6 @@ file   dev/pci/drm/drm_heap.c          inteldrm | radeondrm
 file   dev/pci/drm/drm_irq.c           drm
 file   dev/pci/drm/drm_lock.c          drm
 file   dev/pci/drm/drm_memory.c        drm
-file   dev/pci/drm/drm_pci.c           drm
 file   dev/pci/drm/drm_scatter.c       drm
 
 device	inteldrm: drmbase

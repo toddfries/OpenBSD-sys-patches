@@ -166,7 +166,6 @@ extern int ticks;		/* really should be in a header */
 
 extern struct cfdriver drm_cd;
 
-typedef unsigned long dma_addr_t;
 typedef u_int64_t u64;
 typedef u_int32_t u32;
 typedef u_int16_t u16;
@@ -268,15 +267,6 @@ typedef struct drm_pci_id_list
 struct drm_file;
 struct drm_device;
 
-#define DRM_AUTH	0x1
-#define DRM_MASTER	0x2
-#define DRM_ROOT_ONLY	0x4
-typedef struct drm_ioctl_desc {
-	unsigned long cmd;
-	int (*func)(struct drm_device *, void *, struct drm_file *);
-	int flags;
-} drm_ioctl_desc_t;
-
 struct drm_magic_entry {
 	drm_magic_t	       magic;
 	struct drm_file	       *priv;
@@ -295,22 +285,21 @@ typedef struct drm_buf {
 	void		  *dev_private;  /* Per-buffer private storage       */
 } drm_buf_t;
 
-typedef struct drm_dma_handle {
-	void *vaddr;
-	bus_addr_t busaddr;
-	bus_dmamap_t	dmamap;
-	bus_dma_segment_t seg;
-	void *addr;
-	size_t size;
-} drm_dma_handle_t;
+struct drm_dmamem {
+	bus_dmamap_t		map;
+	caddr_t			kva;
+	bus_size_t		size;
+	int			nsegs;
+	bus_dma_segment_t	segs[1];
+};
 
 typedef struct drm_buf_entry {
-	int		  buf_size;
-	int		  buf_count;
-	drm_buf_t	  *buflist;
-	int		  seg_count;
-	drm_dma_handle_t  **seglist;
-	int		  page_order;
+	struct drm_dmamem	**seglist;
+	drm_buf_t		*buflist;
+	int			 buf_size;
+	int			 buf_count;
+	int			 page_order;
+	int			 seg_count;
 } drm_buf_entry_t;
 
 typedef TAILQ_HEAD(drm_file_list, drm_file) drm_file_list_t;
@@ -375,37 +364,24 @@ struct drm_agp_head {
    	int					 mtrr;
 };
 
-struct drm_sg_dmamem {
-	bus_dma_tag_t		sg_tag;
-	bus_dmamap_t		sg_map;
-	bus_dma_segment_t	*sg_segs;
-	int			sg_nsegs;
-	size_t			sg_size;
-	caddr_t			sg_kva;
+struct drm_sg_mem {
+	struct drm_dmamem	*mem;
+	unsigned long		 handle;
 };
-
-typedef struct drm_sg_mem {
-	unsigned long   handle;
-	void            *virtual;
-	int             pages;
-	dma_addr_t	*busaddr;
-	drm_dma_handle_t *dmah;	/* Handle to PCI memory for ATI PCIGART table */
-	struct drm_sg_dmamem *mem;
-} drm_sg_mem_t;
 
 typedef TAILQ_HEAD(drm_map_list, drm_local_map) drm_map_list_t;
 
 typedef struct drm_local_map {
 	TAILQ_ENTRY(drm_local_map)	 link;	/* Link for map list */
-	drm_dma_handle_t		*dmah;	/* Handle to DMA mem */
+	struct drm_dmamem		*dmamem;/* Handle to DMA mem */
 	void				*handle;/* KVA, if mapped */
 	bus_space_tag_t			 bst;	/* Tag for mapped pci mem */
 	bus_space_handle_t		 bsh;	/* Handle to mapped pci mem */
 	u_long				 ext;	/* extent for mmap */
-	enum drm_map_flags		 flags;	/* Flags */
+	u_long				 offset;/* Physical address */
+	u_long				 size;	/* Physical size (bytes) */
 	int				 mtrr;	/* Boolean: MTRR used */
-	unsigned long			 offset;/* Physical address */
-	unsigned long			 size;	/* Physical size (bytes) */
+	enum drm_map_flags		 flags;	/* Flags */
 	enum drm_map_type		 type;	/* Type of memory mapped */
 } drm_local_map_t;
 
@@ -439,13 +415,14 @@ struct drm_mem {
 #define upper_32_bits(_val) ((u_int32_t)(((_val) >> 16) >> 16))
 
 struct drm_ati_pcigart_info {
-	int gart_table_location;
-	int gart_reg_if;
-	void *addr;
-	dma_addr_t bus_addr;
-	dma_addr_t table_mask;
-	drm_local_map_t mapping;
-	int table_size;
+	drm_local_map_t		 mapping;
+	struct drm_dmamem	*mem;
+	void			*addr;
+	bus_addr_t		 bus_addr;
+	bus_addr_t		 table_mask;
+	int			 gart_table_location;
+	int			 gart_reg_if;
+	int			 table_size;
 };
 
 struct drm_driver_info {
@@ -543,7 +520,7 @@ struct drm_device {
 	pid_t		  buf_pgid;
 
 	struct drm_agp_head	*agp;
-	drm_sg_mem_t		*sg;  /* Scatter gather memory */
+	struct drm_sg_mem	*sg;  /* Scatter gather memory */
 	atomic_t		*ctx_bitmap;
 	void			*dev_private;
 	drm_local_map_t		*agp_buffer_map;
@@ -570,6 +547,9 @@ dev_type_open(drmopen);
 dev_type_close(drmclose);
 dev_type_mmap(drmmmap);
 extern drm_local_map_t	*drm_getsarea(struct drm_device *);
+struct drm_dmamem	*drm_dmamem_alloc(bus_dma_tag_t, bus_size_t, bus_size_t,
+			     int, bus_size_t, int, int);
+void	drm_dmamem_free(bus_dma_tag_t, struct drm_dmamem *);
 
 drm_pci_id_list_t *drm_find_description(int , int , drm_pci_id_list_t *);
 
@@ -619,8 +599,6 @@ int	drm_lock_free(struct drm_lock_data *, unsigned int);
 void	drm_rmmap(struct drm_device *, drm_local_map_t *);
 void	drm_rmmap_locked(struct drm_device *, drm_local_map_t *);
 int	drm_order(unsigned long);
-drm_local_map_t
-	*drm_find_matching_map(struct drm_device *, drm_local_map_t *);
 int	drm_addmap(struct drm_device *, unsigned long, unsigned long,
 	    enum drm_map_type, enum drm_map_flags, drm_local_map_t **);
 int	drm_addbufs_pci(struct drm_device *, struct drm_buf_desc *);
@@ -664,7 +642,7 @@ int	drm_agp_bind(struct drm_device *, struct drm_agp_binding *);
 int	drm_agp_unbind(struct drm_device *, struct drm_agp_binding *);
 
 /* Scatter Gather Support (drm_scatter.c) */
-void	drm_sg_cleanup(drm_sg_mem_t *);
+void	drm_sg_cleanup(struct drm_device *, struct drm_sg_mem *);
 int	drm_sg_alloc(struct drm_device *, struct drm_scatter_gather *);
 
 /* ATI PCIGART support (ati_pcigart.c) */
@@ -718,11 +696,6 @@ int	drm_agp_bind_ioctl(struct drm_device *, void *, struct drm_file *);
 /* Scatter Gather Support (drm_scatter.c) */
 int	drm_sg_alloc_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_sg_free(struct drm_device *, void *, struct drm_file *);
-
-/* consistent PCI memory functions (drm_pci.c) */
-drm_dma_handle_t *drm_pci_alloc(bus_dma_tag_t, size_t, size_t,
-		      dma_addr_t);
-void	drm_pci_free(bus_dma_tag_t, drm_dma_handle_t *);
 
 /* Inline replacements for DRM_IOREMAP macros */
 #define drm_core_ioremap_wc drm_core_ioremap
