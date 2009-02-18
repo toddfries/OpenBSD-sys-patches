@@ -102,6 +102,8 @@ sdmmc_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sct = saa->sct;
 	sc->sch = saa->sch;
+	sc->sc_flags = saa->flags;
+	sc->sc_max_xfer = saa->max_xfer;
 
 	SIMPLEQ_INIT(&sc->sf_head);
 	TAILQ_INIT(&sc->sc_tskq);
