@@ -1,4 +1,4 @@
-/*	$OpenBSD: m188_machdep.c,v 1.45 2008/11/27 21:43:03 miod Exp $	*/
+/*	$OpenBSD: m188_machdep.c,v 1.48 2009/02/16 23:03:33 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -138,7 +138,7 @@ u_int	safe_level(u_int, u_int);
 
 void	m188_bootstrap(void);
 void	m188_clock_ipi_handler(struct trapframe *);
-void	m188_ext_int(u_int, struct trapframe *);
+void	m188_ext_int(struct trapframe *);
 u_int	m188_getipl(void);
 void	m188_init_clocks(void);
 void	m188_ipi_handler(struct trapframe *);
@@ -146,6 +146,7 @@ vaddr_t	m188_memsize(void);
 u_int	m188_raiseipl(u_int);
 void	m188_send_ipi(int, cpuid_t);
 u_int	m188_setipl(u_int);
+void	m188_soft_ipi(void);
 void	m188_startup(void);
 
 /*
@@ -220,7 +221,9 @@ m188_bootstrap()
 	md_init_clocks = m188_init_clocks;
 #ifdef MULTIPROCESSOR
 	md_send_ipi = m188_send_ipi;
+	md_soft_ipi = m188_soft_ipi;
 #endif
+	md_delay = m188_delay;
 
 	/* clear and disable all interrupts */
 	*(volatile u_int32_t *)MVME188_IENALL = 0;
@@ -428,6 +431,12 @@ m188_clock_ipi_handler(struct trapframe *eframe)
 		statclock((struct clockframe *)eframe);
 }
 
+void
+m188_soft_ipi()
+{
+	/* this function is not used on MVME188 */
+}
+
 #endif
 
 /*
@@ -476,7 +485,7 @@ const u_int obio_vec[32] = {
 #define VME_BERR_MASK		0x100 	/* timeout during VME IACK cycle */
 
 void
-m188_ext_int(u_int v, struct trapframe *eframe)
+m188_ext_int(struct trapframe *eframe)
 {
 #ifdef MULTIPROCESSOR
 	struct cpu_info *ci = curcpu();

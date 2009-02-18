@@ -42,11 +42,9 @@ int	radeon_do_cleanup_cp(struct drm_device *);
 void	radeon_do_cp_start(drm_radeon_private_t *);
 void	radeon_do_cp_reset(drm_radeon_private_t *);
 void	radeon_do_cp_stop(drm_radeon_private_t *);
-void	radeon_do_cp_flush(drm_radeon_private_t * dev_priv);
 int	radeon_do_engine_reset(struct drm_device *);
 void	radeon_cp_init_ring_buffer(struct drm_device *, drm_radeon_private_t *);
 int	radeon_do_init_cp(struct drm_device *, drm_radeon_init_t *);
-int	radeon_do_resume_cp(struct drm_device *);
 void	radeon_cp_load_microcode(drm_radeon_private_t *);
 int	radeon_cp_get_buffers(struct drm_device *dev, struct drm_file *,
 	    struct drm_dma *);
@@ -374,7 +372,7 @@ radeon_cp_load_microcode(drm_radeon_private_t *dev_priv)
 	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV200) ||
 	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS100) ||
 	    ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS200)) {
-		DRM_INFO("Loading R100 Microcode\n");
+		DRM_DEBUG("Loading R100 Microcode\n");
 		for (i = 0; i < 256; i++) {
 			RADEON_WRITE(RADEON_CP_ME_RAM_DATAH,
 				     R100_cp_microcode[i][1]);
@@ -385,7 +383,7 @@ radeon_cp_load_microcode(drm_radeon_private_t *dev_priv)
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV250) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV280) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS300)) {
-		DRM_INFO("Loading R200 Microcode\n");
+		DRM_DEBUG("Loading R200 Microcode\n");
 		for (i = 0; i < 256; i++) {
 			RADEON_WRITE(RADEON_CP_ME_RAM_DATAH,
 				     R200_cp_microcode[i][1]);
@@ -398,7 +396,7 @@ radeon_cp_load_microcode(drm_radeon_private_t *dev_priv)
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV380) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS400) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS480)) {
-		DRM_INFO("Loading R300 Microcode\n");
+		DRM_DEBUG("Loading R300 Microcode\n");
 		for (i = 0; i < 256; i++) {
 			RADEON_WRITE(RADEON_CP_ME_RAM_DATAH,
 				     R300_cp_microcode[i][1]);
@@ -408,7 +406,7 @@ radeon_cp_load_microcode(drm_radeon_private_t *dev_priv)
 	} else if (((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R420) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R423) ||	
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV410)) {
-		DRM_INFO("Loading R400 Microcode\n");
+		DRM_DEBUG("Loading R400 Microcode\n");
 		for (i = 0; i < 256; i++) {
 			RADEON_WRITE(RADEON_CP_ME_RAM_DATAH,
 				     R420_cp_microcode[i][1]);
@@ -416,7 +414,7 @@ radeon_cp_load_microcode(drm_radeon_private_t *dev_priv)
 				     R420_cp_microcode[i][0]);
 		}
 	} else if ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RS690) {
-		DRM_INFO("Loading RS690 Microcode\n");
+		DRM_DEBUG("Loading RS690 Microcode\n");
 		for (i = 0; i < 256; i++) {
 			RADEON_WRITE(RADEON_CP_ME_RAM_DATAH,
 				     RS690_cp_microcode[i][1]);
@@ -429,7 +427,7 @@ radeon_cp_load_microcode(drm_radeon_private_t *dev_priv)
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R580) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV560) ||
 		   ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV570)) {
-		DRM_INFO("Loading R500 Microcode\n");
+		DRM_DEBUG("Loading R500 Microcode\n");
 		for (i = 0; i < 256; i++) {
 			RADEON_WRITE(RADEON_CP_ME_RAM_DATAH,
 				     R520_cp_microcode[i][1]);
@@ -437,22 +435,6 @@ radeon_cp_load_microcode(drm_radeon_private_t *dev_priv)
 				     R520_cp_microcode[i][0]);
 		}
 	}
-}
-
-/* Flush any pending commands to the CP.  This should only be used just
- * prior to a wait for idle, as it informs the engine that the command
- * stream is ending.
- */
-void
-radeon_do_cp_flush(drm_radeon_private_t *dev_priv)
-{
-	DRM_DEBUG("\n");
-#if 0
-	u32 tmp;
-
-	tmp = RADEON_READ(RADEON_CP_RB_WPTR) | (1 << 31);
-	RADEON_WRITE(RADEON_CP_RB_WPTR, tmp);
-#endif
 }
 
 /* Wait for the CP to go idle.
@@ -634,9 +616,8 @@ radeon_cp_init_ring_buffer(struct drm_device *dev,
 			      + dev_priv->gart_vm_start);
 	} else
 #endif
-		ring_start = (dev_priv->cp_ring->offset
-			      - (unsigned long)dev->sg->virtual
-			      + dev_priv->gart_vm_start);
+		ring_start = (dev_priv->cp_ring->offset - dev->sg->handle +
+		    dev_priv->gart_vm_start);
 
 	RADEON_WRITE(RADEON_CP_RB_BASE, ring_start);
 
@@ -660,14 +641,14 @@ radeon_cp_init_ring_buffer(struct drm_device *dev,
 		struct drm_sg_mem *entry = dev->sg;
 		unsigned long tmp_ofs, page_ofs;
 
-		tmp_ofs = dev_priv->ring_rptr->offset -
-				(unsigned long)dev->sg->virtual;
+		tmp_ofs = dev_priv->ring_rptr->offset - dev->sg->handle;
 		page_ofs = tmp_ofs >> PAGE_SHIFT;
 
-		RADEON_WRITE(RADEON_CP_RB_RPTR_ADDR, entry->busaddr[page_ofs]);
+		RADEON_WRITE(RADEON_CP_RB_RPTR_ADDR,
+		    entry->mem->map->dm_segs[page_ofs].ds_addr);
 		DRM_DEBUG("ring rptr: offset=0x%08lx handle=0x%08lx\n",
-			  (unsigned long)entry->busaddr[page_ofs],
-			  entry->handle + tmp_ofs);
+		    (unsigned long)entry->mem->map->dm_segs[page_ofs].ds_addr,
+		    entry->handle + tmp_ofs);
 	}
 
 	/* Set ring buffer size */
@@ -1188,9 +1169,8 @@ radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init)
 						 + dev_priv->gart_vm_start);
 	else
 #endif
-		dev_priv->gart_buffers_offset = (dev->agp_buffer_map->offset
-					- (unsigned long)dev->sg->virtual
-					+ dev_priv->gart_vm_start);
+		dev_priv->gart_buffers_offset = (dev->agp_buffer_map->offset -
+		    dev->sg->handle + dev_priv->gart_vm_start);
 
 	DRM_DEBUG("dev_priv->gart_size %d\n", dev_priv->gart_size);
 	DRM_DEBUG("dev_priv->gart_vm_start 0x%x\n", dev_priv->gart_vm_start);
@@ -1210,8 +1190,6 @@ radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init)
 	dev_priv->ring.fetch_size_l2ow = drm_order( /* init->fetch_size */ 32 / 16);
 
 	dev_priv->ring.tail_mask = (dev_priv->ring.size / sizeof(u32)) - 1;
-
-	dev_priv->ring.high_mark = RADEON_RING_HIGH_MARK;
 
 #if __OS_HAS_AGP
 	if (dev_priv->flags & RADEON_IS_AGP) {
@@ -1261,7 +1239,7 @@ radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init)
 			}
 		}
 
-		if (!drm_ati_pcigart_init(dev, &dev_priv->gart_info)) {
+		if (drm_ati_pcigart_init(dev, &dev_priv->gart_info)) {
 			DRM_ERROR("failed to init PCI GART!\n");
 			radeon_do_cleanup_cp(dev);
 			return ENOMEM;
@@ -1291,13 +1269,6 @@ radeon_do_cleanup_cp(struct drm_device *dev)
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	DRM_DEBUG("\n");
 
-	/* Make sure interrupts are disabled here because the uninstall ioctl
-	 * may not have been called from userspace and after dev_private
-	 * is freed, it's too late.
-	 */
-	if (dev->irq_enabled)
-		drm_irq_uninstall(dev);
-
 #if __OS_HAS_AGP
 	if (dev_priv->flags & RADEON_IS_AGP) {
 		if (dev_priv->cp_ring != NULL)
@@ -1313,7 +1284,7 @@ radeon_do_cleanup_cp(struct drm_device *dev)
 		if (dev_priv->gart_info.bus_addr) {
 			/* Turn off PCI GART */
 			radeon_set_pcigart(dev_priv, 0);
-			if (!drm_ati_pcigart_cleanup(dev, &dev_priv->gart_info))
+			if (drm_ati_pcigart_cleanup(dev, &dev_priv->gart_info))
 				DRM_ERROR("failed to cleanup PCI GART!\n");
 		}
 
@@ -1327,47 +1298,6 @@ radeon_do_cleanup_cp(struct drm_device *dev)
 	dev_priv->cp_ring = NULL;
 	dev_priv->ring_rptr = NULL;
 	dev->agp_buffer_map = NULL;
-
-	return 0;
-}
-
-/* This code will reinit the Radeon CP hardware after a resume from disc.
- * AFAIK, it would be very difficult to pickle the state at suspend time, so
- * here we make sure that all Radeon hardware initialisation is re-done without
- * affecting running applications.
- *
- * Charl P. Botha <http://cpbotha.net>
- */
-int
-radeon_do_resume_cp(struct drm_device *dev)
-{
-	drm_radeon_private_t *dev_priv = dev->dev_private;
-
-	if (!dev_priv) {
-		DRM_ERROR("Called with no initialization\n");
-		return EINVAL;
-	}
-
-	DRM_DEBUG("Starting radeon_do_resume_cp()\n");
-
-#if __OS_HAS_AGP
-	if (dev_priv->flags & RADEON_IS_AGP) {
-		/* Turn off PCI GART */
-		radeon_set_pcigart(dev_priv, 0);
-	} else
-#endif
-	{
-		/* Turn on PCI GART */
-		radeon_set_pcigart(dev_priv, 1);
-	}
-
-	radeon_cp_load_microcode(dev_priv);
-	radeon_cp_init_ring_buffer(dev, dev_priv);
-
-	radeon_do_engine_reset(dev);
-	radeon_irq_set_state(dev, RADEON_SW_INT_ENABLE, 1);
-
-	DRM_DEBUG("radeon_do_resume_cp() complete\n");
 
 	return 0;
 }
@@ -1432,13 +1362,6 @@ radeon_cp_stop(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 	if (!dev_priv->cp_running)
 		return 0;
-
-	/* Flush any pending CP commands.  This ensures any outstanding
-	 * commands are exectuted by the engine before we turn it off.
-	 */
-	if (stop->flush) {
-		radeon_do_cp_flush(dev_priv);
-	}
 
 	/* If we fail to make the engine go idle, we return an error
 	 * code so that the DRM ioctl wrapper can try again.
@@ -1530,13 +1453,46 @@ radeon_cp_idle(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	return radeon_do_cp_idle(dev_priv);
 }
 
-/* Added by Charl P. Botha to call radeon_do_resume_cp().
+/*
+ * This code will reinit the Radeon CP hardware after a resume from disc.
+ * AFAIK, it would be very difficult to pickle the state at suspend time, so
+ * here we make sure that all Radeon hardware initialisation is re-done without
+ * affecting running applications.
+ *
+ * Charl P. Botha <http://cpbotha.net>
  */
 int
-radeon_cp_resume(struct drm_device *dev, void *data, struct drm_file *file_priv)
+radeon_cp_resume(struct drm_device *dev)
 {
+	drm_radeon_private_t *dev_priv = dev->dev_private;
 
-	return radeon_do_resume_cp(dev);
+	if (!dev_priv) {
+		DRM_ERROR("Called with no initialization\n");
+		return EINVAL;
+	}
+
+	DRM_DEBUG("Starting radeon_cp_resume()\n");
+
+#if __OS_HAS_AGP
+	if (dev_priv->flags & RADEON_IS_AGP) {
+		/* Turn off PCI GART */
+		radeon_set_pcigart(dev_priv, 0);
+	} else
+#endif
+	{
+		/* Turn on PCI GART */
+		radeon_set_pcigart(dev_priv, 1);
+	}
+
+	radeon_cp_load_microcode(dev_priv);
+	radeon_cp_init_ring_buffer(dev, dev_priv);
+
+	radeon_do_engine_reset(dev);
+	radeon_irq_set_state(dev, RADEON_SW_INT_ENABLE, 1);
+
+	DRM_DEBUG("radeon_cp_resume() complete\n");
+
+	return 0;
 }
 
 int
