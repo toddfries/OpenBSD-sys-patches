@@ -1,4 +1,4 @@
-/* 	$OpenBSD: isp_openbsd.c,v 1.34 2009/01/11 16:54:59 blambert Exp $ */
+/* 	$OpenBSD: isp_openbsd.c,v 1.35 2009/02/16 21:19:06 miod Exp $ */
 /*
  * Platform (OpenBSD) dependent common attachment code for QLogic adapters.
  *
@@ -59,10 +59,9 @@
  * firmware might do, we just add 3 seconds at the back end.
  */
 #define	_XT(xs)	((((xs)->timeout/1000) * hz) + (3 * hz))
-
-void ispminphys(struct buf *);
-int32_t ispcmd_slow(XS_T *);
-int32_t ispcmd(XS_T *);
+static void ispminphys(struct buf *, struct scsi_link *);
+static int32_t ispcmd_slow(XS_T *);
+static int32_t ispcmd(XS_T *);
 
 struct scsi_device isp_dev = { NULL, NULL, NULL, NULL };
 
@@ -191,8 +190,8 @@ isp_attach(struct ispsoftc *isp)
  * adapter we are and adjust accordingly.
  */
 
-void
-ispminphys(struct buf *bp)
+static void
+ispminphys(struct buf *bp, struct scsi_link *sl)
 {
 	/*
 	 * XX: Only the 1020 has a 24 bit limit.

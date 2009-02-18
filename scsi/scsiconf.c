@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.135 2008/07/22 01:01:31 dlg Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.138 2009/02/16 21:19:07 miod Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -54,6 +54,7 @@
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
+#include <sys/buf.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
@@ -161,8 +162,10 @@ scsibusattach(struct device *parent, struct device *self, void *aux)
 	if (sb->adapter_link->luns == 0)
 		sb->adapter_link->luns = 8;
 
-	printf(": %d targets, initiator %d\n", sb->sc_buswidth,
-	    sb->adapter_link->adapter_target);
+	printf(": %d targets", sb->sc_buswidth);
+	if (sb->adapter_link->adapter_target < sb->sc_buswidth)
+		printf(", initiator %d", sb->adapter_link->adapter_target);
+	printf("\n");
 
 	/* Initialize shared data. */
 	scsi_init();
@@ -746,8 +749,8 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 	 */
 #ifdef SCSIDEBUG
 	if (((1 << sc_link->scsibus) & scsidebug_buses) &&
-	    ((1 << target) & scsidebug_targets) &&
-	    ((1 << lun) & scsidebug_luns))
+	    ((target < 32) && ((1 << target) & scsidebug_targets)) &&
+	    ((lun < 32) && ((1 << lun) & scsidebug_luns)))
 		sc_link->flags |= scsidebug_level;
 #endif /* SCSIDEBUG */
 
@@ -1055,4 +1058,14 @@ scsi_devid_pg83(struct scsi_link *link)
 err:
 	free(pg, M_TEMP);
 	return (rv);
+}
+
+/*
+ * scsi_minphys member of struct scsi_adapter for drivers which don't
+ * need any specific routine.
+ */
+void
+scsi_minphys(struct buf *bp, struct scsi_link *sl)
+{
+	minphys(bp);
 }

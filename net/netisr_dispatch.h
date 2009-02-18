@@ -1,4 +1,4 @@
-/*	$OpenBSD: netisr_dispatch.h,v 1.16 2008/05/07 05:51:12 mpf Exp $	*/
+/*	$OpenBSD: netisr_dispatch.h,v 1.17 2009/02/16 00:31:25 dlg Exp $	*/
 /* $NetBSD: netisr_dispatch.h,v 1.2 2000/07/02 04:40:47 cgd Exp $ */
 
 /*

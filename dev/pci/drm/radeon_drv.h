@@ -180,8 +180,6 @@ typedef struct drm_radeon_ring_buffer {
 	u32 tail;
 	u32 tail_mask;
 	int space;
-
-	int high_mark;
 } drm_radeon_ring_buffer_t;
 
 typedef struct drm_radeon_depth_clear_t {
@@ -291,7 +289,6 @@ typedef struct drm_radeon_private {
 	atomic_t swi_emitted;
 	int vblank_crtc;
 	uint32_t irq_enable_reg;
-	int irq_enabled;
 	uint32_t r500_disp_irq_reg;
 
 	struct radeon_surface surfaces[RADEON_MAX_SURFACES];
@@ -350,7 +347,7 @@ extern int radeon_cp_start(struct drm_device *dev, void *data, struct drm_file *
 extern int radeon_cp_stop(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int radeon_cp_reset(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int radeon_cp_idle(struct drm_device *dev, void *data, struct drm_file *file_priv);
-extern int radeon_cp_resume(struct drm_device *dev, void *data, struct drm_file *file_priv);
+extern int radeon_cp_resume(struct drm_device *dev);
 extern int radeon_engine_reset(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int radeon_fullscreen(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int radeon_cp_buffers(struct drm_device *dev, void *data, struct drm_file *file_priv);
@@ -1214,8 +1211,6 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
 
 #define RADEON_MAX_VB_AGE		0x7fffffff
 #define RADEON_MAX_VB_VERTS		(0xffff)
-
-#define RADEON_RING_HIGH_MARK		128
 
 #define RADEON_PCIGART_TABLE_SIZE      (32*1024)
 

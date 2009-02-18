@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.66 2009/02/08 21:40:13 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.68 2009/02/16 22:55:03 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -178,14 +178,25 @@ panictrap(int type, struct trapframe *frame)
  * Handle external interrupts.
  */
 void
-interrupt(u_int type, struct trapframe *frame)
+interrupt(struct trapframe *frame)
 {
 	struct cpu_info *ci = curcpu();
 
 	ci->ci_intrdepth++;
-	md_interrupt_func(type, frame);
+	md_interrupt_func(frame);
 	ci->ci_intrdepth--;
 }
+
+#ifdef M88110
+/*
+ * Handle non-maskable interrupts.
+ */
+void
+nmi(struct trapframe *frame)
+{
+	md_nmi_func(frame);
+}
+#endif
 
 /*
  * Handle asynchronous software traps.
