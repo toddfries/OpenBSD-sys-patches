@@ -497,8 +497,15 @@ sdmmc_stimeout(void *arg)
 void
 sdmmc_scsi_minphys(struct buf *bp, struct scsi_link *sl)
 {
-	/* XXX limit to max. transfer size supported by card/host? */
-	if (bp->b_bcount > DEV_BSIZE)
-		bp->b_bcount = DEV_BSIZE;
+	struct sdmmc_softc *sc = sl->adapter_softc;
+	struct sdmmc_scsi_softc *scbus = sc->sc_scsibus;
+	struct sdmmc_scsi_target *tgt = &scbus->sc_tgt[sl->target];
+	struct sdmmc_function *sf = tgt->card;
+
+	/* limit to max. transfer size supported by card/host */
+	if (sc->sc_max_xfer != 0 &&
+	    bp->b_bcount > sf->csd.sector_size * sc->sc_max_xfer)
+		bp->b_bcount = sf->csd.sector_size * sc->sc_max_xfer;
+
 	minphys(bp);
 }

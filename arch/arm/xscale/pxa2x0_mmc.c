@@ -182,6 +182,8 @@ pxammc_attach(struct pxammc_softc *sc, void *aux)
 	saa.saa_busname = "sdmmc";
 	saa.sct = &pxammc_functions;
 	saa.sch = sc;
+	saa.flags = SMF_STOP_AFTER_MULTIPLE;
+	saa.max_xfer = 1;
 
 	sc->sc_sdmmc = config_found(&sc->sc_dev, &saa, NULL);
 	if (sc->sc_sdmmc == NULL) {
