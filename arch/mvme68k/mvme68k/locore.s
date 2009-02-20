@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.55 2007/10/10 15:53:52 art Exp $ */
+/*	$OpenBSD: locore.s,v 1.58 2009/02/18 20:48:02 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -212,6 +212,9 @@ is147:
 	RELOC(cputype, a0)		| no, we have 68030
 	movl	#CPU_68030,a0@		| set to reflect 68030 CPU
 
+	RELOC(clockbus, a0)		| timer is on pcc
+	movl	#BUS_PCC, a0@
+
 	movl	#CACHE_OFF,d0
 	movc	d0,cacr			| clear and disable on-chip cache(s)
 
@@ -258,6 +261,9 @@ is162:
 	RELOC(fputype, a0)
 	movl	#FPU_68040,a0@		| and a 68040 FPU
 
+	RELOC(clockbus, a0)		| timer is on mc
+	movl	#BUS_MC, a0@
+
 	RELOC(vectab, a1)
 	movl	#_C_LABEL(buserr40),a1@(8)
 	movl	#_C_LABEL(addrerr4060),a1@(12)
@@ -278,6 +284,9 @@ is167:
 
 	RELOC(fputype, a0)
 	movl	#FPU_68040,a0@		| and a 68040 FPU
+
+	RELOC(clockbus, a0)		| timer is on pcctwo
+	movl	#BUS_PCCTWO, a0@
 
 	RELOC(vectab, a1)
 	movl	#_C_LABEL(buserr40),a1@(8)
@@ -307,6 +316,9 @@ is172:
 	RELOC(fputype, a0)
 	movl	#FPU_68060,a0@		| and a 68060 FPU
 
+	RELOC(clockbus, a0)		| timer is on mc
+	movl	#BUS_MC, a0@
+
 	RELOC(vectab, a1)
 	movl	#_C_LABEL(buserr60),a1@(8)
 	movl	#_C_LABEL(addrerr4060),a1@(12)
@@ -332,6 +344,9 @@ is177:
 	
 	RELOC(fputype, a0)
 	movl	#FPU_68060,a0@		| and a 68060 FPU
+
+	RELOC(clockbus, a0)		| timer is on pcctwo
+	movl	#BUS_PCCTWO, a0@
 
 	RELOC(vectab, a1)
 	movl	#_C_LABEL(buserr60),a1@(8)
@@ -785,6 +800,11 @@ Lisaerr:
 	jra	_ASM_LABEL(faultstkadj)	| and deal with it
 Lisberr1:
 	clrw	sp@			| re-clear pad word
+	tstl	_C_LABEL(nofault)	| device probe?
+	jeq	Lisberr			| it is a bus error
+	movl	_C_LABEL(nofault),sp@-	| yes,
+	jbsr	_C_LABEL(longjmp)	|  longjmp(nofault)
+	/* NOTREACHED */
 Lisberr:
 	movl	#T_BUSERR,sp@-		| mark bus error
 	jra	_ASM_LABEL(faultstkadj)	| and deal with it
@@ -1488,6 +1508,7 @@ ENTRY(DCIU)
 	cmpl	#MMU_68040,_C_LABEL(mmutype) | 68040 or 68060?
 	jgt	1f			| no, skip
 	.word	0xf478			| cpusha dc
+1:
 #endif
 	rts
 
