@@ -1,4 +1,4 @@
-/*	$OpenBSD: bwi.c,v 1.82 2008/10/15 19:12:19 blambert Exp $	*/
+/*	$OpenBSD: bwi.c,v 1.85 2009/01/21 21:53:59 grange Exp $	*/
 
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
@@ -76,7 +76,7 @@
 
 #define BWI_DEBUG
 #ifdef BWI_DEBUG
-int bwi_debug = 1;
+int bwi_debug = 0;
 #define DPRINTF(l, x...)	do { if ((l) <= bwi_debug) printf(x); } while (0)
 #else
 #define DPRINTF(l, x...)
@@ -100,6 +100,8 @@ int bwi_debug = 1;
 
 #define __unused __attribute__((__unused__))
 
+extern int ticks;
+
 /* XXX end porting goop */
 
 /* MAC */
@@ -122,6 +124,13 @@ struct ieee80211_ds_plcp_hdr {
 	uint16_t	i_length;
 	uint16_t	i_crc;
 } __packed;
+
+enum bwi_modtype {
+	IEEE80211_MODTYPE_DS	= 0,	/* DS/CCK modulation */
+	IEEE80211_MODTYPE_PBCC	= 1,	/* PBCC modulation */
+	IEEE80211_MODTYPE_OFDM	= 2	/* OFDM modulation */
+};
+#define IEEE80211_MODTYPE_CCK   IEEE80211_MODTYPE_DS
 
 /* MAC */
 void		 bwi_tmplt_write_4(struct bwi_mac *, uint32_t, uint32_t);
@@ -572,13 +581,6 @@ const struct {
 
 static const uint8_t bwi_zero_addr[IEEE80211_ADDR_LEN];
 
-
-enum bwi_modtype {
-	IEEE80211_MODTYPE_DS	= 0,	/* DS/CCK modulation */
-	IEEE80211_MODTYPE_PBCC	= 1,	/* PBCC modulation */
-	IEEE80211_MODTYPE_OFDM	= 2	/* OFDM modulation */
-};
-#define IEEE80211_MODTYPE_CCK   IEEE80211_MODTYPE_DS
 
 /* CODE */
 
@@ -7446,7 +7448,7 @@ back:
 	error = sc->sc_newstate(ic, nstate, arg);
 
 	if (nstate == IEEE80211_S_SCAN) {
-		timeout_add(&sc->sc_scan_ch, (sc->sc_dwell_time * hz) / 1000);
+		timeout_add_msec(&sc->sc_scan_ch, sc->sc_dwell_time);
 	} else if (nstate == IEEE80211_S_RUN) {
 		/* XXX 15 seconds */
 		timeout_add_sec(&sc->sc_calib_ch, 1);

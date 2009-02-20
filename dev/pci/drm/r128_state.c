@@ -269,74 +269,12 @@ static void r128_emit_state(drm_r128_private_t * dev_priv)
 	sarea_priv->dirty &= ~R128_REQUIRE_QUIESCENCE;
 }
 
-#if R128_PERFORMANCE_BOXES
-/* ================================================================
- * Performance monitoring functions
- */
-
-static void r128_clear_box(drm_r128_private_t * dev_priv,
-			   int x, int y, int w, int h, int r, int g, int b)
-{
-	u32 pitch, offset;
-	u32 fb_bpp, color;
-	RING_LOCALS;
-
-	switch (dev_priv->fb_bpp) {
-	case 16:
-		fb_bpp = R128_GMC_DST_16BPP;
-		color = (((r & 0xf8) << 8) |
-			 ((g & 0xfc) << 3) | ((b & 0xf8) >> 3));
-		break;
-	case 24:
-		fb_bpp = R128_GMC_DST_24BPP;
-		color = ((r << 16) | (g << 8) | b);
-		break;
-	case 32:
-		fb_bpp = R128_GMC_DST_32BPP;
-		color = (((0xff) << 24) | (r << 16) | (g << 8) | b);
-		break;
-	default:
-		return;
-	}
-
-	offset = dev_priv->back_offset;
-	pitch = dev_priv->back_pitch >> 3;
-
-	BEGIN_RING(6);
-
-	OUT_RING(CCE_PACKET3(R128_CNTL_PAINT_MULTI, 4));
-	OUT_RING(R128_GMC_DST_PITCH_OFFSET_CNTL |
-		 R128_GMC_BRUSH_SOLID_COLOR |
-		 fb_bpp |
-		 R128_GMC_SRC_DATATYPE_COLOR |
-		 R128_ROP3_P |
-		 R128_GMC_CLR_CMP_CNTL_DIS | R128_GMC_AUX_CLIP_DIS);
-
-	OUT_RING((pitch << 21) | (offset >> 5));
-	OUT_RING(color);
-
-	OUT_RING((x << 16) | y);
-	OUT_RING((w << 16) | h);
-
-	ADVANCE_RING();
-}
-
-static void r128_cce_performance_boxes(drm_r128_private_t * dev_priv)
-{
-	if (atomic_read(&dev_priv->idle_count) == 0) {
-		r128_clear_box(dev_priv, 64, 4, 8, 8, 0, 255, 0);
-	} else {
-		atomic_set(&dev_priv->idle_count, 0);
-	}
-}
-
-#endif
-
 /* ================================================================
  * CCE command dispatch functions
  */
 
-static void r128_print_dirty(const char *msg, unsigned int flags)
+static void r128_print_dirty(drm_r128_private_t *dev_priv, const char *msg,
+    unsigned int flags)
 {
 	DRM_INFO("%s: (0x%x) %s%s%s%s%s%s%s%s%s\n",
 		 msg,
@@ -468,12 +406,6 @@ static void r128_cce_dispatch_swap(struct drm_device * dev)
 	RING_LOCALS;
 	DRM_DEBUG("\n");
 
-#if R128_PERFORMANCE_BOXES
-	/* Do some trivial performance monitoring...
-	 */
-	r128_cce_performance_boxes(dev_priv);
-#endif
-
 	for (i = 0; i < nbox; i++) {
 		int x = pbox[i].x1;
 		int y = pbox[i].y1;
@@ -531,12 +463,6 @@ static void r128_cce_dispatch_flip(struct drm_device * dev)
 	DRM_DEBUG("page=%d pfCurrentPage=%d\n",
 		  dev_priv->current_page, dev_priv->sarea_priv->pfCurrentPage);
 
-#if R128_PERFORMANCE_BOXES
-	/* Do some trivial performance monitoring...
-	 */
-	r128_cce_performance_boxes(dev_priv);
-#endif
-
 	BEGIN_RING(4);
 
 	R128_WAIT_UNTIL_PAGE_FLIPPED();
@@ -580,7 +506,8 @@ static void r128_cce_dispatch_vertex(struct drm_device * dev, struct drm_buf * b
 	DRM_DEBUG("buf=%d nbox=%d\n", buf->idx, sarea_priv->nbox);
 
 	if (0)
-		r128_print_dirty("dispatch_vertex", sarea_priv->dirty);
+		r128_print_dirty(dev_priv, "dispatch_vertex",
+		    sarea_priv->dirty);
 
 	if (buf->used) {
 		buf_priv->dispatched = 1;
@@ -708,7 +635,8 @@ static void r128_cce_dispatch_indices(struct drm_device * dev,
 	DRM_DEBUG("indices: s=%d e=%d c=%d\n", start, end, count);
 
 	if (0)
-		r128_print_dirty("dispatch_indices", sarea_priv->dirty);
+		r128_print_dirty(dev_priv, "dispatch_indices",
+		    sarea_priv->dirty);
 
 	if (start != end) {
 		buf_priv->dispatched = 1;
@@ -1643,13 +1571,12 @@ int r128_getparam(struct drm_device *dev, void *data, struct drm_file *file_priv
 	return 0;
 }
 
-void r128_driver_preclose(struct drm_device * dev, struct drm_file *file_priv)
+void r128_driver_close(struct drm_device * dev, struct drm_file *file_priv)
 {
-	if (dev->dev_private) {
-		drm_r128_private_t *dev_priv = dev->dev_private;
-		if (dev_priv->page_flipping) {
-			r128_do_cleanup_pageflip(dev);
-		}
+	drm_r128_private_t *dev_priv = dev->dev_private;
+
+	if (dev_priv->page_flipping) {
+		r128_do_cleanup_pageflip(dev);
 	}
 }
 

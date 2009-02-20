@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_syscalls.c,v 1.72 2008/09/12 15:41:40 thib Exp $	*/
+/*	$OpenBSD: nfs_syscalls.c,v 1.76 2009/01/28 12:02:00 bluhm Exp $	*/
 /*	$NetBSD: nfs_syscalls.c,v 1.19 1996/02/18 11:53:52 fvdl Exp $	*/
 
 /*
@@ -78,6 +78,7 @@ extern int nfs_numasync;
 extern int nfsrtton;
 extern struct nfsstats nfsstats;
 extern int nfsrvw_procrastinate;
+extern struct timeval nfsrvw_procrastinate_tv;
 struct nfssvc_sock *nfs_udpsock;
 int nfsd_waiting = 0;
 
@@ -120,9 +121,6 @@ struct nfsdhead nfsd_head;
 
 int nfssvc_sockhead_flag;
 int nfsd_head_flag;
-
-#define	TRUE	1
-#define	FALSE	0
 
 #ifdef NFSCLIENT
 struct proc *nfs_asyncdaemon[NFS_MAXASYNCDAEMON];
@@ -313,7 +311,6 @@ nfssvc_nfsd(nsd, argp, p)
 	struct nfsrv_descript *nd = NULL;
 	struct mbuf *mreq;
 	int error = 0, cacherep, s, sotype, writes_todo;
-	u_quad_t cur_usec;
 	struct timeval tv;
 
 	cacherep = RC_DOIT;
@@ -359,8 +356,6 @@ nfssvc_nfsd(nsd, argp, p)
 			if ((slp = nfsd->nfsd_slp) == (struct nfssvc_sock *)0)
 				continue;
 			if (slp->ns_flag & SLP_VALID) {
-				struct timeval tv;
-
 				if (slp->ns_flag & SLP_DISCONN)
 					nfsrv_zapsock(slp);
 				else if (slp->ns_flag & SLP_NEEDQ) {
@@ -373,11 +368,9 @@ nfssvc_nfsd(nsd, argp, p)
 				}
 				error = nfsrv_dorec(slp, nfsd, &nd);
 				getmicrotime(&tv);
-				cur_usec = (u_quad_t)tv.tv_sec * 1000000 +
-					(u_quad_t)tv.tv_usec;
 				if (error && LIST_FIRST(&slp->ns_tq) &&
-				    LIST_FIRST(&slp->ns_tq)->nd_time
-				    <= cur_usec) {
+				    timercmp(&LIST_FIRST(&slp->ns_tq)->nd_time,
+				    &tv, <=)) {
 					error = 0;
 					cacherep = RC_DOIT;
 					writes_todo = 1;
@@ -440,13 +433,13 @@ nfssvc_nfsd(nsd, argp, p)
 			}
 			if (error) {
 				nfsstats.srv_errs++;
-				nfsrv_updatecache(nd, FALSE, mreq);
+				nfsrv_updatecache(nd, 0, mreq);
 				if (nd->nd_nam2)
 					m_freem(nd->nd_nam2);
 				break;
 			}
 			nfsstats.srvrpccnt[nd->nd_procnum]++;
-			nfsrv_updatecache(nd, TRUE, mreq);
+			nfsrv_updatecache(nd, 1, mreq);
 			nd->nd_mrep = (struct mbuf *)0;
 
 			/* FALLTHROUGH */
@@ -514,11 +507,9 @@ nfssvc_nfsd(nsd, argp, p)
 		     * need to be serviced.
 		     */
 		    getmicrotime(&tv);
-		    cur_usec = (u_quad_t)tv.tv_sec * 1000000 +
-			(u_quad_t)tv.tv_usec;
 		    s = splsoftclock();
 		    if (LIST_FIRST(&slp->ns_tq) &&
-			LIST_FIRST(&slp->ns_tq)->nd_time <= cur_usec) {
+			timercmp(&LIST_FIRST(&slp->ns_tq)->nd_time, &tv, <=)) {
 			cacherep = RC_DOIT;
 			writes_todo = 1;
 		    } else
@@ -538,7 +529,7 @@ done:
 	free((caddr_t)nfsd, M_NFSD);
 	nsd->nsd_nfsd = (struct nfsd *)0;
 	if (--nfs_numnfsd == 0)
-		nfsrv_init(TRUE);	/* Reinitialize everything */
+		nfsrv_init(1);	/* Reinitialize everything */
 	return (error);
 }
 
@@ -684,10 +675,10 @@ nfsd_rt(sotype, nd, cacherep)
  * They do read-ahead and write-behind operations on the block I/O cache.
  * Never returns unless it fails or gets killed.
  */
-int
-nfssvc_iod(p)
-	struct proc *p;
+void
+nfssvc_iod(void *arg)
 {
+	struct proc *p = (struct proc *)arg;
 	struct buf *bp, *nbp;
 	int i, myiod;
 	struct vnode *vp;
@@ -704,7 +695,7 @@ nfssvc_iod(p)
 		}
 	}
 	if (myiod == -1)
-		return (EBUSY);
+		kthread_exit(EBUSY);
 
 	nfs_asyncdaemon[myiod] = p;
 	nfs_numasync++;
@@ -765,24 +756,16 @@ nfssvc_iod(p)
 		nfs_asyncdaemon[myiod] = NULL;
 		nfs_numasync--;
 		nfs_bufqmax -= bufcount;
-		return (error);
+		kthread_exit(error);
 	    }
 	}
-}
-
-void
-start_nfsio(arg)
-	void *arg;
-{
-	nfssvc_iod(curproc);
-	
-	kthread_exit(0);
 }
 
 void
 nfs_getset_niothreads(set)
 	int set;
 {
+	struct proc *p;
 	int i, have, start;
 	
 	for (have = 0, i = 0; i < NFS_MAXASYNCDAEMON; i++)
@@ -796,7 +779,7 @@ nfs_getset_niothreads(set)
 		start = nfs_niothreads - have;
 
 		while (start > 0) {
-			kthread_create(start_nfsio, NULL, NULL, "nfsio");
+			kthread_create(nfssvc_iod, p, &p, "nfsio");
 			start--;
 		}
 

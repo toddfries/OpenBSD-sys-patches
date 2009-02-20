@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.48 2007/09/10 18:49:45 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.51 2009/02/05 01:13:21 oga Exp $	*/
 /*	$NetBSD: pmap.h,v 1.44 2000/04/24 17:18:18 thorpej Exp $	*/
 
 /*
@@ -292,6 +292,10 @@ struct pv_entry {			/* locked by its list's pvh_lock */
 	vaddr_t pv_va;			/* the virtual address */
 	struct vm_page *pv_ptp;		/* the vm_page of the PTP */
 };
+/*
+ * MD flags to pmap_enter:
+ */
+#define	PMAP_NOCACHE	PMAP_MD0
 
 /*
  * We keep mod/ref flags in struct vm_page->pg_flags.
@@ -347,6 +351,7 @@ extern int pmap_pg_g;			/* do we support PG_G? */
  */
 
 #define	pmap_kernel()			(&kernel_pmap_store)
+#define	pmap_wired_count(pmap)		((pmap)->pm_stats.wired_count)
 #define	pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)
 #define	pmap_update(pm)			/* nada */
 
@@ -390,6 +395,8 @@ void	pmap_tlb_shootwait(void);
 #else
 #define pmap_tlb_shootwait()
 #endif
+
+void	pmap_prealloc_lowmem_ptp(paddr_t);
 
 #define PMAP_GROWKERNEL		/* turn on pmap_growkernel interface */
 

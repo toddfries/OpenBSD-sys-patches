@@ -1,4 +1,4 @@
-/*	$OpenBSD: schizo.c,v 1.55 2008/08/18 20:29:37 brad Exp $	*/
+/*	$OpenBSD: schizo.c,v 1.58 2009/01/02 20:01:45 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -40,6 +40,10 @@
 #include <machine/bus.h>
 #include <machine/autoconf.h>
 #include <machine/psl.h>
+
+#ifdef DDB
+#include <machine/db_machdep.h>
+#endif
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
@@ -100,6 +104,10 @@ void *schizo_intr_establish(bus_space_tag_t, bus_space_tag_t, int, int, int,
 
 int schizo_dmamap_create(bus_dma_tag_t, bus_dma_tag_t, bus_size_t, int,
     bus_size_t, bus_size_t, int, bus_dmamap_t *);
+
+#ifdef DDB
+void schizo_xir(void *, int);
+#endif
 
 int
 schizo_match(struct device *parent, void *match, void *aux)
@@ -269,6 +277,16 @@ schizo_init(struct schizo_softc *sc, int busa)
 	    "ce");
 	schizo_set_intr(sc, pbm, PIL_HIGH, schizo_safari_error, sc,
 	    SCZ_SERR_INO, "safari");
+
+#ifdef DDB
+	/* 
+	 * Only a master Tomatillo (the one with JPID[0:2] = 6)
+	 * can/should generate XIR.
+	 */
+	if (sc->sc_tomatillo &&
+	    ((schizo_read(sc, SCZ_CONTROL_STATUS) >> 20) & 0x7) == 6)
+		db_register_xir(schizo_xir, sc);
+#endif
 
 	config_found(&sc->sc_dv, &pba, schizo_print);
 }
@@ -594,8 +612,6 @@ schizo_alloc_dma_tag(struct schizo_pbm *pbm)
 	dt->_dmamap_sync	= iommu_dvmamap_sync;
 	dt->_dmamem_alloc	= iommu_dvmamem_alloc;
 	dt->_dmamem_free	= iommu_dvmamem_free;
-	dt->_dmamem_map		= iommu_dvmamem_map;
-	dt->_dmamem_unmap	= iommu_dvmamem_unmap;
 	return (dt);
 }
 
@@ -779,6 +795,16 @@ schizo_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int ihandle,
 
 	return (ih);
 }
+
+#ifdef DDB
+void
+schizo_xir(void *arg, int cpu)
+{
+	struct schizo_softc *sc = arg;
+
+	schizo_write(sc, TOM_RESET_GEN, TOM_RESET_GEN_XIR);
+}
+#endif
 
 const struct cfattach schizo_ca = {
 	sizeof(struct schizo_softc), schizo_match, schizo_attach

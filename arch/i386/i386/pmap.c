@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.124 2008/10/24 06:34:55 deraadt Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.136 2009/02/05 01:13:21 oga Exp $	*/
 /*	$NetBSD: pmap.c,v 1.91 2000/06/02 17:46:37 thorpej Exp $	*/
 
 /*
@@ -335,6 +335,8 @@ void		 pmap_free_pvs(struct pmap *, struct pv_entry *);
 void		 pmap_free_pv_doit(struct pv_entry *);
 void		 pmap_free_pvpage(void);
 struct vm_page	*pmap_get_ptp(struct pmap *, int, boolean_t);
+void		 pmap_drop_ptp(struct pmap *, vaddr_t, struct vm_page *,
+    pt_entry_t *);
 boolean_t	 pmap_is_curpmap(struct pmap *);
 boolean_t	 pmap_is_active(struct pmap *, int);
 void		 pmap_sync_flags_pte(struct vm_page *, u_long);
@@ -540,6 +542,10 @@ pmap_map_ptes(struct pmap *pmap)
 
 	/* need to load a new alternate pt space into curpmap? */
 	opde = *APDP_PDE;
+#if defined(MULTIPROCESSOR) && defined(DIAGNOSTIC)
+	if (pmap_valid_entry(opde))
+		panic("pmap_map_ptes: APTE valid");
+#endif
 	if (!pmap_valid_entry(opde) || (opde & PG_FRAME) != pmap->pm_pdirpa) {
 		*APDP_PDE = (pd_entry_t) (pmap->pm_pdirpa | PG_RW | PG_V |
 		    PG_U | PG_M);
@@ -578,7 +584,7 @@ pmap_exec_account(struct pmap *pm, vaddr_t va,
 	if (pm == pmap_kernel())
 		return;
 
-	if (curproc == NULL || curproc->p_vmspace == NULL ||
+	if (curproc->p_vmspace == NULL ||
 	    pm != vm_map_pmap(&curproc->p_vmspace->vm_map))
 		return;
 
@@ -664,11 +670,10 @@ setcslimit(struct pmap *pm, struct trapframe *tf, struct pcb *pcb,
 	setsegment(&pm->pm_codeseg, 0, atop(limit),
 	    SDT_MEMERA, SEL_UPL, 1, 1);
 
-	/* And update the GDT and LDT since we may be called by the
+	/* And update the GDT since we may be called by the
 	 * trap handler (cpu_switch won't get a chance).
 	 */
-	curcpu()->ci_gdt[GUCODE_SEL].sd = pcb->pcb_ldt[LUCODE_SEL].sd =
-	    pm->pm_codeseg;
+	curcpu()->ci_gdt[GUCODE_SEL].sd = pm->pm_codeseg;
 
 	pcb->pcb_cs = tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
 }
@@ -695,7 +700,12 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 
 	pte = vtopte(va);
 	npte = pa | ((prot & VM_PROT_WRITE)? PG_RW : PG_RO) | PG_V |
-	    pmap_pg_g | PG_U | PG_M;
+	    PG_U | PG_M;
+
+	/* special 1:1 mappings in the first 4MB must not be global */
+	if (va >= (vaddr_t)NBPD)
+		npte |= pmap_pg_g;
+
 	opte = i386_atomic_testset_ul(pte, npte); /* zap! */
 	if (pmap_valid_entry(opte)) {
 		/* NB. - this should not happen. */
@@ -918,6 +928,26 @@ pmap_bootstrap(vaddr_t kva_start)
 	 */
 
 	tlbflush();
+}
+
+/*
+ * Pre-allocate PTP 0 for low memory, so that 1:1 mappings for various
+ * trampoline code can be entered.
+ */
+void
+pmap_prealloc_lowmem_ptp(paddr_t ptppa)
+{
+	pt_entry_t *pte, npte;
+	vaddr_t ptpva = (vaddr_t)vtopte(0);
+
+	/* enter pa for pte 0 into recursive map */
+	pte = vtopte(ptpva);
+	npte = ptppa | PG_RW | PG_V | PG_U | PG_M;
+
+	i386_atomic_testset_ul(pte, npte); /* zap! */
+
+	/* make sure it is clean before using */
+	memset((void *)ptpva, 0, NBPG);
 }
 
 /*
@@ -1391,6 +1421,28 @@ pmap_get_ptp(struct pmap *pmap, int pde_index, boolean_t just_try)
 	return (pmap_alloc_ptp(pmap, pde_index, just_try, PG_u));
 }
 
+void
+pmap_drop_ptp(struct pmap *pm, vaddr_t va, struct vm_page *ptp,
+    pt_entry_t *ptes)
+{
+	i386_atomic_testset_ul(&pm->pm_pdir[pdei(va)], 0);
+	pmap_tlb_shootpage(curpcb->pcb_pmap, ((vaddr_t)ptes) + ptp->offset);
+#ifdef MULTIPROCESSOR
+	/*
+	 * Always shoot down the other pmap's
+	 * self-mapping of the PTP.
+	 */
+	pmap_tlb_shootpage(pm, ((vaddr_t)PTE_BASE) + ptp->offset);
+#endif
+	pm->pm_stats.resident_count--;
+	/* update hint */
+	if (pm->pm_ptphint == ptp)
+		pm->pm_ptphint = TAILQ_FIRST(&pm->pm_obj.memq);
+	ptp->wire_count = 0;
+	/* Postpone free to after shootdown. */
+	uvm_pagerealloc(ptp, NULL, 0);
+}
+
 /*
  * p m a p  l i f e c y c l e   f u n c t i o n s
  */
@@ -1655,7 +1707,7 @@ pmap_ldt_cleanup(struct proc *p)
 /*
  * pmap_activate: activate a process' pmap (fill in %cr3 and LDT info)
  *
- * => called from cpu_switch()
+ * => called from cpu_switchto()
  * => if proc is the curproc, then load it into the MMU
  */
 
@@ -1678,10 +1730,9 @@ pmap_activate(struct proc *p)
 	if (p == curproc) {
 		/*
 		 * Set the correct descriptor value (i.e. with the
-		 * correct code segment X limit) in the GDT and the LDT.
+		 * correct code segment X limit) in the GDT.
 		 */
-		self->ci_gdt[GUCODE_SEL].sd = pcb->pcb_ldt[LUCODE_SEL].sd =
-		    pmap->pm_codeseg;
+		self->ci_gdt[GUCODE_SEL].sd = pmap->pm_codeseg;
 
 		lcr3(pcb->pcb_cr3);
 		lldt(pcb->pcb_ldt_sel);
@@ -1931,71 +1982,6 @@ pmap_remove_ptes(struct pmap *pmap, struct vm_page *ptp, vaddr_t ptpva,
 		pmap_free_pvs(pmap, pv_tofree);
 }
 
-
-/*
- * pmap_remove_pte: remove a single PTE from a PTP
- *
- * => must have proper locking on pmap_master_lock
- * => caller must hold pmap's lock
- * => PTP must be mapped into KVA
- * => PTP should be null if pmap == pmap_kernel()
- * => returns true if we removed a mapping
- */
-
-boolean_t
-pmap_remove_pte(struct pmap *pmap, struct vm_page *ptp, pt_entry_t *pte,
-    vaddr_t va, int flags)
-{
-	struct pv_entry *pve;
-	struct vm_page *pg;
-	pt_entry_t opte;
-
-	if (!pmap_valid_entry(*pte))
-		return (FALSE);		/* VA not mapped */
-
-	if ((flags & PMAP_REMOVE_SKIPWIRED) && (*pte & PG_W))
-		return (FALSE);
-
-	opte = *pte;			/* save the old PTE */
-	*pte = 0;			/* zap! */
-
-	pmap_exec_account(pmap, va, opte, 0);
-
-	if (opte & PG_W)
-		pmap->pm_stats.wired_count--;
-	pmap->pm_stats.resident_count--;
-
-	if (ptp)
-		ptp->wire_count--;		/* dropping a PTE */
-
-	pg = PHYS_TO_VM_PAGE(opte & PG_FRAME);
-
-	/*
-	 * if we are not on a pv list we are done.
-	 */
-	if ((opte & PG_PVLIST) == 0) {
-#ifdef DIAGNOSTIC
-		if (pg != NULL)
-			panic("pmap_remove_pte: managed page without "
-			      "PG_PVLIST for 0x%lx", va);
-#endif
-		return(TRUE);
-	}
-
-#ifdef DIAGNOSTIC
-	if (pg == NULL)
-		panic("pmap_remove_pte: unmanaged page marked "
-		    "PG_PVLIST, va = 0x%lx, pa = 0x%lx", va,
-		    (u_long)(opte & PG_FRAME));
-#endif
-
-	pmap_sync_flags_pte(pg, opte);
-	pve = pmap_remove_pv(pg, pmap, va);
-	if (pve)
-		pmap_free_pv(pmap, pve);
-	return(TRUE);
-}
-
 /*
  * pmap_remove: top level mapping removal function
  *
@@ -2011,8 +1997,7 @@ pmap_remove(struct pmap *pmap, vaddr_t sva, vaddr_t eva)
 void
 pmap_do_remove(struct pmap *pmap, vaddr_t sva, vaddr_t eva, int flags)
 {
-	pt_entry_t *ptes, opte;
-	boolean_t result;
+	pt_entry_t *ptes;
 	paddr_t ptppa;
 	vaddr_t blkendva;
 	struct vm_page *ptp;
@@ -2024,92 +2009,6 @@ pmap_do_remove(struct pmap *pmap, vaddr_t sva, vaddr_t eva, int flags)
 
  	PMAP_MAP_TO_HEAD_LOCK();
 	ptes = pmap_map_ptes(pmap);	/* locks pmap */
-
-	/*
-	 * removing one page?  take shortcut function.
-	 */
-
-	if (sva + PAGE_SIZE == eva) {
-
-		if (pmap_valid_entry(pmap->pm_pdir[pdei(sva)])) {
-
-			/* PA of the PTP */
-			ptppa = pmap->pm_pdir[pdei(sva)] & PG_FRAME;
-
-			/* get PTP if non-kernel mapping */
-
-			if (pmap == pmap_kernel()) {
-				/* we never free kernel PTPs */
-				ptp = NULL;
-			} else {
-				if (pmap->pm_ptphint &&
-				    VM_PAGE_TO_PHYS(pmap->pm_ptphint) ==
-				    ptppa) {
-					ptp = pmap->pm_ptphint;
-				} else {
-					ptp = PHYS_TO_VM_PAGE(ptppa);
-#ifdef DIAGNOSTIC
-					if (ptp == NULL)
-						panic("pmap_remove: unmanaged "
-						      "PTP detected");
-#endif
-				}
-			}
-
-			/* do it! */
-			result = pmap_remove_pte(pmap, ptp, &ptes[atop(sva)],
-			    sva, flags);
-
-			/*
-			 * if mapping removed and the PTP is no longer
-			 * being used, free it!
-			 */
-
-			if (result && ptp && ptp->wire_count <= 1) {
-				opte = i386_atomic_testset_ul(
-				    &pmap->pm_pdir[pdei(sva)], 0);
-#ifdef MULTIPROCESSOR
-				/*
-				 * XXXthorpej Redundant shootdown can happen
-				 * here if we're using APTE space.
-				 */
-#endif
-				pmap_tlb_shootpage(curpcb->pcb_pmap,
-				    ((vaddr_t)ptes) + ptp->offset);
-#ifdef MULTIPROCESSOR
-				/*
-				 * Always shoot down the pmap's self-mapping
-				 * of the PTP.
-				 * XXXthorpej Redundant shootdown can happen
-				 * here if pmap == curpcb->pcb_pmap (not APTE
-				 * space).
-				 */
-				pmap_tlb_shootpage(pmap,
-				    ((vaddr_t)PTE_BASE) + ptp->offset);
-#endif
-				pmap->pm_stats.resident_count--;
-				if (pmap->pm_ptphint == ptp)
-					pmap->pm_ptphint =
-					    TAILQ_FIRST(&pmap->pm_obj.memq);
-				ptp->wire_count = 0;
-				/* Postpone free to after shootdown. */
-				uvm_pagerealloc(ptp, NULL, 0);
-				TAILQ_INSERT_TAIL(&empty_ptps, ptp, listq);
-			}
-			/*
-			 * Shoot the tlb after any updates to the PDE.
-			 */
-			pmap_tlb_shootpage(pmap, sva);
-		}
-		pmap_tlb_shootwait();
-		pmap_unmap_ptes(pmap);		/* unlock pmap */
-		PMAP_MAP_TO_HEAD_UNLOCK();
-		while ((ptp = TAILQ_FIRST(&empty_ptps)) != NULL) {
-			TAILQ_REMOVE(&empty_ptps, ptp, listq);
-			uvm_pagefree(ptp);
-		}
-		return;
-	}
 
 	/*
 	 * Decide if we want to shoot the whole tlb or just the range.
@@ -2172,41 +2071,17 @@ pmap_do_remove(struct pmap *pmap, vaddr_t sva, vaddr_t eva, int flags)
 		pmap_remove_ptes(pmap, ptp, (vaddr_t)&ptes[atop(va)],
 		    va, blkendva, flags);
 
-		/* if PTP is no longer being used, free it! */
+		/* If PTP is no longer being used, free it. */
 		if (ptp && ptp->wire_count <= 1) {
-			opte = i386_atomic_testset_ul(
-			    &pmap->pm_pdir[pdei(va)], 0);
-#if defined(MULTIPROCESSOR)
-			/*
-			 * XXXthorpej Redundant shootdown can happen here
-			 * if we're using APTE space.
-			 */
-#endif
-			pmap_tlb_shootpage(curpcb->pcb_pmap,
-			    ((vaddr_t)ptes) + ptp->offset);
-#if defined(MULTIPROCESSOR)
-			/*
-			 * Always shoot down the pmap's self-mapping
-			 * of the PTP.
-			 * XXXthorpej Redundant shootdown can happen here
-			 * if pmap == curpcb->pcb_pmap (not APTE space).
-			 */
-			pmap_tlb_shootpage(pmap,
-			    ((vaddr_t)PTE_BASE) + ptp->offset);
-#endif
-			pmap->pm_stats.resident_count--;
-			if (pmap->pm_ptphint == ptp)	/* update hint? */
-				pmap->pm_ptphint =
-				    TAILQ_FIRST(&pmap->pm_obj.memq);
-			ptp->wire_count = 0;
-			/* Postpone free to after shootdown. */
-			uvm_pagerealloc(ptp, NULL, 0);
+			pmap_drop_ptp(pmap, va, ptp, ptes);
 			TAILQ_INSERT_TAIL(&empty_ptps, ptp, listq);
 		}
+
+		if (!shootall)
+			pmap_tlb_shootrange(pmap, va, blkendva);
 	}
-	if (!shootall)
-		pmap_tlb_shootrange(pmap, sva, eva);
-	else
+
+	if (shootall)
 		pmap_tlb_shoottlb();
 
 	pmap_tlb_shootwait();
@@ -2243,8 +2118,6 @@ pmap_page_remove(struct vm_page *pg)
 		ptes = pmap_map_ptes(pve->pv_pmap);	/* locks pmap */
 
 #ifdef DIAGNOSTIC
-		if (pve->pv_va >= uvm.pager_sva && pve->pv_va < uvm.pager_eva)
-			printf("pmap_page_remove: found pager VA on pv_list\n");
 		if (pve->pv_ptp && (pve->pv_pmap->pm_pdir[pdei(pve->pv_va)] &
 				    PG_FRAME)
 		    != VM_PAGE_TO_PHYS(pve->pv_ptp)) {
@@ -2269,33 +2142,10 @@ pmap_page_remove(struct vm_page *pg)
 		pmap_sync_flags_pte(pg, opte);
 
 		/* update the PTP reference count.  free if last reference. */
-		if (pve->pv_ptp) {
-			pve->pv_ptp->wire_count--;
-			if (pve->pv_ptp->wire_count <= 1) {
-				opte = i386_atomic_testset_ul(
-				    &pve->pv_pmap->pm_pdir[pdei(pve->pv_va)],
-				    0);
-				pmap_tlb_shootpage(curpcb->pcb_pmap,
-				    ((vaddr_t)ptes) + pve->pv_ptp->offset);
-#if defined(MULTIPROCESSOR)
-				/*
-				 * Always shoot down the other pmap's
-				 * self-mapping of the PTP.
-				 */
-				pmap_tlb_shootpage(pve->pv_pmap,
-				    ((vaddr_t)PTE_BASE) + pve->pv_ptp->offset);
-#endif
-				pve->pv_pmap->pm_stats.resident_count--;
-				/* update hint? */
-				if (pve->pv_pmap->pm_ptphint == pve->pv_ptp)
-					pve->pv_pmap->pm_ptphint =
-					    TAILQ_FIRST(&pve->pv_pmap->pm_obj.memq);
-				pve->pv_ptp->wire_count = 0;
-				/* Postpone free to after shootdown. */
-				uvm_pagerealloc(pve->pv_ptp, NULL, 0);
-				TAILQ_INSERT_TAIL(&empty_ptps, pve->pv_ptp,
-				    listq);
-			}
+		if (pve->pv_ptp && --pve->pv_ptp->wire_count <= 1) {
+			pmap_drop_ptp(pve->pv_pmap, pve->pv_va,
+			    pve->pv_ptp, ptes);
+			TAILQ_INSERT_TAIL(&empty_ptps, pve->pv_ptp, listq);
 		}
 
 		pmap_tlb_shootpage(pve->pv_pmap, pve->pv_va);
@@ -2365,7 +2215,7 @@ boolean_t
 pmap_clear_attrs(struct vm_page *pg, int clearbits)
 {
 	struct pv_entry *pve;
-	pt_entry_t *ptes, npte, opte;
+	pt_entry_t *ptes, opte;
 	u_long clearflags;
 	int result;
 
@@ -2378,19 +2228,18 @@ pmap_clear_attrs(struct vm_page *pg, int clearbits)
 		atomic_clearbits_int(&pg->pg_flags, clearflags);
 
 	for (pve = pg->mdpage.pv_list; pve != NULL; pve = pve->pv_next) {
+		ptes = pmap_map_ptes(pve->pv_pmap);	/* locks pmap */
 #ifdef DIAGNOSTIC
 		if (!pmap_valid_entry(pve->pv_pmap->pm_pdir[pdei(pve->pv_va)]))
 			panic("pmap_change_attrs: mapping without PTP "
 			      "detected");
 #endif
 
-		ptes = pmap_map_ptes(pve->pv_pmap);	/* locks pmap */
-		npte = ptes[atop(pve->pv_va)];
-		if (npte & clearbits) {
+		opte = ptes[atop(pve->pv_va)];
+		if (opte & clearbits) {
 			result = TRUE;
-			npte &= ~clearbits;
-			opte = i386_atomic_testset_ul(
-			    &ptes[atop(pve->pv_va)], npte);
+			i386_atomic_clearbits_l(&ptes[atop(pve->pv_va)],
+			    (opte & clearbits));
 			pmap_tlb_shootpage(pve->pv_pmap, pve->pv_va);
 		}
 		pmap_unmap_ptes(pve->pv_pmap);	/* unlocks pmap */
@@ -2431,7 +2280,7 @@ void
 pmap_write_protect(struct pmap *pmap, vaddr_t sva, vaddr_t eva,
     vm_prot_t prot)
 {
-	pt_entry_t *ptes, *spte, *epte, npte;
+	pt_entry_t *ptes, *spte, *epte, npte, opte;
 	vaddr_t blockend;
 	u_int32_t md_prot;
 	vaddr_t va;
@@ -2483,11 +2332,14 @@ pmap_write_protect(struct pmap *pmap, vaddr_t sva, vaddr_t eva,
 			if (!pmap_valid_entry(*spte))	/* no mapping? */
 				continue;
 
-			npte = (*spte & ~PG_PROT) | md_prot;
+			opte = *spte;
+			npte = (opte & ~PG_PROT) | md_prot;
 
-			if (npte != *spte) {
+			if (npte != opte) {
 				pmap_exec_account(pmap, va, *spte, npte);
-				i386_atomic_testset_ul(spte, npte);
+				i386_atomic_clearbits_l(spte,
+				    (~md_prot & opte) & PG_PROT);
+				i386_atomic_setbits_l(spte, md_prot);
 			}
 		}
 	}
@@ -2523,7 +2375,7 @@ pmap_unwire(struct pmap *pmap, vaddr_t va)
 			panic("pmap_unwire: invalid (unmapped) va 0x%lx", va);
 #endif
 		if ((ptes[atop(va)] & PG_W) != 0) {
-			ptes[atop(va)] &= ~PG_W;
+			i386_atomic_clearbits_l(&ptes[atop(va)], PG_W);
 			pmap->pm_stats.wired_count--;
 		}
 #ifdef DIAGNOSTIC
@@ -2739,6 +2591,8 @@ enter_now:
 	pmap_exec_account(pmap, va, opte, npte);
 	if (wired)
 		npte |= PG_W;
+	if (flags & PMAP_NOCACHE)
+		npte |= PG_N;
 	if (va < VM_MAXUSER_ADDRESS)
 		npte |= PG_u;
 	else if (va < VM_MAX_ADDRESS)

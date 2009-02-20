@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.173 2008/06/12 16:15:05 claudio Exp $	*/
+/*	$OpenBSD: if.c,v 1.187 2009/01/31 21:23:34 grange Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -151,6 +151,24 @@ TAILQ_HEAD(, ifg_group) ifg_head;
 LIST_HEAD(, if_clone) if_cloners = LIST_HEAD_INITIALIZER(if_cloners);
 int if_cloners_count;
 
+struct timeout m_cltick_tmo;
+int m_clticks;
+
+/*
+ * Record when the last timeout has been run.  If the delta is
+ * too high, m_cldrop() will notice and decrease the interface
+ * high water marks.
+ */
+static void
+m_cltick(void *arg)
+{
+	extern int ticks;
+	extern void m_cltick(void *);
+
+	m_clticks = ticks;
+	timeout_add(&m_cltick_tmo, 1);
+}
+
 /*
  * Network interface utility routines.
  *
@@ -165,6 +183,9 @@ ifinit()
 	timeout_set(&if_slowtim, if_slowtimo, &if_slowtim);
 
 	if_slowtimo(&if_slowtim);
+
+	timeout_set(&m_cltick_tmo, m_cltick, NULL);
+	m_cltick(NULL);
 }
 
 static int if_index = 0;
@@ -300,8 +321,7 @@ if_alloc_sadl(struct ifnet *ifp)
 		if_free_sadl(ifp);
 
 	namelen = strlen(ifp->if_xname);
-#define _offsetof(t, m) ((int)((caddr_t)&((t *)0)->m))
-	masklen = _offsetof(struct sockaddr_dl, sdl_data[0]) + namelen;
+	masklen = offsetof(struct sockaddr_dl, sdl_data[0]) + namelen;
 	socksize = masklen + ifp->if_addrlen;
 #define ROUNDUP(a) (1 + (((a) - 1) | (sizeof(long) - 1)))
 	if (socksize < sizeof(*sdl))
@@ -454,6 +474,8 @@ if_attach(struct ifnet *ifp)
 #else
 	TAILQ_INSERT_TAIL(&ifnet, ifp, if_list);
 #endif
+
+	m_clinitifp(ifp);
 
 	if_attachsetup(ifp);
 }
@@ -636,6 +658,7 @@ do { \
 	/* Announce that the interface is gone. */
 	rt_ifannouncemsg(ifp, IFAN_DEPARTURE);
 
+	ifindex2ifnet[ifp->if_index] = NULL;
 	splx(s);
 }
 
@@ -1065,6 +1088,9 @@ if_down(struct ifnet *ifp)
 		bstp_ifstate(ifp);
 #endif
 	rt_ifmsg(ifp);
+#ifndef SMALL_KERNEL
+	rt_if_track(ifp);
+#endif
 }
 
 /*
@@ -1101,6 +1127,12 @@ if_up(struct ifnet *ifp)
 #ifdef INET6
 	in6_if_up(ifp);
 #endif
+
+#ifndef SMALL_KERNEL
+	rt_if_track(ifp);
+#endif
+
+	m_clinitifp(ifp);
 }
 
 /*
@@ -1111,6 +1143,9 @@ void
 if_link_state_change(struct ifnet *ifp)
 {
 	rt_ifmsg(ifp);
+#ifndef SMALL_KERNEL
+	rt_if_track(ifp);
+#endif
 	dohooks(ifp->if_linkstatehooks, 0);
 }
 
@@ -1345,6 +1380,18 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		}
 		break;
 
+	case SIOCGIFPRIORITY:
+		ifr->ifr_metric = ifp->if_priority;
+		break;
+
+	case SIOCSIFPRIORITY:
+		if ((error = suser(p, 0)) != 0)
+			return (error);
+		if (ifr->ifr_metric < 0 || ifr->ifr_metric > 15)
+			return (EINVAL);
+		ifp->if_priority = ifr->ifr_metric;
+		break;
+
 	case SIOCAIFGROUP:
 		if ((error = suser(p, 0)))
 			return (error);
@@ -1393,6 +1440,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 			    ETHER_ADDR_LEN);
 			bcopy((caddr_t)ifr->ifr_addr.sa_data,
 			    LLADDR(sdl), ETHER_ADDR_LEN);
+			error = ENETRESET;
 			break;
 		default:
 			return (ENODEV);
@@ -1873,9 +1921,9 @@ if_group_routechange(struct sockaddr *dst, struct sockaddr *mask)
 #ifdef INET6
 	case AF_INET6:
 		if (IN6_ARE_ADDR_EQUAL(&(satosin6(dst))->sin6_addr,
-		    &in6addr_any) && mask &&
+		    &in6addr_any) && mask && (mask->sa_len == 0 ||
 		    IN6_ARE_ADDR_EQUAL(&(satosin6(mask))->sin6_addr,
-		    &in6addr_any))
+		    &in6addr_any)))
 			if_group_egress_build();
 		break;
 #endif
@@ -1913,7 +1961,7 @@ if_group_egress_build(void)
 			if (rt->rt_ifp)
 				if_addgroup(rt->rt_ifp, IFG_EGRESS);
 #ifndef SMALL_KERNEL
-			rn = rn_mpath_next(rn);
+			rn = rn_mpath_next(rn, 0);
 #else
 			rn = NULL;
 #endif
@@ -1928,7 +1976,7 @@ if_group_egress_build(void)
 			if (rt->rt_ifp)
 				if_addgroup(rt->rt_ifp, IFG_EGRESS);
 #ifndef SMALL_KERNEL
-			rn = rn_mpath_next(rn);
+			rn = rn_mpath_next(rn, 0);
 #else
 			rn = NULL;
 #endif

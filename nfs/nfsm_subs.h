@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsm_subs.h,v 1.31 2008/06/15 04:03:40 thib Exp $	*/
+/*	$OpenBSD: nfsm_subs.h,v 1.33 2009/01/24 23:30:42 thib Exp $	*/
 /*	$NetBSD: nfsm_subs.h,v 1.10 1996/03/20 21:59:56 fvdl Exp $	*/
 
 /*
@@ -68,11 +68,17 @@
  */
 
 #define	nfsm_dissect(a, c, s) \
-		if (((a) = nfsm_disct(&md, (s), &t1, &dpos)) == NULL) { \
+		{ t1 = mtod(md, caddr_t)+md->m_len-dpos; \
+		if (t1 >= (s)) { \
+			(a) = (c)(dpos); \
+			dpos += (s); \
+		} else if ((t1 = nfsm_disct(&md, &dpos, (s), t1, &cp2)) != 0){ \
 			error = t1; \
 			m_freem(mrep); \
 			goto nfsmout; \
-		}
+		} else { \
+			(a) = (c)cp2; \
+		} }
 
 #define nfsm_fhtom(v, v3) \
 	      { if (v3) { \
@@ -164,21 +170,26 @@
 #define NFSV3_WCCRATTR	0
 #define NFSV3_WCCCHK	1
 
-#define	nfsm_wcc_data(v, f) \
-		{ int ttattrf, ttretf = 0; \
-		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED); \
-		if (*tl == nfs_true) { \
-			nfsm_dissect(tl, u_int32_t *, 6 * NFSX_UNSIGNED); \
-			if (f) \
-				ttretf = (VTONFS(v)->n_mtime == \
-					fxdr_unsigned(u_int32_t, *(tl + 2))); \
-		} \
-		nfsm_postop_attr((v), ttattrf); \
-		if (f) { \
-			(f) = ttretf; \
-		} else { \
-			(f) = ttattrf; \
-		} }
+#define	nfsm_wcc_data(v, f) do {					\
+	struct timespec	 _mtime;					\
+	int		 ttattrf, ttretf = 0;				\
+									\
+	nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);			\
+	if (*tl == nfs_true) {						\
+		nfsm_dissect(tl, u_int32_t *, 6 * NFSX_UNSIGNED);	\
+		fxdr_nfsv3time(tl + 2, &_mtime);			\
+		if (f) {						\
+			ttretf = timespeccmp(&VTONFS(v)->n_mtime,	\
+			    &_mtime, !=);				\
+		}							\
+	}								\
+	nfsm_postop_attr((v), ttattrf);					\
+	if (f) {							\
+		(f) = ttretf;						\
+	} else {							\
+		(f) = ttattrf;						\
+	}								\
+} while (0)
 
 #define	nfsm_strsiz(s,m) \
 		{ nfsm_dissect(tl,u_int32_t *,NFSX_UNSIGNED); \
@@ -186,13 +197,6 @@
 			m_freem(mrep); \
 			error = EBADRPC; \
 			goto nfsmout; \
-		} }
-
-#define	nfsm_srvstrsiz(s,m) \
-		{ nfsm_dissect(tl,u_int32_t *,NFSX_UNSIGNED); \
-		if (((s) = fxdr_unsigned(int32_t,*tl)) > (m) || (s) <= 0) { \
-			error = EBADRPC; \
-			nfsm_reply(0); \
 		} }
 
 #define	nfsm_srvnamesiz(s) \
@@ -264,7 +268,9 @@
 
 #define	nfsm_adv(s) \
 		{ t1 = mtod(md, caddr_t)+md->m_len-dpos; \
-		if ((t1 = nfs_adv(&md, &dpos, (s), t1)) != 0) { \
+		if (t1 >= (s)) { \
+			dpos += (s); \
+		} else if ((t1 = nfs_adv(&md, &dpos, (s), t1)) != 0) { \
 			error = t1; \
 			m_freem(mrep); \
 			goto nfsmout; \

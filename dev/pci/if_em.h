@@ -32,7 +32,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 /* $FreeBSD: if_em.h,v 1.26 2004/09/01 23:22:41 pdeuskar Exp $ */
-/* $OpenBSD: if_em.h,v 1.37 2008/07/22 11:20:10 martynas Exp $ */
+/* $OpenBSD: if_em.h,v 1.43 2008/12/15 02:33:04 brad Exp $ */
 
 #ifndef _EM_H_DEFINED_
 #define _EM_H_DEFINED_
@@ -94,7 +94,6 @@ POSSIBILITY OF SUCH DAMAGE.
  *   desscriptors should meet the following condition.
  *      (num_tx_desc * sizeof(struct em_tx_desc)) % 128 == 0
  */
-#define EM_MIN_TXD			12
 #define EM_MAX_TXD_82543		256
 #define EM_MAX_TXD			512
 
@@ -111,7 +110,6 @@ POSSIBILITY OF SUCH DAMAGE.
  *   desscriptors should meet the following condition.
  *      (num_tx_desc * sizeof(struct em_tx_desc)) % 128 == 0
  */
-#define EM_MIN_RXD			12
 #define EM_MAX_RXD_82543		256
 #define EM_MAX_RXD			256
 
@@ -379,11 +377,12 @@ struct em_softc {
 	struct em_dma_alloc	rxdma;		/* bus_dma glue for rx desc */
 	struct em_rx_desc	*rx_desc_base;
 	u_int32_t		next_rx_desc_to_check;
+	u_int32_t		last_rx_desc_filled;
+	int			rx_ndescs;
 	u_int32_t		rx_buffer_len;
 	u_int16_t		num_rx_desc;
 	struct em_buffer	*rx_buffer_area;
 	bus_dma_tag_t		rxtag;
-	bus_dmamap_t		rx_sparemap;
 
 	/*
 	 * First/last mbuf pointers, for

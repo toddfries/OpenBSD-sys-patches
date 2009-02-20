@@ -34,17 +34,27 @@
 
 #include "tdfx_drv.h"
 #include "drmP.h"
-#include "drm_pciids.h"
 
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
-static drm_pci_id_list_t tdfx_pciidlist[] = {
-	tdfx_PCI_IDS
+struct tdfxdrm_softc {
+	struct device	 dev;
+	struct device	*drmdev;
 };
 
-static const struct drm_driver_info tdfx_driver = {
-	.buf_priv_size	= 1, /* No dev_priv */
+int	tdfxdrm_probe(struct device *, void *, void *);
+void	tdfxdrm_attach(struct device *, struct device *, void *);
 
-	.max_ioctl	= 0,
+static drm_pci_id_list_t tdfxdrm_pciidlist[] = {
+	{PCI_VENDOR_3DFX, PCI_PRODUCT_3DFX_BANSHEE},
+	{PCI_VENDOR_3DFX, PCI_PRODUCT_3DFX_VOODOO32000},
+	{PCI_VENDOR_3DFX, PCI_PRODUCT_3DFX_VOODOO3},
+	{PCI_VENDOR_3DFX, PCI_PRODUCT_3DFX_VOODOO4},
+	{PCI_VENDOR_3DFX, PCI_PRODUCT_3DFX_VOODOO5},
+	{PCI_VENDOR_3DFX, PCI_PRODUCT_3DFX_VOODOO44200},
+        {0, 0, 0}
+};
+
+static const struct drm_driver_info tdfxdrm_driver = {
+	.buf_priv_size	= 1, /* No dev_priv */
 
 	.name		= DRIVER_NAME,
 	.desc		= DRIVER_DESC,
@@ -53,31 +63,29 @@ static const struct drm_driver_info tdfx_driver = {
 	.minor		= DRIVER_MINOR,
 	.patchlevel	= DRIVER_PATCHLEVEL,
 
-	.use_mtrr	= 1,
+	.flags		= DRIVER_MTRR,
 };
-
-int	tdfxdrm_probe(struct device *, void *, void *);
-void	tdfxdrm_attach(struct device *, struct device *, void *);
 
 int
 tdfxdrm_probe(struct device *parent, void *match, void *aux)
 {
-	return drm_probe((struct pci_attach_args *)aux, tdfx_pciidlist);
+	return drm_pciprobe((struct pci_attach_args *)aux, tdfxdrm_pciidlist);
 }
 
 void
 tdfxdrm_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pci_attach_args *pa = aux;
-	struct drm_device *dev = (struct drm_device *)self;
+	struct tdfxdrm_softc	*dev_priv = (struct tdfxdrm_softc *)self;
+	struct pci_attach_args	*pa = aux;
 
-	dev->driver = &tdfx_driver;
-	return drm_attach(parent, self, pa, tdfx_pciidlist);
+	printf("\n");
+
+	/* never agp */
+	dev_priv->drmdev = drm_attach_pci(&tdfxdrm_driver, pa, 0, self);
 }
 
 struct cfattach tdfxdrm_ca = {
-	sizeof(struct drm_device), tdfxdrm_probe, tdfxdrm_attach,
-	drm_detach, drm_activate
+	sizeof(struct tdfxdrm_softc), tdfxdrm_probe, tdfxdrm_attach,
 };
 
 struct cfdriver tdfxdrm_cd = {

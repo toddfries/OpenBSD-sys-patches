@@ -1,4 +1,4 @@
-#	$OpenBSD: files.amd64,v 1.40 2008/06/11 09:22:39 phessler Exp $
+#	$OpenBSD: files.amd64,v 1.44 2009/02/15 02:03:40 marco Exp $
 
 maxpartitions 16
 maxusers 2 16 128
@@ -35,10 +35,6 @@ file	arch/amd64/amd64/ipi.c			multiprocessor
 file	arch/amd64/amd64/mp_setperf.c		multiprocessor
 
 file	arch/amd64/amd64/apic.c			ioapic | lapic
-
-file	arch/amd64/amd64/mpbios.c		mpbios
-file	arch/amd64/amd64/mpbios_intr_fixup.c	mpbios & pci
-
 
 file	arch/amd64/amd64/consinit.c
 file	dev/cninit.c
@@ -80,6 +76,13 @@ device	bios {}
 attach	bios at mainbus
 file	arch/amd64/amd64/bios.c			bios needs-flag
 
+#Intel SMP specification 1.4
+define	mpbios
+device	mpbios
+attach	mpbios at bios
+file	arch/amd64/amd64/mpbios.c		mpbios needs-flag
+file	arch/amd64/amd64/mpbios_intr_fixup.c	mpbios & pci
+
 define	cpu {[apid = -1]}
 device	cpu
 attach	cpu at mainbus
@@ -89,7 +92,7 @@ file	arch/amd64/amd64/cpu.c	cpu
 define	lapic
 file	arch/amd64/amd64/lapic.c		lapic needs-flag
 
-device	ioapic: lapic
+device	ioapic: mpbios, lapic
 attach	ioapic at mainbus
 file	arch/amd64/amd64/ioapic.c		ioapic needs-flag
 
@@ -104,15 +107,14 @@ file	arch/amd64/pci/pciide_machdep.c		pciide
 
 include	"dev/puc/files.puc"
 
-# AGP devices
-device	agp: agp_i810
-attach	agp at agpbus
-file	arch/amd64/pci/agp_machdep.c		agp
-
 # PCI Host bridge chipsets
-device	pchb: pcibus
+device	pchb: pcibus, agpbus
 attach	pchb at pci
 file	arch/amd64/pci/pchb.c			pchb
+
+# AGP bridge support. most attach at pchb
+include "dev/pci/files.agp"
+file	arch/amd64/pci/agp_machdep.c		agp
 
 #
 # CARDBUS
@@ -204,6 +206,7 @@ include "dev/i2c/files.i2c"
 #
 include "../../../dev/acpi/files.acpi"
 file	arch/amd64/amd64/acpi_machdep.c		acpi
+file	arch/amd64/amd64/acpi_wakecode.S	acpi
 
 #
 # Machine-independent SD/MMC drivers

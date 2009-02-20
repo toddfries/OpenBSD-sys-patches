@@ -1,4 +1,4 @@
-/* $OpenBSD: acpicpu.c,v 1.47 2008/10/11 20:31:50 miod Exp $ */
+/* $OpenBSD: acpicpu.c,v 1.51 2009/02/18 03:13:49 marco Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *

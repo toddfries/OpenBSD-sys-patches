@@ -1,4 +1,4 @@
-/*	$OpenBSD: cac.c,v 1.27 2008/10/29 21:17:15 brad Exp $	*/
+/*	$OpenBSD: cac.c,v 1.28 2009/02/16 21:19:06 miod Exp $	*/
 /*	$NetBSD: cac.c,v 1.15 2000/11/08 19:20:35 ad Exp $	*/
 
 /*
@@ -77,6 +77,7 @@
 #include <sys/endian.h>
 #include <sys/malloc.h>
 #include <sys/pool.h>
+#include <sys/sensors.h>
 
 #include <machine/bus.h>
 
@@ -90,14 +91,13 @@
 #if NBIO > 0
 #include <dev/biovar.h>
 #endif
-#include <sys/sensors.h>
 
 struct cfdriver cac_cd = {
 	NULL, "cac", DV_DULL
 };
 
 int     cac_scsi_cmd(struct scsi_xfer *);
-void	cacminphys(struct buf *bp);
+void	cacminphys(struct buf *bp, struct scsi_link *sl);
 
 struct scsi_adapter cac_switch = {
 	cac_scsi_cmd, cacminphys, 0, 0,
@@ -555,8 +555,7 @@ cac_get_dinfo(sc, target)
 }
 
 void
-cacminphys(bp)
-	struct buf *bp;
+cacminphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > CAC_MAX_XFER)
 		bp->b_bcount = CAC_MAX_XFER;

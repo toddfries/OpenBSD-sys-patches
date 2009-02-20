@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.h,v 1.135 2006/11/24 13:52:14 reyk Exp $	*/
+/*	$OpenBSD: ip_ipsp.h,v 1.137 2009/02/16 00:31:25 dlg Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -303,6 +303,8 @@ struct tdb {				/* tunnel descriptor block */
 #define	TDBF_SKIPCRYPTO		0x08000	/* Skip actual crypto processing */
 #define	TDBF_USEDTUNNEL		0x10000	/* Appended a tunnel header in past */
 #define	TDBF_UDPENCAP		0x20000	/* UDP encapsulation */
+#define	TDBF_PFSYNC		0x40000	/* TDB will be synced */
+#define	TDBF_PFSYNC_RPL		0x80000	/* Replay counter should be bumped */
 
 	u_int32_t	tdb_flags;	/* Flags related to this TDB */
 
@@ -342,6 +344,7 @@ struct tdb {				/* tunnel descriptor block */
 	u_int8_t	tdb_sproto;	/* IPsec protocol */
 	u_int8_t	tdb_wnd;	/* Replay window */
 	u_int8_t	tdb_satype;	/* SA type (RFC2367, PF_KEY) */
+	u_int8_t	tdb_updates;	/* pfsync update counter */
 
 	union sockaddr_union	tdb_dst;	/* Destination address */
 	union sockaddr_union	tdb_src;	/* Source address */
@@ -375,6 +378,7 @@ struct tdb {				/* tunnel descriptor block */
 	TAILQ_HEAD(tdb_inp_head_in, inpcb)	tdb_inp_in;
 	TAILQ_HEAD(tdb_inp_head_out, inpcb)	tdb_inp_out;
 	TAILQ_HEAD(tdb_policy_head, ipsec_policy)	tdb_policy_head;
+	TAILQ_ENTRY(tdb)	tdb_sync_entry;
 };
 
 struct tdb_ident {
@@ -484,19 +488,20 @@ extern struct xformsw xformsw[], *xformswNXFORMSW;
 
 /* Traverse spi chain and get attributes */
 
-#define	SPI_CHAIN_ATTRIB(have, TDB_DIR, TDBP) do {\
-	int s = spltdb(); \
-	struct tdb *tmptdb = (TDBP); \
-	\
-	(have) = 0; \
-	while (tmptdb && tmptdb->tdb_xform) { \
-	        if (tmptdb == NULL || tmptdb->tdb_flags & TDBF_INVALID) \
-			break; \
-		(have) |= TDB_ATTRIB(tmptdb); \
-		tmptdb = tmptdb->TDB_DIR; \
-	} \
-	splx(s); \
-} while (0)
+#define	SPI_CHAIN_ATTRIB(have, TDB_DIR, TDBP)				\
+do {									\
+	int s = spltdb();						\
+	struct tdb *tmptdb = (TDBP);					\
+									\
+	(have) = 0;							\
+	while (tmptdb && tmptdb->tdb_xform) {				\
+	        if (tmptdb == NULL || tmptdb->tdb_flags & TDBF_INVALID)	\
+			break;						\
+		(have) |= TDB_ATTRIB(tmptdb);				\
+		tmptdb = tmptdb->TDB_DIR;				\
+	}								\
+	splx(s);							\
+} while (/* CONSTCOND */ 0)
 
 /* Misc. */
 extern char *inet_ntoa4(struct in_addr);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vfsops.c,v 1.79 2008/07/28 13:35:14 thib Exp $	*/
+/*	$OpenBSD: nfs_vfsops.c,v 1.80 2008/12/24 02:43:52 thib Exp $	*/
 /*	$NetBSD: nfs_vfsops.c,v 1.46.4.1 1996/05/25 22:40:35 fvdl Exp $	*/
 
 /*
@@ -97,9 +97,6 @@ const struct vfsops nfs_vfsops = {
 	nfs_checkexp
 };
 
-#define TRUE	1
-#define	FALSE	0
-
 /*
  * nfs statfs call
  */
@@ -113,7 +110,7 @@ nfs_statfs(mp, sbp, p)
 	struct nfs_statfs *sfp = NULL;
 	u_int32_t *tl;
 	int32_t t1;
-	caddr_t dpos;
+	caddr_t dpos, cp2;
 	struct nfsmount *nmp = VFSTONFS(mp);
 	int error = 0, v3 = (nmp->nm_flag & NFSMNT_NFSV3), retattr;
 	struct mbuf *mreq, *mrep = NULL, *md, *mb;
@@ -186,7 +183,7 @@ nfs_fsinfo(nmp, vp, cred, p)
 	struct nfsv3_fsinfo *fsp;
 	int32_t t1;
 	u_int32_t *tl, pref, max;
-	caddr_t dpos;
+	caddr_t dpos, cp2;
 	int error = 0, retattr;
 	struct mbuf *mreq, *mrep, *md, *mb;
 
@@ -611,7 +608,7 @@ nfs_mount(mp, path, data, ndp, p)
 
 	if (nfs_niothreads < 0) {
 		nfs_niothreads = 4;
-		nfs_getset_niothreads(TRUE);
+		nfs_getset_niothreads(1);
 	}
 
 	if (mp->mnt_flag & MNT_UPDATE) {

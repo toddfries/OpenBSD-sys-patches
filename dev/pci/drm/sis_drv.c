@@ -29,31 +29,28 @@
 #include "drmP.h"
 #include "sis_drm.h"
 #include "sis_drv.h"
-#include "drm_pciids.h"
 
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
+int	sisdrm_probe(struct device *, void *, void *);
+void	sisdrm_attach(struct device *, struct device *, void *);
+int	sisdrm_detach(struct device *, int);
+int	sisdrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
+
 static drm_pci_id_list_t sis_pciidlist[] = {
-	sis_PCI_IDS
+	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_300},
+	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_5300},
+	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_6300},
+	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_6330},
+	{PCI_VENDOR_SIS, PCI_PRODUCT_SIS_7300},
+	{PCI_VENDOR_XGI, 0x0042, SIS_CHIP_315},
+	{PCI_VENDOR_XGI, PCI_PRODUCT_XGI_VOLARI_V3XT},
+	{0, 0, 0}
 };
-
-drm_ioctl_desc_t sis_ioctls[] = {
-	DRM_IOCTL_DEF(DRM_SIS_FB_ALLOC, sis_fb_alloc, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_SIS_FB_FREE, sis_fb_free, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_SIS_AGP_INIT, sis_ioctl_agp_init, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF(DRM_SIS_AGP_ALLOC, sis_ioctl_agp_alloc, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_SIS_AGP_FREE, sis_ioctl_agp_free, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_SIS_FB_INIT, sis_fb_init, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY)
-};
-
-int sis_max_ioctl = DRM_ARRAY_SIZE(sis_ioctls);
 
 static const struct drm_driver_info sis_driver = {
 	.buf_priv_size		= 1, /* No dev_priv */
+	.ioctl			= sisdrm_ioctl,
 	.context_ctor		= sis_init_context,
 	.context_dtor		= sis_final_context,
-
-	.ioctls			= sis_ioctls,
-	.max_ioctl		= DRM_ARRAY_SIZE(sis_ioctls),
 
 	.name			= DRIVER_NAME,
 	.desc			= DRIVER_DESC,
@@ -62,34 +59,75 @@ static const struct drm_driver_info sis_driver = {
 	.minor			= DRIVER_MINOR,
 	.patchlevel		= DRIVER_PATCHLEVEL,
 
-	.use_agp		= 1,
-	.use_mtrr		= 1,
+	.flags			= DRIVER_AGP | DRIVER_MTRR,
 };
-
-int	sisdrm_probe(struct device *, void *, void *);
-void	sisdrm_attach(struct device *, struct device *, void *);
 
 int
 sisdrm_probe(struct device *parent, void *match, void *aux)
 {
-	return drm_probe((struct pci_attach_args *)aux, sis_pciidlist);
+	return drm_pciprobe((struct pci_attach_args *)aux, sis_pciidlist);
 }
 
 void
 sisdrm_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pci_attach_args *pa = aux;
-	struct drm_device *dev = (struct drm_device *)self;
+	drm_sis_private_t	*dev_priv = (drm_sis_private_t *)self;
+	struct pci_attach_args	*pa = aux;
+	int			 is_agp;
 
-	dev->driver = &sis_driver;
-	return drm_attach(parent, self, pa, sis_pciidlist);
+	is_agp = pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP,
+	    NULL, NULL);
+	printf("\n");
+
+	dev_priv->drmdev = drm_attach_pci(&sis_driver, pa, is_agp, self);
+}
+
+int
+sisdrm_detach(struct device *self, int flags)
+{
+	drm_sis_private_t *dev_priv = (drm_sis_private_t *)self;
+
+	if (dev_priv->drmdev != NULL) {
+		config_detach(dev_priv->drmdev, flags);
+		dev_priv->drmdev = NULL;
+	}
+
+	return (0);
 }
 
 struct cfattach sisdrm_ca = {
-	sizeof(struct drm_device), sisdrm_probe, sisdrm_attach,
-	drm_detach, drm_activate
+	sizeof(drm_sis_private_t), sisdrm_probe, sisdrm_attach,
+	sisdrm_detach
 };
 
 struct cfdriver sisdrm_cd = {
 	0, "sisdrm", DV_DULL
 };
+
+int
+sisdrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
+    struct drm_file *file_priv)
+{
+	if (file_priv->authenticated == 1) {
+		switch (cmd) {
+		case DRM_IOCTL_SIS_FB_ALLOC:
+			return (sis_fb_alloc(dev, data, file_priv));
+		case DRM_IOCTL_SIS_FB_FREE:
+			return (sis_fb_free(dev, data, file_priv));
+		case DRM_IOCTL_SIS_AGP_ALLOC:
+			return (sis_ioctl_agp_alloc(dev, data, file_priv));
+		case DRM_IOCTL_SIS_AGP_FREE:
+			return (sis_ioctl_agp_free(dev, data, file_priv));
+		}
+	}
+
+	if (file_priv->master == 1) {
+		switch (cmd) {
+		case DRM_IOCTL_SIS_AGP_INIT:
+			return (sis_ioctl_agp_init(dev, data, file_priv));
+		case DRM_IOCTL_SIS_FB_INIT:
+			return (sis_fb_init(dev, data, file_priv));
+		}
+	}
+	return (EINVAL);
+}

@@ -1,4 +1,4 @@
-/* $OpenBSD: acpibtn.c,v 1.19 2008/06/01 17:59:55 marco Exp $ */
+/* $OpenBSD: acpibtn.c,v 1.20 2008/11/06 23:41:28 marco Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -71,7 +71,7 @@ acpibtn_match(struct device *parent, void *match, void *aux)
 	struct cfdata		*cf = match;
 
 	/* sanity */
-	return acpi_matchhids(aa, acpibtn_hids, cf->cf_driver->cd_name);
+	return (acpi_matchhids(aa, acpibtn_hids, cf->cf_driver->cd_name));
 }
 
 void
@@ -122,17 +122,11 @@ acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 	switch (sc->sc_btn_type) {
 	case ACPIBTN_LID:
 	case ACPIBTN_SLEEP:
-#ifdef acpi_sleep_enabled
-	case ACPIBTN_POWER:
-		acpi_sleep_state(sc->sc_acpi, ACPI_STATE_S3);
-#endif /* acpi_sleep_enabled */
 		break;
-#ifndef acpi_sleep_enabled
 	case ACPIBTN_POWER:
 		if (notify_type == 0x80)
 			psignal(initproc, SIGUSR2);
 		break;
-#endif
 	default:
 		printf("%s: spurious acpi button interrupt %i\n", DEVNAME(sc),
 		    sc->sc_btn_type);

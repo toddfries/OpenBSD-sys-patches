@@ -1,4 +1,4 @@
-/*	$OpenBSD: pyro.c,v 1.14 2008/07/12 13:08:04 kettenis Exp $	*/
+/*	$OpenBSD: pyro.c,v 1.16 2009/01/02 20:01:45 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -38,6 +38,10 @@
 #include <machine/bus.h>
 #include <machine/autoconf.h>
 
+#ifdef DDB
+#include <machine/db_machdep.h>
+#endif
+
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 
@@ -55,6 +59,10 @@ int pyro_debug = ~0;
 #else
 #define DPRINTF(l, s)
 #endif
+
+#define FIRE_RESET_GEN			0x7010
+
+#define FIRE_RESET_GEN_XIR		0x0000000000000002L
 
 #define FIRE_INTRMAP_INT_CNTRL_NUM_MASK	0x000003c0
 #define FIRE_INTRMAP_INT_CNTRL_NUM0	0x00000040
@@ -97,6 +105,10 @@ void *_pyro_intr_establish(bus_space_tag_t, bus_space_tag_t, int, int, int,
 
 int pyro_dmamap_create(bus_dma_tag_t, bus_dma_tag_t, bus_size_t, int,
     bus_size_t, bus_size_t, int, bus_dmamap_t *);
+
+#ifdef DDB
+void pyro_xir(void *, int);
+#endif
 
 int
 pyro_match(struct device *parent, void *match, void *aux)
@@ -213,6 +225,10 @@ pyro_init(struct pyro_softc *sc, int busa)
 	pba.pba_pc->intr_map = pyro_intr_map;
 
 	free(busranges, M_DEVBUF);
+
+#ifdef DDB
+	db_register_xir(pyro_xir, sc);
+#endif
 
 	config_found(&sc->sc_dv, &pba, pyro_print);
 }
@@ -376,8 +392,6 @@ pyro_alloc_dma_tag(struct pyro_pbm *pbm)
 	dt->_dmamap_sync	= iommu_dvmamap_sync;
 	dt->_dmamem_alloc	= iommu_dvmamem_alloc;
 	dt->_dmamem_free	= iommu_dvmamem_free;
-	dt->_dmamem_map		= iommu_dvmamem_map;
-	dt->_dmamem_unmap	= iommu_dvmamem_unmap;
 	return (dt);
 }
 
@@ -538,6 +552,17 @@ _pyro_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int ihandle,
 
 	return (ih);
 }
+
+#ifdef DDB
+void
+pyro_xir(void *arg, int cpu)
+{
+	struct pyro_softc *sc = arg;
+
+	bus_space_write_8(sc->sc_bust, sc->sc_xbch, FIRE_RESET_GEN,
+	    FIRE_RESET_GEN_XIR);
+}
+#endif
 
 const struct cfattach pyro_ca = {
 	sizeof(struct pyro_softc), pyro_match, pyro_attach

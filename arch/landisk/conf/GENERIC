@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.16 2008/04/12 19:24:49 miod Exp $
+# $OpenBSD: GENERIC,v 1.21 2009/02/10 18:35:44 damien Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -150,6 +150,7 @@ ugen*	at uhub?		# USB Generic driver
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
+run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
 zyd*	at uhub?		# Zydas ZD1211
 #option	NATM
 #ueagle* at uhub?		# Analog Devices Eagle ADSL
@@ -159,16 +160,15 @@ udcf*	at uhub?		# Gude Expert mouseCLOCK
 
 # Bluetooth controllers
 ubt*	at uhub?		# USB Bluetooth
-
-# Bluetooth bus support
 bthub*	at ubt?
 
-# Bluetooth HID support
-bthidev* at bthub?
-btkbd*	at bthidev?
-btms*	at bthidev?
-wskbd*	at btkbd? mux 1
-wsmouse* at btms? mux 0
+bthidev* at bthub?		# Bluetooth HID support
+#btkbd*	at bthidev?
+#btms*	at bthidev?
+#wskbd*	at btkbd? mux 1
+#wsmouse* at btms? mux 0
+btsco*	at bthub?		# Bluetooth audio support
+audio*	at btsco?
 
 sd*	at scsibus?			# SCSI disk drives
 cd*	at scsibus?			# SCSI CD-ROM drives

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pucdata.c,v 1.57 2008/10/02 15:28:07 mbalmer Exp $	*/
+/*	$OpenBSD: pucdata.c,v 1.60 2009/01/22 13:15:20 jsg Exp $	*/
 /*	$NetBSD: pucdata.c,v 1.6 1999/07/03 05:55:23 cgd Exp $	*/
 
 /*
@@ -97,7 +97,7 @@ const struct puc_device_description puc_devices[] = {
 	 */
 
 	/* Decision Computer Inc PCCOM 2 Port RS232/422/485: 2S */
-	{   /* "Decision Computer Inc PCCOM 2 Port RS232/422/485", */ 
+	{   /* "Decision Computer Inc PCCOM 2 Port RS232/422/485", */
 	    {	PCI_VENDOR_DCI,	PCI_PRODUCT_DCI_APCI2,		0, 0	},
 	    {	0xffff,	0xffff,					0, 0	},
 	    {
@@ -107,7 +107,7 @@ const struct puc_device_description puc_devices[] = {
 	},
 
 	/* Decision Computer Inc PCCOM 4 Port RS232/422/485: 4S */
-	{   /* "Decision Computer Inc PCCOM 4 Port RS232/422/485", */ 
+	{   /* "Decision Computer Inc PCCOM 4 Port RS232/422/485", */
 	    {	PCI_VENDOR_DCI,	PCI_PRODUCT_DCI_APCI4,		0, 0	},
 	    {	0xffff,	0xffff,					0, 0	},
 	    {
@@ -119,7 +119,7 @@ const struct puc_device_description puc_devices[] = {
 	},
 
 	/* Decision Computer Inc PCCOM 8 Port RS232/422/485: 8S */
-	{   /* "Decision Computer Inc PCCOM 8 Port RS232/422/485", */ 
+	{   /* "Decision Computer Inc PCCOM 8 Port RS232/422/485", */
 	    {	PCI_VENDOR_DCI, PCI_PRODUCT_DCI_APCI8,		0, 0	},
 	    {	0xffff,	0xffff,					0, 0	},
 	    {
@@ -144,7 +144,7 @@ const struct puc_device_description puc_devices[] = {
 		{ PUC_PORT_TYPE_COM, 0x1c, 0x00, COM_FREQ }, /* Port F */
 	    },
 	},
-	
+
 	/*
 	 * SIIG Boards.
 	 *
@@ -727,7 +727,7 @@ const struct puc_device_description puc_devices[] = {
 	 */
 	{   /* "VScom PCI-010L", */
 	    {	PCI_VENDOR_OXFORD, PCI_PRODUCT_OXFORD_VSCOM_PCI010L,    0, 0 },
-	    {	0xffff, 0xffff,                                         0, 0 },
+	    {	0xffff, 0xffff,						0, 0 },
 	    {
 		{ PUC_PORT_TYPE_LPT, 0x1c, 0x00 },
 	    },
@@ -771,8 +771,8 @@ const struct puc_device_description puc_devices[] = {
 	    {	PCI_VENDOR_OXFORD, PCI_PRODUCT_OXFORD_VSCOM_PCI200L,	0, 0 },
 	    {	0xffff, 0xffff,						0, 0 },
 	    {
-		{ PUC_PORT_TYPE_COM, 0x14, 0x00, COM_FREQ * 8},
-		{ PUC_PORT_TYPE_COM, 0x18, 0x00, COM_FREQ * 8},
+		{ PUC_PORT_TYPE_COM, 0x14, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x18, 0x00, COM_FREQ * 8 },
 	    },
 	},
 
@@ -851,6 +851,17 @@ const struct puc_device_description puc_devices[] = {
 	 * I/O Flex PCI I/O Card Model-223 with 4 serial and 1 parallel ports.
 	 */
 
+	/* Exsys EX-1372 (uses Oxford OX16PCI952 and a 8x clock) */
+	{   /* "Oxford Semiconductor OX16PCI952 UARTs", */
+	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OX16PCI952,
+		PCI_VENDOR_OXFORD2, 0x0001 },
+	    {   0xffff, 0xffff,	0xffff, 0xffff },
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x14, 0x00, COM_FREQ * 8 },
+	    },
+	},
+
 	/* Oxford Semiconductor OX16PCI952 PCI `950 UARTs - 128 byte FIFOs */
 	{   /* "Oxford Semiconductor OX16PCI952 UARTs", */
 	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OX16PCI952,	0, 0 },
@@ -900,9 +911,9 @@ const struct puc_device_description puc_devices[] = {
 	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OXMPCI954,	0, 0 },
 	    {   0xffff, 0xffff,						0, 0 },
 	    {
-		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ*4 },
-		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ*4 },
-		{ PUC_PORT_TYPE_COM, 0x10, 0x10, COM_FREQ*4 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 4 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 4 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x10, COM_FREQ * 4 },
 	    },
 	},
 
@@ -988,8 +999,8 @@ const struct puc_device_description puc_devices[] = {
 	    {	PCI_VENDOR_LAVA, PCI_PRODUCT_LAVA_LAVAPORT_0,	0, 0	},
 	    {	0xffff,	0xfffc,					0, 0	},
 	    {
-		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ*4 },
-		{ PUC_PORT_TYPE_COM, 0x14, 0x00, COM_FREQ*4 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 4 },
+		{ PUC_PORT_TYPE_COM, 0x14, 0x00, COM_FREQ * 4 },
 	    },
 	},
 
@@ -1000,7 +1011,7 @@ const struct puc_device_description puc_devices[] = {
 	    {	PCI_VENDOR_LAVA, PCI_PRODUCT_LAVA_LAVAPORT_2,	0, 0	},
 	    {	0xffff,	0xfffc,					0, 0	},
 	    {
-		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ*4 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 4 },
 	    },
 	},
 
@@ -1009,7 +1020,7 @@ const struct puc_device_description puc_devices[] = {
 	    {	PCI_VENDOR_LAVA, PCI_PRODUCT_LAVA_650,		0, 0	},
 	    {	0xffff,	0xfffc,					0, 0	},
 	    {
-		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ*4 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 4 },
 	    },
 	},
 
@@ -1122,8 +1133,20 @@ const struct puc_device_description puc_devices[] = {
 	},
 
 	/* Moxa Technologies Co., Ltd. PCI I/O Card 4S RS232 */
-	{   /* "Moxa Technologies, SmartIO CP104/PCI" */
-	    {	PCI_VENDOR_MOXA, PCI_PRODUCT_MOXA_CP104,	0, 0	},
+	{   /* "Moxa Technologies, SmartIO CP104UL/PCI" */
+	    {	PCI_VENDOR_MOXA, PCI_PRODUCT_MOXA_CP104UL,	0, 0	},
+	    {	0xffff,	0xffff,					0, 0	},
+	    {
+		{ PUC_PORT_TYPE_COM, 0x18, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x18, 0x08, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x18, 0x10, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x18, 0x18, COM_FREQ * 8 },
+	    },
+	},
+
+	/* Moxa Technologies Co., Ltd. PCI I/O Card 4S RS232 */
+	{   /* "Moxa Technologies, SmartIO CP104JU/PCI" */
+	    {	PCI_VENDOR_MOXA, PCI_PRODUCT_MOXA_CP104JU,	0, 0	},
 	    {	0xffff,	0xffff,					0, 0	},
 	    {
 		{ PUC_PORT_TYPE_COM, 0x18, 0x00, COM_FREQ * 8 },
@@ -1252,7 +1275,7 @@ const struct puc_device_description puc_devices[] = {
 	    {	PCI_VENDOR_SUNIX, PCI_PRODUCT_SUNIX_40XX, 0x1409, 0x4020 },
 	    {	0xffff,	0xffff,	0xffff,	0xeff0 },
 	    {
-		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8},
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8 },
 	    },
 	},
 
@@ -1260,8 +1283,8 @@ const struct puc_device_description puc_devices[] = {
 	    {	PCI_VENDOR_SUNIX, PCI_PRODUCT_SUNIX_40XX, 0x1409, 0x4030 },
 	    {	0xffff,	0xffff,	0xffff,	0xeff0 },
 	    {
-		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8},
-		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8},
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8 },
 	    },
 	},
 
@@ -1269,8 +1292,8 @@ const struct puc_device_description puc_devices[] = {
 	    {	PCI_VENDOR_SUNIX, PCI_PRODUCT_SUNIX_40XX, 0x1409, 0x0002 },
 	    {	0xffff,	0xffff,	0xffff,	0xffff },
 	    {
-		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8},
-		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8},
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8 },
 	    },
 	},
 
@@ -1279,10 +1302,10 @@ const struct puc_device_description puc_devices[] = {
 	    {	PCI_VENDOR_SUNIX, PCI_PRODUCT_SUNIX_40XX, 0x1409, 0x4050 },
 	    {	0xffff,	0xffff,	0xffff,	0xeff0 },
 	    {
-		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8},
-		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8},
-		{ PUC_PORT_TYPE_COM, 0x14, 0x00, COM_FREQ},
-		{ PUC_PORT_TYPE_COM, 0x14, 0x08, COM_FREQ},
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x14, 0x00, COM_FREQ },
+		{ PUC_PORT_TYPE_COM, 0x14, 0x08, COM_FREQ },
 	    },
 	},
 
@@ -1290,14 +1313,14 @@ const struct puc_device_description puc_devices[] = {
 	    {	PCI_VENDOR_SUNIX, PCI_PRODUCT_SUNIX_40XX, 0x1409, 0x4060 },
 	    {	0xffff,	0xffff,	0xffff,	0xeff0 },
 	    {
-		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8},
-		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8},
-		{ PUC_PORT_TYPE_COM, 0x14, 0x00, COM_FREQ},
-		{ PUC_PORT_TYPE_COM, 0x14, 0x08, COM_FREQ},
-		{ PUC_PORT_TYPE_COM, 0x18, 0x00, COM_FREQ},
-		{ PUC_PORT_TYPE_COM, 0x1c, 0x00, COM_FREQ},
-		{ PUC_PORT_TYPE_COM, 0x20, 0x00, COM_FREQ},
-		{ PUC_PORT_TYPE_COM, 0x24, 0x00, COM_FREQ},
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x14, 0x00, COM_FREQ },
+		{ PUC_PORT_TYPE_COM, 0x14, 0x08, COM_FREQ },
+		{ PUC_PORT_TYPE_COM, 0x18, 0x00, COM_FREQ },
+		{ PUC_PORT_TYPE_COM, 0x1c, 0x00, COM_FREQ },
+		{ PUC_PORT_TYPE_COM, 0x20, 0x00, COM_FREQ },
+		{ PUC_PORT_TYPE_COM, 0x24, 0x00, COM_FREQ },
 	    },
 	},
 
@@ -1305,8 +1328,8 @@ const struct puc_device_description puc_devices[] = {
 	    {	PCI_VENDOR_SUNIX, PCI_PRODUCT_SUNIX_40XX, 0x1409, 0x4070 },
 	    {	0xffff,	0xffff,	0xffff,	0xeff0 },
 	    {
-		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8},
-		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8},
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8 },
 		{ PUC_PORT_TYPE_LPT, 0x18, 0x00, 0x00 },
 	    },
 	},
@@ -1315,8 +1338,8 @@ const struct puc_device_description puc_devices[] = {
 	    {	PCI_VENDOR_SUNIX, PCI_PRODUCT_SUNIX_40XX, 0x1409, 0x4080 },
 	    {	0xffff,	0xffff,	0xffff,	0xeff0 },
 	    {
-		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8},
-		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8},
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8 },
 		{ PUC_PORT_TYPE_LPT, 0x18, 0x00, 0x00 },
 		{ PUC_PORT_TYPE_LPT, 0x20, 0x00, 0x00 },
 	    },
@@ -1326,10 +1349,10 @@ const struct puc_device_description puc_devices[] = {
 	    {	PCI_VENDOR_SUNIX, PCI_PRODUCT_SUNIX_40XX, 0x1409, 0x4090 },
 	    {	0xffff,	0xffff,	0xffff,	0xeff0 },
 	    {
-		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8},
-		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8},
-		{ PUC_PORT_TYPE_COM, 0x14, 0x00, COM_FREQ},
-		{ PUC_PORT_TYPE_COM, 0x14, 0x08, COM_FREQ},
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x14, 0x00, COM_FREQ },
+		{ PUC_PORT_TYPE_COM, 0x14, 0x08, COM_FREQ },
 		{ PUC_PORT_TYPE_LPT, 0x18, 0x00, 0x00 },
 		{ PUC_PORT_TYPE_LPT, 0x20, 0x00, 0x00 },
 	    },
@@ -1467,7 +1490,7 @@ const struct puc_device_description puc_devices[] = {
 
 	{   /* EXAR XR17C152 Dual UART */
 	    {   PCI_VENDOR_EXAR, PCI_PRODUCT_EXAR_XR17C152,	0, 0 },
-	    {   0xffff, 0xffff, 				0, 0 },
+	    {   0xffff, 0xffff,					0, 0 },
 	    {
 		{ PUC_PORT_TYPE_COM, 0x10, 0x0000, COM_FREQ * 8 },
 		{ PUC_PORT_TYPE_COM, 0x10, 0x0200, COM_FREQ * 8 },
@@ -1487,7 +1510,7 @@ const struct puc_device_description puc_devices[] = {
 
 	{   /* Exar XR17C158 Eight Channel UART */
 	    {   PCI_VENDOR_EXAR, PCI_PRODUCT_EXAR_XR17C158,	0, 0 },
-	    {   0xffff, 0xffff, 				0, 0 },
+	    {   0xffff, 0xffff,					0, 0 },
 	    {
 		{ PUC_PORT_TYPE_COM, 0x10, 0x0000, COM_FREQ * 8 },
 		{ PUC_PORT_TYPE_COM, 0x10, 0x0200, COM_FREQ * 8 },
@@ -1502,14 +1525,14 @@ const struct puc_device_description puc_devices[] = {
 
 	{   /* Dell DRAC 3 Virtual UART */
 	    {   PCI_VENDOR_DELL, PCI_PRODUCT_DELL_DRAC_3_VUART,	0, 0 },
-	    {   0xffff, 0xffff, 				0, 0 },
+	    {   0xffff, 0xffff,					0, 0 },
 	    {
 		{ PUC_PORT_TYPE_COM, 0x14, 0x0000, COM_FREQ * 128 },
 	    },
 	},
 	{   /* Dell DRAC 4 Virtual UART */
 	    {   PCI_VENDOR_DELL, PCI_PRODUCT_DELL_DRAC_4_VUART,	0, 0 },
-	    {   0xffff, 0xffff, 				0, 0 },
+	    {   0xffff, 0xffff,					0, 0 },
 	    {
 		{ PUC_PORT_TYPE_COM, 0x14, 0x0000, COM_FREQ * 128 },
 	    },

@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.97 2008/07/21 04:35:54 todd Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.100 2009/02/15 15:03:58 kettenis Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.51 2001/07/24 19:32:11 eeh Exp $ */
 
 /*
@@ -75,6 +75,8 @@
 #include <machine/trap.h>
 #include <sparc64/sparc64/cache.h>
 #include <sparc64/sparc64/timerreg.h>
+#include <sparc64/dev/vbusvar.h>
+#include <sparc64/dev/cbusvar.h>
 
 #include <dev/ata/atavar.h>
 #include <dev/pci/pcivar.h>
@@ -101,7 +103,6 @@ int	fbnode;		/* node ID of ROM's console output device */
 int	optionsnode;	/* node ID of ROM's options */
 
 static	int rootnode;
-char platform_type[64];
 
 /* for hw.product/vendor see sys/kern/kern_sysctl.c */
 extern char *hw_prod, *hw_vendor;
@@ -746,7 +747,7 @@ extern struct sparc_bus_dma_tag mainbus_dma_tag;
 extern bus_space_tag_t mainbus_space_tag;
 
 	struct mainbus_attach_args ma;
-	char buf[32], *p;
+	char buf[64];
 	const char *const *ssp, *sp = NULL;
 	int node0, node, rv, len;
 
@@ -766,27 +767,44 @@ extern bus_space_tag_t mainbus_space_tag;
 		NULL
 	};
 
-	if ((len = OF_getprop(findroot(), "banner-name", platform_type,
-	    sizeof(platform_type))) <= 0)
-		OF_getprop(findroot(), "name", platform_type,
-		    sizeof(platform_type));
-	printf(": %s\n", platform_type);
+	/*
+	 * Print the "banner-name" property in dmesg.  It provides a
+	 * description of the machine that is generally more
+	 * informative than the "name" property.  However, if the
+	 * "banner-name" property is missing, fall back on the "name"
+	 * propery.
+	 */
+	if (OF_getprop(findroot(), "banner-name", buf, sizeof(buf)) > 0 ||
+	    OF_getprop(findroot(), "name", buf, sizeof(buf)) > 0)
+		printf(": %s\n", buf);
+	else
+		printf("\n");
 
-	hw_vendor = malloc(sizeof(platform_type), M_DEVBUF, M_NOWAIT);
-	if (len > 0 && hw_vendor != NULL) {
-		strlcpy(hw_vendor, platform_type, sizeof(platform_type));
-		if ((strncmp(hw_vendor, "SUNW,", 5)) == 0) {
-			p = hw_prod = hw_vendor + 5;
+	/*
+	 * Base the hw.product and hw.vendor strings on the "name"
+	 * property.  They describe the hardware in a much more
+	 * consistent way than the "banner-property".
+	 */
+	if ((len = OF_getprop(findroot(), "name", buf, sizeof(buf))) > 0) {
+		hw_prod = malloc(len, M_DEVBUF, M_NOWAIT);
+		if (hw_prod)
+			strlcpy(hw_prod, buf, len);
+
+		if (strncmp(buf, "SUNW,", 5) == 0)
 			hw_vendor = "Sun";
-		} else if ((strncmp(hw_vendor, "Sun (TM) ", 9)) == 0) {
-			p = hw_prod = hw_vendor + 9;
-			hw_vendor = "Sun";
-		} else if ((p = memchr(hw_vendor, ' ', len)) != NULL) {
-			*p = '\0';
-			hw_prod = ++p;
-		}
-		if ((p = memchr(hw_prod, '(', len - (p - hw_prod))) != NULL)
-			*p = '\0';
+		if (strncmp(buf, "FJSV,", 5) == 0)
+			hw_vendor = "Fujitsu";
+		if (strncmp(buf, "TAD,", 4) == 0)
+			hw_vendor = "Tadpole";
+
+		/*
+		 * The Momentum Leopard-V advertises itself as
+		 * SUNW,UltraSPARC-IIi-Engine, but can be
+		 * distinguished by looking at the "model" property.
+		 */
+		if (OF_getprop(findroot(), "model", buf, sizeof(buf)) > 0 &&
+		    strncmp(buf, "MOMENTUM,", 9) == 0)
+			hw_vendor = "Momentum";
 	}
 
 	/* Establish the first component of the boot path */
@@ -1195,6 +1213,8 @@ device_register(struct device *dev, void *aux)
 	struct mainbus_attach_args *ma = aux;
 	struct pci_attach_args *pa = aux;
 	struct sbus_attach_args *sa = aux;
+	struct vbus_attach_args *va = aux;
+	struct cbus_attach_args *ca = aux;
 	struct bootpath *bp = bootpath_store(0, NULL);
 	struct device *busdev = dev->dv_parent;
 	const char *devname = dev->dv_cfdata->cf_driver->cd_name;
@@ -1230,10 +1250,29 @@ device_register(struct device *dev, void *aux)
 	else if (strcmp(busname, "sbus") == 0 ||
 	    strcmp(busname, "dma") == 0 || strcmp(busname, "ledma") == 0)
 		node = sa->sa_node;
+	else if (strcmp(busname, "vbus") == 0)
+		node = va->va_node;
+	else if (strcmp(busname, "cbus") == 0)
+		node = ca->ca_node;
 	else if (strcmp(busname, "pci") == 0)
 		node = PCITAG_NODE(pa->pa_tag);
 
 	if (node == bootnode) {
+		if (strcmp(devname, "vdsk") == 0) {
+			/*
+			 * For virtual disks, don't nail the boot
+			 * device just yet.  Instead, we add fake a
+			 * SCSI target/lun, such that we match it the
+			 * next time around.
+			 */
+			bp->dev = dev;
+			(bp + 1)->val[0] = 0;
+			(bp + 1)->val[1] = 0;
+			nbootpath++;
+			bootpath_store(1, bp + 1);
+			return;
+		}
+
 		nail_bootdev(dev, bp);
 		return;
 	}

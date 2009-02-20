@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_node.c,v 1.42 2008/08/09 10:14:02 thib Exp $	*/
+/*	$OpenBSD: nfs_node.c,v 1.44 2008/12/24 02:43:52 thib Exp $	*/
 /*	$NetBSD: nfs_node.c,v 1.16 1996/02/18 11:53:42 fvdl Exp $	*/
 
 /*
@@ -64,9 +64,6 @@ struct pool nfs_node_pool;
 
 extern int prtactive;
 
-#define TRUE	1
-#define	FALSE	0
-
 #define	nfs_hash(x,y)	hash32_buf((x), (y), HASHINIT)
 
 /*
@@ -94,6 +91,7 @@ nfs_nget(mntp, fhp, fhsize, npp)
 	int fhsize;
 	struct nfsnode **npp;
 {
+	struct nfsmount *nmp;
 	struct proc *p = curproc;	/* XXX */
 	struct nfsnode *np;
 	struct nfsnodehashhead *nhpp;
@@ -133,14 +131,12 @@ loop:
 	 * Are we getting the root? If so, make sure the vnode flags
 	 * are correct 
 	 */
-	{
-		struct nfsmount *nmp = VFSTONFS(mntp);
-		if ((fhsize == nmp->nm_fhsize) &&
-		    !bcmp(fhp, nmp->nm_fh, fhsize)) {
-			if (vp->v_type == VNON)
-				vp->v_type = VDIR;
-			vp->v_flag |= VROOT;
-		}
+	nmp = VFSTONFS(mntp);
+	if ((fhsize == nmp->nm_fhsize) &&
+	    !bcmp(fhp, nmp->nm_fh, fhsize)) {
+		if (vp->v_type == VNON)
+			vp->v_type = VDIR;
+		vp->v_flag |= VROOT;
 	}
 	
 	LIST_INSERT_HEAD(nhpp, np, n_hash);

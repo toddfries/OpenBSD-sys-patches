@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.127 2008/10/16 19:12:51 naddy Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.131 2009/01/28 22:18:43 michele Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -135,6 +135,10 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <net/if_trunk.h>
 #endif
 
+#ifdef AOE
+#include <net/if_aoe.h>
+#endif /* AOE */
+
 #ifdef INET6
 #ifndef INET
 #include <netinet/in.h>
@@ -259,6 +263,12 @@ ether_output(ifp0, m0, dst, rt0)
 			else
 				senderr(EHOSTUNREACH);
 		}
+#ifdef MPLS
+		if (rt->rt_flags & RTF_MPLS) {
+			if ((m = mpls_output(m, rt)) == NULL)
+				senderr(EHOSTUNREACH);
+		}
+#endif
 		if (rt->rt_flags & RTF_GATEWAY) {
 			if (rt->rt_gwroute == 0)
 				goto lookup;
@@ -285,7 +295,12 @@ ether_output(ifp0, m0, dst, rt0)
 		if ((m->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX) &&
 		    !m->m_pkthdr.pf.routed)
 			mcopy = m_copy(m, 0, (int)M_COPYALL);
-		etype = htons(ETHERTYPE_IP);
+#ifdef MPLS
+		if (rt0->rt_flags & RTF_MPLS)
+			etype = htons(ETHERTYPE_MPLS);
+		else
+#endif
+			etype = htons(ETHERTYPE_IP);
 		break;
 #endif
 #ifdef INET6
@@ -515,6 +530,8 @@ ether_input(ifp0, eh, m)
 	struct ether_header *eh_tmp;
 #endif
 
+	m_cluncount(m, 1);
+
 	if (eh == NULL) {
 		eh = mtod(m, struct ether_header *);
 		m_adj(m, ETHER_HDR_LEN);
@@ -736,6 +753,11 @@ decapsulate:
 		schednetisr(NETISR_PPPOE);
 		break;
 #endif /* NPPPOE > 0 */
+#ifdef AOE
+	case ETHERTYPE_AOE:
+		aoe_input(ifp, m);
+		goto done;
+#endif /* AOE */
 #ifdef MPLS
 	case ETHERTYPE_MPLS:
 	case ETHERTYPE_MPLS_MCAST:

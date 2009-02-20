@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9reg.h,v 1.56 2008/10/11 23:49:05 brad Exp $	*/
+/*	$OpenBSD: rtl81x9reg.h,v 1.60 2009/02/12 11:55:29 martynas Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -163,6 +163,7 @@
 #define RL_HWREV_8169_8110SB	0x10000000
 #define RL_HWREV_8169_8110SCd	0x18000000
 #define RL_HWREV_8102EL		0x24800000
+#define RL_HWREV_8168D		0x28000000
 #define RL_HWREV_8168_SPIN1	0x30000000
 #define RL_HWREV_8100E_SPIN1	0x30800000
 #define RL_HWREV_8101E		0x34000000
@@ -665,7 +666,7 @@ struct rl_stats {
 
 #define RL_RX_DESC_CNT		64
 #define RL_TX_DESC_CNT_8139	64
-#define RL_TX_DESC_CNT_8169	1024
+#define RL_TX_DESC_CNT_8169	512
 
 #define RL_TX_QLEN		64
 
@@ -767,6 +768,7 @@ struct rl_list_data {
 	struct rl_txq		rl_txq[RL_TX_QLEN];
 	int			rl_txq_considx;
 	int			rl_txq_prodidx;
+	int			rl_txq_free;
 
 	bus_dmamap_t		rl_tx_list_map;
 	struct rl_desc		*rl_tx_list;
@@ -826,6 +828,7 @@ struct rl_softc {
 #define	RL_FLAG_MACSTAT		0x0100
 #define	RL_FLAG_HWIM		0x0200
 #define	RL_FLAG_TIMERINTR	0x0400
+#define	RL_FLAG_MACLDPS		0x0800
 #define	RL_FLAG_LINK		0x8000
 
 	u_int16_t		rl_intrs;
@@ -894,6 +897,7 @@ struct rl_softc {
 	CSR_WRITE_4(sc, offset, CSR_READ_4(sc, offset) & ~(val))
 
 #define RL_TIMEOUT		1000
+#define RL_PHY_TIMEOUT		20
 
 /*
  * General constants that are fun to know.

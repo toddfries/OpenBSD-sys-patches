@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic6360.c,v 1.16 2007/11/05 18:16:19 krw Exp $	*/
+/*	$OpenBSD: aic6360.c,v 1.19 2009/02/16 21:19:06 miod Exp $	*/
 /*	$NetBSD: aic6360.c,v 1.52 1996/12/10 21:27:51 thorpej Exp $	*/
 
 #ifdef DDB
@@ -154,7 +154,7 @@
 int aic_debug = 0x00; /* AIC_SHOWSTART|AIC_SHOWMISC|AIC_SHOWTRACE; */
 #endif
 
-void	aic_minphys(struct buf *);
+void	aic_minphys(struct buf *, struct scsi_link *);
 void 	aic_init(struct aic_softc *);
 void	aic_done(struct aic_softc *, struct aic_acb *);
 void	aic_dequeue(struct aic_softc *, struct aic_acb *);
@@ -193,7 +193,7 @@ struct scsi_adapter aic_switch = {
 #ifdef notyet
 	aic_minphys,
 #else
-	minphys,
+	scsi_minphys,
 #endif
 	0,
 	0,
@@ -518,7 +518,7 @@ aic_scsi_cmd(struct scsi_xfer *xs)
 
 	flags = xs->flags;
 	if ((acb = aic_get_acb(sc, flags)) == NULL) {
-		return TRY_AGAIN_LATER;
+		return (NO_CCB);
 	}
 
 	/* Initialize acb */
@@ -563,7 +563,7 @@ aic_scsi_cmd(struct scsi_xfer *xs)
  * Adjust transfer size in buffer structure
  */
 void
-aic_minphys(struct buf *bp)
+aic_minphys(struct buf *bp, struct scsi_link *sl)
 {
 
 	AIC_TRACE(("aic_minphys  "));
@@ -1769,8 +1769,7 @@ loop:
 
 			/* On our first connection, schedule a timeout. */
 			if ((acb->xs->flags & SCSI_POLL) == 0)
-				timeout_add(&acb->xs->stimeout,
-				    (acb->timeout * hz) / 1000);
+				timeout_add_msec(&acb->xs->stimeout, acb->timeout);
 
 			sc->sc_state = AIC_CONNECTED;
 		} else if ((sstat1 & SELTO) != 0) {

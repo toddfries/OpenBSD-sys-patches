@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.104 2008/11/03 01:42:15 marco Exp $ */
+/*	$OpenBSD: mpi.c,v 1.109 2009/02/16 21:19:07 miod Exp $ */
 
 /*
  * Copyright (c) 2005, 2006 David Gwynne <dlg@openbsd.org>
@@ -63,7 +63,7 @@ struct cfdriver mpi_cd = {
 
 int			mpi_scsi_cmd(struct scsi_xfer *);
 void			mpi_scsi_cmd_done(struct mpi_ccb *);
-void			mpi_minphys(struct buf *bp);
+void			mpi_minphys(struct buf *bp, struct scsi_link *sl);
 int			mpi_scsi_probe(struct scsi_link *);
 int			mpi_scsi_ioctl(struct scsi_link *, u_long, caddr_t,
 			    int, struct proc *);
@@ -154,14 +154,12 @@ int		mpi_ioctl_setstate(struct mpi_softc *, struct bioc_setstate *);
 #ifndef SMALL_KERNEL
 int		mpi_create_sensors(struct mpi_softc *);
 void		mpi_refresh_sensors(void *);
-void		mpi_refresh_sensors(void *);
 #endif /* SMALL_KERNEL */
 #endif /* NBIO > 0 */
 
 #define DEVNAME(s)		((s)->sc_dev.dv_xname)
 
 #define	dwordsof(s)		(sizeof(s) / sizeof(u_int32_t))
-#define	sizeofa(s)		(sizeof(s) / sizeof((s)[0]))
 
 #define mpi_read_db(s)		mpi_read((s), MPI_DOORBELL)
 #define mpi_write_db(s, v)	mpi_write((s), MPI_DOORBELL, (v))
@@ -288,7 +286,6 @@ mpi_attach(struct mpi_softc *sc)
 	/* enable interrupts */
 	mpi_write(sc, MPI_INTR_MASK, MPI_INTR_MASK_DOORBELL);
 
-#ifdef notyet
 #if NBIO > 0
 	if (sc->sc_flags & MPI_F_RAID) {
 		if (bio_register(&sc->sc_dev, mpi_ioctl) != 0)
@@ -319,7 +316,6 @@ mpi_attach(struct mpi_softc *sc)
 #endif /* SMALL_KERNEL */
 done:
 #endif /* NBIO > 0 */
-#endif /* notyet */
 
 	return (0);
 
@@ -1435,7 +1431,7 @@ mpi_load_xs(struct mpi_ccb *ccb)
 }
 
 void
-mpi_minphys(struct buf *bp)
+mpi_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	/* XXX */
 	if (bp->b_bcount > MAXPHYS)
@@ -2994,9 +2990,10 @@ mpi_refresh_sensors(void *arg)
 		}
 
 		/* override status if scrubbing or something */
-		if (rpg0->volume_status & MPI_CFG_RAID_VOL_0_STATUS_RESYNCING)
+		if (rpg0->volume_status & MPI_CFG_RAID_VOL_0_STATUS_RESYNCING) {
 			sc->sc_sensors[vol].value = SENSOR_DRIVE_REBUILD;
 			sc->sc_sensors[vol].status = SENSOR_S_WARN;
+		}
 
 		vol++;
 	}

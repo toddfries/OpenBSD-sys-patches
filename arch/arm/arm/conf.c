@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.19 2008/06/12 20:03:48 mglocker Exp $	*/
+/*	$OpenBSD: conf.c,v 1.21 2009/01/25 17:30:48 miod Exp $	*/
 /*	$NetBSD: conf.c,v 1.10 2002/04/19 01:04:38 wiz Exp $	*/
 
 /*
@@ -66,6 +66,13 @@
  */
 #include "com.h"		/* NS164x0 serial ports */
 
+#ifdef CONF_HAVE_SSCOM
+#include "sscom.h"
+cdev_decl(sscom);
+#else
+#define NSSCOM 0
+#endif
+
 /*
  * Standard pseudo-devices
  */
@@ -97,7 +104,6 @@
  */
 #include "wd.h"
 bdev_decl(wd);
-bdev_decl(sw);
 
 #ifdef USER_PCICONF
 #include "pci.h"
@@ -291,7 +297,7 @@ struct cdevsw cdevsw[] = {
 	cdev_cn_init(1,cn),			/*  0: virtual console */
 	cdev_ctty_init(1,ctty),			/*  1: controlling terminal */
 	cdev_mm_init(1,mm),			/*  2: /dev/{null,mem,kmem,...} */
-	cdev_swap_init(1,sw),			/*  3: /dev/drum (swap pseudo-device) */
+	cdev_notdef(),				/*  3 was /dev/drum */
 	cdev_tty_init(NPTY,pts),		/*  4: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),		/*  5: pseudo-tty master */
 	cdev_log_init(1,log),			/*  6: /dev/klog */
@@ -302,7 +308,7 @@ struct cdevsw cdevsw[] = {
 	cdev_lkm_dummy(),			/* 11: */
 	cdev_tty_init(NCOM,com),		/* 12: serial port */
 	cdev_gpio_init(NGPIO,gpio),     	/* 13: GPIO interface */
-	cdev_lkm_dummy(),			/* 14: */
+	cdev_tty_init(NSSCOM,sscom),		/* 14: alternate serial port */
 	cdev_lkm_dummy(),			/* 15: */
 	cdev_disk_init(NWD,wd),			/* 16: ST506/ESDI/IDE disk */
 	cdev_lkm_dummy(),			/* 17: */

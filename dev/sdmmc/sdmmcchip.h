@@ -77,6 +77,8 @@ struct sdmmcbus_attach_args {
 	const char *saa_busname;
 	sdmmc_chipset_tag_t sct;
 	sdmmc_chipset_handle_t sch;
+	int	flags;
+	long	max_xfer;
 };
 
 void	sdmmc_needs_discover(struct device *);

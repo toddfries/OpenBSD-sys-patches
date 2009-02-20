@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs.h,v 1.35 2008/09/12 16:55:37 thib Exp $	*/
+/*	$OpenBSD: nfs.h,v 1.38 2009/01/24 23:35:47 thib Exp $	*/
 /*	$NetBSD: nfs.h,v 1.10.4.1 1996/05/27 11:23:56 fvdl Exp $	*/
 
 /*
@@ -89,8 +89,6 @@
 
 /*
  * sys/malloc.h needs M_NFSDIROFF, M_NFSRVDESC and M_NFSBIGFH added.
- * The VA_EXCLUSIVE flag should be added for va_vaflags and set for an
- * exclusive create.
  */
 #ifndef M_NFSRVDESC
 #define M_NFSRVDESC	M_TEMP
@@ -100,9 +98,6 @@
 #endif
 #ifndef M_NFSBIGFH
 #define M_NFSBIGFH	M_TEMP
-#endif
-#ifndef VA_EXCLUSIVE
-#define VA_EXCLUSIVE	0
 #endif
 
 /*
@@ -325,10 +320,6 @@ struct nfsd {
 	TAILQ_ENTRY(nfsd) nfsd_chain;	/* List of all nfsd's */
 	int		nfsd_flag;	/* NFSD_ flags */
 	struct nfssvc_sock *nfsd_slp;	/* Current socket */
-	int		nfsd_authlen;	/* Authenticator len */
-	u_char		nfsd_authstr[RPCAUTH_MAXSIZ]; /* Authenticator data */
-	int		nfsd_verflen;	/* and the Verifier */
-	u_char		nfsd_verfstr[RPCVERF_MAXSIZ];
 	struct proc	*nfsd_procp;	/* Proc ptr */
 	struct nfsrv_descript *nfsd_nd;	/* Associated nfsrv_descript */
 };
@@ -344,7 +335,7 @@ struct nfsd {
  * Some fields are used only when write request gathering is performed.
  */
 struct nfsrv_descript {
-	u_quad_t		nd_time;	/* Write deadline (usec) */
+	struct timeval		nd_time;	/* Write deadline */
 	off_t			nd_off;		/* Start byte offset */
 	off_t			nd_eoff;	/* and end byte offset */
 	LIST_ENTRY(nfsrv_descript) nd_hash;	/* Hash list */

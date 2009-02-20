@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwi.c,v 1.94 2008/09/04 15:59:52 damien Exp $	*/
+/*	$OpenBSD: if_iwi.c,v 1.99 2009/01/26 19:09:41 damien Exp $	*/
 
 /*-
  * Copyright (c) 2004-2008
@@ -100,7 +100,7 @@ void		iwi_tx_intr(struct iwi_softc *, struct iwi_tx_ring *);
 int		iwi_intr(void *);
 int		iwi_cmd(struct iwi_softc *, uint8_t, void *, uint8_t, int);
 int		iwi_send_mgmt(struct ieee80211com *, struct ieee80211_node *,
-		    int, int);
+		    int, int, int);
 int		iwi_tx_start(struct ifnet *, struct mbuf *,
 		    struct ieee80211_node *);
 void		iwi_start(struct ifnet *);
@@ -149,7 +149,7 @@ int
 iwi_match(struct device *parent, void *match, void *aux)
 {
 	return pci_matchbyid((struct pci_attach_args *)aux, iwi_devices,
-	    sizeof (iwi_devices) / sizeof (iwi_devices[0]));
+	    nitems(iwi_devices));
 }
 
 /* Base Address Register */
@@ -1221,7 +1221,7 @@ iwi_cmd(struct iwi_softc *sc, uint8_t type, void *data, uint8_t len, int async)
 /* ARGSUSED */
 int
 iwi_send_mgmt(struct ieee80211com *ic, struct ieee80211_node *ni, int type,
-    int arg)
+    int arg1, int arg2)
 {
 	return EOPNOTSUPP;
 }
@@ -1233,10 +1233,10 @@ iwi_tx_start(struct ifnet *ifp, struct mbuf *m0, struct ieee80211_node *ni)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211_frame *wh;
 	struct ieee80211_key *k;
+	struct mbuf *m1;
 	struct iwi_tx_data *data;
 	struct iwi_tx_desc *desc;
 	struct iwi_tx_ring *txq = &sc->txq[0];
-	struct mbuf *mnew;
 	int hdrlen, error, i, station = 0;
 
 	wh = mtod(m0, struct ieee80211_frame *);
@@ -1300,26 +1300,23 @@ iwi_tx_start(struct ifnet *ifp, struct mbuf *m0, struct ieee80211_node *ni)
 	}
 	if (error != 0) {
 		/* too many fragments, linearize */
-
-		MGETHDR(mnew, M_DONTWAIT, MT_DATA);
-		if (mnew == NULL) {
+		MGETHDR(m1, M_DONTWAIT, MT_DATA);
+		if (m1 == NULL) {
 			m_freem(m0);
-			return ENOMEM;
+			return ENOBUFS;
 		}
-		M_DUP_PKTHDR(mnew, m0);
 		if (m0->m_pkthdr.len > MHLEN) {
-			MCLGET(mnew, M_DONTWAIT);
-			if (!(mnew->m_flags & M_EXT)) {
+			MCLGET(m1, M_DONTWAIT);
+			if (!(m1->m_flags & M_EXT)) {
 				m_freem(m0);
-				m_freem(mnew);
-				return ENOMEM;
+				m_freem(m1);
+				return ENOBUFS;
 			}
 		}
-
-		m_copydata(m0, 0, m0->m_pkthdr.len, mtod(mnew, caddr_t));
+		m_copydata(m0, 0, m0->m_pkthdr.len, mtod(m1, caddr_t));
+		m1->m_pkthdr.len = m1->m_len = m0->m_pkthdr.len;
 		m_freem(m0);
-		mnew->m_len = mnew->m_pkthdr.len;
-		m0 = mnew;
+		m0 = m1;
 
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 		    BUS_DMA_NOWAIT);

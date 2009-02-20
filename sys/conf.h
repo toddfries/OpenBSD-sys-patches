@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.90 2008/06/14 21:31:46 mbalmer Exp $	*/
+/*	$OpenBSD: conf.h,v 1.93 2009/01/25 17:30:49 miod Exp $	*/
 /*	$NetBSD: conf.h,v 1.33 1996/05/03 20:03:32 christos Exp $	*/
 
 /*-
@@ -264,13 +264,6 @@ extern struct cdevsw cdevsw[];
 	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
 	0, (dev_type_poll((*))) enodev, (dev_type_mmap((*))) enodev }
 
-/* read, write */
-#define cdev_swap_init(c,n) { \
-	(dev_type_open((*))) nullop, (dev_type_close((*))) nullop, \
-	dev_init(c,n,read), dev_init(c,n,write), (dev_type_ioctl((*))) enodev, \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	(dev_type_mmap((*))) enodev }
-
 /* open, close, read, write, ioctl, tty, poll, kqfilter */
 #define cdev_ptc_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
@@ -302,6 +295,14 @@ extern struct cdevsw cdevsw[];
 #define cdev_tun_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
 	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
+	0, dev_init(c,n,poll), (dev_type_mmap((*))) enodev, \
+	0, D_KQFILTER, dev_init(c,n,kqfilter) }
+
+/* open, close, ioctl, poll, kqfilter -- XXX should be generic device */
+#define cdev_vscsi_init(c,n) { \
+	dev_init(c,n,open), dev_init(c,n,close), \
+	(dev_type_read((*))) enodev, (dev_type_write((*))) enodev, \
+	dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
 	0, dev_init(c,n,poll), (dev_type_mmap((*))) enodev, \
 	0, D_KQFILTER, dev_init(c,n,kqfilter) }
 
@@ -513,9 +514,9 @@ void	randomattach(void);
 
 /* open, close, read, ioctl, poll, mmap, nokqfilter */
 #define      cdev_drm_init(c,n)        { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
+	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
 	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
+	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
 	dev_init(c,n,mmap), 0, D_CLONE }
 
 /* open, close, ioctl */
@@ -605,7 +606,6 @@ cdev_decl(video);
 cdev_decl(cn);
 
 bdev_decl(sw);
-cdev_decl(sw);
 
 bdev_decl(vnd);
 cdev_decl(vnd);
@@ -666,6 +666,7 @@ cdev_decl(crypto);
 cdev_decl(systrace);
 
 cdev_decl(bio);
+cdev_decl(vscsi);
 cdev_decl(bthub);
 
 cdev_decl(gpr);

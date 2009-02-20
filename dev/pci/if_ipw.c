@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ipw.c,v 1.80 2008/09/03 19:43:59 damien Exp $	*/
+/*	$OpenBSD: if_ipw.c,v 1.84 2009/01/26 19:09:41 damien Exp $	*/
 
 /*-
  * Copyright (c) 2004-2008
@@ -84,7 +84,7 @@ void		ipw_tx_intr(struct ipw_softc *);
 int		ipw_intr(void *);
 int		ipw_cmd(struct ipw_softc *, uint32_t, void *, uint32_t);
 int		ipw_send_mgmt(struct ieee80211com *, struct ieee80211_node *,
-		    int, int);
+		    int, int, int);
 int		ipw_tx_start(struct ifnet *, struct mbuf *,
 		    struct ieee80211_node *);
 void		ipw_start(struct ifnet *);
@@ -610,7 +610,6 @@ ipw_media_change(struct ifnet *ifp)
 void
 ipw_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 {
-#define N(a)	(sizeof (a) / sizeof (a[0]))
 	struct ipw_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
 	static const struct {
@@ -635,8 +634,8 @@ ipw_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 	val &= 0xf;
 
 	/* convert rate to 802.11 rate */
-	for (i = 0; i < N(rates) && rates[i].val != val; i++);
-	rate = (i < N(rates)) ? rates[i].rate : 0;
+	for (i = 0; i < nitems(rates) && rates[i].val != val; i++);
+	rate = (i < nitems(rates)) ? rates[i].rate : 0;
 
 	imr->ifm_active |= IFM_IEEE80211_11B;
 	imr->ifm_active |= ieee80211_rate2media(ic, rate, IEEE80211_MODE_11B);
@@ -655,7 +654,6 @@ ipw_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 		/* should not get there */
 		break;
 	}
-#undef N
 }
 
 int
@@ -1117,7 +1115,7 @@ ipw_cmd(struct ipw_softc *sc, uint32_t type, void *data, uint32_t len)
 /* ARGSUSED */
 int
 ipw_send_mgmt(struct ieee80211com *ic, struct ieee80211_node *ni, int type,
-    int arg)
+    int arg1, int arg2)
 {
 	return EOPNOTSUPP;
 }
@@ -1129,10 +1127,10 @@ ipw_tx_start(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211_frame *wh;
 	struct ieee80211_key *k;
+	struct mbuf *m1;
 	struct ipw_soft_bd *sbd;
 	struct ipw_soft_hdr *shdr;
 	struct ipw_soft_buf *sbuf;
-	struct mbuf *mnew;
 	int error, i;
 
 	wh = mtod(m, struct ieee80211_frame *);
@@ -1194,25 +1192,23 @@ ipw_tx_start(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni)
 	}
 	if (error != 0) {
 		/* too many fragments, linearize */
-
-		MGETHDR(mnew, M_DONTWAIT, MT_DATA);
-		if (mnew == NULL) {
+		MGETHDR(m1, M_DONTWAIT, MT_DATA);
+		if (m1 == NULL) {
 			m_freem(m);
-			return ENOMEM;
+			return ENOBUFS;
 		}
-		M_DUP_PKTHDR(mnew, m);
 		if (m->m_pkthdr.len > MHLEN) {
-			MCLGET(mnew, M_DONTWAIT);
-			if (!(mnew->m_flags & M_EXT)) {
+			MCLGET(m1, M_DONTWAIT);
+			if (!(m1->m_flags & M_EXT)) {
 				m_freem(m);
-				m_freem(mnew);
-				return ENOMEM;
+				m_freem(m1);
+				return ENOBUFS;
 			}
 		}
-		m_copydata(m, 0, m->m_pkthdr.len, mtod(mnew, caddr_t));
+		m_copydata(m, 0, m->m_pkthdr.len, mtod(m1, caddr_t));
+		m1->m_pkthdr.len = m1->m_len = m->m_pkthdr.len;
 		m_freem(m);
-		mnew->m_len = mnew->m_pkthdr.len;
-		m = mnew;
+		m = m1;
 
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, sbuf->map, m,
 		    BUS_DMA_NOWAIT);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.13 2008/10/28 05:39:18 brad Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.15 2008/11/28 02:44:18 brad Exp $	*/
 
 /******************************************************************************
 
@@ -362,7 +362,7 @@ ixgbe_start_locked(struct tx_ring *txr, struct ifnet * ifp)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 
 		/* Set timeout in case hardware has problems transmitting */
@@ -425,10 +425,10 @@ ixgbe_start(struct ifnet *ifp)
 int
 ixgbe_ioctl(struct ifnet * ifp, u_long command, caddr_t data)
 {
-	int             s, error = 0;
-	struct ifreq   *ifr = (struct ifreq *) data;
-	struct ifaddr   *ifa = (struct ifaddr *) data;
-	struct ix_softc *sc = ifp->if_softc;
+	struct ix_softc	*sc = ifp->if_softc;
+	struct ifaddr	*ifa = (struct ifaddr *) data;
+	struct ifreq	*ifr = (struct ifreq *) data;
+	int		s, error = 0;
 
 	s = splnet();
 
@@ -443,6 +443,7 @@ ixgbe_ioctl(struct ifnet * ifp, u_long command, caddr_t data)
 			arp_ifinit(&sc->arpcom, ifa);
 #endif
 		break;
+
 	case SIOCSIFMTU:
 		IOCTL_DEBUGOUT("ioctl: SIOCSIFMTU (Set Interface MTU)");
 		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
@@ -454,6 +455,7 @@ ixgbe_ioctl(struct ifnet * ifp, u_long command, caddr_t data)
 			ixgbe_init(sc);
 		}
 		break;
+
 	case SIOCSIFFLAGS:
 		IOCTL_DEBUGOUT("ioctl: SIOCSIFFLAGS (Set Interface Flags)");
 		if (ifp->if_flags & IFF_UP) {
@@ -470,29 +472,24 @@ ixgbe_ioctl(struct ifnet * ifp, u_long command, caddr_t data)
 				ixgbe_stop(sc);
 		sc->if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		IOCTL_DEBUGOUT("ioctl: SIOC(ADD|DEL)MULTI");
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING) {
-				ixgbe_disable_intr(sc);
-				ixgbe_set_multi(sc);
-				ixgbe_enable_intr(sc);
-			}
-			error = 0;
-		}
-		break;
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		IOCTL_DEBUGOUT("ioctl: SIOCxIFMEDIA (Get/Set Interface Media)");
 		error = ifmedia_ioctl(ifp, ifr, &sc->media, command);
 		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING) {
+			ixgbe_disable_intr(sc);
+			ixgbe_set_multi(sc);
+			ixgbe_enable_intr(sc);
+		}
+		error = 0;
 	}
 
 	splx(s);
@@ -2813,7 +2810,8 @@ discard:
                         rxr->next_to_check = i;
 #if NBPFILTER > 0
 			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+				bpf_mtap_ether(ifp->if_bpf, m,
+				    BPF_DIRECTION_IN);
 #endif
 			ether_input_mbuf(ifp, m);
 			i = rxr->next_to_check;

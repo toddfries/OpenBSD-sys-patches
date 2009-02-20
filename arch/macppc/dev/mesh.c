@@ -1,4 +1,4 @@
-/*	$OpenBSD: mesh.c,v 1.20 2008/10/15 19:12:19 blambert Exp $	*/
+/*	$OpenBSD: mesh.c,v 1.22 2009/02/16 21:19:06 miod Exp $	*/
 /*	$NetBSD: mesh.c,v 1.1 1999/02/19 13:06:03 tsubai Exp $	*/
 
 /*-
@@ -241,7 +241,7 @@ void mesh_sched(struct mesh_softc *);
 int mesh_poll(struct scsi_xfer *);
 void mesh_done(struct mesh_softc *, struct mesh_scb *);
 void mesh_timeout(void *);
-void mesh_minphys(struct buf *);
+void mesh_minphys(struct buf *, struct scsi_link *);
 
 struct cfattach mesh_ca = {
 	sizeof(struct mesh_softc), mesh_match, mesh_attach
@@ -1048,7 +1048,7 @@ mesh_scsi_cmd(struct scsi_xfer *xs)
 	scb = mesh_get_scb(sc);
 	splx(s);
 	if (scb == NULL)
-		return (TRY_AGAIN_LATER);
+		return (NO_CCB);
 	DPRINTF("cmdlen: %d\n", xs->cmdlen);
 	scb->xs = xs;
 	scb->flags = 0;
@@ -1185,7 +1185,7 @@ mesh_timeout(void *arg)
 }
 
 void
-mesh_minphys(struct buf *bp)
+mesh_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > 64*1024)
 		bp->b_bcount = 64*1024;

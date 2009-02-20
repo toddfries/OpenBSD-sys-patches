@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.153 2008/08/17 14:25:19 kettenis Exp $	*/
+/*	$OpenBSD: locore.s,v 1.157 2009/01/23 19:16:39 kettenis Exp $	*/
 /*	$NetBSD: locore.s,v 1.137 2001/08/13 06:10:10 jdolecek Exp $	*/
 
 /*
@@ -1573,15 +1573,11 @@ intr_setup_msg:
 
 	stx	%i5, [%sp + CC64FSZ + BIAS + TF_O + (5*8)]
 	stx	%i6, [%sp + CC64FSZ + BIAS + TF_O + (6*8)]
-	stx	%i6, [%sp + CC64FSZ + BIAS + TF_G + (0*8)]	! Save fp in clockframe->cf_fp
 	brz,pt	%g3, 1f				! If we were in kernel mode start saving globals
 	 stx	%i7, [%sp + CC64FSZ + BIAS + TF_O + (7*8)]
 
 	! came from user mode -- switch to kernel mode stack
-	rdpr	%otherwin, %g5			! Has this already been done?
-	brnz,pn	%g5, 1f				! Don't set this twice
-
-	 rdpr	%canrestore, %g5		! Fixup register window state registers
+	rdpr	%canrestore, %g5		! Fixup register window state registers
 	wrpr	%g0, 0, %canrestore
 	wrpr	%g0, %g5, %otherwin
 	wrpr	%g0, WSTATE_KERN, %wstate	! Enable kernel mode window traps -- now we can trap again
@@ -8869,8 +8865,8 @@ ENTRY(cecc_catch)
  */
 ENTRY(send_softint)
 	rdpr	%pstate, %g1
-	andn	%g1, PSTATE_IE, %g1
-	wrpr	%g1, 0, %pstate
+	andn	%g1, PSTATE_IE, %o3
+	wrpr	%o3, 0, %pstate
 
 	brz,pn	%o2, 1f
 	 add	%g7, CI_INTRPENDING, %o3
@@ -8893,6 +8889,26 @@ ENTRY(send_softint)
 1:
 	retl
 	 wrpr	%g1, 0, %pstate		! restore interrupts
+
+/*
+ * Flush user windows to memory.
+ */
+ENTRY(write_user_windows)
+	rdpr	%otherwin, %g1
+	brz	%g1, 3f
+	clr	%g2
+1:
+	save	%sp, -CC64FSZ, %sp
+	rdpr	%otherwin, %g1
+	brnz	%g1, 1b
+	 inc	%g2
+2:
+	dec	%g2
+	brnz	%g2, 2b
+	 restore
+3:
+	retl
+	 nop
 
 /*
  * On Blackbird (UltraSPARC-II) CPUs, writes to %tick_cmpr may fail.

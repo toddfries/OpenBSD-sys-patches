@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.97 2008/09/10 14:01:23 blambert Exp $	*/
+/*	$OpenBSD: route.c,v 1.103 2009/02/03 16:42:54 michele Exp $	*/
 /*	$NetBSD: route.c,v 1.14 1996/02/13 22:00:46 christos Exp $	*/
 
 /*
@@ -121,6 +121,10 @@
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 
+#ifdef MPLS
+#include <netmpls/mpls.h>
+#endif
+
 #ifdef IPSEC
 #include <netinet/ip_ipsp.h>
 #include <net/if_enc.h>
@@ -144,10 +148,12 @@ struct pool		rttimer_pool;	/* pool for rttimer structures */
 
 int	rtable_init(struct radix_node_head ***);
 int	okaytoclone(u_int, int);
-int	rtdeletemsg(struct rtentry *, u_int);
 int	rtflushclone1(struct radix_node *, void *);
 void	rtflushclone(struct radix_node_head *, struct rtentry *);
 int	rt_if_remove_rtdelete(struct radix_node *, void *);
+#ifndef SMALL_KERNEL
+int	rt_if_linkstate_change(struct radix_node *, void *);
+#endif
 
 #define	LABELID_MAX	50000
 
@@ -399,6 +405,8 @@ rtfree(struct rtentry *rt)
 	rt->rt_refcnt--;
 
 	if (rt->rt_refcnt <= 0 && (rt->rt_flags & RTF_UP) == 0) {
+		if (rt->rt_refcnt == 0 && (rt->rt_nodes->rn_flags & RNF_ACTIVE))
+			return; /* route still active but currently down */
 		if (rt->rt_nodes->rn_flags & (RNF_ACTIVE | RNF_ROOT))
 			panic("rtfree 2");
 		rttrash--;
@@ -411,6 +419,10 @@ rtfree(struct rtentry *rt)
 		if (ifa)
 			IFAFREE(ifa);
 		rtlabel_unref(rt->rt_labelid);
+#ifdef MPLS
+		if (rt->rt_flags & RTF_MPLS)
+			free(rt->rt_llinfo, M_TEMP);
+#endif
 		Free(rt_key(rt));
 		pool_put(&rtentry_pool, rt);
 	}
@@ -719,6 +731,9 @@ rtrequest1(int req, struct rt_addrinfo *info, u_int8_t prio,
 	struct ifaddr		*ifa;
 	struct sockaddr		*ndst;
 	struct sockaddr_rtlabel	*sa_rl;
+#ifdef MPLS
+	struct sockaddr_mpls	*sa_mpls;
+#endif
 #define senderr(x) { error = x ; goto bad; }
 
 	if ((rnh = rt_gettable(info->rti_info[RTAX_DST]->sa_family, tableid)) ==
@@ -771,7 +786,7 @@ rtrequest1(int req, struct rt_addrinfo *info, u_int8_t prio,
 		if (rn_mpath_capable(rnh)) {
 			if ((rn = rnh->rnh_lookup(info->rti_info[RTAX_DST],
 			    info->rti_info[RTAX_NETMASK], rnh)) != NULL &&
-			    rn_mpath_next(rn) == NULL)
+			    rn_mpath_next(rn, 0) == NULL)
 				((struct rtentry *)rn)->rt_flags &= ~RTF_MPATH;
 		}
 #endif
@@ -811,8 +826,20 @@ makeroute:
 		if (rt == NULL)
 			senderr(ENOBUFS);
 		Bzero(rt, sizeof(*rt));
-		rt->rt_flags = RTF_UP | info->rti_flags;
+
+		rt->rt_flags = info->rti_flags;
+
+		if (prio == 0)
+			prio = ifa->ifa_ifp->if_priority + RTP_STATIC;
 		rt->rt_priority = prio;	/* init routing priority */
+		if ((LINK_STATE_IS_UP(ifa->ifa_ifp->if_link_state) ||
+		    ifa->ifa_ifp->if_link_state == LINK_STATE_UNKNOWN) &&
+		    ifa->ifa_ifp->if_flags & IFF_UP)
+			rt->rt_flags |= RTF_UP;
+		else {
+			rt->rt_flags &= ~RTF_UP;
+			rt->rt_priority |= RTP_DOWN;
+		}
 		LIST_INIT(&rt->rt_timer);
 		if (rt_setgate(rt, info->rti_info[RTAX_DST],
 		    info->rti_info[RTAX_GATEWAY], tableid)) {
@@ -844,6 +871,39 @@ makeroute:
 			    info->rti_info[RTAX_LABEL];
 			rt->rt_labelid = rtlabel_name2id(sa_rl->sr_label);
 		}
+
+#ifdef MPLS
+		/* We have to allocate additional space for MPLS infos */ 
+		if (info->rti_info[RTAX_SRC] != NULL ||
+		    info->rti_info[RTAX_DST]->sa_family == AF_MPLS) {
+			struct rt_mpls *rt_mpls;
+
+			sa_mpls = (struct sockaddr_mpls *)
+			    info->rti_info[RTAX_SRC];
+
+			rt->rt_llinfo = (caddr_t)malloc(sizeof(struct rt_mpls),
+			    M_TEMP, M_NOWAIT|M_ZERO);
+
+			if (rt->rt_llinfo == NULL) {
+				if (rt->rt_gwroute)
+					rtfree(rt->rt_gwroute);
+				Free(rt_key(rt));
+				pool_put(&rtentry_pool, rt);
+				senderr(ENOMEM);
+			}
+
+			rt_mpls = (struct rt_mpls *)rt->rt_llinfo;
+
+			if (sa_mpls != NULL)
+				rt_mpls->mpls_label = sa_mpls->smpls_label;
+
+			rt_mpls->mpls_operation = info->rti_mpls;
+
+			/* XXX: set experimental bits */
+
+			rt->rt_flags |= RTF_MPLS;
+		}
+#endif
 
 		ifa->ifa_refcnt++;
 		rt->rt_ifa = ifa;
@@ -887,7 +947,7 @@ makeroute:
 		    (rn = rnh->rnh_lookup(info->rti_info[RTAX_DST],
 		    info->rti_info[RTAX_NETMASK], rnh)) != NULL &&
 		    (rn = rn_mpath_prio(rn, prio)) != NULL) {
-			if (rn_mpath_next(rn) == NULL)
+			if (rn_mpath_next(rn, 0) == NULL)
 				((struct rtentry *)rn)->rt_flags &= ~RTF_MPATH;
 			else
 				((struct rtentry *)rn)->rt_flags |= RTF_MPATH;
@@ -1395,3 +1455,56 @@ rt_if_remove_rtdelete(struct radix_node *rn, void *vifp)
 
 	return (0);
 }
+
+#ifndef SMALL_KERNEL
+void
+rt_if_track(struct ifnet *ifp)
+{
+	struct radix_node_head *rnh;
+	int i;
+	u_int tid;
+
+	if (rt_tables == NULL)
+		return;
+
+	for (tid = 0; tid <= rtbl_id_max; tid++) {
+		for (i = 1; i <= AF_MAX; i++) {
+			if ((rnh = rt_gettable(i, tid)) != NULL) {
+				if (!rn_mpath_capable(rnh))
+					continue;
+				while ((*rnh->rnh_walktree)(rnh,
+				    rt_if_linkstate_change, ifp) == EAGAIN)
+					;	/* nothing */
+			}
+		}
+	}
+}
+
+int
+rt_if_linkstate_change(struct radix_node *rn, void *arg)
+{
+	struct ifnet *ifp = arg;
+	struct rtentry *rt = (struct rtentry *)rn;
+
+	if (rt->rt_ifp == ifp) {
+		if ((LINK_STATE_IS_UP(ifp->if_link_state) ||
+		    ifp->if_link_state == LINK_STATE_UNKNOWN) &&
+		    ifp->if_flags & IFF_UP) {
+			if (!(rt->rt_flags & RTF_UP)) {
+				/* bring route up */
+				rt->rt_flags |= RTF_UP;
+				rn_mpath_reprio(rn, rt->rt_priority & RTP_MASK);
+			}
+		} else {
+			if (rt->rt_flags & RTF_UP) {
+				/* take route done */
+				rt->rt_flags &= ~RTF_UP;
+				rn_mpath_reprio(rn, rt->rt_priority | RTP_DOWN);
+			}
+		}
+		if_group_routechange(rt_key(rt), rt_mask(rt));
+	}
+
+	return (0);
+}
+#endif

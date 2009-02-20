@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860var.h,v 1.8 2008/07/21 19:41:44 damien Exp $	*/
+/*	$OpenBSD: rt2860var.h,v 1.11 2008/12/29 13:27:27 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007
@@ -95,6 +95,12 @@ struct rt2860_rx_ring {
 	struct rt2860_rx_data	data[RT2860_RX_RING_COUNT];
 };
 
+struct rt2860_node {
+	struct ieee80211_node	ni;
+	uint8_t			ridx[IEEE80211_RATE_MAXSIZE];
+	uint8_t			ctl_ridx[IEEE80211_RATE_MAXSIZE];
+};
+
 struct rt2860_softc {
 	struct device			sc_dev;
 
@@ -111,16 +117,13 @@ struct rt2860_softc {
 	bus_space_tag_t			sc_st;
 	bus_space_handle_t		sc_sh;
 
-	struct timeout			scan_to;
-	struct timeout			amrr_to;
-
 	int				sc_flags;
 #define RT2860_ENABLED		(1 << 0)
 #define RT2860_FWLOADED		(1 << 1)
-#define RT2860_UPD_BEACON	(1 << 2)
-#define RT2860_ADVANCED_PS	(1 << 3)
+#define RT2860_ADVANCED_PS	(1 << 2)
 
 	uint32_t			sc_ic_flags;
+	int				fixed_ridx;
 
 	struct rt2860_tx_ring		txq[6];
 	struct rt2860_rx_ring		rxq;
@@ -129,11 +132,12 @@ struct rt2860_softc {
 	struct rt2860_tx_data		data[RT2860_TX_POOL_COUNT];
 	bus_dmamap_t			txwi_map;
 	bus_dma_segment_t		txwi_seg;
-	struct rt2860_txwi		*txwi;
+	caddr_t				txwi_vaddr;
 
 	int				sc_tx_timer;
 	int				mgtqid;
 	int				sifs;
+	uint8_t				qfullmsk;
 
 	uint32_t			mac_rev;
 	uint8_t				rf_rev;
@@ -146,6 +150,8 @@ struct rt2860_softc {
 	int8_t				rssi_2ghz[3];
 	int8_t				rssi_5ghz[3];
 	uint8_t				lna[4];
+	uint8_t				ext_2ghz_lna;
+	uint8_t				ext_5ghz_lna;
 	uint8_t				calib_2ghz;
 	uint8_t				calib_5ghz;
 	uint8_t				tssi_2ghz[9];

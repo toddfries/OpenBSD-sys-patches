@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.158 2008/07/28 19:08:46 miod Exp $	*/
+/*	$OpenBSD: locore.S,v 1.160 2009/02/14 19:03:50 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -117,15 +117,6 @@ netisr
 	.word	0
 	.size	netisr, .-netisr
 	.align	16
-
-	.export cpu_hzticks, data
-cpu_hzticks			/* itmr ticks in one hz */
-	.word	0
-	.size	cpu_hzticks, .-cpu_hzticks
-	.export cpu_itmr, data
-cpu_itmr			/* itmr value at the most recent clk int */
-	.word	0
-	.size	cpu_itmr, .-cpu_itmr
 
 	BSS(pdc_stack, 4)	/* temp stack for PDC call */
 	BSS(emrg_stack, 4)	/* stack for HPMC/TOC/PWRF */
@@ -2124,18 +2115,6 @@ ENTRY(TLABEL(intr),0)
 
 	INTR_PROF_PRE
 
-	bb,>=,n	r8, 0, $intr_noclock
-
-	/* reload the itmr */
-	ldil	L%cpu_hzticks, r25	/* those both are aligned properly */
-	ldw	R%cpu_hzticks(r25), r16
-	ldw	R%cpu_itmr(r25), r9
-	sh1add	r16, r9, r17
-	add	r16, r9, r16
-	mtctl	r17, itmr
-	stw	r16, R%cpu_itmr(r25)
-
-$intr_noclock
 	ldil	L%intr_table + 32*32, r1
 	ldo	R%intr_table + 32*32(r1), r1
 	ldil	L%ipending, r17
@@ -2748,13 +2727,15 @@ LEAF_ENTRY(spstrcpy)
 	mtsp	arg0, sr1
 	mtsp	arg2, sr2
 	copy	arg1, arg0
+	copy	r0, ret0
 
 $spstrcpy_loop
 	ldbs,ma	1(sr1, arg1), t1
-	comb,=	t2, arg1, $spstrcpy_exit
+	comb,=	r0, t1, $spstrcpy_exit
 	stbs,ma	t1, 1(sr2, arg3)
-	comb,<>,n r0, t1, $spstrcpy_loop
+	comb,<>,n t2, arg1, $spstrcpy_loop
 	nop
+	ldi	ENAMETOOLONG, ret0
 
 $spstrcpy_exit
 	mtsp	r0, sr1
@@ -2767,7 +2748,7 @@ $spstrcpy_exit
 	sub,=	r0, arg0, r0
 	stw	arg1, 0(arg0)
 	bv	0(rp)
-	copy	r0, ret0
+	nop
 EXIT(spstrcpy)
 
 /*

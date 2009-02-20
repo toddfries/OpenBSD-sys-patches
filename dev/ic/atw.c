@@ -1,4 +1,4 @@
-/*	$OpenBSD: atw.c,v 1.63 2008/10/03 00:58:39 brad Exp $	*/
+/*	$OpenBSD: atw.c,v 1.65 2009/01/21 21:53:59 grange Exp $	*/
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -2519,7 +2519,7 @@ atw_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		panic("%s: unexpected state IEEE80211_S_INIT", __func__);
 		break;
 	case IEEE80211_S_SCAN:
-		timeout_add(&sc->sc_scan_to, atw_dwelltime * hz / 1000);
+		timeout_add_msec(&sc->sc_scan_to, atw_dwelltime);
 		break;
 	case IEEE80211_S_RUN:
 		if (ic->ic_opmode == IEEE80211_M_STA)
@@ -4041,13 +4041,6 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	s = splnet();
 
 	switch (cmd) {
-        case SIOCSIFMTU:
-                if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
-                        error = EINVAL;
-                } else if (ifp->if_mtu != ifr->ifr_mtu) {
-                        ifp->if_mtu = ifr->ifr_mtu;
-                }
-                break;
         case SIOCSIFADDR:
                 ifp->if_flags |= IFF_UP;
 #ifdef INET
@@ -4056,6 +4049,7 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
                 }
 #endif  /* INET */
 		/* FALLTHROUGH */
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ATW_IS_ENABLED(sc)) {
@@ -4070,6 +4064,7 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		} else if (ATW_IS_ENABLED(sc))
 			atw_stop(ifp, 1);
 		break;
+
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
 		error = (cmd == SIOCADDMULTI) ?
@@ -4082,6 +4077,7 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			error = 0;
 		}
 		break;
+
 	default:
 		error = ieee80211_ioctl(ifp, cmd, data);
 		if (error == ENETRESET) {

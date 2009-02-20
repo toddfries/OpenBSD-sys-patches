@@ -1,4 +1,4 @@
-/*	$OpenBSD: aha1742.c,v 1.27 2008/09/12 11:14:04 miod Exp $	*/
+/*	$OpenBSD: aha1742.c,v 1.31 2009/02/16 21:19:06 miod Exp $	*/
 /*	$NetBSD: aha1742.c,v 1.61 1996/05/12 23:40:01 mycroft Exp $	*/
 
 /*
@@ -289,7 +289,7 @@ struct ahb_ecb *ahb_get_ecb(struct ahb_softc *, int);
 struct ahb_ecb *ahb_ecb_phys_kv(struct ahb_softc *, physaddr);
 int ahb_find(bus_space_tag_t, bus_space_handle_t, struct ahb_softc *);
 void ahb_init(struct ahb_softc *);
-void ahbminphys(struct buf *);
+void ahbminphys(struct buf *, struct scsi_link *);
 int ahb_scsi_cmd(struct scsi_xfer *);
 void ahb_timeout(void *);
 void ahb_print_ecb(struct ahb_ecb *);
@@ -929,10 +929,8 @@ ahb_init(sc)
 }
 
 void
-ahbminphys(bp)
-	struct buf *bp;
+ahbminphys(struct buf *bp, struct scsi_link *sl)
 {
-
 	if (bp->b_bcount > ((AHB_NSEG - 1) << PGSHIFT))
 		bp->b_bcount = ((AHB_NSEG - 1) << PGSHIFT);
 	minphys(bp);
@@ -967,7 +965,7 @@ ahb_scsi_cmd(xs)
 		xs->flags &= ~ITSDONE;
 	}
 	if ((ecb = ahb_get_ecb(sc, flags)) == NULL) {
-		return TRY_AGAIN_LATER;
+		return (NO_CCB);
 	}
 	ecb->xs = xs;
 	timeout_set(&ecb->xs->stimeout, ahb_timeout, ecb);
@@ -990,7 +988,7 @@ ahb_scsi_cmd(xs)
 
 		if ((flags & SCSI_POLL) == 0) {
 			splx(s);
-			timeout_add(&ecb->xs->stimeout, (xs->timeout * hz) / 1000);
+			timeout_add_msec(&ecb->xs->stimeout, xs->timeout);
 			return SUCCESSFULLY_QUEUED;
 		}
 
@@ -1106,7 +1104,7 @@ ahb_scsi_cmd(xs)
 	 */
 	if ((flags & SCSI_POLL) == 0) {
 		splx(s);
-		timeout_add(&ecb->xs->stimeout, (xs->timeout * hz) / 1000);
+		timeout_add_msec(&ecb->xs->stimeout, xs->timeout);
 		return SUCCESSFULLY_QUEUED;
 	}
 
@@ -1165,7 +1163,7 @@ ahb_timeout(arg)
 		ahb_send_mbox(sc, OP_ABORT_ECB, ecb);
 		/* 2 secs for the abort */
 		if ((xs->flags & SCSI_POLL) == 0)
-			timeout_add(&ecb->xs->stimeout, 2 * hz);
+			timeout_add_sec(&ecb->xs->stimeout, 2);
 	}
 
 	splx(s);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.40 2008/06/26 05:42:11 ray Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.44 2009/01/27 15:33:59 oga Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.28 1997/06/06 23:29:17 thorpej Exp $	*/
 
 /*-
@@ -82,7 +82,7 @@
 
 #include <uvm/uvm_extern.h>
 
-#define _I386_BUS_DMA_PRIVATE
+#define _BUS_DMA_PRIVATE
 #include <machine/bus.h>
 #include <machine/pio.h>
 #include <machine/i8259.h>
@@ -112,6 +112,18 @@ extern bios_pciinfo_t *bios_pciinfo;
 #endif
 
 int pci_mode = -1;
+
+struct mutex pci_conf_lock = MUTEX_INITIALIZER(IPL_HIGH);
+
+#define	PCI_CONF_LOCK()							\
+do {									\
+	mtx_enter(&pci_conf_lock);					\
+} while (0)
+
+#define	PCI_CONF_UNLOCK()						\
+do {									\
+	mtx_leave(&pci_conf_lock);					\
+} while (0)
 
 #define	PCI_MODE1_ENABLE	0x80000000UL
 #define	PCI_MODE1_ADDRESS_REG	0x0cf8
@@ -145,7 +157,7 @@ struct {
  * PCI doesn't have any special needs; just use the generic versions
  * of these functions.
  */
-struct i386_bus_dma_tag pci_bus_dma_tag = {
+struct bus_dma_tag pci_bus_dma_tag = {
 	NULL,			/* _cookie */
 	_bus_dmamap_create, 
 	_bus_dmamap_destroy,
@@ -252,6 +264,7 @@ pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 {
 	pcireg_t data;
 
+	PCI_CONF_LOCK();
 	switch (pci_mode) {
 	case 1:
 		outl(PCI_MODE1_ADDRESS_REG, tag.mode1 | reg);
@@ -267,6 +280,7 @@ pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 	default:
 		panic("pci_conf_read: mode not configured");
 	}
+	PCI_CONF_UNLOCK();
 
 	return data;
 }
@@ -275,6 +289,7 @@ void
 pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 {
 
+	PCI_CONF_LOCK();
 	switch (pci_mode) {
 	case 1:
 		outl(PCI_MODE1_ADDRESS_REG, tag.mode1 | reg);
@@ -290,6 +305,7 @@ pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 	default:
 		panic("pci_conf_write: mode not configured");
 	}
+	PCI_CONF_UNLOCK();
 }
 
 int
@@ -403,17 +419,11 @@ not2:
 int
 pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 {
-	int pin = pa->pa_intrpin;
+	int pin = pa->pa_rawintrpin;
 	int line = pa->pa_intrline;
 #if NIOAPIC > 0
-	int rawpin = pa->pa_rawintrpin;
 	struct mp_intr_map *mip;
 	int bus, dev, func;
-#endif
-
-#if (NPCIBIOS > 0) || (NIOAPIC > 0)
-	pci_chipset_tag_t pc = pa->pa_pc;
-	pcitag_t intrtag = pa->pa_intrtag;
 #endif
 
 	if (pin == 0) {
@@ -426,11 +436,12 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 		goto bad;
 	}
 
+	ihp->tag = pa->pa_tag;
 	ihp->line = line;
 	ihp->pin = pin;
 
 #if NIOAPIC > 0
-	pci_decompose_tag (pc, intrtag, &bus, &dev, &func);
+	pci_decompose_tag (pa->pa_pc, pa->pa_tag, &bus, &dev, &func);
 
 	if (!(ihp->line & PCI_INT_VIA_ISA) && mp_busses != NULL) {
 		/*
@@ -448,9 +459,9 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 		}
 
 		if (pa->pa_bridgetag) {
-			int pin = PPB_INTERRUPT_SWIZZLE(rawpin, dev);
-			if (pa->pa_bridgeih[pin - 1].line != -1) {
-				ihp->line = pa->pa_bridgeih[pin - 1].line;
+			int swizpin = PPB_INTERRUPT_SWIZZLE(pin, dev);
+			if (pa->pa_bridgeih[swizpin - 1].line != -1) {
+				ihp->line = pa->pa_bridgeih[swizpin - 1].line;
 				ihp->line |= line;
 				return 0;
 			}
@@ -463,7 +474,7 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 #endif
 
 #if NPCIBIOS > 0
-	pci_intr_header_fixup(pc, intrtag, ihp);
+	pci_intr_header_fixup(pa->pa_pc, pa->pa_tag, ihp);
 	line = ihp->line & APIC_INT_LINE_MASK;
 #endif
 
@@ -550,12 +561,23 @@ pci_intr_string(pci_chipset_tag_t pc, pci_intr_handle_t ih)
 	return (irqstr);
 }
 
+#include "acpiprt.h"
+#if NACPIPRT > 0
+void	acpiprt_route_interrupt(int bus, int dev, int pin);
+#endif
+
 void *
 pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
     int (*func)(void *), void *arg, char *what)
 {
 	void *ret;
+	int bus, dev;
 	int l = ih.line & APIC_INT_LINE_MASK;
+
+	pci_decompose_tag(pc, ih.tag, &bus, &dev, NULL);
+#if NACPIPRT > 0
+	acpiprt_route_interrupt(bus, dev, ih.pin);
+#endif
 
 #if NIOAPIC > 0
 	if (l != -1 && ih.line & APIC_INT_VIA_APIC)

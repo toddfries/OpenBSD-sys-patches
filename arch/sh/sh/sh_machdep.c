@@ -1,4 +1,4 @@
-/*	$OpenBSD: sh_machdep.c,v 1.21 2008/08/24 03:13:12 jsg Exp $	*/
+/*	$OpenBSD: sh_machdep.c,v 1.23 2009/02/04 17:19:17 miod Exp $	*/
 /*	$NetBSD: sh3_machdep.c,v 1.59 2006/03/04 01:13:36 uwe Exp $	*/
 
 /*
@@ -153,7 +153,7 @@ caddr_t allocsys(caddr_t);
 /*
  * These variables are needed by /sbin/savecore
  */
-u_int32_t dumpmag = 0x8fca0101;	/* magic number */
+u_long dumpmag = 0x8fca0101;	/* magic number */
 u_int dumpsize;			/* pages */
 long dumplo;	 		/* blocks */
 cpu_kcore_hdr_t cpu_kcore_hdr;
@@ -279,7 +279,8 @@ sh_startup()
 	    sh_vector_interrupt_end - sh_vector_interrupt);
 #endif /* DEBUG */
 
-	printf("real mem = %u (%uK)\n", ptoa(physmem), ptoa(physmem) / 1024);
+	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem) / 1024 / 1024);
 
 	/*
 	 * Find out how much space we need, allocate it,
@@ -325,8 +326,8 @@ sh_startup()
 	 */
 	bufinit();
 
-	printf("avail mem = %u (%uK)\n", ptoa(uvmexp.free),
-	    ptoa(uvmexp.free) / 1024);
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free) / 1024 / 1024);
 
 	if (boothowto & RB_CONFIG) {
 #ifdef BOOT_CONFIG

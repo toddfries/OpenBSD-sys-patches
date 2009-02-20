@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioprbs.c,v 1.13 2008/06/26 05:42:15 ray Exp $	*/
+/*	$OpenBSD: ioprbs.c,v 1.16 2009/02/16 21:19:06 miod Exp $	*/
 
 /*
  * Copyright (c) 2001 Niklas Hallqvist
@@ -91,7 +91,6 @@
 #define	DPRINTF(x)
 #endif
 
-void	ioprbsminphys(struct buf *);
 void	ioprbs_adjqparam(struct device *, int);
 void	ioprbs_attach(struct device *, struct device *, void *);
 void	ioprbs_copy_internal_data(struct scsi_xfer *, u_int8_t *,
@@ -122,7 +121,7 @@ struct cfattach ioprbs_ca = {
 };
 
 struct scsi_adapter ioprbs_switch = {
-	ioprbs_scsi_cmd, ioprbsminphys, 0, 0,
+	ioprbs_scsi_cmd, scsi_minphys, 0, 0,
 };
 
 struct scsi_device ioprbs_dev = {
@@ -505,7 +504,7 @@ ioprbs_scsi_cmd(xs)
 			 */
 			if (ccb == NULL) {
 				splx(s);
-				return (TRY_AGAIN_LATER);
+				return (NO_CCB);
 			}
 
 			ccb->ic_blockno = blockno;
@@ -542,13 +541,6 @@ ioprbs_scsi_cmd(xs)
 
 	splx(s);
 	return (retval);
-}
-
-void
-ioprbsminphys(bp)
-	struct buf *bp;
-{
-	minphys(bp);
 }
 
 void
@@ -859,8 +851,7 @@ ioprbs_start_ccbs(sc)
 			ccb->ic_flags |= IOPRBS_ICF_WATCHDOG;
 			timeout_set(&ccb->ic_xs->stimeout, ioprbs_watchdog,
 			    ccb);
-			timeout_add(&xs->stimeout,
-			    (IOPRBS_WATCH_TIMEOUT * hz) / 1000);
+			timeout_add_msec(&xs->stimeout, IOPRBS_WATCH_TIMEOUT);
 			break;
 		}
 		TAILQ_REMOVE(&sc->sc_ccbq, ccb, ic_chain);
@@ -868,8 +859,7 @@ ioprbs_start_ccbs(sc)
 		if ((xs->flags & SCSI_POLL) == 0) {
 			timeout_set(&ccb->ic_xs->stimeout, ioprbs_timeout,
 			    ccb);
-			timeout_add(&xs->stimeout,
-			    (ccb->ic_timeout * hz) / 1000);
+			timeout_add_msec(&xs->stimeout, ccb->ic_timeout);
 		}
 	}
 }

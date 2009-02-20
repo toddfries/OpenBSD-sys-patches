@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2560.c,v 1.39 2008/08/27 09:05:03 damien Exp $  */
+/*	$OpenBSD: rt2560.c,v 1.42 2008/12/22 18:20:47 damien Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006
@@ -1699,7 +1699,7 @@ rt2560_tx_data(struct rt2560_softc *sc, struct mbuf *m0,
 	struct rt2560_tx_data *data;
 	struct ieee80211_frame *wh;
 	struct ieee80211_key *k;
-	struct mbuf *mnew;
+	struct mbuf *m1;
 	uint16_t dur;
 	uint32_t flags = 0;
 	int pktlen, rate, needcts = 0, needrts = 0, error;
@@ -1828,26 +1828,23 @@ rt2560_tx_data(struct rt2560_softc *sc, struct mbuf *m0,
 	}
 	if (error != 0) {
 		/* too many fragments, linearize */
-
-		MGETHDR(mnew, M_DONTWAIT, MT_DATA);
-		if (mnew == NULL) {
+		MGETHDR(m1, M_DONTWAIT, MT_DATA);
+		if (m1 == NULL) {
 			m_freem(m0);
-			return ENOMEM;
+			return ENOBUFS;
 		}
-		M_DUP_PKTHDR(mnew, m0);
 		if (m0->m_pkthdr.len > MHLEN) {
-			MCLGET(mnew, M_DONTWAIT);
-			if (!(mnew->m_flags & M_EXT)) {
+			MCLGET(m1, M_DONTWAIT);
+			if (!(m1->m_flags & M_EXT)) {
 				m_freem(m0);
-				m_freem(mnew);
-				return ENOMEM;
+				m_freem(m1);
+				return ENOBUFS;
 			}
 		}
-
-		m_copydata(m0, 0, m0->m_pkthdr.len, mtod(mnew, caddr_t));
+		m_copydata(m0, 0, m0->m_pkthdr.len, mtod(m1, caddr_t));
+		m1->m_pkthdr.len = m1->m_len = m0->m_pkthdr.len;
 		m_freem(m0);
-		mnew->m_len = mnew->m_pkthdr.len;
-		m0 = mnew;
+		m0 = m1;
 
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 		    BUS_DMA_NOWAIT);
@@ -2551,7 +2548,6 @@ rt2560_read_eeprom(struct rt2560_softc *sc)
 int
 rt2560_bbp_init(struct rt2560_softc *sc)
 {
-#define N(a)	(sizeof (a) / sizeof ((a)[0]))
 	int i, ntries;
 
 	/* wait for BBP to be ready */
@@ -2566,7 +2562,7 @@ rt2560_bbp_init(struct rt2560_softc *sc)
 	}
 
 	/* initialize BBP registers to default values */
-	for (i = 0; i < N(rt2560_def_bbp); i++) {
+	for (i = 0; i < nitems(rt2560_def_bbp); i++) {
 		rt2560_bbp_write(sc, rt2560_def_bbp[i].reg,
 		    rt2560_def_bbp[i].val);
 	}
@@ -2580,13 +2576,11 @@ rt2560_bbp_init(struct rt2560_softc *sc)
 #endif
 
 	return 0;
-#undef N
 }
 
 int
 rt2560_init(struct ifnet *ifp)
 {
-#define N(a)	(sizeof (a) / sizeof ((a)[0]))
 	struct rt2560_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
 	uint32_t tmp;
@@ -2624,7 +2618,7 @@ rt2560_init(struct ifnet *ifp)
 	RAL_WRITE(sc, RT2560_RXCSR2, sc->rxq.physaddr);
 
 	/* initialize MAC registers to default values */
-	for (i = 0; i < N(rt2560_def_mac); i++)
+	for (i = 0; i < nitems(rt2560_def_mac); i++)
 		RAL_WRITE(sc, rt2560_def_mac[i].reg, rt2560_def_mac[i].val);
 
 	IEEE80211_ADDR_COPY(ic->ic_myaddr, LLADDR(ifp->if_sadl));
@@ -2683,7 +2677,6 @@ rt2560_init(struct ifnet *ifp)
 		ieee80211_new_state(ic, IEEE80211_S_SCAN, -1);
 
 	return 0;
-#undef N
 }
 
 void

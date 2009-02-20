@@ -1,4 +1,4 @@
-/*	$OpenBSD: envy.c,v 1.10 2008/10/25 22:30:43 jakemsr Exp $	*/
+/*	$OpenBSD: envy.c,v 1.13 2009/01/17 18:29:55 ratchov Exp $	*/
 /*
  * Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
  *
@@ -397,7 +397,7 @@ envy_lineout_setsrc(struct envy_softc *sc, int out, int src) {
 		sel = ENVY_MT_OUTSRC_MON;
 	}
 	shift = (out  & 1) ? (out & ~1) + 8 : out;
-	mask = ENVY_MT_INSEL_MASK << shift;
+	mask = ENVY_MT_OUTSRC_MASK << shift;
 	reg = bus_space_read_2(sc->mt_iot, sc->mt_ioh, ENVY_MT_OUTSRC);
 	reg = (reg & ~mask) | (sel << shift);
 	bus_space_write_2(sc->mt_iot, sc->mt_ioh, ENVY_MT_OUTSRC, reg);
@@ -667,7 +667,7 @@ envy_query_encoding(void *self, struct audio_encoding *enc)
 	if (enc->index == 0) {
 		strlcpy(enc->name, AudioEslinear_le, sizeof(enc->name));
 		enc->encoding = AUDIO_ENCODING_SLINEAR_LE;
-		enc->precision = 32;
+		enc->precision = 24;
 		enc->flags = 0;
 		return 0;
 	}
@@ -704,12 +704,12 @@ envy_set_params(void *self, int setmode, int usemode,
 	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_RATE, reg);
 	if (setmode & AUMODE_PLAY) {
 		p->encoding = AUDIO_ENCODING_SLINEAR;
-		p->precision = 32;
+		p->precision = 24;
 		p->channels = ENVY_PCHANS;
 	}
 	if (setmode & AUMODE_RECORD) {
 		r->encoding = AUDIO_ENCODING_SLINEAR;
-		r->precision = 32;
+		r->precision = 24;
 		r->channels = ENVY_RCHANS;
 	}
 	return 0;
@@ -1045,5 +1045,5 @@ envy_set_port(void *self, struct mixer_ctrl *ctl)
 int
 envy_get_props(void *self)
 {
-	return AUDIO_PROP_FULLDUPLEX;
+	return AUDIO_PROP_FULLDUPLEX | AUDIO_PROP_INDEPENDENT;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_subs.c,v 1.86 2008/08/25 09:26:17 pedro Exp $	*/
+/*	$OpenBSD: nfs_subs.c,v 1.92 2009/01/24 23:30:42 thib Exp $	*/
 /*	$NetBSD: nfs_subs.c,v 1.27.4.3 1996/07/08 20:34:24 jtc Exp $	*/
 
 /*
@@ -54,7 +54,6 @@
 #include <sys/stat.h>
 #include <sys/pool.h>
 #include <sys/time.h>
-#include <sys/hash.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -562,8 +561,7 @@ nfs_get_xid(void)
  * other authorization methods, such as Kerberos.
  */
 void
-nfsm_rpchead(struct nfsreq *req, struct ucred *cr, int auth_type,
-    struct mbuf *mrest, int mrest_len)
+nfsm_rpchead(struct nfsreq *req, struct ucred *cr, int auth_type)
 {
 	struct mbuf	*mb;
 	u_int32_t	*tl;
@@ -573,10 +571,10 @@ nfsm_rpchead(struct nfsreq *req, struct ucred *cr, int auth_type,
 
 	/*
 	 * RPCAUTH_UNIX fits in an hdr mbuf, in the future other
-	 * authorization methods need to figure out there own sizes
+	 * authorization methods need to figure out their own sizes
 	 * and allocate and chain mbuf's accorindgly.
 	 */
-	MGETHDR(mb, M_WAIT, MT_DATA);
+	mb = req->r_mreq;
 
 	/*
 	 * We need to start out by finding how big the authorization cred
@@ -641,58 +639,83 @@ nfsm_rpchead(struct nfsreq *req, struct ucred *cr, int auth_type,
 		break;
 	}
 
-	mb->m_next = mrest;
-	mb->m_pkthdr.len = authsiz + 10 * NFSX_UNSIGNED + mrest_len;
+	mb->m_pkthdr.len += authsiz + 10 * NFSX_UNSIGNED;
 	mb->m_pkthdr.rcvif = NULL;
-	req->r_mreq = mb;
 }
 
 /*
  * copies mbuf chain to the uio scatter/gather list
  */
 int
-nfsm_mbuftouio(struct mbuf **mrep, struct uio *uiop, int siz, caddr_t *dposp)
+nfsm_mbuftouio(mrep, uiop, siz, dpos)
+	struct mbuf **mrep;
+	struct uio *uiop;
+	int siz;
+	caddr_t *dpos;
 {
+	char *mbufcp, *uiocp;
+	int xfer, left, len;
 	struct mbuf *mp;
-	int xfer, len, pad, error = 0;
-	caddr_t dpos;
-	off_t saved_off;	/* XXX -- if we don't save this here,
-				 *        vnode ops explode; please fix me */
-#ifdef DIAGNOSTIC
-	if (uiop->uio_rw != UIO_READ)
-		panic("nfsm_mbuftouio: uio_rw != UIO_READ");
-	if (uiop->uio_segflg != UIO_SYSSPACE)
-		panic("nfsm_mbuftouio: uio_segflg != UIO_SYSSPACE");
-#endif
+	long uiosiz, rem;
+	int error = 0;
 
 	mp = *mrep;
-	dpos = *dposp;
-	pad = nfsm_padlen(siz);
-	saved_off = uiop->uio_offset;
-
+	mbufcp = *dpos;
+	len = mtod(mp, caddr_t)+mp->m_len-mbufcp;
+	rem = nfsm_padlen(siz);
 	while (siz > 0) {
-		len = mtod(mp, caddr_t) + mp->m_len - dpos;	/* XXX */
-		xfer = min(len, siz);
-		uiomove(dpos, xfer, uiop);
-		siz -= xfer;
-		if (siz > 0) {
-			mp->m_len -= xfer;
-			mp->m_data += xfer;
-			if (mp->m_len == 0) {
+		if (uiop->uio_iovcnt <= 0 || uiop->uio_iov == NULL)
+			return (EFBIG);
+		left = uiop->uio_iov->iov_len;
+		uiocp = uiop->uio_iov->iov_base;
+		if (left > siz)
+			left = siz;
+		uiosiz = left;
+		while (left > 0) {
+			while (len == 0) {
 				mp = mp->m_next;
-				dpos = mtod(mp, caddr_t);
 				if (mp == NULL)
 					return (EBADRPC);
+				mbufcp = mtod(mp, caddr_t);
+				len = mp->m_len;
 			}
+			xfer = (left > len) ? len : left;
+#ifdef notdef
+			/* Not Yet.. */
+			if (uiop->uio_iov->iov_op != NULL)
+				(*(uiop->uio_iov->iov_op))
+				(mbufcp, uiocp, xfer);
+			else
+#endif
+			if (uiop->uio_segflg == UIO_SYSSPACE)
+				bcopy(mbufcp, uiocp, xfer);
+			else
+				copyout(mbufcp, uiocp, xfer);
+			left -= xfer;
+			len -= xfer;
+			mbufcp += xfer;
+			uiocp += xfer;
+			uiop->uio_offset += xfer;
+			uiop->uio_resid -= xfer;
 		}
+		if (uiop->uio_iov->iov_len <= siz) {
+			uiop->uio_iovcnt--;
+			uiop->uio_iov++;
+		} else {
+			uiop->uio_iov->iov_base =
+			    (char *)uiop->uio_iov->iov_base + uiosiz;
+			uiop->uio_iov->iov_len -= uiosiz;
+		}
+		siz -= uiosiz;
 	}
+	*dpos = mbufcp;
 	*mrep = mp;
-	if (pad > 0) {
-		error = nfs_adv(mrep, &dpos, pad, len);
+	if (rem > 0) {
+		if (len < rem)
+			error = nfs_adv(mrep, dpos, rem, len);
+		else
+			*dpos += rem;
 	}
-	uiop->uio_offset = saved_off;
-	*dposp = dpos;
-
 	return (error);
 }
 
@@ -790,62 +813,69 @@ nfsm_strtombuf(struct mbuf **mp, void *str, size_t len)
 }
 
 /*
- * Ensure siz bytes in the mbuf chain are contiguous
+ * Help break down an mbuf chain by setting the first siz bytes contiguous
+ * pointed to by returned val.
+ * This is used by the macros nfsm_dissect and nfsm_dissecton for tough
+ * cases. (The macros use the vars. dpos and dpos2)
  */
-void *
-nfsm_disct(struct mbuf **mdp, int siz, int *err, caddr_t *dposp)
+int
+nfsm_disct(mdp, dposp, siz, left, cp2)
+	struct mbuf **mdp;
+	caddr_t *dposp;
+	int siz;
+	int left;
+	caddr_t *cp2;
 {
 	struct mbuf *mp, *mp2;
-	int xfer, left;
-	caddr_t buf;
+	int siz2, xfer;
+	caddr_t p;
 
-	if (siz > MHLEN)
-		panic("nfsm_disct: siz too large");
-
-	*err = 0;
 	mp = *mdp;
-	left = mtod(mp, caddr_t) + mp->m_len - *dposp;	/* XXX */
-
-	/*
-	 * There are two cases that must be considered:
-	 * 1) the data is contiguous in the current mbuf
-	 * 2) the data spans two mbufs
-	 *
-	 * case 1
-	 */
-	if (siz <= left) {
-		buf = *dposp;				/* XXX */
+	while (left == 0) {
+		*mdp = mp = mp->m_next;
+		if (mp == NULL)
+			return (EBADRPC);
+		left = mp->m_len;
+		*dposp = mtod(mp, caddr_t);
+	}
+	if (left >= siz) {
+		*cp2 = *dposp;
 		*dposp += siz;
-		mp->m_data += siz;
-		mp->m_len -= siz;
-
-		return (buf);
+	} else if (mp->m_next == NULL) {
+		return (EBADRPC);
+	} else if (siz > MHLEN) {
+		panic("nfs S too big");
+	} else {
+		MGET(mp2, M_WAIT, MT_DATA);
+		mp2->m_next = mp->m_next;
+		mp->m_next = mp2;
+		mp->m_len -= left;
+		mp = mp2;
+		*cp2 = p = mtod(mp, caddr_t);
+		bcopy(*dposp, p, left);		/* Copy what was left */
+		siz2 = siz-left;
+		p += left;
+		mp2 = mp->m_next;
+		/* Loop around copying up the siz2 bytes */
+		while (siz2 > 0) {
+			if (mp2 == NULL)
+				return (EBADRPC);
+			xfer = (siz2 > mp2->m_len) ? mp2->m_len : siz2;
+			if (xfer > 0) {
+				bcopy(mtod(mp2, caddr_t), p, xfer);
+				mp2->m_data += xfer;
+				mp2->m_len -= xfer;
+				p += xfer;
+				siz2 -= xfer;
+			}
+			if (siz2 > 0)
+				mp2 = mp2->m_next;
+		}
+		mp->m_len = siz;
+		*mdp = mp2;
+		*dposp = mtod(mp2, caddr_t);
 	}
-
-	/* spanning mbufs requires a second mbuf */
-	if (mp->m_next == NULL) {
-		*err = EBADRPC;
-		return (NULL);
-	}
-
-	/* case 2 */
-	MGET(mp2, MT_DATA, M_WAIT);
-	M_ALIGN(mp2, siz);
-	buf = mtod(mp2, void *);
-	xfer = *dposp - mtod(mp, caddr_t);		/* XXX */
-	bcopy(*dposp, buf, xfer);			/* XXX */
-	mp->m_data += xfer;
-	mp->m_len -= xfer;
-	mp->m_len += xfer;
-	siz -= xfer;
-	bcopy(mtod(mp->m_next, caddr_t), buf + xfer, siz);
-	mp->m_len += siz;
-	mp2->m_next = mp->m_next;
-	mp->m_next = mp2;
-	*dposp = buf + siz;
-	*mdp = mp2;
-
-	return (buf);
+	return (0);
 }
 
 /*
@@ -859,25 +889,19 @@ nfs_adv(mdp, dposp, offs, left)
 	int left;
 {
 	struct mbuf *m;
-	caddr_t dpos;
 	int s;
 
 	m = *mdp;
 	s = left;
-	dpos = *dposp;
-
 	while (s < offs) {
 		offs -= s;
 		m = m->m_next;
 		if (m == NULL)
 			return (EBADRPC);
 		s = m->m_len;
-		dpos = mtod(m, caddr_t);
 	}
-
 	*mdp = m;
-	*dposp = dpos + offs;
-
+	*dposp = mtod(m, caddr_t)+offs;
 	return (0);
 }
 
@@ -899,8 +923,8 @@ nfs_init()
 	rpc_autherr = txdr_unsigned(RPC_AUTHERR);
 	rpc_auth_unix = txdr_unsigned(RPCAUTH_UNIX);
 	nfs_prog = txdr_unsigned(NFS_PROG);
-	nfs_true = txdr_unsigned(TRUE);
-	nfs_false = txdr_unsigned(FALSE);
+	nfs_true = txdr_unsigned(1);
+	nfs_false = txdr_unsigned(0);
 	nfs_xdrneg1 = txdr_unsigned(-1);
 	nfs_ticks = (hz * NFS_TICKINTVL + 500) / 1000;
 	if (nfs_ticks < 1)
@@ -959,6 +983,8 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 	struct nfs_fattr *fp;
 	extern int (**spec_nfsv2nodeop_p)(void *);
 	struct nfsnode *np;
+	int32_t t1;
+	caddr_t cp2;
 	int error = 0;
 	int32_t rdev;
 	struct mbuf *md;
@@ -971,9 +997,11 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 	gid_t gid;
 
 	md = *mdp;
-	fp = nfsm_disct(mdp, NFSX_FATTR(v3), &error, dposp);
+	t1 = (mtod(md, caddr_t) + md->m_len) - *dposp;
+	error = nfsm_disct(mdp, dposp, NFSX_FATTR(v3), t1, &cp2);
 	if (error)
 		return (error);
+	fp = (struct nfs_fattr *)cp2;
 	if (v3) {
 		vtyp = nfsv3tov_type(fp->fa_type);
 		vmode = fxdr_unsigned(mode_t, fp->fa_mode);
@@ -1035,7 +1063,7 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 				*vpp = vp = nvp;
 			}
 		}
-		np->n_mtime = mtime.tv_sec;
+		np->n_mtime = mtime;
 	}
 	vap = &np->n_vattr;
 	vap->va_type = vtyp;
@@ -1127,7 +1155,7 @@ nfs_attrtimeo (np)
 {
 	struct vnode *vp = np->n_vnode;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
-	int tenthage = (time_second - np->n_mtime) / 10;
+	int tenthage = (time_second - np->n_mtime.tv_sec) / 10;
 	int minto, maxto;
 
 	if (vp->v_type == VDIR) {
@@ -1206,10 +1234,9 @@ nfs_namei(ndp, fhp, len, slp, nam, mdp, dposp, retdirp, p)
 	struct vnode **retdirp;
 	struct proc *p;
 {
-	struct uio uio;
-	struct iovec iov;
-	int rem;
+	int i, rem;
 	struct mbuf *md;
+	char *fromcp, *tocp;
 	struct vnode *dp;
 	int error, rdonly;
 	struct componentname *cnp = &ndp->ni_cnd;
@@ -1220,42 +1247,45 @@ nfs_namei(ndp, fhp, len, slp, nam, mdp, dposp, retdirp, p)
 	 * Copy the name from the mbuf list to ndp->ni_pnbuf
 	 * and set the various ndp fields appropriately.
 	 */
+	fromcp = *dposp;
+	tocp = cnp->cn_pnbuf;
 	md = *mdp;
-
-	iov.iov_base = cnp->cn_pnbuf;
-	iov.iov_len = len;
-
-	uio.uio_iov = &iov;
-	uio.uio_iovcnt = 1;
-	uio.uio_resid = len;
-	uio.uio_segflg = UIO_SYSSPACE;
-	uio.uio_rw = UIO_READ;
-	uio.uio_procp = NULL;
-
-	error = nfsm_mbuftouio(&md, &uio, len, dposp);
-	if (error)
-		goto out;
-
-	cnp->cn_pnbuf[len + 1] = '\0';	/* XXX -- bounds checking */
-	if (strlen(cnp->cn_pnbuf) < len ||
-	    strchr(cnp->cn_pnbuf, '/') != NULL) {
-		error = EACCES;
-		goto out;
+	rem = mtod(md, caddr_t) + md->m_len - fromcp;
+	cnp->cn_hash = 0;
+	for (i = 0; i < len; i++) {
+		while (rem == 0) {
+			md = md->m_next;
+			if (md == NULL) {
+				error = EBADRPC;
+				goto out;
+			}
+			fromcp = mtod(md, caddr_t);
+			rem = md->m_len;
+		}
+		if (*fromcp == '\0' || *fromcp == '/') {
+			error = EACCES;
+			goto out;
+		}
+		cnp->cn_hash += (u_char)*fromcp;
+		*tocp++ = *fromcp++;
+		rem--;
 	}
-	cnp->cn_hash = hash32_str(cnp->cn_pnbuf, 0);
-	cnp->cn_nameptr = cnp->cn_pnbuf;
-	ndp->ni_pathlen = len;
-
+	*tocp = '\0';
 	*mdp = md;
+	*dposp = fromcp;
 	len = nfsm_padlen(len);
 	if (len > 0) {
-		if ((error = nfs_adv(mdp, dposp, len, rem)) != 0)
+		if (rem >= len)
+			*dposp += len;
+		else if ((error = nfs_adv(mdp, dposp, len, rem)) != 0)
 			goto out;
 	}
+	ndp->ni_pathlen = tocp - cnp->cn_pnbuf;
+	cnp->cn_nameptr = cnp->cn_pnbuf;
 	/*
 	 * Extract and set starting directory.
 	 */
-	error = nfsrv_fhtovp(fhp, FALSE, &dp, ndp->ni_cnd.cn_cred, slp,
+	error = nfsrv_fhtovp(fhp, 0, &dp, ndp->ni_cnd.cn_cred, slp,
 	    nam, &rdonly);
 	if (error)
 		goto out;
@@ -1525,9 +1555,8 @@ nfsrv_fhtovp(fhp, lockflag, vpp, cred, slp, nam, rdonlyp)
 }
 
 /*
- * This function compares two net addresses by family and returns TRUE
- * if they are the same host.
- * If there is any doubt, return FALSE.
+ * This function compares two net addresses by family and returns non zero
+ * if they are the same host, or if there is any doubt it returns 0.
  * The AF_INET family is handled as a special case so that address mbufs
  * don't need to be saved to store "struct in_addr", which is only 4 bytes.
  */
@@ -1772,7 +1801,7 @@ nfsrv_errmap(nd, err)
 	    } else
 		return (err & 0xffff);
 	}
-	if (err <= sizeof(nfsrv_v2errmap)/sizeof(nfsrv_v2errmap[0]))
+	if (err <= nitems(nfsrv_v2errmap))
 		return ((int)nfsrv_v2errmap[err - 1]);
 	return (NFSERR_IO);
 }
@@ -1820,7 +1849,7 @@ nfsrv_setcred(incred, outcred)
 }
 
 /*
- * If full is true, set all fields, otherwise just set mode and time fields
+ * If full is non zero, set all fields, otherwise just set mode and time fields
  */
 void
 nfsm_v3attrbuild(struct mbuf **mp, struct vattr *a, int full)

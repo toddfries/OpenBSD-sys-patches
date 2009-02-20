@@ -391,8 +391,7 @@ struct acpi_facs {
 #define	FACS_LOCK_OWNED		0x00000002
 	u_int32_t	flags;
 #define	FACS_S4BIOS_F		0x00000001	/* S4BIOS_REQ supported */
-	u_int64_t	x_wakeup_vector;
-/*	struct acpi_gas	x_wakeup_vector; */
+	struct acpi_gas	x_wakeup_vector;
 	u_int8_t	version;
 	u_int8_t	reserved[31];
 } __packed;

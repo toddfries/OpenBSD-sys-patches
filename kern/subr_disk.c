@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.82 2008/08/25 11:27:00 krw Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.84 2009/02/09 20:00:48 otto Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -229,9 +229,13 @@ checkdisklabel(void *rlp, struct disklabel *lp)
 	if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC)
 		msg = "no disk label";
 	else if (dlp->d_npartitions > MAXPARTITIONS)
-		msg = "unreasonable partition count";
+		msg = "invalid label, partition count > MAXPARTITIONS";
+	else if (dlp->d_secpercyl == 0)
+		msg = "invalid label, d_secpercyl == 0";
+	else if (dlp->d_secsize == 0)
+		msg = "invalid label, d_secsize == 0";
 	else if (dkcksum(dlp) != 0)
-		msg = "disk label corrupted";
+		msg = "invalid label, incorrect checksum";
 
 	if (msg) {
 		u_int16_t *start, *end, sum = 0;
@@ -522,11 +526,26 @@ donot:
 	if (n == 0 && part_blkno == DOSBBSECTOR) {
 		u_int16_t fattest;
 
-		/* Check for a short jump instruction. */
-		fattest = ((bp->b_data[0] << 8) & 0xff00) |
-		    (bp->b_data[2] & 0xff);
-		if (fattest != 0xeb90 && fattest != 0xe900)
+		/* Check for a valid initial jmp instruction. */
+		switch ((u_int8_t)bp->b_data[0]) {
+		case 0xeb:
+			/*
+			 * Two-byte jmp instruction. The 2nd byte is the number
+			 * of bytes to jmp and the 3rd byte must be a NOP.
+			 */
+			if ((u_int8_t)bp->b_data[2] != 0x90)
+				goto notfat;
+			break;
+		case 0xe9:
+			/*
+			 * Three-byte jmp instruction. The next two bytes are a
+			 * little-endian 16 bit value.
+			 */
+			break;
+		default:
 			goto notfat;
+			break;
+		}
 
 		/* Check for a valid bytes per sector value. */
 		fattest = ((bp->b_data[12] << 8) & 0xff00) |

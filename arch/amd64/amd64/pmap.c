@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.32 2008/06/10 02:55:39 weingart Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.37 2009/02/16 20:26:58 kurt Exp $	*/
 /*	$NetBSD: pmap.c,v 1.3 2003/05/08 18:13:13 thorpej Exp $	*/
 
 /*
@@ -447,8 +447,12 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 
 	pte = kvtopte(va);
 
-	npte = pa | ((prot & VM_PROT_WRITE) ? PG_RW : PG_RO) |
-	     PG_V | pmap_pg_g;
+	npte = pa | ((prot & VM_PROT_WRITE) ? PG_RW : PG_RO) | PG_V;
+
+	/* special 1:1 mappings in the first 2MB must not be global */
+	if (va >= (vaddr_t)NBPD_L2)
+		npte |= pmap_pg_g;
+
 	if ((cpu_feature & CPUID_NXE) && !(prot & VM_PROT_EXECUTE))
 		npte |= PG_NX;
 	opte = pmap_pte_set(pte, npte);
@@ -570,7 +574,7 @@ pmap_bootstrap(paddr_t first_avail, paddr_t max_pa)
 	}
 	memset(&kpm->pm_list, 0, sizeof(kpm->pm_list));  /* pm_list not used */
 	kpm->pm_pdir = (pd_entry_t *)(proc0.p_addr->u_pcb.pcb_cr3 + KERNBASE);
-	kpm->pm_pdirpa = (u_int32_t) proc0.p_addr->u_pcb.pcb_cr3;
+	kpm->pm_pdirpa = proc0.p_addr->u_pcb.pcb_cr3;
 	kpm->pm_stats.wired_count = kpm->pm_stats.resident_count =
 		atop(kva_start - VM_MIN_KERNEL_ADDRESS);
 
@@ -1938,7 +1942,7 @@ pmap_unwire(struct pmap *pmap, vaddr_t va)
 			panic("pmap_unwire: invalid (unmapped) va 0x%lx", va);
 #endif
 		if ((ptes[pl1_i(va)] & PG_W) != 0) {
-			ptes[pl1_i(va)] &= ~PG_W;
+			pmap_pte_clearbits(&ptes[pl1_i(va)], PG_W);
 			pmap->pm_stats.wired_count--;
 		}
 #ifdef DIAGNOSTIC
@@ -2166,6 +2170,8 @@ enter_now:
 		npte |= PG_PVLIST;
 	if (wired)
 		npte |= PG_W;
+	if (flags & PMAP_NOCACHE)
+		npte |= PG_N;
 	if (va < VM_MAXUSER_ADDRESS)
 		npte |= PG_u;
 	else if (va < VM_MAX_ADDRESS)
@@ -2484,9 +2490,6 @@ volatile long tlb_shoot_wait;
 
 volatile vaddr_t tlb_shoot_addr1;
 volatile vaddr_t tlb_shoot_addr2;
-
-/* XXX */
-#define SPINLOCK_SPIN_HOOK __asm __volatile("pause": : :"memory")
 
 void
 pmap_tlb_shootpage(struct pmap *pm, vaddr_t va)

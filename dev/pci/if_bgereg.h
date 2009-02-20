@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bgereg.h,v 1.85 2008/07/17 19:59:44 brad Exp $	*/
+/*	$OpenBSD: if_bgereg.h,v 1.90 2008/12/23 00:12:22 dlg Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -1805,6 +1805,7 @@
 #define BGE_MISCCFG_BOARD_ID_5788	0x00010000
 #define BGE_MISCCFG_BOARD_ID_5788M	0x00018000
 #define BGE_MISCCFG_BOARD_ID_MASK	0x0001e000
+#define BGE_MISCCFG_EPHY_IDDQ		0x00200000
 #define BGE_MISCCFG_KEEP_GPHY_POWER	0x04000000
 
 #define BGE_32BITTIME_66MHZ		(0x41 << 1)
@@ -2455,6 +2456,7 @@ struct bge_softc {
 	u_int16_t		bge_return_ring_cnt;
 	u_int32_t		bge_tx_prodidx;
 	u_int16_t		bge_std;	/* current std ring head */
+	int			bge_std_cnt;
 	u_int16_t		bge_jumbo;	/* current jumo ring head */
 	SLIST_HEAD(__bge_jfreehead, bge_jpool_entry)	bge_jfree_listhead;
 	SLIST_HEAD(__bge_jinusehead, bge_jpool_entry)	bge_jinuse_listhead;
@@ -2475,6 +2477,7 @@ struct bge_softc {
 	int			bge_if_flags;
 	int			bge_txcnt;
 	struct timeout		bge_timeout;
+	struct timeout		bge_rxtimeout;
 	void			*sc_powerhook;
 	void			*sc_shutdownhook;
 	u_int32_t		bge_rx_discards;

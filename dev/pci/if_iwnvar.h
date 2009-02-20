@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwnvar.h,v 1.4 2008/10/22 06:25:07 damien Exp $	*/
+/*	$OpenBSD: if_iwnvar.h,v 1.9 2009/02/15 08:58:22 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -111,6 +111,7 @@ struct iwn_node {
 	struct	ieee80211_amrr_node	amn;
 	uint16_t			disable_tid;
 	uint8_t				id;
+	uint8_t				ridx[IEEE80211_RATE_MAXSIZE];
 };
 
 struct iwn_calib_state {
@@ -181,11 +182,12 @@ struct iwn_hal {
 	int		(*add_node)(struct iwn_softc *, struct iwn_node_info *,
 			    int);
 	void		(*tx_done)(struct iwn_softc *, struct iwn_rx_desc *);
+#ifndef IEEE80211_NO_HT
 	void		(*ampdu_tx_start)(struct iwn_softc *,
 			    struct ieee80211_node *, uint8_t, uint16_t);
 	void		(*ampdu_tx_stop)(struct iwn_softc *, uint8_t,
 			    uint16_t);
-	const char	*fwname;
+#endif
 	const struct	iwn_sensitivity_limits *limits;
 	int		ntxqs;
 	uint8_t		broadcast_id;
@@ -205,6 +207,7 @@ struct iwn_softc {
 				    enum ieee80211_state, int);
 
 	struct ieee80211_amrr	amrr;
+	uint8_t			fixed_ridx;
 
 	bus_dma_tag_t		sc_dmat;
 
@@ -214,6 +217,7 @@ struct iwn_softc {
 
 	uint8_t 		hw_type;
 	const struct iwn_hal	*sc_hal;
+	const char		*fwname;
 
 	/* TX scheduler rings. */
 	struct iwn_dma_info	sched_dma;
@@ -245,7 +249,7 @@ struct iwn_softc {
 	struct iwn_calib_state	calib;
 
 	struct iwn_fw_info	fw;
-	struct iwn_calib_info	calibcmd[3];
+	struct iwn_calib_info	calibcmd[5];
 	uint32_t		errptr;
 
 	struct iwn_rx_stat	last_rx_stat;

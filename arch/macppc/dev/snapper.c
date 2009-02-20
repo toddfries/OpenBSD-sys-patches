@@ -1,4 +1,4 @@
-/*	$OpenBSD: snapper.c,v 1.33 2008/11/05 01:43:09 jakemsr Exp $	*/
+/*	$OpenBSD: snapper.c,v 1.34 2008/11/06 10:01:50 todd Exp $	*/
 /*	$NetBSD: snapper.c,v 1.1 2003/12/27 02:19:34 grant Exp $	*/
 
 /*-
