@@ -60,10 +60,24 @@ struct iicprobelist probe_addrs_eeprom[] = {
 	{ 0, 0 }
 };
 
+/*
+ * Addresses at which to probe for switch devices.
+ */
+struct iicprobelist probe_addrs_switch[] = {
+//	{ 0x20, 0x27 },		/* pca8574 is dangerous */
+	{ 0x38, 0x3f },		/* pca8574a */
+	{ 0x58, 0x5b },		/* pca9454c */
+	{ 0x68, 0x6b },		/* pca9454b */
+	{ 0x70, 0x73 },		/* pca9454a */
+	{ 0, 0 }
+};
+
 char 	*iic_probe_sensor(struct device *, u_int8_t);
 char	*iic_probe_eeprom(struct device *, u_int8_t);
+char	*iic_probe_switch(struct device *, u_int8_t);
 
 #define PFLAG_SENSOR	1
+#define PFLAG_SWITCH	2
 static struct {
 	struct iicprobelist *pl;
 	char	*(*probe)(struct device *, u_int8_t);
@@ -71,6 +85,7 @@ static struct {
 } probes[] = {
 	{ probe_addrs_sensor, iic_probe_sensor, PFLAG_SENSOR },
 	{ probe_addrs_eeprom, iic_probe_eeprom, 0 },
+	{ probe_addrs_switch, iic_probe_switch, PFLAG_SWITCH },
 	{ NULL, NULL }
 };
 
@@ -938,6 +953,37 @@ iic_probe_eeprom(struct device *self, u_int8_t addr)
 	name = "eeprom";
 
 	return (name);
+}
+
+char *
+iic_probe_switch(struct device *self, u_int8_t addr)
+{
+	u_int8_t reg;
+
+	iic_acquire_bus(probe_ic, 0);
+	if (iic_exec(probe_ic, I2C_OP_READ_WITH_STOP,
+	    probe_addr, NULL, 0, &reg, sizeof reg, 0) != 0)
+		reg = 0xff;
+	iic_release_bus(probe_ic, 0);
+
+	printf("iic switch 0x%x\n", reg);
+
+	/* all ports muxed through?  Rather unlikely */
+	if ((reg & 0x0f) == 0x0f)
+		return (NULL);
+
+	/* more matching in driver(s) */
+	if ((addr & 0x78) == 0x28)
+		return ("pca8574");
+	if ((addr & 0x78) == 0x38)
+		return ("pca8574a");
+	if ((addr & 0x7c) == 0x70)
+		return ("pca9545a");
+	if ((addr & 0x7c) == 0x68)
+		return ("pca9545b");
+	if ((addr & 0x7c) == 0x58)
+		return ("pca9545c");
+	return (NULL);
 }
 
 void
