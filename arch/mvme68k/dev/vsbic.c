@@ -1,4 +1,4 @@
-/*	$OpenBSD: vsbic.c,v 1.1 2009/02/17 22:28:41 miod Exp $	*/
+/*	$OpenBSD: vsbic.c,v 1.3 2009/02/18 20:49:25 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009  Miodrag Vallat.
@@ -426,7 +426,7 @@ struct cfdriver vsbic_cd = {
 
 struct scsi_adapter vsbic_swtch = {
 	vsbic_scsicmd,
-	minphys
+	scsi_minphys
 };
 
 struct scsi_device vsbic_scsidev = {
@@ -447,10 +447,6 @@ vsbic_match(struct device *device, void *cf, void *args)
 	bus_space_handle_t ioh;
 	int rc;
 	uint8_t id;
-
-	/* XXX does not work on 68060 yet, likely a cache handling bug */
-	if (mmutype == MMU_68060)
-		return 0;
 
 	if (bus_space_map(iot, ca->ca_paddr, MVME327_CSR_SIZE, 0, &ioh) != 0)
 		return 0;
@@ -926,7 +922,8 @@ vsbic_cmd_ccb(struct vsbic_softc *sc, struct vsbic_cmd *cmd)
 {
 	struct vsbic_ccb *ccb, *prev;
 
-	for (prev = NULL, ccb = sc->sc_ccb_active; ccb != NULL; prev = ccb++) {
+	for (prev = NULL, ccb = sc->sc_ccb_active; ccb != NULL;
+	    prev = ccb, ccb = ccb->ccb_next) {
 		if (ccb->ccb_cmd == cmd) {
 			if (prev == NULL)
 				sc->sc_ccb_active = ccb->ccb_next;
