@@ -472,11 +472,17 @@ pxammc_intr(void *arg)
 {
 	struct pxammc_softc *sc = arg;
 	int status;
+#ifdef DIAGNOSTIC
+	int wstatus;
+#endif
 
 #define MMC_I_REG_STR	"\20\001DATADONE\002PRGDONE\003ENDCMDRES"	\
 			"\004STOPCMD\005CLKISOFF\006RXFIFO\007TXFIFO"	\
 			"\011DATERR\012RESERR\014SDIO"
 
+#ifdef DIAGNOSTIC
+	wstatus =
+#endif
 	status = CSR_READ_4(sc, MMC_I_REG) & ~CSR_READ_4(sc, MMC_I_MASK);
 	DPRINTF(1,("%s: intr %b\n", sc->sc_dev.dv_xname, status,
 	    MMC_I_REG_STR));
@@ -521,6 +527,11 @@ pxammc_intr(void *arg)
 		pxammc_intr_done(sc);
 		CSR_SET_4(sc, MMC_I_MASK, MMC_I_DAT_ERR);
 		CLR(status, MMC_I_DAT_ERR);
+		/* ignore transmission done condition */
+		if (ISSET(status, MMC_I_DATA_TRAN_DONE)) {
+			CSR_SET_4(sc, MMC_I_MASK, MMC_I_DATA_TRAN_DONE);
+			CLR(status, MMC_I_DATA_TRAN_DONE);
+		}
 		goto end;
 	}
 
@@ -534,8 +545,9 @@ end:
 	/* Avoid further unhandled interrupts. */
 	if (status != 0) {
 #ifdef DIAGNOSTIC
-		printf("%s: unhandled interrupt %b\n", sc->sc_dev.dv_xname,
-		    status, MMC_I_REG_STR);
+		printf("%s: unhandled interrupt %b out of %b\n",
+		    sc->sc_dev.dv_xname, status, MMC_I_REG_STR,
+		    wstatus, MMC_I_REG_STR);
 #endif
 		CSR_SET_4(sc, MMC_I_MASK, status);
 	}
