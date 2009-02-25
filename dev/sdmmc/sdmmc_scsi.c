@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc_scsi.c,v 1.14 2009/02/16 21:19:07 miod Exp $	*/
+/*	$OpenBSD: sdmmc_scsi.c,v 1.15 2009/02/20 19:16:35 miod Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

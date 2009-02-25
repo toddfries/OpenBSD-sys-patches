@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.108 2009/02/18 10:07:24 dlg Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.111 2009/02/24 21:47:28 dlg Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -1248,7 +1248,7 @@ pfsync_in_tdb(struct pfsync_pkt *pkt, struct mbuf *m, int offset, int count)
 {
 	int len = count * sizeof(struct pfsync_tdb);
 
-#if 0 && defined(IPSEC)
+#if defined(IPSEC)
 	struct pfsync_tdb *tp;
 	struct mbuf *mp;
 	int offp;
@@ -1264,12 +1264,55 @@ pfsync_in_tdb(struct pfsync_pkt *pkt, struct mbuf *m, int offset, int count)
 
 	s = splsoftnet();
 	for (i = 0; i < count; i++)
-		pfsync_update_net_tdb(&tp[i]); /* XXX */
+		pfsync_update_net_tdb(&tp[i]);
 	splx(s);
 #endif
 
 	return (len);
 }
+
+#if defined(IPSEC)
+/* Update an in-kernel tdb. Silently fail if no tdb is found. */
+void
+pfsync_update_net_tdb(struct pfsync_tdb *pt)
+{
+	struct tdb		*tdb;
+	int			 s;
+
+	/* check for invalid values */
+	if (ntohl(pt->spi) <= SPI_RESERVED_MAX ||
+	    (pt->dst.sa.sa_family != AF_INET &&
+	     pt->dst.sa.sa_family != AF_INET6))
+		goto bad;
+
+	s = spltdb();
+	tdb = gettdb(pt->spi, &pt->dst, pt->sproto);
+	if (tdb) {
+		pt->rpl = ntohl(pt->rpl);
+		pt->cur_bytes = betoh64(pt->cur_bytes);
+
+		/* Neither replay nor byte counter should ever decrease. */
+		if (pt->rpl < tdb->tdb_rpl ||
+		    pt->cur_bytes < tdb->tdb_cur_bytes) {
+			splx(s);
+			goto bad;
+		}
+
+		tdb->tdb_rpl = pt->rpl;
+		tdb->tdb_cur_bytes = pt->cur_bytes;
+	}
+	splx(s);
+	return;
+
+ bad:
+	if (pf_status.debug >= PF_DEBUG_MISC)
+		printf("pfsync_insert: PFSYNC_ACT_TDB_UPD: "
+		    "invalid value\n");
+	pfsyncstats.pfsyncs_badstate++;
+	return;
+}
+#endif
+
 
 int
 pfsync_in_eof(struct pfsync_pkt *pkt, struct mbuf *m, int offset, int count)
@@ -1426,7 +1469,6 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ip->ip_dst.s_addr = sc->sc_sync_peer.s_addr;
 
 		if (sc->sc_sync_if) {
-#if 0
 			/* Request a full state table update. */
 			sc->sc_ureq_sent = time_uptime;
 #if NCARP > 0
@@ -1437,9 +1479,7 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if (pf_status.debug >= PF_DEBUG_MISC)
 				printf("pfsync: requesting bulk update\n");
 			timeout_add_sec(&sc->sc_bulkfail_tmo, 5);
-			/* XXX bulks done this way? */
 			pfsync_request_update(0, 0);
-#endif
 		}
 		splx(s);
 
@@ -1570,6 +1610,15 @@ pfsync_sendout(void)
 	if (sc == NULL || sc->sc_len == PFSYNC_MINPKT)
 		return;
 
+#if NBPFILTER > 0
+	if (ifp->if_bpf == NULL && sc->sc_sync_if == NULL) {
+#else
+	if (sc->sc_sync_if == NULL) {
+#endif
+		pfsync_drop(sc);
+		return;
+	}
+
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
 	if (m == NULL) {
 		sc->sc_if.if_oerrors++;
@@ -1699,7 +1748,14 @@ pfsync_sendout(void)
 		m->m_data -= sizeof(*ip);
 		m->m_len = m->m_pkthdr.len = sc->sc_len;
 	}
+
+	if (sc->sc_sync_if == NULL) {
+		sc->sc_len = PFSYNC_MINPKT;
+		m_freem(m);
+		return;
+	}
 #endif
+
 	sc->sc_if.if_opackets++;
 	sc->sc_if.if_obytes += m->m_pkthdr.len;
 

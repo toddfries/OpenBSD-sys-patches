@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_mmc.c,v 1.3 2007/08/22 18:47:16 mglocker Exp $	*/
+/*	$OpenBSD: pxa2x0_mmc.c,v 1.5 2009/02/23 18:09:55 miod Exp $	*/
 
 /*
  * Copyright (c) 2007 Uwe Stuehler <uwe@openbsd.org>
@@ -515,6 +515,11 @@ pxammc_intr(void *arg)
 		pxammc_intr_cmd(sc);
 		CSR_SET_4(sc, MMC_I_MASK, MMC_I_END_CMD_RES);
 		CLR(status, MMC_I_END_CMD_RES);
+		/* ignore programming done condition */
+		if (ISSET(status, MMC_I_PRG_DONE)) {
+			CSR_SET_4(sc, MMC_I_MASK, MMC_I_PRG_DONE);
+			CLR(status, MMC_I_PRG_DONE);
+		}
 		if (sc->sc_cmd == NULL)
 			goto end;
 	}

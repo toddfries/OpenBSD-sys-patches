@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmcvar.h,v 1.14 2009/02/06 20:16:41 grange Exp $	*/
+/*	$OpenBSD: sdmmcvar.h,v 1.15 2009/02/20 19:16:35 miod Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

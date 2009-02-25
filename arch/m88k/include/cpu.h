@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.42 2009/02/17 21:03:59 miod Exp $ */
+/*	$OpenBSD: cpu.h,v 1.44 2009/02/21 18:37:47 miod Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
@@ -79,6 +79,8 @@
 
 extern u_int max_cpus;
 
+#include <machine/lock.h>
+
 /*
  * Per-CPU data structure
  */
@@ -94,6 +96,15 @@ struct cpu_info {
 	u_int		 ci_cpuid;		/* cpu number */
 
 	/*
+	 * Function pointers used within mplock to ensure
+	 * non-interruptability.
+	 */
+	uint32_t	(*ci_mp_atomic_begin)
+			    (__cpu_simple_lock_t *lock, uint *csr);
+	void		(*ci_mp_atomic_end)
+			    (uint32_t psr, __cpu_simple_lock_t *lock, uint csr);
+
+	/*
 	 * The following fields are used differently depending on
 	 * the processor type.  Think of them as an anonymous union
 	 * of two anonymous structs.
@@ -104,8 +115,6 @@ struct cpu_info {
 	u_int		 ci_cpudep3;
 	u_int		 ci_cpudep4;
 	u_int		 ci_cpudep5;
-	u_int		 ci_cpudep6;
-	u_int		 ci_cpudep7;
 
 	/* 88100 fields */
 #define	ci_pfsr_i0	 ci_cpudep0		/* instruction... */
@@ -114,13 +123,12 @@ struct cpu_info {
 #define	ci_pfsr_d1	 ci_cpudep3
 
 	/* 88110 fields */
-#define	ci_nmi_stack	 ci_cpudep0		/* NMI stack */
-#define	ci_ipi_arg1	 ci_cpudep1		/* Complex IPI arguments */
-#define	ci_ipi_arg2	 ci_cpudep2
-#define	ci_h_sxip	 ci_cpudep3		/* trapframe values */
-#define	ci_h_epsr	 ci_cpudep4		/* for hardclock */
-#define	ci_s_sxip	 ci_cpudep5		/* and softclock */
-#define	ci_s_epsr	 ci_cpudep6
+#define	ci_ipi_arg1	 ci_cpudep0		/* Complex IPI arguments */
+#define	ci_ipi_arg2	 ci_cpudep1
+#define	ci_h_sxip	 ci_cpudep2		/* trapframe values */
+#define	ci_h_epsr	 ci_cpudep3		/* for hardclock */
+#define	ci_s_sxip	 ci_cpudep4		/* and softclock */
+#define	ci_s_epsr	 ci_cpudep5
 
 	struct schedstate_percpu
 			 ci_schedstate;		/* scheduling state */

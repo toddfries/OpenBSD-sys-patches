@@ -1,5 +1,4 @@
-/*	$OpenBSD$	*/
-
+/*	$OpenBSD: if_alereg.h,v 1.1 2009/02/25 03:05:32 kevlo Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -33,41 +32,6 @@
 #define	_IF_ALEREG_H
 
 #define ALE_PCIR_BAR			0x10
-
-#define	ALE_TX_RING_CNT		256	/* Should be multiple of 4. */
-#define	ALE_TX_RING_CNT_MIN	32
-#define	ALE_TX_RING_CNT_MAX	1020
-#define	ALE_TX_RING_ALIGN	8
-#define	ALE_RX_PAGE_ALIGN	32
-#define	ALE_RX_PAGES		2
-#define	ALE_CMB_ALIGN		32
-
-#define	ALE_TSO_MAXSEGSIZE	4096
-#define	ALE_TSO_MAXSIZE		(65535 + sizeof(struct ether_vlan_header))
-#define	ALE_MAXTXSEGS		32
-
-#define	ALE_ADDR_LO(x)		((uint64_t) (x) & 0xFFFFFFFF)
-#define	ALE_ADDR_HI(x)		((uint64_t) (x) >> 32)
-
-/* Water mark to kick reclaiming Tx buffers. */
-#define	ALE_TX_DESC_HIWAT	(ALE_TX_RING_CNT - ((ALE_TX_RING_CNT * 4) / 10))
-
-#define	ALE_MSI_MESSAGES	1
-#define	ALE_MSIX_MESSAGES	1
-
-/*
- * TODO : Should get real jumbo MTU size.
- * The hardware seems to have trouble in dealing with large
- * frame length. If you encounter unstability issue, use
- * lower MTU size.
- */
-#define	ALE_JUMBO_FRAMELEN	8132
-#define	ALE_JUMBO_MTU		\
-	(ALE_JUMBO_FRAMELEN - sizeof(struct ether_vlan_header) - ETHER_CRC_LEN)
-#define	ALE_MAX_FRAMELEN	(ETHER_MAX_LEN + EVL_ENCAPLEN)
-
-#define	ALE_DESC_INC(x, y)	((x) = ((x) + 1) % (y))
-
 
 #define	ALE_SPI_CTRL			0x200
 #define	SPI_VPD_ENB			0x00002000
@@ -789,6 +753,39 @@ struct tx_desc {
 #define	ALE_TD_IPHDR_LEN_SHIFT		10
 } __packed;
 
+#define	ALE_TX_RING_CNT		256	/* Should be multiple of 4. */
+#define	ALE_TX_RING_CNT_MIN	32
+#define	ALE_TX_RING_CNT_MAX	1020
+#define	ALE_TX_RING_ALIGN	8
+#define	ALE_RX_PAGE_ALIGN	32
+#define	ALE_RX_PAGES		2
+#define	ALE_CMB_ALIGN		32
+
+#define	ALE_TSO_MAXSEGSIZE	4096
+#define	ALE_TSO_MAXSIZE		(65535 + sizeof(struct ether_vlan_header))
+#define	ALE_MAXTXSEGS		32
+
+#define	ALE_ADDR_LO(x)		((uint64_t) (x) & 0xFFFFFFFF)
+#define	ALE_ADDR_HI(x)		((uint64_t) (x) >> 32)
+
+/* Water mark to kick reclaiming Tx buffers. */
+#define	ALE_TX_DESC_HIWAT	(ALE_TX_RING_CNT - ((ALE_TX_RING_CNT * 4) / 10))
+
+#define	ALE_MSI_MESSAGES	1
+#define	ALE_MSIX_MESSAGES	1
+
+/*
+ * TODO : Should get real jumbo MTU size.
+ * The hardware seems to have trouble in dealing with large
+ * frame length. If you encounter unstability issue, use
+ * lower MTU size.
+ */
+#define	ALE_JUMBO_FRAMELEN	8132
+#define	ALE_JUMBO_MTU		\
+	(ALE_JUMBO_FRAMELEN - sizeof(struct ether_vlan_header) - ETHER_CRC_LEN)
+#define	ALE_MAX_FRAMELEN	(ETHER_MAX_LEN + EVL_ENCAPLEN)
+
+#define	ALE_DESC_INC(x, y)	((x) = ((x) + 1) % (y))
 
 struct ale_txdesc {
 	struct mbuf		*tx_m;
@@ -796,12 +793,12 @@ struct ale_txdesc {
 };
 
 struct ale_rx_page {
-	bus_dma_tag_t		page_tag;
 	bus_dmamap_t		page_map;
+	bus_dma_segment_t	page_seg;
 	uint8_t			*page_addr;
 	bus_addr_t		page_paddr;
-	bus_dma_tag_t		cmb_tag;
 	bus_dmamap_t		cmb_map;
+	bus_dma_segment_t	cmb_seg;
 	uint32_t		*cmb_addr;
 	bus_addr_t		cmb_paddr;
 	uint32_t		cons;
@@ -809,14 +806,16 @@ struct ale_rx_page {
 
 struct ale_chain_data{
 	struct ale_txdesc	ale_txdesc[ALE_TX_RING_CNT];
-	bus_dma_tag_t		ale_rx_mblock_tag[ALE_RX_PAGES];
-	bus_dmamap_t		ale_rx_mblock_map[ALE_RX_PAGES];
-	bus_dma_tag_t		ale_tx_ring_tag;
+	bus_dmamap_t		ale_tx_ring_map;
 	bus_dma_segment_t	ale_tx_ring_seg;
-	bus_dma_segment_t	ale_rx_ring_seg;
+	bus_dmamap_t		ale_rx_mblock_map[ALE_RX_PAGES];
+	bus_dma_segment_t	ale_rx_mblock_seg[ALE_RX_PAGES];
 	struct tx_desc		*ale_tx_ring;
 	bus_addr_t		ale_tx_ring_paddr;
-	bus_dma_segment_t	ale_rr_ring_seg;
+	uint32_t		*ale_tx_cmb;
+	bus_addr_t		ale_tx_cmb_paddr;
+	bus_dmamap_t		ale_tx_cmb_map;
+	bus_dma_segment_t	ale_tx_cmb_seg;
 
 	uint32_t		ale_tx_prod;
 	uint32_t		ale_tx_cons;
@@ -912,16 +911,13 @@ struct ale_softc {
 	pci_chipset_tag_t	sc_pct;
 	pcitag_t		sc_pcitag;
 
-	int			ale_mem_rid;
-	struct resource		*ale_mem_res;
-
 	void			*sc_irq_handle;
 
 	struct mii_data		sc_miibus;
-	int			ale_rev;
-	int			ale_chip_rev;
 	int			ale_phyaddr;
 
+	int			ale_rev;
+	int			ale_chip_rev;
 	uint8_t			ale_eaddr[ETHER_ADDR_LEN];
 	uint32_t		ale_dma_rd_burst;
 	uint32_t		ale_dma_wr_burst;
@@ -942,7 +938,6 @@ struct ale_softc {
 	struct timeout		ale_tick_ch;
 	struct ale_hw_stats	ale_stats;
 	struct ale_chain_data	ale_cdata;
-	int			ale_if_flags;
 	int			ale_int_rx_mod;
 	int			ale_int_tx_mod;
 	int			ale_max_frame_size;
@@ -951,15 +946,15 @@ struct ale_softc {
 };
 
 /* Register access macros. */
-#define	CSR_WRITE_4(sc, reg, val)	\
+#define	CSR_WRITE_4(_sc, reg, val)	\
 	bus_space_write_4((sc)->sc_mem_bt, (sc)->sc_mem_bh, (reg), (val))
-#define	CSR_WRITE_2(sc, reg, val)	\
+#define	CSR_WRITE_2(_sc, reg, val)	\
 	bus_space_write_2((sc)->sc_mem_bt, (sc)->sc_mem_bh, (reg), (val))
-#define	CSR_WRITE_1(sc, reg, val)	\
+#define	CSR_WRITE_1(_sc, reg, val)	\
 	bus_space_write_1((sc)->sc_mem_bt, (sc)->sc_mem_bh, (reg), (val))
-#define	CSR_READ_2(sc, reg)		\
+#define	CSR_READ_2(_sc, reg)		\
 	bus_space_read_2((sc)->sc_mem_bt, (sc)->sc_mem_bh, (reg))
-#define	CSR_READ_4(sc, reg)		\
+#define	CSR_READ_4(_sc, reg)		\
 	bus_space_read_4((sc)->sc_mem_bt, (sc)->sc_mem_bh, (reg))
 
 #define	ALE_TX_TIMEOUT		5
