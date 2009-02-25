@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jme.c,v 1.15 2009/01/10 15:33:05 kevlo Exp $	*/
+/*	$OpenBSD: if_jme.c,v 1.17 2009/02/25 13:10:38 jsg Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -1316,25 +1316,12 @@ jme_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING)
-				jme_set_filter(sc);
+				error = ENETRESET;
 			else
 				jme_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				jme_stop(sc);
-		}
-		break;
-
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				jme_set_filter(sc);
-			error = 0;
 		}
 		break;
 
@@ -1897,19 +1884,27 @@ jme_init(struct ifnet *ifp)
 	 *  Don't receive runt/bad frame.
 	 */
 	sc->jme_rxcsr = RXCSR_FIFO_FTHRESH_128T;
+
 	/*
 	 * Since Rx FIFO size is 4K bytes, receiving frames larger
 	 * than 4K bytes will suffer from Rx FIFO overruns. So
 	 * decrease FIFO threshold to reduce the FIFO overruns for
 	 * frames larger than 4000 bytes.
 	 * For best performance of standard MTU sized frames use
-	 * maximum allowable FIFO threshold, 128QW.
+	 * maximum allowable FIFO threshold, which is 32QW for
+	 * chips with a full mask >= 2 otherwise 128QW. FIFO
+	 * thresholds of 64QW and 128QW are not valid for chips
+	 * with a full mask >= 2.
 	 */
-	if ((ifp->if_mtu + ETHER_HDR_LEN + ETHER_CRC_LEN + ETHER_VLAN_ENCAP_LEN) >
-	    JME_RX_FIFO_SIZE)
+	if (sc->jme_revfm >= 2)
 		sc->jme_rxcsr |= RXCSR_FIFO_THRESH_16QW;
-	else
-		sc->jme_rxcsr |= RXCSR_FIFO_THRESH_128QW;
+	else {
+		if ((ifp->if_mtu + ETHER_HDR_LEN + ETHER_CRC_LEN +
+		    ETHER_VLAN_ENCAP_LEN) > JME_RX_FIFO_SIZE)
+			sc->jme_rxcsr |= RXCSR_FIFO_THRESH_16QW;
+		else
+			sc->jme_rxcsr |= RXCSR_FIFO_THRESH_128QW;
+	}
 	sc->jme_rxcsr |= sc->jme_rx_dma_size | RXCSR_RXQ_N_SEL(RXCSR_RXQ0);
 	sc->jme_rxcsr |= RXCSR_DESC_RT_CNT(RXCSR_DESC_RT_CNT_DEFAULT);
 	sc->jme_rxcsr |= RXCSR_DESC_RT_GAP_256 & RXCSR_DESC_RT_GAP_MASK;
@@ -2301,6 +2296,7 @@ jme_set_filter(struct jme_softc *sc)
 	rxcfg = CSR_READ_4(sc, JME_RXMAC);
 	rxcfg &= ~(RXMAC_BROADCAST | RXMAC_PROMISC | RXMAC_MULTICAST |
 	    RXMAC_ALLMULTI);
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
 	/*
 	 * Always accept frames destined to our station address.
@@ -2308,39 +2304,37 @@ jme_set_filter(struct jme_softc *sc)
 	 */
 	rxcfg |= RXMAC_UNICAST | RXMAC_BROADCAST;
 
-	if (ifp->if_flags & (IFF_PROMISC | IFF_ALLMULTI)) {
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
 		if (ifp->if_flags & IFF_PROMISC)
 			rxcfg |= RXMAC_PROMISC;
-		if (ifp->if_flags & IFF_ALLMULTI)
+		else
 			rxcfg |= RXMAC_ALLMULTI;
-		CSR_WRITE_4(sc, JME_MAR0, 0xFFFFFFFF);
-		CSR_WRITE_4(sc, JME_MAR1, 0xFFFFFFFF);
-		CSR_WRITE_4(sc, JME_RXMAC, rxcfg);
-		return;
-	}
+		mchash[0] = mchash[1] = 0xFFFFFFFF;
+	} else {
+		/*
+		 * Set up the multicast address filter by passing all
+		 * multicast addresses through a CRC generator, and then
+		 * using the low-order 6 bits as an index into the 64 bit
+		 * multicast hash table.  The high order bits select the
+		 * register, while the rest of the bits select the bit
+		 * within the register.
+		 */
+		rxcfg |= RXMAC_MULTICAST;
+		bzero(mchash, sizeof(mchash));
 
-	/*
-	 * Set up the multicast address filter by passing all multicast
-	 * addresses through a CRC generator, and then using the low-order
-	 * 6 bits as an index into the 64 bit multicast hash table.  The
-	 * high order bits select the register, while the rest of the bits
-	 * select the bit within the register.
-	 */
-	rxcfg |= RXMAC_MULTICAST;
-	bzero(mchash, sizeof(mchash));
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			crc = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN);
 
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm != NULL) {
-		crc = ether_crc32_be(LLADDR((struct sockaddr_dl *)
-		    enm->enm_addrlo), ETHER_ADDR_LEN);
+			/* Just want the 6 least significant bits. */
+			crc &= 0x3f;
 
-		/* Just want the 6 least significant bits. */
-		crc &= 0x3f;
+			/* Set the corresponding bit in the hash table. */
+			mchash[crc >> 5] |= 1 << (crc & 0x1f);
 
-		/* Set the corresponding bit in the hash table. */
-		mchash[crc >> 5] |= 1 << (crc & 0x1f);
-
-		ETHER_NEXT_MULTI(step, enm);
+			ETHER_NEXT_MULTI(step, enm);
+		}
 	}
 
 	CSR_WRITE_4(sc, JME_MAR0, mchash[0]);
