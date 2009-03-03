@@ -97,7 +97,6 @@ struct puc_softc {
 	/* card-global dynamic data */
 	struct {
 		int		mapped;
-		u_long		type;
 		bus_addr_t	a;
 		bus_size_t	s;
 		bus_space_tag_t	t;
