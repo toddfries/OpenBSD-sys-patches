@@ -345,7 +345,8 @@ puc_submatch(struct device *parent, void *vcf, void *aux)
 }
 
 const struct puc_device_description *
-puc_find_description(u_long vend, u_long prod, u_long svend, u_long sprod)
+puc_find_description(u_int16_t vend, u_int16_t prod,
+    u_int16_t svend, u_int16_t sprod)
 {
 	int i;
 

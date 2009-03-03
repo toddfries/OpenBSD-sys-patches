@@ -41,8 +41,8 @@
 #define	PUC_MAX_PORTS		8
 
 struct puc_device_description {
-	u_long	rval[4];
-	u_long	rmask[4];
+	u_int16_t	rval[4];
+	u_int16_t	rmask[4];
 	struct {
 		u_char	type;
 		u_char	bar;
@@ -113,7 +113,7 @@ struct puc_softc {
 };
 
 const struct puc_device_description *
-    puc_find_description(u_long, u_long, u_long, u_long);
+    puc_find_description(u_int16_t, u_int16_t, u_int16_t, u_int16_t);
 void	puc_print_ports(const struct puc_device_description *);
 void	puc_common_attach(struct puc_softc *, struct puc_attach_args *);
 int	puc_print(void *, const char *);
