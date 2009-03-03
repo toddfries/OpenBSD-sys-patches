@@ -240,14 +240,7 @@ struct pf_pool_limit pf_pool_limits[PF_LIMIT_MAX] = {
 	{ &pfr_kentry_pl, PFR_KENTRY_HIWAT }
 };
 
-/*
- * PF virtual icmp types above 255 to avoid conflict with the
- * real ICMP types (8 bits)
- */
-enum	{ PF_ICMP_STATE=256, PF_ICMP_ECHO, PF_ICMP_TSTAMP, PF_ICMP_IREQ,
-	  PF_ICMP_MASKREQ, PF_ICMP_IPV6_WHEREAREYOU, PF_ICMP_MOBILE_REG,
-	  PF_ICMP_ROUTER, PF_ICMP6_ECHO, PF_ICMP6_MLD_LISTENER,
-	  PF_ICMP6_ROUTER, PF_ICMP6_WRU, PF_ICMP6_MLD_MTRACE, PF_ICMP6_ND };
+#define PF_ICMP_STATE	256
 
 
 #define STATE_LOOKUP(i, k, d, s, m)					\
@@ -1591,91 +1584,71 @@ pf_icmp_type_mapping(u_int8_t type, int *icmp_dir)
 	u_int16_t ret;
 
 	/*
-         * ICMP types marked with PF_IN are typically responses to
-	 * PF_IN, and will match states in the opposite direction.
-	 * PF_OUT ICMP types need explicit states.
+         * ICMP types marked with PF_OUT are typically responses to
+	 * PF_OUT, and will match states in the opposite direction.
+	 * PF_IN ICMP types need explicit states.
 	 */
 	*icmp_dir = PF_OUT;
 	/* Queries (and responses) */
 	switch (type) {
-	case ICMP_ECHO:
-		*icmp_dir = PF_IN;
 	case ICMP_ECHOREPLY:
-		ret = PF_ICMP_ECHO;
+		ret = ICMP_ECHO;
 		break;
 
-	case ICMP_TSTAMP:
-		*icmp_dir = PF_IN;
 	case ICMP_TSTAMPREPLY:
-		ret = PF_ICMP_TSTAMP;
+		ret = ICMP_TSTAMP;
 		break;
 
-	case ICMP_IREQ:
-		*icmp_dir = PF_IN;
 	case ICMP_IREQREPLY:
-		ret = PF_ICMP_IREQ;
+		ret = ICMP_IREQ;
 		break;
 
-	case ICMP_MASKREQ:
-		*icmp_dir = PF_IN;
 	case ICMP_MASKREPLY:
-		ret = PF_ICMP_MASKREQ;
+		ret = ICMP_MASKREQ;
 		break;
 
-	case ICMP_IPV6_WHEREAREYOU:
-		*icmp_dir = PF_IN;
 	case ICMP_IPV6_IAMHERE:
-		ret = PF_ICMP_IPV6_WHEREAREYOU;
+		ret = ICMP_IPV6_WHEREAREYOU;
 		break;
 
-	case ICMP_MOBILE_REGREQUEST:
-		*icmp_dir = PF_IN;
 	case ICMP_MOBILE_REGREPLY:
-		ret = PF_ICMP_MOBILE_REG;
+		ret = ICMP_MOBILE_REGREQUEST;
 		break;
 
-	case ICMP_ROUTERSOLICIT:
-		*icmp_dir = PF_IN;
 	case ICMP_ROUTERADVERT:
-		ret = PF_ICMP_ROUTER;
+		ret = ICMP_ROUTERSOLICIT;
 		break;
 
 #ifdef INET6
-	case ICMP6_ECHO_REQUEST:
-		*icmp_dir = PF_IN;
 	case ICMP6_ECHO_REPLY:
-		ret = PF_ICMP6_ECHO;
+		ret = ICMP6_ECHO_REQUEST;
 		break;
 
-	case MLD_LISTENER_QUERY:
-		*icmp_dir = PF_IN;
 	case MLD_LISTENER_REPORT:
-		ret = PF_ICMP6_MLD_LISTENER;
+		ret = MLD_LISTENER_QUERY;
 		break;
 
-	/*
-	 * ICMP6_FQDN and ICMP6_NI query/reply are the same type as ICMP6_WRU
-	 */
-	case ICMP6_WRUREQUEST:	
-		*icmp_dir = PF_IN;
+	/* ICMP6_FQDN and ICMP6_NI query/reply are the same type as ICMP6_WRU */
 	case ICMP6_WRUREPLY:
-		ret = PF_ICMP6_WRU;
+		ret = ICMP6_WRUREQUEST;
 		break;
 
-	case MLD_MTRACE:
-		*icmp_dir = PF_IN;
 	case MLD_MTRACE_RESP:
-		ret = PF_ICMP6_MLD_MTRACE;
+		ret = MLD_MTRACE;
 		break;
 
-#endif
+#endif /* INET6 */
 	/* These ICMP types map to other connections */
-	/* XXX Should ICMPv6 ND_REDIRECT be here? */
-	case ICMP_UNREACH:
+	case ICMP_UNREACH:	
 	case ICMP_SOURCEQUENCH:
 	case ICMP_REDIRECT:
 	case ICMP_TIMXCEED:
 	case ICMP_PARAMPROB:
+#ifdef INET6
+	/* ICMP6_TIME_EXCEEDED is the same type as ICMP_UNREACH */
+	/* XXX Should ICMPv6 ND_REDIRECT be here? */
+	case ICMP6_PACKET_TOO_BIG:
+#endif /* INET6 */
 		*icmp_dir = PF_IN; /* icmp_dir not used, but set it strict */
 		ret = PF_ICMP_STATE;
 		break;
@@ -4467,19 +4440,17 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 
 				if (PF_ANEQ(pd2.src,
 				    &nk->addr[pd2.sidx], pd2.af) ||
-				    nk->port[1] != iih.icmp_id)
+				    nk->port[iidx] != iih.icmp_id)
 					pf_change_icmp(pd2.src, &iih.icmp_id,
-					    daddr, &nk->addr[1],
-					    nk->port[1], NULL,
+					    daddr, &nk->addr[pd2.sidx],
+					    nk->port[iidx], NULL,
 					    pd2.ip_sum, icmpsum,
 					    pd->ip_sum, 0, AF_INET);
 
 				if (PF_ANEQ(pd2.dst,
-				    &nk->addr[iidx], pd2.af))
-                                       pf_change_icmp(pd2.dst, &iih.icmp_id,
-					    NULL, /* XXX Inbound NAT? */
-					    &nk->addr[pd2.didx],
-					    nk->port[iidx], NULL,
+				    &nk->addr[pd2.didx], pd2.af))
+                                       pf_change_icmp(pd2.dst, NULL, NULL,
+					    &nk->addr[pd2.didx], 0, NULL,
 					    pd2.ip_sum, icmpsum,
 					    pd->ip_sum, 0, AF_INET);
 
@@ -4528,10 +4499,8 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 
 				if (PF_ANEQ(pd2.dst,
 				    &nk->addr[pd2.didx], pd2.af))
-					pf_change_icmp(pd2.dst, &iih.icmp6_id,
-					    NULL, /* XXX Inbound NAT? */
-					    &nk->addr[pd2.didx],
-					    nk->port[iidx], NULL,
+					pf_change_icmp(pd2.dst, NULL, NULL,
+					    &nk->addr[pd2.didx], 0, NULL,
 					    pd2.ip_sum, icmpsum,
 					    pd->ip_sum, 0, AF_INET6);
 
