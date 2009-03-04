@@ -112,7 +112,8 @@ roundrobin(struct cpu_info *ci)
 		splx(s);
 	}
 
-	need_resched(curcpu());
+	if (spc->spc_nrun)
+		need_resched(ci);
 }
 
 /*
@@ -257,7 +258,8 @@ schedcpu(void *arg)
 		resetpriority(p);
 		if (p->p_priority >= PUSER) {
 			if (p->p_stat == SRUN &&
-			    (p->p_priority / PPQ) != (p->p_usrpri / PPQ)) {
+			    (p->p_priority / SCHED_PPQ) !=
+			    (p->p_usrpri / SCHED_PPQ)) {
 				remrunqueue(p);
 				p->p_priority = p->p_usrpri;
 				setrunqueue(p);

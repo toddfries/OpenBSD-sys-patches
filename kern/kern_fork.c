@@ -260,8 +260,6 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	timeout_set(&p2->p_sleep_to, endtsleep, p2);
 	timeout_set(&p2->p_realit_to, realitexpire, p2);
 
-	p2->p_cpu = p1->p_cpu;
-
 	/*
 	 * Duplicate sub-structures as needed.
 	 * Increase reference counts on shared objects.

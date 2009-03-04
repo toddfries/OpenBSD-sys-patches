@@ -1,0 +1,36 @@
+--- /home/todd/owtemp.c.final	Thu Dec 25 16:12:13 2008
++++ owtemp.c	Thu Dec 25 15:29:18 2008
+@@ -41,7 +41,7 @@
+ #define DS1920_SP_TEMP_MSB		1
+ #define DS1920_SP_TH			2
+ #define DS1920_SP_TL			3
+-#define DS18B20_SP_CONFIG		4
++#define DS18B20_SP_CoNFIG		4
+ #define DS1920_SP_COUNT_REMAIN		6
+ #define DS1920_SP_COUNT_PERC		7
+ #define DS1920_SP_CRC			8
+@@ -102,6 +102,8 @@
+ 	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
+ 	    sizeof(sc->sc_sensordev.xname));
+ 	sc->sc_sensor.type = SENSOR_TEMP;
++	snprintf(sc->sc_sensor.desc, sizeof(sc->sc_sensor.desc), "sn %012llx",
++	    ONEWIRE_ROM_SN(oa->oa_rom));
+ 
+ 	sc->sc_sensortask = sensor_task_register(sc, owtemp_update, 5);
+ 	if (sc->sc_sensortask == NULL) {
+@@ -172,13 +173,12 @@
+ 	onewire_read_block(sc->sc_onewire, data, 9);
+ 	if (onewire_crc(data, 8) == data[DS1920_SP_CRC]) {
+ 		temp = data[DS1920_SP_TEMP_MSB] << 8 |
+-			data[DS1920_SP_TEMP_LSB];
+-		if ( (sc->sc_rom&0xff) == ONEWIRE_FAMILY_DS18B20) {
++		    data[DS1920_SP_TEMP_LSB];
++		if ((sc->rom&0xff) == ONEWIRE_FAMILY_DS18B20) {
+ 			/* DS18B20 decoding */
+ 			/* default 12 bit 0.0625 C resolution */
+ 			val = temp * (1000000 / 16);
+ 		} else {
+-			/* DS1920 decoding */
+ 			count_perc = data[DS1920_SP_COUNT_PERC];
+ 			count_remain = data[DS1920_SP_COUNT_REMAIN];
+ 

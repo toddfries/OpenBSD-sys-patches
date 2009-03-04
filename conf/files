@@ -693,6 +693,7 @@ file kern/subr_log.c
 file kern/subr_pool.c
 file kern/subr_prf.c
 file kern/subr_prof.c
+file kern/subr_cpuset.c
 file kern/subr_userconf.c		boot_config
 file kern/subr_xxx.c
 file kern/sys_generic.c
