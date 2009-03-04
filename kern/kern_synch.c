@@ -381,7 +381,6 @@ wakeup_n(void *ident, int n)
 				 * resched_proc().
 				 */
 				setrunqueue(p);
-				KASSERT(p->p_cpu != NULL);
 				need_resched(p->p_cpu);
 				/* END INLINE EXPANSION */
 
