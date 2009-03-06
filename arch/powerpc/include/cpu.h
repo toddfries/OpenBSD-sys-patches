@@ -95,7 +95,7 @@ curcpu(void)
 #define	curpcb			(curcpu()->ci_curpcb)
 #define	curpm			(curcpu()->ci_curpm)
 
-#define CPU_INFO_UNIT(ci)	((ci)->ci_dev->dv_unit)
+#define CPU_INFO_UNIT(ci)	((ci)->ci_dev ? (ci)->ci_dev->dv_unit : 0)
 
 #ifdef MULTIPROCESSOR
 
