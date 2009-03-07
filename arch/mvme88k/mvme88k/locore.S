@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.63 2009/02/08 21:40:58 miod Exp $	*/
+/*	$OpenBSD: locore.S,v 1.65 2009/02/21 18:37:48 miod Exp $	*/
 /*
  * Copyright (c) 2005, Miodrag Vallat.
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -230,6 +230,14 @@ GLOBAL(secondary_start)
 	bsr.n	_C_LABEL(secondary_main)
 	 addu	r31, r2, USPACE			/* switch to startup stack */
 
+	/*
+	 * Dummy mp_atomic_begin() and mp_atomic_end() routine, so that
+	 * we can interact with ddb if things go wrong very early during
+	 * bootstrap. Of course this should never happen (-:
+	 */
+ASLOCAL(dummy_mplock)
+	jmp	r1
+
 #endif	/* MULTIPROCESSOR */
 
 /*
@@ -328,11 +336,6 @@ ASGLOBAL(initstack)
 	space	USPACE
 ASGLOBAL(initstack_end)
 
-#ifdef M88110
-GLOBAL(nmi_stack)		/* NMI stack for the boot processor */
-	space	USPACE
-#endif
-
 #ifdef MULTIPROCESSOR
 	space	PAGE_SIZE	/* 4K, small, interim stack */
 ASLOCAL(slavestack_end)
@@ -355,7 +358,10 @@ ASLOCAL(dummy_cpu)
 	word	0				/* ci_curproc */
 	word	0				/* ci_curpcb */
 	word	0				/* ci_cpuid */
-	space	CPU_INFO_SIZEOF - 4 * 4
+	word	_ASM_LABEL(dummy_mplock)	/* ci_mp_atomic_begin */
+	word	_ASM_LABEL(dummy_mplock)	/* ci_mp_atomic_end */
+
+	space	CPU_INFO_SIZEOF - 6 * 4
 #endif	/* MULTIPROCESSOR */
 
 #if defined(DDB) || NKSYMS > 0

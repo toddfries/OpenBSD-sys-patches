@@ -1,4 +1,4 @@
-/*	$OpenBSD: m197_machdep.c,v 1.34 2009/02/17 21:04:01 miod Exp $	*/
+/*	$OpenBSD: m197_machdep.c,v 1.38 2009/03/01 17:44:46 miod Exp $	*/
 
 /*
  * Copyright (c) 2009 Miodrag Vallat.
@@ -87,21 +87,20 @@ void	m197_bootstrap(void);
 void	m197_delay(int);
 void	m197_ext_int(struct trapframe *);
 u_int	m197_getipl(void);
-void	m197_ipi_handler(struct trapframe *);
+int	m197_ipi_handler(struct trapframe *);
 vaddr_t	m197_memsize(void);
-void	m197_nmi(struct trapframe *);
+uint32_t m197_mp_atomic_begin(__cpu_simple_lock_t *, uint *);
+void	m197_mp_atomic_end(uint32_t, __cpu_simple_lock_t *, uint);
+int	m197_nmi(struct trapframe *);
+void	m197_nmi_wrapup(struct trapframe *);
 u_int	m197_raiseipl(u_int);
 u_int	m197_setipl(u_int);
+void	m197_smp_setup(struct cpu_info *);
 void	m197_soft_ipi(void);
 void	m197_startup(void);
 
 vaddr_t obiova;
 vaddr_t flashva;
-
-#define	CI_IPI_MASKABLE \
-	(CI_IPI_HARDCLOCK | CI_IPI_STATCLOCK)
-#define	CI_IPI_COMPLEX \
-	(CI_IPI_CACHE_FLUSH | CI_IPI_ICACHE_FLUSH | CI_IPI_DMA_CACHECTL)
 
 /*
  * Figure out how much real memory is available.
@@ -261,19 +260,15 @@ m197_ext_int(struct trapframe *eframe)
 
 /*
  * NMI handler. Invoked with interrupts disabled.
+ * Returns nonzero if NMI have been reenabled, and the exception handler
+ * is allowed to run soft interrupts and AST; nonzero otherwise.
  */
-void
+
+int
 m197_nmi(struct trapframe *eframe)
 {
 	u_int8_t abort;
-#if 0
-	u_int32_t psr;
-
-	/* block all hardware interrupts */
-	m197_setipl(IPL_HIGH);	/* IPL_IPI? */
-	psr = get_psr();
-	set_psr(psr & ~PSR_IND);
-#endif
+	int rc;
 
 	/*
 	 * Non-maskable interrupts are either the abort switch (on
@@ -283,12 +278,17 @@ m197_nmi(struct trapframe *eframe)
 	if ((*(volatile u_int8_t *)(BS_BASE + BS_CPINT)) & BS_CPI_INT) {
 		/* disable further NMI for now */
 		*(volatile u_int8_t *)(BS_BASE + BS_CPINT) = 0;
-		m197_ipi_handler(eframe);
-		/* acknowledge and reenable IPIs */
-		*(volatile u_int8_t *)(BS_BASE + BS_CPINT) =
-		    BS_CPI_ICLR | BS_CPI_IEN;
-	}
+
+		rc = m197_ipi_handler(eframe);
+
+		/* acknowledge */
+		*(volatile u_int8_t *)(BS_BASE + BS_CPINT) = BS_CPI_ICLR;
+
+		if (rc != 0)
+			m197_nmi_wrapup(eframe);
+	} else
 #endif
+		rc = 1;
 
 	if (CPU_IS_PRIMARY(curcpu())) {
 		abort = *(u_int8_t *)(BS_BASE + BS_ABORT);
@@ -300,14 +300,16 @@ m197_nmi(struct trapframe *eframe)
 		}
 	}
 
-#if 0
-	/*
-	 * Disable interrupts before returning to assembler,
-	 * the spl will be restored later.
-	 */
-	set_psr(psr | PSR_IND);
-#endif
+	return rc;
+}
 
+void
+m197_nmi_wrapup(struct trapframe *eframe)
+{
+#ifdef MULTIPROCESSOR
+	/* reenable IPIs */
+	*(volatile u_int8_t *)(BS_BASE + BS_CPINT) = BS_CPI_IEN;
+#endif
 }
 
 u_int
@@ -415,6 +417,7 @@ m197_bootstrap()
 
 	md_interrupt_func_ptr = m197_ext_int;
 	md_nmi_func_ptr = m197_nmi;
+	md_nmi_wrapup_func_ptr = m197_nmi_wrapup;
 	md_getipl = m197_getipl;
 	md_setipl = m197_setipl;
 	md_raiseipl = m197_raiseipl;
@@ -423,12 +426,22 @@ m197_bootstrap()
 	md_send_ipi = m197_send_ipi;
 	md_soft_ipi = m197_soft_ipi;
 	md_delay = m197_delay;
+	md_smp_setup = m197_smp_setup;
 #else
 	md_delay = m1x7_delay;
 #endif
 }
 
 #ifdef MULTIPROCESSOR
+
+/*
+ * IPIs groups
+ */
+#define	CI_IPI_CLOCK \
+	(CI_IPI_HARDCLOCK | CI_IPI_STATCLOCK)
+#define	CI_IPI_SYNCHRONOUS \
+	(CI_IPI_TLB_FLUSH_KERNEL | CI_IPI_TLB_FLUSH_USER | \
+	 CI_IPI_CACHE_FLUSH | CI_IPI_ICACHE_FLUSH | CI_IPI_DMA_CACHECTL)
 
 void
 m197_send_ipi(int ipi, cpuid_t cpu)
@@ -446,13 +459,17 @@ m197_send_ipi(int ipi, cpuid_t cpu)
 
 	atomic_setbits_int(&ci->ci_ipi, ipi);
 
-	*(volatile u_int8_t *)(BS_BASE + BS_CPINT) |= BS_CPI_SCPI;
+	if (ipi & CI_IPI_SYNCHRONOUS)
+		m197_send_complex_ipi(ipi, cpu, 0, 0);
+	else
+		*(volatile u_int8_t *)(BS_BASE + BS_CPINT) |= BS_CPI_SCPI;
 }
 
 void
 m197_send_complex_ipi(int ipi, cpuid_t cpu, u_int32_t arg1, u_int32_t arg2)
 {
 	struct cpu_info *ci = &m88k_cpus[cpu];
+	uint32_t psr;
 	int wait;
 
 	if ((ci->ci_flags & CIF_ALIVE) == 0)
@@ -460,6 +477,9 @@ m197_send_complex_ipi(int ipi, cpuid_t cpu, u_int32_t arg1, u_int32_t arg2)
 
 	if (ci->ci_ddb_state == CI_DDB_PAUSE)
 		return;				/* XXX skirting deadlock */
+
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
 
 	/*
 	 * Wait for the other processor to be ready to accept an IPI.
@@ -470,21 +490,43 @@ m197_send_complex_ipi(int ipi, cpuid_t cpu, u_int32_t arg1, u_int32_t arg2)
 			break;
 	}
 	if (wait == 0)
-		panic("couldn't send complex ipi %x to cpu %d", ipi, cpu);
+		panic("couldn't send complex ipi %x to cpu %d: busy",
+		    ipi, cpu);
 
 	/*
 	 * In addition to the ipi bit itself, we need to set up ipi arguments.
 	 * Note that we do not need to protect against another processor
 	 * trying to send another complex IPI, since we know there are only
-	 * two processors on the board.
+	 * two processors on the board. This is also why we do not use atomic
+	 * operations on ci_ipi there, since we know from the loop above that
+	 * the other process is done doing any IPI work.
 	 */
 	ci->ci_ipi_arg1 = arg1;
 	ci->ci_ipi_arg2 = arg2;
-	atomic_setbits_int(&ci->ci_ipi, ipi);
+	ci->ci_ipi |= ipi;
 
 	*(volatile u_int8_t *)(BS_BASE + BS_CPINT) |= BS_CPI_SCPI;
-}
 
+	/*
+	 * Wait for the other processor to complete ipi processing.
+	 */
+	for (wait = 1000000; wait != 0; wait--) {
+		if (!ISSET(*(volatile u_int8_t *)(BS_BASE + BS_CPINT),
+		    BS_CPI_STAT))
+			break;
+	}
+	if (wait == 0)
+		panic("couldn't send complex ipi %x to cpu %d: no ack",
+		    ipi, cpu);
+
+	/*
+	 * If there are any simple IPIs pending, trigger them now.
+	 */
+	if (ci->ci_ipi != 0)
+		*(volatile u_int8_t *)(BS_BASE + BS_CPINT) |= BS_CPI_SCPI;
+
+	set_psr(psr);
+}
 void
 m197_broadcast_complex_ipi(int ipi, u_int32_t arg1, u_int32_t arg2)
 {
@@ -495,7 +537,7 @@ m197_broadcast_complex_ipi(int ipi, u_int32_t arg1, u_int32_t arg2)
 	m197_send_complex_ipi(ipi, 1 - curcpu()->ci_cpuid, arg1, arg2);
 }
 
-void
+int
 m197_ipi_handler(struct trapframe *eframe)
 {
 	struct cpu_info *ci = curcpu();
@@ -506,11 +548,49 @@ m197_ipi_handler(struct trapframe *eframe)
 #endif
 
 	if (ipi == 0)
-		return;
+		return 1;
+
+	/*
+	 * Synchronous IPIs. There can only be one pending at the same time,
+	 * sending processor will wait for us to have processed the current
+	 * one before sending a new one.
+	 * We process them ASAP, ignoring any other pending ipi - sender will
+	 * take care of resending an ipi if necessary.
+	 */
+	if (ipi & CI_IPI_SYNCHRONOUS) {
+		/* no need to use atomic ops, the other cpu waits */
+		ci->ci_ipi &= ~CI_IPI_SYNCHRONOUS;
+
+		arg1 = ci->ci_ipi_arg1;
+		arg2 = ci->ci_ipi_arg2;
+
+		if (ipi & CI_IPI_TLB_FLUSH_KERNEL) {
+			cmmu_flush_tlb(ci->ci_cpuid, 1, 0, 0);
+		}
+		else if (ipi & CI_IPI_TLB_FLUSH_USER) {
+			cmmu_flush_tlb(ci->ci_cpuid, 0, 0, 0);
+		}
+		else if (ipi & CI_IPI_CACHE_FLUSH) {
+			cmmu_flush_cache(ci->ci_cpuid, arg1, arg2);
+		}
+		else if (ipi & CI_IPI_ICACHE_FLUSH) {
+			cmmu_flush_inst_cache(ci->ci_cpuid, arg1, arg2);
+		}
+		else if (ipi & CI_IPI_DMA_CACHECTL) {
+			dma_cachectl_local(arg1, arg2 & ~DMA_CACHE_MASK,
+			    arg2 & DMA_CACHE_MASK);
+		}
+
+		return 0;
+	}
+
+	/*
+	 * Asynchronous IPIs. We can have as many bits set as possible.
+	 */
 
 	atomic_clearbits_int(&ci->ci_ipi, ipi);
 
-	if (ipi & CI_IPI_MASKABLE) {
+	if (ipi & CI_IPI_CLOCK) {
 		/*
 		 * Even if the current spl level would allow it, we can
 		 * not run the clock handlers from there because we would
@@ -534,36 +614,6 @@ m197_ipi_handler(struct trapframe *eframe)
 		setsoftipi(ci);
 	}
 
-	/*
-	 * Complex IPIs (with extra arguments). There can only be one
-	 * pending at the same time, sending processor will wait for us
-	 * to have processed the current one before sending a new one.
-	 */
-	if (ipi & CI_IPI_COMPLEX) {
-		arg1 = ci->ci_ipi_arg1;
-		arg2 = ci->ci_ipi_arg2;
-
-		if (ipi & CI_IPI_CACHE_FLUSH) {
-			cmmu_flush_cache(ci->ci_cpuid, arg1, arg2);
-		}
-		else if (ipi & CI_IPI_ICACHE_FLUSH) {
-			cmmu_flush_inst_cache(ci->ci_cpuid, arg1, arg2);
-		}
-		else if (ipi & CI_IPI_DMA_CACHECTL) {
-			dma_cachectl_local(arg1, arg2 & ~DMA_CACHE_MASK,
-			    arg2 & DMA_CACHE_MASK);
-		}
-	}
-
-	/*
-	 * Regular, simple, IPIs. We can have as many bits set as possible.
-	 */
-	if (ipi & CI_IPI_TLB_FLUSH_KERNEL) {
-		cmmu_flush_tlb(ci->ci_cpuid, 1, 0, 0);
-	}
-	if (ipi & CI_IPI_TLB_FLUSH_USER) {
-		cmmu_flush_tlb(ci->ci_cpuid, 0, 0, 0);
-	}
 	if (ipi & CI_IPI_DDB) {
 #ifdef DDB
 		/*
@@ -594,6 +644,8 @@ m197_ipi_handler(struct trapframe *eframe)
 	if (need_ddb)
 		Debugger();
 #endif
+
+	return 1;
 }
 
 /*
@@ -664,4 +716,40 @@ m197_delay(int us)
 	}
 }
 
+void
+m197_smp_setup(struct cpu_info *ci)
+{
+	/*
+	 * Setup function pointers for mplock operation.
+	 */
+
+	ci->ci_mp_atomic_begin = m197_mp_atomic_begin;
+	ci->ci_mp_atomic_end = m197_mp_atomic_end;
+}
+
+uint32_t
+m197_mp_atomic_begin(__cpu_simple_lock_t *lock, uint *csr)
+{
+	uint32_t psr;
+
+	psr = get_psr();
+	set_psr(psr | PSR_IND);
+
+	*csr = *(volatile uint8_t *)(BS_BASE + BS_CPINT);
+	*(volatile uint8_t *)(BS_BASE + BS_CPINT) = 0;
+
+	__cpu_simple_lock(lock);
+
+	return psr;
+}
+
+void
+m197_mp_atomic_end(uint32_t psr, __cpu_simple_lock_t *lock, uint csr)
+{
+	__cpu_simple_unlock(lock);
+
+	*(volatile uint8_t *)(BS_BASE + BS_CPINT) = csr & BS_CPI_IEN;
+
+	set_psr(psr);
+}
 #endif	/* MULTIPROCESSOR */

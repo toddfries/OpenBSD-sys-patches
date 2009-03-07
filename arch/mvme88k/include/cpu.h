@@ -1,4 +1,4 @@
-/* $OpenBSD: cpu.h,v 1.41 2009/02/16 23:03:33 miod Exp $ */
+/* $OpenBSD: cpu.h,v 1.43 2009/02/27 05:19:34 miod Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
@@ -48,8 +48,10 @@
 /* board dependent pointers */
 extern void	(*md_interrupt_func_ptr)(struct trapframe *);
 #define	md_interrupt_func	(*md_interrupt_func_ptr)
-extern void	(*md_nmi_func_ptr)(struct trapframe *);
+extern int	(*md_nmi_func_ptr)(struct trapframe *);
 #define	md_nmi_func		(*md_nmi_func_ptr)
+extern void	(*md_nmi_wrapup_func_ptr)(struct trapframe *);
+#define	md_nmi_wrapup_func	(*md_nmi_wrapup_func_ptr)
 extern u_int	(*md_getipl)(void);
 extern u_int	(*md_setipl)(u_int);
 extern u_int	(*md_raiseipl)(u_int);
@@ -57,6 +59,7 @@ extern void	(*md_init_clocks)(void);
 extern void	(*md_send_ipi)(int, cpuid_t);
 extern void	(*md_delay)(int);
 extern void	(*md_soft_ipi)(void);
+extern void	(*md_smp_setup)(struct cpu_info *);
 
 struct intrhand {
 	SLIST_ENTRY(intrhand) ih_link;

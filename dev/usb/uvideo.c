@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.115 2009/02/06 14:24:44 mglocker Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.121 2009/02/27 06:00:31 mglocker Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -80,7 +80,7 @@ usbd_status	uvideo_vc_set_ctrl(struct uvideo_softc *, uint8_t *, uint8_t,
 int		uvideo_find_ctrl(struct uvideo_softc *, int);
 
 usbd_status	uvideo_vs_parse_desc(struct uvideo_softc *,
-		    struct usb_attach_arg *, usb_config_descriptor_t *);
+		    usb_config_descriptor_t *);
 usbd_status	uvideo_vs_parse_desc_input_header(struct uvideo_softc *,
 		    const usb_descriptor_t *);
 usbd_status	uvideo_vs_parse_desc_format(struct uvideo_softc *);
@@ -93,8 +93,7 @@ usbd_status	uvideo_vs_parse_desc_frame_mjpeg(struct uvideo_softc *,
 		    const usb_descriptor_t *);
 usbd_status	uvideo_vs_parse_desc_frame_uncompressed(struct uvideo_softc *,
 		    const usb_descriptor_t *);
-usbd_status	uvideo_vs_parse_desc_alt(struct uvideo_softc *,
-		    struct usb_attach_arg *uaa, int, int, int);
+usbd_status	uvideo_vs_parse_desc_alt(struct uvideo_softc *, int, int, int);
 usbd_status	uvideo_vs_set_alt(struct uvideo_softc *, usbd_interface_handle,
 		    int);
 int		uvideo_desc_len(const usb_descriptor_t *, int, int, int, int);
@@ -244,12 +243,42 @@ struct video_hw_if uvideo_hw_if = {
  * or which need firmware uploads or other quirk handling later on.
  */
 #define UVIDEO_FLAG_ISIGHT_STREAM_HEADER	0x1
+#define UVIDEO_FLAG_REATTACH			0x2
+#define UVIDEO_FLAG_VENDOR_CLASS		0x4
 struct uvideo_devs {
 	struct usb_devno	 uv_dev;
 	char			*ucode_name;
 	usbd_status		 (*ucode_loader)(struct uvideo_softc *);
 	int			 flags;
 } uvideo_devs[] = {
+	{
+	    /* Needs firmware */
+	    { USB_VENDOR_RICOH, USB_PRODUCT_RICOH_VGPVCC5 },
+	    "uvideo_r5u87x_05ca-1835",
+	    uvideo_ucode_loader_ricoh,
+	    0
+	},
+	{
+	    /* Needs firmware */
+	    { USB_VENDOR_RICOH, USB_PRODUCT_RICOH_VGPVCC4 },
+	    "uvideo_r5u87x_05ca-1836",
+	    uvideo_ucode_loader_ricoh,
+	    0
+	},
+	{
+	    /* Needs firmware */
+	    { USB_VENDOR_RICOH, USB_PRODUCT_RICOH_VGPVCC4_2 },
+	    "uvideo_r5u87x_05ca-1837",
+	    uvideo_ucode_loader_ricoh,
+	    0
+	},
+	{
+	    /* Needs firmware */
+	    { USB_VENDOR_RICOH, USB_PRODUCT_RICOH_VGPVCC6 },
+	    "uvideo_r5u87x_05ca-1839",
+	    uvideo_ucode_loader_ricoh,
+	    0
+	},
 	{
 	    /* Needs firmware */
 	    { USB_VENDOR_RICOH, USB_PRODUCT_RICOH_VGPVCC7 },
@@ -259,10 +288,24 @@ struct uvideo_devs {
 	},
 	{
 	    /* Needs firmware */
+	    { USB_VENDOR_RICOH, USB_PRODUCT_RICOH_VGPVCC8 },
+	    "uvideo_r5u87x_05ca-183b",
+	    uvideo_ucode_loader_ricoh,
+	    0
+	},
+	{
+	    /* Needs firmware */
+	    { USB_VENDOR_RICOH, USB_PRODUCT_RICOH_VGPVCC9 },
+	    "uvideo_r5u87x_05ca-183e",
+	    uvideo_ucode_loader_ricoh,
+	    0
+	},
+	{
+	    /* Needs firmware */
 	    { USB_VENDOR_APPLE, USB_PRODUCT_APPLE_BLUETOOTH },
 	    "uvideo_isight_05ac-8300",
 	    uvideo_ucode_loader_apple_isight,
-	    0
+	    UVIDEO_FLAG_REATTACH
 	},
 	{
 	    /* Has a non-standard streaming header protocol */
@@ -275,7 +318,7 @@ struct uvideo_devs {
 	    { USB_VENDOR_LOGITECH, USB_PRODUCT_LOGITECH_QUICKCAMOEM_1 },
 	    NULL,
 	    NULL,
-	    0
+	    UVIDEO_FLAG_VENDOR_CLASS
 	}
 };
 #define uvideo_lookup(v, p) \
@@ -366,6 +409,7 @@ uvideo_match(struct device *parent, void *match, void *aux)
 {
 	struct usb_attach_arg *uaa = aux;
 	usb_interface_descriptor_t *id;
+	struct uvideo_devs *quirk;
 
 	if (uaa->iface == NULL)
 		return (UMATCH_NONE);
@@ -375,15 +419,20 @@ uvideo_match(struct device *parent, void *match, void *aux)
 		return (UMATCH_NONE);
 
 	if (id->bInterfaceClass == UICLASS_VIDEO &&
-	    id->bInterfaceSubClass == UISUBCLASS_VIDEOSTREAM)
-		return (UMATCH_NONE);
-
-	if (id->bInterfaceClass == UICLASS_VIDEO &&
 	    id->bInterfaceSubClass == UISUBCLASS_VIDEOCONTROL)
 		return (UMATCH_VENDOR_PRODUCT_CONF_IFACE);
 
-	if (uvideo_lookup(uaa->vendor, uaa->product) != NULL)
-		return (UMATCH_VENDOR_PRODUCT_CONF_IFACE);
+	/* quirk devices which we want to attach */
+	quirk = uvideo_lookup(uaa->vendor, uaa->product);
+	if (quirk != NULL) {
+		if (quirk->flags & UVIDEO_FLAG_REATTACH)
+			return (UMATCH_VENDOR_PRODUCT_CONF_IFACE);
+
+		if (quirk->flags & UVIDEO_FLAG_VENDOR_CLASS &&
+		    id->bInterfaceClass == UICLASS_VENDOR &&
+		    id->bInterfaceSubClass == UISUBCLASS_VIDEOCONTROL)
+			return (UMATCH_VENDOR_PRODUCT_CONF_IFACE);
+	}
 
 	return (UMATCH_NONE);
 }
@@ -394,8 +443,12 @@ uvideo_attach(struct device *parent, struct device *self, void *aux)
 	struct uvideo_softc *sc = (struct uvideo_softc *)self;
 	struct usb_attach_arg *uaa = aux;
 
-	sc->sc_uaa = uaa;
 	sc->sc_udev = uaa->device;
+	sc->sc_nifaces = uaa->nifaces;
+	sc->sc_ifaces = malloc(uaa->nifaces * sizeof(usbd_interface_handle),
+	    M_USB, M_WAITOK);
+	bcopy(uaa->ifaces, sc->sc_ifaces,
+	    uaa->nifaces * sizeof(usbd_interface_handle));
 
 	/* maybe the device has quirks */
 	sc->sc_quirk = uvideo_lookup(uaa->vendor, uaa->product);
@@ -447,7 +500,7 @@ uvideo_attach_hook(void *arg)
 		return;
 
 	/* parse video stream descriptors */
-	error = uvideo_vs_parse_desc(sc, sc->sc_uaa, cdesc);
+	error = uvideo_vs_parse_desc(sc, cdesc);
 	if (error != USBD_NORMAL_COMPLETION)
 		return;
 
@@ -477,6 +530,8 @@ uvideo_detach(struct device *self, int flags)
 {
 	struct uvideo_softc *sc = (struct uvideo_softc *)self;
 	int rv = 0;
+
+	free(sc->sc_ifaces, M_USB);
 
 	/* Wait for outstanding requests to complete */
 	usbd_delay_ms(sc->sc_udev, UVIDEO_NFRAMES_MAX);
@@ -703,8 +758,7 @@ uvideo_find_ctrl(struct uvideo_softc *sc, int id)
 }
 
 usbd_status
-uvideo_vs_parse_desc(struct uvideo_softc *sc, struct usb_attach_arg *uaa,
-    usb_config_descriptor_t *cdesc)
+uvideo_vs_parse_desc(struct uvideo_softc *sc, usb_config_descriptor_t *cdesc)
 {
 	usbd_desc_iter_t iter;
 	const usb_descriptor_t *desc;
@@ -713,7 +767,7 @@ uvideo_vs_parse_desc(struct uvideo_softc *sc, struct usb_attach_arg *uaa,
 	usbd_status error;
 
 	DPRINTF(1, "%s: number of total interfaces=%d\n",
-	    DEVNAME(sc), uaa->nifaces);
+	    DEVNAME(sc), sc->sc_nifaces);
 	DPRINTF(1, "%s: number of VS interfaces=%d\n",
 	    DEVNAME(sc), sc->sc_desc_vc_header.fix->bInCollection);
 
@@ -754,7 +808,7 @@ uvideo_vs_parse_desc(struct uvideo_softc *sc, struct usb_attach_arg *uaa,
 	for (i = 0; i < sc->sc_desc_vc_header.fix->bInCollection; i++) {
 		iface = sc->sc_desc_vc_header.baInterfaceNr[i];
 
-		id = usbd_get_interface_descriptor(uaa->ifaces[iface]);
+		id = usbd_get_interface_descriptor(sc->sc_ifaces[iface]);
 		if (id == NULL) {
 			printf("%s: can't get VS interface %d!\n",
 			    DEVNAME(sc), iface);
@@ -767,7 +821,7 @@ uvideo_vs_parse_desc(struct uvideo_softc *sc, struct usb_attach_arg *uaa,
 		DPRINTF(1, "bInterfaceNumber=0x%02x, numalts=%d\n",
 		    id->bInterfaceNumber, numalts);
 
-		error = uvideo_vs_parse_desc_alt(sc, uaa, i, iface, numalts);
+		error = uvideo_vs_parse_desc_alt(sc, i, iface, numalts);
 		if (error != USBD_NORMAL_COMPLETION)
 			return (error);
 	}
@@ -1049,8 +1103,7 @@ uvideo_vs_parse_desc_frame_uncompressed(struct uvideo_softc *sc,
 }
 
 usbd_status
-uvideo_vs_parse_desc_alt(struct uvideo_softc *sc, struct usb_attach_arg *uaa,
-    int vs_nr, int iface, int numalts)
+uvideo_vs_parse_desc_alt(struct uvideo_softc *sc, int vs_nr, int iface, int numalts)
 {
 	struct uvideo_vs_iface *vs;
 	usbd_desc_iter_t iter;
@@ -1098,7 +1151,7 @@ uvideo_vs_parse_desc_alt(struct uvideo_softc *sc, struct usb_attach_arg *uaa,
 
 		/* save endpoint with largest bandwidth */
 		if (UGETW(ed->wMaxPacketSize) > vs->psize) {
-			vs->ifaceh = uaa->ifaces[iface];
+			vs->ifaceh = sc->sc_ifaces[iface];
 			vs->endpoint = ed->bEndpointAddress;
 			vs->numalts = numalts;
 			vs->curalt = id->bAlternateSetting;
@@ -1621,18 +1674,18 @@ uvideo_vs_close(struct uvideo_softc *sc)
 {
 	sc->sc_vs_cur->bulk_running = 0;
 
-	if (sc->sc_vs_cur->pipeh) {
-		usbd_abort_pipe(sc->sc_vs_cur->pipeh);
-		usbd_close_pipe(sc->sc_vs_cur->pipeh);
-		sc->sc_vs_cur->pipeh = NULL;
-	}
-
 	/*
 	 * Some devices need time to shutdown before we switch back to
 	 * the default interface (0).  Not doing so can leave the device
 	 * back in a undefined condition.
 	 */
 	usbd_delay_ms(sc->sc_udev, 100);
+
+	if (sc->sc_vs_cur->pipeh) {
+		usbd_abort_pipe(sc->sc_vs_cur->pipeh);
+		usbd_close_pipe(sc->sc_vs_cur->pipeh);
+		sc->sc_vs_cur->pipeh = NULL;
+	}
 
 	/* switch back to default interface (turns off cam LED) */
 	(void)usbd_set_interface(sc->sc_vs_cur->ifaceh, 0);
