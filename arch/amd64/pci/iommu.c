@@ -245,7 +245,7 @@ amdgart_probe(struct pcibus_attach_args *pba)
 {
 	struct amdgart_softc *sc;
 	int dev, func, count = 0, r, nseg;
-	u_long dvabase = (u_long)-1, mapsize, ptesize;
+	u_long mapsize, ptesize;
 	bus_dma_segment_t seg;
 	pcitag_t tag;
 	pcireg_t v;
@@ -313,7 +313,6 @@ amdgart_probe(struct pcibus_attach_args *pba)
 		goto err;
 	}
 	sc->g_pc = pba->pba_pc;
-	sc->g_pa = dvabase;
 	pmap_extract(pmap_kernel(), (vaddr_t)scrib,
 	    &sc->g_scribpa);
 	sc->g_scrib = scrib;
@@ -363,7 +362,7 @@ amdgart_probe(struct pcibus_attach_args *pba)
 			pci_conf_write(pba->pba_pc, tag, GART_APCTRL, v);
 
 			pci_conf_write(pba->pba_pc, tag, GART_APBASE,
-			    dvabase >> 25);
+			    sc->g_pa >> 25);
 
 			pci_conf_write(pba->pba_pc, tag, GART_TBLBASE,
 			    (ptepa >> 8) & GART_TBLBASE_MASK);
@@ -376,7 +375,7 @@ amdgart_probe(struct pcibus_attach_args *pba)
 			sc->g_tags[count] = tag;
 
 			printf("\niommu%d at cpu%d: base 0x%lx length %dMB pte 0x%lx",
-			    count, dev - 24, dvabase, IOMMU_SIZE, ptepa);
+			    count, dev - 24, sc->g_pa, IOMMU_SIZE, ptepa);
 			count++;
 		}
 	}
