@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.14 2009/02/21 20:32:34 miod Exp $ */
+/*	$OpenBSD: clock.c,v 1.16 2009/03/01 22:08:13 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -72,10 +72,21 @@
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
 
-#include "pcc.h"
+#include "lrc.h"
 #include "mc.h"
+#include "ofobio.h"
+#include "pcc.h"
 #include "pcctwo.h"
 
+#if NLRC > 0
+#include <mvme68k/dev/lrcreg.h>
+#endif
+#if NMC > 0
+#include <mvme68k/dev/mcreg.h>
+#endif
+#if NOFOBIO > 0
+#include <mvme68k/dev/ofobioreg.h>
+#endif
 #if NPCC > 0
 #include <mvme68k/dev/pccreg.h>
 #endif
@@ -83,9 +94,6 @@
 #include <mvme68k/dev/pcctworeg.h>
 #include <mvme68k/dev/vme.h>
 extern struct vme2reg *sys_vme2;
-#endif
-#if NMC > 0
-#include <mvme68k/dev/mcreg.h>
 #endif
 
 /*
@@ -154,12 +162,13 @@ clockattach(parent, self, args)
 
 	clockbus = ca->ca_bustype;
 	switch (ca->ca_bustype) {
-#if NPCC > 0
-	case BUS_PCC:
-		prof_reset = ca->ca_ipl | PCC_IRQ_IEN | PCC_TIMERACK;
-		stat_reset = ca->ca_ipl | PCC_IRQ_IEN | PCC_TIMERACK;
-		pccintr_establish(PCCV_TIMER1, &sc->sc_profih, "clock");
-		pccintr_establish(PCCV_TIMER2, &sc->sc_statih, "stat");
+#if NLRC > 0
+	case BUS_LRC:
+		/*
+		 * XXX once we have dynamic ipl levels, put clock at ipl 6,
+		 * move it to timer1, then use timer2/ipl5 for statclock.
+		 */
+		lrcintr_establish(LRCVEC_TIMER2, &sc->sc_profih, "clock");
 		break;
 #endif
 #if NMC > 0
@@ -168,6 +177,19 @@ clockattach(parent, self, args)
 		stat_reset = ca->ca_ipl | MC_IRQ_IEN | MC_IRQ_ICLR;
 		mcintr_establish(MCV_TIMER1, &sc->sc_profih, "clock");
 		mcintr_establish(MCV_TIMER2, &sc->sc_statih, "stat");
+		break;
+#endif
+#if NOFOBIO > 0
+	case BUS_OFOBIO:
+		intr_establish(OFOBIOVEC_CLOCK, &sc->sc_profih, "clock");
+		break;
+#endif
+#if NPCC > 0
+	case BUS_PCC:
+		prof_reset = ca->ca_ipl | PCC_IRQ_IEN | PCC_TIMERACK;
+		stat_reset = ca->ca_ipl | PCC_IRQ_IEN | PCC_TIMERACK;
+		pccintr_establish(PCCV_TIMER1, &sc->sc_profih, "clock");
+		pccintr_establish(PCCV_TIMER2, &sc->sc_statih, "stat");
 		break;
 #endif
 #if NPCCTWO > 0
@@ -191,14 +213,24 @@ clockintr(arg)
 	void *arg;
 {
 	switch (clockbus) {
-#if NPCC > 0
-	case BUS_PCC:
-		sys_pcc->pcc_t1irq = prof_reset;
+#if NLRC > 0
+	case BUS_LRC:
+		/* nothing to do */
+		break;
+#endif
+#if NOFOBIO > 0
+	case BUS_OFOBIO:
+		sys_ofobio->csr_c &= ~OFO_CSRC_TIMER_ACK;
 		break;
 #endif
 #if NMC > 0
 	case BUS_MC:
 		sys_mc->mc_t1irq = prof_reset;
+		break;
+#endif
+#if NPCC > 0
+	case BUS_PCC:
+		sys_pcc->pcc_t1irq = prof_reset;
 		break;
 #endif
 #if NPCCTWO > 0
@@ -213,8 +245,7 @@ clockintr(arg)
 }
 
 /*
- * Set up real-time clock; we don't have a statistics clock at
- * present.
+ * Set up real-time and, if available, statistics clock.
  */
 void
 cpu_initclocks()
@@ -239,17 +270,23 @@ cpu_initclocks()
 	while (statvar > minint)
 		statvar >>= 1;
 	switch (clockbus) {
-#if NPCC > 0
-	case BUS_PCC:
-		sys_pcc->pcc_t1pload = pcc_timer_us2lim(tick);
-		sys_pcc->pcc_t1ctl = PCC_TIMERCLEAR;
-		sys_pcc->pcc_t1ctl = PCC_TIMERSTART;
-		sys_pcc->pcc_t1irq = prof_reset;
+#if NLRC > 0
+	case BUS_LRC:
+		profhz = stathz = 0;	/* only one timer available for now */
 
-		sys_pcc->pcc_t2pload = pcc_timer_us2lim(statint);
-		sys_pcc->pcc_t2ctl = PCC_TIMERCLEAR;
-		sys_pcc->pcc_t2ctl = PCC_TIMERSTART;
-		sys_pcc->pcc_t2irq = stat_reset;
+		sys_lrc->lrc_tcr0 = 0;
+		sys_lrc->lrc_tcr1 = 0;
+		/* profclock as timer 2 */
+		sys_lrc->lrc_t2base = tick + 1;
+		sys_lrc->lrc_tcr2 = TCR_TLD2;	/* reset to one */
+		sys_lrc->lrc_tcr2 = TCR_TEN2 | TCR_TCYC2 | TCR_T2IE;
+		break;
+#endif
+#if NOFOBIO > 0
+	case BUS_OFOBIO:
+		profhz = stathz = 0;	/* only one timer available */
+
+		ofobio_clocksetup();
 		break;
 #endif
 #if NMC > 0
@@ -267,6 +304,19 @@ cpu_initclocks()
 		sys_mc->mc_t2count = 0;
 		sys_mc->mc_t2ctl = MC_TCTL_CEN | MC_TCTL_COC | MC_TCTL_COVF;
 		sys_mc->mc_t2irq = stat_reset;
+		break;
+#endif
+#if NPCC > 0
+	case BUS_PCC:
+		sys_pcc->pcc_t1pload = pcc_timer_us2lim(tick);
+		sys_pcc->pcc_t1ctl = PCC_TIMERCLEAR;
+		sys_pcc->pcc_t1ctl = PCC_TIMERSTART;
+		sys_pcc->pcc_t1irq = prof_reset;
+
+		sys_pcc->pcc_t2pload = pcc_timer_us2lim(statint);
+		sys_pcc->pcc_t2ctl = PCC_TIMERCLEAR;
+		sys_pcc->pcc_t2ctl = PCC_TIMERSTART;
+		sys_pcc->pcc_t2irq = stat_reset;
 		break;
 #endif
 #if NPCCTWO > 0
@@ -370,21 +420,29 @@ void
 delay(us)
 	int us;
 {
-#if NPCC > 0
+#if NPCC > 0 || NOFOBIO > 0
 	volatile register int c;
 #endif
 
 	switch (clockbus) {
-#if NPCC > 0
-	case BUS_PCC:
-		/*
-		 * XXX MVME147 doesn't have a 3rd free-running timer,
-		 * so we use a stupid loop. Fix the code to watch t1:
-		 * the profiling timer.
-		 */
-		c = 2 * us;
-		while (--c > 0)
+#if NLRC > 0
+	case BUS_LRC:
+	{
+		struct lrcreg *lrc;
+
+		if (sys_lrc != NULL)
+			lrc = sys_lrc;
+		else
+			lrc = (struct lrcreg *)IIOV(0xfff90000);
+
+		/* use timer0 and wait for it to wrap */
+		lrc->lrc_t0base = us + 1;
+		lrc->lrc_tcr0 = TCR_TLD0;	/* reset to one */
+		lrc->lrc_stat = STAT_TMR0;	/* clear latch */
+		lrc->lrc_tcr0 = TCR_TEN0;
+		while ((lrc->lrc_stat & STAT_TMR0) == 0)
 			;
+	}
 		break;
 #endif
 #if NMC > 0
@@ -409,6 +467,21 @@ delay(us)
 		while (mc->mc_t3count < us)
 			;
 	}
+		break;
+#endif
+#if NPCC > 0 || NOFOBIO > 0
+	case BUS_PCC:
+	case BUS_OFOBIO:
+		/*
+		 * XXX MVME147 doesn't have a 3rd free-running timer,
+		 * so we use a stupid loop. Fix the code to watch t1:
+		 * the profiling timer.
+		 * MVME141 only has one timer, so there is no hope
+		 * either.
+		 */
+		c = 2 * us;
+		while (--c > 0)
+			;
 		break;
 #endif
 #if NPCCTWO > 0

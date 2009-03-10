@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.634 2009/02/27 12:37:45 henning Exp $ */
+/*	$OpenBSD: pf.c,v 1.637 2009/03/09 13:53:09 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -143,7 +143,7 @@ int			 pf_modulate_sack(struct mbuf *, int, struct pf_pdesc *,
 void			 pf_change_a6(struct pf_addr *, u_int16_t *,
 			    struct pf_addr *, u_int8_t);
 #endif /* INET6 */
-u_int16_t		 pf_icmp_mapping(struct pf_pdesc *, u_int8_t, int *,
+int			 pf_icmp_mapping(struct pf_pdesc *, u_int8_t, int *,
 			    int *, u_int16_t *, u_int16_t *);
 void			 pf_change_icmp(struct pf_addr *, u_int16_t *,
 			    struct pf_addr *, struct pf_addr *, u_int16_t,
@@ -234,11 +234,11 @@ extern struct pool pfr_ktable_pl;
 extern struct pool pfr_kentry_pl;
 
 struct pf_pool_limit pf_pool_limits[PF_LIMIT_MAX] = {
-	{ &pf_state_pl, PFSTATE_HIWAT },
-	{ &pf_src_tree_pl, PFSNODE_HIWAT },
-	{ &pf_frent_pl, PFFRAG_FRENT_HIWAT },
-	{ &pfr_ktable_pl, PFR_KTABLE_HIWAT },
-	{ &pfr_kentry_pl, PFR_KENTRY_HIWAT }
+	{ &pf_state_pl, PFSTATE_HIWAT, PFSTATE_HIWAT },
+	{ &pf_src_tree_pl, PFSNODE_HIWAT, PFSNODE_HIWAT },
+	{ &pf_frent_pl, PFFRAG_FRENT_HIWAT, PFFRAG_FRENT_HIWAT },
+	{ &pfr_ktable_pl, PFR_KTABLE_HIWAT, PFR_KTABLE_HIWAT },
+	{ &pfr_kentry_pl, PFR_KENTRY_HIWAT, PFR_KENTRY_HIWAT }
 };
 
 enum { PF_ICMP_MULTI_NONE, PF_ICMP_MULTI_SOLICITED, PF_ICMP_MULTI_LINK };
@@ -1579,14 +1579,14 @@ pf_change_a6(struct pf_addr *a, u_int16_t *c, struct pf_addr *an, u_int8_t u)
 }
 #endif /* INET6 */
 
-u_int16_t
+int
 pf_icmp_mapping(struct pf_pdesc *pd, u_int8_t type,
     int *icmp_dir, int *multi, u_int16_t *icmpid, u_int16_t *icmptype)
 {
 	/*
-         * ICMP types marked with PF_OUT are typically responses to
-	 * PF_OUT, and will match states in the opposite direction.
-	 * PF_IN ICMP types need explicit states.
+	 * ICMP types marked with PF_OUT are typically responses to
+	 * PF_IN, and will match states in the opposite direction.
+	 * PF_IN ICMP types need to match a state with that type.
 	 */
 	*icmp_dir = PF_OUT;
 	*multi = PF_ICMP_MULTI_LINK;
@@ -1701,15 +1701,18 @@ pf_icmp_mapping(struct pf_pdesc *pd, u_int8_t type,
 	case ICMP_TIMXCEED:
 	case ICMP_PARAMPROB:
 #ifdef INET6
-	/* ICMP6_TIME_EXCEEDED is the same type as ICMP_UNREACH */
-	/* XXX Should ICMPv6 ND_REDIRECT be here? */
+	/*
+	 * ICMP6_TIME_EXCEEDED is the same type as ICMP_UNREACH
+	 * ND_REDIRECT can't be in this list because the triggering packet
+	 * header is optional.
+	 */
 	case ICMP6_PACKET_TOO_BIG:
 #endif /* INET6 */
 		/* These will not be used, but set them anyways */
 		*icmp_dir = PF_IN;
 		*icmptype = htons(type);
 		*icmpid = 0;
-		return (1);
+		return (1);	/* These types are matched to other state */
 	/*
 	 * All remaining ICMP types get their own states,
 	 * and will only match in one direction.
@@ -4507,7 +4510,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 				return (PF_DROP);
 			}
 
-			icmpid = iih.icmp_id;
+			pd2.hdr.icmp = &iih;
 			pf_icmp_mapping(&pd2, iih.icmp_type,
 			    &icmp_dir, &multi, &virtual_id, &virtual_type);
 
@@ -4563,6 +4566,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 				return (PF_DROP);
 			}
 
+			pd2.hdr.icmp6 = &iih;
 			pf_icmp_mapping(&pd2, iih.icmp6_type,
 			    &icmp_dir, &multi, &virtual_id, &virtual_type);
 			ret = pf_icmp_state_lookup(&key, &pd2, state, m,
@@ -4589,14 +4593,14 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 
 				if (PF_ANEQ(pd2.src,
 				    &nk->addr[pd2.sidx], pd2.af) ||
-			 	    ((virtual_type == ICMP_ECHO) &&
+			 	    ((virtual_type == ICMP6_ECHO_REQUEST) &&
 				    nk->port[pd2.sidx] != iih.icmp6_id))
 					pf_change_icmp(pd2.src,
-					    (virtual_type == ICMP_ECHO) ?
-					    &iih.icmp6_id : NULL,
+					    (virtual_type == ICMP6_ECHO_REQUEST)
+					    ? &iih.icmp6_id : NULL,
 					    daddr, &nk->addr[pd2.sidx],
-					    (virtual_type == ICMP_ECHO) ?
-					    nk->port[iidx] : NULL, NULL,
+					    (virtual_type == ICMP6_ECHO_REQUEST)
+					    ? nk->port[iidx] : NULL, NULL,
 					    pd2.ip_sum, icmpsum,
 					    pd->ip_sum, 0, AF_INET6);
 
