@@ -104,7 +104,7 @@
 extern paddr_t avail_end;
 extern struct extent *iomem_ex;
 
-int amdgart_enable = 0;
+int amdgart_enable = 1;
 
 struct amdgart_softc {
 	pci_chipset_tag_t	 g_pc;
@@ -235,9 +235,6 @@ amdgart_ok(pci_chipset_tag_t pc, pcitag_t tag)
 	    PCI_PRODUCT(v) != PCI_PRODUCT_AMD_AMD64_11_MISC)
 		return (0);
 
-	v = pci_conf_read(pc, tag, GART_APCTRL);
-	if (v & GART_APCTRL_ENABLE)
-		return (0);
 
 	return (1);
 }
@@ -386,6 +383,8 @@ amdgart_probe(struct pcibus_attach_args *pba)
 
 	amdgart_bus_dma_tag._cookie = sc;
 	pba->pba_dmat = &amdgart_bus_dma_tag;
+
+	amdgart_dumpregs(sc);
 
 	return;
 
