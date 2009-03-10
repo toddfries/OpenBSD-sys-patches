@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.154 2008/11/30 18:21:36 martin Exp $	*/
+/*	$NetBSD: machdep.c,v 1.161 2009/02/13 22:41:03 apb Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -77,7 +77,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.154 2008/11/30 18:21:36 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.161 2009/02/13 22:41:03 apb Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -85,6 +85,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.154 2008/11/30 18:21:36 martin Exp $")
 #include "opt_m680x0.h"
 #include "opt_fpu_emulate.h"
 #include "opt_m060sp.h"
+#include "opt_modular.h"
 #include "opt_panicbutton.h"
 #include "opt_extmem.h"
 
@@ -112,6 +113,8 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.154 2008/11/30 18:21:36 martin Exp $")
 #include <sys/kcore.h>
 #include <sys/ksyms.h>
 #include <sys/cpu.h>
+#include <sys/sysctl.h>
+#include <sys/device.h>
 
 #include "ksyms.h"
 
@@ -134,11 +137,8 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.154 2008/11/30 18:21:36 martin Exp $")
 #define	MAXMEM	64*1024	/* XXX - from cmap.h */
 #include <uvm/uvm_extern.h>
 
-#include <sys/sysctl.h>
-
-#include <sys/device.h>
-
 #include <machine/bus.h>
+#include <machine/autoconf.h>
 #include <arch/x68k/dev/intiovar.h>
 
 void initcpu(void);
@@ -155,10 +155,8 @@ struct vm_map *mb_map = NULL;
 struct vm_map *phys_map = NULL;
 
 extern paddr_t avail_start, avail_end;
-extern vaddr_t virtual_avail;
 extern u_int lowram;
 extern int end, *esym;
-extern psize_t mem_size;
 
 int	maxmem;			/* max memory per process */
 int	physmem = MAXMEM;	/* max supported memory, changes to actual */
@@ -262,9 +260,6 @@ cpu_startup(void)
 	int opmapdebug = pmapdebug;
 
 	pmapdebug = 0;
-#endif
-#if 0
-	rtclockinit(); /* XXX */
 #endif
 
 	if (fputype != FPU_NONE)
@@ -723,15 +718,15 @@ dumpsys(void)
 			return;
 	}
 	if (dumplo <= 0) {
-		printf("\ndump to dev %u,%u not possible\n", major(dumpdev),
-		    minor(dumpdev));
+		printf("\ndump to dev %u,%u not possible\n",
+		    major(dumpdev), minor(dumpdev));
 		return;
 	}
 	dump = bdev->d_dump;
 	blkno = dumplo;
 
-	printf("\ndumping to dev %u,%u offset %ld\n", major(dumpdev),
-	    minor(dumpdev), dumplo);
+	printf("\ndumping to dev %u,%u offset %ld\n",
+	    major(dumpdev), minor(dumpdev), dumplo);
 
 	printf("dump ");
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: pccbb.c,v 1.180 2008/10/25 18:46:38 christos Exp $	*/
+/*	$NetBSD: pccbb.c,v 1.184 2009/03/05 01:38:12 msaitoh Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 and 2000
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: pccbb.c,v 1.180 2008/10/25 18:46:38 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pccbb.c,v 1.184 2009/03/05 01:38:12 msaitoh Exp $");
 
 /*
 #define CBB_DEBUG
@@ -150,7 +150,7 @@ STATIC int pccbb_pcmcia_mem_alloc(pcmcia_chipset_handle_t, bus_size_t,
 STATIC void pccbb_pcmcia_mem_free(pcmcia_chipset_handle_t,
     struct pcmcia_mem_handle *);
 STATIC int pccbb_pcmcia_mem_map(pcmcia_chipset_handle_t, int, bus_addr_t,
-    bus_size_t, struct pcmcia_mem_handle *, bus_addr_t *, int *);
+    bus_size_t, struct pcmcia_mem_handle *, bus_size_t *, int *);
 STATIC void pccbb_pcmcia_mem_unmap(pcmcia_chipset_handle_t, int);
 STATIC int pccbb_pcmcia_io_alloc(pcmcia_chipset_handle_t, bus_addr_t,
     bus_size_t, bus_size_t, struct pcmcia_io_handle *);
@@ -946,7 +946,7 @@ pccbb_intrinit(struct pccbb_softc *sc)
 
 	/*
 	 * XXX pccbbintr should be called under the priority lower
-	 * than any other hard interupts.
+	 * than any other hard interrupts.
 	 */
 	KASSERT(sc->sc_ih == NULL);
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_BIO, pccbbintr, sc);
@@ -1045,6 +1045,17 @@ pccbbintr(void *arg)
 		    sockevent);
 	}
 
+	/* XXX sockevent == CB_SOCKET_EVENT_CSTS|CB_SOCKET_EVENT_POWER
+	 * does occur in the wild.  Check for a _POWER event before
+	 * possibly exiting because of an _CSTS event.
+	 */
+	if (sockevent & CB_SOCKET_EVENT_POWER) {
+		DPRINTF(("Powercycling because of socket event\n"));
+		/* XXX: Does not happen when attaching a 16-bit card */
+		sc->sc_pwrcycle++;
+		wakeup(&sc->sc_pwrcycle);
+	}
+
 	/* Sometimes a change of CSTSCHG# accompanies the first
 	 * interrupt from an Atheros WLAN.  That generates a
 	 * CB_SOCKET_EVENT_CSTS event on the bridge.  The event
@@ -1102,14 +1113,6 @@ pccbbintr(void *arg)
 			callout_schedule(&sc->sc_insert_ch, hz / 5);
 			sc->sc_flags |= CBB_INSERTING;
 		}
-	}
-
-	/* XXX sockevent == 9 does occur in the wild.  handle it. */
-	if (sockevent & CB_SOCKET_EVENT_POWER) {
-		DPRINTF(("Powercycling because of socket event\n"));
-		/* XXX: Does not happen when attaching a 16-bit card */
-		sc->sc_pwrcycle++;
-		wakeup(&sc->sc_pwrcycle);
 	}
 
 	return (1);
@@ -1371,8 +1374,9 @@ pccbb_power(struct pccbb_softc *sc, int command)
 	splx(s);
 	microtime(&after);
 	timersub(&after, &before, &diff);
-	aprint_debug_dev(sc->sc_dev, "wait took%s %ld.%06lds\n",
-	    (on && times < 0) ? " too long" : "", diff.tv_sec, diff.tv_usec);
+	aprint_debug_dev(sc->sc_dev, "wait took%s %lld.%06lds\n",
+	    (on && times < 0) ? " too long" : "", (long long)diff.tv_sec,
+	    (long)diff.tv_usec);
 
 	/*
 	 * Ok, wait a bit longer for things to settle.
@@ -2683,7 +2687,7 @@ pccbb_pcmcia_do_mem_map(struct pccbb_softc *sc, int win)
 STATIC int
 pccbb_pcmcia_mem_map(pcmcia_chipset_handle_t pch, int kind,
     bus_addr_t card_addr, bus_size_t size, struct pcmcia_mem_handle *pcmhp,
-    bus_addr_t *offsetp, int *windowp)
+    bus_size_t *offsetp, int *windowp)
 {
 	struct pccbb_softc *sc = (struct pccbb_softc *)pch;
 	struct pcic_handle *ph = &sc->sc_pcmcia_h;

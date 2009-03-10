@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.23 2008/12/31 21:22:02 agc Exp $
+#	$NetBSD: Makefile,v 1.29 2009/03/10 14:56:30 yamt Exp $
 
 # For all platforms
 
@@ -40,10 +40,13 @@ SUBDIR+=	puffs
 SUBDIR+=	putter
 SUBDIR+=	miniroot
 SUBDIR+=	smbfs
+SUBDIR+=	sysvbfs
 SUBDIR+=	tmpfs
 SUBDIR+=	udf
 SUBDIR+=	umap
 SUBDIR+=	union
+SUBDIR+=	vnd
+SUBDIR+=	tprof
 .if (defined(NOTYET))
 SUBDIR+=	unionfs
 .endif
@@ -59,7 +62,12 @@ SUBDIR+=	exec_elf32
 SUBDIR+=	exec_elf64
 .endif
 
-.if ${MACHINE} == "amd64"
+.if ${MACHINE_ARCH} == "i386" || \
+    ${MACHINE_ARCH} == "x86_64"
+SUBDIR+=	tprof_pmi
+.endif
+
+.if ${MACHINE_ARCH} == "x86_64"
 SUBDIR+=	azalia
 SUBDIR+=	compat_linux
 SUBDIR+=	compat_linux32
@@ -68,7 +76,7 @@ SUBDIR+=	drm
 SUBDIR+=	i915drm
 .endif
 
-.if ${MACHINE} == "i386"
+.if ${MACHINE_ARCH} == "i386"
 SUBDIR+=	azalia
 SUBDIR+=	compat_freebsd
 SUBDIR+=	compat_ibcs2
@@ -84,7 +92,7 @@ SUBDIR+=	radeondrm
 
 # we need our device mapper for LVM
 .if (${MKLVM} != "no")
-SUBDIR+= dm
+SUBDIR+= 	dm
 .endif
 
 .include <bsd.subdir.mk>

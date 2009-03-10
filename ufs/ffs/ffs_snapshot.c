@@ -1,4 +1,4 @@
-/*	$NetBSD: ffs_snapshot.c,v 1.89 2008/12/19 11:36:10 hannken Exp $	*/
+/*	$NetBSD: ffs_snapshot.c,v 1.92 2009/02/22 20:28:06 ad Exp $	*/
 
 /*
  * Copyright 2000 Marshall Kirk McKusick. All Rights Reserved.
@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ffs_snapshot.c,v 1.89 2008/12/19 11:36:10 hannken Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ffs_snapshot.c,v 1.92 2009/02/22 20:28:06 ad Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_ffs.h"
@@ -380,8 +380,8 @@ out:
 #ifdef DEBUG
 		getmicrotime(&endtime);
 		timersub(&endtime, &starttime, &endtime);
-		printf("%s: suspended %ld.%03ld sec, redo %d of %d\n",
-		    mp->mnt_stat.f_mntonname, (long)endtime.tv_sec,
+		printf("%s: suspended %lld.%03d sec, redo %d of %d\n",
+		    mp->mnt_stat.f_mntonname, (long long)endtime.tv_sec,
 		    endtime.tv_usec / 1000, redo, fs->fs_ncg);
 #endif
 	}
@@ -455,10 +455,7 @@ snapshot_setup(struct mount *mp, struct vnode *vp)
 		    fs->fs_bsize, l->l_cred, B_METAONLY, &ibp);
 		if (error)
 			goto out;
-		if (DOINGSOFTDEP(vp))
-			bawrite(ibp);
-		else
-			brelse(ibp, 0);
+		brelse(ibp, 0);
 		if ((++i % 16) == 0) {
 			UFS_WAPBL_END(mp);
 			error = UFS_WAPBL_BEGIN(mp);
@@ -727,7 +724,7 @@ snapshot_expunge_snap(struct mount *mp, struct vnode *vp,
 		error = expunge(vp, xp, fs, snapacct, BLK_SNAP);
 		if (error)
 			break;
-		if (xp->i_ffs_effnlink != 0)
+		if (xp->i_nlink != 0)
 			continue;
 		error = ffs_freefile_snap(copy_fs, vp, xp->i_number, xp->i_mode);
 		if (error)
@@ -1020,7 +1017,7 @@ expunge(struct vnode *snapvp, struct inode *cancelip, struct fs *fs,
 	if (fs->fs_magic == FS_UFS1_MAGIC) {
 		dip1 = (struct ufs1_dinode *)bp->b_data +
 		    ino_to_fsbo(fs, cancelip->i_number);
-		if (expungetype == BLK_NOCOPY || cancelip->i_ffs_effnlink == 0)
+		if (expungetype == BLK_NOCOPY || cancelip->i_nlink == 0)
 			dip1->di_mode = 0;
 		dip1->di_size = 0;
 		dip1->di_blocks = 0;
@@ -1030,7 +1027,7 @@ expunge(struct vnode *snapvp, struct inode *cancelip, struct fs *fs,
 	} else {
 		dip2 = (struct ufs2_dinode *)bp->b_data +
 		    ino_to_fsbo(fs, cancelip->i_number);
-		if (expungetype == BLK_NOCOPY || cancelip->i_ffs_effnlink == 0)
+		if (expungetype == BLK_NOCOPY || cancelip->i_nlink == 0)
 			dip2->di_mode = 0;
 		dip2->di_size = 0;
 		dip2->di_blocks = 0;
@@ -1486,7 +1483,7 @@ retry:
 				idb_assign(ip, ibp->b_data, indiroff,
 				    BLK_NOCOPY);
 				mutex_exit(&si->si_lock);
-				if (ip->i_ffs_effnlink > 0)
+				if (ip->i_nlink > 0)
 					bwrite(ibp);
 				else
 					bdwrite(ibp);
@@ -1526,14 +1523,14 @@ retry:
 				db_assign(ip, lbn, bno);
 			} else {
 				idb_assign(ip, ibp->b_data, indiroff, bno);
-				if (ip->i_ffs_effnlink > 0)
+				if (ip->i_nlink > 0)
 					bwrite(ibp);
 				else
 					bdwrite(ibp);
 			}
 			DIP_ADD(ip, blocks, btodb(size));
 			ip->i_flag |= IN_CHANGE | IN_UPDATE;
-			if (ip->i_ffs_effnlink > 0 && mp->mnt_wapbl)
+			if (ip->i_nlink > 0 && mp->mnt_wapbl)
 				error = syncsnap(vp);
 			else
 				error = 0;
@@ -1568,7 +1565,7 @@ retry:
 			}
 		}
 		error = wrsnapblk(vp, saved_data, lbn);
-		if (error == 0 && ip->i_ffs_effnlink > 0 && mp->mnt_wapbl)
+		if (error == 0 && ip->i_nlink > 0 && mp->mnt_wapbl)
 			error = syncsnap(vp);
 		mutex_enter(&si->si_lock);
 		if (error)
@@ -1725,13 +1722,12 @@ ffs_snapshot_unmount(struct mount *mp)
 	mutex_enter(&si->si_lock);
 	while ((xp = TAILQ_FIRST(&si->si_snapshots)) != 0) {
 		vp = ITOV(xp);
-		vp->v_vnlock = &vp->v_lock;
 		TAILQ_REMOVE(&si->si_snapshots, xp, i_nextsnap);
 		xp->i_nextsnap.tqe_prev = 0;
 		if (xp->i_snapblklist == si->si_snapblklist)
 			si->si_snapblklist = NULL;
 		free(xp->i_snapblklist, M_UFSMNT);
-		if (xp->i_ffs_effnlink > 0) {
+		if (xp->i_nlink > 0) {
 			si->si_gen++;
 			mutex_exit(&si->si_lock);
 			vrele(vp);
@@ -1910,7 +1906,7 @@ retry:
 			}
 		}
 		error = wrsnapblk(vp, saved_data, lbn);
-		if (error == 0 && ip->i_ffs_effnlink > 0 && mp->mnt_wapbl)
+		if (error == 0 && ip->i_nlink > 0 && mp->mnt_wapbl)
 			error = syncsnap(vp);
 		mutex_enter(&si->si_lock);
 		if (error)
@@ -2115,11 +2111,11 @@ wrsnapblk(struct vnode *vp, void *data, daddr_t lbn)
 	int error;
 
 	error = ffs_balloc(vp, lblktosize(fs, (off_t)lbn), fs->fs_bsize,
-	    FSCRED, (ip->i_ffs_effnlink > 0 ? B_SYNC : 0), &bp);
+	    FSCRED, (ip->i_nlink > 0 ? B_SYNC : 0), &bp);
 	if (error)
 		return error;
 	bcopy(data, bp->b_data, fs->fs_bsize);
-	if (ip->i_ffs_effnlink > 0)
+	if (ip->i_nlink > 0)
 		error = bwrite(bp);
 	else
 		bawrite(bp);

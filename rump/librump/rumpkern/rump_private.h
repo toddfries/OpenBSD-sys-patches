@@ -1,4 +1,4 @@
-/*	$NetBSD: rump_private.h,v 1.20 2008/12/29 22:16:15 pooka Exp $	*/
+/*	$NetBSD: rump_private.h,v 1.25 2009/02/20 17:58:22 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -31,12 +31,10 @@
 #define _SYS_RUMP_PRIVATE_H_
 
 #include <sys/param.h>
-#include <sys/types.h>
-
-#include <sys/disklabel.h>
-#include <sys/mount.h>
+#include <sys/lwp.h>
 #include <sys/proc.h>
-#include <sys/vnode.h>
+#include <sys/systm.h>
+#include <sys/types.h>
 
 #include <uvm/uvm.h>
 #include <uvm/uvm_object.h>
@@ -51,7 +49,6 @@
 #define DPRINTF(x)
 #endif
 
-struct lwp;
 extern kauth_cred_t rump_cred;
 extern struct vmspace rump_vmspace;
 
@@ -59,21 +56,9 @@ extern struct rumpuser_mtx *rump_giantlock;
 
 #define UIO_VMSPACE_SYS (&rump_vmspace)
 
-struct rump_specpriv {
-	char	rsp_path[MAXPATHLEN+1];
-	int	rsp_fd;
-
-	struct partition *rsp_curpi;
-	struct partition rsp_pi;
-	struct disklabel rsp_dl;
-};
-
-#define RUMP_UBC_MAGIC_WINDOW (void *)0x37
 #define RUMP_LMUTEX_MAGIC ((kmutex_t *)0x101)
 
 extern int rump_threads;
-
-void abort(void) __dead;
 
 void		rumpvm_init(void);
 void		rump_sleepers_init(void);
@@ -82,9 +67,9 @@ struct vm_page	*rumpvm_makepage(struct uvm_object *, voff_t);
 void		rumpvm_enterva(vaddr_t addr, struct vm_page *);
 void		rumpvm_flushva(struct uvm_object *);
 
-lwpid_t		rump_nextlid(void);
+void		rump_gettime(struct timespec *);
 
-void		rump_biodone(void *, size_t, int);
+lwpid_t		rump_nextlid(void);
 
 typedef void	(*rump_proc_vfs_init_fn)(struct proc *);
 typedef void	(*rump_proc_vfs_release_fn)(struct proc *);
@@ -93,6 +78,8 @@ rump_proc_vfs_release_fn rump_proc_vfs_release;
 
 extern struct cpu_info rump_cpu;
 
-#define RUMPBLK	254
+extern struct sysent rump_sysent[];
+extern rump_sysproxy_t rump_sysproxy;
+extern void *rump_sysproxy_arg;
 
 #endif /* _SYS_RUMP_PRIVATE_H_ */

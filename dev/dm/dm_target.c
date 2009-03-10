@@ -1,4 +1,4 @@
-/*        $NetBSD: dm_target.c,v 1.4 2008/12/21 00:59:39 haad Exp $      */
+/*        $NetBSD: dm_target.c,v 1.9 2009/02/20 11:14:11 haad Exp $      */
 
 /*
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -33,6 +33,8 @@
 #include <sys/param.h>
 
 #include <sys/kmem.h>
+#include <sys/module.h>
+
 
 #include "netbsd-dm.h"
 #include "dm.h"
@@ -52,15 +54,54 @@ kmutex_t dm_target_mutex;
 void
 dm_target_busy(dm_target_t *target)
 {
-	target->ref_cnt++;	
+	atomic_inc_32(&target->ref_cnt);
 }
 
+/*
+ * Release reference counter on target.
+ */
 void
 dm_target_unbusy(dm_target_t *target)
 {
-	target->ref_cnt--;
+	KASSERT(target->ref_cnt > 0);
+	atomic_dec_32(&target->ref_cnt);
 }
 
+/*
+ * Try to autoload target module if it was not found in current
+ * target list.
+ */
+dm_target_t *
+dm_target_autoload(const char *dm_target_name)
+{
+	char name[30];
+	u_int gen;
+	dm_target_t *dmt;
+
+	snprintf(name, sizeof(name), "dm_target_%s", dm_target_name);
+	name[29]='\0';
+	
+	do {
+		gen = module_gen;
+		
+		/* Try to autoload target module */
+		mutex_enter(&module_lock);
+		(void) module_autoload(name, MODULE_CLASS_MISC);
+		mutex_exit(&module_lock);
+	} while (gen != module_gen);	
+
+	mutex_enter(&dm_target_mutex);
+	dmt = dm_target_lookup_name(dm_target_name);
+	if (dmt != NULL)
+		dm_target_busy(dmt);
+	mutex_exit(&dm_target_mutex);
+	
+	return dmt;
+}
+
+/*
+ * Lookup for target in global target list.
+ */
 dm_target_t *
 dm_target_lookup(const char *dm_target_name)
 {
@@ -68,11 +109,12 @@ dm_target_lookup(const char *dm_target_name)
 
 	dmt = NULL;
 
+	if (dm_target_name == NULL)
+		return NULL;
+
 	mutex_enter(&dm_target_mutex);
 
-	if (dm_target_name != NULL)
-		dmt = dm_target_lookup_name(dm_target_name);
-
+	dmt = dm_target_lookup_name(dm_target_name);
 	if (dmt != NULL)
 		dm_target_busy(dmt);
 	
@@ -94,13 +136,11 @@ dm_target_lookup_name(const char *dm_target_name)
 
 	TAILQ_FOREACH(dm_target, &dm_target_list, dm_target_next) {
 		dlen = strlen(dm_target->name) + 1;
-
 		if (dlen != slen)
 			continue;
 		
-		if (strncmp(dm_target_name, dm_target->name, slen) == 0){
+		if (strncmp(dm_target_name, dm_target->name, slen) == 0)
 			return dm_target;
-		}
 	}
 
 	return NULL;
@@ -170,7 +210,6 @@ dm_target_rem(char *dm_target_name)
  * This routine is called from dm_detach, before module
  * is unloaded.
  */
-
 int
 dm_target_destroy(void)
 {
@@ -244,7 +283,7 @@ dm_target_prop_list(void)
 int
 dm_target_init(void)
 {
-	dm_target_t *dmt,*dmt3,*dmt4;
+	dm_target_t *dmt,*dmt3;
 	int r;
 
 	r = 0;
@@ -253,7 +292,6 @@ dm_target_init(void)
 	
 	dmt = dm_target_alloc("linear");
 	dmt3 = dm_target_alloc("striped");
-	dmt4 = dm_target_alloc("mirror");
 	
 	dmt->version[0] = 1;
 	dmt->version[1] = 0;
@@ -268,59 +306,21 @@ dm_target_init(void)
 	
 	r = dm_target_insert(dmt);
 		
-/*	dmt1->version[0] = 1;
-	dmt1->version[1] = 0;
-	dmt1->version[2] = 0;
-	strlcpy(dmt1->name, "zero", DM_MAX_TYPE_NAME);
-	dmt1->init = &dm_target_zero_init;
-	dmt1->status = &dm_target_zero_status;
-	dmt1->strategy = &dm_target_zero_strategy;
-	dmt1->deps = &dm_target_zero_deps; 
-	dmt1->destroy = &dm_target_zero_destroy; 
-	dmt1->upcall = &dm_target_zero_upcall;
-	
-	r = dm_target_insert(dmt1);
-
-	dmt2->version[0] = 1;
-	dmt2->version[1] = 0;
-	dmt2->version[2] = 0;
-	strlcpy(dmt2->name, "error", DM_MAX_TYPE_NAME);
-	dmt2->init = &dm_target_error_init;
-	dmt2->status = &dm_target_error_status;
-	dmt2->strategy = &dm_target_error_strategy;
-	dmt2->deps = &dm_target_error_deps; 
-	dmt2->destroy = &dm_target_error_destroy; 
-	dmt2->upcall = &dm_target_error_upcall;
-	
-	r = dm_target_insert(dmt2);*/
-	
 	dmt3->version[0] = 1;
 	dmt3->version[1] = 0;
 	dmt3->version[2] = 3;
 	strlcpy(dmt3->name, "striped", DM_MAX_TYPE_NAME);
-	dmt3->init = &dm_target_linear_init;
-	dmt3->status = &dm_target_linear_status;
-	dmt3->strategy = &dm_target_linear_strategy;
-	dmt3->deps = &dm_target_linear_deps;
-	dmt3->destroy = &dm_target_linear_destroy;
-	dmt3->upcall = NULL;
+	dmt3->init = &dm_target_stripe_init;
+	dmt3->status = &dm_target_stripe_status;
+	dmt3->strategy = &dm_target_stripe_strategy;
+	dmt3->deps = &dm_target_stripe_deps;
+	dmt3->destroy = &dm_target_stripe_destroy;
+	dmt3->upcall = &dm_target_stripe_upcall;
 	
 	r = dm_target_insert(dmt3);
 
-	dmt4->version[0] = 1;
-	dmt4->version[1] = 0;
-	dmt4->version[2] = 3;
-	strlcpy(dmt4->name, "mirror", DM_MAX_TYPE_NAME);
-	dmt4->init = NULL;
-	dmt4->status = NULL;
-	dmt4->strategy = NULL;
-	dmt4->deps = NULL;
-	dmt4->destroy = NULL;
-	dmt4->upcall = NULL;
-	
-	r = dm_target_insert(dmt4);
-
-/*	dmt5->version[0] = 1;
+#ifdef notyet	
+	dmt5->version[0] = 1;
 	dmt5->version[1] = 0;
 	dmt5->version[2] = 5;
 	strlcpy(dmt5->name, "snapshot", DM_MAX_TYPE_NAME);
@@ -344,7 +344,8 @@ dm_target_init(void)
 	dmt6->destroy = &dm_target_snapshot_orig_destroy;
 	dmt6->upcall = &dm_target_snapshot_orig_upcall;
 
-	r = dm_target_insert(dmt6);*/
+	r = dm_target_insert(dmt6);
+#endif
 	
 	return r;
 }

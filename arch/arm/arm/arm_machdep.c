@@ -1,4 +1,4 @@
-/*	$NetBSD: arm_machdep.c,v 1.22 2008/11/15 11:15:22 ad Exp $	*/
+/*	$NetBSD: arm_machdep.c,v 1.24 2009/01/16 01:03:47 bjh21 Exp $	*/
 
 /*
  * Copyright (c) 2001 Wasabi Systems, Inc.
@@ -72,13 +72,14 @@
  */
 
 #include "opt_execfmt.h"
+#include "opt_cpuoptions.h"
 #include "opt_cputypes.h"
 #include "opt_arm_debug.h"
 #include "opt_sa.h"
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: arm_machdep.c,v 1.22 2008/11/15 11:15:22 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: arm_machdep.c,v 1.24 2009/01/16 01:03:47 bjh21 Exp $");
 
 #include <sys/exec.h>
 #include <sys/proc.h>
@@ -94,6 +95,18 @@ __KERNEL_RCSID(0, "$NetBSD: arm_machdep.c,v 1.22 2008/11/15 11:15:22 ad Exp $");
 
 #include <machine/pcb.h>
 #include <machine/vmparam.h>
+
+/* the following is used externally (sysctl_hw) */
+char	machine[] = MACHINE;		/* from <machine/param.h> */
+char	machine_arch[] = MACHINE_ARCH;	/* from <machine/param.h> */
+
+/* Our exported CPU info; we can have only one. */
+struct cpu_info cpu_info_store = {
+	.ci_cpl = IPL_HIGH,
+#ifndef PROCESS_ID_IS_CURLWP
+	.ci_curlwp = &lwp0,
+#endif
+};
 
 /*
  * The ARM architecture places the vector page at address 0.
@@ -243,3 +256,22 @@ cpu_upcall(struct lwp *l, int type, int nevents, int ninterrupted, void *sas,
 }
 
 #endif /* KERN_SA */
+
+void
+cpu_need_resched(struct cpu_info *ci, int flags)
+{
+	bool immed = (flags & RESCHED_IMMED) != 0;
+
+	if (ci->ci_want_resched && !immed)
+		return;
+
+	ci->ci_want_resched = 1;
+	if (curlwp != ci->ci_data.cpu_idlelwp)
+		setsoftast();
+}
+
+bool
+cpu_intr_p(void)
+{
+	return curcpu()->ci_intr_depth != 0;
+}

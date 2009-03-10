@@ -1,4 +1,4 @@
-/*	$NetBSD: locks.c,v 1.25 2008/12/19 09:50:04 pooka Exp $	*/
+/*	$NetBSD: locks.c,v 1.27 2009/02/07 01:50:29 pooka Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -55,12 +55,13 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: locks.c,v 1.25 2008/12/19 09:50:04 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: locks.c,v 1.27 2009/02/07 01:50:29 pooka Exp $");
 
 #include <sys/param.h>
+#include <sys/atomic.h>
+#include <sys/kmem.h>
 #include <sys/mutex.h>
 #include <sys/rwlock.h>
-#include <sys/atomic.h>
 
 #include <rump/rumpuser.h>
 
@@ -248,16 +249,19 @@ cv_wait_sig(kcondvar_t *cv, kmutex_t *mtx)
 int
 cv_timedwait(kcondvar_t *cv, kmutex_t *mtx, int ticks)
 {
-#ifdef DIAGNOSTIC
+	struct timespec ts, tick;
 	extern int hz;
-#endif
+
+	nanotime(&ts);
+	tick.tv_sec = ticks / hz;
+	tick.tv_nsec = (ticks % hz) * (1000000000/hz);
+	timespecadd(&ts, &tick, &ts);
 
 	if (ticks == 0) {
 		cv_wait(cv, mtx);
 		return 0;
 	} else {
-		KASSERT(hz == 100);
-		return rumpuser_cv_timedwait(RUMPCV(cv), RUMPMTX(mtx), ticks);
+		return rumpuser_cv_timedwait(RUMPCV(cv), RUMPMTX(mtx), &ts);
 	}
 }
 

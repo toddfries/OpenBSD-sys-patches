@@ -1,4 +1,4 @@
-/*	$NetBSD: subr_kobj.c,v 1.30 2008/11/16 16:23:58 ad Exp $	*/
+/*	$NetBSD: subr_kobj.c,v 1.34 2009/02/13 22:41:04 apb Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -63,7 +63,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: subr_kobj.c,v 1.30 2008/11/16 16:23:58 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_kobj.c,v 1.34 2009/02/13 22:41:04 apb Exp $");
+
+#include "opt_modular.h"
 
 #define	ELFSIZE		ARCH_ELFSIZE
 
@@ -456,7 +458,7 @@ kobj_load(kobj_t ko)
 	if (hdr->e_shstrndx != 0 && shdr[hdr->e_shstrndx].sh_size != 0 &&
 	    shdr[hdr->e_shstrndx].sh_type == SHT_STRTAB) {
 		ko->ko_shstrtabsz = shdr[hdr->e_shstrndx].sh_size;
-		error = kobj_read(ko, (void *)&ko->ko_shstrtab,
+		error = kobj_read(ko, (void **)&ko->ko_shstrtab,
 		    shdr[hdr->e_shstrndx].sh_size,
 		    shdr[hdr->e_shstrndx].sh_offset);
 		if (error != 0) {
@@ -745,7 +747,11 @@ kobj_affix(kobj_t ko, const char *name)
 	/* Jettison unneeded memory post-link. */
 	kobj_jettison(ko);
 
-	/* Notify MD code that a module has been loaded. */
+	/*
+	 * Notify MD code that a module has been loaded.
+	 *
+	 * Most architectures use this opportunity to flush their caches.
+	 */
 	if (error == 0) {
 		error = kobj_machdep(ko, (void *)ko->ko_address, ko->ko_size,
 		    true);

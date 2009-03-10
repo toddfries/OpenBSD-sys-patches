@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_aobj.c,v 1.104 2008/10/18 03:46:22 rmind Exp $	*/
+/*	$NetBSD: uvm_aobj.c,v 1.106 2009/02/18 13:16:58 yamt Exp $	*/
 
 /*
  * Copyright (c) 1998 Chuck Silvers, Charles D. Cranor and
@@ -43,7 +43,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_aobj.c,v 1.104 2008/10/18 03:46:22 rmind Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_aobj.c,v 1.106 2009/02/18 13:16:58 yamt Exp $");
 
 #include "opt_uvmhist.h"
 
@@ -175,6 +175,9 @@ static void	uao_free(struct uvm_aobj *);
 static int	uao_get(struct uvm_object *, voff_t, struct vm_page **,
 		    int *, int, vm_prot_t, int, int);
 static int	uao_put(struct uvm_object *, voff_t, voff_t, int);
+
+static void uao_detach_locked(struct uvm_object *);
+static void uao_reference_locked(struct uvm_object *);
 
 #if defined(VMSWAP)
 static struct uao_swhash_elt *uao_find_swhash_elt
@@ -583,7 +586,7 @@ uao_reference(struct uvm_object *uobj)
  * it's already locked.
  */
 
-void
+static void
 uao_reference_locked(struct uvm_object *uobj)
 {
 	UVMHIST_FUNC("uao_reference"); UVMHIST_CALLED(maphist);
@@ -631,7 +634,7 @@ uao_detach(struct uvm_object *uobj)
  * it's already locked.
  */
 
-void
+static void
 uao_detach_locked(struct uvm_object *uobj)
 {
 	struct uvm_aobj *aobj = (struct uvm_aobj *)uobj;
@@ -762,7 +765,7 @@ uao_put(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
 			stop = aobj->u_pages << PAGE_SHIFT;
 		}
 		by_list = (uobj->uo_npages <=
-		    ((stop - start) >> PAGE_SHIFT) * UVM_PAGE_HASH_PENALTY);
+		    ((stop - start) >> PAGE_SHIFT) * UVM_PAGE_TREE_PENALTY);
 	}
 	UVMHIST_LOG(maphist,
 	    " flush start=0x%lx, stop=0x%x, by_list=%d, flags=0x%x",

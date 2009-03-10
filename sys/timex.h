@@ -1,4 +1,4 @@
-/*	$NetBSD: timex.h,v 1.15 2008/12/23 20:52:07 christos Exp $	*/
+/*	$NetBSD: timex.h,v 1.17 2009/01/11 02:45:56 christos Exp $	*/
 
 /*-
  ***********************************************************************
@@ -161,13 +161,13 @@
 #define STA_FMT	"\177\020\
 b\0PLL\0\
 b\1PPSFREQ\0\
-b\2PSTIME\0\
+b\2PPSTIME\0\
 b\3FLL\0\
 b\4INS\0\
 b\5DEL\0\
 b\6UNSYNC\0\
 b\7FREQHOLD\0\
-b\x8PSSIGNAL\0\
+b\x8PPSSIGNAL\0\
 b\x9PPSJITTER\0\
 b\xaPPSWANDER\0\
 b\xbPPSERROR\0\
@@ -247,11 +247,10 @@ int ntp_timestatus(void);
 
 extern kmutex_t timecounter_lock;
 #else /* !_KERNEL */
-#include <sys/cdefs.h>
 
 __BEGIN_DECLS
 #ifndef __LIBC12_SOURCE__
-int ntp_gettime(struct ntptimeval *) __RENAME(__ntp_gettime30);
+int ntp_gettime(struct ntptimeval *) __RENAME(__ntp_gettime50);
 #endif
 int ntp_adjtime(struct timex *);
 __END_DECLS

@@ -1,4 +1,4 @@
-/*	$NetBSD: uipc_socket.c,v 1.178 2008/12/07 20:58:46 pooka Exp $	*/
+/*	$NetBSD: uipc_socket.c,v 1.186 2009/01/23 15:40:19 pooka Exp $	*/
 
 /*-
  * Copyright (c) 2002, 2007, 2008 The NetBSD Foundation, Inc.
@@ -63,8 +63,9 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uipc_socket.c,v 1.178 2008/12/07 20:58:46 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uipc_socket.c,v 1.186 2009/01/23 15:40:19 pooka Exp $");
 
+#include "opt_compat_netbsd.h"
 #include "opt_sock_counters.h"
 #include "opt_sosend_loan.h"
 #include "opt_mbuftrace.h"
@@ -91,6 +92,11 @@ __KERNEL_RCSID(0, "$NetBSD: uipc_socket.c,v 1.178 2008/12/07 20:58:46 pooka Exp 
 #include <sys/kauth.h>
 #include <sys/mutex.h>
 #include <sys/condvar.h>
+
+#ifdef COMPAT_50
+#include <compat/sys/time.h>
+#include <compat/sys/socket.h>
+#endif
 
 #include <uvm/uvm.h>
 
@@ -674,7 +680,7 @@ soclose(struct socket *so)
 			if ((so->so_state & SS_ISDISCONNECTING) && so->so_nbio)
 				goto drop;
 			while (so->so_state & SS_ISCONNECTED) {
-				error = sowait(so, so->so_linger * hz);
+				error = sowait(so, true, so->so_linger * hz);
 				if (error)
 					break;
 			}
@@ -1576,11 +1582,11 @@ sorflush(struct socket *so)
 static int
 sosetopt1(struct socket *so, const struct sockopt *sopt)
 {
-	int error, optval;
+	int error = EINVAL, optval, opt;
 	struct linger l;
 	struct timeval tv;
 
-	switch (sopt->sopt_name) {
+	switch ((opt = sopt->sopt_name)) {
 
 	case SO_ACCEPTFILTER:
 		error = accept_filt_setopt(so, sopt);
@@ -1613,14 +1619,17 @@ sosetopt1(struct socket *so, const struct sockopt *sopt)
 	case SO_REUSEPORT:
 	case SO_OOBINLINE:
 	case SO_TIMESTAMP:
+#ifdef SO_OTIMESTAMP
+	case SO_OTIMESTAMP:
+#endif
 		error = sockopt_getint(sopt, &optval);
 		solock(so);
 		if (error)
 			break;
 		if (optval)
-			so->so_options |= sopt->sopt_name;
+			so->so_options |= opt;
 		else
-			so->so_options &= ~sopt->sopt_name;
+			so->so_options &= ~opt;
 		break;
 
 	case SO_SNDBUF:
@@ -1641,7 +1650,7 @@ sosetopt1(struct socket *so, const struct sockopt *sopt)
 			break;
 		}
 
-		switch (sopt->sopt_name) {
+		switch (opt) {
 		case SO_SNDBUF:
 			if (sbreserve(&so->so_snd, (u_long)optval, so) == 0) {
 				error = ENOBUFS;
@@ -1678,9 +1687,26 @@ sosetopt1(struct socket *so, const struct sockopt *sopt)
 		}
 		break;
 
+#ifdef COMPAT_50
+	case SO_OSNDTIMEO:
+	case SO_ORCVTIMEO: {
+		struct timeval50 otv;
+		error = sockopt_get(sopt, &otv, sizeof(otv));
+		if (error) {
+			solock(so);
+			break;
+		}
+		timeval50_to_timeval(&otv, &tv);
+		opt = opt == SO_OSNDTIMEO ? SO_SNDTIMEO : SO_RCVTIMEO;
+		error = 0;
+		/*FALLTHROUGH*/
+	}
+#endif /* COMPAT_50 */
+
 	case SO_SNDTIMEO:
 	case SO_RCVTIMEO:
-		error = sockopt_get(sopt, &tv, sizeof(tv));
+		if (error)
+			error = sockopt_get(sopt, &tv, sizeof(tv));
 		solock(so);
 		if (error)
 			break;
@@ -1694,7 +1720,7 @@ sosetopt1(struct socket *so, const struct sockopt *sopt)
 		if (optval == 0 && tv.tv_usec != 0)
 			optval = 1;
 
-		switch (sopt->sopt_name) {
+		switch (opt) {
 		case SO_SNDTIMEO:
 			so->so_snd.sb_timeo = optval;
 			break;
@@ -1767,11 +1793,11 @@ so_setsockopt(struct lwp *l, struct socket *so, int level, int name,
 static int
 sogetopt1(struct socket *so, struct sockopt *sopt)
 {
-	int error, optval;
+	int error, optval, opt;
 	struct linger l;
 	struct timeval tv;
 
-	switch (sopt->sopt_name) {
+	switch ((opt = sopt->sopt_name)) {
 
 	case SO_ACCEPTFILTER:
 		error = accept_filt_getopt(so, sopt);
@@ -1793,8 +1819,10 @@ sogetopt1(struct socket *so, struct sockopt *sopt)
 	case SO_BROADCAST:
 	case SO_OOBINLINE:
 	case SO_TIMESTAMP:
-		error = sockopt_setint(sopt,
-		    (so->so_options & sopt->sopt_name) ? 1 : 0);
+#ifdef SO_OTIMESTAMP
+	case SO_OTIMESTAMP:
+#endif
+		error = sockopt_setint(sopt, (so->so_options & opt) ? 1 : 0);
 		break;
 
 	case SO_TYPE:
@@ -1822,9 +1850,25 @@ sogetopt1(struct socket *so, struct sockopt *sopt)
 		error = sockopt_setint(sopt, so->so_rcv.sb_lowat);
 		break;
 
+#ifdef COMPAT_50
+	case SO_OSNDTIMEO:
+	case SO_ORCVTIMEO: {
+		struct timeval50 otv;
+
+		optval = (opt == SO_OSNDTIMEO ?
+		     so->so_snd.sb_timeo : so->so_rcv.sb_timeo);
+
+		otv.tv_sec = optval / hz;
+		otv.tv_usec = (optval % hz) * tick;
+
+		error = sockopt_set(sopt, &otv, sizeof(otv));
+		break;
+	}
+#endif /* COMPAT_50 */
+
 	case SO_SNDTIMEO:
 	case SO_RCVTIMEO:
-		optval = (sopt->sopt_name == SO_SNDTIMEO ?
+		optval = (opt == SO_SNDTIMEO ?
 		     so->so_snd.sb_timeo : so->so_rcv.sb_timeo);
 
 		tv.tv_sec = optval / hz;

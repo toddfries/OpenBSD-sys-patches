@@ -1,4 +1,4 @@
-/*	$NetBSD: cdefs.h,v 1.70 2008/12/10 22:10:47 alc Exp $	*/
+/*	$NetBSD: cdefs.h,v 1.72 2009/01/14 19:41:55 pooka Exp $	*/
 
 /*
  * Copyright (c) 1991, 1993

@@ -1,7 +1,7 @@
-/*	$NetBSD: kern_lwp.c,v 1.126 2008/10/28 22:11:36 wrstuden Exp $	*/
+/*	$NetBSD: kern_lwp.c,v 1.128 2009/03/03 21:55:06 rmind Exp $	*/
 
 /*-
- * Copyright (c) 2001, 2006, 2007, 2008 The NetBSD Foundation, Inc.
+ * Copyright (c) 2001, 2006, 2007, 2008, 2009 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -206,7 +206,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_lwp.c,v 1.126 2008/10/28 22:11:36 wrstuden Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_lwp.c,v 1.128 2009/03/03 21:55:06 rmind Exp $");
 
 #include "opt_ddb.h"
 #include "opt_lockdebug.h"
@@ -640,33 +640,33 @@ lwp_create(lwp_t *l1, proc_t *p2, vaddr_t uaddr, bool inmem, int flags,
 	LIST_INSERT_HEAD(&p2->p_lwps, l2, l_sibling);
 	p2->p_nlwps++;
 
-	mutex_exit(p2->p_lock);
-
-	mutex_enter(proc_lock);
-	LIST_INSERT_HEAD(&alllwp, l2, l_list);
-	mutex_exit(proc_lock);
-
 	if ((p2->p_flag & PK_SYSTEM) == 0) {
-		/* Locking is needed, since LWP is in the list of all LWPs */
-		lwp_lock(l2);
-		/* Inherit a processor-set */
-		l2->l_psid = l1->l_psid;
 		/* Inherit an affinity */
 		if (l1->l_flag & LW_AFFINITY) {
-			proc_t *p = l1->l_proc;
-
-			mutex_enter(p->p_lock);
+			/*
+			 * Note that we hold the state lock while inheriting
+			 * the affinity to avoid race with sched_setaffinity().
+			 */
+			lwp_lock(l1);
 			if (l1->l_flag & LW_AFFINITY) {
 				kcpuset_use(l1->l_affinity);
 				l2->l_affinity = l1->l_affinity;
 				l2->l_flag |= LW_AFFINITY;
 			}
-			mutex_exit(p->p_lock);
+			lwp_unlock(l1);
 		}
+		lwp_lock(l2);
+		/* Inherit a processor-set */
+		l2->l_psid = l1->l_psid;
 		/* Look for a CPU to start */
 		l2->l_cpu = sched_takecpu(l2);
 		lwp_unlock_to(l2, l2->l_cpu->ci_schedstate.spc_mutex);
 	}
+	mutex_exit(p2->p_lock);
+
+	mutex_enter(proc_lock);
+	LIST_INSERT_HEAD(&alllwp, l2, l_list);
+	mutex_exit(proc_lock);
 
 	SYSCALL_TIME_LWP_INIT(l2);
 
@@ -810,8 +810,11 @@ lwp_exit(struct lwp *l)
 	l->l_stat = LSZOMB;
 	if (l->l_name != NULL)
 		strcpy(l->l_name, "(zombie)");
-	if (l->l_flag & LW_AFFINITY)
+	if (l->l_flag & LW_AFFINITY) {
 		l->l_flag &= ~LW_AFFINITY;
+	} else {
+		KASSERT(l->l_affinity == NULL);
+	}
 	lwp_unlock(l);
 	p->p_nrlwps--;
 	cv_broadcast(&p->p_lwpcv);
@@ -1386,6 +1389,47 @@ lwp_drainrefs(struct lwp *l)
 	l->l_refcnt--;
 	while (l->l_refcnt != 0)
 		cv_wait(&p->p_lwpcv, p->p_lock);
+}
+
+/*
+ * Return true if the specified LWP is 'alive'.  Only p->p_lock need
+ * be held.
+ */
+bool
+lwp_alive(lwp_t *l)
+{
+
+	KASSERT(mutex_owned(l->l_proc->p_lock));
+
+	switch (l->l_stat) {
+	case LSSLEEP:
+	case LSRUN:
+	case LSONPROC:
+	case LSSTOP:
+	case LSSUSPENDED:
+		return true;
+	default:
+		return false;
+	}
+}
+
+/*
+ * Return first live LWP in the process.
+ */
+lwp_t *
+lwp_find_first(proc_t *p)
+{
+	lwp_t *l;
+
+	KASSERT(mutex_owned(p->p_lock));
+
+	LIST_FOREACH(l, &p->p_lwps, l_sibling) {
+		if (lwp_alive(l)) {
+			return l;
+		}
+	}
+
+	return NULL;
 }
 
 /*

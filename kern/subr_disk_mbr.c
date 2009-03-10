@@ -1,4 +1,4 @@
-/*	$NetBSD: subr_disk_mbr.c,v 1.32 2008/12/30 19:38:36 reinoud Exp $	*/
+/*	$NetBSD: subr_disk_mbr.c,v 1.35 2009/01/28 15:26:28 reinoud Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1988 Regents of the University of California.
@@ -54,7 +54,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: subr_disk_mbr.c,v 1.32 2008/12/30 19:38:36 reinoud Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_disk_mbr.c,v 1.35 2009/01/28 15:26:28 reinoud Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -241,27 +241,29 @@ scan_iso_vrs_session(mbr_args_t *a, uint32_t first_sector,
 	struct vrs_desc *vrsd;
 	uint64_t vrs;
 	int sector_size;
-	int blks;
+	int blks, inc;
 
 	sector_size = a->lp->d_secsize;
 	blks = sector_size / DEV_BSIZE;
+	inc  = MAX(1, 2048 / sector_size);
 
 	/* by definition */
 	vrs = ((32*1024 + sector_size - 1) / sector_size)
 	        + first_sector;
 
 	/* read first vrs sector */
-	if (read_sector(a, vrs * blks, blks))
+	if (read_sector(a, vrs * blks, 1))
 		return;
 
 	/* skip all CD001 records */
 	vrsd = a->bp->b_data;
+	/* printf("vrsd->identifier = `%s`\n", vrsd->identifier); */
 	while (memcmp(vrsd->identifier, "CD001", 5) == 0) {
 		/* for sure */
 		*is_iso9660 = first_sector;
 
-		vrs++;
-		if (read_sector(a, vrs * blks, blks))
+		vrs += inc;
+		if (read_sector(a, vrs * blks, 1))
 			return;
 	}
 
@@ -272,12 +274,13 @@ scan_iso_vrs_session(mbr_args_t *a, uint32_t first_sector,
 		return;
 
 	/* read successor */
-	vrs++;
-	if (read_sector(a, vrs * blks, blks))
+	vrs += inc;
+	if (read_sector(a, vrs * blks, 1))
 		return;
 
 	/* check for NSR[23] */
 	vrsd = a->bp->b_data;
+	/* printf("vrsd->identifier = `%s`\n", vrsd->identifier); */
 	if (memcmp(vrsd->identifier, "NSR0", 4))
 		return;
 
@@ -340,11 +343,12 @@ scan_iso_vrs(mbr_args_t *a)
 		/* try start of disc */
 		sector = 0;
 		scan_iso_vrs_session(a, sector, &is_iso9660, &is_udf);
-		strncpy(a->lp->d_typename, "iso partition", 16);
 	}
 
 	if ((is_iso9660 < 0) && (is_udf < 0))
 		return SCAN_CONTINUE;
+
+	strncpy(a->lp->d_typename, "iso partition", 16);
 
 	/* add iso9660 partition if found */
 	if (is_iso9660 >= 0) {
@@ -420,15 +424,12 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp,
 	lp->d_partitions[0].p_size = lp->d_partitions[RAW_PART].p_size;
 	lp->d_partitions[0].p_fstype = FS_BSDFFS;
 
-	/* get a buffer and initialize it */
-
 	/*
-	 * XXX somehow memory is getting corrupted on 2048 byte sectors if its
-	 * just 2 times 2048!! It even reads only 2048 bytes max in one go on
-	 * optical media.
+	 * Get a buffer big enough to read a disklabel in and initialize it
+	 * make it two sectors long for the validate_label(); see comment at
+	 * start of file.
 	 */
-
-	a.bp = geteblk(3 * (int)lp->d_secsize);
+	a.bp = geteblk(2 * (int)lp->d_secsize);
 	a.bp->b_dev = dev;
 
 	if (osdep)

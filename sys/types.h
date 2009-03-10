@@ -1,4 +1,4 @@
-/*	$NetBSD: types.h,v 1.81 2008/11/14 15:49:21 ad Exp $	*/
+/*	$NetBSD: types.h,v 1.86 2009/03/07 21:59:25 ad Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1991, 1993, 1994
@@ -154,7 +154,7 @@ typedef	__daddr_t	daddr_t;	/* disk address */
 typedef	int64_t		daddr_t;	/* disk address */
 #endif
 
-typedef	uint32_t	dev_t;		/* device number */
+typedef	uint64_t	dev_t;		/* device number */
 typedef	uint32_t	fixpt_t;	/* fixed point number */
 
 #ifndef	gid_t
@@ -184,7 +184,7 @@ typedef	__pid_t		pid_t;		/* process id */
 #define	pid_t		__pid_t
 #endif
 typedef int32_t		lwpid_t;	/* LWP id */
-typedef quad_t		rlim_t;		/* resource limit */
+typedef uint64_t	rlim_t;		/* resource limit */
 typedef	int32_t		segsz_t;	/* segment size */
 typedef	int32_t		swblk_t;	/* swap offset */
 
@@ -256,9 +256,13 @@ __END_DECLS
 
 #if defined(_NETBSD_SOURCE)
 /* Major, minor numbers, dev_t's. */
-#define	major(x)	((int32_t)((((x) & 0x000fff00) >>  8)))
-#define	minor(x)	((int32_t)((((x) & 0xfff00000) >> 12) | \
-				   (((x) & 0x000000ff) >>  0)))
+typedef int32_t __devmajor_t, __devminor_t;
+#define devmajor_t __devmajor_t
+#define devminor_t __devminor_t
+#define NODEVMAJOR (-1)
+#define	major(x)	((devmajor_t)(((uint32_t)(x) & 0x000fff00) >>  8))
+#define	minor(x)	((devminor_t)((((uint32_t)(x) & 0xfff00000) >> 12) | \
+				   (((uint32_t)(x) & 0x000000ff) >>  0)))
 #define	makedev(x,y)	((dev_t)((((x) <<  8) & 0x000fff00) | \
 				 (((y) << 12) & 0xfff00000) | \
 				 (((y) <<  0) & 0x000000ff)))
@@ -315,7 +319,7 @@ typedef int pri_t;
 
 #endif
 
-#if defined(__STDC__) && defined(_KERNEL)
+#if defined(__STDC__) && (defined(_KERNEL) || defined(_KMEMUSER))
 /*
  * Forward structure declarations for function prototypes.  We include the
  * common structures that cross subsystem boundaries here; others are mostly

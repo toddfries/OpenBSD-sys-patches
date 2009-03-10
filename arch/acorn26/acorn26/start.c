@@ -1,4 +1,4 @@
-/* $NetBSD: start.c,v 1.9 2008/11/12 12:35:54 ad Exp $ */
+/* $NetBSD: start.c,v 1.12 2009/02/13 22:41:00 apb Exp $ */
 /*-
  * Copyright (c) 1998, 2000 Ben Harris
  * All rights reserved.
@@ -31,7 +31,9 @@
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: start.c,v 1.9 2008/11/12 12:35:54 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: start.c,v 1.12 2009/02/13 22:41:00 apb Exp $");
+
+#include "opt_modular.h"
 
 #include <sys/msgbuf.h>
 #include <sys/user.h>
@@ -59,7 +61,7 @@ __KERNEL_RCSID(0, "$NetBSD: start.c,v 1.9 2008/11/12 12:35:54 ad Exp $");
 #include <arch/acorn26/iobus/iocreg.h>
 #endif
 
-extern void main __P((void)); /* XXX Should be in a header file */
+extern void main(void); /* XXX Should be in a header file */
 
 struct bootconfig bootconfig;
 
@@ -192,12 +194,6 @@ start(initbootconfig)
 	 */
 	proc0paddr = (struct user *)(round_page((vaddr_t)&onstack) - USPACE);
 	bzero(proc0paddr, sizeof(*proc0paddr));
-
-	/*
-	 * Get a handle on the IOC's I2C interface in the event we need
-	 * it during bootstrap.
-	 */
-	acorn26_i2c_tag = iociic_bootstrap_cookie();
 
 	/* TODO: anything else? */
 	

@@ -1,4 +1,4 @@
-/*	$NetBSD: vfs_vnops.c,v 1.161 2008/11/12 12:36:16 ad Exp $	*/
+/*	$NetBSD: vfs_vnops.c,v 1.163 2009/02/11 00:19:11 enami Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vfs_vnops.c,v 1.161 2008/11/12 12:36:16 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vfs_vnops.c,v 1.163 2009/02/11 00:19:11 enami Exp $");
 
 #include "veriexec.h"
 
@@ -48,7 +48,6 @@ __KERNEL_RCSID(0, "$NetBSD: vfs_vnops.c,v 1.161 2008/11/12 12:36:16 ad Exp $");
 #include <sys/stat.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/malloc.h>
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/vnode.h>
@@ -104,7 +103,7 @@ vn_open(struct nameidata *ndp, int fmode, int cmode)
 	int error;
 	char *path;
 
-	ndp->ni_cnd.cn_flags &= TRYEMULROOT;
+	ndp->ni_cnd.cn_flags &= TRYEMULROOT | NOCHROOT;
 
 	if (fmode & O_CREAT) {
 		ndp->ni_cnd.cn_nameiop = CREATE;

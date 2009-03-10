@@ -1,4 +1,4 @@
-/*	$NetBSD: wsmux.c,v 1.50 2008/04/28 20:24:01 martin Exp $	*/
+/*	$NetBSD: wsmux.c,v 1.53 2009/02/13 22:41:04 apb Exp $	*/
 
 /*
  * Copyright (c) 1998, 2005 The NetBSD Foundation, Inc.
@@ -37,7 +37,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: wsmux.c,v 1.50 2008/04/28 20:24:01 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: wsmux.c,v 1.53 2009/02/13 22:41:04 apb Exp $");
+
+#include "opt_compat_netbsd.h"
+#include "opt_modular.h"
 
 #include "wsdisplay.h"
 #include "wsmux.h"
@@ -412,6 +415,9 @@ wsmux_do_ioctl(device_t dv, u_long cmd, void *data, int flag,
 		 device_xname(sc->sc_base.me_dv), sc, cmd));
 
 	switch (cmd) {
+#if defined(COMPAT_50) || defined(MODULAR)
+	case WSMUXIO_OINJECTEVENT:
+#endif /* defined(COMPAT_50) || defined(MODULAR) */
 	case WSMUXIO_INJECTEVENT:
 		/* Inject an event, e.g., from moused. */
 		DPRINTF(("%s: inject\n", device_xname(sc->sc_base.me_dv)));

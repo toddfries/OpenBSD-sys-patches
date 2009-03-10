@@ -1,4 +1,4 @@
-/*	$NetBSD: rump.c,v 1.79 2008/12/29 17:45:55 pooka Exp $	*/
+/*	$NetBSD: rump.c,v 1.96 2009/02/20 18:08:12 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rump.c,v 1.79 2008/12/29 17:45:55 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rump.c,v 1.96 2009/02/20 18:08:12 pooka Exp $");
 
 #include <sys/param.h>
 #include <sys/atomic.h>
@@ -39,15 +39,22 @@ __KERNEL_RCSID(0, "$NetBSD: rump.c,v 1.79 2008/12/29 17:45:55 pooka Exp $");
 #include <sys/filedesc.h>
 #include <sys/iostat.h>
 #include <sys/kauth.h>
+#include <sys/kernel.h>
 #include <sys/kmem.h>
+#include <sys/kprintf.h>
+#include <sys/ksyms.h>
+#include <sys/msgbuf.h>
 #include <sys/module.h>
 #include <sys/once.h>
 #include <sys/percpu.h>
 #include <sys/queue.h>
 #include <sys/resourcevar.h>
 #include <sys/select.h>
-#include <sys/uidinfo.h>
 #include <sys/sysctl.h>
+#include <sys/syscall.h>
+#include <sys/tty.h>
+#include <sys/uidinfo.h>
+#include <sys/vmem.h>
 
 #include <rump/rumpuser.h>
 
@@ -56,6 +63,18 @@ __KERNEL_RCSID(0, "$NetBSD: rump.c,v 1.79 2008/12/29 17:45:55 pooka Exp $");
 #include "rump_vfs_private.h"
 
 struct proc proc0;
+struct session rump_session = {
+	.s_count = 1,
+	.s_flags = 0,
+	.s_leader = &proc0,
+	.s_login = "rumphobo",
+	.s_sid = 0,
+};
+struct pgrp rump_pgrp = {
+	.pg_members = LIST_HEAD_INITIALIZER(pg_members),
+	.pg_session = &rump_session,
+	.pg_jobc = 1,
+};
 struct pstats rump_stats;
 struct plimit rump_limits;
 struct cpu_info rump_cpu;
@@ -86,10 +105,16 @@ rump_aiodone_worker(struct work *wk, void *dummy)
 static int rump_inited;
 static struct emul emul_rump;
 
-void __rump_unavailable(void);
-void __rump_unavailable() {}
-__weak_alias(rump_net_init,__rump_unavailable);
-__weak_alias(rump_vfs_init,__rump_unavailable);
+void rump__unavailable(void);
+void rump__unavailable() {}
+__weak_alias(rump_net_init,rump__unavailable);
+__weak_alias(rump_vfs_init,rump__unavailable);
+
+void rump__unavailable_vfs_panic(void);
+void rump__unavailable_vfs_panic() {panic("vfs component not available");}
+__weak_alias(vn_open,rump__unavailable_vfs_panic);
+__weak_alias(vn_rdwr,rump__unavailable_vfs_panic);
+__weak_alias(vn_close,rump__unavailable_vfs_panic);
 
 static void
 pvfsinit_nop(struct proc *p)
@@ -109,10 +134,8 @@ rump_proc_vfs_init_fn rump_proc_vfs_init = pvfsinit_nop;
 rump_proc_vfs_release_fn rump_proc_vfs_release = pvfsrele_nop;
 
 int
-_rump_init(int rump_version)
+rump__init(int rump_version)
 {
-	extern char hostname[];
-	extern size_t hostnamelen;
 	char buf[256];
 	struct proc *p;
 	struct lwp *l;
@@ -129,22 +152,25 @@ _rump_init(int rump_version)
 		return EPROGMISMATCH;
 	}
 
-	if (rumpuser_getenv("RUMP_NVNODES", buf, sizeof(buf), &error) == 0) {
-		desiredvnodes = strtoul(buf, NULL, 10);
-	} else {
-		desiredvnodes = 1<<16;
-	}
 	if (rumpuser_getenv("RUMP_THREADS", buf, sizeof(buf), &error) == 0) {
 		rump_threads = *buf != '0';
 	}
+	rumpuser_thrinit(_kernel_lock, _kernel_unlock, rump_threads);
 
+	mutex_init(&tty_lock, MUTEX_DEFAULT, IPL_NONE);
 	rumpuser_mutex_recursive_init(&rump_giantlock);
-
+	ksyms_init();
 	rumpvm_init();
+
+	once_init();
+
 	rump_sleepers_init();
-#ifdef RUMP_USE_REAL_KMEM
+#ifdef RUMP_USE_REAL_ALLOCATORS
+	pool_subsystem_init();
 	kmem_init();
 #endif
+	kprintf_init();
+	loginit();
 
 	kauth_init();
 	rump_susercred = rump_cred_create(0, 0, 0, NULL);
@@ -153,24 +179,25 @@ _rump_init(int rump_version)
 	p = &proc0;
 	p->p_stats = &rump_stats;
 	p->p_limit = &rump_limits;
+	p->p_pgrp = &rump_pgrp;
 	p->p_pid = 0;
 	p->p_fd = &rump_filedesc0;
 	p->p_vmspace = &rump_vmspace;
 	p->p_emul = &emul_rump;
+	p->p_lock = mutex_obj_alloc(MUTEX_DEFAULT, IPL_NONE);
 	l->l_cred = rump_cred_suserget();
 	l->l_proc = p;
 	l->l_lid = 1;
 	LIST_INSERT_HEAD(&allproc, p, p_list);
+	proc_lock = mutex_obj_alloc(MUTEX_DEFAULT, IPL_NONE);
 
 	rump_limits.pl_rlimit[RLIMIT_FSIZE].rlim_cur = RLIM_INFINITY;
 	rump_limits.pl_rlimit[RLIMIT_NOFILE].rlim_cur = RLIM_INFINITY;
 	rump_limits.pl_rlimit[RLIMIT_SBSIZE].rlim_cur = RLIM_INFINITY;
 
-	rumpuser_thrinit();
 	callout_startup();
 	callout_init_cpu(&rump_cpu);
 
-	once_init();
 	iostat_init();
 	uid_init();
 	percpu_init();
@@ -178,6 +205,7 @@ _rump_init(int rump_version)
 	module_init();
 	sysctl_init();
 	softint_init(&rump_cpu);
+	cold = 0;
 	devsw_init();
 
 	/* these do nothing if not present */
@@ -197,6 +225,11 @@ _rump_init(int rump_version)
 	sigemptyset(&sigcantmask);
 
 	lwp0.l_fd = proc0.p_fd = fd_init(&rump_filedesc0);
+
+#ifdef RUMP_USE_REAL_ALLOCATORS
+	if (rump_threads)
+		vmem_rehash_start();
+#endif
 
 	return 0;
 }
@@ -319,44 +352,6 @@ rump_get_curlwp()
 	return l;
 }
 
-int
-rump_splfoo()
-{
-
-	if (rumpuser_whatis_ipl() != RUMPUSER_IPL_INTR) {
-		rumpuser_rw_enter(&rumpspl, 0);
-		rumpuser_set_ipl(RUMPUSER_IPL_SPLFOO);
-	}
-
-	return 0;
-}
-
-void
-rump_intr_enter(void)
-{
-
-	rumpuser_set_ipl(RUMPUSER_IPL_INTR);
-	rumpuser_rw_enter(&rumpspl, 1);
-}
-
-void
-rump_intr_exit(void)
-{
-
-	rumpuser_rw_exit(&rumpspl);
-	rumpuser_clear_ipl(RUMPUSER_IPL_INTR);
-}
-
-void
-rump_splx(int dummy)
-{
-
-	if (rumpuser_whatis_ipl() != RUMPUSER_IPL_INTR) {
-		rumpuser_clear_ipl(RUMPUSER_IPL_SPLFOO);
-		rumpuser_rw_exit(&rumpspl);
-	}
-}
-
 kauth_cred_t
 rump_cred_create(uid_t uid, gid_t gid, size_t ngroups, gid_t *groups)
 {
@@ -393,17 +388,26 @@ rump_cred_suserget()
 	return rump_susercred;
 }
 
-/* XXX: if they overflow, we're screwed */
+/*
+ * Return the next system lwpid
+ */
 lwpid_t
 rump_nextlid()
 {
-	static unsigned lwpid = 2;
+	lwpid_t retid;
 
-	do {
-		lwpid = atomic_inc_uint_nv(&lwpid);
-	} while (lwpid == 0);
+	mutex_enter(proc0.p_lock);
+	/*
+	 * Take next one, don't return 0
+	 * XXX: most likely we'll have collisions in case this
+	 * wraps around.
+	 */
+	if (++proc0.p_nlwpid == 0)
+		++proc0.p_nlwpid;
+	retid = proc0.p_nlwpid;
+	mutex_exit(proc0.p_lock);
 
-	return (lwpid_t)lwpid;
+	return retid;
 }
 
 int
@@ -423,4 +427,41 @@ _syspuffs_stub(int fd, int *newfd)
 
 	return ENODEV;
 }
-__weak_alias(syspuffs_glueinit,_syspuffs_stub);
+__weak_alias(rump_syspuffs_glueinit,_syspuffs_stub);
+
+static int
+rump_sysproxy_local(int num, void *arg, uint8_t *data, size_t dlen,
+	register_t *retval)
+{
+	struct lwp *l;
+	struct sysent *callp;
+
+	if (__predict_false(num >= SYS_NSYSENT))
+		return ENOSYS;
+
+	l = curlwp;
+	callp = rump_sysent + num;
+	return callp->sy_call(l, (void *)data, retval);
+}
+
+rump_sysproxy_t rump_sysproxy = rump_sysproxy_local;
+void *rump_sysproxy_arg;
+
+/*
+ * This whole syscall-via-rpc is still taking form.  For example, it
+ * may be necessary to set syscalls individually instead of lobbing
+ * them all to the same place.  So don't think this interface is
+ * set in stone.
+ */
+int
+rump_sysproxy_set(rump_sysproxy_t proxy, void *arg)
+{
+
+	if (rump_sysproxy_arg)
+		return EBUSY;
+
+	rump_sysproxy_arg = arg;
+	rump_sysproxy = proxy;
+
+	return 0;
+}

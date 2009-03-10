@@ -1,7 +1,7 @@
-/*	$NetBSD: uvm_swap.c,v 1.142 2008/12/17 20:51:39 cegger Exp $	*/
+/*	$NetBSD: uvm_swap.c,v 1.145 2009/03/01 01:13:14 mrg Exp $	*/
 
 /*
- * Copyright (c) 1995, 1996, 1997 Matthew R. Green
+ * Copyright (c) 1995, 1996, 1997, 2009 Matthew R. Green
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_swap.c,v 1.142 2008/12/17 20:51:39 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_swap.c,v 1.145 2009/03/01 01:13:14 mrg Exp $");
 
 #include "fs_nfs.h"
 #include "opt_uvmhist.h"
@@ -124,11 +124,10 @@ __KERNEL_RCSID(0, "$NetBSD: uvm_swap.c,v 1.142 2008/12/17 20:51:39 cegger Exp $"
  * swd_nblks <= swd_mapsize [because mapsize includes miniroot+disklabel]
  */
 struct swapdev {
-	struct oswapent swd_ose;
-#define	swd_dev		swd_ose.ose_dev		/* device id */
-#define	swd_flags	swd_ose.ose_flags	/* flags:inuse/enable/fake */
-#define	swd_priority	swd_ose.ose_priority	/* our priority */
-	/* also: swd_ose.ose_nblks, swd_ose.ose_inuse */
+	dev_t			swd_dev;	/* device id */
+	int			swd_flags;	/* flags:inuse/enable/fake */
+	int			swd_priority;	/* our priority */
+	int			swd_nblks;	/* blocks in this device */
 	char			*swd_path;	/* saved pathname of device */
 	int			swd_pathlen;	/* length of pathname */
 	int			swd_npages;	/* #pages we can use */
@@ -177,6 +176,30 @@ struct vndbuf {
 	struct vndxfer	*vb_xfer;
 };
 
+/*
+ * NetBSD 1.3 swapctl(SWAP_STATS, ...) swapent structure; uses 32 bit
+ * dev_t and has no se_path[] member.
+ */
+struct swapent13 {
+	int32_t	se13_dev;		/* device id */
+	int	se13_flags;		/* flags */
+	int	se13_nblks;		/* total blocks */
+	int	se13_inuse;		/* blocks in use */
+	int	se13_priority;		/* priority of this device */
+};
+
+/*
+ * NetBSD 5.0 swapctl(SWAP_STATS, ...) swapent structure; uses 32 bit
+ * dev_t.
+ */
+struct swapent50 {
+	int32_t	se50_dev;		/* device id */
+	int	se50_flags;		/* flags */
+	int	se50_nblks;		/* total blocks */
+	int	se50_inuse;		/* blocks in use */
+	int	se50_priority;		/* priority of this device */
+	char	se50_path[PATH_MAX+1];	/* path name */
+};
 
 /*
  * We keep a of pool vndbuf's and vndxfer structures.
@@ -256,11 +279,11 @@ uvm_swap_init(void)
 	mutex_init(&uvm_scheduler_mutex, MUTEX_SPIN, IPL_SCHED);
 
 	if (bdevvp(swapdev, &swapdev_vp))
-		panic("uvm_swap_init: can't get vnode for swap device");
+		panic("%s: can't get vnode for swap device", __func__);
 	if (vn_lock(swapdev_vp, LK_EXCLUSIVE | LK_RETRY))
-		panic("uvm_swap_init: can't lock swap device");
+		panic("%s: can't lock swap device", __func__);
 	if (VOP_OPEN(swapdev_vp, FREAD | FWRITE, NOCRED))
-		panic("uvm_swap_init: can't open swap device");
+		panic("%s: can't open swap device", __func__);
 	VOP_UNLOCK(swapdev_vp, 0);
 
 	/*
@@ -272,7 +295,7 @@ uvm_swap_init(void)
 	swapmap = vmem_create("swapmap", 1, INT_MAX - 1, 1, NULL, NULL, NULL, 0,
 	    VM_NOSLEEP, IPL_NONE);
 	if (swapmap == 0)
-		panic("uvm_swap_init: extent_create failed");
+		panic("%s: vmem_create failed", __func__);
 
 	/*
 	 * done!
@@ -485,15 +508,23 @@ sys_swapctl(struct lwp *l, const struct sys_swapctl_args *uap, register_t *retva
 	 * copyout() and we don't want to be holding that lock then!
 	 */
 	if (SCARG(uap, cmd) == SWAP_STATS
+#if defined(COMPAT_50)
+	    || SCARG(uap, cmd) == SWAP_STATS50
+#endif
 #if defined(COMPAT_13)
-	    || SCARG(uap, cmd) == SWAP_OSTATS
+	    || SCARG(uap, cmd) == SWAP_STATS13
 #endif
 	    ) {
 		if ((size_t)misc > (size_t)uvmexp.nswapdev)
 			misc = uvmexp.nswapdev;
 #if defined(COMPAT_13)
-		if (SCARG(uap, cmd) == SWAP_OSTATS)
-			len = sizeof(struct oswapent) * misc;
+		if (SCARG(uap, cmd) == SWAP_STATS13)
+			len = sizeof(struct swapent13) * misc;
+		else
+#endif
+#if defined(COMPAT_50)
+		if (SCARG(uap, cmd) == SWAP_STATS50)
+			len = sizeof(struct swapent50) * misc;
 		else
 #endif
 			len = sizeof(struct swapent) * misc;
@@ -726,38 +757,56 @@ uvm_swap_stats_locked(int cmd, struct swapent *sep, int sec, register_t *retval)
 		for (sdp = CIRCLEQ_FIRST(&spp->spi_swapdev);
 		     sdp != (void *)&spp->spi_swapdev && sec-- > 0;
 		     sdp = CIRCLEQ_NEXT(sdp, swd_next)) {
+			int inuse;
+
 		  	/*
 			 * backwards compatibility for system call.
-			 * note that we use 'struct oswapent' as an
-			 * overlay into both 'struct swapdev' and
-			 * the userland 'struct swapent', as we
-			 * want to retain backwards compatibility
-			 * with NetBSD 1.3.
+			 * For NetBSD 1.3 and 5.0, we have to use
+			 * the 32 bit dev_t.  For 5.0 and -current
+			 * we have to add the path.
 			 */
-			sdp->swd_ose.ose_inuse =
-			    btodb((uint64_t)sdp->swd_npginuse <<
+			inuse = btodb((uint64_t)sdp->swd_npginuse <<
 			    PAGE_SHIFT);
-			(void)memcpy(sep, &sdp->swd_ose,
-			    sizeof(struct oswapent));
 
-			/* now copy out the path if necessary */
-#if !defined(COMPAT_13)
-			(void) cmd;
+#if defined(COMPAT_13) || defined(COMPAT_50)
+			if (cmd == SWAP_STATS) {
 #endif
-#if defined(COMPAT_13)
-			if (cmd == SWAP_STATS)
-#endif
-				(void)memcpy(&sep->se_path, sdp->swd_path,
-				    sdp->swd_pathlen);
-
-			count++;
-#if defined(COMPAT_13)
-			if (cmd == SWAP_OSTATS)
-				sep = (struct swapent *)
-				    ((struct oswapent *)sep + 1);
-			else
-#endif
+				sep->se_dev = sdp->swd_dev;
+				sep->se_flags = sdp->swd_flags;
+				sep->se_nblks = sdp->swd_nblks;
+				sep->se_inuse = inuse;
+				sep->se_priority = sdp->swd_priority;
+				memcpy(&sep->se_path, sdp->swd_path,
+				       sizeof sep->se_path);
 				sep++;
+#if defined(COMPAT_13)
+			} else if (cmd == SWAP_STATS13) {
+				struct swapent13 *sep13 =
+				    (struct swapent13 *)sep;
+
+				sep13->se13_dev = sdp->swd_dev;
+				sep13->se13_flags = sdp->swd_flags;
+				sep13->se13_nblks = sdp->swd_nblks;
+				sep13->se13_inuse = inuse;
+				sep13->se13_priority = sdp->swd_priority;
+				sep = (struct swapent *)(sep13 + 1);
+#endif
+#if defined(COMPAT_50)
+			} else if (cmd == SWAP_STATS50) {
+				struct swapent50 *sep50 =
+				    (struct swapent50 *)sep;
+
+				sep50->se50_dev = sdp->swd_dev;
+				sep50->se50_flags = sdp->swd_flags;
+				sep50->se50_nblks = sdp->swd_nblks;
+				sep50->se50_inuse = inuse;
+				sep50->se50_priority = sdp->swd_priority;
+				memcpy(&sep50->se50_path, sdp->swd_path,
+				       sizeof sep50->se50_path);
+				sep = (struct swapent *)(sep50 + 1);
+			}
+#endif
+			count++;
 		}
 	}
 
@@ -863,7 +912,7 @@ swap_on(struct lwp *l, struct swapdev *sdp)
 	 * save nblocks in a safe place and convert to pages.
 	 */
 
-	sdp->swd_ose.ose_nblks = nblocks;
+	sdp->swd_nblks = nblocks;
 	npages = dbtob((uint64_t)nblocks) >> PAGE_SHIFT;
 
 	/*
@@ -965,7 +1014,7 @@ swap_on(struct lwp *l, struct swapdev *sdp)
 			KASSERT(sw_reg_workqueue == NULL);
 			if (workqueue_create(&sw_reg_workqueue, "swapiod",
 			    sw_reg_iodone, NULL, PRIBIO, IPL_BIO, 0) != 0)
-				panic("swap_add: workqueue_create failed");
+				panic("%s: workqueue_create failed", __func__);
 		}
 	}
 
@@ -1066,7 +1115,7 @@ swap_off(struct lwp *l, struct swapdev *sdp)
 	uvmexp.swpginuse -= sdp->swd_npgbad;
 
 	if (swaplist_find(sdp->swd_vp, true) == NULL)
-		panic("swap_off: swapdev not in list");
+		panic("%s: swapdev not in list", __func__);
 	swaplist_trim();
 	mutex_exit(&uvm_swap_data_lock);
 
@@ -1133,7 +1182,7 @@ swstrategy(struct buf *bp)
 	vp = sdp->swd_vp;		/* swapdev vnode pointer */
 	switch (vp->v_type) {
 	default:
-		panic("swstrategy: vnode type 0x%x", vp->v_type);
+		panic("%s: vnode type 0x%x", __func__, vp->v_type);
 
 	case VBLK:
 
@@ -1266,7 +1315,7 @@ sw_reg_strategy(struct swapdev *sdp, struct buf *bp, int bn)
 			 * this condition doesn't destabilize the system.
 			 */
 #if 1
-			panic("sw_reg_strategy: swap to sparse file");
+			panic("%s: swap to sparse file", __func__);
 #else
 			error = EIO;	/* failure */
 #endif
@@ -1337,7 +1386,7 @@ sw_reg_strategy(struct swapdev *sdp, struct buf *bp, int bn)
 
 		/* sort it in and start I/O if we are not over our limit */
 		/* XXXAD locking */
-		BUFQ_PUT(sdp->swd_tab, &nbp->vb_buf);
+		bufq_put(sdp->swd_tab, &nbp->vb_buf);
 		sw_reg_start(sdp);
 		splx(s);
 
@@ -1380,7 +1429,7 @@ sw_reg_start(struct swapdev *sdp)
 	sdp->swd_flags |= SWF_BUSY;
 
 	while (sdp->swd_active < sdp->swd_maxactive) {
-		bp = BUFQ_GET(sdp->swd_tab);
+		bp = bufq_get(sdp->swd_tab);
 		if (bp == NULL)
 			break;
 		sdp->swd_active++;

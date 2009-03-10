@@ -1,4 +1,4 @@
-/*        $NetBSD: dm.h,v 1.4 2008/12/21 00:59:39 haad Exp $      */
+/*        $NetBSD: dm.h,v 1.11 2009/03/06 16:17:29 haad Exp $      */
 
 /*
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -42,6 +42,8 @@
 #include <sys/mutex.h>
 #include <sys/rwlock.h>
 #include <sys/queue.h>
+
+#include <sys/disklabel.h>
 
 #define DM_MAX_TYPE_NAME 16
 #define DM_NAME_LEN 128
@@ -115,7 +117,7 @@ typedef struct dm_dev {
 	char name[DM_NAME_LEN];
 	char uuid[DM_UUID_LEN];
 
-	int minor;
+	uint64_t minor;
 	uint32_t flags; /* store communication protocol flags */
 
 	kmutex_t dev_mtx; /* mutex for generall device lock */
@@ -130,7 +132,7 @@ typedef struct dm_dev {
 
 	struct dm_dev_head upcalls;
 	
-	struct disklabel *dk_label;    /* Disklabel for this table. */
+	struct disk *diskp;
 	
 	TAILQ_ENTRY(dm_dev) next_upcall; /* LIST of mirrored, snapshoted devices. */
 
@@ -162,6 +164,14 @@ typedef struct target_linear_config {
 	uint64_t offset;
 } dm_target_linear_config_t;
 
+/* for stripe : */
+typedef struct target_stripe_config {
+#define MAX_STRIPES 2
+	struct target_linear_config stripe_devs[MAX_STRIPES];
+	uint8_t stripe_num;
+	uint64_t stripe_chunksize;
+	size_t params_len;
+} dm_target_stripe_config_t;
 
 /* for mirror : */
 typedef struct target_mirror_config {
@@ -254,6 +264,7 @@ int dm_table_status_ioctl(prop_dictionary_t);
 
 /* dm_target.c */
 dm_target_t* dm_target_alloc(const char *);
+dm_target_t* dm_target_autoload(const char *);
 int dm_target_destroy(void);
 int dm_target_insert(dm_target_t *);
 prop_array_t dm_target_prop_list(void);
@@ -291,6 +302,22 @@ int dm_target_linear_upcall(dm_table_entry_t *, struct buf *);
 
 /* Generic function used to convert char to string */
 uint64_t atoi(const char *); 
+
+/* dm_target_mirror.c */
+int dm_target_mirror_init(dm_dev_t *, void**, char *);
+char * dm_target_mirror_status(void *);
+int dm_target_mirror_strategy(dm_table_entry_t *, struct buf *);
+int dm_target_mirror_deps(dm_table_entry_t *, prop_array_t);
+int dm_target_mirror_destroy(dm_table_entry_t *);
+int dm_target_mirror_upcall(dm_table_entry_t *, struct buf *);
+
+/* dm_target_stripe.c */
+int dm_target_stripe_init(dm_dev_t *, void**, char *);
+char * dm_target_stripe_status(void *);
+int dm_target_stripe_strategy(dm_table_entry_t *, struct buf *);
+int dm_target_stripe_deps(dm_table_entry_t *, prop_array_t);
+int dm_target_stripe_destroy(dm_table_entry_t *);
+int dm_target_stripe_upcall(dm_table_entry_t *, struct buf *);
 
 /* dm_target_snapshot.c */
 int dm_target_snapshot_init(dm_dev_t *, void**, char *);

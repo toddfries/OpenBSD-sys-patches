@@ -1,4 +1,4 @@
-/*        $NetBSD: dm_target_snapshot.c,v 1.4 2008/12/21 00:59:39 haad Exp $      */
+/*        $NetBSD: dm_target_snapshot.c,v 1.8 2009/02/19 23:07:33 haad Exp $      */
 
 /*
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -58,6 +58,19 @@
  * 8. Resume the snapshot and origin devices.
  * dmsetup resume my_data_snap
  * dmsetup resume my_data
+ *
+ * Before snapshot creation
+ *  dev_name; dev table
+ * | my_data; 0 1024 linear /dev/sd1a 384|
+ *
+ * After snapshot creation
+ *                               |my_data_org;0 1024 linear /dev/sd1a 384|
+ *                              /             
+ * |my_data; 0 1024 snapshot-origin /dev/vg00/my_data_org|
+ *                           /
+ * |my_data_snap; 0 1024 snapshot /dev/vg00/my_data /dev/mapper/my_data_cow P 8
+ *                           \
+ *                            |my_data_cow; 0 256 linear /dev/sd1a 1408|
  */
 
 /*
@@ -83,21 +96,29 @@
 #include <sys/kernel.h>
 #include <sys/module.h>
 
-MODULE(MODULE_CLASS_MISC, dm_target_snapshot, NULL);
+MODULE(MODULE_CLASS_MISC, dm_target_snapshot, "dm");
 
 static int
 dm_target_snapshot_modcmd(modcmd_t cmd, void *arg)
 {
 	dm_target_t *dmt, *dmt1;
 	int r;
+
 	dmt = NULL;
+	dmt1 = NULL;
 	
 	switch (cmd) {
 	case MODULE_CMD_INIT:
-		if (((dmt = dm_target_lookup("snapshot")) != NULL) ||
-		    (((dmt = dm_target_lookup("snapshot-origin")) != NULL)))
+		if (((dmt = dm_target_lookup("snapshot")) != NULL)) {
+			dm_target_unbusy(dmt);
 			return EEXIST;
-		
+		}
+				
+		if (((dmt = dm_target_lookup("snapshot-origin")) != NULL)){
+			dm_target_unbusy(dmt);
+			return EEXIST;
+		}
+	
 		dmt = dm_target_alloc("snapshot");
 		dmt1 = dm_target_alloc("snapshot-origin");
 
@@ -136,6 +157,7 @@ dm_target_snapshot_modcmd(modcmd_t cmd, void *arg)
 		 */
 		if ((r = dm_target_rem("snapshot")) == 0)
 			r = dm_target_rem("snapshot-origin");
+
 		break;
 
 	case MODULE_CMD_STAT:

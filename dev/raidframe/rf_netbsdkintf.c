@@ -1,4 +1,4 @@
-/*	$NetBSD: rf_netbsdkintf.c,v 1.251 2008/11/18 14:29:55 ad Exp $	*/
+/*	$NetBSD: rf_netbsdkintf.c,v 1.257 2009/02/28 23:11:11 oster Exp $	*/
 /*-
  * Copyright (c) 1996, 1997, 1998, 2008 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -139,9 +139,10 @@
  ***********************************************************/
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rf_netbsdkintf.c,v 1.251 2008/11/18 14:29:55 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rf_netbsdkintf.c,v 1.257 2009/02/28 23:11:11 oster Exp $");
 
 #ifdef _KERNEL_OPT
+#include "opt_compat_netbsd.h"
 #include "opt_raid_autoconfig.h"
 #include "raid.h"
 #endif
@@ -184,6 +185,10 @@ __KERNEL_RCSID(0, "$NetBSD: rf_netbsdkintf.c,v 1.251 2008/11/18 14:29:55 ad Exp 
 #include "rf_driver.h"
 #include "rf_parityscan.h"
 #include "rf_threadstuff.h"
+
+#ifdef COMPAT_50
+#include "rf_compat50.h"
+#endif
 
 #ifdef DEBUG
 int     rf_kdebug_level = 0;
@@ -321,6 +326,7 @@ void rf_release_all_vps(RF_ConfigSet_t *);
 void rf_cleanup_config_set(RF_ConfigSet_t *);
 int rf_have_enough_components(RF_ConfigSet_t *);
 int rf_auto_config_set(RF_ConfigSet_t *, int *);
+static int rf_sync_component_caches(RF_Raid_t *raidPtr);
 
 static int raidautoconfig = 0; /* Debugging, mostly.  Set to 0 to not
 				  allow autoconfig to take place.
@@ -921,7 +927,7 @@ raidstrategy(struct buf *bp)
 	bp->b_resid = 0;
 
 	/* stuff it onto our queue */
-	BUFQ_PUT(rs->buf_queue, bp);
+	bufq_put(rs->buf_queue, bp);
 
 	/* scheduled the IO to happen at the next convenient time */
 	wakeup(&(raidPtrs[raidID]->iodone));
@@ -1047,6 +1053,7 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	case DIOCAWEDGE:
 	case DIOCDWEDGE:
 	case DIOCLWEDGES:
+	case DIOCCACHESYNC:
 	case RAIDFRAME_SHUTDOWN:
 	case RAIDFRAME_REWRITEPARITY:
 	case RAIDFRAME_GET_INFO:
@@ -1078,7 +1085,15 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	}
 
 	switch (cmd) {
+#ifdef COMPAT_50
+	case RAIDFRAME_GET_INFO50:
+		return rf_get_info50(raidPtr, data);
 
+	case RAIDFRAME_CONFIGURE50:
+		if ((retcode = rf_config50(raidPtr, unit, data, &k_cfg)) != 0)
+			return retcode;
+		goto config;
+#endif
 		/* configure the system */
 	case RAIDFRAME_CONFIGURE:
 
@@ -1103,6 +1118,8 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 				retcode));
 			return (retcode);
 		}
+		goto config;
+	config:
 		/* allocate a buffer for the layout-specific data, and copy it
 		 * in */
 		if (k_cfg->layoutSpecificSize) {
@@ -1818,7 +1835,8 @@ raidioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 	case DIOCLWEDGES:
 		return dkwedge_list(&rs->sc_dkdev,
 		    (struct dkwedge_list *)data, l);
-
+	case DIOCCACHESYNC:
+		return rf_sync_component_caches(raidPtr);
 	default:
 		retcode = ENOTTY;
 	}
@@ -1954,7 +1972,7 @@ raidstart(RF_Raid_t *raidPtr)
 		RF_UNLOCK_MUTEX(raidPtr->mutex);
 
 		/* get the next item, if any, from the queue */
-		if ((bp = BUFQ_GET(rs->buf_queue)) == NULL) {
+		if ((bp = bufq_get(rs->buf_queue)) == NULL) {
 			/* nothing more to do */
 			return;
 		}
@@ -2056,15 +2074,6 @@ rf_DispatchKernelIO(RF_DiskQueue_t *queue, RF_DiskQueueData_t *req)
 	struct buf *bp;
 
 	req->queue = queue;
-
-#if DIAGNOSTIC
-	if (queue->raidPtr->raidid >= numraid) {
-		printf("Invalid unit number: %d %d\n", queue->raidPtr->raidid,
-		    numraid);
-		panic("Invalid Unit number in rf_DispatchKernelIO");
-	}
-#endif
-
 	bp = req->bp;
 
 	switch (req->type) {
@@ -2112,8 +2121,16 @@ rf_DispatchKernelIO(RF_DiskQueue_t *queue, RF_DiskQueueData_t *req)
 			(int) (req->numSector <<
 			    queue->raidPtr->logBytesPerSector),
 			(int) queue->raidPtr->logBytesPerSector));
-		bdev_strategy(bp);
 
+		/*
+		 * XXX: drop lock here since this can block at 
+		 * least with backing SCSI devices.  Retake it
+		 * to minimize fuss with calling interfaces.
+		 */
+
+		RF_UNLOCK_QUEUE_MUTEX(queue, "unusedparam");
+		bdev_strategy(bp);
+		RF_LOCK_QUEUE_MUTEX(queue, "unusedparam");
 		break;
 
 	default:
@@ -3556,7 +3573,7 @@ rf_pool_init(struct pool *p, size_t size, const char *w_chan,
 int
 rf_buf_queue_check(int raidid)
 {
-	if ((BUFQ_PEEK(raid_softc[raidid].buf_queue) != NULL) &&
+	if ((bufq_peek(raid_softc[raidid].buf_queue) != NULL) &&
 	    raidPtrs[raidid]->openings > 0) {
 		/* there is work to do */
 		return 0;
@@ -3644,4 +3661,52 @@ rf_set_properties(struct raid_softc *rs, RF_Raid_t *raidPtr)
 	rs->sc_dkdev.dk_info = disk_info;
 	if (odisk_info)
 		prop_object_release(odisk_info);
+}
+
+/* 
+ * Implement forwarding of the DIOCCACHESYNC ioctl to each of the components.
+ * We end up returning whatever error was returned by the first cache flush
+ * that fails.
+ */
+
+static int
+rf_sync_component_caches(RF_Raid_t *raidPtr)
+{
+	int c, sparecol;
+	int e,error;
+	int force = 1;
+	
+	error = 0;
+	for (c = 0; c < raidPtr->numCol; c++) {
+		if (raidPtr->Disks[c].status == rf_ds_optimal) {
+			e = VOP_IOCTL(raidPtr->raid_cinfo[c].ci_vp, DIOCCACHESYNC, 
+					  &force, FWRITE, NOCRED);
+			if (e) {
+				if (e != ENODEV)
+					printf("raid%d: cache flush to component %s failed.\n",
+					       raidPtr->raidid, raidPtr->Disks[c].devname);
+				if (error == 0) {
+					error = e;
+				}
+			}
+		}
+	}
+
+	for( c = 0; c < raidPtr->numSpare ; c++) {
+		sparecol = raidPtr->numCol + c;
+		/* Need to ensure that the reconstruct actually completed! */
+		if (raidPtr->Disks[sparecol].status == rf_ds_used_spare) {
+			e = VOP_IOCTL(raidPtr->raid_cinfo[sparecol].ci_vp,
+					  DIOCCACHESYNC, &force, FWRITE, NOCRED);
+			if (e) {
+				if (e != ENODEV)
+					printf("raid%d: cache flush to component %s failed.\n",
+					       raidPtr->raidid, raidPtr->Disks[sparecol].devname);
+				if (error == 0) {
+					error = e;
+				}
+			}
+		}
+	}
+	return error;
 }

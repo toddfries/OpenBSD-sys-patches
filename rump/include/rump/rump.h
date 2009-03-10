@@ -1,4 +1,4 @@
-/*	$NetBSD: rump.h,v 1.4 2008/11/21 06:09:52 pooka Exp $	*/
+/*	$NetBSD: rump.h,v 1.10 2009/02/22 20:28:06 ad Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -63,10 +63,10 @@ struct modinfo;
  * do this for a start.
  */
 #define RUMP_VERSION	01
-#define rump_init()	_rump_init(RUMP_VERSION)
+#define rump_init()	rump__init(RUMP_VERSION)
 int	rump_module_load(struct modinfo **);
 
-int		_rump_init(int);
+int		rump__init(int);
 struct mount	*rump_mnt_init(struct vfsops *, int);
 int		rump_mnt_mount(struct mount *, const char *, void *, size_t *);
 void		rump_mnt_destroy(struct mount *);
@@ -127,8 +127,6 @@ int	rump_vfs_fhtovp(struct mount *, struct fid *, struct vnode **);
 int	rump_vfs_vptofh(struct vnode *, struct fid *, size_t *);
 void	rump_vfs_syncwait(struct mount *);
 
-void	rump_bioops_sync(void);
-
 struct lwp	*rump_setup_curlwp(pid_t, lwpid_t, int);
 struct lwp	*rump_get_curlwp(void);
 void		rump_clear_curlwp(void);
@@ -136,12 +134,10 @@ void		rump_clear_curlwp(void);
 void		rump_rcvp_set(struct vnode *, struct vnode *);
 struct vnode 	*rump_cdir_get(void);
 
-void	rump_intr_enter(void);
-void	rump_intr_exit(void);
-int	rump_splfoo(void);
-void	rump_splx(int);
-
 /* I picked the wrong header to stop sniffin' glue */
-int syspuffs_glueinit(int, int *);
+int rump_syspuffs_glueinit(int, int *);
+
+typedef int (*rump_sysproxy_t)(int, void *, uint8_t *, size_t, register_t *);
+int		rump_sysproxy_set(rump_sysproxy_t, void *);
 
 #endif /* _RUMP_RUMP_H_ */

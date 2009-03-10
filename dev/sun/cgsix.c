@@ -1,4 +1,4 @@
-/*	$NetBSD: cgsix.c,v 1.42 2008/12/29 14:42:15 jdc Exp $ */
+/*	$NetBSD: cgsix.c,v 1.44 2009/02/20 22:55:26 martin Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -78,7 +78,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: cgsix.c,v 1.42 2008/12/29 14:42:15 jdc Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cgsix.c,v 1.44 2009/02/20 22:55:26 martin Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -109,14 +109,12 @@ __KERNEL_RCSID(0, "$NetBSD: cgsix.c,v 1.42 2008/12/29 14:42:15 jdc Exp $");
 #include <dev/wscons/wsconsio.h>
 #include <dev/wsfont/wsfont.h>
 #include <dev/rasops/rasops.h>
-#include <dev/wscons/wsdisplay_vconsvar.h>
 
 #include "opt_wsemul.h"
 #include "rasops_glue.h"
 
 #include <dev/sun/cgsixreg.h>
 #include <dev/sun/cgsixvar.h>
-#include "wsdisplay.h"
 
 static void	cg6_unblank(device_t);
 static void	cg6_blank(struct cgsix_softc *, int);
@@ -1256,12 +1254,13 @@ cgsix_init_screen(void *cookie, struct vcons_screen *scr,
 	ri->ri_height = sc->sc_height;
 	ri->ri_stride = sc->sc_stride;
 	ri->ri_flg = RI_CENTER;
-	/* Use software for initial screen clear on old revisions */
-	if (sc->sc_fhcrev < 2)
-		ri->ri_flg |= RI_CLEAR;
 
 	ri->ri_bits = sc->sc_fb.fb_pixels;
 	
+	/* We need unaccelerated initial screen clear on old revisions */
+	if (sc->sc_fhcrev < 2)
+		memset(sc->sc_fb.fb_pixels, (*defattr >> 16) & 0xff,
+		    sc->sc_stride * sc->sc_height);
 	rasops_init(ri, sc->sc_height/8, sc->sc_width/8);
 	ri->ri_caps = WSSCREEN_WSCOLORS | WSSCREEN_REVERSE;
 	rasops_reconfig(ri, sc->sc_height / ri->ri_font->fontheight,

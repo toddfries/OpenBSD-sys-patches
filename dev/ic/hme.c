@@ -1,4 +1,4 @@
-/*	$NetBSD: hme.c,v 1.68 2008/12/16 22:35:31 christos Exp $	*/
+/*	$NetBSD: hme.c,v 1.70 2009/03/07 16:46:25 tsutsui Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hme.c,v 1.68 2008/12/16 22:35:31 christos Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hme.c,v 1.70 2009/03/07 16:46:25 tsutsui Exp $");
 
 /* #define HMEDEBUG */
 
@@ -110,8 +110,6 @@ void		hme_read(struct hme_softc *, int, uint32_t);
 int		hme_eint(struct hme_softc *, u_int);
 int		hme_rint(struct hme_softc *);
 int		hme_tint(struct hme_softc *);
-
-static int	ether_cmp(u_char *, u_char *);
 
 /* Default buffer copy routines */
 void	hme_copytobuf_contig(struct hme_softc *, void *, int, int);
@@ -642,22 +640,6 @@ hme_init(sc)
 }
 
 /*
- * Compare two Ether/802 addresses for equality, inlined and unrolled for
- * speed.
- */
-static inline int
-ether_cmp(a, b)
-	u_char *a, *b;
-{
-
-	if (a[5] != b[5] || a[4] != b[4] || a[3] != b[3] ||
-	    a[2] != b[2] || a[1] != b[1] || a[0] != b[0])
-		return (0);
-	return (1);
-}
-
-
-/*
  * Routine to copy from mbuf chain to transmit buffer in
  * network buffer memory.
  * Returns the amount of data copied.
@@ -836,7 +818,7 @@ hme_get(sc, ri, flags)
 		}
 
 		m0->m_pkthdr.csum_flags |= M_CSUM_DATA | M_CSUM_NO_PSEUDOHDR;
-	}
+	} else
 swcsum:
 		m0->m_pkthdr.csum_flags = 0;
 #endif
@@ -1560,7 +1542,7 @@ hme_setladrf(sc)
 
 	ETHER_FIRST_MULTI(step, ec, enm);
 	while (enm != NULL) {
-		if (ether_cmp(enm->enm_addrlo, enm->enm_addrhi)) {
+		if (memcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
 			/*
 			 * We must listen to a range of multicast addresses.
 			 * For now, just accept all multicasts, rather than

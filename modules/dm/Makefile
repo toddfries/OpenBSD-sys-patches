@@ -1,4 +1,4 @@
-$NetBSD: Makefile,v 1.2 2008/12/19 15:36:58 haad Exp $
+$NetBSD: Makefile,v 1.4 2009/01/02 11:03:24 haad Exp $
 
 .include "../Makefile.inc"
 
@@ -6,7 +6,17 @@ $NetBSD: Makefile,v 1.2 2008/12/19 15:36:58 haad Exp $
 
 KMOD=	dm
 SRCS=	device-mapper.c dm_dev.c dm_ioctl.c dm_pdev.c dm_table.c dm_target.c \
-        dm_target_error.c dm_target_linear.c dm_target_snapshot.c \
-        dm_target_zero.c
+        dm_target_linear.c dm_target_stripe.c
+
+# Do not build unneeded modules now.
+MK_DM_TARGETS= no
+
+.if (${MK_DM_TARGETS} != "no")
+SUBDIR+= dm_target_error
+SUBDIR+= dm_target_mirror
+SUBDIR+= dm_target_snapshot
+SUBDIR+= dm_target_zero
+.endif
 
 .include <bsd.kmodule.mk>
+.include <bsd.subdir.mk>

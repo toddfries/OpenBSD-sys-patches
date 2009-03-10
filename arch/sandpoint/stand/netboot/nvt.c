@@ -1,4 +1,4 @@
-/* $NetBSD: nvt.c,v 1.15 2008/05/30 14:54:16 nisimura Exp $ */
+/* $NetBSD: nvt.c,v 1.17 2009/01/25 03:39:28 nisimura Exp $ */
 
 /*-
  * Copyright (c) 2007 The NetBSD Foundation, Inc.
@@ -56,11 +56,6 @@
 #define inv(adr, siz)		_inv(VTOPHYS(adr), (uint32_t)(siz))
 #define DELAY(n)		delay(n)
 #define ALLOC(T,A)	(T *)((unsigned)alloc(sizeof(T) + (A)) &~ ((A) - 1))
-
-int nvt_match(unsigned, void *);
-void *nvt_init(unsigned, void *);
-int nvt_send(void *, char *, unsigned);
-int nvt_recv(void *, char *, unsigned, unsigned);
 
 struct desc {
 	uint32_t xd0, xd1, xd2, xd3;
@@ -180,21 +175,16 @@ nvt_init(unsigned tag, void *data)
 	struct desc *txd, *rxd;
 	uint8_t *en;
 
-	val = pcicfgread(tag, PCI_ID_REG);
-	if (PCI_DEVICE(0x1106, 0x3053) != val
-	    && PCI_DEVICE(0x1106, 0x3065) != val)
-		return NULL;
-
 	l = ALLOC(struct local, sizeof(struct desc)); /* desc alignment */
 	memset(l, 0, sizeof(struct local));
-	l->csr = DEVTOV(pcicfgread(tag, 0x14)); /* use mem space */
+	l->csr = ~01 & DEVTOV(pcicfgread(tag, 0x10)); /* use IO space */
 
 	val = CTL1_RESET;
 	CSR_WRITE_1(l, VR_CTL1, val);
 	do {
 		val = CSR_READ_1(l, VR_CTL1);
 	} while (val & CTL1_RESET);
-
+	/* PHY number is loaded from EEPROM */
 	l->phy = CSR_READ_1(l, VR_MIICFG) & 0x1f;
 
 	en = data;

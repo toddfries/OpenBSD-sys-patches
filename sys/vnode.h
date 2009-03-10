@@ -1,4 +1,4 @@
-/*	$NetBSD: vnode.h,v 1.198 2008/12/30 15:08:09 he Exp $	*/
+/*	$NetBSD: vnode.h,v 1.201 2009/02/22 20:28:06 ad Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -238,13 +238,12 @@ typedef struct vnode vnode_t;
  * The third set are locked by the underlying file system.
  */
 #define	VU_DIROP	0x01000000	/* LFS: involved in a directory op */
-#define	VU_SOFTDEP	0x02000000	/* FFS: involved in softdep processing */
 
 #define	VNODE_FLAGBITS \
     "\20\1ROOT\2SYSTEM\3ISTTY\4MAPPED\5MPSAFE\6LOCKSWORK\11TEXT\12EXECMAP" \
     "\13WRMAP\14WRMAPDIRTY\15XLOCK\17ONWORKLST\20MARKER" \
     "\22LAYER\24CLEAN\25INACTPEND\26INACTREDO\27FREEING" \
-    "\28INACTNOW\31DIROP\32SOFTDEP" 
+    "\28INACTNOW\31DIROP" 
 
 #define	VSIZENOTSET	((voff_t)-1)
 
@@ -258,7 +257,7 @@ struct vattr {
 	nlink_t		va_nlink;	/* number of references to file */
 	uid_t		va_uid;		/* owner user id */
 	gid_t		va_gid;		/* owner group id */
-	u_long		va_fsid;	/* file system id (dev for now) */
+	dev_t		va_fsid;	/* file system id (dev for now) */
 	ino_t		va_fileid;	/* file id */
 	u_quad_t	va_size;	/* file size in bytes */
 	long		va_blocksize;	/* blocksize preferred for i/o */
@@ -484,9 +483,6 @@ struct vnodeop_desc {
 };
 
 #ifdef _KERNEL
-#include <sys/mallocvar.h>
-MALLOC_DECLARE(M_CACHE);
-MALLOC_DECLARE(M_VNODE);
 
 /*
  * A list of all the operation descs.

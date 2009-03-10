@@ -1,4 +1,4 @@
-/*	$NetBSD: netbsd32_compat_30.c,v 1.27 2008/11/19 18:36:05 ad Exp $	*/
+/*	$NetBSD: netbsd32_compat_30.c,v 1.29 2009/01/26 13:00:04 njoly Exp $	*/
 
 /*
  * Copyright (c) 1998, 2001 Matthew R. Green
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: netbsd32_compat_30.c,v 1.27 2008/11/19 18:36:05 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: netbsd32_compat_30.c,v 1.29 2009/01/26 13:00:04 njoly Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -120,17 +120,11 @@ compat_30_netbsd32___fstat13(struct lwp *l, const struct compat_30_netbsd32___fs
 		syscallarg(int) fd;
 		syscallarg(netbsd32_stat13p_t) sb;
 	} */
-	int fd = SCARG(uap, fd);
-	file_t *fp;
 	struct netbsd32_stat13 sb32;
 	struct stat ub;
-	int error = 0;
+	int error;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
-	error = (*fp->f_ops->fo_stat)(fp, &ub);
-	fd_putfile(fd);
-
+	error = do_sys_fstat(SCARG(uap, fd), &ub);
 	if (error == 0) {
 		netbsd32_from___stat13(&ub, &sb32);
 		error = copyout(&sb32, SCARG_P32(uap, sb), sizeof(sb32));
@@ -259,21 +253,21 @@ compat_30_netbsd32_getfh(struct lwp *l, const struct compat_30_netbsd32_getfh_ar
 
 
 int
-compat_30_netbsd32_sys___fhstat30(struct lwp *l, const struct compat_30_netbsd32_sys___fhstat30_args *uap, register_t *retval)
+compat_30_netbsd32___fhstat30(struct lwp *l, const struct compat_30_netbsd32___fhstat30_args *uap, register_t *retval)
 {
 	/* {
 		syscallarg(const netbsd32_fhandlep_t) fhp;
 		syscallarg(netbsd32_statp_t) sb;
 	} */
 	struct stat sb;
-	struct netbsd32_stat sb32;
+	struct netbsd32_stat50 sb32;
 	int error;
 
 	error = do_fhstat(l, SCARG_P32(uap, fhp), FHANDLE_SIZE_COMPAT, &sb);
 	if (error)
 		return error;
 
-	netbsd32_from___stat30(&sb, &sb32);
+	netbsd32_from___stat50(&sb, &sb32);
 	error = copyout(&sb32, SCARG_P32(uap, sb), sizeof(sb32));
 	return error;
 }

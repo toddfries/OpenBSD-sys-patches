@@ -1,4 +1,4 @@
-/*	$NetBSD: mpacpi.c,v 1.73 2008/12/23 15:31:20 cegger Exp $	*/
+/*	$NetBSD: mpacpi.c,v 1.75 2009/01/14 19:31:25 cegger Exp $	*/
 
 /*
  * Copyright (c) 2003 Wasabi Systems, Inc.
@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mpacpi.c,v 1.73 2008/12/23 15:31:20 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mpacpi.c,v 1.75 2009/01/14 19:31:25 cegger Exp $");
 
 #include "acpi.h"
 #include "opt_acpi.h"
@@ -892,12 +892,11 @@ mpacpi_config_irouting(struct acpi_softc *acpi)
 	mp_nbus = mp_isa_bus + 1;
 	mp_nintr = nintr;
 
-	mp_busses = kmem_zalloc(sizeof(struct mp_bus) * mp_nbus, KM_NOSLEEP);
+	mp_busses = kmem_zalloc(sizeof(struct mp_bus) * mp_nbus, KM_SLEEP);
 	if (mp_busses == NULL)
 		panic("can't allocate mp_busses");
 
-	mp_intrs = kmem_zalloc(sizeof(struct mp_intr_map) * mp_nintr,
-		KM_NOSLEEP);
+	mp_intrs = kmem_zalloc(sizeof(struct mp_intr_map) * mp_nintr, KM_SLEEP);
 	if (mp_intrs == NULL)
 		panic("can't allocate mp_intrs");
 
@@ -1197,8 +1196,12 @@ mpacpi_findintr_linkdev(struct mp_intr_map *mip)
 		    acpi_pci_link_name(mip->linkdev), irq, line);
 	if (irq == X86_PCI_INTERRUPT_LINE_NO_CONNECTION)
 		return ENOENT;
-	if (irq != line)
-		panic("mpacpi_findintr_linkdev: irq mismatch");
+	if (irq != line) {
+		aprint_error("%s: mpacpi_findintr_linkdev:"
+		    " irq mismatch (%d vs %d)\n",
+		    acpi_pci_link_name(mip->linkdev), irq, line);
+		return ENOENT;
+	}
 
 	/*
 	 * Convert ACPICA values to MPS values

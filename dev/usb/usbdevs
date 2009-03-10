@@ -1,4 +1,4 @@
-$NetBSD: usbdevs,v 1.520 2008/11/20 10:50:42 jnemeth Exp $
+$NetBSD: usbdevs,v 1.523 2009/02/14 17:01:23 jakllsch Exp $
 
 /*
  * Copyright (c) 1998-2004 The NetBSD Foundation, Inc.
@@ -28,6 +28,10 @@ $NetBSD: usbdevs,v 1.520 2008/11/20 10:50:42 jnemeth Exp $
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/*
+ * Use "make -f Makefile.usbdevs" to regenerate usbdevs.h and usbdevs_data.h
  */
 
 /*
@@ -260,6 +264,7 @@ vendor EICON		0x0734	Eicon Networks
 vendor DIGITALSTREAM	0x074e	Digital Stream
 vendor AUREAL		0x0755	Aureal Semiconductor
 vendor MIDIMAN		0x0763	Midiman
+vendor CYBERPOWER	0x0764  CyberPower Systems, Inc.
 vendor SURECOM		0x0769	Surecom Technology
 vendor LINKSYS2		0x077b	Linksys
 vendor GRIFFIN		0x077d	Griffin Technology
@@ -893,6 +898,9 @@ product CSR BLUETOOTH_NF	0xffff	Bluetooth USB Adapter
 /* CTX products */
 product CTX EX1300		0x9999	Ex1300 hub
 
+/* CyberPower Systems, Inc. products */
+product CYBERPOWER UPS		0x0501	Uninterruptible Power Supply
+
 /* CyberTAN Technology products */
 product CYBERTAN TG54USB	0x1666	TG54USB
 
@@ -1205,6 +1213,7 @@ product HP 959C			0x1104	Deskjet 959C
 product HP 568J			0x1116	Jornada 568
 product HP 930C			0x1204	DeskJet 930c
 product HP P2000U		0x1801	Inkjet P-2000U
+product HP RNDIS		0x1c1d	Generic RNDIS
 product HP 640C			0x2004	DeskJet 640c
 product HP 4670V		0x3005	ScanJet 4670v
 product HP P1100		0x3102	Photosmart P1100

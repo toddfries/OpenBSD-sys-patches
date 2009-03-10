@@ -1,4 +1,4 @@
-/*	$NetBSD: uvm_page.c,v 1.141 2008/12/13 11:34:43 ad Exp $	*/
+/*	$NetBSD: uvm_page.c,v 1.144 2009/02/27 23:29:08 drochner Exp $	*/
 
 /*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
@@ -71,7 +71,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: uvm_page.c,v 1.141 2008/12/13 11:34:43 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: uvm_page.c,v 1.144 2009/02/27 23:29:08 drochner Exp $");
 
 #include "opt_uvmhist.h"
 #include "opt_readahead.h"
@@ -1196,7 +1196,7 @@ uvm_pagealloc_strat(struct uvm_object *obj, voff_t off, struct vm_anon *anon,
 			ucpu->page_idle_zero = vm_page_zero_enable;
 		}
 	}
-	mutex_spin_exit(&uvm_fpageqlock);
+	KASSERT(pg->pqflags == PQ_FREE);
 
 	pg->offset = off;
 	pg->uobject = obj;
@@ -1212,6 +1212,8 @@ uvm_pagealloc_strat(struct uvm_object *obj, voff_t off, struct vm_anon *anon,
 		}
 		pg->pqflags = 0;
 	}
+	mutex_spin_exit(&uvm_fpageqlock);
+
 #if defined(UVM_PAGE_TRKOWN)
 	pg->owner_tag = NULL;
 #endif
@@ -1351,6 +1353,7 @@ uvm_pagefree(struct vm_page *pg)
 #endif /* DEBUG */
 
 	KASSERT((pg->flags & PG_PAGEOUT) == 0);
+	KASSERT(!(pg->pqflags & PQ_FREE));
 	KASSERT(mutex_owned(&uvm_pageqlock) || !uvmpdpol_pageisqueued_p(pg));
 	KASSERT(pg->uobject == NULL || mutex_owned(&pg->uobject->vmobjlock));
 	KASSERT(pg->uobject != NULL || pg->uanon == NULL ||
@@ -1438,13 +1441,13 @@ uvm_pagefree(struct vm_page *pg)
 	color = VM_PGCOLOR_BUCKET(pg);
 	queue = (iszero ? PGFL_ZEROS : PGFL_UNKNOWN);
 
-	pg->pqflags = PQ_FREE;
 #ifdef DEBUG
 	pg->uobject = (void *)0xdeadbeef;
 	pg->uanon = (void *)0xdeadbeef;
 #endif
 
 	mutex_spin_enter(&uvm_fpageqlock);
+	pg->pqflags = PQ_FREE;
 
 #ifdef DEBUG
 	if (iszero)
@@ -1514,6 +1517,7 @@ uvm_page_unbusy(struct vm_page **pgs, int npgs)
 			uvm_pagefree(pg);
 		} else {
 			UVMHIST_LOG(ubchist, "unbusying pg %p", pg,0,0,0);
+			KASSERT((pg->flags & PG_FAKE) == 0);
 			pg->flags &= ~(PG_WANTED|PG_BUSY);
 			UVM_PAGE_OWN(pg, NULL);
 		}
@@ -1621,6 +1625,8 @@ uvm_pageidlezero(void)
 				LIST_REMOVE(pg, listq.list); /* per-cpu list */
 				ucpu->pages[PGFL_UNKNOWN]--;
 				uvmexp.free--;
+				KASSERT(pg->pqflags == PQ_FREE);
+				pg->pqflags = 0;
 				mutex_spin_exit(&uvm_fpageqlock);
 #ifdef PMAP_PAGEIDLEZERO
 				if (!PMAP_PAGEIDLEZERO(VM_PAGE_TO_PHYS(pg))) {
@@ -1633,6 +1639,7 @@ uvm_pageidlezero(void)
 					 */
 
 					mutex_spin_enter(&uvm_fpageqlock);
+					pg->pqflags = PQ_FREE;
 					LIST_INSERT_HEAD(&gpgfl->pgfl_buckets[
 					    nextbucket].pgfl_queues[
 					    PGFL_UNKNOWN], pg, pageq.list);
@@ -1650,6 +1657,7 @@ uvm_pageidlezero(void)
 				pg->flags |= PG_ZERO;
 
 				mutex_spin_enter(&uvm_fpageqlock);
+				pg->pqflags = PQ_FREE;
 				LIST_INSERT_HEAD(&gpgfl->pgfl_buckets[
 				    nextbucket].pgfl_queues[PGFL_ZEROS],
 				    pg, pageq.list);

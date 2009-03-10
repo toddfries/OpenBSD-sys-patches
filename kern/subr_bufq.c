@@ -1,4 +1,4 @@
-/*	$NetBSD: subr_bufq.c,v 1.15 2008/04/30 12:09:02 reinoud Exp $	*/
+/*	$NetBSD: subr_bufq.c,v 1.18 2009/01/19 14:54:28 yamt Exp $	*/
 /*	NetBSD: subr_disk.c,v 1.70 2005/08/20 12:00:01 yamt Exp $	*/
 
 /*-
@@ -68,14 +68,14 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: subr_bufq.c,v 1.15 2008/04/30 12:09:02 reinoud Exp $");
+__KERNEL_RCSID(0, "$NetBSD: subr_bufq.c,v 1.18 2009/01/19 14:54:28 yamt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/bufq.h>
 #include <sys/bufq_impl.h>
-#include <sys/malloc.h>
+#include <sys/kmem.h>
 #include <sys/sysctl.h>
 
 BUFQ_DEFINE(dummy, 0, NULL); /* so that bufq_strats won't be empty */
@@ -147,7 +147,7 @@ bufq_alloc(struct bufq_state **bufqp, const char *strategy, int flags)
 	printf("bufq_alloc: using '%s'\n", bsp->bs_name);
 #endif
 
-	*bufqp = bufq = malloc(sizeof(*bufq), M_DEVBUF, M_WAITOK | M_ZERO);
+	*bufqp = bufq = kmem_zalloc(sizeof(*bufq), KM_SLEEP);
 	bufq->bq_flags = flags;
 	bufq->bq_strat = bsp;
 	(*bsp->bs_initfn)(bufq);
@@ -180,6 +180,7 @@ bufq_peek(struct bufq_state *bufq)
 struct buf *
 bufq_cancel(struct bufq_state *bufq, struct buf *bp)
 {
+
 	return (*bufq->bq_cancel)(bufq, bp);
 }
 
@@ -191,7 +192,7 @@ bufq_drain(struct bufq_state *bufq)
 {
 	struct buf *bp;
 
-	while ((bp = BUFQ_GET(bufq)) != NULL) {
+	while ((bp = bufq_get(bufq)) != NULL) {
 		bp->b_error = EIO;
 		bp->b_resid = bp->b_bcount;
 		biodone(bp);
@@ -205,11 +206,10 @@ void
 bufq_free(struct bufq_state *bufq)
 {
 
-	KASSERT(bufq->bq_private != NULL);
-	KASSERT(BUFQ_PEEK(bufq) == NULL);
+	KASSERT(bufq_peek(bufq) == NULL);
 
-	free(bufq->bq_private, M_DEVBUF);
-	free(bufq, M_DEVBUF);
+	bufq->bq_fini(bufq);
+	kmem_free(bufq, sizeof(*bufq));
 }
 
 /*
@@ -230,8 +230,8 @@ bufq_move(struct bufq_state *dst, struct bufq_state *src)
 {
 	struct buf *bp;
 
-	while ((bp = BUFQ_GET(src)) != NULL) {
-		BUFQ_PUT(dst, bp);
+	while ((bp = bufq_get(src)) != NULL) {
+		bufq_put(dst, bp);
 	}
 }
 

@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.kern.inc,v 1.119 2008/11/13 06:48:38 matt Exp $
+#	$NetBSD: Makefile.kern.inc,v 1.121 2009/02/12 18:24:18 christos Exp $
 #
 # This file contains common `MI' targets and definitions and it is included
 # at the bottom of each `MD' ${MACHINE}/conf/Makefile.${MACHINE}.
@@ -95,6 +95,7 @@ CFLAGS+=	-fno-strict-aliasing
 .if ${USE_SSP:Uno} == "yes"
 CFLAGS+=-fstack-protector -Wstack-protector --param ssp-buffer-size=1
 LDFLAGS+=-fstack-protector -Wstack-protector --param ssp-buffer-size=1
+COPTS.kern_ssp.c+=	-fno-stack-protector -D__SSP__
 .endif
 
 # If we want the bpendtsleep: label in kern_synch.c, we need to use
@@ -232,7 +233,7 @@ LINKFLAGS+=	${LINKFLAGS_NORMAL}
 .endif
 
 SYSTEM_LD_TAIL+=; \
-	if grep -q '^\#define.*SYMTAB_SPACE' opt_ddbparam.h; then \
+	if grep '^\#define.*SYMTAB_SPACE' opt_ddbparam.h > /dev/null; then \
 		echo "${DBSYM} $@"; \
 		${DBSYM} $@; \
 	fi

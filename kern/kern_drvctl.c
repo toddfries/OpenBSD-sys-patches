@@ -1,4 +1,4 @@
-/* $NetBSD: kern_drvctl.c,v 1.20 2008/11/23 23:59:41 jmcneill Exp $ */
+/* $NetBSD: kern_drvctl.c,v 1.22 2009/01/17 07:02:35 yamt Exp $ */
 
 /*
  * Copyright (c) 2004
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_drvctl.c,v 1.20 2008/11/23 23:59:41 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_drvctl.c,v 1.22 2009/01/17 07:02:35 yamt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -35,7 +35,6 @@ __KERNEL_RCSID(0, "$NetBSD: kern_drvctl.c,v 1.20 2008/11/23 23:59:41 jmcneill Ex
 #include <sys/conf.h>
 #include <sys/device.h>
 #include <sys/event.h>
-#include <sys/malloc.h>
 #include <sys/kmem.h>
 #include <sys/ioctl.h>
 #include <sys/fcntl.h>
@@ -106,7 +105,7 @@ drvctl_init(void)
 void
 devmon_insert(const char *event, prop_dictionary_t ev)
 {
-	struct drvctl_event *dce, *odce;;
+	struct drvctl_event *dce, *odce;
 
 	mutex_enter(&drvctl_lock);
 
@@ -306,6 +305,7 @@ drvctl_ioctl(struct file *fp, u_long cmd, void *data)
 	int res;
 	char *ifattr;
 	int *locs;
+	size_t locs_sz = 0; /* XXXgcc */
 
 	switch (cmd) {
 	case DRVSUSPENDDEV:
@@ -336,19 +336,18 @@ drvctl_ioctl(struct file *fp, u_long cmd, void *data)
 		if (d->numlocators) {
 			if (d->numlocators > MAXLOCATORS)
 				return (EINVAL);
-			locs = malloc(d->numlocators * sizeof(int), M_DEVBUF,
-				      M_WAITOK);
-			res = copyin(d->locators, locs,
-				     d->numlocators * sizeof(int));
+			locs_sz = d->numlocators * sizeof(int);
+			locs = kmem_alloc(locs_sz, KM_SLEEP);
+			res = copyin(d->locators, locs, locs_sz);
 			if (res) {
-				free(locs, M_DEVBUF);
+				kmem_free(locs, locs_sz);
 				return (res);
 			}
 		} else
-			locs = 0;
+			locs = NULL;
 		res = rescanbus(d->busname, ifattr, d->numlocators, locs);
 		if (locs)
-			free(locs, M_DEVBUF);
+			kmem_free(locs, locs_sz);
 #undef d
 		break;
 	case DRVCTLCOMMAND:

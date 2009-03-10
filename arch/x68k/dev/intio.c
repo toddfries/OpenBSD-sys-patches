@@ -1,4 +1,4 @@
-/*	$NetBSD: intio.c,v 1.38 2008/12/18 05:56:42 isaki Exp $	*/
+/*	$NetBSD: intio.c,v 1.42 2009/01/18 05:00:39 isaki Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: intio.c,v 1.38 2008/12/18 05:56:42 isaki Exp $");
+__KERNEL_RCSID(0, "$NetBSD: intio.c,v 1.42 2009/01/18 05:00:39 isaki Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -46,7 +46,6 @@ __KERNEL_RCSID(0, "$NetBSD: intio.c,v 1.38 2008/12/18 05:56:42 isaki Exp $");
 #include <machine/frame.h>
 
 #include <arch/x68k/dev/intiovar.h>
-#include <arch/x68k/dev/mfp.h>
 
 
 /*
@@ -134,11 +133,6 @@ static struct intio_interrupt_vector {
 	struct evcnt		*iiv_evcnt;
 } iiv[256] = {{0,},};
 
-/* used in console initialization */
-extern int x68k_realconfig;
-int x68k_config_found(struct cfdata *, struct device *, void *, cfprint_t);
-static cfdata_t cfdata_intiobus = NULL;
-
 #ifdef DEBUG
 int intio_debug = 0;
 #endif
@@ -151,37 +145,15 @@ intio_match(device_t parent, cfdata_t cf, void *aux)
 		return (0);
 	if (intio_attached)
 		return (0);
-	if (x68k_realconfig == 0)
-		cfdata_intiobus = cf; /* XXX */
 
 	return (1);
 }
-
-
-/* used in console initialization: configure only MFP */
-static struct intio_attach_args initial_ia = {
-	&intio_bus,
-	0/*XXX*/,
-
-	"mfp",			/* ia_name */
-	MFP_ADDR,		/* ia_addr */
-	0x30,			/* ia_size */
-	MFP_INTR,		/* ia_intr */
-	-1			/* ia_dma */
-	-1,			/* ia_dmaintr */
-};
 
 static void
 intio_attach(device_t parent, device_t self, void *aux)
 {
 	struct intio_softc *sc = device_private(self);
 	struct intio_attach_args ia;
-
-	if (self == NULL) {
-		/* console only init */
-		x68k_config_found(cfdata_intiobus, NULL, &initial_ia, NULL);
-		return;
-	}
 
 	intio_attached = 1;
 
@@ -385,10 +357,6 @@ intio_intr(struct frame *frame)
 {
 	int vector = frame->f_vector / 4;
 
-#if 0				/* this is not correct now */
-	/* CAUTION: HERE WE ARE IN SPLHIGH() */
-	/* LOWER TO APPROPRIATE IPL AT VERY FIRST IN THE HANDLER!! */
-#endif
 	if (iiv[vector].iiv_handler == 0) {
 		printf("Stray interrupt: %d type %x, pc %x\n",
 			vector, frame->f_format, frame->f_pc);
@@ -432,7 +400,6 @@ _intio_bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
 	struct intio_dma_cookie *cookie;
 	bus_dmamap_t map;
 	int error, cookieflags;
-	void *cookiestore;
 	size_t cookiesize;
 	extern paddr_t avail_end;
 
@@ -479,13 +446,12 @@ _intio_bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
 	/*
 	 * Allocate our cookie.
 	 */
-	if ((cookiestore = malloc(cookiesize, M_DMAMAP,
-	    (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK)) == NULL) {
+	cookie = malloc(cookiesize, M_DMAMAP, 
+	    ((flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK) | M_ZERO);
+	if (cookie == NULL) {
 		error = ENOMEM;
 		goto out;
 	}
-	memset(cookiestore, 0, cookiesize);
-	cookie = (struct intio_dma_cookie *)cookiestore;
 	cookie->id_flags = cookieflags;
 	map->x68k_dm_cookie = cookie;
 

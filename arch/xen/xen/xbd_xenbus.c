@@ -1,4 +1,4 @@
-/*      $NetBSD: xbd_xenbus.c,v 1.35 2008/12/18 12:19:03 cegger Exp $      */
+/*      $NetBSD: xbd_xenbus.c,v 1.39 2009/03/03 19:04:41 bouyer Exp $      */
 
 /*
  * Copyright (c) 2006 Manuel Bouyer.
@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: xbd_xenbus.c,v 1.35 2008/12/18 12:19:03 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: xbd_xenbus.c,v 1.39 2009/03/03 19:04:41 bouyer Exp $");
 
 #include "opt_xen.h"
 #include "rnd.h"
@@ -53,6 +53,10 @@ __KERNEL_RCSID(0, "$NetBSD: xbd_xenbus.c,v 1.35 2008/12/18 12:19:03 cegger Exp $
 #include <dev/dkvar.h>
 
 #include <uvm/uvm.h>
+
+#if NRND > 0
+#include <sys/rnd.h>
+#endif
 
 #include <xen/hypervisor.h>
 #include <xen/evtchn.h>
@@ -112,6 +116,9 @@ struct xbd_xenbus_softc {
 	uint64_t sc_xbdsize; /* size of disk in DEV_BSIZE */
 	u_long sc_info; /* VDISK_* */
 	u_long sc_handle; /* from backend */
+#if NRND > 0
+	rndsource_element_t     sc_rnd_source;
+#endif
 };
 
 #if 0
@@ -215,10 +222,11 @@ xbd_xenbus_attach(device_t parent, device_t self, void *aux)
 		printf("%s/\n", xa->xa_xbusd->xbusd_path);
 		for (i = 0; i < dir_n; i++) {
 			printf("\t/%s", dir[i]);
-			err = xenbus_read(NULL, xa->xa_xbusd->xbusd_path, dir[i],
-			    NULL, &val);
+			err = xenbus_read(NULL, xa->xa_xbusd->xbusd_path,
+					  dir[i], NULL, &val);
 			if (err) {
-				aprint_error_dev(self, "xenbus_read err %d\n", err);
+				aprint_error_dev(self, "xenbus_read err %d\n",
+						 err);
 			} else {
 				printf(" = %s\n", val);
 				free(val, M_DEVBUF);
@@ -244,6 +252,11 @@ xbd_xenbus_attach(device_t parent, device_t self, void *aux)
 	sc->sc_shutdown = 1;
 	/* initialise shared structures and tell backend that we are ready */
 	xbd_xenbus_resume(sc);
+
+#if NRND > 0
+	rnd_attach_source(&sc->sc_rnd_source, device_xname(self),
+	    RND_TYPE_DISK, RND_FLAG_NO_COLLECT | RND_FLAG_NO_ESTIMATE);
+#endif
 }
 
 static int
@@ -285,6 +298,10 @@ xbd_xenbus_detach(device_t dev, int flags)
 		/* detach disk */
 		disk_detach(&sc->sc_dksc.sc_dkdev);
 		disk_destroy(&sc->sc_dksc.sc_dkdev);
+#if NRND > 0
+		/* Unhook the entropy source. */
+		rnd_detach_source(&sc->sc_rnd_source);
+#endif
 	}
 
 	hypervisor_mask_event(sc->sc_evtchn);
@@ -320,6 +337,10 @@ xbd_xenbus_resume(void *p)
 	SHARED_RING_INIT(ring);
 	FRONT_RING_INIT(&sc->sc_ring, ring, PAGE_SIZE);
 
+	/*
+	 * get MA address of the ring, and use it to set up the grant entry
+	 * for the block device
+	 */
 	(void)pmap_extract_ma(pmap_kernel(), (vaddr_t)ring, &ma);
 	error = xenbus_grant_ring(sc->sc_xbusd, ma, &sc->sc_ring_gntref);
 	if (error)
@@ -380,7 +401,8 @@ static void xbd_backend_changed(void *arg, XenbusState new_state)
 	struct dk_geom *pdg;
 	char buf[9];
 	int s;
-	DPRINTF(("%s: new backend state %d\n", device_xname(sc->sc_dev), new_state));
+	DPRINTF(("%s: new backend state %d\n",
+	    device_xname(sc->sc_dev), new_state));
 
 	switch (new_state) {
 	case XenbusStateUnknown:
@@ -492,7 +514,7 @@ xbd_handler(void *arg)
 		return 0;
 again:
 	resp_prod = sc->sc_ring.sring->rsp_prod;
-	x86_lfence(); /* ensure we see replies up to resp_prod */
+	xen_rmb(); /* ensure we see replies up to resp_prod */
 	for (i = sc->sc_ring.rsp_cons; i != resp_prod; i++) {
 		blkif_response_t *rep = RING_GET_RESPONSE(&sc->sc_ring, i);
 		struct xbd_req *xbdreq = &sc->sc_reqs[rep->id];
@@ -533,10 +555,14 @@ next:
 		disk_unbusy(&sc->sc_dksc.sc_dkdev,
 		    (bp->b_bcount - bp->b_resid),
 		    (bp->b_flags & B_READ));
+#if NRND > 0
+		rnd_add_uint32(&sc->sc_rnd_source,
+		    bp->b_blkno);
+#endif
 		biodone(bp);
 		SLIST_INSERT_HEAD(&sc->sc_xbdreq_head, xbdreq, req_next);
 	}
-	x86_lfence();
+	xen_rmb();
 	sc->sc_ring.rsp_cons = i;
 	RING_FINAL_CHECK_FOR_RESPONSES(&sc->sc_ring, more_to_do);
 	if (more_to_do)
@@ -614,7 +640,8 @@ xbdsize(dev_t dev)
 int
 xbdread(dev_t dev, struct uio *uio, int flags)
 {
-	struct xbd_xenbus_softc *sc = device_lookup_private(&xbd_cd, DISKUNIT(dev));
+	struct xbd_xenbus_softc *sc = 
+	    device_lookup_private(&xbd_cd, DISKUNIT(dev));
 	struct  dk_softc *dksc = &sc->sc_dksc;
 
 	if ((dksc->sc_flags & DKF_INITED) == 0)
@@ -625,7 +652,8 @@ xbdread(dev_t dev, struct uio *uio, int flags)
 int
 xbdwrite(dev_t dev, struct uio *uio, int flags)
 {
-	struct xbd_xenbus_softc *sc = device_lookup_private(&xbd_cd, DISKUNIT(dev));
+	struct xbd_xenbus_softc *sc =
+	    device_lookup_private(&xbd_cd, DISKUNIT(dev));
 	struct  dk_softc *dksc = &sc->sc_dksc;
 
 	if ((dksc->sc_flags & DKF_INITED) == 0)
@@ -638,7 +666,8 @@ xbdwrite(dev_t dev, struct uio *uio, int flags)
 int
 xbdioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
-	struct xbd_xenbus_softc *sc = device_lookup_private(&xbd_cd, DISKUNIT(dev));
+	struct xbd_xenbus_softc *sc =
+	    device_lookup_private(&xbd_cd, DISKUNIT(dev));
 	struct	dk_softc *dksc;
 	int	error;
 	struct	disk *dk;
@@ -775,7 +804,7 @@ xbdstart(struct dk_softc *dksc, struct buf *bp)
 	}
 	xbdreq->req_nr_segments = req->nr_segments = seg;
 	sc->sc_ring.req_prod_pvt++;
-	if (BUFQ_PEEK(sc->sc_dksc.sc_bufq)) {
+	if (bufq_peek(sc->sc_dksc.sc_bufq)) {
 		 /* we will be called again; don't notify guest yet */
 		runqueue = 0;
 	}

@@ -1,5 +1,8 @@
-#	$NetBSD: Makefile.inc,v 1.1 2008/12/30 19:05:40 pooka Exp $
+#	$NetBSD: Makefile.inc,v 1.4 2009/01/01 20:30:45 pooka Exp $
 #
 
 .PATH:	${ARCHDIR}/../i386
-SRCS+=	cpu.c spl.c
+SRCS+=	rumpcpu.c rumpspl.c
+
+.PATH:	${RUMPTOP}/../arch/amd64/amd64
+SRCS+=	kobj_machdep.c

@@ -1,4 +1,4 @@
-/*	$NetBSD: lfs_vnops.c,v 1.218 2008/06/24 10:47:32 gmcgarry Exp $	*/
+/*	$NetBSD: lfs_vnops.c,v 1.220 2009/02/22 20:28:07 ad Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001, 2002, 2003 The NetBSD Foundation, Inc.
@@ -60,7 +60,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: lfs_vnops.c,v 1.218 2008/06/24 10:47:32 gmcgarry Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lfs_vnops.c,v 1.220 2009/02/22 20:28:07 ad Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_compat_netbsd.h"
@@ -343,8 +343,6 @@ lfs_inactive(void *v)
 	struct vop_inactive_args /* {
 		struct vnode *a_vp;
 	} */ *ap = v;
-
-	KASSERT(VTOI(ap->a_vp)->i_nlink == VTOI(ap->a_vp)->i_ffs_effnlink);
 
 	lfs_unmark_vnode(ap->a_vp);
 
@@ -1076,8 +1074,6 @@ lfs_reclaim(void *v)
 	struct inode *ip = VTOI(vp);
 	struct lfs *fs = ip->i_lfs;
 	int error;
-
-	KASSERT(ip->i_nlink == ip->i_ffs_effnlink);
 
 	mutex_enter(&lfs_lock);
 	LFS_CLR_UINO(ip, IN_ALLMOD);
@@ -1819,7 +1815,7 @@ check_dirty(struct lfs *fs, struct vnode *vp,
   top:
 	by_list = (vp->v_uobj.uo_npages <=
 		   ((endoffset - startoffset) >> PAGE_SHIFT) *
-		   UVM_PAGE_HASH_PENALTY);
+		   UVM_PAGE_TREE_PENALTY);
 	any_dirty = 0;
 
 	if (by_list) {

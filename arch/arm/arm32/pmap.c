@@ -1,4 +1,4 @@
-/*	$NetBSD: pmap.c,v 1.194 2008/12/30 05:51:19 matt Exp $	*/
+/*	$NetBSD: pmap.c,v 1.196 2009/03/09 08:42:36 nonaka Exp $	*/
 
 /*
  * Copyright 2003 Wasabi Systems, Inc.
@@ -212,7 +212,7 @@
 #include <machine/param.h>
 #include <arm/arm32/katelib.h>
 
-__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.194 2008/12/30 05:51:19 matt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: pmap.c,v 1.196 2009/03/09 08:42:36 nonaka Exp $");
 
 #ifdef PMAP_DEBUG
 
@@ -316,9 +316,12 @@ static struct evcnt pmap_ev_vac_flush_one =
    PMAP_EVCNT_INITIALIZER("flush page (1 color)");
 static struct evcnt pmap_ev_vac_flush_lots =
    PMAP_EVCNT_INITIALIZER("flush page (2+ colors)");
+static struct evcnt pmap_ev_vac_flush_lots2 =
+   PMAP_EVCNT_INITIALIZER("flush page (2+ colors, kmpage)");
 EVCNT_ATTACH_STATIC(pmap_ev_vac_clean_one);
 EVCNT_ATTACH_STATIC(pmap_ev_vac_flush_one);
 EVCNT_ATTACH_STATIC(pmap_ev_vac_flush_lots);
+EVCNT_ATTACH_STATIC(pmap_ev_vac_flush_lots2);
 
 static struct evcnt pmap_ev_vac_color_new =
    PMAP_EVCNT_INITIALIZER("new page color");
@@ -692,8 +695,8 @@ vaddr_t virtual_avail;
 vaddr_t virtual_end;
 vaddr_t pmap_curmaxkvaddr;
 
-vaddr_t avail_start;
-vaddr_t avail_end;
+paddr_t avail_start;
+paddr_t avail_end;
 
 pv_addrqh_t pmap_boot_freeq = SLIST_HEAD_INITIALIZER(&pmap_boot_freeq);
 pv_addr_t kernelpages;
@@ -1839,6 +1842,7 @@ pmap_vac_me_harder(struct vm_page *pg, pmap_t pm, vaddr_t va)
 	if (__predict_false(pg->mdpage.pvh_attrs & PVF_NC)) {
 		/* just an add, things are already non-cached */
 		KASSERT(!(pg->mdpage.pvh_attrs & PVF_DIRTY));
+		KASSERT(!(pg->mdpage.pvh_attrs & PVF_MULTCLR));
 		bad_alias = false;
 		if (va) {
 			PMAPCOUNT(vac_color_none);
@@ -1943,6 +1947,7 @@ pmap_vac_me_harder(struct vm_page *pg, pmap_t pm, vaddr_t va)
 	} else if (!pmap_is_page_colored_p(pg)) {
 		/* not colored so we just use its color */
 		KASSERT(pg->mdpage.pvh_attrs & (PVF_WRITE|PVF_DIRTY));
+		KASSERT(!(pg->mdpage.pvh_attrs & PVF_MULTCLR));
 		PMAPCOUNT(vac_color_new);
 		pg->mdpage.pvh_attrs &= PAGE_SIZE - 1;
 		pg->mdpage.pvh_attrs |= PVF_COLORED
@@ -2004,6 +2009,7 @@ pmap_vac_me_harder(struct vm_page *pg, pmap_t pm, vaddr_t va)
 		pg->mdpage.pvh_attrs &= ~PVF_COLORED;
 		pg->mdpage.pvh_attrs |= PVF_NC;
 		KASSERT((pg->mdpage.pvh_attrs & PVF_DMOD) == 0 || (pg->mdpage.pvh_attrs & (PVF_DIRTY|PVF_NC)));
+		KASSERT(!(pg->mdpage.pvh_attrs & PVF_MULTCLR));
 		PMAPCOUNT(vac_color_erase);
 	} else if (rw_mappings == 0
 		   && (pg->mdpage.pvh_attrs & PVF_KMPAGE) == 0) {
@@ -2057,6 +2063,7 @@ pmap_vac_me_harder(struct vm_page *pg, pmap_t pm, vaddr_t va)
 				PMAPCOUNT(vac_color_change);
 				KASSERT((pg->mdpage.pvh_attrs & PVF_DMOD) == 0 || (pg->mdpage.pvh_attrs & (PVF_DIRTY|PVF_NC)));
 				KASSERT((rw_mappings == 0) == !(pg->mdpage.pvh_attrs & PVF_WRITE));
+				KASSERT(!(pg->mdpage.pvh_attrs & PVF_MULTCLR));
 				return;
 			}
 		}
@@ -3380,6 +3387,13 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 			    && ((va ^ pg->mdpage.pvh_attrs) & arm_cache_prefer_mask)) {
 				PMAPCOUNT(vac_color_change);
 				pmap_flush_page(pg, PMAP_FLUSH_PRIMARY);
+			} else if (pg->mdpage.pvh_attrs & PVF_MULTCLR) {
+				/*
+				 * If this page has multiple colors, expunge
+				 * them.
+				 */
+				PMAPCOUNT(vac_flush_lots2);
+				pmap_flush_page(pg, PMAP_FLUSH_SECONDARY);
 			}
 			pg->mdpage.pvh_attrs &= PAGE_SIZE - 1;
 			pg->mdpage.pvh_attrs |= PVF_KMPAGE
@@ -5326,7 +5340,6 @@ pmap_alloc_specials(vaddr_t *availp, int pages, vaddr_t *vap, pt_entry_t **ptep)
 void
 pmap_init(void)
 {
-	extern int physmem;
 
 	/*
 	 * Set the available memory vars - These do not map to real memory
@@ -5335,8 +5348,8 @@ pmap_init(void)
 	 * One could argue whether this should be the entire memory or just
 	 * the memory that is useable in a user process.
 	 */
-	avail_start = 0;
-	avail_end = physmem * PAGE_SIZE;
+	avail_start = ptoa(vm_physmem[0].start);
+	avail_end = ptoa(vm_physmem[vm_nphysseg - 1].end);
 
 	/*
 	 * Now we need to free enough pv_entry structures to allow us to get

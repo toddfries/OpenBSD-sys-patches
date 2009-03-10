@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.77 2008/12/10 14:19:02 tsutsui Exp $	*/
+/*	$NetBSD: machdep.c,v 1.80 2009/02/13 22:41:02 apb Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -77,10 +77,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.77 2008/12/10 14:19:02 tsutsui Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.80 2009/02/13 22:41:02 apb Exp $");
 
 #include "opt_ddb.h"
 #include "opt_compat_netbsd.h"
+#include "opt_modular.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -610,15 +611,15 @@ dumpsys(void)
 			return;
 	}
 	if (dumplo <= 0) {
-		printf("\ndump to dev %u,%u not possible\n", major(dumpdev),
-		    minor(dumpdev));
+		printf("\ndump to dev %u,%u not possible\n",
+		    major(dumpdev), minor(dumpdev));
 		return;
 	}
 	dump = bdev->d_dump;
 	blkno = dumplo;
 
-	printf("\ndumping to dev %u,%u offset %ld\n", major(dumpdev),
-	    minor(dumpdev), dumplo);
+	printf("\ndumping to dev %u,%u offset %ld\n",
+	    major(dumpdev), minor(dumpdev), dumplo);
 
 	printf("dump ");
 

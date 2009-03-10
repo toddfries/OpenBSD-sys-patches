@@ -1,4 +1,4 @@
-/* $NetBSD: machdep.c,v 1.171 2008/11/30 18:21:36 martin Exp $	 */
+/* $NetBSD: machdep.c,v 1.174 2009/02/13 22:41:03 apb Exp $	 */
 
 /*
  * Copyright (c) 1982, 1986, 1990 The Regents of the University of California.
@@ -83,11 +83,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.171 2008/11/30 18:21:36 martin Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.174 2009/02/13 22:41:03 apb Exp $");
 
 #include "opt_ddb.h"
 #include "opt_compat_netbsd.h"
 #include "opt_compat_ultrix.h"
+#include "opt_modular.h"
 #include "opt_multiprocessor.h"
 #include "opt_lockdebug.h"
 #include "opt_compat_ibcs2.h"
@@ -427,12 +428,12 @@ dumpsys(void)
 	if (dumpsize == 0)
 		cpu_dumpconf();
 	if (dumplo <= 0) {
-		printf("\ndump to dev %u,%u not possible\n", major(dumpdev),
-		    minor(dumpdev));
+		printf("\ndump to dev %u,%u not possible\n",
+		    major(dumpdev), minor(dumpdev));
 		return;
 	}
-	printf("\ndumping to dev %u,%u offset %ld\n", major(dumpdev),
-	    minor(dumpdev), dumplo);
+	printf("\ndumping to dev %u,%u offset %ld\n",
+	    major(dumpdev), minor(dumpdev), dumplo);
 	printf("dump ");
 	switch ((*bdev->d_dump) (dumpdev, 0, 0, 0)) {
 

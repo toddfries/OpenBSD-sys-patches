@@ -1,4 +1,4 @@
-/*	$NetBSD: libi386.h,v 1.28 2008/12/13 23:30:54 christos Exp $	*/
+/*	$NetBSD: libi386.h,v 1.30 2009/02/16 22:39:30 jmcneill Exp $	*/
 
 /*
  * Copyright (c) 1996
@@ -92,9 +92,6 @@ struct bootblk_command {
 void bootmenu(void);
 void docommand(char *);
 
-/* getsecs.c */
-time_t getsecs(void);
-
 /* in "user code": */
 void command_help(char *);
 extern const struct bootblk_command commands[];
@@ -138,3 +135,6 @@ int dosseek(int, int, int);
 extern int doserrno;	/* in dos_file.S */
 
 void module_add(char *);
+
+struct btinfo_framebuffer;
+void framebuffer_configure(struct btinfo_framebuffer *);

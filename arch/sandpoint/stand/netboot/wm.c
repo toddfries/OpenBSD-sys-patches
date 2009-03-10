@@ -1,4 +1,4 @@
-/* $NetBSD: wm.c,v 1.8 2008/05/30 14:54:16 nisimura Exp $ */
+/* $NetBSD: wm.c,v 1.10 2009/01/25 03:39:28 nisimura Exp $ */
 
 /*-
  * Copyright (c) 2007 The NetBSD Foundation, Inc.
@@ -46,19 +46,14 @@
  * - no vtophys() translation, vaddr_t == paddr_t. 
  * - PIPT writeback cache aware.
  */
-#define CSR_WRITE(l, r, v) 	out32rb((l)->csr+(r), (v))
 #define CSR_READ(l, r)		in32rb((l)->csr+(r))
+#define CSR_WRITE(l, r, v) 	out32rb((l)->csr+(r), (v))
 #define VTOPHYS(va) 		(uint32_t)(va)
 #define DEVTOV(pa) 		(uint32_t)(pa)
 #define wbinv(adr, siz)		_wbinv(VTOPHYS(adr), (uint32_t)(siz))
 #define inv(adr, siz)		_inv(VTOPHYS(adr), (uint32_t)(siz))
 #define DELAY(n)		delay(n)
 #define ALLOC(T,A)	(T *)((unsigned)alloc(sizeof(T) + (A)) &~ ((A) - 1))
-
-int wm_match(unsigned, void *);
-void *wm_init(unsigned, void *);
-int wm_send(void *, char *, unsigned);
-int wm_recv(void *, char *, unsigned, unsigned);
 
 struct tdesc {
 	uint32_t lo;	/* 31:0 */

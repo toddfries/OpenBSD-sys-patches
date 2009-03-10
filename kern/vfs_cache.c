@@ -1,4 +1,4 @@
-/*	$NetBSD: vfs_cache.c,v 1.80 2008/10/25 14:20:17 yamt Exp $	*/
+/*	$NetBSD: vfs_cache.c,v 1.84 2009/02/18 13:36:11 yamt Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -58,7 +58,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vfs_cache.c,v 1.80 2008/10/25 14:20:17 yamt Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vfs_cache.c,v 1.84 2009/02/18 13:36:11 yamt Exp $");
 
 #include "opt_ddb.h"
 #include "opt_revcache.h"
@@ -130,8 +130,6 @@ TAILQ_HEAD(, namecache) nclruhead =		/* LRU chain */
 struct	nchstats nchstats;		/* cache effectiveness statistics */
 
 static pool_cache_t namecache_cache;
-
-MALLOC_DEFINE(M_CACHE, "namecache", "Dynamically allocated cache entries");
 
 int cache_lowat = 95;
 int cache_hiwat = 98;
@@ -260,6 +258,7 @@ cache_lookup_entry(const struct vnode *dvp, const struct componentname *cnp)
 	struct nchashhead *ncpp;
 	struct namecache *ncp;
 
+	KASSERT(dvp != NULL);
 	ncpp = &nchashtbl[NCHASH(cnp, dvp)];
 
 	LIST_FOREACH(ncp, ncpp, nc_hash) {
@@ -819,8 +818,8 @@ cache_purge1(struct vnode *vp, const struct componentname *cnp, int flags)
 		ncp = cache_lookup_entry(vp, cnp);
 		if (ncp) {
 			cache_invalidate(ncp);
-			cache_disassociate(ncp);
 			mutex_exit(&ncp->nc_lock);
+			cache_disassociate(ncp);
 		}
 	}
 	mutex_exit(namecache_lock);
@@ -882,7 +881,7 @@ cache_prune(int incache, int target)
 			 */
 			tryharder = 1;
 		}
-		if (!tryharder && ncp->nc_hittime > recent) {
+		if (!tryharder && (ncp->nc_hittime - recent) > 0) {
 			if (sentinel == NULL)
 				sentinel = ncp;
 			TAILQ_REMOVE(&nclruhead, ncp, nc_lru);

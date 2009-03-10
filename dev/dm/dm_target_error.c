@@ -1,4 +1,4 @@
-/*        $NetBSD: dm_target_error.c,v 1.4 2008/12/21 00:59:39 haad Exp $      */
+/*        $NetBSD: dm_target_error.c,v 1.7 2009/02/19 23:07:33 haad Exp $      */
 
 /*
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -50,7 +50,7 @@
 #include <sys/kernel.h>
 #include <sys/module.h>
 
-MODULE(MODULE_CLASS_MISC, dm_target_error, NULL);
+MODULE(MODULE_CLASS_MISC, dm_target_error, "dm");
 
 static int
 dm_target_error_modcmd(modcmd_t cmd, void *arg)
@@ -61,9 +61,10 @@ dm_target_error_modcmd(modcmd_t cmd, void *arg)
 	
 	switch (cmd) {
 	case MODULE_CMD_INIT:
-		if ((dmt = dm_target_lookup("error")) != NULL)
+		if ((dmt = dm_target_lookup("error")) != NULL){
+			dm_target_unbusy(dmt);
 			return EEXIST;
-
+		}
 		dmt = dm_target_alloc("error");
 		
 		dmt->version[0] = 1;

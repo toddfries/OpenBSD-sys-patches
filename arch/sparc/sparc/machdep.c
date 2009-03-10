@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.285 2008/11/25 15:51:34 ad Exp $ */
+/*	$NetBSD: machdep.c,v 1.289 2009/02/13 22:41:03 apb Exp $ */
 
 /*-
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
@@ -71,11 +71,12 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.285 2008/11/25 15:51:34 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.289 2009/02/13 22:41:03 apb Exp $");
 
 #include "opt_compat_netbsd.h"
 #include "opt_compat_sunos.h"
 #include "opt_sparc_arch.h"
+#include "opt_modular.h"
 #include "opt_multiprocessor.h"
 
 #include <sys/param.h>
@@ -100,6 +101,7 @@ __KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.285 2008/11/25 15:51:34 ad Exp $");
 #include <sys/exec.h>
 #include <sys/ucontext.h>
 #include <sys/simplelock.h>
+#include <sys/module.h>
 
 #include <uvm/uvm.h>		/* we use uvm.kernel_object */
 
@@ -1007,12 +1009,12 @@ dumpsys(void)
 	if (dumpsize == 0)
 		cpu_dumpconf();
 	if (dumplo <= 0) {
-		printf("\ndump to dev %u,%u not possible\n", major(dumpdev),
-		    minor(dumpdev));
+		printf("\ndump to dev %u,%u not possible\n",
+		    major(dumpdev), minor(dumpdev));
 		return;
 	}
-	printf("\ndumping to dev %u,%u offset %ld\n", major(dumpdev),
-	    minor(dumpdev), dumplo);
+	printf("\ndumping to dev %u,%u offset %ld\n",
+	    major(dumpdev), minor(dumpdev), dumplo);
 
 	psize = (*bdev->d_psize)(dumpdev);
 	printf("dump ");
@@ -1268,6 +1270,12 @@ wcopy(const void *vb1, void *vb2, u_int l)
 		*b2 = *b1e;
 }
 
+#ifdef MODULAR
+void
+module_init_md(void)
+{
+}
+#endif
 
 /*
  * Common function for DMA map creation.  May be called by bus-specific

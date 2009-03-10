@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile.rumpvfs,v 1.2 2008/12/19 00:57:24 pooka Exp $
+#	$NetBSD: Makefile.rumpvfs,v 1.5 2009/01/13 11:37:16 pooka Exp $
 #
 
 .include "${RUMPTOP}/Makefile.rump"
@@ -7,22 +7,23 @@ LIB=	rumpvfs
 
 .PATH:	${RUMPTOP}/librump/rumpvfs				\
 	${RUMPTOP}/../kern ${RUMPTOP}/../lib/libkern		\
-	${RUMPTOP}/../miscfs/genfs ${RUMPTOP}/../miscfs/syncfs
+	${RUMPTOP}/../miscfs/genfs ${RUMPTOP}/../miscfs/syncfs	\
+	${RUMPTOP}/../miscfs/specfs
 
 #
 # Source modules, first the ones specifically implemented for librump.
 # 
-SRCS=	genfs_io.c rump_vfs.c rumpfs.c specfs.c vm_vfs.c
+SRCS=	genfs_io.c rump_vfs.c rumpblk.c rumpfs.c vm_vfs.c
 
 SRCS+=	fstrans_stub.c vfsops_stub.c
 
 # sys/kern vfs
 SRCS+=	vfs_bio.c vfs_cache.c vfs_cwd.c vfs_dirhash.c vfs_getcwd.c	\
-	vfs_hooks.c vfs_init.c vfs_lookup.c vfs_subr.c vfs_syscalls.c	\
-	vfs_vnops.c vfs_wapbl.c vfs_xattr.c
+	vfs_hooks.c vfs_init.c vfs_lockf.c vfs_lookup.c vfs_subr.c	\
+	vfs_syscalls.c vfs_vnops.c vfs_wapbl.c vfs_xattr.c
 
 # sys/miscfs
-SRCS+=	genfs_vfsops.c genfs_vnops.c sync_subr.c
+SRCS+=	genfs_vfsops.c genfs_vnops.c sync_subr.c spec_vnops.c
 
 # sys/kern bufq
 SRCS+=	subr_bufq.c bufq_disksort.c bufq_fcfs.c bufq_priocscan.c	\
@@ -34,7 +35,6 @@ SRCS+=	rumpvnode_if.c
 SHLIB_MAJOR=    0
 SHLIB_MINOR=    0
 
-CPPFLAGS+=	-I${RUMPTOP}/librump/rumpkern/opt -DMAXUSERS=32
 CPPFLAGS+=	-I${RUMPTOP}/librump/rumpkern
 CFLAGS+=	-Wno-pointer-sign
 

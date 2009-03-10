@@ -1,4 +1,4 @@
-/* $NetBSD: wsmouse.c,v 1.60 2008/06/12 23:04:37 cegger Exp $ */
+/* $NetBSD: wsmouse.c,v 1.62 2009/01/15 04:22:11 yamt Exp $ */
 
 /*-
  * Copyright (c) 2006 The NetBSD Foundation, Inc.
@@ -104,7 +104,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: wsmouse.c,v 1.60 2008/06/12 23:04:37 cegger Exp $");
+__KERNEL_RCSID(0, "$NetBSD: wsmouse.c,v 1.62 2009/01/15 04:22:11 yamt Exp $");
 
 #include "wsmouse.h"
 #include "wsdisplay.h"
@@ -748,6 +748,9 @@ wsmouse_do_ioctl(struct wsmouse_softc *sc, u_long cmd, void *data,
 		memcpy(&sc->sc_repeat, wr, sizeof(sc->sc_repeat));
 
 		return 0;
+
+	case WSMOUSEIO_SETVERSION:
+		return wsevent_setversion(sc->sc_base.me_evp, *(int *)data);
 	}
 
 	/*

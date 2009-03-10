@@ -1,4 +1,4 @@
-/* $NetBSD: tlp.c,v 1.19 2008/05/30 14:54:16 nisimura Exp $ */
+/* $NetBSD: tlp.c,v 1.22 2009/01/25 03:39:28 nisimura Exp $ */
 
 /*-
  * Copyright (c) 2007 The NetBSD Foundation, Inc.
@@ -44,18 +44,14 @@
  * - no vtophys() translation, vaddr_t == paddr_t. 
  * - PIPT writeback cache aware.
  */
-#define CSR_WRITE(l, r, v) 	out32rb((l)->csr+(r), (v))
 #define CSR_READ(l, r)		in32rb((l)->csr+(r))
+#define CSR_WRITE(l, r, v) 	out32rb((l)->csr+(r), (v))
 #define VTOPHYS(va) 		(uint32_t)(va)
 #define DEVTOV(pa) 		(uint32_t)(pa)
 #define wbinv(adr, siz)		_wbinv(VTOPHYS(adr), (uint32_t)(siz))
 #define inv(adr, siz)		_inv(VTOPHYS(adr), (uint32_t)(siz))
 #define DELAY(n)		delay(n)
 #define ALLOC(T,A)	(T *)((unsigned)alloc(sizeof(T) + (A)) &~ ((A) - 1))
-
-void *tlp_init(unsigned, void *);
-int tlp_send(void *, char *, unsigned);
-int tlp_recv(void *, char *, unsigned, unsigned);
 
 struct desc {
 	uint32_t xd0, xd1, xd2, xd3;

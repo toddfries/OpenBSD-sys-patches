@@ -1,4 +1,4 @@
-#	$NetBSD: IQ31244,v 1.42 2008/11/24 11:41:09 ad Exp $
+#	$NetBSD: IQ31244,v 1.45 2009/03/06 20:31:48 joerg Exp $
 #
 #	IQ31244 -- Intel IQ31244 Evaluation Board Kernel
 #
@@ -102,7 +102,6 @@ options 	SYSVSEM		# System V-like semaphores
 #options 	SEMUME=10	# max number of undo entries per process
 #options 	SEMMNU=30	# number of undo structures in system
 options 	SYSVSHM		# System V-like memory sharing
-options 	SHMMAXPGS=1024	# 1024 pages is the default
 
 # Device options
 
@@ -167,14 +166,13 @@ iopwdog*	at iopxs?		# Watchdog timer
 pci0		at iopxs? bus ?		# PCI/PCI-X support
 
 # IIC devices
-# XXX These don't seem to work yet
 
 # Temperature sensors
-#lmtemp0  	at iic0	addr 0x48	# LM75 temperature sensor
-#lmtemp1  	at iic0	addr 0x49	# LM75 temperature sensor
+lmtemp0  	at iic0	addr 0x48	# LM75 temperature sensor
+lmtemp1  	at iic0	addr 0x49	# LM75 temperature sensor
 
 # RTC
-#strtc0		at iic0 addr 0x68	# M41ST84 RTC
+strtc0		at iic0 addr 0x68	# M41ST84 RTC & watchdog
 
 # PCI-PCI bridges
 ppb*		at pci? dev ? function ?

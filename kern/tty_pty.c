@@ -1,4 +1,4 @@
-/*	$NetBSD: tty_pty.c,v 1.114 2008/11/15 05:58:33 mrg Exp $	*/
+/*	$NetBSD: tty_pty.c,v 1.116 2009/03/09 16:19:22 uebayasi Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: tty_pty.c,v 1.114 2008/11/15 05:58:33 mrg Exp $");
+__KERNEL_RCSID(0, "$NetBSD: tty_pty.c,v 1.116 2009/03/09 16:19:22 uebayasi Exp $");
 
 #include "opt_ptm.h"
 
@@ -57,7 +57,6 @@ __KERNEL_RCSID(0, "$NetBSD: tty_pty.c,v 1.114 2008/11/15 05:58:33 mrg Exp $");
 #include <sys/filedesc.h>
 #include <sys/conf.h>
 #include <sys/poll.h>
-#include <sys/malloc.h>
 #include <sys/pty.h>
 #include <sys/kauth.h>
 
@@ -151,13 +150,20 @@ pty_isfree(int minor, int lock)
  * Allocate and zero array of nelem elements.
  */
 static struct pt_softc **
-ptyarralloc(nelem)
-	int nelem;
+ptyarralloc(int nelem)
 {
 	struct pt_softc **pt;
 	nelem += 10;
-	pt = malloc(nelem * sizeof *pt, M_DEVBUF, M_WAITOK | M_ZERO);
+	pt = kmem_zalloc(nelem * sizeof(*pt), KM_SLEEP);
 	return pt;
+}
+
+static void
+ptyarrfree(struct pt_softc **pt, int nelem)
+{
+
+	nelem += 10;
+	kmem_free(pt, nelem * sizeof(*pt));
 }
 
 /*
@@ -172,6 +178,7 @@ pty_check(int ptn)
 	if (ptn >= npty) {
 		struct pt_softc **newpt, **oldpt;
 		int newnpty;
+		int oldnpty;
 
 		/* check if the requested pty can be granted */
 		if (ptn >= maxptys) {
@@ -197,12 +204,12 @@ pty_check(int ptn)
 
 		if (newnpty >= maxptys) {
 			/* limit cut away beneath us... */
-			newnpty = maxptys;
-			if (ptn >= newnpty) {
+			if (ptn >= maxptys) {
 				mutex_exit(&pt_softc_mutex);
-				free(newpt, M_DEVBUF);
+				ptyarrfree(newpt, newnpty);
 				goto limit_reached;
 			}
+			newnpty = maxptys;
 		}
 
 		/*
@@ -213,15 +220,17 @@ pty_check(int ptn)
 		if (newnpty > npty) {
 			memcpy(newpt, pt_softc, npty*sizeof(struct pt_softc *));
 			oldpt = pt_softc;
+			oldnpty = npty;
 			pt_softc = newpt;
 			npty = newnpty;
 		} else {
 			/* was enlarged when waited for lock, free new space */
 			oldpt = newpt;
+			oldnpty = newnpty;
 		}
 
 		mutex_exit(&pt_softc_mutex);
-		free(oldpt, M_DEVBUF);
+		ptyarrfree(oldpt, oldnpty);
 	}
 
 	/*
@@ -230,8 +239,7 @@ pty_check(int ptn)
 	 * in case it has been lengthened above.
 	 */
 	if (!pt_softc[ptn]) {
-		pti = malloc(sizeof(struct pt_softc),
-		    M_DEVBUF, M_WAITOK | M_ZERO);
+		pti = kmem_zalloc(sizeof(*pti), KM_SLEEP);
 
 		selinit(&pti->pt_selr);
 		selinit(&pti->pt_selw);
@@ -248,7 +256,7 @@ pty_check(int ptn)
 			ttyfree(pti->pt_tty);
 			seldestroy(&pti->pt_selr);
 			seldestroy(&pti->pt_selw);
-			free(pti, M_DEVBUF);
+			kmem_free(pti, sizeof(*pti));
 			return (0);
 		}
 		tty_attach(pti->pt_tty);
@@ -265,8 +273,7 @@ pty_check(int ptn)
  * new value of maxptys.
  */
 int
-pty_maxptys(newmax, set)
-	int newmax, set;
+pty_maxptys(int newmax, int set)
 {
 	if (!set)
 		return (maxptys);
@@ -295,8 +302,7 @@ pty_maxptys(newmax, set)
  * Establish n (or default if n is 1) ptys in the system.
  */
 void
-ptyattach(n)
-	int n;
+ptyattach(int n)
 {
 
 	mutex_init(&pt_softc_mutex, MUTEX_DEFAULT, IPL_NONE);
@@ -372,10 +378,7 @@ ptsclose(dev_t dev, int flag, int mode, struct lwp *l)
 }
 
 int
-ptsread(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+ptsread(dev_t dev, struct uio *uio, int flag)
 {
 	struct proc *p = curproc;
 	struct pt_softc *pti = pt_softc[minor(dev)];
@@ -436,10 +439,7 @@ again:
  * indirectly, when tty driver calls ptsstart.
  */
 int
-ptswrite(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+ptswrite(dev_t dev, struct uio *uio, int flag)
 {
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
@@ -453,10 +453,7 @@ ptswrite(dev, uio, flag)
  * Poll pseudo-tty.
  */
 int
-ptspoll(dev, events, l)
-	dev_t dev;
-	int events;
-	struct lwp *l;
+ptspoll(dev_t dev, int events, struct lwp *l)
 {
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
@@ -472,8 +469,7 @@ ptspoll(dev, events, l)
  * Wake up process polling or sleeping for input from controlling tty.
  */
 void
-ptsstart(tp)
-	struct tty *tp;
+ptsstart(struct tty *tp)
 {
 	struct pt_softc *pti = pt_softc[minor(tp->t_dev)];
 
@@ -494,9 +490,7 @@ ptsstart(tp)
  * Stop output.
  */
 void
-ptsstop(tp, flush)
-	struct tty *tp;
-	int flush;
+ptsstop(struct tty *tp, int flush)
 {
 	struct pt_softc *pti = pt_softc[minor(tp->t_dev)];
 
@@ -522,9 +516,7 @@ ptsstop(tp, flush)
 }
 
 void
-ptcwakeup(tp, flag)
-	struct tty *tp;
-	int flag;
+ptcwakeup(struct tty *tp, int flag)
 {
 	struct pt_softc *pti = pt_softc[minor(tp->t_dev)];
 
@@ -586,10 +578,7 @@ ptcclose(dev_t dev, int flag, int devtype, struct lwp *l)
 }
 
 int
-ptcread(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+ptcread(dev_t dev, struct uio *uio, int flag)
 {
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
@@ -674,10 +663,7 @@ out:
 
 
 int
-ptcwrite(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+ptcwrite(dev_t dev, struct uio *uio, int flag)
 {
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
@@ -794,10 +780,7 @@ out:
 }
 
 int
-ptcpoll(dev, events, l)
-	dev_t dev;
-	int events;
-	struct lwp *l;
+ptcpoll(dev_t dev, int events, struct lwp *l)
 {
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
@@ -976,8 +959,7 @@ ptckqfilter(dev_t dev, struct knote *kn)
 }
 
 struct tty *
-ptytty(dev)
-	dev_t dev;
+ptytty(dev_t dev)
 {
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
@@ -987,12 +969,7 @@ ptytty(dev)
 
 /*ARGSUSED*/
 int
-ptyioctl(dev, cmd, data, flag, l)
-	dev_t dev;
-	u_long cmd;
-	void *data;
-	int flag;
-	struct lwp *l;
+ptyioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;

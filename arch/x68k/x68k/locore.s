@@ -1,4 +1,4 @@
-/*	$NetBSD: locore.s,v 1.90 2008/12/21 06:16:06 isaki Exp $	*/
+/*	$NetBSD: locore.s,v 1.92 2009/01/18 04:48:53 isaki Exp $	*/
 
 /*
  * Copyright (c) 1980, 1990, 1993
@@ -354,7 +354,7 @@ ENTRY_NOPROFILE(fpfault)
 #if defined(M68040) || defined(M68060)
 	/* always null state frame on 68040, 68060 */
 	cmpl	#FPU_68040,_C_LABEL(fputype)
-	jle	Lfptnull
+	jge	Lfptnull
 #endif
 	tstb	%a0@		| null state frame?
 	jeq	Lfptnull	| yes, safe
@@ -573,9 +573,6 @@ ENTRY_NOPROFILE(com1trap)
 ENTRY_NOPROFILE(intiotrap)
 	addql	#1,_C_LABEL(idepth)
 	INTERRUPT_SAVEREG
-#if 0
-	movw	#PSL_HIGHIPL,%sr	| XXX
-#endif
 	pea	%sp@(16-(FR_HW))	| XXX
 	jbsr	_C_LABEL(intio_intr)
 	addql	#4,%sp

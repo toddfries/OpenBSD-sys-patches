@@ -1,4 +1,4 @@
-/* $NetBSD: mfi.c,v 1.19 2008/10/23 21:00:06 bouyer Exp $ */
+/* $NetBSD: mfi.c,v 1.21 2009/02/16 18:05:19 mlelstv Exp $ */
 /* $OpenBSD: mfi.c,v 1.66 2006/11/28 23:59:45 dlg Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
@@ -17,7 +17,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: mfi.c,v 1.19 2008/10/23 21:00:06 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: mfi.c,v 1.21 2009/02/16 18:05:19 mlelstv Exp $");
 
 #include "bio.h"
 
@@ -1106,7 +1106,6 @@ mfi_scsipi_request(struct scsipi_channel *chan, scsipi_adapter_req_t req,
 			/* XXX check for sense in ccb->ccb_sense? */
 			printf("%s: mfi_scsipi_request poll failed\n",
 			    DEVNAME(sc));
-			mfi_put_ccb(ccb);
 			bzero(&xs->sense, sizeof(xs->sense));
 			xs->sense.scsi_sense.response_code =
 			    SSD_RCODE_VALID | SSD_RCODE_CURRENT;
@@ -1684,7 +1683,7 @@ mfi_ioctl_blink(struct mfi_softc *sc, struct bioc_blink *bb)
 
 	memset(mbox, 0, sizeof mbox);
 
-	*((uint16_t *)&mbox) = pd->mpl_address[i].mpa_pd_id;;
+	*((uint16_t *)&mbox) = pd->mpl_address[i].mpa_pd_id;
 
 	switch (bb->bb_status) {
 	case BIOC_SBUNBLINK:
@@ -1741,7 +1740,7 @@ mfi_ioctl_setstate(struct mfi_softc *sc, struct bioc_setstate *bs)
 
 	memset(mbox, 0, sizeof mbox);
 
-	*((uint16_t *)&mbox) = pd->mpl_address[i].mpa_pd_id;;
+	*((uint16_t *)&mbox) = pd->mpl_address[i].mpa_pd_id;
 
 	switch (bs->bs_status) {
 	case BIOC_SSONLINE:

@@ -1,4 +1,4 @@
-/*	$NetBSD: socket.h,v 1.10 2008/11/12 12:36:11 ad Exp $	*/
+/*	$NetBSD: socket.h,v 1.12 2009/02/13 22:41:04 apb Exp $	*/
 
 /*
  * Copyright (c) 1982, 1985, 1986, 1988, 1993, 1994
@@ -40,6 +40,7 @@
 #include "opt_compat_svr4.h"
 #include "opt_compat_ultrix.h"
 #include "opt_compat_43.h"
+#include "opt_modular.h"
 
 #if defined(COMPAT_43) || defined(COMPAT_LINUX) || defined(COMPAT_SVR4) || \
     defined(COMPAT_ULTRIX) || defined(MODULAR)
@@ -71,6 +72,12 @@ struct omsghdr {
 };
 
 #ifdef _KERNEL
+
+#define	SO_OSNDTIMEO	0x1005
+#define	SO_ORCVTIMEO	0x1006
+#define	SO_OTIMESTAMP	0x0400
+#define	SCM_OTIMESTAMP	0x2
+
 __BEGIN_DECLS
 struct socket;
 struct proc;

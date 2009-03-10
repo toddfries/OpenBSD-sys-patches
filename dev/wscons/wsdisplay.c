@@ -1,4 +1,4 @@
-/* $NetBSD: wsdisplay.c,v 1.123 2008/11/07 19:33:13 he Exp $ */
+/* $NetBSD: wsdisplay.c,v 1.126 2009/01/22 20:40:20 drochner Exp $ */
 
 /*
  * Copyright (c) 1996, 1997 Christopher G. Demetriou.  All rights reserved.
@@ -31,11 +31,10 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: wsdisplay.c,v 1.123 2008/11/07 19:33:13 he Exp $");
+__KERNEL_RCSID(0, "$NetBSD: wsdisplay.c,v 1.126 2009/01/22 20:40:20 drochner Exp $");
 
 #include "opt_wsdisplay_compat.h"
 #include "opt_wsmsgattrs.h"
-#include "opt_compat_netbsd.h"
 #include "wskbd.h"
 #include "wsmux.h"
 #include "wsdisplay.h"
@@ -57,9 +56,9 @@ __KERNEL_RCSID(0, "$NetBSD: wsdisplay.c,v 1.123 2008/11/07 19:33:13 he Exp $");
 #include <sys/vnode.h>
 #include <sys/kauth.h>
 
+#include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wseventvar.h>
 #include <dev/wscons/wsmuxvar.h>
-#include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
 #include <dev/wscons/wsksymvar.h>
 #include <dev/wscons/wsksymdef.h>
@@ -96,6 +95,11 @@ struct wsscreen {
 #endif
 
 	struct wsdisplay_softc *sc;
+
+#ifdef DIAGNOSTIC
+	/* XXX this is to support a hack in emulinput, see comment below */
+	int scr_in_ttyoutput;
+#endif
 };
 
 struct wsscreen *wsscreen_attach(struct wsdisplay_softc *, int,
@@ -1308,6 +1312,8 @@ wsdisplay_internal_ioctl(struct wsdisplay_softc *sc, struct wsscreen *scr,
 	case WSDISPLAYIO_SMSGATTRS:
 		return (ENODEV);
 #endif
+	case WSDISPLAYIO_SETVERSION:
+		return wsevent_setversion(&sc->evar, *(int *)data);
 	}
 
 	/* check ioctls for display */
@@ -1523,6 +1529,10 @@ wsdisplaystart(struct tty *tp)
 	tp->t_state |= TS_BUSY;
 	splx(s);
 
+#ifdef DIAGNOSTIC
+	scr->scr_in_ttyoutput = 1;
+#endif
+
 	/*
 	 * Drain output from ring buffer.
 	 * The output will normally be in one contiguous chunk, but when the
@@ -1552,6 +1562,10 @@ wsdisplaystart(struct tty *tp)
 		}
 		ndflush(&tp->t_outq, n);
 	}
+
+#ifdef DIAGNOSTIC
+	scr->scr_in_ttyoutput = 0;
+#endif
 
 	s = spltty();
 	tp->t_state &= ~TS_BUSY;
@@ -1609,6 +1623,7 @@ wsdisplay_emulinput(void *v, const u_char *data, u_int count)
 {
 	struct wsscreen *scr = v;
 	struct tty *tp;
+	int (*ifcn)(int, struct tty *);
 
 	if (v == NULL)			/* console, before real attach */
 		return;
@@ -1619,8 +1634,21 @@ wsdisplay_emulinput(void *v, const u_char *data, u_int count)
 		return;
 
 	tp = scr->scr_tty;
+
+	/*
+	 * XXX bad hack to work around locking problems in tty.c:
+	 * ttyinput() will try to lock again, causing deadlock.
+	 * We assume that wsdisplay_emulinput() can only be called
+	 * from within wsdisplaystart(), and thus the tty lock
+	 * is already held. Use an entry point which doesn't lock.
+	 */
+	KASSERT(scr->scr_in_ttyoutput);
+	ifcn = tp->t_linesw->l_rint;
+	if (ifcn == ttyinput)
+		ifcn = ttyinput_wlock;
+
 	while (count-- > 0)
-		(*tp->t_linesw->l_rint)(*data++, tp);
+		(*ifcn)(*data++, tp);
 }
 
 /*

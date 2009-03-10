@@ -1,4 +1,4 @@
-/*	$NetBSD: iwm_fd.c,v 1.44 2008/11/12 12:36:03 ad Exp $	*/
+/*	$NetBSD: iwm_fd.c,v 1.46 2009/01/13 13:35:52 yamt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998 Hauke Fath.  All rights reserved.
@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: iwm_fd.c,v 1.44 2008/11/12 12:36:03 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: iwm_fd.c,v 1.46 2009/01/13 13:35:52 yamt Exp $");
 
 #ifdef _MODULE
 #define IWMCF_DRIVE 0
@@ -1078,7 +1078,7 @@ fdstrategy(struct buf *bp)
 		}
 		spl = splbio();
 		callout_stop(&fd->motor_ch);
-		BUFQ_PUT(fd->bufQueue, bp);
+		bufq_put(fd->bufQueue, bp);
 		if (fd->sc_active == 0)
 			fdstart(fd);
 		splx(spl);
@@ -1189,7 +1189,7 @@ fdstart_Init(fd_softc_t *fd)
 	 * Get the first entry from the queue. This is the buf we gave to
 	 * fdstrategy(); disksort() put it into our softc.
 	 */
-	bp = BUFQ_PEEK(fd->bufQueue);
+	bp = bufq_peek(fd->bufQueue);
 	if (NULL == bp) {
 		if (TRACE_STRAT)
 			printf("Queue empty: Nothing to do");
@@ -1584,7 +1584,7 @@ fdstart_Exit(fd_softc_t *fd)
 			    fd->pos.track, fd->pos.side, fd->pos.sector);
 #endif
 
-	bp = BUFQ_GET(fd->bufQueue);
+	bp = bufq_get(fd->bufQueue);
 
 	bp->b_resid = fd->bytesLeft;
 	bp->b_error = (0 == fd->iwmErr) ? 0 : EIO;
@@ -1597,7 +1597,7 @@ fdstart_Exit(fd_softc_t *fd)
 	}
 	if (DISABLED && TRACE_STRAT)
 		printf(" Next buf (bufQueue first) at %p\n",
-		    BUFQ_PEEK(fd->bufQueue));
+		    bufq_peek(fd->bufQueue));
 	disk_unbusy(&fd->diskInfo, bp->b_bcount - bp->b_resid,
 	    (bp->b_flags & B_READ));
 	biodone(bp);
@@ -1697,8 +1697,8 @@ fdGetDiskLabel(fd_softc_t *fd, dev_t dev)
 	struct cpu_disklabel *clp;
 
 	if (TRACE_IOCTL)
-		printf("iwm: fdGetDiskLabel() for disk %d.\n",
-		    minor(dev) / MAXPARTITIONS);
+		printf("iwm: fdGetDiskLabel() for disk %" PRIu64 ".\n",
+		    (dev_t) (minor(dev) / MAXPARTITIONS));
 	fdType = minor(dev) % MAXPARTITIONS;
 	lp = fd->diskInfo.dk_label;
 	clp = fd->diskInfo.dk_cpulabel;

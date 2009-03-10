@@ -1,4 +1,4 @@
-/*	$NetBSD: rump_vfs.c,v 1.8 2008/12/31 00:57:45 pooka Exp $	*/
+/*	$NetBSD: rump_vfs.c,v 1.13 2009/02/22 20:28:06 ad Exp $	*/
 
 /*
  * Copyright (c) 2008 Antti Kantee.  All Rights Reserved.
@@ -35,6 +35,7 @@ __KERNEL_RCSID(0, "$NetBSD");
 #include <sys/buf.h>
 #include <sys/conf.h>
 #include <sys/filedesc.h>
+#include <sys/lockf.h>
 #include <sys/module.h>
 #include <sys/namei.h>
 #include <sys/queue.h>
@@ -74,25 +75,30 @@ pvfs_rele(struct proc *p)
 	cwdfree(p->p_cwdi);
 }
 
-static const struct bdevsw rumpblk_bdevsw;
-static const struct cdevsw rumpblk_cdevsw;
-
 void
 rump_vfs_init()
 {
-	int rumpblk = RUMPBLK;
+	char buf[64];
+	int error;
 
 	syncdelay = 0;
 	dovfsusermount = 1;
 
-	devsw_attach("rumpblk", &rumpblk_bdevsw, &rumpblk,
-	    &rumpblk_cdevsw, &rumpblk);
+	rumpblk_init();
+
+	if (rumpuser_getenv("RUMP_NVNODES", buf, sizeof(buf), &error) == 0) {
+		desiredvnodes = strtoul(buf, NULL, 10);
+	} else {
+		desiredvnodes = 1<<16;
+	}
 
 	cache_cpu_init(&rump_cpu);
 	vfsinit();
 	bufinit();
 	wapbl_init();
 	cwd_sys_init();
+	lf_init();
+
 	rumpuser_bioinit(rump_biodone);
 	rumpfs_init();
 
@@ -505,14 +511,6 @@ rump_vfs_syncwait(struct mount *mp)
 }
 
 void
-rump_bioops_sync()
-{
-
-	if (bioopsp)
-		bioopsp->io_sync(NULL);
-}
-
-void
 rump_biodone(void *arg, size_t count, int error)
 {
 	struct buf *bp = arg;
@@ -521,9 +519,7 @@ rump_biodone(void *arg, size_t count, int error)
 	KASSERT(bp->b_resid >= 0);
 	bp->b_error = error;
 
-	rump_intr_enter();
 	biodone(bp);
-	rump_intr_exit();
 }
 
 static void

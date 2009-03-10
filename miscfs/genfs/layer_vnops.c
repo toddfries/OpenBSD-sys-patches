@@ -1,4 +1,4 @@
-/*	$NetBSD: layer_vnops.c,v 1.35 2008/01/30 09:50:23 ad Exp $	*/
+/*	$NetBSD: layer_vnops.c,v 1.37 2009/02/14 16:57:05 plunky Exp $	*/
 
 /*
  * Copyright (c) 1999 National Aeronautics & Space Administration
@@ -232,7 +232,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: layer_vnops.c,v 1.35 2008/01/30 09:50:23 ad Exp $");
+__KERNEL_RCSID(0, "$NetBSD: layer_vnops.c,v 1.37 2009/02/14 16:57:05 plunky Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -261,7 +261,6 @@ __KERNEL_RCSID(0, "$NetBSD: layer_vnops.c,v 1.35 2008/01/30 09:50:23 ad Exp $");
  *    The 10-Apr-92 version was optimized for speed, throwing away some
  * safety checks.  It should still always work, but it's not as
  * robust to programmer errors.
- *    Define SAFETY to include some error checking code.
  *
  * In general, we map all vnodes going down and unmap them on the way back.
  *
@@ -300,7 +299,7 @@ layer_bypass(v)
 	struct vnodeop_desc *descp = ap->a_desc;
 	int reles, i, flags;
 
-#ifdef SAFETY
+#ifdef DIAGNOSTIC
 	/*
 	 * We require at least one vp.
 	 */
@@ -458,8 +457,9 @@ layer_lookup(v)
 	if (ldvp == lvp) {
 
 		/*
-		 * Did lookup on "." or ".." in the root node of a mount point.
-		 * So we return dvp after a VREF.
+		 * Got the same object back, because we looked up ".",
+		 * or ".." in the root node of a mount point.
+		 * So we make another reference to dvp and return it.
 		 */
 		VREF(dvp);
 		*ap->a_vpp = dvp;

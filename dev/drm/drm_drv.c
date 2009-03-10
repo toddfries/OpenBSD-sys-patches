@@ -1,4 +1,4 @@
-/* $NetBSD: drm_drv.c,v 1.19 2008/07/03 17:36:44 drochner Exp $ */
+/* $NetBSD: drm_drv.c,v 1.22 2009/01/31 13:49:29 bouyer Exp $ */
 
 /* drm_drv.h -- Generic driver template -*- linux-c -*-
  * Created: Thu Nov 23 03:10:50 2000 by gareth@valinux.com
@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: drm_drv.c,v 1.19 2008/07/03 17:36:44 drochner Exp $");
+__KERNEL_RCSID(0, "$NetBSD: drm_drv.c,v 1.22 2009/01/31 13:49:29 bouyer Exp $");
 /*
 __FBSDID("$FreeBSD: src/sys/dev/drm/drm_drv.c,v 1.6 2006/09/07 23:04:47 anholt Exp $");
 */
@@ -259,6 +259,10 @@ void drm_attach(struct device *kdev, struct pci_attach_args *pa,
 int drm_detach(struct device *self, int flags)
 {
 	drm_device_t *dev = device_private(self);
+
+	/* XXX locking */
+	if (dev->open_count)
+		return EBUSY;
 	drm_unload(dev);
 	drm_units[dev->unit] = NULL;
 	return 0;
@@ -409,7 +413,7 @@ static int drm_lastclose(drm_device_t *dev)
 
 	for(i = 0; i<DRM_MAX_PCI_RESOURCE; i++) {
 		if (dev->pci_map_data[i].mapped > 1) {
-			bus_space_unmap(dev->pci_map_data[i].maptype,
+			bus_space_unmap(dev->pa.pa_memt,
 					dev->pci_map_data[i].bsh,
 					dev->pci_map_data[i].size);
 			dev->pci_map_data[i].mapped = 0;
@@ -816,7 +820,7 @@ static int
 drm_modcmd(modcmd_t cmd, void *arg)
 {
 #ifdef _MODULE
-	int bmajor = -1, cmajor = -1;
+	devmajor_t bmajor = NODEVMAJOR, cmajor = NODEVMAJOR;
 
 	switch (cmd) {
 	case MODULE_CMD_INIT:

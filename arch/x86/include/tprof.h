@@ -1,4 +1,4 @@
-/*	$NetBSD: tprof.h,v 1.1 2008/01/01 21:28:39 yamt Exp $	*/
+/*	$NetBSD: tprof.h,v 1.2 2009/02/24 06:03:54 yamt Exp $	*/
 
 /*-
  * Copyright (c)2008 YAMAMOTO Takashi,
@@ -29,7 +29,6 @@
 #ifndef _X86_TPROF_H_
 #define	_X86_TPROF_H_
 
-struct trapframe;
-int tprof_pmi_nmi(const struct trapframe *);
+/* XXX nothing */
 
 #endif /* _X86_TPROF_H_ */

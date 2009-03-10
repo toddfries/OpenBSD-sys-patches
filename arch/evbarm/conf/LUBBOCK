@@ -100,7 +100,6 @@ options		COMPAT_BSDPTY	# /dev/[pt]ty?? ptys.
 #options 	SEMUME=10	# max number of undo entries per process
 #options 	SEMMNU=30	# number of undo structures in system
 #options 	SYSVSHM		# System V-like memory sharing
-#options 	SHMMAXPGS=1024	# 1024 pages is the default
 
 # Device options
 
@@ -240,9 +239,6 @@ xi*	at xirc?
 mhzc*	at pcmcia? function ?		# Megahertz Ethernet/Modem combo cards
 com*	at mhzc?
 sm*	at mhzc?
-
-# PCMCIA audio devices
-#esl*	at pcmcia? function ?			# ESS 1688 AudioDrive
 
 # Pseudo-Devices
 

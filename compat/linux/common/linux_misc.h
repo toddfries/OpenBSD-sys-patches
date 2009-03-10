@@ -1,4 +1,4 @@
-/*	$NetBSD: linux_misc.h,v 1.17 2008/05/28 12:01:10 njoly Exp $	*/
+/*	$NetBSD: linux_misc.h,v 1.19 2009/01/19 13:31:40 njoly Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -122,11 +122,16 @@ struct linux_mnttypes {
 extern const struct linux_mnttypes linux_fstypes[];
 extern const int linux_fstypes_cnt;
 
+/* Personality types. */
+#define LINUX_PER_LINUX		0x00000000
+#define LINUX_PER_LINUX32	0x00000008
+#define LINUX_PER_QUERY		0xffffffff
+
 #ifdef _KERNEL
 __BEGIN_DECLS
 int bsd_to_linux_wstat(int);
 int linux_select1(struct lwp *, register_t *, int, fd_set *, fd_set *,
-		       fd_set *, struct timeval *);
+		       fd_set *, struct linux_timeval *);
 __END_DECLS
 #endif /* !_KERNEL */
 

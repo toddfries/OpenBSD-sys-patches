@@ -1,4 +1,4 @@
-/* $NetBSD: hypervisor.c,v 1.42 2008/10/24 21:09:24 jym Exp $ */
+/* $NetBSD: hypervisor.c,v 1.45 2009/03/10 17:17:30 bouyer Exp $ */
 
 /*
  * Copyright (c) 2005 Manuel Bouyer.
@@ -63,7 +63,7 @@
 
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hypervisor.c,v 1.42 2008/10/24 21:09:24 jym Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hypervisor.c,v 1.45 2009/03/10 17:17:30 bouyer Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -124,12 +124,6 @@ __KERNEL_RCSID(0, "$NetBSD: hypervisor.c,v 1.42 2008/10/24 21:09:24 jym Exp $");
 #endif
 #ifdef MPBIOS
 #include <machine/mpbiosvar.h>       
-#endif
-#ifdef PCI_BUS_FIXUP
-#include <arch/i386/pci/pci_bus_fixup.h>
-#ifdef PCI_ADDR_FIXUP
-#include <arch/i386/pci/pci_addr_fixup.h>
-#endif  
 #endif
 #endif /* NPCI */
 
@@ -243,12 +237,14 @@ hypervisor_attach(device_t parent, device_t self, void *aux)
 	int i, j, busnum;
 #endif
 
-#ifdef PCI_BUS_FIXUP
-	int pci_maxbus = 0;
-#endif
 #endif /* NPCI */
 	union hypervisor_attach_cookie hac;
 
+#ifdef DOM0OPS
+	if (xendomain_is_privileged()) {
+		xenkernfs_init();
+	}
+#endif
 #ifdef XEN3
 	xen_version = HYPERVISOR_xen_version(XENVER_version, NULL);
 	aprint_normal(": Xen version %d.%d\n", (xen_version & 0xffff0000) >> 16,
@@ -290,6 +286,7 @@ hypervisor_attach(device_t parent, device_t self, void *aux)
 #endif
 #if NPCI > 0
 #ifdef XEN3
+#ifdef DOM0OPS
 #if NACPI > 0
 	if (acpi_present) {
 		hac.hac_acpi.aa_iot = X86_BUS_SPACE_IO;
@@ -329,6 +326,7 @@ hypervisor_attach(device_t parent, device_t self, void *aux)
 	if (mp_verbose)
 		acpi_pci_link_state();
 #endif
+#endif /* DOM0OPS */
 #else /* !XEN3 */
 	physdev_op.cmd = PHYSDEVOP_PCI_PROBE_ROOT_BUSES;
 	if ((i = HYPERVISOR_physdev_op(&physdev_op)) < 0) {
@@ -380,7 +378,6 @@ hypervisor_attach(device_t parent, device_t self, void *aux)
 
 #ifdef DOM0OPS
 	if (xendomain_is_privileged()) {
-		xenkernfs_init();
 		xenprivcmd_init();
 		xen_shm_init();
 #ifndef XEN3

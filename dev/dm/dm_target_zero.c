@@ -1,4 +1,4 @@
-/*        $NetBSD: dm_target_zero.c,v 1.4 2008/12/21 00:59:39 haad Exp $      */
+/*        $NetBSD: dm_target_zero.c,v 1.7 2009/02/19 23:07:33 haad Exp $      */
 
 /*
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -51,7 +51,7 @@
 #include <sys/kernel.h>
 #include <sys/module.h>
 
-MODULE(MODULE_CLASS_MISC, dm_target_zero, NULL);
+MODULE(MODULE_CLASS_MISC, dm_target_zero, "dm");
 
 static int
 dm_target_zero_modcmd(modcmd_t cmd, void *arg)
@@ -62,9 +62,10 @@ dm_target_zero_modcmd(modcmd_t cmd, void *arg)
 	
 	switch (cmd) {
 	case MODULE_CMD_INIT:
-		if ((dmt = dm_target_lookup("zero")) != NULL)
+		if ((dmt = dm_target_lookup("zero")) != NULL){
+			dm_target_unbusy(dmt);
 			return EEXIST;
-
+		}
 		dmt = dm_target_alloc("zero");
 		
 		dmt->version[0] = 1;
@@ -83,6 +84,7 @@ dm_target_zero_modcmd(modcmd_t cmd, void *arg)
 
 	case MODULE_CMD_FINI:
 		r = dm_target_rem("zero");
+
 		break;
 
 	case MODULE_CMD_STAT:

@@ -1,4 +1,4 @@
-/*	$NetBSD: init_main.c,v 1.378 2008/12/07 20:58:46 pooka Exp $	*/
+/*	$NetBSD: init_main.c,v 1.383 2009/03/05 06:37:03 yamt Exp $	*/
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -97,10 +97,11 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: init_main.c,v 1.378 2008/12/07 20:58:46 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: init_main.c,v 1.383 2009/03/05 06:37:03 yamt Exp $");
 
 #include "opt_ddb.h"
 #include "opt_ipsec.h"
+#include "opt_modular.h"
 #include "opt_ntp.h"
 #include "opt_pipe.h"
 #include "opt_syscall_debug.h"
@@ -108,6 +109,7 @@ __KERNEL_RCSID(0, "$NetBSD: init_main.c,v 1.378 2008/12/07 20:58:46 pooka Exp $"
 #include "opt_fileassoc.h"
 #include "opt_ktrace.h"
 #include "opt_pax.h"
+#include "opt_compat_netbsd.h"
 #include "opt_wapbl.h"
 
 #include "ksyms.h"
@@ -165,6 +167,7 @@ __KERNEL_RCSID(0, "$NetBSD: init_main.c,v 1.378 2008/12/07 20:58:46 pooka Exp $"
 #include <sys/once.h>
 #include <sys/ksyms.h>
 #include <sys/uidinfo.h>
+#include <sys/kprintf.h>
 #ifdef FAST_IPSEC
 #include <netipsec/ipsec.h>
 #endif
@@ -226,6 +229,11 @@ __KERNEL_RCSID(0, "$NetBSD: init_main.c,v 1.378 2008/12/07 20:58:46 pooka Exp $"
 
 #include <secmodel/secmodel.h>
 
+#ifdef COMPAT_50
+#include <compat/sys/time.h>
+struct timeval50 boottime50;
+#endif
+
 extern struct proc proc0;
 extern struct lwp lwp0;
 extern struct cwdinfo cwdi0;
@@ -239,59 +247,13 @@ struct	proc *initproc;
 struct	vnode *rootvp, *swapdev_vp;
 int	boothowto;
 int	cold = 1;			/* still working on startup */
-struct timeval boottime;	        /* time at system startup - will only follow settime deltas */
+struct timespec boottime;	        /* time at system startup - will only follow settime deltas */
 
 int	start_init_exec;		/* semaphore for start_init() */
 
 static void check_console(struct lwp *l);
 static void start_init(void *);
 void main(void);
-void ssp_init(void);
-
-#if defined(__SSP__) || defined(__SSP_ALL__)
-long __stack_chk_guard[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-void __stack_chk_fail(void);
-
-void
-__stack_chk_fail(void)
-{
-	panic("stack overflow detected; terminated");
-}
-
-void
-ssp_init(void)
-{
-	int s;
-
-#ifdef DIAGNOSTIC
-	printf("Initializing SSP:");
-#endif
-	/*
-	 * We initialize ssp here carefully:
-	 *	1. after we got some entropy
-	 *	2. without calling a function
-	 */
-	size_t i;
-	long guard[__arraycount(__stack_chk_guard)];
-
-	arc4randbytes(guard, sizeof(guard));
-	s = splhigh();
-	for (i = 0; i < __arraycount(guard); i++)
-		__stack_chk_guard[i] = guard[i];
-	splx(s);
-#ifdef DIAGNOSTIC
-	for (i = 0; i < __arraycount(guard); i++)
-		printf("%lx ", guard[i]);
-	printf("\n");
-#endif
-}
-#else
-void
-ssp_init(void)
-{
-
-}
-#endif
 
 void __secmodel_none(void);
 __weak_alias(secmodel_start,__secmodel_none);
@@ -310,7 +272,7 @@ __secmodel_none(void)
 void
 main(void)
 {
-	struct timeval time;
+	struct timespec time;
 	struct lwp *l;
 	struct proc *p;
 	int s, error;
@@ -339,6 +301,7 @@ main(void)
 #if ((NKSYMS > 0) || (NDDB > 0) || (NMODULAR > 0))
 	ksyms_init();
 #endif
+	kprintf_init();
 
 	percpu_init();
 
@@ -394,6 +357,9 @@ main(void)
 
 	/* Create process 0 (the swapper). */
 	proc0_init();
+
+	/* Disable preemption during boot. */
+	kpreempt_disable();
 
 	/* Initialize the UID hash table. */
 	uid_init();
@@ -504,6 +470,13 @@ main(void)
 
 	/* Configure the system hardware.  This will enable interrupts. */
 	configure();
+
+	ssp_init();
+
+	configure2();
+
+	/* Now timer is working.  Enable preemption. */
+	kpreempt_enable();
 
 	ubc_init();		/* must be after autoconfig */
 
@@ -654,13 +627,20 @@ main(void)
 	 * from the file system.  Reset l->l_rtime as it may have been
 	 * munched in mi_switch() after the time got set.
 	 */
-	getmicrotime(&time);
+	getnanotime(&time);
 	boottime = time;
+#ifdef COMPAT_50
+	{
+		struct timeval tv;
+		TIMESPEC_TO_TIMEVAL(&tv, &time);
+		timeval_to_timeval50(&tv, &boottime50);
+	}
+#endif
 	mutex_enter(proc_lock);
 	LIST_FOREACH(p, &allproc, p_list) {
 		KASSERT((p->p_flag & PK_MARKER) == 0);
 		mutex_enter(p->p_lock);
-		p->p_stats->p_start = time;
+		TIMESPEC_TO_TIMEVAL(&p->p_stats->p_start, &time);
 		LIST_FOREACH(l, &p->p_lwps, l_sibling) {
 			lwp_lock(l);
 			memset(&l->l_rtime, 0, sizeof(l->l_rtime));

@@ -1,4 +1,4 @@
-/* $NetBSD: kse.c,v 1.1 2008/05/31 01:43:57 nisimura Exp $ */
+/* $NetBSD: kse.c,v 1.3 2009/01/25 03:39:28 nisimura Exp $ */
 
 /*-
  * Copyright (c) 2008 The NetBSD Foundation, Inc.
@@ -44,19 +44,16 @@
  * - no VTOPHYS() translation, vaddr_t == paddr_t. 
  * - PIPT writeback cache aware.
  */
-#define CSR_READ(l, r)		in32rb((l)->csr+(r))
-#define CSR_WRITE(l, r, v) 	out32rb((l)->csr+(r), (v))
+#define CSR_READ_4(l, r)	in32rb((l)->csr+(r))
+#define CSR_WRITE_4(l, r, v) 	out32rb((l)->csr+(r), (v))
+#define CSR_READ_2(l, r)	in16rb((l)->csr+(r))
+#define CSR_WRITE_2(l, r, v) 	out16rb((l)->csr+(r), (v))
 #define VTOPHYS(va) 		(uint32_t)(va)
 #define DEVTOV(pa) 		(uint32_t)(pa)
 #define wbinv(adr, siz)		_wbinv(VTOPHYS(adr), (uint32_t)(siz))
 #define inv(adr, siz)		_inv(VTOPHYS(adr), (uint32_t)(siz))
 #define DELAY(n)		delay(n)
 #define ALLOC(T,A)	(T *)((unsigned)alloc(sizeof(T) + (A)) &~ ((A) - 1))
-
-int kse_match(unsigned, void *);
-void *kse_init(unsigned, void *);
-int kse_send(void *, char *, unsigned);
-int kse_recv(void *, char *, unsigned, unsigned);
 
 struct desc {
 	uint32_t xd0, xd1, xd2, xd3;
@@ -97,17 +94,8 @@ struct desc {
 #define MARM	0x202	/* MAC address middle */
 #define MARH	0x204	/* MAC address high */
 #define CIDR	0x400	/* chip ID and enable */
-#define P1CR4	0x510	/* port 1 control 4 */
+#define P1CR4	0x512	/* port 1 control 4 */
 #define P1SR	0x514	/* port 1 status */
-
-#define CSR_READ_4(l, off) \
-	    *(volatile unsigned *)((l)->csr + (off))
-#define CSR_WRITE_4(l, off, val) \
-	    *(volatile unsigned *)((l)->csr + (off)) = (val)
-#define CSR_READ_2(l, off) \
-	    *(volatile unsigned short *)((l)->csr + (off))
-#define CSR_WRITE_2(l, off, val) \
-	    *(volatile unsigned short *)((l)->csr + (off)) = (val)
 
 #define FRAMESIZE	1536
 
@@ -166,7 +154,7 @@ kse_init(unsigned tag, void *data)
 
 	val = pcicfgread(tag, PCI_ID_REG);
 	if (PCI_PRODUCT(val) == 0x8841) {
-		val = CSR_READ_4(l, P1SR);
+		val = CSR_READ_2(l, P1SR);
 		fdx = !!(val & (1U << 9));
 		printf("%s", (val & (1U << 8)) ? "100Mbps" : "10Mbps");
 		if (fdx)
@@ -208,7 +196,7 @@ kse_send(void *dev, char *buf, unsigned len)
 	txd->xd1 = htole32(T1_FS | T1_LS | (len & T1_TBS_MASK));
 	txd->xd0 = htole32(T0_OWN);
 	wbinv(txd, sizeof(struct desc));
-	CSR_WRITE(l, MDTSC, 01); /* start transmission */
+	CSR_WRITE_4(l, MDTSC, 01); /* start transmission */
 	loop = 100;
 	do {
 		txstat = le32toh(txd->xd0);
@@ -249,7 +237,7 @@ printf("recving with %u sec. timeout\n", timo);
 		rxd->xd0 = htole32(R0_OWN);
 		wbinv(rxd, sizeof(struct desc));
 		l->rx ^= 1;
-		CSR_WRITE(l, MDRSC, 01); /* restart receiving */
+		CSR_WRITE_4(l, MDRSC, 01); /* restart receiving */
 		goto again;
 	}
 	/* good frame */
@@ -262,7 +250,7 @@ printf("recving with %u sec. timeout\n", timo);
 	rxd->xd0 = htole32(R0_OWN);
 	wbinv(rxd, sizeof(struct desc));
 	l->rx ^= 1;
-	CSR_WRITE(l, MDRSC, 01); /* necessary? */
+	CSR_WRITE_4(l, MDRSC, 01); /* necessary? */
 	return len;
 }
 
@@ -272,10 +260,10 @@ mii_dealan(struct local *l, unsigned timo)
 	unsigned val, bound;
 
 	val = (1U << 13) | (1U << 7) | 0x1f /* advertise all caps */;
-	CSR_WRITE_4(l, P1CR4, val);
+	CSR_WRITE_2(l, P1CR4, val);
 	bound = getsecs() + timo;
 	do {
-		val = CSR_READ_4(l, P1SR);
+		val = CSR_READ_2(l, P1SR);
 		if (val & (1U << 5)) /* link is found up */
 			break;
 		DELAY(10 * 1000);

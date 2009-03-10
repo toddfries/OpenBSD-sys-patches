@@ -1,4 +1,4 @@
-/*	$NetBSD: vfs_subr.c,v 1.363 2008/12/29 17:41:18 pooka Exp $	*/
+/*	$NetBSD: vfs_subr.c,v 1.369 2009/02/22 20:28:06 ad Exp $	*/
 
 /*-
  * Copyright (c) 1997, 1998, 2004, 2005, 2007, 2008 The NetBSD Foundation, Inc.
@@ -81,7 +81,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vfs_subr.c,v 1.363 2008/12/29 17:41:18 pooka Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vfs_subr.c,v 1.369 2009/02/22 20:28:06 ad Exp $");
 
 #include "opt_ddb.h"
 #include "opt_compat_netbsd.h"
@@ -100,7 +100,7 @@ __KERNEL_RCSID(0, "$NetBSD: vfs_subr.c,v 1.363 2008/12/29 17:41:18 pooka Exp $")
 #include <sys/ucred.h>
 #include <sys/buf.h>
 #include <sys/errno.h>
-#include <sys/malloc.h>
+#include <sys/kmem.h>
 #include <sys/syscallargs.h>
 #include <sys/device.h>
 #include <sys/filedesc.h>
@@ -163,8 +163,6 @@ kmutex_t vfs_list_lock;
 
 static pool_cache_t vnode_cache;
 
-MALLOC_DEFINE(M_VNODE, "vnodes", "Dynamically allocated vnodes");
-
 /*
  * These define the root filesystem and device.
  */
@@ -178,7 +176,7 @@ struct device *root_device;			/* root device */
 static void vrele_thread(void *);
 static void insmntque(vnode_t *, struct mount *);
 static int getdevvp(dev_t, vnode_t **, enum vtype);
-static vnode_t *getcleanvnode(void);;
+static vnode_t *getcleanvnode(void);
 void vpanic(vnode_t *, const char *);
 
 #ifdef DEBUG 
@@ -737,7 +735,6 @@ insmntque(vnode_t *vp, struct mount *mp)
 #ifdef DIAGNOSTIC
 	if ((mp != NULL) &&
 	    (mp->mnt_iflag & IMNT_UNMOUNT) &&
-	    !(mp->mnt_flag & MNT_SOFTDEP) &&
 	    vp->v_tag != VT_VFS) {
 		panic("insmntque into dying filesystem");
 	}
@@ -1990,6 +1987,11 @@ vrevoke(vnode_t *vp)
 	if ((vp->v_iflag & VI_CLEAN) != 0) {
 		mutex_exit(&vp->v_interlock);
 		return;
+	} else if (vp->v_type != VBLK && vp->v_type != VCHR) {
+		atomic_inc_uint(&vp->v_usecount);
+		vclean(vp, DOCLOSE);
+		vrelel(vp, 0);
+		return;
 	} else {
 		dev = vp->v_rdev;
 		type = vp->v_type;
@@ -2147,7 +2149,7 @@ sysctl_kern_vnode(SYSCTLFN_ARGS)
 			}
 			memcpy(&vbuf, vp, VNODESZ);
 			mutex_exit(&mntvnode_lock);
-			if ((error = copyout(vp, bp, VPTRSZ)) ||
+			if ((error = copyout(&vp, bp, VPTRSZ)) ||
 			   (error = copyout(&vbuf, bp + VPTRSZ, VNODESZ))) {
 			   	mutex_enter(&mntvnode_lock);
 				(void)vunmark(mvp);
@@ -2322,8 +2324,10 @@ vfs_mountroot(void)
 	case DV_IFNET:
 		if (rootdev != NODEV)
 			panic("vfs_mountroot: rootdev set for DV_IFNET "
-			    "(0x%08x -> %d,%d)", rootdev,
-			    major(rootdev), minor(rootdev));
+			    "(0x%llx -> %llu,%llu)",
+			    (unsigned long long)rootdev,
+			    (unsigned long long)major(rootdev),
+			    (unsigned long long)minor(rootdev));
 		break;
 
 	case DV_DISK:
@@ -2386,7 +2390,7 @@ vfs_mountroot(void)
 	if (v == NULL) {
 		printf("no file system for %s", device_xname(root_device));
 		if (device_class(root_device) == DV_DISK)
-			printf(" (dev 0x%x)", rootdev);
+			printf(" (dev 0x%llx)", (unsigned long long)rootdev);
 		printf("\n");
 		error = EFTYPE;
 	}
@@ -3067,8 +3071,8 @@ vfs_buf_print(struct buf *bp, int full, void (*pr)(const char *, ...))
 
 	(*pr)("  bufsize 0x%lx bcount 0x%lx resid 0x%lx\n",
 		  bp->b_bufsize, bp->b_bcount, bp->b_resid);
-	(*pr)("  data %p saveaddr %p dep %p\n",
-		  bp->b_data, bp->b_saveaddr, LIST_FIRST(&bp->b_dep));
+	(*pr)("  data %p saveaddr %p\n",
+		  bp->b_data, bp->b_saveaddr);
 	(*pr)("  iodone %p objlock %p\n", bp->b_iodone, bp->b_objlock);
 }
 

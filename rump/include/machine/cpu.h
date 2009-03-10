@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.h,v 1.5 2008/12/11 16:25:23 pooka Exp $	*/
+/*	$NetBSD: cpu.h,v 1.9 2009/01/06 13:20:34 pooka Exp $	*/
 
 /*
  * Copyright (c) 2007 Antti Kantee.  All Rights Reserved.
@@ -30,6 +30,8 @@
 #ifndef _SYS_RUMP_CPU_H_
 #define _SYS_RUMP_CPU_H_
 
+#ifndef _LOCORE
+
 #include <sys/cpu_data.h>
 #include <machine/pcb.h>
 
@@ -47,6 +49,18 @@ struct cpu_info {
 #define IPI_SEND_CNCHAR 0
 #define IPI_DDB 0
 #endif /* __vax__ */
+
+/*
+ * More stinky hacks, this time for powerpc.  Will go away eventually.
+ */
+#ifdef __powerpc__
+	struct cache_info {
+		int dcache_size;
+		int dcache_line_size;
+		int icache_size;
+		int icache_line_size;
+	} ci_ci;
+#endif /* __powerpc */
 };
 
 /* more dirty rotten vax kludges */
@@ -54,11 +68,17 @@ struct cpu_info {
 static __inline void cpu_handle_ipi(void) {}
 #endif /* __vax__ */
 
+#ifdef __powerpc__
+void __syncicache(void *, size_t);
+#endif
+
 extern struct cpu_info rump_cpu;
 #define curcpu() (&rump_cpu)
 #define cpu_number() 0 /* XXX: good enuf? */
 
 struct lwp *rump_get_curlwp(void); /* XXX */
 #define curlwp rump_get_curlwp()
+
+#endif /* !_LOCORE */
 
 #endif /* _SYS_RUMP_CPU_H_ */
