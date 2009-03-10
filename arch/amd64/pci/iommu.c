@@ -230,7 +230,9 @@ amdgart_ok(pci_chipset_tag_t pc, pcitag_t tag)
 	v = pci_conf_read(pc, tag, PCI_ID_REG);
 	if (PCI_VENDOR(v) != PCI_VENDOR_AMD)
 		return (0);
-	if (PCI_PRODUCT(v) != PCI_PRODUCT_AMD_AMD64_0F_MISC)
+	if (PCI_PRODUCT(v) != PCI_PRODUCT_AMD_AMD64_0F_MISC &&
+	    PCI_PRODUCT(v) != PCI_PRODUCT_AMD_AMD64_10_MISC &&
+	    PCI_PRODUCT(v) != PCI_PRODUCT_AMD_AMD64_11_MISC)
 		return (0);
 
 	v = pci_conf_read(pc, tag, GART_APCTRL);
