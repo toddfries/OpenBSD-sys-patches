@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.58 2009/02/18 20:48:02 miod Exp $ */
+/*	$OpenBSD: locore.s,v 1.60 2009/03/01 22:08:13 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -158,6 +158,11 @@ ASENTRY_NOPROFILE(start)
 	RELOC(cputyp, a0)
 	movl	d0, a0@			| init _cputyp
 
+#ifdef MVME141
+	cmpw	#CPU_141, d0
+	beq	is141
+#endif
+
 #ifdef MVME147
 	cmpw	#CPU_147, d0
 	beq	is147
@@ -168,6 +173,11 @@ ASENTRY_NOPROFILE(start)
 	beq	is162
 #endif
 
+#ifdef MVME165
+	cmpw	#CPU_165, d0
+	beq	is165
+#endif
+
 #ifdef MVME167
 	cmpw	#CPU_166, d0
 	beq	is167
@@ -176,10 +186,8 @@ ASENTRY_NOPROFILE(start)
 #endif
 
 #ifdef MVME177
-#ifdef notyet	
         cmpw	#CPU_176, d0
 	beq	is177
-#endif        
         cmpw	#CPU_177, d0
 	beq	is177
 #endif
@@ -203,6 +211,31 @@ notsupend:
 
 	BUGCALL(MVMEPROM_EXIT)		| return to m68kbug
 	/*NOTREACHED*/
+
+#ifdef MVME141
+is141:
+	RELOC(mmutype, a0)		| no, we have 68030
+	movl	#MMU_68030,a0@		| set to reflect 68030 PMMU
+
+	RELOC(cputype, a0)		| no, we have 68030
+	movl	#CPU_68030,a0@		| set to reflect 68030 CPU
+
+	RELOC(clockbus, a0)		| timer is on ofobio
+	movl	#BUS_OFOBIO, a0@
+
+	movl	#CACHE_OFF,d0
+	movc	d0,cacr			| clear and disable on-chip cache(s)
+
+	ASRELOC(memsize141, a1)		| how much memory?
+	jbsr	a1@
+	movl	d0, d1
+
+	RELOC(iiomapsize, a1)
+	movl	#INTIOSIZE_141, a1@
+	RELOC(iiomapbase, a1)
+	movl	#INTIOBASE_141, a1@
+	bra	Lstart1
+#endif
 
 #ifdef MVME147
 is147:
@@ -269,6 +302,39 @@ is162:
 	movl	#_C_LABEL(addrerr4060),a1@(12)
 
 	bra	is16x
+#endif
+
+#ifdef MVME165
+is165:
+	movl	#0xfffe0000, a0		| MVME165 CSR
+	movl	a0@, d0
+	movl	#4*1024*1024, d1
+	btst	#18, d0			| 4MEG*
+	jeq	1f			| not set, this is a 4MB board.
+	movl	#16*1024*1024, d1	| set, this is a 16MB board.
+
+	RELOC(mmutype, a0)
+	movl	#MMU_68040,a0@		| with a 68040 MMU
+
+	RELOC(cputype, a0)		| no, we have 68040
+	movl	#CPU_68040,a0@		| set to reflect 68040 CPU
+
+	RELOC(fputype, a0)
+	movl	#FPU_68040,a0@		| and a 68040 FPU
+
+	RELOC(clockbus, a0)		| timer is on lrc
+	movl	#BUS_LRC, a0@
+
+	RELOC(vectab, a1)
+	movl	#_C_LABEL(buserr40),a1@(8)
+	movl	#_C_LABEL(addrerr4060),a1@(12)
+
+	RELOC(iiomapsize, a1)
+	movl	#INTIOSIZE_165, a1@
+	RELOC(iiomapbase, a1)
+	movl	#INTIOBASE_165, a1@
+
+	bra	Lstart1
 #endif
 
 #ifdef MVME167
@@ -422,19 +488,6 @@ Lstart2:
 	addl	#NBPG-1,d2
 	andl	#PG_FRAME,d2		| round to a page
 	movl	d2,a4
-#if 0
-	| XXX clear from end-of-kernel to 1M, as a workaround for an
-	| insane pmap_bootstrap bug I cannot find (68040-specific)
-	movl	a4,a0
-	movl	#1024*1024,d0
-	cmpl	a0,d0			| end of kernel is beyond 1M?
-	jlt	2f
-	subl	a0,d0
-1:	clrb	a0@+
-	subql	#1,d0
-	bne	1b
-2:
-#endif
 
 /* do pmap_bootstrap stuff */	
 	clrl	sp@-			| firstpa
@@ -443,6 +496,7 @@ Lstart2:
 	jbsr	a0@			| pmap_bootstrap(firstpa, nextpa)
 	addql	#8,sp
 
+#if defined(M68040) || defined(M68060)
 /*
  * While still running physical, override copypage() with the 68040
  * optimized version, copypage040(), if possible.
@@ -459,6 +513,7 @@ Lstart2:
 	movw	a0@+, a2@+
 	cmpl	a0, a1
 	jgt	1b
+#endif
 
 /*
  * Enable the MMU.
@@ -540,10 +595,8 @@ Lenab2:
 	movc	d0,cacr			| clear cache(s)
 Lnocache0:
 /* final setup for C code */
-#if 1
 	movl	#_vectab,d2		| set VBR
 	movc	d2,vbr
-#endif	
 	movw	#PSL_LOWIPL,sr		| lower SPL
 	movl	d3, _C_LABEL(bootpart)	| save bootpart
 	movl	d4, _C_LABEL(bootdevlun) | save bootdevlun
@@ -621,7 +674,45 @@ Lmemc040berr:
 	movl	d0,sp			| Get rid of the exception frame
 	clrl	d0			| No ASIC at this location, then!
 	jbra	Lmemc040ret		| Done
-#endif
+
+#endif	/* 162 | 167 | 172 | 177 */
+
+#ifdef MVME141
+ASLOCAL(memsize141)
+	moveml	d1-d3/a0-a2,sp@-	| save working registers
+	movc	vbr,d2			| save vbr
+	RELOC(vectab,a2)
+	movc	a2,vbr			| install our own vectab
+	ASRELOC(Lmem141sizeerr,a1)
+	movl	a2@(8),sp@-		| save bus error and
+	movl	a2@(12),sp@-		| address error vectors
+	movl	a1,a2@(8)		| and put ours in place
+	movl	a1,a2@(12)
+	movl	sp,d3			| save stack
+	movql	#0,d0
+	movl	d0,a0			| starting test address
+Lmem141loop:
+	movb	a0@,d0			| try byte, word and long access
+	movw	a0@,d0
+	movl	a0@,d0
+	movl	d0,d1
+	movl	a0@,d0			| read it again
+	cmp	d0,d1			| and compare
+	bne	Lmem141ret		| if they differ, it's not ram
+	movel	#(1024 * 1024),d0
+	addl	d0,a0
+	bra	Lmem141loop
+Lmem141ret:
+	movl	a0,d0			| d0 = size in bytes
+	movc	d2,vbr			| restore vbr
+	movl	sp@+,a2@(12)		| and vectors
+	movl	sp@+,a2@(8)
+	moveml	sp@+,d1-d3/a0-a2
+	rts
+ASLOCAL(Lmem141sizeerr)
+	movl	d3,sp			| get rid of the exception frame
+	jbra	Lmem141ret
+#endif	/* MVME141 */
 
 /*
  * proc_trampoline: call function in register a2 with a3 as an arg
@@ -1700,6 +1791,7 @@ Lbootnot040:
 	cmpw	#CPU_147,d0
 	bne	not147
 	movl	#0xfffe2000,a0		| MVME147: "struct vme1reg *"
+vmechipreset:
 	movw	a0@,d0
 	movl	d0,d1
 	andw	#0x0001,d1		| is VME1_SCON_SWITCH set?
@@ -1714,6 +1806,22 @@ Lbootnot040:
 	bra	3f
 
 not147:
+	cmpw	#CPU_165, d0
+	bne	not165
+	movl	#0xfff90020,a0		| disable timer2 (clock)
+	movl	#0, a0@
+	movl	#0xfffb0000,a0		| MVME165 VMEChip base address
+	/* similar to MVME147 sequence above */
+	bra	vmechipreset
+
+not165:
+	cmpw	#CPU_141, d0
+	bne	not141
+	movl	#0xfffb0000,a0		| MVME141 VMEChip base address
+	/* similar to MVME147 sequence above */
+	bra	vmechipreset
+
+not141:
 	movl	#0xfff40000,a0		| MVME16x: "struct vme2reg *"
 	movl	a0@(0x60),d0
 	movl	d0,d1
