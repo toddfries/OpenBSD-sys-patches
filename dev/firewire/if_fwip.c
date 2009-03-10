@@ -33,7 +33,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  * 
- * $FreeBSD: src/sys/dev/firewire/if_fwip.c,v 1.17 2008/03/25 09:38:58 ru Exp $
+ * $FreeBSD: src/sys/dev/firewire/if_fwip.c,v 1.18 2009/02/09 16:58:18 fjoe Exp $
  */
 
 #ifdef HAVE_KERNEL_OPTION_HEADERS
@@ -427,7 +427,7 @@ fwip_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 #ifdef DEVICE_POLLING
 	    {
 		struct ifreq *ifr = (struct ifreq *) data;
-		struct firewire_comm *fc = fc = fwip->fd.fc;
+		struct firewire_comm *fc = fwip->fd.fc;
 
 		if (ifr->ifr_reqcap & IFCAP_POLLING &&
 		    !(ifp->if_capenable & IFCAP_POLLING)) {

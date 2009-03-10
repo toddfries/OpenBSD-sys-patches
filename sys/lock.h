@@ -26,7 +26,7 @@
  * SUCH DAMAGE.
  *
  *	from BSDI $Id: mutex.h,v 2.7.2.35 2000/04/27 03:10:26 cp Exp $
- * $FreeBSD: src/sys/sys/lock.h,v 1.75 2008/09/10 19:13:30 jhb Exp $
+ * $FreeBSD: src/sys/sys/lock.h,v 1.76 2009/01/21 04:19:18 thompsa Exp $
  */
 
 #ifndef _SYS_LOCK_H_
@@ -216,6 +216,8 @@ int	witness_warn(int, struct lock_object *, const char *, ...);
 void	witness_assert(struct lock_object *, int, const char *, int);
 void	witness_display_spinlock(struct lock_object *, struct thread *);
 int	witness_line(struct lock_object *);
+void	witness_norelease(struct lock_object *);
+void	witness_releaseok(struct lock_object *);
 const char *witness_file(struct lock_object *);
 void	witness_thread_exit(struct thread *);
 
@@ -267,6 +269,12 @@ void	witness_thread_exit(struct thread *);
 #define	WITNESS_RESTORE(lock, n) 					\
 	witness_restore((lock), __CONCAT(n, __wf), __CONCAT(n, __wl))
 
+#define	WITNESS_NORELEASE(lock)						\
+	witness_norelease(&(lock)->lock_object)
+
+#define	WITNESS_RELEASEOK(lock)						\
+	witness_releaseok(&(lock)->lock_object)
+
 #define	WITNESS_FILE(lock) 						\
 	witness_file(lock)
 
@@ -287,6 +295,8 @@ void	witness_thread_exit(struct thread *);
 #define	WITNESS_SAVE_DECL(n)
 #define	WITNESS_SAVE(lock, n)
 #define	WITNESS_RESTORE(lock, n)
+#define	WITNESS_NORELEASE(lock)
+#define	WITNESS_RELEASEOK(lock)
 #define	WITNESS_FILE(lock) ("?")
 #define	WITNESS_LINE(lock) (0)
 #endif	/* WITNESS */

@@ -28,12 +28,13 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_divert.c,v 1.142 2008/12/10 23:12:39 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_divert.c,v 1.143 2009/02/03 11:00:43 rrs Exp $");
 
 #if !defined(KLD_MODULE)
 #include "opt_inet.h"
 #include "opt_ipfw.h"
 #include "opt_mac.h"
+#include "opt_sctp.h"
 #ifndef INET
 #error "IPDIVERT requires INET."
 #endif
@@ -76,6 +77,9 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_divert.c,v 1.142 2008/12/10 23:12:39 zec 
 #include <netinet/ip_var.h>
 #include <netinet/ip_fw.h>
 #include <netinet/vinet.h>
+#ifdef SCTP
+#include <netinet/sctp_crc32.h>
+#endif
 
 #include <security/mac/mac_framework.h>
 
@@ -222,7 +226,14 @@ divert_packet(struct mbuf *m, int incoming)
 		m->m_pkthdr.csum_flags &= ~CSUM_DELAY_DATA;
 		ip->ip_len = htons(ip->ip_len);
 	}
-
+#ifdef SCTP
+	if (m->m_pkthdr.csum_flags & CSUM_SCTP) {
+		ip->ip_len = ntohs(ip->ip_len);
+		sctp_delayed_cksum(m);
+		m->m_pkthdr.csum_flags &= ~CSUM_SCTP;
+		ip->ip_len = htons(ip->ip_len);
+	}
+#endif
 	/*
 	 * Record receive interface address, if any.
 	 * But only for incoming packets.

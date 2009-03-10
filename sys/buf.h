@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)buf.h	8.9 (Berkeley) 3/30/95
- * $FreeBSD: src/sys/sys/buf.h,v 1.207 2008/03/28 12:30:12 attilio Exp $
+ * $FreeBSD: src/sys/sys/buf.h,v 1.208 2009/03/09 19:35:20 jhb Exp $
  */
 
 #ifndef _SYS_BUF_H_
@@ -446,10 +446,10 @@ buf_countdeps(struct buf *bp, int i)
 
 #ifdef _KERNEL
 extern int	nbuf;			/* The number of buffer headers */
-extern int	maxswzone;		/* Max KVA for swap structures */
-extern int	maxbcache;		/* Max KVA for buffer cache */
-extern int	runningbufspace;
-extern int	hibufspace;
+extern long	maxswzone;		/* Max KVA for swap structures */
+extern long	maxbcache;		/* Max KVA for buffer cache */
+extern long	runningbufspace;
+extern long	hibufspace;
 extern int	dirtybufthresh;
 extern int	bdwriteskip;
 extern int	dirtybufferflushes;

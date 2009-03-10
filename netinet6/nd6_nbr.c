@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/nd6_nbr.c,v 1.60 2008/12/24 01:08:18 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/nd6_nbr.c,v 1.61 2009/01/31 10:48:02 bz Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -259,7 +259,7 @@ nd6_ns_input(struct mbuf *m, int off, int icmp6len)
 		need_proxy = (rt && (rt->rt_flags & RTF_ANNOUNCE) != 0 &&
 		    rt->rt_gateway->sa_family == AF_LINK);
 		if (rt)
-			rtfree(rt);
+			RTFREE_LOCKED(rt);
 		if (need_proxy) {
 			/*
 			 * proxy NDP for single entry

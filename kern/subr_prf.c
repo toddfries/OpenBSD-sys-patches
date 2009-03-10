@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_prf.c,v 1.134 2008/12/21 21:54:01 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_prf.c,v 1.138 2009/02/27 13:28:54 ed Exp $");
 
 #include "opt_ddb.h"
 #include "opt_printf.h"
@@ -127,13 +127,14 @@ tablefull(const char *tab)
 int
 uprintf(const char *fmt, ...)
 {
-	struct thread *td = curthread;
-	struct proc *p = td->td_proc;
 	va_list ap;
 	struct putchar_arg pca;
+	struct proc *p;
+	struct thread *td;
 	int retval;
 
-	if (td == NULL || TD_IS_IDLETHREAD(td))
+	td = curthread;
+	if (TD_IS_IDLETHREAD(td))
 		return (0);
 
 	sx_slock(&proctree_lock);
@@ -294,38 +295,11 @@ int
 printf(const char *fmt, ...)
 {
 	va_list ap;
-	struct putchar_arg pca;
 	int retval;
-#ifdef PRINTF_BUFR_SIZE
-	char bufr[PRINTF_BUFR_SIZE];
-#endif
 
 	va_start(ap, fmt);
-	pca.tty = NULL;
-	pca.flags = TOCONS | TOLOG;
-	pca.pri = -1;
-#ifdef PRINTF_BUFR_SIZE
-	pca.p_bufr = bufr;
-	pca.p_next = pca.p_bufr;
-	pca.n_bufr = sizeof(bufr);
-	pca.remain = sizeof(bufr);
-	*pca.p_next = '\0';
-#else
-	/* Don't buffer console output. */
-	pca.p_bufr = NULL;
-#endif
-
-	retval = kvprintf(fmt, putchar, &pca, 10, ap);
+	retval = vprintf(fmt, ap);
 	va_end(ap);
-
-#ifdef PRINTF_BUFR_SIZE
-	/* Write any buffered console output: */
-	if (*pca.p_bufr != '\0')
-		cnputs(pca.p_bufr);
-#endif
-
-	if (!panicstr)
-		msgbuftrigger = 1;
 
 	return (retval);
 }
@@ -959,7 +933,7 @@ sysctl_kern_msgbuf(SYSCTL_HANDLER_ARGS)
 }
 
 SYSCTL_PROC(_kern, OID_AUTO, msgbuf, CTLTYPE_STRING | CTLFLAG_RD,
-    0, 0, sysctl_kern_msgbuf, "A", "Contents of kernel message buffer");
+    NULL, 0, sysctl_kern_msgbuf, "A", "Contents of kernel message buffer");
 
 static int msgbuf_clearflag;
 

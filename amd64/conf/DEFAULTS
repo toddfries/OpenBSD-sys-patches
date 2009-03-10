@@ -1,7 +1,7 @@
 #
 # DEFAULTS -- Default kernel configuration file for FreeBSD/amd64
 #
-# $FreeBSD: src/sys/amd64/conf/DEFAULTS,v 1.14 2008/12/17 17:43:22 marcel Exp $
+# $FreeBSD: src/sys/amd64/conf/DEFAULTS,v 1.15 2009/02/10 00:08:39 marcel Exp $
 
 machine		amd64
 
@@ -17,4 +17,5 @@ device		uart_ns8250
 
 # Default partitioning schemes
 options 	GEOM_PART_BSD
+options 	GEOM_PART_EBR
 options 	GEOM_PART_MBR

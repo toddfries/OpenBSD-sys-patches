@@ -36,7 +36,7 @@
  * 
  * Author: Archie Cobbs <archie@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_l2tp.c,v 1.29 2008/11/22 16:40:12 mav Exp $
+ * $FreeBSD: src/sys/netgraph/ng_l2tp.c,v 1.30 2009/02/28 16:21:25 ed Exp $
  */
 
 /*
@@ -341,9 +341,6 @@ NETGRAPH_INIT(l2tp, &ng_l2tp_typestruct);
 #else
 #define L2TP_SEQ_CHECK(x)	do { } while (0)
 #endif
-
-/* memmove macro */
-#define memmove(d, s, l)	bcopy(s, d, l)
 
 /* Whether to use m_copypacket() or m_dup() */
 #define L2TP_COPY_MBUF		m_copypacket

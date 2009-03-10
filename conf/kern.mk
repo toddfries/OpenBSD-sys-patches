@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/kern.mk,v 1.57 2008/07/23 06:16:34 imp Exp $
+# $FreeBSD: src/sys/conf/kern.mk,v 1.59 2009/03/03 18:53:47 imp Exp $
 
 #
 # Warning flags for compiling the kernel and components of the kernel.
@@ -78,9 +78,10 @@ INLINE_LIMIT?=	8000
 #
 # For PowerPC we tell gcc to use floating point emulation.  This avoids using
 # floating point registers for integer operations which it has a tendency to do.
+# Also explicitly disable Altivec instructions inside the kernel.
 #
 .if ${MACHINE_ARCH} == "powerpc"
-CFLAGS+=	-msoft-float
+CFLAGS+=	-msoft-float -mno-altivec
 INLINE_LIMIT?=	15000
 .endif
 
@@ -90,7 +91,7 @@ INLINE_LIMIT?=	15000
 #
 .if ${MACHINE_ARCH} == "mips"
 CFLAGS+=	-msoft-float -mno-dsp
-INLINE_LIMIT?=	15000
+INLINE_LIMIT?=	8000
 .endif
 
 #

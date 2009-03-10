@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netipsec/ipsec_output.c,v 1.23 2008/12/02 21:37:28 bz Exp $
+ * $FreeBSD: src/sys/netipsec/ipsec_output.c,v 1.24 2009/01/30 20:17:08 bz Exp $
  */
 
 /*
@@ -791,14 +791,14 @@ ipsec6_output_tunnel(struct ipsec_output_state *state, struct secpolicy *sp, int
 			RTFREE(state->ro->ro_rt);
 			state->ro->ro_rt = NULL;
 		}
-		if (state->ro->ro_rt == 0) {
+		if (state->ro->ro_rt == NULL) {
 			bzero(dst6, sizeof(*dst6));
 			dst6->sin6_family = AF_INET6;
 			dst6->sin6_len = sizeof(*dst6);
 			dst6->sin6_addr = ip6->ip6_dst;
 			rtalloc(state->ro);
 		}
-		if (state->ro->ro_rt == 0) {
+		if (state->ro->ro_rt == NULL) {
 			V_ip6stat.ip6s_noroute++;
 			V_ipsec6stat.ips_out_noroute++;
 			error = EHOSTUNREACH;

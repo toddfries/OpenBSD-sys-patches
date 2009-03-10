@@ -14,7 +14,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $FreeBSD: src/sys/dev/ath/ath_hal/ar5312/ar5312_attach.c,v 1.3 2008/12/15 00:29:26 sam Exp $
+ * $FreeBSD: src/sys/dev/ath/ath_hal/ar5312/ar5312_attach.c,v 1.4 2009/02/13 01:50:04 sam Exp $
  */
 #include "opt_ah.h"
 
@@ -321,6 +321,7 @@ ar5312Probe(uint16_t vendorid, uint16_t devid)
 		case AR5212_AR2315_REV7:
 			return "Atheros 2315 WiSoC";
 		case AR5212_AR2317_REV1:
+		case AR5212_AR2317_REV2:
 			return "Atheros 2317 WiSoC";
 		case AR5212_AR2413:
 			return "Atheros 2413";

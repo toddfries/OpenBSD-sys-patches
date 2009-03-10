@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)nfsnode.h	8.9 (Berkeley) 5/14/95
- * $FreeBSD: src/sys/nfsclient/nfsnode.h,v 1.63 2008/06/26 10:21:54 dfr Exp $
+ * $FreeBSD: src/sys/nfsclient/nfsnode.h,v 1.64 2009/02/19 22:28:48 jhb Exp $
  */
 
 #ifndef _NFSCLIENT_NFSNODE_H_
@@ -109,6 +109,7 @@ struct nfsnode {
 	time_t			n_modestamp;	/* mode cache timestamp */
 	struct timespec		n_mtime;	/* Prev modify time. */
 	time_t			n_ctime;	/* Prev create time. */
+	time_t			n_dmtime;	/* Prev dir modify time. */
 	time_t			n_expiry;	/* Lease expiry time */
 	nfsfh_t			*n_fhp;		/* NFS File Handle */
 	struct vnode		*n_vnode;	/* associated vnode */

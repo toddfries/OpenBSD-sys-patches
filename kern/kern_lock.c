@@ -29,7 +29,7 @@
 #include "opt_ddb.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_lock.c,v 1.137 2008/09/10 19:13:30 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_lock.c,v 1.138 2009/02/06 20:06:48 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/ktr.h>
@@ -897,14 +897,14 @@ lockmgr_printinfo(struct lock *lk)
 	uintptr_t x;
 
 	if (lk->lk_lock == LK_UNLOCKED)
-		printf(" lock type %s: UNLOCKED\n", lk->lock_object.lo_name);
+		printf("lock type %s: UNLOCKED\n", lk->lock_object.lo_name);
 	else if (lk->lk_lock & LK_SHARE)
-		printf(" lock type %s: SHARED (count %ju)\n",
+		printf("lock type %s: SHARED (count %ju)\n",
 		    lk->lock_object.lo_name,
 		    (uintmax_t)LK_SHARERS(lk->lk_lock));
 	else {
 		td = lockmgr_xholder(lk);
-		printf(" lock type %s: EXCL by thread %p (pid %d)\n",
+		printf("lock type %s: EXCL by thread %p (pid %d)\n",
 		    lk->lock_object.lo_name, td, td->td_proc->p_pid);
 	}
 

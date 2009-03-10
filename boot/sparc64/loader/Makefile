@@ -1,8 +1,7 @@
-# $FreeBSD: src/sys/boot/sparc64/loader/Makefile,v 1.21 2008/06/25 21:33:28 ru Exp $
-
-WITHOUT_SSP=
+# $FreeBSD: src/sys/boot/sparc64/loader/Makefile,v 1.22 2009/02/21 15:04:31 ru Exp $
 
 .include <bsd.own.mk>
+MK_SSP=		no
 
 PROG=		loader
 NEWVERSWHAT=	"bootstrap loader" sparc64

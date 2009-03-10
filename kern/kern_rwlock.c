@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_rwlock.c,v 1.42 2008/12/08 21:46:55 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_rwlock.c,v 1.43 2009/02/26 15:51:54 ed Exp $");
 
 #include "opt_ddb.h"
 #include "opt_no_adaptive_rwlocks.h"
@@ -732,7 +732,6 @@ _rw_wunlock_hard(struct rwlock *rw, uintptr_t tid, const char *file, int line)
 			CTR2(KTR_LOCK, "%s: %p unrecursing", __func__, rw);
 		return;
 	}
-	v = rw->rw_lock;
 
 	KASSERT(rw->rw_lock & (RW_LOCK_READ_WAITERS | RW_LOCK_WRITE_WAITERS),
 	    ("%s: neither of the waiter flags are set", __func__));

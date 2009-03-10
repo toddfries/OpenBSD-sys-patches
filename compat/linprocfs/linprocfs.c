@@ -39,10 +39,11 @@
  *	@(#)procfs_status.c	8.4 (Berkeley) 6/15/94
  */
 
+#include "opt_route.h"
 #include "opt_compat.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linprocfs/linprocfs.c,v 1.133 2008/12/29 12:45:11 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linprocfs/linprocfs.c,v 1.136 2009/02/27 14:12:05 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/queue.h>
@@ -76,6 +77,7 @@ __FBSDID("$FreeBSD: src/sys/compat/linprocfs/linprocfs.c,v 1.133 2008/12/29 12:4
 #include <sys/vimage.h>
 
 #include <net/if.h>
+#include <net/route.h>
 #include <net/vnet.h>
 
 #include <vm/vm.h>
@@ -276,11 +278,17 @@ linprocfs_docpuinfo(PFS_FILL_ARGS)
 
 	sbuf_cat(sb, "flags\t\t:");
 
-	if (!strcmp(cpu_vendor, "AuthenticAMD") && (class < 6)) {
-		flags[16] = "fcmov";
-	} else if (!strcmp(cpu_vendor, "CyrixInstead")) {
+#ifdef __i386__
+	switch (cpu_vendor_id) {
+	case CPU_VENDOR_AMD:
+		if (class < 6)
+			flags[16] = "fcmov";
+		break;
+	case CPU_VENDOR_CYRIX:
 		flags[24] = "cxmmx";
+		break;
 	}
+#endif
 
 	for (i = 0; i < 32; i++)
 		if (cpu_feature & (1 << i))
@@ -321,7 +329,7 @@ linprocfs_domtab(PFS_FILL_ARGS)
 	error = namei(&nd);
 	lep = linux_emul_path;
 	if (error == 0) {
-		if (vn_fullpath(td, nd.ni_vp, &dlep, &flep) != 0)
+		if (vn_fullpath(td, nd.ni_vp, &dlep, &flep) == 0)
 			lep = dlep;
 		vrele(nd.ni_vp);
 		VFS_UNLOCK_GIANT(NDHASGIANT(&nd));

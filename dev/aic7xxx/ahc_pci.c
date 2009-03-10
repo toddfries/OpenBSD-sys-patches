@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/aic7xxx/ahc_pci.c,v 1.65 2006/09/03 00:27:40 jmg Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/aic7xxx/ahc_pci.c,v 1.66 2009/03/09 13:23:54 imp Exp $");
 
 #include <dev/aic7xxx/aic7xxx_osm.h>
 
@@ -54,7 +54,6 @@ static driver_t ahc_pci_driver = {
 };
 
 DRIVER_MODULE(ahc_pci, pci, ahc_pci_driver, ahc_devclass, 0, 0);
-DRIVER_MODULE(ahc_pci, cardbus, ahc_pci_driver, ahc_devclass, 0, 0);
 MODULE_DEPEND(ahc_pci, ahc, 1, 1, 1);
 MODULE_VERSION(ahc_pci, 1);
 

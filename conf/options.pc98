@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/options.pc98,v 1.204 2008/06/14 12:51:44 wkoszek Exp $
+# $FreeBSD: src/sys/conf/options.pc98,v 1.205 2009/02/06 20:57:10 wkoszek Exp $
 # Options specific to the pc98 platform kernels
 
 AUTO_EOI_1		opt_auto_eoi.h
@@ -96,6 +96,7 @@ DEV_NPX			opt_npx.h
 # Debugging
 NPX_DEBUG		opt_npx.h
 STOP_NMI		opt_cpu.h
+AGP_DEBUG		opt_agp.h
 
 # BPF just-in-time compiler
 BPF_JITTER		opt_bpf.h

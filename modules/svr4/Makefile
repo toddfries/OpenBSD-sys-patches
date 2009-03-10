@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/svr4/Makefile,v 1.32 2008/09/15 15:09:35 ed Exp $
+# $FreeBSD: src/sys/modules/svr4/Makefile,v 1.33 2009/02/12 14:44:15 n_hibma Exp $
 
 .PATH:	${.CURDIR}/../../${MACHINE_ARCH}/svr4 ${.CURDIR}/../../compat/svr4
 KMOD=	svr4
@@ -8,6 +8,8 @@ SRCS=	svr4_sysent.c svr4_sysvec.c opt_compat.h opt_mac.h opt_svr4.h \
 	svr4_termios.c svr4_stream.c svr4_socket.c svr4_sockio.c \
 	svr4_machdep.c svr4_resource.c svr4_ipc.c
 OBJS=	svr4_locore.o 
+
+SRCS+=	opt_ktrace.h opt_sysvipc.h opt_route.h
 
 CLEANFILES=	svr4_assym.h svr4_genassym.o
 

@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/machdep.c,v 1.676 2008/12/29 06:31:03 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/machdep.c,v 1.677 2009/03/05 19:42:11 jhb Exp $");
 
 #include "opt_apic.h"
 #include "opt_atalk.h"
@@ -1362,7 +1362,7 @@ SYSCTL_PROC(_machdep, OID_AUTO, idle, CTLTYPE_STRING | CTLFLAG_RW, 0, 0,
     idle_sysctl, "A", "currently selected idle function");
 
 /*
- * Clear registers on exec
+ * Reset registers to default values on exec.
  */
 void
 exec_setregs(td, entry, stack, ps_strings)
@@ -1427,6 +1427,7 @@ exec_setregs(td, entry, stack, ps_strings)
 	 * emulators don't provide an entry point for initialization.
 	 */
 	td->td_pcb->pcb_flags &= ~FP_SOFTFP;
+	pcb->pcb_initial_npxcw = __INITIAL_NPXCW__;
 
 	/*
 	 * Drop the FP state if we hold it, so that the process gets a

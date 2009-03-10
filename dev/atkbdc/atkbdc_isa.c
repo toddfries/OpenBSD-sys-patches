@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/atkbdc/atkbdc_isa.c,v 1.36 2006/07/03 23:40:58 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/atkbdc/atkbdc_isa.c,v 1.37 2009/02/05 18:38:39 imp Exp $");
 
 #include "opt_kbd.h"
 
@@ -47,8 +47,8 @@ __FBSDID("$FreeBSD: src/sys/dev/atkbdc/atkbdc_isa.c,v 1.36 2006/07/03 23:40:58 j
 
 static int	atkbdc_isa_probe(device_t dev);
 static int	atkbdc_isa_attach(device_t dev);
-static device_t	atkbdc_isa_add_child(device_t bus, int order, char *name,
-				 int unit);
+static device_t	atkbdc_isa_add_child(device_t bus, int order, const char *name,
+		    int unit);
 
 static device_method_t atkbdc_isa_methods[] = {
 	DEVMETHOD(device_probe,		atkbdc_isa_probe),
@@ -227,7 +227,7 @@ atkbdc_isa_attach(device_t dev)
 }
 
 static device_t
-atkbdc_isa_add_child(device_t bus, int order, char *name, int unit)
+atkbdc_isa_add_child(device_t bus, int order, const char *name, int unit)
 {
 	atkbdc_device_t	*ivar;
 	device_t	child;

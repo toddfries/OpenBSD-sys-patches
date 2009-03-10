@@ -1,8 +1,7 @@
-# $FreeBSD: src/sys/boot/ia64/common/Makefile,v 1.2 2008/06/25 21:33:28 ru Exp $
-
-WITHOUT_SSP=
+# $FreeBSD: src/sys/boot/ia64/common/Makefile,v 1.3 2009/02/21 15:04:31 ru Exp $
 
 .include <bsd.own.mk>
+MK_SSP=		no
 
 LIB=		ia64
 INTERNALLIB=

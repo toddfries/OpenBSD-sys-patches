@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/linux/linux_machdep.c,v 1.81 2008/11/11 14:55:59 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/linux/linux_machdep.c,v 1.82 2009/02/18 16:11:39 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -376,7 +376,7 @@ linux_vfork(struct thread *td, struct linux_vfork_args *args)
 	/* wait for the children to exit, ie. emulate vfork */
 	PROC_LOCK(p2);
 	while (p2->p_flag & P_PPWAIT)
-	   	msleep(td->td_proc, &p2->p_mtx, PWAIT, "ppwait", 0);
+		cv_wait(&p2->p_pwait, &p2->p_mtx);
 	PROC_UNLOCK(p2);
 
 	return (0);
@@ -581,7 +581,7 @@ linux_clone(struct thread *td, struct linux_clone_args *args)
    	   	/* wait for the children to exit, ie. emulate vfork */
    	   	PROC_LOCK(p2);
 		while (p2->p_flag & P_PPWAIT)
-   		   	msleep(td->td_proc, &p2->p_mtx, PWAIT, "ppwait", 0);
+			cv_wait(&p2->p_pwait, &p2->p_mtx);
 		PROC_UNLOCK(p2);
 	}
 

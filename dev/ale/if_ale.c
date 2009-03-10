@@ -28,7 +28,7 @@
 /* Driver for Atheros AR8121/AR8113/AR8114 PCIe Ethernet. */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ale/if_ale.c,v 1.3 2008/12/03 09:01:12 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ale/if_ale.c,v 1.4 2009/03/05 00:04:32 yongari Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -1543,20 +1543,11 @@ ale_resume(device_t dev)
 	struct ale_softc *sc;
 	struct ifnet *ifp;
 	int pmc;
-	uint16_t cmd, pmstat;
+	uint16_t pmstat;
 
 	sc = device_get_softc(dev);
 
 	ALE_LOCK(sc);
-	/*
-	 * Clear INTx emulation disable for hardwares that
-	 * is set in resume event. From Linux.
-	 */
-	cmd = pci_read_config(sc->ale_dev, PCIR_COMMAND, 2);
-	if ((cmd & 0x0400) != 0) {
-		cmd &= ~0x0400;
-		pci_write_config(sc->ale_dev, PCIR_COMMAND, cmd, 2);
-	}
 	if (pci_find_extcap(sc->ale_dev, PCIY_PMG, &pmc) == 0) {
 		/* Disable PME and clear PME status. */
 		pmstat = pci_read_config(sc->ale_dev,

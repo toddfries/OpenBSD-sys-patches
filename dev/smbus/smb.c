@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/smbus/smb.c,v 1.39 2008/06/06 18:45:32 jhb Exp $
+ * $FreeBSD: src/sys/dev/smbus/smb.c,v 1.40 2009/02/03 16:14:37 jhb Exp $
  */
 
 #ifdef HAVE_KERNEL_OPTION_HEADERS
@@ -179,6 +179,10 @@ smbioctl(struct cdev *dev, u_long cmd, caddr_t data, int flags, struct thread *t
 	char c;
 
 	parent = device_get_parent(smbdev);
+
+	/* Make sure that LSB bit is cleared. */
+	if (s->slave & 0x1)
+		return (EINVAL);
 
 	/* Allocate the bus. */
 	if ((error = smbus_request_bus(parent, smbdev,

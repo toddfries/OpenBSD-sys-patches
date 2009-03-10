@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/cd9660/cd9660_vnops.c,v 1.120 2008/11/18 23:19:43 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/cd9660/cd9660_vnops.c,v 1.121 2009/01/28 18:46:29 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -168,10 +168,14 @@ cd9660_open(ap)
 		int a_fdidx;
 	} */ *ap;
 {
-	struct iso_node *ip = VTOI(ap->a_vp);
+	struct vnode *vp = ap->a_vp;
+	struct iso_node *ip = VTOI(vp);
 
-	vnode_create_vobject(ap->a_vp, ip->i_size, ap->a_td);
-	return 0;
+	if (vp->v_type == VCHR || vp->v_type == VBLK)
+		return (EOPNOTSUPP);
+
+	vnode_create_vobject(vp, ip->i_size, ap->a_td);
+	return (0);
 }
 
 

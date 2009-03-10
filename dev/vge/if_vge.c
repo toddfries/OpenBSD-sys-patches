@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/vge/if_vge.c,v 1.33 2008/11/13 04:11:01 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/vge/if_vge.c,v 1.34 2009/03/09 13:23:54 imp Exp $");
 
 /*
  * VIA Networking Technologies VT612x PCI gigabit ethernet NIC driver.
@@ -221,7 +221,6 @@ static driver_t vge_driver = {
 static devclass_t vge_devclass;
 
 DRIVER_MODULE(vge, pci, vge_driver, vge_devclass, 0, 0);
-DRIVER_MODULE(vge, cardbus, vge_driver, vge_devclass, 0, 0);
 DRIVER_MODULE(miibus, vge, miibus_driver, miibus_devclass, 0, 0);
 
 #ifdef VGE_EEPROM

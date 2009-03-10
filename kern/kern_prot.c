@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_prot.c,v 1.215 2008/12/12 12:06:28 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_prot.c,v 1.216 2009/03/08 10:58:37 rwatson Exp $");
 
 #include "opt_compat.h"
 #include "opt_inet.h"
@@ -489,7 +489,7 @@ setuid(struct thread *td, struct setuid_args *uap)
 	oldcred = p->p_ucred;
 
 #ifdef MAC
-	error = mac_proc_check_setuid(p, oldcred, uid);
+	error = mac_cred_check_setuid(oldcred, uid);
 	if (error)
 		goto fail;
 #endif
@@ -601,7 +601,7 @@ seteuid(struct thread *td, struct seteuid_args *uap)
 	oldcred = p->p_ucred;
 
 #ifdef MAC
-	error = mac_proc_check_seteuid(p, oldcred, euid);
+	error = mac_cred_check_seteuid(oldcred, euid);
 	if (error)
 		goto fail;
 #endif
@@ -654,7 +654,7 @@ setgid(struct thread *td, struct setgid_args *uap)
 	oldcred = p->p_ucred;
 
 #ifdef MAC
-	error = mac_proc_check_setgid(p, oldcred, gid);
+	error = mac_cred_check_setgid(oldcred, gid);
 	if (error)
 		goto fail;
 #endif
@@ -753,7 +753,7 @@ setegid(struct thread *td, struct setegid_args *uap)
 	oldcred = p->p_ucred;
 
 #ifdef MAC
-	error = mac_proc_check_setegid(p, oldcred, egid);
+	error = mac_cred_check_setegid(oldcred, egid);
 	if (error)
 		goto fail;
 #endif
@@ -815,7 +815,7 @@ kern_setgroups(struct thread *td, u_int ngrp, gid_t *groups)
 	oldcred = p->p_ucred;
 
 #ifdef MAC
-	error = mac_proc_check_setgroups(p, oldcred, ngrp, groups);
+	error = mac_cred_check_setgroups(oldcred, ngrp, groups);
 	if (error)
 		goto fail;
 #endif
@@ -880,7 +880,7 @@ setreuid(register struct thread *td, struct setreuid_args *uap)
 	oldcred = p->p_ucred;
 
 #ifdef MAC
-	error = mac_proc_check_setreuid(p, oldcred, ruid, euid);
+	error = mac_cred_check_setreuid(oldcred, ruid, euid);
 	if (error)
 		goto fail;
 #endif
@@ -945,7 +945,7 @@ setregid(register struct thread *td, struct setregid_args *uap)
 	oldcred = p->p_ucred;
 
 #ifdef MAC
-	error = mac_proc_check_setregid(p, oldcred, rgid, egid);
+	error = mac_cred_check_setregid(oldcred, rgid, egid);
 	if (error)
 		goto fail;
 #endif
@@ -1016,7 +1016,7 @@ setresuid(register struct thread *td, struct setresuid_args *uap)
 	oldcred = p->p_ucred;
 
 #ifdef MAC
-	error = mac_proc_check_setresuid(p, oldcred, ruid, euid, suid);
+	error = mac_cred_check_setresuid(oldcred, ruid, euid, suid);
 	if (error)
 		goto fail;
 #endif
@@ -1093,7 +1093,7 @@ setresgid(register struct thread *td, struct setresgid_args *uap)
 	oldcred = p->p_ucred;
 
 #ifdef MAC
-	error = mac_proc_check_setresgid(p, oldcred, rgid, egid, sgid);
+	error = mac_cred_check_setresgid(oldcred, rgid, egid, sgid);
 	if (error)
 		goto fail;
 #endif

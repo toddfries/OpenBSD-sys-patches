@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_thr.c,v 1.73 2008/11/22 12:36:15 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_thr.c,v 1.74 2009/02/26 15:51:54 ed Exp $");
 
 #include "opt_compat.h"
 #include "opt_posix.h"
@@ -149,7 +149,6 @@ create_thread(struct thread *td, mcontext_t *ctx,
 	struct proc *p;
 	int error;
 
-	error = 0;
 	p = td->td_proc;
 
 	/* Have race condition but it is cheap. */
@@ -253,7 +252,7 @@ create_thread(struct thread *td, mcontext_t *ctx,
 	sched_add(newtd, SRQ_BORING);
 	thread_unlock(newtd);
 
-	return (error);
+	return (0);
 }
 
 int
@@ -403,7 +402,6 @@ thr_suspend(struct thread *td, struct thr_suspend_args *uap)
 	struct timespec ts, *tsp;
 	int error;
 
-	error = 0;
 	tsp = NULL;
 	if (uap->timeout != NULL) {
 		error = copyin((const void *)uap->timeout, (void *)&ts,

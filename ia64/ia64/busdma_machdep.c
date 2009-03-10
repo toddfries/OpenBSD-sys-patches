@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia64/busdma_machdep.c,v 1.47 2008/07/15 03:34:49 alc Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia64/busdma_machdep.c,v 1.48 2009/02/08 22:54:58 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -936,6 +936,13 @@ add_bounce_page(bus_dma_tag_t dmat, bus_dmamap_t map, vm_offset_t vaddr,
 	active_bpages++;
 	mtx_unlock(&bounce_lock);
 
+	if (dmat->flags & BUS_DMA_KEEP_PG_OFFSET) {
+		/* page offset needs to be preserved */
+		bpage->vaddr &= ~PAGE_MASK;
+		bpage->busaddr &= ~PAGE_MASK;
+		bpage->vaddr |= vaddr & PAGE_MASK;
+		bpage->busaddr |= vaddr & PAGE_MASK;
+	}
 	bpage->datavaddr = vaddr;
 	bpage->datacount = size;
 	STAILQ_INSERT_TAIL(&(map->bpages), bpage, links);

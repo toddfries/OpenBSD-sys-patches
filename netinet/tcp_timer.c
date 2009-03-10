@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/tcp_timer.c,v 1.105 2008/12/02 21:37:28 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/tcp_timer.c,v 1.106 2009/01/15 06:44:22 lstewart Exp $");
 
 #include "opt_inet6.h"
 #include "opt_tcpdebug.h"
@@ -587,6 +587,7 @@ tcp_timer_rexmt(void * xtp)
 		tp->t_dupacks = 0;
 	}
 	EXIT_FASTRECOVERY(tp);
+	tp->t_bytes_acked = 0;
 	(void) tcp_output(tp);
 
 out:

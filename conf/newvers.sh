@@ -28,7 +28,7 @@
 # SUCH DAMAGE.
 #
 #	@(#)newvers.sh	8.1 (Berkeley) 4/20/94
-# $FreeBSD: src/sys/conf/newvers.sh,v 1.78 2008/10/03 10:08:36 bz Exp $
+# $FreeBSD: src/sys/conf/newvers.sh,v 1.80 2009/01/20 21:37:41 thompsa Exp $
 
 TYPE="FreeBSD"
 REVISION="8.0"
@@ -91,6 +91,9 @@ for dir in /bin /usr/bin /usr/local/bin; do
 	if [ -x "${dir}/svnversion" ]; then
 		svnversion=${dir}/svnversion
 		SRCDIR=${d##*obj}
+		if [ -n "$MACHINE" ]; then
+			SRCDIR=${SRCDIR##/$MACHINE}
+		fi
 		SRCDIR=${SRCDIR%%/sys/*}
 		break
 	fi

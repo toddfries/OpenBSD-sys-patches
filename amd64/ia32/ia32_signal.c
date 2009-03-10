@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/ia32/ia32_signal.c,v 1.19 2008/09/02 17:52:11 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/ia32/ia32_signal.c,v 1.21 2009/03/05 19:42:11 jhb Exp $");
 
 #include "opt_compat.h"
 
@@ -328,8 +328,8 @@ freebsd4_ia32_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	sf.sf_uc.uc_mcontext.mc_onstack = (oonstack) ? 1 : 0;
 	sf.sf_uc.uc_mcontext.mc_gs = rgs();
 	sf.sf_uc.uc_mcontext.mc_fs = rfs();
-	__asm __volatile("movl %%es,%0" : "=rm" (sf.sf_uc.uc_mcontext.mc_es));
-	__asm __volatile("movl %%ds,%0" : "=rm" (sf.sf_uc.uc_mcontext.mc_ds));
+	__asm __volatile("mov %%es,%0" : "=rm" (sf.sf_uc.uc_mcontext.mc_es));
+	__asm __volatile("mov %%ds,%0" : "=rm" (sf.sf_uc.uc_mcontext.mc_ds));
 	sf.sf_uc.uc_mcontext.mc_edi = regs->tf_rdi;
 	sf.sf_uc.uc_mcontext.mc_esi = regs->tf_rsi;
 	sf.sf_uc.uc_mcontext.mc_ebp = regs->tf_rbp;
@@ -443,8 +443,8 @@ ia32_sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	sf.sf_uc.uc_mcontext.mc_onstack = (oonstack) ? 1 : 0;
 	sf.sf_uc.uc_mcontext.mc_gs = rgs();
 	sf.sf_uc.uc_mcontext.mc_fs = rfs();
-	__asm __volatile("movl %%es,%0" : "=rm" (sf.sf_uc.uc_mcontext.mc_es));
-	__asm __volatile("movl %%ds,%0" : "=rm" (sf.sf_uc.uc_mcontext.mc_ds));
+	__asm __volatile("mov %%es,%0" : "=rm" (sf.sf_uc.uc_mcontext.mc_es));
+	__asm __volatile("mov %%ds,%0" : "=rm" (sf.sf_uc.uc_mcontext.mc_ds));
 	sf.sf_uc.uc_mcontext.mc_edi = regs->tf_rdi;
 	sf.sf_uc.uc_mcontext.mc_esi = regs->tf_rsi;
 	sf.sf_uc.uc_mcontext.mc_ebp = regs->tf_rbp;
@@ -729,6 +729,7 @@ ia32_setregs(td, entry, stack, ps_strings)
 	pcb->pcb_es = _udatasel;
 	pcb->pcb_fs = _udatasel;
 	pcb->pcb_gs = _udatasel;
+	pcb->pcb_initial_fpucw = __INITIAL_FPUCW_I386__;
 
 	bzero((char *)regs, sizeof(struct trapframe));
 	regs->tf_rip = entry;

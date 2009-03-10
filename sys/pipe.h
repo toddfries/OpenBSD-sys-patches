@@ -18,7 +18,7 @@
  * 5. Modifications may be freely made to this file if the above conditions
  *    are met.
  *
- * $FreeBSD: src/sys/sys/pipe.h,v 1.30 2008/05/23 11:14:03 kib Exp $
+ * $FreeBSD: src/sys/sys/pipe.h,v 1.31 2009/03/09 19:35:20 jhb Exp $
  */
 
 #ifndef _SYS_PIPE_H_
@@ -56,7 +56,7 @@
 /*
  * See sys_pipe.c for info on what these limits mean. 
  */
-extern int	maxpipekva;
+extern u_long	maxpipekva;
 
 /*
  * Pipe buffer information.

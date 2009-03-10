@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/iicbus/iic.c,v 1.41 2009/01/06 17:23:37 nwhitehorn Exp $
+ * $FreeBSD: src/sys/dev/iicbus/iic.c,v 1.43 2009/01/26 13:53:39 raj Exp $
  *
  */
 #include <sys/param.h>
@@ -110,14 +110,18 @@ iic_identify(driver_t *driver, device_t parent)
 {
 
 	if (device_find_child(parent, "iic", -1) == NULL)
-		BUS_ADD_CHILD(parent, 0, "iic", 0);
+		BUS_ADD_CHILD(parent, 0, "iic", -1);
 }
 
 static int
 iic_probe(device_t dev)
 {
+	if (iicbus_get_addr(dev) > 0)
+		return (ENXIO);
+
 	device_set_desc(dev, "I2C generic I/O");
-	return (BUS_PROBE_NOWILDCARD);
+
+	return (0);
 }
 	
 static int
@@ -364,6 +368,11 @@ iicioctl(struct cdev *dev, u_long cmd, caddr_t data, int flags, struct thread *t
 		}
 		free(usrbufs, M_TEMP);
 		break;
+
+	case I2CRPTSTART:
+		error = iicbus_repeated_start(parent, s->slave, 0);
+		break;
+
 	default:
 		error = ENOTTY;
 	}

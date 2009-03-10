@@ -1,15 +1,22 @@
-# $FreeBSD: src/sys/modules/sound/driver/Makefile,v 1.26 2008/05/04 16:02:45 marius Exp $
+# $FreeBSD: src/sys/modules/sound/driver/Makefile,v 1.27 2009/01/25 18:20:15 nwhitehorn Exp $
+
+SUBDIR=		ad1816 als4000 atiixp cs4281 csa ds1 emu10k1 emu10kx
+SUBDIR+=	envy24 envy24ht es137x ess fm801 hda ich maestro maestro3
+SUBDIR+=	neomagic sb16 sb8 sbc solo spicds t4dwave via8233
+SUBDIR+=	via82c686 vibes driver uaudio
+
+.if ${MACHINE_ARCH} == "i386" || ${MACHINE_ARCH} == "amd64"
+SUBDIR+=	cmi mss
+.endif
 
 .if ${MACHINE_ARCH} == "sparc64"
 .if ${MACHINE} == "sparc64"
-audiocs=	audiocs
+SUBDIR+=	audiocs
 .endif
-SUBDIR=	${audiocs} es137x
-.else
-SUBDIR=		ad1816 als4000 atiixp cmi cs4281 csa ds1 emu10k1 emu10kx
-SUBDIR+=	envy24 envy24ht es137x ess fm801 hda ich maestro maestro3
-SUBDIR+=	mss neomagic sb16 sb8 sbc solo spicds t4dwave via8233
-SUBDIR+=	via82c686 vibes driver uaudio
+.endif
+
+.if ${MACHINE_ARCH} == "powerpc"
+SUBDIR+=	ai2s davbus
 .endif
 
 .include <bsd.subdir.mk>

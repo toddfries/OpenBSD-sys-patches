@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_fw_pfil.c,v 1.32 2008/12/16 15:05:35 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_fw_pfil.c,v 1.33 2009/02/16 15:10:51 luigi Exp $");
 
 #if !defined(KLD_MODULE)
 #include "opt_ipfw.h"
@@ -51,13 +51,13 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_fw_pfil.c,v 1.32 2008/12/16 15:05:35 rwat
 #include <sys/ucred.h>
 #include <sys/vimage.h>
 
+#define _NET_IF_VAR_H_	/* we don't want if_var.h, only if.h */
 #include <net/if.h>
 #include <net/route.h>
 #include <net/pfil.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/ip_fw.h>

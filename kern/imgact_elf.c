@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/imgact_elf.c,v 1.191 2008/12/17 16:54:29 peter Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/imgact_elf.c,v 1.192 2009/01/25 12:07:43 rwatson Exp $");
 
 #include "opt_compat.h"
 
@@ -822,7 +822,8 @@ __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp)
 			uprintf("ELF interpreter %s not found\n", interp);
 			return (error);
 		}
-	}
+	} else
+		addr = 0;
 
 	/*
 	 * Construct auxargs table (used by the fixup routine)

@@ -40,7 +40,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/malta/gt_pci.c,v 1.4 2008/09/19 04:16:13 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/malta/gt_pci.c,v 1.5 2009/01/14 22:32:43 gonzo Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -457,21 +457,7 @@ gt_pci_write_config(device_t dev, int bus, int slot, int func, int reg,
 		*	Should we set the mode explicitly during chip
 		*	Initialization?
 		*/ 
-		switch(reg % 4)
-		{
-		case 3:
-			shift = 24;
-			break;
-		case 2:
-			shift = 16;
-			break;
-		case 1:
-			shift = 8;
-			break;
-		default:
-			shift = 0;
-			break;
-		}	
+		shift = 8 * (reg & 3);
 
 		switch(bytes)
 		{

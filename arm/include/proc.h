@@ -32,7 +32,7 @@
  *
  *      from: @(#)proc.h        7.1 (Berkeley) 5/15/91
  *	from: FreeBSD: src/sys/i386/include/proc.h,v 1.11 2001/06/29
- * $FreeBSD: src/sys/arm/include/proc.h,v 1.5 2005/04/04 21:53:52 jhb Exp $
+ * $FreeBSD: src/sys/arm/include/proc.h,v 1.6 2009/02/12 23:23:30 cognet Exp $
  */
 
 #ifndef	_MACHINE_PROC_H_
@@ -51,6 +51,8 @@ struct mdthread {
 	int md_ptrace_instr;
 	int md_ptrace_addr;
 	void *md_tp;
+	void *md_ras_start;
+	void *md_ras_end;
 };
 
 struct mdproc {

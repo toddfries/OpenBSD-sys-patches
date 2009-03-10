@@ -1,7 +1,7 @@
 /*	$NetBSD: smc90cx6.c,v 1.38 2001/07/07 15:57:53 thorpej Exp $ */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cm/smc90cx6.c,v 1.19 2007/10/12 06:03:42 kevlo Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cm/smc90cx6.c,v 1.20 2009/02/12 23:55:35 rwatson Exp $");
 
 /*-
  * Copyright (c) 1994, 1995, 1998 The NetBSD Foundation, Inc.
@@ -861,14 +861,10 @@ cm_ioctl(ifp, command, data)
 	caddr_t data;
 {
 	struct cm_softc *sc;
-	struct ifaddr *ifa;
-	struct ifreq *ifr;
 	int error;
 
 	error = 0;
 	sc = ifp->if_softc;
-	ifa = (struct ifaddr *)data;
-	ifr = (struct ifreq *)data;
 
 #if defined(CM_DEBUG) && (CM_DEBUG > 2)
 	if_printf(ifp, "ioctl() called, cmd = 0x%lx\n", command);

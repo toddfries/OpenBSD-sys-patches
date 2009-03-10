@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/fs/msdosfs/msdosfsmount.h,v 1.39 2007/07/12 16:09:07 bde Exp $ */
+/* $FreeBSD: src/sys/fs/msdosfs/msdosfsmount.h,v 1.40 2009/02/27 20:00:15 jhb Exp $ */
 /*	$NetBSD: msdosfsmount.h,v 1.17 1997/11/17 15:37:07 ws Exp $	*/
 
 /*-
@@ -74,7 +74,8 @@ struct msdosfsmount {
 				   for files */
 	mode_t pm_dirmask;	/* mask to and with file protection bits
 				   for directories */
-	struct vnode *pm_devvp;	/* vnode for block device mntd */
+	struct vnode *pm_devvp;	/* vnode for character device mounted */
+	struct cdev *pm_dev;	/* character device mounted */
 	struct bpb50 pm_bpb;	/* BIOS parameter blk for this fs */
 	u_long pm_BlkPerSec;	/* How many DEV_BSIZE blocks fit inside a physical sector */
 	u_long pm_FATsecs;	/* actual number of fat sectors */

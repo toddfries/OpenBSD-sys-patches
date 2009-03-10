@@ -30,11 +30,12 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/nd6.c,v 1.103 2008/12/17 10:03:49 qingli Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/nd6.c,v 1.106 2009/02/27 14:12:05 bz Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_mac.h"
+#include "opt_route.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -52,6 +53,7 @@ __FBSDID("$FreeBSD: src/sys/netinet6/nd6.c,v 1.103 2008/12/17 10:03:49 qingli Ex
 #include <sys/rwlock.h>
 #include <sys/queue.h>
 #include <sys/sysctl.h>
+#include <sys/vimage.h>
 
 #include <net/if.h>
 #include <net/if_arc.h>
@@ -75,7 +77,6 @@ __FBSDID("$FreeBSD: src/sys/netinet6/nd6.c,v 1.103 2008/12/17 10:03:49 qingli Ex
 #include <netinet6/vinet6.h>
 
 #include <sys/limits.h>
-#include <sys/vimage.h>
 
 #include <security/mac/mac_framework.h>
 
@@ -83,7 +84,6 @@ __FBSDID("$FreeBSD: src/sys/netinet6/nd6.c,v 1.103 2008/12/17 10:03:49 qingli Ex
 #define ND6_RECALC_REACHTM_INTERVAL (60 * 120) /* 2 hours */
 
 #define SIN6(s) ((struct sockaddr_in6 *)s)
-#define SDL(s) ((struct sockaddr_dl *)s)
 
 #ifdef VIMAGE_GLOBALS
 int nd6_prune;

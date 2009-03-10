@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)unistd.h	8.2 (Berkeley) 1/7/94
- * $FreeBSD: src/sys/sys/unistd.h,v 1.49 2007/04/07 18:31:40 pjd Exp $
+ * $FreeBSD: src/sys/sys/unistd.h,v 1.50 2009/01/31 10:04:36 trhodes Exp $
  */
 
 #ifndef _SYS_UNISTD_H_
@@ -178,7 +178,7 @@
 #define	RFSIGSHARE	(1<<14)	/* share signal handlers */
 #define	RFLINUXTHPN	(1<<16)	/* do linux clone exit parent notification */
 #define	RFSTOPPED	(1<<17)	/* leave child in a stopped state */
-#define	RFHIGHPID	(1<<18)	/* use a pid higher then 10 (idleproc) */
+#define	RFHIGHPID	(1<<18)	/* use a pid higher than 10 (idleproc) */
 #define	RFPPWAIT	(1<<31)	/* parent sleeps until child exits (vfork) */
 #define	RFKERNELONLY	(RFSTOPPED | RFHIGHPID | RFPPWAIT)
 

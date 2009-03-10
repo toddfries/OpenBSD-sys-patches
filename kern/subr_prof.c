@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_prof.c,v 1.80 2008/03/16 10:58:05 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_prof.c,v 1.81 2009/02/03 07:52:36 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -404,9 +404,7 @@ struct profil_args {
 #endif
 /* ARGSUSED */
 int
-profil(td, uap)
-	struct thread *td;
-	register struct profil_args *uap;
+profil(struct thread *td, struct profil_args *uap)
 {
 	struct uprof *upp;
 	struct proc *p;

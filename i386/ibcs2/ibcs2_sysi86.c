@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_sysi86.c,v 1.24 2008/12/29 12:58:45 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_sysi86.c,v 1.25 2009/02/23 15:38:35 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/lock.h>
@@ -60,9 +60,10 @@ ibcs2_sysi86(struct thread *td, struct ibcs2_sysi86_args *args)
 	case SI86_FPHW: {	/* Floating Point information */
 		int val, error;
 
-		if (hw_float) val = IBCS2_FP_387;	/* FPU hardware */
-		else val = IBCS2_FP_SW;			/* FPU emulator */
-			
+		if (hw_float)
+			val = IBCS2_FP_387;
+		else
+			val = IBCS2_FP_NO;
 		if ((error = copyout(&val, args->arg, sizeof(val))) != 0)
 			return error;
 		return 0;

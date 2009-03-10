@@ -35,9 +35,10 @@
 #if defined(__FreeBSD__)
 #include "opt_inet.h"
 #include "opt_inet6.h"
+#include "opt_route.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_if.c,v 1.19 2008/12/13 19:13:03 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_if.c,v 1.20 2009/02/27 14:12:05 bz Exp $");
 #endif
 
 #include <sys/param.h>
@@ -61,6 +62,7 @@ __FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_if.c,v 1.19 2008/12/13 19:13:03 bz
 #include <net/if.h>
 #include <net/if_types.h>
 #ifdef __FreeBSD__
+#include <net/route.h>
 #include <net/vnet.h>
 #endif
 

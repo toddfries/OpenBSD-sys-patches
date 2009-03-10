@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsserver/nfs_serv.c,v 1.192 2008/12/16 04:34:09 kensmith Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsserver/nfs_serv.c,v 1.193 2009/02/13 18:18:14 jhb Exp $");
 
 /*
  * nfs version 2 and 3 server calls to vnode ops
@@ -3251,7 +3251,7 @@ again:
 	io.uio_rw = UIO_READ;
 	io.uio_td = NULL;
 	eofflag = 0;
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+	vn_lock(vp, LK_SHARED | LK_RETRY);
 	if (cookies) {
 		free((caddr_t)cookies, M_TEMP);
 		cookies = NULL;
@@ -3533,7 +3533,7 @@ again:
 	io.uio_rw = UIO_READ;
 	io.uio_td = NULL;
 	eofflag = 0;
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+	vn_lock(vp, LK_SHARED | LK_RETRY);
 	if (cookies) {
 		free((caddr_t)cookies, M_TEMP);
 		cookies = NULL;

@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)clist.h	8.1 (Berkeley) 6/4/93
- * $FreeBSD: src/sys/sys/clist.h,v 1.14 2008/09/21 18:12:18 ed Exp $
+ * $FreeBSD: src/sys/sys/clist.h,v 1.15 2009/02/04 17:10:01 ed Exp $
  */
 
 #ifndef _SYS_CLIST_H_
@@ -54,8 +54,6 @@ struct cblock {
 };
 
 #ifdef _KERNEL
-extern	int cfreecount;
-
 int	 b_to_q(char *cp, int cc, struct clist *q);
 void	 clist_alloc_cblocks(struct clist *q, int ccmax, int ccres);
 void	 clist_free_cblocks(struct clist *q);

@@ -27,14 +27,14 @@
  * SUCH DAMAGE.
  *
  *	@(#)tcp_debug.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/netinet/tcp_debug.h,v 1.16 2007/03/24 22:15:02 maxim Exp $
+ * $FreeBSD: src/sys/netinet/tcp_debug.h,v 1.17 2009/02/13 15:14:43 luigi Exp $
  */
 
 #ifndef _NETINET_TCP_DEBUG_H_
 #define	_NETINET_TCP_DEBUG_H_
 
 struct	tcp_debug {
-	n_time	td_time;
+	uint32_t	td_time;	/* network format */
 	short	td_act;
 	short	td_ostate;
 	caddr_t	td_tcb;

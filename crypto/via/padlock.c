@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/crypto/via/padlock.c,v 1.22 2009/01/12 19:23:46 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/crypto/via/padlock.c,v 1.23 2009/02/05 19:30:28 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -72,7 +72,7 @@ static int padlock_process(device_t, struct cryptop *crp, int hint __unused);
 MALLOC_DEFINE(M_PADLOCK, "padlock_data", "PadLock Data");
 
 static void
-padlock_identify(device_t *dev, device_t parent)
+padlock_identify(driver_t *drv, device_t parent)
 {
 	/* NB: order 10 is so we get attached after h/w devices */
 	if (device_find_child(parent, "padlock", -1) == NULL &&

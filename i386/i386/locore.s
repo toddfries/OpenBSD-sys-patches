@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)locore.s	7.3 (Berkeley) 5/13/91
- * $FreeBSD: src/sys/i386/i386/locore.s,v 1.189 2007/11/13 23:00:24 peter Exp $
+ * $FreeBSD: src/sys/i386/i386/locore.s,v 1.190 2009/01/31 11:37:21 obrien Exp $
  *
  *		originally from: locore.s, by William F. Jolitz
  *
@@ -338,7 +338,7 @@ NON_GPROF_ENTRY(sigcode)
 	pushl	%eax
 	testl	$PSL_VM,UC_EFLAGS(%eax)
 	jne	1f
-	movl	UC_GS(%eax),%gs		/* restore %gs */
+	mov	UC_GS(%eax),%gs		/* restore %gs */
 1:
 	movl	$SYS_sigreturn,%eax
 	pushl	%eax			/* junk to fake return addr. */
@@ -355,7 +355,7 @@ freebsd4_sigcode:
 	pushl	%eax
 	testl	$PSL_VM,UC4_EFLAGS(%eax)
 	jne	1f
-	movl	UC4_GS(%eax),%gs	/* restore %gs */
+	mov	UC4_GS(%eax),%gs	/* restore %gs */
 1:
 	movl	$344,%eax		/* 4.x SYS_sigreturn */
 	pushl	%eax			/* junk to fake return addr. */
@@ -373,7 +373,7 @@ osigcode:
 	pushl	%eax
 	testl	$PSL_VM,SC_PS(%eax)
 	jne	9f
-	movl	SC_GS(%eax),%gs		/* restore %gs */
+	mov	SC_GS(%eax),%gs		/* restore %gs */
 9:
 	movl	$103,%eax		/* 3.x SYS_sigreturn */
 	pushl	%eax			/* junk to fake return addr. */

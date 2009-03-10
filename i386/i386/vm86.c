@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/vm86.c,v 1.62 2006/12/17 05:07:01 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/vm86.c,v 1.63 2009/02/24 18:09:31 rdivacky Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -615,10 +615,7 @@ vm86_datacall(intnum, vmf, vmc)
 }
 
 vm_offset_t
-vm86_getaddr(vmc, sel, off)
-	struct vm86context *vmc;
-	u_short sel;
-	u_short off;
+vm86_getaddr(struct vm86context *vmc, u_short sel, u_short off)
 {
 	int i, page;
 	vm_offset_t addr;

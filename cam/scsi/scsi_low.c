@@ -2,7 +2,7 @@
 /*	$NetBSD$	*/
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_low.c,v 1.29 2007/06/17 05:55:54 scottl Exp $");
+__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_low.c,v 1.30 2009/01/23 21:06:16 trasz Exp $");
 
 #define	SCSI_LOW_STATICS
 #define	SCSI_LOW_DEBUG
@@ -966,16 +966,16 @@ scsi_low_rescan_bus_cam(slp)
 	struct scsi_low_softc *slp;
 {
   	struct cam_path *path;
-	union ccb *ccb = xpt_alloc_ccb();
+	union ccb *ccb; 
 	cam_status status;
-
-	bzero(ccb, sizeof(union ccb));
 
 	status = xpt_create_path(&path, xpt_periph,
 				 cam_sim_path(slp->sl_si.sim), -1, 0);
 	if (status != CAM_REQ_CMP)
 		return;
 
+	ccb = xpt_alloc_ccb();
+	bzero(ccb, sizeof(union ccb));
 	xpt_setup_ccb(&ccb->ccb_h, path, 5);
 	ccb->ccb_h.func_code = XPT_SCAN_BUS;
 	ccb->ccb_h.cbfcnp = scsi_low_cam_rescan_callback;

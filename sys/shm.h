@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/sys/shm.h,v 1.25 2008/02/12 20:55:03 csjp Exp $ */
+/* $FreeBSD: src/sys/sys/shm.h,v 1.26 2009/03/02 18:53:30 kib Exp $ */
 /*	$NetBSD: shm.h,v 1.15 1994/06/29 06:45:17 cgd Exp $	*/
 
 /*-
@@ -108,6 +108,7 @@ struct shminfo {
 struct shmid_kernel {
 	struct shmid_ds u;
 	struct label *label;	/* MAC label */
+	size_t shm_bsegsz;
 };
 
 extern struct shminfo	shminfo;

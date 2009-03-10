@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/dc/if_dc.c,v 1.198 2008/12/07 23:02:37 marius Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/dc/if_dc.c,v 1.199 2009/03/09 13:23:54 imp Exp $");
 
 /*
  * DEC "tulip" clone ethernet driver. Supports the DEC/Intel 21143
@@ -331,7 +331,6 @@ static driver_t dc_driver = {
 
 static devclass_t dc_devclass;
 
-DRIVER_MODULE(dc, cardbus, dc_driver, dc_devclass, 0, 0);
 DRIVER_MODULE(dc, pci, dc_driver, dc_devclass, 0, 0);
 DRIVER_MODULE(miibus, dc, miibus_driver, miibus_devclass, 0, 0);
 

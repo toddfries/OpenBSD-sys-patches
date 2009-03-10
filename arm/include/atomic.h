@@ -33,7 +33,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/arm/include/atomic.h,v 1.25 2008/11/22 05:55:56 kmacy Exp $
+ * $FreeBSD: src/sys/arm/include/atomic.h,v 1.26 2009/02/03 19:06:12 sam Exp $
  */
 
 #ifndef	_MACHINE_ATOMIC_H_
@@ -344,7 +344,8 @@ atomic_readandclear_32(volatile u_int32_t *p)
 
 #define atomic_clear_ptr		atomic_clear_32
 #define atomic_set_ptr			atomic_set_32
-#define atomic_cmpset_ptr		atomic_cmpset_32
+#define	atomic_cmpset_ptr(dst, old, new)	\
+    atomic_cmpset_32((volatile u_int *)(dst), (u_int)(old), (u_int)(new))
 #define atomic_cmpset_rel_ptr		atomic_cmpset_ptr
 #define atomic_cmpset_acq_ptr		atomic_cmpset_ptr
 #define atomic_store_ptr		atomic_store_32

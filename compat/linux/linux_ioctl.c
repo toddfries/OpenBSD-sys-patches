@@ -26,10 +26,11 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "opt_route.h"
 #include "opt_compat.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_ioctl.c,v 1.146 2008/12/02 21:37:28 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_ioctl.c,v 1.147 2009/02/27 14:12:05 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,6 +64,7 @@ __FBSDID("$FreeBSD: src/sys/compat/linux/linux_ioctl.c,v 1.146 2008/12/02 21:37:
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
+#include <net/route.h>
 #include <net/vnet.h>
 
 #ifdef COMPAT_LINUX32

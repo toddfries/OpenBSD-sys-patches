@@ -1,7 +1,7 @@
 # This file tells config what files go into building a kernel,
 # files marked standard are always included.
 #
-# $FreeBSD: src/sys/conf/files.sun4v,v 1.18 2008/12/20 00:33:10 nwhitehorn Exp $
+# $FreeBSD: src/sys/conf/files.sun4v,v 1.19 2009/02/28 16:21:25 ed Exp $
 #
 # The long compile-with and dependency lines are required because of
 # limitations in config: backslash-newline doesn't work in strings, and
@@ -34,6 +34,7 @@ libkern/ffs.c			standard
 libkern/ffsl.c			standard
 libkern/fls.c			standard
 libkern/flsl.c			standard
+libkern/memmove.c		standard
 sparc64/sparc64/autoconf.c	standard
 sun4v/sun4v/bus_machdep.c	standard
 sun4v/sun4v/clock.c		standard

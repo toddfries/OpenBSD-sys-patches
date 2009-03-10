@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/mips/in_cksum.c,v 1.2 2008/09/03 18:40:02 obrien Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/mips/in_cksum.c,v 1.3 2009/02/08 23:43:36 gonzo Exp $");
 
 #include <sys/param.h>
 #include <sys/mbuf.h>
@@ -69,7 +69,7 @@ __FBSDID("$FreeBSD: src/sys/mips/mips/in_cksum.c,v 1.2 2008/09/03 18:40:02 obrie
     }
 
 static const u_int32_t in_masks[] = {
-#ifndef _MISEB
+#if _BYTE_ORDER == _LITTLE_ENDIAN
 	/*0 bytes*/ /*1 byte*/	/*2 bytes*/ /*3 bytes*/
 	0x00000000, 0x000000FF, 0x0000FFFF, 0x00FFFFFF,	/* offset 0 */
 	0x00000000, 0x0000FF00, 0x00FFFF00, 0xFFFFFF00,	/* offset 1 */

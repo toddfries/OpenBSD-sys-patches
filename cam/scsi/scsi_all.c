@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_all.c,v 1.53 2008/08/16 21:26:58 ken Exp $");
+__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_all.c,v 1.54 2009/01/14 21:25:17 trasz Exp $");
 
 #include <sys/param.h>
 
@@ -3432,6 +3432,7 @@ scsi_print_inquiry(struct scsi_inquiry_data *inq_data)
 		break;
 	case T_NODEVICE:
 		dtype = "Uninstalled";
+		break;
 	default:
 		dtype = "unknown";
 		break;

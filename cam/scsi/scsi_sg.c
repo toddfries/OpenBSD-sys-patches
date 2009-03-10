@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_sg.c,v 1.12 2009/01/10 17:22:49 trasz Exp $");
+__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_sg.c,v 1.13 2009/01/14 21:31:22 trasz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -941,6 +941,7 @@ sg_scsiio_status(struct ccb_scsiio *csio, u_short *hoststat, u_short *drvstat)
 	case CAM_DEV_NOT_THERE:
 		*hoststat = DID_BAD_TARGET;
 		*drvstat = 0;
+		break;
 	case CAM_SEL_TIMEOUT:
 		*hoststat = DID_NO_CONNECT;
 		*drvstat = 0;

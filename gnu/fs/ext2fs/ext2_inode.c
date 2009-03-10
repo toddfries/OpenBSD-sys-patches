@@ -33,7 +33,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ffs_inode.c	8.5 (Berkeley) 12/30/93
- * $FreeBSD: src/sys/gnu/fs/ext2fs/ext2_inode.c,v 1.60 2008/10/23 15:53:51 des Exp $
+ * $FreeBSD: src/sys/gnu/fs/ext2fs/ext2_inode.c,v 1.61 2009/01/18 14:04:56 stas Exp $
  */
 
 #include <sys/param.h>
@@ -91,7 +91,7 @@ ext2_update(vp, waitfor)
 		return (error);
 	}
 	ext2_i2ei(ip, (struct ext2_inode *)((char *)bp->b_data +
-	    EXT2_INODE_SIZE * ino_to_fsbo(fs, ip->i_number)));
+	    EXT2_INODE_SIZE(fs) * ino_to_fsbo(fs, ip->i_number)));
 	if (waitfor && (vp->v_mount->mnt_kern_flag & MNTK_ASYNC) == 0)
 		return (bwrite(bp));
 	else {

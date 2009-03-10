@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/tty_pts.c,v 1.27 2008/12/21 21:16:57 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/tty_pts.c,v 1.30 2009/03/01 09:50:13 ed Exp $");
 
 #include "opt_tty.h"
 
@@ -290,12 +290,7 @@ ptsdev_ioctl(struct file *fp, u_long cmd, void *data,
 
 		/* Reverse device name lookups, for ptsname() and ttyname(). */
 		fgn = data;
-#ifdef PTS_EXTERNAL
-		if (psc->pts_cdev != NULL)
-			p = devtoname(psc->pts_cdev);
-		else
-#endif /* PTS_EXTERNAL */
-			p = tty_devname(tp);
+		p = tty_devname(tp);
 		i = strlen(p) + 1;
 		if (i > fgn->len)
 			return (EINVAL);
@@ -315,7 +310,7 @@ ptsdev_ioctl(struct file *fp, u_long cmd, void *data,
 	case TIOCGETA:
 		/* Obtain terminal flags through tcgetattr(). */
 		tty_lock(tp);
-		bcopy(&tp->t_termios, data, sizeof(struct termios));
+		*(struct termios*)data = tp->t_termios;
 		tty_unlock(tp);
 		return (0);
 #endif /* PTS_LINUX */
@@ -385,6 +380,8 @@ ptsdev_ioctl(struct file *fp, u_long cmd, void *data,
 	tty_lock(tp);
 	error = tty_ioctl(tp, cmd, data, td);
 	tty_unlock(tp);
+	if (error == ENOIOCTL)
+		error = ENOTTY;
 
 	return (error);
 }

@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/sis/if_sis.c,v 1.5 2008/12/09 04:30:47 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/sis/if_sis.c,v 1.7 2009/02/13 02:08:20 yongari Exp $");
 
 /*
  * SiS 900/SiS 7016 fast ethernet PCI NIC driver. Datasheets are
@@ -1663,10 +1663,11 @@ sis_intr(void *arg)
 		     SIS_ISR_TX_OK | SIS_ISR_TX_IDLE) )
 			sis_txeof(sc);
 
-		if (status & (SIS_ISR_RX_DESC_OK|SIS_ISR_RX_OK|SIS_ISR_RX_IDLE))
+		if (status & (SIS_ISR_RX_DESC_OK | SIS_ISR_RX_OK |
+		    SIS_ISR_RX_ERR | SIS_ISR_RX_IDLE))
 			sis_rxeof(sc);
 
-		if (status & (SIS_ISR_RX_ERR | SIS_ISR_RX_OFLOW))
+		if (status & SIS_ISR_RX_OFLOW)
 			sis_rxeoc(sc);
 
 		if (status & (SIS_ISR_RX_IDLE))
@@ -2257,7 +2258,7 @@ sis_stop(struct sis_softc *sc)
  * Stop all chip I/O so that the kernel's probe routines don't
  * get confused by errant DMAs when rebooting.
  */
-static void
+static int
 sis_shutdown(device_t dev)
 {
 	struct sis_softc	*sc;
@@ -2267,6 +2268,7 @@ sis_shutdown(device_t dev)
 	sis_reset(sc);
 	sis_stop(sc);
 	SIS_UNLOCK(sc);
+	return (0);
 }
 
 static device_method_t sis_methods[] = {

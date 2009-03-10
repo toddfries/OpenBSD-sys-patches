@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)pcb.h	5.10 (Berkeley) 5/12/91
- * $FreeBSD: src/sys/i386/include/pcb.h,v 1.56 2005/12/29 13:23:48 davidxu Exp $
+ * $FreeBSD: src/sys/i386/include/pcb.h,v 1.57 2009/03/05 19:42:11 jhb Exp $
  */
 
 #ifndef _I386_PCB_H_
@@ -61,6 +61,7 @@ struct pcb {
 	int     pcb_dr7;
 
 	union	savefpu	pcb_save;
+	uint16_t pcb_initial_npxcw;
 	u_int	pcb_flags;
 #define	FP_SOFTFP	0x01	/* process using software fltng pnt emulator */
 #define	PCB_DBREGS	0x02	/* process using debug registers */

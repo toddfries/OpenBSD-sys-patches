@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_auth.c,v 1.21 2008/12/06 13:19:54 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_auth.c,v 1.22 2009/02/03 11:04:03 rrs Exp $");
 
 #include <netinet/sctp_os.h>
 #include <netinet/sctp.h>
@@ -1645,8 +1645,10 @@ sctp_auth_get_cookie_params(struct sctp_tcb *stcb, struct mbuf *m,
 			bcopy(p_random->random_data, new_key->key, random_len);
 	}
 #else
-	keylen = sizeof(*p_random) + random_len + sizeof(*chunks) + num_chunks +
-	    sizeof(*hmacs) + hmacs_len;
+	keylen = sizeof(*p_random) + random_len + sizeof(*hmacs) + hmacs_len;
+	if (chunks != NULL) {
+		keylen += sizeof(*chunks) + num_chunks;
+	}
 	new_key = sctp_alloc_key(keylen);
 	if (new_key != NULL) {
 		/* copy in the RANDOM */

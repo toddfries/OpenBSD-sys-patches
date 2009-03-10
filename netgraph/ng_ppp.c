@@ -58,7 +58,7 @@
  *
  * Authors: Archie Cobbs <archie@freebsd.org>, Alexander Motin <mav@alkar.net>
  *
- * $FreeBSD: src/sys/netgraph/ng_ppp.c,v 1.76 2008/10/23 15:53:51 des Exp $
+ * $FreeBSD: src/sys/netgraph/ng_ppp.c,v 1.77 2009/01/18 12:03:43 mav Exp $
  * $Whistle: ng_ppp.c,v 1.24 1999/11/01 09:24:52 julian Exp $
  */
 
@@ -128,7 +128,6 @@ MALLOC_DEFINE(M_NETGRAPH_PPP, "netgraph_ppp", "netgraph ppp node");
 #define PROT_VJUNCOMP		0x002f
 
 /* Multilink PPP definitions */
-#define MP_MIN_MRRU		1500		/* per RFC 1990 */
 #define MP_INITIAL_SEQ		0		/* per RFC 1990 */
 #define MP_MIN_LINK_MRU		32
 
@@ -1985,6 +1984,12 @@ ng_ppp_mp_xmit(node_p node, item_p item, uint16_t proto)
 		    priv->activeLinks[0], plen));
 	}
 
+	/* Check peer's MRRU for this bundle. */
+	if (plen > priv->conf.mrru) {
+		NG_FREE_ITEM(item);
+		return (EMSGSIZE);
+	}
+
 	/* Extract mbuf. */
 	NGI_GET_M(item, m);
 
@@ -2539,10 +2544,6 @@ ng_ppp_config_valid(node_p node, const struct ng_ppp_node_conf *newConf)
 		if (newConf->links[i].latency > NG_PPP_MAX_LATENCY)
 			return (0);
 	}
-
-	/* Check bundle parameters */
-	if (newConf->bund.enableMultilink && newConf->bund.mrru < MP_MIN_MRRU)
-		return (0);
 
 	/* Disallow changes to multi-link configuration while MP is active */
 	if (priv->numActiveLinks > 0 && newNumLinksActive > 0) {

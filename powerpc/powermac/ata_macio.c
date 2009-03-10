@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/powermac/ata_macio.c,v 1.20 2008/09/27 15:13:44 nwhitehorn Exp $
+ * $FreeBSD: src/sys/powerpc/powermac/ata_macio.c,v 1.21 2009/01/19 23:25:18 nwhitehorn Exp $
  */
 
 /*
@@ -164,9 +164,11 @@ ata_macio_probe(device_t dev)
 	ch = &sc->sc_ch.sc_ch;
 
 	if (strcmp(name,"ata-4") == 0) {
+		device_set_desc(dev,"Apple MacIO Ultra ATA Controller");
 		sc->rev = 4;
 		sc->max_mode = ATA_UDMA4;
 	} else {
+		device_set_desc(dev,"Apple MacIO ATA Controller");
 		sc->rev = 3;
 		sc->max_mode = ATA_WDMA2;
 	}

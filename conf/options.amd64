@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/options.amd64,v 1.33 2008/05/26 10:39:52 bz Exp $
+# $FreeBSD: src/sys/conf/options.amd64,v 1.34 2009/02/06 20:57:10 wkoszek Exp $
 # Options specific to AMD64 platform kernels
 
 AUTO_EOI_1		opt_auto_eoi.h
@@ -36,6 +36,9 @@ VGA_NO_FONT_LOADING	opt_vga.h
 VGA_NO_MODE_CHANGE	opt_vga.h
 VGA_SLOW_IOACCESS	opt_vga.h
 VGA_WIDTH90		opt_vga.h
+
+# AGP debugging support
+AGP_DEBUG		opt_agp.h
 
 ATKBD_DFLT_KEYMAP	opt_atkbd.h
 

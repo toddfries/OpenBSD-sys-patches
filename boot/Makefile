@@ -1,10 +1,6 @@
-# $FreeBSD: src/sys/boot/Makefile,v 1.38 2008/12/14 02:57:41 nyan Exp $
+# $FreeBSD: src/sys/boot/Makefile,v 1.39 2009/02/19 18:53:08 imp Exp $
 
 .include <bsd.own.mk>
-
-.if ${MACHINE_ARCH} == "mips"
-MK_FORTH=no	# not yet
-.endif
 
 .if ${MK_FORTH} != "no"
 # Build the add-in FORTH interpreter.

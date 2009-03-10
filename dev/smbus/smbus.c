@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/smbus/smbus.c,v 1.23 2006/09/11 22:20:37 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/smbus/smbus.c,v 1.24 2009/03/09 13:30:00 imp Exp $");
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/lock.h>
@@ -111,7 +111,7 @@ smbus_detach(device_t dev)
 }
 
 void
-smbus_generic_intr(device_t dev, u_char devaddr, char low, char high)
+smbus_generic_intr(device_t dev, u_char devaddr, char low, char high, int err)
 {
 }
 

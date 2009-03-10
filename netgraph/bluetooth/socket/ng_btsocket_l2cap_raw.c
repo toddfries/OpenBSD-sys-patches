@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  * $Id: ng_btsocket_l2cap_raw.c,v 1.12 2003/09/14 23:29:06 max Exp $
- * $FreeBSD: src/sys/netgraph/bluetooth/socket/ng_btsocket_l2cap_raw.c,v 1.23 2008/10/23 20:26:15 des Exp $
+ * $FreeBSD: src/sys/netgraph/bluetooth/socket/ng_btsocket_l2cap_raw.c,v 1.24 2009/02/04 22:44:09 emax Exp $
  */
 
 #include <sys/param.h>
@@ -946,11 +946,6 @@ ng_btsocket_l2cap_raw_control(struct socket *so, u_long cmd, caddr_t data,
 			(struct ng_btsocket_l2cap_raw_ping *) data;
 		ng_l2cap_l2ca_ping_ip			*ip = NULL;
 		ng_l2cap_l2ca_ping_op			*op = NULL;
-
-		if (!(pcb->flags & NG_BTSOCKET_L2CAP_RAW_PRIVILEGED)) {
-			error = EPERM;
-			break;
-		}
 
 		if ((p->echo_size != 0 && p->echo_data == NULL) ||
 		     p->echo_size > NG_L2CAP_MAX_ECHO_SIZE) {

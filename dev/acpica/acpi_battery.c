@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_battery.c,v 1.26 2007/11/20 18:35:36 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpica/acpi_battery.c,v 1.27 2009/01/17 17:40:44 mav Exp $");
 
 #include "opt_acpi.h"
 #include <sys/param.h>
@@ -197,7 +197,7 @@ acpi_battery_get_battinfo(device_t dev, struct acpi_battinfo *battinfo)
 	 * is 0 (due to some error reading the battery), skip this
 	 * conversion.
 	 */
-	if (bif->units == ACPI_BIF_UNITS_MA && bif->dvol != 0) {
+	if (bif->units == ACPI_BIF_UNITS_MA && bif->dvol != 0 && dev == NULL) {
 	    bst[i].rate = (bst[i].rate * bif->dvol) / 1000;
 	    bst[i].cap = (bst[i].cap * bif->dvol) / 1000;
 	    bif->lfcap = (bif->lfcap * bif->dvol) / 1000;

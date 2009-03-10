@@ -6,7 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $FreeBSD: src/sys/dev/md/md.c,v 1.178 2009/01/10 17:17:18 trasz Exp $
+ * $FreeBSD: src/sys/dev/md/md.c,v 1.179 2009/02/22 02:50:31 alc Exp $
  *
  */
 
@@ -629,9 +629,7 @@ mdstart_swap(struct md_s *sc, struct bio *bp)
 			if (rv == VM_PAGER_ERROR) {
 				sf_buf_free(sf);
 				sched_unpin();
-				vm_page_lock_queues();
 				vm_page_wakeup(m);
-				vm_page_unlock_queues();
 				break;
 			}
 			bcopy((void *)(sf_buf_kva(sf) + offs), p, len);
@@ -641,9 +639,7 @@ mdstart_swap(struct md_s *sc, struct bio *bp)
 			if (rv == VM_PAGER_ERROR) {
 				sf_buf_free(sf);
 				sched_unpin();
-				vm_page_lock_queues();
 				vm_page_wakeup(m);
-				vm_page_unlock_queues();
 				break;
 			}
 			bcopy(p, (void *)(sf_buf_kva(sf) + offs), len);
@@ -655,9 +651,7 @@ mdstart_swap(struct md_s *sc, struct bio *bp)
 			if (rv == VM_PAGER_ERROR) {
 				sf_buf_free(sf);
 				sched_unpin();
-				vm_page_lock_queues();
 				vm_page_wakeup(m);
-				vm_page_unlock_queues();
 				break;
 			}
 			bzero((void *)(sf_buf_kva(sf) + offs), len);
@@ -667,8 +661,8 @@ mdstart_swap(struct md_s *sc, struct bio *bp)
 		}
 		sf_buf_free(sf);
 		sched_unpin();
-		vm_page_lock_queues();
 		vm_page_wakeup(m);
+		vm_page_lock_queues();
 		vm_page_activate(m);
 		if (bp->bio_cmd == BIO_WRITE)
 			vm_page_dirty(m);

@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/sio/sio_pci.c,v 1.24 2008/11/18 21:01:54 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/sio/sio_pci.c,v 1.25 2009/03/09 13:23:54 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -124,4 +124,3 @@ sio_pci_probe(dev)
 }
 
 DRIVER_MODULE(sio, pci, sio_pci_driver, sio_devclass, 0, 0);
-DRIVER_MODULE(sio, cardbus, sio_pci_driver, sio_devclass, 0, 0);

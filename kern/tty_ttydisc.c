@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/tty_ttydisc.c,v 1.7 2008/11/12 09:04:44 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/tty_ttydisc.c,v 1.8 2009/02/26 10:28:32 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/fcntl.h>
@@ -48,11 +48,11 @@ __FBSDID("$FreeBSD: src/sys/kern/tty_ttydisc.c,v 1.7 2008/11/12 09:04:44 ed Exp 
  */
 
 /* Statistics. */
-static long tty_nin = 0;
-SYSCTL_LONG(_kern, OID_AUTO, tty_nin, CTLFLAG_RD,
+static unsigned long tty_nin = 0;
+SYSCTL_ULONG(_kern, OID_AUTO, tty_nin, CTLFLAG_RD,
 	&tty_nin, 0, "Total amount of bytes received");
-static long tty_nout = 0;
-SYSCTL_LONG(_kern, OID_AUTO, tty_nout, CTLFLAG_RD,
+static unsigned long tty_nout = 0;
+SYSCTL_ULONG(_kern, OID_AUTO, tty_nout, CTLFLAG_RD,
 	&tty_nout, 0, "Total amount of bytes transmitted");
 
 /* termios comparison macro's. */

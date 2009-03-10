@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)stat.h	8.12 (Berkeley) 6/16/95
- * $FreeBSD: src/sys/sys/stat.h,v 1.44 2008/03/31 12:14:04 kib Exp $
+ * $FreeBSD: src/sys/sys/stat.h,v 1.45 2009/03/04 03:33:38 das Exp $
  */
 
 #ifndef _SYS_STAT_H_
@@ -330,7 +330,7 @@ int	mknod(const char *, mode_t, dev_t);
 #endif
 int	stat(const char * __restrict, struct stat * __restrict);
 mode_t	umask(mode_t);
-#if __BSD_VISIBLE
+#if __BSD_VISIBLE || __POSIX_VISIBLE >= 200809
 int	fstatat(int, const char *, struct stat *, int);
 int	mkdirat(int, const char *, mode_t);
 int	mkfifoat(int, const char *, mode_t);

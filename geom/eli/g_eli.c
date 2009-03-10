@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/eli/g_eli.c,v 1.41 2008/08/12 20:19:08 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/eli/g_eli.c,v 1.42 2009/03/10 15:23:43 guido Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -996,6 +996,7 @@ g_eli_taste(struct g_class *mp, struct g_provider *pp, int flags __unused)
 	/*
 	 * We have correct key, let's attach provider.
 	 */
+	md.md_flags |= G_ELI_FLAG_WO_DETACH;
 	gp = g_eli_create(NULL, mp, pp, &md, mkey, nkey);
 	bzero(mkey, sizeof(mkey));
 	bzero(&md, sizeof(md));

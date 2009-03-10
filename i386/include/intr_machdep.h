@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/intr_machdep.h,v 1.21 2008/03/14 19:41:46 jhb Exp $
+ * $FreeBSD: src/sys/i386/include/intr_machdep.h,v 1.22 2009/01/29 09:22:56 jeff Exp $
  */
 
 #ifndef __MACHINE_INTR_MACHDEP_H__
@@ -47,7 +47,7 @@
  * IRQ values beyond 256 are used by MSI.  We leave 255 unused to avoid
  * confusion since 255 is used in PCI to indicate an invalid IRQ.
  */
-#define	NUM_MSI_INTS	128
+#define	NUM_MSI_INTS	512
 #define	FIRST_MSI_INT	256
 #define	NUM_IO_INTS	(FIRST_MSI_INT + NUM_MSI_INTS)
 

@@ -23,7 +23,7 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 #
-# $FreeBSD: src/sys/dev/pccard/card_if.m,v 1.31 2005/09/25 01:39:04 imp Exp $
+# $FreeBSD: src/sys/dev/pccard/card_if.m,v 1.32 2009/02/05 19:39:07 imp Exp $
 #
 
 #include <sys/bus.h>
@@ -93,7 +93,7 @@ METHOD int detach_card {
 #
 # Find "dev" in the passed table of devices.  Return it or NULL.
 #
-METHOD struct pccard_product * do_product_lookup {
+METHOD const struct pccard_product * do_product_lookup {
 	device_t bus;
 	device_t dev;
 	const struct pccard_product *tab;

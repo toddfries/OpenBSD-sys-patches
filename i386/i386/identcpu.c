@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/identcpu.c,v 1.199 2009/01/12 22:01:49 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/identcpu.c,v 1.200 2009/01/22 21:04:46 jkim Exp $");
 
 #include "opt_cpu.h"
 
@@ -887,7 +887,8 @@ printcpuinfo(void)
 				break;
 			case CPU_VENDOR_CENTAUR:
 				if (I386_CPU_FAMILY(cpu_id) == 0x6 &&
-				    I386_CPU_MODEL(cpu_id) >= 0xf)
+				    I386_CPU_MODEL(cpu_id) >= 0xf &&
+				    (rdmsr(0x1203) & 0x100000000ULL) == 0)
 					tsc_is_invariant = 1;
 				break;
 			}

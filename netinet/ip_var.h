@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ip_var.h	8.2 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/netinet/ip_var.h,v 1.107 2008/12/11 16:26:38 bz Exp $
+ * $FreeBSD: src/sys/netinet/ip_var.h,v 1.108 2009/03/09 17:53:05 bms Exp $
  */
 
 #ifndef _NETINET_IP_VAR_H_
@@ -79,25 +79,6 @@ struct ipq {
 struct ipoption {
 	struct	in_addr ipopt_dst;	/* first-hop dst if source routed */
 	char	ipopt_list[MAX_IPOPTLEN];	/* options proper */
-};
-
-/*
- * Multicast source list entry.
- */
-struct in_msource {
-	TAILQ_ENTRY(in_msource) ims_next;	/* next source */
-	struct sockaddr_storage ims_addr;	/* address of this source */
-};
-
-/*
- * Multicast filter descriptor; there is one instance per group membership
- * on a socket, allocated as an expandable vector hung off ip_moptions.
- * struct in_multi contains separate IPv4-stack-wide state for IGMPv3.
- */
-struct in_mfilter {
-	uint16_t	imf_fmode;	/* filter mode for this socket/group */
-	uint16_t	imf_nsources;	/* # of sources for this socket/group */
-	TAILQ_HEAD(, in_msource) imf_sources;	/* source list */
 };
 
 /*

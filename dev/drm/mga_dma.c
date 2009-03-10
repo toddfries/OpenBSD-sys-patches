@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/mga_dma.c,v 1.14 2008/08/23 20:59:12 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/mga_dma.c,v 1.15 2009/02/28 02:37:55 rnoland Exp $");
 
 /**
  * \file mga_dma.c
@@ -399,6 +399,7 @@ int mga_freelist_put(struct drm_device * dev, struct drm_buf * buf)
 int mga_driver_load(struct drm_device *dev, unsigned long flags)
 {
 	drm_mga_private_t *dev_priv;
+	int ret;
 
 	dev_priv = drm_alloc(sizeof(drm_mga_private_t), DRM_MEM_DRIVER);
 	if (!dev_priv)
@@ -417,6 +418,13 @@ int mga_driver_load(struct drm_device *dev, unsigned long flags)
 	dev->types[6] = _DRM_STAT_IRQ;
 	dev->types[7] = _DRM_STAT_PRIMARY;
 	dev->types[8] = _DRM_STAT_SECONDARY;
+
+	ret = drm_vblank_init(dev, 1);
+
+	if (ret) {
+		(void) mga_driver_unload(dev);
+		return ret;
+	}
 
 	return 0;
 }

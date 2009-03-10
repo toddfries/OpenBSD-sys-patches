@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/xen/xen_machdep.c,v 1.17 2008/12/29 06:31:03 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/xen/xen_machdep.c,v 1.18 2009/02/03 03:43:00 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -1130,13 +1130,13 @@ initvalues(start_info_t *startinfo)
 
 trap_info_t trap_table[] = {
 	{ 0,   0, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(div)},
-	{ 1,   0, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(dbg)},
-	{ 3,   3, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(bpt)},
+	{ 1,   0|4, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(dbg)},
+	{ 3,   3|4, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(bpt)},
 	{ 4,   3, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(ofl)},
 	/* This is UPL on Linux and KPL on BSD */
 	{ 5,   3, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(bnd)},
 	{ 6,   0, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(ill)},
-	{ 7,   0, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(dna)},
+	{ 7,   0|4, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(dna)},
 	/*
 	 * { 8,   0, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(XXX)},
 	 *   no handler for double fault
@@ -1146,7 +1146,7 @@ trap_info_t trap_table[] = {
 	{11,   0, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(missing)},
 	{12,   0, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(stk)},
 	{13,   0, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(prot)},
-	{14,   0, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(page)},
+	{14,   0|4, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(page)},
 	{15,   0, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(rsvd)},
 	{16,   0, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(fpu)},
 	{17,   0, GSEL(GCODE_SEL, SEL_KPL), (unsigned long) &IDTVEC(align)},

@@ -31,7 +31,7 @@
 /* $KAME: sctp_output.h,v 1.14 2005/03/06 16:04:18 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_output.h,v 1.16 2008/12/06 13:19:54 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_output.h,v 1.18 2009/02/27 20:54:45 rrs Exp $");
 
 #ifndef __sctp_output_h__
 #define __sctp_output_h__
@@ -100,6 +100,11 @@ void sctp_send_cookie_ack(struct sctp_tcb *);
 void
 sctp_send_heartbeat_ack(struct sctp_tcb *, struct mbuf *, int, int,
     struct sctp_nets *);
+
+void
+sctp_remove_from_wheel(struct sctp_tcb *stcb,
+    struct sctp_association *asoc,
+    struct sctp_stream_out *strq, int holds_lock);
 
 
 void sctp_send_shutdown(struct sctp_tcb *, struct sctp_nets *);
@@ -192,10 +197,14 @@ sctp_add_stream_reset_result_tsn(struct sctp_tmit_chunk *chk,
 
 int
 sctp_send_str_reset_req(struct sctp_tcb *stcb,
-    int number_entries, uint16_t * list,
-    uint8_t send_out_req, uint32_t resp_seq,
+    int number_entries,
+    uint16_t * list,
+    uint8_t send_out_req,
+    uint32_t resp_seq,
     uint8_t send_in_req,
-    uint8_t send_tsn_req);
+    uint8_t send_tsn_req,
+    uint8_t add_str,
+    uint16_t adding);
 
 
 void

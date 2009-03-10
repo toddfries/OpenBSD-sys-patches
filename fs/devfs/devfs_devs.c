@@ -25,7 +25,7 @@
  *
  * From: FreeBSD: src/sys/miscfs/kernfs/kernfs_vfsops.c 1.36
  *
- * $FreeBSD: src/sys/fs/devfs/devfs_devs.c,v 1.55 2008/09/21 14:02:43 ed Exp $
+ * $FreeBSD: src/sys/fs/devfs/devfs_devs.c,v 1.56 2009/01/28 19:58:05 ed Exp $
  */
 
 #include "opt_mac.h"
@@ -103,8 +103,9 @@ sysctl_devname(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
-SYSCTL_PROC(_kern, OID_AUTO, devname, CTLTYPE_OPAQUE|CTLFLAG_RW|CTLFLAG_ANYBODY,
-	NULL, 0, sysctl_devname, "", "devname(3) handler");
+SYSCTL_PROC(_kern, OID_AUTO, devname,
+    CTLTYPE_OPAQUE|CTLFLAG_RW|CTLFLAG_ANYBODY|CTLFLAG_MPSAFE,
+    NULL, 0, sysctl_devname, "", "devname(3) handler");
 
 SYSCTL_INT(_debug_sizeof, OID_AUTO, cdev, CTLFLAG_RD,
     0, sizeof(struct cdev), "sizeof(struct cdev)");

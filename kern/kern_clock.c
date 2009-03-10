@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_clock.c,v 1.209 2008/04/02 11:20:30 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_clock.c,v 1.210 2009/01/17 07:17:57 jeff Exp $");
 
 #include "opt_kdb.h"
 #include "opt_device_polling.h"
@@ -498,8 +498,8 @@ statclock(int usermode)
 	rss = pgtok(vmspace_resident_count(vm));
 	if (ru->ru_maxrss < rss)
 		ru->ru_maxrss = rss;
-	CTR4(KTR_SCHED, "statclock: %p(%s) prio %d stathz %d",
-	    td, td->td_name, td->td_priority, (stathz)?stathz:hz);
+	KTR_POINT2(KTR_SCHED, "thread", sched_tdname(td), "statclock",
+	    "prio:%d", td->td_priority, "stathz:%d", (stathz)?stathz:hz);
 	thread_lock_flags(td, MTX_QUIET);
 	sched_clock(td);
 	thread_unlock(td);

@@ -1,5 +1,5 @@
 /*
- * $FreeBSD: src/sys/dev/lmc/if_lmc.c,v 1.35 2008/10/23 15:53:51 des Exp $
+ * $FreeBSD: src/sys/dev/lmc/if_lmc.c,v 1.36 2009/02/05 19:37:49 imp Exp $
  *
  * Copyright (c) 2002-2004 David Boggs. <boggs@boggs.palo-alto.ca.us>
  * All rights reserved.
@@ -5643,10 +5643,11 @@ fbsd_detach(device_t dev)
   return 0; /* no error */
   }
 
-static void
+static int
 fbsd_shutdown(device_t dev)
   {
   shutdown_card(device_get_softc(dev));
+  return 0;
   }
 
 static int

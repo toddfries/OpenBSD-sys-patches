@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/cfi/cfi_reg.h,v 1.1 2008/10/25 06:18:12 marcel Exp $
+ * $FreeBSD: src/sys/dev/cfi/cfi_reg.h,v 1.2 2009/02/05 18:12:07 sam Exp $
  */
 
 #ifndef _DEV_CFI_REG_H_
@@ -103,6 +103,28 @@ struct cfi_qry {
 #define	CFI_BCS_ERASE_RESUME	0xd0	/* Equals CONFIRM */
 #define	CFI_BCS_CONFIRM		0xd0
 #define	CFI_BCS_READ_ARRAY	0xff
+
+/* Intel commands. */
+#define	CFI_INTEL_READ_ID	0x90	/* Read Identifier */
+#define	CFI_INTEL_PP_SETUP	0xc0	/* Protection Program Setup */
+
+/* NB: these are addresses for 16-bit accesses */
+#define	CFI_INTEL_PLR		0x80	/* Protection Lock Register */
+#define	CFI_INTEL_PR(n)		(0x81+(n)) /* Protection Register */
+
+/* Status register definitions */
+#define	CFI_INTEL_STATUS_WSMS	0x0080	/* Write Machine Status */
+#define	CFI_INTEL_STATUS_ESS	0x0040	/* Erase Suspend Status */
+#define	CFI_INTEL_STATUS_ECLBS	0x0020	/* Erase and Clear Lock-Bit Status */
+#define	CFI_INTEL_STATUS_PSLBS	0x0010	/* Program and Set Lock-Bit Status */
+#define	CFI_INTEL_STATUS_VPENS	0x0008	/* Programming Voltage Status */
+#define	CFI_INTEL_STATUS_PSS	0x0004	/* Program Suspend Status */
+#define	CFI_INTEL_STATUS_DPS	0x0002	/* Device Protect Status */
+#define	CFI_INTEL_STATUS_RSVD	0x0001	/* reserved */
+
+/* eXtended Status register definitions */
+#define	CFI_INTEL_XSTATUS_WBS	0x8000	/* Write Buffer Status */
+#define	CFI_INTEL_XSTATUS_RSVD	0x7f00	/* reserved */
 
 /* AMD commands. */
 #define	CFI_AMD_BLOCK_ERASE	0x30

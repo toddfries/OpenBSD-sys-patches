@@ -1,6 +1,5 @@
 #-
-# Copyright (c) 1992-1998 Nick Hibma <n_hibma@freebsd.org>
-# All rights reserved.
+# Copyright (c) 2008 Hans Petter Selasky. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -25,7 +24,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 # THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# $FreeBSD: src/sys/dev/usb/usb_if.m,v 1.10 2005/01/06 01:43:29 imp Exp $
+# $FreeBSD: src/sys/dev/usb/usb_if.m,v 1.12 2009/02/23 18:31:00 thompsa Exp $
 #
 
 # USB interface description
@@ -35,8 +34,19 @@
 
 INTERFACE usb;
 
-# The device should start probing for new drivers again
+# The device received a control request
 #
-METHOD int reconfigure {
+# Return values:
+# 0: Success
+# ENOTTY: Transaction stalled
+# Else: Use builtin request handler
+#
+METHOD int handle_request {
 	device_t dev;
+	const void *req; /* pointer to the device request */
+	void **pptr; /* data pointer */
+	uint16_t *plen; /* maximum transfer length */
+	uint16_t offset; /* data offset */
+	uint8_t is_complete; /* set if transfer is complete */
 };
+

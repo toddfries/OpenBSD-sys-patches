@@ -18,7 +18,7 @@
 #
 # For hardware specific information check HARDWARE.TXT
 #
-# $FreeBSD: src/sys/ia64/conf/GENERIC,v 1.100 2008/12/02 19:09:08 ed Exp $
+# $FreeBSD: src/sys/ia64/conf/GENERIC,v 1.103 2009/02/23 18:34:56 thompsa Exp $
 
 cpu		ITANIUM
 ident		GENERIC
@@ -110,7 +110,6 @@ device		mlx		# Mylex DAC960 family
 # USB host controllers and peripherals
 device		ehci		# EHCI host controller
 device		ohci		# OHCI PCI->USB interface
-device		ugen		# Generic device
 device		uhci		# UHCI PCI->USB interface
 device		uhid		# Human Interface Devices
 device		ukbd		# Keyboard

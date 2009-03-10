@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_pass.c,v 1.51 2009/01/10 17:22:49 trasz Exp $");
+__FBSDID("$FreeBSD: src/sys/cam/scsi/scsi_pass.c,v 1.52 2009/01/31 17:34:55 bz Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -297,8 +297,6 @@ passopen(struct cdev *dev, int flags, int fmt, struct thread *td)
 	struct cam_periph *periph;
 	struct pass_softc *softc;
 	int error;
-
-	error = 0; /* default to no error */
 
 	periph = (struct cam_periph *)dev->si_drv1;
 	if (cam_periph_acquire(periph) != CAM_REQ_CMP)

@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/frag6.c,v 1.41 2008/12/02 21:37:28 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/frag6.c,v 1.43 2009/02/01 21:11:08 bz Exp $");
 
 #include "opt_mac.h"
 
@@ -751,22 +751,6 @@ frag6_slowtimo(void)
 	}
 	VNET_LIST_RUNLOCK();
 	IP6Q_UNLOCK();
-
-#if 0
-	/*
-	 * Routing changes might produce a better route than we last used;
-	 * make sure we notice eventually, even if forwarding only for one
-	 * destination and the cache is never replaced.
-	 */
-	if (V_ip6_forward_rt.ro_rt) {
-		RTFREE(V_ip6_forward_rt.ro_rt);
-		V_ip6_forward_rt.ro_rt = 0;
-	}
-	if (ipsrcchk_rt.ro_rt) {
-		RTFREE(ipsrcchk_rt.ro_rt);
-		ipsrcchk_rt.ro_rt = 0;
-	}
-#endif
 }
 
 /*

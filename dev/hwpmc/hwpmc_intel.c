@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_intel.c,v 1.10 2008/12/03 17:30:36 jkoshy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/hwpmc/hwpmc_intel.c,v 1.11 2009/01/27 07:29:37 jeff Exp $");
 
 #include <sys/param.h>
 #include <sys/pmc.h>
@@ -130,6 +130,10 @@ pmc_intel_initialize(void)
 			cputype = PMC_CPU_INTEL_ATOM;
 			nclasses = 3;
 			break;
+		case 0x1A:
+			cputype = PMC_CPU_INTEL_COREI7;
+			nclasses = 3;
+			break;
 		}
 		break;
 #if	defined(__i386__) || defined(__amd64__)
@@ -169,6 +173,7 @@ pmc_intel_initialize(void)
 	case PMC_CPU_INTEL_CORE:
 	case PMC_CPU_INTEL_CORE2:
 	case PMC_CPU_INTEL_CORE2EXTREME:
+	case PMC_CPU_INTEL_COREI7:
 		error = pmc_core_initialize(pmc_mdep, ncpus);
 		break;
 

@@ -62,7 +62,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ffs/ffs_vnops.c,v 1.184 2008/10/20 10:11:33 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ffs/ffs_vnops.c,v 1.186 2009/01/27 21:48:47 rwatson Exp $");
 
 #include <sys/param.h>
 #include <sys/bio.h>
@@ -723,8 +723,10 @@ ffs_write(ap)
 /* XXX is uio->uio_offset the right thing here? */
 		error = UFS_BALLOC(vp, uio->uio_offset, xfersize,
 		    ap->a_cred, flags, &bp);
-		if (error != 0)
+		if (error != 0) {
+			vnode_pager_setsize(vp, ip->i_size);
 			break;
+		}
 		/*
 		 * If the buffer is not valid we have to clear out any
 		 * garbage data from the pages instantiated for the buffer.
@@ -1004,14 +1006,6 @@ ffs_extread(struct vnode *vp, struct uio *uio, int ioflag)
 			bqrelse(bp);
 		}
 	}
-
-	if ((error == 0 || uio->uio_resid != orig_resid) &&
-	    (vp->v_mount->mnt_flag & MNT_NOATIME) == 0 &&
-	    (ip->i_flag & IN_ACCESS) == 0) {
-		VI_LOCK(vp);
-		ip->i_flag |= IN_ACCESS;
-		VI_UNLOCK(vp);
-	}
 	return (error);
 }
 
@@ -1117,7 +1111,7 @@ ffs_extwrite(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *ucred)
 			bdwrite(bp);
 		if (error || xfersize == 0)
 			break;
-		ip->i_flag |= IN_CHANGE | IN_UPDATE;
+		ip->i_flag |= IN_CHANGE;
 	}
 	/*
 	 * If we successfully wrote any data, and we are not the superuser

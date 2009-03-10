@@ -23,9 +23,9 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  *	from: $NetBSD: locore.S,v 1.24 2000/05/31 05:09:17 thorpej Exp $
- *	from: $FreeBSD: src/sys/powerpc/booke/swtch.S,v 1.1 2008/03/03 17:17:00 raj Exp $
+ *	from: $FreeBSD: src/sys/powerpc/booke/swtch.S,v 1.2 2009/02/27 12:08:24 raj Exp $
  *
- * $FreeBSD: src/sys/powerpc/booke/swtch.S,v 1.1 2008/03/03 17:17:00 raj Exp $
+ * $FreeBSD: src/sys/powerpc/booke/swtch.S,v 1.2 2009/02/27 12:08:24 raj Exp $
  */
 /*-
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -66,6 +66,7 @@
 #include <machine/param.h>
 #include <machine/psl.h>
 #include <machine/asm.h>
+#include <machine/spr.h>
 
 /*
  * void cpu_switch(struct thread *old, struct thread *new)
@@ -87,6 +88,8 @@ ENTRY(cpu_switch)
 	stw	%r16, PCB_BOOKE_CTR(%r5)
 	mfxer	%r16
 	stw	%r16, PCB_BOOKE_XER(%r5)
+	mfspr	%r16, SPR_DBCR0
+	stw	%r16, PCB_BOOKE_DBCR0(%r5)
 
 	stw	%r1, PCB_SP(%r5)	/* Save the stack pointer */
 
@@ -114,6 +117,8 @@ ENTRY(cpu_switch)
 	mtctr	%r5
 	lwz	%r5, PCB_BOOKE_XER(%r3)
 	mtxer	%r5
+	lwz	%r5, PCB_BOOKE_DBCR0(%r3)
+	mtspr	SPR_DBCR0, %r5
 
 	lwz	%r1, PCB_SP(%r3)	/* Load the stack pointer */
 	blr

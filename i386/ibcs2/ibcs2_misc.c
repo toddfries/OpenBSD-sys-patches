@@ -47,7 +47,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_misc.c,v 1.70 2008/01/13 14:44:07 attilio Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/ibcs2/ibcs2_misc.c,v 1.71 2009/02/13 18:18:14 jhb Exp $");
 
 /*
  * IBCS2 compatibility module.
@@ -356,7 +356,7 @@ ibcs2_getdents(td, uap)
 	buflen = max(DIRBLKSIZ, uap->nbytes);
 	buflen = min(buflen, MAXBSIZE);
 	buf = malloc(buflen, M_TEMP, M_WAITOK);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+	vn_lock(vp, LK_SHARED | LK_RETRY);
 again:
 	aiov.iov_base = buf;
 	aiov.iov_len = buflen;
@@ -518,7 +518,7 @@ ibcs2_read(td, uap)
 	buflen = max(DIRBLKSIZ, uap->nbytes);
 	buflen = min(buflen, MAXBSIZE);
 	buf = malloc(buflen, M_TEMP, M_WAITOK);
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+	vn_lock(vp, LK_SHARED | LK_RETRY);
 again:
 	aiov.iov_base = buf;
 	aiov.iov_len = buflen;

@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)ip.h	8.2 (Berkeley) 6/1/94
- * $FreeBSD: src/sys/netinet/ip.h,v 1.33 2008/09/26 18:30:11 emaste Exp $
+ * $FreeBSD: src/sys/netinet/ip.h,v 1.34 2009/02/13 15:14:43 luigi Exp $
  */
 
 #ifndef _NETINET_IP_H_
@@ -150,10 +150,10 @@ struct	ip_timestamp {
 		ipt_flg:4;		/* flags, see below */
 #endif
 	union ipt_timestamp {
-		n_long	ipt_time[1];
+		uint32_t	ipt_time[1];	/* network format */
 		struct	ipt_ta {
 			struct in_addr ipt_addr;
-			n_long ipt_time;
+			uint32_t ipt_time;	/* network format */
 		} ipt_ta[1];
 	} ipt_timestamp;
 };

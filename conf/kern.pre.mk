@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/kern.pre.mk,v 1.103 2009/01/12 16:54:41 gnn Exp $
+# $FreeBSD: src/sys/conf/kern.pre.mk,v 1.106 2009/02/26 20:54:43 thompsa Exp $
 
 # Part of a unified Makefile for building kernels.  This part contains all
 # of the definitions that need to be before %BEFORE_DEPEND.
@@ -53,7 +53,11 @@ C_DIALECT= -std=c99
 NOSTDINC= -nostdinc
 .endif
 
-INCLUDES= ${NOSTDINC} ${INCLMAGIC} -I. -I$S
+.if defined(WITH_LEGACY)
+LEGACY_INC= -I$S/legacy
+.endif
+
+INCLUDES= ${NOSTDINC} ${INCLMAGIC} -I. ${LEGACY_INC} -I$S
 
 # This hack lets us use the OpenBSD altq code without spamming a new
 # include path into contrib'ed source files.

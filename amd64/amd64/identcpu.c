@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/amd64/amd64/identcpu.c,v 1.170 2009/01/12 19:17:35 jkim Exp $");
+__FBSDID("$FreeBSD: src/sys/amd64/amd64/identcpu.c,v 1.171 2009/01/22 21:04:46 jkim Exp $");
 
 #include "opt_cpu.h"
 
@@ -392,7 +392,8 @@ printcpuinfo(void)
 				break;
 			case CPU_VENDOR_CENTAUR:
 				if (AMD64_CPU_FAMILY(cpu_id) == 0x6 &&
-				    AMD64_CPU_MODEL(cpu_id) >= 0xf)
+				    AMD64_CPU_MODEL(cpu_id) >= 0xf &&
+				    (rdmsr(0x1203) & 0x100000000ULL) == 0)
 					tsc_is_invariant = 1;
 				break;
 			}

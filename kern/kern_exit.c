@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_exit.c,v 1.317 2008/12/05 20:50:24 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_exit.c,v 1.318 2009/02/26 15:51:54 ed Exp $");
 
 #include "opt_compat.h"
 #include "opt_kdtrace.h"
@@ -584,8 +584,6 @@ abort2(struct thread *td, struct abort2_args *uap)
 	struct sbuf *sb;
 	void *uargs[16];
 	int error, i, sig;
-
-	error = 0;	/* satisfy compiler */
 
 	/*
 	 * Do it right now so we can log either proper call of abort2(), or

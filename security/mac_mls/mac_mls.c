@@ -35,7 +35,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_mls/mac_mls.c,v 1.110 2009/01/10 10:58:41 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac_mls/mac_mls.c,v 1.111 2009/03/08 12:32:06 rwatson Exp $
  */
 
 /*
@@ -2398,8 +2398,7 @@ mls_vnode_check_getacl(struct ucred *cred, struct vnode *vp,
 
 static int
 mls_vnode_check_getextattr(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, int attrnamespace, const char *name,
-    struct uio *uio)
+    struct label *vplabel, int attrnamespace, const char *name)
 {
 	struct mac_mls *subj, *obj;
 
@@ -2739,8 +2738,7 @@ mls_vnode_check_setacl(struct ucred *cred, struct vnode *vp,
 
 static int
 mls_vnode_check_setextattr(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, int attrnamespace, const char *name,
-    struct uio *uio)
+    struct label *vplabel, int attrnamespace, const char *name)
 {
 	struct mac_mls *subj, *obj;
 

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/atapi-tape.c,v 1.109 2008/09/27 08:51:18 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/atapi-tape.c,v 1.113 2009/02/28 22:07:15 mav Exp $");
 
 #include "opt_ata.h"
 #include <sys/param.h>
@@ -175,13 +175,14 @@ ast_detach(device_t dev)
     return 0;
 }
 
-static void
+static int
 ast_shutdown(device_t dev)
 {
     struct ata_device *atadev = device_get_softc(dev);
 
     if (atadev->param.support.command2 & ATA_SUPPORT_FLUSHCACHE)
 	ata_controlcmd(dev, ATA_FLUSHCACHE, 0, 0, 0);
+    return 0;
 }
 
 static int
@@ -190,10 +191,10 @@ ast_reinit(device_t dev)
     struct ata_channel *ch = device_get_softc(device_get_parent(dev));
     struct ata_device *atadev = device_get_softc(dev);
 
-    if (((atadev->unit == ATA_MASTER) && !(ch->devices & ATA_ATAPI_MASTER)) ||
-	((atadev->unit == ATA_SLAVE) && !(ch->devices & ATA_ATAPI_SLAVE))) {
+    /* if detach pending, return error */
+    if (!(ch->devices & (ATA_ATAPI_MASTER << atadev->unit)))
 	return 1;
-    }
+
     ATA_SETMODE(device_get_parent(dev), dev);
     return 0;
 }

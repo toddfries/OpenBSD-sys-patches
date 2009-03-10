@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/syscons/teken/teken_subr_compat.h,v 1.1 2009/01/01 13:26:53 ed Exp $
+ * $FreeBSD: src/sys/dev/syscons/teken/teken_subr_compat.h,v 1.4 2009/01/18 09:44:33 ed Exp $
  */
 
 static void
@@ -31,6 +31,32 @@ teken_subr_cons25_set_cursor_type(teken_t *t, unsigned int type)
 {
 
 	teken_funcs_param(t, TP_SHOWCURSOR, type != 1);
+}
+
+static const teken_color_t cons25_colors[8] = { TC_BLACK, TC_BLUE,
+    TC_GREEN, TC_CYAN, TC_RED, TC_MAGENTA, TC_BROWN, TC_WHITE };
+
+static void
+teken_subr_cons25_set_adapter_background(teken_t *t, unsigned int c)
+{
+
+	t->t_defattr.ta_bgcolor = cons25_colors[c % 8];
+	t->t_curattr.ta_bgcolor = cons25_colors[c % 8];
+}
+
+static void
+teken_subr_cons25_set_adapter_foreground(teken_t *t, unsigned int c)
+{
+
+	t->t_defattr.ta_fgcolor = cons25_colors[c % 8];
+	t->t_curattr.ta_fgcolor = cons25_colors[c % 8];
+	if (c >= 8) {
+		t->t_defattr.ta_format |= TF_BOLD;
+		t->t_curattr.ta_format |= TF_BOLD;
+	} else {
+		t->t_defattr.ta_format &= ~TF_BOLD;
+		t->t_curattr.ta_format &= ~TF_BOLD;
+	}
 }
 
 static void

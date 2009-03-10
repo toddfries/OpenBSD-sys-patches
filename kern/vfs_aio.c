@@ -19,7 +19,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/vfs_aio.c,v 1.240 2008/12/10 20:56:19 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/vfs_aio.c,v 1.241 2009/01/23 13:23:17 jhb Exp $");
 
 #include "opt_compat.h"
 
@@ -2824,7 +2824,7 @@ int
 freebsd32_aio_waitcomplete(struct thread *td,
     struct freebsd32_aio_waitcomplete_args *uap)
 {
-	struct timespec ts32;
+	struct timespec32 ts32;
 	struct timespec ts, *tsp;
 	int error;
 

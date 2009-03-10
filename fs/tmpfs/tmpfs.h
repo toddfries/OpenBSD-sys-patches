@@ -29,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/tmpfs/tmpfs.h,v 1.15 2008/09/23 14:45:10 obrien Exp $
+ * $FreeBSD: src/sys/fs/tmpfs/tmpfs.h,v 1.16 2009/02/08 19:18:33 kib Exp $
  */
 
 #ifndef _FS_TMPFS_TMPFS_H_
@@ -408,9 +408,8 @@ int	tmpfs_alloc_file(struct vnode *, struct vnode **, struct vattr *,
 void	tmpfs_dir_attach(struct vnode *, struct tmpfs_dirent *);
 void	tmpfs_dir_detach(struct vnode *, struct tmpfs_dirent *);
 struct tmpfs_dirent *	tmpfs_dir_lookup(struct tmpfs_node *node,
+			    struct tmpfs_node *f,
 			    struct componentname *cnp);
-struct tmpfs_dirent *tmpfs_dir_search(struct tmpfs_node *node,
-    struct tmpfs_node *f);
 int	tmpfs_dir_getdotdent(struct tmpfs_node *, struct uio *);
 int	tmpfs_dir_getdotdotdent(struct tmpfs_node *, struct uio *);
 struct tmpfs_dirent *	tmpfs_dir_lookupbycookie(struct tmpfs_node *, off_t);

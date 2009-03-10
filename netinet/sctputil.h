@@ -32,7 +32,7 @@
 /* $KAME: sctputil.h,v 1.15 2005/03/06 16:04:19 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctputil.h,v 1.34 2008/12/06 13:19:54 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctputil.h,v 1.35 2009/02/03 11:04:03 rrs Exp $");
 #ifndef __sctputil_h__
 #define __sctputil_h__
 
@@ -93,8 +93,6 @@ sctp_timer_stop(int, struct sctp_inpcb *, struct sctp_tcb *,
 
 int
     sctp_dynamic_set_primary(struct sockaddr *sa, uint32_t vrf_id);
-
-uint32_t sctp_calculate_sum(struct mbuf *, int32_t *, uint32_t);
 
 void
      sctp_mtu_size_reset(struct sctp_inpcb *, struct sctp_association *, uint32_t);

@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)in_pcb.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/netinet/in_pcb.h,v 1.125 2009/01/09 16:02:19 adrian Exp $
+ * $FreeBSD: src/sys/netinet/in_pcb.h,v 1.126 2009/03/10 11:04:19 rwatson Exp $
  */
 
 #ifndef _NETINET_IN_PCB_H_
@@ -433,8 +433,6 @@ void 	inp_4tuple_get(struct inpcb *inp, uint32_t *laddr, uint16_t *lp,
 				 IN6P_DSTOPTS|IN6P_RTHDR|IN6P_RTHDRDSTOPTS|\
 				 IN6P_TCLASS|IN6P_AUTOFLOWLABEL|IN6P_RFC2292|\
 				 IN6P_MTU)
-#define	INP_UNMAPPABLEOPTS	(IN6P_HOPOPTS|IN6P_DSTOPTS|IN6P_RTHDR|\
-				 IN6P_TCLASS|IN6P_AUTOFLOWLABEL)
 
  /* for KAME src sync over BSD*'s */
 #define	IN6P_HIGHPORT		INP_HIGHPORT

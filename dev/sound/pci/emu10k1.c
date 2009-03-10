@@ -37,7 +37,7 @@
 #include <dev/sound/midi/mpu401.h>
 #include "mpufoi_if.h"
 
-SND_DECLARE_FILE("$FreeBSD: src/sys/dev/sound/pci/emu10k1.c,v 1.69 2007/06/17 06:10:42 ariff Exp $");
+SND_DECLARE_FILE("$FreeBSD: src/sys/dev/sound/pci/emu10k1.c,v 1.70 2009/03/09 13:23:54 imp Exp $");
 
 /* -------------------------------------------------------------------- */
 
@@ -2109,7 +2109,6 @@ static driver_t emu_driver = {
 };
 
 DRIVER_MODULE(snd_emu10k1, pci, emu_driver, pcm_devclass, 0, 0);
-DRIVER_MODULE(snd_emu10k1, cardbus, emu_driver, pcm_devclass, 0, 0);
 MODULE_DEPEND(snd_emu10k1, sound, SOUND_MINVER, SOUND_PREFVER, SOUND_MAXVER);
 MODULE_VERSION(snd_emu10k1, 1);
 MODULE_DEPEND(snd_emu10k1, midi, 1, 1, 1);

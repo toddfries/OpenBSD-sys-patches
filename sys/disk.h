@@ -6,7 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $FreeBSD: src/sys/sys/disk.h,v 1.43 2008/09/07 13:54:57 lulf Exp $
+ * $FreeBSD: src/sys/sys/disk.h,v 1.44 2009/02/20 04:48:40 marcel Exp $
  *
  */
 
@@ -102,6 +102,12 @@ void disk_err(struct bio *bp, const char *what, int blkdone, int nl);
 	/*-
 	 * Store the provider name, given a device path, in a buffer. The buffer
 	 * must be at least MAXPATHLEN bytes long.
+	 */
+
+#define	DIOCGPROVIDERALIAS _IOR('d', 139, char[MAXPATHLEN])
+	/*-
+	 * Store the provider alias, if present, in a buffer. The buffer must
+	 * be at least MAXPATHLEN bytes long.
 	 */
 
 #endif /* _SYS_DISK_H_ */

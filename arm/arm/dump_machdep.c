@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/dump_machdep.c,v 1.6 2008/11/06 16:20:27 raj Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/dump_machdep.c,v 1.7 2009/02/02 20:09:14 cognet Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -158,14 +158,12 @@ cb_dumpdata(struct md_pa *mdp, int seqnr, void *arg)
 {
 	struct dumperinfo *di = (struct dumperinfo*)arg;
 	vm_paddr_t pa;
-	vm_offset_t va;
 	uint32_t pgs;
 	size_t counter, sz, chunk;
 	int c, error;
 
 	error = 0;	/* catch case in which chunk size is 0 */
 	counter = 0;
-	va = 0;
 	pgs = mdp->md_size / PAGE_SIZE;
 	pa = mdp->md_start;
 

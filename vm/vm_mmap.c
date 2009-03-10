@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_mmap.c,v 1.225 2008/10/22 16:50:12 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_mmap.c,v 1.228 2009/02/24 20:57:43 kib Exp $");
 
 #include "opt_compat.h"
 #include "opt_hwpmc_hooks.h"
@@ -1160,7 +1160,7 @@ vm_mmap_vnode(struct thread *td, vm_size_t objsize,
 	mp = vp->v_mount;
 	cred = td->td_ucred;
 	vfslocked = VFS_LOCK_GIANT(mp);
-	if ((error = vget(vp, LK_EXCLUSIVE, td)) != 0) {
+	if ((error = vget(vp, LK_SHARED, td)) != 0) {
 		VFS_UNLOCK_GIANT(vfslocked);
 		return (error);
 	}
@@ -1177,7 +1177,7 @@ vm_mmap_vnode(struct thread *td, vm_size_t objsize,
 		if (obj->handle != vp) {
 			vput(vp);
 			vp = (struct vnode*)obj->handle;
-			vget(vp, LK_EXCLUSIVE, td);
+			vget(vp, LK_SHARED, td);
 		}
 		type = OBJT_VNODE;
 		handle = vp;

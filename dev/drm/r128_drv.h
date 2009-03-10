@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/r128_drv.h,v 1.12 2008/08/23 20:59:12 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/r128_drv.h,v 1.13 2009/02/28 02:37:55 rnoland Exp $");
 
 #ifndef __R128_DRV_H__
 #define __R128_DRV_H__
@@ -162,6 +162,7 @@ extern void r128_driver_irq_preinstall(struct drm_device * dev);
 extern int r128_driver_irq_postinstall(struct drm_device * dev);
 extern void r128_driver_irq_uninstall(struct drm_device * dev);
 extern void r128_driver_lastclose(struct drm_device * dev);
+extern int r128_driver_load(struct drm_device * dev, unsigned long flags);
 extern void r128_driver_preclose(struct drm_device * dev,
 				 struct drm_file *file_priv);
 

@@ -23,7 +23,7 @@
  * SUCH DAMAGE.
  */
 
-/* $FreeBSD: src/sys/arm/at91/at91var.h,v 1.3 2008/11/25 18:40:40 imp Exp $ */
+/* $FreeBSD: src/sys/arm/at91/at91var.h,v 1.4 2009/01/22 21:54:26 imp Exp $ */
 
 #ifndef _AT91VAR_H_
 #define _AT91VAR_H_
@@ -42,5 +42,7 @@ struct at91_softc {
 struct at91_ivar {
 	struct resource_list resources;
 };
+
+extern uint32_t at91_master_clock;
 
 #endif /* _AT91VAR_H_ */

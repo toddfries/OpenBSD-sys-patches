@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/powerpc/booke/trap.c,v 1.3 2008/10/27 01:51:30 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/powerpc/booke/trap.c,v 1.4 2009/02/27 12:08:24 raj Exp $");
 
 #include "opt_fpu_emu.h"
 #include "opt_ktrace.h"
@@ -187,6 +187,7 @@ trap(struct trapframe *frame)
 		case EXC_DEBUG:	/* Single stepping */
 			mtspr(SPR_DBSR, mfspr(SPR_DBSR));
 			frame->srr1 &= ~PSL_DE;
+			frame->cpu.booke.dbcr0 &= ~(DBCR0_IDM || DBCR0_IC);
 			sig = SIGTRAP;
 			break;
 

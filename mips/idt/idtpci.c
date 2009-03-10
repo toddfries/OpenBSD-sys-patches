@@ -62,7 +62,7 @@
  */ 
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/mips/idt/idtpci.c,v 1.2 2008/09/10 03:49:08 gonzo Exp $");
+__FBSDID("$FreeBSD: src/sys/mips/idt/idtpci.c,v 1.3 2009/01/14 22:46:13 gonzo Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -125,8 +125,6 @@ struct idtpci_softc {
 	struct rman		sc_mem_rman[2];
 	struct rman		sc_io_rman[2];
 	struct rman		sc_irq_rman;
-	uint32_t		sc_mem;
-	uint32_t		sc_io;
 };
 
 static uint32_t
@@ -154,9 +152,6 @@ idtpci_attach(device_t dev)
 
 	sc->sc_dev = dev;
 	sc->sc_busno = busno;
-
-	sc->sc_io = 0;
-	sc->sc_mem = 0;
 
 	/* TODO: Check for host mode */
 
@@ -240,7 +235,6 @@ idtpci_attach(device_t dev)
 	}
 
 	/* Use KSEG1 to access IO ports for it is uncached */
-	sc->sc_io = 0;
 	sc->sc_io_rman[0].rm_type = RMAN_ARRAY;
 	sc->sc_io_rman[0].rm_descr = "IDTPCI I/O Ports window 1";
 	if (rman_init(&sc->sc_io_rman[0]) != 0 ||
@@ -258,7 +252,6 @@ idtpci_attach(device_t dev)
 	}
 
 	/* Use KSEG1 to access PCI memory for it is uncached */
-	sc->sc_mem = 0;
 	sc->sc_mem_rman[0].rm_type = RMAN_ARRAY;
 	sc->sc_mem_rman[0].rm_descr = "IDTPCI PCI Memory window 1";
 	if (rman_init(&sc->sc_mem_rman[0]) != 0 ||

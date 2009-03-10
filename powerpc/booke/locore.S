@@ -23,7 +23,7 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/booke/locore.S,v 1.6 2008/12/18 18:28:03 raj Exp $
+ * $FreeBSD: src/sys/powerpc/booke/locore.S,v 1.7 2009/01/13 15:41:58 raj Exp $
  */
 
 #include "assym.s"
@@ -397,6 +397,87 @@ ivor_setup:
 	mtspr	SPR_IVOR14, %r3
 	li	%r3, int_debug@l
 	mtspr	SPR_IVOR15, %r3
+	blr
+
+/*
+ * void tid_flush(tlbtid_t tid);
+ *
+ * Invalidate all TLB0 entries which match the given TID. Note this is
+ * dedicated for cases when invalidation(s) should NOT be propagated to other
+ * CPUs.
+ *
+ * Global vars tlb0_ways, tlb0_entries_per_way are assumed to have been set up
+ * correctly (by tlb0_get_tlbconf()).
+ *
+ */
+ENTRY(tid_flush)
+	cmpwi	%r3, TID_KERNEL
+	beq	tid_flush_end	/* don't evict kernel translations */
+
+	/* Number of TLB0 ways */
+	lis	%r4, tlb0_ways@h
+	ori	%r4, %r4, tlb0_ways@l
+	lwz	%r4, 0(%r4)
+
+	/* Number of entries / way */
+	lis	%r5, tlb0_entries_per_way@h
+	ori	%r5, %r5, tlb0_entries_per_way@l
+	lwz	%r5, 0(%r5)
+
+	/* Disable interrupts */
+	mfmsr	%r10
+	wrteei	0
+
+	li	%r6, 0		/* ways counter */
+loop_ways:
+	li	%r7, 0		/* entries [per way] counter */
+loop_entries:
+	/* Select TLB0 and ESEL (way) */
+	lis	%r8, MAS0_TLBSEL0@h
+	rlwimi	%r8, %r6, 16, 14, 15
+	mtspr	SPR_MAS0, %r8
+	isync
+
+	/* Select EPN (entry within the way) */
+	rlwinm	%r8, %r7, 12, 13, 19
+	mtspr	SPR_MAS2, %r8
+	isync
+	tlbre
+
+	/* Check if valid entry */
+	mfspr	%r8, SPR_MAS1
+	andis.	%r9, %r8, MAS1_VALID@h
+	beq	next_entry	/* invalid entry */
+
+	/* Check if this is our TID */
+	rlwinm	%r9, %r8, 16, 24, 31
+
+	cmplw	%r9, %r3
+	bne	next_entry	/* not our TID */
+
+	/* Clear VALID bit */
+	rlwinm	%r8, %r8, 0, 1, 31
+	mtspr	SPR_MAS1, %r8
+	isync
+	tlbwe
+	isync
+	msync
+
+next_entry:
+	addi	%r7, %r7, 1
+	cmpw	%r7, %r5
+	bne	loop_entries
+
+	/* Next way */
+	addi	%r6, %r6, 1
+	cmpw	%r6, %r4
+	bne	loop_ways
+
+	/* Restore MSR (possibly re-enable interrupts) */
+	mtmsr	%r10
+	isync
+
+tid_flush_end:
 	blr
 
 /*

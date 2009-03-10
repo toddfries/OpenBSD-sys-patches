@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_conf.c,v 1.225 2008/11/27 16:47:25 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_conf.c,v 1.226 2009/03/06 15:35:37 kib Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -312,18 +312,8 @@ no_strategy(struct bio *bp)
 static int
 no_poll(struct cdev *dev __unused, int events, struct thread *td __unused)
 {
-	/*
-	 * Return true for read/write.  If the user asked for something
-	 * special, return POLLNVAL, so that clients have a way of
-	 * determining reliably whether or not the extended
-	 * functionality is present without hard-coding knowledge
-	 * of specific filesystem implementations.
-	 * Stay in sync with vop_nopoll().
-	 */
-	if (events & ~POLLSTANDARD)
-		return (POLLNVAL);
 
-	return (events & (POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM));
+	return (poll_no_poll(events));
 }
 
 #define no_dump		(dumper_t *)enodev

@@ -1,8 +1,7 @@
-# $FreeBSD: src/sys/boot/powerpc/ofw/Makefile,v 1.24 2008/06/25 21:33:28 ru Exp $
-
-WITHOUT_SSP=
+# $FreeBSD: src/sys/boot/powerpc/ofw/Makefile,v 1.25 2009/02/21 15:04:31 ru Exp $
 
 .include <bsd.own.mk>
+MK_SSP=		no
 
 PROG=		loader
 NEWVERSWHAT=	"Open Firmware loader" ${MACHINE_ARCH}

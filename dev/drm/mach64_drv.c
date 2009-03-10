@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/mach64_drv.c,v 1.8 2008/10/13 18:03:27 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/mach64_drv.c,v 1.10 2009/03/09 07:55:18 rnoland Exp $");
 
 
 #include <sys/types.h>
@@ -54,6 +54,7 @@ static void mach64_configure(struct drm_device *dev)
 	    DRIVER_HAVE_DMA | DRIVER_HAVE_IRQ;
 
 	dev->driver->buf_priv_size	= 1; /* No dev_priv */
+	dev->driver->load		= mach64_driver_load;
 	dev->driver->lastclose		= mach64_driver_lastclose;
 	dev->driver->get_vblank_counter	= mach64_get_vblank_counter;
 	dev->driver->enable_vblank	= mach64_enable_vblank;
@@ -76,31 +77,37 @@ static void mach64_configure(struct drm_device *dev)
 }
 
 static int
-mach64_probe(device_t dev)
+mach64_probe(device_t kdev)
 {
-	return drm_probe(dev, mach64_pciidlist);
+	return drm_probe(kdev, mach64_pciidlist);
 }
 
 static int
-mach64_attach(device_t nbdev)
+mach64_attach(device_t kdev)
 {
-	struct drm_device *dev = device_get_softc(nbdev);
+	struct drm_device *dev = device_get_softc(kdev);
 
 	dev->driver = malloc(sizeof(struct drm_driver_info), DRM_MEM_DRIVER,
 	    M_WAITOK | M_ZERO);
 
 	mach64_configure(dev);
 
-	return drm_attach(nbdev, mach64_pciidlist);
+	return drm_attach(kdev, mach64_pciidlist);
+}
+
+int
+mach64_driver_load(struct drm_device * dev, unsigned long flags)
+{
+        return drm_vblank_init(dev, 1);
 }
 
 static int
-mach64_detach(device_t nbdev)
+mach64_detach(device_t kdev)
 {
-	struct drm_device *dev = device_get_softc(nbdev);
+	struct drm_device *dev = device_get_softc(kdev);
 	int ret;
 
-	ret = drm_detach(nbdev);
+	ret = drm_detach(kdev);
 
 	free(dev->driver, DRM_MEM_DRIVER);
 

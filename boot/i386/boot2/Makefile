@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/i386/boot2/Makefile,v 1.60 2007/05/19 05:07:47 kan Exp $
+# $FreeBSD: src/sys/boot/i386/boot2/Makefile,v 1.61 2009/03/07 22:05:58 marcel Exp $
 
 FILES=		boot boot1 boot2
 
@@ -70,7 +70,7 @@ boot2.ld: boot2.ldr boot2.bin ${BTXKERN}
 	    -o ${.TARGET} -P 1 boot2.bin
 
 boot2.ldr:
-	dd if=/dev/zero of=${.TARGET} bs=276 count=1
+	dd if=/dev/zero of=${.TARGET} bs=512 count=1
 
 boot2.bin: boot2.out
 	objcopy -S -O binary boot2.out ${.TARGET}

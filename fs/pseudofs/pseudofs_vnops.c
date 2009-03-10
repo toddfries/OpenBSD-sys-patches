@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/pseudofs/pseudofs_vnops.c,v 1.72 2008/12/30 21:49:39 marcus Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/pseudofs/pseudofs_vnops.c,v 1.73 2009/02/16 15:17:26 des Exp $");
 
 #include "opt_pseudofs.h"
 
@@ -226,13 +226,16 @@ pfs_getattr(struct vop_getattr_args *va)
 	if (proc != NULL) {
 		vap->va_uid = proc->p_ucred->cr_ruid;
 		vap->va_gid = proc->p_ucred->cr_rgid;
-		if (pn->pn_attr != NULL)
-			error = pn_attr(curthread, proc, pn, vap);
-		PROC_UNLOCK(proc);
 	} else {
 		vap->va_uid = 0;
 		vap->va_gid = 0;
 	}
+
+	if (pn->pn_attr != NULL)
+		error = pn_attr(curthread, proc, pn, vap);
+
+	if(proc != NULL)
+		PROC_UNLOCK(proc);
 
 	PFS_RETURN (error);
 }

@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ia64/ia64/mp_machdep.c,v 1.71 2008/10/19 20:14:48 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/ia64/ia64/mp_machdep.c,v 1.72 2009/02/10 20:29:57 marcel Exp $");
 
 #include "opt_kstack_pages.h"
 
@@ -267,7 +267,8 @@ cpu_mp_start()
 			if (!ap_awake)
 				printf("SMP: WARNING: cpu%d did not wake up\n",
 				    pc->pc_cpuid);
-		}
+		} else
+			pc->pc_awake = 1;
 	}
 }
 

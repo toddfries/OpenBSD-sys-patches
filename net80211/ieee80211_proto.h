@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net80211/ieee80211_proto.h,v 1.34 2009/01/08 17:12:47 sam Exp $
+ * $FreeBSD: src/sys/net80211/ieee80211_proto.h,v 1.35 2009/02/12 18:57:18 thompsa Exp $
  */
 #ifndef _NET80211_IEEE80211_PROTO_H_
 #define _NET80211_IEEE80211_PROTO_H_
@@ -260,6 +260,7 @@ ieee80211_gettid(const struct ieee80211_frame *wh)
 	return tid;
 }
 
+void	ieee80211_waitfor_parent(struct ieee80211com *);
 void	ieee80211_start_locked(struct ieee80211vap *);
 void	ieee80211_init(void *);
 void	ieee80211_start_all(struct ieee80211com *);

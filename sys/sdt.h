@@ -22,7 +22,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/sdt.h,v 1.1 2008/05/17 02:14:19 jb Exp $
+ * $FreeBSD: src/sys/sys/sdt.h,v 1.3 2009/03/03 18:23:16 rwatson Exp $
  *
  * Statically Defined Tracing (SDT) definitions.
  *
@@ -52,6 +52,12 @@
 #define SDT_PROBE_DECLARE(prov, mod, func, name)
 #define SDT_PROBE(prov, mod, func, name, arg0, arg1, arg2, arg3, arg4)
 #define SDT_PROBE_ARGTYPE(prov, mod, func, name, num, type)
+
+#define	SDT_PROBE_DEFINE1(prov, mod, func, name, arg0)
+#define	SDT_PROBE_DEFINE2(prov, mod, func, name, arg0, arg1)
+#define	SDT_PROBE_DEFINE3(prov, mod, func, name, arg0, arg1, arg2)
+#define	SDT_PROBE_DEFINE4(prov, mod, func, name, arg0, arg1, arg2, arg3)
+#define	SDT_PROBE_DEFINE5(prov, mod, func, name, arg0, arg1, arg2, arg3, arg4)
 
 #else
 
@@ -155,6 +161,36 @@ struct sdt_provider {
 	SYSUNINIT(sdt_##prov##_##mod##_##func##_##name##num##_uninit, 		\
 	    SI_SUB_KDTRACE, SI_ORDER_SECOND + 2, sdt_argtype_deregister,	\
 	    sdt_##prov##_##mod##_##func##_##name##num )
+
+#define	SDT_PROBE_DEFINE1(prov, mod, func, name, arg0)			\
+	SDT_PROBE_DEFINE(prov, mod, func, name);			\
+	SDT_PROBE_ARGTYPE(prov, mod, func, name, 0, arg0)
+
+#define	SDT_PROBE_DEFINE2(prov, mod, func, name, arg0, arg1)		\
+	SDT_PROBE_DEFINE(prov, mod, func, name);			\
+	SDT_PROBE_ARGTYPE(prov, mod, func, name, 0, arg0);		\
+	SDT_PROBE_ARGTYPE(prov, mod, func, name, 1, arg1)
+
+#define	SDT_PROBE_DEFINE3(prov, mod, func, name, arg0, arg1, arg2)	\
+	SDT_PROBE_DEFINE(prov, mod, func, name);			\
+	SDT_PROBE_ARGTYPE(prov, mod, func, name, 0, arg0);		\
+	SDT_PROBE_ARGTYPE(prov, mod, func, name, 1, arg1);		\
+	SDT_PROBE_ARGTYPE(prov, mod, func, name, 2, arg2)
+
+#define	SDT_PROBE_DEFINE4(prov, mod, func, name, arg0, arg1, arg2, arg3) \
+	SDT_PROBE_DEFINE(prov, mod, func, name);			\
+	SDT_PROBE_ARGTYPE(prov, mod, func, name, 0, arg0);		\
+	SDT_PROBE_ARGTYPE(prov, mod, func, name, 1, arg1);		\
+	SDT_PROBE_ARGTYPE(prov, mod, func, name, 2, arg2);		\
+	SDT_PROBE_ARGTYPE(prov, mod, func, name, 3, arg3)
+
+#define	SDT_PROBE_DEFINE5(prov, mod, func, name, arg0, arg1, arg2, arg3, arg4) \
+	SDT_PROBE_DEFINE(prov, mod, func, name);			\
+	SDT_PROBE_ARGTYPE(prov, mod, func, name, 0, arg0);		\
+	SDT_PROBE_ARGTYPE(prov, mod, func, name, 1, arg1);		\
+	SDT_PROBE_ARGTYPE(prov, mod, func, name, 2, arg2);		\
+	SDT_PROBE_ARGTYPE(prov, mod, func, name, 3, arg3);		\
+	SDT_PROBE_ARGTYPE(prov, mod, func, name, 4, arg4)
 
 typedef int (*sdt_argtype_listall_func_t)(struct sdt_argtype *, void *);
 typedef int (*sdt_probe_listall_func_t)(struct sdt_probe *, void *);

@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/rpc/clnt_rc.c,v 1.6 2008/11/03 10:38:00 dfr Exp $");
+__FBSDID("$FreeBSD: src/sys/rpc/clnt_rc.c,v 1.7 2009/02/05 11:48:10 dfr Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -181,11 +181,12 @@ again:
 		rpc_createerr.cf_error.re_errno = 0;
 		goto out;
 	}
-	if (rc->rc_privport)
-		bindresvport(so, NULL);
 
 	oldcred = td->td_ucred;
 	td->td_ucred = rc->rc_ucred;
+	if (rc->rc_privport)
+		bindresvport(so, NULL);
+
 	if (rc->rc_nconf->nc_semantics == NC_TPI_CLTS)
 		rc->rc_client = clnt_dg_create(so,
 		    (struct sockaddr *) &rc->rc_addr, rc->rc_prog, rc->rc_vers,

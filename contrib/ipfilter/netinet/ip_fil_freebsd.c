@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/contrib/ipfilter/netinet/ip_fil_freebsd.c,v 1.14 2008/12/23 16:49:07 bz Exp $	*/
+/*	$FreeBSD: src/sys/contrib/ipfilter/netinet/ip_fil_freebsd.c,v 1.15 2009/02/27 13:29:18 bz Exp $	*/
 
 /*
  * Copyright (C) 1993-2003 by Darren Reed.
@@ -92,6 +92,9 @@ static const char rcsid[] = "@(#)$Id: ip_fil_freebsd.c,v 2.53.2.50 2007/09/20 12
 #include <netinet/udp.h>
 #include <netinet/tcpip.h>
 #include <netinet/ip_icmp.h>
+#if defined(__FreeBSD_version) && (__FreeBSD_version >= 800056)
+# include <netinet/vinet.h>
+#endif
 #ifndef _KERNEL
 # include "netinet/ipf.h"
 #endif
@@ -112,9 +115,6 @@ static const char rcsid[] = "@(#)$Id: ip_fil_freebsd.c,v 2.53.2.50 2007/09/20 12
 #include "netinet/ip_scan.h"
 #endif
 #include "netinet/ip_pool.h"
-#if defined(__FreeBSD_version) && (__FreeBSD_version >= 800056)
-# include <netinet/vinet.h>
-#endif
 #if defined(__FreeBSD_version) && (__FreeBSD_version >= 300000)
 # include <sys/malloc.h>
 #endif

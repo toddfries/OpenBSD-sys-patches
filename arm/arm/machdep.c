@@ -46,7 +46,7 @@
 #include "opt_ddb.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/arm/machdep.c,v 1.31 2008/04/25 05:18:48 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/arm/machdep.c,v 1.32 2009/02/12 22:55:39 cognet Exp $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -304,7 +304,6 @@ cpu_startup(void *dummy)
 	    USPACE_SVC_STACK_TOP;
 	vector_page_setprot(VM_PROT_READ);
 	pmap_set_pcb_pagedir(pmap_kernel(), pcb);
-	thread0.td_frame = (struct trapframe *)pcb->un_32.pcb32_sp - 1;
 	pmap_postinit();
 #ifdef ARM_CACHE_LOCK_ENABLE
 	pmap_kenter_user(ARM_TP_ADDRESS, ARM_TP_ADDRESS);

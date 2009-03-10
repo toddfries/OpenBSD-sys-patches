@@ -35,7 +35,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_biba/mac_biba.c,v 1.128 2009/01/10 10:58:41 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac_biba/mac_biba.c,v 1.129 2009/03/08 12:32:06 rwatson Exp $
  */
 
 /*
@@ -2775,8 +2775,7 @@ biba_vnode_check_getacl(struct ucred *cred, struct vnode *vp,
 
 static int
 biba_vnode_check_getextattr(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, int attrnamespace, const char *name,
-    struct uio *uio)
+    struct label *vplabel, int attrnamespace, const char *name)
 {
 	struct mac_biba *subj, *obj;
 
@@ -3116,8 +3115,7 @@ biba_vnode_check_setacl(struct ucred *cred, struct vnode *vp,
 
 static int
 biba_vnode_check_setextattr(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, int attrnamespace, const char *name,
-    struct uio *uio)
+    struct label *vplabel, int attrnamespace, const char *name)
 {
 	struct mac_biba *subj, *obj;
 

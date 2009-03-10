@@ -37,7 +37,7 @@
  *
  * Author: Archie Cobbs <archie@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_iface.h,v 1.9 2005/02/13 16:36:41 archie Exp $
+ * $FreeBSD: src/sys/netgraph/ng_iface.h,v 1.10 2009/01/20 22:26:09 mav Exp $
  * $Whistle: ng_iface.h,v 1.5 1999/01/20 00:22:13 archie Exp $
  */
 
@@ -71,5 +71,8 @@ enum {
 	NGM_IFACE_BROADCAST,
 	NGM_IFACE_GET_IFINDEX,
 };
+
+#define	MTAG_NGIF			NGM_IFACE_COOKIE
+#define	MTAG_NGIF_CALLED		0 | MTAG_PERSISTENT
 
 #endif /* _NETGRAPH_NG_IFACE_H_ */

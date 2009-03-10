@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-netcell.c,v 1.1 2008/10/09 12:56:57 sos Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-netcell.c,v 1.3 2009/02/19 00:32:55 mav Exp $");
 
 #include "opt_ata.h"
 #include <sys/param.h>
@@ -53,7 +53,7 @@ __FBSDID("$FreeBSD: src/sys/dev/ata/chipsets/ata-netcell.c,v 1.1 2008/10/09 12:5
 
 /* local prototypes */
 static int ata_netcell_chipinit(device_t dev);
-static int ata_netcell_allocate(device_t dev);
+static int ata_netcell_ch_attach(device_t dev);
 static void ata_netcell_setmode(device_t dev, int mode);
 
 
@@ -81,18 +81,19 @@ ata_netcell_chipinit(device_t dev)
     if (ata_setup_interrupt(dev, ata_generic_intr))
         return ENXIO;
 
-    ctlr->allocate = ata_netcell_allocate;
+    ctlr->ch_attach = ata_netcell_ch_attach;
+    ctlr->ch_detach = ata_pci_ch_detach;
     ctlr->setmode = ata_netcell_setmode;
     return 0;
 }
 
 static int
-ata_netcell_allocate(device_t dev)
+ata_netcell_ch_attach(device_t dev)
 {
     struct ata_channel *ch = device_get_softc(dev);
  
     /* setup the usual register normal pci style */
-    if (ata_pci_allocate(dev))
+    if (ata_pci_ch_attach(dev))
 	return ENXIO;
  
     /* the NetCell only supports 16 bit PIO transfers */

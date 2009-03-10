@@ -26,7 +26,7 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/powerpc/include/pmap.h,v 1.22 2008/09/23 03:02:57 nwhitehorn Exp $
+ * $FreeBSD: src/sys/powerpc/include/pmap.h,v 1.23 2009/01/13 15:41:58 raj Exp $
  */
 /*-
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -111,17 +111,17 @@ struct	md_page {
 #else
 
 struct pmap {
-	struct mtx pm_mtx;		/* pmap mutex */
-	tlbtid_t pm_tid;		/* TID to identify this pmap entries in TLB */
-	u_int pm_active;		/* active on cpus */
-	int pm_refs;			/* ref count */
-	struct pmap_statistics pm_stats;/* pmap statistics */
+	struct mtx		pm_mtx;		/* pmap mutex */
+	tlbtid_t		pm_tid[MAXCPU];	/* TID to identify this pmap entries in TLB */
+	u_int			pm_active;	/* active on cpus */
+	int			pm_refs;	/* ref count */
+	struct pmap_statistics	pm_stats;	/* pmap statistics */
 
 	/* Page table directory, array of pointers to page tables. */
-	pte_t *pm_pdir[PDIR_NENTRIES];
+	pte_t			*pm_pdir[PDIR_NENTRIES];
 
 	/* List of allocated ptbl bufs (ptbl kva regions). */
-	TAILQ_HEAD(, ptbl_buf) ptbl_list;
+	TAILQ_HEAD(, ptbl_buf)	pm_ptbl_list;
 };
 typedef	struct pmap *pmap_t;
 

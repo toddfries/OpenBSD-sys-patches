@@ -29,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/compat/ndis/hal_var.h,v 1.8 2005/04/11 02:02:34 wpaul Exp $
+ * $FreeBSD: src/sys/compat/ndis/hal_var.h,v 1.9 2009/03/07 07:26:22 weongyo Exp $
  */
 
 #ifndef _HAL_VAR_H_
@@ -48,6 +48,7 @@ extern image_patch_table hal_functbl[];
 __BEGIN_DECLS
 extern int hal_libinit(void);
 extern int hal_libfini(void);
+extern struct mtx *hal_getdisplock(void);
 extern uint8_t KfAcquireSpinLock(kspin_lock *);
 extern void KfReleaseSpinLock(kspin_lock *, uint8_t);
 extern uint8_t KfRaiseIrql(uint8_t);

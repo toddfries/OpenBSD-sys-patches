@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/agp/Makefile,v 1.19 2007/11/12 21:51:37 jhb Exp $
+# $FreeBSD: src/sys/modules/agp/Makefile,v 1.21 2009/02/12 14:44:15 n_hibma Exp $
 
 .PATH: ${.CURDIR}/../../dev/agp
 
@@ -12,10 +12,10 @@ SRCS+=	agp_i810.c agp_intel.c agp_via.c agp_sis.c agp_ali.c agp_amd.c \
 SRCS+=	agp_amd64.c
 .endif
 .if  ${MACHINE_ARCH} == "amd64"
-SRCS+=	agp_amd64.c agp_i810.c
+SRCS+=	agp_amd64.c agp_i810.c agp_via.c
 .endif
 SRCS+=	device_if.h bus_if.h agp_if.h pci_if.h
-SRCS+=	opt_bus.h
+SRCS+=	opt_agp.h opt_bus.h
 MFILES=	kern/device_if.m kern/bus_if.m dev/agp/agp_if.m dev/pci/pci_if.m
 WERROR=
 

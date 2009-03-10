@@ -1,5 +1,5 @@
 /*
- * $FreeBSD: src/sys/dev/lmc/if_lmc.h,v 1.6 2008/07/05 16:39:24 rwatson Exp $
+ * $FreeBSD: src/sys/dev/lmc/if_lmc.h,v 1.7 2009/02/05 19:37:49 imp Exp $
  *
  * Copyright (c) 2002-2004 David Boggs. (boggs@boggs.palo-alto.ca.us)
  * All rights reserved.
@@ -1642,7 +1642,7 @@ static void detach_card(softc_t *);
 #ifdef __FreeBSD__
 static int fbsd_probe(device_t);
 static int fbsd_detach(device_t);
-static void fbsd_shutdown(device_t);
+static int fbsd_shutdown(device_t);
 static int fbsd_attach(device_t);
 #endif /* __FreeBSD__ */
 

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/i386/libi386/devicename.c,v 1.11 2008/11/17 20:49:29 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/i386/libi386/devicename.c,v 1.12 2009/03/09 17:16:29 jhb Exp $");
 
 #include <stand.h>
 #include <string.h>
@@ -120,6 +120,7 @@ i386_parsedev(struct i386_devdesc **dev, const char *devspec, const char **path)
 		err = EUNIT;
 		goto fail;
 	    }
+#ifdef LOADER_GPT_SUPPORT
 	    if (*cp == 'p') {		/* got a GPT partition */
 		np = cp + 1;
 		slice = strtol(np, &cp, 10);
@@ -133,6 +134,7 @@ i386_parsedev(struct i386_devdesc **dev, const char *devspec, const char **path)
 		}
 		partition = 0xff;
 	    } else {
+#endif
 		if (*cp == 's') {		/* got a slice number */
 		    np = cp + 1;
 		    slice = strtol(np, &cp, 10);
@@ -149,7 +151,9 @@ i386_parsedev(struct i386_devdesc **dev, const char *devspec, const char **path)
 		    }
 		    cp++;
 		}
+#ifdef LOADER_GPT_SUPPORT
 	    }
+#endif
 	} else {
 		cp = np;
 	}
@@ -227,14 +231,18 @@ i386_fmtdev(void *vdev)
     case DEVT_DISK:
 	cp = buf;
 	cp += sprintf(cp, "%s%d", dev->d_dev->dv_name, dev->d_unit);
+#ifdef LOADER_GPT_SUPPORT
 	if (dev->d_kind.biosdisk.partition == 0xff) {
 	    cp += sprintf(cp, "p%d", dev->d_kind.biosdisk.slice);
 	} else {
+#endif
 	    if (dev->d_kind.biosdisk.slice > 0)
 		cp += sprintf(cp, "s%d", dev->d_kind.biosdisk.slice);
 	    if (dev->d_kind.biosdisk.partition >= 0)
 		cp += sprintf(cp, "%c", dev->d_kind.biosdisk.partition + 'a');
+#ifdef LOADER_GPT_SUPPORT
 	}
+#endif
 	strcat(cp, ":");
 	break;
 

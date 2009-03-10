@@ -41,7 +41,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/in_rmx.c,v 1.67 2008/12/15 06:10:57 qingli Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/in_rmx.c,v 1.69 2009/02/27 14:12:05 bz Exp $");
+
+#include "opt_route.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -203,6 +205,8 @@ in_rtqkill(struct radix_node *rn, void *rock)
 	struct rtentry *rt = (struct rtentry *)rn;
 	int err;
 
+	RADIX_NODE_HEAD_WLOCK_ASSERT(ap->rnh);
+
 	if (rt->rt_flags & RTPRF_OURS) {
 		ap->found++;
 
@@ -213,7 +217,8 @@ in_rtqkill(struct radix_node *rn, void *rock)
 			err = in_rtrequest(RTM_DELETE,
 					(struct sockaddr *)rt_key(rt),
 					rt->rt_gateway, rt_mask(rt),
-					rt->rt_flags, 0, rt->rt_fibnum);
+					rt->rt_flags | RTF_RNH_LOCKED, 0,
+					rt->rt_fibnum);
 			if (err) {
 				log(LOG_WARNING, "in_rtqkill: error %d\n", err);
 			} else {

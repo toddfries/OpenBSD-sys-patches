@@ -1,7 +1,7 @@
 #
 # Custom kernel for Freescale MPC85XX development boards like the CDS etc.
 #
-# $FreeBSD: src/sys/powerpc/conf/MPC85XX,v 1.5 2008/10/25 06:25:15 marcel Exp $
+# $FreeBSD: src/sys/powerpc/conf/MPC85XX,v 1.7 2009/02/23 18:34:56 thompsa Exp $
 #
 
 cpu		E500
@@ -22,6 +22,8 @@ options 	BOOTP_WIRED_TO=tsec0
 options 	CD9660
 options 	COMPAT_43
 options 	DDB
+options		DEVICE_POLLING
+options		HZ=1000
 #options 	DIAGNOSTIC
 options 	FFS
 options 	GDB
@@ -68,7 +70,7 @@ device		scc
 device		tsec
 device		tun
 device		uart
-device		ugen
 #device		uhci
 device		umass
 device		usb
+device		vlan

@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ata/ata-dma.c,v 1.158 2008/10/21 18:51:55 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ata/ata-dma.c,v 1.159 2009/02/19 00:32:55 mav Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -45,7 +45,6 @@ __FBSDID("$FreeBSD: src/sys/dev/ata/ata-dma.c,v 1.158 2008/10/21 18:51:55 jhb Ex
 #include <dev/ata/ata-pci.h>
 
 /* prototypes */
-static void ata_dmafini(device_t dev);
 static void ata_dmasetupc_cb(void *xsc, bus_dma_segment_t *segs, int nsegs, int error);
 static void ata_dmaalloc(device_t dev);
 static void ata_dmafree(device_t dev);

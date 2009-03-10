@@ -89,7 +89,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/sys_pipe.c,v 1.199 2008/11/11 14:55:59 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/sys_pipe.c,v 1.200 2009/03/09 19:35:20 jhb Exp $");
 
 #include "opt_mac.h"
 
@@ -184,7 +184,7 @@ static int pipeallocfail;
 static int piperesizefail;
 static int piperesizeallowed = 1;
 
-SYSCTL_INT(_kern_ipc, OID_AUTO, maxpipekva, CTLFLAG_RDTUN,
+SYSCTL_ULONG(_kern_ipc, OID_AUTO, maxpipekva, CTLFLAG_RDTUN,
 	   &maxpipekva, 0, "Pipe KVA limit");
 SYSCTL_INT(_kern_ipc, OID_AUTO, pipekva, CTLFLAG_RD,
 	   &amountpipekva, 0, "Pipe KVA usage");

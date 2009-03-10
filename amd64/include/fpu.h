@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)npx.h	5.3 (Berkeley) 1/18/91
- * $FreeBSD: src/sys/amd64/include/fpu.h,v 1.33 2004/04/05 21:25:51 imp Exp $
+ * $FreeBSD: src/sys/amd64/include/fpu.h,v 1.35 2009/03/05 16:56:16 jhb Exp $
  */
 
 /*
@@ -92,11 +92,12 @@ struct  savefpu {
  * SSE2 based math.  For FreeBSD/amd64, we go with the default settings.
  */
 #define	__INITIAL_FPUCW__	0x037F
+#define	__INITIAL_FPUCW_I386__	0x127F
 #define	__INITIAL_MXCSR__	0x1F80
 #define	__INITIAL_MXCSR_MASK__	0xFFBF
 
 #ifdef _KERNEL
-int	fpudna(void);
+void	fpudna(void);
 void	fpudrop(void);
 void	fpuexit(struct thread *td);
 int	fpuformat(void);

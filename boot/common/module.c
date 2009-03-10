@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/boot/common/module.c,v 1.27 2007/10/04 18:29:52 obrien Exp $");
+__FBSDID("$FreeBSD: src/sys/boot/common/module.c,v 1.28 2009/02/16 02:42:17 thompsa Exp $");
 
 /*
  * file/module function dispatcher, support, etc.
@@ -152,6 +152,44 @@ command_load(int argc, char *argv[])
     if (error == EEXIST)
 	sprintf(command_errbuf, "warning: module '%s' already loaded", argv[1]);
     return (error == 0 ? CMD_OK : CMD_ERROR);
+}
+
+COMMAND_SET(load_geli, "load_geli", "load a geli key", command_load_geli);
+
+static int
+command_load_geli(int argc, char *argv[])
+{
+    char	typestr[80];
+    char	*cp;
+    int		ch, num;
+
+    if (argc < 3) {
+	    command_errmsg = "usage is [-n key#] <prov> <file>";
+	    return(CMD_ERROR);
+    }
+
+    num = 0;
+    optind = 1;
+    optreset = 1;
+    while ((ch = getopt(argc, argv, "n:")) != -1) {
+	switch(ch) {
+	case 'n':
+	    num = strtol(optarg, &cp, 0);
+	    if (cp == optarg) {
+		    sprintf(command_errbuf, "bad key index '%s'", optarg);
+		    return(CMD_ERROR);
+	    }
+	    break;
+	case '?':
+	default:
+	    /* getopt has already reported an error */
+	    return(CMD_OK);
+	}
+    }
+    argv += (optind - 1);
+    argc -= (optind - 1);
+    sprintf(typestr, "%s:geli_keyfile%d", argv[1], num);
+    return(file_loadraw(typestr, argv[2]));
 }
 
 COMMAND_SET(unload, "unload", "unload all modules", command_unload);

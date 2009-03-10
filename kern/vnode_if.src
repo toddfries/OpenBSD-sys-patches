@@ -27,7 +27,7 @@
 # SUCH DAMAGE.
 #
 #	@(#)vnode_if.src	8.12 (Berkeley) 5/14/95
-# $FreeBSD: src/sys/kern/vnode_if.src,v 1.95 2008/12/12 00:57:38 marcus Exp $
+# $FreeBSD: src/sys/kern/vnode_if.src,v 1.96 2009/01/21 14:42:00 jhb Exp $
 #
 
 #
@@ -171,6 +171,11 @@ vop_setattr {
 	IN struct ucred *cred;
 };
 
+%% markatime	vp	L L L
+
+vop_markatime {
+	IN struct vnode *vp;
+};
 
 %% read		vp	L L L
 

@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/radeon_drm.h,v 1.15 2008/08/23 20:59:12 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/radeon_drm.h,v 1.16 2009/03/07 21:36:57 rnoland Exp $");
 
 #ifndef __RADEON_DRM_H__
 #define __RADEON_DRM_H__
@@ -306,6 +306,7 @@ typedef union {
 #define RADEON_INDEX_PRIM_OFFSET	20
 
 #define RADEON_SCRATCH_REG_OFFSET	32
+#define R600_SCRATCH_REG_OFFSET	        256
 
 #define RADEON_NR_SAREA_CLIPRECTS	12
 
@@ -529,7 +530,8 @@ typedef struct drm_radeon_init {
 		RADEON_INIT_CP = 0x01,
 		RADEON_CLEANUP_CP = 0x02,
 		RADEON_INIT_R200_CP = 0x03,
-		RADEON_INIT_R300_CP = 0x04
+		RADEON_INIT_R300_CP = 0x04,
+		RADEON_INIT_R600_CP = 0x05,
 	} func;
 	unsigned long sarea_priv_offset;
 	int is_pci; /* for overriding only */
@@ -654,6 +656,9 @@ typedef struct drm_radeon_indirect {
 	int end;
 	int discard;
 } drm_radeon_indirect_t;
+
+#define RADEON_INDIRECT_DISCARD (1 << 0)
+#define RADEON_INDIRECT_NOFLUSH (1 << 1)
 
 /* enum for card type parameters */
 #define RADEON_CARD_PCI 0

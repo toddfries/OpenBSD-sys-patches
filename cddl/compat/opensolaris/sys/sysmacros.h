@@ -19,7 +19,7 @@
  *
  * CDDL HEADER END
  *
- * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/sysmacros.h,v 1.4 2008/11/17 20:49:29 pjd Exp $
+ * $FreeBSD: src/sys/cddl/compat/opensolaris/sys/sysmacros.h,v 1.5 2009/02/28 16:21:25 ed Exp $
  */
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
 /*	  All Rights Reserved  	*/
@@ -96,10 +96,6 @@ extern "C" {
 	(((type)(x) ^ (type)(y)) > (type)(align) - 1)
 #define	P2SAMEHIGHBIT_TYPED(x, y, type) \
 	(((type)(x) ^ (type)(y)) < ((type)(x) & (type)(y)))
-
-#ifdef _KERNEL
-#define	memmove(dst, src, size)	bcopy((src), (dst), (size))
-#endif
 
 /*
  * Find highest one bit set.

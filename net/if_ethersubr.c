@@ -27,13 +27,14 @@
  * SUCH DAMAGE.
  *
  *	@(#)if_ethersubr.c	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/net/if_ethersubr.c,v 1.256 2008/12/17 10:27:34 qingli Exp $
+ * $FreeBSD: src/sys/net/if_ethersubr.c,v 1.258 2009/02/27 14:12:05 bz Exp $
  */
 
 #include "opt_atalk.h"
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipx.h"
+#include "opt_route.h"
 #include "opt_mac.h"
 #include "opt_netgraph.h"
 #include "opt_carp.h"
@@ -299,6 +300,8 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 			csum_flags |= (CSUM_IP_CHECKED|CSUM_IP_VALID);
 		if (m->m_pkthdr.csum_flags & CSUM_DELAY_DATA)
 			csum_flags |= (CSUM_DATA_VALID|CSUM_PSEUDO_HDR);
+		if (m->m_pkthdr.csum_flags & CSUM_SCTP)
+			csum_flags |= CSUM_SCTP_VALID;
 		m->m_pkthdr.csum_flags |= csum_flags;
 		m->m_pkthdr.csum_data = 0xffff;
 		return (if_simloop(ifp, m, dst->sa_family, 0));
@@ -339,6 +342,8 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 			csum_flags |= (CSUM_IP_CHECKED|CSUM_IP_VALID);
 		if (m->m_pkthdr.csum_flags & CSUM_DELAY_DATA)
 			csum_flags |= (CSUM_DATA_VALID|CSUM_PSEUDO_HDR);
+		if (m->m_pkthdr.csum_flags & CSUM_SCTP)
+			csum_flags |= CSUM_SCTP_VALID;
 
 		if (m->m_flags & M_BCAST) {
 			struct mbuf *n;

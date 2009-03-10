@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/cd9660/cd9660_rrip.c,v 1.34 2008/11/26 13:09:45 lulf Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/cd9660/cd9660_rrip.c,v 1.35 2009/01/28 17:57:16 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -416,9 +416,9 @@ cd9660_rrip_device(p,ana)
 	low  = isonum_733(p->dev_t_low);
 
 	if (high == 0)
-		ana->inop->inode.iso_rdev = makedev(umajor(low), uminor(low));
+		ana->inop->inode.iso_rdev = makedev(major(low), minor(low));
 	else
-		ana->inop->inode.iso_rdev = makedev(high, uminor(low));
+		ana->inop->inode.iso_rdev = makedev(high, minor(low));
 	ana->fields &= ~ISO_SUSP_DEVICE;
 	return ISO_SUSP_DEVICE;
 }

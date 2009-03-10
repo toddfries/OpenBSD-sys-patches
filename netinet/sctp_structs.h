@@ -31,7 +31,7 @@
 /* $KAME: sctp_structs.h,v 1.13 2005/03/06 16:04:18 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_structs.h,v 1.29 2008/12/06 13:19:54 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_structs.h,v 1.30 2009/02/20 15:03:54 rrs Exp $");
 
 #ifndef __sctp_structs_h__
 #define __sctp_structs_h__
@@ -935,7 +935,7 @@ struct sctp_association {
 	/* could re-arrange to optimize space here. */
 	uint16_t streamincnt;
 	uint16_t streamoutcnt;
-
+	uint16_t strm_realoutsize;
 	/* my maximum number of retrans of INIT and SEND */
 	/* copied from SCTP but should be individually setable */
 	uint16_t max_init_times;

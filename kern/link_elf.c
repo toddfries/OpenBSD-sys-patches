@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/link_elf.c,v 1.101 2008/08/03 13:33:45 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/link_elf.c,v 1.102 2009/02/10 15:50:19 attilio Exp $");
 
 #include "opt_ddb.h"
 #include "opt_gdb.h"
@@ -638,8 +638,7 @@ link_elf_load_file(linker_class_t cls, const char* filename,
 	goto out;
     }
     if (hdr->e_type != ET_EXEC && hdr->e_type != ET_DYN) {
-	link_elf_error(filename, "Unsupported file type");
-	error = ENOEXEC;
+	error = ENOSYS;
 	goto out;
     }
     if (hdr->e_machine != ELF_TARG_MACH) {
@@ -694,8 +693,7 @@ link_elf_load_file(linker_class_t cls, const char* filename,
 	    break;
 
 	case PT_INTERP:
-	    link_elf_error(filename, "Unsupported file type");
-	    error = ENOEXEC;
+	    error = ENOSYS;
 	    goto out;
 	}
 

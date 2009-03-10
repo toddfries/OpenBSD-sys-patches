@@ -22,7 +22,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net80211/ieee80211_freebsd.h,v 1.24 2008/10/26 01:04:46 sam Exp $
+ * $FreeBSD: src/sys/net80211/ieee80211_freebsd.h,v 1.26 2009/02/28 16:21:25 ed Exp $
  */
 #ifndef _NET80211_IEEE80211_FREEBSD_H_
 #define _NET80211_IEEE80211_FREEBSD_H_
@@ -207,8 +207,6 @@ void	ieee80211_vap_destroy(struct ieee80211vap *);
 #define time_after_eq(a,b)	((long)(a) - (long)(b) >= 0)
 #define time_before_eq(a,b)	time_after_eq(b,a)
 
-#define	memmove(dst, src, n)	ovbcopy(src, dst, n)
-
 struct mbuf *ieee80211_getmgtframe(uint8_t **frm, int headroom, int pktlen);
 
 /* tx path usage */
@@ -221,7 +219,8 @@ struct mbuf *ieee80211_getmgtframe(uint8_t **frm, int headroom, int pktlen);
 #define	M_TXCB		M_PROTO7		/* do tx complete callback */
 #define	M_AMPDU_MPDU	M_PROTO8		/* ok for A-MPDU aggregation */
 #define	M_80211_TX \
-	(M_ENCAP|M_WDS|M_EAPOL|M_PWR_SAV|M_MORE_DATA|M_FF|M_TXCB|M_AMPDU_MPDU)
+	(M_FRAG|M_FIRSTFRAG|M_LASTFRAG|M_ENCAP|M_WDS|M_EAPOL|M_PWR_SAV|\
+	 M_MORE_DATA|M_FF|M_TXCB|M_AMPDU_MPDU)
 
 /* rx path usage */
 #define	M_AMPDU		M_PROTO1		/* A-MPDU subframe */

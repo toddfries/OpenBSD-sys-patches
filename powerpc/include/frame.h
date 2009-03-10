@@ -29,7 +29,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  *	$NetBSD: frame.h,v 1.2 1999/01/10 10:13:15 tsubai Exp $
- * $FreeBSD: src/sys/powerpc/include/frame.h,v 1.13 2008/03/02 17:05:57 raj Exp $
+ * $FreeBSD: src/sys/powerpc/include/frame.h,v 1.14 2009/02/27 12:08:24 raj Exp $
  */
 
 #ifndef	_MACHINE_FRAME_H_
@@ -65,6 +65,7 @@ struct trapframe {
 		struct {
 			register_t dear;
 			register_t esr;
+			register_t dbcr0;
 		} booke;
 	} cpu;
 };

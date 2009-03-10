@@ -27,7 +27,9 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/iw_cxgb/iw_cxgb.c,v 1.6 2008/12/02 21:37:28 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/iw_cxgb/iw_cxgb.c,v 1.7 2009/02/27 14:12:05 bz Exp $");
+
+#include "opt_route.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,6 +65,7 @@ __FBSDID("$FreeBSD: src/sys/dev/cxgb/ulp/iw_cxgb/iw_cxgb.c,v 1.6 2008/12/02 21:3
 #include <net/if.h>
 #include <net/if_var.h>
 #if __FreeBSD_version >= 800056
+#include <net/route.h>
 #include <net/vnet.h>
 #endif
 

@@ -26,7 +26,7 @@
  *
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/cardbus/cardbus_device.c,v 1.5 2008/12/02 04:54:31 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/cardbus/cardbus_device.c,v 1.6 2009/02/06 00:55:19 wkoszek Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -98,12 +98,10 @@ static int
 cardbus_device_buffer_cis(device_t parent, device_t child,
     struct cis_buffer *cbp)
 {
-	struct cardbus_softc *sc;
 	struct tuple_callbacks cb[] = {
 		{CISTPL_GENERIC, "GENERIC", cardbus_build_cis}
 	};
 
-	sc = device_get_softc(parent);
 	return (cardbus_parse_cis(parent, child, cb, cbp));
 }
 

@@ -28,8 +28,10 @@
  * SUCH DAMAGE.
  *
  *	@(#)raw_cb.c	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/net/raw_cb.c,v 1.43 2008/12/02 21:37:28 bz Exp $
+ * $FreeBSD: src/sys/net/raw_cb.c,v 1.44 2009/02/27 14:12:05 bz Exp $
  */
+
+#include "opt_route.h"
 
 #include <sys/param.h>
 #include <sys/domain.h>
@@ -46,6 +48,7 @@
 
 #include <net/if.h>
 #include <net/raw_cb.h>
+#include <net/route.h>
 #include <net/vnet.h>
 
 /*

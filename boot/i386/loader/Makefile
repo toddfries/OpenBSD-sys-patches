@@ -1,8 +1,7 @@
-# $FreeBSD: src/sys/boot/i386/loader/Makefile,v 1.88 2008/11/18 03:55:55 ache Exp $
-
-WITHOUT_SSP=
+# $FreeBSD: src/sys/boot/i386/loader/Makefile,v 1.90 2009/03/09 17:16:29 jhb Exp $
 
 .include <bsd.own.mk>
+MK_SSP=		no
 
 PROG=		loader.sym
 INTERNALPROG=
@@ -51,6 +50,9 @@ CFLAGS+=	-DLOADER_BZIP2_SUPPORT
 .endif
 .if !defined(LOADER_NO_GZIP_SUPPORT)
 CFLAGS+=	-DLOADER_GZIP_SUPPORT
+.endif
+.if !defined(LOADER_NO_GPT_SUPPORT)
+CFLAGS+=	-DLOADER_GPT_SUPPORT
 .endif
 
 # Always add MI sources 

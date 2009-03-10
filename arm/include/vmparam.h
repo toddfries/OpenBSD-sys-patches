@@ -28,7 +28,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/arm/include/vmparam.h,v 1.12 2007/12/27 16:45:38 alc Exp $
+ * $FreeBSD: src/sys/arm/include/vmparam.h,v 1.13 2009/01/22 15:36:11 cognet Exp $
  */
 
 #ifndef	_MACHINE_VMPARAM_H_
@@ -97,6 +97,13 @@
 
 #define VM_MIN_ADDRESS          (0x00001000)
 #ifdef ARM_USE_SMALL_ALLOC
+/* 
+ * ARM_KERN_DIRECTMAP is used to make sure there's enough space between
+ * VM_MAXUSER_ADDRESS and KERNBASE to map the whole memory.
+ * It has to be a compile-time constant, even if arm_init_smallalloc(),
+ * which will do the mapping, gets the real amount of memory at runtime,
+ * because VM_MAXUSER_ADDRESS is a constant.
+ */
 #ifndef ARM_KERN_DIRECTMAP
 #define ARM_KERN_DIRECTMAP 512 * 1024 * 1024 /* 512 MB */
 #endif

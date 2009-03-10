@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_vnops.c,v 1.191 2008/12/16 21:13:11 trasz Exp $ */
+/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_vnops.c,v 1.192 2009/02/27 20:00:15 jhb Exp $ */
 /*	$NetBSD: msdosfs_vnops.c,v 1.68 1998/02/10 14:10:04 mrg Exp $	*/
 
 /*-
@@ -180,7 +180,6 @@ msdosfs_create(ap)
 	ndirent.de_LowerCase = 0;
 	ndirent.de_StartCluster = 0;
 	ndirent.de_FileSize = 0;
-	ndirent.de_dev = pdep->de_dev;
 	ndirent.de_pmp = pdep->de_pmp;
 	ndirent.de_flag = DE_ACCESS | DE_CREATE | DE_UPDATE;
 	getnanotime(&ts);
@@ -302,7 +301,7 @@ msdosfs_getattr(ap)
 
 	getnanotime(&ts);
 	DETIMES(dep, &ts, &ts, &ts);
-	vap->va_fsid = dev2udev(dep->de_dev);
+	vap->va_fsid = dev2udev(pmp->pm_dev);
 	/*
 	 * The following computation of the fileid must be the same as that
 	 * used in msdosfs_readdir() to compute d_fileno. If not, pwd
@@ -1410,7 +1409,6 @@ msdosfs_mkdir(ap)
 	ndirent.de_LowerCase = 0;
 	ndirent.de_StartCluster = newcluster;
 	ndirent.de_FileSize = 0;
-	ndirent.de_dev = pdep->de_dev;
 	error = createde(&ndirent, pdep, &dep, cnp);
 	if (error)
 		goto bad;
@@ -1909,7 +1907,7 @@ msdosfs_print(ap)
 
 	printf("\tstartcluster %lu, dircluster %lu, diroffset %lu, ",
 	       dep->de_StartCluster, dep->de_dirclust, dep->de_diroffset);
-	printf("on dev %s\n", devtoname(dep->de_dev));
+	printf("on dev %s\n", devtoname(dep->de_pmp->pm_dev));
 	return (0);
 }
 

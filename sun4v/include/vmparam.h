@@ -37,9 +37,8 @@
  *
  *	from: @(#)vmparam.h     5.9 (Berkeley) 5/12/91
  *	from: FreeBSD: src/sys/i386/include/vmparam.h,v 1.33 2000/03/30
- * $FreeBSD: src/sys/sun4v/include/vmparam.h,v 1.6 2007/12/27 16:45:39 alc Exp $
+ * $FreeBSD: src/sys/sun4v/include/vmparam.h,v 1.7 2009/02/11 07:50:07 marius Exp $
  */
-
 
 #ifndef	_MACHINE_VMPARAM_H_
 #define	_MACHINE_VMPARAM_H_
@@ -203,6 +202,7 @@
 #define	VM_MAXUSER_ADDRESS	(VM_MAX_USER_ADDRESS)
 
 #define	KERNBASE		(VM_MIN_KERNEL_ADDRESS)
+#define	PROMBASE		(VM_MIN_PROM_ADDRESS)
 #define	USRSTACK		(VM_MAX_USER_ADDRESS)
 
 /*

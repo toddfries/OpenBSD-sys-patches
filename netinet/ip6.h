@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netinet/ip6.h,v 1.18 2008/12/02 21:37:28 bz Exp $	*/
+/*	$FreeBSD: src/sys/netinet/ip6.h,v 1.19 2009/03/03 13:12:12 bz Exp $	*/
 /*	$KAME: ip6.h,v 1.18 2001/03/29 05:34:30 itojun Exp $	*/
 
 /*-
@@ -219,7 +219,7 @@ struct ip6_rthdr {
 	/* followed by routing type specific data */
 } __packed;
 
-/* Type 0 Routing header */
+/* Type 0 Routing header, deprecated by RFC 5095. */
 struct ip6_rthdr0 {
 	u_int8_t  ip6r0_nxt;		/* next header */
 	u_int8_t  ip6r0_len;		/* length in units of 8 octets */

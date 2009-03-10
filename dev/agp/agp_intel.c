@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/agp/agp_intel.c,v 1.36 2007/11/12 21:51:36 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/agp/agp_intel.c,v 1.37 2009/03/09 13:27:33 imp Exp $");
 
 #include "opt_bus.h"
 
@@ -365,7 +365,7 @@ agp_intel_set_aperture(device_t dev, u_int32_t aperture)
 }
 
 static int
-agp_intel_bind_page(device_t dev, int offset, vm_offset_t physical)
+agp_intel_bind_page(device_t dev, vm_offset_t offset, vm_offset_t physical)
 {
 	struct agp_intel_softc *sc;
 
@@ -379,7 +379,7 @@ agp_intel_bind_page(device_t dev, int offset, vm_offset_t physical)
 }
 
 static int
-agp_intel_unbind_page(device_t dev, int offset)
+agp_intel_unbind_page(device_t dev, vm_offset_t offset)
 {
 	struct agp_intel_softc *sc;
 

@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/i386/vm_machdep.c,v 1.293 2008/12/29 06:31:03 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/i386/vm_machdep.c,v 1.295 2009/02/05 21:41:27 kmacy Exp $");
 
 #include "opt_isa.h"
 #include "opt_npx.h"
@@ -616,7 +616,10 @@ cpu_reset_real()
 
 	disable_intr();
 #ifdef XEN
-	HYPERVISOR_shutdown(SHUTDOWN_poweroff);
+	if (smp_processor_id() == 0)
+		HYPERVISOR_shutdown(SHUTDOWN_reboot);
+	else
+		HYPERVISOR_shutdown(SHUTDOWN_poweroff);
 #endif 
 #ifdef CPU_ELAN
 	if (elan_mmcr != NULL)

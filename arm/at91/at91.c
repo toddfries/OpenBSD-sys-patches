@@ -24,7 +24,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/at91/at91.c,v 1.21 2008/11/25 00:13:26 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/at91/at91.c,v 1.22 2009/01/22 21:54:26 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -49,6 +49,8 @@ __FBSDID("$FreeBSD: src/sys/arm/at91/at91.c,v 1.21 2008/11/25 00:13:26 imp Exp $
 static struct at91_softc *at91_softc;
 
 static void at91_eoi(void *);
+
+uint32_t at91_master_clock = AT91C_MASTER_CLOCK;
 
 static int
 at91_bs_map(void *t, bus_addr_t bpa, bus_size_t size, int flags,

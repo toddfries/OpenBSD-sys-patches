@@ -31,7 +31,7 @@
 /* $KAME: sctp_header.h,v 1.14 2005/03/06 16:04:17 itojun Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_header.h,v 1.8 2008/12/06 13:19:54 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_header.h,v 1.9 2009/02/20 15:03:54 rrs Exp $");
 
 #ifndef __sctp_header_h__
 #define __sctp_header_h__
@@ -498,7 +498,12 @@ struct sctp_stream_reset_response_tsn {
 	uint32_t receivers_next_tsn;
 }                              SCTP_PACKED;
 
-
+struct sctp_stream_reset_add_strm {
+	struct sctp_paramhdr ph;
+	uint32_t request_seq;
+	uint16_t number_of_streams;
+	uint16_t reserved;
+};
 
 #define SCTP_STREAM_RESET_NOTHING   0x00000000	/* Nothing for me to do */
 #define SCTP_STREAM_RESET_PERFORMED 0x00000001	/* Did it */

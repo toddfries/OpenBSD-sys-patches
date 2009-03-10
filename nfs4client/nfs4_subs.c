@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/nfs4client/nfs4_subs.c,v 1.6 2006/11/28 19:33:28 rees Exp $ */
+/* $FreeBSD: src/sys/nfs4client/nfs4_subs.c,v 1.7 2009/01/28 17:57:16 ed Exp $ */
 /* $Id: nfs4_subs.c,v 1.52 2003/11/05 14:58:59 rees Exp $ */
 
 /*-
@@ -668,7 +668,7 @@ nfsm_v4build_create_xx(struct nfs4_compound *cp, struct nfs4_oparg_create *c,
 		nfsm_buildf_xx(mb, bpos, "s", strlen(c->linktext), c->linktext);
 	else if (c->type == NFCHR || c->type == NFBLK)
 		nfsm_buildf_xx(mb, bpos, "uu",
-		    umajor(c->vap->va_rdev), uminor(c->vap->va_rdev));
+		    major(c->vap->va_rdev), minor(c->vap->va_rdev));
 
 	/* Name */
 	nfsm_buildf_xx(mb, bpos, "s", c->namelen, c->name);	

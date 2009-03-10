@@ -29,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/an/if_anreg.h,v 1.25 2008/01/18 16:31:24 ambrisko Exp $
+ * $FreeBSD: src/sys/dev/an/if_anreg.h,v 1.26 2009/02/04 20:39:45 imp Exp $
  */
 
 #define AN_TIMEOUT	65536
@@ -511,7 +511,7 @@ int	an_alloc_aux_memory	(device_t, int, int);
 int	an_alloc_irq		(device_t, int, int);
 int	an_pci_probe	(device_t);
 int	an_probe	(device_t);
-void	an_shutdown	(device_t);
+int	an_shutdown	(device_t);
 void	an_resume	(device_t);
 int	an_attach		(struct an_softc *, int, int);
 int	an_detach	(device_t);

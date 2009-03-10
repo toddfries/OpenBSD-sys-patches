@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ppbus/vpoio.c,v 1.21 2008/11/16 17:42:02 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ppbus/vpoio.c,v 1.22 2009/01/21 23:10:06 jhb Exp $");
 
 #ifdef _KERNEL
 #include <sys/param.h>
@@ -609,6 +609,7 @@ vpoio_attach(struct vpoio_data *vpo)
 	/*
 	 * Initialize mode dependent in/out microsequences
 	 */
+	ppb_lock(ppbus);
 	if ((error = ppb_request_bus(ppbus, vpo->vpo_dev, PPB_WAIT)))
 		goto error;
 
@@ -636,6 +637,7 @@ vpoio_attach(struct vpoio_data *vpo)
 	ppb_release_bus(ppbus, vpo->vpo_dev);
 
 error:
+	ppb_unlock(ppbus);
 	return (error);
 }
 

@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/dev/ipw/if_ipw.c,v 1.38 2008/05/12 00:15:28 sam Exp $	*/
+/*	$FreeBSD: src/sys/dev/ipw/if_ipw.c,v 1.39 2009/03/09 13:23:54 imp Exp $	*/
 
 /*-
  * Copyright (c) 2004-2006
@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ipw/if_ipw.c,v 1.38 2008/05/12 00:15:28 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ipw/if_ipw.c,v 1.39 2009/03/09 13:23:54 imp Exp $");
 
 /*-
  * Intel(R) PRO/Wireless 2100 MiniPCI driver
@@ -203,7 +203,6 @@ static driver_t ipw_driver = {
 static devclass_t ipw_devclass;
 
 DRIVER_MODULE(ipw, pci, ipw_driver, ipw_devclass, 0, 0);
-DRIVER_MODULE(ipw, cardbus, ipw_driver, ipw_devclass, 0, 0);
 
 static int
 ipw_probe(device_t dev)

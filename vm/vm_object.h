@@ -57,7 +57,7 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  *
- * $FreeBSD: src/sys/vm/vm_object.h,v 1.116 2008/05/20 19:05:43 ups Exp $
+ * $FreeBSD: src/sys/vm/vm_object.h,v 1.117 2009/02/08 22:17:24 alc Exp $
  */
 
 /*
@@ -147,7 +147,6 @@ struct vm_object {
 #define	OBJ_COLORED	0x1000		/* pg_color is defined */
 #define	OBJ_ONEMAPPING	0x2000		/* One USE (a single, non-forked) mapping flag */
 #define	OBJ_DISCONNECTWNT 0x4000	/* disconnect from vnode wanted */
-#define	OBJ_NEEDGIANT	0x8000		/* object requires Giant */
 
 #define IDX_TO_OFF(idx) (((vm_ooffset_t)(idx)) << PAGE_SHIFT)
 #define OFF_TO_IDX(off) ((vm_pindex_t)(((vm_ooffset_t)(off)) >> PAGE_SHIFT))

@@ -31,7 +31,7 @@
  * SUCH DAMAGE.
  *
  *	JNPR: frame.h,v 1.6.2.1 2007/09/10 08:14:57 girish
- * $FreeBSD: src/sys/mips/include/frame.h,v 1.1 2008/04/13 07:22:52 imp Exp $
+ * $FreeBSD: src/sys/mips/include/frame.h,v 1.2 2009/02/15 01:12:16 imp Exp $
  *
  */
 #ifndef _MACHINE_FRAME_H_
@@ -130,7 +130,7 @@ struct trapframe {
 };
 
 /* REVISIT */
-struct	frame *get_current_fp __P((void));
+struct	frame *get_current_fp(void);
 #define	get_next_fp(fp)		(0)
 #define	get_return_ptr(fp)	(0)
 void	get_stack_trace(u_int32_t depth, u_int32_t *trace);

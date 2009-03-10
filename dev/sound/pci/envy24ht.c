@@ -47,7 +47,7 @@
 
 #include "mixer_if.h"
 
-SND_DECLARE_FILE("$FreeBSD: src/sys/dev/sound/pci/envy24ht.c,v 1.16 2007/10/12 06:03:44 kevlo Exp $");
+SND_DECLARE_FILE("$FreeBSD: src/sys/dev/sound/pci/envy24ht.c,v 1.17 2009/02/11 10:29:45 netchild Exp $");
 
 MALLOC_DEFINE(M_ENVY24HT, "envy24ht", "envy24ht audio");
 
@@ -323,7 +323,7 @@ static struct cfg_info cfg_table[] = {
                 0x153b, 0x1150,
                 0x10, 0x80, 0xf0, 0xc3,
                 0x7ffbc7, 0x7fffff, 0x438,
-                0x20, 0x10, 0x400, 0x00, 0x00,
+                0x10, 0x20, 0x400, 0x01, 0x00,
                 0,
                 &spi_codec,
         },
@@ -349,7 +349,7 @@ static struct cfg_info cfg_table[] = {
                 "Envy24HT audio (M-Audio Revolution 7.1)",
                 0x1412, 0x3630,
                 0x43, 0x80, 0xf8, 0xc1,
-                0x3fff85, 0x72, 0x4000fa,
+                0x3fff85, 0x400072, 0x4000fa,
                 0x08, 0x02, 0x20, 0x00, 0x04,
                 0,
                 &spi_codec,
@@ -358,7 +358,7 @@ static struct cfg_info cfg_table[] = {
                 "Envy24GT audio (M-Audio Revolution 5.1)",
                 0x1412, 0x3631,
                 0x42, 0x80, 0xf8, 0xc1,
-                0x3fff85, 0x72, 0x4000fa,
+                0x3fff05, 0x4000f0, 0x4000fa,
                 0x08, 0x02, 0x10, 0x00, 0x03,
                 0,
                 &spi_codec,
@@ -390,6 +390,15 @@ static struct cfg_info cfg_table[] = {
                 0,
                 &spi_codec,
         },
+	{
+                "Envy24HT-S audio (Terrasoniq TS22PCI)",
+                0x153b, 0x117b,
+                0x10, 0x80, 0xf0, 0xc3,
+                0x7ffbc7, 0x7fffff, 0x438,
+                0x10, 0x20, 0x400, 0x01, 0x00,
+                0,
+                &spi_codec,
+	},
 	{
 		"Envy24HT audio (Generic)",
 		0, 0,

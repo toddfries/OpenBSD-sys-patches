@@ -23,7 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/pc98/cbus/syscons_cbus.c,v 1.28 2008/04/08 13:10:57 nyan Exp $
+ * $FreeBSD: src/sys/pc98/cbus/syscons_cbus.c,v 1.29 2009/03/06 11:10:31 nyan Exp $
  */
 
 #include "opt_syscons.h"
@@ -203,8 +203,10 @@ sc_get_cons_priority(int *unit, int *flags)
 			*flags = f;
 		}
 	}
-	if (*unit < 0)
-		return CN_DEAD;
+	if (*unit < 0) {
+		*unit = 0;
+		*flags = 0;
+	}
 	return CN_INTERNAL;
 }
 

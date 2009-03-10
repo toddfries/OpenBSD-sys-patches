@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/ndis/subr_pe.c,v 1.13 2007/04/06 11:18:57 pjd Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/ndis/subr_pe.c,v 1.14 2009/03/07 07:26:22 weongyo Exp $");
 
 /*
  * This file contains routines for relocating and dynamically linking
@@ -417,7 +417,7 @@ pe_relocate(imgbase)
 				    relhdr->ibr_vaddr + IMR_RELOFFSET(rel));
 				*qloc = pe_translate_addr(imgbase,
 				    (*qloc - base));
-                                break;
+				break;
 
 			default:
 				printf ("[%d]reloc type: %d\n",i,
@@ -446,7 +446,7 @@ pe_get_import_descriptor(imgbase, desc, module)
 	vm_offset_t		imgbase;
 	image_import_descriptor	*desc;
 	char			*module;
-{	
+{
 	vm_offset_t		offset;
 	image_import_descriptor	*imp_desc;
 	char			*modname;

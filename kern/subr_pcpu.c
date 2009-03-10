@@ -43,7 +43,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_pcpu.c,v 1.11 2008/09/15 22:45:14 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_pcpu.c,v 1.12 2009/01/17 07:17:57 jeff Exp $");
 
 #include "opt_ddb.h"
 
@@ -76,6 +76,9 @@ pcpu_init(struct pcpu *pcpu, int cpuid, size_t size)
 	cpu_pcpu_init(pcpu, cpuid, size);
 	pcpu->pc_rm_queue.rmq_next = &pcpu->pc_rm_queue;
 	pcpu->pc_rm_queue.rmq_prev = &pcpu->pc_rm_queue;
+#ifdef KTR
+	snprintf(pcpu->pc_name, sizeof(pcpu->pc_name), "CPU %d", cpuid);
+#endif
 
 }
 

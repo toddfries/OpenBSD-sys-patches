@@ -28,7 +28,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)mbuf.h	8.5 (Berkeley) 2/19/95
- * $FreeBSD: src/sys/sys/mbuf.h,v 1.228 2009/01/06 12:23:19 rrs Exp $
+ * $FreeBSD: src/sys/sys/mbuf.h,v 1.229 2009/03/04 02:55:04 bms Exp $
  */
 
 #ifndef _SYS_MBUF_H_
@@ -122,9 +122,13 @@ struct pkthdr {
 	int		 csum_flags;	/* flags regarding checksum */
 	int		 csum_data;	/* data field used by csum routines */
 	u_int16_t	 tso_segsz;	/* TSO segment size */
-	u_int16_t	 ether_vtag;	/* Ethernet 802.1p+q vlan tag */
+	union {
+		u_int16_t vt_vtag;	/* Ethernet 802.1p+q vlan tag */
+		u_int16_t vt_nrecs;	/* # of IGMPv3 records in this chain */
+	} PH_vt;
 	SLIST_HEAD(packet_tags, m_tag) tags; /* list of packet tags */
 };
+#define ether_vtag	PH_vt.vt_vtag
 
 /*
  * Description of external storage mapped into mbuf; valid only if M_EXT is

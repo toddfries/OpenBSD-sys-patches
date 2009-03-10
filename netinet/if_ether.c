@@ -36,9 +36,10 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/if_ether.c,v 1.190 2008/12/24 05:31:26 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/if_ether.c,v 1.192 2009/03/09 17:53:05 bms Exp $");
 
 #include "opt_inet.h"
+#include "opt_route.h"
 #include "opt_mac.h"
 #include "opt_carp.h"
 
@@ -80,7 +81,8 @@ __FBSDID("$FreeBSD: src/sys/netinet/if_ether.c,v 1.190 2008/12/24 05:31:26 kmacy
 
 #define SIN(s) ((struct sockaddr_in *)s)
 #define SDL(s) ((struct sockaddr_dl *)s)
-#define LLTABLE(ifp)	((struct lltable *)(ifp)->if_afdata[AF_INET])
+#define LLTABLE(ifp)	\
+	((struct in_ifinfo *)(ifp)->if_afdata[AF_INET])->ii_llt
 
 SYSCTL_DECL(_net_link_ether);
 SYSCTL_NODE(_net_link_ether, PF_INET, inet, CTLFLAG_RW, 0, "");

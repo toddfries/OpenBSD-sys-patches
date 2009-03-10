@@ -29,7 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/nwfs/nwfs_subr.c,v 1.18 2008/03/01 19:47:49 attilio Exp $
+ * $FreeBSD: src/sys/fs/nwfs/nwfs_subr.c,v 1.19 2009/01/31 17:36:22 bz Exp $
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -179,7 +179,6 @@ ncp_lookup(struct vnode *dvp, int len, char *name, struct nw_entry_info *fap,
 {
 	struct nwmount *nmp;
 	struct nwnode *dnp;
-	struct ncp_conn *conn;
 	int error;
 
 	if (!dvp || dvp->v_type != VDIR) {
@@ -188,7 +187,6 @@ ncp_lookup(struct vnode *dvp, int len, char *name, struct nw_entry_info *fap,
 	}
 	dnp = VTONW(dvp);
 	nmp = VTONWFS(dvp);
-	conn = NWFSTOCONN(nmp);
 
 	if (len == 1 && name[0] == '.') {
 		if (dnp->n_flag & NVOLUME) {

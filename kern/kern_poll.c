@@ -26,8 +26,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_poll.c,v 1.37 2008/12/11 16:09:31 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_poll.c,v 1.38 2009/02/27 14:12:05 bz Exp $");
 
+#include "opt_route.h"
 #include "opt_device_polling.h"
 
 #include <sys/param.h>
@@ -44,6 +45,7 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_poll.c,v 1.37 2008/12/11 16:09:31 bz Exp $
 
 #include <net/if.h>			/* for IFF_* flags		*/
 #include <net/netisr.h>			/* for NETISR_POLL		*/
+#include <net/route.h>
 #include <net/vnet.h>
 
 static void netisr_poll(void);		/* the two netisr handlers      */

@@ -28,9 +28,10 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_ipsec.c,v 1.13 2008/12/02 21:37:28 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_ipsec.c,v 1.15 2009/02/08 09:27:07 bz Exp $");
 
 #include "opt_ipsec.h"
+#include "opt_sctp.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,6 +57,9 @@ __FBSDID("$FreeBSD: src/sys/netinet/ip_ipsec.c,v 1.13 2008/12/02 21:37:28 bz Exp
 #include <netinet/ip_options.h>
 #include <netinet/ip_ipsec.h>
 #include <netinet/vinet.h>
+#ifdef SCTP
+#include <netinet/sctp_crc32.h>
+#endif
 
 #include <machine/in_cksum.h>
 
@@ -214,9 +218,7 @@ ip_ipsec_mtu(struct mbuf *m, int mtu)
 				   &ipsecerror);
 	if (sp != NULL) {
 		/* count IPsec header size */
-		ipsechdr = ipsec4_hdrsiz(m,
-					 IPSEC_DIR_OUTBOUND,
-					 NULL);
+		ipsechdr = ipsec_hdrsiz(m, IPSEC_DIR_OUTBOUND, NULL);
 
 		/*
 		 * find the correct route for outer IPv4
@@ -328,7 +330,12 @@ ip_ipsec_output(struct mbuf **m, struct inpcb *inp, int *flags, int *error,
 			in_delayed_cksum(*m);
 			(*m)->m_pkthdr.csum_flags &= ~CSUM_DELAY_DATA;
 		}
-
+#ifdef SCTP
+		if ((*m)->m_pkthdr.csum_flags & CSUM_SCTP) {
+			sctp_delayed_cksum(*m);
+			(*m)->m_pkthdr.csum_flags &= ~CSUM_SCTP;
+		}
+#endif
 		ip->ip_len = htons(ip->ip_len);
 		ip->ip_off = htons(ip->ip_off);
 

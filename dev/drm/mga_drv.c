@@ -32,7 +32,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/mga_drv.c,v 1.17 2008/10/13 18:03:27 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/mga_drv.c,v 1.18 2009/03/09 07:55:18 rnoland Exp $");
 
 #include "dev/drm/drmP.h"
 #include "dev/drm/drm.h"
@@ -120,31 +120,31 @@ static void mga_configure(struct drm_device *dev)
 }
 
 static int
-mga_probe(device_t dev)
+mga_probe(device_t kdev)
 {
-	return drm_probe(dev, mga_pciidlist);
+	return drm_probe(kdev, mga_pciidlist);
 }
 
 static int
-mga_attach(device_t nbdev)
+mga_attach(device_t kdev)
 {
-	struct drm_device *dev = device_get_softc(nbdev);
+	struct drm_device *dev = device_get_softc(kdev);
 
 	dev->driver = malloc(sizeof(struct drm_driver_info), DRM_MEM_DRIVER,
 	    M_WAITOK | M_ZERO);
 
 	mga_configure(dev);
 
-	return drm_attach(nbdev, mga_pciidlist);
+	return drm_attach(kdev, mga_pciidlist);
 }
 
 static int
-mga_detach(device_t nbdev)
+mga_detach(device_t kdev)
 {
-	struct drm_device *dev = device_get_softc(nbdev);
+	struct drm_device *dev = device_get_softc(kdev);
 	int ret;
 
-	ret = drm_detach(nbdev);
+	ret = drm_detach(kdev);
 
 	free(dev->driver, DRM_MEM_DRIVER);
 

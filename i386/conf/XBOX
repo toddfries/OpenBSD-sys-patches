@@ -1,7 +1,7 @@
 #
 # XBOX -- kernel for an XBOX
 #
-# $FreeBSD: src/sys/i386/conf/XBOX,v 1.10 2008/08/20 08:31:58 ed Exp $
+# $FreeBSD: src/sys/i386/conf/XBOX,v 1.11 2009/02/23 18:34:56 thompsa Exp $
 cpu		I686_CPU		# Celeron
 ident		XBOX
 
@@ -85,7 +85,6 @@ device		bpf		# Berkeley packet filter
 #device		uhci		# UHCI PCI->USB interface
 device		ohci		# OHCI PCI->USB interface
 device		usb		# USB Bus (required)
-device		ugen		# Generic
 device		uhid		# "Human Interface Devices"
 device		ukbd		# Keyboard
 device		ulpt		# Printer

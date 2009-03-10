@@ -48,7 +48,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_rtc.c,v 1.10 2008/04/22 19:38:28 phk Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_rtc.c,v 1.11 2009/02/03 07:50:01 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -154,7 +154,7 @@ inittodr(time_t base)
  * Write system time back to RTC
  */
 void
-resettodr()
+resettodr(void)
 {
 	struct timespec ts;
 	int error;

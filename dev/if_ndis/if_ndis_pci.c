@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/if_ndis/if_ndis_pci.c,v 1.19 2008/12/27 08:03:32 weongyo Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/if_ndis/if_ndis_pci.c,v 1.22 2009/03/09 13:23:54 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -55,7 +55,7 @@ __FBSDID("$FreeBSD: src/sys/dev/if_ndis/if_ndis_pci.c,v 1.19 2008/12/27 08:03:32
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/usb/usb.h>
-#include <dev/usb/usbdi.h>
+#include <dev/usb/usb_core.h>
 
 #include <compat/ndis/pe_var.h>
 #include <compat/ndis/cfg_var.h>
@@ -103,7 +103,6 @@ static driver_t ndis_driver = {
 static devclass_t ndis_devclass;
 
 DRIVER_MODULE(ndis, pci, ndis_driver, ndis_devclass, ndisdrv_modevent, 0);
-DRIVER_MODULE(ndis, cardbus, ndis_driver, ndis_devclass, ndisdrv_modevent, 0);
 
 static int
 ndis_devcompare(bustype, t, dev)

@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iwn/if_iwn.c,v 1.9 2008/10/27 16:46:50 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iwn/if_iwn.c,v 1.10 2009/02/13 16:17:05 sam Exp $");
 
 #include <sys/param.h>
 #include <sys/sockio.h>
@@ -1442,7 +1442,6 @@ iwn_rx_intr(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 	if (len < sizeof (struct ieee80211_frame)) {
 		DPRINTF(sc, IWN_DEBUG_RECV, "%s: frame too short: %d\n",
 		    __func__, len);
-		ic->ic_stats.is_rx_tooshort++;
 		ifp->if_ierrors++;
 		return;
 	}
@@ -1452,7 +1451,6 @@ iwn_rx_intr(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 	if (mnew == NULL) {
 		DPRINTF(sc, IWN_DEBUG_ANY, "%s: no mbuf to restock ring\n",
 		    __func__);
-		ic->ic_stats.is_rx_nobuf++;
 		ifp->if_ierrors++;
 		return;
 	}
@@ -1463,7 +1461,6 @@ iwn_rx_intr(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 		device_printf(sc->sc_dev,
 		    "%s: bus_dmamap_load failed, error %d\n", __func__, error);
 		m_freem(mnew);
-		ic->ic_stats.is_rx_nobuf++;	/* XXX need stat */
 		ifp->if_ierrors++;
 		return;
 	}

@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/nfsserver/nfs_srvsubs.c,v 1.162 2008/11/29 13:34:59 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/nfsserver/nfs_srvsubs.c,v 1.163 2009/01/28 17:57:16 ed Exp $");
 
 /*
  * These functions support the macros and help fiddle mbuf chains for
@@ -1057,8 +1057,8 @@ nfsm_srvfattr(struct nfsrv_descript *nfsd, struct vattr *vap,
 		fp->fa_mode = vtonfsv3_mode(vap->va_mode);
 		txdr_hyper(vap->va_size, &fp->fa3_size);
 		txdr_hyper(vap->va_bytes, &fp->fa3_used);
-		fp->fa3_rdev.specdata1 = txdr_unsigned(umajor(vap->va_rdev));
-		fp->fa3_rdev.specdata2 = txdr_unsigned(uminor(vap->va_rdev));
+		fp->fa3_rdev.specdata1 = txdr_unsigned(major(vap->va_rdev));
+		fp->fa3_rdev.specdata2 = txdr_unsigned(minor(vap->va_rdev));
 		fp->fa3_fsid.nfsuquad[0] = 0;
 		fp->fa3_fsid.nfsuquad[1] = txdr_unsigned(vap->va_fsid);
 		fp->fa3_fileid.nfsuquad[0] = 0;

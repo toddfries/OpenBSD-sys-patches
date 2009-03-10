@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/keysock.c,v 1.28 2008/12/02 21:37:28 bz Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/keysock.c,v 1.29 2009/02/27 14:12:05 bz Exp $	*/
 /*	$KAME: keysock.c,v 1.25 2001/08/13 20:07:41 itojun Exp $	*/
 
 /*-
@@ -31,6 +31,7 @@
  */
 
 #include "opt_ipsec.h"
+#include "opt_route.h"
 
 /* This code has derived from sys/net/rtsock.c on FreeBSD2.2.5 */
 

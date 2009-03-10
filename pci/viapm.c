@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/pci/viapm.c,v 1.21 2008/08/04 20:46:15 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/pci/viapm.c,v 1.22 2009/03/03 18:54:57 imp Exp $");
 
 #include "opt_isa.h"
 
@@ -484,7 +484,7 @@ viapm_pro_detach(device_t dev)
 }
 
 static int
-viabb_callback(device_t dev, int index, caddr_t *data)
+viabb_callback(device_t dev, int index, caddr_t data)
 {
 	return 0;
 }
@@ -641,7 +641,7 @@ viapm_wait(struct viapm_softc *viapm)
 }
 
 static int
-viasmb_callback(device_t dev, int index, caddr_t *data)
+viasmb_callback(device_t dev, int index, void *data)
 {
 	int error = 0;
 

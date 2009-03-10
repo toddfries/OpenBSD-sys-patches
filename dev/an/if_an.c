@@ -38,7 +38,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/an/if_an.c,v 1.89 2008/11/06 08:55:46 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/an/if_an.c,v 1.90 2009/02/04 20:39:45 imp Exp $");
 
 /*
  * The Aironet 4500/4800 series cards come in PCMCIA, ISA and PCI form.
@@ -2989,7 +2989,7 @@ an_watchdog(struct ifnet *ifp)
 	return;
 }
 
-void
+int
 an_shutdown(device_t dev)
 {
 	struct an_softc		*sc;
@@ -2998,7 +2998,7 @@ an_shutdown(device_t dev)
 	an_stop(sc);
 	sc->an_gone = 1;
 
-	return;
+	return 0;
 }
 
 void

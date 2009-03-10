@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/cfictl.h,v 1.2 2008/11/06 17:00:19 marcel Exp $
+ * $FreeBSD: src/sys/sys/cfictl.h,v 1.3 2009/02/05 18:12:07 sam Exp $
  */
 
 #ifndef _SYS_CFICTL_H_
@@ -44,4 +44,10 @@ struct cfiocqry {
 
 #define	CFIOCQRY	_IOWR('q', 0, struct cfiocqry)
 
+/* Intel StrataFlash Protection Register support */
+#define	CFIOCGFACTORYPR	_IOR('q', 1, uint64_t)	/* get factory protection reg */
+#define	CFIOCGOEMPR	_IOR('q', 2, uint64_t)	/* get oem protection reg */
+#define	CFIOCSOEMPR	_IOW('q', 3, uint64_t)	/* set oem protection reg */
+#define	CFIOCGPLR	_IOR('q', 4, uint32_t)	/* get protection lock reg */
+#define	CFIOCSPLR	_IO('q', 5)		/* set protection log reg */
 #endif	/* _SYS_CFICTL_H_ */

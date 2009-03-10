@@ -25,7 +25,7 @@
  * SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net/if_llatbl.c,v 1.2 2008/12/16 04:41:39 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/net/if_llatbl.c,v 1.3 2009/01/31 10:48:02 bz Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -219,10 +219,11 @@ lla_rt_output(struct rt_msghdr *rtm, struct rt_addrinfo *info)
 					log(LOG_INFO, "%s: RTM_ADD publish "
 					    "(proxy only) is invalid\n",
 					    __func__);
-					RTFREE(rt);
+					if (rt)
+						RTFREE_LOCKED(rt);
 					return EINVAL;
 				}
-				RTFREE(rt);
+				RTFREE_LOCKED(rt);
 
 				flags |= LLE_PROXY;
 			}

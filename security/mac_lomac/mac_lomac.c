@@ -35,7 +35,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_lomac/mac_lomac.c,v 1.74 2009/01/10 10:58:41 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac_lomac/mac_lomac.c,v 1.75 2009/03/08 12:32:06 rwatson Exp $
  */
 
 /*
@@ -2631,8 +2631,7 @@ lomac_vnode_check_setacl(struct ucred *cred, struct vnode *vp,
 
 static int
 lomac_vnode_check_setextattr(struct ucred *cred, struct vnode *vp,
-    struct label *vplabel, int attrnamespace, const char *name,
-    struct uio *uio)
+    struct label *vplabel, int attrnamespace, const char *name)
 {
 	struct mac_lomac *subj, *obj;
 

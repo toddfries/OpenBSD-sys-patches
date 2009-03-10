@@ -37,7 +37,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_getcwd.c,v 1.31 2008/10/28 13:44:11 trasz Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_getcwd.c,v 1.32 2009/02/13 18:18:14 jhb Exp $");
 
 #include "opt_compat.h"
 #include "opt_mac.h"
@@ -163,7 +163,7 @@ linux_getcwd_scandir(lvpp, uvpp, bpp, bufp, td)
 	cn.cn_nameptr = "..";
 	cn.cn_namelen = 2;
 	cn.cn_consume = 0;
-	cn.cn_lkflags = LK_EXCLUSIVE;
+	cn.cn_lkflags = LK_SHARED;
 	
 	/*
 	 * At this point, lvp is locked and will be unlocked by the lookup.

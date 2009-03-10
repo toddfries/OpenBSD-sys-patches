@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/options.ia64,v 1.28 2007/07/30 22:42:33 marcel Exp $
+# $FreeBSD: src/sys/conf/options.ia64,v 1.29 2009/02/07 09:57:14 wkoszek Exp $
 # Options specific to the ia64 platform kernels
 
 ITANIUM			opt_global.h
@@ -19,6 +19,9 @@ VGA_NO_FONT_LOADING	opt_vga.h
 VGA_NO_MODE_CHANGE	opt_vga.h
 VGA_SLOW_IOACCESS	opt_vga.h
 VGA_WIDTH90		opt_vga.h
+
+# AGP debugging.
+AGP_DEBUG		opt_agp.h
 
 PSM_HOOKRESUME		opt_psm.h
 PSM_RESETAFTERSUSPEND	opt_psm.h

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/dev/agp/agppriv.h,v 1.10 2008/12/21 22:30:37 rnoland Exp $
+ *	$FreeBSD: src/sys/dev/agp/agppriv.h,v 1.11 2009/03/09 13:27:33 imp Exp $
  */
 
 #ifndef _PCI_AGPPRIV_H_
@@ -92,7 +92,7 @@ void		        agp_free_gatt(struct agp_gatt *gatt);
 void			agp_free_res(device_t dev);
 int			agp_generic_attach(device_t dev);
 int			agp_generic_detach(device_t dev);
-int			agp_generic_get_aperture(device_t dev);
+u_int32_t		agp_generic_get_aperture(device_t dev);
 int			agp_generic_set_aperture(device_t dev,
 						 u_int32_t aperture);
 int			agp_generic_enable(device_t dev, u_int32_t mode);

@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/dtrace/dtrace/Makefile,v 1.1 2008/05/17 02:31:17 jb Exp $
+# $FreeBSD: src/sys/modules/dtrace/dtrace/Makefile,v 1.2 2009/02/12 14:44:15 n_hibma Exp $
 
 ARCHDIR=	${MACHINE_ARCH}
 
@@ -23,7 +23,7 @@ SRCS+=		bus_if.h device_if.h vnode_if.h
 SRCS+=		assym.s
 
 # These are needed for assym.s
-SRCS+=		opt_compat.h opt_kstack_pages.h opt_nfs.h
+SRCS+=		opt_compat.h opt_kstack_pages.h opt_nfs.h opt_hwpmc_hooks.h
 
 .if ${MACHINE_ARCH} == "i386"
 SRCS+=		opt_apic.h

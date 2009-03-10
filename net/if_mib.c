@@ -26,8 +26,10 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net/if_mib.c,v 1.22 2008/12/02 21:37:28 bz Exp $
+ * $FreeBSD: src/sys/net/if_mib.c,v 1.23 2009/02/27 14:12:05 bz Exp $
  */
+
+#include "opt_route.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -38,6 +40,7 @@
 
 #include <net/if.h>
 #include <net/if_mib.h>
+#include <net/route.h>
 #include <net/vnet.h>
 
 /*

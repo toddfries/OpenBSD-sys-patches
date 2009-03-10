@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/vfs_extattr.c,v 1.436 2009/01/08 12:47:30 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/vfs_extattr.c,v 1.437 2009/03/08 12:32:06 rwatson Exp $");
 
 #include "opt_mac.h"
 
@@ -195,7 +195,7 @@ extattr_set_vp(struct vnode *vp, int attrnamespace, const char *attrname,
 
 #ifdef MAC
 	error = mac_vnode_check_setextattr(td->td_ucred, vp, attrnamespace,
-	    attrname, &auio);
+	    attrname);
 	if (error)
 		goto done;
 #endif
@@ -373,7 +373,7 @@ extattr_get_vp(struct vnode *vp, int attrnamespace, const char *attrname,
 
 #ifdef MAC
 	error = mac_vnode_check_getextattr(td->td_ucred, vp, attrnamespace,
-	    attrname, &auio);
+	    attrname);
 	if (error)
 		goto done;
 #endif

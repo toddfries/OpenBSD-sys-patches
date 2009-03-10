@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/iicbus/iicsmb.c,v 1.17 2009/01/06 17:23:37 nwhitehorn Exp $
+ * $FreeBSD: src/sys/dev/iicbus/iicsmb.c,v 1.18 2009/02/10 22:50:23 imp Exp $
  *
  */
 
@@ -84,7 +84,7 @@ static int iicsmb_attach(device_t);
 static int iicsmb_detach(device_t);
 static void iicsmb_identify(driver_t *driver, device_t parent);
 
-static void iicsmb_intr(device_t dev, int event, char *buf);
+static int iicsmb_intr(device_t dev, int event, char *buf);
 static int iicsmb_callback(device_t dev, int index, void *data);
 static int iicsmb_quick(device_t dev, u_char slave, int how);
 static int iicsmb_sendb(device_t dev, u_char slave, char byte);
@@ -186,7 +186,7 @@ iicsmb_detach(device_t dev)
  *
  * iicbus interrupt handler
  */
-static void
+static int
 iicsmb_intr(device_t dev, int event, char *buf)
 {
 	struct iicsmb_softc *sc = (struct iicsmb_softc *)device_get_softc(dev);
@@ -252,7 +252,7 @@ end:
 	}
 	mtx_unlock(&sc->lock);
 
-	return;
+	return (0);
 }
 
 static int

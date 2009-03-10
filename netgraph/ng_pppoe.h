@@ -37,7 +37,7 @@
  *
  * Author: Julian Elischer <julian@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_pppoe.h,v 1.25 2007/12/26 19:15:07 mav Exp $
+ * $FreeBSD: src/sys/netgraph/ng_pppoe.h,v 1.26 2009/03/03 18:47:33 ed Exp $
  * $Whistle: ng_pppoe.h,v 1.7 1999/10/16 10:16:43 julian Exp $
  */
 
@@ -201,7 +201,6 @@ struct ngpppoe_sts {
 struct pppoe_tag {
 	u_int16_t tag_type;
 	u_int16_t tag_len;
-	char tag_data[];
 }__packed;
 
 struct pppoe_hdr{
@@ -210,7 +209,6 @@ struct pppoe_hdr{
 	u_int8_t code;
 	u_int16_t sid;
 	u_int16_t length;
-	struct pppoe_tag tag[];
 }__packed;
 
 

@@ -25,7 +25,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/linux/linux.h,v 1.83 2008/11/29 17:14:06 kib Exp $
+ * $FreeBSD: src/sys/i386/linux/linux.h,v 1.84 2009/03/04 12:14:33 dchagin Exp $
  */
 
 #ifndef _I386_LINUX_H_
@@ -102,6 +102,10 @@ typedef struct {
 
 #define	LINUX_CTL_MAXNAME	10
 
+#define LINUX_AT_COUNT		16	/* Count of used aux entry types.
+					 * Keep this synchronized with
+					 * elf_linux_fixup() code.
+					 */
 struct l___sysctl_args
 {
 	l_int		*name;

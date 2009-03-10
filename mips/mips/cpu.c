@@ -22,8 +22,10 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/mips/mips/cpu.c,v 1.1 2008/04/13 07:27:37 imp Exp $
  */
+
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/mips/mips/cpu.c,v 1.2 2009/01/14 20:16:44 gonzo Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -132,6 +134,8 @@ mips_cpu_init(void)
 
 	mips_icache_sync_all();
 	mips_dcache_wbinv_all();
+	/* Print some info about CPU */
+	cpu_identify();
 }
 
 void

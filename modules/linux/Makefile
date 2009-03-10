@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/linux/Makefile,v 1.74 2008/12/02 21:37:28 bz Exp $
+# $FreeBSD: src/sys/modules/linux/Makefile,v 1.75 2009/02/12 14:44:15 n_hibma Exp $
 
 .if ${MACHINE_ARCH} == "amd64"
 SFX= 32
@@ -17,7 +17,7 @@ SRCS=	linux${SFX}_dummy.c linux_emul.c linux_file.c \
 	device_if.h bus_if.h assym.s
 
 # XXX: for assym.s
-SRCS+=  opt_kstack_pages.h opt_nfs.h opt_apic.h opt_compat.h
+SRCS+=  opt_kstack_pages.h opt_nfs.h opt_apic.h opt_compat.h opt_hwpmc_hooks.h
 
 OBJS=	linux${SFX}_locore.o linux${SFX}_support.o
 

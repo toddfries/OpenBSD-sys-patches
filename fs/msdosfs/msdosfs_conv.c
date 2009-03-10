@@ -1,4 +1,4 @@
-/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_conv.c,v 1.53 2007/08/31 22:29:55 bde Exp $ */
+/* $FreeBSD: src/sys/fs/msdosfs/msdosfs_conv.c,v 1.54 2009/01/13 22:35:26 trasz Exp $ */
 /*	$NetBSD: msdosfs_conv.c,v 1.25 1997/11/17 15:36:40 ws Exp $	*/
 
 /*-
@@ -1060,8 +1060,11 @@ mbnambuf_write(struct mbnambuf *nbp, char *name, int id)
 	char *slot;
 	size_t count, newlen;
 
-	KASSERT(nbp->nb_len == 0 || id == nbp->nb_last_id - 1,
-	    ("non-decreasing id: id %d, last id %d", id, nbp->nb_last_id));
+	if (nbp->nb_len != 0 && id != nbp->nb_last_id - 1) {
+		printf("msdosfs: non-decreasing id: id %d, last id %d\n",
+		    id, nbp->nb_last_id);
+		return;
+	}
 
 	/* Will store this substring in a WIN_CHARS-aligned slot. */
 	slot = &nbp->nb_buf[id * WIN_CHARS];

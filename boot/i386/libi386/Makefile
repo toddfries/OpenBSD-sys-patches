@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/boot/i386/libi386/Makefile,v 1.43 2007/10/12 17:09:43 ps Exp $
+# $FreeBSD: src/sys/boot/i386/libi386/Makefile,v 1.44 2009/03/09 17:16:29 jhb Exp $
 #
 LIB=			i386
 INTERNALLIB=
@@ -31,6 +31,10 @@ CFLAGS+= -DDISK_DEBUG
 .if !defined(BOOT_HIDE_SERIAL_NUMBERS)
 # Export serial numbers, UUID, and asset tag from loader.
 CFLAGS+= -DSMBIOS_SERIAL_NUMBERS
+.endif
+
+.if !defined(LOADER_NO_GPT_SUPPORT)
+CFLAGS+=	-DLOADER_GPT_SUPPORT
 .endif
 
 # Include simple terminal emulation (cons25-compatible)

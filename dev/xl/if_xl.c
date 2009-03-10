@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/xl/if_xl.c,v 1.1 2008/08/10 09:45:52 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/xl/if_xl.c,v 1.2 2009/03/09 13:23:54 imp Exp $");
 
 /*
  * 3Com 3c90x Etherlink XL PCI NIC driver
@@ -314,7 +314,6 @@ static driver_t xl_driver = {
 
 static devclass_t xl_devclass;
 
-DRIVER_MODULE(xl, cardbus, xl_driver, xl_devclass, 0, 0);
 DRIVER_MODULE(xl, pci, xl_driver, xl_devclass, 0, 0);
 DRIVER_MODULE(miibus, xl, miibus_driver, miibus_devclass, 0, 0);
 

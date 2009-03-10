@@ -28,7 +28,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netinet/ip_options.h,v 1.3 2007/05/11 10:48:30 rwatson Exp $
+ * $FreeBSD: src/sys/netinet/ip_options.h,v 1.4 2009/03/04 02:51:22 bms Exp $
  */
 
 #ifndef _NETINET_IP_OPTIONS_H_
@@ -49,6 +49,7 @@ struct ipopt_tag {
 
 extern	int	ip_doopts;		/* process or ignore IP options */
 
+int		 ip_checkrouteralert(struct mbuf *);
 int		 ip_dooptions(struct mbuf *, int);
 struct mbuf	*ip_insertoptions(struct mbuf *, struct mbuf *, int *);
 int		 ip_optcopy(struct ip *, struct ip *);

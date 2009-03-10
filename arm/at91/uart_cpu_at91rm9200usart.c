@@ -29,18 +29,22 @@
 #include "opt_uart.h"
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/at91/uart_cpu_at91rm9200usart.c,v 1.6 2008/11/25 00:13:26 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/at91/uart_cpu_at91rm9200usart.c,v 1.7 2009/01/22 21:56:41 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bus.h>
 #include <sys/cons.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
 #include <machine/bus.h>
 
 #include <dev/uart/uart.h>
+#include <dev/uart/uart_bus.h>
 #include <dev/uart/uart_cpu.h>
 
 #include <arm/at91/at91rm92reg.h>
+#include <arm/at91/at91var.h>
 
 bus_space_tag_t uart_bus_space_io;
 bus_space_tag_t uart_bus_space_mem;
@@ -60,6 +64,8 @@ uart_cpu_getdev(int devtype, struct uart_devinfo *di)
 	struct uart_class *class;
 
 	class = &at91_usart_class;
+	if (class->uc_rclk == 0)
+		class->uc_rclk = at91_master_clock;
 	di->ops = uart_getops(class);
 	di->bas.chan = 0;
 	di->bas.bst = &at91_bs_tag;

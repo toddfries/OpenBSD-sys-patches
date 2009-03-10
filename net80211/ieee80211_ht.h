@@ -22,7 +22,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/net80211/ieee80211_ht.h,v 1.11 2008/10/25 23:58:59 sam Exp $
+ * $FreeBSD: src/sys/net80211/ieee80211_ht.h,v 1.12 2009/01/27 23:00:38 sam Exp $
  */
 #ifndef _NET80211_IEEE80211_HT_H_
 #define _NET80211_IEEE80211_HT_H_
@@ -70,6 +70,9 @@ struct ieee80211_tx_ampdu {
 #define	IEEE80211_AMPDU_REQUESTED(tap) \
 	(((tap)->txa_flags & \
 	 (IEEE80211_AGGR_RUNNING|IEEE80211_AGGR_XCHGPEND|IEEE80211_AGGR_NAK)) != 0)
+
+#define	IEEE80211_AGGR_BITS \
+	"\20\1IMMEDIATE\2XCHGPEND\3RUNNING\4SETUP\5NAK"
 
 /*
  * Traffic estimator support.  We estimate packets/sec for

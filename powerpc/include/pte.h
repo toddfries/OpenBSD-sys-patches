@@ -29,7 +29,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  *	$NetBSD: pte.h,v 1.2 1998/08/31 14:43:40 tsubai Exp $
- * $FreeBSD: src/sys/powerpc/include/pte.h,v 1.7 2008/09/23 03:02:57 nwhitehorn Exp $
+ * $FreeBSD: src/sys/powerpc/include/pte.h,v 1.8 2009/01/13 15:41:58 raj Exp $
  */
 
 #ifndef	_MACHINE_PTE_H_
@@ -211,11 +211,11 @@ extern u_int dsisr(void);
  * Page Table Entry definitions and macros.
  */
 #ifndef	LOCORE
-struct pte_entry {
+struct pte {
 	vm_offset_t rpn;
-	u_int32_t flags;
+	uint32_t flags;
 };
-typedef struct pte_entry pte_t;
+typedef struct pte pte_t;
 #endif
 
 /* RPN mask, TLB0 4K pages */

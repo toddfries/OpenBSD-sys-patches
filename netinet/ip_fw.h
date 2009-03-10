@@ -22,7 +22,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netinet/ip_fw.h,v 1.121 2008/12/13 19:13:03 bz Exp $
+ * $FreeBSD: src/sys/netinet/ip_fw.h,v 1.123 2009/03/02 22:11:48 luigi Exp $
  */
 
 #ifndef _IPFW2_H
@@ -682,6 +682,7 @@ typedef int ipfw_nat_t(struct ip_fw_args *, struct cfg_nat *, struct mbuf *);
 typedef int ipfw_nat_cfg_t(struct sockopt *);
 #endif
 
+struct eventhandler_entry;
 /*
  * Stack virtualization support.
  */
@@ -692,7 +693,7 @@ struct vnet_ipfw {
 	int	_fw_deny_unknown_exthdrs;
 	int	_fw_verbose;
 	int	_verbose_limit;
-	int	_fw_debug;
+	int	_fw_debug;		/* actually unused */
 	int	_autoinc_step;
 	ipfw_dyn_rule **_ipfw_dyn_v;
 	struct ip_fw_chain _layer3_chain;
@@ -713,7 +714,7 @@ struct vnet_ipfw {
 	u_int32_t _dyn_max;
 	u_int64_t _norule_counter;
 	struct callout _ipfw_timeout;
-	eventhandler_tag _ifaddr_event_tag;
+	struct eventhandler_entry *_ifaddr_event_tag;
 };
 
 #ifndef VIMAGE

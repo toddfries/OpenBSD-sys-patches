@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/compat/linux/linux_misc.c,v 1.231 2008/12/29 12:58:45 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/compat/linux/linux_misc.c,v 1.232 2009/03/04 12:14:33 dchagin Exp $");
 
 #include "opt_compat.h"
 #include "opt_mac.h"
@@ -91,10 +91,6 @@ __FBSDID("$FreeBSD: src/sys/compat/linux/linux_misc.c,v 1.231 2008/12/29 12:58:4
 #include <compat/linux/linux_sysproto.h>
 #include <compat/linux/linux_emul.h>
 #include <compat/linux/linux_misc.h>
-
-#ifdef __i386__
-#include <machine/cputypes.h>
-#endif
 
 #define BSD_TO_LINUX_SIGNAL(sig)	\
 	(((sig) <= LINUX_SIGTBLSZ) ? bsd_to_linux_signal[_SIG_IDX(sig)] : sig)
@@ -731,34 +727,8 @@ linux_newuname(struct thread *td, struct linux_newuname_args *args)
 			*p = '\0';
 			break;
 		}
-#ifdef __i386__
-	{
-		const char *class;
+	strlcpy(utsname.machine, linux_platform, LINUX_MAX_UTSNAME);
 
-		switch (cpu_class) {
-		case CPUCLASS_686:
-			class = "i686";
-			break;
-		case CPUCLASS_586:
-			class = "i586";
-			break;
-		case CPUCLASS_486:
-			class = "i486";
-			break;
-		default:
-			class = "i386";
-		}
-		strlcpy(utsname.machine, class, LINUX_MAX_UTSNAME);
-	}
-#elif defined(__amd64__)	/* XXX: Linux can change 'personality'. */
-#ifdef COMPAT_LINUX32
-	strlcpy(utsname.machine, "i686", LINUX_MAX_UTSNAME);
-#else
-	strlcpy(utsname.machine, "x86_64", LINUX_MAX_UTSNAME);
-#endif /* COMPAT_LINUX32 */
-#else /* something other than i386 or amd64 - assume we and Linux agree */
-	strlcpy(utsname.machine, machine, LINUX_MAX_UTSNAME);
-#endif /* __i386__ */
 	mtx_lock(&hostname_mtx);
 	strlcpy(utsname.domainname, V_domainname, LINUX_MAX_UTSNAME);
 	mtx_unlock(&hostname_mtx);

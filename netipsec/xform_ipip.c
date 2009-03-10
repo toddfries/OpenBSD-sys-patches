@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/xform_ipip.c,v 1.24 2009/01/05 20:29:01 bz Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/xform_ipip.c,v 1.25 2009/02/27 14:12:05 bz Exp $	*/
 /*	$OpenBSD: ip_ipip.c,v 1.25 2002/06/10 18:04:55 itojun Exp $ */
 /*-
  * The authors of this code are John Ioannidis (ji@tla.org),
@@ -41,6 +41,7 @@
  */
 #include "opt_inet.h"
 #include "opt_inet6.h"
+#include "opt_route.h"
 #include "opt_enc.h"
 
 #include <sys/param.h>

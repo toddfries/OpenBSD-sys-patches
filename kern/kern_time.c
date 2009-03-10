@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_time.c,v 1.145 2008/10/20 02:37:53 davidxu Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_time.c,v 1.146 2009/02/26 15:51:54 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -1367,10 +1367,8 @@ realtimer_expire(void *arg)
 	struct timespec cts, ts;
 	struct timeval tv;
 	struct itimer *it;
-	struct proc *p;
 
 	it = (struct itimer *)arg;
-	p = it->it_proc;
 
 	realtimer_clocktime(it->it_clockid, &cts);
 	/* Only fire if time is reached. */

@@ -28,7 +28,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_os_bsd.h,v 1.44 2008/12/10 23:12:39 zec Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_os_bsd.h,v 1.47 2009/03/04 20:54:42 rrs Exp $");
 #ifndef __sctp_os_bsd_h__
 #define __sctp_os_bsd_h__
 /*
@@ -38,6 +38,7 @@ __FBSDID("$FreeBSD: src/sys/netinet/sctp_os_bsd.h,v 1.44 2008/12/10 23:12:39 zec
 #include "opt_compat.h"
 #include "opt_inet6.h"
 #include "opt_inet.h"
+#include "opt_route.h"
 #include "opt_sctp.h"
 
 #include <sys/param.h>
@@ -154,11 +155,8 @@ MALLOC_DECLARE(SCTP_M_SOCKOPT);
 #define MOD_IPSEC ipsec
 
 /* then define the macro(s) that hook into the vimage macros */
-#if defined(__FreeBSD__) && __FreeBSD_version >= 800056
 #define MODULE_GLOBAL(__MODULE, __SYMBOL) V_ ## __SYMBOL
-#else
-#define MODULE_GLOBAL(__MODULE, __SYMBOL) (__SYMBOL)
-#endif
+
 /*
  *
  */
@@ -198,7 +196,7 @@ MALLOC_DECLARE(SCTP_M_SOCKOPT);
 #define SCTP_PRINTF(params...)	printf(params)
 
 #ifdef SCTP_LTRACE_CHUNKS
-#define SCTP_LTRACE_CHK(a, b, c, d) if(SCTP_BASE_SYSCTL(sctp_logging_level) & SCTP_LTRACE_CHUNK_ENABLE) CTR6(KTR_SUBSYS, "SCTP:%d[%d]:%x-%x-%x-%x", SCTP_LOG_CHUNK_PROC, 0, a, b, c, d)
+#define SCTP_LTRACE_CHK(a, b, c, d) if(SCTP_BASE_SYSCTL(sctp_logging_level) & SCTP_LTRACE_CHUNK_ENABLE) SCTP_CTR6(KTR_SUBSYS, "SCTP:%d[%d]:%x-%x-%x-%x", SCTP_LOG_CHUNK_PROC, 0, a, b, c, d)
 #else
 #define SCTP_LTRACE_CHK(a, b, c, d)
 #endif

@@ -26,8 +26,8 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * P4: //depot/projects/trustedbsd/openbsm/sys/bsm/audit.h#1
- * $FreeBSD: src/sys/bsm/audit.h,v 1.13 2008/12/31 11:12:24 rwatson Exp $
+ * P4: //depot/projects/trustedbsd/openbsm/sys/bsm/audit.h#5
+ * $FreeBSD: src/sys/bsm/audit.h,v 1.15 2009/03/02 13:29:18 rwatson Exp $
  */
 
 #ifndef _BSM_AUDIT_H
@@ -66,8 +66,9 @@
 #define	AUDIT_TRIGGER_CLOSE_AND_DIE	4	/* Terminate audit. */
 #define	AUDIT_TRIGGER_NO_SPACE		5	/* Below min free space. */
 #define	AUDIT_TRIGGER_ROTATE_USER	6	/* User requests rotate. */
-#define	AUDIT_TRIGGER_INITIALIZE	7	/* Initialize audit. */
-#define	AUDIT_TRIGGER_MAX		7
+#define	AUDIT_TRIGGER_INITIALIZE	7	/* User initialize of auditd. */
+#define	AUDIT_TRIGGER_EXPIRE_TRAILS	8	/* User expiration of trails. */
+#define	AUDIT_TRIGGER_MAX		8
 
 /*
  * The special device filename (FreeBSD).
@@ -280,8 +281,8 @@ typedef	struct audit_stat	au_stat_t;
  * Structure for the audit file statistics.
  */
 struct audit_fstat {
-	u_quad_t	af_filesz;
-	u_quad_t	af_currsz;
+	u_int64_t	af_filesz;
+	u_int64_t	af_currsz;
 };
 typedef	struct audit_fstat	au_fstat_t;
 

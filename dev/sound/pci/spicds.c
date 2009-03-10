@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THEPOSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/sound/pci/spicds.c,v 1.6 2007/05/27 19:58:39 joel Exp $
+ * $FreeBSD: src/sys/dev/sound/pci/spicds.c,v 1.7 2009/02/11 10:29:45 netchild Exp $
  */
 
 #include <dev/sound/pcm/sound.h>
@@ -234,7 +234,7 @@ spicds_init(struct spicds_info *codec)
 	if (codec->type == SPICDS_TYPE_AK4358) 
 	spicds_wrcd(codec, 0x00, 0x07);		/* I2S, 24bit, power-up */
 	if (codec->type == SPICDS_TYPE_AK4381)
-	spicds_wrcd(codec, 0x00, 0x0f);		/* I2S, 24bit, power-up */
+	spicds_wrcd(codec, 0x00, 0x8f);		/* I2S, 24bit, power-up */
 	if (codec->type == SPICDS_TYPE_AK4396)
 	spicds_wrcd(codec, 0x00, 0x07);		/* I2S, 24bit, power-up */
 	snd_mtxunlock(codec->lock);
@@ -296,7 +296,8 @@ spicds_set(struct spicds_info *codec, int dir, unsigned int left, unsigned int r
 		case SPICDS_TYPE_WM8770:
                         right = right + 27;
 			break;
-		case SPICDS_TYPE_AK4381 || SPICDS_TYPE_AK4396:
+		case SPICDS_TYPE_AK4381: 
+		case SPICDS_TYPE_AK4396:
 			right = right * 255 / 100;
 			break;
                 default:   

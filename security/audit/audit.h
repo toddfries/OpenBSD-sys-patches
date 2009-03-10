@@ -26,7 +26,7 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/audit/audit.h,v 1.23 2009/01/06 13:59:59 rwatson Exp $
+ * $FreeBSD: src/sys/security/audit/audit.h,v 1.24 2009/03/09 10:45:58 rwatson Exp $
  */
 
 /*
@@ -186,7 +186,7 @@ void	 audit_thread_free(struct thread *td);
  * audit_enabled flag before performing the actual call.
  */
 #define	AUDIT_ARG(op, args...)	do {					\
-	if (td->td_ar != NULL)						\
+	if (td->td_pflags & TDP_AUDITREC)				\
 		audit_arg_ ## op (args);				\
 } while (0)
 
@@ -202,7 +202,7 @@ void	 audit_thread_free(struct thread *td);
  * auditing is disabled, so we don't just check audit_enabled here.
  */
 #define	AUDIT_SYSCALL_EXIT(error, td)	do {				\
-	if (td->td_ar != NULL)						\
+	if (td->td_pflags & TDP_AUDITREC)				\
 		audit_syscall_exit(error, td);				\
 } while (0)
 
@@ -210,7 +210,7 @@ void	 audit_thread_free(struct thread *td);
  * A Macro to wrap the audit_sysclose() function.
  */
 #define	AUDIT_SYSCLOSE(td, fd)	do {					\
-	if (audit_enabled)						\
+	if (td->td_pflags & TDP_AUDITREC)				\
 		audit_sysclose(td, fd);					\
 } while (0)
 

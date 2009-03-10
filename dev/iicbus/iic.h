@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/iicbus/iic.h,v 1.5 2006/11/28 06:51:36 imp Exp $
+ * $FreeBSD: src/sys/dev/iicbus/iic.h,v 1.6 2009/01/26 13:53:39 raj Exp $
  *
  */
 #ifndef __IIC_H
@@ -60,5 +60,6 @@ struct iic_rdwr_data {
 #define I2CWRITE	_IOW('i', 4, struct iiccmd)	/* send data */
 #define I2CREAD		_IOW('i', 5, struct iiccmd)	/* receive data */
 #define I2CRDWR		_IOW('i', 6, struct iic_rdwr_data)	/* General read/write interface */
+#define I2CRPTSTART	_IOW('i', 7, struct iiccmd)	/* repeated start */
 
 #endif

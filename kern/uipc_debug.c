@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/uipc_debug.c,v 1.5 2009/01/04 19:16:36 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/uipc_debug.c,v 1.7 2009/02/09 18:19:58 rwatson Exp $");
 
 #include "opt_ddb.h"
 
@@ -145,7 +145,7 @@ db_print_sostate(short so_state)
 
 	comma = 0;
 	if (so_state & SS_NOFDREF) {
-		db_printf("%sSS_FDREF", comma ? ", " : "");
+		db_printf("%sSS_NOFDREF", comma ? ", " : "");
 		comma = 1;
 	}
 	if (so_state & SS_ISCONNECTED) {
@@ -172,7 +172,6 @@ db_print_sostate(short so_state)
 		db_printf("%sSS_ISCONFIRMING", comma ? ", " : "");
 		comma = 1;
 	}
-	comma = 0;
 	if (so_state & SS_PROTOREF) {
 		db_printf("%sSS_PROTOREF", comma ? ", " : "");
 		comma = 1;

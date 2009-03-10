@@ -7,7 +7,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/speaker/spkr.c,v 1.77 2008/09/27 08:51:18 ed Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/speaker/spkr.c,v 1.78 2009/01/25 09:20:59 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -419,9 +419,7 @@ spkropen(dev, flags, fmt, td)
 	(void) printf("spkropen: entering with dev = %s\n", devtoname(dev));
 #endif /* DEBUG */
 
-	if (dev2unit(dev) != 0)
-		return(ENXIO);
-	else if (spkr_active)
+	if (spkr_active)
 		return(EBUSY);
 	else {
 #ifdef DEBUG
@@ -444,9 +442,8 @@ spkrwrite(dev, uio, ioflag)
 	printf("spkrwrite: entering with dev = %s, count = %d\n",
 		devtoname(dev), uio->uio_resid);
 #endif /* DEBUG */
-	if (dev2unit(dev) != 0)
-		return(ENXIO);
-	else if (uio->uio_resid > (DEV_BSIZE - 1))     /* prevent system crashes */
+
+	if (uio->uio_resid > (DEV_BSIZE - 1))     /* prevent system crashes */
 		return(E2BIG);	
 	else {
 		unsigned n;
@@ -475,15 +472,11 @@ spkrclose(dev, flags, fmt, td)
 	(void) printf("spkrclose: entering with dev = %s\n", devtoname(dev));
 #endif /* DEBUG */
 
-	if (dev2unit(dev) != 0)
-		return(ENXIO);
-	else {
-		wakeup(&endtone);
-		wakeup(&endrest);
-		free(spkr_inbuf, M_SPKR);
-		spkr_active = FALSE;
-		return(0);
-	}
+	wakeup(&endtone);
+	wakeup(&endrest);
+	free(spkr_inbuf, M_SPKR);
+	spkr_active = FALSE;
+	return(0);
 }
 
 static int
@@ -499,9 +492,7 @@ spkrioctl(dev, cmd, cmdarg, flags, td)
     		devtoname(dev), cmd);
 #endif /* DEBUG */
 
-	if (dev2unit(dev) != 0)
-		return(ENXIO);
-	else if (cmd == SPKRTONE) {
+	if (cmd == SPKRTONE) {
 		tone_t	*tp = (tone_t *)cmdarg;
 
 		if (tp->frequency == 0)

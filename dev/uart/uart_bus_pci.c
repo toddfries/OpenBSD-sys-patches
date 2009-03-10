@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/uart/uart_bus_pci.c,v 1.11 2007/05/17 04:07:19 marcel Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/uart/uart_bus_pci.c,v 1.14 2009/03/09 13:23:54 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -96,6 +96,7 @@ static struct pci_id pci_ns8250_ids[] = {
 	0x18 },
 { 0x1407, 0x0110, 0xffff, 0, "Lava Computer mfg DSerial-PCI Port A", 0x10 },
 { 0x1407, 0x0111, 0xffff, 0, "Lava Computer mfg DSerial-PCI Port B", 0x10 },
+{ 0x1407, 0x0510, 0xffff, 0, "Lava SP Serial 550 PCI", 0x10 },
 { 0x1409, 0x7168, 0x1409, 0x4025, "Timedia Technology Serial Port", 0x10,
 	8 * DEFAULT_RCLK },
 { 0x1409, 0x7168, 0x1409, 0x4027, "Timedia Technology Serial Port", 0x10,
@@ -109,6 +110,7 @@ static struct pci_id pci_ns8250_ids[] = {
 { 0x1415, 0x950b, 0xffff, 0, "Oxford Semiconductor OXCB950 Cardbus 16950 UART",
 	0x10, 16384000 },
 { 0x151f, 0x0000, 0xffff, 0, "TOPIC Semiconductor TP560 56k modem", 0x10 },
+{ 0x9710, 0x9835, 0x1000, 1, "NetMos NM9835 Serial Port", 0x10 },
 { 0xdeaf, 0x9051, 0xffff, 0, "Middle Digital PC Weasel Serial Port", 0x10 },
 { 0xffff, 0, 0xffff, 0, NULL, 0, 0}
 };
@@ -158,4 +160,3 @@ uart_pci_probe(device_t dev)
 }
 
 DRIVER_MODULE(uart, pci, uart_pci_driver, uart_devclass, 0, 0);
-DRIVER_MODULE(uart, cardbus, uart_pci_driver, uart_devclass, 0, 0);

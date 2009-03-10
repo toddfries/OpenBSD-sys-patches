@@ -29,7 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/smbfs/smbfs_vnops.c,v 1.72 2008/12/16 21:13:11 trasz Exp $
+ * $FreeBSD: src/sys/fs/smbfs/smbfs_vnops.c,v 1.73 2009/01/31 18:06:34 bz Exp $
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -850,7 +850,6 @@ smbfs_strategy (ap)
 	struct buf *bp=ap->a_bp;
 	struct ucred *cr;
 	struct thread *td;
-	int error = 0;
 
 	SMBVDEBUG("\n");
 	if (bp->b_flags & B_ASYNC)
@@ -863,7 +862,7 @@ smbfs_strategy (ap)
 		cr = bp->b_wcred;
 
 	if ((bp->b_flags & B_ASYNC) == 0 )
-		error = smbfs_doio(ap->a_vp, bp, cr, td);
+		(void)smbfs_doio(ap->a_vp, bp, cr, td);
 	return (0);
 }
 

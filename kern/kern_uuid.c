@@ -25,7 +25,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/kern_uuid.c,v 1.16 2008/12/02 21:37:28 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/kern_uuid.c,v 1.17 2009/02/27 14:12:05 bz Exp $");
+
+#include "opt_route.h"
 
 #include <sys/param.h>
 #include <sys/endian.h>
@@ -42,6 +44,7 @@ __FBSDID("$FreeBSD: src/sys/kern/kern_uuid.c,v 1.16 2008/12/02 21:37:28 bz Exp $
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
+#include <net/route.h>
 #include <net/vnet.h>
 
 /*

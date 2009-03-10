@@ -62,12 +62,13 @@
  * THIS SOFTWARE, EVEN IF WHISTLE COMMUNICATIONS IS ADVISED OF THE POSSIBILITY
  * OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netgraph/ng_gif.c,v 1.23 2008/12/02 21:37:28 bz Exp $
+ * $FreeBSD: src/sys/netgraph/ng_gif.c,v 1.24 2009/02/27 14:12:05 bz Exp $
  */
 
 /*
  * ng_gif(4) netgraph node type
  */
+#include "opt_route.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>

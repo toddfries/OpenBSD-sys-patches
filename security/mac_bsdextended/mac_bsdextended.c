@@ -37,7 +37,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/security/mac_bsdextended/mac_bsdextended.c,v 1.54 2009/01/10 10:58:41 rwatson Exp $
+ * $FreeBSD: src/sys/security/mac_bsdextended/mac_bsdextended.c,v 1.55 2009/03/09 17:42:18 csjp Exp $
  */
 
 /*
@@ -202,8 +202,8 @@ out:
 	return (error);
 }
 
-SYSCTL_NODE(_security_mac_bsdextended, OID_AUTO, rules, CTLFLAG_RW,
-    sysctl_rule, "BSD extended MAC rules");
+SYSCTL_NODE(_security_mac_bsdextended, OID_AUTO, rules,
+    CTLFLAG_MPSAFE | CTLFLAG_RW, sysctl_rule, "BSD extended MAC rules");
 
 static void
 ugidfw_init(struct mac_policy_conf *mpc)

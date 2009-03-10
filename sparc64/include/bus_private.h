@@ -25,7 +25,7 @@
  *
  *	from: FreeBSD: src/sys/i386/i386/busdma_machdep.c,v 1.25 2002/01/05
  *
- * $FreeBSD: src/sys/sparc64/include/bus_private.h,v 1.8 2007/03/07 21:13:50 marius Exp $
+ * $FreeBSD: src/sys/sparc64/include/bus_private.h,v 1.9 2009/02/10 21:51:33 marius Exp $
  */
 
 #ifndef	_MACHINE_BUS_PRIVATE_H_
@@ -66,9 +66,10 @@ struct bus_dmamap {
 	int			dm_flags;		/* (p) */
 };
 
-/* Flag values. */
-#define	DMF_LOADED	1	/* Map is loaded */
-#define	DMF_COHERENT	2	/* Coherent mapping requested */
+/* Flag values */
+#define	DMF_LOADED	(1 << 0)	/* Map is loaded. */
+#define	DMF_COHERENT	(1 << 1)	/* Coherent mapping requested. */
+#define	DMF_STREAMED	(1 << 2)	/* Streaming cache used. */
 
 int sparc64_dma_alloc_map(bus_dma_tag_t dmat, bus_dmamap_t *mapp);
 void sparc64_dma_free_map(bus_dma_tag_t dmat, bus_dmamap_t map);

@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * $FreeBSD: src/sys/sys/lockmgr.h,v 1.70 2008/05/15 20:10:06 attilio Exp $
+ * $FreeBSD: src/sys/sys/lockmgr.h,v 1.71 2009/02/05 15:09:04 attilio Exp $
  */
 
 #ifndef	_SYS_LOCKMGR_H_
@@ -183,8 +183,6 @@ _lockmgr_args_rw(struct lock *lk, u_int flags, struct rwlock *ilk,
 #define	KA_UNLOCKED	LA_UNLOCKED
 #define	KA_RECURSED	LA_RECURSED
 #define	KA_NOTRECURSED	LA_NOTRECURSED
-#define	KA_HELD
-#define	KA_UNHELD
 #endif
 
 #endif /* _KERNEL */

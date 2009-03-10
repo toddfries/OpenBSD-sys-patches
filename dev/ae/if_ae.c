@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ae/if_ae.c,v 1.2 2008/12/06 14:23:45 stas Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ae/if_ae.c,v 1.3 2009/02/04 20:35:31 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -105,7 +105,7 @@ static void	ae_phy_init(ae_softc_t *sc);
 static int	ae_reset(ae_softc_t *sc);
 static void	ae_init(void *arg);
 static int	ae_init_locked(ae_softc_t *sc);
-static unsigned	int	ae_detach(device_t dev);
+static int	ae_detach(device_t dev);
 static int	ae_miibus_readreg(device_t dev, int phy, int reg);
 static int	ae_miibus_writereg(device_t dev, int phy, int reg, int val);
 static void	ae_miibus_statchg(device_t dev);
@@ -746,7 +746,7 @@ ae_init_locked(ae_softc_t *sc)
 	return (0);
 }
 
-static unsigned int
+static int
 ae_detach(device_t dev)
 {
 	struct ae_softc *sc;

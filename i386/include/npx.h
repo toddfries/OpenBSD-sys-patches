@@ -30,7 +30,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)npx.h	5.3 (Berkeley) 1/18/91
- * $FreeBSD: src/sys/i386/include/npx.h,v 1.32 2006/05/30 23:44:20 davidxu Exp $
+ * $FreeBSD: src/sys/i386/include/npx.h,v 1.33 2009/03/05 18:32:43 jhb Exp $
  */
 
 /*
@@ -151,7 +151,7 @@ void	npxdrop(void);
 void	npxexit(struct thread *td);
 int	npxformat(void);
 int	npxgetregs(struct thread *td, union savefpu *addr);
-void	npxinit(u_short control);
+void	npxinit(void);
 void	npxsave(union savefpu *addr);
 void	npxsetregs(struct thread *td, union savefpu *addr);
 int	npxtrap(void);

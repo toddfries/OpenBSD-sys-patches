@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)netisr.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/net/netisr.h,v 1.35 2008/07/04 00:21:38 rwatson Exp $
+ * $FreeBSD: src/sys/net/netisr.h,v 1.36 2009/03/04 02:54:11 bms Exp $
  */
 
 #ifndef _NET_NETISR_H_
@@ -46,6 +46,7 @@
  */
 #define	NETISR_POLL	0		/* polling callback, must be first */
 #define	NETISR_IP	2		/* same as AF_INET */
+#define	NETISR_IGMP	3		/* IGMPv3 output queue */
 #define	NETISR_ROUTE	14		/* routing socket */
 #define	NETISR_AARP	15		/* Appletalk ARP */
 #define	NETISR_ATALK2	16		/* Appletalk phase 2 */

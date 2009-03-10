@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_firmware.c,v 1.12 2008/11/11 12:25:08 gallatin Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_firmware.c,v 1.13 2009/02/03 07:51:11 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -525,7 +525,7 @@ firmware_modevent(module_t mod, int type, void *unused)
 static moduledata_t firmware_mod = {
 	"firmware",
 	firmware_modevent,
-	0
+	NULL
 };
 DECLARE_MODULE(firmware, firmware_mod, SI_SUB_DRIVERS, SI_ORDER_FIRST);
 MODULE_VERSION(firmware, 1);

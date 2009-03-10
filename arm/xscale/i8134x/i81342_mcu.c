@@ -25,14 +25,13 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/xscale/i8134x/i81342_mcu.c,v 1.1 2007/07/27 14:50:57 cognet Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/xscale/i8134x/i81342_mcu.c,v 1.2 2009/01/16 19:31:27 cognet Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bus.h>
 #include <sys/kernel.h>
 #include <sys/module.h>
-#include <sys/bus.h>
 
 #include <machine/bus.h>
 #include <arm/xscale/i8134x/i81342reg.h>

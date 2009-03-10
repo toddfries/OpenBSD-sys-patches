@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)if.h	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/net/if.h,v 1.115 2008/08/28 22:05:19 jfv Exp $
+ * $FreeBSD: src/sys/net/if.h,v 1.116 2009/02/16 15:09:37 luigi Exp $
  */
 
 #ifndef _NET_IF_H_
@@ -452,8 +452,6 @@ __END_DECLS
 #endif
 
 #ifdef _KERNEL
-struct thread;
-
 /* XXX - this should go away soon. */
 #include <net/if_var.h>
 #endif

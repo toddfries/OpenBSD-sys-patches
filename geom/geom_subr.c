@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/geom/geom_subr.c,v 1.98 2008/12/08 17:09:02 lulf Exp $");
+__FBSDID("$FreeBSD: src/sys/geom/geom_subr.c,v 1.100 2009/02/03 07:07:13 marcel Exp $");
 
 #include "opt_ddb.h"
 
@@ -858,14 +858,14 @@ g_handleattr_off_t(struct bio *bp, const char *attribute, off_t val)
 }
 
 int
-g_handleattr_str(struct bio *bp, const char *attribute, char *str)
+g_handleattr_str(struct bio *bp, const char *attribute, const char *str)
 {
 
 	return (g_handleattr(bp, attribute, str, 0));
 }
 
 int
-g_handleattr(struct bio *bp, const char *attribute, void *val, int len)
+g_handleattr(struct bio *bp, const char *attribute, const void *val, int len)
 {
 	int error = 0;
 
@@ -882,12 +882,13 @@ g_handleattr(struct bio *bp, const char *attribute, void *val, int len)
 		}
 	} else if (bp->bio_length == len) {
 		bcopy(val, bp->bio_data, len);
-		bp->bio_completed = len;
 	} else {
 		printf("%s: %s bio_length %jd len %d -> EFAULT\n", __func__,
 		    bp->bio_to->name, (intmax_t)bp->bio_length, len);
 		error = EFAULT;
 	}
+	if (error == 0)
+		bp->bio_completed = bp->bio_length;
 	g_io_deliver(bp, error);
 	return (1);
 }

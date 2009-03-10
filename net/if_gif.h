@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/net/if_gif.h,v 1.22 2008/12/10 23:12:39 zec Exp $	*/
+/*	$FreeBSD: src/sys/net/if_gif.h,v 1.23 2009/03/07 19:08:58 marius Exp $	*/
 /*	$KAME: if_gif.h,v 1.17 2000/09/11 11:36:41 sumikawa Exp $	*/
 
 /*-
@@ -100,6 +100,8 @@ struct etherip_header {
 #define ETHERIP_VER_VERS_MASK   0x0f
 #define ETHERIP_VER_RSVD_MASK   0xf0
 #define ETHERIP_VERSION         0x03
+/* mbuf adjust factor to force 32-bit alignment of IP header */
+#define	ETHERIP_ALIGN		2
 
 /* Prototypes */
 void gif_input(struct mbuf *, int, struct ifnet *);

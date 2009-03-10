@@ -39,12 +39,14 @@
  * Authors: Archie Cobbs <archie@freebsd.org>
  *	    Julian Elischer <julian@freebsd.org>
  *
- * $FreeBSD: src/sys/netgraph/ng_ether.c,v 1.66 2008/12/25 09:02:55 julian Exp $
+ * $FreeBSD: src/sys/netgraph/ng_ether.c,v 1.67 2009/02/27 14:12:05 bz Exp $
  */
 
 /*
  * ng_ether(4) netgraph node type
  */
+
+#include "opt_route.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,6 +65,7 @@
 #include <net/if_var.h>
 #include <net/ethernet.h>
 #include <net/if_bridgevar.h>
+#include <net/route.h>
 #include <net/vnet.h>
 
 #include <netgraph/ng_message.h>

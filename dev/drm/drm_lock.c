@@ -29,7 +29,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/drm_lock.c,v 1.6 2008/10/23 20:19:56 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/drm_lock.c,v 1.7 2009/02/25 18:25:47 rnoland Exp $");
 
 /** @file drm_lock.c
  * Implementation of the ioctls and other support code for dealing with the
@@ -114,13 +114,6 @@ int drm_unlock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		    DRM_CURRENTPID, lock->context);
 		return EINVAL;
 	}
-
-	DRM_SPINLOCK(&dev->tsk_lock);
-	if (dev->locked_task_call != NULL) {
-		dev->locked_task_call(dev);
-		dev->locked_task_call = NULL;
-	}
-	DRM_SPINUNLOCK(&dev->tsk_lock);
 
 	atomic_inc(&dev->counts[_DRM_STAT_UNLOCKS]);
 

@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/arm/at91/uart_dev_at91usart.c,v 1.18 2008/11/25 00:13:26 imp Exp $");
+__FBSDID("$FreeBSD: src/sys/arm/at91/uart_dev_at91usart.c,v 1.19 2009/01/22 21:56:41 imp Exp $");
 
 #include "opt_comconsole.h"
 
@@ -45,10 +45,11 @@ __FBSDID("$FreeBSD: src/sys/arm/at91/uart_dev_at91usart.c,v 1.18 2008/11/25 00:1
 #include <arm/at91/at91rm92reg.h>
 #include <arm/at91/at91_usartreg.h>
 #include <arm/at91/at91_pdcreg.h>
+#include <arm/at91/at91var.h>
 
 #include "uart_if.h"
 
-#define DEFAULT_RCLK		AT91C_MASTER_CLOCK
+#define DEFAULT_RCLK		at91_master_clock
 #define	USART_BUFFER_SIZE	128
 
 /*
@@ -684,6 +685,5 @@ struct uart_class at91_usart_class = {
 	at91_usart_methods,
 	sizeof(struct at91_usart_softc),
 	.uc_ops = &at91_usart_ops,
-	.uc_range = 8,
-	.uc_rclk = DEFAULT_RCLK
+	.uc_range = 8
 };

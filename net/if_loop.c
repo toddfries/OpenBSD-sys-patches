@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)if_loop.c	8.2 (Berkeley) 1/9/95
- * $FreeBSD: src/sys/net/if_loop.c,v 1.124 2009/01/10 23:50:23 rwatson Exp $
+ * $FreeBSD: src/sys/net/if_loop.c,v 1.125 2009/02/27 14:12:05 bz Exp $
  */
 
 /*
@@ -38,6 +38,7 @@
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipx.h"
+#include "opt_route.h"
 #include "opt_mac.h"
 
 #include <sys/param.h>

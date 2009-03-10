@@ -32,14 +32,13 @@
  * SUCH DAMAGE.
  *
  *	@(#)vnode_pager.h	8.1 (Berkeley) 6/11/93
- * $FreeBSD: src/sys/vm/vnode_pager.h,v 1.20 2005/01/24 21:21:59 phk Exp $
+ * $FreeBSD: src/sys/vm/vnode_pager.h,v 1.21 2009/02/08 20:23:46 kib Exp $
  */
 
 #ifndef	_VNODE_PAGER_
 #define	_VNODE_PAGER_	1
 
 #ifdef _KERNEL
-struct vnode *vnode_pager_lock(vm_object_t);
 
 /*
  * XXX Generic routines; currently called by badly written FS code; these

@@ -56,7 +56,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/sched.h,v 1.39 2008/04/17 04:20:10 jeff Exp $
+ * $FreeBSD: src/sys/sys/sched.h,v 1.40 2009/01/17 07:17:57 jeff Exp $
  */
 
 #ifndef _SCHED_H_
@@ -133,6 +133,12 @@ void	sched_affinity(struct thread *td);
  */
 int	sched_sizeof_proc(void);
 int	sched_sizeof_thread(void);
+
+/*
+ * This routine provides a consistent thread name for use with KTR graphing
+ * functions.
+ */
+char	*sched_tdname(struct thread *td);
 
 static __inline void
 sched_pin(void)

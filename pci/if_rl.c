@@ -31,7 +31,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/pci/if_rl.c,v 1.186 2008/12/22 00:53:47 yongari Exp $");
+__FBSDID("$FreeBSD: src/sys/pci/if_rl.c,v 1.187 2009/02/09 16:53:37 fjoe Exp $");
 
 /*
  * RealTek 8129/8139 PCI NIC driver
@@ -1151,9 +1151,9 @@ rl_dma_free(struct rl_softc *sc)
 				    sc->rl_cdata.rl_tx_dmamap[i]);
 				sc->rl_cdata.rl_tx_dmamap[i] = NULL;
 			}
+		}
 		bus_dma_tag_destroy(sc->rl_cdata.rl_tx_tag);
 		sc->rl_cdata.rl_tx_tag = NULL;
-		}
 	}
 
 	if (sc->rl_parent_tag != NULL) {

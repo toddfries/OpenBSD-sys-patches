@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/de/if_de.c,v 1.184 2008/04/05 17:24:44 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/de/if_de.c,v 1.185 2009/02/09 17:07:29 fjoe Exp $");
 
 #define	TULIP_HDR_DATA
 
@@ -4561,7 +4561,7 @@ tulip_busdma_cleanup(tulip_softc_t * const sc)
 	sc->tulip_setup_dma_addr = 0;
     }
     if (sc->tulip_setupbuf != NULL) {
-	bus_dmamem_free(sc->tulip_setup_tag, sc->tulip_setupdata,
+	bus_dmamem_free(sc->tulip_setup_tag, sc->tulip_setupbuf,
 	    sc->tulip_setup_map);
 	sc->tulip_setup_map = NULL;
 	sc->tulip_setupbuf = NULL;

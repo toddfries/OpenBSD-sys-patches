@@ -36,14 +36,12 @@
  */
 
 #ifdef __FreeBSD__
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_ioctl.c,v 1.42 2009/02/27 14:12:05 bz Exp $");
+
 #include "opt_inet.h"
 #include "opt_inet6.h"
-
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/contrib/pf/net/pf_ioctl.c,v 1.38 2008/12/02 21:37:28 bz Exp $");
-#endif
-
-#ifdef __FreeBSD__
+#include "opt_route.h"
 #include "opt_bpf.h"
 #include "opt_pf.h"
 

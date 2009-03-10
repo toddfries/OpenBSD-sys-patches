@@ -57,7 +57,7 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  *
- * $FreeBSD: src/sys/vm/vm_map.h,v 1.126 2009/01/01 00:31:46 alc Exp $
+ * $FreeBSD: src/sys/vm/vm_map.h,v 1.128 2009/02/24 20:57:43 kib Exp $
  */
 
 /*
@@ -182,6 +182,7 @@ struct vm_map {
 	vm_flags_t flags;		/* flags for this vm_map */
 	vm_map_entry_t root;		/* Root of a binary search tree */
 	pmap_t pmap;			/* (c) Physical map */
+	vm_map_entry_t deferred_freelist;
 #define	min_offset	header.start	/* (c) */
 #define	max_offset	header.end	/* (c) */
 };
@@ -336,7 +337,7 @@ long vmspace_wired_count(struct vmspace *vmspace);
 #ifdef _KERNEL
 boolean_t vm_map_check_protection (vm_map_t, vm_offset_t, vm_offset_t, vm_prot_t);
 vm_map_t vm_map_create(pmap_t, vm_offset_t, vm_offset_t);
-int vm_map_delete (vm_map_t, vm_offset_t, vm_offset_t);
+int vm_map_delete(vm_map_t, vm_offset_t, vm_offset_t);
 int vm_map_find(vm_map_t, vm_object_t, vm_ooffset_t, vm_offset_t *, vm_size_t,
     int, vm_prot_t, vm_prot_t, int);
 int vm_map_fixed(vm_map_t, vm_object_t, vm_ooffset_t, vm_offset_t, vm_size_t,

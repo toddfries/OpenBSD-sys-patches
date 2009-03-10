@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/conf/options.i386,v 1.243 2008/08/15 20:58:57 kmacy Exp $
+# $FreeBSD: src/sys/conf/options.i386,v 1.244 2009/02/06 20:57:10 wkoszek Exp $
 # Options specific to the i386 platform kernels
 
 AUTO_EOI_1		opt_auto_eoi.h
@@ -87,6 +87,9 @@ VGA_WIDTH90		opt_vga.h
 
 VESA
 VESA_DEBUG		opt_vesa.h
+
+# AGP debugging support
+AGP_DEBUG		opt_agp.h
 
 PSM_DEBUG		opt_psm.h
 PSM_HOOKRESUME		opt_psm.h

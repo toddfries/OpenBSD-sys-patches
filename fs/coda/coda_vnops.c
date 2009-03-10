@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/fs/coda/coda_vnops.c,v 1.99 2008/10/28 13:44:11 trasz Exp $");
+__FBSDID("$FreeBSD: src/sys/fs/coda/coda_vnops.c,v 1.100 2009/02/13 18:18:14 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -1506,7 +1506,7 @@ coda_readdir(struct vop_readdir_args *ap)
 	 */
 	CODADEBUG(CODA_READDIR, myprintf(("indirect readdir: fid = %s, "
 	    "refcnt = %d\n", coda_f2s(&cp->c_fid), vp->v_usecount)););
-	vn_lock(cp->c_ovp, LK_EXCLUSIVE | LK_RETRY);
+	vn_lock(cp->c_ovp, LK_SHARED | LK_RETRY);
 	error = VOP_READDIR(cp->c_ovp, uiop, cred, eofflag, ncookies,
 	    cookies);
 	VOP_UNLOCK(cp->c_ovp, 0);

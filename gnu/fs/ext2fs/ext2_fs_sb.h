@@ -4,7 +4,7 @@
  *  Aug 1995, Godmar Back (gback@cs.utah.edu)
  *  University of Utah, Department of Computer Science
  *
- * $FreeBSD: src/sys/gnu/fs/ext2fs/ext2_fs_sb.h,v 1.6 2005/06/16 06:51:38 imp Exp $
+ * $FreeBSD: src/sys/gnu/fs/ext2fs/ext2_fs_sb.h,v 1.7 2009/01/18 14:04:56 stas Exp $
  */
 /*-
  *  linux/include/linux/ext2_fs_sb.h
@@ -63,6 +63,8 @@ struct ext2_sb_info {
 	unsigned long s_db_per_group;	/* Number of descriptor blocks per group */
 	unsigned long s_desc_per_block;	/* Number of group descriptors per block */
 	unsigned long s_groups_count;	/* Number of groups in the fs */
+	unsigned long s_first_inode;	/* First inode on fs */
+	unsigned int s_inode_size;	/* Size for inode with extra data */
 	struct buffer_head * s_sbh;	/* Buffer containing the super block */
 	struct ext2_super_block * s_es;	/* Pointer to the super block in the buffer */
 	struct buffer_head ** s_group_desc;

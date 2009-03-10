@@ -26,7 +26,7 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/priv.h,v 1.25 2008/11/17 20:49:29 pjd Exp $
+ * $FreeBSD: src/sys/sys/priv.h,v 1.26 2009/02/28 10:44:39 rwatson Exp $
  */
 
 /*
@@ -52,13 +52,7 @@
 /*
  * Track beginning of privilege list.
  */
-#define	_PRIV_LOWEST	0
-
-/*
- * PRIV_ROOT is a catch-all for as yet unnamed privileges.  No new
- * references to this privilege should be added.
- */
-#define	PRIV_ROOT	1	/* Catch-all during development. */
+#define	_PRIV_LOWEST	1
 
 /*
  * The remaining privileges typically correspond to one or a small
@@ -67,6 +61,7 @@
  * privileges, such as the ability to reboot, and then loosely by
  * subsystem, indicated by a subsystem name.
  */
+#define	_PRIV_ROOT		1	/* Removed. */
 #define	PRIV_ACCT		2	/* Manage process accounting. */
 #define	PRIV_MAXFILES		3	/* Exceed system open files limit. */
 #define	PRIV_MAXPROC		4	/* Exceed system processes limit. */

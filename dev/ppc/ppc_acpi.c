@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ppc/ppc_acpi.c,v 1.4 2008/11/16 17:42:02 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ppc/ppc_acpi.c,v 1.5 2009/01/21 23:10:06 jhb Exp $");
 
 #include "opt_isa.h"
 
@@ -63,8 +63,7 @@ static device_method_t ppc_acpi_methods[] = {
 
 	/* bus interface */
 	DEVMETHOD(bus_read_ivar,	ppc_read_ivar),
-	DEVMETHOD(bus_setup_intr,	ppc_setup_intr),
-	DEVMETHOD(bus_teardown_intr,	ppc_teardown_intr),
+	DEVMETHOD(bus_write_ivar,	ppc_write_ivar),
 	DEVMETHOD(bus_alloc_resource,	ppc_alloc_resource),
 	DEVMETHOD(bus_release_resource,	ppc_release_resource),
 

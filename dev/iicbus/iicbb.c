@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/iicbus/iicbb.c,v 1.20 2008/08/04 20:46:15 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/iicbus/iicbb.c,v 1.21 2009/02/10 22:50:23 imp Exp $");
 
 /*
  * Generic I2C bit-banging code
@@ -72,7 +72,7 @@ static int iicbb_probe(device_t);
 static int iicbb_callback(device_t, int, caddr_t);
 static int iicbb_start(device_t, u_char, int);
 static int iicbb_stop(device_t);
-static int iicbb_write(device_t, char *, int, int *, int);
+static int iicbb_write(device_t, const char *, int, int *, int);
 static int iicbb_read(device_t, char *, int, int *, int, int);
 static int iicbb_reset(device_t, u_char, u_char, u_char *);
 
@@ -372,7 +372,7 @@ iicbb_stop(device_t dev)
 }
 
 static int
-iicbb_write(device_t dev, char * buf, int len, int *sent, int timeout)
+iicbb_write(device_t dev, const char *buf, int len, int *sent, int timeout)
 {
 	int bytes, error = 0;
 

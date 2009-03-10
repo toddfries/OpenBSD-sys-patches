@@ -64,7 +64,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/vm/vm_pager.c,v 1.108 2007/08/05 21:04:32 alc Exp $");
+__FBSDID("$FreeBSD: src/sys/vm/vm_pager.c,v 1.109 2009/02/24 18:09:31 rdivacky Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -104,11 +104,8 @@ dead_pager_getpages(obj, ma, count, req)
 }
 
 static vm_object_t
-dead_pager_alloc(handle, size, prot, off)
-	void *handle;
-	vm_ooffset_t size;
-	vm_prot_t prot;
-	vm_ooffset_t off;
+dead_pager_alloc(void *handle, vm_ooffset_t size, vm_prot_t prot,
+    vm_ooffset_t off)
 {
 	return NULL;
 }

@@ -58,7 +58,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/puc/puc_pci.c,v 1.17 2007/10/13 12:14:20 des Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/puc/puc_pci.c,v 1.18 2009/03/09 13:25:34 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -144,4 +144,3 @@ static driver_t puc_pci_driver = {
 };
 
 DRIVER_MODULE(puc, pci, puc_pci_driver, puc_devclass, 0, 0);
-DRIVER_MODULE(puc, cardbus, puc_pci_driver, puc_devclass, 0, 0);

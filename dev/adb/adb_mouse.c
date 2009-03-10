@@ -22,7 +22,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/adb/adb_mouse.c,v 1.4 2008/12/06 23:26:02 nwhitehorn Exp $
+ * $FreeBSD: src/sys/dev/adb/adb_mouse.c,v 1.6 2009/01/29 16:18:49 jhb Exp $
  */
 
 #include <sys/cdefs.h>
@@ -46,7 +46,7 @@
 
 #include "adb.h"
 
-#define CDEV_GET_SOFTC(x) devclass_get_softc(adb_mouse_devclass, minor(x) & 0x1f)
+#define CDEV_GET_SOFTC(x) (x)->si_drv1
 
 static int adb_mouse_probe(device_t dev);
 static int adb_mouse_attach(device_t dev);
@@ -236,6 +236,7 @@ adb_mouse_attach(device_t dev)
 	sc->cdev = make_dev(&ams_cdevsw, device_get_unit(dev),
 		       UID_ROOT, GID_OPERATOR, 0644, "ams%d", 
 		       device_get_unit(dev));
+	sc->cdev->si_drv1 = sc;
 
 	adb_set_autopoll(dev,1);
 

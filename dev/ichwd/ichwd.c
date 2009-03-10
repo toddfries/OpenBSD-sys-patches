@@ -56,7 +56,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/ichwd/ichwd.c,v 1.15 2008/08/25 15:23:54 jhb Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/ichwd/ichwd.c,v 1.16 2009/03/03 15:50:24 avg Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -220,8 +220,8 @@ ichwd_tmr_set(struct ichwd_softc *sc, unsigned int timeout)
 		uint16_t tmr_val16 = ichwd_read_tco_2(sc, TCO_TMR2);
 
 		tmr_val16 &= 0xfc00;
-		if (timeout > 0x0bff)
-			timeout = 0x0bff;
+		if (timeout > 0x03ff)
+			timeout = 0x03ff;
 		tmr_val16 |= timeout;
 		ichwd_write_tco_2(sc, TCO_TMR2, tmr_val16);
 	}

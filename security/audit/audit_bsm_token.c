@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2004-2008 Apple Inc.
+ * Copyright (c) 2004-2009 Apple Inc.
  * Copyright (c) 2005 SPARTA, Inc.
  * All rights reserved.
  *
@@ -30,11 +30,11 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * P4: //depot/projects/trustedbsd/openbsm/libbsm/bsm_token.c#72
+ * P4: //depot/projects/trustedbsd/openbsm/libbsm/bsm_token.c#90
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/security/audit/audit_bsm_token.c,v 1.21 2008/12/31 11:12:24 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/security/audit/audit_bsm_token.c,v 1.24 2009/03/02 13:29:18 rwatson Exp $");
 
 #include <sys/types.h>
 #include <sys/endian.h>
@@ -139,7 +139,7 @@ au_to_attr32(struct vnode_au_info *vni)
 	token_t *t;
 	u_char *dptr = NULL;
 	u_int16_t pad0_16 = 0;
-	u_int16_t pad0_32 = 0;
+	u_int32_t pad0_32 = 0;
 
 	GET_TOKEN_AREA(t, dptr, sizeof(u_char) + 2 * sizeof(u_int16_t) +
 	    3 * sizeof(u_int32_t) + sizeof(u_int64_t) + sizeof(u_int32_t));
@@ -186,7 +186,7 @@ au_to_attr64(struct vnode_au_info *vni)
 	token_t *t;
 	u_char *dptr = NULL;
 	u_int16_t pad0_16 = 0;
-	u_int16_t pad0_32 = 0;
+	u_int32_t pad0_32 = 0;
 
 	GET_TOKEN_AREA(t, dptr, sizeof(u_char) + 2 * sizeof(u_int16_t) +
 	    3 * sizeof(u_int32_t) + sizeof(u_int64_t) * 2);
@@ -439,7 +439,8 @@ au_to_ipc_perm(struct ipc_perm *perm)
 	u_char *dptr = NULL;
 	u_int16_t pad0 = 0;
 
-	GET_TOKEN_AREA(t, dptr, 12 * sizeof(u_int16_t) + sizeof(u_int32_t));
+	GET_TOKEN_AREA(t, dptr, sizeof(u_char) + 12 * sizeof(u_int16_t) +
+	    sizeof(u_int32_t));
 
 	ADD_U_CHAR(dptr, AUT_IPC_PERM);
 
@@ -851,6 +852,9 @@ au_to_seq(long audit_count)
  * local address           4 bytes/16 bytes (IPv4/IPv6 address)
  * remote port             2 bytes
  * remote address          4 bytes/16 bytes (IPv4/IPv6 address)
+ *
+ * Domain and type arguments to this routine are assumed to already have been
+ * converted to the BSM constant space, so we don't do that here.
  */
 token_t *
 au_to_socket_ex(u_short so_domain, u_short so_type,
@@ -866,13 +870,13 @@ au_to_socket_ex(u_short so_domain, u_short so_type,
 		    5 * sizeof(u_int16_t) + 2 * sizeof(u_int32_t));
 	else if (so_domain == AF_INET6)
 		GET_TOKEN_AREA(t, dptr, sizeof(u_char) +
-		    5 * sizeof(u_int16_t) + 16 * sizeof(u_int32_t));
+		    5 * sizeof(u_int16_t) + 8 * sizeof(u_int32_t));
 	else
 		return (NULL);
 
 	ADD_U_CHAR(dptr, AUT_SOCKET_EX);
-	ADD_U_INT16(dptr, so_domain);	/* XXXRW: explicitly convert? */
-	ADD_U_INT16(dptr, so_type);	/* XXXRW: explicitly convert? */
+	ADD_U_INT16(dptr, au_domain_to_bsm(so_domain));
+	ADD_U_INT16(dptr, au_socket_type_to_bsm(so_type));
 	if (so_domain == AF_INET) {
 		ADD_U_INT16(dptr, AU_IPv4);
 		sin = (struct sockaddr_in *)sa_local;

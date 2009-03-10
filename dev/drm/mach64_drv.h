@@ -33,7 +33,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/mach64_drv.h,v 1.3 2008/08/23 20:59:12 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/mach64_drv.h,v 1.4 2009/02/28 02:37:55 rnoland Exp $");
 
 #ifndef __MACH64_DRV_H__
 #define __MACH64_DRV_H__
@@ -166,6 +166,7 @@ extern int mach64_dma_blit(struct drm_device *dev, void *data,
 extern int mach64_get_param(struct drm_device *dev, void *data,
 			    struct drm_file *file_priv);
 
+extern int mach64_driver_load(struct drm_device * dev, unsigned long flags);
 extern u32 mach64_get_vblank_counter(struct drm_device *dev, int crtc);
 extern int mach64_enable_vblank(struct drm_device *dev, int crtc);
 extern void mach64_disable_vblank(struct drm_device *dev, int crtc);

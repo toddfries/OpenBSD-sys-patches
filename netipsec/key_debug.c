@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/key_debug.c,v 1.6 2008/03/02 17:12:28 bz Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/key_debug.c,v 1.7 2009/02/27 13:22:26 bz Exp $	*/
 /*	$KAME: key_debug.c,v 1.26 2001/06/27 10:46:50 sakane Exp $	*/
 
 /*-
@@ -44,6 +44,7 @@
 #include <sys/queue.h>
 #endif
 #include <sys/socket.h>
+#include <sys/vimage.h>
 
 #include <net/route.h>
 

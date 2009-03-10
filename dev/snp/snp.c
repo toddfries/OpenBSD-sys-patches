@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/snp/snp.c,v 1.112 2008/12/13 21:17:46 mav Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/snp/snp.c,v 1.113 2009/02/03 19:58:28 ed Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -127,7 +127,6 @@ snp_open(struct cdev *dev, int flag, int mode, struct thread *td)
 
 	/* Allocate per-snoop data. */
 	ss = malloc(sizeof(struct snp_softc), M_SNP, M_WAITOK|M_ZERO);
-	ttyoutq_init(&ss->snp_outq);
 	cv_init(&ss->snp_outwait, "snp out");
 
 	devfs_set_cdevpriv(ss, snp_dtor);

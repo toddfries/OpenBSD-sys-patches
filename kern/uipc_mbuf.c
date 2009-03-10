@@ -30,7 +30,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/uipc_mbuf.c,v 1.180 2008/09/05 04:05:31 thompsa Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/uipc_mbuf.c,v 1.181 2009/01/18 20:19:55 mav Exp $");
 
 #include "opt_mac.h"
 #include "opt_param.h"
@@ -1271,6 +1271,10 @@ m_copyback(struct mbuf *m0, int off, int len, c_caddr_t cp)
 		m = m->m_next;
 	}
 	while (len > 0) {
+		if (m->m_next == NULL && (len > m->m_len - off)) {
+			m->m_len += min(len - (m->m_len - off),
+			    M_TRAILINGSPACE(m));
+		}
 		mlen = min (m->m_len - off, len);
 		bcopy(cp, off + mtod(m, caddr_t), (u_int)mlen);
 		cp += mlen;

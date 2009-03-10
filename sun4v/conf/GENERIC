@@ -18,7 +18,7 @@
 #
 # For hardware specific information check HARDWARE.TXT
 #
-# $FreeBSD: src/sys/sun4v/conf/GENERIC,v 1.22 2008/12/02 19:09:08 ed Exp $
+# $FreeBSD: src/sys/sun4v/conf/GENERIC,v 1.25 2009/02/23 18:34:56 thompsa Exp $
 
 cpu		SUN4V
 ident		GENERIC
@@ -185,7 +185,6 @@ device		bpf		# Berkeley packet filter
 #device		ohci		# OHCI PCI->USB interface
 device		usb		# USB Bus (required)
 #device		udbp		# USB Double Bulk Pipe devices
-device		ugen		# Generic
 device		uhid		# "Human Interface Devices"
 #device		ukbd		# Keyboard
 device		ulpt		# Printer

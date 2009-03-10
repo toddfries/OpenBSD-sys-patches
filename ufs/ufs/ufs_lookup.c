@@ -35,7 +35,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_lookup.c,v 1.94 2008/12/02 11:12:50 kib Exp $");
+__FBSDID("$FreeBSD: src/sys/ufs/ufs/ufs_lookup.c,v 1.95 2009/01/21 14:51:38 kib Exp $");
 
 #include "opt_ffs_broken_fixme.h"
 #include "opt_ufs.h"
@@ -157,7 +157,6 @@ ufs_lookup(ap)
 	int nameiop = cnp->cn_nameiop;
 	ino_t ino;
 	int ltype;
-	struct mount *mp;
 
 	bp = NULL;
 	slotoffset = -1;
@@ -578,27 +577,7 @@ found:
 	 */
 	pdp = vdp;
 	if (flags & ISDOTDOT) {
-		ltype = VOP_ISLOCKED(pdp);
-		mp = pdp->v_mount;
-		for (;;) {
-			error = vfs_busy(mp, MBF_NOWAIT);
-			if (error == 0)
-				break;
-			VOP_UNLOCK(pdp, 0);
-			pause("ufs_dd", 1);
-			vn_lock(pdp, ltype | LK_RETRY);
-			if (pdp->v_iflag & VI_DOOMED)
-				return (ENOENT);
-		}
-		VOP_UNLOCK(pdp, 0);	/* race to get the inode */
-		error = VFS_VGET(mp, ino, cnp->cn_lkflags, &tdp);
-		vfs_unbusy(mp);
-		vn_lock(pdp, ltype | LK_RETRY);
-		if (pdp->v_iflag & VI_DOOMED) {
-			if (error == 0)
-				vput(tdp);
-			error = ENOENT;
-		}
+		error = vn_vget_ino(pdp, ino, cnp->cn_lkflags, &tdp);
 		if (error)
 			return (error);
 		*vpp = tdp;

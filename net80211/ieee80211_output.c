@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_output.c,v 1.73 2009/01/08 17:12:47 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/net80211/ieee80211_output.c,v 1.74 2009/02/09 04:39:16 weongyo Exp $");
 
 #include "opt_inet.h"
 #include "opt_wlan.h"
@@ -1376,6 +1376,9 @@ ieee80211_fragment(struct ieee80211vap *vap, struct mbuf *m0,
 		remainder -= payload;
 		off += payload;
 	} while (remainder != 0);
+
+	/* set the last fragment */
+	m->m_flags |= M_LASTFRAG;
 	whf->i_fc[1] &= ~IEEE80211_FC1_MORE_FRAG;
 
 	/* strip first mbuf now that everything has been copied */

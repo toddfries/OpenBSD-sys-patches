@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/acpi_support/acpi_panasonic.c,v 1.13 2007/06/17 04:40:33 mjacob Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/acpi_support/acpi_panasonic.c,v 1.14 2009/02/05 18:39:33 imp Exp $");
 
 #include "opt_acpi.h"
 #include <sys/param.h>
@@ -79,7 +79,7 @@ typedef int hkey_fn_t(ACPI_HANDLE, int, UINT32 *);
 static int	acpi_panasonic_probe(device_t dev);
 static int	acpi_panasonic_attach(device_t dev);
 static int	acpi_panasonic_detach(device_t dev);
-static void	acpi_panasonic_shutdown(device_t dev);
+static int	acpi_panasonic_shutdown(device_t dev);
 static int	acpi_panasonic_sysctl(SYSCTL_HANDLER_ARGS);
 static ACPI_INTEGER acpi_panasonic_sinf(ACPI_HANDLE h, ACPI_INTEGER index);
 static void	acpi_panasonic_sset(ACPI_HANDLE h, ACPI_INTEGER index,
@@ -220,7 +220,7 @@ acpi_panasonic_detach(device_t dev)
 	return (0);
 }
 
-static void
+static int
 acpi_panasonic_shutdown(device_t dev)
 {
 	struct acpi_panasonic_softc *sc;
@@ -230,6 +230,7 @@ acpi_panasonic_shutdown(device_t dev)
 	sc = device_get_softc(dev);
 	mute = 1;
 	hkey_sound_mute(sc->handle, HKEY_SET, &mute);
+	return (0);
 }
 
 static int

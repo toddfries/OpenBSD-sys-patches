@@ -31,7 +31,7 @@
 
 #include <sys/cdefs.h>
 #ifdef __FreeBSD__
-__FBSDID("$FreeBSD: src/sys/dev/malo/if_malo_pci.c,v 1.1 2008/03/25 06:32:32 weongyo Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/malo/if_malo_pci.c,v 1.2 2009/03/09 13:23:54 imp Exp $");
 #endif
 
 /*
@@ -367,7 +367,6 @@ static driver_t malo_pci_driver = {
 
 static	devclass_t malo_devclass;
 DRIVER_MODULE(if_malo, pci, malo_pci_driver, malo_devclass, 0, 0);
-DRIVER_MODULE(if_malo, cardbus, malo_pci_driver, malo_devclass, 0, 0);
 MODULE_VERSION(if_malo, 1);
 MODULE_DEPEND(if_malo, wlan, 1, 1, 1);		/* 802.11 media layer */
 MODULE_DEPEND(if_malo, malofw_fw, 1, 1, 1);

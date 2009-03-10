@@ -31,7 +31,7 @@
 /* $KAME: sctp_pcb.h,v 1.21 2005/07/16 01:18:47 suz Exp $	 */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/sctp_pcb.h,v 1.40 2008/12/06 13:19:54 rrs Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/sctp_pcb.h,v 1.41 2009/02/03 11:04:03 rrs Exp $");
 
 #ifndef __sctp_pcb_h__
 #define __sctp_pcb_h__
@@ -144,6 +144,7 @@ struct sctp_tagblock {
 
 
 struct sctp_epinfo {
+	struct socket *udp_tun_socket;
 	struct sctpasochead *sctp_asochash;
 	u_long hashasocmark;
 

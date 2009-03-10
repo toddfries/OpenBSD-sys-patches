@@ -61,11 +61,12 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/icmp6.c,v 1.101 2008/12/17 13:00:18 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/icmp6.c,v 1.102 2009/02/27 14:12:05 bz Exp $");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
+#include "opt_route.h"
 
 #include <sys/param.h>
 #include <sys/domain.h>

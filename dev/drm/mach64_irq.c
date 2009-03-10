@@ -36,7 +36,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/drm/mach64_irq.c,v 1.3 2008/08/23 20:59:12 rnoland Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/drm/mach64_irq.c,v 1.4 2009/02/28 02:37:55 rnoland Exp $");
 
 #include "dev/drm/drmP.h"
 #include "dev/drm/drm.h"
@@ -146,7 +146,7 @@ void mach64_driver_irq_preinstall(struct drm_device * dev)
 
 int mach64_driver_irq_postinstall(struct drm_device * dev)
 {
-	return drm_vblank_init(dev, 1);
+	return 0;
 }
 
 void mach64_driver_irq_uninstall(struct drm_device * dev)

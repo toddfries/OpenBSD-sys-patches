@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/netipsec/ipsec.h,v 1.22 2008/12/27 09:36:22 bz Exp $	*/
+/*	$FreeBSD: src/sys/netipsec/ipsec.h,v 1.23 2009/02/08 09:27:07 bz Exp $	*/
 /*	$KAME: ipsec.h,v 1.53 2001/11/20 08:32:38 itojun Exp $	*/
 
 /*-
@@ -374,9 +374,9 @@ extern int ipsec_copy_policy
 extern u_int ipsec_get_reqlevel __P((struct ipsecrequest *));
 extern int ipsec_in_reject __P((struct secpolicy *, struct mbuf *));
 
-extern int ipsec4_set_policy __P((struct inpcb *inp, int optname,
+extern int ipsec_set_policy __P((struct inpcb *inp, int optname,
 	caddr_t request, size_t len, struct ucred *cred));
-extern int ipsec4_get_policy __P((struct inpcb *inpcb, caddr_t request,
+extern int ipsec_get_policy __P((struct inpcb *inpcb, caddr_t request,
 	size_t len, struct mbuf **mp));
 extern int ipsec_delete_pcbpolicy __P((struct inpcb *));
 extern int ipsec4_in_reject __P((struct mbuf *, struct inpcb *));
@@ -386,7 +386,7 @@ struct tcpcb;
 extern int ipsec_chkreplay __P((u_int32_t, struct secasvar *));
 extern int ipsec_updatereplay __P((u_int32_t, struct secasvar *));
 
-extern size_t ipsec4_hdrsiz __P((struct mbuf *, u_int, struct inpcb *));
+extern size_t ipsec_hdrsiz __P((struct mbuf *, u_int, struct inpcb *));
 extern size_t ipsec_hdrsiz_tcp __P((struct tcpcb *));
 
 union sockaddr_union;

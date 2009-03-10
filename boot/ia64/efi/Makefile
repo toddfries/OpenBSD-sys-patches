@@ -1,9 +1,9 @@
-# $FreeBSD: src/sys/boot/ia64/efi/Makefile,v 1.29 2008/06/25 21:33:28 ru Exp $
+# $FreeBSD: src/sys/boot/ia64/efi/Makefile,v 1.30 2009/02/21 15:04:31 ru Exp $
 
 NO_MAN=
-WITHOUT_SSP=
 
 .include <bsd.own.mk>
+MK_SSP=		no
 
 PROG=		loader.sym
 INTERNALPROG=

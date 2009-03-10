@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)fcntl.h	8.3 (Berkeley) 1/21/94
- * $FreeBSD: src/sys/sys/fcntl.h,v 1.22 2008/06/26 10:21:54 dfr Exp $
+ * $FreeBSD: src/sys/sys/fcntl.h,v 1.24 2009/03/04 03:33:21 das Exp $
  */
 
 #ifndef _SYS_FCNTL_H_
@@ -138,6 +138,11 @@ typedef	__pid_t		pid_t;
 #endif
 #ifdef	_KERNEL
 #define	FEXEC		O_EXEC
+#endif
+
+/* Defined by POSIX 1003.1-2008; BSD default, but reserve for future use. */
+#if __POSIX_VISIBLE >= 200809
+#define	O_TTY_INIT	0x00080000	/* Restore default termios attributes */
 #endif
 
 /*
@@ -273,7 +278,9 @@ __BEGIN_DECLS
 int	open(const char *, int, ...);
 int	creat(const char *, mode_t);
 int	fcntl(int, int, ...);
+#if __BSD_VISIBLE || __POSIX_VISIBLE >= 200809
 int	openat(int, const char *, int, ...);
+#endif
 #if __BSD_VISIBLE
 int	flock(int, int);
 #endif

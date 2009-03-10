@@ -28,8 +28,10 @@
  * SUCH DAMAGE.
  *
  *	@(#)raw_usrreq.c	8.1 (Berkeley) 6/10/93
- * $FreeBSD: src/sys/net/raw_usrreq.c,v 1.49 2008/12/02 21:37:28 bz Exp $
+ * $FreeBSD: src/sys/net/raw_usrreq.c,v 1.50 2009/02/27 14:12:05 bz Exp $
  */
+
+#include "opt_route.h"
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -48,6 +50,7 @@
 
 #include <net/if.h>
 #include <net/raw_cb.h>
+#include <net/route.h>
 #include <net/vnet.h>
 
 MTX_SYSINIT(rawcb_mtx, &rawcb_mtx, "rawcb", MTX_DEF);

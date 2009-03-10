@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/kern/subr_devstat.c,v 1.51 2005/05/03 10:58:05 jeff Exp $");
+__FBSDID("$FreeBSD: src/sys/kern/subr_devstat.c,v 1.52 2009/02/03 07:54:42 imp Exp $");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -407,10 +407,10 @@ sysctl_devstat(SYSCTL_HANDLER_ARGS)
  * Sysctl entries for devstat.  The first one is a node that all the rest
  * hang off of. 
  */
-SYSCTL_NODE(_kern, OID_AUTO, devstat, CTLFLAG_RD, 0, "Device Statistics");
+SYSCTL_NODE(_kern, OID_AUTO, devstat, CTLFLAG_RD, NULL, "Device Statistics");
 
 SYSCTL_PROC(_kern_devstat, OID_AUTO, all, CTLFLAG_RD|CTLTYPE_OPAQUE,
-    0, 0, sysctl_devstat, "S,devstat", "All devices in the devstat list");
+    NULL, 0, sysctl_devstat, "S,devstat", "All devices in the devstat list");
 /*
  * Export the number of devices in the system so that userland utilities
  * can determine how much memory to allocate to hold all the devices.
@@ -534,4 +534,4 @@ devstat_free(struct devstat *dsp)
 }
 
 SYSCTL_INT(_debug_sizeof, OID_AUTO, devstat, CTLFLAG_RD,
-    0, sizeof(struct devstat), "sizeof(struct devstat)");
+    NULL, sizeof(struct devstat), "sizeof(struct devstat)");

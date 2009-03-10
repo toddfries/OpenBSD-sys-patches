@@ -24,7 +24,7 @@
  * SUCH DAMAGE.
  *
  *	from: FreeBSD: src/sys/i386/include/globaldata.h,v 1.27 2001/04/27
- * $FreeBSD: src/sys/sun4v/include/pcpu.h,v 1.12 2008/08/19 19:53:52 jhb Exp $
+ * $FreeBSD: src/sys/sun4v/include/pcpu.h,v 1.13 2009/01/18 13:04:38 marius Exp $
  */
 
 #ifndef	_MACHINE_PCPU_H_
@@ -37,6 +37,12 @@
 #define	ALT_STACK_SIZE	128
 
 struct pmap;
+
+#ifdef KTR
+#define	PCPU_MD_FIELDS_PAD	(4 - (PCPU_NAME_LEN + 7) / 8)
+#else
+#define	PCPU_MD_FIELDS_PAD	4
+#endif
 
 /*
  * Inside the kernel, the globally reserved register g7 is used to
@@ -72,7 +78,7 @@ struct pmap;
 	u_int   pc_kwbuf_full;                                          \
 	struct rwindow pc_tsbwbuf[2];                                   \
         uint16_t pc_cpulist[MAXCPU];                                    \
-	uint64_t pad[4];
+	uint64_t pad[PCPU_MD_FIELDS_PAD];
 
 	/* XXX SUN4V_FIXME - as we access the *_ra and *_size fields in quick
 	 * succession we _really_ want them to be L1 cache line size aligned

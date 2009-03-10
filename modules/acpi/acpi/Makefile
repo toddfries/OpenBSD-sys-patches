@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/modules/acpi/acpi/Makefile,v 1.19 2007/09/24 16:59:06 njl Exp $
+# $FreeBSD: src/sys/modules/acpi/acpi/Makefile,v 1.20 2009/02/12 14:44:15 n_hibma Exp $
 
 .if ${MACHINE_ARCH} == "amd64" || ${MACHINE_ARCH} == "ia64"
 .error "ACPI can only be compiled into the kernel on the amd64 and ia64 platforms"
@@ -58,7 +58,7 @@ SRCS+=	cpufreq_if.h device_if.h isa_if.h pci_if.h pcib_if.h
 # XXX ACPI should not depend on the following headers but this is currently
 # needed for the build of assym.s.
 # This obviously needs a better and more structural fix.
-SRCS+=	opt_kstack_pages.h opt_nfs.h opt_apic.h opt_compat.h
+SRCS+=	opt_kstack_pages.h opt_nfs.h opt_apic.h opt_compat.h opt_hwpmc_hooks.h
 
 # Debugging support
 DBSRC=	dbcmds.c dbdisply.c dbexec.c dbfileio.c dbhistry.c dbinput.c dbstats.c

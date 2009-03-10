@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/acpica/madt.c,v 1.30 2008/03/16 10:58:03 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/acpica/madt.c,v 1.31 2009/03/05 16:03:44 jhb Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -482,6 +482,10 @@ madt_parse_apics(ACPI_SUBTABLE_HEADER *entry, void *arg __unused)
 			    apic->Id);
 		if (ioapics[apic->Id].io_apic != NULL)
 			panic("%s: Double APIC ID %u", __func__, apic->Id);
+		if (apic->GlobalIrqBase >= FIRST_MSI_INT) {
+			printf("MADT: Ignoring bogus I/O APIC ID %u", apic->Id);
+			break;
+		}
 		ioapics[apic->Id].io_apic = ioapic_create(apic->Address,
 		    apic->Id, apic->GlobalIrqBase);
 		ioapics[apic->Id].io_vector = apic->GlobalIrqBase;

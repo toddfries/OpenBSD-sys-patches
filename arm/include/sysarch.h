@@ -32,7 +32,7 @@
  * SUCH DAMAGE.
  */
 
-/* $FreeBSD: src/sys/arm/include/sysarch.h,v 1.5 2008/02/05 10:22:33 raj Exp $ */
+/* $FreeBSD: src/sys/arm/include/sysarch.h,v 1.6 2009/02/12 23:23:30 cognet Exp $ */
 
 #ifndef _ARM_SYSARCH_H_
 #define _ARM_SYSARCH_H_
@@ -42,6 +42,9 @@
  * The ARM_TP_ADDRESS points to a special purpose page, which is used as local
  * store for the ARM per-thread data and Restartable Atomic Sequences support.
  * Put it just above the "high" vectors' page.
+ * the cpu_switch() code assumes ARM_RAS_START is ARM_TP_ADDRESS + 4, and
+ * ARM_RAS_END is ARM_TP_ADDRESS + 8, so if that ever changes, be sure to
+ * update the cpu_switch() (and cpu_throw()) code as well.
  */
 #define ARM_TP_ADDRESS		(ARM_VECTORS_HIGH + 0x1000)
 #define ARM_RAS_START		(ARM_TP_ADDRESS + 4)

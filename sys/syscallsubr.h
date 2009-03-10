@@ -22,7 +22,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/syscallsubr.h,v 1.52 2008/11/11 14:55:59 ed Exp $
+ * $FreeBSD: src/sys/sys/syscallsubr.h,v 1.53 2009/02/20 13:05:29 ed Exp $
  */
 
 #ifndef _SYS_SYSCALLSUBR_H_
@@ -193,6 +193,9 @@ int	kern_stat(struct thread *td, char *path, enum uio_seg pathseg,
 	    struct stat *sbp);
 int	kern_statat(struct thread *td, int flag, int fd, char *path,
 	    enum uio_seg pathseg, struct stat *sbp);
+int	kern_statat_vnhook(struct thread *td, int flag, int fd, char *path,
+	    enum uio_seg pathseg, struct stat *sbp,
+	    void (*hook)(struct vnode *vp, struct stat *sbp));
 int	kern_statfs(struct thread *td, char *path, enum uio_seg pathseg,
 	    struct statfs *buf);
 int	kern_symlink(struct thread *td, char *path, char *link,

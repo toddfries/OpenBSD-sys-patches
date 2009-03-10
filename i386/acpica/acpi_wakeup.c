@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/i386/acpica/acpi_wakeup.c,v 1.47 2008/03/16 10:58:03 rwatson Exp $");
+__FBSDID("$FreeBSD: src/sys/i386/acpica/acpi_wakeup.c,v 1.49 2009/02/18 22:44:55 rdivacky Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -63,14 +63,15 @@ extern uint32_t	acpi_resume_beep;
 extern uint32_t	acpi_reset_video;
 extern void	initializecpu(void);
 
-static struct region_descriptor	saved_idt, saved_gdt, *p_gdt;
-static uint16_t		saved_ldt;
+static struct region_descriptor __used	saved_idt, saved_gdt;
+static struct region_descriptor	*p_gdt;
+static uint16_t __used 	saved_ldt;
 
-static uint32_t		r_eax, r_ebx, r_ecx, r_edx, r_ebp, r_esi, r_edi,
+static uint32_t	__used	r_eax, r_ebx, r_ecx, r_edx, r_ebp, r_esi, r_edi,
 			r_efl, r_cr0, r_cr2, r_cr3, r_cr4, ret_addr;
 
-static uint16_t		r_cs, r_ds, r_es, r_fs, r_gs, r_ss, r_tr;
-static uint32_t		r_esp;
+static uint16_t	__used	r_cs, r_ds, r_es, r_fs, r_gs, r_ss, r_tr;
+static uint32_t	__used	r_esp;
 
 static void		acpi_printcpu(void);
 static void		acpi_realmodeinst(void *arg, bus_dma_segment_t *segs,

@@ -18,12 +18,13 @@
 
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/xen/netfront/netfront.c,v 1.10 2008/12/29 06:31:03 kmacy Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/xen/netfront/netfront.c,v 1.12 2009/02/05 21:18:39 kmacy Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/sockio.h>
 #include <sys/mbuf.h>
+#include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/module.h>
 #include <sys/kernel.h>
@@ -1234,11 +1235,12 @@ xennet_get_responses(struct netfront_info *np,
 		gnttab_release_grant_reference(&np->gref_rx_head, ref);
 
 next:
-		if (m != NULL) {
-				m->m_len = rx->status;
-				m->m_data += rx->offset;
-				m0->m_pkthdr.len += rx->status;
-		}
+		if (m == NULL)
+			break;
+		
+		m->m_len = rx->status;
+		m->m_data += rx->offset;
+		m0->m_pkthdr.len += rx->status;
 		
 		if (!(rx->flags & NETRXF_more_data))
 			break;

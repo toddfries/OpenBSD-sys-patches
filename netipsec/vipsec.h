@@ -27,7 +27,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/netipsec/vipsec.h,v 1.6 2008/12/23 16:52:03 bz Exp $
+ * $FreeBSD: src/sys/netipsec/vipsec.h,v 1.7 2009/03/01 11:01:00 bz Exp $
  */
 
 #ifndef _NETIPSEC_VIPSEC_H_
@@ -106,6 +106,9 @@ struct vnet_ipsec {
 	LIST_HEAD(, secacq)	_acqtree;
 	LIST_HEAD(, secspacq)	_spacqtree;
 };
+
+/* Size guard. See sys/vimage.h. */
+VIMAGE_CTASSERT(SIZEOF_vnet_ipsec, sizeof(struct vnet_ipsec));
 
 #ifndef VIMAGE
 #ifndef VIMAGE_GLOBALS

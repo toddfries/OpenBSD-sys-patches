@@ -41,7 +41,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/hifn/hifn7751.c,v 1.40 2007/03/21 03:42:49 sam Exp $");
+__FBSDID("$FreeBSD: src/sys/dev/hifn/hifn7751.c,v 1.41 2009/02/05 19:37:49 imp Exp $");
 
 /*
  * Driver for various Hifn encryption processors.
@@ -98,7 +98,7 @@ static	int hifn_attach(device_t);
 static	int hifn_detach(device_t);
 static	int hifn_suspend(device_t);
 static	int hifn_resume(device_t);
-static	void hifn_shutdown(device_t);
+static	int hifn_shutdown(device_t);
 
 static	int hifn_newsession(device_t, u_int32_t *, struct cryptoini *);
 static	int hifn_freesession(device_t, u_int64_t);
@@ -691,12 +691,13 @@ hifn_detach(device_t dev)
  * Stop all chip I/O so that the kernel's probe routines don't
  * get confused by errant DMAs when rebooting.
  */
-static void
+static int
 hifn_shutdown(device_t dev)
 {
 #ifdef notyet
 	hifn_stop(device_get_softc(dev));
 #endif
+	return (0);
 }
 
 /*

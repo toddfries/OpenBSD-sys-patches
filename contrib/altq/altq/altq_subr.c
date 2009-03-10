@@ -1,4 +1,4 @@
-/*	$FreeBSD: src/sys/contrib/altq/altq/altq_subr.c,v 1.15 2008/12/02 21:37:28 bz Exp $	*/
+/*	$FreeBSD: src/sys/contrib/altq/altq/altq_subr.c,v 1.19 2009/02/27 14:12:05 bz Exp $	*/
 /*	$KAME: altq_subr.c,v 1.21 2003/11/06 06:32:53 kjc Exp $	*/
 
 /*
@@ -32,6 +32,7 @@
 #include "opt_inet.h"
 #ifdef __FreeBSD__
 #include "opt_inet6.h"
+#include "opt_route.h"
 #endif
 #endif /* __FreeBSD__ || __NetBSD__ */
 
@@ -47,11 +48,17 @@
 #include <sys/syslog.h>
 #include <sys/sysctl.h>
 #include <sys/queue.h>
+#ifdef __FreeBSD__
+#include <sys/vimage.h>
+#endif
 
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
+#ifdef __FreeBSD__
+#include <net/route.h>
 #include <net/vnet.h>
+#endif
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -76,7 +83,6 @@
 #include <sys/bus.h>
 #include <sys/cpu.h>
 #include <sys/eventhandler.h>
-#include <sys/vimage.h>
 #include <machine/clock.h>
 #endif
 #if defined(__i386__)
@@ -812,10 +818,7 @@ read_dsfield(m, pktattr)
 }
 
 void
-write_dsfield(m, pktattr, dsfield)
-	struct mbuf *m;
-	struct altq_pktattr *pktattr;
-	u_int8_t dsfield;
+write_dsfield(struct mbuf *m, struct altq_pktattr *pktattr, u_int8_t dsfield)
 {
 	struct mbuf *m0;
 
@@ -910,7 +913,7 @@ tsc_freq_changed(void *arg, const struct cf_level *level, int status)
 	if (status != 0)
 		return;
 
-#if (__FreeBSD_version >= 800050) && (defined(__amd64__) || defined(__i386__))
+#if (__FreeBSD_version >= 701102) && (defined(__amd64__) || defined(__i386__))
 	/* If TSC is P-state invariant, don't do anything. */
 	if (tsc_is_invariant)
 		return;

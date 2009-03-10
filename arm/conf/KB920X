@@ -16,7 +16,7 @@
 # If you are in doubt as to the purpose or necessity of a line, check first 
 # in NOTES.
 #
-# $FreeBSD: src/sys/arm/conf/KB920X,v 1.21 2008/11/30 17:53:19 sam Exp $
+# $FreeBSD: src/sys/arm/conf/KB920X,v 1.22 2009/02/23 18:34:56 thompsa Exp $
 
 ident		KB920X
 
@@ -98,7 +98,6 @@ device		bpf
 device          ohci            # OHCI localbus->USB interface
 device          usb             # USB Bus (required)
 #device         udbp            # USB Double Bulk Pipe devices
-device          ugen            # Generic
 device          uhid            # "Human Interface Devices"
 device          ulpt            # Printer
 device          umass           # Disks/Mass storage - Requires scbus and da
@@ -116,7 +115,6 @@ device          kue             # Kawasaki LSI USB Ethernet
 device          rue             # RealTek RTL8150 USB Ethernet
 device		udav
 # usb serial
-device          ucom
 device          uark
 device          ubsa
 device          uftdi

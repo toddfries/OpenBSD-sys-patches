@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet/ip_fw_nat.c,v 1.9 2008/12/11 16:26:38 bz Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet/ip_fw_nat.c,v 1.10 2009/02/07 18:49:42 piso Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -326,6 +326,10 @@ ipfw_nat(struct ip_fw_args *args, struct cfg_nat *t, struct mbuf *m)
 	else
 		retval = LibAliasOut(t->lib, c, 
 			mcl->m_len + M_TRAILINGSPACE(mcl));
+	if (retval == PKT_ALIAS_RESPOND) {
+	  m->m_flags |= M_SKIP_FIREWALL;
+	  retval = PKT_ALIAS_OK;
+	}
 	if (retval != PKT_ALIAS_OK &&
 	    retval != PKT_ALIAS_FOUND_HEADER_FRAGMENT) {
 		/* XXX - should i add some logging? */

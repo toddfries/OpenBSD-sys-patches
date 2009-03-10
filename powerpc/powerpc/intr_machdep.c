@@ -57,7 +57,7 @@
  *	from: @(#)isa.c	7.2 (Berkeley) 5/13/91
  *	form: src/sys/i386/isa/intr_machdep.c,v 1.57 2001/07/20
  *
- * $FreeBSD: src/sys/powerpc/powerpc/intr_machdep.c,v 1.23 2008/09/28 18:34:14 marius Exp $
+ * $FreeBSD: src/sys/powerpc/powerpc/intr_machdep.c,v 1.24 2009/01/25 17:50:53 nwhitehorn Exp $
  */
 
 #include <sys/param.h>
@@ -243,7 +243,7 @@ powerpc_setup_intr(const char *name, u_int irq, driver_filter_t filter,
     driver_intr_t handler, void *arg, enum intr_type flags, void **cookiep)
 {
 	struct powerpc_intr *i;
-	int error;
+	int error, enable = 0;
 
 	i = intr_lookup(irq);
 	if (i == NULL)
@@ -258,13 +258,16 @@ powerpc_setup_intr(const char *name, u_int irq, driver_filter_t filter,
 
 		i->cntp = &intrcnt[i->vector];
 
-		if (!cold)
-			PIC_ENABLE(pic, i->irq, i->vector);
+		enable = 1;
 	}
 
 	error = intr_event_add_handler(i->event, name, filter, handler, arg,
 	    intr_priority(flags), flags, cookiep);
 	intrcnt_setname(i->event->ie_fullname, i->vector);
+
+	if (!cold && enable)
+		PIC_ENABLE(pic, i->irq, i->vector);
+
 	return (error);
 }
 

@@ -31,7 +31,7 @@
  *	@(#)kernfs_vnops.c	8.15 (Berkeley) 5/21/95
  * From: FreeBSD: src/sys/miscfs/kernfs/kernfs_vnops.c 1.43
  *
- * $FreeBSD: src/sys/fs/devfs/devfs_vnops.c,v 1.172 2009/01/08 19:13:34 trasz Exp $
+ * $FreeBSD: src/sys/fs/devfs/devfs_vnops.c,v 1.174 2009/03/06 15:35:37 kib Exp $
  */
 
 /*
@@ -1014,7 +1014,7 @@ devfs_poll_f(struct file *fp, int events, struct ucred *cred, struct thread *td)
 	fpop = td->td_fpop;
 	error = devfs_fp_check(fp, &dev, &dsw);
 	if (error)
-		return (error);
+		return (poll_no_poll(events));
 	error = dsw->d_poll(dev, events, td);
 	td->td_fpop = fpop;
 	dev_relthread(dev);
@@ -1074,7 +1074,7 @@ devfs_readdir(struct vop_readdir_args *ap)
 	struct devfs_dirent *dd;
 	struct devfs_dirent *de;
 	struct devfs_mount *dmp;
-	off_t off, oldoff;
+	off_t off;
 	int *tmp_ncookies = NULL;
 
 	if (ap->a_vp->v_type != VDIR)
@@ -1113,7 +1113,6 @@ devfs_readdir(struct vop_readdir_args *ap)
 	error = 0;
 	de = ap->a_vp->v_data;
 	off = 0;
-	oldoff = uio->uio_offset;
 	TAILQ_FOREACH(dd, &de->de_dlist, de_list) {
 		KASSERT(dd->de_cdp != (void *)0xdeadc0de, ("%s %d\n", __func__, __LINE__));
 		if (dd->de_flags & DE_WHITEOUT)

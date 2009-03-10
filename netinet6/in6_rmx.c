@@ -73,7 +73,9 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/netinet6/in6_rmx.c,v 1.34 2008/12/17 10:03:49 qingli Exp $");
+__FBSDID("$FreeBSD: src/sys/netinet6/in6_rmx.c,v 1.36 2009/02/27 14:12:05 bz Exp $");
+
+#include "opt_route.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -243,6 +245,8 @@ in6_rtqkill(struct radix_node *rn, void *rock)
 	struct rtqk_arg *ap = rock;
 	struct rtentry *rt = (struct rtentry *)rn;
 	int err;
+
+	RADIX_NODE_HEAD_WLOCK_ASSERT(ap->rnh);
 
 	if (rt->rt_flags & RTPRF_OURS) {
 		ap->found++;

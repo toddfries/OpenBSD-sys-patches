@@ -29,7 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/fs/nwfs/nwfs_vnops.c,v 1.47 2008/12/16 21:13:11 trasz Exp $
+ * $FreeBSD: src/sys/fs/nwfs/nwfs_vnops.c,v 1.49 2009/01/31 18:06:34 bz Exp $
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -627,7 +627,6 @@ nwfs_mkdir(ap)
 	struct componentname *cnp = ap->a_cnp;
 	int len=cnp->cn_namelen;
 	struct ncp_open_info no;
-	struct nwnode *np;
 	struct vnode *newvp = (struct vnode *)0;
 	ncpfid fid;
 	int error = 0;
@@ -651,7 +650,6 @@ nwfs_mkdir(ap)
 		fid.f_id = no.fattr.dirEntNum;
 		error = nwfs_nget(VTOVFS(dvp), fid, &no.fattr, dvp, &newvp);
 		if (!error) {
-			np = VTONW(newvp);
 			newvp->v_type = VDIR;
 			*ap->a_vpp = newvp;
 		}
@@ -786,7 +784,6 @@ static int nwfs_strategy (ap)
 	struct buf *bp=ap->a_bp;
 	struct ucred *cr;
 	struct thread *td;
-	int error = 0;
 
 	NCPVNDEBUG("\n");
 	if (bp->b_flags & B_ASYNC)
@@ -803,7 +800,7 @@ static int nwfs_strategy (ap)
 	 * otherwise just do it ourselves.
 	 */
 	if ((bp->b_flags & B_ASYNC) == 0 )
-		error = nwfs_doio(ap->a_vp, bp, cr, td);
+		(void)nwfs_doio(ap->a_vp, bp, cr, td);
 	return (0);
 }
 

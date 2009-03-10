@@ -1,4 +1,4 @@
-# $FreeBSD: src/sys/ia64/conf/NOTES,v 1.14 2006/10/23 13:23:13 ru Exp $
+# $FreeBSD: src/sys/ia64/conf/NOTES,v 1.15 2009/02/07 09:57:14 wkoszek Exp $
 #
 # This file contains machine dependent kernel configuration notes.  For
 # machine independent notes, look in /sys/conf/NOTES.
@@ -100,6 +100,9 @@ options 	VGA_WIDTH90		# support 90 column modes
 
 # Debugging.
 options 	VGA_DEBUG
+
+# AGP debugging.
+options		AGP_DEBUG
 
 # The following devices are not supported.
 nodevice	fdc

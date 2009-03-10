@@ -26,7 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/cpufunc.h,v 1.150 2008/10/19 01:27:40 kmacy Exp $
+ * $FreeBSD: src/sys/i386/include/cpufunc.h,v 1.151 2009/01/31 11:37:21 obrien Exp $
  */
 
 /*
@@ -497,7 +497,7 @@ static __inline u_int
 rfs(void)
 {
 	u_int sel;
-	__asm __volatile("movl %%fs,%0" : "=rm" (sel));
+	__asm __volatile("mov %%fs,%0" : "=rm" (sel));
 	return (sel);
 }
 
@@ -513,7 +513,7 @@ static __inline u_int
 rgs(void)
 {
 	u_int sel;
-	__asm __volatile("movl %%gs,%0" : "=rm" (sel));
+	__asm __volatile("mov %%gs,%0" : "=rm" (sel));
 	return (sel);
 }
 
@@ -537,7 +537,7 @@ static __inline u_int
 rss(void)
 {
 	u_int sel;
-	__asm __volatile("movl %%ss,%0" : "=rm" (sel));
+	__asm __volatile("mov %%ss,%0" : "=rm" (sel));
 	return (sel);
 }
 
@@ -552,13 +552,13 @@ rtr(void)
 static __inline void
 load_fs(u_int sel)
 {
-	__asm __volatile("movl %0,%%fs" : : "rm" (sel));
+	__asm __volatile("mov %0,%%fs" : : "rm" (sel));
 }
 
 static __inline void
 load_gs(u_int sel)
 {
-	__asm __volatile("movl %0,%%gs" : : "rm" (sel));
+	__asm __volatile("mov %0,%%gs" : : "rm" (sel));
 }
 
 static __inline void

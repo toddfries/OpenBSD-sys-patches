@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/sys/elf_common.h,v 1.27 2009/01/03 13:42:49 kaiw Exp $
+ * $FreeBSD: src/sys/sys/elf_common.h,v 1.28 2009/02/03 06:12:13 jkoshy Exp $
  */
 
 #ifndef _SYS_ELF_COMMON_H_
@@ -47,6 +47,17 @@ typedef struct {
 	u_int32_t	n_descsz;	/* Length of descriptor. */
 	u_int32_t	n_type;		/* Type of this note. */
 } Elf_Note;
+
+/*
+ * The header for GNU-style hash sections.
+ */
+
+typedef struct {
+	u_int32_t	gh_nbuckets;	/* Number of hash buckets. */
+	u_int32_t	gh_symndx;	/* First visible symbol in .dynsym. */
+	u_int32_t	gh_maskwords;	/* #maskwords used in bloom filter. */
+	u_int32_t	gh_shift2;	/* Bloom filter shift count. */
+} Elf_GNU_Hash_Header;
 
 /* Indexes into the e_ident array.  Keep synced with
    http://www.sco.com/developers/gabi/latest/ch4.eheader.html */
