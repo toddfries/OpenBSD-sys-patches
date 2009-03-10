@@ -5270,6 +5270,10 @@ const struct usb_known_product usb_known_products[] = {
 	    "RTL8187",
 	},
 	{
+	    USB_VENDOR_REALTEK, USB_PRODUCT_REALTEK_RTL8187B,
+	    "RTL8187B",
+	},
+	{
 	    USB_VENDOR_RIM, USB_PRODUCT_RIM_BLACKBERRY,
 	    "Blackberry",
 	},
