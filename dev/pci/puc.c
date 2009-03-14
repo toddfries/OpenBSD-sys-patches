@@ -1,4 +1,4 @@
-/*	$OpenBSD: puc.c,v 1.14 2009/03/03 16:52:25 deraadt Exp $	*/
+/*	$OpenBSD: puc.c,v 1.13 2007/12/04 21:49:35 kettenis Exp $	*/
 /*	$NetBSD: puc.c,v 1.3 1999/02/06 06:29:54 cgd Exp $	*/
 
 /*
@@ -199,6 +199,7 @@ puc_pci_attach(struct device *parent, struct device *self, void *aux)
 		    0, &sc->sc_bar_mappings[i].t, &sc->sc_bar_mappings[i].h,
 		    &sc->sc_bar_mappings[i].a, &sc->sc_bar_mappings[i].s, 0)
 		      == 0);
+		sc->sc_bar_mappings[i].type = type;
 		if (sc->sc_bar_mappings[i].mapped)
 			continue;
 
@@ -344,8 +345,7 @@ puc_submatch(struct device *parent, void *vcf, void *aux)
 }
 
 const struct puc_device_description *
-puc_find_description(u_int16_t vend, u_int16_t prod,
-    u_int16_t svend, u_int16_t sprod)
+puc_find_description(u_long vend, u_long prod, u_long svend, u_long sprod)
 {
 	int i;
 
