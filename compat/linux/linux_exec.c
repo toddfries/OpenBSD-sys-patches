@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_exec.c,v 1.31 2009/03/05 19:52:24 kettenis Exp $	*/
+/*	$OpenBSD: linux_exec.c,v 1.30 2008/06/26 05:42:14 ray Exp $	*/
 /*	$NetBSD: linux_exec.c,v 1.13 1996/04/05 00:01:10 christos Exp $	*/
 
 /*-
@@ -39,7 +39,6 @@
 #include <sys/namei.h>
 #include <sys/vnode.h>
 #include <sys/mount.h>
-#include <sys/core.h>
 #include <sys/exec.h>
 #include <sys/exec_elf.h>
 #include <sys/exec_olf.h>
@@ -102,7 +101,6 @@ struct emul emul_linux_aout = {
 	linux_aout_copyargs,
 	setregs,
 	NULL,
-	coredump_trad,
 	linux_sigcode,
 	linux_esigcode,
 	0,
@@ -128,7 +126,6 @@ struct emul emul_linux_elf = {
 	elf32_copyargs,
 	setregs,
 	exec_elf32_fixup,
-	coredump_trad,
 	linux_sigcode,
 	linux_esigcode,
 	0,

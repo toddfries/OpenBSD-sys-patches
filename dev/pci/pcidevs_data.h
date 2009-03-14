@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1459 2009/03/07 10:17:10 jsg Exp 
+ *	OpenBSD: pcidevs,v 1.1457 2009/02/23 15:21:33 jsg Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -3564,10 +3564,6 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Radeon HD 3650",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3400_M82,
-	    "Mobility Radeon HD 3400",
-	},
-	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3450,
 	    "Radeon HD 3450",
 	},
@@ -3888,10 +3884,6 @@ static const struct pci_known_product pci_known_products[] = {
 	    "BCM5716",
 	},
 	{
-	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5716S,
-	    "BCM5716S",
-	},
-	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5700,
 	    "BCM5700",
 	},
@@ -3930,14 +3922,6 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57710,
 	    "BCM57710",
-	},
-	{
-	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57711,
-	    "BCM57711",
-	},
-	{
-	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57711E,
-	    "BCM57711E",
 	},
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5705,
@@ -6046,10 +6030,6 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_IBM, PCI_PRODUCT_IBM_I82557B,
 	    "i82557B 10/100",
-	},
-	{
-	    PCI_VENDOR_IBM, PCI_PRODUCT_IBM_RSA,
-	    "RSA",
 	},
 	{
 	    PCI_VENDOR_IBM, PCI_PRODUCT_IBM_FIREGL2,
@@ -14196,30 +14176,6 @@ static const struct pci_known_product pci_known_products[] = {
 	    "RT2790",
 	},
 	{
-	    PCI_VENDOR_RDC, PCI_PRODUCT_RDC_R1010_IDE,
-	    "R1010 IDE",
-	},
-	{
-	    PCI_VENDOR_RDC, PCI_PRODUCT_RDC_R6021_HB,
-	    "R6021 Host",
-	},
-	{
-	    PCI_VENDOR_RDC, PCI_PRODUCT_RDC_R6031_ISA,
-	    "R6031 ISA",
-	},
-	{
-	    PCI_VENDOR_RDC, PCI_PRODUCT_RDC_R6040_ETHER,
-	    "R6040 Ethernet",
-	},
-	{
-	    PCI_VENDOR_RDC, PCI_PRODUCT_RDC_R6060_OHCI,
-	    "R6060 USB",
-	},
-	{
-	    PCI_VENDOR_RDC, PCI_PRODUCT_RDC_R6061_EHCI,
-	    "R6061 USB",
-	},
-	{
 	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8029,
 	    "8029",
 	},
@@ -16832,10 +16788,6 @@ static const struct pci_known_product pci_known_products[] = {
 	    "P4M890 PCI-PCI",
 	},
 	{
-	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VX800_PCIE_0,
-	    "VX800 PCIE",
-	},
-	{
 	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_P4M900_PPB_2,
 	    "P4M900 PCI-PCI",
 	},
@@ -16848,16 +16800,8 @@ static const struct pci_known_product pci_known_products[] = {
 	    "K8T890 PCI-PCI",
 	},
 	{
-	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VX800_PCIE_1,
-	    "VX800 PCIE",
-	},
-	{
 	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_K8T890_PPB_F,
 	    "K8T890 PCI-PCI",
-	},
-	{
-	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VX800_PCIE_2,
-	    "VX800 PCIE",
 	},
 	{
 	    PCI_VENDOR_VITESSE, PCI_PRODUCT_VITESSE_VSC_7174,
@@ -18386,10 +18330,6 @@ static const struct pci_known_vendor pci_known_vendors[] = {
 	{
 	    PCI_VENDOR_NETERION,
 	    "Neterion",
-	},
-	{
-	    PCI_VENDOR_RDC,
-	    "RDC",
 	},
 	{
 	    PCI_VENDOR_INPROCOMM,

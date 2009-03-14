@@ -229,6 +229,7 @@ radeon_emit_irq(struct drm_device * dev)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	unsigned int ret;
+	RING_LOCALS;
 
 	atomic_inc(&dev_priv->swi_emitted);
 	ret = atomic_read(&dev_priv->swi_emitted);
@@ -251,6 +252,8 @@ radeon_wait_irq(struct drm_device * dev, int swi_nr)
 
 	if (RADEON_READ(RADEON_LAST_SWI_REG) >= swi_nr)
 		return 0;
+
+	dev_priv->stats.boxes |= RADEON_BOX_WAIT_IDLE;
 
 	DRM_WAIT_ON(ret, dev_priv, 3 * DRM_HZ,
 		    RADEON_READ(RADEON_LAST_SWI_REG) >= swi_nr);
@@ -370,4 +373,23 @@ radeon_driver_irq_uninstall(struct drm_device * dev)
 	RADEON_WRITE(RADEON_GEN_INT_CNTL, 0);
 
 	pci_intr_disestablish(dev_priv->pc, dev_priv->irqh);
+}
+
+
+int radeon_vblank_crtc_get(struct drm_device *dev)
+{
+	drm_radeon_private_t *dev_priv = (drm_radeon_private_t *) dev->dev_private;
+
+	return dev_priv->vblank_crtc;
+}
+
+int radeon_vblank_crtc_set(struct drm_device *dev, int64_t value)
+{
+	drm_radeon_private_t *dev_priv = (drm_radeon_private_t *) dev->dev_private;
+	if (value & ~(DRM_RADEON_VBLANK_CRTC1 | DRM_RADEON_VBLANK_CRTC2)) {
+		DRM_ERROR("called with invalid crtc 0x%x\n", (unsigned int)value);
+		return EINVAL;
+	}
+	dev_priv->vblank_crtc = (unsigned int)value;
+	return 0;
 }

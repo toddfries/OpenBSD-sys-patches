@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.16 2009/03/10 15:03:16 oga Exp $	*/
+/*	$OpenBSD: bus_dma.c,v 1.14 2009/02/05 01:15:20 oga Exp $	*/
 /*	$NetBSD: bus_dma.c,v 1.3 2003/05/07 21:33:58 fvdl Exp $	*/
 
 /*-
@@ -95,6 +95,7 @@
 #include <sys/mbuf.h>
 #include <sys/proc.h>
 
+#define _BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <dev/isa/isareg.h>
@@ -371,7 +372,7 @@ _bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 {
 
 	return (_bus_dmamem_alloc_range(t, size, alignment, boundary,
-	    segs, nsegs, rsegs, flags, (paddr_t)0, (paddr_t)-1));
+	    segs, nsegs, rsegs, flags, 0, trunc_page(avail_end)));
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hpux_exec.c,v 1.4 2009/03/05 19:52:23 kettenis Exp $	*/
+/*	$OpenBSD: hpux_exec.c,v 1.3 2005/12/30 19:46:53 miod Exp $	*/
 
 /*
  * Copyright (c) 2004 Michael Shalayeff.  All rights reserved.
@@ -46,7 +46,6 @@
 #include <sys/vnode.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/core.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -90,7 +89,6 @@ struct emul emul_hpux = {
 	copyargs,
 	hpux_setregs,
 	NULL,
-	coredump_trad,
 	hpux_sigcode,
 	hpux_esigcode,
 };
