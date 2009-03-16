@@ -1,4 +1,4 @@
-/* $OpenBSD: interrupt.c,v 1.25 2008/06/26 05:42:08 ray Exp $ */
+/* $OpenBSD: interrupt.c,v 1.27 2009/03/15 19:41:33 miod Exp $ */
 /* $NetBSD: interrupt.c,v 1.46 2000/06/03 20:47:36 thorpej Exp $ */
 
 /*-
@@ -505,7 +505,7 @@ netintr()
 struct alpha_soft_intr alpha_soft_intrs[SI_NSOFT];
 
 /* XXX For legacy software interrupts. */
-struct alpha_soft_intrhand *softnet_intrhand, *softclock_intrhand;
+struct alpha_soft_intrhand *softnet_intrhand;
 
 /*
  * softintr_init:
@@ -528,8 +528,6 @@ softintr_init()
 	/* XXX Establish legacy software interrupt handlers. */
 	softnet_intrhand = softintr_establish(IPL_SOFTNET,
 	    (void (*)(void *))netintr, NULL);
-	softclock_intrhand = softintr_establish(IPL_SOFTCLOCK,
-	    (void (*)(void *))softclock, NULL);
 }
 
 /*
@@ -661,12 +659,6 @@ void
 splassert_check(int wantipl, const char *func)
 {
 	int curipl = alpha_pal_rdps() & ALPHA_PSL_IPL_MASK;
-
-	/*
-	 * Tell soft interrupts apart from regular levels.
-	 */
-	if (wantipl < 0)
-		wantipl = IPL_SOFTINT;
 
 	/*
 	 * Depending on the system, hardware interrupts may occur either

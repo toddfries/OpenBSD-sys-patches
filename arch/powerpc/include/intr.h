@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.37 2008/09/19 01:42:05 drahn Exp $ */
+/*	$OpenBSD: intr.h,v 1.39 2009/03/15 19:40:40 miod Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom, Opsycon AB and RTMX Inc, USA.
@@ -100,6 +100,7 @@ void do_pending_int(void);
 
 /* SPL asserts */
 #define	splassert(wantipl)	/* nothing */
+#define	splsoftassert(wantipl)	/* nothing */
 
 #define	set_sint(p)	atomic_setbits_int(&curcpu()->ci_ipending, p)
 

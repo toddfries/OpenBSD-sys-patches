@@ -1,4 +1,4 @@
-/* $OpenBSD: acpithinkpad.c,v 1.15 2008/12/26 06:35:34 jsg Exp $ */
+/* $OpenBSD: acpithinkpad.c,v 1.18 2009/03/11 20:52:11 jordan Exp $ */
 /*
  * Copyright (c) 2008 joshua stein <jcs@openbsd.org>
  *
@@ -75,12 +75,24 @@
 /* type 7 events */
 #define	THINKPAD_SWITCH_WIRELESS	0x000
 
+#define THINKPAD_NSENSORS 9
+#define THINKPAD_NTEMPSENSORS 8
+
+#define THINKPAD_ECOFFSET_FANLO		0x84
+#define THINKPAD_ECOFFSET_FANHI		0x85
+
 struct acpithinkpad_softc {
 	struct device		sc_dev;
 
+	struct acpiec_softc     *sc_ec;
 	struct acpi_softc	*sc_acpi;
 	struct aml_node		*sc_devnode;
+
+	struct ksensor           sc_sens[THINKPAD_NSENSORS];
+	struct ksensordev        sc_sensdev;
 };
+
+extern void acpiec_read(struct acpiec_softc *, u_int8_t, int, u_int8_t *);
 
 int	thinkpad_match(struct device *, void *, void *);
 void	thinkpad_attach(struct device *, struct device *, void *);
@@ -94,6 +106,9 @@ int	thinkpad_volume_up(struct acpithinkpad_softc *);
 int	thinkpad_volume_mute(struct acpithinkpad_softc *);
 int	thinkpad_brightness_up(struct acpithinkpad_softc *);
 int	thinkpad_brightness_down(struct acpithinkpad_softc *);
+
+void    thinkpad_sensor_attach(struct acpithinkpad_softc *sc);
+void    thinkpad_sensor_refresh(void *);
 
 struct cfattach acpithinkpad_ca = {
 	sizeof(struct acpithinkpad_softc), thinkpad_match, thinkpad_attach
@@ -110,21 +125,72 @@ thinkpad_match(struct device *parent, void *match, void *aux)
 {
 	struct acpi_attach_args	*aa = aux;
 	struct cfdata		*cf = match;
-	struct aml_value	res;
+	int64_t			res;
 	int			rv = 0;
 
 	if (!acpi_matchhids(aa, acpithinkpad_hids, cf->cf_driver->cd_name))
 		return (0);
 
-	if (aml_evalname((struct acpi_softc *)parent, aa->aaa_node,
+	if (aml_evalinteger((struct acpi_softc *)parent, aa->aaa_node,
 	    "MHKV", 0, NULL, &res))
 		return (0);
 
-	if (aml_val2int(&res) == THINKPAD_HKEY_VERSION)
+	if (res == THINKPAD_HKEY_VERSION)
 		rv = 1;
 
-	aml_freevalue(&res);
 	return (rv);
+}
+
+void
+thinkpad_sensor_attach(struct acpithinkpad_softc *sc)
+{
+	int i;
+
+	if (sc->sc_acpi->sc_ec == NULL)
+		return;
+	sc->sc_ec = sc->sc_acpi->sc_ec;
+
+	/* Add temperature probes */
+	strlcpy(sc->sc_sensdev.xname, DEVNAME(sc),
+	    sizeof(sc->sc_sensdev.xname));
+	for (i=0; i<THINKPAD_NTEMPSENSORS; i++) {
+		snprintf(sc->sc_sens[i].desc, sizeof(sc->sc_sens[i].desc), 
+		    "TMP%d", i);
+		sc->sc_sens[i].type = SENSOR_TEMP;
+		sc->sc_sens[i].value = 0;
+		sensor_attach(&sc->sc_sensdev, &sc->sc_sens[i]);
+	}
+
+	/* Add fan probe */
+	strlcpy(sc->sc_sens[i].desc, "fan", 
+	    sizeof(sc->sc_sens[i].desc));
+	sc->sc_sens[i].type = SENSOR_FANRPM;
+	sc->sc_sens[i].value = 0;
+	sensor_attach(&sc->sc_sensdev, &sc->sc_sens[i]);
+
+	sensordev_install(&sc->sc_sensdev);
+}
+
+void
+thinkpad_sensor_refresh(void *arg)
+{
+	struct acpithinkpad_softc *sc = arg;
+	u_int8_t lo, hi, i;
+	int64_t tmp;
+
+	/* Refresh sensor readings */
+	for (i=0; i<THINKPAD_NTEMPSENSORS; i++) {
+		aml_evalinteger(sc->sc_acpi, sc->sc_ec->sc_devnode, 
+		    sc->sc_sens[i].desc, 0, 0, &tmp);
+		sc->sc_sens[i].value = (tmp * 1000000) + 273150000;
+		if (tmp > 127 || tmp < -127)
+			sc->sc_sens[i].flags = SENSOR_FINVALID;
+	}
+
+	/* Read fan RPM */
+	acpiec_read(sc->sc_ec, THINKPAD_ECOFFSET_FANLO, 1, &lo);
+	acpiec_read(sc->sc_ec, THINKPAD_ECOFFSET_FANHI, 1, &hi);
+	sc->sc_sens[i].value = ((hi << 8L) + lo);
 }
 
 void
@@ -140,26 +206,25 @@ thinkpad_attach(struct device *parent, struct device *self, void *aux)
 
 	/* set event mask to receive everything */
 	thinkpad_enable_events(sc);
+	thinkpad_sensor_attach(sc);
 
 	/* run thinkpad_hotkey on button presses */
 	aml_register_notify(sc->sc_devnode, aa->aaa_dev,
-	    thinkpad_hotkey, sc, ACPIDEV_NOPOLL);
+	    thinkpad_hotkey, sc, ACPIDEV_POLL);
 }
 
 int
 thinkpad_enable_events(struct acpithinkpad_softc *sc)
 {
-	struct aml_value	res, arg, args[2];
+	struct aml_value	arg, args[2];
 	int64_t			mask;
 	int			i, rv = 1;
 
 	/* get the supported event mask */
-	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "MHKA", 0, NULL, &res)) {
+	if (aml_evalinteger(sc->sc_acpi, sc->sc_devnode, "MHKA", 0, NULL, &mask)) {
 		printf("%s: no MHKA\n", DEVNAME(sc));
 		goto fail;
 	}
-	mask = aml_val2int(&res);
-	aml_freevalue(&res);
 
 	/* update hotkey mask */
 	bzero(args, sizeof(args));
@@ -193,18 +258,21 @@ int
 thinkpad_hotkey(struct aml_node *node, int notify_type, void *arg)
 {
 	struct acpithinkpad_softc *sc = arg;
-	struct aml_value	res;
-	int			val, type, event, handled, rv = 1, tot = 0;
+	int			type, event, handled, rv = 1, tot = 0;
+	int64_t			val;
 
+	if (notify_type == 0x00) {
+		/* poll sensors */
+		thinkpad_sensor_refresh(sc);
+		return 0;
+	}
 	if (notify_type != 0x80)
 		goto fail;
 
 	for (;;) {
-		if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "MHKP", 0, NULL,
-		    &res))
+		if (aml_evalinteger(sc->sc_acpi, sc->sc_devnode, "MHKP", 0, NULL,
+		    &val))
 			goto done;
-		val = aml_val2int(&res);
-		aml_freevalue(&res);
 		if (val == 0)
 			goto done;
 
@@ -309,14 +377,12 @@ fail:
 int
 thinkpad_toggle_bluetooth(struct acpithinkpad_softc *sc)
 {
-	struct aml_value	res, arg;
-	int			bluetooth, rv = 1;
+	struct aml_value	arg;
+	int			rv = 1;
+	int64_t			bluetooth;
 
-	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "GBDC", 0, NULL, &res))
+	if (aml_evalinteger(sc->sc_acpi, sc->sc_devnode, "GBDC", 0, NULL, &bluetooth))
 		goto fail;
-
-	bluetooth = aml_val2int(&res);
-	aml_freevalue(&res);
 
 	if (!(bluetooth & THINKPAD_BLUETOOTH_PRESENT))
 		goto fail;
@@ -337,14 +403,12 @@ fail:
 int
 thinkpad_toggle_wan(struct acpithinkpad_softc *sc)
 {
-	struct aml_value	res, arg;
-	int			wan, rv = 1;;
+	struct aml_value	arg;
+	int			rv = 1;
+	int64_t			wan;
 
-	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "GWAN", 0, NULL, &res))
+	if (aml_evalinteger(sc->sc_acpi, sc->sc_devnode, "GWAN", 0, NULL, &wan))
 		goto fail;
-
-	wan = aml_val2int(&res);
-	aml_freevalue(&res);
 
 	if (!(wan & THINKPAD_WAN_PRESENT))
 		goto fail;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: iommu.c,v 1.23 2008/12/03 15:46:06 oga Exp $	*/
+/*	$OpenBSD: iommu.c,v 1.26 2009/03/11 23:38:51 oga Exp $	*/
 
 /*
  * Copyright (c) 2005 Jason L. Wright (jason@thought.net)
@@ -38,7 +38,6 @@
 
 #include <uvm/uvm_extern.h>
 
-#define _BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <machine/pio.h>
@@ -104,7 +103,7 @@
 extern paddr_t avail_end;
 extern struct extent *iomem_ex;
 
-int amdgart_enable = 1;
+int amdgart_enable = 0;
 
 struct amdgart_softc {
 	pci_chipset_tag_t	 g_pc;
@@ -115,7 +114,7 @@ struct amdgart_softc {
 	u_int32_t		 g_scribpte;
 	u_int32_t		*g_pte;
 	bus_dma_tag_t		 g_dmat;
-	int			 g_no;
+	int			 g_count;
 	pcitag_t		 g_tags[1];
 };
 
@@ -174,7 +173,7 @@ amdgart_invalidate_wait(struct amdgart_softc *sc)
 {
 	int	i, n;
 
-	for (n = 0; n < sc->g_no; n++) {
+	for (n = 0; n < sc->g_count; n++) {
 		for (i = 1000; i > 0; i--) {
 			if ((pci_conf_read(sc->g_pc, sc->g_tags[n],
 			    GART_CACHECTRL) & GART_CACHE_INVALIDATE) == 0)
@@ -191,7 +190,7 @@ amdgart_invalidate(struct amdgart_softc *sc)
 {
 	int n;
 
-	for (n = 0; n < sc->g_no; n++)
+	for (n = 0; n < sc->g_count; n++)
 		pci_conf_write(sc->g_pc, sc->g_tags[n], GART_CACHECTRL,
 		    GART_CACHE_INVALIDATE);
 	amdgart_invalidate_wait(sc);
@@ -203,7 +202,7 @@ amdgart_dumpregs(struct amdgart_softc *sc)
 	int n, i, dirty = 0;
 	u_int8_t *p;
 
-	for (n = 0; n < sc->g_no; n++) {
+	for (n = 0; n < sc->g_count; n++) {
 		printf("GART%d:\n", n);
 		printf(" apctl %x\n", pci_conf_read(sc->g_pc, sc->g_tags[n],
 		    GART_APCTRL));
@@ -231,8 +230,7 @@ amdgart_ok(pci_chipset_tag_t pc, pcitag_t tag)
 	if (PCI_VENDOR(v) != PCI_VENDOR_AMD)
 		return (0);
 	if (PCI_PRODUCT(v) != PCI_PRODUCT_AMD_AMD64_0F_MISC &&
-	    PCI_PRODUCT(v) != PCI_PRODUCT_AMD_AMD64_10_MISC &&
-	    PCI_PRODUCT(v) != PCI_PRODUCT_AMD_AMD64_11_MISC)
+	    PCI_PRODUCT(v) != PCI_PRODUCT_AMD_AMD64_10_MISC)
 		return (0);
 
 
@@ -379,12 +377,10 @@ amdgart_probe(struct pcibus_attach_args *pba)
 		}
 	}
 	amdgart_initpt(sc, ptesize / sizeof(*sc->g_pte));
-	sc->g_no = count;
+	sc->g_count = count;
 
 	amdgart_bus_dma_tag._cookie = sc;
 	pba->pba_dmat = &amdgart_bus_dma_tag;
-
-	amdgart_dumpregs(sc);
 
 	return;
 

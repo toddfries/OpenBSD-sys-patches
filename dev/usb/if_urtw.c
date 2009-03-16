@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtw.c,v 1.5 2009/02/11 10:44:36 kevlo Exp $	*/
+/*	$OpenBSD: if_urtw.c,v 1.7 2009/03/10 09:48:46 kevlo Exp $	*/
 /*-
  * Copyright (c) 2008 Weongyo Jeong <weongyo@FreeBSD.org>
  *
@@ -72,8 +72,12 @@ int urtw_debug = 0;
 /* recognized device vendors/products */
 static const struct usb_devno urtw_devs[] = {
 #define	URTW_DEV(v,p) { USB_VENDOR_##v, USB_PRODUCT_##v##_##p }
+	URTW_DEV(DICKSMITH, RTL8187),
+	URTW_DEV(LOGITEC, RTL8187),
 	URTW_DEV(REALTEK, RTL8187),
+#if 0
 	URTW_DEV(REALTEK, RTL8187B),
+#endif
 	URTW_DEV(SPHAIRON, RTL8187),
 	URTW_DEV(SURECOM, EP9001G2A),
 	URTW_DEV(NETGEAR, WG111V2)
@@ -1798,12 +1802,6 @@ urtw_update_msr(struct urtw_softc *sc)
 		case IEEE80211_M_STA:
 		case IEEE80211_M_MONITOR:
 			data |= URTW_MSR_LINK_STA;
-			break;
-		case IEEE80211_M_IBSS:
-			data |= URTW_MSR_LINK_ADHOC;
-			break;
-		case IEEE80211_M_HOSTAP:
-			data |= URTW_MSR_LINK_HOSTAP;
 			break;
 		default:
 			panic("unsupported operation mode 0x%x\n",
