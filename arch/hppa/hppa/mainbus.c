@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.72 2009/03/08 19:26:39 martin Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.70 2009/02/01 14:53:02 miod Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -935,13 +935,14 @@ mbus_dmamem_alloc(void *v, bus_size_t size, bus_size_t alignment,
 		  bus_size_t boundary, bus_dma_segment_t *segs, int nsegs,
 		  int *rsegs, int flags)
 {
+	extern paddr_t avail_end;
 	struct pglist pglist;
 	struct vm_page *pg;
 
 	size = round_page(size);
 
 	TAILQ_INIT(&pglist);
-	if (uvm_pglistalloc(size, 0, -1, alignment, boundary,
+	if (uvm_pglistalloc(size, 0, avail_end, alignment, boundary,
 	    &pglist, 1, flags & BUS_DMA_NOWAIT))
 		return (ENOMEM);
 

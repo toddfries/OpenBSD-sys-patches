@@ -87,6 +87,7 @@ r300_emit_cliprects(drm_radeon_private_t *dev_priv,
 	struct drm_clip_rect box;
 	int nr;
 	int i;
+	RING_LOCALS;
 
 	nr = cmdbuf->nbox - n;
 	if (nr > R300_SIMULTANEOUS_CLIPRECTS)
@@ -319,6 +320,7 @@ r300_emit_carefully_checked_packet0(drm_radeon_private_t *dev_priv,
 	int sz;
 	int i;
 	int values[64];
+	RING_LOCALS;
 
 	sz = header.packet0.count;
 	reg = (header.packet0.reghi << 8) | header.packet0.reglo;
@@ -372,6 +374,7 @@ r300_emit_packet0(drm_radeon_private_t *dev_priv,
 {
 	int reg;
 	int sz;
+	RING_LOCALS;
 
 	sz = header.packet0.count;
 	reg = (header.packet0.reghi << 8) | header.packet0.reglo;
@@ -418,6 +421,7 @@ r300_emit_vpu(drm_radeon_private_t *dev_priv, drm_radeon_kcmd_buffer_t *cmdbuf,
 {
 	int sz;
 	int addr;
+	RING_LOCALS;
 
 	sz = header.vpu.count;
 	addr = (header.vpu.adrhi << 8) | header.vpu.adrlo;
@@ -465,6 +469,8 @@ int
 r300_emit_clear(drm_radeon_private_t *dev_priv,
     drm_radeon_kcmd_buffer_t *cmdbuf)
 {
+	RING_LOCALS;
+
 	if (8 * 4 > cmdbuf->bufsz)
 		return EINVAL;
 
@@ -498,6 +504,7 @@ r300_emit_3d_load_vbpntr(drm_radeon_private_t *dev_priv,
 #define MAX_ARRAY_PACKET  64
 	u32 payload[MAX_ARRAY_PACKET];
 	u32 narrays;
+	RING_LOCALS;
 
 	count = (header >> 16) & 0x3fff;
 
@@ -563,6 +570,7 @@ r300_emit_bitblt_multi(drm_radeon_private_t *dev_priv,
 {
 	u32 *cmd = (u32 *) cmdbuf->buf;
 	int count, ret;
+	RING_LOCALS;
 
 	count=(cmd[0]>>16) & 0x3fff;
 
@@ -609,6 +617,7 @@ r300_emit_draw_indx_2(drm_radeon_private_t *dev_priv,
 	u32 *cmd;
 	int count;
 	int expected_count;
+	RING_LOCALS;
 
 	cmd = (u32 *) cmdbuf->buf;
 	count = (cmd[0]>>16) & 0x3fff;
@@ -683,6 +692,7 @@ r300_emit_raw_packet3(drm_radeon_private_t *dev_priv,
 {
 	u32 header;
 	int count;
+	RING_LOCALS;
 
 	if (4 > cmdbuf->bufsz)
 		return EINVAL;
@@ -830,6 +840,7 @@ void
 r300_pacify(drm_radeon_private_t *dev_priv)
 {
 	uint32_t cache_z, cache_3d, cache_2d;
+	RING_LOCALS;
 
 	cache_z = R300_ZC_FLUSH;
 	cache_2d = R300_RB2D_DC_FLUSH;
@@ -897,6 +908,7 @@ void
 r300_cmd_wait(drm_radeon_private_t * dev_priv, drm_r300_cmd_header_t header)
 {
 	u32 wait_until;
+	RING_LOCALS;
 
 	if (!header.wait.flags)
 		return;
@@ -939,6 +951,7 @@ r300_scratch(drm_radeon_private_t *dev_priv, drm_radeon_kcmd_buffer_t *cmdbuf,
 {
 	u32 *ref_age_base;
 	u32 i, buf_idx, h_pending;
+	RING_LOCALS;
 
 	if (cmdbuf->bufsz < sizeof(uint64_t) + header.scratch.n_bufs * sizeof(buf_idx) ) {
 		return EINVAL;
@@ -1003,6 +1016,7 @@ r300_emit_r500fp(drm_radeon_private_t *dev_priv,
 	int type;
 	int clamp;
 	int stride;
+	RING_LOCALS;
 
 	sz = header.r500fp.count;
 	/* address is 9 bits 0 - 8, bit 1 of flags is part of address */
@@ -1123,6 +1137,7 @@ int r300_do_cp_cmdbuf(struct drm_device *dev,
 			DRM_DEBUG("R300_CMD_CP_DELAY\n");
 			{
 				int i;
+				RING_LOCALS;
 
 				BEGIN_RING(header.delay.count);
 				for (i = 0; i < header.delay.count; i++)
@@ -1202,6 +1217,8 @@ int r300_do_cp_cmdbuf(struct drm_device *dev,
 	 *      are written inside the pacifier bracket.
 	 */
 	if (emit_dispatch_age) {
+		RING_LOCALS;
+
 		/* Emit the vertex buffer age */
 		BEGIN_RING(2);
 		RADEON_DISPATCH_AGE(dev_priv->sarea_priv->last_dispatch);
