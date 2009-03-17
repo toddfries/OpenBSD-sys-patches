@@ -599,13 +599,6 @@ _bus_dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 
 	TAILQ_INIT(&mlist);
 
-	segs[0]._ds_boundary = boundary;
-	segs[0]._ds_align = alignment;
-	if (flags & BUS_DMA_SG) {
-		boundary = 0;
-		alignment = 0;
-	}
-
 	/*
 	 * Allocate pages from the VM system.
 	 */
