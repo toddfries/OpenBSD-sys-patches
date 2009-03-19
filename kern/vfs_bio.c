@@ -1156,12 +1156,15 @@ biodone(struct buf *bp)
 
 	if (!ISSET(bp->b_flags, B_READ)) {
 		CLR(bp->b_flags, B_WRITEINPROG);
-		bcstats.pendingwrites--;
 		vwakeup(bp->b_vp);
-	} else if (bcstats.numbufs && 
-	           (!(ISSET(bp->b_flags, B_RAW) || ISSET(bp->b_flags, B_PHYS))))
-		bcstats.pendingreads--;
-
+	}
+	if (bcstats.numbufs &&
+	    (!(ISSET(bp->b_flags, B_RAW) || ISSET(bp->b_flags, B_PHYS)))) {
+		if (!ISSET(bp->b_flags, B_READ))
+			bcstats.pendingwrites--;
+		else
+			bcstats.pendingreads--;
+	}
 	if (ISSET(bp->b_flags, B_CALL)) {	/* if necessary, call out */
 		CLR(bp->b_flags, B_CALL);	/* but note callout done */
 		(*bp->b_iodone)(bp);
