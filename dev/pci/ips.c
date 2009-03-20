@@ -1,4 +1,4 @@
-/*	$OpenBSD: ips.c,v 1.70 2009/03/16 21:46:00 grange Exp $	*/
+/*	$OpenBSD: ips.c,v 1.79 2009/03/20 07:24:41 grange Exp $	*/
 
 /*
  * Copyright (c) 2006, 2007, 2009 Alexander Yurchenko <grange@openbsd.org>
@@ -82,6 +82,7 @@ int ips_debug = IPS_D_ERR;
 #define IPS_CMD_FLUSH		0x0a
 #define IPS_CMD_REBUILDSTATUS	0x0c
 #define IPS_CMD_SETSTATE	0x10
+#define IPS_CMD_REBUILD		0x16
 #define IPS_CMD_ERRORTABLE	0x17
 #define IPS_CMD_GETDRIVEINFO	0x19
 #define IPS_CMD_RESETCHAN	0x1a
@@ -348,6 +349,7 @@ struct ips_info {
 /* Command control block */
 struct ips_softc;
 struct ips_ccb {
+	struct ips_softc *	c_sc;		/* driver softc */
 	int			c_id;		/* command id */
 	int			c_flags;	/* SCSI_* flags */
 	enum {
@@ -453,6 +455,7 @@ void	ips_done_xs(struct ips_softc *, struct ips_ccb *);
 void	ips_done_pt(struct ips_softc *, struct ips_ccb *);
 void	ips_done_mgmt(struct ips_softc *, struct ips_ccb *);
 int	ips_error(struct ips_softc *, struct ips_ccb *);
+int	ips_error_xs(struct ips_softc *, struct ips_ccb *);
 int	ips_intr(void *);
 void	ips_timeout(void *);
 
@@ -462,21 +465,16 @@ int	ips_getconf(struct ips_softc *, int);
 int	ips_getrblstat(struct ips_softc *, int);
 int	ips_getpg5(struct ips_softc *, int);
 int	ips_setstate(struct ips_softc *, int, int, int, int);
+int	ips_rebuild(struct ips_softc *, int, int, int, int, int);
 
 void	ips_copperhead_exec(struct ips_softc *, struct ips_ccb *);
-void	ips_copperhead_init(struct ips_softc *);
 void	ips_copperhead_intren(struct ips_softc *);
-void	ips_copperhead_intrds(struct ips_softc *);
 int	ips_copperhead_isintr(struct ips_softc *);
-int	ips_copperhead_reset(struct ips_softc *);
 u_int32_t ips_copperhead_status(struct ips_softc *);
 
 void	ips_morpheus_exec(struct ips_softc *, struct ips_ccb *);
-void	ips_morpheus_init(struct ips_softc *);
 void	ips_morpheus_intren(struct ips_softc *);
-void	ips_morpheus_intrds(struct ips_softc *);
 int	ips_morpheus_isintr(struct ips_softc *);
-int	ips_morpheus_reset(struct ips_softc *);
 u_int32_t ips_morpheus_status(struct ips_softc *);
 
 struct ips_ccb *ips_ccb_alloc(struct ips_softc *, int);
@@ -542,43 +540,31 @@ static const struct ips_chipset {
 	int		ic_bar;
 
 	void		(*ic_exec)(struct ips_softc *, struct ips_ccb *);
-	void		(*ic_init)(struct ips_softc *);
 	void		(*ic_intren)(struct ips_softc *);
-	void		(*ic_intrds)(struct ips_softc *);
 	int		(*ic_isintr)(struct ips_softc *);
-	int		(*ic_reset)(struct ips_softc *);
 	u_int32_t	(*ic_status)(struct ips_softc *);
 } ips_chips[] = {
 	{
 		IPS_CHIP_COPPERHEAD,
 		0x14,
 		ips_copperhead_exec,
-		ips_copperhead_init,
 		ips_copperhead_intren,
-		ips_copperhead_intrds,
 		ips_copperhead_isintr,
-		ips_copperhead_reset,
 		ips_copperhead_status
 	},
 	{
 		IPS_CHIP_MORPHEUS,
 		0x10,
 		ips_morpheus_exec,
-		ips_morpheus_init,
 		ips_morpheus_intren,
-		ips_morpheus_intrds,
 		ips_morpheus_isintr,
-		ips_morpheus_reset,
 		ips_morpheus_status
 	}
 };
 
 #define ips_exec(s, c)	(s)->sc_chip->ic_exec((s), (c))
-#define ips_init(s)	(s)->sc_chip->ic_init((s))
 #define ips_intren(s)	(s)->sc_chip->ic_intren((s))
-#define ips_intrds(s)	(s)->sc_chip->ic_intrds((s))
 #define ips_isintr(s)	(s)->sc_chip->ic_isintr((s))
-#define ips_reset(s)	(s)->sc_chip->ic_reset((s))
 #define ips_status(s)	(s)->sc_chip->ic_status((s))
 
 static const char *ips_names[] = {
@@ -641,9 +627,6 @@ ips_attach(struct device *parent, struct device *self, void *aux)
 		printf(": can't map regs\n");
 		return;
 	}
-
-	/* Initialize hardware */
-	ips_init(sc);
 
 	/* Allocate command buffer */
 	if (ips_dmamem_alloc(&sc->sc_cmdbm, sc->sc_dmat,
@@ -1051,12 +1034,22 @@ ips_scsi_pt_cmd(struct scsi_xfer *xs)
 		dcdb->attr |= IPS_DCDB_DATAIN;
 	if (xs->flags & SCSI_DATA_OUT)
 		dcdb->attr |= IPS_DCDB_DATAOUT;
-	if (xs->timeout <= 10000)
+
+	/*
+	 * Adjust timeout value to what controller supports. Make sure our
+	 * timeout will be fired after controller gives up.
+	 */
+	if (xs->timeout <= 10000) {
 		dcdb->attr |= IPS_DCDB_TIMO10;
-	else if (xs->timeout <= 60000)
+		xs->timeout = 11000;
+	} else if (xs->timeout <= 60000) {
 		dcdb->attr |= IPS_DCDB_TIMO60;
-	else
+		xs->timeout = 61000;
+	} else {
 		dcdb->attr |= IPS_DCDB_TIMO20M;
+		xs->timeout = 20 * 60000 + 1000;
+	}
+
 	dcdb->attr |= IPS_DCDB_DISCON;
 	dcdb->datalen = htole16(xs->datalen);
 	dcdb->cdblen = xs->cmdlen;
@@ -1091,7 +1084,11 @@ int
 ips_scsi_ioctl(struct scsi_link *link, u_long cmd, caddr_t addr, int flag,
     struct proc *p)
 {
+#if NBIO > 0
 	return (ips_ioctl(link->adapter_softc, cmd, addr));
+#else
+	return (ENOTTY);
+#endif
 }
 
 #if NBIO > 0
@@ -1143,6 +1140,7 @@ ips_ioctl_vol(struct ips_softc *sc, struct bioc_vol *bv)
 	struct ips_ld *ld;
 	int vid = bv->bv_volid;
 	struct device *dev;
+	int rebuild = 0;
 	u_int32_t total = 0, done = 0;
 
 	if (vid >= sc->sc_nunits)
@@ -1155,18 +1153,22 @@ ips_ioctl_vol(struct ips_softc *sc, struct bioc_vol *bv)
 		break;
 	case IPS_DS_DEGRADED:
 		bv->bv_status = BIOC_SVDEGRADED;
+		rebuild++;
 		break;
 	case IPS_DS_OFFLINE:
 		bv->bv_status = BIOC_SVOFFLINE;
+		rebuild++;
 		break;
 	default:
 		bv->bv_status = BIOC_SVINVALID;
 	}
 
-	total = letoh32(rblstat->ld[vid].total);
-	done = total - letoh32(rblstat->ld[vid].remain);
-	if (total)
-		bv->bv_percent = 100 * done / total;
+	if (rebuild) {
+		total = letoh32(rblstat->ld[vid].total);
+		done = total - letoh32(rblstat->ld[vid].remain);
+		if (total)
+			bv->bv_percent = 100 * done / total;
+	}
 
 	bv->bv_size = (u_quad_t)letoh32(ld->size) * IPS_SECSZ;
 	bv->bv_level = di->drive[vid].raid;
@@ -1250,8 +1252,8 @@ ips_ioctl_setstate(struct ips_softc *sc, struct bioc_setstate *bs)
 		state = IPS_SS_HOTSPARE;
 		break;
 	case BIOC_SSREBUILD:
-		state = IPS_SS_REBUILD;
-		break;
+		return (ips_rebuild(sc, bs->bs_channel, bs->bs_target,
+		    bs->bs_channel, bs->bs_target, 0));
 	default:
 		return (EINVAL);
 	}
@@ -1267,7 +1269,7 @@ ips_sensors(void *arg)
 	struct ips_softc *sc = arg;
 	struct ips_conf *conf = &sc->sc_info->conf;
 	struct ips_ld *ld;
-	int i;
+	int i, rebuild = 0;
 
 	/* ips_sensors() runs from work queue thus allowed to sleep */
 	if (ips_getconf(sc, 0)) {
@@ -1280,7 +1282,6 @@ ips_sensors(void *arg)
 		}
 		return;
 	}
-	(void)ips_getrblstat(sc, 0);
 
 	DPRINTF(IPS_D_INFO, ("%s: ips_sensors:", sc->sc_dev.dv_xname));
 	for (i = 0; i < sc->sc_nunits; i++) {
@@ -1294,10 +1295,12 @@ ips_sensors(void *arg)
 		case IPS_DS_DEGRADED:
 			sc->sc_sensors[i].value = SENSOR_DRIVE_PFAIL;
 			sc->sc_sensors[i].status = SENSOR_S_WARN;
+			rebuild++;
 			break;
 		case IPS_DS_OFFLINE:
 			sc->sc_sensors[i].value = SENSOR_DRIVE_FAIL;
 			sc->sc_sensors[i].status = SENSOR_S_CRIT;
+			rebuild++;
 			break;
 		default:
 			sc->sc_sensors[i].value = 0;
@@ -1305,6 +1308,9 @@ ips_sensors(void *arg)
 		}
 	}
 	DPRINTF(IPS_D_INFO, ("\n"));
+
+	if (rebuild)
+		(void)ips_getrblstat(sc, 0);
 }
 #endif
 
@@ -1473,7 +1479,7 @@ ips_done_xs(struct ips_softc *sc, struct ips_ccb *ccb)
 	}
 
 	xs->resid = 0;
-	xs->error = ccb->c_error;
+	xs->error = ips_error_xs(sc, ccb);
 	xs->flags |= ITSDONE;
 	scsi_done(xs);
 }
@@ -1502,7 +1508,7 @@ ips_done_pt(struct ips_softc *sc, struct ips_ccb *ccb)
 		xs->resid = xs->datalen - done;
 	else
 		xs->resid = 0;
-	xs->error = ccb->c_error;
+	xs->error = ips_error_xs(sc, ccb);
 	xs->status = dcdb->status;
 
 	if (xs->error == XS_SENSE)
@@ -1548,10 +1554,9 @@ ips_error(struct ips_softc *sc, struct ips_ccb *ccb)
 	struct ips_dcdb *dcdb = &cmdb->dcdb;
 	struct scsi_xfer *xs = ccb->c_xfer;
 	u_int8_t gsc = IPS_STAT_GSC(ccb->c_stat);
-	int error = XS_DRIVER_STUFFUP;
 
 	if (gsc == IPS_STAT_OK)
-		return (XS_NOERROR);
+		return (0);
 
 	DPRINTF(IPS_D_ERR, ("%s: ips_error: stat 0x%02x, estat 0x%02x, "
 	    "cmd code 0x%02x, drive %d, sgcnt %d, lba %u, seccnt %d",
@@ -1576,42 +1581,73 @@ ips_error(struct ips_softc *sc, struct ips_ccb *ccb)
 	}		
 	DPRINTF(IPS_D_ERR, ("\n"));
 
-	/* Map hardware error codes to SCSI ones */
 	switch (gsc) {
 	case IPS_STAT_RECOV:
-		error = XS_NOERROR;
-		break;
+		return (0);
+	case IPS_STAT_INVOP:
+	case IPS_STAT_INVCMD:
+	case IPS_STAT_INVPARM:
+		return (EINVAL);
 	case IPS_STAT_BUSY:
-		error = XS_BUSY;
-		break;
+		return (EBUSY);
 	case IPS_STAT_TIMO:
-		error = XS_TIMEOUT;
-		break;
+		return (ETIMEDOUT);
 	case IPS_STAT_PDRVERR:
 		switch (ccb->c_estat) {
 		case IPS_ESTAT_SELTIMO:
-			error = XS_SELTIMEOUT;
-			break;
+			return (ENODEV);
 		case IPS_ESTAT_OURUN:
 			if (xs && letoh16(dcdb->datalen) < xs->datalen)
 				/* underrun */
-				error = XS_NOERROR;
-			break;
-		case IPS_ESTAT_HOSTRST:
-		case IPS_ESTAT_DEVRST:
-			error = XS_RESET;
+				return (0);
 			break;
 		case IPS_ESTAT_RECOV:
-			error = XS_NOERROR;
-			break;
-		case IPS_ESTAT_CKCOND:
-			error = XS_SENSE;
-			break;
+			return (0);
 		}
 		break;
 	}
 
-	return (error);
+	return (EIO);
+}
+
+int
+ips_error_xs(struct ips_softc *sc, struct ips_ccb *ccb)
+{
+	struct ips_cmdb *cmdb = ccb->c_cmdbva;
+	struct ips_dcdb *dcdb = &cmdb->dcdb;
+	struct scsi_xfer *xs = ccb->c_xfer;
+	u_int8_t gsc = IPS_STAT_GSC(ccb->c_stat);
+
+	/* Map hardware error codes to SCSI ones */
+	switch (gsc) {
+	case IPS_STAT_OK:
+	case IPS_STAT_RECOV:
+		return (XS_NOERROR);
+	case IPS_STAT_BUSY:
+		return (XS_BUSY);
+	case IPS_STAT_TIMO:
+		return (XS_TIMEOUT);
+	case IPS_STAT_PDRVERR:
+		switch (ccb->c_estat) {
+		case IPS_ESTAT_SELTIMO:
+			return (XS_SELTIMEOUT);
+		case IPS_ESTAT_OURUN:
+			if (xs && letoh16(dcdb->datalen) < xs->datalen)
+				/* underrun */
+				return (XS_NOERROR);
+			break;
+		case IPS_ESTAT_HOSTRST:
+		case IPS_ESTAT_DEVRST:
+			return (XS_RESET);
+		case IPS_ESTAT_RECOV:
+			return (XS_NOERROR);
+		case IPS_ESTAT_CKCOND:
+			return (XS_SENSE);
+		}
+		break;
+	}
+
+	return (XS_DRIVER_STUFFUP);
 }
 
 int
@@ -1643,9 +1679,10 @@ ips_intr(void *arg)
 
 		ccb = &sc->sc_ccb[id];
 		if (ccb->c_state != IPS_CCB_QUEUED) {
-			DPRINTF(IPS_D_ERR, ("%s: ips_intr: cmd %d not queued, "
-			    "state %d, status 0x%08x\n", sc->sc_dev.dv_xname,
-			    ccb->c_id, ccb->c_state, status));
+			DPRINTF(IPS_D_ERR, ("%s: ips_intr: cmd 0x%02x not "
+			    "queued, state %d, status 0x%08x\n",
+			    sc->sc_dev.dv_xname, ccb->c_id, ccb->c_state,
+			    status));
 			continue;
 		}
 
@@ -1668,26 +1705,25 @@ void
 ips_timeout(void *arg)
 {
 	struct ips_ccb *ccb = arg;
+	struct ips_softc *sc = ccb->c_sc;
 	struct scsi_xfer *xs = ccb->c_xfer;
-	struct ips_softc *sc = xs->sc_link->adapter_softc;
 	int s;
 
-	/*
-	 * Command never completed. Cleanup and recover.
-	 */
 	s = splbio();
-	sc_print_addr(xs->sc_link);
-	printf("timeout");
-	DPRINTF(IPS_D_ERR, (", command %d", ccb->c_id));
-	printf("\n");
+	if (xs)
+		sc_print_addr(xs->sc_link);
+	else
+		printf("%s: ", sc->sc_dev.dv_xname);
+	printf("timeout\n");
 
+	/*
+	 * Command never completed. Fake hardware status byte
+	 * to indicate timeout.
+	 * XXX: need to remove command from controller.
+	 */
+	ccb->c_stat = IPS_STAT_TIMO;
+	ips_done(sc, ccb);
 	ips_ccb_put(sc, ccb);
-
-	xs->error = XS_TIMEOUT;
-	xs->flags |= ITSDONE;
-	scsi_done(xs);
-
-	ips_reset(sc);
 	splx(s);
 }
 
@@ -1837,6 +1873,32 @@ ips_setstate(struct ips_softc *sc, int chan, int target, int state, int flags)
 	return (ips_cmd(sc, ccb));
 }
 
+int
+ips_rebuild(struct ips_softc *sc, int chan, int target, int nchan,
+    int ntarget, int flags)
+{
+	struct ips_ccb *ccb;
+	struct ips_cmd *cmd;
+	int s;
+
+	s = splbio();
+	ccb = ips_ccb_get(sc);
+	splx(s);
+	if (ccb == NULL)
+		return (1);
+
+	ccb->c_flags = SCSI_POLL | flags;
+	ccb->c_done = ips_done_mgmt;
+
+	cmd = ccb->c_cmdbva;
+	cmd->code = IPS_CMD_REBUILD;
+	cmd->drive = chan;
+	cmd->sgcnt = target;
+	cmd->seccnt = htole16(ntarget << 8 | nchan);
+
+	return (ips_cmd(sc, ccb));
+}
+
 void
 ips_copperhead_exec(struct ips_softc *sc, struct ips_ccb *ccb)
 {
@@ -1859,21 +1921,9 @@ ips_copperhead_exec(struct ips_softc *sc, struct ips_ccb *ccb)
 }
 
 void
-ips_copperhead_init(struct ips_softc *sc)
-{
-	/* XXX: not implemented */
-}
-
-void
 ips_copperhead_intren(struct ips_softc *sc)
 {
 	bus_space_write_1(sc->sc_iot, sc->sc_ioh, IPS_REG_HIS, IPS_REG_HIS_EN);
-}
-
-void
-ips_copperhead_intrds(struct ips_softc *sc)
-{
-	bus_space_write_1(sc->sc_iot, sc->sc_ioh, IPS_REG_HIS, 0);
 }
 
 int
@@ -1886,13 +1936,6 @@ ips_copperhead_isintr(struct ips_softc *sc)
 	if (reg != 0xff && (reg & IPS_REG_HIS_SCE))
 		return (1);
 
-	return (0);
-}
-
-int
-ips_copperhead_reset(struct ips_softc *sc)
-{
-	/* XXX: not implemented */
 	return (0);
 }
 
@@ -1927,12 +1970,6 @@ ips_morpheus_exec(struct ips_softc *sc, struct ips_ccb *ccb)
 }
 
 void
-ips_morpheus_init(struct ips_softc *sc)
-{
-	/* XXX: not implemented */
-}
-
-void
 ips_morpheus_intren(struct ips_softc *sc)
 {
 	u_int32_t reg;
@@ -1942,28 +1979,11 @@ ips_morpheus_intren(struct ips_softc *sc)
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, IPS_REG_OIM, reg);
 }
 
-void
-ips_morpheus_intrds(struct ips_softc *sc)
-{
-	u_int32_t reg;
-
-	reg = bus_space_read_4(sc->sc_iot, sc->sc_ioh, IPS_REG_OIM);
-	reg |= IPS_REG_OIM_DS;
-	bus_space_write_4(sc->sc_iot, sc->sc_ioh, IPS_REG_OIM, reg);
-}
-
 int
 ips_morpheus_isintr(struct ips_softc *sc)
 {
 	return (bus_space_read_4(sc->sc_iot, sc->sc_ioh, IPS_REG_OIS) &
 	    IPS_REG_OIS_PEND);
-}
-
-int
-ips_morpheus_reset(struct ips_softc *sc)
-{
-	/* XXX: not implemented */
-	return (0);
 }
 
 u_int32_t
@@ -1988,6 +2008,7 @@ ips_ccb_alloc(struct ips_softc *sc, int n)
 		return (NULL);
 
 	for (i = 0; i < n; i++) {
+		ccb[i].c_sc = sc;
 		ccb[i].c_id = i;
 		ccb[i].c_cmdbva = (char *)sc->sc_cmdbm.dm_vaddr +
 		    i * sizeof(struct ips_cmdb);
