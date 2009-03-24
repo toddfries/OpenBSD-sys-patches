@@ -1,4 +1,4 @@
-/*	$OpenBSD: viommu.c,v 1.2 2009/01/02 20:01:45 kettenis Exp $	*/
+/*	$OpenBSD: viommu.c,v 1.4 2009/03/16 21:00:48 oga Exp $	*/
 /*	$NetBSD: iommu.c,v 1.47 2002/02/08 20:03:45 eeh Exp $	*/
 
 /*
@@ -313,7 +313,7 @@ viommu_dvmamap_load(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 		boundary = map->_dm_boundary;
 	align = MAX(map->dm_segs[0]._ds_align, PAGE_SIZE);
 
-	pmap = p ? p->p_vmspace->vm_map.pmap : pmap = pmap_kernel();
+	pmap = p ? p->p_vmspace->vm_map.pmap : pmap_kernel();
 
 	/* Count up the total number of pages we need */
 	iommu_iomap_clear_pages(ims);
@@ -914,11 +914,9 @@ viommu_iomap_create(int n)
 		n = 16;
 
 	ims = malloc(sizeof(*ims) + (n - 1) * sizeof(ims->ims_map.ipm_map[0]),
-		M_DEVBUF, M_NOWAIT);
+		M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (ims == NULL)
 		return (NULL);
-
-	memset(ims, 0, sizeof *ims);
 
 	/* Initialize the map. */
 	ims->ims_map.ipm_maxpage = n;
