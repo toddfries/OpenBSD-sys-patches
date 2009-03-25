@@ -47,7 +47,7 @@ struct iopiic_softc {
 	void *sc_ih;
 
 	struct i2c_controller sc_i2c;
-	struct lock sc_buslock;
+	struct rwlock sc_buslock;
 	uint32_t sc_icr;
 };
 

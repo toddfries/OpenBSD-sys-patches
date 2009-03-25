@@ -41,7 +41,7 @@
  */
 
 #include <sys/param.h>
-#include <sys/lock.h>
+#include <sys/rwlock.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
@@ -110,7 +110,7 @@ i80321_i2c_attach(struct device *parent, struct device *self, void *aux)
 
 	/* XXX Reset the I2C unit? */
 
-	lockinit(&sc->sc_buslock, PRIBIO|PCATCH, "iopiiclk", 0, 0);
+	rw_init(&sc->sc_buslock, "iopiiclk");
 
 	/* XXX We don't currently use interrupts.  Fix this some day. */
 #if 0
