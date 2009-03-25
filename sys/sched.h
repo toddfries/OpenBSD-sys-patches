@@ -145,11 +145,7 @@ void cpu_idle_enter(void);
 void cpu_idle_cycle(void);
 void cpu_idle_leave(void);
 
-<<<<<<< HEAD:sys/sched.h
-#define sched_is_idle()	(curcpu()->ci_schedstate.spc_whichqs == 0)
-=======
 #define curcpu_is_idle()	(curcpu()->ci_schedstate.spc_whichqs == 0)
->>>>>>> master:sys/sched.h
 
 void sched_init_runqueues(void);
 void setrunqueue(struct proc *);

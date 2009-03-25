@@ -128,11 +128,7 @@ sched_idle(void *v)
 	KASSERT(curproc == spc->spc_idleproc);
 
 	while (1) {
-<<<<<<< HEAD:kern/kern_sched.c
-		while (!sched_is_idle()) {
-=======
 		while (!curcpu_is_idle()) {
->>>>>>> master:kern/kern_sched.c
 			struct proc *dead;
 
 			SCHED_LOCK(s);
@@ -214,28 +210,11 @@ setrunqueue(struct proc *p)
 	sched_choosecpu(p);
 	spc = &p->p_cpu->ci_schedstate;
 	spc->spc_nrun++;
-<<<<<<< HEAD:kern/kern_sched.c
 
 	TAILQ_INSERT_TAIL(&spc->spc_qs[queue], p, p_runq);
 	spc->spc_whichqs |= (1 << queue);
 	cpuset_add(&sched_queued_cpus, p->p_cpu);
 
-#if 0
-	/*
-	 * Remove this cpu from the idle set, if we get a thundering herd,
-	 * we don't want to consider this cpu in the "go to idle" scheduling
-	 * decisions for all the procs in the herd.
-	 */
-	cpuset_del(&sched_idle_cpus, p->p_cpu);
-#endif
-
-=======
-
-	TAILQ_INSERT_TAIL(&spc->spc_qs[queue], p, p_runq);
-	spc->spc_whichqs |= (1 << queue);
-	cpuset_add(&sched_queued_cpus, p->p_cpu);
-
->>>>>>> master:kern/kern_sched.c
 	if (p->p_cpu != curcpu())
 		cpu_unidle(p->p_cpu);
 }
@@ -465,13 +444,6 @@ sched_proc_to_cpu_cost(struct cpu_info *ci, struct proc *p)
 	struct schedstate_percpu *spc;
 	int l2resident = 0;
 	int cost;
-<<<<<<< HEAD:kern/kern_sched.c
-	UVMHIST_FUNC("sptcc");
-#ifdef UVMHIST
-	_uvmhist_cnt++;
-#endif
-=======
->>>>>>> master:kern/kern_sched.c
 
 	spc = &ci->ci_schedstate;
 
@@ -496,35 +468,11 @@ sched_proc_to_cpu_cost(struct cpu_info *ci, struct proc *p)
 	 */
 	cost += ((sched_cost_load * spc->spc_ldavg) >> FSHIFT);
 
-<<<<<<< HEAD:kern/kern_sched.c
-
-=======
->>>>>>> master:kern/kern_sched.c
 	/*
 	 * If the proc is on this cpu already, lower the cost by how much
 	 * it has been running and an estimate of its footprint.
 	 */
 	if (p->p_cpu == ci && p->p_slptime == 0) {
-<<<<<<< HEAD:kern/kern_sched.c
-#if defined(pmap_resident_count) && !defined(__sparc__) && !defined(__sparc64__)
-		l2resident =
-		    log2(pmap_resident_count(p->p_vmspace->vm_map.pmap));
-#else
-		l2resident = log2(p->p_vmspace->vm_rssize);
-#endif
-		cost -= l2resident * sched_cost_resident;
-	}
-
-	UVMHIST_LOG(schedhist, "sptcc - pri:%d run:%d lod:%d res:%d",
-	    p->p_priority - spc->spc_curpriority,
-	    spc->spc_nrun + (cpuset_isset(&sched_idle_cpus, ci) ? 1 : 0),
-	    spc->spc_ldavg,
-	    l2resident);
-
-	return (cost);
-}
-
-=======
 		l2resident =
 		    log2(pmap_resident_count(p->p_vmspace->vm_map.pmap));
 		cost -= l2resident * sched_cost_resident;
@@ -603,4 +551,3 @@ cpuset_first(struct cpuset *cs)
 
 	return (NULL);
 }
->>>>>>> master:kern/kern_sched.c
