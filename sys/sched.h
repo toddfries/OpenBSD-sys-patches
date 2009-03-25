@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched.h,v 1.19 2008/06/26 05:42:20 ray Exp $	*/
+/*	$OpenBSD: sched.h,v 1.20 2009/03/23 13:25:11 art Exp $	*/
 /* $NetBSD: sched.h,v 1.2 1999/02/28 18:14:58 ross Exp $ */
 
 /*-
@@ -145,7 +145,7 @@ void cpu_idle_enter(void);
 void cpu_idle_cycle(void);
 void cpu_idle_leave(void);
 
-#define sched_is_idle()	(curcpu()->ci_schedstate.spc_whichqs == 0)
+#define curcpu_is_idle()	(curcpu()->ci_schedstate.spc_whichqs == 0)
 
 void sched_init_runqueues(void);
 void setrunqueue(struct proc *);
