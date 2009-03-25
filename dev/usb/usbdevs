@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.412 2009/03/14 15:40:29 damien Exp $
+$OpenBSD: usbdevs,v 1.414 2009/03/24 18:55:30 deraadt Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -2463,6 +2463,7 @@ product RICOH VGPVCC6		0x1839	VGP-VCC6 Camera
 product RICOH VGPVCC7		0x183a	VGP-VCC7 Camera
 product RICOH VGPVCC8		0x183b	VGP-VCC8 Camera
 product RICOH VGPVCC9		0x183e	VGP-VCC9 Camera
+product RICOH VPGVCCX		0x18b2	VGP-VCCX Camera
 
 /* Roland products */
 product ROLAND UA100		0x0000	UA-100 Audio I/F
@@ -2759,6 +2760,7 @@ product SONY CLIE_41_MS		0x0099	Clie v4.1 Memory Stick
 product SONY CLIE_41		0x009a	Clie v4.1
 product SONY CLIE_NX60		0x00da	Clie nx60
 product SONY CLIE_TJ25		0x0169	Clie tj25
+product SONY CXD9192		0x0279	1seg TV tuner
 
 /* SOURCENEXT products */
 product SOURCENEXT KEIKAI8	0x039f	KeikaiDenwa 8

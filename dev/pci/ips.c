@@ -1,4 +1,4 @@
-/*	$OpenBSD: ips.c,v 1.79 2009/03/20 07:24:41 grange Exp $	*/
+/*	$OpenBSD: ips.c,v 1.93 2009/03/23 17:40:56 grange Exp $	*/
 
 /*
  * Copyright (c) 2006, 2007, 2009 Alexander Yurchenko <grange@openbsd.org>
@@ -60,7 +60,7 @@ int ips_debug = IPS_D_ERR;
 
 #define IPS_MAXDRIVES		8
 #define IPS_MAXCHANS		4
-#define IPS_MAXTARGETS		15
+#define IPS_MAXTARGETS		16
 #define IPS_MAXCHUNKS		16
 #define IPS_MAXCMDS		128
 
@@ -101,12 +101,6 @@ int ips_debug = IPS_D_ERR;
 #define IPS_CMD_FFDC		0xd7
 #define IPS_CMD_SG		0x80
 #define IPS_CMD_RWNVRAM		0xbc
-
-/* SETSTATE states */
-#define IPS_SS_ONLINE		0x89
-#define IPS_SS_OFFLINE		0x08
-#define IPS_SS_HOTSPARE		0x85
-#define IPS_SS_REBUILD		0x8b
 
 /* DCDB attributes */
 #define IPS_DCDB_DATAIN		0x01	/* data input */
@@ -233,7 +227,7 @@ struct ips_adapterinfo {
 	u_int16_t	confupdcnt;
 	u_int8_t	blkflag;
 	u_int8_t	__reserved;
-	u_int16_t	deaddisk[IPS_MAXCHANS * (IPS_MAXTARGETS + 1)];
+	u_int16_t	deaddisk[IPS_MAXCHANS][IPS_MAXTARGETS];
 };
 
 struct ips_driveinfo {
@@ -302,14 +296,16 @@ struct ips_conf {
 		u_int8_t	params;
 		u_int8_t	miscflag;
 		u_int8_t	state;
-#define IPS_DVS_PRESENT	0x81
+#define IPS_DVS_STANDBY	0x01
 #define IPS_DVS_REBUILD	0x02
 #define IPS_DVS_SPARE	0x04
 #define IPS_DVS_MEMBER	0x08
+#define IPS_DVS_ONLINE	0x80
+#define IPS_DVS_READY	(IPS_DVS_STANDBY | IPS_DVS_ONLINE)
 
 		u_int32_t	seccnt;
 		u_int8_t	devid[28];
-	}		dev[IPS_MAXCHANS][IPS_MAXTARGETS + 1];
+	}		dev[IPS_MAXCHANS][IPS_MAXTARGETS];
 
 	u_int8_t	reserved[512];
 };
@@ -437,13 +433,17 @@ int	ips_scsi_pt_cmd(struct scsi_xfer *);
 int	ips_scsi_ioctl(struct scsi_link *, u_long, caddr_t, int,
 	    struct proc *);
 
+#if NBIO > 0
 int	ips_ioctl(struct device *, u_long, caddr_t);
 int	ips_ioctl_inq(struct ips_softc *, struct bioc_inq *);
 int	ips_ioctl_vol(struct ips_softc *, struct bioc_vol *);
 int	ips_ioctl_disk(struct ips_softc *, struct bioc_disk *);
 int	ips_ioctl_setstate(struct ips_softc *, struct bioc_setstate *);
+#endif
 
+#ifndef SMALL_KERNEL
 void	ips_sensors(void *);
+#endif
 
 int	ips_load_xs(struct ips_softc *, struct ips_ccb *, struct scsi_xfer *);
 int	ips_start_xs(struct ips_softc *, struct ips_ccb *, struct scsi_xfer *);
@@ -462,10 +462,13 @@ void	ips_timeout(void *);
 int	ips_getadapterinfo(struct ips_softc *, int);
 int	ips_getdriveinfo(struct ips_softc *, int);
 int	ips_getconf(struct ips_softc *, int);
-int	ips_getrblstat(struct ips_softc *, int);
 int	ips_getpg5(struct ips_softc *, int);
+
+#if NBIO > 0
+int	ips_getrblstat(struct ips_softc *, int);
 int	ips_setstate(struct ips_softc *, int, int, int, int);
 int	ips_rebuild(struct ips_softc *, int, int, int, int, int);
+#endif
 
 void	ips_copperhead_exec(struct ips_softc *, struct ips_ccb *);
 void	ips_copperhead_intren(struct ips_softc *);
@@ -756,16 +759,36 @@ ips_attach(struct device *parent, struct device *self, void *aux)
 	for (i = 0; i < IPS_MAXCHANS; i++) {
 		struct ips_pt *pt;
 		struct scsi_link *link;
+		int target, lastarget;
 
 		pt = &sc->sc_pt[i];
 		pt->pt_sc = sc;
 		pt->pt_chan = i;
 		pt->pt_proctgt = -1;
 
+		/* Check if channel has any devices besides disks */
+		for (target = 0, lastarget = -1; target < IPS_MAXTARGETS;
+		    target++) {
+			struct ips_dev *dev;
+			int type;
+
+			dev = &sc->sc_info->conf.dev[i][target];
+			type = dev->params & SID_TYPE;
+			if (dev->state && type != T_DIRECT) {
+				lastarget = target;
+				if (type == T_PROCESSOR ||
+				    type == T_ENCLOSURE)
+					/* remember enclosure address */
+					pt->pt_proctgt = target;
+			}
+		}
+		if (lastarget == -1)
+			continue;
+
 		link = &pt->pt_link;
 		link->openings = 1;
-		link->adapter_target = IPS_MAXTARGETS + 1;
-		link->adapter_buswidth = IPS_MAXTARGETS;
+		link->adapter_target = IPS_MAXTARGETS;
+		link->adapter_buswidth = lastarget + 1;
 		link->device = &ips_scsi_pt_device;
 		link->adapter = &ips_scsi_pt_adapter;
 		link->adapter_softc = pt;
@@ -1139,12 +1162,14 @@ ips_ioctl_vol(struct ips_softc *sc, struct bioc_vol *bv)
 	struct ips_rblstat *rblstat = &sc->sc_info->rblstat;
 	struct ips_ld *ld;
 	int vid = bv->bv_volid;
-	struct device *dev;
-	int rebuild = 0;
+	struct device *dv;
+	int error, rebuild = 0;
 	u_int32_t total = 0, done = 0;
 
 	if (vid >= sc->sc_nunits)
 		return (EINVAL);
+	if ((error = ips_getconf(sc, 0)))
+		return (error);
 	ld = &conf->ld[vid];
 
 	switch (ld->state) {
@@ -1157,25 +1182,41 @@ ips_ioctl_vol(struct ips_softc *sc, struct bioc_vol *bv)
 		break;
 	case IPS_DS_OFFLINE:
 		bv->bv_status = BIOC_SVOFFLINE;
-		rebuild++;
 		break;
 	default:
 		bv->bv_status = BIOC_SVINVALID;
 	}
 
-	if (rebuild) {
+	if (rebuild && ips_getrblstat(sc, 0) == 0) {
 		total = letoh32(rblstat->ld[vid].total);
 		done = total - letoh32(rblstat->ld[vid].remain);
-		if (total)
+		if (total && total > done) {
+			bv->bv_status = BIOC_SVREBUILD;
 			bv->bv_percent = 100 * done / total;
+		}
 	}
 
 	bv->bv_size = (u_quad_t)letoh32(ld->size) * IPS_SECSZ;
 	bv->bv_level = di->drive[vid].raid;
 	bv->bv_nodisk = ld->chunkcnt;
 
-	dev = sc->sc_scsibus->sc_link[vid][0]->device_softc;
-	strlcpy(bv->bv_dev, dev->dv_xname, sizeof(bv->bv_dev));
+	/* Associate all unused and spare drives with first volume */
+	if (vid == 0) {
+		struct ips_dev *dev;
+		int chan, target;
+
+		for (chan = 0; chan < IPS_MAXCHANS; chan++)
+			for (target = 0; target < IPS_MAXTARGETS; target++) {
+				dev = &conf->dev[chan][target];
+				if (dev->state && !(dev->state &
+				    IPS_DVS_MEMBER) &&
+				    (dev->params & SID_TYPE) == T_DIRECT)
+					bv->bv_nodisk++;
+			}
+	}
+
+	dv = sc->sc_scsibus->sc_link[vid][0]->device_softc;
+	strlcpy(bv->bv_dev, dv->dv_xname, sizeof(bv->bv_dev));
 	strlcpy(bv->bv_vendor, "IBM", sizeof(bv->bv_vendor));
 
 	DPRINTF(IPS_D_INFO, ("%s: ips_ioctl_vol: vid %d, state 0x%02x, "
@@ -1194,31 +1235,53 @@ ips_ioctl_disk(struct ips_softc *sc, struct bioc_disk *bd)
 	struct ips_chunk *chunk;
 	struct ips_dev *dev;
 	int vid = bd->bd_volid, did = bd->bd_diskid;
+	int chan, target, error, i;
 
 	if (vid >= sc->sc_nunits)
 		return (EINVAL);
+	if ((error = ips_getconf(sc, 0)))
+		return (error);
 	ld = &conf->ld[vid];
 
-	if (did >= ld->chunkcnt)
-		return (EINVAL);
-	chunk = &ld->chunk[did];
+	if (did >= ld->chunkcnt) {
+		/* Probably unused or spare drives */
+		if (vid != 0)
+			return (EINVAL);
 
-	if (chunk->channel >= IPS_MAXCHANS || chunk->target >= IPS_MAXTARGETS)
-		return (EINVAL);
-	dev = &conf->dev[chunk->channel][chunk->target];
+		i = ld->chunkcnt;
+		for (chan = 0; chan < IPS_MAXCHANS; chan++)
+			for (target = 0; target < IPS_MAXTARGETS; target++) {
+				dev = &conf->dev[chan][target];
+				if (dev->state && !(dev->state &
+				    IPS_DVS_MEMBER) &&
+				    (dev->params & SID_TYPE) == T_DIRECT)
+					if (i++ == did)
+						goto out;
+			}
+	} else {
+		chunk = &ld->chunk[did];
+		chan = chunk->channel;
+		target = chunk->target;
+	}
 
-	bd->bd_channel = chunk->channel;
-	bd->bd_target = chunk->target;
+out:
+	if (chan >= IPS_MAXCHANS || target >= IPS_MAXTARGETS)
+		return (EINVAL);
+	dev = &conf->dev[chan][target];
+
+	bd->bd_channel = chan;
+	bd->bd_target = target;
 	bd->bd_lun = 0;
-	bd->bd_size = (u_quad_t)letoh32(chunk->seccnt) * IPS_SECSZ;
+	bd->bd_size = (u_quad_t)letoh32(dev->seccnt) * IPS_SECSZ;
 
 	bzero(bd->bd_vendor, sizeof(bd->bd_vendor));
 	memcpy(bd->bd_vendor, dev->devid, MIN(sizeof(bd->bd_vendor),
 	    sizeof(dev->devid)));
-	strlcpy(bd->bd_procdev, sc->sc_pt[chunk->channel].pt_procdev,
+	strlcpy(bd->bd_procdev, sc->sc_pt[chan].pt_procdev,
 	    sizeof(bd->bd_procdev));
 
-	if (dev->state & IPS_DVS_PRESENT) {
+	if (dev->state & IPS_DVS_READY) {
+		bd->bd_status = BIOC_SDUNUSED;
 		if (dev->state & IPS_DVS_MEMBER)
 			bd->bd_status = BIOC_SDONLINE;
 		if (dev->state & IPS_DVS_SPARE)
@@ -1239,17 +1302,26 @@ ips_ioctl_disk(struct ips_softc *sc, struct bioc_disk *bd)
 int
 ips_ioctl_setstate(struct ips_softc *sc, struct bioc_setstate *bs)
 {
-	int state;
+	struct ips_conf *conf = &sc->sc_info->conf;
+	struct ips_dev *dev;
+	int state, error;
+
+	if (bs->bs_channel >= IPS_MAXCHANS || bs->bs_target >= IPS_MAXTARGETS)
+		return (EINVAL);
+	if ((error = ips_getconf(sc, 0)))
+		return (error);
+	dev = &conf->dev[bs->bs_channel][bs->bs_target];
+	state = dev->state;
 
 	switch (bs->bs_status) {
 	case BIOC_SSONLINE:
-		state = IPS_SS_ONLINE;
+		state |= IPS_DVS_READY;
 		break;
 	case BIOC_SSOFFLINE:
-		state = IPS_SS_OFFLINE;
+		state &= ~IPS_DVS_READY;
 		break;
 	case BIOC_SSHOTSPARE:
-		state = IPS_SS_HOTSPARE;
+		state |= IPS_DVS_SPARE;
 		break;
 	case BIOC_SSREBUILD:
 		return (ips_rebuild(sc, bs->bs_channel, bs->bs_target,
@@ -1269,7 +1341,7 @@ ips_sensors(void *arg)
 	struct ips_softc *sc = arg;
 	struct ips_conf *conf = &sc->sc_info->conf;
 	struct ips_ld *ld;
-	int i, rebuild = 0;
+	int i;
 
 	/* ips_sensors() runs from work queue thus allowed to sleep */
 	if (ips_getconf(sc, 0)) {
@@ -1295,12 +1367,10 @@ ips_sensors(void *arg)
 		case IPS_DS_DEGRADED:
 			sc->sc_sensors[i].value = SENSOR_DRIVE_PFAIL;
 			sc->sc_sensors[i].status = SENSOR_S_WARN;
-			rebuild++;
 			break;
 		case IPS_DS_OFFLINE:
 			sc->sc_sensors[i].value = SENSOR_DRIVE_FAIL;
 			sc->sc_sensors[i].status = SENSOR_S_CRIT;
-			rebuild++;
 			break;
 		default:
 			sc->sc_sensors[i].value = 0;
@@ -1308,11 +1378,8 @@ ips_sensors(void *arg)
 		}
 	}
 	DPRINTF(IPS_D_INFO, ("\n"));
-
-	if (rebuild)
-		(void)ips_getrblstat(sc, 0);
 }
-#endif
+#endif	/* !SMALL_KERNEL */
 
 int
 ips_load_xs(struct ips_softc *sc, struct ips_ccb *ccb, struct scsi_xfer *xs)
@@ -1488,11 +1555,9 @@ void
 ips_done_pt(struct ips_softc *sc, struct ips_ccb *ccb)
 {
 	struct scsi_xfer *xs = ccb->c_xfer;
-	struct scsi_link *link = xs->sc_link;
-	struct ips_pt *pt = link->adapter_softc;
 	struct ips_cmdb *cmdb = ccb->c_cmdbva;
 	struct ips_dcdb *dcdb = &cmdb->dcdb;
-	int target = link->target, done = letoh16(dcdb->datalen);
+	int done = letoh16(dcdb->datalen);
 
 	if (!(xs->flags & SCSI_POLL))
 		timeout_del(&xs->stimeout);
@@ -1519,17 +1584,9 @@ ips_done_pt(struct ips_softc *sc, struct ips_ccb *ccb)
 		int type = ((struct scsi_inquiry_data *)xs->data)->device &
 		    SID_TYPE;
 
-		switch (type) {
-		case T_DIRECT:
+		if (type == T_DIRECT)
 			/* mask physical drives */
 			xs->error = XS_DRIVER_STUFFUP;
-			break;
-		case T_ENCLOSURE:
-		case T_PROCESSOR:
-			/* remember enclosure address */
-			pt->pt_proctgt = target;
-			break;
-		}
 	}
 
 	xs->flags |= ITSDONE;
@@ -1800,30 +1857,6 @@ ips_getconf(struct ips_softc *sc, int flags)
 }
 
 int
-ips_getrblstat(struct ips_softc *sc, int flags)
-{
-	struct ips_ccb *ccb;
-	struct ips_cmd *cmd;
-	int s;
-
-	s = splbio();
-	ccb = ips_ccb_get(sc);
-	splx(s);
-	if (ccb == NULL)
-		return (1);
-
-	ccb->c_flags = SCSI_DATA_IN | SCSI_POLL | flags;
-	ccb->c_done = ips_done_mgmt;
-
-	cmd = ccb->c_cmdbva;
-	cmd->code = IPS_CMD_REBUILDSTATUS;
-	cmd->sgaddr = htole32(sc->sc_infom.dm_paddr + offsetof(struct ips_info,
-	    rblstat));
-
-	return (ips_cmd(sc, ccb));
-}
-
-int
 ips_getpg5(struct ips_softc *sc, int flags)
 {
 	struct ips_ccb *ccb;
@@ -1844,6 +1877,31 @@ ips_getpg5(struct ips_softc *sc, int flags)
 	cmd->drive = 5;
 	cmd->sgaddr = htole32(sc->sc_infom.dm_paddr + offsetof(struct ips_info,
 	    pg5));
+
+	return (ips_cmd(sc, ccb));
+}
+
+#if NBIO > 0
+int
+ips_getrblstat(struct ips_softc *sc, int flags)
+{
+	struct ips_ccb *ccb;
+	struct ips_cmd *cmd;
+	int s;
+
+	s = splbio();
+	ccb = ips_ccb_get(sc);
+	splx(s);
+	if (ccb == NULL)
+		return (1);
+
+	ccb->c_flags = SCSI_DATA_IN | SCSI_POLL | flags;
+	ccb->c_done = ips_done_mgmt;
+
+	cmd = ccb->c_cmdbva;
+	cmd->code = IPS_CMD_REBUILDSTATUS;
+	cmd->sgaddr = htole32(sc->sc_infom.dm_paddr + offsetof(struct ips_info,
+	    rblstat));
 
 	return (ips_cmd(sc, ccb));
 }
@@ -1898,6 +1956,7 @@ ips_rebuild(struct ips_softc *sc, int chan, int target, int nchan,
 
 	return (ips_cmd(sc, ccb));
 }
+#endif	/* NBIO > 0 */
 
 void
 ips_copperhead_exec(struct ips_softc *sc, struct ips_ccb *ccb)
