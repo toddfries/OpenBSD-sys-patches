@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.226 2009/02/27 05:19:36 miod Exp $	*/
+/* $OpenBSD: machdep.c,v 1.228 2009/03/15 20:39:53 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -97,6 +97,7 @@
 
 caddr_t	allocsys(caddr_t);
 void	consinit(void);
+void	cpu_hatch_secondary_processors(void *);
 void	dumb_delay(int);
 void	dumpconf(void);
 void	dumpsys(void);
@@ -134,7 +135,6 @@ u_int (*md_setipl)(u_int);
 u_int (*md_raiseipl)(u_int);
 #ifdef MULTIPROCESSOR
 void (*md_send_ipi)(int, cpuid_t);
-void (*md_soft_ipi)(void);
 #endif
 void (*md_delay)(int) = dumb_delay;
 #ifdef MULTIPROCESSOR
@@ -147,7 +147,8 @@ struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
 #ifdef MULTIPROCESSOR
-__cpu_simple_lock_t cpu_boot_mutex;
+__cpu_simple_lock_t cpu_hatch_mutex;
+__cpu_simple_lock_t cpu_boot_mutex = __SIMPLELOCK_LOCKED;
 #endif
 
 /*
@@ -734,7 +735,7 @@ secondary_pre_main()
 	if (init_stack == (vaddr_t)NULL) {
 		printf("cpu%d: unable to allocate startup stack\n",
 		    ci->ci_cpuid);
-		__cpu_simple_unlock(&cpu_boot_mutex);
+		__cpu_simple_unlock(&cpu_hatch_mutex);
 		for (;;) ;
 	}
 
@@ -756,17 +757,21 @@ secondary_main()
 	cpu_configuration_print(0);
 	ncpus++;
 
+	sched_init_cpu(ci);
 	microuptime(&ci->ci_schedstate.spc_runtime);
 	ci->ci_curproc = NULL;
 	ci->ci_randseed = random();
 	SET(ci->ci_flags, CIF_ALIVE);
 
+	__cpu_simple_unlock(&cpu_hatch_mutex);
+
+	/* wait for cpu_boot_secondary_processors() */
+	__cpu_simple_lock(&cpu_boot_mutex);
 	__cpu_simple_unlock(&cpu_boot_mutex);
 
-	set_psr(get_psr() & ~PSR_IND);
 	spl0();
-
 	SCHED_LOCK(s);
+	set_psr(get_psr() & ~PSR_IND);
 	cpu_switchto(NULL, sched_chooseproc());
 }
 
@@ -1070,7 +1075,7 @@ mvme_bootstrap()
 
 #ifdef MULTIPROCESSOR
 void
-cpu_boot_secondary_processors()
+cpu_hatch_secondary_processors(void *unused)
 {
 	struct cpu_info *ci = curcpu();
 	cpuid_t cpu;
@@ -1087,11 +1092,11 @@ cpu_boot_secondary_processors()
 #endif
 		for (cpu = 0; cpu < max_cpus; cpu++) {
 			if (cpu != ci->ci_cpuid) {
-				__cpu_simple_lock(&cpu_boot_mutex);
+				__cpu_simple_lock(&cpu_hatch_mutex);
 				rc = spin_cpu(cpu, (vaddr_t)secondary_start);
 				switch (rc) {
 				case 0:
-					__cpu_simple_lock(&cpu_boot_mutex);
+					__cpu_simple_lock(&cpu_hatch_mutex);
 					break;
 				default:
 					printf("cpu%d: spin_cpu error %d\n",
@@ -1100,7 +1105,7 @@ cpu_boot_secondary_processors()
 				case FORKMPU_NO_MPU:
 					break;
 				}
-				__cpu_simple_unlock(&cpu_boot_mutex);
+				__cpu_simple_unlock(&cpu_hatch_mutex);
 			}
 		}
 		break;
@@ -1108,6 +1113,12 @@ cpu_boot_secondary_processors()
 	default:
 		break;
 	}
+}
+
+void
+cpu_boot_secondary_processors()
+{
+	__cpu_simple_unlock(&cpu_boot_mutex);
 }
 #endif
 
@@ -1192,12 +1203,6 @@ m88k_broadcast_ipi(int ipi)
 		if (ISSET(ci->ci_flags, CIF_ALIVE))
 			(*md_send_ipi)(ipi, ci->ci_cpuid);
 	}
-}
-
-void
-softipi()
-{
-	(*md_soft_ipi)();
 }
 
 #endif

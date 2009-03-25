@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sched.c,v 1.8 2008/11/06 19:49:13 deraadt Exp $	*/
+/*	$OpenBSD: kern_sched.c,v 1.9 2009/03/23 13:25:11 art Exp $	*/
 /*
  * Copyright (c) 2007, 2008 Artur Grabowski <art@openbsd.org>
  *
@@ -24,15 +24,12 @@
 #include <sys/resourcevar.h>
 #include <sys/signalvar.h>
 #include <sys/mutex.h>
-#include <sys/cpuset.h>
+#include <machine/atomic.h>
 
 #include <uvm/uvm_extern.h>
 
-#include <uvm/uvm_stat.h>
 #include <sys/malloc.h>
 
-
-UVMHIST_DECL(schedhist);
 
 void sched_kthreads_create(void *);
 void sched_idle(void *);
@@ -73,13 +70,7 @@ void
 sched_init_cpu(struct cpu_info *ci)
 {
 	struct schedstate_percpu *spc = &ci->ci_schedstate;
-	static int histinit;
 	int i;
-
-	if (!histinit) {
-		histinit = 1;
-		UVMHIST_INIT(schedhist, 5000);
-	}
 
 	for (i = 0; i < SCHED_NQS; i++)
 		TAILQ_INIT(&spc->spc_qs[i]);
@@ -137,7 +128,11 @@ sched_idle(void *v)
 	KASSERT(curproc == spc->spc_idleproc);
 
 	while (1) {
+<<<<<<< HEAD:kern/kern_sched.c
 		while (!sched_is_idle()) {
+=======
+		while (!curcpu_is_idle()) {
+>>>>>>> master:kern/kern_sched.c
 			struct proc *dead;
 
 			SCHED_LOCK(s);
@@ -219,6 +214,7 @@ setrunqueue(struct proc *p)
 	sched_choosecpu(p);
 	spc = &p->p_cpu->ci_schedstate;
 	spc->spc_nrun++;
+<<<<<<< HEAD:kern/kern_sched.c
 
 	TAILQ_INSERT_TAIL(&spc->spc_qs[queue], p, p_runq);
 	spc->spc_whichqs |= (1 << queue);
@@ -233,6 +229,13 @@ setrunqueue(struct proc *p)
 	cpuset_del(&sched_idle_cpus, p->p_cpu);
 #endif
 
+=======
+
+	TAILQ_INSERT_TAIL(&spc->spc_qs[queue], p, p_runq);
+	spc->spc_whichqs |= (1 << queue);
+	cpuset_add(&sched_queued_cpus, p->p_cpu);
+
+>>>>>>> master:kern/kern_sched.c
 	if (p->p_cpu != curcpu())
 		cpu_unidle(p->p_cpu);
 }
@@ -462,10 +465,13 @@ sched_proc_to_cpu_cost(struct cpu_info *ci, struct proc *p)
 	struct schedstate_percpu *spc;
 	int l2resident = 0;
 	int cost;
+<<<<<<< HEAD:kern/kern_sched.c
 	UVMHIST_FUNC("sptcc");
 #ifdef UVMHIST
 	_uvmhist_cnt++;
 #endif
+=======
+>>>>>>> master:kern/kern_sched.c
 
 	spc = &ci->ci_schedstate;
 
@@ -490,12 +496,16 @@ sched_proc_to_cpu_cost(struct cpu_info *ci, struct proc *p)
 	 */
 	cost += ((sched_cost_load * spc->spc_ldavg) >> FSHIFT);
 
+<<<<<<< HEAD:kern/kern_sched.c
 
+=======
+>>>>>>> master:kern/kern_sched.c
 	/*
 	 * If the proc is on this cpu already, lower the cost by how much
 	 * it has been running and an estimate of its footprint.
 	 */
 	if (p->p_cpu == ci && p->p_slptime == 0) {
+<<<<<<< HEAD:kern/kern_sched.c
 #if defined(pmap_resident_count) && !defined(__sparc__) && !defined(__sparc64__)
 		l2resident =
 		    log2(pmap_resident_count(p->p_vmspace->vm_map.pmap));
@@ -514,3 +524,83 @@ sched_proc_to_cpu_cost(struct cpu_info *ci, struct proc *p)
 	return (cost);
 }
 
+=======
+		l2resident =
+		    log2(pmap_resident_count(p->p_vmspace->vm_map.pmap));
+		cost -= l2resident * sched_cost_resident;
+	}
+
+	return (cost);
+}
+
+/*
+ * Functions to manipulate cpu sets.
+ */
+struct cpu_info *cpuset_infos[MAXCPUS];
+static struct cpuset cpuset_all;
+
+void
+cpuset_init_cpu(struct cpu_info *ci)
+{
+	cpuset_add(&cpuset_all, ci);
+	cpuset_infos[CPU_INFO_UNIT(ci)] = ci;
+}
+
+void
+cpuset_clear(struct cpuset *cs)
+{
+	memset(cs, 0, sizeof(*cs));
+}
+
+/*
+ * XXX - implement it on SP architectures too
+ */
+#ifndef CPU_INFO_UNIT
+#define CPU_INFO_UNIT 0
+#endif
+
+void
+cpuset_add(struct cpuset *cs, struct cpu_info *ci)
+{
+	unsigned int num = CPU_INFO_UNIT(ci);
+	atomic_setbits_int(&cs->cs_set[num/32], (1 << (num % 32)));
+}
+
+void
+cpuset_del(struct cpuset *cs, struct cpu_info *ci)
+{
+	unsigned int num = CPU_INFO_UNIT(ci);
+	atomic_clearbits_int(&cs->cs_set[num/32], (1 << (num % 32)));
+}
+
+int
+cpuset_isset(struct cpuset *cs, struct cpu_info *ci)
+{
+	unsigned int num = CPU_INFO_UNIT(ci);
+	return (cs->cs_set[num/32] & (1 << (num % 32)));
+}
+
+void
+cpuset_add_all(struct cpuset *cs)
+{
+	cpuset_copy(cs, &cpuset_all);
+}
+
+void
+cpuset_copy(struct cpuset *to, struct cpuset *from)
+{
+	memcpy(to, from, sizeof(*to));
+}
+
+struct cpu_info *
+cpuset_first(struct cpuset *cs)
+{
+	int i;
+
+	for (i = 0; i < CPUSET_ASIZE(ncpus); i++)
+		if (cs->cs_set[i])
+			return (cpuset_infos[i * 32 + ffs(cs->cs_set[i]) - 1]);
+
+	return (NULL);
+}
+>>>>>>> master:kern/kern_sched.c

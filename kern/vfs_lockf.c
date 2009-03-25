@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_lockf.c,v 1.13 2008/09/19 12:24:55 art Exp $	*/
+/*	$OpenBSD: vfs_lockf.c,v 1.15 2009/03/24 09:04:30 otto Exp $	*/
 /*	$NetBSD: vfs_lockf.c,v 1.7 1996/02/04 02:18:21 christos Exp $	*/
 
 /*
@@ -181,9 +181,9 @@ lf_advlock(struct lockf **head, off_t size, caddr_t id, int op,
 	/*
 	 * Create the lockf structure.
 	 */
-	lock = lf_alloc(p->p_ucred->cr_uid, op != F_UNLCK ? 1 : 2);
+	lock = lf_alloc(p->p_ucred->cr_uid, op == F_SETLK ? 1 : 2);
 	if (!lock)
-		return (ENOMEM);
+		return (ENOLCK);
 	lock->lf_start = start;
 	lock->lf_end = end;
 	lock->lf_id = id;

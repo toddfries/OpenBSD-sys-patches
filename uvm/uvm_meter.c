@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_meter.c,v 1.24 2007/12/15 03:42:57 deraadt Exp $	*/
+/*	$OpenBSD: uvm_meter.c,v 1.26 2009/03/23 13:25:11 art Exp $	*/
 /*	$NetBSD: uvm_meter.c,v 1.21 2001/07/14 06:36:03 matt Exp $	*/
 
 /*
@@ -82,7 +82,7 @@ static void uvm_loadav(struct loadavg *);
  * uvm_meter: calculate load average and wake up the swapper (if needed)
  */
 void
-uvm_meter()
+uvm_meter(void)
 {
 	if ((time_second % 5) == 0)
 		uvm_loadav(&averunnable);
@@ -143,14 +143,8 @@ uvm_loadav(struct loadavg *avg)
  * uvm_sysctl: sysctl hook into UVM system.
  */
 int
-uvm_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
-	int *name;
-	u_int namelen;
-	void *oldp;
-	size_t *oldlenp;
-	void *newp;
-	size_t newlen;
-	struct proc *p;
+uvm_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
+    size_t newlen, struct proc *p)
 {
 	struct vmtotal vmtotals;
 	int rv, t;
@@ -250,8 +244,7 @@ uvm_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
  * uvm_total: calculate the current state of the system.
  */
 void
-uvm_total(totalp)
-	struct vmtotal *totalp;
+uvm_total(struct vmtotal *totalp)
 {
 	struct proc *p;
 #if 0

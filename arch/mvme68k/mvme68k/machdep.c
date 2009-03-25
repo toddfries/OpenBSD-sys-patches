@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.111 2008/06/27 17:22:14 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.114 2009/03/15 20:40:25 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -99,13 +99,17 @@
 #include <machine/pte.h>
 #include <machine/reg.h>
 
+#ifdef MVME141
+#include <mvme68k/dev/ofobioreg.h>
+#endif
 #ifdef MVME147
 #include <mvme68k/dev/pccreg.h>
 #endif
+#ifdef MVME165
+#include <mvme68k/dev/lrcreg.h>
+#endif
  
 #include <dev/cons.h>
-
-#include <net/netisr.h>
 
 #ifdef DDB
 #include <machine/db_machdep.h>
@@ -365,6 +369,17 @@ identifycpu()
 	}
 
 	switch (cputyp) {
+#ifdef MVME141
+	case CPU_141:
+		snprintf(suffix, sizeof suffix, "MVME%x", brdid.model);
+#if 0
+		cpuspeed = ofobiospeed((struct ofobioreg *)IIOV(0xfffb0000));
+#else
+		cpuspeed = 50;
+#endif
+		snprintf(speed, sizeof speed, "%02d", cpuspeed);
+		break;
+#endif
 #ifdef MVME147
 	case CPU_147:
 		snprintf(suffix, sizeof suffix, "MVME%x", brdid.model);
@@ -374,8 +389,10 @@ identifycpu()
 #endif
 #if defined(MVME162) || defined(MVME167) || defined(MVME172) || defined(MVME177)
 	case CPU_162:
+	case CPU_166:
 	case CPU_167:
 	case CPU_172:
+	case CPU_176:
 	case CPU_177:
 		bzero(speed, sizeof speed);
 		speed[0] = brdid.speed[0];
@@ -394,6 +411,13 @@ identifycpu()
 			else
 				break;
 		}
+		break;
+#endif
+#ifdef MVME165
+	case CPU_165:
+		snprintf(suffix, sizeof suffix, "MVME%x", brdid.model);
+		cpuspeed = lrcspeed((struct lrcreg *)IIOV(0xfff90000));
+		snprintf(speed, sizeof speed, "%02d", cpuspeed);
 		break;
 #endif
 	}
@@ -729,9 +753,9 @@ int m68060_pcr_init = 0x20 | PCR_SUPERSCALAR;	/* make this patchable */
 void
 initvectors()
 {
+#if defined(M68060)
 	typedef void trapfun(void);
 	extern trapfun *vectab[256];
-#if defined(M68060)
 #if defined(M060SP)
 	extern trapfun intemu60, fpiemu60, fpdemu60, fpeaemu60;
 	extern u_int8_t FP_CALL_TOP[];
@@ -844,29 +868,6 @@ badvaddr(addr, size)
 	return (0);
 }
 
-int netisr;
-
-void
-netintr(arg)
-	void *arg;
-{
-	int n;
-
-	while ((n = netisr) != 0) {
-		atomic_clearbits_int(&netisr, n);
-
-#define DONETISR(bit, fn)						\
-		do {							\
-			if (n & (1 << (bit)))				\
-				(fn)();					\
-		} while (0)
-
-#include <net/netisr_dispatch.h>
-
-#undef DONETISR
-	}
-}
-
 /*
  * Level 7 interrupts are normally caused by the ABORT switch,
  * drop into ddb.
@@ -875,12 +876,10 @@ void
 nmihand(frame)
 	void *frame;
 {
+	printf("Abort switch pressed\n");
 #ifdef DDB
-	printf("NMI ... going to debugger\n");
-	Debugger();
-#else
-	/* panic?? */
-	printf("unexpected level 7 interrupt ignored\n");
+	if (db_console)
+		Debugger();
 #endif
 }
 

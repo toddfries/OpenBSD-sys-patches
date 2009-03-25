@@ -1,4 +1,4 @@
-/* $OpenBSD: intr.h,v 1.29 2008/06/26 05:42:08 ray Exp $ */
+/* $OpenBSD: intr.h,v 1.32 2009/03/15 19:41:36 miod Exp $ */
 /* $NetBSD: intr.h,v 1.26 2000/06/03 20:47:41 thorpej Exp $ */
 
 /*-
@@ -118,10 +118,10 @@ struct scbvec {
 #define	IPL_CLOCK	ALPHA_PSL_IPL_CLOCK
 #define	IPL_HIGH	ALPHA_PSL_IPL_HIGH
 
-#define	IPL_SOFTSERIAL	-1	/* serial software interrupts */
-#define	IPL_SOFTNET	-2	/* network software interrupts */
-#define	IPL_SOFTCLOCK	-3	/* clock software interrupts */
-#define	IPL_SOFT	-4	/* other software interrupts */
+#define	IPL_SOFTSERIAL	0	/* serial software interrupts */
+#define	IPL_SOFTNET	1	/* network software interrupts */
+#define	IPL_SOFTCLOCK	2	/* clock software interrupts */
+#define	IPL_SOFT	3	/* other software interrupts */
 
 #define	IST_UNUSABLE	-1	/* interrupt cannot be used */
 #define	IST_NONE	0	/* none (dummy) */
@@ -152,8 +152,10 @@ void splassert_check(int, const char *);
 			splassert_check(__wantipl, __func__);		\
 		}							\
 	} while (0)
+#define	splsoftassert(wantipl)	splassert(IPL_SOFTINT)
 #else
 #define	splassert(wantipl)	do { /* nothing */ } while (0)
+#define	splsoftassert(wantipl)	do { /* nothing */ } while (0)
 #endif
 
 /* IPL-lowering/restoring macros */
@@ -279,10 +281,8 @@ do {									\
 
 /* XXX For legacy software interrupts. */
 extern struct alpha_soft_intrhand *softnet_intrhand;
-extern struct alpha_soft_intrhand *softclock_intrhand;
 
 #define	setsoftnet()	softintr_schedule(softnet_intrhand)
-#define	setsoftclock()	softintr_schedule(softclock_intrhand)
 
 struct alpha_shared_intr *alpha_shared_intr_alloc(unsigned int);
 int	alpha_shared_intr_dispatch(struct alpha_shared_intr *,

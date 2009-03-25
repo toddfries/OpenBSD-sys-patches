@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.44 2009/02/21 18:37:47 miod Exp $ */
+/*	$OpenBSD: cpu.h,v 1.46 2009/03/15 20:39:53 miod Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
@@ -115,6 +115,8 @@ struct cpu_info {
 	u_int		 ci_cpudep3;
 	u_int		 ci_cpudep4;
 	u_int		 ci_cpudep5;
+	u_int		 ci_cpudep6;
+	u_int		 ci_cpudep7;
 
 	/* 88100 fields */
 #define	ci_pfsr_i0	 ci_cpudep0		/* instruction... */
@@ -129,6 +131,7 @@ struct cpu_info {
 #define	ci_h_epsr	 ci_cpudep3		/* for hardclock */
 #define	ci_s_sxip	 ci_cpudep4		/* and softclock */
 #define	ci_s_epsr	 ci_cpudep5
+#define	ci_pmap_ipi	 ci_cpudep6		/* delayed pmap tlb ipi */
 
 	struct schedstate_percpu
 			 ci_schedstate;		/* scheduling state */
@@ -144,7 +147,6 @@ struct cpu_info {
 #define	CI_DDB_INDDB	2
 #define	CI_DDB_PAUSE	3
 
-	int		 ci_softintr;		/* pending soft interrupts */
 	u_int32_t	 ci_randseed;		/* per-cpu random seed */
 
 	int		 ci_ipi;		/* pending ipis */
@@ -159,6 +161,7 @@ struct cpu_info {
 #define	CI_IPI_CACHE_FLUSH	0x00000040
 #define	CI_IPI_ICACHE_FLUSH	0x00000080
 #define	CI_IPI_DMA_CACHECTL	0x00000100
+	void		(*ci_softipi_cb)(void);	/* 88110 softipi callback */
 };
 
 extern cpuid_t master_cpu;
@@ -242,20 +245,6 @@ struct clockframe {
 #define	CLKF_PC(framep)		((framep)->tf.tf_sxip & XIP_ADDR)
 #define	CLKF_INTR(framep) \
 	(((struct cpu_info *)(framep)->tf.tf_cpu)->ci_intrdepth > 1)
-
-/*
- * Get interrupt glue.
- */
-#include <machine/intr.h>
-
-#define SIR_NET		0x01
-#define SIR_CLOCK	0x02
-#define	SIR_IPI		0x04
-
-#define setsoftint(ci,x)	atomic_setbits_int(&ci->ci_softintr, x)
-#define setsoftnet()		setsoftint(curcpu(), SIR_NET)
-#define setsoftclock()		setsoftint(curcpu(), SIR_CLOCK)
-#define	setsoftipi(ci)		setsoftint(ci, SIR_IPI)
 
 #define	aston(p)		((p)->p_md.md_astpending = 1)
 
