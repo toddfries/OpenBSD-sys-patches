@@ -27,7 +27,7 @@
 struct pxa2x0_apm_softc {
 	struct	device sc_dev;
 	struct	proc *sc_thread;
-	struct	lock sc_lock;
+	struct	rwlock sc_lock;
 	struct	klist sc_note;
 	int	sc_flags;
 	int	sc_wakeon;	/* enabled wakeup sources */
