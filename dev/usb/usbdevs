@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.414 2009/03/24 18:55:30 deraadt Exp $
+$OpenBSD: usbdevs,v 1.417 2009/03/26 19:46:22 damien Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -381,6 +381,7 @@ vendor DREAMCHEEKY	0x0a81	Dream Cheeky
 vendor IDQUANTIQUE	0x0aba	id Quantique
 vendor IDTECH		0x0acd	ID TECH
 vendor ZYDAS		0x0ace	ZyDAS Technology
+vendor CHENSOURCE	0x0ad2	Chen-Source
 vendor NEODIO		0x0aec  Neodio
 vendor OPTION		0x0af0  Option
 vendor TODOS		0x0b0c	Todos Data System
@@ -522,6 +523,7 @@ vendor MEINBERG		0x1938	Meinberg Funkuhren
 vendor QUALCOMM3	0x19d2	Qualcomm Inc.
 vendor QUANTA		0x1a32	Quanta
 vendor WCH2		0x1a86	QinHeng Electronics
+vendor LONGCHEER	0x1c9e	Longcheer Technology
 vendor AIRTIES		0x1eda	AirTies
 vendor DLINK		0x2001	D-Link
 vendor PLANEX2		0x2019	Planex Communications
@@ -556,6 +558,7 @@ vendor INTEL		0x8086	Intel
 vendor SITECOM2		0x9016	Sitecom
 vendor MOSCHIP		0x9710	MosChip
 vendor 3COM3		0xa727	3Com
+vendor CACE		0xcace	CACE Technologies
 vendor EVOLUTION	0xdeee	Evolution Robotics
 vendor EMPIA		0xeb1a	eMPIA Technology
 vendor HP2		0xf003	Hewlett Packard
@@ -955,6 +958,9 @@ product BTC BTC7932		0x6782	Keyboard/Mouse
 /* Bernd Walter Computer Technology products */
 product BWCT 6CHCONSER		0x0001	6ch ConSer
 
+/* CACE Technologies products */
+product CACE AIRPCAPNX		0x0300	AirPcap Nx
+
 /* Canon, Inc. products */
 product CANON N656U		0x2206	CANOSCAN N656U
 product CANON N1220U		0x2207	CANOSCAN N1220U
@@ -986,6 +992,9 @@ product CCYU EASYDISK		0x2136	EasyDisk Portable
 /* Cherry products */
 product CHERRY MY3000KBD	0x0001	My3000 keyboard
 product CHERRY MY3000HUB	0x0003	My3000 hub
+
+/* Chen-Source products */
+product CHENSOURCE CM12402	0x933d	CM12402 Eagle IR Cam
 
 /* Chic Technology products */
 product CHIC MOUSE1		0x0001	mouse
@@ -1921,6 +1930,10 @@ product LOGITECH RK53		0xc501	Cordless mouse
 product LOGITECH RB6		0xc503	Cordless keyboard
 product LOGITECH CDO		0xc504	Cordless Desktop Optical
 product LOGITECH QUICKCAMPRO2	0xd001	QuickCam Pro
+
+/* Longcheer products */
+product LONGCHEER D21LCMASS	0x9401	Emobile D21LC Mass only mode
+product LONGCHEER D21LC		0x9404	Emobile D21LC
 
 /* Longshine products */
 product ABOCOM LCS8138TX	0x401a	LCS-8138TX

@@ -75,30 +75,6 @@
 #define DRM_KERNEL_CONTEXT    0	 /* Change drm_resctx if changed	  */
 #define DRM_RESERVED_CONTEXTS 1	 /* Change drm_resctx if changed	  */
 
-#define DRM_MEM_DMA		0
-#define DRM_MEM_SAREA		1
-#define DRM_MEM_DRIVER		2
-#define DRM_MEM_MAGIC		3
-#define DRM_MEM_IOCTLS		4
-#define DRM_MEM_MAPS		5
-#define DRM_MEM_BUFS		6
-#define DRM_MEM_SEGS		7
-#define DRM_MEM_PAGES		8
-#define DRM_MEM_FILES		9
-#define DRM_MEM_QUEUES		10
-#define DRM_MEM_CMDS		11
-#define DRM_MEM_MAPPINGS	12
-#define DRM_MEM_BUFLISTS	13
-#define DRM_MEM_AGPLISTS	14
-#define DRM_MEM_TOTALAGP	15
-#define DRM_MEM_BOUNDAGP	16
-#define DRM_MEM_CTXBITMAP	17
-#define DRM_MEM_CTXLIST		18
-#define DRM_MEM_STUB		19
-#define DRM_MEM_SGLISTS		20
-#define DRM_MEM_DRAWABLE	21
-#define DRM_MEM_MM		22
-
 #define DRM_MAX_CTXBITMAP (PAGE_SIZE * 8)
 
 				/* Internal types and structures */
@@ -267,12 +243,6 @@ typedef struct drm_pci_id_list
 struct drm_file;
 struct drm_device;
 
-struct drm_magic_entry {
-	drm_magic_t	       magic;
-	struct drm_file	       *priv;
-	SPLAY_ENTRY(drm_magic_entry) node;
-};
-
 typedef struct drm_buf {
 	int		  idx;	       /* Index into master buflist	     */
 	int		  total;       /* Buffer size			     */
@@ -304,7 +274,7 @@ typedef struct drm_buf_entry {
 
 typedef TAILQ_HEAD(drm_file_list, drm_file) drm_file_list_t;
 struct drm_file {
-	TAILQ_ENTRY(drm_file)	 link;
+	SPLAY_ENTRY(drm_file)	 link;
 	int			 authenticated;
 	unsigned long		 ioctl_count;
 	dev_t			 kdev;
@@ -492,9 +462,8 @@ struct drm_device {
 	int		  buf_use;	/* Buffers in use -- cannot alloc  */
 
 				/* Authentication */
-	drm_file_list_t   files;
+	SPLAY_HEAD(drm_file_tree, drm_file)	files;
 	drm_magic_t	  magicid;
-	SPLAY_HEAD(drm_magic_tree, drm_magic_entry)	magiclist;
 
 	/* Linked list of mappable regions. Protected by dev_lock */
 	struct extent	*handle_ext;
@@ -557,15 +526,10 @@ drm_pci_id_list_t *drm_find_description(int , int , drm_pci_id_list_t *);
 struct drm_file	*drm_find_file_by_minor(struct drm_device *, int);
 
 /* Memory management support (drm_memory.c) */
-void	*_drm_alloc(size_t);
-#define	drm_alloc(size, area)	_drm_alloc(size)
-void	*_drm_calloc(size_t, size_t);
-#define	drm_calloc(nmemb, size, area) _drm_calloc(nmemb, size)
-void	*_drm_realloc(void *, size_t, size_t);
-#define	drm_realloc(old, oldsz, size, area) _drm_realloc(old, oldsz, size)
-void	_drm_free(void *);
-#define	drm_free(ptr, size, area) do { _drm_free(ptr); (void)(size); \
-} while( /*CONSTCOND*/ 0)
+void	*drm_alloc(size_t);
+void	*drm_calloc(size_t, size_t);
+void	*drm_realloc(void *, size_t, size_t);
+void	 drm_free(void *);
 void	*drm_ioremap(struct drm_device *, drm_local_map_t *);
 void	drm_ioremapfree(drm_local_map_t *);
 int	drm_mtrr_add(unsigned long, size_t, int);
@@ -654,19 +618,12 @@ int	drm_ati_pcigart_cleanup(struct drm_device *,
 /* Locking IOCTL support (drm_drv.c) */
 int	drm_lock(struct drm_device *, void *, struct drm_file *);
 int	drm_unlock(struct drm_device *, void *, struct drm_file *);
-int	drm_version(struct drm_device *, void *, struct drm_file *);
 
 /* Context IOCTL support (drm_context.c) */
 int	drm_resctx(struct drm_device *, void *, struct drm_file *);
 int	drm_addctx(struct drm_device *, void *, struct drm_file *);
 int	drm_getctx(struct drm_device *, void *, struct drm_file *);
 int	drm_rmctx(struct drm_device *, void *, struct drm_file *);
-
-/* Authentication IOCTL support (drm_auth.c) */
-int	drm_getmagic(struct drm_device *, void *, struct drm_file *);
-int	drm_authmagic(struct drm_device *, void *, struct drm_file *);
-int	drm_magic_cmp(struct drm_magic_entry *, struct drm_magic_entry *);
-SPLAY_PROTOTYPE(drm_magic_tree, drm_magic_entry, node, drm_magic_cmp);
 
 /* Buffer management support (drm_bufs.c) */
 int	drm_addmap_ioctl(struct drm_device *, void *, struct drm_file *);
