@@ -510,7 +510,7 @@ static int mga_do_agp_dma_bootstrap(struct drm_device *dev,
 	req.flags = _DRM_AGP_BUFFER;
 	req.agp_start = offset;
 
-	err = drm_addbufs_agp(dev, &req);
+	err = drm_addbufs(dev, &req);
 	if (err) {
 		DRM_ERROR("Unable to add secondary DMA buffers: %d\n", err);
 		return err;
@@ -621,7 +621,7 @@ static int mga_do_pci_dma_bootstrap(struct drm_device * dev,
 		req.count = bin_count;
 		req.size = dma_bs->secondary_bin_size;
 
-		err = drm_addbufs_pci(dev, &req);
+		err = drm_addbufs(dev, &req);
 		if (!err) {
 			break;
 		}
@@ -1001,11 +1001,16 @@ int mga_dma_reset(struct drm_device *dev, void *data,
  * DMA buffer management
  */
 
-static int mga_dma_get_buffers(struct drm_device * dev,
-			       struct drm_file *file_priv, struct drm_dma * d)
+
+int
+mga_dma_buffers(struct drm_device *dev, struct drm_dma * d,
+    struct drm_file *file_priv)
 {
+	drm_mga_private_t *dev_priv = (drm_mga_private_t *) dev->dev_private;
 	struct drm_buf *buf;
 	int i;
+
+	WRAP_TEST_WITH_RETURN(dev_priv);
 
 	for (i = d->granted_count; i < d->request_count; i++) {
 		buf = mga_freelist_get(dev);
@@ -1024,43 +1029,6 @@ static int mga_dma_get_buffers(struct drm_device * dev,
 		d->granted_count++;
 	}
 	return 0;
-}
-
-int mga_dma_buffers(struct drm_device *dev, void *data,
-		    struct drm_file *file_priv)
-{
-	struct drm_device_dma *dma = dev->dma;
-	drm_mga_private_t *dev_priv = (drm_mga_private_t *) dev->dev_private;
-	struct drm_dma *d = data;
-	int ret = 0;
-
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
-
-	/* Please don't send us buffers.
-	 */
-	if (d->send_count != 0) {
-		DRM_ERROR("Process %d trying to send %d buffers via drmDMA\n",
-			  DRM_CURRENTPID, d->send_count);
-		return EINVAL;
-	}
-
-	/* We'll send you buffers.
-	 */
-	if (d->request_count < 0 || d->request_count > dma->buf_count) {
-		DRM_ERROR("Process %d trying to get %d buffers (of %d max)\n",
-			  DRM_CURRENTPID, d->request_count, dma->buf_count);
-		return EINVAL;
-	}
-
-	WRAP_TEST_WITH_RETURN(dev_priv);
-
-	d->granted_count = 0;
-
-	if (d->request_count) {
-		ret = mga_dma_get_buffers(dev, file_priv, d);
-	}
-
-	return ret;
 }
 
 /**

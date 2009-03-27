@@ -78,37 +78,21 @@
 #define DRM_MAX_CTXBITMAP (PAGE_SIZE * 8)
 
 				/* Internal types and structures */
-#define DRM_ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
-#define DRM_MIN(a,b) ((a)<(b)?(a):(b))
-#define DRM_MAX(a,b) ((a)>(b)?(a):(b))
-
 #define DRM_IF_VERSION(maj, min) (maj << 16 | min)
 
 #define __OS_HAS_AGP	1
 
-#define DRM_WAKEUP(w)		wakeup((void *)w)
-
-#define DRM_CURPROC		curproc
 #define DRM_CURRENTPID		curproc->p_pid
-#define DRM_NOOP		do {} while(0)
 #define DRM_SPINTYPE		struct mutex
 #define DRM_SPININIT(l,name)	mtx_init(l,IPL_NONE)
-#define DRM_SPINUNINIT(l)	DRM_NOOP
 #define DRM_SPINLOCK(l)		mtx_enter(l)
 #define DRM_SPINUNLOCK(l)	mtx_leave(l)
-#define DRM_SPINLOCK_IRQSAVE(l, irqflags) do {		\
-	DRM_SPINLOCK(l);				\
-	(void)irqflags;					\
-} while (0)
-#define DRM_SPINUNLOCK_IRQRESTORE(u, irqflags) DRM_SPINUNLOCK(u)
-#define DRM_SPINLOCK_ASSERT(l)	DRM_NOOP
 #define DRM_LOCK()		rw_enter_write(&dev->dev_lock)
 #define DRM_UNLOCK()		rw_exit_write(&dev->dev_lock)
 #define DRM_MAXUNITS	8
 
 /* Deal with netbsd code where only the print statements differ */
 #define printk printf
-#define __unused /* nothing */
 
 #define DRM_IRQ_ARGS		void *arg
 typedef int			irqreturn_t;
@@ -218,7 +202,8 @@ DRM_SPINUNLOCK(&dev->irq_lock)
 
 #define DRM_ERROR(fmt, arg...) \
 	printf("error: [" DRM_NAME ":pid%d:%s] *ERROR* " fmt,		\
-	    DRM_CURRENTPID, __func__ , ## arg)
+	    curproc->p_pid, __func__ , ## arg)
+
 
 #define DRM_INFO(fmt, arg...)  printf("%s: " fmt, dev_priv->dev.dv_xname, ## arg)
 
@@ -226,7 +211,7 @@ DRM_SPINUNLOCK(&dev->irq_lock)
 #undef DRM_DEBUG
 #define DRM_DEBUG(fmt, arg...) do {					\
 	if (drm_debug_flag)						\
-		printf("[" DRM_NAME ":pid%d:%s] " fmt, DRM_CURRENTPID,	\
+		printf("[" DRM_NAME ":pid%d:%s] " fmt, curproc->p_pid,	\
 			__func__ , ## arg);				\
 } while (0)
 #else
@@ -300,13 +285,15 @@ struct drm_lock_data {
  * not concurrently accessed, so no locking is needed.
  */
 typedef struct drm_device_dma {
-	drm_buf_entry_t	  bufs[DRM_MAX_ORDER+1];
-	int		  buf_count;
-	drm_buf_t	  **buflist;	/* Vector of pointers info bufs	   */
-	int		  seg_count;
-	int		  page_count;
-	unsigned long	  *pagelist;
-	unsigned long	  byte_count;
+	struct rwlock	 dma_lock;
+	drm_buf_entry_t	 bufs[DRM_MAX_ORDER+1];
+	drm_buf_t	**buflist;	/* Vector of pointers info bufs	   */
+	unsigned long	*pagelist;
+	unsigned long	 byte_count;
+	int		 buf_use;	/* Buffers in use -- cannot alloc  */
+	int		 buf_count;
+	int		 page_count;
+	int		 seg_count;
 	enum {
 		_DRM_DMA_USE_AGP = 0x01,
 		_DRM_DMA_USE_SG  = 0x02
@@ -404,7 +391,8 @@ struct drm_driver_info {
 	void	(*lastclose)(struct drm_device *);
 	void	(*reclaim_buffers_locked)(struct drm_device *,
 		    struct drm_file *);
-	int	(*dma_ioctl)(struct drm_device *, void *, struct drm_file *);
+	int	(*dma_ioctl)(struct drm_device *, struct drm_dma *,
+		    struct drm_file *);
 	int	(*dma_quiescent)(struct drm_device *);
 	int	(*context_ctor)(struct drm_device *, int);
 	int	(*context_dtor)(struct drm_device *, int);
@@ -453,13 +441,11 @@ struct drm_device {
 	
 	int		  if_version;	/* Highest interface version set */
 				/* Locks */
-	DRM_SPINTYPE	  dma_lock;	/* protects dev->dma */
 	DRM_SPINTYPE	  irq_lock;	/* protects irq condition checks */
 	struct rwlock	  dev_lock;	/* protects everything else */
 
 				/* Usage Counters */
 	int		  open_count;	/* Outstanding files open	   */
-	int		  buf_use;	/* Buffers in use -- cannot alloc  */
 
 				/* Authentication */
 	SPLAY_HEAD(drm_file_tree, drm_file)	files;
@@ -486,7 +472,7 @@ struct drm_device {
 	struct timeout		 vblank_disable_timer;	/* timer for disable */
 	struct drm_vblank	*vblank;		/* One per ctrc */
 
-	pid_t		  buf_pgid;
+	pid_t			 buf_pgid;
 
 	struct drm_agp_head	*agp;
 	struct drm_sg_mem	*sg;  /* Scatter gather memory */
@@ -559,23 +545,23 @@ void	drm_write32(drm_local_map_t *, unsigned long, u_int32_t);
 int	drm_lock_take(struct drm_lock_data *, unsigned int);
 int	drm_lock_free(struct drm_lock_data *, unsigned int);
 
-/* Buffer management support (drm_bufs.c) */
+/* Buffer management and DMA support (drm_bufs.c) */
+int	drm_order(unsigned long);
+int	drm_rmmap_ioctl(struct drm_device *, void *, struct drm_file *);
 void	drm_rmmap(struct drm_device *, drm_local_map_t *);
 void	drm_rmmap_locked(struct drm_device *, drm_local_map_t *);
-int	drm_order(unsigned long);
+int	drm_addmap_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_addmap(struct drm_device *, unsigned long, unsigned long,
 	    enum drm_map_type, enum drm_map_flags, drm_local_map_t **);
-int	drm_addbufs_pci(struct drm_device *, struct drm_buf_desc *);
-int	drm_addbufs_sg(struct drm_device *, struct drm_buf_desc *);
-int	drm_addbufs_agp(struct drm_device *, struct drm_buf_desc *);
-
-/* DMA support (drm_dma.c) */
+int	drm_addbufs(struct drm_device *, struct drm_buf_desc *);
+int	drm_freebufs(struct drm_device *, void *, struct drm_file *);
+int	drm_mapbufs(struct drm_device *, void *, struct drm_file *);
+int	drm_dma(struct drm_device *, void *, struct drm_file *);
 int	drm_dma_setup(struct drm_device *);
 void	drm_dma_takedown(struct drm_device *);
 void	drm_cleanup_buf(struct drm_device *, drm_buf_entry_t *);
 void	drm_free_buffer(struct drm_device *, drm_buf_t *);
 void	drm_reclaim_buffers(struct drm_device *, struct drm_file *);
-#define drm_core_reclaim_buffers drm_reclaim_buffers
 
 /* IRQ support (drm_irq.c) */
 int	drm_irq_install(struct drm_device *);
@@ -624,16 +610,6 @@ int	drm_resctx(struct drm_device *, void *, struct drm_file *);
 int	drm_addctx(struct drm_device *, void *, struct drm_file *);
 int	drm_getctx(struct drm_device *, void *, struct drm_file *);
 int	drm_rmctx(struct drm_device *, void *, struct drm_file *);
-
-/* Buffer management support (drm_bufs.c) */
-int	drm_addmap_ioctl(struct drm_device *, void *, struct drm_file *);
-int	drm_rmmap_ioctl(struct drm_device *, void *, struct drm_file *);
-int	drm_addbufs_ioctl(struct drm_device *, void *, struct drm_file *);
-int	drm_freebufs(struct drm_device *, void *, struct drm_file *);
-int	drm_mapbufs(struct drm_device *, void *, struct drm_file *);
-
-/* DMA support (drm_dma.c) */
-int	drm_dma(struct drm_device *, void *, struct drm_file *);
 
 /* IRQ support (drm_irq.c) */
 int	drm_control(struct drm_device *, void *, struct drm_file *);
