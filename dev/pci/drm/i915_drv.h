@@ -85,28 +85,25 @@ typedef struct drm_i915_private {
 
 	struct vga_pci_bar	*regs;
 
-	drm_local_map_t		*sarea;
+	struct drm_local_map	*sarea;
 	drm_i915_sarea_t	*sarea_priv;
 
 	struct inteldrm_ring	 ring;
-	drm_local_map_t		 hws_map;
+	struct drm_local_map	 hws_map;
 	struct drm_dmamem	*hws_dmamem;
 	void			*hw_status_page;
 	unsigned int		 status_gfx_addr;
 	u_int32_t		 counter;
 
-	atomic_t irq_received;
 	/* Protects user_irq_refcount and irq_mask reg */
-	DRM_SPINTYPE user_irq_lock;
+	struct mutex		 user_irq_lock;
 	/* Refcount for user irq, only enabled when needed */
-	int user_irq_refcount;
+	int			 user_irq_refcount;
 	/* Cached value of IMR to avoid reads in updating the bitfield */
-	u_int32_t irq_mask_reg;
-	u_int32_t pipestat[2];
+	u_int32_t		 irq_mask_reg;
+	u_int32_t		 pipestat[2];
 
-	int tex_lru_log_granularity;
-	int allow_batchbuffer;
-	struct drm_heap agp_heap;
+	int			 allow_batchbuffer;
 
 	/* Register state */
 	u8 saveLBB;
@@ -227,7 +224,6 @@ void		inteldrm_update_ring(struct drm_i915_private *);
 extern void i915_driver_lastclose(struct drm_device * dev);
 extern void i915_driver_close(struct drm_device *dev,
 				 struct drm_file *file_priv);
-extern int i915_driver_device_is_agp(struct drm_device * dev);
 extern long i915_compat_ioctl(struct file *filp, unsigned int cmd,
 			      unsigned long arg);
 extern void i915_emit_breadcrumb(struct drm_device *dev);
@@ -244,7 +240,6 @@ extern int i915_irq_emit(struct drm_device *dev, void *data,
 extern int i915_irq_wait(struct drm_device *dev, void *data,
 			 struct drm_file *file_priv);
 
-extern irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS);
 extern int i915_driver_irq_install(struct drm_device * dev);
 extern void i915_driver_irq_uninstall(struct drm_device * dev);
 extern int i915_vblank_pipe_get(struct drm_device *dev, void *data,

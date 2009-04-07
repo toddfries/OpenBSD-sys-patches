@@ -40,12 +40,7 @@ void	inteldrm_attach(struct device *, struct device *, void *);
 int	inteldrm_detach(struct device *, int);
 int	inteldrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-int	i915drm_probe(struct device *, void *, void *);
-void	i915drm_attach(struct device *, struct device *, void *);
-int	inteldrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
-
-
-static drm_pci_id_list_t inteldrm_pciidlist[] = {
+const static struct drm_pcidev inteldrm_pciidlist[] = {
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82830M_IGD,
 	    CHIP_I830|CHIP_M},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82845G_IGD,
@@ -98,7 +93,6 @@ static drm_pci_id_list_t inteldrm_pciidlist[] = {
 static const struct drm_driver_info inteldrm_driver = {
 	.buf_priv_size		= 1,	/* No dev_priv */
 	.ioctl			= inteldrm_ioctl,
-	.close			= i915_driver_close,
 	.lastclose		= i915_driver_lastclose,
 	.vblank_pipes		= 2,
 	.get_vblank_counter	= i915_get_vblank_counter,
@@ -106,7 +100,6 @@ static const struct drm_driver_info inteldrm_driver = {
 	.disable_vblank		= i915_disable_vblank,
 	.irq_install		= i915_driver_irq_install,
 	.irq_uninstall		= i915_driver_irq_uninstall,
-	.irq_handler		= i915_driver_irq_handler,
 
 	.name			= DRIVER_NAME,
 	.desc			= DRIVER_DESC,
@@ -122,7 +115,8 @@ static const struct drm_driver_info inteldrm_driver = {
 int
 inteldrm_probe(struct device *parent, void *match, void *aux)
 {
-	return drm_pciprobe((struct pci_attach_args *)aux, inteldrm_pciidlist);
+	return (drm_pciprobe((struct pci_attach_args *)aux,
+	    inteldrm_pciidlist));
 }
 
 void
@@ -131,7 +125,7 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	struct drm_i915_private	*dev_priv = (struct drm_i915_private *)self;
 	struct pci_attach_args	*pa = aux;
 	struct vga_pci_bar	*bar;
-	drm_pci_id_list_t	*id_entry;
+	const struct drm_pcidev	*id_entry;
 
 	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
 	    PCI_PRODUCT(pa->pa_id), inteldrm_pciidlist);
@@ -173,7 +167,6 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	printf(": %s\n", pci_intr_string(pa->pa_pc, dev_priv->ih));
 
 	mtx_init(&dev_priv->user_irq_lock, IPL_BIO);
-	TAILQ_INIT(&dev_priv->agp_heap);
 
 	/* All intel chipsets need to be treated as agp, so just pass one */
 	dev_priv->drmdev = drm_attach_pci(&inteldrm_driver, pa, 1, self);
@@ -193,8 +186,6 @@ inteldrm_detach(struct device *self, int flags)
 
 	if (dev_priv->regs != NULL)
 		vga_pci_bar_unmap(dev_priv->regs);
-
-	DRM_SPINUNINIT(&dev_priv->user_irq_lock);
 
 	return (0);
 }
@@ -224,10 +215,6 @@ inteldrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 			return (i915_irq_wait(dev, data, file_priv));
 		case DRM_IOCTL_I915_GETPARAM:
 			return (i915_getparam(dev, data, file_priv));
-		case DRM_IOCTL_I915_ALLOC:
-			return (i915_mem_alloc(dev, data, file_priv));
-		case DRM_IOCTL_I915_FREE:
-			return (i915_mem_free(dev, data, file_priv));
 		case DRM_IOCTL_I915_CMDBUFFER:
 			return (i915_cmdbuffer(dev, data, file_priv));
 		case DRM_IOCTL_I915_GET_VBLANK_PIPE:
@@ -241,12 +228,11 @@ inteldrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 			return (i915_setparam(dev, data, file_priv));
 		case DRM_IOCTL_I915_INIT:
 			return (i915_dma_init(dev, data, file_priv));
-		case DRM_IOCTL_I915_INIT_HEAP:
-			return (i915_mem_init_heap(dev, data, file_priv));
-		case DRM_IOCTL_I915_DESTROY_HEAP:
-			return (i915_mem_destroy_heap(dev, data, file_priv));
 		case DRM_IOCTL_I915_HWS_ADDR:
 			return (i915_set_status_page(dev, data, file_priv));
+		/* Removed, but still used by userland, so just say `fine' */
+		case DRM_IOCTL_I915_INIT_HEAP:
+		case DRM_IOCTL_I915_DESTROY_HEAP:
 		case DRM_IOCTL_I915_SET_VBLANK_PIPE:
 			return (0);
 		}

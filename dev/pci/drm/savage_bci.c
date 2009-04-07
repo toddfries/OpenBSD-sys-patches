@@ -203,22 +203,17 @@ uint16_t savage_bci_emit_event(drm_savage_private_t *dev_priv,
 /*
  * Freelist management
  */
-static int savage_freelist_init(struct drm_device *dev)
+static int
+savage_freelist_init(struct drm_device *dev)
 {
-	drm_savage_private_t *dev_priv = dev->dev_private;
-	struct drm_device_dma *dma = dev->dma;
-	struct drm_buf *buf;
-	drm_savage_buf_priv_t *entry;
-	int i;
+	drm_savage_private_t		*dev_priv = dev->dev_private;
+	struct drm_device_dma		*dma = dev->dma;
+	struct drm_buf			*buf;
+	struct savagedrm_buf_priv	*entry;
+	int				 i;
 	DRM_DEBUG("count=%d\n", dma->buf_count);
 
-	dev_priv->head.next = &dev_priv->tail;
-	dev_priv->head.prev = NULL;
-	dev_priv->head.buf = NULL;
-
-	dev_priv->tail.next = NULL;
-	dev_priv->tail.prev = &dev_priv->head;
-	dev_priv->tail.buf = NULL;
+	TAILQ_INIT(&dev_priv->freelist);
 
 	for (i = 0; i < dma->buf_count; i++) {
 		buf = dma->buflist[i];
@@ -226,22 +221,21 @@ static int savage_freelist_init(struct drm_device *dev)
 
 		SET_AGE(&entry->age, 0, 0);
 		entry->buf = buf;
+		entry->free = 1;
 
-		entry->next = dev_priv->head.next;
-		entry->prev = &dev_priv->head;
-		dev_priv->head.next->prev = entry;
-		dev_priv->head.next = entry;
+		TAILQ_INSERT_HEAD(&dev_priv->freelist, entry, link);
 	}
 
-	return 0;
+	return (0);
 }
 
-static struct drm_buf *savage_freelist_get(struct drm_device *dev)
+static struct drm_buf *
+savage_freelist_get(struct drm_device *dev)
 {
-	drm_savage_private_t *dev_priv = dev->dev_private;
-	drm_savage_buf_priv_t *tail = dev_priv->tail.prev;
-	uint16_t event;
-	unsigned int wrap;
+	drm_savage_private_t		*dev_priv = dev->dev_private;
+	struct savagedrm_buf_priv	*tail;
+	uint16_t			 event;
+	unsigned int			 wrap;
 	DRM_DEBUG("\n");
 
 	UPDATE_EVENT_COUNTER();
@@ -256,37 +250,36 @@ static struct drm_buf *savage_freelist_get(struct drm_device *dev)
 	DRM_DEBUG("   tail=0x%04x %d\n", tail->age.event, tail->age.wrap);
 	DRM_DEBUG("   head=0x%04x %d\n", event, wrap);
 
-	if (tail->buf && (TEST_AGE(&tail->age, event, wrap) || event == 0)) {
-		drm_savage_buf_priv_t *next = tail->next;
-		drm_savage_buf_priv_t *prev = tail->prev;
-		prev->next = next;
-		next->prev = prev;
-		tail->next = tail->prev = NULL;
-		return tail->buf;
+	if (TAILQ_EMPTY(&dev_priv->freelist))
+		goto out;
+
+	tail = TAILQ_LAST(&dev_priv->freelist, savage_freelist);
+	if (TEST_AGE(&tail->age, event, wrap) || event == 0) {
+		TAILQ_REMOVE(&dev_priv->freelist, tail, link);
+		tail->free = 0;
+		return (tail->buf);
 	}
 
+out:
 	DRM_DEBUG("returning NULL, tail->buf=%p!\n", tail->buf);
 	return NULL;
 }
 
-void savage_freelist_put(struct drm_device *dev, struct drm_buf *buf)
+void
+savage_freelist_put(struct drm_device *dev, struct drm_buf *buf)
 {
-	drm_savage_private_t *dev_priv = dev->dev_private;
-	drm_savage_buf_priv_t *entry = buf->dev_private, *prev, *next;
+	drm_savage_private_t		*dev_priv = dev->dev_private;
+	struct savagedrm_buf_priv	*entry = buf->dev_private;
 
 	DRM_DEBUG("age=0x%04x wrap=%d\n", entry->age.event, entry->age.wrap);
 
-	if (entry->next != NULL || entry->prev != NULL) {
+	if (entry->free == 1) {
 		DRM_ERROR("entry already on freelist.\n");
 		return;
 	}
 
-	prev = &dev_priv->head;
-	next = prev->next;
-	prev->next = entry;
-	next->prev = entry;
-	entry->prev = prev;
-	entry->next = next;
+	entry->free = 1;
+	TAILQ_INSERT_HEAD(&dev_priv->freelist, entry, link);
 }
 
 /*
@@ -298,8 +291,7 @@ static int savage_dma_init(drm_savage_private_t *dev_priv)
 
 	dev_priv->nr_dma_pages = dev_priv->cmd_dma->size /
 		(SAVAGE_DMA_PAGE_SIZE*4);
-	dev_priv->dma_pages = drm_calloc(sizeof(drm_savage_dma_page_t),
-	    dev_priv->nr_dma_pages, DRM_MEM_DRIVER);
+	dev_priv->dma_pages = drm_calloc(1, sizeof(*dev_priv->dma_pages));
 	if (dev_priv->dma_pages == NULL)
 		return ENOMEM;
 
@@ -735,8 +727,7 @@ static int savage_do_init_bci(struct drm_device *dev, drm_savage_init_t *init)
 		dev_priv->fake_dma.offset = 0;
 		dev_priv->fake_dma.size = SAVAGE_FAKE_DMA_SIZE;
 		dev_priv->fake_dma.type = _DRM_SHM;
-		dev_priv->fake_dma.handle = drm_alloc(SAVAGE_FAKE_DMA_SIZE,
-		    DRM_MEM_DRIVER);
+		dev_priv->fake_dma.handle = drm_alloc(SAVAGE_FAKE_DMA_SIZE);
 		if (!dev_priv->fake_dma.handle) {
 			DRM_ERROR("could not allocate faked DMA buffer!\n");
 			savage_do_cleanup_bci(dev);
@@ -836,8 +827,7 @@ static int savage_do_cleanup_bci(struct drm_device *dev)
 
 	if (dev_priv->cmd_dma == &dev_priv->fake_dma) {
 		if (dev_priv->fake_dma.handle)
-			drm_free(dev_priv->fake_dma.handle,
-				 SAVAGE_FAKE_DMA_SIZE, DRM_MEM_DRIVER);
+			drm_free(dev_priv->fake_dma.handle);
 	} else if (dev_priv->cmd_dma && dev_priv->cmd_dma->handle &&
 		   dev_priv->cmd_dma->type == _DRM_AGP &&
 		   dev_priv->dma_type == SAVAGE_DMA_AGP)
@@ -853,9 +843,7 @@ static int savage_do_cleanup_bci(struct drm_device *dev)
 	}
 
 	if (dev_priv->dma_pages)
-		drm_free(dev_priv->dma_pages,
-			 sizeof(drm_savage_dma_page_t)*dev_priv->nr_dma_pages,
-			 DRM_MEM_DRIVER);
+		drm_free(dev_priv->dma_pages);
 
 	return 0;
 }
@@ -926,9 +914,9 @@ int savage_bci_event_wait(struct drm_device *dev, void *data, struct drm_file *f
  * DMA buffer management
  */
 
-static int savage_bci_get_buffers(struct drm_device *dev,
-				  struct drm_file *file_priv,
-				  struct drm_dma *d)
+int
+savage_bci_buffers(struct drm_device *dev, struct drm_dma *d,
+    struct drm_file *file_priv)
 {
 	struct drm_buf *buf;
 	int i;
@@ -952,44 +940,12 @@ static int savage_bci_get_buffers(struct drm_device *dev,
 	return 0;
 }
 
-int savage_bci_buffers(struct drm_device *dev, void *data, struct drm_file *file_priv)
-{
-	struct drm_device_dma *dma = dev->dma;
-	struct drm_dma *d = data;
-	int ret = 0;
-
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
-
-	/* Please don't send us buffers.
-	 */
-	if (d->send_count != 0) {
-		DRM_ERROR("Process %d trying to send %d buffers via drmDMA\n",
-			  DRM_CURRENTPID, d->send_count);
-		return EINVAL;
-	}
-
-	/* We'll send you buffers.
-	 */
-	if (d->request_count < 0 || d->request_count > dma->buf_count) {
-		DRM_ERROR("Process %d trying to get %d buffers (of %d max)\n",
-			  DRM_CURRENTPID, d->request_count, dma->buf_count);
-		return EINVAL;
-	}
-
-	d->granted_count = 0;
-
-	if (d->request_count) {
-		ret = savage_bci_get_buffers(dev, file_priv, d);
-	}
-
-	return ret;
-}
 
 void savage_reclaim_buffers(struct drm_device *dev, struct drm_file *file_priv)
 {
-	struct drm_device_dma *dma = dev->dma;
-	drm_savage_private_t *dev_priv = dev->dev_private;
-	int i;
+	struct drm_device_dma	*dma = dev->dma;
+	drm_savage_private_t	*dev_priv = dev->dev_private;
+	int			 i;
 
 	if (!dma)
 		return;
@@ -1000,11 +956,12 @@ void savage_reclaim_buffers(struct drm_device *dev, struct drm_file *file_priv)
 
 	for (i = 0; i < dma->buf_count; i++) {
 		struct drm_buf *buf = dma->buflist[i];
-		drm_savage_buf_priv_t *buf_priv = buf->dev_private;
+		struct savagedrm_buf_priv *buf_priv = buf->dev_private;
 
 		if (buf->file_priv == file_priv && buf_priv &&
-		    buf_priv->next == NULL && buf_priv->prev == NULL) {
+		    buf_priv->free == 0) {
 			uint16_t event;
+
 			DRM_DEBUG("reclaimed from client\n");
 			event = savage_bci_emit_event(dev_priv, SAVAGE_WAIT_3D);
 			SET_AGE(&buf_priv->age, event, dev_priv->event_wrap);
@@ -1012,5 +969,5 @@ void savage_reclaim_buffers(struct drm_device *dev, struct drm_file *file_priv)
 		}
 	}
 
-	drm_core_reclaim_buffers(dev, file_priv);
+	drm_reclaim_buffers(dev, file_priv);
 }

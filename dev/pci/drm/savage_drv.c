@@ -35,7 +35,7 @@ int	savagedrm_probe(struct device *, void *, void *);
 void	savagedrm_attach(struct device *, struct device *, void *);
 int	savagedrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-static drm_pci_id_list_t savagedrm_pciidlist[] = {
+const static struct drm_pcidev savagedrm_pciidlist[] = {
 	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SAVAGE3D, S3_SAVAGE3D},
 	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SAVAGE3D_M, S3_SAVAGE3D},
 	{PCI_VENDOR_S3, PCI_PRODUCT_S3_SAVAGE4, S3_SAVAGE4},
@@ -63,7 +63,7 @@ static drm_pci_id_list_t savagedrm_pciidlist[] = {
 };
 
 static const struct drm_driver_info savagedrm_driver = {
-	.buf_priv_size		= sizeof(drm_savage_buf_priv_t),
+	.buf_priv_size		= sizeof(struct savagedrm_buf_priv),
 	.firstopen		= savage_driver_firstopen,
 	.lastclose		= savage_driver_lastclose,
 	.reclaim_buffers_locked = savage_reclaim_buffers,
@@ -92,7 +92,7 @@ savagedrm_attach(struct device *parent, struct device *self, void *aux)
 	drm_savage_private_t	*dev_priv = (drm_savage_private_t *)self;
 	struct pci_attach_args	*pa = aux;
 	struct vga_pci_bar	*bar;
-	drm_pci_id_list_t	*id_entry;
+	const struct drm_pcidev	*id_entry;
 	unsigned long		 mmio_base;
 	int			 is_agp;
 

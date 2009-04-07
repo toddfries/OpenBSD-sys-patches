@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.101 2009/02/19 11:12:42 kettenis Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.103 2009/04/04 21:07:48 kettenis Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.51 2001/07/24 19:32:11 eeh Exp $ */
 
 /*
@@ -115,7 +115,7 @@ static	void mainbus_attach(struct device *, struct device *, void *);
 int	get_ncpus(void);
 
 struct device *booted_device;
-struct	bootpath bootpath[8];
+struct	bootpath bootpath[16];
 int	nbootpath;
 int	bootnode;
 static	void bootpath_build(void);
@@ -661,8 +661,6 @@ sun4v_soft_state_init(void)
 
 	if (prom_set_sun4v_api_version(HSVC_GROUP_SOFT_STATE, 1, 0, &minor))
 		return;
-
-	prom_printf("minor %lld\r\n", minor);
 
 	prom_sun4v_soft_state_supported();
 	sun4v_soft_state_initialized = 1;

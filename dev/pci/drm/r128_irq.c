@@ -35,21 +35,26 @@
 #include "r128_drm.h"
 #include "r128_drv.h"
 
-u32 r128_get_vblank_counter(struct drm_device *dev, int crtc)
+int	ragedrm_intr(void *);
+
+u_int32_t
+r128_get_vblank_counter(struct drm_device *dev, int crtc)
 {
-	const drm_r128_private_t *dev_priv = dev->dev_private;
+	const drm_r128_private_t	*dev_priv = dev->dev_private;
 
 	if (crtc != 0)
 		return 0;
 
-	return atomic_read(&dev_priv->vbl_received);
+	return (atomic_read(&dev_priv->vbl_received));
 }
 
-irqreturn_t r128_driver_irq_handler(DRM_IRQ_ARGS)
+int
+ragedrm_intr(void *arg)
 {
-	struct drm_device *dev = (struct drm_device *) arg;
-	drm_r128_private_t *dev_priv = (drm_r128_private_t *) dev->dev_private;
-	int status;
+	struct drm_device	*dev = (struct drm_device *) arg;
+	drm_r128_private_t	*dev_priv = dev->dev_private;
+	u_int32_t		 status;
+	int			 handled = 0;
 
 	status = R128_READ(R128_GEN_INT_STATUS);
 
@@ -58,25 +63,27 @@ irqreturn_t r128_driver_irq_handler(DRM_IRQ_ARGS)
 		R128_WRITE(R128_GEN_INT_STATUS, R128_CRTC_VBLANK_INT_AK);
 		atomic_inc(&dev_priv->vbl_received);
 		drm_handle_vblank(dev, 0);
-		return IRQ_HANDLED;
+		handled = 1;
 	}
-	return IRQ_NONE;
+	return (handled);
 }
 
-int r128_enable_vblank(struct drm_device *dev, int crtc)
+int
+r128_enable_vblank(struct drm_device *dev, int crtc)
 {
-	drm_r128_private_t *dev_priv = dev->dev_private;
+	drm_r128_private_t	*dev_priv = dev->dev_private;
 
 	if (crtc != 0) {
 		DRM_ERROR("%s:  bad crtc %d\n", __FUNCTION__, crtc);
-		return -EINVAL;
+		return (EINVAL);
 	}
 
 	R128_WRITE(R128_GEN_INT_CNTL, R128_CRTC_VBLANK_INT_EN);
-	return 0;
+	return (0);
 }
 
-void r128_disable_vblank(struct drm_device *dev, int crtc)
+void
+r128_disable_vblank(struct drm_device *dev, int crtc)
 {
 	if (crtc != 0)
 		DRM_ERROR("%s:  bad crtc %d\n", __FUNCTION__, crtc);
@@ -93,7 +100,7 @@ void r128_disable_vblank(struct drm_device *dev, int crtc)
 int
 r128_driver_irq_install(struct drm_device * dev)
 {
-	drm_r128_private_t *dev_priv = (drm_r128_private_t *) dev->dev_private;
+	drm_r128_private_t *dev_priv = dev->dev_private;
 
 	/* Disable *all* interrupts */
 	R128_WRITE(R128_GEN_INT_CNTL, 0);
@@ -101,7 +108,7 @@ r128_driver_irq_install(struct drm_device * dev)
 	R128_WRITE(R128_GEN_INT_STATUS, R128_CRTC_VBLANK_INT_AK);
 
 	dev_priv->irqh = pci_intr_establish(dev_priv->pc, dev_priv->ih, IPL_BIO,
-	    drm_irq_handler_wrap, dev, dev_priv->dev.dv_xname);
+	    ragedrm_intr, dev, dev_priv->dev.dv_xname);
 	if (dev_priv->irqh == NULL)
 		return (ENOENT);
 	return (0);
@@ -110,7 +117,7 @@ r128_driver_irq_install(struct drm_device * dev)
 void
 r128_driver_irq_uninstall(struct drm_device * dev)
 {
-	drm_r128_private_t *dev_priv = (drm_r128_private_t *) dev->dev_private;
+	drm_r128_private_t *dev_priv = dev->dev_private;
 
 	/* Disable *all* interrupts */
 	R128_WRITE(R128_GEN_INT_CNTL, 0);

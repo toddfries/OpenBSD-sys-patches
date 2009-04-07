@@ -477,7 +477,7 @@ radeon_emit_clip_rect(drm_radeon_private_t *dev_priv, struct drm_clip_rect *box)
  * 1.3 cmdbuffers allow all previous state to be updated as well as
  * the tcl scalar and vector areas.
  */
-static struct {
+const static struct {
 	int start;
 	int len;
 	const char *name;
@@ -2184,12 +2184,12 @@ radeon_cp_cmdbuf(struct drm_device *dev, void *data,
 	 */
 	orig_bufsz = cmdbuf->bufsz;
 	if (orig_bufsz != 0) {
-		kbuf = drm_alloc(cmdbuf->bufsz, DRM_MEM_DRIVER);
+		kbuf = drm_alloc(cmdbuf->bufsz);
 		if (kbuf == NULL)
 			return ENOMEM;
 		if (DRM_COPY_FROM_USER(kbuf, (void __user *)cmdbuf->buf,
 				       cmdbuf->bufsz)) {
-			drm_free(kbuf, orig_bufsz, DRM_MEM_DRIVER);
+			drm_free(kbuf);
 			return EFAULT;
 		}
 		cmdbuf->buf = kbuf;
@@ -2202,7 +2202,7 @@ radeon_cp_cmdbuf(struct drm_device *dev, void *data,
 		temp = r300_do_cp_cmdbuf(dev, file_priv, cmdbuf);
 
 		if (orig_bufsz != 0)
-			drm_free(kbuf, orig_bufsz, DRM_MEM_DRIVER);
+			drm_free(kbuf);
 
 		return temp;
 	}
@@ -2309,7 +2309,7 @@ radeon_cp_cmdbuf(struct drm_device *dev, void *data,
 	}
 
 	if (orig_bufsz != 0)
-		drm_free(kbuf, orig_bufsz, DRM_MEM_DRIVER);
+		drm_free(kbuf);
 
 	DRM_DEBUG("DONE\n");
 	COMMIT_RING();
@@ -2317,7 +2317,7 @@ radeon_cp_cmdbuf(struct drm_device *dev, void *data,
 
       err:
 	if (orig_bufsz != 0)
-		drm_free(kbuf, orig_bufsz, DRM_MEM_DRIVER);
+		drm_free(kbuf);
 	return EINVAL;
 }
 
@@ -2341,13 +2341,13 @@ radeon_cp_getparam(struct drm_device *dev, void *data,
 		value = dev_priv->gart_buffers_offset;
 		break;
 	case RADEON_PARAM_LAST_FRAME:
-		value = GET_SCRATCH(0);
+		value = radeondrm_get_scratch(dev_priv, 0);
 		break;
 	case RADEON_PARAM_LAST_DISPATCH:
-		value = GET_SCRATCH(1);
+		value = radeondrm_get_scratch(dev_priv, 1);
 		break;
 	case RADEON_PARAM_LAST_CLEAR:
-		value = GET_SCRATCH(2);
+		value = radeondrm_get_scratch(dev_priv, 2);
 		break;
 	case RADEON_PARAM_IRQ_NR:
 		value = dev->irq;
@@ -2487,8 +2487,8 @@ radeon_driver_close(struct drm_device *dev, struct drm_file *file_priv)
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 
 	dev_priv->page_flipping = 0;
-	radeon_mem_release(file_priv, &dev_priv->gart_heap);
-	radeon_mem_release(file_priv, &dev_priv->fb_heap);
+	drm_mem_release(&dev_priv->gart_heap, file_priv);
+	drm_mem_release(&dev_priv->fb_heap, file_priv);
 	if (dev_priv->cp_running)
 		radeon_surfaces_release(file_priv, dev_priv);
 }

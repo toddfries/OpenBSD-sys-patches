@@ -57,7 +57,12 @@ int	 drm_activate(struct device *, enum devact);
 int	 drmprint(void *, const char *);
 
 int	 drm_getunique(struct drm_device *, void *, struct drm_file *);
+int	 drm_version(struct drm_device *, void *, struct drm_file *);
 int	 drm_setversion(struct drm_device *, void *, struct drm_file *);
+int	 drm_getmagic(struct drm_device *, void *, struct drm_file *);
+int	 drm_authmagic(struct drm_device *, void *, struct drm_file *);
+int	 drm_file_cmp(struct drm_file *, struct drm_file *);
+SPLAY_PROTOTYPE(drm_file_tree, drm_file, link, drm_file_cmp);
 
 /*
  * attach drm to a pci-based driver.
@@ -93,14 +98,14 @@ int
 drmprint(void *aux, const char *pnp)
 {
 	if (pnp != NULL)
-		printf("drm at %s\n", pnp);
+		printf("drm at %s", pnp);
 	return (UNCONF);
 }
 
 int
-drm_pciprobe(struct pci_attach_args *pa, drm_pci_id_list_t *idlist)
+drm_pciprobe(struct pci_attach_args *pa, const struct drm_pcidev *idlist)
 {
-	drm_pci_id_list_t *id_entry;
+	const struct drm_pcidev *id_entry;
 
 	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
 	    PCI_PRODUCT(pa->pa_id), idlist);
@@ -137,7 +142,7 @@ drm_attach(struct device *parent, struct device *self, void *aux)
 	mtx_init(&dev->lock.spinlock, IPL_NONE);
 
 	TAILQ_INIT(&dev->maplist);
-	TAILQ_INIT(&dev->files);
+	SPLAY_INIT(&dev->files);
 
 	if (dev->driver->vblank_pipes != 0 && drm_vblank_init(dev,
 	    dev->driver->vblank_pipes)) {
@@ -205,7 +210,7 @@ drm_detach(struct device *self, int flags)
 
 
 	if (dev->agp != NULL) {
-		drm_free(dev->agp, sizeof(*dev->agp), DRM_MEM_AGPLISTS);
+		drm_free(dev->agp);
 		dev->agp = NULL;
 	}
 
@@ -236,8 +241,8 @@ struct cfdriver drm_cd = {
 	0, "drm", DV_DULL
 };
 
-drm_pci_id_list_t *
-drm_find_description(int vendor, int device, drm_pci_id_list_t *idlist)
+const struct drm_pcidev *
+drm_find_description(int vendor, int device, const struct drm_pcidev *idlist)
 {
 	int i = 0;
 	
@@ -249,24 +254,28 @@ drm_find_description(int vendor, int device, drm_pci_id_list_t *idlist)
 	return NULL;
 }
 
+int
+drm_file_cmp(struct drm_file *f1, struct drm_file *f2)
+{
+	return (f1->minor < f2->minor ? -1 : f1->minor > f2->minor);
+}
+
+SPLAY_GENERATE(drm_file_tree, drm_file, link, drm_file_cmp);
+
 struct drm_file *
 drm_find_file_by_minor(struct drm_device *dev, int minor)
 {
-	struct drm_file *priv;
+	struct drm_file	key;
 
-	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
-
-	TAILQ_FOREACH(priv, &dev->files, link)
-		if (priv->minor == minor)
-			break;
-        return (priv);
+	key.minor = minor;
+	return (SPLAY_FIND(drm_file_tree, &dev->files, &key));
 }
 
 int
 drm_firstopen(struct drm_device *dev)
 {
-	drm_local_map_t *map;
-	int i;
+	struct drm_local_map	*map;
+	int			 i;
 
 	/* prebuild the SAREA */
 	i = drm_addmap(dev, 0, SAREA_MAX, _DRM_SHM,
@@ -278,13 +287,11 @@ drm_firstopen(struct drm_device *dev)
 		dev->driver->firstopen(dev);
 
 	if (dev->driver->flags & DRIVER_DMA) {
-		i = drm_dma_setup(dev);
-		if (i != 0)
-			return i;
+		if ((i = drm_dma_setup(dev)) != 0)
+			return (i);
 	}
 
 	dev->magicid = 1;
-	SPLAY_INIT(&dev->magiclist);
 
 	dev->irq_enabled = 0;
 	dev->if_version = 0;
@@ -299,8 +306,7 @@ drm_firstopen(struct drm_device *dev)
 int
 drm_lastclose(struct drm_device *dev)
 {
-	struct drm_magic_entry *pt;
-	drm_local_map_t *map, *mapsave;
+	struct drm_local_map	*map, *mapsave;
 
 	DRM_DEBUG("\n");
 
@@ -314,12 +320,6 @@ drm_lastclose(struct drm_device *dev)
 	drm_dma_takedown(dev);
 
 	DRM_LOCK();
-	/* Clear pid list */
-	while ((pt = SPLAY_ROOT(&dev->magiclist)) != NULL) {
-		SPLAY_REMOVE(drm_magic_tree, &dev->magiclist, pt);
-		drm_free(pt, sizeof(*pt), DRM_MEM_MAGIC);
-	}
-
 	if (dev->sg != NULL) {
 		struct drm_sg_mem *sg = dev->sg; 
 		dev->sg = NULL;
@@ -332,7 +332,7 @@ drm_lastclose(struct drm_device *dev)
 	for (map = TAILQ_FIRST(&dev->maplist); map != TAILQ_END(&dev->maplist);
 	    map = mapsave) {
 		mapsave = TAILQ_NEXT(map, link);
-		if (!(map->flags & _DRM_DRIVER))
+		if ((map->flags & _DRM_DRIVER) == 0)
 			drm_rmmap_locked(dev, map);
 	}
 
@@ -342,32 +342,6 @@ drm_lastclose(struct drm_device *dev)
 		wakeup(&dev->lock); /* there should be nothing sleeping on it */
 	}
 	DRM_UNLOCK();
-
-	return 0;
-}
-
-int
-drm_version(struct drm_device *dev, void *data, struct drm_file *file_priv)
-{
-	struct drm_version	*version = data;
-	int			 len;
-
-#define DRM_COPY(name, value)						\
-	len = strlen( value );						\
-	if ( len > name##_len ) len = name##_len;			\
-	name##_len = strlen( value );					\
-	if ( len && name ) {						\
-		if ( DRM_COPY_TO_USER( name, value, len ) )		\
-			return EFAULT;				\
-	}
-
-	version->version_major = dev->driver->major;
-	version->version_minor = dev->driver->minor;
-	version->version_patchlevel = dev->driver->patchlevel;
-
-	DRM_COPY(version->name, dev->driver->name);
-	DRM_COPY(version->date, dev->driver->date);
-	DRM_COPY(version->desc, dev->driver->desc);
 
 	return 0;
 }
@@ -399,7 +373,7 @@ drmopen(dev_t kdev, int flags, int fmt, struct proc *p)
 
 	/* always allocate at least enough space for our data */
 	priv = drm_calloc(1, max(dev->driver->file_priv_size,
-	    sizeof(*priv)), DRM_MEM_FILES);
+	    sizeof(*priv)));
 	if (priv == NULL) {
 		ret = ENOMEM;
 		goto err;
@@ -422,22 +396,21 @@ drmopen(dev_t kdev, int flags, int fmt, struct proc *p)
 
 	DRM_LOCK();
 	/* first opener automatically becomes master if root */
-	if (TAILQ_EMPTY(&dev->files) && !DRM_SUSER(p)) {
+	if (SPLAY_EMPTY(&dev->files) && !DRM_SUSER(p)) {
 		DRM_UNLOCK();
 		ret = EPERM;
 		goto free_priv;
 	}
 
-	priv->master = TAILQ_EMPTY(&dev->files);
+	priv->master = SPLAY_EMPTY(&dev->files);
 
-	TAILQ_INSERT_TAIL(&dev->files, priv, link);
+	SPLAY_INSERT(drm_file_tree, &dev->files, priv);
 	DRM_UNLOCK();
 
 	return (0);
 
 free_priv:
-	drm_free(priv, max(dev->driver->file_priv_size,
-	    sizeof(*priv)), DRM_MEM_FILES);
+	drm_free(priv);
 err:
 	DRM_LOCK();
 	--dev->open_count;
@@ -494,7 +467,6 @@ drmclose(dev_t kdev, int flags, int fmt, struct proc *p)
 			}
 			if (drm_lock_take(&dev->lock, DRM_KERNEL_CONTEXT)) {
 				dev->lock.file_priv = file_priv;
-				dev->lock.lock_time = jiffies;
 				break;	/* Got lock */
 			}
 				/* Contention */
@@ -517,9 +489,8 @@ drmclose(dev_t kdev, int flags, int fmt, struct proc *p)
 	dev->buf_pgid = 0;
 
 	DRM_LOCK();
-	TAILQ_REMOVE(&dev->files, file_priv, link);
-	drm_free(file_priv, max(dev->driver->file_priv_size, 
-	    sizeof(*file_priv)), DRM_MEM_FILES);
+	SPLAY_REMOVE(drm_file_tree, &dev->files, file_priv);
+	drm_free(file_priv);
 
 done:
 	if (--dev->open_count == 0) {
@@ -529,7 +500,7 @@ done:
 
 	DRM_UNLOCK();
 	
-	return retcode;
+	return (retcode);
 }
 
 /* drmioctl is called whenever a process performs an ioctl on /dev/drm.
@@ -645,7 +616,7 @@ drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags,
 		case DRM_IOCTL_RM_CTX:
 			return (drm_rmctx(dev, data, file_priv));
 		case DRM_IOCTL_ADD_BUFS:
-			return (drm_addbufs_ioctl(dev, data, file_priv));
+			return (drm_addbufs(dev, (struct drm_buf_desc *)data));
 		case DRM_IOCTL_CONTROL:
 			return (drm_control(dev, data, file_priv));
 		case DRM_IOCTL_AGP_ACQUIRE:
@@ -690,10 +661,10 @@ drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags,
 		return (EINVAL);
 }
 
-drm_local_map_t *
+struct drm_local_map *
 drm_getsarea(struct drm_device *dev)
 {
-	drm_local_map_t *map;
+	struct drm_local_map	*map;
 
 	DRM_LOCK();
 	TAILQ_FOREACH(map, &dev->maplist, link) {
@@ -708,7 +679,7 @@ paddr_t
 drmmmap(dev_t kdev, off_t offset, int prot)
 {
 	struct drm_device	*dev = drm_get_device_from_kdev(kdev);
-	drm_local_map_t		*map;
+	struct drm_local_map	*map;
 	struct drm_file		*priv;
 	enum drm_map_type	 type;
 
@@ -727,19 +698,15 @@ drmmmap(dev_t kdev, off_t offset, int prot)
 		return (-1);
 
 	if (dev->dma && offset >= 0 && offset < ptoa(dev->dma->page_count)) {
-		drm_device_dma_t *dma = dev->dma;
+		struct drm_device_dma *dma = dev->dma;
+		paddr_t	phys = -1;
 
-		DRM_SPINLOCK(&dev->dma_lock);
+		rw_enter_write(&dma->dma_lock);
+		if (dma->pagelist != NULL)
+			phys = atop(dma->pagelist[offset >> PAGE_SHIFT]);
+		rw_exit_write(&dma->dma_lock);
 
-		if (dma->pagelist != NULL) {
-			paddr_t phys = dma->pagelist[offset >> PAGE_SHIFT];
-
-			DRM_SPINUNLOCK(&dev->dma_lock);
-			return (atop(phys));
-		} else {
-			DRM_SPINUNLOCK(&dev->dma_lock);
-			return (-1);
-		}
+		return (phys);
 	}
 
 	/*
@@ -819,6 +786,32 @@ drm_getunique(struct drm_device *dev, void *data, struct drm_file *file_priv)
 #define DRM_IF_MINOR	2
 
 int
+drm_version(struct drm_device *dev, void *data, struct drm_file *file_priv)
+{
+	struct drm_version	*version = data;
+	int			 len;
+
+#define DRM_COPY(name, value)						\
+	len = strlen( value );						\
+	if ( len > name##_len ) len = name##_len;			\
+	name##_len = strlen( value );					\
+	if ( len && name ) {						\
+		if ( DRM_COPY_TO_USER( name, value, len ) )		\
+			return EFAULT;				\
+	}
+
+	version->version_major = dev->driver->major;
+	version->version_minor = dev->driver->minor;
+	version->version_patchlevel = dev->driver->patchlevel;
+
+	DRM_COPY(version->name, dev->driver->name);
+	DRM_COPY(version->date, dev->driver->date);
+	DRM_COPY(version->desc, dev->driver->desc);
+
+	return 0;
+}
+
+int
 drm_setversion(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	struct drm_set_version	ver, *sv = data;
@@ -844,7 +837,7 @@ drm_setversion(struct drm_device *dev, void *data, struct drm_file *file_priv)
 			return EINVAL;
 		}
 		if_version = DRM_IF_VERSION(ver.drm_di_major, ver.drm_dd_minor);
-		dev->if_version = DRM_MAX(if_version, dev->if_version);
+		dev->if_version = imax(if_version, dev->if_version);
 	}
 
 	if (ver.drm_dd_major != -1) {
@@ -916,4 +909,64 @@ drm_dmamem_free(bus_dma_tag_t dmat, struct drm_dmamem *mem)
 	bus_dmamem_free(dmat, mem->segs, mem->nsegs);
 	bus_dmamap_destroy(dmat, mem->map);
 	free(mem, M_DRM);
+}
+
+/**
+ * Called by the client, this returns a unique magic number to be authorized
+ * by the master.
+ *
+ * The master may use its own knowledge of the client (such as the X
+ * connection that the magic is passed over) to determine if the magic number
+ * should be authenticated.
+ */
+int
+drm_getmagic(struct drm_device *dev, void *data, struct drm_file *file_priv)
+{
+	struct drm_auth		*auth = data;
+
+	if (dev->magicid == 0)
+		dev->magicid = 1;
+
+	/* Find unique magic */
+	if (file_priv->magic) {
+		auth->magic = file_priv->magic;
+	} else {
+		DRM_LOCK();
+		file_priv->magic = auth->magic = dev->magicid++;
+		DRM_UNLOCK();
+		DRM_DEBUG("%d\n", auth->magic);
+	}
+
+	DRM_DEBUG("%u\n", auth->magic);
+
+	return (0);
+}
+
+/**
+ * Marks the client associated with the given magic number as authenticated.
+ */
+int
+drm_authmagic(struct drm_device *dev, void *data, struct drm_file *file_priv)
+{
+	struct drm_file	*p;
+	struct drm_auth	*auth = data;
+	int		 ret = EINVAL;
+
+	DRM_DEBUG("%u\n", auth->magic);
+
+	if (auth->magic == 0)
+		return (ret);
+
+	DRM_LOCK();
+	SPLAY_FOREACH(p, drm_file_tree, &dev->files) {
+		if (p->magic == auth->magic) {
+			p->authenticated = 1;
+			p->magic = 0;
+			ret = 0;
+			break;
+		}
+	}
+	DRM_UNLOCK();
+
+	return (ret);
 }

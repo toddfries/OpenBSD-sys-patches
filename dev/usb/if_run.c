@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_run.c,v 1.12 2009/03/14 15:53:23 damien Exp $	*/
+/*	$OpenBSD: if_run.c,v 1.17 2009/04/02 17:47:15 damien Exp $	*/
 
 /*-
  * Copyright (c) 2008,2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -160,13 +160,26 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(AIRTIES,			RT3070),
 
 	/* Entries not in the Ralink Linux driver. */
+	USB_ID(AMIT,			CGWLUSB2GNR),
+	USB_ID(ASUS2,			USBN11),
+	USB_ID(BELKIN,			F5D8053V3),
+	USB_ID(BELKIN,			F5D8055),
+	USB_ID(CONCEPTRONIC2,		VIGORN61),
+	USB_ID(COREGA,			CGWLUSB300GNM),
 	USB_ID(DLINK2,			DWA130),
+	USB_ID(EDIMAX,			EW7717),
+	USB_ID(EDIMAX,			EW7718),
+	USB_ID(GIGABYTE,		GNWB31N),
+	USB_ID(HAWKING,			HWUN2),
+	USB_ID(LINKSYS4,		WUSB100),
 	USB_ID(LINKSYS4,		WUSB600N),
 	USB_ID(MELCO,			WLIUCAG300N),
+	USB_ID(MELCO,			WLIUCG300N),
 	USB_ID(MELCO,			WLIUCGN),
 	USB_ID(PLANEX2,			GWUS300MINIS),
-	USB_ID(PLANEX2,			GWUSBMICRON),
-	USB_ID(COREGA,			CGWLUSB300GNM)
+	USB_ID(PLANEX2,			GWUSMICRON),
+	USB_ID(SWEEX2,			LW303),
+	USB_ID(SWEEX2,			LW313)
 };
 
 int		run_match(struct device *, void *, void *);
@@ -348,8 +361,6 @@ run_attach(struct device *parent, struct device *self, void *aux)
 			nrx++;
 		} else if (ntx < 4) {
 			sc->txq[ntx].pipe_no = ed->bEndpointAddress;
-			sc->txq[ntx].pktsize =
-			    UE_GET_SIZE(UGETW(ed->wMaxPacketSize));
 			ntx++;
 		}
 	}
@@ -2028,8 +2039,6 @@ run_tx(struct run_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	ieee80211_release_node(ic, ni);
 
 	xferlen += sizeof (*txd) + 4;
-	if ((xferlen % ring->pktsize) == 0)
-		xferlen += 4;
 
 	usbd_setup_xfer(data->xfer, ring->pipeh, data, data->buf, xferlen,
 	    USBD_FORCE_SHORT_XFER | USBD_NO_COPY, RUN_TX_TIMEOUT, run_txeof);

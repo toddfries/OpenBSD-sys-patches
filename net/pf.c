@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.639 2009/03/15 19:40:41 miod Exp $ */
+/*	$OpenBSD: pf.c,v 1.640 2009/04/06 12:05:55 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -2923,7 +2923,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 			if (r->anchor == NULL) {
 				if (r->action == PF_MATCH) {
 					ri = pool_get(&pf_rule_item_pl,
-					    PR_WAITOK);
+					    PR_NOWAIT);
 					ri->r = r;
 					/* order is irrelevant */
 					SLIST_INSERT_HEAD(&rules, ri, entry);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: iop.c,v 1.35 2008/06/26 05:42:14 ray Exp $	*/
+/*	$OpenBSD: iop.c,v 1.36 2009/04/02 18:44:49 oga Exp $	*/
 /*	$NetBSD: iop.c,v 1.12 2001/03/21 14:27:05 ad Exp $	*/
 
 /*-
@@ -531,11 +531,12 @@ iop_config_interrupts(struct device *self)
 #endif
 
 	rw_enter_write(&sc->sc_conflock);
-	if ((rv = iop_reconfigure(sc, 0)) == -1) {
+	rv = iop_reconfigure(sc, 0);
+	rw_exit_write(&sc->sc_conflock);
+	if (rv == -1) {
 		printf("%s: configure failed (%d)\n", sc->sc_dv.dv_xname, rv);
 		return;
 	}
-	rw_exit_write(&sc->sc_conflock);
 	kthread_create_deferred(iop_create_reconf_thread, sc);
 }
 

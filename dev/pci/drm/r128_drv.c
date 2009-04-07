@@ -41,12 +41,7 @@ void	ragedrm_attach(struct device *, struct device *, void *);
 int	ragedrm_detach(struct device *, int);
 int	ragedrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-int	r128drm_probe(struct device *, void *, void *);
-void	r128drm_attach(struct device *, struct device *, void *);
-int	ragedrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
-
-
-static drm_pci_id_list_t ragedrm_pciidlist[] = {
+const static struct drm_pcidev ragedrm_pciidlist[] = {
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_LE},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MOBILITY_M3},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_MF},
@@ -88,7 +83,7 @@ static drm_pci_id_list_t ragedrm_pciidlist[] = {
 };
 
 static const struct drm_driver_info ragedrm_driver = {
-	.buf_priv_size		= sizeof(drm_r128_buf_priv_t),
+	.buf_priv_size		= sizeof(struct ragedrm_buf_priv),
 	.ioctl			= ragedrm_ioctl,
 	.close			= r128_driver_close,
 	.lastclose		= r128_driver_lastclose,
@@ -98,7 +93,6 @@ static const struct drm_driver_info ragedrm_driver = {
 	.disable_vblank		= r128_disable_vblank,
 	.irq_install		= r128_driver_irq_install,
 	.irq_uninstall		= r128_driver_irq_uninstall,
-	.irq_handler		= r128_driver_irq_handler,
 	.dma_ioctl		= r128_cce_buffers,
 
 	.name			= DRIVER_NAME,

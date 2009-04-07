@@ -1,4 +1,4 @@
-/*	$OpenBSD: iopsp.c,v 1.14 2009/02/16 21:19:06 miod Exp $	*/
+/*	$OpenBSD: iopsp.c,v 1.15 2009/04/02 18:44:49 oga Exp $	*/
 /*	$NetBSD$	*/
 
 /*-

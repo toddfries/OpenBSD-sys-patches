@@ -154,10 +154,6 @@ enum radeon_chip_flags {
 	RADEON_IS_IGPGART = 0x01000000UL,
 };
 
-#define GET_RING_HEAD(dev_priv)	(dev_priv->writeback_works ? \
-        DRM_READ32(  (dev_priv)->ring_rptr, 0 ) : RADEON_READ(RADEON_CP_RB_RPTR))
-#define SET_RING_HEAD(dev_priv,val)	DRM_WRITE32( (dev_priv)->ring_rptr, 0, (val) )
-
 typedef struct drm_radeon_freelist {
 	unsigned int age;
 	struct drm_buf *buf;
@@ -207,8 +203,8 @@ struct radeon_virt_surface {
 	struct drm_file *file_priv;
 };
 
-#define RADEON_FLUSH_EMITED	(1 < 0)
-#define RADEON_PURGE_EMITED	(1 < 1)
+#define RADEON_FLUSH_EMITED	(1 << 0)
+#define RADEON_PURGE_EMITED	(1 << 1)
 
 typedef struct drm_radeon_private {
 	struct device		 dev;
@@ -236,7 +232,6 @@ typedef struct drm_radeon_private {
 	drm_radeon_freelist_t *head;
 	drm_radeon_freelist_t *tail;
 	int last_buf;
-	volatile u32 *scratch;
 	int writeback_works;
 
 	int usec_timeout;
@@ -264,18 +259,19 @@ typedef struct drm_radeon_private {
 	unsigned long buffers_offset;
 	unsigned long gart_textures_offset;
 
-	drm_local_map_t *sarea;
-	drm_local_map_t *cp_ring;
-	drm_local_map_t *ring_rptr;
-	drm_local_map_t *gart_textures;
+	struct drm_local_map	*sarea;
+	struct drm_local_map	*cp_ring;
+	struct drm_local_map	*ring_rptr;
+	struct drm_local_map	*gart_textures;
 
 	struct drm_heap gart_heap;
 	struct drm_heap fb_heap;
 
 	/* SW interrupt */
-	atomic_t swi_emitted;
-	uint32_t irq_enable_reg;
-	uint32_t r500_disp_irq_reg;
+	struct mutex	swi_lock;
+	atomic_t	swi_emitted;
+	uint32_t	irq_enable_reg;
+	uint32_t	r500_disp_irq_reg;
 
 	struct radeon_surface surfaces[RADEON_MAX_SURFACES];
 	struct radeon_virt_surface virt_surfaces[2 * RADEON_MAX_SURFACES];
@@ -324,11 +320,18 @@ static __inline__ int radeon_check_offset(drm_radeon_private_t *dev_priv,
 		(off >= gart_start && off <= gart_end));
 }
 
-void	radeondrm_begin_ring(struct drm_radeon_private *, int);
-void	radeondrm_advance_ring(struct drm_radeon_private *);
-void	radeondrm_commit_ring(struct drm_radeon_private *);
-void	radeondrm_out_ring(struct drm_radeon_private *, u_int32_t);
-void	radeondrm_out_ring_table(struct drm_radeon_private *, u_int32_t *, int);
+u_int32_t	radeondrm_read_rptr(struct drm_radeon_private *, u_int32_t);
+void		radeondrm_write_rptr(struct drm_radeon_private *, u_int32_t,
+		    u_int32_t);
+u_int32_t	radeondrm_get_ring_head(struct drm_radeon_private *);
+void		radeondrm_set_ring_head(struct drm_radeon_private *, u_int32_t);
+u_int32_t	radeondrm_get_scratch(struct drm_radeon_private *, u_int32_t);
+void		radeondrm_begin_ring(struct drm_radeon_private *, int);
+void		radeondrm_advance_ring(struct drm_radeon_private *);
+void		radeondrm_commit_ring(struct drm_radeon_private *);
+void		radeondrm_out_ring(struct drm_radeon_private *, u_int32_t);
+void		radeondrm_out_ring_table(struct drm_radeon_private *,
+		    u_int32_t *, int);
 
 				/* radeon_cp.c */
 extern int radeon_cp_init(struct drm_device *dev, void *data, struct drm_file *file_priv);
@@ -337,7 +340,8 @@ extern int radeon_cp_stop(struct drm_device *dev, void *data, struct drm_file *f
 extern int radeon_cp_reset(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int radeon_cp_idle(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int radeon_cp_resume(struct drm_device *dev);
-extern int radeon_cp_buffers(struct drm_device *dev, void *data, struct drm_file *file_priv);
+extern int radeon_cp_buffers(struct drm_device *, struct drm_dma *,
+    struct drm_file *);
 extern u32 radeon_read_fb_location(drm_radeon_private_t *dev_priv);
 
 extern int radeon_surface_alloc(struct drm_device *, void *, struct drm_file *);
@@ -362,8 +366,6 @@ extern int radeon_do_cp_idle(drm_radeon_private_t * dev_priv);
 extern int radeon_mem_alloc(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int radeon_mem_free(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int radeon_mem_init_heap(struct drm_device *dev, void *data, struct drm_file *file_priv);
-extern void radeon_mem_takedown(struct drm_heap *heap);
-extern void radeon_mem_release(struct drm_file *, struct drm_heap *);
 
 				/* radeon_irq.c */
 extern void radeon_irq_set_state(struct drm_device *dev, u32 mask, int state);
@@ -373,7 +375,6 @@ extern int radeon_irq_wait(struct drm_device *dev, void *data, struct drm_file *
 extern u32 radeon_get_vblank_counter(struct drm_device *dev, int crtc);
 extern int radeon_enable_vblank(struct drm_device *dev, int crtc);
 extern void radeon_disable_vblank(struct drm_device *dev, int crtc);
-extern irqreturn_t radeon_driver_irq_handler(DRM_IRQ_ARGS);
 extern int radeon_driver_irq_install(struct drm_device * dev);
 extern void radeon_driver_irq_uninstall(struct drm_device * dev);
 
@@ -383,8 +384,6 @@ extern void radeon_driver_close(struct drm_device * dev,
 extern void radeon_driver_lastclose(struct drm_device * dev);
 extern int radeon_driver_open(struct drm_device * dev,
 			      struct drm_file * file_priv);
-extern long radeon_compat_ioctl(struct file *filp, unsigned int cmd,
-					 unsigned long arg);
 
 /* r300_cmdbuf.c */
 extern void r300_init_reg_flags(struct drm_device *dev);
@@ -599,10 +598,6 @@ extern int r300_do_cp_cmdbuf(struct drm_device *dev,
 #define RADEON_SCRATCH_ADDR		0x0774
 
 #define RADEON_SCRATCHOFF( x )		(RADEON_SCRATCH_REG_OFFSET + 4*(x))
-
-#define GET_SCRATCH( x )	(dev_priv->writeback_works			\
-				? DRM_READ32( dev_priv->ring_rptr, RADEON_SCRATCHOFF(x) ) \
-				: RADEON_READ( RADEON_SCRATCH_REG0 + 4*(x) ) )
 
 #define RADEON_CRTC_CRNT_FRAME 0x0214
 #define RADEON_CRTC2_CRNT_FRAME 0x0314

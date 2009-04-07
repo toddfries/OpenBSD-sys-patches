@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_subr.c,v 1.28 2007/12/09 21:34:32 hshoexer Exp $	*/
+/*	$OpenBSD: procfs_subr.c,v 1.29 2009/04/02 18:43:08 oga Exp $	*/
 /*	$NetBSD: procfs_subr.c,v 1.15 1996/02/12 15:01:42 christos Exp $	*/
 
 /*

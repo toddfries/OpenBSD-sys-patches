@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.h,v 1.28 2009/03/24 16:29:42 oga Exp $	*/
+/*	$OpenBSD: uvm_page.h,v 1.30 2009/04/06 17:03:51 oga Exp $	*/
 /*	$NetBSD: uvm_page.h,v 1.19 2000/12/28 08:24:55 chs Exp $	*/
 
 /* 
@@ -232,49 +232,73 @@ extern struct vm_physseg vm_physmem[VM_PHYSSEG_MAX];
 extern int vm_nphysseg;
 
 /*
- * handle inline options
- */
-
-#ifdef UVM_PAGE_INLINE
-#define PAGE_INLINE static __inline
-#else 
-#define PAGE_INLINE /* nothing */
-#endif /* UVM_PAGE_INLINE */
-
-/*
  * prototypes: the following prototypes define the interface to pages
  */
 
-void uvm_page_init(vaddr_t *, vaddr_t *);
+void		uvm_page_init(vaddr_t *, vaddr_t *);
 #if defined(UVM_PAGE_TRKOWN)
-void uvm_page_own(struct vm_page *, char *);
+void		uvm_page_own(struct vm_page *, char *);
 #endif
 #if !defined(PMAP_STEAL_MEMORY)
-boolean_t uvm_page_physget(paddr_t *);
+boolean_t	uvm_page_physget(paddr_t *);
 #endif
-void uvm_page_rehash(void);
-void uvm_pageidlezero(void);
+void		uvm_page_rehash(void);
+void		uvm_pageidlezero(void);
 
-PAGE_INLINE int uvm_lock_fpageq(void);
-PAGE_INLINE void uvm_unlock_fpageq(int);
+void		uvm_pageactivate(struct vm_page *);
+vaddr_t		uvm_pageboot_alloc(vsize_t);
+void		uvm_pagecopy(struct vm_page *, struct vm_page *);
+void		uvm_pagedeactivate(struct vm_page *);
+void		uvm_pagefree(struct vm_page *);
+void		uvm_page_unbusy(struct vm_page **, int);
+struct vm_page	*uvm_pagelookup(struct uvm_object *, voff_t);
+void		uvm_pageunwire(struct vm_page *);
+void		uvm_pagewait(struct vm_page *, int);
+void		uvm_pagewake(struct vm_page *);
+void		uvm_pagewire(struct vm_page *);
+void		uvm_pagezero(struct vm_page *);
 
-PAGE_INLINE void uvm_pageactivate(struct vm_page *);
-vaddr_t uvm_pageboot_alloc(vsize_t);
-PAGE_INLINE void uvm_pagecopy(struct vm_page *, struct vm_page *);
-PAGE_INLINE void uvm_pagedeactivate(struct vm_page *);
-void uvm_pagefree(struct vm_page *);
-void uvm_page_unbusy(struct vm_page **, int);
-PAGE_INLINE struct vm_page *uvm_pagelookup(struct uvm_object *, voff_t);
-PAGE_INLINE void uvm_pageunwire(struct vm_page *);
-PAGE_INLINE void uvm_pagewait(struct vm_page *, int);
-PAGE_INLINE void uvm_pagewake(struct vm_page *);
-PAGE_INLINE void uvm_pagewire(struct vm_page *);
-PAGE_INLINE void uvm_pagezero(struct vm_page *);
+int		uvm_page_lookup_freelist(struct vm_page *);
 
-PAGE_INLINE int uvm_page_lookup_freelist(struct vm_page *);
+#if  VM_PHYSSEG_MAX == 1
+/*
+ * Inline functions for archs like the vax where function calls are expensive.
+ */
+/*
+ * vm_physseg_find: find vm_physseg structure that belongs to a PA
+ */
+static __inline int
+vm_physseg_find(paddr_t pframe, int *offp)
+{
+	/* 'contig' case */
+	if (pframe >= vm_physmem[0].start && pframe < vm_physmem[0].end) {
+		if (offp)
+			*offp = pframe - vm_physmem[0].start;
+		return(0);
+	}
+	return(-1);
+}
 
+/*
+ * PHYS_TO_VM_PAGE: find vm_page for a PA.   used by MI code to get vm_pages
+ * back from an I/O mapping (ugh!).   used in some MD code as well.
+ */
+static __inline struct vm_page *
+PHYS_TO_VM_PAGE(paddr_t pa)
+{
+	paddr_t pf = atop(pa);
+	int	off;
+	int	psi;
+
+	psi = vm_physseg_find(pf, &off);
+
+	return ((psi == -1) ? NULL : &vm_physmem[psi].pgs[off]);
+}
+#else
+/* if VM_PHYSSEG_MAX > 1 they're not inline, they're in uvm_page.c. */
 struct vm_page	*PHYS_TO_VM_PAGE(paddr_t);
-int	vm_physseg_find(paddr_t, int *);
+int		vm_physseg_find(paddr_t, int *);
+#endif
 
 /*
  * macros

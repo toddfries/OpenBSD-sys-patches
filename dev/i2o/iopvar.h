@@ -1,4 +1,4 @@
-/*	$OpenBSD: iopvar.h,v 1.9 2008/06/26 05:42:15 ray Exp $	*/
+/*	$OpenBSD: iopvar.h,v 1.10 2009/04/02 18:44:49 oga Exp $	*/
 /*	$NetBSD: iopvar.h,v 1.5 2001/03/20 13:01:49 ad Exp $	*/
 
 /*-
