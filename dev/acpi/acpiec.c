@@ -1,4 +1,4 @@
-/* $OpenBSD: acpiec.c,v 1.26 2008/11/06 23:41:28 marco Exp $ */
+/* $OpenBSD: acpiec.c,v 1.28 2009/03/11 20:37:46 jordan Exp $ */
 /*
  * Copyright (c) 2006 Can Erkin Acar <canacar@openbsd.org>
  *
@@ -77,31 +77,6 @@ struct aml_node	*aml_find_name(struct acpi_softc *, struct aml_node *,
 #define		EC_CMD_QR	0x84	/* Query */
 
 #define		REG_TYPE_EC	3
-
-#define ACPIEC_MAX_EVENTS	256
-
-struct acpiec_event {
-	struct aml_node *event;
-};
-
-struct acpiec_softc {
-	struct device		sc_dev;
-
-	/* command/status register */
-	bus_space_tag_t		sc_cmd_bt;
-	bus_space_handle_t	sc_cmd_bh;
-
-	/* data register */
-	bus_space_tag_t		sc_data_bt;
-	bus_space_handle_t	sc_data_bh;
-
-	struct acpi_softc	*sc_acpi;
-	struct aml_node		*sc_devnode;
-	u_int32_t		sc_gpe;
-	struct acpiec_event	sc_events[ACPIEC_MAX_EVENTS];
-	int			sc_gotsci;
-};
-
 
 int	acpiec_reg(struct acpiec_softc *);
 
@@ -397,14 +372,14 @@ acpiec_getcrs(struct acpiec_softc *sc, struct acpi_attach_args *aa)
 	int			type1, type2;
 	char			*buf;
 	int			size, ret;
+	int64_t			gpe;
 
-	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_GPE", 0, NULL, &res)) {
+	if (aml_evalinteger(sc->sc_acpi, sc->sc_devnode, "_GPE", 0, NULL, &gpe)) {
 		dnprintf(10, "%s: no _GPE\n", DEVNAME(sc));
 		return (1);
 	}
 
-	sc->sc_gpe = aml_val2int(&res);
-	aml_freevalue(&res);
+	sc->sc_gpe = gpe;
 
 	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_CRS", 0, NULL, &res)) {
 		dnprintf(10, "%s: no _CRS\n", DEVNAME(sc));

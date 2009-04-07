@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_socket.c,v 1.73 2009/01/20 18:03:33 blambert Exp $	*/
+/*	$OpenBSD: nfs_socket.c,v 1.78 2009/02/22 07:47:22 otto Exp $	*/
 /*	$NetBSD: nfs_socket.c,v 1.27 1996/04/15 20:20:00 thorpej Exp $	*/
 
 /*
@@ -248,8 +248,8 @@ nfs_connect(nmp, rep)
 		so->so_snd.sb_timeo = 0;
 	if (nmp->nm_sotype == SOCK_DGRAM) {
 		sndreserve = nmp->nm_wsize + NFS_MAXPKTHDR;
-		rcvreserve = max(nmp->nm_rsize, nmp->nm_readdirsize) +
-		    NFS_MAXPKTHDR;
+		rcvreserve = (max(nmp->nm_rsize, nmp->nm_readdirsize) +
+		    NFS_MAXPKTHDR) * 2;
 	} else if (nmp->nm_sotype == SOCK_SEQPACKET) {
 		sndreserve = (nmp->nm_wsize + NFS_MAXPKTHDR) * 2;
 		rcvreserve = (max(nmp->nm_rsize, nmp->nm_readdirsize) +
@@ -310,7 +310,7 @@ nfs_reconnect(rep)
 {
 	struct nfsreq *rp;
 	struct nfsmount *nmp = rep->r_nmp;
-	int error;
+	int s, error;
 
 	nfs_disconnect(nmp);
 	while ((error = nfs_connect(nmp, rep)) != 0) {
@@ -323,12 +323,14 @@ nfs_reconnect(rep)
 	 * Loop through outstanding request list and fix up all requests
 	 * on old socket.
 	 */
+	s = splsoftnet();
 	TAILQ_FOREACH(rp, &nfs_reqq, r_chain) {
 		if (rp->r_nmp == nmp) {
 			rp->r_flags |= R_MUSTRESEND;
 			rp->r_rexmit = 0;
 		}
 	}
+	splx(s);
 	return (0);
 }
 
@@ -515,7 +517,8 @@ tryagain:
 			do {
 			   rcvflg = MSG_WAITALL;
 			   error = soreceive(so, (struct mbuf **)0, &auio,
-				(struct mbuf **)0, (struct mbuf **)0, &rcvflg);
+				(struct mbuf **)0, (struct mbuf **)0, &rcvflg,
+				0);
 			   if (error == EWOULDBLOCK && rep) {
 				if (rep->r_flags & R_SOFTTERM)
 					return (EINTR);
@@ -559,7 +562,7 @@ tryagain:
 			do {
 			    rcvflg = MSG_WAITALL;
 			    error =  soreceive(so, (struct mbuf **)0,
-				&auio, mp, (struct mbuf **)0, &rcvflg);
+				&auio, mp, (struct mbuf **)0, &rcvflg, 0);
 			} while (error == EWOULDBLOCK || error == EINTR ||
 				 error == ERESTART);
 			if (!error && auio.uio_resid > 0) {
@@ -583,7 +586,7 @@ tryagain:
 			do {
 			    rcvflg = 0;
 			    error =  soreceive(so, (struct mbuf **)0,
-				&auio, mp, &control, &rcvflg);
+				&auio, mp, &control, &rcvflg, 0);
 			    if (control)
 				m_freem(control);
 			    if (error == EWOULDBLOCK && rep) {
@@ -627,7 +630,7 @@ errout:
 		do {
 			rcvflg = 0;
 			error =  soreceive(so, getnam, &auio, mp,
-				(struct mbuf **)0, &rcvflg);
+				(struct mbuf **)0, &rcvflg, 0);
 			if (error == EWOULDBLOCK &&
 			    (rep->r_flags & R_SOFTTERM))
 				return (EINTR);
@@ -663,7 +666,7 @@ nfs_reply(myrep)
 	struct mbuf *mrep, *nam, *md;
 	u_int32_t rxid, *tl;
 	caddr_t dpos, cp2;
-	int error;
+	int s, error;
 
 	/*
 	 * Loop around until we get our own reply
@@ -717,6 +720,7 @@ nfsmout:
 		 * Loop through the request list to match up the reply
 		 * Iff no match, just drop the datagram
 		 */
+		s = splsoftnet();
 		TAILQ_FOREACH(rep, &nfs_reqq, r_chain) {
 			if (rep->r_mrep == NULL && rxid == rep->r_xid) {
 				/* Found it.. */
@@ -780,6 +784,7 @@ nfsmout:
 				break;
 			}
 		}
+		splx(s);
 		/*
 		 * If not matched to a request, drop it.
 		 * If it's mine, get out.
@@ -1145,7 +1150,6 @@ nfs_timer(arg)
 #ifdef NFSSERVER
 	struct nfssvc_sock *slp;
 	struct timeval tv;
-	u_quad_t cur_usec;
 #endif
 
 	s = splsoftnet();
@@ -1167,7 +1171,7 @@ nfs_timer(arg)
 				timeo *= nfs_backoff[nmp->nm_timeouts - 1];
 			if (rep->r_rtt <= timeo)
 				continue;
-			if (nmp->nm_timeouts < 8)
+			if (nmp->nm_timeouts < nitems(nfs_backoff))
 				nmp->nm_timeouts++;
 		}
 		/*
@@ -1240,10 +1244,9 @@ nfs_timer(arg)
 	 * completed now.
 	 */
 	getmicrotime(&tv);
-	cur_usec = (u_quad_t)tv.tv_sec * 1000000 + (u_quad_t)tv.tv_usec;
 	TAILQ_FOREACH(slp, &nfssvc_sockhead, ns_chain) {
 		if (LIST_FIRST(&slp->ns_tq) &&
-		    LIST_FIRST(&slp->ns_tq)->nd_time <= cur_usec)
+		    timercmp(&LIST_FIRST(&slp->ns_tq)->nd_time, &tv, <=))
 			nfsrv_wakenfsd(slp);
 	}
 #endif /* NFSSERVER */
@@ -1642,7 +1645,8 @@ nfsrv_rcv(so, arg, waitflag)
 		 */
 		auio.uio_resid = 1000000000;
 		flags = MSG_DONTWAIT;
-		error = soreceive(so, &nam, &auio, &mp, (struct mbuf **)0, &flags);
+		error = soreceive(so, &nam, &auio, &mp, (struct mbuf **)0,
+		    &flags, 0);
 		if (error || mp == (struct mbuf *)0) {
 			if (error == EWOULDBLOCK)
 				slp->ns_flag |= SLP_NEEDQ;
@@ -1677,7 +1681,7 @@ nfsrv_rcv(so, arg, waitflag)
 			auio.uio_resid = 1000000000;
 			flags = MSG_DONTWAIT;
 			error = soreceive(so, &nam, &auio, &mp,
-						(struct mbuf **)0, &flags);
+			    (struct mbuf **)0, &flags, 0);
 			if (mp) {
 				if (nam) {
 					m = nam;

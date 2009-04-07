@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_apm.c,v 1.28 2007/03/29 18:42:38 uwe Exp $	*/
+/*	$OpenBSD: pxa2x0_apm.c,v 1.31 2009/03/27 16:01:37 oga Exp $	*/
 
 /*-
  * Copyright (c) 2001 Alexander Guy.  All rights reserved.
@@ -39,7 +39,7 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/kthread.h>
-#include <sys/lock.h>
+#include <sys/rwlock.h>
 #include <sys/mount.h>		/* for vfs_syncwait() */
 #include <sys/proc.h>
 #include <sys/device.h>
@@ -62,8 +62,8 @@
 #define	DPRINTF(x)	/**/
 #endif
 
-#define APM_LOCK(sc)    lockmgr(&(sc)->sc_lock, LK_EXCLUSIVE, NULL)
-#define APM_UNLOCK(sc)  lockmgr(&(sc)->sc_lock, LK_RELEASE, NULL)
+#define APM_LOCK(sc)    rw_enter_write(&(sc)->sc_lock);
+#define APM_UNLOCK(sc)  rw_exit_write(&(sc)->sc_lock);
 
 struct cfdriver apm_cd = {
 	NULL, "apm", DV_DULL
@@ -562,7 +562,17 @@ apmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	        power = (struct apm_power_info *)data;
 		apm_power_info(sc, power);
 		break;
-
+	case APM_IOC_STANDBY_REQ:
+		if ((flag & FWRITE) == 0)
+			error = EBADF;
+		else if (apm_record_event(sc, APM_USER_STANDBY_REQ))
+			error = EINVAL; /* ? */
+		break;
+	case APM_IOC_SUSPEND_REQ:
+		if ((flag & FWRITE) == 0)
+			error = EBADF;
+		else if (apm_record_event(sc, APM_USER_SUSPEND_REQ))
+			error = EINVAL; /* ? */
 	default:
 		error = ENOTTY;
 	}
@@ -640,7 +650,7 @@ pxa2x0_apm_attach_sub(struct pxa2x0_apm_softc *sc)
 		return;
 	}
 
-	lockinit(&sc->sc_lock, PWAIT, "apmlk", 0, 0);
+	rw_init(&sc->sc_lock, "apmlk");
 
 	kthread_create_deferred(apm_thread_create, sc);
 

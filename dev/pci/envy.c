@@ -1,4 +1,4 @@
-/*	$OpenBSD: envy.c,v 1.13 2009/01/17 18:29:55 ratchov Exp $	*/
+/*	$OpenBSD: envy.c,v 1.15 2009/03/29 21:53:52 sthen Exp $	*/
 /*
  * Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
  *
@@ -514,13 +514,13 @@ envyattach(struct device *parent, struct device *self, void *aux)
 
 	if (pci_mapreg_map(pa, ENVY_CTL_BAR, PCI_MAPREG_TYPE_IO, 0, 
 			   &sc->ccs_iot, &sc->ccs_ioh, NULL, &sc->ccs_iosz, 0)) {
-		printf(": failed to map ctl i/o space\n");
+		printf(": can't map ctl i/o space\n");
 		sc->ccs_iosz = 0;
 		return;
         }
 	if (pci_mapreg_map(pa, ENVY_MT_BAR, PCI_MAPREG_TYPE_IO, 0, 
 			   &sc->mt_iot, &sc->mt_ioh, NULL, &sc->mt_iosz, 0)) {
-		printf(": failed to map mt i/o space\n");
+		printf(": can't map mt i/o space\n");
 		sc->mt_iosz = 0;
 		return;
         }
@@ -555,7 +555,7 @@ envydetach(struct device *self, int flags)
 		bus_space_unmap(sc->ccs_iot, sc->ccs_ioh, sc->ccs_iosz);
 	}
 	if (sc->mt_iosz) {
-		bus_space_unmap(sc->ccs_iot, sc->mt_ioh, sc->mt_iosz);
+		bus_space_unmap(sc->mt_iot, sc->mt_ioh, sc->mt_iosz);
 	}
 	return 0;
 }

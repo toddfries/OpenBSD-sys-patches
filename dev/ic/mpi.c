@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.107 2008/11/23 16:20:06 marco Exp $ */
+/*	$OpenBSD: mpi.c,v 1.110 2009/03/06 01:28:44 krw Exp $ */
 
 /*
  * Copyright (c) 2005, 2006 David Gwynne <dlg@openbsd.org>
@@ -63,7 +63,7 @@ struct cfdriver mpi_cd = {
 
 int			mpi_scsi_cmd(struct scsi_xfer *);
 void			mpi_scsi_cmd_done(struct mpi_ccb *);
-void			mpi_minphys(struct buf *bp);
+void			mpi_minphys(struct buf *bp, struct scsi_link *sl);
 int			mpi_scsi_probe(struct scsi_link *);
 int			mpi_scsi_ioctl(struct scsi_link *, u_long, caddr_t,
 			    int, struct proc *);
@@ -1124,13 +1124,9 @@ mpi_scsi_cmd(struct scsi_xfer *xs)
 	s = splbio();
 	ccb = mpi_get_ccb(sc);
 	splx(s);
-	if (ccb == NULL) {
-		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
-		scsi_done(xs);
-		splx(s);
-		return (COMPLETE);
-	}
+	if (ccb == NULL)
+		return (NO_CCB);
+
 	DNPRINTF(MPI_D_CMD, "%s: ccb_id: %d xs->flags: 0x%x\n",
 	    DEVNAME(sc), ccb->ccb_id, xs->flags);
 
@@ -1431,7 +1427,7 @@ mpi_load_xs(struct mpi_ccb *ccb)
 }
 
 void
-mpi_minphys(struct buf *bp)
+mpi_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	/* XXX */
 	if (bp->b_bcount > MAXPHYS)
@@ -2990,9 +2986,10 @@ mpi_refresh_sensors(void *arg)
 		}
 
 		/* override status if scrubbing or something */
-		if (rpg0->volume_status & MPI_CFG_RAID_VOL_0_STATUS_RESYNCING)
+		if (rpg0->volume_status & MPI_CFG_RAID_VOL_0_STATUS_RESYNCING) {
 			sc->sc_sensors[vol].value = SENSOR_DRIVE_REBUILD;
 			sc->sc_sensors[vol].status = SENSOR_S_WARN;
+		}
 
 		vol++;
 	}

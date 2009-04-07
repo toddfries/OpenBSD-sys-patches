@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.2 2008/12/04 19:25:38 oga Exp $	*/
+/*	$OpenBSD: bus_dma.c,v 1.8 2009/04/04 14:07:22 dlg Exp $	*/
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -71,7 +71,6 @@
 #include <sys/mbuf.h>
 #include <sys/proc.h>
 
-#define _BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <dev/isa/isareg.h>
@@ -276,27 +275,68 @@ int
 _bus_dmamap_load_raw(bus_dma_tag_t t, bus_dmamap_t map, bus_dma_segment_t *segs,
     int nsegs, bus_size_t size, int flags)
 {
+	bus_addr_t paddr, baddr, bmask, lastaddr = 0;
+	bus_size_t plen, sgsize;
+	int first = 1;
+	int i, seg = 0;
+
 	if (nsegs > map->_dm_segcnt || size > map->_dm_size)
 		return (EINVAL);
 
-	/*
-	 * Make sure we don't cross any boundaries.
-	 */
-	if (map->_dm_boundary) {
-		bus_addr_t bmask = ~(map->_dm_boundary - 1);
-		int i;
+	bmask  = ~(map->_dm_boundary - 1);
 
-		for (i = 0; i < nsegs; i++) {
-			if (segs[i].ds_len > map->_dm_maxsegsz)
-				return (EINVAL);
-			if ((segs[i].ds_addr & bmask) !=
-			    ((segs[i].ds_addr + segs[i].ds_len - 1) & bmask))
-				return (EINVAL);
+	for (i = 0; i < nsegs; i++) {
+		paddr = segs[i].ds_addr;
+		plen = segs[i].ds_len;
+
+		while (plen > 0) {
+			/*
+			 * Compute the segment size, and adjust counts.
+			 */
+			sgsize = PAGE_SIZE - ((u_long)paddr & PGOFSET);
+			if (plen < sgsize)
+				sgsize = plen;
+
+			/*
+			 * Make sure we don't cross any boundaries.
+			 */
+			if (map->_dm_boundary > 0) {
+				baddr = (paddr + map->_dm_boundary) & bmask;
+				if (sgsize > (baddr - paddr))
+					sgsize = (baddr - paddr);
+			}
+
+			/*
+			 * Insert chunk into a segment, coalescing with
+			 * previous segment if possible.
+			 */
+			if (first) {
+				map->dm_segs[seg].ds_addr = paddr;
+				map->dm_segs[seg].ds_len = sgsize;
+				first = 0;
+			} else {
+				if (paddr == lastaddr &&
+				    (map->dm_segs[seg].ds_len + sgsize) <=
+				     map->_dm_maxsegsz &&
+				    (map->_dm_boundary == 0 ||
+				     (map->dm_segs[seg].ds_addr & bmask) ==
+				     (paddr & bmask)))
+					map->dm_segs[seg].ds_len += sgsize;
+				else {
+					if (++seg >= map->_dm_segcnt)
+						return (EINVAL);
+					map->dm_segs[seg].ds_addr = paddr;
+					map->dm_segs[seg].ds_len = sgsize;
+				}
+			}
+
+			lastaddr = paddr + sgsize;
+			paddr += sgsize;
+			plen -= sgsize;
 		}
 	}
 
-	bcopy(segs, map->dm_segs, nsegs * sizeof(*segs));
-	map->dm_nsegs = nsegs;
+	map->dm_nsegs = seg + 1;
 	return (0);
 }
 
@@ -327,7 +367,7 @@ _bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 {
 
 	return (_bus_dmamem_alloc_range(t, size, alignment, boundary,
-	    segs, nsegs, rsegs, flags, 0, trunc_page(avail_end)));
+	    segs, nsegs, rsegs, flags, (paddr_t)0, (paddr_t)-1));
 }
 
 /*
@@ -368,7 +408,10 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 {
 	vaddr_t va;
 	bus_addr_t addr;
-	int curseg;
+	int curseg, pmapflags = VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED;
+
+	if (flags & BUS_DMA_NOCACHE)
+		pmapflags |= PMAP_NOCACHE;
 
 	size = round_page(size);
 	va = uvm_km_valloc(kernel_map, size);
@@ -384,8 +427,7 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 			if (size == 0)
 				panic("_bus_dmamem_map: size botch");
 			pmap_enter(pmap_kernel(), va, addr,
-			    VM_PROT_READ | VM_PROT_WRITE,
-			    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
+			    VM_PROT_READ | VM_PROT_WRITE, pmapflags);
 		}
 	}
 	pmap_update(pmap_kernel());

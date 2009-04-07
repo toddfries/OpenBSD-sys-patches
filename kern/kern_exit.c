@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.82 2008/12/16 07:57:28 guenther Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.84 2009/04/03 04:22:49 guenther Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -60,9 +60,6 @@
 #include <sys/ktrace.h>
 #include <sys/pool.h>
 #include <sys/mutex.h>
-#ifdef SYSVSHM
-#include <sys/shm.h>
-#endif
 #ifdef SYSVSEM
 #include <sys/sem.h>
 #endif
@@ -183,7 +180,8 @@ exit1(struct proc *p, int rv, int flags)
 	fdfree(p);
 
 #ifdef SYSVSEM
-	semexit(p);
+	if ((p->p_flag & P_THREAD) == 0)
+		semexit(p->p_p);
 #endif
 	if (SESS_LEADER(p)) {
 		struct session *sp = p->p_session;
@@ -398,14 +396,6 @@ reaper(void)
 		mtx_leave(&deadproc_mutex);
 
 		KERNEL_PROC_LOCK(curproc);
-
-		/*
-		 * Give machine-dependent code a chance to free any
-		 * resources it couldn't free while still running on
-		 * that process's context.  This must be done before
-		 * uvm_exit(), in case these resources are in the PCB.
-		 */
-		cpu_wait(p);
 
 		/*
 		 * Free the VM resources we're still holding on to.

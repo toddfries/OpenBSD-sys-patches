@@ -41,7 +41,7 @@ int	radeondrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
 int radeon_no_wb;
 
-static drm_pci_id_list_t radeondrm_pciidlist[] = {
+const static struct drm_pcidev radeondrm_pciidlist[] = {
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_M241P,
 	    CHIP_RV380|RADEON_IS_MOBILITY},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X300M24,
@@ -207,6 +207,7 @@ static drm_pci_id_list_t radeondrm_pciidlist[] = {
 	    CHIP_RS300|RADEON_IS_IGP},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_IGP9100,
 	    CHIP_RS300|RADEON_IS_IGP|RADEON_IS_MOBILITY},
+#if 0
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_RS480,
 	    CHIP_RS480|RADEON_IS_IGP|RADEON_IS_IGPGART},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_RS480_B,
@@ -215,12 +216,14 @@ static drm_pci_id_list_t radeondrm_pciidlist[] = {
 	    CHIP_RS480|RADEON_IS_IGP|RADEON_IS_MOBILITY|RADEON_IS_IGPGART},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_RS482_B,
 	    CHIP_RS480|RADEON_IS_IGP|RADEON_IS_MOBILITY|RADEON_IS_IGPGART},
+#endif
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_RV280_PRO, CHIP_RV280},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_RV280, CHIP_RV280},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_RV280_B, CHIP_RV280},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_RV280_SE_S, CHIP_RV280},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_FIREMV_2200, CHIP_RV280},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_ES1000, CHIP_RV100},
+#if 0
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_RS400,
 	    CHIP_RS400|RADEON_IS_IGP|RADEON_IS_IGPGART},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_RS400_B,
@@ -229,6 +232,7 @@ static drm_pci_id_list_t radeondrm_pciidlist[] = {
 	    CHIP_RS400|RADEON_IS_IGP|RADEON_IS_IGPGART},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_RC410_B,
 	    CHIP_RS400|RADEON_IS_IGP|RADEON_IS_MOBILITY|RADEON_IS_IGPGART},
+#endif
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X300,
 	    CHIP_RV380|RADEON_NEW_MEMMAP},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X600_RV370,
@@ -469,10 +473,12 @@ static drm_pci_id_list_t radeondrm_pciidlist[] = {
 	    CHIP_RS300|RADEON_IS_IGP|RADEON_NEW_MEMMAP},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_RS350IGP,
 	    CHIP_RS300|RADEON_IS_IGP|RADEON_IS_MOBILITY|RADEON_NEW_MEMMAP},
+#if 0
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1250,
 	    CHIP_RS690|RADEON_IS_IGP|RADEON_NEW_MEMMAP|RADEON_IS_IGPGART},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1250IGP,
 	    CHIP_RS690|RADEON_IS_IGP|RADEON_NEW_MEMMAP|RADEON_IS_IGPGART},
+#endif
         {0, 0, 0}
 };
 
@@ -490,7 +496,6 @@ static const struct drm_driver_info radeondrm_driver = {
 	.disable_vblank		= radeon_disable_vblank,
 	.irq_install		= radeon_driver_irq_install,
 	.irq_uninstall		= radeon_driver_irq_uninstall,
-	.irq_handler		= radeon_driver_irq_handler,
 	.dma_ioctl		= radeon_cp_buffers,
 
 	.name			= DRIVER_NAME,
@@ -516,7 +521,7 @@ radeondrm_attach(struct device *parent, struct device *self, void *aux)
 	drm_radeon_private_t	*dev_priv = (drm_radeon_private_t *)self;
 	struct pci_attach_args	*pa = aux;
 	struct vga_pci_bar	*bar;
-	drm_pci_id_list_t	*id_entry;
+	const struct drm_pcidev	*id_entry;
 	int			 is_agp;
 
 	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
@@ -550,6 +555,7 @@ radeondrm_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	printf(": %s\n", pci_intr_string(pa->pa_pc, dev_priv->ih));
+	mtx_init(&dev_priv->swi_lock, IPL_BIO);
 
 	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
 	case CHIP_R100:
@@ -586,6 +592,9 @@ radeondrm_attach(struct device *parent, struct device *self, void *aux)
 
 	is_agp = pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP,
 	    NULL, NULL);
+
+	TAILQ_INIT(&dev_priv->gart_heap);
+	TAILQ_INIT(&dev_priv->fb_heap);
 
 	dev_priv->drmdev = drm_attach_pci(&radeondrm_driver, pa, is_agp, self);
 }
@@ -626,25 +635,15 @@ radeondrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 		case DRM_IOCTL_RADEON_CP_IDLE:
 			return (radeon_cp_idle(dev, data, file_priv));
 		case DRM_IOCTL_RADEON_CP_RESUME:
-			return (radeon_cp_resume(dev, data, file_priv));
-		case DRM_IOCTL_RADEON_RESET:
-			return (radeon_engine_reset(dev, data, file_priv));
-		case DRM_IOCTL_RADEON_FULLSCREEN:
-			return (0); /* oh so deprecated */
+			return (radeon_cp_resume(dev));
 		case DRM_IOCTL_RADEON_SWAP:
 			return (radeon_cp_swap(dev, data, file_priv));
 		case DRM_IOCTL_RADEON_CLEAR:
 			return (radeon_cp_clear(dev, data, file_priv));
-		case DRM_IOCTL_RADEON_VERTEX:
-			return (radeon_cp_vertex(dev, data, file_priv));
-		case DRM_IOCTL_RADEON_INDICES:
-			return (radeon_cp_indices(dev, data, file_priv));
 		case DRM_IOCTL_RADEON_TEXTURE:
 			return (radeon_cp_texture(dev, data, file_priv));
 		case DRM_IOCTL_RADEON_STIPPLE:
 			return (radeon_cp_stipple(dev, data, file_priv));
-		case DRM_IOCTL_RADEON_VERTEX2:
-			return (radeon_cp_vertex2(dev, data, file_priv));
 		case DRM_IOCTL_RADEON_CMDBUF:
 			return (radeon_cp_cmdbuf(dev, data, file_priv));
 		case DRM_IOCTL_RADEON_GETPARAM:
@@ -685,4 +684,120 @@ radeondrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 		}
 	}
 	return (EINVAL);
+}
+
+u_int32_t
+radeondrm_read_rptr(struct drm_radeon_private *dev_priv, u_int32_t off)
+{
+	u_int32_t val;
+
+	if (dev_priv->flags & RADEON_IS_AGP) {
+		val = bus_space_read_4(dev_priv->ring_rptr->bst,
+		    dev_priv->ring_rptr->bsh, off);
+	} else {
+		val = *(((volatile u_int32_t *)dev_priv->ring_rptr->handle) +
+		    (off / sizeof(u_int32_t)));
+		val = letoh32(val);
+	}
+	return (val);
+}
+
+void
+radeondrm_write_rptr(struct drm_radeon_private *dev_priv, u_int32_t off,
+    u_int32_t val)
+{
+	if (dev_priv->flags & RADEON_IS_AGP) {
+		bus_space_write_4(dev_priv->ring_rptr->bst,
+		    dev_priv->ring_rptr->bsh, off, val);
+	} else
+		*(((volatile u_int32_t *)dev_priv->ring_rptr->handle +
+		    (off / sizeof(u_int32_t)))) = htole32(val);
+}
+
+u_int32_t
+radeondrm_get_ring_head(struct drm_radeon_private *dev_priv)
+{
+	if (dev_priv->writeback_works)
+		return (radeondrm_read_rptr(dev_priv, 0));
+	else
+		return (RADEON_READ(RADEON_CP_RB_RPTR));
+}
+
+void
+radeondrm_set_ring_head(struct drm_radeon_private *dev_priv, u_int32_t val)
+{
+	radeondrm_write_rptr(dev_priv, 0, val);
+}
+
+u_int32_t
+radeondrm_get_scratch(struct drm_radeon_private *dev_priv, u_int32_t off)
+{
+	if (dev_priv->writeback_works)
+		return (radeondrm_read_rptr(dev_priv, RADEON_SCRATCHOFF(off)));
+	else
+		return (RADEON_READ( RADEON_SCRATCH_REG0 + 4*(off) ));
+}
+
+void
+radeondrm_begin_ring(struct drm_radeon_private *dev_priv, int ncmd)
+{
+	RADEON_VPRINTF("%d\n", ncmd);
+	if (dev_priv->ring.space <= ncmd) {
+		radeondrm_commit_ring(dev_priv);
+		radeon_wait_ring(dev_priv, ncmd);
+	}
+	dev_priv->ring.space -= ncmd;
+	dev_priv->ring.wspace = ncmd;
+	dev_priv->ring.woffset = dev_priv->ring.tail;
+}
+
+void
+radeondrm_advance_ring(struct drm_radeon_private *dev_priv)
+{
+	RADEON_VPRINTF("wr=0x%06x, tail = 0x%06x\n", dev_priv->ring.woffset,
+	    dev_priv->ring.tail);
+	if (((dev_priv->ring.tail + dev_priv->ring.wspace) &
+	    dev_priv->ring.tail_mask) != dev_priv->ring.woffset) {
+		DRM_ERROR("mismatch: nr %x, write %x\n", ((dev_priv->ring.tail +
+		    dev_priv->ring.wspace) & dev_priv->ring.tail_mask),
+		    dev_priv->ring.woffset);
+	} else
+		dev_priv->ring.tail = dev_priv->ring.woffset;
+}
+
+void
+radeondrm_commit_ring(struct drm_radeon_private *dev_priv)
+{
+	/* flush write combining buffer and writes to ring */
+	DRM_MEMORYBARRIER();
+	radeondrm_get_ring_head(dev_priv);
+	RADEON_WRITE(RADEON_CP_RB_WPTR, dev_priv->ring.tail);
+	/* read from PCI bus to ensure correct posting */
+	RADEON_READ(RADEON_CP_RB_RPTR);
+}
+
+void
+radeondrm_out_ring(struct drm_radeon_private *dev_priv, u_int32_t x)
+{
+	RADEON_VPRINTF("0x%08x at 0x%x\n", x, dev_priv->ring.woffset);
+	dev_priv->ring.start[dev_priv->ring.woffset++] = x;
+	dev_priv->ring.woffset &= dev_priv->ring.tail_mask;
+}
+
+void
+radeondrm_out_ring_table(struct drm_radeon_private *dev_priv, u_int32_t *table,
+    int size)
+{
+	if (dev_priv->ring.woffset + size > dev_priv->ring.tail_mask) {
+		int i = dev_priv->ring.tail_mask + 1 - dev_priv->ring.woffset;
+
+		size -= i;
+		while (i--)
+			dev_priv->ring.start[dev_priv->ring.woffset++] =
+			    *table++;
+		dev_priv->ring.woffset = 0;
+	}
+	while (size--)
+		dev_priv->ring.start[dev_priv->ring.woffset++] = *table++;
+	dev_priv->ring.woffset &= dev_priv->ring.tail_mask;
 }

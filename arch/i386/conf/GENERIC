@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.649 2009/01/18 04:41:26 kevlo Exp $
+#	$OpenBSD: GENERIC,v 1.653 2009/03/24 18:56:17 damien Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -130,6 +130,11 @@ iic*	at amdpm?
 it*	at isa? port 0x2e		# ITE IT8705F, IT8712F, IT8716F,
 it*	at isa? port 0x4e		# IT8718F, IT8726F and SiS SiS950
 					# monitors and watchdog timer
+
+schsio*	at isa? port 0x2e		# SMSC SCH311x Super I/O
+schsio*	at isa? port 0x4e
+#schsio*	at isa? port 0x162e
+#schsio*	at isa? port 0x164e
 
 viaenv*	at pci?				# VIA VT82C686A hardware monitor
 viasio*	at isa? port 0x2e flags 0x0000	# VIA VT1211 LPC Super I/O
@@ -278,8 +283,10 @@ uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
+otus*	at uhub?		# Atheros AR9001U
 zyd*	at uhub?		# Zydas ZD1211
 upgt*	at uhub?		# Conexant/Intersil PrismGT SoftMAC USB
+urtw*	at uhub?		# RealTek 8187
 #option	NATM
 #ueagle* at uhub?		# Analog Devices Eagle ADSL
 udcf*	at uhub?		# Gude Expert mouseCLOCK
@@ -611,6 +618,7 @@ gem*	at pci?				# Sun 'gem' ethernet
 vic*	at pci?				# VMware VMXnet virtual interface
 et*	at pci?				# Agere/LSI ET1310
 age*	at pci?				# Attansic L1 Ethernet
+ale*	at pci?				# Attansic L1E Ethernet
 lii*	at pci?				# Attansic L2 Ethernet
 jme*	at pci?				# JMicron JMC250/JMC260 Ethernet
 #ale*	at pci?				# Attansic L1E Ethernet

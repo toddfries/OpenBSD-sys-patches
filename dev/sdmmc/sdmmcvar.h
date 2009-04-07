@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmcvar.h,v 1.13 2009/01/09 10:55:22 jsg Exp $	*/
+/*	$OpenBSD: sdmmcvar.h,v 1.16 2009/04/07 16:35:52 blambert Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -162,6 +162,7 @@ struct sdmmc_softc {
 #define SMF_MEM_MODE		0x0004	/* host in memory mode (SD or MMC) */
 #define SMF_CARD_PRESENT	0x0010	/* card presence noticed */
 #define SMF_CARD_ATTACHED	0x0020	/* card driver(s) attached */
+#define	SMF_STOP_AFTER_MULTIPLE	0x0040	/* send a stop after a multiple cmd */
 	int sc_function_count;		/* number of I/O functions (SDIO) */
 	struct sdmmc_function *sc_card;	/* selected card */
 	struct sdmmc_function *sc_fn0;	/* function 0, the card itself */
@@ -174,13 +175,14 @@ struct sdmmc_softc {
 	struct lock sc_lock;		/* lock around host controller */
 	void *sc_scsibus;		/* SCSI bus emulation softc */
 	TAILQ_HEAD(, sdmmc_intr_handler) sc_intrq; /* interrupt handlers */
+	long sc_max_xfer;		/* maximum transfer size */
 };
 
 /*
  * Attach devices at the sdmmc bus.
  */
 struct sdmmc_attach_args {
-	struct scsi_link scsi_link;	/* XXX */
+	struct scsi_link *scsi_link;	/* XXX */
 	struct sdmmc_function *sf;
 };
 
@@ -189,6 +191,8 @@ struct sdmmc_attach_args {
 
 #define SDMMC_LOCK(sc)	 lockmgr(&(sc)->sc_lock, LK_EXCLUSIVE, NULL)
 #define SDMMC_UNLOCK(sc) lockmgr(&(sc)->sc_lock, LK_RELEASE, NULL)
+#define	SDMMC_ASSERT_LOCKED(sc) \
+	KASSERT(lockstatus(&((sc))->sc_lock) == LK_EXCLUSIVE)
 
 void	sdmmc_add_task(struct sdmmc_softc *, struct sdmmc_task *);
 void	sdmmc_del_task(struct sdmmc_task *);

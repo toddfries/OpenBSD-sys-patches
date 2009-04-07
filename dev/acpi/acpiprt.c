@@ -1,4 +1,4 @@
-/* $OpenBSD: acpiprt.c,v 1.30 2008/12/19 18:55:47 kettenis Exp $ */
+/* $OpenBSD: acpiprt.c,v 1.35 2009/03/31 20:59:00 kettenis Exp $ */
 /*
  * Copyright (c) 2006 Mark Kettenis <kettenis@openbsd.org>
  *
@@ -216,7 +216,8 @@ acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 	struct aml_node	*node;
 	struct aml_value res, *pp;
 	u_int64_t addr;
-	int pin, irq, sta;
+	int pin, irq;
+	int64_t sta;
 #if NIOAPIC > 0
 	struct mp_intr_map *map;
 	struct ioapic_softc *apic;
@@ -260,13 +261,11 @@ acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 	}
 	if (pp->type == AML_OBJTYPE_DEVICE) {
 		node = pp->node;
-		if (aml_evalname(sc->sc_acpi, node, "_STA", 0, NULL, &res)) {
+		if (aml_evalinteger(sc->sc_acpi, node, "_STA", 0, NULL, &sta)) {
 			printf("no _STA method\n");
 			return;
 		}
 
-		sta = aml_val2int(&res);
-		aml_freevalue(&res);
 		if ((sta & STA_PRESENT) == 0)
 			return;
 
@@ -275,7 +274,7 @@ acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 			return;
 		}
 
-		if (res.type != AML_OBJTYPE_BUFFER || res.length < 6) {
+		if (res.type != AML_OBJTYPE_BUFFER || res.length < 5) {
 			printf("invalid _CRS object\n");
 			aml_freevalue(&res);
 			return;
@@ -288,7 +287,7 @@ acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 		if ((irq == 0 || irq == 2 || irq == 13) &&
 		    !aml_evalname(sc->sc_acpi, node, "_PRS", 0, NULL, &res)){
 			if (res.type == AML_OBJTYPE_BUFFER &&
-			    res.length >= 6) {
+			    res.length >= 5) {
 				aml_parse_resource(res.length, res.v_buffer,
 				    acpiprt_chooseirq, &irq);
 			}
@@ -386,6 +385,7 @@ acpiprt_getpcibus(struct acpiprt_softc *sc, struct aml_node *node)
 	pcitag_t tag;
 	pcireg_t reg;
 	int bus, dev, func, rv;
+	int64_t ires;
 
 	if (parent == NULL)
 		return 0;
@@ -408,21 +408,18 @@ acpiprt_getpcibus(struct acpiprt_softc *sc, struct aml_node *node)
 	 * If our parent is the root of the bus, it should specify the
 	 * base bus number.
 	 */
-	if (aml_evalname(sc->sc_acpi, parent, "_BBN.", 0, NULL, &res) == 0) {
-		rv = aml_val2int(&res);
-		aml_freevalue(&res);
-		return (rv);
+	if (aml_evalinteger(sc->sc_acpi, parent, "_BBN.", 0, NULL, &ires) == 0) {
+		return (ires);
 	}
 
 	/*
 	 * If our parent is a PCI-PCI bridge, get our bus number from its
 	 * PCI config space.
 	 */
-	if (aml_evalname(sc->sc_acpi, parent, "_ADR.", 0, NULL, &res) == 0) {
+	if (aml_evalinteger(sc->sc_acpi, parent, "_ADR.", 0, NULL, &ires) == 0) {
 		bus = acpiprt_getpcibus(sc, parent);
-		dev = ACPI_PCI_DEV(aml_val2int(&res) << 16);
-		func = ACPI_PCI_FN(aml_val2int(&res) << 16);
-		aml_freevalue(&res);
+		dev = ACPI_PCI_DEV(ires << 16);
+		func = ACPI_PCI_FN(ires << 16);
 
 		/*
 		 * Some systems return 255 as the device number for
@@ -457,7 +454,8 @@ acpiprt_route_interrupt(int bus, int dev, int pin)
 	struct aml_node *node = NULL;
 	struct aml_value res, res2;
 	union acpi_resource *crs;
-	int irq, newirq, sta;
+	int irq, newirq;
+	int64_t sta;
 
 	SIMPLEQ_FOREACH(p, &acpiprt_map_list, list) {
 		if (p->bus == bus && p->dev == dev && p->pin == (pin - 1)) {
@@ -470,20 +468,18 @@ acpiprt_route_interrupt(int bus, int dev, int pin)
 	if (node == NULL)
 		return;
 
-	if (aml_evalname(sc->sc_acpi, node, "_STA", 0, NULL, &res)) {
+	if (aml_evalinteger(sc->sc_acpi, node, "_STA", 0, NULL, &sta)) {
 		printf("no _STA method\n");
 		return;
 	}
 
-	sta = aml_val2int(&res);
-	aml_freevalue(&res);
 	KASSERT(sta & STA_PRESENT);
 
 	if (aml_evalname(sc->sc_acpi, node, "_CRS", 0, NULL, &res)) {
 		printf("no _CRS method\n");
 		return;
 	}
-	if (res.type != AML_OBJTYPE_BUFFER || res.length < 6) {
+	if (res.type != AML_OBJTYPE_BUFFER || res.length < 5) {
 		printf("invalid _CRS object\n");
 		aml_freevalue(&res);
 		return;

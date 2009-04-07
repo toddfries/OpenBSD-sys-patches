@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtw.c,v 1.71 2008/11/28 02:44:17 brad Exp $	*/
+/*	$OpenBSD: rtw.c,v 1.73 2009/03/29 21:53:52 sthen Exp $	*/
 /*	$NetBSD: rtw.c,v 1.29 2004/12/27 19:49:16 dyoung Exp $ */
 
 /*-
@@ -3454,7 +3454,7 @@ rtw_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 			rtw_set_nettype(sc, IEEE80211_M_MONITOR);
 		}
 
-		timeout_add(&sc->sc_scan_to, rtw_dwelltime * hz / 1000);
+		timeout_add_msec(&sc->sc_scan_to, rtw_dwelltime);
 
 		break;
 	case IEEE80211_S_RUN:
@@ -3956,7 +3956,7 @@ rtw_attach(struct rtw_softc *sc)
 	    (caddr_t*)&sc->sc_descs, BUS_DMA_COHERENT);
 
 	if (rc != 0) {
-		printf("\n%s: could not map hw descriptors, error %d\n",
+		printf("\n%s: can't map hw descriptors, error %d\n",
 		    sc->sc_dev.dv_xname, rc);
 		goto fail1;
 	}

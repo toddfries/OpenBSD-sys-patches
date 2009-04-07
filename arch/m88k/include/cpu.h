@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.39 2008/12/21 21:43:51 miod Exp $ */
+/*	$OpenBSD: cpu.h,v 1.47 2009/03/26 17:24:33 oga Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
@@ -79,54 +79,89 @@
 
 extern u_int max_cpus;
 
+#include <machine/lock.h>
+
 /*
  * Per-CPU data structure
  */
 
 struct cpu_info {
-	u_int	ci_flags;
+	u_int		 ci_flags;
 #define	CIF_ALIVE		0x01		/* cpu initialized */
 #define	CIF_PRIMARY		0x02		/* primary cpu */
 
-	struct proc *ci_curproc;		/* current process... */
-	struct pcb *ci_curpcb;			/* ...and its pcb */
+	struct proc	*ci_curproc;		/* current process... */
+	struct pcb	*ci_curpcb;		/* ...and its pcb */
 
-	u_int	ci_cpuid;			/* cpu number */
+	u_int		 ci_cpuid;		/* cpu number */
 
-	u_int	ci_pfsr_i0, ci_pfsr_i1;		/* instruction... */
-	u_int	ci_pfsr_d0, ci_pfsr_d1;		/* ... and data CMMU PFSRs */
+	/*
+	 * Function pointers used within mplock to ensure
+	 * non-interruptability.
+	 */
+	uint32_t	(*ci_mp_atomic_begin)
+			    (__cpu_simple_lock_t *lock, uint *csr);
+	void		(*ci_mp_atomic_end)
+			    (uint32_t psr, __cpu_simple_lock_t *lock, uint csr);
 
-	struct schedstate_percpu ci_schedstate;	/* scheduling state */
-	int	ci_want_resched;		/* need_resched() invoked */
+	/*
+	 * The following fields are used differently depending on
+	 * the processor type.  Think of them as an anonymous union
+	 * of two anonymous structs.
+	 */
+	u_int		 ci_cpudep0;
+	u_int		 ci_cpudep1;
+	u_int		 ci_cpudep2;
+	u_int		 ci_cpudep3;
+	u_int		 ci_cpudep4;
+	u_int		 ci_cpudep5;
+	u_int		 ci_cpudep6;
+	u_int		 ci_cpudep7;
 
-	u_int	ci_intrdepth;			/* interrupt depth */
+	/* 88100 fields */
+#define	ci_pfsr_i0	 ci_cpudep0		/* instruction... */
+#define	ci_pfsr_i1	 ci_cpudep1
+#define	ci_pfsr_d0	 ci_cpudep2		/* ...and data CMMU PFSRs */
+#define	ci_pfsr_d1	 ci_cpudep3
 
-	u_long	ci_spin_locks;			/* spin locks counter */
+	/* 88110 fields */
+#define	ci_ipi_arg1	 ci_cpudep0		/* Complex IPI arguments */
+#define	ci_ipi_arg2	 ci_cpudep1
+#define	ci_h_sxip	 ci_cpudep2		/* trapframe values */
+#define	ci_h_epsr	 ci_cpudep3		/* for hardclock */
+#define	ci_s_sxip	 ci_cpudep4		/* and softclock */
+#define	ci_s_epsr	 ci_cpudep5
+#define	ci_pmap_ipi	 ci_cpudep6		/* delayed pmap tlb ipi */
 
-	int	ci_ddb_state;			/* ddb status */
+	struct schedstate_percpu
+			 ci_schedstate;		/* scheduling state */
+	int		 ci_want_resched;	/* need_resched() invoked */
+
+	u_int		 ci_intrdepth;		/* interrupt depth */
+
+	u_long		 ci_spin_locks;		/* spin locks counter */
+
+	int		 ci_ddb_state;		/* ddb status */
 #define	CI_DDB_RUNNING	0
 #define	CI_DDB_ENTERDDB	1
 #define	CI_DDB_INDDB	2
 #define	CI_DDB_PAUSE	3
 
-	int	ci_softintr;			/* pending soft interrupts */
-	u_int32_t ci_randseed;
+	u_int32_t	 ci_randseed;		/* per-cpu random seed */
 
-#ifdef MULTIPROCESSOR
-
-	int	ci_ipi;				/* pending ipis */
+	int		 ci_ipi;		/* pending ipis */
 #define	CI_IPI_NOTIFY		0x00000001
 #define	CI_IPI_HARDCLOCK	0x00000002
 #define	CI_IPI_STATCLOCK	0x00000004
 #define	CI_IPI_DDB		0x00000008
+/* 88110 simple ipi */
 #define	CI_IPI_TLB_FLUSH_KERNEL	0x00000010
 #define	CI_IPI_TLB_FLUSH_USER	0x00000020
-
+/* 88110 complex ipi */
 #define	CI_IPI_CACHE_FLUSH	0x00000040
 #define	CI_IPI_ICACHE_FLUSH	0x00000080
-	u_int32_t	ci_ipi_arg1;
-	u_int32_t	ci_ipi_arg2;
-#endif
+#define	CI_IPI_DMA_CACHECTL	0x00000100
+	void		(*ci_softipi_cb)(void);	/* 88110 softipi callback */
 };
 
 extern cpuid_t master_cpu;
@@ -184,7 +219,6 @@ void	set_cpu_number(cpuid_t);
  * referenced in generic code
  */
 #define	cpu_exec(p)		do { /* nothing */ } while (0)
-#define	cpu_wait(p)		do { /* nothing */ } while (0)
 
 #define	cpu_idle_enter()	do { /* nothing */ } while (0)
 #define	cpu_idle_cycle()	do { /* nothing */ } while (0)
@@ -211,19 +245,7 @@ struct clockframe {
 #define	CLKF_INTR(framep) \
 	(((struct cpu_info *)(framep)->tf.tf_cpu)->ci_intrdepth > 1)
 
-/*
- * Get interrupt glue.
- */
-#include <machine/intr.h>
-
-#define SIR_NET		0x01
-#define SIR_CLOCK	0x02
-
-#define setsoftint(x)	atomic_setbits_int(&curcpu()->ci_softintr, x)
-#define setsoftnet()	setsoftint(SIR_NET)
-#define setsoftclock()	setsoftint(SIR_CLOCK)
-
-#define	aston(p)	((p)->p_md.md_astpending = 1)
+#define	aston(p)		((p)->p_md.md_astpending = 1)
 
 /*
  * This is used during profiling to integrate system time.
@@ -246,6 +268,7 @@ struct clockframe {
 
 void	need_resched(struct cpu_info *);
 void	signotify(struct proc *);
+void	softipi(void);
 
 int	badaddr(vaddr_t addr, int size);
 

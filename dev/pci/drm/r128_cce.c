@@ -92,17 +92,17 @@ static int R128_READ_PLL(struct drm_device * dev, int addr)
 #if R128_FIFO_DEBUG
 static void r128_status(drm_r128_private_t * dev_priv)
 {
-	printk("GUI_STAT           = 0x%08x\n",
+	printf("GUI_STAT           = 0x%08x\n",
 	       (unsigned int)R128_READ(R128_GUI_STAT));
-	printk("PM4_STAT           = 0x%08x\n",
+	printf("PM4_STAT           = 0x%08x\n",
 	       (unsigned int)R128_READ(R128_PM4_STAT));
-	printk("PM4_BUFFER_DL_WPTR = 0x%08x\n",
+	printf("PM4_BUFFER_DL_WPTR = 0x%08x\n",
 	       (unsigned int)R128_READ(R128_PM4_BUFFER_DL_WPTR));
-	printk("PM4_BUFFER_DL_RPTR = 0x%08x\n",
+	printf("PM4_BUFFER_DL_RPTR = 0x%08x\n",
 	       (unsigned int)R128_READ(R128_PM4_BUFFER_DL_RPTR));
-	printk("PM4_MICRO_CNTL     = 0x%08x\n",
+	printf("PM4_MICRO_CNTL     = 0x%08x\n",
 	       (unsigned int)R128_READ(R128_PM4_MICRO_CNTL));
-	printk("PM4_BUFFER_CNTL    = 0x%08x\n",
+	printf("PM4_BUFFER_CNTL    = 0x%08x\n",
 	       (unsigned int)R128_READ(R128_PM4_BUFFER_CNTL));
 }
 #endif
@@ -324,8 +324,7 @@ static void r128_cce_init_ring_buffer(struct drm_device * dev,
 		ring_start = dev_priv->cce_ring->offset - dev->agp->base;
 	else
 #endif
-		ring_start = dev_priv->cce_ring->offset -
-				(unsigned long)dev->sg->virtual;
+		ring_start = dev_priv->cce_ring->offset - dev->sg->handle;
 
 	R128_WRITE(R128_PM4_BUFFER_OFFSET, ring_start | R128_AGP_OFFSET);
 
@@ -518,7 +517,7 @@ static int r128_do_init_cce(struct drm_device * dev, drm_r128_init_t * init)
 		dev_priv->cce_buffers_offset = dev->agp->base;
 	else
 #endif
-		dev_priv->cce_buffers_offset = (unsigned long)dev->sg->virtual;
+		dev_priv->cce_buffers_offset = dev->sg->handle;
 
 	dev_priv->ring.start = (u32 *) dev_priv->cce_ring->handle;
 	dev_priv->ring.end = ((u32 *) dev_priv->cce_ring->handle
@@ -545,7 +544,7 @@ static int r128_do_init_cce(struct drm_device * dev, drm_r128_init_t * init)
 		dev_priv->gart_info.addr = NULL;
 		dev_priv->gart_info.bus_addr = 0;
 		dev_priv->gart_info.gart_reg_if = DRM_ATI_GART_PCI;
-		if (!drm_ati_pcigart_init(dev, &dev_priv->gart_info)) {
+		if (drm_ati_pcigart_init(dev, &dev_priv->gart_info)) {
 			DRM_ERROR("failed to init PCI GART!\n");
 			r128_do_cleanup_cce(dev);
 			return ENOMEM;
@@ -567,12 +566,6 @@ int r128_do_cleanup_cce(struct drm_device * dev)
 {
 	drm_r128_private_t *dev_priv = dev->dev_private;
 
-	/* Make sure interrupts are disabled here because the uninstall ioctl
-	 * may not have been called from userspace
-	 */
-	if (dev->irq_enabled)
-		drm_irq_uninstall(dev);
-
 #if __OS_HAS_AGP
 	if (!dev_priv->is_pci) {
 		if (dev_priv->cce_ring != NULL)
@@ -587,7 +580,7 @@ int r128_do_cleanup_cce(struct drm_device * dev)
 #endif
 	{
 		if (dev_priv->gart_info.bus_addr)
-			if (!drm_ati_pcigart_cleanup(dev, &dev_priv->gart_info))
+			if (drm_ati_pcigart_cleanup(dev, &dev_priv->gart_info))
 				DRM_ERROR("failed to cleanup PCI GART!\n");
 	}
 
@@ -722,63 +715,15 @@ int r128_fullscreen(struct drm_device *dev, void *data, struct drm_file *file_pr
 /* ================================================================
  * Freelist management
  */
-#define R128_BUFFER_USED	0xffffffff
-#define R128_BUFFER_FREE	0
 
-#if 0
-static int r128_freelist_init(struct drm_device * dev)
+static struct drm_buf *
+r128_freelist_get(struct drm_device * dev)
 {
-	struct drm_device_dma *dma = dev->dma;
-	drm_r128_private_t *dev_priv = dev->dev_private;
-	struct drm_buf *buf;
-	drm_r128_buf_priv_t *buf_priv;
-	drm_r128_freelist_t *entry;
-	int i;
-
-	dev_priv->head = drm_calloc(1, sizeof(drm_r128_freelist_t),
-	    DRM_MEM_DRIVER);
-	if (dev_priv->head == NULL)
-		return ENOMEM;
-
-	dev_priv->head->age = R128_BUFFER_USED;
-
-	for (i = 0; i < dma->buf_count; i++) {
-		buf = dma->buflist[i];
-		buf_priv = buf->dev_private;
-
-		entry = drm_alloc(sizeof(drm_r128_freelist_t), DRM_MEM_DRIVER);
-		if (!entry)
-			return ENOMEM;
-
-		entry->age = R128_BUFFER_FREE;
-		entry->buf = buf;
-		entry->prev = dev_priv->head;
-		entry->next = dev_priv->head->next;
-		if (!entry->next)
-			dev_priv->tail = entry;
-
-		buf_priv->discard = 0;
-		buf_priv->dispatched = 0;
-		buf_priv->list_entry = entry;
-
-		dev_priv->head->next = entry;
-
-		if (dev_priv->head->next)
-			dev_priv->head->next->prev = entry;
-	}
-
-	return 0;
-
-}
-#endif
-
-static struct drm_buf *r128_freelist_get(struct drm_device * dev)
-{
-	struct drm_device_dma *dma = dev->dma;
-	drm_r128_private_t *dev_priv = dev->dev_private;
-	drm_r128_buf_priv_t *buf_priv;
-	struct drm_buf *buf;
-	int i, t;
+	struct drm_device_dma	*dma = dev->dma;
+	drm_r128_private_t	*dev_priv = dev->dev_private;
+	struct ragedrm_buf_priv	*buf_priv;
+	struct drm_buf		*buf;
+	int			 i, t;
 
 	/* FIXME: Optimize -- use freelist code */
 
@@ -810,14 +755,16 @@ static struct drm_buf *r128_freelist_get(struct drm_device * dev)
 	return NULL;
 }
 
-void r128_freelist_reset(struct drm_device * dev)
+void
+r128_freelist_reset(struct drm_device * dev)
 {
 	struct drm_device_dma *dma = dev->dma;
 	int i;
 
 	for (i = 0; i < dma->buf_count; i++) {
 		struct drm_buf *buf = dma->buflist[i];
-		drm_r128_buf_priv_t *buf_priv = buf->dev_private;
+		struct ragedrm_buf_priv *buf_priv = buf->dev_private;
+
 		buf_priv->age = 0;
 	}
 }
@@ -843,9 +790,9 @@ int r128_wait_ring(drm_r128_private_t * dev_priv, int n)
 	return EBUSY;
 }
 
-static int r128_cce_get_buffers(struct drm_device * dev,
-				struct drm_file *file_priv,
-				struct drm_dma * d)
+int
+r128_cce_buffers(struct drm_device *dev, struct drm_dma * d,
+    struct drm_file *file_priv)
 {
 	int i;
 	struct drm_buf *buf;
@@ -867,37 +814,4 @@ static int r128_cce_get_buffers(struct drm_device * dev,
 		d->granted_count++;
 	}
 	return 0;
-}
-
-int r128_cce_buffers(struct drm_device *dev, void *data, struct drm_file *file_priv)
-{
-	struct drm_device_dma *dma = dev->dma;
-	int ret = 0;
-	struct drm_dma *d = data;
-
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
-
-	/* Please don't send us buffers.
-	 */
-	if (d->send_count != 0) {
-		DRM_ERROR("Process %d trying to send %d buffers via drmDMA\n",
-			  DRM_CURRENTPID, d->send_count);
-		return EINVAL;
-	}
-
-	/* We'll send you buffers.
-	 */
-	if (d->request_count < 0 || d->request_count > dma->buf_count) {
-		DRM_ERROR("Process %d trying to get %d buffers (of %d max)\n",
-			  DRM_CURRENTPID, d->request_count, dma->buf_count);
-		return EINVAL;
-	}
-
-	d->granted_count = 0;
-
-	if (d->request_count) {
-		ret = r128_cce_get_buffers(dev, file_priv, d);
-	}
-
-	return ret;
 }

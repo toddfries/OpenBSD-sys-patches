@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860.c,v 1.31 2008/12/29 13:59:00 damien Exp $	*/
+/*	$OpenBSD: rt2860.c,v 1.33 2009/03/29 21:53:52 sthen Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -389,7 +389,7 @@ rt2860_alloc_tx_ring(struct rt2860_softc *sc, struct rt2860_tx_ring *ring)
 	error = bus_dmamem_map(sc->sc_dmat, &ring->seg, nsegs, size,
 	    (caddr_t *)&ring->txd, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map DMA memory\n", sc->sc_dev.dv_xname);
+		printf("%s: can't map DMA memory\n", sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
@@ -499,7 +499,7 @@ rt2860_alloc_tx_pool(struct rt2860_softc *sc)
 	error = bus_dmamem_map(sc->sc_dmat, &sc->txwi_seg, nsegs, size,
 	    &sc->txwi_vaddr, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map DMA memory\n", sc->sc_dev.dv_xname);
+		printf("%s: can't map DMA memory\n", sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
@@ -589,7 +589,7 @@ rt2860_alloc_rx_ring(struct rt2860_softc *sc, struct rt2860_rx_ring *ring)
 	error = bus_dmamem_map(sc->sc_dmat, &ring->seg, nsegs, size,
 	    (caddr_t *)&ring->rxd, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map DMA memory\n", sc->sc_dev.dv_xname);
+		printf("%s: can't map DMA memory\n", sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
@@ -1440,8 +1440,7 @@ rt2860_tx(struct rt2860_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 		txwi->txop = RT2860_TX_TXOP_BACKOFF;
 
 	if (!IEEE80211_IS_MULTICAST(wh->i_addr1) &&
-	    (!hasqos || (qos & IEEE80211_QOS_ACK_POLICY_MASK) >>
-	     IEEE80211_QOS_ACK_POLICY_SHIFT !=
+	    (!hasqos || (qos & IEEE80211_QOS_ACK_POLICY_MASK) !=
 	     IEEE80211_QOS_ACK_POLICY_NOACK)) {
 		txwi->xflags |= RT2860_TX_ACK;
 
@@ -1490,7 +1489,7 @@ rt2860_tx(struct rt2860_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m,
 	    BUS_DMA_NOWAIT);
 	if (__predict_false(error != 0 && error != EFBIG)) {
-		printf("%s: could not map mbuf (error %d)\n",
+		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		m_freem(m);
 		return error;
@@ -1528,7 +1527,7 @@ rt2860_tx(struct rt2860_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m,
 		    BUS_DMA_NOWAIT);
 		if (__predict_false(error != 0)) {
-			printf("%s: could not map mbuf (error %d)\n",
+			printf("%s: can't map mbuf (error %d)\n",
 			    sc->sc_dev.dv_xname, error);
 			m_freem(m);
 			return error;

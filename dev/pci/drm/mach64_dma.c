@@ -821,7 +821,7 @@ int mach64_add_hostdata_buf_to_ring(drm_mach64_private_t *dev_priv,
 static int mach64_bm_dma_test(struct drm_device * dev)
 {
 	drm_mach64_private_t *dev_priv = dev->dev_private;
-	drm_dma_handle_t *cpu_addr_dmah;
+	struct drm_dmamem	*cpu_addr_dmah;
 	u32 data_addr;
 	u32 *table, *data;
 	u32 expected[2];
@@ -834,14 +834,14 @@ static int mach64_bm_dma_test(struct drm_device * dev)
 
 	/* FIXME: get a dma buffer from the freelist here */
 	DRM_DEBUG("Allocating data memory ...\n");
-	cpu_addr_dmah =
-	    drm_pci_alloc(dev->dmat, 0x1000, 0x1000, 0xfffffffful);
-	if (!cpu_addr_dmah) {
+	cpu_addr_dmah = drm_dmamem_alloc(dev->dmat, 0x1000, 0x1000, 1,
+	    0x1000, 0, 0);
+	if (cpu_addr_dmah == NULL) {
 		DRM_INFO("data-memory allocation failed!\n");
 		return ENOMEM;
 	} else {
-		data = (u32 *) cpu_addr_dmah->vaddr;
-		data_addr = (u32) cpu_addr_dmah->busaddr;
+		data = (u_int32_t *)cpu_addr_dmah->kva;
+		data_addr = (u_int32_t)cpu_addr_dmah->map->dm_segs[0].ds_addr;
 	}
 
 	/* Save the X server's value for SRC_CNTL and restore it
@@ -869,7 +869,7 @@ static int mach64_bm_dma_test(struct drm_device * dev)
 			DRM_INFO("resetting engine ...\n");
 			mach64_do_engine_reset(dev_priv);
 			DRM_INFO("freeing data buffer memory.\n");
-			drm_pci_free(dev->dmat, cpu_addr_dmah);
+			drm_dmamem_free(dev->dmat, cpu_addr_dmah);
 			return EIO;
 		}
 	}
@@ -924,7 +924,7 @@ static int mach64_bm_dma_test(struct drm_device * dev)
 		MACH64_WRITE(MACH64_PAT_REG0, pat_reg0);
 		MACH64_WRITE(MACH64_PAT_REG1, pat_reg1);
 		DRM_INFO("freeing data buffer memory.\n");
-		drm_pci_free(dev->dmat, cpu_addr_dmah);
+		drm_dmamem_free(dev->dmat, cpu_addr_dmah);
 		return i;
 	}
 	DRM_DEBUG("waiting for idle...done\n");
@@ -960,7 +960,7 @@ static int mach64_bm_dma_test(struct drm_device * dev)
 		MACH64_WRITE(MACH64_PAT_REG0, pat_reg0);
 		MACH64_WRITE(MACH64_PAT_REG1, pat_reg1);
 		DRM_INFO("freeing data buffer memory.\n");
-		drm_pci_free(dev->dmat, cpu_addr_dmah);
+		drm_dmamem_free(dev->dmat, cpu_addr_dmah);
 		return i;
 	}
 
@@ -988,7 +988,7 @@ static int mach64_bm_dma_test(struct drm_device * dev)
 	MACH64_WRITE(MACH64_PAT_REG1, pat_reg1);
 
 	DRM_DEBUG("freeing data buffer memory.\n");
-	drm_pci_free(dev->dmat, cpu_addr_dmah);
+	drm_dmamem_free(dev->dmat, cpu_addr_dmah);
 	DRM_DEBUG("returning ...\n");
 
 	return failed;
@@ -1344,13 +1344,6 @@ int mach64_do_cleanup_dma(struct drm_device * dev)
 
 	DRM_DEBUG("\n");
 
-	/* Make sure interrupts are disabled here because the uninstall ioctl
-	 * may not have been called from userspace and after dev_private
-	 * is freed, it's too late.
-	 */
-	if (dev->irq_enabled)
-		drm_irq_uninstall(dev);
-
 	if (!dev_priv->is_pci) {
 		if (dev_priv->ring_map)
 			drm_core_ioremapfree(dev_priv->ring_map);
@@ -1446,10 +1439,7 @@ int mach64_init_freelist(struct drm_device * dev)
 	DRM_DEBUG("adding %d buffers to freelist\n", dma->buf_count);
 
 	for (i = 0; i < dma->buf_count; i++) {
-		if ((entry =
-		     (drm_mach64_freelist_t *)
-		     drm_calloc(1, sizeof(drm_mach64_freelist_t),
-			       DRM_MEM_BUFLISTS)) == NULL)
+		if ((entry = drm_calloc(1, sizeof(*entry))) == NULL)
 			return ENOMEM;
 		entry->buf = dma->buflist[i];
 		ptr = &entry->list;
@@ -1471,18 +1461,18 @@ void mach64_destroy_freelist(struct drm_device * dev)
 	list_for_each_safe(ptr, tmp, &dev_priv->pending) {
 		list_del(ptr);
 		entry = list_entry(ptr, drm_mach64_freelist_t, list);
-		drm_free(entry, sizeof(*entry), DRM_MEM_BUFLISTS);
+		drm_free(entry);
 	}
 	list_for_each_safe(ptr, tmp, &dev_priv->placeholders) {
 		list_del(ptr);
 		entry = list_entry(ptr, drm_mach64_freelist_t, list);
-		drm_free(entry, sizeof(*entry), DRM_MEM_BUFLISTS);
+		drm_free(entry);
 	}
 
 	list_for_each_safe(ptr, tmp, &dev_priv->free_list) {
 		list_del(ptr);
 		entry = list_entry(ptr, drm_mach64_freelist_t, list);
-		drm_free(entry, sizeof(*entry), DRM_MEM_BUFLISTS);
+		drm_free(entry);
 	}
 }
 
@@ -1668,9 +1658,10 @@ int mach64_freelist_put(drm_mach64_private_t *dev_priv, struct drm_buf *copy_buf
 /** \name DMA buffer request and submission IOCTL handler */
 /*@{*/
 
-static int mach64_dma_get_buffers(struct drm_device *dev,
-				  struct drm_file *file_priv,
-				  struct drm_dma * d)
+
+int
+mach64_dma_buffers(struct drm_device *dev, struct drm_dma *d,
+    struct drm_file *file_priv)
 {
 	int i;
 	struct drm_buf *buf;
@@ -1698,40 +1689,6 @@ static int mach64_dma_get_buffers(struct drm_device *dev,
 		d->granted_count++;
 	}
 	return 0;
-}
-
-int mach64_dma_buffers(struct drm_device *dev, void *data,
-		       struct drm_file *file_priv)
-{
-	struct drm_device_dma *dma = dev->dma;
-	struct drm_dma *d = data;
-	int ret = 0;
-
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
-
-	/* Please don't send us buffers.
-	 */
-	if (d->send_count != 0) {
-		DRM_ERROR("Process %d trying to send %d buffers via drmDMA\n",
-			  DRM_CURRENTPID, d->send_count);
-		return EINVAL;
-	}
-
-	/* We'll send you buffers.
-	 */
-	if (d->request_count < 0 || d->request_count > dma->buf_count) {
-		DRM_ERROR("Process %d trying to get %d buffers (of %d max)\n",
-			  DRM_CURRENTPID, d->request_count, dma->buf_count);
-		ret = EINVAL;
-	}
-
-	d->granted_count = 0;
-
-	if (d->request_count) {
-		ret = mach64_dma_get_buffers(dev, file_priv, d);
-	}
-
-	return ret;
 }
 
 void mach64_driver_lastclose(struct drm_device * dev)

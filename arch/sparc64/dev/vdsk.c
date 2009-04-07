@@ -1,4 +1,4 @@
-/*	$OpenBSD: vdsk.c,v 1.8 2009/01/17 22:18:14 kettenis Exp $	*/
+/*	$OpenBSD: vdsk.c,v 1.10 2009/02/20 17:55:28 kettenis Exp $	*/
 /*
  * Copyright (c) 2009 Mark Kettenis
  *
@@ -337,7 +337,7 @@ vdsk_attach(struct device *parent, struct device *self, void *aux)
 		return;
 
 	sc->sc_switch.scsi_cmd = vdsk_scsi_cmd;
-	sc->sc_switch.scsi_minphys = minphys;
+	sc->sc_switch.scsi_minphys = scsi_minphys;
 	sc->sc_switch.dev_probe = vdsk_dev_probe;
 	sc->sc_switch.dev_free = vdsk_dev_free;
 	sc->sc_switch.ioctl = vdsk_ioctl;
@@ -751,7 +751,7 @@ vdsk_sendmsg(struct vdsk_softc *sc, void *msg, size_t len)
 	tx_tail &= ((lc->lc_txq->lq_nentries * sizeof(*lp)) - 1);
 	err = hv_ldc_tx_set_qtail(lc->lc_id, tx_tail);
 	if (err != H_EOK)
-		printf("hv_ldc_tx_set_qtail: %d\n", err);
+		printf("%s: hv_ldc_tx_set_qtail: %d\n", __func__, err);
 }
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.43 2008/12/28 18:26:53 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.45 2009/03/10 15:03:17 oga Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.28 1997/06/06 23:29:17 thorpej Exp $	*/
 
 /*-
@@ -82,7 +82,6 @@
 
 #include <uvm/uvm_extern.h>
 
-#define _BUS_DMA_PRIVATE
 #include <machine/bus.h>
 #include <machine/pio.h>
 #include <machine/i8259.h>
@@ -112,6 +111,18 @@ extern bios_pciinfo_t *bios_pciinfo;
 #endif
 
 int pci_mode = -1;
+
+struct mutex pci_conf_lock = MUTEX_INITIALIZER(IPL_HIGH);
+
+#define	PCI_CONF_LOCK()							\
+do {									\
+	mtx_enter(&pci_conf_lock);					\
+} while (0)
+
+#define	PCI_CONF_UNLOCK()						\
+do {									\
+	mtx_leave(&pci_conf_lock);					\
+} while (0)
 
 #define	PCI_MODE1_ENABLE	0x80000000UL
 #define	PCI_MODE1_ADDRESS_REG	0x0cf8
@@ -252,6 +263,7 @@ pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 {
 	pcireg_t data;
 
+	PCI_CONF_LOCK();
 	switch (pci_mode) {
 	case 1:
 		outl(PCI_MODE1_ADDRESS_REG, tag.mode1 | reg);
@@ -267,6 +279,7 @@ pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 	default:
 		panic("pci_conf_read: mode not configured");
 	}
+	PCI_CONF_UNLOCK();
 
 	return data;
 }
@@ -275,6 +288,7 @@ void
 pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 {
 
+	PCI_CONF_LOCK();
 	switch (pci_mode) {
 	case 1:
 		outl(PCI_MODE1_ADDRESS_REG, tag.mode1 | reg);
@@ -290,6 +304,7 @@ pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 	default:
 		panic("pci_conf_write: mode not configured");
 	}
+	PCI_CONF_UNLOCK();
 }
 
 int

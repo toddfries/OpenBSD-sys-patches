@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.20 2008/12/28 18:26:53 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.24 2009/04/04 16:03:17 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.3 2003/05/07 21:33:58 fvdl Exp $	*/
 
 /*-
@@ -79,11 +79,9 @@
 #include <sys/systm.h>
 #include <sys/errno.h>
 #include <sys/device.h>
-#include <sys/lock.h>
 
 #include <uvm/uvm_extern.h>
 
-#define _BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <machine/pio.h>
@@ -105,22 +103,16 @@
 
 int pci_mode = -1;
 
-#if defined(MULTIPROCESSOR) && 0
-struct simplelock pci_conf_slock = SIMPLELOCK_INITIALIZER;
-#else
-struct simplelock pci_conf_slock = { 0 };
-#endif
+struct mutex pci_conf_lock = MUTEX_INITIALIZER(IPL_HIGH);
 
-#define	PCI_CONF_LOCK(s)						\
+#define	PCI_CONF_LOCK()						\
 do {									\
-	(s) = splhigh();						\
-	simple_lock(&pci_conf_slock);					\
+	mtx_enter(&pci_conf_lock);					\
 } while (0)
 
-#define	PCI_CONF_UNLOCK(s)						\
+#define	PCI_CONF_UNLOCK()						\
 do {									\
-	simple_unlock(&pci_conf_slock);					\
-	splx((s));							\
+	mtx_leave(&pci_conf_lock);					\
 } while (0)
 
 #define	PCI_MODE1_ENABLE	0x80000000UL
@@ -258,9 +250,8 @@ pcireg_t
 pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 {
 	pcireg_t data;
-	int s;
 
-	PCI_CONF_LOCK(s);
+	PCI_CONF_LOCK();
 	switch (pci_mode) {
 	case 1:
 		outl(PCI_MODE1_ADDRESS_REG, tag.mode1 | reg);
@@ -276,7 +267,7 @@ pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 	default:
 		panic("pci_conf_read: mode not configured");
 	}
-	PCI_CONF_UNLOCK(s);
+	PCI_CONF_UNLOCK();
 
 	return data;
 }
@@ -284,9 +275,8 @@ pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 void
 pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 {
-	int s;
 
-	PCI_CONF_LOCK(s);
+	PCI_CONF_LOCK();
 	switch (pci_mode) {
 	case 1:
 		outl(PCI_MODE1_ADDRESS_REG, tag.mode1 | reg);
@@ -302,7 +292,7 @@ pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 	default:
 		panic("pci_conf_write: mode not configured");
 	}
-	PCI_CONF_UNLOCK(s);
+	PCI_CONF_UNLOCK();
 }
 
 int
@@ -558,49 +548,4 @@ void
 pci_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 {
 	intr_disestablish(cookie);
-}
-
-/*
- * Determine which flags should be passed to the primary PCI bus's
- * autoconfiguration node.  We use this to detect broken chipsets
- * which cannot safely use memory-mapped device access.
- */
-int
-pci_bus_flags(void)
-{
-	int rval = PCI_FLAGS_IO_ENABLED | PCI_FLAGS_MEM_ENABLED;
-	int device, maxndevs;
-	pcitag_t tag;
-	pcireg_t id;
-
-	maxndevs = pci_bus_maxdevs(NULL, 0);
-
-	for (device = 0; device < maxndevs; device++) {
-		tag = pci_make_tag(NULL, 0, device, 0);
-		id = pci_conf_read(NULL, tag, PCI_ID_REG);
-
-		/* Invalid vendor ID value? */
-		if (PCI_VENDOR(id) == PCI_VENDOR_INVALID)
-			continue;
-		/* XXX Not invalid, but we've done this ~forever. */
-		if (PCI_VENDOR(id) == 0)
-			continue;
-
-		switch (PCI_VENDOR(id)) {
-		case PCI_VENDOR_SIS:
-			switch (PCI_PRODUCT(id)) {
-			case PCI_PRODUCT_SIS_85C496:
-				goto disable_mem;
-			}
-			break;
-		}
-	}
-
-	return (rval);
-
- disable_mem:
-	printf("Warning: broken PCI-Host bridge detected; "
-	    "disabling memory-mapped access\n");
-	rval &= ~(PCI_FLAGS_MEM_ENABLED);
-	return (rval);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: adv.c,v 1.22 2008/11/26 16:38:00 krw Exp $	*/
+/*	$OpenBSD: adv.c,v 1.24 2009/02/16 21:19:06 miod Exp $	*/
 /*	$NetBSD: adv.c,v 1.6 1998/10/28 20:39:45 dante Exp $	*/
 
 /*
@@ -74,7 +74,7 @@ static void adv_start_ccbs(ASC_SOFTC *);
 static u_int8_t *adv_alloc_overrunbuf(char *dvname, bus_dma_tag_t);
 
 static int adv_scsi_cmd(struct scsi_xfer *);
-static void advminphys(struct buf *);
+static void advminphys(struct buf *, struct scsi_link *);
 static void adv_narrow_isr_callback(ASC_SOFTC *, ASC_QDONE_INFO *);
 
 static int adv_poll(ASC_SOFTC *, struct scsi_xfer *, int);
@@ -320,15 +320,14 @@ adv_start_ccbs(sc)
 		if (AscExeScsiQueue(sc, &ccb->scsiq) == ASC_BUSY) {
 			ccb->flags |= CCB_WATCHDOG;
 			timeout_set(&xs->stimeout, adv_watchdog, ccb);
-			timeout_add(&xs->stimeout,
-				(ADV_WATCH_TIMEOUT * hz) / 1000);
+			timeout_add_msec(&xs->stimeout, ADV_WATCH_TIMEOUT);
 			break;
 		}
 		TAILQ_REMOVE(&sc->sc_waiting_ccb, ccb, chain);
 
 		if ((ccb->xs->flags & SCSI_POLL) == 0) {
 			timeout_set(&xs->stimeout, adv_timeout, ccb);
-			timeout_add(&xs->stimeout, (ccb->timeout * hz) / 1000);
+			timeout_add_msec(&xs->stimeout, ccb->timeout);
 		}
 	}
 }
@@ -565,10 +564,8 @@ adv_attach(sc)
 
 
 static void
-advminphys(bp)
-	struct buf     *bp;
+advminphys(struct buf *bp, struct scsi_link *sl)
 {
-
 	if (bp->b_bcount > ((ASC_MAX_SG_LIST - 1) * PAGE_SIZE))
 		bp->b_bcount = ((ASC_MAX_SG_LIST - 1) * PAGE_SIZE);
 	minphys(bp);

@@ -39,12 +39,11 @@
 int	mgadrm_probe(struct device *, void *, void *);
 void	mgadrm_attach(struct device *, struct device *, void *);
 int	mgadrm_detach(struct device *, int);
-int	mga_driver_device_is_agp(struct drm_device * );
 int	mgadrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
 #define MGA_DEFAULT_USEC_TIMEOUT	10000
 
-static drm_pci_id_list_t mgadrm_pciidlist[] = {
+const static struct drm_pcidev mgadrm_pciidlist[] = {
 	{PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_MILL_II_G200_PCI,
 	    MGA_CARD_TYPE_G200},
 	{PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_MILL_II_G200_AGP,
@@ -56,54 +55,8 @@ static drm_pci_id_list_t mgadrm_pciidlist[] = {
 	{0, 0, 0}
 };
 
-/**
- * Determine if the device really is AGP or not.
- *
- * In addition to the usual tests performed by \c drm_device_is_agp, this
- * function detects PCI G450 cards that appear to the system exactly like
- * AGP G450 cards.
- *
- * \param dev   The device to be tested.
- *
- * \returns
- * If the device is a PCI G450, zero is returned.  Otherwise non-zero is
- * returned.
- *
- * \bug
- * This function needs to be filled in!  The implementation in
- * linux-core/mga_drv.c shows what needs to be done.
- */
-int
-mga_driver_device_is_agp(struct drm_device * dev)
-{
-#ifdef __FreeBSD__
-	device_t bus;
-
-	/* There are PCI versions of the G450.  These cards have the
-	 * same PCI ID as the AGP G450, but have an additional PCI-to-PCI
-	 * bridge chip.  We detect these cards, which are not currently
-	 * supported by this driver, by looking at the device ID of the
-	 * bus the "card" is on.  If vendor is 0x3388 (Hint Corp) and the
-	 * device is 0x0021 (HB6 Universal PCI-PCI bridge), we reject the
-	 * device.
-	 */
-#if __FreeBSD_version >= 700010
-	bus = device_get_parent(device_get_parent(dev->device));
-#else
-	bus = device_get_parent(dev->device);
-#endif
-	if (pci_get_device(dev->device) == 0x0525 &&
-	    pci_get_vendor(bus) == 0x3388 &&
-	    pci_get_device(bus) == 0x0021)
-		return DRM_IS_NOT_AGP;
-	else
-#endif /* XXX Fixme for non freebsd */
-		return DRM_MIGHT_BE_AGP;
-
-}
-
 static const struct drm_driver_info mga_driver = {
-	.buf_priv_size		= sizeof(drm_mga_buf_priv_t),
+	.buf_priv_size		= sizeof(struct mgadrm_buf_priv),
 	.ioctl			= mgadrm_ioctl,
 	.lastclose		= mga_driver_lastclose,
 	.vblank_pipes		= 1,
@@ -112,7 +65,6 @@ static const struct drm_driver_info mga_driver = {
 	.get_vblank_counter	= mga_get_vblank_counter,
 	.irq_install		= mga_driver_irq_install,
 	.irq_uninstall		= mga_driver_irq_uninstall,
-	.irq_handler		= mga_driver_irq_handler,
 	.dma_ioctl		= mga_dma_buffers,
 	.dma_quiescent		= mga_driver_dma_quiescent,
 
@@ -139,7 +91,7 @@ mgadrm_attach(struct device *parent, struct device *self, void *aux)
 	drm_mga_private_t	*dev_priv = (drm_mga_private_t *)self;
 	struct pci_attach_args	*pa = aux;
 	struct vga_pci_bar	*bar;
-	drm_pci_id_list_t	*id_entry;
+	const struct drm_pcidev	*id_entry;
 	int			 is_agp;
 
 	dev_priv->usec_timeout = MGA_DEFAULT_USEC_TIMEOUT;
@@ -173,6 +125,7 @@ mgadrm_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	printf(": %s\n", pci_intr_string(pa->pa_pc, dev_priv->ih));
+	mtx_init(&dev_priv->fence_lock, IPL_BIO);
 
 	/* XXX pcie */
 	is_agp = pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP,
