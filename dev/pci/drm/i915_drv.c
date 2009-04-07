@@ -2,6 +2,7 @@
  * Created: Wed Feb 14 17:10:04 2001 by gareth@valinux.com
  */
 /*-
+ * Copyright 2003 Tungsten Graphics, Inc., Cedar Park, Texas.
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
  *
@@ -39,7 +40,7 @@ void	inteldrm_attach(struct device *, struct device *, void *);
 int	inteldrm_detach(struct device *, int);
 int	inteldrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-static drm_pci_id_list_t inteldrm_pciidlist[] = {
+const static struct drm_pcidev inteldrm_pciidlist[] = {
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82830M_IGD,
 	    CHIP_I830|CHIP_M},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82845G_IGD,
@@ -92,7 +93,6 @@ static drm_pci_id_list_t inteldrm_pciidlist[] = {
 static const struct drm_driver_info inteldrm_driver = {
 	.buf_priv_size		= 1,	/* No dev_priv */
 	.ioctl			= inteldrm_ioctl,
-	.close			= i915_driver_close,
 	.lastclose		= i915_driver_lastclose,
 	.vblank_pipes		= 2,
 	.get_vblank_counter	= i915_get_vblank_counter,
@@ -100,7 +100,6 @@ static const struct drm_driver_info inteldrm_driver = {
 	.disable_vblank		= i915_disable_vblank,
 	.irq_install		= i915_driver_irq_install,
 	.irq_uninstall		= i915_driver_irq_uninstall,
-	.irq_handler		= i915_driver_irq_handler,
 
 	.name			= DRIVER_NAME,
 	.desc			= DRIVER_DESC,
@@ -116,7 +115,8 @@ static const struct drm_driver_info inteldrm_driver = {
 int
 inteldrm_probe(struct device *parent, void *match, void *aux)
 {
-	return drm_pciprobe((struct pci_attach_args *)aux, inteldrm_pciidlist);
+	return (drm_pciprobe((struct pci_attach_args *)aux,
+	    inteldrm_pciidlist));
 }
 
 void
@@ -125,13 +125,16 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	struct drm_i915_private	*dev_priv = (struct drm_i915_private *)self;
 	struct pci_attach_args	*pa = aux;
 	struct vga_pci_bar	*bar;
-	drm_pci_id_list_t	*id_entry;
+	const struct drm_pcidev	*id_entry;
 
 	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
 	    PCI_PRODUCT(pa->pa_id), inteldrm_pciidlist);
 	dev_priv->flags = id_entry->driver_private;
 	dev_priv->pci_device = PCI_PRODUCT(pa->pa_id);
+
 	dev_priv->pc = pa->pa_pc;
+	dev_priv->dmat = pa->pa_dmat;
+	dev_priv->bst = pa->pa_memt;
 
 	/* Add register map (needed for suspend/resume) */
 	bar = vga_pci_bar_info((struct vga_pci_softc *)parent,
@@ -164,7 +167,6 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	printf(": %s\n", pci_intr_string(pa->pa_pc, dev_priv->ih));
 
 	mtx_init(&dev_priv->user_irq_lock, IPL_BIO);
-	TAILQ_INIT(&dev_priv->agp_heap);
 
 	/* All intel chipsets need to be treated as agp, so just pass one */
 	dev_priv->drmdev = drm_attach_pci(&inteldrm_driver, pa, 1, self);
@@ -184,8 +186,6 @@ inteldrm_detach(struct device *self, int flags)
 
 	if (dev_priv->regs != NULL)
 		vga_pci_bar_unmap(dev_priv->regs);
-
-	DRM_SPINUNINIT(&dev_priv->user_irq_lock);
 
 	return (0);
 }
@@ -215,10 +215,6 @@ inteldrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 			return (i915_irq_wait(dev, data, file_priv));
 		case DRM_IOCTL_I915_GETPARAM:
 			return (i915_getparam(dev, data, file_priv));
-		case DRM_IOCTL_I915_ALLOC:
-			return (i915_mem_alloc(dev, data, file_priv));
-		case DRM_IOCTL_I915_FREE:
-			return (i915_mem_free(dev, data, file_priv));
 		case DRM_IOCTL_I915_CMDBUFFER:
 			return (i915_cmdbuffer(dev, data, file_priv));
 		case DRM_IOCTL_I915_GET_VBLANK_PIPE:
@@ -232,12 +228,11 @@ inteldrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 			return (i915_setparam(dev, data, file_priv));
 		case DRM_IOCTL_I915_INIT:
 			return (i915_dma_init(dev, data, file_priv));
-		case DRM_IOCTL_I915_INIT_HEAP:
-			return (i915_mem_init_heap(dev, data, file_priv));
-		case DRM_IOCTL_I915_DESTROY_HEAP:
-			return (i915_mem_destroy_heap(dev, data, file_priv));
 		case DRM_IOCTL_I915_HWS_ADDR:
 			return (i915_set_status_page(dev, data, file_priv));
+		/* Removed, but still used by userland, so just say `fine' */
+		case DRM_IOCTL_I915_INIT_HEAP:
+		case DRM_IOCTL_I915_DESTROY_HEAP:
 		case DRM_IOCTL_I915_SET_VBLANK_PIPE:
 			return (0);
 		}
@@ -266,3 +261,90 @@ inteldrm_read_hws(struct drm_i915_private *dev_priv, int reg)
 		    PAGE_SIZE, BUS_DMASYNC_PREREAD);
 	return (val);
 }
+
+/*
+ * These five ring manipulation functions are protected by dev->dev_lock.
+ */
+int
+inteldrm_wait_ring(struct drm_i915_private *dev_priv, int n)
+{
+	struct inteldrm_ring	*ring = &dev_priv->ring;
+	u_int32_t		 acthd_reg, acthd, last_acthd, last_head;
+	int			 i;
+
+	acthd_reg = IS_I965G(dev_priv) ? ACTHD_I965 : ACTHD;
+	last_head = I915_READ(PRB0_HEAD) & HEAD_ADDR;
+	last_acthd = I915_READ(acthd_reg);
+
+	/* ugh. Could really do with a proper, resettable timer here. */
+	for (i = 0; i < 100000; i++) {
+		ring->head = I915_READ(PRB0_HEAD) & HEAD_ADDR;
+		acthd = I915_READ(acthd_reg);
+		ring->space = ring->head - (ring->tail + 8);
+
+		INTELDRM_VPRINTF("%s: head: %x tail: %x space: %x\n", __func__,
+			ring->head, ring->tail, ring->space);
+		if (ring->space < 0)
+			ring->space += ring->size;
+		if (ring->space >= n)
+			return (0);
+
+		/* Only timeout if the ring isn't chewing away on something */
+		if (ring->head != last_head || acthd != last_acthd)
+			i = 0;
+
+		last_head = ring->head;
+		last_acthd = acthd;
+		tsleep(dev_priv, PZERO | PCATCH, "i915wt",
+		    hz / 100);
+	}
+
+	return (EBUSY);
+}
+
+void
+inteldrm_begin_ring(struct drm_i915_private *dev_priv, int ncmd)
+{
+	INTELDRM_VPRINTF("%s: %d\n", __func__, ncmd);
+	if (dev_priv->ring.space < ncmd * 4)
+		inteldrm_wait_ring(dev_priv, ncmd * 4);
+	dev_priv->ring.wspace = 0;
+	dev_priv->ring.woffset = dev_priv->ring.tail;
+}
+
+void
+inteldrm_out_ring(struct drm_i915_private *dev_priv, u_int32_t cmd)
+{
+	INTELDRM_VPRINTF("%s: %x\n", __func__, cmd);
+	bus_space_write_4(dev_priv->bst, dev_priv->ring.bsh,
+	    dev_priv->ring.woffset, cmd);
+	dev_priv->ring.wspace++;
+	/* deal with ring wrapping */
+	dev_priv->ring.woffset += 4;
+	dev_priv->ring.woffset &= dev_priv->ring.tail_mask;
+}
+
+void
+inteldrm_advance_ring(struct drm_i915_private *dev_priv)
+{
+	INTELDRM_VPRINTF("%s: %x, %x\n", __func__, dev_priv->ring.wspace,
+	    dev_priv->ring.woffset);
+	dev_priv->ring.tail = dev_priv->ring.woffset;
+	dev_priv->ring.space -= dev_priv->ring.wspace * 4;
+	I915_WRITE(PRB0_TAIL, dev_priv->ring.woffset);
+}
+
+void
+inteldrm_update_ring(struct drm_i915_private *dev_priv)
+{
+	struct inteldrm_ring	*ring = &dev_priv->ring;
+
+	ring->head = (I915_READ(PRB0_HEAD) & HEAD_ADDR);
+	ring->tail = (I915_READ(PRB0_TAIL) & TAIL_ADDR);
+	ring->space = ring->head - (ring->tail + 8);
+	if (ring->space < 0)
+		ring->space += ring->size;
+	INTELDRM_VPRINTF("%s: head: %x tail: %x space: %x\n", __func__,
+		ring->head, ring->tail, ring->space);
+}
+

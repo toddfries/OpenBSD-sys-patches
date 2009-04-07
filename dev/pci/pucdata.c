@@ -1,4 +1,4 @@
-/*	$OpenBSD: pucdata.c,v 1.60 2009/01/22 13:15:20 jsg Exp $	*/
+/*	$OpenBSD: pucdata.c,v 1.62 2009/03/29 22:11:19 deraadt Exp $	*/
 /*	$NetBSD: pucdata.c,v 1.6 1999/07/03 05:55:23 cgd Exp $	*/
 
 /*
@@ -572,6 +572,32 @@ const struct puc_device_description puc_devices[] = {
 		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 10 },
 		{ PUC_PORT_TYPE_COM, 0x10, 0x10, COM_FREQ * 10 },
 		{ PUC_PORT_TYPE_COM, 0x10, 0x18, COM_FREQ * 10 },
+	    },
+	},
+
+	/* OX16PCI954, first part of Serial Technologies Expander PCI-232-108 */
+	{   /* "OX16PCI954" */
+	    {	PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OX16PCI954,
+		PCI_VENDOR_OXFORD2, 0	},
+	    {	0xffff, 0xffff,	0xffff, 0xffff	},
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x10, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x18, COM_FREQ * 8 },
+	    },
+	},
+
+	/* Exsys EX-41098, second part of Serial Technologies Expander PCI-232-108 */
+	{   /* "Exsys EX-41098", */
+	    {	PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_EXSYS_EX41098,
+		PCI_VENDOR_OXFORD2, 0	},
+	    {	0xffff, 0xffff, 0xffff, 0xffff },
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x10, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x18, COM_FREQ * 8 },
 	    },
 	},
 
@@ -1178,6 +1204,15 @@ const struct puc_device_description puc_devices[] = {
 	    {	0xffff,	0xffff,					0, 0	},
 	    {
 		{ PUC_PORT_TYPE_LPT, 0x10, 0x00, 0x00 },
+	    },
+	},
+
+	/* NetMos 1S PCI 16C650 : 1S */
+	{   /* "NetMos NM9835 UART" */
+	    {   PCI_VENDOR_NETMOS, PCI_PRODUCT_NETMOS_NM9835,	0x1000, 0x0001	},
+	    {	0xffff,	0xffff,					0xffff, 0xffff	},
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ },
 	    },
 	},
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.283 2009/02/16 00:31:25 dlg Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.285 2009/04/06 12:05:55 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -58,8 +58,9 @@ struct ip6_hdr;
 #endif
 
 enum	{ PF_INOUT, PF_IN, PF_OUT };
-enum	{ PF_PASS, PF_MATCH, PF_DROP, PF_NAT, PF_NONAT, PF_BINAT,
-	  PF_NOBINAT, PF_RDR, PF_NORDR, PF_SYNPROXY_DROP, PF_DEFER };
+enum	{ PF_PASS, PF_DROP, PF_SCRUB, PF_NOSCRUB, PF_NAT, PF_NONAT,
+	  PF_BINAT, PF_NOBINAT, PF_RDR, PF_NORDR, PF_SYNPROXY_DROP, PF_DEFER,
+	  PF_MATCH };
 enum	{ PF_RULESET_FILTER, PF_RULESET_NAT, PF_RULESET_BINAT,
 	  PF_RULESET_RDR, PF_RULESET_MAX };
 enum	{ PF_OP_NONE, PF_OP_IRG, PF_OP_EQ, PF_OP_NE, PF_OP_LT,
@@ -122,7 +123,7 @@ enum	{ PF_ADDR_ADDRMASK, PF_ADDR_NOROUTE, PF_ADDR_DYNIFTL,
 #define	PF_LOG			0x01
 #define	PF_LOG_ALL		0x02
 #define	PF_LOG_SOCKET_LOOKUP	0x04
-#define PF_LOG_FORCE		0x08
+#define	PF_LOG_FORCE		0x08
 
 struct pf_addr {
 	union {
@@ -1087,6 +1088,7 @@ struct pfi_kif {
 	u_int64_t			 pfik_bytes[2][2][2];
 	u_int32_t			 pfik_tzero;
 	int				 pfik_flags;
+	int				 pfik_flags_new;
 	void				*pfik_ah_cookie;
 	struct ifnet			*pfik_ifp;
 	struct ifg_group		*pfik_group;
@@ -1779,6 +1781,7 @@ void		 pfi_update_status(const char *, struct pf_status *);
 int		 pfi_get_ifaces(const char *, struct pfi_kif *, int *);
 int		 pfi_set_flags(const char *, int);
 int		 pfi_clear_flags(const char *, int);
+void		 pfi_xcommit(void);
 
 int		 pf_match_tag(struct mbuf *, struct pf_rule *, int *);
 u_int16_t	 pf_tagname2tag(char *);
@@ -1797,6 +1800,7 @@ extern struct rwlock	pf_consistency_lock;
 struct pf_pool_limit {
 	void		*pp;
 	unsigned	 limit;
+	unsigned	 limit_new;
 };
 extern struct pf_pool_limit	pf_pool_limits[PF_LIMIT_MAX];
 

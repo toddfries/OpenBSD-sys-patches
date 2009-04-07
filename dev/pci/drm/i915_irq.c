@@ -31,6 +31,7 @@
 #include "i915_drm.h"
 #include "i915_drv.h"
 
+int	inteldrm_intr(void *);
 void	i915_enable_irq(drm_i915_private_t *, u_int32_t);
 void	i915_disable_irq(drm_i915_private_t *, u_int32_t);
 void	i915_enable_pipestat(drm_i915_private_t *, int, u_int32_t);
@@ -159,22 +160,22 @@ i915_pipe_enabled(struct drm_device *dev, int pipe)
 	return 0;
 }
 
-u32 i915_get_vblank_counter(struct drm_device *dev, int plane)
+u_int32_t
+i915_get_vblank_counter(struct drm_device *dev, int plane)
 {
-	drm_i915_private_t *dev_priv = (drm_i915_private_t *) dev->dev_private;
-	unsigned long high_frame;
-	unsigned long low_frame;
-	u32 high1, high2, low, count;
-	int pipe;
+	drm_i915_private_t	*dev_priv = dev->dev_private;
+	bus_size_t		 high_frame, low_frame;
+	u_int32_t		 high1, high2, low;
+	int			 pipe;
 
 	pipe = i915_get_pipe(dev, plane);
 	high_frame = pipe ? PIPEBFRAMEHIGH : PIPEAFRAMEHIGH;
 	low_frame = pipe ? PIPEBFRAMEPIXEL : PIPEAFRAMEPIXEL;
 
-	if (!i915_pipe_enabled(dev, pipe)) {
+	if (i915_pipe_enabled(dev, pipe) == 0) {
 		DRM_DEBUG("trying to get vblank count for disabled pipe %d\n",
 		    pipe);
-		return 0;
+		return (0);
 	}
 
 	/*
@@ -191,23 +192,24 @@ u32 i915_get_vblank_counter(struct drm_device *dev, int plane)
 			 PIPE_FRAME_HIGH_SHIFT);
 	} while (high1 != high2);
 
-	count = (high1 << 8) | low;
-
-	return count;
+	return ((high1 << 8) | low);
 }
 
-irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
+int
+inteldrm_intr(void *arg)
 {
 	struct drm_device *dev = (struct drm_device *)arg;
 	drm_i915_private_t *dev_priv = (drm_i915_private_t *)dev->dev_private;
 	u_int32_t iir, pipea_stats = 0, pipeb_stats = 0;
 
+	/*
+	 * lock is to protect from writes to PIPESTAT and IMR from other cores.
+	 */
 	mtx_enter(&dev_priv->user_irq_lock);
-	atomic_inc(&dev_priv->irq_received);
 	iir = I915_READ(IIR);
 	if (iir == 0) {
 		mtx_leave(&dev_priv->user_irq_lock);
-		return (IRQ_NONE);
+		return (0);
 	}
 
 	/*
@@ -224,14 +226,14 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 
 	I915_WRITE(IIR, iir);
 	(void)I915_READ(IIR); /* Flush posted writes */
-	mtx_leave(&dev_priv->user_irq_lock);
 
 	if (dev_priv->sarea_priv != NULL)
 		dev_priv->sarea_priv->last_dispatch = READ_BREADCRUMB(dev_priv);
 
 	if (iir & I915_USER_INTERRUPT) {
-		DRM_WAKEUP(dev_priv);
+		wakeup(dev_priv);
 	}
+	mtx_leave(&dev_priv->user_irq_lock);
 
 	if (pipea_stats & I915_VBLANK_INTERRUPT_STATUS)
 		drm_handle_vblank(dev, i915_get_plane(dev, 0));
@@ -239,15 +241,14 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 	if (pipeb_stats & I915_VBLANK_INTERRUPT_STATUS)
 		drm_handle_vblank(dev, i915_get_plane(dev, 1));
 
-	return (IRQ_HANDLED);
+	return (1);
 }
 
 int i915_emit_irq(struct drm_device *dev)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
-	RING_LOCALS;
 
-	i915_kernel_lost_context(dev);
+	inteldrm_update_ring(dev_priv);
 
 	DRM_DEBUG("\n");
 
@@ -282,35 +283,23 @@ void i915_user_irq_put(struct drm_device *dev)
 }
 
 
-int i915_wait_irq(struct drm_device * dev, int irq_nr)
+int
+i915_wait_irq(struct drm_device *dev, int irq_nr)
 {
-	drm_i915_private_t *dev_priv = (drm_i915_private_t *) dev->dev_private;
-	int ret = 0;
+	drm_i915_private_t	*dev_priv =  dev->dev_private;
+	int			 ret = 0;
 
 	DRM_DEBUG("irq_nr=%d breadcrumb=%d\n", irq_nr,
 		  READ_BREADCRUMB(dev_priv));
 
-	if (READ_BREADCRUMB(dev_priv) >= irq_nr) {
-		if (dev_priv->sarea_priv != NULL) {
-			dev_priv->sarea_priv->last_dispatch =
-			    READ_BREADCRUMB(dev_priv);
-		}
-		return 0;
-	}
-
 	i915_user_irq_get(dev);
-	DRM_WAIT_ON(ret, dev_priv, 3 * DRM_HZ,
-		    READ_BREADCRUMB(dev_priv) >= irq_nr);
+	DRM_WAIT_ON(ret, dev_priv, &dev_priv->user_irq_lock, 3 * hz, "i915wt",
+	    READ_BREADCRUMB(dev_priv) >= irq_nr);
 	i915_user_irq_put(dev);
-
-	if (ret == EBUSY) {
-		DRM_ERROR("EBUSY -- rec: %d emitted: %d\n",
-			  READ_BREADCRUMB(dev_priv), (int)dev_priv->counter);
-	}
 
 	if (dev_priv->sarea_priv != NULL)
 		dev_priv->sarea_priv->last_dispatch = READ_BREADCRUMB(dev_priv);
-	return ret;
+	return (ret);
 }
 
 /* Needs the lock as it touches the ring.
@@ -361,9 +350,8 @@ int i915_enable_vblank(struct drm_device *dev, int plane)
 {
 	drm_i915_private_t *dev_priv = (drm_i915_private_t *) dev->dev_private;
 	int pipe = i915_get_pipe(dev, plane);
-	int pipeconf_reg = (pipe == 0) ? PIPEACONF : PIPEBCONF;
- 
-	if ((I915_READ(pipeconf_reg) & PIPEACONF_ENABLE) == 0)
+
+	if (i915_pipe_enabled(dev, pipe) == 0)
 		return (EINVAL);
 
 	mtx_enter(&dev_priv->user_irq_lock);
@@ -416,11 +404,11 @@ i915_driver_irq_install(struct drm_device *dev)
 	(void)I915_READ(IER);
 
 	dev_priv->irqh = pci_intr_establish(dev_priv->pc, dev_priv->ih, IPL_BIO,
-	    drm_irq_handler_wrap, dev, dev_priv->dev.dv_xname);
+	    inteldrm_intr, dev, dev_priv->dev.dv_xname);
 	if (dev_priv->irqh == NULL)
 		return (ENOENT);
 
-	dev->max_vblank_count = 0xffffff; /* only 24 bits of frame count */
+	dev->vblank->vb_max = 0xffffff; /* only 24 bits of frame count */
 
 	/* Unmask the interrupts that we always want on. */
 	dev_priv->irq_mask_reg = ~I915_INTERRUPT_ENABLE_FIX;

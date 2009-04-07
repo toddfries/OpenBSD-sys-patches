@@ -39,13 +39,13 @@
 #include "drmP.h"
 
 void*
-_drm_alloc(size_t size)
+drm_alloc(size_t size)
 {
-	return malloc(size, M_DRM, M_NOWAIT);
+	return (malloc(size, M_DRM, M_NOWAIT));
 }
 
 void *
-_drm_calloc(size_t nmemb, size_t size)
+drm_calloc(size_t nmemb, size_t size)
 {
 	if (nmemb == 0 || SIZE_MAX / nmemb < size)
 		return (NULL);
@@ -54,7 +54,7 @@ _drm_calloc(size_t nmemb, size_t size)
 }
 
 void *
-_drm_realloc(void *oldpt, size_t oldsize, size_t size)
+drm_realloc(void *oldpt, size_t oldsize, size_t size)
 {
 	void *pt;
 
@@ -69,17 +69,21 @@ _drm_realloc(void *oldpt, size_t oldsize, size_t size)
 }
 
 void
-_drm_free(void *pt)
+drm_free(void *pt)
 {
 	if (pt != NULL)
 		free(pt, M_DRM);
 }
 
-void *
-drm_ioremap(struct drm_device *dev, drm_local_map_t *map)
+/* Inline replacements for DRM_IOREMAP macros */
+void
+drm_core_ioremap(struct drm_local_map *map, struct drm_device *dev)
 {
 	DRM_DEBUG("offset: 0x%x size: 0x%x type: %d\n", map->offset, map->size,
 	    map->type);
+
+	/* default to failure. */
+	map->handle = 0;
 
 	if (map->type == _DRM_AGP || map->type == _DRM_FRAME_BUFFER) {
 	/*
@@ -92,23 +96,21 @@ drm_ioremap(struct drm_device *dev, drm_local_map_t *map)
 		if (bus_space_map(map->bst, map->offset,
 		    map->size, BUS_SPACE_MAP_LINEAR, &map->bsh)) {
 			DRM_ERROR("ioremap fail\n");
-			return (NULL);
+			return;
 		}
-	} else {
-		return (NULL);
+		/* handles are still supposed to be kernel virtual addresses */
+		map->handle = bus_space_vaddr(map->bst, map->bsh);
 	}
-	/* handles are still supposed to be kernel virtual addresses */
-	return bus_space_vaddr(map->bst, map->bsh);
 }
 
 void
-drm_ioremapfree(drm_local_map_t *map)
+drm_core_ioremapfree(struct drm_local_map *map)
 {
-	if (map == NULL || (map->type != _DRM_AGP && map->type !=
-	    _DRM_FRAME_BUFFER))
-		return;
-
-	bus_space_unmap(map->bst, map->bsh, map->size);
+	if (map->handle && map->size && (map->type == _DRM_AGP ||
+	    map->type == _DRM_FRAME_BUFFER)) {
+		bus_space_unmap(map->bst, map->bsh, map->size);
+		map->handle = 0;
+	}
 }
 
 int
@@ -130,7 +132,7 @@ drm_mtrr_add(unsigned long offset, size_t size, int flags)
 }
 
 int
-drm_mtrr_del(int __unused handle, unsigned long offset, size_t size, int flags)
+drm_mtrr_del(int handle, unsigned long offset, size_t size, int flags)
 {
 #ifndef DRM_NO_MTRR
 	int act;
@@ -145,87 +147,4 @@ drm_mtrr_del(int __unused handle, unsigned long offset, size_t size, int flags)
 #else
 	return 0;
 #endif
-}
-
-u_int8_t
-drm_read8(drm_local_map_t *map, unsigned long offset)
-{
-	u_int8_t *ptr;
-
-	switch (map->type) {
-	case _DRM_SCATTER_GATHER:
-		ptr = map->handle + offset;
-		return  (*ptr);
-		
-	default:
-		return (bus_space_read_1(map->bst, map->bsh, offset));
-	}
-}
-
-u_int16_t
-drm_read16(drm_local_map_t *map, unsigned long offset)
-{
-	u_int16_t *ptr;
-	switch (map->type) {
-	case _DRM_SCATTER_GATHER:
-		ptr = map->handle + offset;
-		return  (*ptr);
-	default:
-		return (bus_space_read_2(map->bst, map->bsh, offset));
-	}
-}
-
-u_int32_t
-drm_read32(drm_local_map_t *map, unsigned long offset)
-{
-	u_int32_t *ptr;
-	switch (map->type) {
-	case _DRM_SCATTER_GATHER:
-		ptr = map->handle + offset;
-		return  (*ptr);
-	default:
-		return (bus_space_read_4(map->bst, map->bsh, offset));
-	}
-}
-
-void
-drm_write8(drm_local_map_t *map, unsigned long offset, u_int8_t val)
-{
-	u_int8_t *ptr;
-	switch (map->type) {
-	case _DRM_SCATTER_GATHER:
-		ptr = map->handle + offset;
-		*ptr = val;
-		break;
-	default:
-		bus_space_write_1(map->bst, map->bsh, offset, val);
-	}
-}
-
-void
-drm_write16(drm_local_map_t *map, unsigned long offset, u_int16_t val)
-{
-	u_int16_t *ptr;
-	switch (map->type) {
-	case _DRM_SCATTER_GATHER:
-		ptr = map->handle + offset;
-		*ptr = val;
-		break;
-	default:
-		bus_space_write_2(map->bst, map->bsh, offset, val);
-	}
-}
-
-void
-drm_write32(drm_local_map_t *map, unsigned long offset, u_int32_t val)
-{
-	u_int32_t *ptr;
-	switch (map->type) {
-	case _DRM_SCATTER_GATHER:
-		ptr = map->handle + offset;
-		*ptr = val;
-		break;
-	default:
-		bus_space_write_4(map->bst, map->bsh, offset, val);
-	}
 }

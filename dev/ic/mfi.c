@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi.c,v 1.89 2009/02/16 21:19:06 miod Exp $ */
+/* $OpenBSD: mfi.c,v 1.93 2009/04/04 03:22:30 dlg Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -171,11 +171,13 @@ void
 mfi_put_ccb(struct mfi_ccb *ccb)
 {
 	struct mfi_softc	*sc = ccb->ccb_sc;
+	struct mfi_frame_header	*hdr = &ccb->ccb_frame->mfr_header;
 	int			s;
 
 	DNPRINTF(MFI_D_CCB, "%s: mfi_put_ccb: %p\n", DEVNAME(sc), ccb);
 
-	s = splbio();
+	hdr->mfh_cmd_status = 0x0;
+	hdr->mfh_flags = 0x0;
 	ccb->ccb_state = MFI_CCB_FREE;
 	ccb->ccb_xs = NULL;
 	ccb->ccb_flags = 0;
@@ -186,6 +188,8 @@ mfi_put_ccb(struct mfi_ccb *ccb)
 	ccb->ccb_sgl = NULL;
 	ccb->ccb_data = NULL;
 	ccb->ccb_len = 0;
+
+	s = splbio();
 	TAILQ_INSERT_TAIL(&sc->sc_ccb_freeq, ccb, ccb_link);
 	splx(s);
 }
@@ -1035,7 +1039,7 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 		    0, NULL, mbox))
 			goto stuffup;
 
-		return (COMPLETE);
+		goto complete;
 		/* NOTREACHED */
 
 	/* hand it of to the firmware and let it deal with it */
@@ -1085,6 +1089,7 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 
 stuffup:
 	xs->error = XS_DRIVER_STUFFUP;
+complete:
 	xs->flags |= ITSDONE;
 	s = splbio();
 	scsi_done(xs);
@@ -1163,6 +1168,7 @@ mfi_mgmt(struct mfi_softc *sc, uint32_t opc, uint32_t dir, uint32_t len,
 	struct mfi_ccb		*ccb;
 	struct mfi_dcmd_frame	*dcmd;
 	int			rv = 1;
+	int			s;
 
 	DNPRINTF(MFI_D_MISC, "%s: mfi_mgmt %#x\n", DEVNAME(sc), opc);
 
@@ -1199,11 +1205,13 @@ mfi_mgmt(struct mfi_softc *sc, uint32_t opc, uint32_t dir, uint32_t len,
 		if (mfi_poll(ccb))
 			goto done;
 	} else {
+		s = splbio();
 		mfi_post(sc, ccb);
 
 		DNPRINTF(MFI_D_MISC, "%s: mfi_mgmt sleeping\n", DEVNAME(sc));
 		while (ccb->ccb_state != MFI_CCB_DONE)
 			tsleep(ccb, PRIBIO, "mfi_mgmt", 0);
+		splx(s);
 
 		if (ccb->ccb_flags & MFI_CCB_F_ERR)
 			goto done;
@@ -1480,7 +1488,7 @@ mfi_ioctl_vol(struct mfi_softc *sc, struct bioc_vol *bv)
 
 	/*
 	 * The RAID levels are determined per the SNIA DDF spec, this is only
-	 * a subset that is valid for the MFI contrller.
+	 * a subset that is valid for the MFI controller.
 	 */
 	bv->bv_level = sc->sc_ld_details[i].mld_cfg.mlc_parm.mpa_pri_raid;
 	if (sc->sc_ld_details[i].mld_cfg.mlc_parm.mpa_sec_raid ==

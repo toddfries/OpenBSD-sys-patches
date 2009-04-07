@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_unix.c,v 1.34 2008/03/02 20:29:20 kettenis Exp $	*/
+/*	$OpenBSD: uvm_unix.c,v 1.36 2009/03/20 15:19:04 oga Exp $	*/
 /*	$NetBSD: uvm_unix.c,v 1.18 2000/09/13 15:00:25 thorpej Exp $	*/
 
 /*
@@ -67,10 +67,7 @@
  */
 
 int
-sys_obreak(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_obreak(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_obreak_args /* {
 		syscallarg(char *) nsize;
@@ -117,9 +114,7 @@ sys_obreak(p, v, retval)
  */
 
 void
-uvm_grow(p, sp)
-	struct proc *p;
-	vaddr_t sp;
+uvm_grow(struct proc *p, vaddr_t sp)
 {
 	struct vmspace *vm = p->p_vmspace;
 	int si;
@@ -157,11 +152,8 @@ uvm_grow(p, sp)
  */
 
 int
-uvm_coredump(p, vp, cred, chdr)
-	struct proc *p;
-	struct vnode *vp;
-	struct ucred *cred;
-	struct core *chdr;
+uvm_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
+    struct core *chdr)
 {
 	struct vmspace *vm = p->p_vmspace;
 	vm_map_t map = &vm->vm_map;
@@ -255,3 +247,76 @@ uvm_coredump(p, vp, cred, chdr)
 	return (error);
 }
 
+int
+uvm_coredump_walkmap(struct proc *p, void *iocookie,
+    int (*func)(struct proc *, void *, struct uvm_coredump_state *),
+    void *cookie)
+{
+	struct uvm_coredump_state state;
+	struct vmspace *vm = p->p_vmspace;
+	struct vm_map *map = &vm->vm_map;
+	struct vm_map_entry *entry;
+	vaddr_t top;
+	int error;
+
+	for (entry = map->header.next; entry != &map->header;
+	    entry = entry->next) {
+
+		state.cookie = cookie;
+		state.prot = entry->protection;
+		state.flags = 0;
+
+		/* should never happen for a user process */
+		if (UVM_ET_ISSUBMAP(entry)) {
+			panic("uvm_coredump: user process with submap?");
+		}
+
+		if (!(entry->protection & VM_PROT_WRITE) &&
+		    entry->start != p->p_sigcode)
+			continue;
+
+		/*
+		 * Don't dump mmaped devices.
+		 */
+		if (entry->object.uvm_obj != NULL &&
+		    UVM_OBJ_IS_DEVICE(entry->object.uvm_obj))
+			continue;
+
+		state.start = entry->start;
+		state.realend = entry->end;
+		state.end = entry->end;
+
+		if (state.start >= VM_MAXUSER_ADDRESS)
+			continue;
+
+		if (state.end > VM_MAXUSER_ADDRESS)
+			state.end = VM_MAXUSER_ADDRESS;
+
+#ifdef MACHINE_STACK_GROWS_UP
+		if (USRSTACK <= state.start &&
+		    state.start < (USRSTACK + MAXSSIZ)) {
+			top = round_page(USRSTACK + ptoa(vm->vm_ssize));
+			if (state.end > top)
+				state.end = top;
+
+			if (state.start >= state.end)
+				continue;
+#else
+		if (state.start >= (vaddr_t)vm->vm_maxsaddr) {
+			top = trunc_page(USRSTACK - ptoa(vm->vm_ssize));
+			if (state.start < top)
+				state.start = top;
+
+			if (state.start >= state.end)
+				continue;
+#endif
+			state.flags |= UVM_COREDUMP_STACK;
+		}
+
+		error = (*func)(p, iocookie, &state);
+		if (error)
+			return (error);
+	}
+
+	return (0);
+}

@@ -1,4 +1,19 @@
-/*	$OpenBSD: m188_machdep.c,v 1.50 2009/02/21 18:37:48 miod Exp $	*/
+/*	$OpenBSD: m188_machdep.c,v 1.53 2009/03/15 20:39:53 miod Exp $	*/
+/*
+ * Copyright (c) 2009 Miodrag Vallat.
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -114,6 +129,7 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/errno.h>
+#include <sys/timetc.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -127,6 +143,7 @@
 #include <machine/mvme188.h>
 
 #include <mvme88k/dev/sysconvar.h>
+#include <dev/ic/z8536reg.h>
 #include <mvme88k/mvme88k/clockvar.h>
 
 #ifdef MULTIPROCESSOR
@@ -146,7 +163,6 @@ vaddr_t	m188_memsize(void);
 u_int	m188_raiseipl(u_int);
 void	m188_send_ipi(int, cpuid_t);
 u_int	m188_setipl(u_int);
-void	m188_soft_ipi(void);
 void	m188_startup(void);
 
 /*
@@ -221,7 +237,6 @@ m188_bootstrap()
 	md_init_clocks = m188_init_clocks;
 #ifdef MULTIPROCESSOR
 	md_send_ipi = m188_send_ipi;
-	md_soft_ipi = m188_soft_ipi;
 #endif
 	md_delay = m188_delay;
 #ifdef MULTIPROCESSOR
@@ -432,12 +447,6 @@ m188_clock_ipi_handler(struct trapframe *eframe)
 		hardclock((struct clockframe *)eframe);
 	if (ipi & CI_IPI_STATCLOCK)
 		statclock((struct clockframe *)eframe);
-}
-
-void
-m188_soft_ipi()
-{
-	/* this function is not used on MVME188 */
 }
 
 #endif
@@ -697,24 +706,18 @@ void	write_cio(int, u_int);
 int	m188_clockintr(void *);
 int	m188_calibrateintr(void *);
 int	m188_statintr(void *);
+u_int	m188_cio_get_timecount(struct timecounter *);
 
 volatile int	m188_calibrate_phase = 0;
 
 /* multiplication factor for delay() */
 u_int	m188_delay_const = 25;		/* no MVME188 is faster than 25MHz */
 
-#if defined(MULTIPROCESSOR) && 0
-#include <machine/lock.h>
-__cpu_simple_lock_t m188_cio_lock;
+uint32_t	cio_step;
+uint32_t	cio_refcnt;
+uint32_t	cio_lastcnt;
 
-#define	CIO_LOCK_INIT()	__cpu_simple_lock_init(&m188_cio_lock)
-#define	CIO_LOCK()	__cpu_simple_lock(&m188_cio_lock)
-#define	CIO_UNLOCK()	__cpu_simple_unlock(&m188_cio_lock)
-#else
-#define	CIO_LOCK_INIT()	do { } while (0)
-#define	CIO_LOCK()	do { } while (0)
-#define	CIO_UNLOCK()	do { } while (0)
-#endif
+struct mutex cio_mutex = MUTEX_INITIALIZER(IPL_CLOCK);
 
 /*
  * Notes on the MVME188 clock usage:
@@ -757,6 +760,16 @@ __cpu_simple_lock_t m188_cio_lock;
 #define	DART_CTLR		0xfff8201f	/* counter/timer LSB */
 #define	DART_OPCR		0xfff82037	/* output port config*/
 
+struct timecounter m188_cio_timecounter = {
+	m188_cio_get_timecount,
+	NULL,
+	0xffffffff,
+	0,
+	"cio",
+	0,
+	NULL
+};
+
 void
 m188_init_clocks(void)
 {
@@ -767,8 +780,6 @@ m188_init_clocks(void)
 
 	psr = get_psr();
 	set_psr(psr | PSR_IND);
-
-	CIO_LOCK_INIT();
 
 #ifdef DIAGNOSTIC
 	if (1000000 % hz) {
@@ -848,17 +859,16 @@ m188_init_clocks(void)
 	sysconintr_establish(INTSRC_CIO, &clock_ih, "clock");
 
 	set_psr(psr);
+
+	tc_init(&m188_cio_timecounter);
 }
 
 int
 m188_calibrateintr(void *eframe)
 {
-	CIO_LOCK();
-	write_cio(CIO_CSR1, CIO_GCB | CIO_CIP);  /* Ack the interrupt */
-
-	/* restart counter */
-	write_cio(CIO_CSR1, CIO_GCB | CIO_TCB | CIO_IE);
-	CIO_UNLOCK();
+	/* no need to grab the mutex, only one processor is running for now */
+	/* ack the interrupt */
+	write_cio(ZCIO_CT1CS, ZCIO_CTCS_GCB | ZCIO_CTCS_C_IP); 
 
 	m188_calibrate_phase++;
 
@@ -868,12 +878,11 @@ m188_calibrateintr(void *eframe)
 int
 m188_clockintr(void *eframe)
 {
-	CIO_LOCK();
-	write_cio(CIO_CSR1, CIO_GCB | CIO_CIP);  /* Ack the interrupt */
-
-	/* restart counter */
-	write_cio(CIO_CSR1, CIO_GCB | CIO_TCB | CIO_IE);
-	CIO_UNLOCK();
+	mtx_enter(&cio_mutex);
+	/* ack the interrupt */
+	write_cio(ZCIO_CT1CS, ZCIO_CTCS_GCB | ZCIO_CTCS_C_IP); 
+	cio_refcnt += cio_step;
+	mtx_leave(&cio_mutex);
 
 	hardclock(eframe);
 
@@ -971,28 +980,70 @@ m188_cio_init(u_int period)
 	volatile int i;
 
 	/* Start by forcing chip into known state */
-	read_cio(CIO_MICR);
-	write_cio(CIO_MICR, CIO_MICR_RESET);	/* Reset the CTC */
+	read_cio(ZCIO_MIC);
+	write_cio(ZCIO_MIC, ZCIO_MIC_RESET);	/* Reset the CTC */
 	for (i = 0; i < 1000; i++)	 	/* Loop to delay */
 		;
 
 	/* Clear reset and start init seq. */
-	write_cio(CIO_MICR, 0x00);
+	write_cio(ZCIO_MIC, 0x00);
 
 	/* Wait for chip to come ready */
-	while ((read_cio(CIO_MICR) & CIO_MICR_RJA) == 0)
+	while ((read_cio(ZCIO_MIC) & ZCIO_MIC_RJA) == 0)
 		;
 
 	/* Initialize the 8536 for real */
-	write_cio(CIO_MICR,
-	    CIO_MICR_MIE /* | CIO_MICR_NV */ | CIO_MICR_RJA | CIO_MICR_DLC);
-	write_cio(CIO_CTMS1, CIO_CTMS_CSC);	/* Continuous count */
-	write_cio(CIO_PDCB, 0xff);		/* set port B to input */
+	write_cio(ZCIO_MIC,
+	    ZCIO_MIC_MIE /* | ZCIO_MIC_NV */ | ZCIO_MIC_RJA | ZCIO_MIC_DLC);
+	write_cio(ZCIO_CT1MD, ZCIO_CTMD_CSC);	/* Continuous count */
+	write_cio(ZCIO_PBDIR, 0xff);		/* set port B to input */
 
 	period <<= 1;	/* CT#1 runs at PCLK/2, hence 2MHz */
-	write_cio(CIO_CT1MSB, period >> 8);
-	write_cio(CIO_CT1LSB, period);
+	write_cio(ZCIO_CT1TCM, period >> 8);
+	write_cio(ZCIO_CT1TCL, period);
 	/* enable counter #1 */
-	write_cio(CIO_MCCR, CIO_MCCR_CT1E | CIO_MCCR_PBE);
-	write_cio(CIO_CSR1, CIO_GCB | CIO_TCB | CIO_IE);
+	write_cio(ZCIO_MCC, ZCIO_MCC_CT1E | ZCIO_MCC_PBE);
+	write_cio(ZCIO_CT1CS, ZCIO_CTCS_GCB | ZCIO_CTCS_TCB | ZCIO_CTCS_S_IE);
+
+	cio_step = period;
+	m188_cio_timecounter.tc_frequency = (u_int64_t)cio_step * hz;
+}
+
+u_int
+m188_cio_get_timecount(struct timecounter *tc)
+{
+	u_int cmsb, clsb, counter, curcnt;
+
+	/*
+	 * The CIO counter is free running, but by setting the
+	 * RCC bit in its control register, we can read a frozen
+	 * value of the counter.
+	 * The counter will automatically unfreeze after reading
+	 * its LSB.
+	 */
+
+	mtx_enter(&cio_mutex);
+	write_cio(ZCIO_CT1CS, ZCIO_CTCS_GCB | ZCIO_CTCS_RCC);
+	cmsb = read_cio(ZCIO_CT1CCM);
+	clsb = read_cio(ZCIO_CT1CCL);
+	curcnt = cio_refcnt;
+
+	counter = (cmsb << 8) | clsb;
+#if 0	/* this will never happen unless the period itself is 65536 */
+	if (counter == 0)
+		counter = 65536;
+#endif
+
+	/*
+	 * The counter counts down from its initialization value to 1.
+	 */
+	counter = cio_step - counter;
+
+	curcnt += counter;
+	if (curcnt < cio_lastcnt)
+		curcnt += cio_step;
+
+	cio_lastcnt = curcnt;
+	mtx_leave(&cio_mutex);
+	return curcnt;
 }

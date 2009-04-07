@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc64,v 1.117 2009/01/12 20:11:13 kettenis Exp $
+#	$OpenBSD: files.sparc64,v 1.119 2009/03/09 22:36:43 kettenis Exp $
 #	$NetBSD: files.sparc64,v 1.50 2001/08/10 20:53:50 eeh Exp $
 
 # maxpartitions must be first item in files.${ARCH}
@@ -96,6 +96,10 @@ device	creator: wsemuldisplaydev, rasops32
 attach	creator at mainbus, upa
 file	arch/sparc64/dev/creator.c		creator
 
+device	gfb: wsemuldisplaydev, rasops32
+attach	gfb at upa
+file	arch/sparc64/dev/gfb.c			gfb
+
 include	"dev/pci/files.pci"
 major	{wd = 12}
 
@@ -132,6 +136,10 @@ file	arch/sparc64/dev/vgafb.c		vgafb
 device	ifb: ifb_ident, wsemuldisplaydev, rasops_bswap, rasops8
 attach	ifb at pci
 file	arch/sparc64/dev/ifb.c			ifb
+
+device	raptor: wsemuldisplaydev, rasops_bswap, rasops8
+attach	raptor at pci
+file	arch/sparc64/dev/raptor.c		raptor
 
 device	sbbc
 attach	sbbc at pci

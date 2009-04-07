@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwn.c,v 1.47 2009/02/15 08:58:22 damien Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.49 2009/03/29 21:53:52 sthen Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -67,26 +67,26 @@
 #include <dev/pci/if_iwnvar.h>
 
 static const struct pci_matchid iwn_devices[] = {
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_4965AGN_1 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_4965AGN_2 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5100AGN_1 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5100AGN_2 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5150AGN_1 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5150AGN_2 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5300AGN_1 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5300AGN_2 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5350AGN_1 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_5350AGN_2 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6000_1 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6000_2 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6000_3 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6000_4 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6050_1 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6050_2 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6050_3 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6050_4 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_100_1 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_100_2 }
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_4965_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_4965_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5100_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5100_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5150_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5150_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5300_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5300_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5350_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5350_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_3 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_4 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_3 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_4 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_1000_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_1000_2 }
 };
 
 int		iwn_match(struct device *, void *, void *);
@@ -360,20 +360,20 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 	error = pci_mapreg_map(pa, IWN_PCI_BAR0, memtype, 0, &sc->sc_st,
 	    &sc->sc_sh, NULL, &sc->sc_sz, 0);
 	if (error != 0) {
-		printf(": could not map memory space\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 
 	/* Install interrupt handler. */
 	if (pci_intr_map(pa, &ih) != 0) {
-		printf(": could not map interrupt\n");
+		printf(": can't map interrupt\n");
 		return;
 	}
 	intrstr = pci_intr_string(sc->sc_pct, ih);
 	sc->sc_ih = pci_intr_establish(sc->sc_pct, ih, IPL_NET, iwn_intr, sc,
 	    sc->sc_dev.dv_xname);
 	if (sc->sc_ih == NULL) {
-		printf(": could not establish interrupt");
+		printf(": can't establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
@@ -563,9 +563,9 @@ iwn_hal_attach(struct iwn_softc *sc)
 		sc->txantmsk = sc->rxantmsk = IWN_ANT_ABC;
 		sc->ntxchains = sc->nrxchains = 3;
 		break;
-	case IWN_HW_REV_TYPE_100:
+	case IWN_HW_REV_TYPE_1000:
 		sc->sc_hal = &iwn5000_hal;
-		sc->fwname = "iwn-100";
+		sc->fwname = "iwn-1000";
 		sc->critical_temp = 110;
 		sc->txantmsk = IWN_ANT_A;
 		sc->rxantmsk = IWN_ANT_A | IWN_ANT_B;
@@ -2624,7 +2624,7 @@ iwn_tx(struct iwn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m,
 	    BUS_DMA_NOWAIT);
 	if (error != 0 && error != EFBIG) {
-		printf("%s: could not map mbuf (error %d)\n",
+		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		m_freem(m);
 		return error;
@@ -2652,7 +2652,7 @@ iwn_tx(struct iwn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m,
 		    BUS_DMA_NOWAIT);
 		if (error != 0) {
-			printf("%s: could not map mbuf (error %d)\n",
+			printf("%s: can't map mbuf (error %d)\n",
 			    sc->sc_dev.dv_xname, error);
 			m_freem(m);
 			return error;

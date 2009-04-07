@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_input.c,v 1.109 2009/02/08 15:34:39 damien Exp $	*/
+/*	$OpenBSD: ieee80211_input.c,v 1.111 2009/03/26 20:34:54 damien Exp $	*/
 
 /*-
  * Copyright (c) 2001 Atsushi Onoe
@@ -2095,7 +2095,7 @@ ieee80211_recv_assoc_resp(struct ieee80211com *ic, struct mbuf *m,
 	status =  LE_READ_2(frm); frm += 2;
 	if (status != IEEE80211_STATUS_SUCCESS) {
 		if (ifp->if_flags & IFF_DEBUG)
-			printf("%s: %sassociation failed (reason %d)"
+			printf("%s: %sassociation failed (status %d)"
 			    " for %s\n", ifp->if_xname,
 			    reassoc ?  "re" : "",
 			    status, ether_sprintf((u_int8_t *)wh->i_addr3));
@@ -2580,7 +2580,7 @@ ieee80211_recv_sa_query_req(struct ieee80211com *ic, struct mbuf *m,
 		    ether_sprintf(ni->ni_macaddr)));
 		return;
 	}
-	if (m->m_len < sizeof(*wh) + 18) {
+	if (m->m_len < sizeof(*wh) + 4) {
 		DPRINTF(("frame too short\n"));
 		return;
 	}
@@ -2590,7 +2590,7 @@ ieee80211_recv_sa_query_req(struct ieee80211com *ic, struct mbuf *m,
 	/* MLME-SAQuery.indication */
 
 	/* save Transaction Identifier for SA Query Response */
-	memcpy(ni->ni_sa_query_trid, &frm[2], 16);
+	ni->ni_sa_query_trid = LE_READ_2(&frm[2]);
 
 	/* MLME-SAQuery.response */
 	IEEE80211_SEND_ACTION(ic, ni, IEEE80211_CATEG_SA_QUERY,
@@ -2617,7 +2617,7 @@ ieee80211_recv_sa_query_resp(struct ieee80211com *ic, struct mbuf *m,
 		    ether_sprintf(ni->ni_macaddr)));
 		return;
 	}
-	if (m->m_len < sizeof(*wh) + 18) {
+	if (m->m_len < sizeof(*wh) + 4) {
 		DPRINTF(("frame too short\n"));
 		return;
 	}
@@ -2625,7 +2625,7 @@ ieee80211_recv_sa_query_resp(struct ieee80211com *ic, struct mbuf *m,
 	frm = (const u_int8_t *)&wh[1];
 
 	/* check that Transaction Identifier matches */
-	if (memcmp(&frm[2], ni->ni_sa_query_trid, 16) != 0) {
+	if (ni->ni_sa_query_trid != LE_READ_2(&frm[2])) {
 		DPRINTF(("transaction identifier does not match\n"));
 		return;
 	}

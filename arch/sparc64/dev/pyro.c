@@ -1,4 +1,4 @@
-/*	$OpenBSD: pyro.c,v 1.16 2009/01/02 20:01:45 kettenis Exp $	*/
+/*	$OpenBSD: pyro.c,v 1.18 2009/03/29 22:52:11 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -202,17 +202,17 @@ pyro_init(struct pyro_softc *sc, int busa)
 	pbm->pp_dmat = pyro_alloc_dma_tag(pbm);
 
 	if (bus_space_map(pbm->pp_cfgt, 0, 0x10000000, 0, &pbm->pp_cfgh))
-		panic("pyro: could not map config space");
+		panic("pyro: can't map config space");
 
 	pbm->pp_pc = pyro_alloc_chipset(pbm, sc->sc_node, &_sparc_pci_chipset);
 
 	pbm->pp_pc->bustag = pbm->pp_cfgt;
 	pbm->pp_pc->bushandle = pbm->pp_cfgh;
 
+	bzero(&pba, sizeof(pba));
 	pba.pba_busname = "pci";
 	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = busranges[0];
-	pba.pba_bridgetag = NULL;
 	pba.pba_pc = pbm->pp_pc;
 #if 0
 	pba.pba_flags = pbm->pp_flags;

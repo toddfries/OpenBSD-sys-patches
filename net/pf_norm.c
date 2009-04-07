@@ -1,7 +1,8 @@
-/*	$OpenBSD: pf_norm.c,v 1.115 2009/01/31 20:06:55 henning Exp $ */
+/*	$OpenBSD: pf_norm.c,v 1.117 2009/04/07 13:26:23 henning Exp $ */
 
 /*
  * Copyright 2001 Niels Provos <provos@citi.umich.edu>
+ * Copyright 2009 Henning Brauer <henning@openbsd.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -1326,7 +1327,6 @@ pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd, u_int16_t maxmss)
 	u_int16_t	*mss;
 	int		 thoff;
 	int		 opt, cnt, optlen = 0;
-	int		 rewrite = 0;
 	u_char		 opts[MAX_TCPOPTLEN];
 	u_char		*optp = opts;
 
@@ -1357,7 +1357,9 @@ pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd, u_int16_t maxmss)
 				th->th_sum = pf_cksum_fixup(th->th_sum,
 				    *mss, htons(maxmss), 0);
 				*mss = htons(maxmss);
-				rewrite = 1;
+				m_copyback(m, off + sizeof(*th),
+				    thoff - sizeof(*th), opts);
+				m_copyback(m, off, sizeof(*th), th);
 			}
 			break;
 		default:
@@ -1365,8 +1367,7 @@ pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd, u_int16_t maxmss)
 		}
 	}
 
-	if (rewrite)
-		m_copyback(m, off + sizeof(*th), thoff - sizeof(*th), opts);
+
 
 	return (0);
 }

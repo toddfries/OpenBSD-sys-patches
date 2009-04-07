@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.16 2007/12/02 22:31:26 miod Exp $	*/
+/*	$OpenBSD: intr.h,v 1.18 2009/03/15 20:40:25 miod Exp $	*/
 /*
  * Copyright (C) 2000 Steve Murphree, Jr.
  * All rights reserved.
@@ -34,25 +34,6 @@
 #ifdef _KERNEL
 
 /*
- * Simulated software interrupt register.
- */
-extern volatile u_int8_t ssir;
-
-#define	SIR_NET		0x01
-#define	SIR_CLOCK	0x02
-
-#define	siron(mask)	\
-	__asm __volatile ( "orb %1,%0" : "=m" (ssir) : "ir" (mask))
-#define	siroff(mask)	\
-	__asm __volatile ( "andb %1,%0" : "=m" (ssir) : "ir" (~(mask)))
-
-#define	setsoftint(s)	siron(s)
-#define	setsoftnet()	siron(SIR_NET)
-#define	setsoftclock()	siron(SIR_CLOCK)
-
-u_int8_t allocate_sir(void (*proc)(void *), void *arg);
-
-/*
  * Interrupt "levels".  These are a more abstract representation
  * of interrupt levels, and do not have the same meaning as m68k
  * CPU interrupt levels.  They serve two purposes:
@@ -61,12 +42,11 @@ u_int8_t allocate_sir(void (*proc)(void *), void *arg);
  *      - compute CPU PSL values for the spl*() calls.
  */
 #define IPL_NONE	0
-#define IPL_SOFTNET	1
-#define IPL_SOFTCLOCK	1
+#define IPL_SOFTINT	1
 #define IPL_BIO		2
 #define IPL_NET		3
-#define IPL_TTY		3
-#define	IPL_VM		3
+#define IPL_TTY		5
+#define	IPL_VM		5
 #define IPL_CLOCK	5
 #define IPL_STATCLOCK	5
 #define IPL_HIGH	7
@@ -76,8 +56,8 @@ u_int8_t allocate_sir(void (*proc)(void *), void *arg);
 #define	splsoftnet()		splsoft()
 #define	splbio()		_splraise(PSL_S | PSL_IPL2)
 #define	splnet()		_splraise(PSL_S | PSL_IPL3)
-#define	spltty()		_splraise(PSL_S | PSL_IPL3)
-#define	splvm()			_splraise(PSL_S | PSL_IPL3)
+#define	spltty()		_splraise(PSL_S | PSL_IPL5)
+#define	splvm()			_splraise(PSL_S | PSL_IPL5)
 #define	splclock()		_splraise(PSL_S | PSL_IPL5)
 #define	splstatclock()		_splraise(PSL_S | PSL_IPL5)
 #define	splhigh()		_spl(PSL_S | PSL_IPL7)
@@ -85,6 +65,8 @@ u_int8_t allocate_sir(void (*proc)(void *), void *arg);
 
 /* watch out for side effects */
 #define	splx(s)			((s) & PSL_IPL ? _spl(s) : spl0())
+
+#include <m68k/intr.h>		/* soft interrupt support */
 
 /* locore.s */
 int	spl0(void);
