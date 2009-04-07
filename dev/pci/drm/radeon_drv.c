@@ -41,7 +41,7 @@ int	radeondrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
 int radeon_no_wb;
 
-static drm_pci_id_list_t radeondrm_pciidlist[] = {
+const static struct drm_pcidev radeondrm_pciidlist[] = {
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_M241P,
 	    CHIP_RV380|RADEON_IS_MOBILITY},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X300M24,
@@ -496,7 +496,6 @@ static const struct drm_driver_info radeondrm_driver = {
 	.disable_vblank		= radeon_disable_vblank,
 	.irq_install		= radeon_driver_irq_install,
 	.irq_uninstall		= radeon_driver_irq_uninstall,
-	.irq_handler		= radeon_driver_irq_handler,
 	.dma_ioctl		= radeon_cp_buffers,
 
 	.name			= DRIVER_NAME,
@@ -522,7 +521,7 @@ radeondrm_attach(struct device *parent, struct device *self, void *aux)
 	drm_radeon_private_t	*dev_priv = (drm_radeon_private_t *)self;
 	struct pci_attach_args	*pa = aux;
 	struct vga_pci_bar	*bar;
-	drm_pci_id_list_t	*id_entry;
+	const struct drm_pcidev	*id_entry;
 	int			 is_agp;
 
 	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
@@ -556,6 +555,7 @@ radeondrm_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	printf(": %s\n", pci_intr_string(pa->pa_pc, dev_priv->ih));
+	mtx_init(&dev_priv->swi_lock, IPL_BIO);
 
 	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
 	case CHIP_R100:
@@ -686,6 +686,58 @@ radeondrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 	return (EINVAL);
 }
 
+u_int32_t
+radeondrm_read_rptr(struct drm_radeon_private *dev_priv, u_int32_t off)
+{
+	u_int32_t val;
+
+	if (dev_priv->flags & RADEON_IS_AGP) {
+		val = bus_space_read_4(dev_priv->ring_rptr->bst,
+		    dev_priv->ring_rptr->bsh, off);
+	} else {
+		val = *(((volatile u_int32_t *)dev_priv->ring_rptr->handle) +
+		    (off / sizeof(u_int32_t)));
+		val = letoh32(val);
+	}
+	return (val);
+}
+
+void
+radeondrm_write_rptr(struct drm_radeon_private *dev_priv, u_int32_t off,
+    u_int32_t val)
+{
+	if (dev_priv->flags & RADEON_IS_AGP) {
+		bus_space_write_4(dev_priv->ring_rptr->bst,
+		    dev_priv->ring_rptr->bsh, off, val);
+	} else
+		*(((volatile u_int32_t *)dev_priv->ring_rptr->handle +
+		    (off / sizeof(u_int32_t)))) = htole32(val);
+}
+
+u_int32_t
+radeondrm_get_ring_head(struct drm_radeon_private *dev_priv)
+{
+	if (dev_priv->writeback_works)
+		return (radeondrm_read_rptr(dev_priv, 0));
+	else
+		return (RADEON_READ(RADEON_CP_RB_RPTR));
+}
+
+void
+radeondrm_set_ring_head(struct drm_radeon_private *dev_priv, u_int32_t val)
+{
+	radeondrm_write_rptr(dev_priv, 0, val);
+}
+
+u_int32_t
+radeondrm_get_scratch(struct drm_radeon_private *dev_priv, u_int32_t off)
+{
+	if (dev_priv->writeback_works)
+		return (radeondrm_read_rptr(dev_priv, RADEON_SCRATCHOFF(off)));
+	else
+		return (RADEON_READ( RADEON_SCRATCH_REG0 + 4*(off) ));
+}
+
 void
 radeondrm_begin_ring(struct drm_radeon_private *dev_priv, int ncmd)
 {
@@ -718,7 +770,7 @@ radeondrm_commit_ring(struct drm_radeon_private *dev_priv)
 {
 	/* flush write combining buffer and writes to ring */
 	DRM_MEMORYBARRIER();
-	GET_RING_HEAD(dev_priv);
+	radeondrm_get_ring_head(dev_priv);
 	RADEON_WRITE(RADEON_CP_RB_WPTR, dev_priv->ring.tail);
 	/* read from PCI bus to ensure correct posting */
 	RADEON_READ(RADEON_CP_RB_RPTR);

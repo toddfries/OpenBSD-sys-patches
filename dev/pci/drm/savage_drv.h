@@ -54,12 +54,12 @@ typedef struct drm_savage_age {
 	unsigned int wrap;
 } drm_savage_age_t;
 
-typedef struct drm_savage_buf_priv {
-	struct drm_savage_buf_priv *next;
-	struct drm_savage_buf_priv *prev;
-	drm_savage_age_t age;
-	struct drm_buf *buf;
-} drm_savage_buf_priv_t;
+struct savagedrm_buf_priv {
+	TAILQ_ENTRY(savagedrm_buf_priv)	 link;
+	drm_savage_age_t		 age;
+	struct drm_buf			*buf;
+	int				 free;
+};
 
 typedef struct drm_savage_dma_page {
 	drm_savage_age_t age;
@@ -132,7 +132,7 @@ typedef struct drm_savage_private {
 	bus_size_t		 fb_size;
 	bus_addr_t		 aperture_base;
 
-	drm_savage_buf_priv_t head, tail;
+	TAILQ_HEAD(savage_freelist, savagedrm_buf_priv)	freelist;
 
 	/* who am I? */
 	enum savage_family chipset;
@@ -156,13 +156,13 @@ typedef struct drm_savage_private {
 	unsigned int texture_size;
 
 	/* memory regions in physical memory */
-	drm_local_map_t *sarea;
-	drm_local_map_t *fb;
-	drm_local_map_t *aperture;
-	drm_local_map_t *status;
-	drm_local_map_t *agp_textures;
-	drm_local_map_t *cmd_dma;
-	drm_local_map_t fake_dma;
+	struct drm_local_map *sarea;
+	struct drm_local_map *fb;
+	struct drm_local_map *aperture;
+	struct drm_local_map *status;
+	struct drm_local_map *agp_textures;
+	struct drm_local_map *cmd_dma;
+	struct drm_local_map fake_dma;
 
 	struct {
 		int handle;

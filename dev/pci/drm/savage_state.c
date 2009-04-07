@@ -981,11 +981,6 @@ int savage_bci_cmdbuf(struct drm_device *dev, void *data, struct drm_file *file_
 		dmabuf = NULL;
 	}
 
-	/* Copy the user buffers into kernel temporary areas.  This hasn't been
-	 * a performance loss compared to VERIFYAREA_READ/
-	 * COPY_FROM_USER_UNCHECKED when done in other drivers, and is correct
-	 * for locking on FreeBSD.
-	 */
 	if (cmdbuf->size) {
 		kcmd_addr = drm_calloc(cmdbuf->size, 8);
 		if (kcmd_addr == NULL)
@@ -1145,9 +1140,9 @@ int savage_bci_cmdbuf(struct drm_device *dev, void *data, struct drm_file *file_
 	DMA_FLUSH();
 
 	if (dmabuf && cmdbuf->discard) {
-		drm_savage_buf_priv_t *buf_priv =
-		    (drm_savage_buf_priv_t *)dmabuf;
+		struct savagedrm_buf_priv *buf_priv = dmabuf->dev_private;
 		uint16_t event;
+
 		event = savage_bci_emit_event(dev_priv, SAVAGE_WAIT_3D);
 		SET_AGE(&buf_priv->age, event, dev_priv->event_wrap);
 		savage_freelist_put(dev, dmabuf);

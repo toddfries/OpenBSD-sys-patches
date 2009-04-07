@@ -196,22 +196,22 @@ RADEON_READ_PCIE(drm_radeon_private_t *dev_priv, int addr)
 static void
 radeon_status(drm_radeon_private_t *dev_priv)
 {
-	printk("%s:\n", __FUNCTION__);
-	printk("RBBM_STATUS = 0x%08x\n",
+	printf("%s:\n", __FUNCTION__);
+	printf("RBBM_STATUS = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_RBBM_STATUS));
-	printk("CP_RB_RTPR = 0x%08x\n",
+	printf("CP_RB_RTPR = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_CP_RB_RPTR));
-	printk("CP_RB_WTPR = 0x%08x\n",
+	printf("CP_RB_WTPR = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_CP_RB_WPTR));
-	printk("AIC_CNTL = 0x%08x\n",
+	printf("AIC_CNTL = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_AIC_CNTL));
-	printk("AIC_STAT = 0x%08x\n",
+	printf("AIC_STAT = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_AIC_STAT));
-	printk("AIC_PT_BASE = 0x%08x\n",
+	printf("AIC_PT_BASE = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_AIC_PT_BASE));
-	printk("TLB_ADDR = 0x%08x\n",
+	printf("TLB_ADDR = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_AIC_TLB_ADDR));
-	printk("TLB_DATA = 0x%08x\n",
+	printf("TLB_DATA = 0x%08x\n",
 	       (unsigned int)RADEON_READ(RADEON_AIC_TLB_DATA));
 }
 #endif
@@ -489,7 +489,7 @@ radeon_do_cp_reset(drm_radeon_private_t *dev_priv)
 
 	cur_read_ptr = RADEON_READ(RADEON_CP_RB_RPTR);
 	RADEON_WRITE(RADEON_CP_RB_WPTR, cur_read_ptr);
-	SET_RING_HEAD(dev_priv, cur_read_ptr);
+	radeondrm_set_ring_head(dev_priv, cur_read_ptr);
 	dev_priv->ring.tail = cur_read_ptr;
 }
 
@@ -617,7 +617,7 @@ radeon_cp_init_ring_buffer(struct drm_device *dev,
 	/* Initialize the ring buffer's read and write pointers */
 	cur_read_ptr = RADEON_READ(RADEON_CP_RB_RPTR);
 	RADEON_WRITE(RADEON_CP_RB_WPTR, cur_read_ptr);
-	SET_RING_HEAD(dev_priv, cur_read_ptr);
+	radeondrm_set_ring_head(dev_priv, cur_read_ptr);
 	dev_priv->ring.tail = cur_read_ptr;
 
 #if __OS_HAS_AGP
@@ -628,17 +628,9 @@ radeon_cp_init_ring_buffer(struct drm_device *dev,
 	} else
 #endif
 	{
-		struct drm_sg_mem *entry = dev->sg;
-		unsigned long tmp_ofs, page_ofs;
-
-		tmp_ofs = dev_priv->ring_rptr->offset - dev->sg->handle;
-		page_ofs = tmp_ofs >> PAGE_SHIFT;
-
 		RADEON_WRITE(RADEON_CP_RB_RPTR_ADDR,
-		    entry->mem->map->dm_segs[page_ofs].ds_addr);
-		DRM_DEBUG("ring rptr: offset=0x%08lx handle=0x%08lx\n",
-		    (unsigned long)entry->mem->map->dm_segs[page_ofs].ds_addr,
-		    entry->handle + tmp_ofs);
+		    dev_priv->ring_rptr->offset - dev->sg->handle +
+		    dev_priv->gart_vm_start);
 	}
 
 	/* Set ring buffer size */
@@ -664,10 +656,6 @@ radeon_cp_init_ring_buffer(struct drm_device *dev,
 	 */
 	RADEON_WRITE(RADEON_SCRATCH_ADDR, RADEON_READ(RADEON_CP_RB_RPTR_ADDR)
 		     + RADEON_SCRATCH_REG_OFFSET);
-
-	dev_priv->scratch = ((__volatile__ u32 *)
-			     dev_priv->ring_rptr->handle +
-			     (RADEON_SCRATCH_REG_OFFSET / sizeof(u32)));
 
 	RADEON_WRITE(RADEON_SCRATCH_UMSK, 0x7);
 
@@ -702,14 +690,17 @@ radeon_cp_init_ring_buffer(struct drm_device *dev,
 		break;
 	}
 
-	dev_priv->sarea_priv->last_frame = dev_priv->scratch[0] = 0;
+	radeondrm_write_rptr(dev_priv, RADEON_SCRATCHOFF(0), 0);
+	dev_priv->sarea_priv->last_frame = 0;
 	RADEON_WRITE(RADEON_LAST_FRAME_REG, dev_priv->sarea_priv->last_frame);
 
-	dev_priv->sarea_priv->last_dispatch = dev_priv->scratch[1] = 0;
+	radeondrm_write_rptr(dev_priv, RADEON_SCRATCHOFF(1), 0);
+	dev_priv->sarea_priv->last_dispatch = 0;
 	RADEON_WRITE(RADEON_LAST_DISPATCH_REG,
 		     dev_priv->sarea_priv->last_dispatch);
 
-	dev_priv->sarea_priv->last_clear = dev_priv->scratch[2] = 0;
+	radeondrm_write_rptr(dev_priv, RADEON_SCRATCHOFF(2), 0);
+	dev_priv->sarea_priv->last_clear = 0;
 	RADEON_WRITE(RADEON_LAST_CLEAR_REG, dev_priv->sarea_priv->last_clear);
 
 	radeon_do_wait_for_idle(dev_priv);
@@ -731,11 +722,11 @@ radeon_test_writeback(drm_radeon_private_t *dev_priv)
 	/* Writeback doesn't seem to work everywhere, test it here and possibly
 	 * enable it if it appears to work
 	 */
-	DRM_WRITE32(dev_priv->ring_rptr, RADEON_SCRATCHOFF(1), 0);
+	radeondrm_write_rptr(dev_priv, RADEON_SCRATCHOFF(1), 0);
 	RADEON_WRITE(RADEON_SCRATCH_REG1, 0xdeadbeef);
 
 	for (tmp = 0; tmp < dev_priv->usec_timeout; tmp++) {
-		if (DRM_READ32(dev_priv->ring_rptr, RADEON_SCRATCHOFF(1)) ==
+		if (radeondrm_read_rptr(dev_priv, RADEON_SCRATCHOFF(1)) ==
 		    0xdeadbeef)
 			break;
 		DRM_UDELAY(1);
@@ -1396,8 +1387,8 @@ radeon_driver_lastclose(struct drm_device *dev)
 	}
 
 	/* Free memory heap structures */
-	radeon_mem_takedown(&(dev_priv->gart_heap));
-	radeon_mem_takedown(&(dev_priv->fb_heap));
+	drm_mem_takedown(&dev_priv->gart_heap);
+	drm_mem_takedown(&dev_priv->fb_heap);
 
 	/* deallocate kernel resources */
 	radeon_do_cleanup_cp(dev);
@@ -1516,7 +1507,8 @@ radeon_freelist_get(struct drm_device *dev)
 	start = dev_priv->last_buf;
 
 	for (t = 0; t < dev_priv->usec_timeout; t++) {
-		u32 done_age = GET_SCRATCH(1);
+		u_int32_t done_age = radeondrm_get_scratch(dev_priv, 1);
+
 		DRM_DEBUG("done_age = %d\n", done_age);
 		for (i = start; i < dma->buf_count; i++) {
 			buf = dma->buflist[i];
@@ -1547,7 +1539,9 @@ struct drm_buf *radeon_freelist_get(struct drm_device * dev)
 	struct drm_buf *buf;
 	int i, t;
 	int start;
-	u32 done_age = DRM_READ32(dev_priv->ring_rptr, RADEON_SCRATCHOFF(1));
+	u32 done_age;
+
+	done_age = radeondrm_get_scratch(dev_priv, 1);
 
 	if (++dev_priv->last_buf >= dma->buf_count)
 		dev_priv->last_buf = 0;
@@ -1593,12 +1587,14 @@ radeon_freelist_reset(struct drm_device *dev)
 int
 radeon_wait_ring(drm_radeon_private_t *dev_priv, int n)
 {
-	drm_radeon_ring_buffer_t *ring = &dev_priv->ring;
-	int i;
-	u32 last_head = GET_RING_HEAD(dev_priv);
+	drm_radeon_ring_buffer_t	*ring = &dev_priv->ring;
+	u_int32_t			 last_head;
+	int				 i;
+
+	last_head = radeondrm_get_ring_head(dev_priv);
 
 	for (i = 0; i < dev_priv->usec_timeout; i++) {
-		u_int32_t head = GET_RING_HEAD(dev_priv);
+		u_int32_t head = radeondrm_get_ring_head(dev_priv);
 
 		ring->space = head - ring->tail;
 		if (ring->space <= 0)
@@ -1653,9 +1649,9 @@ radeon_cp_buffers(struct drm_device *dev, struct drm_dma * d,
 int
 radeon_driver_firstopen(struct drm_device *dev)
 {
-	int ret;
-	drm_local_map_t *map;
-	drm_radeon_private_t *dev_priv = dev->dev_private;
+	drm_radeon_private_t	*dev_priv = dev->dev_private;
+	struct drm_local_map	*map;
+	int			 ret;
 
 	dev_priv->gart_info.table_size = RADEON_PCIGART_TABLE_SIZE;
 

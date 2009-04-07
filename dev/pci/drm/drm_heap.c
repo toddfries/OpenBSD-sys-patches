@@ -34,6 +34,8 @@
 
 struct drm_mem *drm_split_block(struct drm_heap *, struct drm_mem *, int,
 		    int, struct drm_file *);
+struct drm_mem *drm_find_block(struct drm_heap *, int);
+void		drm_free_block(struct drm_heap *, struct drm_mem *);
 /*
  * Very simple allocator for GART memory, working on a static range
  * already mapped into each client's address space.
@@ -124,7 +126,8 @@ drm_free_block(struct drm_heap *heap, struct drm_mem *p)
 	}
 }
 
-/* Initialize.
+/*
+ * Initialize.
  */
 int
 drm_init_heap(struct drm_heap *heap, int start, int size)
@@ -143,4 +146,67 @@ drm_init_heap(struct drm_heap *heap, int start, int size)
 	TAILQ_INSERT_HEAD(heap, blocks, link);
 
 	return (0);
+}
+
+/*
+ * Free block at offset ``offset'' owned by file_priv.
+ */
+int
+drm_mem_free(struct drm_heap *heap, int offset, struct drm_file *file_priv)
+{
+	struct drm_mem	*p;
+
+	if ((p = drm_find_block(heap, offset)) == NULL)
+		return (EFAULT);
+	if (p->file_priv != file_priv)
+		return (EPERM);
+
+	drm_free_block(heap, p);
+	return (0);
+}
+
+/*
+ * Free all blocks associated with the releasing file.
+ */
+void
+drm_mem_release(struct drm_heap *heap, struct drm_file *file_priv)
+{
+	struct drm_mem	*p, *q;
+
+	if (heap == NULL || TAILQ_EMPTY(heap))
+		return;
+
+	TAILQ_FOREACH(p, heap, link) {
+		if (p->file_priv == file_priv)
+			p->file_priv = NULL;
+	}
+
+	/* Coalesce the entries.  ugh... */
+	for (p = TAILQ_FIRST(heap); p != TAILQ_END(heap); p = q) {
+		while (p->file_priv == NULL &&
+		    (q = TAILQ_NEXT(p, link)) != TAILQ_END(heap) &&
+		    q->file_priv == NULL) {
+			p->size += q->size;
+			TAILQ_REMOVE(heap, q, link);
+			drm_free(q);
+		}
+		q = TAILQ_NEXT(p, link);
+	}
+}
+
+/*
+ * Shutdown the heap.
+ */
+void
+drm_mem_takedown(struct drm_heap *heap)
+{
+	struct drm_mem	*p;
+
+	if (heap == NULL)
+		return;
+
+	while ((p = TAILQ_FIRST(heap)) != NULL) {
+		TAILQ_REMOVE(heap, p, link);
+		drm_free(p);
+	}
 }

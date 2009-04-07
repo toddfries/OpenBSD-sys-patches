@@ -202,7 +202,7 @@ int i915_dma_init(struct drm_device *dev, void *data,
  * instruction detected will be given a size of zero, which is a
  * signal to abort the rest of the buffer.
  */
-static int do_validate_cmd(int cmd)
+static int validate_cmd(int cmd)
 {
 	switch (((cmd >> 29) & 0x7)) {
 	case 0x0:
@@ -260,15 +260,6 @@ static int do_validate_cmd(int cmd)
 	return 0;
 }
 
-static int validate_cmd(int cmd)
-{
-	int ret = do_validate_cmd(cmd);
-
-/*	printk("validate_cmd( %x ): %d\n", cmd, ret); */
-
-	return ret;
-}
-
 static int i915_emit_cmds(struct drm_device *dev, int __user *buffer,
 			  int dwords)
 {
@@ -283,7 +274,7 @@ static int i915_emit_cmds(struct drm_device *dev, int __user *buffer,
 	for (i = 0; i < dwords;) {
 		int cmd, sz;
 
-		if (DRM_COPY_FROM_USER_UNCHECKED(&cmd, &buffer[i], sizeof(cmd)))
+		if (DRM_COPY_FROM_USER(&cmd, &buffer[i], sizeof(cmd)))
 			return EINVAL;
 
 		if ((sz = validate_cmd(cmd)) == 0 || i + sz > dwords)
@@ -292,8 +283,7 @@ static int i915_emit_cmds(struct drm_device *dev, int __user *buffer,
 		OUT_RING(cmd);
 
 		while (++i, --sz) {
-			if (DRM_COPY_FROM_USER_UNCHECKED(&cmd, &buffer[i],
-							 sizeof(cmd))) {
+			if (DRM_COPY_FROM_USER(&cmd, &buffer[i], sizeof(cmd))) {
 				return EINVAL;
 			}
 			OUT_RING(cmd);
@@ -308,20 +298,21 @@ static int i915_emit_cmds(struct drm_device *dev, int __user *buffer,
 	return 0;
 }
 
-static int i915_emit_box(struct drm_device * dev,
-			 struct drm_clip_rect __user * boxes,
-			 int i, int DR1, int DR4)
+static int
+i915_emit_box(struct drm_device * dev, struct drm_clip_rect *boxes,
+    int i, int DR1, int DR4)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	struct drm_clip_rect box;
 
-	if (DRM_COPY_FROM_USER_UNCHECKED(&box, &boxes[i], sizeof(box))) {
+	if (DRM_COPY_FROM_USER(&box, &boxes[i], sizeof(box))) {
 		return EFAULT;
 	}
 
-	if (box.y2 <= box.y1 || box.x2 <= box.x1 || box.y2 <= 0 || box.x2 <= 0) {
+	if (box.y2 <= box.y1 || box.x2 <= box.x1 || box.y2 <= 0 ||
+	    box.x2 <= 0) {
 		DRM_ERROR("Bad box %d,%d..%d,%d\n",
-			  box.x1, box.y1, box.x2, box.y2);
+		    box.x1, box.y1, box.x2, box.y2);
 		return EINVAL;
 	}
 
@@ -489,10 +480,6 @@ int i915_batchbuffer(struct drm_device *dev, void *data,
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
-	if (batch->num_cliprects && DRM_VERIFYAREA_READ(batch->cliprects,
-	    batch->num_cliprects * sizeof(struct drm_clip_rect)))
-		return EFAULT;
-
 	DRM_LOCK();
 	ret = i915_dispatch_batchbuffer(dev, batch);
 	DRM_UNLOCK();
@@ -516,14 +503,6 @@ int i915_cmdbuffer(struct drm_device *dev, void *data,
 		return EINVAL;
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
-
-	if (cmdbuf->num_cliprects &&
-	    DRM_VERIFYAREA_READ(cmdbuf->cliprects,
-				cmdbuf->num_cliprects *
-				sizeof(struct drm_clip_rect))) {
-		DRM_ERROR("Fault accessing cliprects\n");
-		return EFAULT;
-	}
 
 	DRM_LOCK();
 	ret = i915_dispatch_cmdbuffer(dev, cmdbuf);
@@ -594,7 +573,7 @@ int i915_setparam(struct drm_device *dev, void *data,
 	case I915_SETPARAM_USE_MI_BATCHBUFFER_START:
 		break;
 	case I915_SETPARAM_TEX_LRU_LOG_GRANULARITY:
-		dev_priv->tex_lru_log_granularity = param->value;
+		/* We really don't care anymore */
 		break;
 	case I915_SETPARAM_ALLOW_BATCHBUFFER:
 		dev_priv->allow_batchbuffer = param->value;
@@ -661,13 +640,5 @@ void i915_driver_lastclose(struct drm_device * dev)
 
 	dev_priv->sarea_priv = NULL;
 
-	i915_mem_takedown(&dev_priv->agp_heap);
-
 	i915_dma_cleanup(dev);
-}
-
-void i915_driver_close(struct drm_device * dev, struct drm_file *file_priv)
-{
-	drm_i915_private_t *dev_priv = dev->dev_private;
-	i915_mem_release(dev, file_priv, &dev_priv->agp_heap);
 }
