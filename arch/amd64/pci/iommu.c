@@ -228,12 +228,11 @@ amdgart_ok(pci_chipset_tag_t pc, pcitag_t tag)
 	pcireg_t v;
 
 	v = pci_conf_read(pc, tag, PCI_ID_REG);
-	if (PCI_VENDOR(v) != PCI_VENDOR_AMD)
-		return (0);
-	if (PCI_PRODUCT(v) != PCI_PRODUCT_AMD_AMD64_0F_MISC &&
-	    PCI_PRODUCT(v) != PCI_PRODUCT_AMD_AMD64_10_MISC)
-		return (0);
-	return (1);
+	if (PCI_VENDOR(v) == PCI_VENDOR_AMD &&
+	    (PCI_PRODUCT(v) == PCI_PRODUCT_AMD_AMD64_0F_MISC ||
+	    PCI_PRODUCT(v) == PCI_PRODUCT_AMD_AMD64_10_MISC))
+		return (1);
+	return (0);
 }
 
 int
@@ -253,15 +252,14 @@ static const struct gart_size {
 	{ GART_APCTRL_SIZE_512M, 512 },
 	{ GART_APCTRL_SIZE_1G, 1024 },
 	{ GART_APCTRL_SIZE_2G, 2048 },
-	{ 0, 0 }
 };
 
 void
 amdgart_probe(struct pcibus_attach_args *pba)
 {
 	struct amdgart_softc *sc;
-	int dev, func, count = 0, encount = 0, r, nseg;
-	u_long mapsize, ptesize, gartsize;
+	int dev, count = 0, encount = 0, r, nseg;
+	u_long mapsize, ptesize, gartsize = 0;
 	bus_dma_segment_t seg;
 	pcitag_t tag;
 	pcireg_t v;
@@ -273,30 +271,27 @@ amdgart_probe(struct pcibus_attach_args *pba)
 	if (amdgart_enable == 0)
 		return;
 
+	/* Function is always three */
 	for (count = 0, dev = 24; dev < 32; dev++) {
-		for (func = 0; func < 8; func++) {
-			tag = pci_make_tag(pba->pba_pc, 0, dev, func);
+		tag = pci_make_tag(pba->pba_pc, 0, dev, 3);
 
-			if (amdgart_ok(pba->pba_pc, tag)) {
-				count++;
-				if (amdgart_enabled(pba->pba_pc, tag)) {
-					encount++;
-					pa = pci_conf_read(pba->pba_pc, tag,
-					    GART_APBASE) << 25;
-					v = pci_conf_read(pba->pba_pc, tag,
-					    GART_APCTRL) & GART_APCTRL_SIZE;
-				}
-			}
+		if (!amdgart_ok(pba->pba_pc, tag))
+			continue;
+		count++;
+		if (amdgart_enabled(pba->pba_pc, tag)) {
+			encount++;
+			pa = pci_conf_read(pba->pba_pc, tag,
+			    GART_APBASE) << 25;
+			v = pci_conf_read(pba->pba_pc, tag,
+			    GART_APCTRL) & GART_APCTRL_SIZE;
 		}
 	}
 
-	if (count == 0)  {
-		printf("ENOIOMMU\n");
+	if (count == 0)
 		return;
-	}
 
 	if (encount > 0 && encount != count) {
-		printf("holy mismatched enabling, batman!\n");
+		printf("\niommu: holy mismatched enabling, batman!\n");
 		return;
 	}
 
@@ -308,31 +303,36 @@ amdgart_probe(struct pcibus_attach_args *pba)
 	}
 
 	if (encount > 0) {
-		const struct gart_size *sz;
-		/* Checkup that the size is ok, and do our funky magic. */
+		int i;
 		/*
-		 * XXX does the bios tell us about this bit, if not we need to
-		 * allocate it
+		 * GART exists, use the current value.
+		 *
+		 * It appears that the bios mentions this in it's memory map
+		 * (sample size of 1), so we don't need to allocate
+		 * address space for it.
 		 */
-		sc->g_pa  = pa;
-		sz = apsizes;
-		for (sz = &apsizes[0]; sz != &apsizes[nitems(apsizes) - 1] &&
-		    sz->reg != v; sz++)
-			;
-		if (sz == &apsizes[nitems(apsizes) -1]) {
+		sc->g_pa = pa;
+		for (i = 0; i < nitems(apsizes); i++)
+			if (apsizes[i].reg == v)
+				gartsize = apsizes[i].size;
+		if (gartsize == 0) {
 			printf("iommu: strange size\n");
+			free(sc, M_DEVBUF);
 			return;
 		}
 
-		gartsize = sz->size;
 		mapsize = gartsize * 1024 * 1024;
 	} else {
-		/* We've gotta allocate on. Heuristic time! */
+		/* We've gotta allocate one. Heuristic time! */
+		/*
+		 * XXX right now we stuff the iommu where we want. this need
+		 * XXX changing to allocate from pci space.
+		 */
 		sc->g_pa = IOMMU_START;
 		gartsize = IOMMU_SIZE;
-		mapsize = IOMMU_SIZE * 1024 * 1024;
 	}
 
+	mapsize = gartsize * 1024 * 1024;
 	ptesize = mapsize / (PAGE_SIZE / sizeof(u_int32_t));
 
 	/*
@@ -378,62 +378,60 @@ amdgart_probe(struct pcibus_attach_args *pba)
 	sc->g_dmat = pba->pba_dmat;
 
 	for (count = 0, dev = 24; dev < 32; dev++) {
-		for (func = 0; func < 8; func++) {
-			tag = pci_make_tag(pba->pba_pc, 0, dev, func);
+		tag = pci_make_tag(pba->pba_pc, 0, dev, 3);
 
-			if (!amdgart_ok(pba->pba_pc, tag))
-				continue;
+		if (!amdgart_ok(pba->pba_pc, tag))
+			continue;
 
-			v = pci_conf_read(pba->pba_pc, tag, GART_APCTRL);
-			v |= GART_APCTRL_DISCPU | GART_APCTRL_DISTBL |
-			    GART_APCTRL_DISIO;
-			v &= ~(GART_APCTRL_ENABLE | GART_APCTRL_SIZE);
-			switch (gartsize) {
-			case 32:
-				v |= GART_APCTRL_SIZE_32M;
-				break;
-			case 64:
-				v |= GART_APCTRL_SIZE_64M;
-				break;
-			case 128:
-				v |= GART_APCTRL_SIZE_128M;
-				break;
-			case 256:
-				v |= GART_APCTRL_SIZE_256M;
-				break;
-			case 512:
-				v |= GART_APCTRL_SIZE_512M;
-				break;
-			case 1024:
-				v |= GART_APCTRL_SIZE_1G;
-				break;
-			case 2048:
-				v |= GART_APCTRL_SIZE_2G;
-				break;
-			default:
-				printf("\nGART: bad size");
-				return;
-			}
-			pci_conf_write(pba->pba_pc, tag, GART_APCTRL, v);
-
-			pci_conf_write(pba->pba_pc, tag, GART_APBASE,
-			    sc->g_pa >> 25);
-
-			pci_conf_write(pba->pba_pc, tag, GART_TBLBASE,
-			    (ptepa >> 8) & GART_TBLBASE_MASK);
-
-			v = pci_conf_read(pba->pba_pc, tag, GART_APCTRL);
-			v |= GART_APCTRL_ENABLE;
-			v &= ~GART_APCTRL_DISIO;
-			pci_conf_write(pba->pba_pc, tag, GART_APCTRL, v);
-
-			sc->g_tags[count] = tag;
-
-			printf("\niommu%d at cpu%d: base 0x%lx length %dMB"
-			    " pte 0x%lx", count, dev - 24, sc->g_pa,
-			    gartsize, ptepa);
-			count++;
+		v = pci_conf_read(pba->pba_pc, tag, GART_APCTRL);
+		v |= GART_APCTRL_DISCPU | GART_APCTRL_DISTBL |
+		    GART_APCTRL_DISIO;
+		v &= ~(GART_APCTRL_ENABLE | GART_APCTRL_SIZE);
+		switch (gartsize) {
+		case 32:
+			v |= GART_APCTRL_SIZE_32M;
+			break;
+		case 64:
+			v |= GART_APCTRL_SIZE_64M;
+			break;
+		case 128:
+			v |= GART_APCTRL_SIZE_128M;
+			break;
+		case 256:
+			v |= GART_APCTRL_SIZE_256M;
+			break;
+		case 512:
+			v |= GART_APCTRL_SIZE_512M;
+			break;
+		case 1024:
+			v |= GART_APCTRL_SIZE_1G;
+			break;
+		case 2048:
+			v |= GART_APCTRL_SIZE_2G;
+			break;
+		default:
+			printf("\nGART: bad size");
+			return;
 		}
+		pci_conf_write(pba->pba_pc, tag, GART_APCTRL, v);
+
+		pci_conf_write(pba->pba_pc, tag, GART_APBASE,
+		    sc->g_pa >> 25);
+
+		pci_conf_write(pba->pba_pc, tag, GART_TBLBASE,
+		    (ptepa >> 8) & GART_TBLBASE_MASK);
+
+		v = pci_conf_read(pba->pba_pc, tag, GART_APCTRL);
+		v |= GART_APCTRL_ENABLE;
+		v &= ~GART_APCTRL_DISIO;
+		pci_conf_write(pba->pba_pc, tag, GART_APCTRL, v);
+
+		sc->g_tags[count] = tag;
+
+		printf("\niommu%d at cpu%d: base 0x%lx length %dMB"
+		    " pte 0x%lx", count, dev - 24, sc->g_pa,
+		    gartsize, ptepa);
+		count++;
 	}
 	amdgart_initpt(sc, ptesize / sizeof(*sc->g_pte));
 	sc->g_count = count;
