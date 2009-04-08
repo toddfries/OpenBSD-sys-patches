@@ -165,6 +165,12 @@ pciattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_intrswiz = pba->pba_intrswiz;
 	sc->sc_intrtag = pba->pba_intrtag;
 	pci_enumerate_bus(sc, pci_reserve_resources, NULL);
+#ifdef DDB
+	if (pba->pba_ioex)
+		extent_print(pba->pba_ioex);
+	if (pba->pba_memex)
+		extent_print(pba->pba_memex);
+#endif
 	pci_enumerate_bus(sc, NULL, NULL);
 }
 
