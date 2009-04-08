@@ -103,7 +103,7 @@
 extern paddr_t avail_end;
 extern struct extent *iomem_ex;
 
-int amdgart_enable = 0;
+int amdgart_enable = 1;
 
 struct amdgart_softc {
 	pci_chipset_tag_t	 g_pc;
@@ -127,6 +127,7 @@ int amdgart_iommu_map(struct amdgart_softc *, bus_dmamap_t,
 int amdgart_iommu_unmap(struct amdgart_softc *, bus_dma_segment_t *);
 int amdgart_reload(struct amdgart_softc *, bus_dmamap_t);
 int amdgart_ok(pci_chipset_tag_t, pcitag_t);
+int amdgart_enabled(pci_chipset_tag_t, pcitag_t);
 void amdgart_initpt(struct amdgart_softc *, u_long);
 
 int amdgart_dmamap_create(bus_dma_tag_t, bus_size_t, int, bus_size_t,
@@ -232,20 +233,35 @@ amdgart_ok(pci_chipset_tag_t pc, pcitag_t tag)
 	if (PCI_PRODUCT(v) != PCI_PRODUCT_AMD_AMD64_0F_MISC &&
 	    PCI_PRODUCT(v) != PCI_PRODUCT_AMD_AMD64_10_MISC)
 		return (0);
-
-	v = pci_conf_read(pc, tag, GART_APCTRL);
-	if (v & GART_APCTRL_ENABLE)
-		return (0);
-
 	return (1);
 }
+
+int
+amdgart_enabled(pci_chipset_tag_t pc, pcitag_t tag)
+{
+	return (pci_conf_read(pc, tag, GART_APCTRL) & GART_APCTRL_ENABLE);
+}
+
+static const struct gart_size {
+	pcireg_t	reg;
+	bus_size_t	size;
+} apsizes[] = {
+	{ GART_APCTRL_SIZE_32M, 32 },
+	{ GART_APCTRL_SIZE_64M, 64 },
+	{ GART_APCTRL_SIZE_128M, 128 },
+	{ GART_APCTRL_SIZE_256M, 256 },
+	{ GART_APCTRL_SIZE_512M, 512 },
+	{ GART_APCTRL_SIZE_1G, 1024 },
+	{ GART_APCTRL_SIZE_2G, 2048 },
+	{ 0, 0 }
+};
 
 void
 amdgart_probe(struct pcibus_attach_args *pba)
 {
 	struct amdgart_softc *sc;
-	int dev, func, count = 0, r, nseg;
-	u_long mapsize, ptesize;
+	int dev, func, count = 0, encount = 0, r, nseg;
+	u_long mapsize, ptesize, gartsize;
 	bus_dma_segment_t seg;
 	pcitag_t tag;
 	pcireg_t v;
@@ -262,10 +278,12 @@ amdgart_probe(struct pcibus_attach_args *pba)
 
 			if (amdgart_ok(pba->pba_pc, tag))
 				count++;
+			if (amdgart_enabled(pba->pba_pc, tag))
+				encount++;
 		}
 	}
 
-	if (count == 0)
+	if (count == 0 || (encount > 0 && encount != count))
 		return;
 
 	sc = malloc(sizeof(*sc) + (sizeof(pcitag_t) * (count - 1)),
@@ -275,9 +293,32 @@ amdgart_probe(struct pcibus_attach_args *pba)
 		return;
 	}
 
-	sc->g_pa = IOMMU_START;
+	if (encount > 0) {
+		struct gart_size *sz;
+		/* Checkup that the size is ok, and do our funky magic. */
+		/*
+		 * XXX does the bios tell us about this bit, if not we need to
+		 * allocate it
+		 */
+		sc->g_pa = pci_conf_read(pba->pba_pc, tag, GART_APBASE) << 25;
+		v = pci_conf_read(pba->pba_pc, tag, GART_APCTRL) &
+		    GART_APCTRL_SIZE;
+		while (sz->reg != 0 && sz->reg != v)
+			sz++;
+		if (sz->reg == 0) {
+			printf("iommu: strange size\n");
+			return;
+		}
 
-	mapsize = IOMMU_SIZE * 1024 * 1024;
+		gartsize = sz->size;
+		mapsize = mapsize * 1024 * 1024;
+	} else {
+		/* We've gotta allocate on. Heuristic time! */
+		sc->g_pa = IOMMU_START;
+		gartsize = IOMMU_SIZE;
+		mapsize = IOMMU_SIZE * 1024 * 1024;
+	}
+
 	ptesize = mapsize / (PAGE_SIZE / sizeof(u_int32_t));
 
 	/*
@@ -333,7 +374,7 @@ amdgart_probe(struct pcibus_attach_args *pba)
 			v |= GART_APCTRL_DISCPU | GART_APCTRL_DISTBL |
 			    GART_APCTRL_DISIO;
 			v &= ~(GART_APCTRL_ENABLE | GART_APCTRL_SIZE);
-			switch (IOMMU_SIZE) {
+			switch (gartsize) {
 			case 32:
 				v |= GART_APCTRL_SIZE_32M;
 				break;
@@ -374,8 +415,9 @@ amdgart_probe(struct pcibus_attach_args *pba)
 
 			sc->g_tags[count] = tag;
 
-			printf("\niommu%d at cpu%d: base 0x%lx length %dMB pte 0x%lx",
-			    count, dev - 24, sc->g_pa, IOMMU_SIZE, ptepa);
+			printf("\niommu%d at cpu%d: base 0x%lx length %dMB"
+			    " pte 0x%lx", count, dev - 24, sc->g_pa,
+			    gartsize, ptepa);
 			count++;
 		}
 	}
