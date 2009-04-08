@@ -276,10 +276,11 @@ amdgart_probe(struct pcibus_attach_args *pba)
 		for (func = 0; func < 8; func++) {
 			tag = pci_make_tag(pba->pba_pc, 0, dev, func);
 
-			if (amdgart_ok(pba->pba_pc, tag))
+			if (amdgart_ok(pba->pba_pc, tag)) {
 				count++;
-			if (amdgart_enabled(pba->pba_pc, tag))
-				encount++;
+				if (amdgart_enabled(pba->pba_pc, tag))
+					encount++;
+			}
 		}
 	}
 
