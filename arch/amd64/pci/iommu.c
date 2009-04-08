@@ -283,8 +283,15 @@ amdgart_probe(struct pcibus_attach_args *pba)
 		}
 	}
 
-	if (count == 0 || (encount > 0 && encount != count))
+	if (count == 0)  {
+		printf("ENOIOMMU\n");
 		return;
+	}
+
+	if (encount > 0 && encount != count) {
+		printf("holy mismatched enabling, batman!\n");
+		return;
+	}
 
 	sc = malloc(sizeof(*sc) + (sizeof(pcitag_t) * (count - 1)),
 	    M_DEVBUF, M_NOWAIT | M_ZERO);
@@ -294,7 +301,7 @@ amdgart_probe(struct pcibus_attach_args *pba)
 	}
 
 	if (encount > 0) {
-		struct gart_size *sz;
+		const struct gart_size *sz;
 		/* Checkup that the size is ok, and do our funky magic. */
 		/*
 		 * XXX does the bios tell us about this bit, if not we need to
@@ -303,6 +310,7 @@ amdgart_probe(struct pcibus_attach_args *pba)
 		sc->g_pa = pci_conf_read(pba->pba_pc, tag, GART_APBASE) << 25;
 		v = pci_conf_read(pba->pba_pc, tag, GART_APCTRL) &
 		    GART_APCTRL_SIZE;
+		sz = apsizes;
 		while (sz->reg != 0 && sz->reg != v)
 			sz++;
 		if (sz->reg == 0) {
