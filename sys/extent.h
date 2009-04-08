@@ -82,6 +82,7 @@ struct extent_fixed {
 #define EX_MALLOCOK	0x10		/* safe to call malloc() */
 #define EX_WAITSPACE	0x20		/* wait for space to become free */
 #define EX_BOUNDZERO	0x40		/* boundary lines start at 0 */
+#define EX_CONFLICTOK	0x80		/* allow conlficts */
 
 /*
  * Special place holders for "alignment" and "boundary" arguments,
