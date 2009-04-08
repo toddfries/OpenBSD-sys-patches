@@ -265,6 +265,7 @@ amdgart_probe(struct pcibus_attach_args *pba)
 	bus_dma_segment_t seg;
 	pcitag_t tag;
 	pcireg_t v;
+	paddr_t pa;
 	void *scrib = NULL;
 	u_int32_t *pte = NULL;
 	paddr_t ptepa;
@@ -280,6 +281,8 @@ amdgart_probe(struct pcibus_attach_args *pba)
 				count++;
 				if (amdgart_enabled(pba->pba_pc, tag)) {
 					encount++;
+					pa = pci_conf_read(pba->pba_pc, tag,
+					    GART_APBASE) << 25;
 					v = pci_conf_read(pba->pba_pc, tag,
 					    GART_APCTRL) & GART_APCTRL_SIZE;
 				}
@@ -311,11 +314,12 @@ amdgart_probe(struct pcibus_attach_args *pba)
 		 * XXX does the bios tell us about this bit, if not we need to
 		 * allocate it
 		 */
-		sc->g_pa = pci_conf_read(pba->pba_pc, tag, GART_APBASE) << 25;
+		sc->g_pa  = pa;
 		sz = apsizes;
-		while (sz->reg != 0 && sz->reg != v)
-			sz++;
-		if (sz->reg == 0) {
+		for (sz = &apsizes[0]; sz != &apsizes[nitems(apsizes) - 1] &&
+		    sz->reg != v; sz++)
+			;
+		if (sz == &apsizes[nitems(apsizes) -1]) {
 			printf("iommu: strange size\n");
 			return;
 		}
