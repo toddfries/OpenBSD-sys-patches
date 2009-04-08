@@ -196,15 +196,11 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 
 #if NPCI > 0
 	if (pci_mode != 0) {
-		pci_init_extents();
-
 		bzero(&mba.mba_pba, sizeof(mba.mba_pba));
 		mba.mba_pba.pba_busname = "pci";
 		mba.mba_pba.pba_iot = X86_BUS_SPACE_IO;
 		mba.mba_pba.pba_memt = X86_BUS_SPACE_MEM;
 		mba.mba_pba.pba_dmat = &pci_bus_dma_tag;
-		mba.mba_pba.pba_ioex = pciio_ex;
-		mba.mba_pba.pba_memex = pcimem_ex;
 		mba.mba_pba.pba_domain = pci_ndomains++;
 		mba.mba_pba.pba_bus = 0;
 		config_found(self, &mba.mba_pba, mainbus_print);
