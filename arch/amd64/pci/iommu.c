@@ -278,12 +278,14 @@ amdgart_probe(struct pcibus_attach_args *pba)
 
 			if (amdgart_ok(pba->pba_pc, tag)) {
 				count++;
-				if (amdgart_enabled(pba->pba_pc, tag))
+				if (amdgart_enabled(pba->pba_pc, tag)) {
 					encount++;
+					v = pci_conf_read(pba->pba_pc, tag,
+					    GART_APCTRL) & GART_APCTRL_SIZE;
+				}
 			}
 		}
 	}
-	printf("\namdgart: count %d, encount %d\n",count,encount);
 
 	if (count == 0)  {
 		printf("ENOIOMMU\n");
@@ -310,17 +312,13 @@ amdgart_probe(struct pcibus_attach_args *pba)
 		 * allocate it
 		 */
 		sc->g_pa = pci_conf_read(pba->pba_pc, tag, GART_APBASE) << 25;
-		v = pci_conf_read(pba->pba_pc, tag, GART_APCTRL) &
-		    GART_APCTRL_SIZE;
-		printf("iommu: v 0x%x\n",v);
 		sz = apsizes;
 		while (sz->reg != 0 && sz->reg != v)
 			sz++;
 		if (sz->reg == 0) {
-			printf("iommu: strange size: apsizes %d, sz %p, sz->reg 0, sz->size %d\n",apsizes,sz,sz->size);
+			printf("iommu: strange size\n");
 			return;
 		}
-		printf("iommu: ok size: apsizes %d, sz %p, sz->reg 0, sz->size %d\n",apsizes,sz,sz->size);
 
 		gartsize = sz->size;
 		mapsize = gartsize * 1024 * 1024;
