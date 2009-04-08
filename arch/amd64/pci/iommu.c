@@ -275,7 +275,7 @@ amdgart_probe(struct pcibus_attach_args *pba)
 	for (count = 0, dev = 24; dev < 32; dev++) {
 		tag = pci_make_tag(pba->pba_pc, 0, dev, 3);
 
-		if (!amdgart_ok(pba->pba_pc, tag)) {
+		if (!amdgart_ok(pba->pba_pc, tag))
 			continue;
 		count++;
 		if (amdgart_enabled(pba->pba_pc, tag)) {
@@ -284,7 +284,6 @@ amdgart_probe(struct pcibus_attach_args *pba)
 			    GART_APBASE) << 25;
 			v = pci_conf_read(pba->pba_pc, tag,
 			    GART_APCTRL) & GART_APCTRL_SIZE;
-			}
 		}
 	}
 
