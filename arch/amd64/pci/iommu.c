@@ -576,9 +576,6 @@ amdgart_dmamap_load(bus_dma_tag_t tag, bus_dmamap_t dmam, void *buf,
 	struct amdgart_softc *sc = tag->_cookie;
 	int err;
 
-	if (dmam->dm_mapsize != 0)
-		panic("UNLOAD FIRST, ASSHOLE\n");
-
 	err = bus_dmamap_load(sc->g_dmat, dmam, buf, buflen,
 	    p, flags);
 	if (err)
@@ -597,9 +594,6 @@ amdgart_dmamap_load_mbuf(bus_dma_tag_t tag, bus_dmamap_t dmam,
 {
 	struct amdgart_softc *sc = tag->_cookie;
 	int err;
-
-	if (dmam->dm_mapsize != 0)
-		panic("UNLOAD FIRST, ASSHOLE\n");
 
 	err = bus_dmamap_load_mbuf(sc->g_dmat, dmam,
 	    chain, flags);
@@ -620,9 +614,6 @@ amdgart_dmamap_load_uio(bus_dma_tag_t tag, bus_dmamap_t dmam,
 	struct amdgart_softc *sc = tag->_cookie;
 	int err;
 
-	if (dmam->dm_mapsize != 0)
-		panic("UNLOAD FIRST, ASSHOLE\n");
-
 	err = bus_dmamap_load_uio(sc->g_dmat, dmam, uio, flags);
 	if (err)
 		return (err);
@@ -641,9 +632,6 @@ amdgart_dmamap_load_raw(bus_dma_tag_t tag, bus_dmamap_t dmam,
 	struct amdgart_softc *sc = tag->_cookie;
 	int err;
 
-	if (dmam->dm_mapsize != 0)
-		panic("UNLOAD FIRST, ASSHOLE\n");
-
 	err = bus_dmamap_load_raw(sc->g_dmat, dmam, segs, nsegs,
 	    size, flags);
 	if (err)
@@ -661,9 +649,6 @@ amdgart_dmamap_unload(bus_dma_tag_t tag, bus_dmamap_t dmam)
 {
 	struct amdgart_softc *sc = tag->_cookie;
 	int i;
-
-	if (dmam->dm_mapsize == 0)
-		panic("already unloaded, asshole\n");
 
 	for (i = 0; i < dmam->dm_nsegs; i++)
 		amdgart_iommu_unmap(sc, &dmam->dm_segs[i]);
