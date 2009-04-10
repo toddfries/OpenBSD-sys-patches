@@ -4303,34 +4303,32 @@ bnx_mgmt_init_exit:
 /*   0 for success, positive value for failure.                             */
 /****************************************************************************/
 int
-bnx_tx_encap(struct bnx_softc *sc, struct mbuf **m_head)
+bnx_tx_encap(struct bnx_softc *sc, struct mbuf *m)
 {
 	bus_dmamap_t		map;
 	struct tx_bd 		*txbd = NULL;
-	struct mbuf		*m0;
 	u_int16_t		vlan_tag = 0, flags = 0;
 	u_int16_t		chain_prod, prod;
 #ifdef BNX_DEBUG
 	u_int16_t		debug_prod;
 #endif
 	u_int32_t		addr, prod_bseq;
-	int			i, error, rc = 0;
+	int			i, error;
 
-	m0 = *m_head;
 	/* Transfer any checksum offload flags to the bd. */
-	if (m0->m_pkthdr.csum_flags) {
-		if (m0->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
+	if (m->m_pkthdr.csum_flags) {
+		if (m->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
 			flags |= TX_BD_FLAGS_IP_CKSUM;
-		if (m0->m_pkthdr.csum_flags &
+		if (m->m_pkthdr.csum_flags &
 		    (M_TCPV4_CSUM_OUT | M_UDPV4_CSUM_OUT))
 			flags |= TX_BD_FLAGS_TCP_UDP_CKSUM;
 	}
 
 #if NVLAN > 0
 	/* Transfer any VLAN tags to the bd. */
-	if (m0->m_flags & M_VLANTAG) {
+	if (m->m_flags & M_VLANTAG) {
 		flags |= TX_BD_FLAGS_VLAN_TAG;
-		vlan_tag = m0->m_pkthdr.ether_vtag;
+		vlan_tag = m->m_pkthdr.ether_vtag;
 	}
 #endif
 
@@ -4340,12 +4338,10 @@ bnx_tx_encap(struct bnx_softc *sc, struct mbuf **m_head)
 	map = sc->tx_mbuf_map[chain_prod];
 
 	/* Map the mbuf into our DMA address space. */
-	error = bus_dmamap_load_mbuf(sc->bnx_dmatag, map, m0, BUS_DMA_NOWAIT);
+	error = bus_dmamap_load_mbuf(sc->bnx_dmatag, map, m, BUS_DMA_NOWAIT);
 	if (error != 0) {
 		printf("%s: Error mapping mbuf into TX chain!\n",
 		    sc->bnx_dev.dv_xname);
-		m_freem(m0);
-		*m_head = NULL;
 		sc->tx_dma_map_failures++;
 		return (error);
 	}
@@ -4410,7 +4406,7 @@ bnx_tx_encap(struct bnx_softc *sc, struct mbuf **m_head)
 	 * and we don't want to unload the map before
 	 * all of the segments have been freed.
 	 */
-	sc->tx_mbuf_ptr[chain_prod] = m0;
+	sc->tx_mbuf_ptr[chain_prod] = m;
 	sc->used_tx_bd += map->dm_nsegs;
 
 	/* Update some debug statistics counters */
@@ -4426,7 +4422,7 @@ bnx_tx_encap(struct bnx_softc *sc, struct mbuf **m_head)
 	sc->tx_prod = prod;
 	sc->tx_prod_bseq = prod_bseq;
 
-	return (rc);
+	return (0);
 }
 
 /****************************************************************************/
