@@ -903,14 +903,15 @@ extent_free(struct extent *ex, u_long start, u_long size, int flags)
 
 #ifdef DIAGNOSTIC
 	/* Check arguments. */
-	if (ex == NULL)
+	if (ex == NULL) {
 		panic("extent_free: NULL extent");
 	if ((start < ex->ex_start) || (end > ex->ex_end)) {
 		extent_print(ex);
 		printf("extent_free: extent `%s', start 0x%lx, size 0x%lx\n",
 		    ex->ex_name, start, size);
-		panic("extent_free: extent `%s', region not within extent",
+		printf("extent_free: extent `%s', region not within extent",
 		    ex->ex_name);
+		return (0);
 	}
 	/* Check for an overflow. */
 	if (end < start) {
