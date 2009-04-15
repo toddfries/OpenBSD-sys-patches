@@ -1,7 +1,7 @@
-/*	$OpenBSD: iocvar.h,v 1.2 2009/04/12 17:56:58 miod Exp $	*/
+/*	$OpenBSD: hub.h,v 1.1 2009/04/15 18:45:41 miod Exp $	*/
 
 /*
- * Copyright (c) 2008 Miodrag Vallat.
+ * Copyright (c) 2009 Miodrag Vallat.
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -16,17 +16,27 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-struct ioc_attach_args {
-	const char	*iaa_name;
+/*
+ * IP27 specific registers
+ */
 
-	bus_space_tag_t	 iaa_memt;
-	bus_dma_tag_t	 iaa_dmat;
+/*
+ * HUB space (very incomplete)
+ */
 
-	bus_addr_t	 iaa_base;
-	int		 iaa_dev;
+#define	HUB_CPU_NUMBER			0x00000020
 
-	uint8_t		 iaa_enaddr[6];
-};
+#define	HUB_CPU0_PRESENT		0x00000040
+#define	HUB_CPU1_PRESENT		0x00000048
+#define	HUB_CPU0_ENABLED		0x00000050
+#define	HUB_CPU1_ENABLED		0x00000058
 
-void   *ioc_intr_establish(void *, u_long, int, int (*)(void *),
-	    void *, char *);
+#define	HUB_IR_CHANGE			0x00000090
+#define	HUB_IR_SET				0x100
+#define	HUB_IR_CLR				0x000
+#define	HUB_IR0				0x00000098
+#define	HUB_IR1				0x000000a0
+#define	HUB_CPU0_IMR0			0x000000a8
+#define	HUB_CPU0_IMR1			0x000000b0
+#define	HUB_CPU1_IMR0			0x000000b8
+#define	HUB_CPU1_IMR1			0x000000c0

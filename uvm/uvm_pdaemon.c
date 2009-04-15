@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pdaemon.c,v 1.38 2009/04/06 12:02:52 oga Exp $	*/
+/*	$OpenBSD: uvm_pdaemon.c,v 1.41 2009/04/15 12:43:07 oga Exp $	*/
 /*	$NetBSD: uvm_pdaemon.c,v 1.23 2000/08/20 10:24:14 bjh21 Exp $	*/
 
 /* 
@@ -110,8 +110,7 @@ static void		uvmpd_tune(void);
 void
 uvm_wait(const char *wmsg)
 {
-	int timo = 0;
-	int s = splbio();
+	int	timo = 0;
 
 	/*
 	 * check for page daemon going to sleep (waiting for itself)
@@ -143,12 +142,9 @@ uvm_wait(const char *wmsg)
 #endif
 	}
 
-	simple_lock(&uvm.pagedaemon_lock);
+	uvm_lock_fpageq();
 	wakeup(&uvm.pagedaemon);		/* wake the daemon! */
-	UVM_UNLOCK_AND_WAIT(&uvmexp.free, &uvm.pagedaemon_lock, FALSE, wmsg,
-	    timo);
-
-	splx(s);
+	msleep(&uvmexp.free, &uvm.fpageqlock, PVM | PNORELOCK, wmsg, timo);
 }
 
 
@@ -216,11 +212,10 @@ uvm_pageout(void *arg)
 	 */
 
 	for (;;) {
-		simple_lock(&uvm.pagedaemon_lock);
-
+		uvm_lock_fpageq();
 		UVMHIST_LOG(pdhist,"  <<SLEEPING>>",0,0,0,0);
-		UVM_UNLOCK_AND_WAIT(&uvm.pagedaemon,
-		    &uvm.pagedaemon_lock, FALSE, "pgdaemon", 0);
+		msleep(&uvm.pagedaemon, &uvm.fpageqlock, PVM | PNORELOCK,
+		    "pgdaemon", 0);
 		uvmexp.pdwoke++;
 		UVMHIST_LOG(pdhist,"  <<WOKE UP>>",0,0,0,0);
 
@@ -255,11 +250,12 @@ uvm_pageout(void *arg)
 		 * if there's any free memory to be had,
 		 * wake up any waiters.
 		 */
-
+		uvm_lock_fpageq();
 		if (uvmexp.free > uvmexp.reserve_kernel ||
 		    uvmexp.paging == 0) {
 			wakeup(&uvmexp.free);
 		}
+		uvm_unlock_fpageq();
 
 		/*
 		 * scan done.  unlock page queues (the only lock we are holding)
@@ -313,15 +309,10 @@ uvm_aiodone_daemon(void *arg)
 			splx(s);
 			bp = nbp;
 		}
-		if (free <= uvmexp.reserve_kernel) {
-			uvm_lock_fpageq();
-			wakeup(&uvm.pagedaemon);
-			uvm_unlock_fpageq();
-		} else {
-			simple_lock(&uvm.pagedaemon_lock);
-			wakeup(&uvmexp.free);
-			simple_unlock(&uvm.pagedaemon_lock);
-		}
+		uvm_lock_fpageq();
+		wakeup(free <= uvmexp.reserve_kernel ? &uvm.pagedaemon :
+		    &uvmexp.free);
+		uvm_unlock_fpageq();
 	}
 }
 
@@ -390,10 +381,7 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			 * update our copy of "free" and see if we've met
 			 * our target
 			 */
-
-			uvm_lock_fpageq();
 			free = uvmexp.free - BUFPAGES_DEFICIT;
-			uvm_unlock_fpageq();
 
 			if (free + uvmexp.paging >= uvmexp.freetarg << 2 ||
 			    dirtyreacts == UVMPD_NUMDIRTYREACTS) {
@@ -860,13 +848,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 					    &nextpg))
 						/* uobj died after release */
 						uobj = NULL;
-
-					/*
-					 * lock page queues here so that they're
-					 * always locked at the end of the loop.
-					 */
-
-					uvm_lock_pageq();
 				}
 			} else {	/* page was not released during I/O */
 				uvm_lock_pageq();
@@ -900,6 +881,9 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			else if (uobj)
 				simple_unlock(&uobj->vmobjlock);
 
+			if (nextpg && (nextpg->pg_flags & PQ_INACTIVE) == 0) {
+				nextpg = TAILQ_FIRST(pglst);	/* reload! */
+			}
 		} else {
 
 			/*
@@ -915,10 +899,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			 */
 
 			uvm_lock_pageq();
-		}
-
-		if (nextpg && (nextpg->pg_flags & PQ_INACTIVE) == 0) {
-			nextpg = TAILQ_FIRST(pglst);	/* reload! */
 		}
 	}
 	return (retval);

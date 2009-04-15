@@ -1,4 +1,4 @@
-/* $OpenBSD: dsdt.c,v 1.143 2009/03/13 19:01:03 marco Exp $ */
+/* $OpenBSD: dsdt.c,v 1.146 2009/04/10 16:05:10 jordan Exp $ */
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
  *
@@ -80,8 +80,6 @@ struct aml_value	*aml_evaltarget(struct aml_scope *scope,
 			    struct aml_value *res);
 int			aml_evalterm(struct aml_scope *scope,
 			    struct aml_value *raw, struct aml_value *dst);
-void			aml_gasio(struct acpi_softc *, int, uint64_t, uint64_t,
-			    int, int, int, void *, int);
 
 struct aml_opcode	*aml_findopcode(int);
 
@@ -170,8 +168,8 @@ struct aml_opcode aml_table[] = {
 	{ AMLOP_BREAKPOINT,	"BreakPoint",	"",     },
 
 	/* Arithmetic operations */
-	{ AMLOP_INCREMENT,	"Increment",	"t",	},
-	{ AMLOP_DECREMENT,	"Decrement",	"t",	},
+	{ AMLOP_INCREMENT,	"Increment",	"S",	},
+	{ AMLOP_DECREMENT,	"Decrement",	"S",	},
 	{ AMLOP_ADD,		"Add",		"iir",	},
 	{ AMLOP_SUBTRACT,	"Subtract",	"iir",	},
 	{ AMLOP_MULTIPLY,	"Multiply",	"iir",	},
@@ -2483,7 +2481,7 @@ aml_rwfield(struct aml_value *fld, int bpos, int blen, struct aml_value *val, in
 		aml_rwgas(ref1, fld->v_field.bitpos, fld->v_field.bitlen, val, mode, fld->v_field.flags);
 	}
 	else if (fld->v_field.type == AMLOP_FIELD) {
-		aml_rwgas(ref1, fld->v_field.bitpos, fld->v_field.bitlen, val, mode, fld->v_field.flags);
+		aml_rwgas(ref1, fld->v_field.bitpos+bpos, blen, val, mode, fld->v_field.flags);
 	}
 	else if (mode == ACPI_IOREAD) {
 		/* bufferfield:read */
