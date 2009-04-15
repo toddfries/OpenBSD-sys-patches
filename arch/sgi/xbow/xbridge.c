@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbridge.c,v 1.6 2009/04/12 17:55:20 miod Exp $	*/
+/*	$OpenBSD: xbridge.c,v 1.8 2009/04/15 18:45:41 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Miodrag Vallat.
@@ -109,6 +109,8 @@ void	xbridge_read_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
 	    uint8_t *, bus_size_t);
 void	xbridge_write_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
 	    const uint8_t *, bus_size_t);
+int	xbridge_space_map_short(bus_space_tag_t, bus_addr_t, bus_size_t, int,
+	    bus_space_handle_t *);
 
 bus_addr_t xbridge_pa_to_device(paddr_t);
 paddr_t	xbridge_device_to_pa(bus_addr_t);
@@ -184,26 +186,39 @@ xbridge_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc_io_bus_space == NULL)
 		goto fail2;
 
-	bcopy(xaa->xaa_long_tag, sc->sc_mem_bus_space,
-	    sizeof(*sc->sc_mem_bus_space));
-	sc->sc_mem_bus_space->bus_base = xaa->xaa_long_tag->bus_base +
-	    BRIDGE_PCI_MEM_SPACE_BASE;
+	if (sys_config.system_type == SGI_OCTANE) {
+		bcopy(xaa->xaa_long_tag, sc->sc_mem_bus_space,
+		    sizeof(*sc->sc_mem_bus_space));
+		sc->sc_mem_bus_space->bus_base += BRIDGE_PCI_MEM_SPACE_BASE;
 
-	if (sc->sc_rev >= 4) {
-		/* Unrestricted I/O mappings in the large window */
-		bcopy(xaa->xaa_long_tag, sc->sc_io_bus_space,
-		    sizeof(*sc->sc_io_bus_space));
-		sc->sc_io_bus_space->bus_base +=
-		    BRIDGE_PCI_IO_SPACE_BASE;
+		if (sc->sc_rev >= 4) {
+			/* Unrestricted I/O mappings in the large window */
+			bcopy(xaa->xaa_long_tag, sc->sc_io_bus_space,
+			    sizeof(*sc->sc_io_bus_space));
+			sc->sc_io_bus_space->bus_base +=
+			    BRIDGE_PCI_IO_SPACE_BASE;
+		} else {
+			/* Programmable I/O mappings in the small window */
+			bcopy(xaa->xaa_short_tag, sc->sc_io_bus_space,
+			    sizeof(*sc->sc_io_bus_space));
+		}
 	} else {
-		/* Programmable I/O mappings in the small window */
+		/* Limited memory mappings in the small window */
+		bcopy(xaa->xaa_short_tag, sc->sc_mem_bus_space,
+		    sizeof(*sc->sc_mem_bus_space));
+		sc->sc_mem_bus_space->bus_private = sc;
+		sc->sc_mem_bus_space->_space_map = xbridge_space_map_short;
+
+		/* Limited I/O mappings in the small window */
 		bcopy(xaa->xaa_short_tag, sc->sc_io_bus_space,
 		    sizeof(*sc->sc_io_bus_space));
+		sc->sc_io_bus_space->bus_private = sc;
+		sc->sc_io_bus_space->_space_map = xbridge_space_map_short;
 	}
 
 	sc->sc_io_bus_space->_space_read_1 = xbridge_read_1;
-	sc->sc_io_bus_space->_space_read_2 = xbridge_read_2;
 	sc->sc_io_bus_space->_space_write_1 = xbridge_write_1;
+	sc->sc_io_bus_space->_space_read_2 = xbridge_read_2;
 	sc->sc_io_bus_space->_space_write_2 = xbridge_write_2;
 	sc->sc_io_bus_space->_space_read_raw_2 = xbridge_read_raw_2;
 	sc->sc_io_bus_space->_space_write_raw_2 = xbridge_write_raw_2;
@@ -213,8 +228,8 @@ xbridge_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_io_bus_space->_space_write_raw_8 = xbridge_write_raw_8;
 
 	sc->sc_mem_bus_space->_space_read_1 = xbridge_read_1;
-	sc->sc_mem_bus_space->_space_read_2 = xbridge_read_2;
 	sc->sc_mem_bus_space->_space_write_1 = xbridge_write_1;
+	sc->sc_mem_bus_space->_space_read_2 = xbridge_read_2;
 	sc->sc_mem_bus_space->_space_write_2 = xbridge_write_2;
 	sc->sc_mem_bus_space->_space_read_raw_2 = xbridge_read_raw_2;
 	sc->sc_mem_bus_space->_space_write_raw_2 = xbridge_write_raw_2;
@@ -249,13 +264,19 @@ xbridge_attach(struct device *parent, struct device *self, void *aux)
 		    (xbow_intr_widget << 20) | (1 << 17));
 #if 0
 		bus_space_write_4(sc->sc_iot, sc->sc_regh, 0x284,
-		    0xddcc9988);
+		    0x99889988 | 0x44440000);
 		bus_space_write_4(sc->sc_iot, sc->sc_regh, 0x28c,
-		    0xddcc9988);
+		    0x99889988 | 0x44440000);
 #endif
 	} else {
 		bus_space_write_4(sc->sc_iot, sc->sc_regh, BRIDGE_DIR_MAP,
 		    xbow_intr_widget << 20);
+#if 0
+		bus_space_write_4(sc->sc_iot, sc->sc_regh, 0x284,
+		    0xba98ba98 | 0x44440000);
+		bus_space_write_4(sc->sc_iot, sc->sc_regh, 0x28c,
+		    0xba98ba98 | 0x44440000);
+#endif
 	}
 
 	(void)bus_space_read_4(sc->sc_iot, sc->sc_regh, WIDGET_TFLUSH);
@@ -268,10 +289,12 @@ xbridge_attach(struct device *parent, struct device *self, void *aux)
 	bus_space_write_4(sc->sc_iot, sc->sc_regh, BRIDGE_INT_MODE, 0);
 	bus_space_write_4(sc->sc_iot, sc->sc_regh, BRIDGE_INT_DEV, 0);
 	bus_space_write_4(sc->sc_iot, sc->sc_regh, WIDGET_INTDEST_ADDR_UPPER,
-	    xbow_intr_widget << 16);
+	    (xbow_intr_widget_register  >> 32) | (xbow_intr_widget << 16));
 	bus_space_write_4(sc->sc_iot, sc->sc_regh, WIDGET_INTDEST_ADDR_LOWER,
-	    xbow_intr_widget_register);
+	    (uint32_t)xbow_intr_widget_register);
+
 	(void)bus_space_read_4(sc->sc_iot, sc->sc_regh, WIDGET_TFLUSH);
+
 	for (i = 0; i < BRIDGE_NINTRS; i++)
 		sc->sc_intrbit[i] = -1;
 
@@ -658,11 +681,6 @@ xbridge_intr_handler(void *v)
 	if ((rc = (*xi->xi_func)(xi->xi_arg)) != 0)
 		xi->xi_count.ec_count++;
 
-#if 0
-	/* Clear PCI interrupts. */
-	bus_space_write_4(sc->sc_iot, sc->sc_regh, BRIDGE_ICR, 1 << 0);
-#endif
-
 	return rc;
 }
 
@@ -769,29 +787,47 @@ xbridge_write_raw_8(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
 }
 
 /*
+ * On IP27, we can not use the default xbow space_map_short because
+ * of the games we play with bus addresses.
+ */
+int
+xbridge_space_map_short(bus_space_tag_t t, bus_addr_t offs, bus_size_t size,
+    int cacheable, bus_space_handle_t *bshp)
+{
+	struct xbridge_softc *sc = (struct xbridge_softc *)t->bus_private;
+	bus_addr_t bpa;
+
+	bpa = t->bus_base - (sc->sc_widget << 24) + offs;
+
+	/* check that this neither underflows nor overflows the window */
+	if (((bpa + size - 1) >> 24) != (t->bus_base >> 24) ||
+	    (bpa >> 24) != (t->bus_base >> 24))
+		return (EINVAL);
+
+	*bshp = bpa;
+	return 0;
+}
+
+/*
  * bus_dma helpers
  */
 
 bus_addr_t
 xbridge_pa_to_device(paddr_t pa)
 {
-	switch (sys_config.system_type) {
-	case SGI_OCTANE:
-		/*
-		 * On Octane, direct DMA is not possible on memory
-		 * above 2GB.  Until _dmamem_alloc() is modified to
-		 * make sure it doesn't use memory above this limit,
-		 * add a check there.  Otherwise I'll never come back
-		 * and fix _dmamem_alloc().
-		 */
-		if (pa > IP30_MEMORY_BASE + BRIDGE_DMA_DIRECT_LENGTH)
-			panic("dma above 2GB");
+	/*
+	 * On the Octane, we try to use the direct DMA window whenever
+	 * possible; this allows hardware limited to 32 bit DMA addresses
+	 * to work.
+	 */
 
-		return (pa - IP30_MEMORY_BASE) + BRIDGE_DMA_DIRECT_BASE;
-
-	case SGI_O200:
-		break;	/* XXX likely wrong */
+	if (sys_config.system_type == SGI_OCTANE) {
+		pa -= IP30_MEMORY_BASE;
+		if (pa < BRIDGE_DMA_DIRECT_LENGTH)
+			return pa + BRIDGE_DMA_DIRECT_BASE;
 	}
+
+	pa += ((uint64_t)xbow_intr_widget << 60) | (1UL << 56);
 
 	return pa;
 }
@@ -799,13 +835,14 @@ xbridge_pa_to_device(paddr_t pa)
 paddr_t
 xbridge_device_to_pa(bus_addr_t addr)
 {
-	switch (sys_config.system_type) {
-	case SGI_OCTANE:
-		return (addr - BRIDGE_DMA_DIRECT_BASE) + IP30_MEMORY_BASE;
+	paddr_t pa;
 
-	case SGI_O200:
-		break;
-	}
+	pa = addr & ((1UL << 56) - 1);
+	if (sys_config.system_type == SGI_OCTANE && pa == (paddr_t)addr)
+		pa = addr - BRIDGE_DMA_DIRECT_BASE;
 
-	return addr;
+	if (sys_config.system_type == SGI_OCTANE)
+		pa += IP30_MEMORY_BASE;
+
+	return pa;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioc.c,v 1.3 2009/04/12 17:56:58 miod Exp $	*/
+/*	$OpenBSD: ioc.c,v 1.5 2009/04/15 18:41:32 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Joel Sing.
@@ -27,6 +27,7 @@
 #include <sys/device.h>
 #include <sys/malloc.h>
 
+#include <mips64/archtype.h>
 #include <machine/autoconf.h>
 #include <machine/bus.h>
 #include <machine/cpu.h>
@@ -41,7 +42,9 @@
 #include <dev/onewire/onewirereg.h>
 #include <dev/onewire/onewirevar.h>
 
+#if 0
 #include <sgi/dev/if_efreg.h>
+#endif
 #include <sgi/dev/owmacvar.h>
 
 #include <sgi/xbow/xbow.h>
@@ -180,7 +183,21 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 		printf(": failed to map interrupt!\n");
 		goto unmap;
 	}
-	sih = eih + 2;	/* XXX ACK GAG BARF */
+
+	/*
+	 * The second vector source seems to be the next unused PCI
+	 * slot.
+	 * On Octane systems, the on-board IOC3 is device #2 and
+	 * immediately followed by the RAD1 audio, device #3, thus
+	 * the next empty slot is #4.
+	 * XXX Is this still true with the Octane PCI cardcage?
+	 * On Origin systems, there is no RAD1 audio, slot #3 is
+	 * empty (available PCI slots are #5-#7).
+	 */
+	if (sys_config.system_type == SGI_OCTANE)
+		sih = eih + 2;	/* XXX ACK GAG BARF */
+	else
+		sih = eih + 1;	/* XXX ACK GAG BARF */
 
 	/*
 	 * Register the superio interrupt.
@@ -191,6 +208,7 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 		printf(": failed to establish superio interrupt!\n");
 		goto unmap;
 	}
+	printf(": superio %s", pci_intr_string(sc->sc_pc, sih));
 
 	/*
 	 * Register the ethernet interrupt.
@@ -198,12 +216,11 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_eih = pci_intr_establish(sc->sc_pc, eih, IPL_NET,
 	    ioc_intr_ethernet, sc, self->dv_xname);
 	if (sc->sc_eih == NULL) {
-		printf(": failed to establish ethernet interrupt!\n");
+		printf("\n%s: failed to establish ethernet interrupt!\n",
+		    self->dv_xname);
 		goto unregister;
 	}
-
-	printf(": superio %s", pci_intr_string(sc->sc_pc, sih));
-	printf(", ethernet %s", pci_intr_string(sc->sc_pc, eih));
+	printf(", ethernet %s\n", pci_intr_string(sc->sc_pc, eih));
 
 	/*
 	 * Build a suitable bus_space_handle by rebasing the xbridge
@@ -217,7 +234,7 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_mem_bus_space = malloc(sizeof (*sc->sc_mem_bus_space),
 	    M_DEVBUF, M_NOWAIT);
 	if (sc->sc_mem_bus_space == NULL) {
-		printf(": can't allocate bus_space\n");
+		printf("%s: can't allocate bus_space\n", self->dv_xname);
 		goto unregister2;
 	}
 
@@ -227,6 +244,10 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_mem_bus_space->_space_read_2 = xbow_read_2;
 	sc->sc_mem_bus_space->_space_write_1 = xbow_write_1;
 	sc->sc_mem_bus_space->_space_write_2 = xbow_write_2;
+
+	/* XXX undo IP27 xbridge weird mapping */
+	if (sys_config.system_type != SGI_OCTANE)
+		sc->sc_mem_bus_space->_space_map = xbow_space_map_short;
 
 	sc->sc_memt = sc->sc_mem_bus_space;
 	sc->sc_memh = memh;
@@ -439,16 +460,17 @@ iocow_pulse(struct ioc_softc *sc, int pulse, int data)
 /*
  * List of interrupt bits to enable for each device.
  *
- * We intentionnaly mask the RX high water bits, as they apparently never
- * clear on some machines regardless of what we do.
+ * For the serial ports, we only enable the passthrough interrupt and
+ * let com(4) tinker with the appropriate registers, instead of adding
+ * an unnecessary layer there.
  */
 const uint32_t ioc_intrbits[IOC_NDEVS] = {
-	0x000001ff & ~0x00000004,	/* serial A */
-	0x0003fe00 & ~0x00000800,	/* serial B */
-	0x003c0000,			/* parallel port */
-	0x00400000,			/* PS/2 port */
-	0x08000000,			/* rtc */
-	0x00000000			/* Ethernet (handled differently) */
+	0x00000040,	/* serial A */
+	0x00008000,	/* serial B */
+	0x00040000,	/* parallel port */
+	0x00400000,	/* PS/2 port */
+	0x08000000,	/* rtc */
+	0x00000000	/* Ethernet (handled differently) */
 };
 
 void *
@@ -515,6 +537,7 @@ ioc_intr_superio(void *v)
 int
 ioc_intr_ethernet(void *v)
 {
+#if 0
 	struct ioc_softc *sc = (struct ioc_softc *)v;
 	uint32_t stat;
 
@@ -527,6 +550,9 @@ ioc_intr_ethernet(void *v)
 	bus_space_write_4(sc->sc_memt, sc->sc_memh, EF_INTR_STATUS, stat);
 
 	return 1;
+#else
+	return 0;
+#endif
 }
 
 void

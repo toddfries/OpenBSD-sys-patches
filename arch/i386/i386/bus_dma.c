@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.11 2009/04/09 03:08:36 dlg Exp $	*/
+/*	$OpenBSD: bus_dma.c,v 1.15 2009/04/15 03:35:26 oga Exp $	*/
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -276,13 +276,20 @@ _bus_dmamap_load_raw(bus_dma_tag_t t, bus_dmamap_t map, bus_dma_segment_t *segs,
     int nsegs, bus_size_t size, int flags)
 {
 	bus_addr_t paddr, baddr, bmask, lastaddr = 0;
-	bus_size_t plen, sgsize;
+	bus_size_t plen, sgsize, mapsize;
 	int first = 1;
 	int i, seg = 0;
+
+	/*
+	 * Make sure that on error condition we return "no valid mappings".
+	 */
+	map->dm_mapsize = 0;
+	map->dm_nsegs = 0;
 
 	if (nsegs > map->_dm_segcnt || size > map->_dm_size)
 		return (EINVAL);
 
+	mapsize = size;
 	bmask  = ~(map->_dm_boundary - 1);
 
 	for (i = 0; i < nsegs && size > 0; i++) {
@@ -338,6 +345,7 @@ _bus_dmamap_load_raw(bus_dma_tag_t t, bus_dmamap_t map, bus_dma_segment_t *segs,
 		}
 	}
 
+	map->dm_mapsize = mapsize;
 	map->dm_nsegs = seg + 1;
 	return (0);
 }
@@ -588,7 +596,7 @@ _bus_dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	paddr_t curaddr, lastaddr;
 	struct vm_page *m;
 	struct pglist mlist;
-	int curseg, error;
+	int curseg, error, plaflag;
 
 	/* Always round the size. */
 	size = round_page(size);
@@ -598,11 +606,13 @@ _bus_dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	 * Allocate pages from the VM system.
 	 * For non-ISA mappings first try higher memory segments.
 	 */
+	plaflag = flags & BUS_DMA_NOWAIT ? UVM_PLA_NOWAIT : UVM_PLA_WAITOK;
+
 	if (high <= ISA_DMA_BOUNCE_THRESHOLD || (error = uvm_pglistalloc(size,
 	    round_page(ISA_DMA_BOUNCE_THRESHOLD), high, alignment, boundary,
-	    &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0)))
+	    &mlist, nsegs, plaflag)))
 		error = uvm_pglistalloc(size, low, high, alignment, boundary,
-		    &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
+		    &mlist, nsegs, plaflag);
 	if (error)
 		return (error);
 
