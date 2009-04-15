@@ -28,6 +28,7 @@ file	arch/amd64/amd64/lock_machdep.c		multiprocessor
 file	arch/amd64/amd64/intr.c
 file	arch/amd64/amd64/bus_space.c
 file	arch/amd64/amd64/bus_dma.c
+file	arch/amd64/amd64/sg_dma.c
 
 file	arch/amd64/amd64/mptramp.S		multiprocessor
 file	arch/amd64/amd64/ipifuncs.c		multiprocessor
