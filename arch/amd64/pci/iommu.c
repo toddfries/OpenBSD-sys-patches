@@ -99,7 +99,7 @@
 #define	IOMMU_SIZE		512		/* size in MB */
 #define	IOMMU_ALIGN		IOMMU_SIZE
 
-int amdgart_enable = 1;
+int amdgart_enable = 0;
 
 struct amdgart_softc {
 	pci_chipset_tag_t	 g_pc;
@@ -125,15 +125,15 @@ void	amdgart_invalidate_wait(struct amdgart_softc *);
 
 struct bus_dma_tag amdgart_bus_dma_tag = {
 	NULL,			/* _may_bounce */
-	_sg_dmamap_create,
-	_sg_dmamap_destroy,
-	_sg_dmamap_load,
-	_sg_dmamap_load_mbuf,
-	_sg_dmamap_load_uio,
-	_sg_dmamap_load_raw,
-	_sg_dmamap_unload,
+	sg_dmamap_create,
+	sg_dmamap_destroy,
+	sg_dmamap_load,
+	sg_dmamap_load_mbuf,
+	sg_dmamap_load_uio,
+	sg_dmamap_load_raw,
+	sg_dmamap_unload,
 	NULL,
-	_sg_dmamem_alloc,
+	sg_dmamem_alloc,
 	_bus_dmamem_free,
 	_bus_dmamem_map,
 	_bus_dmamem_unmap,
@@ -364,7 +364,7 @@ amdgart_probe(struct pcibus_attach_args *pba)
 	sc->g_pte = pte;
 	sc->g_dmat = pba->pba_dmat;
 
-	if ((cookie = _sg_dmatag_init("iommu", sc, sc->g_pa, mapsize,
+	if ((cookie = sg_dmatag_init("iommu", sc, sc->g_pa, mapsize,
 	    amdgart_bind_page, amdgart_unbind_page,
 	    amdgart_invalidate)) == NULL) {
 		printf("\nGART: didn't get dma cookie\n");
@@ -441,7 +441,7 @@ nofreeseg:
 	if (scrib != NULL)
 		free(scrib, M_DEVBUF);
 	if (cookie != NULL)
-		_sg_dmatag_destroy(cookie);
+		sg_dmatag_destroy(cookie);
 	if (sc != NULL)
 		free(sc, M_DEVBUF);
 }

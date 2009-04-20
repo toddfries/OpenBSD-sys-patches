@@ -449,6 +449,7 @@ void	bus_space_barrier(bus_space_tag_t, bus_space_handle_t,
 #define	BUS_DMA_WRITE		0x0400	/* mapping is memory -> device only */
 #define	BUS_DMA_NOCACHE		0x0800	/* map memory uncached */
 #define	BUS_DMA_ZERO		0x1000	/* zero memory in dmamem_alloc */
+#define	BUS_DMA_SG		0x2000	/* Internal. memory is for SG map */
 
 /* Forwards needed by prototypes below. */
 struct mbuf;
@@ -625,27 +626,27 @@ struct sg_cookie {
 	void		(*flush_tlb)(void *);
 };
 
-struct sg_cookie	*_sg_dmatag_init(char *, void *, bus_addr_t, bus_size_t,
+struct sg_cookie	*sg_dmatag_init(char *, void *, bus_addr_t, bus_size_t,
 			    void (*)(void *, vaddr_t, paddr_t, int),
 			    void (*)(void *, vaddr_t), void (*)(void *));
-void	_sg_dmatag_destroy(struct sg_cookie *);
-int	_sg_dmamap_create(bus_dma_tag_t, bus_size_t, int, bus_size_t,
+void	sg_dmatag_destroy(struct sg_cookie *);
+int	sg_dmamap_create(bus_dma_tag_t, bus_size_t, int, bus_size_t,
 	    bus_size_t, int, bus_dmamap_t *);
-void	_sg_dmamap_destroy(bus_dma_tag_t, bus_dmamap_t);
-void	_sg_bus_dma_set_alignment(bus_dma_tag_t, bus_dmamap_t, u_long);
-int	_sg_dmamap_load(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
+void	sg_dmamap_destroy(bus_dma_tag_t, bus_dmamap_t);
+void	sg_dmamap_set_alignment(bus_dma_tag_t, bus_dmamap_t, u_long);
+int	sg_dmamap_load(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
 	    struct proc *, int);
-int	_sg_dmamap_load_mbuf(bus_dma_tag_t, bus_dmamap_t,
+int	sg_dmamap_load_mbuf(bus_dma_tag_t, bus_dmamap_t,
 	    struct mbuf *, int);
-int	_sg_dmamap_load_uio(bus_dma_tag_t, bus_dmamap_t, struct uio *, int);
-int	_sg_dmamap_load_raw(bus_dma_tag_t, bus_dmamap_t, bus_dma_segment_t *,
+int	sg_dmamap_load_uio(bus_dma_tag_t, bus_dmamap_t, struct uio *, int);
+int	sg_dmamap_load_raw(bus_dma_tag_t, bus_dmamap_t, bus_dma_segment_t *,
 	    int, bus_size_t, int);
-void	_sg_dmamap_unload(bus_dma_tag_t, bus_dmamap_t);
-int	_sg_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
+void	sg_dmamap_unload(bus_dma_tag_t, bus_dmamap_t);
+int	sg_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
 	    struct proc *, int, int *, int);
-int	_sg_dmamap_load_physarray(bus_dma_tag_t, bus_dmamap_t, paddr_t *,
+int	sg_dmamap_load_physarray(bus_dma_tag_t, bus_dmamap_t, paddr_t *,
 	    int, int, int *, int);
-int	_sg_dmamem_alloc(bus_dma_tag_t, bus_size_t, bus_size_t, bus_size_t,
+int	sg_dmamem_alloc(bus_dma_tag_t, bus_size_t, bus_size_t, bus_size_t,
 	    bus_dma_segment_t *, int, int *, int);
 
 /*      
