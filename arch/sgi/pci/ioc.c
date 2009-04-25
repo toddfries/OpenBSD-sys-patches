@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioc.c,v 1.9 2009/04/19 18:36:07 miod Exp $	*/
+/*	$OpenBSD: ioc.c,v 1.11 2009/04/25 20:37:30 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Joel Sing.
@@ -93,6 +93,7 @@ struct cfdriver ioc_cd = {
 
 int	ioc_intr_dispatch(struct ioc_softc *, int);
 int	ioc_intr_ethernet(void *);
+int	ioc_intr_shared(void *);
 int	ioc_intr_superio(void *);
 
 int	iocow_reset(void *);
@@ -141,7 +142,7 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 	bus_size_t memsize;
 	uint32_t data;
 	int dev;
-	int dual_irq, has_ethernet, has_ps2, has_serial;
+	int dual_irq, shared_handler, has_ethernet, has_ps2, has_serial;
 
 	if (pci_mapreg_map(pa, PCI_MAPREG_START, PCI_MAPREG_TYPE_MEM, 0,
 	    &memt, &memh, NULL, &memsize, 0)) {
@@ -206,9 +207,14 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 
 	printf("%s: ", self->dv_xname);
 
-	dual_irq = 0;
+	dual_irq = shared_handler = 0;
 	has_ethernet = has_ps2 = has_serial = 0;
 	if (sc->sc_owserial != NULL) {
+		if (strncmp(sc->sc_owserial->sc_product, "030-0873-", 9) == 0) {
+			/* MENET board */
+			has_ethernet = has_serial = 1;
+			shared_handler = 1;
+		} else
 		if (strncmp(sc->sc_owserial->sc_product, "030-0891-", 9) == 0) {
 			/* IP30 on-board IOC3 */
 			has_ethernet = has_ps2 = has_serial = 1;
@@ -217,9 +223,14 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 		if (strncmp(sc->sc_owserial->sc_product, "030-1155-", 9) == 0) {
 			/* CADDuo board */
 			has_ps2 = 1;
+			/*
+			 * XXX This card supposedly has the Ethernet part, too.
+			 */
+			/* has_ethernet = 1; shared_handler = 1; */
 		} else
 		if (strncmp(sc->sc_owserial->sc_product, "030-1657-", 9) == 0 ||
 		    strncmp(sc->sc_owserial->sc_product, "030-1664-", 9) == 0) {
+			/* PCI_SIO_UFC dual serial board */
 			has_serial = 1;
 		} else {
 			goto unknown;
@@ -234,6 +245,12 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 		    sys_config.system_type == SGI_O300) {
 			has_ethernet = has_ps2 = has_serial = 1;
 			dual_irq = 1;
+			/*
+			 * XXX On IP35 class machines, there are no
+			 * XXX Number-In-a-Can chips to tell us the
+			 * XXX Ethernet address, we need to query
+			 * XXX the L1 controller.
+			 */
 		} else {
 unknown:
 			/*
@@ -286,9 +303,12 @@ unknown:
 	 * is empty (available PCI slots are on a different bridge).
 	 */
 	if (dual_irq) {
-		for (dev = pa->pa_device + 1;
+		for (dev = 0;
 		    dev < pci_bus_maxdevs(pa->pa_pc, pa->pa_bus); dev++) {
 			pcitag_t tag;
+
+			if (dev == pa->pa_device)
+				continue;
 
 			tag = pci_make_tag(pa->pa_pc, pa->pa_bus, dev, 0);
 			if (pci_conf_read(pa->pa_pc, tag, PCI_ID_REG) ==
@@ -306,9 +326,17 @@ unknown:
 			}
 		}
 
-		printf("could not discover superio interrupt!\n");
-		goto unmap;
+		/*
+		 * There are no empty slots, thus we can't steal an
+		 * interrupt. I don't know how IOC3 behaves in this
+		 * situation, but it's probably safe to revert to
+		 * a shared, single interrupt.
+		 */
+		shared_handler = 1;
+		dual_irq = 0;
+	}
 
+	if (dual_irq) {
 establish:
 		/*
 		 * Register the second (superio) interrupt.
@@ -328,7 +356,8 @@ establish:
 	 * interrupt.
 	 */
 	sc->sc_ih1 = pci_intr_establish(sc->sc_pc, ih1, IPL_NET,
-	    ioc_intr_ethernet, sc, self->dv_xname);
+	    shared_handler ? ioc_intr_shared : ioc_intr_ethernet,
+	    sc, self->dv_xname);
 	if (sc->sc_ih1 == NULL) {
 		printf("\n%s: failed to establish %sinterrupt!\n",
 		    self->dv_xname, dual_irq ? "ethernet " : "");
@@ -352,6 +381,8 @@ establish:
 	/*
 	 * Attach other sub-devices.
 	 */
+
+	/* XXX need to limit search depending upon has_xxx values */
 	config_search(ioc_search_mundane, self, aux);
 
 	return;
@@ -644,6 +675,12 @@ ioc_intr_ethernet(void *v)
 
 	/* This interrupt source is not shared between several devices. */
 	return ioc_intr_dispatch(sc, IOCDEV_EF);
+}
+
+int
+ioc_intr_shared(void *v)
+{
+	return ioc_intr_superio(v) | ioc_intr_ethernet(v);
 }
 
 int

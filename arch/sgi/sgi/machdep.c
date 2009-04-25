@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.62 2009/04/19 12:52:33 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.64 2009/04/25 20:38:32 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -156,10 +156,12 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	char *cp;
 	int i;
 	caddr_t sd;
+	u_int cputype;
 	extern char start[], edata[], end[];
 	extern char tlb_miss_tramp[], e_tlb_miss_tramp[];
 	extern char xtlb_miss_tramp[], e_xtlb_miss_tramp[];
 	extern char exception[], e_exception[];
+	extern char *hw_vendor, *hw_prod;
 
 	/*
 	 * Make sure we can access the extended address space.
@@ -223,11 +225,13 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	/*
 	 * Determine system type and set up configuration record data.
 	 */
+	hw_vendor = "SGI";
 	switch (sys_config.system_type) {
 #if defined(TGT_O2)
 	case SGI_O2:
 		bios_printf("Found SGI-IP32, setting up.\n");
-		strlcpy(cpu_model, "SGI-O2 (IP32)", sizeof(cpu_model));
+		hw_prod = "O2";
+		strlcpy(cpu_model, "IP32", sizeof(cpu_model));
 		ip32_setup();
 
 		sys_config.cpu[0].clock = 180000000;  /* Reasonable default */
@@ -241,14 +245,17 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 #if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
 	case SGI_O200:
 		bios_printf("Found SGI-IP27, setting up.\n");
-		strlcpy(cpu_model, "SGI-Origin200 (IP27)", sizeof(cpu_model));
+		hw_prod = "Origin 200";
+		strlcpy(cpu_model, "IP27", sizeof(cpu_model));
 		ip27_setup();
 
 		break;
 
 	case SGI_O300:
 		bios_printf("Found SGI-IP35, setting up.\n");
-		strlcpy(cpu_model, "SGI-Origin300 (IP35)", sizeof(cpu_model));
+		hw_prod = "Origin 300";
+		/* IP27 is intentional, we use the same kernel */
+		strlcpy(cpu_model, "IP27", sizeof(cpu_model));
 		ip27_setup();
 
 		break;
@@ -257,7 +264,8 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 #if defined(TGT_OCTANE)
 	case SGI_OCTANE:
 		bios_printf("Found SGI-IP30, setting up.\n");
-		strlcpy(cpu_model, "SGI-Octane (IP30)", sizeof cpu_model);
+		hw_prod = "Octane";
+		strlcpy(cpu_model, "IP30", sizeof(cpu_model));
 		ip30_setup();
 
 		sys_config.cpu[0].clock = 175000000;  /* Reasonable default */
@@ -415,6 +423,35 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	case MIPS_R10000:
 	case MIPS_R12000:
 	case MIPS_R14000:
+		cputype = MIPS_R10000;
+		break;
+	case MIPS_R5000:
+	case MIPS_RM7000:
+	case MIPS_RM52X0:
+	case MIPS_RM9000:
+		cputype = MIPS_R5000;
+		break;
+	default:
+		/*
+		 * If we can't identify the cpu type, it must be
+		 * r10k-compatible on Octane and Origin families, and
+		 * it is likely to be r5k-compatible on O2.
+		 */
+		switch (sys_config.system_type) {
+		case SGI_O2:
+			cputype = MIPS_R5000;
+			break;
+		default:
+		case SGI_OCTANE:
+		case SGI_O200:
+		case SGI_O300:
+			cputype = MIPS_R10000;
+			break;
+		}
+		break;
+	}
+	switch (cputype) {
+	case MIPS_R10000:
 		Mips10k_ConfigCache();
 		sys_config._SyncCache = Mips10k_SyncCache;
 		sys_config._InvalidateICache = Mips10k_InvalidateICache;
@@ -424,8 +461,8 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 		sys_config._IOSyncDCache = Mips10k_IOSyncDCache;
 		sys_config._HitInvalidateDCache = Mips10k_HitInvalidateDCache;
 		break;
-
 	default:
+	case MIPS_R5000:
 		Mips5k_ConfigCache();
 		sys_config._SyncCache = Mips5k_SyncCache;
 		sys_config._InvalidateICache = Mips5k_InvalidateICache;
