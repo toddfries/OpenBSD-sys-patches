@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pglist.c,v 1.25 2009/03/20 15:19:04 oga Exp $	*/
+/*	$OpenBSD: uvm_pglist.c,v 1.27 2009/04/20 00:30:18 oga Exp $	*/
 /*	$NetBSD: uvm_pglist.c,v 1.13 2001/02/18 21:19:08 chs Exp $	*/
 
 /*-
@@ -129,7 +129,6 @@ uvm_pglistalloc_simple(psize_t size, paddr_t low, paddr_t high,
 			uvmexp.free--;
 			if (pg->pg_flags & PG_ZERO)
 				uvmexp.zeropages--;
-			pg->pg_flags = PG_CLEAN;
 			pg->uobject = NULL;
 			pg->uanon = NULL;
 			pg->pg_version++;
@@ -184,7 +183,7 @@ out:
 
 int
 uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
-    paddr_t boundary, struct pglist *rlist, int nsegs, int waitok)
+    paddr_t boundary, struct pglist *rlist, int nsegs, int flags)
 {
 	int psi;
 	struct vm_page *pgs;
@@ -201,6 +200,11 @@ uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
 
 	KASSERT((alignment & (alignment - 1)) == 0);
 	KASSERT((boundary & (boundary - 1)) == 0);
+	/*
+	 * This argument is always ignored for now, but ensure drivers always
+	 * show intention.
+	 */
+	KASSERT(!(flags & UVM_PLA_WAITOK) ^ !(flags & UVM_PLA_NOWAIT));
 	
 	/*
 	 * Our allocations are always page granularity, so our alignment
@@ -220,8 +224,10 @@ uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
 	 * no need to be smart.
 	 */
 	if ((nsegs >= size / PAGE_SIZE) && (alignment == PAGE_SIZE) &&
-	    (boundary == 0))
-		return (uvm_pglistalloc_simple(size, low, high, rlist));
+	    (boundary == 0)) {
+		error = uvm_pglistalloc_simple(size, low, high, rlist);
+		goto done;
+	}
 
 	if (boundary != 0 && boundary < size)
 		return (EINVAL);
@@ -334,7 +340,6 @@ found:
 		uvmexp.free--;
 		if (m->pg_flags & PG_ZERO)
 			uvmexp.zeropages--;
-		m->pg_flags = PG_CLEAN;
 		m->uobject = NULL;
 		m->uanon = NULL;
 		m->pg_version++;
@@ -357,6 +362,17 @@ out:
 	}
 
 	uvm_unlock_fpageq();
+
+done: 
+	/* No locking needed here, pages are not on any queue. */
+	if (error == 0) {
+		TAILQ_FOREACH(m, rlist, pageq) {
+			if (flags & UVM_PLA_ZERO &&
+			    (m->pg_flags & PG_ZERO) == 0)
+				uvm_pagezero(m);
+			m->pg_flags = PG_CLEAN;
+		}
+	}
 
 	return (error);
 }

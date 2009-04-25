@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbridge.c,v 1.5 2009/03/30 09:41:00 kettenis Exp $	*/
+/*	$OpenBSD: xbridge.c,v 1.12 2009/04/19 18:37:31 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Miodrag Vallat.
@@ -36,6 +36,7 @@
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
+#include <dev/pci/pcidevs.h>
 
 #include <mips64/archtype.h>
 #include <sgi/xbow/xbow.h>
@@ -59,6 +60,7 @@ struct xbridge_softc {
 
 	struct mips_bus_space *sc_mem_bus_space;
 	struct mips_bus_space *sc_io_bus_space;
+	struct machine_bus_dma_tag sc_dmatag;
 
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_regh;
@@ -108,11 +110,13 @@ void	xbridge_read_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
 	    uint8_t *, bus_size_t);
 void	xbridge_write_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
 	    const uint8_t *, bus_size_t);
+int	xbridge_space_map_short(bus_space_tag_t, bus_addr_t, bus_size_t, int,
+	    bus_space_handle_t *);
 
 bus_addr_t xbridge_pa_to_device(paddr_t);
 paddr_t	xbridge_device_to_pa(bus_addr_t);
 
-struct machine_bus_dma_tag xbridge_dma_tag = {
+const struct machine_bus_dma_tag xbridge_dma_tag = {
 	NULL,			/* _cookie */
 	_dmamap_create,
 	_dmamap_destroy,
@@ -139,6 +143,10 @@ xbridge_match(struct device *parent, void *match, void *aux)
 
 	if (xaa->xaa_vendor == XBOW_VENDOR_SGI4 &&
 	    xaa->xaa_product == XBOW_PRODUCT_SGI4_BRIDGE)
+		return 1;
+
+	if (xaa->xaa_vendor == XBOW_VENDOR_SGI3 &&
+	    xaa->xaa_product == XBOW_PRODUCT_SGI3_XBRIDGE)
 		return 1;
 
 	return 0;
@@ -183,26 +191,39 @@ xbridge_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc_io_bus_space == NULL)
 		goto fail2;
 
-	bcopy(xaa->xaa_long_tag, sc->sc_mem_bus_space,
-	    sizeof(*sc->sc_mem_bus_space));
-	sc->sc_mem_bus_space->bus_base = xaa->xaa_long_tag->bus_base +
-	    BRIDGE_PCI_MEM_SPACE_BASE;
+	if (sys_config.system_type == SGI_OCTANE) {
+		bcopy(xaa->xaa_long_tag, sc->sc_mem_bus_space,
+		    sizeof(*sc->sc_mem_bus_space));
+		sc->sc_mem_bus_space->bus_base += BRIDGE_PCI_MEM_SPACE_BASE;
 
-	if (sc->sc_rev >= 4) {
-		/* Unrestricted I/O mappings in the large window */
-		bcopy(xaa->xaa_long_tag, sc->sc_io_bus_space,
-		    sizeof(*sc->sc_io_bus_space));
-		sc->sc_io_bus_space->bus_base +=
-		    BRIDGE_PCI_IO_SPACE_BASE;
+		if (sc->sc_rev >= 4) {
+			/* Unrestricted I/O mappings in the large window */
+			bcopy(xaa->xaa_long_tag, sc->sc_io_bus_space,
+			    sizeof(*sc->sc_io_bus_space));
+			sc->sc_io_bus_space->bus_base +=
+			    BRIDGE_PCI_IO_SPACE_BASE;
+		} else {
+			/* Programmable I/O mappings in the small window */
+			bcopy(xaa->xaa_short_tag, sc->sc_io_bus_space,
+			    sizeof(*sc->sc_io_bus_space));
+		}
 	} else {
-		/* Programmable I/O mappings in the small window */
+		/* Limited memory mappings in the small window */
+		bcopy(xaa->xaa_short_tag, sc->sc_mem_bus_space,
+		    sizeof(*sc->sc_mem_bus_space));
+		sc->sc_mem_bus_space->bus_private = sc;
+		sc->sc_mem_bus_space->_space_map = xbridge_space_map_short;
+
+		/* Limited I/O mappings in the small window */
 		bcopy(xaa->xaa_short_tag, sc->sc_io_bus_space,
 		    sizeof(*sc->sc_io_bus_space));
+		sc->sc_io_bus_space->bus_private = sc;
+		sc->sc_io_bus_space->_space_map = xbridge_space_map_short;
 	}
 
 	sc->sc_io_bus_space->_space_read_1 = xbridge_read_1;
-	sc->sc_io_bus_space->_space_read_2 = xbridge_read_2;
 	sc->sc_io_bus_space->_space_write_1 = xbridge_write_1;
+	sc->sc_io_bus_space->_space_read_2 = xbridge_read_2;
 	sc->sc_io_bus_space->_space_write_2 = xbridge_write_2;
 	sc->sc_io_bus_space->_space_read_raw_2 = xbridge_read_raw_2;
 	sc->sc_io_bus_space->_space_write_raw_2 = xbridge_write_raw_2;
@@ -212,8 +233,8 @@ xbridge_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_io_bus_space->_space_write_raw_8 = xbridge_write_raw_8;
 
 	sc->sc_mem_bus_space->_space_read_1 = xbridge_read_1;
-	sc->sc_mem_bus_space->_space_read_2 = xbridge_read_2;
 	sc->sc_mem_bus_space->_space_write_1 = xbridge_write_1;
+	sc->sc_mem_bus_space->_space_read_2 = xbridge_read_2;
 	sc->sc_mem_bus_space->_space_write_2 = xbridge_write_2;
 	sc->sc_mem_bus_space->_space_read_raw_2 = xbridge_read_raw_2;
 	sc->sc_mem_bus_space->_space_write_raw_2 = xbridge_write_raw_2;
@@ -248,13 +269,19 @@ xbridge_attach(struct device *parent, struct device *self, void *aux)
 		    (xbow_intr_widget << 20) | (1 << 17));
 #if 0
 		bus_space_write_4(sc->sc_iot, sc->sc_regh, 0x284,
-		    0xddcc9988);
+		    0x99889988 | 0x44440000);
 		bus_space_write_4(sc->sc_iot, sc->sc_regh, 0x28c,
-		    0xddcc9988);
+		    0x99889988 | 0x44440000);
 #endif
 	} else {
 		bus_space_write_4(sc->sc_iot, sc->sc_regh, BRIDGE_DIR_MAP,
 		    xbow_intr_widget << 20);
+#if 0
+		bus_space_write_4(sc->sc_iot, sc->sc_regh, 0x284,
+		    0xba98ba98 | 0x44440000);
+		bus_space_write_4(sc->sc_iot, sc->sc_regh, 0x28c,
+		    0xba98ba98 | 0x44440000);
+#endif
 	}
 
 	(void)bus_space_read_4(sc->sc_iot, sc->sc_regh, WIDGET_TFLUSH);
@@ -267,10 +294,12 @@ xbridge_attach(struct device *parent, struct device *self, void *aux)
 	bus_space_write_4(sc->sc_iot, sc->sc_regh, BRIDGE_INT_MODE, 0);
 	bus_space_write_4(sc->sc_iot, sc->sc_regh, BRIDGE_INT_DEV, 0);
 	bus_space_write_4(sc->sc_iot, sc->sc_regh, WIDGET_INTDEST_ADDR_UPPER,
-	    xbow_intr_widget << 16);
+	    (xbow_intr_widget_register  >> 32) | (xbow_intr_widget << 16));
 	bus_space_write_4(sc->sc_iot, sc->sc_regh, WIDGET_INTDEST_ADDR_LOWER,
-	    xbow_intr_widget_register);
+	    (uint32_t)xbow_intr_widget_register);
+
 	(void)bus_space_read_4(sc->sc_iot, sc->sc_regh, WIDGET_TFLUSH);
+
 	for (i = 0; i < BRIDGE_NINTRS; i++)
 		sc->sc_intrbit[i] = -1;
 
@@ -278,14 +307,23 @@ xbridge_attach(struct device *parent, struct device *self, void *aux)
 	 * Attach children.
 	 */
 
+	bcopy(&xbridge_dma_tag, &sc->sc_dmatag, sizeof(xbridge_dma_tag));
+	if (sys_config.system_type == SGI_OCTANE) {
+		/*
+		 * Make sure we do not risk crossing the direct mapping
+		 * window.
+		 */
+		sc->sc_dmatag._dma_mask = BRIDGE_DMA_DIRECT_LENGTH - 1;
+	}
+
 	bzero(&pba, sizeof(pba));
 	pba.pba_busname = "pci";
 	pba.pba_iot = sc->sc_io_bus_space;
 	pba.pba_memt = sc->sc_mem_bus_space;
-	pba.pba_dmat = &xbridge_dma_tag;
+	pba.pba_dmat = &sc->sc_dmatag;
 	pba.pba_pc = &sc->sc_pc;
 	pba.pba_domain = pci_ndomains++;
-	pba.pba_bus = sc->sc_dev.dv_unit;
+	pba.pba_bus = 0;
 
 	config_found(self, &pba, xbridge_print);
 	return;
@@ -344,7 +382,7 @@ pcireg_t
 xbridge_conf_read(void *cookie, pcitag_t tag, int offset)
 {
 	struct xbridge_softc *sc = cookie;
-	pcireg_t data;
+	pcireg_t id, data;
 	int bus, dev, fn;
 	paddr_t pa;
 	int s;
@@ -360,9 +398,49 @@ xbridge_conf_read(void *cookie, pcitag_t tag, int offset)
 	} else
 		pa = sc->sc_regh + BRIDGE_PCI_CFG_SPACE + (dev << 12);
 
-	pa += (fn << 8) + offset;
-	if (guarded_read_4(pa, &data) != 0)
-		data = 0xffffffff;
+	/*
+	 * IOC3 devices only implement a subset of the PCI configuration
+	 * registers.
+	 * Depending on which particular model we encounter, things may
+	 * seem to work, or write access to nonexisting registers would
+	 * completely freeze the machine.
+	 *
+	 * We thus check for the device type here, and handle the non
+	 * existing registers ourselves.
+	 */
+
+	if (guarded_read_4(pa + PCI_ID_REG, &id) != 0) {
+		splx(s);
+		return 0xffffffff;
+	}
+
+	if (id == PCI_ID_CODE(PCI_VENDOR_SGI, PCI_PRODUCT_SGI_IOC3)) {
+		switch (offset) {
+		case PCI_ID_REG:
+		case PCI_COMMAND_STATUS_REG:
+		case PCI_CLASS_REG:
+		case PCI_BHLC_REG:
+		case PCI_MAPREG_START:
+			/* These registers are implemented. Go ahead. */
+			id = 0;
+			break;
+		case PCI_INTERRUPT_REG:
+			/* This register is not implemented. Fake it. */
+			data = PCI_INTERRUPT_PIN_A << PCI_INTERRUPT_PIN_SHIFT;
+			break;
+		default:
+			/* These registers are not implemented. */
+			data = 0;
+			break;
+		}
+	} else
+		id = 0;
+
+	if (id == 0) {
+		pa += (fn << 8) + offset;
+		if (guarded_read_4(pa, &data) != 0)
+			data = 0xffffffff;
+	}
 
 	splx(s);
 	return(data);
@@ -372,6 +450,7 @@ void
 xbridge_conf_write(void *cookie, pcitag_t tag, int offset, pcireg_t data)
 {
 	struct xbridge_softc *sc = cookie;
+	pcireg_t id;
 	int bus, dev, fn;
 	paddr_t pa;
 	int s;
@@ -387,8 +466,50 @@ xbridge_conf_write(void *cookie, pcitag_t tag, int offset, pcireg_t data)
 	} else
 		pa = sc->sc_regh + BRIDGE_PCI_CFG_SPACE + (dev << 12);
 
-	pa += (fn << 8) + offset;
-	guarded_write_4(pa, data);
+	/*
+	 * IOC3 devices only implement a subset of the PCI configuration
+	 * registers.
+	 * Depending on which particular model we encounter, things may
+	 * seem to work, or write access to nonexisting registers would
+	 * completely freeze the machine.
+	 *
+	 * We thus check for the device type here, and handle the non
+	 * existing registers ourselves.
+	 */
+
+	if (guarded_read_4(pa + PCI_ID_REG, &id) != 0) {
+		splx(s);
+		return;
+	}
+
+	if (id == PCI_ID_CODE(PCI_VENDOR_SGI, PCI_PRODUCT_SGI_IOC3)) {
+		switch (offset) {
+		case PCI_COMMAND_STATUS_REG:
+			/*
+			 * Some IOC models do not support having this bit
+			 * cleared (which is what pci_mapreg_probe() will
+			 * do), so we set it unconditionnaly.
+			 */
+			data |= PCI_COMMAND_MEM_ENABLE;
+			/* FALLTHROUGH */
+		case PCI_ID_REG:
+		case PCI_CLASS_REG:
+		case PCI_BHLC_REG:
+		case PCI_MAPREG_START:
+			/* These registers are implemented. Go ahead. */
+			id = 0;
+			break;
+		default:
+			/* These registers are not implemented. */
+			break;
+		}
+	} else
+		id = 0;
+
+	if (id == 0) {
+		pa += (fn << 8) + offset;
+		guarded_write_4(pa, data);
+	}
 
 	splx(s);
 }
@@ -507,6 +628,7 @@ xbridge_intr_establish(void *cookie, pci_intr_handle_t ih, int level,
 		break;
 	default:
 	case SGI_O200:
+	case SGI_O300:
 		int_addr = 0x20000 | intrsrc | (nasid << 8);
 		break;
 	}
@@ -521,7 +643,7 @@ xbridge_intr_establish(void *cookie, pci_intr_handle_t ih, int level,
 	    (1 << intrbit));
 	bus_space_write_4(sc->sc_iot, sc->sc_regh, BRIDGE_INT_DEV,
 	    bus_space_read_4(sc->sc_iot, sc->sc_regh, BRIDGE_INT_DEV) |
-	    (7 << (intrbit * 3)));
+	    (intrbit << (intrbit * 3)));
 	(void)bus_space_read_4(sc->sc_iot, sc->sc_regh, WIDGET_TFLUSH);
 
 	return (void *)((uint64_t)ih | 8);	/* XXX don't return zero */
@@ -573,11 +695,6 @@ xbridge_intr_handler(void *v)
 
 	if ((rc = (*xi->xi_func)(xi->xi_arg)) != 0)
 		xi->xi_count.ec_count++;
-
-#if 0
-	/* Clear PCI interrupts. */
-	bus_space_write_4(sc->sc_iot, sc->sc_regh, BRIDGE_ICR, 1 << 0);
-#endif
 
 	return rc;
 }
@@ -685,29 +802,47 @@ xbridge_write_raw_8(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
 }
 
 /*
+ * On IP27, we can not use the default xbow space_map_short because
+ * of the games we play with bus addresses.
+ */
+int
+xbridge_space_map_short(bus_space_tag_t t, bus_addr_t offs, bus_size_t size,
+    int cacheable, bus_space_handle_t *bshp)
+{
+	struct xbridge_softc *sc = (struct xbridge_softc *)t->bus_private;
+	bus_addr_t bpa;
+
+	bpa = t->bus_base - (sc->sc_widget << 24) + offs;
+
+	/* check that this neither underflows nor overflows the window */
+	if (((bpa + size - 1) >> 24) != (t->bus_base >> 24) ||
+	    (bpa >> 24) != (t->bus_base >> 24))
+		return (EINVAL);
+
+	*bshp = bpa;
+	return 0;
+}
+
+/*
  * bus_dma helpers
  */
 
 bus_addr_t
 xbridge_pa_to_device(paddr_t pa)
 {
-	switch (sys_config.system_type) {
-	case SGI_OCTANE:
-		/*
-		 * On Octane, direct DMA is not possible on memory
-		 * above 2GB.  Until _dmamem_alloc() is modified to
-		 * make sure it doesn't use memory above this limit,
-		 * add a check there.  Otherwise I'll never come back
-		 * and fix _dmamem_alloc().
-		 */
-		if (pa > IP30_MEMORY_BASE + BRIDGE_DMA_DIRECT_LENGTH)
-			panic("dma above 2GB");
+	/*
+	 * On the Octane, we try to use the direct DMA window whenever
+	 * possible; this allows hardware limited to 32 bit DMA addresses
+	 * to work.
+	 */
 
-		return (pa - IP30_MEMORY_BASE) + BRIDGE_DMA_DIRECT_BASE;
-
-	case SGI_O200:
-		break;	/* XXX likely wrong */
+	if (sys_config.system_type == SGI_OCTANE) {
+		pa -= IP30_MEMORY_BASE;
+		if (pa < BRIDGE_DMA_DIRECT_LENGTH)
+			return pa + BRIDGE_DMA_DIRECT_BASE;
 	}
+
+	pa += ((uint64_t)xbow_intr_widget << 60) | (1UL << 56);
 
 	return pa;
 }
@@ -715,13 +850,14 @@ xbridge_pa_to_device(paddr_t pa)
 paddr_t
 xbridge_device_to_pa(bus_addr_t addr)
 {
-	switch (sys_config.system_type) {
-	case SGI_OCTANE:
-		return (addr - BRIDGE_DMA_DIRECT_BASE) + IP30_MEMORY_BASE;
+	paddr_t pa;
 
-	case SGI_O200:
-		break;
-	}
+	pa = addr & ((1UL << 56) - 1);
+	if (sys_config.system_type == SGI_OCTANE && pa == (paddr_t)addr)
+		pa = addr - BRIDGE_DMA_DIRECT_BASE;
 
-	return addr;
+	if (sys_config.system_type == SGI_OCTANE)
+		pa += IP30_MEMORY_BASE;
+
+	return pa;
 }

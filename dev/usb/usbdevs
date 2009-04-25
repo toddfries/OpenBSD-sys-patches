@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.423 2009/04/02 17:45:17 damien Exp $
+$OpenBSD: usbdevs,v 1.426 2009/04/22 18:56:33 deraadt Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -518,7 +518,8 @@ vendor LINKSYS4		0x1737	Linksys
 vendor SENAO		0x1740	Senao
 vendor ASUS2		0x1761	ASUS
 vendor SWEEX2		0x177f	Sweex
-vendor METAGEEK		0x1781	MetaGeek
+vendor MECANIQUE	0x1781	Mecanique
+vendor DISPLAYLINK	0x17e9	DisplayLink
 vendor AMIT		0x18c5	AMIT
 vendor QCOM		0x18e8	Qcom
 vendor LINKSYS3		0x1915	Linksys
@@ -1216,6 +1217,9 @@ product DLINK2 DWA130		0x3c13	DWA-130
 /* D-Link(3) products */
 product DLINK3 KVM221		0x020f	KVM-221
 
+/* DisplayLink products */
+product DISPLAYLINK DL120	0x01bb	DL-120
+
 /* DMI products */
 product DMI SA2_0		0xb001	Storage Adapter
 
@@ -1337,6 +1341,7 @@ product FREECOM DVD		0xfc01	Connector for DVD drive
 /* Future Technology Devices products */
 product FTDI FT232_1		0x0232	Serial
 product FTDI SERIAL_8U232AM	0x6001	8U232AM Serial
+product FTDI SERIAL_8U232AM4	0x6004	8U232AM Serial
 product FTDI FT232_3		0x6006	Serial
 product FTDI FT232_4		0x6007	Serial
 product FTDI FT232_5		0x6008	Serial
@@ -2003,8 +2008,9 @@ product MELCO SG54HG		0x00f4	WLI-U2-SG54HG
 product MELCO WLIUCAG300N	0x012e	WLI-UC-AG300N
 product MELCO WLIUCGN		0x015d	WLI-UC-GN
 
-/* MetaGeek products */
-product METAGEEK WISPY		0x083e	Wi-Spy
+/* MetaGeek tagged products */
+product MECANIQUE WISPY		0x083e	MetaGeek Wi-Spy
+product MECANIQUE TELLSTICK	0x0c30	Telldus Tellstick
 
 /* Metricom products */
 product METRICOM RICOCHET_GS	0x0001	Ricochet GS

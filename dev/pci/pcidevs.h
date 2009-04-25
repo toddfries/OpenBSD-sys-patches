@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1467 2009/04/06 15:16:18 kettenis Exp 
+ *	OpenBSD: pcidevs,v 1.1469 2009/04/24 17:32:48 mk Exp 
  */
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
@@ -2986,7 +2986,7 @@
 #define	PCI_PRODUCT_INTEL_RCU31	0x9641		/* RCU31 I2O RAID */
 #define	PCI_PRODUCT_INTEL_RCU31L	0x96a1		/* RCU31L I2O RAID */
 #define	PCI_PRODUCT_INTEL_21152	0xb152		/* S21152BB PCI-PCI */
-#define	PCI_PRODUCT_INTEL_21154	0xb154		/* S21154AE/BE PCI-PCI */
+#define	PCI_PRODUCT_INTEL_21154	0xb154		/* 21154AE/BE PCI-PCI */
 
 /* Intergraph products */
 #define	PCI_PRODUCT_INTERGRAPH_4D50T	0x00e4		/* Powerstorm 4D50T */
@@ -4209,6 +4209,7 @@
 
 /* Pijnenburg */
 #define	PCI_PRODUCT_PIJNENBURG_PCC_ISES	0x0001		/* PCC-ISES */
+#define	PCI_PRODUCT_PIJNENBURG_PCWD_PCI	0x5030		/* PCI PC WD */
 
 /* Platform */
 #define	PCI_PRODUCT_PLATFORM_ES1849	0x0100		/* ES1849 */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_i810.c,v 1.46 2009/02/17 18:41:32 oga Exp $	*/
+/*	$OpenBSD: agp_i810.c,v 1.48 2009/04/20 01:28:45 oga Exp $	*/
 
 /*-
  * Copyright (c) 2000 Doug Rabson
@@ -287,8 +287,6 @@ agp_i810_attach(struct device *parent, struct device *self, void *aux)
 		if (bus_dmamem_map(pa->pa_dmat, &gatt->ag_dmaseg, 1, 64 * 1024,
 		    (caddr_t *)&gatt->ag_virtual, BUS_DMA_NOWAIT) != 0)
 			goto out;
-
-		memset(gatt->ag_virtual, 0, gatt->ag_size);
 
 		agp_flush_cache();
 		/* Install the GATT. */
@@ -676,6 +674,8 @@ agp_i810_bind_memory(void *sc, struct agp_memory *mem, off_t offset)
 	struct agp_i810_softc	*isc = sc;
 	u_int32_t 		 regval, i;
 
+	if (mem->am_is_bound != 0)
+		return (EINVAL);
 	/*
 	 * XXX evil hack: the PGTBL_CTL appearently gets overwritten by the
 	 * X server for mysterious reasons which leads to crashes if we write
@@ -716,6 +716,9 @@ agp_i810_unbind_memory(void *sc, struct agp_memory *mem)
 {
 	struct agp_i810_softc	*isc = sc;
 	u_int32_t		 i;
+
+	if (mem->am_is_bound == 0)
+		return (EINVAL);
 
 	if (mem->am_type == 2) {
 		for (i = 0; i < mem->am_size; i += AGP_PAGE_SIZE) {

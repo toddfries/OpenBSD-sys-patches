@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.653 2009/03/24 18:56:17 damien Exp $
+#	$OpenBSD: GENERIC,v 1.656 2009/04/24 21:28:41 mk Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -100,6 +100,7 @@ geodesc* at pci?		# Geode SC1100/SCx200 IAOC
 #gscpm*	at pci?			# NS Geode SC1100 SMI/ACPI module
 #ichwdt* at pci?		# Intel 6300ESB ICH watchdog timer
 wdt0	at pci?			# Ind Computer Source PCI-WDT50x driver
+berkwdt0 at pci?		# Berkshire PCI-PC Watchdog driver
 pwdog0	at pci?			# Quancom PWDOG1 watchdog timer
 
 # National Semiconductor LM7[89] and compatible hardware monitors
@@ -133,8 +134,8 @@ it*	at isa? port 0x4e		# IT8718F, IT8726F and SiS SiS950
 
 schsio*	at isa? port 0x2e		# SMSC SCH311x Super I/O
 schsio*	at isa? port 0x4e
-#schsio*	at isa? port 0x162e
-#schsio*	at isa? port 0x164e
+schsio*	at isa? port 0x162e
+schsio*	at isa? port 0x164e
 
 viaenv*	at pci?				# VIA VT82C686A hardware monitor
 viasio*	at isa? port 0x2e flags 0x0000	# VIA VT1211 LPC Super I/O

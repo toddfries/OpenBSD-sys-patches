@@ -1,4 +1,4 @@
-/*	$OpenBSD: agpvar.h,v 1.15 2008/11/09 15:11:19 oga Exp $	*/
+/*	$OpenBSD: agpvar.h,v 1.16 2009/04/20 01:28:45 oga Exp $	*/
 /*	$NetBSD: agpvar.h,v 1.4 2001/10/01 21:54:48 fvdl Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sch311x.c,v 1.6 2009/03/29 21:53:52 sthen Exp $	*/
+/*	$OpenBSD: sch311x.c,v 1.9 2009/04/17 21:48:54 mk Exp $	*/
 /*
  * Copyright (c) 2008 Mark Kettenis <kettenis@openbsd.org>
  * Copyright (c) 2009 Michael Knudsen <mk@openbsd.org>
@@ -63,8 +63,6 @@
 #define SCHSIO_HWM_INTERVAL	5 /* seconds */
 
 /* Register access */
-#define SCHSIO_HWM_IOSIZE 0x100
-#define SCHSIO_HWM_OFFSET	0x70
 #define SCHSIO_HWM_INDEX	0x70
 #define SCHSIO_HWM_DATA		0x71
 
@@ -170,14 +168,14 @@ static __inline void schsio_config_disable(bus_space_tag_t iot,
     bus_space_handle_t ioh);
 
 u_int8_t schsio_config_read(bus_space_tag_t iot, bus_space_handle_t ioh,
-    int reg);
-void schsio_config_write(bus_space_tag_t iot,
-    bus_space_handle_t ioh, int reg, u_int8_t val);
+    u_int8_t reg);
+void schsio_config_write(bus_space_tag_t iot, bus_space_handle_t ioh,
+    u_int8_t reg, u_int8_t val);
 
 /* HWM prototypes */
 void schsio_hwm_init(struct schsio_softc *sc);
 void schsio_hwm_update(void *arg);
-u_int8_t schsio_hwm_read(struct schsio_softc *sc, int reg);
+u_int8_t schsio_hwm_read(struct schsio_softc *sc, u_int8_t reg);
 
 /* Watchdog prototypes */
 
@@ -207,15 +205,16 @@ schsio_config_disable(bus_space_tag_t iot, bus_space_handle_t ioh)
 }
 
 u_int8_t
-schsio_config_read(bus_space_tag_t iot, bus_space_handle_t ioh, int reg)
+schsio_config_read(bus_space_tag_t iot, bus_space_handle_t ioh,
+    u_int8_t reg)
 {
 	bus_space_write_1(iot, ioh, SCHSIO_PORT_INDEX, reg);
 	return (bus_space_read_1(iot, ioh, SCHSIO_PORT_DATA));
 }
 
 void
-schsio_config_write(bus_space_tag_t iot, bus_space_handle_t ioh, int reg,
-    u_int8_t val)
+schsio_config_write(bus_space_tag_t iot, bus_space_handle_t ioh,
+    u_int8_t reg, u_int8_t val)
 {
 	bus_space_write_1(iot, ioh, SCHSIO_PORT_INDEX, reg);
 	bus_space_write_1(iot, ioh, SCHSIO_PORT_DATA, val);
@@ -249,6 +248,7 @@ schsio_probe(struct device *parent, void *match, void *aux)
 		ia->ipa_nmem = 0;
 		ia->ipa_nirq = 0;
 		ia->ipa_ndrq = 0;
+		ia->ia_aux = (void *)(u_long) reg;
 
 		return (1);
 		break;
@@ -276,8 +276,8 @@ schsio_attach(struct device *parent, struct device *self, void *aux)
 	/* Enter configuration mode */
 	schsio_config_enable(sc->sc_iot, sc->sc_ioh);
 
-	/* Read device ID */
-	reg0 = schsio_config_read(sc->sc_iot, sc->sc_ioh, SCHSIO_IDX_DEVICE);
+	/* Check device ID */
+	reg0 = (u_int8_t)(u_long) ia->ia_aux;
 	switch (reg0) {
 	case SCHSIO_ID_SCH3112:
 		printf(": SCH3112");
@@ -448,7 +448,7 @@ schsio_hwm_update(void *arg)
 }
 
 u_int8_t
-schsio_hwm_read(struct schsio_softc *sc, int reg)
+schsio_hwm_read(struct schsio_softc *sc, u_int8_t reg)
 {
 	bus_space_write_1(sc->sc_iot, sc->sc_ioh_rr, SCHSIO_HWM_INDEX, reg);
 	return (bus_space_read_1(sc->sc_iot, sc->sc_ioh_rr, SCHSIO_HWM_DATA));
