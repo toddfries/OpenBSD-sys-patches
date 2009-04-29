@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.128 2009/04/26 17:04:53 marco Exp $ */
+/* $OpenBSD: softraid.c,v 1.131 2009/04/29 00:52:30 marco Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -54,6 +54,7 @@
 #include <dev/rndvar.h>
 
 /* #define SR_FANCY_STATS */
+/* #define SR_UNIT_TEST */
 
 #ifdef SR_DEBUG
 #define SR_FANCY_STATS
@@ -105,6 +106,7 @@ void			sr_chunks_unwind(struct sr_softc *,
 			    struct sr_chunk_head *);
 void			sr_discipline_free(struct sr_discipline *);
 void			sr_discipline_shutdown(struct sr_discipline *);
+int			sr_discipline_init(struct sr_discipline *, int);
 
 /* utility functions */
 void			sr_shutdown(void *);
@@ -189,7 +191,7 @@ sr_meta_attach(struct sr_discipline *sd, int force)
 	struct sr_softc		*sc = sd->sd_sc;
 	struct sr_chunk_head	*cl;
 	struct sr_chunk		*ch_entry;
-	int			rv = 1, i;
+	int			rv = 1, i = 0;
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_attach(%d)\n", DEVNAME(sc));
 
@@ -213,14 +215,22 @@ sr_meta_attach(struct sr_discipline *sd, int force)
 		}
 	}
 
-	if (smd[sd->sd_meta_type].smd_attach(sd, force))
-		goto bad;
-
-	/* fill out chunk array */
+	/* we have a valid list now create an array index */
 	cl = &sd->sd_vol.sv_chunk_list;
+	SLIST_FOREACH(ch_entry, cl, src_link) {
+		i++;
+	}
+	sd->sd_vol.sv_chunks = malloc(sizeof(struct sr_chunk *) * i,
+	    M_DEVBUF, M_WAITOK | M_ZERO);
+	
+	/* fill out chunk array */
 	i = 0;
 	SLIST_FOREACH(ch_entry, cl, src_link)
 		sd->sd_vol.sv_chunks[i++] = ch_entry;
+
+	/* attach metadata */
+	if (smd[sd->sd_meta_type].smd_attach(sd, force))
+		goto bad;
 
 	rv = 0;
 bad:
@@ -633,7 +643,7 @@ sr_meta_read(struct sr_discipline *sd)
 	struct sr_meta_driver	*s;
 	struct sr_meta_opt	*om;
 	void			*fm = NULL;
-	int			no_disk = 0;
+	int			no_disk = 0, got_meta = 0;
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_read\n", DEVNAME(sc));
 
@@ -644,9 +654,18 @@ sr_meta_read(struct sr_discipline *sd)
 
 	cp = (struct sr_meta_chunk *)(sm + 1);
 	SLIST_FOREACH(ch_entry, cl, src_link) {
-		/* read and translate */
-		if (s->smd_read(sd, ch_entry->src_dev_mm, sm, fm)) {
-			/* XXX mark disk offline */
+		/* skip disks that are offline */
+		if (ch_entry->src_meta.scm_status == BIOC_SDOFFLINE) {
+			DNPRINTF(SR_D_META,
+			    "%s: %s chunk marked offline, spoofing status\n",
+			    DEVNAME(sc), ch_entry->src_devname);
+			cp++; /* adjust chunk pointer to match failure */
+			continue;
+		} else if (s->smd_read(sd, ch_entry->src_dev_mm, sm, fm)) {
+			/* read and translate */
+			/* XXX mark chunk offline, elsewhere!! */
+			ch_entry->src_meta.scm_status = BIOC_SDOFFLINE;
+			cp++; /* adjust chunk pointer to match failure */
 			DNPRINTF(SR_D_META, "%s: sr_meta_read failed\n",
 			    DEVNAME(sc));
 			continue;
@@ -666,9 +685,11 @@ sr_meta_read(struct sr_discipline *sd)
 			goto done;
 		}
 
-		/* assume chunk 0 contains metadata */
-		if (no_disk == 0)
+		/* assume first chunk contains metadata */
+		if (got_meta == 0) {
 			bcopy(sm, sd->sd_meta, sizeof(*sd->sd_meta));
+			got_meta = 1;
+		}
 
 		bcopy(cp, &ch_entry->src_meta, sizeof(ch_entry->src_meta));
 
@@ -1050,9 +1071,10 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 	struct sr_softc		*sc = sd->sd_sc;
 	struct sr_chunk_head 	*cl = &sd->sd_vol.sv_chunk_list;
 	struct sr_metadata	*md = NULL;
-	struct sr_chunk		*ch_entry;
+	struct sr_chunk		*ch_entry, *ch_next;
 	struct sr_uuid		uuid;
-	int			sr, not_sr, rv = 1, d, expected = -1;
+	u_int64_t		version = 0;
+	int			sr, not_sr, rv = 1, d, expected = -1, old_meta = 0;
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_native_attach\n", DEVNAME(sc));
 
@@ -1078,6 +1100,8 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 			if (d == 0) {
 				bcopy(&md->ssdi.ssd_uuid, &uuid, sizeof uuid);
 				expected = md->ssdi.ssd_chunk_no;
+				version = md->ssd_ondisk;
+				d++;
 				continue;
 			} else if (bcmp(&md->ssdi.ssd_uuid, &uuid,
 			    sizeof uuid)) {
@@ -1085,10 +1109,12 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 				    DEVNAME(sc));
 				goto bad;
 			}
+			if (md->ssd_ondisk != version) {
+				old_meta++;
+				version = MAX(md->ssd_ondisk, version);
+			}
 		} else
 			not_sr++;
-
-		d++;
 	}
 
 	if (sr && not_sr) {
@@ -1096,6 +1122,25 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 		     DEVNAME(sc));
 		goto bad;
 	}
+
+	/* mixed metadata versions; mark bad disks offline */
+	if (old_meta) {
+		d = 0;
+		for (ch_entry = SLIST_FIRST(cl); ch_entry != SLIST_END(cl);
+		    ch_entry = ch_next, d++) {
+			ch_next = SLIST_NEXT(ch_entry, src_link);
+
+			/* XXX do we want to read this again? */
+			if (sr_meta_native_read(sd, ch_entry->src_dev_mm, md,
+			    NULL))
+				printf("%s: could not read native metadata\n",
+				    DEVNAME(sc));
+			if (md->ssd_ondisk != version)
+				sd->sd_vol.sv_chunks[d]->src_meta.scm_status =
+				    BIOC_SDOFFLINE;
+		}
+	}
+
 	if (expected != sr && !force && expected != -1) {
 		/* XXX make this smart so that we can bring up degraded disks */
 		printf("%s: not all chunks were provided\n", DEVNAME(sc));
@@ -1454,7 +1499,7 @@ sr_scsi_cmd(struct scsi_xfer *xs)
 
 	if ((wu = sr_wu_get(sd)) == NULL) {
 		DNPRINTF(SR_D_CMD, "%s: sr_scsi_cmd no wu\n", DEVNAME(sc));
-		return (TRY_AGAIN_LATER);
+		return (NO_CCB);
 	}
 
 	xs->error = XS_NOERROR;
@@ -1706,18 +1751,33 @@ sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 	int			rv = EINVAL;
 
 #ifdef SR_UNIT_TEST
-	int			i, vol, state;
+	int			i, vol, state, found, tg;
 	struct sr_discipline	*sd;
+	struct sr_chunk		*ch_entry;
+	struct sr_chunk_head 	*cl;
+
+	if (bs->bs_other_id_type == BIOC_SSOTHER_UNUSED)
+		goto done;
 
 	for (i = 0, vol = -1; i < SR_MAXSCSIBUS; i++) {
 		/* XXX this will not work when we stagger disciplines */
 		if (sc->sc_dis[i])
 			vol++;
-		if (vol != bs->bs_channel)
+		if (vol != bs->bs_volid)
 			continue;
+		sd = sc->sc_dis[i];
 
-		sd = sc->sc_dis[vol];
-		if (bs->bs_target >= sd->sd_meta->ssdi.ssd_chunk_no)
+		found = 0;
+		tg = 0;
+		cl = &sd->sd_vol.sv_chunk_list;
+		SLIST_FOREACH(ch_entry, cl, src_link) {
+			if (ch_entry->src_dev_mm == bs->bs_other_id) {
+				found = 1;
+				break;
+			}
+			tg++;
+		}
+		if (found == 0)
 			goto done;
 
 		switch (bs->bs_status) {
@@ -1738,10 +1798,7 @@ sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 			goto done;
 		}
 
-		printf("status change for %u:%u -> %u %u\n",
-		    bs->bs_channel, bs->bs_target, bs->bs_status, state);
-
-		sd->sd_set_chunk_state(sd, bs->bs_target, bs->bs_status);
+		sd->sd_set_chunk_state(sd, tg, bs->bs_status);
 
 		rv = 0;
 
@@ -1786,10 +1843,6 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 	no_chunk = bc->bc_dev_list_len / sizeof(dev_t);
 	cl = &sd->sd_vol.sv_chunk_list;
 	SLIST_INIT(cl);
-
-	/* we have a valid list now create an array index */
-	sd->sd_vol.sv_chunks = malloc(sizeof(struct sr_chunk *) * no_chunk,
-	    M_DEVBUF, M_WAITOK | M_ZERO);
 
 	sd->sd_meta_type = sr_meta_probe(sd, dt, no_chunk);
 	if (sd->sd_meta_type == SR_META_F_INVALID) {
@@ -1972,125 +2025,14 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 			    "assemble it\n");
 			goto unwind;
 		}
-		printf("%s: not yet partial bringup\n", DEVNAME(sc));
-		goto unwind;
+		printf("%s: trying to bring up %s degraded\n", DEVNAME(sc),
+		    sd->sd_meta->ssd_devname);
 	}
 
-	/* XXX metadata SHALL be fully filled in at this point */
+	/* metadata SHALL be fully filled in at this point */
 
-	switch (bc->bc_level) {
-	case 0:
-		/* fill out discipline members */
-		sd->sd_type = SR_MD_RAID0;
-		sd->sd_max_ccb_per_wu =
-		    (MAXPHYS / sd->sd_meta->ssdi.ssd_strip_size + 1) *
-		    SR_RAID0_NOWU * sd->sd_meta->ssdi.ssd_chunk_no;
-		sd->sd_max_wu = SR_RAID0_NOWU;
-
-		/* setup discipline pointers */
-		sd->sd_alloc_resources = sr_raid0_alloc_resources;
-		sd->sd_free_resources = sr_raid0_free_resources;
-		sd->sd_start_discipline = NULL;
-		sd->sd_scsi_inquiry = sr_raid_inquiry;
-		sd->sd_scsi_read_cap = sr_raid_read_cap;
-		sd->sd_scsi_tur = sr_raid_tur;
-		sd->sd_scsi_req_sense = sr_raid_request_sense;
-		sd->sd_scsi_start_stop = sr_raid_start_stop;
-		sd->sd_scsi_sync = sr_raid_sync;
-		sd->sd_scsi_rw = sr_raid0_rw;
-		sd->sd_set_chunk_state = sr_raid0_set_chunk_state;
-		sd->sd_set_vol_state = sr_raid0_set_vol_state;
-		break;
-	case 1:
-		/* fill out discipline members */
-		sd->sd_type = SR_MD_RAID1;
-		sd->sd_max_ccb_per_wu = no_chunk;
-		sd->sd_max_wu = SR_RAID1_NOWU;
-
-		/* setup discipline pointers */
-		sd->sd_alloc_resources = sr_raid1_alloc_resources;
-		sd->sd_free_resources = sr_raid1_free_resources;
-		sd->sd_start_discipline = NULL;
-		sd->sd_scsi_inquiry = sr_raid_inquiry;
-		sd->sd_scsi_read_cap = sr_raid_read_cap;
-		sd->sd_scsi_tur = sr_raid_tur;
-		sd->sd_scsi_req_sense = sr_raid_request_sense;
-		sd->sd_scsi_start_stop = sr_raid_start_stop;
-		sd->sd_scsi_sync = sr_raid_sync;
-		sd->sd_scsi_rw = sr_raid1_rw;
-		sd->sd_set_chunk_state = sr_raid1_set_chunk_state;
-		sd->sd_set_vol_state = sr_raid1_set_vol_state;
-		break;
-#ifdef AOE
-	/* target */
-	case 'A':
-		/* fill out discipline members */
-		sd->sd_type = SR_MD_AOE_TARG;
-		sd->sd_max_ccb_per_wu = no_chunk;
-		sd->sd_max_wu = SR_RAIDAOE_NOWU;
-
-		/* setup discipline pointers */
-		sd->sd_alloc_resources = sr_aoe_server_alloc_resources;
-		sd->sd_free_resources = sr_aoe_server_free_resources;
-		sd->sd_start_discipline = sr_aoe_server_start;
-		sd->sd_scsi_inquiry = NULL;
-		sd->sd_scsi_read_cap = NULL;
-		sd->sd_scsi_tur = NULL;
-		sd->sd_scsi_req_sense = NULL;
-		sd->sd_scsi_start_stop = NULL;
-		sd->sd_scsi_sync = NULL;
-		sd->sd_scsi_rw = NULL;
-		sd->sd_set_chunk_state = NULL;
-		sd->sd_set_vol_state = NULL;
-		disk = 0; /* we are not a disk */
-		break;
-	case 'a':
-		/* initiator */
-		/* fill out discipline members */
-		sd->sd_type = SR_MD_AOE_INIT;
-		sd->sd_max_ccb_per_wu = no_chunk;
-		sd->sd_max_wu = SR_RAIDAOE_NOWU;
-
-		/* setup discipline pointers */
-		sd->sd_alloc_resources = sr_aoe_alloc_resources;
-		sd->sd_free_resources = sr_aoe_free_resources;
-		sd->sd_start_discipline = NULL;
-		sd->sd_scsi_inquiry = sr_raid_inquiry;
-		sd->sd_scsi_read_cap = sr_raid_read_cap;
-		sd->sd_scsi_tur = sr_raid_tur;
-		sd->sd_scsi_req_sense = sr_raid_request_sense;
-		sd->sd_scsi_start_stop = sr_raid_start_stop;
-		sd->sd_scsi_sync = sr_raid_sync;
-		sd->sd_scsi_rw = sr_aoe_rw;
-		/* XXX reuse raid 1 functions for now FIXME */
-		sd->sd_set_chunk_state = sr_raid1_set_chunk_state;
-		sd->sd_set_vol_state = sr_raid1_set_vol_state;
-		break;
-#endif
-#ifdef CRYPTO
-	case 'C':
-		/* fill out discipline members */
-		sd->sd_type = SR_MD_CRYPTO;
-		sd->sd_max_ccb_per_wu = no_chunk;
-		sd->sd_max_wu = SR_CRYPTO_NOWU;
-
-		/* setup discipline pointers */
-		sd->sd_alloc_resources = sr_crypto_alloc_resources;
-		sd->sd_free_resources = sr_crypto_free_resources;
-		sd->sd_start_discipline = NULL;
-		sd->sd_scsi_inquiry = sr_raid_inquiry;
-		sd->sd_scsi_read_cap = sr_raid_read_cap;
-		sd->sd_scsi_tur = sr_raid_tur;
-		sd->sd_scsi_req_sense = sr_raid_request_sense;
-		sd->sd_scsi_start_stop = sr_raid_start_stop;
-		sd->sd_scsi_sync = sr_raid_sync;
-		sd->sd_scsi_rw = sr_crypto_rw;
-		/* XXX reuse raid 1 functions for now FIXME */
-		sd->sd_set_chunk_state = sr_raid1_set_chunk_state;
-		sd->sd_set_vol_state = sr_raid1_set_vol_state;
-		break;
-#endif
-	default:
+	if (sr_discipline_init(sd, bc->bc_level)) {
+		printf("%s: could not initialize discipline\n", DEVNAME(sc));
 		goto unwind;
 	}
 
@@ -2099,6 +2041,9 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 		goto unwind;
 
 	if (disk) {
+		/* set volume status */
+		sd->sd_set_vol_state(sd);
+
 		/* setup scsi midlayer */
 		sd->sd_link.openings = sd->sd_max_wu;
 		sd->sd_link.device = &sr_dev;
@@ -2318,6 +2263,132 @@ sr_discipline_shutdown(struct sr_discipline *sd)
 		sr_discipline_free(sd);
 
 	splx(s);
+}
+
+int
+sr_discipline_init(struct sr_discipline *sd, int level)
+{
+	int			rv = 1;
+
+	switch (level) {
+	case 0:
+		/* fill out discipline members */
+		sd->sd_type = SR_MD_RAID0;
+		sd->sd_max_ccb_per_wu =
+		    (MAXPHYS / sd->sd_meta->ssdi.ssd_strip_size + 1) *
+		    SR_RAID0_NOWU * sd->sd_meta->ssdi.ssd_chunk_no;
+		sd->sd_max_wu = SR_RAID0_NOWU;
+
+		/* setup discipline pointers */
+		sd->sd_alloc_resources = sr_raid0_alloc_resources;
+		sd->sd_free_resources = sr_raid0_free_resources;
+		sd->sd_start_discipline = NULL;
+		sd->sd_scsi_inquiry = sr_raid_inquiry;
+		sd->sd_scsi_read_cap = sr_raid_read_cap;
+		sd->sd_scsi_tur = sr_raid_tur;
+		sd->sd_scsi_req_sense = sr_raid_request_sense;
+		sd->sd_scsi_start_stop = sr_raid_start_stop;
+		sd->sd_scsi_sync = sr_raid_sync;
+		sd->sd_scsi_rw = sr_raid0_rw;
+		sd->sd_set_chunk_state = sr_raid0_set_chunk_state;
+		sd->sd_set_vol_state = sr_raid0_set_vol_state;
+		break;
+	case 1:
+		/* fill out discipline members */
+		sd->sd_type = SR_MD_RAID1;
+		sd->sd_max_ccb_per_wu = sd->sd_meta->ssdi.ssd_chunk_no;
+		sd->sd_max_wu = SR_RAID1_NOWU;
+
+		/* setup discipline pointers */
+		sd->sd_alloc_resources = sr_raid1_alloc_resources;
+		sd->sd_free_resources = sr_raid1_free_resources;
+		sd->sd_start_discipline = NULL;
+		sd->sd_scsi_inquiry = sr_raid_inquiry;
+		sd->sd_scsi_read_cap = sr_raid_read_cap;
+		sd->sd_scsi_tur = sr_raid_tur;
+		sd->sd_scsi_req_sense = sr_raid_request_sense;
+		sd->sd_scsi_start_stop = sr_raid_start_stop;
+		sd->sd_scsi_sync = sr_raid_sync;
+		sd->sd_scsi_rw = sr_raid1_rw;
+		sd->sd_set_chunk_state = sr_raid1_set_chunk_state;
+		sd->sd_set_vol_state = sr_raid1_set_vol_state;
+		break;
+#ifdef AOE
+	/* target */
+	case 'A':
+		/* fill out discipline members */
+		sd->sd_type = SR_MD_AOE_TARG;
+		sd->sd_max_ccb_per_wu = sd->sd_meta->ssdi.ssd_chunk_no;
+		sd->sd_max_wu = SR_RAIDAOE_NOWU;
+
+		/* setup discipline pointers */
+		sd->sd_alloc_resources = sr_aoe_server_alloc_resources;
+		sd->sd_free_resources = sr_aoe_server_free_resources;
+		sd->sd_start_discipline = sr_aoe_server_start;
+		sd->sd_scsi_inquiry = NULL;
+		sd->sd_scsi_read_cap = NULL;
+		sd->sd_scsi_tur = NULL;
+		sd->sd_scsi_req_sense = NULL;
+		sd->sd_scsi_start_stop = NULL;
+		sd->sd_scsi_sync = NULL;
+		sd->sd_scsi_rw = NULL;
+		sd->sd_set_chunk_state = NULL;
+		sd->sd_set_vol_state = NULL;
+		disk = 0; /* we are not a disk */
+		break;
+	case 'a':
+		/* initiator */
+		/* fill out discipline members */
+		sd->sd_type = SR_MD_AOE_INIT;
+		sd->sd_max_ccb_per_wu = sd->sd_meta->ssdi.ssd_chunk_no;
+		sd->sd_max_wu = SR_RAIDAOE_NOWU;
+
+		/* setup discipline pointers */
+		sd->sd_alloc_resources = sr_aoe_alloc_resources;
+		sd->sd_free_resources = sr_aoe_free_resources;
+		sd->sd_start_discipline = NULL;
+		sd->sd_scsi_inquiry = sr_raid_inquiry;
+		sd->sd_scsi_read_cap = sr_raid_read_cap;
+		sd->sd_scsi_tur = sr_raid_tur;
+		sd->sd_scsi_req_sense = sr_raid_request_sense;
+		sd->sd_scsi_start_stop = sr_raid_start_stop;
+		sd->sd_scsi_sync = sr_raid_sync;
+		sd->sd_scsi_rw = sr_aoe_rw;
+		/* XXX reuse raid 1 functions for now FIXME */
+		sd->sd_set_chunk_state = sr_raid1_set_chunk_state;
+		sd->sd_set_vol_state = sr_raid1_set_vol_state;
+		break;
+#endif
+#ifdef CRYPTO
+	case 'C':
+		/* fill out discipline members */
+		sd->sd_type = SR_MD_CRYPTO;
+		sd->sd_max_ccb_per_wu = sd->sd_meta->ssdi.ssd_chunk_no;
+		sd->sd_max_wu = SR_CRYPTO_NOWU;
+
+		/* setup discipline pointers */
+		sd->sd_alloc_resources = sr_crypto_alloc_resources;
+		sd->sd_free_resources = sr_crypto_free_resources;
+		sd->sd_start_discipline = NULL;
+		sd->sd_scsi_inquiry = sr_raid_inquiry;
+		sd->sd_scsi_read_cap = sr_raid_read_cap;
+		sd->sd_scsi_tur = sr_raid_tur;
+		sd->sd_scsi_req_sense = sr_raid_request_sense;
+		sd->sd_scsi_start_stop = sr_raid_start_stop;
+		sd->sd_scsi_sync = sr_raid_sync;
+		sd->sd_scsi_rw = sr_crypto_rw;
+		/* XXX reuse raid 1 functions for now FIXME */
+		sd->sd_set_chunk_state = sr_raid1_set_chunk_state;
+		sd->sd_set_vol_state = sr_raid1_set_vol_state;
+		break;
+#endif
+	default:
+		goto bad;
+	}
+
+	rv = 0;
+bad:
+	return (rv);
 }
 
 int
