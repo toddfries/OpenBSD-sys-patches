@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.h,v 1.40 2009/01/05 09:46:26 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.h,v 1.43 2009/04/24 16:05:06 jakemsr Exp $	*/
 /*	$NetBSD: azalia.h,v 1.6 2006/01/16 14:15:26 kent Exp $	*/
 
 /*-
@@ -609,6 +609,12 @@ typedef struct {
 	int cur;
 } volgroup_t;
 
+struct io_pin {
+	nid_t nid;		/* NID of pin */
+	nid_t conv;		/* NID of default converter */
+	int prio;		/* assoc/seq/dir "priority" */
+};
+
 typedef struct codec_t {
 	int (*comresp)(const struct codec_t *, nid_t, uint32_t, uint32_t, uint32_t *);
 	int (*init_dacgroup)(struct codec_t *);
@@ -639,17 +645,31 @@ typedef struct codec_t {
 	int nmixers, maxmixers;
 	mixer_item_t *mixers;
 
-	struct audio_format* formats;
+	struct audio_format *formats;
 	int nformats;
-	struct audio_encoding* encs;
+	struct audio_encoding *encs;
 	int nencs;
 
-	int headphones;
-	int hp_dac;
-	int speaker;
-	int spkr_dac;
+	struct io_pin *ipins;
+	int nipins;
+	struct io_pin *ipins_d;
+	int nipins_d;
+	struct io_pin *opins;
+	int nopins;
+	struct io_pin *opins_d;
+	int nopins_d;
+
+	nid_t a_dacs[HDA_MAX_CHANNELS], a_dacs_d[HDA_MAX_CHANNELS];
+	int na_dacs, na_dacs_d;
+	nid_t a_adcs[HDA_MAX_CHANNELS], a_adcs_d[HDA_MAX_CHANNELS];
+	int na_adcs, na_adcs_d;
+
+	nid_t mic;		/* fixed (internal) mic */
+	nid_t mic_adc;
+	nid_t speaker;		/* fixed (internal) speaker */
+	nid_t spkr_dac;
+
 	int spkr_muters;
-	int mic;
 
 	volgroup_t playvols;
 	volgroup_t recvols;
@@ -665,3 +685,4 @@ int	azalia_codec_init_vtbl(codec_t *);
 int	azalia_codec_construct_format(codec_t *, int, int);
 int	azalia_widget_enabled(const codec_t *, nid_t);
 int	azalia_codec_gpio_quirks(codec_t *);
+int	azalia_codec_fnode(codec_t *, nid_t, int, int);

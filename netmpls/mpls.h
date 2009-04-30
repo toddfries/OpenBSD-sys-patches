@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpls.h,v 1.19 2009/02/03 16:42:54 michele Exp $	*/
+/*	$OpenBSD: mpls.h,v 1.21 2009/04/28 12:07:43 michele Exp $	*/
 
 /*
  * Copyright (C) 1999, 2000 and 2001 AYAME Project, WIDE Project.
@@ -100,6 +100,7 @@ struct rt_mpls {
 	u_int8_t	mpls_exp;
 };
 
+#define MPLS_OP_LOCAL		0x0
 #define MPLS_OP_POP		0x1
 #define MPLS_OP_PUSH		0x2
 #define MPLS_OP_SWAP		0x4
@@ -179,5 +180,8 @@ struct mbuf	*mpls_shim_push(struct mbuf *, struct rt_mpls *);
 int		 mpls_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 void		 mpls_input(struct mbuf *);
 struct mbuf	*mpls_output(struct mbuf *, struct rtentry *);
+
+void		 mpls_ip_input(struct mbuf *, u_int8_t);
+void		 mpls_ip6_input(struct mbuf *, u_int8_t);
 
 #endif /* _KERNEL */

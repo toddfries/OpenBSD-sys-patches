@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.640 2009/04/06 12:05:55 henning Exp $ */
+/*	$OpenBSD: pf.c,v 1.646 2009/04/23 02:01:21 dlg Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -2917,10 +2917,10 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 		    r->os_fingerprint)))
 			r = TAILQ_NEXT(r, entries);
 		else {
-			lastr = r;
 			if (r->tag)
 				tag = r->tag;
 			if (r->anchor == NULL) {
+				lastr = r;
 				if (r->action == PF_MATCH) {
 					ri = pool_get(&pf_rule_item_pl,
 					    PR_NOWAIT);
@@ -4075,7 +4075,7 @@ pf_icmp_state_lookup(struct pf_state_key_cmp *key, struct pf_pdesc *pd,
 	    PF_IN : PF_OUT) != icmp_dir) {
 		if (pf_status.debug >= PF_DEBUG_MISC) {
 			printf("pf: icmp type %d in wrong direction (%d): ",
-			    icmp_dir);
+			    ntohs(type), icmp_dir);
 			pf_print_state(*state);
 			printf("\n");
 		}
@@ -4365,7 +4365,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 				REASON_SET(reason, PFRES_BADSTATE);
 				return (PF_DROP);
 			} else {
-				if (pf_status.debug >= PF_DEBUG_MISC) {
+				if (pf_status.debug >= PF_DEBUG_NOISY) {
 					printf("pf: OK ICMP %d:%d ",
 					    icmptype, pd->hdr.icmp->icmp_code);
 					pf_print_host(pd->src, 0, pd->af);
@@ -5381,6 +5381,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 	struct pf_ruleset	*ruleset = NULL;
 	struct pf_pdesc		 pd;
 	int			 off, dirndx, pqid = 0;
+	u_int16_t		 qid;
 
 	if (!pf_status.running)
 		return (PF_PASS);
@@ -5549,6 +5550,15 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 		break;
 	}
 
+#ifdef INET6
+	case IPPROTO_ICMPV6: {
+		action = PF_DROP;
+		DPFPRINTF(PF_DEBUG_MISC,
+		    ("pf: dropping IPv4 packet with ICMPv6 payload\n"));
+		goto done;
+	}
+#endif
+
 	default:
 		action = pf_test_state_other(&s, dir, kif, m, &pd);
 		if (action == PF_PASS) {
@@ -5574,25 +5584,29 @@ done:
 		    ("pf: dropping packet with ip options\n"));
 	}
 
-	if (s)
+	if (s) {
 		pf_scrub_ip(&m, s->state_flags, s->min_ttl, s->set_tos);
-	else
+		pf_tag_packet(m, s->tag, s->rtableid);
+		if (pqid || (pd.tos & IPTOS_LOWDELAY))
+			qid = s->pqid;
+		else
+			qid = s->qid;
+	} else {
 		pf_scrub_ip(&m, r->scrub_flags, r->min_ttl, r->set_tos);
-
-	if (s && (s->tag || s->rtableid))
-		pf_tag_packet(m, s ? s->tag : 0, s->rtableid);
+		pf_tag_packet(m, r->tag, r->rtableid);
+		if (pqid || (pd.tos & IPTOS_LOWDELAY))
+			qid = r->pqid;
+		else
+			qid = r->qid;
+	}
 
 	if (dir == PF_IN && s && s->key[PF_SK_STACK])
 		m->m_pkthdr.pf.statekey = s->key[PF_SK_STACK];
 
 #ifdef ALTQ
-	if (action == PF_PASS && s && s->qid) {
-		if (pqid || (pd.tos & IPTOS_LOWDELAY))
-			m->m_pkthdr.pf.qid = s->pqid;
-		else
-			m->m_pkthdr.pf.qid = s->qid;
-		/* add hints for ecn */
-		m->m_pkthdr.pf.hdr = h;
+	if (action == PF_PASS && qid) {
+		m->m_pkthdr.pf.qid = qid;
+		m->m_pkthdr.pf.hdr = h;	/* hints for ecn */
 	}
 #endif /* ALTQ */
 
@@ -5630,10 +5644,12 @@ done:
 		if (log == PF_LOG_FORCE || lr->log & PF_LOG_ALL)
 			PFLOG_PACKET(kif, h, m, AF_INET, dir, reason, lr, a,
 			    ruleset, &pd);
-		SLIST_FOREACH(ri, &s->match_rules, entry)
-			if (ri->r->log & PF_LOG_ALL)
-				PFLOG_PACKET(kif, h, m, AF_INET, dir, reason,
-				    ri->r, a, ruleset, &pd);
+		if (s) {
+			SLIST_FOREACH(ri, &s->match_rules, entry)
+				if (ri->r->log & PF_LOG_ALL)
+					PFLOG_PACKET(kif, h, m, AF_INET, dir,
+					    reason, ri->r, a, ruleset, &pd);
+		}
 	}
 
 	kif->pfik_bytes[0][dir == PF_OUT][action != PF_PASS] += pd.tot_len;
@@ -5918,6 +5934,13 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 			action = pf_test_rule(&r, &s, dir, kif,
 			    m, off, h, &pd, &a, &ruleset, &ip6intrq);
 		break;
+	}
+
+	case IPPROTO_ICMP: {
+		action = PF_DROP;
+		DPFPRINTF(PF_DEBUG_MISC,
+		    ("pf: dropping IPv6 packet with ICMPv4 payload\n"));
+		goto done;
 	}
 
 	case IPPROTO_ICMPV6: {

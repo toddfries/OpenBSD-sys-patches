@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.115 2009/04/03 09:29:15 art Exp $	*/
+/*	$OpenBSD: proc.h,v 1.117 2009/04/17 15:17:27 blambert Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -464,8 +464,6 @@ int	msleep(void *, struct mutex *, int,  const char*, int);
 void	proc_trampoline_mp(void);	/* XXX */
 #endif
 
-int proc_isunder(struct proc *, struct proc *);
-
 /*
  * functions to handle sets of cpus.
  *
@@ -485,7 +483,10 @@ void cpuset_add(struct cpuset *, struct cpu_info *);
 void cpuset_del(struct cpuset *, struct cpu_info *);
 int cpuset_isset(struct cpuset *, struct cpu_info *);
 void cpuset_add_all(struct cpuset *);
-void cpuset_copy(struct cpuset *to, struct cpuset *from);
+void cpuset_copy(struct cpuset *, struct cpuset *);
+void cpuset_union(struct cpuset *, struct cpuset *, struct cpuset *);
+void cpuset_intersection(struct cpuset *t, struct cpuset *, struct cpuset *);
+void cpuset_complement(struct cpuset *, struct cpuset *, struct cpuset *);
 struct cpu_info *cpuset_first(struct cpuset *);
 
 #endif	/* _KERNEL */

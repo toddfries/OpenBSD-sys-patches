@@ -103,7 +103,7 @@ i915_disable_pipestat(drm_i915_private_t *dev_priv, int pipe, u_int32_t mask)
 }
 
 /**
- * i915_get_pipe - return the the pipe associated with a given plane
+ * i915_get_pipe - return the pipe associated with a given plane
  * @dev: DRM device
  * @plane: plane to look for
  *
@@ -176,6 +176,12 @@ i915_get_vblank_counter(struct drm_device *dev, int plane)
 		DRM_DEBUG("trying to get vblank count for disabled pipe %d\n",
 		    pipe);
 		return (0);
+	}
+
+	/* GM45 just had to be different... */
+	if (IS_GM45(dev_priv) || IS_G4X(dev_priv)) {
+		return (I915_READ(pipe ? PIPEB_FRMCOUNT_GM45 :
+		    PIPEA_FRMCOUNT_GM45));
 	}
 
 	/*

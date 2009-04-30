@@ -70,7 +70,6 @@ include "dev/puc/files.puc"
 device	mpcpcibr {} : pcibus
 attach	mpcpcibr at mainbus
 file	arch/macppc/pci/mpcpcibus.c			mpcpcibr
-file	arch/macppc/pci/pci_addr_fixup.c		mpcpcibr
 
 device  ht {} : pcibus
 attach	ht at mainbus
