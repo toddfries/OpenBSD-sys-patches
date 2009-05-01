@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.126 2009/04/27 23:49:04 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.130 2009/05/01 04:00:40 jakemsr Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -212,6 +212,7 @@ int	azalia_codec_find_defadc_sub(codec_t *, nid_t, int, int);
 int	azalia_codec_init_volgroups(codec_t *);
 int	azalia_codec_sort_pins(codec_t *);
 int	azalia_codec_select_micadc(codec_t *);
+int	azalia_codec_select_spkrdac(codec_t *);
 
 int	azalia_widget_init(widget_t *, const codec_t *, int);
 int	azalia_widget_label_widgets(codec_t *);
@@ -1278,7 +1279,7 @@ azalia_codec_init(codec_t *this)
 
 	this->na_dacs = this->na_dacs_d = 0;
 	this->na_adcs = this->na_adcs_d = 0;
-	this->speaker = this->spkr_dac = this->mic = -1;
+	this->speaker = this->spkr_dac = this->mic = this->mic_adc = -1;
 	this->nsense_pins = 0;
 	FOR_EACH_WIDGET(this, i) {
 		if (!this->w[i].enable)
@@ -1344,8 +1345,6 @@ azalia_codec_init(codec_t *this)
 		}
 	}
 
-	this->mic_adc = -1;
-
 	/* make sure built-in mic is connected to an adc */
 	if (this->mic != -1 && this->mic_adc == -1) {
 		if (azalia_codec_select_micadc(this)) {
@@ -1354,6 +1353,10 @@ azalia_codec_init(codec_t *this)
 	}
 
 	err = azalia_codec_sort_pins(this);
+	if (err)
+		return err;
+
+	err = azalia_codec_select_spkrdac(this);
 	if (err)
 		return err;
 
@@ -1390,7 +1393,7 @@ int
 azalia_codec_select_micadc(codec_t *this)
 {
 	widget_t *w;
-	int i, j, err;
+	int i, j, conv, err;
 
 	for (i = 0; i < this->na_adcs; i++) {
 		if (azalia_codec_fnode(this, this->mic,
@@ -1399,9 +1402,13 @@ azalia_codec_select_micadc(codec_t *this)
 	}
 	if (i >= this->na_adcs)
 		return(-1);
-	w = &this->w[this->a_adcs[i]];
+	conv = this->a_adcs[i];
+
+	w = &this->w[conv];
 	for (j = 0; j < 10; j++) {
 		for (i = 0; i < w->nconnections; i++) {
+			if (!azalia_widget_enabled(this, w->connections[i]))
+				continue;
 			if (azalia_codec_fnode(this, this->mic,
 			    w->connections[i], j + 1) >= 0) {
 				break;
@@ -1414,8 +1421,10 @@ azalia_codec_select_micadc(codec_t *this)
 		if (err)
 			return(err);
 		w->selected = i;
-		if (w->connections[i] == this->mic)
+		if (w->connections[i] == this->mic) {
+			this->mic_adc = conv;
 			return(0);
+		}
 		w = &this->w[w->connections[i]];
 	}
 	return(-1);
@@ -1633,6 +1642,84 @@ azalia_codec_sort_pins(codec_t *this)
 
 	return 0;
 #undef MAX_PINS
+}
+
+/* Connect the speaker to a DAC that no other output pin is connected
+ * to by default.  If that is not possible, connect to a DAC other
+ * than the one the first output pin is connected to. 
+ */
+int
+azalia_codec_select_spkrdac(codec_t *this)
+{
+	widget_t *w;
+	nid_t convs[HDA_MAX_CHANNELS];
+	int nconv, conv;
+	int i, j, err, fspkr, conn;
+
+	nconv = fspkr = 0;
+	for (i = 0; i < this->nopins; i++) {
+		conv = this->opins[i].conv;
+		for (j = 0; j < nconv; j++) {
+			if (conv == convs[j])
+				break;
+		}
+		if (j == nconv) {
+			if (conv == this->spkr_dac)
+				fspkr = 1;
+			convs[nconv++] = conv;
+			if (nconv == this->na_dacs)
+				break;
+		}
+	}
+
+	if (fspkr) {
+		conn = conv = -1;
+		w = &this->w[this->speaker];
+		for (i = 0; i < w->nconnections; i++) {
+			conv = azalia_codec_find_defdac(this,
+			    w->connections[i], 1);
+			for (j = 0; j < nconv; j++)
+				if (conv == convs[j])
+					break;
+			if (j == nconv)
+				break;
+		}
+		if (i < w->nconnections) {
+			conn = i;
+		} else {
+			/* Couldn't get a unique DAC.  Try to get a diferent
+			 * DAC than the first pin's DAC.
+			 */
+			if (this->spkr_dac == this->opins[0].conv) {
+				/* If the speaker connection can't be changed,
+				 * change the first pin's connection.
+				 */
+				if (w->nconnections == 1)
+					w = &this->w[this->opins[0].nid];
+				for (j = 0; j < w->nconnections; j++) {
+					conv = azalia_codec_find_defdac(this,
+					    w->connections[j], 1);
+					if (conv != this->opins[0].conv) {
+						conn = j;
+						break;
+					}
+				}
+			}
+		}
+		if (conn != -1) {
+			err = this->comresp(this, w->nid,
+			    CORB_SET_CONNECTION_SELECT_CONTROL, conn, 0);
+			if (err)
+				return(err);
+			w->selected = conn;
+			if (w->nid == this->speaker)
+				this->spkr_dac = conv;
+			else
+				this->opins[0].conv = conv;
+		}
+	}
+
+	return(0);
 }
 
 int
@@ -2325,7 +2412,7 @@ azalia_widget_init(widget_t *this, const codec_t *codec, nid_t nid)
 int
 azalia_widget_sole_conn(codec_t *this, nid_t nid)
 {
-	int i, j, target;
+	int i, j, target, nconn, has_target;
 
 	/* connected to ADC */
 	for (i = 0; i < this->adcs.ngroups; i++) {
@@ -2348,18 +2435,39 @@ azalia_widget_sole_conn(codec_t *this, nid_t nid)
 		}
 	}
 	/* connected to pin complex */
-	j = -1;
+	target = -1;
 	FOR_EACH_WIDGET(this, i) {
-		if (this->w[i].type == COP_AWTYPE_PIN_COMPLEX &&
-		    this->w[i].nconnections == 1 &&
+		if (this->w[i].type != COP_AWTYPE_PIN_COMPLEX)
+			continue;
+		if (this->w[i].nconnections == 1 &&
 		    this->w[i].connections[0] == nid) {
-			if (j != -1)
+			if (target != -1)
 				return -1;
-			j = i;
+			target = i;
+		} else {
+			nconn = 0;
+			has_target = 0;
+			for (j = 0; j < this->w[i].nconnections; j++) {
+				if (!this->w[this->w[i].connections[j]].enable)
+					continue;
+				nconn++;
+				if (this->w[i].connections[j] == nid)
+					has_target = 1;
+			}
+			if (has_target == 1) {
+				if (nconn == 1) {
+					if (target != -1)
+						return -1;
+					target = i;
+				} else {
+					/* not sole connection at least once */
+					return -1;
+				}
+			}
 		}
 	}
-	if (j != -1)
-		return j;
+	if (target != -1)
+		return target;
 
 	return -1;
 }
