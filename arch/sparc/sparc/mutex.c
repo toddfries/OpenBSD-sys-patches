@@ -63,6 +63,24 @@ mtx_enter(struct mutex *mtx)
 	mtx->mtx_lock = 1;
 }
 
+int
+mtx_enter_try(struct mutex *mtx)
+{
+	int psr;
+
+	if (mtx->mtx_wantipl != IPL_NONE << 8) {
+		psr = getpsr();
+		mtx->mtx_oldipl = psr & PSR_PIL;
+		if (mtx->mtx_oldipl < mtx->mtx_wantipl)
+			setpsr((psr & ~PSR_PIL) | mtx->mtx_wantipl);
+	}
+
+	MUTEX_ASSERT_UNLOCKED(mtx);
+	mtx->mtx_lock = 1;
+
+	return 1;
+}
+
 void
 mtx_leave(struct mutex *mtx)
 {
