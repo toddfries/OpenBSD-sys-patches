@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.120 2009/04/27 23:49:04 jakemsr Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.122 2009/05/01 03:45:17 jakemsr Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -153,11 +153,41 @@ azalia_codec_init_vtbl(codec_t *this)
 		this->name = "Realtek ALC888";
 		this->init_widget = azalia_alc88x_init_widget;
 		break;
+	case 0x111d7603:
+		this->name = "IDT 92HD75B3/4";
+		break;
+	case 0x111d7604:
+		this->name = "IDT 92HD83C1X";
+		break;
+	case 0x111d7605:
+		this->name = "IDT 92HD81B1X";
+		break;
+	case 0x111d7608:
+		this->name = "IDT 92HD75B1/2";
+		break;
+	case 0x111d7674:
+		this->name = "IDT 92HD73D1";
+		break;
+	case 0x111d7675:
+		this->name = "IDT 92HD73C1";	/* aka 92HDW74C1 */
+		break;
+	case 0x111d7676:
+		this->name = "IDT 92HD73E1";	/* aka 92HDW74E1 */
+		break;
+	case 0x111d76b0:
+		this->name = "IDT 92HD71B8";
+		break;
 	case 0x111d76b2:
 		this->name = "IDT 92HD71B7";
 		break;
 	case 0x111d76b6:
 		this->name = "IDT 92HD71B5";
+		break;
+	case 0x111d76d4:
+		this->name = "IDT 92HD83C1C";
+		break;
+	case 0x111d76d5:
+		this->name = "IDT 92HD81B1C";
 		break;
 	case 0x11d41884:
 		this->name = "Analog Devices AD1884";
@@ -192,6 +222,18 @@ azalia_codec_init_vtbl(codec_t *this)
 	case 0x434d4980:
 		this->name = "CMedia CMI9880";
 		break;
+	case 0x83847612:
+		this->name = "Sigmatel STAC9230X";
+		break;
+	case 0x83847613:
+		this->name = "Sigmatel STAC9230D";
+		break;
+	case 0x83847614:
+		this->name = "Sigmatel STAC9229X";
+		break;
+	case 0x83847615:
+		this->name = "Sigmatel STAC9229D";
+		break;
 	case 0x83847616:
 		this->name = "Sigmatel STAC9228X";
 		break;
@@ -200,6 +242,9 @@ azalia_codec_init_vtbl(codec_t *this)
 		break;
 	case 0x83847618:
 		this->name = "Sigmatel STAC9227X";
+		break;
+	case 0x83847619:
+		this->name = "Sigmatel STAC9227D";
 		break;
 	case 0x83847620:
 		this->name = "Sigmatel STAC9274";
@@ -222,6 +267,18 @@ azalia_codec_init_vtbl(codec_t *this)
 	case 0x83847636:
 		this->name = "Sigmatel STAC9251";
 		break;
+	case 0x83847638:
+		this->name = "IDT 92HD700X";
+		break;
+	case 0x83847639:
+		this->name = "IDT 92HD700D";
+		break;
+	case 0x83847645:
+		this->name = "IDT 92HD206X";
+		break;
+	case 0x83847646:
+		this->name = "IDT 92HD206D";
+		break;
 	case 0x83847661:
 		/* FALLTHROUGH */
 	case 0x83847662:
@@ -229,16 +286,24 @@ azalia_codec_init_vtbl(codec_t *this)
 		this->mixer_init = azalia_stac7661_mixer_init;
 		break;
 	case 0x83847680:
-		this->name = "Sigmatel STAC9221";
+		this->name = "Sigmatel STAC9220/1";
 		break;
+	case 0x83847682:
+		/* FALLTHROUGH */
 	case 0x83847683:
-		this->name = "Sigmatel STAC9221D";
+		this->name = "Sigmatel STAC9221D";	/* aka IDT 92HD202 */
 		break;
 	case 0x83847690:
-		this->name = "Sigmatel STAC9200";
+		this->name = "Sigmatel STAC9200";	/* aka IDT 92HD001 */
 		break;
 	case 0x83847691:
 		this->name = "Sigmatel STAC9200D";
+		break;
+	case 0x83847698:
+		this->name = "IDT 92HD005";
+		break;
+	case 0x83847699:
+		this->name = "IDT 92HD005D";
 		break;
 	case 0x838476a0:
 		this->name = "Sigmatel STAC9205X";
@@ -445,15 +510,22 @@ azalia_generic_unsol(codec_t *this, int tag)
 		}
 		if (err)
 			break;
-		if ((this->w[this->speaker].widgetcap & COP_AWCAP_OUTAMP) &&
-		    (this->w[this->speaker].outamp_cap & COP_AMPCAP_MUTE)) {
+		switch(this->spkr_mute_method) {
+		case AZ_SPKR_MUTE_SPKR_MUTE:
 			mc.un.ord = vol;
 			err = azalia_generic_mixer_set(this, this->speaker,
 			    MI_TARGET_OUTAMP, &mc);
-		} else {
+			break;
+		case AZ_SPKR_MUTE_SPKR_DIR:
 			mc.un.ord = vol ? 0 : 1;
 			err = azalia_generic_mixer_set(this, this->speaker,
 			    MI_TARGET_PINDIR, &mc);
+			break;
+		case AZ_SPKR_MUTE_DAC_MUTE:
+			mc.un.ord = vol;
+			err = azalia_generic_mixer_set(this, this->spkr_dac,
+			    MI_TARGET_OUTAMP, &mc);
+			break;
 		}
 		break;
 
@@ -893,12 +965,25 @@ azalia_generic_mixer_init(codec_t *this)
 	}
 
 	/* spkr mute by jack sense */
-	w = &this->w[this->speaker];
-	if (this->nsense_pins > 0 && this->speaker != -1 &&
-	    (((w->widgetcap & COP_AWCAP_OUTAMP) &&
-	    (w->outamp_cap & COP_AMPCAP_MUTE)) ||
-	    ((w->d.pin.cap & COP_PINCAP_OUTPUT) &&
-	    (w->d.pin.cap & COP_PINCAP_INPUT)))) {
+	this->spkr_mute_method = AZ_SPKR_MUTE_NONE;
+	if (this->speaker != -1 && this->spkr_dac != -1 && this->nsense_pins > 0) {
+		w = &this->w[this->speaker];
+		if ((w->widgetcap & COP_AWCAP_OUTAMP) &&
+		    (w->outamp_cap & COP_AMPCAP_MUTE))
+			this->spkr_mute_method = AZ_SPKR_MUTE_SPKR_MUTE;
+		else if ((w->d.pin.cap & COP_PINCAP_OUTPUT) &&
+		    (w->d.pin.cap & COP_PINCAP_INPUT))
+			this->spkr_mute_method = AZ_SPKR_MUTE_SPKR_DIR;
+		else {
+			w = &this->w[this->spkr_dac];
+			if (w->nid != this->dacs.groups[0].conv[0] &&
+			    (w->widgetcap & COP_AWCAP_OUTAMP) &&
+			    (w->outamp_cap & COP_AMPCAP_MUTE))
+				this->spkr_mute_method = AZ_SPKR_MUTE_DAC_MUTE;
+		}
+	}
+	if (this->spkr_mute_method != AZ_SPKR_MUTE_NONE) {
+		w = &this->w[this->speaker];
 		MIXER_REG_PROLOG;
 		m->nid = w->nid;
 		snprintf(d->label.name, sizeof(d->label.name),
