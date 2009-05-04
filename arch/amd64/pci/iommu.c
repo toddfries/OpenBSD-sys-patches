@@ -99,7 +99,7 @@
 #define	IOMMU_SIZE		512		/* size in MB */
 #define	IOMMU_ALIGN		IOMMU_SIZE
 
-int amdgart_enable = 0;
+int amdgart_enable = 1;
 
 struct amdgart_softc {
 	pci_chipset_tag_t	 g_pc;
