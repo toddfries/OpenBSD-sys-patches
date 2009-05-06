@@ -371,7 +371,8 @@ struct ostatfs {
 #define	MOUNT_CD9660	"cd9660"	/* ISO9660 (aka CDROM) Filesystem */
 #define	MOUNT_EXT2FS	"ext2fs"	/* Second Extended Filesystem */
 #define	MOUNT_NCPFS	"ncpfs"		/* NetWare Network File System */
-#define	MOUNT_XFS	"xfs"		/* xfs */
+#define	MOUNT_XFS	"nnpfs"		/* nnpfs (temp) */
+#define	MOUNT_NNPFS	"nnpfs"		/* nnpfs */
 #define	MOUNT_NTFS	"ntfs"		/* NTFS */
 #define	MOUNT_UDF	"udf"		/* UDF */
 

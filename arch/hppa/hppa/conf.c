@@ -88,9 +88,9 @@ int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 #include "wskbd.h"
 #include "wsmouse.h"
 #include "wsmux.h"
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 
 #include "inet.h"
@@ -162,8 +162,8 @@ struct cdevsw   cdevsw[] =
 #else
 	cdev_notdef(),			/* 31: */
 #endif
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 32: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 32: nnpfs communication device */
 #else
 	cdev_notdef(),
 #endif

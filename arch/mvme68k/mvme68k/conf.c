@@ -136,9 +136,9 @@ cdev_decl(fd);
 #include "lp.h"
 #include "lptwo.h"
 cdev_decl(lptwo);
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "ksyms.h"
 
@@ -210,8 +210,8 @@ struct cdevsw	cdevsw[] =
 	cdev_lkm_dummy(),		/* 48 */
 	cdev_lkm_dummy(),		/* 49 */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_lkm_dummy(),		/* 51 */
 #endif

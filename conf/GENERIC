@@ -37,7 +37,7 @@ option		UFS_DIRHASH	# hash large directories
 option		QUOTA		# UFS quotas
 option		EXT2FS		# Second Extended Filesystem
 option		MFS		# memory file system
-option		XFS		# xfs filesystem
+option		NNPFS		# NNPFS filesystem
 
 option		TCP_SACK	# Selective Acknowledgements for TCP
 option		TCP_ECN		# Explicit Congestion Notification for TCP
