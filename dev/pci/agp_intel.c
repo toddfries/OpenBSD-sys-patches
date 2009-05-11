@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_intel.c,v 1.12 2008/11/09 15:11:19 oga Exp $	*/
+/*	$OpenBSD: agp_intel.c,v 1.15 2009/05/10 16:57:44 oga Exp $	*/
 /*	$NetBSD: agp_intel.c,v 1.3 2001/09/15 00:25:00 thorpej Exp $	*/
 
 /*-
@@ -53,6 +53,8 @@ struct agp_intel_softc {
 	struct agp_gatt 	*gatt;
 	pci_chipset_tag_t	 isc_pc;
 	pcitag_t		 isc_tag;
+	bus_addr_t		 isc_apaddr;
+	bus_size_t		 isc_apsize;
 	u_int			 aperture_mask;
 	enum {
 		CHIP_INTEL,
@@ -62,7 +64,6 @@ struct agp_intel_softc {
 		CHIP_I850,
 		CHIP_I865
 	}			 chiptype; 
-	bus_size_t		 initial_aperture; /* startup aperture size */
 };
 
 
@@ -70,8 +71,8 @@ void	agp_intel_attach(struct device *, struct device *, void *);
 int	agp_intel_probe(struct device *, void *, void *);
 bus_size_t agp_intel_get_aperture(void *);
 int	agp_intel_set_aperture(void *, bus_size_t);
-int	agp_intel_bind_page(void *, off_t, bus_addr_t);
-int	agp_intel_unbind_page(void *, off_t);
+void	agp_intel_bind_page(void *, bus_addr_t, paddr_t, int);
+void	agp_intel_unbind_page(void *, bus_addr_t);
 void	agp_intel_flush_tlb(void *);
 
 struct cfattach intelagp_ca = {
@@ -83,7 +84,6 @@ struct cfdriver intelagp_cd = {
 };
 
 const struct agp_methods agp_intel_methods = {
-	agp_intel_get_aperture,
 	agp_intel_bind_page,
 	agp_intel_unbind_page,
 	agp_intel_flush_tlb,
@@ -163,17 +163,22 @@ agp_intel_attach(struct device *parent, struct device *self, void *aux)
 		isc->chiptype = CHIP_INTEL;
 	}
 
+	if (pci_mapreg_info(pa->pa_pc, pa->pa_tag, AGP_APBASE,
+	    PCI_MAPREG_TYPE_MEM, &isc->isc_apaddr, NULL, NULL) != 0) {
+		printf(": can't get aperture info\n");
+		return;
+	}
+
 	/* Determine maximum supported aperture size. */
 	value = pci_conf_read(pa->pa_pc, pa->pa_tag, AGP_INTEL_APSIZE);
 	pci_conf_write(pa->pa_pc, pa->pa_tag, AGP_INTEL_APSIZE, APSIZE_MASK);
 	isc->aperture_mask = pci_conf_read(pa->pa_pc, pa->pa_tag,
 		AGP_INTEL_APSIZE) & APSIZE_MASK;
 	pci_conf_write(pa->pa_pc, pa->pa_tag, AGP_INTEL_APSIZE, value);
-	isc->initial_aperture = agp_intel_get_aperture(isc);
+	isc->isc_apsize = agp_intel_get_aperture(isc);
 
 	for (;;) {
-		bus_size_t size = agp_intel_get_aperture(isc);
-		gatt = agp_alloc_gatt(pa->pa_dmat, size);
+		gatt = agp_alloc_gatt(pa->pa_dmat, isc->isc_apsize);
 		if (gatt != NULL)
 			break;
 
@@ -181,7 +186,8 @@ agp_intel_attach(struct device *parent, struct device *self, void *aux)
 		 * almost certainly error allocating contigious dma memory
 		 * so reduce aperture so that the gatt size reduces.
 		 */
-		if (agp_intel_set_aperture(isc, size / 2)) {
+		isc->isc_apsize /= 2;
+		if (agp_intel_set_aperture(isc, isc->isc_apsize)) {
 			printf(": failed to set aperture\n");
 			return;
 		}
@@ -248,7 +254,7 @@ agp_intel_attach(struct device *parent, struct device *self, void *aux)
 	}
 	
 	isc->agpdev = (struct agp_softc *)agp_attach_bus(pa, &agp_intel_methods,
-	    AGP_APBASE, PCI_MAPREG_TYPE_MEM, &isc->dev);
+	    isc->isc_apaddr, isc->isc_apsize, &isc->dev);
 	return;
 }
 
@@ -319,28 +325,21 @@ agp_intel_set_aperture(void *sc, bus_size_t aperture)
 	return (0);
 }
 
-int
-agp_intel_bind_page(void *sc, off_t offset, bus_addr_t physical)
+void
+agp_intel_bind_page(void *sc, bus_addr_t offset, paddr_t physical, int flags)
 {
 	struct agp_intel_softc *isc = sc;
 
-	if (offset < 0 || offset >= (isc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
-
-	isc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = physical | 0x17;
-	return (0);
+	isc->gatt->ag_virtual[(offset - isc->isc_apaddr) >> AGP_PAGE_SHIFT] =
+	    physical | 0x17;
 }
 
-int
-agp_intel_unbind_page(void *sc, off_t offset)
+void
+agp_intel_unbind_page(void *sc, bus_size_t offset)
 {
 	struct agp_intel_softc *isc = sc;
 
-	if (offset < 0 || offset >= (isc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
-
-	isc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = 0;
-	return (0);
+	isc->gatt->ag_virtual[(offset - isc->isc_apaddr) >> AGP_PAGE_SHIFT] = 0;
 }
 
 void

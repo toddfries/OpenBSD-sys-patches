@@ -1,4 +1,4 @@
-/* $OpenBSD: agp.c,v 1.29 2009/04/20 01:28:45 oga Exp $ */
+/* $OpenBSD: agp.c,v 1.32 2009/05/10 16:57:44 oga Exp $ */
 /*-
  * Copyright (c) 2000 Doug Rabson
  * All rights reserved.
@@ -115,14 +115,14 @@ agpvga_match(struct pci_attach_args *pa)
 
 struct device *
 agp_attach_bus(struct pci_attach_args *pa, const struct agp_methods *methods,
-    int bar, pcireg_t type, struct device *dev)
+    bus_addr_t apaddr, bus_size_t apsize, struct device *dev)
 {
 	struct agpbus_attach_args arg;
 
 	arg.aa_methods = methods;
 	arg.aa_pa = pa;
-	arg.aa_bar = bar;
-	arg.aa_type = type;
+	arg.aa_apaddr = apaddr;
+	arg.aa_apsize = apsize;
 
 	printf("\n"); /* newline from the driver that called us */
 	return (config_found(dev, &arg, agpdev_print));
@@ -149,6 +149,8 @@ agp_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_chipc = parent;
 	sc->sc_methods = aa->aa_methods;
+	sc->sc_apaddr = aa->aa_apaddr;
+	sc->sc_apsize = aa->aa_apsize;
 
 	static const int agp_max[][2] = {
 		{0,		0},
@@ -191,15 +193,8 @@ agp_attach(struct device *parent, struct device *self, void *aux)
 	pci_get_capability(sc->sc_pc, sc->sc_pcitag, PCI_CAP_AGP,
 	    &sc->sc_capoff, NULL);
 
-	printf(": ");
-	if (agp_map_aperture(pa, sc, aa->aa_bar, aa->aa_type) != 0) {
-		printf("can't map aperture\n");
-		sc->sc_chipc = NULL;
-		return;
-	}
-
-	printf("aperture at 0x%lx, size 0x%lx\n", (u_long)sc->sc_apaddr,
-	    (u_long)sc->sc_methods->get_aperture(sc->sc_chipc));
+	printf(": aperture at 0x%lx, size 0x%lx\n", (u_long)sc->sc_apaddr,
+	    (u_long)sc->sc_apsize);
 }
 
 struct cfattach agp_ca = {
@@ -218,7 +213,7 @@ agpmmap(void *v, off_t off, int prot)
 
 	if (sc->sc_apaddr) {
 
-		if (off > sc->sc_methods->get_aperture(sc->sc_chipc))
+		if (off > sc->sc_apsize)
 			return (-1);
 
 		/*
@@ -326,17 +321,6 @@ agp_find_memory(struct agp_softc *sc, int id)
 		if (mem->am_id == id)
 			return (mem);
 	}
-	return (0);
-}
-
-int
-agp_map_aperture(struct pci_attach_args *pa, struct agp_softc *sc, u_int32_t bar, u_int32_t memtype)
-{
-	/* Find the aperture. Don't map it (yet), this would eat KVA */
-	if (pci_mapreg_info(pa->pa_pc, pa->pa_tag, bar, memtype,
-	    &sc->sc_apaddr, NULL, NULL) != 0)
-		return (ENXIO);
-
 	return (0);
 }
 
@@ -478,13 +462,12 @@ agp_generic_free_memory(struct agp_softc *sc, struct agp_memory *mem)
 
 int
 agp_generic_bind_memory(struct agp_softc *sc, struct agp_memory *mem,
-			off_t offset)
+    bus_size_t offset)
 {
-	bus_dma_segment_t *segs, *seg;
-	bus_size_t done, j;
-	bus_addr_t pa;
-	off_t i, k;
-	int nseg, error;
+	bus_dma_segment_t	*segs, *seg;
+	bus_addr_t		 apaddr = sc->sc_apaddr + offset;
+	bus_size_t		 done, i, j;
+	int			 nseg, error;
 
 	rw_enter_write(&sc->sc_lock);
 
@@ -494,9 +477,8 @@ agp_generic_bind_memory(struct agp_softc *sc, struct agp_memory *mem,
 		return (EINVAL);
 	}
 
-	if (offset < 0 || (offset & (AGP_PAGE_SIZE - 1)) != 0
-	    || offset + mem->am_size >
-	    sc->sc_methods->get_aperture(sc->sc_chipc)) {
+	if (offset < 0 || (offset & (AGP_PAGE_SIZE - 1)) != 0 ||
+	    offset + mem->am_size > sc->sc_apsize) {
 		printf("AGP: binding memory at bad offset %#lx\n",
 		    (unsigned long) offset);
 		rw_exit_write(&sc->sc_lock);
@@ -530,43 +512,21 @@ agp_generic_bind_memory(struct agp_softc *sc, struct agp_memory *mem,
 	mem->am_dmaseg = segs;
 
 	/*
-	 * Bind the individual pages and flush the chipset's
-	 * TLB.
+	 * Install entries in the GATT, making sure that if
+	 * AGP_PAGE_SIZE < PAGE_SIZE and mem->am_size is not
+	 * aligned to PAGE_SIZE, we don't modify too many GATT
+	 * entries. Flush chipset tlb when done.
 	 */
 	done = 0;
 	for (i = 0; i < mem->am_dmamap->dm_nsegs; i++) {
 		seg = &mem->am_dmamap->dm_segs[i];
-		/*
-		 * Install entries in the GATT, making sure that if
-		 * AGP_PAGE_SIZE < PAGE_SIZE and mem->am_size is not
-		 * aligned to PAGE_SIZE, we don't modify too many GATT
-		 * entries.
-		 */
 		for (j = 0; j < seg->ds_len && (done + j) < mem->am_size;
 		    j += AGP_PAGE_SIZE) {
-			pa = seg->ds_addr + j;
 			AGP_DPF("binding offset %#lx to pa %#lx\n",
 			    (unsigned long)(offset + done + j),
-			    (unsigned long)pa);
-			error = sc->sc_methods->bind_page(sc->sc_chipc,
-			    offset + done + j, pa);
-			if (error) {
-				/*
-				 * Bail out. Reverse all the mappings
-				 * and unwire the pages.
-				 */
-				for (k = 0; k < done + j; k += AGP_PAGE_SIZE)
-					sc->sc_methods->unbind_page(
-					    sc->sc_chipc, offset + k);
-
-				bus_dmamap_unload(sc->sc_dmat, mem->am_dmamap);
-				bus_dmamem_free(sc->sc_dmat, mem->am_dmaseg,
-				    mem->am_nseg);
-				free(mem->am_dmaseg, M_AGP);
-				rw_exit_write(&sc->sc_lock);
-				AGP_DPF("AGP_BIND_PAGE failed %d\n", error);
-				return (error);
-			}
+			    (unsigned long)seg->ds_addr + j);
+			sc->sc_methods->bind_page(sc->sc_chipc,
+			    apaddr + done + j, seg->ds_addr + j, 0);
 		}
 		done += seg->ds_len;
 	}
@@ -593,7 +553,8 @@ agp_generic_bind_memory(struct agp_softc *sc, struct agp_memory *mem,
 int
 agp_generic_unbind_memory(struct agp_softc *sc, struct agp_memory *mem)
 {
-	int i;
+	bus_addr_t	apaddr = sc->sc_apaddr + mem->am_offset;
+	bus_size_t	i;
 
 	rw_enter_write(&sc->sc_lock);
 
@@ -609,7 +570,7 @@ agp_generic_unbind_memory(struct agp_softc *sc, struct agp_memory *mem)
 	 * TLB. Unwire the pages so they can be swapped.
 	 */
 	for (i = 0; i < mem->am_size; i += AGP_PAGE_SIZE)
-		sc->sc_methods->unbind_page(sc->sc_chipc, mem->am_offset + i);
+		sc->sc_methods->unbind_page(sc->sc_chipc, apaddr + i);
 
 	agp_flush_cache();
 	sc->sc_methods->flush_tlb(sc->sc_chipc);
@@ -739,7 +700,7 @@ agp_info_user(void *dev, agp_info *info)
 	else
 		info->agp_mode = 0; /* i810 doesn't have real AGP */
 	info->aper_base = sc->sc_apaddr;
-	info->aper_size = sc->sc_methods->get_aperture(sc->sc_chipc) >> 20;
+	info->aper_size = sc->sc_apsize >> 20;
 	info->pg_total =
 	info->pg_system = sc->sc_maxmem >> AGP_PAGE_SHIFT;
 	info->pg_used = sc->sc_allocated >> AGP_PAGE_SHIFT;
@@ -839,7 +800,7 @@ agp_get_info(void *dev, struct agp_info *info)
 	else
 		info->ai_mode = 0; /* i810 doesn't have real AGP */
 	info->ai_aperture_base = sc->sc_apaddr;
-	info->ai_aperture_size = sc->sc_methods->get_aperture(sc->sc_chipc);
+	info->ai_aperture_size = sc->sc_apsize;
         info->ai_memory_allowed = sc->sc_maxmem;
         info->ai_memory_used = sc->sc_allocated;
 }

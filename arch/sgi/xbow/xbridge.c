@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbridge.c,v 1.14 2009/05/03 19:44:28 miod Exp $	*/
+/*	$OpenBSD: xbridge.c,v 1.16 2009/05/08 18:37:28 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009  Miodrag Vallat.
@@ -33,12 +33,14 @@
 #include <machine/bus.h>
 #include <machine/cpu.h>
 #include <machine/intr.h>
+#include <machine/mnode.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 
 #include <mips64/archtype.h>
+#include <sgi/xbow/hub.h>
 #include <sgi/xbow/xbow.h>
 #include <sgi/xbow/xbowdevs.h>
 
@@ -495,7 +497,8 @@ xbridge_conf_write(void *cookie, pcitag_t tag, int offset, pcireg_t data)
 
 struct xbridge_intr {
 	struct	xbridge_softc	*xi_bridge;
-	int	xi_intrsrc;
+	int	xi_intrsrc;	/* interrupt source on interrupt widget */
+	int	xi_intrbit;	/* interrupt source on BRIDGE */
 
 	int	(*xi_func)(void *);
 	void	*xi_arg;
@@ -576,7 +579,7 @@ xbridge_intr_establish(void *cookie, pci_intr_handle_t ih, int level,
 		 * given source, yet.
 		 */
 		if (xbow_intr_establish(xbridge_intr_handler, xi, intrsrc,
-		    level, sc->sc_dev.dv_xname)) {
+		    level, NULL)) {
 			printf("%s: unable to register interrupt handler, "
 			    "did xheart or xhub attach?\n",
 			    sc->sc_dev.dv_xname);
@@ -588,6 +591,7 @@ xbridge_intr_establish(void *cookie, pci_intr_handle_t ih, int level,
 
 	xi->xi_bridge = sc;
 	xi->xi_intrsrc = intrsrc;
+	xi->xi_intrbit = intrbit;
 	xi->xi_func = func;
 	xi->xi_arg = arg;
 	xi->xi_level = level;
@@ -648,6 +652,7 @@ xbridge_intr_handler(void *v)
 {
 	struct xbridge_intr *xi = v;
 	struct xbridge_softc *sc = xi->xi_bridge;
+	uint16_t nasid = 0;	/* XXX */
 	int rc;
 
 	if (xi == NULL) {
@@ -658,6 +663,30 @@ xbridge_intr_handler(void *v)
 
 	if ((rc = (*xi->xi_func)(xi->xi_arg)) != 0)
 		xi->xi_count.ec_count++;
+
+	/*
+	 * There is a known BRIDGE race in which, if two interrupts
+	 * on two different pins occur within 60nS of each other,
+	 * further interrupts on the first pin do not cause an interrupt
+	 * to be sent.
+	 *
+	 * The workaround against this is to check if our interrupt source
+	 * is still active (i.e. another interrupt is pending), in which
+	 * case we force an interrupt anyway.
+	 *
+	 * The XBridge even has a nice facility to do this, where we do not
+	 * even have to check if our interrupt is pending.
+	 */
+
+	if (ISSET(sc->sc_flags, XBRIDGE_FLAGS_XBRIDGE)) {
+		bus_space_write_4(sc->sc_iot, sc->sc_regh,
+		    BRIDGE_INT_FORCE_PIN(xi->xi_intrbit), 1);
+	} else {
+		if (bus_space_read_4(sc->sc_iot, sc->sc_regh, BRIDGE_ISR) &
+		    (1 << xi->xi_intrbit))
+			IP27_RHUB_PI_S(nasid, 0, HUB_IR_CHANGE,
+			    HUB_IR_SET | xi->xi_intrsrc);
+	}
 
 	return rc;
 }
@@ -1005,11 +1034,6 @@ xbridge_resource_setup(struct xbridge_softc *sc)
 	 * On Octane, the firmware will setup the I/O registers
 	 * correctly for the on-board devices. Other PCI buses,
 	 * and other systems, need more attention.
-	 *
-	 * XXX Another reason not to enter the loop below on the Octane
-	 * XXX main Bridge widget is that it uses a sligthly different
-	 * XXX devio window allocation scheme, with only one large devio
-	 * XXX (used by the first isp controller).
 	 */
 	if (sys_config.system_type == SGI_OCTANE && sc->sc_widget == WIDGET_MAX)
 		return;
@@ -1023,6 +1047,8 @@ xbridge_resource_setup(struct xbridge_softc *sc)
 		/*
 		 * Devices which have been configured by the firmware
 		 * have their I/O window pointing to the bridge widget.
+		 * XXX We only need to preserve IOC3 devio settings if
+		 * XXX it is the console.
 		 */
 		devio = bus_space_read_4(sc->sc_iot, sc->sc_regh,
 		    BRIDGE_DEVICE(dev));
@@ -1048,16 +1074,13 @@ xbridge_resource_setup(struct xbridge_softc *sc)
 		}
 
 		/*
-		 * Enable byte swapping for PIO and DMA, except on IOC3 and
+		 * Enable byte swapping for DMA, except on IOC3 and
 		 * RAD1 devices.
 		 */
-		if (id == PCI_ID_CODE(PCI_VENDOR_SGI, PCI_PRODUCT_SGI_IOC3) ||
-		    id == PCI_ID_CODE(PCI_VENDOR_SGI, PCI_PRODUCT_SGI_RAD1))
-			devio &= ~(BRIDGE_DEVICE_SWAP_DIR |
-			    BRIDGE_DEVICE_SWAP_PMU);
-		else
-			devio |= BRIDGE_DEVICE_SWAP_DIR |
-			    BRIDGE_DEVICE_SWAP_PMU;
+		devio &= ~(BRIDGE_DEVICE_SWAP_DIR | BRIDGE_DEVICE_SWAP_PMU);
+		if (id != PCI_ID_CODE(PCI_VENDOR_SGI, PCI_PRODUCT_SGI_IOC3) &&
+		    id != PCI_ID_CODE(PCI_VENDOR_SGI, PCI_PRODUCT_SGI_RAD1))
+			devio |= BRIDGE_DEVICE_SWAP_PMU;
 
 		bus_space_write_4(sc->sc_iot, sc->sc_regh, BRIDGE_DEVICE(dev),
 		    devio);

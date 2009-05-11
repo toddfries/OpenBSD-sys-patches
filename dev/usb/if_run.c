@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_run.c,v 1.17 2009/04/02 17:47:15 damien Exp $	*/
+/*	$OpenBSD: if_run.c,v 1.20 2009/05/11 20:42:09 damien Exp $	*/
 
 /*-
  * Copyright (c) 2008,2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -92,6 +92,8 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(RALINK,			RT3070),
 	USB_ID(RALINK,			RT3071),
 	USB_ID(RALINK,			RT3072),
+	USB_ID(ABOCOM,			RT2870),
+	USB_ID(ABOCOM,			RT2770),
 	USB_ID(ASUS,			RT2870_1),
 	USB_ID(ASUS,			RT2870_2),
 	USB_ID(ASUS,			RT2870_3),
@@ -133,6 +135,8 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(SENAO,			RT2870_1),
 	USB_ID(SENAO,			RT2870_2),
 	USB_ID(SENAO,			RT3070),
+	USB_ID(SENAO,			RT3071),
+	USB_ID(SENAO,			RT3072),
 	USB_ID(PHILIPS,			RT2870),
 	USB_ID(CONCEPTRONIC2,		RT2870_4),
 	USB_ID(AZUREWAVE,		RT2870_1),
@@ -158,12 +162,15 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(LOGITEC,			RT2870_2),
 	USB_ID(LOGITEC,			RT2870_3),
 	USB_ID(AIRTIES,			RT3070),
+	USB_ID(DLINK2,			RT3072),
+	USB_ID(PEGATRON,		RT3070),
 
 	/* Entries not in the Ralink Linux driver. */
 	USB_ID(AMIT,			CGWLUSB2GNR),
 	USB_ID(ASUS2,			USBN11),
 	USB_ID(BELKIN,			F5D8053V3),
 	USB_ID(BELKIN,			F5D8055),
+	USB_ID(BELKIN,			F6D4050V1),
 	USB_ID(CONCEPTRONIC2,		VIGORN61),
 	USB_ID(COREGA,			CGWLUSB300GNM),
 	USB_ID(DLINK2,			DWA130),
@@ -1768,7 +1775,7 @@ run_rx_frame(struct run_softc *sc, uint8_t *buf, int dmalen)
 		wh = (struct ieee80211_frame *)((caddr_t)wh + 2);
 	}
 
-	/* could use m_devget buf net80211 wants contig mgmt frames */
+	/* could use m_devget but net80211 wants contig mgmt frames */
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
 	if (__predict_false(m == NULL)) {
 		ifp->if_ierrors++;
@@ -1874,7 +1881,6 @@ run_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	}
 
 	/* HW can aggregate multiple 802.11 frames in a single USB xfer */
-	/* NB: can't happen yet because we disable USB RX aggregation */
 	buf = data->buf;
 	while (xferlen > 8) {
 		dmalen = letoh32(*(uint32_t *)buf) & 0xffff;
@@ -2504,7 +2510,7 @@ run_set_macaddr(struct run_softc *sc, const uint8_t *addr)
 	run_write(sc, RT2860_MAC_ADDR_DW0,
 	    addr[0] | addr[1] << 8 | addr[2] << 16 | addr[3] << 24);
 	run_write(sc, RT2860_MAC_ADDR_DW1,
-	    addr[4] | addr[5] << 8);
+	    addr[4] | addr[5] << 8 | 0xff << 16);
 }
 
 void
@@ -2774,12 +2780,9 @@ run_txrx_enable(struct run_softc *sc)
 	tmp |= RT2860_RX_DMA_EN | RT2860_TX_DMA_EN | RT2860_TX_WB_DDONE;
 	run_write(sc, RT2860_WPDMA_GLO_CFG, tmp);
 
-	tmp = RT2860_USB_TX_EN | RT2860_USB_RX_EN;
-#ifdef notyet
-	/* enable bulk aggregation */
-	tmp |= RT2860_USB_RX_AGG_EN | 0x80 << RT2860_USB_RX_AGG_TO_SHIFT |
-	    ((RUN_MAX_RXSZ / 1024) - 3) << RT2860_USB_RX_AGG_LMT_SHIFT;
-#endif
+	/* enable Rx bulk aggregation (set timeout and limit) */
+	tmp = RT2860_USB_TX_EN | RT2860_USB_RX_EN | RT2860_USB_RX_AGG_EN |
+	    RT2860_USB_RX_AGG_TO(128) | RT2860_USB_RX_AGG_LMT(2);
 	run_write(sc, RT2860_USB_DMA_CFG, tmp);
 
 	/* set Rx filter */

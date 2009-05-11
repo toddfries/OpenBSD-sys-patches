@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_amd.c,v 1.10 2009/04/20 01:28:45 oga Exp $	*/
+/*	$OpenBSD: agp_amd.c,v 1.13 2009/05/10 16:57:44 oga Exp $	*/
 /*	$NetBSD: agp_amd.c,v 1.6 2001/10/06 02:48:50 thorpej Exp $	*/
 
 /*-
@@ -72,7 +72,8 @@ struct agp_amd_softc {
 	pcitag_t		 asc_tag;
 	bus_space_handle_t	 ioh;
 	bus_space_tag_t		 iot;
-	bus_size_t		 initial_aperture;
+	bus_addr_t		 asc_apaddr;
+	bus_size_t		 asc_apsize;
 };
 
 void	agp_amd_attach(struct device *, struct device *, void *);
@@ -80,8 +81,8 @@ int	agp_amd_probe(struct device *, void *, void *);
 bus_size_t agp_amd_get_aperture(void *);
 struct agp_amd_gatt *agp_amd_alloc_gatt(bus_dma_tag_t, bus_size_t);
 int	agp_amd_set_aperture(void *, bus_size_t);
-int	agp_amd_bind_page(void *, off_t, bus_addr_t);
-int	agp_amd_unbind_page(void *, off_t);
+void	agp_amd_bind_page(void *, bus_size_t, paddr_t, int);
+void	agp_amd_unbind_page(void *, bus_size_t);
 void	agp_amd_flush_tlb(void *);
 
 struct cfattach amdagp_ca = {
@@ -93,7 +94,6 @@ struct cfdriver amdagp_cd = {
 };
 
 const struct agp_methods agp_amd_methods = {
-	agp_amd_get_aperture,
 	agp_amd_bind_page,
 	agp_amd_unbind_page,
 	agp_amd_flush_tlb,
@@ -192,6 +192,12 @@ agp_amd_attach(struct device *parent, struct device *self, void *aux)
 	asc->asc_pc = pa->pa_pc;
 	asc->asc_tag = pa->pa_tag;
 
+	if (pci_mapreg_info(pa->pa_pc, pa->pa_tag, AGP_APBASE,
+	    PCI_MAPREG_TYPE_MEM, &asc->asc_apaddr, NULL, NULL) != 0) {
+		printf(": can't get aperture info\n");
+		return;
+	}
+
 	error = pci_mapreg_map(pa, AGP_AMD751_REGISTERS,
 	     PCI_MAPREG_TYPE_MEM, 0, &asc->iot, &asc->ioh, NULL, NULL, 0);
 	if (error != 0) {
@@ -199,11 +205,10 @@ agp_amd_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	asc->initial_aperture = agp_amd_get_aperture(asc);
+	asc->asc_apsize = agp_amd_get_aperture(asc);
 
 	for (;;) {
-		bus_size_t size = agp_amd_get_aperture(asc);
-		gatt = agp_amd_alloc_gatt(pa->pa_dmat, size);
+		gatt = agp_amd_alloc_gatt(pa->pa_dmat, asc->asc_apsize);
 		if (gatt != NULL)
 			break;
 
@@ -211,7 +216,8 @@ agp_amd_attach(struct device *parent, struct device *self, void *aux)
 		 * almost certainly error allocating contigious dma memory
 		 * so reduce aperture so that the gatt size reduces.
 		 */
-		if (agp_amd_set_aperture(asc, size / 2)) {
+		asc->asc_apsize /= 2;
+		if (agp_amd_set_aperture(asc, asc->asc_apsize)) {
 			printf(": failed to set aperture\n");
 			return;
 		}
@@ -232,7 +238,7 @@ agp_amd_attach(struct device *parent, struct device *self, void *aux)
 	agp_amd_flush_tlb(asc);
 
 	asc->agpdev = (struct agp_softc *)agp_attach_bus(pa, &agp_amd_methods,
-	    AGP_APBASE, PCI_MAPREG_TYPE_MEM, &asc->dev);
+	    asc->asc_apaddr, asc->asc_apsize, &asc->dev);
 	return;
 }
 
@@ -306,28 +312,21 @@ agp_amd_set_aperture(void *sc, bus_size_t aperture)
 	return (0);
 }
 
-int
-agp_amd_bind_page(void *sc, off_t offset, bus_addr_t physical)
+void
+agp_amd_bind_page(void *sc, bus_size_t offset, paddr_t physical, int flags)
 {
 	struct agp_amd_softc	*asc = sc;
 
-	if (offset < 0 || offset >= (asc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
-
-	asc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = physical | 1;
-	return (0);
+	asc->gatt->ag_virtual[(offset - asc->asc_apaddr) >> AGP_PAGE_SHIFT] =
+	    physical | 1;
 }
 
-int
-agp_amd_unbind_page(void *sc, off_t offset)
+void
+agp_amd_unbind_page(void *sc, bus_size_t offset)
 {
 	struct agp_amd_softc	*asc = sc;
 
-	if (offset < 0 || offset >= (asc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
-
-	asc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = 0;
-	return (0);
+	asc->gatt->ag_virtual[(offset - asc->asc_apaddr) >> AGP_PAGE_SHIFT] = 0;
 }
 
 void

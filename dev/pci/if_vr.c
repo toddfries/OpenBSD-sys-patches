@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.83 2009/04/30 18:28:29 mpf Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.90 2009/05/11 16:23:03 sthen Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -54,9 +54,9 @@
  * multicast filter. Transmit and receive descriptors are similar
  * to the tulip.
  *
- * The Rhine has a serious flaw in its transmit DMA mechanism:
+ * Early Rhine has a serious flaw in its transmit DMA mechanism:
  * transmit buffers must be longword aligned. Unfortunately,
- * FreeBSD doesn't guarantee that mbufs will be filled in starting
+ * OpenBSD doesn't guarantee that mbufs will be filled in starting
  * at longword boundaries, so we have to do a buffer copy before
  * transmission.
  */
@@ -101,6 +101,7 @@
 #include <dev/pci/if_vrreg.h>
 
 int vr_probe(struct device *, void *, void *);
+int vr_quirks(struct pci_attach_args *);
 void vr_attach(struct device *, struct device *, void *);
 
 struct cfattach vr_ca = {
@@ -139,14 +140,33 @@ int vr_list_tx_init(struct vr_softc *);
 
 int vr_alloc_mbuf(struct vr_softc *, struct vr_chain_onefrag *, struct mbuf *);
 
-const struct pci_matchid vr_devices[] = {
-	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_RHINE },
-	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_RHINEII },
-	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_RHINEII_2 },
-	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT6105 },
-	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT6105M },
-	{ PCI_VENDOR_DELTA, PCI_PRODUCT_DELTA_RHINEII },
-	{ PCI_VENDOR_ADDTRON, PCI_PRODUCT_ADDTRON_RHINEII }
+/*
+ * Supported devices & quirks
+ */
+#define	VR_Q_NEEDALIGN		(1<<0)
+#define	VR_Q_CSUM		(1<<1)
+#define	VR_Q_CAM		(1<<2)
+#define	VR_Q_HWTAG		(1<<3)
+
+struct vr_type {
+	pci_vendor_id_t		vr_vid;
+	pci_product_id_t	vr_pid;
+	int			vr_quirks;
+} vr_devices[] = {
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_RHINE,
+	    VR_Q_NEEDALIGN },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_RHINEII,
+	    VR_Q_NEEDALIGN },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_RHINEII_2,
+	    0 },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT6105,
+	    0 },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT6105M,
+	    VR_Q_CSUM | VR_Q_CAM | VR_Q_HWTAG },
+	{ PCI_VENDOR_DELTA, PCI_PRODUCT_DELTA_RHINEII,
+	    VR_Q_NEEDALIGN },
+	{ PCI_VENDOR_ADDTRON, PCI_PRODUCT_ADDTRON_RHINEII,
+	    VR_Q_NEEDALIGN }
 };
 
 #define VR_SETBIT(sc, reg, x)				\
@@ -217,7 +237,7 @@ vr_mii_readreg(struct vr_softc *sc, struct vr_mii_frame *frame)
  */
 int
 vr_mii_writereg(struct vr_softc *sc, struct vr_mii_frame *frame)
-{      
+{
 	int			s, i;
 
 	s = splnet();
@@ -235,7 +255,7 @@ vr_mii_writereg(struct vr_softc *sc, struct vr_mii_frame *frame)
 	for (i = 0; i < 10000; i++) {
 		if ((CSR_READ_1(sc, VR_MIICMD) & VR_MIICMD_WRITE_ENB) == 0)
 			break;
-		DELAY(1); 
+		DELAY(1);
 	}
 
 	splx(s);
@@ -424,7 +444,7 @@ vr_reset(struct vr_softc *sc)
 #endif
 			VR_SETBIT(sc, VR_MISC_CR1, VR_MISCCR1_FORSRST);
 		}
-	}       
+	}
 
 	/* Wait a little while for the chip to get its brains in order. */
 	DELAY(1000);
@@ -436,8 +456,30 @@ vr_reset(struct vr_softc *sc)
 int
 vr_probe(struct device *parent, void *match, void *aux)
 {
-	return (pci_matchbyid((struct pci_attach_args *)aux, vr_devices,
-	    sizeof(vr_devices)/sizeof(vr_devices[0])));
+	const struct vr_type *vr;
+	struct pci_attach_args *pa = (struct pci_attach_args *)aux;
+	int i, nent = nitems(vr_devices);
+
+	for (i = 0, vr = vr_devices; i < nent; i++, vr++)
+		if (PCI_VENDOR(pa->pa_id) == vr->vr_vid &&
+		   PCI_PRODUCT(pa->pa_id) == vr->vr_pid)
+			return(1);
+
+	return(0);
+}
+
+int
+vr_quirks(struct pci_attach_args *pa)
+{
+	const struct vr_type *vr;
+	int i, nent = nitems(vr_devices);
+
+	for (i = 0, vr = vr_devices; i < nent; i++, vr++)
+		if (PCI_VENDOR(pa->pa_id) == vr->vr_vid &&
+		   PCI_PRODUCT(pa->pa_id) == vr->vr_pid)
+			return(vr->vr_quirks);
+
+	return(0);
 }
 
 /*
@@ -450,7 +492,7 @@ vr_attach(struct device *parent, struct device *self, void *aux)
 	int			i;
 	pcireg_t		command;
 	struct vr_softc		*sc = (struct vr_softc *)self;
-	struct pci_attach_args 	*pa = aux;
+	struct pci_attach_args	*pa = aux;
 	pci_chipset_tag_t	pc = pa->pa_pc;
 	pci_intr_handle_t	ih;
 	const char		*intrstr = NULL;
@@ -592,6 +634,7 @@ vr_attach(struct device *parent, struct device *self, void *aux)
 	}
 	sc->vr_ldata = (struct vr_list_data *)kva;
 	bzero(sc->vr_ldata, sizeof(struct vr_list_data));
+	sc->vr_quirks = vr_quirks(pa);
 
 	ifp = &sc->arpcom.ac_if;
 	ifp->if_softc = sc;
@@ -600,10 +643,14 @@ vr_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_start = vr_start;
 	ifp->if_watchdog = vr_watchdog;
 	ifp->if_baudrate = 10000000;
+	ifp->if_capabilities = 0;
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 
-	ifp->if_capabilities = IFCAP_VLAN_MTU;
+	ifp->if_capabilities |= IFCAP_VLAN_MTU;
+	if (sc->vr_quirks & VR_Q_CSUM)
+		ifp->if_capabilities |= IFCAP_CSUM_IPv4|IFCAP_CSUM_TCPv4|
+					IFCAP_CSUM_UDPv4;
 
 	/*
 	 * Do MII setup.
@@ -670,7 +717,7 @@ vr_list_tx_init(struct vr_softc *sc)
 			return (ENOBUFS);
 
 		if (i == (VR_TX_LIST_CNT - 1))
-			cd->vr_tx_chain[i].vr_nextdesc = 
+			cd->vr_tx_chain[i].vr_nextdesc =
 				&cd->vr_tx_chain[0];
 		else
 			cd->vr_tx_chain[i].vr_nextdesc =
@@ -700,7 +747,7 @@ vr_list_rx_init(struct vr_softc *sc)
 	ld = sc->vr_ldata;
 
 	for (i = 0; i < VR_RX_LIST_CNT; i++) {
-		if (bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES, 
+		if (bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES,
 		    0, BUS_DMA_NOWAIT | BUS_DMA_READ,
 		    &cd->vr_rx_chain[i].vr_map))
 			return (ENOBUFS);
@@ -716,7 +763,7 @@ vr_list_rx_init(struct vr_softc *sc)
 
 		if (i == (VR_RX_LIST_CNT - 1))
 			nexti = 0;
-		else 
+		else
 			nexti = i + 1;
 
 		cd->vr_rx_chain[i].vr_nextdesc = &cd->vr_rx_chain[nexti];
@@ -741,7 +788,7 @@ vr_rxeof(struct vr_softc *sc)
 	struct ifnet		*ifp;
 	struct vr_chain_onefrag	*cur_rx;
 	int			total_len = 0;
-	u_int32_t		rxstat;
+	u_int32_t		rxstat, rxctl;
 
 	ifp = &sc->arpcom.ac_if;
 
@@ -754,6 +801,8 @@ vr_rxeof(struct vr_softc *sc)
 		if (rxstat & VR_RXSTAT_OWN)
 			break;
 
+		rxctl = letoh32(sc->vr_cdata.vr_rx_head->vr_ptr->vr_ctl);
+
 		m0 = NULL;
 		cur_rx = sc->vr_cdata.vr_rx_head;
 		sc->vr_cdata.vr_rx_head = cur_rx->vr_nextdesc;
@@ -762,9 +811,9 @@ vr_rxeof(struct vr_softc *sc)
 		 * If an error occurs, update stats, clear the
 		 * status word and leave the mbuf cluster in place:
 		 * it should simply get re-used next time this descriptor
-	 	 * comes up in the ring.
+		 * comes up in the ring.
 		 */
-		if (rxstat & VR_RXSTAT_RXERR) {
+		if ((rxstat & VR_RXSTAT_RX_OK) == 0) {
 			ifp->if_ierrors++;
 #ifdef VR_DEBUG
 			printf("%s: rx error (%02x):",
@@ -798,17 +847,8 @@ vr_rxeof(struct vr_softc *sc)
 			continue;
 		}
 
-		/* No errors; receive the packet. */	
+		/* No errors; receive the packet. */
 		total_len = VR_RXBYTES(letoh32(cur_rx->vr_ptr->vr_status));
-
-		/*
-		 * XXX The VIA Rhine chip includes the CRC with every
-		 * received frame, and there's no way to turn this
-		 * behavior off (at least, I can't find anything in
-	 	 * the manual that explains how to do it) so we have
-		 * to trim off the CRC manually.
-		 */
-		total_len -= ETHER_CRC_LEN;
 
 		m = cur_rx->vr_mbuf;
 		cur_rx->vr_mbuf = NULL;
@@ -816,6 +856,13 @@ vr_rxeof(struct vr_softc *sc)
 		bus_dmamap_sync(sc->sc_dmat, cur_rx->vr_map, 0,
 		    cur_rx->vr_map->dm_mapsize, BUS_DMASYNC_POSTREAD);
 		bus_dmamap_unload(sc->sc_dmat, cur_rx->vr_map);
+
+		/*
+		 * The VIA Rhine chip includes the CRC with every
+		 * received frame, and there's no way to turn this
+		 * behavior off so trim the CRC manually.
+		 */
+		total_len -= ETHER_CRC_LEN;
 
 #ifndef __STRICT_ALIGNMENT
 		if (vr_alloc_mbuf(sc, cur_rx, NULL) == 0) {
@@ -835,13 +882,24 @@ vr_rxeof(struct vr_softc *sc)
 		}
 
 		ifp->if_ipackets++;
+		if (sc->vr_quirks & VR_Q_CSUM &&
+		    (rxstat & VR_RXSTAT_FRAG) == 0 &&
+		    (rxctl & VR_RXCTL_IP) != 0) {
+			/* Checksum is valid for non-fragmented IP packets. */
+			if ((rxctl & VR_RXCTL_IPOK) == VR_RXCTL_IPOK)
+				m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
+			if (rxctl & (VR_RXCTL_TCP | VR_RXCTL_UDP) &&
+			    ((rxctl & VR_RXCTL_TCPUDPOK) != 0))
+				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK |
+				    M_UDP_CSUM_IN_OK;
+		}
 
 #if NBPFILTER > 0
 		/*
 		 * Handle BPF listeners. Let the BPF user see the packet.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		/* pass it on. */
 		ether_input_mbuf(ifp, m);
@@ -860,20 +918,20 @@ vr_rxeoc(struct vr_softc *sc)
 
 	ifp = &sc->arpcom.ac_if;
 
-	ifp->if_ierrors++;      
+	ifp->if_ierrors++;
 
-	VR_CLRBIT16(sc, VR_COMMAND, VR_CMD_RX_ON);      
-	DELAY(10000);  
+	VR_CLRBIT16(sc, VR_COMMAND, VR_CMD_RX_ON);
+	DELAY(10000);
 
-	for (i = 0x400; 
+	for (i = 0x400;
 	    i && (CSR_READ_2(sc, VR_COMMAND) & VR_CMD_RX_ON);
-	    i--)  
+	    i--)
 		;       /* Wait for receiver to stop */
 
-	if (!i) {       
+	if (!i) {
 		printf("%s: rx shutdown error!\n", sc->sc_dev.dv_xname);
 		sc->vr_flags |= VR_F_RESTART;
-		return; 
+		return;
 	}
 
 	vr_rxeof(sc);
@@ -950,7 +1008,7 @@ vr_txeof(struct vr_softc *sc)
 
 	sc->vr_cdata.vr_tx_cons = cur_tx;
 	if (cur_tx->vr_mbuf == NULL)
- 		ifp->if_timer = 0;
+		ifp->if_timer = 0;
 }
 
 void
@@ -963,10 +1021,10 @@ vr_tick(void *xsc)
 	if (sc->vr_flags & VR_F_RESTART) {
 		printf("%s: restarting\n", sc->sc_dev.dv_xname);
 		vr_stop(sc);
-		vr_reset(sc);   
+		vr_reset(sc);
 		vr_init(sc);
 		sc->vr_flags &= ~VR_F_RESTART;
-	}           
+	}
 
 	mii_tick(&sc->sc_mii);
 	timeout_add_sec(&sc->sc_to, 1);
@@ -1012,7 +1070,7 @@ vr_intr(void *arg)
 			printf("%s: rx packet lost\n", sc->sc_dev.dv_xname);
 #endif
 			ifp->if_ierrors++;
-		}       
+		}
 
 		if ((status & VR_ISR_RX_ERR) || (status & VR_ISR_RX_NOBUF) ||
 		    (status & VR_ISR_RX_OFLOW)) {
@@ -1061,7 +1119,7 @@ vr_intr(void *arg)
 					VR_SETBIT16(sc, VR_COMMAND,
 					    VR_CMD_TX_ON);
 					VR_SETBIT16(sc, VR_COMMAND,
-					    VR_CMD_TX_GO); 
+					    VR_CMD_TX_GO);
 				}
 			}
 		}
@@ -1085,50 +1143,71 @@ vr_encap(struct vr_softc *sc, struct vr_chain *c, struct mbuf *m_head)
 {
 	struct vr_desc		*f = NULL;
 	struct mbuf		*m_new = NULL;
+	u_int32_t		vr_flags = 0, vr_status = 0;
 
-	MGETHDR(m_new, M_DONTWAIT, MT_DATA);
-	if (m_new == NULL)
-		return (1);
-	if (m_head->m_pkthdr.len > MHLEN) {
-		MCLGET(m_new, M_DONTWAIT);
-		if (!(m_new->m_flags & M_EXT)) {
+	if (sc->vr_quirks & VR_Q_CSUM) {
+		if (m_head->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
+			vr_flags |= VR_TXCTL_IPCSUM;
+		if (m_head->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+			vr_flags |= VR_TXCTL_TCPCSUM;
+		if (m_head->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+			vr_flags |= VR_TXCTL_UDPCSUM;
+	}
+
+	if (sc->vr_quirks & VR_Q_NEEDALIGN ||
+	    m_head->m_pkthdr.len < VR_MIN_FRAMELEN ||
+	    bus_dmamap_load_mbuf(sc->sc_dmat, c->vr_map, m_head,
+				 BUS_DMA_NOWAIT | BUS_DMA_WRITE)) {
+		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
+		if (m_new == NULL)
+			return (1);
+		if (m_head->m_pkthdr.len > MHLEN) {
+			MCLGET(m_new, M_DONTWAIT);
+			if (!(m_new->m_flags & M_EXT)) {
+				m_freem(m_new);
+				return (1);
+			}
+		}
+		m_copydata(m_head, 0, m_head->m_pkthdr.len,
+		    mtod(m_new, caddr_t));
+		m_new->m_pkthdr.len = m_new->m_len = m_head->m_pkthdr.len;
+
+		/*
+		 * The Rhine chip doesn't auto-pad, so we have to make
+		 * sure to pad short frames out to the minimum frame length
+		 * ourselves.
+		 */
+		if (m_head->m_pkthdr.len < VR_MIN_FRAMELEN) {
+			/* data field should be padded with octets of zero */
+			bzero(&m_new->m_data[m_new->m_len],
+			    VR_MIN_FRAMELEN-m_new->m_len);
+			m_new->m_pkthdr.len += VR_MIN_FRAMELEN - m_new->m_len;
+			m_new->m_len = m_new->m_pkthdr.len;
+		}
+
+		if (bus_dmamap_load_mbuf(sc->sc_dmat, c->vr_map, m_new,
+		    BUS_DMA_NOWAIT | BUS_DMA_WRITE)) {
 			m_freem(m_new);
 			return (1);
 		}
+		bus_dmamap_sync(sc->sc_dmat, c->vr_map, 0, c->vr_map->dm_mapsize,
+		    BUS_DMASYNC_PREWRITE);
+
+		m_freem(m_head);
+
+		c->vr_mbuf = m_new;
+	} else {
+		bus_dmamap_sync(sc->sc_dmat, c->vr_map, 0, c->vr_map->dm_mapsize,
+		    BUS_DMASYNC_PREWRITE);
+
+                c->vr_mbuf = m_head;
 	}
-	m_copydata(m_head, 0, m_head->m_pkthdr.len, mtod(m_new, caddr_t));
-	m_new->m_pkthdr.len = m_new->m_len = m_head->m_pkthdr.len;
-
-	/*
-	 * The Rhine chip doesn't auto-pad, so we have to make
-	 * sure to pad short frames out to the minimum frame length
-	 * ourselves.
-	 */
-	if (m_new->m_len < VR_MIN_FRAMELEN) {
-		/* data field should be padded with octets of zero */
-		bzero(&m_new->m_data[m_new->m_len],
-		    VR_MIN_FRAMELEN-m_new->m_len);
-		m_new->m_pkthdr.len += VR_MIN_FRAMELEN - m_new->m_len;
-		m_new->m_len = m_new->m_pkthdr.len;
-	}
-
-	if (bus_dmamap_load_mbuf(sc->sc_dmat, c->vr_map, m_new,
-	    BUS_DMA_NOWAIT | BUS_DMA_WRITE)) {
-		m_freem(m_new);
-		return (1);
-	}
-	bus_dmamap_sync(sc->sc_dmat, c->vr_map, 0, c->vr_map->dm_mapsize,
-	    BUS_DMASYNC_PREWRITE);
-
-	m_freem(m_head);
-
-	c->vr_mbuf = m_new;
 
 	f = c->vr_ptr;
 	f->vr_data = htole32(c->vr_map->dm_segs[0].ds_addr);
 	f->vr_ctl = htole32(c->vr_map->dm_mapsize);
-	f->vr_ctl |= htole32(VR_TXCTL_TLINK|VR_TXCTL_FIRSTFRAG);
-	f->vr_status = htole32(0);
+	f->vr_ctl |= htole32(vr_flags|VR_TXCTL_TLINK|VR_TXCTL_FIRSTFRAG);
+	f->vr_status = htole32(vr_status);
 
 	f->vr_ctl |= htole32(VR_TXCTL_LASTFRAG|VR_TXCTL_FINT);
 	f->vr_next = htole32(c->vr_nextdesc->vr_paddr);
@@ -1179,7 +1258,7 @@ vr_start(struct ifnet *ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, cur_tx->vr_mbuf,
+			bpf_mtap_ether(ifp->if_bpf, cur_tx->vr_mbuf,
 			BPF_DIRECTION_OUT);
 #endif
 		cur_tx = cur_tx->vr_nextdesc;

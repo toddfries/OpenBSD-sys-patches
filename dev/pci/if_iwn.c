@@ -1,8 +1,7 @@
-/*	$OpenBSD: if_iwn.c,v 1.50 2009/04/26 02:20:58 cnst Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.52 2009/05/11 19:36:00 damien Exp $	*/
 
 /*-
- * Copyright (c) 2007, 2008
- *	Damien Bergamini <damien.bergamini@free.fr>
+ * Copyright (c) 2007-2009 Damien Bergamini <damien.bergamini@free.fr>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -81,6 +80,8 @@ static const struct pci_matchid iwn_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_3 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_4 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_5 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_6 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_1 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_3 },
@@ -1203,7 +1204,7 @@ iwn_read_eeprom(struct iwn_softc *sc)
 	uint16_t val;
 	int error;
 
-	if ((IWN_READ(sc, IWN_EEPROM_GP) & 0x6) == 0) {
+	if ((IWN_READ(sc, IWN_EEPROM_GP) & 0x7) == 0) {
 		printf("%s: bad EEPROM signature\n", sc->sc_dev.dv_xname);
 		return EIO;
 	}
