@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbridge.c,v 1.16 2009/05/08 18:37:28 miod Exp $	*/
+/*	$OpenBSD: xbridge.c,v 1.18 2009/05/15 06:29:39 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009  Miodrag Vallat.
@@ -206,6 +206,7 @@ xbridge_attach(struct device *parent, struct device *self, void *aux)
 		goto fail2;
 
 	if (sys_config.system_type == SGI_OCTANE) {
+		/* Unrestricted memory mappings in the large window */
 		bcopy(xaa->xaa_long_tag, sc->sc_mem_bus_space,
 		    sizeof(*sc->sc_mem_bus_space));
 		sc->sc_mem_bus_space->bus_base += BRIDGE_PCI_MEM_SPACE_BASE;
@@ -499,6 +500,7 @@ struct xbridge_intr {
 	struct	xbridge_softc	*xi_bridge;
 	int	xi_intrsrc;	/* interrupt source on interrupt widget */
 	int	xi_intrbit;	/* interrupt source on BRIDGE */
+	int	xi_device;	/* device slot number */
 
 	int	(*xi_func)(void *);
 	void	*xi_arg;
@@ -506,6 +508,11 @@ struct xbridge_intr {
 	struct evcount	xi_count;
 	int	 xi_level;
 };
+
+/* how our pci_intr_handle_t are constructed... */
+#define	XBRIDGE_INTR_HANDLE(d,b)	(0x100 | ((d) << 3) | (b))
+#define	XBRIDGE_INTR_DEVICE(h)		(((h) >> 3) & 07)
+#define	XBRIDGE_INTR_BIT(h)		((h) & 07)
 
 int
 xbridge_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
@@ -532,7 +539,7 @@ xbridge_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 	else
 		intr = device ^ 4;
 
-	*ihp = intr;
+	*ihp = XBRIDGE_INTR_HANDLE(device, intr);
 
 	return 0;
 }
@@ -542,7 +549,7 @@ xbridge_intr_string(void *cookie, pci_intr_handle_t ih)
 {
 	static char str[16];
 
-	snprintf(str, sizeof(str), "irq %d", ih);
+	snprintf(str, sizeof(str), "irq %d", XBRIDGE_INTR_BIT(ih));
 	return(str);
 }
 
@@ -553,7 +560,8 @@ xbridge_intr_establish(void *cookie, pci_intr_handle_t ih, int level,
 	struct xbridge_softc *sc = cookie;
 	struct xbridge_intr *xi;
 	uint32_t int_addr;
-	int intrbit = ih & 0x07;
+	int intrbit = XBRIDGE_INTR_BIT(ih);
+	int device = XBRIDGE_INTR_DEVICE(ih);
 	int intrsrc;
 
 	if (sc->sc_intr[intrbit] != NULL) {
@@ -592,6 +600,7 @@ xbridge_intr_establish(void *cookie, pci_intr_handle_t ih, int level,
 	xi->xi_bridge = sc;
 	xi->xi_intrsrc = intrsrc;
 	xi->xi_intrbit = intrbit;
+	xi->xi_device = device;
 	xi->xi_func = func;
 	xi->xi_arg = arg;
 	xi->xi_level = level;
@@ -605,23 +614,31 @@ xbridge_intr_establish(void *cookie, pci_intr_handle_t ih, int level,
 	bus_space_write_4(sc->sc_iot, sc->sc_regh, BRIDGE_IER,
 	    bus_space_read_4(sc->sc_iot, sc->sc_regh, BRIDGE_IER) |
 	    (1 << intrbit));
+	/*
+	 * INT_MODE register controls which interrupt pins cause
+	 * ``interrupt clear'' packets to be sent for high->low
+	 * transition.
+	 * We enable such packets to be sent in order not to have to
+	 * clear interrupts ourselves.
+	 */
 	bus_space_write_4(sc->sc_iot, sc->sc_regh, BRIDGE_INT_MODE,
 	    bus_space_read_4(sc->sc_iot, sc->sc_regh, BRIDGE_INT_MODE) |
 	    (1 << intrbit));
 	bus_space_write_4(sc->sc_iot, sc->sc_regh, BRIDGE_INT_DEV,
 	    bus_space_read_4(sc->sc_iot, sc->sc_regh, BRIDGE_INT_DEV) |
-	    (intrbit << (intrbit * 3)));
+	    (device << (intrbit * 3)));
 	(void)bus_space_read_4(sc->sc_iot, sc->sc_regh, WIDGET_TFLUSH);
 
-	return (void *)((uint64_t)ih | 8);	/* XXX don't return zero */
+	return (void *)((uint64_t)ih);
 }
 
 void
-xbridge_intr_disestablish(void *cookie, void *ih)
+xbridge_intr_disestablish(void *cookie, void *vih)
 {
 	struct xbridge_softc *sc = cookie;
 	struct xbridge_intr *xi;
-	int intrbit = (uint64_t)ih & 0x07;
+	pci_intr_handle_t ih = (pci_intr_handle_t)(uint64_t)vih;
+	int intrbit = XBRIDGE_INTR_BIT(ih);
 
 	/* should not happen */
 	if ((xi = sc->sc_intr[intrbit]) == NULL)
@@ -654,41 +671,77 @@ xbridge_intr_handler(void *v)
 	struct xbridge_softc *sc = xi->xi_bridge;
 	uint16_t nasid = 0;	/* XXX */
 	int rc;
+	int spurious;
 
 	if (xi == NULL) {
-		printf("%s: spurious interrupt on source %d\n",
-		    sc->sc_dev.dv_xname, xi->xi_intrsrc);
+		printf("%s: spurious irq %d\n",
+		    sc->sc_dev.dv_xname, xi->xi_intrbit);
 		return 0;
 	}
 
+	/*
+	 * Flush PCI write buffers before servicing the interrupt.
+	 */
+	bus_space_read_4(sc->sc_iot, sc->sc_regh,
+	    BRIDGE_DEVICE_WBFLUSH(xi->xi_device));
+
+	if ((bus_space_read_4(sc->sc_iot, sc->sc_regh, BRIDGE_ISR) &
+	    (1 << xi->xi_intrbit)) == 0) {
+		spurious = 1;
+#ifdef DEBUG
+		printf("%s: irq %d but not pending in ISR %08x\n",
+		    sc->sc_dev.dv_xname, xi->xi_intrbit,
+		    bus_space_read_4(sc->sc_iot, sc->sc_regh, BRIDGE_ISR));
+#endif
+	} else
+		spurious = 0;
+
 	if ((rc = (*xi->xi_func)(xi->xi_arg)) != 0)
 		xi->xi_count.ec_count++;
+	if (rc == 0 && spurious == 0)
+		printf("%s: spurious irq %d\n",
+		    sc->sc_dev.dv_xname, xi->xi_intrbit);
 
 	/*
 	 * There is a known BRIDGE race in which, if two interrupts
 	 * on two different pins occur within 60nS of each other,
-	 * further interrupts on the first pin do not cause an interrupt
-	 * to be sent.
+	 * further interrupts on the first pin do not cause an
+	 * interrupt to be sent.
 	 *
-	 * The workaround against this is to check if our interrupt source
-	 * is still active (i.e. another interrupt is pending), in which
-	 * case we force an interrupt anyway.
+	 * The workaround against this is to check if our interrupt
+	 * source is still active (i.e. another interrupt is pending),
+	 * in which case we force an interrupt anyway.
 	 *
-	 * The XBridge even has a nice facility to do this, where we do not
-	 * even have to check if our interrupt is pending.
+	 * The XBridge even has a nice facility to do this, where we
+	 * do not even have to check if our interrupt is pending.
 	 */
 
 	if (ISSET(sc->sc_flags, XBRIDGE_FLAGS_XBRIDGE)) {
 		bus_space_write_4(sc->sc_iot, sc->sc_regh,
 		    BRIDGE_INT_FORCE_PIN(xi->xi_intrbit), 1);
 	} else {
-		if (bus_space_read_4(sc->sc_iot, sc->sc_regh, BRIDGE_ISR) &
-		    (1 << xi->xi_intrbit))
+		if (bus_space_read_4(sc->sc_iot, sc->sc_regh,
+		    BRIDGE_ISR) & (1 << xi->xi_intrbit))
 			IP27_RHUB_PI_S(nasid, 0, HUB_IR_CHANGE,
 			    HUB_IR_SET | xi->xi_intrsrc);
 	}
 
-	return rc;
+	return 1;
+}
+
+/*
+ * Bridge (not XBridge) ugly workaround for the interrupt deadlock
+ * problem mentioned above.
+ */
+void
+xbridge_timeout(void *v)
+{
+	struct xbridge_intr *xi = v;
+	struct xbridge_softc *sc = xi->xi_bridge;
+
+	if ((bus_space_read_4(sc->sc_iot, sc->sc_regh, BRIDGE_ISR) &
+	    (1 << xi->xi_intrbit)) != 0)
+		xbridge_intr_handler(v);
 }
 
 /*
