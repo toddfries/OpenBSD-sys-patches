@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC-IP30,v 1.1 2009/05/14 21:27:02 miod Exp $
+#	$OpenBSD: GENERIC-IP30,v 1.3 2009/05/16 16:41:13 miod Exp $
 #
 # THIS KERNEL IS FOR Octane and Octane 2 (IP30) SYSTEMS ONLY.
 #
@@ -61,6 +61,7 @@ owserial*	at onewire?
 
 #### SCSI
 isp*		at pci?
+option		ISP_COMPILE_FW
 siop*		at pci?
 mpi*		at pci?
 scsibus*	at isp?
@@ -141,6 +142,9 @@ urlphy*		at mii?		# Realtek RTL8150L internal PHY
 rgephy*		at mii?		# Realtek 8169S/8110S PHY
 ukphy*		at mii?		# "unknown" PHYs
 
+#### Wireless
+wi*		at pci?
+
 #### Audio
 emu*		at pci?
 audio*		at emu?
@@ -156,6 +160,6 @@ ses*		at scsibus?
 uk*		at scsibus?
 
 #### Crypto devices
-#hifn*		at pci?		# Hi/fn 7751 crypto card
+hifn*		at pci?		# Hi/fn 7751 crypto card
 
 pseudo-device	crypto	1
