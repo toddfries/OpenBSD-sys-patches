@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.430 2009/05/15 15:39:12 damien Exp $
+$OpenBSD: usbdevs,v 1.432 2009/05/19 15:53:06 damien Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -1231,6 +1231,7 @@ product DLINK3 KVM221		0x020f	KVM-221
 
 /* DisplayLink products */
 product DISPLAYLINK DL120	0x01bb	DL-120
+product DISPLAYLINK DL160	0x0141	DL-160
 
 /* DMI products */
 product DMI SA2_0		0xb001	Storage Adapter
@@ -1578,6 +1579,7 @@ product GUILLEMOT DALEADER	0xa300	DA Leader
 product GUILLEMOT HWGUSB254	0xe000	HWGUSB2-54 WLAN
 product GUILLEMOT HWGUSB254LB	0xe010	HWGUSB2-54-LB
 product GUILLEMOT HWGUSB254V2AP	0xe020	HWGUSB2-54V2-AP
+product GUILLEMOT HWNU300	0xe030	HWNU-300
 
 /* Gunze Gunze Electronics USA */
 product GUNZE TOUCHPANEL	0x0001	Gunze USB Touch Panel
