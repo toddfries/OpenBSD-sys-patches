@@ -142,6 +142,8 @@ cdev_decl(pci);
 #include "hotplug.h"
 #include "gpio.h"
 #include "bio.h"
+#include "midi.h"
+#include "sequencer.h"
 
 struct cdevsw cdevsw[] = {
 	cdev_cn_init(1,cn),		/* 0: virtual console */
@@ -171,8 +173,8 @@ struct cdevsw cdevsw[] = {
 	cdev_lkm_init(NLKM,lkm),	/* 24: loadable module driver */
 	cdev_apm_init(NAPM,apm),	/* 25: APM interface */
 	cdev_tty_init(NCOM,com),        /* 26: Serial Ports via com(4) */
-	cdev_notdef(),			/* 27 */
-	cdev_notdef(),			/* 28 */
+	cdev_midi_init(NMIDI,midi),	/* 27: MIDI I/O */
+	cdev_midi_init(NSEQUENCER,sequencer), /* 28: sequencer I/O */
 	cdev_notdef(),			/* 29 */
 	cdev_notdef(),			/* 30 */
 	cdev_notdef(),			/* 31 */
