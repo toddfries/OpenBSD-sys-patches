@@ -61,18 +61,13 @@ typedef struct drm_mga_primary_buffer {
 	u32 high_mark;
 } drm_mga_primary_buffer_t;
 
-typedef struct drm_mga_freelist {
-	struct drm_mga_freelist *next;
-	struct drm_mga_freelist *prev;
-	drm_mga_age_t age;
-	struct drm_buf *buf;
-} drm_mga_freelist_t;
-
-typedef struct {
-	drm_mga_freelist_t *list_entry;
-	int discard;
-	int dispatched;
-} drm_mga_buf_priv_t;
+struct mgadrm_buf_priv {
+	TAILQ_ENTRY(mgadrm_buf_priv)	 link;
+	drm_mga_age_t			 age;
+	struct drm_buf			*buf;
+	int				 discard;
+	int				 dispatched;
+};
 
 typedef struct drm_mga_private {
 	struct device		 dev;
@@ -87,8 +82,7 @@ typedef struct drm_mga_private {
 	drm_mga_primary_buffer_t prim;
 	drm_mga_sarea_t *sarea_priv;
 
-	drm_mga_freelist_t *head;
-	drm_mga_freelist_t *tail;
+	TAILQ_HEAD(mga_freelist, mgadrm_buf_priv) freelist;
 
 	unsigned int warp_pipe;
 	unsigned long warp_pipe_phys[MGA_MAX_WARP_PIPES];
@@ -119,9 +113,10 @@ typedef struct drm_mga_private {
 	u32 clear_cmd;
 	u32 maccess;
 
-	atomic_t vbl_received;		/**< Number of vblanks received. */
-	atomic_t last_fence_retired;
-	u32 next_fence_to_post;
+	atomic_t	vbl_received;	/**< Number of vblanks received. */
+	struct mutex	fence_lock;
+	u_int32_t	last_fence_retired;
+	u_int32_t	next_fence_to_post;
 
 	unsigned int fb_cpp;
 	unsigned int front_offset;
@@ -136,11 +131,11 @@ typedef struct drm_mga_private {
 	unsigned int texture_offset;
 	unsigned int texture_size;
 
-	drm_local_map_t *sarea;
-	drm_local_map_t *status;
-	drm_local_map_t *warp;
-	drm_local_map_t *primary;
-	drm_local_map_t *agp_textures;
+	struct drm_local_map *sarea;
+	struct drm_local_map *status;
+	struct drm_local_map *warp;
+	struct drm_local_map *primary;
+	struct drm_local_map *agp_textures;
 
 	unsigned long agp_handle;
 	unsigned int agp_size;
@@ -155,8 +150,8 @@ extern int mga_dma_flush(struct drm_device *dev, void *data,
 			 struct drm_file *file_priv);
 extern int mga_dma_reset(struct drm_device *dev, void *data,
 			 struct drm_file *file_priv);
-extern int mga_dma_buffers(struct drm_device *dev, void *data,
-			   struct drm_file *file_priv);
+extern int mga_dma_buffers(struct drm_device *, struct drm_dma *,
+    struct drm_file *);
 extern void mga_driver_lastclose(struct drm_device * dev);
 extern int mga_driver_dma_quiescent(struct drm_device * dev);
 extern int mga_dma_swap(struct drm_device *, void *, struct drm_file *);
@@ -186,9 +181,7 @@ extern int mga_warp_init(drm_mga_private_t * dev_priv);
 extern int mga_enable_vblank(struct drm_device *dev, int crtc);
 extern void mga_disable_vblank(struct drm_device *dev, int crtc);
 extern u32 mga_get_vblank_counter(struct drm_device *dev, int crtc);
-extern int mga_driver_fence_wait(struct drm_device * dev, unsigned int *sequence);
-extern int mga_driver_vblank_wait(struct drm_device * dev, unsigned int *sequence);
-extern irqreturn_t mga_driver_irq_handler(DRM_IRQ_ARGS);
+extern int mga_driver_fence_wait(struct drm_device * dev, u_int32_t *sequence);
 extern int mga_driver_irq_install(struct drm_device * dev);
 extern void mga_driver_irq_uninstall(struct drm_device * dev);
 extern long mga_compat_ioctl(struct file *filp, unsigned int cmd,
@@ -373,14 +366,13 @@ do {									\
 
 #define AGE_BUFFER( buf_priv )						\
 do {									\
-	drm_mga_freelist_t *entry = (buf_priv)->list_entry;		\
 	if ( (buf_priv)->dispatched ) {					\
-		entry->age.head = (dev_priv->prim.tail +		\
+		buf_priv->age.head = (dev_priv->prim.tail +		\
 				   dev_priv->primary->offset);		\
-		entry->age.wrap = dev_priv->sarea_priv->last_wrap;	\
+		buf_priv->age.wrap = dev_priv->sarea_priv->last_wrap;	\
 	} else {							\
-		entry->age.head = 0;					\
-		entry->age.wrap = 0;					\
+		buf_priv->age.head = 0;					\
+		buf_priv->age.wrap = 0;					\
 	}								\
 } while (0)
 

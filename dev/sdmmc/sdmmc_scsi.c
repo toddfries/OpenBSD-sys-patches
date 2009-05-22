@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc_scsi.c,v 1.11 2008/12/02 23:49:54 deraadt Exp $	*/
+/*	$OpenBSD: sdmmc_scsi.c,v 1.17 2009/04/07 16:35:52 blambert Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -82,7 +82,7 @@ int	sdmmc_start_xs(struct sdmmc_softc *, struct sdmmc_ccb *);
 void	sdmmc_complete_xs(void *);
 void	sdmmc_done_xs(struct sdmmc_ccb *);
 void	sdmmc_stimeout(void *);
-void	sdmmc_scsi_minphys(struct buf *);
+void	sdmmc_scsi_minphys(struct buf *, struct scsi_link *);
 
 #define DEVNAME(sc)	SDMMCDEVNAME(sc)
 
@@ -95,14 +95,15 @@ void	sdmmc_scsi_minphys(struct buf *);
 void
 sdmmc_scsi_attach(struct sdmmc_softc *sc)
 {
-	struct scsibus_attach_args saa;
+	struct sdmmc_attach_args saa;
 	struct sdmmc_scsi_softc *scbus;
 	struct sdmmc_function *sf;
 
-	scbus = (struct sdmmc_scsi_softc *)malloc(sizeof *scbus,
-	    M_DEVBUF, M_WAITOK | M_ZERO);
+	SDMMC_ASSERT_LOCKED(sc);
 
-	scbus->sc_tgt = (struct sdmmc_scsi_target *)malloc(sizeof(*scbus->sc_tgt) *
+	scbus = malloc(sizeof *scbus, M_DEVBUF, M_WAITOK | M_ZERO);
+
+	scbus->sc_tgt = malloc(sizeof(*scbus->sc_tgt) *
 	    (SDMMC_SCSIID_MAX+1), M_DEVBUF, M_WAITOK | M_ZERO);
 
 	/*
@@ -136,7 +137,7 @@ sdmmc_scsi_attach(struct sdmmc_softc *sc)
 	scbus->sc_link.adapter = &scbus->sc_adapter;
 
 	bzero(&saa, sizeof(saa));
-	saa.saa_sc_link = &scbus->sc_link;
+	saa.scsi_link = &scbus->sc_link;
 
 	scbus->sc_child = config_found(&sc->sc_dev, &saa, scsiprint);
 	if (scbus->sc_child == NULL) {
@@ -159,6 +160,8 @@ sdmmc_scsi_detach(struct sdmmc_softc *sc)
 	struct sdmmc_scsi_softc *scbus;
 	struct sdmmc_ccb *ccb;
 	int s;
+
+	SDMMC_ASSERT_LOCKED(sc);
 
 	scbus = sc->sc_scsibus;
 	if (scbus == NULL)
@@ -417,7 +420,7 @@ sdmmc_start_xs(struct sdmmc_softc *sc, struct sdmmc_ccb *ccb)
 		return COMPLETE;
 	}
 
-	timeout_add(&xs->stimeout, (xs->timeout * hz) / 1000);
+	timeout_add_msec(&xs->stimeout, xs->timeout);
 	sdmmc_add_task(sc, &ccb->ccb_task);
 	return SUCCESSFULLY_QUEUED;
 }
@@ -495,10 +498,17 @@ sdmmc_stimeout(void *arg)
 }
 
 void
-sdmmc_scsi_minphys(struct buf *bp)
+sdmmc_scsi_minphys(struct buf *bp, struct scsi_link *sl)
 {
-	/* XXX limit to max. transfer size supported by card/host? */
-	if (bp->b_bcount > DEV_BSIZE)
-		bp->b_bcount = DEV_BSIZE;
+	struct sdmmc_softc *sc = sl->adapter_softc;
+	struct sdmmc_scsi_softc *scbus = sc->sc_scsibus;
+	struct sdmmc_scsi_target *tgt = &scbus->sc_tgt[sl->target];
+	struct sdmmc_function *sf = tgt->card;
+
+	/* limit to max. transfer size supported by card/host */
+	if (sc->sc_max_xfer != 0 &&
+	    bp->b_bcount > sf->csd.sector_size * sc->sc_max_xfer)
+		bp->b_bcount = sf->csd.sector_size * sc->sc_max_xfer;
+
 	minphys(bp);
 }

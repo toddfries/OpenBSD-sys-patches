@@ -1,4 +1,4 @@
-/* $OpenBSD: wskbd.c,v 1.58 2007/09/11 13:39:34 gilles Exp $ */
+/* $OpenBSD: wskbd.c,v 1.60 2009/01/21 21:54:00 grange Exp $ */
 /* $NetBSD: wskbd.c,v 1.80 2005/05/04 01:52:16 augustss Exp $ */
 
 /*
@@ -522,8 +522,7 @@ wskbd_repeat(void *v)
 		    sc->sc_repeat_value);
 	}
 	if (sc->sc_keyrepeat_data.delN != 0)
-		timeout_add(&sc->sc_repeat_ch,
-		    (hz * sc->sc_keyrepeat_data.delN) / 1000);
+		timeout_add_msec(&sc->sc_repeat_ch, sc->sc_keyrepeat_data.delN);
 	splx(s);
 }
 #endif
@@ -641,8 +640,8 @@ wskbd_input(struct device *dev, u_int type, int value)
 
 			if (sc->sc_keyrepeat_data.del1 != 0) {
 				sc->sc_repeating = num;
-				timeout_add(&sc->sc_repeat_ch,
-				    (hz * sc->sc_keyrepeat_data.del1) / 1000);
+				timeout_add_msec(&sc->sc_repeat_ch,
+				    sc->sc_keyrepeat_data.del1);
 			}
 		}
 		return;
@@ -657,8 +656,7 @@ wskbd_input(struct device *dev, u_int type, int value)
 		sc->sc_repeat_type = type;
 		sc->sc_repeat_value = value;
 		sc->sc_repeating = 1;
-		timeout_add(&sc->sc_repeat_ch,
-		    (hz * sc->sc_keyrepeat_data.del1) / 1000);
+		timeout_add_msec(&sc->sc_repeat_ch, sc->sc_keyrepeat_data.del1);
 	}
 #endif
 }
@@ -1465,9 +1463,21 @@ internal_command(struct wskbd_softc *sc, u_int *type, keysym_t ksym,
 		return (1);
 #if defined(__i386__) || defined(__amd64__)
 	case KS_Cmd_KbdReset:
-		if (kbd_reset == 1) {
+		switch (kbd_reset) {
+#ifdef DDB
+		case 2:
+			if (sc->sc_isconsole && db_console)
+				Debugger();
+			/* discard this key (ddb discarded command modifiers) */
+			*type = WSCONS_EVENT_KEY_UP;
+			break;
+#endif
+		case 1:
 			kbd_reset = 0;
 			psignal(initproc, SIGUSR1);
+			break;
+		default:
+			break;
 		}
 		return (1);
 #endif

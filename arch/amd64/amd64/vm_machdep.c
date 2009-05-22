@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.12 2007/10/13 07:18:32 miod Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.18 2009/04/27 17:48:22 deraadt Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.1 2003/04/26 18:39:33 fvdl Exp $	*/
 
 /*-
@@ -107,15 +107,6 @@ cpu_fork(struct proc *p1, struct proc *p2, void *stack, size_t stacksize,
 	*pcb = p1->p_addr->u_pcb;
 
 	/*
-	 * Preset these so that gdt_compact() doesn't get confused if called
-	 * during the allocations below.
-	 *
-	 * Note: pcb_ldt_sel is handled in the pmap_activate() call when
-	 * we run the new process.
-	 */
-	p2->p_md.md_tss_sel = GSEL(GNULL_SEL, SEL_KPL);
-
-	/*
 	 * Activate the address space.  Note this will refresh pcb_ldt_sel.
 	 */
 	pmap_activate(p2);
@@ -169,19 +160,8 @@ cpu_exit(struct proc *p)
 		mtrr_clean(p);
 
 	pmap_deactivate(p);
-	sched_exit(p);
-}
-
-/*
- * cpu_wait is called from reaper() to let machine-dependent
- * code free machine-dependent resources that couldn't be freed
- * in cpu_exit().
- */
-void
-cpu_wait(struct proc *p)
-{
-	/* Nuke the TSS. */
 	tss_free(p->p_md.md_tss_sel);
+	sched_exit(p);
 }
 
 /*
@@ -261,7 +241,7 @@ vmapbuf(struct buf *bp, vsize_t len)
 
 	if ((bp->b_flags & B_PHYS) == 0)
 		panic("vmapbuf");
-	faddr = trunc_page((vaddr_t)bp->b_saveaddr = bp->b_data);
+	faddr = trunc_page((vaddr_t)(bp->b_saveaddr = bp->b_data));
 	off = (vaddr_t)bp->b_data - faddr;
 	len = round_page(off + len);
 	taddr= uvm_km_valloc_wait(phys_map, len);

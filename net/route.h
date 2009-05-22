@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.h,v 1.54 2008/11/24 12:53:53 claudio Exp $	*/
+/*	$OpenBSD: route.h,v 1.60 2009/03/31 01:31:26 dlg Exp $	*/
 /*	$NetBSD: route.h,v 1.9 1996/02/13 22:00:49 christos Exp $	*/
 
 /*
@@ -114,7 +114,8 @@ struct rtentry {
 	struct	ifnet *rt_ifp;		/* the answer: interface to use */
 	struct	ifaddr *rt_ifa;		/* the answer: interface addr to use */
 	struct	sockaddr *rt_genmask;	/* for generation of cloned routes */
-	caddr_t	rt_llinfo;		/* pointer to link level info cache */
+	caddr_t	rt_llinfo;		/* pointer to link level info cache or
+					   to an MPLS structure */ 
 	struct	rt_kmetrics rt_rmx;	/* metrics used by rx'ing protocols */
 	struct	rtentry *rt_gwroute;	/* implied entry for gatewayed routes */
 	struct	rtentry *rt_parent;	/* If cloned, parent of this route. */
@@ -143,6 +144,7 @@ struct rtentry {
 #define RTF_CLONED	0x10000		/* this is a cloned route */
 #define RTF_MPATH	0x40000		/* multipath route or operation */
 #define RTF_JUMBO	0x80000		/* try to use jumbo frames */
+#define RTF_MPLS	0x100000	/* MPLS additional infos */
 
 /* mask of RTF flags that are allowed to be modified by RTM_CHANGE */
 #define RTF_FMASK	\
@@ -158,12 +160,12 @@ struct rtentry {
 /* Routing priorities used by the different routing protocols */
 #define RTP_NONE	0	/* unset priority use sane default */
 #define RTP_CONNECTED	4	/* directly connected routes */
-#define RTP_STATIC	8	/* static routes */
-#define RTP_OSPF	16	/* OSPF routes */
-#define RTP_ISIS	20	/* IS-IS routes */
-#define RTP_RIP		24	/* RIP routes */
-#define RTP_BGP		32	/* BGP routes */
-#define RTP_DEFAULT	48	/* routes that have nothing set */
+#define RTP_STATIC	8	/* static routes base priority */
+#define RTP_OSPF	32	/* OSPF routes */
+#define RTP_ISIS	36	/* IS-IS routes */
+#define RTP_RIP		40	/* RIP routes */
+#define RTP_BGP		48	/* BGP routes */
+#define RTP_DEFAULT	56	/* routes that have nothing set */
 #define RTP_MAX		63	/* maximum priority */
 #define RTP_ANY		64	/* any of the above */
 #define RTP_MASK	0x7f
@@ -191,7 +193,7 @@ struct rt_msghdr {
 	u_short	rtm_index;	/* index for associated ifp */
 	u_short rtm_tableid;	/* routing table id */
 	u_char	rtm_priority;	/* routing priority */
-	u_char	rtm_pad;
+	u_char	rtm_mpls;	/* MPLS additional infos */
 	int	rtm_addrs;	/* bitmask identifying sockaddrs in msg */
 	int	rtm_flags;	/* flags, incl. kern & message, e.g. DONE */
 	int	rtm_fmask;	/* bitmask used in RTM_CHANGE message */
@@ -293,6 +295,14 @@ struct rt_omsghdr {
 #define RTAX_LABEL	10	/* route label present */
 #define RTAX_MAX	11	/* size of array to allocate */
 
+/*
+ * setsockopt defines used for the filtering.
+ */
+#define ROUTE_MSGFILTER	1	/* bitmask to specifiy which types should be
+				   sent to the client. */
+
+#define ROUTE_FILTER(m)	(1 << (m))
+
 struct rt_addrinfo {
 	int	rti_addrs;
 	struct	sockaddr *rti_info[RTAX_MAX];
@@ -300,6 +310,7 @@ struct rt_addrinfo {
 	struct	ifaddr *rti_ifa;
 	struct	ifnet *rti_ifp;
 	struct	rt_msghdr *rti_rtm;
+	u_char	rti_mpls;
 };
 
 struct route_cb {

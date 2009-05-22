@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2560.c,v 1.40 2008/11/25 21:43:57 damien Exp $  */
+/*	$OpenBSD: rt2560.c,v 1.43 2009/03/29 21:53:52 sthen Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006
@@ -376,7 +376,7 @@ rt2560_alloc_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring,
 	    count * RT2560_TX_DESC_SIZE, (caddr_t *)&ring->desc,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map desc DMA memory\n",
+		printf("%s: can't map desc DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -521,7 +521,7 @@ rt2560_alloc_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring,
 	    count * RT2560_RX_DESC_SIZE, (caddr_t *)&ring->desc,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map desc DMA memory\n",
+		printf("%s: can't map desc DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -1561,7 +1561,7 @@ rt2560_tx_bcn(struct rt2560_softc *sc, struct mbuf *m0,
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map mbuf (error %d)\n",
+		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		m_freem(m0);
 		return error;
@@ -1621,7 +1621,7 @@ rt2560_tx_mgt(struct rt2560_softc *sc, struct mbuf *m0,
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map mbuf (error %d)\n",
+		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		m_freem(m0);
 		return error;
@@ -1699,6 +1699,7 @@ rt2560_tx_data(struct rt2560_softc *sc, struct mbuf *m0,
 	struct rt2560_tx_data *data;
 	struct ieee80211_frame *wh;
 	struct ieee80211_key *k;
+	struct mbuf *m1;
 	uint16_t dur;
 	uint32_t flags = 0;
 	int pktlen, rate, needcts = 0, needrts = 0, error;
@@ -1783,7 +1784,7 @@ rt2560_tx_data(struct rt2560_softc *sc, struct mbuf *m0,
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, mprot,
 		    BUS_DMA_NOWAIT);
 		if (error != 0) {
-			printf("%s: could not map mbuf (error %d)\n",
+			printf("%s: can't map mbuf (error %d)\n",
 			    sc->sc_dev.dv_xname, error);
 			m_freem(mprot);
 			m_freem(m0);
@@ -1820,21 +1821,35 @@ rt2560_tx_data(struct rt2560_softc *sc, struct mbuf *m0,
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 	    BUS_DMA_NOWAIT);
 	if (error != 0 && error != EFBIG) {
-		printf("%s: could not map mbuf (error %d)\n",
+		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		m_freem(m0);
 		return error;
 	}
 	if (error != 0) {
 		/* too many fragments, linearize */
-		if (m_defrag(m0, M_DONTWAIT) != 0) {
+		MGETHDR(m1, M_DONTWAIT, MT_DATA);
+		if (m1 == NULL) {
 			m_freem(m0);
-			return ENOMEM;
+			return ENOBUFS;
 		}
+		if (m0->m_pkthdr.len > MHLEN) {
+			MCLGET(m1, M_DONTWAIT);
+			if (!(m1->m_flags & M_EXT)) {
+				m_freem(m0);
+				m_freem(m1);
+				return ENOBUFS;
+			}
+		}
+		m_copydata(m0, 0, m0->m_pkthdr.len, mtod(m1, caddr_t));
+		m1->m_pkthdr.len = m1->m_len = m0->m_pkthdr.len;
+		m_freem(m0);
+		m0 = m1;
+
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 		    BUS_DMA_NOWAIT);
 		if (error != 0) {
-			printf("%s: could not map mbuf (error %d)\n",
+			printf("%s: can't map mbuf (error %d)\n",
 			    sc->sc_dev.dv_xname, error);
 			m_freem(m0);
 			return error;

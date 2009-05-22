@@ -1,4 +1,4 @@
-/*	$OpenBSD: softintr.h,v 1.2 2007/05/10 17:59:24 deraadt Exp $	*/
+/*	$OpenBSD: softintr.h,v 1.4 2009/04/19 18:54:06 oga Exp $	*/
 /*	$NetBSD: softintr.h,v 1.1 2002/01/29 22:54:14 thorpej Exp $	*/
 
 /*
@@ -41,6 +41,8 @@
 
 #ifdef _KERNEL
 
+#include <sys/mutex.h>
+
 /*
  * Generic software interrupt support for all ARM platforms.
  *
@@ -51,16 +53,9 @@
 #define	SI_SOFT			0	/* for IPL_SOFT */
 #define	SI_SOFTCLOCK		1	/* for IPL_SOFTCLOCK */
 #define	SI_SOFTNET		2	/* for IPL_SOFTNET */
-#define	SI_SOFTSERIAL		3	/* for IPL_SOFTSERIAL */
+#define	SI_SOFTTTY		3	/* for IPL_SOFTTTY */
 
 #define	SI_NQUEUES		4
-
-#define	SI_QUEUENAMES {							\
-	"generic",							\
-	"clock",							\
-	"net",								\
-	"serial",							\
-}
 
 struct soft_intrhand {
 	TAILQ_ENTRY(soft_intrhand) sih_list;
@@ -71,8 +66,10 @@ struct soft_intrhand {
 };
 
 struct soft_intrq {
-	TAILQ_HEAD(, soft_intrhand) siq_list;
-	int siq_si;
+	TAILQ_HEAD(, soft_intrhand)
+			siq_list;
+	int		siq_si;
+	struct mutex	siq_mtx;
 };
 
 void	*softintr_establish(int, void (*)(void *), void *);
@@ -84,15 +81,14 @@ void	softintr_dispatch(int);
 do {									\
 	struct soft_intrhand *__sih = (arg);				\
 	struct soft_intrq *__siq = __sih->sih_siq;			\
-	int __s;							\
 									\
-	__s = splhigh();						\
+	mtx_enter(&__siq->siq_mtx);					\
 	if (__sih->sih_pending == 0) {					\
 		TAILQ_INSERT_TAIL(&__siq->siq_list, __sih, sih_list);	\
 		__sih->sih_pending = 1;					\
 		_setsoftintr(__siq->siq_si);				\
 	}								\
-	splx(__s);							\
+	mtx_leave(&__siq->siq_mtx);					\
 } while (/*CONSTCOND*/0)
 
 /* XXX For legacy software interrupts. */

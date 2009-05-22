@@ -1,4 +1,4 @@
-/* $OpenBSD: acpiprt.c,v 1.28 2008/12/07 14:33:26 kettenis Exp $ */
+/* $OpenBSD: acpiprt.c,v 1.35 2009/03/31 20:59:00 kettenis Exp $ */
 /*
  * Copyright (c) 2006 Mark Kettenis <kettenis@openbsd.org>
  *
@@ -57,7 +57,7 @@ int	acpiprt_match(struct device *, void *, void *);
 void	acpiprt_attach(struct device *, struct device *, void *);
 int	acpiprt_getirq(union acpi_resource *crs, void *arg);
 int	acpiprt_getminbus(union acpi_resource *, void *);
-int	acpiprt_checkprs(union acpi_resource *, void *);
+int	acpiprt_chooseirq(union acpi_resource *, void *);
 
 struct acpiprt_softc {
 	struct device		sc_dev;
@@ -132,36 +132,6 @@ acpiprt_attach(struct device *parent, struct device *self, void *aux)
 }
 
 int
-acpiprt_checkprs(union acpi_resource *crs, void *arg)
-{
-	int *irq = (int *)arg;
-	int typ, i;
-
-	typ = AML_CRSTYPE(crs);
-	switch (typ) {
-	case SR_IRQ:
-		for (i = 0; i < sizeof(crs->sr_irq.irq_mask) * 8; i++) {
-			if (crs->sr_irq.irq_mask & (1L << i)) {
-				if (i == *irq)
-					return (0);
-			}
-		}
-		break;
-	case LR_EXTIRQ:
-		for (i = 0; i < crs->lr_extirq.irq_count; i++) {
-			if (crs->lr_extirq.irq[i] == *irq)
-				return (0);
-		}
-		break;
-	default:
-		printf("unknown interrupt: %x\n", typ);
-	}
-
-	*irq = -1;
-	return (0);
-}
-
-int
 acpiprt_getirq(union acpi_resource *crs, void *arg)
 {
 	int *irq = (int *)arg;
@@ -181,13 +151,73 @@ acpiprt_getirq(union acpi_resource *crs, void *arg)
 	return (0);
 }
 
+int
+acpiprt_pri[16] = {
+	0,			/* 8254 Counter 0 */
+	1,			/* Keyboard */
+	0,			/* 8259 Slave */
+	2,			/* Serial Port A */
+	2,			/* Serial Port B */
+	5,			/* Parallel Port / Generic */
+	2,			/* Floppy Disk */
+	4, 			/* Parallel Port / Generic */
+	1,			/* RTC */
+	6,			/* Generic */
+	7,			/* Generic */
+	7,			/* Generic */
+	1,			/* Mouse */
+	0,			/* FPU */
+	2,			/* Primary IDE */
+	3			/* Secondary IDE */
+};
+
+int
+acpiprt_chooseirq(union acpi_resource *crs, void *arg)
+{
+	int *irq = (int *)arg;
+	int typ, i, pri = -1;
+
+	typ = AML_CRSTYPE(crs);
+	switch (typ) {
+	case SR_IRQ:
+		for (i = 0; i < sizeof(crs->sr_irq.irq_mask) * 8; i++) {
+			if (crs->sr_irq.irq_mask & (1 << i) &&
+			    acpiprt_pri[i] > pri) {
+				*irq = i;
+				pri = acpiprt_pri[*irq];
+			}
+		}
+		break;
+	case LR_EXTIRQ:
+		/* First try non-8259 interrupts. */
+		for (i = 0; i < crs->lr_extirq.irq_count; i++) {
+			if (crs->lr_extirq.irq[i] > 15) {
+				*irq = crs->lr_extirq.irq[i];
+				return (0);
+			}
+		}
+
+		for (i = 0; i < crs->lr_extirq.irq_count; i++) {
+			if (acpiprt_pri[crs->lr_extirq.irq[i]] > pri) {
+				*irq = crs->lr_extirq.irq[i];
+				pri = acpiprt_pri[*irq];
+			}
+		}
+		break;
+	default:
+		printf("unknown interrupt: %x\n", typ);
+	}
+	return (0);
+}
+
 void
 acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 {
 	struct aml_node	*node;
 	struct aml_value res, *pp;
 	u_int64_t addr;
-	int pin, irq, newirq, sta;
+	int pin, irq;
+	int64_t sta;
 #if NIOAPIC > 0
 	struct mp_intr_map *map;
 	struct ioapic_softc *apic;
@@ -231,13 +261,11 @@ acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 	}
 	if (pp->type == AML_OBJTYPE_DEVICE) {
 		node = pp->node;
-		if (aml_evalname(sc->sc_acpi, node, "_STA", 0, NULL, &res)) {
+		if (aml_evalinteger(sc->sc_acpi, node, "_STA", 0, NULL, &sta)) {
 			printf("no _STA method\n");
 			return;
 		}
 
-		sta = aml_val2int(&res);
-		aml_freevalue(&res);
 		if ((sta & STA_PRESENT) == 0)
 			return;
 
@@ -246,7 +274,7 @@ acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 			return;
 		}
 
-		if (res.type != AML_OBJTYPE_BUFFER || res.length < 6) {
+		if (res.type != AML_OBJTYPE_BUFFER || res.length < 5) {
 			printf("invalid _CRS object\n");
 			aml_freevalue(&res);
 			return;
@@ -255,26 +283,15 @@ acpiprt_prt_add(struct acpiprt_softc *sc, struct aml_value *v)
 		    acpiprt_getirq, &irq);
 		aml_freevalue(&res);
 
-		/* Check Possible IRQs */
-		if (!aml_evalname(sc->sc_acpi, node, "_PRS", 0, NULL, &res)){
+		/* Pick a new IRQ if necessary. */
+		if ((irq == 0 || irq == 2 || irq == 13) &&
+		    !aml_evalname(sc->sc_acpi, node, "_PRS", 0, NULL, &res)){
 			if (res.type == AML_OBJTYPE_BUFFER &&
-			    res.length >= 6) {
+			    res.length >= 5) {
 				aml_parse_resource(res.length, res.v_buffer,
-				    acpiprt_checkprs, &irq);
-				aml_parse_resource(res.length, res.v_buffer,
-				    acpiprt_getirq, &newirq);
+				    acpiprt_chooseirq, &irq);
 			}
 			aml_freevalue(&res);
-		}
-
-		if (irq == -1) {
-			/*
-			 * Current IRQ is "impossible".  Use the first
-			 * available Possible IRQ instead.  We
-			 * postpone re-routeing the interrupt until we
-			 * establish a handler for it.
-			 */
-			irq = newirq;
 		}
 
 		if ((p = malloc(sizeof(*p), M_ACPI, M_NOWAIT)) == NULL)
@@ -368,6 +385,7 @@ acpiprt_getpcibus(struct acpiprt_softc *sc, struct aml_node *node)
 	pcitag_t tag;
 	pcireg_t reg;
 	int bus, dev, func, rv;
+	int64_t ires;
 
 	if (parent == NULL)
 		return 0;
@@ -390,21 +408,18 @@ acpiprt_getpcibus(struct acpiprt_softc *sc, struct aml_node *node)
 	 * If our parent is the root of the bus, it should specify the
 	 * base bus number.
 	 */
-	if (aml_evalname(sc->sc_acpi, parent, "_BBN.", 0, NULL, &res) == 0) {
-		rv = aml_val2int(&res);
-		aml_freevalue(&res);
-		return (rv);
+	if (aml_evalinteger(sc->sc_acpi, parent, "_BBN.", 0, NULL, &ires) == 0) {
+		return (ires);
 	}
 
 	/*
 	 * If our parent is a PCI-PCI bridge, get our bus number from its
 	 * PCI config space.
 	 */
-	if (aml_evalname(sc->sc_acpi, parent, "_ADR.", 0, NULL, &res) == 0) {
+	if (aml_evalinteger(sc->sc_acpi, parent, "_ADR.", 0, NULL, &ires) == 0) {
 		bus = acpiprt_getpcibus(sc, parent);
-		dev = ACPI_PCI_DEV(aml_val2int(&res) << 16);
-		func = ACPI_PCI_FN(aml_val2int(&res) << 16);
-		aml_freevalue(&res);
+		dev = ACPI_PCI_DEV(ires << 16);
+		func = ACPI_PCI_FN(ires << 16);
 
 		/*
 		 * Some systems return 255 as the device number for
@@ -439,7 +454,8 @@ acpiprt_route_interrupt(int bus, int dev, int pin)
 	struct aml_node *node = NULL;
 	struct aml_value res, res2;
 	union acpi_resource *crs;
-	int irq, newirq, sta;
+	int irq, newirq;
+	int64_t sta;
 
 	SIMPLEQ_FOREACH(p, &acpiprt_map_list, list) {
 		if (p->bus == bus && p->dev == dev && p->pin == (pin - 1)) {
@@ -452,20 +468,18 @@ acpiprt_route_interrupt(int bus, int dev, int pin)
 	if (node == NULL)
 		return;
 
-	if (aml_evalname(sc->sc_acpi, node, "_STA", 0, NULL, &res)) {
+	if (aml_evalinteger(sc->sc_acpi, node, "_STA", 0, NULL, &sta)) {
 		printf("no _STA method\n");
 		return;
 	}
 
-	sta = aml_val2int(&res);
-	aml_freevalue(&res);
 	KASSERT(sta & STA_PRESENT);
 
 	if (aml_evalname(sc->sc_acpi, node, "_CRS", 0, NULL, &res)) {
 		printf("no _CRS method\n");
 		return;
 	}
-	if (res.type != AML_OBJTYPE_BUFFER || res.length < 6) {
+	if (res.type != AML_OBJTYPE_BUFFER || res.length < 5) {
 		printf("invalid _CRS object\n");
 		aml_freevalue(&res);
 		return;

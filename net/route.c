@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.99 2008/11/24 12:53:53 claudio Exp $	*/
+/*	$OpenBSD: route.c,v 1.105 2009/03/15 19:40:41 miod Exp $	*/
 /*	$NetBSD: route.c,v 1.14 1996/02/13 22:00:46 christos Exp $	*/
 
 /*
@@ -120,6 +120,10 @@
 
 #include <netinet/in.h>
 #include <netinet/in_var.h>
+
+#ifdef MPLS
+#include <netmpls/mpls.h>
+#endif
 
 #ifdef IPSEC
 #include <netinet/ip_ipsp.h>
@@ -415,6 +419,10 @@ rtfree(struct rtentry *rt)
 		if (ifa)
 			IFAFREE(ifa);
 		rtlabel_unref(rt->rt_labelid);
+#ifdef MPLS
+		if (rt->rt_flags & RTF_MPLS)
+			free(rt->rt_llinfo, M_TEMP);
+#endif
 		Free(rt_key(rt));
 		pool_put(&rtentry_pool, rt);
 	}
@@ -451,7 +459,7 @@ rtredirect(struct sockaddr *dst, struct sockaddr *gateway,
 	struct ifaddr		*ifa;
 	struct ifnet		*ifp = NULL;
 
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
 
 	/* verify the gateway is directly reachable */
 	if ((ifa = ifa_ifwithnet(gateway)) == NULL) {
@@ -723,6 +731,9 @@ rtrequest1(int req, struct rt_addrinfo *info, u_int8_t prio,
 	struct ifaddr		*ifa;
 	struct sockaddr		*ndst;
 	struct sockaddr_rtlabel	*sa_rl;
+#ifdef MPLS
+	struct sockaddr_mpls	*sa_mpls;
+#endif
 #define senderr(x) { error = x ; goto bad; }
 
 	if ((rnh = rt_gettable(info->rti_info[RTAX_DST]->sa_family, tableid)) ==
@@ -815,8 +826,13 @@ makeroute:
 		if (rt == NULL)
 			senderr(ENOBUFS);
 		Bzero(rt, sizeof(*rt));
+
 		rt->rt_flags = info->rti_flags;
+
+		if (prio == 0)
+			prio = ifa->ifa_ifp->if_priority + RTP_STATIC;
 		rt->rt_priority = prio;	/* init routing priority */
+#if 0
 		if ((LINK_STATE_IS_UP(ifa->ifa_ifp->if_link_state) ||
 		    ifa->ifa_ifp->if_link_state == LINK_STATE_UNKNOWN) &&
 		    ifa->ifa_ifp->if_flags & IFF_UP)
@@ -825,6 +841,7 @@ makeroute:
 			rt->rt_flags &= ~RTF_UP;
 			rt->rt_priority |= RTP_DOWN;
 		}
+#endif
 		LIST_INIT(&rt->rt_timer);
 		if (rt_setgate(rt, info->rti_info[RTAX_DST],
 		    info->rti_info[RTAX_GATEWAY], tableid)) {
@@ -856,6 +873,39 @@ makeroute:
 			    info->rti_info[RTAX_LABEL];
 			rt->rt_labelid = rtlabel_name2id(sa_rl->sr_label);
 		}
+
+#ifdef MPLS
+		/* We have to allocate additional space for MPLS infos */ 
+		if (info->rti_info[RTAX_SRC] != NULL ||
+		    info->rti_info[RTAX_DST]->sa_family == AF_MPLS) {
+			struct rt_mpls *rt_mpls;
+
+			sa_mpls = (struct sockaddr_mpls *)
+			    info->rti_info[RTAX_SRC];
+
+			rt->rt_llinfo = (caddr_t)malloc(sizeof(struct rt_mpls),
+			    M_TEMP, M_NOWAIT|M_ZERO);
+
+			if (rt->rt_llinfo == NULL) {
+				if (rt->rt_gwroute)
+					rtfree(rt->rt_gwroute);
+				Free(rt_key(rt));
+				pool_put(&rtentry_pool, rt);
+				senderr(ENOMEM);
+			}
+
+			rt_mpls = (struct rt_mpls *)rt->rt_llinfo;
+
+			if (sa_mpls != NULL)
+				rt_mpls->mpls_label = sa_mpls->smpls_label;
+
+			rt_mpls->mpls_operation = info->rti_mpls;
+
+			/* XXX: set experimental bits */
+
+			rt->rt_flags |= RTF_MPLS;
+		}
+#endif
 
 		ifa->ifa_refcnt++;
 		rt->rt_ifa = ifa;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vic.c,v 1.67 2008/12/05 01:10:25 dlg Exp $	*/
+/*	$OpenBSD: if_vic.c,v 1.70 2009/02/01 14:05:52 dlg Exp $	*/
 
 /*
  * Copyright (c) 2006 Reyk Floeter <reyk@openbsd.org>
@@ -487,6 +487,9 @@ vic_attach(struct device *parent, struct device *self, void *aux)
 	IFQ_SET_MAXLEN(&ifp->if_snd, sc->sc_ntxbuf - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 
+	m_clsetwms(ifp, MCLBYTES, 2, sc->sc_nrxbuf - 1);
+	m_clsetwms(ifp, 4096, 2, sc->sc_nrxbuf - 1);
+
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 #if 0
@@ -565,7 +568,7 @@ vic_alloc_data(struct vic_softc *sc)
 	int				i, q;
 
 	sc->sc_rxq[0].pktlen = MCLBYTES;
-	sc->sc_rxq[1].pktlen = VIC_JUMBO_FRAMELEN;
+	sc->sc_rxq[1].pktlen = 4096;
 
 	for (q = 0; q < VIC_NRXRINGS; q++) {
 		sc->sc_rxq[q].bufs = malloc(sizeof(struct vic_rxbuf) *
@@ -1350,7 +1353,7 @@ vic_alloc_mbuf(struct vic_softc *sc, bus_dmamap_t map, u_int pktlen)
 	m->m_len = m->m_pkthdr.len = pktlen - ETHER_ALIGN;
 
 	if (bus_dmamap_load_mbuf(sc->sc_dmat, map, m, BUS_DMA_NOWAIT) != 0) {
-		printf("%s: could not load mbuf DMA map", DEVNAME(sc));
+		printf("%s: could not load mbuf DMA map\n", DEVNAME(sc));
 		m_freem(m);
 		return (NULL);
 	}

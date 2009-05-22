@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.108 2008/12/04 23:40:44 dlg Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.119 2009/03/02 23:52:18 dlg Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -108,6 +108,8 @@ u_int	mclsizes[] = {
 static	char mclnames[MCLPOOLS][8];
 struct	pool mclpools[MCLPOOLS];
 
+int	m_clpool(u_int);
+
 int max_linkhdr;		/* largest link-level header */
 int max_protohdr;		/* largest protocol header */
 int max_hdr;			/* largest link+protocol header */
@@ -164,14 +166,14 @@ m_reclaim(void *arg, int flags)
 {
 	struct domain *dp;
 	struct protosw *pr;
-	int s = splvm();
+	int s = splnet();
 
 	for (dp = domains; dp; dp = dp->dom_next)
 		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
 			if (pr->pr_drain)
 				(*pr->pr_drain)();
-	splx(s);
 	mbstat.m_drain++;
+	splx(s);
 }
 
 /*
@@ -183,12 +185,13 @@ m_get(int nowait, int type)
 	struct mbuf *m;
 	int s;
 
-	s = splvm();
+	s = splnet();
 	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK : 0);
+	if (m)
+		mbstat.m_mtypes[type]++;
 	splx(s);
 	if (m) {
 		m->m_type = type;
-		mbstat.m_mtypes[type]++;
 		m->m_next = (struct mbuf *)NULL;
 		m->m_nextpkt = (struct mbuf *)NULL;
 		m->m_data = m->m_dat;
@@ -207,12 +210,13 @@ m_gethdr(int nowait, int type)
 	struct mbuf *m;
 	int s;
 
-	s = splvm();
+	s = splnet();
 	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK : 0);
+	if (m)
+		mbstat.m_mtypes[type]++;
 	splx(s);
 	if (m) {
 		m->m_type = type;
-		mbstat.m_mtypes[type]++;
 
 		/* keep in sync with m_inithdr */
 		m->m_next = (struct mbuf *)NULL;
@@ -269,34 +273,140 @@ m_getclr(int nowait, int type)
 	return (m);
 }
 
+int
+m_clpool(u_int pktlen)
+{
+	int pi;
+
+	for (pi = 0; pi < MCLPOOLS; pi++) {
+                if (pktlen <= mclsizes[pi])
+			return (pi);
+	}
+
+	return (-1);
+}
+
+void
+m_clinitifp(struct ifnet *ifp)
+{
+	struct mclpool *mclp = ifp->if_data.ifi_mclpool;
+	int i;
+
+	/* Initialize high water marks for use of cluster pools */
+	for (i = 0; i < MCLPOOLS; i++) {
+		mclp = &ifp->if_data.ifi_mclpool[i];
+
+		if (mclp->mcl_lwm == 0)
+			mclp->mcl_lwm = 2;
+		if (mclp->mcl_hwm == 0)
+			mclp->mcl_hwm = 32768;
+
+		mclp->mcl_cwm = MAX(4, mclp->mcl_lwm);
+	}
+}
+
+void
+m_clsetwms(struct ifnet *ifp, u_int pktlen, u_int lwm, u_int hwm)
+{
+	int pi;
+
+	pi = m_clpool(pktlen);
+	if (pi == -1)
+		return;
+
+	ifp->if_data.ifi_mclpool[pi].mcl_lwm = lwm;
+	ifp->if_data.ifi_mclpool[pi].mcl_hwm = hwm;
+}
+
+extern int m_clticks;
+int m_livelock;
+
+int
+m_cldrop(struct ifnet *ifp, int pi)
+{
+	static int liveticks;
+	struct mclpool *mclp;
+	extern int ticks;
+	int i;
+
+	if (m_livelock == 0 && ticks - m_clticks > 2) {
+		struct ifnet *aifp;
+
+		/*
+		 * Timeout did not run, so we are in some kind of livelock.
+		 * Decrease the cluster allocation high water marks on all
+		 * interfaces and prevent them from growth for the very near
+		 * future.
+		 */
+		m_livelock = 1;
+		ifp->if_data.ifi_livelocks++;
+		liveticks = ticks;
+		TAILQ_FOREACH(aifp, &ifnet, if_list) {
+			mclp = aifp->if_data.ifi_mclpool;
+			for (i = 0; i < MCLPOOLS; i++) {
+				mclp[i].mcl_cwm =
+				    max(mclp[i].mcl_cwm / 2, mclp[i].mcl_lwm);
+			}
+		}
+	} else if (m_livelock && ticks - liveticks > 5)
+		m_livelock = 0;	/* Let the high water marks grow again */
+
+	mclp = &ifp->if_data.ifi_mclpool[pi];
+	if (m_livelock == 0 && ISSET(ifp->if_flags, IFF_RUNNING) &&
+	    mclp->mcl_alive <= 2 && mclp->mcl_cwm < mclp->mcl_hwm) {
+		/* About to run out, so increase the current watermark */
+		mclp->mcl_cwm++;
+	} else if (mclp->mcl_alive >= mclp->mcl_cwm)
+		return (1);		/* No more packets given */
+
+	return (0);
+}
+
+void
+m_clcount(struct ifnet *ifp, int pi)
+{
+	ifp->if_data.ifi_mclpool[pi].mcl_alive++;
+}
+
+void
+m_cluncount(struct mbuf *m, int all)
+{
+	struct mbuf_ext *me;
+
+	do {
+		me = &m->m_ext;
+		if (((m->m_flags & (M_EXT|M_CLUSTER)) != (M_EXT|M_CLUSTER)) ||
+		    (me->ext_ifp == NULL))
+			continue;
+
+		me->ext_ifp->if_data.ifi_mclpool[me->ext_backend].mcl_alive--;
+		me->ext_ifp = NULL;
+	} while (all && (m = m->m_next));
+}
+
 void
 m_clget(struct mbuf *m, int how, struct ifnet *ifp, u_int pktlen)
 {
-	struct pool *mclp;
 	int pi;
 	int s;
 
-	for (pi = 0; pi < nitems(mclpools); pi++) {
-		mclp = &mclpools[pi];
-		if (pktlen <= mclp->pr_size)
-			break;
-	}
-
+	pi = m_clpool(pktlen);
 #ifdef DIAGNOSTIC
-	if (mclp == NULL)
-		panic("m_clget: request for %d sized cluster", pktlen);
+	if (pi == -1)
+		panic("m_clget: request for %u byte cluster", pktlen);
 #endif
 
 	if (ifp != NULL && m_cldrop(ifp, pi))
 		return;
 
-	s = splvm();
-	m->m_ext.ext_buf = pool_get(mclp, how == M_WAIT ? PR_WAITOK : 0);
+	s = splnet();
+	m->m_ext.ext_buf = pool_get(&mclpools[pi],
+	    how == M_WAIT ? PR_WAITOK : 0);
 	splx(s);
 	if (m->m_ext.ext_buf != NULL) {
 		m->m_data = m->m_ext.ext_buf;
 		m->m_flags |= M_EXT|M_CLUSTER;
-		m->m_ext.ext_size = mclp->pr_size;
+		m->m_ext.ext_size = mclpools[pi].pr_size;
 		m->m_ext.ext_free = NULL;
 		m->m_ext.ext_arg = NULL;
 
@@ -315,7 +425,7 @@ m_free(struct mbuf *m)
 	struct mbuf *n;
 	int s;
 
-	s = splvm();
+	s = splnet();
 	mbstat.m_mtypes[m->m_type]--;
 	if (m->m_flags & M_PKTHDR)
 		m_tag_delete_chain(m);
@@ -397,7 +507,7 @@ m_defrag(struct mbuf *m, int how)
 	m->m_next = NULL;
 
 	if (m->m_flags & M_EXT) {
-		int s = splvm();
+		int s = splnet();
 		m_extfree(m);
 		splx(s);
 	}
@@ -414,7 +524,7 @@ m_defrag(struct mbuf *m, int how)
 		m->m_data = m->m_ext.ext_buf;
 	} else {
 		m->m_data = m->m_pktdat;
-		bcopy(&m0->m_data, &m->m_data, m0->m_len);
+		bcopy(m0->m_data, m->m_data, m0->m_len);
 	}
 	m->m_pkthdr.len = m->m_len = m0->m_len;
 	m->m_pkthdr.pf.hdr = NULL;	/* altq will cope */
@@ -602,9 +712,8 @@ m_copydata(struct mbuf *m, int off, int len, caddr_t cp)
 void
 m_copyback(struct mbuf *m0, int off, int len, const void *_cp)
 {
-	int mlen;
+	int mlen, totlen = 0;
 	struct mbuf *m = m0, *n;
-	int totlen = 0;
 	caddr_t cp = (caddr_t)_cp;
 
 	if (m0 == NULL)
@@ -613,34 +722,54 @@ m_copyback(struct mbuf *m0, int off, int len, const void *_cp)
 		off -= mlen;
 		totlen += mlen;
 		if (m->m_next == NULL) {
-			n = m_getclr(M_DONTWAIT, m->m_type);
-			if (n == NULL)
+			if ((n = m_get(M_DONTWAIT, m->m_type)) == NULL)
 				goto out;
-			n->m_len = min(MLEN, len + off);
+
+			if (off + len > MLEN) {
+				MCLGETI(n, M_DONTWAIT, NULL, off + len);
+				if (!(n->m_flags & M_EXT)) {
+					m_free(n);
+					goto out;
+				}
+			}
+			bzero(mtod(n, caddr_t), off);
+			n->m_len = len + off;
 			m->m_next = n;
 		}
 		m = m->m_next;
 	}
 	while (len > 0) {
-		mlen = min (m->m_len - off, len);
-		bcopy(cp, off + mtod(m, caddr_t), (unsigned)mlen);
+		/* extend last packet to be filled fully */
+		if (m->m_next == NULL && (len > m->m_len - off))
+			m->m_len += min(len - (m->m_len - off),
+			    M_TRAILINGSPACE(m));
+		mlen = min(m->m_len - off, len);
+		bcopy(cp, mtod(m, caddr_t) + off, (size_t)mlen);
 		cp += mlen;
 		len -= mlen;
-		mlen += off;
-		off = 0;
-		totlen += mlen;
+		totlen += mlen + off;
 		if (len == 0)
 			break;
+		off = 0;
+
 		if (m->m_next == NULL) {
-			n = m_get(M_DONTWAIT, m->m_type);
-			if (n == NULL)
-				break;
-			n->m_len = min(MLEN, len);
+			if ((n = m_get(M_DONTWAIT, m->m_type)) == NULL)
+				goto out;
+
+			if (len > MLEN) {
+				MCLGETI(n, M_DONTWAIT, NULL, len);
+				if (!(n->m_flags & M_EXT)) {
+					m_free(n);
+					goto out;
+				}
+			}
+			n->m_len = len;
 			m->m_next = n;
 		}
 		m = m->m_next;
 	}
-out:	if (((m = m0)->m_flags & M_PKTHDR) && (m->m_pkthdr.len < totlen))
+out:
+	if (((m = m0)->m_flags & M_PKTHDR) && (m->m_pkthdr.len < totlen))
 		m->m_pkthdr.len = totlen;
 }
 
@@ -1165,11 +1294,11 @@ m_apply(struct mbuf *m, int off, int len,
 int
 m_leadingspace(struct mbuf *m)
 {
-	if (M_READONLY((m)))
+	if (M_READONLY(m))
 		return 0;
-	return ((m)->m_flags & M_EXT ? (m)->m_data - (m)->m_ext.ext_buf :
-	    (m)->m_flags & M_PKTHDR ? (m)->m_data - (m)->m_pktdat :
-	    (m)->m_data - (m)->m_dat);
+	return (m->m_flags & M_EXT ? m->m_data - m->m_ext.ext_buf :
+	    m->m_flags & M_PKTHDR ? m->m_data - m->m_pktdat :
+	    m->m_data - m->m_dat);
 }
 
 int
@@ -1177,7 +1306,7 @@ m_trailingspace(struct mbuf *m)
 {
 	if (M_READONLY(m))
 		return 0;
-	return ((m)->m_flags & M_EXT ? (m)->m_ext.ext_buf +
-	    (m)->m_ext.ext_size - ((m)->m_data + (m)->m_len) :
-	    &(m)->m_dat[MLEN] - ((m)->m_data + (m)->m_len));
+	return (m->m_flags & M_EXT ? m->m_ext.ext_buf +
+	    m->m_ext.ext_size - (m->m_data + m->m_len) :
+	    &m->m_dat[MLEN] - (m->m_data + m->m_len));
 }

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.186 2008/12/04 15:24:18 oga Exp $
+#	$OpenBSD: files.i386,v 1.188 2009/01/20 20:21:03 mlarkin Exp $
 #
 # new style config file for i386 architecture
 #
@@ -304,6 +304,8 @@ file	arch/i386/i386/acpiapm.c
 
 # Intel SMP specification 1.4
 define	mpbios
+device	mpbios
+attach	mpbios at bios
 file	arch/i386/i386/mpbios.c		mpbios needs-flag
 file	arch/i386/i386/mpbios_intr_fixup.c	mpbios & pci
 
@@ -424,6 +426,7 @@ include "dev/bluetooth/files.bluetooth"
 
 include "../../../dev/acpi/files.acpi"
 file	arch/i386/i386/acpi_machdep.c		acpi
+file	arch/i386/i386/acpi_wakecode.S		acpi
 
 #
 # IPMI

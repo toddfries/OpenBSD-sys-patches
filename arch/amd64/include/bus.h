@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.13 2008/12/03 15:46:06 oga Exp $	*/
+/*	$OpenBSD: bus.h,v 1.17 2009/04/21 17:05:29 oga Exp $	*/
 /*	$NetBSD: bus.h,v 1.6 1996/11/10 03:19:25 thorpej Exp $	*/
 
 /*-
@@ -65,6 +65,8 @@
 
 #ifndef _X86_BUS_H_
 #define _X86_BUS_H_
+
+#include <sys/mutex.h>
 
 #include <machine/pio.h>
 
@@ -434,17 +436,20 @@ void	bus_space_barrier(bus_space_tag_t, bus_space_handle_t,
 /*
  * Flags used in various bus DMA methods.
  */
-#define	BUS_DMA_WAITOK		0x000	/* safe to sleep (pseudo-flag) */
-#define	BUS_DMA_NOWAIT		0x001	/* not safe to sleep */
-#define	BUS_DMA_ALLOCNOW	0x002	/* perform resource allocation now */
-#define	BUS_DMA_COHERENT	0x004	/* hint: map memory DMA coherent */
-#define	BUS_DMA_BUS1		0x010	/* placeholders for bus functions... */
-#define	BUS_DMA_BUS2		0x020
-#define	BUS_DMA_32BIT		0x040
-#define	BUS_DMA_24BIT		0x080	/* isadma map */
-#define	BUS_DMA_STREAMING	0x100	/* hint: sequential, unidirectional */
-#define	BUS_DMA_READ		0x200	/* mapping is device -> memory only */
-#define	BUS_DMA_WRITE		0x400	/* mapping is memory -> device only */
+#define	BUS_DMA_WAITOK		0x0000	/* safe to sleep (pseudo-flag) */
+#define	BUS_DMA_NOWAIT		0x0001	/* not safe to sleep */
+#define	BUS_DMA_ALLOCNOW	0x0002	/* perform resource allocation now */
+#define	BUS_DMA_COHERENT	0x0004	/* hint: map memory DMA coherent */
+#define	BUS_DMA_BUS1		0x0010	/* placeholders for bus functions... */
+#define	BUS_DMA_BUS2		0x0020
+#define	BUS_DMA_32BIT		0x0040
+#define	BUS_DMA_24BIT		0x0080	/* isadma map */
+#define	BUS_DMA_STREAMING	0x0100	/* hint: sequential, unidirectional */
+#define	BUS_DMA_READ		0x0200	/* mapping is device -> memory only */
+#define	BUS_DMA_WRITE		0x0400	/* mapping is memory -> device only */
+#define	BUS_DMA_NOCACHE		0x0800	/* map memory uncached */
+#define	BUS_DMA_ZERO		0x1000	/* zero memory in dmamem_alloc */
+#define	BUS_DMA_SG		0x2000	/* Internal. memory is for SG map */
 
 /* Forwards needed by prototypes below. */
 struct mbuf;
@@ -471,6 +476,13 @@ typedef struct bus_dmamap		*bus_dmamap_t;
 struct bus_dma_segment {
 	bus_addr_t	ds_addr;	/* DMA address */
 	bus_size_t	ds_len;		/* length of transfer */
+	/*
+	 * Ugh. need this so can pass alignment down from bus_dmamem_alloc
+	 * to scatter gather maps. only the first one is used so the rest is
+	 * wasted space. bus_dma could do with fixing the api for this.
+	 */
+	 bus_size_t	_ds_boundary;	/* don't cross */
+	 bus_size_t	_ds_align;	/* align to me */
 };
 typedef struct bus_dma_segment	bus_dma_segment_t;
 
@@ -570,7 +582,6 @@ struct bus_dmamap {
 	bus_dma_segment_t dm_segs[1];	/* segments; variable length */
 };
 
-#ifdef _BUS_DMA_PRIVATE
 int	_bus_dmamap_create(bus_dma_tag_t, bus_size_t, int, bus_size_t,
 	    bus_size_t, int, bus_dmamap_t *);
 void	_bus_dmamap_destroy(bus_dma_tag_t, bus_dmamap_t);
@@ -603,6 +614,41 @@ int	_bus_dmamem_alloc_range(bus_dma_tag_t tag, bus_size_t size,
 	    bus_dma_segment_t *segs, int nsegs, int *rsegs, int flags,
 	    paddr_t low, paddr_t high);
 
+struct extent;
+
+/* Scatter gather bus_dma functions. */
+struct sg_cookie {
+	struct mutex	 sg_mtx;
+	struct extent	*sg_ex;
+	void		*sg_hdl;
+	void		(*bind_page)(void *, vaddr_t, paddr_t, int);
+	void		(*unbind_page)(void *, vaddr_t);
+	void		(*flush_tlb)(void *);
+};
+
+struct sg_cookie	*sg_dmatag_init(char *, void *, bus_addr_t, bus_size_t,
+			    void (*)(void *, vaddr_t, paddr_t, int),
+			    void (*)(void *, vaddr_t), void (*)(void *));
+void	sg_dmatag_destroy(struct sg_cookie *);
+int	sg_dmamap_create(bus_dma_tag_t, bus_size_t, int, bus_size_t,
+	    bus_size_t, int, bus_dmamap_t *);
+void	sg_dmamap_destroy(bus_dma_tag_t, bus_dmamap_t);
+void	sg_dmamap_set_alignment(bus_dma_tag_t, bus_dmamap_t, u_long);
+int	sg_dmamap_load(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
+	    struct proc *, int);
+int	sg_dmamap_load_mbuf(bus_dma_tag_t, bus_dmamap_t,
+	    struct mbuf *, int);
+int	sg_dmamap_load_uio(bus_dma_tag_t, bus_dmamap_t, struct uio *, int);
+int	sg_dmamap_load_raw(bus_dma_tag_t, bus_dmamap_t, bus_dma_segment_t *,
+	    int, bus_size_t, int);
+void	sg_dmamap_unload(bus_dma_tag_t, bus_dmamap_t);
+int	sg_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
+	    struct proc *, int, int *, int);
+int	sg_dmamap_load_physarray(bus_dma_tag_t, bus_dmamap_t, paddr_t *,
+	    int, int, int *, int);
+int	sg_dmamem_alloc(bus_dma_tag_t, bus_size_t, bus_size_t, bus_size_t,
+	    bus_dma_segment_t *, int, int *, int);
+
 /*      
  *      paddr_t bus_space_mmap(bus_space_tag_t t, bus_addr_t base,
  *          off_t offset, int prot, int flags);
@@ -611,8 +657,5 @@ int	_bus_dmamem_alloc_range(bus_dma_tag_t tag, bus_size_t size,
  */
  
 paddr_t bus_space_mmap(bus_space_tag_t, bus_addr_t, off_t, int, int);
-            
-
-#endif /* _BUS_DMA_PRIVATE */
 
 #endif /* _X86_BUS_H_ */

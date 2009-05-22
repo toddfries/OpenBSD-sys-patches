@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.7 2008/12/04 16:02:20 maja Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.9 2009/02/17 20:35:47 kettenis Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -396,11 +396,6 @@ initppc(u_int startkernel, u_int endkernel, char *args)
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
-
-	printf("%02x:%02x:%02x:%02x:%02x:%02x\n", bootinfo.bi_enetaddr[0],
-	    bootinfo.bi_enetaddr[1], bootinfo.bi_enetaddr[2],
-	    bootinfo.bi_enetaddr[3],  bootinfo.bi_enetaddr[4],
-	    bootinfo.bi_enetaddr[5]);
 }
 
 void
@@ -536,8 +531,7 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 		vaddr = uvm_km_kmemalloc(phys_map, NULL, len,
 		    UVM_KMF_NOWAIT|UVM_KMF_VALLOC);
 		if (vaddr == 0)
-			panic("bus_mem_add_mapping: kvm alloc of 0x%x failed",
-			    len);
+			return (ENOMEM);
 	}
 	*bshp = vaddr + off;
 #ifdef DEBUG_BUS_MEM_ADD_MAPPING

@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_pool.c,v 1.72 2008/12/04 12:40:35 art Exp $	*/
+/*	$OpenBSD: subr_pool.c,v 1.79 2009/04/22 01:16:11 dlg Exp $	*/
 /*	$NetBSD: subr_pool.c,v 1.61 2001/09/26 07:14:56 chs Exp $	*/
 
 /*-
@@ -72,6 +72,7 @@ struct pool_item_header {
 				ph_node;	/* Off-page page headers */
 	int			ph_nmissing;	/* # of chunks in use */
 	caddr_t			ph_page;	/* this page's address */
+	caddr_t			ph_colored;	/* page's colored address */
 	int			ph_pagesize;
 };
 
@@ -79,14 +80,15 @@ struct pool_item {
 #ifdef DIAGNOSTIC
 	u_int32_t pi_magic;
 #endif
+	/* Other entries use only this list entry */
+	TAILQ_ENTRY(pool_item)	pi_list;
+};
+
 #ifdef DEADBEEF1
 #define	PI_MAGIC DEADBEEF1
 #else
 #define	PI_MAGIC 0xdeafbeef
 #endif
-	/* Other entries use only this list entry */
-	TAILQ_ENTRY(pool_item)	pi_list;
-};
 
 #define	POOL_NEEDS_CATCHUP(pp)						\
 	((pp)->pr_nitems < (pp)->pr_minitems)
@@ -331,6 +333,11 @@ pool_init(struct pool *pp, size_t size, u_int align, u_int ioff, int flags,
 	if (pool_serial == 0)
 		panic("pool_init: too much uptime");
 
+        /* constructor, destructor, and arg */
+	pp->pr_ctor = NULL;
+	pp->pr_dtor = NULL;
+	pp->pr_arg = NULL;
+
 	/*
 	 * Decide whether to put the page header off page to avoid
 	 * wasting too large a part of the page. Off-page page headers
@@ -466,7 +473,7 @@ pool_do_get(struct pool *pp, int flags)
 	struct pool_item_header *ph;
 	void *v;
 	int slowdown = 0;
-#ifdef DIAGNOSTIC
+#ifdef POOL_DEBUG
 	int i, *ip;
 #endif
 
@@ -592,6 +599,7 @@ startover:
 		panic("pool_do_get(%s): free list modified: "
 		    "page %p; item addr %p; offset 0x%x=0x%x",
 		    pp->pr_wchan, ph->ph_page, pi, 0, pi->pi_magic);
+#ifdef POOL_DEBUG
 	for (ip = (int *)pi, i = sizeof(*pi) / sizeof(int);
 	    i < pp->pr_size / sizeof(int); i++) {
 		if (ip[i] != PI_MAGIC) {
@@ -601,7 +609,8 @@ startover:
 			    i * sizeof(int), ip[i]);
 		}
 	}
-#endif
+#endif /* POOL_DEBUG */
+#endif /* DIAGNOSTIC */
 
 	/*
 	 * Remove from item list.
@@ -676,7 +685,7 @@ pool_do_put(struct pool *pp, void *v)
 {
 	struct pool_item *pi = v;
 	struct pool_item_header *ph;
-#ifdef DIAGNOSTIC
+#ifdef POOL_DEBUG
 	int i, *ip;
 #endif
 
@@ -710,10 +719,12 @@ pool_do_put(struct pool *pp, void *v)
 	 */
 #ifdef DIAGNOSTIC
 	pi->pi_magic = PI_MAGIC;
+#ifdef POOL_DEBUG
 	for (ip = (int *)pi, i = sizeof(*pi)/sizeof(int);
 	    i < pp->pr_size / sizeof(int); i++)
 		ip[i] = PI_MAGIC;
-#endif
+#endif /* POOL_DEBUG */
+#endif /* DIAGNOSTIC */
 
 	TAILQ_INSERT_HEAD(&ph->ph_itemlist, pi, pi_list);
 	ph->ph_nmissing--;
@@ -816,7 +827,7 @@ pool_prime_page(struct pool *pp, caddr_t storage, struct pool_item_header *ph)
 	unsigned int align = pp->pr_align;
 	unsigned int ioff = pp->pr_itemoffset;
 	int n;
-#ifdef DIAGNOSTIC
+#ifdef POOL_DEBUG
 	int i, *ip;
 #endif
 
@@ -845,6 +856,7 @@ pool_prime_page(struct pool *pp, caddr_t storage, struct pool_item_header *ph)
 	 */
 	if (ioff != 0)
 		cp = (caddr_t)(cp + (align - ioff));
+	ph->ph_colored = cp;
 
 	/*
 	 * Insert remaining chunks on the bucket list.
@@ -859,12 +871,15 @@ pool_prime_page(struct pool *pp, caddr_t storage, struct pool_item_header *ph)
 
 		/* Insert on page list */
 		TAILQ_INSERT_TAIL(&ph->ph_itemlist, pi, pi_list);
+
 #ifdef DIAGNOSTIC
 		pi->pi_magic = PI_MAGIC;
+#ifdef POOL_DEBUG
 		for (ip = (int *)pi, i = sizeof(*pi)/sizeof(int);
 		    i < pp->pr_size / sizeof(int); i++)
 			ip[i] = PI_MAGIC;
-#endif
+#endif /* POOL_DEBUG */
+#endif /* DIAGNOSTIC */
 		cp = (caddr_t)(cp + pp->pr_size);
 	}
 
@@ -1197,7 +1212,7 @@ pool_chk_page(struct pool *pp, const char *label, struct pool_item_header *ph)
 	struct pool_item *pi;
 	caddr_t page;
 	int n;
-#ifdef DIAGNOSTIC
+#ifdef POOL_DEBUG
 	int i, *ip;
 #endif
 
@@ -1226,6 +1241,7 @@ pool_chk_page(struct pool *pp, const char *label, struct pool_item_header *ph)
 			    pp->pr_wchan, ph->ph_page, n, pi, page,
 			    0, pi->pi_magic);
 		}
+#ifdef POOL_DEBUG
 		for (ip = (int *)pi, i = sizeof(*pi) / sizeof(int);
 		    i < pp->pr_size / sizeof(int); i++) {
 			if (ip[i] != PI_MAGIC) {
@@ -1237,7 +1253,8 @@ pool_chk_page(struct pool *pp, const char *label, struct pool_item_header *ph)
 			}
 		}
 
-#endif
+#endif /* POOL_DEBUG */
+#endif /* DIAGNOSTIC */
 		page =
 		    (caddr_t)((u_long)pi & pp->pr_alloc->pa_pagemask);
 		if (page == ph->ph_page)
@@ -1267,6 +1284,43 @@ pool_chk(struct pool *pp, const char *label)
 		r += pool_chk_page(pp, label, ph);
 
 	return (r);
+}
+
+void
+pool_walk(struct pool *pp, void (*func)(void *))
+{
+	struct pool_item_header *ph;
+	struct pool_item *pi;
+	caddr_t cp;
+	int n;
+
+	LIST_FOREACH(ph, &pp->pr_fullpages, ph_pagelist) {
+		cp = ph->ph_colored;
+		n = ph->ph_nmissing;
+
+		while (n--) {
+			func(cp);
+			cp += pp->pr_size;
+		}
+	}
+
+	LIST_FOREACH(ph, &pp->pr_partpages, ph_pagelist) {
+		cp = ph->ph_colored;
+		n = ph->ph_nmissing;
+
+		do {
+			TAILQ_FOREACH(pi, &ph->ph_itemlist, pi_list) {
+				if (cp == (caddr_t)pi)
+					break;
+			}
+			if (cp != (caddr_t)pi) {
+				func(cp);
+				n--;
+			}
+
+			cp += pp->pr_size;
+		} while (n > 0);
+	}
 }
 #endif
 

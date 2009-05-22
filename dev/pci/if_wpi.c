@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpi.c,v 1.78 2008/12/03 17:17:08 damien Exp $	*/
+/*	$OpenBSD: if_wpi.c,v 1.85 2009/04/26 02:20:58 cnst Exp $	*/
 
 /*-
  * Copyright (c) 2006-2008
@@ -215,20 +215,20 @@ wpi_attach(struct device *parent, struct device *self, void *aux)
 	error = pci_mapreg_map(pa, WPI_PCI_BAR0, memtype, 0, &sc->sc_st,
 	    &sc->sc_sh, NULL, &sc->sc_sz, 0);
 	if (error != 0) {
-		printf(": could not map memory space\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 
 	/* Install interrupt handler. */
 	if (pci_intr_map(pa, &ih) != 0) {
-		printf(": could not map interrupt\n");
+		printf(": can't map interrupt\n");
 		return;
 	}
 	intrstr = pci_intr_string(sc->sc_pct, ih);
 	sc->sc_ih = pci_intr_establish(sc->sc_pct, ih, IPL_NET, wpi_intr, sc,
 	    sc->sc_dev.dv_xname);
 	if (sc->sc_ih == NULL) {
-		printf(": could not establish interrupt");
+		printf(": can't establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
@@ -367,7 +367,6 @@ wpi_sensor_attach(struct wpi_softc *sc)
 	    sizeof sc->sensor.desc);
 	sc->sensor.type = SENSOR_INTEGER;	/* not in muK! */
 	/* Temperature is not valid unless interface is up. */
-	sc->sensor.value = 0;
 	sc->sensor.flags = SENSOR_FINVALID;
 	sensor_attach(&sc->sensordev, &sc->sensor);
 	sensordev_install(&sc->sensordev);
@@ -1687,6 +1686,7 @@ wpi_tx(struct wpi_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	const struct wpi_rate *rinfo;
 	struct ieee80211_frame *wh;
 	struct ieee80211_key *k = NULL;
+	struct mbuf *m1;
 	enum ieee80211_edca_ac ac;
 	uint32_t flags;
 	uint16_t qos;
@@ -1778,8 +1778,7 @@ wpi_tx(struct wpi_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	flags = 0;
 	if (!IEEE80211_IS_MULTICAST(wh->i_addr1)) {
 		/* Unicast frame, check if an ACK is expected. */
-		if (!hasqos || (qos & IEEE80211_QOS_ACK_POLICY_MASK) >>
-		    IEEE80211_QOS_ACK_POLICY_SHIFT !=
+		if (!hasqos || (qos & IEEE80211_QOS_ACK_POLICY_MASK) !=
 		    IEEE80211_QOS_ACK_POLICY_NOACK)
 			flags |= WPI_TX_NEED_ACK;
 	}
@@ -1858,21 +1857,35 @@ wpi_tx(struct wpi_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m,
 	    BUS_DMA_NOWAIT);
 	if (error != 0 && error != EFBIG) {
-		printf("%s: could not map mbuf (error %d)\n",
+		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		m_freem(m);
 		return error;
 	}
 	if (error != 0) {
 		/* Too many DMA segments, linearize mbuf. */
-		if (m_defrag(m, M_DONTWAIT) != 0) {
+		MGETHDR(m1, M_DONTWAIT, MT_DATA);
+		if (m1 == NULL) {
 			m_freem(m);
-			return ENOMEM;
+			return ENOBUFS;
 		}
+		if (m->m_pkthdr.len > MHLEN) {
+			MCLGET(m1, M_DONTWAIT);
+			if (!(m1->m_flags & M_EXT)) {
+				m_freem(m);
+				m_freem(m1);
+				return ENOBUFS;
+			}
+		}
+		m_copydata(m, 0, m->m_pkthdr.len, mtod(m1, caddr_t));
+		m1->m_pkthdr.len = m1->m_len = m->m_pkthdr.len;
+		m_freem(m);
+		m = m1;
+
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m,
 		    BUS_DMA_NOWAIT);
 		if (error != 0) {
-			printf("%s: could not map mbuf (error %d)\n",
+			printf("%s: can't map mbuf (error %d)\n",
 			    sc->sc_dev.dv_xname, error);
 			m_freem(m);
 			return error;
@@ -2433,6 +2446,7 @@ wpi_set_pslevel(struct wpi_softc *sc, int dtim, int level, int async)
 		skip_dtim = pmgt->skip_dtim;
 	if (skip_dtim != 0) {
 		cmd.flags |= htole16(WPI_PS_SLEEP_OVER_DTIM);
+		max = pmgt->intval[4];
 		if (max == (uint32_t)-1)
 			max = dtim * (skip_dtim + 1);
 		else if (max > dtim)
@@ -3290,6 +3304,7 @@ wpi_init(struct ifnet *ifp)
 	struct ieee80211com *ic = &sc->sc_ic;
 	int error;
 
+#ifdef notyet
 	/* Check that the radio is not disabled by hardware switch. */
 	if (!(WPI_READ(sc, WPI_GP_CNTRL) & WPI_GP_CNTRL_RFKILL)) {
 		printf("%s: radio is disabled by hardware switch\n",
@@ -3297,7 +3312,7 @@ wpi_init(struct ifnet *ifp)
 		error = EPERM;	/* :-) */
 		goto fail;
 	}
-
+#endif
 	/* Read firmware images from the filesystem. */
 	if ((error = wpi_read_firmware(sc)) != 0) {
 		printf("%s: could not read firmware\n", sc->sc_dev.dv_xname);

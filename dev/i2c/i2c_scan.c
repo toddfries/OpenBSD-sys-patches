@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2c_scan.c,v 1.128 2008/11/13 17:57:15 deraadt Exp $	*/
+/*	$OpenBSD: i2c_scan.c,v 1.131 2009/03/14 06:31:48 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Theo de Raadt <deraadt@openbsd.org>
@@ -17,7 +17,7 @@
  */
 
 /*
- * I2C bus scanning.
+ * I2C bus scanning.  We apologize in advance for the massive overuse of 0x.
  */
 
 #include "ipmi.h"
@@ -926,18 +926,17 @@ iic_probe_sensor(struct device *self, u_int8_t addr)
 char *
 iic_probe_eeprom(struct device *self, u_int8_t addr)
 {
-	int reg, csum = 0;
+	u_int8_t type;
 	char *name = NULL;
 
-	/* SPD EEPROMs should only set lower nibble for size (ie <= 32K) */
-	if ((iicprobe(0x01) & 0xf0) != 0)
+	type = iicprobe(0x02);
+	/* limit to SPD types seen in the wild */
+	if (type < 4 || type > 11)
 		return (name);
 
-	for (reg = 0; reg < 0x3f; reg++)
-		csum += iicprobe(reg);
+	/* more matching in driver(s) */
+	name = "eeprom";
 
-	if (iicprobe(0x3f) == (csum & 0xff))
-		name = "spd";
 	return (name);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: envyvar.h,v 1.5 2008/03/22 11:23:11 ratchov Exp $	*/
+/*	$OpenBSD: envyvar.h,v 1.9 2009/05/04 04:49:50 ratchov Exp $	*/
 /*
  * Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
  *
@@ -22,6 +22,8 @@
 #include <sys/device.h>
 #include <dev/audio_if.h>
 
+struct envy_softc;
+
 struct envy_buf {
 	bus_dma_segment_t	seg;
 	bus_dmamap_t		map;
@@ -29,16 +31,34 @@ struct envy_buf {
 	size_t			size;
 };
 
-/*
- * ak4524 codecs
- */
+struct envy_codec {
+	char *name;
+	int ndev;
+	void (*devinfo)(struct envy_softc *, struct mixer_devinfo *, int);
+	void (*get)(struct envy_softc *, struct mixer_ctrl *, int);
+	int (*set)(struct envy_softc *, struct mixer_ctrl *, int);
+};
+
+struct envy_card {
+	int subid;
+	char *name;
+	int nadc;
+	struct envy_codec *adc;
+	int ndac;
+	struct envy_codec *dac;
+	void (*init)(struct envy_softc *);
+	void (*ak_write)(struct envy_softc *, int, int, int);
+	unsigned char *eeprom;
+};
+
 struct envy_ak {
-	unsigned char reg[8];	/* shadow for ak4524 registers */
+	unsigned char reg[16];
 };
 
 struct envy_softc {
 	struct device		dev;
 	struct device	       *audio;
+	int			isht;		/* is a Envy24HT ? */
 	struct envy_buf		ibuf, obuf;
 	pcitag_t		pci_tag;
 	pci_chipset_tag_t	pci_pc;
@@ -50,7 +70,10 @@ struct envy_softc {
 	bus_space_tag_t		mt_iot;
 	bus_space_handle_t      mt_ioh;
 	bus_size_t		mt_iosz;
+	struct envy_card       *card;
 	struct envy_ak		ak[4];
+#define ENVY_EEPROM_MAXSZ 32
+	unsigned char		eeprom[ENVY_EEPROM_MAXSZ];
 	void (*iintr)(void *);
 	void *iarg;
 	void (*ointr)(void *);
@@ -60,12 +83,10 @@ struct envy_softc {
 #define ENVY_MIX_CLASSIN	0
 #define ENVY_MIX_CLASSOUT	1
 #define ENVY_MIX_CLASSMON	2
-#define ENVY_MIX_OUTSRC		3
-#define ENVY_MIX_MONITOR	13
-#define ENVY_MIX_ILVL(nak)	33
-#define ENVY_MIX_OLVL(nak)	(ENVY_MIX_ILVL(nak) + 2 * (nak))
-#define ENVY_MIX_OMUTE(nak)	(ENVY_MIX_OLVL(nak) + 2 * (nak))
-#define ENVY_MIX_INVAL(nak)	(ENVY_MIX_OMUTE(nak) + (nak))
+
+#define ENVY_MIX_NCLASS		3
+#define ENVY_MIX_NOUTSRC	10
+#define ENVY_MIX_NMONITOR	20
 
 #define ENVY_MIX_OUTSRC_LINEIN	0
 #define ENVY_MIX_OUTSRC_SPDIN	8

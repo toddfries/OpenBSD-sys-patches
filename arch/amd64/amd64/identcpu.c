@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.15 2008/06/13 00:00:45 jsg Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.17 2009/02/16 17:24:21 krw Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -129,7 +129,9 @@ intelcore_update_sensor(void *args)
 	u_int64_t msr;
 	int max = 100;
 
-	if (rdmsr(MSR_TEMPERATURE_TARGET) & MSR_TEMPERATURE_TARGET_LOW_BIT)
+	/* Only some Core family chips have MSR_TEMPERATURE_TARGET. */
+	if (ci->ci_model == 0xe &&
+	    (rdmsr(MSR_TEMPERATURE_TARGET) & MSR_TEMPERATURE_TARGET_LOW_BIT))
 		max = 85;
 
 	msr = rdmsr(MSR_THERM_STATUS);
@@ -189,6 +191,13 @@ identifycpu(struct cpu_info *ci)
 
 	if (cpu_model[0] == 0)
 		strlcpy(cpu_model, "Opteron or Athlon 64", sizeof(cpu_model));
+
+	ci->ci_family = (ci->ci_signature >> 8) & 0x0f;
+	ci->ci_model = (ci->ci_signature >> 4) & 0x0f;
+	if (ci->ci_family == 0x6 || ci->ci_family == 0xf) {
+		ci->ci_family += (ci->ci_signature >> 20) & 0xff;
+		ci->ci_model += ((ci->ci_signature >> 16) & 0x0f) << 4;
+	}
 
 	last_tsc = rdtsc();
 	delay(100000);

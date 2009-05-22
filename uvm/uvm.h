@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm.h,v 1.24 2008/06/09 20:30:23 miod Exp $	*/
+/*	$OpenBSD: uvm.h,v 1.32 2009/05/04 18:08:06 oga Exp $	*/
 /*	$NetBSD: uvm.h,v 1.24 2000/11/27 08:40:02 chs Exp $	*/
 
 /*
@@ -80,38 +80,32 @@ struct uvm {
 	struct pglist page_active;	/* allocated pages, in use */
 	struct pglist page_inactive_swp;/* pages inactive (reclaim or free) */
 	struct pglist page_inactive_obj;/* pages inactive (reclaim or free) */
+	/* Lock order: object lock,  pageqlock, then fpageqlock. */
 	simple_lock_data_t pageqlock;	/* lock for active/inactive page q */
-	struct mutex fpageqlock;	/* lock for free page q */
+	struct mutex fpageqlock;	/* lock for free page q  + pdaemon */
 	boolean_t page_init_done;	/* TRUE if uvm_page_init() finished */
 	boolean_t page_idle_zero;	/* TRUE if we should try to zero
 					   pages in the idle loop */
 
-		/* page daemon trigger */
-	int pagedaemon;			/* daemon sleeps on this */
-	struct proc *pagedaemon_proc;	/* daemon's pid */
-	simple_lock_data_t pagedaemon_lock;
+	/* page daemon's pid, we sleep on the pointer to this. */
+	struct proc *pagedaemon_proc;
 
-		/* aiodone daemon trigger */
-	int aiodoned;			/* daemon sleeps on this */
-	struct proc *aiodoned_proc;	/* daemon's pid */
-	simple_lock_data_t aiodoned_lock;
+	/* aiodone daemon's pid, we sleep on the pointer to this. */
+	struct proc *aiodoned_proc;
+	struct mutex aiodoned_lock;
 
 		/* page hash */
 	struct pglist *page_hash;	/* page hash table (vp/off->page) */
 	int page_nhash;			/* number of buckets */
 	int page_hashmask;		/* hash mask */
-	simple_lock_data_t hashlock;	/* lock on page_hash array */
+	struct mutex hashlock;		/* lock on page_hash array */
 
 	/* static kernel map entry pool */
 	vm_map_entry_t kentry_free;	/* free page pool */
 	simple_lock_data_t kentry_lock;
 
-	/* aio_done is locked by uvm.pagedaemon_lock and splbio! */
+	/* aio_done is locked by uvm.aiodoned_lock. */
 	TAILQ_HEAD(, buf) aio_done;		/* done async i/o reqs */
-
-	/* pager VM area bounds */
-	vaddr_t pager_sva;		/* start of pager VA area */
-	vaddr_t pager_eva;		/* end of pager VA area */
 
 	/* swap-related items */
 	simple_lock_data_t swap_data_lock;
@@ -171,16 +165,6 @@ do {									\
 #else
 #define UVM_PAGE_OWN(PG, TAG) /* nothing */
 #endif /* UVM_PAGE_TRKOWN */
-
-/*
- * pull in inlines
- */
-
-#include <uvm/uvm_amap_i.h>
-#include <uvm/uvm_fault_i.h>
-#include <uvm/uvm_map_i.h>
-#include <uvm/uvm_page_i.h>
-#include <uvm/uvm_pager_i.h>
 
 #endif /* _KERNEL */
 

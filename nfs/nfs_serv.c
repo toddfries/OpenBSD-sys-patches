@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_serv.c,v 1.58 2008/07/06 16:54:48 thib Exp $	*/
+/*	$OpenBSD: nfs_serv.c,v 1.66 2009/04/13 17:51:57 blambert Exp $	*/
 /*     $NetBSD: nfs_serv.c,v 1.34 1997/05/12 23:37:12 fvdl Exp $       */
 
 /*
@@ -89,6 +89,10 @@ extern struct nfsstats nfsstats;
 extern nfstype nfsv2_type[9];
 extern nfstype nfsv3_type[9];
 int nfsrvw_procrastinate = NFS_GATHERDELAY * 1000;
+struct timeval nfsrvw_procrastinate_tv = {
+	(NFS_GATHERDELAY * 1000) / 1000000,	/* tv_sec */
+	(NFS_GATHERDELAY * 1000) % 1000000	/* tv_usec */
+};
 
 /*
  * nfs v3 access service
@@ -229,7 +233,9 @@ nfsrv_setattr(nfsd, slp, procp, mrq)
 	VATTR_NULL(&va);
 	if (v3) {
 		va.va_vaflags |= VA_UTIMES_NULL;
-		nfsm_srvsattr(&va);
+		error = nfsm_srvsattr(&md, &va, mrep, &dpos);
+		if (error)
+			goto nfsmout;
 		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
 		gcheck = fxdr_unsigned(int, *tl);
 		if (gcheck) {
@@ -305,7 +311,7 @@ nfsrv_setattr(nfsd, slp, procp, mrq)
 			error = EISDIR;
 			goto out;
 		} else if ((error = nfsrv_access(vp, VWRITE, cred, rdonly,
-			procp, 0)) != 0)
+			procp, 1)) != 0)
 			goto out;
 	}
 	error = VOP_SETATTR(vp, &va, cred, procp);
@@ -385,7 +391,7 @@ nfsrv_lookup(nfsd, slp, procp, mrq)
 		nfsm_srvpostop_attr(nfsd, dirattr_ret, &dirattr, &mb);
 		return (0);
 	}
-	nfsm_srvfhtom(fhp, v3);
+	nfsm_srvfhtom(&mb, fhp, v3);
 	if (v3) {
 		nfsm_srvpostop_attr(nfsd, 0, &va, &mb);
 		nfsm_srvpostop_attr(nfsd, dirattr_ret, &dirattr, &mb);
@@ -537,7 +543,14 @@ nfsrv_read(nfsd, slp, procp, mrq)
 		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
 		off = (off_t)fxdr_unsigned(u_int32_t, *tl);
 	}
-	nfsm_srvstrsiz(reqlen, NFS_SRVMAXDATA(nfsd));
+
+	nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
+	reqlen = fxdr_unsigned(int32_t, *tl);
+	if (reqlen > (NFS_SRVMAXDATA(nfsd)) || reqlen <= 0) {
+		error = EBADRPC;
+		nfsm_reply(0);
+	}
+
 	error = nfsrv_fhtovp(fhp, 1, &vp, cred, slp, nam, &rdonly);
 	if (error) {
 		nfsm_reply(2 * NFSX_UNSIGNED);
@@ -870,7 +883,6 @@ nfsrv_writegather(ndp, slp, procp, mrq)
 	struct mbuf *mb, *mreq, *mrep, *md;
 	struct vnode *vp;
 	struct uio io, *uiop = &io;
-	u_quad_t cur_usec;
 	struct timeval tv;
 
 	*mrq = NULL;
@@ -886,8 +898,7 @@ nfsrv_writegather(ndp, slp, procp, mrq)
 	    nfsd->nd_mreq = NULL;
 	    nfsd->nd_stable = NFSV3WRITE_FILESYNC;
 	    getmicrotime(&tv);
-	    cur_usec = (u_quad_t)tv.tv_sec * 1000000 + (u_quad_t)tv.tv_usec;
-	    nfsd->nd_time = cur_usec + nfsrvw_procrastinate;
+	    timeradd(&tv, &nfsrvw_procrastinate_tv, &nfsd->nd_time);
     
 	    /*
 	     * Now, get the write header..
@@ -942,7 +953,7 @@ nfsmout:
 		    nfsm_srvwcc(nfsd, forat_ret, &forat, aftat_ret, &va, &mb);
 		nfsd->nd_mreq = mreq;
 		nfsd->nd_mrep = NULL;
-		nfsd->nd_time = 0;
+		timerclear(&nfsd->nd_time);
 	    }
     
 	    /*
@@ -951,7 +962,7 @@ nfsmout:
 	    s = splsoftclock();
 	    owp = NULL;
 	    wp = LIST_FIRST(&slp->ns_tq);
-	    while (wp && wp->nd_time < nfsd->nd_time) {
+	    while (wp && timercmp(&wp->nd_time, &nfsd->nd_time, <)) {
 		owp = wp;
 		wp = LIST_NEXT(wp, nd_tq);
 	    }
@@ -999,11 +1010,10 @@ nfsmout:
 	 */
 loop1:
 	getmicrotime(&tv);
-	cur_usec = (u_quad_t)tv.tv_sec * 1000000 + (u_quad_t)tv.tv_usec;
 	s = splsoftclock();
 	for (nfsd = LIST_FIRST(&slp->ns_tq); nfsd != NULL; nfsd = owp) {
 		owp = LIST_NEXT(nfsd, nd_tq);
-		if (nfsd->nd_time > cur_usec)
+		if (timercmp(&nfsd->nd_time, &tv, >))
 		    break;
 		if (nfsd->nd_mreq)
 		    continue;
@@ -1119,7 +1129,7 @@ loop1:
 		     */
 		    s = splsoftclock();
 		    if (nfsd != swp) {
-			nfsd->nd_time = 0;
+			timerclear(&nfsd->nd_time);
 			LIST_INSERT_HEAD(&slp->ns_tq, nfsd, nd_tq);
 		    }
 		    nfsd = LIST_FIRST(&swp->nd_coalesce);
@@ -1129,7 +1139,7 @@ loop1:
 		    splx(s);
 		} while (nfsd);
 		s = splsoftclock();
-		swp->nd_time = 0;
+		timerclear(&swp->nd_time);
 		LIST_INSERT_HEAD(&slp->ns_tq, swp, nd_tq);
 		splx(s);
 		goto loop1;
@@ -1167,7 +1177,7 @@ nfsrvw_coalesce(struct nfsrv_descript *owp, struct nfsrv_descript *nfsd)
         int overlap;
         struct mbuf *mp;
 
-	splassert(IPL_SOFTCLOCK);
+	splsoftassert(IPL_SOFTCLOCK);
 
         LIST_REMOVE(nfsd, nd_hash);
         LIST_REMOVE(nfsd, nd_tq);
@@ -1275,7 +1285,9 @@ nfsrv_create(nfsd, slp, procp, mrq)
 				break;
 			}
 		case NFSV3CREATE_UNCHECKED:
-			nfsm_srvsattr(&va);
+			error = nfsm_srvsattr(&md, &va, mrep, &dpos);
+			if (error)
+				goto nfsmout;
 			break;
 		case NFSV3CREATE_EXCLUSIVE:
 			nfsm_dissect(cp, caddr_t, NFSX_V3CREATEVERF);
@@ -1424,7 +1436,7 @@ nfsrv_create(nfsd, slp, procp, mrq)
 		nfsm_srvwcc(nfsd, dirfor_ret, &dirfor, diraft_ret, &diraft,
 		    &mb);
 	} else {
-		nfsm_srvfhtom(fhp, v3);
+		nfsm_srvfhtom(&mb, fhp, v3);
 		fp = nfsm_build(&mb, NFSX_V2FATTR);
 		nfsm_srvfattr(nfsd, &va, fp);
 	}
@@ -1502,7 +1514,9 @@ nfsrv_mknod(nfsd, slp, procp, mrq)
 		goto out;
 	}
 	VATTR_NULL(&va);
-	nfsm_srvsattr(&va);
+	error = nfsm_srvsattr(&md, &va, mrep, &dpos);
+	if (error)
+		goto nfsmout;
 	if (vtyp == VCHR || vtyp == VBLK) {
 		nfsm_dissect(tl, u_int32_t *, 2 * NFSX_UNSIGNED);
 		major = fxdr_unsigned(u_int32_t, *tl++);
@@ -1885,7 +1899,7 @@ nfsrv_link(nfsd, slp, procp, mrq)
 	nfsm_srvmtofh(fhp);
 	nfsm_srvmtofh(dfhp);
 	nfsm_srvnamesiz(len);
-	error = nfsrv_fhtovp(fhp, FALSE, &vp, cred, slp, nam, &rdonly);
+	error = nfsrv_fhtovp(fhp, 0, &vp, cred, slp, nam, &rdonly);
 	if (error) {
 		nfsm_reply(NFSX_POSTOPATTR(v3) + NFSX_WCCDATA(v3));
 		nfsm_srvpostop_attr(nfsd, getret, &at, &mb);
@@ -1999,7 +2013,9 @@ nfsrv_symlink(nfsd, slp, procp, mrq)
 		goto out;
 	VATTR_NULL(&va);
 	if (v3)
-		nfsm_srvsattr(&va);
+		error = nfsm_srvsattr(&md, &va, mrep, &dpos);
+		if (error)
+			goto nfsmout;
 	nfsm_strsiz(len2, NFS_MAXPATHLEN);
 	pathcp = malloc(len2 + 1, M_TEMP, M_WAITOK);
 	iv.iov_base = pathcp;
@@ -2142,7 +2158,9 @@ nfsrv_mkdir(nfsd, slp, procp, mrq)
 	}
 	VATTR_NULL(&va);
 	if (v3) {
-		nfsm_srvsattr(&va);
+		error = nfsm_srvsattr(&md, &va, mrep, &dpos);
+		if (error)
+			goto nfsmout;
 	} else {
 		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
 		va.va_mode = nfstov_mode(*tl++);
@@ -2183,7 +2201,7 @@ out:
 		nfsm_srvwcc(nfsd, dirfor_ret, &dirfor, diraft_ret, &diraft,
 		    &mb);
 	} else {
-		nfsm_srvfhtom(fhp, v3);
+		nfsm_srvfhtom(&mb, fhp, v3);
 		fp = nfsm_build(&mb, NFSX_V2FATTR);
 		nfsm_srvfattr(nfsd, &va, fp);
 	}

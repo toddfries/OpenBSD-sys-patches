@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.118 2008/11/26 17:36:23 dlg Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.121 2009/01/27 09:17:51 dlg Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -211,7 +211,7 @@ struct mbuf {
 /*
  * Macros for tracking external storage associated with an mbuf.
  *
- * Note: add and delete reference must be called at splvm().
+ * Note: add and delete reference must be called at splnet().
  */
 #ifdef DEBUG
 #define MCLREFDEBUGN(m, file, line) do {				\
@@ -230,7 +230,7 @@ struct mbuf {
 #define	MCLISREFERENCED(m)	((m)->m_ext.ext_nextref != (m))
 
 #define	MCLADDREFERENCE(o, n)	do {					\
-		int ms =  splvm();					\
+		int ms = splnet();					\
 		(n)->m_flags |= ((o)->m_flags & (M_EXT|M_CLUSTER));	\
 		(n)->m_ext.ext_nextref = (o)->m_ext.ext_nextref;	\
 		(n)->m_ext.ext_prevref = (o);				\
@@ -428,10 +428,11 @@ struct  mbuf *m_getptr(struct mbuf *, int, int *);
 int	m_leadingspace(struct mbuf *);
 int	m_trailingspace(struct mbuf *);
 void	m_clget(struct mbuf *, int, struct ifnet *, u_int);
-void	m_clsetlwm(struct ifnet *, u_int, u_int);
+void	m_clsetwms(struct ifnet *, u_int, u_int, u_int);
 int	m_cldrop(struct ifnet *, int);
 void	m_clcount(struct ifnet *, int);
 void	m_cluncount(struct mbuf *, int);
+void	m_clinitifp(struct ifnet *);
 void	m_adj(struct mbuf *, int);
 void	m_copyback(struct mbuf *, int, int, const void *);
 void	m_freem(struct mbuf *);

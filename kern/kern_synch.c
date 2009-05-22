@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_synch.c,v 1.87 2008/09/10 12:30:40 blambert Exp $	*/
+/*	$OpenBSD: kern_synch.c,v 1.89 2009/04/14 09:13:25 art Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*
@@ -370,18 +370,8 @@ wakeup_n(void *ident, int n)
 					updatepri(p);
 				p->p_slptime = 0;
 				p->p_stat = SRUN;
-
-				/*
-				 * Since curpriority is a user priority,
-				 * p->p_priority is always better than
-				 * curpriority on the last CPU on
-				 * which it ran.
-				 *
-				 * XXXSMP See affinity comment in
-				 * resched_proc().
-				 */
+				p->p_cpu = sched_choosecpu(p);
 				setrunqueue(p);
-				KASSERT(p->p_cpu != NULL);
 				need_resched(p->p_cpu);
 				/* END INLINE EXPANSION */
 

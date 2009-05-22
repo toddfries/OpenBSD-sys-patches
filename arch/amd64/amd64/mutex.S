@@ -1,4 +1,4 @@
-/*	$OpenBSD: mutex.S,v 1.4 2005/07/26 08:11:11 art Exp $	*/
+/*	$OpenBSD: mutex.S,v 1.6 2009/04/27 21:48:56 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>

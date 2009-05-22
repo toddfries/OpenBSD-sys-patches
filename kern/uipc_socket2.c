@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket2.c,v 1.45 2008/11/24 12:57:37 dlg Exp $	*/
+/*	$OpenBSD: uipc_socket2.c,v 1.48 2009/03/30 14:29:30 blambert Exp $	*/
 /*	$NetBSD: uipc_socket2.c,v 1.11 1996/02/04 02:17:55 christos Exp $	*/
 
 /*
@@ -156,16 +156,15 @@ sonewconn(struct socket *head, int connstatus)
 	extern u_long unpst_sendspace, unpst_recvspace;
 	u_long snd_sb_hiwat, rcv_sb_hiwat;
 
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
 
 	if (mclpools[0].pr_nout > mclpools[0].pr_hardlimit * 95 / 100)
 		return ((struct socket *)0);
 	if (head->so_qlen + head->so_q0len > head->so_qlimit * 3)
 		return ((struct socket *)0);
-	so = pool_get(&socket_pool, PR_NOWAIT);
+	so = pool_get(&socket_pool, PR_NOWAIT|PR_ZERO);
 	if (so == NULL)
 		return ((struct socket *)0);
-	bzero(so, sizeof(*so));
 	so->so_type = head->so_type;
 	so->so_options = head->so_options &~ SO_ACCEPTCONN;
 	so->so_linger = head->so_linger;
@@ -364,9 +363,9 @@ int
 soreserve(struct socket *so, u_long sndcc, u_long rcvcc)
 {
 
-	if (sbreserve(&so->so_snd, sndcc) == 0)
+	if (sbreserve(&so->so_snd, sndcc))
 		goto bad;
-	if (sbreserve(&so->so_rcv, rcvcc) == 0)
+	if (sbreserve(&so->so_rcv, rcvcc))
 		goto bad2;
 	if (so->so_rcv.sb_lowat == 0)
 		so->so_rcv.sb_lowat = 1;
@@ -391,12 +390,12 @@ sbreserve(struct sockbuf *sb, u_long cc)
 {
 
 	if (cc == 0 || cc > sb_max)
-		return (0);
+		return (1);
 	sb->sb_hiwat = cc;
 	sb->sb_mbmax = min(cc * 2, sb_max + (sb_max / MCLBYTES) * MSIZE);
 	if (sb->sb_lowat > sb->sb_hiwat)
 		sb->sb_lowat = sb->sb_hiwat;
-	return (1);
+	return (0);
 }
 
 /*

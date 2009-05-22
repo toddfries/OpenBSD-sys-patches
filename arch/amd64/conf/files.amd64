@@ -1,4 +1,4 @@
-#	$OpenBSD: files.amd64,v 1.41 2008/11/09 15:11:19 oga Exp $
+#	$OpenBSD: files.amd64,v 1.46 2009/04/21 17:05:29 oga Exp $
 
 maxpartitions 16
 maxusers 2 16 128
@@ -28,6 +28,7 @@ file	arch/amd64/amd64/lock_machdep.c		multiprocessor
 file	arch/amd64/amd64/intr.c
 file	arch/amd64/amd64/bus_space.c
 file	arch/amd64/amd64/bus_dma.c
+file	arch/amd64/amd64/sg_dma.c
 
 file	arch/amd64/amd64/mptramp.S		multiprocessor
 file	arch/amd64/amd64/ipifuncs.c		multiprocessor
@@ -35,10 +36,6 @@ file	arch/amd64/amd64/ipi.c			multiprocessor
 file	arch/amd64/amd64/mp_setperf.c		multiprocessor
 
 file	arch/amd64/amd64/apic.c			ioapic | lapic
-
-file	arch/amd64/amd64/mpbios.c		mpbios
-file	arch/amd64/amd64/mpbios_intr_fixup.c	mpbios & pci
-
 
 file	arch/amd64/amd64/consinit.c
 file	dev/cninit.c
@@ -80,6 +77,13 @@ device	bios {}
 attach	bios at mainbus
 file	arch/amd64/amd64/bios.c			bios needs-flag
 
+#Intel SMP specification 1.4
+define	mpbios
+device	mpbios
+attach	mpbios at bios
+file	arch/amd64/amd64/mpbios.c		mpbios needs-flag
+file	arch/amd64/amd64/mpbios_intr_fixup.c	mpbios & pci
+
 define	cpu {[apid = -1]}
 device	cpu
 attach	cpu at mainbus
@@ -89,7 +93,7 @@ file	arch/amd64/amd64/cpu.c	cpu
 define	lapic
 file	arch/amd64/amd64/lapic.c		lapic needs-flag
 
-device	ioapic: lapic
+device	ioapic: mpbios, lapic
 attach	ioapic at mainbus
 file	arch/amd64/amd64/ioapic.c		ioapic needs-flag
 
@@ -108,6 +112,11 @@ include	"dev/puc/files.puc"
 device	pchb: pcibus, agpbus
 attach	pchb at pci
 file	arch/amd64/pci/pchb.c			pchb
+
+# AMAS AMD memory address switch
+device	amas
+attach	amas at pci
+file	arch/amd64/pci/amas.c			amas
 
 # AGP bridge support. most attach at pchb
 include "dev/pci/files.agp"
@@ -203,6 +212,7 @@ include "dev/i2c/files.i2c"
 #
 include "../../../dev/acpi/files.acpi"
 file	arch/amd64/amd64/acpi_machdep.c		acpi
+file	arch/amd64/amd64/acpi_wakecode.S	acpi
 
 #
 # Machine-independent SD/MMC drivers

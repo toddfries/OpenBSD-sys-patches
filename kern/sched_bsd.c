@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched_bsd.c,v 1.19 2008/11/06 22:11:36 art Exp $	*/
+/*	$OpenBSD: sched_bsd.c,v 1.21 2009/04/14 09:13:25 art Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*-
@@ -97,7 +97,7 @@ roundrobin(struct cpu_info *ci)
 
 	spc->spc_rrticks = rrticks_init;
 
-	if (curproc != NULL) {
+	if (ci->ci_curproc != NULL) {
 		s = splstatclock();
 		if (spc->spc_schedflags & SPCF_SEENRR) {
 			/*
@@ -112,7 +112,8 @@ roundrobin(struct cpu_info *ci)
 		splx(s);
 	}
 
-	need_resched(curcpu());
+	if (spc->spc_nrun)
+		need_resched(ci);
 }
 
 /*
@@ -257,7 +258,8 @@ schedcpu(void *arg)
 		resetpriority(p);
 		if (p->p_priority >= PUSER) {
 			if (p->p_stat == SRUN &&
-			    (p->p_priority / PPQ) != (p->p_usrpri / PPQ)) {
+			    (p->p_priority / SCHED_PPQ) !=
+			    (p->p_usrpri / SCHED_PPQ)) {
 				remrunqueue(p);
 				p->p_priority = p->p_usrpri;
 				setrunqueue(p);
@@ -335,6 +337,7 @@ preempt(struct proc *newp)
 	SCHED_LOCK(s);
 	p->p_priority = p->p_usrpri;
 	p->p_stat = SRUN;
+	p->p_cpu = sched_choosecpu(p);
 	setrunqueue(p);
 	p->p_stats->p_ru.ru_nivcsw++;
 	mi_switch();
@@ -514,6 +517,7 @@ setrunnable(struct proc *p)
 		break;
 	}
 	p->p_stat = SRUN;
+	p->p_cpu = sched_choosecpu(p);
 	setrunqueue(p);
 	if (p->p_slptime > 1)
 		updatepri(p);

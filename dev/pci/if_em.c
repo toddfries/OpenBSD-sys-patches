@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.202 2008/12/06 11:39:38 dlg Exp $ */
+/* $OpenBSD: if_em.c,v 1.207 2009/01/27 09:17:51 dlg Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -261,8 +261,13 @@ em_attach(struct device *parent, struct device *self, void *aux)
 	em_identify_hardware(sc);
 
 	/* Parameters (to be read from user) */
-	sc->num_tx_desc = EM_MIN_TXD;
-	sc->num_rx_desc = EM_MIN_RXD;
+	if (sc->hw.mac_type >= em_82544) {
+		sc->num_tx_desc = EM_MAX_TXD;
+		sc->num_rx_desc = EM_MAX_RXD;
+	} else {
+		sc->num_tx_desc = EM_MAX_TXD_82543;
+		sc->num_rx_desc = EM_MAX_RXD_82543;
+	}
 	sc->tx_int_delay = EM_TIDV;
 	sc->tx_abs_int_delay = EM_TADV;
 	sc->rx_int_delay = EM_RDTR;
@@ -663,20 +668,6 @@ em_init(void *arg)
 
 	em_stop(sc);
 
-	if (ifp->if_flags & IFF_UP) {
-		if (sc->hw.mac_type >= em_82544) {
-		    sc->num_tx_desc = EM_MAX_TXD;
-		    sc->num_rx_desc = EM_MAX_RXD;
-		} else {
-		    sc->num_tx_desc = EM_MAX_TXD_82543;
-		    sc->num_rx_desc = EM_MAX_RXD_82543;
-		}
-	} else {
-		sc->num_tx_desc = EM_MIN_TXD;
-		sc->num_rx_desc = EM_MIN_RXD;
-	}
-	IFQ_SET_MAXLEN(&ifp->if_snd, sc->num_tx_desc - 1);
-
 	/*
 	 * Packet Buffer Allocation (PBA)
 	 * Writing PBA sets the receive portion of the buffer
@@ -792,6 +783,7 @@ em_intr(void *arg)
 	struct ifnet	*ifp;
 	u_int32_t	reg_icr, test_icr;
 	int claimed = 0;
+	int refill;
 
 	ifp = &sc->interface_data.ac_if;
 
@@ -803,15 +795,12 @@ em_intr(void *arg)
 			break;
 
 		claimed = 1;
+		refill = 0;
 
 		if (ifp->if_flags & IFF_RUNNING) {
 			em_rxeof(sc, -1);
-			if (em_rxfill(sc)) {
-				/* Advance the Rx Queue #0 "Tail Pointer". */
-				E1000_WRITE_REG(&sc->hw, RDT,
-				    sc->last_rx_desc_filled);
-			}
 			em_txeof(sc);
+			refill = 1;
 		}
 
 		/* Link status change */
@@ -823,8 +812,16 @@ em_intr(void *arg)
 			timeout_add_sec(&sc->timer_handle, 1); 
 		}
 
-		if (reg_icr & E1000_ICR_RXO)
+		if (reg_icr & E1000_ICR_RXO) {
 			sc->rx_overruns++;
+			ifp->if_ierrors++;
+			refill = 1;
+		}
+
+		if (refill && em_rxfill(sc)) {
+			/* Advance the Rx Queue #0 "Tail Pointer". */
+			E1000_WRITE_REG(&sc->hw, RDT, sc->last_rx_desc_filled);
+		}
 	}
 
 	if (ifp->if_flags & IFF_RUNNING && !IFQ_IS_EMPTY(&ifp->if_snd))
@@ -1324,13 +1321,14 @@ em_set_multi(struct em_softc *sc)
 {
 	u_int32_t reg_rctl = 0;
 	u_int8_t  mta[MAX_NUM_MULTICAST_ADDRESSES * ETH_LENGTH_OF_ADDRESS];
-	int mcnt = 0;
 	struct ifnet *ifp = &sc->interface_data.ac_if;
 	struct arpcom *ac = &sc->interface_data;
 	struct ether_multi *enm;
 	struct ether_multistep step;
+	int i = 0;
 
 	IOCTL_DEBUGOUT("em_set_multi: begin");
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
 	if (sc->hw.mac_type == em_82542_rev2_0) {
 		reg_rctl = E1000_READ_REG(&sc->hw, RCTL);
@@ -1340,26 +1338,26 @@ em_set_multi(struct em_softc *sc)
 		E1000_WRITE_REG(&sc->hw, RCTL, reg_rctl);
 		msec_delay(5);
 	}
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			mcnt = MAX_NUM_MULTICAST_ADDRESSES;
-		}
-		if (mcnt == MAX_NUM_MULTICAST_ADDRESSES)
-			break;
-		bcopy(enm->enm_addrlo, &mta[mcnt*ETH_LENGTH_OF_ADDRESS],
-		      ETH_LENGTH_OF_ADDRESS);
-		mcnt++;
-		ETHER_NEXT_MULTI(step, enm);
-	}
 
-	if (mcnt >= MAX_NUM_MULTICAST_ADDRESSES) {
-		reg_rctl = E1000_READ_REG(&sc->hw, RCTL);
+	reg_rctl = E1000_READ_REG(&sc->hw, RCTL);
+	if (ac->ac_multirangecnt > 0 ||
+	    ac->ac_multicnt > MAX_NUM_MULTICAST_ADDRESSES) {
+		ifp->if_flags |= IFF_ALLMULTI;
 		reg_rctl |= E1000_RCTL_MPE;
-		E1000_WRITE_REG(&sc->hw, RCTL, reg_rctl);
-	} else
-		em_mc_addr_list_update(&sc->hw, mta, mcnt, 0, 1);
+	} else {
+		ETHER_FIRST_MULTI(step, ac, enm);
+
+		while (enm != NULL) {
+			bcopy(enm->enm_addrlo, mta + i, ETH_LENGTH_OF_ADDRESS);
+			i += ETH_LENGTH_OF_ADDRESS;
+
+			ETHER_NEXT_MULTI(step, enm);
+		}
+
+		em_mc_addr_list_update(&sc->hw, mta, ac->ac_multicnt, 0, 1);
+		reg_rctl &= ~E1000_RCTL_MPE;
+	}
+	E1000_WRITE_REG(&sc->hw, RCTL, reg_rctl);
 
 	if (sc->hw.mac_type == em_82542_rev2_0) {
 		reg_rctl = E1000_READ_REG(&sc->hw, RCTL);
@@ -1734,6 +1732,8 @@ em_setup_interface(struct em_softc *sc)
 		sc->hw.max_frame_size - ETHER_HDR_LEN - ETHER_CRC_LEN;
 	IFQ_SET_MAXLEN(&ifp->if_snd, sc->num_tx_desc - 1);
 	IFQ_SET_READY(&ifp->if_snd);
+
+	m_clsetwms(ifp, MCLBYTES, 4, sc->num_rx_desc);
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
@@ -2646,7 +2646,7 @@ em_rxeof(struct em_softc *sc, int count)
 
 	i = sc->next_rx_desc_to_check;
 
-	while (count != 0 && sc->rx_ndescs > 1) {
+	while (count != 0 && sc->rx_ndescs > 0) {
 		m = NULL;
 
 		desc = &sc->rx_desc_base[i];

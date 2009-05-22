@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwnreg.h,v 1.19 2008/12/02 17:17:50 damien Exp $	*/
+/*	$OpenBSD: if_iwnreg.h,v 1.22 2009/03/10 20:39:21 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -32,6 +32,15 @@
 
 /* RX buffers must be large enough to hold a full 4K A-MPDU. */
 #define IWN_RBUF_SIZE	(4 * 1024)
+
+#if defined(__LP64__)
+/* HW supports 36-bit DMA addresses. */
+#define IWN_LOADDR(paddr)	((uint32_t)(paddr))
+#define IWN_HIADDR(paddr)	(((paddr) >> 32) & 0xf)
+#else
+#define IWN_LOADDR(paddr)	(paddr)
+#define IWN_HIADDR(paddr)	(0)
+#endif
 
 /* Base Address Register. */
 #define IWN_PCI_BAR0	PCI_MAPREG_START
@@ -171,6 +180,9 @@
 #define IWN_HW_REV_TYPE_5350	3
 #define IWN_HW_REV_TYPE_5150	4
 #define IWN_HW_REV_TYPE_5100	5
+#define IWN_HW_REV_TYPE_1000	6
+#define IWN_HW_REV_TYPE_6000	7
+#define IWN_HW_REV_TYPE_6050	8
 
 /* Possible flags for register IWN_GIO_CHICKEN. */
 #define IWN_GIO_CHICKEN_L1A_NO_L0S_RX	(1 << 23)
@@ -296,29 +308,12 @@ struct iwn_tx_desc {
 	uint8_t		reserved1[3];
 	uint8_t		nsegs;
 	struct {
-		uint32_t	w1;
-		uint32_t	w2;
-		uint32_t	w3;
-	} __packed	segs[IWN_MAX_SCATTER / 2];
+		uint32_t	addr;
+		uint16_t	len;
+	} __packed	segs[IWN_MAX_SCATTER];
 	/* Pad to 128 bytes. */
 	uint32_t	reserved2;
 } __packed;
-
-#define IWN_SET_DESC_NSEGS(d, x)					\
-	(d)->nsegs = (x)
-
-/* Set a segment physical address and length in a TX descriptor. */
-#define IWN_SET_DESC_SEG(d, n, addr, size) do {				\
-	if ((n) & 1) {							\
-		(d)->segs[(n) / 2].w2 |=				\
-		    htole32(((addr) & 0xffff) << 16);			\
-		(d)->segs[(n) / 2].w3 =					\
-		    htole32((((addr) >> 16) & 0xffff) | (size) << 20);	\
-	} else {							\
-		(d)->segs[(n) / 2].w1 = htole32(addr);			\
-		(d)->segs[(n) / 2].w2 = htole32((size) << 4);		\
-	}								\
-} while (0)
 
 struct iwn_rx_status {
 	uint16_t	closed_count;
@@ -1183,8 +1178,8 @@ struct iwn_firmware_hdr {
 
 #define IWN4965_FW_TEXT_MAXSZ	( 96 * 1024)
 #define IWN4965_FW_DATA_MAXSZ	( 40 * 1024)
-#define IWN5000_FW_TEXT_MAXSZ	(128 * 1024)
-#define IWN5000_FW_DATA_MAXSZ	( 48 * 1024)
+#define IWN5000_FW_TEXT_MAXSZ	(256 * 1024)
+#define IWN5000_FW_DATA_MAXSZ	( 80 * 1024)
 #define IWN_FW_BOOT_TEXT_MAXSZ	1024
 #define IWN4965_FWSZ		(IWN4965_FW_TEXT_MAXSZ + IWN4965_FW_DATA_MAXSZ)
 #define IWN5000_FWSZ		IWN5000_FW_TEXT_MAXSZ

@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic79xx_openbsd.c,v 1.30 2008/11/25 18:10:00 krw Exp $	*/
+/*	$OpenBSD: aic79xx_openbsd.c,v 1.32 2009/02/16 21:19:06 miod Exp $	*/
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom
@@ -81,7 +81,7 @@ int	ahd_setup_data(struct ahd_softc *, struct scsi_xfer *,
 		    struct scb *);
 
 void	ahd_adapter_req_set_xfer_mode(struct ahd_softc *, struct scb *);
-void    ahd_minphys(struct buf *);
+void    ahd_minphys(struct buf *, struct scsi_link *);
 
 struct cfdriver ahd_cd = {
 	NULL, "ahd", DV_DULL
@@ -284,7 +284,7 @@ ahd_done(struct ahd_softc *ahd, struct scb *scb)
 }
 
 void
-ahd_minphys(struct buf *bp)
+ahd_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	/*
 	 * Even though the card can transfer up to 16megs per command
@@ -459,7 +459,7 @@ ahd_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 	LIST_INSERT_HEAD(&ahd->pending_scbs, scb, pending_links);
 
 	if (!(xs->flags & SCSI_POLL))
-		timeout_add(&xs->stimeout, (xs->timeout * hz) / 1000);
+		timeout_add_msec(&xs->stimeout, xs->timeout);
 
 	scb->flags |= SCB_ACTIVE;
 

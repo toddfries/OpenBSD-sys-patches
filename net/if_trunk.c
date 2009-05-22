@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_trunk.c,v 1.61 2008/11/28 02:44:18 brad Exp $	*/
+/*	$OpenBSD: if_trunk.c,v 1.65 2009/01/27 16:40:54 naddy Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -91,6 +91,7 @@ int	 trunk_media_change(struct ifnet *);
 void	 trunk_media_status(struct ifnet *, struct ifmediareq *);
 struct trunk_port *trunk_link_active(struct trunk_softc *,
 	    struct trunk_port *);
+const void *trunk_gethdr(struct mbuf *, u_int, u_int, void *);
 
 struct if_clone trunk_cloner =
     IF_CLONE_INITIALIZER("trunk", trunk_clone_create, trunk_clone_destroy);
@@ -119,7 +120,6 @@ int	 trunk_lb_start(struct trunk_softc *, struct mbuf *);
 int	 trunk_lb_input(struct trunk_softc *, struct trunk_port *,
 	    struct ether_header *, struct mbuf *);
 int	 trunk_lb_porttable(struct trunk_softc *, struct trunk_port *);
-const void *trunk_lb_gethdr(struct mbuf *, u_int, u_int, void *);
 
 /* Broadcast mode */
 int	 trunk_bcast_attach(struct trunk_softc *);
@@ -936,7 +936,7 @@ trunk_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
 		if (tr->tr_proto != TRUNK_PROTO_NONE && tr->tr_count) {
@@ -977,7 +977,7 @@ trunk_enqueue(struct ifnet *ifp, struct mbuf *m)
 u_int32_t
 trunk_hashmbuf(struct mbuf *m, u_int32_t key)
 {
-	u_int16_t etype;
+	u_int16_t etype, ether_vtag;
 	u_int32_t p = 0;
 	u_int16_t *vlan, vlanbuf[2];
 	int off;
@@ -999,11 +999,15 @@ trunk_hashmbuf(struct mbuf *m, u_int32_t key)
 	p = hash32_buf(&eh->ether_dhost, ETHER_ADDR_LEN, p);
 
 	/* Special handling for encapsulating VLAN frames */
-	if (etype == ETHERTYPE_VLAN) {
+	if (m->m_flags & M_VLANTAG) {
+		ether_vtag = EVL_VLANOFTAG(m->m_pkthdr.ether_vtag);
+		p = hash32_buf(&ether_vtag, sizeof(ether_vtag), p);
+	} else if (etype == ETHERTYPE_VLAN) {
 		if ((vlan = (u_int16_t *)
-		    trunk_lb_gethdr(m, off, EVL_ENCAPLEN, &vlanbuf)) == NULL)
+		    trunk_gethdr(m, off, EVL_ENCAPLEN, &vlanbuf)) == NULL)
 			return (p);
-		p = hash32_buf(vlan, sizeof(*vlan), p);
+		ether_vtag = EVL_VLANOFTAG(*vlan);
+		p = hash32_buf(&ether_vtag, sizeof(ether_vtag), p);
 		etype = ntohs(vlan[1]);
 		off += EVL_ENCAPLEN;
 	}
@@ -1012,7 +1016,7 @@ trunk_hashmbuf(struct mbuf *m, u_int32_t key)
 #ifdef INET
 	case ETHERTYPE_IP:
 		if ((ip = (struct ip *)
-		    trunk_lb_gethdr(m, off, sizeof(*ip), &ipbuf)) == NULL)
+		    trunk_gethdr(m, off, sizeof(*ip), &ipbuf)) == NULL)
 			return (p);
 		p = hash32_buf(&ip->ip_src, sizeof(struct in_addr), p);
 		p = hash32_buf(&ip->ip_dst, sizeof(struct in_addr), p);
@@ -1021,7 +1025,7 @@ trunk_hashmbuf(struct mbuf *m, u_int32_t key)
 #ifdef INET6
 	case ETHERTYPE_IPV6:
 		if ((ip6 = (struct ip6_hdr *)
-		    trunk_lb_gethdr(m, off, sizeof(*ip6), &ip6buf)) == NULL)
+		    trunk_gethdr(m, off, sizeof(*ip6), &ip6buf)) == NULL)
 			return (p);
 		p = hash32_buf(&ip6->ip6_src, sizeof(struct in6_addr), p);
 		p = hash32_buf(&ip6->ip6_dst, sizeof(struct in6_addr), p);
@@ -1217,6 +1221,18 @@ trunk_link_active(struct trunk_softc *tr, struct trunk_port *tp)
 	}
 
 	return (rval);
+}
+
+const void *
+trunk_gethdr(struct mbuf *m, u_int off, u_int len, void *buf)
+{
+	if (m->m_pkthdr.len < (off + len))
+		return (NULL);
+	else if (m->m_len < (off + len)) {
+		m_copydata(m, off, len, buf);
+		return (buf);
+	}
+	return (mtod(m, const void *) + off);
 }
 
 /*
@@ -1441,18 +1457,6 @@ trunk_lb_port_destroy(struct trunk_port *tp)
 {
 	struct trunk_softc *tr = (struct trunk_softc *)tp->tp_trunk;
 	trunk_lb_porttable(tr, tp);
-}
-
-const void *
-trunk_lb_gethdr(struct mbuf *m, u_int off, u_int len, void *buf)
-{
-	if (m->m_pkthdr.len < (off + len)) {
-		return (NULL);
-	} else if (m->m_len < (off + len)) {
-		m_copydata(m, off, len, buf);
-		return (buf);
-	}
-	return (mtod(m, const void *) + off);
 }
 
 int

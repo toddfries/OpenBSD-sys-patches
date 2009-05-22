@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.h,v 1.41 2008/12/08 22:02:39 deraadt Exp $ */
+/*	$OpenBSD: uvideo.h,v 1.45 2009/02/19 21:17:35 deraadt Exp $ */
 
 /*
  * Copyright (c) 2007 Robert Nagy <robert@openbsd.org>
@@ -285,7 +285,7 @@ struct usb_video_probe_commit {
 	uWord	wDelay;
 	uDWord	dwMaxVideoFrameSize;
 	uDWord	dwMaxPayloadTransferSize;
-	uDWord	wClockFrequency;
+	uDWord	dwClockFrequency;
 	uByte	bmFramingInfo;
 	uByte	bPreferedVersion;
 	uByte	bMinVersion;
@@ -555,6 +555,8 @@ struct uvideo_controls {
 struct uvideo_softc {
 	struct device				 sc_dev;
 	usbd_device_handle			 sc_udev;
+	int					 sc_nifaces;
+	usbd_interface_handle			*sc_ifaces;
 
 	struct device				*sc_videodev;
 
@@ -600,5 +602,8 @@ struct uvideo_softc {
 	uint8_t					*sc_uplayer_fbuffer;
 	void					 (*sc_uplayer_intr)(void *);
 
-	struct uvideo_devs			*sc_ucode;
+	struct uvideo_devs			*sc_quirk;
+	usbd_status				(*sc_decode_stream_header)
+						    (struct uvideo_softc *,
+						    uint8_t *, int);
 };

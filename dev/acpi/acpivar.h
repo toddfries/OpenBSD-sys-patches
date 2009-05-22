@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivar.h,v 1.44 2008/11/06 23:41:28 marco Exp $	*/
+/*	$OpenBSD: acpivar.h,v 1.47 2009/04/17 13:20:20 pirofti Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -18,6 +18,10 @@
 #ifndef _DEV_ACPI_ACPIVAR_H_
 #define _DEV_ACPI_ACPIVAR_H_
 
+#define ACPI_TRAMPOLINE		(NBPG*4)
+
+#ifndef _ACPI_WAKECODE
+
 #include <sys/timeout.h>
 #include <sys/rwlock.h>
 #include <machine/biosvar.h>
@@ -31,6 +35,8 @@ extern int acpi_debug;
 #define dprintf(x...)
 #define dnprintf(n,x...)
 #endif
+
+/* #define ACPI_SLEEP_ENABLED */
 
 extern int acpi_hasprocfvs;
 
@@ -219,6 +225,12 @@ struct acpi_table {
 	void	*table;
 };
 
+struct acpi_dev_rank {
+	struct device	*dev;
+	int		rank;
+	TAILQ_ENTRY(acpi_dev_rank) link;
+};
+
 #define	ACPI_IOC_GETFACS	_IOR('A', 0, struct acpi_facs)
 #define	ACPI_IOC_GETTABLE	_IOWR('A', 1, struct acpi_table)
 #define ACPI_IOC_SETSLEEPSTATE	_IOW('A', 2, int)
@@ -243,10 +255,16 @@ int	 acpi_probe(struct device *, struct cfdata *, struct bios_attach_args *);
 u_int	 acpi_checksum(const void *, size_t);
 void	 acpi_attach_machdep(struct acpi_softc *);
 int	 acpi_interrupt(void *);
-void	 acpi_enter_sleep_state(struct acpi_softc *, int);
 void	 acpi_powerdown(void);
-void	 acpi_resume(struct acpi_softc *);
 void	 acpi_reset(void);
+void	 acpi_cpu_flush(struct acpi_softc *, int);
+int	 acpi_sleep_state(struct acpi_softc *, int);
+void	 acpi_resume(struct acpi_softc *);
+int	 acpi_prepare_sleep_state(struct acpi_softc *, int);
+int	 acpi_enter_sleep_state(struct acpi_softc *, int);
+int	 acpi_sleep_machdep(struct acpi_softc *, int);
+void	 acpi_sleep_walk(struct acpi_softc *, int);
+
 
 #define ACPI_IOREAD 0
 #define ACPI_IOWRITE 1
@@ -272,4 +290,5 @@ int acpi_matchhids(struct acpi_attach_args *, const char *[], const char *);
 
 #endif
 
+#endif /* !_ACPI_WAKECODE */
 #endif	/* !_DEV_ACPI_ACPIVAR_H_ */

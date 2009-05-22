@@ -1,4 +1,4 @@
-/*	$OpenBSD: moko_machdep.c,v 1.1 2008/11/26 14:47:50 drahn Exp $	*/
+/*	$OpenBSD: moko_machdep.c,v 1.3 2009/01/02 06:38:25 drahn Exp $	*/
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -392,7 +392,6 @@ const struct pmap_devmap smdk2410_devmap[] = {
 #undef _S
 
 #define VERBOSE_INIT_ARM
-#if 1
 static void
 map_io_area(paddr_t pagedir)
 {
@@ -419,7 +418,6 @@ map_io_area(paddr_t pagedir)
 		++loop;
 	}
 }
-#endif
 
 /*
  * simple memory mapping function used in early bootstrap stage
@@ -479,6 +477,15 @@ bootstrap_bs_map(void *t, bus_addr_t bpa, bus_size_t size,
  *   Relocating the kernel to the bottom of physical memory
  */
 u_int ol1pagetable;
+void	sscom_dump_init_state(void);
+
+/*
+ * format is 0xff << 8 is major, 0xff is revision
+ * ie gta01 -> 0x0100 (TODO, find revision info)
+ * ie gta02 -> 0x0200 (TODO, find revision info)
+ */
+uint32_t hardware_type; /* better way of doing this? */
+
 u_int
 initarm(void *arg)
 {
@@ -625,6 +632,8 @@ initarm(void *arg)
 
 	/* Talk to the user */
 	printf("\nOpenBSD/moko booting ...\n");
+
+	sscom_dump_init_state();
 
 	{
 		/* XXX - all Zaurus have this for now, fix memory sizing */
@@ -1095,6 +1104,7 @@ void
 consinit(void)
 {
 	static int consinit_done = 0;
+	int conunit;
 #if defined(SSCOM0CONSOLE) || defined(SSCOM1CONSOLE)
 	bus_space_tag_t iot = &s3c2xx0_bs_tag;
 #endif
@@ -1111,8 +1121,19 @@ consinit(void)
 
 	s3c24x0_clock_freq2(CLKMAN_VBASE, NULL, NULL, &pclk);
 
+
+	/* HORRID HACK */
+	if (pclk == 66500000) {
+		conunit = 0;
+		hardware_type = 0x0100; /* what about revision? */
+	} else if (pclk == 100000000) {
+		conunit = 2;
+		hardware_type = 0x0200;	 /* what about revision? */
+	} else /* XXX */
+		conunit = 0;
+
 #if NSSCOM > 0
-	if (0 == s3c2410_sscom_cnattach(iot, 0, comcnspeed,
+	if (0 == s3c2410_sscom_cnattach(iot, conunit, comcnspeed,
 		pclk, comcnmode))
 		return;
 #if 0
@@ -1163,11 +1184,10 @@ void
 board_startup(void)
 {
 	extern int lcd_cnattach(void (*)(u_int, int));
+
+#ifdef ENABLE_LCD_CONSOLE
 #if NWSDISPLAY > 0
 	extern bus_addr_t comconsaddr;
-#endif
-
-#if NWSDISPLAY > 0
 	/*
 	 * Try to attach the display console now that VM services
 	 * are available.
@@ -1194,6 +1214,7 @@ board_startup(void)
 		}
 	}
 #endif
+#endif /* ENABLE_LCD_CONSOLE */
 
         if (boothowto & RB_CONFIG) {
 #ifdef BOOT_CONFIG

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.80 2008/11/28 02:44:18 brad Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.83 2009/04/30 18:28:29 mpf Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -366,20 +366,38 @@ allmulti:
 void
 vr_setcfg(struct vr_softc *sc, int media)
 {
-	int restart = 0;
+	int i;
 
-	if (CSR_READ_2(sc, VR_COMMAND) & (VR_CMD_TX_ON|VR_CMD_RX_ON)) {
-		restart = 1;
-		VR_CLRBIT16(sc, VR_COMMAND, (VR_CMD_TX_ON|VR_CMD_RX_ON));
-	}
+	if (sc->sc_mii.mii_media_status & IFM_ACTIVE &&
+	    IFM_SUBTYPE(sc->sc_mii.mii_media_active) != IFM_NONE) {
+		sc->vr_link = 1;
 
-	if ((media & IFM_GMASK) == IFM_FDX)
-		VR_SETBIT16(sc, VR_COMMAND, VR_CMD_FULLDUPLEX);
-	else
-		VR_CLRBIT16(sc, VR_COMMAND, VR_CMD_FULLDUPLEX);
+		if (CSR_READ_2(sc, VR_COMMAND) & (VR_CMD_TX_ON|VR_CMD_RX_ON))
+			VR_CLRBIT16(sc, VR_COMMAND,
+			    (VR_CMD_TX_ON|VR_CMD_RX_ON));
 
-	if (restart)
+		if ((media & IFM_GMASK) == IFM_FDX)
+			VR_SETBIT16(sc, VR_COMMAND, VR_CMD_FULLDUPLEX);
+		else
+			VR_CLRBIT16(sc, VR_COMMAND, VR_CMD_FULLDUPLEX);
+
 		VR_SETBIT16(sc, VR_COMMAND, VR_CMD_TX_ON|VR_CMD_RX_ON);
+	} else {
+		sc->vr_link = 0;
+		VR_CLRBIT16(sc, VR_COMMAND, (VR_CMD_TX_ON|VR_CMD_RX_ON));
+		for (i = VR_TIMEOUT; i > 0; i--) {
+			DELAY(10);
+			if (!(CSR_READ_2(sc, VR_COMMAND) &
+			    (VR_CMD_TX_ON|VR_CMD_RX_ON)))
+				break;
+		}
+		if (i == 0) {
+#ifdef VR_DEBUG
+			printf("%s: rx shutdown error!\n", sc->sc_dev.dv_xname);
+#endif
+			sc->vr_flags |= VR_F_RESTART;
+		}
+	}
 }
 
 void
@@ -482,27 +500,27 @@ vr_attach(struct device *parent, struct device *self, void *aux)
 #ifdef VR_USEIOSPACE
 	if (pci_mapreg_map(pa, VR_PCI_LOIO, PCI_MAPREG_TYPE_IO, 0,
 	    &sc->vr_btag, &sc->vr_bhandle, NULL, &size, 0)) {
-		printf(": failed to map i/o space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 #else
 	if (pci_mapreg_map(pa, VR_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
 	    &sc->vr_btag, &sc->vr_bhandle, NULL, &size, 0)) {
-		printf(": failed to map memory space\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 #endif
 
 	/* Allocate interrupt */
 	if (pci_intr_map(pa, &ih)) {
-		printf(": couldn't map interrupt\n");
+		printf(": can't map interrupt\n");
 		goto fail_1;
 	}
 	intrstr = pci_intr_string(pc, ih);
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, vr_intr, sc,
 				       self->dv_xname);
 	if (sc->sc_ih == NULL) {
-		printf(": could not establish interrupt");
+		printf(": can't establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
@@ -1132,10 +1150,10 @@ vr_start(struct ifnet *ifp)
 	struct mbuf		*m_head;
 	struct vr_chain		*cur_tx;
 
-	if (ifp->if_flags & IFF_OACTIVE)
-		return;
-
 	sc = ifp->if_softc;
+
+	if (ifp->if_flags & IFF_OACTIVE || sc->vr_link == 0)
+		return;
 
 	cur_tx = sc->vr_cdata.vr_tx_prod;
 	while (cur_tx->vr_mbuf == NULL) {
@@ -1283,6 +1301,7 @@ vr_init(void *xsc)
 	CSR_WRITE_2(sc, VR_IMR, VR_INTRS);
 
 	/* Restore state of BMCR */
+	sc->vr_link = 1;
 	mii_mediachg(mii);
 
 	ifp->if_flags |= IFF_RUNNING;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vfsops.c,v 1.79 2008/07/28 13:35:14 thib Exp $	*/
+/*	$OpenBSD: nfs_vfsops.c,v 1.81 2009/04/13 17:51:57 blambert Exp $	*/
 /*	$NetBSD: nfs_vfsops.c,v 1.46.4.1 1996/05/25 22:40:35 fvdl Exp $	*/
 
 /*
@@ -97,9 +97,6 @@ const struct vfsops nfs_vfsops = {
 	nfs_checkexp
 };
 
-#define TRUE	1
-#define	FALSE	0
-
 /*
  * nfs statfs call
  */
@@ -131,7 +128,7 @@ nfs_statfs(mp, sbp, p)
 		(void)nfs_fsinfo(nmp, vp, cred, p);
 	nfsstats.rpccnt[NFSPROC_FSSTAT]++;
 	mb = mreq = nfsm_reqhead(NFSX_FH(v3));
-	nfsm_fhtom(vp, v3);
+	nfsm_fhtom(&mb, vp, v3);
 	nfsm_request(vp, NFSPROC_FSSTAT, p, cred);
 	if (v3)
 		nfsm_postop_attr(vp, retattr);
@@ -192,7 +189,7 @@ nfs_fsinfo(nmp, vp, cred, p)
 
 	nfsstats.rpccnt[NFSPROC_FSINFO]++;
 	mb = mreq = nfsm_reqhead(NFSX_FH(1));
-	nfsm_fhtom(vp, 1);
+	nfsm_fhtom(&mb, vp, 1);
 	nfsm_request(vp, NFSPROC_FSINFO, p, cred);
 	nfsm_postop_attr(vp, retattr);
 	if (!error) {
@@ -611,7 +608,7 @@ nfs_mount(mp, path, data, ndp, p)
 
 	if (nfs_niothreads < 0) {
 		nfs_niothreads = 4;
-		nfs_getset_niothreads(TRUE);
+		nfs_getset_niothreads(1);
 	}
 
 	if (mp->mnt_flag & MNT_UPDATE) {

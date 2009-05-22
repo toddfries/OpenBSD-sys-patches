@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.290 2008/10/02 16:00:41 deraadt Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.294 2009/04/24 07:59:50 jsg Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -281,21 +281,6 @@ void ixp_setup_channel(struct channel_softc *);
 void jmicron_chip_map(struct pciide_softc *, struct pci_attach_args *);
 void jmicron_setup_channel(struct channel_softc *);
 
-u_int8_t pciide_dmacmd_read(struct pciide_softc *, int);
-void pciide_dmacmd_write(struct pciide_softc *, int, u_int8_t);
-u_int8_t pciide_dmactl_read(struct pciide_softc *, int);
-void pciide_dmactl_write(struct pciide_softc *, int, u_int8_t);
-void pciide_dmatbl_write(struct pciide_softc *, int, u_int32_t);
-
-void pciide_channel_dma_setup(struct pciide_channel *);
-int  pciide_dma_table_setup(struct pciide_softc *, int, int);
-int  pciide_dma_init(void *, int, int, void *, size_t, int);
-void pciide_dma_start(void *, int, int);
-int  pciide_dma_finish(void *, int, int, int);
-void pciide_irqack(struct channel_softc *);
-void pciide_print_modes(struct pciide_channel *);
-void pciide_print_channels(int, pcireg_t);
-
 struct pciide_product_desc {
 	u_int32_t ide_product;
 	u_short ide_flags;
@@ -523,6 +508,22 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	  0,
 	  piixsata_chip_map
 	},
+	{ PCI_PRODUCT_INTEL_82801JD_SATA_1, /* Intel 82801JD (ICH10) SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801JD_SATA_2, /* Intel 82801JD (ICH10) SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801JI_SATA_1, /* Intel 82801JI (ICH10) SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801JI_SATA_2, /* Intel 82801JI (ICH10) SATA */
+	  0,
+	  piixsata_chip_map
+	},
 	{ PCI_PRODUCT_INTEL_6321ESB_SATA, /* Intel 6321ESB SATA */
 	  0,
 	  piixsata_chip_map
@@ -686,7 +687,17 @@ const struct pciide_product_desc pciide_sis_products[] =  {
 	}
 };
 
+/*
+ * The National/AMD CS5535 requires MSRs to set DMA/PIO modes so it
+ * has been banished to the MD i386 pciide_machdep
+ */
 const struct pciide_product_desc pciide_natsemi_products[] =  {
+#ifdef __i386__
+	{ PCI_PRODUCT_NS_CS5535_IDE,	/* National/AMD CS5535 IDE */
+	  0,
+	  gcsc_chip_map
+	},
+#endif
 	{ PCI_PRODUCT_NS_PC87415,	/* National Semi PC87415 IDE */
 	  0,
 	  natsemi_chip_map
@@ -1056,6 +1067,22 @@ const struct pciide_product_desc pciide_nvidia_products[] = {
 	{ PCI_PRODUCT_NVIDIA_MCP67_SATA4,
 	  0,
 	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP79_SATA_1,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP79_SATA_2,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP79_SATA_3,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP79_SATA_4,
+	  0,
+	  sata_chip_map
 	}
 };
 
@@ -1190,26 +1217,6 @@ struct cfattach pciide_jmb_ca = {
 struct cfdriver pciide_cd = {
 	NULL, "pciide", DV_DULL
 };
-
-int	pciide_mapregs_compat( struct pci_attach_args *,
-	    struct pciide_channel *, int, bus_size_t *, bus_size_t *);
-int	pciide_mapregs_native(struct pci_attach_args *,
-	    struct pciide_channel *, bus_size_t *, bus_size_t *,
-	    int (*pci_intr)(void *));
-void	pciide_mapreg_dma(struct pciide_softc *,
-	    struct pci_attach_args *);
-int	pciide_chansetup(struct pciide_softc *, int, pcireg_t);
-void	pciide_mapchan(struct pci_attach_args *,
-	    struct pciide_channel *, pcireg_t, bus_size_t *, bus_size_t *,
-	    int (*pci_intr)(void *));
-int	pciide_chan_candisable(struct pciide_channel *);
-void	pciide_map_compat_intr( struct pci_attach_args *,
-	    struct pciide_channel *, int, int);
-void	pciide_unmap_compat_intr( struct pci_attach_args *,
-	    struct pciide_channel *, int, int);
-int	pciide_compat_intr(void *);
-int	pciide_pci_intr(void *);
-int	pciide_intr_flag(struct pciide_channel *);
 
 const struct pciide_product_desc *pciide_lookup_product(u_int32_t);
 

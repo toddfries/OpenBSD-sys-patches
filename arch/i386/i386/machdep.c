@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.441 2008/12/04 15:24:18 oga Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.448 2009/03/10 15:03:17 oga Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -105,7 +105,6 @@
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm_swap.h>
 
-#define _BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <machine/cpu.h>
@@ -118,6 +117,9 @@
 #include <machine/reg.h>
 #include <machine/specialreg.h>
 #include <machine/biosvar.h>
+#ifdef MULTIPROCESSOR
+#include <machine/mpbiosvar.h>
+#endif /* MULTIPROCESSOR */
 
 #include <dev/rndvar.h>
 #include <dev/isa/isareg.h>
@@ -1378,7 +1380,9 @@ intelcore_update_sensor(void *args)
 	u_int64_t msr;
 	int max = 100;
 
-	if (rdmsr(MSR_TEMPERATURE_TARGET) & MSR_TEMPERATURE_TARGET_LOW_BIT)
+	/* Only some Core family chips have MSR_TEMPERATURE_TARGET. */
+	if (ci->ci_model == 0xe &&
+	    (rdmsr(MSR_TEMPERATURE_TARGET) & MSR_TEMPERATURE_TARGET_LOW_BIT))
 		max = 85;
 
 	msr = rdmsr(MSR_THERM_STATUS);
@@ -1625,7 +1629,9 @@ identifycpu(struct cpu_info *ci)
 		max = sizeof (i386_cpuid_cpus) / sizeof (i386_cpuid_cpus[0]);
 		modif = (ci->ci_signature >> 12) & 3;
 		family = (ci->ci_signature >> 8) & 15;
+		ci->ci_family = family;
 		model = (ci->ci_signature >> 4) & 15;
+		ci->ci_model = model;
 		step = ci->ci_signature & 15;
 #ifdef CPUDEBUG
 		printf("%s: family %x model %x step %x\n", cpu_device, family,
@@ -1681,6 +1687,16 @@ identifycpu(struct cpu_info *ci)
 			} else if (model > CPU_MAXMODEL)
 				model = CPU_DEFMODEL;
 			i = family - CPU_MINFAMILY;
+
+			/* store extended family/model values for later use */
+			if ((vendor == CPUVENDOR_INTEL &&
+			    (family == 0x6 || family == 0xf)) ||
+			    (vendor == CPUVENDOR_AMD && family == 0xf)) {
+				ci->ci_family += (ci->ci_signature >> 20) &
+				    0xff;
+				ci->ci_model += ((ci->ci_signature >> 16) &
+				    0x0f) << 4;
+			}
 
 			/* Special hack for the PentiumII/III series. */
 			if (vendor == CPUVENDOR_INTEL && family == 6 &&
@@ -1810,12 +1826,6 @@ identifycpu(struct cpu_info *ci)
 			printf("\n");
 		}
 	}
-
-#ifndef MULTIPROCESSOR
-	/* configure the CPU if needed */
-	if (ci->cpu_setup != NULL)
-		(ci->cpu_setup)(ci);
-#endif
 
 #ifndef SMALL_KERNEL
 	if (cpuspeed != 0 && cpu_cpuspeed == NULL)
@@ -1967,10 +1977,9 @@ void
 p3_get_bus_clock(struct cpu_info *ci)
 {
 	u_int64_t msr;
-	int model, bus;
+	int bus;
 
-	model = (ci->ci_signature >> 4) & 15;
-	switch (model) {
+	switch (ci->ci_model) {
 	case 0x9: /* Pentium M (130 nm, Banias) */
 		bus_clock = BUS100;
 		break;
@@ -1992,6 +2001,8 @@ p3_get_bus_clock(struct cpu_info *ci)
 		break;
 	case 0xe: /* Core Duo/Solo */
 	case 0xf: /* Core Xeon */
+	case 0x16: /* 65nm Celeron */
+	case 0x17: /* Core 2 Extreme/45nm Xeon */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
 		switch (bus) {
@@ -2019,12 +2030,18 @@ p3_get_bus_clock(struct cpu_info *ci)
 			goto print_msr;
 		}
 		break;
-	case 0xc: /* Atom */
+	case 0x1c: /* Atom */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
 		switch (bus) {
+		case 5:
+			bus_clock = BUS100;
+			break;
 		case 1:
 			bus_clock = BUS133;
+			break;
+		case 3:
+			bus_clock = BUS166;
 			break;
 		default:
 			printf("%s: unknown Atom FSB_FREQ value %d",
@@ -2059,8 +2076,8 @@ p3_get_bus_clock(struct cpu_info *ci)
 		}
 		break;
 	default: 
-		printf("%s: unknown i686 model %d, can't get bus clock",
-		    ci->ci_dev.dv_xname, model);
+		printf("%s: unknown i686 model 0x%x, can't get bus clock",
+		    ci->ci_dev.dv_xname, ci->ci_model);
 print_msr:
 		/*
 		 * Show the EBL_CR_POWERON MSR, so we'll at least have
@@ -2961,12 +2978,8 @@ init386(paddr_t first_avail)
 #endif
  
 #if defined(MULTIPROCESSOR)
-	/* install the page after boot args as PT page for first 4M */
-	pmap_enter(pmap_kernel(), (u_long)vtopte(0),
-	   round_page((vaddr_t)(bootargv + bootargc)),
-		VM_PROT_READ|VM_PROT_WRITE,
-		VM_PROT_READ|VM_PROT_WRITE|PMAP_WIRED);
-	memset(vtopte(0), 0, NBPG);  /* make sure it is clean before using */
+	/* install the lowmem ptp after boot args for 1:1 mappings */
+	pmap_prealloc_lowmem_ptp(round_page((paddr_t)(bootargv + bootargc)));
 #endif
 
 	/*
@@ -3115,6 +3128,25 @@ init386(paddr_t first_avail)
 #ifdef DEBUG
 	printf("\n");
 #endif
+
+#if defined(MULTIPROCESSOR) || \
+    (NACPI > 0 && defined(ACPI_SLEEP_ENABLED) && !defined(SMALL_KERNEL))
+	/* install the lowmem ptp after boot args for 1:1 mappings */
+	pmap_prealloc_lowmem_ptp(PTP0_PA);
+#endif
+
+#ifdef MULTIPROCESSOR
+	pmap_kenter_pa((vaddr_t)MP_TRAMPOLINE,  /* virtual */
+	    (paddr_t)MP_TRAMPOLINE,             /* physical */
+	    VM_PROT_ALL);                       /* protection */
+#endif
+
+#if NACPI > 0 && defined(ACPI_SLEEP_ENABLED) && !defined(SMALL_KERNEL)
+	pmap_kenter_pa((vaddr_t)ACPI_TRAMPOLINE,/* virtual */
+	    (paddr_t)ACPI_TRAMPOLINE,           /* physical */
+	    VM_PROT_ALL);                       /* protection */
+#endif
+
 	tlbflush();
 #if 0
 #if NISADMA > 0

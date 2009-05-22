@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.144 2008/12/07 22:37:05 mikeb Exp $ */
+/*	$OpenBSD: ahci.c,v 1.147 2009/02/16 21:19:07 miod Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -433,6 +433,8 @@ static const struct ahci_device ahci_devices[] = {
 	    NULL,		ahci_ati_sb600_attach },
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP65_AHCI_2,
 	    NULL,		ahci_nvidia_mcp_attach },
+	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP67_AHCI_1,
+	    NULL,		ahci_nvidia_mcp_attach },
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP77_AHCI_5,
 	    NULL,		ahci_nvidia_mcp_attach }
 };
@@ -747,7 +749,7 @@ noccc:
 	bzero(&aaa, sizeof(aaa));
 	aaa.aaa_cookie = sc;
 	aaa.aaa_methods = &ahci_atascsi_methods;
-	aaa.aaa_minphys = minphys;
+	aaa.aaa_minphys = NULL;
 	aaa.aaa_nports = AHCI_MAX_PORTS;
 	aaa.aaa_ncmds = sc->sc_ncmds;
 	aaa.aaa_capability = ASAA_CAP_NEEDS_RESERVED;
@@ -2326,7 +2328,7 @@ ahci_ata_cmd(struct ata_xfer *xa)
 		return (ATA_COMPLETE);
 	}
 
-	timeout_add(&xa->stimeout, (xa->timeout * hz) / 1000);
+	timeout_add_msec(&xa->stimeout, xa->timeout);
 
 	s = splbio();
 	ahci_start(ccb);

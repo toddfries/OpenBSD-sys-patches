@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.h,v 1.26 2008/11/30 08:36:57 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.h,v 1.44 2009/05/01 02:55:16 jakemsr Exp $	*/
 /*	$NetBSD: azalia.h,v 1.6 2006/01/16 14:15:26 kent Exp $	*/
 
 /*-
@@ -283,12 +283,6 @@
 #define		CORB_CSC_INDEX(x)		(x & 0xff)
 #define CORB_SET_CONNECTION_SELECT_CONTROL	0x701
 #define CORB_GET_CONNECTION_LIST_ENTRY	0xf02
-#define		CORB_CLE_LONG_0(x)	(x & 0x0000ffff)
-#define		CORB_CLE_LONG_1(x)	((x & 0xffff0000) >> 16)
-#define		CORB_CLE_SHORT_0(x)	(x & 0xff)
-#define		CORB_CLE_SHORT_1(x)	((x >> 8) & 0xff)
-#define		CORB_CLE_SHORT_2(x)	((x >> 16) & 0xff)
-#define		CORB_CLE_SHORT_3(x)	((x >> 24) & 0xff)
 #define CORB_GET_PROCESSING_STATE	0xf03
 #define CORB_SET_PROCESSING_STATE	0x703
 #define CORB_GET_COEFFICIENT_INDEX	0xd00
@@ -339,6 +333,7 @@
 #define		CORB_PWC_HEADPHONE	0x80
 #define		CORB_PWC_OUTPUT		0x40
 #define		CORB_PWC_INPUT		0x20
+#define		CORB_PWC_VREF_MASK	0x07
 #define		CORB_PWC_VREF_HIZ	0x00
 #define		CORB_PWC_VREF_50	0x01
 #define		CORB_PWC_VREF_GND	0x02
@@ -380,6 +375,8 @@
 #define CORB_SET_GPIO_UNSOLICITED_ENABLE_MASK	0x719
 #define CORB_GET_GPIO_STICKY_MASK	0xf1a
 #define CORB_SET_GPIO_STICKY_MASK	0x71a
+#define CORB_GET_GPIO_POLARITY		0xfe7
+#define CORB_SET_GPIO_POLARITY		0x7e7
 #define CORB_GET_BEEP_GENERATION	0xf0a
 #define CORB_SET_BEEP_GENERATION	0x70a
 #define CORB_GET_VOLUME_KNOB		0xf0f
@@ -416,8 +413,10 @@
 #define			CORB_CD_PINK	0x9
 #define			CORB_CD_WHITE	0xe
 #define			CORB_CD_COLOR_OTHER	0xf
-#define		CORB_CD_CONNECTION_MASK	0x000f0000
-#define		CORB_CD_CONNECTION(x)	((x >> 16) & 0xf)
+#define		CORB_CD_CONNECTION_OFFSET	16
+#define		CORB_CD_CONNECTION_BITS		0xf
+#define		CORB_CD_CONNECTION_MASK	(CORB_CD_CONNECTION_BITS << CORB_CD_CONNECTION_OFFSET)
+#define		CORB_CD_CONNECTION(x) ((x >> CORB_CD_CONNECTION_OFFSET) & CORB_CD_CONNECTION_BITS)
 #define			CORB_CD_CONN_UNKNOWN	0x0
 #define			CORB_CD_18		0x1
 #define			CORB_CD_14		0x2
@@ -431,7 +430,10 @@
 #define			CORB_CD_RJ11		0xa
 #define			CORB_CD_CONN_COMB	0xb
 #define			CORB_CD_CONN_OTHER	0xf
-#define		CORB_CD_DEVICE(x)	((x >> 20) & 0xf)
+#define		CORB_CD_DEVICE_OFFSET		20
+#define		CORB_CD_DEVICE_BITS		0xf
+#define		CORB_CD_DEVICE_MASK (CORB_CD_DEVICE_BITS << CORB_CD_DEVICE_OFFSET)
+#define		CORB_CD_DEVICE(x) ((x >> CORB_CD_DEVICE_OFFSET) & CORB_CD_DEVICE_BITS)
 #define			CORB_CD_LINEOUT		0x0
 #define			CORB_CD_SPEAKER		0x1
 #define			CORB_CD_HEADPHONE	0x2
@@ -446,6 +448,7 @@
 #define			CORB_CD_TELEPHONY	0xb
 #define			CORB_CD_SPDIFIN		0xc
 #define			CORB_CD_DIGITALIN	0xd
+#define			CORB_CD_BEEP		0xe
 #define			CORB_CD_DEVICE_OTHER	0xf
 #define		CORB_CD_LOCATION_MASK	0x3f000000
 #define		CORB_CD_LOC_GEO(x)	((x >> 24) & 0xf)
@@ -464,8 +467,10 @@
 #define			CORB_CD_INTERNAL	0x1
 #define			CORB_CD_SEPARATE	0x2
 #define			CORB_CD_LOC_OTHER	0x3
-#define		CORB_CD_PORT_MASK	0xc0000000
-#define		CORB_CD_PORT(x)		((x >> 30) & 0x3)
+#define		CORB_CD_PORT_OFFSET		30
+#define		CORB_CD_PORT_BITS		0x3
+#define		CORB_CD_PORT_MASK (CORB_CD_PORT_BITS << CORB_CD_PORT_OFFSET)
+#define		CORB_CD_PORT(x)	((x >> CORB_CD_PORT_OFFSET) & CORB_CD_PORT_BITS)
 #define			CORB_CD_JACK		0x0
 #define			CORB_CD_NONE		0x1
 #define			CORB_CD_FIXED		0x2
@@ -477,6 +482,14 @@
 #define CORB_NID_ROOT		0
 #define HDA_MAX_CHANNELS	16
 #define HDA_MAX_SENSE_PINS	16
+
+#define AZ_MAX_VOL_SLAVES	16
+#define AZ_TAG_SPKR		0x01
+#define AZ_TAG_PLAYVOL		0x02
+
+#define AZ_CLASS_INPUT	0
+#define AZ_CLASS_OUTPUT	1
+#define AZ_CLASS_RECORD	2
 
 /* memory-mapped types */
 typedef struct {
@@ -518,6 +531,7 @@ typedef struct {
 	int enable;
 	uint32_t widgetcap;
 	int type;		/* = bit20-24 of widgetcap */
+	int mixer_class;
 	int nconnections;
 	nid_t *connections;
 	int selected;
@@ -562,6 +576,10 @@ typedef struct {
 #define MI_TARGET_EAPD		0x109
 #define MI_TARGET_MUTESET	0x10a
 #define MI_TARGET_PINSENSE	0x10b
+#define MI_TARGET_SENSESET	0x10c
+#define MI_TARGET_PLAYVOL	0x10d
+#define MI_TARGET_RECVOL	0x10e
+#define MI_TARGET_MIXERSET	0x10f
 } mixer_item_t;
 
 #define VALID_WIDGET_NID(nid, codec)	(nid == (codec)->audiofunc || \
@@ -577,6 +595,25 @@ typedef struct {
 	int ngroups;
 	convgroup_t groups[32];
 } convgroupset_t;
+
+typedef struct {
+	int master;
+	int vol_l;
+	int vol_r;
+	int mute;
+	int hw_step;
+	int hw_nsteps;
+	nid_t slaves[AZ_MAX_VOL_SLAVES];
+	int nslaves;
+	int mask;
+	int cur;
+} volgroup_t;
+
+struct io_pin {
+	nid_t nid;		/* NID of pin */
+	nid_t conv;		/* NID of default converter */
+	int prio;		/* assoc/seq/dir "priority" */
+};
 
 typedef struct codec_t {
 	int (*comresp)(const struct codec_t *, nid_t, uint32_t, uint32_t, uint32_t *);
@@ -608,10 +645,39 @@ typedef struct codec_t {
 	int nmixers, maxmixers;
 	mixer_item_t *mixers;
 
-	struct audio_format* formats;
+	struct audio_format *formats;
 	int nformats;
-	struct audio_encoding* encs;
+	struct audio_encoding *encs;
 	int nencs;
+
+	struct io_pin *ipins;
+	int nipins;
+	struct io_pin *ipins_d;
+	int nipins_d;
+	struct io_pin *opins;
+	int nopins;
+	struct io_pin *opins_d;
+	int nopins_d;
+
+	nid_t a_dacs[HDA_MAX_CHANNELS], a_dacs_d[HDA_MAX_CHANNELS];
+	int na_dacs, na_dacs_d;
+	nid_t a_adcs[HDA_MAX_CHANNELS], a_adcs_d[HDA_MAX_CHANNELS];
+	int na_adcs, na_adcs_d;
+
+	nid_t mic;		/* fixed (internal) mic */
+	nid_t mic_adc;
+	nid_t speaker;		/* fixed (internal) speaker */
+	nid_t spkr_dac;
+
+	int spkr_muters;
+	int spkr_mute_method;
+#define	AZ_SPKR_MUTE_NONE	0
+#define	AZ_SPKR_MUTE_SPKR_MUTE	1
+#define	AZ_SPKR_MUTE_SPKR_DIR	2
+#define	AZ_SPKR_MUTE_DAC_MUTE	3
+
+	volgroup_t playvols;
+	volgroup_t recvols;
 
 	nid_t sense_pins[HDA_MAX_SENSE_PINS];
 	int nsense_pins;
@@ -620,6 +686,8 @@ typedef struct codec_t {
 	u_int rate;
 } codec_t;
 
-
 int	azalia_codec_init_vtbl(codec_t *);
 int	azalia_codec_construct_format(codec_t *, int, int);
+int	azalia_widget_enabled(const codec_t *, nid_t);
+int	azalia_codec_gpio_quirks(codec_t *);
+int	azalia_codec_fnode(codec_t *, nid_t, int, int);

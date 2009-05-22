@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.6 2008/07/16 15:49:22 miod Exp $ */
+/*	$OpenBSD: bus_dma.c,v 1.10 2009/04/20 00:42:06 oga Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -134,7 +134,8 @@ _dmamap_load(t, map, buf, buflen, p, flags)
 
 	lastaddr = ~0;		/* XXX gcc */
 	bmask  = ~(map->_dm_boundary - 1);
-	bmask &= t->_dma_mask;
+	if (t->_dma_mask != 0)
+		bmask &= t->_dma_mask;
 
 	saved_buflen = buflen;
 	for (first = 1, seg = 0; buflen > 0; ) {
@@ -299,7 +300,8 @@ _dmamap_load_raw(t, map, segs, nsegs, size, flags)
 		bus_addr_t bmask = ~(map->_dm_boundary - 1);
 		int i;
 
-		bmask &= t->_dma_mask;
+		if (t->_dma_mask != 0)
+			bmask &= t->_dma_mask;
 		for (i = 0; i < nsegs; i++) {
 			if (segs[i].ds_len > map->_dm_maxsegsz)
 				return (EINVAL);
@@ -438,7 +440,7 @@ _dmamem_alloc(t, size, alignment, boundary, segs, nsegs, rsegs, flags)
 	int flags;
 {
 	return (_dmamem_alloc_range(t, size, alignment, boundary,
-	    segs, nsegs, rsegs, flags, 0, -1));
+	    segs, nsegs, rsegs, flags, (paddr_t)0, (paddr_t)-1));
 }
 
 /*
@@ -521,7 +523,7 @@ _dmamem_map(t, segs, nsegs, size, kvap, flags)
 			segs[curseg].ds_vaddr = va;
 
 			if (flags & BUS_DMA_COHERENT &&
-			    sys_config.system_type == SGI_O2) 
+			    sys_config.system_type == SGI_O2)
 				pmap_page_cache(PHYS_TO_VM_PAGE(pa),
 				    PV_UNCACHED);
 		}
@@ -609,7 +611,7 @@ _dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	vaddr_t curaddr, lastaddr;
 	vm_page_t m;
 	struct pglist mlist;
-	int curseg, error;
+	int curseg, error, plaflag;
 
 	/* Always round the size. */
 	size = round_page(size);
@@ -617,9 +619,13 @@ _dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	/*
 	 * Allocate pages from the VM system.
 	 */
+	plaflag = flags & BUS_DMA_NOWAIT ? UVM_PLA_NOWAIT : UVM_PLA_WAITOK;
+	if (flags & BUS_DMA_ZERO)
+		plaflag |= UVM_PLA_ZERO;
+
 	TAILQ_INIT(&mlist);
-	error = uvm_pglistalloc(size, low, high,
-	    alignment, boundary, &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
+	error = uvm_pglistalloc(size, low, high, alignment, boundary,
+	    &mlist, nsegs, plaflag);
 	if (error)
 		return (error);
 

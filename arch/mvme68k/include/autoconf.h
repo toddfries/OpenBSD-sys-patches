@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.14 2007/05/08 15:33:10 deraadt Exp $ */
+/*	$OpenBSD: autoconf.h,v 1.17 2009/03/01 22:08:13 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -28,9 +28,13 @@
 #ifndef _MVME68K_AUTOCONF_H_
 #define _MVME68K_AUTOCONF_H_
 
+#include <machine/bus.h>
+
 struct confargs {
+	bus_space_tag_t	ca_iot;
+	bus_dma_tag_t	ca_dmat;	
 	int	ca_bustype;
-	vaddr_t	ca_vaddr;
+	vaddr_t	ca_vaddr;	/* on-board (pcc,mc,pcctwo) only */
 	paddr_t	ca_paddr;
 	int	ca_offset;
 	int	ca_ipl;
@@ -40,17 +44,20 @@ struct confargs {
 
 #define BUS_MAIN	1
 #define BUS_PCC		2	/* VME147 PCC chip */
-#define BUS_MC		3	/* VME162 MC chip */
-#define BUS_PCCTWO	4	/* VME166/167/177 PCC2 chip */
+#define BUS_MC		3	/* VME162/172 MC chip */
+#define BUS_PCCTWO	4	/* VME166/167/176/177 PCC2 chip */
 #define BUS_VMES	5	/* 16 bit VME access */
 #define BUS_VMEL	6	/* 32 bit VME access */
-#define BUS_IP		7	/* VME162 IP module bus */
+#define BUS_IP		7	/* VME162/172 IP module bus */
+#define BUS_LRC		8	/* VME165 LRC chip */
+#define BUS_OFOBIO	9	/* VME141 */
 
 /* the following are from the prom/bootblocks */
 extern paddr_t	bootaddr;	/* PA of boot device */
 extern int	bootctrllun;	/* ctrl_lun of boot device */
 extern int	bootdevlun;	/* dev_lun of boot device */
 extern int	bootpart;	/* boot partition (disk) */
+extern int	bootbus;	/* scsi bus (disk) */
 
 vaddr_t	mapiodev(paddr_t, int);
 void	unmapiodev(vaddr_t, int);

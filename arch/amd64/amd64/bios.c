@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.15 2007/12/05 19:17:14 deraadt Exp $	*/
+/*	$OpenBSD: bios.c,v 1.17 2009/04/21 19:18:09 kettenis Exp $	*/
 /*
  * Copyright (c) 2006 Gordon Willem Klok <gklok@cogeco.ca>
  *
@@ -27,6 +27,7 @@
 
 #include <machine/conf.h>
 #include <machine/biosvar.h>
+#include <machine/mpbiosvar.h>
 #include <machine/smbiosvar.h>
 
 #include <dev/isa/isareg.h>
@@ -37,6 +38,7 @@
 #include <dev/acpi/acpivar.h>
 
 #include "acpi.h"
+#include "mpbios.h"
 #include "pci.h"
 
 struct bios_softc {
@@ -156,14 +158,24 @@ bios_attach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 
 #if NACPI > 0
-#if NPCI > 0
-	if (pci_mode != 0)
-#endif
 	{
 		struct bios_attach_args ba;
 
 		memset(&ba, 0, sizeof(ba));
 		ba.ba_name = "acpi";
+		ba.ba_iot = X86_BUS_SPACE_IO;
+		ba.ba_memt = X86_BUS_SPACE_MEM;
+
+		config_found(self, &ba, bios_print);
+	}
+#endif
+
+#if NMPBIOS > 0
+	if (mpbios_probe(self)) {
+		struct bios_attach_args ba;
+
+		memset(&ba, 0, sizeof(ba));
+		ba.ba_name = "mpbios";
 		ba.ba_iot = X86_BUS_SPACE_IO;
 		ba.ba_memt = X86_BUS_SPACE_MEM;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.33 2008/12/04 15:48:19 weingart Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.41 2009/04/27 17:48:22 deraadt Exp $	*/
 /*	$NetBSD: pmap.c,v 1.3 2003/05/08 18:13:13 thorpej Exp $	*/
 
 /*
@@ -447,8 +447,12 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 
 	pte = kvtopte(va);
 
-	npte = pa | ((prot & VM_PROT_WRITE) ? PG_RW : PG_RO) |
-	     PG_V | pmap_pg_g;
+	npte = pa | ((prot & VM_PROT_WRITE) ? PG_RW : PG_RO) | PG_V;
+
+	/* special 1:1 mappings in the first 2MB must not be global */
+	if (va >= (vaddr_t)NBPD_L2)
+		npte |= pmap_pg_g;
+
 	if ((cpu_feature & CPUID_NXE) && !(prot & VM_PROT_EXECUTE))
 		npte |= PG_NX;
 	opte = pmap_pte_set(pte, npte);
@@ -570,7 +574,7 @@ pmap_bootstrap(paddr_t first_avail, paddr_t max_pa)
 	}
 	memset(&kpm->pm_list, 0, sizeof(kpm->pm_list));  /* pm_list not used */
 	kpm->pm_pdir = (pd_entry_t *)(proc0.p_addr->u_pcb.pcb_cr3 + KERNBASE);
-	kpm->pm_pdirpa = (u_int32_t) proc0.p_addr->u_pcb.pcb_cr3;
+	kpm->pm_pdirpa = proc0.p_addr->u_pcb.pcb_cr3;
 	kpm->pm_stats.wired_count = kpm->pm_stats.resident_count =
 		atop(kva_start - VM_MIN_KERNEL_ADDRESS);
 
@@ -639,42 +643,6 @@ pmap_bootstrap(paddr_t first_avail, paddr_t max_pa)
 	kpm->pm_pdir[PDIR_SLOT_DIRECT] = dmpdp | PG_V | PG_KW | PG_U |
 	    PG_M;
 
-	/*
-	 * Now do the same thing, but for the direct uncached map.
-	 */
-	ndmpdp = (max_pa + NBPD_L3 - 1) >> L3_SHIFT;
-	if (ndmpdp < NDML2_ENTRIES)
-		ndmpdp = NDML2_ENTRIES;		/* At least 4GB */
-
-	dmpdp = first_avail;	first_avail += PAGE_SIZE;
-	dmpd = first_avail;	first_avail += ndmpdp * PAGE_SIZE;
-
-	for (i = 0; i < NPDPG * ndmpdp; i++) {
-		paddr_t pdp;
-		vaddr_t va;
-
-		pdp = (paddr_t)&(((pd_entry_t *)dmpd)[i]);
-		va = PMAP_DIRECT_MAP(pdp);
-
-		*((pd_entry_t *)va) = (paddr_t)i << L2_SHIFT;
-		*((pd_entry_t *)va) |= PG_RW | PG_V | PG_PS | PG_G | PG_N |
-		    PG_U | PG_M;
-	}
-
-	for (i = 0; i < ndmpdp; i++) {
-		paddr_t pdp;
-		vaddr_t va;
-
-		pdp = (paddr_t)&(((pd_entry_t *)dmpdp)[i]);
-		va = PMAP_DIRECT_MAP(pdp);
-
-		*((pd_entry_t *)va) = dmpd + (i << PAGE_SHIFT);
-		*((pd_entry_t *)va) |= PG_RW | PG_V | PG_U | PG_M;
-	}
-
-	kpm->pm_pdir[PDIR_SLOT_DIRECT_NC] = dmpdp | PG_V | PG_KW | PG_U |
-	    PG_M;
-	
 	tlbflush();
 
 	msgbuf_vaddr = virtual_avail;
@@ -1024,7 +992,6 @@ pmap_pdp_ctor(void *arg, void *object, int flags)
 	    (NTOPLEVEL_PDES - (PDIR_SLOT_KERN + npde)) * sizeof(pd_entry_t));
 
 	pdir[PDIR_SLOT_DIRECT] = pmap_kernel()->pm_pdir[PDIR_SLOT_DIRECT];
-	pdir[PDIR_SLOT_DIRECT_NC] = pmap_kernel()->pm_pdir[PDIR_SLOT_DIRECT_NC];
 
 #if VM_MIN_KERNEL_ADDRESS != KERNBASE
 	pdir[pl4_pi(KERNBASE)] = PDP_BASE[pl4_pi(KERNBASE)];
@@ -1237,12 +1204,6 @@ pmap_extract(struct pmap *pmap, vaddr_t va, paddr_t *pap)
 		return (TRUE);
 	}
 
-	if (pmap == pmap_kernel() && va >= PMAP_DIRECT_BASE_NC &&
-	    va < PMAP_DIRECT_END_NC) {
-		*pap = va - PMAP_DIRECT_BASE_NC;
-		return (TRUE);
-	}
-
 	pmap_map_ptes(pmap, &ptes, &pdes);
 	if (pmap_pdes_valid(va, pdes, &pde) == FALSE) {
 		return FALSE;
@@ -1318,7 +1279,7 @@ pmap_pageidlezero(struct vm_page *pg)
 	 *       with uncached mappings.
 	 */
 	for (i = 0, ptr = (long *) va; i < PAGE_SIZE / sizeof(long); i++) {
-		if (!sched_is_idle()) {
+		if (!curcpu_is_idle()) {
 
 			/*
 			 * A process has become ready.  Abort now,
@@ -1938,7 +1899,7 @@ pmap_unwire(struct pmap *pmap, vaddr_t va)
 			panic("pmap_unwire: invalid (unmapped) va 0x%lx", va);
 #endif
 		if ((ptes[pl1_i(va)] & PG_W) != 0) {
-			ptes[pl1_i(va)] &= ~PG_W;
+			pmap_pte_clearbits(&ptes[pl1_i(va)], PG_W);
 			pmap->pm_stats.wired_count--;
 		}
 #ifdef DIAGNOSTIC
@@ -2166,6 +2127,8 @@ enter_now:
 		npte |= PG_PVLIST;
 	if (wired)
 		npte |= PG_W;
+	if (flags & PMAP_NOCACHE)
+		npte |= PG_N;
 	if (va < VM_MAXUSER_ADDRESS)
 		npte |= PG_u;
 	else if (va < VM_MAX_ADDRESS)

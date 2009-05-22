@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.644 2008/12/01 23:48:46 todd Exp $
+#	$OpenBSD: GENERIC,v 1.656 2009/04/24 21:28:41 mk Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -40,8 +40,10 @@ mainbus0 at root
 
 cpu0	at mainbus?
 bios0	at mainbus0
+ioapic*	at mainbus?
 apm0	at bios0 flags 0x0000	# flags 0x0101 to force protocol version 1.1
 acpi0	at bios?
+mpbios0	at bios0
 pcibios0 at bios0 flags 0x0000	# use 0x30 for a total verbose
 ipmi0	at mainbus? disable	# IPMI
 #vmt0	at mainbus?		# VMware Tools
@@ -56,6 +58,7 @@ acpibtn*	at acpi?
 acpicpu*	at acpi?
 #acpidock*	at acpi?
 acpiec*		at acpi?
+acpimadt0	at acpi?
 acpiprt*	at acpi?
 acpitz*		at acpi?
 acpiasus*	at acpi?
@@ -97,6 +100,7 @@ geodesc* at pci?		# Geode SC1100/SCx200 IAOC
 #gscpm*	at pci?			# NS Geode SC1100 SMI/ACPI module
 #ichwdt* at pci?		# Intel 6300ESB ICH watchdog timer
 wdt0	at pci?			# Ind Computer Source PCI-WDT50x driver
+berkwdt0 at pci?		# Berkshire PCI-PC Watchdog driver
 pwdog0	at pci?			# Quancom PWDOG1 watchdog timer
 
 # National Semiconductor LM7[89] and compatible hardware monitors
@@ -127,6 +131,11 @@ iic*	at amdpm?
 it*	at isa? port 0x2e		# ITE IT8705F, IT8712F, IT8716F,
 it*	at isa? port 0x4e		# IT8718F, IT8726F and SiS SiS950
 					# monitors and watchdog timer
+
+schsio*	at isa? port 0x2e		# SMSC SCH311x Super I/O
+schsio*	at isa? port 0x4e
+schsio*	at isa? port 0x162e
+schsio*	at isa? port 0x164e
 
 viaenv*	at pci?				# VIA VT82C686A hardware monitor
 viasio*	at isa? port 0x2e flags 0x0000	# VIA VT1211 LPC Super I/O
@@ -274,8 +283,11 @@ ugen*	at uhub?		# USB Generic driver
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
+run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
+otus*	at uhub?		# Atheros AR9001U
 zyd*	at uhub?		# Zydas ZD1211
 upgt*	at uhub?		# Conexant/Intersil PrismGT SoftMAC USB
+urtw*	at uhub?		# RealTek 8187
 #option	NATM
 #ueagle* at uhub?		# Analog Devices Eagle ADSL
 udcf*	at uhub?		# Gude Expert mouseCLOCK
@@ -606,6 +618,8 @@ tht*	at thtc?
 gem*	at pci?				# Sun 'gem' ethernet
 vic*	at pci?				# VMware VMXnet virtual interface
 et*	at pci?				# Agere/LSI ET1310
+age*	at pci?				# Attansic L1 Ethernet
+ale*	at pci?				# Attansic L1E Ethernet
 lii*	at pci?				# Attansic L2 Ethernet
 jme*	at pci?				# JMicron JMC250/JMC260 Ethernet
 
@@ -668,6 +682,8 @@ ciphy*	at mii?				# Cicada CS8201 10/100/1000 copper PHY
 gentbi*	at mii?				# Generic 1000BASE-X ten-bit PHY
 etphy*	at mii?				# Agere/LSI ET1011 TruePHY
 jmphy*	at mii?				# JMicron JMP202/JMP211 PHYs
+atphy*	at mii?				# Attansic F1 PHYs
+ipgphy*	at mii?				# IC Plus IP1000A PHYs
 ukphy*	at mii?				# "unknown" PHYs
 
 pss0	at isa? port 0x220 irq 7 drq 6	# Personal Sound System

@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.110 2008/11/07 02:22:33 deraadt Exp $	*/
+/*	$OpenBSD: proc.h,v 1.117 2009/04/17 15:17:27 blambert Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -100,6 +100,7 @@ struct	emul {
 	void	(*e_setregs)(struct proc *, struct exec_package *,
 				  u_long, register_t *);
 	int	(*e_fixup)(struct proc *, struct exec_package *);
+	int	(*e_coredump)(struct proc *, void *cookie);
 	char	*e_sigcode;		/* Start of sigcode */
 	char	*e_esigcode;		/* End of sigcode */
 	int	e_flags;		/* Flags, see below */
@@ -304,6 +305,7 @@ struct proc {
 #define	P_IGNEXITRV	0x8000000	/* For thread kills */
 #define	P_SOFTDEP	0x10000000	/* Stuck processing softdep worklist */
 #define P_STOPPED	0x20000000	/* Just stopped. */
+#define P_CPUPEG	0x40000000	/* Do not move to another cpu. */
 
 #define	P_BITS \
     ("\20\01ADVLOCK\02CTTY\04NOCLDSTOP\05PPWAIT\06PROFIL\07SELECT" \
@@ -350,6 +352,7 @@ struct uidinfo *uid_find(uid_t);
  */
 #define	PID_MAX		32766
 #define	NO_PID		(PID_MAX+1)
+#define	THREAD_PID_OFFSET	1000000
 
 #define SESS_LEADER(p)	((p)->p_session->s_leader == (p))
 #define	SESSHOLD(s)	((s)->s_count++)
@@ -433,9 +436,6 @@ void	cpu_exit(struct proc *);
 int	fork1(struct proc *, int, int, void *, size_t, void (*)(void *),
 	    void *, register_t *, struct proc **);
 int	groupmember(gid_t, struct ucred *);
-#if !defined(cpu_wait)
-void	cpu_wait(struct proc *);
-#endif
 
 void	child_return(void *);
 
@@ -464,7 +464,30 @@ int	msleep(void *, struct mutex *, int,  const char*, int);
 void	proc_trampoline_mp(void);	/* XXX */
 #endif
 
-int proc_isunder(struct proc *, struct proc *);
+/*
+ * functions to handle sets of cpus.
+ *
+ * For now we keep the cpus in ints so that we can use the generic
+ * atomic ops.
+ */
+#define CPUSET_ASIZE(x) (((x) - 1)/32 + 1)
+#define CPUSET_SSIZE CPUSET_ASIZE(MAXCPUS)
+struct cpuset {
+	int cs_set[CPUSET_SSIZE];
+};
+
+void cpuset_init_cpu(struct cpu_info *);
+
+void cpuset_clear(struct cpuset *);
+void cpuset_add(struct cpuset *, struct cpu_info *);
+void cpuset_del(struct cpuset *, struct cpu_info *);
+int cpuset_isset(struct cpuset *, struct cpu_info *);
+void cpuset_add_all(struct cpuset *);
+void cpuset_copy(struct cpuset *, struct cpuset *);
+void cpuset_union(struct cpuset *, struct cpuset *, struct cpuset *);
+void cpuset_intersection(struct cpuset *t, struct cpuset *, struct cpuset *);
+void cpuset_complement(struct cpuset *, struct cpuset *, struct cpuset *);
+struct cpu_info *cpuset_first(struct cpuset *);
 
 #endif	/* _KERNEL */
 #endif	/* !_SYS_PROC_H_ */

@@ -1,7 +1,7 @@
-/*	$OpenBSD: xbow.c,v 1.2 2008/07/30 17:37:46 miod Exp $	*/
+/*	$OpenBSD: xbow.c,v 1.6 2009/05/02 21:30:13 miod Exp $	*/
 
 /*
- * Copyright (c) 2008 Miodrag Vallat.
+ * Copyright (c) 2008, 2009 Miodrag Vallat.
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -66,7 +66,9 @@
 #include <machine/atomic.h>
 #include <machine/autoconf.h>
 #include <machine/intr.h>
+#include <machine/mnode.h>
 
+#include <sgi/xbow/hub.h>
 #include <sgi/xbow/xbow.h>
 #include <sgi/xbow/xbowdevs.h>
 #include <sgi/xbow/xbowdevs_data.h>
@@ -77,7 +79,9 @@ int	xbowprint_pass1(void *, const char *);
 int	xbowprint_pass2(void *, const char *);
 int	xbowsubmatch_pass1(struct device *, void *, void *);
 int	xbowsubmatch_pass2(struct device *, void *, void *);
-void	xbow_enumerate(struct device *, int,
+int	xbow_attach_widget(struct device *, int16_t, int,
+	    int (*)(struct device *, void *, void *), cfprint_t);
+void	xbow_enumerate(struct device *, int16_t, int,
 	    int (*)(struct device *, void *, void *), cfprint_t);
 
 uint32_t xbow_read_4(bus_space_tag_t, bus_space_handle_t, bus_size_t);
@@ -97,8 +101,6 @@ void	xbow_read_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
 void	xbow_write_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
 	    const uint8_t *, bus_size_t);
 
-int	xbow_space_map_short(bus_space_tag_t, bus_addr_t, bus_size_t, int,
-	    bus_space_handle_t *);
 int	xbow_space_map_long(bus_space_tag_t, bus_addr_t, bus_size_t, int,
 	    bus_space_handle_t *);
 void	xbow_space_unmap(bus_space_tag_t, bus_space_handle_t, bus_size_t);
@@ -121,7 +123,7 @@ struct cfdriver xbow_cd = {
 static const bus_space_t xbowbus_short_tag = {
 	NULL,
 	(bus_addr_t)0,		/* will be modified in widgets bus_space_t */
-	(bus_addr_t)0,
+	NULL,
 	0,
 	xbow_read_1,
 	xbow_write_1,
@@ -146,7 +148,7 @@ static const bus_space_t xbowbus_short_tag = {
 static const bus_space_t xbowbus_long_tag = {
 	NULL,
 	(bus_addr_t)0,		/* will be modified in widgets bus_space_t */
-	(bus_addr_t)0,
+	NULL,
 	0,
 	xbow_read_1,
 	xbow_write_1,
@@ -187,6 +189,7 @@ xbowmatch(struct device *parent, void *match, void *aux)
 {
 	switch (sys_config.system_type) {
 	case SGI_O200:
+	case SGI_O300:
 	case SGI_OCTANE:
 		return (1);
 	default:
@@ -299,65 +302,113 @@ xbowattach(struct device *parent, struct device *self, void *aux)
 	    (wid & WIDGET_ID_REV_MASK) >> WIDGET_ID_REV_SHIFT);
 
 	/*
-	 * Enumerate the other widgets.
-	 * We'll do two passes - one to give the first Heart or a Hub a
-	 * chance to setup interrupt routing, and one to attach all other
-	 * widgets.
+	 * Default value for the interrupt register. If this system
+	 * has a Heart widget, the Heart code will take care of changing it.
 	 */
-	xbow_enumerate(self, 0, xbowsubmatch_pass1, xbowprint_pass1);
-	xbow_enumerate(self, xbow_intr_widget, xbowsubmatch_pass2,
-	    xbowprint_pass2);
+	xbow_intr_widget_register = (1UL << 47) /* XIO I/O space */ |
+	    ((paddr_t)IP27_RHUB_ADDR(nasid, HUB_IR_CHANGE) -
+	     IP27_NODE_IO_BASE(0)) /* HUB register offset */;
+
+	/*
+	 * If widget 0 reports itself as a bridge, this is not a
+	 * complete XBow, but only a limited topology. This is
+	 * found on at least the Origin 200.
+	 */
+	if (vendor == XBOW_VENDOR_SGI4 && product == XBOW_PRODUCT_SGI4_BRIDGE) {
+		/*
+		 * Interrupt widget is hardwired to #a (this is another
+		 * facet of this bridge).
+		 */
+		xbow_intr_widget = 0x0a;
+
+		xbow_attach_widget(self, nasid, WIDGET_MIN,
+		    xbowsubmatch_pass2, xbowprint_pass2);
+	} else {
+		/*
+		 * XXX This widget number is actually the Hub part of the
+		 * XXX crossbow, and is where memory and interrupt logic
+		 * XXX resources are connected to.
+		 * XXX The exact widget number ought to be computed from
+		 * XXX the KL configuration graph; I'm hardcoding it for
+		 * XXX now because I am lazy and we only care about the
+		 * XXX first node at the moment. -- miod
+		 */
+		if (sys_config.system_type != SGI_OCTANE)
+			xbow_intr_widget = 0x0a;
+
+		/*
+		 * Enumerate the other widgets.
+		 * We'll do two passes - one to give the first Heart or a Hub a
+		 * chance to setup interrupt routing, and one to attach all
+		 * other widgets.
+		 */
+		if (xbow_intr_widget == 0)
+			xbow_enumerate(self, nasid, 0,
+			    xbowsubmatch_pass1, xbowprint_pass1);
+		xbow_enumerate(self, nasid, xbow_intr_widget,
+		    xbowsubmatch_pass2, xbowprint_pass2);
+	}
 }
 
 void
-xbow_enumerate(struct device *self, int skip,
+xbow_enumerate(struct device *self, int16_t nasid, int skip,
     int (*sm)(struct device *, void *, void *), cfprint_t print)
 {
-	int16_t nasid = 0;	/* XXX for now... */
-	struct xbow_attach_args xaa;
 	int widget;
-	uint32_t wid;
 
-	for (widget = 8; widget <= 15; widget++) {
-		struct mips_bus_space *bs, *bl;
-
+	for (widget = WIDGET_MIN; widget <= WIDGET_MAX; widget++) {
 		if (widget == skip)
 			continue;
 
-		if (xbow_widget_id(nasid, widget, &wid) != 0)
-			continue;
-
-		/*
-		 * Build a pair of bus_space_t suitable for this widget.
-		 */
-		bs = malloc(sizeof (*bs), M_DEVBUF, M_NOWAIT);
-		if (bs == NULL)
-			continue;
-		bl = malloc(sizeof (*bl), M_DEVBUF, M_NOWAIT);
-		if (bl == NULL) {
-			free(bs, M_DEVBUF);
-			continue;
-		}
-
-		xbow_build_bus_space(bs, nasid, widget, 0);
-		xbow_build_bus_space(bl, nasid, widget, 1);
-
-		xaa.xaa_widget = widget;
-		xaa.xaa_vendor = (wid & WIDGET_ID_VENDOR_MASK) >>
-		    WIDGET_ID_VENDOR_SHIFT;
-		xaa.xaa_product = (wid & WIDGET_ID_PRODUCT_MASK) >>
-		    WIDGET_ID_PRODUCT_SHIFT;
-		xaa.xaa_revision = (wid & WIDGET_ID_REV_MASK) >>
-		    WIDGET_ID_REV_SHIFT;
-		xaa.xaa_short_tag = bs;
-		xaa.xaa_long_tag = bl;
-
-		if (config_found_sm(self, &xaa, print, sm) == NULL) {
-			/* nothing attached, no need to keep the bus_space */
-			free(bs, M_DEVBUF);
-			free(bl, M_DEVBUF);
-		}
+		(void)xbow_attach_widget(self, nasid, widget, sm, print);
 	}
+}
+
+int
+xbow_attach_widget(struct device *self, int16_t nasid, int widget,
+    int (*sm)(struct device *, void *, void *), cfprint_t print)
+{
+	struct xbow_attach_args xaa;
+	uint32_t wid;
+	struct mips_bus_space *bs, *bl;
+	int rc;
+
+	if ((rc = xbow_widget_id(nasid, widget, &wid)) != 0)
+		return rc;
+
+	/*
+	 * Build a pair of bus_space_t suitable for this widget.
+	 */
+	bs = malloc(sizeof (*bs), M_DEVBUF, M_NOWAIT);
+	if (bs == NULL)
+		return ENOMEM;
+	bl = malloc(sizeof (*bl), M_DEVBUF, M_NOWAIT);
+	if (bl == NULL) {
+		free(bs, M_DEVBUF);
+		return ENOMEM;
+	}
+
+	xbow_build_bus_space(bs, nasid, widget, 0);
+	xbow_build_bus_space(bl, nasid, widget, 1);
+
+	xaa.xaa_widget = widget;
+	xaa.xaa_vendor = (wid & WIDGET_ID_VENDOR_MASK) >>
+	    WIDGET_ID_VENDOR_SHIFT;
+	xaa.xaa_product = (wid & WIDGET_ID_PRODUCT_MASK) >>
+	    WIDGET_ID_PRODUCT_SHIFT;
+	xaa.xaa_revision = (wid & WIDGET_ID_REV_MASK) >> WIDGET_ID_REV_SHIFT;
+	xaa.xaa_short_tag = bs;
+	xaa.xaa_long_tag = bl;
+
+	if (config_found_sm(self, &xaa, print, sm) == NULL) {
+		/* nothing attached, no need to keep the bus_space */
+		free(bs, M_DEVBUF);
+		free(bl, M_DEVBUF);
+
+		return ENOENT;
+	}
+
+	return 0;
 }
 
 
@@ -567,7 +618,7 @@ xbow_space_vaddr(bus_space_tag_t t, bus_space_handle_t h)
  */
 
 int	xbow_intr_widget = 0;
-unsigned int xbow_intr_widget_register = 0;
+paddr_t	xbow_intr_widget_register;
 int	(*xbow_intr_widget_intr_register)(int, int, int *) = NULL;
 int	(*xbow_intr_widget_intr_establish)(int (*)(void *), void *, int, int,
 	    const char *) = NULL;

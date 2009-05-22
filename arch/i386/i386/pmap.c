@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.132 2008/11/24 16:32:45 art Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.136 2009/02/05 01:13:21 oga Exp $	*/
 /*	$NetBSD: pmap.c,v 1.91 2000/06/02 17:46:37 thorpej Exp $	*/
 
 /*
@@ -700,7 +700,12 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 
 	pte = vtopte(va);
 	npte = pa | ((prot & VM_PROT_WRITE)? PG_RW : PG_RO) | PG_V |
-	    pmap_pg_g | PG_U | PG_M;
+	    PG_U | PG_M;
+
+	/* special 1:1 mappings in the first 4MB must not be global */
+	if (va >= (vaddr_t)NBPD)
+		npte |= pmap_pg_g;
+
 	opte = i386_atomic_testset_ul(pte, npte); /* zap! */
 	if (pmap_valid_entry(opte)) {
 		/* NB. - this should not happen. */
@@ -923,6 +928,26 @@ pmap_bootstrap(vaddr_t kva_start)
 	 */
 
 	tlbflush();
+}
+
+/*
+ * Pre-allocate PTP 0 for low memory, so that 1:1 mappings for various
+ * trampoline code can be entered.
+ */
+void
+pmap_prealloc_lowmem_ptp(paddr_t ptppa)
+{
+	pt_entry_t *pte, npte;
+	vaddr_t ptpva = (vaddr_t)vtopte(0);
+
+	/* enter pa for pte 0 into recursive map */
+	pte = vtopte(ptpva);
+	npte = ptppa | PG_RW | PG_V | PG_U | PG_M;
+
+	i386_atomic_testset_ul(pte, npte); /* zap! */
+
+	/* make sure it is clean before using */
+	memset((void *)ptpva, 0, NBPG);
 }
 
 /*
@@ -2093,8 +2118,6 @@ pmap_page_remove(struct vm_page *pg)
 		ptes = pmap_map_ptes(pve->pv_pmap);	/* locks pmap */
 
 #ifdef DIAGNOSTIC
-		if (pve->pv_va >= uvm.pager_sva && pve->pv_va < uvm.pager_eva)
-			printf("pmap_page_remove: found pager VA on pv_list\n");
 		if (pve->pv_ptp && (pve->pv_pmap->pm_pdir[pdei(pve->pv_va)] &
 				    PG_FRAME)
 		    != VM_PAGE_TO_PHYS(pve->pv_ptp)) {
@@ -2352,7 +2375,7 @@ pmap_unwire(struct pmap *pmap, vaddr_t va)
 			panic("pmap_unwire: invalid (unmapped) va 0x%lx", va);
 #endif
 		if ((ptes[atop(va)] & PG_W) != 0) {
-			ptes[atop(va)] &= ~PG_W;
+			i386_atomic_clearbits_l(&ptes[atop(va)], PG_W);
 			pmap->pm_stats.wired_count--;
 		}
 #ifdef DIAGNOSTIC
@@ -2568,6 +2591,8 @@ enter_now:
 	pmap_exec_account(pmap, va, opte, npte);
 	if (wired)
 		npte |= PG_W;
+	if (flags & PMAP_NOCACHE)
+		npte |= PG_N;
 	if (va < VM_MAXUSER_ADDRESS)
 		npte |= PG_u;
 	else if (va < VM_MAX_ADDRESS)

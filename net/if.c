@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.183 2008/11/26 19:07:33 deraadt Exp $	*/
+/*	$OpenBSD: if.c,v 1.189 2009/03/15 19:40:41 miod Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -147,14 +147,12 @@ struct if_clone	*if_clone_lookup(const char *, int *);
 void	if_congestion_clear(void *);
 int	if_group_egress_build(void);
 
-void	m_clinitifp(struct ifnet *);
-
 TAILQ_HEAD(, ifg_group) ifg_head;
 LIST_HEAD(, if_clone) if_cloners = LIST_HEAD_INITIALIZER(if_cloners);
 int if_cloners_count;
 
-int m_clticks;
 struct timeout m_cltick_tmo;
+int m_clticks;
 
 /*
  * Record when the last timeout has been run.  If the delta is
@@ -165,6 +163,7 @@ static void
 m_cltick(void *arg)
 {
 	extern int ticks;
+	extern void m_cltick(void *);
 
 	m_clticks = ticks;
 	timeout_add(&m_cltick_tmo, 1);
@@ -322,8 +321,7 @@ if_alloc_sadl(struct ifnet *ifp)
 		if_free_sadl(ifp);
 
 	namelen = strlen(ifp->if_xname);
-#define _offsetof(t, m) ((int)((caddr_t)&((t *)0)->m))
-	masklen = _offsetof(struct sockaddr_dl, sdl_data[0]) + namelen;
+	masklen = offsetof(struct sockaddr_dl, sdl_data[0]) + namelen;
 	socksize = masklen + ifp->if_addrlen;
 #define ROUNDUP(a) (1 + (((a) - 1) | (sizeof(long) - 1)))
 	if (socksize < sizeof(*sdl))
@@ -1073,7 +1071,7 @@ if_down(struct ifnet *ifp)
 {
 	struct ifaddr *ifa;
 
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
 
 	ifp->if_flags &= ~IFF_UP;
 	microtime(&ifp->if_lastchange);
@@ -1090,8 +1088,10 @@ if_down(struct ifnet *ifp)
 		bstp_ifstate(ifp);
 #endif
 	rt_ifmsg(ifp);
+#if 0
 #ifndef SMALL_KERNEL
 	rt_if_track(ifp);
+#endif
 #endif
 }
 
@@ -1107,7 +1107,7 @@ if_up(struct ifnet *ifp)
 	struct ifaddr *ifa;
 #endif
 
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
 
 	ifp->if_flags |= IFF_UP;
 	microtime(&ifp->if_lastchange);
@@ -1130,8 +1130,10 @@ if_up(struct ifnet *ifp)
 	in6_if_up(ifp);
 #endif
 
+#if 0
 #ifndef SMALL_KERNEL
 	rt_if_track(ifp);
+#endif
 #endif
 
 	m_clinitifp(ifp);
@@ -1145,8 +1147,10 @@ void
 if_link_state_change(struct ifnet *ifp)
 {
 	rt_ifmsg(ifp);
+#if 0
 #ifndef SMALL_KERNEL
 	rt_if_track(ifp);
+#endif
 #endif
 	dohooks(ifp->if_linkstatehooks, 0);
 }
@@ -1380,6 +1384,18 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 			rtlabel_unref(ifp->if_rtlabelid);
 			ifp->if_rtlabelid = rtlabel_name2id(ifrtlabelbuf);
 		}
+		break;
+
+	case SIOCGIFPRIORITY:
+		ifr->ifr_metric = ifp->if_priority;
+		break;
+
+	case SIOCSIFPRIORITY:
+		if ((error = suser(p, 0)) != 0)
+			return (error);
+		if (ifr->ifr_metric < 0 || ifr->ifr_metric > 15)
+			return (EINVAL);
+		ifp->if_priority = ifr->ifr_metric;
 		break;
 
 	case SIOCAIFGROUP:
@@ -1910,9 +1926,9 @@ if_group_routechange(struct sockaddr *dst, struct sockaddr *mask)
 #ifdef INET6
 	case AF_INET6:
 		if (IN6_ARE_ADDR_EQUAL(&(satosin6(dst))->sin6_addr,
-		    &in6addr_any) && mask &&
+		    &in6addr_any) && mask && (mask->sa_len == 0 ||
 		    IN6_ARE_ADDR_EQUAL(&(satosin6(mask))->sin6_addr,
-		    &in6addr_any))
+		    &in6addr_any)))
 			if_group_egress_build();
 		break;
 #endif
@@ -2034,97 +2050,4 @@ sysctl_ifq(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return (EOPNOTSUPP);
 	}
 	/* NOTREACHED */
-}
-
-void
-m_clinitifp(struct ifnet *ifp)
-{
-	extern u_int mclsizes[];
-	int i;
-
-	/* Initialize high water marks for use of cluster pools */
-	for (i = 0; i < MCLPOOLS; i++) {
-		ifp->if_mclstat.mclpool[i].mcl_hwm = MAX(4,
-		    ifp->if_mclstat.mclpool[i].mcl_lwm);
-		ifp->if_mclstat.mclpool[i].mcl_size = mclsizes[i];
-	}
-}
-
-void
-m_clsetlwm(struct ifnet *ifp, u_int pktlen, u_int lwm)
-{
-	extern u_int mclsizes[];
-	int i;
-
-	for (i = 0; i < MCLPOOLS; i++) {
-                if (pktlen <= mclsizes[i])
-			break;
-        }
-	if (i >= MCLPOOLS)
-		return;
-
-	ifp->if_mclstat.mclpool[i].mcl_lwm = lwm;
-}
-
-int
-m_cldrop(struct ifnet *ifp, int pi)
-{
-	static int livelock, liveticks;
-	struct mclstat *mcls;
-	extern int ticks;
-	int i;
-
-	if (livelock == 0 && ticks - m_clticks > 2) {
-		struct ifnet *aifp;
-
-		/*
-		 * Timeout did not run, so we are in some kind of livelock.
-		 * Decrease the cluster allocation high water marks on all
-		 * interfaces and prevent them from growth for the very near
-		 * future.
-		 */
-		livelock = 1;
-		liveticks = ticks;
-		TAILQ_FOREACH(aifp, &ifnet, if_list) {
-			mcls = &aifp->if_mclstat;
-			for (i = 0; i < nitems(mcls->mclpool); i++)
-				mcls->mclpool[i].mcl_hwm =
-				    max(mcls->mclpool[i].mcl_hwm / 2,
-				    mcls->mclpool[i].mcl_lwm);
-		}
-	} else if (livelock && ticks - liveticks > 5)
-		livelock = 0;	/* Let the high water marks grow again */
-
-	mcls = &ifp->if_mclstat;
-	if (mcls->mclpool[pi].mcl_alive <= 2 &&
-	    mcls->mclpool[pi].mcl_hwm < 32768 &&
-	    ISSET(ifp->if_flags, IFF_RUNNING) && livelock == 0) {
-		/* About to run out, so increase the watermark */
-		mcls->mclpool[pi].mcl_hwm++;
-	} else if (mcls->mclpool[pi].mcl_alive >= mcls->mclpool[pi].mcl_hwm)
-		return (1);		/* No more packets given */
-
-	return (0);
-}
-
-void
-m_clcount(struct ifnet *ifp, int pi)
-{
-	ifp->if_mclstat.mclpool[pi].mcl_alive++;
-}
-
-void
-m_cluncount(struct mbuf *m, int all)
-{
-	struct mbuf_ext *me;
-
-	do {
-		me = &m->m_ext;
-		if (((m->m_flags & (M_EXT|M_CLUSTER)) != (M_EXT|M_CLUSTER)) ||
-		    (me->ext_ifp == NULL))
-			continue;
-
-		me->ext_ifp->if_mclstat.mclpool[me->ext_backend].mcl_alive--;
-		me->ext_ifp = NULL;
-	} while (all && (m = m->m_next));
 }

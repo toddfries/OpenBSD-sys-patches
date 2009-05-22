@@ -37,6 +37,34 @@
 #include "radeon_drv.h"
 #include "r300_reg.h"
 
+int	r300_emit_cliprects(drm_radeon_private_t *,
+	    drm_radeon_kcmd_buffer_t *, int);
+int	r300_check_range(unsigned, int);
+int	r300_emit_carefully_checked_packet0(drm_radeon_private_t *,
+	    drm_radeon_kcmd_buffer_t *, drm_r300_cmd_header_t);
+int	r300_emit_packet0(drm_radeon_private_t *, drm_radeon_kcmd_buffer_t *,
+	    drm_r300_cmd_header_t);
+int	r300_emit_vpu(drm_radeon_private_t *, drm_radeon_kcmd_buffer_t *,
+	    drm_r300_cmd_header_t);
+int	r300_emit_clear(drm_radeon_private_t *, drm_radeon_kcmd_buffer_t *);
+int	r300_emit_3d_load_vbpntr(drm_radeon_private_t *,
+	    drm_radeon_kcmd_buffer_t *, u32);
+int	r300_emit_bitblt_multi(drm_radeon_private_t *,
+	    drm_radeon_kcmd_buffer_t *);
+int	r300_emit_draw_indx_2(drm_radeon_private_t *,
+	    drm_radeon_kcmd_buffer_t *);
+int	r300_emit_raw_packet3(drm_radeon_private_t *,
+	    drm_radeon_kcmd_buffer_t *);
+int	r300_emit_packet3(drm_radeon_private_t *, drm_radeon_kcmd_buffer_t *,
+	    drm_r300_cmd_header_t);
+void	r300_pacify(drm_radeon_private_t *);
+void	r300_discard_buffer(struct drm_device *, struct drm_buf *);
+void	r300_cmd_wait(drm_radeon_private_t *, drm_r300_cmd_header_t);
+int	r300_scratch(drm_radeon_private_t *, drm_radeon_kcmd_buffer_t *,
+	    drm_r300_cmd_header_t);
+int	r300_emit_r500fp(drm_radeon_private_t *, drm_radeon_kcmd_buffer_t *,
+	    drm_r300_cmd_header_t);
+
 #define R300_SIMULTANEOUS_CLIPRECTS		4
 
 /* Values for R300_RE_CLIPRECT_CNTL depending on the number of cliprects
@@ -52,13 +80,13 @@ static const int r300_cliprect_cntl[4] = {
  * Emit up to R300_SIMULTANEOUS_CLIPRECTS cliprects from the given command
  * buffer, starting with index n.
  */
-static int r300_emit_cliprects(drm_radeon_private_t *dev_priv,
-			       drm_radeon_kcmd_buffer_t *cmdbuf, int n)
+int
+r300_emit_cliprects(drm_radeon_private_t *dev_priv,
+    drm_radeon_kcmd_buffer_t *cmdbuf, int n)
 {
 	struct drm_clip_rect box;
 	int nr;
 	int i;
-	RING_LOCALS;
 
 	nr = cmdbuf->nbox - n;
 	if (nr > R300_SIMULTANEOUS_CLIPRECTS)
@@ -71,8 +99,8 @@ static int r300_emit_cliprects(drm_radeon_private_t *dev_priv,
 		OUT_RING(CP_PACKET0(R300_RE_CLIPRECT_TL_0, nr * 2 - 1));
 
 		for (i = 0; i < nr; ++i) {
-			if (DRM_COPY_FROM_USER_UNCHECKED
-			    (&box, &cmdbuf->boxes[n + i], sizeof(box))) {
+			if (DRM_COPY_FROM_USER(&box, &cmdbuf->boxes[n + i],
+			    sizeof(box))) {
 				DRM_ERROR("copy cliprect faulted\n");
 				return EFAULT;
 			}
@@ -271,7 +299,8 @@ void r300_init_reg_flags(struct drm_device *dev)
 	}
 }
 
-static __inline__ int r300_check_range(unsigned reg, int count)
+int
+r300_check_range(unsigned reg, int count)
 {
 	int i;
 	if (reg & ~0xffff)
@@ -282,18 +311,14 @@ static __inline__ int r300_check_range(unsigned reg, int count)
 	return 0;
 }
 
-static __inline__ int r300_emit_carefully_checked_packet0(drm_radeon_private_t *
-							  dev_priv,
-							  drm_radeon_kcmd_buffer_t
-							  * cmdbuf,
-							  drm_r300_cmd_header_t
-							  header)
+int
+r300_emit_carefully_checked_packet0(drm_radeon_private_t *dev_priv,
+    drm_radeon_kcmd_buffer_t *cmdbuf, drm_r300_cmd_header_t header)
 {
 	int reg;
 	int sz;
 	int i;
 	int values[64];
-	RING_LOCALS;
 
 	sz = header.packet0.count;
 	reg = (header.packet0.reghi << 8) | header.packet0.reglo;
@@ -341,13 +366,12 @@ static __inline__ int r300_emit_carefully_checked_packet0(drm_radeon_private_t *
  *
  * Note that checks are performed on contents and addresses of the registers
  */
-static __inline__ int r300_emit_packet0(drm_radeon_private_t *dev_priv,
-					drm_radeon_kcmd_buffer_t *cmdbuf,
-					drm_r300_cmd_header_t header)
+int
+r300_emit_packet0(drm_radeon_private_t *dev_priv,
+    drm_radeon_kcmd_buffer_t *cmdbuf, drm_r300_cmd_header_t header)
 {
 	int reg;
 	int sz;
-	RING_LOCALS;
 
 	sz = header.packet0.count;
 	reg = (header.packet0.reghi << 8) | header.packet0.reglo;
@@ -388,13 +412,12 @@ static __inline__ int r300_emit_packet0(drm_radeon_private_t *dev_priv,
  * the graphics card.
  * Called by r300_do_cp_cmdbuf.
  */
-static __inline__ int r300_emit_vpu(drm_radeon_private_t *dev_priv,
-				    drm_radeon_kcmd_buffer_t *cmdbuf,
-				    drm_r300_cmd_header_t header)
+int
+r300_emit_vpu(drm_radeon_private_t *dev_priv, drm_radeon_kcmd_buffer_t *cmdbuf,
+    drm_r300_cmd_header_t header)
 {
 	int sz;
 	int addr;
-	RING_LOCALS;
 
 	sz = header.vpu.count;
 	addr = (header.vpu.adrhi << 8) | header.vpu.adrlo;
@@ -438,11 +461,10 @@ static __inline__ int r300_emit_vpu(drm_radeon_private_t *dev_priv,
  * Emit a clear packet from userspace.
  * Called by r300_emit_packet3.
  */
-static __inline__ int r300_emit_clear(drm_radeon_private_t *dev_priv,
-				      drm_radeon_kcmd_buffer_t *cmdbuf)
+int
+r300_emit_clear(drm_radeon_private_t *dev_priv,
+    drm_radeon_kcmd_buffer_t *cmdbuf)
 {
-	RING_LOCALS;
-
 	if (8 * 4 > cmdbuf->bufsz)
 		return EINVAL;
 
@@ -468,15 +490,14 @@ static __inline__ int r300_emit_clear(drm_radeon_private_t *dev_priv,
 	return 0;
 }
 
-static __inline__ int r300_emit_3d_load_vbpntr(drm_radeon_private_t *dev_priv,
-					       drm_radeon_kcmd_buffer_t *cmdbuf,
-					       u32 header)
+int
+r300_emit_3d_load_vbpntr(drm_radeon_private_t *dev_priv,
+    drm_radeon_kcmd_buffer_t *cmdbuf, u32 header)
 {
 	int count, i, k;
 #define MAX_ARRAY_PACKET  64
 	u32 payload[MAX_ARRAY_PACKET];
 	u32 narrays;
-	RING_LOCALS;
 
 	count = (header >> 16) & 0x3fff;
 
@@ -536,12 +557,12 @@ static __inline__ int r300_emit_3d_load_vbpntr(drm_radeon_private_t *dev_priv,
 	return 0;
 }
 
-static __inline__ int r300_emit_bitblt_multi(drm_radeon_private_t *dev_priv,
-					     drm_radeon_kcmd_buffer_t *cmdbuf)
+int
+r300_emit_bitblt_multi(drm_radeon_private_t *dev_priv,
+    drm_radeon_kcmd_buffer_t *cmdbuf)
 {
 	u32 *cmd = (u32 *) cmdbuf->buf;
 	int count, ret;
-	RING_LOCALS;
 
 	count=(cmd[0]>>16) & 0x3fff;
 
@@ -581,13 +602,13 @@ static __inline__ int r300_emit_bitblt_multi(drm_radeon_private_t *dev_priv,
 	return 0;
 }
 
-static __inline__ int r300_emit_draw_indx_2(drm_radeon_private_t *dev_priv,
-					    drm_radeon_kcmd_buffer_t *cmdbuf)
+int
+r300_emit_draw_indx_2(drm_radeon_private_t *dev_priv,
+    drm_radeon_kcmd_buffer_t *cmdbuf)
 {
 	u32 *cmd;
 	int count;
 	int expected_count;
-	RING_LOCALS;
 
 	cmd = (u32 *) cmdbuf->buf;
 	count = (cmd[0]>>16) & 0x3fff;
@@ -656,12 +677,12 @@ static __inline__ int r300_emit_draw_indx_2(drm_radeon_private_t *dev_priv,
 	return 0;
 }
 
-static __inline__ int r300_emit_raw_packet3(drm_radeon_private_t *dev_priv,
-					    drm_radeon_kcmd_buffer_t *cmdbuf)
+int
+r300_emit_raw_packet3(drm_radeon_private_t *dev_priv,
+    drm_radeon_kcmd_buffer_t *cmdbuf)
 {
 	u32 header;
 	int count;
-	RING_LOCALS;
 
 	if (4 > cmdbuf->bufsz)
 		return EINVAL;
@@ -736,9 +757,9 @@ static __inline__ int r300_emit_raw_packet3(drm_radeon_private_t *dev_priv,
  * Emit a rendering packet3 from userspace.
  * Called by r300_do_cp_cmdbuf.
  */
-static __inline__ int r300_emit_packet3(drm_radeon_private_t *dev_priv,
-					drm_radeon_kcmd_buffer_t *cmdbuf,
-					drm_r300_cmd_header_t header)
+int
+r300_emit_packet3(drm_radeon_private_t *dev_priv,
+    drm_radeon_kcmd_buffer_t *cmdbuf, drm_r300_cmd_header_t header)
 {
 	int n;
 	int ret;
@@ -805,10 +826,10 @@ static __inline__ int r300_emit_packet3(drm_radeon_private_t *dev_priv,
 /**
  * Emit the sequence to pacify R300.
  */
-static __inline__ void r300_pacify(drm_radeon_private_t *dev_priv)
+void
+r300_pacify(drm_radeon_private_t *dev_priv)
 {
 	uint32_t cache_z, cache_3d, cache_2d;
-	RING_LOCALS;
 
 	cache_z = R300_ZC_FLUSH;
 	cache_2d = R300_RB2D_DC_FLUSH;
@@ -861,7 +882,8 @@ static __inline__ void r300_pacify(drm_radeon_private_t *dev_priv)
  * The actual age emit is done by r300_do_cp_cmdbuf, which is why you must
  * be careful about how this function is called.
  */
-static void r300_discard_buffer(struct drm_device * dev, struct drm_buf * buf)
+void
+r300_discard_buffer(struct drm_device * dev, struct drm_buf * buf)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	drm_radeon_buf_priv_t *buf_priv = buf->dev_private;
@@ -871,11 +893,10 @@ static void r300_discard_buffer(struct drm_device * dev, struct drm_buf * buf)
 	buf->used = 0;
 }
 
-static void r300_cmd_wait(drm_radeon_private_t * dev_priv,
-			  drm_r300_cmd_header_t header)
+void
+r300_cmd_wait(drm_radeon_private_t * dev_priv, drm_r300_cmd_header_t header)
 {
 	u32 wait_until;
-	RING_LOCALS;
 
 	if (!header.wait.flags)
 		return;
@@ -912,13 +933,12 @@ static void r300_cmd_wait(drm_radeon_private_t * dev_priv,
 	ADVANCE_RING();
 }
 
-static int r300_scratch(drm_radeon_private_t *dev_priv,
-			drm_radeon_kcmd_buffer_t *cmdbuf,
-			drm_r300_cmd_header_t header)
+int
+r300_scratch(drm_radeon_private_t *dev_priv, drm_radeon_kcmd_buffer_t *cmdbuf,
+    drm_r300_cmd_header_t header)
 {
 	u32 *ref_age_base;
 	u32 i, buf_idx, h_pending;
-	RING_LOCALS;
 
 	if (cmdbuf->bufsz < sizeof(uint64_t) + header.scratch.n_bufs * sizeof(buf_idx) ) {
 		return EINVAL;
@@ -974,16 +994,15 @@ static int r300_scratch(drm_radeon_private_t *dev_priv,
  * the graphics card.
  * Called by r300_do_cp_cmdbuf.
  */
-static __inline__ int r300_emit_r500fp(drm_radeon_private_t *dev_priv,
-				       drm_radeon_kcmd_buffer_t *cmdbuf,
-				       drm_r300_cmd_header_t header)
+int
+r300_emit_r500fp(drm_radeon_private_t *dev_priv,
+    drm_radeon_kcmd_buffer_t *cmdbuf, drm_r300_cmd_header_t header)
 {
 	int sz;
 	int addr;
 	int type;
 	int clamp;
 	int stride;
-	RING_LOCALS;
 
 	sz = header.r500fp.count;
 	/* address is 9 bits 0 - 8, bit 1 of flags is part of address */
@@ -1104,7 +1123,6 @@ int r300_do_cp_cmdbuf(struct drm_device *dev,
 			DRM_DEBUG("R300_CMD_CP_DELAY\n");
 			{
 				int i;
-				RING_LOCALS;
 
 				BEGIN_RING(header.delay.count);
 				for (i = 0; i < header.delay.count; i++)
@@ -1184,8 +1202,6 @@ int r300_do_cp_cmdbuf(struct drm_device *dev,
 	 *      are written inside the pacifier bracket.
 	 */
 	if (emit_dispatch_age) {
-		RING_LOCALS;
-
 		/* Emit the vertex buffer age */
 		BEGIN_RING(2);
 		RADEON_DISPATCH_AGE(dev_priv->sarea_priv->last_dispatch);

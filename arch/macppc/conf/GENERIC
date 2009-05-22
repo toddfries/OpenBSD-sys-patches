@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.186 2008/12/01 23:48:47 todd Exp $g
+#	$OpenBSD: GENERIC,v 1.188 2009/02/10 18:35:44 damien Exp $g
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -130,6 +130,7 @@ urlphy*		at mii?		# Realtek RTL8150L internal PHY
 rgephy*		at mii?		# Realtek 8169S/8110S PHY
 rlphy*		at mii?		# Realtek 8139 internal PHYs
 ciphy*		at mii?		# Cicada CS8201 10/100/1000 copper PHY
+ipgphy*		at mii?		# IC Plus IP1000A PHYs
 ukphy*		at mii?		# generic unknown PHYs
 
 # crypto
@@ -285,6 +286,7 @@ ugen*	at uhub?		# USB Generic driver
 upgt*	at uhub?		# Conexant/Intersil PrismGT SoftMAC USB
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
+run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 umbg*	at uhub?		# Meinberg Funkuhren USB5131
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpbios.c,v 1.26 2008/10/05 16:57:36 kettenis Exp $	*/
+/*	$OpenBSD: mpbios.c,v 1.32 2009/04/19 18:02:57 deraadt Exp $	*/
 /*	$NetBSD: mpbios.c,v 1.2 2002/10/01 12:56:57 fvdl Exp $	*/
 
 /*-
@@ -96,8 +96,6 @@
  * so only Intel MP specific stuff is here.
  */
 
-#include "mpbios.h"
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -110,6 +108,7 @@
 #include <machine/cputypes.h>
 #include <machine/cpuvar.h>
 #include <machine/bus.h>
+#include <machine/biosvar.h>
 #include <machine/mpbiosreg.h>
 #include <machine/mpbiosvar.h>
 
@@ -125,6 +124,11 @@
 
 #include "pci.h"
 
+#include "apm.h"
+#include "acpi.h"
+#if NAPM > 0 && NACPI > 0
+extern int haveacpibutusingapm;
+#endif
 
 static struct mpbios_ioapic default_ioapic = {
     2, 0, 1, IOAPICENTRY_FLAG_EN, (caddr_t)IOAPIC_BASE_DEFAULT
@@ -156,18 +160,20 @@ struct mp_map
 int	mp_print(void *, const char *);
 int	mp_match(struct device *, void *, void *);
 int	mpbios_cpu_start(struct cpu_info *);
-const void *mpbios_search(struct device *, paddr_t, int,
-    struct mp_map *);
+const void *mpbios_search(struct device *, paddr_t, int, struct mp_map *);
 static __inline int mpbios_cksum(const void *, int);
 
 void	mp_cfg_special_intr(const struct mpbios_int *, u_int32_t *);
+void	mp_print_special_intr(int);
+
 void	mp_cfg_pci_intr(const struct mpbios_int *, u_int32_t *);
+void	mp_print_pci_intr(int);
+
 void	mp_cfg_eisa_intr(const struct mpbios_int *, u_int32_t *);
+void	mp_print_eisa_intr(int);
+
 void	mp_cfg_isa_intr(const struct mpbios_int *, u_int32_t *);
-void	mp_print_special_intr (int);
-void	mp_print_pci_intr (int);
-void	mp_print_eisa_intr (int);
-void	mp_print_isa_intr (int);
+void	mp_print_isa_intr(int);
 
 void	mpbios_cpu(const u_int8_t *, struct device *);
 void	mpbios_bus(const u_int8_t *, struct device *);
@@ -175,7 +181,7 @@ void	mpbios_ioapic(const u_int8_t *, struct device *);
 int	mpbios_int(const u_int8_t *, struct mp_intr_map *);
 
 const void *mpbios_map(paddr_t, int, struct mp_map *);
-static __inline void mpbios_unmap(struct mp_map *);
+void	mpbios_unmap(struct mp_map *);
 
 /*
  * globals to help us bounce our way through parsing the config table.
@@ -192,10 +198,39 @@ int mp_verbose = 1;
 int mp_verbose = 0;
 #endif
 
+int	mpbios_match(struct device *, void *, void *);
+void	mpbios_attach(struct device *, struct device *, void *);
+
+struct cfattach mpbios_ca = {
+	sizeof(struct device), mpbios_match, mpbios_attach
+};
+
+struct cfdriver mpbios_cd = {
+	NULL, "mpbios", DV_DULL
+};
+
+int
+mpbios_match(struct device *parent, void *match, void *aux)
+{
+	struct cfdata *cf = match;
+	struct bios_attach_args *bia = aux;
+
+	if (strcmp(bia->ba_name, cf->cf_driver->cd_name) == 0)
+		return (1);
+	return (0);
+}
+
+void
+mpbios_attach(struct device *parent, struct device *self, void *aux)
+{
+	mpbios_scan(self);
+}
+
 int
 mp_print(void *aux, const char *pnp)
 {
-	struct cpu_attach_args * caa = (struct cpu_attach_args *) aux;
+	struct cpu_attach_args *caa = aux;
+
 	if (pnp)
 		printf("%s at %s:", caa->caa_name, pnp);
 	return (UNCONF);
@@ -204,8 +239,9 @@ mp_print(void *aux, const char *pnp)
 int
 mp_match(struct device *parent, void *cfv, void *aux)
 {
-        struct cfdata *cf = (struct cfdata *)cfv;
-	struct cpu_attach_args * caa = (struct cpu_attach_args *) aux;
+	struct cfdata *cf = cfv;
+	struct cpu_attach_args *caa = aux;
+
 	if (strcmp(caa->caa_name, cf->cf_driver->cd_name))
 		return 0;
 
@@ -228,30 +264,21 @@ mpbios_map(paddr_t pa, int len, struct mp_map *handle)
 	handle->pg = pgpa;
 	handle->psize = len;
 	handle->baseva = va;
-	handle->vsize = endpa-pgpa;
+	handle->vsize = endpa - pgpa;
 
 	do {
-#if 1
 		pmap_kenter_pa(va, pgpa, VM_PROT_READ);
-#else
-		pmap_enter(pmap_kernel(), va, pgpa, VM_PROT_READ, TRUE,
-		    VM_PROT_READ);
-#endif
-		va += NBPG;
-		pgpa += NBPG;
+		va += PAGE_SIZE;
+		pgpa += PAGE_SIZE;
 	} while (pgpa < endpa);
 
 	return ((const void *)retva);
 }
 
-static __inline void
+void
 mpbios_unmap(struct mp_map *handle)
 {
-#if 1
-  	pmap_kremove(handle->baseva, handle->vsize);
-#else
-  	pmap_extract(pmap_kernel(), handle->baseva, NULL);
-#endif
+	pmap_kremove(handle->baseva, handle->vsize);
 	uvm_km_free(kernel_map, handle->baseva, handle->vsize);
 }
 
@@ -270,6 +297,16 @@ mpbios_probe(struct device *self)
 
 	struct		mp_map t;
 
+#if NAPM > 0 && NACPI > 0
+	/*
+	 * If we have acpi but chose to use apm, then we really should
+	 * not go use mpbios.  Systems with usable acpi typically have
+	 * unuseable mpbios
+	 */
+	if (haveacpibutusingapm)
+		return (0);
+#endif
+
 	/*
 	 * Skip probe if someone else (e.g. acpi) already provided the
 	 * necessary details.
@@ -279,7 +316,7 @@ mpbios_probe(struct device *self)
 
 	/* see if EBDA exists */
 
-	mpbios_page = mpbios_map(0, NBPG, &t);
+	mpbios_page = mpbios_map(0, PAGE_SIZE, &t);
 
 	/* XXX Ugly magic constants below. */
 	ebda = *(const u_int16_t *)(&mpbios_page[0x40e]);
@@ -496,18 +533,7 @@ mpbios_scan(struct device *self)
 	int		intr_cnt;
 	paddr_t		lapic_base;
 
-	printf("%s: Intel MP Specification ", self->dv_xname);
-
-	switch (mp_fps->spec_rev) {
-	case 1:
-		printf("(Version 1.1)\n");
-		break;
-	case 4:
-		printf("(Version 1.4)\n");
-		break;
-	default:
-		printf("(unrecognized rev %d)\n", mp_fps->spec_rev);
-	}
+	printf(": Intel MP Specification 1.%d\n", mp_fps->spec_rev);
 
 	/*
 	 * looks like we've got a MP system.  start setting up
@@ -525,7 +551,7 @@ mpbios_scan(struct device *self)
 	if (mp_fps->mpfb1 != 0) {
 		struct mpbios_proc pe;
 
-		printf("\n%s: MP default configuration %d\n",
+		printf("%s: MP default configuration %d\n",
 		    self->dv_xname, mp_fps->mpfb1);
 
 		/* use default addresses */
@@ -646,13 +672,14 @@ mpbios_scan(struct device *self)
 				return;
 			}
 
-			(u_char*)position += mp_conf[type].length;
+			position += mp_conf[type].length;
 		}
 		if (mp_verbose && mp_cth->ext_len)
 			printf("%s: MP WARNING: %d "
 			    "bytes of extended entries not examined\n",
 			    self->dv_xname, mp_cth->ext_len);
 	}
+
 	/* Clean up. */
 	mp_fps = NULL;
 	mpbios_unmap(&mp_fp_map);
@@ -706,6 +733,7 @@ void
 mpbios_cpu(const u_int8_t *ent, struct device *self)
 {
 	const struct mpbios_proc *entry = (const struct mpbios_proc *)ent;
+	struct device *mainbus = self->dv_parent->dv_parent;
 	struct cpu_attach_args caa;
 
 	/* XXX move this into the CPU attachment goo. */
@@ -716,8 +744,10 @@ mpbios_cpu(const u_int8_t *ent, struct device *self)
 	/* check for BSP flag */
 	if (entry->cpu_flags & PROCENTRY_FLAG_BP)
 		caa.cpu_role = CPU_ROLE_BP;
-	else
+	else {
 		caa.cpu_role = CPU_ROLE_AP;
+		ncpusfound++;
+	}
 
 	caa.caa_name = "cpu";
 	caa.cpu_number = entry->apic_id;
@@ -744,7 +774,7 @@ mpbios_cpu(const u_int8_t *ent, struct device *self)
 	}
 #endif
 
-	config_found_sm(self, &caa, mp_print, mp_match);
+	config_found_sm(mainbus, &caa, mp_print, mp_match);
 }
 
 /*
@@ -829,7 +859,7 @@ mp_cfg_pci_intr(const struct mpbios_int *entry, u_int32_t *redir)
 }
 
 void
-mp_cfg_eisa_intr (const struct mpbios_int *entry, u_int32_t *redir)
+mp_cfg_eisa_intr(const struct mpbios_int *entry, u_int32_t *redir)
 {
 	int mpspo = entry->int_flags & 0x03; /* XXX magic */
 	int mpstrig = (entry->int_flags >> 2) & 0x03; /* XXX magic */
@@ -1009,6 +1039,7 @@ void
 mpbios_ioapic(const u_int8_t *ent, struct device *self)
 {
 	const struct mpbios_ioapic *entry = (const struct mpbios_ioapic *)ent;
+	struct device *mainbus = self->dv_parent->dv_parent;
 	struct apic_attach_args aaa;
 
 	/* XXX let flags checking happen in ioapic driver.. */
@@ -1022,7 +1053,7 @@ mpbios_ioapic(const u_int8_t *ent, struct device *self)
 	aaa.apic_vecbase = -1;
 	aaa.flags = (mp_fps->mpfb2 & 0x80) ? IOAPIC_PICMODE : IOAPIC_VWIRE;
 
-	config_found_sm(self, &aaa, mp_print, mp_match);
+	config_found_sm(mainbus, &aaa, mp_print, mp_match);
 }
 
 int

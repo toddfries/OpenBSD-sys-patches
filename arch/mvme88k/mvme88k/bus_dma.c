@@ -1,4 +1,4 @@
-/*      $OpenBSD: bus_dma.c,v 1.8 2008/06/26 05:42:12 ray Exp $	*/
+/*      $OpenBSD: bus_dma.c,v 1.12 2009/04/20 00:42:06 oga Exp $	*/
 /*      $NetBSD: bus_dma.c,v 1.2 2001/06/10 02:31:25 briggs Exp $        */
 
 /*-
@@ -448,7 +448,7 @@ bus_dmamap_sync(t, map, offset, len, op)
 			if (sublen > len)
 				sublen = len;
 
-			dma_cachectl_pa(addr, sublen, op);
+			dma_cachectl(addr, sublen, op);
 
 			offset = 0;
 			len -= sublen;
@@ -482,7 +482,7 @@ bus_dmamem_alloc(t, size, alignment, boundary, segs, nsegs, rsegs, flags)
         }
 
         return _bus_dmamem_alloc_range(t, size, alignment, boundary, segs,
-            nsegs, rsegs, flags, avail_start, avail_end - PAGE_SIZE);
+            nsegs, rsegs, flags, 0, -1);
 }
 
 /*
@@ -633,7 +633,7 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
         paddr_t curaddr, lastaddr;
         struct vm_page *m;
         struct pglist mlist;
-        int curseg, error;
+        int curseg, error, plaflag;
 
         /* Always round the size. */
         size = round_page(size);
@@ -641,9 +641,13 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
         /*
          * Allocate pages from the VM system.
          */
+	plaflag = flags & BUS_DMA_NOWAIT ? UVM_PLA_NOWAIT : UVM_PLA_WAITOK;
+	if (flags & BUS_DMA_ZERO)
+		plaflag |= UVM_PLA_ZERO;
+
         TAILQ_INIT(&mlist);
         error = uvm_pglistalloc(size, low, high, alignment, boundary,
-            &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
+            &mlist, nsegs, plaflag);
         if (error)
                 return (error);
 
