@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcibrvar.h,v 1.6 2003/06/09 16:10:04 deraadt Exp $ */
+/*	$OpenBSD: pcibrvar.h,v 1.7 2009/05/03 21:30:09 kettenis Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom

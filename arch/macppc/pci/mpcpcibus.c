@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpcpcibus.c,v 1.38 2009/03/29 22:58:31 kettenis Exp $ */
+/*	$OpenBSD: mpcpcibus.c,v 1.39 2009/05/03 21:30:09 kettenis Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -384,7 +384,7 @@ mpcpcibrattach(struct device *parent, struct device *self, void *aux)
 
 	snprintf(sc->sc_ioex_name, sizeof(sc->sc_ioex_name),
 	    "%s pciio", sc->sc_dev.dv_xname);
-	sc->sc_ioex = extent_create(sc->sc_ioex_name, 0x00000000, 0x007fffff,
+	sc->sc_ioex = extent_create(sc->sc_ioex_name, 0x00000000, 0xffffffff,
 	    M_DEVBUF, NULL, 0, EX_NOWAIT | EX_FILLED);
 	snprintf(sc->sc_memex_name, sizeof(sc->sc_memex_name),
 	    "%s pcimem", sc->sc_dev.dv_xname);
