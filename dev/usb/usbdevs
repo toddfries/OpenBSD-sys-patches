@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.426 2009/04/22 18:56:33 deraadt Exp $
+$OpenBSD: usbdevs,v 1.432 2009/05/19 15:53:06 damien Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -421,6 +421,7 @@ vendor MSI		0x0db0	Micro Star International
 vendor ELCON		0x0db7	ELCON Systemtechnik
 vendor SITECOMEU	0x0df6	Sitecom Europe
 vendor MOBILEACTION	0x0df7	Mobile Action
+vendor AMIGO		0x0e0b	Amigo Technology
 vendor SPEEDDRAGON	0x0e55	Speed Dragon Multimedia
 vendor CTC		0x0e5e	CONWISE Technology
 vendor HAWKING		0x0e66	Hawking
@@ -527,6 +528,7 @@ vendor QUALCOMM3	0x19d2	Qualcomm Inc.
 vendor QUANTA		0x1a32	Quanta
 vendor WCH2		0x1a86	QinHeng Electronics
 vendor LONGCHEER	0x1c9e	Longcheer Technology
+vendor PEGATRON		0x1d4d	Pegatron
 vendor AIRTIES		0x1eda	AirTies
 vendor DLINK		0x2001	D-Link
 vendor PLANEX2		0x2019	Planex Communications
@@ -758,6 +760,10 @@ product AMBIT NTL_250		0x6098	NTL 250 cable modem
 /* American Power Conversion products */
 product APC UPSPRO500		0x0002	Back-UPS Pro 500
 
+/* Amigo Technology products */
+product AMIGO RT2870_1		0x9031	RT2870
+product AMIGO RT2870_2		0x9041	RT2870
+
 /* AMIT products */
 product AMIT CGWLUSB2GO		0x0002	CG-WLUSB2GO
 product AMIT CGWLUSB2GNR	0x0008	CG-WLUSB2GNR
@@ -832,6 +838,8 @@ product ASUS A9T_WIFI		0x171b	A9T wireless
 product ASUS RT2870_1		0x1731	RT2870
 product ASUS RT2870_2		0x1732	RT2870
 product ASUS RT2870_3		0x1742	RT2870
+product ASUS RT2870_4		0x1760	RT2870
+product ASUS RT2870_5		0x1761	RT2870
 product ASUS MYPAL_A730		0x4202	MyPal A730
 
 /* ASUSTeK Computer products */
@@ -889,11 +897,15 @@ product AVERATEC USBWLAN	0x4013	WLAN
 /* Avision products */
 product AVISION 1200U		0x0268	1200U
 
+/* AVM products */
+product AVM FRITZWLAN		0x8401	FRITZ!WLAN N
+
 /* Axesstel products */
 product AXESSTEL DATAMODEM	0x1000	Data Modem
 
 /* AsureWave products */
 product AZUREWAVE RT2870_1	0x3247	RT2870
+product AZUREWAVE RT2870_2	0x3262	RT2870
 product AZUREWAVE RT3070	0x3273	RT3070
 
 /* B&B Electronics products */
@@ -941,6 +953,7 @@ product BELKIN F5D8053V3	0x815c	F5D8053 v3
 product BELKIN F5D8055		0x825a	F5D8055
 product BELKIN F5D9050C		0x905c	F5D9050C
 product BELKIN F5D9050V3	0x905b	F5D9050 ver 3
+product BELKIN F6D4050V1	0x935a	F6D4050 ver 1
 
 /* Belkin(2) products */
 product BELKIN2 F5U002		0x0002	F5U002 Parallel
@@ -1211,6 +1224,7 @@ product DLINK2 WUA1340		0x3c04	WUA-1340
 product DLINK2 DWA111		0x3c06	DWA-111
 product DLINK2 DWA110		0x3c07	DWA-110
 product DLINK2 RT2870_1		0x3c09	RT2870
+product DLINK2 RT3072		0x3c0a	RT3072
 product DLINK2 DWA160A		0x3c10	DWA-160A
 product DLINK2 RT2870_2		0x3c11	RT2870
 product DLINK2 DWA130		0x3c13	DWA-130
@@ -1220,6 +1234,7 @@ product DLINK3 KVM221		0x020f	KVM-221
 
 /* DisplayLink products */
 product DISPLAYLINK DL120	0x01bb	DL-120
+product DISPLAYLINK DL160	0x0141	DL-160
 
 /* DMI products */
 product DMI SA2_0		0xb001	Storage Adapter
@@ -1567,6 +1582,7 @@ product GUILLEMOT DALEADER	0xa300	DA Leader
 product GUILLEMOT HWGUSB254	0xe000	HWGUSB2-54 WLAN
 product GUILLEMOT HWGUSB254LB	0xe010	HWGUSB2-54-LB
 product GUILLEMOT HWGUSB254V2AP	0xe020	HWGUSB2-54V2-AP
+product GUILLEMOT HWNU300	0xe030	HWNU-300
 
 /* Gunze Gunze Electronics USA */
 product GUNZE TOUCHPANEL	0x0001	Gunze USB Touch Panel
@@ -1591,6 +1607,7 @@ product HAUPPAUGE WINTV_USB_FM	0x4d12	WinTV FM
 product HAWKING RT2870_1	0x0001	RT2870
 product HAWKING RT2870_2	0x0003	RT2870
 product HAWKING HWUN2		0x0009	HWUN2
+product HAWKING RT3070		0x000b	RT3070
 product HAWKING UF100		0x400c	10/100 Ethernet
 product ABOCOM UF200		0x420a	UF200 Ethernet
 
@@ -1650,7 +1667,7 @@ product HTC SMARTPHONE		0x0a51	SmartPhone
 
 /* HUAWEI products */
 product HUAWEI E618		0x1001	HUAWEI Mobile E618
-product HUAWEI E220		0x1003	HUAWEI Mobile E220
+product HUAWEI E220		0x1003	HUAWEI Mobile Modem
 product HUAWEI E510		0x1411	HUAWEI Mobile E510
 
 /* HUMAX products */
@@ -2312,6 +2329,10 @@ product PAPOUCH AD4USB		0x8003	AD4USB
 product PAPOUCH GOLIATH_MUX	0x8004	GOLIATH MUX
 product PAPOUCH GOLIATH_MSR	0x8005	GOLIATH MSR
 
+/* Pegatron products */
+product PEGATRON RT2870		0x0002	RT2870
+product PEGATRON RT3070		0x000c	RT3070
+
 /* Pen Driver */
 product PEN USBREADER		0x0240	6 in 1
 product PEN MOBILEDRIVE		0x0280	3 in 1
@@ -2437,6 +2458,7 @@ product PUTERCOM UPA100		0x047e	USB-1284 BRIDGE
 product QCOM RT2573		0x6196	RT2573
 product QCOM RT2573_2		0x6229	RT2573
 product QCOM RT2573_3		0x6238	RT2573
+product QCOM RT2870		0x6259	RT2870
 
 /* Qtronix products */
 product QTRONIX 980N		0x2011	Scorpion-980N
@@ -2471,6 +2493,7 @@ product	RAINBOW IKEY2000	0x1200	i-Key 2000
 
 /* Ralink Technology products */
 product RALINK RT2570		0x1706	RT2570
+product RALINK RT2070		0x2070	RT2070
 product RALINK RT2570_2		0x2570	RT2570
 product RALINK RT2573		0x2573	RT2573
 product RALINK RT2671		0x2671	RT2671
@@ -2612,11 +2635,15 @@ product SEALEVEL 2803_7		0X2873	SeaLINK+8 (2803) Port 7
 product SEALEVEL 2803_8		0X2883	SeaLINK+8 (2803) Port 8
 
 /* Senao products */
+product SENAO RT2870_3		0x0605	RT2870
+product SENAO RT2870_4		0x0615	RT2870
 product SENAO NUB8301		0x2000	NUB-8301
 product SENAO NUB862		0x6100	NUB-862
 product SENAO RT2870_1		0x9701	RT2870
 product SENAO RT2870_2		0x9702	RT2870
 product SENAO RT3070		0x9703	RT3070
+product SENAO RT3071		0x9705	RT3071
+product SENAO RT3072		0x9706	RT3072
 
 /* Serverworks */
 product SERVERWORKS HUB		0x0000	Root Hub
@@ -2756,6 +2783,9 @@ product SITECOMEU RT2870_3	0x002c	RT2870
 product SITECOMEU RT2870_4	0x002d	RT2870
 product SITECOMEU WL603		0x0036	WL-603
 product SITECOMEU RT2770	0x0039	RT2770
+product SITECOMEU RT3070_2	0x003b	RT3070
+product SITECOMEU RT3070_3	0x003c	RT3070
+product SITECOMEU RT3070_4	0x003d	RT3070
 product SITECOMEU RT3070	0x003e	RT3070
 product SITECOMEU LN028		0x061c	LN-028
 product SITECOMEU LN030		0x0021	LN-030
@@ -2815,6 +2845,7 @@ product SOURCENEXT KEIKAI8_CHG	0x012e	KeikaiDenwa 8 with charger
 /* SparkLAN products */
 product SPARKLAN RT2573		0x0004	RT2573
 product SPARKLAN RT2870_1	0x0006	RT2870
+product SPARKLAN RT3070		0x0010	RT3070
 
 /* Speed Dragon Multimedia products */
 product SPEEDDRAGON MS3303H	0x110b	MS3303H Serial
@@ -3141,4 +3172,5 @@ product ZYXEL G220V2		0x340f	G-220 v2
 product ZYXEL G202		0x3410	G-202
 product ZYXEL RT2573		0x3415	RT2573
 product ZYXEL RT2870_1		0x3416	RT2870
+product ZYXEL NWD271N		0x3417	NWD-271N
 product ZYXEL PRESTIGE		0x401a	Prestige

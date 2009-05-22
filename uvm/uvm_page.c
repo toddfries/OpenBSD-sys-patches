@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.c,v 1.78 2009/05/04 18:08:06 oga Exp $	*/
+/*	$OpenBSD: uvm_page.c,v 1.80 2009/05/08 15:10:35 ariane Exp $	*/
 /*	$NetBSD: uvm_page.c,v 1.44 2000/11/27 08:40:04 chs Exp $	*/
 
 /* 
@@ -195,7 +195,7 @@ uvm_pageremove(struct vm_page *pg)
 	/* object should be locked */
 	TAILQ_REMOVE(&pg->uobject->memq, pg, listq);
 
-	atomic_clearbits_int(&pg->pg_flags, PG_TABLED);
+	atomic_clearbits_int(&pg->pg_flags, PG_TABLED|PQ_AOBJ);
 	pg->uobject->uo_npages--;
 	pg->uobject = NULL;
 	pg->pg_version++;
@@ -483,9 +483,9 @@ uvm_pageboot_alloc(vsize_t size)
  */
 
 /* subroutine: try to allocate from memory chunks on the specified freelist */
-static boolean_t uvm_page_physget_freelist(paddr_t *, int);
+boolean_t uvm_page_physget_freelist(paddr_t *, int);
 
-static boolean_t
+boolean_t
 uvm_page_physget_freelist(paddr_t *paddrp, int freelist)
 {
 	int lcv, x;
@@ -1186,7 +1186,9 @@ uvm_pagefree(struct vm_page *pg)
 		uvmexp.wired--;
 	}
 	if (pg->uanon) {
+		atomic_clearbits_int(&pg->pg_flags, PQ_ANON);
 		pg->uanon->an_page = NULL;
+		pg->uanon = NULL;
 #ifdef UBC
 		uvm_pgcnt_anon--;
 #endif

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.188 2009/01/20 20:21:03 mlarkin Exp $
+#	$OpenBSD: files.i386,v 1.190 2009/05/12 19:49:36 mglocker Exp $
 #
 # new style config file for i386 architecture
 #
@@ -51,6 +51,9 @@ file	arch/i386/i386/ipifuncs.c	multiprocessor
 file	arch/i386/i386/db_mp.c		multiprocessor & ddb
 file	arch/i386/i386/wscons_machdep.c	wsdisplay
 major	{vnd = 14}
+
+include "dev/rasops/files.rasops"
+include "dev/wsfont/files.wsfont"
 
 #
 # Media Independent Interface (mii)
@@ -105,6 +108,11 @@ file	arch/i386/pci/pcic_pci_machdep.c	pcic_pci
 device  pchb: pcibus, agpbus
 attach	pchb at pci
 file	arch/i386/pci/pchb.c		pchb
+
+# AMAS AMD memory address switch
+device  amas
+attach  amas at pci
+file    dev/pci/amas.c			amas
 
 # AGP bridge support. most attach at pchb
 include "dev/pci/files.agp"

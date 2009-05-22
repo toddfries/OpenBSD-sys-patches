@@ -1,4 +1,4 @@
-/*	$OpenBSD: amas.c,v 1.2 2009/04/20 20:29:11 ariane Exp $	*/
+/*	$OpenBSD: amas.c,v 1.4 2009/05/07 22:25:31 ariane Exp $	*/
 
 /*
  * Copyright (c) 2009 Ariane van der Steldt <ariane@stack.nl>
@@ -24,7 +24,7 @@
  * and contains mappings for memory to processor nodes.
  */
 
-#include <machine/amas.h>
+#include <dev/pci/amas.h>
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -177,14 +177,12 @@ amas_attach(struct device *parent, struct device *self, void *aux)
 
 	printf(":");
 	if (nodes != 0) {
-		printf(" interleaved across %d nodes", nodes);
+		printf(" interleaved");
 	} else {
 		for (i = 0; i < AMAS_MAX_NODES; i++) {
 			amas_get_pagerange(amas, i, &start_pg, &end_pg);
 
-			if (start_pg == 0 && end_pg == 0)
-				printf(" []");
-			else
+			if (!(start_pg == 0 && end_pg == 0))
 				printf(" [%p, %p]", start_pg, end_pg);
 		}
 	}
@@ -268,7 +266,8 @@ amas_get_pagerange(struct amas_softc *amas, int node,
 	}
 #endif /* 0 */
 
-	if (base_addr == limit_addr && ebase_addr == elimit_addr) {
+	if (ebase_addr > elimit_addr ||
+	    (ebase_addr == elimit_addr && base_addr >= limit_addr)) {
 		/* no memory present */
 		*start_pg_idx = 0;
 		*end_pg_idx = 0;

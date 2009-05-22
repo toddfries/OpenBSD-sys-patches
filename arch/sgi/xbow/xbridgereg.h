@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbridgereg.h,v 1.3 2009/05/03 19:44:28 miod Exp $	*/
+/*	$OpenBSD: xbridgereg.h,v 1.5 2009/05/14 21:10:33 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Miodrag Vallat.
@@ -66,6 +66,9 @@
 #define	BRIDGE_INT_DEV			0x00000124
 #define	BRIDGE_INT_HOST_ERR		0x0000012c
 #define	BRIDGE_INT_ADDR(d)		(0x00000134 + 8 * (d))
+/* the following two are XBridge-only */
+#define	BRIDGE_INT_FORCE_ALWAYS(d)	(0x00000184 + 8 * (d))
+#define	BRIDGE_INT_FORCE_PIN(d)		(0x000001c4 + 8 * (d))
 
 /*
  * PCI Resource Mapping control
@@ -104,6 +107,9 @@
 	 BRIDGE_DEVIO_SHORT * ((d) < 2 ? 0 : (d) - 2))
 #define	BRIDGE_DEVIO_SIZE(d) \
 	((d) < 2 ? BRIDGE_DEVIO_LARGE : BRIDGE_DEVIO_SHORT)
+
+
+#define	BRIDGE_DEVICE_WBFLUSH(d)	(0x00000244 + 8 * (d))
 
 /*
  * Read Response Buffer configuration registers

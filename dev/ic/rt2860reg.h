@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860reg.h,v 1.16 2009/01/06 18:56:07 damien Exp $	*/
+/*	$OpenBSD: rt2860reg.h,v 1.19 2009/05/18 19:25:07 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007
@@ -270,8 +270,8 @@
 #define RT2860_USB_TX_CLEAR		(1 << 19)
 #define RT2860_USB_PHY_WD_EN		(1 << 16)
 #define RT2860_USB_PHY_MAN_RST		(1 << 15)
-#define RT2860_USB_RX_AGG_LMT_SHIFT	8
-#define RT2860_USB_RX_AGG_TO_SHIFT	0
+#define RT2860_USB_RX_AGG_LMT(x)	((x) << 8)	/* in unit of 1KB */
+#define RT2860_USB_RX_AGG_TO(x)		((x) & 0xff)	/* in unit of 33ns */
 
 /* possible flags for register US_CYC_CNT */
 #define RT2860_TEST_EN		(1 << 24)
@@ -372,8 +372,9 @@
 /* possible flags for register EFUSE_CTRL */
 #define RT3070_SEL_EFUSE	(1 << 31)
 #define RT3070_EFSROM_KICK	(1 << 30)
+#define RT3070_EFSROM_AIN_MASK	0x03ff0000
 #define RT3070_EFSROM_AIN_SHIFT	16
-#define RT3070_EFSROM_MODE_MASK	(3 <<  6)
+#define RT3070_EFSROM_MODE_MASK	0x000000c0
 #define RT3070_EFUSE_AOUT_MASK	0x0000003f
 
 /* possible flags for register MAC_SYS_CTRL */
@@ -835,6 +836,7 @@ struct rt2860_rxwi {
 #define RT3070_RF_2020	6	/* b/g */
 #define RT3070_RF_3021	7	/* 1T2R */
 #define RT3070_RF_3022	8	/* 2T2R */
+#define RT3070_RF_3052	9	/* dual-band 2T2R */
 
 /* USB commands for RT2870 only */
 #define RT2870_RESET		1

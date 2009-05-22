@@ -1,4 +1,4 @@
-/*	$OpenBSD: agpvar.h,v 1.16 2009/04/20 01:28:45 oga Exp $	*/
+/*	$OpenBSD: agpvar.h,v 1.19 2009/05/10 16:57:44 oga Exp $	*/
 /*	$NetBSD: agpvar.h,v 1.4 2001/10/01 21:54:48 fvdl Exp $	*/
 
 /*-
@@ -52,8 +52,8 @@ struct agpbus_attach_args {
 	char				*aa_busname; /*so pci doesn't conflict*/
         struct pci_attach_args		*aa_pa;
 	const struct agp_methods	*aa_methods;
-	int				 aa_bar;
-	pcireg_t			 aa_type;
+	bus_addr_t			 aa_apaddr;
+	bus_size_t			 aa_apsize;
 };
 
 enum agp_acquire_state {
@@ -67,16 +67,16 @@ enum agp_acquire_state {
  */
 TAILQ_HEAD(agp_memory_list, agp_memory);
 struct agp_memory {
-	TAILQ_ENTRY(agp_memory) am_link;	/* wiring for the tailq */
-	int		am_id;			/* unique id for block */
-	vsize_t		am_size;		/* number of bytes allocated */
-	int		am_type;		/* chipset specific type */
-	off_t		am_offset;		/* page offset if bound */
-	int		am_is_bound;		/* non-zero if bound */
-	bus_addr_t	am_physical;
-	bus_dmamap_t	am_dmamap;
-	int		am_nseg;
-	bus_dma_segment_t *am_dmaseg;
+	TAILQ_ENTRY(agp_memory)	 am_link;	/* wiring for the tailq */
+	bus_dmamap_t		 am_dmamap;
+	bus_dma_segment_t	*am_dmaseg;
+	bus_size_t		 am_size;	/* number of bytes allocated */
+	bus_size_t		 am_offset;	/* page offset if bound */
+	paddr_t			 am_physical;
+	int			 am_id;		/* unique id for block */
+	int			 am_is_bound;	/* non-zero if bound */
+	int			 am_nseg;
+	int			 am_type;	/* chipset specific type */
 };
 
 /*
@@ -99,15 +99,14 @@ struct agp_memory_info {
 };
 
 struct agp_methods {
-	bus_size_t (*get_aperture)(void *);
-	int	(*bind_page)(void *, off_t, bus_addr_t);
-	int	(*unbind_page)(void *, off_t);
+	void	(*bind_page)(void *, bus_addr_t, paddr_t, int);
+	void	(*unbind_page)(void *, bus_addr_t);
 	void	(*flush_tlb)(void *);
 	int	(*enable)(void *, u_int32_t mode);
 	struct agp_memory *
 		(*alloc_memory)(void *, int, vsize_t);
 	int	(*free_memory)(void *, struct agp_memory *);
-	int	(*bind_memory)(void *, struct agp_memory *, off_t);
+	int	(*bind_memory)(void *, struct agp_memory *, bus_size_t);
 	int	(*unbind_memory)(void *, struct agp_memory *);
 };
 
@@ -123,9 +122,10 @@ struct agp_softc {
 	void				*sc_chipc;	/* chipset softc */
 
 	bus_dma_tag_t			 sc_dmat;
-	bus_addr_t			 sc_apaddr;
 	pci_chipset_tag_t		 sc_pc;
 	pcitag_t			 sc_pcitag;
+	bus_addr_t			 sc_apaddr;
+	bus_size_t			 sc_apsize;
 	pcireg_t			 sc_id;
 
 	int				 sc_opened;
@@ -150,15 +150,14 @@ struct agp_gatt {
  * Functions private to the AGP code.
  */
 struct device	*agp_attach_bus(struct pci_attach_args *,
-		     const struct agp_methods *, int, pcireg_t,
+		     const struct agp_methods *, bus_addr_t, bus_size_t,
 		     struct device *);
-int	agp_map_aperture(struct pci_attach_args *, 
-	    struct agp_softc *, u_int32_t, u_int32_t);
 struct agp_gatt *
 	agp_alloc_gatt(bus_dma_tag_t, u_int32_t);
 void	agp_free_gatt(bus_dma_tag_t, struct agp_gatt *);
 void	agp_flush_cache(void);
-int	agp_generic_bind_memory(struct agp_softc *, struct agp_memory *, off_t);
+int	agp_generic_bind_memory(struct agp_softc *, struct agp_memory *,
+	    bus_size_t);
 int	agp_generic_unbind_memory(struct agp_softc *, struct agp_memory *);
 
 int	agp_alloc_dmamem(bus_dma_tag_t, size_t, bus_dmamap_t *,
