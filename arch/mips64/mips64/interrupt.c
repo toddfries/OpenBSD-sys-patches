@@ -1,4 +1,4 @@
-/*	$OpenBSD: interrupt.c,v 1.35 2009/04/25 20:35:06 miod Exp $ */
+/*	$OpenBSD: interrupt.c,v 1.38 2009/05/22 20:37:53 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -38,7 +38,6 @@
 #endif
 
 #include <machine/trap.h>
-#include <machine/psl.h>
 #include <machine/cpu.h>
 #include <machine/intr.h>
 #include <machine/autoconf.h>
@@ -276,7 +275,17 @@ dummy_do_pending_int(int newcpl)
 void
 splinit()
 {
+	struct proc *p = curproc;
+	struct pcb *pcb = &p->p_addr->u_pcb;
 	u_int32_t sr;
+
+	/*
+	 * Update proc0 pcb to contain proper values.
+	 */
+	pcb->pcb_context.val[13] = 0;	/* IPL_NONE */
+	pcb->pcb_context.val[12] = (idle_mask << 8) & IC_INT_MASK;
+	pcb->pcb_context.val[11] = (pcb->pcb_regs.sr & ~SR_INT_MASK) |
+	    (idle_mask & SR_INT_MASK);
 
 	spl0();
 	sr = updateimask(0);
@@ -287,7 +296,6 @@ splinit()
 #endif
 }
 
-#ifndef INLINE_SPLRAISE
 int
 splraise(int newcpl)
 {
@@ -299,4 +307,29 @@ splraise(int newcpl)
 	__asm__ (" sync\n .set reorder\n");
 	return (oldcpl);
 }
+
+void
+splx(int newcpl)
+{
+	if (ipending & ~newcpl)
+		(*pending_hand)(newcpl);
+	else {
+		__asm__ (" .set noreorder\n");
+		cpl = newcpl;
+		__asm__ (" sync\n .set reorder\n");
+#ifdef IMASK_EXTERNAL
+		hw_setintrmask(newcpl);
 #endif
+	}
+}
+
+int
+spllower(int newcpl)
+{
+	int oldcpl;
+
+	oldcpl = cpl;
+	splx(newcpl);
+	return (oldcpl);
+}
+
