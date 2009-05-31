@@ -1159,6 +1159,7 @@ setroot(struct device *bootdv, int part, int exitflags)
 					nswapdev = NODEV;
 					break;
 				case DV_DISK:
+					/* XXX so, I guess it might be desirable to confirm this is of type swap, or too difficult/paranoid? */
 					nswapdev = MAKEDISKDEV(major(nrootdev),
 					    DISKUNIT(nrootdev), 1);
 					if (nswapdev == nrootdev)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.6 2009/05/15 22:59:07 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.10 2009/05/28 18:03:55 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -24,9 +24,11 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
+#include <sys/reboot.h>
 #include <sys/tty.h>
 
 #include <mips64/arcbios.h>
+#include <mips64/archtype.h>
 
 #include <machine/autoconf.h>
 #include <machine/bus.h>
@@ -36,19 +38,23 @@
 
 #include <uvm/uvm_extern.h>
 
+#include <sgi/sgi/ip27.h>
 #include <sgi/xbow/hub.h>
 #include <sgi/xbow/xbow.h>
 #include <sgi/xbow/xbridgereg.h>
 
-#include <sgi/pci/iocreg.h>
-
 #include <dev/ic/comvar.h>
+
+extern void (*md_halt)(int);
 
 paddr_t	ip27_widget_short(int16_t, u_int);
 paddr_t	ip27_widget_long(int16_t, u_int);
 int	ip27_widget_id(int16_t, u_int, uint32_t *);
 
+void	ip27_halt(int);
+
 static paddr_t io_base;
+static int ip35 = 0;
 
 int	ip27_hub_intr_register(int, int, int *);
 int	ip27_hub_intr_establish(int (*)(void *), void *, int, int,
@@ -58,36 +64,42 @@ intrmask_t ip27_hub_intr_handler(intrmask_t, struct trap_frame *);
 void	ip27_hub_intr_makemasks(void);
 void	ip27_hub_do_pending_int(int);
 
+void	ip27_nmi(void *);
+
 void
 ip27_setup()
 {
+	kl_nmi_t *nmi;
+
 	uncached_base = PHYS_TO_XKPHYS_UNCACHED(0, SP_NC);
 	io_base = PHYS_TO_XKPHYS_UNCACHED(0, SP_IO);
+
+	ip35 = sys_config.system_type == SGI_O300;
 
 	xbow_widget_short = ip27_widget_short;
 	xbow_widget_long = ip27_widget_long;
 	xbow_widget_id = ip27_widget_id;
 
-	/*
-	 * Scan this node's configuration to find out CPU and memory
-	 * information.
-	 */
-	kl_scan_config(0);
+	md_halt = ip27_halt;
 
+	kl_init();
 	if (kl_n_mode != 0)
 		xbow_long_shift = 28;
 
 	/*
-	 * Initialize the early console parameters.
-	 * This assumes BRIDGE is on widget 8 and IOC3 is mapped in
-	 * memory space at address 0x600000.
-	 *
-	 * XXX And that 0x600000 should be computed from the first BAR
-	 * XXX of the IOC3 in pci configuration space. Joy. I'll get there
-	 * XXX eventually.
+	 * Scan this node's configuration to find out CPU and memory
+	 * information.
 	 */
-	xbow_build_bus_space(&sys_config.console_io, 0, 8, 0);
 
+	kl_scan_config(0);
+	kl_scan_done();
+
+	/*
+	 * Initialize the early console parameters.
+	 * This assumes IOC3 is accessible through a widget small window.
+	 */
+
+	xbow_build_bus_space(&sys_config.console_io, 0, 8 /* whatever */, 0);
 	/* Constrain to a short window */
 	sys_config.console_io.bus_base =
 	    kl_get_console_base() & 0xffffffffff000000UL;
@@ -100,6 +112,7 @@ ip27_setup()
 	 * Force widget interrupts to run through us, unless a
 	 * better interrupt master widget is found.
 	 */
+
 	xbow_intr_widget_intr_register = ip27_hub_intr_register;
 	xbow_intr_widget_intr_establish = ip27_hub_intr_establish;
 	xbow_intr_widget_intr_disestablish = ip27_hub_intr_disestablish;
@@ -110,12 +123,29 @@ ip27_setup()
 	/*
 	 * Disable all hardware interrupts.
 	 */
+
 	IP27_LHUB_S(HUB_CPU0_IMR0, 0);
 	IP27_LHUB_S(HUB_CPU0_IMR1, 0);
 	IP27_LHUB_S(HUB_CPU1_IMR0, 0);
 	IP27_LHUB_S(HUB_CPU1_IMR1, 0);
 	(void)IP27_LHUB_L(HUB_IR0);
 	(void)IP27_LHUB_L(HUB_IR1);
+	/* XXX do the other two cpus on IP35 */
+
+	/*
+	 * Setup NMI handler.
+	 */
+	nmi = IP27_KLNMI_HDR(0);
+	nmi->magic = NMI_MAGIC;
+	nmi->cb = (vaddr_t)ip27_nmi;
+	nmi->cb_complement = ~nmi->cb;
+	nmi->cb_arg = 0;
+
+	/*
+	 * Set up Node 0's HUB.
+	 */
+	IP27_LHUB_S(PI_REGION_PRESENT, 1);
+	IP27_LHUB_S(PI_CALIAS_SIZE, PI_CALIAS_SIZE_0);
 }
 
 /*
@@ -169,6 +199,38 @@ ip27_widget_id(int16_t nasid, u_int widget, uint32_t *wid)
 		*wid = id;
 
 	return 0;
+}
+
+/*
+ * Reboot code
+ */
+
+void
+ip27_halt(int howto)
+{
+	/*
+	 * Even if ARCBios TLB and exception vectors are restored,
+	 * returning to ARCBios doesn't work.
+	 *
+	 * So, instead, send a reset through the network interface
+	 * of the Hub space.  Unfortunately there is no known way
+	 * to tell the PROM which action we want it to take afterwards.
+	 */
+
+	if (howto & RB_HALT) {
+		if (howto & RB_POWERDOWN)
+			return;	/* caller will spin */
+	}
+
+	if (ip35) {
+		IP27_LHUB_S(HUB_NI_IP35 + HUB_NI_RESET_ENABLE, RESET_ENABLE);
+		IP27_LHUB_S(HUB_NI_IP35 + HUB_NI_RESET,
+		    RESET_LOCAL | RESET_ACTION);
+	} else {
+		IP27_LHUB_S(HUB_NI_IP27 + HUB_NI_RESET_ENABLE, RESET_ENABLE);
+		IP27_LHUB_S(HUB_NI_IP27 + HUB_NI_RESET,
+		    RESET_LOCAL | RESET_ACTION);
+	}
 }
 
 /*
@@ -374,6 +436,7 @@ ip27_hub_intr_handler(intrmask_t hwpend, struct trap_frame *frame)
 	if ((mask = isr & frame->cpl) != 0) {
 		atomic_setbits_int(&ipending, mask);
 		isr &= ~mask;
+		imr &= ~mask;
 	}
 
 	/*
@@ -427,4 +490,48 @@ hw_setintrmask(intrmask_t m)
 {
 	IP27_LHUB_S(HUB_CPU0_IMR0, ip27_hub_intrmask & ~((uint64_t)m));
 	(void)IP27_LHUB_L(HUB_IR0);
+}
+
+void
+ip27_nmi(void *arg)
+{
+	vaddr_t regs_offs;
+	register_t *regs, epc;
+	struct trap_frame nmi_frame;
+	extern int kdb_trap(int, struct trap_frame *);
+
+	/*
+	 * Build a ddb frame from the registers saved in the NMI KREGS
+	 * area.
+	 */
+
+	if (ip35)
+		regs_offs = IP35_NMI_KREGS_BASE;	/* XXX assumes cpu0 */
+	else
+		regs_offs = IP27_NMI_KREGS_BASE;	/* XXX assumes cpu0 */
+	regs = IP27_UNCAC_ADDR(register_t *, 0, regs_offs);
+
+	memset(&nmi_frame, 0xff, sizeof nmi_frame);
+	
+	/* general registers */
+	memcpy(&nmi_frame.zero, regs, 32 * sizeof(register_t));
+	regs += 32;
+	nmi_frame.sr = *regs++;		/* COP_0_STATUS_REG */
+	nmi_frame.cause = *regs++;	/* COP_0_CAUSE_REG */
+	nmi_frame.pc = *regs++;
+	nmi_frame.badvaddr = *regs++;	/* COP_0_BAD_VADDR */
+	epc = *regs++;			/* COP_0_EXC_PC */
+	regs++;				/* COP_0_CACHE_ERR */
+	regs++;				/* NMI COP_0_STATUS_REG */
+
+	setsr(getsr() & ~SR_BOOT_EXC_VEC);
+#ifdef DDB
+	printf("NMI\n");
+	(void)kdb_trap(-1, &nmi_frame);
+#else
+	printf("NMI, PC = %p RA = %p SR = %08x EPC = %p\n",
+	    nmi_frame.pc, nmi_frame.ra, nmi_frame.sr, epc);
+#endif
+	printf("Resetting system...\n");
+	boot(RB_USERREQ);
 }

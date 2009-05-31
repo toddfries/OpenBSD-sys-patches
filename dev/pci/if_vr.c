@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.92 2009/05/12 13:30:56 sthen Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.94 2009/05/29 06:57:21 mpf Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -342,10 +342,9 @@ vr_iff(struct vr_softc *sc)
 
 	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
 		ifp->if_flags |= IFF_ALLMULTI;
+		rxfilt |= VR_RXCFG_RX_MULTI;
 		if (ifp->if_flags & IFF_PROMISC)
 			rxfilt |= VR_RXCFG_RX_PROMISC;
-		else
-			rxfilt |= VR_RXCFG_RX_MULTI;
 		hashes[0] = hashes[1] = 0xFFFFFFFF;
 	} else {
 		/* Program new filter. */
@@ -1588,9 +1587,9 @@ vr_alloc_mbuf(struct vr_softc *sc, struct vr_chain_onefrag *r, struct mbuf *mb)
 
 	/* Reinitialize the RX descriptor */
 	d = r->vr_ptr;
-	d->vr_status = htole32(VR_RXSTAT);
 	d->vr_data = htole32(r->vr_map->dm_segs[0].ds_addr);
 	d->vr_ctl = htole32(VR_RXCTL | VR_RXLEN);
+	d->vr_status = htole32(VR_RXSTAT);
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap, 0,
 	    sc->sc_listmap->dm_mapsize,
