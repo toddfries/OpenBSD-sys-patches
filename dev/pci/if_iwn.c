@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwn.c,v 1.54 2009/05/20 16:31:50 damien Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.57 2009/05/29 08:25:45 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007-2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -238,6 +238,7 @@ void		iwn_apm_stop_master(struct iwn_softc *);
 void		iwn_apm_stop(struct iwn_softc *);
 int		iwn4965_nic_config(struct iwn_softc *);
 int		iwn5000_nic_config(struct iwn_softc *);
+int		iwn_hw_prepare(struct iwn_softc *);
 int		iwn_hw_init(struct iwn_softc *);
 void		iwn_hw_stop(struct iwn_softc *);
 int		iwn_init(struct ifnet *);
@@ -272,6 +273,7 @@ static const struct iwn_hal iwn4965_hal = {
 #endif
 	&iwn4965_sensitivity_limits,
 	IWN4965_NTXQUEUES,
+	IWN4965_NDMACHNLS,
 	IWN4965_ID_BROADCAST,
 	IWN4965_RXONSZ,
 	IWN4965_SCHEDSZ,
@@ -301,6 +303,7 @@ static const struct iwn_hal iwn5000_hal = {
 #endif
 	&iwn5000_sensitivity_limits,
 	IWN5000_NTXQUEUES,
+	IWN5000_NDMACHNLS,
 	IWN5000_ID_BROADCAST,
 	IWN5000_RXONSZ,
 	IWN5000_SCHEDSZ,
@@ -344,7 +347,7 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 
 	/*
 	 * Get the offset of the PCI Express Capability Structure in PCI
-	 * Configuration Space (the vendor driver hard-codes it as E0h.)
+	 * Configuration Space.
 	 */
 	error = pci_get_capability(sc->sc_pct, sc->sc_pcitag,
 	    PCI_CAP_PCIEXPRESS, &sc->sc_cap_off, NULL);
@@ -357,6 +360,15 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 	reg = pci_conf_read(sc->sc_pct, sc->sc_pcitag, 0x40);
 	reg &= ~0xff00;
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, reg);
+
+	/* Hardware bug workaround. */
+	reg = pci_conf_read(sc->sc_pct, sc->sc_pcitag, PCI_COMMAND_STATUS_REG);
+	if (reg & PCI_COMMAND_INTERRUPT_DISABLE) {
+		DPRINTF(("PCIe INTx Disable set\n"));
+		reg &= ~PCI_COMMAND_INTERRUPT_DISABLE;
+		pci_conf_write(sc->sc_pct, sc->sc_pcitag,
+		    PCI_COMMAND_STATUS_REG, reg);
+	}
 
 	memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag, IWN_PCI_BAR0);
 	error = pci_mapreg_map(pa, IWN_PCI_BAR0, memtype, 0, &sc->sc_st,
@@ -386,6 +398,11 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 	/* Attach Hardware Abstraction Layer. */
 	if ((hal = iwn_hal_attach(sc)) == NULL)
 		return;
+
+	if ((error = iwn_hw_prepare(sc)) != 0) {
+		printf(": hardware not ready\n");
+		return;
+	}
 
 	/* Power ON adapter. */
 	if ((error = hal->apm_init(sc)) != 0) {
@@ -815,7 +832,7 @@ int
 iwn_read_prom_data(struct iwn_softc *sc, uint32_t addr, void *data, int count)
 {
 	uint8_t *out = data;
-	uint32_t val;
+	uint32_t val, tmp;
 	int ntries;
 
 	for (; count > 0; count -= 2, addr++) {
@@ -833,7 +850,7 @@ iwn_read_prom_data(struct iwn_softc *sc, uint32_t addr, void *data, int count)
 		}
 		if (sc->sc_flags & IWN_FLAG_HAS_OTPROM) {
 			/* OTPROM, check for ECC errors. */
-			uint32_t tmp = IWN_READ(sc, IWN_OTP_GP);
+			tmp = IWN_READ(sc, IWN_OTP_GP);
 			if (tmp & IWN_OTP_GP_ECC_UNCORR_STTS) {
 				printf("%s: OTPROM ECC error at 0x%x\n",
 				    sc->sc_dev.dv_xname, addr);
@@ -1134,20 +1151,8 @@ fail:	iwn_free_tx_ring(sc, ring);
 void
 iwn_reset_tx_ring(struct iwn_softc *sc, struct iwn_tx_ring *ring)
 {
-	uint32_t tmp;
-	int i, ntries;
+	int i;
 
-	if (iwn_nic_lock(sc) == 0) {
-		IWN_WRITE(sc, IWN_FH_TX_CONFIG(ring->qid), 0);
-		for (ntries = 0; ntries < 200; ntries++) {
-			tmp = IWN_READ(sc, IWN_FH_TX_STATUS);
-			if ((tmp & IWN_FH_TX_STATUS_IDLE(ring->qid)) ==
-			    IWN_FH_TX_STATUS_IDLE(ring->qid))
-				break;
-			DELAY(10);
-		}
-		iwn_nic_unlock(sc);
-	}
 	for (i = 0; i < IWN_TX_RING_COUNT; i++) {
 		struct iwn_tx_data *data = &ring->data[i];
 
@@ -1199,7 +1204,8 @@ iwn_read_eeprom(struct iwn_softc *sc)
 	int error;
 
 	/* Check whether adapter has an EEPROM or an OTPROM. */
-	if (IWN_READ(sc, IWN_OTP_GP) & IWN_OTP_GP_DEV_SEL_OTP)
+	if (sc->hw_type >= IWN_HW_REV_TYPE_1000 &&
+	    (IWN_READ(sc, IWN_OTP_GP) & IWN_OTP_GP_DEV_SEL_OTP))
 		sc->sc_flags |= IWN_FLAG_HAS_OTPROM;
 	DPRINTF(("%s found\n", (sc->sc_flags & IWN_FLAG_HAS_OTPROM) ?
 	    "OTPROM" : "EEPROM"));
@@ -4777,21 +4783,21 @@ iwn5000_load_firmware_section(struct iwn_softc *sc, uint32_t dst,
 	if ((error = iwn_nic_lock(sc)) != 0)
 		return error;
 
-	IWN_WRITE(sc, IWN_FH_TX_CONFIG(IWN_SRVC_CHNL),
+	IWN_WRITE(sc, IWN_FH_TX_CONFIG(IWN_SRVC_DMACHNL),
 	    IWN_FH_TX_CONFIG_DMA_PAUSE);
 
-	IWN_WRITE(sc, IWN_FH_SRAM_ADDR(IWN_SRVC_CHNL), dst);
-	IWN_WRITE(sc, IWN_FH_TFBD_CTRL0(IWN_SRVC_CHNL),
+	IWN_WRITE(sc, IWN_FH_SRAM_ADDR(IWN_SRVC_DMACHNL), dst);
+	IWN_WRITE(sc, IWN_FH_TFBD_CTRL0(IWN_SRVC_DMACHNL),
 	    IWN_LOADDR(dma->paddr));
-	IWN_WRITE(sc, IWN_FH_TFBD_CTRL1(IWN_SRVC_CHNL),
+	IWN_WRITE(sc, IWN_FH_TFBD_CTRL1(IWN_SRVC_DMACHNL),
 	    IWN_HIADDR(dma->paddr) << 28 | size);
-	IWN_WRITE(sc, IWN_FH_TXBUF_STATUS(IWN_SRVC_CHNL),
+	IWN_WRITE(sc, IWN_FH_TXBUF_STATUS(IWN_SRVC_DMACHNL),
 	    IWN_FH_TXBUF_STATUS_TBNUM(1) |
 	    IWN_FH_TXBUF_STATUS_TBIDX(1) |
 	    IWN_FH_TXBUF_STATUS_TFBD_VALID);
 
 	/* Kick Flow Handler to start DMA transfer. */
-	IWN_WRITE(sc, IWN_FH_TX_CONFIG(IWN_SRVC_CHNL),
+	IWN_WRITE(sc, IWN_FH_TX_CONFIG(IWN_SRVC_DMACHNL),
 	    IWN_FH_TX_CONFIG_DMA_ENA | IWN_FH_TX_CONFIG_CIRQ_HOST_ENDTFD);
 
 	iwn_nic_unlock(sc);
@@ -5053,11 +5059,39 @@ iwn5000_nic_config(struct iwn_softc *sc)
 	return 0;
 }
 
+/*
+ * Take NIC ownership over Intel Active Management Technology (AMT).
+ */
+int
+iwn_hw_prepare(struct iwn_softc *sc)
+{
+	int ntries;
+
+	IWN_SETBITS(sc, IWN_HW_IF_CONFIG, IWN_HW_IF_CONFIG_PREPARE);
+	for (ntries = 0; ntries < 15000; ntries++) {
+		if (!(IWN_READ(sc, IWN_HW_IF_CONFIG) &
+		    IWN_HW_IF_CONFIG_PREPARE_DONE))
+			break;
+		DELAY(10);
+	}
+	if (ntries == 15000)
+		return ETIMEDOUT;
+
+	IWN_SETBITS(sc, IWN_HW_IF_CONFIG, IWN_HW_IF_CONFIG_NIC_READY);
+	for (ntries = 0; ntries < 5; ntries++) {
+		if (IWN_READ(sc, IWN_HW_IF_CONFIG) &
+		    IWN_HW_IF_CONFIG_NIC_READY)
+			return 0;
+		DELAY(10);
+	}
+	return ETIMEDOUT;
+}
+
 int
 iwn_hw_init(struct iwn_softc *sc)
 {
 	const struct iwn_hal *hal = sc->sc_hal;
-	int error, qid;
+	int error, chnl, qid;
 
 	/* Clear pending interrupts. */
 	IWN_WRITE(sc, IWN_INT, 0xffffffff);
@@ -5114,12 +5148,15 @@ iwn_hw_init(struct iwn_softc *sc)
 		/* Set physical address of TX ring (256-byte aligned.) */
 		IWN_WRITE(sc, IWN_FH_CBBC_QUEUE(qid),
 		    txq->desc_dma.paddr >> 8);
-		/* Enable TX for this ring. */
-		IWN_WRITE(sc, IWN_FH_TX_CONFIG(qid),
+	}
+	iwn_nic_unlock(sc);
+
+	/* Enable DMA channels. */
+	for (chnl = 0; chnl < hal->ndmachnls; chnl++) {
+		IWN_WRITE(sc, IWN_FH_TX_CONFIG(chnl),
 		    IWN_FH_TX_CONFIG_DMA_ENA |
 		    IWN_FH_TX_CONFIG_DMA_CREDIT_ENA);
 	}
-	iwn_nic_unlock(sc);
 
 	/* Clear "radio off" and "commands blocked" bits. */
 	IWN_WRITE(sc, IWN_UCODE_GP1_CLR, IWN_UCODE_GP1_RFKILL);
@@ -5154,7 +5191,8 @@ void
 iwn_hw_stop(struct iwn_softc *sc)
 {
 	const struct iwn_hal *hal = sc->sc_hal;
-	int qid;
+	int chnl, qid, ntries;
+	uint32_t tmp;
 
 	IWN_WRITE(sc, IWN_RESET, IWN_RESET_NEVO);
 
@@ -5169,12 +5207,27 @@ iwn_hw_stop(struct iwn_softc *sc)
 	/* Stop TX scheduler. */
 	iwn_prph_write(sc, hal->sched_txfact_addr, 0);
 
-	/* Stop all TX rings. */
-	for (qid = 0; qid < hal->ntxqs; qid++)
-		iwn_reset_tx_ring(sc, &sc->txq[qid]);
+	/* Stop all DMA channels. */
+	if (iwn_nic_lock(sc) == 0) {
+		for (chnl = 0; chnl < hal->ndmachnls; chnl++) {
+			IWN_WRITE(sc, IWN_FH_TX_CONFIG(chnl), 0);
+			for (ntries = 0; ntries < 200; ntries++) {
+				tmp = IWN_READ(sc, IWN_FH_TX_STATUS);
+				if ((tmp & IWN_FH_TX_STATUS_IDLE(chnl)) ==
+				    IWN_FH_TX_STATUS_IDLE(chnl))
+					break;
+				DELAY(10);
+			}
+		}
+		iwn_nic_unlock(sc);
+	}
 
 	/* Stop RX ring. */
 	iwn_reset_rx_ring(sc, &sc->rxq);
+
+	/* Reset all TX rings. */
+	for (qid = 0; qid < hal->ntxqs; qid++)
+		iwn_reset_tx_ring(sc, &sc->txq[qid]);
 
 	if (iwn_nic_lock(sc) == 0) {
 		iwn_prph_write(sc, IWN_APMG_CLK_DIS, IWN_APMG_CLK_DMA_RQT);
@@ -5191,6 +5244,11 @@ iwn_init(struct ifnet *ifp)
 	struct iwn_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
 	int error;
+
+	if ((error = iwn_hw_prepare(sc)) != 0) {
+		printf("%s: hardware not ready\n", sc->sc_dev.dv_xname);
+		goto fail;
+	}
 
 	/* Check that the radio is not disabled by hardware switch. */
 	if (!(IWN_READ(sc, IWN_GP_CNTRL) & IWN_GP_CNTRL_RFKILL)) {

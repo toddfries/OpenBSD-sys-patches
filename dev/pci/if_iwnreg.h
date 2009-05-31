@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwnreg.h,v 1.23 2009/05/20 16:31:50 damien Exp $	*/
+/*	$OpenBSD: if_iwnreg.h,v 1.26 2009/05/29 08:25:45 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -20,12 +20,16 @@
 #define IWN_TX_RING_COUNT	256
 #define IWN_TX_RING_LOMARK	192
 #define IWN_TX_RING_HIMARK	224
-#define IWN_RX_RING_COUNT_LOG	8
+#define IWN_RX_RING_COUNT_LOG	6
 #define IWN_RX_RING_COUNT	(1 << IWN_RX_RING_COUNT_LOG)
 
 #define IWN4965_NTXQUEUES	16
 #define IWN5000_NTXQUEUES	20
-#define IWN_SRVC_CHNL		9
+
+#define IWN4965_NDMACHNLS	7
+#define IWN5000_NDMACHNLS	8
+
+#define IWN_SRVC_DMACHNL	9
 
 /* Maximum number of DMA segments for TX. */
 #define IWN_MAX_SCATTER	20
@@ -150,7 +154,10 @@
 #define IWN_HW_IF_CONFIG_MAC_SI		(1 <<  8)
 #define IWN_HW_IF_CONFIG_RADIO_SI	(1 <<  9)
 #define IWN_HW_IF_CONFIG_EEPROM_LOCKED	(1 << 21)
+#define IWN_HW_IF_CONFIG_NIC_READY	(1 << 22)
 #define IWN_HW_IF_CONFIG_HAP_WAKE_L1A	(1 << 23)
+#define IWN_HW_IF_CONFIG_PREPARE_DONE	(1 << 25)
+#define IWN_HW_IF_CONFIG_PREPARE	(1 << 27)
 
 /* Possible flags for registers IWN_PRPH_RADDR/IWN_PRPH_WADDR. */
 #define IWN_PRPH_DWORD	((sizeof (uint32_t) - 1) << 24)
@@ -433,7 +440,7 @@ struct iwn_rxon {
 	uint8_t		cck_mask;
 	uint16_t	associd;
 	uint32_t	flags;
-#define IWN_RXON_24GHZ	(1 <<  0)
+#define IWN_RXON_24GHZ		(1 <<  0)
 #define IWN_RXON_CCK		(1 <<  1)
 #define IWN_RXON_AUTO		(1 <<  2)
 #define IWN_RXON_SHSLOT		(1 <<  4)

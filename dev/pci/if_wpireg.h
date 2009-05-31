@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpireg.h,v 1.23 2008/11/25 18:49:49 damien Exp $	*/
+/*	$OpenBSD: if_wpireg.h,v 1.25 2009/05/29 08:25:45 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006-2008
@@ -20,10 +20,11 @@
 #define WPI_TX_RING_COUNT	256
 #define WPI_TX_RING_LOMARK	192
 #define WPI_TX_RING_HIMARK	224
-#define WPI_RX_RING_COUNT_LOG	8
+#define WPI_RX_RING_COUNT_LOG	6
 #define WPI_RX_RING_COUNT	(1 << WPI_RX_RING_COUNT_LOG)
 
-#define WPI_NTXQUEUES		16
+#define WPI_NTXQUEUES		8
+#define WPI_NDMACHNLS		6
 
 /* Maximum scatter/gather. */
 #define WPI_MAX_SCATTER	4
