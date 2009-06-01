@@ -149,6 +149,7 @@ void softnet(int isr);
 #define	SI_SOFTNET		2	/* for IPL_SOFTNET */
 #define	SI_SOFTTTY		3	/* for IPL_SOFTSERIAL */
 
+#if 0
 #define	SI_NQUEUES		4
 
 #define SI_QUEUENAMES {		\
@@ -157,6 +158,7 @@ void softnet(int isr);
 	"net",			\
 	"serial",		\
 }
+#endif
 
 #define PPC_IPI_NOP		0
 #define PPC_IPI_DDB		1

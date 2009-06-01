@@ -131,7 +131,7 @@ openpic_read(int reg)
 {
 	char *addr = (void *)(openpic_base + reg);
 
-	asm volatile("eieio");
+	asm volatile("eieio"::: "memory");
 	if (openpic_big_endian)
 		return in32(addr);
 	else
@@ -147,7 +147,7 @@ openpic_write(int reg, u_int val)
 		out32(addr, val);
 	else
 		out32rb(addr, val);
-	asm volatile("eieio");
+	asm volatile("eieio"::: "memory");
 }
 
 static inline int
@@ -454,6 +454,12 @@ openpic_do_pending_int(int pcpl)
 	ppc_intr_enable(s);
 
 }
+
+/*
+ * This function expect interrupts disabled on entry and exit,
+ * the s argument indicates if interrupts may be enabled during
+ * the processing of off level interrupts, s 'should' always be 1.
+ */
 void
 openpic_do_pending_int_dis(int pcpl, int s)
 {
@@ -463,7 +469,6 @@ openpic_do_pending_int_dis(int pcpl, int s)
 	if (ci->ci_iactive & CI_IACTIVE_PROCESSING_SOFT) {
 		/* soft interrupts are being processed, just set ipl/return */
 		openpic_setipl(pcpl);
-		ppc_intr_enable(s);
 		return;
 	}
 
@@ -649,6 +654,7 @@ openpic_ext_intr()
 	}
 
 	if (irqnest == 1) {
+		irqloop = 0;
 		/* raise IPL back to max until do_pending will lower it back */
 		openpic_setipl(maxipl);
 		/*
@@ -660,7 +666,20 @@ openpic_ext_intr()
 		 * openpic_do_pending_int, but before ppc_intr_disable
 		 */
 		do {
-			openpic_do_pending_int_dis(pcpl, 1);
+			irqloop++;
+			if (irqloop > 5) {
+				printf("ext_intr: do_pending loop %d\n", irqloop);
+			}
+			if (ci->ci_iactive & CI_IACTIVE_PROCESSING_SOFT) {
+				openpic_setipl(pcpl);
+				/*
+				 * some may be pending but someone else is
+				 * processing them
+				 */
+				break;
+			} else {
+				openpic_do_pending_int_dis(pcpl, 1);
+			}
 		} while (ci->ci_ipending & ppc_smask[pcpl]);
 	}
 	irqnest--;
