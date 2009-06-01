@@ -95,7 +95,7 @@ ENTRY(mtx_leave)
 	beq-	.L_mutex_notlocked
 #endif
 	li	%r4,0
-	lwz	% r5,MTX_OLDCPL(%r3)
+	lwz	%r5,MTX_OLDCPL(%r3)
 	stw	%r4,MTX_OLDCPL(%r3)
 	stw	%r4,MTX_OWNER(%r3)
 	mr	%r3,%r5

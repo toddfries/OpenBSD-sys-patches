@@ -88,6 +88,10 @@ splx(int newcpl)
 	ppc_intr_func.x(newcpl);
 }
 
+/*
+ * functions with 'default' behavior to use before the real
+ * interrupt controller attaches
+ */
 int
 ppc_dflt_splraise(int newcpl)
 {
@@ -102,10 +106,6 @@ ppc_dflt_splraise(int newcpl)
 	return (oldcpl);
 }
 
-/*
- * functions with 'default' behavior to use before the real
- * interrupt controller attaches
- */
 int
 ppc_dflt_spllower(int newcpl)
 {
