@@ -1,4 +1,4 @@
-/*	$OpenBSD: macintr.c,v 1.35 2008/11/21 17:35:52 deraadt Exp $	*/
+/*	$OpenBSD: macintr.c,v 1.34 2008/09/18 03:56:25 drahn Exp $	*/
 
 /*-
  * Copyright (c) 2008 Dale Rahn <drahn@openbsd.org>
