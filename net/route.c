@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.105 2009/03/15 19:40:41 miod Exp $	*/
+/*	$OpenBSD: route.c,v 1.108 2009/05/31 04:07:03 claudio Exp $	*/
 /*	$NetBSD: route.c,v 1.14 1996/02/13 22:00:46 christos Exp $	*/
 
 /*
@@ -730,7 +730,7 @@ rtrequest1(int req, struct rt_addrinfo *info, u_int8_t prio,
 	struct radix_node_head	*rnh;
 	struct ifaddr		*ifa;
 	struct sockaddr		*ndst;
-	struct sockaddr_rtlabel	*sa_rl;
+	struct sockaddr_rtlabel	*sa_rl, sa_rl2;
 #ifdef MPLS
 	struct sockaddr_mpls	*sa_mpls;
 #endif
@@ -815,6 +815,8 @@ rtrequest1(int req, struct rt_addrinfo *info, u_int8_t prio,
 		info->rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 		if ((info->rti_info[RTAX_NETMASK] = rt->rt_genmask) == NULL)
 			info->rti_flags |= RTF_HOST;
+		info->rti_info[RTAX_LABEL] =
+		    rtlabel_id2sa(rt->rt_labelid, &sa_rl2);
 		goto makeroute;
 
 	case RTM_ADD:
@@ -832,7 +834,6 @@ makeroute:
 		if (prio == 0)
 			prio = ifa->ifa_ifp->if_priority + RTP_STATIC;
 		rt->rt_priority = prio;	/* init routing priority */
-#if 0
 		if ((LINK_STATE_IS_UP(ifa->ifa_ifp->if_link_state) ||
 		    ifa->ifa_ifp->if_link_state == LINK_STATE_UNKNOWN) &&
 		    ifa->ifa_ifp->if_flags & IFF_UP)
@@ -841,7 +842,6 @@ makeroute:
 			rt->rt_flags &= ~RTF_UP;
 			rt->rt_priority |= RTP_DOWN;
 		}
-#endif
 		LIST_INIT(&rt->rt_timer);
 		if (rt_setgate(rt, info->rti_info[RTAX_DST],
 		    info->rti_info[RTAX_GATEWAY], tableid)) {
@@ -1057,7 +1057,6 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 	int			 error;
 	struct rt_addrinfo	 info;
 	struct sockaddr_rtlabel	 sa_rl;
-	const char		*label;
 
 	dst = flags & RTF_HOST ? ifa->ifa_dstaddr : ifa->ifa_addr;
 	if (cmd == RTM_DELETE) {
@@ -1085,14 +1084,8 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 	info.rti_info[RTAX_DST] = dst;
 	if (cmd == RTM_ADD)
 		info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
-	if (ifa->ifa_ifp->if_rtlabelid &&
-	    (label = rtlabel_id2name(ifa->ifa_ifp->if_rtlabelid)) != NULL) {
-		bzero(&sa_rl, sizeof(sa_rl));
-		sa_rl.sr_len = sizeof(sa_rl);
-		sa_rl.sr_family = AF_UNSPEC;
-		strlcpy(sa_rl.sr_label, label, sizeof(sa_rl.sr_label));
-		info.rti_info[RTAX_LABEL] = (struct sockaddr *)&sa_rl;
-	}
+	info.rti_info[RTAX_LABEL] =
+	    rtlabel_id2sa(ifa->ifa_ifp->if_rtlabelid, &sa_rl);
 
 	/*
 	 * XXX here, it seems that we are assuming that ifa_netmask is NULL
@@ -1300,7 +1293,7 @@ rt_gettable(sa_family_t af, u_int id)
 }
 
 struct radix_node *
-rt_lookup(struct sockaddr *dst, struct sockaddr *mask, int tableid)
+rt_lookup(struct sockaddr *dst, struct sockaddr *mask, u_int tableid)
 {
 	struct radix_node_head	*rnh;
 
@@ -1396,6 +1389,22 @@ rtlabel_id2name(u_int16_t id)
 			return (label->rtl_name);
 
 	return (NULL);
+}
+
+struct sockaddr *
+rtlabel_id2sa(u_int16_t labelid, struct sockaddr_rtlabel *sa_rl)
+{
+	const char	*label;
+
+	if (labelid == 0 || (label = rtlabel_id2name(labelid)) == NULL)
+		return (NULL);
+
+	bzero(sa_rl, sizeof(*sa_rl));
+	sa_rl->sr_len = sizeof(*sa_rl);
+	sa_rl->sr_family = AF_UNSPEC;
+	strlcpy(sa_rl->sr_label, label, sizeof(sa_rl->sr_label));
+
+	return ((struct sockaddr *)sa_rl);
 }
 
 void

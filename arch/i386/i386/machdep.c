@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.448 2009/03/10 15:03:17 oga Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.450 2009/06/01 20:11:38 weingart Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -2135,19 +2135,6 @@ pentium_cpuspeed(int *freq)
 }
 #endif	/* !SMALL_KERNEL */
 
-#ifdef COMPAT_IBCS2
-void ibcs2_sendsig(sig_t, int, int, u_long, int, union sigval);
-
-void
-ibcs2_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
-    union sigval val)
-{
-	extern int bsd_to_ibcs2_sig[];
-
-	sendsig(catcher, bsd_to_ibcs2_sig[sig], mask, code, type, val);
-}
-#endif
-
 /*
  * Send an interrupt to process.
  *
@@ -2893,9 +2880,14 @@ init386(paddr_t first_avail)
 	    sizeof(struct cpu_info)-1, SDT_MEMRWA, SEL_KPL, 0, 0);
 
 	/* make ldt gates and memory segments */
+#ifdef COMPAT_IBCS2
 	setgate(&ldt[LSYS5CALLS_SEL].gd, &IDTVEC(osyscall), 1, SDT_SYS386CGT,
 	    SEL_UPL, GCODE_SEL);
-	ldt[LBSDICALLS_SEL] = ldt[LSYS5CALLS_SEL];
+#endif
+#ifdef COMPAT_BSDOS
+	setgate(&ldt[LBSDICALLS_SEL].gd, &IDTVEC(osyscall), 1, SDT_SYS386CGT,
+	    SEL_UPL, GCODE_SEL);
+#endif
 
 	/* exceptions */
 	setgate(&idt[  0], &IDTVEC(div),     0, SDT_SYS386TGT, SEL_KPL, GCODE_SEL);

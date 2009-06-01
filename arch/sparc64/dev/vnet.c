@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnet.c,v 1.13 2009/02/20 17:50:22 kettenis Exp $	*/
+/*	$OpenBSD: vnet.c,v 1.16 2009/05/12 21:33:38 kettenis Exp $	*/
 /*
  * Copyright (c) 2009 Mark Kettenis
  *
@@ -64,9 +64,10 @@ struct vnet_attr_info {
 	uint8_t			xfer_mode;
 	uint8_t			addr_type;
 	uint16_t		ack_freq;
-	uint32_t		_reserved;
+	uint32_t		_reserved1;
 	uint64_t		addr;
 	uint64_t		mtu;
+	uint64_t		_reserved2[3];
 };
 
 /* Address types. */
@@ -308,7 +309,6 @@ vnet_attach(struct device *parent, struct device *self, void *aux)
 
 free_txqueue:
 	ldc_queue_free(sc->sc_dmatag, lc->lc_txq);
-	return;
 }
 
 int
@@ -373,7 +373,6 @@ vnet_rx_intr(void *arg)
 			break;
 		}
 		lc->lc_rx_state = rx_state;
-		hv_ldc_rx_set_qhead(lc->lc_id, rx_tail);
 		return (1);
 	}
 

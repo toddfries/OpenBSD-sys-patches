@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs.h,v 1.38 2009/01/24 23:35:47 thib Exp $	*/
+/*	$OpenBSD: nfs.h,v 1.40 2009/05/22 00:19:25 thib Exp $	*/
 /*	$NetBSD: nfs.h,v 1.10.4.1 1996/05/27 11:23:56 fvdl Exp $	*/
 
 /*
@@ -105,14 +105,6 @@
  * buffer cache code to say "Invalidate the block after it is written back".
  */
 #define	B_INVAFTERWRITE	B_INVAL
-
-/*
- * The IO_METASYNC flag should be implemented for local file systems.
- * (Until then, it is nothin at all.)
- */
-#ifndef IO_METASYNC
-#define IO_METASYNC	0
-#endif
 
 /*
  * Structures for the nfssvc(2) syscall. Not that anyone but nfsd and mount_nfs
@@ -353,7 +345,6 @@ struct nfsrv_descript {
 	int			nd_len;		/* Length of this write */
 	int			nd_repstat;	/* Reply status */
 	u_int32_t		nd_retxid;	/* Reply xid */
-	struct timeval		nd_starttime;	/* Time RPC initiated */
 	fhandle_t		nd_fh;		/* File handle */
 	struct ucred		nd_cr;		/* Credentials */
 };

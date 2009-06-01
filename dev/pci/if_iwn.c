@@ -1,8 +1,7 @@
-/*	$OpenBSD: if_iwn.c,v 1.50 2009/04/26 02:20:58 cnst Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.57 2009/05/29 08:25:45 damien Exp $	*/
 
 /*-
- * Copyright (c) 2007, 2008
- *	Damien Bergamini <damien.bergamini@free.fr>
+ * Copyright (c) 2007-2009 Damien Bergamini <damien.bergamini@free.fr>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -81,6 +80,8 @@ static const struct pci_matchid iwn_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_3 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_4 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_5 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_6 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_1 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_3 },
@@ -101,9 +102,10 @@ void		iwn_radiotap_attach(struct iwn_softc *);
 void		iwn_power(int, void *);
 int		iwn_nic_lock(struct iwn_softc *);
 int		iwn_eeprom_lock(struct iwn_softc *);
+int		iwn_init_otprom(struct iwn_softc *);
 int		iwn_read_prom_data(struct iwn_softc *, uint32_t, void *, int);
 int		iwn_dma_contig_alloc(bus_dma_tag_t, struct iwn_dma_info *,
-		    void **, bus_size_t, bus_size_t, int);
+		    void **, bus_size_t, bus_size_t);
 void		iwn_dma_contig_free(struct iwn_dma_info *);
 int		iwn_alloc_sched(struct iwn_softc *);
 void		iwn_free_sched(struct iwn_softc *);
@@ -111,10 +113,6 @@ int		iwn_alloc_kw(struct iwn_softc *);
 void		iwn_free_kw(struct iwn_softc *);
 int		iwn_alloc_fwmem(struct iwn_softc *);
 void		iwn_free_fwmem(struct iwn_softc *);
-struct		iwn_rbuf *iwn_alloc_rbuf(struct iwn_softc *);
-void		iwn_free_rbuf(caddr_t, u_int, void *);
-int		iwn_alloc_rpool(struct iwn_softc *);
-void		iwn_free_rpool(struct iwn_softc *);
 int		iwn_alloc_rx_ring(struct iwn_softc *, struct iwn_rx_ring *);
 void		iwn_reset_rx_ring(struct iwn_softc *, struct iwn_rx_ring *);
 void		iwn_free_rx_ring(struct iwn_softc *, struct iwn_rx_ring *);
@@ -136,14 +134,18 @@ void		iwn_iter_func(void *, struct ieee80211_node *);
 void		iwn_calib_timeout(void *);
 int		iwn_ccmp_decap(struct iwn_softc *, struct mbuf *,
 		    struct ieee80211_key *);
-void		iwn_rx_phy(struct iwn_softc *, struct iwn_rx_desc *);
+void		iwn_rx_phy(struct iwn_softc *, struct iwn_rx_desc *,
+		    struct iwn_rx_data *);
 void		iwn_rx_done(struct iwn_softc *, struct iwn_rx_desc *,
 		    struct iwn_rx_data *);
 void		iwn5000_rx_calib_results(struct iwn_softc *,
-		    struct iwn_rx_desc *);
-void		iwn_rx_statistics(struct iwn_softc *, struct iwn_rx_desc *);
-void		iwn4965_tx_done(struct iwn_softc *, struct iwn_rx_desc *);
-void		iwn5000_tx_done(struct iwn_softc *, struct iwn_rx_desc *);
+		    struct iwn_rx_desc *, struct iwn_rx_data *);
+void		iwn_rx_statistics(struct iwn_softc *, struct iwn_rx_desc *,
+		    struct iwn_rx_data *);
+void		iwn4965_tx_done(struct iwn_softc *, struct iwn_rx_desc *,
+		    struct iwn_rx_data *);
+void		iwn5000_tx_done(struct iwn_softc *, struct iwn_rx_desc *,
+		    struct iwn_rx_data *);
 void		iwn_tx_done(struct iwn_softc *, struct iwn_rx_desc *, int,
 		    uint8_t);
 void		iwn_cmd_done(struct iwn_softc *, struct iwn_rx_desc *);
@@ -236,6 +238,7 @@ void		iwn_apm_stop_master(struct iwn_softc *);
 void		iwn_apm_stop(struct iwn_softc *);
 int		iwn4965_nic_config(struct iwn_softc *);
 int		iwn5000_nic_config(struct iwn_softc *);
+int		iwn_hw_prepare(struct iwn_softc *);
 int		iwn_hw_init(struct iwn_softc *);
 void		iwn_hw_stop(struct iwn_softc *);
 int		iwn_init(struct ifnet *);
@@ -270,6 +273,7 @@ static const struct iwn_hal iwn4965_hal = {
 #endif
 	&iwn4965_sensitivity_limits,
 	IWN4965_NTXQUEUES,
+	IWN4965_NDMACHNLS,
 	IWN4965_ID_BROADCAST,
 	IWN4965_RXONSZ,
 	IWN4965_SCHEDSZ,
@@ -299,6 +303,7 @@ static const struct iwn_hal iwn5000_hal = {
 #endif
 	&iwn5000_sensitivity_limits,
 	IWN5000_NTXQUEUES,
+	IWN5000_NDMACHNLS,
 	IWN5000_ID_BROADCAST,
 	IWN5000_RXONSZ,
 	IWN5000_SCHEDSZ,
@@ -342,7 +347,7 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 
 	/*
 	 * Get the offset of the PCI Express Capability Structure in PCI
-	 * Configuration Space (the vendor driver hard-codes it as E0h.)
+	 * Configuration Space.
 	 */
 	error = pci_get_capability(sc->sc_pct, sc->sc_pcitag,
 	    PCI_CAP_PCIEXPRESS, &sc->sc_cap_off, NULL);
@@ -355,6 +360,15 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 	reg = pci_conf_read(sc->sc_pct, sc->sc_pcitag, 0x40);
 	reg &= ~0xff00;
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, reg);
+
+	/* Hardware bug workaround. */
+	reg = pci_conf_read(sc->sc_pct, sc->sc_pcitag, PCI_COMMAND_STATUS_REG);
+	if (reg & PCI_COMMAND_INTERRUPT_DISABLE) {
+		DPRINTF(("PCIe INTx Disable set\n"));
+		reg &= ~PCI_COMMAND_INTERRUPT_DISABLE;
+		pci_conf_write(sc->sc_pct, sc->sc_pcitag,
+		    PCI_COMMAND_STATUS_REG, reg);
+	}
 
 	memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag, IWN_PCI_BAR0);
 	error = pci_mapreg_map(pa, IWN_PCI_BAR0, memtype, 0, &sc->sc_st,
@@ -384,6 +398,11 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 	/* Attach Hardware Abstraction Layer. */
 	if ((hal = iwn_hal_attach(sc)) == NULL)
 		return;
+
+	if ((error = iwn_hw_prepare(sc)) != 0) {
+		printf(": hardware not ready\n");
+		return;
+	}
 
 	/* Power ON adapter. */
 	if ((error = hal->apm_init(sc)) != 0) {
@@ -415,24 +434,18 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 		goto fail2;
 	}
 
-	/* Allocate RX buffers. */
-	if ((error = iwn_alloc_rpool(sc)) != 0) {
-		printf(": could not allocate RX buffers\n");
-		goto fail3;
-	}
-
 	/* Allocate TX rings (16 on 4965AGN, 20 on 5000.) */
 	for (i = 0; i < hal->ntxqs; i++) {
 		if ((error = iwn_alloc_tx_ring(sc, &sc->txq[i], i)) != 0) {
 			printf(": could not allocate TX ring %d\n", i);
-			goto fail4;
+			goto fail3;
 		}
 	}
 
 	/* Allocate RX ring. */
 	if ((error = iwn_alloc_rx_ring(sc, &sc->rxq)) != 0) {
 		printf(": could not allocate RX ring\n");
-		goto fail4;
+		goto fail3;
 	}
 
 	/* Power OFF adapter. */
@@ -514,10 +527,9 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 	return;
 
 	/* Free allocated memory if something failed during attachment. */
-fail4:	while (--i >= 0)
+fail3:	while (--i >= 0)
 		iwn_free_tx_ring(sc, &sc->txq[i]);
-	iwn_free_rpool(sc);
-fail3:	iwn_free_sched(sc);
+	iwn_free_sched(sc);
 fail2:	iwn_free_kw(sc);
 fail1:	iwn_free_fwmem(sc);
 }
@@ -789,17 +801,42 @@ iwn_eeprom_unlock(struct iwn_softc *sc)
 	IWN_CLRBITS(sc, IWN_HW_IF_CONFIG, IWN_HW_IF_CONFIG_EEPROM_LOCKED);
 }
 
+/*
+ * Initialize access by host to One Time Programmable ROM.
+ * NB: This kind of ROM can be found on 1000 or 6000 Series only.
+ */
+int
+iwn_init_otprom(struct iwn_softc *sc)
+{
+	int error;
+
+	if ((error = iwn_clock_wait(sc)) != 0)
+		return error;
+
+	if ((error = iwn_nic_lock(sc)) != 0)
+		return error;
+	iwn_prph_setbits(sc, IWN_APMG_PS, IWN_APMG_PS_RESET_REQ);
+	DELAY(5);
+	iwn_prph_clrbits(sc, IWN_APMG_PS, IWN_APMG_PS_RESET_REQ);
+	iwn_nic_unlock(sc);
+
+	IWN_CLRBITS(sc, IWN_EEPROM_GP, IWN_EEPROM_GP_IF_OWNER);
+	/* Clear ECC status. */
+	IWN_SETBITS(sc, IWN_OTP_GP,
+	    IWN_OTP_GP_ECC_CORR_STTS | IWN_OTP_GP_ECC_UNCORR_STTS);
+
+	return 0;
+}
+
 int
 iwn_read_prom_data(struct iwn_softc *sc, uint32_t addr, void *data, int count)
 {
 	uint8_t *out = data;
-	uint32_t val;
+	uint32_t val, tmp;
 	int ntries;
 
 	for (; count > 0; count -= 2, addr++) {
 		IWN_WRITE(sc, IWN_EEPROM, addr << 2);
-		IWN_CLRBITS(sc, IWN_EEPROM, IWN_EEPROM_CMD);
-
 		for (ntries = 0; ntries < 10; ntries++) {
 			val = IWN_READ(sc, IWN_EEPROM);
 			if (val & IWN_EEPROM_READ_VALID)
@@ -807,9 +844,23 @@ iwn_read_prom_data(struct iwn_softc *sc, uint32_t addr, void *data, int count)
 			DELAY(5);
 		}
 		if (ntries == 10) {
-			printf("%s: could not read EEPROM\n",
-			    sc->sc_dev.dv_xname);
+			printf("%s: timeout reading ROM at 0x%x\n",
+			    sc->sc_dev.dv_xname, addr);
 			return ETIMEDOUT;
+		}
+		if (sc->sc_flags & IWN_FLAG_HAS_OTPROM) {
+			/* OTPROM, check for ECC errors. */
+			tmp = IWN_READ(sc, IWN_OTP_GP);
+			if (tmp & IWN_OTP_GP_ECC_UNCORR_STTS) {
+				printf("%s: OTPROM ECC error at 0x%x\n",
+				    sc->sc_dev.dv_xname, addr);
+				return EIO;
+			}
+			if (tmp & IWN_OTP_GP_ECC_CORR_STTS) {
+				/* Correctable ECC error, clear bit. */
+				IWN_SETBITS(sc, IWN_OTP_GP,
+				    IWN_OTP_GP_ECC_CORR_STTS);
+			}
 		}
 		*out++ = val >> 16;
 		if (count > 1)
@@ -820,31 +871,33 @@ iwn_read_prom_data(struct iwn_softc *sc, uint32_t addr, void *data, int count)
 
 int
 iwn_dma_contig_alloc(bus_dma_tag_t tag, struct iwn_dma_info *dma, void **kvap,
-    bus_size_t size, bus_size_t alignment, int flags)
+    bus_size_t size, bus_size_t alignment)
 {
 	int nsegs, error;
 
 	dma->tag = tag;
 	dma->size = size;
 
-	error = bus_dmamap_create(tag, size, 1, size, 0, flags, &dma->map);
+	error = bus_dmamap_create(tag, size, 1, size, 0, BUS_DMA_NOWAIT,
+	    &dma->map);
 	if (error != 0)
 		goto fail;
 
 	error = bus_dmamem_alloc(tag, size, alignment, 0, &dma->seg, 1, &nsegs,
-	    flags);
+	    BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0)
 		goto fail;
 
-	error = bus_dmamem_map(tag, &dma->seg, 1, size, &dma->vaddr, flags);
+	error = bus_dmamem_map(tag, &dma->seg, 1, size, &dma->vaddr,
+	    BUS_DMA_NOWAIT);
 	if (error != 0)
 		goto fail;
 
-	error = bus_dmamap_load_raw(tag, dma->map, &dma->seg, 1, size, flags);
+	error = bus_dmamap_load_raw(tag, dma->map, &dma->seg, 1, size,
+	    BUS_DMA_NOWAIT);
 	if (error != 0)
 		goto fail;
 
-	memset(dma->vaddr, 0, size);
 	bus_dmamap_sync(tag, dma->map, 0, size, BUS_DMASYNC_PREWRITE);
 
 	dma->paddr = dma->map->dm_segs[0].ds_addr;
@@ -879,7 +932,7 @@ iwn_alloc_sched(struct iwn_softc *sc)
 {
 	/* TX scheduler rings must be aligned on a 1KB boundary. */
 	return iwn_dma_contig_alloc(sc->sc_dmat, &sc->sched_dma,
-	    (void **)&sc->sched, sc->sc_hal->schedsz, 1024, BUS_DMA_NOWAIT);
+	    (void **)&sc->sched, sc->sc_hal->schedsz, 1024);
 }
 
 void
@@ -893,7 +946,7 @@ iwn_alloc_kw(struct iwn_softc *sc)
 {
 	/* "Keep Warm" page must be aligned on a 4KB boundary. */
 	return iwn_dma_contig_alloc(sc->sc_dmat, &sc->kw_dma, NULL, 4096,
-	    4096, BUS_DMA_NOWAIT);
+	    4096);
 }
 
 void
@@ -907,73 +960,13 @@ iwn_alloc_fwmem(struct iwn_softc *sc)
 {
 	/* Must be aligned on a 16-byte boundary. */
 	return iwn_dma_contig_alloc(sc->sc_dmat, &sc->fw_dma, NULL,
-	    sc->sc_hal->fwsz, 16, BUS_DMA_NOWAIT);
+	    sc->sc_hal->fwsz, 16);
 }
 
 void
 iwn_free_fwmem(struct iwn_softc *sc)
 {
 	iwn_dma_contig_free(&sc->fw_dma);
-}
-
-struct iwn_rbuf *
-iwn_alloc_rbuf(struct iwn_softc *sc)
-{
-	struct iwn_rbuf *rbuf;
-
-	rbuf = SLIST_FIRST(&sc->rxq.freelist);
-	if (rbuf == NULL)
-		return NULL;
-	SLIST_REMOVE_HEAD(&sc->rxq.freelist, next);
-	return rbuf;
-}
-
-/*
- * This is called automatically by the network stack when the mbuf to which
- * our RX buffer is attached is freed.
- */
-void
-iwn_free_rbuf(caddr_t buf, u_int size, void *arg)
-{
-	struct iwn_rbuf *rbuf = arg;
-	struct iwn_softc *sc = rbuf->sc;
-
-	/* Put the RX buffer back in the free list. */
-	SLIST_INSERT_HEAD(&sc->rxq.freelist, rbuf, next);
-}
-
-int
-iwn_alloc_rpool(struct iwn_softc *sc)
-{
-	struct iwn_rx_ring *ring = &sc->rxq;
-	int i, error;
-
-	/* Allocate a big chunk of DMA'able memory... */
-	error = iwn_dma_contig_alloc(sc->sc_dmat, &ring->buf_dma, NULL,
-	    IWN_RBUF_COUNT * IWN_RBUF_SIZE, 4096, BUS_DMA_NOWAIT);
-	if (error != 0) {
-		printf("%s: could not allocate RX buffers DMA memory\n",
-		    sc->sc_dev.dv_xname);
-		return error;
-	}
-	/* ...and split it into chunks of IWN_RBUF_SIZE bytes. */
-	SLIST_INIT(&ring->freelist);
-	for (i = 0; i < IWN_RBUF_COUNT; i++) {
-		struct iwn_rbuf *rbuf = &ring->rbuf[i];
-
-		rbuf->sc = sc;	/* Backpointer for callbacks. */
-		rbuf->vaddr = ring->buf_dma.vaddr + i * IWN_RBUF_SIZE;
-		rbuf->paddr = ring->buf_dma.paddr + i * IWN_RBUF_SIZE;
-
-		SLIST_INSERT_HEAD(&ring->freelist, rbuf, next);
-	}
-	return 0;
-}
-
-void
-iwn_free_rpool(struct iwn_softc *sc)
-{
-	iwn_dma_contig_free(&sc->rxq.buf_dma);
 }
 
 int
@@ -987,7 +980,7 @@ iwn_alloc_rx_ring(struct iwn_softc *sc, struct iwn_rx_ring *ring)
 	/* Allocate RX descriptors (256-byte aligned.) */
 	size = IWN_RX_RING_COUNT * sizeof (uint32_t);
 	error = iwn_dma_contig_alloc(sc->sc_dmat, &ring->desc_dma,
-	    (void **)&ring->desc, size, 256, BUS_DMA_NOWAIT);
+	    (void **)&ring->desc, size, 256);
 	if (error != 0) {
 		printf("%s: could not allocate RX ring DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -996,8 +989,7 @@ iwn_alloc_rx_ring(struct iwn_softc *sc, struct iwn_rx_ring *ring)
 
 	/* Allocate RX status area (16-byte aligned.) */
 	error = iwn_dma_contig_alloc(sc->sc_dmat, &ring->stat_dma,
-	    (void **)&ring->stat, sizeof (struct iwn_rx_status), 16,
-	    BUS_DMA_NOWAIT);
+	    (void **)&ring->stat, sizeof (struct iwn_rx_status), 16);
 	if (error != 0) {
 		printf("%s: could not allocate RX status DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -1005,11 +997,18 @@ iwn_alloc_rx_ring(struct iwn_softc *sc, struct iwn_rx_ring *ring)
 	}
 
 	/*
-	 * Allocate RX buffers.
+	 * Allocate and map RX buffers.
 	 */
 	for (i = 0; i < IWN_RX_RING_COUNT; i++) {
 		struct iwn_rx_data *data = &ring->data[i];
-		struct iwn_rbuf *rbuf;
+
+		error = bus_dmamap_create(sc->sc_dmat, IWN_RBUF_SIZE, 1,
+		    IWN_RBUF_SIZE, 0, BUS_DMA_NOWAIT, &data->map);
+		if (error != 0) {
+			printf("%s: could not create RX buf DMA map\n",
+			    sc->sc_dev.dv_xname);
+			goto fail;
+		}
 
 		MGETHDR(data->m, M_DONTWAIT, MT_DATA);
 		if (data->m == NULL) {
@@ -1018,24 +1017,29 @@ iwn_alloc_rx_ring(struct iwn_softc *sc, struct iwn_rx_ring *ring)
 			error = ENOMEM;
 			goto fail;
 		}
-		if ((rbuf = iwn_alloc_rbuf(sc)) == NULL) {
-			m_freem(data->m);
-			data->m = NULL;
-			printf("%s: could not allocate RX buffer\n",
+		MCLGETI(data->m, M_DONTWAIT, NULL, IWN_RBUF_SIZE);
+		if (!(data->m->m_flags & M_EXT)) {
+			printf("%s: could not allocate RX mbuf cluster\n",
 			    sc->sc_dev.dv_xname);
-			error = ENOMEM;
+			error = ENOBUFS;
 			goto fail;
 		}
-		/* Attach RX buffer to mbuf header. */
-		MEXTADD(data->m, rbuf->vaddr, IWN_RBUF_SIZE, 0, iwn_free_rbuf,
-		    rbuf);
+
+		error = bus_dmamap_load(sc->sc_dmat, data->map,
+		    mtod(data->m, void *), IWN_RBUF_SIZE, NULL,
+		    BUS_DMA_NOWAIT);
+		if (error != 0) {
+			printf("%s: can't not map mbuf (error %d)\n",
+			    sc->sc_dev.dv_xname, error);
+			goto fail;
+		}
 
 		/* Set physical address of RX buffer (256-byte aligned.) */
-		ring->desc[i] = htole32(rbuf->paddr >> 8);
+		ring->desc[i] = htole32(data->map->dm_segs[0].ds_addr >> 8);
 	}
 
-	bus_dmamap_sync(sc->sc_dmat, ring->desc_dma.map,
-	    0, ring->desc_dma.size, BUS_DMASYNC_PREWRITE);
+	bus_dmamap_sync(sc->sc_dmat, ring->desc_dma.map, 0, size,
+	    BUS_DMASYNC_PREWRITE);
 
 	return 0;
 
@@ -1071,8 +1075,16 @@ iwn_free_rx_ring(struct iwn_softc *sc, struct iwn_rx_ring *ring)
 	iwn_dma_contig_free(&ring->stat_dma);
 
 	for (i = 0; i < IWN_RX_RING_COUNT; i++) {
-		if (ring->data[i].m != NULL)
-			m_freem(ring->data[i].m);
+		struct iwn_rx_data *data = &ring->data[i];
+
+		if (data->m != NULL) {
+			bus_dmamap_sync(sc->sc_dmat, data->map, 0,
+			    data->map->dm_mapsize, BUS_DMASYNC_POSTREAD);
+			bus_dmamap_unload(sc->sc_dmat, data->map);
+			m_freem(data->m);
+		}
+		if (data->map != NULL)
+			bus_dmamap_destroy(sc->sc_dmat, data->map);
 	}
 }
 
@@ -1090,7 +1102,7 @@ iwn_alloc_tx_ring(struct iwn_softc *sc, struct iwn_tx_ring *ring, int qid)
 	/* Allocate TX descriptors (256-byte aligned.) */
 	size = IWN_TX_RING_COUNT * sizeof (struct iwn_tx_desc);
 	error = iwn_dma_contig_alloc(sc->sc_dmat, &ring->desc_dma,
-	    (void **)&ring->desc, size, 256, BUS_DMA_NOWAIT);
+	    (void **)&ring->desc, size, 256);
 	if (error != 0) {
 		printf("%s: could not allocate TX ring DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -1106,7 +1118,7 @@ iwn_alloc_tx_ring(struct iwn_softc *sc, struct iwn_tx_ring *ring, int qid)
 
 	size = IWN_TX_RING_COUNT * sizeof (struct iwn_tx_cmd);
 	error = iwn_dma_contig_alloc(sc->sc_dmat, &ring->cmd_dma,
-	    (void **)&ring->cmd, size, 4, BUS_DMA_NOWAIT);
+	    (void **)&ring->cmd, size, 4);
 	if (error != 0) {
 		printf("%s: could not allocate TX cmd DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -1139,20 +1151,8 @@ fail:	iwn_free_tx_ring(sc, ring);
 void
 iwn_reset_tx_ring(struct iwn_softc *sc, struct iwn_tx_ring *ring)
 {
-	uint32_t tmp;
-	int i, ntries;
+	int i;
 
-	if (iwn_nic_lock(sc) == 0) {
-		IWN_WRITE(sc, IWN_FH_TX_CONFIG(ring->qid), 0);
-		for (ntries = 0; ntries < 200; ntries++) {
-			tmp = IWN_READ(sc, IWN_FH_TX_STATUS);
-			if ((tmp & IWN_FH_TX_STATUS_IDLE(ring->qid)) ==
-			    IWN_FH_TX_STATUS_IDLE(ring->qid))
-				break;
-			DELAY(10);
-		}
-		iwn_nic_unlock(sc);
-	}
 	for (i = 0; i < IWN_TX_RING_COUNT; i++) {
 		struct iwn_tx_data *data = &ring->data[i];
 
@@ -1203,12 +1203,26 @@ iwn_read_eeprom(struct iwn_softc *sc)
 	uint16_t val;
 	int error;
 
-	if ((IWN_READ(sc, IWN_EEPROM_GP) & 0x6) == 0) {
-		printf("%s: bad EEPROM signature\n", sc->sc_dev.dv_xname);
+	/* Check whether adapter has an EEPROM or an OTPROM. */
+	if (sc->hw_type >= IWN_HW_REV_TYPE_1000 &&
+	    (IWN_READ(sc, IWN_OTP_GP) & IWN_OTP_GP_DEV_SEL_OTP))
+		sc->sc_flags |= IWN_FLAG_HAS_OTPROM;
+	DPRINTF(("%s found\n", (sc->sc_flags & IWN_FLAG_HAS_OTPROM) ?
+	    "OTPROM" : "EEPROM"));
+
+	if ((IWN_READ(sc, IWN_EEPROM_GP) & 0x7) == 0) {
+		printf("%s: bad ROM signature\n", sc->sc_dev.dv_xname);
 		return EIO;
 	}
 	if ((error = iwn_eeprom_lock(sc)) != 0) {
-		printf("%s: could not lock EEPROM (error=%d)\n",
+		printf("%s: could not lock ROM (error=%d)\n",
+		    sc->sc_dev.dv_xname, error);
+		return error;
+	}
+
+	if ((sc->sc_flags & IWN_FLAG_HAS_OTPROM) &&
+	    ((error = iwn_init_otprom(sc)) != 0)) {
+		printf("%s: could not initialize OTPROM (error=%d)\n",
 		    sc->sc_dev.dv_xname, error);
 		return error;
 	}
@@ -1609,14 +1623,14 @@ iwn_ccmp_decap(struct iwn_softc *sc, struct mbuf *m, struct ieee80211_key *k)
  * followed by an MPDU_RX_DONE notification.
  */
 void
-iwn_rx_phy(struct iwn_softc *sc, struct iwn_rx_desc *desc)
+iwn_rx_phy(struct iwn_softc *sc, struct iwn_rx_desc *desc,
+    struct iwn_rx_data *data)
 {
 	struct iwn_rx_stat *stat = (struct iwn_rx_stat *)(desc + 1);
 
 	DPRINTFN(2, ("received PHY stats\n"));
-	bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
-	    (caddr_t)stat - sc->rxq.buf_dma.vaddr, sizeof (*stat),
-	    BUS_DMASYNC_POSTREAD);
+	bus_dmamap_sync(sc->sc_dmat, data->map, sizeof (*desc),
+	    sizeof (*stat), BUS_DMASYNC_POSTREAD);
 
 	/* Save RX statistics, they will be used on MPDU_RX_DONE. */
 	memcpy(&sc->last_rx_stat, stat, sizeof (*stat));
@@ -1635,7 +1649,6 @@ iwn_rx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
 	struct iwn_rx_ring *ring = &sc->rxq;
-	struct iwn_rbuf *rbuf;
 	struct ieee80211_frame *wh;
 	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
@@ -1643,7 +1656,7 @@ iwn_rx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 	struct iwn_rx_stat *stat;
 	caddr_t head;
 	uint32_t flags;
-	int len, rssi;
+	int error, len, rssi;
 
 	if (desc->type == IWN_MPDU_RX_DONE) {
 		/* Check for prior RX_PHY notification. */
@@ -1657,8 +1670,7 @@ iwn_rx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 	} else
 		stat = (struct iwn_rx_stat *)(desc + 1);
 
-	bus_dmamap_sync(sc->sc_dmat, ring->buf_dma.map,
-	    (caddr_t)(desc + 1) - ring->buf_dma.vaddr, IWN_RBUF_SIZE,
+	bus_dmamap_sync(sc->sc_dmat, data->map, 0, IWN_RBUF_SIZE,
 	    BUS_DMASYNC_POSTREAD);
 
 	if (stat->cfg_phy_len > IWN_STAT_MAXLEN) {
@@ -1668,8 +1680,7 @@ iwn_rx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 		return;
 	}
 	if (desc->type == IWN_MPDU_RX_DONE) {
-		struct iwn_rx_mpdu *mpdu =
-		    (struct iwn_rx_mpdu *)(desc + 1);
+		struct iwn_rx_mpdu *mpdu = (struct iwn_rx_mpdu *)(desc + 1);
 		head = (caddr_t)(mpdu + 1);
 		len = letoh16(mpdu->len);
 	} else {
@@ -1686,14 +1697,58 @@ iwn_rx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 		return;
 	}
 	/* Discard frames that are too short. */
-	if (len < sizeof (struct ieee80211_frame)) {
+	if (len < sizeof (*wh)) {
 		DPRINTF(("frame too short: %d\n", len));
 		ic->ic_stats.is_rx_tooshort++;
 		ifp->if_ierrors++;
 		return;
 	}
 
+	MGETHDR(m1, M_DONTWAIT, MT_DATA);
+	if (m1 == NULL) {
+		ic->ic_stats.is_rx_nombuf++;
+		ifp->if_ierrors++;
+		return;
+	}
+	MCLGETI(m1, M_DONTWAIT, NULL, IWN_RBUF_SIZE);
+	if (!(m1->m_flags & M_EXT)) {
+		m_freem(m1);
+		ic->ic_stats.is_rx_nombuf++;
+		ifp->if_ierrors++;
+		return;
+	}
+	bus_dmamap_unload(sc->sc_dmat, data->map);
+
+	error = bus_dmamap_load(sc->sc_dmat, data->map, mtod(m1, void *),
+	    IWN_RBUF_SIZE, NULL, BUS_DMA_NOWAIT);
+	if (error != 0) {
+		m_freem(m1);
+
+		/* Try to reload the old mbuf. */
+		error = bus_dmamap_load(sc->sc_dmat, data->map,
+		    mtod(data->m, void *), IWN_RBUF_SIZE, NULL,
+		    BUS_DMA_NOWAIT);
+		if (error != 0) {
+			panic("%s: could not load old RX mbuf",
+			    sc->sc_dev.dv_xname);
+		}
+		/* Physical address may have changed. */
+		ring->desc[ring->cur] =
+		    htole32(data->map->dm_segs[0].ds_addr >> 8);
+		bus_dmamap_sync(sc->sc_dmat, ring->desc_dma.map,
+		    ring->cur * sizeof (uint32_t), sizeof (uint32_t),
+		    BUS_DMASYNC_PREWRITE);
+		ifp->if_ierrors++;
+		return;
+	}
+
 	m = data->m;
+	data->m = m1;
+	/* Update RX descriptor. */
+	ring->desc[ring->cur] = htole32(data->map->dm_segs[0].ds_addr >> 8);
+	bus_dmamap_sync(sc->sc_dmat, ring->desc_dma.map,
+	    ring->cur * sizeof (uint32_t), sizeof (uint32_t),
+	    BUS_DMASYNC_PREWRITE);
 
 	/* Finalize mbuf. */
 	m->m_pkthdr.rcvif = ifp;
@@ -1730,36 +1785,6 @@ iwn_rx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 			return;
 		}
 		rxi.rxi_flags |= IEEE80211_RXI_HWDEC;
-	}
-
-	if ((rbuf = SLIST_FIRST(&sc->rxq.freelist)) != NULL) {
-		MGETHDR(m1, M_DONTWAIT, MT_DATA);
-		if (m1 == NULL) {
-			ic->ic_stats.is_rx_nombuf++;
-			ifp->if_ierrors++;
-			return;
-		}
-		/* Attach RX buffer to mbuf header. */
-		MEXTADD(m1, rbuf->vaddr, IWN_RBUF_SIZE, 0, iwn_free_rbuf,
-		    rbuf);
-		SLIST_REMOVE_HEAD(&sc->rxq.freelist, next);
-
-		data->m = m1;
-
-		/* Update RX descriptor. */
-		ring->desc[ring->cur] = htole32(rbuf->paddr >> 8);
-		bus_dmamap_sync(sc->sc_dmat, ring->desc_dma.map,
-		    ring->cur * sizeof (uint32_t), sizeof (uint32_t),
-		    BUS_DMASYNC_PREWRITE);
-	} else {
-		/* No free rbufs, copy frame into an mbuf. */
-		m = m_copym2(m, 0, M_COPYALL, M_DONTWAIT);
-		if (m == NULL) {
-			/* No free mbufs either, drop frame. */
-			ic->ic_stats.is_rx_nombuf++;
-			ifp->if_ierrors++;
-			return;
-		}
 	}
 
 	rssi = hal->get_rssi(stat);
@@ -1822,7 +1847,8 @@ iwn_rx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
  * firmware on response to a CMD_CALIB_CONFIG command (5000 only.)
  */
 void
-iwn5000_rx_calib_results(struct iwn_softc *sc, struct iwn_rx_desc *desc)
+iwn5000_rx_calib_results(struct iwn_softc *sc, struct iwn_rx_desc *desc,
+    struct iwn_rx_data *data)
 {
 	struct iwn_phy_calib *calib = (struct iwn_phy_calib *)(desc + 1);
 	int len, idx = -1;
@@ -1832,8 +1858,7 @@ iwn5000_rx_calib_results(struct iwn_softc *sc, struct iwn_rx_desc *desc)
 		return;
 
 	len = (letoh32(desc->len) & 0x3fff) - 4;
-	bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
-	    (caddr_t)calib - sc->rxq.buf_dma.vaddr, len,
+	bus_dmamap_sync(sc->sc_dmat, data->map, sizeof (*desc), len,
 	    BUS_DMASYNC_POSTREAD);
 
 	switch (calib->code) {
@@ -1878,7 +1903,8 @@ iwn5000_rx_calib_results(struct iwn_softc *sc, struct iwn_rx_desc *desc)
  * The latter is sent by the firmware after each received beacon.
  */
 void
-iwn_rx_statistics(struct iwn_softc *sc, struct iwn_rx_desc *desc)
+iwn_rx_statistics(struct iwn_softc *sc, struct iwn_rx_desc *desc,
+    struct iwn_rx_data *data)
 {
 	const struct iwn_hal *hal = sc->sc_hal;
 	struct ieee80211com *ic = &sc->sc_ic;
@@ -1890,9 +1916,8 @@ iwn_rx_statistics(struct iwn_softc *sc, struct iwn_rx_desc *desc)
 	if (ic->ic_state != IEEE80211_S_RUN)
 		return;
 
-	bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
-	    (caddr_t)stats - sc->rxq.buf_dma.vaddr, sizeof (*stats),
-	    BUS_DMASYNC_POSTREAD);
+	bus_dmamap_sync(sc->sc_dmat, data->map, sizeof (*desc),
+	    sizeof (*stats), BUS_DMASYNC_POSTREAD);
 
 	DPRINTFN(3, ("received statistics (cmd=%d)\n", desc->type));
 	sc->calib_cnt = 0;	/* Reset TX power calibration timeout. */
@@ -1935,27 +1960,27 @@ iwn_rx_statistics(struct iwn_softc *sc, struct iwn_rx_desc *desc)
  * and 5000 adapters have different incompatible TX status formats.
  */
 void
-iwn4965_tx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc)
+iwn4965_tx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
+    struct iwn_rx_data *data)
 {
 	struct iwn4965_tx_stat *stat = (struct iwn4965_tx_stat *)(desc + 1);
 
-	bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
-	    (caddr_t)stat - sc->rxq.buf_dma.vaddr, sizeof (*stat),
-	    BUS_DMASYNC_POSTREAD);
+	bus_dmamap_sync(sc->sc_dmat, data->map, sizeof (*desc),
+	    sizeof (*stat), BUS_DMASYNC_POSTREAD);
 	iwn_tx_done(sc, desc, stat->retrycnt, letoh32(stat->status) & 0xff);
 }
 
 void
-iwn5000_tx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc)
+iwn5000_tx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
+    struct iwn_rx_data *data)
 {
 	struct iwn5000_tx_stat *stat = (struct iwn5000_tx_stat *)(desc + 1);
 
 	/* Reset TX scheduler slot. */
 	iwn5000_reset_sched(sc, desc->qid & 0xf, desc->idx);
 
-	bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
-	    (caddr_t)stat - sc->rxq.buf_dma.vaddr, sizeof (*stat),
-	    BUS_DMASYNC_POSTREAD);
+	bus_dmamap_sync(sc->sc_dmat, data->map, sizeof (*desc),
+	    sizeof (*stat), BUS_DMASYNC_POSTREAD);
 	iwn_tx_done(sc, desc, stat->retrycnt, letoh16(stat->status) & 0xff);
 }
 
@@ -2043,11 +2068,11 @@ iwn_notif_intr(struct iwn_softc *sc)
 	hw = letoh16(sc->rxq.stat->closed_count) & 0xfff;
 	while (sc->rxq.cur != hw) {
 		struct iwn_rx_data *data = &sc->rxq.data[sc->rxq.cur];
-		struct iwn_rx_desc *desc = (void *)data->m->m_ext.ext_buf;
+		struct iwn_rx_desc *desc;
 
-		bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
-		    (caddr_t)desc - sc->rxq.buf_dma.vaddr, sizeof (*desc),
+		bus_dmamap_sync(sc->sc_dmat, data->map, 0, sizeof (*desc),
 		    BUS_DMASYNC_POSTREAD);
+		desc = mtod(data->m, struct iwn_rx_desc *);
 
 		DPRINTFN(4, ("notification qid=%d idx=%d flags=%x type=%d\n",
 		    desc->qid & 0xf, desc->idx, desc->flags, desc->type));
@@ -2057,7 +2082,7 @@ iwn_notif_intr(struct iwn_softc *sc)
 
 		switch (desc->type) {
 		case IWN_RX_PHY:
-			iwn_rx_phy(sc, desc);
+			iwn_rx_phy(sc, desc, data);
 			break;
 
 		case IWN_RX_DONE:		/* 4965AGN only. */
@@ -2068,12 +2093,12 @@ iwn_notif_intr(struct iwn_softc *sc)
 
 		case IWN_TX_DONE:
 			/* An 802.11 frame has been transmitted. */
-			sc->sc_hal->tx_done(sc, desc);
+			sc->sc_hal->tx_done(sc, desc, data);
 			break;
 
 		case IWN_RX_STATISTICS:
 		case IWN_BEACON_STATISTICS:
-			iwn_rx_statistics(sc, desc);
+			iwn_rx_statistics(sc, desc, data);
 			break;
 
 		case IWN_BEACON_MISSED:
@@ -2081,8 +2106,7 @@ iwn_notif_intr(struct iwn_softc *sc)
 			struct iwn_beacon_missed *miss =
 			    (struct iwn_beacon_missed *)(desc + 1);
 
-			bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
-			    (caddr_t)miss - sc->rxq.buf_dma.vaddr,
+			bus_dmamap_sync(sc->sc_dmat, data->map, sizeof (*desc),
 			    sizeof (*miss), BUS_DMASYNC_POSTREAD);
 			/*
 			 * If more than 5 consecutive beacons are missed,
@@ -2101,8 +2125,7 @@ iwn_notif_intr(struct iwn_softc *sc)
 			    (struct iwn_ucode_info *)(desc + 1);
 
 			/* The microcontroller is ready. */
-			bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
-			    (caddr_t)uc - sc->rxq.buf_dma.vaddr,
+			bus_dmamap_sync(sc->sc_dmat, data->map, sizeof (*desc),
 			    sizeof (*uc), BUS_DMASYNC_POSTREAD);
 			DPRINTF(("microcode alive notification version=%d.%d "
 			    "subtype=%x alive=%x\n", uc->major, uc->minor,
@@ -2126,8 +2149,7 @@ iwn_notif_intr(struct iwn_softc *sc)
 			uint32_t *status = (uint32_t *)(desc + 1);
 
 			/* Enabled/disabled notification. */
-			bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
-			    (caddr_t)status - sc->rxq.buf_dma.vaddr,
+			bus_dmamap_sync(sc->sc_dmat, data->map, sizeof (*desc),
 			    sizeof (*status), BUS_DMASYNC_POSTREAD);
 			DPRINTF(("state changed to %x\n", letoh32(*status)));
 
@@ -2147,8 +2169,7 @@ iwn_notif_intr(struct iwn_softc *sc)
 			struct iwn_start_scan *scan =
 			    (struct iwn_start_scan *)(desc + 1);
 
-			bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
-			    (caddr_t)scan - sc->rxq.buf_dma.vaddr,
+			bus_dmamap_sync(sc->sc_dmat, data->map, sizeof (*desc),
 			    sizeof (*scan), BUS_DMASYNC_POSTREAD);
 			DPRINTFN(2, ("scanning channel %d status %x\n",
 			    scan->chan, letoh32(scan->status)));
@@ -2162,8 +2183,7 @@ iwn_notif_intr(struct iwn_softc *sc)
 			struct iwn_stop_scan *scan =
 			    (struct iwn_stop_scan *)(desc + 1);
 
-			bus_dmamap_sync(sc->sc_dmat, sc->rxq.buf_dma.map,
-			    (caddr_t)scan - sc->rxq.buf_dma.vaddr,
+			bus_dmamap_sync(sc->sc_dmat, data->map, sizeof (*desc),
 			    sizeof (*scan), BUS_DMASYNC_POSTREAD);
 			DPRINTF(("scan finished nchan=%d status=%d chan=%d\n",
 			    scan->nchan, scan->status, scan->chan));
@@ -2181,7 +2201,7 @@ iwn_notif_intr(struct iwn_softc *sc)
 			break;
 		}
 		case IWN5000_CALIBRATION_RESULT:
-			iwn5000_rx_calib_results(sc, desc);
+			iwn5000_rx_calib_results(sc, desc, data);
 			break;
 
 		case IWN5000_CALIBRATION_DONE:
@@ -4763,21 +4783,21 @@ iwn5000_load_firmware_section(struct iwn_softc *sc, uint32_t dst,
 	if ((error = iwn_nic_lock(sc)) != 0)
 		return error;
 
-	IWN_WRITE(sc, IWN_FH_TX_CONFIG(IWN_SRVC_CHNL),
+	IWN_WRITE(sc, IWN_FH_TX_CONFIG(IWN_SRVC_DMACHNL),
 	    IWN_FH_TX_CONFIG_DMA_PAUSE);
 
-	IWN_WRITE(sc, IWN_FH_SRAM_ADDR(IWN_SRVC_CHNL), dst);
-	IWN_WRITE(sc, IWN_FH_TFBD_CTRL0(IWN_SRVC_CHNL),
+	IWN_WRITE(sc, IWN_FH_SRAM_ADDR(IWN_SRVC_DMACHNL), dst);
+	IWN_WRITE(sc, IWN_FH_TFBD_CTRL0(IWN_SRVC_DMACHNL),
 	    IWN_LOADDR(dma->paddr));
-	IWN_WRITE(sc, IWN_FH_TFBD_CTRL1(IWN_SRVC_CHNL),
+	IWN_WRITE(sc, IWN_FH_TFBD_CTRL1(IWN_SRVC_DMACHNL),
 	    IWN_HIADDR(dma->paddr) << 28 | size);
-	IWN_WRITE(sc, IWN_FH_TXBUF_STATUS(IWN_SRVC_CHNL),
+	IWN_WRITE(sc, IWN_FH_TXBUF_STATUS(IWN_SRVC_DMACHNL),
 	    IWN_FH_TXBUF_STATUS_TBNUM(1) |
 	    IWN_FH_TXBUF_STATUS_TBIDX(1) |
 	    IWN_FH_TXBUF_STATUS_TFBD_VALID);
 
 	/* Kick Flow Handler to start DMA transfer. */
-	IWN_WRITE(sc, IWN_FH_TX_CONFIG(IWN_SRVC_CHNL),
+	IWN_WRITE(sc, IWN_FH_TX_CONFIG(IWN_SRVC_DMACHNL),
 	    IWN_FH_TX_CONFIG_DMA_ENA | IWN_FH_TX_CONFIG_CIRQ_HOST_ENDTFD);
 
 	iwn_nic_unlock(sc);
@@ -5039,11 +5059,39 @@ iwn5000_nic_config(struct iwn_softc *sc)
 	return 0;
 }
 
+/*
+ * Take NIC ownership over Intel Active Management Technology (AMT).
+ */
+int
+iwn_hw_prepare(struct iwn_softc *sc)
+{
+	int ntries;
+
+	IWN_SETBITS(sc, IWN_HW_IF_CONFIG, IWN_HW_IF_CONFIG_PREPARE);
+	for (ntries = 0; ntries < 15000; ntries++) {
+		if (!(IWN_READ(sc, IWN_HW_IF_CONFIG) &
+		    IWN_HW_IF_CONFIG_PREPARE_DONE))
+			break;
+		DELAY(10);
+	}
+	if (ntries == 15000)
+		return ETIMEDOUT;
+
+	IWN_SETBITS(sc, IWN_HW_IF_CONFIG, IWN_HW_IF_CONFIG_NIC_READY);
+	for (ntries = 0; ntries < 5; ntries++) {
+		if (IWN_READ(sc, IWN_HW_IF_CONFIG) &
+		    IWN_HW_IF_CONFIG_NIC_READY)
+			return 0;
+		DELAY(10);
+	}
+	return ETIMEDOUT;
+}
+
 int
 iwn_hw_init(struct iwn_softc *sc)
 {
 	const struct iwn_hal *hal = sc->sc_hal;
-	int error, qid;
+	int error, chnl, qid;
 
 	/* Clear pending interrupts. */
 	IWN_WRITE(sc, IWN_INT, 0xffffffff);
@@ -5100,12 +5148,15 @@ iwn_hw_init(struct iwn_softc *sc)
 		/* Set physical address of TX ring (256-byte aligned.) */
 		IWN_WRITE(sc, IWN_FH_CBBC_QUEUE(qid),
 		    txq->desc_dma.paddr >> 8);
-		/* Enable TX for this ring. */
-		IWN_WRITE(sc, IWN_FH_TX_CONFIG(qid),
+	}
+	iwn_nic_unlock(sc);
+
+	/* Enable DMA channels. */
+	for (chnl = 0; chnl < hal->ndmachnls; chnl++) {
+		IWN_WRITE(sc, IWN_FH_TX_CONFIG(chnl),
 		    IWN_FH_TX_CONFIG_DMA_ENA |
 		    IWN_FH_TX_CONFIG_DMA_CREDIT_ENA);
 	}
-	iwn_nic_unlock(sc);
 
 	/* Clear "radio off" and "commands blocked" bits. */
 	IWN_WRITE(sc, IWN_UCODE_GP1_CLR, IWN_UCODE_GP1_RFKILL);
@@ -5140,7 +5191,8 @@ void
 iwn_hw_stop(struct iwn_softc *sc)
 {
 	const struct iwn_hal *hal = sc->sc_hal;
-	int qid;
+	int chnl, qid, ntries;
+	uint32_t tmp;
 
 	IWN_WRITE(sc, IWN_RESET, IWN_RESET_NEVO);
 
@@ -5155,12 +5207,27 @@ iwn_hw_stop(struct iwn_softc *sc)
 	/* Stop TX scheduler. */
 	iwn_prph_write(sc, hal->sched_txfact_addr, 0);
 
-	/* Stop all TX rings. */
-	for (qid = 0; qid < hal->ntxqs; qid++)
-		iwn_reset_tx_ring(sc, &sc->txq[qid]);
+	/* Stop all DMA channels. */
+	if (iwn_nic_lock(sc) == 0) {
+		for (chnl = 0; chnl < hal->ndmachnls; chnl++) {
+			IWN_WRITE(sc, IWN_FH_TX_CONFIG(chnl), 0);
+			for (ntries = 0; ntries < 200; ntries++) {
+				tmp = IWN_READ(sc, IWN_FH_TX_STATUS);
+				if ((tmp & IWN_FH_TX_STATUS_IDLE(chnl)) ==
+				    IWN_FH_TX_STATUS_IDLE(chnl))
+					break;
+				DELAY(10);
+			}
+		}
+		iwn_nic_unlock(sc);
+	}
 
 	/* Stop RX ring. */
 	iwn_reset_rx_ring(sc, &sc->rxq);
+
+	/* Reset all TX rings. */
+	for (qid = 0; qid < hal->ntxqs; qid++)
+		iwn_reset_tx_ring(sc, &sc->txq[qid]);
 
 	if (iwn_nic_lock(sc) == 0) {
 		iwn_prph_write(sc, IWN_APMG_CLK_DIS, IWN_APMG_CLK_DMA_RQT);
@@ -5177,6 +5244,11 @@ iwn_init(struct ifnet *ifp)
 	struct iwn_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
 	int error;
+
+	if ((error = iwn_hw_prepare(sc)) != 0) {
+		printf("%s: hardware not ready\n", sc->sc_dev.dv_xname);
+		goto fail;
+	}
 
 	/* Check that the radio is not disabled by hardware switch. */
 	if (!(IWN_READ(sc, IWN_GP_CNTRL) & IWN_GP_CNTRL_RFKILL)) {
