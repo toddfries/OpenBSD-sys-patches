@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.52 2008/11/21 17:35:52 deraadt Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.51 2008/11/04 14:28:24 drahn Exp $	*/
 
 /*-
  * Copyright (c) 2008 Dale Rahn <drahn@openbsd.org>
@@ -102,6 +102,9 @@ int	openpic_big_endian;
 intr_send_ipi_t openpic_send_ipi;
 #endif
 
+u_int openpic_read(int reg);
+void openpic_write(int reg, u_int val);
+
 struct openpic_softc {
 	struct device sc_dev;
 };
@@ -109,6 +112,7 @@ struct openpic_softc {
 int	openpic_match(struct device *parent, void *cf, void *aux);
 void	openpic_attach(struct device *, struct device *, void *);
 void	openpic_do_pending_int(int pcpl);
+void	openpic_do_pending_int_dis(int pcpl, int s);
 void	openpic_collect_preconf_intr(void);
 void	openpic_ext_intr(void);
 
@@ -122,18 +126,19 @@ struct cfdriver openpic_cd = {
 	NULL, "openpic", DV_DULL
 };
 
-static inline u_int
+u_int
 openpic_read(int reg)
 {
 	char *addr = (void *)(openpic_base + reg);
 
+	asm volatile("eieio");
 	if (openpic_big_endian)
 		return in32(addr);
 	else
 		return in32rb(addr);
 }
 
-static inline void
+void
 openpic_write(int reg, u_int val)
 {
 	char *addr = (void *)(openpic_base + reg);
@@ -142,6 +147,7 @@ openpic_write(int reg, u_int val)
 		out32(addr, val);
 	else
 		out32rb(addr, val);
+	asm volatile("eieio");
 }
 
 static inline int
@@ -154,7 +160,6 @@ static inline void
 openpic_eoi(int cpu)
 {
 	openpic_write(OPENPIC_EOI(cpu), 0);
-	openpic_read(OPENPIC_EOI(cpu));
 }
 
 int
@@ -443,12 +448,21 @@ openpic_calc_mask()
 void
 openpic_do_pending_int(int pcpl)
 {
-	struct cpu_info *ci = curcpu();
 	int s;
+	s = ppc_intr_disable();
+	openpic_do_pending_int_dis(pcpl, s);
+	ppc_intr_enable(s);
+
+}
+void
+openpic_do_pending_int_dis(int pcpl, int s)
+{
+	struct cpu_info *ci = curcpu();
 	int loopcount = 0;
 
-	s = ppc_intr_disable();
 	if (ci->ci_iactive & CI_IACTIVE_PROCESSING_SOFT) {
+		/* soft interrupts are being processed, just set ipl/return */
+		openpic_setipl(pcpl);
 		ppc_intr_enable(s);
 		return;
 	}
@@ -457,7 +471,7 @@ openpic_do_pending_int(int pcpl)
 
 	do {
 		loopcount ++;
-		if (loopcount > 5)
+		if (loopcount > 50)
 			printf("do_pending looping %d pcpl %x %x\n", loopcount,
 			    pcpl, ci->ci_cpl);
 		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTTTY)) &&
@@ -505,7 +519,6 @@ openpic_do_pending_int(int pcpl)
 	openpic_setipl(pcpl);	/* Don't use splx... we are here already! */
 
 	atomic_clearbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_SOFT);
-	ppc_intr_enable(s);
 }
 
 void
@@ -567,6 +580,7 @@ openpic_ext_intr()
 	struct cpu_info *ci = curcpu();
 	int irq;
 	int pcpl;
+	int maxipl = IPL_NONE;
 	struct intrhand *ih;
 	struct intrq *iq;
 	int irqloop = 0;
@@ -604,6 +618,8 @@ openpic_ext_intr()
 			printf("invalid interrupt %d lvl %d at %d hw %d\n",
 			    irq, iq->iq_ipl, ci->ci_cpl,
 			    openpic_read(OPENPIC_CPU_PRIORITY(ci->ci_cpuid)));
+		if (iq->iq_ipl > maxipl)
+			maxipl = iq->iq_ipl;
 		splraise(iq->iq_ipl);
 		openpic_eoi(ci->ci_cpuid);
 
@@ -621,7 +637,9 @@ openpic_ext_intr()
  		}
 		if (spurious) {
 			openpic_spurious.ec_count++;
+#ifdef OPENPIC_NOISY
 			printf("spurious intr %d\n", irq);
+#endif
 		}
 
 		uvmexp.intrs++;
@@ -629,10 +647,23 @@ openpic_ext_intr()
 
 		irq = openpic_read_irq(ci->ci_cpuid);
 	}
-	irqnest--;
-	ppc_intr_enable(1);
 
-	splx(pcpl);	/* Process pendings. */
+	if (irqnest == 1) {
+		/* raise IPL back to max until do_pending will lower it back */
+		openpic_setipl(maxipl);
+		/*
+		 * we must not process pending soft interrupts when nested, can
+		 * cause excessive recursion.
+		 * 
+		 * The loop here is because an interrupt could case a pending
+		 * soft interrupt between the finishing of the
+		 * openpic_do_pending_int, but before ppc_intr_disable
+		 */
+		do {
+			openpic_do_pending_int_dis(pcpl, 1);
+		} while (ci->ci_ipending & ppc_smask[pcpl]);
+	}
+	irqnest--;
 }
 
 void
@@ -739,6 +770,8 @@ openpic_prog_button (void *arg)
 void
 openpic_ipi_ddb()
 {
+#ifdef OPENPIC_NOISY
 	printf("ipi_ddb() called\n");
+#endif
 	Debugger();
 }
