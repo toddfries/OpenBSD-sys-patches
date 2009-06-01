@@ -1,4 +1,4 @@
-/*	$OpenBSD: udl.c,v 1.11 2009/05/24 11:11:03 mglocker Exp $ */
+/*	$OpenBSD: udl.c,v 1.18 2009/06/01 18:21:51 mglocker Exp $ */
 
 /*
  * Copyright (c) 2009 Marcus Glocker <mglocker@openbsd.org>
@@ -117,19 +117,21 @@ void		udl_init_fb_offsets(struct udl_softc *, uint32_t, uint32_t,
 		    uint32_t, uint32_t);
 usbd_status	udl_init_resolution(struct udl_softc *, uint8_t *, uint8_t);
 void		udl_fb_off_write(struct udl_softc *, uint16_t, uint32_t,
-		    uint8_t);
-void		udl_fb_pos_write(struct udl_softc *, uint16_t, uint32_t,
+		    uint16_t);
+void		udl_fb_line_write(struct udl_softc *, uint16_t, uint32_t,
 		    uint32_t, uint32_t);
-void		udl_fb_blk_write(struct udl_softc *, uint16_t, uint32_t,
+void		udl_fb_block_write(struct udl_softc *, uint16_t, uint32_t,
 		    uint32_t, uint32_t, uint32_t);
+void		udl_fb_buf_write(struct udl_softc *, uint8_t *, uint32_t,
+		    uint32_t, uint16_t);
 void		udl_fb_off_copy(struct udl_softc *, uint32_t, uint32_t,
-		    uint8_t);
-void		udl_fb_pos_copy(struct udl_softc *, uint32_t, uint32_t,
+		    uint16_t);
+void		udl_fb_line_copy(struct udl_softc *, uint32_t, uint32_t,
 		    uint32_t, uint32_t, uint32_t);
-void		udl_fb_blk_copy(struct udl_softc *, uint32_t, uint32_t,
+void		udl_fb_block_copy(struct udl_softc *, uint32_t, uint32_t,
 		    uint32_t, uint32_t, uint32_t, uint32_t);
-void		udl_draw_char(struct udl_softc *, uint32_t, uint32_t,
-		    uint16_t, uint16_t, u_int);
+void		udl_draw_char(struct udl_softc *, uint16_t, uint16_t, u_int,
+		    uint32_t, uint32_t);
 #ifdef UDL_DEBUG
 void		udl_hexdump(void *, int, int);
 usbd_status	udl_init_test(struct udl_softc *);
@@ -496,7 +498,7 @@ udl_copycols(void *cookie, int row, int src, int dst, int num)
 	cx = num * ri->ri_font->fontwidth;
 	cy = ri->ri_font->fontheight;
 
-	udl_fb_blk_copy(sc, sx, sy, dx, dy, cx, cy);
+	udl_fb_block_copy(sc, sx, sy, dx, dy, cx, cy);
 
 	(void)udl_cmd_send_async(sc);
 }
@@ -519,10 +521,10 @@ udl_copyrows(void *cookie, int src, int dst, int num)
 	cy = num * sc->sc_ri.ri_font->fontheight;
 
 	/* copy row block to off-screen first to fix overlay-copy problem */
-	udl_fb_blk_copy(sc, 0, sy, 0, sc->sc_ri.ri_emuheight, cx, cy);
+	udl_fb_block_copy(sc, 0, sy, 0, sc->sc_ri.ri_emuheight, cx, cy);
 
 	/* copy row block back from off-screen now */
-	udl_fb_blk_copy(sc, 0, sc->sc_ri.ri_emuheight, 0, dy, cx, cy);
+	udl_fb_block_copy(sc, 0, sc->sc_ri.ri_emuheight, 0, dy, cx, cy);
 
 	(void)udl_cmd_send_async(sc);
 }
@@ -532,6 +534,7 @@ udl_erasecols(void *cookie, int row, int col, int num, long attr)
 {
 	struct rasops_info *ri = cookie;
 	struct udl_softc *sc = ri->ri_hw;
+	uint16_t bgc;
 	int fg, bg;
 	int x, y, cx, cy;
 
@@ -541,13 +544,14 @@ udl_erasecols(void *cookie, int row, int col, int num, long attr)
 	    DN(sc), FUNC, row, col, num);
 
 	sc->sc_ri.ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
+	bgc = (uint16_t)sc->sc_ri.ri_devcmap[bg];
 
 	x = col * sc->sc_ri.ri_font->fontwidth;
 	y = row * sc->sc_ri.ri_font->fontheight;
 	cx = num * sc->sc_ri.ri_font->fontwidth;
 	cy = sc->sc_ri.ri_font->fontheight;
 
-	udl_fb_blk_write(sc, 0x0000, x, y, cx, cy);
+	udl_fb_block_write(sc, bgc, x, y, cx, cy);
 
 	(void)udl_cmd_send_async(sc);
 }
@@ -557,18 +561,23 @@ udl_eraserows(void *cookie, int row, int num, long attr)
 {
 	struct rasops_info *ri = cookie;
 	struct udl_softc *sc;
+	uint16_t bgc;
+	int fg, bg;
 	int x, y, cx, cy;
 
 	sc = ri->ri_hw;
 
 	DPRINTF(2, "%s: %s: row=%d, num=%d\n", DN(sc), FUNC, row, num);
 
+	sc->sc_ri.ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
+	bgc = (uint16_t)sc->sc_ri.ri_devcmap[bg];
+
 	x = 0;
 	y = row * sc->sc_ri.ri_font->fontheight;
 	cx = sc->sc_ri.ri_emuwidth;
 	cy = num * sc->sc_ri.ri_font->fontheight;
 
-	udl_fb_blk_write(sc, 0x0000, x, y, cx, cy);
+	udl_fb_block_write(sc, bgc, x, y, cx, cy);
 
 	(void)udl_cmd_send_async(sc);
 }
@@ -595,11 +604,11 @@ udl_putchar(void *cookie, int row, int col, u_int uc, long attr)
 		 * Writting a block for the space character instead rendering
 		 * it from font bits is more slim.
 		 */
-		udl_fb_blk_write(sc, bgc, x, y,
+		udl_fb_block_write(sc, bgc, x, y,
 		    ri->ri_font->fontwidth, ri->ri_font->fontheight);
 	} else {
 		/* render a character from font bits */
-		udl_draw_char(sc, x, y, fgc, bgc, uc);
+		udl_draw_char(sc, fgc, bgc, uc, x, y);
 	}
 
 	/*
@@ -632,17 +641,17 @@ udl_do_cursor(struct rasops_info *ri)
 
 	if (sc->sc_cursor_on == 0) {
 		/* safe the last character block to off-screen */
-		udl_fb_blk_copy(sc, x, y, 0, sc->sc_ri.ri_emuheight,
+		udl_fb_block_copy(sc, x, y, 0, sc->sc_ri.ri_emuheight,
 		    ri->ri_font->fontwidth, ri->ri_font->fontheight);
 
 		/* draw cursor */
-		udl_fb_blk_write(sc, 0xffff, x, y,
+		udl_fb_block_write(sc, 0xffff, x, y,
 		    ri->ri_font->fontwidth, ri->ri_font->fontheight);
 
 		sc->sc_cursor_on = 1;
 	} else {
 		/* restore the last safed character from off-screen */
-		udl_fb_blk_copy(sc, 0, sc->sc_ri.ri_emuheight, x, y,
+		udl_fb_block_copy(sc, 0, sc->sc_ri.ri_emuheight, x, y,
 		    ri->ri_font->fontwidth, ri->ri_font->fontheight);
 
 		sc->sc_cursor_on = 0;
@@ -1027,6 +1036,10 @@ udl_cmd_send_async(struct udl_softc *sc)
 	}
 	cx = &sc->sc_cmd_xfer[i];
 
+	/* mark end of command stack */
+	udl_cmd_insert_int_1(sc, UDL_BULK_SOC);
+	udl_cmd_insert_int_1(sc, UDL_BULK_CMD_EOC);
+
 	/* copy command buffer to xfer buffer */
 	bcopy(cb->buf, cx->buf, cb->off);
 
@@ -1158,7 +1171,7 @@ udl_init_resolution(struct udl_softc *sc, uint8_t *buf, uint8_t len)
 		return (error);
 
 	/* clear screen */
-	udl_fb_blk_write(sc, 0x0000, 0, 0, sc->sc_width, sc->sc_height);
+	udl_fb_block_write(sc, 0x0000, 0, 0, sc->sc_width, sc->sc_height);
 	error = udl_cmd_send(sc);
 	if (error != USBD_NORMAL_COMPLETION)
 		return (error);
@@ -1175,7 +1188,7 @@ udl_init_resolution(struct udl_softc *sc, uint8_t *buf, uint8_t len)
 
 void
 udl_fb_off_write(struct udl_softc *sc, uint16_t rgb16, uint32_t off,
-    uint8_t width)
+    uint16_t width)
 {
 	uint8_t buf[UDL_CMD_MAX_DATA_SIZE];
 	uint16_t lwidth, lrgb16;
@@ -1188,7 +1201,7 @@ udl_fb_off_write(struct udl_softc *sc, uint16_t rgb16, uint32_t off,
 	udl_cmd_insert_int_1(sc, UDL_BULK_SOC);
 	udl_cmd_insert_int_1(sc, UDL_BULK_CMD_FB_WRITE | UDL_BULK_CMD_FB_WORD);
 	udl_cmd_insert_int_3(sc, loff);
-	udl_cmd_insert_int_1(sc, width);
+	udl_cmd_insert_int_1(sc, width >= UDL_CMD_MAX_PIXEL_COUNT ? 0 : width);
 
 	for (i = 0; i < lwidth; i += 2) {
 		lrgb16 = htobe16(rgb16);
@@ -1199,7 +1212,7 @@ udl_fb_off_write(struct udl_softc *sc, uint16_t rgb16, uint32_t off,
 }
 
 void
-udl_fb_pos_write(struct udl_softc *sc, uint16_t rgb16, uint32_t x,
+udl_fb_line_write(struct udl_softc *sc, uint16_t rgb16, uint32_t x,
     uint32_t y, uint32_t width)
 {
 	uint32_t off, block;
@@ -1220,18 +1233,36 @@ udl_fb_pos_write(struct udl_softc *sc, uint16_t rgb16, uint32_t x,
 }
 
 void
-udl_fb_blk_write(struct udl_softc *sc, uint16_t rgb16, uint32_t x,
+udl_fb_block_write(struct udl_softc *sc, uint16_t rgb16, uint32_t x,
     uint32_t y, uint32_t width, uint32_t height)
 {
 	uint32_t i;
 
 	for (i = 0; i < height; i++)
-		udl_fb_pos_write(sc, rgb16, x, y + i, width);
+		udl_fb_line_write(sc, rgb16, x, y + i, width);
+}
+
+void
+udl_fb_buf_write(struct udl_softc *sc, uint8_t *buf, uint32_t x,
+    uint32_t y, uint16_t width)
+{
+	uint16_t lwidth;
+	uint32_t off;
+
+	off = ((y * sc->sc_width) + x) * 2;
+	lwidth = width * 2;
+
+	udl_cmd_insert_int_1(sc, UDL_BULK_SOC);
+	udl_cmd_insert_int_1(sc, UDL_BULK_CMD_FB_WRITE | UDL_BULK_CMD_FB_WORD);
+	udl_cmd_insert_int_3(sc, off);
+	udl_cmd_insert_int_1(sc, width >= UDL_CMD_MAX_PIXEL_COUNT ? 0 : width);
+
+	udl_cmd_insert_buf(sc, buf, lwidth);
 }
 
 void
 udl_fb_off_copy(struct udl_softc *sc, uint32_t src_off, uint32_t dst_off,
-    uint8_t width)
+    uint16_t width)
 {
 	uint32_t ldst_off, lsrc_off;
 
@@ -1241,12 +1272,12 @@ udl_fb_off_copy(struct udl_softc *sc, uint32_t src_off, uint32_t dst_off,
 	udl_cmd_insert_int_1(sc, UDL_BULK_SOC);
 	udl_cmd_insert_int_1(sc, UDL_BULK_CMD_FB_COPY | UDL_BULK_CMD_FB_WORD);
 	udl_cmd_insert_int_3(sc, ldst_off);
-	udl_cmd_insert_int_1(sc, width);
+	udl_cmd_insert_int_1(sc, width >= UDL_CMD_MAX_PIXEL_COUNT ? 0 : width);
 	udl_cmd_insert_int_3(sc, lsrc_off);
 }
 
 void
-udl_fb_pos_copy(struct udl_softc *sc, uint32_t src_x, uint32_t src_y,
+udl_fb_line_copy(struct udl_softc *sc, uint32_t src_x, uint32_t src_y,
     uint32_t dst_x, uint32_t dst_y, uint32_t width)
 {
 	uint32_t src_off, dst_off, block;
@@ -1269,41 +1300,43 @@ udl_fb_pos_copy(struct udl_softc *sc, uint32_t src_x, uint32_t src_y,
 }
 
 void
-udl_fb_blk_copy(struct udl_softc *sc, uint32_t src_x, uint32_t src_y,
+udl_fb_block_copy(struct udl_softc *sc, uint32_t src_x, uint32_t src_y,
     uint32_t dst_x, uint32_t dst_y, uint32_t width, uint32_t height)
 {
 	int i;
 
 	for (i = 0; i < height; i++)
-		udl_fb_pos_copy(sc, src_x, src_y + i, dst_x, dst_y + i, width);
+		udl_fb_line_copy(sc, src_x, src_y + i, dst_x, dst_y + i, width);
 }
 
 void
-udl_draw_char(struct udl_softc *sc, uint32_t x, uint32_t y,
-    uint16_t fg, uint16_t bg, u_int uc)
+udl_draw_char(struct udl_softc *sc, uint16_t fg, uint16_t bg, u_int uc,
+    uint32_t x, uint32_t y)
 {
-	int i, j, lx, ly;
+	int i, j, ly;
 	uint8_t *fontchar, fontbits, luc;
+	uint8_t buf[UDL_CMD_MAX_DATA_SIZE];
+	uint16_t *line, lrgb16;
 	struct wsdisplay_font *font = sc->sc_ri.ri_font;
-
-	/* draw the characters background first */
-	udl_fb_blk_write(sc, bg, x, y, font->fontwidth, font->fontheight);
 
 	fontchar = (uint8_t *)(font->data + (uc - font->firstchar) *
 	    sc->sc_ri.ri_fontscale);
 
-	lx = x;
 	ly = y;
 	for (i = 0; i < font->fontheight; i++) {
 		fontbits = *fontchar;
+		line = (uint16_t *)buf;
 
-		for (j = 7; j != -1; j--) {
+		for (j = (font->fontwidth - 1); j != -1; j--) {
 			luc = 1 << j;
 			if (fontbits & luc)
-				udl_fb_pos_write(sc, fg, lx, ly, 1);
-			lx++;
+				lrgb16 = htobe16(fg);
+			else
+				lrgb16 = htobe16(bg);
+			bcopy(&lrgb16, line, 2);
+			line++;
 		}
-		lx = x;
+		udl_fb_buf_write(sc, buf, x, ly, font->fontwidth);
 		ly++;
 
 		fontchar += font->stride;
@@ -1336,7 +1369,7 @@ udl_init_test(struct udl_softc *sc)
 	uint16_t color;
 	uint16_t rgb24[3] = { 0xf800, 0x07e0, 0x001f };
 
-	loops = sc->sc_width * sc->sc_height / UDL_CMD_MAX_PIXEL_COUNT;
+	loops = (sc->sc_width * sc->sc_height) / UDL_CMD_MAX_PIXEL_COUNT;
 	parts = loops / 3;
 	color = rgb24[0];
 
