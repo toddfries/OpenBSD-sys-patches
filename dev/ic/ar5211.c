@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5211.c,v 1.42 2009/02/06 17:06:45 grange Exp $	*/
+/*	$OpenBSD: ar5211.c,v 1.44 2009/06/02 12:39:02 reyk Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -29,7 +29,7 @@ HAL_BOOL	 ar5k_ar5211_nic_reset(struct ath_hal *, u_int32_t);
 HAL_BOOL	 ar5k_ar5211_nic_wakeup(struct ath_hal *, u_int16_t);
 u_int16_t	 ar5k_ar5211_radio_revision(struct ath_hal *, HAL_CHIP);
 void		 ar5k_ar5211_fill(struct ath_hal *);
-void		 ar5k_ar5211_rfregs(struct ath_hal *, HAL_CHANNEL *, u_int,
+HAL_BOOL	 ar5k_ar5211_rfregs(struct ath_hal *, HAL_CHANNEL *, u_int,
     u_int);
 
 /*
@@ -480,12 +480,13 @@ ar5k_ar5211_reset(struct ath_hal *hal, HAL_OPMODE op_mode, HAL_CHANNEL *channel,
 	/*
 	 * Write initial RF registers
 	 */
-	ar5k_ar5211_rfregs(hal, channel, freq, ee_mode);
+	if (ar5k_ar5211_rfregs(hal, channel, freq, ee_mode) == AH_FALSE)
+		return (AH_FALSE);
 
 	/*
 	 * Write initial mode settings
 	 */
-	for (i = 0; i < AR5K_ELEMENTS(ar5211_mode); i++) {
+	for (i = 0; i < nitems(ar5211_mode); i++) {
 		AR5K_REG_WAIT(i);
 		AR5K_REG_WRITE((u_int32_t)ar5211_mode[i].mode_register,
 		    ar5211_mode[i].mode_value[mode]);
@@ -494,7 +495,7 @@ ar5k_ar5211_reset(struct ath_hal *hal, HAL_OPMODE op_mode, HAL_CHANNEL *channel,
 	/*
 	 * Write initial register settings
 	 */
-	for (i = 0; i < AR5K_ELEMENTS(ar5211_ini); i++) {
+	for (i = 0; i < nitems(ar5211_ini); i++) {
 		if (change_channel == AH_TRUE &&
 		    ar5211_ini[i].ini_register >= AR5K_AR5211_PCU_MIN &&
 		    ar5211_ini[i].ini_register <= AR5K_AR5211_PCU_MAX)
@@ -1991,7 +1992,7 @@ ar5k_ar5211_set_key(struct ath_hal *hal, u_int16_t entry,
 		return (AH_FALSE);
 	}
 
-	for (i = 0; i < AR5K_ELEMENTS(key_v); i++)
+	for (i = 0; i < nitems(key_v); i++)
 		AR5K_REG_WRITE(AR5K_AR5211_KEYTABLE_OFF(entry, i), key_v[i]);
 
 	return (ar5k_ar5211_set_key_lladdr(hal, entry, mac));
@@ -2556,12 +2557,12 @@ ar5k_ar5211_eeprom_write(struct ath_hal *hal, u_int32_t offset, u_int16_t data)
  * RF register settings
  */
 
-void
+HAL_BOOL
 ar5k_ar5211_rfregs(struct ath_hal *hal, HAL_CHANNEL *channel, u_int freq,
     u_int ee_mode)
 {
 	struct ar5k_eeprom_info *ee = &hal->ah_capabilities.cap_eeprom;
-	struct ar5k_ar5211_ini_rf rf[AR5K_ELEMENTS(ar5211_rf)];
+	struct ar5k_ar5211_ini_rf rf[nitems(ar5211_rf)];
 	u_int32_t ob, db, obdb, xpds, xpdp, x_gain;
 	u_int i;
 
@@ -2587,6 +2588,10 @@ ar5k_ar5211_rfregs(struct ath_hal *hal, HAL_CHANNEL *channel, u_int freq,
 			    (channel->c_channel > 4000 ? 0 : -1)));
 	}
 
+	/* bogus channel: bad beacon? */
+	if (obdb < 0)
+		return (AH_FALSE);
+
 	ob = ee->ee_ob[ee_mode][obdb];
 	db = ee->ee_db[ee_mode][obdb];
 	x_gain = ee->ee_x_gain[ee_mode];
@@ -2606,13 +2611,15 @@ ar5k_ar5211_rfregs(struct ath_hal *hal, HAL_CHANNEL *channel, u_int freq,
 	rf[17].rf_value[freq] = (rf[17].rf_value[freq] & ~0x8) |
 		((xpds << 3) & 0x8);
 
-	for (i = 0; i < AR5K_ELEMENTS(rf); i++) {
+	for (i = 0; i < nitems(rf); i++) {
 		AR5K_REG_WAIT(i);
 		AR5K_REG_WRITE((u_int32_t)rf[i].rf_register,
 		    rf[i].rf_value[freq]);
 	}
 
 	hal->ah_rf_gain = HAL_RFGAIN_INACTIVE;
+
+	return (AH_TRUE);
 }
 
 HAL_BOOL
