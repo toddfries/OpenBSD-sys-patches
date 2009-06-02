@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid1.c,v 1.9 2009/05/11 14:06:21 jsing Exp $ */
+/* $OpenBSD: softraid_raid1.c,v 1.13 2009/06/02 16:32:23 marco Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  *
@@ -59,6 +59,7 @@ sr_raid1_discipline_init(struct sr_discipline *sd)
 	sd->sd_type = SR_MD_RAID1;
 	sd->sd_max_ccb_per_wu = sd->sd_meta->ssdi.ssd_chunk_no;
 	sd->sd_max_wu = SR_RAID1_NOWU;
+	sd->sd_rebuild = 1;
 
 	/* Setup discipline pointers. */
 	sd->sd_alloc_resources = sr_raid1_alloc_resources;
@@ -208,7 +209,7 @@ sr_raid1_set_vol_state(struct sr_discipline *sd)
 
 	for (i = 0; i < nd; i++) {
 		s = sd->sd_vol.sv_chunks[i]->src_meta.scm_status;
-		if (s > SR_MAX_STATES)
+		if (s >= SR_MAX_STATES)
 			panic("%s: %s: %s: invalid chunk state",
 			    DEVNAME(sd->sd_sc),
 			    sd->sd_meta->ssd_devname,
@@ -244,6 +245,7 @@ sr_raid1_set_vol_state(struct sr_discipline *sd)
 		case BIOC_SVONLINE: /* can go to same state */
 		case BIOC_SVOFFLINE:
 		case BIOC_SVDEGRADED:
+		case BIOC_SVREBUILD: /* happens on boot */
 			break;
 		default:
 			goto die;
@@ -281,6 +283,7 @@ sr_raid1_set_vol_state(struct sr_discipline *sd)
 		switch (new_state) {
 		case BIOC_SVONLINE:
 		case BIOC_SVOFFLINE:
+		case BIOC_SVDEGRADED:
 		case BIOC_SVREBUILD: /* can go to the same state */
 			break;
 		default:
@@ -427,6 +430,10 @@ ragain:
 
 	s = splbio();
 
+	/* rebuild io, let rebuild routine deal with it */
+	if (wu->swu_flags & SR_WUF_REBUILD)
+		goto queued;
+
 	/* current io failed, restart */
 	if (wu->swu_state == SR_WU_RESTART)
 		goto start;
@@ -541,9 +548,17 @@ sr_raid1_intr(struct buf *bp)
 			printf("%s: wu: %p not on pending queue\n",
 			    DEVNAME(sc), wu);
 
-		/* do not change the order of these 2 functions */
-		sr_wu_put(wu);
-		sr_scsi_done(sd, xs);
+		if (wu->swu_flags & SR_WUF_REBUILD) {
+			if (wu->swu_xs->flags & SCSI_DATA_OUT) {
+				//printf("waking up write\n");
+				wu->swu_flags |= SR_WUF_REBUILDIOCOMP;
+				wakeup(wu);
+			}
+		} else {
+			/* do not change the order of these 2 functions */
+			sr_wu_put(wu);
+			scsi_done(xs);
+		}
 
 		if (sd->sd_sync && sd->sd_wu_pending == 0)
 			wakeup(sd);
@@ -555,8 +570,15 @@ retry:
 bad:
 	xs->error = XS_DRIVER_STUFFUP;
 	xs->flags |= ITSDONE;
-	sr_wu_put(wu);
-	sr_scsi_done(sd, xs);
+	if (wu->swu_flags & SR_WUF_REBUILD) {
+		wu->swu_flags |= SR_WUF_REBUILDIOCOMP;
+		wakeup(wu);
+	} else {
+		/* do not change the order of these 2 functions */
+		sr_wu_put(wu);
+		scsi_done(xs);
+	}
+
 	splx(s);
 }
 
