@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.137 2009/06/02 12:32:08 deraadt Exp $ */
+/* $OpenBSD: softraid.c,v 1.140 2009/06/02 21:23:11 marco Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -281,7 +281,7 @@ sr_meta_probe(struct sr_discipline *sd, dev_t *dt, int no_chunk)
 			 * XXX leaving dev open for now; move this to attach
 			 * and figure out the open/close dance for unwind.
 			 */
-			error = bdsw->d_open(dev, FREAD | FWRITE , S_IFBLK,
+			error = bdsw->d_open(dev, FREAD | FWRITE, S_IFBLK,
 			    curproc);
 			if (error) {
 				DNPRINTF(SR_D_META,"%s: sr_meta_probe can't "
@@ -361,7 +361,7 @@ sr_meta_rw(struct sr_discipline *sd, dev_t dev, void *md, size_t sz,
 	}
 
 	bzero(&b, sizeof(b));
-	b.b_flags = flags;
+	b.b_flags = flags | B_PHYS;
 	b.b_blkno = ofs;
 	b.b_bcount = sz;
 	b.b_bufsize = sz;
@@ -1152,6 +1152,10 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 			ch_next = SLIST_NEXT(ch_entry, src_link);
 
 			/* XXX do we want to read this again? */
+			printf("ch %p %p\n", ch_entry, md);
+			printf("mm %x\n", ch_entry->src_dev_mm);
+			if (ch_entry->src_dev_mm == NODEV)
+				panic("src_dev_mm == NODEV");
 			if (sr_meta_native_read(sd, ch_entry->src_dev_mm, md,
 			    NULL))
 				printf("%s: could not read native metadata\n",
@@ -1904,7 +1908,7 @@ sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 	rv = 0;
 done:
 	if (open)
-		(*bdsw->d_close)(dev, FREAD, S_IFCHR, curproc);
+		(*bdsw->d_close)(dev, FREAD | FWRITE, S_IFCHR, curproc);
 
 	return (rv);
 }
@@ -2234,11 +2238,8 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 	rv = sr_meta_save(sd, SR_META_DIRTY);
 	sd->sd_shutdownhook = shutdownhook_establish(sr_shutdown, sd);
 
-	if (sd->sd_vol_status == BIOC_SVREBUILD) {
-		printf("%s: resuming rebuild on %s\n", DEVNAME(sc),
-		    sd->sd_meta->ssd_devname);
+	if (sd->sd_vol_status == BIOC_SVREBUILD)
 		kthread_create_deferred(sr_rebuild, sd);
-	}
 
 	return (rv);
 unwind:
@@ -2699,6 +2700,11 @@ sr_shutdown(void *arg)
 	DNPRINTF(SR_D_DIS, "%s: sr_shutdown %s\n",
 	    DEVNAME(sc), sd->sd_meta->ssd_devname);
 
+	/* abort rebuild and drain io */
+	sd->sd_going_down = 1;
+	while (sd->sd_reb_active)
+		tsleep(sd, PWAIT, "sr_shutdown", 1);
+
 	sr_meta_save(sd, 0);
 
 	sr_discipline_shutdown(sd);
@@ -2811,18 +2817,35 @@ sr_rebuild_thread(void *arg)
 	struct sr_discipline	*sd = arg;
 	struct sr_softc		*sc = sd->sd_sc;
 	daddr64_t		whole_blk, partial_blk, blk, sz, lba;
+	daddr64_t		psz, rb, restart;
 	uint64_t		mysize = 0;
 	struct sr_workunit	*wu_r, *wu_w;
 	struct scsi_xfer	xs_r, xs_w;
 	struct scsi_rw_16	cr, cw;
-	int			c, s, slept;
+	int			c, s, slept, percent = 0, old_percent = -1;
 	u_int8_t		*buf;
 
 	whole_blk = sd->sd_meta->ssdi.ssd_size / SR_REBUILD_IO_SIZE;
 	partial_blk = sd->sd_meta->ssdi.ssd_size % SR_REBUILD_IO_SIZE;
 
+	restart = sd->sd_meta->ssd_rebuild / SR_REBUILD_IO_SIZE;
+	if (restart > whole_blk) {
+		printf("%s: bogus rebuild restart offset, starting from 0\n",
+		    DEVNAME(sc));
+		restart = 0;
+	}
+	if (restart) {
+		psz = sd->sd_meta->ssdi.ssd_size;
+		rb = sd->sd_meta->ssd_rebuild;
+		percent = 100 - ((psz * 100 - rb * 100) / psz);
+		printf("%s: resuming rebuild on %s at %llu%%\n",
+		    DEVNAME(sc), sd->sd_meta->ssd_devname, percent);
+	}
+
+	sd->sd_reb_active = 1;
+
 	buf = malloc(SR_REBUILD_IO_SIZE << DEV_BSHIFT, M_DEVBUF, M_WAITOK);
-	for (blk = 0; blk <= whole_blk; blk++) {
+	for (blk = restart; blk <= whole_blk; blk++) {
 		if (blk == whole_blk)
 			sz = partial_blk;
 		else
@@ -2891,7 +2914,6 @@ queued:
 		splx(s);
 
 		/* wait for read completion */
-
 		slept = 0;
 		while ((wu_w->swu_flags & SR_WUF_REBUILDIOCOMP) == 0) {
 			tsleep(wu_w, PRIBIO, "sr_rebuild", 0);
@@ -2905,12 +2927,24 @@ queued:
 		sr_wu_put(wu_w);
 
 		sd->sd_meta->ssd_rebuild = lba;
-		/* XXX save metadata periodically */
+
+		/* save metadata every percent */
+		psz = sd->sd_meta->ssdi.ssd_size;
+		rb = sd->sd_meta->ssd_rebuild;
+		percent = 100 - ((psz * 100 - rb * 100) / psz);
+		if (percent != old_percent && blk != whole_blk) {
+			if (sr_meta_save(sd, SR_META_DIRTY))
+				printf("%s: could not save metadata to %s\n",
+				    DEVNAME(sc), sd->sd_meta->ssd_devname);
+			old_percent = percent;
+		}
+
+		if (sd->sd_going_down)
+			goto abort;
 	}
 
 	/* all done */
 	sd->sd_meta->ssd_rebuild = 0;
-
 	for (c = 0; c < sd->sd_meta->ssdi.ssd_chunk_no; c++)
 		if (sd->sd_vol.sv_chunks[c]->src_meta.scm_status ==
 		    BIOC_SDREBUILD) {
@@ -2918,11 +2952,13 @@ queued:
 			break;
 		}
 
+abort:
 	if (sr_meta_save(sd, SR_META_DIRTY))
 		printf("%s: could not save metadata to %s\n",
 		    DEVNAME(sc), sd->sd_meta->ssd_devname);
 
 	free(buf, M_DEVBUF);
+	sd->sd_reb_active = 0;
 	kthread_exit(0);
 }
 

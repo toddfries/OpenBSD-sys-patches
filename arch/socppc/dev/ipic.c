@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipic.c,v 1.5 2008/10/12 11:50:18 kettenis Exp $	*/
+/*	$OpenBSD: ipic.c,v 1.7 2009/06/02 21:38:10 drahn Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
