@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.3 2008/09/18 03:56:25 drahn Exp $	*/
+/*	$OpenBSD: intr.c,v 1.5 2009/06/02 21:38:10 drahn Exp $	*/
 
 /*
  * Copyright (c) 1997 Per Fogelstrom, Opsycon AB and RTMX Inc, USA.
