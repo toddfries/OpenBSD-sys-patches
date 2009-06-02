@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwn.c,v 1.57 2009/05/29 08:25:45 damien Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.59 2009/06/02 16:28:21 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007-2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -1767,6 +1767,7 @@ iwn_rx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 		if ((flags & IWN_RX_CIPHER_MASK) != IWN_RX_CIPHER_CCMP) {
 			ic->ic_stats.is_ccmp_dec_errs++;
 			ifp->if_ierrors++;
+			m_freem(m);
 			return;
 		}
 		/* Check whether decryption was successful or not. */
@@ -1778,10 +1779,12 @@ iwn_rx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 			DPRINTF(("CCMP decryption failed 0x%x\n", flags));
 			ic->ic_stats.is_ccmp_dec_errs++;
 			ifp->if_ierrors++;
+			m_freem(m);
 			return;
 		}
 		if (iwn_ccmp_decap(sc, m, &ni->ni_pairwise_key) != 0) {
 			ifp->if_ierrors++;
+			m_freem(m);
 			return;
 		}
 		rxi.rxi_flags |= IEEE80211_RXI_HWDEC;
@@ -3212,6 +3215,8 @@ iwn4965_set_txpower(struct iwn_softc *sc, int async)
 		if (sc->bands[i].lo != 0 &&
 		    sc->bands[i].lo <= chan && chan <= sc->bands[i].hi)
 			break;
+	if (i == IWN_NBANDS)	/* Can't happen in real-life. */
+		return EINVAL;
 	chans = sc->bands[i].chans;
 	DPRINTF(("chan %d sub-band=%d\n", chan, i));
 

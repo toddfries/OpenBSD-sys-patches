@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid1.c,v 1.10 2009/06/02 00:58:16 marco Exp $ */
+/* $OpenBSD: softraid_raid1.c,v 1.13 2009/06/02 16:32:23 marco Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  *
@@ -59,6 +59,7 @@ sr_raid1_discipline_init(struct sr_discipline *sd)
 	sd->sd_type = SR_MD_RAID1;
 	sd->sd_max_ccb_per_wu = sd->sd_meta->ssdi.ssd_chunk_no;
 	sd->sd_max_wu = SR_RAID1_NOWU;
+	sd->sd_rebuild = 1;
 
 	/* Setup discipline pointers. */
 	sd->sd_alloc_resources = sr_raid1_alloc_resources;
@@ -208,7 +209,7 @@ sr_raid1_set_vol_state(struct sr_discipline *sd)
 
 	for (i = 0; i < nd; i++) {
 		s = sd->sd_vol.sv_chunks[i]->src_meta.scm_status;
-		if (s > SR_MAX_STATES)
+		if (s >= SR_MAX_STATES)
 			panic("%s: %s: %s: invalid chunk state",
 			    DEVNAME(sd->sd_sc),
 			    sd->sd_meta->ssd_devname,
@@ -282,6 +283,7 @@ sr_raid1_set_vol_state(struct sr_discipline *sd)
 		switch (new_state) {
 		case BIOC_SVONLINE:
 		case BIOC_SVOFFLINE:
+		case BIOC_SVDEGRADED:
 		case BIOC_SVREBUILD: /* can go to the same state */
 			break;
 		default:
