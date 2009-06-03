@@ -1,4 +1,4 @@
-/* $OpenBSD: nnpfs_dev-bsd.c,v 1.10 2004/01/18 21:46:54 beck Exp $
+/* $OpenBSD: nnpfs_dev-bsd.c,v 1.1 2009/06/03 14:45:54 jj Exp $
 
  * Copyright (c) 2004 Bob Beck
  * Copyright (c) 1995 - 2003 Kungliga Tekniska Högskolan

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.42 2009/01/25 17:30:48 miod Exp $	*/
+/*	$OpenBSD: conf.c,v 1.43 2009/06/03 14:45:52 jj Exp $	*/
 /*	$NetBSD: conf.c,v 1.41 1997/02/11 07:35:49 scottr Exp $	*/
 
 /*

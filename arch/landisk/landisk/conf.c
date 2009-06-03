@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.11 2009/05/15 16:21:25 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.12 2009/06/03 14:45:52 jj Exp $	*/
 
 /*
  * Copyright (c) 1994-1998 Mark Brinicombe.

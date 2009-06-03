@@ -1,4 +1,4 @@
-/*	$OpenBSD: nnpfs_pioctl.h,v 1.5 2003/09/08 05:46:08 beck Exp $	*/
+/*	$OpenBSD: nnpfs_pioctl.h,v 1.1 2009/06/03 14:45:54 jj Exp $	*/
 /*
  * Copyright (c) 1995 - 2000 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).
