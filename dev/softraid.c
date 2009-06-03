@@ -2845,7 +2845,7 @@ sr_rebuild_thread(void *arg)
 	struct scsi_rw_16	cr, cw;
 	int			c, s, slept, percent = 0;
 	u_int8_t		*buf;
-	struct sd_timeout	*sdt;
+	struct sd_timeout	sdt;
 	struct timeout		to;
 
 	whole_blk = sd->sd_meta->ssdi.ssd_size / SR_REBUILD_IO_SIZE;
@@ -2867,12 +2867,11 @@ sr_rebuild_thread(void *arg)
 
 	sd->sd_reb_active = 1;
 
-	sdt = malloc(sizeof(struct sd_timeout), M_DEVBUF, M_WAITOK);
-	sdt->to = &to;
-	sdt->sd = sd;
+	sdt.to = &to;
+	sdt.sd = sd;
 
 	timeout_set(&to, sr_meta_rebuild_timeout, &sdt);
-	timeout_add_sec(sdt->to, 5);
+	timeout_add_sec(sdt.to, 5);
 
 	buf = malloc(SR_REBUILD_IO_SIZE << DEV_BSHIFT, M_DEVBUF, M_WAITOK);
 	for (blk = restart; blk <= whole_blk; blk++) {
@@ -2989,9 +2988,7 @@ sr_meta_rebuild_timeout(void *arg)
 	struct sr_discipline	*sd = sdt->sd;;
 	struct sr_softc		*sc = sd->sd_sc;
 
-	if (sr_meta_save(sd, SR_META_DIRTY))
-		printf("%s: could not save metadata to %s\n",
-		    DEVNAME(sc), sd->sd_meta->ssd_devname);
+	workq_add_task(NULL, 0, sr_meta_save_callback, sd, NULL);
 
 	timeout_add_sec(sdt->to, 5);
 }
