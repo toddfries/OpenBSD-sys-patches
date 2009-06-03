@@ -1,4 +1,4 @@
-/* $OpenBSD: wsconsio.h,v 1.49 2008/12/29 22:25:16 miod Exp $ */
+/* $OpenBSD: wsconsio.h,v 1.53 2009/06/02 04:53:57 kettenis Exp $ */
 /* $NetBSD: wsconsio.h,v 1.74 2005/04/28 07:15:44 martin Exp $ */
 
 /*
@@ -205,6 +205,7 @@ struct wskbd_map_data {
 #define		WSMOUSE_TYPE_LUNA	11	/* OMRON Luna */
 #define		WSMOUSE_TYPE_DOMAIN	12	/* Apollo Domain */
 #define		WSMOUSE_TYPE_BLUETOOTH	13	/* Bluetooth mouse */
+#define		WSMOUSE_TYPE_SUN	14	/* SUN serial mouse */
 
 /* Set resolution.  Not applicable to all mouse types. */
 #define	WSMOUSEIO_SRES		_IOW('W', 33, u_int)
@@ -302,6 +303,9 @@ struct wsmouse_calibcoords {
 #define		WSDISPLAY_TYPE_GBE	54	/* SGI GBE frame buffer */
 #define		WSDISPLAY_TYPE_LEGSS	55	/* DEC LEGSS (VS35x0) */
 #define		WSDISPLAY_TYPE_IFB	56	/* Sun Expert3D{,-Lite} */
+#define		WSDISPLAY_TYPE_RAPTOR	57	/* Tech Source Raptor */
+#define		WSDISPLAY_TYPE_DL	58	/* DisplayLink DL-120/DL-160 */
+#define		WSDISPLAY_TYPE_MACHFB	59	/* Sun PGX/PGX64 */
 
 /* Basic display information.  Not applicable to all display types. */
 struct wsdisplay_fbinfo {

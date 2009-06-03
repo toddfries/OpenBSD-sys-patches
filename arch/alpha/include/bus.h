@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.24 2006/05/12 20:48:19 brad Exp $	*/
+/*	$OpenBSD: bus.h,v 1.26 2009/04/20 00:42:05 oga Exp $	*/
 /*	$NetBSD: bus.h,v 1.10 1996/12/02 22:19:32 cgd Exp $	*/
 
 /*
@@ -218,6 +218,9 @@ struct alpha_bus_space {
 #define	bus_space_subregion(t, h, o, s, hp)				\
 	(*(t)->abs_subregion)((t)->abs_cookie, (h), (o), (s), (hp))
 
+#define	BUS_SPACE_MAP_CACHEABLE		0x01
+#define	BUS_SPACE_MAP_LINEAR		0x02
+#define	BUS_SPACE_MAP_PREFETCHABLE	0x04
 
 /*
  * Allocation and deallocation operations.
@@ -425,17 +428,18 @@ struct alpha_bus_space {
 /*
  * Flags used in various bus DMA methods.
  */
-#define	BUS_DMA_WAITOK		0x000	/* safe to sleep (pseudo-flag) */
-#define	BUS_DMA_NOWAIT		0x001	/* not safe to sleep */
-#define	BUS_DMA_ALLOCNOW	0x002	/* perform resource allocation now */
-#define	BUS_DMA_COHERENT	0x004	/* hint: map memory DMA coherent */
-#define	BUS_DMA_BUS1		0x010	/* placeholders for bus functions... */
-#define	BUS_DMA_BUS2		0x020
-#define	BUS_DMA_BUS3		0x040
-#define	BUS_DMA_24BIT		0x080	/* isadma map */
-#define	BUS_DMA_STREAMING	0x100	/* hint: sequential, unidirectional */
-#define	BUS_DMA_READ		0x200	/* mapping is device -> memory only */
-#define	BUS_DMA_WRITE		0x400	/* mapping is memory -> device only */
+#define	BUS_DMA_WAITOK		0x0000	/* safe to sleep (pseudo-flag) */
+#define	BUS_DMA_NOWAIT		0x0001	/* not safe to sleep */
+#define	BUS_DMA_ALLOCNOW	0x0002	/* perform resource allocation now */
+#define	BUS_DMA_COHERENT	0x0004	/* hint: map memory DMA coherent */
+#define	BUS_DMA_BUS1		0x0010	/* placeholders for bus functions... */
+#define	BUS_DMA_BUS2		0x0020
+#define	BUS_DMA_BUS3		0x0040
+#define	BUS_DMA_24BIT		0x0080	/* isadma map */
+#define	BUS_DMA_STREAMING	0x0100	/* hint: sequential, unidirectional */
+#define	BUS_DMA_READ		0x0200	/* mapping is device -> memory only */
+#define	BUS_DMA_WRITE		0x0400	/* mapping is memory -> device only */
+#define	BUS_DMA_ZERO		0x1000	/* zero memory in dmamem_alloc */
 
 /*
  * Private flags stored in the DMA map.
@@ -529,16 +533,6 @@ struct alpha_bus_dma_tag {
 	 * windows also get a pointer to their SGMAP state.
 	 */
 	struct alpha_sgmap *_sgmap;
-
-	/*
-	 * The SGMAP MMU implements a prefetch FIFO to keep data
-	 * moving down the pipe, when doing host->bus DMA writes.
-	 * The threshold (distance until the next page) used to
-	 * trigger the prefetch is differnet on different chipsets,
-	 * and we need to know what it is in order to know whether
-	 * or not to allocate a spill page.
-	 */
-	bus_size_t _pfthresh;
 
 	/*
 	 * Internal-use only utility methods.  NOT TO BE USED BY

@@ -43,7 +43,7 @@ void	machdrm_attach(struct device *, struct device *, void *);
 int	machdrm_detach(struct device *, int);
 int	machdrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-static drm_pci_id_list_t mach64_pciidlist[] = {
+const static struct drm_pcidev mach64_pciidlist[] = {
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GI},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GP},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GQ},
@@ -77,7 +77,6 @@ static const struct drm_driver_info machdrm_driver = {
 	.disable_vblank		= mach64_disable_vblank,
 	.irq_install		= mach64_driver_irq_install,
 	.irq_uninstall		= mach64_driver_irq_uninstall,
-	.irq_handler		= mach64_driver_irq_handler,
 	.dma_ioctl		= mach64_dma_buffers,
 
 	.name			= DRIVER_NAME,

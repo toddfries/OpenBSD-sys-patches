@@ -1,4 +1,4 @@
-/* $OpenBSD: interrupt.c,v 1.25 2008/06/26 05:42:08 ray Exp $ */
+/* $OpenBSD: interrupt.c,v 1.29 2009/04/19 19:13:57 oga Exp $ */
 /* $NetBSD: interrupt.c,v 1.46 2000/06/03 20:47:36 thorpej Exp $ */
 
 /*-
@@ -505,7 +505,7 @@ netintr()
 struct alpha_soft_intr alpha_soft_intrs[SI_NSOFT];
 
 /* XXX For legacy software interrupts. */
-struct alpha_soft_intrhand *softnet_intrhand, *softclock_intrhand;
+struct alpha_soft_intrhand *softnet_intrhand;
 
 /*
  * softintr_init:
@@ -521,15 +521,13 @@ softintr_init()
 	for (i = 0; i < SI_NSOFT; i++) {
 		asi = &alpha_soft_intrs[i];
 		TAILQ_INIT(&asi->softintr_q);
-		simple_lock_init(&asi->softintr_slock);
+		mtx_init(&asi->softintr_mtx, IPL_HIGH);
 		asi->softintr_siq = i;
 	}
 
 	/* XXX Establish legacy software interrupt handlers. */
 	softnet_intrhand = softintr_establish(IPL_SOFTNET,
 	    (void (*)(void *))netintr, NULL);
-	softclock_intrhand = softintr_establish(IPL_SOFTCLOCK,
-	    (void (*)(void *))softclock, NULL);
 }
 
 /*
@@ -552,23 +550,20 @@ softintr_dispatch()
 			asi = &alpha_soft_intrs[i];
 
 			for (;;) {
-				(void) alpha_pal_swpipl(ALPHA_PSL_IPL_HIGH);
-				simple_lock(&asi->softintr_slock);
+				mtx_enter(&asi->softintr_mtx);
 
 				sih = TAILQ_FIRST(&asi->softintr_q);
-				if (sih != NULL) {
-					TAILQ_REMOVE(&asi->softintr_q, sih,
-					    sih_q);
-					sih->sih_pending = 0;
-				}
-
-				simple_unlock(&asi->softintr_slock);
-				(void) alpha_pal_swpipl(ALPHA_PSL_IPL_SOFT);
-
-				if (sih == NULL)
+				if (sih == NULL) {
+					mtx_leave(&asi->softintr_mtx);
 					break;
+				}
+				TAILQ_REMOVE(&asi->softintr_q, sih, sih_q);
+				sih->sih_pending = 0;
 
 				uvmexp.softs++;
+
+				mtx_leave(&asi->softintr_mtx);
+
 				(*sih->sih_fn)(sih->sih_arg);
 			}
 		}
@@ -635,18 +630,33 @@ softintr_disestablish(void *arg)
 {
 	struct alpha_soft_intrhand *sih = arg;
 	struct alpha_soft_intr *asi = sih->sih_intrhead;
-	int s;
 
-	s = splhigh();
-	simple_lock(&asi->softintr_slock);
+	mtx_enter(&asi->softintr_mtx);
 	if (sih->sih_pending) {
 		TAILQ_REMOVE(&asi->softintr_q, sih, sih_q);
 		sih->sih_pending = 0;
 	}
-	simple_unlock(&asi->softintr_slock);
-	splx(s);
+	mtx_leave(&asi->softintr_mtx);
 
 	free(sih, M_DEVBUF);
+}
+
+/*
+ * Schedule a software interrupt.
+*/
+void
+softintr_schedule(void *arg)
+{
+	struct alpha_soft_intrhand *sih = arg;
+	struct alpha_soft_intr *si = sih->sih_intrhead;
+
+	mtx_enter(&si->softintr_mtx);
+	if (sih->sih_pending == 0) {
+		TAILQ_INSERT_TAIL(&si->softintr_q, sih, sih_q);
+		sih->sih_pending = 1;
+		setsoft(si->softintr_siq);
+	}
+	mtx_leave(&si->softintr_mtx);
 }
 
 int
@@ -661,12 +671,6 @@ void
 splassert_check(int wantipl, const char *func)
 {
 	int curipl = alpha_pal_rdps() & ALPHA_PSL_IPL_MASK;
-
-	/*
-	 * Tell soft interrupts apart from regular levels.
-	 */
-	if (wantipl < 0)
-		wantipl = IPL_SOFTINT;
 
 	/*
 	 * Depending on the system, hardware interrupts may occur either

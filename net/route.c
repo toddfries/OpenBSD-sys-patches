@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.101 2009/01/08 12:47:45 michele Exp $	*/
+/*	$OpenBSD: route.c,v 1.108 2009/05/31 04:07:03 claudio Exp $	*/
 /*	$NetBSD: route.c,v 1.14 1996/02/13 22:00:46 christos Exp $	*/
 
 /*
@@ -419,6 +419,10 @@ rtfree(struct rtentry *rt)
 		if (ifa)
 			IFAFREE(ifa);
 		rtlabel_unref(rt->rt_labelid);
+#ifdef MPLS
+		if (rt->rt_flags & RTF_MPLS)
+			free(rt->rt_llinfo, M_TEMP);
+#endif
 		Free(rt_key(rt));
 		pool_put(&rtentry_pool, rt);
 	}
@@ -455,7 +459,7 @@ rtredirect(struct sockaddr *dst, struct sockaddr *gateway,
 	struct ifaddr		*ifa;
 	struct ifnet		*ifp = NULL;
 
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
 
 	/* verify the gateway is directly reachable */
 	if ((ifa = ifa_ifwithnet(gateway)) == NULL) {
@@ -726,7 +730,7 @@ rtrequest1(int req, struct rt_addrinfo *info, u_int8_t prio,
 	struct radix_node_head	*rnh;
 	struct ifaddr		*ifa;
 	struct sockaddr		*ndst;
-	struct sockaddr_rtlabel	*sa_rl;
+	struct sockaddr_rtlabel	*sa_rl, sa_rl2;
 #ifdef MPLS
 	struct sockaddr_mpls	*sa_mpls;
 #endif
@@ -811,6 +815,8 @@ rtrequest1(int req, struct rt_addrinfo *info, u_int8_t prio,
 		info->rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 		if ((info->rti_info[RTAX_NETMASK] = rt->rt_genmask) == NULL)
 			info->rti_flags |= RTF_HOST;
+		info->rti_info[RTAX_LABEL] =
+		    rtlabel_id2sa(rt->rt_labelid, &sa_rl2);
 		goto makeroute;
 
 	case RTM_ADD:
@@ -822,7 +828,9 @@ makeroute:
 		if (rt == NULL)
 			senderr(ENOBUFS);
 		Bzero(rt, sizeof(*rt));
+
 		rt->rt_flags = info->rti_flags;
+
 		if (prio == 0)
 			prio = ifa->ifa_ifp->if_priority + RTP_STATIC;
 		rt->rt_priority = prio;	/* init routing priority */
@@ -867,10 +875,35 @@ makeroute:
 		}
 
 #ifdef MPLS
-		if (info->rti_info[RTAX_SRC] != NULL) {
+		/* We have to allocate additional space for MPLS infos */ 
+		if (info->rti_info[RTAX_SRC] != NULL ||
+		    info->rti_info[RTAX_DST]->sa_family == AF_MPLS) {
+			struct rt_mpls *rt_mpls;
+
 			sa_mpls = (struct sockaddr_mpls *)
 			    info->rti_info[RTAX_SRC];
-			rt->rt_mpls = sa_mpls->smpls_label;
+
+			rt->rt_llinfo = (caddr_t)malloc(sizeof(struct rt_mpls),
+			    M_TEMP, M_NOWAIT|M_ZERO);
+
+			if (rt->rt_llinfo == NULL) {
+				if (rt->rt_gwroute)
+					rtfree(rt->rt_gwroute);
+				Free(rt_key(rt));
+				pool_put(&rtentry_pool, rt);
+				senderr(ENOMEM);
+			}
+
+			rt_mpls = (struct rt_mpls *)rt->rt_llinfo;
+
+			if (sa_mpls != NULL)
+				rt_mpls->mpls_label = sa_mpls->smpls_label;
+
+			rt_mpls->mpls_operation = info->rti_mpls;
+
+			/* XXX: set experimental bits */
+
+			rt->rt_flags |= RTF_MPLS;
 		}
 #endif
 
@@ -1024,7 +1057,6 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 	int			 error;
 	struct rt_addrinfo	 info;
 	struct sockaddr_rtlabel	 sa_rl;
-	const char		*label;
 
 	dst = flags & RTF_HOST ? ifa->ifa_dstaddr : ifa->ifa_addr;
 	if (cmd == RTM_DELETE) {
@@ -1052,14 +1084,8 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 	info.rti_info[RTAX_DST] = dst;
 	if (cmd == RTM_ADD)
 		info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
-	if (ifa->ifa_ifp->if_rtlabelid &&
-	    (label = rtlabel_id2name(ifa->ifa_ifp->if_rtlabelid)) != NULL) {
-		bzero(&sa_rl, sizeof(sa_rl));
-		sa_rl.sr_len = sizeof(sa_rl);
-		sa_rl.sr_family = AF_UNSPEC;
-		strlcpy(sa_rl.sr_label, label, sizeof(sa_rl.sr_label));
-		info.rti_info[RTAX_LABEL] = (struct sockaddr *)&sa_rl;
-	}
+	info.rti_info[RTAX_LABEL] =
+	    rtlabel_id2sa(ifa->ifa_ifp->if_rtlabelid, &sa_rl);
 
 	/*
 	 * XXX here, it seems that we are assuming that ifa_netmask is NULL
@@ -1267,7 +1293,7 @@ rt_gettable(sa_family_t af, u_int id)
 }
 
 struct radix_node *
-rt_lookup(struct sockaddr *dst, struct sockaddr *mask, int tableid)
+rt_lookup(struct sockaddr *dst, struct sockaddr *mask, u_int tableid)
 {
 	struct radix_node_head	*rnh;
 
@@ -1363,6 +1389,22 @@ rtlabel_id2name(u_int16_t id)
 			return (label->rtl_name);
 
 	return (NULL);
+}
+
+struct sockaddr *
+rtlabel_id2sa(u_int16_t labelid, struct sockaddr_rtlabel *sa_rl)
+{
+	const char	*label;
+
+	if (labelid == 0 || (label = rtlabel_id2name(labelid)) == NULL)
+		return (NULL);
+
+	bzero(sa_rl, sizeof(*sa_rl));
+	sa_rl->sr_len = sizeof(*sa_rl);
+	sa_rl->sr_family = AF_UNSPEC;
+	strlcpy(sa_rl->sr_label, label, sizeof(sa_rl->sr_label));
+
+	return ((struct sockaddr *)sa_rl);
 }
 
 void

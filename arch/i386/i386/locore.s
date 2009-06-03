@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.125 2009/01/17 23:44:46 guenther Exp $	*/
+/*	$OpenBSD: locore.s,v 1.127 2009/06/03 00:49:12 art Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -84,9 +84,6 @@
 
 #define	GET_CURPCB(reg)					\
 	movl	CPUVAR(CURPCB), reg
-
-#define	SET_CURPCB(reg)					\
-	movl	reg, CPUVAR(CURPCB)
 
 #define	CHECK_ASTPENDING(treg)				\
 	movl 	CPUVAR(CURPROC),treg		;	\
@@ -363,7 +360,6 @@ trycyrix486:
 	jne	2f			# yes; must not be Cyrix CPU
 	movl	$CPU_486DLC,RELOC(_C_LABEL(cpu))	# set CPU type
 
-#ifndef CYRIX_CACHE_WORKS
 	/* Disable caching of the ISA hole only. */
 	invd
 	movb	$CCR0,%al		# Configuration Register index (CCR0)
@@ -376,49 +372,6 @@ trycyrix486:
 	movb	%ah,%al
 	outb	%al,$0x23
 	invd
-#else /* CYRIX_CACHE_WORKS */
-	/* Set cache parameters */
-	invd				# Start with guaranteed clean cache
-	movb	$CCR0,%al		# Configuration Register index (CCR0)
-	outb	%al,$0x22
-	inb	$0x23,%al
-	andb	$~CCR0_NC0,%al
-#ifndef CYRIX_CACHE_REALLY_WORKS
-	orb	$(CCR0_NC1|CCR0_BARB),%al
-#else
-	orb	$CCR0_NC1,%al
-#endif
-	movb	%al,%ah
-	movb	$CCR0,%al
-	outb	%al,$0x22
-	movb	%ah,%al
-	outb	%al,$0x23
-	/* clear non-cacheable region 1	*/
-	movb	$(NCR1+2),%al
-	outb	%al,$0x22
-	movb	$NCR_SIZE_0K,%al
-	outb	%al,$0x23
-	/* clear non-cacheable region 2	*/
-	movb	$(NCR2+2),%al
-	outb	%al,$0x22
-	movb	$NCR_SIZE_0K,%al
-	outb	%al,$0x23
-	/* clear non-cacheable region 3	*/
-	movb	$(NCR3+2),%al
-	outb	%al,$0x22
-	movb	$NCR_SIZE_0K,%al
-	outb	%al,$0x23
-	/* clear non-cacheable region 4	*/
-	movb	$(NCR4+2),%al
-	outb	%al,$0x22
-	movb	$NCR_SIZE_0K,%al
-	outb	%al,$0x23
-	/* enable caching in CR0 */
-	movl	%cr0,%eax
-	andl	$~(CR0_CD|CR0_NW),%eax
-	movl	%eax,%cr0
-	invd
-#endif /* CYRIX_CACHE_WORKS */
 
 	jmp	2f
 
@@ -1314,49 +1267,28 @@ ENTRY(cpu_switchto)
 	testl	%esi,%esi
 	jz	switch_exited
 
-	/*
-	 * Save old context.
-	 *
-	 * Registers:
-	 *   %eax, %ecx - scratch
-	 *   %esi - old process, then old pcb
-	 *   %edi - new process
-	 */
-
-	pushl	%esi
-	call	_C_LABEL(pmap_deactivate)
-	addl	$4,%esp
-
-	movl	P_ADDR(%esi),%esi
-
-	/* Save stack pointers. */
-	movl	%esp,PCB_ESP(%esi)
-	movl	%ebp,PCB_EBP(%esi)
+	/* Save old stack pointers. */
+	movl	P_ADDR(%esi),%ebx
+	movl	%esp,PCB_ESP(%ebx)
+	movl	%ebp,PCB_EBP(%ebx)
 
 switch_exited:
-	/*
-	 * Third phase: restore saved context.
-	 *
-	 * Registers:
-	 *   %eax, %ecx, %edx - scratch
-	 *   %esi - new pcb
-	 *   %edi - new process
-	 */
+	/* Restore saved context. */
 
 	/* No interrupts while loading new state. */
 	cli
 
 	/* Record new process. */
-	movl	CPUVAR(SELF), %ebx
 	movl	%edi, CPUVAR(CURPROC)
 	movb	$SONPROC, P_STAT(%edi)
-	movl	%ebx, P_CPU(%edi)
-
-	movl	P_ADDR(%edi),%esi
 
 	/* Restore stack pointers. */
-	movl	PCB_ESP(%esi),%esp
-	movl	PCB_EBP(%esi),%ebp
+	movl	P_ADDR(%edi),%ebx
+	movl	PCB_ESP(%ebx),%esp
+	movl	PCB_EBP(%ebx),%ebp
+
+	/* Record new pcb. */
+	movl	%ebx, CPUVAR(CURPCB)
 
 	/*
 	 * Activate the address space.  The pcb copy of %cr3 and the
@@ -1364,9 +1296,10 @@ switch_exited:
 	 * curproc they'll both be reloaded into the CPU.
 	 */
 	pushl	%edi
-	call	_C_LABEL(pmap_activate)
-	addl	$4,%esp
-	
+	pushl	%esi
+	call	_C_LABEL(pmap_switch)
+	addl	$8,%esp
+
 	/* Load TSS info. */
 	movl	CPUVAR(GDT),%eax
 	movl	P_MD_TSS_SEL(%edi),%edx
@@ -1376,22 +1309,19 @@ switch_exited:
 	ltr	%dx
 
 	/* Restore cr0 (including FPU state). */
-	movl	PCB_CR0(%esi),%ecx
+	movl	PCB_CR0(%ebx),%ecx
 #ifdef MULTIPROCESSOR
 	/*
 	 * If our floating point registers are on a different CPU,
 	 * clear CR0_TS so we'll trap rather than reuse bogus state.
 	 */
-	movl	CPUVAR(SELF), %ebx
-	cmpl	PCB_FPCPU(%esi),%ebx
+	movl	CPUVAR(SELF), %esi
+	cmpl	PCB_FPCPU(%ebx), %esi
 	jz	1f
 	orl	$CR0_TS,%ecx
 1:	
 #endif	
 	movl	%ecx,%cr0
-
-	/* Record new pcb. */
-	SET_CURPCB(%esi)
 
 	/* Interrupts are okay again. */
 	sti

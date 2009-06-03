@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.186 2009/01/09 04:41:02 david Exp $	*/
+/*	$OpenBSD: if.c,v 1.192 2009/06/01 17:49:11 claudio Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -127,6 +127,7 @@
 
 void	if_attachsetup(struct ifnet *);
 void	if_attachdomain1(struct ifnet *);
+void	if_attach_common(struct ifnet *);
 
 int	ifqmaxlen = IFQ_MAXLEN;
 
@@ -203,7 +204,6 @@ struct ifnet *lo0ifp;
 void
 if_attachsetup(struct ifnet *ifp)
 {
-	struct ifaddr *ifa;
 	int wrapped = 0;
 
 	if (ifindex2ifnet == 0)
@@ -252,8 +252,8 @@ if_attachsetup(struct ifnet *ifp)
 			if_indexlim <<= 1;
 
 		/* grow ifnet_addrs */
-		m = oldlim * sizeof(ifa);
-		n = if_indexlim * sizeof(ifa);
+		m = oldlim * sizeof(struct ifaddr *);
+		n = if_indexlim * sizeof(struct ifaddr *);
 		q = (caddr_t)malloc(n, M_IFADDR, M_WAITOK|M_ZERO);
 		if (ifnet_addrs) {
 			bcopy((caddr_t)ifnet_addrs, q, m);
@@ -321,8 +321,7 @@ if_alloc_sadl(struct ifnet *ifp)
 		if_free_sadl(ifp);
 
 	namelen = strlen(ifp->if_xname);
-#define _offsetof(t, m) ((int)((caddr_t)&((t *)0)->m))
-	masklen = _offsetof(struct sockaddr_dl, sdl_data[0]) + namelen;
+	masklen = offsetof(struct sockaddr_dl, sdl_data[0]) + namelen;
 	socksize = masklen + ifp->if_addrlen;
 #define ROUNDUP(a) (1 + (((a) - 1) | (sizeof(long) - 1)))
 	if (socksize < sizeof(*sdl))
@@ -411,26 +410,7 @@ if_attachdomain1(struct ifnet *ifp)
 void
 if_attachhead(struct ifnet *ifp)
 {
-	if (if_index == 0) {
-		TAILQ_INIT(&ifnet);
-		TAILQ_INIT(&ifg_head);
-	}
-	TAILQ_INIT(&ifp->if_addrlist);
-	ifp->if_addrhooks = malloc(sizeof(*ifp->if_addrhooks),
-	    M_TEMP, M_NOWAIT);
-	if (ifp->if_addrhooks == NULL)
-		panic("if_attachhead: malloc");
-	TAILQ_INIT(ifp->if_addrhooks);
-	ifp->if_linkstatehooks = malloc(sizeof(*ifp->if_linkstatehooks),
-	    M_TEMP, M_NOWAIT);
-	if (ifp->if_linkstatehooks == NULL)
-		panic("if_attachhead: malloc");
-	TAILQ_INIT(ifp->if_linkstatehooks);
-	ifp->if_detachhooks = malloc(sizeof(*ifp->if_detachhooks),
-	    M_TEMP, M_NOWAIT);
-	if (ifp->if_detachhooks == NULL)
-		panic("if_attachhead: malloc");
-	TAILQ_INIT(ifp->if_detachhooks);
+	if_attach_common(ifp);
 	TAILQ_INSERT_HEAD(&ifnet, ifp, if_list);
 	if_attachsetup(ifp);
 }
@@ -442,26 +422,7 @@ if_attach(struct ifnet *ifp)
 	struct ifnet *before = NULL;
 #endif
 
-	if (if_index == 0) {
-		TAILQ_INIT(&ifnet);
-		TAILQ_INIT(&ifg_head);
-	}
-	TAILQ_INIT(&ifp->if_addrlist);
-	ifp->if_addrhooks = malloc(sizeof(*ifp->if_addrhooks),
-	    M_TEMP, M_NOWAIT);
-	if (ifp->if_addrhooks == NULL)
-		panic("if_attach: malloc");
-	TAILQ_INIT(ifp->if_addrhooks);
-	ifp->if_linkstatehooks = malloc(sizeof(*ifp->if_linkstatehooks),
-	    M_TEMP, M_NOWAIT);
-	if (ifp->if_linkstatehooks == NULL)
-		panic("if_attach: malloc");
-	TAILQ_INIT(ifp->if_linkstatehooks);
-	ifp->if_detachhooks = malloc(sizeof(*ifp->if_detachhooks),
-	    M_TEMP, M_NOWAIT);
-	if (ifp->if_detachhooks == NULL)
-		panic("if_attach: malloc");
-	TAILQ_INIT(ifp->if_detachhooks);
+	if_attach_common(ifp);
 
 #if NCARP > 0
 	if (ifp->if_type != IFT_CARP)
@@ -479,6 +440,32 @@ if_attach(struct ifnet *ifp)
 	m_clinitifp(ifp);
 
 	if_attachsetup(ifp);
+}
+
+void
+if_attach_common(struct ifnet *ifp)
+{
+
+	if (if_index == 0) {
+		TAILQ_INIT(&ifnet);
+		TAILQ_INIT(&ifg_head);
+	}
+	TAILQ_INIT(&ifp->if_addrlist);
+	ifp->if_addrhooks = malloc(sizeof(*ifp->if_addrhooks),
+	    M_TEMP, M_NOWAIT);
+	if (ifp->if_addrhooks == NULL)
+		panic("if_attach_common: malloc");
+	TAILQ_INIT(ifp->if_addrhooks);
+	ifp->if_linkstatehooks = malloc(sizeof(*ifp->if_linkstatehooks),
+	    M_TEMP, M_NOWAIT);
+	if (ifp->if_linkstatehooks == NULL)
+		panic("if_attach_common: malloc");
+	TAILQ_INIT(ifp->if_linkstatehooks);
+	ifp->if_detachhooks = malloc(sizeof(*ifp->if_detachhooks),
+	    M_TEMP, M_NOWAIT);
+	if (ifp->if_detachhooks == NULL)
+		panic("if_attach_common: malloc");
+	TAILQ_INIT(ifp->if_detachhooks);
 }
 
 void
@@ -1072,7 +1059,7 @@ if_down(struct ifnet *ifp)
 {
 	struct ifaddr *ifa;
 
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
 
 	ifp->if_flags &= ~IFF_UP;
 	microtime(&ifp->if_lastchange);
@@ -1106,7 +1093,7 @@ if_up(struct ifnet *ifp)
 	struct ifaddr *ifa;
 #endif
 
-	splassert(IPL_SOFTNET);
+	splsoftassert(IPL_SOFTNET);
 
 	ifp->if_flags |= IFF_UP;
 	microtime(&ifp->if_lastchange);

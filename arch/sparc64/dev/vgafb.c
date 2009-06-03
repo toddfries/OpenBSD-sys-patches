@@ -1,4 +1,4 @@
-/*	$OpenBSD: vgafb.c,v 1.56 2008/12/29 22:07:35 miod Exp $	*/
+/*	$OpenBSD: vgafb.c,v 1.58 2009/06/02 18:51:03 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
@@ -225,6 +225,12 @@ vgafb_ioctl(v, cmd, data, flags, p)
 		wdf->depth  = sc->sc_sunfb.sf_depth;
 		wdf->cmsize = 256;
 		break;
+	case WSDISPLAYIO_GETSUPPORTEDDEPTH:
+		if (sc->sc_sunfb.sf_depth == 32)
+			*(u_int *)data = WSDISPLAYIO_DEPTH_24_32;
+		else
+			return (-1);
+		break;
 	case WSDISPLAYIO_LINEBYTES:
 		*(u_int *)data = sc->sc_sunfb.sf_linebytes;
 		break;
@@ -438,7 +444,7 @@ vgafb_mapregs(sc, pa)
 				 * or mmio, we guess that memory is
 				 * the larger of the two.
 				 */
-				if (sc->sc_mem_size > bs) {
+				if (sc->sc_mem_size >= bs) {
 					/* this is the mmio */
 					sc->sc_mmio_addr = ba;
 					/* ATI driver maps 0x80000 mmio, grr */

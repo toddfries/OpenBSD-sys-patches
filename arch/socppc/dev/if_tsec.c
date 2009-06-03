@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tsec.c,v 1.14 2008/11/28 02:44:17 brad Exp $	*/
+/*	$OpenBSD: if_tsec.c,v 1.22 2009/02/22 20:03:19 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -60,12 +60,23 @@ extern void myetheraddr(u_char *);
 
 #define TSEC_IEVENT		0x010
 #define  TSEC_IEVENT_BABR	0x80000000
+#define  TSEC_IEVENT_RXC	0x40000000
+#define  TSEC_IEVENT_BSY	0x20000000
+#define  TSEC_IEVENT_EBERR	0x10000000
+#define  TSEC_IEVENT_MSRO	0x04000000
 #define  TSEC_IEVENT_GTSC	0x02000000
+#define  TSEC_IEVENT_BABT	0x01000000
 #define  TSEC_IEVENT_TXC	0x00800000
 #define  TSEC_IEVENT_TXE	0x00400000
 #define  TSEC_IEVENT_TXB	0x00200000
 #define  TSEC_IEVENT_TXF	0x00100000
+#define  TSEC_IEVENT_LC		0x00040000
+#define  TSEC_IEVENT_CRL	0x00020000
+#define  TSEC_IEVENT_DXA	TSEC_IEVENT_CRL
+#define  TSEC_IEVENT_XFUN	0x00010000
 #define  TSEC_IEVENT_RXB	0x00008000
+#define  TSEC_IEVENT_MMRD	0x00000400
+#define  TSEC_IEVENT_MMWR	0x00000200
 #define  TSEC_IEVENT_GRSC	0x00000100
 #define  TSEC_IEVENT_RXF	0x00000080
 #define  TSEC_IEVENT_FMT	"\020" "\040BABR" "\037RXC" "\036BSY" \
@@ -252,7 +263,9 @@ struct tsec_softc {
 	struct tsec_dmamem	*sc_rxring;
 	struct tsec_buf		*sc_rxbuf;
 	struct tsec_desc	*sc_rxdesc;
-	int			sc_rx_nextidx;
+	int			sc_rx_prod;
+	int			sc_rx_cnt;
+	int			sc_rx_cons;
 
 	struct timeout		sc_tick;
 };
@@ -307,6 +320,7 @@ struct tsec_dmamem *
 	tsec_dmamem_alloc(struct tsec_softc *, bus_size_t, bus_size_t);
 void	tsec_dmamem_free(struct tsec_softc *, struct tsec_dmamem *);
 struct mbuf *tsec_alloc_mbuf(struct tsec_softc *, bus_dmamap_t);
+void	tsec_fill_rx_ring(struct tsec_softc *);
 
 int
 tsec_match(struct device *parent, void *cfdata, void *aux)
@@ -344,6 +358,8 @@ tsec_attach(struct device *parent, struct device *self, void *aux)
 	IFQ_SET_MAXLEN(&ifp->if_snd, TSEC_NTXDESC - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
+
+	m_clsetwms(ifp, MCLBYTES, 0, TSEC_NRXDESC);
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
@@ -543,6 +559,7 @@ tsec_mii_readreg(struct device *self, int phy, int reg)
 		v = tsec_read(sc, TSEC_MIIMIND);
 		if ((v & (TSEC_MIIMIND_NOTVALID | TSEC_MIIMIND_BUSY)) == 0)
 			return (tsec_read(sc, TSEC_MIIMSTAT));
+		delay(10);
 	}
 
 	printf("%s: mii_read timeout\n", sc->sc_dev.dv_xname);
@@ -562,6 +579,7 @@ tsec_mii_writereg(struct device *self, int phy, int reg, int val)
 		v = tsec_read(sc, TSEC_MIIMIND);
 		if ((v & TSEC_MIIMIND_BUSY) == 0)
 			return;
+		delay(10);
 	}
 
 	printf("%s: mii_write timeout\n", sc->sc_dev.dv_xname);
@@ -623,6 +641,9 @@ tsec_txintr(void *arg)
 	uint32_t ievent;
 
 	ievent = tsec_read(sc, TSEC_IEVENT);
+	if ((ievent & (TSEC_IEVENT_TXC | TSEC_IEVENT_TXE |
+	    TSEC_IEVENT_TXB | TSEC_IEVENT_TXF)) == 0)
+		printf("%s: tx %b\n", DEVNAME(sc), ievent, TSEC_IEVENT_FMT);
 	ievent &= (TSEC_IEVENT_TXC | TSEC_IEVENT_TXE |
 	    TSEC_IEVENT_TXB | TSEC_IEVENT_TXF);
 	tsec_write(sc, TSEC_IEVENT, ievent);
@@ -639,6 +660,8 @@ tsec_rxintr(void *arg)
 	uint32_t ievent;
 
 	ievent = tsec_read(sc, TSEC_IEVENT);
+	if ((ievent & (TSEC_IEVENT_RXB | TSEC_IEVENT_RXF)) == 0)
+		printf("%s: rx %b\n", DEVNAME(sc), ievent, TSEC_IEVENT_FMT);
 	ievent &= (TSEC_IEVENT_RXB | TSEC_IEVENT_RXF);
 	tsec_write(sc, TSEC_IEVENT, ievent);
 
@@ -651,11 +674,25 @@ int
 tsec_errintr(void *arg)
 {
 	struct tsec_softc *sc = arg;
+	struct ifnet *ifp = &sc->sc_ac.ac_if;
 	uint32_t ievent;
 
 	ievent = tsec_read(sc, TSEC_IEVENT);
+	if ((ievent & TSEC_IEVENT_BSY) == 0)
+		printf("%s: err %b\n", DEVNAME(sc), ievent, TSEC_IEVENT_FMT);
+	ievent &= TSEC_IEVENT_BSY;
 	tsec_write(sc, TSEC_IEVENT, ievent);
-	printf("%s: %b\n", __func__, ievent, TSEC_IEVENT_FMT);
+
+	if (ievent & TSEC_IEVENT_BSY) {
+		/*
+		 * We ran out of buffers and dropped one (or more)
+		 * packets.  We must clear RSTAT[QHLT] after
+		 * processing the ring to get things started again.
+		 */
+		tsec_rx_proc(sc);
+		tsec_write(sc, TSEC_RSTAT, TSEC_RSTAT_QHLT);
+		ifp->if_ierrors++;
+	}
 
 	return (1);
 }
@@ -724,8 +761,8 @@ tsec_rx_proc(struct tsec_softc *sc)
 	    TSEC_DMA_LEN(sc->sc_rxring),
 	    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 
-	for (;;) {
-		idx = sc->sc_rx_nextidx;
+	while (sc->sc_rx_cnt > 0) {
+		idx = sc->sc_rx_cons;
 		KASSERT(idx < TSEC_NRXDESC);
 
 		rxd = &sc->sc_rxdesc[idx];
@@ -749,19 +786,6 @@ tsec_rx_proc(struct tsec_softc *sc)
 		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = len;
 
-		rxb->tb_m = tsec_alloc_mbuf(sc, rxb->tb_map);
-		if (rxb->tb_m == NULL) {
-			printf("%s: mbuf alloc failed\n", DEVNAME(sc));
-			break;
-		}
-		bus_dmamap_sync(sc->sc_dmat, rxb->tb_map, 0,
-		    rxb->tb_m->m_pkthdr.len, BUS_DMASYNC_PREREAD);
-
-		rxd->td_len = 0;
-		rxd->td_addr = rxb->tb_map->dm_segs[0].ds_addr;
-		__asm volatile("eieio" ::: "memory");
-		rxd->td_status |= TSEC_RX_E | TSEC_RX_I;
-
 		ifp->if_ipackets++;
 
 #if NBPFILTER > 0
@@ -771,11 +795,14 @@ tsec_rx_proc(struct tsec_softc *sc)
 
 		ether_input_mbuf(ifp, m);
 
+		sc->sc_rx_cnt--;
 		if (rxd->td_status & TSEC_RX_W)
-			sc->sc_rx_nextidx = 0;
+			sc->sc_rx_cons = 0;
 		else
-			sc->sc_rx_nextidx++;
+			sc->sc_rx_cons++;
 	}
+
+	tsec_fill_rx_ring(sc);
 
 	bus_dmamap_sync(sc->sc_dmat, TSEC_DMA_MAP(sc->sc_rxring), 0,
 	    TSEC_DMA_LEN(sc->sc_rxring),
@@ -829,12 +856,7 @@ tsec_up(struct tsec_softc *sc)
 		rxb = &sc->sc_rxbuf[i];
 		bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1,
 		    MCLBYTES, 0, BUS_DMA_WAITOK, &rxb->tb_map);
-		rxb->tb_m = tsec_alloc_mbuf(sc, rxb->tb_map);
-
-		rxd= &sc->sc_rxdesc[i];
-		rxd->td_addr = rxb->tb_map->dm_segs[0].ds_addr;
-		__asm volatile("eieio" ::: "memory");
-		rxd->td_status = TSEC_RX_E | TSEC_RX_I;
+		rxb->tb_m = NULL;
 	}
 
 	/* Set wrap bit on last descriptor. */
@@ -843,7 +865,10 @@ tsec_up(struct tsec_softc *sc)
 	bus_dmamap_sync(sc->sc_dmat, TSEC_DMA_MAP(sc->sc_rxring),
 	    0, TSEC_DMA_LEN(sc->sc_rxring), BUS_DMASYNC_PREWRITE);
 
-	sc->sc_rx_nextidx = 0;
+	sc->sc_rx_prod = sc->sc_rx_cons = 0;
+	sc->sc_rx_cnt = 0;
+
+	tsec_fill_rx_ring(sc);
 
 	tsec_write(sc, TSEC_MRBLR, MCLBYTES);
 
@@ -912,7 +937,7 @@ tsec_up(struct tsec_softc *sc)
 
 	tsec_write(sc, TSEC_IMASK, TSEC_IMASK_TXEEN |
 	    TSEC_IMASK_TXBEN | TSEC_IMASK_TXFEN |
-	    TSEC_IMASK_RXBEN | TSEC_IMASK_RXFEN);
+	    TSEC_IMASK_RXBEN | TSEC_IMASK_RXFEN | TSEC_IMASK_BSYEN);
 
 	timeout_add_sec(&sc->sc_tick, 1);
 }
@@ -921,7 +946,9 @@ void
 tsec_down(struct tsec_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
+	struct tsec_buf *txb, *rxb;
 	uint32_t maccfg1;
+	int i;
 
 	timeout_del(&sc->sc_tick);
 
@@ -935,24 +962,79 @@ tsec_down(struct tsec_softc *sc)
 	maccfg1 &= ~TSEC_MACCFG1_RXEN;
 	tsec_write(sc, TSEC_MACCFG1, maccfg1);
 
+	for (i = 0; i < TSEC_NTXDESC; i++) {
+		txb = &sc->sc_txbuf[i];
+		if (txb->tb_m) {
+			bus_dmamap_sync(sc->sc_dmat, txb->tb_map, 0,
+			    txb->tb_map->dm_mapsize, BUS_DMASYNC_POSTWRITE);
+			bus_dmamap_unload(sc->sc_dmat, txb->tb_map);
+			m_freem(txb->tb_m);
+		}
+		bus_dmamap_destroy(sc->sc_dmat, txb->tb_map);
+	}
+
 	tsec_dmamem_free(sc, sc->sc_txring);
 	free (sc->sc_txbuf, M_DEVBUF);
+
+	for (i = 0; i < TSEC_NRXDESC; i++) {
+		rxb = &sc->sc_rxbuf[i];
+		if (rxb->tb_m) {
+			bus_dmamap_sync(sc->sc_dmat, rxb->tb_map, 0,
+			    rxb->tb_map->dm_mapsize, BUS_DMASYNC_POSTREAD);
+			bus_dmamap_unload(sc->sc_dmat, rxb->tb_map);
+			m_freem(rxb->tb_m);
+		}
+		bus_dmamap_destroy(sc->sc_dmat, rxb->tb_map);
+	}
+
+	tsec_dmamem_free(sc, sc->sc_rxring);
+	free(sc->sc_rxbuf, M_DEVBUF);
 }
 
 void
 tsec_iff(struct tsec_softc *sc)
 {
+	struct arpcom *ac = &sc->sc_ac;
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
+	struct ether_multi *enm;
+	struct ether_multistep step;
+	uint32_t crc, hash[8];
 	uint32_t rctrl;
+	int i;
+
+	ifp->if_flags &= ~IFF_ALLMULTI;
+	bzero(hash, sizeof(hash));
+
+	if ((ifp->if_flags & IFF_RUNNING) == 0)
+		goto domulti;
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0)
+		goto allmulti;
+
+	ETHER_FIRST_MULTI(step, ac, enm);
+	while (enm != NULL) {
+		crc = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN);
+		crc >>= 24;
+		hash[crc / 32] |= 1 << (31 - (crc % 32));
+
+		ETHER_NEXT_MULTI(step, enm);
+	}
+
+	goto domulti;
+
+allmulti:
+	ifp->if_flags |= IFF_ALLMULTI;
+	bzero(hash, sizeof(hash));
+	
+domulti:
+	for (i = 0; i < nitems(hash); i++)
+		tsec_write(sc, TSEC_GADDR0 + i * 4, hash[i]);
 
 	rctrl = tsec_read(sc, TSEC_RCTRL);
-	if (ifp->if_flags & IFF_PROMISC)
+	if (ifp->if_flags & IFF_ALLMULTI)
 		rctrl |= TSEC_RCTRL_PROM;
 	else
 		rctrl &= ~TSEC_RCTRL_PROM;
-	tsec_write(sc, TSEC_RCTRL, rctrl | TSEC_RCTRL_PROM);
-
-	/* XXX multicast */
+	tsec_write(sc, TSEC_RCTRL, rctrl);
 }
 
 int
@@ -1118,7 +1200,7 @@ tsec_alloc_mbuf(struct tsec_softc *sc, bus_dmamap_t map)
 	if (m == NULL)
 		return (NULL);
 
-	MCLGET(m, M_DONTWAIT);
+	MCLGETI(m, M_DONTWAIT, &sc->sc_ac.ac_if, MCLBYTES);
 	if ((m->m_flags & M_EXT) == 0) {
 		m_freem(m);
 		return (NULL);
@@ -1131,5 +1213,34 @@ tsec_alloc_mbuf(struct tsec_softc *sc, bus_dmamap_t map)
 		return (NULL);
 	}
 
+	bus_dmamap_sync(sc->sc_dmat, map, 0,
+	    m->m_pkthdr.len, BUS_DMASYNC_PREREAD);
+
 	return (m);
+}
+
+void
+tsec_fill_rx_ring(struct tsec_softc *sc)
+{
+	struct tsec_desc *rxd;
+	struct tsec_buf *rxb;
+
+	while (sc->sc_rx_cnt < TSEC_NRXDESC) {
+		rxb = &sc->sc_rxbuf[sc->sc_rx_prod];
+		rxb->tb_m = tsec_alloc_mbuf(sc, rxb->tb_map);
+		if (rxb->tb_m == NULL)
+			break;
+
+		rxd = &sc->sc_rxdesc[sc->sc_rx_prod];
+		rxd->td_len = 0;
+		rxd->td_addr = rxb->tb_map->dm_segs[0].ds_addr;
+		__asm volatile("eieio" ::: "memory");
+		rxd->td_status |= TSEC_RX_E | TSEC_RX_I;
+
+		sc->sc_rx_cnt++;
+		if (rxd->td_status & TSEC_RX_W)
+			sc->sc_rx_prod = 0;
+		else
+			sc->sc_rx_prod++;
+	}
 }

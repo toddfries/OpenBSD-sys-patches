@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.214 2008/10/30 22:07:18 miod Exp $	*/
+/* $OpenBSD: machdep.c,v 1.229 2009/04/19 17:56:13 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -80,6 +80,7 @@
 #ifdef MVME188
 #include <mvme88k/dev/sysconvar.h>
 #endif
+#include <mvme88k/mvme88k/clockvar.h>
 
 #include <dev/cons.h>
 
@@ -96,6 +97,8 @@
 
 caddr_t	allocsys(caddr_t);
 void	consinit(void);
+void	cpu_hatch_secondary_processors(void *);
+void	dumb_delay(int);
 void	dumpconf(void);
 void	dumpsys(void);
 int	getcpuspeed(struct mvmeprom_brdid *);
@@ -121,13 +124,21 @@ extern void	m197_startup(void);
 intrhand_t intr_handlers[NVMEINTR];
 
 /* board dependent pointers */
-void (*md_interrupt_func_ptr)(u_int, struct trapframe *);
+void (*md_interrupt_func_ptr)(struct trapframe *);
+#ifdef M88110
+int (*md_nmi_func_ptr)(struct trapframe *);
+void (*md_nmi_wrapup_func_ptr)(struct trapframe *);
+#endif
 void (*md_init_clocks)(void);
 u_int (*md_getipl)(void);
 u_int (*md_setipl)(u_int);
 u_int (*md_raiseipl)(u_int);
 #ifdef MULTIPROCESSOR
 void (*md_send_ipi)(int, cpuid_t);
+#endif
+void (*md_delay)(int) = dumb_delay;
+#ifdef MULTIPROCESSOR
+void (*md_smp_setup)(struct cpu_info *);
 #endif
 
 int physmem;	  /* available physical memory, in pages */
@@ -136,7 +147,8 @@ struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
 #ifdef MULTIPROCESSOR
-__cpu_simple_lock_t cpu_boot_mutex;
+__cpu_simple_lock_t cpu_hatch_mutex;
+__cpu_simple_lock_t cpu_boot_mutex = __SIMPLELOCK_LOCKED;
 #endif
 
 /*
@@ -172,6 +184,20 @@ vaddr_t avail_start, avail_end;
 vaddr_t virtual_avail, virtual_end;
 
 extern struct user *proc0paddr;
+
+struct intrhand	clock_ih;
+struct intrhand	statclock_ih;
+
+/*
+ * Statistics clock interval and variance, in usec.  Variance must be a
+ * power of two.  Since this gives us an even number, not an odd number,
+ * we discard one case and compensate.  That is, a variance of 4096 would
+ * give us offsets in [0..4095].  Instead, we take offsets in [1..4095].
+ * This is symmetric about the point 2048, or statvar/2, and thus averages
+ * to that value (assuming uniform random numbers).
+ */
+int statvar = 8192;
+int statmin;			/* statclock interval - 1/2*variance */
 
 /*
  * This is to fake out the console routines, while booting.
@@ -212,28 +238,16 @@ int
 getcpuspeed(struct mvmeprom_brdid *brdid)
 {
 	int speed = 0;
+#ifdef MVME188
 	u_int i, c;
-
-	for (i = 0; i < 4; i++) {
-		c = (u_int)brdid->speed[i];
-		if (c == ' ')
-			c = '0';
-		else if (c > '9' || c < '0') {
-			speed = 0;
-			break;
-		}
-		speed = speed * 10 + (c - '0');
-	}
-	speed = speed / 100;
+#endif
 
 	switch (brdtyp) {
 #ifdef MVME187
 	case BRD_187:
 	case BRD_8120:
-		if (speed == 25 || speed == 33)
-			return speed;
-		speed = 25;
-		break;
+		/* we already computed the speed in m187_bootstrap() */
+		return cpuspeed;
 #endif
 #ifdef MVME188
 	case BRD_188:
@@ -246,6 +260,18 @@ getcpuspeed(struct mvmeprom_brdid *brdid)
 		if ((u_int)brdid->rev < 0x50) {
 			speed = 20;
 		} else {
+			for (i = 0; i < 4; i++) {
+				c = (u_int)brdid->speed[i];
+				if (c == ' ')
+					c = '0';
+				else if (c > '9' || c < '0') {
+					speed = 0;
+					break;
+				}
+				speed = speed * 10 + (c - '0');
+			}
+			speed = speed / 100;
+
 			if (speed == 20 || speed == 25)
 				return speed;
 			speed = 25;
@@ -693,6 +719,7 @@ secondary_pre_main()
 	set_cpu_number(cmmu_cpu_number()); /* Determine cpu number by CMMU */
 	ci = curcpu();
 	ci->ci_curproc = &proc0;
+	(*md_smp_setup)(ci);
 
 	splhigh();
 
@@ -708,7 +735,7 @@ secondary_pre_main()
 	if (init_stack == (vaddr_t)NULL) {
 		printf("cpu%d: unable to allocate startup stack\n",
 		    ci->ci_cpuid);
-		__cpu_simple_unlock(&cpu_boot_mutex);
+		__cpu_simple_unlock(&cpu_hatch_mutex);
 		for (;;) ;
 	}
 
@@ -730,17 +757,21 @@ secondary_main()
 	cpu_configuration_print(0);
 	ncpus++;
 
-	__cpu_simple_unlock(&cpu_boot_mutex);
-
+	sched_init_cpu(ci);
 	microuptime(&ci->ci_schedstate.spc_runtime);
 	ci->ci_curproc = NULL;
 	ci->ci_randseed = random();
 	SET(ci->ci_flags, CIF_ALIVE);
 
-	set_psr(get_psr() & ~PSR_IND);
-	spl0();
+	__cpu_simple_unlock(&cpu_hatch_mutex);
 
+	/* wait for cpu_boot_secondary_processors() */
+	__cpu_simple_lock(&cpu_boot_mutex);
+	__cpu_simple_unlock(&cpu_boot_mutex);
+
+	spl0();
 	SCHED_LOCK(s);
+	set_psr(get_psr() & ~PSR_IND);
 	cpu_switchto(NULL, sched_chooseproc());
 }
 
@@ -990,6 +1021,9 @@ mvme_bootstrap()
 	setup_board_config();
 	master_cpu = cmmu_init();
 	set_cpu_number(master_cpu);
+#ifdef MULTIPROCESSOR
+	(*md_smp_setup)(curcpu());
+#endif
 	SET(curcpu()->ci_flags, CIF_ALIVE | CIF_PRIMARY);
 
 #ifdef M88100
@@ -1041,7 +1075,7 @@ mvme_bootstrap()
 
 #ifdef MULTIPROCESSOR
 void
-cpu_boot_secondary_processors()
+cpu_hatch_secondary_processors(void *unused)
 {
 	struct cpu_info *ci = curcpu();
 	cpuid_t cpu;
@@ -1056,13 +1090,13 @@ cpu_boot_secondary_processors()
 #ifdef MVME197
 	case BRD_197:
 #endif
-		for (cpu = 0; cpu < max_cpus; cpu++) {
+		for (cpu = 0; cpu < ncpusfound; cpu++) {
 			if (cpu != ci->ci_cpuid) {
-				__cpu_simple_lock(&cpu_boot_mutex);
+				__cpu_simple_lock(&cpu_hatch_mutex);
 				rc = spin_cpu(cpu, (vaddr_t)secondary_start);
 				switch (rc) {
 				case 0:
-					__cpu_simple_lock(&cpu_boot_mutex);
+					__cpu_simple_lock(&cpu_hatch_mutex);
 					break;
 				default:
 					printf("cpu%d: spin_cpu error %d\n",
@@ -1071,7 +1105,7 @@ cpu_boot_secondary_processors()
 				case FORKMPU_NO_MPU:
 					break;
 				}
-				__cpu_simple_unlock(&cpu_boot_mutex);
+				__cpu_simple_unlock(&cpu_hatch_mutex);
 			}
 		}
 		break;
@@ -1079,6 +1113,12 @@ cpu_boot_secondary_processors()
 	default:
 		break;
 	}
+}
+
+void
+cpu_boot_secondary_processors()
+{
+	__cpu_simple_unlock(&cpu_boot_mutex);
 }
 #endif
 
@@ -1166,3 +1206,15 @@ m88k_broadcast_ipi(int ipi)
 }
 
 #endif
+
+void
+delay(int us)
+{
+	(*md_delay)(us);
+}
+
+/* delay() routine used until a proper routine is set up */
+void
+dumb_delay(int us)
+{
+}

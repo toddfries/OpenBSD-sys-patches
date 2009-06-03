@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.35 2008/12/18 14:18:29 kurt Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.44 2009/06/02 23:00:18 oga Exp $	*/
 /*	$NetBSD: pmap.c,v 1.3 2003/05/08 18:13:13 thorpej Exp $	*/
 
 /*
@@ -313,7 +313,7 @@ struct vm_page *pmap_find_ptp(struct pmap *, vaddr_t, paddr_t, int);
 void pmap_free_ptp(struct pmap *, struct vm_page *,
     vaddr_t, pt_entry_t *, pd_entry_t **, struct pg_to_free *);
 void pmap_freepage(struct pmap *, struct vm_page *, int, struct pg_to_free *);
-static boolean_t pmap_is_active(struct pmap *, int);
+static boolean_t pmap_is_active(struct pmap *, struct cpu_info *);
 void pmap_map_ptes(struct pmap *, pt_entry_t **, pd_entry_t ***);
 struct pv_entry *pmap_remove_pv(struct vm_page *, struct pmap *, vaddr_t);
 void pmap_do_remove(struct pmap *, vaddr_t, vaddr_t, int);
@@ -328,13 +328,23 @@ void pmap_unmap_ptes(struct pmap *);
 boolean_t pmap_get_physpage(vaddr_t, int, paddr_t *);
 boolean_t pmap_pdes_valid(vaddr_t, pd_entry_t **, pd_entry_t *);
 void pmap_alloc_level(pd_entry_t **, vaddr_t, int, long *);
-void pmap_apte_flush(struct pmap *pmap);
+void pmap_apte_flush(void);
 
 void pmap_sync_flags_pte(struct vm_page *, u_long);
 
 /*
  * p m a p   i n l i n e   h e l p e r   f u n c t i o n s
  */
+
+/*
+ * pmap_is_active: is this pmap loaded into the specified processor's %cr3?
+ */
+
+static __inline boolean_t
+pmap_is_active(struct pmap *pmap, struct cpu_info *ci)
+{
+	return (pmap == pmap_kernel() || ci->ci_curpmap == pmap);
+}
 
 /*
  * pmap_is_curpmap: is this pmap the one currently loaded [in %cr3]?
@@ -344,20 +354,9 @@ void pmap_sync_flags_pte(struct vm_page *, u_long);
 static __inline boolean_t
 pmap_is_curpmap(struct pmap *pmap)
 {
-	return((pmap == pmap_kernel()) ||
-	       (pmap->pm_pdirpa == (paddr_t) rcr3()));
+	return (pmap_is_active(pmap, curcpu()));
 }
 
-/*
- * pmap_is_active: is this pmap loaded into the specified processor's %cr3?
- */
-
-static __inline boolean_t
-pmap_is_active(struct pmap *pmap, int cpu_id)
-{
-	return (pmap == pmap_kernel() ||
-	    (pmap->pm_cpus & (1U << cpu_id)) != 0);
-}
 
 static __inline u_int
 pmap_pte2flags(u_long pte)
@@ -375,7 +374,7 @@ pmap_sync_flags_pte(struct vm_page *pg, u_long pte)
 }
 
 void
-pmap_apte_flush(struct pmap *pmap)
+pmap_apte_flush(void)
 {
 	pmap_tlb_shoottlb();
 	pmap_tlb_shootwait();
@@ -406,7 +405,7 @@ pmap_map_ptes(struct pmap *pmap, pt_entry_t **ptepp, pd_entry_t ***pdeppp)
 		npde = (pd_entry_t) (pmap->pm_pdirpa | PG_RW | PG_V);
 		*APDP_PDE = npde;
 		if (pmap_valid_entry(opde))
-			pmap_apte_flush(curpcb->pcb_pmap);
+			pmap_apte_flush();
 	}
 	*ptepp = APTE_BASE;
 	*pdeppp = alternate_pdes;
@@ -420,7 +419,7 @@ pmap_unmap_ptes(struct pmap *pmap)
 
 #if defined(MULTIPROCESSOR)
 	*APDP_PDE = 0;
-	pmap_apte_flush(curpcb->pcb_pmap);
+	pmap_apte_flush();
 #endif
 	COUNT(apdp_pde_unmap);
 }
@@ -567,14 +566,14 @@ pmap_bootstrap(paddr_t first_avail, paddr_t max_pa)
 	kpm = pmap_kernel();
 	for (i = 0; i < PTP_LEVELS - 1; i++) {
 		kpm->pm_obj[i].pgops = NULL;
-		TAILQ_INIT(&kpm->pm_obj[i].memq);
+		RB_INIT(&kpm->pm_obj[i].memt);
 		kpm->pm_obj[i].uo_npages = 0;
 		kpm->pm_obj[i].uo_refs = 1;
 		kpm->pm_ptphint[i] = NULL;
 	}
 	memset(&kpm->pm_list, 0, sizeof(kpm->pm_list));  /* pm_list not used */
 	kpm->pm_pdir = (pd_entry_t *)(proc0.p_addr->u_pcb.pcb_cr3 + KERNBASE);
-	kpm->pm_pdirpa = (u_int32_t) proc0.p_addr->u_pcb.pcb_cr3;
+	kpm->pm_pdirpa = proc0.p_addr->u_pcb.pcb_cr3;
 	kpm->pm_stats.wired_count = kpm->pm_stats.resident_count =
 		atop(kva_start - VM_MIN_KERNEL_ADDRESS);
 
@@ -643,42 +642,6 @@ pmap_bootstrap(paddr_t first_avail, paddr_t max_pa)
 	kpm->pm_pdir[PDIR_SLOT_DIRECT] = dmpdp | PG_V | PG_KW | PG_U |
 	    PG_M;
 
-	/*
-	 * Now do the same thing, but for the direct uncached map.
-	 */
-	ndmpdp = (max_pa + NBPD_L3 - 1) >> L3_SHIFT;
-	if (ndmpdp < NDML2_ENTRIES)
-		ndmpdp = NDML2_ENTRIES;		/* At least 4GB */
-
-	dmpdp = first_avail;	first_avail += PAGE_SIZE;
-	dmpd = first_avail;	first_avail += ndmpdp * PAGE_SIZE;
-
-	for (i = 0; i < NPDPG * ndmpdp; i++) {
-		paddr_t pdp;
-		vaddr_t va;
-
-		pdp = (paddr_t)&(((pd_entry_t *)dmpd)[i]);
-		va = PMAP_DIRECT_MAP(pdp);
-
-		*((pd_entry_t *)va) = (paddr_t)i << L2_SHIFT;
-		*((pd_entry_t *)va) |= PG_RW | PG_V | PG_PS | PG_G | PG_N |
-		    PG_U | PG_M;
-	}
-
-	for (i = 0; i < ndmpdp; i++) {
-		paddr_t pdp;
-		vaddr_t va;
-
-		pdp = (paddr_t)&(((pd_entry_t *)dmpdp)[i]);
-		va = PMAP_DIRECT_MAP(pdp);
-
-		*((pd_entry_t *)va) = dmpd + (i << PAGE_SHIFT);
-		*((pd_entry_t *)va) |= PG_RW | PG_V | PG_U | PG_M;
-	}
-
-	kpm->pm_pdir[PDIR_SLOT_DIRECT_NC] = dmpdp | PG_V | PG_KW | PG_U |
-	    PG_M;
-	
 	tlbflush();
 
 	msgbuf_vaddr = virtual_avail;
@@ -868,10 +831,10 @@ pmap_freepage(struct pmap *pmap, struct vm_page *ptp, int level,
 	obj = &pmap->pm_obj[lidx];
 	pmap->pm_stats.resident_count--;
 	if (pmap->pm_ptphint[lidx] == ptp)
-		pmap->pm_ptphint[lidx] = TAILQ_FIRST(&obj->memq);
+		pmap->pm_ptphint[lidx] = RB_ROOT(&obj->memt);
 	ptp->wire_count = 0;
 	uvm_pagerealloc(ptp, NULL, 0);
-	TAILQ_INSERT_TAIL(pagelist, ptp, listq);
+	TAILQ_INSERT_TAIL(pagelist, ptp, fq.queues.listq);
 }
 
 void
@@ -890,7 +853,7 @@ pmap_free_ptp(struct pmap *pmap, struct vm_page *ptp, vaddr_t va,
 		opde = pmap_pte_set(&pdes[level - 1][index], 0);
 		invaladdr = level == 1 ? (vaddr_t)ptes :
 		    (vaddr_t)pdes[level - 2];
-		pmap_tlb_shootpage(curpcb->pcb_pmap,
+		pmap_tlb_shootpage(curcpu()->ci_curpmap,
 		    invaladdr + index * PAGE_SIZE);
 #if defined(MULTIPROCESSOR)
 		invaladdr = level == 1 ? (vaddr_t)PTE_BASE :
@@ -1028,7 +991,6 @@ pmap_pdp_ctor(void *arg, void *object, int flags)
 	    (NTOPLEVEL_PDES - (PDIR_SLOT_KERN + npde)) * sizeof(pd_entry_t));
 
 	pdir[PDIR_SLOT_DIRECT] = pmap_kernel()->pm_pdir[PDIR_SLOT_DIRECT];
-	pdir[PDIR_SLOT_DIRECT_NC] = pmap_kernel()->pm_pdir[PDIR_SLOT_DIRECT_NC];
 
 #if VM_MIN_KERNEL_ADDRESS != KERNBASE
 	pdir[pl4_pi(KERNBASE)] = PDP_BASE[pl4_pi(KERNBASE)];
@@ -1056,7 +1018,7 @@ pmap_create(void)
 	/* init uvm_object */
 	for (i = 0; i < PTP_LEVELS - 1; i++) {
 		pmap->pm_obj[i].pgops = NULL;	/* not a mappable object */
-		TAILQ_INIT(&pmap->pm_obj[i].memq);
+		RB_INIT(&pmap->pm_obj[i].memt);
 		pmap->pm_obj[i].uo_npages = 0;
 		pmap->pm_obj[i].uo_refs = 1;
 		pmap->pm_ptphint[i] = NULL;
@@ -1118,6 +1080,8 @@ pmap_destroy(struct pmap *pmap)
 	 * reference count is zero, free pmap resources and then free pmap.
 	 */
 
+	/* Make sure it's not used by some other cpu. */
+	pmap_tlb_droppmap(pmap);
 	/*
 	 * remove it from global list of pmaps
 	 */
@@ -1128,7 +1092,7 @@ pmap_destroy(struct pmap *pmap)
 	 */
 
 	for (i = 0; i < PTP_LEVELS - 1; i++) {
-		while ((pg = TAILQ_FIRST(&pmap->pm_obj[i].memq)) != NULL) {
+		while ((pg = RB_ROOT(&pmap->pm_obj[i].memt)) != NULL) {
 			KASSERT((pg->pg_flags & PG_BUSY) == 0);
 
 			pg->wire_count = 0;
@@ -1136,13 +1100,7 @@ pmap_destroy(struct pmap *pmap)
 		}
 	}
 
-	/*
-	 * MULTIPROCESSOR -- no need to flush out of other processors'
-	 * APTE space because we do that in pmap_unmap_ptes().
-	 */
-	/* XXX: need to flush it out of other processor's APTE space? */
 	pool_put(&pmap_pdp_pool, pmap->pm_pdir);
-
 	pool_put(&pmap_pmap_pool, pmap);
 }
 
@@ -1158,29 +1116,14 @@ pmap_reference(struct pmap *pmap)
 
 /*
  * pmap_activate: activate a process' pmap (fill in %cr3 and LDT info)
- *
- * => called from cpu_switch()
- * => if p is the curproc, then load it into the MMU
  */
-
 void
 pmap_activate(struct proc *p)
 {
-	struct pcb *pcb = &p->p_addr->u_pcb;
-	struct pmap *pmap = p->p_vmspace->vm_map.pmap;
+	KASSERT(p == curproc);
+	KASSERT(&p->p_addr->u_pcb == curpcb);
 
-	pcb->pcb_pmap = pmap;
-	pcb->pcb_ldt_sel = pmap->pm_ldt_sel;
-	pcb->pcb_cr3 = pmap->pm_pdirpa;
-	if (p == curproc)
-		lcr3(pcb->pcb_cr3);
-	if (pcb == curpcb)
-		lldt(pcb->pcb_ldt_sel);
-
-	/*
-	 * mark the pmap in use by this processor.
-	 */
-	x86_atomic_setbits_ul(&pmap->pm_cpus, (1U << cpu_number()));
+	pmap_switch(NULL, p);
 }
 
 /*
@@ -1190,13 +1133,41 @@ pmap_activate(struct proc *p)
 void
 pmap_deactivate(struct proc *p)
 {
-	struct pmap *pmap = p->p_vmspace->vm_map.pmap;
+}
+
+u_int64_t nlazy_cr3;
+u_int64_t nlazy_cr3_hit;
+
+void
+pmap_switch(struct proc *o, struct proc *n)
+{
+	struct pmap *npmap, *opmap;
+	struct pcb *npcb;
+
+	npmap = n->p_vmspace->vm_map.pmap;
+
+	npcb = &n->p_addr->u_pcb;
+	npcb->pcb_pmap = npmap;
+	npcb->pcb_ldt_sel = npmap->pm_ldt_sel;
+	npcb->pcb_cr3 = npmap->pm_pdirpa;
+
+	opmap = curcpu()->ci_curpmap;
 
 	/*
-	 * mark the pmap no longer in use by this processor. 
+	 * Don't reload cr3 if we're switching to the same pmap or
+	 * when we're not exiting and switching to kernel pmap.
 	 */
-	x86_atomic_clearbits_ul(&pmap->pm_cpus, (1U << cpu_number()));
+	if (opmap == npmap) {
+		if (npmap != pmap_kernel())
+			nlazy_cr3_hit++;
+	} else if (o != NULL && npmap == pmap_kernel()) {
+		nlazy_cr3++;
+	} else {
+		curcpu()->ci_curpmap = npmap;
+		lcr3(npmap->pm_pdirpa);
+	}
 
+	lldt(npcb->pcb_ldt_sel);
 }
 
 /*
@@ -1238,12 +1209,6 @@ pmap_extract(struct pmap *pmap, vaddr_t va, paddr_t *pap)
 	if (pmap == pmap_kernel() && va >= PMAP_DIRECT_BASE &&
 	    va < PMAP_DIRECT_END) {
 		*pap = va - PMAP_DIRECT_BASE;
-		return (TRUE);
-	}
-
-	if (pmap == pmap_kernel() && va >= PMAP_DIRECT_BASE_NC &&
-	    va < PMAP_DIRECT_END_NC) {
-		*pap = va - PMAP_DIRECT_BASE_NC;
 		return (TRUE);
 	}
 
@@ -1322,7 +1287,7 @@ pmap_pageidlezero(struct vm_page *pg)
 	 *       with uncached mappings.
 	 */
 	for (i = 0, ptr = (long *) va; i < PAGE_SIZE / sizeof(long); i++) {
-		if (!sched_is_idle()) {
+		if (!curcpu_is_idle()) {
 
 			/*
 			 * A process has become ready.  Abort now,
@@ -1580,7 +1545,7 @@ pmap_do_remove(struct pmap *pmap, vaddr_t sva, vaddr_t eva, int flags)
 		PMAP_MAP_TO_HEAD_UNLOCK();
 
 		while ((ptp = TAILQ_FIRST(&empty_ptps)) != NULL) {
-			TAILQ_REMOVE(&empty_ptps, ptp, listq);
+			TAILQ_REMOVE(&empty_ptps, ptp, fq.queues.listq);
 			uvm_pagefree(ptp);
                 }
 
@@ -1652,7 +1617,7 @@ pmap_do_remove(struct pmap *pmap, vaddr_t sva, vaddr_t eva, int flags)
 	PMAP_MAP_TO_HEAD_UNLOCK();
 
 	while ((ptp = TAILQ_FIRST(&empty_ptps)) != NULL) {
-		TAILQ_REMOVE(&empty_ptps, ptp, listq);
+		TAILQ_REMOVE(&empty_ptps, ptp, fq.queues.listq);
 		uvm_pagefree(ptp);
 	}
 }
@@ -1725,7 +1690,7 @@ pmap_page_remove(struct vm_page *pg)
 	pmap_tlb_shootwait();
 
 	while ((ptp = TAILQ_FIRST(&empty_ptps)) != NULL) {
-		TAILQ_REMOVE(&empty_ptps, ptp, listq);
+		TAILQ_REMOVE(&empty_ptps, ptp, fq.queues.listq);
 		uvm_pagefree(ptp);
 	}
 }
@@ -2170,6 +2135,8 @@ enter_now:
 		npte |= PG_PVLIST;
 	if (wired)
 		npte |= PG_W;
+	if (flags & PMAP_NOCACHE)
+		npte |= PG_N;
 	if (va < VM_MAXUSER_ADDRESS)
 		npte |= PG_u;
 	else if (va < VM_MAX_ADDRESS)
@@ -2498,7 +2465,7 @@ pmap_tlb_shootpage(struct pmap *pm, vaddr_t va)
 	int mask = 0;
 
 	CPU_INFO_FOREACH(cii, ci) {
-		if (ci == self || !pmap_is_active(pm, ci->ci_cpuid) ||
+		if (ci == self || !pmap_is_active(pm, ci) ||
 		    !(ci->ci_flags & CPUF_RUNNING))
 			continue;
 		mask |= 1 << ci->ci_cpuid;
@@ -2536,7 +2503,7 @@ pmap_tlb_shootrange(struct pmap *pm, vaddr_t sva, vaddr_t eva)
 	vaddr_t va;
 
 	CPU_INFO_FOREACH(cii, ci) {
-		if (ci == self || !pmap_is_active(pm, ci->ci_cpuid) ||
+		if (ci == self || !pmap_is_active(pm, ci) ||
 		    !(ci->ci_flags & CPUF_RUNNING))
 			continue;
 		mask |= 1 << ci->ci_cpuid;
@@ -2599,6 +2566,42 @@ pmap_tlb_shoottlb(void)
 	}
 
 	tlbflush();
+}
+
+void
+pmap_tlb_droppmap(struct pmap *pm)
+{
+	struct cpu_info *ci, *self = curcpu();
+	CPU_INFO_ITERATOR cii;
+	long wait = 0;
+	int mask = 0;
+
+	CPU_INFO_FOREACH(cii, ci) {
+		if (ci == self || !(ci->ci_flags & CPUF_RUNNING) ||
+		    ci->ci_curpmap != pm)
+			continue;
+		mask |= 1 << ci->ci_cpuid;
+		wait++;
+	}
+
+	if (wait) {
+		int s = splvm();
+
+		while (x86_atomic_cas_ul(&tlb_shoot_wait, 0, wait) != 0) {
+			while (tlb_shoot_wait != 0)
+				SPINLOCK_SPIN_HOOK;
+		}
+
+		CPU_INFO_FOREACH(cii, ci) {
+			if ((mask & 1 << ci->ci_cpuid) == 0)
+				continue;
+			if (x86_fast_ipi(ci, LAPIC_IPI_RELOADCR3) != 0)
+				panic("pmap_tlb_shoottlb: ipi failed");
+		}
+		splx(s);
+	}
+
+	pmap_activate(curproc);
 }
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubsa.c,v 1.43 2008/12/11 10:46:33 fkr Exp $ 	*/
+/*	$OpenBSD: ubsa.c,v 1.46 2009/06/02 12:32:08 deraadt Exp $ 	*/
 /*	$NetBSD: ubsa.c,v 1.5 2002/11/25 00:51:33 fvdl Exp $	*/
 /*-
  * Copyright (c) 2002, Alexander Kabaev <kan.FreeBSD.org>.
@@ -203,8 +203,6 @@ struct	ucom_methods ubsa_methods = {
 };
 
 const struct usb_devno ubsa_devs[] = {
-	/* AnyDATA ADU-E100H */
-	{ USB_VENDOR_ANYDATA, USB_PRODUCT_ANYDATA_ADU_E100H },
 	/* Axesstel MV100H */
 	{ USB_VENDOR_AXESSTEL, USB_PRODUCT_AXESSTEL_DATAMODEM },
 	/* BELKIN F5U103 */
@@ -215,8 +213,6 @@ const struct usb_devno ubsa_devs[] = {
 	{ USB_VENDOR_ETEK, USB_PRODUCT_ETEK_1COM },
 	/* GoHubs GO-COM232 */
 	{ USB_VENDOR_GOHUBS, USB_PRODUCT_GOHUBS_GOCOM232 },
-	/* Novatel Wireless U740 */
-	{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINU740 },
 	/* Peracom */
 	{ USB_VENDOR_PERACOM, USB_PRODUCT_PERACOM_SERIAL1 },
 	/* Qualcomm Inc. ZTE CMDMA MSM modem */
@@ -721,7 +717,7 @@ ubsa_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		if (cdcbuf->bNotification == UCDC_N_SERIAL_STATE)
 			printf("%s:notify serial state, len=%d, data=0x%02x\n",
 			    sc->sc_dev.dv_xname,
-			    cdcbuf->wLength, cdcbuf->data[0]);
+			    UGETW(cdcbuf->wLength), cdcbuf->data[0]);
 	}
 #endif
 

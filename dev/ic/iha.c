@@ -1,4 +1,4 @@
-/*	$OpenBSD: iha.c,v 1.31 2008/11/24 00:31:35 krw Exp $ */
+/*	$OpenBSD: iha.c,v 1.33 2009/02/16 21:19:06 miod Exp $ */
 /*-------------------------------------------------------------------------
  *
  * Device driver for the INI-9XXXU/UW or INIC-940/950  PCI SCSI Controller.
@@ -338,7 +338,7 @@ iha_scsi_cmd(xs)
 	 */
 	timeout_set(&xs->stimeout, iha_timeout, pScb);
 	if ((pScb->SCB_Flags & SCSI_POLL) == 0)
-		timeout_add(&xs->stimeout, (xs->timeout/1000) * hz);
+		timeout_add_msec(&xs->stimeout, xs->timeout);
 
 	iha_exec_scb(sc, pScb);
 
@@ -473,8 +473,7 @@ iha_init_tulip(sc)
  *		 via sc->sc_adapter.scsi_minphys.
  */
 void
-iha_minphys(bp)
-	struct buf *bp;
+iha_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > ((IHA_MAX_SG_ENTRIES - 1) * PAGE_SIZE))
 		bp->b_bcount = ((IHA_MAX_SG_ENTRIES - 1) * PAGE_SIZE);
@@ -877,8 +876,8 @@ iha_push_sense_request(sc, pScb)
 	sensecmd->length = sizeof(pScb->SCB_ScsiSenseData);
 
 	if ((pScb->SCB_Flags & SCSI_POLL) == 0)
-		timeout_add(&pScb->SCB_Xs->stimeout,
-		    (pScb->SCB_Xs->timeout/1000) * hz);
+		timeout_add_msec(&pScb->SCB_Xs->stimeout,
+		    pScb->SCB_Xs->timeout);
 
 	iha_push_pend_scb(sc, pScb);
 

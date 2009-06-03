@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.81 2008/11/24 14:26:54 deraadt Exp $	*/
+/*	$OpenBSD: param.h,v 1.83 2009/03/25 22:42:59 weingart Exp $	*/
 /*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
 
 /*-
@@ -41,8 +41,8 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	200811		/* OpenBSD version (year & month). */
-#define OpenBSD4_4 1		/* OpenBSD 4.4 */
+#define OpenBSD	200905		/* OpenBSD version (year & month). */
+#define OpenBSD4_5 1		/* OpenBSD 4.5 */
 
 #ifndef NULL
 #ifdef 	__GNUG__
@@ -115,8 +115,6 @@
 #define	PCATCH		0x100	/* OR'd with pri for tsleep to check signals */
 #define PNORELOCK	0x200	/* OR'd with pri for msleep to not reaquire
 				   the mutex */
-
-#define	NBPW	sizeof(int)	/* number of bytes per word (integer) */
 
 #define	CMASK	022		/* default file mask: S_IWGRP|S_IWOTH */
 #define	NODEV	(dev_t)(-1)	/* non-existent device */

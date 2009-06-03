@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.c,v 1.174 2008/10/22 23:04:45 mpf Exp $	*/
+/*	$OpenBSD: ip_ipsp.c,v 1.177 2009/06/02 21:28:36 blambert Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -38,6 +38,7 @@
  */
 
 #include "pf.h"
+#include "pfsync.h"
 
 #include <sys/param.h>
 #include <sys/mbuf.h>
@@ -50,6 +51,10 @@
 
 #if NPF > 0
 #include <net/pfvar.h>
+#endif
+
+#if NPFSYNC > 0
+#include <net/if_pfsync.h>
 #endif
 
 #ifdef INET
@@ -82,13 +87,13 @@ void tdb_hashstats(void);
 #define	DPRINTF(x)
 #endif
 
-int		ipsp_kern(int, char **, int);
 u_int8_t	get_sa_require(struct inpcb *);
 void		tdb_rehash(void);
 void		tdb_timeout(void *v);
 void		tdb_firstuse(void *v);
 void		tdb_soft_timeout(void *v);
 void		tdb_soft_firstuse(void *v);
+int		tdb_hash(u_int32_t, union sockaddr_union *, u_int8_t);
 
 extern int	ipsec_auth_default_level;
 extern int	ipsec_esp_trans_default_level;
@@ -466,10 +471,12 @@ gettdbbysrc(union sockaddr_union *src, u_int8_t sproto,
 }
 
 #if DDB
+
+#define NBUCKETS 16
 void
 tdb_hashstats(void)
 {
-	int i, cnt, buckets[16];
+	int i, cnt, buckets[NBUCKETS];
 	struct tdb *tdbp;
 
 	if (tdbh == NULL) {
@@ -480,17 +487,17 @@ tdb_hashstats(void)
 	bzero (buckets, sizeof(buckets));
 	for (i = 0; i <= tdb_hashmask; i++) {
 		cnt = 0;
-		for (tdbp = tdbh[i]; cnt < 16 && tdbp != NULL;
+		for (tdbp = tdbh[i]; cnt < NBUCKETS - 1 && tdbp != NULL;
 		    tdbp = tdbp->tdb_hnext)
 			cnt++;
 		buckets[cnt]++;
 	}
 
 	db_printf("tdb cnt\t\tbucket cnt\n");
-	for (i = 0; i < 16; i++)
+	for (i = 0; i < NBUCKETS; i++)
 		if (buckets[i] > 0)
-			db_printf("%d%c\t\t%d\n", i, i == 15 ? "+" : "",
-			    buckets[i]);
+			db_printf("%d%c\t\t%d\n", i, i == NBUCKETS - 1 ?
+			    "+" : "", buckets[i]);
 }
 #endif	/* DDB */
 
@@ -788,6 +795,11 @@ tdb_free(struct tdb *tdbp)
 		(*(tdbp->tdb_xform->xf_zeroize))(tdbp);
 		tdbp->tdb_xform = NULL;
 	}
+
+#if NPFSYNC > 0
+	/* Cleanup pfsync references */
+	pfsync_delete_tdb(tdbp);
+#endif
 
 	/* Cleanup inp references. */
 	for (inp = TAILQ_FIRST(&tdbp->tdb_inp_in); inp;

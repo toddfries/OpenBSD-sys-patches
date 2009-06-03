@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.7 2008/12/04 16:02:20 maja Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.10 2009/06/02 21:38:10 drahn Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -396,11 +396,6 @@ initppc(u_int startkernel, u_int endkernel, char *args)
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
-
-	printf("%02x:%02x:%02x:%02x:%02x:%02x\n", bootinfo.bi_enetaddr[0],
-	    bootinfo.bi_enetaddr[1], bootinfo.bi_enetaddr[2],
-	    bootinfo.bi_enetaddr[3],  bootinfo.bi_enetaddr[4],
-	    bootinfo.bi_enetaddr[5]);
 }
 
 void
@@ -536,8 +531,7 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 		vaddr = uvm_km_kmemalloc(phys_map, NULL, len,
 		    UVM_KMF_NOWAIT|UVM_KMF_VALLOC);
 		if (vaddr == 0)
-			panic("bus_mem_add_mapping: kvm alloc of 0x%x failed",
-			    len);
+			return (ENOMEM);
 	}
 	*bshp = vaddr + off;
 #ifdef DEBUG_BUS_MEM_ADD_MAPPING
@@ -1094,67 +1088,9 @@ boot(int howto)
 	while(1) /* forever */;
 }
 
-extern void ipic_do_pending_int(void);
-
 void
 do_pending_int(void)
 {
-	struct cpu_info *ci = curcpu();
-	int pcpl, s;
-
-	if (ci->ci_iactive)
-		return;
-
-	ci->ci_iactive = 1;
-	s = ppc_intr_disable();
-	pcpl = ci->ci_cpl;
-
-	ipic_do_pending_int();
-
-	do {
-		if((ci->ci_ipending & SINT_CLOCK) & ~pcpl) {
-			ci->ci_ipending &= ~SINT_CLOCK;
-			ci->ci_cpl = SINT_CLOCK|SINT_NET|SINT_TTY;
-			ppc_intr_enable(1);
-			KERNEL_LOCK();
-			softclock();
-			KERNEL_UNLOCK();
-			ppc_intr_disable();
-			continue;
-		}
-		if((ci->ci_ipending & SINT_NET) & ~pcpl) {
-			extern int netisr;
-			int pisr;
-		       
-			ci->ci_ipending &= ~SINT_NET;
-			ci->ci_cpl = SINT_NET|SINT_TTY;
-			while ((pisr = netisr) != 0) {
-				atomic_clearbits_int(&netisr, pisr);
-				ppc_intr_enable(1);
-				KERNEL_LOCK();
-				softnet(pisr);
-				KERNEL_UNLOCK();
-				ppc_intr_disable();
-			}
-			continue;
-		}
-#if 0
-		if((ci->ci_ipending & SINT_TTY) & ~pcpl) {
-			ci->ci_ipending &= ~SINT_TTY;
-			ci->ci_cpl = SINT_TTY;
-			ppc_intr_enable(1);
-			KERNEL_LOCK();
-			softtty();
-			KERNEL_UNLOCK();
-			ppc_intr_disable();
-			continue;
-		}
-#endif
-	} while ((ci->ci_ipending & SINT_MASK) & ~pcpl);
-	ci->ci_cpl = pcpl;	/* Don't use splx... we are here already! */
-
-	ci->ci_iactive = 0;
-	ppc_intr_enable(s);
 }
 
 /*

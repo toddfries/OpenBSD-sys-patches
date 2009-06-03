@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip32_machdep.c,v 1.3 2008/05/04 12:27:46 miod Exp $ */
+/*	$OpenBSD: ip32_machdep.c,v 1.6 2009/05/21 16:28:12 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -29,7 +29,9 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
+#include <sys/device.h>
 #include <sys/extent.h>
+#include <sys/tty.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -44,13 +46,9 @@
 #include <sgi/localbus/crimebus.h>
 #include <sgi/localbus/macebus.h>
 
+#include <dev/ic/comvar.h>
+
 void crime_configure_memory(void);
-
-extern int bootdriveoffs;
-
-extern bus_addr_t comconsaddr;
-extern bus_space_tag_t comconsiot;
-extern int comconsfreq;
 
 void
 crime_configure_memory(void)
@@ -116,6 +114,7 @@ crime_configure_memory(void)
 				m->mem_first_page = first_page;
 				m->mem_last_page = last_page;
 			}
+			m->mem_freelist = VM_FREELIST_DEFAULT;
 			physmem += atop(size);
 		}
 	}
@@ -136,13 +135,6 @@ ip32_setup()
 
 	crime_configure_memory();
 
-	/* R1xK O2s are one disk slot machines. Offset slotno. */
-	switch ((cp0_get_prid() >> 8) & 0xff) {
-	case MIPS_R10000:
-	case MIPS_R12000:
-		bootdriveoffs = -1;
-		break;
-	}
 	/* R12K O2s must run with DSD on. */
 	switch ((cp0_get_prid() >> 8) & 0xff) {
 	case MIPS_R12000:

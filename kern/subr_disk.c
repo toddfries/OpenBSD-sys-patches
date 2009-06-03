@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.83 2008/11/21 23:51:30 krw Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.89 2009/06/03 03:14:28 thib Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -198,7 +198,7 @@ initdisklabel(struct disklabel *lp)
 		DL_SETDSIZE(lp, MAXDISKSIZE);
 	if (lp->d_secpercyl == 0)
 		return ("invalid geometry");
-	lp->d_npartitions = RAW_PART + 1;
+	lp->d_npartitions = MAXPARTITIONS;
 	for (i = 0; i < RAW_PART; i++) {
 		DL_SETPSIZE(&lp->d_partitions[i], 0);
 		DL_SETPOFFSET(&lp->d_partitions[i], 0);
@@ -229,9 +229,13 @@ checkdisklabel(void *rlp, struct disklabel *lp)
 	if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC)
 		msg = "no disk label";
 	else if (dlp->d_npartitions > MAXPARTITIONS)
-		msg = "unreasonable partition count";
+		msg = "invalid label, partition count > MAXPARTITIONS";
+	else if (dlp->d_secpercyl == 0)
+		msg = "invalid label, d_secpercyl == 0";
+	else if (dlp->d_secsize == 0)
+		msg = "invalid label, d_secsize == 0";
 	else if (dkcksum(dlp) != 0)
-		msg = "disk label corrupted";
+		msg = "invalid label, incorrect checksum";
 
 	if (msg) {
 		u_int16_t *start, *end, sum = 0;
@@ -411,6 +415,16 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 
 		bcopy(bp->b_data + offset, dp, sizeof(dp));
 
+		if (n == 0 && part_blkno == DOSBBSECTOR) {
+			u_int16_t fattest;
+
+			/* Check the end of sector marker. */
+			fattest = ((bp->b_data[510] << 8) & 0xff00) |
+			    (bp->b_data[511] & 0xff);
+			if (fattest != 0x55aa)
+				goto notfat;
+		}
+
 		if (ourpart == -1) {
 			/* Search for our MBR partition */
 			for (dp2=dp, i=0; i < NDOSPART && ourpart == -1;
@@ -491,6 +505,7 @@ donot:
 					part_blkno = 0;
 				}
 				wander = 1;
+				continue;
 				break;
 			default:
 				fstype = FS_OTHER;
@@ -499,11 +514,11 @@ donot:
 			}
 
 			/*
-			 * Don't set fstype/offset/size when wandering or just
-			 * looking for the offset of the OpenBSD partition. It
-			 * would invalidate the disklabel checksum!
+			 * Don't set fstype/offset/size when just looking for
+			 * the offset of the OpenBSD partition. It would
+			 * invalidate the disklabel checksum!
 			 */
-			if (wander || partoffp)
+			if (partoffp)
 				continue;
 
 			pp->p_fstype = fstype;
@@ -547,12 +562,6 @@ donot:
 		fattest = ((bp->b_data[12] << 8) & 0xff00) |
 		    (bp->b_data[11] & 0xff);
 		if (fattest < 512 || fattest > 4096 || (fattest % 512 != 0))
-			goto notfat;
-
-		/* Check the end of sector marker. */
-		fattest = ((bp->b_data[510] << 8) & 0xff00) |
-		    (bp->b_data[511] & 0xff);
-		if (fattest != 0x55aa)
 			goto notfat;
 
 		/* Looks like a FAT filesystem. Spoof 'i'. */
@@ -748,7 +757,7 @@ disk_init(void)
 int
 disk_construct(struct disk *diskp, char *lockname)
 {
-	rw_init(&diskp->dk_lock, lockname);
+	rw_init(&diskp->dk_lock, "dklk");
 	mtx_init(&diskp->dk_mtx, IPL_BIO);
 	
 	diskp->dk_flags |= DKF_CONSTRUCTED;
@@ -954,63 +963,6 @@ dk_mountroot(void)
 #endif
 	}
 	return (*mountrootfn)();
-}
-
-struct bufq *
-bufq_default_alloc(void)
-{
-	struct bufq_default *bq;
-
-	bq = malloc(sizeof(*bq), M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (bq == NULL)
-		panic("bufq_default_alloc: no memory");
-
-	bq->bufq.bufq_free = bufq_default_free;
-	bq->bufq.bufq_add = bufq_default_add;
-	bq->bufq.bufq_get = bufq_default_get;
-
-	return ((struct bufq *)bq);
-}
-
-void
-bufq_default_free(struct bufq *bq)
-{
-	free(bq, M_DEVBUF);
-}
-
-void
-bufq_default_add(struct bufq *bq, struct buf *bp)
-{
-	struct bufq_default *bufq = (struct bufq_default *)bq;
-	struct proc *p = bp->b_proc;
-	struct buf *head;
-
-	if (p == NULL || p->p_nice < NZERO)
-		head = &bufq->bufq_head[0];
-	else if (p->p_nice == NZERO)
-		head = &bufq->bufq_head[1];
-	else
-		head = &bufq->bufq_head[2];
-
-	disksort(head, bp);
-}
-
-struct buf *
-bufq_default_get(struct bufq *bq)
-{
-	struct bufq_default *bufq = (struct bufq_default *)bq;
-	struct buf *bp, *head;
-	int i;
-
-	for (i = 0; i < 3; i++) {
-		head = &bufq->bufq_head[i];
-		if ((bp = head->b_actf))
-			break;
-	}
-	if (bp == NULL)
-		return (NULL);
-	head->b_actf = bp->b_actf;
-	return (bp);
 }
 
 struct device *

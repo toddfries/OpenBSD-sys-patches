@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.444 2009/01/20 20:21:03 mlarkin Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.451 2009/06/03 00:41:48 weingart Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -105,7 +105,6 @@
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm_swap.h>
 
-#define _BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <machine/cpu.h>
@@ -1381,7 +1380,9 @@ intelcore_update_sensor(void *args)
 	u_int64_t msr;
 	int max = 100;
 
-	if (rdmsr(MSR_TEMPERATURE_TARGET) & MSR_TEMPERATURE_TARGET_LOW_BIT)
+	/* Only some Core family chips have MSR_TEMPERATURE_TARGET. */
+	if (ci->ci_model == 0xe &&
+	    (rdmsr(MSR_TEMPERATURE_TARGET) & MSR_TEMPERATURE_TARGET_LOW_BIT))
 		max = 85;
 
 	msr = rdmsr(MSR_THERM_STATUS);
@@ -1628,7 +1629,9 @@ identifycpu(struct cpu_info *ci)
 		max = sizeof (i386_cpuid_cpus) / sizeof (i386_cpuid_cpus[0]);
 		modif = (ci->ci_signature >> 12) & 3;
 		family = (ci->ci_signature >> 8) & 15;
+		ci->ci_family = family;
 		model = (ci->ci_signature >> 4) & 15;
+		ci->ci_model = model;
 		step = ci->ci_signature & 15;
 #ifdef CPUDEBUG
 		printf("%s: family %x model %x step %x\n", cpu_device, family,
@@ -1684,6 +1687,16 @@ identifycpu(struct cpu_info *ci)
 			} else if (model > CPU_MAXMODEL)
 				model = CPU_DEFMODEL;
 			i = family - CPU_MINFAMILY;
+
+			/* store extended family/model values for later use */
+			if ((vendor == CPUVENDOR_INTEL &&
+			    (family == 0x6 || family == 0xf)) ||
+			    (vendor == CPUVENDOR_AMD && family == 0xf)) {
+				ci->ci_family += (ci->ci_signature >> 20) &
+				    0xff;
+				ci->ci_model += ((ci->ci_signature >> 16) &
+				    0x0f) << 4;
+			}
 
 			/* Special hack for the PentiumII/III series. */
 			if (vendor == CPUVENDOR_INTEL && family == 6 &&
@@ -1814,12 +1827,6 @@ identifycpu(struct cpu_info *ci)
 		}
 	}
 
-#ifndef MULTIPROCESSOR
-	/* configure the CPU if needed */
-	if (ci->cpu_setup != NULL)
-		(ci->cpu_setup)(ci);
-#endif
-
 #ifndef SMALL_KERNEL
 	if (cpuspeed != 0 && cpu_cpuspeed == NULL)
 		cpu_cpuspeed = pentium_cpuspeed;
@@ -1834,17 +1841,8 @@ identifycpu(struct cpu_info *ci)
 
 	ci->cpu_class = class;
 
-	if (cpu == CPU_486DLC) {
-#ifndef CYRIX_CACHE_WORKS
+	if (cpu == CPU_486DLC)
 		printf("WARNING: CYRIX 486DLC CACHE UNCHANGED.\n");
-#else
-#ifndef CYRIX_CACHE_REALLY_WORKS
-		printf("WARNING: CYRIX 486DLC CACHE ENABLED IN HOLD-FLUSH MODE.\n");
-#else
-		printf("WARNING: CYRIX 486DLC CACHE ENABLED.\n");
-#endif
-#endif
-	}
 
 	/*
 	 * Enable ring 0 write protection (486 or above, but 386
@@ -1970,10 +1968,9 @@ void
 p3_get_bus_clock(struct cpu_info *ci)
 {
 	u_int64_t msr;
-	int model, bus;
+	int bus;
 
-	model = (ci->ci_signature >> 4) & 15;
-	switch (model) {
+	switch (ci->ci_model) {
 	case 0x9: /* Pentium M (130 nm, Banias) */
 		bus_clock = BUS100;
 		break;
@@ -1995,6 +1992,8 @@ p3_get_bus_clock(struct cpu_info *ci)
 		break;
 	case 0xe: /* Core Duo/Solo */
 	case 0xf: /* Core Xeon */
+	case 0x16: /* 65nm Celeron */
+	case 0x17: /* Core 2 Extreme/45nm Xeon */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
 		switch (bus) {
@@ -2022,7 +2021,7 @@ p3_get_bus_clock(struct cpu_info *ci)
 			goto print_msr;
 		}
 		break;
-	case 0xc: /* Atom */
+	case 0x1c: /* Atom */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
 		switch (bus) {
@@ -2068,8 +2067,8 @@ p3_get_bus_clock(struct cpu_info *ci)
 		}
 		break;
 	default: 
-		printf("%s: unknown i686 model %d, can't get bus clock",
-		    ci->ci_dev.dv_xname, model);
+		printf("%s: unknown i686 model 0x%x, can't get bus clock",
+		    ci->ci_dev.dv_xname, ci->ci_model);
 print_msr:
 		/*
 		 * Show the EBL_CR_POWERON MSR, so we'll at least have
@@ -2126,19 +2125,6 @@ pentium_cpuspeed(int *freq)
 	return (0);
 }
 #endif	/* !SMALL_KERNEL */
-
-#ifdef COMPAT_IBCS2
-void ibcs2_sendsig(sig_t, int, int, u_long, int, union sigval);
-
-void
-ibcs2_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
-    union sigval val)
-{
-	extern int bsd_to_ibcs2_sig[];
-
-	sendsig(catcher, bsd_to_ibcs2_sig[sig], mask, code, type, val);
-}
-#endif
 
 /*
  * Send an interrupt to process.
@@ -2885,9 +2871,14 @@ init386(paddr_t first_avail)
 	    sizeof(struct cpu_info)-1, SDT_MEMRWA, SEL_KPL, 0, 0);
 
 	/* make ldt gates and memory segments */
+#ifdef COMPAT_IBCS2
 	setgate(&ldt[LSYS5CALLS_SEL].gd, &IDTVEC(osyscall), 1, SDT_SYS386CGT,
 	    SEL_UPL, GCODE_SEL);
-	ldt[LBSDICALLS_SEL] = ldt[LSYS5CALLS_SEL];
+#endif
+#ifdef COMPAT_BSDOS
+	setgate(&ldt[LBSDICALLS_SEL].gd, &IDTVEC(osyscall), 1, SDT_SYS386CGT,
+	    SEL_UPL, GCODE_SEL);
+#endif
 
 	/* exceptions */
 	setgate(&idt[  0], &IDTVEC(div),     0, SDT_SYS386TGT, SEL_KPL, GCODE_SEL);

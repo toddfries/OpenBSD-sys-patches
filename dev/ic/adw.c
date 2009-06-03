@@ -1,4 +1,4 @@
-/*	$OpenBSD: adw.c,v 1.36 2008/11/26 16:38:00 krw Exp $ */
+/*	$OpenBSD: adw.c,v 1.38 2009/02/16 21:19:06 miod Exp $ */
 /* $NetBSD: adw.c,v 1.23 2000/05/27 18:24:50 dante Exp $	 */
 
 /*
@@ -73,7 +73,7 @@ int adw_queue_ccb(ADW_SOFTC *, ADW_CCB *, int);
 int adw_scsi_cmd(struct scsi_xfer *);
 int adw_build_req(struct scsi_xfer *, ADW_CCB *, int);
 void adw_build_sglist(ADW_CCB *, ADW_SCSI_REQ_Q *, ADW_SG_BLOCK *);
-void adw_minphys(struct buf *);
+void adw_minphys(struct buf *, struct scsi_link *);
 void adw_isr_callback(ADW_SOFTC *, ADW_SCSI_REQ_Q *);
 void adw_async_callback(ADW_SOFTC *, u_int8_t);
 
@@ -407,7 +407,7 @@ adw_queue_ccb(sc, ccb, retry)
 		/* ALWAYS initialize stimeout, lest it contain garbage! */
 		timeout_set(&ccb->xs->stimeout, adw_timeout, ccb);
 		if ((ccb->xs->flags & SCSI_POLL) == 0)
-			timeout_add(&ccb->xs->stimeout, (ccb->timeout * hz) / 1000);
+			timeout_add_msec(&ccb->xs->stimeout, ccb->timeout);
 	}
 
 	return(errcode);
@@ -581,8 +581,7 @@ adw_attach(sc)
 
 
 void
-adw_minphys(bp)
-	struct buf     *bp;
+adw_minphys(struct buf *bp, struct scsi_link *sl)
 {
 
 	if (bp->b_bcount > ((ADW_MAX_SG_LIST - 1) * PAGE_SIZE))
@@ -915,7 +914,7 @@ adw_timeout(arg)
 		 * by hand so the next time a timeout event will occur
 		 * we will reset the bus.
 		 */
-		timeout_add(&xs->stimeout, (ccb->timeout * hz) / 1000);
+		timeout_add_msec(&xs->stimeout, ccb->timeout);
 	} else {
 	/*
 	 * Abort the operation that has timed out.
@@ -947,7 +946,7 @@ adw_timeout(arg)
 		 * by hand so to give a second opportunity to the command
 		 * which timed-out.
 		 */
-		timeout_add(&xs->stimeout, (ccb->timeout * hz) / 1000);
+		timeout_add_msec(&xs->stimeout, ccb->timeout);
 	}
 
 	splx(s);

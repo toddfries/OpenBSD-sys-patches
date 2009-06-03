@@ -1,4 +1,4 @@
-/*	$OpenBSD: un.h,v 1.8 2003/06/02 23:28:22 millert Exp $	*/
+/*	$OpenBSD: un.h,v 1.10 2009/02/22 07:47:22 otto Exp $	*/
 /*	$NetBSD: un.h,v 1.11 1996/02/04 02:12:47 christos Exp $	*/
 
 /*
@@ -48,19 +48,19 @@ struct	sockaddr_un {
 struct unpcb;
 struct socket;
 
-int	unp_attach(struct socket *so);
-int	unp_bind(struct unpcb *unp, struct mbuf *nam, struct proc *p);
-int	unp_connect(struct socket *so, struct mbuf *nam, struct proc *p);
-int	unp_connect2(struct socket *so, struct socket *so2);
-void	unp_detach(struct unpcb *unp);
-void	unp_discard(struct file *fp);
-void	unp_disconnect(struct unpcb *unp);
-void	unp_drop(struct unpcb *unp, int errno);
+int	unp_attach(struct socket *);
+int	unp_bind(struct unpcb *, struct mbuf *, struct proc *);
+int	unp_connect(struct socket *, struct mbuf *, struct proc *);
+int	unp_connect2(struct socket *, struct socket *);
+void	unp_detach(struct unpcb *);
+void	unp_discard(struct file *);
+void	unp_disconnect(struct unpcb *);
+void	unp_drop(struct unpcb *, int);
 void	unp_gc(void);
-void	unp_mark(struct file *fp);
-void	unp_scan(struct mbuf *m0, void (*op)(struct file *), int);
-void	unp_shutdown(struct unpcb *unp);
-int 	unp_externalize(struct mbuf *);
+void	unp_mark(struct file *);
+void	unp_scan(struct mbuf *, void (*)(struct file *), int);
+void	unp_shutdown(struct unpcb *);
+int 	unp_externalize(struct mbuf *, socklen_t);
 int	unp_internalize(struct mbuf *, struct proc *);
 void 	unp_dispose(struct mbuf *);
 #else /* !_KERNEL */

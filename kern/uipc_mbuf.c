@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.114 2008/12/23 01:06:35 deraadt Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.120 2009/06/02 00:05:13 blambert Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -107,6 +107,8 @@ u_int	mclsizes[] = {
 };
 static	char mclnames[MCLPOOLS][8];
 struct	pool mclpools[MCLPOOLS];
+
+int	m_clpool(u_int);
 
 int max_linkhdr;		/* largest link-level header */
 int max_protohdr;		/* largest protocol header */
@@ -271,36 +273,49 @@ m_getclr(int nowait, int type)
 	return (m);
 }
 
+int
+m_clpool(u_int pktlen)
+{
+	int pi;
+
+	for (pi = 0; pi < MCLPOOLS; pi++) {
+                if (pktlen <= mclsizes[pi])
+			return (pi);
+	}
+
+	return (-1);
+}
+
 void
 m_clinitifp(struct ifnet *ifp)
 {
 	struct mclpool *mclp = ifp->if_data.ifi_mclpool;
-	extern u_int mclsizes[];
 	int i;
 
 	/* Initialize high water marks for use of cluster pools */
 	for (i = 0; i < MCLPOOLS; i++) {
-		if (mclp[i].mcl_lwm == 0)
-			mclp[i].mcl_lwm = 2;
-		mclp[i].mcl_hwm = MAX(4, mclp[i].mcl_lwm);
-		mclp[i].mcl_size = mclsizes[i];
+		mclp = &ifp->if_data.ifi_mclpool[i];
+
+		if (mclp->mcl_lwm == 0)
+			mclp->mcl_lwm = 2;
+		if (mclp->mcl_hwm == 0)
+			mclp->mcl_hwm = 32768;
+
+		mclp->mcl_cwm = MAX(4, mclp->mcl_lwm);
 	}
 }
 
 void
-m_clsetlwm(struct ifnet *ifp, u_int pktlen, u_int lwm)
+m_clsetwms(struct ifnet *ifp, u_int pktlen, u_int lwm, u_int hwm)
 {
-	extern u_int mclsizes[];
-	int i;
+	int pi;
 
-	for (i = 0; i < MCLPOOLS; i++) {
-                if (pktlen <= mclsizes[i])
-			break;
-        }
-	if (i >= MCLPOOLS)
+	pi = m_clpool(pktlen);
+	if (pi == -1)
 		return;
 
-	ifp->if_data.ifi_mclpool[i].mcl_lwm = lwm;
+	ifp->if_data.ifi_mclpool[pi].mcl_lwm = lwm;
+	ifp->if_data.ifi_mclpool[pi].mcl_hwm = hwm;
 }
 
 extern int m_clticks;
@@ -328,19 +343,20 @@ m_cldrop(struct ifnet *ifp, int pi)
 		liveticks = ticks;
 		TAILQ_FOREACH(aifp, &ifnet, if_list) {
 			mclp = aifp->if_data.ifi_mclpool;
-			for (i = 0; i < nitems(aifp->if_data.ifi_mclpool); i++)
-				mclp[i].mcl_hwm =
-				    max(mclp[i].mcl_hwm / 2, mclp[i].mcl_lwm);
+			for (i = 0; i < MCLPOOLS; i++) {
+				mclp[i].mcl_cwm =
+				    max(mclp[i].mcl_cwm / 2, mclp[i].mcl_lwm);
+			}
 		}
 	} else if (m_livelock && ticks - liveticks > 5)
 		m_livelock = 0;	/* Let the high water marks grow again */
 
-	mclp = ifp->if_data.ifi_mclpool;
-	if (mclp[pi].mcl_alive <= 2 && mclp[pi].mcl_hwm < 32768 &&
-	    ISSET(ifp->if_flags, IFF_RUNNING) && m_livelock == 0) {
-		/* About to run out, so increase the watermark */
-		mclp[pi].mcl_hwm++;
-	} else if (mclp[pi].mcl_alive >= mclp[pi].mcl_hwm)
+	mclp = &ifp->if_data.ifi_mclpool[pi];
+	if (m_livelock == 0 && ISSET(ifp->if_flags, IFF_RUNNING) &&
+	    mclp->mcl_alive <= 2 && mclp->mcl_cwm < mclp->mcl_hwm) {
+		/* About to run out, so increase the current watermark */
+		mclp->mcl_cwm++;
+	} else if (mclp->mcl_alive >= mclp->mcl_cwm)
 		return (1);		/* No more packets given */
 
 	return (0);
@@ -371,31 +387,26 @@ m_cluncount(struct mbuf *m, int all)
 void
 m_clget(struct mbuf *m, int how, struct ifnet *ifp, u_int pktlen)
 {
-	struct pool *mclp;
 	int pi;
 	int s;
 
-	for (pi = 0; pi < nitems(mclpools); pi++) {
-		mclp = &mclpools[pi];
-		if (pktlen <= mclp->pr_size)
-			break;
-	}
-
+	pi = m_clpool(pktlen);
 #ifdef DIAGNOSTIC
-	if (mclp == NULL)
-		panic("m_clget: request for %d sized cluster", pktlen);
+	if (pi == -1)
+		panic("m_clget: request for %u byte cluster", pktlen);
 #endif
 
 	if (ifp != NULL && m_cldrop(ifp, pi))
 		return;
 
 	s = splnet();
-	m->m_ext.ext_buf = pool_get(mclp, how == M_WAIT ? PR_WAITOK : 0);
+	m->m_ext.ext_buf = pool_get(&mclpools[pi],
+	    how == M_WAIT ? PR_WAITOK : 0);
 	splx(s);
 	if (m->m_ext.ext_buf != NULL) {
 		m->m_data = m->m_ext.ext_buf;
 		m->m_flags |= M_EXT|M_CLUSTER;
-		m->m_ext.ext_size = mclp->pr_size;
+		m->m_ext.ext_size = mclpools[pi].pr_size;
 		m->m_ext.ext_free = NULL;
 		m->m_ext.ext_arg = NULL;
 
@@ -529,9 +540,7 @@ m_defrag(struct mbuf *m, int how)
  */
 
 /*
- * Lesser-used path for M_PREPEND:
- * allocate new mbuf to prepend to chain,
- * copy junk along.
+ * Ensure len bytes of contiguous space at the beginning of the mbuf chain
  */
 struct mbuf *
 m_prepend(struct mbuf *m, int len, int how)
@@ -541,17 +550,24 @@ m_prepend(struct mbuf *m, int len, int how)
 	if (len > MHLEN)
 		panic("mbuf prepend length too big");
 
-	MGET(mn, how, m->m_type);
-	if (mn == NULL) {
-		m_freem(m);
-		return (NULL);
+	if (M_LEADINGSPACE(m) >= len) {
+		m->m_data -= len;
+		m->m_len += len;
+	} else {
+		MGET(mn, how, m->m_type);
+		if (mn == NULL) {
+			m_freem(m);
+			return (NULL);
+		}
+		if (m->m_flags & M_PKTHDR)
+			M_MOVE_PKTHDR(mn, m);
+		mn->m_next = m;
+		m = mn;
+		MH_ALIGN(m, len);
+		m->m_len = len;
 	}
 	if (m->m_flags & M_PKTHDR)
-		M_MOVE_PKTHDR(mn, m);
-	mn->m_next = m;
-	m = mn;
-	MH_ALIGN(m, len);
-	m->m_len = len;
+		m->m_pkthdr.len += len;
 	return (m);
 }
 
@@ -701,9 +717,8 @@ m_copydata(struct mbuf *m, int off, int len, caddr_t cp)
 void
 m_copyback(struct mbuf *m0, int off, int len, const void *_cp)
 {
-	int mlen;
+	int mlen, totlen = 0;
 	struct mbuf *m = m0, *n;
-	int totlen = 0;
 	caddr_t cp = (caddr_t)_cp;
 
 	if (m0 == NULL)
@@ -712,34 +727,54 @@ m_copyback(struct mbuf *m0, int off, int len, const void *_cp)
 		off -= mlen;
 		totlen += mlen;
 		if (m->m_next == NULL) {
-			n = m_getclr(M_DONTWAIT, m->m_type);
-			if (n == NULL)
+			if ((n = m_get(M_DONTWAIT, m->m_type)) == NULL)
 				goto out;
-			n->m_len = min(MLEN, len + off);
+
+			if (off + len > MLEN) {
+				MCLGETI(n, M_DONTWAIT, NULL, off + len);
+				if (!(n->m_flags & M_EXT)) {
+					m_free(n);
+					goto out;
+				}
+			}
+			bzero(mtod(n, caddr_t), off);
+			n->m_len = len + off;
 			m->m_next = n;
 		}
 		m = m->m_next;
 	}
 	while (len > 0) {
-		mlen = min (m->m_len - off, len);
-		bcopy(cp, off + mtod(m, caddr_t), (unsigned)mlen);
+		/* extend last packet to be filled fully */
+		if (m->m_next == NULL && (len > m->m_len - off))
+			m->m_len += min(len - (m->m_len - off),
+			    M_TRAILINGSPACE(m));
+		mlen = min(m->m_len - off, len);
+		bcopy(cp, mtod(m, caddr_t) + off, (size_t)mlen);
 		cp += mlen;
 		len -= mlen;
-		mlen += off;
-		off = 0;
-		totlen += mlen;
+		totlen += mlen + off;
 		if (len == 0)
 			break;
+		off = 0;
+
 		if (m->m_next == NULL) {
-			n = m_get(M_DONTWAIT, m->m_type);
-			if (n == NULL)
-				break;
-			n->m_len = min(MLEN, len);
+			if ((n = m_get(M_DONTWAIT, m->m_type)) == NULL)
+				goto out;
+
+			if (len > MLEN) {
+				MCLGETI(n, M_DONTWAIT, NULL, len);
+				if (!(n->m_flags & M_EXT)) {
+					m_free(n);
+					goto out;
+				}
+			}
+			n->m_len = len;
 			m->m_next = n;
 		}
 		m = m->m_next;
 	}
-out:	if (((m = m0)->m_flags & M_PKTHDR) && (m->m_pkthdr.len < totlen))
+out:
+	if (((m = m0)->m_flags & M_PKTHDR) && (m->m_pkthdr.len < totlen))
 		m->m_pkthdr.len = totlen;
 }
 
@@ -1264,11 +1299,11 @@ m_apply(struct mbuf *m, int off, int len,
 int
 m_leadingspace(struct mbuf *m)
 {
-	if (M_READONLY((m)))
+	if (M_READONLY(m))
 		return 0;
-	return ((m)->m_flags & M_EXT ? (m)->m_data - (m)->m_ext.ext_buf :
-	    (m)->m_flags & M_PKTHDR ? (m)->m_data - (m)->m_pktdat :
-	    (m)->m_data - (m)->m_dat);
+	return (m->m_flags & M_EXT ? m->m_data - m->m_ext.ext_buf :
+	    m->m_flags & M_PKTHDR ? m->m_data - m->m_pktdat :
+	    m->m_data - m->m_dat);
 }
 
 int
@@ -1276,7 +1311,7 @@ m_trailingspace(struct mbuf *m)
 {
 	if (M_READONLY(m))
 		return 0;
-	return ((m)->m_flags & M_EXT ? (m)->m_ext.ext_buf +
-	    (m)->m_ext.ext_size - ((m)->m_data + (m)->m_len) :
-	    &(m)->m_dat[MLEN] - ((m)->m_data + (m)->m_len));
+	return (m->m_flags & M_EXT ? m->m_ext.ext_buf +
+	    m->m_ext.ext_size - (m->m_data + m->m_len) :
+	    &m->m_dat[MLEN] - (m->m_data + m->m_len));
 }

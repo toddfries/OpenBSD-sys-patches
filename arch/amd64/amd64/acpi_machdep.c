@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.14 2008/12/28 22:27:10 kettenis Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.19 2009/06/02 12:50:29 kurt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -30,8 +30,24 @@
 #include <dev/isa/isareg.h>
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
+#include <dev/acpi/acpidev.h>
 
 #include "ioapic.h"
+#include "lapic.h"
+
+#if NLAPIC > 0
+#include <machine/apicvar.h>
+#include <machine/i82489reg.h>
+#include <machine/i82489var.h>
+#endif
+
+extern u_char acpi_real_mode_resume[], acpi_resume_end[];
+extern u_int32_t acpi_pdirpa;
+extern paddr_t tramp_pdirpa;
+
+int acpi_savecpu(void);
+void ioapic_enable(void);
+void lapic_enable(void);
 
 #define ACPI_BIOS_RSDP_WINDOW_BASE        0xe0000
 #define ACPI_BIOS_RSDP_WINDOW_SIZE        0x20000
@@ -148,5 +164,99 @@ acpi_attach_machdep(struct acpi_softc *sc)
 	sc->sc_interrupt = isa_intr_establish(NULL, sc->sc_fadt->sci_int,
 	    IST_LEVEL, IPL_TTY, acpi_interrupt, sc, sc->sc_dev.dv_xname);
 	cpuresetfn = acpi_reset;
+
+#ifdef ACPI_SLEEP_ENABLED
+
+	/*
+	 * Sanity check before setting up trampoline.
+	 * Ensure the trampoline size is < PAGE_SIZE
+	 */
+	KASSERT(acpi_resume_end - acpi_real_mode_resume < PAGE_SIZE);
+
+	bcopy(acpi_real_mode_resume, 
+	    (caddr_t)ACPI_TRAMPOLINE, 
+	    acpi_resume_end - acpi_real_mode_resume);
+
+	acpi_pdirpa = tramp_pdirpa;
+
+#endif /* ACPI_SLEEP_ENABLED */
 }
-#endif /* SMALL_KERNEL */
+
+void
+acpi_cpu_flush(struct acpi_softc *sc, int state)
+{
+	/*
+	 * Flush write back caches since we'll lose them.
+	 */
+	if (state > ACPI_STATE_S1)
+		wbinvd();
+}
+int
+acpi_sleep_machdep(struct acpi_softc *sc, int state)
+{
+#ifdef ACPI_SLEEP_ENABLED
+
+	if (sc->sc_facs == NULL) {
+		printf("%s: acpi_sleep_machdep: no FACS\n", DEVNAME(sc));
+		return (ENXIO);
+	}
+
+#ifdef DIAGNOSTIC
+	if (curproc != &proc0)
+		panic("acpi_sleep_machdep: sleeping in non-kernel proc");
+#endif
+
+	if (rcr3() != pmap_kernel()->pm_pdirpa) {
+		pmap_activate(curproc);
+	}
+
+	/*
+	 *
+	 * ACPI defines two wakeup vectors. One is used for ACPI 1.0
+	 * implementations - it's in the FACS table as wakeup_vector and
+	 * indicates a 32-bit physical address containing real-mode wakeup
+	 * code.
+	 *
+	 * The second wakeup vector is in the FACS table as
+	 * x_wakeup_vector and indicates a 64-bit physical address
+	 * containing protected-mode wakeup code.
+	 *
+	 */
+
+	sc->sc_facs->wakeup_vector = (u_int32_t)ACPI_TRAMPOLINE;
+	if (sc->sc_facs->version == 1)
+		sc->sc_facs->x_wakeup_vector = 0;
+
+	disable_intr();
+
+	/* Copy the current cpu registers into a safe place for resume. */
+	if (acpi_savecpu()) {
+		wbinvd();
+		acpi_enter_sleep_state(sc, state);
+		panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
+	}
+
+	/*
+	 * On resume, the execution path will actually occur here.
+	 * This is because we previously saved the stack location
+	 * in acpi_savecpu, and issued a far jmp to the restore
+	 * routine in the wakeup code. This means we are
+	 * returning to the location immediately following the
+	 * last call instruction - after the call to acpi_savecpu.
+	 */
+
+#if NLAPIC > 0
+	lapic_enable();
+	lapic_calibrate_timer(&cpu_info_primary);
+#endif
+#if NIOAPIC > 0
+	ioapic_enable();
+#endif
+	initrtclock();
+	enable_intr();
+#endif /* ACPI_SLEEP_ENABLED */
+	return 0;
+ }
+
+
+#endif /* ! SMALL_KERNEL */

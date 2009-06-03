@@ -1,4 +1,4 @@
-/*	$OpenBSD: ibcs2_exec.c,v 1.18 2006/12/29 13:04:37 pedro Exp $	*/
+/*	$OpenBSD: ibcs2_exec.c,v 1.20 2009/06/01 20:11:38 weingart Exp $	*/
 /*	$NetBSD: ibcs2_exec.c,v 1.12 1996/10/12 02:13:52 thorpej Exp $	*/
 
 /*
@@ -38,6 +38,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
+#include <sys/core.h>
 #include <sys/exec.h>
 #include <sys/malloc.h>
 #include <sys/vnode.h>
@@ -48,6 +49,7 @@
 #include <compat/ibcs2/ibcs2_types.h>
 #include <compat/ibcs2/ibcs2_exec.h>
 #include <compat/ibcs2/ibcs2_util.h>
+#include <compat/ibcs2/ibcs2_signal.h>
 #include <compat/ibcs2/ibcs2_syscall.h>
 
 int exec_ibcs2_coff_prep_omagic(struct proc *, struct exec_package *,
@@ -79,7 +81,6 @@ extern struct sysent ibcs2_sysent[];
 #ifdef SYSCALL_DEBUG
 extern char *ibcs2_syscallnames[];
 #endif
-extern void ibcs2_sendsig(sig_t, int, int, u_long, int, union sigval);
 extern char sigcode[], esigcode[];
 
 const char ibcs2_emul_path[] = "/emul/ibcs2";
@@ -100,6 +101,7 @@ struct emul emul_ibcs2 = {
 	copyargs,
 	setregs,
 	NULL,
+	coredump_trad,
 	sigcode,
 	esigcode,
 };

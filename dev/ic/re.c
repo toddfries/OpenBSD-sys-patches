@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.103 2008/11/30 06:01:45 brad Exp $	*/
+/*	$OpenBSD: re.c,v 1.106 2009/06/03 00:11:19 sthen Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -516,44 +516,46 @@ re_iff(struct rl_softc *sc)
 {
 	struct ifnet		*ifp = &sc->sc_arpcom.ac_if;
 	int			h = 0;
-	u_int32_t		hashes[2] = { 0, 0 };
+	u_int32_t		hashes[2];
 	u_int32_t		rxfilt;
-	int			mcnt = 0;
 	struct arpcom		*ac = &sc->sc_arpcom;
 	struct ether_multi	*enm;
 	struct ether_multistep	step;
 
 	rxfilt = CSR_READ_4(sc, RL_RXCFG);
-	rxfilt &= ~(RL_RXCFG_RX_ALLPHYS | RL_RXCFG_RX_MULTI);
+	rxfilt &= ~(RL_RXCFG_RX_ALLPHYS | RL_RXCFG_RX_BROAD |
+	    RL_RXCFG_RX_INDIV | RL_RXCFG_RX_MULTI);
 	ifp->if_flags &= ~IFF_ALLMULTI;
 
-	if (ifp->if_flags & IFF_PROMISC ||
-	    ac->ac_multirangecnt > 0) {
-		ifp ->if_flags |= IFF_ALLMULTI;
+	/*
+	 * Always accept frames destined to our station address.
+	 * Always accept broadcast frames.
+	 */
+	rxfilt |= RL_RXCFG_RX_INDIV | RL_RXCFG_RX_BROAD;
+
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
 		rxfilt |= RL_RXCFG_RX_MULTI;
 		if (ifp->if_flags & IFF_PROMISC)
 			rxfilt |= RL_RXCFG_RX_ALLPHYS;
 		hashes[0] = hashes[1] = 0xFFFFFFFF;
 	} else {
-		/* first, zot all the existing hash bits */
-		CSR_WRITE_4(sc, RL_MAR0, 0);
-		CSR_WRITE_4(sc, RL_MAR4, 0);
+		rxfilt |= RL_RXCFG_RX_MULTI;
+		/* Program new filter. */
+		bzero(hashes, sizeof(hashes));
 
-		/* now program new ones */
 		ETHER_FIRST_MULTI(step, ac, enm);
 		while (enm != NULL) {
 			h = ether_crc32_be(enm->enm_addrlo,
 			    ETHER_ADDR_LEN) >> 26;
+
 			if (h < 32)
 				hashes[0] |= (1 << h);
 			else
 				hashes[1] |= (1 << (h - 32));
-			mcnt++;
+
 			ETHER_NEXT_MULTI(step, enm);
 		}
-
-		if (mcnt)
-			rxfilt |= RL_RXCFG_RX_MULTI;
 	}
 
 	/*
@@ -588,7 +590,8 @@ re_reset(struct rl_softc *sc)
 	if (i == RL_TIMEOUT)
 		printf("%s: reset never completed!\n", sc->sc_dev.dv_xname);
 
-	CSR_WRITE_1(sc, RL_LDPS, 1);
+	if (sc->rl_flags & RL_FLAG_MACLDPS)
+		CSR_WRITE_1(sc, RL_LDPS, 1);
 }
 
 #ifdef RE_DIAG
@@ -802,44 +805,7 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	const struct re_revision *rr;
 	const char	*re_name = NULL;
 
-	/* Reset the adapter. */
-	re_reset(sc);
-
 	sc->sc_hwrev = CSR_READ_4(sc, RL_TXCFG) & RL_TXCFG_HWREV;
-
-	sc->rl_tx_time = 5;		/* 125us */
-	sc->rl_rx_time = 2;		/* 50us */
-	if (sc->rl_flags & RL_FLAG_PCIE)
-		sc->rl_sim_time = 75;	/* 75us */
-	else
-		sc->rl_sim_time = 125;	/* 125us */
-	sc->rl_imtype = RL_IMTYPE_SIM;	/* simulated interrupt moderation */
-
-	if (sc->sc_hwrev == RL_HWREV_8139CPLUS)
-		sc->rl_bus_speed = 33; /* XXX */
-	else if (sc->rl_flags & RL_FLAG_PCIE)
-		sc->rl_bus_speed = 125;
-	else {
-		u_int8_t cfg2;
-
-		cfg2 = CSR_READ_1(sc, RL_CFG2);
-		switch (cfg2 & RL_CFG2_PCI_MASK) {
-		case RL_CFG2_PCI_33MHZ:
- 			sc->rl_bus_speed = 33;
-			break;
-		case RL_CFG2_PCI_66MHZ:
-			sc->rl_bus_speed = 66;
-			break;
-		default:
-			printf("%s: unknown bus speed, assume 33MHz\n",
-			    sc->sc_dev.dv_xname);
-			sc->rl_bus_speed = 33;
-			break;
-		}
-
-		if (cfg2 & RL_CFG2_PCI_64BIT)
-			sc->rl_flags |= RL_FLAG_PCI64;
-	}
 
 	switch (sc->sc_hwrev) {
 	case RL_HWREV_8139CPLUS:
@@ -882,14 +848,56 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		 */
 		sc->rl_flags |= RL_FLAG_NOJUMBO;
 		break;
+	case RL_HWREV_8169:
+	case RL_HWREV_8169S:
+	case RL_HWREV_8110S:
+		sc->rl_flags |= RL_FLAG_MACLDPS;
+		break;
 	case RL_HWREV_8169_8110SB:
 	case RL_HWREV_8169_8110SBL:
 	case RL_HWREV_8169_8110SCd:
 	case RL_HWREV_8169_8110SCe:
-		sc->rl_flags |= RL_FLAG_PHYWAKE;
+		sc->rl_flags |= RL_FLAG_PHYWAKE | RL_FLAG_MACLDPS;
 		break;
 	default:
 		break;
+	}
+
+	/* Reset the adapter. */
+	re_reset(sc);
+
+	sc->rl_tx_time = 5;		/* 125us */
+	sc->rl_rx_time = 2;		/* 50us */
+	if (sc->rl_flags & RL_FLAG_PCIE)
+		sc->rl_sim_time = 75;	/* 75us */
+	else
+		sc->rl_sim_time = 125;	/* 125us */
+	sc->rl_imtype = RL_IMTYPE_SIM;	/* simulated interrupt moderation */
+
+	if (sc->sc_hwrev == RL_HWREV_8139CPLUS)
+		sc->rl_bus_speed = 33; /* XXX */
+	else if (sc->rl_flags & RL_FLAG_PCIE)
+		sc->rl_bus_speed = 125;
+	else {
+		u_int8_t cfg2;
+
+		cfg2 = CSR_READ_1(sc, RL_CFG2);
+		switch (cfg2 & RL_CFG2_PCI_MASK) {
+		case RL_CFG2_PCI_33MHZ:
+ 			sc->rl_bus_speed = 33;
+			break;
+		case RL_CFG2_PCI_66MHZ:
+			sc->rl_bus_speed = 66;
+			break;
+		default:
+			printf("%s: unknown bus speed, assume 33MHz\n",
+			    sc->sc_dev.dv_xname);
+			sc->rl_bus_speed = 33;
+			break;
+		}
+
+		if (cfg2 & RL_CFG2_PCI_64BIT)
+			sc->rl_flags |= RL_FLAG_PCI64;
 	}
 
 	re_config_imtype(sc, sc->rl_imtype);
@@ -1916,7 +1924,6 @@ int
 re_init(struct ifnet *ifp)
 {
 	struct rl_softc *sc = ifp->if_softc;
-	u_int32_t	rxcfg = 0;
 	u_int16_t	cfg;
 	int		s;
 	union {
@@ -2002,20 +2009,6 @@ re_init(struct ifnet *ifp)
 	CSR_WRITE_1(sc, RL_EARLY_TX_THRESH, 16);
 
 	CSR_WRITE_4(sc, RL_RXCFG, RL_RXCFG_CONFIG);
-
-	/* Set the individual bit to receive frames for this host only. */
-	rxcfg = CSR_READ_4(sc, RL_RXCFG);
-	rxcfg |= RL_RXCFG_RX_INDIV;
-
-	/*
-	 * Set capture broadcast bit to capture broadcast frames.
-	 */
-	if (ifp->if_flags & IFF_BROADCAST)
-		rxcfg |= RL_RXCFG_RX_BROAD;
-	else
-		rxcfg &= ~RL_RXCFG_RX_BROAD;
-
-	CSR_WRITE_4(sc, RL_RXCFG, rxcfg);
 
 	/* Program promiscuous mode and multicast filters. */
 	re_iff(sc);
@@ -2113,14 +2106,13 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING)
-				re_iff(sc);
+				error = ENETRESET;
 			else
 				re_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				re_stop(ifp, 1);
 		}
-		sc->if_flags = ifp->if_flags;
 		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
@@ -2287,7 +2279,7 @@ re_config_imtype(struct rl_softc *sc, int imtype)
 	switch (imtype) {
 	case RL_IMTYPE_HW:
 		KASSERT(sc->rl_flags & RL_FLAG_HWIM);
-		/* FALL THROUGH */
+		/* FALLTHROUGH */
 	case RL_IMTYPE_NONE:
 		sc->rl_intrs = RL_INTRS_CPLUS;
 		sc->rl_rx_ack = RL_ISR_RX_OK | RL_ISR_FIFO_OFLOW |

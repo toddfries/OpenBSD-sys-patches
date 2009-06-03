@@ -1,4 +1,4 @@
-/*	$OpenBSD: envyreg.h,v 1.4 2008/11/29 18:32:18 ratchov Exp $	*/
+/*	$OpenBSD: envyreg.h,v 1.9 2009/05/08 17:52:18 ratchov Exp $	*/
 /*
  * Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
  *
@@ -21,7 +21,7 @@
  * BARs at PCI config space
  */
 #define ENVY_CTL_BAR		0x10
-#define ENVY_MT_BAR		0x1c
+#define ENVY_MT_BAR(isht)	((isht) ? 0x14 : 0x1c)
 #define ENVY_CONF		0x60
 
 /*
@@ -36,6 +36,15 @@
 #define   ENVY_CCS_INT_TMR	0x80
 #define   ENVY_CCS_INT_MIDI0	0x80
 #define ENVY_CCS_INTSTAT	0x02
+#define ENVY_CCS_GPIODATA0	0x14	/* Envy24HT only */
+#define ENVY_CCS_GPIODATA1	0x15	/* Envy24HT only */
+#define ENVY_CCS_GPIODATA2	0x1e	/* Envy24HT only */
+#define ENVY_CCS_GPIOMASK0	0x16	/* Envy24HT only */
+#define ENVY_CCS_GPIOMASK1	0x17	/* Envy24HT only */
+#define ENVY_CCS_GPIOMASK2	0x1f	/* Envy24HT only */
+#define ENVY_CCS_GPIODIR0	0x18	/* Envy24HT only */
+#define ENVY_CCS_GPIODIR1	0x19	/* Envy24HT only */
+#define ENVY_CCS_GPIODIR2	0x1a	/* Envy24HT only */
 
 /*
  * CCS registers to access indirect registers (CCI)
@@ -58,9 +67,9 @@
 /*
  * CCI registers to access GPIO pins
  */
-#define ENVY_GPIO_DATA		0x20
-#define ENVY_GPIO_MASK		0x21
-#define ENVY_GPIO_DIR		0x22
+#define ENVY_CCI_GPIODATA	0x20
+#define ENVY_CCI_GPIOMASK	0x21
+#define ENVY_CCI_GPIODIR	0x22
 
 /*
  * GPIO pin numbers
@@ -78,10 +87,8 @@
 #define ENVY_EEPROM_I2S		8
 #define ENVY_EEPROM_SPDIF	9
 #define ENVY_EEPROM_GPIOMASK	10
-#define ENVY_EEPROM_GPIOST	11
-#define ENVY_EEPROM_GPIODIR	12
-
-#define ENVY_EEPROM_MAXSZ	32
+#define ENVY_EEPROM_GPIOST(s)	((s)->isht ? 16 : 11)
+#define ENVY_EEPROM_GPIODIR(s)	((s)->isht ? 13 : 12)
 
 /*
  * MT registers for play/record params
@@ -89,18 +96,20 @@
 #define ENVY_MT_INTR		0
 #define   ENVY_MT_INTR_PACK	0x01
 #define   ENVY_MT_INTR_RACK	0x02
-#define   ENVY_MT_INTR_PMASK	0x40
-#define   ENVY_MT_INTR_RMASK	0x80
+#define   ENVY_MT_INTR_PMASK	0x40	/* !HT only */
+#define   ENVY_MT_INTR_RMASK	0x80	/* !HT only */
 #define ENVY_MT_RATE		1
 #define   ENVY_MT_RATEMASK	0x0f
+#define ENVY_MT_IMASK		3	/* HT only */
+#define   ENVY_MT_IMASK_PDMA0	0x1
+#define   ENVY_MT_IMASK_RDMA0	0x2
 #define ENVY_MT_PADDR		0x10
 #define ENVY_MT_PBUFSZ		0x14
-#define ENVY_MT_PBLKSZ		0x16
+#define ENVY_MT_PBLKSZ(s)	((s)->isht ? 0x1c : 0x16)
 #define ENVY_MT_CTL		0x18
 #define   ENVY_MT_CTL_PSTART	0x01
-#define   ENVY_MT_CTL_PPAUSE	0x02
-#define   ENVY_MT_CTL_RSTART	0x04
-#define   ENVY_MT_CTL_RPAUSE	0x08
+#define   ENVY_MT_CTL_RSTART(s)	((s)->isht ? 0x02 : 0x04)
+#define ENVY_MT_NSTREAM		0x19	/* HT only: 4 - active DACs */
 #define ENVY_MT_RADDR		0x20
 #define ENVY_MT_RBUFSZ		0x24
 #define ENVY_MT_RBLKSZ		0x26
@@ -136,49 +145,61 @@
 #define   ENVY_MT_INSEL_MASK	((1 << ENVY_MT_INSEL_BITS) - 1)
 
 /*
+ * HT routing control
+ */
+#define ENVY_MT_HTSRC		0x2c
+#define   ENVY_MT_HTSRC_DMA	0x00
+#define   ENVY_MT_HTSRC_LINE	0x02
+#define   ENVY_MT_HTSRC_SPD	0x04
+#define   ENVY_MT_HTSRC_MASK	0x07
+/*
  * AK4524 control registers
  */
-#define AK_PWR			0x00
-#define   AK_PWR_DA		0x01
-#define   AK_PWR_AD		0x02
-#define   AK_PWR_VREF		0x04
-#define AK_RST			0x01
-#define   AK_RST_DA		0x01
-#define   AK_RST_AD		0x02
-#define AK_FMT			0x02
-#define   AK_FMT_NORM		0
-#define   AK_FMT_DBL	       	0x01
-#define   AK_FMT_QUAD		0x02
-#define   AK_FMT_QAUDFILT	0x04
-#define   AK_FMT_256		0
-#define   AK_FMT_512		0x04
-#define   AK_FMT_1024		0x08
-#define   AK_FMT_384		0x10
-#define   AK_FMT_768		0x14
-#define   AK_FMT_LSB16		0
-#define   AK_FMT_LSB20		0x20
-#define   AK_FMT_MSB24		0x40
-#define   AK_FMT_IIS24		0x60
-#define   AK_FMT_LSB24		0x80
-#define AK_DEEMVOL		0x03
-#define   AK_DEEM_44K1		0x00
-#define   AK_DEEM_OFF		0x01
-#define   AK_DEEM_48K		0x02
-#define   AK_DEEM_32K		0x03
-#define   AK_MUTE		0x80
-#define AK_ADC_GAIN0		0x04
-#define	AK_ADC_GAIN1		0x05
-#define AK_DAC_GAIN0		0x06
-#define AK_DAC_GAIN1		0x07
+#define AK4524_PWR		0x00
+#define   AK4524_PWR_DA		0x01
+#define   AK4524_PWR_AD		0x02
+#define   AK4524_PWR_VREF	0x04
+#define AK4524_RST		0x01
+#define   AK4524_RST_DA		0x01
+#define   AK4524_RST_AD		0x02
+#define AK4524_FMT		0x02
+#define   AK4524_FMT_NORM	0
+#define   AK4524_FMT_DBL       	0x01
+#define   AK4524_FMT_QUA	0x02
+#define   AK4524_FMT_QAUDFILT	0x04
+#define   AK4524_FMT_256	0
+#define   AK4524_FMT_512	0x04
+#define   AK4524_FMT_1024	0x08
+#define   AK4524_FMT_384	0x10
+#define   AK4524_FMT_768	0x14
+#define   AK4524_FMT_LSB16	0
+#define   AK4524_FMT_LSB20	0x20
+#define   AK4524_FMT_MSB24	0x40
+#define   AK4524_FMT_IIS24	0x60
+#define   AK4524_FMT_LSB24	0x80
+#define AK4524_DEEMVOL		0x03
+#define   AK4524_DEEM_44K1	0x00
+#define   AK4524_DEEM_OFF	0x01
+#define   AK4524_DEEM_48K	0x02
+#define   AK4524_DEEM_32K	0x03
+#define   AK4524_MUTE		0x80
+#define AK4524_ADC_GAIN0	0x04
+#define	AK4524_ADC_GAIN1	0x05
+#define AK4524_DAC_GAIN0	0x06
+#define AK4524_DAC_GAIN1	0x07
+
+/*
+ * AK4358 control registers
+ */
+#define AK4358_ATT(chan)	((chan) <= 5 ? 0x4 + (chan) : 0xb - 6 + (chan))
+#define   AK4358_ATT_EN		0x80
 
 /*
  * default formats
  */
-#define ENVY_RFRAME_SIZE	(4 * 12)
-#define ENVY_PFRAME_SIZE	(4 * 10)
-#define ENVY_RBUF_SIZE		(ENVY_RFRAME_SIZE * 0x1000)
-#define ENVY_PBUF_SIZE		(ENVY_PFRAME_SIZE * 0x1000)
 #define ENVY_RCHANS		12
 #define ENVY_PCHANS		10
+#define ENVY_RFRAME_SIZE	(4 * ENVY_RCHANS)
+#define ENVY_PFRAME_SIZE	(4 * ENVY_PCHANS)
 
 #endif /* !defined(SYS_DEV_PCI_ENVYREG_H) */

@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi.c,v 1.87 2008/10/31 21:39:04 marco Exp $ */
+/* $OpenBSD: mfi.c,v 1.95 2009/04/30 01:24:05 marco Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -44,7 +44,7 @@ uint32_t	mfi_debug = 0
 /*		    | MFI_D_INTR */
 /*		    | MFI_D_MISC */
 /*		    | MFI_D_DMA */
-		    | MFI_D_IOCTL
+/*		    | MFI_D_IOCTL */
 /*		    | MFI_D_RW */
 /*		    | MFI_D_MEM */
 /*		    | MFI_D_CCB */
@@ -57,7 +57,7 @@ struct cfdriver mfi_cd = {
 
 int	mfi_scsi_cmd(struct scsi_xfer *);
 int	mfi_scsi_ioctl(struct scsi_link *, u_long, caddr_t, int, struct proc *);
-void	mfiminphys(struct buf *bp);
+void	mfiminphys(struct buf *bp, struct scsi_link *sl);
 
 struct scsi_adapter mfi_switch = {
 	mfi_scsi_cmd, mfiminphys, 0, 0, mfi_scsi_ioctl
@@ -84,7 +84,7 @@ int		mfi_create_sgl(struct mfi_ccb *, int);
 
 /* commands */
 int		mfi_scsi_ld(struct mfi_ccb *, struct scsi_xfer *);
-int		mfi_scsi_io(struct mfi_ccb *, struct scsi_xfer *, uint32_t,
+int		mfi_scsi_io(struct mfi_ccb *, struct scsi_xfer *, uint64_t,
 		    uint32_t);
 void		mfi_scsi_xs_done(struct mfi_ccb *);
 int		mfi_mgmt(struct mfi_softc *, uint32_t, uint32_t, uint32_t,
@@ -131,6 +131,18 @@ static const struct mfi_iop_ops mfi_iop_ppc = {
 	mfi_ppc_post
 };
 
+u_int32_t	mfi_gen2_fw_state(struct mfi_softc *sc);
+void		mfi_gen2_intr_ena(struct mfi_softc *sc);
+int		mfi_gen2_intr(struct mfi_softc *sc);
+void		mfi_gen2_post(struct mfi_softc *sc, struct mfi_ccb *ccb);
+
+static const struct mfi_iop_ops mfi_iop_gen2 = {
+	mfi_gen2_fw_state,
+	mfi_gen2_intr_ena,
+	mfi_gen2_intr,
+	mfi_gen2_post
+};
+
 #define mfi_fw_state(_s)	((_s)->sc_iop->mio_fw_state(_s))
 #define mfi_intr_enable(_s)	((_s)->sc_iop->mio_intr_ena(_s))
 #define mfi_my_intr(_s)		((_s)->sc_iop->mio_intr(_s))
@@ -159,11 +171,13 @@ void
 mfi_put_ccb(struct mfi_ccb *ccb)
 {
 	struct mfi_softc	*sc = ccb->ccb_sc;
+	struct mfi_frame_header	*hdr = &ccb->ccb_frame->mfr_header;
 	int			s;
 
 	DNPRINTF(MFI_D_CCB, "%s: mfi_put_ccb: %p\n", DEVNAME(sc), ccb);
 
-	s = splbio();
+	hdr->mfh_cmd_status = 0x0;
+	hdr->mfh_flags = 0x0;
 	ccb->ccb_state = MFI_CCB_FREE;
 	ccb->ccb_xs = NULL;
 	ccb->ccb_flags = 0;
@@ -174,6 +188,8 @@ mfi_put_ccb(struct mfi_ccb *ccb)
 	ccb->ccb_sgl = NULL;
 	ccb->ccb_data = NULL;
 	ccb->ccb_len = 0;
+
+	s = splbio();
 	TAILQ_INSERT_TAIL(&sc->sc_ccb_freeq, ccb, ccb_link);
 	splx(s);
 }
@@ -588,7 +604,7 @@ mfi_get_info(struct mfi_softc *sc)
 }
 
 void
-mfiminphys(struct buf *bp)
+mfiminphys(struct buf *bp, struct scsi_link *sl)
 {
 	DNPRINTF(MFI_D_MISC, "mfiminphys: %d\n", bp->b_bcount);
 
@@ -611,6 +627,9 @@ mfi_attach(struct mfi_softc *sc, enum mfi_iop iop)
 		break;
 	case MFI_IOP_PPC:
 		sc->sc_iop = &mfi_iop_ppc;
+		break;
+	case MFI_IOP_GEN2:
+		sc->sc_iop = &mfi_iop_gen2;
 		break;
 	default:
 		panic("%s: unknown iop %d", DEVNAME(sc), iop);
@@ -821,7 +840,7 @@ mfi_intr(void *arg)
 }
 
 int
-mfi_scsi_io(struct mfi_ccb *ccb, struct scsi_xfer *xs, uint32_t blockno,
+mfi_scsi_io(struct mfi_ccb *ccb, struct scsi_xfer *xs, uint64_t blockno,
     uint32_t blockcnt)
 {
 	struct scsi_link	*link = xs->sc_link;
@@ -846,8 +865,8 @@ mfi_scsi_io(struct mfi_ccb *ccb, struct scsi_xfer *xs, uint32_t blockno,
 	io->mif_header.mfh_flags = 0;
 	io->mif_header.mfh_sense_len = MFI_SENSE_SIZE;
 	io->mif_header.mfh_data_len= blockcnt;
-	io->mif_lba_hi = 0;
-	io->mif_lba_lo = blockno;
+	io->mif_lba_hi = (uint32_t)(blockno >> 32);
+	io->mif_lba_lo = (uint32_t)(blockno & 0xffffffffull);
 	io->mif_sense_addr_lo = htole32(ccb->ccb_psense);
 	io->mif_sense_addr_hi = 0;
 
@@ -966,7 +985,9 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 	struct mfi_ccb		*ccb;
 	struct scsi_rw		*rw;
 	struct scsi_rw_big	*rwb;
-	uint32_t		blockno, blockcnt;
+	struct scsi_rw_16	*rw16;
+	uint64_t		blockno;
+	uint32_t		blockcnt;
 	uint8_t			target = link->target;
 	uint8_t			mbox[MFI_MBOX_SIZE];
 	int			s;
@@ -993,7 +1014,7 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 	case READ_BIG:
 	case WRITE_BIG:
 		rwb = (struct scsi_rw_big *)xs->cmd;
-		blockno = _4btol(rwb->addr);
+		blockno = (uint64_t)_4btol(rwb->addr);
 		blockcnt = _2btol(rwb->length);
 		if (mfi_scsi_io(ccb, xs, blockno, blockcnt)) {
 			mfi_put_ccb(ccb);
@@ -1004,8 +1025,20 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 	case READ_COMMAND:
 	case WRITE_COMMAND:
 		rw = (struct scsi_rw *)xs->cmd;
-		blockno = _3btol(rw->addr) & (SRW_TOPADDR << 16 | 0xffff);
+		blockno =
+		    (uint64_t)(_3btol(rw->addr) & (SRW_TOPADDR << 16 | 0xffff));
 		blockcnt = rw->length ? rw->length : 0x100;
+		if (mfi_scsi_io(ccb, xs, blockno, blockcnt)) {
+			mfi_put_ccb(ccb);
+			goto stuffup;
+		}
+		break;
+
+	case READ_16:
+	case WRITE_16:
+		rw16 = (struct scsi_rw_16 *)xs->cmd;
+		blockno = _8btol(rw16->addr);
+		blockcnt = _4btol(rw16->length);
 		if (mfi_scsi_io(ccb, xs, blockno, blockcnt)) {
 			mfi_put_ccb(ccb);
 			goto stuffup;
@@ -1020,7 +1053,7 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 		    0, NULL, mbox))
 			goto stuffup;
 
-		return (COMPLETE);
+		goto complete;
 		/* NOTREACHED */
 
 	/* hand it of to the firmware and let it deal with it */
@@ -1070,6 +1103,7 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 
 stuffup:
 	xs->error = XS_DRIVER_STUFFUP;
+complete:
 	xs->flags |= ITSDONE;
 	s = splbio();
 	scsi_done(xs);
@@ -1148,6 +1182,7 @@ mfi_mgmt(struct mfi_softc *sc, uint32_t opc, uint32_t dir, uint32_t len,
 	struct mfi_ccb		*ccb;
 	struct mfi_dcmd_frame	*dcmd;
 	int			rv = 1;
+	int			s;
 
 	DNPRINTF(MFI_D_MISC, "%s: mfi_mgmt %#x\n", DEVNAME(sc), opc);
 
@@ -1184,11 +1219,13 @@ mfi_mgmt(struct mfi_softc *sc, uint32_t opc, uint32_t dir, uint32_t len,
 		if (mfi_poll(ccb))
 			goto done;
 	} else {
+		s = splbio();
 		mfi_post(sc, ccb);
 
 		DNPRINTF(MFI_D_MISC, "%s: mfi_mgmt sleeping\n", DEVNAME(sc));
 		while (ccb->ccb_state != MFI_CCB_DONE)
 			tsleep(ccb, PRIBIO, "mfi_mgmt", 0);
+		splx(s);
 
 		if (ccb->ccb_flags & MFI_CCB_F_ERR)
 			goto done;
@@ -1465,7 +1502,7 @@ mfi_ioctl_vol(struct mfi_softc *sc, struct bioc_vol *bv)
 
 	/*
 	 * The RAID levels are determined per the SNIA DDF spec, this is only
-	 * a subset that is valid for the MFI contrller.
+	 * a subset that is valid for the MFI controller.
 	 */
 	bv->bv_level = sc->sc_ld_details[i].mld_cfg.mlc_parm.mpa_pri_raid;
 	if (sc->sc_ld_details[i].mld_cfg.mlc_parm.mpa_sec_raid ==
@@ -2025,6 +2062,41 @@ mfi_ppc_intr(struct mfi_softc *sc)
 
 void
 mfi_ppc_post(struct mfi_softc *sc, struct mfi_ccb *ccb)
+{
+	mfi_write(sc, MFI_IQP, 0x1 | ccb->ccb_pframe |
+	    (ccb->ccb_extra_frames << 1));
+}
+
+u_int32_t
+mfi_gen2_fw_state(struct mfi_softc *sc)
+{
+	return (mfi_read(sc, MFI_OSP));
+}
+
+void
+mfi_gen2_intr_ena(struct mfi_softc *sc)
+{
+	mfi_write(sc, MFI_ODC, 0xffffffff);
+	mfi_write(sc, MFI_OMSK, ~MFI_OSTS_GEN2_INTR_VALID);
+}
+
+int
+mfi_gen2_intr(struct mfi_softc *sc)
+{
+	u_int32_t status;
+
+	status = mfi_read(sc, MFI_OSTS);
+	if (!ISSET(status, MFI_OSTS_GEN2_INTR_VALID))
+		return (0);
+
+	/* write status back to acknowledge interrupt */
+	mfi_write(sc, MFI_ODC, status);
+
+	return (1);
+}
+
+void
+mfi_gen2_post(struct mfi_softc *sc, struct mfi_ccb *ccb)
 {
 	mfi_write(sc, MFI_IQP, 0x1 | ccb->ccb_pframe |
 	    (ccb->ccb_extra_frames << 1));

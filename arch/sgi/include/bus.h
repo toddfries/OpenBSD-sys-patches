@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.11 2008/08/25 14:05:51 jsing Exp $	*/
+/*	$OpenBSD: bus.h,v 1.15 2009/05/31 17:42:13 miod Exp $	*/
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB Sweden.  All rights reserved.
@@ -48,7 +48,7 @@ typedef struct mips_bus_space bus_space_t;
 struct mips_bus_space {
 	struct extent	*bus_extent;
 	bus_addr_t	bus_base;
-	bus_addr_t	bus_base_dma;
+	void		*bus_private;
 	int32_t		bus_reverse;
 	u_int8_t	(*_space_read_1)(bus_space_tag_t , bus_space_handle_t,
 			  bus_size_t);
@@ -306,18 +306,18 @@ bus_space_copy_8(void *v, bus_space_handle_t h1, bus_size_t o1,
 
 #define BUS_SPACE_MAP_LINEAR	0x02
 
-#define	BUS_DMA_WAITOK		0x00
-#define	BUS_DMA_NOWAIT		0x01
-#define	BUS_DMA_ALLOCNOW	0x02
-#define	BUS_DMAMEM_NOSYNC	0x04
-#define	BUS_DMA_COHERENT	0x08
-#define	BUS_DMA_BUS1		0x10	/* placeholders for bus functions... */
-#define	BUS_DMA_BUS2		0x20
-#define	BUS_DMA_BUS3		0x40
-#define	BUS_DMA_BUS4		0x80
-#define BUS_DMA_READ		0x100   /* mapping is device -> memory only */
-#define BUS_DMA_WRITE		0x200   /* mapping is memory -> device only */
-#define BUS_DMA_STREAMING	0x400   /* hint: sequential, unidirectional */
+#define	BUS_DMA_WAITOK		0x000
+#define	BUS_DMA_NOWAIT		0x001
+#define	BUS_DMA_ALLOCNOW	0x002
+#define	BUS_DMA_COHERENT	0x008
+#define	BUS_DMA_BUS1		0x010	/* placeholders for bus functions... */
+#define	BUS_DMA_BUS2		0x020
+#define	BUS_DMA_BUS3		0x040
+#define	BUS_DMA_BUS4		0x080
+#define	BUS_DMA_READ		0x100   /* mapping is device -> memory only */
+#define	BUS_DMA_WRITE		0x200   /* mapping is memory -> device only */
+#define	BUS_DMA_STREAMING	0x400   /* hint: sequential, unidirectional */
+#define	BUS_DMA_ZERO		0x800	/* zero memory in dmamem_alloc */
 
 /* Forwards needed by prototypes below. */
 struct mbuf;
@@ -340,8 +340,9 @@ typedef struct machine_bus_dmamap	*bus_dmamap_t;
  */
 struct machine_bus_dma_segment {
 	bus_addr_t	ds_addr;	/* DMA address */
-	bus_addr_t	ds_vaddr;	/* CPU address */
 	bus_size_t	ds_len;		/* length of transfer */
+
+	bus_addr_t	_ds_vaddr;	/* CPU address */
 };
 typedef struct machine_bus_dma_segment	bus_dma_segment_t;
 

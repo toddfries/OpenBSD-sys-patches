@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.231 2009/01/17 19:25:56 kettenis Exp $
+#	$OpenBSD: GENERIC,v 1.238 2009/06/02 04:34:16 kettenis Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -229,6 +229,8 @@ upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 ural*	at uhub?		# Ralink RT2500USB
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
+run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
+zyd*	at uhub?		# Zydas ZD1211
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
@@ -281,23 +283,27 @@ sabtty* at sab?
 # NS16550 based serial ports
 com*	at ebus?
 comkbd*	at ebus?
-wskbd* at comkbd?
+wskbd* at comkbd? mux 1
+comms*	at ebus?
+wsmouse* at comms? mux 0
 
 # Z8530 based serial ports
 zs*	at sbus?
 zs*	at fhc?
 zstty*	at zs?
 zskbd*	at zs?
-wskbd*	at zskbd?
+wskbd*	at zskbd? mux 1
+zsms*	at zs?
+wsmouse* at zsms? mux 0
 
 # i8042 based serial ports (PS/2 ports)
 pckbc*	at ebus?			# controller
 pckbd*	at pckbc?			#  ps2 keyboard
-wskbd*	at pckbd?			#   generic keyboard layer
+wskbd*	at pckbd? mux 1			#   generic keyboard layer
 pms*	at pckbc?			#  ps2 mouse
-wsmouse* at pms?			#   generic mouse
+wsmouse* at pms? mux 0			#   generic mouse
 pmsi*	at pckbc?			#  ps2 "intelli"mouse
-wsmouse* at pmsi?			#   generic mouse
+wsmouse* at pmsi? mux 0			#   generic mouse
 
 audioce*	at ebus?		# ebus cs4231
 
@@ -339,6 +345,8 @@ vrng0	at vbus?
 vdsk*	at cbus?
 scsibus* at vdsk?
 vnet*	at cbus?
+vcc*	at cbus?
+vcctty*	at vcc?
 
 ## Lance Ethernet - AMD7990
 le*		at sbus?
@@ -474,8 +482,12 @@ creator*	at upa0
 wsdisplay*	at creator?
 ifb*		at pci?			# Expert3D/XVR-500 framebuffers
 wsdisplay*	at ifb?
+machfb*		at pci?			# PGX/PGX64 framebuffers
+wsdisplay*	at machfb?
 mgx*		at sbus?		# SMS MGX/MGXPlus framebuffer
 wsdisplay*	at mgx?
+raptor*		at pci?			# Raptor framebuffer
+wsdisplay*	at raptor?
 rfx*		at sbus?		# RasterFlex framebuffer series
 wsdisplay*	at rfx?
 tvtwo*		at sbus?		# Parallax XVideo/PowerVideo framebuffer

@@ -1,4 +1,4 @@
-/*	$OpenBSD: macepcibridge.c,v 1.17 2008/07/30 17:37:46 miod Exp $ */
+/*	$OpenBSD: macepcibridge.c,v 1.21 2009/04/25 15:28:59 kettenis Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB (www.opsycon.se)
@@ -46,6 +46,7 @@
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
+#include <dev/pci/ppbreg.h>
 
 #include <mips64/archtype.h>
 #include <sgi/localbus/crimebus.h>
@@ -244,6 +245,7 @@ mace_pcibrattach(struct device *parent, struct device *self, void *aux)
 	/*
 	 *  Configure our PCI devices.
 	 */
+	bzero(&pba, sizeof(pba));
 	pba.pba_busname = "pci";
 	pba.pba_iot = sc->sc_io_bus_space;
 	pba.pba_memt = sc->sc_mem_bus_space;
@@ -251,8 +253,7 @@ mace_pcibrattach(struct device *parent, struct device *self, void *aux)
 	*pba.pba_dmat = pci_bus_dma_tag;
 	pba.pba_pc = &sc->sc_pc;
 	pba.pba_domain = pci_ndomains++;
-	pba.pba_bus = sc->sc_dev.dv_unit;
-	pba.pba_bridgetag = NULL;
+	pba.pba_bus = 0;
 	config_found(self, &pba, mace_pcibrprint);
 
 	/* Clear PCI errors and set up error interrupt */
@@ -397,7 +398,7 @@ mace_pcibr_conf_write(cpv, tag, offset, data)
 int
 mace_pcibr_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 {
-	int bus, device, pirq;
+	int bus, dev, pin = pa->pa_rawintrpin;
 	static const signed char intrmap[][PCI_INTERRUPT_PIN_MAX] = {
 		{ -1, -1, -1, -1 },
 		{ 9, -1, -1, -1 },	/* ahc0 */
@@ -409,25 +410,30 @@ mace_pcibr_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 
 	*ihp = -1;
 
-	if (pa->pa_intrpin == 0) {
+	if (pin == 0) {
 		/* No IRQ used. */
 		return 1;
 	}
 #ifdef DIAGNOSTIC
-	if (pa->pa_intrpin > 4) {
-		printf("mace_pcibr_intr_map: bad interrupt pin %d\n", pa->pa_intrpin);
+	if (pin > PCI_INTERRUPT_PIN_MAX) {
+		printf("mace_pcibr_intr_map: bad interrupt pin %d\n", pin);
 		return 1;
 	}
 #endif
 
-	pci_decompose_tag(pa->pa_pc, pa->pa_intrtag, &bus, &device, NULL);
+	pci_decompose_tag(pa->pa_pc, pa->pa_tag, &bus, &dev, NULL);
 
-	pirq = -1;
-	if ((unsigned int)device < sizeof(intrmap) / PCI_INTERRUPT_PIN_MAX)
-		pirq = intrmap[device][pa->pa_intrpin - PCI_INTERRUPT_PIN_A];
+	if (pa->pa_bridgetag) {
+		pin = PPB_INTERRUPT_SWIZZLE(pin, dev);
+		*ihp = pa->pa_bridgeih[pin - PCI_INTERRUPT_PIN_A];
 
-	*ihp = pirq;
-	return pirq >= 0 ? 0 : 1;
+		return ((*ihp == -1) ? 1 : 0);
+	}
+
+	if (dev < nitems(intrmap))
+		*ihp = intrmap[dev][pin - PCI_INTERRUPT_PIN_A];
+
+	return ((*ihp == -1) ? 1 : 0);
 }
 
 const char *
@@ -593,7 +599,8 @@ mace_pcib_space_map(bus_space_tag_t t, bus_addr_t offs, bus_size_t size,
 {
 	bus_addr_t bpa;
 	int error;
-	bpa = t->bus_base + (offs & 0x01ffffff);
+
+	bpa = t->bus_base + (offs & 0x7fffffff);
 
 	if ((error = extent_alloc_region(t->bus_extent, bpa, size,
 	    EX_NOWAIT | extent_malloc_flags))) {

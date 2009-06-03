@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.25 2008/06/27 17:22:14 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.27 2009/04/19 17:56:12 miod Exp $	*/
 /*
  * Copyright (c) 2007 Miodrag Vallat.
  *
@@ -14,7 +14,7 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-/* $OpenBSD: machdep.c,v 1.25 2008/06/27 17:22:14 miod Exp $	*/
+ */
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -847,7 +847,7 @@ cpu_boot_secondary_processors()
 	int rc;
 	extern void secondary_start(void);
 
-	for (cpu = 0; cpu < max_cpus; cpu++) {
+	for (cpu = 0; cpu < ncpusfound; cpu++) {
 		if (cpu != curcpu()->ci_cpuid) {
 			rc = scm_spincpu(cpu, (vaddr_t)secondary_start);
 			if (rc != 0)

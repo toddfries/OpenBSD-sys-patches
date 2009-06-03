@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.20 2008/12/01 23:48:46 todd Exp $
+# $OpenBSD: GENERIC,v 1.23 2009/05/15 21:44:34 deraadt Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -22,6 +22,7 @@ option	 	DONT_INIT_BSC
 #option	 	DONT_INIT_PCIBSC
 
 option		PCIVERBOSE
+option		USER_PCICONF		# user-space PCI configuration
 option		USBVERBOSE
 
 #config		bsd	swap generic
@@ -122,10 +123,10 @@ umass*	at uhub?		# USB Mass Storage devices
 scsibus* at umass?
 atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
-#ums*	at uhidev?		# USB mouse
-#wsmouse* at ums? mux 0
-#ukbd*	at uhidev?		# USB keyboard
-#wskbd*	at ukbd? mux 1
+ums*	at uhidev?		# USB mouse
+wsmouse* at ums? mux 0
+ukbd*	at uhidev?		# USB keyboard
+wskbd*	at ukbd? mux 1
 ucycom*	at uhidev?		# Cypress serial
 ucom*	at ucycom?
 uhid*	at uhidev?		# USB generic HID support
@@ -150,12 +151,16 @@ ugen*	at uhub?		# USB Generic driver
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
+run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
 zyd*	at uhub?		# Zydas ZD1211
 #option	NATM
 #ueagle* at uhub?		# Analog Devices Eagle ADSL
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 #uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 #onewire* at uow?
+
+udl*		at uhub?
+wsdisplay*	at udl?
 
 # Bluetooth controllers
 ubt*	at uhub?		# USB Bluetooth
@@ -171,3 +176,6 @@ audio*	at btsco?
 
 sd*	at scsibus?			# SCSI disk drives
 cd*	at scsibus?			# SCSI CD-ROM drives
+
+# mouse & keyboard multiplexor pseudo-devices
+pseudo-device	wsmux		2

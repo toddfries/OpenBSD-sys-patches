@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc64,v 1.117 2009/01/12 20:11:13 kettenis Exp $
+#	$OpenBSD: files.sparc64,v 1.124 2009/06/02 04:13:37 kettenis Exp $
 #	$NetBSD: files.sparc64,v 1.50 2001/08/10 20:53:50 eeh Exp $
 
 # maxpartitions must be first item in files.${ARCH}
@@ -80,6 +80,9 @@ include	"dev/ata/files.ata"
 include	"dev/pckbc/files.pckbc"
 include	"dev/pcmcia/files.pcmcia"
 
+# Needs to be declared before including files.sun
+device	zs {[channel = -1]}
+
 # Sun specific files
 include	"../../../dev/sun/files.sun"
 
@@ -95,6 +98,10 @@ file	arch/sparc64/dev/sbus.c			sbus
 device	creator: wsemuldisplaydev, rasops32
 attach	creator at mainbus, upa
 file	arch/sparc64/dev/creator.c		creator
+
+device	gfb: wsemuldisplaydev, rasops32
+attach	gfb at upa
+file	arch/sparc64/dev/gfb.c			gfb
 
 include	"dev/pci/files.pci"
 major	{wd = 12}
@@ -129,9 +136,17 @@ device	vgafb: ifb_ident, wsemuldisplaydev, rasops_bswap, rasops8, rasops16, raso
 attach	vgafb at pci
 file	arch/sparc64/dev/vgafb.c		vgafb
 
+device	machfb: wsemuldisplaydev, rasops_bswap, rasops8
+attach	machfb at pci
+file	arch/sparc64/dev/machfb.c		machfb
+
 device	ifb: ifb_ident, wsemuldisplaydev, rasops_bswap, rasops8
 attach	ifb at pci
 file	arch/sparc64/dev/ifb.c			ifb
+
+device	raptor: wsemuldisplaydev, rasops_bswap, rasops8
+attach	raptor at pci
+file	arch/sparc64/dev/raptor.c		raptor
 
 device	sbbc
 attach	sbbc at pci
@@ -232,14 +247,18 @@ file	arch/sparc64/dev/com_ebus.c		com_ebus
 attach	pckbc at ebus with pckbc_ebus
 file	arch/sparc64/dev/pckbc_ebus.c		pckbc_ebus
 
-device	comkbd: tty, wskbddev, sunkbd
+device	comkbd: wskbddev, sunkbd
 attach	comkbd at ebus
 file	arch/sparc64/dev/comkbd_ebus.c		comkbd
+
+device	comms: wsmousedev, sunms
+attach	comms at ebus
+file	arch/sparc64/dev/comms_ebus.c		comms
 
 attach	lpt at ebus with lpt_ebus
 file	arch/sparc64/dev/lpt_ebus.c		lpt_ebus
 
-device	zs {[channel = -1]}
+#device	zs {[channel = -1]}
 attach	zs at sbus with zs_sbus
 attach	zs at fhc with zs_fhc
 file	arch/sparc64/dev/zs.c			zs needs-flag
@@ -250,9 +269,9 @@ device	zstty: tty
 attach	zstty at zs
 file	arch/sparc64/dev/z8530tty.c		zstty needs-flag
 
-device	zskbd: tty, wskbddev, sunkbd
+device	zskbd: wskbddev, sunkbd
 attach	zskbd at zs
-file	arch/sparc64/dev/z8530kbd.c		zskbd needs-flag
+file	arch/sparc64/dev/z8530kbd.c		zskbd
 
 # Floppy drive
 device	fdc {}
@@ -294,6 +313,7 @@ file	arch/sparc64/sparc64/kgdb_machdep.c	kgdb
 # because it must come first in the "ld" command line.
 file	arch/sparc64/sparc64/lock_machdep.c	multiprocessor
 file	arch/sparc64/sparc64/machdep.c
+file	arch/sparc64/sparc64/mdesc.c		sun4v
 file	arch/sparc64/sparc64/mem.c
 file	arch/sparc64/sparc64/mutex.S
 file	arch/sparc64/sparc64/openprom.c
@@ -394,10 +414,24 @@ device	vdsk: ldc, scsi
 attach	vdsk at cbus
 file	arch/sparc64/dev/vdsk.c			vdsk
 
+# Virtual network switch
+device	vsw {}
+attach	vsw at cbus
+file	arch/sparc64/dev/vsw.c			vsw
+
 # Virtual network
 device	vnet: ldc
-attach	vnet at cbus
+attach	vnet at cbus, vsw
 file	arch/sparc64/dev/vnet.c			vnet
+
+# Virtual console concentrator
+device	vcc {}
+attach	vcc at cbus
+file	arch/sparc64/dev/vcc.c			vcc
+
+device	vcctty: ldc
+attach	vcctty at vcc
+file	arch/sparc64/dev/vcctty.c		vcctty needs-flag
 
 device	mgiic: i2cbus
 attach	mgiic at mainbus

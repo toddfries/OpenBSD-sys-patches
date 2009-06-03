@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc_mem.c,v 1.10 2009/01/09 10:55:22 jsg Exp $	*/
+/*	$OpenBSD: sdmmc_mem.c,v 1.12 2009/04/07 16:35:52 blambert Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -50,6 +50,8 @@ sdmmc_mem_enable(struct sdmmc_softc *sc)
 {
 	u_int32_t host_ocr;
 	u_int32_t card_ocr;
+
+	SDMMC_ASSERT_LOCKED(sc);
 
 	/* Set host mode to SD "combo" card or SD memory-only. */
 	SET(sc->sc_flags, SMF_SD_MODE|SMF_MEM_MODE);
@@ -116,6 +118,8 @@ sdmmc_mem_scan(struct sdmmc_softc *sc)
 	u_int16_t next_rca;
 	int error;
 	int i;
+
+	SDMMC_ASSERT_LOCKED(sc);
 
 	/*
 	 * CMD2 is a broadcast command understood by SD cards and MMC
@@ -324,11 +328,11 @@ sdmmc_mem_init(struct sdmmc_softc *sc, struct sdmmc_function *sf)
 {
 	int error = 0;
 
-	SDMMC_LOCK(sc);
+	SDMMC_ASSERT_LOCKED(sc);
+
 	if (sdmmc_select_card(sc, sf) != 0 ||
 	    sdmmc_mem_set_blocklen(sc, sf) != 0)
 		error = 1;
-	SDMMC_UNLOCK(sc);
 	return error;
 }
 
@@ -343,7 +347,7 @@ sdmmc_mem_send_op_cond(struct sdmmc_softc *sc, u_int32_t ocr,
 	int error;
 	int i;
 
-	SDMMC_LOCK(sc);
+	SDMMC_ASSERT_LOCKED(sc);
 
 	/*
 	 * If we change the OCR value, retry the command until the OCR
@@ -373,7 +377,6 @@ sdmmc_mem_send_op_cond(struct sdmmc_softc *sc, u_int32_t ocr,
 	if (error == 0 && ocrp != NULL)
 		*ocrp = MMC_R3(cmd.c_resp);
 
-	SDMMC_UNLOCK(sc);
 	return error;
 }
 
@@ -385,6 +388,8 @@ int
 sdmmc_mem_set_blocklen(struct sdmmc_softc *sc, struct sdmmc_function *sf)
 {
 	struct sdmmc_command cmd;
+
+	SDMMC_ASSERT_LOCKED(sc);
 
 	bzero(&cmd, sizeof cmd);
 	cmd.c_opcode = MMC_SET_BLOCKLEN;
@@ -425,9 +430,8 @@ sdmmc_mem_read_block(struct sdmmc_function *sf, int blkno, u_char *data,
 	if (error != 0)
 		goto err;
 
-	/* XXX sdhc(4) does not need this */
-#ifdef __zaurus__
-	if (cmd.c_opcode == MMC_READ_BLOCK_MULTIPLE) {
+	if (ISSET(sc->sc_flags, SMF_STOP_AFTER_MULTIPLE) &&
+	    cmd.c_opcode == MMC_READ_BLOCK_MULTIPLE) {
 		bzero(&cmd, sizeof cmd);
 		cmd.c_opcode = MMC_STOP_TRANSMISSION;
 		cmd.c_arg = MMC_ARG_RCA(sf->rca);
@@ -436,7 +440,6 @@ sdmmc_mem_read_block(struct sdmmc_function *sf, int blkno, u_char *data,
 		if (error != 0)
 			goto err;
 	}
-#endif
 
 	do {
 		bzero(&cmd, sizeof cmd);
@@ -483,9 +486,8 @@ sdmmc_mem_write_block(struct sdmmc_function *sf, int blkno, u_char *data,
 	if (error != 0)
 		goto err;
 
-	/* XXX sdhc(4) does not need this */
-#ifdef __zaurus__
-	if (cmd.c_opcode == MMC_WRITE_BLOCK_MULTIPLE) {
+	if (ISSET(sc->sc_flags, SMF_STOP_AFTER_MULTIPLE) &&
+	    cmd.c_opcode == MMC_WRITE_BLOCK_MULTIPLE) {
 		bzero(&cmd, sizeof cmd);
 		cmd.c_opcode = MMC_STOP_TRANSMISSION;
 		cmd.c_flags = SCF_CMD_AC | SCF_RSP_R1B;
@@ -493,7 +495,6 @@ sdmmc_mem_write_block(struct sdmmc_function *sf, int blkno, u_char *data,
 		if (error != 0)
 			goto err;
 	}
-#endif
 
 	do {
 		bzero(&cmd, sizeof cmd);

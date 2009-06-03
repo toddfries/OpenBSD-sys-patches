@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.87 2009/01/02 05:16:15 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.92 2009/06/02 03:04:54 jordan Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -126,6 +126,7 @@
 #ifdef DDB
 #include <machine/db_machdep.h>
 #include <ddb/db_extern.h>
+extern int db_console;
 #endif
 
 #include "isa.h"
@@ -146,6 +147,13 @@
 
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;
+
+/*
+ * switchto vectors
+ */
+void (*cpu_idle_leave_fcn)(void) = NULL;
+void (*cpu_idle_cycle_fcn)(void) = NULL;
+void (*cpu_idle_enter_fcn)(void) = NULL;
 
 /* the following is used externally for concurrent handlers */
 int setperf_prio = 0;
@@ -173,6 +181,7 @@ paddr_t	idt_paddr;
 
 vaddr_t lo32_vaddr;
 paddr_t lo32_paddr;
+paddr_t tramp_pdirpa;
 
 int kbd_reset;
 
@@ -253,6 +262,7 @@ int	cpu_dumpsize(void);
 u_long	cpu_dump_mempagecnt(void);
 void	dumpsys(void);
 void	cpu_init_extents(void);
+void	map_tramps(void);
 void	init_x86_64(paddr_t);
 void	(*cpuresetfn)(void);
 
@@ -1168,6 +1178,7 @@ cpu_init_extents(void)
 {
 	extern struct extent *iomem_ex;
 	static int already_done;
+	int i;
 
 	/* We get called for each CPU, only first should do this */
 	if (already_done)
@@ -1175,25 +1186,54 @@ cpu_init_extents(void)
 
 	/*
 	 * Allocate the physical addresses used by RAM from the iomem
-	 * extent map.  This is done before the addresses are
-	 * page rounded just to make sure we get them all.
+	 * extent map.
 	 */
-	if (extent_alloc_region(iomem_ex, 0, KBTOB(biosbasemem),
-	    EX_NOWAIT)) {
-		/* XXX What should we do? */
-		printf("WARNING: CAN'T ALLOCATE BASE MEMORY FROM "
-		    "IOMEM EXTENT MAP!\n");
-	}
-	if (extent_alloc_region(iomem_ex, IOM_END, KBTOB(biosextmem),
-	    EX_NOWAIT)) {
-		/* XXX What should we do? */
-		printf("WARNING: CAN'T ALLOCATE EXTENDED MEMORY FROM "
-		    "IOMEM EXTENT MAP!\n");
+	for (i = 0; i < mem_cluster_cnt; i++) {
+		if (extent_alloc_region(iomem_ex, mem_clusters[i].start,
+		    mem_clusters[i].size, EX_NOWAIT)) {
+			/* XXX What should we do? */
+			printf("WARNING: CAN'T ALLOCATE RAM (%lx-%lx)"
+			    " FROM IOMEM EXTENT MAP!\n", mem_clusters[i].start,
+			    mem_clusters[i].start + mem_clusters[i].size - 1);
+		}
 	}
 
 	already_done = 1;
 }
 
+#if defined(MULTIPROCESSOR) || \
+    (NACPI > 0 && defined(ACPI_SLEEP_ENABLED) && !defined(SMALL_KERNEL))
+void
+map_tramps(void) {
+	struct pmap *kmp = pmap_kernel();
+
+	pmap_kenter_pa(lo32_vaddr, lo32_paddr, VM_PROT_ALL);
+
+	/*
+	 * The initial PML4 pointer must be below 4G, so if the
+	 * current one isn't, use a "bounce buffer" and save it
+	 * for tramps to use.
+	 */
+	if (kmp->pm_pdirpa > 0xffffffff) {
+		memcpy((void *)lo32_vaddr, kmp->pm_pdir, PAGE_SIZE);
+		tramp_pdirpa = lo32_paddr;
+	} else
+		tramp_pdirpa = kmp->pm_pdirpa;
+
+#ifdef MULTIPROCESSOR
+	pmap_kenter_pa((vaddr_t)MP_TRAMPOLINE,	/* virtual */
+	    (paddr_t)MP_TRAMPOLINE,	/* physical */
+	    VM_PROT_ALL);		/* protection */
+#endif /* MULTIPROCESSOR */
+
+
+#ifdef ACPI_SLEEP_ENABLED
+	pmap_kenter_pa((vaddr_t)ACPI_TRAMPOLINE, /* virtual */
+	    (paddr_t)ACPI_TRAMPOLINE,	/* physical */
+	    VM_PROT_ALL);		/* protection */
+#endif /* ACPI_SLEEP_ENABLED */
+}
+#endif
 
 #define	IDTVEC(name)	__CONCAT(X, name)
 typedef void (vector)(void);
@@ -1203,7 +1243,6 @@ extern vector IDTVEC(osyscall);
 extern vector IDTVEC(oosyscall);
 extern vector *IDTVEC(exceptions)[];
 
-/* Tweakable by config(8) */
 int bigmem = 0;
 
 void
@@ -1287,6 +1326,11 @@ init_x86_64(paddr_t first_avail)
 		avail_start = MP_TRAMPOLINE + PAGE_SIZE;
 #endif
 
+#ifdef ACPI_SLEEP_ENABLED
+	if (avail_start < ACPI_TRAMPOLINE + PAGE_SIZE)
+		avail_start = ACPI_TRAMPOLINE + PAGE_SIZE;
+#endif /* ACPI_SLEEP_ENABLED */
+
 	/* Let us know if we're supporting > 4GB ram load */
 	if (bigmem)
 		printf("Bigmem = %d\n", bigmem);
@@ -1326,6 +1370,8 @@ init_x86_64(paddr_t first_avail)
 		/* Nuke page zero */
 		if (s1 < avail_start) {
 			s1 = avail_start;
+			if (s1 > e1)
+				continue;
 		}
 
 		/* Crop to fit below 4GB for now */
@@ -1476,7 +1522,10 @@ init_x86_64(paddr_t first_avail)
 	pmap_kenter_pa(idt_vaddr + PAGE_SIZE, idt_paddr + PAGE_SIZE,
 	    VM_PROT_READ|VM_PROT_WRITE);
 
-	pmap_kenter_pa(lo32_vaddr, lo32_paddr, VM_PROT_READ|VM_PROT_WRITE);
+#if defined(MULTIPROCESSOR) || \
+    (NACPI > 0 && defined(ACPI_SLEEP_ENABLED) && !defined(SMALL_KERNEL))
+	map_tramps();
+#endif
 
 	idt = (struct gate_descriptor *)idt_vaddr;
 	gdtstore = (char *)(idt + NIDT);
@@ -1791,6 +1840,7 @@ void
 getbootinfo(char *bootinfo, int bootinfo_size)
 {
 	bootarg32_t *q;
+	bios_ddb_t *bios_ddb;
 
 #undef BOOTINFO_DEBUG
 #ifdef BOOTINFO_DEBUG
@@ -1868,6 +1918,13 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 			break;
 		case BOOTARG_BOOTMAC:
 			bios_bootmac = (bios_bootmac_t *)q->ba_arg;
+			break;
+
+		case BOOTARG_DDB:
+			bios_ddb = (bios_ddb_t *)q->ba_arg;
+#ifdef DDB
+			db_console = bios_ddb->db_console;
+#endif
 			break;
 
 		default:

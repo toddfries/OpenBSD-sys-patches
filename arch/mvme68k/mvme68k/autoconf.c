@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.42 2008/07/21 04:35:54 todd Exp $ */
+/*	$OpenBSD: autoconf.c,v 1.44 2009/03/01 22:08:13 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -97,87 +97,16 @@ int	mainbus_scan(struct device *, void *, void *);
 extern void init_intrs(void);
 extern void dumpconf(void);
 
+int	get_target(int *, int *, int *);
+
 /* boot device information */
 paddr_t	bootaddr;
-int	bootctrllun, bootdevlun, bootpart;
+int	bootctrllun, bootdevlun;
+int	bootpart, bootbus;
 struct	device *bootdv;
-
-/*
- * XXX some storage space must be allocated statically because of
- * early console init
- */
-char	extiospace[EXTENT_FIXED_STORAGE_SIZE(8)];
 
 struct	extent *extio;
 extern	vaddr_t extiobase;
-
-void mainbus_attach(struct device *, struct device *, void *);
-int  mainbus_match(struct device *, void *, void *);
-
-struct cfattach mainbus_ca = {
-	sizeof(struct device), mainbus_match, mainbus_attach
-};
-
-struct cfdriver mainbus_cd = {
-	NULL, "mainbus", DV_DULL
-};
-
-int
-mainbus_match(parent, cf, args)
-	struct device *parent;
-	void *cf;
-	void *args;
-{
-	return (1);
-}
-
-int
-mainbus_print(args, bus)
-	void *args;
-	const char *bus;
-{
-	struct confargs *ca = args;
-
-	if (ca->ca_paddr != (paddr_t)-1)
-		printf(" addr 0x%x", (u_int32_t)ca->ca_paddr);
-	return (UNCONF);
-}
-
-int
-mainbus_scan(parent, child, args)
-	struct device *parent;
-	void *child, *args;
-{
-	struct cfdata *cf = child;
-	struct confargs oca;
-
-	bzero(&oca, sizeof oca);
-	oca.ca_paddr = cf->cf_loc[0];
-	oca.ca_vaddr = (vaddr_t)-1;
-	oca.ca_ipl = -1;
-	oca.ca_bustype = BUS_MAIN;
-	oca.ca_name = cf->cf_driver->cd_name;
-	if ((*cf->cf_attach->ca_match)(parent, cf, &oca) == 0)
-		return (0);
-	config_attach(parent, cf, &oca, mainbus_print);
-	return (1);
-}
-
-void
-mainbus_attach(parent, self, args)
-	struct device *parent, *self;
-	void *args;
-{
-	printf("\n");
-
-	/* XXX
-	 * should have a please-attach-first list for mainbus,
-	 * to ensure that the pcc/vme2/mcc chips are attached
-	 * first.
-	 */
-
-	(void)config_search(mainbus_scan, self, args);
-}
 
 /*
  * Determine mass storage and memory configuration for a machine.
@@ -189,7 +118,7 @@ cpu_configure()
 
 	extio = extent_create("extio",
 	    (u_long)extiobase, (u_long)extiobase + ptoa(EIOMAPSIZE),
-	    M_DEVBUF, extiospace, sizeof(extiospace), EX_NOWAIT);
+	    M_DEVBUF, NULL, 0, EX_NOWAIT);
 
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("autoconfig failed, no root");
@@ -280,20 +209,31 @@ device_register(struct device *dev, void *aux)
 	if (strncmp("sd", dev->dv_xname, 2) == 0 ||
 	    strncmp("cd", dev->dv_xname, 2) == 0) {
 		struct scsi_attach_args *sa = aux;
-		int target, lun;
-#ifdef MVME147
+		int target, bus, lun;
+
+#if defined(MVME141) || defined(MVME147)
 		/*
-		 * The 147 can only boot from the built-in scsi controller,
-		 * and stores the scsi id as the controller number.
+		 * Both 141 and 147 do not use the controller number to
+		 * identify the controller itself, but expect the
+		 * operating system to match it with its physical address
+		 * (bootaddr), which is indeed what we are doing.
+		 * Then the SCSI device id may be found in the controller
+		 * number, and the device number is zero (except on MVME141
+		 * when booting from MVME319/320/321/322, which we
+		 * do not support anyway).
 		 */
-		if (cputyp == CPU_147) {
+		if (cputyp == CPU_141 || cputyp == CPU_147) {
 			target = bootctrllun;
-			lun = 0;
+			bus = lun = 0;
 		} else
 #endif
 		{
-			target = bootdevlun >> 4;
-			lun = bootdevlun & 0x0f;
+			if (get_target(&target, &bus, &lun) != 0)
+				return;
+
+			/* make sure we are on the expected scsibus */
+			if (bootbus != bus)
+				return;
 		}
     		
 		if (sa->sa_sc_link->target == target &&
@@ -314,6 +254,39 @@ device_register(struct device *dev, void *aux)
 			bootdv = dev;
 			return;
 		}
+	}
+}
+
+/*
+ * Returns the ID of the SCSI disk based on Motorola's CLUN/DLUN stuff
+ * This handles SBC SCSI and MVME32[78].
+ */
+int
+get_target(int *target, int *bus, int *lun)
+{
+	switch (bootctrllun) {
+	/* built-in controller */
+	case 0x00:
+	/* MVME327 */
+	case 0x02:
+	case 0x03:
+		*bus = 0;
+		*target = (bootdevlun & 0x70) >> 4;
+		*lun = (bootdevlun & 0x07);
+		return (0);
+	/* MVME328 */
+	case 0x06:
+	case 0x07:
+	case 0x16:
+	case 0x17:
+	case 0x18:
+	case 0x19:
+		*bus = (bootdevlun & 0x40) >> 6;
+		*target = (bootdevlun & 0x38) >> 3;
+		*lun = (bootdevlun & 0x07);
+		return (0);
+	default:
+		return (ENODEV);
 	}
 }
 

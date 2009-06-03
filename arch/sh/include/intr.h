@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.5 2008/06/26 05:42:12 ray Exp $	*/
+/*	$OpenBSD: intr.h,v 1.7 2009/04/19 18:54:06 oga Exp $	*/
 /*	$NetBSD: intr.h,v 1.22 2006/01/24 23:51:42 uwe Exp $	*/
 
 /*-
@@ -35,6 +35,7 @@
 #include <sys/device.h>
 #include <sys/evcount.h>
 #include <sys/lock.h>
+#include <sys/mutex.h>
 #include <sys/queue.h>
 #include <sh/psl.h>
 
@@ -101,33 +102,17 @@ struct sh_soft_intrhand {
 };
 
 struct sh_soft_intr {
-	TAILQ_HEAD(, sh_soft_intrhand) softintr_q;
-	struct simplelock softintr_slock;
-	unsigned long softintr_ipl;
+	TAILQ_HEAD(, sh_soft_intrhand)
+			softintr_q;
+	unsigned long	softintr_ipl;
+	struct mutex	softintr_lock;
 };
 
-#define	softintr_schedule(arg)						\
-do {									\
-	struct sh_soft_intrhand *__sih = (arg);				\
-	struct sh_soft_intr *__si = __sih->sih_intrhead;		\
-	int __s;							\
-									\
-	__s = _cpu_intr_suspend();					\
-	simple_lock(&__si->softintr_slock);				\
-	if (__sih->sih_pending == 0) {					\
-		TAILQ_INSERT_TAIL(&__si->softintr_q, __sih, sih_q);	\
-		__sih->sih_pending = 1;					\
-		setsoft(__si->softintr_ipl);				\
-	}								\
-	simple_unlock(&__si->softintr_slock);				\
-	_cpu_intr_resume(__s);						\
-} while (/*CONSTCOND*/0)
-
-void softintr_init(void);
-void *softintr_establish(int, void (*)(void *), void *);
-void softintr_disestablish(void *);
-void softintr_dispatch(int);
-void setsoft(int);
+void	 softintr_disestablish(void *);
+void	 softintr_dispatch(int);
+void	*softintr_establish(int, void (*)(void *), void *);
+void	 softintr_init(void);
+void	 softintr_schedule(void *);
 
 /* XXX For legacy software interrupts. */
 extern struct sh_soft_intrhand *softnet_intrhand;

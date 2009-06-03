@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.h,v 1.56 2009/01/08 12:47:45 michele Exp $	*/
+/*	$OpenBSD: route.h,v 1.62 2009/05/26 08:29:44 reyk Exp $	*/
 /*	$NetBSD: route.h,v 1.9 1996/02/13 22:00:49 christos Exp $	*/
 
 /*
@@ -114,17 +114,14 @@ struct rtentry {
 	struct	ifnet *rt_ifp;		/* the answer: interface to use */
 	struct	ifaddr *rt_ifa;		/* the answer: interface addr to use */
 	struct	sockaddr *rt_genmask;	/* for generation of cloned routes */
-	caddr_t	rt_llinfo;		/* pointer to link level info cache */
+	caddr_t	rt_llinfo;		/* pointer to link level info cache or
+					   to an MPLS structure */ 
 	struct	rt_kmetrics rt_rmx;	/* metrics used by rx'ing protocols */
 	struct	rtentry *rt_gwroute;	/* implied entry for gatewayed routes */
 	struct	rtentry *rt_parent;	/* If cloned, parent of this route. */
 	LIST_HEAD(, rttimer) rt_timer;  /* queue of timeouts for misc funcs */
 	u_int16_t rt_labelid;		/* route label ID */
 	u_int8_t rt_priority;		/* routing priority to use */
-#ifdef MPLS
-	/* XXX: temporay hack, will be removed soon */
-	u_int32_t rt_mpls;		/* MPLS outbound label */
-#endif
 };
 #define	rt_use	rt_rmx.rmx_pksent
 
@@ -147,6 +144,7 @@ struct rtentry {
 #define RTF_CLONED	0x10000		/* this is a cloned route */
 #define RTF_MPATH	0x40000		/* multipath route or operation */
 #define RTF_JUMBO	0x80000		/* try to use jumbo frames */
+#define RTF_MPLS	0x100000	/* MPLS additional infos */
 
 /* mask of RTF flags that are allowed to be modified by RTM_CHANGE */
 #define RTF_FMASK	\
@@ -195,7 +193,7 @@ struct rt_msghdr {
 	u_short	rtm_index;	/* index for associated ifp */
 	u_short rtm_tableid;	/* routing table id */
 	u_char	rtm_priority;	/* routing priority */
-	u_char	rtm_pad;
+	u_char	rtm_mpls;	/* MPLS additional infos */
 	int	rtm_addrs;	/* bitmask identifying sockaddrs in msg */
 	int	rtm_flags;	/* flags, incl. kern & message, e.g. DONE */
 	int	rtm_fmask;	/* bitmask used in RTM_CHANGE message */
@@ -297,6 +295,14 @@ struct rt_omsghdr {
 #define RTAX_LABEL	10	/* route label present */
 #define RTAX_MAX	11	/* size of array to allocate */
 
+/*
+ * setsockopt defines used for the filtering.
+ */
+#define ROUTE_MSGFILTER	1	/* bitmask to specifiy which types should be
+				   sent to the client. */
+
+#define ROUTE_FILTER(m)	(1 << (m))
+
 struct rt_addrinfo {
 	int	rti_addrs;
 	struct	sockaddr *rti_info[RTAX_MAX];
@@ -304,6 +310,7 @@ struct rt_addrinfo {
 	struct	ifaddr *rti_ifa;
 	struct	ifnet *rti_ifp;
 	struct	rt_msghdr *rti_rtm;
+	u_char	rti_mpls;
 };
 
 struct route_cb {
@@ -349,6 +356,7 @@ struct sockaddr_rtlabel {
 #ifdef _KERNEL
 const char	*rtlabel_id2name(u_int16_t);
 u_int16_t	 rtlabel_name2id(char *);
+struct sockaddr	*rtlabel_id2sa(u_int16_t, struct sockaddr_rtlabel *);
 void		 rtlabel_unref(u_int16_t);
 
 #define	RTFREE(rt) do {							\
@@ -423,6 +431,6 @@ void	 rt_if_track(struct ifnet *);
 int	 rtdeletemsg(struct rtentry *, u_int);
 
 struct radix_node_head	*rt_gettable(sa_family_t, u_int);
-struct radix_node	*rt_lookup(struct sockaddr *, struct sockaddr *, int);
+struct radix_node	*rt_lookup(struct sockaddr *, struct sockaddr *, u_int);
 #endif /* _KERNEL */
 #endif /* _NET_ROUTE_H_ */

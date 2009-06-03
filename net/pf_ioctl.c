@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.211 2008/11/24 13:22:09 mikeb Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.219 2009/05/31 19:10:51 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -113,12 +113,26 @@ int			 pf_commit_rules(u_int32_t, int, char *);
 int			 pf_addr_setup(struct pf_ruleset *,
 			    struct pf_addr_wrap *, sa_family_t);
 void			 pf_addr_copyout(struct pf_addr_wrap *);
+void			 pf_trans_set_commit(void);
 
-struct pf_rule		 pf_default_rule;
+struct pf_rule		 pf_default_rule, pf_default_rule_new;
 struct rwlock		 pf_consistency_lock = RWLOCK_INITIALIZER("pfcnslk");
 #ifdef ALTQ
 static int		 pf_altq_running;
 #endif
+
+struct {
+	char		statusif[IFNAMSIZ];
+	u_int32_t	debug;
+	u_int32_t	hostid;
+	u_int32_t	reass;
+	u_int32_t	mask;
+} pf_trans_set;
+
+#define	PF_TSET_STATUSIF	0x01
+#define	PF_TSET_DEBUG		0x02
+#define	PF_TSET_HOSTID		0x04
+#define	PF_TSET_REASS		0x08
 
 #define	TAGID_MAX	 50000
 TAILQ_HEAD(pf_tags, pf_tagname)	pf_tags = TAILQ_HEAD_INITIALIZER(pf_tags),
@@ -151,6 +165,8 @@ pfattach(int num)
 	    "pfstatekeypl", NULL);
 	pool_init(&pf_state_item_pl, sizeof(struct pf_state_item), 0, 0, 0,
 	    "pfstateitempl", NULL);
+	pool_init(&pf_rule_item_pl, sizeof(struct pf_rule_item), 0, 0, 0,
+	    "pfruleitempl", NULL);
 	pool_init(&pf_altq_pl, sizeof(struct pf_altq), 0, 0, 0, "pfaltqpl",
 	    &pool_allocator_nointr);
 	pool_init(&pf_pooladdr_pl, sizeof(struct pf_pooladdr), 0, 0, 0,
@@ -207,6 +223,7 @@ pfattach(int num)
 	pf_normalize_init();
 	bzero(&pf_status, sizeof(pf_status));
 	pf_status.debug = PF_DEBUG_URGENT;
+	pf_status.reass = PF_REASS_ENABLED;
 
 	/* XXX do our best to avoid a conflict */
 	pf_status.hostid = arc4random();
@@ -853,10 +870,6 @@ pf_setup_pfsync_matching(struct pf_ruleset *rs)
 
 	MD5Init(&ctx);
 	for (rs_cnt = 0; rs_cnt < PF_RULESET_MAX; rs_cnt++) {
-		/* XXX PF_RULESET_SCRUB as well? */
-		if (rs_cnt == PF_RULESET_SCRUB)
-			continue;
-
 		if (rs->rules[rs_cnt].inactive.ptr_array)
 			free(rs->rules[rs_cnt].inactive.ptr_array, M_TEMP);
 		rs->rules[rs_cnt].inactive.ptr_array = NULL;
@@ -1491,7 +1504,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			    s->kif->pfik_name)) {
 #if NPFSYNC > 0
 				/* don't send out individual delete messages */
-				s->sync_flags = PFSTATE_NOSYNC;
+				SET(s->state_flags, PFSTATE_NOSYNC);
 #endif
 				pf_unlink_state(s);
 				killed++;
@@ -1516,11 +1529,6 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			if (psk->psk_pfcmp.creatorid == 0)
 				psk->psk_pfcmp.creatorid = pf_status.hostid;
 			if ((s = pf_find_state_byid(&psk->psk_pfcmp))) {
-#if NPFSYNC > 0
-				/* send immediate delete of state */
-				pfsync_delete_state(s);
-				s->sync_flags |= PFSTATE_NOSYNC;
-#endif
 				pf_unlink_state(s);
 				psk->psk_killed = 1;
 			}
@@ -1566,11 +1574,6 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			    !strcmp(psk->psk_label, s->rule.ptr->label))) &&
 			    (!psk->psk_ifname[0] || !strcmp(psk->psk_ifname,
 			    s->kif->pfik_name))) {
-#if NPFSYNC > 0
-				/* send immediate delete of state */
-				pfsync_delete_state(s);
-				s->sync_flags |= PFSTATE_NOSYNC;
-#endif
 				pf_unlink_state(s);
 				killed++;
 			}
@@ -1663,7 +1666,8 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			bzero(pf_status.ifname, IFNAMSIZ);
 			break;
 		}
-		strlcpy(pf_status.ifname, pi->ifname, IFNAMSIZ);
+		strlcpy(pf_trans_set.statusif, pi->ifname, IFNAMSIZ);
+		pf_trans_set.mask |= PF_TSET_STATUSIF;
 		break;
 	}
 
@@ -1722,20 +1726,16 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 
 	case DIOCSETTIMEOUT: {
 		struct pfioc_tm	*pt = (struct pfioc_tm *)addr;
-		int		 old;
 
 		if (pt->timeout < 0 || pt->timeout >= PFTM_MAX ||
 		    pt->seconds < 0) {
 			error = EINVAL;
 			goto fail;
 		}
-		old = pf_default_rule.timeout[pt->timeout];
 		if (pt->timeout == PFTM_INTERVAL && pt->seconds == 0)
 			pt->seconds = 1;
-		pf_default_rule.timeout[pt->timeout] = pt->seconds;
-		if (pt->timeout == PFTM_INTERVAL && pt->seconds < old)
-			wakeup(pf_purge_thread);
-		pt->seconds = old;
+		pf_default_rule_new.timeout[pt->timeout] = pt->seconds;
+		pt->seconds = pf_default_rule.timeout[pt->timeout];
 		break;
 	}
 
@@ -1763,28 +1763,27 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 
 	case DIOCSETLIMIT: {
 		struct pfioc_limit	*pl = (struct pfioc_limit *)addr;
-		int			 old_limit;
 
 		if (pl->index < 0 || pl->index >= PF_LIMIT_MAX ||
 		    pf_pool_limits[pl->index].pp == NULL) {
 			error = EINVAL;
 			goto fail;
 		}
-		if (pool_sethardlimit(pf_pool_limits[pl->index].pp,
-		    pl->limit, NULL, 0) != 0) {
+		if (((struct pool *)pf_pool_limits[pl->index].pp)->pr_nout >
+		    pl->limit) {
 			error = EBUSY;
 			goto fail;
 		}
-		old_limit = pf_pool_limits[pl->index].limit;
-		pf_pool_limits[pl->index].limit = pl->limit;
-		pl->limit = old_limit;
+		pf_pool_limits[pl->index].limit_new = pl->limit;
+		pl->limit = pf_pool_limits[pl->index].limit;
 		break;
 	}
 
 	case DIOCSETDEBUG: {
 		u_int32_t	*level = (u_int32_t *)addr;
 
-		pf_status.debug = *level;
+		pf_trans_set.debug = *level;
+		pf_trans_set.mask |= PF_TSET_DEBUG;
 		break;
 	}
 
@@ -2443,6 +2442,8 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		}
 		ioe = malloc(sizeof(*ioe), M_TEMP, M_WAITOK);
 		table = malloc(sizeof(*table), M_TEMP, M_WAITOK);
+		pf_default_rule_new = pf_default_rule;
+		bzero(&pf_trans_set, sizeof(pf_trans_set));
 		for (i = 0; i < io->size; i++) {
 			if (copyin(io->array+i, ioe, sizeof(*ioe))) {
 				free(table, M_TEMP);
@@ -2629,6 +2630,17 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 				break;
 			}
 		}
+		/*
+		 * Checked already in DIOCSETLIMIT, but check again as the
+		 * situation might have changed.
+		 */
+		for (i = 0; i < PF_LIMIT_MAX; i++) {
+			if (((struct pool *)pf_pool_limits[i].pp)->pr_nout >
+			    pf_pool_limits[i].limit_new) {
+				error = EBUSY;
+				goto fail;
+			}
+		}
 		/* now do the commit - no errors should happen here */
 		for (i = 0; i < io->size; i++) {
 			if (copyin(io->array+i, ioe, sizeof(*ioe))) {
@@ -2668,6 +2680,27 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 				break;
 			}
 		}
+		for (i = 0; i < PF_LIMIT_MAX; i++) {
+			if (pf_pool_limits[i].limit_new !=
+			    pf_pool_limits[i].limit &&
+			    pool_sethardlimit(pf_pool_limits[i].pp,
+			    pf_pool_limits[i].limit_new, NULL, 0) != 0) {
+				error = EBUSY;
+				goto fail; /* really bad */
+			}
+			pf_pool_limits[i].limit = pf_pool_limits[i].limit_new;
+		}
+		for (i = 0; i < PFTM_MAX; i++) {
+			int old = pf_default_rule.timeout[i];
+
+			pf_default_rule.timeout[i] =
+			    pf_default_rule_new.timeout[i];
+			if (pf_default_rule.timeout[i] == PFTM_INTERVAL &&
+			    pf_default_rule.timeout[i] < old)
+				wakeup(pf_purge_thread);
+		}
+		pfi_xcommit();
+		pf_trans_set_commit();
 		free(table, M_TEMP);
 		free(ioe, M_TEMP);
 		break;
@@ -2787,9 +2820,10 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		u_int32_t	*hostid = (u_int32_t *)addr;
 
 		if (*hostid == 0)
-			pf_status.hostid = arc4random();
+			pf_trans_set.hostid = arc4random();
 		else
-			pf_status.hostid = *hostid;
+			pf_trans_set.hostid = *hostid;
+		pf_trans_set.mask |= PF_TSET_HOSTID;
 		break;
 	}
 
@@ -2823,6 +2857,14 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		break;
 	}
 
+	case DIOCSETREASS: {
+		u_int32_t	*reass = (u_int32_t *)addr;
+
+		pf_trans_set.reass = *reass;
+		pf_trans_set.mask |= PF_TSET_REASS;
+		break;
+	}
+
 	default:
 		error = ENODEV;
 		break;
@@ -2834,4 +2876,17 @@ fail:
 	else
 		rw_exit_read(&pf_consistency_lock);
 	return (error);
+}
+
+void
+pf_trans_set_commit(void)
+{
+	if (pf_trans_set.mask & PF_TSET_STATUSIF)
+		strlcpy(pf_status.ifname, pf_trans_set.statusif, IFNAMSIZ);
+	if (pf_trans_set.mask & PF_TSET_DEBUG)
+		pf_status.debug = pf_trans_set.debug;
+	if (pf_trans_set.mask & PF_TSET_HOSTID)
+		pf_status.hostid = pf_trans_set.hostid;
+	if (pf_trans_set.mask & PF_TSET_REASS)
+		pf_status.reass = pf_trans_set.reass;
 }

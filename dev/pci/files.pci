@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.258 2009/01/16 05:00:34 kevlo Exp $
+#	$OpenBSD: files.pci,v 1.261 2009/04/24 17:52:55 mk Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -240,12 +240,6 @@ device	de: ether, ifnet, ifmedia
 attach	de at pci
 file	dev/pci/if_de.c			de
 
-# ENI ATM driver
-device	en: atm, ifnet
-attach	en at pci with en_pci
-file	dev/pci/if_en_pci.c		en
-file	dev/ic/midway.c			en
-
 # 3Com 3c590 and 3c595 Ethernet controllers
 # device declaration in sys/conf/files
 attach	ep at pci with ep_pci
@@ -477,6 +471,11 @@ device	wdt: pcibus
 attach	wdt at pci
 file	dev/pci/wdt.c			wdt
 
+# Berkshire PCI-PC Watchdog
+device	berkwdt: pcibus
+attach	berkwdt at pci
+file	dev/pci/berkwdt.c		berkwdt
+
 # Quancom PWDOG1
 device	pwdog: pcibus
 attach	pwdog at pci
@@ -636,6 +635,11 @@ file	dev/pci/if_jme.c		jme
 device	age: ether, ifnet, mii, ifmedia, mii_phy
 attach	age at pci
 file	dev/pci/if_age.c		age
+
+# Attansic/Atheros L1E Gigabit Ethernet
+device	ale: ether, ifnet, mii, ifmedia, mii_phy
+attach	ale at pci
+file	dev/pci/if_ale.c		ale
 
 # AMD-76x PM and SMBus controller
 device	amdpm: i2cbus

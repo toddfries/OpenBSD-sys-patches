@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwi.c,v 1.98 2008/12/22 18:20:47 damien Exp $	*/
+/*	$OpenBSD: if_iwi.c,v 1.101 2009/05/11 19:24:57 damien Exp $	*/
 
 /*-
  * Copyright (c) 2004-2008
@@ -100,7 +100,7 @@ void		iwi_tx_intr(struct iwi_softc *, struct iwi_tx_ring *);
 int		iwi_intr(void *);
 int		iwi_cmd(struct iwi_softc *, uint8_t, void *, uint8_t, int);
 int		iwi_send_mgmt(struct ieee80211com *, struct ieee80211_node *,
-		    int, int);
+		    int, int, int);
 int		iwi_tx_start(struct ifnet *, struct mbuf *,
 		    struct ieee80211_node *);
 void		iwi_start(struct ifnet *);
@@ -182,7 +182,7 @@ iwi_attach(struct device *parent, struct device *self, void *aux)
 	error = pci_mapreg_map(pa, IWI_PCI_BAR0, PCI_MAPREG_TYPE_MEM |
 	    PCI_MAPREG_MEM_TYPE_32BIT, 0, &memt, &memh, NULL, &sc->sc_sz, 0);
 	if (error != 0) {
-		printf(": could not map memory space\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 
@@ -191,7 +191,7 @@ iwi_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_dmat = pa->pa_dmat;
 
 	if (pci_intr_map(pa, &ih) != 0) {
-		printf(": could not map interrupt\n");
+		printf(": can't map interrupt\n");
 		return;
 	}
 
@@ -199,7 +199,7 @@ iwi_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_ih = pci_intr_establish(sc->sc_pct, ih, IPL_NET, iwi_intr, sc,
 	    sc->sc_dev.dv_xname);
 	if (sc->sc_ih == NULL) {
-		printf(": could not establish interrupt");
+		printf(": can't establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
@@ -390,7 +390,7 @@ iwi_alloc_cmd_ring(struct iwi_softc *sc, struct iwi_cmd_ring *ring)
 	    sizeof (struct iwi_cmd_desc) * IWI_CMD_RING_COUNT,
 	    (caddr_t *)&ring->desc, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map cmd ring DMA memory\n",
+		printf("%s: can't map cmd ring DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -466,7 +466,7 @@ iwi_alloc_tx_ring(struct iwi_softc *sc, struct iwi_tx_ring *ring, int ac)
 	    sizeof (struct iwi_tx_desc) * IWI_TX_RING_COUNT,
 	    (caddr_t *)&ring->desc, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map tx ring DMA memory\n",
+		printf("%s: can't map tx ring DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -1221,7 +1221,7 @@ iwi_cmd(struct iwi_softc *sc, uint8_t type, void *data, uint8_t len, int async)
 /* ARGSUSED */
 int
 iwi_send_mgmt(struct ieee80211com *ic, struct ieee80211_node *ni, int type,
-    int arg)
+    int arg1, int arg2)
 {
 	return EOPNOTSUPP;
 }
@@ -1293,7 +1293,7 @@ iwi_tx_start(struct ifnet *ifp, struct mbuf *m0, struct ieee80211_node *ni)
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 	    BUS_DMA_NOWAIT);
 	if (error != 0 && error != EFBIG) {
-		printf("%s: could not map mbuf (error %d)\n",
+		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		m_freem(m0);
 		return error;
@@ -1321,7 +1321,7 @@ iwi_tx_start(struct ifnet *ifp, struct mbuf *m0, struct ieee80211_node *ni)
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 		    BUS_DMA_NOWAIT);
 		if (error != 0) {
-			printf("%s: could not map mbuf (error %d)\n",
+			printf("%s: can't map mbuf (error %d)\n",
 			    sc->sc_dev.dv_xname, error);
 			m_freem(m0);
 			return error;
@@ -1677,7 +1677,7 @@ iwi_load_firmware(struct iwi_softc *sc, const char *data, int size)
 	error = bus_dmamem_map(sc->sc_dmat, &seg, nsegs, size, &virtaddr,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map firmware DMA memory\n",
+		printf("%s: can't map firmware DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail3;
 	}
@@ -2148,7 +2148,7 @@ iwi_auth_and_assoc(struct iwi_softc *sc)
 	if ((ic->ic_flags & IEEE80211_F_SHPREAMBLE) &&
 	    IEEE80211_IS_CHAN_2GHZ(ni->ni_chan))
 		capinfo |= IEEE80211_CAPINFO_SHORT_PREAMBLE;
-	if (ic->ic_flags & IEEE80211_F_SHSLOT)
+	if (ic->ic_caps & IEEE80211_C_SHSLOT)
 		capinfo |= IEEE80211_CAPINFO_SHORT_SLOTTIME;
 	assoc.capinfo = htole16(capinfo);
 

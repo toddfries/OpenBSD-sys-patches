@@ -1,4 +1,4 @@
-/*	$OpenBSD: vme.c,v 1.24 2005/11/27 14:19:09 miod Exp $ */
+/*	$OpenBSD: vme.c,v 1.27 2009/03/01 22:08:13 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -42,15 +42,20 @@
 #include <machine/cpu.h>
 #include <mvme68k/dev/vme.h>
 
-#include "pcc.h"
+#include "lrc.h"
 #include "mc.h"
+#include "ofobio.h"
+#include "pcc.h"
 #include "pcctwo.h"
 
-#if NPCC > 0
-#include <mvme68k/dev/pccreg.h>
+#if NLRC > 0
+#include <mvme68k/dev/lrcreg.h>
 #endif
 #if NMC > 0
 #include <mvme68k/dev/mcreg.h>
+#endif
+#if NPCC > 0
+#include <mvme68k/dev/pccreg.h>
 #endif
 #if NPCCTWO > 0
 #include <mvme68k/dev/pcctworeg.h>
@@ -79,6 +84,107 @@ struct cfdriver vme_cd = {
 	NULL, "vme", DV_DULL
 };
 
+/*
+ * bus_space routines for VME mappings
+ */
+
+int	vme_map(bus_addr_t, bus_size_t, int, bus_space_handle_t *);
+void	vme_unmap(bus_space_handle_t, bus_size_t);
+int	vme_subregion(bus_space_handle_t, bus_size_t, bus_size_t,
+	    bus_space_handle_t *);
+void *	vme_vaddr(bus_space_handle_t);
+
+const struct mvme68k_bus_space_tag vme_bustag = {
+	vme_map,
+	vme_unmap,
+	vme_subregion,
+	vme_vaddr
+};
+
+/*
+ * VME space mapping functions
+ */
+
+int
+vme_map(bus_addr_t addr, bus_size_t size, int flags, bus_space_handle_t *ret)
+{
+	vaddr_t map;
+
+	map = (vaddr_t)mapiodev((paddr_t)addr, size);
+	if (map == NULL)
+		return ENOMEM;
+
+	*ret = (bus_space_handle_t)map;
+	return 0;
+}
+
+void
+vme_unmap(bus_space_handle_t handle, bus_size_t size)
+{
+	unmapiodev((vaddr_t)handle, size);
+}
+
+int
+vme_subregion(bus_space_handle_t handle, bus_addr_t offset, bus_size_t size,
+    bus_space_handle_t *ret)
+{
+	*ret = handle + offset;
+	return (0);
+}
+
+void *
+vme_vaddr(bus_space_handle_t handle)
+{
+	return (void *)handle;
+}
+
+/*
+ * Extra D16 access functions
+ *
+ * D16 cards will trigger bus errors on attempting to read or write more
+ * than 16 bits on the bus. Given how the m88k processor works, this means
+ * basically that all long (D32) accesses must be carefully taken care of.
+ *
+ * Since the kernels bcopy() and bzero() routines will use 32 bit accesses
+ * for performance, here are specific D16-compatible routines. They will
+ * also revert to D8 operations if neither of the operands is properly
+ * aligned.
+ */
+
+void d16_bcopy(const void *, void *, size_t);
+void d16_bzero(void *, size_t);
+
+void
+d16_bcopy(const void *src, void *dst, size_t len)
+{
+	if ((vaddr_t)src & 1 || (vaddr_t)dst & 1)
+		bus_space_write_region_1(&vme_bustag, 0, (vaddr_t)dst,
+		    (void *)src, len);
+	else {
+		bus_space_write_region_2(&vme_bustag, 0, (vaddr_t)dst,
+		    (void *)src, len / 2);
+		if (len & 1)
+			bus_space_write_1(&vme_bustag, 0,
+			    dst + len - 1, *(u_int8_t *)(src + len - 1));
+	}
+}
+
+void
+d16_bzero(void *dst, size_t len)
+{
+	if ((vaddr_t)dst & 1)
+		bus_space_set_region_1(&vme_bustag, 0, (vaddr_t)dst, 0, len);
+	else {
+		bus_space_set_region_2(&vme_bustag, 0, (vaddr_t)dst, 0, len / 2);
+		if (len & 1)
+			bus_space_write_1(&vme_bustag, 0, dst + len - 1, 0);
+	}
+}
+
+/*
+ * Configuration glue
+ */
+
 int
 vmematch(parent, cf, args)
 	struct device *parent;
@@ -96,7 +202,7 @@ vmematch(parent, cf, args)
 	return (1);
 }
 
-#if defined(MVME162) || defined(MVME167) || defined(MVME177)
+#if defined(MVME162) || defined(MVME167) || defined(MVME172) || defined(MVME177)
 /*
  * make local addresses 1G-2G correspond to VME addresses 3G-4G,
  * as D32
@@ -131,7 +237,9 @@ vmepmap(sc, vmeaddr, len, bustype)
 
 	len = roundup(len, NBPG);
 	switch (vmebustype) {
-#if NPCC > 0
+#if NLRC > 0 || NOFOBIO > 0 || NPCC > 0
+	case BUS_LRC:
+	case BUS_OFOBIO:
 	case BUS_PCC:
 		switch (bustype) {
 		case BUS_VMES:
@@ -284,11 +392,11 @@ vmeprint(args, bus)
 {
 	struct confargs *ca = args;
 
-	printf(" addr 0x%x", ca->ca_offset);
-	if (ca->ca_vec > 0)
-		printf(" vec 0x%x", ca->ca_vec);
+	printf(" addr 0x%x", ca->ca_paddr);
 	if (ca->ca_ipl > 0)
 		printf(" ipl %d", ca->ca_ipl);
+	if (ca->ca_vec > 0)
+		printf(" vec 0x%x", ca->ca_vec);
 	return (UNCONF);
 }
 
@@ -299,31 +407,25 @@ vmescan(parent, child, args, bustype)
 	int bustype;
 {
 	struct cfdata *cf = child;
-	struct vmesoftc *sc = (struct vmesoftc *)parent;
+	struct confargs *ca = args;
 	struct confargs oca;
 
 	bzero(&oca, sizeof oca);
+	oca.ca_iot = &vme_bustag;
+	oca.ca_dmat = ca->ca_dmat;
 	oca.ca_bustype = bustype;
 	oca.ca_paddr = cf->cf_loc[0];
 	oca.ca_vec = cf->cf_loc[1];
 	oca.ca_ipl = cf->cf_loc[2];
 	if (oca.ca_ipl > 0 && oca.ca_vec == -1)
 		oca.ca_vec = intr_findvec(255, 0);
-
 	oca.ca_offset = oca.ca_paddr;
-	oca.ca_vaddr = vmemap(sc, oca.ca_paddr, PAGE_SIZE, oca.ca_bustype);
-	if (oca.ca_vaddr == 0)
-		oca.ca_vaddr = (vaddr_t)-1;
+	oca.ca_vaddr = (vaddr_t)-1;	/* nothing mapped during probe */
 	oca.ca_name = cf->cf_driver->cd_name;
-	if ((*cf->cf_attach->ca_match)(parent, cf, &oca) == 0) {
-		if (oca.ca_vaddr != (vaddr_t)-1)
-			vmeunmap(oca.ca_vaddr, PAGE_SIZE);
+
+	if ((*cf->cf_attach->ca_match)(parent, cf, &oca) == 0)
 		return (0);
-	}
-	/*
-	 * If match works, the driver is responsible for
-	 * vmunmap()ing if it does not need the mapping. 
-	 */
+
 	config_attach(parent, cf, &oca, vmeprint);
 	return (1);
 }
@@ -335,7 +437,7 @@ vmeattach(parent, self, args)
 {
 	struct vmesoftc *sc = (struct vmesoftc *)self;
 	struct confargs *ca = args;
-#if NPCC > 0
+#if NLRC > 0 || NOFOBIO > 0 || NPCC > 0
 	struct vme1reg *vme1;
 #endif
 #if NMC > 0 || NPCCTWO > 0
@@ -346,7 +448,9 @@ vmeattach(parent, self, args)
 
 	vmebustype = ca->ca_bustype;
 	switch (ca->ca_bustype) {
-#if NPCC > 0
+#if NLRC > 0 || NOFOBIO > 0 || NPCC > 0
+	case BUS_LRC:
+	case BUS_OFOBIO:
 	case BUS_PCC:
 		vme1 = (struct vme1reg *)sc->sc_vaddr;
 		if (vme1->vme1_scon & VME1_SCON_SWITCH)
@@ -367,7 +471,7 @@ vmeattach(parent, self, args)
 #endif
 	}
 
-	while (config_found(self, NULL, NULL))
+	while (config_found(self, args, NULL))
 		;
 }
 
@@ -390,7 +494,7 @@ vmeintr_establish(vec, ih, name)
 	const char *name;
 {
 	struct vmesoftc *sc = (struct vmesoftc *) vme_cd.cd_devs[0];
-#if NPCC > 0
+#if NLRC > 0 || NOFOBIO > 0 || NPCC > 0
 	struct vme1reg *vme1;
 #endif
 #if NMC > 0 || NPCCTWO > 0
@@ -401,7 +505,9 @@ vmeintr_establish(vec, ih, name)
 	x = intr_establish(vec, ih, name);
 
 	switch (vmebustype) {
-#if NPCC > 0
+#if NLRC > 0 || NOFOBIO > 0 || NPCC > 0
+	case BUS_LRC:
+	case BUS_OFOBIO:
 	case BUS_PCC:
 		vme1 = (struct vme1reg *)sc->sc_vaddr;
 		vme1->vme1_irqen = vme1->vme1_irqen |
@@ -420,7 +526,7 @@ vmeintr_establish(vec, ih, name)
 	return (x);
 }
 
-#if defined(MVME147)
+#if defined(MVME141) || defined(MVME147) || defined(MVME165)
 void
 vme1chip_init(sc)
 	struct vmesoftc *sc;
@@ -432,7 +538,7 @@ vme1chip_init(sc)
 #endif
 
 
-#if defined(MVME162) || defined(MVME167) || defined(MVME177)
+#if defined(MVME162) || defined(MVME167) || defined(MVME172) || defined(MVME177)
 
 /*
  * XXX what AM bits should be used for the D32/D16 mappings?
@@ -489,7 +595,6 @@ vme2chip_init(sc)
 	    (6 << VME2_IRQL4_VME6SHIFT) | (5 << VME2_IRQL4_VME5SHIFT) |
 	    (4 << VME2_IRQL4_VME4SHIFT) | (3 << VME2_IRQL4_VME3SHIFT) |
 	    (2 << VME2_IRQL4_VME2SHIFT) | (1 << VME2_IRQL4_VME1SHIFT);
-	printf("%s: vme to cpu irq level 1:1\n",sc->sc_dev.dv_xname);
 
 #if NPCCTWO > 0
 	if (vmebustype == BUS_PCCTWO) {
@@ -542,14 +647,9 @@ int
 vme2abort(frame)
 	void *frame;
 {
-	struct vmesoftc *sc = (struct vmesoftc *)vme_cd.cd_devs[0];
-	struct vme2reg *vme2 = (struct vme2reg *)sc->sc_vaddr;
+	if ((sys_vme2->vme2_irqstat & VME2_IRQ_AB) != 0)
+		sys_vme2->vme2_irqclr = VME2_IRQ_AB;
 
-	if ((vme2->vme2_irqstat & VME2_IRQ_AB) == 0) {
-		printf("%s: abort irq not set\n", sc->sc_dev.dv_xname);
-		return (0);
-	}
-	vme2->vme2_irqclr = VME2_IRQ_AB;
 	nmihand(frame);
 	return (1);
 }

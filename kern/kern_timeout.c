@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_timeout.c,v 1.29 2008/10/22 08:38:06 blambert Exp $	*/
+/*	$OpenBSD: kern_timeout.c,v 1.31 2009/06/02 22:05:54 guenther Exp $	*/
 /*
  * Copyright (c) 2001 Thomas Nordin <nordin@openbsd.org>
  * Copyright (c) 2000-2001 Artur Grabowski <art@openbsd.org>
@@ -31,6 +31,7 @@
 #include <sys/timeout.h>
 #include <sys/mutex.h>
 #include <sys/kernel.h>
+#include <sys/queue.h>			/* _Q_INVALIDATE */
 
 #ifdef DDB
 #include <machine/db_machdep.h>
@@ -108,6 +109,8 @@ struct mutex timeout_mutex = MUTEX_INITIALIZER(IPL_HIGH);
 #define CIRCQ_REMOVE(elem) do {                 \
         (elem)->next->prev = (elem)->prev;      \
         (elem)->prev->next = (elem)->next;      \
+	_Q_INVALIDATE((elem)->prev);		\
+	_Q_INVALIDATE((elem)->next);		\
 } while (0)
 
 #define CIRCQ_FIRST(elem) ((elem)->next)
@@ -135,7 +138,7 @@ timeout_startup(void)
 	int b;
 
 	CIRCQ_INIT(&timeout_todo);
-	for (b = 0; b < BUCKETS; b++)
+	for (b = 0; b < nitems(timeout_wheel); b++)
 		CIRCQ_INIT(&timeout_wheel[b]);
 }
 
@@ -184,7 +187,7 @@ timeout_add(struct timeout *new, int to_ticks)
 }
 
 void
-timeout_add_tv(struct timeout *to, struct timeval *tv)
+timeout_add_tv(struct timeout *to, const struct timeval *tv)
 {
 	long long to_ticks;
 
@@ -196,7 +199,7 @@ timeout_add_tv(struct timeout *to, struct timeval *tv)
 }
 
 void
-timeout_add_ts(struct timeout *to, struct timespec *ts)
+timeout_add_ts(struct timeout *to, const struct timespec *ts)
 {
 	long long to_ticks;
 
@@ -208,7 +211,7 @@ timeout_add_ts(struct timeout *to, struct timespec *ts)
 }
 
 void
-timeout_add_bt(struct timeout *to, struct bintime *bt)
+timeout_add_bt(struct timeout *to, const struct bintime *bt)
 {
 	long long to_ticks;
 
@@ -367,7 +370,7 @@ db_show_callout(db_expr_t addr, int haddr, db_expr_t count, char *modif)
 	db_printf("    ticks  wheel       arg  func\n");
 
 	db_show_callout_bucket(&timeout_todo);
-	for (b = 0; b < BUCKETS; b++)
+	for (b = 0; b < nitems(timeout_wheel); b++)
 		db_show_callout_bucket(&timeout_wheel[b]);
 }
 #endif

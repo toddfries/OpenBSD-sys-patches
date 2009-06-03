@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.113 2009/01/07 07:19:39 marco Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.130 2009/05/31 03:22:05 jakemsr Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -40,59 +40,21 @@
 #define XNAME(co)	(((struct device *)co->az)->dv_xname)
 #define MIXER_DELTA(n)	(AUDIO_MAX_GAIN / (n))
 
-#define REALTEK_ALC660		0x10ec0660
-#define ALC660_ASUS_G2K		0x13391043
-#define REALTEK_ALC880		0x10ec0880
-#define ALC880_ASUS_M5200	0x19931043
-#define ALC880_ASUS_A7M		0x13231043
-#define ALC880_MEDION_MD95257	0x203d161f
-#define REALTEK_ALC882		0x10ec0882
-#define ALC882_ASUS_A7T		0x13c21043
-#define ALC882_ASUS_W2J		0x19711043
-#define REALTEK_ALC883		0x10ec0883
-#define ALC883_ACER_ID		0x00981025
-#define REALTEK_ALC885		0x10ec0885
-#define ALC885_APPLE_MB3	0x00a1106b
-#define ALC885_APPLE_MB4	0x00a3106b
-#define SIGMATEL_STAC9221	0x83847680
-#define STAC9221_APPLE_ID	0x76808384
-#define SIGMATEL_STAC9205	0x838476a0
-#define STAC9205_DELL_D630	0x01f91028
-#define STAC9205_DELL_V1500	0x02281028
-#define IDT_92HD71B7		0x111d76b2
-#define IDT92HD71B7_DELL_E6400	0x02331028
-#define IDT92HD71B7_DELL_E6500	0x024f1028
-#define SIGMATEL_STAC9228X	0x83847616
-#define STAC9228X_DELL_V1400	0x02271028
+int	azalia_add_convgroup(codec_t *, convgroupset_t *,
+    struct io_pin *, int, nid_t *, int, uint32_t, uint32_t);
 
-int	azalia_generic_codec_init_dacgroup(codec_t *);
-int	azalia_generic_codec_fnode(codec_t *, nid_t, int, int);
-int	azalia_generic_codec_add_convgroup(codec_t *, convgroupset_t *,
-    uint32_t, uint32_t);
-
-int	azalia_generic_unsol(codec_t *, int);
-
-int	azalia_generic_mixer_init(codec_t *);
-int	azalia_generic_mixer_fix_indexes(codec_t *);
-int	azalia_generic_mixer_default(codec_t *);
-int	azalia_generic_mixer_delete(codec_t *);
-int	azalia_generic_mixer_ensure_capacity(codec_t *, size_t);
-int	azalia_generic_mixer_get(const codec_t *, nid_t, int, mixer_ctrl_t *);
-int	azalia_generic_mixer_set(codec_t *, nid_t, int, const mixer_ctrl_t *);
-u_char	azalia_generic_mixer_from_device_value
+int	azalia_mixer_fix_indexes(codec_t *);
+int	azalia_mixer_default(codec_t *);
+int	azalia_mixer_ensure_capacity(codec_t *, size_t);
+u_char	azalia_mixer_from_device_value
 	(const codec_t *, nid_t, int, uint32_t );
-uint32_t azalia_generic_mixer_to_device_value
+uint32_t azalia_mixer_to_device_value
 	(const codec_t *, nid_t, int, u_char);
-int	azalia_generic_set_port(codec_t *, mixer_ctrl_t *);
-int	azalia_generic_get_port(codec_t *, mixer_ctrl_t *);
 
 void	azalia_devinfo_offon(mixer_devinfo_t *);
 void	azalia_pin_config_ov(widget_t *, int, int);
 int	azalia_gpio_unmute(codec_t *, int);
 
-int	azalia_alc88x_init_widget(const codec_t *, widget_t *, nid_t);
-int	azalia_stac9221_init_widget(const codec_t *, widget_t *, nid_t);
-int	azalia_stac7661_mixer_init(codec_t *);
 
 int
 azalia_codec_init_vtbl(codec_t *this)
@@ -101,23 +63,18 @@ azalia_codec_init_vtbl(codec_t *this)
 	 * We can refer this->vid and this->subid.
 	 */
 	this->name = NULL;
-	this->init_dacgroup = azalia_generic_codec_init_dacgroup;
-	this->mixer_init = azalia_generic_mixer_init;
-	this->mixer_delete = azalia_generic_mixer_delete;
-	this->set_port = azalia_generic_set_port;
-	this->get_port = azalia_generic_get_port;
-	this->unsol_event = azalia_generic_unsol;
+	this->qrks = AZ_QRK_NONE;
 	switch (this->vid) {
 	case 0x10ec0260:
 		this->name = "Realtek ALC260";
 		break;
 	case 0x10ec0262:
 		this->name = "Realtek ALC262";
-		this->init_widget = azalia_alc88x_init_widget;
+		this->qrks |= AZ_QRK_WID_CDIN_1C | AZ_QRK_WID_BEEP_1D;
 		break;
 	case 0x10ec0268:
 		this->name = "Realtek ALC268";
-		this->init_widget = azalia_alc88x_init_widget;
+		this->qrks |= AZ_QRK_WID_CDIN_1C | AZ_QRK_WID_BEEP_1D;
 		break;
 	case 0x10ec0269:
 		this->name = "Realtek ALC269";
@@ -125,9 +82,15 @@ azalia_codec_init_vtbl(codec_t *this)
 	case 0x10ec0272:
 		this->name = "Realtek ALC272";
 		break;
+	case 0x10ec0660:
+		this->name = "Realtek ALC660";
+		if (this->subid == 0x13391043) {	/* ASUS_G2K */
+			this->qrks |= AZ_QRK_GPIO_UNMUTE_0;
+		}
+		break;
 	case 0x10ec0662:
 		this->name = "Realtek ALC662";
-		this->init_widget = azalia_alc88x_init_widget;
+		this->qrks |= AZ_QRK_WID_CDIN_1C | AZ_QRK_WID_BEEP_1D;
 		break;
 	case 0x10ec0663:
 		this->name = "Realtek ALC663";
@@ -137,29 +100,92 @@ azalia_codec_init_vtbl(codec_t *this)
 		break;
 	case 0x10ec0880:
 		this->name = "Realtek ALC880";
-		this->init_widget = azalia_alc88x_init_widget;
+		this->qrks |= AZ_QRK_WID_CDIN_1C | AZ_QRK_WID_BEEP_1D;
+		if (this->subid == 0x19931043 ||	/* ASUS_M5200 */
+		    this->subid == 0x13231043) {	/* ASUS_A7M */
+			this->qrks |= AZ_QRK_GPIO_UNMUTE_0;
+		}
+		if (this->subid == 0x203d161f) {	/* MEDION_MD95257 */
+			this->qrks |= AZ_QRK_GPIO_UNMUTE_1;
+		}
 		break;
 	case 0x10ec0882:
 		this->name = "Realtek ALC882";
-		this->init_widget = azalia_alc88x_init_widget;
+		this->qrks |= AZ_QRK_WID_CDIN_1C | AZ_QRK_WID_BEEP_1D;
+		if (this->subid == 0x13c21043 ||	/* ASUS_A7T */
+		    this->subid == 0x19711043) {	/* ASUS_W2J */
+			this->qrks |= AZ_QRK_GPIO_UNMUTE_0;
+		}
 		break;
 	case 0x10ec0883:
 		this->name = "Realtek ALC883";
-		this->init_widget = azalia_alc88x_init_widget;
+		this->qrks |= AZ_QRK_WID_CDIN_1C | AZ_QRK_WID_BEEP_1D;
+		if (this->subid == 0x00981025) {	/* ACER_ID */
+			this->qrks |= AZ_QRK_GPIO_UNMUTE_0 |
+			    AZ_QRK_GPIO_UNMUTE_1;
+		}
 		break;
 	case 0x10ec0885:
 		this->name = "Realtek ALC885";
-		this->init_widget = azalia_alc88x_init_widget;
+		this->qrks |= AZ_QRK_WID_CDIN_1C | AZ_QRK_WID_BEEP_1D;
+		if (this->subid == 0x00a1106b ||	/* APPLE_MB3 */
+		    this->subid == 0x00a3106b) {	/* APPLE_MB4 */
+			this->qrks |= AZ_QRK_GPIO_UNMUTE_0;
+		}
 		break;
 	case 0x10ec0888:
 		this->name = "Realtek ALC888";
-		this->init_widget = azalia_alc88x_init_widget;
+		this->qrks |= AZ_QRK_WID_CDIN_1C | AZ_QRK_WID_BEEP_1D;
+		break;
+	case 0x111d7603:
+		this->name = "IDT 92HD75B3/4";
+		break;
+	case 0x111d7604:
+		this->name = "IDT 92HD83C1X";
+		break;
+	case 0x111d7605:
+		this->name = "IDT 92HD81B1X";
+		break;
+	case 0x111d7608:
+		this->name = "IDT 92HD75B1/2";
+		break;
+	case 0x111d7674:
+		this->name = "IDT 92HD73D1";
+		break;
+	case 0x111d7675:
+		this->name = "IDT 92HD73C1";	/* aka 92HDW74C1 */
+		break;
+	case 0x111d7676:
+		this->name = "IDT 92HD73E1";	/* aka 92HDW74E1 */
+		break;
+	case 0x111d76b0:
+		this->name = "IDT 92HD71B8";
 		break;
 	case 0x111d76b2:
 		this->name = "IDT 92HD71B7";
+		if (this->subid == 0x02631028 ||	/* DELL_E5500 */
+		    this->subid == 0x02331028 ||	/* DELL_E6400 */
+		    this->subid == 0x024f1028) {	/* DELL_E6500 */
+			this->qrks |= AZ_QRK_GPIO_UNMUTE_0;
+		}
 		break;
 	case 0x111d76b6:
 		this->name = "IDT 92HD71B5";
+		break;
+	case 0x111d76d4:
+		this->name = "IDT 92HD83C1C";
+		break;
+	case 0x111d76d5:
+		this->name = "IDT 92HD81B1C";
+		break;
+	case 0x11d4184a:
+		this->name = "Analog Devices AD1884A";
+		break;
+	case 0x11d41882:
+		this->name = "Analog Devices AD1882";
+		break;
+	case 0x11d41883:
+		this->name = "Analog Devices AD1883";
 		break;
 	case 0x11d41884:
 		this->name = "Analog Devices AD1884";
@@ -182,6 +208,15 @@ azalia_codec_init_vtbl(codec_t *this)
 	case 0x11d4198b:
 		this->name = "Analog Devices AD1988B";
 		break;
+	case 0x11d4882a:
+		this->name = "Analog Devices AD1882A";
+		break;
+	case 0x11d4989a:
+		this->name = "Analog Devices AD1989A";
+		break;
+	case 0x11d4989b:
+		this->name = "Analog Devices AD1989B";
+		break;
 	case 0x14f15045:
 		this->name = "Conexant CX20549";  /* Venice */
 		break;
@@ -194,14 +229,32 @@ azalia_codec_init_vtbl(codec_t *this)
 	case 0x434d4980:
 		this->name = "CMedia CMI9880";
 		break;
+	case 0x83847612:
+		this->name = "Sigmatel STAC9230X";
+		break;
+	case 0x83847613:
+		this->name = "Sigmatel STAC9230D";
+		break;
+	case 0x83847614:
+		this->name = "Sigmatel STAC9229X";
+		break;
+	case 0x83847615:
+		this->name = "Sigmatel STAC9229D";
+		break;
 	case 0x83847616:
 		this->name = "Sigmatel STAC9228X";
+		if (this->subid == 0x02271028) {	/* DELL_V1400 */
+			this->qrks |= AZ_QRK_GPIO_UNMUTE_2;
+	 	}
 		break;
 	case 0x83847617:
 		this->name = "Sigmatel STAC9228D";
 		break;
 	case 0x83847618:
 		this->name = "Sigmatel STAC9227X";
+		break;
+	case 0x83847619:
+		this->name = "Sigmatel STAC9227D";
 		break;
 	case 0x83847620:
 		this->name = "Sigmatel STAC9274";
@@ -224,27 +277,53 @@ azalia_codec_init_vtbl(codec_t *this)
 	case 0x83847636:
 		this->name = "Sigmatel STAC9251";
 		break;
+	case 0x83847638:
+		this->name = "IDT 92HD700X";
+		break;
+	case 0x83847639:
+		this->name = "IDT 92HD700D";
+		break;
+	case 0x83847645:
+		this->name = "IDT 92HD206X";
+		break;
+	case 0x83847646:
+		this->name = "IDT 92HD206D";
+		break;
 	case 0x83847661:
 		/* FALLTHROUGH */
 	case 0x83847662:
 		this->name = "Sigmatel STAC9225";
-		this->mixer_init = azalia_stac7661_mixer_init;
 		break;
 	case 0x83847680:
-		this->name = "Sigmatel STAC9221";
-		this->init_widget = azalia_stac9221_init_widget;
+		this->name = "Sigmatel STAC9220/1";
+		if (this->subid == 0x76808384) {	/* APPLE_ID */
+			this->qrks |= AZ_QRK_GPIO_POL_0 | AZ_QRK_GPIO_UNMUTE_0 |
+			     AZ_QRK_GPIO_UNMUTE_1;
+		}
 		break;
+	case 0x83847682:
+		/* FALLTHROUGH */
 	case 0x83847683:
-		this->name = "Sigmatel STAC9221D";
+		this->name = "Sigmatel STAC9221D";	/* aka IDT 92HD202 */
 		break;
 	case 0x83847690:
-		this->name = "Sigmatel STAC9200";
+		this->name = "Sigmatel STAC9200";	/* aka IDT 92HD001 */
 		break;
 	case 0x83847691:
 		this->name = "Sigmatel STAC9200D";
 		break;
+	case 0x83847698:
+		this->name = "IDT 92HD005";
+		break;
+	case 0x83847699:
+		this->name = "IDT 92HD005D";
+		break;
 	case 0x838476a0:
 		this->name = "Sigmatel STAC9205X";
+		if (this->subid == 0x01f91028 ||	/* DELL_D630 */
+		    this->subid == 0x02281028) {	/* DELL_V1500 */
+			this->qrks |= AZ_QRK_GPIO_UNMUTE_0;
+		}
 		break;
 	case 0x838476a1:
 		this->name = "Sigmatel STAC9205D";
@@ -272,117 +351,104 @@ azalia_widget_enabled(const codec_t *this, nid_t nid)
 }
 
 int
-azalia_generic_codec_init_dacgroup(codec_t *this)
+azalia_init_dacgroup(codec_t *this)
 {
 	this->dacs.ngroups = 0;
-	azalia_generic_codec_add_convgroup(this, &this->dacs,
-	    COP_AWTYPE_AUDIO_OUTPUT, 0);
-	azalia_generic_codec_add_convgroup(this, &this->dacs,
-	    COP_AWTYPE_AUDIO_OUTPUT, COP_AWCAP_DIGITAL);
+	if (this->na_dacs > 0)
+		azalia_add_convgroup(this, &this->dacs,
+		    this->opins, this->nopins,
+		    this->a_dacs, this->na_dacs,
+		    COP_AWTYPE_AUDIO_OUTPUT, 0);
+	if (this->na_dacs_d > 0)
+		azalia_add_convgroup(this, &this->dacs,
+		    this->opins_d, this->nopins_d,
+		    this->a_dacs_d, this->na_dacs_d,
+		    COP_AWTYPE_AUDIO_OUTPUT, COP_AWCAP_DIGITAL);
 	this->dacs.cur = 0;
 
 	this->adcs.ngroups = 0;
-	azalia_generic_codec_add_convgroup(this, &this->adcs,
-	    COP_AWTYPE_AUDIO_INPUT, 0);
-	azalia_generic_codec_add_convgroup(this, &this->adcs,
-	    COP_AWTYPE_AUDIO_INPUT, COP_AWCAP_DIGITAL);
+	if (this->na_adcs > 0)
+		azalia_add_convgroup(this, &this->adcs,
+		    this->ipins, this->nipins,
+		    this->a_adcs, this->na_adcs,
+		    COP_AWTYPE_AUDIO_INPUT, 0);
+	if (this->na_adcs_d > 0)
+		azalia_add_convgroup(this, &this->adcs,
+		    this->ipins_d, this->nipins_d,
+		    this->a_adcs_d, this->na_adcs_d,
+		    COP_AWTYPE_AUDIO_INPUT, COP_AWCAP_DIGITAL);
 	this->adcs.cur = 0;
 
 	return 0;
 }
 
 int
-azalia_generic_codec_add_convgroup(codec_t *this, convgroupset_t *group,
+azalia_add_convgroup(codec_t *this, convgroupset_t *group,
+    struct io_pin *pins, int npins, nid_t *all_convs, int nall_convs,
     uint32_t type, uint32_t digital)
 {
-	nid_t all_convs[HDA_MAX_CHANNELS];
-	int nall_convs;
 	nid_t convs[HDA_MAX_CHANNELS];
 	int nconvs;
-	int assoc, seq;
 	nid_t conv;
 	int i, j, k;
 
-	DPRINTF(("%s: looking for %s %s\n", __func__,
-	    digital ? "digital" : "analog",
-	    (type == COP_AWTYPE_AUDIO_OUTPUT) ? "DACs" : "ADCs"));
-
 	nconvs = 0;
-	nall_convs = 0;
 
-	FOR_EACH_WIDGET(this, i) {
-		if (this->w[i].type == type &&
-		    (this->w[i].widgetcap & COP_AWCAP_DIGITAL) == digital &&
-		    nall_convs < HDA_MAX_CHANNELS)
-			all_convs[nall_convs++] = this->w[i].nid;
+	/* default pin connections */
+	for (i = 0; i < npins; i++) {
+		conv = pins[i].conv;
+		if (conv < 0)
+			continue;
+		for (j = 0; j < nconvs; j++) {
+			if (convs[j] == conv)
+				break;
+		}
+		if (j < nconvs)
+			continue;
+		convs[nconvs++] = conv;
+		if (nconvs >= nall_convs) {
+			goto done;
+		}
 	}
-	if (nall_convs == 0)
-		goto done;
-
-	for (assoc = 0; assoc <= CORB_CD_ASSOCIATION_MAX; assoc++) {
-		for (seq = 0; seq <= CORB_CD_SEQUENCE_MAX; seq++) {
-			FOR_EACH_WIDGET(this, i) {
-				const widget_t *w;
-
-				w = &this->w[i];
-				if (!w->enable)
+	/* non-default connections */
+	for (i = 0; i < npins; i++) {
+		for (j = 0; j < nall_convs; j++) {
+			conv = all_convs[j];
+			for (k = 0; k < nconvs; k++) {
+				if (convs[k] == conv)
+					break;
+			}
+			if (k < nconvs)
+				continue;
+			if (type == COP_AWTYPE_AUDIO_OUTPUT) {
+				k = azalia_codec_fnode(this, conv,
+				    pins[i].nid, 0);
+				if (k < 0)
 					continue;
-				if (w->type != COP_AWTYPE_PIN_COMPLEX)
+			} else {
+				if (!azalia_widget_enabled(this, conv))
 					continue;
-				if ((w->widgetcap &
-				    COP_AWCAP_DIGITAL) != digital)
+				k = azalia_codec_fnode(this, pins[i].nid,
+				    conv, 0);
+				if (k < 0)
 					continue;
-				if (w->d.pin.sequence != seq ||
-				    w->d.pin.association != assoc)
-					continue;
-				if (type == COP_AWTYPE_AUDIO_OUTPUT) {
-					if (!(w->d.pin.cap & COP_PINCAP_OUTPUT))
-						continue;
-					if (this->mic != -1 &&
-					    w->nid == this->mic)
-						continue;
-				} else {
-					if (!(w->d.pin.cap & COP_PINCAP_INPUT))
-						continue;
-					if (this->speaker != -1 &&
-					    w->nid == this->speaker)
-						continue;
-				}
-				DPRINTF(("\tpin=%2.2x, assoc=%d, seq=%d:",
-				    w->nid, assoc, seq));
-				for (j = 0; j < nall_convs; j++) {
-					conv = all_convs[j];
-					for (k = 0; k < nconvs; k++) {
-						if (convs[k] == conv)
-							break;
-					}
-					if (k < nconvs)
-						continue;
-					if (type == COP_AWTYPE_AUDIO_OUTPUT) {
-						k = azalia_generic_codec_fnode
-						    (this, conv, i, 0);
-						if (k < 0)
-							continue;
-					} else {
-						if (!azalia_widget_enabled(this,
-						    conv))
-							continue;
-						k = azalia_generic_codec_fnode
-						    (this, w->nid, conv, 0);
-						if (k < 0)
-							continue;
-					}
-					convs[nconvs++] = conv;
-					DPRINTF(("%2.2x", conv));
-					if (nconvs >= nall_convs ||
-					    nconvs >= HDA_MAX_CHANNELS) {
-						DPRINTF(("\n"));
-						goto done;
-					}
-				}
-				DPRINTF(("\n"));
+			}
+			convs[nconvs++] = conv;
+			if (nconvs >= nall_convs) {
+				goto done;
 			}
 		}
+	}
+	/* Make sure the speaker dac is part of the analog output convgroup
+	 * or it won't get connected by azalia_codec_connect_stream().
+	 */
+	if (type == COP_AWTYPE_AUDIO_OUTPUT && !digital &&
+	    nconvs < nall_convs && this->spkr_dac != -1) {
+		for (i = 0; i < nconvs; i++)
+			if (convs[i] == this->spkr_dac)
+				break;
+		if (i == nconvs)
+			convs[nconvs++] = this->spkr_dac;
 	}
 done:
 	for (i = 0; i < nconvs; i++)
@@ -392,31 +458,33 @@ done:
 		group->ngroups++;
 	}
 
+	/* Disable converters that aren't in a convgroup. */
 	for (i = 0; i < nall_convs; i++) {
+		conv = all_convs[i];
 		for (j = 0; j < nconvs; j++)
-			if (convs[j] == all_convs[i])
+			if (convs[j] == conv)
 				break;
 		if (j == nconvs)
-			this->w[all_convs[i]].enable = 0;
+			this->w[conv].enable = 0;
 	}
 
 	return 0;
 }
 
 int
-azalia_generic_codec_fnode(codec_t *this, nid_t node, int index, int depth)
+azalia_codec_fnode(codec_t *this, nid_t node, int index, int depth)
 {
 	const widget_t *w;
 	int i, ret;
 
 	w = &this->w[index];
 	if (w->nid == node) {
-		DPRINTF((" depth=%d:", depth));
 		return index;
 	}
 	/* back at the beginning or a bad end */
 	if (depth > 0 &&
 	    (w->type == COP_AWTYPE_PIN_COMPLEX ||
+	    w->type == COP_AWTYPE_BEEP_GENERATOR ||
 	    w->type == COP_AWTYPE_AUDIO_OUTPUT ||
 	    w->type == COP_AWTYPE_AUDIO_INPUT))
 		return -1;
@@ -425,8 +493,7 @@ azalia_generic_codec_fnode(codec_t *this, nid_t node, int index, int depth)
 	for (i = 0; i < w->nconnections; i++) {
 		if (!azalia_widget_enabled(this, w->connections[i]))
 			continue;
-		ret = azalia_generic_codec_fnode(this, node,
-		    w->connections[i], depth);
+		ret = azalia_codec_fnode(this, node, w->connections[i], depth);
 		if (ret >= 0)
 			return ret;
 	}
@@ -434,7 +501,7 @@ azalia_generic_codec_fnode(codec_t *this, nid_t node, int index, int depth)
 }
 
 int
-azalia_generic_unsol(codec_t *this, int tag)
+azalia_unsol_event(codec_t *this, int tag)
 {
 	mixer_ctrl_t mc;
 	uint32_t result;
@@ -449,33 +516,40 @@ azalia_generic_unsol(codec_t *this, int tag)
 		for (i = 0; err == 0 && i < this->nsense_pins; i++) {
 			if (!(this->spkr_muters & (1 << i)))
 				continue;
-			err = this->comresp(this, this->sense_pins[i],
+			err = azalia_comresp(this, this->sense_pins[i],
 			    CORB_GET_PIN_WIDGET_CONTROL, 0, &result);
 			if (err || !(result & CORB_PWC_OUTPUT))
 				continue;
-			err = this->comresp(this, this->sense_pins[i],
+			err = azalia_comresp(this, this->sense_pins[i],
 			    CORB_GET_PIN_SENSE, 0, &result);
 			if (!err && (result & CORB_PS_PRESENCE))
 				vol = 1;
 		}
 		if (err)
 			break;
-		if ((this->w[this->speaker].widgetcap & COP_AWCAP_OUTAMP) &&
-		    (this->w[this->speaker].outamp_cap & COP_AMPCAP_MUTE)) {
+		switch(this->spkr_mute_method) {
+		case AZ_SPKR_MUTE_SPKR_MUTE:
 			mc.un.ord = vol;
-			err = azalia_generic_mixer_set(this, this->speaker,
+			err = azalia_mixer_set(this, this->speaker,
 			    MI_TARGET_OUTAMP, &mc);
-		} else {
+			break;
+		case AZ_SPKR_MUTE_SPKR_DIR:
 			mc.un.ord = vol ? 0 : 1;
-			err = azalia_generic_mixer_set(this, this->speaker,
+			err = azalia_mixer_set(this, this->speaker,
 			    MI_TARGET_PINDIR, &mc);
+			break;
+		case AZ_SPKR_MUTE_DAC_MUTE:
+			mc.un.ord = vol;
+			err = azalia_mixer_set(this, this->spkr_dac,
+			    MI_TARGET_OUTAMP, &mc);
+			break;
 		}
 		break;
 
 	case AZ_TAG_PLAYVOL:
 		if (this->playvols.master == this->audiofunc)
 			return EINVAL;
-		err = this->comresp(this, this->playvols.master,
+		err = azalia_comresp(this, this->playvols.master,
 		    CORB_GET_VOLUME_KNOB, 0, &result);
 		if (err)
 			return err;
@@ -502,7 +576,7 @@ azalia_generic_unsol(codec_t *this, int tag)
 		mc.un.value.num_channels = 2;
 		mc.un.value.level[0] = this->playvols.vol_l;
 		mc.un.value.level[1] = this->playvols.vol_r;
-		err = azalia_generic_mixer_set(this, this->playvols.master,
+		err = azalia_mixer_set(this, this->playvols.master,
 		    MI_TARGET_PLAYVOL, &mc);
 		break;
 
@@ -520,7 +594,7 @@ azalia_generic_unsol(codec_t *this, int tag)
  * ---------------------------------------------------------------- */
 
 int
-azalia_generic_mixer_init(codec_t *this)
+azalia_mixer_init(codec_t *this)
 {
 	/*
 	 * pin		"<color>%2.2x"
@@ -577,7 +651,7 @@ azalia_generic_mixer_init(codec_t *this)
 
 #define MIXER_REG_PROLOG	\
 	mixer_devinfo_t *d; \
-	err = azalia_generic_mixer_ensure_capacity(this, this->nmixers + 1); \
+	err = azalia_mixer_ensure_capacity(this, this->nmixers + 1); \
 	if (err) \
 		return err; \
 	m = &this->mixers[this->nmixers]; \
@@ -908,12 +982,25 @@ azalia_generic_mixer_init(codec_t *this)
 	}
 
 	/* spkr mute by jack sense */
-	w = &this->w[this->speaker];
-	if (this->nsense_pins > 0 && this->speaker != -1 &&
-	    (((w->widgetcap & COP_AWCAP_OUTAMP) &&
-	    (w->outamp_cap & COP_AMPCAP_MUTE)) ||
-	    ((w->d.pin.cap & COP_PINCAP_OUTPUT) &&
-	    (w->d.pin.cap & COP_PINCAP_INPUT)))) {
+	this->spkr_mute_method = AZ_SPKR_MUTE_NONE;
+	if (this->speaker != -1 && this->spkr_dac != -1 && this->nsense_pins > 0) {
+		w = &this->w[this->speaker];
+		if ((w->widgetcap & COP_AWCAP_OUTAMP) &&
+		    (w->outamp_cap & COP_AMPCAP_MUTE))
+			this->spkr_mute_method = AZ_SPKR_MUTE_SPKR_MUTE;
+		else if ((w->d.pin.cap & COP_PINCAP_OUTPUT) &&
+		    (w->d.pin.cap & COP_PINCAP_INPUT))
+			this->spkr_mute_method = AZ_SPKR_MUTE_SPKR_DIR;
+		else {
+			w = &this->w[this->spkr_dac];
+			if (w->nid != this->dacs.groups[0].conv[0] &&
+			    (w->widgetcap & COP_AWCAP_OUTAMP) &&
+			    (w->outamp_cap & COP_AMPCAP_MUTE))
+				this->spkr_mute_method = AZ_SPKR_MUTE_DAC_MUTE;
+		}
+	}
+	if (this->spkr_mute_method != AZ_SPKR_MUTE_NONE) {
+		w = &this->w[this->speaker];
 		MIXER_REG_PROLOG;
 		m->nid = w->nid;
 		snprintf(d->label.name, sizeof(d->label.name),
@@ -941,7 +1028,7 @@ azalia_generic_mixer_init(codec_t *this)
 	/* playback volume group */
 	if (this->playvols.nslaves > 0) {
 		mixer_devinfo_t *d;
-		err = azalia_generic_mixer_ensure_capacity(this,
+		err = azalia_mixer_ensure_capacity(this,
 		    this->nmixers + 3);
 
 		/* volume */
@@ -994,7 +1081,7 @@ azalia_generic_mixer_init(codec_t *this)
 	/* recording volume group */
 	if (this->recvols.nslaves > 0) {
 		mixer_devinfo_t *d;
-		err = azalia_generic_mixer_ensure_capacity(this,
+		err = azalia_mixer_ensure_capacity(this,
 		    this->nmixers + 3);
 
 		/* volume */
@@ -1086,8 +1173,8 @@ azalia_generic_mixer_init(codec_t *this)
 		this->nmixers++;
 	}
 
-	azalia_generic_mixer_fix_indexes(this);
-	azalia_generic_mixer_default(this);
+	azalia_mixer_fix_indexes(this);
+	azalia_mixer_default(this);
 	return 0;
 }
 
@@ -1103,7 +1190,7 @@ azalia_devinfo_offon(mixer_devinfo_t *d)
 }
 
 int
-azalia_generic_mixer_ensure_capacity(codec_t *this, size_t newsize)
+azalia_mixer_ensure_capacity(codec_t *this, size_t newsize)
 {
 	size_t newmax;
 	void *newbuf;
@@ -1126,7 +1213,7 @@ azalia_generic_mixer_ensure_capacity(codec_t *this, size_t newsize)
 }
 
 int
-azalia_generic_mixer_fix_indexes(codec_t *this)
+azalia_mixer_fix_indexes(codec_t *this)
 {
 	int i;
 	mixer_devinfo_t *d;
@@ -1148,7 +1235,7 @@ azalia_generic_mixer_fix_indexes(codec_t *this)
 }
 
 int
-azalia_generic_mixer_default(codec_t *this)
+azalia_mixer_default(codec_t *this)
 {
 	widget_t *w;
 	mixer_item_t *m;
@@ -1167,7 +1254,7 @@ azalia_generic_mixer_default(codec_t *this)
 		bzero(&mc, sizeof(mc));
 		mc.dev = i;
 		mc.type = AUDIO_MIXER_ENUM;
-		azalia_generic_mixer_set(this, m->nid, m->target, &mc);
+		azalia_mixer_set(this, m->nid, m->target, &mc);
 	}
 
 	/* set unextreme volume */
@@ -1187,14 +1274,13 @@ azalia_generic_mixer_default(codec_t *this)
 			mc.un.value.num_channels = 2;
 			mc.un.value.level[1] = mc.un.value.level[0];
 		}
-		azalia_generic_mixer_set(this, m->nid, m->target, &mc);
+		azalia_mixer_set(this, m->nid, m->target, &mc);
 	}
 
 	/* unmute all */
 	for (i = 0; i < this->nmixers; i++) {
 		m = &this->mixers[i];
-		if (m->target != MI_TARGET_MUTESET &&
-		    m->target != MI_TARGET_MIXERSET)
+		if (m->target != MI_TARGET_MUTESET)
 			continue;
 		if (m->devinfo.type != AUDIO_MIXER_SET)
 			continue;
@@ -1209,21 +1295,24 @@ azalia_generic_mixer_default(codec_t *this)
 		for (j = 0; j < w->nconnections; j++) {
 			if (!azalia_widget_enabled(this, w->connections[j]))
 				continue;
+			if (w->nid == this->input_mixer &&
+			    w->connections[j] == this->mic)
+				continue;
 			mc.un.mask |= 1 << j;
 		}
-		azalia_generic_mixer_set(this, m->nid, m->target, &mc);
+		azalia_mixer_set(this, m->nid, m->target, &mc);
 	}
 
 	/* turn on jack sense unsolicited responses */
 	for (i = 0; i < this->nsense_pins; i++) {
 		if (this->spkr_muters & (1 << i)) {
-			this->comresp(this, this->sense_pins[i],
+			azalia_comresp(this, this->sense_pins[i],
 			    CORB_SET_UNSOLICITED_RESPONSE,
 			    CORB_UNSOL_ENABLE | AZ_TAG_SPKR, NULL);
 		}
 	}
-	if (this->spkr_muters != 0 && this->unsol_event != NULL)
-		this->unsol_event(this, AZ_TAG_SPKR);
+	if (this->spkr_muters != 0)
+		azalia_unsol_event(this, AZ_TAG_SPKR);
 
 	/* get default value for play group master */
 	for (i = 0; i < this->playvols.nslaves; i++) {
@@ -1234,7 +1323,7 @@ azalia_generic_mixer_default(codec_t *this)
 			continue;
 		mc.type = AUDIO_MIXER_VALUE;
 		tgt = MI_TARGET_OUTAMP;
-		azalia_generic_mixer_get(this, w->nid, tgt, &mc);
+		azalia_mixer_get(this, w->nid, tgt, &mc);
 		this->playvols.vol_l = mc.un.value.level[0];
 		this->playvols.vol_r = mc.un.value.level[0];
 		break;
@@ -1256,7 +1345,7 @@ azalia_generic_mixer_default(codec_t *this)
  		}
 		if (!(COP_AMPCAP_NUMSTEPS(cap)))
 			continue;
-		azalia_generic_mixer_get(this, w->nid, tgt, &mc);
+		azalia_mixer_get(this, w->nid, tgt, &mc);
 		this->recvols.vol_l = mc.un.value.level[0];
 		this->recvols.vol_r = mc.un.value.level[0];
 		break;
@@ -1267,7 +1356,7 @@ azalia_generic_mixer_default(codec_t *this)
 	if (this->playvols.master != this->audiofunc) {
 
 		w = &this->w[this->playvols.master];
-		err = this->comresp(this, w->nid, CORB_GET_VOLUME_KNOB,
+		err = azalia_comresp(this, w->nid, CORB_GET_VOLUME_KNOB,
 		    0, &result);
 		if (err)
 			return err;
@@ -1278,14 +1367,14 @@ azalia_generic_mixer_default(codec_t *this)
 
 		/* indirect mode */
 		result &= ~(CORB_VKNOB_DIRECT);
-		err = this->comresp(this, w->nid, CORB_SET_VOLUME_KNOB,
+		err = azalia_comresp(this, w->nid, CORB_SET_VOLUME_KNOB,
 		    result, NULL);
 		if (err)
 			return err;
 
 		/* enable unsolicited responses */
 		result = CORB_UNSOL_ENABLE | AZ_TAG_PLAYVOL;
-		err = this->comresp(this, w->nid,
+		err = azalia_comresp(this, w->nid,
 		    CORB_SET_UNSOLICITED_RESPONSE, result, NULL);
 		if (err)
 			return err;
@@ -1295,7 +1384,7 @@ azalia_generic_mixer_default(codec_t *this)
 }
 
 int
-azalia_generic_mixer_delete(codec_t *this)
+azalia_mixer_delete(codec_t *this)
 {
 	if (this->mixers != NULL) {
 		free(this->mixers, M_DEVBUF);
@@ -1308,7 +1397,7 @@ azalia_generic_mixer_delete(codec_t *this)
  * @param mc	mc->type must be set by the caller before the call
  */
 int
-azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target,
+azalia_mixer_get(const codec_t *this, nid_t nid, int target,
     mixer_ctrl_t *mc)
 {
 	uint32_t result, cap, value;
@@ -1317,7 +1406,7 @@ azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target,
 
 	/* inamp mute */
 	if (IS_MI_TARGET_INAMP(target) && mc->type == AUDIO_MIXER_ENUM) {
-		err = this->comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
+		err = azalia_comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
 		    CORB_GAGM_INPUT | CORB_GAGM_LEFT |
 		    MI_TARGET_INAMP(target), &result);
 		if (err)
@@ -1327,12 +1416,12 @@ azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target,
 
 	/* inamp gain */
 	else if (IS_MI_TARGET_INAMP(target) && mc->type == AUDIO_MIXER_VALUE) {
-		err = this->comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
+		err = azalia_comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
 		      CORB_GAGM_INPUT | CORB_GAGM_LEFT |
 		      MI_TARGET_INAMP(target), &result);
 		if (err)
 			return err;
-		mc->un.value.level[0] = azalia_generic_mixer_from_device_value(this,
+		mc->un.value.level[0] = azalia_mixer_from_device_value(this,
 		    nid, target, CORB_GAGM_GAIN(result));
 		if (this->w[nid].type == COP_AWTYPE_AUDIO_SELECTOR ||
 		    this->w[nid].type == COP_AWTYPE_AUDIO_MIXER) {
@@ -1346,20 +1435,20 @@ azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target,
 			n = nid;
 		mc->un.value.num_channels = WIDGET_CHANNELS(&this->w[n]);
 		if (mc->un.value.num_channels == 2) {
-			err = this->comresp(this, nid,
+			err = azalia_comresp(this, nid,
 			    CORB_GET_AMPLIFIER_GAIN_MUTE, CORB_GAGM_INPUT |
 			    CORB_GAGM_RIGHT | MI_TARGET_INAMP(target),
 			    &result);
 			if (err)
 				return err;
-			mc->un.value.level[1] = azalia_generic_mixer_from_device_value
+			mc->un.value.level[1] = azalia_mixer_from_device_value
 			    (this, nid, target, CORB_GAGM_GAIN(result));
 		}
 	}
 
 	/* outamp mute */
 	else if (target == MI_TARGET_OUTAMP && mc->type == AUDIO_MIXER_ENUM) {
-		err = this->comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
+		err = azalia_comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
 		    CORB_GAGM_OUTPUT | CORB_GAGM_LEFT | 0, &result);
 		if (err)
 			return err;
@@ -1368,27 +1457,27 @@ azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target,
 
 	/* outamp gain */
 	else if (target == MI_TARGET_OUTAMP && mc->type == AUDIO_MIXER_VALUE) {
-		err = this->comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
+		err = azalia_comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
 		      CORB_GAGM_OUTPUT | CORB_GAGM_LEFT | 0, &result);
 		if (err)
 			return err;
-		mc->un.value.level[0] = azalia_generic_mixer_from_device_value(this,
+		mc->un.value.level[0] = azalia_mixer_from_device_value(this,
 		    nid, target, CORB_GAGM_GAIN(result));
 		mc->un.value.num_channels = WIDGET_CHANNELS(&this->w[nid]);
 		if (mc->un.value.num_channels == 2) {
-			err = this->comresp(this, nid,
+			err = azalia_comresp(this, nid,
 			    CORB_GET_AMPLIFIER_GAIN_MUTE,
 			    CORB_GAGM_OUTPUT | CORB_GAGM_RIGHT | 0, &result);
 			if (err)
 				return err;
-			mc->un.value.level[1] = azalia_generic_mixer_from_device_value
+			mc->un.value.level[1] = azalia_mixer_from_device_value
 			    (this, nid, target, CORB_GAGM_GAIN(result));
 		}
 	}
 
 	/* selection */
 	else if (target == MI_TARGET_CONNLIST) {
-		err = this->comresp(this, nid,
+		err = azalia_comresp(this, nid,
 		    CORB_GET_CONNECTION_SELECT_CONTROL, 0, &result);
 		if (err)
 			return err;
@@ -1402,7 +1491,7 @@ azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target,
 
 	/* pin I/O */
 	else if (target == MI_TARGET_PINDIR) {
-		err = this->comresp(this, nid,
+		err = azalia_comresp(this, nid,
 		    CORB_GET_PIN_WIDGET_CONTROL, 0, &result);
 		if (err)
 			return err;
@@ -1430,7 +1519,7 @@ azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target,
 
 	/* pin headphone-boost */
 	else if (target == MI_TARGET_PINBOOST) {
-		err = this->comresp(this, nid,
+		err = azalia_comresp(this, nid,
 		    CORB_GET_PIN_WIDGET_CONTROL, 0, &result);
 		if (err)
 			return err;
@@ -1449,13 +1538,13 @@ azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target,
 
 	/* S/PDIF */
 	else if (target == MI_TARGET_SPDIF) {
-		err = this->comresp(this, nid, CORB_GET_DIGITAL_CONTROL,
+		err = azalia_comresp(this, nid, CORB_GET_DIGITAL_CONTROL,
 		    0, &result);
 		if (err)
 			return err;
 		mc->un.mask = result & 0xff & ~(CORB_DCC_DIGEN | CORB_DCC_NAUDIO);
 	} else if (target == MI_TARGET_SPDIF_CC) {
-		err = this->comresp(this, nid, CORB_GET_DIGITAL_CONTROL,
+		err = azalia_comresp(this, nid, CORB_GET_DIGITAL_CONTROL,
 		    0, &result);
 		if (err)
 			return err;
@@ -1465,8 +1554,8 @@ azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target,
 
 	/* EAPD */
 	else if (target == MI_TARGET_EAPD) {
-		err = this->comresp(this, nid,
-		    CORB_GET_EAPD_BTL_ENABLE, 0, &result);
+		err = azalia_comresp(this, nid, CORB_GET_EAPD_BTL_ENABLE,
+		    0, &result);
 		if (err)
 			return err;
 		mc->un.ord = result & CORB_EAPD_EAPD ? 1 : 0;
@@ -1474,7 +1563,7 @@ azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target,
 
 	/* sense pin */
 	else if (target == MI_TARGET_PINSENSE) {
-		err = this->comresp(this, nid, CORB_GET_PIN_SENSE,
+		err = azalia_comresp(this, nid, CORB_GET_PIN_SENSE,
 		    0, &result);
 		if (err)
 			return err;
@@ -1494,7 +1583,7 @@ azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target,
 		for (i = 0; i < w->nconnections; i++) {
 			if (!azalia_widget_enabled(this, w->connections[i]))
 				continue;
-			err = this->comresp(this, nid,
+			err = azalia_comresp(this, nid,
 			    CORB_GET_AMPLIFIER_GAIN_MUTE,
 			    CORB_GAGM_INPUT | CORB_GAGM_LEFT |
 			    MI_TARGET_INAMP(i), &result);
@@ -1578,7 +1667,7 @@ azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target,
 }
 
 int
-azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
+azalia_mixer_set(codec_t *this, nid_t nid, int target,
     const mixer_ctrl_t *mc)
 {
 	uint32_t result, value;
@@ -1587,7 +1676,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 	/* inamp mute */
 	if (IS_MI_TARGET_INAMP(target) && mc->type == AUDIO_MIXER_ENUM) {
 		/* We have to set stereo mute separately to keep each gain value. */
-		err = this->comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
+		err = azalia_comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
 		    CORB_GAGM_INPUT | CORB_GAGM_LEFT |
 		    MI_TARGET_INAMP(target), &result);
 		if (err)
@@ -1597,12 +1686,12 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 		    CORB_GAGM_GAIN(result);
 		if (mc->un.ord)
 			value |= CORB_AGM_MUTE;
-		err = this->comresp(this, nid, CORB_SET_AMPLIFIER_GAIN_MUTE,
+		err = azalia_comresp(this, nid, CORB_SET_AMPLIFIER_GAIN_MUTE,
 		    value, &result);
 		if (err)
 			return err;
 		if (WIDGET_CHANNELS(&this->w[nid]) == 2) {
-			err = this->comresp(this, nid,
+			err = azalia_comresp(this, nid,
 			    CORB_GET_AMPLIFIER_GAIN_MUTE, CORB_GAGM_INPUT |
 			    CORB_GAGM_RIGHT | MI_TARGET_INAMP(target),
 			    &result);
@@ -1613,7 +1702,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 			    CORB_GAGM_GAIN(result);
 			if (mc->un.ord)
 				value |= CORB_AGM_MUTE;
-			err = this->comresp(this, nid,
+			err = azalia_comresp(this, nid,
 			    CORB_SET_AMPLIFIER_GAIN_MUTE, value, &result);
 			if (err)
 				return err;
@@ -1624,36 +1713,36 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 	else if (IS_MI_TARGET_INAMP(target) && mc->type == AUDIO_MIXER_VALUE) {
 		if (mc->un.value.num_channels < 1)
 			return EINVAL;
-		err = this->comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
+		err = azalia_comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
 		      CORB_GAGM_INPUT | CORB_GAGM_LEFT |
 		      MI_TARGET_INAMP(target), &result);
 		if (err)
 			return err;
-		value = azalia_generic_mixer_to_device_value(this, nid, target,
+		value = azalia_mixer_to_device_value(this, nid, target,
 		    mc->un.value.level[0]);
 		value = CORB_AGM_INPUT | CORB_AGM_LEFT |
 		    (target << CORB_AGM_INDEX_SHIFT) |
 		    (result & CORB_GAGM_MUTE ? CORB_AGM_MUTE : 0) |
 		    (value & CORB_AGM_GAIN_MASK);
-		err = this->comresp(this, nid, CORB_SET_AMPLIFIER_GAIN_MUTE,
+		err = azalia_comresp(this, nid, CORB_SET_AMPLIFIER_GAIN_MUTE,
 		    value, &result);
 		if (err)
 			return err;
 		if (mc->un.value.num_channels >= 2 &&
 		    WIDGET_CHANNELS(&this->w[nid]) == 2) {
-			err = this->comresp(this, nid,
+			err = azalia_comresp(this, nid,
 			      CORB_GET_AMPLIFIER_GAIN_MUTE, CORB_GAGM_INPUT |
 			      CORB_GAGM_RIGHT | MI_TARGET_INAMP(target),
 			      &result);
 			if (err)
 				return err;
-			value = azalia_generic_mixer_to_device_value(this, nid, target,
+			value = azalia_mixer_to_device_value(this, nid, target,
 			    mc->un.value.level[1]);
 			value = CORB_AGM_INPUT | CORB_AGM_RIGHT |
 			    (target << CORB_AGM_INDEX_SHIFT) |
 			    (result & CORB_GAGM_MUTE ? CORB_AGM_MUTE : 0) |
 			    (value & CORB_AGM_GAIN_MASK);
-			err = this->comresp(this, nid,
+			err = azalia_comresp(this, nid,
 			    CORB_SET_AMPLIFIER_GAIN_MUTE, value, &result);
 			if (err)
 				return err;
@@ -1662,19 +1751,19 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 
 	/* outamp mute */
 	else if (target == MI_TARGET_OUTAMP && mc->type == AUDIO_MIXER_ENUM) {
-		err = this->comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
+		err = azalia_comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
 		    CORB_GAGM_OUTPUT | CORB_GAGM_LEFT, &result);
 		if (err)
 			return err;
 		value = CORB_AGM_OUTPUT | CORB_AGM_LEFT | CORB_GAGM_GAIN(result);
 		if (mc->un.ord)
 			value |= CORB_AGM_MUTE;
-		err = this->comresp(this, nid, CORB_SET_AMPLIFIER_GAIN_MUTE,
+		err = azalia_comresp(this, nid, CORB_SET_AMPLIFIER_GAIN_MUTE,
 		    value, &result);
 		if (err)
 			return err;
 		if (WIDGET_CHANNELS(&this->w[nid]) == 2) {
-			err = this->comresp(this, nid,
+			err = azalia_comresp(this, nid,
 			    CORB_GET_AMPLIFIER_GAIN_MUTE,
 			    CORB_GAGM_OUTPUT | CORB_GAGM_RIGHT, &result);
 			if (err)
@@ -1683,7 +1772,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 			    CORB_GAGM_GAIN(result);
 			if (mc->un.ord)
 				value |= CORB_AGM_MUTE;
-			err = this->comresp(this, nid,
+			err = azalia_comresp(this, nid,
 			    CORB_SET_AMPLIFIER_GAIN_MUTE, value, &result);
 			if (err)
 				return err;
@@ -1694,32 +1783,32 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 	else if (target == MI_TARGET_OUTAMP && mc->type == AUDIO_MIXER_VALUE) {
 		if (mc->un.value.num_channels < 1)
 			return EINVAL;
-		err = this->comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
+		err = azalia_comresp(this, nid, CORB_GET_AMPLIFIER_GAIN_MUTE,
 		      CORB_GAGM_OUTPUT | CORB_GAGM_LEFT, &result);
 		if (err)
 			return err;
-		value = azalia_generic_mixer_to_device_value(this, nid, target,
+		value = azalia_mixer_to_device_value(this, nid, target,
 		    mc->un.value.level[0]);
 		value = CORB_AGM_OUTPUT | CORB_AGM_LEFT |
 		    (result & CORB_GAGM_MUTE ? CORB_AGM_MUTE : 0) |
 		    (value & CORB_AGM_GAIN_MASK);
-		err = this->comresp(this, nid, CORB_SET_AMPLIFIER_GAIN_MUTE,
+		err = azalia_comresp(this, nid, CORB_SET_AMPLIFIER_GAIN_MUTE,
 		    value, &result);
 		if (err)
 			return err;
 		if (mc->un.value.num_channels >= 2 &&
 		    WIDGET_CHANNELS(&this->w[nid]) == 2) {
-			err = this->comresp(this, nid,
+			err = azalia_comresp(this, nid,
 			      CORB_GET_AMPLIFIER_GAIN_MUTE, CORB_GAGM_OUTPUT |
 			      CORB_GAGM_RIGHT, &result);
 			if (err)
 				return err;
-			value = azalia_generic_mixer_to_device_value(this, nid, target,
+			value = azalia_mixer_to_device_value(this, nid, target,
 			    mc->un.value.level[1]);
 			value = CORB_AGM_OUTPUT | CORB_AGM_RIGHT |
 			    (result & CORB_GAGM_MUTE ? CORB_AGM_MUTE : 0) |
 			    (value & CORB_AGM_GAIN_MASK);
-			err = this->comresp(this, nid,
+			err = azalia_comresp(this, nid,
 			    CORB_SET_AMPLIFIER_GAIN_MUTE, value, &result);
 			if (err)
 				return err;
@@ -1733,7 +1822,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 		    !azalia_widget_enabled(this,
 		    this->w[nid].connections[mc->un.ord]))
 			return EINVAL;
-		err = this->comresp(this, nid,
+		err = azalia_comresp(this, nid,
 		    CORB_SET_CONNECTION_SELECT_CONTROL, mc->un.ord, &result);
 		if (err)
 			return err;
@@ -1742,7 +1831,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 	/* pin I/O */
 	else if (target == MI_TARGET_PINDIR) {
 
-		err = this->comresp(this, nid,
+		err = azalia_comresp(this, nid,
 		    CORB_GET_PIN_WIDGET_CONTROL, 0, &result);
 		if (err)
 			return err;
@@ -1767,7 +1856,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 			if (mc->un.ord == 6)
 				value |= CORB_PWC_VREF_100;
 		}
-		err = this->comresp(this, nid,
+		err = azalia_comresp(this, nid,
 		    CORB_SET_PIN_WIDGET_CONTROL, value, &result);
 		if (err)
 			return err;
@@ -1780,8 +1869,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 				break;
 		}
 		if (i < this->nsense_pins) {
-			if (this->unsol_event != NULL)
-				this->unsol_event(this, AZ_TAG_SPKR);
+			azalia_unsol_event(this, AZ_TAG_SPKR);
 		}
 	}
 
@@ -1789,7 +1877,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 	else if (target == MI_TARGET_PINBOOST) {
 		if (mc->un.ord >= 2)
 			return EINVAL;
-		err = this->comresp(this, nid,
+		err = azalia_comresp(this, nid,
 		    CORB_GET_PIN_WIDGET_CONTROL, 0, &result);
 		if (err)
 			return err;
@@ -1798,7 +1886,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 		} else {
 			result |= CORB_PWC_HEADPHONE;
 		}
-		err = this->comresp(this, nid,
+		err = azalia_comresp(this, nid,
 		    CORB_SET_PIN_WIDGET_CONTROL, result, &result);
 		if (err)
 			return err;
@@ -1832,11 +1920,11 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 
 	/* S/PDIF */
 	else if (target == MI_TARGET_SPDIF) {
-		err = this->comresp(this, nid, CORB_GET_DIGITAL_CONTROL,
+		err = azalia_comresp(this, nid, CORB_GET_DIGITAL_CONTROL,
 		    0, &result);
 		result &= CORB_DCC_DIGEN | CORB_DCC_NAUDIO;
 		result |= mc->un.mask & 0xff & ~CORB_DCC_DIGEN;
-		err = this->comresp(this, nid, CORB_SET_DIGITAL_CONTROL_L,
+		err = azalia_comresp(this, nid, CORB_SET_DIGITAL_CONTROL_L,
 		    result, NULL);
 		if (err)
 			return err;
@@ -1845,7 +1933,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 			return EINVAL;
 		if (mc->un.value.level[0] > 127)
 			return EINVAL;
-		err = this->comresp(this, nid, CORB_SET_DIGITAL_CONTROL_H,
+		err = azalia_comresp(this, nid, CORB_SET_DIGITAL_CONTROL_H,
 		    mc->un.value.level[0], NULL);
 		if (err)
 			return err;
@@ -1855,7 +1943,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 	else if (target == MI_TARGET_EAPD) {
 		if (mc->un.ord >= 2)
 			return EINVAL;
-		err = this->comresp(this, nid,
+		err = azalia_comresp(this, nid,
 		    CORB_GET_EAPD_BTL_ENABLE, 0, &result);
 		if (err)
 			return err;
@@ -1865,7 +1953,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 		} else {
 			result |= CORB_EAPD_EAPD;
 		}
-		err = this->comresp(this, nid,
+		err = azalia_comresp(this, nid,
 		    CORB_SET_EAPD_BTL_ENABLE, result, &result);
 		if (err)
 			return err;
@@ -1890,7 +1978,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 			/* We have to set stereo mute separately
 			 * to keep each gain value.
 			 */
-			err = this->comresp(this, nid,
+			err = azalia_comresp(this, nid,
 			    CORB_GET_AMPLIFIER_GAIN_MUTE,
 			    CORB_GAGM_INPUT | CORB_GAGM_LEFT |
 			    MI_TARGET_INAMP(i), &result);
@@ -1901,13 +1989,13 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 			    CORB_GAGM_GAIN(result);
 			if ((mc->un.mask & (1 << i)) == 0)
 				value |= CORB_AGM_MUTE;
-			err = this->comresp(this, nid,
+			err = azalia_comresp(this, nid,
 			    CORB_SET_AMPLIFIER_GAIN_MUTE, value, &result);
 			if (err)
 				return err;
 
 			if (WIDGET_CHANNELS(w) == 2) {
-				err = this->comresp(this, nid,
+				err = azalia_comresp(this, nid,
 				    CORB_GET_AMPLIFIER_GAIN_MUTE,
 				    CORB_GAGM_INPUT | CORB_GAGM_RIGHT |
 				    MI_TARGET_INAMP(i), &result);
@@ -1918,7 +2006,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 				    CORB_GAGM_GAIN(result);
 				if ((mc->un.mask & (1 << i)) == 0)
 					value |= CORB_AGM_MUTE;
-				err = this->comresp(this, nid,
+				err = azalia_comresp(this, nid,
 				    CORB_SET_AMPLIFIER_GAIN_MUTE,
 				    value, &result);
 				if (err)
@@ -1927,7 +2015,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 		}
 	}
 
-	else if (target == MI_TARGET_MUTESET && mc->type == AUDIO_MIXER_SET) {
+	else if (target == MI_TARGET_MIXERSET && mc->type == AUDIO_MIXER_SET) {
 		/* do nothing, control is read only */
 	}
 
@@ -1935,8 +2023,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 
 		if (nid == this->speaker) {
 			this->spkr_muters = mc->un.mask;
-			if (this->unsol_event != NULL)
-				this->unsol_event(this, AZ_TAG_SPKR);
+			azalia_unsol_event(this, AZ_TAG_SPKR);
 		} else {
 			DPRINTF(("%s: invalid senseset nid\n"));
 			return EINVAL;
@@ -1959,11 +2046,20 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 				w = &this->w[this->playvols.slaves[i]];
 				if (!(COP_AMPCAP_NUMSTEPS(w->outamp_cap)))
 					continue;
+
+				/* don't change volume if muted */
+				if (w->outamp_cap & COP_AMPCAP_MUTE) {
+					mc2.type = AUDIO_MIXER_ENUM;
+					azalia_mixer_get(this, w->nid,
+					    MI_TARGET_OUTAMP, &mc2);
+					if (mc2.un.ord)
+						continue;
+				}
 				mc2.type = AUDIO_MIXER_VALUE;
 				mc2.un.value.num_channels = WIDGET_CHANNELS(w);
 				mc2.un.value.level[0] = this->playvols.vol_l;
 				mc2.un.value.level[1] = this->playvols.vol_r;
-				err = azalia_generic_mixer_set(this, w->nid,
+				err = azalia_mixer_set(this, w->nid,
 				    MI_TARGET_OUTAMP, &mc2);
 				if (err) {
 					DPRINTF(("%s: out slave %2.2x vol\n",
@@ -1983,7 +2079,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 					continue;
 				mc2.type = AUDIO_MIXER_ENUM;
 				mc2.un.ord = this->playvols.mute;
-				err = azalia_generic_mixer_set(this, w->nid,
+				err = azalia_mixer_set(this, w->nid,
 				    MI_TARGET_OUTAMP, &mc2);
 				if (err) {
 					DPRINTF(("%s: out slave %2.2x mute\n",
@@ -2031,7 +2127,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 				mc2.un.value.num_channels = WIDGET_CHANNELS(w);
 				mc2.un.value.level[0] = this->recvols.vol_l;
 				mc2.un.value.level[1] = this->recvols.vol_r;
-				err = azalia_generic_mixer_set(this, w->nid,
+				err = azalia_mixer_set(this, w->nid,
 				    tgt, &mc2);
 				if (err) {
 					DPRINTF(("%s: in slave %2.2x vol\n",
@@ -2058,7 +2154,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 					continue;
 				mc2.type = AUDIO_MIXER_ENUM;
 				mc2.un.ord = this->recvols.mute;
-				err = azalia_generic_mixer_set(this, w->nid,
+				err = azalia_mixer_set(this, w->nid,
 				    tgt, &mc2);
 				if (err) {
 					DPRINTF(("%s: out slave %2.2x mute\n",
@@ -2085,7 +2181,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target,
 }
 
 u_char
-azalia_generic_mixer_from_device_value(const codec_t *this, nid_t nid, int target,
+azalia_mixer_from_device_value(const codec_t *this, nid_t nid, int target,
     uint32_t dv)
 {
 	uint32_t dmax;
@@ -2106,7 +2202,7 @@ azalia_generic_mixer_from_device_value(const codec_t *this, nid_t nid, int targe
 }
 
 uint32_t
-azalia_generic_mixer_to_device_value(const codec_t *this, nid_t nid, int target,
+azalia_mixer_to_device_value(const codec_t *this, nid_t nid, int target,
     u_char uv)
 {
 	uint32_t dmax;
@@ -2127,51 +2223,22 @@ azalia_generic_mixer_to_device_value(const codec_t *this, nid_t nid, int target,
 }
 
 int
-azalia_generic_set_port(codec_t *this, mixer_ctrl_t *mc)
-{
-	const mixer_item_t *m;
-
-	if (mc->dev >= this->nmixers)
-		return ENXIO;
-	m = &this->mixers[mc->dev];
-	if (mc->type != m->devinfo.type)
-		return EINVAL;
-	if (mc->type == AUDIO_MIXER_CLASS)
-		return 0;	/* nothing to do */
-	return azalia_generic_mixer_set(this, m->nid, m->target, mc);
-}
-
-int
-azalia_generic_get_port(codec_t *this, mixer_ctrl_t *mc)
-{
-	const mixer_item_t *m;
-
-	if (mc->dev >= this->nmixers)
-		return ENXIO;
-	m = &this->mixers[mc->dev];
-	mc->type = m->devinfo.type;
-	if (mc->type == AUDIO_MIXER_CLASS)
-		return 0;	/* nothing to do */
-	return azalia_generic_mixer_get(this, m->nid, m->target, mc);
-}
-
-int
 azalia_gpio_unmute(codec_t *this, int pin)
 {
 	uint32_t data, mask, dir;
 
-	this->comresp(this, this->audiofunc, CORB_GET_GPIO_DATA, 0, &data);
-	this->comresp(this, this->audiofunc, CORB_GET_GPIO_ENABLE_MASK, 0, &mask);
-	this->comresp(this, this->audiofunc, CORB_GET_GPIO_DIRECTION, 0, &dir);
+	azalia_comresp(this, this->audiofunc, CORB_GET_GPIO_DATA, 0, &data);
+	azalia_comresp(this, this->audiofunc, CORB_GET_GPIO_ENABLE_MASK, 0, &mask);
+	azalia_comresp(this, this->audiofunc, CORB_GET_GPIO_DIRECTION, 0, &dir);
 
 	data |= 1 << pin;
 	mask |= 1 << pin;
 	dir |= 1 << pin;
 
-	this->comresp(this, this->audiofunc, CORB_SET_GPIO_ENABLE_MASK, mask, NULL);
-	this->comresp(this, this->audiofunc, CORB_SET_GPIO_DIRECTION, dir, NULL);
+	azalia_comresp(this, this->audiofunc, CORB_SET_GPIO_ENABLE_MASK, mask, NULL);
+	azalia_comresp(this, this->audiofunc, CORB_SET_GPIO_DIRECTION, dir, NULL);
 	DELAY(1000);
-	this->comresp(this, this->audiofunc, CORB_SET_GPIO_DATA, data, NULL);
+	azalia_comresp(this, this->audiofunc, CORB_SET_GPIO_DATA, data, NULL);
 
 	return 0;
 }
@@ -2203,98 +2270,44 @@ azalia_pin_config_ov(widget_t *w, int mask, int val)
 int
 azalia_codec_gpio_quirks(codec_t *this)
 {
-	if (this->vid == SIGMATEL_STAC9221 && this->subid == STAC9221_APPLE_ID) {
-		this->comresp(this, this->audiofunc, CORB_SET_GPIO_POLARITY, 0, NULL);
-		azalia_gpio_unmute(this, 0);
-		azalia_gpio_unmute(this, 1);
+	if (this->qrks & AZ_QRK_GPIO_POL_0) {
+		azalia_comresp(this, this->audiofunc,
+		    CORB_SET_GPIO_POLARITY, 0, NULL);
 	}
-	if (this->vid == REALTEK_ALC883 && this->subid == ALC883_ACER_ID) {
-		azalia_gpio_unmute(this, 0);
-		azalia_gpio_unmute(this, 1);
-	}
-	if ((this->vid == REALTEK_ALC660 && this->subid == ALC660_ASUS_G2K) ||
-	    (this->vid == REALTEK_ALC880 && this->subid == ALC880_ASUS_M5200) ||
-	    (this->vid == REALTEK_ALC880 && this->subid == ALC880_ASUS_A7M) ||
-	    (this->vid == REALTEK_ALC882 && this->subid == ALC882_ASUS_A7T) ||
-	    (this->vid == REALTEK_ALC882 && this->subid == ALC882_ASUS_W2J) ||
-	    (this->vid == REALTEK_ALC885 && this->subid == ALC885_APPLE_MB3) ||
-	    (this->vid == REALTEK_ALC885 && this->subid == ALC885_APPLE_MB4) ||
-	    (this->vid == IDT_92HD71B7 && this->subid == IDT92HD71B7_DELL_E6400) ||
-	    (this->vid == IDT_92HD71B7 && this->subid == IDT92HD71B7_DELL_E6500) ||
-	    (this->vid == SIGMATEL_STAC9205 && this->subid == STAC9205_DELL_D630) ||
-	    (this->vid == SIGMATEL_STAC9205 && this->subid == STAC9205_DELL_V1500)) {
+	if (this->qrks & AZ_QRK_GPIO_UNMUTE_0) {
 		azalia_gpio_unmute(this, 0);
 	}
-	if (this->vid == REALTEK_ALC880 && this->subid == ALC880_MEDION_MD95257) {
+	if (this->qrks & AZ_QRK_GPIO_UNMUTE_1) {
 		azalia_gpio_unmute(this, 1);
 	}
-	if (this->vid == SIGMATEL_STAC9228X && this->subid == STAC9228X_DELL_V1400) {
+	if (this->qrks & AZ_QRK_GPIO_UNMUTE_2) {
 		azalia_gpio_unmute(this, 2);
- 	}
-	return 0;
+	}
+
+	return(0);
 }
 
-/* ----------------------------------------------------------------
- * codec specific functions
- * ---------------------------------------------------------------- */
-
-/* Realtek ALC88x */
 int
-azalia_alc88x_init_widget(const codec_t *this, widget_t *w, nid_t nid)
+azalia_codec_widget_quirks(codec_t *this, nid_t nid)
 {
-	if (nid == 0x1c && w->enable == 0 && w->d.pin.device == CORB_CD_CD) {
-		azalia_pin_config_ov(w, CORB_CD_PORT_MASK, CORB_CD_FIXED);
-		w->widgetcap |= COP_AWCAP_STEREO;
-		w->enable = 1;
-	}
-	if (nid == 0x1d && w->enable == 0) {
+	widget_t *w;
+
+	w = &this->w[nid];
+
+	if (this->qrks & AZ_QRK_WID_BEEP_1D &&
+	    nid == 0x1d && w->enable == 0) {
 		azalia_pin_config_ov(w, CORB_CD_DEVICE_MASK, CORB_CD_BEEP);
 		azalia_pin_config_ov(w, CORB_CD_PORT_MASK, CORB_CD_FIXED);
 		w->widgetcap |= COP_AWCAP_STEREO;
 		w->enable = 1;
 	}
- 	return 0;
-}
 
-/* Sigmatel STAC9221 */
-int
-azalia_stac9221_init_widget(const codec_t *codec, widget_t *w, nid_t nid)
-{
-	/* Apple didn't follow the HDA spec for associations */
-	if (codec->subid == STAC9221_APPLE_ID) {
-		if (nid == 0xa &&
-		    (w->d.pin.color == CORB_CD_WHITE ||
-		    w->d.pin.color == CORB_CD_GREEN)) {
-			w->d.pin.association = 1;
-			w->d.pin.sequence = 0;
-		}
-		if (nid == 0xc && w->d.pin.device == CORB_CD_SPEAKER) {
-			w->d.pin.association = 1;
-			w->d.pin.sequence = 1;
-		}
-		if (nid == 0xf && w->d.pin.color == CORB_CD_BLUE) {
-			w->d.pin.association = 2;
-			w->d.pin.sequence = 0;
-		}
+	if (this->qrks & AZ_QRK_WID_CDIN_1C &&
+	    nid == 0x1c && w->enable == 0 && w->d.pin.device == CORB_CD_CD) {
+		azalia_pin_config_ov(w, CORB_CD_PORT_MASK, CORB_CD_FIXED);
+		w->widgetcap |= COP_AWCAP_STEREO;
+		w->enable = 1;
 	}
-	return 0;
-}
 
-/* Sigmatel STAC9225 */
-int
-azalia_stac7661_mixer_init(codec_t *this)
-{
-	mixer_ctrl_t mc;
-
-	azalia_generic_mixer_init(this);
-
-	mc.dev = -1;
-	mc.type = AUDIO_MIXER_ENUM;
-	mc.un.ord = 1;
-	/* mute ADC input (why?) */
-	azalia_generic_mixer_set(this, 0x09, MI_TARGET_INAMP(0), &mc);
-	/* select internal mic for recording */
-	mc.un.ord = 2;
-	azalia_generic_mixer_set(this, 0x15, MI_TARGET_CONNLIST, &mc);
-	return 0;
+	return(0);
 }

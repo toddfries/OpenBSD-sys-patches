@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.649 2009/01/18 04:41:26 kevlo Exp $
+#	$OpenBSD: GENERIC,v 1.661 2009/06/03 00:36:59 pirofti Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -56,13 +56,15 @@ acpiac*		at acpi?
 acpibat*	at acpi?
 acpibtn*	at acpi?
 acpicpu*	at acpi?
-#acpidock*	at acpi?
+acpidock*	at acpi?
 acpiec*		at acpi?
 acpimadt0	at acpi?
 acpiprt*	at acpi?
 acpitz*		at acpi?
 acpiasus*	at acpi?
 acpithinkpad*	at acpi?
+acpivideo*	at acpi?
+acpivout*	at acpivideo?
 
 option		PCIVERBOSE
 option		EISAVERBOSE
@@ -92,6 +94,7 @@ glxpcib* at pci?		# AMD CS5536 PCI-ISA bridge
 gpio*	at glxpcib?
 kate*	at pci?			# AMD K8 temperature sensor
 km*	at pci?			# AMD K10 temperature sensor
+amas*	at pci? disable		# AMD memory configuration
 
 # power management and other environmental stuff
 elansc*	at pci?			# AMD Elan SC520 System Controller
@@ -100,6 +103,7 @@ geodesc* at pci?		# Geode SC1100/SCx200 IAOC
 #gscpm*	at pci?			# NS Geode SC1100 SMI/ACPI module
 #ichwdt* at pci?		# Intel 6300ESB ICH watchdog timer
 wdt0	at pci?			# Ind Computer Source PCI-WDT50x driver
+berkwdt0 at pci?		# Berkshire PCI-PC Watchdog driver
 pwdog0	at pci?			# Quancom PWDOG1 watchdog timer
 
 # National Semiconductor LM7[89] and compatible hardware monitors
@@ -130,6 +134,11 @@ iic*	at amdpm?
 it*	at isa? port 0x2e		# ITE IT8705F, IT8712F, IT8716F,
 it*	at isa? port 0x4e		# IT8718F, IT8726F and SiS SiS950
 					# monitors and watchdog timer
+
+schsio*	at isa? port 0x2e		# SMSC SCH311x Super I/O
+schsio*	at isa? port 0x4e
+schsio*	at isa? port 0x162e
+schsio*	at isa? port 0x164e
 
 viaenv*	at pci?				# VIA VT82C686A hardware monitor
 viasio*	at isa? port 0x2e flags 0x0000	# VIA VT1211 LPC Super I/O
@@ -278,8 +287,10 @@ uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
+otus*	at uhub?		# Atheros AR9001U
 zyd*	at uhub?		# Zydas ZD1211
 upgt*	at uhub?		# Conexant/Intersil PrismGT SoftMAC USB
+urtw*	at uhub?		# RealTek 8187
 #option	NATM
 #ueagle* at uhub?		# Analog Devices Eagle ADSL
 udcf*	at uhub?		# Gude Expert mouseCLOCK
@@ -292,6 +303,9 @@ puc*	at pci?			# PCI "universal" communication device
 # USB Video
 uvideo* at uhub?
 video*  at uvideo?
+
+udl*		at uhub?
+wsdisplay*	at udl?
 
 sdhc*	at pci?			# SD Host Controller
 sdmmc*	at sdhc?		# SD/MMC bus
@@ -611,6 +625,7 @@ gem*	at pci?				# Sun 'gem' ethernet
 vic*	at pci?				# VMware VMXnet virtual interface
 et*	at pci?				# Agere/LSI ET1310
 age*	at pci?				# Attansic L1 Ethernet
+ale*	at pci?				# Attansic L1E Ethernet
 lii*	at pci?				# Attansic L2 Ethernet
 jme*	at pci?				# JMicron JMC250/JMC260 Ethernet
 

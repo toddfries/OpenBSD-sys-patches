@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_sis.c,v 1.10 2008/11/09 22:54:01 oga Exp $	*/
+/*	$OpenBSD: agp_sis.c,v 1.13 2009/05/10 16:57:44 oga Exp $	*/
 /*	$NetBSD: agp_sis.c,v 1.2 2001/09/15 00:25:00 thorpej Exp $	*/
 
 /*-
@@ -54,15 +54,16 @@ struct agp_sis_softc {
 	struct agp_gatt		*gatt;
 	pci_chipset_tag_t	 ssc_pc;
 	pcitag_t		 ssc_tag;
-	bus_size_t		 initial_aperture;
+	bus_addr_t		 ssc_apaddr;
+	bus_size_t		 ssc_apsize;
 };
 
 void	agp_sis_attach(struct device *, struct device *, void *);
 int	agp_sis_probe(struct device *, void *, void *);
 bus_size_t agp_sis_get_aperture(void *);
 int	agp_sis_set_aperture(void *, bus_size_t);
-int	agp_sis_bind_page(void *, off_t, bus_addr_t);
-int	agp_sis_unbind_page(void *, off_t);
+void	agp_sis_bind_page(void *, bus_addr_t, paddr_t, int);
+void	agp_sis_unbind_page(void *, bus_addr_t);
 void	agp_sis_flush_tlb(void *);
 
 struct cfattach sisagp_ca = {
@@ -74,7 +75,6 @@ struct cfdriver sisagp_cd = {
 };
 
 const struct agp_methods agp_sis_methods = {
-	agp_sis_get_aperture,
 	agp_sis_bind_page,
 	agp_sis_unbind_page,
 	agp_sis_flush_tlb,
@@ -104,13 +104,18 @@ agp_sis_attach(struct device *parent, struct device *self, void *aux)
 	struct agp_gatt		*gatt;
 	pcireg_t		 reg;
 
+	if (pci_mapreg_info(pa->pa_pc, pa->pa_tag, AGP_APBASE,
+	    PCI_MAPREG_TYPE_MEM, &ssc->ssc_apaddr, NULL, NULL) != 0) {
+		printf(": can't get aperture info\n");
+		return;
+	}
+
 	ssc->ssc_pc = pa->pa_pc;
 	ssc->ssc_tag = pa->pa_tag;
-	ssc->initial_aperture = agp_sis_get_aperture(ssc);
+	ssc->ssc_apsize = agp_sis_get_aperture(ssc);
 
 	for (;;) {
-		bus_size_t size = agp_sis_get_aperture(ssc);
-		gatt = agp_alloc_gatt(pa->pa_dmat, size);
+		gatt = agp_alloc_gatt(pa->pa_dmat, ssc->ssc_apsize);
 		if (gatt != NULL)
 			break;
 
@@ -118,7 +123,8 @@ agp_sis_attach(struct device *parent, struct device *self, void *aux)
 		 * Probably failed to alloc congigious memory. Try reducing the
 		 * aperture so that the gatt size reduces.
 		 */
-		if (agp_sis_set_aperture(ssc, size / 2)) {
+		ssc->ssc_apsize /= 2;
+		if (agp_sis_set_aperture(ssc, ssc->ssc_apsize)) {
 			printf("can't set aperture size\n");
 			return;
 		}
@@ -135,7 +141,7 @@ agp_sis_attach(struct device *parent, struct device *self, void *aux)
 	pci_conf_write(ssc->ssc_pc, ssc->ssc_tag, AGP_SIS_WINCTRL, reg);
 
 	ssc->agpdev = (struct agp_softc *)agp_attach_bus(pa, &agp_sis_methods,
-	    AGP_APBASE, PCI_MAPREG_TYPE_MEM, &ssc->dev);
+	    ssc->ssc_apaddr, ssc->ssc_apsize, &ssc->dev);
 	return;
 }
 
@@ -204,28 +210,21 @@ agp_sis_set_aperture(void *sc, bus_size_t aperture)
 	return (0);
 }
 
-int
-agp_sis_bind_page(void *sc, off_t offset, bus_addr_t physical)
+void
+agp_sis_bind_page(void *sc, bus_addr_t offset, paddr_t physical, int flags)
 {
 	struct agp_sis_softc	*ssc = sc;
 
-	if (offset < 0 || offset >= (ssc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
-
-	ssc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = physical;
-	return (0);
+	ssc->gatt->ag_virtual[(offset - ssc->ssc_apaddr) >> AGP_PAGE_SHIFT] =
+	    physical;
 }
 
-int
-agp_sis_unbind_page(void *sc, off_t offset)
+void
+agp_sis_unbind_page(void *sc, bus_addr_t offset)
 {
 	struct agp_sis_softc	*ssc = sc;
 
-	if (offset < 0 || offset >= (ssc->gatt->ag_entries << AGP_PAGE_SHIFT))
-		return (EINVAL);
-
-	ssc->gatt->ag_virtual[offset >> AGP_PAGE_SHIFT] = 0;
-	return (0);
+	ssc->gatt->ag_virtual[(offset - ssc->ssc_apaddr) >> AGP_PAGE_SHIFT] = 0;
 }
 
 void

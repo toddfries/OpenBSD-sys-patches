@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.15 2008/06/13 00:00:45 jsg Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.20 2009/06/01 03:50:57 gwk Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -48,6 +48,9 @@
 /* sysctl wants this. */
 char cpu_model[48];
 int cpuspeed;
+#ifdef CRYPTO
+int amd64_has_xcrypt;
+#endif
 
 const struct {
 	u_int32_t	bit;
@@ -129,7 +132,9 @@ intelcore_update_sensor(void *args)
 	u_int64_t msr;
 	int max = 100;
 
-	if (rdmsr(MSR_TEMPERATURE_TARGET) & MSR_TEMPERATURE_TARGET_LOW_BIT)
+	/* Only some Core family chips have MSR_TEMPERATURE_TARGET. */
+	if (ci->ci_model == 0xe &&
+	    (rdmsr(MSR_TEMPERATURE_TARGET) & MSR_TEMPERATURE_TARGET_LOW_BIT))
 		max = 85;
 
 	msr = rdmsr(MSR_THERM_STATUS);
@@ -149,6 +154,96 @@ intelcore_update_sensor(void *args)
 #endif
 
 void (*setperf_setup)(struct cpu_info *);
+
+void via_nano_setup(struct cpu_info *ci);
+
+void
+via_nano_setup(struct cpu_info *ci)
+{
+	u_int32_t regs[4], val;
+	u_int64_t msreg;
+	int model = (ci->ci_signature >> 4) & 15;
+
+	if (model >= 9) {
+		CPUID(0xC0000000, regs[0], regs[1], regs[2], regs[3]);
+		val = regs[0];
+		if (val >= 0xC0000001) {
+			CPUID(0xC0000001, regs[0], regs[1], regs[2], regs[3]);
+			val = regs[3];
+		} else
+			val = 0;
+
+		if (val & (C3_CPUID_HAS_RNG | C3_CPUID_HAS_ACE))
+			printf("%s:", ci->ci_dev->dv_xname);
+
+		/* Enable RNG if present and disabled */
+		if (val & C3_CPUID_HAS_RNG) {
+			extern int viac3_rnd_present;
+
+			if (!(val & C3_CPUID_DO_RNG)) {
+				msreg = rdmsr(0x110B);
+				msreg |= 0x40;
+				wrmsr(0x110B, msreg);
+			}
+			viac3_rnd_present = 1;
+			printf(" RNG");
+		}
+
+		/* Enable AES engine if present and disabled */
+		if (val & C3_CPUID_HAS_ACE) {
+#ifdef CRYPTO
+			if (!(val & C3_CPUID_DO_ACE)) {
+				msreg = rdmsr(0x1107);
+				msreg |= (0x01 << 28);
+				wrmsr(0x1107, msreg);
+			}
+			amd64_has_xcrypt |= C3_HAS_AES;
+#endif /* CRYPTO */
+			printf(" AES");
+		}
+
+		/* Enable ACE2 engine if present and disabled */
+		if (val & C3_CPUID_HAS_ACE2) {
+#ifdef CRYPTO
+			if (!(val & C3_CPUID_DO_ACE2)) {
+				msreg = rdmsr(0x1107);
+				msreg |= (0x01 << 28);
+				wrmsr(0x1107, msreg);
+			}
+			amd64_has_xcrypt |= C3_HAS_AESCTR;
+#endif /* CRYPTO */
+			printf(" AES-CTR");
+		}
+
+		/* Enable SHA engine if present and disabled */
+		if (val & C3_CPUID_HAS_PHE) {
+#ifdef CRYPTO
+			if (!(val & C3_CPUID_DO_PHE)) {
+				msreg = rdmsr(0x1107);
+				msreg |= (0x01 << 28/**/);
+				wrmsr(0x1107, msreg);
+			}
+			amd64_has_xcrypt |= C3_HAS_SHA;
+#endif /* CRYPTO */
+			printf(" SHA1 SHA256");
+		}
+
+		/* Enable MM engine if present and disabled */
+		if (val & C3_CPUID_HAS_PMM) {
+#ifdef CRYPTO
+			if (!(val & C3_CPUID_DO_PMM)) {
+				msreg = rdmsr(0x1107);
+				msreg |= (0x01 << 28/**/);
+				wrmsr(0x1107, msreg);
+			}
+			amd64_has_xcrypt |= C3_HAS_MM;
+#endif /* CRYPTO */
+			printf(" RSA");
+		}
+
+		printf("\n");
+	}
+}
 
 void
 identifycpu(struct cpu_info *ci)
@@ -189,6 +284,13 @@ identifycpu(struct cpu_info *ci)
 
 	if (cpu_model[0] == 0)
 		strlcpy(cpu_model, "Opteron or Athlon 64", sizeof(cpu_model));
+
+	ci->ci_family = (ci->ci_signature >> 8) & 0x0f;
+	ci->ci_model = (ci->ci_signature >> 4) & 0x0f;
+	if (ci->ci_family == 0x6 || ci->ci_family == 0xf) {
+		ci->ci_family += (ci->ci_signature >> 20) & 0xff;
+		ci->ci_model += ((ci->ci_signature >> 16) & 0x0f) << 4;
+	}
 
 	last_tsc = rdtsc();
 	delay(100000);
@@ -232,12 +334,13 @@ identifycpu(struct cpu_info *ci)
 		}
 	}
 
+	if (cpu_ecxfeature & CPUIDECX_EST) {
+		setperf_setup = est_init;
+	}
+
 	if (!strncmp(cpu_model, "Intel", 5)) {
-		if (cpu_ecxfeature & CPUIDECX_EST) {
-			setperf_setup = est_init;
-		}
-	 	CPUID(0x06, val, dummy, dummy, dummy);
-	 	if (val & 0x1) {
+		CPUID(0x06, val, dummy, dummy, dummy);
+		if (val & 0x1) {
 			strlcpy(ci->ci_sensordev.xname, ci->ci_dev->dv_xname,
 			    sizeof(ci->ci_sensordev.xname));
 			ci->ci_sensor.type = SENSOR_TEMP;
@@ -254,6 +357,9 @@ identifycpu(struct cpu_info *ci)
 	if (vendor[0] == 0x68747541 && vendor[1] == 0x69746e65 &&
 	    vendor[2] == 0x444d4163)	/* DMAc */
 		amd64_errata(ci);
+
+	if (strncmp(cpu_model, "VIA Nano processor", 18) == 0)
+		ci->cpu_setup = via_nano_setup;
 }
 
 void
