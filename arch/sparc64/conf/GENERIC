@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.234 2009/03/01 20:38:02 kettenis Exp $
+#	$OpenBSD: GENERIC,v 1.238 2009/06/02 04:34:16 kettenis Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -230,6 +230,7 @@ ural*	at uhub?		# Ralink RT2500USB
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
+zyd*	at uhub?		# Zydas ZD1211
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
@@ -283,6 +284,8 @@ sabtty* at sab?
 com*	at ebus?
 comkbd*	at ebus?
 wskbd* at comkbd? mux 1
+comms*	at ebus?
+wsmouse* at comms? mux 0
 
 # Z8530 based serial ports
 zs*	at sbus?
@@ -290,6 +293,8 @@ zs*	at fhc?
 zstty*	at zs?
 zskbd*	at zs?
 wskbd*	at zskbd? mux 1
+zsms*	at zs?
+wsmouse* at zsms? mux 0
 
 # i8042 based serial ports (PS/2 ports)
 pckbc*	at ebus?			# controller
@@ -340,6 +345,8 @@ vrng0	at vbus?
 vdsk*	at cbus?
 scsibus* at vdsk?
 vnet*	at cbus?
+vcc*	at cbus?
+vcctty*	at vcc?
 
 ## Lance Ethernet - AMD7990
 le*		at sbus?
@@ -475,6 +482,8 @@ creator*	at upa0
 wsdisplay*	at creator?
 ifb*		at pci?			# Expert3D/XVR-500 framebuffers
 wsdisplay*	at ifb?
+machfb*		at pci?			# PGX/PGX64 framebuffers
+wsdisplay*	at machfb?
 mgx*		at sbus?		# SMS MGX/MGXPlus framebuffer
 wsdisplay*	at mgx?
 raptor*		at pci?			# Raptor framebuffer

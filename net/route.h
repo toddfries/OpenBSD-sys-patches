@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.h,v 1.60 2009/03/31 01:31:26 dlg Exp $	*/
+/*	$OpenBSD: route.h,v 1.62 2009/05/26 08:29:44 reyk Exp $	*/
 /*	$NetBSD: route.h,v 1.9 1996/02/13 22:00:49 christos Exp $	*/
 
 /*
@@ -356,6 +356,7 @@ struct sockaddr_rtlabel {
 #ifdef _KERNEL
 const char	*rtlabel_id2name(u_int16_t);
 u_int16_t	 rtlabel_name2id(char *);
+struct sockaddr	*rtlabel_id2sa(u_int16_t, struct sockaddr_rtlabel *);
 void		 rtlabel_unref(u_int16_t);
 
 #define	RTFREE(rt) do {							\
@@ -430,6 +431,6 @@ void	 rt_if_track(struct ifnet *);
 int	 rtdeletemsg(struct rtentry *, u_int);
 
 struct radix_node_head	*rt_gettable(sa_family_t, u_int);
-struct radix_node	*rt_lookup(struct sockaddr *, struct sockaddr *, int);
+struct radix_node	*rt_lookup(struct sockaddr *, struct sockaddr *, u_int);
 #endif /* _KERNEL */
 #endif /* _NET_ROUTE_H_ */

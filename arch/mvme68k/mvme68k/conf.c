@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.45 2009/03/01 21:40:49 miod Exp $ */
+/*	$OpenBSD: conf.c,v 1.46 2009/06/03 14:45:52 jj Exp $ */
 
 /*-
  * Copyright (c) 1995 Theo de Raadt

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid1.c,v 1.8 2009/04/28 02:54:53 marco Exp $ */
+/* $OpenBSD: softraid_raid1.c,v 1.14 2009/06/02 21:23:11 marco Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  *
@@ -43,7 +43,39 @@
 #include <dev/softraidvar.h>
 #include <dev/rndvar.h>
 
-/* RAID 1 functions */
+/* RAID 1 functions. */
+int	sr_raid1_alloc_resources(struct sr_discipline *);
+int	sr_raid1_free_resources(struct sr_discipline *);
+int	sr_raid1_rw(struct sr_workunit *);
+void	sr_raid1_intr(struct buf *);
+void	sr_raid1_recreate_wu(struct sr_workunit *);
+
+/* Discipline initialisation. */
+void
+sr_raid1_discipline_init(struct sr_discipline *sd)
+{
+
+	/* Fill out discipline members. */
+	sd->sd_type = SR_MD_RAID1;
+	sd->sd_max_ccb_per_wu = sd->sd_meta->ssdi.ssd_chunk_no;
+	sd->sd_max_wu = SR_RAID1_NOWU;
+	sd->sd_rebuild = 1;
+
+	/* Setup discipline pointers. */
+	sd->sd_alloc_resources = sr_raid1_alloc_resources;
+	sd->sd_free_resources = sr_raid1_free_resources;
+	sd->sd_start_discipline = NULL;
+	sd->sd_scsi_inquiry = sr_raid_inquiry;
+	sd->sd_scsi_read_cap = sr_raid_read_cap;
+	sd->sd_scsi_tur = sr_raid_tur;
+	sd->sd_scsi_req_sense = sr_raid_request_sense;
+	sd->sd_scsi_start_stop = sr_raid_start_stop;
+	sd->sd_scsi_sync = sr_raid_sync;
+	sd->sd_scsi_rw = sr_raid1_rw;
+	sd->sd_set_chunk_state = sr_raid1_set_chunk_state;
+	sd->sd_set_vol_state = sr_raid1_set_vol_state;
+}
+
 int
 sr_raid1_alloc_resources(struct sr_discipline *sd)
 {
@@ -177,7 +209,7 @@ sr_raid1_set_vol_state(struct sr_discipline *sd)
 
 	for (i = 0; i < nd; i++) {
 		s = sd->sd_vol.sv_chunks[i]->src_meta.scm_status;
-		if (s > SR_MAX_STATES)
+		if (s >= SR_MAX_STATES)
 			panic("%s: %s: %s: invalid chunk state",
 			    DEVNAME(sd->sd_sc),
 			    sd->sd_meta->ssd_devname,
@@ -213,6 +245,7 @@ sr_raid1_set_vol_state(struct sr_discipline *sd)
 		case BIOC_SVONLINE: /* can go to same state */
 		case BIOC_SVOFFLINE:
 		case BIOC_SVDEGRADED:
+		case BIOC_SVREBUILD: /* happens on boot */
 			break;
 		default:
 			goto die;
@@ -250,6 +283,7 @@ sr_raid1_set_vol_state(struct sr_discipline *sd)
 		switch (new_state) {
 		case BIOC_SVONLINE:
 		case BIOC_SVOFFLINE:
+		case BIOC_SVDEGRADED:
 		case BIOC_SVREBUILD: /* can go to the same state */
 			break;
 		default:
@@ -321,6 +355,7 @@ sr_raid1_rw(struct sr_workunit *wu)
 			ccb->ccb_buf.b_iodone = sr_raid1_intr;
 		}
 
+		ccb->ccb_buf.b_flags |= B_PHYS;
 		ccb->ccb_buf.b_blkno = blk;
 		ccb->ccb_buf.b_bcount = xs->datalen;
 		ccb->ccb_buf.b_bufsize = xs->datalen;
@@ -395,6 +430,10 @@ ragain:
 	}
 
 	s = splbio();
+
+	/* rebuild io, let rebuild routine deal with it */
+	if (wu->swu_flags & SR_WUF_REBUILD)
+		goto queued;
 
 	/* current io failed, restart */
 	if (wu->swu_state == SR_WU_RESTART)
@@ -510,9 +549,16 @@ sr_raid1_intr(struct buf *bp)
 			printf("%s: wu: %p not on pending queue\n",
 			    DEVNAME(sc), wu);
 
-		/* do not change the order of these 2 functions */
-		sr_wu_put(wu);
-		sr_scsi_done(sd, xs);
+		if (wu->swu_flags & SR_WUF_REBUILD) {
+			if (wu->swu_xs->flags & SCSI_DATA_OUT) {
+				wu->swu_flags |= SR_WUF_REBUILDIOCOMP;
+				wakeup(wu);
+			}
+		} else {
+			/* do not change the order of these 2 functions */
+			sr_wu_put(wu);
+			scsi_done(xs);
+		}
 
 		if (sd->sd_sync && sd->sd_wu_pending == 0)
 			wakeup(sd);
@@ -524,8 +570,15 @@ retry:
 bad:
 	xs->error = XS_DRIVER_STUFFUP;
 	xs->flags |= ITSDONE;
-	sr_wu_put(wu);
-	sr_scsi_done(sd, xs);
+	if (wu->swu_flags & SR_WUF_REBUILD) {
+		wu->swu_flags |= SR_WUF_REBUILDIOCOMP;
+		wakeup(wu);
+	} else {
+		/* do not change the order of these 2 functions */
+		sr_wu_put(wu);
+		scsi_done(xs);
+	}
+
 	splx(s);
 }
 

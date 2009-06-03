@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs.h,v 1.38 2009/01/24 23:35:47 thib Exp $	*/
+/*	$OpenBSD: nfs.h,v 1.43 2009/06/03 03:55:23 thib Exp $	*/
 /*	$NetBSD: nfs.h,v 1.10.4.1 1996/05/27 11:23:56 fvdl Exp $	*/
 
 /*
@@ -38,11 +38,6 @@
 #ifndef _NFS_NFS_H_
 #define _NFS_NFS_H_
 
-/*
- * Tunable constants for nfs
- */
-
-#define	NFS_MAXIOVEC	34
 #define NFS_TICKINTVL	5		/* Desired time for a tick (msec) */
 #define NFS_HZ		(hz / nfs_ticks) /* Ticks/sec */
 #define	NFS_TIMEO	(1 * NFS_HZ)	/* Default timeout = 1 second */
@@ -51,15 +46,10 @@
 #define	NFS_MINIDEMTIMEO (5 * NFS_HZ)	/* Min timeout for non-idempotent ops*/
 #define	NFS_TIMEOUTMUL	2		/* Timeout/Delay multiplier */
 #define	NFS_MAXREXMIT	100		/* Stop counting after this many */
-#define	NFS_MAXWINDOW	1024		/* Max number of outstanding requests */
 #define	NFS_RETRANS	10		/* Num of retrans for soft mounts */
 #define	NFS_MAXGRPS	16		/* Max. size of groups list */
-#ifndef NFS_MINATTRTIMO
 #define	NFS_MINATTRTIMO 5		/* Attribute cache timeout in sec */
-#endif
-#ifndef NFS_MAXATTRTIMO
 #define	NFS_MAXATTRTIMO 60
-#endif
 #define	NFS_WSIZE	8192		/* Def. write data size <= 8192 */
 #define	NFS_RSIZE	8192		/* Def. read data size <= 8192 */
 #define NFS_READDIRSIZE	8192		/* Def. readdir size */
@@ -67,9 +57,8 @@
 #define	NFS_MAXRAHEAD	4		/* Max. read ahead # blocks */
 #define	NFS_MAXASYNCDAEMON 	20	/* Max. number async_daemons runable */
 #define NFS_MAXGATHERDELAY	100	/* Max. write gather delay (msec) */
-#ifndef NFS_GATHERDELAY
 #define NFS_GATHERDELAY		10	/* Default write gather delay (msec) */
-#endif
+
 /*
  * Ideally, NFS_DIRBLKSIZ should be bigger, but I've seen servers with
  * broken NFS/ethernet drivers that won't work with anything bigger (Linux..)
@@ -105,14 +94,6 @@
  * buffer cache code to say "Invalidate the block after it is written back".
  */
 #define	B_INVAFTERWRITE	B_INVAL
-
-/*
- * The IO_METASYNC flag should be implemented for local file systems.
- * (Until then, it is nothin at all.)
- */
-#ifndef IO_METASYNC
-#define IO_METASYNC	0
-#endif
 
 /*
  * Structures for the nfssvc(2) syscall. Not that anyone but nfsd and mount_nfs
@@ -238,7 +219,6 @@ struct nfsreq {
 	struct vnode	*r_vp;
 	u_int32_t	r_xid;
 	int		r_flags;	/* flags on request, see below */
-	int		r_retry;	/* max retransmission count */
 	int		r_rexmit;	/* current retrans count */
 	int		r_timer;	/* tick counter on reply */
 	int		r_procnum;	/* NFS procedure number */
@@ -259,6 +239,31 @@ extern TAILQ_HEAD(nfsreqhead, nfsreq) nfs_reqq;
 #define	R_SOCKERR	0x10		/* Fatal error on socket */
 #define	R_TPRINTFMSG	0x20		/* Did a tprintf msg. */
 #define	R_MUSTRESEND	0x40		/* Must resend request */
+
+/*
+ * On fast networks, the estimator will try to reduce the
+ * timeout lower than the latency of the server's disks,
+ * which results in too many timeouts, so cap the lower
+ * bound.
+ */
+#define NFS_MINRTO	(NFS_HZ >> 2)
+
+/*
+ * Keep the RTO from increasing to unreasonably large values
+ * when a server is not responding.
+ */
+#define NFS_MAXRTO	(20 * NFS_HZ)
+
+enum nfs_rto_timers {
+	NFS_DEFAULT_TIMER,
+	NFS_GETATTR_TIMER,
+	NFS_LOOKUP_TIMER,
+	NFS_READ_TIMER,
+	NFS_WRITE_TIMER,
+};
+#define NFS_MAX_TIMER	(NFS_WRITE_TIMER)
+
+#define NFS_INITRTT	(NFS_HZ << 3)
 
 /*
  * A list of nfssvc_sock structures is maintained with all the sockets
@@ -353,7 +358,6 @@ struct nfsrv_descript {
 	int			nd_len;		/* Length of this write */
 	int			nd_repstat;	/* Reply status */
 	u_int32_t		nd_retxid;	/* Reply xid */
-	struct timeval		nd_starttime;	/* Time RPC initiated */
 	fhandle_t		nd_fh;		/* File handle */
 	struct ucred		nd_cr;		/* Credentials */
 };

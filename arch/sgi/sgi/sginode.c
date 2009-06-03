@@ -1,4 +1,4 @@
-/*	$OpenBSD: sginode.c,v 1.2 2009/04/15 18:47:15 miod Exp $	*/
+/*	$OpenBSD: sginode.c,v 1.7 2009/05/27 19:00:19 miod Exp $	*/
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
  *
@@ -55,24 +55,26 @@
 
 int nextcpu = 0;
 
-void	kl_do_boardinfo(lboard_t *);
-void	kl_add_memory(int16_t *, unsigned int);
+void	kl_add_memory_ip27(int16_t *, unsigned int);
+void	kl_add_memory_ip35(int16_t *, unsigned int);
+
+int	kl_first_pass_board(lboard_t *, void *);
+int	kl_first_pass_comp(klinfo_t *, void *);
 
 #ifdef DEBUG
-#define	DB_PRF(x)	bios_printf x 
+#define	DB_PRF(x)	bios_printf x
 #else
 #define	DB_PRF(x)
 #endif
 
 void
-kl_scan_config(int node)
+kl_init()
 {
-	lboard_t *boardinfo;
 	kl_config_hdr_t *cfghdr;
 	u_int64_t val;
 
-	if (node == 0)
-		physmem = 0;
+	/* will be recomputed when processing memory information */
+	physmem = 0;
 
 	cfghdr = IP27_KLCONFIG_HDR(0);
 	DB_PRF(("config @%p\n", cfghdr));
@@ -88,105 +90,200 @@ kl_scan_config(int node)
         DB_PRF(("Region present %p.\n", val));
 	val = IP27_LHUB_L(PI_CALIAS_SIZE);
         DB_PRF(("Calias size %p.\n", val));
+}
 
-	for (boardinfo = IP27_KLFIRST_BOARD(0); boardinfo != NULL;
-	    boardinfo = IP27_KLNEXT_BOARD(0, boardinfo)) {
-		kl_do_boardinfo(boardinfo);
-		if (boardinfo->brd_next == NULL)
-			break;
-	}
+void
+kl_scan_config(int nasid)
+{
+	kl_scan_node(nasid, KLBRD_ANY, kl_first_pass_board, NULL);
+}
 
+void
+kl_scan_done()
+{
 	if (nextcpu > MAX_CPUS) {
 		bios_printf("%u processors found, increase MAX_CPUS\n",
 		    nextcpu);
 	}
+	ncpusfound = nextcpu;
 }
 
-void
-kl_do_boardinfo(lboard_t *boardinfo)
+/*
+ * Callback routine for the initial enumration (boards).
+ */
+int
+kl_first_pass_board(lboard_t *boardinfo, void *arg)
 {
-	klinfo_t *comp;
-	klcpu_t *cpucomp;
-	klhub_t *hubcomp;
-	klmembnk_m_t *memcomp_m;
-	klmembnk_n_t *memcomp_n;
-	struct cpuinfo *cpu;
-	int i, j;
-
-	DB_PRF(("board type %x slot %x nasid %x components %d\n",
+	DB_PRF(("%cboard type %x slot %x nasid %x nic %p components %d\n",
+	    boardinfo->struct_type & LBOARD ? 'l' : 'r',
 	    boardinfo->brd_type, boardinfo->brd_slot, boardinfo->brd_nasid,
-	    boardinfo->brd_numcompts));
+	    boardinfo->brd_nic, boardinfo->brd_numcompts));
 
-	for (i = 0; i < boardinfo->brd_numcompts; i++) {
-		comp = IP27_UNCAC_ADDR(klinfo_t *, 0, boardinfo->brd_compts[i]);
+	kl_scan_board(boardinfo, KLSTRUCT_ANY, kl_first_pass_comp, NULL);
+	return 0;
+}
 
-		switch(comp->struct_type) {
-		case KLSTRUCT_CPU:
-			cpucomp = (klcpu_t *)comp;
-			DB_PRF(("\tcpu type %x %dMhz cache %dMB speed %dMhz\n",
-			    cpucomp->cpu_prid, cpucomp->cpu_speed,
-			    cpucomp->cpu_scachesz, cpucomp->cpu_scachespeed));
+/*
+ * Callback routine for the initial enumeration (components).
+ * We are interested in cpu and memory information only, but display a few
+ * other things if option DEBUG.
+ */
+int
+kl_first_pass_comp(klinfo_t *comp, void *arg)
+{
+	struct cpuinfo *cpu;
+	klcpu_t *cpucomp;
+	klmembnk_m_t *memcomp_m;
+#ifdef DEBUG
+	klhub_t *hubcomp;
+	klmembnk_n_t *memcomp_n;
+	klxbow_t *xbowcomp;
+	int i;
+#endif
 
-			if (nextcpu < MAX_CPUS) {
-				cpu = &sys_config.cpu[nextcpu];
-				cpu->clock = cpucomp->cpu_speed * 1000000;
-				cpu->type = (cpucomp->cpu_prid >> 8) & 0xff;
-				cpu->vers_maj = (cpucomp->cpu_prid >> 4) & 0x0f;
-				cpu->vers_min = cpucomp->cpu_prid & 0x0f;
-				cpu->fptype = (cpucomp->cpu_fpirr >> 8) & 0xff;
-				cpu->fpvers_maj =
-				    (cpucomp->cpu_fpirr >> 4) & 0x0f;
-				cpu->fpvers_min = cpucomp->cpu_fpirr & 0x0f;
-				cpu->tlbsize = 64;
-			}
-			nextcpu++;
-			break;
+	switch (comp->struct_type) {
+	case KLSTRUCT_CPU:
+		cpucomp = (klcpu_t *)comp;
+		DB_PRF(("\tcpu type %x/%x %dMhz cache %dMB speed %dMhz\n",
+		    cpucomp->cpu_prid, cpucomp->cpu_fpirr, cpucomp->cpu_speed,
+		    cpucomp->cpu_scachesz, cpucomp->cpu_scachespeed));
 
-		case KLSTRUCT_HUB:
-			hubcomp = (klhub_t *)comp;
-			DB_PRF(("\thub widget %d port %d flag %d speed %dMHz\n",
-			    hubcomp->hub_info.widid,
-			    hubcomp->hub_port.port_nasid,
-			    hubcomp->hub_port.port_flag,
-			    hubcomp->hub_speed / 1000000));
-			break;
-			
-		case KLSTRUCT_MEMBNK:
-			memcomp_m = (klmembnk_m_t *)comp;
-			memcomp_n = (klmembnk_n_t *)comp;
-			DB_PRF(("\tmemory %dMB, select %x\n",
-			    memcomp_m->membnk_memsz,
-			    memcomp_m->membnk_dimm_select));
-
-			if (kl_n_mode) {
-				for (j = 0; j < MD_MEM_BANKS_N; j++) {
-					if (memcomp_n->membnk_bnksz[j] == 0)
-						continue;
-					DB_PRF(("\t\tbank %d %dMB\n",
-					    j + 1,
-					    memcomp_n->membnk_bnksz[j]));
-				}
-			} else {
-				for (j = 0; j < MD_MEM_BANKS_M; j++) {
-					if (memcomp_m->membnk_bnksz[j] == 0)
-						continue;
-					DB_PRF(("\t\tbank %d %dMB\n",
-					    j + 1,
-					    memcomp_m->membnk_bnksz[j]));
-				}
-			}
-
-			kl_add_memory(memcomp_m->membnk_bnksz,
-			     kl_n_mode ? MD_MEM_BANKS_N : MD_MEM_BANKS_M);
-
-			break;
-
-		default:
-			DB_PRF(("\tcomponent widget %d type %d\n",
-			    comp->widid, comp->struct_type));
+		if (nextcpu < MAX_CPUS) {
+			cpu = &sys_config.cpu[nextcpu];
+			cpu->clock = cpucomp->cpu_speed * 1000000;
+			cpu->type = (cpucomp->cpu_prid >> 8) & 0xff;
+			cpu->vers_maj = (cpucomp->cpu_prid >> 4) & 0x0f;
+			cpu->vers_min = cpucomp->cpu_prid & 0x0f;
+#if 0
+			cpu->fptype = (cpucomp->cpu_fpirr >> 8) & 0xff;
+#else
+			cpu->fptype = cpu->type;
+#endif
+			cpu->fpvers_maj = (cpucomp->cpu_fpirr >> 4) & 0x0f;
+			cpu->fpvers_min = cpucomp->cpu_fpirr & 0x0f;
+			cpu->tlbsize = 64;
 		}
+		nextcpu++;
+		break;
+
+	case KLSTRUCT_MEMBNK:
+		memcomp_m = (klmembnk_m_t *)comp;
+#ifdef DEBUG
+		memcomp_n = (klmembnk_n_t *)comp;
+		DB_PRF(("\tmemory %dMB, select %x flags %x\n",
+		    memcomp_m->membnk_memsz, memcomp_m->membnk_dimm_select,
+		    kl_n_mode ?
+		      memcomp_n->membnk_attr : memcomp_m->membnk_attr));
+
+		if (kl_n_mode) {
+			for (i = 0; i < MD_MEM_BANKS_N; i++) {
+				if (memcomp_n->membnk_bnksz[i] == 0)
+					continue;
+				DB_PRF(("\t\tbank %d %dMB\n",
+				    i + 1, memcomp_n->membnk_bnksz[i]));
+			}
+		} else {
+			for (i = 0; i < MD_MEM_BANKS_M; i++) {
+				if (memcomp_m->membnk_bnksz[i] == 0)
+					continue;
+				DB_PRF(("\t\tbank %d %dMB\n",
+				    i + 1, memcomp_m->membnk_bnksz[i]));
+			}
+		}
+#endif
+
+		if (sys_config.system_type == SGI_O200)
+			kl_add_memory_ip27(memcomp_m->membnk_bnksz,
+			    kl_n_mode ? MD_MEM_BANKS_N : MD_MEM_BANKS_M);
+		else
+			kl_add_memory_ip35(memcomp_m->membnk_bnksz,
+			    kl_n_mode ? MD_MEM_BANKS_N : MD_MEM_BANKS_M);
+		break;
+
+#ifdef DEBUG
+	case KLSTRUCT_HUB:
+		hubcomp = (klhub_t *)comp;
+		DB_PRF(("\thub widget %d port %d flag %d speed %dMHz\n",
+		    hubcomp->hub_info.widid, hubcomp->hub_port.port_nasid,
+		    hubcomp->hub_port.port_flag, hubcomp->hub_speed / 1000000));
+		break;
+
+	case KLSTRUCT_XBOW:
+		xbowcomp = (klxbow_t *)comp;
+		DB_PRF(("\txbow hub master link %d\n",
+		    xbowcomp->xbow_hub_master_link));
+		for (i = 0; i < MAX_XBOW_LINKS; i++) {
+			if (xbowcomp->xbow_port_info[i].port_flag &
+			    XBOW_PORT_ENABLE)
+				DB_PRF(("\t\twidget %d nasid %d flg %u\n",
+				    8 + i,
+				    xbowcomp->xbow_port_info[i].port_nasid,
+				    xbowcomp->xbow_port_info[i].port_flag));
+		}
+		break;
+
+	default:
+		DB_PRF(("\tcomponent widget %d type %d\n",
+		    comp->widid, comp->struct_type));
+		break;
+#endif
+	}
+	return 0;
+}
+
+/*
+ * Enumerate the boards of a node, and invoke a callback for those matching
+ * the given class.
+ */
+int
+kl_scan_node(int nasid, uint clss, int (*cb)(lboard_t *, void *), void *cbarg)
+{
+	lboard_t *boardinfo;
+
+	for (boardinfo = IP27_KLFIRST_BOARD(nasid); boardinfo != NULL;
+	    boardinfo = IP27_KLNEXT_BOARD(nasid, boardinfo)) {
+		if (clss == KLBRD_ANY ||
+		    (boardinfo->brd_type & IP27_BC_MASK) == clss) {
+			if ((*cb)(boardinfo, cbarg) != 0)
+				return 1;
+		}
+		if (boardinfo->brd_next == NULL)
+			break;
 	}
 
+	return 0;
+}
+
+/*
+ * Enumerate the components of a board, and invoke a callback for those
+ * matching the given type.
+ */
+int
+kl_scan_board(lboard_t *boardinfo, uint type, int (*cb)(klinfo_t *, void *),
+    void *cbarg)
+{
+	klinfo_t *comp;
+	int i;
+
+	if (!ISSET(boardinfo->struct_type, LBOARD))
+		return 0;
+
+	for (i = 0; i < boardinfo->brd_numcompts; i++) {
+		comp = IP27_UNCAC_ADDR(klinfo_t *, boardinfo->brd_nasid,
+		    boardinfo->brd_compts[i]);
+
+		if (!ISSET(comp->flags, KLINFO_ENABLED) ||
+		    ISSET(comp->flags, KLINFO_FAILED))
+			continue;
+
+		if (type != KLSTRUCT_ANY && comp->struct_type != type)
+			continue;
+
+		if ((*cb)(comp, cbarg) != 0)
+			return 1;
+	}
+
+	return 0;
 }
 
 /*
@@ -202,9 +299,12 @@ kl_get_console_base()
 
 /*
  * Process memory bank information.
+ * There are two different routines, because IP27 and IP35 do not
+ * layout memory the same way.
  */
+
 void
-kl_add_memory(int16_t *sizes, unsigned int cnt)
+kl_add_memory_ip27(int16_t *sizes, unsigned int cnt)
 {
 	int16_t nasid = 0;	/* XXX */
 	paddr_t basepa;
@@ -213,8 +313,8 @@ kl_add_memory(int16_t *sizes, unsigned int cnt)
 	struct phys_mem_desc *md;
 
 	/*
-	 * Access to each DIMM is interleaved, which cause it to map
-	 * to four banks on 128MB boundaries.
+	 * On IP27, access to each DIMM is interleaved, which cause it to
+	 * map to four banks on 128MB boundaries.
 	 * DIMMs of 128MB or smaller map everything in the first bank,
 	 * though.
 	 */
@@ -237,8 +337,8 @@ kl_add_memory(int16_t *sizes, unsigned int cnt)
 			lp = fp + np;
 
 			/*
-			 * ARCBios provided us with information on the
-			 * first 32MB, so skip them here if necessary.
+			 * We do not manage the first 32MB, so skip them here
+			 * if necessary.
 			 */
 			if (fp < atop(32 << 20)) {
 				fp = atop(32 << 20);
@@ -251,7 +351,9 @@ kl_add_memory(int16_t *sizes, unsigned int cnt)
 			/*
 			 * Walk the existing segment list to find if we
 			 * are adjacent to an existing segment, or the
-			 * next free segment to use if not.
+			 * next free segment to use if not (unless doing
+			 * this would cross the 2GB boundary we need for
+			 * 32 bit DMA memory).
 			 *
 			 * Note that since we do not know in which order
 			 * we'll find our nodes, we have to check for
@@ -263,14 +365,16 @@ kl_add_memory(int16_t *sizes, unsigned int cnt)
 				if (md->mem_first_page == 0)
 					break;
 
-				if (md->mem_first_page == lp) {
+				if (md->mem_first_page == lp &&
+				    lp != atop(2 << 30)) {
 					md->mem_first_page = fp;
 					physmem += np;
 					md = NULL;
 					break;
 				}
 
-				if (md->mem_last_page == fp) {
+				if (md->mem_last_page == fp &&
+				    fp != atop(2 << 30)) {
 					md->mem_last_page = lp;
 					physmem += np;
 					md = NULL;
@@ -280,6 +384,8 @@ kl_add_memory(int16_t *sizes, unsigned int cnt)
 			if (descno != MAXMEMSEGS && md != NULL) {
 				md->mem_first_page = fp;
 				md->mem_last_page = lp;
+				md->mem_freelist = lp <= atop(2 << 30) ?
+				    VM_FREELIST_DMA32 : VM_FREELIST_DEFAULT;
 				physmem += np;
 				md = NULL;
 			}
@@ -294,5 +400,98 @@ kl_add_memory(int16_t *sizes, unsigned int cnt)
 				    atop(np) >> 20);
 			}
 		}
+	}
+}
+
+void
+kl_add_memory_ip35(int16_t *sizes, unsigned int cnt)
+{
+	int16_t nasid = 0;	/* XXX */
+	paddr_t basepa;
+	uint32_t fp, lp, np;
+	unsigned int descno;
+	struct phys_mem_desc *md;
+
+	/*
+	 * On IP35, the smallest memory DIMMs are 256MB, and the
+	 * largest is 1GB. Memory is reported at 1GB intervals.
+	 */
+
+	basepa = nasid << (32 - kl_n_mode);
+	while (cnt-- != 0) {
+		np = *sizes++;
+		if (np != 0) {
+			DB_PRF(("memory from %p to %p (%u MB)\n",
+			    basepa, basepa + (np << 20), np));
+
+			fp = atop(basepa);
+			np = atop(np << 20);	/* MB to pages */
+			lp = fp + np;
+
+			/*
+			 * We do not manage the first 64MB, so skip them here
+			 * if necessary.
+			 */
+			if (fp < atop(64 << 20)) {
+				fp = atop(64 << 20);
+				if (fp >= lp)
+					continue;
+				np = lp - fp;
+				physmem += atop(64 << 20);
+			}
+
+			/*
+			 * Walk the existing segment list to find if we
+			 * are adjacent to an existing segment, or the
+			 * next free segment to use if not (unless doing
+			 * this would cross the 2GB boundary we need for
+			 * 32 bit DMA memory).
+			 *
+			 * Note that since we do not know in which order
+			 * we'll find our nodes, we have to check for
+			 * both boundaries, despite adding a given node's
+			 * memory in increasing pa order.
+			 */
+			for (descno = 0, md = mem_layout; descno < MAXMEMSEGS;
+			    descno++, md++) {
+				if (md->mem_first_page == 0)
+					break;
+
+				if (md->mem_first_page == lp &&
+				    lp != atop(2 << 30)) {
+					md->mem_first_page = fp;
+					physmem += np;
+					md = NULL;
+					break;
+				}
+
+				if (md->mem_last_page == fp &&
+				    fp != atop(2 << 30)) {
+					md->mem_last_page = lp;
+					physmem += np;
+					md = NULL;
+					break;
+				}
+			}
+			if (descno != MAXMEMSEGS && md != NULL) {
+				md->mem_first_page = fp;
+				md->mem_last_page = lp;
+				md->mem_freelist = lp <= atop(2 << 30) ?
+				    VM_FREELIST_DMA32 : VM_FREELIST_DEFAULT;
+				physmem += np;
+				md = NULL;
+			}
+
+			if (md != NULL) {
+				/*
+				 * We could hijack the smallest segment here.
+				 * But is it really worth doing?
+				 */
+				bios_printf("%u MB of memory could not be "
+				    "managed, increase MAXMEMSEGS\n",
+				    atop(np) >> 20);
+			}
+		}
+		basepa += 1 << 30;	/* 1 GB */
 	}
 }

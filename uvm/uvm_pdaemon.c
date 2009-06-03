@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pdaemon.c,v 1.42 2009/04/17 07:14:04 oga Exp $	*/
+/*	$OpenBSD: uvm_pdaemon.c,v 1.45 2009/06/01 19:54:02 oga Exp $	*/
 /*	$NetBSD: uvm_pdaemon.c,v 1.23 2000/08/20 10:24:14 bjh21 Exp $	*/
 
 /* 
@@ -96,9 +96,9 @@
  * local prototypes
  */
 
-static void		uvmpd_scan(void);
-static boolean_t	uvmpd_scan_inactive(struct pglist *);
-static void		uvmpd_tune(void);
+void		uvmpd_scan(void);
+boolean_t	uvmpd_scan_inactive(struct pglist *);
+void		uvmpd_tune(void);
 
 /*
  * uvm_wait: wait (sleep) for the page daemon to free some pages
@@ -143,7 +143,7 @@ uvm_wait(const char *wmsg)
 	}
 
 	uvm_lock_fpageq();
-	wakeup(&uvm.pagedaemon);		/* wake the daemon! */
+	wakeup(&uvm.pagedaemon_proc);		/* wake the daemon! */
 	msleep(&uvmexp.free, &uvm.fpageqlock, PVM | PNORELOCK, wmsg, timo);
 }
 
@@ -155,7 +155,7 @@ uvm_wait(const char *wmsg)
  * => caller must call with page queues locked
  */
 
-static void
+void
 uvmpd_tune(void)
 {
 	UVMHIST_FUNC("uvmpd_tune"); UVMHIST_CALLED(pdhist);
@@ -214,7 +214,7 @@ uvm_pageout(void *arg)
 	for (;;) {
 		uvm_lock_fpageq();
 		UVMHIST_LOG(pdhist,"  <<SLEEPING>>",0,0,0,0);
-		msleep(&uvm.pagedaemon, &uvm.fpageqlock, PVM | PNORELOCK,
+		msleep(&uvm.pagedaemon_proc, &uvm.fpageqlock, PVM | PNORELOCK,
 		    "pgdaemon", 0);
 		uvmexp.pdwoke++;
 		UVMHIST_LOG(pdhist,"  <<WOKE UP>>",0,0,0,0);
@@ -288,7 +288,7 @@ uvm_aiodone_daemon(void *arg)
 		 */
 		mtx_enter(&uvm.aiodoned_lock);
 		while ((bp = TAILQ_FIRST(&uvm.aio_done)) == NULL)
-			msleep(&uvm.aiodoned, &uvm.aiodoned_lock,
+			msleep(&uvm.aiodoned_proc, &uvm.aiodoned_lock,
 			    PVM, "aiodoned", 0);
 		/* Take the list for ourselves. */
 		TAILQ_INIT(&uvm.aio_done);
@@ -310,8 +310,8 @@ uvm_aiodone_daemon(void *arg)
 			bp = nbp;
 		}
 		uvm_lock_fpageq();
-		wakeup(free <= uvmexp.reserve_kernel ? &uvm.pagedaemon :
-		    &uvmexp.free);
+		wakeup(free <= uvmexp.reserve_kernel ?
+		    (void *)&uvm.pagedaemon_proc : (void *)&uvmexp.free);
 		uvm_unlock_fpageq();
 	}
 }
@@ -328,7 +328,7 @@ uvm_aiodone_daemon(void *arg)
  * => we return TRUE if we are exiting because we met our target
  */
 
-static boolean_t
+boolean_t
 uvmpd_scan_inactive(struct pglist *pglst)
 {
 	boolean_t retval = FALSE;	/* assume we haven't hit target */
@@ -820,35 +820,20 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			atomic_clearbits_int(&p->pg_flags, PG_BUSY|PG_WANTED);
 			UVM_PAGE_OWN(p, NULL);
 
-			/* released during I/O? */
+			/* released during I/O? Can only happen for anons */
 			if (p->pg_flags & PG_RELEASED) {
-				if (anon) {
-					/* remove page so we can get nextpg */
-					anon->an_page = NULL;
+				KASSERT(anon != NULL);
+				/* remove page so we can get nextpg */
+				anon->an_page = NULL;
 
-					simple_unlock(&anon->an_lock);
-					uvm_anfree(anon);	/* kills anon */
-					pmap_page_protect(p, VM_PROT_NONE);
-					anon = NULL;
-					uvm_lock_pageq();
-					nextpg = TAILQ_NEXT(p, pageq);
-					/* free released page */
-					uvm_pagefree(p);
-
-				} else {
-
-					/*
-					 * pgo_releasepg nukes the page and
-					 * gets "nextpg" for us.  it returns
-					 * with the page queues locked (when
-					 * given nextpg ptr).
-					 */
-
-					if (!uobj->pgops->pgo_releasepg(p,
-					    &nextpg))
-						/* uobj died after release */
-						uobj = NULL;
-				}
+				simple_unlock(&anon->an_lock);
+				uvm_anfree(anon);	/* kills anon */
+				pmap_page_protect(p, VM_PROT_NONE);
+				anon = NULL;
+				uvm_lock_pageq();
+				nextpg = TAILQ_NEXT(p, pageq);
+				/* free released page */
+				uvm_pagefree(p);
 			} else {	/* page was not released during I/O */
 				uvm_lock_pageq();
 				nextpg = TAILQ_NEXT(p, pageq);

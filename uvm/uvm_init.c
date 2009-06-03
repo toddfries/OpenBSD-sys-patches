@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_init.c,v 1.20 2009/03/20 15:19:04 oga Exp $	*/
+/*	$OpenBSD: uvm_init.c,v 1.22 2009/06/02 23:00:19 oga Exp $	*/
 /*	$NetBSD: uvm_init.c,v 1.14 2000/06/27 17:29:23 mrg Exp $	*/
 
 /*
@@ -81,10 +81,8 @@ uvm_init(void)
 	}
 
 	/*
-	 * step 1: zero the uvm structure
+	 * step 1: set up stats.
 	 */
-
-	memset(&uvm, 0, sizeof(uvm));
 	averunnable.fscale = FSCALE;
 
 	/*
@@ -150,7 +148,6 @@ uvm_init(void)
 	 * of kernel objects.
 	 */
 
-	uvm_page_rehash();
 	uao_create(VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS,
 	    UAO_FLAG_KERNSWAP);
 

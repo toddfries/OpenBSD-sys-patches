@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.64 2009/04/25 20:38:32 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.70 2009/05/28 18:03:55 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -63,7 +63,6 @@
 
 #include <machine/cpu.h>
 #include <machine/frame.h>
-#include <machine/psl.h>
 #include <machine/autoconf.h>
 #include <machine/memconf.h>
 #include <machine/regnum.h>
@@ -80,8 +79,6 @@
 #include <machine/bus.h>
 
 extern char kernel_text[];
-extern int makebootdev(const char *, int);
-extern void stacktrace(void);
 extern bus_addr_t comconsaddr;
 
 #ifdef DEBUG
@@ -119,7 +116,6 @@ int	ncpu = 1;		/* At least one CPU in the system. */
 struct	user *proc0paddr;
 struct	user *curprocpaddr;
 int	console_ok;		/* Set when console initialized. */
-int	bootdriveoffs = 0;
 int	kbd_reset;
 
 int32_t *environment;
@@ -132,18 +128,19 @@ caddr_t	ekern;
 
 struct phys_mem_desc mem_layout[MAXMEMSEGS];
 
-void crime_configure_memory(void);
-
-caddr_t mips_init(int, void *, caddr_t);
-void initcpu(void);
-void dumpsys(void);
-void dumpconf(void);
-caddr_t allocsys(caddr_t);
-
-void db_command_loop(void);
+caddr_t	mips_init(int, void *, caddr_t);
+void	initcpu(void);
+void	dumpsys(void);
+void	dumpconf(void);
+caddr_t	allocsys(caddr_t);
 
 static void dobootopts(int, void *);
 static int atoi(const char *, int, const char **);
+
+void	arcbios_halt(int);
+void	build_trampoline(vaddr_t, vaddr_t);
+
+void	(*md_halt)(int) = arcbios_halt;
 
 /*
  * Do all the stuff that locore normally does before calling main().
@@ -157,11 +154,14 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	int i;
 	caddr_t sd;
 	u_int cputype;
+	vaddr_t tlb_handler, xtlb_handler;
 	extern char start[], edata[], end[];
-	extern char tlb_miss_tramp[], e_tlb_miss_tramp[];
-	extern char xtlb_miss_tramp[], e_xtlb_miss_tramp[];
 	extern char exception[], e_exception[];
 	extern char *hw_vendor, *hw_prod;
+	extern void tlb_miss;
+	extern void tlb_miss_err_r5k;
+	extern void xtlb_miss;
+	extern void xtlb_miss_err_r5k;
 
 	/*
 	 * Make sure we can access the extended address space.
@@ -302,13 +302,15 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	dobootopts(argc, argv);
 
 	/*
-	 * Figure out where we booted from.
+	 * Figure out where we supposedly booted from.
 	 */
 	cp = Bios_GetEnvironmentVariable("OSLoadPartition");
 	if (cp == NULL)
 		cp = "unknown";
-	if (makebootdev(cp, bootdriveoffs))
-		bios_printf("Boot device unrecognized: '%s'\n", cp);
+	if (strlcpy(osloadpartition, cp, sizeof osloadpartition) >=
+	    sizeof osloadpartition)
+		bios_printf("Value of `OSLoadPartition' is too large.\n"
+		 "The kernel might not be able to find out its root device.\n");
 
 	/*
 	 * Read platform-specific environment variables.
@@ -336,6 +338,7 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	for (i = 0; i < MAXMEMSEGS && mem_layout[i].mem_first_page != 0; i++) {
 		u_int32_t fp, lp;
 		u_int32_t firstkernpage, lastkernpage;
+		unsigned int freelist;
 		paddr_t firstkernpa, lastkernpa;
 
 		if (IS_XKPHYS((vaddr_t)start))
@@ -352,13 +355,14 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 
 		fp = mem_layout[i].mem_first_page;
 		lp = mem_layout[i].mem_last_page;
+		freelist = mem_layout[i].mem_freelist;
 
 		/* Account for kernel and kernel symbol table. */
 		if (fp >= firstkernpage && lp < lastkernpage)
 			continue;	/* In kernel. */
 
 		if (lp < firstkernpage || fp > lastkernpage) {
-			uvm_page_physload(fp, lp, fp, lp, VM_FREELIST_DEFAULT);
+			uvm_page_physload(fp, lp, fp, lp, freelist);
 			continue;	/* Outside kernel. */
 		}
 
@@ -368,11 +372,11 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 			lp = firstkernpage;
 		else { /* Need to split! */
 			u_int32_t xp = firstkernpage;
-			uvm_page_physload(fp, xp, fp, xp, VM_FREELIST_DEFAULT);
+			uvm_page_physload(fp, xp, fp, xp, freelist);
 			fp = lastkernpage;
 		}
 		if (lp > fp)
-			uvm_page_physload(fp, lp, fp, lp, VM_FREELIST_DEFAULT);
+			uvm_page_physload(fp, lp, fp, lp, freelist);
 	}
 
 
@@ -476,8 +480,7 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 
 	/*
 	 * Last chance to call the BIOS. Wiping the TLB means the BIOS' data
-	 * areas are demapped on most systems. O2s are okay as they do not have 
-	 * mapped BIOS text or data.
+	 * areas are demapped on most systems.
 	 */
 	delay(20*1000);		/* Let any UART FIFO drain... */
 
@@ -485,17 +488,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	tlb_set_wired(0);
 	tlb_flush(sys_config.cpu[0].tlbsize);
 	tlb_set_wired(sys_config.cpu[0].tlbwired);
-
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
-	/*
-	 * If an IP27 or IP35 system set up Node 0's HUB.
-	 */
-	if (sys_config.system_type == SGI_O200 ||
-	    sys_config.system_type == SGI_O300) {
-		IP27_LHUB_S(PI_REGION_PRESENT, 1);
-		IP27_LHUB_S(PI_CALIAS_SIZE, PI_CALIAS_SIZE_0);
-	}
-#endif
 
 	/*
 	 * Get a console, very early but after initial mapping setup.
@@ -532,12 +524,36 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	/*
 	 * Copy down exception vector code.
 	 */
-	bcopy(tlb_miss_tramp, (char *)TLB_MISS_EXC_VEC,
-	    e_tlb_miss_tramp - tlb_miss_tramp);
-	bcopy(xtlb_miss_tramp, (char *)XTLB_MISS_EXC_VEC,
-	    e_xtlb_miss_tramp - xtlb_miss_tramp);
 	bcopy(exception, (char *)CACHE_ERR_EXC_VEC, e_exception - exception);
 	bcopy(exception, (char *)GEN_EXC_VEC, e_exception - exception);
+
+	/*
+	 * Build proper TLB refill handler trampolines.
+	 */
+	switch (cputype) {
+	case MIPS_R5000:
+		/*
+		 * R5000 processors need a specific chip bug workaround
+		 * in their tlb handlers.  Theoretically only revision 1
+		 * of the processor need it, but there is evidence
+		 * later versions also need it.
+		 *
+		 * This is also necessary on RM52x0; we test on the `rounded'
+		 * cputype value instead of sys_config.cpu[0].type; this
+		 * causes RM7k and RM9k to be included, just to be on the
+		 * safe side.
+		 */
+		tlb_handler = (vaddr_t)&tlb_miss_err_r5k;
+		xtlb_handler = (vaddr_t)&xtlb_miss_err_r5k;
+		break;
+	default:
+		tlb_handler = (vaddr_t)&tlb_miss;
+		xtlb_handler = (vaddr_t)&xtlb_miss;
+		break;
+	}
+
+	build_trampoline(TLB_MISS_EXC_VEC, tlb_handler);
+	build_trampoline(XTLB_MISS_EXC_VEC, xtlb_handler);
 
 	/*
 	 * Turn off bootstrap exception vectors.
@@ -584,6 +600,72 @@ allocsys(caddr_t v)
 	return(v);
 }
 
+/*
+ * Build a tlb trampoline
+ */
+void
+build_trampoline(vaddr_t addr, vaddr_t dest)
+{
+	const uint32_t insns[] = {
+		0x3c1a0000,	/* lui k0, imm16 */
+		0x675a0000,	/* daddiu k0, k0, imm16 */
+		0x001ad438,	/* dsll k0, k0, 0x10 */
+		0x675a0000,	/* daddiu k0, k0, imm16 */
+		0x001ad438,	/* dsll k0, k0, 0x10 */
+		0x675a0000,	/* daddiu k0, k0, imm16 */
+		0x03400008,	/* jr k0 */
+		0x00000000	/* nop */
+	};
+	uint32_t *dst = (uint32_t *)addr;
+	const uint32_t *src = insns;
+	uint32_t a, b, c, d;
+
+	/*
+	 * Decompose the handler address in the four components which,
+	 * added with sign extension, will produce the correct address.
+	 */
+	d = dest & 0xffff;
+	dest >>= 16;
+	if (d & 0x8000)
+		dest++;
+	c = dest & 0xffff;
+	dest >>= 16;
+	if (c & 0x8000)
+		dest++;
+	b = dest & 0xffff;
+	dest >>= 16;
+	if (b & 0x8000)
+		dest++;
+	a = dest & 0xffff;
+
+	/*
+	 * Build the trampoline, skipping noop computations.
+	 */
+	*dst++ = *src++ | a;
+	if (b != 0)
+		*dst++ = *src++ | b;
+	else
+		src++;
+	*dst++ = *src++;
+	if (c != 0)
+		*dst++ = *src++ | c;
+	else
+		src++;
+	*dst++ = *src++;
+	if (d != 0)
+		*dst++ = *src++ | d;
+	else
+		src++;
+	*dst++ = *src++;
+	*dst++ = *src++;
+
+	/*
+	 * Note that we keep the delay slot instruction a nop, instead
+	 * of branching to the second instruction of the handler and
+	 * having its first instruction in the delay slot, so that the
+	 * tlb handler is free to use k0 immediately.
+	 */
+}
 
 /*
  * Decode boot options.
@@ -829,11 +911,6 @@ boot(int howto)
 	if (curproc)
 		savectx(curproc->p_addr, 0);
 
-#ifdef DEBUG
-	if (panicstr)
-		stacktrace();
-#endif
-
 	if (cold) {
 		/*
 		 * If the system is cold, just halt, unless the user
@@ -877,24 +954,31 @@ haltsys:
 	doshutdownhooks();
 
 	if (howto & RB_HALT) {
-		if (howto & RB_POWERDOWN) {
+		if (howto & RB_POWERDOWN)
 			printf("System Power Down.\n");
-			delay(1000000);
-			Bios_PowerDown();
-		} else {
+		else
 			printf("System Halt.\n");
-			delay(1000000);
-			Bios_EnterInteractiveMode();
-		}
-		printf("Didn't want to die!!! Reset manually.\n");
-	} else {
+	} else
 		printf("System restart.\n");
-		delay(1000000);
-		Bios_Reboot();
-		printf("Restart failed!!! Reset manually.\n");
-	}
+
+	delay(1000000);
+	md_halt(howto);
+
+	printf("Failed!!! Please reset manually.\n");
 	for (;;) ;
 	/*NOTREACHED*/
+}
+
+void
+arcbios_halt(int howto)
+{
+	if (howto & RB_HALT) {
+		if (howto & RB_POWERDOWN)
+			Bios_PowerDown();
+		else
+			Bios_EnterInteractiveMode();
+	} else
+		Bios_Reboot();
 }
 
 u_long	dumpmag = 0x8fca0101;	/* Magic number for savecore. */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.90 2009/04/30 01:16:56 dlg Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.92 2009/06/02 03:04:54 jordan Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -147,6 +147,13 @@ extern int db_console;
 
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;
+
+/*
+ * switchto vectors
+ */
+void (*cpu_idle_leave_fcn)(void) = NULL;
+void (*cpu_idle_cycle_fcn)(void) = NULL;
+void (*cpu_idle_enter_fcn)(void) = NULL;
 
 /* the following is used externally for concurrent handlers */
 int setperf_prio = 0;
@@ -1171,6 +1178,7 @@ cpu_init_extents(void)
 {
 	extern struct extent *iomem_ex;
 	static int already_done;
+	int i;
 
 	/* We get called for each CPU, only first should do this */
 	if (already_done)
@@ -1178,20 +1186,16 @@ cpu_init_extents(void)
 
 	/*
 	 * Allocate the physical addresses used by RAM from the iomem
-	 * extent map.  This is done before the addresses are
-	 * page rounded just to make sure we get them all.
+	 * extent map.
 	 */
-	if (extent_alloc_region(iomem_ex, 0, KBTOB(biosbasemem),
-	    EX_NOWAIT)) {
-		/* XXX What should we do? */
-		printf("WARNING: CAN'T ALLOCATE BASE MEMORY FROM "
-		    "IOMEM EXTENT MAP!\n");
-	}
-	if (extent_alloc_region(iomem_ex, IOM_END, KBTOB(biosextmem),
-	    EX_NOWAIT)) {
-		/* XXX What should we do? */
-		printf("WARNING: CAN'T ALLOCATE EXTENDED MEMORY FROM "
-		    "IOMEM EXTENT MAP!\n");
+	for (i = 0; i < mem_cluster_cnt; i++) {
+		if (extent_alloc_region(iomem_ex, mem_clusters[i].start,
+		    mem_clusters[i].size, EX_NOWAIT)) {
+			/* XXX What should we do? */
+			printf("WARNING: CAN'T ALLOCATE RAM (%lx-%lx)"
+			    " FROM IOMEM EXTENT MAP!\n", mem_clusters[i].start,
+			    mem_clusters[i].start + mem_clusters[i].size - 1);
+		}
 	}
 
 	already_done = 1;
@@ -1366,6 +1370,8 @@ init_x86_64(paddr_t first_avail)
 		/* Nuke page zero */
 		if (s1 < avail_start) {
 			s1 = avail_start;
+			if (s1 > e1)
+				continue;
 		}
 
 		/* Crop to fit below 4GB for now */

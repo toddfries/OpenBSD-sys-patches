@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.66 2008/12/24 19:32:02 marco Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.70 2009/06/02 19:15:58 marco Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -215,6 +215,7 @@ extern u_int32_t		sr_debug;
 #define	SR_MAX_CMDS		16
 #define	SR_MAX_STATES		7
 #define SR_VM_IGNORE_DIRTY	1
+#define SR_REBUILD_IO_SIZE	128 /* blocks */
 
 /* forward define to prevent dependency goo */
 struct sr_softc;
@@ -253,6 +254,10 @@ struct sr_workunit {
 #define SR_WU_PENDING		6
 #define SR_WU_RESTART		7
 #define SR_WU_REQUEUE		8
+
+	int			swu_flags;	/* additional hints */
+#define SR_WUF_REBUILD		(1<<0)
+#define SR_WUF_REBUILDIOCOMP	(1<<1)
 
 	int			swu_fake;	/* faked wu */
 	/* workunit io range */
@@ -399,6 +404,9 @@ struct sr_discipline {
 
 	struct sr_workunit	*sd_wu;		/* all workunits */
 	u_int32_t		sd_max_wu;
+	int			sd_rebuild;	/* can we rebuild? */
+	int			sd_reb_active;	/* rebuild in progress */
+	int			sd_going_down;	/* dive dive dive */
 
 	struct sr_wu_list	sd_wu_freeq;	/* free wu queue */
 	struct sr_wu_list	sd_wu_pendq;	/* pending wu queue */
@@ -425,6 +433,9 @@ struct sr_discipline {
 	int			(*sd_scsi_inquiry)(struct sr_workunit *);
 	int			(*sd_scsi_read_cap)(struct sr_workunit *);
 	int			(*sd_scsi_req_sense)(struct sr_workunit *);
+
+	/* background operation */
+	struct proc		*sd_background_proc;
 };
 
 struct sr_softc {
@@ -477,41 +488,23 @@ int			sr_raid_start_stop(struct sr_workunit *);
 int			sr_raid_sync(struct sr_workunit *);
 void			sr_raid_startwu(struct sr_workunit *);
 
-/* raid 0 */
-int			sr_raid0_alloc_resources(struct sr_discipline *);
-int			sr_raid0_free_resources(struct sr_discipline *);
-int			sr_raid0_rw(struct sr_workunit *);
-void			sr_raid0_intr(struct buf *);
-void			sr_raid0_set_chunk_state(struct sr_discipline *,
-			    int, int);
-void			sr_raid0_set_vol_state(struct sr_discipline *);
+/* Discipline specific initialisation. */
+void			sr_raid0_discipline_init(struct sr_discipline *);
+void			sr_raid1_discipline_init(struct sr_discipline *);
+void			sr_crypto_discipline_init(struct sr_discipline *);
+void			sr_aoe_discipline_init(struct sr_discipline *);
+void			sr_aoe_server_discipline_init(struct sr_discipline *);
 
 /* raid 1 */
-int			sr_raid1_alloc_resources(struct sr_discipline *);
-int			sr_raid1_free_resources(struct sr_discipline *);
-int			sr_raid1_rw(struct sr_workunit *);
-void			sr_raid1_intr(struct buf *);
-void			sr_raid1_recreate_wu(struct sr_workunit *);
+/* XXX - currently (ab)used by AOE and CRYPTO. */
 void			sr_raid1_set_chunk_state(struct sr_discipline *,
 			    int, int);
 void			sr_raid1_set_vol_state(struct sr_discipline *);
 
-/* crypto discipline */
-int			sr_crypto_alloc_resources(struct sr_discipline *);
-int			sr_crypto_free_resources(struct sr_discipline *);
-int			sr_crypto_rw(struct sr_workunit *);
+/* Crypto discipline hooks. */
 int			sr_crypto_get_kdf(struct bioc_createraid *,
 			    struct sr_discipline *);
 int			sr_crypto_create_keys(struct sr_discipline *);
-
-/* aoe discipline */
-int			sr_aoe_alloc_resources(struct sr_discipline *);
-int			sr_aoe_free_resources(struct sr_discipline *);
-int			sr_aoe_rw(struct sr_workunit *);
-/* aoe target */
-int			sr_aoe_server_alloc_resources(struct sr_discipline *);
-int			sr_aoe_server_free_resources(struct sr_discipline *);
-int			sr_aoe_server_start(struct sr_discipline *);
 
 #ifdef SR_DEBUG
 void			sr_dump_mem(u_int8_t *, int);

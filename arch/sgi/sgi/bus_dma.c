@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.10 2009/04/20 00:42:06 oga Exp $ */
+/*	$OpenBSD: bus_dma.c,v 1.13 2009/05/24 17:31:07 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -40,6 +40,7 @@
 #include <machine/autoconf.h>
 
 #include <machine/bus.h>
+#include <sgi/sgi/ip30.h>
 
 /*
  * Common function for DMA map creation.  May be called by bus-specific
@@ -171,7 +172,7 @@ _dmamap_load(t, map, buf, buflen, p, flags)
 			map->dm_segs[seg].ds_addr =
 			    (*t->_pa_to_device)(curaddr);
 			map->dm_segs[seg].ds_len = sgsize;
-			map->dm_segs[seg].ds_vaddr = (vaddr_t)vaddr;
+			map->dm_segs[seg]._ds_vaddr = (vaddr_t)vaddr;
 			first = 0;
 		} else {
 			if (curaddr == lastaddr &&
@@ -187,7 +188,7 @@ _dmamap_load(t, map, buf, buflen, p, flags)
 				map->dm_segs[seg].ds_addr =
 				    (*t->_pa_to_device)(curaddr);
 				map->dm_segs[seg].ds_len = sgsize;
-				map->dm_segs[seg].ds_vaddr = (vaddr_t)vaddr;
+				map->dm_segs[seg]._ds_vaddr = (vaddr_t)vaddr;
 			}
 		}
 
@@ -248,7 +249,7 @@ _dmamap_load_mbuf(t, map, m, flags)
 			}
 			map->dm_segs[i].ds_addr =
 			    (*t->_pa_to_device)(pa);
-			map->dm_segs[i].ds_vaddr = vaddr;
+			map->dm_segs[i]._ds_vaddr = vaddr;
 			map->dm_segs[i].ds_len = incr;
 			i++;
 			vaddr += incr;
@@ -370,7 +371,7 @@ _dmamap_sync(t, map, addr, size, op)
 		bus_size_t ssize;
 
 		ssize = map->dm_segs[curseg].ds_len;
-		vaddr = map->dm_segs[curseg].ds_vaddr;
+		vaddr = map->dm_segs[curseg]._ds_vaddr;
 
 		if (addr != 0) {
 			if (addr >= ssize) {
@@ -439,8 +440,8 @@ _dmamem_alloc(t, size, alignment, boundary, segs, nsegs, rsegs, flags)
 	int *rsegs;
 	int flags;
 {
-	return (_dmamem_alloc_range(t, size, alignment, boundary,
-	    segs, nsegs, rsegs, flags, (paddr_t)0, (paddr_t)-1));
+	return _dmamem_alloc_range(t, size, alignment, boundary,
+	    segs, nsegs, rsegs, flags, (vaddr_t)0, (vaddr_t)-1);
 }
 
 /*
@@ -492,13 +493,16 @@ _dmamem_map(t, segs, nsegs, size, kvap, flags)
 	bus_addr_t addr;
 	int curseg;
 
+#ifdef TGT_COHERENT
+	if (ISSET(flags, BUS_DMA_COHERENT))
+		CLR(flags, BUS_DMA_COHERENT);
+#endif
+
 	if (nsegs == 1) {
 		pa = (*t->_device_to_pa)(segs[0].ds_addr);
-#ifndef TGT_COHERENT
 		if (flags & BUS_DMA_COHERENT)
 			*kvap = (caddr_t)PHYS_TO_UNCACHED(pa);
 		else
-#endif
 			*kvap = (caddr_t)PHYS_TO_XKPHYS(pa, CCA_CACHED);
 		return (0);
 	}
@@ -520,10 +524,8 @@ _dmamem_map(t, segs, nsegs, size, kvap, flags)
 			pmap_enter(pmap_kernel(), va, pa,
 			    VM_PROT_READ | VM_PROT_WRITE,
 			    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
-			segs[curseg].ds_vaddr = va;
 
-			if (flags & BUS_DMA_COHERENT &&
-			    sys_config.system_type == SGI_O2)
+			if (flags & BUS_DMA_COHERENT)
 				pmap_page_cache(PHYS_TO_VM_PAGE(pa),
 				    PV_UNCACHED);
 		}
@@ -641,7 +643,7 @@ _dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	m = TAILQ_NEXT(m, pageq);
 
 	for (; m != TAILQ_END(&mlist); m = TAILQ_NEXT(m, pageq)) {
-		curaddr = (*t->_pa_to_device)(VM_PAGE_TO_PHYS(m));
+		curaddr = VM_PAGE_TO_PHYS(m);
 #ifdef DIAGNOSTIC
 		if (curaddr < low || curaddr >= high) {
 			printf("vm_page_alloc_memory returned non-sensical"
@@ -649,6 +651,7 @@ _dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 			panic("_dmamem_alloc_range");
 		}
 #endif
+		curaddr = (*t->_pa_to_device)(curaddr);
 		if (curaddr == (lastaddr + PAGE_SIZE))
 			segs[curseg].ds_len += PAGE_SIZE;
 		else {

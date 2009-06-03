@@ -1,4 +1,4 @@
-/*	$OpenBSD: envyvar.h,v 1.7 2009/04/25 12:15:10 ratchov Exp $	*/
+/*	$OpenBSD: envyvar.h,v 1.12 2009/05/08 16:53:45 ratchov Exp $	*/
 /*
  * Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
  *
@@ -31,17 +31,24 @@ struct envy_buf {
 	size_t			size;
 };
 
+struct envy_codec {
+	char *name;
+	int (*ndev)(struct envy_softc *);
+	void (*devinfo)(struct envy_softc *, struct mixer_devinfo *, int);
+	void (*get)(struct envy_softc *, struct mixer_ctrl *, int);
+	int (*set)(struct envy_softc *, struct mixer_ctrl *, int);
+};
+
 struct envy_card {
 	int subid;
 	char *name;
-	int nadc, ndac;
+	int nich;
+	struct envy_codec *adc;
+	int noch;
+	struct envy_codec *dac;
 	void (*init)(struct envy_softc *);
-	void (*ak_write)(struct envy_softc *, int, int, int);
+	void (*codec_write)(struct envy_softc *, int, int, int);
 	unsigned char *eeprom;
-};
-
-struct envy_ak {
-	unsigned char reg[16];
 };
 
 struct envy_softc {
@@ -60,7 +67,7 @@ struct envy_softc {
 	bus_space_handle_t      mt_ioh;
 	bus_size_t		mt_iosz;
 	struct envy_card       *card;
-	struct envy_ak		ak[4];
+	unsigned char 		shadow[4][16];
 #define ENVY_EEPROM_MAXSZ 32
 	unsigned char		eeprom[ENVY_EEPROM_MAXSZ];
 	void (*iintr)(void *);
@@ -72,12 +79,10 @@ struct envy_softc {
 #define ENVY_MIX_CLASSIN	0
 #define ENVY_MIX_CLASSOUT	1
 #define ENVY_MIX_CLASSMON	2
-#define ENVY_MIX_OUTSRC		3
-#define ENVY_MIX_MONITOR	13
-#define ENVY_MIX_ILVL(nak)	33
-#define ENVY_MIX_OLVL(nak)	(ENVY_MIX_ILVL(nak) + 2 * (nak))
-#define ENVY_MIX_OMUTE(nak)	(ENVY_MIX_OLVL(nak) + 2 * (nak))
-#define ENVY_MIX_INVAL(nak)	(ENVY_MIX_OMUTE(nak) + (nak))
+
+#define ENVY_MIX_NCLASS		3
+#define ENVY_MIX_NOUTSRC	10
+#define ENVY_MIX_NMONITOR	20
 
 #define ENVY_MIX_OUTSRC_LINEIN	0
 #define ENVY_MIX_OUTSRC_SPDIN	8

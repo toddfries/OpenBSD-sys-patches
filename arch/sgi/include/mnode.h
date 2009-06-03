@@ -1,4 +1,4 @@
-/*	$OpenBSD: mnode.h,v 1.1 2009/04/13 21:17:54 miod Exp $ */
+/*	$OpenBSD: mnode.h,v 1.5 2009/05/28 18:02:41 miod Exp $ */
 
 /*
  * Copyright (c) 2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -145,6 +145,7 @@ typedef struct kl_config_hdr {
 #define IP27_KLNEXT_BOARD(n, board) \
 	IP27_UNCAC_ADDR(lboard_t *, n, board->brd_next)
 #define	MAX_COMPTS_PER_BRD	24
+
 typedef struct lboard_s {
 	klconf_off_t	brd_next;	/* Next BOARD */
 	uint8_t		struct_type;	/* type, local or remote */
@@ -173,6 +174,9 @@ typedef struct lboard_s {
 	char		brd_name[32];
 } lboard_t;
 
+#define	LBOARD	0x01
+#define	RBOARD	0x02
+
 /* Definitions of board type and class */
 #define	IP27_BC_MASK	0xf0
 #define	IP27_BC_NODE	0x10
@@ -187,6 +191,11 @@ typedef struct lboard_s {
 #define	IP27_BT_CPU	0x01
 #define	IP27_BT_BASEIO	0x01
 #define	IP27_BT_MPLANE8	0x01
+
+#define	IP27_BRD_BASEIO		(IP27_BC_IO | IP27_BT_BASEIO)
+#define	IP27_BRD_IBRICK		(IP27_BC_BRICK | 0x01)
+#define	IP27_BRD_PBRICK		(IP27_BC_BRICK | 0x02)
+#define	IP27_BRD_XBRICK		(IP27_BC_BRICK | 0x03)
 
 
 /* Component info. Common info about a component. */
@@ -211,15 +220,11 @@ typedef struct klinfo_s {                  /* Generic info */
 	unsigned short  pad4;             /* klbri_t */
 } klinfo_t;
 
-#define KLCONFIG_INFO_ENABLED(_i)       ((_i)->flags & KLINFO_ENABLE)
+#define	KLINFO_ENABLED	0x01
+#define	KLINFO_FAILED	0x02
+
 /*
- * Component structures.
- * Following are the currently identified components:
- *  CPU, HUB, MEM_BANK,
- *  XBOW(consists of 16 WIDGETs, each of which can be HUB or GRAPHICS or BRIDGE)
- *  BRIDGE, IOC3, SuperIO, SCSI, FDDI
- *  ROUTER
- *  GRAPHICS
+ * Component structure types.
  */
 #define	KLSTRUCT_UNKNOWN	0
 #define	KLSTRUCT_CPU		1
@@ -241,11 +246,28 @@ typedef struct klinfo_s {                  /* Generic info */
 #define	KLSTRUCT_HUB_UART	17
 #define	KLSTRUCT_IOC3ENET	18
 #define	KLSTRUCT_IOC3UART	19
-#define	KLSTRUCT_UNUSED		20 /* XXX UNUSED */
+#define	KLSTRUCT_UNUSED		20
 #define	KLSTRUCT_IOC3PCKM	21
 #define	KLSTRUCT_RAD		22
 #define	KLSTRUCT_HUB_TTY	23
 #define	KLSTRUCT_IOC3_TTY	24
+/* new IP35 values */
+#define	KLSTRUCT_FIBERCHANNEL	25
+#define	KLSTRUCT_MOD_SERIAL_NUM	26
+#define	KLSTRUCT_IOC3MS		27
+#define	KLSTRUCT_TPU		28
+#define	KLSTRUCT_GSN_A		29
+#define	KLSTRUCT_GSN_B		30
+#define	KLSTRUCT_XTHD		31
+#define	KLSTRUCT_QLFIBRE	32
+#define	KLSTRUCT_FIREWIRE	33
+#define	KLSTRUCT_USB		34
+#define	KLSTRUCT_USBKBD		35
+#define	KLSTRUCT_USBMS		36
+#define	KLSTRUCT_SCSI2		37
+#define	KLSTRUCT_PEBRICK	38
+#define	KLSTRUCT_GIGENET	39
+#define	KLSTRUCT_IDE		40
 
 typedef struct klport_s {
 	int16_t		port_nasid;
@@ -292,6 +314,19 @@ typedef struct klmembnk_n_s {
         int16_t		membnk_attr;
 } klmembnk_n_t;
 
+/* KLSTRUCT_XBOW: Xbow */
+#define	MAX_XBOW_LINKS	16
+typedef struct klxbow_s {
+	klinfo_t	xbow_info;
+	klport_t	xbow_port_info[MAX_XBOW_LINKS];	/* Module number */
+	int		xbow_hub_master_link;
+} klxbow_t;
+
+/* xbow_port_info.port_flag bits */
+#define	XBOW_PORT_IO		0x01
+#define	XBOW_PORT_HUB		0x02
+#define	XBOW_PORT_ENABLE	0x04
+
 /* KLSTRUCT_IOC3: Basic I/O Controller */
 typedef struct klioc3_s {
 	klinfo_t	ioc3_info;
@@ -309,6 +344,21 @@ typedef struct klttydev_s {
 	klinfo_t        ttydev_info;
 	struct terminal_data *ttydev_cfg;	/* driver fills up this */
 } klttydev_t;
+
+/*  KLNMI header addressed by IP27_KLNMI_HDR(node) */
+#define IP27_KLNMI_HDR(n) \
+	IP27_UNCAC_ADDR(kl_nmi_t *, n, IP27_KLD_NMI(n)->offset)
+
+#define	NMI_MAGIC	0x0048414d4d455201	/* \x00HAMMER\x01 */
+
+typedef struct kl_nmi {
+	uint64_t	magic;			/* NMI_MAGIC */
+	uint64_t	flags;
+	uint64_t	cb;			/* callback function */
+	uint64_t	cb_complement;		/* two's complement of above */
+	uint64_t	cb_arg;			/* callback arg */
+	uint64_t	master;			/* nonzero if master node */
+} kl_nmi_t;
 
 
 /*                            H U B                    */
@@ -350,8 +400,8 @@ typedef struct klttydev_s {
 #define	IP27_LHUB_S(r, d)		*(IP27_LHUB_ADDR(r)) = (d)
 #define	IP27_RHUB_L(n, r)		*(IP27_RHUB_ADDR((n), (r))
 #define	IP27_RHUB_S(n, r, d)		*(IP27_RHUB_ADDR((n), (r)) = (d)
-#define IP27_RHUB_PI_L(n, s, r)		*(IP27_RHUB_PI_ADDR((n), (s), (r))
-#define	IP27_RHUB_PI_S(n, s, r, d)	*(IP27_RHUB_PI_ADDR((n), (s), (r)) = (d)
+#define IP27_RHUB_PI_L(n, s, r)		*(IP27_RHUB_PI_ADDR((n), (s), (r)))
+#define	IP27_RHUB_PI_S(n, s, r, d)	*(IP27_RHUB_PI_ADDR((n), (s), (r))) = (d)
 
 
 /* HUB I/O registers */
@@ -369,8 +419,14 @@ typedef struct klttydev_s {
  *  Functions.
  */
 
-void	kl_scan_config(int);
 vaddr_t	kl_get_console_base(void);
+void	kl_init(void);
+void	kl_scan_config(int);
+void	kl_scan_done(void);
+int	kl_scan_node(int, uint, int (*)(lboard_t *, void *), void *);
+#define	KLBRD_ANY	0
+int	kl_scan_board(lboard_t *, uint, int (*)(klinfo_t *, void *), void *);
+#define	KLSTRUCT_ANY	((uint)~0)
 
 int	kl_n_mode;
 

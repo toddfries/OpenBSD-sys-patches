@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.24 2009/01/25 17:30:48 miod Exp $	*/
+/*	$OpenBSD: conf.c,v 1.25 2009/06/03 14:45:50 jj Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.

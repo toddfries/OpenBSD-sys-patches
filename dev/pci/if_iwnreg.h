@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwnreg.h,v 1.22 2009/03/10 20:39:21 damien Exp $	*/
+/*	$OpenBSD: if_iwnreg.h,v 1.26 2009/05/29 08:25:45 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -20,12 +20,16 @@
 #define IWN_TX_RING_COUNT	256
 #define IWN_TX_RING_LOMARK	192
 #define IWN_TX_RING_HIMARK	224
-#define IWN_RX_RING_COUNT_LOG	8
+#define IWN_RX_RING_COUNT_LOG	6
 #define IWN_RX_RING_COUNT	(1 << IWN_RX_RING_COUNT_LOG)
 
 #define IWN4965_NTXQUEUES	16
 #define IWN5000_NTXQUEUES	20
-#define IWN_SRVC_CHNL		9
+
+#define IWN4965_NDMACHNLS	7
+#define IWN5000_NDMACHNLS	8
+
+#define IWN_SRVC_DMACHNL	9
 
 /* Maximum number of DMA segments for TX. */
 #define IWN_MAX_SCATTER	20
@@ -58,6 +62,7 @@
 #define IWN_HW_REV		0x028
 #define IWN_EEPROM		0x02c
 #define IWN_EEPROM_GP		0x030
+#define IWN_OTP_GP		0x034
 #define IWN_GIO			0x03c
 #define IWN_UCODE_GP1_CLR	0x05c
 #define IWN_LED			0x094
@@ -149,7 +154,10 @@
 #define IWN_HW_IF_CONFIG_MAC_SI		(1 <<  8)
 #define IWN_HW_IF_CONFIG_RADIO_SI	(1 <<  9)
 #define IWN_HW_IF_CONFIG_EEPROM_LOCKED	(1 << 21)
+#define IWN_HW_IF_CONFIG_NIC_READY	(1 << 22)
 #define IWN_HW_IF_CONFIG_HAP_WAKE_L1A	(1 << 23)
+#define IWN_HW_IF_CONFIG_PREPARE_DONE	(1 << 25)
+#define IWN_HW_IF_CONFIG_PREPARE	(1 << 27)
 
 /* Possible flags for registers IWN_PRPH_RADDR/IWN_PRPH_WADDR. */
 #define IWN_PRPH_DWORD	((sizeof (uint32_t) - 1) << 24)
@@ -272,6 +280,15 @@
 #define IWN_EEPROM_READ_VALID	(1 << 0)
 #define IWN_EEPROM_CMD		(1 << 1)
 
+/* Possible flags for register IWN_EEPROM_GP. */
+#define IWN_EEPROM_GP_IF_OWNER	0x00000180
+
+/* Possible flags for register IWN_OTP_GP. */
+#define IWN_OTP_GP_DEV_SEL_OTP		(1 << 16)
+#define IWN_OTP_GP_RELATIVE_ACCESS	(1 << 17)
+#define IWN_OTP_GP_ECC_CORR_STTS	(1 << 20)
+#define IWN_OTP_GP_ECC_UNCORR_STTS	(1 << 21)
+
 /* Possible flags for register IWN_SCHED_QUEUE_STATUS. */
 #define IWN4965_TXQ_STATUS_ACTIVE	0x0007fc01
 #define IWN4965_TXQ_STATUS_INACTIVE	0x0007fc00
@@ -287,9 +304,11 @@
 
 /* Possible flags for register IWN_APMG_PS. */
 #define IWN_APMG_PS_EARLY_PWROFF_DIS	(1 << 22)
-#define IWN_APMG_PS_PWR_SRC_MASK	(3 << 24)
 #define IWN_APMG_PS_PWR_SRC(x)		((x) << 24)
 #define IWN_APMG_PS_PWR_SRC_VMAIN	0
+#define IWN_APMG_PS_PWR_SRC_VAUX	2
+#define IWN_APMG_PS_PWR_SRC_MASK	IWN_APMG_PS_PWR_SRC(3)
+#define IWN_APMG_PS_RESET_REQ		(1 << 26)
 
 /* Possible flags for IWN_APMG_PCI_STT. */
 #define IWN_APMG_PCI_STT_L1A_DIS	(1 << 11)
@@ -421,7 +440,7 @@ struct iwn_rxon {
 	uint8_t		cck_mask;
 	uint16_t	associd;
 	uint32_t	flags;
-#define IWN_RXON_24GHZ	(1 <<  0)
+#define IWN_RXON_24GHZ		(1 <<  0)
 #define IWN_RXON_CCK		(1 <<  1)
 #define IWN_RXON_AUTO		(1 <<  2)
 #define IWN_RXON_SHSLOT		(1 <<  4)

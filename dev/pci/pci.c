@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci.c,v 1.60 2009/04/06 20:51:48 kettenis Exp $	*/
+/*	$OpenBSD: pci.c,v 1.62 2009/06/03 06:09:21 kettenis Exp $	*/
 /*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*
@@ -157,6 +157,7 @@ pciattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_pc = pba->pba_pc;
 	sc->sc_ioex = pba->pba_ioex;
 	sc->sc_memex = pba->pba_memex;
+	sc->sc_pmemex = pba->pba_pmemex;
 	sc->sc_domain = pba->pba_domain;
 	sc->sc_bus = pba->pba_bus;
 	sc->sc_bridgetag = pba->pba_bridgetag;
@@ -283,6 +284,7 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 	pa.pa_pc = pc;
 	pa.pa_ioex = sc->sc_ioex;
 	pa.pa_memex = sc->sc_memex;
+	pa.pa_pmemex = sc->sc_pmemex;
 	pa.pa_domain = sc->sc_domain;
 	pa.pa_bus = bus;
 	pa.pa_device = device;
@@ -514,6 +516,7 @@ pci_reserve_resources(struct pci_attach_args *pa)
 	bus_addr_t base, limit;
 	bus_size_t size;
 	int reg, reg_start, reg_end;
+	int flags;
 
 	bhlc = pci_conf_read(pc, tag, PCI_BHLC_REG);
 	switch (PCI_HDRTYPE_TYPE(bhlc)) {
@@ -537,7 +540,7 @@ pci_reserve_resources(struct pci_attach_args *pa)
 		if (!pci_mapreg_probe(pc, tag, reg, &type))
 			continue;
 
-		if (pci_mapreg_info(pc, tag, reg, type, &base, &size, NULL))
+		if (pci_mapreg_info(pc, tag, reg, type, &base, &size, &flags))
 			continue;
 
 		if (base == 0)
@@ -546,16 +549,29 @@ pci_reserve_resources(struct pci_attach_args *pa)
 		switch (type) {
 		case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT:
 		case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT:
+#ifdef BUS_SPACE_MAP_PREFETCHABLE
+			if (ISSET(flags, BUS_SPACE_MAP_PREFETCHABLE) &&
+			    pa->pa_pmemex && extent_alloc_region(pa->pa_pmemex,
+			    base, size, EX_NOWAIT) == 0) {
+				break;
+			}
+#endif
 			if (pa->pa_memex && extent_alloc_region(pa->pa_memex,
-			    base, size, EX_NOWAIT))
+			    base, size, EX_NOWAIT)) {
 				printf("mem address conflict 0x%x/0x%x\n",
 				    base, size);
+				pci_conf_write(pc, tag, reg, 0);
+				if (type & PCI_MAPREG_MEM_TYPE_64BIT)
+					pci_conf_write(pc, tag, reg + 4, 0);
+			}
 			break;
 		case PCI_MAPREG_TYPE_IO:
 			if (pa->pa_ioex && extent_alloc_region(pa->pa_ioex,
-			    base, size, EX_NOWAIT))
+			    base, size, EX_NOWAIT)) {
 				printf("io address conflict 0x%x/0x%x\n",
 				    base, size);
+				pci_conf_write(pc, tag, reg, 0);
+			}
 			break;
 		}
 
@@ -602,7 +618,11 @@ pci_reserve_resources(struct pci_attach_args *pa)
 		size = (limit - base + 1);
 	else
 		size = 0;
-	if (pa->pa_memex && base > 0 && size > 0) {
+	if (pa->pa_pmemex && base > 0 && size > 0) {
+		if (extent_alloc_region(pa->pa_pmemex, base, size, EX_NOWAIT))
+			printf("bridge mem address conflict 0x%x/0x%x\n",
+			       base, size);
+	} else if (pa->pa_memex && base > 0 && size > 0) {
 		if (extent_alloc_region(pa->pa_memex, base, size, EX_NOWAIT))
 			printf("bridge mem address conflict 0x%x/0x%x\n",
 			       base, size);

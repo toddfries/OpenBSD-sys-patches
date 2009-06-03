@@ -1,4 +1,4 @@
-/*	$OpenBSD: nnpfs_extern.h,v 1.6 2003/09/28 04:33:44 millert Exp $	*/
+/*	$OpenBSD: nnpfs_extern.h,v 1.1 2009/06/03 14:45:54 jj Exp $	*/
 /*
  * Copyright (c) 1998 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).

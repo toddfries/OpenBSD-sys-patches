@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbridgereg.h,v 1.1 2008/04/07 22:47:40 miod Exp $	*/
+/*	$OpenBSD: xbridgereg.h,v 1.6 2009/05/24 17:33:12 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Miodrag Vallat.
@@ -26,8 +26,29 @@
 
 #define	BRIDGE_WIDGET_CONTROL_IO_SWAP		0x00800000
 #define	BRIDGE_WIDGET_CONTROL_MEM_SWAP		0x00400000
+#define	BRIDGE_WIDGET_CONTROL_LARGE_PAGES	0x00200000
+
+/*
+ * DMA Direct Window
+ *
+ * The direct map register allows the 2GB direct window to map to
+ * a given widget address space. The upper bits of the XIO address,
+ * identifying the node to access, are provided in the low-order
+ * bits of the register.
+ */
 
 #define	BRIDGE_DIR_MAP			0x00000084
+
+#define	BRIDGE_DIRMAP_WIDGET_SHIFT	20
+#define	BRIDGE_DIRMAP_ADD_512MB		0x00020000	/* add 512MB */
+#define	BRIDGE_DIRMAP_BASE_MASK		0x00001fff
+#define	BRIDGE_DIRMAP_BASE_SHIFT	31
+
+#define	BRIDGE_PCI_MEM_SPACE_BASE	0x0000000040000000ULL
+#define	BRIDGE_PCI_MEM_SPACE_LENGTH	0x0000000040000000ULL
+#define	BRIDGE_PCI_IO_SPACE_BASE	0x0000000100000000ULL
+#define	BRIDGE_PCI_IO_SPACE_LENGTH	0x0000000100000000ULL
+
 #define	BRIDGE_NIC			0x000000b4
 #define	BRIDGE_BUS_TIMEOUT		0x000000c4
 #define	BRIDGE_PCI_CFG			0x000000cc
@@ -45,9 +66,12 @@
 #define	BRIDGE_INT_DEV			0x00000124
 #define	BRIDGE_INT_HOST_ERR		0x0000012c
 #define	BRIDGE_INT_ADDR(d)		(0x00000134 + 8 * (d))
+/* the following two are XBridge-only */
+#define	BRIDGE_INT_FORCE_ALWAYS(d)	(0x00000184 + 8 * (d))
+#define	BRIDGE_INT_FORCE_PIN(d)		(0x000001c4 + 8 * (d))
 
 /*
- * Mapping control
+ * PCI Resource Mapping control
  *
  * There are three ways to map a given device:
  * - memory mapping in the long window, at BRIDGE_PCI_MEM_SPACE_BASE,
@@ -63,15 +87,78 @@
  */
 
 #define	BRIDGE_DEVICE(d)		(0x00000204 + 8 * (d))
+#define	BRIDGE_DEVICE_SWAP_PMU			0x00080000	/* ??? */
+#define	BRIDGE_DEVICE_SWAP_DIR			0x00040000	/* ??? */
+#define	BRIDGE_DEVICE_PRECISE			0x00020000
+#define	BRIDGE_DEVICE_COHERENT			0x00010000
+#define	BRIDGE_DEVICE_BARRIER			0x00008000
 #define	BRIDGE_DEVICE_SWAP			0x00002000
-#define	BRIDGE_DEVICE_IO			0x00001000
+#define	BRIDGE_DEVICE_IO_MEM			0x00001000 /* clear if I/O */
 #define	BRIDGE_DEVICE_BASE_MASK			0x00000fff
 #define	BRIDGE_DEVICE_BASE_SHIFT		20
 
-#define	BRIDGE_PCI_MEM_SPACE_BASE	0x0000000040000000ULL
-#define	BRIDGE_PCI_MEM_SPACE_LENGTH	0x0000000040000000ULL
-#define	BRIDGE_PCI_IO_SPACE_BASE	0x0000000100000000ULL
-#define	BRIDGE_PCI_IO_SPACE_LENGTH	0x0000000100000000ULL
+#define	BRIDGE_DEVIO_BASE			0x00200000
+#define	BRIDGE_DEVIO_LARGE			0x00200000
+#define	BRIDGE_DEVIO_SHORT			0x00100000
+
+#define	BRIDGE_DEVIO_OFFS(d) \
+	(BRIDGE_DEVIO_BASE + \
+	 BRIDGE_DEVIO_LARGE * ((d) < 2 ? (d) : 2) + \
+	 BRIDGE_DEVIO_SHORT * ((d) < 2 ? 0 : (d) - 2))
+#define	BRIDGE_DEVIO_SIZE(d) \
+	((d) < 2 ? BRIDGE_DEVIO_LARGE : BRIDGE_DEVIO_SHORT)
+
+
+#define	BRIDGE_DEVICE_WBFLUSH(d)	(0x00000244 + 8 * (d))
+
+/*
+ * Read Response Buffer configuration registers
+ *
+ * There are 16 RRB, which are shared among the PCI devices.
+ * The following registers provide four bits per RRB, describing
+ * their RRB assignment.
+ *
+ * Since these four bits only assign two bits to map to a PCI slot,
+ * the low-order bit is implied by the RRB register: one controls the
+ * even-numbered PCI slots, while the other controls the odd-numbered
+ * PCI slots.
+ */
+
+#define	BRIDGE_RRB_EVEN			0x00000284
+#define	BRIDGE_RRB_ODD			0x0000028c
+
+#define	RRB_VALID			0x8
+#define	RRB_VCHAN			0x4
+#define	RRB_DEVICE_MASK			0x3
+#define	RRB_SHIFT			4
+
+/*
+ * Address Translation Entries
+ */
+
+#define	BRIDGE_INTERNAL_ATE		128
+#define	XBRIDGE_INTERNAL_ATE		1024
+
+#define	BRIDGE_ATE_SSHIFT		12	/* 4KB */
+#define	BRIDGE_ATE_LSHIFT		14	/* 16KB */
+#define	BRIDGE_ATE_SSIZE		(1ULL << BRIDGE_ATE_SSHIFT)
+#define	BRIDGE_ATE_LSIZE		(1ULL << BRIDGE_ATE_LSHIFT)
+#define	BRIDGE_ATE_SMASK		(BRIDGE_ATE_SSIZE - 1)
+#define	BRIDGE_ATE_LMASK		(BRIDGE_ATE_LSIZE - 1)
+
+#define	BRIDGE_ATE(a)			(0x00010000 + (a) * 8)
+
+#define	ATE_NV				0x0000000000000000ULL
+#define	ATE_V				0x0000000000000001ULL
+#define	ATE_COH				0x0000000000000002ULL
+#define	ATE_PRECISE			0x0000000000000004ULL
+#define	ATE_PREFETCH			0x0000000000000008ULL
+#define	ATE_BARRIER			0x0000000000000010ULL
+#define	ATE_BSWAP			0x0000000000000020ULL	/* XBridge */
+#define	ATE_WIDGET_MASK			0x0000000000000f00ULL
+#define	ATE_WIDGET_SHIFT		8
+#define	ATE_ADDRESS_MASK		0x0000fffffffff000ULL
+#define	ATE_RMF_MASK			0x00ff000000000000ULL	/* Bridge */
 
 /*
  * Configuration space
@@ -90,6 +177,13 @@
  * The Bridge can do DMA either through a direct 2GB window, or through
  * a 1GB translated window, using its ATE memory.
  */
+
+#define	BRIDGE_DMA_TRANSLATED_BASE	0x40000000ULL
+#define	XBRIDGE_DMA_TRANSLATED_SWAP	0x20000000ULL
+#define	ATE_ADDRESS(a,s) \
+		(BRIDGE_DMA_TRANSLATED_BASE + ((a) << (s)))
+#define	ATE_INDEX(a,s) \
+		(((a) - BRIDGE_DMA_TRANSLATED_BASE) >> (s))
 
 #define	BRIDGE_DMA_DIRECT_BASE		0x80000000ULL
 #define	BRIDGE_DMA_DIRECT_LENGTH	0x80000000ULL

@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.25 2009/02/10 18:35:44 damien Exp $ 
+# $OpenBSD: GENERIC,v 1.27 2009/05/16 05:47:44 deraadt Exp $ 
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -26,6 +26,7 @@ options	CACHE_CLEAN_BLOCK_INTR
 #options	PERFCTRS	# performance counters
 
 option		PCIVERBOSE
+option		USER_PCICONF		# user-space PCI configuration
 
 config	bsd	swap generic
 
@@ -127,6 +128,8 @@ ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
 ukbd*	at uhidev?		# USB keyboard
 wskbd*	at ukbd? mux 1
+udl*	 at uhub?		# USB DisplayLink video
+wsdisplay* at udl?
 ucycom*	at uhidev?		# Cypress serial
 ucom*	at ucycom?
 uhid*	at uhidev?		# USB generic HID support
@@ -200,7 +203,7 @@ owsbm*	at onewire?		# Smart Battery Monitor
 owtemp* at onewire?		# Temperature
 
 # mouse & keyboard multiplexor pseudo-devices
-#pseudo-device	wsmux		2
+pseudo-device	wsmux		2
 pseudo-device	crypto		1
 pseudo-device	hotplug		1	# devices hot plugging
 #pseudo-device	raid		4	# RAIDframe disk driver
