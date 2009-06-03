@@ -43,7 +43,7 @@
 
 #include <uvm/uvm.h>
 
-
+#define POOL_DEBUG 1
 /*
  * Pool resource management utility.
  *
