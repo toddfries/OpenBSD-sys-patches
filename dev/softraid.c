@@ -88,7 +88,7 @@ struct cfdriver softraid_cd = {
 struct sd_timeout {
 	struct sr_discipline *sd;
 	struct timeout *to;
-}
+};
 
 /* scsi & discipline */
 int			sr_scsi_cmd(struct scsi_xfer *);
@@ -124,7 +124,7 @@ int			sr_boot_assembly(struct sr_softc *);
 int			sr_already_assembled(struct sr_discipline *);
 void			sr_rebuild(void *);
 void			sr_rebuild_thread(void *);
-void			sr_rebuild_timeout(void *);
+void			sr_meta_rebuild_timeout(void *);
 
 /* don't include these on RAMDISK */
 #ifndef SMALL_KERNEL
@@ -2828,7 +2828,7 @@ sr_rebuild_thread(void *arg)
 	struct sr_workunit	*wu_r, *wu_w;
 	struct scsi_xfer	xs_r, xs_w;
 	struct scsi_rw_16	cr, cw;
-	int			c, s, slept, percent = 0, old_percent = -1;
+	int			c, s, slept, percent = 0;
 	u_int8_t		*buf;
 	struct sd_timeout	*sdt;
 	struct timeout		to;
@@ -2853,8 +2853,8 @@ sr_rebuild_thread(void *arg)
 	sd->sd_reb_active = 1;
 
 	sdt = malloc(sizeof(struct sd_timeout), M_DEVBUF, M_WAITOK);
-	sbt->to = &to;
-	sbt->sd = sd;
+	sdt->to = &to;
+	sdt->sd = sd;
 
 	timeout_set(&to, sr_meta_rebuild_timeout, &sdt);
 	timeout_add_sec(sdt->to, 5);
@@ -2971,7 +2971,8 @@ void
 sr_meta_rebuild_timeout(void *arg)
 {
 	struct sd_timeout	*sdt = arg;
-	struct sr_softc		*sc = sdt->sd->sd_sc;
+	struct sr_discipline	*sd = sdt->sd;;
+	struct sr_softc		*sc = sd->sd_sc;
 
 	if (sr_meta_save(sd, SR_META_DIRTY))
 		printf("%s: could not save metadata to %s\n",
