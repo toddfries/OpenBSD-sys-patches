@@ -814,7 +814,7 @@ flashstrategy(struct buf *bp)
 
 	/* Queue the transfer. */
 	s = splbio();
-	BUFQ_ADD(sc->sc_dk.dk_bufq, bp);
+	disksort(&sc->sc_q, bp);
 	flashstart(sc);
 	splx(s);
 	device_unref(&sc->sc_dev);
@@ -881,9 +881,11 @@ flashstart(struct flash_softc *sc)
 
 	while (1) {
 		/* Remove the next buffer from the queue or stop. */
-		bp = BUFQ_GET(sc->sc_dk.dk_bufq);
+		dp = &sc->sc_q;
+		bp = dp->b_actf;
 		if (bp == NULL)
 			return;
+		dp->b_actf = bp->b_actf;
 
 		/* Transfer this buffer now. */
 		_flashstart(sc, bp);

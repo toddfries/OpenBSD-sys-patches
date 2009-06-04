@@ -39,7 +39,6 @@ int db_cmd_search(char *, struct db_command *, struct db_command **);
 void db_cmd_list(struct db_command *);
 void db_command(struct db_command **, struct db_command *);
 void db_buf_print_cmd(db_expr_t, int, db_expr_t, char *);
-void db_bufq_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_map_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_malloc_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_mount_print_cmd(db_expr_t, int, db_expr_t, char *);

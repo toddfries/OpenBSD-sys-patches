@@ -71,7 +71,6 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/buf.h>
-#include <sys/bufq.h>
 #include <sys/uio.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
@@ -120,7 +119,7 @@ struct wd_softc {
 	/* General disk infos */
 	struct device sc_dev;
 	struct disk sc_dk;
-
+	struct buf sc_q;
 	/* IDE disk soft states */
 	struct ata_bio sc_wdc_bio; /* current transfer */
 	struct buf *sc_bp; /* buf being transferred */
@@ -397,12 +396,13 @@ int
 wddetach(struct device *self, int flags)
 {
 	struct wd_softc *sc = (struct wd_softc *)self;
-	struct buf *bp;
+	struct buf *dp, *bp;
 	int s, bmaj, cmaj, mn;
 
 	/* Remove unprocessed buffers from queue */
 	s = splbio();
-	while ((bp = BUFQ_GET(sc->sc_dk.dk_bufq)) != NULL) {
+	for (dp = &sc->sc_q; (bp = dp->b_actf) != NULL; ) {
+		dp->b_actf = bp->b_actf;
 		bp->b_error = ENXIO;
 		bp->b_flags |= B_ERROR;
 		biodone(bp);
@@ -475,7 +475,7 @@ wdstrategy(struct buf *bp)
 		goto done;
 	/* Queue transfer on drive, activate drive and controller if idle. */
 	s = splbio();
-	BUFQ_ADD(wd->sc_dk.dk_bufq, bp);
+	disksort(&wd->sc_q, bp);
 	wdstart(wd);
 	splx(s);
 	device_unref(&wd->sc_dev);
@@ -499,15 +499,18 @@ void
 wdstart(void *arg)
 {
 	struct wd_softc *wd = arg;
-	struct buf *bp = NULL;
+	struct buf *dp, *bp = NULL;
 
 	WDCDEBUG_PRINT(("wdstart %s\n", wd->sc_dev.dv_xname),
 	    DEBUG_XFERS);
 	while (wd->openings > 0) {
 
 		/* Is there a buf for us ? */
-		if ((bp = BUFQ_GET(wd->sc_dk.dk_bufq)) == NULL)
+		dp = &wd->sc_q;
+		if ((bp = dp->b_actf) == NULL)  /* yes, an assign */
 			return;
+		dp->b_actf = bp->b_actf;
+
 		/*
 		 * Make the command. First lock the device
 		 */

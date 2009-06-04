@@ -77,6 +77,7 @@ struct flash_softc {
 	struct device		 sc_dev;
 	/* Disk device information */
 	struct disk		 sc_dk;
+	struct buf		 sc_q;
 	struct buf		*sc_bp;
 	int			 sc_flags;
 	/* Flash controller tag */
