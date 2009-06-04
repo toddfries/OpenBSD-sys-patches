@@ -131,6 +131,7 @@ struct bufq	*bufq_init(int);
 void		 bufq_destroy(struct bufq *);
 void		 bufq_drain(struct bufq *);
 
+
 /*
  * For portability with historic industry practice, the cylinder number has
  * to be maintained in the `b_resid' field.

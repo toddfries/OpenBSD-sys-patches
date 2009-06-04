@@ -44,7 +44,6 @@
 #include <sys/malloc.h>
 #include <sys/fcntl.h>
 #include <sys/buf.h>
-#include <sys/bufq.h>
 #include <sys/stat.h>
 #include <sys/syslog.h>
 #include <sys/device.h>

@@ -56,7 +56,6 @@
 #include <sys/ioctl.h>
 #include <sys/mtio.h>
 #include <sys/buf.h>
-#include <sys/bufq.h>
 #include <sys/uio.h>
 #include <sys/malloc.h>
 #include <sys/errno.h>

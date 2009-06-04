@@ -21,7 +21,6 @@
 #include <sys/pool.h>
 #include <sys/proc.h>
 #include <sys/buf.h>
-#include <sys/bufq.h>
 #include <sys/errno.h>
 
 #include <sys/disklabel.h>

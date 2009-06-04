@@ -39,7 +39,7 @@
 #include <sys/msgbuf.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
-#include <sys/bufq.h>
+#include <sys/buf.h>
 
 #include <uvm/uvm_extern.h>
 #include <machine/db_machdep.h>		/* type definitions */
