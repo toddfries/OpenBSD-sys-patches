@@ -3025,6 +3025,17 @@ fail:
 	kthread_exit(0);
 }
 
+void
+sr_meta_rebuild_timeout(void *arg)
+{
+	struct sd_timeout	*sdt = arg;
+	struct sr_discipline	*sd = sdt->sd;;
+
+	workq_add_task(NULL, 0, sr_meta_save_callback, sd, NULL);
+
+	timeout_add_sec(sdt->to, 5);
+}
+
 #ifndef SMALL_KERNEL
 int
 sr_sensors_create(struct sr_discipline *sd)
