@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.450 2009/06/01 20:11:38 weingart Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.452 2009/06/03 21:30:19 beck Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -547,11 +547,6 @@ setup_buffers()
 	if (bufpages == 0)
 		bufpages = atop(avail_end) * bufcachepercent / 100;
 
-	/* Restrict to at most 25% filled kvm */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4)
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
 }
 
 /*
@@ -1841,17 +1836,8 @@ identifycpu(struct cpu_info *ci)
 
 	ci->cpu_class = class;
 
-	if (cpu == CPU_486DLC) {
-#ifndef CYRIX_CACHE_WORKS
+	if (cpu == CPU_486DLC)
 		printf("WARNING: CYRIX 486DLC CACHE UNCHANGED.\n");
-#else
-#ifndef CYRIX_CACHE_REALLY_WORKS
-		printf("WARNING: CYRIX 486DLC CACHE ENABLED IN HOLD-FLUSH MODE.\n");
-#else
-		printf("WARNING: CYRIX 486DLC CACHE ENABLED.\n");
-#endif
-#endif
-	}
 
 	/*
 	 * Enable ring 0 write protection (486 or above, but 386

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.112 2009/04/22 13:12:26 art Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.114 2009/06/03 21:30:20 beck Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*-
@@ -60,20 +60,6 @@
 #include <uvm/uvm_extern.h>
 
 #include <miscfs/specfs/specdev.h>
-
-/*
- * Definitions for the buffer hash lists.
- */
-#define	BUFHASH(dvp, lbn)	\
-	(&bufhashtbl[((long)(dvp) / sizeof(*(dvp)) + (int)(lbn)) & bufhash])
-LIST_HEAD(bufhashhdr, buf) *bufhashtbl, invalhash;
-u_long	bufhash;
-
-/*
- * Insq/Remq for the buffer hash lists.
- */
-#define	binshash(bp, dp)	LIST_INSERT_HEAD(dp, bp, b_hash)
-#define	bremhash(bp)		LIST_REMOVE(bp, b_hash)
 
 /*
  * Definitions for the buffer free lists.
@@ -182,7 +168,6 @@ buf_put(struct buf *bp)
 		panic("buf_put: b_dep is not empty");
 #endif
 
-	bremhash(bp);
 	LIST_REMOVE(bp, b_list);
 	bcstats.numbufs--;
 
@@ -237,7 +222,6 @@ bufinit(void)
  	 */
 	buf_mem_init(bufkvm);
 
-	bufhashtbl = hashinit(bufpages / 4, M_CACHE, M_WAITOK, &bufhash);
 	hidirtypages = (bufpages / 4) * 3;
 	lodirtypages = bufpages / 2;
 
@@ -250,6 +234,33 @@ bufinit(void)
 
 	maxcleanpages = locleanpages;
 }
+
+/*
+ * Change cachepct
+ */
+void
+bufadjust(int newbufpages)
+{
+	/*
+	 * XXX - note, bufkvm was allocated once, based on 10% of physmem
+	 * see above.
+	 */
+
+	bufpages = newbufpages;
+
+	hidirtypages = (bufpages / 4) * 3;
+	lodirtypages = bufpages / 2;
+
+	/*
+	 * When we hit 95% of pages being clean, we bring them down to
+	 * 90% to have some slack.
+	 */
+	hicleanpages = bufpages - (bufpages / 20);
+	locleanpages = bufpages - (bufpages / 10);
+
+	maxcleanpages = locleanpages;
+}
+
 
 struct buf *
 bio_doread(struct vnode *vp, daddr64_t blkno, int size, int async)
@@ -676,10 +687,12 @@ brelse(struct buf *bp)
 			CLR(bp->b_flags, B_DELWRI);
 		}
 
-		if (bp->b_vp)
+		if (bp->b_vp) {
+			RB_REMOVE(buf_rb_bufs, &bp->b_vp->v_bufs_tree,
+			    bp);
 			brelvp(bp);
-		bremhash(bp);
-		binshash(bp, &invalhash);
+		}
+		bp->b_vp = NULL;
 
 		/*
 		 * If the buffer has no associated data, place it back in the
@@ -697,6 +710,9 @@ brelse(struct buf *bp)
 				CLR(bp->b_flags, B_WANTED);
 				wakeup(bp);
 			}
+			if (bp->b_vp != NULL)
+				RB_REMOVE(buf_rb_bufs,
+				    &bp->b_vp->v_bufs_tree, bp);
 			buf_put(bp);
 			splx(s);
 			return;
@@ -758,15 +774,14 @@ struct buf *
 incore(struct vnode *vp, daddr64_t blkno)
 {
 	struct buf *bp;
+	struct buf b;
 
-	/* Search hash chain */
-	LIST_FOREACH(bp, BUFHASH(vp, blkno), b_hash) {
-		if (bp->b_lblkno == blkno && bp->b_vp == vp &&
-		    !ISSET(bp->b_flags, B_INVAL))
-			return (bp);
-	}
-
-	return (NULL);
+	/* Search buf lookup tree */
+	b.b_lblkno = blkno;
+	bp = RB_FIND(buf_rb_bufs, &vp->v_bufs_tree, &b);
+	if (bp && !ISSET(bp->b_flags, B_INVAL))
+		return(bp);
+	return(NULL);
 }
 
 /*
@@ -781,6 +796,7 @@ struct buf *
 getblk(struct vnode *vp, daddr64_t blkno, int size, int slpflag, int slptimeo)
 {
 	struct buf *bp;
+	struct buf b;
 	int s, error;
 
 	/*
@@ -794,9 +810,9 @@ getblk(struct vnode *vp, daddr64_t blkno, int size, int slpflag, int slptimeo)
 	 * the block until the write is finished.
 	 */
 start:
-	LIST_FOREACH(bp, BUFHASH(vp, blkno), b_hash) {
-		if (bp->b_lblkno != blkno || bp->b_vp != vp)
-			continue;
+	b.b_lblkno = blkno;
+	bp = RB_FIND(buf_rb_bufs, &vp->v_bufs_tree, &b);
+	if (bp != NULL) {
 
 		s = splbio();
 		if (ISSET(bp->b_flags, B_BUSY)) {
@@ -868,8 +884,11 @@ buf_get(struct vnode *vp, daddr64_t blkno, size_t size)
 			while (bcstats.numcleanpages > locleanpages) {
 				bp = TAILQ_FIRST(&bufqueues[BQ_CLEAN]);
 				bremfree(bp);
-				if (bp->b_vp)
+				if (bp->b_vp) {
+					RB_REMOVE(buf_rb_bufs,
+					    &bp->b_vp->v_bufs_tree, bp);
 					brelvp(bp);
+				}
 				buf_put(bp);
 			}
 		}
@@ -884,8 +903,11 @@ buf_get(struct vnode *vp, daddr64_t blkno, size_t size)
 			int i = freemax;
 			while ((bp = TAILQ_FIRST(&bufqueues[BQ_CLEAN])) && i--) {
 				bremfree(bp);
-				if (bp->b_vp)
+				if (bp->b_vp) {
+					RB_REMOVE(buf_rb_bufs,
+					    &bp->b_vp->v_bufs_tree, bp);
 					brelvp(bp);
+				}
 				buf_put(bp);
 			}
 			if (freemax == i) {
@@ -929,11 +951,12 @@ buf_get(struct vnode *vp, daddr64_t blkno, size_t size)
 
 		bp->b_blkno = bp->b_lblkno = blkno;
 		bgetvp(vp, bp);
-		binshash(bp, BUFHASH(vp, blkno));
+		if (RB_INSERT(buf_rb_bufs, &vp->v_bufs_tree, bp))
+			panic("buf_get: dup lblk vp %p bp %p", vp, bp);
 	} else {
 		bp->b_vnbufs.le_next = NOLIST;
 		SET(bp->b_flags, B_INVAL);
-		binshash(bp, &invalhash);
+		bp->b_vp = NULL;
 	}
 
 	LIST_INSERT_HEAD(&bufhead, bp, b_list);

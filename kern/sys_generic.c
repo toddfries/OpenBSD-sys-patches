@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_generic.c,v 1.63 2009/06/02 05:20:41 thib Exp $	*/
+/*	$OpenBSD: sys_generic.c,v 1.65 2009/06/04 00:24:02 blambert Exp $	*/
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*
@@ -89,13 +89,13 @@ sys_read(struct proc *p, void *v, register_t *retval)
 	if ((fp->f_flag & FREAD) == 0)
 		return (EBADF);
 
-	iov.iov_base = (void *)SCARG(uap, buf);
+	iov.iov_base = SCARG(uap, buf);
 	iov.iov_len = SCARG(uap, nbyte);
 
 	FREF(fp);
 
 	/* dofilereadv() will FRELE the descriptor for us */
-	return (dofilereadv(p, fd, fp, &iov, 1, &fp->f_offset, retval));
+	return (dofilereadv(p, fd, fp, &iov, 1, 0, &fp->f_offset, retval));
 }
 
 /*
@@ -104,7 +104,6 @@ sys_read(struct proc *p, void *v, register_t *retval)
 int
 sys_readv(struct proc *p, void *v, register_t *retval)
 {
-	struct iovec aiov[UIO_SMALLIOV];
 	struct sys_readv_args /* {
 		syscallarg(int) fd;
 		syscallarg(const struct iovec *) iovp;
@@ -113,60 +112,60 @@ sys_readv(struct proc *p, void *v, register_t *retval)
 	int fd = SCARG(uap, fd);
 	struct file *fp;
 	struct filedesc *fdp = p->p_fd;
-	struct iovec *iov, *needfree;
-	const struct iovec *iovp = SCARG(uap, iovp);
-	int iovcnt = SCARG(uap, iovcnt);
-	int iovlen;
-	int error;
 
 	if ((fp = fd_getfile(fdp, fd)) == NULL)
 		return (EBADF);
 	if ((fp->f_flag & FREAD) == 0)
 		return (EBADF);
 
-	/* note: can't use iovlen until iovcnt is validated */
-	iovlen = iovcnt * sizeof(struct iovec);
-	if ((u_int)iovcnt > UIO_SMALLIOV) {
-		if ((u_int)iovcnt > IOV_MAX) {
-			error = EINVAL;
-			goto out;
-		}
-		iov = needfree = malloc(iovlen, M_IOV, M_WAITOK);
-	} else if ((u_int)iovcnt > 0) {
-		iov = aiov;
-		needfree = NULL;
-	} else {
-		error = EINVAL;
-		goto out;
-	}
-
-	error = copyin(iovp, iov, iovlen);
-	if (error)
-		goto out;
-
 	FREF(fp);
 
 	/* dofilereadv() will FRELE the descriptor for us */
-	error = dofilereadv(p, fd, fp, iov, iovcnt, &fp->f_offset, retval);
-out:
-	if (needfree)
-		free(needfree, M_IOV);
-
-	return (error);
+	return (dofilereadv(p, fd, fp, SCARG(uap, iovp), SCARG(uap, iovcnt), 1,
+	    &fp->f_offset, retval));
 }
 
 int
-dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iov,
-    int iovcnt, off_t *offset, register_t *retval)
+dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
+    int iovcnt, int userspace, off_t *offset, register_t *retval)
 {
+	struct iovec aiov[UIO_SMALLIOV];
 	struct uio auio;
+	struct iovec *iov;
+	struct iovec *needfree = NULL;
 	long i, cnt, error = 0;
+	u_int iovlen;
 #ifdef KTRACE
-	u_int iovlen = iovcnt * sizeof(struct iovec);
 	struct iovec *ktriov = NULL;
 #endif
 
-	auio.uio_iov = (struct iovec *)iov;
+	/*
+	 * If the iovec array exists in userspace, it needs to be copied in;
+	 * otherwise, it can be used directly.
+	 */
+	if (userspace) {
+		/* note: can't use iovlen until iovcnt is validated */
+		iovlen = iovcnt * sizeof(struct iovec);
+		if ((u_int)iovcnt > UIO_SMALLIOV) {
+			if ((u_int)iovcnt > IOV_MAX) {
+				error = EINVAL;
+				goto out;
+			}
+			iov = needfree = malloc(iovlen, M_IOV, M_WAITOK);
+		} else if ((u_int)iovcnt > 0) {
+			iov = aiov;
+			needfree = NULL;
+		} else {
+			error = EINVAL;
+			goto out;
+		}
+		if ((error = copyin(iovp, iov, iovlen)))
+			goto done;
+	} else {
+		iov = (struct iovec *)iovp;		/* de-constify */
+	}
+
+	auio.uio_iov = iov;
 	auio.uio_iovcnt = iovcnt;
 	auio.uio_rw = UIO_READ;
 	auio.uio_segflg = UIO_USERSPACE;
@@ -181,7 +180,7 @@ dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iov,
 		 */
 		if (iov->iov_len > SSIZE_MAX || auio.uio_resid > SSIZE_MAX) {
 			error = EINVAL;
-			goto out;
+			goto done;
 		}
 		iov++;
 	}
@@ -213,6 +212,9 @@ dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iov,
 	}
 #endif
 	*retval = cnt;
+ done:
+	if (needfree)
+		free(needfree, M_IOV);
  out:
 	FRELE(fp);
 	return (error);
@@ -239,13 +241,13 @@ sys_write(struct proc *p, void *v, register_t *retval)
 	if ((fp->f_flag & FWRITE) == 0)
 		return (EBADF);
 
-	FREF(fp);
-
 	iov.iov_base = (void *)SCARG(uap, buf);
 	iov.iov_len = SCARG(uap, nbyte);
 
+	FREF(fp);
+
 	/* dofilewritev() will FRELE the descriptor for us */
-	return (dofilewritev(p, fd, fp, &iov, 1, &fp->f_offset, retval));
+	return (dofilewritev(p, fd, fp, &iov, 1, 0, &fp->f_offset, retval));
 }
 
 /*
@@ -254,21 +256,14 @@ sys_write(struct proc *p, void *v, register_t *retval)
 int
 sys_writev(struct proc *p, void *v, register_t *retval)
 {
-	struct iovec aiov[UIO_SMALLIOV];
 	struct sys_writev_args /* {
 		syscallarg(int) fd;
 		syscallarg(const struct iovec *) iovp;
 		syscallarg(int) iovcnt;
 	} */ *uap = v;
-	struct filedesc *fdp = p->p_fd;
-	struct file *fp;
-	struct iovec *needfree = NULL;
-	struct iovec *iov;
-	const struct iovec *iovp = SCARG(uap, iovp);
 	int fd = SCARG(uap, fd);
-	int iovcnt = SCARG(uap, iovcnt);
-	u_int iovlen;
-	int error;
+	struct file *fp;
+	struct filedesc *fdp = p->p_fd;
 
 	if ((fp = fd_getfile(fdp, fd)) == NULL)
 		return (EBADF);
@@ -277,46 +272,52 @@ sys_writev(struct proc *p, void *v, register_t *retval)
 
 	FREF(fp);
 
-	/* note: can't use iovlen until iovcnt is validated */
-	iovlen = iovcnt * sizeof(struct iovec);
-	if ((u_int)iovcnt > UIO_SMALLIOV) {
-		if ((u_int)iovcnt > IOV_MAX) {
-			error = EINVAL;
-			goto out;
-		}
-		iov = needfree = malloc(iovlen, M_IOV, M_WAITOK);
-	} else if ((u_int)iovcnt > 0) {
-		iov = aiov;
-		needfree = NULL;
-	} else {
-		error = EINVAL;
-		goto out;
-	}
-	error = copyin(iovp, iov, iovlen);
-	if (error)
-		goto out;
-
 	/* dofilewritev() will FRELE the descriptor for us */
-	error = dofilewritev(p, fd, fp, iov, iovcnt, &fp->f_offset, retval);
-out:
-	if (needfree)
-		free(needfree, M_IOV);
-
-	return (error);
+	return (dofilewritev(p, fd, fp, SCARG(uap, iovp), SCARG(uap, iovcnt), 1,
+	    &fp->f_offset, retval));
 }
 
 int
-dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iov,
-    int iovcnt, off_t *offset, register_t *retval)
+dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
+    int iovcnt, int userspace, off_t *offset, register_t *retval)
 {
+	struct iovec aiov[UIO_SMALLIOV];
 	struct uio auio;
+	struct iovec *iov;
+	struct iovec *needfree = NULL;
 	long i, cnt, error = 0;
-#ifdef KTRACE
 	u_int iovlen;
+#ifdef KTRACE
 	struct iovec *ktriov = NULL;
 #endif
 
-	auio.uio_iov = (struct iovec *)iov;
+	/*
+	 * If the iovec array exists in userspace, it needs to be copied in;
+	 * otherwise, it can be used directly.
+	 */
+	if (userspace) {
+		/* note: can't use iovlen until iovcnt is validated */
+		iovlen = iovcnt * sizeof(struct iovec);
+		if ((u_int)iovcnt > UIO_SMALLIOV) {
+			if ((u_int)iovcnt > IOV_MAX) {
+				error = EINVAL;
+				goto out;
+			}
+			iov = needfree = malloc(iovlen, M_IOV, M_WAITOK);
+		} else if ((u_int)iovcnt > 0) {
+			iov = aiov;
+			needfree = NULL;
+		} else {
+			error = EINVAL;
+			goto out;
+		}
+		if ((error = copyin(iovp, iov, iovlen)))
+			goto done;
+	} else {
+		iov = (struct iovec *)iovp;		/* de-constify */
+	}
+
+	auio.uio_iov = iov;
 	auio.uio_iovcnt = iovcnt;
 	auio.uio_rw = UIO_WRITE;
 	auio.uio_segflg = UIO_USERSPACE;
@@ -331,7 +332,7 @@ dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iov,
 		 */
 		if (iov->iov_len > SSIZE_MAX || auio.uio_resid > SSIZE_MAX) {
 			error = EINVAL;
-			goto out;
+			goto done;
 		}
 		iov++;
 	}
@@ -365,6 +366,9 @@ dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iov,
 	}
 #endif
 	*retval = cnt;
+ done:
+	if (needfree)
+		free(needfree, M_IOV);
  out:
 	FRELE(fp);
 	return (error);
@@ -478,7 +482,8 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 			}
 			tmp = p1->p_pgrp->pg_id;
 		}
-		error = (*fp->f_ops->fo_ioctl)(fp, TIOCSPGRP, (caddr_t)&tmp, p);
+		error = (*fp->f_ops->fo_ioctl)
+			(fp, TIOCSPGRP, (caddr_t)&tmp, p);
 		break;
 
 	case FIOGETOWN:

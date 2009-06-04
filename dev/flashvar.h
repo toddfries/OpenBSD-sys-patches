@@ -1,4 +1,4 @@
-/*	$OpenBSD: flashvar.h,v 1.2 2007/06/20 18:15:46 deraadt Exp $	*/
+/*	$OpenBSD: flashvar.h,v 1.3 2009/06/03 22:09:30 thib Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@openbsd.org>

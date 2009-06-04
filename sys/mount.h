@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.h,v 1.91 2008/07/22 08:05:02 thib Exp $	*/
+/*	$OpenBSD: mount.h,v 1.93 2009/06/03 21:30:20 beck Exp $	*/
 /*	$NetBSD: mount.h,v 1.48 1996/02/18 11:55:47 fvdl Exp $	*/
 
 /*
@@ -371,7 +371,8 @@ struct ostatfs {
 #define	MOUNT_CD9660	"cd9660"	/* ISO9660 (aka CDROM) Filesystem */
 #define	MOUNT_EXT2FS	"ext2fs"	/* Second Extended Filesystem */
 #define	MOUNT_NCPFS	"ncpfs"		/* NetWare Network File System */
-#define	MOUNT_XFS	"xfs"		/* xfs */
+#define	MOUNT_XFS	"nnpfs"		/* nnpfs (temp) */
+#define	MOUNT_NNPFS	"nnpfs"		/* nnpfs */
 #define	MOUNT_NTFS	"ntfs"		/* NTFS */
 #define	MOUNT_UDF	"udf"		/* UDF */
 
@@ -505,6 +506,8 @@ struct bcachestats {
 #ifdef _KERNEL
 extern struct bcachestats bcstats;
 #define BUFPAGES_DEFICIT (bufpages - bcstats.numbufpages)
+extern int bufcachepercent;
+extern void bufadjust(int);
 #endif
 
 /*

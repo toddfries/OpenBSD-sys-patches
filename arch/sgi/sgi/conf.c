@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.18 2009/01/25 17:30:49 miod Exp $ */
+/*	$OpenBSD: conf.c,v 1.20 2009/06/03 18:32:24 jasper Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -57,6 +57,7 @@
 bdev_decl(wd);
 #include "ccd.h"
 #include "rd.h"
+#include "hotplug.h"
 
 struct bdevsw	bdevsw[] =
 {
@@ -110,9 +111,9 @@ cdev_decl(lpt);
 cdev_decl(wd);
 #include "audio.h"
 #include "video.h"
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "ksyms.h"
 
@@ -192,8 +193,8 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48: */
 	cdev_bio_init(NBIO,bio),	/* 49: ioctl tunnel */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50: system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 51: */
 #endif
@@ -211,7 +212,8 @@ struct cdevsw	cdevsw[] =
 	cdev_usbdev_init(NUGEN,ugen),	/* 63: USB generic driver */
 	cdev_ulpt_init(NULPT,ulpt),	/* 64: USB printers */
 	cdev_urio_init(NURIO,urio),	/* 65: USB Diamond Rio 500 */
-	cdev_tty_init(NUCOM,ucom)	/* 66: USB tty */
+	cdev_tty_init(NUCOM,ucom),	/* 66: USB tty */
+	cdev_hotplug_init(NHOTPLUG,hotplug) /* 67: devices hotplugging */
 };
 
 int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);
