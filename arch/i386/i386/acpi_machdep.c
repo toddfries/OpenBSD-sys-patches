@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.18 2009/05/31 03:42:38 mlarkin Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.20 2009/06/04 23:48:00 mlarkin Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -216,9 +216,9 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	}
 
 	if (rcr3() != pmap_kernel()->pm_pdirpa) {
-		printf("%s: acpi_sleep_machdep: only kernel may sleep\n",
-		    DEVNAME(sc));
-		return (ENXIO);
+		pmap_activate(curproc);
+
+		KASSERT(rcr3() == pmap_kernel()->pm_pdirpa);
 	}
 
 	/*

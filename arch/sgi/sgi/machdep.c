@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.70 2009/05/28 18:03:55 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.72 2009/06/04 16:52:12 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -719,10 +719,6 @@ dobootopts(int argc, void *argv)
 				}
 		}
 	}
-
-	/* Catch serial consoles on O2s. */
-	if (strncmp(bios_console, "serial", 6) == 0)
-		boothowto |= RB_SERCONS;
 }
 
 
@@ -770,12 +766,6 @@ cpu_startup()
 	 */
 	if (bufpages == 0)
 		bufpages = physmem * bufcachepercent / 100;
-
-	/* Restrict to at most 25% filled kvm. */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments. This map effectively
