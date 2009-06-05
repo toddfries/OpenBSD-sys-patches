@@ -85,6 +85,11 @@ struct cfdriver softraid_cd = {
 	NULL, "softraid", DV_DULL
 };
 
+struct sd_timeout {
+	struct sr_discipline *sd;
+	struct timeout *to;
+};
+
 /* scsi & discipline */
 int			sr_scsi_cmd(struct scsi_xfer *);
 void			sr_minphys(struct buf *bp, struct scsi_link *sl);
@@ -119,6 +124,7 @@ int			sr_boot_assembly(struct sr_softc *);
 int			sr_already_assembled(struct sr_discipline *);
 void			sr_rebuild(void *);
 void			sr_rebuild_thread(void *);
+void			sr_meta_rebuild_timeout(void *);
 
 /* don't include these on RAMDISK */
 #ifndef SMALL_KERNEL
@@ -2873,8 +2879,10 @@ sr_rebuild_thread(void *arg)
 	struct sr_workunit	*wu_r, *wu_w;
 	struct scsi_xfer	xs_r, xs_w;
 	struct scsi_rw_16	cr, cw;
-	int			c, s, slept, percent = 0, old_percent = -1;
+	int			c, s, slept, percent = 0;
 	u_int8_t		*buf;
+	struct sd_timeout	sdt;
+	struct timeout		to;
 
 	whole_blk = sd->sd_meta->ssdi.ssd_size / SR_REBUILD_IO_SIZE;
 	partial_blk = sd->sd_meta->ssdi.ssd_size % SR_REBUILD_IO_SIZE;
@@ -2903,6 +2911,12 @@ sr_rebuild_thread(void *arg)
 	}
 
 	sd->sd_reb_active = 1;
+
+	sdt.to = &to;
+	sdt.sd = sd;
+
+	timeout_set(&to, sr_meta_rebuild_timeout, &sdt);
+	timeout_add_sec(sdt.to, 5);
 
 	buf = malloc(SR_REBUILD_IO_SIZE << DEV_BSHIFT, M_DEVBUF, M_WAITOK);
 	for (blk = restart; blk <= whole_blk; blk++) {
@@ -2991,17 +3005,6 @@ queued:
 
 		sd->sd_meta->ssd_rebuild = lba;
 
-		/* save metadata every percent */
-		psz = sd->sd_meta->ssdi.ssd_size;
-		rb = sd->sd_meta->ssd_rebuild;
-		percent = 100 - ((psz * 100 - rb * 100) / psz);
-		if (percent != old_percent && blk != whole_blk) {
-			if (sr_meta_save(sd, SR_META_DIRTY))
-				printf("%s: could not save metadata to %s\n",
-				    DEVNAME(sc), sd->sd_meta->ssd_devname);
-			old_percent = percent;
-		}
-
 		if (sd->sd_going_down)
 			goto abort;
 	}
@@ -3016,6 +3019,7 @@ queued:
 		}
 
 abort:
+	timeout_del(&to);
 	if (sr_meta_save(sd, SR_META_DIRTY))
 		printf("%s: could not save metadata to %s\n",
 		    DEVNAME(sc), sd->sd_meta->ssd_devname);
