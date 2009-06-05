@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_pool.c,v 1.80 2009/05/31 17:11:14 miod Exp $	*/
+/*	$OpenBSD: subr_pool.c,v 1.83 2009/06/04 18:48:54 deraadt Exp $	*/
 /*	$NetBSD: subr_pool.c,v 1.61 2001/09/26 07:14:56 chs Exp $	*/
 
 /*-
@@ -56,6 +56,7 @@
  * the allocated pages themselves (for small pool items) or taken from
  * an internal pool of page headers (`phpool').
  */
+#define POOL_DEBUG
 
 /* List of all pools */
 TAILQ_HEAD(,pool) pool_head = TAILQ_HEAD_INITIALIZER(pool_head);
@@ -478,7 +479,7 @@ pool_do_get(struct pool *pp, int flags)
 	struct pool_item_header *ph;
 	void *v;
 	int slowdown = 0;
-#ifdef POOL_DEBUG
+#if defined(DIAGNOSTIC) && defined(POOL_DEBUG)
 	int i, *ip;
 #endif
 
@@ -683,7 +684,7 @@ pool_do_put(struct pool *pp, void *v)
 {
 	struct pool_item *pi = v;
 	struct pool_item_header *ph;
-#ifdef POOL_DEBUG
+#if defined(DIAGNOSTIC) && defined(POOL_DEBUG)
 	int i, *ip;
 #endif
 
@@ -825,7 +826,7 @@ pool_prime_page(struct pool *pp, caddr_t storage, struct pool_item_header *ph)
 	unsigned int align = pp->pr_align;
 	unsigned int ioff = pp->pr_itemoffset;
 	int n;
-#ifdef POOL_DEBUG
+#if defined(DIAGNOSTIC) && defined(POOL_DEBUG)
 	int i, *ip;
 #endif
 
@@ -1210,7 +1211,7 @@ pool_chk_page(struct pool *pp, const char *label, struct pool_item_header *ph)
 	struct pool_item *pi;
 	caddr_t page;
 	int n;
-#ifdef POOL_DEBUG
+#if defined(DIAGNOSTIC) && defined(POOL_DEBUG)
 	int i, *ip;
 #endif
 
