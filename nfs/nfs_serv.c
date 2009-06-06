@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_serv.c,v 1.70 2009/06/05 03:24:20 thib Exp $	*/
+/*	$OpenBSD: nfs_serv.c,v 1.73 2009/06/06 02:23:33 blambert Exp $	*/
 /*     $NetBSD: nfs_serv.c,v 1.34 1997/05/12 23:37:12 fvdl Exp $       */
 
 /*
@@ -724,36 +724,6 @@ nfsrv_write(nfsd, slp, procp, mrq)
 	retlen = len = fxdr_unsigned(int32_t, *tl);
 	cnt = i = 0;
 
-	if (len > NFS_MAXDATA || len < 0 || i < len) {
-		error = EIO;
-		nfsm_reply(2 * NFSX_UNSIGNED);
-		nfsm_srvwcc(nfsd, forat_ret, &forat, aftat_ret, &va, &mb);
-		return (0);
-	}
-	error = nfsrv_fhtovp(fhp, 1, &vp, cred, slp, nam, &rdonly);
-	if (error) {
-		nfsm_reply(2 * NFSX_UNSIGNED);
-		nfsm_srvwcc(nfsd, forat_ret, &forat, aftat_ret, &va, &mb);
-		return (0);
-	}
-	if (v3)
-		forat_ret = VOP_GETATTR(vp, &forat, cred, procp);
-	if (vp->v_type != VREG) {
-		if (v3)
-			error = EINVAL;
-		else
-			error = (vp->v_type == VDIR) ? EISDIR : EACCES;
-	}
-	if (!error) {
-		error = nfsrv_access(vp, VWRITE, cred, rdonly, procp, 1);
-	}
-	if (error) {
-		vput(vp);
-		nfsm_reply(NFSX_WCCDATA(v3));
-		nfsm_srvwcc(nfsd, forat_ret, &forat, aftat_ret, &va, &mb);
-		return (0);
-	}
-
 	/*
 	 * For NFS Version 2, it is not obvious what a write of zero length
 	 * should do, but I might as well be consistent with Version 3,
@@ -783,6 +753,28 @@ nfsrv_write(nfsd, slp, procp, mrq)
 		}
 		mp = mp->m_next;
 	    }
+	}
+	if (len > NFS_MAXDATA || len < 0 || i < len) {
+		error = EIO;
+		goto bad;
+	}
+	error = nfsrv_fhtovp(fhp, 1, &vp, cred, slp, nam, &rdonly);
+	if (error)
+		goto bad;
+	if (v3)
+		forat_ret = VOP_GETATTR(vp, &forat, cred, procp);
+	if (vp->v_type != VREG) {
+		if (v3)
+			error = EINVAL;
+		else
+			error = (vp->v_type == VDIR) ? EISDIR : EACCES;
+		goto vbad;
+	}
+	error = nfsrv_access(vp, VWRITE, cred, rdonly, procp, 1);
+	if (error)
+		goto vbad;
+
+	if (len > 0) {
 	    ivp = malloc(cnt * sizeof(struct iovec), M_TEMP, M_WAITOK);
 	    uiop->uio_iov = iv = ivp;
 	    uiop->uio_iovcnt = cnt;
@@ -840,6 +832,13 @@ nfsrv_write(nfsd, slp, procp, mrq)
 	}
 nfsmout:
 	return(error);
+
+vbad:
+	vput(vp);
+bad:
+	nfsm_reply(0);
+	nfsm_srvwcc(nfsd, forat_ret, &forat, aftat_ret, &va, &mb);
+	return (0);
 }
 
 /*
@@ -2168,19 +2167,16 @@ nfsrv_mkdir(nfsd, slp, procp, mrq)
 		error = EEXIST;
 		goto out;
 	}
-
 	error = VOP_MKDIR(nd.ni_dvp, &nd.ni_vp, &nd.ni_cnd, &va);
-	if (error)
-		goto out;
-
-	vp = nd.ni_vp;
-	bzero((caddr_t)fhp, sizeof(nfh));
-	fhp->fh_fsid = vp->v_mount->mnt_stat.f_fsid;
-	error = VFS_VPTOFH(vp, &fhp->fh_fid);
-	if (!error)
-		error = VOP_GETATTR(vp, &va, cred, procp);
-	vput(vp);
-
+	if (!error) {
+		vp = nd.ni_vp;
+		bzero((caddr_t)fhp, sizeof(nfh));
+		fhp->fh_fsid = vp->v_mount->mnt_stat.f_fsid;
+		error = VFS_VPTOFH(vp, &fhp->fh_fid);
+		if (!error)
+			error = VOP_GETATTR(vp, &va, cred, procp);
+		vput(vp);
+	}
 out:
 	if (dirp) {
 		diraft_ret = VOP_GETATTR(dirp, &diraft, cred, procp);
