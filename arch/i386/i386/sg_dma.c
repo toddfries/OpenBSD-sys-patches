@@ -1,4 +1,4 @@
-/*	$OpenBSD: sg_dma.c,v 1.3 2009/06/06 05:26:28 oga Exp $	*/
+/*	$OpenBSD: sg_dma.c,v 1.1 2009/06/06 05:31:01 oga Exp $	*/
 /*
  * Copyright (c) 2009 Owain G. Ainsworth <oga@openbsd.org>
  *
