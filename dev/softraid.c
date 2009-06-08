@@ -2985,8 +2985,7 @@ void
 sr_meta_rebuild_timeout(void *arg)
 {
 	struct sd_timeout	*sdt = arg;
-	struct sr_discipline	*sd = sdt->sd;;
-	struct sr_softc		*sc = sd->sd_sc;
+	struct sr_discipline	*sd = sdt->sd;
 
 	workq_add_task(NULL, 0, sr_meta_save_callback, sd, NULL);
 
