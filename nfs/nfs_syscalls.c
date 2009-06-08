@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_syscalls.c,v 1.78 2009/05/30 17:20:29 thib Exp $	*/
+/*	$OpenBSD: nfs_syscalls.c,v 1.80 2009/06/04 01:02:42 blambert Exp $	*/
 /*	$NetBSD: nfs_syscalls.c,v 1.19 1996/02/18 11:53:52 fvdl Exp $	*/
 
 /*
@@ -81,6 +81,8 @@ struct nfssvc_sock *nfs_udpsock;
 int nfsd_waiting = 0;
 
 #ifdef NFSSERVER
+int nfsrv_getslp(struct nfsd *nfsd);
+
 static int nfs_numnfsd = 0;
 int (*nfsrv3_procs[NFS_NPROCS])(struct nfsrv_descript *,
     struct nfssvc_sock *, struct proc *, struct mbuf **) = {
@@ -141,6 +143,7 @@ sys_nfssvc(struct proc *p, void *v, register_t *retval)
 	struct mbuf *nam;
 	struct nfsd_args nfsdarg;
 	struct nfsd_srvargs nfsd_srvargs, *nsd = &nfsd_srvargs;
+	struct nfsd *nfsd;
 #endif
 
 	/* Must be super user */
@@ -188,7 +191,11 @@ sys_nfssvc(struct proc *p, void *v, register_t *retval)
 		if (error)
 			return (error);
 
-		error = nfssvc_nfsd(nsd, SCARG(uap, argp), p);
+		nfsd = malloc(sizeof(*nfsd), M_NFSD, M_WAITOK|M_ZERO);
+		nfsd->nfsd_procp = p;
+		nfsd->nfsd_slp = NULL;
+
+		error = nfssvc_nfsd(nfsd);
 		break;
 	default:
 		error = EINVAL;
@@ -287,17 +294,13 @@ nfssvc_addsock(fp, mynam)
  * until it is killed by a signal.
  */
 int
-nfssvc_nfsd(nsd, argp, p)
-	struct nfsd_srvargs *nsd;
-	caddr_t argp;
-	struct proc *p;
+nfssvc_nfsd(struct nfsd *nfsd)
 {
 	struct mbuf *m;
 	int siz;
 	struct nfssvc_sock *slp;
 	struct socket *so;
 	int *solockp;
-	struct nfsd *nfsd = nsd->nsd_nfsd;
 	struct nfsrv_descript *nd = NULL;
 	struct mbuf *mreq;
 	int error = 0, cacherep, s, sotype, writes_todo;
@@ -307,44 +310,20 @@ nfssvc_nfsd(nsd, argp, p)
 	writes_todo = 0;
 
 	s = splsoftnet();
-	if (nfsd == NULL) {
-		nsd->nsd_nfsd = nfsd = malloc(sizeof(struct nfsd), M_NFSD,
-		    M_WAITOK|M_ZERO);
-		nfsd->nfsd_procp = p;
-		TAILQ_INSERT_TAIL(&nfsd_head, nfsd, nfsd_chain);
-		nfs_numnfsd++;
-	}
+	TAILQ_INSERT_TAIL(&nfsd_head, nfsd, nfsd_chain);
+	nfs_numnfsd++;
 	/*
 	 * Loop getting rpc requests until SIGKILL.
 	 */
 	for (;;) {
 		if ((nfsd->nfsd_flag & NFSD_REQINPROG) == 0) {
-			while (nfsd->nfsd_slp == (struct nfssvc_sock *)0 &&
-			    (nfsd_head_flag & NFSD_CHECKSLP) == 0) {
-				nfsd->nfsd_flag |= NFSD_WAITING;
-				nfsd_waiting++;
-				error = tsleep((caddr_t)nfsd, PSOCK | PCATCH,
-				    "nfsd", 0);
-				nfsd_waiting--;
-				if (error)
-					goto done;
-			}
-			if (nfsd->nfsd_slp == NULL &&
-			    (nfsd_head_flag & NFSD_CHECKSLP) != 0) {
-				TAILQ_FOREACH(slp, &nfssvc_sockhead, ns_chain) {
-				    if ((slp->ns_flag & (SLP_VALID | SLP_DOREC))
-					== (SLP_VALID | SLP_DOREC)) {
-					    slp->ns_flag &= ~SLP_DOREC;
-					    slp->ns_sref++;
-					    nfsd->nfsd_slp = slp;
-					    break;
-				    }
-				}
-				if (slp == 0)
-					nfsd_head_flag &= ~NFSD_CHECKSLP;
-			}
-			if ((slp = nfsd->nfsd_slp) == (struct nfssvc_sock *)0)
-				continue;
+
+			/* attach an nfssvc_sock to nfsd */
+			error = nfsrv_getslp(nfsd);
+			if (error)
+				goto done;
+			slp = nfsd->nfsd_slp;
+
 			if (slp->ns_flag & SLP_VALID) {
 				if (slp->ns_flag & SLP_DISCONN)
 					nfsrv_zapsock(slp);
@@ -512,7 +491,6 @@ done:
 	TAILQ_REMOVE(&nfsd_head, nfsd, nfsd_chain);
 	splx(s);
 	free((caddr_t)nfsd, M_NFSD);
-	nsd->nsd_nfsd = (struct nfsd *)0;
 	if (--nfs_numnfsd == 0)
 		nfsrv_init(1);	/* Reinitialize everything */
 	return (error);
@@ -745,3 +723,46 @@ nfs_getset_niothreads(set)
 	}
 }
 #endif /* NFSCLIENT */
+
+#ifdef NFSSERVER
+/*
+ * Find an nfssrv_sock for nfsd, sleeping if needed.
+ */
+int
+nfsrv_getslp(struct nfsd *nfsd)
+{
+	struct nfssvc_sock *slp;
+	int error;
+
+again:
+	while (nfsd->nfsd_slp == NULL &&
+	    (nfsd_head_flag & NFSD_CHECKSLP) == 0) {
+		nfsd->nfsd_flag |= NFSD_WAITING;
+		nfsd_waiting++;
+		error = tsleep(nfsd, PSOCK | PCATCH, "nfsd", 0);
+		nfsd_waiting--;
+		if (error)
+			return (error);
+	}
+
+	if (nfsd->nfsd_slp == NULL &&
+	    (nfsd_head_flag & NFSD_CHECKSLP) != 0) {
+		TAILQ_FOREACH(slp, &nfssvc_sockhead, ns_chain) {
+			if ((slp->ns_flag & (SLP_VALID | SLP_DOREC)) ==
+			    (SLP_VALID | SLP_DOREC)) {
+				slp->ns_flag &= ~SLP_DOREC;
+				slp->ns_sref++;
+				nfsd->nfsd_slp = slp;
+				break;
+			}
+		}
+		if (slp == NULL)
+			nfsd_head_flag &= ~NFSD_CHECKSLP;
+	}
+
+	if (nfsd->nfsd_slp == NULL)
+		goto again;
+
+	return (0);
+}
+#endif /* NFSSERVER */

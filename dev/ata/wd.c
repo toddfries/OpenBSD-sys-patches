@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.73 2008/11/08 01:32:06 chl Exp $ */
+/*	$OpenBSD: wd.c,v 1.74 2009/06/03 22:09:30 thib Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -71,7 +71,6 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/buf.h>
-#include <sys/bufq.h>
 #include <sys/uio.h>
 #include <sys/malloc.h>
 #include <sys/device.h>

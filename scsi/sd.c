@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.154 2009/02/16 21:19:07 miod Exp $	*/
+/*	$OpenBSD: sd.c,v 1.155 2009/06/03 22:09:30 thib Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -56,7 +56,6 @@
 #include <sys/ioctl.h>
 #include <sys/mtio.h>
 #include <sys/buf.h>
-#include <sys/bufq.h>
 #include <sys/uio.h>
 #include <sys/malloc.h>
 #include <sys/errno.h>

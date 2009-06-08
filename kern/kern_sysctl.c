@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.169 2009/04/19 17:53:38 deraadt Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.171 2009/06/05 04:29:14 beck Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -535,6 +535,24 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case KERN_CPTIME2:
 		return (sysctl_cptime2(name + 1, namelen -1, oldp, oldlenp,
 		    newp, newlen));
+	case KERN_CACHEPCT: {
+		int opct, pgs;
+		opct = bufcachepercent;
+		error = sysctl_int(oldp, oldlenp, newp, newlen,
+		    &bufcachepercent);
+		if (error)
+			return(error);
+		if (bufcachepercent > 90 || bufcachepercent < 5) {
+			bufcachepercent = opct;
+			return (EINVAL);
+		}
+		if (bufcachepercent != opct) {
+			pgs = bufcachepercent * physmem / 100;
+			bufadjust(pgs); /* adjust bufpages */
+			bufhighpages = bufpages; /* set high water mark */
+		}
+		return(0);
+	}
 	default:
 		return (EOPNOTSUPP);
 	}

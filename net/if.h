@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.103 2009/01/27 09:17:51 dlg Exp $	*/
+/*	$OpenBSD: if.h,v 1.106 2009/06/05 00:05:21 claudio Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -215,6 +215,7 @@ struct ifnet {				/* and the entries */
 	struct	if_data if_data;	/* stats and other data about if */
 	u_int32_t if_hardmtu;		/* maximum MTU device supports */
 	int	if_capabilities;	/* interface capabilities */
+	u_int	if_rdomain;		/* routing instance */
 	char	if_description[IFDESCRSIZE]; /* interface description */
 	u_short	if_rtlabelid;		/* next route label */
 	u_int8_t if_priority;
@@ -281,6 +282,12 @@ struct ifnet {				/* and the entries */
 	    IFF_SIMPLEX|IFF_MULTICAST|IFF_ALLMULTI)
 
 #define IFXF_TXREADY	0x1		/* interface is ready to tx */
+#define	IFXF_NOINET6	0x2		/* don't do inet6 */
+#define	IFXF_DHCP	0x4		/* IPv4 autoconfiguration */
+#define IFXF_RTSOL	0x8		/* IPv6 autoconfiguration */
+
+#define	IFXF_CANTCHANGE \
+	(IFXF_TXREADY)
 
 /*
  * Some convenience macros used for setting ifi_baudrate.
@@ -419,7 +426,7 @@ struct if_msghdr {
 	u_short ifm_pad;
 	int	ifm_addrs;	/* like rtm_addrs */
 	int	ifm_flags;	/* value of if_flags */
-	int	ifm_pad2;
+	int	ifm_xflags;	/* value of if_xflags */
 	struct	if_data ifm_data;/* statistics and other data about if */
 };
 
@@ -574,6 +581,7 @@ struct	ifreq {
 		struct	sockaddr ifru_dstaddr;
 		struct	sockaddr ifru_broadaddr;
 		short	ifru_flags;
+		int	ifru_xflags;
 		int	ifru_metric;
 		caddr_t	ifru_data;
 	} ifr_ifru;
@@ -581,9 +589,11 @@ struct	ifreq {
 #define	ifr_dstaddr	ifr_ifru.ifru_dstaddr	/* other end of p-to-p link */
 #define	ifr_broadaddr	ifr_ifru.ifru_broadaddr	/* broadcast address */
 #define	ifr_flags	ifr_ifru.ifru_flags	/* flags */
+#define ifr_xflags	ifr_ifru.ifru_xflags	/* xflags */
 #define	ifr_metric	ifr_ifru.ifru_metric	/* metric */
 #define	ifr_mtu		ifr_ifru.ifru_metric	/* mtu (overload) */
 #define	ifr_media	ifr_ifru.ifru_metric	/* media options (overload) */
+#define	ifr_rdomainid	ifr_ifru.ifru_metric	/* VRF instance (overload) */
 #define	ifr_data	ifr_ifru.ifru_data	/* for use by interface */
 };
 
@@ -757,6 +767,10 @@ do {									\
 #define	IFQ_INC_DROPS(ifq)		((ifq)->ifq_drops++)
 #define	IFQ_SET_MAXLEN(ifq, len)	((ifq)->ifq_maxlen = (len))
 
+/* default interface priorities */
+#define IF_WIRED_DEFAULT_PRIORITY 0
+#define IF_WIRELESS_DEFAULT_PRIORITY 4
+
 extern int ifqmaxlen;
 extern struct ifnet_head ifnet;
 extern struct ifnet **ifindex2ifnet;
@@ -796,12 +810,12 @@ void	if_group_routechange(struct sockaddr *, struct sockaddr *);
 struct	ifnet *ifunit(const char *);
 void	if_start(struct ifnet *);
 
-struct	ifaddr *ifa_ifwithaddr(struct sockaddr *);
-struct	ifaddr *ifa_ifwithaf(int);
-struct	ifaddr *ifa_ifwithdstaddr(struct sockaddr *);
-struct	ifaddr *ifa_ifwithnet(struct sockaddr *);
+struct	ifaddr *ifa_ifwithaddr(struct sockaddr *, u_int);
+struct	ifaddr *ifa_ifwithaf(int, u_int);
+struct	ifaddr *ifa_ifwithdstaddr(struct sockaddr *, u_int);
+struct	ifaddr *ifa_ifwithnet(struct sockaddr *, u_int);
 struct	ifaddr *ifa_ifwithroute(int, struct sockaddr *,
-					struct sockaddr *);
+					struct sockaddr *, u_int);
 struct	ifaddr *ifaof_ifpforaddr(struct sockaddr *, struct ifnet *);
 void	ifafree(struct ifaddr *);
 void	link_rtrequest(int, struct rtentry *, struct rt_addrinfo *);

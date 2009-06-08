@@ -1,6 +1,7 @@
-/*	$OpenBSD: acpivideo.c,v 1.3 2009/06/03 00:36:59 pirofti Exp $	*/
+/*	$OpenBSD: acpivideo.c,v 1.5 2009/06/04 17:16:00 pirofti Exp $	*/
 /*
  * Copyright (c) 2008 Federico G. Schwindt <fgsch@openbsd.org>
+ * Copyright (c) 2009 Paul Irofti <pirofti@openbsd.org>
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -97,6 +98,7 @@ acpivideo_attach(struct device *parent, struct device *self, void *aux)
 
 	acpivideo_get_dod(sc);
 	aml_find_node(aaa->aaa_node, "_DCS", acpi_foundvout, sc);
+	aml_find_node(aaa->aaa_node, "_BCL", acpi_foundvout, sc);
 }
 
 int
@@ -170,6 +172,11 @@ acpi_foundvout(struct aml_node *node, void *arg)
 		av.aaa.aaa_node = node->parent;
 		av.aaa.aaa_name = "acpivout";
 		av.dod = sc->sc_dod[i];
+		/* 
+		 *  Make sure we don't attach twice if both _BCL and
+		 * _DCS methods are found by zeroing the DOD address.
+		 */
+		sc->sc_dod[i] = 0;
 
 		config_found(self, &av, acpivideo_print);
 	}

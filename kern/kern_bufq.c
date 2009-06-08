@@ -1,3 +1,5 @@
+/*	$OpenBSD: kern_bufq.c,v 1.2 2009/06/04 19:16:13 thib Exp $ */
+
 /*
  * Copyright (c) 2008, 2009	Thordur I. Bjornsson <thib@openbsd.org>
  * Copyright (c) 2004		Ted Unangst <tedu@openbsd.org>
@@ -21,7 +23,6 @@
 #include <sys/pool.h>
 #include <sys/proc.h>
 #include <sys/buf.h>
-#include <sys/bufq.h>
 #include <sys/errno.h>
 
 #include <sys/disklabel.h>

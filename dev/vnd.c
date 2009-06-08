@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.90 2008/09/03 23:24:25 krw Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.92 2009/06/04 05:57:27 krw Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -66,7 +66,6 @@
 #include <sys/proc.h>
 #include <sys/errno.h>
 #include <sys/buf.h>
-#include <sys/bufq.h>
 #include <sys/malloc.h>
 #include <sys/pool.h>
 #include <sys/ioctl.h>
@@ -750,6 +749,7 @@ int
 vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 {
 	int unit = vndunit(dev);
+	struct disklabel *lp;
 	struct vnd_softc *vnd;
 	struct vnd_ioctl *vio;
 	struct vnd_user *vnu;
@@ -945,6 +945,15 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		}
 
 		break;
+
+	case DIOCRLDINFO:
+		if ((vnd->sc_flags & VNF_HAVELABEL) == 0)
+			return (ENOTTY);
+		lp = malloc(sizeof(*lp), M_TEMP, M_WAITOK);
+		vndgetdisklabel(dev, vnd, lp, 0);
+		*(vnd->sc_dk.dk_label) = *lp;
+		free(lp, M_TEMP);
+		return (0);
 
 	case DIOCGPDINFO:
 		if ((vnd->sc_flags & VNF_HAVELABEL) == 0)

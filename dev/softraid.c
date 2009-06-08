@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.143 2009/06/03 06:30:10 marco Exp $ */
+/* $OpenBSD: softraid.c,v 1.145 2009/06/03 21:04:36 marco Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -213,7 +213,7 @@ sr_meta_attach(struct sr_discipline *sd, int force)
 
 	if (sd->sd_meta_type != SR_META_F_NATIVE) {
 		/* in memory copy of foreign metadata */
-		sd->sd_meta_foreign =  malloc(smd[sd->sd_meta_type].smd_size ,
+		sd->sd_meta_foreign = malloc(smd[sd->sd_meta_type].smd_size,
 		    M_DEVBUF, M_ZERO);
 		if (!sd->sd_meta_foreign) {
 			/* unwind frees sd_meta */
@@ -230,7 +230,7 @@ sr_meta_attach(struct sr_discipline *sd, int force)
 	}
 	sd->sd_vol.sv_chunks = malloc(sizeof(struct sr_chunk *) * i,
 	    M_DEVBUF, M_WAITOK | M_ZERO);
-	
+
 	/* fill out chunk array */
 	i = 0;
 	SLIST_FOREACH(ch_entry, cl, src_link)
@@ -1065,7 +1065,7 @@ sr_meta_native_probe(struct sr_softc *sc, struct sr_chunk *ch_entry)
 	if (label.d_partitions[part].p_fstype != FS_RAID) {
 		DNPRINTF(SR_D_META,
 		    "%s: %s partition not of type RAID (%d)\n", DEVNAME(sc) ,
-		        devname,
+		    devname,
 		    label.d_partitions[part].p_fstype);
 		goto unwind;
 	}
@@ -1476,23 +1476,39 @@ sr_wu_put(struct sr_workunit *wu)
 	TAILQ_INSERT_TAIL(&sd->sd_wu_freeq, wu, swu_link);
 	sd->sd_wu_pending--;
 
+	/* wake up sleepers */
+#ifdef DIAGNOSTIC
+	if (sd->sd_wu_sleep < 0)
+		panic("negative wu sleepers");
+#endif /* DIAGNOSTIC */
+	if (sd->sd_wu_sleep)
+		wakeup(&sd->sd_wu_sleep);
+
 	splx(s);
 }
 
 struct sr_workunit *
-sr_wu_get(struct sr_discipline *sd)
+sr_wu_get(struct sr_discipline *sd, int canwait)
 {
 	struct sr_workunit	*wu;
 	int			s;
 
 	s = splbio();
 
-	wu = TAILQ_FIRST(&sd->sd_wu_freeq);
-	if (wu) {
-		TAILQ_REMOVE(&sd->sd_wu_freeq, wu, swu_link);
-		wu->swu_state = SR_WU_INPROGRESS;
+	for (;;) {
+		wu = TAILQ_FIRST(&sd->sd_wu_freeq);
+		if (wu) {
+			TAILQ_REMOVE(&sd->sd_wu_freeq, wu, swu_link);
+			wu->swu_state = SR_WU_INPROGRESS;
+			sd->sd_wu_pending++;
+			break;
+		} else if (wu == NULL && canwait) {
+			sd->sd_wu_sleep++;
+			tsleep(&sd->sd_wu_sleep, PRIBIO, "sr_wu_get", 0);
+			sd->sd_wu_sleep--;
+		} else
+			break;
 	}
-	sd->sd_wu_pending++;
 
 	splx(s);
 
@@ -1547,7 +1563,11 @@ sr_scsi_cmd(struct scsi_xfer *xs)
 		goto stuffup;
 	}
 
-	if ((wu = sr_wu_get(sd)) == NULL) {
+	/*
+	 * we'll let the midlayer deal with stalls instead of being clever
+	 * and sending sr_wu_get !(xs->flags & SCSI_NOSLEEP) in cansleep
+	 */
+	if ((wu = sr_wu_get(sd, 0)) == NULL) {
 		DNPRINTF(SR_D_CMD, "%s: sr_scsi_cmd no wu\n", DEVNAME(sc));
 		return (NO_CCB);
 	}
@@ -1937,7 +1957,7 @@ sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 		goto done;
 	}
 
-	printf("%s: trying rebuild %s from %s\n", DEVNAME(sc),
+	printf("%s: trying to rebuild %s to %s\n", DEVNAME(sc),
 	    sd->sd_meta->ssd_devname, devname);
 
 	kthread_create_deferred(sr_rebuild, sd);
@@ -2874,6 +2894,15 @@ sr_rebuild_thread(void *arg)
 		restart = 0;
 	}
 	if (restart) {
+		/*
+		 * XXX there is a hole here; there is a posibility that we
+		 * had a restart however the chunk that was supposed to
+		 * be rebuilt is no longer valid; we can reach this situation
+		 * when a rebuild is in progress and the box crashes and
+		 * on reboot the rebuild chunk is different (like zero'd or
+		 * replaced).  We need to check the uuid of the chunk that is
+		 * being rebuilt to assert this.
+		 */
 		psz = sd->sd_meta->ssdi.ssd_size;
 		rb = sd->sd_meta->ssd_rebuild;
 		percent = 100 - ((psz * 100 - rb * 100) / psz);
@@ -2898,9 +2927,11 @@ sr_rebuild_thread(void *arg)
 		mysize += sz;
 		lba = blk * sz;
 
-		/* XXX be nicer than panic */
-		if ((wu_r = sr_wu_get(sd)) == NULL)
+		/* get some wu */
+		if ((wu_r = sr_wu_get(sd, 1)) == NULL)
 			panic("%s: rebuild exhausted wu_r", DEVNAME(sc));
+		if ((wu_w = sr_wu_get(sd, 1)) == NULL)
+			panic("%s: rebuild exhausted wu_w", DEVNAME(sc));
 
 		/* setup read io */
 		bzero(&xs_r, sizeof xs_r);
@@ -2914,15 +2945,13 @@ sr_rebuild_thread(void *arg)
 		_lto4b(sz, cr.length);
 		_lto8b(lba, cr.addr);
 		xs_r.cmd = (struct scsi_generic *)&cr;
-		wu_r->swu_flags = SR_WUF_REBUILD;
+		wu_r->swu_flags |= SR_WUF_REBUILD;
 		wu_r->swu_xs = &xs_r;
-		/* XXX be nicer than panic */
-		if (sd->sd_scsi_rw(wu_r))
-			panic("read failed");
-
-		/* XXX be nicer than panic */
-		if ((wu_w = sr_wu_get(sd)) == NULL)
-			panic("%s: rebuild exhausted wu_w", DEVNAME(sc));
+		if (sd->sd_scsi_rw(wu_r)) {
+			printf("%s: could not create read io\n",
+			    DEVNAME(sc));
+			goto fail;
+		}
 
 		/* setup write io */
 		bzero(&xs_w, sizeof xs_w);
@@ -2936,10 +2965,13 @@ sr_rebuild_thread(void *arg)
 		_lto4b(sz, cw.length);
 		_lto8b(lba, cw.addr);
 		xs_w.cmd = (struct scsi_generic *)&cw;
-		wu_w->swu_flags = SR_WUF_REBUILD;
+		wu_w->swu_flags |= SR_WUF_REBUILD;
 		wu_w->swu_xs = &xs_w;
-		if (sd->sd_scsi_rw(wu_w))
-			panic("write failed");
+		if (sd->sd_scsi_rw(wu_w)) {
+			printf("%s: could not create write io\n",
+			    DEVNAME(sc));
+			goto fail;
+		}
 
 		/*
 		 * collide with the read io so that we get automatically
@@ -2991,7 +3023,7 @@ abort:
 	if (sr_meta_save(sd, SR_META_DIRTY))
 		printf("%s: could not save metadata to %s\n",
 		    DEVNAME(sc), sd->sd_meta->ssd_devname);
-
+fail:
 	free(buf, M_DEVBUF);
 	sd->sd_reb_active = 0;
 	kthread_exit(0);
