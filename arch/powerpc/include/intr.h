@@ -1,8 +1,8 @@
-/*	$OpenBSD: intr.h,v 1.37 2008/09/19 01:42:05 drahn Exp $ */
+/*	$OpenBSD: intr.h,v 1.40 2009/06/02 21:38:10 drahn Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom, Opsycon AB and RTMX Inc, USA.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -84,13 +84,6 @@ extern struct ppc_intr_func {
 	ppc_splx_t *x;
 }ppc_intr_func;
 
-#if 0
-/* does it make sense to call directly ?? */
-#define	splraise(x)	ppc_intr.raise(x)
-#define	spllower(x)	ppc_intr.lower(x)
-#define	splx(x)		ppc_intr.x(x)
-#endif
-
 extern int ppc_smask[IPL_NUM];
 
 void ppc_smask_init(void);
@@ -100,16 +93,9 @@ void do_pending_int(void);
 
 /* SPL asserts */
 #define	splassert(wantipl)	/* nothing */
+#define	splsoftassert(wantipl)	/* nothing */
 
 #define	set_sint(p)	atomic_setbits_int(&curcpu()->ci_ipending, p)
-
-#if 0
-#define	SINT_CLOCK	0x10000000
-#define	SINT_NET	0x20000000
-#define	SINT_TTY	0x40000000
-#define	SPL_CLOCK	0x80000000
-#define	SINT_MASK	(SINT_CLOCK|SINT_NET|SINT_TTY)
-#endif
 
 #define	splbio()	splraise(IPL_BIO)
 #define	splnet()	splraise(IPL_NET)
@@ -127,7 +113,7 @@ void do_pending_int(void);
 #define	setsoftclock()	set_sint(SI_TO_IRQBIT(SI_SOFTCLOCK))
 #define	setsoftnet()	set_sint(SI_TO_IRQBIT(SI_SOFTNET))
 #define	setsofttty()	set_sint(SI_TO_IRQBIT(SI_SOFTTTY))
-
+ 
 #define	splhigh()	splraise(IPL_HIGH)
 #define	spl0()		spllower(IPL_NONE)
 
@@ -147,7 +133,7 @@ struct intrhand {
 
 struct intrq {
 	TAILQ_HEAD(, intrhand) iq_list; /* handler list */
-	int iq_ipl;			/* IPL_ to mask while handling */ 
+	int iq_ipl;			/* IPL_ to mask while handling */
 	int iq_ist;			/* share type */
 };
 
@@ -163,6 +149,7 @@ void softnet(int isr);
 #define	SI_SOFTNET		2	/* for IPL_SOFTNET */
 #define	SI_SOFTTTY		3	/* for IPL_SOFTSERIAL */
 
+#if 0
 #define	SI_NQUEUES		4
 
 #define SI_QUEUENAMES {		\
@@ -171,6 +158,7 @@ void softnet(int isr);
 	"net",			\
 	"serial",		\
 }
+#endif
 
 #define PPC_IPI_NOP		0
 #define PPC_IPI_DDB		1

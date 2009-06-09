@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.144 2008/08/01 01:44:20 dlg Exp $	*/
+/*	$OpenBSD: cd.c,v 1.147 2009/06/03 22:09:30 thib Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -74,7 +74,7 @@
 #include <scsi/scsiconf.h>
 
 
-#include <ufs/ffs/fs.h>			/* for BBSIZE and SBSIZE */
+#include <ufs/ffs/fs.h>		/* for BBSIZE and SBSIZE */
 
 #define	CDOUTSTANDING	4
 
@@ -98,7 +98,6 @@ void	cdrestart(void *);
 void	cdminphys(struct buf *);
 void	cdgetdisklabel(dev_t, struct cd_softc *, struct disklabel *, int);
 void	cddone(struct scsi_xfer *);
-void	cd_kill_buffers(struct cd_softc *);
 int	cd_setchan(struct cd_softc *, int, int, int, int, int);
 int	cd_getvol(struct cd_softc *cd, struct ioc_vol *, int);
 int	cd_setvol(struct cd_softc *, const struct ioc_vol *, int);
@@ -125,6 +124,10 @@ int    dvd_read_manufact(struct cd_softc *, union dvd_struct *);
 int    dvd_read_struct(struct cd_softc *, union dvd_struct *);
 
 void	cd_powerhook(int why, void *arg);
+
+#if defined(__macppc__)
+int	cd_eject(void);
+#endif
 
 struct cfattach cd_ca = {
 	sizeof(struct cd_softc), cdmatch, cdattach,
@@ -244,7 +247,7 @@ cddetach(struct device *self, int flags)
 	struct cd_softc *cd = (struct cd_softc *)self;
 	int bmaj, cmaj, mn;
 
-	cd_kill_buffers(cd);
+	bufq_drain(cd->sc_dk.dk_bufq);
 
 	/* Locate the lowest minor number to be detached. */
 	mn = DISKMINOR(self->dv_unit, 0);
@@ -495,7 +498,7 @@ cdstrategy(struct buf *bp)
 	/*
 	 * Place it in the queue of disk activities for this disk
 	 */
-	disksort(&cd->buf_queue, bp);
+	BUFQ_ADD(cd->sc_dk.dk_bufq, bp);
 
 	/*
 	 * Tell the device to get going on the transfer if it's
@@ -542,8 +545,7 @@ cdstart(void *v)
 {
 	struct cd_softc *cd = v;
 	struct scsi_link *sc_link = cd->sc_link;
-	struct buf *bp = 0;
-	struct buf *dp;
+	struct buf *bp = NULL;
 	struct scsi_rw_big cmd_big;
 	struct scsi_rw cmd_small;
 	struct scsi_generic *cmdp;
@@ -568,13 +570,9 @@ cdstart(void *v)
 			return;
 		}
 
-		/*
-		 * See if there is a buf with work for us to do..
-		 */
-		dp = &cd->buf_queue;
-		if ((bp = dp->b_actf) == NULL)	/* yes, an assign */
+		/* See if there is a buf with work for us to do..*/
+		if ((bp = BUFQ_GET(cd->sc_dk.dk_bufq)) == NULL)
 			return;
-		dp->b_actf = bp->b_actf;
 
 		/*
 		 * If the device has become invalid, abort all the
@@ -651,7 +649,7 @@ cdstart(void *v)
 			/*
 			 * The device can't start another i/o. Try again later.
 			 */
-			dp->b_actf = bp;
+			BUFQ_ADD(cd->sc_dk.dk_bufq, bp);
 			disk_unbusy(&cd->sc_dk, 0, 0);
 			timeout_add(&cd->sc_timeout, 1);
 			return;
@@ -712,7 +710,7 @@ cdminphys(struct buf *bp)
 			bp->b_bcount = max;
 	}
 
-	(*cd->sc_link->adapter->scsi_minphys)(bp);
+	(*cd->sc_link->adapter->scsi_minphys)(bp, cd->sc_link);
 
 	device_unref(&cd->sc_dev);
 }
@@ -1949,22 +1947,33 @@ cd_interpret_sense(struct scsi_xfer *xs)
 	return (EJUSTRETURN); /* use generic handler in scsi_base */
 }
 
-/*
- * Remove unprocessed buffers from queue.
- */
-void
-cd_kill_buffers(struct cd_softc *cd)
+#if defined(__macppc__)
+int
+cd_eject(void)
 {
-	struct buf *dp, *bp;
-	int s;
+	struct cd_softc *cd;
+	int error = 0;
+	
+	if (cd_cd.cd_ndevs == 0 || (cd = cd_cd.cd_devs[0]) == NULL)
+		return (ENXIO);
 
-	s = splbio();
-	for (dp = &cd->buf_queue; (bp = dp->b_actf) != NULL; ) {
-		dp->b_actf = bp->b_actf;
+	if ((error = cdlock(cd)) != 0)
+		return (error);
 
-		bp->b_error = ENXIO;
-		bp->b_flags |= B_ERROR;
-		biodone(bp);
+	if (cd->sc_dk.dk_openmask == 0) {
+		cd->sc_link->flags |= SDEV_EJECTING;
+
+		scsi_prevent(cd->sc_link, PR_ALLOW,
+		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_NOT_READY |
+		    SCSI_SILENT | SCSI_IGNORE_MEDIA_CHANGE);
+		cd->sc_link->flags &= ~SDEV_MEDIA_LOADED;
+
+		scsi_start(cd->sc_link, SSS_STOP|SSS_LOEJ, 0);
+
+		cd->sc_link->flags &= ~SDEV_EJECTING;
 	}
-	splx(s);
+	cdunlock(cd);
+
+	return (error);
 }
+#endif

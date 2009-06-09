@@ -1,4 +1,4 @@
-/*	$OpenBSD: hmevar.h,v 1.10 2008/06/26 05:42:15 ray Exp $	*/
+/*	$OpenBSD: hmevar.h,v 1.12 2009/04/17 20:20:18 kettenis Exp $	*/
 /*	$NetBSD: hmevar.h,v 1.6 2000/09/28 10:56:57 tsutsui Exp $	*/
 
 /*-
@@ -37,11 +37,11 @@
 #define	HME_RX_RING_MAX		256
 #define	HME_TX_RING_MAX		256
 #define	HME_RX_PKTSIZE		1600
+#define	HME_TX_NSEGS		16
 
 struct hme_sxd {
 	struct mbuf *sd_mbuf;		/* descriptor mbuf */
 	bus_dmamap_t sd_map;		/* descriptor dmamap */
-	int sd_loaded;			/* descriptor dmamap loaded? */
 };
 
 struct hme_ring {
@@ -89,7 +89,7 @@ struct hme_softc {
 	struct hme_sxd sc_txd[HME_TX_RING_MAX], sc_rxd[HME_RX_RING_MAX];
 	bus_dmamap_t	sc_rxmap_spare;
 	int	sc_tx_cnt, sc_tx_prod, sc_tx_cons;
-	int	sc_last_rd;
+	int	sc_rx_cnt, sc_rx_prod, sc_rx_cons;
 	u_int32_t sc_tcvr;
 };
 

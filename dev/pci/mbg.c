@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbg.c,v 1.25 2008/09/10 14:01:23 blambert Exp $ */
+/*	$OpenBSD: mbg.c,v 1.28 2009/04/26 02:20:58 cnst Exp $ */
 
 /*
  * Copyright (c) 2006, 2007 Marc Balmer <mbalmer@openbsd.org>
@@ -168,7 +168,7 @@ int
 mbg_probe(struct device *parent, void *match, void *aux)
 {
 	return pci_matchbyid((struct pci_attach_args *)aux, mbg_devices,
-	    sizeof(mbg_devices) / sizeof(mbg_devices[0]));
+	    nitems(mbg_devices));
 }
 
 void
@@ -208,14 +208,10 @@ mbg_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_timedelta.type = SENSOR_TIMEDELTA;
 	sc->sc_timedelta.status = SENSOR_S_UNKNOWN;
-	sc->sc_timedelta.value = 0LL;
-	sc->sc_timedelta.flags = 0;
 	sensor_attach(&sc->sc_sensordev, &sc->sc_timedelta);
 
 	sc->sc_signal.type = SENSOR_PERCENT;
 	sc->sc_signal.status = SENSOR_S_UNKNOWN;
-	sc->sc_signal.value = 0LL;
-	sc->sc_signal.flags = 0;
 	strlcpy(sc->sc_signal.desc, "Signal", sizeof(sc->sc_signal.desc));
 	sensor_attach(&sc->sc_sensordev, &sc->sc_signal);
 
@@ -562,8 +558,8 @@ mbg_read_asic(struct mbg_softc *sc, int cmd, char *buf, size_t len,
 }
 
 /*
- * Degrade the sensor state if we are feerunning for more than
- * TRUSTTIME seconds.
+ * degrade the sensor state if we are feerunning for more than
+ * sc->sc_trust seconds.
  */
 void
 mbg_timeout(void *xsc)
@@ -573,8 +569,8 @@ mbg_timeout(void *xsc)
 	if (sc->sc_timedelta.status == SENSOR_S_OK) {
 		sc->sc_timedelta.status = SENSOR_S_WARN;
 		/*
-		 * further degrade in TRUSTTIME seconds if no new valid NMEA
-		 * sentences are received.
+		 * further degrade in sc->sc_trust seconds if no new valid
+		 * time data can be read from the device.
 		 */
 		timeout_add_sec(&sc->sc_timeout, sc->sc_trust);
 	} else

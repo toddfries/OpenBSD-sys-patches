@@ -1,4 +1,4 @@
-/* $OpenBSD: acpitz.c,v 1.28 2008/09/12 12:35:19 miod Exp $ */
+/* $OpenBSD: acpitz.c,v 1.31 2009/04/26 02:20:58 cnst Exp $ */
 /*
  * Copyright (c) 2006 Can Erkin Acar <canacar@openbsd.org>
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
@@ -142,7 +142,6 @@ acpitz_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_sens.type = SENSOR_TEMP;
 	sensor_attach(&sc->sc_sensdev, &sc->sc_sens);
 	sensordev_install(&sc->sc_sensdev);
-	sc->sc_sens.value = 0;
 
 	aml_register_notify(sc->sc_devnode, NULL,
 	    acpitz_notify, sc, ACPIDEV_POLL);
@@ -183,9 +182,10 @@ int
 acpitz_setfan(struct acpitz_softc *sc, int i, char *method)
 {
 	struct aml_node		*node;
-	struct aml_value	res0, res1, res2, *ref;
+	struct aml_value	res0, res1, *ref;
 	char			name[8];
 	int			rv = 1, x, y;
+	int64_t			sta;
 
 	dnprintf(20, "%s: acpitz_setfan(%d, %s)\n", DEVNAME(sc), i, method);
 
@@ -260,13 +260,12 @@ acpitz_setfan(struct acpitz_softc *sc, int i, char *method)
 				    DEVNAME(sc), name, x, y, method);
 
 			/* save off status of fan */
-			if (aml_evalname(sc->sc_acpi, ref->node, "_STA", 0,
-			    NULL, &res2))
+			if (aml_evalinteger(sc->sc_acpi, ref->node, "_STA", 0,
+			    NULL, &sta))
 				printf("%s: %s[%d.%d] _STA fails\n",
 				    DEVNAME(sc), name, x, y);
 			else {
-				sc->sc_ac_stat[i] = aml_val2int(&res2);
-				aml_freevalue(&res2);
+				sc->sc_ac_stat[i] = sta;
 			}
 		}
 		aml_freevalue(&res1);
@@ -337,7 +336,7 @@ acpitz_refresh(void *arg)
 				acpitz_setfan(sc, i, "_OFF");
 		}
 	}
-	sc->sc_sens.value = sc->sc_tmp * 100000;
+	sc->sc_sens.value = sc->sc_tmp * 100000 - 50000;
 }
 
 int

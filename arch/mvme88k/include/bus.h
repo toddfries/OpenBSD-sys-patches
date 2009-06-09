@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.5 2006/04/26 21:09:50 miod Exp $	*/
+/*	$OpenBSD: bus.h,v 1.7 2009/05/31 17:42:13 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  *
@@ -729,7 +729,6 @@ void d16_bzero(void *, size_t);
 #define	BUS_DMA_NOWAIT		0x001	/* not safe to sleep */
 #define	BUS_DMA_ALLOCNOW	0x002	/* perform resource allocation now */
 #define	BUS_DMA_COHERENT	0x004	/* hint: map memory DMA coherent */
-#define	BUS_DMAMEM_NOSYNC	0x008
 #define	BUS_DMA_BUS1		0x010	/* placeholders for bus functions... */
 #define	BUS_DMA_BUS2		0x020
 #define	BUS_DMA_BUS3		0x040
@@ -737,6 +736,7 @@ void d16_bzero(void *, size_t);
 #define	BUS_DMA_READ		0x100	/* mapping is device -> memory only */
 #define	BUS_DMA_WRITE		0x200	/* mapping is memory -> device only */
 #define	BUS_DMA_STREAMING	0x400	/* hint: sequential, unidirectional */
+#define	BUS_DMA_ZERO		0x800	/* zero memory in dmamem_alloc */
 
 #define BUS_DMASYNC_PREREAD	0x01
 #define BUS_DMASYNC_POSTREAD	0x02

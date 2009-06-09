@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipip.c,v 1.41 2008/06/10 09:57:51 todd Exp $ */
+/*	$OpenBSD: ip_ipip.c,v 1.43 2009/06/05 00:05:22 claudio Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -39,6 +39,8 @@
  * IP-inside-IP processing
  */
 
+#include "pf.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -66,6 +68,10 @@
 #include <netinet/ip_ipip.h>
 
 #include "bpfilter.h"
+
+#if NPF > 0
+#include <net/pfvar.h>
+#endif
 
 #ifdef ENCDEBUG
 #define DPRINTF(x)	if (encdebug) printf x
@@ -282,6 +288,8 @@ ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp)
 	    !(m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK)) &&
 	    ipip_allow != 2) {
 		TAILQ_FOREACH(ifp, &ifnet, if_list) {
+			if (ifp->if_rdomain != m->m_pkthdr.rdomain)
+				continue;
 			TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 #ifdef INET
 				if (ipo) {
@@ -352,6 +360,9 @@ ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp)
 	if (gifp && gifp->if_bpf)
 		bpf_mtap_af(gifp->if_bpf, ifq == &ipintrq ? AF_INET : AF_INET6,
 		    m, BPF_DIRECTION_IN);
+#endif
+#if NPF > 0
+	pf_pkt_addr_changed(m);
 #endif
 
 	s = splnet();			/* isn't it already? */

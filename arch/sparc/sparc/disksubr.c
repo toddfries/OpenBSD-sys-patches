@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.76 2008/06/29 20:05:22 krw Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.81 2009/06/04 21:13:02 deraadt Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.16 1996/04/28 20:25:59 thorpej Exp $ */
 
 /*
@@ -76,6 +76,7 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *),
 
 	if ((msg = initdisklabel(lp)))
 		goto done;
+	lp->d_flags |= D_VENDOR;
 
 	/*
 	 * On sparc64 we check for a CD label first, because our
@@ -96,7 +97,7 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *),
 	}
 #endif /* NCD > 0 */
 
-	/* get a buffer and initialize it */
+	/* get buffer and initialize it */
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
 
@@ -118,7 +119,7 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *),
 		goto done;
 	}
 
-	msg = checkdisklabel(bp->b_data + LABELOFFSET, lp);
+	msg = checkdisklabel(bp->b_data + LABELOFFSET, lp, 0, DL_GETDSIZE(lp));
 	if (msg == NULL)
 		goto done;
 
@@ -158,7 +159,7 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 	struct buf *bp = NULL;
 	int error;
 
-	/* get a buffer and initialize it */
+	/* get buffer and initialize it */
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
 
@@ -233,7 +234,7 @@ sun_extended_sum(struct sun_disklabel *sl, void *end)
  *
  * The BSD label is cleared out before this is called.
  */
-char *
+static char *
 disklabel_sun_to_bsd(struct sun_disklabel *sl, struct disklabel *lp)
 {
 	struct sun_preamble *preamble = (struct sun_preamble *)sl;
@@ -384,7 +385,7 @@ disklabel_sun_to_bsd(struct sun_disklabel *sl, struct disklabel *lp)
 
 	lp->d_checksum = 0;
 	lp->d_checksum = dkcksum(lp);
-	return (NULL);
+	return (checkdisklabel(lp, lp, 0, DL_GETDSIZE(lp)));
 }
 
 /*
@@ -421,27 +422,28 @@ disklabel_bsd_to_sun(struct disklabel *lp, struct sun_disklabel *sl)
 	for (i = 0; i < 8; i++) {
 		spp = &sl->sl_part[i];
 		npp = &lp->d_partitions[i];
-
-		if (DL_GETPOFFSET(npp) % secpercyl)
-			return (EINVAL);
-		spp->sdkp_cyloffset = DL_GETPOFFSET(npp) / secpercyl;
-		spp->sdkp_nsectors = DL_GETPSIZE(npp);
+		spp->sdkp_cyloffset = 0;
+		spp->sdkp_nsectors = 0;
+		if (DL_GETPSIZE(npp)) {
+			if (DL_GETPOFFSET(npp) % secpercyl)
+				return (EINVAL);
+			spp->sdkp_cyloffset = DL_GETPOFFSET(npp) / secpercyl;
+			spp->sdkp_nsectors = DL_GETPSIZE(npp);
+		}
 	}
 	sl->sl_magic = SUN_DKMAGIC;
 
 	for (i = 0; i < SUNXPART; i++) {
-		if (DL_GETPOFFSET(&lp->d_partitions[i+8]) ||
-		    DL_GETPSIZE(&lp->d_partitions[i+8]))
-			break;
-	}
-	for (i = 0; i < SUNXPART; i++) {
 		spp = &sl->sl_xpart[i];
 		npp = &lp->d_partitions[i+8];
-		if (DL_GETPOFFSET(npp) % secpercyl)
-			return (EINVAL);
-		sl->sl_xpart[i].sdkp_cyloffset =
-		    DL_GETPOFFSET(npp) / secpercyl;
-		sl->sl_xpart[i].sdkp_nsectors = DL_GETPSIZE(npp);
+		spp->sdkp_cyloffset = 0;
+		spp->sdkp_nsectors = 0;
+		if (DL_GETPSIZE(npp)) {
+			if (DL_GETPOFFSET(npp) % secpercyl)
+				return (EINVAL);
+			spp->sdkp_cyloffset = DL_GETPOFFSET(npp) / secpercyl;
+			spp->sdkp_nsectors = DL_GETPSIZE(npp);
+		}
 	}
 	for (i = 0; i < MAXPARTITIONS; i++) {
 		npp = &lp->d_partitions[i];

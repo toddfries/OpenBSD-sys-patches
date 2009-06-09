@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_meter.c,v 1.24 2007/12/15 03:42:57 deraadt Exp $	*/
+/*	$OpenBSD: uvm_meter.c,v 1.27 2009/05/08 13:50:15 ariane Exp $	*/
 /*	$NetBSD: uvm_meter.c,v 1.21 2001/07/14 06:36:03 matt Exp $	*/
 
 /*
@@ -76,13 +76,13 @@ static fixpt_t cexp[3] = {
  * prototypes
  */
 
-static void uvm_loadav(struct loadavg *);
+void uvm_loadav(struct loadavg *);
 
 /*
  * uvm_meter: calculate load average and wake up the swapper (if needed)
  */
 void
-uvm_meter()
+uvm_meter(void)
 {
 	if ((time_second % 5) == 0)
 		uvm_loadav(&averunnable);
@@ -94,14 +94,18 @@ uvm_meter()
  * uvm_loadav: compute a tenex style load average of a quantity on
  * 1, 5, and 15 minute intervals.
  */
-static void
-uvm_loadav(avg)
-	struct loadavg *avg;
+void
+uvm_loadav(struct loadavg *avg)
 {
+	CPU_INFO_ITERATOR cii;
+	struct cpu_info *ci;
 	int i, nrun;
 	struct proc *p;
+	int nrun_cpu[MAXCPUS];
 
 	nrun = 0;
+	memset(nrun_cpu, 0, sizeof(nrun_cpu));
+
 	LIST_FOREACH(p, &allproc, p_list) {
 		switch (p->p_stat) {
 		case SSLEEP:
@@ -114,25 +118,33 @@ uvm_loadav(avg)
 				continue;
 		case SIDL:
 			nrun++;
+			if (p->p_cpu)
+				nrun_cpu[CPU_INFO_UNIT(p->p_cpu)]++;
 		}
 	}
-	for (i = 0; i < 3; i++)
+
+	for (i = 0; i < 3; i++) {
 		avg->ldavg[i] = (cexp[i] * avg->ldavg[i] +
 		    nrun * FSCALE * (FSCALE - cexp[i])) >> FSHIFT;
+	}
+
+	CPU_INFO_FOREACH(cii, ci) {
+		struct schedstate_percpu *spc = &ci->ci_schedstate;
+
+		if (nrun_cpu[CPU_INFO_UNIT(ci)] == 0)
+			continue;
+		spc->spc_ldavg = (cexp[0] * spc->spc_ldavg +
+		    nrun_cpu[CPU_INFO_UNIT(ci)] * FSCALE *
+		    (FSCALE - cexp[0])) >> FSHIFT;
+	}		
 }
 
 /*
  * uvm_sysctl: sysctl hook into UVM system.
  */
 int
-uvm_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
-	int *name;
-	u_int namelen;
-	void *oldp;
-	size_t *oldlenp;
-	void *newp;
-	size_t newlen;
-	struct proc *p;
+uvm_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
+    size_t newlen, struct proc *p)
 {
 	struct vmtotal vmtotals;
 	int rv, t;
@@ -232,8 +244,7 @@ uvm_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
  * uvm_total: calculate the current state of the system.
  */
 void
-uvm_total(totalp)
-	struct vmtotal *totalp;
+uvm_total(struct vmtotal *totalp)
 {
 	struct proc *p;
 #if 0

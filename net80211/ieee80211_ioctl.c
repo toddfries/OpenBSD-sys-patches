@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_ioctl.c,v 1.26 2008/10/02 20:21:15 brad Exp $	*/
+/*	$OpenBSD: ieee80211_ioctl.c,v 1.32 2009/06/06 07:57:27 damien Exp $	*/
 /*	$NetBSD: ieee80211_ioctl.c,v 1.15 2004/05/06 02:58:16 dyoung Exp $	*/
 
 /*-
@@ -164,10 +164,9 @@ ieee80211_ioctl_setnwkeys(struct ieee80211com *ic,
 			k->k_cipher = IEEE80211_CIPHER_WEP40;
 		else
 			k->k_cipher = IEEE80211_CIPHER_WEP104;
-		k->k_len = nwkey->i_key[i].i_keylen;
+		k->k_len = ieee80211_cipher_keylen(k->k_cipher);
 		k->k_flags = IEEE80211_KEY_GROUP | IEEE80211_KEY_TX;
-		error = copyin(nwkey->i_key[i].i_keydat, k->k_key,
-		    nwkey->i_key[i].i_keylen);
+		error = copyin(nwkey->i_key[i].i_keydat, k->k_key, k->k_len);
 		if (error != 0)
 			return error;
 		if ((error = (*ic->ic_set_key)(ic, NULL, k)) != 0)
@@ -238,15 +237,15 @@ ieee80211_ioctl_setwpaparms(struct ieee80211com *ic,
 
 	ic->ic_rsnakms = 0;
 	if (wpa->i_akms & IEEE80211_WPA_AKM_PSK)
-		ic->ic_rsnakms |=
-		    IEEE80211_AKM_PSK | IEEE80211_AKM_SHA256_PSK;
-	if (wpa->i_akms & IEEE80211_WPA_AKM_IEEE8021X)
-		ic->ic_rsnakms |=
-		    IEEE80211_AKM_8021X | IEEE80211_AKM_SHA256_8021X;
-	if (ic->ic_rsnakms == 0)	/* set to default (PSK+802.1X) */
-		ic->ic_rsnakms =
-		    IEEE80211_AKM_PSK | IEEE80211_AKM_8021X |
-		    IEEE80211_AKM_SHA256_PSK | IEEE80211_AKM_SHA256_8021X;
+		ic->ic_rsnakms |= IEEE80211_AKM_PSK;
+	if (wpa->i_akms & IEEE80211_WPA_AKM_SHA256_PSK)
+		ic->ic_rsnakms |= IEEE80211_AKM_SHA256_PSK;
+	if (wpa->i_akms & IEEE80211_WPA_AKM_8021X)
+		ic->ic_rsnakms |= IEEE80211_AKM_8021X;
+	if (wpa->i_akms & IEEE80211_WPA_AKM_SHA256_8021X)
+		ic->ic_rsnakms |= IEEE80211_AKM_SHA256_8021X;
+	if (ic->ic_rsnakms == 0)	/* set to default (PSK) */
+		ic->ic_rsnakms = IEEE80211_AKM_PSK;
 
 	if (wpa->i_groupcipher == IEEE80211_WPA_CIPHER_WEP40)
 		ic->ic_rsngroupcipher = IEEE80211_CIPHER_WEP40;
@@ -292,12 +291,14 @@ ieee80211_ioctl_getwpaparms(struct ieee80211com *ic,
 		wpa->i_protos |= IEEE80211_WPA_PROTO_WPA2;
 
 	wpa->i_akms = 0;
-	if (ic->ic_rsnakms &
-	    (IEEE80211_AKM_PSK | IEEE80211_AKM_SHA256_PSK))
+	if (ic->ic_rsnakms & IEEE80211_AKM_PSK)
 		wpa->i_akms |= IEEE80211_WPA_AKM_PSK;
-	if (ic->ic_rsnakms &
-	    (IEEE80211_AKM_8021X | IEEE80211_AKM_SHA256_8021X))
-		wpa->i_akms |= IEEE80211_WPA_AKM_IEEE8021X;
+	if (ic->ic_rsnakms & IEEE80211_AKM_SHA256_PSK)
+		wpa->i_akms |= IEEE80211_WPA_AKM_SHA256_PSK;
+	if (ic->ic_rsnakms & IEEE80211_AKM_8021X)
+		wpa->i_akms |= IEEE80211_WPA_AKM_8021X;
+	if (ic->ic_rsnakms & IEEE80211_AKM_SHA256_8021X)
+		wpa->i_akms |= IEEE80211_WPA_AKM_SHA256_8021X;
 
 	if (ic->ic_rsngroupcipher == IEEE80211_CIPHER_WEP40)
 		wpa->i_groupcipher = IEEE80211_WPA_CIPHER_WEP40;
@@ -446,8 +447,6 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ka = (struct ieee80211_keyavail *)data;
 		(void)ieee80211_pmksa_add(ic, IEEE80211_AKM_8021X,
 		    ka->i_macaddr, ka->i_key, ka->i_lifetime);
-		(void)ieee80211_pmksa_add(ic, IEEE80211_AKM_SHA256_8021X,
-		    ka->i_macaddr, ka->i_key, ka->i_lifetime);
 		break;
 	case SIOCS80211KEYRUN:
 		if ((error = suser(curproc, 0)) != 0)
@@ -575,6 +574,11 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		chanreq->i_channel = ieee80211_chan2ieee(ic, chan);
 		break;
+	case SIOCG80211ALLCHANS:
+		error = copyout(ic->ic_channels,
+		    ((struct ieee80211_chanreq_all *)data)->i_chans,
+		    sizeof(ic->ic_channels));
+		break;
 #if 0
 	case SIOCG80211ZSTATS:
 #endif
@@ -594,8 +598,8 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			error = EINVAL;
 			break;
 		}
-		if (!(IEEE80211_TXPOWER_MIN < txpower->i_val &&
-			txpower->i_val < IEEE80211_TXPOWER_MAX)) {
+		if (!(IEEE80211_TXPOWER_MIN <= txpower->i_val &&
+			txpower->i_val <= IEEE80211_TXPOWER_MAX)) {
 			error = EINVAL;
 			break;
 		}
@@ -624,7 +628,8 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (ic->ic_opmode == IEEE80211_M_HOSTAP)
 			break;
 #endif
-		if ((ifp->if_flags & IFF_UP) == 0) {
+		if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) !=
+		    (IFF_UP | IFF_RUNNING)) {
 			error = ENETDOWN;
 			break;
 		}
@@ -726,13 +731,14 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if ((error = suser(curproc, 0)) != 0)
 			break;
 		flags = (u_int32_t)ifr->ifr_flags << IEEE80211_F_USERSHIFT;
+		if (
 #ifndef IEEE80211_STA_ONLY
-		if (ic->ic_opmode != IEEE80211_M_HOSTAP &&
+		    ic->ic_opmode != IEEE80211_M_HOSTAP &&
+#endif
 		    (flags & IEEE80211_F_HOSTAPMASK)) {
 			error = EINVAL;
 			break;
 		}
-#endif
 		ic->ic_flags = (ic->ic_flags & ~IEEE80211_F_USERMASK) | flags;
 		error = ENETRESET;
 		break;

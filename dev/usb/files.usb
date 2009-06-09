@@ -1,4 +1,4 @@
-#	$OpenBSD: files.usb,v 1.77 2008/10/23 17:21:22 deraadt Exp $
+#	$OpenBSD: files.usb,v 1.83 2009/05/09 19:23:07 mglocker Exp $
 #	$NetBSD: files.usb,v 1.16 2000/02/14 20:29:54 augustss Exp $
 #
 # Config file and device description for machine-independent USB code.
@@ -35,9 +35,13 @@ attach	uaudio at uhub
 file	dev/usb/uaudio.c		uaudio
 
 # Video devices
-device	uvideo: video
+device	uvideo: video, firmload
 attach	uvideo at uhub
 file	dev/usb/uvideo.c		uvideo
+
+device	udl: wsemuldisplaydev, rasops16
+attach	udl at uhub
+file	dev/usb/udl.c			udl
 
 # MIDI devices
 device	umidi: midibus
@@ -292,6 +296,11 @@ device	rum: ether, ifnet, ifmedia, wlan, firmload
 attach	rum at uhub
 file	dev/usb/if_rum.c		rum
 
+# Ralink Technology RT2700U/RT2800U/RT3000U
+device	run: ether, ifnet, ifmedia, wlan, firmload
+attach	run at uhub
+file	dev/usb/if_run.c		run
+
 # Zydas ZD1211
 device	zyd: ether, ifnet, ifmedia, wlan, firmload
 attach	zyd at uhub
@@ -301,6 +310,16 @@ file	dev/usb/if_zyd.c		zyd
 device	upgt: ether, ifnet, ifmedia, wlan, firmload
 attach	upgt at uhub
 file	dev/usb/if_upgt.c		upgt
+
+# RealTek 8187
+device	urtw: ether, ifnet, ifmedia, wlan
+attach	urtw at uhub
+file	dev/usb/if_urtw.c		urtw
+
+# Atheros AR9170
+device	otus: ether, ifnet, ifmedia, wlan, firmload
+attach	otus at uhub
+file	dev/usb/if_otus.c		otus
 
 # Analog Devices Eagle driver
 device	ueagle: atm, ifnet, ezload, firmload
@@ -334,3 +353,8 @@ file	dev/usb/uow.c			uow
 device	uberry {}
 attach	uberry at uhub
 file	dev/usb/uberry.c		uberry
+
+# DFU driver
+device	udfu {}
+attach	udfu at uhub
+file	dev/usb/udfu.c			udfu

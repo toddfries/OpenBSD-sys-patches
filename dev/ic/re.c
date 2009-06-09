@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.101 2008/11/17 01:25:31 brad Exp $	*/
+/*	$OpenBSD: re.c,v 1.107 2009/06/04 04:48:24 naddy Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -230,6 +230,7 @@ static const struct re_revision {
 	{ RL_HWREV_8168C,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168C_SPIN2,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168CP,	"RTL8168CP/8111CP" },
+	{ RL_HWREV_8168D,	"RTL8168D/8111D" },
 	{ RL_HWREV_8169,	"RTL8169" },
 	{ RL_HWREV_8169_8110SB,	"RTL8169/8110SB" },
 	{ RL_HWREV_8169_8110SBL, "RTL8169SBL" },
@@ -515,44 +516,46 @@ re_iff(struct rl_softc *sc)
 {
 	struct ifnet		*ifp = &sc->sc_arpcom.ac_if;
 	int			h = 0;
-	u_int32_t		hashes[2] = { 0, 0 };
+	u_int32_t		hashes[2];
 	u_int32_t		rxfilt;
-	int			mcnt = 0;
 	struct arpcom		*ac = &sc->sc_arpcom;
 	struct ether_multi	*enm;
 	struct ether_multistep	step;
 
 	rxfilt = CSR_READ_4(sc, RL_RXCFG);
-	rxfilt &= ~(RL_RXCFG_RX_ALLPHYS | RL_RXCFG_RX_MULTI);
+	rxfilt &= ~(RL_RXCFG_RX_ALLPHYS | RL_RXCFG_RX_BROAD |
+	    RL_RXCFG_RX_INDIV | RL_RXCFG_RX_MULTI);
 	ifp->if_flags &= ~IFF_ALLMULTI;
 
-	if (ifp->if_flags & IFF_PROMISC ||
-	    ac->ac_multirangecnt > 0) {
-		ifp ->if_flags |= IFF_ALLMULTI;
+	/*
+	 * Always accept frames destined to our station address.
+	 * Always accept broadcast frames.
+	 */
+	rxfilt |= RL_RXCFG_RX_INDIV | RL_RXCFG_RX_BROAD;
+
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
 		rxfilt |= RL_RXCFG_RX_MULTI;
 		if (ifp->if_flags & IFF_PROMISC)
 			rxfilt |= RL_RXCFG_RX_ALLPHYS;
 		hashes[0] = hashes[1] = 0xFFFFFFFF;
 	} else {
-		/* first, zot all the existing hash bits */
-		CSR_WRITE_4(sc, RL_MAR0, 0);
-		CSR_WRITE_4(sc, RL_MAR4, 0);
+		rxfilt |= RL_RXCFG_RX_MULTI;
+		/* Program new filter. */
+		bzero(hashes, sizeof(hashes));
 
-		/* now program new ones */
 		ETHER_FIRST_MULTI(step, ac, enm);
 		while (enm != NULL) {
 			h = ether_crc32_be(enm->enm_addrlo,
 			    ETHER_ADDR_LEN) >> 26;
+
 			if (h < 32)
 				hashes[0] |= (1 << h);
 			else
 				hashes[1] |= (1 << (h - 32));
-			mcnt++;
+
 			ETHER_NEXT_MULTI(step, enm);
 		}
-
-		if (mcnt)
-			rxfilt |= RL_RXCFG_RX_MULTI;
 	}
 
 	/*
@@ -587,7 +590,8 @@ re_reset(struct rl_softc *sc)
 	if (i == RL_TIMEOUT)
 		printf("%s: reset never completed!\n", sc->sc_dev.dv_xname);
 
-	CSR_WRITE_1(sc, RL_LDPS, 1);
+	if (sc->rl_flags & RL_FLAG_MACLDPS)
+		CSR_WRITE_1(sc, RL_LDPS, 1);
 }
 
 #ifdef RE_DIAG
@@ -801,10 +805,66 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	const struct re_revision *rr;
 	const char	*re_name = NULL;
 
+	sc->sc_hwrev = CSR_READ_4(sc, RL_TXCFG) & RL_TXCFG_HWREV;
+
+	switch (sc->sc_hwrev) {
+	case RL_HWREV_8139CPLUS:
+		sc->rl_flags |= RL_FLAG_NOJUMBO;
+		break;
+	case RL_HWREV_8100E_SPIN1:
+	case RL_HWREV_8100E_SPIN2:
+	case RL_HWREV_8101E:
+		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_INVMAR |
+		    RL_FLAG_PHYWAKE;
+		break;
+	case RL_HWREV_8102E:
+	case RL_HWREV_8102EL:
+		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_INVMAR |
+		    RL_FLAG_PHYWAKE | RL_FLAG_PAR | RL_FLAG_DESCV2 |
+		    RL_FLAG_MACSTAT;
+		break;
+	case RL_HWREV_8168_SPIN1:
+	case RL_HWREV_8168_SPIN2:
+	case RL_HWREV_8168_SPIN3:
+		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
+		    RL_FLAG_MACSTAT | RL_FLAG_HWIM;
+		break;
+	case RL_HWREV_8168C:
+	case RL_HWREV_8168C_SPIN2:
+	case RL_HWREV_8168CP:
+	case RL_HWREV_8168D:
+		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
+		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
+		    RL_FLAG_HWIM;
+		/*
+		 * These controllers support jumbo frame but it seems
+		 * that enabling it requires touching additional magic
+		 * registers. Depending on MAC revisions some
+		 * controllers need to disable checksum offload. So
+		 * disable jumbo frame until I have better idea what
+		 * it really requires to make it support.
+		 * RTL8168C/CP : supports up to 6KB jumbo frame.
+		 * RTL8111C/CP : supports up to 9KB jumbo frame.
+		 */
+		sc->rl_flags |= RL_FLAG_NOJUMBO;
+		break;
+	case RL_HWREV_8169:
+	case RL_HWREV_8169S:
+	case RL_HWREV_8110S:
+		sc->rl_flags |= RL_FLAG_MACLDPS;
+		break;
+	case RL_HWREV_8169_8110SB:
+	case RL_HWREV_8169_8110SBL:
+	case RL_HWREV_8169_8110SCd:
+	case RL_HWREV_8169_8110SCe:
+		sc->rl_flags |= RL_FLAG_PHYWAKE | RL_FLAG_MACLDPS;
+		break;
+	default:
+		break;
+	}
+
 	/* Reset the adapter. */
 	re_reset(sc);
-
-	sc->sc_hwrev = CSR_READ_4(sc, RL_TXCFG) & RL_TXCFG_HWREV;
 
 	sc->rl_tx_time = 5;		/* 125us */
 	sc->rl_rx_time = 2;		/* 50us */
@@ -838,56 +898,6 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 
 		if (cfg2 & RL_CFG2_PCI_64BIT)
 			sc->rl_flags |= RL_FLAG_PCI64;
-	}
-
-	switch (sc->sc_hwrev) {
-	case RL_HWREV_8139CPLUS:
-		sc->rl_flags |= RL_FLAG_NOJUMBO;
-		break;
-	case RL_HWREV_8100E_SPIN1:
-	case RL_HWREV_8100E_SPIN2:
-	case RL_HWREV_8101E:
-		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_INVMAR |
-		    RL_FLAG_PHYWAKE;
-		break;
-	case RL_HWREV_8102E:
-	case RL_HWREV_8102EL:
-		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_INVMAR |
-		    RL_FLAG_PHYWAKE | RL_FLAG_PAR | RL_FLAG_DESCV2 |
-		    RL_FLAG_MACSTAT;
-		break;
-	case RL_HWREV_8168_SPIN1:
-	case RL_HWREV_8168_SPIN2:
-	case RL_HWREV_8168_SPIN3:
-		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
-		    RL_FLAG_MACSTAT | RL_FLAG_HWIM;
-		break;
-	case RL_HWREV_8168C:
-	case RL_HWREV_8168C_SPIN2:
-	case RL_HWREV_8168CP:
-		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
-		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
-		    RL_FLAG_HWIM;
-		/*
-		 * These controllers support jumbo frame but it seems
-		 * that enabling it requires touching additional magic
-		 * registers. Depending on MAC revisions some
-		 * controllers need to disable checksum offload. So
-		 * disable jumbo frame until I have better idea what
-		 * it really requires to make it support.
-		 * RTL8168C/CP : supports up to 6KB jumbo frame.
-		 * RTL8111C/CP : supports up to 9KB jumbo frame.
-		 */
-		sc->rl_flags |= RL_FLAG_NOJUMBO;
-		break;
-	case RL_HWREV_8169_8110SB:
-	case RL_HWREV_8169_8110SBL:
-	case RL_HWREV_8169_8110SCd:
-	case RL_HWREV_8169_8110SCe:
-		sc->rl_flags |= RL_FLAG_PHYWAKE;
-		break;
-	default:
-		break;
 	}
 
 	re_config_imtype(sc, sc->rl_imtype);
@@ -1435,16 +1445,16 @@ re_rxeof(struct rl_softc *sc)
 
 		if (sc->rl_flags & RL_FLAG_DESCV2) {
 			/* Check IP header checksum */
-			if ((rxstat & RL_RDESC_STAT_PROTOID) &&
-			    !(rxstat & RL_RDESC_STAT_IPSUMBAD) &&
-			    (rxvlan & RL_RDESC_IPV4))
+			if ((rxvlan & RL_RDESC_IPV4) &&
+			    !(rxstat & RL_RDESC_STAT_IPSUMBAD))
 				m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
 
 			/* Check TCP/UDP checksum */
-			if (((rxstat & RL_RDESC_STAT_TCP) &&
+			if ((rxvlan & (RL_RDESC_IPV4|RL_RDESC_IPV6)) &&
+			    (((rxstat & RL_RDESC_STAT_TCP) &&
 			    !(rxstat & RL_RDESC_STAT_TCPSUMBAD)) ||
 			    ((rxstat & RL_RDESC_STAT_UDP) &&
-			    !(rxstat & RL_RDESC_STAT_UDPSUMBAD)))
+			    !(rxstat & RL_RDESC_STAT_UDPSUMBAD))))
 				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK |
 				    M_UDP_CSUM_IN_OK;
 		} else {
@@ -1914,7 +1924,6 @@ int
 re_init(struct ifnet *ifp)
 {
 	struct rl_softc *sc = ifp->if_softc;
-	u_int32_t	rxcfg = 0;
 	u_int16_t	cfg;
 	int		s;
 	union {
@@ -2000,20 +2009,6 @@ re_init(struct ifnet *ifp)
 	CSR_WRITE_1(sc, RL_EARLY_TX_THRESH, 16);
 
 	CSR_WRITE_4(sc, RL_RXCFG, RL_RXCFG_CONFIG);
-
-	/* Set the individual bit to receive frames for this host only. */
-	rxcfg = CSR_READ_4(sc, RL_RXCFG);
-	rxcfg |= RL_RXCFG_RX_INDIV;
-
-	/*
-	 * Set capture broadcast bit to capture broadcast frames.
-	 */
-	if (ifp->if_flags & IFF_BROADCAST)
-		rxcfg |= RL_RXCFG_RX_BROAD;
-	else
-		rxcfg &= ~RL_RXCFG_RX_BROAD;
-
-	CSR_WRITE_4(sc, RL_RXCFG, rxcfg);
 
 	/* Program promiscuous mode and multicast filters. */
 	re_iff(sc);
@@ -2108,37 +2103,15 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			arp_ifinit(&sc->sc_arpcom, ifa);
 #endif /* INET */
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING)
-				re_iff(sc);
+				error = ENETRESET;
 			else
 				re_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				re_stop(ifp, 1);
-		}
-		sc->if_flags = ifp->if_flags;
-		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				re_iff(sc);
-			error = 0;
 		}
 		break;
 	case SIOCGIFMEDIA:
@@ -2147,6 +2120,12 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		break;
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			re_iff(sc);
+		error = 0;
 	}
 
 	splx(s);
@@ -2300,7 +2279,7 @@ re_config_imtype(struct rl_softc *sc, int imtype)
 	switch (imtype) {
 	case RL_IMTYPE_HW:
 		KASSERT(sc->rl_flags & RL_FLAG_HWIM);
-		/* FALL THROUGH */
+		/* FALLTHROUGH */
 	case RL_IMTYPE_NONE:
 		sc->rl_intrs = RL_INTRS_CPLUS;
 		sc->rl_rx_ack = RL_ISR_RX_OK | RL_ISR_FIFO_OFLOW |

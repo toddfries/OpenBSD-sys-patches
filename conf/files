@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.446 2008/11/17 00:18:13 krw Exp $
+#	$OpenBSD: files,v 1.463 2009/06/06 03:45:08 oga Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -101,11 +101,11 @@ file	dev/ic/mk48txx.c		mk48txx
 define agpint {}
 
 # DRM - Direct Rendering Manager: /dev/drm
-define drm {}
+define drmdev {}
 include "dev/pci/drm/files.drm"
 
 # VGA graphics
-device	vga: wsemuldisplaydev, pcdisplayops, drm, agpint
+device	vga: wsemuldisplaydev, pcdisplayops, drmdev, agpint
 file	dev/ic/vga.c			vga & (vga_pci | vga_isa) needs-flag
 file	dev/ic/vga_subr.c		vga & (vga_pci | vga_isa) needs-flag
 
@@ -303,10 +303,8 @@ file	dev/ic/gem.c			gem
 
 # 8250/16[45]50-based "com" ports
 device	com: tty
-device	pccom: tty			# XXX
 file	dev/ic/com.c			com & (com | com_cardbus | com_gsc |
 					       com_isapnp)	needs-flag
-file	dev/ic/com_subr.c		com | pccom
 
 # PC-like keyboard controller
 define	pckbcslot {[slot = -1]}
@@ -446,6 +444,11 @@ file	dev/ipmi.c			ipmi	needs-flag
 device	vmt
 file	dev/vmt.c			vmt	needs-flag
 
+# Virtual SCSI
+device	vscsi: scsi
+attach	vscsi at root
+file	dev/vscsi.c			vscsi	needs-flag
+
 # Software RAID
 device	softraid: scsi
 attach	softraid at root
@@ -453,6 +456,7 @@ file	dev/softraid.c			softraid	needs-flag
 file	dev/softraid_raid0.c		softraid
 file	dev/softraid_raid1.c		softraid
 file	dev/softraid_crypto.c		softraid & crypto
+file	dev/softraid_aoe.c		softraid & ether & aoe
 
 # legitimate pseudo-devices
 pseudo-device vnd: disk
@@ -464,6 +468,7 @@ file	dev/ramdisk.c			rd needs-flag
 pseudo-device pty: tty
 pseudo-device nmea: tty
 pseudo-device msts: tty
+pseudo-device endrun: tty
 
 pseudo-device loop: ifnet
 pseudo-device sl: ifnet
@@ -497,6 +502,7 @@ file	net/pf_ioctl.c			pf
 file	net/pf_table.c			pf
 file	net/pf_osfp.c			pf
 file	net/pf_if.c			pf
+file	net/pf_lb.c			pf
 pseudo-device pflog: ifnet
 file	net/if_pflog.c			pflog	needs-flag
 pseudo-device pfsync: ifnet
@@ -649,6 +655,7 @@ file kern/exec_subr.c
 file kern/init_main.c
 file kern/init_sysent.c
 file kern/kern_acct.c			accounting
+file kern/kern_bufq.c
 file kern/kern_clock.c
 file kern/kern_descrip.c
 file kern/kern_event.c
@@ -704,6 +711,7 @@ file kern/tty_conf.c
 file kern/tty_pty.c			pty			needs-count
 file kern/tty_nmea.c			nmea			needs-flag
 file kern/tty_msts.c			msts			needs-flag
+file kern/tty_endrun.c			endrun			needs-flag
 file kern/tty_subr.c
 file kern/tty_tty.c
 file kern/uipc_domain.c
@@ -787,6 +795,7 @@ file net/if_gre.c			gre			needs-count
 file net/if_trunk.c			trunk			needs-count
 file net/trunklacp.c			trunk
 file net/if_mpe.c			mpe			needs-count
+file net/if_aoe.c			ether & aoe
 file net80211/ieee80211.c		wlan
 file net80211/ieee80211_amrr.c		wlan
 file net80211/ieee80211_crypto.c	wlan
@@ -882,6 +891,7 @@ file netbt/rfcomm_upper.c		bluetooth
 file netbt/sco_socket.c			bluetooth
 file netbt/sco_upper.c			bluetooth
 file netmpls/mpls_input.c		mpls
+file netmpls/mpls_output.c		mpls
 file netmpls/mpls_proto.c		mpls
 file netmpls/mpls_raw.c			mpls
 file netmpls/mpls_shim.c		mpls
@@ -891,6 +901,7 @@ file netnatm/natm.c			natm
 file nfs/krpc_subr.c			nfsclient
 file nfs/nfs_bio.c			nfsclient
 file nfs/nfs_boot.c			nfsclient
+file nfs/nfs_debug.c			nfsclient & ddb
 file nfs/nfs_node.c			nfsclient
 file nfs/nfs_kq.c			nfsclient
 file nfs/nfs_serv.c			nfsserver
@@ -930,20 +941,20 @@ file ufs/ext2fs/ext2fs_readwrite.c	ext2fs
 file ufs/ext2fs/ext2fs_subr.c		ext2fs
 file ufs/ext2fs/ext2fs_vfsops.c		ext2fs
 file ufs/ext2fs/ext2fs_vnops.c		ext2fs
-file xfs/xfs_common-bsd.c		xfs
-file xfs/xfs_deb.c			xfs
-file xfs/xfs_dev-bsd.c			xfs
-file xfs/xfs_dev-common.c		xfs
-file xfs/xfs_message.c			xfs
-file xfs/xfs_node.c			xfs
-file xfs/xfs_node-bsd.c			xfs
-file xfs/xfs_syscalls-common.c		xfs
-file xfs/xfs_vfsops-bsd.c		xfs
-file xfs/xfs_vfsops-common.c		xfs
-file xfs/xfs_vfsops-openbsd.c		xfs
-file xfs/xfs_vnodeops-bsd.c		xfs
-file xfs/xfs_vnodeops-common.c		xfs
-file xfs/xfs_syscalls-dummy.c		!xfs
+file nnpfs/nnpfs_common-bsd.c		nnpfs
+file nnpfs/nnpfs_deb.c			nnpfs
+file nnpfs/nnpfs_dev-bsd.c		nnpfs
+file nnpfs/nnpfs_dev-common.c		nnpfs
+file nnpfs/nnpfs_message.c		nnpfs
+file nnpfs/nnpfs_node.c			nnpfs
+file nnpfs/nnpfs_node-bsd.c		nnpfs
+file nnpfs/nnpfs_syscalls-common.c	nnpfs
+file nnpfs/nnpfs_vfsops-bsd.c		nnpfs
+file nnpfs/nnpfs_vfsops-common.c	nnpfs
+file nnpfs/nnpfs_vfsops-openbsd.c	nnpfs
+file nnpfs/nnpfs_vnodeops-bsd.c		nnpfs
+file nnpfs/nnpfs_vnodeops-common.c	nnpfs
+file nnpfs/nnpfs_syscalls-dummy.c	!nnpfs
 file uvm/uvm_amap.c
 file uvm/uvm_anon.c
 file uvm/uvm_aobj.c
@@ -957,10 +968,12 @@ file uvm/uvm_km.c
 file uvm/uvm_map.c
 file uvm/uvm_meter.c
 file uvm/uvm_mmap.c
+file uvm/uvm_object.c			!small_kernel
 file uvm/uvm_page.c
 file uvm/uvm_pager.c
 file uvm/uvm_pdaemon.c
 file uvm/uvm_pglist.c
+file uvm/uvm_pmemrange.c
 file uvm/uvm_stat.c
 file uvm/uvm_swap.c
 file uvm/uvm_swap_encrypt.c		uvm_swap_encrypt
@@ -1016,8 +1029,8 @@ file compat/common/kern_ipc_10.c	!small_kernel &
 	(compat_freebsd | compat_ibcs2 | compat_sunos | compat_hpux | compat_bsdos)
 file compat/common/vfs_syscalls_25.c	!small_kernel &
 	(compat_freebsd | compat_bsdos | compat_sunos | compat_hpux)
-file compat/common/vfs_syscalls_35.c	!small_kernel &
-	(compat_freebsd | compat_bsdos | compat_sunos | compat_hpux)
+file compat/common/vfs_syscalls_35.c	!small_kernel & (compat_35 |
+	compat_freebsd | compat_bsdos | compat_sunos | compat_hpux)
 file compat/common/vfs_syscalls_o43.c	!small_kernel & compat_o43
 file compat/common/kern_ipc_35.c	!small_kernel & compat_35
 file compat/common/kern_ipc_23.c	!small_kernel & compat_23
@@ -1029,6 +1042,10 @@ file compat/common/tty_43.c		!small_kernel
 file compat/common/uipc_syscalls_43.c	!small_kernel
 file compat/common/vfs_syscalls_43.c	!small_kernel
 file compat/common/vm_43.c		!small_kernel
+
+# libx86emu
+file dev/x86emu/x86emu.c		x86emu
+file dev/x86emu/x86emu_util.c		x86emu
 
 # libkern MI components
 file lib/libkern/mcount.c		gprof

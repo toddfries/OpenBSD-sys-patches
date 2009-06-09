@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tht.c,v 1.119 2008/10/02 20:21:14 brad Exp $ */
+/*	$OpenBSD: if_tht.c,v 1.122 2009/04/07 05:03:25 dlg Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -637,7 +637,6 @@ int			tht_wait_ne(struct tht_softc *, bus_size_t, u_int32_t,
 
 /* misc */
 #define DEVNAME(_sc)	((_sc)->sc_dev.dv_xname)
-#define sizeofa(_a)	(sizeof(_a) / sizeof((_a)[0]))
 #define LWORDS(_b)	(((_b) + 7) >> 3)
 
 
@@ -661,7 +660,7 @@ thtc_lookup(struct pci_attach_args *pa)
 	int				i;
 	const struct thtc_device	*td;
 
-	for (i = 0; i < sizeofa(thtc_devices); i++) {
+	for (i = 0; i < nitems(thtc_devices); i++) {
 		td = &thtc_devices[i];
 		if (td->td_vendor == PCI_VENDOR(pa->pa_id) &&
 		    td->td_product == PCI_PRODUCT(pa->pa_id))
@@ -783,8 +782,7 @@ tht_attach(struct device *parent, struct device *self, void *aux)
 	ifp = &sc->sc_ac.ac_if;
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_CSUM_IPv4 |
-	    IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
 	ifp->if_ioctl = tht_ioctl;
 	ifp->if_start = tht_start;
 	ifp->if_watchdog = tht_watchdog;
@@ -864,25 +862,23 @@ int
 tht_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 {
 	struct tht_softc		*sc = ifp->if_softc;
+	struct ifaddr			*ifa = (struct ifaddr *)addr;
 	struct ifreq			*ifr = (struct ifreq *)addr;
-	struct ifaddr			*ifa;
-	int				error = 0;
-	int				s;
+	int				s, error = 0;
 
 	rw_enter_write(&sc->sc_lock);
 	s = splnet();
 
 	switch (cmd) {
 	case SIOCSIFADDR:
-		ifa = (struct ifaddr *)addr;
+		ifp->if_flags |= IFF_UP;
 
 #ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_ac, ifa);
 #endif
-
-		ifp->if_flags |= IFF_UP;
 		/* FALLTHROUGH */
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING)
@@ -893,20 +889,6 @@ tht_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 			if (ifp->if_flags & IFF_RUNNING)
 				tht_down(sc);
 		}
-		break;
-
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
-	case SIOCADDMULTI:
-		error = ether_addmulti(ifr, &sc->sc_ac);
-		break;
-	case SIOCDELMULTI:
-		error = ether_delmulti(ifr, &sc->sc_ac);
 		break;
 
 	case SIOCGIFMEDIA:
@@ -1157,8 +1139,7 @@ tht_start(struct ifnet *ifp)
 		bc = sizeof(txt) +
 		    sizeof(struct tht_pbd) * pkt->tp_dmap->dm_nsegs;
 
-		flags = THT_TXT_TYPE | THT_TXT_FLAGS_UDPCS |
-		    THT_TXT_FLAGS_TCPCS | THT_TXT_FLAGS_IPCS | LWORDS(bc);
+		flags = THT_TXT_TYPE | LWORDS(bc);
 		txt.flags = htole32(flags);
 		txt.len = htole16(pkt->tp_m->m_pkthdr.len);
 		txt.uid = pkt->tp_id;
@@ -1374,13 +1355,6 @@ tht_rxd(struct tht_softc *sc)
 		m = pkt->tp_m;
 		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = letoh16(rxd.len);
-
-		if (!ISSET(flags, THT_RXD_FLAGS_IPCS))
-			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
-		if (!ISSET(flags, THT_RXD_FLAGS_TCPCS))
-			m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK;
-		if (!ISSET(flags, THT_RXD_FLAGS_UDPCS))
-			m->m_pkthdr.csum_flags |= M_UDP_CSUM_IN_OK;
 
 		/* XXX process type 3 rx descriptors */
 
@@ -1615,7 +1589,7 @@ tht_lladdr_read(struct tht_softc *sc)
 {
 	int				i;
 
-	for (i = 0; i < sizeofa(tht_mac_regs); i++)
+	for (i = 0; i < nitems(tht_mac_regs); i++)
 		sc->sc_lladdr[i] = betoh16(tht_read(sc, tht_mac_regs[i]));
 }
 
@@ -1624,7 +1598,7 @@ tht_lladdr_write(struct tht_softc *sc)
 {
 	int				i;
 
-	for (i = 0; i < sizeofa(tht_mac_regs); i++)
+	for (i = 0; i < nitems(tht_mac_regs); i++)
 		tht_write(sc, tht_mac_regs[i], htobe16(sc->sc_lladdr[i]));
 }
 

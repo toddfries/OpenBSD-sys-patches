@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2661.c,v 1.44 2008/08/27 09:05:03 damien Exp $	*/
+/*	$OpenBSD: rt2661.c,v 1.48 2009/03/29 21:53:52 sthen Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -410,7 +410,7 @@ rt2661_alloc_tx_ring(struct rt2661_softc *sc, struct rt2661_tx_ring *ring,
 	    count * RT2661_TX_DESC_SIZE, (caddr_t *)&ring->desc,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map desc DMA memory\n",
+		printf("%s: can't map desc DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -552,7 +552,7 @@ rt2661_alloc_rx_ring(struct rt2661_softc *sc, struct rt2661_rx_ring *ring,
 	    count * RT2661_RX_DESC_SIZE, (caddr_t *)&ring->desc,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map desc DMA memory\n",
+		printf("%s: can't map desc DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -1468,7 +1468,7 @@ rt2661_tx_mgt(struct rt2661_softc *sc, struct mbuf *m0,
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map mbuf (error %d)\n",
+		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		m_freem(m0);
 		return error;
@@ -1546,7 +1546,7 @@ rt2661_tx_data(struct rt2661_softc *sc, struct mbuf *m0,
 	struct rt2661_tx_data *data;
 	struct ieee80211_frame *wh;
 	struct ieee80211_key *k;
-	struct mbuf *mnew;
+	struct mbuf *m1;
 	uint16_t dur;
 	uint32_t flags = 0;
 	int pktlen, rate, needcts = 0, needrts = 0, error;
@@ -1629,7 +1629,7 @@ rt2661_tx_data(struct rt2661_softc *sc, struct mbuf *m0,
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, mprot,
 		    BUS_DMA_NOWAIT);
 		if (error != 0) {
-			printf("%s: could not map mbuf (error %d)\n",
+			printf("%s: can't map mbuf (error %d)\n",
 			    sc->sc_dev.dv_xname, error);
 			m_freem(mprot);
 			m_freem(m0);
@@ -1665,38 +1665,35 @@ rt2661_tx_data(struct rt2661_softc *sc, struct mbuf *m0,
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 	    BUS_DMA_NOWAIT);
 	if (error != 0 && error != EFBIG) {
-		printf("%s: could not map mbuf (error %d)\n",
+		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		m_freem(m0);
 		return error;
 	}
 	if (error != 0) {
 		/* too many fragments, linearize */
-
-		MGETHDR(mnew, M_DONTWAIT, MT_DATA);
-		if (mnew == NULL) {
+		MGETHDR(m1, M_DONTWAIT, MT_DATA);
+		if (m1 == NULL) {
 			m_freem(m0);
-			return ENOMEM;
+			return ENOBUFS;
 		}
-		M_DUP_PKTHDR(mnew, m0);
 		if (m0->m_pkthdr.len > MHLEN) {
-			MCLGET(mnew, M_DONTWAIT);
-			if (!(mnew->m_flags & M_EXT)) {
+			MCLGET(m1, M_DONTWAIT);
+			if (!(m1->m_flags & M_EXT)) {
 				m_freem(m0);
-				m_freem(mnew);
-				return ENOMEM;
+				m_freem(m1);
+				return ENOBUFS;
 			}
 		}
-
-		m_copydata(m0, 0, m0->m_pkthdr.len, mtod(mnew, caddr_t));
+		m_copydata(m0, 0, m0->m_pkthdr.len, mtod(m1, caddr_t));
+		m1->m_pkthdr.len = m1->m_len = m0->m_pkthdr.len;
 		m_freem(m0);
-		mnew->m_len = mnew->m_pkthdr.len;
-		m0 = mnew;
+		m0 = m1;
 
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 		    BUS_DMA_NOWAIT);
 		if (error != 0) {
-			printf("%s: could not map mbuf (error %d)\n",
+			printf("%s: can't map mbuf (error %d)\n",
 			    sc->sc_dev.dv_xname, error);
 			m_freem(m0);
 			return error;
@@ -2387,7 +2384,6 @@ rt2661_read_eeprom(struct rt2661_softc *sc)
 int
 rt2661_bbp_init(struct rt2661_softc *sc)
 {
-#define N(a)	(sizeof (a) / sizeof ((a)[0]))
 	int i, ntries;
 
 	/* wait for BBP to be ready */
@@ -2403,7 +2399,7 @@ rt2661_bbp_init(struct rt2661_softc *sc)
 	}
 
 	/* initialize BBP registers to default values */
-	for (i = 0; i < N(rt2661_def_bbp); i++) {
+	for (i = 0; i < nitems(rt2661_def_bbp); i++) {
 		rt2661_bbp_write(sc, rt2661_def_bbp[i].reg,
 		    rt2661_def_bbp[i].val);
 	}
@@ -2416,13 +2412,11 @@ rt2661_bbp_init(struct rt2661_softc *sc)
 	}
 
 	return 0;
-#undef N
 }
 
 int
 rt2661_init(struct ifnet *ifp)
 {
-#define N(a)	(sizeof (a) / sizeof ((a)[0]))
 	struct rt2661_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
 	const char *name = NULL;	/* make lint happy */
@@ -2515,7 +2509,7 @@ rt2661_init(struct ifnet *ifp)
 	RAL_WRITE(sc, RT2661_RX_CNTL_CSR, 2);
 
 	/* initialize MAC registers to default values */
-	for (i = 0; i < N(rt2661_def_mac); i++)
+	for (i = 0; i < nitems(rt2661_def_mac); i++)
 		RAL_WRITE(sc, rt2661_def_mac[i].reg, rt2661_def_mac[i].val);
 
 	IEEE80211_ADDR_COPY(ic->ic_myaddr, LLADDR(ifp->if_sadl));
@@ -2566,7 +2560,7 @@ rt2661_init(struct ifnet *ifp)
 	RAL_WRITE(sc, RT2661_TXRX_CSR0, tmp);
 
 	/* clear STA registers */
-	RAL_READ_REGION_4(sc, RT2661_STA_CSR0, sta, N(sta));
+	RAL_READ_REGION_4(sc, RT2661_STA_CSR0, sta, nitems(sta));
 
 	/* initialize ASIC */
 	RAL_WRITE(sc, RT2661_MAC_CSR1, 4);
@@ -2590,7 +2584,6 @@ rt2661_init(struct ifnet *ifp)
 		ieee80211_new_state(ic, IEEE80211_S_RUN, -1);
 
 	return 0;
-#undef N
 }
 
 void

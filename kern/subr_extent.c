@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_extent.c,v 1.34 2008/06/26 05:42:20 ray Exp $	*/
+/*	$OpenBSD: subr_extent.c,v 1.38 2009/06/04 03:14:14 oga Exp $	*/
 /*	$NetBSD: subr_extent.c,v 1.7 1996/11/21 18:46:34 cgd Exp $	*/
 
 /*-
@@ -64,8 +64,11 @@
 #define	pool_init(a, b, c, d, e, f, g)	(a)->pr_size = (b)
 #define	pool_put(pool, rp)		free((rp), 0)
 #define	panic				printf
-#define	splvm()				(1)
 #define	splx(s)				((void)(s))
+#endif
+
+#if defined(DIAGNOSTIC) || defined(DDB)
+void	extent_print1(struct extent *, int (*)(const char *, ...));
 #endif
 
 static	void extent_insert_and_optimize(struct extent *, u_long, u_long,
@@ -127,6 +130,7 @@ extent_pool_init(void)
 	if (!inited) {
 		pool_init(&ex_region_pl, sizeof(struct extent_region), 0, 0, 0,
 		    "extentpl", NULL);
+		pool_setipl(&ex_region_pl, IPL_VM);
 		inited = 1;
 	}
 }
@@ -142,7 +146,7 @@ extent_print_all(void)
 	struct extent *ep;
 
 	LIST_FOREACH(ep, &ext_list, ex_link) {
-		extent_print(ep);
+		extent_print1(ep, db_printf);
 	}
 }
 #endif
@@ -223,6 +227,18 @@ extent_create(char *name, u_long start, u_long end, int mtype, caddr_t storage,
 		ex->ex_flags |= EXF_FIXED;
 	if (flags & EX_NOCOALESCE)
 		ex->ex_flags |= EXF_NOCOALESCE;
+
+	if (flags & EX_FILLED) {
+		rp = extent_alloc_region_descriptor(ex, flags);
+		if (rp == NULL) {
+			if (!fixed_extent)
+				free(ex, mtype);
+			return (NULL);
+		}
+		rp->er_start = start;
+		rp->er_end = end;
+		LIST_INSERT_HEAD(&ex->ex_regions, rp, er_link);
+	}
 
 #if defined(DIAGNOSTIC) || defined(DDB)
 	extent_register(ex);
@@ -397,6 +413,9 @@ extent_alloc_region(struct extent *ex, u_long start, u_long size, int flags)
 		 ex->ex_name, start, size);
 		panic("extent_alloc_region: overflow");
 	}
+	if ((flags & EX_CONFLICTOK) && (flags & EX_WAITSPACE))
+		panic("extent_alloc_region: EX_CONFLICTOK and EX_WAITSPACE "
+		    "are mutually exclusive");
 #endif
 
 	/*
@@ -472,6 +491,36 @@ extent_alloc_region(struct extent *ex, u_long start, u_long size, int flags)
 					return (error);
 				goto alloc_start;
 			}
+
+			/*
+			 * If we tolerate conflicts adjust things such
+			 * that all space in the requested region is
+			 * allocated.
+			 */
+			if (flags & EX_CONFLICTOK) {
+				/*
+				 * There are two possibilities:
+				 *
+				 * 1. The current region overlaps.
+				 *    Adjust the requested region to
+				 *    start at the end of the current
+				 *    region, and try again.
+				 *
+				 * 2. The current region falls
+                                 *    completely within the requested
+                                 *    region.  Free the current region
+                                 *    and try again.
+				 */
+				if (rp->er_start <= start) {
+					start = rp->er_end + 1;
+					size = end - start + 1;
+				} else {
+					LIST_REMOVE(rp, er_link);
+					extent_free_region_descriptor(ex, rp);
+				}
+				goto alloc_start;
+			}
+
 			extent_free_region_descriptor(ex, myrp);
 			return (EAGAIN);
 		}
@@ -1001,7 +1050,6 @@ static struct extent_region *
 extent_alloc_region_descriptor(struct extent *ex, int flags)
 {
 	struct extent_region *rp;
-	int s;
 
 	if (ex->ex_flags & EXF_FIXED) {
 		struct extent_fixed *fex = (struct extent_fixed *)ex;
@@ -1032,9 +1080,7 @@ extent_alloc_region_descriptor(struct extent *ex, int flags)
 	}
 
  alloc:
-	s = splvm();
 	rp = pool_get(&ex_region_pl, (flags & EX_WAITOK) ? PR_WAITOK : 0);
-	splx(s);
 	if (rp != NULL)
 		rp->er_flags = ER_ALLOC;
 
@@ -1044,8 +1090,6 @@ extent_alloc_region_descriptor(struct extent *ex, int flags)
 static void
 extent_free_region_descriptor(struct extent *ex, struct extent_region *rp)
 {
-	int s;
-
 	if (ex->ex_flags & EXF_FIXED) {
 		struct extent_fixed *fex = (struct extent_fixed *)ex;
 
@@ -1062,9 +1106,7 @@ extent_free_region_descriptor(struct extent *ex, struct extent_region *rp)
 				    er_link);
 				goto wake_em_up;
 			} else {
-				s = splvm();
 				pool_put(&ex_region_pl, rp);
-				splx(s);
 			}
 		} else {
 			/* Clear all flags. */
@@ -1083,18 +1125,20 @@ extent_free_region_descriptor(struct extent *ex, struct extent_region *rp)
 	/*
 	 * We know it's dynamically allocated if we get here.
 	 */
-	s = splvm();
 	pool_put(&ex_region_pl, rp);
-	splx(s);
 }
 
-#ifndef DDB
-#define db_printf printf
-#endif
-
+	
 #if defined(DIAGNOSTIC) || defined(DDB) || !defined(_KERNEL)
+
 void
 extent_print(struct extent *ex)
+{
+	extent_print1(ex, printf);
+}
+
+void
+extent_print1(struct extent *ex, int (*pr)(const char *, ...))
 {
 	struct extent_region *rp;
 
@@ -1102,14 +1146,14 @@ extent_print(struct extent *ex)
 		panic("extent_print: NULL extent");
 
 #ifdef _KERNEL
-	db_printf("extent `%s' (0x%lx - 0x%lx), flags=%b\n", ex->ex_name,
+	(*pr)("extent `%s' (0x%lx - 0x%lx), flags=%b\n", ex->ex_name,
 	    ex->ex_start, ex->ex_end, ex->ex_flags, EXF_BITS);
 #else
-	db_printf("extent `%s' (0x%lx - 0x%lx), flags = 0x%x\n", ex->ex_name,
+	(*pr)("extent `%s' (0x%lx - 0x%lx), flags = 0x%x\n", ex->ex_name,
 	    ex->ex_start, ex->ex_end, ex->ex_flags);
 #endif
 
 	LIST_FOREACH(rp, &ex->ex_regions, er_link)
-		db_printf("     0x%lx - 0x%lx\n", rp->er_start, rp->er_end);
+		(*pr)("     0x%lx - 0x%lx\n", rp->er_start, rp->er_end);
 }
 #endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.25 2008/06/27 17:22:14 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.28 2009/06/03 21:30:19 beck Exp $	*/
 /*
  * Copyright (c) 2007 Miodrag Vallat.
  *
@@ -14,7 +14,7 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-/* $OpenBSD: machdep.c,v 1.25 2008/06/27 17:22:14 miod Exp $	*/
+ */
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -292,12 +292,6 @@ cpu_startup()
 	 */
 	if (bufpages == 0)
 		bufpages = physmem * bufcachepercent / 100;
-
-	/* Restrict to at most 25% filled kvm */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -847,7 +841,7 @@ cpu_boot_secondary_processors()
 	int rc;
 	extern void secondary_start(void);
 
-	for (cpu = 0; cpu < max_cpus; cpu++) {
+	for (cpu = 0; cpu < ncpusfound; cpu++) {
 		if (cpu != curcpu()->ci_cpuid) {
 			rc = scm_spincpu(cpu, (vaddr_t)secondary_start);
 			if (rc != 0)

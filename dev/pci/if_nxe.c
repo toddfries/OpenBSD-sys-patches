@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nxe.c,v 1.57 2008/10/29 01:14:47 deraadt Exp $ */
+/*	$OpenBSD: if_nxe.c,v 1.60 2009/06/02 12:33:42 reyk Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -833,7 +833,6 @@ int			nxe_rom_read_region(struct nxe_softc *, u_int32_t,
 
 /* misc bits */
 #define DEVNAME(_sc)	((_sc)->sc_dev.dv_xname)
-#define sizeofa(_a)	(sizeof(_a) / sizeof((_a)[0]))
 
 /* let's go! */
 
@@ -864,7 +863,7 @@ nxe_match(struct device *parent, void *match, void *aux)
 	if (PCI_CLASS(pa->pa_class) != PCI_CLASS_NETWORK)
 		return (0);
 
-	return (pci_matchbyid(pa, nxe_devices, sizeofa(nxe_devices)));
+	return (pci_matchbyid(pa, nxe_devices, nitems(nxe_devices)));
 }
 
 void
@@ -1018,10 +1017,9 @@ int
 nxe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 {
 	struct nxe_softc		*sc = ifp->if_softc;
+	struct ifaddr			*ifa = (struct ifaddr *)addr;
 	struct ifreq			*ifr = (struct ifreq *)addr;
-	struct ifaddr			*ifa;
-	int				error = 0;
-	int				s;
+	int				s, error = 0;
 
 	rw_enter_write(&sc->sc_lock);
 	s = splnet();
@@ -1032,11 +1030,11 @@ nxe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 	case SIOCSIFADDR:
 		SET(ifp->if_flags, IFF_UP);
 #ifdef INET
-		ifa = (struct ifaddr *)addr;
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_ac, ifa);
 #endif
 		/* FALLTHROUGH */
+
 	case SIOCSIFFLAGS:
 		if (ISSET(ifp->if_flags, IFF_UP)) {
 			if (ISSET(ifp->if_flags, IFF_RUNNING))
@@ -1052,13 +1050,6 @@ nxe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_media, cmd);
-		break;
-
-	case SIOCADDMULTI:
-		error = ether_addmulti(ifr, &sc->sc_ac);
-		break;
-	case SIOCDELMULTI:
-		error = ether_delmulti(ifr, &sc->sc_ac);
 		break;
 
 	default:
@@ -1646,7 +1637,7 @@ nxe_board_info(struct nxe_softc *sc)
 		goto out;
 	}
 
-	for (i = 0; i < sizeofa(nxe_boards); i++) {
+	for (i = 0; i < nitems(nxe_boards); i++) {
 		if (ni->ni_board_type == nxe_boards[i].brd_type) {
 			sc->sc_board = &nxe_boards[i];
 			break;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mc_obio.c,v 1.6 2006/06/24 13:23:27 miod Exp $	*/
+/*	$OpenBSD: if_mc_obio.c,v 1.8 2009/04/14 16:01:04 oga Exp $	*/
 /*	$NetBSD: if_mc_obio.c,v 1.13 2004/03/26 12:15:46 wiz Exp $	*/
 
 /*-
@@ -139,13 +139,13 @@ mc_obio_attach(parent, self, aux)
 	/* allocate memory for transmit buffer and mark it non-cacheable */
 	TAILQ_INIT(&txlist);
 	if (uvm_pglistalloc(PAGE_SIZE, 0, -PAGE_SIZE, PAGE_SIZE, 0,
-	    &txlist, 1, 0) != 0) {
+	    &txlist, 1, UVM_PLA_NOWAIT) != 0) {
 		printf(": could not allocate transmit buffer memory\n");
 		goto out1;
 	}
 	sc->sc_txbuf = (u_char *)uvm_km_valloc(kernel_map, PAGE_SIZE);
 	if (sc->sc_txbuf == NULL) {
-		printf(": could not map transmit buffer memory\n");
+		printf(": can't map transmit buffer memory\n");
 		goto out2;
 	}
 	pg = TAILQ_FIRST(&txlist);
@@ -159,14 +159,14 @@ mc_obio_attach(parent, self, aux)
 	 */
 	TAILQ_INIT(&rxlist);
 	if (uvm_pglistalloc(MC_NPAGES * PAGE_SIZE, 0, -PAGE_SIZE, PAGE_SIZE, 0,
-	    &rxlist, 1, 0) != 0) {
+	    &rxlist, 1, UVM_PLA_NOWAIT) != 0) {
 		printf(": could not allocate receive buffer memory\n");
 		goto out3;
 	}
 	sc->sc_rxbuf = (u_char *)(va = uvm_km_valloc(kernel_map,
 	    MC_NPAGES * PAGE_SIZE));
 	if (sc->sc_rxbuf == NULL) {
-		printf(": could not map receive buffer memory\n");
+		printf(": can't map receive buffer memory\n");
 		goto out4;
 	}
 	pg = TAILQ_FIRST(&rxlist);

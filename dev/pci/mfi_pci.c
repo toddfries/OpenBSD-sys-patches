@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi_pci.c,v 1.17 2008/10/27 03:11:58 marco Exp $ */
+/* $OpenBSD: mfi_pci.c,v 1.21 2009/02/23 15:21:34 jsg Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -37,6 +37,7 @@
 #include <dev/ic/mfivar.h>
 
 #define	MFI_BAR		0x10
+#define	MFI_BAR_GEN2	0x14
 #define	MFI_PCI_MEMSIZE	0x2000 /* 8k */
 
 int	mfi_pci_match(struct device *, void *, void *);
@@ -72,6 +73,10 @@ static const struct mfi_pci_subtype mfi_perc5_subtypes[] = {
 	{ 0x0,		"" }
 };
 
+static const struct mfi_pci_subtype mfi_gen2_subtypes[] = {
+	{ 0x0,		"" } /* XXX add entries when known */
+};
+
 static const
 struct	mfi_pci_device {
 	pcireg_t			mpd_vendor;
@@ -85,13 +90,16 @@ struct	mfi_pci_device {
 	  MFI_IOP_XSCALE,	NULL },
 	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS1078,
 	  MFI_IOP_PPC,		mfi_1078_subtypes },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS1078DE,
+	  MFI_IOP_PPC,		mfi_1078_subtypes },
 	{ PCI_VENDOR_DELL,	PCI_PRODUCT_DELL_PERC5,
 	  MFI_IOP_XSCALE,	mfi_perc5_subtypes },
-	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_DELL_PERC6,
-	  MFI_IOP_PPC,		mfi_1078_subtypes }
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2108_1,
+	  MFI_IOP_GEN2,		mfi_gen2_subtypes },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SAS2108_2,
+	  MFI_IOP_GEN2,		mfi_gen2_subtypes },
 };
 
-#define sizeofa(_a) (sizeof(_a) / sizeof((_a)[0]))
 const struct mfi_pci_device *mfi_pci_find_device(struct pci_attach_args *);
 
 const struct mfi_pci_device *
@@ -100,7 +108,7 @@ mfi_pci_find_device(struct pci_attach_args *pa)
 	const struct mfi_pci_device *mpd;
 	int i;
 
-	for (i = 0; i < sizeofa(mfi_pci_devices); i++) {
+	for (i = 0; i < nitems(mfi_pci_devices); i++) {
 		mpd = &mfi_pci_devices[i];
 
 		if (mpd->mpd_vendor == PCI_VENDOR(pa->pa_id) &&
@@ -128,13 +136,23 @@ mfi_pci_attach(struct device *parent, struct device *self, void *aux)
 	pci_intr_handle_t	ih;
 	bus_size_t		size;
 	pcireg_t		reg;
+	int			regbar;
 	const char		*subtype = NULL;
 	char			subid[32];
 
 	mpd = mfi_pci_find_device(pa);
+	if (mpd == NULL) {
+		printf(": can't find matching pci device\n");
+		return;
+	}
 
-	reg = pci_mapreg_type(pa->pa_pc, pa->pa_tag, MFI_BAR);
-	if (pci_mapreg_map(pa, MFI_BAR, reg, 0,
+	if (mpd->mpd_iop == MFI_IOP_GEN2)
+		regbar = MFI_BAR_GEN2;
+	else
+		regbar = MFI_BAR;
+
+	reg = pci_mapreg_type(pa->pa_pc, pa->pa_tag, regbar);
+	if (pci_mapreg_map(pa, regbar, reg, 0,
 	    &sc->sc_iot, &sc->sc_ioh, NULL, &size, MFI_PCI_MEMSIZE)) {
 		printf(": can't map controller pci space\n");
 		return;

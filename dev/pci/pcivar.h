@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcivar.h,v 1.57 2007/12/31 19:13:36 kettenis Exp $	*/
+/*	$OpenBSD: pcivar.h,v 1.59 2009/05/05 14:16:17 kettenis Exp $	*/
 /*	$NetBSD: pcivar.h,v 1.23 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -43,6 +43,8 @@
  */
 
 #include <sys/device.h>
+#include <sys/malloc.h>
+#include <sys/extent.h>
 #include <machine/bus.h>
 #include <dev/pci/pcireg.h>
 
@@ -89,6 +91,10 @@ struct pcibus_attach_args {
 	bus_dma_tag_t pba_dmat;		/* DMA tag */
 	pci_chipset_tag_t pba_pc;
 
+	struct extent	*pba_ioex;
+	struct extent	*pba_memex;
+	struct extent	*pba_pmemex;
+
 	int		pba_domain;	/* PCI domain */
 	int		pba_bus;	/* PCI bus number */
 
@@ -116,6 +122,10 @@ struct pci_attach_args {
 	bus_dma_tag_t pa_dmat;		/* DMA tag */
 	pci_chipset_tag_t pa_pc;
 	int		pa_flags;	/* flags; see below */
+
+	struct extent	*pa_ioex;
+	struct extent	*pa_memex;
+	struct extent	*pa_pmemex;
 
 	u_int           pa_domain;
 	u_int           pa_bus;
@@ -170,6 +180,9 @@ struct pci_softc {
 	bus_space_tag_t sc_iot, sc_memt;
 	bus_dma_tag_t sc_dmat;
 	pci_chipset_tag_t sc_pc;
+	struct extent *sc_ioex;
+	struct extent *sc_memex;
+	struct extent *sc_pmemex;
 	void *sc_powerhook;
 	LIST_HEAD(, pci_dev) sc_devs;
 	int sc_domain, sc_bus, sc_maxndevs;

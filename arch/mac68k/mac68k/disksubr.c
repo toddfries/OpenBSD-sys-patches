@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.55 2008/06/12 06:58:35 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.57 2009/05/21 23:45:48 krw Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.22 1997/11/26 04:18:20 briggs Exp $	*/
 
 /*
@@ -313,12 +313,12 @@ read_mac_label(char *dlbuf, struct disklabel *lp)
 			break;
 		}
 	}
-	lp->d_npartitions = maxslot + 1;
+	lp->d_npartitions = MAXPARTITIONS;
 	lp->d_version = 1;
 	lp->d_checksum = 0;
 	lp->d_checksum = dkcksum(lp);
 	free(pmap, M_DEVBUF);
-	return NULL;
+	return (checkdisklabel(lp, lp));
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: viaenv.c,v 1.11 2007/05/14 00:37:18 jsg Exp $	*/
+/*	$OpenBSD: viaenv.c,v 1.13 2009/06/06 19:21:33 jasper Exp $	*/
 /*	$NetBSD: viaenv.c,v 1.9 2002/10/02 16:51:59 thorpej Exp $	*/
 
 /*
@@ -168,7 +168,7 @@ val_to_uK(unsigned int val)
 	int     i = val / 4;
 	int     j = val % 4;
 
-	assert(i >= 0 && i <= 255);
+	KASSERT(i >= 0 && i <= 255);
 
 	if (j == 0 || i == 255)
 		return val_to_temp[i] * 10000;
@@ -194,7 +194,7 @@ val_to_uV(unsigned int val, int index)
 	static const long mult[] =
 	    {1250000, 1250000, 1670000, 2600000, 6300000};
 
-	assert(index >= 0 && index <= 4);
+	KASSERT(index >= 0 && index <= 4);
 
 	return (25LL * val + 133) * mult[index] / 2628;
 }
@@ -280,7 +280,7 @@ viaenv_attach(struct device * parent, struct device * self, void *aux)
 	}
 	sc->sc_iot = pa->pa_iot;
 	if (bus_space_map(sc->sc_iot, iobase & 0xff80, 128, 0, &sc->sc_ioh)) {
-		printf(": failed to map HWM I/O space");
+		printf(": can't map HWM i/o space");
 		goto nohwm;
 	}
 
@@ -333,7 +333,7 @@ nohwm:
 	iobase = pci_conf_read(pa->pa_pc, pa->pa_tag, VIAENV_PMBASE);
 	if (bus_space_map(sc->sc_iot, PCI_MAPREG_IO_ADDR(iobase),
 	    VIAENV_PMSIZE, 0, &sc->sc_pm_ioh)) {
-		printf(": failed to map PM I/O space");
+		printf(": can't map PM i/o space");
 		goto nopm;
 	}
 

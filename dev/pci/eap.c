@@ -1,4 +1,4 @@
-/*      $OpenBSD: eap.c,v 1.35 2008/10/25 22:30:43 jakemsr Exp $ */
+/*      $OpenBSD: eap.c,v 1.37 2009/02/15 00:11:59 jakemsr Exp $ */
 /*	$NetBSD: eap.c,v 1.46 2001/09/03 15:07:37 reinoud Exp $ */
 
 /*
@@ -413,7 +413,7 @@ u_int32_t
 eap1371_src_wait(struct eap_softc *sc)
 {
 	int to;
-	u_int32_t src;
+	u_int32_t src = 0;
 	
 	for (to = 0; to < EAP_READ_TIMEOUT; to++) {
 		src = EREAD4(sc, E1371_SRC);
@@ -431,11 +431,14 @@ eap1371_src_read(struct eap_softc *sc, int a)
 	int to;
 	u_int32_t src, t;
 
-	src = eap1371_src_wait(sc) & E1371_SRC_CTLMASK;
-	src |= E1371_SRC_ADDR(a);
+	t = eap1371_src_wait(sc);
+
+	src = (t & E1371_SRC_CTLMASK) | E1371_SRC_ADDR(a);
 	EWRITE4(sc, E1371_SRC, src | E1371_SRC_STATE_OK);
 
-	if ((eap1371_src_wait(sc) & E1371_SRC_STATE_MASK) != E1371_SRC_STATE_OK) {
+	t = eap1371_src_wait(sc);
+
+	if ((t & E1371_SRC_STATE_MASK) != E1371_SRC_STATE_OK) {
 		for (to = 0; to < EAP_READ_TIMEOUT; to++) {
 			t = EREAD4(sc, E1371_SRC);
 			if ((t & E1371_SRC_STATE_MASK) == E1371_SRC_STATE_OK)
@@ -645,7 +648,7 @@ eap_attach(struct device *parent, struct device *self, void *aux)
 		/*
 		 * Must properly reprogram sample rate converter,
 		 * or it locks up.  Set some defaults for the life of the
-		 * machine, and set up a sb default sample rate.
+		 * machine, and set up an ac97 default sample rate.
 		 */
 		EWRITE4(sc, E1371_SRC, E1371_SRC_DISABLE);
 		for (i = 0; i < 0x80; i++)
@@ -660,9 +663,9 @@ eap_attach(struct device *parent, struct device *self, void *aux)
 		eap1371_src_write(sc, ESRC_DAC1_VOLR, ESRC_SET_DAC_VOLI(1));
 		eap1371_src_write(sc, ESRC_DAC2_VOLL, ESRC_SET_DAC_VOLI(1));
 		eap1371_src_write(sc, ESRC_DAC2_VOLR, ESRC_SET_DAC_VOLI(1));
-		eap1371_set_adc_rate(sc, 22050);
-		eap1371_set_dac_rate(sc, 22050, 1);
-		eap1371_set_dac_rate(sc, 22050, 2);
+		eap1371_set_adc_rate(sc, 48000);
+		eap1371_set_dac_rate(sc, 48000, 1);
+		eap1371_set_dac_rate(sc, 48000, 2);
 	     
 		EWRITE4(sc, E1371_SRC, 0);
 

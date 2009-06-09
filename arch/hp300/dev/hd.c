@@ -1,4 +1,4 @@
-/*	$OpenBSD: hd.c,v 1.54 2008/10/15 19:12:20 blambert Exp $	*/
+/*	$OpenBSD: hd.c,v 1.56 2009/06/04 05:57:27 krw Exp $	*/
 /*	$NetBSD: rd.c,v 1.33 1997/07/10 18:14:08 kleink Exp $	*/
 
 /*
@@ -292,7 +292,6 @@ hdattach(parent, self, aux)
 	/*
 	 * Initialize and attach the disk structure.
 	 */
-	bzero(&sc->sc_dkdev, sizeof(sc->sc_dkdev));
 	sc->sc_dkdev.dk_name = sc->sc_dev.dv_xname;
 	disk_attach(&sc->sc_dkdev);
 
@@ -545,6 +544,14 @@ hdopen(dev, flags, mode, p)
 	rs = hdlookup(unit);
 	if (rs == NULL)
 		return (ENXIO);
+
+	/*
+	 * Fail open if we tried to attach but the disk did not answer.
+	 */
+	if (!ISSET(rs->sc_dkdev.dk_flags, DKF_CONSTRUCTED)) {
+		device_unref(&rs->sc_dev);
+		return (error);
+	}
 
 	if ((error = hdlock(rs)) != 0) {
 		device_unref(&rs->sc_dev);
@@ -1130,6 +1137,7 @@ hdioctl(dev, cmd, data, flag, p)
 	struct proc *p;
 {
 	int unit = DISKUNIT(dev);
+	struct disklabel *lp;
 	struct hd_softc *sc;
 	int error = 0;
 
@@ -1138,6 +1146,13 @@ hdioctl(dev, cmd, data, flag, p)
 		return (ENXIO);
 
 	switch (cmd) {
+	case DIOCRLDINFO:
+		lp = malloc(sizeof(*lp), M_TEMP, M_WAITOK);
+		hdgetdisklabel(dev, sc, lp, 0);
+		*(sc->sc_dkdev.dk_label) = *lp;
+		free(lp, M_TEMP);
+		return 0;
+
 	case DIOCGPDINFO:
 		hdgetdisklabel(dev, sc, (struct disklabel *)data, 1);
 		goto exit;

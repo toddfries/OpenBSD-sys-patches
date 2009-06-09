@@ -1,4 +1,4 @@
-/*	$OpenBSD: gscsio.c,v 1.9 2007/06/05 08:37:20 jsg Exp $	*/
+/*	$OpenBSD: gscsio.c,v 1.11 2009/06/02 12:12:35 grange Exp $	*/
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -42,9 +42,9 @@ struct gscsio_softc {
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
 
-	int sc_ld_en[GSCSIO_LDNUM];
-	bus_space_handle_t sc_ld_ioh0[GSCSIO_LDNUM];
-	bus_space_handle_t sc_ld_ioh1[GSCSIO_LDNUM];
+	int sc_ld_en[GSCSIO_LDN_LAST + 1];
+	bus_space_handle_t sc_ld_ioh0[GSCSIO_LDN_LAST + 1];
+	bus_space_handle_t sc_ld_ioh1[GSCSIO_LDN_LAST + 1];
 
 	/* ACCESS.bus */
 	struct gscsio_acb {
@@ -151,7 +151,7 @@ gscsio_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_iot = ia->ia_iot;
 	if (bus_space_map(sc->sc_iot, ia->ipa_io[0].base, GSCSIO_IOSIZE,
 	    0, &sc->sc_ioh)) {
-		printf(": can't map I/O space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 	printf(": SC1100 SIO rev %d:",

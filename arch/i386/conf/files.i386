@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.184 2008/11/09 15:11:19 oga Exp $
+#	$OpenBSD: files.i386,v 1.193 2009/06/06 05:31:01 oga Exp $
 #
 # new style config file for i386 architecture
 #
@@ -11,6 +11,9 @@ maxusers 2 16 100
 major	{ccd = 16}
 
 file	arch/i386/i386/autoconf.c
+file	arch/i386/i386/bus_space.c
+file	arch/i386/i386/bus_dma.c
+file	arch/i386/i386/sg_dma.c		!small_kernel
 file	arch/i386/i386/conf.c
 file	arch/i386/i386/db_disasm.c	ddb
 file	arch/i386/i386/db_interface.c	ddb
@@ -49,6 +52,9 @@ file	arch/i386/i386/ipifuncs.c	multiprocessor
 file	arch/i386/i386/db_mp.c		multiprocessor & ddb
 file	arch/i386/i386/wscons_machdep.c	wsdisplay
 major	{vnd = 14}
+
+include "dev/rasops/files.rasops"
+include "dev/wsfont/files.wsfont"
 
 #
 # Media Independent Interface (mii)
@@ -98,11 +104,17 @@ include "../../../dev/pci/files.pci"
 file	arch/i386/pci/pci_machdep.c		pci
 file	arch/i386/pci/pciide_machdep.c		pciide
 file	arch/i386/pci/pcic_pci_machdep.c	pcic_pci
+file	arch/i386/pci/vga_post.c		vga_pci & x86emu
 
 # PCI-Host bridge chipsets
 device  pchb: pcibus, agpbus
 attach	pchb at pci
 file	arch/i386/pci/pchb.c		pchb
+
+# AMAS AMD memory address switch
+device  amas
+attach  amas at pci
+file    dev/pci/amas.c			amas
 
 # AGP bridge support. most attach at pchb
 include "dev/pci/files.agp"
@@ -302,6 +314,8 @@ file	arch/i386/i386/acpiapm.c
 
 # Intel SMP specification 1.4
 define	mpbios
+device	mpbios
+attach	mpbios at bios
 file	arch/i386/i386/mpbios.c		mpbios needs-flag
 file	arch/i386/i386/mpbios_intr_fixup.c	mpbios & pci
 
@@ -422,6 +436,7 @@ include "dev/bluetooth/files.bluetooth"
 
 include "../../../dev/acpi/files.acpi"
 file	arch/i386/i386/acpi_machdep.c		acpi
+file	arch/i386/i386/acpi_wakecode.S		acpi
 
 #
 # IPMI

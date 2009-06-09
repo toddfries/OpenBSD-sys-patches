@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_extern.h,v 1.72 2008/11/04 21:37:06 deraadt Exp $	*/
+/*	$OpenBSD: uvm_extern.h,v 1.78 2009/06/07 02:01:54 oga Exp $	*/
 /*	$NetBSD: uvm_extern.h,v 1.57 2001/03/09 01:02:12 chs Exp $	*/
 
 /*
@@ -221,10 +221,23 @@ typedef int		vm_prot_t;
 #define	UVM_PGA_ZERO		0x0002	/* returned page must be zeroed */
 
 /*
+ * flags for uvm_pglistalloc() and uvm_pmr_getpages()
+ */
+#define UVM_PLA_WAITOK		0x0001	/* may sleep */
+#define UVM_PLA_NOWAIT		0x0002	/* can't sleep (need one of the two) */
+#define UVM_PLA_ZERO		0x0004	/* zero all pages before returning */
+#define UVM_PLA_TRY_CONTIG	0x0008	/* try to allocate a contig range */
+
+/*
  * lockflags that control the locking behavior of various functions.
  */
 #define	UVM_LK_ENTER	0x00000001	/* map locked on entry */
 #define	UVM_LK_EXIT	0x00000002	/* leave map locked on exit */
+
+/*
+ * flags to uvm_physload.
+ */
+#define	PHYSLOAD_DEVICE	0x01	/* don't add to the page queue */
 
 /*
  * structures
@@ -406,6 +419,20 @@ struct vmspace {
 #ifdef _KERNEL
 
 /*
+ * used to keep state while iterating over the map for a core dump.
+ */
+struct uvm_coredump_state {
+	void *cookie;		/* opaque for the caller */
+	vaddr_t start;		/* start of region */
+	vaddr_t realend;	/* real end of region */
+	vaddr_t end;		/* virtual end of region */
+	vm_prot_t prot;		/* protection of region */
+	int flags;		/* flags; see below */
+};
+
+#define	UVM_COREDUMP_STACK	0x01	/* region is user stack */
+
+/*
  * the various kernel maps, owned by MD code
  */
 extern struct vm_map *exec_map;
@@ -501,10 +528,6 @@ vaddr_t			uvm_km_valloc_align(vm_map_t, vsize_t, vsize_t);
 vaddr_t			uvm_km_valloc_wait(vm_map_t, vsize_t);
 vaddr_t			uvm_km_valloc_prefer_wait(vm_map_t, vsize_t,
 					voff_t);
-vaddr_t			uvm_km_alloc_poolpage1(vm_map_t,
-				struct uvm_object *, boolean_t);
-void			uvm_km_free_poolpage1(vm_map_t, vaddr_t);
-
 void			*uvm_km_getpage(boolean_t, int *);
 void			uvm_km_putpage(void *);
 
@@ -552,8 +575,10 @@ vaddr_t			uvm_pagealloc_contig(vaddr_t, vaddr_t,
 void			uvm_pagerealloc(struct vm_page *, 
 					     struct uvm_object *, voff_t);
 /* Actually, uvm_page_physload takes PF#s which need their own type */
-void			uvm_page_physload(paddr_t, paddr_t,
-					       paddr_t, paddr_t, int);
+void			uvm_page_physload_flags(paddr_t, paddr_t, paddr_t,
+			    paddr_t, int, int);
+#define uvm_page_physload(s, e, as, ae, fl)	\
+	uvm_page_physload_flags(s, e, as, ae, fl, 0)
 void			uvm_setpagesize(void);
 void			uvm_shutdown(void);
 
@@ -572,12 +597,20 @@ int			uvm_pglistalloc(psize_t, paddr_t,
 				struct pglist *, int, int); 
 void			uvm_pglistfree(struct pglist *);
 
+/* uvm_pmemrange.c */
+
+void			uvm_pmr_use_inc(paddr_t, paddr_t);
+
 /* uvm_swap.c */
 void			uvm_swap_init(void);
 
 /* uvm_unix.c */
 int			uvm_coredump(struct proc *, struct vnode *, 
 				struct ucred *, struct core *);
+int			uvm_coredump_walkmap(struct proc *,
+			    void *,
+			    int (*)(struct proc *, void *,
+				    struct uvm_coredump_state *), void *);
 void			uvm_grow(struct proc *, vaddr_t);
 
 /* uvm_user.c */

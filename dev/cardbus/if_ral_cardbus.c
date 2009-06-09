@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ral_cardbus.c,v 1.11 2008/07/21 19:41:44 damien Exp $  */
+/*	$OpenBSD: if_ral_cardbus.c,v 1.14 2009/05/12 17:43:16 damien Exp $  */
 
 /*-
  * Copyright (c) 2005-2007
@@ -106,15 +106,22 @@ struct cfattach ral_cardbus_ca = {
 };
 
 static const struct cardbus_matchid ral_cardbus_devices[] = {
-	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2560  },
-	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2561  },
+	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2560 },
+	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2561 },
 	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2561S },
-	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2661  },
-	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2860  },
-	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2890  },
-	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2760  },
-	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2790  },
-	{ PCI_VENDOR_AWT,    PCI_PRODUCT_AWT_RT2890     }
+	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2661 },
+	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2860 },
+	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2890 },
+	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2760 },
+	{ PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT2790 },
+	{ PCI_VENDOR_AWT,    PCI_PRODUCT_AWT_RT2890 },
+	{ PCI_VENDOR_EDIMAX, PCI_PRODUCT_EDIMAX_RT2860_1 },
+	{ PCI_VENDOR_EDIMAX, PCI_PRODUCT_EDIMAX_RT2860_2 },
+	{ PCI_VENDOR_EDIMAX, PCI_PRODUCT_EDIMAX_RT2860_3 },
+	{ PCI_VENDOR_EDIMAX, PCI_PRODUCT_EDIMAX_RT2860_4 },
+	{ PCI_VENDOR_EDIMAX, PCI_PRODUCT_EDIMAX_RT2860_5 },
+	{ PCI_VENDOR_EDIMAX, PCI_PRODUCT_EDIMAX_RT2860_6 },
+	{ PCI_VENDOR_EDIMAX, PCI_PRODUCT_EDIMAX_RT2860_7 }
 };
 
 int	ral_cardbus_enable(struct rt2560_softc *);
@@ -126,8 +133,7 @@ int
 ral_cardbus_match(struct device *parent, void *match, void *aux)
 {
 	return (cardbus_matchbyid((struct cardbus_attach_args *)aux,
-	    ral_cardbus_devices,
-	    sizeof (ral_cardbus_devices) / sizeof (ral_cardbus_devices[0])));
+	    ral_cardbus_devices, nitems(ral_cardbus_devices)));
 }
 
 void
@@ -140,24 +146,27 @@ ral_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	bus_addr_t base;
 	int error;
 
-	switch (CARDBUS_PRODUCT(ca->ca_id)) {
-	case PCI_PRODUCT_RALINK_RT2560:
-		csc->sc_opns = &ral_rt2560_opns;
-		break;
-	case PCI_PRODUCT_RALINK_RT2561:
-	case PCI_PRODUCT_RALINK_RT2561S:
-	case PCI_PRODUCT_RALINK_RT2661:
-		csc->sc_opns = &ral_rt2661_opns;
-		break;
-	case PCI_PRODUCT_RALINK_RT2860:
-	case PCI_PRODUCT_RALINK_RT2890:
-	case PCI_PRODUCT_RALINK_RT2760:
-	case PCI_PRODUCT_RALINK_RT2790:
-	case PCI_PRODUCT_AWT_RT2890:
+	if (CARDBUS_VENDOR(ca->ca_id) == PCI_VENDOR_RALINK) {
+		switch (CARDBUS_PRODUCT(ca->ca_id)) {
+		case PCI_PRODUCT_RALINK_RT2560:
+			csc->sc_opns = &ral_rt2560_opns;
+			break;
+		case PCI_PRODUCT_RALINK_RT2561:
+		case PCI_PRODUCT_RALINK_RT2561S:
+		case PCI_PRODUCT_RALINK_RT2661:
+			csc->sc_opns = &ral_rt2661_opns;
+			break;
+		case PCI_PRODUCT_RALINK_RT2860:
+		case PCI_PRODUCT_RALINK_RT2890:
+		case PCI_PRODUCT_RALINK_RT2760:
+		case PCI_PRODUCT_RALINK_RT2790:
+			csc->sc_opns = &ral_rt2860_opns;
+			break;
+		}
+	} else {
+		/* all other vendors are RT2860 only */
 		csc->sc_opns = &ral_rt2860_opns;
-		break;
 	}
-
 	sc->sc_dmat = ca->ca_dmat;
 	csc->sc_ct = ct;
 	csc->sc_tag = ca->ca_tag;
@@ -173,7 +182,7 @@ ral_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	    CARDBUS_MAPREG_TYPE_MEM, 0, &sc->sc_st, &sc->sc_sh, &base,
 	    &csc->sc_mapsize);
 	if (error != 0) {
-		printf(": could not map memory space\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 

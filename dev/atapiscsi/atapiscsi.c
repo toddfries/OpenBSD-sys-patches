@@ -1,4 +1,4 @@
-/*      $OpenBSD: atapiscsi.c,v 1.80 2008/05/22 20:11:03 drahn Exp $     */
+/*      $OpenBSD: atapiscsi.c,v 1.82 2009/02/16 21:19:06 miod Exp $     */
 
 /*
  * This code is derived from code with the copyright below.
@@ -164,7 +164,7 @@ struct atapiscsi_softc {
 	int drive;
 };
 
-void  wdc_atapi_minphys(struct buf *bp);
+void  wdc_atapi_minphys(struct buf *bp, struct scsi_link *sl);
 int   wdc_atapi_ioctl(struct scsi_link *,
 	u_long, caddr_t, int, struct proc *);
 int   wdc_atapi_send_cmd(struct scsi_xfer *sc_xfer);
@@ -341,7 +341,7 @@ wdc_atapi_send_cmd(sc_xfer)
 	xfer = wdc_get_xfer(sc_xfer->flags & SCSI_NOSLEEP
 	    ? WDC_NOSLEEP : WDC_CANSLEEP);
 	if (xfer == NULL) {
-		return (TRY_AGAIN_LATER);
+		return (NO_CCB);
 	}
 	if (sc_xfer->flags & SCSI_POLL)
 		xfer->c_flags |= C_POLL;
@@ -433,9 +433,9 @@ wdc_atapi_send_cmd(sc_xfer)
 }
 
 void
-wdc_atapi_minphys (struct buf *bp)
+wdc_atapi_minphys (struct buf *bp, struct scsi_link *sl)
 {
-	if(bp->b_bcount > MAX_SIZE)
+	if (bp->b_bcount > MAX_SIZE)
 		bp->b_bcount = MAX_SIZE;
 	minphys(bp);
 }

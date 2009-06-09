@@ -1,4 +1,4 @@
-/*	$OpenBSD: arcbios.c,v 1.14 2008/04/07 22:40:58 miod Exp $	*/
+/*	$OpenBSD: arcbios.c,v 1.21 2009/05/16 16:40:31 miod Exp $	*/
 /*-
  * Copyright (c) 1996 M. Warner Losh.  All rights reserved.
  * Copyright (c) 1996-2004 Opsycon AB.  All rights reserved.
@@ -41,7 +41,7 @@
 #include <machine/mnode.h>
 #endif
 
-int bios_is_32bit = 1;
+int bios_is_32bit;
 /*
  * If we cannot get the onboard Ethernet address to override this bogus
  * value, ether_ifattach() will pick a valid address.
@@ -59,7 +59,7 @@ int bios_get_system_type(void);
 arc_dsp_stat_t	displayinfo;		/* Save area for display status info. */
 
 static struct systypes {
-	char *sys_vend;		/* Vendor ID if name is ambigous */
+	char *sys_vend;		/* Vendor ID if name is ambiguous */
 	char *sys_name;		/* May be left NULL if name is sufficient */
 	int  sys_type;
 } sys_types[] = {
@@ -76,7 +76,6 @@ static struct systypes {
     { NULL,		"SGI-IP22",			SGI_INDY },
     { NULL,		"SGI-IP25",			SGI_POWER10 },
     { NULL,		"SGI-IP26",			SGI_POWERI },
-    { NULL,		"SGI-IP27",			SGI_O200 },
     { NULL,		"SGI-IP30",			SGI_OCTANE },
     { NULL,		"SGI-IP32",			SGI_O2 }
 };
@@ -154,7 +153,7 @@ int
 bios_getchar()
 {
 	char buf[4];
-	int  cnt;
+	long  cnt;
 
 	if (Bios_Read(0, &buf[0], 1, &cnt) != 0)
 		return(-1);
@@ -166,7 +165,7 @@ bios_putchar(c)
 char c;
 {
 	char buf[4];
-	int  cnt;
+	long  cnt;
 
 	if (c == '\n') {
 		buf[0] = '\r';
@@ -207,10 +206,9 @@ bios_printf(const char *fmt, ...)
 /*
  * Get memory descriptor for the memory configuration and
  * create a layout database used by pmap init to set up
- * the memory system. Note that kernel option "MACHINE_NONCONTIG"
- * must be set for systems with non contigous physical memory.
+ * the memory system.
  *
- * Concatenate obvious adjecent segments.
+ * Concatenate obvious adjacent segments.
  */
 void
 bios_configure_memory()
@@ -220,7 +218,10 @@ bios_configure_memory()
 	uint64_t start, count;
 	MEMORYTYPE type;
 	vaddr_t seg_start, seg_end;
-	int	i;
+#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+	int seen_free = 0;
+#endif
+	int i;
 
 	descr = (arc_mem_t *)Bios_GetMemoryDescriptor(descr);
 	while (descr != NULL) {
@@ -246,26 +247,52 @@ bios_configure_memory()
 #endif
 
 #if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
-			/*
-			 * On Origin200 systems, data after the first
-			 * FirmwarePermanent entry is not reliable
-			 * (entries conflict with each other), and memory
-			 * after 32MB is not listed anyway.
-			 * So, break from the loop as soon as a
-			 * FirmwarePermanent entry is found, after
-			 * making it span the end of the first 32MB.
-			 * The rest of the memory is gathered from the
-			 * node structures.  This probably loses some of
-			 * the first 32MB, but at least we're safe to
-			 * use ARCBios after going virtual.
-			 */
-			if (sys_config.system_type == SGI_O200 &&
-			    type == FirmwarePermanent) {
-				count = (32 << (20 - 12)) - start;
-				descr = NULL;
+			if ((sys_config.system_type == SGI_O200 ||
+			     sys_config.system_type == SGI_O300)) {
+
+				/*
+				 * For the lack of a better way to tell
+				 * IP27 apart from IP35, look at the
+				 * start of the first chunk of free
+				 * memory. On IP27, it starts under
+				 * 0x20000 (which allows us to link
+				 * kernels at 0xa800000000020000).
+				 * On IP35, it starts at 0x40000.
+				 */
+				if (type == FreeMemory && seen_free == 0) {
+					seen_free = 1;
+					if (start >= 0x20)	/* IP35 */
+						sys_config.system_type =
+						    SGI_O300;
+				}
+
+				/*
+				 * On IP27 and IP35 systems, data after the
+				 * first FirmwarePermanent entry is not
+				 * reliable (entries conflict with each other),
+				 * and memory after 32MB (or 64MB on IP35) is
+				 * not listed anyway.
+				 * So, break from the loop as soon as a
+				 * FirmwarePermanent entry is found, after
+				 * making it span the end of the first 32MB
+				 * (64MB on IP35).
+				 *
+				 * The rest of the memory will be gathered
+				 * from the node structures.  This loses some
+				 * of the first few MB (well... all of them
+				 * but the kernel image), but at least we're
+				 * safe to use ARCBios after going virtual.
+				 */
+				if (type == FirmwarePermanent) {
+					descr = NULL; /* abort loop */
+					count = ((sys_config.system_type ==
+					    SGI_O200 ?  32 : 64) << (20 - 12)) -
+					    start;
+				}
 			}
-#endif
+#endif	/* O200 || O300 */
 		}
+
 		seg_start = start;
 		seg_end = seg_start + count;
 
@@ -273,6 +300,16 @@ bios_configure_memory()
 		case BadMemory:		/* Have no use for these */
 			break;
 
+		case LoadedProgram:
+			/*
+			 * LoadedProgram areas are either the boot loader,
+			 * if the kernel has not been directly loaded by
+			 * ARCBios, or the kernel image itself.
+			 * Since we will move the kernel image out of the
+			 * memory segments later anyway, it makes sense to
+			 * claim this memory as free.
+			 */
+			/* FALLTHROUGH */
 		case FreeMemory:
 		case FreeContigous:
 			physmem += count;
@@ -298,15 +335,11 @@ bios_configure_memory()
 			}
 			break;
 
-		case ExeceptionBlock:
+		case ExceptionBlock:
 		case SystemParameterBlock:
 		case FirmwareTemporary:
 		case FirmwarePermanent:
 			rsvdmem += count;
-			physmem += count;
-			break;
-
-		case LoadedProgram:	/* Count this into total memory */
 			physmem += count;
 			break;
 
@@ -344,7 +377,8 @@ bios_get_system_type()
 	int		i;
 
 	/*
-	 *  Figure out if this is an ARC Bios machine and if its 32 or 64 bits.
+	 * Figure out if this is an ARC Bios machine and if it is, see if we're
+	 * dealing with a 32 or 64 bit version.
 	 */
 	if ((ArcBiosBase32->magic == ARC_PARAM_BLK_MAGIC) ||
 	    (ArcBiosBase32->magic == ARC_PARAM_BLK_MAGIC_BUG)) {
@@ -390,7 +424,10 @@ bios_get_system_type()
 	} else {
 #if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
 		if (IP27_KLD_KLCONFIG(0)->magic == IP27_KLDIR_MAGIC) {
-			/* If we find a kldir assume IP27 */
+			/*
+			 * If we find a kldir assume IP27 for now.
+			 * We'll decide whether this is IP27 or IP35 later.
+			 */
 			return SGI_O200;
 		}
 #endif
@@ -398,7 +435,6 @@ bios_get_system_type()
 
 	bios_printf("UNRECOGNIZED SYSTEM '%s' VENDOR '%8.8s' PRODUCT '%8.8s'\n",
 	    cf == NULL ? "??" : sysid, sid->vendor, sid->prodid);
-	bios_printf("See the www.openbsd.org for further information.\n");
 	bios_printf("Halting system!\n");
 	Bios_Halt();
 	bios_printf("Halting failed, use manual reset!\n");

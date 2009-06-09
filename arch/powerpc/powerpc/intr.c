@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.3 2008/09/18 03:56:25 drahn Exp $	*/
+/*	$OpenBSD: intr.c,v 1.5 2009/06/02 21:38:10 drahn Exp $	*/
 
 /*
  * Copyright (c) 1997 Per Fogelstrom, Opsycon AB and RTMX Inc, USA.
@@ -88,6 +88,10 @@ splx(int newcpl)
 	ppc_intr_func.x(newcpl);
 }
 
+/*
+ * functions with 'default' behavior to use before the real
+ * interrupt controller attaches
+ */
 int
 ppc_dflt_splraise(int newcpl)
 {
@@ -102,10 +106,6 @@ ppc_dflt_splraise(int newcpl)
 	return (oldcpl);
 }
 
-/*
- * functions with 'default' behavior to use before the real
- * interrupt controller attaches
- */
 int
 ppc_dflt_spllower(int newcpl)
 {

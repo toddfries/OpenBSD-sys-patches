@@ -1,4 +1,4 @@
-/*	$OpenBSD: gem.c,v 1.82 2008/11/07 18:03:52 brad Exp $	*/
+/*	$OpenBSD: gem.c,v 1.90 2009/03/29 11:53:47 kettenis Exp $	*/
 /*	$NetBSD: gem.c,v 1.1 2001/09/16 00:11:43 eeh Exp $ */
 
 /*
@@ -80,7 +80,7 @@ struct cfdriver gem_cd = {
 };
 
 void		gem_start(struct ifnet *);
-void		gem_stop(struct ifnet *, int);
+void		gem_stop(struct ifnet *);
 int		gem_ioctl(struct ifnet *, u_long, caddr_t);
 void		gem_tick(void *);
 void		gem_watchdog(struct ifnet *);
@@ -97,7 +97,9 @@ int		gem_reset_rx(struct gem_softc *);
 int		gem_reset_tx(struct gem_softc *);
 int		gem_disable_rx(struct gem_softc *);
 int		gem_disable_tx(struct gem_softc *);
+void		gem_rx_watchdog(void *);
 void		gem_rxdrain(struct gem_softc *);
+void		gem_fill_rx_ring(struct gem_softc *);
 int		gem_add_rxbuf(struct gem_softc *, int idx);
 void		gem_setladrf(struct gem_softc *);
 
@@ -111,7 +113,6 @@ void		gem_pcs_writereg(struct device *, int, int, int);
 int		gem_mediachange(struct ifnet *);
 void		gem_mediastatus(struct ifnet *, struct ifmediareq *);
 
-struct mbuf	*gem_get(struct gem_softc *, int, int);
 int		gem_eint(struct gem_softc *, u_int);
 int		gem_rint(struct gem_softc *);
 int		gem_tint(struct gem_softc *, u_int32_t);
@@ -226,6 +227,9 @@ gem_config(struct gem_softc *sc)
 	ifp->if_watchdog = gem_watchdog;
 	IFQ_SET_MAXLEN(&ifp->if_snd, GEM_NTXDESC - 1);
 	IFQ_SET_READY(&ifp->if_snd);
+
+	/* Hardware reads RX descriptors in multiples of four. */
+	m_clsetwms(ifp, MCLBYTES, 4, GEM_NRXDESC - 4);
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
@@ -347,6 +351,7 @@ gem_config(struct gem_softc *sc)
 		panic("gem_config: can't establish shutdownhook");
 
 	timeout_set(&sc->sc_tick_ch, gem_tick, sc);
+	timeout_set(&sc->sc_rx_watchdog, gem_rx_watchdog, sc);
 	return;
 
 	/*
@@ -475,13 +480,14 @@ gem_rxdrain(struct gem_softc *sc)
 			rxs->rxs_mbuf = NULL;
 		}
 	}
+	sc->sc_rx_prod = sc->sc_rx_cons = sc->sc_rx_cnt = 0;
 }
 
 /*
  * Reset the whole thing.
  */
 void
-gem_stop(struct ifnet *ifp, int disable)
+gem_stop(struct ifnet *ifp)
 {
 	struct gem_softc *sc = (struct gem_softc *)ifp->if_softc;
 	struct gem_sxd *sd;
@@ -517,8 +523,7 @@ gem_stop(struct ifnet *ifp, int disable)
 	}
 	sc->sc_tx_cnt = sc->sc_tx_prod = sc->sc_tx_cons = 0;
 
-	if (disable)
-		gem_rxdrain(sc);
+	gem_rxdrain(sc);
 }
 
 
@@ -630,8 +635,7 @@ gem_disable_tx(struct gem_softc *sc)
 int
 gem_meminit(struct gem_softc *sc)
 {
-	struct gem_rxsoft *rxs;
-	int i, error;
+	int i;
 
 	/*
 	 * Initialize the transmit descriptor ring.
@@ -648,23 +652,10 @@ gem_meminit(struct gem_softc *sc)
 	 * descriptor rings.
 	 */
 	for (i = 0; i < GEM_NRXDESC; i++) {
-		rxs = &sc->sc_rxsoft[i];
-		if (rxs->rxs_mbuf == NULL) {
-			if ((error = gem_add_rxbuf(sc, i)) != 0) {
-				printf("%s: unable to allocate or map rx "
-				    "buffer %d, error = %d\n",
-				    sc->sc_dev.dv_xname, i, error);
-				/*
-				 * XXX Should attempt to run with fewer receive
-				 * XXX buffers instead of just failing.
-				 */
-				gem_rxdrain(sc);
-				return (1);
-			}
-		} else
-			GEM_INIT_RXDESC(sc, i);
+		sc->sc_rxdescs[i].gd_flags = 0;
+		sc->sc_rxdescs[i].gd_addr = 0;
 	}
-	sc->sc_rxptr = 0;
+	gem_fill_rx_ring(sc);
 
 	return (0);
 }
@@ -723,7 +714,7 @@ gem_init(struct ifnet *ifp)
 	 */
 
 	/* step 1 & 2. Reset the Ethernet Channel */
-	gem_stop(ifp, 0);
+	gem_stop(ifp);
 	gem_reset(sc);
 	DPRINTF(sc, ("%s: gem_init: restarting\n", sc->sc_dev.dv_xname));
 
@@ -810,9 +801,8 @@ gem_init(struct ifnet *ifp)
 	if (sc->sc_hwinit)
 		(*sc->sc_hwinit)(sc);
 
-
 	/* step 15.  Give the receiver a swift kick */
-	bus_space_write_4(t, h, GEM_RX_KICK, GEM_NRXDESC-4);
+	bus_space_write_4(t, h, GEM_RX_KICK, sc->sc_rx_prod);
 
 	/* Start the one second timer. */
 	timeout_add_sec(&sc->sc_tick_ch, 1);
@@ -931,7 +921,7 @@ gem_rint(struct gem_softc *sc)
 	u_int64_t rxstat;
 	int i, len;
 
-	for (i = sc->sc_rxptr;; i = GEM_NEXTRX(i)) {
+	for (i = sc->sc_rx_cons; sc->sc_rx_cnt > 0; i = GEM_NEXTRX(i)) {
 		rxs = &sc->sc_rxsoft[i];
 
 		GEM_CDRXSYNC(sc, i,
@@ -940,23 +930,29 @@ gem_rint(struct gem_softc *sc)
 		rxstat = GEM_DMA_READ(sc, sc->sc_rxdescs[i].gd_flags);
 
 		if (rxstat & GEM_RD_OWN) {
-			/*
-			 * We have processed all of the receive buffers.
-			 */
+			/* We have processed all of the receive buffers. */
 			break;
-		}
-
-		if (rxstat & GEM_RD_BAD_CRC) {
-#ifdef GEM_DEBUG
-			printf("%s: receive error: CRC error\n",
-				sc->sc_dev.dv_xname);
-#endif
-			GEM_INIT_RXDESC(sc, i);
-			continue;
 		}
 
 		bus_dmamap_sync(sc->sc_dmatag, rxs->rxs_dmamap, 0,
 		    rxs->rxs_dmamap->dm_mapsize, BUS_DMASYNC_POSTREAD);
+		bus_dmamap_unload(sc->sc_dmatag, rxs->rxs_dmamap);
+
+		m = rxs->rxs_mbuf;
+		rxs->rxs_mbuf = NULL;
+
+		sc->sc_rx_cnt--;
+
+		if (rxstat & GEM_RD_BAD_CRC) {
+			ifp->if_ierrors++;
+#ifdef GEM_DEBUG
+			printf("%s: receive error: CRC error\n",
+				sc->sc_dev.dv_xname);
+#endif
+			m_freem(m);
+			continue;
+		}
+
 #ifdef GEM_DEBUG
 		if (ifp->if_flags & IFF_DEBUG) {
 			printf("    rxsoft %p descriptor %d: ", rxs, i);
@@ -970,19 +966,6 @@ gem_rint(struct gem_softc *sc)
 		/* No errors; receive the packet. */
 		len = GEM_RD_BUFLEN(rxstat);
 
-		/*
-		 * Allocate a new mbuf cluster.  If that fails, we are
-		 * out of memory, and must drop the packet and recycle
-		 * the buffer that's already attached to this descriptor.
-		 */
-		m = rxs->rxs_mbuf;
-		if (gem_add_rxbuf(sc, i) != 0) {
-			ifp->if_ierrors++;
-			GEM_INIT_RXDESC(sc, i);
-			bus_dmamap_sync(sc->sc_dmatag, rxs->rxs_dmamap, 0,
-			    rxs->rxs_dmamap->dm_mapsize, BUS_DMASYNC_PREREAD);
-			continue;
-		}
 		m->m_data += 2; /* We're already off by two */
 
 		ifp->if_ipackets++;
@@ -990,10 +973,6 @@ gem_rint(struct gem_softc *sc)
 		m->m_pkthdr.len = m->m_len = len;
 
 #if NBPFILTER > 0
-		/*
-		 * Pass this up to any BPF listeners, but only
-		 * pass it up the stack if its for us.
-		 */
 		if (ifp->if_bpf)
 			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif /* NBPFILTER > 0 */
@@ -1003,15 +982,24 @@ gem_rint(struct gem_softc *sc)
 	}
 
 	/* Update the receive pointer. */
-	sc->sc_rxptr = i;
-	bus_space_write_4(t, h, GEM_RX_KICK, i);
+	sc->sc_rx_cons = i;
+	gem_fill_rx_ring(sc);
+	bus_space_write_4(t, h, GEM_RX_KICK, sc->sc_rx_prod);
 
-	DPRINTF(sc, ("gem_rint: done sc->rxptr %d, complete %d\n",
-		sc->sc_rxptr, bus_space_read_4(t, h, GEM_RX_COMPLETION)));
+	DPRINTF(sc, ("gem_rint: done sc->sc_rx_cons %d, complete %d\n",
+		sc->sc_rx_cons, bus_space_read_4(t, h, GEM_RX_COMPLETION)));
 
 	return (1);
 }
 
+void
+gem_fill_rx_ring(struct gem_softc *sc)
+{
+	while (sc->sc_rx_cnt < (GEM_NRXDESC - 4)) {
+		if (gem_add_rxbuf(sc, sc->sc_rx_prod))
+			break;
+	}
+}
 
 /*
  * Add a receive buffer to the indicated descriptor.
@@ -1027,24 +1015,21 @@ gem_add_rxbuf(struct gem_softc *sc, int idx)
 	if (m == NULL)
 		return (ENOBUFS);
 
-	MCLGET(m, M_DONTWAIT);
+	MCLGETI(m, M_DONTWAIT, &sc->sc_arpcom.ac_if, MCLBYTES);
 	if ((m->m_flags & M_EXT) == 0) {
 		m_freem(m);
 		return (ENOBUFS);
 	}
+	m->m_len = m->m_pkthdr.len = MCLBYTES;
 
 #ifdef GEM_DEBUG
 /* bzero the packet to check dma */
 	memset(m->m_ext.ext_buf, 0, m->m_ext.ext_size);
 #endif
 
-	if (rxs->rxs_mbuf != NULL)
-		bus_dmamap_unload(sc->sc_dmatag, rxs->rxs_dmamap);
-
 	rxs->rxs_mbuf = m;
 
-	error = bus_dmamap_load(sc->sc_dmatag, rxs->rxs_dmamap,
-	    m->m_ext.ext_buf, m->m_ext.ext_size, NULL,
+	error = bus_dmamap_load_mbuf(sc->sc_dmatag, rxs->rxs_dmamap, m,
 	    BUS_DMA_READ|BUS_DMA_NOWAIT);
 	if (error) {
 		printf("%s: can't load rx DMA map %d, error = %d\n",
@@ -1057,9 +1042,11 @@ gem_add_rxbuf(struct gem_softc *sc, int idx)
 
 	GEM_INIT_RXDESC(sc, idx);
 
+	sc->sc_rx_prod = GEM_NEXTRX(sc->sc_rx_prod);
+	sc->sc_rx_cnt++;
+
 	return (0);
 }
-
 
 int
 gem_eint(struct gem_softc *sc, u_int status)
@@ -1135,13 +1122,22 @@ gem_intr(void *v)
  			printf("%s: MAC rx fault, status %x\n",
  			    sc->sc_dev.dv_xname, rxstat);
 #endif
-		/*
-		 * On some chip revisions GEM_MAC_RX_OVERFLOW happen often
-		 * due to a silicon bug so handle them silently.
-		 */
 		if (rxstat & GEM_MAC_RX_OVERFLOW) {
 			ifp->if_ierrors++;
-			gem_init(ifp);
+
+			/*
+			 * Apparently a silicon bug causes ERI to hang
+			 * from time to time.  So if we detect an RX
+			 * FIFO overflow, we fire off a timer, and
+			 * check whether we're still making progress
+			 * by looking at the RX FIFO write and read
+			 * pointers.
+			 */
+			sc->sc_rx_fifo_wr_ptr =
+				bus_space_read_4(t, seb, GEM_RX_FIFO_WR_PTR);
+			sc->sc_rx_fifo_rd_ptr =
+				bus_space_read_4(t, seb, GEM_RX_FIFO_RD_PTR);
+			timeout_add_msec(&sc->sc_rx_watchdog, 400);
 		}
 #ifdef GEM_DEBUG
 		else if (rxstat & ~(GEM_MAC_RX_DONE | GEM_MAC_RX_FRAME_CNT))
@@ -1152,6 +1148,36 @@ gem_intr(void *v)
 	return (r);
 }
 
+void
+gem_rx_watchdog(void *arg)
+{
+	struct gem_softc *sc = arg;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	bus_space_tag_t t = sc->sc_bustag;
+	bus_space_handle_t h = sc->sc_h1;
+	u_int32_t rx_fifo_wr_ptr;
+	u_int32_t rx_fifo_rd_ptr;
+	u_int32_t state;
+
+	if ((ifp->if_flags & IFF_RUNNING) == 0)
+		return;
+
+	rx_fifo_wr_ptr = bus_space_read_4(t, h, GEM_RX_FIFO_WR_PTR);
+	rx_fifo_rd_ptr = bus_space_read_4(t, h, GEM_RX_FIFO_RD_PTR);
+	state = bus_space_read_4(t, h, GEM_MAC_MAC_STATE);
+	if ((state & GEM_MAC_STATE_OVERFLOW) == GEM_MAC_STATE_OVERFLOW &&
+	    ((rx_fifo_wr_ptr == rx_fifo_rd_ptr) ||
+	     ((sc->sc_rx_fifo_wr_ptr == rx_fifo_wr_ptr) &&
+	      (sc->sc_rx_fifo_rd_ptr == rx_fifo_rd_ptr)))) {
+		/*
+		 * The RX state machine is still in overflow state and
+		 * the RX FIFO write and read pointers seem to be
+		 * stuck.  Whack the chip over the head to get things
+		 * going again.
+		 */
+		gem_init(ifp);
+	}
+}
 
 void
 gem_watchdog(struct ifnet *ifp)
@@ -1456,36 +1482,11 @@ gem_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				gem_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
-				gem_stop(ifp, 1);
+				gem_stop(ifp);
 		}
 #ifdef GEM_DEBUG
 		sc->sc_debug = (ifp->if_flags & IFF_DEBUG) != 0 ? 1 : 0;
 #endif
-		break;
-
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
-			error = EINVAL;
-		} else if (ifp->if_mtu != ifr->ifr_mtu) {
-			ifp->if_mtu = ifr->ifr_mtu;
-		}
-		break;
-
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				gem_setladrf(sc);
-			error = 0;
-		}
 		break;
 
 	case SIOCGIFMEDIA:
@@ -1495,6 +1496,12 @@ gem_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			gem_setladrf(sc);
+		error = 0;
 	}
 
 	splx(s);
@@ -1508,7 +1515,7 @@ gem_shutdown(void *arg)
 	struct gem_softc *sc = (struct gem_softc *)arg;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 
-	gem_stop(ifp, 1);
+	gem_stop(ifp);
 }
 
 /*
@@ -1642,7 +1649,7 @@ void
 gem_start(struct ifnet *ifp)
 {
 	struct gem_softc *sc = ifp->if_softc;
-	struct mbuf *m, *m0;
+	struct mbuf *m;
 	u_int64_t flags;
 	bus_dmamap_t map;
 	u_int32_t cur, frag, i;
@@ -1663,7 +1670,6 @@ gem_start(struct ifnet *ifp)
 
 		cur = frag = sc->sc_tx_prod;
 		map = sc->sc_txd[cur].sd_map;
-		m0 = NULL;
 
 		error = bus_dmamap_load_mbuf(sc->sc_dmatag, map, m,
 		    BUS_DMA_NOWAIT);
@@ -1671,41 +1677,22 @@ gem_start(struct ifnet *ifp)
 			goto drop;
 		if (error != 0) {
 			/* Too many fragments, linearize. */
-			MGETHDR(m0, M_DONTWAIT, MT_DATA);
-			if (m0 == NULL)
+			if (m_defrag(m, M_DONTWAIT))
 				goto drop;
-			if (m->m_pkthdr.len > MHLEN) {
-				MCLGET(m0, M_DONTWAIT);
-				if (!(m0->m_flags & M_EXT)) {
-					m_freem(m0);
-					goto drop;
-				}
-			}
-			m_copydata(m, 0, m->m_pkthdr.len, mtod(m0, caddr_t));
-			m0->m_pkthdr.len = m0->m_len = m->m_pkthdr.len;
-			error = bus_dmamap_load_mbuf(sc->sc_dmatag, map, m0,
+			error = bus_dmamap_load_mbuf(sc->sc_dmatag, map, m,
 			    BUS_DMA_NOWAIT);
-			if (error != 0) {
-				m_freem(m0);
+			if (error != 0)
 				goto drop;
-			}
 		}
 
 		if ((sc->sc_tx_cnt + map->dm_nsegs) > (GEM_NTXDESC - 2)) {
 			bus_dmamap_unload(sc->sc_dmatag, map);
 			ifp->if_flags |= IFF_OACTIVE;
-			if (m0 != NULL)
-				m_free(m0);
 			break;
 		}
 
 		/* We are now committed to transmitting the packet. */
-
 		IFQ_DEQUEUE(&ifp->if_snd, m);
-		if (m0 != NULL) {
-			m_free(m);
-			m = m0;
-		}
 
 #if NBPFILTER > 0
 		/*
@@ -1752,6 +1739,6 @@ gem_start(struct ifnet *ifp)
 
  drop:
 	IFQ_DEQUEUE(&ifp->if_snd, m);
-	m_free(m);
+	m_freem(m);
 	ifp->if_oerrors++;
 }

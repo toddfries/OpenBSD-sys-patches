@@ -1,4 +1,4 @@
-/*	$OpenBSD: esp.c,v 1.25 2007/10/01 16:11:19 krw Exp $	*/
+/*	$OpenBSD: esp.c,v 1.27 2009/03/29 21:53:52 sthen Exp $	*/
 /*	$NetBSD: esp.c,v 1.69 1997/08/27 11:24:18 bouyer Exp $	*/
 
 /*
@@ -134,7 +134,7 @@ struct cfattach esp_ca = {
 
 struct scsi_adapter esp_switch = {
 	ncr53c9x_scsi_cmd,
-	minphys,		/* no max at this level; handled by DMA code */
+	scsi_minphys,		/* no max at this level; handled by DMA code */
 	NULL,
 	NULL,
 };
@@ -297,7 +297,7 @@ espattach(parent, self, aux)
 		dsc->sc_regs = (struct dma_regs *)mapiodev(&ca->ca_ra.ra_reg[0],
 		    0, ca->ca_ra.ra_reg[0].rr_len);
 		if (dsc->sc_regs == NULL) {
-			printf(": could not map DMA registers\n");
+			printf(": can't map DMA registers\n");
 			return;
 		}
 		dsc->sc_rev = dsc->sc_regs->csr & D_DEV_ID;
@@ -336,7 +336,7 @@ espattach(parent, self, aux)
 		esc->sc_reg = (volatile u_char *)mapiodev(&ca->ca_ra.ra_reg[1],
 		    0, ca->ca_ra.ra_reg[1].rr_len);
 		if (esc->sc_reg == NULL) {
-			printf(": could not map SCSI core registers\n");
+			printf(": can't map SCSI core registers\n");
 			return;
 		}
 

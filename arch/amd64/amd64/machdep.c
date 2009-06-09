@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.84 2008/10/09 19:04:18 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.94 2009/06/07 02:01:54 oga Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -126,6 +126,7 @@
 #ifdef DDB
 #include <machine/db_machdep.h>
 #include <ddb/db_extern.h>
+extern int db_console;
 #endif
 
 #include "isa.h"
@@ -146,6 +147,13 @@
 
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;
+
+/*
+ * switchto vectors
+ */
+void (*cpu_idle_leave_fcn)(void) = NULL;
+void (*cpu_idle_cycle_fcn)(void) = NULL;
+void (*cpu_idle_enter_fcn)(void) = NULL;
 
 /* the following is used externally for concurrent handlers */
 int setperf_prio = 0;
@@ -173,6 +181,7 @@ paddr_t	idt_paddr;
 
 vaddr_t lo32_vaddr;
 paddr_t lo32_paddr;
+paddr_t tramp_pdirpa;
 
 int kbd_reset;
 
@@ -253,6 +262,7 @@ int	cpu_dumpsize(void);
 u_long	cpu_dump_mempagecnt(void);
 void	dumpsys(void);
 void	cpu_init_extents(void);
+void	map_tramps(void);
 void	init_x86_64(paddr_t);
 void	(*cpuresetfn)(void);
 
@@ -389,12 +399,6 @@ setup_buffers()
 	 */
 	if (bufpages == 0)
 		bufpages = physmem * bufcachepercent / 100;
-
-	/* Restrict to at most 25% filled kvm */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
 }
 
 /*
@@ -726,11 +730,17 @@ void
 signotify(struct proc *p)
 {
 	aston(p);
-#ifdef MULTIPROCESSOR
-	if (p->p_cpu != curcpu() && p->p_cpu != NULL)
-		x86_send_ipi(p->p_cpu, X86_IPI_NOP);
-#endif
+	cpu_unidle(p->p_cpu);
 }
+
+#ifdef MULTIPROCESSOR
+void
+cpu_unidle(struct cpu_info *ci)
+{
+	if (ci != curcpu())
+		x86_send_ipi(ci, X86_IPI_NOP);
+}
+#endif
 
 int	waittime = -1;
 struct pcb dumppcb;
@@ -816,7 +826,7 @@ haltsys:
 /*
  * These variables are needed by /sbin/savecore
  */
-u_int32_t	dumpmag = 0x8fca0101;	/* magic number */
+u_long	dumpmag = 0x8fca0101;	/* magic number */
 int 	dumpsize = 0;		/* pages */
 long	dumplo = 0; 		/* blocks */
 
@@ -1162,6 +1172,7 @@ cpu_init_extents(void)
 {
 	extern struct extent *iomem_ex;
 	static int already_done;
+	int i;
 
 	/* We get called for each CPU, only first should do this */
 	if (already_done)
@@ -1169,25 +1180,54 @@ cpu_init_extents(void)
 
 	/*
 	 * Allocate the physical addresses used by RAM from the iomem
-	 * extent map.  This is done before the addresses are
-	 * page rounded just to make sure we get them all.
+	 * extent map.
 	 */
-	if (extent_alloc_region(iomem_ex, 0, KBTOB(biosbasemem),
-	    EX_NOWAIT)) {
-		/* XXX What should we do? */
-		printf("WARNING: CAN'T ALLOCATE BASE MEMORY FROM "
-		    "IOMEM EXTENT MAP!\n");
-	}
-	if (extent_alloc_region(iomem_ex, IOM_END, KBTOB(biosextmem),
-	    EX_NOWAIT)) {
-		/* XXX What should we do? */
-		printf("WARNING: CAN'T ALLOCATE EXTENDED MEMORY FROM "
-		    "IOMEM EXTENT MAP!\n");
+	for (i = 0; i < mem_cluster_cnt; i++) {
+		if (extent_alloc_region(iomem_ex, mem_clusters[i].start,
+		    mem_clusters[i].size, EX_NOWAIT)) {
+			/* XXX What should we do? */
+			printf("WARNING: CAN'T ALLOCATE RAM (%lx-%lx)"
+			    " FROM IOMEM EXTENT MAP!\n", mem_clusters[i].start,
+			    mem_clusters[i].start + mem_clusters[i].size - 1);
+		}
 	}
 
 	already_done = 1;
 }
 
+#if defined(MULTIPROCESSOR) || \
+    (NACPI > 0 && defined(ACPI_SLEEP_ENABLED) && !defined(SMALL_KERNEL))
+void
+map_tramps(void) {
+	struct pmap *kmp = pmap_kernel();
+
+	pmap_kenter_pa(lo32_vaddr, lo32_paddr, VM_PROT_ALL);
+
+	/*
+	 * The initial PML4 pointer must be below 4G, so if the
+	 * current one isn't, use a "bounce buffer" and save it
+	 * for tramps to use.
+	 */
+	if (kmp->pm_pdirpa > 0xffffffff) {
+		memcpy((void *)lo32_vaddr, kmp->pm_pdir, PAGE_SIZE);
+		tramp_pdirpa = lo32_paddr;
+	} else
+		tramp_pdirpa = kmp->pm_pdirpa;
+
+#ifdef MULTIPROCESSOR
+	pmap_kenter_pa((vaddr_t)MP_TRAMPOLINE,	/* virtual */
+	    (paddr_t)MP_TRAMPOLINE,	/* physical */
+	    VM_PROT_ALL);		/* protection */
+#endif /* MULTIPROCESSOR */
+
+
+#ifdef ACPI_SLEEP_ENABLED
+	pmap_kenter_pa((vaddr_t)ACPI_TRAMPOLINE, /* virtual */
+	    (paddr_t)ACPI_TRAMPOLINE,	/* physical */
+	    VM_PROT_ALL);		/* protection */
+#endif /* ACPI_SLEEP_ENABLED */
+}
+#endif
 
 #define	IDTVEC(name)	__CONCAT(X, name)
 typedef void (vector)(void);
@@ -1197,7 +1237,6 @@ extern vector IDTVEC(osyscall);
 extern vector IDTVEC(oosyscall);
 extern vector *IDTVEC(exceptions)[];
 
-/* Tweakable by config(8) */
 int bigmem = 0;
 
 void
@@ -1281,6 +1320,11 @@ init_x86_64(paddr_t first_avail)
 		avail_start = MP_TRAMPOLINE + PAGE_SIZE;
 #endif
 
+#ifdef ACPI_SLEEP_ENABLED
+	if (avail_start < ACPI_TRAMPOLINE + PAGE_SIZE)
+		avail_start = ACPI_TRAMPOLINE + PAGE_SIZE;
+#endif /* ACPI_SLEEP_ENABLED */
+
 	/* Let us know if we're supporting > 4GB ram load */
 	if (bigmem)
 		printf("Bigmem = %d\n", bigmem);
@@ -1292,7 +1336,7 @@ init_x86_64(paddr_t first_avail)
 	 */ 
 	avail_end = mem_cluster_cnt = 0;
 	for (bmp = bios_memmap; bmp->type != BIOS_MAP_END; bmp++) {
-		paddr_t s1, s2, e1, e2, s3, e3, s4, e4;
+		paddr_t s1, s2, e1, e2;
 
 		/* Ignore non-free memory */
 		if (bmp->type != BIOS_MAP_FREE)
@@ -1303,7 +1347,7 @@ init_x86_64(paddr_t first_avail)
 		/* Init our segment(s), round/trunc to pages */
 		s1 = round_page(bmp->addr);
 		e1 = trunc_page(bmp->addr + bmp->size);
-		s2 = e2 = 0; s3 = e3 = 0; s4 = e4 = 0;
+		s2 = e2 = 0;
 
 		/*
 		 * XXX Some buggy ACPI BIOSes use memory that they
@@ -1320,6 +1364,8 @@ init_x86_64(paddr_t first_avail)
 		/* Nuke page zero */
 		if (s1 < avail_start) {
 			s1 = avail_start;
+			if (s1 > e1)
+				continue;
 		}
 
 		/* Crop to fit below 4GB for now */
@@ -1340,32 +1386,10 @@ init_x86_64(paddr_t first_avail)
 		if (s1 < biosbasemem && e1 > biosbasemem)
 			e1 = biosbasemem;
 
-/* XXX - This is sooo GROSS! */
-#define KERNEL_START IOM_END
-		/* Crop stuff into kernel from bottom */
-		if (s1 < KERNEL_START && e1 > KERNEL_START &&
-		    e1 < first_avail) {
-			e1 = KERNEL_START;
-		}
-		/* Crop stuff into kernel from top */
-		if (s1 > KERNEL_START && s1 < first_avail &&
-		    e1 > first_avail) {
-			s1 = first_avail;
-		}
-		/* Split stuff straddling kernel */
-		if (s1 <= KERNEL_START && e1 >= first_avail) {
-			s2 = first_avail; e2 = e1;
-			e1 = KERNEL_START;
-		}
-
 		/* Split any segments straddling the 16MB boundary */
 		if (s1 < 16*1024*1024 && e1 > 16*1024*1024) {
-			e3 = e1;
-			s3 = e1 = 16*1024*1024;
-		}
-		if (s2 < 16*1024*1024 && e2 > 16*1024*1024) {
-			e4 = e2;
-			s4 = e2 = 16*1024*1024;
+			e2 = e1;
+			s2 = e1 = 16*1024*1024;
 		}
 
 		/* Store segment(s) */
@@ -1379,20 +1403,8 @@ init_x86_64(paddr_t first_avail)
 			mem_clusters[mem_cluster_cnt].size = e2 - s2;
 			mem_cluster_cnt++;
 		}
-		if (e3 - s3 >= PAGE_SIZE) {
-			mem_clusters[mem_cluster_cnt].start = s3;
-			mem_clusters[mem_cluster_cnt].size = e3 - s3;
-			mem_cluster_cnt++;
-		}
-		if (e4 - s4 >= PAGE_SIZE) {
-			mem_clusters[mem_cluster_cnt].start = s4;
-			mem_clusters[mem_cluster_cnt].size = e4 - s4;
-			mem_cluster_cnt++;
-		}
 		if (avail_end < e1) avail_end = e1;
 		if (avail_end < e2) avail_end = e2;
-		if (avail_end < e3) avail_end = e3;
-		if (avail_end < e4) avail_end = e4;
 	}
 
 	/*
@@ -1504,7 +1516,10 @@ init_x86_64(paddr_t first_avail)
 	pmap_kenter_pa(idt_vaddr + PAGE_SIZE, idt_paddr + PAGE_SIZE,
 	    VM_PROT_READ|VM_PROT_WRITE);
 
-	pmap_kenter_pa(lo32_vaddr, lo32_paddr, VM_PROT_READ|VM_PROT_WRITE);
+#if defined(MULTIPROCESSOR) || \
+    (NACPI > 0 && defined(ACPI_SLEEP_ENABLED) && !defined(SMALL_KERNEL))
+	map_tramps();
+#endif
 
 	idt = (struct gate_descriptor *)idt_vaddr;
 	gdtstore = (char *)(idt + NIDT);
@@ -1698,10 +1713,11 @@ cpu_dump_mempagecnt(void)
 int
 amd64_pa_used(paddr_t addr)
 {
-	bios_memmap_t *bmp;
+	struct vm_page	*pg;
+	bios_memmap_t	*bmp;
 
 	/* Kernel manages these */
-	if (PHYS_TO_VM_PAGE(addr))
+	if ((pg = PHYS_TO_VM_PAGE(addr)) && (pg->pg_flags & PG_DEV) == 0)
 		return 1;
 
 	/* Kernel is loaded here */
@@ -1743,8 +1759,13 @@ void
 need_resched(struct cpu_info *ci)
 {
 	ci->ci_want_resched = 1;
-	if ((ci)->ci_curproc != NULL)
-		aston((ci)->ci_curproc);
+
+	/* There's a risk we'll be called before the idle threads start */
+	if (ci->ci_curproc) {
+		aston(ci->ci_curproc);
+		if (ci != curcpu())
+			cpu_unidle(ci);
+	}
 }
 
 /*
@@ -1814,6 +1835,7 @@ void
 getbootinfo(char *bootinfo, int bootinfo_size)
 {
 	bootarg32_t *q;
+	bios_ddb_t *bios_ddb;
 
 #undef BOOTINFO_DEBUG
 #ifdef BOOTINFO_DEBUG
@@ -1891,6 +1913,13 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 			break;
 		case BOOTARG_BOOTMAC:
 			bios_bootmac = (bios_bootmac_t *)q->ba_arg;
+			break;
+
+		case BOOTARG_DDB:
+			bios_ddb = (bios_ddb_t *)q->ba_arg;
+#ifdef DDB
+			db_console = bios_ddb->db_console;
+#endif
 			break;
 
 		default:

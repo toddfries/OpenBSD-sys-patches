@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.43 2008/06/26 05:42:10 ray Exp $	*/
+/*	$OpenBSD: bus.h,v 1.49 2009/06/06 05:43:13 oga Exp $	*/
 /*	$NetBSD: bus.h,v 1.6 1996/11/10 03:19:25 thorpej Exp $	*/
 
 /*-
@@ -66,6 +66,8 @@
 #ifndef _I386_BUS_H_
 #define _I386_BUS_H_
 
+#include <sys/mutex.h>
+
 #include <machine/pio.h>
 
 /*
@@ -113,18 +115,18 @@ void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
  * Read a 1, 2, 4, or 8 byte quantity from bus space
  * described by tag/handle/offset.
  */
+u_int8_t	bus_space_read_1(bus_space_tag_t, bus_space_handle_t,
+		    bus_size_t);
 
-#define	bus_space_read_1(t, h, o)					\
-	((t) == I386_BUS_SPACE_IO ? (inb((h) + (o))) :			\
-	    (*(volatile u_int8_t *)((h) + (o))))
+u_int16_t	bus_space_read_2(bus_space_tag_t, bus_space_handle_t,
+		    bus_size_t);
 
-#define	bus_space_read_2(t, h, o)					\
-	((t) == I386_BUS_SPACE_IO ? (inw((h) + (o))) :			\
-	    (*(volatile u_int16_t *)((h) + (o))))
+u_int32_t	bus_space_read_4(bus_space_tag_t, bus_space_handle_t,
+		    bus_size_t);
 
-#define	bus_space_read_4(t, h, o)					\
-	((t) == I386_BUS_SPACE_IO ? (inl((h) + (o))) :			\
-	    (*(volatile u_int32_t *)((h) + (o))))
+#if 0	/* Cause a link error for bus_space_read_8 */
+#define	bus_space_read_8(t, h, o)	!!! bus_space_read_8 unimplemented !!!
+#endif
 
 #if 0	/* Cause a link error for bus_space_read_8 */
 #define	bus_space_read_8(t, h, o)	!!! bus_space_read_8 unimplemented !!!
@@ -139,47 +141,17 @@ void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
  * described by tag/handle/offset and copy into buffer provided.
  */
 
-#define	bus_space_read_multi_1(t, h, o, a, cnt) do {			\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		insb((h) + (o), (a), (cnt));				\
-	} else {void *_addr=(a); int _cnt=(cnt);			\
-		__asm __volatile("					\
-			cld					;	\
-		1:	movb (%2),%%al				;	\
-			stosb					;	\
-			loop 1b"				:	\
-		    "+D" (_addr), "+c" (_cnt) : "r" ((h) + (o))	:	\
-		    "%eax", "memory", "cc");				\
-	}								\
-} while (0)
+#define	bus_space_read_raw_multi_2(t, h, o, a, c) \
+    bus_space_read_multi_2((t), (h), (o), (u_int16_t *)(a), (c) >> 1)
+#define	bus_space_read_raw_multi_4(t, h, o, a, c) \
+    bus_space_read_multi_4((t), (h), (o), (u_int32_t *)(a), (c) >> 2)
 
-#define	bus_space_read_multi_2(t, h, o, a, cnt) do {			\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		insw((h) + (o), (a), (cnt));				\
-	} else {void *_addr=(a); int _cnt=(cnt);			\
-		__asm __volatile("					\
-			cld					;	\
-		1:	movw (%2),%%ax				;	\
-			stosw					;	\
-			loop 1b"				:	\
-		    "+D" (_addr), "+c" (_cnt) : "r" ((h) + (o))	:	\
-		    "%eax", "memory", "cc");				\
-	}								\
-} while (0)
-
-#define	bus_space_read_multi_4(t, h, o, a, cnt) do {			\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		insl((h) + (o), (a), (cnt));				\
-	} else {void *_addr=(a); int _cnt=(cnt);			\
-		__asm __volatile("					\
-			cld					;	\
-		1:	movl (%2),%%eax				;	\
-			stosl					;	\
-			loop 1b"				:	\
-		    "+D" (_addr), "+c" (_cnt) : "r" ((h) + (o))	:	\
-		    "%eax", "memory", "cc");				\
-	}								\
-} while (0)
+void	bus_space_read_multi_1(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    u_int8_t *, bus_size_t);
+void	bus_space_read_multi_2(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    u_int16_t *, bus_size_t);
+void	bus_space_read_multi_4(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    u_int32_t *, bus_size_t);
 
 #if 0	/* Cause a link error for bus_space_read_multi_8 */
 #define	bus_space_read_multi_8	!!! bus_space_read_multi_8 unimplemented !!!
@@ -216,50 +188,12 @@ void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
  * buffer provided.
  */
 
-#define	bus_space_read_region_1(t, h, o, a, cnt) do {			\
-	int _cnt = (cnt);	void *_addr = (a); int _port = (h)+(o);	\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		__asm __volatile("					\
-			cld					;	\
-		1:	inb %w2,%%al				;	\
-			stosb					;	\
-			incl %2					;	\
-			loop 1b"				:	\
-		    "+D" (_addr), "+c" (_cnt), "+d" (_port)	::	\
-		    "%eax", "memory", "cc");				\
-	} else								\
-		i386_space_copy(_port, _addr, 1, _cnt);			\
-} while (0)
-
-#define	bus_space_read_region_2(t, h, o, a, cnt) do {			\
-	int _cnt = (cnt);	void *_addr = (a); int _port = (h)+(o);	\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		__asm __volatile("					\
-			cld					;	\
-		1:	inw %w2,%%ax				;	\
-			stosw					;	\
-			addl $2,%2				;	\
-			loop 1b"				:	\
-		    "+D" (_addr), "+c" (_cnt), "+d" (_port)	::	\
-		    "%eax", "memory", "cc");				\
-	} else								\
-		i386_space_copy(_port, _addr, 2, _cnt);			\
-} while (0)
-
-#define	bus_space_read_region_4(t, h, o, a, cnt) do {			\
-	int _cnt = (cnt);	void *_addr = (a); int _port = (h)+(o);	\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		__asm __volatile("					\
-			cld					;	\
-		1:	inl %w2,%%eax				;	\
-			stosl					;	\
-			addl $4,%2				;	\
-			loop 1b"				:	\
-		    "+D" (_addr), "+c" (_cnt), "+d" (_port)	::	\
-		    "%eax", "memory", "cc");				\
-	} else								\
-		i386_space_copy(_port, _addr, 4, _cnt);			\
-} while (0)
+void	bus_space_read_region_1(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int8_t *, bus_size_t);
+void	bus_space_read_region_2(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int16_t *, bus_size_t);
+void	bus_space_read_region_4(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int32_t *, bus_size_t);
 
 #if 0	/* Cause a link error for bus_space_read_region_8 */
 #define	bus_space_read_region_8	!!! bus_space_read_region_8 unimplemented !!!
@@ -296,26 +230,12 @@ void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
  * described by tag/handle/offset.
  */
 
-#define	bus_space_write_1(t, h, o, v)	do {				\
-	if ((t) == I386_BUS_SPACE_IO)					\
-		outb((h) + (o), (v));					\
-	else								\
-		((void)(*(volatile u_int8_t *)((h) + (o)) = (v)));	\
-} while (0)
-
-#define	bus_space_write_2(t, h, o, v)	do {				\
-	if ((t) == I386_BUS_SPACE_IO)					\
-		outw((h) + (o), (v));					\
-	else								\
-		((void)(*(volatile u_int16_t *)((h) + (o)) = (v)));	\
-} while (0)
-
-#define	bus_space_write_4(t, h, o, v)	do {				\
-	if ((t) == I386_BUS_SPACE_IO)					\
-		outl((h) + (o), (v));					\
-	else								\
-		((void)(*(volatile u_int32_t *)((h) + (o)) = (v)));	\
-} while (0)
+void	bus_space_write_1(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int8_t);
+void	bus_space_write_2(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int16_t);
+void	bus_space_write_4(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int32_t);
 
 #if 0	/* Cause a link error for bus_space_write_8 */
 #define	bus_space_write_8	!!! bus_space_write_8 not implemented !!!
@@ -330,47 +250,12 @@ void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
  * provided to bus space described by tag/handle/offset.
  */
 
-#define	bus_space_write_multi_1(t, h, o, a, cnt) do {			\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		outsb((h) + (o), (a), (cnt));				\
-	} else {const void *_addr=(a); int _cnt=(cnt);			\
-		__asm __volatile("					\
-			cld					;	\
-		1:	lodsb					;	\
-			movb %%al,(%2)				;	\
-			loop 1b"				:	\
-		    "+S" (_addr), "+c" (_cnt) : "r" ((h) + (o))	:	\
-		    "%eax", "memory", "cc");				\
-	}								\
-} while (0)
-
-#define bus_space_write_multi_2(t, h, o, a, cnt) do {			\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		outsw((h) + (o), (a), (cnt));				\
-	} else {const void *_addr=(a); int _cnt=(cnt);			\
-		__asm __volatile("					\
-			cld					;	\
-		1:	lodsw					;	\
-			movw %%ax,(%2)				;	\
-			loop 1b"				:	\
-		    "+S" (_addr), "+c" (_cnt) : "r" ((h) + (o))	:	\
-		    "%eax", "memory", "cc");				\
-	}								\
-} while (0)
-
-#define bus_space_write_multi_4(t, h, o, a, cnt) do {			\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		outsl((h) + (o), (a), (cnt));				\
-	} else {const void *_addr=(a); int _cnt=(cnt);			\
-		__asm __volatile("					\
-			cld					;	\
-		1:	lodsl					;	\
-			movl %%eax,(%2)				;	\
-			loop 1b"				:	\
-		    "+S" (_addr), "+c" (_cnt) : "r" ((h) + (o))	:	\
-		    "%eax", "memory", "cc");				\
-	}								\
-} while (0)
+void	bus_space_write_multi_1(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, const u_int8_t *, bus_size_t);
+void	bus_space_write_multi_2(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, const u_int16_t *, bus_size_t);
+void	bus_space_write_multi_4(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, const u_int32_t *, bus_size_t);
 
 #if 0	/* Cause a link error for bus_space_write_multi_8 */
 #define	bus_space_write_multi_8(t, h, o, a, c)				\
@@ -407,50 +292,12 @@ void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
  * to bus space described by tag/handle starting at `offset'.
  */
 
-#define	bus_space_write_region_1(t, h, o, a, cnt) do {			\
-	int _port = (h)+(o); const void *_addr=(a); int _cnt=(cnt);	\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		__asm __volatile("					\
-			cld					;	\
-		1:	lodsb					;	\
-			outb %%al,%w0				;	\
-			incl %0					;	\
-			loop 1b"				:	\
-		    "+d" (_port), "+S" (_addr), "+c" (_cnt)	::	\
-		    "%eax", "memory", "cc");				\
-	} else								\
-		i386_space_copy(_addr, _port, 1, _cnt);			\
-} while (0)
-
-#define	bus_space_write_region_2(t, h, o, a, cnt) do {			\
-	int _port = (h)+(o); const void *_addr=(a); int _cnt=(cnt);	\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		__asm __volatile("					\
-			cld					;	\
-		1:	lodsw					;	\
-			outw %%ax,%w0				;	\
-			addl $2,%0				;	\
-			loop 1b"				:	\
-		    "+d" (_port), "+S" (_addr), "+c" (_cnt)	::	\
-		    "%eax", "memory", "cc");				\
-	} else								\
-		i386_space_copy(_addr, _port, 2, _cnt);			\
-} while (0)
-
-#define	bus_space_write_region_4(t, h, o, a, cnt) do {			\
-	int _port = (h)+(o); const void *_addr=(a); int _cnt=(cnt);	\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		__asm __volatile("					\
-			cld					;	\
-		1:	lodsl					;	\
-			outl %%eax,%w0				;	\
-			addl $4,%0				;	\
-			loop 1b"				:	\
-		    "+d" (_port), "+S" (_addr), "+c" (_cnt)	::	\
-		    "%eax", "memory", "cc");				\
-	} else								\
-		i386_space_copy(_addr, _port, 4, _cnt);			\
-} while (0)
+void	bus_space_write_region_1(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, const u_int8_t *, bus_size_t);
+void	bus_space_write_region_2(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, const u_int16_t *, bus_size_t);
+void	bus_space_write_region_4(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, const u_int32_t *, bus_size_t);
 
 #if 0	/* Cause a link error for bus_space_write_region_8 */
 #define	bus_space_write_region_8					\
@@ -488,62 +335,12 @@ void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
  * by tag/handle/offset `count' times.
  */
 
-#define	bus_space_set_multi_1(t, h, o, v, cnt) do {			\
-	int _cnt=(cnt);							\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		__asm __volatile("					\
-			cld					;	\
-		1:	outb %b2, %w1				;	\
-			loop 1b"				:	\
-		    "+c" (_cnt) : "d" ((h) + (o)), "a" ((v))	:	\
-		    "cc");						\
-	} else {							\
-		__asm __volatile("					\
-			cld					;	\
-		1:	movb %b2, (%1)				;	\
-			loop 1b"				:	\
-		    "+c" (_cnt) : "D" ((h) + (o)), "a" ((v))	:	\
-		    "cc", "memory");					\
-	}								\
-} while (0)
-
-#define	bus_space_set_multi_2(t, h, o, v, cnt) do {			\
-	int _cnt=(cnt);							\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		__asm __volatile("					\
-			cld					;	\
-		1:	outw %w2, %w1				;	\
-			loop 1b"				:	\
-		    "+c" (_cnt) : "d" ((h) + (o)), "a" ((v))	:	\
-		    "cc");						\
-	} else {							\
-		__asm __volatile("					\
-			cld					;	\
-		1:	movw %w2, (%1)				;	\
-			loop 1b"				:	\
-		    "+c" (_cnt) : "D" ((h) + (o)), "a" ((v))	:	\
-		    "cc", "memory");					\
-	}								\
-} while (0)
-
-#define	bus_space_set_multi_4(t, h, o, v, cnt) do {			\
-	int _cnt=(cnt);							\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		__asm __volatile("					\
-			cld					;	\
-		1:	outl %2,%w1				;	\
-			loop 1b"				:	\
-		    "+c" (_cnt) : "d" ((h) + (o)), "a" ((v))	:	\
-		    "cc");						\
-	} else {							\
-		__asm __volatile("					\
-			cld					;	\
-		1:	movl %2,(%1)				;	\
-			loop 1b"				:	\
-		    "+c" (_cnt) : "D" ((h) + (o)), "a" ((v))	:	\
-		    "cc", "memory");					\
-	}								\
-} while (0)
+void	bus_space_set_multi_1(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int8_t, size_t);
+void	bus_space_set_multi_2(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int16_t, size_t);
+void	bus_space_set_multi_4(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int32_t, size_t);
 
 #if 0	/* Cause a link error for bus_space_set_multi_8 */
 #define	bus_space_set_multi_8					\
@@ -558,63 +355,13 @@ void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
  * Write `count' 1, 2, 4, or 8 byte value `val' to bus space described
  * by tag/handle starting at `offset'.
  */
+void	bus_space_set_region_1(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int8_t, size_t);
+void	bus_space_set_region_2(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int16_t, size_t);
+void	bus_space_set_region_4(bus_space_tag_t, bus_space_handle_t,
+	    bus_size_t, u_int32_t, size_t);
 
-#define	bus_space_set_region_1(t, h, o, v, cnt) do {			\
-	int _port = (h)+(o); int _cnt = (cnt);				\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		__asm __volatile("					\
-		1:	outb %%al,%w0				;	\
-			incl %0					;	\
-			loop 1b"				:	\
-		    "+d" (_port), "+c" (_cnt) : "a" ((v))	:	\
-		    "cc");						\
-	} else {							\
-		__asm __volatile("					\
-			cld					;	\
-			repne					;	\
-			stosb"					:	\
-		    "+D" (_port), "+c" (_cnt) : "a" ((v))	:	\
-		    "memory", "cc");					\
-	}								\
-} while (0)
-
-#define	bus_space_set_region_2(t, h, o, v, cnt) do {			\
-	int _port = (h)+(o); int _cnt = (cnt);				\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		__asm __volatile("					\
-		1:	outw %%ax,%w0				;	\
-			addl $2, %0				;	\
-			loop 1b"				:	\
-		    "+d" (_port), "+c" (_cnt) : "a" ((v))	:	\
-		    "cc");						\
-	} else {							\
-		__asm __volatile("					\
-			cld					;	\
-			repne					;	\
-			stosw"					:	\
-		    "+D" (_port), "+c" (_cnt) : "a" ((v))	:	\
-		    "memory", "cc");					\
-	}								\
-} while (0)
-
-#define	bus_space_set_region_4(t, h, o, v, cnt) do {			\
-	int _port = (h)+(o); int _cnt = (cnt);				\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		__asm __volatile("					\
-		1:	outl %%eax,%w0				;	\
-			addl $4, %0				;	\
-			loop 1b"				:	\
-		    "+d" (_port), "+c" (_cnt) : "a" ((v))	:	\
-		    "cc");						\
-	} else {							\
-		__asm __volatile("					\
-			cld					;	\
-			repne					;	\
-			stosl"					:	\
-		    "+D" (_port), "+c" (_cnt) : "a" ((v))	:	\
-		    "memory", "cc");					\
-	}								\
-} while (0)
 
 #if 0	/* Cause a link error for bus_space_set_region_8 */
 #define	bus_space_set_region_8					\
@@ -631,56 +378,12 @@ void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
  * at tag/bsh1/off1 to bus space starting at tag/bsh2/off2.
  */
 
-#define	bus_space_copy_1(t, h1, o1, h2, o2, cnt) do {			\
-	int _port1 = (h1)+(o1); int _port2 = (h2)+(o2); int _cnt=(cnt);	\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		__asm __volatile("					\
-		1:	movl %k1,%%edx				;	\
-			inb  %%dx,%%al				;	\
-			movl %k0,%%edx				;	\
-			outb %%al,%%dx				;	\
-			incl %0					;	\
-			incl %1					;	\
-			loop 1b"				:	\
-		    "+D" (_port2), "+S" (_port1), "+c" ((_cnt))	::	\
-		    "%edx", "%eax", "cc");				\
-	} else								\
-		i386_space_copy(_port1, _port2, 1, _cnt);		\
-} while (0)
-
-#define	bus_space_copy_2(t, h1, o1, h2, o2, cnt) do {			\
-	int _port1 = (h1)+(o1); int _port2 = (h2)+(o2); int _cnt=(cnt);	\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		__asm __volatile("					\
-		1:	movl %k1,%%edx				;	\
-			inw  %%dx,%%ax				;	\
-			movl %k0,%%edx				;	\
-			outw %%ax,%%dx				;	\
-			addl $2, %0				;	\
-			addl $2, %1				;	\
-			loop 1b"				:	\
-		    "+D" (_port2), "+ES" (_port1), "+c" ((_cnt))	::	\
-		    "%edx", "%eax", "cc");				\
-	} else								\
-		i386_space_copy(_port1, _port2, 2, _cnt);		\
-} while (0)
-
-#define	bus_space_copy_4(t, h1, o1, h2, o2, cnt) do {			\
-	int _port1 = (h1)+(o1); int _port2 = (h2)+(o2); int _cnt=(cnt);	\
-	if ((t) == I386_BUS_SPACE_IO) {					\
-		__asm __volatile("					\
-		1:	movl %k1,%%edx				;	\
-			inl  %%dx,%%eax				;	\
-			movl %k0,%%edx				;	\
-			outl %%eax,%%dx				;	\
-			addl $4, %0				;	\
-			addl $4, %1				;	\
-			loop 1b"				:	\
-		    "+D" (_port2), "+ES" (_port1), "+c" ((_cnt))	::	\
-		    "%edx", "%eax", "cc");				\
-	} else								\
-		i386_space_copy(_port1, _port2, 4, _cnt);		\
-} while (0)
+void	bus_space_copy_1(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	     bus_space_handle_t, bus_size_t, bus_size_t);
+void	bus_space_copy_2(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	     bus_space_handle_t, bus_size_t, bus_size_t);
+void	bus_space_copy_4(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	     bus_space_handle_t, bus_size_t, bus_size_t);
 
 #if 0	/* Cause a link error for bus_space_copy_8 */
 #define	bus_space_copy_8					\
@@ -740,17 +443,20 @@ void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
 /*
  * Flags used in various bus DMA methods.
  */
-#define	BUS_DMA_WAITOK		0x000	/* safe to sleep (pseudo-flag) */
-#define	BUS_DMA_NOWAIT		0x001	/* not safe to sleep */
-#define	BUS_DMA_ALLOCNOW	0x002	/* perform resource allocation now */
-#define	BUS_DMA_COHERENT	0x004	/* hint: map memory DMA coherent */
-#define	BUS_DMA_BUS1		0x010	/* placeholders for bus functions... */
-#define	BUS_DMA_BUS2		0x020
-#define	BUS_DMA_BUS3		0x040
-#define	BUS_DMA_24BIT		0x080	/* isadma map */
-#define	BUS_DMA_STREAMING	0x100	/* hint: sequential, unidirectional */
-#define	BUS_DMA_READ		0x200	/* mapping is device -> memory only */
-#define	BUS_DMA_WRITE		0x400	/* mapping is memory -> device only */
+#define	BUS_DMA_WAITOK		0x0000	/* safe to sleep (pseudo-flag) */
+#define	BUS_DMA_NOWAIT		0x0001	/* not safe to sleep */
+#define	BUS_DMA_ALLOCNOW	0x0002	/* perform resource allocation now */
+#define	BUS_DMA_COHERENT	0x0004	/* hint: map memory DMA coherent */
+#define	BUS_DMA_BUS1		0x0010	/* placeholders for bus functions... */
+#define	BUS_DMA_BUS2		0x0020
+#define	BUS_DMA_BUS3		0x0040
+#define	BUS_DMA_24BIT		0x0080	/* isadma map */
+#define	BUS_DMA_STREAMING	0x0100	/* hint: sequential, unidirectional */
+#define	BUS_DMA_READ		0x0200	/* mapping is device -> memory only */
+#define	BUS_DMA_WRITE		0x0400	/* mapping is memory -> device only */
+#define	BUS_DMA_NOCACHE		0x0800	/* map memory uncached */
+#define	BUS_DMA_ZERO		0x1000	/* dmamem_alloc return zeroed mem */
+#define	BUS_DMA_SG		0x2000	/* Internal. memory is for SG map */
 
 /* Forwards needed by prototypes below. */
 struct mbuf;
@@ -765,8 +471,8 @@ struct uio;
 #define BUS_DMASYNC_PREWRITE	0x04
 #define BUS_DMASYNC_POSTWRITE	0x08
 
-typedef struct i386_bus_dma_tag		*bus_dma_tag_t;
-typedef struct i386_bus_dmamap		*bus_dmamap_t;
+typedef struct bus_dma_tag		*bus_dma_tag_t;
+typedef struct bus_dmamap		*bus_dmamap_t;
 
 /*
  *	bus_dma_segment_t
@@ -774,11 +480,18 @@ typedef struct i386_bus_dmamap		*bus_dmamap_t;
  *	Describes a single contiguous DMA transaction.  Values
  *	are suitable for programming into DMA registers.
  */
-struct i386_bus_dma_segment {
+struct bus_dma_segment {
 	bus_addr_t	ds_addr;	/* DMA address */
 	bus_size_t	ds_len;		/* length of transfer */
+	/*
+	 * Ugh. need this so can pass alignment down from bus_dmamem_alloc
+	 * to scatter gather maps. only the first one is used so the rest is
+	 * wasted space. bus_dma could do with fixing the api for this.
+	 */
+	 bus_size_t	_ds_boundary;	/* don't cross */
+	 bus_size_t	_ds_align;	/* align to me */
 };
-typedef struct i386_bus_dma_segment	bus_dma_segment_t;
+typedef struct bus_dma_segment	bus_dma_segment_t;
 
 /*
  *	bus_dma_tag_t
@@ -787,7 +500,7 @@ typedef struct i386_bus_dma_segment	bus_dma_segment_t;
  *	DMA for a given bus.
  */
 
-struct i386_bus_dma_tag {
+struct bus_dma_tag {
 	void	*_cookie;		/* cookie used in the guts */
 
 	/*
@@ -856,7 +569,7 @@ struct i386_bus_dma_tag {
  *
  *	Describes a DMA mapping.
  */
-struct i386_bus_dmamap {
+struct bus_dmamap {
 	/*
 	 * PRIVATE MEMBERS: not for use by machine-independent code.
 	 */
@@ -876,7 +589,6 @@ struct i386_bus_dmamap {
 	bus_dma_segment_t dm_segs[1];	/* segments; variable length */
 };
 
-#ifdef _I386_BUS_DMA_PRIVATE
 int	_bus_dmamap_create(bus_dma_tag_t, bus_size_t, int, bus_size_t,
 	    bus_size_t, int, bus_dmamap_t *);
 void	_bus_dmamap_destroy(bus_dma_tag_t, bus_dmamap_t);
@@ -908,6 +620,41 @@ int	_bus_dmamem_alloc_range(bus_dma_tag_t tag, bus_size_t size,
 	    bus_size_t alignment, bus_size_t boundary,
 	    bus_dma_segment_t *segs, int nsegs, int *rsegs, int flags,
 	    paddr_t low, paddr_t high);
-#endif /* _I386_BUS_DMA_PRIVATE */
+
+struct extent;
+
+/* Scatter gather bus_dma functions. */
+struct sg_cookie {
+	struct mutex	 sg_mtx;
+	struct extent	*sg_ex;
+	void		*sg_hdl;
+	void		(*bind_page)(void *, bus_addr_t, paddr_t, int);
+	void		(*unbind_page)(void *, bus_addr_t);
+	void		(*flush_tlb)(void *);
+};
+
+struct sg_cookie	*sg_dmatag_init(char *, void *, bus_addr_t, bus_size_t,
+			    void (*)(void *, vaddr_t, paddr_t, int),
+			    void (*)(void *, vaddr_t), void (*)(void *));
+void	sg_dmatag_destroy(struct sg_cookie *);
+int	sg_dmamap_create(bus_dma_tag_t, bus_size_t, int, bus_size_t,
+	    bus_size_t, int, bus_dmamap_t *);
+void	sg_dmamap_destroy(bus_dma_tag_t, bus_dmamap_t);
+void	sg_dmamap_set_alignment(bus_dma_tag_t, bus_dmamap_t, u_long);
+int	sg_dmamap_load(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
+	    struct proc *, int);
+int	sg_dmamap_load_mbuf(bus_dma_tag_t, bus_dmamap_t,
+	    struct mbuf *, int);
+int	sg_dmamap_load_uio(bus_dma_tag_t, bus_dmamap_t, struct uio *, int);
+int	sg_dmamap_load_raw(bus_dma_tag_t, bus_dmamap_t, bus_dma_segment_t *,
+	    int, bus_size_t, int);
+void	sg_dmamap_unload(bus_dma_tag_t, bus_dmamap_t);
+int	sg_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
+	    struct proc *, int, int *, int);
+int	sg_dmamap_load_physarray(bus_dma_tag_t, bus_dmamap_t, paddr_t *,
+	    int, int, int *, int);
+int	sg_dmamem_alloc(bus_dma_tag_t, bus_size_t, bus_size_t, bus_size_t,
+	    bus_dma_segment_t *, int, int *, int);
+
 
 #endif /* _I386_BUS_H_ */

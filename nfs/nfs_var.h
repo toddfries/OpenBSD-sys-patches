@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_var.h,v 1.44 2008/10/16 07:57:06 blambert Exp $	*/
+/*	$OpenBSD: nfs_var.h,v 1.51 2009/06/04 01:02:42 blambert Exp $	*/
 /*	$NetBSD: nfs_var.h,v 1.3 1996/02/18 11:53:54 fvdl Exp $	*/
 
 /*
@@ -110,10 +110,6 @@ int nfs_pathconf(void *);
 int nfs_advlock(void *);
 int nfs_print(void *);
 int nfs_blkatoff(void *);
-int nfs_valloc(void *);
-int nfs_vfree(void *);
-int nfs_truncate(void *);
-int nfs_update(void *);
 int nfs_bwrite(void *);
 int nfs_writebp(struct buf *, int);
 int nfsspec_access(void *);
@@ -191,6 +187,8 @@ int nfs_reply(struct nfsreq *);
 int nfs_request(struct vnode *, struct mbuf *, int, struct proc *,
 		     struct ucred *, struct mbuf **, struct mbuf **,
 		     caddr_t *);
+int nfs_request1(struct nfsreq *, struct ucred *, struct mbuf **,
+		    struct mbuf **, caddr_t *);
 int nfs_rephead(int, struct nfsrv_descript *, struct nfssvc_sock *, int,
 		struct mbuf **, struct mbuf **);
 void nfs_timer(void *);
@@ -200,7 +198,7 @@ void nfs_sndunlock(int *);
 int nfs_rcvlock(struct nfsreq *);
 void nfs_rcvunlock(int *);
 int nfs_getreq(struct nfsrv_descript *, struct nfsd *, int);
-int nfs_msg(struct proc *, char *, char *);
+void nfs_msg(struct nfsreq *, char *);
 void nfsrv_rcv(struct socket *, caddr_t, int);
 int nfsrv_getstream(struct nfssvc_sock *, int);
 int nfsrv_dorec(struct nfssvc_sock *, struct nfsd *,
@@ -217,7 +215,7 @@ void nfsrv_cleancache(void);
 /* nfs_subs.c */
 struct mbuf *nfsm_reqhead(int);
 u_int32_t nfs_get_xid(void);
-void nfsm_rpchead(struct nfsreq *, struct ucred *, int, struct mbuf *, int);
+void nfsm_rpchead(struct nfsreq *, struct ucred *, int);
 void *nfsm_build(struct mbuf **, u_int);
 int nfsm_mbuftouio(struct mbuf **, struct uio *, int, caddr_t *);
 void nfsm_uiotombuf(struct mbuf **, struct uio *, size_t);
@@ -256,15 +254,18 @@ void nfs_merge_commit_ranges(struct vnode *);
 int nfsrv_errmap(struct nfsrv_descript *, int);
 void nfsrvw_sort(gid_t *, int);
 void nfsrv_setcred(struct ucred *, struct ucred *);
+int nfsm_srvsattr(struct mbuf **, struct vattr *, struct mbuf *, caddr_t *);
+void nfsm_fhtom(struct mbuf **, struct vnode *, int);
+void nfsm_srvfhtom(struct mbuf **, fhandle_t *, int);
 
 /* nfs_syscalls.c */
 int sys_nfssvc(struct proc *, void *, register_t *);
 int nfssvc_addsock(struct file *, struct mbuf *);
-int nfssvc_nfsd(struct nfsd_srvargs *, caddr_t, struct proc *);
+int nfssvc_nfsd(struct nfsd *);
 void nfsrv_zapsock(struct nfssvc_sock *);
 void nfsrv_slpderef(struct nfssvc_sock *);
 void nfsrv_init(int);
-int nfssvc_iod(struct proc *);
+void nfssvc_iod(void *);
 void start_nfsio(void *);
 void nfs_getset_niothreads(int);
 

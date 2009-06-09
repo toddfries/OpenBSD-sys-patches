@@ -1,4 +1,4 @@
-/*	$OpenBSD: ami.c,v 1.190 2008/10/28 11:53:18 marco Exp $	*/
+/*	$OpenBSD: ami.c,v 1.193 2009/06/04 06:34:38 ray Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -94,7 +94,7 @@ struct cfdriver ami_cd = {
 
 int	ami_scsi_cmd(struct scsi_xfer *);
 int	ami_scsi_ioctl(struct scsi_link *, u_long, caddr_t, int, struct proc *);
-void	amiminphys(struct buf *bp);
+void	amiminphys(struct buf *bp, struct scsi_link *sl);
 
 struct scsi_adapter ami_switch = {
 	ami_scsi_cmd, amiminphys, 0, 0, ami_scsi_ioctl
@@ -978,7 +978,7 @@ ami_start_xs(struct ami_softc *sc, struct ami_ccb *ccb, struct scsi_xfer *xs)
 	}
 
 	/* XXX way wrong, this timeout needs to be set later */
-	timeout_add(&xs->stimeout, 61 * hz);
+	timeout_add_sec(&xs->stimeout, 61);
 	ami_start(sc, ccb);
 
 	return (SUCCESSFULLY_QUEUED);
@@ -1300,7 +1300,7 @@ ami_done_init(struct ami_softc *sc, struct ami_ccb *ccb)
 }
 
 void
-amiminphys(struct buf *bp)
+amiminphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > AMI_MAXFER)
 		bp->b_bcount = AMI_MAXFER;
@@ -1957,7 +1957,7 @@ ami_mgmt(struct ami_softc *sc, u_int8_t opcode, u_int8_t par1, u_int8_t par2,
 		while (sc->sc_drained != 1)
 			if (tsleep(sc, PRIBIO, "ami_mgmt_drain", hz * 60) ==
 			    EWOULDBLOCK) {
-				printf("%s: drain io timeout\n");
+				printf("%s: drain io timeout\n", DEVNAME(sc));
 				ccb->ccb_flags |= AMI_CCB_F_ERR;
 				goto restartio;
 			}

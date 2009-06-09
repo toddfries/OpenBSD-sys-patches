@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_lock.c,v 1.31 2007/11/26 15:23:26 art Exp $	*/
+/*	$OpenBSD: kern_lock.c,v 1.33 2009/03/25 21:20:26 oga Exp $	*/
 
 /* 
  * Copyright (c) 1995
@@ -94,10 +94,6 @@ do {									\
 			(lkp)->lk_waitcount--;				\
 		if (error)						\
 			break;						\
-		if ((extflags) & LK_SLEEPFAIL) {			\
-			error = ENOLCK;					\
-			break;						\
-		}							\
 	}								\
 } while (0)
 
@@ -105,7 +101,7 @@ do {									\
 	(lkp)->lk_lockholder = (pid)
 
 #define	WEHOLDIT(lkp, pid, cpu_id)					\
-	(lkp)->lk_lockholder == (pid)
+	((lkp)->lk_lockholder == (pid))
 
 #define	WAKEUP_WAITER(lkp)						\
 do {									\

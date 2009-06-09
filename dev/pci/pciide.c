@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.290 2008/10/02 16:00:41 deraadt Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.295 2009/05/31 04:42:16 jsg Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -281,20 +281,8 @@ void ixp_setup_channel(struct channel_softc *);
 void jmicron_chip_map(struct pciide_softc *, struct pci_attach_args *);
 void jmicron_setup_channel(struct channel_softc *);
 
-u_int8_t pciide_dmacmd_read(struct pciide_softc *, int);
-void pciide_dmacmd_write(struct pciide_softc *, int, u_int8_t);
-u_int8_t pciide_dmactl_read(struct pciide_softc *, int);
-void pciide_dmactl_write(struct pciide_softc *, int, u_int8_t);
-void pciide_dmatbl_write(struct pciide_softc *, int, u_int32_t);
-
-void pciide_channel_dma_setup(struct pciide_channel *);
-int  pciide_dma_table_setup(struct pciide_softc *, int, int);
-int  pciide_dma_init(void *, int, int, void *, size_t, int);
-void pciide_dma_start(void *, int, int);
-int  pciide_dma_finish(void *, int, int, int);
-void pciide_irqack(struct channel_softc *);
-void pciide_print_modes(struct pciide_channel *);
-void pciide_print_channels(int, pcireg_t);
+void sch_chip_map(struct pciide_softc *, struct pci_attach_args *);
+void sch_setup_channel(struct channel_softc *);
 
 struct pciide_product_desc {
 	u_int32_t ide_product;
@@ -523,9 +511,29 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	  0,
 	  piixsata_chip_map
 	},
+	{ PCI_PRODUCT_INTEL_82801JD_SATA_1, /* Intel 82801JD (ICH10) SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801JD_SATA_2, /* Intel 82801JD (ICH10) SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801JI_SATA_1, /* Intel 82801JI (ICH10) SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801JI_SATA_2, /* Intel 82801JI (ICH10) SATA */
+	  0,
+	  piixsata_chip_map
+	},
 	{ PCI_PRODUCT_INTEL_6321ESB_SATA, /* Intel 6321ESB SATA */
 	  0,
 	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_SCH_IDE, /* Intel SCH IDE */
+	  0,
+	  sch_chip_map
 	}
 };
 
@@ -686,7 +694,17 @@ const struct pciide_product_desc pciide_sis_products[] =  {
 	}
 };
 
+/*
+ * The National/AMD CS5535 requires MSRs to set DMA/PIO modes so it
+ * has been banished to the MD i386 pciide_machdep
+ */
 const struct pciide_product_desc pciide_natsemi_products[] =  {
+#ifdef __i386__
+	{ PCI_PRODUCT_NS_CS5535_IDE,	/* National/AMD CS5535 IDE */
+	  0,
+	  gcsc_chip_map
+	},
+#endif
 	{ PCI_PRODUCT_NS_PC87415,	/* National Semi PC87415 IDE */
 	  0,
 	  natsemi_chip_map
@@ -1056,6 +1074,22 @@ const struct pciide_product_desc pciide_nvidia_products[] = {
 	{ PCI_PRODUCT_NVIDIA_MCP67_SATA4,
 	  0,
 	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP79_SATA_1,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP79_SATA_2,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP79_SATA_3,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP79_SATA_4,
+	  0,
+	  sata_chip_map
 	}
 };
 
@@ -1190,26 +1224,6 @@ struct cfattach pciide_jmb_ca = {
 struct cfdriver pciide_cd = {
 	NULL, "pciide", DV_DULL
 };
-
-int	pciide_mapregs_compat( struct pci_attach_args *,
-	    struct pciide_channel *, int, bus_size_t *, bus_size_t *);
-int	pciide_mapregs_native(struct pci_attach_args *,
-	    struct pciide_channel *, bus_size_t *, bus_size_t *,
-	    int (*pci_intr)(void *));
-void	pciide_mapreg_dma(struct pciide_softc *,
-	    struct pci_attach_args *);
-int	pciide_chansetup(struct pciide_softc *, int, pcireg_t);
-void	pciide_mapchan(struct pci_attach_args *,
-	    struct pciide_channel *, pcireg_t, bus_size_t *, bus_size_t *,
-	    int (*pci_intr)(void *));
-int	pciide_chan_candisable(struct pciide_channel *);
-void	pciide_map_compat_intr( struct pci_attach_args *,
-	    struct pciide_channel *, int, int);
-void	pciide_unmap_compat_intr( struct pci_attach_args *,
-	    struct pciide_channel *, int, int);
-int	pciide_compat_intr(void *);
-int	pciide_pci_intr(void *);
-int	pciide_intr_flag(struct pciide_channel *);
 
 const struct pciide_product_desc *pciide_lookup_product(u_int32_t);
 
@@ -8457,6 +8471,117 @@ pio:
 		/* Add software bits in status register */
 		bus_space_write_1(sc->sc_dma_iot, sc->sc_dma_ioh,
 		    IDEDMA_CTL(channel), idedma_ctl);
+	}
+
+	pciide_print_modes(cp);
+}
+
+void
+sch_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
+{
+	struct pciide_channel *cp;
+	int channel;
+	pcireg_t interface = PCI_INTERFACE(pa->pa_class);
+	bus_size_t cmdsize, ctlsize;
+
+	printf(": DMA");
+	pciide_mapreg_dma(sc, pa);
+
+	sc->sc_wdcdev.cap = WDC_CAPABILITY_DATA16 | WDC_CAPABILITY_DATA32 |
+	    WDC_CAPABILITY_MODE;
+	if (sc->sc_dma_ok) {
+		sc->sc_wdcdev.cap |= WDC_CAPABILITY_DMA | WDC_CAPABILITY_UDMA;
+		sc->sc_wdcdev.cap |= WDC_CAPABILITY_IRQACK;
+		sc->sc_wdcdev.irqack = pciide_irqack;
+	}
+	sc->sc_wdcdev.PIO_cap = 4;
+	sc->sc_wdcdev.DMA_cap = 2;
+	sc->sc_wdcdev.UDMA_cap = 6;
+	sc->sc_wdcdev.set_modes = sch_setup_channel;
+	sc->sc_wdcdev.channels = sc->wdc_chanarray;
+	sc->sc_wdcdev.nchannels = 1;
+
+	pciide_print_channels(sc->sc_wdcdev.nchannels, interface);
+
+	for (channel = 0; channel < sc->sc_wdcdev.nchannels; channel++) {
+		cp = &sc->pciide_channels[channel];
+
+		if (pciide_chansetup(sc, channel, interface) == 0)
+			continue;
+
+		pciide_map_compat_intr(pa, cp, channel, interface);
+		if (cp->hw_ok == 0)
+			continue;
+		pciide_mapchan(pa, cp, interface, &cmdsize, &ctlsize,
+		    pciide_pci_intr);
+		if (cp->hw_ok == 0) {
+			pciide_unmap_compat_intr(pa, cp, channel, interface);
+			continue;
+		}
+
+		sc->sc_wdcdev.set_modes(&cp->wdc_channel);
+	}
+}
+
+void
+sch_setup_channel(struct channel_softc *chp)
+{
+	struct ata_drive_datas *drvp;
+	int drive, mode;
+	u_int32_t tim, timaddr;
+	struct pciide_channel *cp = (struct pciide_channel *)chp;
+	struct pciide_softc *sc = (struct pciide_softc *)cp->wdc_channel.wdc;
+
+	/* Setup DMA if needed */
+	pciide_channel_dma_setup(cp);
+
+	/* Per channel settings */
+	for (drive = 0; drive < 2; drive++) {
+		drvp = &chp->ch_drive[drive];
+
+		/* If no drive, skip */
+		if ((drvp->drive_flags & DRIVE) == 0)
+			continue;
+
+		timaddr = (drive == 0) ? SCH_D0TIM : SCH_D1TIM;
+		tim = pci_conf_read(sc->sc_pc, sc->sc_tag, timaddr);
+		tim &= ~SCH_TIM_MASK;
+
+		if ((chp->wdc->cap & WDC_CAPABILITY_UDMA) != 0 &&
+		    (drvp->drive_flags & DRIVE_UDMA) != 0) {
+			/* Setup UltraDMA mode */
+			drvp->drive_flags &= ~DRIVE_DMA;
+
+			mode = drvp->PIO_mode;
+			tim |= (drvp->UDMA_mode << 16) | SCH_TIM_SYNCDMA;
+		} else if ((chp->wdc->cap & WDC_CAPABILITY_DMA) != 0 &&
+		    (drvp->drive_flags & DRIVE_DMA) != 0) {
+			/* Setup multiword DMA mode */
+			drvp->drive_flags &= ~DRIVE_UDMA;
+
+			tim &= ~SCH_TIM_SYNCDMA;
+
+			/* mode = min(pio, dma + 2) */
+			if (drvp->PIO_mode <= (drvp->DMA_mode + 2))
+				mode = drvp->PIO_mode;
+			else
+				mode = drvp->DMA_mode + 2;
+		} else {
+			mode = drvp->PIO_mode;
+			goto pio;
+		}
+
+pio:
+		/* Setup PIO mode */
+		if (mode <= 2) {
+			drvp->DMA_mode = 0;
+			drvp->PIO_mode = 0;
+		} else {
+			drvp->PIO_mode = mode;
+			drvp->DMA_mode = mode - 2;
+		}
+		tim |= (drvp->DMA_mode << 8) | (drvp->PIO_mode);
+		pci_conf_write(sc->sc_pc, sc->sc_tag, timaddr, tim);
 	}
 
 	pciide_print_modes(cp);

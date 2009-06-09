@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.6 2008/10/12 11:50:19 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.11 2009/06/03 21:30:20 beck Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -396,11 +396,6 @@ initppc(u_int startkernel, u_int endkernel, char *args)
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
-
-	printf("%02x:%02x:%02x:%02x:%02x:%02x\n", bootinfo.bi_enetaddr[0],
-	    bootinfo.bi_enetaddr[1], bootinfo.bi_enetaddr[2],
-	    bootinfo.bi_enetaddr[3],  bootinfo.bi_enetaddr[4],
-	    bootinfo.bi_enetaddr[5]);
 }
 
 void
@@ -536,8 +531,7 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 		vaddr = uvm_km_kmemalloc(phys_map, NULL, len,
 		    UVM_KMF_NOWAIT|UVM_KMF_VALLOC);
 		if (vaddr == 0)
-			panic("bus_mem_add_mapping: kvm alloc of 0x%x failed",
-			    len);
+			return (ENOMEM);
 	}
 	*bshp = vaddr + off;
 #ifdef DEBUG_BUS_MEM_ADD_MAPPING
@@ -777,12 +771,6 @@ cpu_startup()
 	 */
 	if (bufpages == 0)
 		bufpages = physmem * bufcachepercent / 100;
-
-	/* Restrict to at most 25% filled kvm */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively

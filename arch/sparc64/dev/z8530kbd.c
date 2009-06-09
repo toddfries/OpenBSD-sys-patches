@@ -1,4 +1,4 @@
-/*	$OpenBSD: z8530kbd.c,v 1.20 2008/10/15 19:12:19 blambert Exp $	*/
+/*	$OpenBSD: z8530kbd.c,v 1.23 2009/01/12 21:11:58 miod Exp $	*/
 /*	$NetBSD: z8530tty.c,v 1.77 2001/05/30 15:24:24 lukem Exp $	*/
 
 /*-
@@ -413,7 +413,7 @@ zskbd_attach(parent, self, aux)
 	if (console)
 		wskbd_cnattach(&zskbd_consops, zst, a.keymap);
 
-	ss->sc_wskbddev = config_found(self, &a, wskbddevprint);
+	sunkbd_attach(ss, &a);
 }
 
 int
@@ -920,10 +920,11 @@ zskbd_rxsoft(zst)
 	struct sunkbd_softc *ss = (void *)zst;
 	struct zs_chanstate *cs = zst->zst_cs;
 	u_char *get, *end;
-	u_int cc, scc, type;
+	u_int cc, scc;
 	u_char rr1;
-	int code, value;
+	int code;
 	int s;
+	u_int8_t cbuf[SUNKBD_MAX_INPUT_SIZE], *c;
 
 	end = zst->zst_ebuf;
 	get = zst->zst_rbget;
@@ -935,6 +936,7 @@ zskbd_rxsoft(zst)
 			timeout_add_sec(&zst->zst_diag_ch, 60);
 	}
 
+	c = cbuf;
 	while (cc) {
 		code = get[0];
 		rr1 = get[1];
@@ -950,14 +952,19 @@ zskbd_rxsoft(zst)
 				SET(code, TTY_PE);
 		}
 
-		sunkbd_decode(code, &type, &value);
-		wskbd_input(ss->sc_wskbddev, type, value);
+		*c++ = code;
+		if (c - cbuf == sizeof cbuf) {
+			sunkbd_input(ss, cbuf, c - cbuf);
+			c = cbuf;
+		}
 
 		get += 2;
 		if (get >= end)
 			get = zst->zst_rbuf;
 		cc--;
 	}
+	if (c != cbuf)
+		sunkbd_input(ss, cbuf, c - cbuf);
 
 	if (cc != scc) {
 		zst->zst_rbget = get;
@@ -1086,15 +1093,5 @@ zskbd_cngetc(v, type, data)
 	c = *zst->zst_cs->cs_reg_data;
 	splx(s);
 
-	switch (c) {
-	case SKBD_RSP_IDLE:
-		*type = WSCONS_EVENT_ALL_KEYS_UP;
-		*data = 0;
-		break;
-	default:
-		*type = (c & 0x80) ?
-		    WSCONS_EVENT_KEY_UP : WSCONS_EVENT_KEY_DOWN;
-		*data = c & 0x7f;
-		break;
-	}
+	sunkbd_decode(c, type, data);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic79xx_openbsd.c,v 1.28 2007/10/20 00:21:49 krw Exp $	*/
+/*	$OpenBSD: aic79xx_openbsd.c,v 1.32 2009/02/16 21:19:06 miod Exp $	*/
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom
@@ -81,7 +81,7 @@ int	ahd_setup_data(struct ahd_softc *, struct scsi_xfer *,
 		    struct scb *);
 
 void	ahd_adapter_req_set_xfer_mode(struct ahd_softc *, struct scb *);
-void    ahd_minphys(struct buf *);
+void    ahd_minphys(struct buf *, struct scsi_link *);
 
 struct cfdriver ahd_cd = {
 	NULL, "ahd", DV_DULL
@@ -284,7 +284,7 @@ ahd_done(struct ahd_softc *ahd, struct scb *scb)
 }
 
 void
-ahd_minphys(struct buf *bp)
+ahd_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	/*
 	 * Even though the card can transfer up to 16megs per command
@@ -308,7 +308,6 @@ ahd_action(struct scsi_xfer *xs)
 	u_int	target_id;
 	u_int	our_id;
 	int	s;
-	int	dontqueue = 0;
 	struct	ahd_initiator_tinfo *tinfo;
 	struct	ahd_tmode_tstate *tstate;
 	u_int	col_idx;
@@ -316,9 +315,6 @@ ahd_action(struct scsi_xfer *xs)
 
 	SC_DEBUG(xs->sc_link, SDEV_DB3, ("ahd_action\n"));
 	ahd = (struct ahd_softc *)xs->sc_link->adapter_softc;
-
-	/* determine safety of software queueing */
-	dontqueue = xs->flags & SCSI_POLL;
 
 	target_id = xs->sc_link->target;
 	our_id = SCSI_SCSI_ID(ahd, xs->sc_link);
@@ -347,7 +343,7 @@ ahd_action(struct scsi_xfer *xs)
 	if ((scb = ahd_get_scb(ahd, col_idx)) == NULL) {
 		ahd->flags |= AHD_RESOURCE_SHORTAGE;
 		ahd_unlock(ahd, &s);
-		return (TRY_AGAIN_LATER);
+		return (NO_CCB);
 	}
 	ahd_unlock(ahd, &s);
 		
@@ -463,7 +459,7 @@ ahd_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 	LIST_INSERT_HEAD(&ahd->pending_scbs, scb, pending_links);
 
 	if (!(xs->flags & SCSI_POLL))
-		timeout_add(&xs->stimeout, (xs->timeout * hz) / 1000);
+		timeout_add_msec(&xs->stimeout, xs->timeout);
 
 	scb->flags |= SCB_ACTIVE;
 

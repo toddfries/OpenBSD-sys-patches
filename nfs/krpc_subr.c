@@ -1,4 +1,4 @@
-/*	$OpenBSD: krpc_subr.c,v 1.17 2008/06/10 23:15:32 blambert Exp $	*/
+/*	$OpenBSD: krpc_subr.c,v 1.19 2009/02/22 07:47:22 otto Exp $	*/
 /*	$NetBSD: krpc_subr.c,v 1.12.4.1 1996/06/07 00:52:26 cgd Exp $	*/
 
 /*
@@ -381,7 +381,8 @@ krpc_call(sa, prog, vers, func, data, from_p, retries)
 			auio.uio_resid = len = 1<<16;
 			auio.uio_procp = NULL;
 			rcvflg = 0;
-			error = soreceive(so, &from, &auio, &m, NULL, &rcvflg);
+			error = soreceive(so, &from, &auio, &m, NULL, &rcvflg,
+			    0);
 			if (error == EWOULDBLOCK) {
 				secs--;
 				continue;
@@ -449,7 +450,7 @@ krpc_call(sa, prog, vers, func, data, from_p, retries)
 
 	/* result */
 	*data = m;
-	if (from_p) {
+	if (from_p && error == 0) {
 		*from_p = from;
 		from = NULL;
 	}

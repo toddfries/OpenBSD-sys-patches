@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_space.c,v 1.9 2008/06/26 05:42:09 ray Exp $	*/
+/*	$OpenBSD: bus_space.c,v 1.14 2009/05/31 19:41:57 kettenis Exp $	*/
 /*	$NetBSD: bus_space.c,v 1.2 2003/03/14 18:47:53 christos Exp $	*/
 
 /*-
@@ -38,7 +38,6 @@
 
 #include <uvm/uvm_extern.h>
 
-#define _X86_BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <dev/isa/isareg.h>
@@ -82,7 +81,7 @@ x86_bus_space_init(void)
 	ioport_ex = extent_create("ioport", 0x0, 0xffff, M_DEVBUF,
 	    (caddr_t)ioport_ex_storage, sizeof(ioport_ex_storage),
 	    EX_NOCOALESCE|EX_NOWAIT);
-	iomem_ex = extent_create("iomem", 0x0, 0xffffffff, M_DEVBUF,
+	iomem_ex = extent_create("iomem", 0x0, 0xffffffffffff, M_DEVBUF,
 	    (caddr_t)iomem_ex_storage, sizeof(iomem_ex_storage),
 	    EX_NOCOALESCE|EX_NOWAIT);
 }
@@ -139,7 +138,7 @@ bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
 	 * For memory space, map the bus physical address to
 	 * a kernel virtual address.
 	 */
-	error = x86_mem_add_mapping(bpa, size, 0, bshp);
+	error = x86_mem_add_mapping(bpa, size, flags, bshp);
 	if (error) {
 		if (extent_free(ex, bpa, size, EX_NOWAIT |
 		    (ioport_malloc_safe ? EX_MALLOCOK : 0))) {
@@ -169,7 +168,7 @@ _bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int flags,
 	 * For memory space, map the bus physical address to
 	 * a kernel virtual address.
 	 */
-	return (x86_mem_add_mapping(bpa, size, 0, bshp));
+	return (x86_mem_add_mapping(bpa, size, flags, bshp));
 }
 
 int
@@ -220,7 +219,7 @@ bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart, bus_addr_t rend,
 	 * For memory space, map the bus physical address to
 	 * a kernel virtual address.
 	 */
-	error = x86_mem_add_mapping(bpa, size, 0, bshp);
+	error = x86_mem_add_mapping(bpa, size, flags, bshp);
 	if (error) {
 		if (extent_free(iomem_ex, bpa, size, EX_NOWAIT |
 		    (ioport_malloc_safe ? EX_MALLOCOK : 0))) {
@@ -236,13 +235,45 @@ bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart, bus_addr_t rend,
 }
 
 int
-x86_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
+x86_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
-	if (cacheable)
-		*bshp = PMAP_DIRECT_MAP(bpa);
-	else
-		*bshp = PMAP_DIRECT_NC_MAP(bpa);
+	u_long pa, endpa;
+	vaddr_t va, sva;
+	pt_entry_t *pte;
+	bus_size_t map_size;
+
+	pa = trunc_page(bpa);
+	endpa = round_page(bpa + size);
+
+#ifdef DIAGNOSTIC
+	if (endpa <= pa && endpa != 0)
+		panic("bus_mem_add_mapping: overflow");
+#endif
+
+	map_size = endpa - pa;
+
+	va = uvm_km_valloc(kernel_map, map_size);
+	if (va == 0)
+		return (ENOMEM);
+
+	*bshp = (bus_space_handle_t)(va + (bpa & PGOFSET));
+
+	sva = va;
+	for (; map_size > 0;
+	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE) {
+		pmap_kenter_pa(va, pa, VM_PROT_READ | VM_PROT_WRITE);
+
+		pte = kvtopte(va);
+		if (flags & BUS_SPACE_MAP_CACHEABLE)
+			*pte &= ~PG_N;
+		else
+			*pte |= PG_N;
+	}
+	pmap_tlb_shootrange(pmap_kernel(), sva, va);
+	pmap_tlb_shootwait();
+	pmap_update(pmap_kernel());
+
 	return 0;
 }
 
@@ -260,36 +291,50 @@ void
 _bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size,
     bus_addr_t *adrp)
 {
+	u_long va, endva;
 	bus_addr_t bpa;
 
 	/*
-	 * Find the correct extent and bus physical address.
+	 * Find the correct bus physical address.
 	 */
 	if (t == X86_BUS_SPACE_IO) {
 		bpa = bsh;
 	} else if (t == X86_BUS_SPACE_MEM) {
-		if (bsh >= atdevbase && (bsh + size) <= (atdevbase + IOM_SIZE)) {
-			bpa = (bus_addr_t)ISA_PHYSADDR(bsh);
-		} else {
-			if (bsh >= PMAP_DIRECT_BASE_NC &&
-			    bsh < PMAP_DIRECT_END_NC)
-				bpa = PMAP_DIRECT_NC_UNMAP(bsh);
-			else
-				bpa = PMAP_DIRECT_UNMAP(bsh);
-		}
-	} else {
-		panic("_bus_space_unmap: bad bus space tag");
-	}
+		bpa = (bus_addr_t)ISA_PHYSADDR(bsh);
+		if (IOM_BEGIN <= bpa && bpa <= IOM_END)
+			goto ok;
 
-	if (adrp != NULL) {
+		va = trunc_page(bsh);
+		endva = round_page(bsh + size);
+
+#ifdef DIAGNOSTIC
+		if (endva <= va)
+			panic("_bus_space_unmap: overflow");
+#endif
+
+		(void) pmap_extract(pmap_kernel(), va, &bpa);
+		bpa += (bsh & PGOFSET);
+
+		pmap_kremove(va, endva - va);
+		pmap_update(pmap_kernel());
+
+		/*
+		 * Free the kernel virtual mapping.
+		 */
+		uvm_km_free(kernel_map, va, endva - va);
+	} else
+		panic("bus_space_unmap: bad bus space tag");
+
+ok:
+	if (adrp != NULL)
 		*adrp = bpa;
-	}
 }
 
 void
 bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 {
 	struct extent *ex;
+	u_long va, endva;
 	bus_addr_t bpa;
 
 	/*
@@ -300,18 +345,28 @@ bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 		bpa = bsh;
 	} else if (t == X86_BUS_SPACE_MEM) {
 		ex = iomem_ex;
-
-		if (bsh >= atdevbase &&
-		    (bsh + size) <= (atdevbase + IOM_SIZE)) {
-			bpa = (bus_addr_t)ISA_PHYSADDR(bsh);
+		bpa = (bus_addr_t)ISA_PHYSADDR(bsh);
+		if (IOM_BEGIN <= bpa && bpa <= IOM_END)
 			goto ok;
-		}
 
-		if (bsh >= PMAP_DIRECT_BASE_NC &&
-		    bsh < PMAP_DIRECT_END_NC)
-			bpa = PMAP_DIRECT_NC_UNMAP(bsh);
-		else
-			bpa = PMAP_DIRECT_UNMAP(bsh);
+		va = trunc_page(bsh);
+		endva = round_page(bsh + size);
+
+#ifdef DIAGNOSTIC
+		if (endva <= va)
+			panic("bus_space_unmap: overflow");
+#endif
+
+		(void)pmap_extract(pmap_kernel(), va, &bpa);
+		bpa += (bsh & PGOFSET);
+
+		pmap_kremove(va, endva - va);
+		pmap_update(pmap_kernel());
+
+		/*
+		 * Free the kernel virtual mapping.
+		 */
+		uvm_km_free(kernel_map, va, endva - va);
 	} else
 		panic("bus_space_unmap: bad bus space tag");
 
@@ -358,3 +413,572 @@ bus_space_mmap(bus_space_tag_t t, bus_addr_t addr, off_t off, int prot, int flag
 	 */
 	return (atop(addr + off));
 }
+
+u_int8_t
+bus_space_read_1(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o)
+{
+	return (t == X86_BUS_SPACE_IO ? (inb(h + o)) :
+	    (*(volatile u_int8_t *)(h + o)));
+}
+
+u_int16_t
+bus_space_read_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o)
+{
+	return (t == X86_BUS_SPACE_IO ? (inw(h + o)) :
+	    (*(volatile u_int16_t *)(h + o)));
+}
+
+u_int32_t
+bus_space_read_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o)
+{
+	return (t == X86_BUS_SPACE_IO ? (inl(h + o)) :
+	    (*(volatile u_int32_t *)(h + o)));
+}
+
+void
+bus_space_read_multi_1(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+	    u_int8_t *ptr, bus_size_t cnt)
+{
+	if ((t) == X86_BUS_SPACE_IO) {
+		insb(h + o, ptr, cnt);
+	} else {
+		void *dummy1;
+		int dummy2;
+		void *dummy3;
+		int __x;
+		__asm __volatile(" cld					;"
+		"1:	movb (%2),%%al				;"
+		"	stosb					;"
+		"	loop 1b"				:
+		    "=D" (dummy1), "=c" (dummy2), "=r" (dummy3), "=&a" (__x) :
+		    "0" ((ptr)), "1" ((cnt)), "2" (h + o)       :
+		    "memory");
+	}
+}
+
+void
+bus_space_read_multi_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+    u_int16_t *ptr, bus_size_t cnt)
+{
+	if ((t) == X86_BUS_SPACE_IO) {
+		insw(h + o, ptr, cnt);
+	} else {
+		void *dummy1;
+		int dummy2;
+		void *dummy3;
+		int __x;
+		__asm __volatile(" cld				;"
+		"1:	movw (%2),%%ax				;"
+		"	stosw					;"
+		"	loop 1b"				:
+		    "=D" (dummy1), "=c" (dummy2), "=r" (dummy3), "=&a" (__x) :
+		    "0" ((ptr)), "1" ((cnt)), "2" (h + o)       :
+		    "memory");
+	}
+}
+
+void
+bus_space_read_multi_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+    u_int32_t *ptr, bus_size_t cnt)
+{
+	if ((t) == X86_BUS_SPACE_IO) {
+		insl(h + o, ptr, cnt);
+	} else {
+		void *dummy1;
+		int dummy2;
+		void *dummy3;
+		int __x;
+		__asm __volatile(" cld				;"
+		"1:	movl (%2),%%eax				;"
+		"	stosl					;"
+		"	loop 1b"				:
+		    "=D" (dummy1), "=c" (dummy2), "=r" (dummy3), "=&a" (__x) :
+		    "0" ((ptr)), "1" ((cnt)), "2" (h + o)       :
+		    "memory");
+	}
+}
+
+void
+bus_space_read_region_1(bus_space_tag_t t, bus_space_handle_t h,
+    bus_size_t o, u_int8_t *ptr, bus_size_t cnt)
+{
+	if ((t) == X86_BUS_SPACE_IO) {
+		int dummy1;
+		void *dummy2;
+		int dummy3;
+		int __x;
+		__asm __volatile(" cld					;"
+		"1:	inb %w1,%%al				;"
+		"	stosb					;"
+		"	incl %1					;"
+		"	loop 1b"				:
+		    "=&a" (__x), "=d" (dummy1), "=D" (dummy2),
+		    "=c" (dummy3)				:
+		    "1" (h + o), "2" (ptr), "3" (cnt)	:
+		    "memory");
+	} else {
+		int dummy1;
+		void *dummy2;
+		int dummy3;
+		__asm __volatile(" cld					;"
+		"	repne					;"
+		"	movsb"					:
+		    "=S" (dummy1), "=D" (dummy2), "=c" (dummy3)	:
+		    "0" (h + o), "1" (ptr), "2" (cnt)	:
+		    "memory");
+	}
+}
+
+void
+bus_space_read_region_2(bus_space_tag_t t, bus_space_handle_t h,
+    bus_size_t o, u_int16_t *ptr, bus_size_t cnt)
+{
+	if ((t) == X86_BUS_SPACE_IO) {
+		int dummy1;
+		void *dummy2;
+		int dummy3;
+		int __x;
+		__asm __volatile(" cld				;"
+		"1:	inw %w1,%%ax				;"
+		"	stosw					;"
+		"	addl $2,%1				;"
+		"	loop 1b"				:
+		    "=&a" (__x), "=d" (dummy1), "=D" (dummy2),
+		    "=c" (dummy3)				:
+		    "1" ((h) + (o)), "2" ((ptr)), "3" ((cnt))	:
+		    "memory");
+	} else {
+		int dummy1;
+		void *dummy2;
+		int dummy3;
+		__asm __volatile(" cld				;"
+		"	repne					;"
+		"	movsw"					:
+		    "=S" (dummy1), "=D" (dummy2), "=c" (dummy3)	:
+		    "0" (h + o), "1" (ptr), "2" (cnt)	:
+		    "memory");
+	}
+}
+
+void
+bus_space_read_region_4(bus_space_tag_t t, bus_space_handle_t h,
+    bus_size_t o, u_int32_t *ptr, bus_size_t cnt)
+{
+	if ((t) == X86_BUS_SPACE_IO) {
+		int dummy1;
+		void *dummy2;
+		int dummy3;
+		int __x;
+		__asm __volatile("cld				;"
+		"1:	inl %w1,%%eax				;"
+		"	stosl					;"
+		"	addl $4,%1				;"
+		"	loop 1b"				:
+		    "=&a" (__x), "=d" (dummy1), "=D" (dummy2),
+		    "=c" (dummy3)				:
+		    "1" (h + o), "2" (ptr), "3" (cnt)	:
+		    "memory");
+	} else {
+		int dummy1;
+		void *dummy2;
+		int dummy3;
+		__asm __volatile("cld				;"
+		"	repne					;"
+		"	movsl"					:
+		    "=S" (dummy1), "=D" (dummy2), "=c" (dummy3)	:
+		    "0" (h + o), "1" (ptr), "2" (cnt)	:
+		    "memory");
+	}
+}
+/*
+ *	void bus_space_write_N(bus_space_tag_t tag,
+ *	    bus_space_handle_t bsh, bus_size_t offset,
+ *	    u_intN_t value);
+ *
+ * Write the 1, 2, 4, or 8 byte value `value' to bus space
+ * described by tag/handle/offset.
+ */
+void
+bus_space_write_1(bus_space_tag_t t, bus_space_handle_t h,
+    bus_size_t o, u_int8_t v)
+{
+	if (t == X86_BUS_SPACE_IO)
+		outb(h + o, v);
+	else
+		((void)(*(volatile u_int8_t *)(h + o) = v));
+}
+
+void
+bus_space_write_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+    u_int16_t v)
+{
+	if ((t) == X86_BUS_SPACE_IO)
+		outw(h + o, v);
+	else
+		((void)(*(volatile u_int16_t *)(h + o) = v));
+}
+
+void
+bus_space_write_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+    u_int32_t v)
+{
+	if ((t) == X86_BUS_SPACE_IO)
+		outl(h + o, v);
+	else
+		((void)(*(volatile u_int32_t *)(h + o) = v));
+}
+
+void
+bus_space_write_multi_1(bus_space_tag_t t, bus_space_handle_t h,
+    bus_size_t o, const u_int8_t *ptr, bus_size_t cnt)
+{
+	if ((t) == X86_BUS_SPACE_IO) {
+		outsb(h + o, ptr, cnt);
+	} else {
+		void *dummy1;
+		int dummy2;
+		void *dummy3;
+		int __x;
+		__asm __volatile("cld				;"
+		"1:	lodsb					;"
+		"	movb %%al,(%2)				;"
+		"	loop 1b"				:
+		    "=S" (dummy1), "=c" (dummy2), "=r" (dummy3), "=&a" (__x) :
+		    "0" (ptr), "1" (cnt), "2" (h + o));
+	}
+}
+
+void
+bus_space_write_multi_2(bus_space_tag_t t, bus_space_handle_t h,
+    bus_size_t o, const u_int16_t *ptr, bus_size_t cnt)
+{
+	if ((t) == X86_BUS_SPACE_IO) {
+		outsw(h + o, ptr, cnt);
+	} else {
+		void *dummy1;
+		int dummy2;
+		void *dummy3;
+		int __x;
+		__asm __volatile("cld					;"
+		"1:	lodsw					;"
+		"	movw %%ax,(%2)				;"
+		"	loop 1b"				:
+		    "=S" (dummy1), "=c" (dummy2), "=r" (dummy3), "=&a" (__x) :
+		    "0" (ptr), "1" (cnt), "2" (h + o));
+	}
+}
+
+void
+bus_space_write_multi_4(bus_space_tag_t t, bus_space_handle_t h,
+    bus_size_t o, const u_int32_t *ptr, bus_size_t cnt)
+{
+	if ((t) == X86_BUS_SPACE_IO) {
+		outsl(h + o, ptr, cnt);
+	} else {
+		void *dummy1;
+		int dummy2;
+		void *dummy3;
+		int __x;
+		__asm __volatile("cld				;"
+		"1:	lodsl					;"
+		"	movl %%eax,(%2)				;"
+		"	loop 1b"				:
+		    "=S" (dummy1), "=c" (dummy2), "=r" (dummy3), "=&a" (__x) :
+		    "0" (ptr), "1" (cnt), "2" (h + o));
+	}
+}
+
+void
+bus_space_write_region_1(bus_space_tag_t t, bus_space_handle_t h,
+    bus_size_t o, const u_int8_t *ptr, bus_size_t cnt)
+{
+	if ((t) == X86_BUS_SPACE_IO) {
+		int dummy1;
+		void *dummy2;
+		int dummy3;
+		int __x;
+		__asm __volatile("cld				;"
+		"1:	lodsb					;"
+		"	outb %%al,%w1				;"
+		"	incl %1					;"
+		"	loop 1b"				:
+		    "=&a" (__x), "=d" (dummy1), "=S" (dummy2),
+		    "=c" (dummy3)				:
+		    "1" (h + o), "2" (ptr), "3" (cnt)	:
+		    "memory");
+	} else {
+		int dummy1;
+		void *dummy2;
+		int dummy3;
+		__asm __volatile("cld				;"
+		"	repne					;"
+		"	movsb"					:
+		    "=D" (dummy1), "=S" (dummy2), "=c" (dummy3)	:
+		    "0" (h + o), "1" (ptr), "2" (cnt)	:
+		    "memory");
+	}
+}
+
+void
+bus_space_write_region_2(bus_space_tag_t t, bus_space_handle_t h,
+    bus_size_t o, const u_int16_t *ptr, bus_size_t cnt)
+{
+	if ((t) == X86_BUS_SPACE_IO) {
+		int dummy1;
+		void *dummy2;
+		int dummy3;
+		int __x;
+		__asm __volatile("cld				;"
+		"1:	lodsw					;"
+		"	outw %%ax,%w1				;"
+		"	addl $2,%1				;"
+		"	loop 1b"				: 
+		    "=&a" (__x), "=d" (dummy1), "=S" (dummy2),
+		    "=c" (dummy3)				:
+		    "1" (h + o), "2" (ptr), "3" (cnt)	:
+		    "memory");
+	} else {
+		int dummy1;
+		void *dummy2;
+		int dummy3;
+		__asm __volatile("cld				;"
+		"	repne					;"
+		"	movsw"					:
+		    "=D" (dummy1), "=S" (dummy2), "=c" (dummy3)	:
+		    "0" (h + o), "1" (ptr), "2" (cnt)	:
+		    "memory");
+	}
+}
+
+void
+bus_space_write_region_4(bus_space_tag_t t, bus_space_handle_t h,
+    bus_size_t o, const u_int32_t *ptr, bus_size_t cnt)
+{
+	if ((t) == X86_BUS_SPACE_IO) {
+		int dummy1;
+		void *dummy2;
+		int dummy3;
+		int __x;
+		__asm __volatile(" cld				;"
+		"1:	lodsl					;"
+		"	outl %%eax,%w1				;"
+		"	addl $4,%1				;"
+		"	loop 1b"				:
+		    "=&a" (__x), "=d" (dummy1), "=S" (dummy2),
+		    "=c" (dummy3)				:
+		    "1" (h + o), "2" (ptr), "3" (cnt)	:
+		    "memory");
+	} else {
+		int dummy1;
+		void *dummy2;
+		int dummy3;
+		__asm __volatile("cld				;"
+		"	repne					;"
+		"	movsl"					:
+		    "=D" (dummy1), "=S" (dummy2), "=c" (dummy3)	:
+		    "0" (h + o), "1" (ptr), "2" (cnt)	:
+		    "memory");
+	}
+}
+
+void
+bus_space_set_multi_1(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+    u_int8_t v, size_t c)
+{
+	bus_addr_t addr = h + o;
+
+	if (t == X86_BUS_SPACE_IO)
+		while (c--)
+			outb(addr, v);
+	else
+		while (c--)
+			*(volatile u_int8_t *)(addr) = v;
+}
+
+void
+bus_space_set_multi_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+    u_int16_t v, size_t c)
+{
+	bus_addr_t addr = h + o;
+
+	if (t == X86_BUS_SPACE_IO)
+		while (c--)
+			outw(addr, v);
+	else
+		while (c--)
+			*(volatile u_int16_t *)(addr) = v;
+}
+
+void
+bus_space_set_multi_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+    u_int32_t v, size_t c)
+{
+	bus_addr_t addr = h + o;
+
+	if (t == X86_BUS_SPACE_IO)
+		while (c--)
+			outl(addr, v);
+	else
+		while (c--)
+			*(volatile u_int32_t *)(addr) = v;
+}
+
+void
+bus_space_set_region_1(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+    u_int8_t v, size_t c)
+{
+	bus_addr_t addr = h + o;
+
+	if (t == X86_BUS_SPACE_IO)
+		for (; c != 0; c--, addr++)
+			outb(addr, v);
+	else
+		for (; c != 0; c--, addr++)
+			*(volatile u_int8_t *)(addr) = v;
+}
+
+void
+bus_space_set_region_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+    u_int16_t v, size_t c)
+{
+	bus_addr_t addr = h + o;
+
+	if (t == X86_BUS_SPACE_IO)
+		for (; c != 0; c--, addr += 2)
+			outw(addr, v);
+	else
+		for (; c != 0; c--, addr += 2)
+			*(volatile u_int16_t *)(addr) = v;
+}
+
+void
+bus_space_set_region_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
+    u_int32_t v, size_t c)
+{
+	bus_addr_t addr = h + o;
+
+	if (t == X86_BUS_SPACE_IO)
+		for (; c != 0; c--, addr += 4)
+			outl(addr, v);
+	else
+		for (; c != 0; c--, addr += 4)
+			*(volatile u_int32_t *)(addr) = v;
+}
+
+void
+bus_space_copy_region_1(bus_space_tag_t t,
+    bus_space_handle_t h1, bus_size_t o1,
+    bus_space_handle_t h2, bus_size_t o2, size_t c)
+{
+	bus_addr_t addr1 = h1 + o1;
+	bus_addr_t addr2 = h2 + o2;
+
+	if (t == X86_BUS_SPACE_IO) {
+		if (addr1 >= addr2) {
+			/* src after dest: copy forward */
+			for (; c != 0; c--, addr1++, addr2++)
+				outb(addr2, inb(addr1));
+		} else {
+			/* dest after src: copy backwards */
+			for (addr1 += (c - 1), addr2 += (c - 1);
+			    c != 0; c--, addr1--, addr2--)
+				outb(addr2, inb(addr1));
+		}
+	} else {
+		if (addr1 >= addr2) {
+			/* src after dest: copy forward */
+			for (; c != 0; c--, addr1++, addr2++)
+				*(volatile u_int8_t *)(addr2) =
+				    *(volatile u_int8_t *)(addr1);
+		} else {
+			/* dest after src: copy backwards */
+			for (addr1 += (c - 1), addr2 += (c - 1);
+			    c != 0; c--, addr1--, addr2--)
+				*(volatile u_int8_t *)(addr2) =
+				    *(volatile u_int8_t *)(addr1);
+		}
+	}
+}
+
+void
+bus_space_copy_region_2(bus_space_tag_t t,
+    bus_space_handle_t h1, bus_size_t o1,
+    bus_space_handle_t h2, bus_size_t o2, size_t c)
+{
+	bus_addr_t addr1 = h1 + o1;
+	bus_addr_t addr2 = h2 + o2;
+
+	if (t == X86_BUS_SPACE_IO) {
+		if (addr1 >= addr2) {
+			/* src after dest: copy forward */
+			for (; c != 0; c--, addr1 += 2, addr2 += 2)
+				outw(addr2, inw(addr1));
+		} else {
+			/* dest after src: copy backwards */
+			for (addr1 += 2 * (c - 1), addr2 += 2 * (c - 1);
+			    c != 0; c--, addr1 -= 2, addr2 -= 2)
+				outw(addr2, inw(addr1));
+		}
+	} else {
+		if (addr1 >= addr2) {
+			/* src after dest: copy forward */
+			for (; c != 0; c--, addr1 += 2, addr2 += 2)
+				*(volatile u_int16_t *)(addr2) =
+				    *(volatile u_int16_t *)(addr1);
+		} else {
+			/* dest after src: copy backwards */
+			for (addr1 += 2 * (c - 1), addr2 += 2 * (c - 1);
+			    c != 0; c--, addr1 -= 2, addr2 -= 2)
+				*(volatile u_int16_t *)(addr2) =
+				    *(volatile u_int16_t *)(addr1);
+		}
+	}
+}
+
+void
+bus_space_copy_region_4(bus_space_tag_t t,
+    bus_space_handle_t h1, bus_size_t o1,
+    bus_space_handle_t h2, bus_size_t o2, size_t c)
+{
+	bus_addr_t addr1 = h1 + o1;
+	bus_addr_t addr2 = h2 + o2;
+
+	if (t == X86_BUS_SPACE_IO) {
+		if (addr1 >= addr2) {
+			/* src after dest: copy forward */
+			for (; c != 0; c--, addr1 += 4, addr2 += 4)
+				outl(addr2, inl(addr1));
+		} else {
+			/* dest after src: copy backwards */
+			for (addr1 += 4 * (c - 1), addr2 += 4 * (c - 1);
+			    c != 0; c--, addr1 -= 4, addr2 -= 4)
+				outl(addr2, inl(addr1));
+		}
+	} else {
+		if (addr1 >= addr2) {
+			/* src after dest: copy forward */
+			for (; c != 0; c--, addr1 += 4, addr2 += 4)
+				*(volatile u_int32_t *)(addr2) =
+				    *(volatile u_int32_t *)(addr1);
+		} else {
+			/* dest after src: copy backwards */
+			for (addr1 += 4 * (c - 1), addr2 += 4 * (c - 1);
+			    c != 0; c--, addr1 -= 4, addr2 -= 4)
+				*(volatile u_int32_t *)(addr2) =
+				    *(volatile u_int32_t *)(addr1);
+		}
+	}
+}
+
+void
+bus_space_barrier(bus_space_tag_t tag, bus_space_handle_t bsh,
+    bus_size_t offset, bus_size_t len, int flags)
+{
+	if (flags == (BUS_SPACE_BARRIER_READ|BUS_SPACE_BARRIER_WRITE))
+		__asm __volatile("mfence");
+	else if (flags == BUS_SPACE_BARRIER_WRITE)
+		__asm __volatile("sfence");
+	else
+		__asm __volatile("lfence");
+}
+

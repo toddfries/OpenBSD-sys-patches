@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.15 2008/06/26 05:42:09 ray Exp $	*/
+/*	$OpenBSD: trap.c,v 1.17 2009/06/06 18:57:31 art Exp $	*/
 /*	$NetBSD: trap.c,v 1.2 2003/05/04 23:51:56 fvdl Exp $	*/
 
 /*-
@@ -344,10 +344,6 @@ copyfault:
 	case T_PAGEFLT:			/* allow page faults in kernel mode */
 		if (p == NULL)
 			goto we_re_toast;
-#ifdef MULTIPROCESSOR
-		if ((p->p_flag & P_BIGLOCK) == 0)
-			goto we_re_toast;
-#endif
 		cr2 = rcr2();
 		KERNEL_LOCK();
 		goto faultcommon;
@@ -448,9 +444,9 @@ faultcommon:
 
 	case T_TRCTRAP:
 		/* Check whether they single-stepped into a lcall. */
-		if (frame.tf_rip == (int)IDTVEC(oosyscall))
+		if (frame.tf_rip == (register_t)IDTVEC(oosyscall))
 			return;
-		if (frame.tf_rip == (int)IDTVEC(oosyscall) + 1) {
+		if (frame.tf_rip == (register_t)IDTVEC(oosyscall) + 1) {
 			frame.tf_rflags &= ~PSL_T;
 			return;
 		}

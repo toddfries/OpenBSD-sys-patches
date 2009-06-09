@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpireg.h,v 1.15 2008/06/24 08:24:57 sobrado Exp $	*/
+/*	$OpenBSD: acpireg.h,v 1.17 2009/04/11 08:22:48 kettenis Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
@@ -391,7 +391,7 @@ struct acpi_facs {
 #define	FACS_LOCK_OWNED		0x00000002
 	u_int32_t	flags;
 #define	FACS_S4BIOS_F		0x00000001	/* S4BIOS_REQ supported */
-	struct acpi_gas	x_wakeup_vector;
+	uint64_t	x_wakeup_vector;
 	u_int8_t	version;
 	u_int8_t	reserved[31];
 } __packed;
@@ -443,6 +443,13 @@ struct acpi_facs {
 #define		ACPI_PM1_SLP_EN			0x2000
 
 /*
+ * PM2 Control Registers
+ */
+#define ACPI_PM2_CONTROL		0x06
+#define	ACPI_PM2_ARB_DIS		0x0001
+
+
+/*
  * Sleeping States
  */
 #define ACPI_STATE_S0		0
@@ -460,6 +467,7 @@ struct acpi_facs {
 #define ACPI_DEV_PCIB	"PNP0A03"	/* PCI bus */
 #define ACPI_DEV_GISAB	"PNP0A05"	/* Generic ISA Bus */
 #define ACPI_DEV_EIOB	"PNP0A06"	/* Extended I/O Bus */
+#define ACPI_DEV_PCIEB	"PNP0A08"	/* PCIe bus */
 #define ACPI_DEV_MR	"PNP0C02"	/* Motherboard resources */
 #define ACPI_DEV_NPROC	"PNP0C04"	/* Numeric data processor */
 #define ACPI_DEV_CS	"PNP0C08"	/* ACPI-Compliant System */

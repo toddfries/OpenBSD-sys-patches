@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.203 2008/06/27 05:40:21 brad Exp $
+#	$OpenBSD: GENERIC,v 1.208 2009/02/10 18:35:44 damien Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -124,6 +124,7 @@ ugen*	at uhub?			# USB Generic driver
 uath*	at uhub?			# Atheros AR5005UG/AR5005UX
 ural*	at uhub?			# Ralink RT2500USB
 rum*	at uhub?			# Ralink RT2501USB/RT2601USB
+run*	at uhub?			# Ralink RT2700U/RT2800U/RT3000U
 uow*	at uhub?			# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 
@@ -132,17 +133,16 @@ uvideo* at uhub?
 video*  at uvideo?
 
 # Bluetooth controllers
-#ubt*	at uhub?			# USB Bluetooth
+ubt*	at uhub?			# USB Bluetooth
+bthub*	at ubt?
 
-# Bluetooth bus support
-#bthub*	at ubt?
-
-# Bluetooth HID support
-#bthidev* at bthub?
-#btkbd*	at bthidev?
-#btms*	at bthidev?
-#wskbd*	at btkbd? mux 1
-#wsmouse* at btms? mux 0
+bthidev* at bthub?			# Bluetooth HID support
+btkbd*	at bthidev?
+btms*	at bthidev?
+wskbd*	at btkbd? mux 1
+wsmouse* at btms? mux 0
+btsco*	at bthub?			# Bluetooth audio support
+audio*	at btsco?
 
 # EV6 Tsunami Core Logic
 tsc*	at	mainbus0
@@ -300,6 +300,7 @@ xmphy*	at mii?				# XaQti XMAC-II PHYs
 urlphy*	at mii?				# Realtek RTL8150L internal PHY
 rgephy*	at mii?				# Realtek 8169S/8110S PHY
 ciphy*	at mii?				# Cicada CS8201 10/100/1000 copper PHY
+ipgphy*	at mii?				# IC Plus IP1000A PHYs
 ukphy*	at mii?				# "unknown" PHYs
 
 # sensors

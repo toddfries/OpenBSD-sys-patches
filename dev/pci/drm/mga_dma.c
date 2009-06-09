@@ -41,7 +41,6 @@
 #include "mga_drm.h"
 #include "mga_drv.h"
 
-#define MGA_DEFAULT_USEC_TIMEOUT	10000
 #define MGA_FREELIST_DEBUG		0
 
 #define MINIMAL_CLEANUP    0
@@ -226,8 +225,8 @@ void mga_do_dma_wrap_end(drm_mga_private_t * dev_priv)
 #if MGA_FREELIST_DEBUG
 static void mga_freelist_print(struct drm_device * dev)
 {
-	drm_mga_private_t *dev_priv = dev->dev_private;
-	drm_mga_freelist_t *entry;
+	drm_mga_private_t	*dev_priv = dev->dev_private;
+	struct mgadrm_buf_priv	*entry;
 
 	DRM_INFO("\n");
 	DRM_INFO("current dispatch: last=0x%x done=0x%x\n",
@@ -236,7 +235,7 @@ static void mga_freelist_print(struct drm_device * dev)
 				dev_priv->primary->offset));
 	DRM_INFO("current freelist:\n");
 
-	for (entry = dev_priv->head->next; entry; entry = entry->next) {
+	TAILQ_FOREACH(entry, &dev_priv->freelist, link) {
 		DRM_INFO("   %p   idx=%2d  age=0x%x 0x%06lx\n",
 			 entry, entry->buf->idx, entry->age.head,
 			 entry->age.head - dev_priv->primary->offset);
@@ -245,170 +244,82 @@ static void mga_freelist_print(struct drm_device * dev)
 }
 #endif
 
-static int mga_freelist_init(struct drm_device * dev, drm_mga_private_t * dev_priv)
+static int
+mga_freelist_init(struct drm_device *dev, drm_mga_private_t *dev_priv)
 {
-	struct drm_device_dma *dma = dev->dma;
-	struct drm_buf *buf;
-	drm_mga_buf_priv_t *buf_priv;
-	drm_mga_freelist_t *entry;
-	int i;
+	struct drm_device_dma	*dma = dev->dma;
+	struct drm_buf		*buf;
+	struct mgadrm_buf_priv	*buf_priv;
+	int 			 i;
+
 	DRM_DEBUG("count=%d\n", dma->buf_count);
 
-	dev_priv->head = drm_calloc(1, sizeof(drm_mga_freelist_t), DRM_MEM_DRIVER);
-	if (dev_priv->head == NULL)
-		return ENOMEM;
-
-	SET_AGE(&dev_priv->head->age, MGA_BUFFER_USED, 0);
+	/* if we have a freelist lying around, this'll nuke them. */
+	TAILQ_INIT(&dev_priv->freelist);
 
 	for (i = 0; i < dma->buf_count; i++) {
 		buf = dma->buflist[i];
 		buf_priv = buf->dev_private;
 
-		entry = drm_calloc(1, sizeof(drm_mga_freelist_t),
-		    DRM_MEM_DRIVER);
-		if (entry == NULL)
-			return ENOMEM;
-
-		entry->next = dev_priv->head->next;
-		entry->prev = dev_priv->head;
-		SET_AGE(&entry->age, MGA_BUFFER_FREE, 0);
-		entry->buf = buf;
-
-		if (dev_priv->head->next != NULL)
-			dev_priv->head->next->prev = entry;
-		if (entry->next == NULL)
-			dev_priv->tail = entry;
-
-		buf_priv->list_entry = entry;
+		TAILQ_INSERT_HEAD(&dev_priv->freelist, buf_priv, link);
+		SET_AGE(&buf_priv->age, MGA_BUFFER_FREE, 0);
 		buf_priv->discard = 0;
 		buf_priv->dispatched = 0;
-
-		dev_priv->head->next = entry;
 	}
 
-	return 0;
+	return (0);
 }
 
-static void mga_freelist_cleanup(struct drm_device * dev)
+static struct drm_buf *
+mga_freelist_get(struct drm_device *dev)
 {
-	drm_mga_private_t *dev_priv = dev->dev_private;
-	drm_mga_freelist_t *entry;
-	drm_mga_freelist_t *next;
-	DRM_DEBUG("\n");
+	drm_mga_private_t	*dev_priv = dev->dev_private;
+	struct mgadrm_buf_priv	*entry;
+	u_int32_t		 head, wrap;
 
-	entry = dev_priv->head;
-	while (entry) {
-		next = entry->next;
-		drm_free(entry, sizeof(drm_mga_freelist_t), DRM_MEM_DRIVER);
-		entry = next;
-	}
-
-	dev_priv->head = dev_priv->tail = NULL;
-}
-
-#if 0
-/* FIXME: Still needed?
- */
-static void mga_freelist_reset(struct drm_device * dev)
-{
-	drm_device_dma_t *dma = dev->dma;
-	struct drm_buf *buf;
-	drm_mga_buf_priv_t *buf_priv;
-	int i;
-
-	for (i = 0; i < dma->buf_count; i++) {
-		buf = dma->buflist[i];
-		buf_priv = buf->dev_private;
-		SET_AGE(&buf_priv->list_entry->age, MGA_BUFFER_FREE, 0);
-	}
-}
-#endif
-
-static struct drm_buf *mga_freelist_get(struct drm_device * dev)
-{
-	drm_mga_private_t *dev_priv = dev->dev_private;
-	drm_mga_freelist_t *next;
-	drm_mga_freelist_t *prev;
-	drm_mga_freelist_t *tail = dev_priv->tail;
-	u32 head, wrap;
 	DRM_DEBUG("\n");
 
 	head = MGA_READ(MGA_PRIMADDRESS);
 	wrap = dev_priv->sarea_priv->last_wrap;
 
-	DRM_DEBUG("   tail=0x%06lx %d\n",
-		  tail->age.head ?
-		  tail->age.head - dev_priv->primary->offset : 0,
-		  tail->age.wrap);
-	DRM_DEBUG("   head=0x%06lx %d\n",
-		  head - dev_priv->primary->offset, wrap);
+	DRM_DEBUG("   tail=0x%06lx %d\n", tail->age.head ?
+	    tail->age.head - dev_priv->primary->offset : 0, tail->age.wrap);
+	DRM_DEBUG("   head=0x%06lx %d\n", head - dev_priv->primary->offset,
+	    wrap);
 
-	if (TEST_AGE(&tail->age, head, wrap)) {
-		prev = dev_priv->tail->prev;
-		next = dev_priv->tail;
-		prev->next = NULL;
-		next->prev = next->next = NULL;
-		dev_priv->tail = prev;
-		SET_AGE(&next->age, MGA_BUFFER_USED, 0);
-		return next->buf;
+	if ((entry = TAILQ_LAST(&dev_priv->freelist, mga_freelist)) != NULL &&
+	    TEST_AGE(&entry->age, head, wrap)) {
+		TAILQ_REMOVE(&dev_priv->freelist, entry, link);
+		SET_AGE(&entry->age, MGA_BUFFER_USED, 0);
+		return (entry->buf);
 	}
 
 	DRM_DEBUG("returning NULL!\n");
-	return NULL;
+	return (NULL);
 }
 
-int mga_freelist_put(struct drm_device * dev, struct drm_buf * buf)
+int
+mga_freelist_put(struct drm_device *dev, struct drm_buf *buf)
 {
-	drm_mga_private_t *dev_priv = dev->dev_private;
-	drm_mga_buf_priv_t *buf_priv = buf->dev_private;
-	drm_mga_freelist_t *head, *entry, *prev;
+	drm_mga_private_t	*dev_priv = dev->dev_private;
+	struct mgadrm_buf_priv	*buf_priv = buf->dev_private;
 
-	DRM_DEBUG("age=0x%06lx wrap=%d\n",
-		  buf_priv->list_entry->age.head -
-		  dev_priv->primary->offset, buf_priv->list_entry->age.wrap);
+	DRM_DEBUG("age=0x%06lx wrap=%d\n", buf_priv->list_entry->age.head -
+	    dev_priv->primary->offset, buf_priv->list_entry->age.wrap);
 
-	entry = buf_priv->list_entry;
-	head = dev_priv->head;
-
-	if (buf_priv->list_entry->age.head == MGA_BUFFER_USED) {
-		SET_AGE(&entry->age, MGA_BUFFER_FREE, 0);
-		prev = dev_priv->tail;
-		prev->next = entry;
-		entry->prev = prev;
-		entry->next = NULL;
+	if (buf_priv->age.head == MGA_BUFFER_USED) {
+		SET_AGE(&buf_priv->age, MGA_BUFFER_FREE, 0);
+		TAILQ_INSERT_TAIL(&dev_priv->freelist, buf_priv, link);
 	} else {
-		prev = head->next;
-		head->next = entry;
-		prev->prev = entry;
-		entry->prev = head;
-		entry->next = prev;
+		TAILQ_INSERT_HEAD(&dev_priv->freelist, buf_priv, link);
 	}
 
-	return 0;
+	return (0);
 }
 
 /* ================================================================
  * DMA initialization, cleanup
  */
-
-int mga_driver_load(struct drm_device *dev, unsigned long flags)
-{
-	drm_mga_private_t *dev_priv;
-
-	dev_priv = drm_calloc(1, sizeof(drm_mga_private_t), DRM_MEM_DRIVER);
-	if (!dev_priv)
-		return ENOMEM;
-
-	dev->dev_private = (void *)dev_priv;
-
-	dev_priv->usec_timeout = MGA_DEFAULT_USEC_TIMEOUT;
-	dev_priv->chipset = flags;
-
-	dev_priv->mmio_base = drm_get_resource_start(dev, 1);
-	dev_priv->mmio_size = drm_get_resource_len(dev, 1);
-
-	return 0;
-}
 
 /**
  * Bootstrap the driver for AGP DMA.
@@ -532,7 +443,7 @@ static int mga_do_agp_dma_bootstrap(struct drm_device *dev,
 	req.flags = _DRM_AGP_BUFFER;
 	req.agp_start = offset;
 
-	err = drm_addbufs_agp(dev, &req);
+	err = drm_addbufs(dev, &req);
 	if (err) {
 		DRM_ERROR("Unable to add secondary DMA buffers: %d\n", err);
 		return err;
@@ -643,7 +554,7 @@ static int mga_do_pci_dma_bootstrap(struct drm_device * dev,
 		req.count = bin_count;
 		req.size = dma_bs->secondary_bin_size;
 
-		err = drm_addbufs_pci(dev, &req);
+		err = drm_addbufs(dev, &req);
 		if (!err) {
 			break;
 		}
@@ -674,7 +585,7 @@ static int mga_do_pci_dma_bootstrap(struct drm_device * dev,
 static int mga_do_dma_bootstrap(struct drm_device *dev,
 				drm_mga_dma_bootstrap_t *dma_bs)
 {
-	const int is_agp = (dma_bs->agp_mode != 0) && drm_device_is_agp(dev);
+	const int is_agp = (dma_bs->agp_mode != 0) && dev->agp != NULL;
 	int err;
 	drm_mga_private_t *const dev_priv =
 		(drm_mga_private_t *) dev->dev_private;
@@ -683,16 +594,8 @@ static int mga_do_dma_bootstrap(struct drm_device *dev,
 	dev_priv->used_new_dma_init = 1;
 
 	/* The first steps are the same for both PCI and AGP based DMA.  Map
-	 * the cards MMIO registers and map a status page.
+	 * a status page. The mmio registers were mapped on attach.
 	 */
-	err = drm_addmap(dev, dev_priv->mmio_base, dev_priv->mmio_size,
-			 _DRM_REGISTERS, _DRM_READ_ONLY, & dev_priv->mmio);
-	if (err) {
-		DRM_ERROR("Unable to map MMIO region: %d\n", err);
-		return err;
-	}
-
-
 	err = drm_addmap(dev, 0, SAREA_MAX, _DRM_SHM,
 			 _DRM_READ_ONLY | _DRM_LOCKED | _DRM_KERNEL,
 			 & dev_priv->status);
@@ -814,11 +717,6 @@ static int mga_do_init_dma(struct drm_device * dev, drm_mga_init_t * init)
 			DRM_ERROR("failed to find status page!\n");
 			return EINVAL;
 		}
-		dev_priv->mmio = drm_core_findmap(dev, init->mmio_offset);
-		if (!dev_priv->mmio) {
-			DRM_ERROR("failed to find mmio region!\n");
-			return EINVAL;
-		}
 		dev_priv->warp = drm_core_findmap(dev, init->warp_offset);
 		if (!dev_priv->warp) {
 			DRM_ERROR("failed to find warp microcode region!\n");
@@ -905,72 +803,56 @@ static int mga_do_init_dma(struct drm_device * dev, drm_mga_init_t * init)
 
 static int mga_do_cleanup_dma(struct drm_device *dev, int full_cleanup)
 {
+	drm_mga_private_t *dev_priv = dev->dev_private;
 	int err = 0;
 	DRM_DEBUG("\n");
 
-	/* Make sure interrupts are disabled here because the uninstall ioctl
-	 * may not have been called from userspace and after dev_private
-	 * is freed, it's too late.
-	 */
-	if (dev->irq_enabled)
-		drm_irq_uninstall(dev);
+	if ((dev_priv->warp != NULL)
+	    && (dev_priv->warp->type != _DRM_CONSISTENT))
+		drm_core_ioremapfree(dev_priv->warp);
 
-	if (dev->dev_private) {
-		drm_mga_private_t *dev_priv = dev->dev_private;
+	if ((dev_priv->primary != NULL)
+	    && (dev_priv->primary->type != _DRM_CONSISTENT))
+		drm_core_ioremapfree(dev_priv->primary);
 
-		if ((dev_priv->warp != NULL)
-		    && (dev_priv->warp->type != _DRM_CONSISTENT))
-			drm_core_ioremapfree(dev_priv->warp, dev);
+	if (dev->agp_buffer_map != NULL)
+		drm_core_ioremapfree(dev->agp_buffer_map);
 
-		if ((dev_priv->primary != NULL)
-		    && (dev_priv->primary->type != _DRM_CONSISTENT))
-			drm_core_ioremapfree(dev_priv->primary, dev);
+	if (dev_priv->used_new_dma_init) {
+		if (dev_priv->agp_handle != 0) {
+			struct drm_agp_binding unbind_req;
+			struct drm_agp_buffer free_req;
 
-		if (dev->agp_buffer_map != NULL)
-			drm_core_ioremapfree(dev->agp_buffer_map, dev);
+			unbind_req.handle = dev_priv->agp_handle;
+			drm_agp_unbind(dev, &unbind_req);
 
-		if (dev_priv->used_new_dma_init) {
-			if (dev_priv->agp_handle != 0) {
-				struct drm_agp_binding unbind_req;
-				struct drm_agp_buffer free_req;
+			free_req.handle = dev_priv->agp_handle;
+			drm_agp_free(dev, &free_req);
 
-				unbind_req.handle = dev_priv->agp_handle;
-				drm_agp_unbind(dev, &unbind_req);
-
-				free_req.handle = dev_priv->agp_handle;
-				drm_agp_free(dev, &free_req);
-
-				dev_priv->agp_textures = NULL;
-				dev_priv->agp_size = 0;
-				dev_priv->agp_handle = 0;
-			}
-
-			if ((dev->agp != NULL) && dev->agp->acquired) {
-				err = drm_agp_release(dev);
-			}
+			dev_priv->agp_textures = NULL;
+			dev_priv->agp_size = 0;
+			dev_priv->agp_handle = 0;
 		}
 
-		dev_priv->warp = NULL;
-		dev_priv->primary = NULL;
-		dev_priv->sarea = NULL;
-		dev_priv->sarea_priv = NULL;
-		dev->agp_buffer_map = NULL;
-
-		if (full_cleanup) {
-			dev_priv->mmio = NULL;
-			dev_priv->status = NULL;
-			dev_priv->used_new_dma_init = 0;
-		}
-
-		memset(&dev_priv->prim, 0, sizeof(dev_priv->prim));
-		dev_priv->warp_pipe = 0;
-		memset(dev_priv->warp_pipe_phys, 0,
-		       sizeof(dev_priv->warp_pipe_phys));
-
-		if (dev_priv->head != NULL) {
-			mga_freelist_cleanup(dev);
+		if ((dev->agp != NULL) && dev->agp->acquired) {
+			err = drm_agp_release(dev);
 		}
 	}
+
+	dev_priv->warp = NULL;
+	dev_priv->primary = NULL;
+	dev_priv->sarea = NULL;
+	dev_priv->sarea_priv = NULL;
+	dev->agp_buffer_map = NULL;
+
+	if (full_cleanup) {
+		dev_priv->status = NULL;
+		dev_priv->used_new_dma_init = 0;
+	}
+
+	memset(&dev_priv->prim, 0, sizeof(dev_priv->prim));
+	dev_priv->warp_pipe = 0;
+	memset(dev_priv->warp_pipe_phys, 0, sizeof(dev_priv->warp_pipe_phys));
 
 	return err;
 }
@@ -1048,11 +930,16 @@ int mga_dma_reset(struct drm_device *dev, void *data,
  * DMA buffer management
  */
 
-static int mga_dma_get_buffers(struct drm_device * dev,
-			       struct drm_file *file_priv, struct drm_dma * d)
+
+int
+mga_dma_buffers(struct drm_device *dev, struct drm_dma * d,
+    struct drm_file *file_priv)
 {
+	drm_mga_private_t *dev_priv = (drm_mga_private_t *) dev->dev_private;
 	struct drm_buf *buf;
 	int i;
+
+	WRAP_TEST_WITH_RETURN(dev_priv);
 
 	for (i = d->granted_count; i < d->request_count; i++) {
 		buf = mga_freelist_get(dev);
@@ -1070,54 +957,6 @@ static int mga_dma_get_buffers(struct drm_device * dev,
 
 		d->granted_count++;
 	}
-	return 0;
-}
-
-int mga_dma_buffers(struct drm_device *dev, void *data,
-		    struct drm_file *file_priv)
-{
-	struct drm_device_dma *dma = dev->dma;
-	drm_mga_private_t *dev_priv = (drm_mga_private_t *) dev->dev_private;
-	struct drm_dma *d = data;
-	int ret = 0;
-
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
-
-	/* Please don't send us buffers.
-	 */
-	if (d->send_count != 0) {
-		DRM_ERROR("Process %d trying to send %d buffers via drmDMA\n",
-			  DRM_CURRENTPID, d->send_count);
-		return EINVAL;
-	}
-
-	/* We'll send you buffers.
-	 */
-	if (d->request_count < 0 || d->request_count > dma->buf_count) {
-		DRM_ERROR("Process %d trying to get %d buffers (of %d max)\n",
-			  DRM_CURRENTPID, d->request_count, dma->buf_count);
-		return EINVAL;
-	}
-
-	WRAP_TEST_WITH_RETURN(dev_priv);
-
-	d->granted_count = 0;
-
-	if (d->request_count) {
-		ret = mga_dma_get_buffers(dev, file_priv, d);
-	}
-
-	return ret;
-}
-
-/**
- * Called just before the module is unloaded.
- */
-int mga_driver_unload(struct drm_device * dev)
-{
-	drm_free(dev->dev_private, sizeof(drm_mga_private_t), DRM_MEM_DRIVER);
-	dev->dev_private = NULL;
-
 	return 0;
 }
 

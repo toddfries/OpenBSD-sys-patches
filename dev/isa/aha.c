@@ -1,4 +1,4 @@
-/*	$OpenBSD: aha.c,v 1.59 2008/09/12 11:14:04 miod Exp $	*/
+/*	$OpenBSD: aha.c,v 1.63 2009/04/14 16:01:04 oga Exp $	*/
 /*	$NetBSD: aha.c,v 1.11 1996/05/12 23:51:23 mycroft Exp $	*/
 
 #undef AHADIAG
@@ -154,7 +154,7 @@ void aha_done(struct aha_softc *, struct aha_ccb *);
 int aha_find(struct isa_attach_args *, struct aha_softc *, int);
 void aha_init(struct aha_softc *);
 void aha_inquire_setup_information(struct aha_softc *);
-void ahaminphys(struct buf *);
+void ahaminphys(struct buf *, struct scsi_link *);
 int aha_scsi_cmd(struct scsi_xfer *);
 int aha_poll(struct aha_softc *, struct scsi_xfer *, int);
 void aha_timeout(void *arg);
@@ -816,7 +816,7 @@ aha_start_ccbs(sc)
 
 		if ((ccb->xs->flags & SCSI_POLL) == 0) {
 			timeout_set(&ccb->xs->stimeout, aha_timeout, ccb);
-			timeout_add(&ccb->xs->stimeout, (ccb->timeout * hz) / 1000);
+			timeout_add_msec(&ccb->xs->stimeout, ccb->timeout);
 		}
 
 		++sc->sc_mbofull;
@@ -1122,10 +1122,10 @@ aha_init(sc)
 	 */
 	size = round_page(sizeof(struct aha_mbx));
 	TAILQ_INIT(&pglist);
-	if (uvm_pglistalloc(size, 0, 0xffffff, PAGE_SIZE, 0, &pglist, 1, 0) ||
-	    uvm_map(kernel_map, &va, size, NULL, UVM_UNKNOWN_OFFSET, 0,
-		UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL, UVM_INH_NONE,
-			UVM_ADV_RANDOM, 0)))
+	if (uvm_pglistalloc(size, 0, 0xffffff, PAGE_SIZE, 0, &pglist, 1,
+	    UVM_PLA_NOWAIT) || uvm_map(kernel_map, &va, size, NULL,
+	    UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL,
+	    UVM_INH_NONE, UVM_ADV_RANDOM, 0)))
 		panic("aha_init: could not allocate mailbox");
 
 	wmbx = (struct aha_mbx *)va;
@@ -1239,10 +1239,8 @@ noinquire:
 }
 
 void
-ahaminphys(bp)
-	struct buf *bp;
+ahaminphys(struct buf *bp, struct scsi_link *sl)
 {
-
 	if (bp->b_bcount > ((AHA_NSEG - 1) << PGSHIFT))
 		bp->b_bcount = ((AHA_NSEG - 1) << PGSHIFT);
 	minphys(bp);
@@ -1271,7 +1269,7 @@ aha_scsi_cmd(xs)
 	 */
 	flags = xs->flags;
 	if ((ccb = aha_get_ccb(sc, flags)) == NULL) {
-		return (TRY_AGAIN_LATER);
+		return (NO_CCB);
 	}
 	ccb->xs = xs;
 	ccb->timeout = xs->timeout;

@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.120 2008/08/18 21:55:01 kettenis Exp $
+#	$OpenBSD: GENERIC,v 1.126 2009/06/01 15:53:46 jsg Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -168,21 +168,22 @@ radio*	at udsbr?		# USB radio
 ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
+run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
+zyd*	at uhub?		# Zydas ZD1211
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 
 # Bluetooth controllers
-#ubt*	at uhub?		# USB Bluetooth
+ubt*	at uhub?		# USB Bluetooth
+bthub*	at ubt?
 
-# Bluetooth bus support
-#bthub*	at ubt?
-
-# Bluetooth HID support
-#bthidev* at bthub?
-#btkbd*	at bthidev?
-#btms*	at bthidev?
-#wskbd*	at btkbd? mux 1
-#wsmouse* at btms? mux 0
+bthidev* at bthub?		# Bluetooth HID support
+btkbd*	at bthidev?
+btms*	at bthidev?
+wskbd*	at btkbd? mux 1
+wsmouse* at btms? mux 0
+btsco*	at bthub?		# Bluetooth audio support
+audio*	at btsco?
 
 sti0	at mainbus0 irq 11	# [H]CRX-{8,24,48}[Z] graphics
 sti0	at phantomas0 irq 11	# builtin graphics on BC*
@@ -325,6 +326,7 @@ eephy*		at mii?		# Marvell 88E1000 Gigabit PHYs
 xmphy*		at mii?		# XaQti XMAC-II PHYs
 rlphy*		at mii?		# Realtek 8139 internal PHYs
 urlphy*		at mii?		# Realtek RTL8150L internal PHY
+ipgphy*		at mii?		# IC Plus IP1000A PHYs
 ukphy*		at mii?		# generic unknown PHYs
 
 # MI devices

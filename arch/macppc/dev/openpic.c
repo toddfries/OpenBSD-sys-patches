@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.51 2008/11/04 14:28:24 drahn Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.53 2009/06/02 21:38:09 drahn Exp $	*/
 
 /*-
  * Copyright (c) 2008 Dale Rahn <drahn@openbsd.org>
@@ -112,6 +112,7 @@ struct openpic_softc {
 int	openpic_match(struct device *parent, void *cf, void *aux);
 void	openpic_attach(struct device *, struct device *, void *);
 void	openpic_do_pending_int(int pcpl);
+void	openpic_do_pending_int_dis(int pcpl, int s);
 void	openpic_collect_preconf_intr(void);
 void	openpic_ext_intr(void);
 
@@ -130,7 +131,7 @@ openpic_read(int reg)
 {
 	char *addr = (void *)(openpic_base + reg);
 
-	asm volatile("eieio");
+	asm volatile("eieio"::: "memory");
 	if (openpic_big_endian)
 		return in32(addr);
 	else
@@ -146,7 +147,7 @@ openpic_write(int reg, u_int val)
 		out32(addr, val);
 	else
 		out32rb(addr, val);
-	asm volatile("eieio");
+	asm volatile("eieio"::: "memory");
 }
 
 static inline int
@@ -447,15 +448,27 @@ openpic_calc_mask()
 void
 openpic_do_pending_int(int pcpl)
 {
-	struct cpu_info *ci = curcpu();
 	int s;
+	s = ppc_intr_disable();
+	openpic_do_pending_int_dis(pcpl, s);
+	ppc_intr_enable(s);
+
+}
+
+/*
+ * This function expect interrupts disabled on entry and exit,
+ * the s argument indicates if interrupts may be enabled during
+ * the processing of off level interrupts, s 'should' always be 1.
+ */
+void
+openpic_do_pending_int_dis(int pcpl, int s)
+{
+	struct cpu_info *ci = curcpu();
 	int loopcount = 0;
 
-	s = ppc_intr_disable();
 	if (ci->ci_iactive & CI_IACTIVE_PROCESSING_SOFT) {
 		/* soft interrupts are being processed, just set ipl/return */
 		openpic_setipl(pcpl);
-		ppc_intr_enable(s);
 		return;
 	}
 
@@ -511,7 +524,6 @@ openpic_do_pending_int(int pcpl)
 	openpic_setipl(pcpl);	/* Don't use splx... we are here already! */
 
 	atomic_clearbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_SOFT);
-	ppc_intr_enable(s);
 }
 
 void
@@ -567,27 +579,32 @@ openpic_send_ipi(struct cpu_info *ci, int id)
 
 #endif
 
+int openpic_irqnest[PPC_MAXPROCS];
+int openpic_irqloop[PPC_MAXPROCS];
 void
 openpic_ext_intr()
 {
 	struct cpu_info *ci = curcpu();
 	int irq;
 	int pcpl;
+	int maxipl = IPL_NONE;
 	struct intrhand *ih;
 	struct intrq *iq;
-	int irqloop = 0;
-	static int irqnest = 0;
 	int spurious;
 
 	pcpl = ci->ci_cpl;
 
+	openpic_irqloop[ci->ci_cpuid] = 0;
 	irq = openpic_read_irq(ci->ci_cpuid);
-	irqnest++;
+	openpic_irqnest[ci->ci_cpuid]++;
 
 	while (irq != 255) {
-		irqloop++;
-		if (irqloop > 20 || irqnest > 3) {
-			printf("irqloop %d irqnest %d\n", irqloop, irqnest);
+		openpic_irqloop[ci->ci_cpuid]++;
+		if (openpic_irqloop[ci->ci_cpuid] > 20 ||
+		    openpic_irqnest[ci->ci_cpuid] > 3) {
+			printf("irqloop %d irqnest %d\n",
+			    openpic_irqloop[ci->ci_cpuid],
+			    openpic_irqnest[ci->ci_cpuid]);
 		}
 #ifdef MULTIPROCESSOR
 		if (irq == IPI_VECTOR_NOP) {
@@ -610,6 +627,8 @@ openpic_ext_intr()
 			printf("invalid interrupt %d lvl %d at %d hw %d\n",
 			    irq, iq->iq_ipl, ci->ci_cpl,
 			    openpic_read(OPENPIC_CPU_PRIORITY(ci->ci_cpuid)));
+		if (iq->iq_ipl > maxipl)
+			maxipl = iq->iq_ipl;
 		splraise(iq->iq_ipl);
 		openpic_eoi(ci->ci_cpuid);
 
@@ -637,10 +656,38 @@ openpic_ext_intr()
 
 		irq = openpic_read_irq(ci->ci_cpuid);
 	}
-	irqnest--;
-	ppc_intr_enable(1);
 
-	splx(pcpl);	/* Process pendings. */
+	if (openpic_irqnest[ci->ci_cpuid] == 1) {
+		openpic_irqloop[ci->ci_cpuid] = 0;
+		/* raise IPL back to max until do_pending will lower it back */
+		openpic_setipl(maxipl);
+		/*
+		 * we must not process pending soft interrupts when nested, can
+		 * cause excessive recursion.
+		 * 
+		 * The loop here is because an interrupt could case a pending
+		 * soft interrupt between the finishing of the
+		 * openpic_do_pending_int, but before ppc_intr_disable
+		 */
+		do {
+			openpic_irqloop[ci->ci_cpuid]++;
+			if (openpic_irqloop[ci->ci_cpuid] > 5) {
+				printf("ext_intr: do_pending loop %d\n",
+				    openpic_irqloop[ci->ci_cpuid]);
+			}
+			if (ci->ci_iactive & CI_IACTIVE_PROCESSING_SOFT) {
+				openpic_setipl(pcpl);
+				/*
+				 * some may be pending but someone else is
+				 * processing them
+				 */
+				break;
+			} else {
+				openpic_do_pending_int_dis(pcpl, 1);
+			}
+		} while (ci->ci_ipending & ppc_smask[pcpl]);
+	}
+	openpic_irqnest[ci->ci_cpuid]--;
 }
 
 void

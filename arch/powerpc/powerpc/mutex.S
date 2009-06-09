@@ -1,4 +1,4 @@
-/*	$OpenBSD: mutex.S,v 1.4 2008/09/18 03:56:25 drahn Exp $	*/
+/*	$OpenBSD: mutex.S,v 1.8 2009/06/02 21:38:10 drahn Exp $	*/
 
 /*
  * Copyright (c) 2007 Dale Rahn
@@ -95,7 +95,7 @@ ENTRY(mtx_leave)
 	beq-	.L_mutex_notlocked
 #endif
 	li	%r4,0
-	lwz	% r5,MTX_OLDCPL(%r3)
+	lwz	%r5,MTX_OLDCPL(%r3)
 	stw	%r4,MTX_OLDCPL(%r3)
 	stw	%r4,MTX_OWNER(%r3)
 	mr	%r3,%r5

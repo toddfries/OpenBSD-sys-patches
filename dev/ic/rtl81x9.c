@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9.c,v 1.61 2008/10/14 18:01:53 naddy Exp $ */
+/*	$OpenBSD: rtl81x9.c,v 1.64 2009/06/02 17:27:39 jsg Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -677,21 +677,18 @@ rl_rxeof(sc)
 
 		if (total_len > wrap) {
 			m = m_devget(rxbufpos, wrap, ETHER_ALIGN, ifp, NULL);
-			if (m == NULL)
-				ifp->if_ierrors++;
-			else {
+			if (m != NULL) {
 				m_copyback(m, wrap, total_len - wrap,
 				    sc->rl_cdata.rl_rx_buf);
-				m = m_pullup(m, sizeof(struct ip));
-				if (m == NULL)
-					ifp->if_ierrors++;
+				if (m->m_pkthdr.len < total_len) {
+					m_freem(m);
+					m = NULL;
+				}
 			}
 			cur_rx = (total_len - wrap + ETHER_CRC_LEN);
 		} else {
 			m = m_devget(rxbufpos, total_len, ETHER_ALIGN, ifp,
 			    NULL);
-			if (m == NULL)
-				ifp->if_ierrors++;
 			cur_rx += total_len + 4 + ETHER_CRC_LEN;
 		}
 
@@ -705,6 +702,7 @@ rl_rxeof(sc)
 			bus_dmamap_sync(sc->sc_dmat, sc->sc_rx_dmamap,
 			    0, sc->sc_rx_dmamap->dm_mapsize,
 			    BUS_DMASYNC_PREREAD);
+			ifp->if_ierrors++;
 			continue;
 		}
 
@@ -1083,7 +1081,7 @@ int rl_ioctl(ifp, command, data)
 {
 	struct rl_softc		*sc = ifp->if_softc;
 	struct ifreq		*ifr = (struct ifreq *) data;
-	struct ifaddr *ifa = (struct ifaddr *)data;
+	struct ifaddr		*ifa = (struct ifaddr *) data;
 	int			s, error = 0;
 
 	s = splnet();
@@ -1103,13 +1101,6 @@ int rl_ioctl(ifp, command, data)
 			break;
 		}
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
-			error = EINVAL;
-		} else if (ifp->if_mtu != ifr->ifr_mtu) {
-			ifp->if_mtu = ifr->ifr_mtu;
-		}
-		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			rl_init(sc);
@@ -1119,28 +1110,18 @@ int rl_ioctl(ifp, command, data)
 		}
 		error = 0;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				rl_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			rl_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
@@ -1462,6 +1443,32 @@ rl_tick(v)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 	timeout_add_sec(&sc->sc_tick_tmo, 1);
+}
+
+int
+rl_detach(struct rl_softc *sc)
+{
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+
+	/* Unhook our tick handler. */
+	timeout_del(&sc->sc_tick_tmo);
+
+	/* Detach any PHYs we might have. */
+	if (LIST_FIRST(&sc->sc_mii.mii_phys) != NULL)
+		mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
+
+	/* Delete any remaining media. */
+	ifmedia_delete_instance(&sc->sc_mii.mii_media, IFM_INST_ANY);
+
+	ether_ifdetach(ifp);
+	if_detach(ifp);
+
+	if (sc->sc_sdhook != NULL)
+		shutdownhook_disestablish(sc->sc_sdhook);
+	if (sc->sc_pwrhook != NULL)
+		powerhook_disestablish(sc->sc_pwrhook);
+
+	return (0);
 }
 
 struct cfdriver rl_cd = {

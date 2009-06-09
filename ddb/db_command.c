@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_command.c,v 1.49 2008/03/23 12:31:57 miod Exp $	*/
+/*	$OpenBSD: db_command.c,v 1.52 2009/06/03 22:09:30 thib Exp $	*/
 /*	$NetBSD: db_command.c,v 1.20 1996/03/30 22:30:05 christos Exp $	*/
 
 /* 
@@ -39,6 +39,7 @@
 #include <sys/msgbuf.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
+#include <sys/buf.h>
 
 #include <uvm/uvm_extern.h>
 #include <machine/db_machdep.h>		/* type definitions */
@@ -296,6 +297,19 @@ db_buf_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 
 /*ARGSUSED*/
 void
+db_bufq_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+{
+	boolean_t full = FALSE;
+
+	if (modif[0] == 'f')
+		full = TRUE;
+				   
+	db_bufq_print((struct bufq *) addr, full, db_printf);
+}
+
+
+/*ARGSUSED*/
+void
 db_map_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 {
         boolean_t full = FALSE;
@@ -383,6 +397,21 @@ db_vnode_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 	vfs_vnode_print((struct vnode *) addr, full, db_printf);
 }
 
+#ifdef NFSCLIENT
+/*ARGSUSED*/
+void     
+db_nfsreq_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+{
+	boolean_t full = FALSE;
+
+	if (modif[0] == 'f')
+		full = TRUE;
+
+	db_nfsreq_print((struct nfsreq *) addr, full, db_printf);
+}
+#endif
+
+
 /*ARGSUSED*/
 void
 db_show_panic_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
@@ -433,6 +462,9 @@ struct db_command db_show_all_cmds[] = {
 	{ "callout",	db_show_callout,	0, NULL },
 	{ "pools",	db_show_all_pools,	0, NULL },
 	{ "mounts",	db_show_all_mounts,	0, NULL },
+#ifdef NFSCLIENT
+	{ "nfsreq",	db_show_all_nfsreqs,	0, NULL },
+#endif
 	{ NULL, 	NULL, 			0, NULL }
 };
 
@@ -440,6 +472,7 @@ struct db_command db_show_cmds[] = {
 	{ "all",	NULL,			0,	db_show_all_cmds },
 	{ "breaks",	db_listbreak_cmd, 	0,	NULL },
 	{ "buf",	db_buf_print_cmd,	0,	NULL },
+	{ "bufq",	db_bufq_print_cmd,	0,	NULL },
 	{ "extents",	db_extent_print_cmd,	0,	NULL },
 	{ "malloc",	db_malloc_print_cmd,	0,	NULL },
 	{ "map",	db_map_print_cmd,	0,	NULL },
@@ -452,6 +485,9 @@ struct db_command db_show_cmds[] = {
 	{ "registers",	db_show_regs,		0,	NULL },
 	{ "uvmexp",	db_uvmexp_print_cmd,	0,	NULL },
 	{ "vnode",	db_vnode_print_cmd,	0,	NULL },
+#ifdef NFSCLIENT
+	{ "nfsreq",	db_nfsreq_print_cmd,	0,	NULL },
+#endif
 	{ "watches",	db_listwatch_cmd, 	0,	NULL },
 	{ NULL,		NULL,			0,	NULL }
 };

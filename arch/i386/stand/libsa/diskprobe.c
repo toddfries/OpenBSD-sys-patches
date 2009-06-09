@@ -1,4 +1,4 @@
-/*	$OpenBSD: diskprobe.c,v 1.29 2007/06/18 22:11:20 krw Exp $	*/
+/*	$OpenBSD: diskprobe.c,v 1.31 2009/05/21 23:45:48 krw Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -236,7 +236,7 @@ cdprobe(void)
 	dip->bios_info.flags |= BDI_GOODLABEL | BDI_EL_TORITO;
 	dip->bios_info.checksum = 0;		 /* just in case */
 	dip->bios_info.bsd_dev =
-	    MAKEBOOTDEV(0, 0, 0, 0xff, RAW_PART);
+	    MAKEBOOTDEV(6, 0, 0, 0, RAW_PART);
 
 	/* Create an imaginary disk label */
 	dip->disklabel.d_secsize = 2048;
@@ -273,7 +273,7 @@ cdprobe(void)
 	dip->disklabel.d_partitions[RAW_PART].p_size = 100;
 	dip->disklabel.d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 
-	dip->disklabel.d_npartitions = RAW_PART + 1;
+	dip->disklabel.d_npartitions = MAXPARTITIONS;
 
 	dip->disklabel.d_magic = DISKMAGIC;
 	dip->disklabel.d_magic2 = DISKMAGIC;

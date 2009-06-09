@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ipw.c,v 1.80 2008/09/03 19:43:59 damien Exp $	*/
+/*	$OpenBSD: if_ipw.c,v 1.85 2009/03/29 21:53:52 sthen Exp $	*/
 
 /*-
  * Copyright (c) 2004-2008
@@ -84,7 +84,7 @@ void		ipw_tx_intr(struct ipw_softc *);
 int		ipw_intr(void *);
 int		ipw_cmd(struct ipw_softc *, uint32_t, void *, uint32_t);
 int		ipw_send_mgmt(struct ieee80211com *, struct ieee80211_node *,
-		    int, int);
+		    int, int, int);
 int		ipw_tx_start(struct ifnet *, struct mbuf *,
 		    struct ieee80211_node *);
 void		ipw_start(struct ifnet *);
@@ -179,7 +179,7 @@ ipw_attach(struct device *parent, struct device *self, void *aux)
 	error = pci_mapreg_map(pa, IPW_PCI_BAR0, PCI_MAPREG_TYPE_MEM |
 	    PCI_MAPREG_MEM_TYPE_32BIT, 0, &memt, &memh, &base, &sc->sc_sz, 0);
 	if (error != 0) {
-		printf(": could not map memory space\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 
@@ -191,7 +191,7 @@ ipw_attach(struct device *parent, struct device *self, void *aux)
 	CSR_WRITE_4(sc, IPW_CSR_INTR_MASK, 0);
 
 	if (pci_intr_map(pa, &ih) != 0) {
-		printf(": could not map interrupt\n");
+		printf(": can't map interrupt\n");
 		return;
 	}
 
@@ -199,7 +199,7 @@ ipw_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_ih = pci_intr_establish(sc->sc_pct, ih, IPL_NET, ipw_intr, sc,
 	    sc->sc_dev.dv_xname);
 	if (sc->sc_ih == NULL) {
-		printf(": could not establish interrupt");
+		printf(": can't establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
@@ -345,7 +345,7 @@ ipw_dma_alloc(struct ipw_softc *sc)
 	error = bus_dmamem_map(sc->sc_dmat, &sc->tbd_seg, nsegs, IPW_TBD_SZ,
 	    (caddr_t *)&sc->tbd_list, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map tx ring DMA memory\n",
+		printf("%s: can't map tx ring DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -380,7 +380,7 @@ ipw_dma_alloc(struct ipw_softc *sc)
 	error = bus_dmamem_map(sc->sc_dmat, &sc->rbd_seg, nsegs, IPW_RBD_SZ,
 	    (caddr_t *)&sc->rbd_list, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map rx ring DMA memory\n",
+		printf("%s: can't map rx ring DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -415,7 +415,7 @@ ipw_dma_alloc(struct ipw_softc *sc)
 	error = bus_dmamem_map(sc->sc_dmat, &sc->status_seg, nsegs,
 	    IPW_STATUS_SZ, (caddr_t *)&sc->status_list, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map status ring DMA memory\n",
+		printf("%s: can't map status ring DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -515,7 +515,7 @@ ipw_dma_alloc(struct ipw_softc *sc)
 		error = bus_dmamap_load(sc->sc_dmat, sbuf->map,
 		    mtod(sbuf->m, void *), MCLBYTES, NULL, BUS_DMA_NOWAIT);
 		if (error != 0) {
-			printf("%s: could not map rx DMA memory\n",
+			printf("%s: can't map rx DMA memory\n",
 			    sc->sc_dev.dv_xname);
 			goto fail;
 		}
@@ -610,7 +610,6 @@ ipw_media_change(struct ifnet *ifp)
 void
 ipw_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 {
-#define N(a)	(sizeof (a) / sizeof (a[0]))
 	struct ipw_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
 	static const struct {
@@ -635,8 +634,8 @@ ipw_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 	val &= 0xf;
 
 	/* convert rate to 802.11 rate */
-	for (i = 0; i < N(rates) && rates[i].val != val; i++);
-	rate = (i < N(rates)) ? rates[i].rate : 0;
+	for (i = 0; i < nitems(rates) && rates[i].val != val; i++);
+	rate = (i < nitems(rates)) ? rates[i].rate : 0;
 
 	imr->ifm_active |= IFM_IEEE80211_11B;
 	imr->ifm_active |= ieee80211_rate2media(ic, rate, IEEE80211_MODE_11B);
@@ -655,7 +654,6 @@ ipw_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 		/* should not get there */
 		break;
 	}
-#undef N
 }
 
 int
@@ -1081,7 +1079,7 @@ ipw_cmd(struct ipw_softc *sc, uint32_t type, void *data, uint32_t len)
 	error = bus_dmamap_load(sc->sc_dmat, sc->cmd_map, &sc->cmd,
 	    sizeof (struct ipw_cmd), NULL, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map command DMA memory\n",
+		printf("%s: can't map command DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		splx(s);
 		return error;
@@ -1117,7 +1115,7 @@ ipw_cmd(struct ipw_softc *sc, uint32_t type, void *data, uint32_t len)
 /* ARGSUSED */
 int
 ipw_send_mgmt(struct ieee80211com *ic, struct ieee80211_node *ni, int type,
-    int arg)
+    int arg1, int arg2)
 {
 	return EOPNOTSUPP;
 }
@@ -1129,10 +1127,10 @@ ipw_tx_start(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211_frame *wh;
 	struct ieee80211_key *k;
+	struct mbuf *m1;
 	struct ipw_soft_bd *sbd;
 	struct ipw_soft_hdr *shdr;
 	struct ipw_soft_buf *sbuf;
-	struct mbuf *mnew;
 	int error, i;
 
 	wh = mtod(m, struct ieee80211_frame *);
@@ -1187,37 +1185,35 @@ ipw_tx_start(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni)
 
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, sbuf->map, m, BUS_DMA_NOWAIT);
 	if (error != 0 && error != EFBIG) {
-		printf("%s: could not map mbuf (error %d)\n",
+		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		m_freem(m);
 		return error;
 	}
 	if (error != 0) {
 		/* too many fragments, linearize */
-
-		MGETHDR(mnew, M_DONTWAIT, MT_DATA);
-		if (mnew == NULL) {
+		MGETHDR(m1, M_DONTWAIT, MT_DATA);
+		if (m1 == NULL) {
 			m_freem(m);
-			return ENOMEM;
+			return ENOBUFS;
 		}
-		M_DUP_PKTHDR(mnew, m);
 		if (m->m_pkthdr.len > MHLEN) {
-			MCLGET(mnew, M_DONTWAIT);
-			if (!(mnew->m_flags & M_EXT)) {
+			MCLGET(m1, M_DONTWAIT);
+			if (!(m1->m_flags & M_EXT)) {
 				m_freem(m);
-				m_freem(mnew);
-				return ENOMEM;
+				m_freem(m1);
+				return ENOBUFS;
 			}
 		}
-		m_copydata(m, 0, m->m_pkthdr.len, mtod(mnew, caddr_t));
+		m_copydata(m, 0, m->m_pkthdr.len, mtod(m1, caddr_t));
+		m1->m_pkthdr.len = m1->m_len = m->m_pkthdr.len;
 		m_freem(m);
-		mnew->m_len = mnew->m_pkthdr.len;
-		m = mnew;
+		m = m1;
 
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, sbuf->map, m,
 		    BUS_DMA_NOWAIT);
 		if (error != 0) {
-			printf("%s: could not map mbuf (error %d)\n",
+			printf("%s: can't map mbuf (error %d)\n",
 			    sc->sc_dev.dv_xname, error);
 			m_freem(m);
 			return error;
@@ -1227,7 +1223,7 @@ ipw_tx_start(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni)
 	error = bus_dmamap_load(sc->sc_dmat, shdr->map, &shdr->hdr,
 	    sizeof (struct ipw_hdr), NULL, BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map header DMA memory (error %d)\n",
+		printf("%s: can't map header DMA memory (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		bus_dmamap_unload(sc->sc_dmat, sbuf->map);
 		m_freem(m);

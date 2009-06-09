@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwnreg.h,v 1.16 2008/11/19 18:52:53 damien Exp $	*/
+/*	$OpenBSD: if_iwnreg.h,v 1.26 2009/05/29 08:25:45 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -20,12 +20,16 @@
 #define IWN_TX_RING_COUNT	256
 #define IWN_TX_RING_LOMARK	192
 #define IWN_TX_RING_HIMARK	224
-#define IWN_RX_RING_COUNT_LOG	8
+#define IWN_RX_RING_COUNT_LOG	6
 #define IWN_RX_RING_COUNT	(1 << IWN_RX_RING_COUNT_LOG)
 
 #define IWN4965_NTXQUEUES	16
 #define IWN5000_NTXQUEUES	20
-#define IWN_SRVC_CHNL		9
+
+#define IWN4965_NDMACHNLS	7
+#define IWN5000_NDMACHNLS	8
+
+#define IWN_SRVC_DMACHNL	9
 
 /* Maximum number of DMA segments for TX. */
 #define IWN_MAX_SCATTER	20
@@ -33,15 +37,17 @@
 /* RX buffers must be large enough to hold a full 4K A-MPDU. */
 #define IWN_RBUF_SIZE	(4 * 1024)
 
+#if defined(__LP64__)
+/* HW supports 36-bit DMA addresses. */
+#define IWN_LOADDR(paddr)	((uint32_t)(paddr))
+#define IWN_HIADDR(paddr)	(((paddr) >> 32) & 0xf)
+#else
+#define IWN_LOADDR(paddr)	(paddr)
+#define IWN_HIADDR(paddr)	(0)
+#endif
+
 /* Base Address Register. */
 #define IWN_PCI_BAR0	PCI_MAPREG_START
-
-/* Possible flags for PCIe Device Control Register (see PCIe 7.8.4) */
-#define PCI_PCIE_DCSR_ENA_NO_SNOOP	(1 << 11)
-
-/* Possible flags for PCIe Link Control Register (see PCIe 7.8.7) */
-#define PCI_PCIE_LCSR_ASPM_L0S	(1 << 0)
-#define PCI_PCIE_LCSR_ASPM_L1	(1 << 1)
 
 /*
  * Control and status registers.
@@ -56,6 +62,7 @@
 #define IWN_HW_REV		0x028
 #define IWN_EEPROM		0x02c
 #define IWN_EEPROM_GP		0x030
+#define IWN_OTP_GP		0x034
 #define IWN_GIO			0x03c
 #define IWN_UCODE_GP1_CLR	0x05c
 #define IWN_LED			0x094
@@ -147,7 +154,10 @@
 #define IWN_HW_IF_CONFIG_MAC_SI		(1 <<  8)
 #define IWN_HW_IF_CONFIG_RADIO_SI	(1 <<  9)
 #define IWN_HW_IF_CONFIG_EEPROM_LOCKED	(1 << 21)
+#define IWN_HW_IF_CONFIG_NIC_READY	(1 << 22)
 #define IWN_HW_IF_CONFIG_HAP_WAKE_L1A	(1 << 23)
+#define IWN_HW_IF_CONFIG_PREPARE_DONE	(1 << 25)
+#define IWN_HW_IF_CONFIG_PREPARE	(1 << 27)
 
 /* Possible flags for registers IWN_PRPH_RADDR/IWN_PRPH_WADDR. */
 #define IWN_PRPH_DWORD	((sizeof (uint32_t) - 1) << 24)
@@ -178,6 +188,9 @@
 #define IWN_HW_REV_TYPE_5350	3
 #define IWN_HW_REV_TYPE_5150	4
 #define IWN_HW_REV_TYPE_5100	5
+#define IWN_HW_REV_TYPE_1000	6
+#define IWN_HW_REV_TYPE_6000	7
+#define IWN_HW_REV_TYPE_6050	8
 
 /* Possible flags for register IWN_GIO_CHICKEN. */
 #define IWN_GIO_CHICKEN_L1A_NO_L0S_RX	(1 << 23)
@@ -267,6 +280,15 @@
 #define IWN_EEPROM_READ_VALID	(1 << 0)
 #define IWN_EEPROM_CMD		(1 << 1)
 
+/* Possible flags for register IWN_EEPROM_GP. */
+#define IWN_EEPROM_GP_IF_OWNER	0x00000180
+
+/* Possible flags for register IWN_OTP_GP. */
+#define IWN_OTP_GP_DEV_SEL_OTP		(1 << 16)
+#define IWN_OTP_GP_RELATIVE_ACCESS	(1 << 17)
+#define IWN_OTP_GP_ECC_CORR_STTS	(1 << 20)
+#define IWN_OTP_GP_ECC_UNCORR_STTS	(1 << 21)
+
 /* Possible flags for register IWN_SCHED_QUEUE_STATUS. */
 #define IWN4965_TXQ_STATUS_ACTIVE	0x0007fc01
 #define IWN4965_TXQ_STATUS_INACTIVE	0x0007fc00
@@ -282,9 +304,11 @@
 
 /* Possible flags for register IWN_APMG_PS. */
 #define IWN_APMG_PS_EARLY_PWROFF_DIS	(1 << 22)
-#define IWN_APMG_PS_PWR_SRC_MASK	(3 << 24)
 #define IWN_APMG_PS_PWR_SRC(x)		((x) << 24)
 #define IWN_APMG_PS_PWR_SRC_VMAIN	0
+#define IWN_APMG_PS_PWR_SRC_VAUX	2
+#define IWN_APMG_PS_PWR_SRC_MASK	IWN_APMG_PS_PWR_SRC(3)
+#define IWN_APMG_PS_RESET_REQ		(1 << 26)
 
 /* Possible flags for IWN_APMG_PCI_STT. */
 #define IWN_APMG_PCI_STT_L1A_DIS	(1 << 11)
@@ -303,29 +327,12 @@ struct iwn_tx_desc {
 	uint8_t		reserved1[3];
 	uint8_t		nsegs;
 	struct {
-		uint32_t	w1;
-		uint32_t	w2;
-		uint32_t	w3;
-	} __packed	segs[IWN_MAX_SCATTER / 2];
+		uint32_t	addr;
+		uint16_t	len;
+	} __packed	segs[IWN_MAX_SCATTER];
 	/* Pad to 128 bytes. */
 	uint32_t	reserved2;
 } __packed;
-
-#define IWN_SET_DESC_NSEGS(d, x)					\
-	(d)->nsegs = (x)
-
-/* Set a segment physical address and length in a TX descriptor. */
-#define IWN_SET_DESC_SEG(d, n, addr, size) do {				\
-	if ((n) & 1) {							\
-		(d)->segs[(n) / 2].w2 |=				\
-		    htole32(((addr) & 0xffff) << 16);			\
-		(d)->segs[(n) / 2].w3 =					\
-		    htole32((((addr) >> 16) & 0xffff) | (size) << 20);	\
-	} else {							\
-		(d)->segs[(n) / 2].w1 = htole32(addr);			\
-		(d)->segs[(n) / 2].w2 = htole32((size) << 4);		\
-	}								\
-} while (0)
 
 struct iwn_rx_status {
 	uint16_t	closed_count;
@@ -433,7 +440,7 @@ struct iwn_rxon {
 	uint8_t		cck_mask;
 	uint16_t	associd;
 	uint32_t	flags;
-#define IWN_RXON_24GHZ	(1 <<  0)
+#define IWN_RXON_24GHZ		(1 <<  0)
 #define IWN_RXON_CCK		(1 <<  1)
 #define IWN_RXON_AUTO		(1 <<  2)
 #define IWN_RXON_SHSLOT		(1 <<  4)
@@ -823,6 +830,7 @@ struct iwn_sensitivity_cmd {
 struct iwn_phy_calib {
 	uint8_t	code;
 #define IWN4965_PHY_CALIB_DIFF_GAIN		 7
+#define IWN5000_PHY_CALIB_DC			 8
 #define IWN5000_PHY_CALIB_LO			 9
 #define IWN5000_PHY_CALIB_TX_IQ			11
 #define IWN5000_PHY_CALIB_CRYSTAL		15
@@ -833,26 +841,27 @@ struct iwn_phy_calib {
 
 	uint8_t	group;
 	uint8_t	ngroups;
-	uint8_t	valid;
+	uint8_t	isvalid;
 } __packed;
 
 struct iwn5000_phy_calib_crystal {
 	uint8_t	code;
 	uint8_t	group;
 	uint8_t	ngroups;
-	uint8_t	valid;
+	uint8_t	isvalid;
 
-	uint8_t	data[2];
+	uint8_t	cap_pin[2];
+	uint8_t	reserved[2];
 } __packed;
 
 struct iwn_phy_calib_gain {
 	uint8_t	code;
 	uint8_t	group;
 	uint8_t	ngroups;
-	uint8_t	valid;
+	uint8_t	isvalid;
 
 	int8_t	gain[3];
-	uint8_t	reserved2;
+	uint8_t	reserved;
 } __packed;
 
 /* Structure for command IWN_CMD_SPECTRUM_MEASUREMENT. */
@@ -1188,8 +1197,8 @@ struct iwn_firmware_hdr {
 
 #define IWN4965_FW_TEXT_MAXSZ	( 96 * 1024)
 #define IWN4965_FW_DATA_MAXSZ	( 40 * 1024)
-#define IWN5000_FW_TEXT_MAXSZ	(128 * 1024)
-#define IWN5000_FW_DATA_MAXSZ	( 48 * 1024)
+#define IWN5000_FW_TEXT_MAXSZ	(256 * 1024)
+#define IWN5000_FW_DATA_MAXSZ	( 80 * 1024)
 #define IWN_FW_BOOT_TEXT_MAXSZ	1024
 #define IWN4965_FWSZ		(IWN4965_FW_TEXT_MAXSZ + IWN4965_FW_DATA_MAXSZ)
 #define IWN5000_FWSZ		IWN5000_FW_TEXT_MAXSZ
@@ -1221,7 +1230,9 @@ struct iwn_firmware_hdr {
 #define IWN5000_EEPROM_BAND5	0x03a
 #define IWN5000_EEPROM_BAND6	0x041
 #define IWN5000_EEPROM_BAND7	0x049
-#define IWN5000_EEPROM_CRYSTAL	0x094
+#define IWN5000_EEPROM_CRYSTAL	0x128
+#define IWN5000_EEPROM_TEMP	0x12a
+#define IWN5000_EEPROM_VOLT	0x12b
 
 /* Possible flags for IWN_EEPROM_RFCFG. */
 #define IWN_RFCFG_TYPE(x)	(((x) >>  0) & 0x3)

@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.183 2008/10/23 17:26:26 deraadt Exp $g
+#	$OpenBSD: GENERIC,v 1.191 2009/06/01 15:53:46 jsg Exp $g
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -130,6 +130,7 @@ urlphy*		at mii?		# Realtek RTL8150L internal PHY
 rgephy*		at mii?		# Realtek 8169S/8110S PHY
 rlphy*		at mii?		# Realtek 8139 internal PHYs
 ciphy*		at mii?		# Cicada CS8201 10/100/1000 copper PHY
+ipgphy*		at mii?		# IC Plus IP1000A PHYs
 ukphy*		at mii?		# generic unknown PHYs
 
 # crypto
@@ -285,6 +286,8 @@ ugen*	at uhub?		# USB Generic driver
 upgt*	at uhub?		# Conexant/Intersil PrismGT SoftMAC USB
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
+run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
+zyd*	at uhub?		# Zydas ZD1211
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 umbg*	at uhub?		# Meinberg Funkuhren USB5131
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
@@ -294,18 +297,20 @@ onewire* at uow?
 uvideo* at uhub?
 video*  at uvideo?
 
+udl*		at uhub?
+wsdisplay*	at udl?
+
 # Bluetooth controllers
-#ubt*	at uhub?		# USB Bluetooth
+ubt*	at uhub?		# USB Bluetooth
+bthub*	at ubt?
 
-# Bluetooth bus support
-#bthub*	at ubt?
-
-# Bluetooth HID support
-#bthidev* at bthub?
-#btkbd*	at bthidev?
-#btms*	at bthidev?
-#wskbd*	at btkbd? mux 1
-#wsmouse* at btms? mux 0
+bthidev* at bthub?		# Bluetooth HID support
+btkbd*	at bthidev?
+btms*	at bthidev?
+wskbd*	at btkbd? mux 1
+wsmouse* at btms? mux 0
+btsco*	at bthub?		# Bluetooth audio support
+audio*	at btsco?
 
 # I2C bus support
 iic*		at kiic?

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.83 2008/10/28 00:05:32 deraadt Exp $	*/
+/*	$OpenBSD: bios.c,v 1.85 2009/04/30 13:47:16 dlg Exp $	*/
 
 /*
  * Copyright (c) 1997-2001 Michael Shalayeff
@@ -52,6 +52,7 @@
 #include <machine/pcb.h>
 #include <machine/biosvar.h>
 #include <machine/apmvar.h>
+#include <machine/mpbiosvar.h>
 #include <machine/smbiosvar.h>
 
 #include <dev/isa/isareg.h>
@@ -64,6 +65,7 @@
 
 #include "apm.h"
 #include "acpi.h"
+#include "mpbios.h"
 #include "pcibios.h"
 #include "pci.h"
 
@@ -108,6 +110,9 @@ struct smbios_entry smbios_entry;
 void		*bios_smpinfo;
 #endif
 bios_bootmac_t	*bios_bootmac;
+#ifdef DDB
+extern int	db_console;
+#endif
 
 void		smbios_info(char*);
 
@@ -361,6 +366,19 @@ biosattach(struct device *parent, struct device *self, void *aux)
 	}
 #endif
 
+#if NMPBIOS > 0
+	if (mpbios_probe(self)) {
+		struct bios_attach_args ba;
+
+		memset(&ba, 0, sizeof(ba));
+		ba.ba_name = "mpbios";
+		ba.ba_iot = I386_BUS_SPACE_IO;
+		ba.ba_memt = I386_BUS_SPACE_MEM;
+
+		config_found(self, &ba, bios_print);
+	}
+#endif
+
 #if NPCI > 0 && NPCIBIOS > 0
 	if (!(flags & BIOSF_PCIBIOS)) {
 		struct bios_attach_args ba;
@@ -435,6 +453,7 @@ void
 bios_getopt()
 {
 	bootarg_t *q;
+	bios_ddb_t *bios_ddb;
 
 #ifdef BIOS_DEBUG
 	printf("bootargv:");
@@ -512,6 +531,12 @@ bios_getopt()
 		case BOOTARG_BOOTMAC:
 			bios_bootmac = (bios_bootmac_t *)q->ba_arg;
 			break;
+
+		case BOOTARG_DDB:
+			bios_ddb = (bios_ddb_t *)q->ba_arg;
+#ifdef DDB
+			db_console = bios_ddb->db_console;
+#endif
 
 		default:
 #ifdef BIOS_DEBUG

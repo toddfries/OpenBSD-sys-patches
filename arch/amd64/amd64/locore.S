@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.30 2008/11/12 21:42:43 weingart Exp $	*/
+/*	$OpenBSD: locore.S,v 1.38 2009/06/06 23:45:35 guenther Exp $	*/
 /*	$NetBSD: locore.S,v 1.13 2004/03/25 18:33:17 drochner Exp $	*/
 
 /*
@@ -132,19 +132,9 @@
 
 #include <machine/asm.h>
 
-#define SET_CURPROC(proc,cpu)			\
-	movq	CPUVAR(SELF),cpu	;	\
-	movq	proc,CPUVAR(CURPROC)      ;	\
-	movq	cpu,P_CPU(proc)
-
-#define GET_CURPCB(reg)			movq	CPUVAR(CURPCB),reg      
-#define SET_CURPCB(reg)			movq	reg,CPUVAR(CURPCB)
-
-
 /* XXX temporary kluge; these should not be here */
 /* Get definitions for IOM_BEGIN, IOM_END, and IOM_SIZE */
 #include <dev/isa/isareg.h>
-
 
 /*
  * Initialization
@@ -209,7 +199,7 @@ _C_LABEL(biosextmem):	.long	REALEXTMEM
 	.globl	gdt64
 
 gdt64:
-	.word	gdt64_end-gdt64_start
+	.word	gdt64_end-gdt64_start-1
 	.quad	_RELOC(gdt64_start)
 .align 64
 
@@ -715,15 +705,117 @@ ENTRY(longjmp)
 /*****************************************************************************/
 
 /*
- * The following primitives manipulate the run queues.
- * _whichqs tells which of the 32 queues _qs
- * have processes in them.  Setrq puts processes into queues, Remrq
- * removes them from queues.  The running process is on no queue,
- * other processes are on a queue related to p->p_pri, divided by 4
- * actually to shrink the 0-127 range of priorities into the 32 available
- * queues.
+ * int cpu_switchto(struct proc *old, struct proc *new)
+ * Switch from "old" proc to "new".
  */
-	.globl	_C_LABEL(uvmexp),_C_LABEL(panic)
+ENTRY(cpu_switchto)
+	pushq	%rbx
+	pushq	%rbp
+	pushq	%r12
+	pushq	%r13
+	pushq	%r14
+	pushq	%r15
+
+#ifdef DIAGNOSTIC
+	xorq	%rax,%rax
+	cmpq	%rax,P_WCHAN(%rsi)
+	jne	_C_LABEL(switch_error2)
+	cmpb	$SRUN,P_STAT(%rsi)
+	jne	_C_LABEL(switch_error3)
+#endif
+
+	/* No interrupts while loading new state. */
+	cli
+
+	/* Record new proc. */
+	movb	$SONPROC,P_STAT(%rsi)	# p->p_stat = SONPROC
+	movq	%rsi, CPUVAR(CURPROC)
+
+	/* If old proc exited, don't bother saving state. */
+	testq	%rdi,%rdi
+	jz	switch_exited
+
+	/* Save stack pointers. */
+	movq	P_ADDR(%rdi),%r13
+	movq	%rsp,PCB_RSP(%r13)
+	movq	%rbp,PCB_RBP(%r13)
+switch_exited:
+	/*
+	 * Restore saved context.
+	 *
+	 * Registers:
+	 *   %rax, %rcx, %rdx - scratch
+	 *   %r13 - new pcb
+	 */
+
+	/* Restore stack pointers. */
+	movq	P_ADDR(%rsi),%r13
+	movq	PCB_RSP(%r13),%rsp
+	movq	PCB_RBP(%r13),%rbp
+
+	movq	%r13, CPUVAR(CURPCB)
+
+	/* Load TSS info. */
+	movq    CPUVAR(GDT),%rax
+	movl	P_MD_TSS_SEL(%rsi),%edx
+
+	/* Switch TSS. Reset "task busy" flag before */
+	andl	$~0x0200,4(%rax,%rdx, 1)
+	ltr	%dx
+
+	call	_C_LABEL(pmap_switch)
+	/* %rsi and %rdi no longer valid */
+
+	/* Restore cr0 (including FPU state). */
+	movl	PCB_CR0(%r13),%ecx
+#ifdef MULTIPROCESSOR
+	movq	PCB_FPCPU(%r13),%r8
+	cmpq	CPUVAR(SELF),%r8
+	jz	1f
+	orl	$CR0_TS,%ecx
+1:
+#endif
+	movq	%rcx,%cr0
+
+	/* Interrupts are okay again. */
+	sti
+
+	popq	%r15
+	popq	%r14
+	popq	%r13
+	popq	%r12
+	popq	%rbp
+	popq	%rbx
+	ret
+
+ENTRY(cpu_idle_enter)
+	movq	_C_LABEL(cpu_idle_enter_fcn),%rax
+	cmpq	$0,%rax
+	je	1f
+	jmpq	*%rax
+1:
+	ret
+
+ENTRY(cpu_idle_cycle)
+	movq	_C_LABEL(cpu_idle_cycle_fcn),%rax
+	cmpq	$0,%rax
+	je	1f
+	call	*%rax
+	ret
+1:
+	sti
+	hlt
+	ret
+
+ENTRY(cpu_idle_leave)
+	movq	_C_LABEL(cpu_idle_leave_fcn),%rax
+	cmpq	$0,%rax
+	je	1f
+	jmpq	*%rax
+1:
+	ret
+
+	.globl	_C_LABEL(panic)
 
 #ifdef DIAGNOSTIC
 NENTRY(switch_error1)
@@ -742,141 +834,6 @@ NENTRY(switch_error3)
 	/* NOTREACHED */
 1:	.asciz	"cpu_switch 3"
 #endif /* DIAGNOSTIC */
-
-/*
- * int cpu_switchto(struct proc *old, struct proc *new)
- * Switch from "old" proc to "new".
- */
-ENTRY(cpu_switchto)
-	pushq	%rbx
-	pushq	%rbp
-	pushq	%r12
-	pushq	%r13
-	pushq	%r14
-	pushq	%r15
-
-	movq	%rdi, %r13
-	movq	%rsi, %r12
-
-#ifdef DIAGNOSTIC
-	xorq	%rax,%rax
-	cmpq	%rax,P_WCHAN(%r12)
-	jne	_C_LABEL(switch_error2)
-	cmpb	$SRUN,P_STAT(%r12)
-	jne	_C_LABEL(switch_error3)
-#endif
-
-	/* Record new proc. */
-	movb	$SONPROC,P_STAT(%r12)	# p->p_stat = SONPROC
-	SET_CURPROC(%r12,%rcx)
-
-	/* If old proc exited, don't bother. */
-	testq	%r13,%r13
-	jz	switch_exited
-
-	/*
-	 * Save old context.
-	 *
-	 * Registers:
-	 *   %rax, %rcx - scratch
-	 *   %r13 - old proc, then old pcb
-	 *   %r12 - new proc
-	 */
-
-	movq	%r13,%rdi
-	call	pmap_deactivate
-
-	movq	P_ADDR(%r13),%r13
-
-	/* Save stack pointers. */
-	movq	%rsp,PCB_RSP(%r13)
-	movq	%rbp,PCB_RBP(%r13)
-
-switch_exited:
-	/*
-	 * Restore saved context.
-	 *
-	 * Registers:
-	 *   %rax, %rcx, %rdx - scratch
-	 *   %r13 - new pcb
-	 *   %r12 - new process
-	 */
-
-	/* No interrupts while loading new state. */
-	cli
-	movq	P_ADDR(%r12),%r13
-
-	/* Restore stack pointers. */
-	movq	PCB_RSP(%r13),%rsp
-	movq	PCB_RBP(%r13),%rbp
-
-#if 0
-	/* Don't bother with the rest if switching to a system process. */
-	testl	$P_SYSTEM,P_FLAG(%r12)
-	jnz	switch_restored
-#endif
-
-	/* Load TSS info. */
-#ifdef MULTIPROCESSOR
-	movq    CPUVAR(GDT),%rax
-#else   
-	movq	_C_LABEL(gdtstore)(%rip),%rax
-#endif
-	movl	P_MD_TSS_SEL(%r12),%edx
-
-	/* Switch TSS. Reset "task busy" flag before */
-	andl	$~0x0200,4(%rax,%rdx, 1)
-	ltr	%dx
-
-	movq	%r12,%rdi
-	call	_C_LABEL(pmap_activate)
-
-#if 0
-switch_restored:
-#endif
-	/* Restore cr0 (including FPU state). */
-	movl	PCB_CR0(%r13),%ecx
-#ifdef MULTIPROCESSOR
-	movq	PCB_FPCPU(%r13),%r8
-	cmpq	CPUVAR(SELF),%r8
-	jz	1f
-	orl	$CR0_TS,%ecx
-1:
-#endif
-	movq	%rcx,%cr0
-
-	SET_CURPCB(%r13)
-
-	/* Interrupts are okay again. */
-	sti
-
-switch_return:
-
-#if 0
-	/* Violation of lock ordering, since we're holding the sched_lock */
-	movl	$IPL_NONE,%edi
-	call	_C_LABEL(Xspllower)
-	movl	$IPL_HIGH,CPUVAR(ILEVEL)
-#endif
-
-	popq	%r15
-	popq	%r14
-	popq	%r13
-	popq	%r12
-	popq	%rbp
-	popq	%rbx
-	ret
-
-ENTRY(cpu_idle_enter)
-	ret
-
-ENTRY(cpu_idle_cycle)
-	hlt
-	ret
-
-ENTRY(cpu_idle_leave)
-	ret
-
 
 /*
  * savectx(struct pcb *pcb);
@@ -1109,3 +1066,4 @@ ENTRY(acpi_release_global_lock)
 	andl	$1, %eax
 	ret
 #endif
+

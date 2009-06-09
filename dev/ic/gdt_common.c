@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdt_common.c,v 1.42 2007/11/11 14:03:35 krw Exp $	*/
+/*	$OpenBSD: gdt_common.c,v 1.45 2009/02/16 21:19:06 miod Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000, 2003 Niklas Hallqvist.  All rights reserved.
@@ -714,7 +714,7 @@ gdt_scsi_cmd(struct scsi_xfer *xs)
 			 */
 			if (ccb == NULL) {
 				splx(s);
-				return (TRY_AGAIN_LATER);
+				return (NO_CCB);
 			}
 
 			ccb->gc_blockno = blockno;
@@ -1189,7 +1189,7 @@ gdt_intr(void *arg)
 }
 
 void
-gdtminphys(struct buf *bp)
+gdtminphys(struct buf *bp, struct scsi_link *sl)
 {
 	GDT_DPRINTF(GDT_D_MISC, ("gdtminphys(0x%x) ", bp));
 
@@ -1374,16 +1374,14 @@ gdt_start_ccbs(struct gdt_softc *sc)
 		if (gdt_exec_ccb(ccb) == 0) {
 			ccb->gc_flags |= GDT_GCF_WATCHDOG;
 			timeout_set(&ccb->gc_xs->stimeout, gdt_watchdog, ccb);
-			timeout_add(&xs->stimeout,
-			    (GDT_WATCH_TIMEOUT * hz) / 1000);
+			timeout_add_msec(&xs->stimeout, GDT_WATCH_TIMEOUT);
 			break;
 		}
 		TAILQ_REMOVE(&sc->sc_ccbq, ccb, gc_chain);
 
 		if ((xs->flags & SCSI_POLL) == 0) {
 			timeout_set(&ccb->gc_xs->stimeout, gdt_timeout, ccb);
-			timeout_add(&xs->stimeout,
-			    (ccb->gc_timeout * hz) / 1000);
+			timeout_add_msec(&xs->stimeout, ccb->gc_timeout);
 		}
 	}
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: macintr.c,v 1.34 2008/09/18 03:56:25 drahn Exp $	*/
+/*	$OpenBSD: macintr.c,v 1.36 2009/06/02 21:38:09 drahn Exp $	*/
 
 /*-
  * Copyright (c) 2008 Dale Rahn <drahn@openbsd.org>
@@ -471,7 +471,7 @@ macintr_do_pending_int()
 {
 	struct cpu_info *ci = curcpu();
 	int pcpl = ci->ci_cpl; /* XXX */
-	int s, s2;
+	int s;
 	s = ppc_intr_disable();
 	if (ci->ci_iactive & CI_IACTIVE_PROCESSING_SOFT) {
 		ppc_intr_enable(s);
@@ -482,7 +482,6 @@ macintr_do_pending_int()
 	do {
 		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTTTY)) &&  (pcpl < IPL_SOFTTTY)) {
 			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTTTY);
-			s2 = ci->ci_cpl;
 			ci->ci_cpl = IPL_SOFTTTY;
 			ppc_intr_enable(1);
 			KERNEL_LOCK();

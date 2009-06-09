@@ -1,7 +1,6 @@
-/*	$OpenBSD: magmareg.h,v 1.9 2004/11/02 21:16:10 miod Exp $	*/
+/*	$OpenBSD: magmareg.h,v 1.11 2009/04/10 20:53:51 miod Exp $	*/
 
-/* magmareg.h
- *
+/*-
  *  Copyright (c) 1998 Iain Hibbert
  *  All rights reserved.
  *
@@ -13,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Iain Hibbert
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -29,7 +23,6 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
  */
 
 /*  The mapping of minor device number -> card and port is done as
@@ -117,7 +110,7 @@ struct magma_softc {
 	struct mbpp_softc *ms_mbpp;
 
 	struct intrhand ms_hardint;	/* hard interrupt handler */
-	struct intrhand ms_softint;	/* soft interrupt handler */
+	void	*ms_softint;		/* soft interrupt handler */
 };
 
 #define MTTY_RBUF_SIZE		(2 * 512)
@@ -198,7 +191,7 @@ void cd1400_enable_transmitter(struct cd1400 *, int);
 int magma_match(struct device *, void *, void *);
 void magma_attach(struct device *, struct device *, void *);
 int magma_hard(void *);
-int magma_soft(void *);
+void magma_soft(void *);
 
 int mtty_match(struct device *, void *, void *);
 void mtty_attach(struct device *, struct device *, void *);

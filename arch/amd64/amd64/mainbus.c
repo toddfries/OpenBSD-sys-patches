@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.14 2007/12/05 19:17:14 deraadt Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.19 2009/04/21 19:18:09 kettenis Exp $	*/
 /*	$NetBSD: mainbus.c,v 1.1 2003/04/26 18:39:29 fvdl Exp $	*/
 
 /*
@@ -47,10 +47,10 @@
 #include "acpi.h"
 #include "ipmi.h"
 #include "bios.h"
+#include "mpbios.h"
 
 #include <machine/cpuvar.h>
 #include <machine/i82093var.h>
-#include <machine/mpbiosvar.h>
 
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
@@ -107,7 +107,7 @@ struct isabus_attach_args mba_iba = {
 };
 #endif
 
-#if defined(MPBIOS) || defined(MPACPI)
+#if NMPBIOS > 0 || NACPI > 0
 struct mp_bus *mp_busses;
 int mp_nbus;
 struct mp_intr_map *mp_intrs;
@@ -142,16 +142,9 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 #if NPCI > 0
 	union mainbus_attach_args	mba;
 #endif
-#ifdef MPBIOS
-	int				mpbios_present = 0;
-#endif
 	extern void			(*setperf_setup)(struct cpu_info *);
 
 	printf("\n");
-
-#if NPCI > 0
-	pci_mode = pci_mode_detect();
-#endif
 
 #if NBIOS > 0
 	{
@@ -171,16 +164,6 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 		if (ipmi_probe(&mba.mba_iaa))
 			config_found(self, &mba.mba_iaa, mainbus_print);
 	}
-#endif
-
-#ifdef MPBIOS
-	mpbios_present = mpbios_probe(self);
-#endif
-
-#ifdef MPBIOS
-	if (mpbios_present)
-		mpbios_scan(self);
-	else
 #endif
 
 	if ((cpu_info_primary.ci_flags & CPUF_PRESENT) == 0) {
@@ -208,15 +191,18 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 #endif
 
 #if NPCI > 0
-	if (pci_mode != 0) {
+	{
+		pci_init_extents();
+
+		bzero(&mba.mba_pba, sizeof(mba.mba_pba));
 		mba.mba_pba.pba_busname = "pci";
 		mba.mba_pba.pba_iot = X86_BUS_SPACE_IO;
 		mba.mba_pba.pba_memt = X86_BUS_SPACE_MEM;
 		mba.mba_pba.pba_dmat = &pci_bus_dma_tag;
+		mba.mba_pba.pba_ioex = pciio_ex;
+		mba.mba_pba.pba_memex = pcimem_ex;
 		mba.mba_pba.pba_domain = pci_ndomains++;
 		mba.mba_pba.pba_bus = 0;
-		mba.mba_pba.pba_bridgetag = NULL;
-		mba.mba_pba.pba_pc = NULL;
 		config_found(self, &mba.mba_pba, mainbus_print);
 	}
 #endif

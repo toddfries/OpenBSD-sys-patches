@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ie.c,v 1.36 2008/10/02 20:21:13 brad Exp $ */
+/*	$OpenBSD: if_ie.c,v 1.38 2009/03/01 21:37:41 miod Exp $ */
 
 /*-
  * Copyright (c) 1999 Steve Murphree, Jr. 
@@ -488,13 +488,9 @@ ieattach(parent, self, aux)
 	case BUS_PCCTWO:
 		pcctwointr_establish(PCC2V_IE, &sc->sc_ih, self->dv_xname);
 		switch (cputyp) {
-#ifdef MVME172
-		case CPU_172:
-#endif 
 #ifdef MVME177
+		case CPU_176:
 		case CPU_177:
-#endif 
-#if defined(MVME172) || defined(MVME177)
 			/* no snooping on 68060 */
 			sys_pcc2->pcc2_ieirq = pri | PCC2_SC_INHIBIT |
 			    PCC2_IRQ_IEN | PCC2_IRQ_ICLR;
@@ -1806,7 +1802,6 @@ ieioctl(ifp, cmd, data)
 {
 	struct ie_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	struct ifreq *ifr = (struct ifreq *)data;
 	int s, error = 0;
 
 	s = splnet();
@@ -1861,25 +1856,14 @@ ieioctl(ifp, cmd, data)
 #endif
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom):
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				mc_reset(sc);
-			error = 0;
-		}
-		break;
-
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			mc_reset(sc);
+		error = 0;
 	}
 
 	splx(s);

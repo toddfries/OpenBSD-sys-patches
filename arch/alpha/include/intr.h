@@ -1,4 +1,4 @@
-/* $OpenBSD: intr.h,v 1.29 2008/06/26 05:42:08 ray Exp $ */
+/* $OpenBSD: intr.h,v 1.33 2009/03/25 21:41:41 miod Exp $ */
 /* $NetBSD: intr.h,v 1.26 2000/06/03 20:47:41 thorpej Exp $ */
 
 /*-
@@ -63,6 +63,7 @@
 
 #include <sys/evcount.h>
 #include <sys/lock.h>
+#include <sys/mutex.h>
 #include <sys/queue.h>
 #include <machine/atomic.h>
 
@@ -118,10 +119,10 @@ struct scbvec {
 #define	IPL_CLOCK	ALPHA_PSL_IPL_CLOCK
 #define	IPL_HIGH	ALPHA_PSL_IPL_HIGH
 
-#define	IPL_SOFTSERIAL	-1	/* serial software interrupts */
-#define	IPL_SOFTNET	-2	/* network software interrupts */
-#define	IPL_SOFTCLOCK	-3	/* clock software interrupts */
-#define	IPL_SOFT	-4	/* other software interrupts */
+#define	IPL_SOFTSERIAL	0	/* serial software interrupts */
+#define	IPL_SOFTCLOCK	1	/* clock software interrupts */
+#define	IPL_SOFTNET	2	/* network software interrupts */
+#define	IPL_SOFT	3	/* other software interrupts */
 
 #define	IST_UNUSABLE	-1	/* interrupt cannot be used */
 #define	IST_NONE	0	/* none (dummy) */
@@ -129,10 +130,10 @@ struct scbvec {
 #define	IST_EDGE	2	/* edge-triggered */
 #define	IST_LEVEL	3	/* level-triggered */
 
-#define SI_SOFTSERIAL	0
-#define SI_SOFTNET	1
-#define SI_SOFTCLOCK	2
-#define SI_SOFT		3
+#define SI_SOFT		0
+#define SI_SOFTCLOCK	1
+#define SI_SOFTNET	2
+#define SI_SOFTSERIAL	3
 #define	SI_NSOFT	4
 
 #ifdef	_KERNEL
@@ -152,8 +153,10 @@ void splassert_check(int, const char *);
 			splassert_check(__wantipl, __func__);		\
 		}							\
 	} while (0)
+#define	splsoftassert(wantipl)	splassert(IPL_SOFTINT)
 #else
 #define	splassert(wantipl)	do { /* nothing */ } while (0)
+#define	splsoftassert(wantipl)	do { /* nothing */ } while (0)
 #endif
 
 /* IPL-lowering/restoring macros */
@@ -251,38 +254,20 @@ struct alpha_soft_intrhand {
 struct alpha_soft_intr {
 	TAILQ_HEAD(, alpha_soft_intrhand)
 		softintr_q;
-	struct simplelock softintr_slock;
+	struct mutex softintr_mtx;
 	unsigned long softintr_siq;
 };
 
+void	 softintr_disestablish(void *);
+void	 softintr_dispatch(void);
 void	*softintr_establish(int, void (*)(void *), void *);
-void	softintr_disestablish(void *);
-void	softintr_init(void);
-void	softintr_dispatch(void);
-
-#define	softintr_schedule(arg)						\
-do {									\
-	struct alpha_soft_intrhand *__sih = (arg);			\
-	struct alpha_soft_intr *__si = __sih->sih_intrhead;		\
-	int __s;							\
-									\
-	__s = splhigh();						\
-	simple_lock(&__si->softintr_slock);				\
-	if (__sih->sih_pending == 0) {					\
-		TAILQ_INSERT_TAIL(&__si->softintr_q, __sih, sih_q);	\
-		__sih->sih_pending = 1;					\
-		setsoft(__si->softintr_siq);				\
-	}								\
-	simple_unlock(&__si->softintr_slock);				\
-	splx(__s);							\
-} while (0)
+void	 softintr_init(void);
+void	 softintr_schedule(void *);
 
 /* XXX For legacy software interrupts. */
 extern struct alpha_soft_intrhand *softnet_intrhand;
-extern struct alpha_soft_intrhand *softclock_intrhand;
 
 #define	setsoftnet()	softintr_schedule(softnet_intrhand)
-#define	setsoftclock()	softintr_schedule(softclock_intrhand)
 
 struct alpha_shared_intr *alpha_shared_intr_alloc(unsigned int);
 int	alpha_shared_intr_dispatch(struct alpha_shared_intr *,

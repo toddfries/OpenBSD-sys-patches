@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.55 2008/08/18 23:19:29 miod Exp $ */
+/*	$OpenBSD: conf.c,v 1.57 2009/06/03 14:45:53 jj Exp $ */
 /*	$NetBSD: conf.c,v 1.44 1999/10/27 16:38:54 ragge Exp $	*/
 
 /*-
@@ -342,9 +342,9 @@ cdev_decl(ii);
 #include "ss.h"
 #include "uk.h"
 
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 
 #include "wsdisplay.h"
@@ -364,7 +364,7 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NHP,hp),		/* 4: Massbuss disk */
 	cdev_notdef(),			/* 5 */
 	cdev_plotter_init(NVP,vp),	/* 6: Versatec plotter */
-	cdev_swap_init(1,sw),		/* 7 */
+	cdev_notdef(),			/* 7 was /dev/drum */
 	cdev_cnstore_init(NCFL,cfl),	/* 8: 11/780 console floppy */
 	cdev_disk_init(NRA,ra),		/* 9: MSCP disk interface */
 	cdev_plotter_init(NVA,va),	/* 10: Benson-Varian plotter */
@@ -431,8 +431,8 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NRY,ry),		/* 71: VS floppy */
 	cdev_bio_init(NBIO,bio),	/* 72: ioctl tunnel */
 	cdev_disk_init(NRAID,raid),	/* 73: RAIDframe disk driver */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 74: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 74: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 74 */
 #endif

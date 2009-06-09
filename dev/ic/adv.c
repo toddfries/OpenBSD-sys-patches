@@ -1,4 +1,4 @@
-/*	$OpenBSD: adv.c,v 1.20 2008/09/12 11:14:04 miod Exp $	*/
+/*	$OpenBSD: adv.c,v 1.24 2009/02/16 21:19:06 miod Exp $	*/
 /*	$NetBSD: adv.c,v 1.6 1998/10/28 20:39:45 dante Exp $	*/
 
 /*
@@ -62,9 +62,6 @@
 /******************************************************************************/
 
 
-static void adv_enqueue(ASC_SOFTC *, struct scsi_xfer *, int);
-static struct scsi_xfer *adv_dequeue(ASC_SOFTC *);
-
 static int adv_alloc_ccbs(ASC_SOFTC *);
 static int adv_create_ccbs(ASC_SOFTC *, ADV_CCB *, int);
 static void adv_free_ccb(ASC_SOFTC *, ADV_CCB *);
@@ -77,7 +74,7 @@ static void adv_start_ccbs(ASC_SOFTC *);
 static u_int8_t *adv_alloc_overrunbuf(char *dvname, bus_dma_tag_t);
 
 static int adv_scsi_cmd(struct scsi_xfer *);
-static void advminphys(struct buf *);
+static void advminphys(struct buf *, struct scsi_link *);
 static void adv_narrow_isr_callback(ASC_SOFTC *, ASC_QDONE_INFO *);
 
 static int adv_poll(ASC_SOFTC *, struct scsi_xfer *, int);
@@ -114,53 +111,6 @@ struct scsi_device adv_dev =
 
 #define ADV_ABORT_TIMEOUT       2000	/* time to wait for abort (mSec) */
 #define ADV_WATCH_TIMEOUT       1000	/* time to wait for watchdog (mSec) */
-
-
-/******************************************************************************/
-/*                            scsi_xfer queue routines                      */
-/******************************************************************************/
-
-
-/*
- * Insert a scsi_xfer into the software queue.  We overload xs->free_list
- * to avoid having to allocate additional resources (since we're used
- * only during resource shortages anyhow.
- */
-static void
-adv_enqueue(sc, xs, infront)
-	ASC_SOFTC      *sc;
-	struct scsi_xfer *xs;
-	int             infront;
-{
-
-	if (infront || LIST_EMPTY(&sc->sc_queue)) {
-		if (LIST_EMPTY(&sc->sc_queue))
-			sc->sc_queuelast = xs;
-		LIST_INSERT_HEAD(&sc->sc_queue, xs, free_list);
-		return;
-	}
-	LIST_INSERT_AFTER(sc->sc_queuelast, xs, free_list);
-	sc->sc_queuelast = xs;
-}
-
-
-/*
- * Pull a scsi_xfer off the front of the software queue.
- */
-static struct scsi_xfer *
-adv_dequeue(sc)
-	ASC_SOFTC      *sc;
-{
-	struct scsi_xfer *xs;
-
-	xs = LIST_FIRST(&sc->sc_queue);
-	LIST_REMOVE(xs, free_list);
-
-	if (LIST_EMPTY(&sc->sc_queue))
-		sc->sc_queuelast = NULL;
-
-	return (xs);
-}
 
 
 /******************************************************************************/
@@ -370,15 +320,14 @@ adv_start_ccbs(sc)
 		if (AscExeScsiQueue(sc, &ccb->scsiq) == ASC_BUSY) {
 			ccb->flags |= CCB_WATCHDOG;
 			timeout_set(&xs->stimeout, adv_watchdog, ccb);
-			timeout_add(&xs->stimeout,
-				(ADV_WATCH_TIMEOUT * hz) / 1000);
+			timeout_add_msec(&xs->stimeout, ADV_WATCH_TIMEOUT);
 			break;
 		}
 		TAILQ_REMOVE(&sc->sc_waiting_ccb, ccb, chain);
 
 		if ((ccb->xs->flags & SCSI_POLL) == 0) {
 			timeout_set(&xs->stimeout, adv_timeout, ccb);
-			timeout_add(&xs->stimeout, (ccb->timeout * hz) / 1000);
+			timeout_add_msec(&xs->stimeout, ccb->timeout);
 		}
 	}
 }
@@ -586,7 +535,6 @@ adv_attach(sc)
 
 	TAILQ_INIT(&sc->sc_free_ccb);
 	TAILQ_INIT(&sc->sc_waiting_ccb);
-	LIST_INIT(&sc->sc_queue);
 
 
 	/*
@@ -616,10 +564,8 @@ adv_attach(sc)
 
 
 static void
-advminphys(bp)
-	struct buf     *bp;
+advminphys(struct buf *bp, struct scsi_link *sl)
 {
-
 	if (bp->b_bcount > ((ASC_MAX_SG_LIST - 1) * PAGE_SIZE))
 		bp->b_bcount = ((ASC_MAX_SG_LIST - 1) * PAGE_SIZE);
 	minphys(bp);
@@ -639,44 +585,8 @@ adv_scsi_cmd(xs)
 	bus_dma_tag_t   dmat = sc->sc_dmat;
 	ADV_CCB        *ccb;
 	int             s, flags, error, nsegs;
-	int             fromqueue = 1, dontqueue = 0;
-
 
 	s = splbio();		/* protect the queue */
-
-	/*
-         * If we're running the queue from adv_done(), we've been
-         * called with the first queue entry as our argument.
-         */
-	if (xs == LIST_FIRST(&sc->sc_queue)) {
-		xs = adv_dequeue(sc);
-		fromqueue = 1;
-	} else {
-
-		/* Polled requests can't be queued for later. */
-		dontqueue = xs->flags & SCSI_POLL;
-
-		/*
-                 * If there are jobs in the queue, run them first.
-                 */
-		if (!LIST_EMPTY(&sc->sc_queue)) {
-			/*
-                         * If we can't queue, we have to abort, since
-                         * we have to preserve order.
-                         */
-			if (dontqueue) {
-				splx(s);
-				return (TRY_AGAIN_LATER);
-			}
-			/*
-                         * Swap with the first queue entry.
-                         */
-			adv_enqueue(sc, xs, 0);
-			xs = adv_dequeue(sc);
-			fromqueue = 1;
-		}
-	}
-
 
 	/*
          * get a ccb to use. If the transfer
@@ -686,20 +596,8 @@ adv_scsi_cmd(xs)
 
 	flags = xs->flags;
 	if ((ccb = adv_get_ccb(sc, flags)) == NULL) {
-		/*
-                 * If we can't queue, we lose.
-                 */
-		if (dontqueue) {
-			splx(s);
-			return (TRY_AGAIN_LATER);
-		}
-		/*
-                 * Stuff ourselves into the queue, in front
-                 * if we came off in the first place.
-                 */
-		adv_enqueue(sc, xs, fromqueue);
 		splx(s);
-		return (SUCCESSFULLY_QUEUED);
+		return (NO_CCB);
 	}
 	splx(s);		/* done playing with the queue */
 
@@ -799,10 +697,6 @@ adv_scsi_cmd(xs)
 			sc_link->scsipi_scsi.lun, xs->cmd->opcode,
 			(unsigned long)ccb);
 #endif
-	s = splbio();
-	adv_queue_ccb(sc, ccb);
-	splx(s);
-
 	/*
          * Usually return SUCCESSFULLY QUEUED
          */
@@ -826,7 +720,6 @@ adv_intr(arg)
 	void           *arg;
 {
 	ASC_SOFTC      *sc = arg;
-	struct scsi_xfer *xs;
 
 #ifdef ASC_DEBUG
 	int int_pend = FALSE;
@@ -842,17 +735,6 @@ adv_intr(arg)
 	if(int_pend)
 		printf("\n");
 #endif
-
-	/*
-         * If there are queue entries in the software queue, try to
-         * run the first one.  We should be more or less guaranteed
-         * to succeed, since we just freed a CCB.
-         *
-         * NOTE: adv_scsi_cmd() relies on our calling it with
-         * the first entry in the queue.
-         */
-	if ((xs = LIST_FIRST(&sc->sc_queue)) != NULL)
-		(void) adv_scsi_cmd(xs);
 
 	return (1);
 }

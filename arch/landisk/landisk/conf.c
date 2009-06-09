@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.9 2008/06/12 20:03:48 mglocker Exp $	*/
+/*	$OpenBSD: conf.c,v 1.12 2009/06/03 14:45:52 jj Exp $	*/
 
 /*
  * Copyright (c) 1994-1998 Mark Brinicombe.
@@ -97,7 +97,6 @@
  */
 #include "wd.h"
 bdev_decl(wd);
-bdev_decl(sw);
 
 #ifdef USER_PCICONF
 #include "pci.h"
@@ -136,7 +135,6 @@ cdev_decl(pci);
 /*
  * WSCONS devices
  */
-#if 0
 #include "wsdisplay.h"
 /*
 #include "wsfont.h"
@@ -144,12 +142,6 @@ cdev_decl(pci);
 #include "wskbd.h"
 #include "wsmouse.h"
 #include "wsmux.h"
-#else
-#define	NWSDISPLAY	0
-#define	NWSMOUSE	0
-#define	NWSKBD	0
-#define	NWSMUX	0
-#endif
 cdev_decl(wskbd);
 cdev_decl(wsmouse);
 
@@ -265,9 +257,9 @@ struct bdevsw bdevsw[] = {
 #define ptctty          ptytty
 #define ptcioctl        ptyioctl
 
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "systrace.h"
 
@@ -284,7 +276,7 @@ struct cdevsw cdevsw[] = {
 	cdev_cn_init(1,cn),			/*  0: virtual console */
 	cdev_ctty_init(1,ctty),			/*  1: controlling terminal */
 	cdev_mm_init(1,mm),			/*  2: /dev/{null,mem,kmem,...} */
-	cdev_swap_init(1,sw),			/*  3: /dev/drum (swap pseudo-device) */
+	cdev_notdef(),				/*  3 was /dev/drum */
 	cdev_tty_init(NPTY,pts),		/*  4: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),		/*  5: pseudo-tty master */
 	cdev_log_init(1,log),			/*  6: /dev/klog */
@@ -332,8 +324,8 @@ struct cdevsw cdevsw[] = {
 	cdev_lkm_dummy(),			/* 48: reserved */
 	cdev_lkm_dummy(),			/* 49: reserved */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50: system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),		/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),		/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),				/* 51: reserved */
 #endif

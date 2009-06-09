@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmpci.c,v 1.21 2008/10/25 22:30:43 jakemsr Exp $	*/
+/*	$OpenBSD: cmpci.c,v 1.24 2009/05/06 23:13:29 jakemsr Exp $	*/
 /*	$NetBSD: cmpci.c,v 1.25 2004/10/26 06:32:20 xtraeme Exp $	*/
 
 /*
@@ -378,20 +378,20 @@ cmpci_attach(struct device *parent, struct device *self, void *aux)
 	/* map I/O space */
 	if (pci_mapreg_map(pa, CMPCI_PCI_IOBASEREG, PCI_MAPREG_TYPE_IO, 0,
 			   &sc->sc_iot, &sc->sc_ioh, NULL, NULL, 0)) {
-		printf(": failed to map I/O space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 
 	/* interrupt */
 	if (pci_intr_map(pa, &ih)) {
-		printf(": failed to map interrupt\n");
+		printf(": can't map interrupt\n");
 		return;
 	}
 	intrstr = pci_intr_string(pa->pa_pc, ih);
 	sc->sc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_AUDIO, cmpci_intr, sc,
 	    sc->sc_dev.dv_xname);
 	if (sc->sc_ih == NULL) {
-		printf(": failed to establish interrupt");
+		printf(": can't establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
@@ -901,9 +901,8 @@ cmpci_set_params(void *handle, int setmode, int usemode,
 			    CMPCI_REG_ADC_FS_MASK, md_divide);
 			sc->sc_ch1.md_divide = md_divide;
 		}
-		cmpci_set_out_ports(sc);
-		cmpci_set_in_ports(sc);
 	}
+
 	return 0;
 }
 
@@ -1567,26 +1566,44 @@ cmpci_set_out_ports(struct cmpci_softc *sc)
 	else
 		chan = &sc->sc_ch0;
 
+	/* disable ac3 and 24 and 32 bit s/pdif modes */
+	cmpci_reg_clear_4(sc, CMPCI_REG_CHANNEL_FORMAT, CMPCI_REG_AC3EN1);
+	cmpci_reg_clear_reg_misc(sc, CMPCI_REG_AC3EN2);
+	cmpci_reg_clear_reg_misc(sc, CMPCI_REG_SPD32SEL);
+	cmpci_reg_clear_4(sc, CMPCI_REG_CHANNEL_FORMAT, CMPCI_REG_SPDIF_24);
+
 	/* playback to ... */
 	if (CMPCI_ISCAP(sc, SPDOUT) &&
 	    sc->sc_gain[CMPCI_PLAYBACK_MODE][CMPCI_LR]
 		== CMPCI_PLAYBACK_MODE_SPDIF &&
 	    (chan->md_divide == CMPCI_REG_RATE_44100 ||
 		(CMPCI_ISCAP(sc, SPDOUT_48K) &&
-		    chan->md_divide==CMPCI_REG_RATE_48000))) {
+		    chan->md_divide == CMPCI_REG_RATE_48000))) {
 		/* playback to SPDIF */
-		cmpci_reg_set_4(sc, CMPCI_REG_FUNC_1, CMPCI_REG_SPDIF0_ENABLE);
+		if (sc->sc_play_channel == 0)
+			cmpci_reg_set_4(sc, CMPCI_REG_FUNC_1,
+			    CMPCI_REG_SPDIF0_ENABLE);
+		else
+			cmpci_reg_set_4(sc, CMPCI_REG_FUNC_1,
+			    CMPCI_REG_SPDIF1_ENABLE);
 		enspdout = 1;
-		if (chan->md_divide==CMPCI_REG_RATE_48000)
+		if (chan->md_divide == CMPCI_REG_RATE_48000)
 			cmpci_reg_set_reg_misc(sc,
 				CMPCI_REG_SPDIFOUT_48K | CMPCI_REG_SPDIF48K);
 		else
 			cmpci_reg_clear_reg_misc(sc,
 				CMPCI_REG_SPDIFOUT_48K | CMPCI_REG_SPDIF48K);
+		/* XXX assume sample rate <= 48kHz */
+		cmpci_reg_clear_4(sc, CMPCI_REG_CHANNEL_FORMAT,
+		    CMPCI_REG_DBL_SPD_RATE);
 	} else {
 		/* playback to DAC */
-		cmpci_reg_clear_4(sc, CMPCI_REG_FUNC_1,
-				  CMPCI_REG_SPDIF0_ENABLE);
+		if (sc->sc_play_channel == 0)
+			cmpci_reg_clear_4(sc, CMPCI_REG_FUNC_1,
+			    CMPCI_REG_SPDIF0_ENABLE);
+		else
+			cmpci_reg_clear_4(sc, CMPCI_REG_FUNC_1,
+			    CMPCI_REG_SPDIF1_ENABLE);
 		if (CMPCI_ISCAP(sc, SPDOUT_48K))
 			cmpci_reg_clear_reg_misc(sc,
 				CMPCI_REG_SPDIFOUT_48K | CMPCI_REG_SPDIF48K);
@@ -1908,6 +1925,8 @@ cmpci_trigger_output(void *handle, void *start, void *end, int blksize,
 	uint32_t length;
 	int bps;
 
+	cmpci_set_out_ports(sc);
+
 	if (sc->sc_play_channel == 1) {
 		chan = &sc->sc_ch1;
 		reg_dma_base = CMPCI_REG_DMA1_BASE;
@@ -1963,6 +1982,8 @@ cmpci_trigger_input(void *handle, void *start, void *end, int blksize,
 	struct cmpci_softc *sc = handle;
 	struct cmpci_dmanode *p;
 	int bps;
+
+	cmpci_set_in_ports(sc);
 
 	sc->sc_ch1.intr = intr;
 	sc->sc_ch1.intr_arg = arg;

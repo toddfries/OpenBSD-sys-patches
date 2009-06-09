@@ -1,4 +1,4 @@
-/*	$OpenBSD: iommu.c,v 1.22 2008/04/28 06:17:47 brad Exp $	*/
+/*	$OpenBSD: iommu.c,v 1.29 2009/05/04 16:48:37 oga Exp $	*/
 
 /*
  * Copyright (c) 2005 Jason L. Wright (jason@thought.net)
@@ -33,12 +33,10 @@
 #include <sys/errno.h>
 #include <sys/device.h>
 #include <sys/lock.h>
-#include <sys/extent.h>
 #include <sys/malloc.h>
 
 #include <uvm/uvm_extern.h>
 
-#define _X86_BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <machine/pio.h>
@@ -101,84 +99,80 @@
 #define	IOMMU_SIZE		512		/* size in MB */
 #define	IOMMU_ALIGN		IOMMU_SIZE
 
-extern paddr_t avail_end;
-extern struct extent *iomem_ex;
-
-int amdgarts;
 int amdgart_enable = 0;
 
+#ifndef SMALL_KERNEL /* no bigmem in ramdisks */
+
 struct amdgart_softc {
-	pci_chipset_tag_t g_pc;
-	pcitag_t g_tag;
-	struct extent *g_ex;
-	paddr_t g_pa;
-	paddr_t g_scribpa;
-	void *g_scrib;
-	u_int32_t g_scribpte;
-	u_int32_t *g_pte;
-	bus_dma_tag_t g_dmat;
-} *amdgart_softcs;
+	pci_chipset_tag_t	 g_pc;
+	paddr_t			 g_pa;
+	paddr_t			 g_scribpa;
+	void			*g_scrib;
+	u_int32_t		 g_scribpte;
+	u_int32_t		*g_pte;
+	bus_dma_tag_t		 g_dmat;
+	int			 g_count;
+	pcitag_t		 g_tags[1];
+};
 
-void amdgart_invalidate_wait(void);
-void amdgart_invalidate(void);
-void amdgart_probe(struct pcibus_attach_args *);
-void amdgart_dumpregs(void);
-int amdgart_iommu_map(bus_dmamap_t, struct extent *, bus_dma_segment_t *);
-int amdgart_iommu_unmap(struct extent *, bus_dma_segment_t *);
-int amdgart_reload(struct extent *, bus_dmamap_t);
-int amdgart_ok(pci_chipset_tag_t, pcitag_t);
-void amdgart_initpt(struct amdgart_softc *, u_long);
+void	amdgart_probe(struct pcibus_attach_args *);
+void	amdgart_dumpregs(struct amdgart_softc *);
+int	amdgart_ok(pci_chipset_tag_t, pcitag_t);
+int	amdgart_enabled(pci_chipset_tag_t, pcitag_t);
+void	amdgart_initpt(struct amdgart_softc *, u_long);
+void	amdgart_bind_page(void *, bus_addr_t, paddr_t,  int);
+void	amdgart_unbind_page(void *, bus_addr_t);
+void	amdgart_invalidate(void *);
+void	amdgart_invalidate_wait(struct amdgart_softc *);
 
-int amdgart_dmamap_create(bus_dma_tag_t, bus_size_t, int, bus_size_t,
-    bus_size_t, int, bus_dmamap_t *);
-void amdgart_dmamap_destroy(bus_dma_tag_t, bus_dmamap_t);
-int amdgart_dmamap_load(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
-    struct proc *, int);
-int amdgart_dmamap_load_mbuf(bus_dma_tag_t, bus_dmamap_t, struct mbuf *, int);
-int amdgart_dmamap_load_uio(bus_dma_tag_t, bus_dmamap_t, struct uio *, int);
-int amdgart_dmamap_load_raw(bus_dma_tag_t, bus_dmamap_t,
-    bus_dma_segment_t *, int, bus_size_t, int);
-void amdgart_dmamap_unload(bus_dma_tag_t, bus_dmamap_t);
-void amdgart_dmamap_sync(bus_dma_tag_t, bus_dmamap_t, bus_addr_t,
-    bus_size_t, int);
-
-int amdgart_dmamem_alloc(bus_dma_tag_t, bus_size_t, bus_size_t, bus_size_t,
-    bus_dma_segment_t *, int, int *, int);
-void amdgart_dmamem_free(bus_dma_tag_t, bus_dma_segment_t *, int);
-int amdgart_dmamem_map(bus_dma_tag_t, bus_dma_segment_t *, int, size_t,
-    caddr_t *, int);
-void amdgart_dmamem_unmap(bus_dma_tag_t, caddr_t, size_t);
-paddr_t amdgart_dmamem_mmap(bus_dma_tag_t, bus_dma_segment_t *, int, off_t,
-    int, int);
-
-struct x86_bus_dma_tag amdgart_bus_dma_tag = {
+struct bus_dma_tag amdgart_bus_dma_tag = {
 	NULL,			/* _may_bounce */
-	amdgart_dmamap_create,
-	amdgart_dmamap_destroy,
-	amdgart_dmamap_load,
-	amdgart_dmamap_load_mbuf,
-	amdgart_dmamap_load_uio,
-	amdgart_dmamap_load_raw,
-	amdgart_dmamap_unload,
+	sg_dmamap_create,
+	sg_dmamap_destroy,
+	sg_dmamap_load,
+	sg_dmamap_load_mbuf,
+	sg_dmamap_load_uio,
+	sg_dmamap_load_raw,
+	sg_dmamap_unload,
 	NULL,
-	amdgart_dmamem_alloc,
-	amdgart_dmamem_free,
-	amdgart_dmamem_map,
-	amdgart_dmamem_unmap,
-	amdgart_dmamem_mmap,
+	sg_dmamem_alloc,
+	_bus_dmamem_free,
+	_bus_dmamem_map,
+	_bus_dmamem_unmap,
+	_bus_dmamem_mmap,
 };
 
 void
-amdgart_invalidate_wait(void)
+amdgart_bind_page(void *handle, bus_addr_t offset, paddr_t page,  int flags)
 {
-	u_int32_t v;
-	int i, n;
+	struct amdgart_softc	*sc = handle;
+	u_int32_t		 pgno, pte;
 
-	for (n = 0; n < amdgarts; n++) {
+	pgno = (offset - sc->g_pa) >> PGSHIFT;
+	pte = GART_PTE_VALID | GART_PTE_COHERENT |
+	    ((page >> 28) & GART_PTE_PHYSHI) | (page & GART_PTE_PHYSLO);
+	sc->g_pte[pgno] = pte;
+}
+
+void
+amdgart_unbind_page(void *handle, bus_addr_t offset)
+{
+	struct amdgart_softc	*sc = handle;
+	u_int32_t		 pgno;
+
+	pgno = (offset - sc->g_pa) >> PGSHIFT;
+	sc->g_pte[pgno] = sc->g_scribpte;
+}
+
+void
+amdgart_invalidate_wait(struct amdgart_softc *sc)
+{
+	int	i, n;
+
+	for (n = 0; n < sc->g_count; n++) {
 		for (i = 1000; i > 0; i--) {
-			v = pci_conf_read(amdgart_softcs[n].g_pc,
-			    amdgart_softcs[n].g_tag, GART_CACHECTRL);
-			if ((v & GART_CACHE_INVALIDATE) == 0)
+			if ((pci_conf_read(sc->g_pc, sc->g_tags[n],
+			    GART_CACHECTRL) & GART_CACHE_INVALIDATE) == 0)
 				break;
 			delay(1);
 		}
@@ -188,41 +182,40 @@ amdgart_invalidate_wait(void)
 }
 
 void
-amdgart_invalidate(void)
+amdgart_invalidate(void* handle)
 {
+	struct amdgart_softc	*sc = handle;
 	int n;
 
-	for (n = 0; n < amdgarts; n++)
-		pci_conf_write(amdgart_softcs[n].g_pc,
-		    amdgart_softcs[n].g_tag, GART_CACHECTRL,
+	for (n = 0; n < sc->g_count; n++)
+		pci_conf_write(sc->g_pc, sc->g_tags[n], GART_CACHECTRL,
 		    GART_CACHE_INVALIDATE);
-	amdgart_invalidate_wait();
+	amdgart_invalidate_wait(sc);
 }
 
 void
-amdgart_dumpregs(void)
+amdgart_dumpregs(struct amdgart_softc *sc)
 {
-	int n, i, dirty;
+	int n, i, dirty = 0;
 	u_int8_t *p;
 
-	for (n = 0; n < amdgarts; n++) {
+	for (n = 0; n < sc->g_count; n++) {
 		printf("GART%d:\n", n);
-		printf(" apctl %x\n", pci_conf_read(amdgart_softcs[n].g_pc,
-		    amdgart_softcs[n].g_tag, GART_APCTRL));
-		printf(" apbase %x\n", pci_conf_read(amdgart_softcs[n].g_pc,
-		    amdgart_softcs[n].g_tag, GART_APBASE));
-		printf(" tblbase %x\n", pci_conf_read(amdgart_softcs[n].g_pc,
-		    amdgart_softcs[n].g_tag, GART_TBLBASE));
-		printf(" cachectl %x\n", pci_conf_read(amdgart_softcs[n].g_pc,
-		    amdgart_softcs[n].g_tag, GART_CACHECTRL));
+		printf(" apctl %x\n", pci_conf_read(sc->g_pc, sc->g_tags[n],
+		    GART_APCTRL));
+		printf(" apbase %x\n", pci_conf_read(sc->g_pc, sc->g_tags[n],
+		    GART_APBASE));
+		printf(" tblbase %x\n", pci_conf_read(sc->g_pc, sc->g_tags[n],
+		    GART_TBLBASE));
+		printf(" cachectl %x\n", pci_conf_read(sc->g_pc, sc->g_tags[n],
+		    GART_CACHECTRL));
 
-		p = amdgart_softcs[n].g_scrib;
-		dirty = 0;
-		for (i = 0; i < PAGE_SIZE; i++, p++)
-			if (*p != '\0')
-				dirty++;
-		printf(" scribble: %s\n", dirty ? "dirty" : "clean");
 	}
+	p = sc->g_scrib;
+	for (i = 0; i < PAGE_SIZE; i++, p++)
+		if (*p != '\0')
+			dirty++;
+	printf(" scribble: %s\n", dirty ? "dirty" : "clean");
 }
 
 int
@@ -231,171 +224,228 @@ amdgart_ok(pci_chipset_tag_t pc, pcitag_t tag)
 	pcireg_t v;
 
 	v = pci_conf_read(pc, tag, PCI_ID_REG);
-	if (PCI_VENDOR(v) != PCI_VENDOR_AMD)
-		return (0);
-	if (PCI_PRODUCT(v) != PCI_PRODUCT_AMD_AMD64_0F_MISC)
-		return (0);
-
-	v = pci_conf_read(pc, tag, GART_APCTRL);
-	if (v & GART_APCTRL_ENABLE)
-		return (0);
-
-	return (1);
+	if (PCI_VENDOR(v) == PCI_VENDOR_AMD &&
+	    (PCI_PRODUCT(v) == PCI_PRODUCT_AMD_AMD64_0F_MISC ||
+	    PCI_PRODUCT(v) == PCI_PRODUCT_AMD_AMD64_10_MISC))
+		return (1);
+	return (0);
 }
+
+int
+amdgart_enabled(pci_chipset_tag_t pc, pcitag_t tag)
+{
+	return (pci_conf_read(pc, tag, GART_APCTRL) & GART_APCTRL_ENABLE);
+}
+
+static const struct gart_size {
+	pcireg_t	reg;
+	bus_size_t	size;
+} apsizes[] = {
+	{ GART_APCTRL_SIZE_32M, 32 },
+	{ GART_APCTRL_SIZE_64M, 64 },
+	{ GART_APCTRL_SIZE_128M, 128 },
+	{ GART_APCTRL_SIZE_256M, 256 },
+	{ GART_APCTRL_SIZE_512M, 512 },
+	{ GART_APCTRL_SIZE_1G, 1024 },
+	{ GART_APCTRL_SIZE_2G, 2048 },
+};
 
 void
 amdgart_probe(struct pcibus_attach_args *pba)
 {
-	int dev, func, count = 0, r;
-	u_long dvabase = (u_long)-1, mapsize, ptesize;
-	pcitag_t tag;
-	pcireg_t v;
-	struct pglist plist;
-	void *scrib = NULL;
-	struct extent *ex = NULL;
-	u_int32_t *pte;
-	paddr_t ptepa;
+	struct amdgart_softc	*sc;
+	struct sg_cookie	*cookie = NULL;
+	void			*scrib = NULL;
+	u_int32_t		*pte;
+	int			 dev, count = 0, encount = 0, r, nseg;
+	u_long			 mapsize, ptesize, gartsize = 0;
+	bus_dma_segment_t	 seg;
+	pcitag_t		 tag;
+	pcireg_t		 v;
+	paddr_t			 pa, ptepa;
 
 	if (amdgart_enable == 0)
 		return;
 
-	TAILQ_INIT(&plist);
-
+	/* Function is always three */
 	for (count = 0, dev = 24; dev < 32; dev++) {
-		for (func = 0; func < 8; func++) {
-			tag = pci_make_tag(pba->pba_pc, 0, dev, func);
+		tag = pci_make_tag(pba->pba_pc, 0, dev, 3);
 
-			if (amdgart_ok(pba->pba_pc, tag))
-				count++;
+		if (!amdgart_ok(pba->pba_pc, tag))
+			continue;
+		count++;
+		if (amdgart_enabled(pba->pba_pc, tag)) {
+			encount++;
+			pa = pci_conf_read(pba->pba_pc, tag,
+			    GART_APBASE) << 25;
+			v = pci_conf_read(pba->pba_pc, tag,
+			    GART_APCTRL) & GART_APCTRL_SIZE;
 		}
 	}
 
 	if (count == 0)
 		return;
 
-	amdgart_softcs = malloc(sizeof(*amdgart_softcs) * count, M_DEVBUF,
-	    M_NOWAIT);
-	if (amdgart_softcs == NULL) {
-		printf("\nGART: can't get softc");
-		goto err;
+	if (encount > 0 && encount != count) {
+		printf("\niommu: holy mismatched enabling, batman!\n");
+		return;
 	}
 
-	dvabase = IOMMU_START;
+	sc = malloc(sizeof(*sc) + (sizeof(pcitag_t) * (count - 1)),
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
+	if (sc == NULL) {
+		printf("\nGART: can't get softc");
+		return;
+	}
 
-	mapsize = IOMMU_SIZE * 1024 * 1024;
+	if (encount > 0) {
+		int i;
+		/*
+		 * GART exists, use the current value.
+		 *
+		 * It appears that the bios mentions this in it's memory map
+		 * (sample size of 1), so we don't need to allocate
+		 * address space for it.
+		 */
+		sc->g_pa = pa;
+		for (i = 0; i < nitems(apsizes); i++)
+			if (apsizes[i].reg == v)
+				gartsize = apsizes[i].size;
+		if (gartsize == 0) {
+			printf("iommu: strange size\n");
+			free(sc, M_DEVBUF);
+			return;
+		}
+
+		mapsize = gartsize * 1024 * 1024;
+	} else {
+		/* We've gotta allocate one. Heuristic time! */
+		/*
+		 * XXX right now we stuff the iommu where we want. this need
+		 * XXX changing to allocate from pci space.
+		 */
+		sc->g_pa = IOMMU_START;
+		gartsize = IOMMU_SIZE;
+	}
+
+	mapsize = gartsize * 1024 * 1024;
 	ptesize = mapsize / (PAGE_SIZE / sizeof(u_int32_t));
 
-	r = uvm_pglistalloc(ptesize, ptesize, trunc_page(avail_end),
-	    ptesize, ptesize, &plist, 1, 0);
+	/*
+	 * use the low level version so we know we get memory we can use.
+	 * Hardware can deal with up to 40bits, which should be all our memory,
+	 * be safe anyway.
+	 */
+	r = _bus_dmamem_alloc_range(pba->pba_dmat, ptesize, ptesize, ptesize,
+	    &seg, 1, &nseg, BUS_DMA_NOWAIT, ptesize, 0x4000000000);
 	if (r != 0) {
 		printf("\nGART: failed to get pte pages");
-		goto err;
+		goto nofreeseg;
 	}
-	ptepa = VM_PAGE_TO_PHYS(TAILQ_FIRST(&plist));
-	pte = (u_int32_t *)pmap_map_nc_direct(TAILQ_FIRST(&plist));
 
-	ex = extent_create("iommu", dvabase, dvabase + mapsize - 1, M_DEVBUF,
-	    NULL, NULL, EX_NOWAIT | EX_NOCOALESCE);
-	if (ex == NULL) {
-		printf("\nGART: extent create failed");
+	r = _bus_dmamem_map(pba->pba_dmat, &seg, 1, ptesize, (caddr_t *)&pte,
+	    BUS_DMA_NOWAIT | BUS_DMA_NOCACHE);
+	if (r != 0) {
+		printf("\nGART: failed to map pte pages");
 		goto err;
 	}
+	ptepa = seg.ds_addr;
 
 	scrib = malloc(PAGE_SIZE, M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (scrib == NULL) {
 		printf("\nGART: didn't get scribble page");
 		goto err;
 	}
+	sc->g_pc = pba->pba_pc;
+	pmap_extract(pmap_kernel(), (vaddr_t)scrib,
+	    &sc->g_scribpa);
+	sc->g_scrib = scrib;
+	sc->g_scribpte = GART_PTE_VALID | GART_PTE_COHERENT |
+	    ((sc->g_scribpa >> 28) & GART_PTE_PHYSHI) |
+	    (sc->g_scribpa & GART_PTE_PHYSLO);
+	sc->g_pte = pte;
+	sc->g_dmat = pba->pba_dmat;
 
-	for (count = 0, dev = 24; dev < 32; dev++) {
-		for (func = 0; func < 8; func++) {
-			tag = pci_make_tag(pba->pba_pc, 0, dev, func);
-
-			if (!amdgart_ok(pba->pba_pc, tag))
-				continue;
-
-			v = pci_conf_read(pba->pba_pc, tag, GART_APCTRL);
-			v |= GART_APCTRL_DISCPU | GART_APCTRL_DISTBL |
-			    GART_APCTRL_DISIO;
-			v &= ~(GART_APCTRL_ENABLE | GART_APCTRL_SIZE);
-			switch (IOMMU_SIZE) {
-			case 32:
-				v |= GART_APCTRL_SIZE_32M;
-				break;
-			case 64:
-				v |= GART_APCTRL_SIZE_64M;
-				break;
-			case 128:
-				v |= GART_APCTRL_SIZE_128M;
-				break;
-			case 256:
-				v |= GART_APCTRL_SIZE_256M;
-				break;
-			case 512:
-				v |= GART_APCTRL_SIZE_512M;
-				break;
-			case 1024:
-				v |= GART_APCTRL_SIZE_1G;
-				break;
-			case 2048:
-				v |= GART_APCTRL_SIZE_2G;
-				break;
-			default:
-				printf("\nGART: bad size");
-				return;
-			}
-			pci_conf_write(pba->pba_pc, tag, GART_APCTRL, v);
-
-			pci_conf_write(pba->pba_pc, tag, GART_APBASE,
-			    dvabase >> 25);
-
-			pci_conf_write(pba->pba_pc, tag, GART_TBLBASE,
-			    (ptepa >> 8) & GART_TBLBASE_MASK);
-
-			v = pci_conf_read(pba->pba_pc, tag, GART_APCTRL);
-			v |= GART_APCTRL_ENABLE;
-			v &= ~GART_APCTRL_DISIO;
-			pci_conf_write(pba->pba_pc, tag, GART_APCTRL, v);
-
-			amdgart_softcs[count].g_pc = pba->pba_pc;
-			amdgart_softcs[count].g_tag = tag;
-			amdgart_softcs[count].g_ex = ex;
-			amdgart_softcs[count].g_pa = dvabase;
-			pmap_extract(pmap_kernel(), (vaddr_t)scrib,
-			    &amdgart_softcs[count].g_scribpa);
-			amdgart_softcs[count].g_scrib = scrib;
-			amdgart_softcs[count].g_scribpte =
-			    GART_PTE_VALID | GART_PTE_COHERENT |
-			    ((amdgart_softcs[count].g_scribpa >> 28) &
-			      GART_PTE_PHYSHI) |
-			     (amdgart_softcs[count].g_scribpa &
-			      GART_PTE_PHYSLO);
-			amdgart_softcs[count].g_pte = pte;
-			amdgart_softcs[count].g_dmat = pba->pba_dmat;
-
-			amdgart_initpt(&amdgart_softcs[count],
-			    ptesize / sizeof(*amdgart_softcs[count].g_pte));
-
-			printf("\niommu%d at cpu%d: base 0x%lx length %dMB pte 0x%lx",
-			    count, dev - 24, dvabase, IOMMU_SIZE, ptepa);
-			count++;
-		}
+	if ((cookie = sg_dmatag_init("iommu", sc, sc->g_pa, mapsize,
+	    amdgart_bind_page, amdgart_unbind_page,
+	    amdgart_invalidate)) == NULL) {
+		printf("\nGART: didn't get dma cookie\n");
+		goto err;
 	}
 
+	for (count = 0, dev = 24; dev < 32; dev++) {
+		tag = pci_make_tag(pba->pba_pc, 0, dev, 3);
+
+		if (!amdgart_ok(pba->pba_pc, tag))
+			continue;
+
+		v = pci_conf_read(pba->pba_pc, tag, GART_APCTRL);
+		v |= GART_APCTRL_DISCPU | GART_APCTRL_DISTBL |
+		    GART_APCTRL_DISIO;
+		v &= ~(GART_APCTRL_ENABLE | GART_APCTRL_SIZE);
+		switch (gartsize) {
+		case 32:
+			v |= GART_APCTRL_SIZE_32M;
+			break;
+		case 64:
+			v |= GART_APCTRL_SIZE_64M;
+			break;
+		case 128:
+			v |= GART_APCTRL_SIZE_128M;
+			break;
+		case 256:
+			v |= GART_APCTRL_SIZE_256M;
+			break;
+		case 512:
+			v |= GART_APCTRL_SIZE_512M;
+			break;
+		case 1024:
+			v |= GART_APCTRL_SIZE_1G;
+			break;
+		case 2048:
+			v |= GART_APCTRL_SIZE_2G;
+			break;
+		default:
+			printf("\nGART: bad size");
+			return;
+		}
+		pci_conf_write(pba->pba_pc, tag, GART_APCTRL, v);
+
+		pci_conf_write(pba->pba_pc, tag, GART_APBASE,
+		    sc->g_pa >> 25);
+
+		pci_conf_write(pba->pba_pc, tag, GART_TBLBASE,
+		    (ptepa >> 8) & GART_TBLBASE_MASK);
+
+		v = pci_conf_read(pba->pba_pc, tag, GART_APCTRL);
+		v |= GART_APCTRL_ENABLE;
+		v &= ~GART_APCTRL_DISIO;
+		pci_conf_write(pba->pba_pc, tag, GART_APCTRL, v);
+
+		sc->g_tags[count] = tag;
+
+		printf("\niommu%d at cpu%d: base 0x%lx length %dMB"
+		    " pte 0x%lx", count, dev - 24, sc->g_pa,
+		    gartsize, ptepa);
+		count++;
+	}
+	amdgart_initpt(sc, ptesize / sizeof(*sc->g_pte));
+	sc->g_count = count;
+
+	amdgart_bus_dma_tag._cookie = cookie;
 	pba->pba_dmat = &amdgart_bus_dma_tag;
-	amdgarts = count;
 
 	return;
 
 err:
-	if (ex != NULL)
-		extent_destroy(ex);
+	_bus_dmamem_free(pba->pba_dmat, &seg, 1);
+nofreeseg:
 	if (scrib != NULL)
 		free(scrib, M_DEVBUF);
-	if (amdgart_softcs != NULL)
-		free(amdgart_softcs, M_DEVBUF);
-	if (!TAILQ_EMPTY(&plist))
-		uvm_pglistfree(&plist);
+	if (cookie != NULL)
+		sg_dmatag_destroy(cookie);
+	if (sc != NULL)
+		free(sc, M_DEVBUF);
 }
 
 void
@@ -405,237 +455,7 @@ amdgart_initpt(struct amdgart_softc *sc, u_long nent)
 
 	for (i = 0; i < nent; i++)
 		sc->g_pte[i] = sc->g_scribpte;
-	amdgart_invalidate();
+	amdgart_invalidate(sc);
 }
 
-int
-amdgart_reload(struct extent *ex, bus_dmamap_t dmam)
-{
-	int i, j, err;
-
-	for (i = 0; i < dmam->dm_nsegs; i++) {
-		psize_t len;
-
-		len = dmam->dm_segs[i].ds_len;
-		err = amdgart_iommu_map(dmam, ex, &dmam->dm_segs[i]);
-		if (err) {
-			for (j = 0; j < i - 1; j++)
-				amdgart_iommu_unmap(ex, &dmam->dm_segs[j]);
-			return (err);
-		}
-	}
-	return (0);
-}
-
-int
-amdgart_iommu_map(bus_dmamap_t dmam, struct extent *ex, bus_dma_segment_t *seg)
-{
-	paddr_t base, end, idx;
-	psize_t alen;
-	u_long res;
-	int err, s;
-	u_int32_t pgno, flags;
-
-	base = trunc_page(seg->ds_addr);
-	end = roundup(seg->ds_addr + seg->ds_len, PAGE_SIZE);
-	alen = end - base;
-
-	s = splhigh();
-	err = extent_alloc(ex, alen, PAGE_SIZE, 0, dmam->_dm_boundary,
-	    EX_NOWAIT, &res);
-	splx(s);
-	if (err) {
-		printf("GART: extent_alloc %d\n", err);
-		return (err);
-	}
-
-	seg->ds_addr = res | (seg->ds_addr & PGOFSET);
-
-	for (idx = 0; idx < alen; idx += PAGE_SIZE) {
-		pgno = ((res + idx) - amdgart_softcs[0].g_pa) >> PGSHIFT;
-		flags = GART_PTE_VALID | GART_PTE_COHERENT |
-		    (((base + idx) >> 28) & GART_PTE_PHYSHI) |
-		     ((base + idx) & GART_PTE_PHYSLO);
-		amdgart_softcs[0].g_pte[pgno] = flags;
-	}
-
-	return (0);
-}
-
-int
-amdgart_iommu_unmap(struct extent *ex, bus_dma_segment_t *seg)
-{
-	paddr_t base, end, idx;
-	psize_t alen;
-	int err, s;
-	u_int32_t pgno;
-
-	base = trunc_page(seg->ds_addr);
-	end = roundup(seg->ds_addr + seg->ds_len, PAGE_SIZE);
-	alen = end - base;
-
-	/*
-	 * order is significant here; invalidate the iommu page table
-	 * entries, then mark them as freed in the extent.
-	 */
-
-	for (idx = 0; idx < alen; idx += PAGE_SIZE) {
-		pgno = ((base - amdgart_softcs[0].g_pa) + idx) >> PGSHIFT;
-		amdgart_softcs[0].g_pte[pgno] = amdgart_softcs[0].g_scribpte;
-	}
-
-	s = splhigh();
-	err = extent_free(ex, base, alen, EX_NOWAIT);
-	splx(s);
-	if (err) {
-		/* XXX Shouldn't happen, but if it does, I think we lose. */
-		printf("GART: extent_free %d\n", err);
-		return (err);
-	}
-
-	return (0);
-}
-
-int
-amdgart_dmamap_create(bus_dma_tag_t tag, bus_size_t size, int nsegments,
-    bus_size_t maxsegsz, bus_size_t boundary, int flags, bus_dmamap_t *dmamp)
-{
-	return (bus_dmamap_create(amdgart_softcs[0].g_dmat, size, nsegments,
-	    maxsegsz, boundary, flags, dmamp));
-}
-
-void
-amdgart_dmamap_destroy(bus_dma_tag_t tag, bus_dmamap_t dmam)
-{
-	bus_dmamap_destroy(amdgart_softcs[0].g_dmat, dmam);
-}
-
-int
-amdgart_dmamap_load(bus_dma_tag_t tag, bus_dmamap_t dmam, void *buf,
-    bus_size_t buflen, struct proc *p, int flags)
-{
-	int err;
-
-	err = bus_dmamap_load(amdgart_softcs[0].g_dmat, dmam, buf, buflen,
-	    p, flags);
-	if (err)
-		return (err);
-	err = amdgart_reload(amdgart_softcs[0].g_ex, dmam);
-	if (err)
-		bus_dmamap_unload(amdgart_softcs[0].g_dmat, dmam);
-	else
-		amdgart_invalidate();
-	return (err);
-}
-
-int
-amdgart_dmamap_load_mbuf(bus_dma_tag_t tag, bus_dmamap_t dmam,
-    struct mbuf *chain, int flags)
-{
-	int err;
-
-	err = bus_dmamap_load_mbuf(amdgart_softcs[0].g_dmat, dmam,
-	    chain, flags);
-	if (err)
-		return (err);
-	err = amdgart_reload(amdgart_softcs[0].g_ex, dmam);
-	if (err)
-		bus_dmamap_unload(amdgart_softcs[0].g_dmat, dmam);
-	else
-		amdgart_invalidate();
-	return (err);
-}
-
-int
-amdgart_dmamap_load_uio(bus_dma_tag_t tag, bus_dmamap_t dmam,
-    struct uio *uio, int flags)
-{
-	int err;
-
-	err = bus_dmamap_load_uio(amdgart_softcs[0].g_dmat, dmam, uio, flags);
-	if (err)
-		return (err);
-	err = amdgart_reload(amdgart_softcs[0].g_ex, dmam);
-	if (err)
-		bus_dmamap_unload(amdgart_softcs[0].g_dmat, dmam);
-	else
-		amdgart_invalidate();
-	return (err);
-}
-
-int
-amdgart_dmamap_load_raw(bus_dma_tag_t tag, bus_dmamap_t dmam,
-    bus_dma_segment_t *segs, int nsegs, bus_size_t size, int flags)
-{
-	int err;
-
-	err = bus_dmamap_load_raw(amdgart_softcs[0].g_dmat, dmam, segs, nsegs,
-	    size, flags);
-	if (err)
-		return (err);
-	err = amdgart_reload(amdgart_softcs[0].g_ex, dmam);
-	if (err)
-		bus_dmamap_unload(amdgart_softcs[0].g_dmat, dmam);
-	else
-		amdgart_invalidate();
-	return (err);
-}
-
-void
-amdgart_dmamap_unload(bus_dma_tag_t tag, bus_dmamap_t dmam)
-{
-	int i;
-
-	for (i = 0; i < dmam->dm_nsegs; i++)
-		amdgart_iommu_unmap(amdgart_softcs[0].g_ex, &dmam->dm_segs[i]);
-	amdgart_invalidate();
-	bus_dmamap_unload(amdgart_softcs[0].g_dmat, dmam);
-}
-
-void
-amdgart_dmamap_sync(bus_dma_tag_t tag, bus_dmamap_t dmam, bus_addr_t offset,
-    bus_size_t size, int ops)
-{
-	/*
-	 * XXX how do we deal with non-coherent mappings?  We don't
-	 * XXX allow them right now.
-	 */
-	bus_dmamap_sync(amdgart_softcs[0].g_dmat, dmam, offset, size, ops);
-}
-
-int
-amdgart_dmamem_alloc(bus_dma_tag_t tag, bus_size_t size, bus_size_t alignment,
-    bus_size_t boundary, bus_dma_segment_t *segs, int nsegs, int *rsegs,
-    int flags)
-{
-	return (bus_dmamem_alloc(amdgart_softcs[0].g_dmat, size, alignment,
-	    boundary, segs, nsegs, rsegs, flags));
-}
-
-void
-amdgart_dmamem_free(bus_dma_tag_t tag, bus_dma_segment_t *segs, int nsegs)
-{
-	bus_dmamem_free(amdgart_softcs[0].g_dmat, segs, nsegs);
-}
-
-int
-amdgart_dmamem_map(bus_dma_tag_t tag, bus_dma_segment_t *segs, int nsegs,
-    size_t size, caddr_t *kvap, int flags)
-{
-	return (bus_dmamem_map(amdgart_softcs[0].g_dmat, segs, nsegs, size,
-	    kvap, flags));
-}
-
-void
-amdgart_dmamem_unmap(bus_dma_tag_t tag, caddr_t kva, size_t size)
-{
-	bus_dmamem_unmap(amdgart_softcs[0].g_dmat, kva, size);
-}
-
-paddr_t
-amdgart_dmamem_mmap(bus_dma_tag_t tag, bus_dma_segment_t *segs, int nsegs,
-    off_t off, int prot, int flags)
-{
-	return (bus_dmamem_mmap(amdgart_softcs[0].g_dmat, segs, nsegs, off,
-	    prot, flags));
-}
+#endif /* !SMALL_KERNEL */

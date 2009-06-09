@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vfsops.c,v 1.79 2008/07/28 13:35:14 thib Exp $	*/
+/*	$OpenBSD: nfs_vfsops.c,v 1.83 2009/06/04 00:31:42 blambert Exp $	*/
 /*	$NetBSD: nfs_vfsops.c,v 1.46.4.1 1996/05/25 22:40:35 fvdl Exp $	*/
 
 /*
@@ -67,9 +67,6 @@
 #include <nfs/nfsdiskless.h>
 #include <nfs/nfs_var.h>
 
-#define	NQ_DEADTHRESH	NQ_NEVERDEAD	/* Default nm_deadthresh */
-#define	NQ_NEVERDEAD	9	/* Greater than max. nm_timeouts */
-
 extern struct nfsstats nfsstats;
 extern int nfs_ticks;
 extern u_int32_t nfs_procids[NFS_NPROCS];
@@ -96,9 +93,6 @@ const struct vfsops nfs_vfsops = {
 	nfs_sysctl,
 	nfs_checkexp
 };
-
-#define TRUE	1
-#define	FALSE	0
 
 /*
  * nfs statfs call
@@ -131,8 +125,14 @@ nfs_statfs(mp, sbp, p)
 		(void)nfs_fsinfo(nmp, vp, cred, p);
 	nfsstats.rpccnt[NFSPROC_FSSTAT]++;
 	mb = mreq = nfsm_reqhead(NFSX_FH(v3));
-	nfsm_fhtom(vp, v3);
-	nfsm_request(vp, NFSPROC_FSSTAT, p, cred);
+	nfsm_fhtom(&mb, vp, v3);
+	if ((error = nfs_request(vp, mreq, NFSPROC_FSSTAT, p, cred, &mrep,
+	    &md, &dpos)) != 0) {
+		if (error & NFSERR_RETERR)
+			error &= ~NFSERR_RETERR;
+		else
+			goto nfsmout;
+	}
 	if (v3)
 		nfsm_postop_attr(vp, retattr);
 	if (error) {
@@ -192,8 +192,14 @@ nfs_fsinfo(nmp, vp, cred, p)
 
 	nfsstats.rpccnt[NFSPROC_FSINFO]++;
 	mb = mreq = nfsm_reqhead(NFSX_FH(1));
-	nfsm_fhtom(vp, 1);
-	nfsm_request(vp, NFSPROC_FSINFO, p, cred);
+	nfsm_fhtom(&mb, vp, 1);
+	if ((error = nfs_request(vp, mreq, NFSPROC_FSINFO, p, cred, &mrep,
+	    &md, &dpos)) != 0) {
+		if (error & NFSERR_RETERR)
+			error &= ~NFSERR_RETERR;
+		else
+			goto nfsmout;
+	}
 	nfsm_postop_attr(vp, retattr);
 	if (!error) {
 		nfsm_dissect(fsp, struct nfsv3_fsinfo *, NFSX_V3FSINFO);
@@ -446,11 +452,10 @@ nfs_decode_args(nmp, argp, nargp)
 			nmp->nm_timeo = NFS_MAXTIMEO;
 	}
 
-	if ((argp->flags & NFSMNT_RETRANS) && argp->retrans > 1) {
-		nmp->nm_retry = argp->retrans;
-		if (nmp->nm_retry > NFS_MAXREXMIT)
-			nmp->nm_retry = NFS_MAXREXMIT;
-	}
+	if ((argp->flags & NFSMNT_RETRANS) && argp->retrans > 1)
+		nmp->nm_retry = MIN(argp->retrans, NFS_MAXREXMIT);
+	if (!(nmp->nm_flag & NFSMNT_SOFT))
+		nmp->nm_retry = NFS_MAXREXMIT + 1; /* past clip limit */
 
 	if (argp->flags & NFSMNT_NFSV3) {
 		if (argp->sotype == SOCK_DGRAM)
@@ -506,9 +511,6 @@ nfs_decode_args(nmp, argp, nargp)
 	if ((argp->flags & NFSMNT_READAHEAD) && argp->readahead >= 0 &&
 		argp->readahead <= NFS_MAXRAHEAD)
 		nmp->nm_readahead = argp->readahead;
-	if ((argp->flags & NFSMNT_DEADTHRESH) && argp->deadthresh >= 1 &&
-		argp->deadthresh <= NQ_NEVERDEAD)
-		nmp->nm_deadthresh = argp->deadthresh;
 	if (argp->flags & NFSMNT_ACREGMIN && argp->acregmin >= 0) {
 		if (argp->acregmin > 0xffff)
 			nmp->nm_acregmin = 0xffff;
@@ -557,7 +559,6 @@ nfs_decode_args(nmp, argp, nargp)
 	nargp->retrans = nmp->nm_retry;
 	nargp->maxgrouplist = nmp->nm_numgrps;
 	nargp->readahead = nmp->nm_readahead;
-	nargp->deadthresh = nmp->nm_deadthresh;
 	nargp->acregmin = nmp->nm_acregmin;
 	nargp->acregmax = nmp->nm_acregmax;
 	nargp->acdirmin = nmp->nm_acdirmin;
@@ -611,7 +612,7 @@ nfs_mount(mp, path, data, ndp, p)
 
 	if (nfs_niothreads < 0) {
 		nfs_niothreads = 4;
-		nfs_getset_niothreads(TRUE);
+		nfs_getset_niothreads(1);
 	}
 
 	if (mp->mnt_flag & MNT_UPDATE) {
@@ -683,7 +684,6 @@ mountnfs(argp, mp, nam, pth, hst)
 	nmp->nm_readdirsize = NFS_READDIRSIZE;
 	nmp->nm_numgrps = NFS_MAXGRPS;
 	nmp->nm_readahead = NFS_DEFRAHEAD;
-	nmp->nm_deadthresh = NQ_DEADTHRESH;
 	nmp->nm_fhsize = argp->fhsize;
 	nmp->nm_acregmin = NFS_MINATTRTIMO;
 	nmp->nm_acregmax = NFS_MAXATTRTIMO;

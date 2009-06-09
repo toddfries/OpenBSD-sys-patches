@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.h,v 1.136 2008/11/08 12:54:58 dlg Exp $	*/
+/*	$OpenBSD: ip_ipsp.h,v 1.138 2009/06/02 21:28:36 blambert Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -303,6 +303,8 @@ struct tdb {				/* tunnel descriptor block */
 #define	TDBF_SKIPCRYPTO		0x08000	/* Skip actual crypto processing */
 #define	TDBF_USEDTUNNEL		0x10000	/* Appended a tunnel header in past */
 #define	TDBF_UDPENCAP		0x20000	/* UDP encapsulation */
+#define	TDBF_PFSYNC		0x40000	/* TDB will be synced */
+#define	TDBF_PFSYNC_RPL		0x80000	/* Replay counter should be bumped */
 
 	u_int32_t	tdb_flags;	/* Flags related to this TDB */
 
@@ -342,6 +344,7 @@ struct tdb {				/* tunnel descriptor block */
 	u_int8_t	tdb_sproto;	/* IPsec protocol */
 	u_int8_t	tdb_wnd;	/* Replay window */
 	u_int8_t	tdb_satype;	/* SA type (RFC2367, PF_KEY) */
+	u_int8_t	tdb_updates;	/* pfsync update counter */
 
 	union sockaddr_union	tdb_dst;	/* Destination address */
 	union sockaddr_union	tdb_src;	/* Source address */
@@ -375,6 +378,7 @@ struct tdb {				/* tunnel descriptor block */
 	TAILQ_HEAD(tdb_inp_head_in, inpcb)	tdb_inp_in;
 	TAILQ_HEAD(tdb_inp_head_out, inpcb)	tdb_inp_out;
 	TAILQ_HEAD(tdb_policy_head, ipsec_policy)	tdb_policy_head;
+	TAILQ_ENTRY(tdb)	tdb_sync_entry;
 };
 
 struct tdb_ident {
@@ -520,7 +524,6 @@ extern void puttdb(struct tdb *);
 extern void tdb_delete(struct tdb *);
 extern struct tdb *tdb_alloc(void);
 extern void tdb_free(struct tdb *);
-extern int tdb_hash(u_int32_t, union sockaddr_union *, u_int8_t);
 extern int tdb_init(struct tdb *, u_int16_t, struct ipsecinit *);
 extern int tdb_walk(int (*)(struct tdb *, void *, int), void *);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubsa.c,v 1.39 2008/10/08 17:17:15 yuo Exp $ 	*/
+/*	$OpenBSD: ubsa.c,v 1.46 2009/06/02 12:32:08 deraadt Exp $ 	*/
 /*	$NetBSD: ubsa.c,v 1.5 2002/11/25 00:51:33 fvdl Exp $	*/
 /*-
  * Copyright (c) 2002, Alexander Kabaev <kan.FreeBSD.org>.
@@ -203,8 +203,6 @@ struct	ucom_methods ubsa_methods = {
 };
 
 const struct usb_devno ubsa_devs[] = {
-	/* AnyDATA ADU-E100H */
-	{ USB_VENDOR_ANYDATA, USB_PRODUCT_ANYDATA_ADU_E100H },
 	/* Axesstel MV100H */
 	{ USB_VENDOR_AXESSTEL, USB_PRODUCT_AXESSTEL_DATAMODEM },
 	/* BELKIN F5U103 */
@@ -215,22 +213,12 @@ const struct usb_devno ubsa_devs[] = {
 	{ USB_VENDOR_ETEK, USB_PRODUCT_ETEK_1COM },
 	/* GoHubs GO-COM232 */
 	{ USB_VENDOR_GOHUBS, USB_PRODUCT_GOHUBS_GOCOM232 },
-	/* Novatel Wireless U740 */
-	{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINU740 },
-	/* Option Vodafone Mobile Connect 3G */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_VODAFONEMC3G },
-	/* Option GlobeTrotter 3G FUSION */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GFUSION },
-	/* Option GlobeTrotter 3G QUAD */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GQUAD },
-	/* Option GlobeTrotter 3G QUAD PLUS */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GQUADPLUS },
-	/* Option GlobeTrotter MAX 3.6/7.2 */
-	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GTMAX36 },
 	/* Peracom */
 	{ USB_VENDOR_PERACOM, USB_PRODUCT_PERACOM_SERIAL1 },
 	/* Qualcomm Inc. ZTE CMDMA MSM modem */
 	{ USB_VENDOR_QUALCOMM3, USB_PRODUCT_QUALCOMM3_CDMA_MSM },
+	/* Qualcomm Inc. AC8700 */
+	{ USB_VENDOR_QUALCOMM3, USB_PRODUCT_QUALCOMM3_AC8700 },
 };
 #define ubsa_lookup(v, p) usb_lookup(ubsa_devs, v, p)
 
@@ -729,7 +717,7 @@ ubsa_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		if (cdcbuf->bNotification == UCDC_N_SERIAL_STATE)
 			printf("%s:notify serial state, len=%d, data=0x%02x\n",
 			    sc->sc_dev.dv_xname,
-			    cdcbuf->wLength, cdcbuf->data[0]);
+			    UGETW(cdcbuf->wLength), cdcbuf->data[0]);
 	}
 #endif
 

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_crypto.c,v 1.31 2008/09/22 19:44:00 miod Exp $ */
+/* $OpenBSD: softraid_crypto.c,v 1.36 2009/06/03 17:39:27 ckuethe Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Hans-Joerg Hoexer <hshoexer@openbsd.org>
@@ -75,6 +75,32 @@ void		 sr_crypto_calculate_check_hmac_sha1(struct sr_discipline *,
 void		 sr_crypto_dumpkeys(struct sr_discipline *);
 #endif
 
+/* Discipline initialisation. */
+void
+sr_crypto_discipline_init(struct sr_discipline *sd)
+{
+
+	/* Fill out discipline members. */
+	sd->sd_type = SR_MD_CRYPTO;
+	sd->sd_max_ccb_per_wu = sd->sd_meta->ssdi.ssd_chunk_no;
+	sd->sd_max_wu = SR_CRYPTO_NOWU;
+
+	/* Setup discipline pointers. */
+	sd->sd_alloc_resources = sr_crypto_alloc_resources;
+	sd->sd_free_resources = sr_crypto_free_resources;
+	sd->sd_start_discipline = NULL;
+	sd->sd_scsi_inquiry = sr_raid_inquiry;
+	sd->sd_scsi_read_cap = sr_raid_read_cap;
+	sd->sd_scsi_tur = sr_raid_tur;
+	sd->sd_scsi_req_sense = sr_raid_request_sense;
+	sd->sd_scsi_start_stop = sr_raid_start_stop;
+	sd->sd_scsi_sync = sr_raid_sync;
+	sd->sd_scsi_rw = sr_crypto_rw;
+	/* XXX reuse raid 1 functions for now FIXME */
+	sd->sd_set_chunk_state = sr_raid1_set_chunk_state;
+	sd->sd_set_vol_state = sr_raid1_set_vol_state;
+}
+
 struct cryptop *
 sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
 {
@@ -125,7 +151,7 @@ sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
 
 	/* Select crypto session based on block number */
 	keyndx = blk >> SR_CRYPTO_KEY_BLKSHIFT;
-	if (keyndx > SR_CRYPTO_MAXKEYS)
+	if (keyndx >= SR_CRYPTO_MAXKEYS)
 		goto unwind;
 	crp->crp_sid = sd->mds.mdd_crypto.scr_sid[keyndx];
 	if (crp->crp_sid == (u_int64_t)-1)
@@ -408,7 +434,7 @@ sr_crypto_alloc_resources(struct sr_discipline *sd)
 	if (sr_ccb_alloc(sd))
 		return (ENOMEM);
 	if (sr_crypto_decrypt_key(sd))
-		return (EPERM);	
+		return (EPERM);
 
 	bzero(&cri, sizeof(cri));
 	cri.cri_alg = CRYPTO_AES_XTS;
@@ -544,7 +570,7 @@ sr_crypto_rw2(struct sr_workunit *wu, struct cryptop *crp)
 		goto bad;
 	}
 
-	ccb->ccb_buf.b_flags = B_CALL;
+	ccb->ccb_buf.b_flags = B_CALL | B_PHYS;
 	ccb->ccb_buf.b_iodone = sr_crypto_intr;
 	ccb->ccb_buf.b_blkno = blk;
 	ccb->ccb_buf.b_bcount = xs->datalen;
@@ -572,11 +598,11 @@ sr_crypto_rw2(struct sr_workunit *wu, struct cryptop *crp)
 
 	TAILQ_INSERT_TAIL(&wu->swu_ccb, ccb, ccb_link);
 
-        DNPRINTF(SR_D_DIS, "%s: %s: sr_crypto_rw2: b_bcount: %d "
-            "b_blkno: %x b_flags 0x%0x b_data %p\n",
-            DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
-            ccb->ccb_buf.b_bcount, ccb->ccb_buf.b_blkno,
-            ccb->ccb_buf.b_flags, ccb->ccb_buf.b_data);
+	DNPRINTF(SR_D_DIS, "%s: %s: sr_crypto_rw2: b_bcount: %d "
+	    "b_blkno: %x b_flags 0x%0x b_data %p\n",
+	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
+	    ccb->ccb_buf.b_bcount, ccb->ccb_buf.b_blkno,
+	    ccb->ccb_buf.b_flags, ccb->ccb_buf.b_data);
 
 	s = splbio();
 
@@ -606,14 +632,14 @@ sr_crypto_intr(struct buf *bp)
 	struct cryptop		*crp;
 	int			 s, s2, pend;
 
-        DNPRINTF(SR_D_INTR, "%s: sr_crypto_intr bp: %x xs: %x\n",
-            DEVNAME(sc), bp, wu->swu_xs);
+	DNPRINTF(SR_D_INTR, "%s: sr_crypto_intr bp: %x xs: %x\n",
+	    DEVNAME(sc), bp, wu->swu_xs);
 
-        DNPRINTF(SR_D_INTR, "%s: sr_crypto_intr: b_bcount: %d b_resid: %d"
-            " b_flags: 0x%0x\n", DEVNAME(sc), ccb->ccb_buf.b_bcount,
-            ccb->ccb_buf.b_resid, ccb->ccb_buf.b_flags);
+	DNPRINTF(SR_D_INTR, "%s: sr_crypto_intr: b_bcount: %d b_resid: %d"
+	    " b_flags: 0x%0x\n", DEVNAME(sc), ccb->ccb_buf.b_bcount,
+	    ccb->ccb_buf.b_resid, ccb->ccb_buf.b_flags);
 
-        s = splbio();
+	s = splbio();
 
 	if (ccb->ccb_buf.b_flags & B_ERROR) {
 		printf("%s: i/o error on block %lld\n", DEVNAME(sc),
@@ -707,7 +733,7 @@ sr_crypto_finish_io(struct sr_workunit *wu)
 
 	/* do not change the order of these 2 functions */
 	sr_wu_put(wu);
-	scsi_done(xs);
+	sr_scsi_done(sd, xs);
 
 	if (sd->sd_sync && sd->sd_wu_pending == 0)
 		wakeup(sd);

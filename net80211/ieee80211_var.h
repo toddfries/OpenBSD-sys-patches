@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_var.h,v 1.55 2008/11/13 13:42:35 djm Exp $	*/
+/*	$OpenBSD: ieee80211_var.h,v 1.60 2009/05/19 16:09:02 damien Exp $	*/
 /*	$NetBSD: ieee80211_var.h,v 1.7 2004/05/06 03:07:10 dyoung Exp $	*/
 
 /*-
@@ -38,7 +38,8 @@
  */
 
 #ifdef	SMALL_KERNEL
-#define IEEE80211_STA_ONLY 1
+#define IEEE80211_STA_ONLY	1
+#define IEEE80211_NO_HT		1	/* no HT yet */
 #endif
 
 #include <sys/timeout.h>
@@ -167,16 +168,20 @@ struct ieee80211_edca_ac_params {
 	u_int8_t	ac_acm;
 };
 
+#define IEEE80211_DEFRAG_SIZE	3	/* must be >= 3 according to spec */
+/*
+ * Entry in the fragment cache.
+ */
+struct ieee80211_defrag {
+	struct timeout	df_to;
+	struct mbuf	*df_m;
+	u_int16_t	df_seq;
+	u_int8_t	df_frag;
+};
+
 #define IEEE80211_PROTO_NONE	0
 #define IEEE80211_PROTO_RSN	(1 << 0)
 #define IEEE80211_PROTO_WPA	(1 << 1)
-
-struct ieee80211_rxinfo {
-	u_int32_t		rxi_flags;
-	u_int32_t		rxi_tstamp;
-	int			rxi_rssi;
-};
-#define IEEE80211_RXI_HWDEC	0x00000001
 
 #define	IEEE80211_SCAN_UNLOCKED	0x0
 #define	IEEE80211_SCAN_LOCKED	0x1
@@ -192,7 +197,7 @@ struct ieee80211com {
 				    struct mbuf *, struct ieee80211_node *,
 				    struct ieee80211_rxinfo *, int);
 	int			(*ic_send_mgmt)(struct ieee80211com *,
-				    struct ieee80211_node *, int, int);
+				    struct ieee80211_node *, int, int, int);
 	int			(*ic_newstate)(struct ieee80211com *,
 				    enum ieee80211_state, int);
 	void			(*ic_newassoc)(struct ieee80211com *,
@@ -206,6 +211,14 @@ struct ieee80211com {
 	void			(*ic_delete_key)(struct ieee80211com *,
 				    struct ieee80211_node *,
 				    struct ieee80211_key *);
+	int			(*ic_ampdu_tx_start)(struct ieee80211com *,
+				    struct ieee80211_node *, u_int8_t);
+	void			(*ic_ampdu_tx_stop)(struct ieee80211com *,
+				    struct ieee80211_node *, u_int8_t);
+	int			(*ic_ampdu_rx_start)(struct ieee80211com *,
+				    struct ieee80211_node *, u_int8_t);
+	void			(*ic_ampdu_rx_stop)(struct ieee80211com *,
+				    struct ieee80211_node *, u_int8_t);
 	u_int8_t		ic_myaddr[IEEE80211_ADDR_LEN];
 	struct ieee80211_rateset ic_sup_rates[IEEE80211_MODE_MAX];
 	struct ieee80211_channel ic_channels[IEEE80211_CHAN_MAX+1];
@@ -286,11 +299,23 @@ struct ieee80211com {
 	enum ieee80211_cipher	ic_rsngroupcipher;
 	enum ieee80211_cipher	ic_rsngroupmgmtcipher;
 
+	struct ieee80211_defrag	ic_defrag[IEEE80211_DEFRAG_SIZE];
+	int			ic_defrag_cur;
+
 	u_int8_t		*ic_tim_bitmap;
 	u_int			ic_tim_len;
 	u_int			ic_tim_mcast_pending;
 	u_int			ic_dtim_period;
 	u_int			ic_dtim_count;
+
+	u_int32_t		ic_txbfcaps;
+	u_int16_t		ic_htcaps;
+	u_int16_t		ic_htxcaps;
+	u_int8_t		ic_aselcaps;
+	u_int8_t		ic_sup_mcs[16];
+	u_int8_t		ic_dialog_token;
+
+	LIST_HEAD(, ieee80211_vap) ic_vaps;
 };
 #define	ic_if		ic_ac.ac_if
 #define	ic_softc	ic_if.if_softc
@@ -320,7 +345,9 @@ extern struct ieee80211com_head ieee80211com_head;
 #define	IEEE80211_F_RSNON	0x00200000	/* CONF: RSN enabled */
 #define	IEEE80211_F_PSK		0x00400000	/* CONF: pre-shared key set */
 #define IEEE80211_F_COUNTERM	0x00800000	/* STATUS: countermeasures */
-#define IEEE80211_F_MFPR	0x01000000	/* CONF: MFP requested */
+#define IEEE80211_F_MFPR	0x01000000	/* CONF: MFP required */
+#define	IEEE80211_F_HTON	0x02000000	/* CONF: HT enabled */
+#define	IEEE80211_F_PBAR	0x04000000	/* CONF: PBAC required */
 #define IEEE80211_F_USERMASK	0xf0000000	/* CONF: ioctl flag mask */
 
 /* ic_caps */
@@ -338,7 +365,7 @@ extern struct ieee80211com_head ieee80211com_head;
 #define IEEE80211_C_QOS		0x00000800	/* CAPABILITY: QoS avail */
 #define IEEE80211_C_RSN		0x00001000	/* CAPABILITY: RSN avail */
 #define IEEE80211_C_MFP		0x00002000	/* CAPABILITY: MFP avail */
-#define	IEEE80211_C_HT		0x00004000	/* CAPABILITY: HT avail */
+#define IEEE80211_C_RAWCTL	0x00004000	/* CAPABILITY: raw ctl */
 
 /* flags for ieee80211_fix_rate() */
 #define	IEEE80211_F_DOSORT	0x00000001	/* sort rate list */

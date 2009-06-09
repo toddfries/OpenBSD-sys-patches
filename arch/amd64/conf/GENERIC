@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.246 2008/11/09 15:11:19 oga Exp $
+#	$OpenBSD: GENERIC,v 1.269 2009/06/06 03:20:57 deraadt Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -32,23 +32,30 @@ mainbus0 at root
 
 bios0	at mainbus?
 cpu0	at mainbus?
+ioapic*	at mainbus?
 isa0	at mainbus0
 isa0	at pcib?
 isa0	at amdpcib?
 pci*	at mainbus0
 
-acpi0		at bios?
+acpi0		at bios0
 acpitimer*	at acpi?
 acpihpet*	at acpi?
 acpiac*		at acpi?
 acpibat*	at acpi?
 acpibtn*	at acpi?
 acpicpu*	at acpi?
-#acpidock*	at acpi?
+acpidock*	at acpi?
 acpiec*		at acpi?
 acpiprt*	at acpi? 
 acpitz*		at acpi?
+acpimadt0	at acpi?
 acpithinkpad*	at acpi?
+acpivideo*	at acpi?
+acpivout*	at acpivideo?
+acpipwrres*	at acpi?
+
+mpbios0		at bios0
 
 ipmi0	at mainbus? disable	# IPMI
 
@@ -56,6 +63,7 @@ option		PCIVERBOSE
 option		USBVERBOSE
 
 pchb*	at pci?			# PCI-Host bridges
+aapic*	at pci?			# AMD 8131 IO apic
 ppb*	at pci?			# PCI-PCI bridges
 pci*	at ppb?
 pci*	at pchb?
@@ -63,6 +71,7 @@ pcib*	at pci?			# PCI-ISA bridge
 amdpcib* at pci?		# AMD 8111 LPC bridge
 kate*	at pci?			# AMD K8 temperature sensor
 km*	at pci?			# AMD K10 temperature sensor
+amas*	at pci? disable		# AMD memory configuration
 
 # National Semiconductor LM7[89] and compatible hardware monitors
 lm0	at isa? port 0x290
@@ -73,6 +82,11 @@ it*	at isa? port 0x2e	# ITE IT8705F, IT8712F, IT8716F, IT8718F,
 it*	at isa? port 0x4e	# IT8726F and SiS SiS950 monitors and
 				# watchdog timer
 				
+schsio*	at isa? port 0x2e	# SMSC SCH311x Super I/O
+schsio*	at isa? port 0x4e
+schsio*	at isa? port 0x162e
+schsio*	at isa? port 0x164e
+
 viaenv*	at pci?			# VIA VT82C686A hardware monitor
 #viasio* at isa? port 0x2e flags 0x0000	# VIA VT1211 LPC Super I/O
 #viasio* at isa? port 0x4e flags 0x0000
@@ -213,8 +227,11 @@ ugen*	at uhub?		# USB Generic driver
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
+run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
+otus*	at uhub?		# Atheros AR9001U
 zyd*	at uhub?		# Zydas ZD1211
 upgt*	at uhub?		# Conexant/Intersil PrismGT SoftMAC USB
+urtw*	at uhub?		# RealTek 8187
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
@@ -222,6 +239,9 @@ onewire* at uow?
 # USB Video
 uvideo*	at uhub?
 video*	at uvideo?
+
+udl*		at uhub?
+wsdisplay*	at udl?
 
 puc*	at pci?			# PCI "universal" communication device
 #puc*	at cardbus?
@@ -231,19 +251,17 @@ sdmmc*	at sdhc?		# SD/MMC bus
 scsibus* at sdmmc?		# SCSI emulation
 
 # Bluetooth controllers
-#sbt*	at sdmmc?		# SDIO Bluetooth
-#ubt*	at uhub?		# USB Bluetooth
-
-# Bluetooth bus support
-#bthub*	at sbt?
-#bthub*	at ubt?
-
-# Bluetooth HID support
-#bthidev* at bthub?
-#btkbd*	at bthidev?
-#btms*	at bthidev?
-#wskbd*	at btkbd? mux 1
-#wsmouse* at btms? mux 0
+sbt*	at sdmmc?		# SDIO Bluetooth
+bthub*	at sbt?
+ubt*	at uhub?		# USB Bluetooth
+bthub*	at ubt?
+bthidev* at bthub?		# Bluetooth HID support
+btkbd*	at bthidev?
+btms*	at bthidev?
+wskbd*	at btkbd? mux 1
+wsmouse* at btms? mux 0
+btsco*	at bthub? 		# Bluetooth audio support
+audio*	at btsco?
 
 isadma0	at isa?
 
@@ -257,6 +275,7 @@ pckbd*		at pckbc?		# PC keyboard
 pms*		at pckbc?		# PS/2 mouse for wsmouse
 pmsi*		at pckbc?		# PS/2 "Intelli"mouse for wsmouse
 vga0		at isa?
+option		X86EMU			# to POST video cards
 vga*		at pci?
 wsdisplay*	at vga?
 wskbd*		at pckbd? mux 1
@@ -265,16 +284,24 @@ wsmouse*	at pmsi? mux 0
 
 intagp*		at vga?		# intel integrated graphics
 agp*		at intagp?
-#agp*		at vga?		# AGP bridge
+
 #option		DRM_DEBUG
 inteldrm*	at vga? 	# Intel i915, i945 DRM driver
+drm*		at inteldrm?
 #machdrm*	at vga?		# mach64 (3D Rage Pro, Rage) DRM driver
+#drm*		at machdrm?
 #mgadrm*	at vga?		# Matrox G[24]00, G[45]50 DRM driver
+#drm*		at mgadrm?
 #ragedrm*	at vga?		# ATI Rage 128 DRM driver
+#drm*		at ragedrm?
 radeondrm*	at vga? 	# ATI Radeon DRM driver
+drm*		at radeondrm?
 #savagedrm*	at vga?		# S3 Savage DRM driver
+#drm*		at savagedrm?
 #sisdrm*	at vga?		# SiS DRM driver
+#drm*		at sisdrm?
 #tdfxdrm*	at vga?		# 3dfx (voodoo) DRM driver
+#drm*		at tdfxdrm?
 
 pcppi0		at isa?
 
@@ -429,7 +456,10 @@ thtc*	at pci?				# Tehuti Networks 10Gb ethernet
 tht*	at thtc?
 gem*	at pci?				# Sun 'gem' ethernet
 bce*	at pci?				# Broadcom BCM4401
+vic*	at pci?				# VMware VMXnet virtual interface
 et*	at pci?				# Agere/LSI ET1310
+age*	at pci?				# Attansic L1 Ethernet
+ale*	at pci?				# Attansic L1E Ethernet
 lii*	at pci?				# Attansic L2 Ethernet
 jme*	at pci?				# JMicron JMC250/JMC260 Ethernet
 
@@ -489,6 +519,8 @@ ciphy*	at mii?				# Cicada CS8201 10/100/1000 copper PHY
 gentbi*	at mii?				# Generic 1000BASE-X ten-bit PHY
 etphy*	at mii?				# Agere/LSI ET1011 TruePHY
 jmphy*	at mii?				# JMicron JMP202/JMP211 PHYs
+atphy*	at mii?				# Attansic F1 PHYs
+ipgphy*	at mii?				# IC Plus IP1000A PHYs
 ukphy*	at mii?				# "unknown" PHYs
 
 eap*	at pci?				# Ensoniq AudioPCI S5016

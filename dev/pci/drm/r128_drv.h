@@ -55,13 +55,6 @@
 
 #define GET_RING_HEAD(dev_priv)		R128_READ( R128_PM4_BUFFER_DL_RPTR )
 
-typedef struct drm_r128_freelist {
-	unsigned int age;
-	struct drm_buf *buf;
-	struct drm_r128_freelist *next;
-	struct drm_r128_freelist *prev;
-} drm_r128_freelist_t;
-
 typedef struct drm_r128_ring_buffer {
 	u32 *start;
 	u32 *end;
@@ -76,15 +69,20 @@ typedef struct drm_r128_ring_buffer {
 } drm_r128_ring_buffer_t;
 
 typedef struct drm_r128_private {
+	struct device		 dev;
+	struct device		*drmdev;
+
+	pci_chipset_tag_t	 pc;
+	pci_intr_handle_t	 ih;
+	void			*irqh;
+
+	struct vga_pci_bar	*regs;
 	drm_r128_ring_buffer_t ring;
 	drm_r128_sarea_t *sarea_priv;
 
 	int cce_mode;
 	int cce_fifo_size;
 	int cce_running;
-
-	drm_r128_freelist_t *head;
-	drm_r128_freelist_t *tail;
 
 	int usec_timeout;
 	int is_pci;
@@ -115,21 +113,19 @@ typedef struct drm_r128_private {
 	u32 depth_pitch_offset_c;
 	u32 span_pitch_offset_c;
 
-	drm_local_map_t *sarea;
-	drm_local_map_t *mmio;
-	drm_local_map_t *cce_ring;
-	drm_local_map_t *ring_rptr;
-	drm_local_map_t *agp_textures;
+	struct drm_local_map *sarea;
+	struct drm_local_map *cce_ring;
+	struct drm_local_map *ring_rptr;
+	struct drm_local_map *agp_textures;
 	struct drm_ati_pcigart_info gart_info;
 } drm_r128_private_t;
 
-typedef struct drm_r128_buf_priv {
-	u32 age;
-	int prim;
-	int discard;
-	int dispatched;
-	drm_r128_freelist_t *list_entry;
-} drm_r128_buf_priv_t;
+struct ragedrm_buf_priv {
+	u_int32_t	 age;
+	int		 prim;
+	int		 discard;
+	int		 dispatched;
+};
 
 				/* r128_cce.c */
 extern int r128_cce_init(struct drm_device *dev, void *data, struct drm_file *file_priv);
@@ -139,7 +135,8 @@ extern int r128_cce_reset(struct drm_device *dev, void *data, struct drm_file *f
 extern int r128_cce_idle(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int r128_engine_reset(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int r128_fullscreen(struct drm_device *dev, void *data, struct drm_file *file_priv);
-extern int r128_cce_buffers(struct drm_device *dev, void *data, struct drm_file *file_priv);
+extern int r128_cce_buffers(struct drm_device *, struct drm_dma *,
+    struct drm_file *);
 extern int r128_cce_swap(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int r128_cce_flip(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int r128_cce_clear(struct drm_device *dev, void *data, struct drm_file *file_priv);
@@ -161,12 +158,10 @@ extern int r128_do_cleanup_cce(struct drm_device * dev);
 extern int r128_enable_vblank(struct drm_device *dev, int crtc);
 extern void r128_disable_vblank(struct drm_device *dev, int crtc);
 extern u32 r128_get_vblank_counter(struct drm_device *dev, int crtc);
-extern irqreturn_t r128_driver_irq_handler(DRM_IRQ_ARGS);
-extern void r128_driver_irq_preinstall(struct drm_device * dev);
-extern int r128_driver_irq_postinstall(struct drm_device * dev);
+extern int r128_driver_irq_install(struct drm_device * dev);
 extern void r128_driver_irq_uninstall(struct drm_device * dev);
 extern void r128_driver_lastclose(struct drm_device * dev);
-extern void r128_driver_preclose(struct drm_device * dev,
+extern void r128_driver_close(struct drm_device * dev,
 				 struct drm_file *file_priv);
 
 extern long r128_compat_ioctl(struct file *filp, unsigned int cmd,
@@ -396,10 +391,14 @@ extern long r128_compat_ioctl(struct file *filp, unsigned int cmd,
 
 #define R128_PCIGART_TABLE_SIZE         32768
 
-#define R128_READ(reg)		DRM_READ32(  dev_priv->mmio, (reg) )
-#define R128_WRITE(reg,val)	DRM_WRITE32( dev_priv->mmio, (reg), (val) )
-#define R128_READ8(reg)		DRM_READ8(   dev_priv->mmio, (reg) )
-#define R128_WRITE8(reg,val)	DRM_WRITE8(  dev_priv->mmio, (reg), (val) )
+#define R128_READ(reg)		bus_space_read_4(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg))
+#define R128_WRITE(reg,val)	bus_space_write_4(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg), (val))
+#define R128_READ8(reg)		bus_space_read_1(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg))
+#define R128_WRITE8(reg,val)	bus_space_write_1(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg), (val))
 
 #define R128_WRITE_PLL(addr,val)					\
 do {									\

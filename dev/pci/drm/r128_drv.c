@@ -35,29 +35,64 @@
 #include "drm.h"
 #include "r128_drm.h"
 #include "r128_drv.h"
-#include "drm_pciids.h"
 
-int	r128drm_probe(struct device *, void *, void *);
-void	r128drm_attach(struct device *, struct device *, void *);
+int	ragedrm_probe(struct device *, void *, void *);
+void	ragedrm_attach(struct device *, struct device *, void *);
+int	ragedrm_detach(struct device *, int);
 int	ragedrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
-static drm_pci_id_list_t r128_pciidlist[] = {
-	r128_PCI_IDS
+const static struct drm_pcidev ragedrm_pciidlist[] = {
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_LE},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MOBILITY_M3},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_MF},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_ML},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PA},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PB},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PC},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PD},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PE},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE_FURY},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PG},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PH},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PI},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PJ},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PK},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PL},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PM},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PN},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PO},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PQ},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PR},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PS},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PT},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PU},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PV},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PW},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_PX},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_GL},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE_MAGNUM},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_RG},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_RK},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_VR},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_SM},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_TF},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_TL},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE128_TR},
+	{0, 0, 0}
 };
 
-static const struct drm_driver_info r128_driver = {
-	.buf_priv_size		= sizeof(drm_r128_buf_priv_t),
+static const struct drm_driver_info ragedrm_driver = {
+	.buf_priv_size		= sizeof(struct ragedrm_buf_priv),
 	.ioctl			= ragedrm_ioctl,
-	.preclose		= r128_driver_preclose,
+	.close			= r128_driver_close,
 	.lastclose		= r128_driver_lastclose,
+	.vblank_pipes		= 1,
 	.get_vblank_counter	= r128_get_vblank_counter,
 	.enable_vblank 		= r128_enable_vblank,
 	.disable_vblank		= r128_disable_vblank,
-	.irq_preinstall		= r128_driver_irq_preinstall,
-	.irq_postinstall	= r128_driver_irq_postinstall,
+	.irq_install		= r128_driver_irq_install,
 	.irq_uninstall		= r128_driver_irq_uninstall,
-	.irq_handler		= r128_driver_irq_handler,
 	.dma_ioctl		= r128_cce_buffers,
 
 	.name			= DRIVER_NAME,
@@ -72,24 +107,65 @@ static const struct drm_driver_info r128_driver = {
 };
 
 int
-r128drm_probe(struct device *parent, void *match, void *aux)
+ragedrm_probe(struct device *parent, void *match, void *aux)
 {
-	return drm_probe((struct pci_attach_args *)aux, r128_pciidlist);
+	return drm_pciprobe((struct pci_attach_args *)aux, ragedrm_pciidlist);
 }
 
 void
-r128drm_attach(struct device *parent, struct device *self, void *aux)
+ragedrm_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pci_attach_args *pa = aux;
-	struct drm_device *dev = (struct drm_device *)self;
+	drm_r128_private_t	*dev_priv = (drm_r128_private_t *)self;
+	struct pci_attach_args	*pa = aux;
+	struct vga_pci_bar	*bar;
+	int			 is_agp;
 
-	dev->driver = &r128_driver;
-	return drm_attach(parent, self, pa, r128_pciidlist);
+	dev_priv->pc = pa->pa_pc;
+
+	bar = vga_pci_bar_info((struct vga_pci_softc *)parent, 2);
+	if (bar == NULL) {
+		printf(": can't get BAR info\n");
+		return;
+	}
+
+	dev_priv->regs = vga_pci_bar_map((struct vga_pci_softc *)parent, 
+	    bar->addr, 0, 0);
+	if (dev_priv->regs == NULL) {
+		printf(": can't map mmio space\n");
+		return;
+	}
+
+	if (pci_intr_map(pa, &dev_priv->ih) != 0) {
+		printf(": couldn't map interrupt\n");
+		return;
+	}
+	printf(": %s\n", pci_intr_string(pa->pa_pc, dev_priv->ih));
+
+	is_agp = pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP,
+	    NULL, NULL);
+
+	dev_priv->drmdev = drm_attach_pci(&ragedrm_driver, pa, is_agp, self);
+}
+
+int
+ragedrm_detach(struct device *self, int flags)
+{
+	drm_r128_private_t	*dev_priv = (drm_r128_private_t *)self;
+
+	if (dev_priv->drmdev != NULL) {
+		config_detach(dev_priv->drmdev, flags);
+		dev_priv->drmdev = NULL;
+	}
+
+	if (dev_priv->regs != NULL)
+		vga_pci_bar_unmap(dev_priv->regs);
+
+	return (0);
 }
 
 struct cfattach ragedrm_ca = {
-	sizeof(struct drm_device), r128drm_probe, r128drm_attach,
-	drm_detach, drm_activate
+	sizeof(drm_r128_private_t), ragedrm_probe, ragedrm_attach,
+	ragedrm_detach
 };
 
 struct cfdriver ragedrm_cd = {
