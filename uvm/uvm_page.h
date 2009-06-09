@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.h,v 1.33 2009/06/01 17:42:33 ariane Exp $	*/
+/*	$OpenBSD: uvm_page.h,v 1.35 2009/06/07 02:01:54 oga Exp $	*/
 /*	$NetBSD: uvm_page.h,v 1.19 2000/12/28 08:24:55 chs Exp $	*/
 
 /* 
@@ -108,7 +108,7 @@
 
 union vm_page_fq {
 	struct {
-		TAILQ_ENTRY(vm_page)	hashq;	/* hash table links (O)*/
+		RB_ENTRY(vm_page)	tree;	/* hash table links (O)*/
 		TAILQ_ENTRY(vm_page)	listq;	/* pages in same object (O)*/
 	}	queues;
 
@@ -122,7 +122,6 @@ struct vm_page {
 	union vm_page_fq	fq;		/* free and queue management */
 	TAILQ_ENTRY(vm_page)	pageq;		/* queue info for FIFO
 						 * queue or free list (P) */
-
 	struct vm_anon		*uanon;		/* anon (O,P) */
 	struct uvm_object	*uobject;	/* object (O,P) */
 	voff_t			offset;		/* offset into object (O,P) */
@@ -174,6 +173,7 @@ struct vm_page {
 #define	PG_FAKE		0x00000040	/* page is not yet initialized */
 #define PG_RDONLY	0x00000080	/* page must be mapped read-only */
 #define PG_ZERO		0x00000100	/* page is pre-zero'd */
+#define PG_DEV		0x00000200	/* page is in device space, lay off */
 
 #define PG_PAGER1	0x00001000	/* pager-specific flag */
 #define PG_MASK		0x0000ffff
@@ -253,7 +253,6 @@ void		uvm_page_own(struct vm_page *, char *);
 #if !defined(PMAP_STEAL_MEMORY)
 boolean_t	uvm_page_physget(paddr_t *);
 #endif
-void		uvm_page_rehash(void);
 void		uvm_pageidlezero(void);
 
 void		uvm_pageactivate(struct vm_page *);

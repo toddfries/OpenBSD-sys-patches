@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.18 2009/05/31 03:42:38 mlarkin Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.22 2009/06/07 16:58:28 mlarkin Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -30,6 +30,7 @@
 
 #include <machine/cpufunc.h>
 #include <machine/npx.h>
+#include <machine/intr.h>
 
 #include <dev/isa/isareg.h>
 #include <dev/acpi/acpireg.h>
@@ -37,8 +38,13 @@
 #include <dev/acpi/acpidev.h>
 
 #include "apm.h"
+#include "isa.h"
 #include "ioapic.h"
 #include "lapic.h"
+
+#if NIOAPIC > 0
+#include <machine/i82093var.h>
+#endif
 
 #if NLAPIC > 0
 #include <machine/apicvar.h>
@@ -53,11 +59,8 @@ int haveacpibutusingapm;
 
 extern u_char acpi_real_mode_resume[], acpi_resume_end[];
 
-int acpi_savecpu(void);
-void intr_calculatemasks(void);
-void acpi_cpu_flush(struct acpi_softc *, int);
-void ioapic_enable(void);
-void lapic_enable(void);
+extern int acpi_savecpu(void);
+extern void intr_calculatemasks(void);
 
 #define ACPI_BIOS_RSDP_WINDOW_BASE        0xe0000
 #define ACPI_BIOS_RSDP_WINDOW_SIZE        0x20000
@@ -216,9 +219,9 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	}
 
 	if (rcr3() != pmap_kernel()->pm_pdirpa) {
-		printf("%s: acpi_sleep_machdep: only kernel may sleep\n",
-		    DEVNAME(sc));
-		return (ENXIO);
+		pmap_activate(curproc);
+
+		KASSERT(rcr3() == pmap_kernel()->pm_pdirpa);
 	}
 
 	/*
@@ -252,19 +255,25 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	 * returning to the location immediately following the
 	 * last call instruction - after the call to acpi_savecpu.
 	 */
-
-	npxinit(&cpu_info_primary);
+	
+#if NISA > 0
 	isa_defaultirq();
+#endif
 	intr_calculatemasks();
+
 #if NLAPIC > 0
 	lapic_enable();
-	lapic_calibrate_timer(&cpu_info_primary);
+	lapic_initclocks();
+	lapic_set_lvt();
 #endif
+
+	npxinit(&cpu_info_primary);
+
 #if NIOAPIC > 0
 	ioapic_enable();
 #endif
 	initrtclock();
-	enable_intr();
+	inittodr(time_second);
 
 #endif /* ACPI_SLEEP_ENABLED */
 	return (0);

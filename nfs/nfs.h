@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs.h,v 1.40 2009/05/22 00:19:25 thib Exp $	*/
+/*	$OpenBSD: nfs.h,v 1.44 2009/06/04 02:06:40 blambert Exp $	*/
 /*	$NetBSD: nfs.h,v 1.10.4.1 1996/05/27 11:23:56 fvdl Exp $	*/
 
 /*
@@ -38,11 +38,6 @@
 #ifndef _NFS_NFS_H_
 #define _NFS_NFS_H_
 
-/*
- * Tunable constants for nfs
- */
-
-#define	NFS_MAXIOVEC	34
 #define NFS_TICKINTVL	5		/* Desired time for a tick (msec) */
 #define NFS_HZ		(hz / nfs_ticks) /* Ticks/sec */
 #define	NFS_TIMEO	(1 * NFS_HZ)	/* Default timeout = 1 second */
@@ -51,15 +46,10 @@
 #define	NFS_MINIDEMTIMEO (5 * NFS_HZ)	/* Min timeout for non-idempotent ops*/
 #define	NFS_TIMEOUTMUL	2		/* Timeout/Delay multiplier */
 #define	NFS_MAXREXMIT	100		/* Stop counting after this many */
-#define	NFS_MAXWINDOW	1024		/* Max number of outstanding requests */
 #define	NFS_RETRANS	10		/* Num of retrans for soft mounts */
 #define	NFS_MAXGRPS	16		/* Max. size of groups list */
-#ifndef NFS_MINATTRTIMO
 #define	NFS_MINATTRTIMO 5		/* Attribute cache timeout in sec */
-#endif
-#ifndef NFS_MAXATTRTIMO
 #define	NFS_MAXATTRTIMO 60
-#endif
 #define	NFS_WSIZE	8192		/* Def. write data size <= 8192 */
 #define	NFS_RSIZE	8192		/* Def. read data size <= 8192 */
 #define NFS_READDIRSIZE	8192		/* Def. readdir size */
@@ -67,9 +57,8 @@
 #define	NFS_MAXRAHEAD	4		/* Max. read ahead # blocks */
 #define	NFS_MAXASYNCDAEMON 	20	/* Max. number async_daemons runable */
 #define NFS_MAXGATHERDELAY	100	/* Max. write gather delay (msec) */
-#ifndef NFS_GATHERDELAY
 #define NFS_GATHERDELAY		10	/* Default write gather delay (msec) */
-#endif
+
 /*
  * Ideally, NFS_DIRBLKSIZ should be bigger, but I've seen servers with
  * broken NFS/ethernet drivers that won't work with anything bigger (Linux..)
@@ -230,7 +219,6 @@ struct nfsreq {
 	struct vnode	*r_vp;
 	u_int32_t	r_xid;
 	int		r_flags;	/* flags on request, see below */
-	int		r_retry;	/* max retransmission count */
 	int		r_rexmit;	/* current retrans count */
 	int		r_timer;	/* tick counter on reply */
 	int		r_procnum;	/* NFS procedure number */
@@ -253,6 +241,31 @@ extern TAILQ_HEAD(nfsreqhead, nfsreq) nfs_reqq;
 #define	R_MUSTRESEND	0x40		/* Must resend request */
 
 /*
+ * On fast networks, the estimator will try to reduce the
+ * timeout lower than the latency of the server's disks,
+ * which results in too many timeouts, so cap the lower
+ * bound.
+ */
+#define NFS_MINRTO	(NFS_HZ >> 2)
+
+/*
+ * Keep the RTO from increasing to unreasonably large values
+ * when a server is not responding.
+ */
+#define NFS_MAXRTO	(20 * NFS_HZ)
+
+enum nfs_rto_timers {
+	NFS_DEFAULT_TIMER,
+	NFS_GETATTR_TIMER,
+	NFS_LOOKUP_TIMER,
+	NFS_READ_TIMER,
+	NFS_WRITE_TIMER,
+};
+#define NFS_MAX_TIMER	(NFS_WRITE_TIMER)
+
+#define NFS_INITRTT	(NFS_HZ << 3)
+
+/*
  * A list of nfssvc_sock structures is maintained with all the sockets
  * that require service by the nfsd.
  */
@@ -273,22 +286,23 @@ union nethostaddr {
 };
 
 struct nfssvc_sock {
-	TAILQ_ENTRY(nfssvc_sock) ns_chain;	/* List of all nfssvc_sock's */
-	struct file	*ns_fp;
-	struct socket	*ns_so;
-	struct mbuf	*ns_nam;
-	struct mbuf	*ns_raw;
-	struct mbuf	*ns_rawend;
-	struct mbuf	*ns_rec;
-	struct mbuf	*ns_recend;
-	struct mbuf	*ns_frag;
-	int		ns_flag;
-	int		ns_solock;
-	int		ns_cc;
-	int		ns_reclen;
-	u_int32_t	ns_sref;
-	LIST_HEAD(, nfsrv_descript) ns_tq;	/* Write gather lists */
-	LIST_HEAD(nfsrvw_delayhash, nfsrv_descript) ns_wdelayhashtbl[NFS_WDELAYHASHSIZ];
+	TAILQ_ENTRY(nfssvc_sock) ns_chain; /* List of all nfssvc_sock's */
+	struct file	*ns_fp;		/* fp from the... */
+	struct socket	*ns_so;		/* ...socket this struct wraps */
+	struct mbuf	*ns_nam;	/* MT_SONAME of client */
+	struct mbuf	*ns_raw;	/* head of unpeeked mbufs */
+	struct mbuf	*ns_rawend;	/* tail of unpeeked mbufs */
+	struct mbuf	*ns_rec;	/* queued RPC records */
+	struct mbuf	*ns_recend;	/* last queued RPC record */
+	struct mbuf	*ns_frag;	/* end of record fragment */
+	int		ns_flag;	/* socket status flags */
+	int		ns_solock;	/* lock for connected socket */
+	int		ns_cc;		/* actual chars queued */
+	int		ns_reclen;	/* length of first queued record */
+	u_int32_t	ns_sref;	/* # of refs to this struct */
+	LIST_HEAD(, nfsrv_descript) ns_tq; /* Write gather lists */
+	LIST_HEAD(nfsrvw_delayhash, nfsrv_descript)
+			ns_wdelayhashtbl[NFS_WDELAYHASHSIZ];
 };
 
 /* Bits for "ns_flag" */
@@ -331,7 +345,7 @@ struct nfsrv_descript {
 	off_t			nd_off;		/* Start byte offset */
 	off_t			nd_eoff;	/* and end byte offset */
 	LIST_ENTRY(nfsrv_descript) nd_hash;	/* Hash list */
-	LIST_ENTRY(nfsrv_descript) nd_tq;		/* and timer list */
+	LIST_ENTRY(nfsrv_descript) nd_tq;	/* and timer list */
 	LIST_HEAD(,nfsrv_descript) nd_coalesce;	/* coalesced writes */
 	struct mbuf		*nd_mrep;	/* Request mbuf list */
 	struct mbuf		*nd_md;		/* Current dissect mbuf */

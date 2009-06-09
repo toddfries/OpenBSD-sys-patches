@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_map.c,v 1.111 2009/06/01 17:42:33 ariane Exp $	*/
+/*	$OpenBSD: uvm_map.c,v 1.113 2009/06/06 17:46:44 art Exp $	*/
 /*	$NetBSD: uvm_map.c,v 1.86 2000/11/27 08:40:03 chs Exp $	*/
 
 /* 
@@ -3058,15 +3058,7 @@ uvm_map_clean(struct vm_map *map, vaddr_t start, vaddr_t end, int flags)
 				}
 				KASSERT(pg->uanon == anon);
 
-#ifdef UBC
-				/* ...and deactivate the page. */
-				pmap_clear_reference(pg);
-#else
-				/* zap all mappings for the page. */
-				pmap_page_protect(pg, VM_PROT_NONE);
-
-				/* ...and deactivate the page. */
-#endif
+				/* Deactivate the page. */
 				uvm_pagedeactivate(pg);
 
 				uvm_unlock_pageq();
@@ -3820,9 +3812,8 @@ uvm_object_printit(uobj, full, pr)
 		return;
 	}
 	(*pr)("  PAGES <pg,offset>:\n  ");
-	for (pg = TAILQ_FIRST(&uobj->memq);
-	     pg != NULL;
-	     pg = TAILQ_NEXT(pg, fq.queues.listq), cnt++) {
+	RB_FOREACH(pg, uobj_pgs, &uobj->memt) {
+		cnt++;
 		(*pr)("<%p,0x%llx> ", pg, (long long)pg->offset);
 		if ((cnt % 3) == 2) {
 			(*pr)("\n  ");
@@ -3883,8 +3874,7 @@ uvm_page_printit(pg, full, pr)
 			uobj = pg->uobject;
 			if (uobj) {
 				(*pr)("  checking object list\n");
-				TAILQ_FOREACH(tpg, &uobj->memq,
-				    fq.queues.listq) {
+				RB_FOREACH(pg, uobj_pgs, &uobj->memt) {
 					if (tpg == pg) {
 						break;
 					}

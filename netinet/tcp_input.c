@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.224 2008/11/02 10:37:29 claudio Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.226 2009/06/05 00:05:22 claudio Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -522,9 +522,20 @@ tcp_input(struct mbuf *m, ...)
 		/*
 		 * Checksum extended TCP header and data.
 		 */
-		if (in6_cksum(m, IPPROTO_TCP, sizeof(struct ip6_hdr), tlen)) {
-			tcpstat.tcps_rcvbadsum++;
-			goto drop;
+		if ((m->m_pkthdr.csum_flags & M_TCP_CSUM_IN_OK) == 0) {
+			if (m->m_pkthdr.csum_flags & M_TCP_CSUM_IN_BAD) {
+				tcpstat.tcps_inhwcsum++;
+				tcpstat.tcps_rcvbadsum++;
+				goto drop;
+			}
+			if (in6_cksum(m, IPPROTO_TCP, sizeof(struct ip6_hdr),
+			    tlen)) {
+				tcpstat.tcps_rcvbadsum++;
+				goto drop;
+			}
+		} else {
+			m->m_pkthdr.csum_flags &= ~M_TCP_CSUM_IN_OK;
+			tcpstat.tcps_inhwcsum++;
 		}
 		break;
 #endif
@@ -594,7 +605,8 @@ findpcb:
 #endif
 		case AF_INET:
 			inp = in_pcbhashlookup(&tcbtable, ip->ip_src,
-			    th->th_sport, ip->ip_dst, th->th_dport);
+			    th->th_sport, ip->ip_dst, th->th_dport,
+			    m->m_pkthdr.rdomain);
 			break;
 		}
 #if NPF > 0
@@ -619,7 +631,8 @@ findpcb:
 #endif /* INET6 */
 		case AF_INET:
 			inp = in_pcblookup_listen(&tcbtable,
-			    ip->ip_dst, th->th_dport, inpl_flags, m);
+			    ip->ip_dst, th->th_dport, inpl_flags, m,
+			    m->m_pkthdr.rdomain);
 			break;
 		}
 		/*
@@ -3022,7 +3035,7 @@ tcp_mss(struct tcpcb *tp, int offer)
 	else if (tp->pf == AF_INET) {
 		if (ip_mtudisc)
 			mss = ifp->if_mtu - iphlen - sizeof(struct tcphdr);
-		else if (inp && in_localaddr(inp->inp_faddr))
+		else if (inp && in_localaddr(inp->inp_faddr, inp->inp_rdomain))
 			mss = ifp->if_mtu - iphlen - sizeof(struct tcphdr);
 	}
 #ifdef INET6

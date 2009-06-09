@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_serv.c,v 1.67 2009/05/21 12:24:22 thib Exp $	*/
+/*	$OpenBSD: nfs_serv.c,v 1.75 2009/06/06 23:40:30 blambert Exp $	*/
 /*     $NetBSD: nfs_serv.c,v 1.34 1997/05/12 23:37:12 fvdl Exp $       */
 
 /*
@@ -552,11 +552,9 @@ nfsrv_read(nfsd, slp, procp, mrq)
 	}
 
 	error = nfsrv_fhtovp(fhp, 1, &vp, cred, slp, nam, &rdonly);
-	if (error) {
-		nfsm_reply(2 * NFSX_UNSIGNED);
-		nfsm_srvpostop_attr(nfsd, 1, NULL, &mb);
-		return (0);
-	}
+	if (error)
+		goto bad;
+
 	if (vp->v_type != VREG) {
 		if (v3)
 			error = EINVAL;
@@ -570,12 +568,9 @@ nfsrv_read(nfsd, slp, procp, mrq)
 	getret = VOP_GETATTR(vp, &va, cred, procp);
 	if (!error)
 		error = getret;
-	if (error) {
-		vput(vp);
-		nfsm_reply(NFSX_POSTOPATTR(v3));
-		nfsm_srvpostop_attr(nfsd, getret, &va, &mb);
-		return (0);
-	}
+	if (error)
+		goto vbad;
+
 	if (off >= va.va_size)
 		cnt = 0;
 	else if ((off + reqlen) > va.va_size)
@@ -608,7 +603,8 @@ nfsrv_read(nfsd, slp, procp, mrq)
 			}
 			if (left > 0) {
 				MGET(m, M_WAIT, MT_DATA);
-				MCLGET(m, M_WAIT);
+				if (left >= MINCLSIZE)
+					MCLGET(m, M_WAIT);
 				m->m_len = 0;
 				m2->m_next = m;
 				m2 = m;
@@ -645,10 +641,7 @@ nfsrv_read(nfsd, slp, procp, mrq)
 			if (!error)
 				error = getret;
 			m_freem(mreq);
-			vput(vp);
-			nfsm_reply(NFSX_POSTOPATTR(v3));
-			nfsm_srvpostop_attr(nfsd, getret, &va, &mb);
-			return (0);
+			goto vbad;
 		}
 	} else
 		uiop->uio_resid = 0;
@@ -669,6 +662,13 @@ nfsrv_read(nfsd, slp, procp, mrq)
 	*tl = txdr_unsigned(cnt);
 nfsmout:
 	return(error);
+
+vbad:
+	vput(vp);
+bad:
+	nfsm_reply(0);
+	nfsm_srvpostop_attr(nfsd, getret, &va, &mb);
+	return (0);
 }
 
 /*
@@ -756,16 +756,11 @@ nfsrv_write(nfsd, slp, procp, mrq)
 	}
 	if (len > NFS_MAXDATA || len < 0 || i < len) {
 		error = EIO;
-		nfsm_reply(2 * NFSX_UNSIGNED);
-		nfsm_srvwcc(nfsd, forat_ret, &forat, aftat_ret, &va, &mb);
-		return (0);
+		goto bad;
 	}
 	error = nfsrv_fhtovp(fhp, 1, &vp, cred, slp, nam, &rdonly);
-	if (error) {
-		nfsm_reply(2 * NFSX_UNSIGNED);
-		nfsm_srvwcc(nfsd, forat_ret, &forat, aftat_ret, &va, &mb);
-		return (0);
-	}
+	if (error)
+		goto bad;
 	if (v3)
 		forat_ret = VOP_GETATTR(vp, &forat, cred, procp);
 	if (vp->v_type != VREG) {
@@ -773,16 +768,11 @@ nfsrv_write(nfsd, slp, procp, mrq)
 			error = EINVAL;
 		else
 			error = (vp->v_type == VDIR) ? EISDIR : EACCES;
+		goto vbad;
 	}
-	if (!error) {
-		error = nfsrv_access(vp, VWRITE, cred, rdonly, procp, 1);
-	}
-	if (error) {
-		vput(vp);
-		nfsm_reply(NFSX_WCCDATA(v3));
-		nfsm_srvwcc(nfsd, forat_ret, &forat, aftat_ret, &va, &mb);
-		return (0);
-	}
+	error = nfsrv_access(vp, VWRITE, cred, rdonly, procp, 1);
+	if (error)
+		goto vbad;
 
 	if (len > 0) {
 	    ivp = malloc(cnt * sizeof(struct iovec), M_TEMP, M_WAITOK);
@@ -842,6 +832,13 @@ nfsrv_write(nfsd, slp, procp, mrq)
 	}
 nfsmout:
 	return(error);
+
+vbad:
+	vput(vp);
+bad:
+	nfsm_reply(0);
+	nfsm_srvwcc(nfsd, forat_ret, &forat, aftat_ret, &va, &mb);
+	return (0);
 }
 
 /*
@@ -3121,14 +3118,17 @@ nfsrv_noop(nfsd, slp, procp, mrq)
 
 /*
  * Perform access checking for vnodes obtained from file handles that would
- * refer to files already opened by a Unix client. You cannot just use
- * vn_writechk() and VOP_ACCESS() for two reasons.
- * 1 - You must check for exported rdonly as well as MNT_RDONLY for the write case
+ * refer to files already opened by a Unix client.
+ * You cannot just use vn_writechk() and VOP_ACCESS() for two reasons:
+ * 1 - You must check for exported rdonly as well as MNT_RDONLY for the
+ *     write case
  * 2 - The owner is to be given access irrespective of mode bits for some
  *     operations, so that processes that chmod after opening a file don't
  *     break. I don't like this because it opens a security hole, but since
  *     the nfs server opens a security hole the size of a barn door anyhow,
- *     what the heck.
+ *     what the heck. A notable exception to this rule is when VOP_ACCESS()
+ *     returns EPERM (e.g. when a file is immutable) which is always an
+ *     error.
  */
 int
 nfsrv_access(vp, flags, cred, rdonly, p, override)
@@ -3172,7 +3172,7 @@ nfsrv_access(vp, flags, cred, rdonly, p, override)
 	 * Allow certain operations for the owner (reads and writes
 	 * on files that are already open).
 	 */
-	if (override && (error == EPERM || error == EACCES) &&
+	if (override && error == EACCES &&
 	    VOP_GETATTR(vp, &vattr, cred, p) == 0 &&
 	    cred->cr_uid == vattr.va_uid)
 		error = 0;

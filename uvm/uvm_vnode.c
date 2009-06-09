@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_vnode.c,v 1.60 2009/06/01 19:54:02 oga Exp $	*/
+/*	$OpenBSD: uvm_vnode.c,v 1.62 2009/06/06 17:46:44 art Exp $	*/
 /*	$NetBSD: uvm_vnode.c,v 1.36 2000/11/24 20:34:01 chs Exp $	*/
 
 /*
@@ -271,7 +271,7 @@ uvn_attach(void *arg, vm_prot_t accessprot)
 	 * now set up the uvn.
 	 */
 	uvn->u_obj.pgops = &uvm_vnodeops;
-	TAILQ_INIT(&uvn->u_obj.memq);
+	RB_INIT(&uvn->u_obj.memt);
 	uvn->u_obj.uo_npages = 0;
 	uvn->u_obj.uo_refs = 1;			/* just us... */
 	oldflags = uvn->u_flags;
@@ -438,11 +438,7 @@ uvn_detach(struct uvm_object *uobj)
 	if (uvn->u_flags & UVM_VNODE_WRITEABLE) {
 		LIST_REMOVE(uvn, u_wlist);
 	}
-#ifdef DIAGNOSTIC
-	if (!TAILQ_EMPTY(&uobj->memq))
-		panic("uvn_deref: vnode VM object still has pages afer "
-		    "syncio/free flush");
-#endif
+	KASSERT(RB_EMPTY(&uobj->memt));
 	oldflags = uvn->u_flags;
 	uvn->u_flags = 0;
 	simple_unlock(&uobj->vmobjlock);
@@ -559,7 +555,7 @@ uvm_vnp_terminate(struct vnode *vp)
 	while (uvn->u_obj.uo_npages) {
 #ifdef DEBUG
 		struct vm_page *pp;
-		TAILQ_FOREACH(pp, &uvn->u_obj.memq, fq.queues.listq) {
+		RB_FOREACH(pp, uobj_pgs, &uvn->u_obj.memt) {
 			if ((pp->pg_flags & PG_BUSY) == 0)
 				panic("uvm_vnp_terminate: detected unbusy pg");
 		}
@@ -806,7 +802,6 @@ uvn_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
 			if (flags & PGO_DEACTIVATE) {
 				if ((pp->pg_flags & PQ_INACTIVE) == 0 &&
 				    pp->wire_count == 0) {
-					pmap_page_protect(pp, VM_PROT_NONE);
 					uvm_pagedeactivate(pp);
 				}
 			} else if (flags & PGO_FREE) {
@@ -950,7 +945,6 @@ ReTry:
 			if (flags & PGO_DEACTIVATE) {
 				if ((pp->pg_flags & PQ_INACTIVE) == 0 &&
 				    pp->wire_count == 0) {
-					pmap_page_protect(ptmp, VM_PROT_NONE);
 					uvm_pagedeactivate(ptmp);
 				}
 			} else if (flags & PGO_FREE &&

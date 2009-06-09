@@ -1,4 +1,4 @@
-/*	$OpenBSD: machfb.c,v 1.3 2009/06/02 04:53:57 kettenis Exp $	*/
+/*	$OpenBSD: machfb.c,v 1.5 2009/06/05 19:16:08 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2009 Mark Kettenis.
@@ -188,8 +188,6 @@ struct machfb_softc {
 	u_int8_t	sc_cmap_red[256];
 	u_int8_t	sc_cmap_green[256];
 	u_int8_t	sc_cmap_blue[256];
-
-	int		sc_ofhandle;
 };
 
 int	machfb_ioctl(void *, u_long, caddr_t, int, struct proc *);
@@ -310,12 +308,7 @@ machfb_attach(struct device *parent, struct device *self, void *aux)
 	ri->ri_hw = sc;
 
 	fbwscons_init(&sc->sc_sunfb, RI_BSWAP, console);
-
-	if (console) {
-		sc->sc_ofhandle = OF_stdout();
-		fbwscons_setcolormap(&sc->sc_sunfb, machfb_setcolor);
-	}
-
+	fbwscons_setcolormap(&sc->sc_sunfb, machfb_setcolor);
 	sc->sc_mode = WSDISPLAYIO_MODE_EMUL;
 
 	machfb_init(sc);
@@ -342,8 +335,17 @@ machfb_ioctl(void *v, u_long cmd, caddr_t data, int flags, struct proc *p)
 		break;
 	case WSDISPLAYIO_SMODE:
 		sc->sc_mode = *(u_int *)data;
-		if (sc->sc_mode == WSDISPLAYIO_MODE_EMUL)
+		if (sc->sc_mode == WSDISPLAYIO_MODE_EMUL) {
+			struct rasops_info *ri = &sc->sc_sunfb.sf_ro;
+
+			/* Restore colormap. */
 			fbwscons_setcolormap(&sc->sc_sunfb, machfb_setcolor);
+
+			/* Clear screen. */
+			ri = &sc->sc_sunfb.sf_ro;
+			machfb_fillrect(sc, 0, 0, ri->ri_width, ri->ri_height,
+			    ri->ri_devcmap[WSCOL_WHITE]);
+		}
 		break;
 	case WSDISPLAYIO_GINFO:
 		wdf = (void *)data;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.19 2009/05/28 09:05:33 art Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.21 2009/06/06 23:45:35 guenther Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.1 2003/04/26 18:39:33 fvdl Exp $	*/
 
 /*-
@@ -158,7 +158,6 @@ cpu_exit(struct proc *p)
 	if (p->p_md.md_flags & MDP_USEDMTRR)
 		mtrr_clean(p);
 
-	pmap_tlb_droppmap(p->p_vmspace->vm_map.pmap);
 	tss_free(p->p_md.md_tss_sel);
 	sched_exit(p);
 }

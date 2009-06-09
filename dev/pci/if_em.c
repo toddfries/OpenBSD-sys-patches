@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.209 2009/05/31 04:47:50 deraadt Exp $ */
+/* $OpenBSD: if_em.c,v 1.212 2009/06/05 16:27:40 naddy Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -116,6 +116,14 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573L_PL_1 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573L_PL_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573V_PM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575EB_COPPER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575EB_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575GB_QUAD_CPR },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_FIBER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_QUAD_COPPER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_NS },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE_G },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE_GT },
@@ -179,8 +187,7 @@ void em_receive_checksum(struct em_softc *, struct em_rx_desc *,
 void em_transmit_checksum_setup(struct em_softc *, struct mbuf *,
 				u_int32_t *, u_int32_t *);
 #endif
-void em_set_promisc(struct em_softc *);
-void em_set_multi(struct em_softc *);
+void em_iff(struct em_softc *);
 #ifdef EM_DEBUG
 void em_print_hw_stats(struct em_softc *);
 #endif
@@ -322,6 +329,7 @@ em_attach(struct device *parent, struct device *self, void *aux)
 		}
 		case em_82571:
 		case em_82572:
+		case em_82575:
 		case em_ich9lan:
 		case em_80003es2lan:	/* Limit Jumbo Frame size */
 			sc->hw.max_frame_size = 9234;
@@ -563,24 +571,14 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	case SIOCSIFFLAGS:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFFLAGS (Set Interface Flags)");
 		if (ifp->if_flags & IFF_UP) {
-			/*
-			 * If only the PROMISC or ALLMULTI flag changes, then
-			 * don't do a full re-init of the chip, just update
-			 * the Rx filter.
-			 */
-			if ((ifp->if_flags & IFF_RUNNING) &&
-			    ((ifp->if_flags ^ sc->if_flags) &
-			     (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
-				em_set_promisc(sc);
-			} else {
-				if (!(ifp->if_flags & IFF_RUNNING))
-					em_init(sc);
-			}
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
+				em_init(sc);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				em_stop(sc);
 		}
-		sc->if_flags = ifp->if_flags;
 		break;
 
 	case SIOCSIFMEDIA:
@@ -602,7 +600,7 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING) {
 			em_disable_intr(sc);
-			em_set_multi(sc);
+			em_iff(sc);
 			if (sc->hw.mac_type == em_82542_rev2_0)
 				em_initialize_receive_unit(sc);
 			em_enable_intr(sc);
@@ -689,6 +687,7 @@ em_init(void *arg)
 		break;
 	case em_82571:
 	case em_82572: /* Total Packet Buffer on these is 48k */
+	case em_82575:
 	case em_80003es2lan:
 		pba = E1000_PBA_32K; /* 32K for Rx, 16K for Tx */
 		break;
@@ -739,9 +738,6 @@ em_init(void *arg)
 	}
 	em_initialize_transmit_unit(sc);
 
-	/* Setup Multicast table */
-	em_set_multi(sc);
-
 	/* Prepare receive descriptors and buffers */
 	if (em_setup_receive_structures(sc)) {
 		printf("%s: Could not setup receive structures\n", 
@@ -752,8 +748,8 @@ em_init(void *arg)
 	}
 	em_initialize_receive_unit(sc);
 
-	/* Don't lose promiscuous settings */
-	em_set_promisc(sc);
+	/* Program promiscuous mode and multicast filters. */
+	em_iff(sc);
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -1288,44 +1284,17 @@ em_82547_tx_fifo_reset(struct em_softc *sc)
 }
 
 void
-em_set_promisc(struct em_softc *sc)
+em_iff(struct em_softc *sc)
 {
-	u_int32_t	reg_rctl;
-	struct ifnet   *ifp = &sc->interface_data.ac_if;
-
-	reg_rctl = E1000_READ_REG(&sc->hw, RCTL);
-
-	if (ifp->if_flags & IFF_PROMISC) {
-		reg_rctl |= (E1000_RCTL_UPE | E1000_RCTL_MPE);
-	} else if (ifp->if_flags & IFF_ALLMULTI) {
-		reg_rctl |= E1000_RCTL_MPE;
-		reg_rctl &= ~E1000_RCTL_UPE;
-	} else {
-		reg_rctl &= ~(E1000_RCTL_UPE | E1000_RCTL_MPE);
-	}
-	E1000_WRITE_REG(&sc->hw, RCTL, reg_rctl);
-}
-
-/*********************************************************************
- *  Multicast Update
- *
- *  This routine is called whenever multicast address list is updated.
- *
- **********************************************************************/
-
-void
-em_set_multi(struct em_softc *sc)
-{
-	u_int32_t reg_rctl = 0;
-	u_int8_t  mta[MAX_NUM_MULTICAST_ADDRESSES * ETH_LENGTH_OF_ADDRESS];
 	struct ifnet *ifp = &sc->interface_data.ac_if;
 	struct arpcom *ac = &sc->interface_data;
+	u_int32_t reg_rctl = 0;
+	u_int8_t  mta[MAX_NUM_MULTICAST_ADDRESSES * ETH_LENGTH_OF_ADDRESS];
 	struct ether_multi *enm;
 	struct ether_multistep step;
 	int i = 0;
 
-	IOCTL_DEBUGOUT("em_set_multi: begin");
-	ifp->if_flags &= ~IFF_ALLMULTI;
+	IOCTL_DEBUGOUT("em_iff: begin");
 
 	if (sc->hw.mac_type == em_82542_rev2_0) {
 		reg_rctl = E1000_READ_REG(&sc->hw, RCTL);
@@ -1337,13 +1306,17 @@ em_set_multi(struct em_softc *sc)
 	}
 
 	reg_rctl = E1000_READ_REG(&sc->hw, RCTL);
-	if (ac->ac_multirangecnt > 0 ||
+	reg_rctl &= ~(E1000_RCTL_MPE | E1000_RCTL_UPE);
+	ifp->if_flags &= ~IFF_ALLMULTI;
+
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0 ||
 	    ac->ac_multicnt > MAX_NUM_MULTICAST_ADDRESSES) {
 		ifp->if_flags |= IFF_ALLMULTI;
 		reg_rctl |= E1000_RCTL_MPE;
+		if (ifp->if_flags & IFF_PROMISC)
+			reg_rctl |= E1000_RCTL_UPE;
 	} else {
 		ETHER_FIRST_MULTI(step, ac, enm);
-
 		while (enm != NULL) {
 			bcopy(enm->enm_addrlo, mta + i, ETH_LENGTH_OF_ADDRESS);
 			i += ETH_LENGTH_OF_ADDRESS;
@@ -1352,8 +1325,8 @@ em_set_multi(struct em_softc *sc)
 		}
 
 		em_mc_addr_list_update(&sc->hw, mta, ac->ac_multicnt, 0, 1);
-		reg_rctl &= ~E1000_RCTL_MPE;
 	}
+
 	E1000_WRITE_REG(&sc->hw, RCTL, reg_rctl);
 
 	if (sc->hw.mac_type == em_82542_rev2_0) {
@@ -1411,7 +1384,8 @@ em_update_link_status(struct em_softc *sc)
 			/* Check if we may set SPEED_MODE bit on PCI-E */
 			if ((sc->link_speed == SPEED_1000) &&
 			    ((sc->hw.mac_type == em_82571) ||
-			    (sc->hw.mac_type == em_82572))) {
+			    (sc->hw.mac_type == em_82572) ||
+			    (sc->hw.mac_type == em_82575))) {
 				int tarc0;
 
 				tarc0 = E1000_READ_REG(&sc->hw, TARC0);
@@ -1659,7 +1633,8 @@ em_hardware_init(struct em_softc *sc)
 	/* Set up smart power down as default off on newer adapters */
 	if (!em_smart_pwr_down &&
 	     (sc->hw.mac_type == em_82571 ||
-	      sc->hw.mac_type == em_82572)) {
+	      sc->hw.mac_type == em_82572 ||
+	      sc->hw.mac_type == em_82575)) {
 		uint16_t phy_tmp = 0;
 
 		/* Speed up time to link by disabling smart power down */
@@ -2037,10 +2012,22 @@ em_initialize_transmit_unit(struct em_softc *sc)
 		reg_tipg |= DEFAULT_82543_TIPG_IPGR2 << E1000_TIPG_IPGR2_SHIFT;
 	}
 
+
 	E1000_WRITE_REG(&sc->hw, TIPG, reg_tipg);
 	E1000_WRITE_REG(&sc->hw, TIDV, sc->tx_int_delay);
 	if (sc->hw.mac_type >= em_82540)
 		E1000_WRITE_REG(&sc->hw, TADV, sc->tx_abs_int_delay);
+
+	/* Setup Transmit Descriptor Base Settings */   
+	sc->txd_cmd = E1000_TXD_CMD_IFCS;
+
+	if (sc->hw.mac_type == em_82575) {
+		/* 82575/6 need to enable the TX queue and lack the IDE bit */
+		reg_tctl = E1000_READ_REG(&sc->hw, TXDCTL);
+		reg_tctl |= E1000_TXDCTL_QUEUE_ENABLE;
+		E1000_WRITE_REG(&sc->hw, TXDCTL, reg_tctl);
+	} else if (sc->tx_int_delay > 0)
+		sc->txd_cmd |= E1000_TXD_CMD_IDE;
 
 	/* Program the Transmit Control Register */
 	reg_tctl = E1000_TCTL_PSP | E1000_TCTL_EN |
@@ -2053,12 +2040,6 @@ em_initialize_transmit_unit(struct em_softc *sc)
 		reg_tctl |= E1000_HDX_COLLISION_DISTANCE << E1000_COLD_SHIFT;
 	/* This write will effectively turn on the transmit unit */
 	E1000_WRITE_REG(&sc->hw, TCTL, reg_tctl);
-
-	/* Setup Transmit Descriptor Base Settings */   
-	sc->txd_cmd = E1000_TXD_CMD_IFCS;
-
-	if (sc->tx_int_delay > 0)
-		sc->txd_cmd |= E1000_TXD_CMD_IDE;
 }
 
 /*********************************************************************

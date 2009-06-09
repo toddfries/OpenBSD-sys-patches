@@ -1,4 +1,4 @@
-/* $OpenBSD: vga_pci.c,v 1.40 2009/06/02 11:22:45 deraadt Exp $ */
+/* $OpenBSD: vga_pci.c,v 1.44 2009/06/06 04:38:18 pirofti Exp $ */
 /* $NetBSD: vga_pci.c,v 1.3 1998/06/08 06:55:58 thorpej Exp $ */
 
 /*
@@ -91,6 +91,10 @@
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
 
+#ifdef X86EMU
+#include <machine/vga_post.h>
+#endif
+
 #ifdef VESAFB
 #include <dev/vesa/vesabiosvar.h>
 #endif
@@ -116,6 +120,16 @@ int	vga_drm_print(void *, const char *);
 int vesafb_putcmap(struct vga_pci_softc *, struct wsdisplay_cmap *);
 int vesafb_getcmap(struct vga_pci_softc *, struct wsdisplay_cmap *);
 #endif
+
+
+/*
+ * Function pointers for wsconsctl parameter handling.
+ * XXX These should be per-softc, but right now we only attach
+ * XXX a single vga@pci instance, so this will do.
+ */
+int	(*ws_get_param)(struct wsdisplay_param *);
+int	(*ws_set_param)(struct wsdisplay_param *);
+    
 
 struct cfattach vga_pci_ca = {
 	sizeof(struct vga_pci_softc), vga_pci_match, vga_pci_attach,
@@ -176,6 +190,12 @@ vga_pci_attach(struct device *parent, struct device *self, void *aux)
 	    WSDISPLAY_TYPE_PCIVGA);
 
 	vga_pci_bar_init(sc, pa);
+
+#ifdef X86EMU
+	if ((sc->sc_posth = vga_post_init(pa->pa_bus, pa->pa_device,
+	    pa->pa_function)) == NULL)
+		printf("couldn't set up vga POST handler\n");
+#endif
 
 #if NINTAGP > 0
 	/*
@@ -335,6 +355,18 @@ vga_pci_ioctl(void *v, u_long cmd, caddr_t addr, int flag, struct proc *pb)
 		break;
 
 #endif
+	case WSDISPLAYIO_GETPARAM:
+		if (ws_get_param != NULL)
+			return (*ws_get_param)((struct wsdisplay_param *)addr);
+		else
+			error = ENOTTY;
+		break;
+	case WSDISPLAYIO_SETPARAM:
+		if (ws_set_param != NULL)
+			return (*ws_set_param)((struct wsdisplay_param *)addr);
+		else
+			error = ENOTTY;
+		break;
 	default:
 		error = ENOTTY;
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pmemrange.c,v 1.1 2009/06/01 17:42:33 ariane Exp $	*/
+/*	$OpenBSD: uvm_pmemrange.c,v 1.3 2009/06/07 02:01:54 oga Exp $	*/
 
 /*
  * Copyright (c) 2009 Ariane van der Steldt <ariane@stack.nl>
@@ -51,9 +51,6 @@ uvm_pmr_pg_to_memtype(struct vm_page *pg)
 	return UVM_PMR_MEMTYPE_DIRTY;
 }
 
-/* Cancel static calls (for profiling). */
-#define static
-#define __inline
 /* Trees. */
 RB_PROTOTYPE(uvm_pmr_addr, vm_page, fq.free.tree, uvm_pmr_addr_cmp);
 RB_PROTOTYPE(uvm_pmr_size, vm_page, fq.free.tree, uvm_pmr_size_cmp);
@@ -63,8 +60,6 @@ RB_GENERATE(uvm_pmr_addr, vm_page, fq.free.tree, uvm_pmr_addr_cmp);
 RB_GENERATE(uvm_pmr_size, vm_page, fq.free.tree, uvm_pmr_size_cmp);
 RB_GENERATE(uvm_pmemrange_addr, uvm_pmemrange, pmr_addr,
     uvm_pmemrange_addr_cmp);
-#undef static
-#undef __inline
 
 /* Validation. */
 #ifdef DEBUG
@@ -781,6 +776,7 @@ uvm_pmr_freepages(struct vm_page *pg, psize_t count)
 	uvm_lock_fpageq();
 
 	for (i = 0; i < count; i++) {
+		KASSERT((pg->pg_flags & PG_DEV) == 0);
 		atomic_clearbits_int(&pg[i].pg_flags, pg[i].pg_flags);
 		atomic_setbits_int(&pg[i].pg_flags, PQ_FREE);
 	}
@@ -811,6 +807,7 @@ uvm_pmr_freepageq(struct pglist *pgl)
 	struct vm_page *pg;
 
 	TAILQ_FOREACH(pg, pgl, pageq) {
+		KASSERT((pg->pg_flags & PG_DEV) == 0);
 		atomic_clearbits_int(&pg->pg_flags, pg->pg_flags);
 		atomic_setbits_int(&pg->pg_flags, PQ_FREE);
 	}
