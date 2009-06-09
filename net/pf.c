@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.649 2009/06/05 00:05:21 claudio Exp $ */
+/*	$OpenBSD: pf.c,v 1.651 2009/06/08 03:56:14 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -1340,7 +1340,7 @@ pf_print_state_parts(struct pf_state *s,
 		printf("ICMPv6");
 		break;
 	default:
-		printf("%u", skw->proto);
+		printf("%u", proto);
 		break;
 	}
 	switch (dir) {
@@ -1468,9 +1468,9 @@ pf_addr_wrap_neq(struct pf_addr_wrap *aw1, struct pf_addr_wrap *aw2)
 	switch (aw1->type) {
 	case PF_ADDR_ADDRMASK:
 	case PF_ADDR_RANGE:
-		if (PF_ANEQ(&aw1->v.a.addr, &aw2->v.a.addr, 0))
+		if (PF_ANEQ(&aw1->v.a.addr, &aw2->v.a.addr, AF_INET6))
 			return (1);
-		if (PF_ANEQ(&aw1->v.a.mask, &aw2->v.a.mask, 0))
+		if (PF_ANEQ(&aw1->v.a.mask, &aw2->v.a.mask, AF_INET6))
 			return (1);
 		return (0);
 	case PF_ADDR_DYNIFTL:
