@@ -15,6 +15,7 @@ option		KTRACE		# system call tracing, a la ktrace(1)
 option		ACCOUNTING	# acct(2) process accounting
 option		KMEMSTATS	# collect malloc(9) statistics
 option		PTRACE		# ptrace(2) system call
+option		RTHREADS
 
 option		CRYPTO		# Cryptographic framework
 
