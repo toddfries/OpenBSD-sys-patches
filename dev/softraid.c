@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.148 2009/06/11 19:42:59 marco Exp $ */
+/* $OpenBSD: softraid.c,v 1.150 2009/06/12 17:22:52 jsing Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -1981,7 +1981,9 @@ sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 			continue;
 		sw = sc->sc_dis[i];
 		for (c = 0; c < sw->sd_meta->ssdi.ssd_chunk_no; c++)
-			if (sw->sd_vol.sv_chunks[c]->src_dev_mm == dev) {
+			if (sw->sd_vol.sv_chunks[c]->src_dev_mm == dev &&
+			    sd->sd_vol.sv_chunks[c]->src_meta.scm_status !=
+			        BIOC_SDOFFLINE) {
 				printf("%s: %s chunk already in use\n",
 				    DEVNAME(sc), devname);
 				goto done;
@@ -2118,17 +2120,19 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 			if (no_chunk < 3)
 				goto unwind;
 			if (bc->bc_level == 4)
-				strlcpy(sd->sd_name, "RAID 4", sizeof(sd->sd_name));
+				strlcpy(sd->sd_name, "RAID 4",
+				    sizeof(sd->sd_name));
 			else
-				strlcpy(sd->sd_name, "RAID 5", sizeof(sd->sd_name));
+				strlcpy(sd->sd_name, "RAID 5",
+				    sizeof(sd->sd_name));
 			/*
 			 * XXX add variable strip size later even though
 			 * MAXPHYS is really the clever value, users like
 			 * to tinker with that type of stuff
 			 */
 			strip_size = MAXPHYS;
-			vol_size =
-			    ch_entry->src_meta.scmi.scm_coerced_size * (no_chunk - 1);
+			vol_size = ch_entry->src_meta.scmi.scm_coerced_size *
+			    (no_chunk - 1);
 			break;
 #endif /* not_yet */
 #ifdef AOE
