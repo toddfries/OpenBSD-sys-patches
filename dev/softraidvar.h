@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.71 2009/06/03 21:04:36 marco Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.73 2009/06/11 19:42:59 marco Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -295,6 +295,12 @@ struct sr_raid1 {
 	u_int32_t		sr1_counter;
 };
 
+/* RAID 4 */
+#define SR_RAIDP_NOWU		16
+struct sr_raidp {
+	int32_t			srp_strip_bits;
+};
+
 /* CRYPTO */
 #define SR_CRYPTO_NOWU		16
 struct sr_crypto {
@@ -366,6 +372,7 @@ struct sr_discipline {
 #define	SR_MD_CRYPTO		4
 #define	SR_MD_AOE_INIT		5
 #define	SR_MD_AOE_TARG		6
+#define	SR_MD_RAID4		7
 	char			sd_name[10];	/* human readable dis name */
 	u_int8_t		sd_scsibus;	/* scsibus discipline uses */
 	struct scsi_link	sd_link;	/* link to midlayer */
@@ -373,6 +380,7 @@ struct sr_discipline {
 	union {
 	    struct sr_raid0	mdd_raid0;
 	    struct sr_raid1	mdd_raid1;
+	    struct sr_raidp	mdd_raidp;
 	    struct sr_crypto	mdd_crypto;
 #ifdef AOE
 	    struct sr_aoe	mdd_aoe;
@@ -407,6 +415,7 @@ struct sr_discipline {
 	int			sd_rebuild;	/* can we rebuild? */
 	int			sd_reb_active;	/* rebuild in progress */
 	int			sd_going_down;	/* dive dive dive */
+	int			sd_ready;	/* fully operational */
 
 	struct sr_wu_list	sd_wu_freeq;	/* free wu queue */
 	struct sr_wu_list	sd_wu_pendq;	/* pending wu queue */
@@ -461,6 +470,10 @@ struct sr_softc {
 	struct sr_discipline	*sc_dis[SR_MAXSCSIBUS]; /* scsibus is u_int8_t */
 };
 
+/* hotplug */
+void			sr_hotplug_register(struct sr_discipline *, void *);
+void			sr_hotplug_unregister(struct sr_discipline *, void *);
+
 /* work units & ccbs */
 int			sr_ccb_alloc(struct sr_discipline *);
 void			sr_ccb_free(struct sr_discipline *);
@@ -492,6 +505,7 @@ void			sr_raid_startwu(struct sr_workunit *);
 /* Discipline specific initialisation. */
 void			sr_raid0_discipline_init(struct sr_discipline *);
 void			sr_raid1_discipline_init(struct sr_discipline *);
+void			sr_raidp_discipline_init(struct sr_discipline *);
 void			sr_crypto_discipline_init(struct sr_discipline *);
 void			sr_aoe_discipline_init(struct sr_discipline *);
 void			sr_aoe_server_discipline_init(struct sr_discipline *);
