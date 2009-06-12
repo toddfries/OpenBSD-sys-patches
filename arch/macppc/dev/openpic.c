@@ -70,6 +70,7 @@ int openpic_prog_button(void *arg);
 ppc_splraise_t openpic_splraise;
 ppc_spllower_t openpic_spllower;
 ppc_splx_t openpic_splx;
+ppc_setipl_t openpic_setipl;
 
 /* IRQ vector used for inter-processor interrupts. */
 #define IPI_VECTOR_NOP	64
@@ -111,8 +112,6 @@ struct openpic_softc {
 
 int	openpic_match(struct device *parent, void *cf, void *aux);
 void	openpic_attach(struct device *, struct device *, void *);
-void	openpic_do_pending_int(int pcpl);
-void	openpic_do_pending_int_dis(int pcpl, int s);
 void	openpic_collect_preconf_intr(void);
 void	openpic_ext_intr(void);
 
@@ -236,6 +235,7 @@ openpic_attach(struct device *parent, struct device  *self, void *aux)
 	ppc_intr_func.raise = openpic_splraise;
 	ppc_intr_func.lower = openpic_spllower;
 	ppc_intr_func.x = openpic_splx;
+	ppc_intr_func.setipl = openpic_setipl;
 
 	openpic_set_priority(ci->ci_cpl);
 
@@ -244,7 +244,7 @@ openpic_attach(struct device *parent, struct device  *self, void *aux)
 	printf("\n");
 }
 
-static inline void
+void
 openpic_setipl(int newcpl)
 {
 	struct cpu_info *ci = curcpu();
@@ -284,7 +284,7 @@ openpic_spllower(int newcpl)
 void
 openpic_splx(int newcpl)
 {
-	openpic_do_pending_int(newcpl);
+	ppc_do_pending_int(newcpl);
 }
 
 void
@@ -446,87 +446,6 @@ openpic_calc_mask()
 }
 
 void
-openpic_do_pending_int(int pcpl)
-{
-	int s;
-	s = ppc_intr_disable();
-	openpic_do_pending_int_dis(pcpl, s);
-	ppc_intr_enable(s);
-
-}
-
-/*
- * This function expect interrupts disabled on entry and exit,
- * the s argument indicates if interrupts may be enabled during
- * the processing of off level interrupts, s 'should' always be 1.
- */
-void
-openpic_do_pending_int_dis(int pcpl, int s)
-{
-	struct cpu_info *ci = curcpu();
-	int loopcount = 0;
-
-	if (ci->ci_iactive & CI_IACTIVE_PROCESSING_SOFT) {
-		/* soft interrupts are being processed, just set ipl/return */
-		openpic_setipl(pcpl);
-		return;
-	}
-
-	atomic_setbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_SOFT);
-
-	do {
-		loopcount ++;
-		if (loopcount > 50)
-			printf("do_pending looping %d pcpl %x %x\n", loopcount,
-			    pcpl, ci->ci_cpl);
-		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTTTY)) &&
-		    (pcpl < IPL_SOFTTTY)) {
-			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTTTY);
-
-			openpic_setipl(IPL_SOFTTTY);
-			ppc_intr_enable(s);
-			KERNEL_LOCK();
-			softtty();
-			KERNEL_UNLOCK();
-			ppc_intr_disable();
-			continue;
-		}
-		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTNET)) &&
-		    (pcpl < IPL_SOFTNET)) {
-			extern int netisr;
-			int pisr;
-
-			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTNET);
-			openpic_setipl(IPL_SOFTNET);
-			ppc_intr_enable(s);
-			KERNEL_LOCK();
-			while ((pisr = netisr) != 0) {
-				atomic_clearbits_int(&netisr, pisr);
-				softnet(pisr);
-			}
-			KERNEL_UNLOCK();
-			ppc_intr_disable();
-			continue;
-		}
-		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTCLOCK)) &&
-		    (pcpl < IPL_SOFTCLOCK)) {
-			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTCLOCK);
-			openpic_setipl(IPL_SOFTCLOCK);
-			ppc_intr_enable(s);
-			KERNEL_LOCK();
-			softclock();
-			KERNEL_UNLOCK();
-			ppc_intr_disable();
-			continue;
-		}
-		break;
-	} while (ci->ci_ipending & ppc_smask[pcpl]);
-	openpic_setipl(pcpl);	/* Don't use splx... we are here already! */
-
-	atomic_clearbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_SOFT);
-}
-
-void
 openpic_enable_irq(int irq, int pri)
 {
 	u_int x;
@@ -667,7 +586,7 @@ openpic_ext_intr()
 		 * 
 		 * The loop here is because an interrupt could case a pending
 		 * soft interrupt between the finishing of the
-		 * openpic_do_pending_int, but before ppc_intr_disable
+		 * ppc_do_pending_int, but before ppc_intr_disable
 		 */
 		do {
 			openpic_irqloop[ci->ci_cpuid]++;
@@ -683,7 +602,7 @@ openpic_ext_intr()
 				 */
 				break;
 			} else {
-				openpic_do_pending_int_dis(pcpl, 1);
+				ppc_do_pending_int_dis(pcpl, 1);
 			}
 		} while (ci->ci_ipending & ppc_smask[pcpl]);
 	}

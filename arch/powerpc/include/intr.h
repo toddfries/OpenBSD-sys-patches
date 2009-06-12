@@ -73,15 +73,18 @@ int  splsoftnet(void);
 int	splraise(int);
 int	spllower(int);
 void	splx(int);
+void	splx_dis(int);
 
 typedef int (ppc_splraise_t) (int);
 typedef int (ppc_spllower_t) (int);
 typedef void (ppc_splx_t) (int);
+typedef void (ppc_setipl_t) (int);
 
 extern struct ppc_intr_func {
 	ppc_splraise_t *raise;
 	ppc_spllower_t *lower;
 	ppc_splx_t *x;
+	ppc_setipl_t *setipl;
 }ppc_intr_func;
 
 extern int ppc_smask[IPL_NUM];
@@ -89,7 +92,8 @@ extern int ppc_smask[IPL_NUM];
 void ppc_smask_init(void);
 char *ppc_intr_typename(int type);
 
-void do_pending_int(void);
+void ppc_do_pending_int(int ncpl);
+void ppc_do_pending_int_dis(int ncpl, int dis);
 
 /* SPL asserts */
 #define	splassert(wantipl)	/* nothing */

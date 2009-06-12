@@ -253,8 +253,9 @@ decr_intr(struct clockframe *frame)
 		while (nstats-- > 0)
 			statclock(frame);
 
-		splx(s);
 		(void) ppc_intr_disable();
+
+		ppc_do_pending_int_dis(s, 1);
 
 		/* if a tick has occurred while dealing with these,
 		 * dont service it now, delay until the next tick.
