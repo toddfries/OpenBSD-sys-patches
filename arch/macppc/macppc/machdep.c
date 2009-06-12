@@ -992,20 +992,6 @@ power4e_get_eth_addr()
 }
 
 typedef void  (void_f) (void);
-void_f *pending_int_f = NULL;
-
-/* call the bus/interrupt controller specific pending interrupt handler
- * would be nice if the offlevel interrupt code was handled here
- * instead of being in each of the specific handler code
- */
-void
-do_pending_int()
-{
-	if (pending_int_f != NULL) {
-		(*pending_int_f)();
-	}
-}
-
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
@@ -1117,7 +1103,6 @@ ppc_send_ipi(struct cpu_info *ci, int id)
 	(*intr_send_ipi_func)(ci, id);
 }
 
-
 /* BUS functions */
 int
 bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
@@ -1145,6 +1130,7 @@ bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
 	}
 	return 0;
 }
+
 bus_addr_t
 bus_space_unmap_p(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 {
@@ -1154,6 +1140,7 @@ bus_space_unmap_p(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 	bus_space_unmap((t), (bsh), (size));
 	return paddr ;
 }
+
 void
 bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 {

@@ -67,7 +67,6 @@ struct intrq macintr_handler[ICU_LEN];
 void macintr_calc_mask(void);
 void macintr_eoi(int irq);
 int macintr_read_irq(void);
-static void macintr_do_pending_int(void);
 
 extern u_int32_t *heathrow_FCR;
 
@@ -86,7 +85,6 @@ struct macintr_softc {
 
 int	macintr_match(struct device *parent, void *cf, void *aux);
 void	macintr_attach(struct device *, struct device *, void *);
-void	mac_do_pending_int(void);
 void	mac_ext_intr(void);
 void	macintr_collect_preconf_intr(void);
 void	macintr_setipl(int ipl);
@@ -128,7 +126,6 @@ macintr_match(struct device *parent, void *cf, void *aux)
 
 u_int8_t *interrupt_reg;
 typedef void  (void_f) (void);
-extern void_f *pending_int_f;
 int macintr_prog_button (void *arg);
 
 intr_establish_t macintr_establish;
@@ -171,9 +168,8 @@ macintr_splx(int newcpl)
 {
 	struct cpu_info *ci = curcpu();
 	 
-	macintr_setipl(newcpl);
 	if (ci->ci_ipending & ppc_smask[newcpl])
-		macintr_do_pending_int();
+		ppc_do_pending_int(newcpl);
 }
 
 void
@@ -195,7 +191,6 @@ macintr_attach(struct device *parent, struct device *self, void *aux)
 	ppc_smask_init();
 
 	install_extint(mac_ext_intr);
-	pending_int_f = macintr_do_pending_int;
 	intr_establish_func  = macintr_establish;
 	intr_disestablish_func  = macintr_disestablish;
 	mac_intr_establish_func  = macintr_establish;
@@ -204,6 +199,7 @@ macintr_attach(struct device *parent, struct device *self, void *aux)
 	ppc_intr_func.raise = macintr_splraise;
 	ppc_intr_func.lower = macintr_spllower;
 	ppc_intr_func.x = macintr_splx;
+	ppc_intr_func.setipl = macintr_setipl;
 
 	ci->ci_iactive = 0;
 
@@ -466,63 +462,6 @@ mac_ext_intr()
 	splx(pcpl);	/* Process pendings. */
 }
 
-void
-macintr_do_pending_int()
-{
-	struct cpu_info *ci = curcpu();
-	int pcpl = ci->ci_cpl; /* XXX */
-	int s;
-	s = ppc_intr_disable();
-	if (ci->ci_iactive & CI_IACTIVE_PROCESSING_SOFT) {
-		ppc_intr_enable(s);
-		return;
-	}
-	atomic_setbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_SOFT);
-
-	do {
-		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTTTY)) &&  (pcpl < IPL_SOFTTTY)) {
-			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTTTY);
-			ci->ci_cpl = IPL_SOFTTTY;
-			ppc_intr_enable(1);
-			KERNEL_LOCK();
-			softtty();
-			KERNEL_UNLOCK();
-			ppc_intr_disable();
-			ci->ci_cpl = pcpl;
-			continue;
-		}
-		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTNET)) &&  (pcpl < IPL_SOFTNET)) {
-			extern int netisr;
-			int pisr;
-
-			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTNET);
-			while ((pisr = netisr) != 0) {
-				atomic_clearbits_int(&netisr, pisr);
-				ci->ci_cpl = IPL_SOFTNET;
-				ppc_intr_enable(1);
-				KERNEL_LOCK();
-				softnet(pisr);
-				KERNEL_UNLOCK();
-				ppc_intr_disable();
-				ci->ci_cpl = pcpl;
-			}
-			continue;
-		}
-		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTCLOCK)) && (pcpl < IPL_SOFTCLOCK)) {
-			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTCLOCK);
-			ci->ci_cpl = IPL_SOFTCLOCK;
-			ppc_intr_enable(1);
-			KERNEL_LOCK();
-			softclock();
-			KERNEL_UNLOCK();
-			ppc_intr_disable();
-			ci->ci_cpl = pcpl;
-			continue;
-		}
-	} while (ci->ci_ipending & ppc_smask[pcpl]);
-	macintr_setipl(pcpl);
-	atomic_clearbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_SOFT);
-}
 
 void
 macintr_eoi(int irq)

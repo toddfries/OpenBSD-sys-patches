@@ -32,14 +32,17 @@
  *
  */
 #include <sys/param.h>
+#include <sys/systm.h>
 
 #include <machine/cpu.h>
 #include <machine/intr.h>
 #include <machine/lock.h>
 
-int ppc_dflt_splraise(int);
-int ppc_dflt_spllower(int);
-void ppc_dflt_splx(int);
+
+ppc_splraise_t ppc_dflt_splraise;
+ppc_spllower_t ppc_dflt_spllower;
+ppc_splx_t ppc_dflt_splx;
+ppc_setipl_t ppc_dflt_setipl;
 
 /* provide a function for asm code to call */
 #undef splraise
@@ -122,19 +125,22 @@ ppc_dflt_spllower(int newcpl)
 void
 ppc_dflt_splx(int newcpl)
 {
+	ppc_do_pending_int(newcpl);
+}
+
+void
+ppc_dflt_setipl(int newcpl)
+{
 	struct cpu_info *ci = curcpu();
-
 	ci->ci_cpl = newcpl;
-
-	if (ci->ci_ipending & ppc_smask[newcpl])
-		do_pending_int();
 }
 
 struct ppc_intr_func ppc_intr_func =
 {
 	ppc_dflt_splraise,
 	ppc_dflt_spllower,
-	ppc_dflt_splx
+	ppc_dflt_splx,
+	ppc_dflt_setipl
 };
 
 char *
@@ -152,4 +158,95 @@ ppc_intr_typename(int type)
 	default:
 		return ("unknown");
 	}
+}
+
+void
+ppc_do_pending_int(int pcpl)
+{
+	int s;
+	s = ppc_intr_disable();
+	ppc_do_pending_int_dis(pcpl, s);
+	ppc_intr_enable(s);
+
+}
+
+/*
+ * This function expect interrupts disabled on entry and exit,
+ * the s argument indicates if interrupts may be enabled during
+ * the processing of off level interrupts, s 'should' always be 1.
+ *
+ * This is called from clock and hardware interrupt service routines
+ * which can cause recursion, however they will only recurse
+ * once because interrupts are only enabled while CI_IACTIVE_PROCESSING_SOFT
+ * is set. This prevents a second recursion from occurring.
+ */
+void
+ppc_do_pending_int_dis(int pcpl, int s)
+{
+	struct cpu_info *ci = curcpu();
+	int loopcount = 0;
+
+	if (ci->ci_iactive & CI_IACTIVE_PROCESSING_SOFT) {
+		/* soft interrupts are being processed, just set ipl/return */
+		ppc_intr_func.setipl(pcpl);
+		return;
+	}
+
+	atomic_setbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_SOFT);
+
+	do {
+		loopcount ++;
+		if (loopcount > 50)
+			printf("do_pending looping %d pcpl %x %x\n", loopcount,
+			    pcpl, ci->ci_cpl);
+		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTTTY)) &&
+		    (pcpl < IPL_SOFTTTY)) {
+			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTTTY);
+
+			ppc_intr_func.setipl(IPL_SOFTTTY);
+			ppc_intr_enable(s);
+			KERNEL_LOCK();
+			softtty();
+			KERNEL_UNLOCK();
+			ppc_intr_disable();
+			continue;
+		}
+		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTNET)) &&
+		    (pcpl < IPL_SOFTNET)) {
+			extern int netisr;
+			int pisr;
+
+			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTNET);
+			ppc_intr_func.setipl(IPL_SOFTNET);
+			ppc_intr_enable(s);
+			KERNEL_LOCK();
+			while ((pisr = netisr) != 0) {
+				atomic_clearbits_int(&netisr, pisr);
+				softnet(pisr);
+			}
+			KERNEL_UNLOCK();
+			ppc_intr_disable();
+			continue;
+		}
+		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTCLOCK)) &&
+		    (pcpl < IPL_SOFTCLOCK)) {
+			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTCLOCK);
+			ppc_intr_func.setipl(IPL_SOFTCLOCK);
+			ppc_intr_enable(s);
+			KERNEL_LOCK();
+			softclock();
+			KERNEL_UNLOCK();
+			ppc_intr_disable();
+			continue;
+		}
+		break;
+	} while (ci->ci_ipending & ppc_smask[pcpl]);
+	/*
+	 * return to original priority, notice that interrupts are
+	 * disabled here because we do not want to take recursive interrupts
+	 * at this point
+	 */
+	ppc_intr_func.setipl(pcpl);
+
+	atomic_clearbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_SOFT);
 }
