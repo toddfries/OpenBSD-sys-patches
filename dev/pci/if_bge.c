@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.273 2009/06/06 14:25:38 sthen Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.275 2009/06/11 23:11:27 sthen Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -1223,6 +1223,10 @@ bge_chipinit(struct bge_softc *sc)
 			/* 1536 bytes for read, 384 bytes for write. */
 			dma_rw_ctl |= BGE_PCIDMARWCTL_RD_WAT_SHIFT(7) |
 			    BGE_PCIDMARWCTL_WR_WAT_SHIFT(3);
+		} else if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5703) {
+			/* 512 bytes for read, 384 bytes for write. */
+			dma_rw_ctl |= BGE_PCIDMARWCTL_RD_WAT_SHIFT(4) |
+			    BGE_PCIDMARWCTL_WR_WAT_SHIFT(3);
 		} else {
 			/* 384 bytes for read and write. */
 			dma_rw_ctl |= BGE_PCIDMARWCTL_RD_WAT_SHIFT(3) |
@@ -1270,6 +1274,16 @@ bge_chipinit(struct bge_softc *sc)
 	CSR_WRITE_4(sc, BGE_MODE_CTL, BGE_DMA_SWAP_OPTIONS|
 		    BGE_MODECTL_MAC_ATTN_INTR|BGE_MODECTL_HOST_SEND_BDS|
 		    BGE_MODECTL_TX_NO_PHDR_CSUM);
+
+	/*
+	 * BCM5701 B5 have a bug causing data corruption when using
+	 * 64-bit DMA reads, which can be terminated early and then
+	 * completed later as 32-bit accesses, in combination with
+	 * certain bridges.
+	 */
+	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5701 &&
+	    sc->bge_chipid == BGE_CHIPID_BCM5701_B5)
+		BGE_SETBIT(sc, BGE_MODE_CTL, BGE_MODECTL_FORCE_PCI32);
 
 	/*
 	 * Disable memory write invalidate.  Apparently it is not supported
