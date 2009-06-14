@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.11 2009/06/10 18:04:25 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.14 2009/06/13 21:48:03 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -17,7 +17,9 @@
  */
 
 /*
- * Origin 200 / Origin 2000 / Onyx 2 (IP27) specific code.
+ * Origin 200 / Origin 2000 / Onyx 2 (IP27), as well as
+ * Origin 300 / Onyx 300 / Origin 350 / Onyx 350 / Onyx 4 / Origin 3000 /
+ * Fuel / Tezro (IP35) specific code.
  */
 
 #include <sys/param.h>
@@ -54,7 +56,9 @@ int	ip27_widget_id(int16_t, u_int, uint32_t *);
 void	ip27_halt(int);
 
 static paddr_t io_base;
+static gda_t *gda;
 static int ip35 = 0;
+static uint maxnodes;
 
 int	ip27_hub_intr_register(int, int, int *);
 int	ip27_hub_intr_establish(int (*)(void *), void *, int, int,
@@ -64,12 +68,16 @@ intrmask_t ip27_hub_intr_handler(intrmask_t, struct trap_frame *);
 void	ip27_hub_intr_makemasks(void);
 void	ip27_hub_do_pending_int(int);
 
+void	ip27_attach_node(struct device *, int16_t);
+int	ip27_print(void *, const char *);
 void	ip27_nmi(void *);
 
 void
 ip27_setup()
 {
-	kl_nmi_t *nmi;
+	size_t gsz;
+	uint node;
+	nmi_t *nmi;
 
 	uncached_base = PHYS_TO_XKPHYS_UNCACHED(0, SP_NC);
 	io_base = PHYS_TO_XKPHYS_UNCACHED(0, SP_IO);
@@ -82,16 +90,48 @@ ip27_setup()
 
 	md_halt = ip27_halt;
 
-	kl_init();
+	/*
+	 * Figure out as early as possibly whether we are running in M
+	 * or N mode.
+	 */
+
+	kl_init(ip35 ? HUBNI_IP35 : HUBNI_IP27);
 	if (kl_n_mode != 0)
 		xbow_long_shift = 28;
 
 	/*
-	 * Scan this node's configuration to find out CPU and memory
-	 * information.
+	 * Get a grip on the global data area, and figure out how many
+	 * theoretical nodes are available.
 	 */
 
-	kl_scan_config(0);
+	gda = IP27_GDA(0);
+	gsz = IP27_GDA_SIZE(0);
+	if (gda->magic != GDA_MAGIC || gda->ver < 2) {
+		masternasid = 0;
+		maxnodes = 0;
+	} else {
+		masternasid = gda->masternasid;
+		maxnodes = (gsz - offsetof(gda_t, nasid)) / sizeof(int16_t);
+		if (maxnodes > GDA_MAXNODES)
+			maxnodes = GDA_MAXNODES;
+		/* in M mode, there can't be more than 64 nodes anyway */
+		if (kl_n_mode == 0 && maxnodes > 64)
+			maxnodes = 64;
+	}
+
+	/*
+	 * Scan all nodes configurations to find out CPU and memory
+	 * information, starting with the master node.
+	 */
+
+	kl_scan_config(masternasid);
+	for (node = 0; node < maxnodes; node++) {
+		if (gda->nasid[node] < 0)
+			continue;
+		if (gda->nasid[node] == masternasid)
+			continue;
+		kl_scan_config(gda->nasid[node]);
+	}
 	kl_scan_done();
 
 	/*
@@ -124,18 +164,18 @@ ip27_setup()
 	 * Disable all hardware interrupts.
 	 */
 
-	IP27_LHUB_S(HUB_CPU0_IMR0, 0);
-	IP27_LHUB_S(HUB_CPU0_IMR1, 0);
-	IP27_LHUB_S(HUB_CPU1_IMR0, 0);
-	IP27_LHUB_S(HUB_CPU1_IMR1, 0);
-	(void)IP27_LHUB_L(HUB_IR0);
-	(void)IP27_LHUB_L(HUB_IR1);
+	IP27_LHUB_S(HUBPI_CPU0_IMR0, 0);
+	IP27_LHUB_S(HUBPI_CPU0_IMR1, 0);
+	IP27_LHUB_S(HUBPI_CPU1_IMR0, 0);
+	IP27_LHUB_S(HUBPI_CPU1_IMR1, 0);
+	(void)IP27_LHUB_L(HUBPI_IR0);
+	(void)IP27_LHUB_L(HUBPI_IR1);
 	/* XXX do the other two cpus on IP35 */
 
 	/*
 	 * Setup NMI handler.
 	 */
-	nmi = IP27_KLNMI_HDR(0);
+	nmi = IP27_NMI(0);
 	nmi->magic = NMI_MAGIC;
 	nmi->cb = (vaddr_t)ip27_nmi;
 	nmi->cb_complement = ~nmi->cb;
@@ -144,8 +184,65 @@ ip27_setup()
 	/*
 	 * Set up Node 0's HUB.
 	 */
-	IP27_LHUB_S(PI_REGION_PRESENT, 1);
-	IP27_LHUB_S(PI_CALIAS_SIZE, PI_CALIAS_SIZE_0);
+	IP27_LHUB_S(HUBPI_REGION_PRESENT, 0xffffffffffffffff);
+	IP27_LHUB_S(HUBPI_CALIAS_SIZE, PI_CALIAS_SIZE_0);
+}
+
+/*
+ * Autoconf enumeration
+ */
+
+void
+ip27_autoconf(struct device *parent)
+{
+	struct confargs nca;
+	uint node;
+
+	/*
+	 * Attach the CPU we are running on early; other processors,
+	 * if any, will get attached as they are discovered.
+	 */
+
+	bzero(&nca, sizeof nca);
+	nca.ca_nasid = masternasid;
+	nca.ca_name = "cpu";
+	config_found(parent, &nca, ip27_print);
+	nca.ca_name = "clock";
+	config_found(parent, &nca, ip27_print);
+
+	/*
+	 * Now attach all nodes' I/O devices.
+	 */
+
+	ip27_attach_node(parent, masternasid);
+	for (node = 0; node < maxnodes; node++) {
+		if (gda->nasid[node] < 0)
+			continue;
+		if (gda->nasid[node] == masternasid)
+			continue;
+		ip27_attach_node(parent, gda->nasid[node]);
+	}
+}
+
+void
+ip27_attach_node(struct device *parent, int16_t nasid)
+{
+	struct confargs nca;
+
+	bzero(&nca, sizeof nca);
+	nca.ca_name = "xbow";
+	nca.ca_nasid = nasid;
+	config_found(parent, &nca, ip27_print);
+}
+
+int
+ip27_print(void *aux, const char *pnp)
+{
+	struct confargs *ca = aux;
+
+	printf(" nasid %d", ca->ca_nasid);
+
+	return UNCONF;
 }
 
 /*
@@ -217,19 +314,17 @@ ip27_halt(int howto)
 	 * to tell the PROM which action we want it to take afterwards.
 	 */
 
-	if (howto & RB_HALT) {
-		if (howto & RB_POWERDOWN)
-			return;	/* caller will spin */
-	}
+	if (howto & RB_HALT)
+		return;	/* caller will spin */
 
 	if (ip35) {
-		IP27_LHUB_S(HUB_NI_IP35 + HUB_NI_RESET_ENABLE, RESET_ENABLE);
-		IP27_LHUB_S(HUB_NI_IP35 + HUB_NI_RESET,
-		    RESET_LOCAL | RESET_ACTION);
+		IP27_LHUB_S(HUBNI_IP35 + HUBNI_RESET_ENABLE, NI_RESET_ENABLE);
+		IP27_LHUB_S(HUBNI_IP35 + HUBNI_RESET,
+		    NI_RESET_LOCAL | NI_RESET_ACTION);
 	} else {
-		IP27_LHUB_S(HUB_NI_IP27 + HUB_NI_RESET_ENABLE, RESET_ENABLE);
-		IP27_LHUB_S(HUB_NI_IP27 + HUB_NI_RESET,
-		    RESET_LOCAL | RESET_ACTION);
+		IP27_LHUB_S(HUBNI_IP27 + HUBNI_RESET_ENABLE, NI_RESET_ENABLE);
+		IP27_LHUB_S(HUBNI_IP27 + HUBNI_RESET,
+		    NI_RESET_LOCAL | NI_RESET_ACTION);
 	}
 }
 
@@ -303,9 +398,9 @@ ip27_hub_intr_establish(int (*func)(void *), void *arg, int intrbit,
 	ip27_hub_intr_makemasks();
 
 	/* XXX this assumes we run on cpu0 */
-	IP27_LHUB_S(HUB_CPU0_IMR0,
-	    IP27_LHUB_L(HUB_CPU0_IMR0) | (1UL << intrbit));
-	(void)IP27_LHUB_L(HUB_IR0);
+	IP27_LHUB_S(HUBPI_CPU0_IMR0,
+	    IP27_LHUB_L(HUBPI_CPU0_IMR0) | (1UL << intrbit));
+	(void)IP27_LHUB_L(HUBPI_IR0);
 
 	return 0;
 }
@@ -329,9 +424,9 @@ ip27_hub_intr_disestablish(int intrbit)
 	}
 
 	/* XXX this assumes we run on cpu0 */
-	IP27_LHUB_S(HUB_CPU0_IMR0,
-	    IP27_LHUB_L(HUB_CPU0_IMR0) & ~(1UL << intrbit));
-	(void)IP27_LHUB_L(HUB_IR0);
+	IP27_LHUB_S(HUBPI_CPU0_IMR0,
+	    IP27_LHUB_L(HUBPI_CPU0_IMR0) & ~(1UL << intrbit));
+	(void)IP27_LHUB_L(HUBPI_IR0);
 
 	intrhand[intrbit] = NULL;
 
@@ -417,8 +512,8 @@ ip27_hub_intr_handler(intrmask_t hwpend, struct trap_frame *frame)
 	int rc;
 
 	/* XXX this assumes we run on cpu0 */
-	isr = IP27_LHUB_L(HUB_IR0);
-	imr = IP27_LHUB_L(HUB_CPU0_IMR0);
+	isr = IP27_LHUB_L(HUBPI_IR0);
+	imr = IP27_LHUB_L(HUBPI_CPU0_IMR0);
 
 	isr &= imr;
 	if (isr == 0)
@@ -427,8 +522,8 @@ ip27_hub_intr_handler(intrmask_t hwpend, struct trap_frame *frame)
 	/*
 	 * Mask all pending interrupts.
 	 */
-	IP27_LHUB_S(HUB_CPU0_IMR0, imr & ~isr);
-	(void)IP27_LHUB_L(HUB_IR0);
+	IP27_LHUB_S(HUBPI_CPU0_IMR0, imr & ~isr);
+	(void)IP27_LHUB_L(HUBPI_IR0);
 
 	/*
 	 * If interrupts are spl-masked, mark them as pending only.
@@ -474,8 +569,8 @@ ip27_hub_intr_handler(intrmask_t hwpend, struct trap_frame *frame)
 		/*
 		 * Reenable interrupts which have been serviced.
 		 */
-		IP27_LHUB_S(HUB_CPU0_IMR0, imr);
-		(void)IP27_LHUB_L(HUB_IR0);
+		IP27_LHUB_S(HUBPI_CPU0_IMR0, imr);
+		(void)IP27_LHUB_L(HUBPI_IR0);
 		
 		__asm__ (" .set noreorder\n");
 		cpl = icpl;
@@ -488,8 +583,8 @@ ip27_hub_intr_handler(intrmask_t hwpend, struct trap_frame *frame)
 void
 hw_setintrmask(intrmask_t m)
 {
-	IP27_LHUB_S(HUB_CPU0_IMR0, ip27_hub_intrmask & ~((uint64_t)m));
-	(void)IP27_LHUB_L(HUB_IR0);
+	IP27_LHUB_S(HUBPI_CPU0_IMR0, ip27_hub_intrmask & ~((uint64_t)m));
+	(void)IP27_LHUB_L(HUBPI_IR0);
 }
 
 void
