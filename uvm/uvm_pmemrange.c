@@ -20,6 +20,21 @@
 #include <uvm/uvm.h>
 #include <sys/malloc.h>
 
+#define DEBUG
+
+#define SET_TAG(pg, val)	do { (pg)->pmr_tag = (val); } while (0)
+
+#define PKASSERT(pred, pmr, pg)						\
+	do {								\
+		if (!(pred)) {						\
+			panic_page(__func__, __LINE__, #pg, pg, pmr,	\
+			    #pred);					\
+		}							\
+	} while (0)
+
+void	panic_page(const char*, int, const char *, struct vm_page *,
+	    struct uvm_pmemrange *, const char *);
+
 /*
  * 2 trees: addr tree and size tree.
  *
@@ -175,6 +190,8 @@ uvm_pmr_size_cmp(struct vm_page *lhs, struct vm_page *rhs)
 	/* Using second tree, so we receive pg[1] instead of pg[0]. */
 	lhs_size = (lhs - 1)->fq.free.pages;
 	rhs_size = (rhs - 1)->fq.free.pages;
+	PKASSERT(lhs_size > 1, NULL, lhs - 1);
+	PKASSERT(rhs_size > 1, NULL, rhs - 1);
 
 	cmp = (lhs_size < rhs_size ? -1 : lhs_size > rhs_size);
 	if (cmp == 0)
@@ -248,10 +265,11 @@ uvm_pmr_pnaddr(struct uvm_pmemrange *pmr, struct vm_page *pg,
 	else
 		*pg_prev = RB_PREV(uvm_pmr_addr, &pmr->addr, *pg_next);
 
-	KASSERT(*pg_next == NULL ||
-	    VM_PAGE_TO_PHYS(*pg_next) > VM_PAGE_TO_PHYS(pg));
+	KASSERT(*pg_next == NULL || VM_PAGE_TO_PHYS(*pg_next) >=
+	    VM_PAGE_TO_PHYS(pg) + pg->fq.free.pages);
 	KASSERT(*pg_prev == NULL ||
-	    VM_PAGE_TO_PHYS(*pg_prev) < VM_PAGE_TO_PHYS(pg));
+	    VM_PAGE_TO_PHYS(*pg_prev) + (*pg_prev)->fq.free.pages <=
+	    VM_PAGE_TO_PHYS(pg));
 
 	/* Reset if not contig. */
 	if (*pg_prev != NULL &&
@@ -331,6 +349,7 @@ struct vm_page *
 uvm_pmr_insert_addr(struct uvm_pmemrange *pmr, struct vm_page *pg, int no_join)
 {
 	struct vm_page *prev, *next;
+	psize_t i_pg;
 
 #ifdef DEBUG
 	struct vm_page *i;
@@ -353,13 +372,20 @@ uvm_pmr_insert_addr(struct uvm_pmemrange *pmr, struct vm_page *pg, int no_join)
 	if (!no_join) {
 		uvm_pmr_pnaddr(pmr, pg, &prev, &next);
 		if (next != NULL) {
-			uvm_pmr_remove_size(pmr, next);
-			uvm_pmr_remove_addr(pmr, next);
+			for (i_pg = 0; i_pg < next->fq.free.pages; i_pg++)
+				SET_TAG(next + i_pg,
+				    "inser_addr: next in join");
+			uvm_pmr_remove(pmr, next);
+			KASSERT(pg != next);
 			pg->fq.free.pages += next->fq.free.pages;
 			next->fq.free.pages = 0;
 		}
 		if (prev != NULL) {
+			for (i_pg = 0; i_pg < prev->fq.free.pages; i_pg++)
+				SET_TAG(prev + i_pg,
+				    "inser_addr: prev in join");
 			uvm_pmr_remove_size(pmr, prev);
+			KASSERT(prev != pg);
 			prev->fq.free.pages += pg->fq.free.pages;
 			pg->fq.free.pages = 0;
 			return prev;
@@ -393,6 +419,7 @@ uvm_pmr_insert_size(struct uvm_pmemrange *pmr, struct vm_page *pg)
 	int mti;
 #endif
 
+	KASSERT(RB_FIND(uvm_pmr_addr, &pmr->addr, pg) == pg);
 	KASSERT(pg->fq.free.pages >= 1);
 	KASSERT(pg->pg_flags & PQ_FREE);
 	memtype = uvm_pmr_pg_to_memtype(pg);
@@ -404,7 +431,6 @@ uvm_pmr_insert_size(struct uvm_pmemrange *pmr, struct vm_page *pg)
 			KDASSERT(RB_FIND(uvm_pmr_size, &pmr->size[mti],
 			    pg + 1) == NULL);
 		}
-		KDASSERT(RB_FIND(uvm_pmr_addr, &pmr->addr, pg) == pg);
 	}
 	for (i = pg; i < pg + pg->fq.free.pages; i++)
 		KASSERT(uvm_pmr_pg_to_memtype(i) == memtype);
@@ -458,6 +484,7 @@ uvm_pmr_remove_1strange(struct pglist *pgl, paddr_t boundary,
 		first_boundary = 0;
 
 	/* Remove all pages in the first segment. */
+	SET_TAG(pg, "remove_1strange");
 	pre_last = pg;
 	last = TAILQ_NEXT(pre_last, pageq);
 	TAILQ_REMOVE(pgl, pre_last, pageq);
@@ -486,6 +513,7 @@ uvm_pmr_remove_1strange(struct pglist *pgl, paddr_t boundary,
 		pre_last = last;
 		last = TAILQ_NEXT(last, pageq);
 		TAILQ_REMOVE(pgl, pre_last, pageq);
+		SET_TAG(pre_last, "remove_1strange");
 	}
 	KDASSERT(TAILQ_FIRST(pgl) == last);
 	KDASSERT(pg + (count - 1) == pre_last);
@@ -514,9 +542,7 @@ uvm_pmr_extract_range(struct uvm_pmemrange *pmr, struct vm_page *pg,
 {
 	struct vm_page *after, *pg_i;
 	psize_t before_sz, after_sz;
-#ifdef DEBUG
 	psize_t i;
-#endif
 
 	KASSERT(end > start);
 	KASSERT(pmr->low <= atop(VM_PAGE_TO_PHYS(pg)));
@@ -539,10 +565,14 @@ uvm_pmr_extract_range(struct uvm_pmemrange *pmr, struct vm_page *pg,
 		pg_i->fq.free.pages = 0;
 		TAILQ_INSERT_TAIL(result, pg_i, pageq);
 		KDASSERT(pg_i->pg_flags & PQ_FREE);
+		SET_TAG(pg_i, "extract_range: extracted");
 	}
 
 	/* Before handling. */
 	if (before_sz > 0) {
+		for (i = 0; i < before_sz; i++) {
+			SET_TAG(&pg[i], "extract_range: before");
+		}
 		pg->fq.free.pages = before_sz;
 		uvm_pmr_insert_size(pmr, pg);
 	}
@@ -554,6 +584,7 @@ uvm_pmr_extract_range(struct uvm_pmemrange *pmr, struct vm_page *pg,
 #ifdef DEBUG
 		for (i = 0; i < after_sz; i++) {
 			KASSERT(!uvm_pmr_isfree(after + i));
+			SET_TAG(&after[i], "extract_range: after");
 		}
 #endif
 		KDASSERT(atop(VM_PAGE_TO_PHYS(after)) == end);
@@ -790,6 +821,7 @@ uvm_pmr_freepages(struct vm_page *pg, psize_t count)
 		KASSERT((pg[i].pg_flags & (PG_DEV|PQ_FREE)) == 0);
 		atomic_clearbits_int(&pg[i].pg_flags, pg[i].pg_flags);
 		atomic_setbits_int(&pg[i].pg_flags, PQ_FREE);
+		SET_TAG(&pg[i], "freepages");
 	}
 
 	while (count > 0) {
@@ -875,14 +907,15 @@ uvm_pmr_assertvalid(struct uvm_pmemrange *pmr)
 	/* Validate address tree. */
 	RB_FOREACH(i, uvm_pmr_addr, &pmr->addr) {
 		/* Validate the range. */
-		KASSERT(i->fq.free.pages > 0);
-		KASSERT(atop(VM_PAGE_TO_PHYS(i)) >= pmr->low);
-		KASSERT(atop(VM_PAGE_TO_PHYS(i)) + i->fq.free.pages
-		    <= pmr->high);
+		PKASSERT(i->fq.free.pages > 0, pmr, i);
+		PKASSERT(atop(VM_PAGE_TO_PHYS(i)) >= pmr->low, pmr, i);
+		PKASSERT(atop(VM_PAGE_TO_PHYS(i)) + i->fq.free.pages
+		    <= pmr->high, pmr, i);
 
 		/* Validate each page in this range. */
 		for (lcv = 0; lcv < i->fq.free.pages; lcv++) {
-			KASSERT(lcv == 0 || i[lcv].fq.free.pages == 0);
+			PKASSERT(lcv == 0 || i[lcv].fq.free.pages == 0,
+			    pmr, &i[lcv]);
 			/* Flag check:
 			 * - PG_ZERO: page is zeroed.
 			 * - PQ_FREE: page is free.
@@ -897,23 +930,24 @@ uvm_pmr_assertvalid(struct uvm_pmemrange *pmr)
 			 * - not loaned
 			 * - have no vm_anon
 			 * - have no uvm_object */
-			KASSERT(i[lcv].wire_count == 0);
-			KASSERT(i[lcv].loan_count == 0);
-			KASSERT(i[lcv].uanon == NULL);
-			KASSERT(i[lcv].uobject == NULL);
+			PKASSERT(i[lcv].wire_count == 0, pmr, &i[lcv]);
+			PKASSERT(i[lcv].loan_count == 0, pmr, &i[lcv]);
+			PKASSERT(i[lcv].uanon == NULL, pmr, &i[lcv]);
+			PKASSERT(i[lcv].uobject == NULL, pmr, &i[lcv]);
 			/* Pages in a single range always have the same
 			 * memtype. */
-			KASSERT(uvm_pmr_pg_to_memtype(&i[0]) ==
-			    uvm_pmr_pg_to_memtype(&i[lcv]));
+			PKASSERT(uvm_pmr_pg_to_memtype(&i[0]) ==
+			    uvm_pmr_pg_to_memtype(&i[lcv]), pmr, &i[lcv]);
 		}
 
 		/* Check that it shouldn't be joined with its predecessor. */
 		prev = RB_PREV(uvm_pmr_addr, &pmr->addr, i);
 		if (prev != NULL) {
-			KASSERT(uvm_pmr_pg_to_memtype(&i[0]) !=
+			PKASSERT(uvm_pmr_pg_to_memtype(&i[0]) !=
 			    uvm_pmr_pg_to_memtype(&i[lcv]) ||
 			    atop(VM_PAGE_TO_PHYS(i)) >
-			    atop(VM_PAGE_TO_PHYS(prev)) + prev->fq.free.pages);
+			    atop(VM_PAGE_TO_PHYS(prev)) + prev->fq.free.pages,
+			    pmr, i);
 		}
 
 		/* Assert i is in the size tree as well. */
@@ -923,28 +957,35 @@ uvm_pmr_assertvalid(struct uvm_pmemrange *pmr)
 				if (xref == i)
 					break;
 			}
-			KASSERT(xref == i);
+			PKASSERT(xref == i, pmr, i);
 		} else {
-			KASSERT(RB_FIND(uvm_pmr_size,
+			PKASSERT(RB_FIND(uvm_pmr_size,
 			    &pmr->size[uvm_pmr_pg_to_memtype(i)], i + 1) ==
-			    i + 1);
+			    i + 1, pmr, i);
 		}
 	}
 
 	/* Validate size tree. */
 	for (mti = 0; mti < UVM_PMR_MEMTYPE_MAX; mti++) {
+		prev = NULL;
 		for (i = uvm_pmr_nfindsz(pmr, 1, mti); i != NULL; i = next) {
 			next = uvm_pmr_nextsz(pmr, i, mti);
-			if (next != NULL) {
-				KASSERT(i->fq.free.pages <=
-				    next->fq.free.pages);
+
+			PKASSERT(i->fq.free.pages >= 1, pmr, i);
+			if (prev != NULL) {
+				PKASSERT(prev->fq.free.pages <=
+				    i->fq.free.pages, pmr, i);
 			}
 
 			/* Assert i is in the addr tree as well. */
-			KASSERT(RB_FIND(uvm_pmr_addr, &pmr->addr, i) == i);
+			PKASSERT(RB_FIND(uvm_pmr_addr, &pmr->addr, i) == i,
+			    pmr, i);
 
 			/* Assert i is of the correct memory type. */
-			KASSERT(uvm_pmr_pg_to_memtype(i) == mti);
+			PKASSERT(uvm_pmr_pg_to_memtype(i) == mti, pmr, i);
+
+			/* Prepare prev for next iteration. */
+			prev = i;
 		}
 	}
 
@@ -1209,7 +1250,7 @@ uvm_pmr_get1page(psize_t count, int memtype, struct pglist *result,
 {
 	struct	uvm_pmemrange *pmr;
 	struct	vm_page *found;
-	psize_t	fcount;
+	psize_t	fcount, i;
 
 	fcount = 0;
 	pmr = TAILQ_FIRST(&uvm.pmr_control.use);
@@ -1236,12 +1277,15 @@ uvm_pmr_get1page(psize_t count, int memtype, struct pglist *result,
 		uvm_pmr_assertvalid(pmr);
 		uvm_pmr_remove_size(pmr, found);
 		while (found->fq.free.pages > 0 && fcount < count) {
+			SET_TAG(&found[found->fq.free.pages], "get1page");
 			found->fq.free.pages--;
 			fcount++;
 			TAILQ_INSERT_HEAD(result,
 			    &found[found->fq.free.pages], pageq);
 		}
 		if (found->fq.free.pages > 0) {
+			for (i = 0; i < found->fq.free.pages; i++)
+				SET_TAG(found + i, "get1page reinsert");
 			uvm_pmr_insert_size(pmr, found);
 			KASSERT(fcount == count);
 			uvm_pmr_assertvalid(pmr);
@@ -1253,4 +1297,56 @@ uvm_pmr_get1page(psize_t count, int memtype, struct pglist *result,
 
 	/* Ran out of ranges before enough pages were gathered. */
 	return fcount;
+}
+
+/*
+ * Print the panic message and all details about the page.
+ */
+void
+panic_page(const char* fun, int line, const char *pgname, struct vm_page *pg,
+    struct uvm_pmemrange *pmr, const char *pred)
+{
+	int mt;
+	char *mt_str;
+	struct vm_page *__single_find;
+	struct vm_page *__size_find;
+	struct vm_page *__addr_find;
+
+	if (pg != NULL && pmr == NULL)
+		pmr = uvm_pmemrange_find(atop(VM_PAGE_TO_PHYS(pg)));
+
+	mt = uvm_pmr_pg_to_memtype(pg);
+	mt_str = (mt == UVM_PMR_MEMTYPE_DIRTY ? "dirty" : "clean");
+	if (pmr != NULL && pg != NULL) {
+		TAILQ_FOREACH(__single_find, &pmr->single[mt], pageq) {
+			if (__single_find == pg)
+				break;
+		}
+		RB_FOREACH(__size_find, uvm_pmr_size, &pmr->size[mt]) {
+			if (__size_find == (pg + 1))
+				break;
+		}
+		RB_FOREACH(__addr_find, uvm_pmr_addr, &pmr->addr) {
+			if (__addr_find == pg)
+				break;
+		}
+	} else
+		__single_find = __size_find = __addr_find = NULL;
+
+	panic("%s = { pg_flags = 0x%x; phys_addr = %p; "
+	    "uanon = %p; uobject = %p; offset = %p; "
+	    "fq.free.pages = 0x%lx; "
+	    "memtype = %d (%s); "
+	    "&%s = %p; pmr single-size find() = %p; "
+	    "pmr size find() = %p; pmr addr find() = %p; pmr = %p; "
+	    "tag = %s; }\n"
+	    "%s() %d: assertion failed: %s",
+	    pgname, pg->pg_flags, pg->phys_addr,
+	    pg->uanon, pg->uobject, pg->offset,
+	    pg->fq.free.pages,
+	    mt, mt_str,
+	    pgname, pg, __single_find,
+	    __size_find, __addr_find, pmr,
+	    (pg->pmr_tag == NULL ? "(null)" : pg->pmr_tag),
+	    fun, line, pred);
 }
