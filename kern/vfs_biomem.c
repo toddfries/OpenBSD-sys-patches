@@ -64,7 +64,7 @@ buf_mem_init(vsize_t size)
 	buf_object = &buf_object_store;
 
 	buf_object->pgops = NULL;
-	TAILQ_INIT(&buf_object->memq);
+	RB_INIT(&buf_object->memt);
 	buf_object->uo_npages = 0;
 	buf_object->uo_refs = 1;
 }
