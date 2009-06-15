@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.73 2009/06/13 21:48:03 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.74 2009/06/15 17:01:26 beck Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)

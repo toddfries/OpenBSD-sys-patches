@@ -1,4 +1,8 @@
+<<<<<<< HEAD:arch/macppc/macppc/machdep.c
 /*	$OpenBSD: machdep.c,v 1.106 2009/06/03 21:30:20 beck Exp $	*/
+=======
+/*	$OpenBSD: machdep.c,v 1.108 2009/06/15 17:01:26 beck Exp $	*/
+>>>>>>> master:arch/macppc/macppc/machdep.c
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
