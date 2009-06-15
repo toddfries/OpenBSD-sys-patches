@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.98 2009/06/07 03:07:19 millert Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.100 2009/06/15 17:59:44 deraadt Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -261,7 +261,7 @@ struct ctlname {
  	{ "timecounter", CTLTYPE_NODE }, \
  	{ "maxlocksperuid", CTLTYPE_INT }, \
  	{ "cp_time2", CTLTYPE_STRUCT }, \
- 	{ "bufcachepercent", CTLTYPE_INT }, \
+	{ "bufcachepercent", CTLTYPE_INT }, \
 	{ "file2", CTLTYPE_STRUCT }, \
 }
 

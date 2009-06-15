@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.94 2009/06/07 02:01:54 oga Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.96 2009/06/15 17:01:25 beck Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -399,6 +399,12 @@ setup_buffers()
 	 */
 	if (bufpages == 0)
 		bufpages = physmem * bufcachepercent / 100;
+
+	/* Restrict to at most 25% filled kvm */
+	if (bufpages >
+	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
+		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
+		    PAGE_SIZE / 4;
 }
 
 /*
@@ -1713,11 +1719,10 @@ cpu_dump_mempagecnt(void)
 int
 amd64_pa_used(paddr_t addr)
 {
-	struct vm_page	*pg;
-	bios_memmap_t	*bmp;
+	bios_memmap_t *bmp;
 
 	/* Kernel manages these */
-	if ((pg = PHYS_TO_VM_PAGE(addr)) && (pg->pg_flags & PG_DEV) == 0)
+	if (PHYS_TO_VM_PAGE(addr))
 		return 1;
 
 	/* Kernel is loaded here */
