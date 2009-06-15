@@ -969,7 +969,6 @@ file uvm/uvm_km.c
 file uvm/uvm_map.c
 file uvm/uvm_meter.c
 file uvm/uvm_mmap.c
-file uvm/uvm_object.c			!small_kernel
 file uvm/uvm_page.c
 file uvm/uvm_pager.c
 file uvm/uvm_pdaemon.c
