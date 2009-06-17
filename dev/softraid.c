@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.151 2009/06/17 19:05:26 jordan Exp $ */
+/* $OpenBSD: softraid.c,v 1.153 2009/06/17 23:13:36 jordan Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -2109,7 +2109,6 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 			strlcpy(sd->sd_name, "RAID 1", sizeof(sd->sd_name));
 			vol_size = ch_entry->src_meta.scmi.scm_coerced_size;
 			break;
-#ifdef not_yet
 		case 4:
 		case 5:
 			if (no_chunk < 3)
@@ -2130,7 +2129,6 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 			    (ch_entry->src_meta.scmi.scm_coerced_size & 
 			    ~((strip_size >> DEV_BSHIFT) - 1)) * (no_chunk - 1);
 			break;
-#endif /* not_yet */
 #ifdef AOE
 #ifdef not_yet
 		case 'A':
@@ -2281,7 +2279,10 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 		}
 
 		/* setup scsi midlayer */
-		sd->sd_link.openings = sd->sd_max_wu;
+		if (sd->sd_openings)
+			sd->sd_link.openings = sd->sd_openings(sd);
+		else
+			sd->sd_link.openings = sd->sd_max_wu;
 		sd->sd_link.device = &sr_dev;
 		sd->sd_link.device_softc = sc;
 		sd->sd_link.adapter_softc = sc;
