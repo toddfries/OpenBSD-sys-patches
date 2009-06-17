@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.134 2008/10/01 19:13:01 kettenis Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.137 2009/06/16 00:11:29 oga Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff

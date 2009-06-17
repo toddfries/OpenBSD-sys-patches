@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_mmap.c,v 1.72 2009/03/20 15:19:04 oga Exp $	*/
+/*	$OpenBSD: uvm_mmap.c,v 1.76 2009/06/17 00:13:59 oga Exp $	*/
 /*	$NetBSD: uvm_mmap.c,v 1.49 2001/02/18 21:19:08 chs Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.464 2009/06/10 03:24:02 marco Exp $
+#	$OpenBSD: files,v 1.467 2009/06/17 01:30:30 thib Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -656,7 +656,6 @@ file kern/exec_subr.c
 file kern/init_main.c
 file kern/init_sysent.c
 file kern/kern_acct.c			accounting
-file kern/kern_bufq.c
 file kern/kern_clock.c
 file kern/kern_descrip.c
 file kern/kern_event.c
@@ -973,7 +972,6 @@ file uvm/uvm_page.c
 file uvm/uvm_pager.c
 file uvm/uvm_pdaemon.c
 file uvm/uvm_pglist.c
-file uvm/uvm_pmemrange.c
 file uvm/uvm_stat.c
 file uvm/uvm_swap.c
 file uvm/uvm_swap_encrypt.c		uvm_swap_encrypt
