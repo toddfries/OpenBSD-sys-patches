@@ -184,8 +184,9 @@ struct ctlname {
 #define	KERN_TIMECOUNTER	69	/* node: timecounter */
 #define	KERN_MAXLOCKSPERUID	70	/* int: locks per uid */
 #define	KERN_CPTIME2		71	/* array: cp_time2 */
-#define	KERN_FILE2		72	/* struct: file entries */
-#define	KERN_MAXID		73	/* number of valid kern ids */
+#define	KERN_CACHEPCT		72	/* buffer cache % of physmem */
+#define	KERN_FILE2		73	/* struct: file entries */
+#define	KERN_MAXID		74	/* number of valid kern ids */
 
 #define	CTL_KERN_NAMES { \
 	{ 0, 0 }, \
