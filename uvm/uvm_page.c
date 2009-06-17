@@ -248,18 +248,6 @@ uvm_page_init(vaddr_t *kvm_startp, vaddr_t *kvm_endp)
 	TAILQ_INIT(uvm.page_hash);		/* init hash table */
 	mtx_init(&uvm.hashlock, IPL_VM);	/* init hash table lock */
 
-	/*
-	 * init the <obj,offset> => <page> hash table.  for now
-	 * we just have one bucket (the bootstrap bucket).  later on we
-	 * will allocate new buckets as we dynamically resize the hash table.
-	 */
-
-	uvm.page_nhash = 1;			/* 1 bucket */
-	uvm.page_hashmask = 0;			/* mask for hash function */
-	uvm.page_hash = &uvm_bootbucket;	/* install bootstrap bucket */
-	TAILQ_INIT(uvm.page_hash);		/* init hash table */
-	mtx_init(&uvm.hashlock, IPL_VM);	/* init hash table lock */
-
 	/* 
 	 * allocate vm_page structures.
 	 */
