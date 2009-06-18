@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.153 2009/06/17 23:13:36 jordan Exp $ */
+/* $OpenBSD: softraid.c,v 1.155 2009/06/18 15:51:56 jsing Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -117,6 +117,7 @@ void			sr_checksum(struct sr_softc *, void *, void *,
 			    u_int32_t);
 int			sr_boot_assembly(struct sr_softc *);
 int			sr_already_assembled(struct sr_discipline *);
+int			sr_rebuild_init(struct sr_discipline *, dev_t);
 void			sr_rebuild(void *);
 void			sr_rebuild_thread(void *);
 
@@ -469,7 +470,7 @@ sr_meta_chunks_create(struct sr_softc *sc, struct sr_chunk_head *cl)
 		ch_entry->src_meta.scm_status = BIOC_SDONLINE;
 		strlcpy(ch_entry->src_meta.scmi.scm_devname, name,
 		    sizeof(ch_entry->src_meta.scmi.scm_devname));
-		bcopy(&uuid,  &ch_entry->src_meta.scmi.scm_uuid,
+		bcopy(&uuid, &ch_entry->src_meta.scmi.scm_uuid,
 		    sizeof(ch_entry->src_meta.scmi.scm_uuid));
 
 		if (ch_entry->src_meta.scmi.scm_size > max_chunk_sz)
@@ -586,7 +587,7 @@ sr_meta_save(struct sr_discipline *sd, u_int32_t flags)
 
 	/* meta scratchpad */
 	s = &smd[sd->sd_meta_type];
-	m = malloc(SR_META_SIZE * 512 , M_DEVBUF, M_ZERO);
+	m = malloc(SR_META_SIZE * 512, M_DEVBUF, M_ZERO);
 	if (!m) {
 		printf("%s: could not allocate metadata scratch area\n",
 		    DEVNAME(sc));
@@ -623,7 +624,7 @@ restart:
 		if (src->src_meta.scm_status == BIOC_SDOFFLINE)
 			continue;
 
-		/* calculate metdata checksum for correct chunk */
+		/* calculate metadata checksum for correct chunk */
 		m->ssdi.ssd_chunk_id = i;
 		sr_checksum(sc, m, &m->ssd_checksum,
 		    sizeof(struct sr_meta_invariant));
@@ -651,7 +652,7 @@ restart:
 		}
 	}
 
-	/* not al disciplines have sync */
+	/* not all disciplines have sync */
 	if (sd->sd_scsi_sync) {
 		bzero(&wu, sizeof(wu));
 		wu.swu_fake = 1;
@@ -1120,7 +1121,7 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_native_attach\n", DEVNAME(sc));
 
-	md = malloc(SR_META_SIZE * 512 , M_DEVBUF, M_ZERO);
+	md = malloc(SR_META_SIZE * 512, M_DEVBUF, M_ZERO);
 	if (md == NULL) {
 		printf("%s: not enough memory for metadata buffer\n",
 		    DEVNAME(sc));
@@ -1869,15 +1870,9 @@ sr_ioctl_disk(struct sr_softc *sc, struct bioc_disk *bd)
 int
 sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 {
-	int			rv = EINVAL, part;
-	int			i, c, found, vol, open = 0;
-	struct sr_discipline	*sd = NULL, *sw = NULL;
-	char			devname[32];
-	struct bdevsw		*bdsw;
-	dev_t			dev;
-	daddr64_t		size, csize;
-	struct disklabel	label;
-	struct sr_meta_chunk	*old, *new;
+	int			rv = EINVAL;
+	int			i, vol;
+	struct sr_discipline	*sd = NULL;
 
 	if (bs->bs_other_id_type == BIOC_SSOTHER_UNUSED)
 		goto done;
@@ -1893,6 +1888,46 @@ sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 	}
 	if (sd == NULL)
 		goto done;
+
+	switch (bs->bs_status) {
+	case BIOC_SSOFFLINE:
+		break;
+
+	case BIOC_SDSCRUB:
+		break;
+
+	case BIOC_SSHOTSPARE:
+		break;
+
+	case BIOC_SSREBUILD:
+		rv = sr_rebuild_init(sd, (dev_t)bs->bs_other_id);
+		break;
+
+	default:
+		printf("%s: unsupported state request %d\n",
+		    DEVNAME(sc), bs->bs_status);
+	}
+
+done:
+	return (rv);
+}
+
+int
+sr_rebuild_init(struct sr_discipline *sd, dev_t dev)
+{
+	struct sr_softc		*sc = sd->sd_sc;
+	int			rv = EINVAL, part;
+	int			i, c, found, vol, open = 0;
+	struct sr_discipline	*sw = NULL;
+	char			devname[32];
+	struct bdevsw		*bdsw;
+	daddr64_t		size, csize;
+	struct disklabel	label;
+	struct sr_meta_chunk	*old, *new;
+
+	/*
+	 * Attempt to initiate a rebuild onto the specified device.
+	 */
 
 	if (!sd->sd_rebuild) {
 		printf("%s: discipline does not support rebuild\n",
@@ -1932,7 +1967,6 @@ sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 	}
 
 	/* populate meta entry */
-	dev = (dev_t)bs->bs_other_id;
 	sr_meta_getdevname(sc, dev, devname, sizeof(devname));
 	bdsw = bdevsw_lookup(dev);
 
