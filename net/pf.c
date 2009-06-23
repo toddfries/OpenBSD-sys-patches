@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.651 2009/06/08 03:56:14 henning Exp $ */
+/*	$OpenBSD: pf.c,v 1.654 2009/06/22 17:04:02 jsing Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -2798,6 +2798,9 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 			break;
 #ifdef INET
 		case IPPROTO_ICMP:
+			if (af != AF_INET)
+				break;
+
 			if (PF_ANEQ(saddr, &nk->addr[pd->sidx], AF_INET))
 				pf_change_a(&saddr->v4.s_addr, pd->ip_sum,
 				    nk->addr[pd->sidx].v4.s_addr, 0);
@@ -2819,6 +2822,9 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 #endif /* INET */
 #ifdef INET6
 		case IPPROTO_ICMPV6:
+			if (af != AF_INET6)
+				break;
+
 			if (PF_ANEQ(saddr, &nk->addr[pd->sidx], AF_INET6))
 				pf_change_a6(saddr, &pd->hdr.icmp6->icmp6_cksum,
 				    &nk->addr[pd->sidx], 0);
@@ -5562,14 +5568,12 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 		break;
 	}
 
-#ifdef INET6
 	case IPPROTO_ICMPV6: {
 		action = PF_DROP;
 		DPFPRINTF(PF_DEBUG_MISC,
 		    ("pf: dropping IPv4 packet with ICMPv6 payload\n"));
 		goto done;
 	}
-#endif
 
 	default:
 		action = pf_test_state_other(&s, dir, kif, m, &pd);
@@ -5915,6 +5919,13 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
 			    m, off, h, &pd, &a, &ruleset, &ip6intrq);
+
+		if (s) {
+			if (s->max_mss)
+				pf_normalize_mss(m, off, &pd, s->max_mss);
+		} else if (r->max_mss)
+			pf_normalize_mss(m, off, &pd, r->max_mss);
+
 		break;
 	}
 
