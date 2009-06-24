@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISKBIG,v 1.78 2009/04/28 17:10:23 deraadt Exp $
+#	$OpenBSD: RAMDISKBIG,v 1.79 2009/06/24 15:02:18 todd Exp $
 #	$NetBSD: GENERIC,v 1.31 1996/12/03 17:25:29 cgd Exp $
 #
 # Generic Alpha kernel.  Enough to get booted, etc., but not much more.
