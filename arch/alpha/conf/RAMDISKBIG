@@ -169,6 +169,8 @@ pcscp*	at pci?				# AMD 53c974 PCscsi-PCI SCSI
 scsibus* at pcscp?
 twe*	at pci?				# 3ware Escalade RAID controllers
 scsibus* at twe?
+softraid0	at root			# Software RAID
+scsibus* at softraid?
 
 #UNTESTED: the following drivers are untested.
 adw*	at pci?				# AdvanSys ULTRA WIDE SCSI
