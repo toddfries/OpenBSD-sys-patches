@@ -1,4 +1,4 @@
-/*	$OpenBSD: isp_pci.c,v 1.49 2009/06/28 01:35:27 krw Exp $	*/
+/*	$OpenBSD: isp_pci.c,v 1.51 2009/06/29 18:53:38 deraadt Exp $	*/
 /* $FreeBSD: src/sys/dev/isp/isp_pci.c,v 1.148 2007/06/26 23:08:57 mjacob Exp $*/
 /*-
  * Copyright (c) 1997-2006 by Matthew Jacob
@@ -212,7 +212,8 @@ static struct ispmdvec mdvec_2400 = {
 	isp_pci_dmateardown,
 	isp_pci_reset0,
 	isp_pci_reset1,
-	NULL
+	NULL,
+	ISP_2400_RISC_CODE
 };
 
 #ifndef	PCIM_CMD_INVEN
@@ -654,7 +655,6 @@ isp_pci_attach(struct device *parent, struct device *self, void *aux)
 		}
 		pcs->pci_poff[MBOX_BLOCK >> _BLK_REG_SHFT] =
 		    PCI_MBOX_REGS2100_OFF;
-		data = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_CLASS_REG);
 #ifdef __sparc64__
 		{
 			char name[32];
@@ -692,7 +692,6 @@ isp_pci_attach(struct device *parent, struct device *self, void *aux)
 		}
 		pcs->pci_poff[MBOX_BLOCK >> _BLK_REG_SHFT] =
 		    PCI_MBOX_REGS2300_OFF;
-		data = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_CLASS_REG);
 	}
 	if (pa->pa_id == PCI_QLOGIC_ISP2322 ||
 	    pa->pa_id == PCI_QLOGIC_ISP6322) {
@@ -707,7 +706,6 @@ isp_pci_attach(struct device *parent, struct device *self, void *aux)
 		}
 		pcs->pci_poff[MBOX_BLOCK >> _BLK_REG_SHFT] =
 		    PCI_MBOX_REGS2300_OFF;
-		data = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_CLASS_REG);
 	}
 	if (pa->pa_id == PCI_QLOGIC_ISP2422 ||
 	    pa->pa_id == PCI_QLOGIC_ISP2432) {
