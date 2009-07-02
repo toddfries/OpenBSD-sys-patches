@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.93 2009/06/05 00:41:13 deraadt Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.95 2009/06/17 01:30:30 thib Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -575,16 +575,18 @@ donot:
 		lp->d_partitions['i' - 'a'].p_fstype = FS_MSDOS;
 	}
 notfat:
-	DL_SETBSTART(lp, dospartoff);
-	DL_SETBEND(lp, dospartend < DL_GETDSIZE(lp) ? dospartend : DL_GETDSIZE(lp));
-
 	/* record the OpenBSD partition's placement for the caller */
 	if (partoffp)
 		*partoffp = dospartoff;
+	else {
+		DL_SETBSTART(lp, dospartoff);
+		DL_SETBEND(lp,
+		    dospartend < DL_GETDSIZE(lp) ? dospartend : DL_GETDSIZE(lp));
+	}
 
 	/* don't read the on-disk label if we are in spoofed-only mode */
 	if (spoofonly)
-		return (NULL);
+		return (NULL);		/* jump to the checkdisklabel below?? */
 
 	bp->b_blkno = DL_BLKTOSEC(lp, dospartoff + DOS_LABELSECTOR) *
 	    DL_BLKSPERSEC(lp);
@@ -766,10 +768,6 @@ disk_construct(struct disk *diskp, char *lockname)
 	rw_init(&diskp->dk_lock, "dklk");
 	mtx_init(&diskp->dk_mtx, IPL_BIO);
 
-	diskp->dk_bufq = bufq_init(BUFQ_DEFAULT);
-	if (diskp->dk_bufq == NULL)
-		return (1);
-
 	diskp->dk_flags |= DKF_CONSTRUCTED;
 	    
 	return (0);
@@ -783,8 +781,7 @@ disk_attach(struct disk *diskp)
 {
 
 	if (!ISSET(diskp->dk_flags, DKF_CONSTRUCTED))
-		if (disk_construct(diskp, diskp->dk_name))
-			panic("disk_attach: can't construct disk");
+		disk_construct(diskp, diskp->dk_name);
 
 	/*
 	 * Allocate and initialize the disklabel structures.  Note that
@@ -826,8 +823,6 @@ disk_detach(struct disk *diskp)
 	 * Free the space used by the disklabel structures.
 	 */
 	free(diskp->dk_label, M_DEVBUF);
-
-	bufq_destroy(diskp->dk_bufq);
 
 	/*
 	 * Remove from the disklist.

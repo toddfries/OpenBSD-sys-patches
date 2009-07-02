@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.137 2009/05/31 03:22:05 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.141 2009/06/26 01:24:05 jakemsr Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -311,6 +311,9 @@ static const char *wtypes[16] = {
 	"dac", "adc", "mix", "sel", "pin", "pow", "volume",
 	"beep", "wid08", "wid09", "wid0a", "wid0b", "wid0c",
 	"wid0d", "wid0e", "vendor"};
+static const char *line_colors[16] = {
+	"unk", "blk", "gry", "blu", "grn", "red", "org", "yel",
+	"pur", "pnk", "0xa", "0xb", "0xc", "0xd", "wht", "oth"};
 
 /* ================================================================
  * PCI functions
@@ -411,10 +414,10 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 	case PCI_PRODUCT_NVIDIA_MCP79_HDA_2:
 	case PCI_PRODUCT_NVIDIA_MCP79_HDA_3:
 	case PCI_PRODUCT_NVIDIA_MCP79_HDA_4:
-	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_1:
-	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_2:
-	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_3:
-	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_4:
+	case PCI_PRODUCT_NVIDIA_MCP89_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP89_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP89_HDA_3:
+	case PCI_PRODUCT_NVIDIA_MCP89_HDA_4:
 		reg = azalia_pci_read(pa->pa_pc, pa->pa_tag, NVIDIA_PCIE_SNOOP_REG);
 		reg &= NVIDIA_PCIE_SNOOP_MASK;
 		reg |= NVIDIA_PCIE_SNOOP_ENABLE;
@@ -1319,11 +1322,13 @@ azalia_codec_init(codec_t *this)
 				switch (this->w[i].d.pin.device) {
 				case CORB_CD_SPEAKER:
 					this->speaker = i;
-					this->spkr_dac = azalia_codec_find_defdac(this, i, 0);
+					this->spkr_dac =
+					    azalia_codec_find_defdac(this, i, 0);
 					break;
 				case CORB_CD_MICIN:
 					this->mic = i;
-					this->mic_adc = azalia_codec_find_defadc(this, i, 0);
+					this->mic_adc =
+					    azalia_codec_find_defadc(this, i, 0);
 					break;
 				}
 				break;
@@ -2544,12 +2549,17 @@ azalia_widget_init(widget_t *this, const codec_t *codec, nid_t nid)
 	}
 
 	/* amplifier information */
+	/* XXX (ab)use bits 24-30 to store the "control offset", which is
+	 * the number of steps, starting at 0, that have no effect.  these
+	 * bits are reserved in HDA 1.0.
+	 */
 	if (this->widgetcap & COP_AWCAP_INAMP) {
 		if (this->widgetcap & COP_AWCAP_AMPOV)
 			azalia_comresp(codec, nid, CORB_GET_PARAMETER,
 			    COP_INPUT_AMPCAP, &this->inamp_cap);
 		else
 			this->inamp_cap = codec->w[codec->audiofunc].inamp_cap;
+		this->inamp_cap &= ~(0x7f << 24);
 	}
 	if (this->widgetcap & COP_AWCAP_OUTAMP) {
 		if (this->widgetcap & COP_AWCAP_AMPOV)
@@ -2557,6 +2567,7 @@ azalia_widget_init(widget_t *this, const codec_t *codec, nid_t nid)
 			    COP_OUTPUT_AMPCAP, &this->outamp_cap);
 		else
 			this->outamp_cap = codec->w[codec->audiofunc].outamp_cap;
+		this->outamp_cap &= ~(0x7f << 24);
 	}
 	return 0;
 }
@@ -2630,10 +2641,28 @@ azalia_widget_label_widgets(codec_t *codec)
 	widget_t *w;
 	int types[16];
 	int pins[16];
+	int colors_used, use_colors;
 	int i, j;
 
 	bzero(&pins, sizeof(pins));
 	bzero(&types, sizeof(types));
+
+	/* If codec has more than one line-out jack, check if the jacks
+	 * have unique colors.  If so, use the colors in the mixer names.
+	 */
+	use_colors = 1;
+	colors_used = 0;
+	if (codec->nout_jacks < 2)
+		use_colors = 0;
+	for (i = 0; use_colors && i < codec->nopins; i++) {
+		w = &codec->w[codec->opins[i].nid];
+		if (w->d.pin.device != CORB_CD_LINEOUT)
+			continue;
+		if (colors_used & (1 << w->d.pin.color))
+			use_colors = 0;
+		else
+			colors_used |= (1 << w->d.pin.color);
+	}
 
 	FOR_EACH_WIDGET(codec, i) {
 		w = &codec->w[i];
@@ -2644,13 +2673,18 @@ azalia_widget_label_widgets(codec_t *codec)
 		switch (w->type) {
 		case COP_AWTYPE_PIN_COMPLEX:
 			pins[w->d.pin.device]++;
-			if (pins[w->d.pin.device] > 1)
+			if (use_colors && w->d.pin.device == CORB_CD_LINEOUT) {
+				snprintf(w->name, sizeof(w->name), "%s-%s",
+				    pin_devices[w->d.pin.device],
+				    line_colors[w->d.pin.color]);
+			} else if (pins[w->d.pin.device] > 1) {
 				snprintf(w->name, sizeof(w->name), "%s%d",
 				    pin_devices[w->d.pin.device],
 				    pins[w->d.pin.device]);
-			else
+			} else {
 				snprintf(w->name, sizeof(w->name), "%s",
 				    pin_devices[w->d.pin.device]);
+			}
 			break;
 		case COP_AWTYPE_AUDIO_OUTPUT:
 			if (codec->dacs.ngroups < 1)
@@ -2867,6 +2901,9 @@ azalia_widget_init_pin(widget_t *this, const codec_t *codec)
 		    (1 << CORB_PWC_VREF_50))
 			dir |= CORB_PWC_VREF_50;
 	}
+
+	if ((codec->qrks & AZ_QRK_WID_OVREF50) && (dir == CORB_PWC_OUTPUT))
+		dir |= CORB_PWC_VREF_50;
 
 	azalia_comresp(codec, this->nid, CORB_SET_PIN_WIDGET_CONTROL,
 	    dir, NULL);

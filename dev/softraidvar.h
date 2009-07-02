@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.71 2009/06/03 21:04:36 marco Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.78 2009/06/26 14:50:44 jsing Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -233,10 +233,13 @@ struct sr_ccb {
 #define SR_CCB_OK		2
 #define SR_CCB_FAILED		3
 
+	int			ccb_flag;
+#define SR_CCBF_FREEBUF		(1<<0)		/* free ccb_buf.b_data */
+
 	void			*ccb_opaque; /* discipline usable pointer */
 
 	TAILQ_ENTRY(sr_ccb)	ccb_link;
-} __packed;
+};
 
 TAILQ_HEAD(sr_ccb_list, sr_ccb);
 
@@ -295,6 +298,12 @@ struct sr_raid1 {
 	u_int32_t		sr1_counter;
 };
 
+/* RAID 4 */
+#define SR_RAIDP_NOWU		16
+struct sr_raidp {
+	int32_t			srp_strip_bits;
+};
+
 /* CRYPTO */
 #define SR_CRYPTO_NOWU		16
 struct sr_crypto {
@@ -321,12 +330,27 @@ struct sr_aoe {
 struct sr_metadata_list {
 	u_int8_t		sml_metadata[SR_META_SIZE * 512];
 	dev_t			sml_mm;
+	u_int32_t		sml_chunk_id;
 	int			sml_used;
 
 	SLIST_ENTRY(sr_metadata_list) sml_link;
 };
 
 SLIST_HEAD(sr_metadata_list_head, sr_metadata_list);
+
+struct sr_boot_volume {
+	struct sr_uuid		sbv_uuid;	/* Volume UUID. */
+	u_int32_t		sbv_level;	/* Level. */
+	u_int32_t		sbv_volid;	/* Volume ID. */
+	u_int32_t		sbv_chunk_no;	/* Number of chunks. */
+	u_int32_t		sbv_dev_no;	/* Number of devs discovered. */
+
+	struct sr_metadata_list_head	sml;	/* List of metadata. */
+
+	SLIST_ENTRY(sr_boot_volume)	sbv_link;	
+};
+
+SLIST_HEAD(sr_boot_volume_head, sr_boot_volume);
 
 struct sr_chunk {
 	struct sr_meta_chunk	src_meta;	/* chunk meta data */
@@ -366,6 +390,7 @@ struct sr_discipline {
 #define	SR_MD_CRYPTO		4
 #define	SR_MD_AOE_INIT		5
 #define	SR_MD_AOE_TARG		6
+#define	SR_MD_RAID4		7
 	char			sd_name[10];	/* human readable dis name */
 	u_int8_t		sd_scsibus;	/* scsibus discipline uses */
 	struct scsi_link	sd_link;	/* link to midlayer */
@@ -373,6 +398,7 @@ struct sr_discipline {
 	union {
 	    struct sr_raid0	mdd_raid0;
 	    struct sr_raid1	mdd_raid1;
+	    struct sr_raidp	mdd_raidp;
 	    struct sr_crypto	mdd_crypto;
 #ifdef AOE
 	    struct sr_aoe	mdd_aoe;
@@ -406,7 +432,8 @@ struct sr_discipline {
 	u_int32_t		sd_max_wu;
 	int			sd_rebuild;	/* can we rebuild? */
 	int			sd_reb_active;	/* rebuild in progress */
-	int			sd_going_down;	/* dive dive dive */
+	int			sd_reb_abort;	/* abort rebuild */
+	int			sd_ready;	/* fully operational */
 
 	struct sr_wu_list	sd_wu_freeq;	/* free wu queue */
 	struct sr_wu_list	sd_wu_pendq;	/* pending wu queue */
@@ -424,6 +451,7 @@ struct sr_discipline {
 	void			(*sd_set_chunk_state)(struct sr_discipline *,
 				    int, int);
 	void			(*sd_set_vol_state)(struct sr_discipline *);
+	int			(*sd_openings)(struct sr_discipline *);
 
 	/* SCSI emulation */
 	struct scsi_sense_data	sd_scsi_sense;
@@ -461,6 +489,10 @@ struct sr_softc {
 	struct sr_discipline	*sc_dis[SR_MAXSCSIBUS]; /* scsibus is u_int8_t */
 };
 
+/* hotplug */
+void			sr_hotplug_register(struct sr_discipline *, void *);
+void			sr_hotplug_unregister(struct sr_discipline *, void *);
+
 /* work units & ccbs */
 int			sr_ccb_alloc(struct sr_discipline *);
 void			sr_ccb_free(struct sr_discipline *);
@@ -492,6 +524,7 @@ void			sr_raid_startwu(struct sr_workunit *);
 /* Discipline specific initialisation. */
 void			sr_raid0_discipline_init(struct sr_discipline *);
 void			sr_raid1_discipline_init(struct sr_discipline *);
+void			sr_raidp_discipline_init(struct sr_discipline *);
 void			sr_crypto_discipline_init(struct sr_discipline *);
 void			sr_aoe_discipline_init(struct sr_discipline *);
 void			sr_aoe_server_discipline_init(struct sr_discipline *);

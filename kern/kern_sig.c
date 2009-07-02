@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.103 2009/03/05 19:52:24 kettenis Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.105 2009/06/06 21:25:19 deraadt Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -1394,6 +1394,9 @@ struct coredump_iostate {
 int
 coredump(struct proc *p)
 {
+#ifdef SMALL_KERNEL
+	return EPERM;
+#else
 	struct vnode *vp;
 	struct ucred *cred = p->p_ucred;
 	struct vmspace *vm = p->p_vmspace;
@@ -1475,11 +1478,15 @@ out:
 	if (error == 0)
 		error = error1;
 	return (error);
+#endif
 }
 
 int
 coredump_trad(struct proc *p, void *cookie)
 {
+#ifdef SMALL_KERNEL
+	return EPERM;
+#else
 	struct coredump_iostate *io = cookie;
 	struct vmspace *vm = io->io_proc->p_vmspace;
 	struct vnode *vp = io->io_vp;
@@ -1510,8 +1517,10 @@ coredump_trad(struct proc *p, void *cookie)
 	    (int)core.c_hdrsize, (off_t)0,
 	    UIO_SYSSPACE, IO_NODELOCKED|IO_UNIT, cred, NULL, p);
 	return (error);
+#endif
 }
 
+#ifndef SMALL_KERNEL
 int
 coredump_write(void *cookie, enum uio_seg segflg, const void *data, size_t len)
 {
@@ -1522,7 +1531,7 @@ coredump_write(void *cookie, enum uio_seg segflg, const void *data, size_t len)
 	    io->io_offset, segflg,
 	    IO_NODELOCKED|IO_UNIT, io->io_cred, NULL, io->io_proc);
 	if (error) {
-		printf("pid %d (%s): %s write of %zu@%p at %lld failed: %d\n",
+		printf("pid %d (%s): %s write of %lu@%p at %lld failed: %d\n",
 		    io->io_proc->p_pid, io->io_proc->p_comm,
 		    segflg == UIO_USERSPACE ? "user" : "system",
 		    len, data, (long long) io->io_offset, error);
@@ -1532,6 +1541,7 @@ coredump_write(void *cookie, enum uio_seg segflg, const void *data, size_t len)
 	io->io_offset += len;
 	return (0);
 }
+#endif	/* !SMALL_KERNEL */
 
 /*
  * Nonexistent system call-- signal process (may want to handle it).

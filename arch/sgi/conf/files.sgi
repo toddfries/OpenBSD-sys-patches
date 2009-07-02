@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sgi,v 1.25 2009/05/02 21:31:17 miod Exp $
+#	$OpenBSD: files.sgi,v 1.27 2009/06/24 17:27:40 miod Exp $
 #
 # maxpartitions must be first item in files.${ARCH}
 #
@@ -8,17 +8,22 @@ maxusers 2 8 64
 
 #	Required files
 
-file	arch/sgi/sgi/disksubr.c			disk
+file	dev/cninit.c
 file	arch/sgi/sgi/autoconf.c
 file	arch/sgi/sgi/bus_dma.c
 file	arch/sgi/sgi/conf.c
+file	arch/sgi/sgi/disksubr.c			disk
 file	arch/sgi/sgi/ip27_machdep.c		tgt_origin200 | tgt_origin2000
 file	arch/sgi/sgi/ip30_machdep.c		tgt_octane
 file	arch/sgi/sgi/ip32_machdep.c		tgt_o2
 file	arch/sgi/sgi/machdep.c
+file	arch/sgi/sgi/mainbus.c
 file	arch/sgi/sgi/mutex.c
 file	arch/sgi/sgi/sginode.c			tgt_origin200 | tgt_origin2000
 file	arch/sgi/sgi/wscons_machdep.c		wsdisplay
+
+# RAM disk for boot
+major	{rd = 8}
 
 #
 # Media Indepedent Interface (mii)
@@ -35,7 +40,7 @@ include	"dev/ata/files.ata"
 #
 #	System BUS types
 #
-define	mainbus {}
+define	mainbus {[nasid = -1]}
 device	mainbus
 attach	mainbus at root
 
@@ -79,7 +84,17 @@ major	{cd = 3}
 
 include	"dev/i2o/files.i2o"
 
+#
+#	PCI Bus support
+#
+
 include	"dev/pci/files.pci"
+
+# Sun HME Ethernet controllers
+device	hme: ether, ifnet, mii, ifmedia
+file	dev/ic/hme.c				hme
+attach	hme at pci with hme_pci
+file	dev/pci/if_hme_pci.c			hme_pci
 
 # IOC3
 define	ioc {[base = -1]}
@@ -101,11 +116,6 @@ file	arch/sgi/dev/dsrtc.c			dsrtc
 device	gbe: wsemuldisplaydev, rasops8, rasops16, rasops32
 attach	gbe at mainbus
 file	arch/sgi/dev/gbe.c			gbe	needs-flag
-
-# Impact graphics
-device	impact: wsemuldisplaydev, rasops8, rasops16, rasops32
-attach	impact at xbow
-file	arch/sgi/xbow/impact.c			impact	needs-flag
 
 # 16[45]50-based "com" ports on localbus
 attach	com at macebus with com_macebus
@@ -147,10 +157,6 @@ include	"dev/wsfont/files.wsfont"
 include	"dev/wscons/files.wscons"
 
 #
-#	PCI Bus support
-#
-
-#
 # Machine-independent USB drivers
 #
 include	"dev/usb/files.usb"
@@ -168,15 +174,3 @@ device	owserial
 attach	owserial at onewire
 file	arch/sgi/dev/owserial.c			owserial
 file	arch/sgi/dev/owmem_subr.c		owmac | owserial
-
-#
-# Specials.
-#
-# RAM disk for boot
-major	{rd = 8}
-
-#
-#	Common files
-#
-
-file	dev/cninit.c

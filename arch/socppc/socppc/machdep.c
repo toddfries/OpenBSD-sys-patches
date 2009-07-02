@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.11 2009/06/03 21:30:20 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.13 2009/06/15 17:01:26 beck Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -772,6 +772,12 @@ cpu_startup()
 	if (bufpages == 0)
 		bufpages = physmem * bufcachepercent / 100;
 
+	/* Restrict to at most 25% filled kvm */
+	if (bufpages >
+	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
+		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
+		    PAGE_SIZE / 4;
+
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
@@ -1082,9 +1088,67 @@ boot(int howto)
 	while(1) /* forever */;
 }
 
+extern void ipic_do_pending_int(void);
+
 void
 do_pending_int(void)
 {
+	struct cpu_info *ci = curcpu();
+	int pcpl, s;
+
+	if (ci->ci_iactive)
+		return;
+
+	ci->ci_iactive = 1;
+	s = ppc_intr_disable();
+	pcpl = ci->ci_cpl;
+
+	ipic_do_pending_int();
+
+	do {
+		if((ci->ci_ipending & SINT_CLOCK) & ~pcpl) {
+			ci->ci_ipending &= ~SINT_CLOCK;
+			ci->ci_cpl = SINT_CLOCK|SINT_NET|SINT_TTY;
+			ppc_intr_enable(1);
+			KERNEL_LOCK();
+			softclock();
+			KERNEL_UNLOCK();
+			ppc_intr_disable();
+			continue;
+		}
+		if((ci->ci_ipending & SINT_NET) & ~pcpl) {
+			extern int netisr;
+			int pisr;
+		       
+			ci->ci_ipending &= ~SINT_NET;
+			ci->ci_cpl = SINT_NET|SINT_TTY;
+			while ((pisr = netisr) != 0) {
+				atomic_clearbits_int(&netisr, pisr);
+				ppc_intr_enable(1);
+				KERNEL_LOCK();
+				softnet(pisr);
+				KERNEL_UNLOCK();
+				ppc_intr_disable();
+			}
+			continue;
+		}
+#if 0
+		if((ci->ci_ipending & SINT_TTY) & ~pcpl) {
+			ci->ci_ipending &= ~SINT_TTY;
+			ci->ci_cpl = SINT_TTY;
+			ppc_intr_enable(1);
+			KERNEL_LOCK();
+			softtty();
+			KERNEL_UNLOCK();
+			ppc_intr_disable();
+			continue;
+		}
+#endif
+	} while ((ci->ci_ipending & SINT_MASK) & ~pcpl);
+	ci->ci_cpl = pcpl;	/* Don't use splx... we are here already! */
+
+	ci->ci_iactive = 0;
+	ppc_intr_enable(s);
 }
 
 /*

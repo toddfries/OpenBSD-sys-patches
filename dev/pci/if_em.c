@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.211 2009/06/04 05:08:43 claudio Exp $ */
+/* $OpenBSD: if_em.c,v 1.214 2009/06/26 14:30:35 claudio Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -116,6 +116,7 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573L_PL_1 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573L_PL_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573V_PM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82574L },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575EB_COPPER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575EB_SERDES },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575GB_QUAD_CPR },
@@ -131,13 +132,19 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_C },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_M },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_M_AMT },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_BM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IFE },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IFE_G },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IFE_GT },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_AMT },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_C },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_M },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_M_AMT }
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_M_AMT },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH10_D_BM_LF },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH10_D_BM_LM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH10_R_BM_LF },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH10_R_BM_LM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH10_R_BM_V }
 };
 
 /*********************************************************************
@@ -187,8 +194,7 @@ void em_receive_checksum(struct em_softc *, struct em_rx_desc *,
 void em_transmit_checksum_setup(struct em_softc *, struct mbuf *,
 				u_int32_t *, u_int32_t *);
 #endif
-void em_set_promisc(struct em_softc *);
-void em_set_multi(struct em_softc *);
+void em_iff(struct em_softc *);
 #ifdef EM_DEBUG
 void em_print_hw_stats(struct em_softc *);
 #endif
@@ -330,15 +336,18 @@ em_attach(struct device *parent, struct device *self, void *aux)
 		}
 		case em_82571:
 		case em_82572:
+		case em_82574:
 		case em_82575:
 		case em_ich9lan:
-		case em_80003es2lan:	/* Limit Jumbo Frame size */
+		case em_ich10lan:
+		case em_80003es2lan:
+			/* Limit Jumbo Frame size */
 			sc->hw.max_frame_size = 9234;
 			break;
-			/* Adapters that do not support Jumbo frames */
 		case em_82542_rev2_0:
 		case em_82542_rev2_1:
 		case em_ich8lan:
+			/* Adapters that do not support Jumbo frames */
 			sc->hw.max_frame_size = ETHER_MAX_LEN;
 			break;
 		default:
@@ -572,24 +581,14 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	case SIOCSIFFLAGS:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFFLAGS (Set Interface Flags)");
 		if (ifp->if_flags & IFF_UP) {
-			/*
-			 * If only the PROMISC or ALLMULTI flag changes, then
-			 * don't do a full re-init of the chip, just update
-			 * the Rx filter.
-			 */
-			if ((ifp->if_flags & IFF_RUNNING) &&
-			    ((ifp->if_flags ^ sc->if_flags) &
-			     (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
-				em_set_promisc(sc);
-			} else {
-				if (!(ifp->if_flags & IFF_RUNNING))
-					em_init(sc);
-			}
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
+				em_init(sc);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				em_stop(sc);
 		}
-		sc->if_flags = ifp->if_flags;
 		break;
 
 	case SIOCSIFMEDIA:
@@ -611,7 +610,7 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING) {
 			em_disable_intr(sc);
-			em_set_multi(sc);
+			em_iff(sc);
 			if (sc->hw.mac_type == em_82542_rev2_0)
 				em_initialize_receive_unit(sc);
 			em_enable_intr(sc);
@@ -706,10 +705,14 @@ em_init(void *arg)
 		/* Jumbo frames not supported */
 		pba = E1000_PBA_12K; /* 12K for Rx, 20K for Tx */
 		break;
+	case em_82574: /* Total Packet Buffer is 40k */
+		pba = E1000_PBA_30K; /* 30K for Rx, 10K for Tx */
+		break;
 	case em_ich8lan:
 		pba = E1000_PBA_8K;
 		break;
 	case em_ich9lan:
+	case em_ich10lan:
 		pba = E1000_PBA_10K;
 		break;
 	default:
@@ -749,9 +752,6 @@ em_init(void *arg)
 	}
 	em_initialize_transmit_unit(sc);
 
-	/* Setup Multicast table */
-	em_set_multi(sc);
-
 	/* Prepare receive descriptors and buffers */
 	if (em_setup_receive_structures(sc)) {
 		printf("%s: Could not setup receive structures\n", 
@@ -762,8 +762,8 @@ em_init(void *arg)
 	}
 	em_initialize_receive_unit(sc);
 
-	/* Don't lose promiscuous settings */
-	em_set_promisc(sc);
+	/* Program promiscuous mode and multicast filters. */
+	em_iff(sc);
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -1298,44 +1298,17 @@ em_82547_tx_fifo_reset(struct em_softc *sc)
 }
 
 void
-em_set_promisc(struct em_softc *sc)
+em_iff(struct em_softc *sc)
 {
-	u_int32_t	reg_rctl;
-	struct ifnet   *ifp = &sc->interface_data.ac_if;
-
-	reg_rctl = E1000_READ_REG(&sc->hw, RCTL);
-
-	if (ifp->if_flags & IFF_PROMISC) {
-		reg_rctl |= (E1000_RCTL_UPE | E1000_RCTL_MPE);
-	} else if (ifp->if_flags & IFF_ALLMULTI) {
-		reg_rctl |= E1000_RCTL_MPE;
-		reg_rctl &= ~E1000_RCTL_UPE;
-	} else {
-		reg_rctl &= ~(E1000_RCTL_UPE | E1000_RCTL_MPE);
-	}
-	E1000_WRITE_REG(&sc->hw, RCTL, reg_rctl);
-}
-
-/*********************************************************************
- *  Multicast Update
- *
- *  This routine is called whenever multicast address list is updated.
- *
- **********************************************************************/
-
-void
-em_set_multi(struct em_softc *sc)
-{
-	u_int32_t reg_rctl = 0;
-	u_int8_t  mta[MAX_NUM_MULTICAST_ADDRESSES * ETH_LENGTH_OF_ADDRESS];
 	struct ifnet *ifp = &sc->interface_data.ac_if;
 	struct arpcom *ac = &sc->interface_data;
+	u_int32_t reg_rctl = 0;
+	u_int8_t  mta[MAX_NUM_MULTICAST_ADDRESSES * ETH_LENGTH_OF_ADDRESS];
 	struct ether_multi *enm;
 	struct ether_multistep step;
 	int i = 0;
 
-	IOCTL_DEBUGOUT("em_set_multi: begin");
-	ifp->if_flags &= ~IFF_ALLMULTI;
+	IOCTL_DEBUGOUT("em_iff: begin");
 
 	if (sc->hw.mac_type == em_82542_rev2_0) {
 		reg_rctl = E1000_READ_REG(&sc->hw, RCTL);
@@ -1347,13 +1320,17 @@ em_set_multi(struct em_softc *sc)
 	}
 
 	reg_rctl = E1000_READ_REG(&sc->hw, RCTL);
-	if (ac->ac_multirangecnt > 0 ||
+	reg_rctl &= ~(E1000_RCTL_MPE | E1000_RCTL_UPE);
+	ifp->if_flags &= ~IFF_ALLMULTI;
+
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0 ||
 	    ac->ac_multicnt > MAX_NUM_MULTICAST_ADDRESSES) {
 		ifp->if_flags |= IFF_ALLMULTI;
 		reg_rctl |= E1000_RCTL_MPE;
+		if (ifp->if_flags & IFF_PROMISC)
+			reg_rctl |= E1000_RCTL_UPE;
 	} else {
 		ETHER_FIRST_MULTI(step, ac, enm);
-
 		while (enm != NULL) {
 			bcopy(enm->enm_addrlo, mta + i, ETH_LENGTH_OF_ADDRESS);
 			i += ETH_LENGTH_OF_ADDRESS;
@@ -1362,8 +1339,8 @@ em_set_multi(struct em_softc *sc)
 		}
 
 		em_mc_addr_list_update(&sc->hw, mta, ac->ac_multicnt, 0, 1);
-		reg_rctl &= ~E1000_RCTL_MPE;
 	}
+
 	E1000_WRITE_REG(&sc->hw, RCTL, reg_rctl);
 
 	if (sc->hw.mac_type == em_82542_rev2_0) {
@@ -1564,7 +1541,8 @@ em_allocate_pci_resources(struct em_softc *sc)
 
 	/* for ICH8 and family we need to find the flash memory */
 	if (sc->hw.mac_type == em_ich8lan ||
-	    sc->hw.mac_type == em_ich9lan) {
+	    sc->hw.mac_type == em_ich9lan ||
+	    sc->hw.mac_type == em_ich10lan) {
 		val = pci_conf_read(pa->pa_pc, pa->pa_tag, EM_FLASH);
 		if (PCI_MAPREG_TYPE(val) != PCI_MAPREG_TYPE_MEM) {
 			printf(": flash is not mem space\n");

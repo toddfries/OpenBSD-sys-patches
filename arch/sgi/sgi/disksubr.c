@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.14 2009/06/04 21:13:02 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.16 2009/06/14 00:09:39 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1999 Michael Shalayeff
@@ -117,11 +117,8 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 	char *msg = NULL;
 	int i, *p, cs = 0;
 	int fsoffs = 0;
-	u_int fslen;
+	u_int fsend;
 	int offset;
-
-	if (partoffp)
-		*partoffp = fsoffs;
 
 	bp->b_blkno = 0;
 	bp->b_bcount = lp->d_secsize;
@@ -143,12 +140,9 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 		goto done;
 	}
 	fsoffs = dlp->partitions[0].first * (dlp->dp.dp_secbytes / DEV_BSIZE);
-	fslen = dlp->partitions[0].blocks * (dlp->dp.dp_secbytes / DEV_BSIZE);
+	fsend = fsoffs + dlp->partitions[0].blocks * (dlp->dp.dp_secbytes / DEV_BSIZE);
 
-	/*
-	 * If the disklabel is about to be written to disk, don't modify it!
-	 * just bail out.
-	 */
+	/* Only came here to find the offset... */
 	if (partoffp) {
 		*partoffp = fsoffs;
 		goto finished;
@@ -191,14 +185,23 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 		}
 	}
 
-	DL_GETBSTART(lp, fsoffs);
-	DL_GETBSIZE(lp, fsoffs + fslen);
+	DL_SETBSTART(lp, fsoffs);
+	DL_SETBEND(lp, fsend);
 	lp->d_version = 1;
 	lp->d_flags = D_VENDOR;
 	lp->d_checksum = 0;
 	lp->d_checksum = dkcksum(lp);
 
 finished:
+	/* record the OpenBSD partition's placement for the caller */
+	if (partoffp)
+		*partoffp = fsoffs;
+	else {
+		DL_SETBSTART(lp, fsoffs);
+		DL_SETBEND(lp, fsend);
+	}
+
+	/* don't read the on-disk label if we are in spoofed-only mode */
 	if (spoofonly)
 		goto done;
 
@@ -212,7 +215,7 @@ finished:
 		goto done;
 	}
 
-	return checkdisklabel(bp->b_data + offset, lp, fsoffs, fsoffs + fslen);
+	return checkdisklabel(bp->b_data + offset, lp, fsoffs, fsend);
 
 done:
 	return (msg);

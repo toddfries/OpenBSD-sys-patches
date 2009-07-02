@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioc.c,v 1.16 2009/05/27 19:04:45 miod Exp $	*/
+/*	$OpenBSD: ioc.c,v 1.18 2009/07/01 21:56:37 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Joel Sing.
@@ -182,12 +182,13 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_mem_bus_space->bus_base = memh;
 	sc->sc_mem_bus_space->_space_read_1 = xbow_read_1;
 	sc->sc_mem_bus_space->_space_read_2 = xbow_read_2;
+	sc->sc_mem_bus_space->_space_read_raw_2 = xbow_read_raw_2;
 	sc->sc_mem_bus_space->_space_write_1 = xbow_write_1;
 	sc->sc_mem_bus_space->_space_write_2 = xbow_write_2;
+	sc->sc_mem_bus_space->_space_write_raw_2 = xbow_write_raw_2;
 
-	/* XXX undo IP27 xbridge weird mapping */
-	if (sys_config.system_type != SGI_OCTANE)
-		sc->sc_mem_bus_space->_space_map = xbow_space_map_short;
+	/* XXX undo xbridge mapping games */
+	sc->sc_mem_bus_space->_space_map = xbow_space_map;
 
 	sc->sc_memt = sc->sc_mem_bus_space;
 	sc->sc_memh = memh;
@@ -268,7 +269,7 @@ unknown:
 	 *
 	 * Since our pci layer doesn't handle this, we have to compute
 	 * the superio interrupt cookie ourselves, with the help of the
-	 * pci bridge driver. This is ugly, and depends on xbridge knowledge.
+	 * pci bridge driver.
 	 *
 	 * (What the above means is that you should wear peril-sensitive
 	 * sunglasses from now on).
@@ -290,51 +291,6 @@ unknown:
 	 * slot.
 	 */
 	if (dual_irq) {
-		/*
-		 * First, try to get reliable interrupt information
-		 * from the pci bridge.
-		 *
-		 * In order to do this, we trigger the superio interrupt
-		 * and read a magic register in configuration space.
-		 * See the xbridge code for details.
-		 */
-
-		/* enable TX empty interrupt */
-		delay(20 * 1000);	/* let console output drain */
-		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IEC, ~0x0);
-		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IES,
-		    0x0201);
-
-		/* read pseudo interrupt register */
-		data = pci_conf_read(pa->pa_pc, pa->pa_tag,
-		    PCI_INTERRUPT_REG + 4);
-
-		/* disable interrupt again */
-		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IEC,
-		    0x0201);
-
-		if (data != 0) {
-			/*
-			 * If the interrupt has been received as the
-			 * regular PCI interrupt, then we probably don't
-			 * have separate interrupts.
-			 */
-			if (PCI_INTERRUPT_LINE(data) == pa->pa_intrline)
-				goto single;
-
-			pa->pa_intrline = PCI_INTERRUPT_LINE(data);
-			pa->pa_rawintrpin = pa->pa_intrpin =
-			    PCI_INTERRUPT_PIN(data);
-
-			if (pci_intr_map(pa, &ih2) == 0)
-				goto establish;
-		}
-
-		/*
-		 * If there was no bridge hint or it did not work, use the
-		 * heuristic of picking the lowest free slot.
-		 */
-
 		for (dev = 0;
 		    dev < pci_bus_maxdevs(pa->pa_pc, pa->pa_bus); dev++) {
 			pcitag_t tag;
@@ -367,7 +323,6 @@ unknown:
 		 * situation, but it's probably safe to revert to
 		 * a shared, single interrupt.
 		 */
-single:
 		shared_handler = 1;
 		dual_irq = 0;
 	}

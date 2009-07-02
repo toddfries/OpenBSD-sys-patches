@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbridge.c,v 1.24 2009/05/28 19:20:06 miod Exp $	*/
+/*	$OpenBSD: xbridge.c,v 1.31 2009/07/01 21:56:38 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009  Miodrag Vallat.
@@ -64,23 +64,22 @@ struct xbridge_softc {
 	struct device	sc_dev;
 	int		sc_flags;
 #define	XBRIDGE_FLAGS_XBRIDGE	0x01	/* is XBridge vs Bridge */
+	int16_t		sc_nasid;
 	int		sc_widget;
+	uint		sc_devio_skew;
 	struct mips_pci_chipset sc_pc;
+
+	bus_space_tag_t sc_iot;
+	bus_space_handle_t sc_regh;
 
 	struct mips_bus_space *sc_mem_bus_space;
 	struct mips_bus_space *sc_io_bus_space;
 	struct machine_bus_dma_tag *sc_dmat;
-	struct extent	*sc_mem_ex;
-	struct extent	*sc_io_ex;
-
-	bus_space_tag_t sc_iot;
-	bus_space_handle_t sc_regh;
 
 	int		sc_intrbit[BRIDGE_NINTRS];
 	struct xbridge_intr	*sc_intr[BRIDGE_NINTRS];
 
 	pcireg_t	sc_devices[BRIDGE_NSLOTS];
-	pcireg_t	sc_ier_ignore;
 
 	struct mutex	sc_atemtx;
 	uint		sc_atecnt;
@@ -122,16 +121,12 @@ void	xbridge_read_raw_2(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
 	    uint8_t *, bus_size_t);
 void	xbridge_write_raw_2(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
 	    const uint8_t *, bus_size_t);
-void	xbridge_read_raw_4(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    uint8_t *, bus_size_t);
-void	xbridge_write_raw_4(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    const uint8_t *, bus_size_t);
-void	xbridge_read_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    uint8_t *, bus_size_t);
-void	xbridge_write_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    const uint8_t *, bus_size_t);
 
-int	xbridge_space_map_short(bus_space_tag_t, bus_addr_t, bus_size_t, int,
+int	xbridge_space_map_devio(bus_space_tag_t, bus_addr_t, bus_size_t, int,
+	    bus_space_handle_t *);
+int	xbridge_space_map_io(bus_space_tag_t, bus_addr_t, bus_size_t, int,
+	    bus_space_handle_t *);
+int	xbridge_space_map_mem(bus_space_tag_t, bus_addr_t, bus_size_t, int,
 	    bus_space_handle_t *);
 
 int	xbridge_dmamap_load(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
@@ -157,8 +152,10 @@ void	xbridge_ate_write(struct xbridge_softc *, uint, uint64_t);
 void	xbridge_setup(struct xbridge_softc *);
 
 void	xbridge_ate_setup(struct xbridge_softc *);
+void	xbridge_resource_explore(struct xbridge_softc *, pcitag_t,
+	    uint *, uint *);
 void	xbridge_resource_manage(struct xbridge_softc *, pcitag_t,
-	    struct extent *);
+	    struct extent *, int);
 void	xbridge_resource_setup(struct xbridge_softc *);
 void	xbridge_rrb_setup(struct xbridge_softc *, int);
 
@@ -209,6 +206,7 @@ xbridge_attach(struct device *parent, struct device *self, void *aux)
 	struct pcibus_attach_args pba;
 	struct xbow_attach_args *xaa = aux;
 
+	sc->sc_nasid = xaa->xaa_nasid;
 	sc->sc_widget = xaa->xaa_widget;
 
 	printf(" revision %d\n", xaa->xaa_revision);
@@ -220,10 +218,14 @@ xbridge_attach(struct device *parent, struct device *self, void *aux)
 	 * Map Bridge registers.
 	 */
 
-	sc->sc_iot = xaa->xaa_short_tag;
+	sc->sc_iot = malloc(sizeof (*sc->sc_iot), M_DEVBUF, M_NOWAIT);
+	if (sc->sc_iot == NULL)
+		goto fail0;
+	bcopy(xaa->xaa_iot, sc->sc_iot, sizeof (*sc->sc_iot));
 	if (bus_space_map(sc->sc_iot, 0, BRIDGE_REGISTERS_SIZE, 0,
 	    &sc->sc_regh)) {
 		printf("%s: unable to map control registers\n", self->dv_xname);
+		free(sc->sc_iot, M_DEVBUF);
 		return;
 	}
 
@@ -242,66 +244,65 @@ xbridge_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc_io_bus_space == NULL)
 		goto fail2;
 
-	if (sys_config.system_type == SGI_OCTANE) {
-		/* Unrestricted memory mappings in the large window */
-		bcopy(xaa->xaa_long_tag, sc->sc_mem_bus_space,
-		    sizeof(*sc->sc_mem_bus_space));
-		sc->sc_mem_bus_space->bus_base += BRIDGE_PCI_MEM_SPACE_BASE;
-		sc->sc_mem_ex = extent_create("pcimem",
-		    0, BRIDGE_PCI_MEM_SPACE_LENGTH - 1,
-		    M_DEVBUF, NULL, 0, EX_NOWAIT);
+#ifdef notyet
+	/*
+	 * Memory mappings are available in the widget at
+	 * offset BRIDGE_PCI_MEM_SPACE_BASE onwards.
+	 */
+	bcopy(xaa->xaa_iot, sc->sc_mem_bus_space,
+	    sizeof(*sc->sc_mem_bus_space));
+	sc->sc_mem_bus_space->bus_base = ...
+	sc->sc_mem_ex = extent_create("pcimem",
+	    0, BRIDGE_PCI_MEM_SPACE_LENGTH - 1,
+	    M_DEVBUF, NULL, 0, EX_NOWAIT);
+	sc->sc_mem_bus_space->_space_map = xbridge_space_map_mem;
+#else
+	/* Programmable memory mappings in the small window */
+	bcopy(xaa->xaa_iot, sc->sc_mem_bus_space,
+	    sizeof(*sc->sc_mem_bus_space));
+	sc->sc_mem_bus_space->_space_map = xbridge_space_map_devio;
+#endif
 
-		if (ISSET(sc->sc_flags, XBRIDGE_FLAGS_XBRIDGE) ||
-		    xaa->xaa_revision >= 4) {
-			/* Unrestricted I/O mappings in the large window */
-			bcopy(xaa->xaa_long_tag, sc->sc_io_bus_space,
-			    sizeof(*sc->sc_io_bus_space));
-			sc->sc_io_bus_space->bus_base +=
-			    BRIDGE_PCI_IO_SPACE_BASE;
-
-			sc->sc_io_ex = extent_create("pciio",
-			    0, BRIDGE_PCI_IO_SPACE_LENGTH - 1,
-			    M_DEVBUF, NULL, 0, EX_NOWAIT);
-		} else {
-			/* Programmable I/O mappings in the small window */
-			bcopy(xaa->xaa_short_tag, sc->sc_io_bus_space,
-			    sizeof(*sc->sc_io_bus_space));
-		}
-	} else {
-		/* Limited memory mappings in the small window */
-		bcopy(xaa->xaa_short_tag, sc->sc_mem_bus_space,
-		    sizeof(*sc->sc_mem_bus_space));
-		sc->sc_mem_bus_space->bus_private = sc;
-		sc->sc_mem_bus_space->_space_map = xbridge_space_map_short;
-
-		/* Limited I/O mappings in the small window */
-		bcopy(xaa->xaa_short_tag, sc->sc_io_bus_space,
-		    sizeof(*sc->sc_io_bus_space));
-		sc->sc_io_bus_space->bus_private = sc;
-		sc->sc_io_bus_space->_space_map = xbridge_space_map_short;
-	}
-
-	sc->sc_io_bus_space->_space_read_1 = xbridge_read_1;
-	sc->sc_io_bus_space->_space_write_1 = xbridge_write_1;
-	sc->sc_io_bus_space->_space_read_2 = xbridge_read_2;
-	sc->sc_io_bus_space->_space_write_2 = xbridge_write_2;
-	sc->sc_io_bus_space->_space_read_raw_2 = xbridge_read_raw_2;
-	sc->sc_io_bus_space->_space_write_raw_2 = xbridge_write_raw_2;
-	sc->sc_io_bus_space->_space_read_raw_4 = xbridge_read_raw_4;
-	sc->sc_io_bus_space->_space_write_raw_4 = xbridge_write_raw_4;
-	sc->sc_io_bus_space->_space_read_raw_8 = xbridge_read_raw_8;
-	sc->sc_io_bus_space->_space_write_raw_8 = xbridge_write_raw_8;
-
+	sc->sc_mem_bus_space->bus_private = sc;
 	sc->sc_mem_bus_space->_space_read_1 = xbridge_read_1;
 	sc->sc_mem_bus_space->_space_write_1 = xbridge_write_1;
 	sc->sc_mem_bus_space->_space_read_2 = xbridge_read_2;
 	sc->sc_mem_bus_space->_space_write_2 = xbridge_write_2;
 	sc->sc_mem_bus_space->_space_read_raw_2 = xbridge_read_raw_2;
 	sc->sc_mem_bus_space->_space_write_raw_2 = xbridge_write_raw_2;
-	sc->sc_mem_bus_space->_space_read_raw_4 = xbridge_read_raw_4;
-	sc->sc_mem_bus_space->_space_write_raw_4 = xbridge_write_raw_4;
-	sc->sc_mem_bus_space->_space_read_raw_8 = xbridge_read_raw_8;
-	sc->sc_mem_bus_space->_space_write_raw_8 = xbridge_write_raw_8;
+
+#ifdef notyet
+	/*
+	 * I/O mappings are available in the widget at
+	 * offset BRIDGE_PCI_IO_SPACE_BASE onwards, but
+	 * weren't working correctly until Bridge revision 4.
+	 */
+	if (ISSET(sc->sc_flags, XBRIDGE_FLAGS_XBRIDGE) ||
+	    xaa->xaa_revision >= 4) {
+		/* Unrestricted I/O mappings in the large window */
+		bcopy(xaa->xaa_iot, sc->sc_io_bus_space,
+		    sizeof(*sc->sc_io_bus_space));
+		sc->sc_io_bus_space->bus_base = ...
+		sc->sc_io_ex = extent_create("pciio",
+		    0, BRIDGE_PCI_IO_SPACE_LENGTH - 1,
+		    M_DEVBUF, NULL, 0, EX_NOWAIT);
+		sc->sc_io_bus_space->_space_map = xbridge_space_map_io;
+	} else
+#endif
+	       {
+		/* Programmable I/O mappings in the small window */
+		bcopy(xaa->xaa_iot, sc->sc_io_bus_space,
+		    sizeof(*sc->sc_io_bus_space));
+		sc->sc_io_bus_space->_space_map = xbridge_space_map_devio;
+	}
+
+	sc->sc_io_bus_space->bus_private = sc;
+	sc->sc_io_bus_space->_space_read_1 = xbridge_read_1;
+	sc->sc_io_bus_space->_space_write_1 = xbridge_write_1;
+	sc->sc_io_bus_space->_space_read_2 = xbridge_read_2;
+	sc->sc_io_bus_space->_space_write_2 = xbridge_write_2;
+	sc->sc_io_bus_space->_space_read_raw_2 = xbridge_read_raw_2;
+	sc->sc_io_bus_space->_space_write_raw_2 = xbridge_write_raw_2;
 
 	sc->sc_dmat = malloc(sizeof (*sc->sc_dmat), M_DEVBUF, M_NOWAIT);
 	if (sc->sc_dmat == NULL)
@@ -342,8 +343,8 @@ xbridge_attach(struct device *parent, struct device *self, void *aux)
 	pba.pba_iot = sc->sc_io_bus_space;
 	pba.pba_memt = sc->sc_mem_bus_space;
 	pba.pba_dmat = sc->sc_dmat;
-	pba.pba_ioex = sc->sc_io_ex;
-	pba.pba_memex = sc->sc_mem_ex;
+	pba.pba_ioex = NULL;
+	pba.pba_memex = NULL;
 	pba.pba_pc = &sc->sc_pc;
 	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
@@ -356,6 +357,8 @@ fail3:
 fail2:
 	free(sc->sc_mem_bus_space, M_DEVBUF);
 fail1:
+	free(sc->sc_iot, M_DEVBUF);
+fail0:
 	printf("%s: not enough memory to build access structures\n",
 	    self->dv_xname);
 	return;
@@ -412,7 +415,6 @@ xbridge_conf_read(void *cookie, pcitag_t tag, int offset)
 {
 	struct xbridge_softc *sc = cookie;
 	pcireg_t data;
-	uint32_t ier;
 	int bus, dev, fn;
 	paddr_t pa;
 	int skip;
@@ -458,41 +460,6 @@ xbridge_conf_read(void *cookie, pcitag_t tag, int offset)
 			data = (PCI_INTERRUPT_PIN_A <<
 			    PCI_INTERRUPT_PIN_SHIFT) |
 			    (dev << PCI_INTERRUPT_LINE_SHIFT);
-			skip = 1;
-			break;
-		case PCI_INTERRUPT_REG + 4:
-			/*
-			 * This is a kluge to help the IOC driver figure
-			 * out which second interrupt line it uses.
-			 *
-			 * The ioc driver will attempt to trigger that
-			 * interrupt, and then read that sort-of second
-			 * interrupt register.  Here we check the pending
-			 * interrupts, and see if a bit has changed.
-			 *
-			 * Unfortunately, this does not work on all
-			 * platforms (e.g. IP30).  The ioc driver falls
-			 * back to heuristics in that case.
-			 */
-
-			ier = bus_space_read_4(sc->sc_iot, sc->sc_regh,
-			    BRIDGE_IER) & 0xff;
-			ier &= ~sc->sc_ier_ignore;
-			sc->sc_ier_ignore |= ier;
-
-			/* we expect only one bit to trigger */
-			if (ier != 0 && (ier & (ier - 1)) != 0)
-				ier = 0;
-
-			if (ier != 0) {
-				/* compute interrupt line */
-				for (data = 0; ier != 1; ier >>= 1, data++) ;
-
-				data = (PCI_INTERRUPT_PIN_A <<
-				    PCI_INTERRUPT_PIN_SHIFT) |
-				    (data << PCI_INTERRUPT_LINE_SHIFT);
-			} else
-				data = 0;
 			skip = 1;
 			break;
 		default:
@@ -699,7 +666,6 @@ xbridge_intr_establish(void *cookie, pci_intr_handle_t ih, int level,
 		}
 
 		sc->sc_intrbit[intrbit] = intrsrc;
-		sc->sc_ier_ignore |= 1 << intrbit;
 	}
 
 	xi->xi_bridge = sc;
@@ -774,7 +740,6 @@ xbridge_intr_handler(void *v)
 {
 	struct xbridge_intr *xi = v;
 	struct xbridge_softc *sc = xi->xi_bridge;
-	uint16_t nasid = 0;	/* XXX */
 	int rc;
 	int spurious;
 
@@ -827,11 +792,19 @@ xbridge_intr_handler(void *v)
 	} else {
 		if (bus_space_read_4(sc->sc_iot, sc->sc_regh,
 		    BRIDGE_ISR) & (1 << xi->xi_intrbit)) {
-			if (sys_config.system_type == SGI_OCTANE) {
+			switch (sys_config.system_type) {
+#if defined(TGT_OCTANE)
+			case SGI_OCTANE:
 				/* XXX what to do there? */
-			} else {
-				IP27_RHUB_PI_S(nasid, 0, HUB_IR_CHANGE,
-				    HUB_IR_SET | xi->xi_intrsrc);
+				break;
+#endif
+#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+			case SGI_O200:
+			case SGI_O300:
+				IP27_RHUB_PI_S(sc->sc_nasid, 0, HUBPI_IR_CHANGE,
+				    PI_IR_SET | xi->xi_intrsrc);
+				break;
+#endif
 			}
 		}
 	}
@@ -893,75 +866,89 @@ xbridge_write_raw_2(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
 	}
 }
 
-void
-xbridge_read_raw_4(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
-    uint8_t *buf, bus_size_t len)
-{
-	volatile uint32_t *addr = (volatile uint32_t *)(h + o);
-	len >>= 2;
-	while (len-- != 0) {
-		*(uint32_t *)buf = *addr;
-		buf += 4;
-	}
-}
-
-void
-xbridge_write_raw_4(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
-    const uint8_t *buf, bus_size_t len)
-{
-	volatile uint32_t *addr = (volatile uint32_t *)(h + o);
-	len >>= 2;
-	while (len-- != 0) {
-		*addr = *(uint32_t *)buf;
-		buf += 4;
-	}
-}
-
-void
-xbridge_read_raw_8(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
-    uint8_t *buf, bus_size_t len)
-{
-	volatile uint64_t *addr = (volatile uint64_t *)(h + o);
-	len >>= 3;
-	while (len-- != 0) {
-		*(uint64_t *)buf = *addr;
-		buf += 8;
-	}
-}
-
-void
-xbridge_write_raw_8(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
-    const uint8_t *buf, bus_size_t len)
-{
-	volatile uint64_t *addr = (volatile uint64_t *)(h + o);
-	len >>= 3;
-	while (len-- != 0) {
-		*addr = *(uint64_t *)buf;
-		buf += 8;
-	}
-}
-
-/*
- * On IP27 and IP35, we can not use the default xbow space_map_short
- * because of the games we play with bus addresses.
- */
 int
-xbridge_space_map_short(bus_space_tag_t t, bus_addr_t offs, bus_size_t size,
+xbridge_space_map_devio(bus_space_tag_t t, bus_addr_t offs, bus_size_t size,
     int cacheable, bus_space_handle_t *bshp)
 {
 	struct xbridge_softc *sc = (struct xbridge_softc *)t->bus_private;
-	bus_addr_t bpa;
+	bus_addr_t bpa, start, end;
+	uint d;
 
-	bpa = t->bus_base - (sc->sc_widget << 24) + offs;
+	if ((offs >> 24) != sc->sc_devio_skew)
+		return EINVAL;	/* not a devio mapping */
 
-	/* check that this neither underflows nor overflows the window */
-	if (((bpa + size - 1) >> 24) != (t->bus_base >> 24) ||
-	    (bpa >> 24) != (t->bus_base >> 24))
-		return (EINVAL);
+	/*
+	 * Figure out which devio `slot' we are using, and make sure
+	 * we do not overrun it.
+	 */
+	bpa = offs & ((1UL << 24) - 1);
+	for (d = 0; d < BRIDGE_NSLOTS; d++) {
+		start = BRIDGE_DEVIO_OFFS(d);
+		end = start + BRIDGE_DEVIO_SIZE(d);
+		if (bpa >= start && bpa < end) {
+			if (bpa + size > end)
+				return EINVAL;
+			else
+				break;
+		}
+	}
+	if (d == BRIDGE_NSLOTS)
+		return EINVAL;
 
-	*bshp = bpa;
+	/*
+	 * Note we can not use our own bus_base because it might not point
+	 * to our small window. Instead, use the one used by the xbridge
+	 * driver itself, which _always_ points to the short window.
+	 */
+	*bshp = sc->sc_iot->bus_base + bpa;
 	return 0;
 }
+
+#ifdef notyet
+int
+xbridge_space_map_io(bus_space_tag_t t, bus_addr_t offs, bus_size_t size,
+    int cacheable, bus_space_handle_t *bshp)
+{
+	struct xbridge_softc *sc = (struct xbridge_softc *)t->bus_private;
+
+	/*
+	 * Base address is either within the devio area, or our direct
+	 * window.
+	 */
+
+	if ((offs >> 24) == sc->sc_devio_skew)
+		return xbridge_space_map_devio(t, offs, size, cacheable, bshp);
+
+	/* check that this doesn't overflow the window */
+	if (offs + size > BRIDGE_PCI_IO_SPACE_LENGTH || offs + size < offs)
+		return EINVAL;
+
+	*bshp = t->bus_base + BRIDGE_PCI_IO_SPACE_BASE + offs;
+	return 0;
+}
+
+int
+xbridge_space_map_mem(bus_space_tag_t t, bus_addr_t offs, bus_size_t size,
+    int cacheable, bus_space_handle_t *bshp)
+{
+	struct xbridge_softc *sc = (struct xbridge_softc *)t->bus_private;
+
+	/*
+	 * Base address is either within the devio area, or our direct
+	 * window.
+	 */
+
+	if ((offs >> 24) == sc->sc_devio_skew)
+		return xbridge_space_map_devio(t, offs, size, cacheable, bshp);
+
+	/* check that this doesn't overflow the window */
+	if (offs + size > BRIDGE_PCI_MEM_SPACE_LENGTH || offs + size < offs)
+		return EINVAL;
+
+	*bshp = t->bus_base + BRIDGE_PCI_MEM_SPACE_BASE + offs;
+	return 0;
+}
+#endif
 
 /*
  ********************* bus_dma helpers
@@ -1543,7 +1530,7 @@ xbridge_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
     bus_size_t boundary, bus_dma_segment_t *segs, int nsegs, int *rsegs,
     int flags)
 {
-	vaddr_t low, high;
+	paddr_t low, high;
 
 	/*
 	 * Limit bus_dma'able memory to the first 2GB of physical memory.
@@ -1629,6 +1616,7 @@ xbridge_setup(struct xbridge_softc *sc)
 
 	/*
 	 * Configure the direct DMA window to access the low 2GB of memory.
+	 * XXX assumes masternasid is 0
 	 */
 
 	if (sys_config.system_type == SGI_OCTANE)
@@ -1652,6 +1640,26 @@ xbridge_setup(struct xbridge_softc *sc)
 
 	xbridge_rrb_setup(sc, 0);
 	xbridge_rrb_setup(sc, 1);
+
+#ifdef notyet
+	/*
+	 * Enable byteswapping on accesses through the large window,
+	 * except on the main I/O widget on Octane, where the default
+	 * mappings require them to be disabled (which doesn't matter,
+	 * since the contents of the PCI bus are immutable and well-known).
+	 */
+
+	if (sys_config.system_type != SGI_OCTANE ||
+	    sc->sc_widget != WIDGET_MAX) {
+		uint32_t ctrl = bus_space_read_4(sc->sc_iot, sc->sc_regh,
+		    WIDGET_CONTROL);
+		ctrl |= BRIDGE_WIDGET_CONTROL_IO_SWAP;
+		ctrl |= BRIDGE_WIDGET_CONTROL_MEM_SWAP;
+		bus_space_write_4(sc->sc_iot, sc->sc_regh, WIDGET_CONTROL,
+		    ctrl);
+		(void)bus_space_read_4(sc->sc_iot, sc->sc_regh, WIDGET_TFLUSH);
+	}
+#endif
 
 	/*
 	 * The PROM will only configure the onboard devices. Set up
@@ -1677,9 +1685,6 @@ xbridge_setup(struct xbridge_softc *sc)
 
 	for (i = 0; i < BRIDGE_NINTRS; i++)
 		sc->sc_intrbit[i] = -1;
-
-	sc->sc_ier_ignore = bus_space_read_4(sc->sc_iot, sc->sc_regh,
-	    BRIDGE_IER) & 0xff;
 }
 
 /*
@@ -1783,8 +1788,29 @@ xbridge_resource_setup(struct xbridge_softc *sc)
 	pcireg_t id, bhlcr;
 	const struct pci_quirkdata *qd;
 	uint32_t devio, basewin;
+	uint io, mem;
 	int need_setup;
-	struct extent *ioex;
+	struct extent *ex;
+
+	/*
+	 * Figure out where the devio mappings will lie in the widget.
+	 * On Octane (at least for the on-board devices widget), they are
+	 * relative to the beginning of the widget.
+	 * On other systems, they are offset an address multiple of the
+	 * widget number.
+	 *
+	 * We could remap everything to the beginning of the widget, but
+	 * since we need serial console mappings early, we can not afford
+	 * changing how ARCS maps the IOC device.
+	 */
+
+	sc->sc_devio_skew = sc->sc_widget;
+	if (sys_config.system_type == SGI_OCTANE) {
+#if 0 /* no reason not to expect all octane xbridge to behave the same way */
+		if (sc->sc_widget == WIDGET_MAX)
+#endif
+			sc->sc_devio_skew = 0;
+	}
 
 	for (dev = 0; dev < BRIDGE_NSLOTS; dev++) {
 		id = sc->sc_devices[dev];
@@ -1800,8 +1826,9 @@ xbridge_resource_setup(struct xbridge_softc *sc)
 		 */
 		devio = bus_space_read_4(sc->sc_iot, sc->sc_regh,
 		    BRIDGE_DEVICE(dev));
+		basewin = (sc->sc_widget << 24) | BRIDGE_DEVIO_OFFS(dev);
 		need_setup = ((devio & BRIDGE_DEVICE_BASE_MASK) >>
-		    (24 - BRIDGE_DEVICE_BASE_SHIFT)) != sc->sc_widget;
+		    (24 - BRIDGE_DEVICE_BASE_SHIFT)) != sc->sc_devio_skew;
 
 		/*
 		 * On Octane, the firmware will setup the I/O registers
@@ -1813,17 +1840,12 @@ xbridge_resource_setup(struct xbridge_softc *sc)
 			need_setup = 0;
 
 		if (need_setup) {
-			basewin =
-			    (sc->sc_widget << 24) | BRIDGE_DEVIO_OFFS(dev);
-
 			devio &= ~BRIDGE_DEVICE_BASE_MASK;
 
 			/*
-			 * XXX This defaults to I/O resources only.
-			 * XXX However some devices may carry only
-			 * XXX memory mappings.
-			 * XXX This code should assign devio in a more
-			 * XXX flexible way...
+			 * Default to I/O resources only for now.
+			 * If we setup memory resources, this bit
+			 * will be flipped later on.
 			 */
 			devio &= ~BRIDGE_DEVICE_IO_MEM;
 
@@ -1843,28 +1865,18 @@ xbridge_resource_setup(struct xbridge_softc *sc)
 		    devio);
 		(void)bus_space_read_4(sc->sc_iot, sc->sc_regh, WIDGET_TFLUSH);
 
-		/*
-		 * If we can manage I/O resource allocation in the MI code,
-		 * we do not need to do anything more at this stage...
-		 */
-
-		if (sc->sc_io_ex != NULL)
-			continue;
-
-		/*
-		 * ...otherwise, we need to perform the resource allocation
-		 * ourselves, within the devio window we have configured
-		 * above, for the devices which have not been setup by the
-		 * firmware already.
-		 */
-
 		if (need_setup == 0)
 			continue;
 
-		ioex = extent_create("pciio",
+		/*
+		 * We now need to perform the resource allocation for this
+		 * device, which has not been setup by ARCS.
+		 */
+
+		ex = extent_create("pcires",
 		    basewin, basewin + BRIDGE_DEVIO_SIZE(dev) - 1,
 		    M_DEVBUF, NULL, 0, EX_NOWAIT);
-		if (ioex == NULL)
+		if (ex == NULL)
 			continue;
 
 		qd = pci_lookup_quirkdata(PCI_VENDOR(id), PCI_PRODUCT(id));
@@ -1877,6 +1889,11 @@ xbridge_resource_setup(struct xbridge_softc *sc)
 		else
 			nfuncs = 1;
 
+		/*
+		 * Count how many I/O and memory mappings are necessary.
+		 */
+
+		io = mem = 0;
 		for (function = 0; function < nfuncs; function++) {
 			tag = pci_make_tag(pc, 0, dev, function);
 			id = pci_conf_read(pc, tag, PCI_ID_REG);
@@ -1885,16 +1902,92 @@ xbridge_resource_setup(struct xbridge_softc *sc)
 			    PCI_VENDOR(id) == 0)
 				continue;
 
-			xbridge_resource_manage(sc, tag, ioex);
+			xbridge_resource_explore(sc, tag, &io, &mem);
 		}
 
-		extent_destroy(ioex);
+		/*
+		 * For devices having both I/O and memory resources, we
+		 * favour the I/O resources so far. Eventually this code
+		 * should attempt to steal a devio from an unpopulated
+		 * slot.
+		 */
+
+		if (io == 0 && mem != 0) {
+			/* swap devio type */
+			devio |= BRIDGE_DEVICE_IO_MEM;
+			bus_space_write_4(sc->sc_iot, sc->sc_regh,
+			    BRIDGE_DEVICE(dev), devio);
+			(void)bus_space_read_4(sc->sc_iot, sc->sc_regh,
+			    WIDGET_TFLUSH);
+		} else
+			mem = 0;
+
+		for (function = 0; function < nfuncs; function++) {
+			tag = pci_make_tag(pc, 0, dev, function);
+			id = pci_conf_read(pc, tag, PCI_ID_REG);
+
+			if (PCI_VENDOR(id) == PCI_VENDOR_INVALID ||
+			    PCI_VENDOR(id) == 0)
+				continue;
+
+			xbridge_resource_manage(sc, tag, ex, mem != 0);
+		}
+
+		extent_destroy(ex);
+	}
+}
+
+void
+xbridge_resource_explore(struct xbridge_softc *sc, pcitag_t tag,
+    uint *nio, uint *nmem)
+{
+	pci_chipset_tag_t pc = &sc->sc_pc;
+	pcireg_t bhlc, type;
+	int reg, reg_start, reg_end;
+
+	bhlc = pci_conf_read(pc, tag, PCI_BHLC_REG);
+	switch (PCI_HDRTYPE(bhlc)) {
+	case 0:
+		reg_start = PCI_MAPREG_START;
+		reg_end = PCI_MAPREG_END;
+		break;
+	case 1:	/* PCI-PCI bridge */
+		reg_start = PCI_MAPREG_START;
+		reg_end = PCI_MAPREG_PPB_END;
+		break;
+	case 2:	/* PCI-CardBus bridge */
+		reg_start = PCI_MAPREG_START;
+		reg_end = PCI_MAPREG_PCB_END;
+		break;
+	default:
+		return;
+	}
+
+	for (reg = reg_start; reg < reg_end; reg += 4) {
+		if (pci_mapreg_probe(pc, tag, reg, &type) == 0)
+			continue;
+
+		if (pci_mapreg_info(pc, tag, reg, type, NULL, NULL, NULL))
+			continue;
+
+		switch (type) {
+		case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT:
+		case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT:
+			(*nmem)++;
+			break;
+		case PCI_MAPREG_TYPE_IO:
+			(*nio)++;
+			break;
+		}
+
+		if (type & PCI_MAPREG_MEM_TYPE_64BIT)
+			reg += 4;
 	}
 }
 
 void
 xbridge_resource_manage(struct xbridge_softc *sc, pcitag_t tag,
-    struct extent *ioex)
+    struct extent *ex, int prefer_mem)
 {
 	pci_chipset_tag_t pc = &sc->sc_pc;
 	pcireg_t bhlc, type;
@@ -1927,28 +2020,34 @@ xbridge_resource_manage(struct xbridge_softc *sc, pcitag_t tag,
 		if (pci_mapreg_info(pc, tag, reg, type, &base, &size, NULL))
 			continue;
 
+		/*
+		 * Note that we do not care about the existing BAR values,
+		 * since these devices either have not been setup by ARCS
+		 * or do not matter for early system setup (such as
+		 * optional IOC3 PCI boards, which will get setup by
+		 * ARCS but can be reinitialized as we see fit).
+		 */
 		switch (type) {
 		case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT:
 		case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT:
-			/*
-			 * XXX Eventually do something if sc->sc_mem_ex is
-			 * XXX NULL...
-			 */
+			if (prefer_mem != 0) {
+				if (extent_alloc(ex, size, size, 0, 0, 0,
+				    &base) != 0)
+					base = 0;
+			} else
+				base = 0;
 			break;
 		case PCI_MAPREG_TYPE_IO:
-			if (base != 0) {
-				if (extent_alloc_region(ioex, base, size,
-				    EX_NOWAIT))
-					printf("io address conflict"
-					    " 0x%x/0x%x\n", base, size);
-			} else {
-				if (extent_alloc(ioex, size, size, 0, 0, 0,
-				    &base) == 0)
-					pci_conf_write(pc, tag, reg, base);
-				/* otherwise the resource remains disabled */
-			}
+			if (prefer_mem == 0) {
+				if (extent_alloc(ex, size, size, 0, 0, 0,
+				    &base) != 0)
+					base = 0;
+			} else
+				base = 0;
 			break;
 		}
+
+		pci_conf_write(pc, tag, reg, base);
 
 		if (type & PCI_MAPREG_MEM_TYPE_64BIT)
 			reg += 4;

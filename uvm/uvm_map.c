@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_map.c,v 1.112 2009/06/02 23:00:19 oga Exp $	*/
+/*	$OpenBSD: uvm_map.c,v 1.118 2009/06/17 00:13:59 oga Exp $	*/
 /*	$NetBSD: uvm_map.c,v 1.86 2000/11/27 08:40:03 chs Exp $	*/
 
 /* 
@@ -3820,8 +3820,9 @@ uvm_object_printit(uobj, full, pr)
 		return;
 	}
 	(*pr)("  PAGES <pg,offset>:\n  ");
-	RB_FOREACH(pg, uobj_pgs, &uobj->memt) {
-		cnt++;
+	for (pg = TAILQ_FIRST(&uobj->memq);
+	     pg != NULL;
+	     pg = TAILQ_NEXT(pg, listq), cnt++) {
 		(*pr)("<%p,0x%llx> ", pg, (long long)pg->offset);
 		if ((cnt % 3) == 2) {
 			(*pr)("\n  ");
@@ -3882,7 +3883,7 @@ uvm_page_printit(pg, full, pr)
 			uobj = pg->uobject;
 			if (uobj) {
 				(*pr)("  checking object list\n");
-				RB_FOREACH(pg, uobj_pgs, &uobj->memt) {
+				TAILQ_FOREACH(tpg, &uobj->memq, listq) {
 					if (tpg == pg) {
 						break;
 					}
@@ -3897,11 +3898,9 @@ uvm_page_printit(pg, full, pr)
 
 	/* cross-verify page queue */
 	if (pg->pg_flags & PQ_FREE) {
-		if (uvm_pmr_isfree(pg))
-			printf("  page found in uvm_pmemrange\n");
-		else
-			printf("  >>> page not found in uvm_pmemrange <<<\n");
-		pgl = NULL;
+		int fl = uvm_page_lookup_freelist(pg);
+		pgl = &uvm.page_free[fl].pgfl_queues[((pg)->pg_flags & PG_ZERO) ?
+		    PGFL_ZEROS : PGFL_UNKNOWN];
 	} else if (pg->pg_flags & PQ_INACTIVE) {
 		pgl = (pg->pg_flags & PQ_SWAPBACKED) ?
 		    &uvm.page_inactive_swp : &uvm.page_inactive_obj;

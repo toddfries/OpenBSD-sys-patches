@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.271 2009/06/04 04:09:02 naddy Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.276 2009/06/19 21:31:54 naddy Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -362,6 +362,8 @@ static const struct bge_revision {
 	{ BGE_CHIPID_BCM5787_A2, "BCM5754/5787 A2" },
 	{ BGE_CHIPID_BCM5906_A1, "BCM5906 A1" },
 	{ BGE_CHIPID_BCM5906_A2, "BCM5906 A2" },
+	{ BGE_CHIPID_BCM57780_A0, "BCM57780 A0" },
+	{ BGE_CHIPID_BCM57780_A1, "BCM57780 A1" },
 
 	{ 0, NULL }
 };
@@ -1223,6 +1225,10 @@ bge_chipinit(struct bge_softc *sc)
 			/* 1536 bytes for read, 384 bytes for write. */
 			dma_rw_ctl |= BGE_PCIDMARWCTL_RD_WAT_SHIFT(7) |
 			    BGE_PCIDMARWCTL_WR_WAT_SHIFT(3);
+		} else if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5703) {
+			/* 512 bytes for read, 384 bytes for write. */
+			dma_rw_ctl |= BGE_PCIDMARWCTL_RD_WAT_SHIFT(4) |
+			    BGE_PCIDMARWCTL_WR_WAT_SHIFT(3);
 		} else {
 			/* 384 bytes for read and write. */
 			dma_rw_ctl |= BGE_PCIDMARWCTL_RD_WAT_SHIFT(3) |
@@ -1270,6 +1276,16 @@ bge_chipinit(struct bge_softc *sc)
 	CSR_WRITE_4(sc, BGE_MODE_CTL, BGE_DMA_SWAP_OPTIONS|
 		    BGE_MODECTL_MAC_ATTN_INTR|BGE_MODECTL_HOST_SEND_BDS|
 		    BGE_MODECTL_TX_NO_PHDR_CSUM);
+
+	/*
+	 * BCM5701 B5 have a bug causing data corruption when using
+	 * 64-bit DMA reads, which can be terminated early and then
+	 * completed later as 32-bit accesses, in combination with
+	 * certain bridges.
+	 */
+	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5701 &&
+	    sc->bge_chipid == BGE_CHIPID_BCM5701_B5)
+		BGE_SETBIT(sc, BGE_MODE_CTL, BGE_MODECTL_FORCE_PCI32);
 
 	/*
 	 * Disable memory write invalidate.  Apparently it is not supported
@@ -2037,7 +2053,7 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	if (bus_dmamem_map(sc->bge_dmatag, &seg, rseg,
 			   sizeof(struct bge_ring_data), &kva,
 			   BUS_DMA_NOWAIT)) {
-		printf(": can't map dma buffers (%zu bytes)\n",
+		printf(": can't map dma buffers (%lu bytes)\n",
 		    sizeof(struct bge_ring_data));
 		goto fail_2;
 	}
@@ -2789,11 +2805,10 @@ int
 bge_compact_dma_runt(struct mbuf *pkt)
 {
 	struct mbuf	*m, *prev, *n = NULL;
-	int 		totlen, prevlen, newprevlen;
+	int 		totlen, newprevlen;
 
 	prev = NULL;
 	totlen = 0;
-	prevlen = -1;
 
 	for (m = pkt; m != NULL; prev = m,m = m->m_next) {
 		int mlen = m->m_len;
@@ -2876,7 +2891,6 @@ bge_compact_dma_runt(struct mbuf *pkt)
 			m_free(m);
 			m = n;	/* for continuing loop */
 		}
-		prevlen = m->m_len;
 	}
 	return (0);
 }
@@ -3123,8 +3137,6 @@ bge_init(void *xsc)
 		splx(s);
 		return;
 	}
-
-	ifp = &sc->arpcom.ac_if;
 
 	/* Specify MRU. */
 	if (BGE_IS_JUMBO_CAPABLE(sc))

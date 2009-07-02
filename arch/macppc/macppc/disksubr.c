@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.63 2009/06/05 00:41:12 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.66 2009/06/19 11:47:09 krw Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.21 1996/05/03 19:42:03 christos Exp $	*/
 
 /*
@@ -106,7 +106,7 @@ readdpmelabel(struct buf *bp, void (*strat)(struct buf *),
     struct disklabel *lp, int *partoffp, int spoofonly)
 {
 	int i, part_cnt, n, hfspartoff = -1;
-	u_int64_t hfspartend;
+	u_int64_t hfspartend = DL_GETDSIZE(lp);
 	struct part_map_entry *part;
 
 	/* First check for a DPME (HFS) disklabel */
@@ -121,7 +121,7 @@ readdpmelabel(struct buf *bp, void (*strat)(struct buf *),
 	part = (struct part_map_entry *)bp->b_data;
 	/* if first partition is not valid, assume not HFS/DPME partitioned */
 	if (part->pmSig != PART_ENTRY_MAGIC)
-		return ("not a DPMI partition");
+		return ("not a DPME partition");
 	part_cnt = part->pmMapBlkCnt;
 	n = 8;
 	for (i = 0; i < part_cnt; i++) {
@@ -147,6 +147,11 @@ readdpmelabel(struct buf *bp, void (*strat)(struct buf *),
 			if (partoffp) {
 				*partoffp = hfspartoff;
 				return (NULL);
+			} else {
+				DL_SETBSTART(lp, hfspartoff);
+				DL_SETBEND(lp,
+				    hfspartend < DL_GETDSIZE(lp) ? hfspartend :
+				    DL_GETDSIZE(lp));
 			}
 			continue;
 		}
@@ -163,9 +168,6 @@ readdpmelabel(struct buf *bp, void (*strat)(struct buf *),
 			n++;
 		}
 
-		DL_SETBSTART(lp, hfspartoff);
-		DL_SETBEND(lp, hfspartend < DL_GETDSIZE(lp) ? hfspartend :
-		    DL_GETDSIZE(lp));
 	}
 
 	if (hfspartoff == -1)
@@ -182,6 +184,8 @@ readdpmelabel(struct buf *bp, void (*strat)(struct buf *),
 	if (biowait(bp))
 		return("disk label I/O error");
 
+	if (hfspartoff == -1)
+		hfspartoff = 0;
 	return checkdisklabel(bp->b_data + LABELOFFSET, lp, hfspartoff,
 	    hfspartend);
 }

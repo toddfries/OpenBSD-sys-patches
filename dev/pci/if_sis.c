@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.90 2009/06/04 20:01:02 sthen Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.93 2009/06/22 22:14:21 claudio Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -119,9 +119,6 @@ void sis_fill_rx_ring(struct sis_softc *);
 int sis_newbuf(struct sis_softc *, struct sis_desc *);
 int sis_encap(struct sis_softc *, struct mbuf *, u_int32_t *);
 void sis_rxeof(struct sis_softc *);
-#if 0
-void sis_rxeoc(struct sis_softc *);
-#endif
 void sis_txeof(struct sis_softc *);
 void sis_tick(void *);
 void sis_start(struct ifnet *);
@@ -1240,7 +1237,7 @@ sis_newbuf(struct sis_softc *sc, struct sis_desc *c)
 
 	MCLGETI(m_new, M_DONTWAIT, &sc->arpcom.ac_if, MCLBYTES);
 	if (!(m_new->m_flags & M_EXT)) {
-		m_freem(m_new);
+		m_free(m_new);
 		return (ENOBUFS);
 	}
 
@@ -1248,7 +1245,7 @@ sis_newbuf(struct sis_softc *sc, struct sis_desc *c)
 
 	if (bus_dmamap_load_mbuf(sc->sc_dmat, c->map, m_new,
 	    BUS_DMA_NOWAIT)) {
-		m_freem(m_new);
+		m_free(m_new);
 		return (ENOBUFS);
 	}
 
@@ -1283,12 +1280,12 @@ sis_rxeof(struct sis_softc *sc)
 
 	while(sc->sis_cdata.sis_rx_cnt > 0) {
 		cur_rx = &sc->sis_ldata->sis_rx_list[sc->sis_cdata.sis_rx_cons];
-		if (!SIS_OWNDESC(cur_rx))
-			break;
 		bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
 		    ((caddr_t)cur_rx - sc->sc_listkva),
 		    sizeof(struct sis_desc),
 		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
+		if (!SIS_OWNDESC(cur_rx))
+			break;
 
 		rxstat = cur_rx->sis_rxstat;
 		m = cur_rx->sis_mbuf;
@@ -1329,7 +1326,7 @@ sis_rxeof(struct sis_softc *sc)
 		 * if the allocation fails, then use m_devget and leave the
 		 * existing buffer in the receive ring.
 		 */
-		if (1) {
+		{
 			struct mbuf *m0;
 			m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN,
 			    ifp, NULL);
@@ -1339,12 +1336,11 @@ sis_rxeof(struct sis_softc *sc)
 				continue;
 			}
 			m = m0;
-		} else
-#endif
-		{
-			m->m_pkthdr.rcvif = ifp;
-			m->m_pkthdr.len = m->m_len = total_len;
 		}
+#else
+		m->m_pkthdr.rcvif = ifp;
+		m->m_pkthdr.len = m->m_len = total_len;
+#endif
 		ifp->if_ipackets++;
 
 #if NBPFILTER > 0
@@ -1358,15 +1354,6 @@ sis_rxeof(struct sis_softc *sc)
 
 	sis_fill_rx_ring(sc);
 }
-
-#if 0
-void
-sis_rxeoc(struct sis_softc *sc)
-{
-	sis_rxeof(sc);
-	sis_init(sc);
-}
-#endif
 
 /*
  * A frame was downloaded to the chip. It's safe for us to clean up
@@ -1496,10 +1483,6 @@ sis_intr(void *arg)
 		     SIS_ISR_RX_ERR | SIS_ISR_RX_IDLE))
 			sis_rxeof(sc);
 
-#if 0
-		if (status & SIS_ISR_RX_OFLOW)
-			sis_rxeoc(sc);
-#endif
 		if (status & (SIS_ISR_RX_IDLE)) {
 			/* consume what's there so that sis_rx_cons points
 			 * to the first HW owned descriptor. */
