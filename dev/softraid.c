@@ -3240,17 +3240,6 @@ queued:
 
 		sd->sd_meta->ssd_rebuild = lba;
 
-		/* save metadata every percent */
-		psz = sd->sd_meta->ssdi.ssd_size;
-		rb = sd->sd_meta->ssd_rebuild;
-		percent = 100 - ((psz * 100 - rb * 100) / psz);
-		if (percent != old_percent && blk != whole_blk) {
-			if (sr_meta_save(sd, SR_META_DIRTY))
-				printf("%s: could not save metadata to %s\n",
-				    DEVNAME(sc), sd->sd_meta->ssd_devname);
-			old_percent = percent;
-		}
-
 		if (sd->sd_reb_abort)
 			goto abort;
 	}
