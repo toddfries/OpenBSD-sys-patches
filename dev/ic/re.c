@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.108 2009/07/03 16:55:27 deraadt Exp $	*/
+/*	$OpenBSD: re.c,v 1.111 2009/07/15 19:50:04 naddy Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -232,7 +232,7 @@ static const struct re_revision {
 	{ RL_HWREV_8168C_SPIN2,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168CP,	"RTL8168CP/8111CP" },
 	{ RL_HWREV_8168D,	"RTL8168D/8111D" },
-	{ RL_HWREV_8168DP,      "RTL8168DP" },
+	{ RL_HWREV_8168DP,      "RTL8168DP/8111DP" },
 	{ RL_HWREV_8169,	"RTL8169" },
 	{ RL_HWREV_8169_8110SB,	"RTL8169/8110SB" },
 	{ RL_HWREV_8169_8110SBL, "RTL8169SBL" },
@@ -811,7 +811,7 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 
 	switch (sc->sc_hwrev) {
 	case RL_HWREV_8139CPLUS:
-		sc->rl_flags |= RL_FLAG_NOJUMBO;
+		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_AUTOPAD;
 		break;
 	case RL_HWREV_8100E_SPIN1:
 	case RL_HWREV_8100E_SPIN2:
@@ -824,7 +824,7 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	case RL_HWREV_8103E:
 		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_INVMAR |
 		    RL_FLAG_PHYWAKE | RL_FLAG_PAR | RL_FLAG_DESCV2 |
-		    RL_FLAG_MACSTAT;
+		    RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD;
 		break;
 	case RL_HWREV_8168_SPIN1:
 	case RL_HWREV_8168_SPIN2:
@@ -832,14 +832,16 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
 		    RL_FLAG_MACSTAT | RL_FLAG_HWIM;
 		break;
-	case RL_HWREV_8168C:
 	case RL_HWREV_8168C_SPIN2:
+		sc->rl_flags |= RL_FLAG_MACSLEEP;
+		/* FALLTHROUGH */
+	case RL_HWREV_8168C:
 	case RL_HWREV_8168CP:
 	case RL_HWREV_8168D:
 	case RL_HWREV_8168DP:
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
 		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
-		    RL_FLAG_HWIM;
+		    RL_FLAG_HWIM | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD;
 		/*
 		 * These controllers support jumbo frame but it seems
 		 * that enabling it requires touching additional magic
@@ -1946,18 +1948,19 @@ re_init(struct ifnet *ifp)
 	 * Enable C+ RX and TX mode, as well as RX checksum offload.
 	 * We must configure the C+ register before all others.
 	 */
-	cfg = RL_CPLUSCMD_PCI_MRW;
+	cfg = RL_CPLUSCMD_TXENB | RL_CPLUSCMD_PCI_MRW;
+
 	if (ifp->if_capabilities & IFCAP_CSUM_IPv4)
 		cfg |= RL_CPLUSCMD_RXCSUM_ENB;
+
 	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
 		cfg |= RL_CPLUSCMD_VLANSTRIP;
-	if (sc->rl_flags & RL_FLAG_MACSTAT) {
+
+	if (sc->rl_flags & RL_FLAG_MACSTAT)
 		cfg |= RL_CPLUSCMD_MACSTAT_DIS;
-		/* XXX magic. */
-		cfg |= 0x0001;
-	} else {
-		cfg |= RL_CPLUSCMD_RXENB | RL_CPLUSCMD_TXENB;
-	}
+	else
+		cfg |= RL_CPLUSCMD_RXENB;
+
 	CSR_WRITE_2(sc, RL_CPLUS_CMD, cfg);
 
 	/*
