@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_bio.c,v 1.59 2009/06/23 08:08:50 jasper Exp $	*/
+/*	$OpenBSD: nfs_bio.c,v 1.61 2009/07/22 13:02:08 thib Exp $	*/
 /*	$NetBSD: nfs_bio.c,v 1.25.4.2 1996/07/08 20:47:04 jtc Exp $	*/
 
 /*
@@ -420,16 +420,13 @@ again:
 		} else 
 			bp->b_flags &= ~B_NEEDCOMMIT;
 
-		/*
-		 * If the lease is non-cachable or IO_SYNC do bwrite().
-		 */
 		if (ioflag & IO_SYNC) {
 			bp->b_proc = p;
 			error = VOP_BWRITE(bp);
 			if (error)
 				return (error);
 		} else if ((n + on) == biosize) {
-			bp->b_proc = (struct proc *)0;
+			bp->b_proc = NULL;
 			bp->b_flags |= B_ASYNC;
 			(void)nfs_writebp(bp, 0);
 		} else {
@@ -463,9 +460,9 @@ nfs_getcacheblk(vp, bn, size, p)
 
 	if (nmp->nm_flag & NFSMNT_INT) {
 		bp = getblk(vp, bn, size, PCATCH, 0);
-		while (bp == (struct buf *)0) {
-			if (nfs_sigintr(nmp, (struct nfsreq *)0, p))
-				return ((struct buf *)0);
+		while (bp == NULL) {
+			if (nfs_sigintr(nmp, NULL, p))
+				return (NULL);
 			bp = getblk(vp, bn, size, 0, 2 * hz);
 		}
 	} else
