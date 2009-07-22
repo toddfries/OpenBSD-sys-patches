@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_gem_sbus.c,v 1.6 2009/07/12 21:27:09 kettenis Exp $	*/
+/*	$OpenBSD: if_gem_sbus.c,v 1.1 2009/07/13 19:53:58 kettenis Exp $	*/
 /*	$NetBSD: if_gem_sbus.c,v 1.1 2006/11/24 13:23:32 martin Exp $	*/
 
 /*-
@@ -56,11 +56,11 @@
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 
-#include <machine/bus.h>
-#include <machine/intr.h>
 #include <machine/autoconf.h>
+#include <machine/bus.h>
+extern struct sparc_bus_dma_tag *iommu_dmatag;
 
-#include <dev/sbus/sbusvar.h>
+#include <sparc/dev/sbusvar.h>
 
 #include <dev/ic/gemreg.h>
 #include <dev/ic/gemvar.h>
@@ -69,6 +69,8 @@
 
 struct gem_sbus_softc {
 	struct	gem_softc	gsc_gem;	/* GEM device */
+	struct intrhand		gsc_ih;
+	struct rom_reg		gsc_rr;
 };
 
 int	gemmatch_sbus(struct device *, void *, void *);
@@ -81,31 +83,33 @@ struct cfattach gem_sbus_ca = {
 int
 gemmatch_sbus(struct device *parent, void *vcf, void *aux)
 {
-	struct sbus_attach_args *sa = aux;
+	struct confargs *ca = aux;
+	struct romaux *ra = &ca->ca_ra;
 
-	return (strcmp("network", sa->sa_name) == 0);
+	return (strcmp("network", ra->ra_name) == 0);
 }
 
 void
 gemattach_sbus(struct device *parent, struct device *self, void *aux)
 {
-	struct sbus_attach_args *sa = aux;
+	struct confargs *ca = aux;
 	struct gem_sbus_softc *gsc = (void *)self;
 	struct gem_softc *sc = &gsc->gsc_gem;
 	/* XXX the following declaration should be elsewhere */
 	extern void myetheraddr(u_char *);
 
 	/* Pass on the bus tags */
-	sc->sc_bustag = sa->sa_bustag;
-	sc->sc_dmatag = sa->sa_dmatag;
+	gsc->gsc_rr = ca->ca_ra.ra_reg[0];
+	sc->sc_bustag = &gsc->gsc_rr;
+	sc->sc_dmatag = iommu_dmatag;
 
-	if (sa->sa_nintr < 1) {
-		printf(": no interrupt\n");
-		return;
-	}
+	if (ca->ca_ra.ra_nintr < 1) {
+                printf(": no interrupt\n");
+                return;
+        }
 
-	if (sa->sa_nreg < 2) {
-		printf(": only %d register sets\n", sa->sa_nreg);
+	if (ca->ca_ra.ra_nreg < 2) {
+                printf(": only %d register sets\n", ca->ca_ra.ra_nreg);
 		return;
 	}
 
@@ -118,36 +122,34 @@ gemattach_sbus(struct device *parent, struct device *self, void *aux)
 	 *	bank 1: various gem parts
 	 *
 	 */
-	if (sbus_bus_map(sa->sa_bustag, sa->sa_reg[0].sbr_slot,
-			 (bus_addr_t)sa->sa_reg[0].sbr_offset,
-			 (bus_size_t)sa->sa_reg[0].sbr_size, 0, 0,
-			 &sc->sc_h2) != 0) {
+	if (bus_space_map(&ca->ca_ra.ra_reg[0], 0,
+	    ca->ca_ra.ra_reg[0].rr_len, 0, &sc->sc_h2)) {
 		printf(": can't map registers\n");
 		return;
 	}
-	if (sbus_bus_map(sa->sa_bustag, sa->sa_reg[0].sbr_slot,
-			 (bus_addr_t)sa->sa_reg[1].sbr_offset,
-			 (bus_size_t)sa->sa_reg[1].sbr_size, 0, 0,
-			 &sc->sc_h1) != 0) {
+	if (bus_space_map(&ca->ca_ra.ra_reg[1], 0,
+	    ca->ca_ra.ra_reg[1].rr_len, 0, &sc->sc_h1)) {
 		printf(": can't map registers\n");
 		return;
 	}
 
-	if (OF_getprop(sa->sa_node, "local-mac-address",
+	if (getprop(ca->ca_ra.ra_node, "local-mac-address",
 	    sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN) <= 0)
 		myetheraddr(sc->sc_arpcom.ac_enaddr);
 
 	/*
 	 * SBUS config
 	 */
-	(void) bus_space_read_4(sa->sa_bustag, sc->sc_h2, GEM_SBUS_RESET);
+	(void) bus_space_read_4(sc->sc_bustag, sc->sc_h2, GEM_SBUS_RESET);
 	delay(100);
-	bus_space_write_4(sa->sa_bustag, sc->sc_h2, GEM_SBUS_CONFIG,
-	    GEM_SBUS_CFG_BSIZE128|GEM_SBUS_CFG_PARITY|GEM_SBUS_CFG_BMODE64);
+	bus_space_write_4(sc->sc_bustag, sc->sc_h2, GEM_SBUS_CONFIG,
+	    GEM_SBUS_CFG_BSIZE32);
 
 	/* Establish interrupt handler */
-	bus_intr_establish(sa->sa_bustag, sa->sa_pri, IPL_NET, 0, gem_intr,
-	    sc, self->dv_xname);
+	gsc->gsc_ih.ih_fun = gem_intr;
+	gsc->gsc_ih.ih_arg = sc;
+	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &gsc->gsc_ih,
+	    IPL_NET, self->dv_xname);
 
 	gem_config(sc);
 }

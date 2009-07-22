@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bnx.c,v 1.79 2009/06/20 15:42:28 naddy Exp $	*/
+/*	$OpenBSD: if_bnx.c,v 1.81 2009/07/03 04:54:05 dlg Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation

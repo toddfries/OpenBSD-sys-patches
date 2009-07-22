@@ -1,4 +1,4 @@
-/*	$OpenBSD: brgphy.c,v 1.86 2009/06/04 00:59:21 naddy Exp $	*/
+/*	$OpenBSD: brgphy.c,v 1.87 2009/07/03 04:54:05 dlg Exp $	*/
 
 /*
  * Copyright (c) 2000

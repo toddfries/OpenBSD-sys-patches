@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1480 2009/06/26 02:46:27 kevlo Exp 
+ *	OpenBSD: pcidevs,v 1.1483 2009/07/15 09:23:58 kettenis Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -8856,8 +8856,16 @@ static const struct pci_known_product pci_known_products[] = {
 	    "82855PM Power",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5500_HB,
+	    "5500 Host",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82X58_HB,
 	    "X58 Host",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_825520_HB,
+	    "5520 Host",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82X58_PCIE_1,
@@ -10550,6 +10558,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_MILL_II_G400_AGP,
 	    "MGA G400/G450 AGP",
+	},
+	{
+	    PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_G200EW,
+	    "MGA G200eW",
 	},
 	{
 	    PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_IMPRESSION,
@@ -13104,7 +13116,15 @@ static const struct pci_known_product pci_known_products[] = {
 	    "MCP77 PCIE",
 	},
 	{
-	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP77_ISA,
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP77_ISA1,
+	    "MCP77 ISA",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP77_ISA2,
+	    "MCP77 ISA",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP77_ISA3,
 	    "MCP77 ISA",
 	},
 	{
@@ -17472,8 +17492,12 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Virtual EHCI",
 	},
 	{
-	    PCI_VENDOR_VMWARE, PCI_PRODUCT_VMWARE_PPB,
+	    PCI_VENDOR_VMWARE, PCI_PRODUCT_VMWARE_PCI,
 	    "Virtual PCI-PCI",
+	},
+	{
+	    PCI_VENDOR_VMWARE, PCI_PRODUCT_VMWARE_PCIE,
+	    "Virtual PCIE-PCIE",
 	},
 	{
 	    PCI_VENDOR_WEITEK, PCI_PRODUCT_WEITEK_P9000,
