@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.175 2009/06/15 17:59:45 deraadt Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.177 2009/07/21 14:10:14 millert Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -1086,6 +1086,8 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 		kf->so_pcb = PTRTOINT64(so->so_pcb);
 		kf->so_protocol = so->so_proto->pr_protocol;
 		kf->so_family = so->so_proto->pr_domain->dom_family;
+		if (!so->so_pcb)
+			break;
 		switch (kf->so_family) {
 		case AF_INET: {
 			struct inpcb *inpcb = so->so_pcb;
@@ -1232,6 +1234,8 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 				continue;
 			}
 			fdp = pp->p_fd;
+			if (pp->p_textvp)
+				FILLIT(NULL, NULL, KERN_FILE_TEXT, pp->p_textvp, pp);
 			if (fdp->fd_cdir)
 				FILLIT(NULL, NULL, KERN_FILE_CDIR, fdp->fd_cdir, pp);
 			if (fdp->fd_rdir)

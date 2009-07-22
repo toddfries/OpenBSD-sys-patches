@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_syscalls.c,v 1.82 2009/06/25 15:49:26 thib Exp $	*/
+/*	$OpenBSD: nfs_syscalls.c,v 1.84 2009/07/20 16:49:40 thib Exp $	*/
 /*	$NetBSD: nfs_syscalls.c,v 1.19 1996/02/18 11:53:52 fvdl Exp $	*/
 
 /*
@@ -81,6 +81,8 @@ struct nfssvc_sock *nfs_udpsock;
 int nfsd_waiting = 0;
 
 #ifdef NFSSERVER
+struct pool nfsrv_descript_pl;
+
 int nfsrv_getslp(struct nfsd *nfsd);
 
 static int nfs_numnfsd = 0;
@@ -226,7 +228,7 @@ nfssvc_addsock(fp, mynam)
 	int error, s;
 
 	so = (struct socket *)fp->f_data;
-	tslp = (struct nfssvc_sock *)0;
+	tslp = NULL;
 	/*
 	 * Add it to the list, as required.
 	 */
@@ -330,7 +332,7 @@ nfssvc_nfsd(struct nfsd *nfsd)
 				else if (slp->ns_flag & SLP_NEEDQ) {
 					slp->ns_flag &= ~SLP_NEEDQ;
 					(void) nfs_sndlock(&slp->ns_solock,
-						(struct nfsreq *)0);
+						NULL);
 					nfsrv_rcv(slp->ns_so, (caddr_t)slp,
 						M_WAIT);
 					nfs_sndunlock(&slp->ns_solock);
@@ -353,10 +355,10 @@ nfssvc_nfsd(struct nfsd *nfsd)
 		}
 		if (error || (slp->ns_flag & SLP_VALID) == 0) {
 			if (nd) {
-				free((caddr_t)nd, M_NFSRVDESC);
+				pool_put(&nfsrv_descript_pl, nd);
 				nd = NULL;
 			}
-			nfsd->nfsd_slp = (struct nfssvc_sock *)0;
+			nfsd->nfsd_slp = NULL;
 			nfsd->nfsd_flag &= ~NFSD_REQINPROG;
 			nfsrv_slpderef(slp);
 			continue;
@@ -367,7 +369,7 @@ nfssvc_nfsd(struct nfsd *nfsd)
 		if (so->so_proto->pr_flags & PR_CONNREQUIRED)
 			solockp = &slp->ns_solock;
 		else
-			solockp = (int *)0;
+			solockp = NULL;
 		if (nd) {
 		    if (nd->nd_nam2)
 			nd->nd_nam = nd->nd_nam2;
@@ -408,7 +410,7 @@ nfssvc_nfsd(struct nfsd *nfsd)
 			}
 			nfsstats.srvrpccnt[nd->nd_procnum]++;
 			nfsrv_updatecache(nd, 1, mreq);
-			nd->nd_mrep = (struct mbuf *)0;
+			nd->nd_mrep = NULL;
 
 			/* FALLTHROUGH */
 		    case RC_REPLY:
@@ -424,7 +426,7 @@ nfssvc_nfsd(struct nfsd *nfsd)
 			}
 			m = mreq;
 			m->m_pkthdr.len = siz;
-			m->m_pkthdr.rcvif = (struct ifnet *)0;
+			m->m_pkthdr.rcvif = NULL;
 			/*
 			 * For stream protocols, prepend a Sun RPC
 			 * Record Mark.
@@ -434,7 +436,7 @@ nfssvc_nfsd(struct nfsd *nfsd)
 				*mtod(m, u_int32_t *) = htonl(0x80000000 | siz);
 			}
 			if (solockp)
-				(void) nfs_sndlock(solockp, (struct nfsreq *)0);
+				(void) nfs_sndlock(solockp, NULL);
 			if (slp->ns_flag & SLP_VALID)
 			    error = nfs_send(so, nd->nd_nam2, m, NULL);
 			else {
@@ -450,7 +452,7 @@ nfssvc_nfsd(struct nfsd *nfsd)
 			if (solockp)
 				nfs_sndunlock(solockp);
 			if (error == EINTR || error == ERESTART) {
-				free((caddr_t)nd, M_NFSRVDESC);
+		    		pool_put(&nfsrv_descript_pl, nd);
 				nfsrv_slpderef(slp);
 				s = splsoftnet();
 				goto done;
@@ -462,7 +464,7 @@ nfssvc_nfsd(struct nfsd *nfsd)
 			break;
 		    };
 		    if (nd) {
-		    	free(nd, M_NFSRVDESC);
+		    	pool_put(&nfsrv_descript_pl, nd);
 			nd = NULL;
 		    }
 
@@ -535,7 +537,7 @@ nfsrv_zapsock(slp)
 		for (nwp = LIST_FIRST(&slp->ns_tq); nwp != NULL; nwp = nnwp) {
 			nnwp = LIST_NEXT(nwp, nd_tq);
 			LIST_REMOVE(nwp, nd_tq);
-			free((caddr_t)nwp, M_NFSRVDESC);
+			pool_put(&nfsrv_descript_pl, nwp);
 		}
 		LIST_INIT(&slp->ns_tq);
 		splx(s);
@@ -595,6 +597,9 @@ nfsrv_init(terminating)
 	nfs_udpsock =  malloc(sizeof(struct nfssvc_sock), M_NFSSVC,
 	    M_WAITOK|M_ZERO);
 	TAILQ_INSERT_HEAD(&nfssvc_sockhead, nfs_udpsock, ns_chain);
+
+	pool_init(&nfsrv_descript_pl, sizeof(struct nfsrv_descript), 0, 0, 0,
+	    "ndscpl", &pool_allocator_nointr);
 }
 #endif /* NFSSERVER */
 
