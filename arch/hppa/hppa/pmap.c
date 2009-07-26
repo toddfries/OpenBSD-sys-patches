@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.137 2009/06/16 00:11:29 oga Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.140 2009/07/26 15:47:23 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -323,7 +323,8 @@ pmap_dump_table(pa_space_t space, vaddr_t sva)
 			if (pdemask != (va & PDE_MASK)) {
 				pdemask = va & PDE_MASK;
 				if (!(pde = pmap_pde_get(pd, va))) {
-					va += ~PDE_MASK + 1 - PAGE_SIZE;
+					va = pdemask + (~PDE_MASK + 1);
+					va -= PAGE_SIZE;
 					continue;
 				}
 				printf("%x:%8p:\n", sp, pde);
@@ -889,10 +890,13 @@ pmap_remove(pmap, sva, eva)
 		if (pdemask != (sva & PDE_MASK)) {
 			pdemask = sva & PDE_MASK;
 			if (!(pde = pmap_pde_get(pmap->pm_pdir, sva))) {
-				sva += ~PDE_MASK + 1 - PAGE_SIZE;
+				sva = pdemask + (~PDE_MASK + 1) - PAGE_SIZE;
 				continue;
 			}
-			batch = pdemask == sva && sva + ~PDE_MASK + 1 <= eva;
+			if (pdemask == sva && sva + (~PDE_MASK + 1) <= eva)
+				batch = 1;
+			else
+				batch = 0;
 		}
 
 		if ((pte = pmap_pte_get(pde, sva))) {
@@ -951,7 +955,7 @@ pmap_write_protect(pmap, sva, eva, prot)
 		if (pdemask != (sva & PDE_MASK)) {
 			pdemask = sva & PDE_MASK;
 			if (!(pde = pmap_pde_get(pmap->pm_pdir, sva))) {
-				sva += ~PDE_MASK + 1 - PAGE_SIZE;
+				sva = pdemask + (~PDE_MASK + 1) - PAGE_SIZE;
 				continue;
 			}
 		}
@@ -1232,11 +1236,11 @@ pmap_kenter_pa(va, pa, prot)
 	    pmap_prot(pmap_kernel(), prot));
 	if (pa >= HPPA_IOBEGIN)
 		pte |= PTE_PROT(TLB_UNCACHABLE);
+	if (opte)
+		pmap_pte_flush(pmap_kernel(), va, opte);
 	pmap_pte_set(pde, va, pte);
 	pmap_kernel()->pm_stats.wired_count++;
 	pmap_kernel()->pm_stats.resident_count++;
-	if (opte)
-		pmap_pte_flush(pmap_kernel(), va, opte);
 
 #ifdef PMAPDEBUG
 	{
@@ -1282,7 +1286,7 @@ pmap_kremove(va, size)
 		if (pdemask != (va & PDE_MASK)) {
 			pdemask = va & PDE_MASK;
 			if (!(pde = pmap_pde_get(pmap_kernel()->pm_pdir, va))) {
-				va += ~PDE_MASK + 1 - PAGE_SIZE;
+				va = pdemask + (~PDE_MASK + 1) - PAGE_SIZE;
 				continue;
 			}
 		}

@@ -1,94 +1,32 @@
 # On branch master
+# Your branch is ahead of 'origin/master' by 1 commit.
+#
 # Changed but not updated:
-#   (use "git add/rm <file>..." to update what will be committed)
+#   (use "git add <file>..." to update what will be committed)
 #   (use "git checkout -- <file>..." to discard changes in working directory)
 #
-#	modified:   arch/amd64/amd64/identcpu.c
-#	modified:   arch/amd64/amd64/machdep.c
-#	modified:   arch/amd64/include/cpu.h
-#	modified:   arch/amd64/include/pci_machdep.h
-#	modified:   arch/amd64/include/rbus_machdep.h
-#	modified:   arch/amd64/pci/pci_machdep.c
-#	modified:   arch/hppa/include/pci_machdep.h
-#	modified:   arch/hppa/include/rbus_machdep.h
-#	modified:   arch/hppa64/include/pci_machdep.h
-#	modified:   arch/hppa64/include/rbus_machdep.h
-#	modified:   arch/i386/include/rbus_machdep.h
-#	modified:   arch/i386/pci/pci_machdep.h
-#	modified:   arch/macppc/include/rbus_machdep.h
-#	modified:   arch/mips64/mips64/db_machdep.c
-#	modified:   arch/powerpc/pci/pci_machdep.h
-#	modified:   arch/powerpc/powerpc/pmap.c
-#	modified:   arch/sgi/conf/files.sgi
-#	modified:   arch/sgi/include/bus.h
-#	modified:   arch/sgi/localbus/macebus.c
-#	modified:   arch/sgi/pci/macepcibridge.c
-#	modified:   arch/sgi/pci/macepcibrvar.h
-#	deleted:    arch/sgi/pci/macepcimap.c
-#	modified:   arch/sgi/pci/pci_machdep.c
-#	modified:   arch/sgi/pci/pci_machdep.h
-#	modified:   arch/sgi/sgi/bus_dma.c
-#	modified:   arch/sgi/sgi/machdep.c
-#	modified:   arch/sgi/stand/boot/arcbios.c
-#	modified:   arch/sgi/xbow/xbow.c
-#	modified:   arch/sgi/xbow/xbridge.c
-#	modified:   arch/sparc64/dev/pci_machdep.c
-#	modified:   arch/sparc64/include/pci_machdep.h
-#	modified:   arch/sparc64/include/rbus_machdep.h
-#	modified:   dev/acpi/amltypes.h
-#	modified:   dev/acpi/dsdt.c
-#	modified:   dev/cardbus/rbus.c
-#	modified:   dev/cardbus/rbus.h
+#	modified:   arch/hp300/dev/mt.c
+#	modified:   arch/hp300/dev/nhpib.c
+#	modified:   arch/hppa/hppa/pmap.c
+#	modified:   arch/i386/i386/pmap.c
+#	modified:   arch/sgi/sgi/ip27_machdep.c
+#	modified:   dev/cardbus/cardbusvar.h
 #	modified:   dev/ic/bwi.c
-#	modified:   dev/ic/gem.c
-#	modified:   dev/ic/re.c
-#	modified:   dev/ic/rtl81x9.c
-#	modified:   dev/microcode/bnx/bnx-license
-#	modified:   dev/microcode/tusb3410/build.c
-#	modified:   dev/microcode/uyap/build.c
-#	modified:   dev/midi.c
-#	modified:   dev/mii/nsgphy.c
-#	modified:   dev/pci/if_bge.c
-#	modified:   dev/pci/if_bgereg.h
-#	modified:   dev/pci/if_sis.c
-#	modified:   dev/pci/if_sisreg.h
+#	modified:   dev/mii/atphy.c
+#	modified:   dev/mii/bmtphy.c
 #	modified:   dev/pci/if_stge.c
 #	modified:   dev/pci/pccbb.c
+#	modified:   dev/pci/pccbbvar.h
 #	modified:   dev/pci/pci.c
-#	modified:   dev/usb/ugen.c
-#	modified:   dev/usb/uhid.c
-#	modified:   kern/kern_sysctl.c
-#	modified:   kern/tty.c
-#	modified:   kern/tty_subr.c
-#	modified:   net/if_sl.c
-#	modified:   net/if_strip.c
-#	modified:   net/pf_norm.c
-#	modified:   nfs/nfs_bio.c
-#	modified:   nfs/nfs_node.c
-#	modified:   nfs/nfs_serv.c
-#	modified:   nfs/nfs_socket.c
-#	modified:   nfs/nfs_subs.c
-#	modified:   nfs/nfs_syscalls.c
-#	modified:   nfs/nfs_vfsops.c
-#	modified:   nfs/nfs_vnops.c
-#	modified:   nfs/nfsm_subs.h
-#	modified:   sys/tty.h
-#	modified:   uvm/uvm_aobj.c
-#	modified:   uvm/uvm_aobj.h
-#	modified:   uvm/uvm_fault.c
+#	modified:   dev/usb/ums.c
+#	modified:   netinet/in_pcb.c
+#	modified:   netinet6/icmp6.c
+#	modified:   status.log
+#	modified:   sys/pciio.h
+#	modified:   uvm/uvm_io.c
 #	modified:   uvm/uvm_km.c
-#	modified:   uvm/uvm_loan.c
+#	modified:   uvm/uvm_map.c
+#	modified:   uvm/uvm_map.h
 #	modified:   uvm/uvm_mmap.c
-#	modified:   uvm/uvm_page.c
-#	modified:   uvm/uvm_pager.c
-#	modified:   uvm/uvm_pager.h
-#	modified:   uvm/uvm_pdaemon.c
-#	modified:   uvm/uvm_vnode.c
 #
-# Untracked files:
-#   (use "git add <file>..." to include in what will be committed)
-#
-#	arch/sgi/include/rbus_machdep.h
-#	status.log
-#	up.log
 no changes added to commit (use "git add" and/or "git commit -a")
