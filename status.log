@@ -1,57 +1,32 @@
 # On branch master
+# Your branch is ahead of 'origin/master' by 1 commit.
+#
 # Changed but not updated:
 #   (use "git add <file>..." to update what will be committed)
 #   (use "git checkout -- <file>..." to discard changes in working directory)
 #
-#	modified:   arch/amd64/conf/GENERIC
-#	modified:   arch/hp300/dev/dnkbd.c
-#	modified:   arch/hp300/dev/fhpib.c
-#	modified:   arch/hp300/dev/mb89352.c
-#	modified:   arch/i386/conf/GENERIC
-#	modified:   arch/mips64/mips64/pmap.c
-#	modified:   arch/sgi/include/bus.h
-#	modified:   arch/sgi/pci/pci_machdep.c
-#	modified:   arch/sgi/xbow/xbridge.c
-#	modified:   arch/sh/sh/pmap.c
-#	modified:   arch/sparc/dev/fd.c
-#	modified:   arch/sparc64/dev/fd.c
-#	modified:   conf/files
-#	modified:   dev/acpi/acpi.c
-#	modified:   dev/acpi/acpireg.h
-#	modified:   dev/acpi/files.acpi
-#	modified:   dev/cardbus/cardbus_map.c
+#	modified:   arch/hp300/dev/mt.c
+#	modified:   arch/hp300/dev/nhpib.c
+#	modified:   arch/hppa/hppa/pmap.c
+#	modified:   arch/i386/i386/pmap.c
+#	modified:   arch/sgi/sgi/ip27_machdep.c
 #	modified:   dev/cardbus/cardbusvar.h
-#	modified:   dev/ic/ar5xxx.h
-#	modified:   dev/ic/athvar.h
-#	modified:   dev/ic/re.c
-#	modified:   dev/ic/rtl81x9reg.h
-#	modified:   dev/ic/smc91cxx.c
-#	modified:   dev/isa/i82365_isasubr.c
-#	modified:   dev/mii/mii_physubr.c
-#	modified:   dev/pci/ehci_pci.c
-#	modified:   dev/pci/if_cas.c
-#	modified:   dev/pci/if_gem_pci.c
-#	modified:   dev/pci/pci_map.c
-#	modified:   dev/pci/pucdata.c
-#	modified:   dev/softraid.c
-#	modified:   dev/softraid_aoe.c
-#	modified:   dev/softraidvar.h
-#	modified:   dev/usb/ehci.c
-#	modified:   dev/usb/hid.c
-#	modified:   dev/usb/udl.c
-#	modified:   dev/usb/uhci.c
-#	modified:   dev/usb/uhidev.c
-#	modified:   dev/usb/usbdevs
-#	modified:   dev/usb/usbdevs.h
-#	modified:   dev/usb/usbdevs_data.h
-#	modified:   netinet/ip_input.c
+#	modified:   dev/ic/bwi.c
+#	modified:   dev/mii/atphy.c
+#	modified:   dev/mii/bmtphy.c
+#	modified:   dev/pci/if_stge.c
+#	modified:   dev/pci/pccbb.c
+#	modified:   dev/pci/pccbbvar.h
+#	modified:   dev/pci/pci.c
+#	modified:   dev/usb/ums.c
+#	modified:   netinet/in_pcb.c
+#	modified:   netinet6/icmp6.c
 #	modified:   status.log
-#	modified:   uvm/uvm_page.c
-#	modified:   uvm/uvm_pglist.c
+#	modified:   sys/pciio.h
+#	modified:   uvm/uvm_io.c
+#	modified:   uvm/uvm_km.c
+#	modified:   uvm/uvm_map.c
+#	modified:   uvm/uvm_map.h
+#	modified:   uvm/uvm_mmap.c
 #
-# Untracked files:
-#   (use "git add <file>..." to include in what will be committed)
-#
-#	dev/acpi/atk0110.c
-#	dev/softraid_raid6.c
 no changes added to commit (use "git add" and/or "git commit -a")
