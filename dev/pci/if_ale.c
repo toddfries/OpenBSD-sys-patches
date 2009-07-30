@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ale.c,v 1.4 2009/03/29 21:53:52 sthen Exp $	*/
+/*	$OpenBSD: if_ale.c,v 1.6 2009/07/28 05:12:12 kevlo Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -372,8 +372,9 @@ ale_attach(struct device *parent, struct device *self, void *aux)
 	const char *intrstr;
 	struct ifnet *ifp;
 	pcireg_t memtype;
-	int error = 0;
+	int mii_flags, error = 0;
 	uint32_t rxf_len, txf_len;
+	const char *chipname;
 
 	/*
 	 * Allocate IO memory
@@ -403,7 +404,6 @@ ale_attach(struct device *parent, struct device *self, void *aux)
 		printf("\n");
 		goto fail;
 	}
-	printf(": %s", intrstr);
 
 	sc->sc_dmat = pa->pa_dmat;
 	sc->sc_pct = pa->pa_pc;
@@ -423,15 +423,20 @@ ale_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->ale_rev >= 0xF0) {
 		/* L2E Rev. B. AR8114 */
 		sc->ale_flags |= ALE_FLAG_FASTETHER;
+		chipname = "AR8114";
 	} else {
 		if ((CSR_READ_4(sc, ALE_PHY_STATUS) & PHY_STATUS_100M) != 0) {
 			/* L1E AR8121 */
 			sc->ale_flags |= ALE_FLAG_JUMBO;
+			chipname = "AR8121";
 		} else {
 			/* L2E Rev. A. AR8113 */
 			sc->ale_flags |= ALE_FLAG_FASTETHER;
+			chipname = "AR8113";
 		}
 	}
+
+	printf(": %s, %s", chipname, intrstr);
 
 	/*
 	 * All known controllers seems to require 4 bytes alignment
@@ -526,8 +531,11 @@ ale_attach(struct device *parent, struct device *self, void *aux)
 
 	ifmedia_init(&sc->sc_miibus.mii_media, 0, ale_mediachange,
 	    ale_mediastatus);
+	mii_flags = 0;
+	if ((sc->ale_flags & ALE_FLAG_JUMBO) != 0)
+		mii_flags |= MIIF_DOPAUSE;
 	mii_attach(self, &sc->sc_miibus, 0xffffffff, MII_PHY_ANY,
-	    MII_OFFSET_ANY, 0);
+	    MII_OFFSET_ANY, mii_flags);
 
 	if (LIST_FIRST(&sc->sc_miibus.mii_phys) == NULL) {
 		printf("%s: no PHY found!\n", sc->sc_dev.dv_xname);
@@ -1153,12 +1161,10 @@ ale_mac_config(struct ale_softc *sc)
 	}
 	if ((IFM_OPTIONS(mii->mii_media_active) & IFM_FDX) != 0) {
 		reg |= MAC_CFG_FULL_DUPLEX;
-#ifdef notyet
 		if ((IFM_OPTIONS(mii->mii_media_active) & IFM_ETH_TXPAUSE) != 0)
 			reg |= MAC_CFG_TX_FC;
 		if ((IFM_OPTIONS(mii->mii_media_active) & IFM_ETH_RXPAUSE) != 0)
 			reg |= MAC_CFG_RX_FC;
-#endif
 	}
 	CSR_WRITE_4(sc, ALE_MAC_CFG, reg);
 }
