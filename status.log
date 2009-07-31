@@ -1,37 +1,10 @@
 # On branch master
-# Your branch is ahead of 'origin/master' by 1 commit.
-#
 # Changed but not updated:
 #   (use "git add <file>..." to update what will be committed)
 #   (use "git checkout -- <file>..." to discard changes in working directory)
 #
-#	modified:   arch/alpha/alpha/dec_axppci_33.c
-#	modified:   arch/alpha/include/bus.h
-#	modified:   arch/alpha/pci/pci_bwx_bus_io_chipdep.c
-#	modified:   arch/alpha/pci/pci_bwx_bus_mem_chipdep.c
-#	modified:   arch/alpha/pci/pci_swiz_bus_io_chipdep.c
-#	modified:   arch/alpha/pci/pci_swiz_bus_mem_chipdep.c
-#	modified:   arch/amd64/amd64/sg_dma.c
-#	modified:   arch/amd64/include/bus.h
-#	modified:   arch/aviion/include/bus.h
-#	modified:   arch/hp300/dev/ppi.c
-#	modified:   arch/hppa/include/bus.h
-#	modified:   arch/hppa64/include/bus.h
-#	modified:   arch/i386/i386/sg_dma.c
-#	modified:   arch/i386/include/bus.h
-#	modified:   arch/macppc/include/bus.h
-#	modified:   arch/mvme68k/include/bus.h
-#	modified:   arch/mvme88k/include/bus.h
-#	modified:   arch/sgi/include/bus.h
-#	modified:   arch/socppc/include/bus.h
-#	modified:   arch/sparc/include/bus.h
-#	modified:   dev/cardbus/if_acx_cardbus.c
-#	modified:   dev/ic/ath.c
-#	modified:   dev/mii/mii_physubr.c
-#	modified:   dev/softraid_raidp.c
-#	modified:   dev/usb/ukbd.c
-#	modified:   kern/subr_pool.c
-#	modified:   net/trunklacp.c
+#	modified:   dev/softraid.c
 #	modified:   status.log
+#	modified:   up.log
 #
 no changes added to commit (use "git add" and/or "git commit -a")
