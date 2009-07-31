@@ -5,28 +5,33 @@
 #   (use "git add <file>..." to update what will be committed)
 #   (use "git checkout -- <file>..." to discard changes in working directory)
 #
-#	modified:   arch/hp300/dev/mt.c
-#	modified:   arch/hp300/dev/nhpib.c
-#	modified:   arch/hppa/hppa/pmap.c
-#	modified:   arch/i386/i386/pmap.c
-#	modified:   arch/sgi/sgi/ip27_machdep.c
-#	modified:   dev/cardbus/cardbusvar.h
-#	modified:   dev/ic/bwi.c
-#	modified:   dev/mii/atphy.c
-#	modified:   dev/mii/bmtphy.c
-#	modified:   dev/pci/if_stge.c
-#	modified:   dev/pci/pccbb.c
-#	modified:   dev/pci/pccbbvar.h
-#	modified:   dev/pci/pci.c
-#	modified:   dev/usb/ums.c
-#	modified:   netinet/in_pcb.c
-#	modified:   netinet6/icmp6.c
+#	modified:   arch/alpha/alpha/dec_axppci_33.c
+#	modified:   arch/alpha/include/bus.h
+#	modified:   arch/alpha/pci/pci_bwx_bus_io_chipdep.c
+#	modified:   arch/alpha/pci/pci_bwx_bus_mem_chipdep.c
+#	modified:   arch/alpha/pci/pci_swiz_bus_io_chipdep.c
+#	modified:   arch/alpha/pci/pci_swiz_bus_mem_chipdep.c
+#	modified:   arch/amd64/amd64/sg_dma.c
+#	modified:   arch/amd64/include/bus.h
+#	modified:   arch/aviion/include/bus.h
+#	modified:   arch/hp300/dev/ppi.c
+#	modified:   arch/hppa/include/bus.h
+#	modified:   arch/hppa64/include/bus.h
+#	modified:   arch/i386/i386/sg_dma.c
+#	modified:   arch/i386/include/bus.h
+#	modified:   arch/macppc/include/bus.h
+#	modified:   arch/mvme68k/include/bus.h
+#	modified:   arch/mvme88k/include/bus.h
+#	modified:   arch/sgi/include/bus.h
+#	modified:   arch/socppc/include/bus.h
+#	modified:   arch/sparc/include/bus.h
+#	modified:   dev/cardbus/if_acx_cardbus.c
+#	modified:   dev/ic/ath.c
+#	modified:   dev/mii/mii_physubr.c
+#	modified:   dev/softraid_raidp.c
+#	modified:   dev/usb/ukbd.c
+#	modified:   kern/subr_pool.c
+#	modified:   net/trunklacp.c
 #	modified:   status.log
-#	modified:   sys/pciio.h
-#	modified:   uvm/uvm_io.c
-#	modified:   uvm/uvm_km.c
-#	modified:   uvm/uvm_map.c
-#	modified:   uvm/uvm_map.h
-#	modified:   uvm/uvm_mmap.c
 #
 no changes added to commit (use "git add" and/or "git commit -a")

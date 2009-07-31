@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.19 2009/07/23 19:24:56 miod Exp $	*/
+/*	$OpenBSD: bus.h,v 1.21 2009/07/30 21:39:15 miod Exp $	*/
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB Sweden.  All rights reserved.
@@ -113,6 +113,10 @@ struct mips_bus_space {
 #define	bus_space_unmap(t, h, s) (*(t)->_space_unmap)((t), (h), (s))
 #define	bus_space_subregion(t, h, o, s, p) \
     (*(t)->_space_subregion)((t), (h), (o), (s), (p))
+
+#define	BUS_SPACE_MAP_CACHEABLE		0x01
+#define	BUS_SPACE_MAP_LINEAR		0x02
+#define	BUS_SPACE_MAP_PREFETCHABLE	0x04
 
 #define	bus_space_vaddr(t, h)	(*(t)->_space_vaddr)((t), (h))
 
@@ -293,13 +297,6 @@ bus_space_copy_8(void *v, bus_space_handle_t h1, bus_size_t o1,
 	((void)((void)(t), (void)(h), (void)(o), (void)(l), (void)(f)))
 #define BUS_SPACE_BARRIER_READ  0x01		/* force read barrier */
 #define BUS_SPACE_BARRIER_WRITE 0x02		/* force write barrier */
-
-/* Compatibility defines */
-#define BUS_BARRIER_READ	BUS_SPACE_BARRIER_READ
-#define BUS_BARRIER_WRITE	BUS_SPACE_BARRIER_WRITE
-
-#define	BUS_SPACE_MAP_CACHEABLE	0x01
-#define BUS_SPACE_MAP_LINEAR	0x02
 
 #define	BUS_DMA_WAITOK		0x000
 #define	BUS_DMA_NOWAIT		0x001

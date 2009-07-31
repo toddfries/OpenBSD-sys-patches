@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raidp.c,v 1.6 2009/06/20 13:00:44 marco Exp $ */
+/* $OpenBSD: softraid_raidp.c,v 1.8 2009/07/31 15:30:35 jsing Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -242,23 +242,27 @@ sr_raidp_set_vol_state(struct sr_discipline *sd)
 
 	if (states[BIOC_SDONLINE] == nd)
 		new_state = BIOC_SVONLINE;
+	else if (states[BIOC_SDONLINE] == nd - 1)
+		new_state = BIOC_SVDEGRADED;
 	else if (states[BIOC_SDONLINE] < nd - 1)
 		new_state = BIOC_SVOFFLINE;
-	else if (states[BIOC_SDOFFLINE] == nd - 1)
-		new_state = BIOC_SVDEGRADED;
 	else if (states[BIOC_SDSCRUB] != 0)
 		new_state = BIOC_SVSCRUB;
 	else if (states[BIOC_SDREBUILD] != 0)
 		new_state = BIOC_SVREBUILD;
 	else {
-		printf("old_state = %d, ", old_state);
+#ifdef SR_DEBUG
+		DNPRINTF(SR_D_STATE, "%s: invalid volume state, old state "
+		    "was %d\n", DEVNAME(sd->sd_sc), old_state);
 		for (i = 0; i < nd; i++)
-			printf("%d = %d, ", i,
+			DNPRINTF(SR_D_STATE, "%s: chunk %d status = %d\n",
+			    DEVNAME(sd->sd_sc), i,
 			    sd->sd_vol.sv_chunks[i]->src_meta.scm_status);
-		panic("invalid new_state");
+#endif
+		panic("invalid volume state");
 	}
 
-	DNPRINTF(SR_D_STATE, "%s: %s: sr_raid_set_vol_state %d -> %d\n",
+	DNPRINTF(SR_D_STATE, "%s: %s: sr_raidp_set_vol_state %d -> %d\n",
 	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
 	    old_state, new_state);
 
