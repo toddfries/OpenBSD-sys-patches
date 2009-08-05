@@ -1,4 +1,4 @@
-$OpenBSD: pcidevs,v 1.1486 2009/07/29 17:53:28 damien Exp $
+$OpenBSD: pcidevs,v 1.1488 2009/08/04 19:18:08 dhill Exp $
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
 /*
@@ -50,6 +50,7 @@ vendor	MARTINMARIETTA	0x003d	Martin-Marietta
 vendor	HAUPPAUGE	0x0070	Hauppauge
 vendor	TTTECH		0x0357	TTTech
 vendor	DYNALINK	0x0675	Dynalink
+vendor	RHINO		0x0b0b	Rhino Equipment
 vendor	COMPAQ		0x0e11	Compaq
 vendor	SYMBIOS		0x1000	Symbios Logic
 vendor	ATI		0x1002	ATI
@@ -2768,9 +2769,11 @@ product INTEL 82GM45_HECI_2	0x2a45	GM45 HECI
 product INTEL 82GM45_PT_IDER	0x2a46	GM45 PT IDER
 product INTEL 82GM45_AMT_SOL	0x2a47	GM45 AMT SOL
 product INTEL 82Q45_HB		0x2e10	Q45 Host
+product INTEL 82Q45_PCIE	0x2e11	Q45 PCIE
 product INTEL 82Q45_IGD_1	0x2e12	Q45 Video
 product INTEL 82Q45_IGD_2	0x2e13	Q45 Video
 product INTEL 82Q45_PT_IDER	0x2e16	Q45 PT IDER
+product INTEL 82Q45_KT		0x2e17	Q45 KT
 product INTEL 82G45_HB		0x2e20	G45 Host
 product INTEL 82G45_PCIE	0x2e21	G45 PCIE
 product INTEL 82G45_IGD_1	0x2e22	G45 Video
@@ -4235,6 +4238,11 @@ product RCC HT_1100		0x0408	HT-1100
 /* Rendition products */
 product RENDITION V1000		0x0001	Verite 1000
 product RENDITION V2x00		0x2000	Verite V2x00
+
+/* Rhino Equipment products */
+product RHINO R1T1		0x0105	T1/E1/J1 
+product RHINO R2T1		0x0605	Dual T1/E1/J1
+product RHINO R4T1		0x0305	Quad T1/E1/J1
 
 /* Philips products */
 product PHILIPS OHCI		0x1561	ISP156x USB
