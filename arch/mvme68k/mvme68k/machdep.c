@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.116 2009/06/15 17:01:26 beck Exp $ */
+/*	$OpenBSD: machdep.c,v 1.117 2009/08/02 16:28:39 beck Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

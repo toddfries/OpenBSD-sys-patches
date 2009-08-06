@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raidp.c,v 1.8 2009/07/31 15:30:35 jsing Exp $ */
+/* $OpenBSD: softraid_raidp.c,v 1.9 2009/08/04 20:17:14 jordan Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -242,14 +242,14 @@ sr_raidp_set_vol_state(struct sr_discipline *sd)
 
 	if (states[BIOC_SDONLINE] == nd)
 		new_state = BIOC_SVONLINE;
-	else if (states[BIOC_SDONLINE] == nd - 1)
-		new_state = BIOC_SVDEGRADED;
 	else if (states[BIOC_SDONLINE] < nd - 1)
 		new_state = BIOC_SVOFFLINE;
 	else if (states[BIOC_SDSCRUB] != 0)
 		new_state = BIOC_SVSCRUB;
 	else if (states[BIOC_SDREBUILD] != 0)
 		new_state = BIOC_SVREBUILD;
+	else if (states[BIOC_SDONLINE] == nd - 1)
+		new_state = BIOC_SVDEGRADED;
 	else {
 #ifdef SR_DEBUG
 		DNPRINTF(SR_D_STATE, "%s: invalid volume state, old state "
@@ -729,7 +729,9 @@ sr_raidp_addio(struct sr_workunit *wu, int dsk, daddr64_t blk, daddr64_t len,
 	ccb->ccb_buf.b_error = 0;
 	ccb->ccb_buf.b_proc = curproc;
 	ccb->ccb_buf.b_dev = sd->sd_vol.sv_chunks[dsk]->src_dev_mm;
-	ccb->ccb_buf.b_vp = NULL;
+	ccb->ccb_buf.b_vp = sd->sd_vol.sv_chunks[dsk]->src_vn;
+	if ((ccb->ccb_buf.b_flags & B_READ) == 0)
+		ccb->ccb_buf.b_vp->v_numoutput++;
 
 	ccb->ccb_wu = wu;
 	ccb->ccb_target = dsk;

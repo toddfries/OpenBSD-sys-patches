@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.h,v 1.66 2009/06/17 01:30:32 thib Exp $	*/
+/*	$OpenBSD: buf.h,v 1.67 2009/08/02 16:28:40 beck Exp $	*/
 /*	$NetBSD: buf.h,v 1.25 1997/04/09 21:12:17 mycroft Exp $	*/
 
 /*

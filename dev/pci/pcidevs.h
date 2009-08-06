@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1486 2009/07/29 17:53:28 damien Exp 
+ *	OpenBSD: pcidevs,v 1.1487 2009/08/02 09:43:54 sthen Exp 
  */
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
@@ -55,6 +55,7 @@
 #define	PCI_VENDOR_HAUPPAUGE	0x0070		/* Hauppauge */
 #define	PCI_VENDOR_TTTECH	0x0357		/* TTTech */
 #define	PCI_VENDOR_DYNALINK	0x0675		/* Dynalink */
+#define	PCI_VENDOR_RHINO	0x0b0b		/* Rhino Equipment */
 #define	PCI_VENDOR_COMPAQ	0x0e11		/* Compaq */
 #define	PCI_VENDOR_SYMBIOS	0x1000		/* Symbios Logic */
 #define	PCI_VENDOR_ATI	0x1002		/* ATI */
@@ -2773,9 +2774,11 @@
 #define	PCI_PRODUCT_INTEL_82GM45_PT_IDER	0x2a46		/* GM45 PT IDER */
 #define	PCI_PRODUCT_INTEL_82GM45_AMT_SOL	0x2a47		/* GM45 AMT SOL */
 #define	PCI_PRODUCT_INTEL_82Q45_HB	0x2e10		/* Q45 Host */
+#define	PCI_PRODUCT_INTEL_82Q45_PCIE	0x2e11		/* Q45 PCIE */
 #define	PCI_PRODUCT_INTEL_82Q45_IGD_1	0x2e12		/* Q45 Video */
 #define	PCI_PRODUCT_INTEL_82Q45_IGD_2	0x2e13		/* Q45 Video */
 #define	PCI_PRODUCT_INTEL_82Q45_PT_IDER	0x2e16		/* Q45 PT IDER */
+#define	PCI_PRODUCT_INTEL_82Q45_KT	0x2e17		/* Q45 KT */
 #define	PCI_PRODUCT_INTEL_82G45_HB	0x2e20		/* G45 Host */
 #define	PCI_PRODUCT_INTEL_82G45_PCIE	0x2e21		/* G45 PCIE */
 #define	PCI_PRODUCT_INTEL_82G45_IGD_1	0x2e22		/* G45 Video */
@@ -4240,6 +4243,11 @@
 /* Rendition products */
 #define	PCI_PRODUCT_RENDITION_V1000	0x0001		/* Verite 1000 */
 #define	PCI_PRODUCT_RENDITION_V2x00	0x2000		/* Verite V2x00 */
+
+/* Rhino Equipment products */
+#define	PCI_PRODUCT_RHINO_R1T1	0x0105		/* T1/E1/J1 */
+#define	PCI_PRODUCT_RHINO_R2T1	0x0605		/* Dual T1/E1/J1 */
+#define	PCI_PRODUCT_RHINO_R4T1	0x0305		/* Quad T1/E1/J1 */
 
 /* Philips products */
 #define	PCI_PRODUCT_PHILIPS_OHCI	0x1561		/* ISP156x USB */

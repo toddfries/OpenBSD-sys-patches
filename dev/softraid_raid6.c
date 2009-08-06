@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid6.c,v 1.1 2009/07/23 15:15:26 jordan Exp $ */
+/* $OpenBSD: softraid_raid6.c,v 1.2 2009/08/04 20:17:14 jordan Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -268,12 +268,12 @@ sr_raid6_set_vol_state(struct sr_discipline *sd)
 		new_state = BIOC_SVONLINE;
 	else if (states[BIOC_SDONLINE] < nd - 2)
 		new_state = BIOC_SVOFFLINE;
-	else if (states[BIOC_SDOFFLINE] == nd - 2)
-		new_state = BIOC_SVDEGRADED;
 	else if (states[BIOC_SDSCRUB] != 0)
 		new_state = BIOC_SVSCRUB;
 	else if (states[BIOC_SDREBUILD] != 0)
 		new_state = BIOC_SVREBUILD;
+	else if (states[BIOC_SDONLINE] < nd)
+		new_state = BIOC_SVDEGRADED;
 	else {
 		printf("old_state = %d, ", old_state);
 		for (i = 0; i < nd; i++)
@@ -394,6 +394,8 @@ sr_raid6_rw(struct sr_workunit *wu)
 	datalen = xs->datalen;
 	lbaoffs	= blk << DEV_BSHIFT;
 
+	pbuf = NULL;
+	qbuf = NULL;
 	if (xs->flags & SCSI_DATA_OUT)
 		/* create write workunit */
 		if ((wu_w = sr_wu_get(sd, 0)) == NULL) {
@@ -529,6 +531,16 @@ sr_raid6_rw(struct sr_workunit *wu)
 				}
 
 				/* XXX: bag of fail */
+#if 0
+				if (wu_w == NULL)
+					if ((wu_w = sr_wu_get(sd, 0)) == NULL)
+						goto bad;
+				wu->swu_flags |= SR_WUF_FAIL;
+				if (sr_raid6_addio(wu_w, 0, 0, 0, pbuf, 0,
+				    SR_CCBF_FREEBUF, NULL, data, 
+				    gf_inv(gf_pow[chunk])))
+					goto bad;
+#else
 				wu->swu_flags |= SR_WUF_FAIL;
 				sr_raid_startwu(wu);
 				while ((wu->swu_flags & SR_WUF_FAILIOCOMP) == 0) {
@@ -542,17 +554,10 @@ sr_raid6_rw(struct sr_workunit *wu)
 				sr_wu_put(wu);
 				scsi_done(xs);
 				return(0);
-
+#endif
 				break;
 			case SR_FAILX+SR_FAILY:
 				/* Dx, Dy failed */
-
-				/* cheat.. get other failed drive */
-				for (fchunk=0; fchunk<no_chunk+2; fchunk++) {
-					if (fchunk != chunk && fchunk != qchunk && fchunk != pchunk)
-						break;
-				}
-
 				printf("Disk %llx & %llx offline, "
 				    "regenerating Dx+Dy\n", chunk, fchunk);
 				qbuf = sr_get_block(sd, length);
@@ -593,6 +598,20 @@ sr_raid6_rw(struct sr_workunit *wu)
 
 
 				/* XXX: bag of fail */
+#if 0
+				if (wu_w == NULL)
+					if ((wu_w = sr_wu_get(sd, 0)) == NULL)
+						goto bad;
+				wu->swu_flags |= SR_WUF_FAIL;
+				if (sr_raid6_addio(wu_w, 0, 0, 0, pbuf, 0,
+				    SR_CCBF_FREEBUF, NULL, data, 
+				    gf_inv(gf_pow[255+chunk-fchunk] ^ 1)))
+					goto bad;
+				if (sr_raid6_addio(wu_w, 0, 0, 0, qbuf, 0,
+				    SR_CCBF_FREEBUF, NULL, data, 
+				    gf_inv(gf_pow[chunk] ^ gf_pow[fchunk])))
+					goto bad;
+#else
 				wu->swu_flags |= SR_WUF_FAIL;
 				sr_raid_startwu(wu);
 				while ((wu->swu_flags & SR_WUF_FAILIOCOMP) == 0) {
@@ -611,7 +630,7 @@ sr_raid6_rw(struct sr_workunit *wu)
 				sr_wu_put(wu);
 				scsi_done(xs);
 				return(0);
-
+#endif
 				break;
 			default:
 				printf("%s: is offline, can't read\n",
@@ -719,6 +738,10 @@ queued:
 	return (0);
 bad:
 	/* wu is unwound by sr_wu_put */
+	if (pbuf)
+		sr_put_block(sd, pbuf);
+	if (qbuf)
+		sr_put_block(sd, qbuf);
 	if (wu_w)
 		sr_wu_put(wu_w);
 	return (1);
@@ -952,7 +975,9 @@ sr_raid6_addio(struct sr_workunit *wu, int dsk, daddr64_t blk, daddr64_t len,
 	ccb->ccb_buf.b_error = 0;
 	ccb->ccb_buf.b_proc = curproc;
 	ccb->ccb_buf.b_dev = sd->sd_vol.sv_chunks[dsk]->src_dev_mm;
-	ccb->ccb_buf.b_vp = NULL;
+	ccb->ccb_buf.b_vp = sd->sd_vol.sv_chunks[dsk]->src_vn;
+	if ((ccb->ccb_buf.b_flags & B_READ) == 0)
+		ccb->ccb_buf.b_vp->v_numoutput++;
 
 	ccb->ccb_wu = wu;
 	ccb->ccb_target = dsk;
@@ -1003,6 +1028,11 @@ sr_raid6_xorq(void *q, void *d, int len, int gn)
 	/* Have to do this a byte at a time */
 	while (len--)
 		qbuf[len] ^= gf_mul(data[len], gn);
+
+	/* Fast mode:
+	 * gpow = gf_pow + index;
+	 * while (len--) qbuf[len] ^= gpow[gf_log[data[len]]];
+ 	 */
 }
 
 /* Create GF256 log/pow tables: polynomial = 0x11D */
