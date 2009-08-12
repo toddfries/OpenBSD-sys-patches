@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.166 2009/07/28 14:01:50 dlg Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.170 2009/08/10 15:29:34 henning Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -1423,10 +1423,10 @@ ip_forward(m, srcrt)
 	struct ip *ip = mtod(m, struct ip *);
 	struct sockaddr_in *sin;
 	struct rtentry *rt;
-	int error, type = 0, code = 0, destmtu = 0;
+	int error, type = 0, code = 0, destmtu = 0, len;
 	u_int rtableid = 0;
-	struct mbuf *mcopy;
 	n_long dest;
+	struct mbuf mfake, *mcopy = NULL;
 
 	dest = 0;
 #ifdef DIAGNOSTIC
@@ -1472,11 +1472,14 @@ ip_forward(m, srcrt)
 	/*
 	 * Save at most 68 bytes of the packet in case
 	 * we need to generate an ICMP message to the src.
-	 * Pullup to avoid sharing mbuf cluster between m and mcopy.
 	 */
-	mcopy = m_copym(m, 0, min(ntohs(ip->ip_len), 68), M_DONTWAIT);
-	if (mcopy)
-		mcopy = m_pullup(mcopy, min(ntohs(ip->ip_len), 68));
+	bzero(&mfake.m_hdr, sizeof(mfake.m_hdr));
+	mfake.m_type = m->m_type;
+	M_DUP_PKTHDR(&mfake, m);
+	mfake.m_data = mfake.m_pktdat;
+	len = min(min(ntohs(ip->ip_len), 68), MHLEN);
+	m_copydata(m, 0, len, mfake.m_pktdat);
+	mfake.m_pkthdr.len = mfake.m_len = len;
 
 	ip->ip_ttl -= IPTTLDEC;
 
@@ -1525,8 +1528,6 @@ ip_forward(m, srcrt)
 		else
 			goto freecopy;
 	}
-	if (mcopy == NULL)
-		goto freert;
 
 	switch (error) {
 
@@ -1561,7 +1562,6 @@ ip_forward(m, srcrt)
 		break;
 
 	case ENOBUFS:
-#if 1
 		/*
 		 * a router should not generate ICMP_SOURCEQUENCH as
 		 * required in RFC1812 Requirements for IP Version 4 Routers.
@@ -1569,14 +1569,11 @@ ip_forward(m, srcrt)
 		 * or the underlying interface is rate-limited.
 		 */
 		goto freecopy;
-#else
-		type = ICMP_SOURCEQUENCH;
-		code = 0;
-		break;
-#endif
 	}
 
-	icmp_error(mcopy, type, code, dest, destmtu);
+	mcopy = m_copym(&mfake, 0, len, M_DONTWAIT);
+	if (mcopy)
+		icmp_error(mcopy, type, code, dest, destmtu);
 	goto freert;
 
  freecopy:

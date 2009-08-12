@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.215 2009/07/27 16:37:52 claudio Exp $ */
+/* $OpenBSD: if_em.c,v 1.218 2009/08/12 14:39:05 dlg Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -152,7 +152,6 @@ const struct pci_matchid em_devices[] = {
  *********************************************************************/
 int  em_probe(struct device *, void *, void *);
 void em_attach(struct device *, struct device *, void *);
-void em_shutdown(void *);
 int  em_intr(void *);
 void em_power(int, void *);
 void em_start(struct ifnet *);
@@ -438,7 +437,6 @@ em_attach(struct device *parent, struct device *self, void *aux)
 		sc->pcix_82544 = FALSE;
 	INIT_DEBUGOUT("em_attach: end");
 	sc->sc_powerhook = powerhook_establish(em_power, sc);
-	sc->sc_shutdownhook = shutdownhook_establish(em_shutdown, sc);
 	return;
 
 err_mac_addr:
@@ -462,20 +460,6 @@ em_power(int why, void *arg)
 		if (ifp->if_flags & IFF_UP)
 			em_init(sc);
 	}
-}
-
-/*********************************************************************
- *
- *  Shutdown entry point
- *
- **********************************************************************/ 
-
-void
-em_shutdown(void *arg)
-{
-	struct em_softc *sc = arg;
-
-	em_stop(sc);
 }
 
 /*********************************************************************
@@ -2307,14 +2291,8 @@ em_get_buf(struct em_softc *sc, int i)
 		return (ENOBUFS);
 	}
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL) {
-		sc->mbuf_alloc_failed++;
-		return (ENOBUFS);
-	}
-	MCLGETI(m, M_DONTWAIT, &sc->interface_data.ac_if, MCLBYTES);
-	if ((m->m_flags & M_EXT) == 0) {
-		m_freem(m);
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->interface_data.ac_if, MCLBYTES);
+	if (!m) {
 		sc->mbuf_cluster_failed++;
 		return (ENOBUFS);
 	}
@@ -2671,10 +2649,12 @@ em_rxeof(struct em_softc *sc, int count)
 			    sc->last_rx_desc_filled);
 		}
 
-		m_cluncount(m, 1);
 		sc->rx_ndescs--;
+		if (m_cluncount(m) == 0)
+			accept_frame = 1;
+		else
+			accept_frame = 0;
 
-		accept_frame = 1;
 		prev_len_adj = 0;
 		desc_len = letoh16(desc->length);
 

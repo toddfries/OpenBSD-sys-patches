@@ -1,4 +1,4 @@
-/*	$OpenBSD: smu.c,v 1.19 2007/05/20 23:38:52 thib Exp $	*/
+/*	$OpenBSD: smu.c,v 1.22 2009/08/12 14:11:52 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis
@@ -46,7 +46,7 @@ struct smu_fan {
 	struct ksensor	sensor;
 };
 
-#define SMU_MAXSENSORS	3
+#define SMU_MAXSENSORS	4
 
 struct smu_sensor {
 	u_int8_t	reg;
@@ -83,6 +83,9 @@ struct smu_softc {
 	int16_t		sc_cpu_volt_offset;
 	u_int16_t	sc_cpu_curr_scale;
 	int16_t		sc_cpu_curr_offset;
+
+	u_int16_t	sc_slots_pow_scale;
+	int16_t		sc_slots_pow_offset;
 
 	struct i2c_controller sc_i2c_tag;
 };
@@ -314,6 +317,11 @@ smu_attach(struct device *parent, struct device *self, void *aux)
 		    OF_getprop(node, "device_type", type, sizeof type) <= 0)
 			continue;
 
+		if (sc->sc_num_sensors >= SMU_MAXSENSORS) {
+			printf(": too many sensors\n");
+			return;
+		}
+
 		sensor = &sc->sc_sensors[sc->sc_num_sensors++];
 		sensor->sensor.flags = SENSOR_FINVALID;
 		sensor->reg = val;
@@ -324,6 +332,8 @@ smu_attach(struct device *parent, struct device *self, void *aux)
 			sensor->sensor.type = SENSOR_TEMP;
 		} else if (strcmp(type, "voltage-sensor") == 0) {
 			sensor->sensor.type = SENSOR_VOLTS_DC;
+		} else if (strcmp(type, "power-sensor") == 0) {
+			sensor->sensor.type = SENSOR_WATTS;
 		} else {
 			sensor->sensor.type = SENSOR_INTEGER;
 		}
@@ -352,6 +362,11 @@ smu_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_cpu_curr_scale = (data[8] << 8) + data[9];
 	sc->sc_cpu_curr_offset = (data[10] << 8) + data[11];
 
+	/* Slots power calibration */
+	smu_get_datablock(sc, 0x78, data, sizeof data);
+	sc->sc_slots_pow_scale = (data[4] << 8) + data[5];
+	sc->sc_slots_pow_offset = (data[6] << 8) + data[7];
+
 	sensor_task_register(sc, smu_refresh_sensors, 5);
 	printf("\n");
 
@@ -362,8 +377,16 @@ smu_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_i2c_tag.ic_release_bus = smu_i2c_release_bus;
 	sc->sc_i2c_tag.ic_exec = smu_i2c_exec;
 
+	/*
+	 * Early versions of the SMU have the i2c bus node directly
+	 * below the "smu" node, while later models have an
+	 * intermediate "smu-i2c-control" node.
+	 */
 	node = OF_getnodebyname(ca->ca_node, "smu-i2c-control");
-	node = OF_child(node);
+	if (node)
+		node = OF_child(node);
+	else
+		node = OF_getnodebyname(ca->ca_node, "i2c");
 
 	bzero(&iba, sizeof iba);
 	iba.iba_name = "iic";
@@ -598,6 +621,16 @@ smu_sensor_refresh(struct smu_softc *sc, struct smu_sensor *sensor)
 		value <<= 4;
 
 		/* Convert from 16.16 fixed point A into muA. */
+		value *= 15625;
+		value /= 1024;
+		break;
+
+	case SENSOR_WATTS:
+		value *= sc->sc_slots_pow_scale;
+		value += sc->sc_slots_pow_offset;
+		value <<= 4;
+
+		/* Convert from 16.16 fixed point W into muW. */
 		value *= 15625;
 		value /= 1024;
 		break;

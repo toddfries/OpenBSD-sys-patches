@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.24 2009/07/10 12:00:52 dlg Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.28 2009/08/12 16:56:59 jsg Exp $	*/
 
 /******************************************************************************
 
@@ -65,7 +65,6 @@ int	ixgbe_probe(struct device *, void *, void *);
 void	ixgbe_attach(struct device *, struct device *, void *);
 int	ixgbe_detach(struct device *, int);
 void	ixgbe_power(int, void *);
-void	ixgbe_shutdown(void *);
 void	ixgbe_start(struct ifnet *);
 void	ixgbe_start_locked(struct tx_ring *, struct ifnet *);
 int	ixgbe_ioctl(struct ifnet *, u_long, caddr_t);
@@ -239,7 +238,6 @@ ixgbe_attach(struct device *parent, struct device *self, void *aux)
 	IXGBE_WRITE_REG(&sc->hw, IXGBE_CTRL_EXT, ctrl_ext);
 
 	sc->powerhook = powerhook_establish(ixgbe_power, sc);
-	sc->shutdownhook = shutdownhook_establish(ixgbe_shutdown, sc);
 
 	printf(", address %s\n", ether_sprintf(sc->hw.mac.addr));
 
@@ -302,20 +300,6 @@ ixgbe_power(int why, void *arg)
 		if (ifp->if_flags & IFF_UP)
 			ixgbe_init(sc);
 	}
-}
-
-/*********************************************************************
- *
- *  Shutdown entry point
- *
- **********************************************************************/
-
-void
-ixgbe_shutdown(void *arg)
-{
-	struct ix_softc *sc = (struct ix_softc *)arg;
-
-	ixgbe_stop(sc);
 }
 
 /*********************************************************************
@@ -1141,9 +1125,9 @@ ixgbe_stop(void *arg)
 	INIT_DEBUGOUT("ixgbe_stop: begin\n");
 	ixgbe_disable_intr(sc);
 
-	ixgbe_hw(&sc->hw, reset_hw);
+	ixgbe_hw0(&sc->hw, reset_hw);
 	sc->hw.adapter_stopped = FALSE;
-	ixgbe_hw(&sc->hw, stop_adapter);
+	ixgbe_hw0(&sc->hw, stop_adapter);
 	timeout_del(&sc->timer);
 
 	/* reprogram the RAR[0] in case user changed it. */
@@ -1323,7 +1307,7 @@ ixgbe_hardware_init(struct ix_softc *sc)
 	csum = 0;
 	/* Issue a global reset */
 	sc->hw.adapter_stopped = FALSE;
-	ixgbe_hw(&sc->hw, stop_adapter);
+	ixgbe_hw0(&sc->hw, stop_adapter);
 
 	/* Make sure we have a good EEPROM before we read from it */
 	if (ixgbe_ee(&sc->hw, validate_checksum, &csum) < 0) {
@@ -1338,7 +1322,7 @@ ixgbe_hardware_init(struct ix_softc *sc)
 	sc->hw.fc.high_water = IXGBE_FC_HI;
 	sc->hw.fc.send_xon = TRUE;
 
-	if (ixgbe_hw(&sc->hw, init_hw) != 0) {
+	if (ixgbe_hw0(&sc->hw, init_hw) != 0) {
 		printf("%s: Hardware Initialization Failed", ifp->if_xname);
 		return (EIO);
 	}
@@ -2217,14 +2201,8 @@ ixgbe_get_buf(struct rx_ring *rxr, int i)
 		return (ENOBUFS);
 	}
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL) {
-		sc->mbuf_alloc_failed++;
-		return (ENOBUFS);
-	}
-	MCLGETI(m, M_DONTWAIT, &sc->arpcom.ac_if, size);
-	if ((m->m_flags & M_EXT) == 0) {
-		m_freem(m);
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->arpcom.ac_if, size);
+	if (!m) {
 		sc->mbuf_cluster_failed++;
 		return (ENOBUFS);
 	}
@@ -2653,10 +2631,12 @@ ixgbe_rxeof(struct rx_ring *rxr, int count)
 			    rxr->last_rx_desc_filled);
 		}
 
-		m_cluncount(m, 1);
 		rxr->rx_ndescs--;
+		if (m_cluncount(m) == 0)
+			accept_frame = 1;
+		else
+			accept_frame = 0;
 
-		accept_frame = 1;
 		prev_len_adj = 0;
 		desc_len = letoh16(rxdesc->wb.upper.length);
 
