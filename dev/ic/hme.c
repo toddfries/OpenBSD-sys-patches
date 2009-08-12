@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.58 2009/06/22 14:31:04 sthen Exp $	*/
+/*	$OpenBSD: hme.c,v 1.60 2009/08/10 20:29:54 deraadt Exp $	*/
 /*	$NetBSD: hme.c,v 1.21 2001/07/07 15:59:37 thorpej Exp $	*/
 
 /*-
@@ -87,7 +87,6 @@ void		hme_stop(struct hme_softc *);
 int		hme_ioctl(struct ifnet *, u_long, caddr_t);
 void		hme_tick(void *);
 void		hme_watchdog(struct ifnet *);
-void		hme_shutdown(void *);
 void		hme_init(struct hme_softc *);
 void		hme_meminit(struct hme_softc *);
 void		hme_mifinit(struct hme_softc *);
@@ -293,10 +292,6 @@ hme_config(sc)
 	/* Attach the interface. */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	sc->sc_sh = shutdownhook_establish(hme_shutdown, sc);
-	if (sc->sc_sh == NULL)
-		panic("hme_config: can't establish shutdownhook");
 
 	timeout_set(&sc->sc_tick_ch, hme_tick, sc);
 	return;
@@ -1326,13 +1321,6 @@ hme_ioctl(ifp, cmd, data)
 }
 
 void
-hme_shutdown(arg)
-	void *arg;
-{
-	hme_stop((struct hme_softc *)arg);
-}
-
-void
 hme_iff(struct hme_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
@@ -1415,16 +1403,10 @@ hme_newbuf(sc, d)
 	 * until we're sure everything is a success.
 	 */
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->sc_arpcom.ac_if, MCLBYTES);
+	if (!m)
 		return (ENOBUFS);
 	m->m_pkthdr.rcvif = &sc->sc_arpcom.ac_if;
-
-	MCLGETI(m, M_DONTWAIT, &sc->sc_arpcom.ac_if, MCLBYTES);
-	if ((m->m_flags & M_EXT) == 0) {
-		m_freem(m);
-		return (ENOBUFS);
-	}
 
 	if (bus_dmamap_load(sc->sc_dmatag, sc->sc_rxmap_spare,
 	    mtod(m, caddr_t), MCLBYTES - HME_RX_OFFSET, NULL,

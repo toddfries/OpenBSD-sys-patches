@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_aoe.c,v 1.8 2009/07/24 14:13:28 blambert Exp $ */
+/* $OpenBSD: softraid_aoe.c,v 1.9 2009/08/09 14:12:25 marco Exp $ */
 /*
  * Copyright (c) 2008 Ted Unangst <tedu@openbsd.org>
  * Copyright (c) 2008 Marco Peereboom <marco@openbsd.org>

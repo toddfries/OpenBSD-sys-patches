@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_command.c,v 1.54 2009/07/15 19:05:14 miod Exp $	*/
+/*	$OpenBSD: db_command.c,v 1.56 2009/08/09 23:04:49 miod Exp $	*/
 /*	$NetBSD: db_command.c,v 1.20 1996/03/30 22:30:05 christos Exp $	*/
 
 /* 
@@ -439,6 +439,15 @@ db_uvmexp_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 	uvmexp_print(db_printf);
 }
 
+void	bcstats_print(int (*)(const char *, ...));
+
+/*ARGSUSED*/
+void
+db_bcstats_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+{
+	bcstats_print(db_printf);
+}
+
 /*
  * 'show' commands
  */
@@ -456,23 +465,30 @@ struct db_command db_show_all_cmds[] = {
 
 struct db_command db_show_cmds[] = {
 	{ "all",	NULL,			0,	db_show_all_cmds },
+	{ "bcstats",	db_bcstats_print_cmd,	0,	NULL },
 	{ "breaks",	db_listbreak_cmd, 	0,	NULL },
 	{ "buf",	db_buf_print_cmd,	0,	NULL },
 	{ "extents",	db_extent_print_cmd,	0,	NULL },
 	{ "malloc",	db_malloc_print_cmd,	0,	NULL },
 	{ "map",	db_map_print_cmd,	0,	NULL },
 	{ "mount",	db_mount_print_cmd,	0,	NULL },
+#ifdef NFSCLIENT
+	{ "nfsreq",	db_nfsreq_print_cmd,	0,	NULL },
+#endif
 	{ "object",	db_object_print_cmd,	0,	NULL },
+#ifdef DDB_STRUCT_INFORMATION
+	{ "offset",	db_struct_offset_cmd,	CS_OWN,	NULL },
+#endif
 	{ "page",	db_page_print_cmd,	0,	NULL },
 	{ "panic",	db_show_panic_cmd,	0,	NULL },
 	{ "pool",	db_pool_print_cmd,	0,	NULL },
 	{ "proc",	db_proc_print_cmd,	0,	NULL },
 	{ "registers",	db_show_regs,		0,	NULL },
+#ifdef DDB_STRUCT_INFORMATION
+	{ "struct",	db_struct_layout_cmd,	CS_OWN,	NULL },
+#endif
 	{ "uvmexp",	db_uvmexp_print_cmd,	0,	NULL },
 	{ "vnode",	db_vnode_print_cmd,	0,	NULL },
-#ifdef NFSCLIENT
-	{ "nfsreq",	db_nfsreq_print_cmd,	0,	NULL },
-#endif
 	{ "watches",	db_listwatch_cmd, 	0,	NULL },
 	{ NULL,		NULL,			0,	NULL }
 };

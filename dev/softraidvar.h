@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.80 2009/07/23 15:15:25 jordan Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.81 2009/08/09 14:12:25 marco Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>

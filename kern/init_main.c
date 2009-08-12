@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.160 2009/07/09 22:29:56 thib Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.162 2009/08/11 18:43:33 blambert Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -99,6 +99,7 @@
 extern void nfs_init(void);
 #endif
 
+#include "mpath.h"
 #include "vscsi.h"
 #include "softraid.h"
 
@@ -444,6 +445,9 @@ main(void *framep)
 
 	dostartuphooks();
 
+#if NMPATH > 0
+	config_rootfound("mpath", NULL);
+#endif
 #if NVSCSI > 0
 	config_rootfound("vscsi", NULL);
 #endif
@@ -537,8 +541,11 @@ main(void *framep)
 	start_init_exec = 1;
 	wakeup((void *)&start_init_exec);
 
-	/* The scheduler is an infinite loop. */
-	uvm_scheduler();
+        /*
+         * proc0: nothing to do, back to sleep
+         */
+        while (1)
+                tsleep(&proc0, PVM, "scheduler", 0);
 	/* NOTREACHED */
 }
 

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raidp.c,v 1.9 2009/08/04 20:17:14 jordan Exp $ */
+/* $OpenBSD: softraid_raidp.c,v 1.10 2009/08/09 14:12:25 marco Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>

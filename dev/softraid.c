@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.169 2009/07/31 16:05:25 jsing Exp $ */
+/* $OpenBSD: softraid.c,v 1.170 2009/08/09 14:12:25 marco Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -413,7 +413,7 @@ sr_meta_rw(struct sr_discipline *sd, dev_t dev, void *md, size_t sz,
 	b.b_dev = dev;
 	b.b_iodone = NULL;
 	if (bdevvp(dev, &b.b_vp)) {
-		printf("%s:, sr_meta_rw: can't allocate vnode\n", DEVNAME(sc));
+		printf("%s: sr_meta_rw: can't allocate vnode\n", DEVNAME(sc));
 		goto done;
 	}
 	if ((b.b_flags & B_READ) == 0)
@@ -903,6 +903,7 @@ sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
 	if (error) {
 		DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe close "
 		    "failed\n", DEVNAME(sc));
+		vput(vn);
 		goto done;
 	}
 	vput(vn);
@@ -978,12 +979,7 @@ sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
 		}
 
 		/* we are done, close partition */
-		error = VOP_CLOSE(vn, FREAD, NOCRED, 0);
-		if (error) {
-			DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe "
-			    "close failed\n", DEVNAME(sc));
-			continue;
-		}
+		VOP_CLOSE(vn, FREAD, NOCRED, 0);
 		vput(vn);
 	}
 
@@ -2137,8 +2133,10 @@ int
 sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 {
 	int			rv = EINVAL;
-	int			i, vol;
+	int			i, vol, found, c;
 	struct sr_discipline	*sd = NULL;
+	struct sr_chunk		*ch_entry;
+	struct sr_chunk_head	*cl;
 
 	if (bs->bs_other_id_type == BIOC_SSOTHER_UNUSED)
 		goto done;
@@ -2162,6 +2160,30 @@ sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 
 	switch (bs->bs_status) {
 	case BIOC_SSOFFLINE:
+		/* Take chunk offline */
+		found = c = 0;
+		cl = &sd->sd_vol.sv_chunk_list;
+		SLIST_FOREACH(ch_entry, cl, src_link) {
+			if (ch_entry->src_dev_mm == bs->bs_other_id) {
+				found = 1;
+				break;
+			}
+			c++;
+		}
+		if (found == 0) {
+			printf("%s: chunk not part of array\n", DEVNAME(sc));
+			goto done;
+		}
+		
+		/* XXX: check current state first */
+		sd->sd_set_chunk_state(sd, c, BIOC_SSOFFLINE);
+		
+		if (sr_meta_save(sd, SR_META_DIRTY)) {
+			printf("%s: could not save metadata to %s\n",
+			    DEVNAME(sc), sd->sd_meta->ssd_devname);
+			goto done;
+		}
+		rv = 0;
 		break;
 
 	case BIOC_SDSCRUB:
@@ -2767,7 +2789,7 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 			    (ch_entry->src_meta.scmi.scm_coerced_size & 
 			    ~((strip_size >> DEV_BSHIFT) - 1)) * (no_chunk - 1);
 			break;
-#ifdef not_yet
+//#ifdef not_yet
 		case 6:
 			if (no_chunk < 4)
 				goto unwind;
@@ -2783,7 +2805,7 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 			    (ch_entry->src_meta.scmi.scm_coerced_size & 
 			    ~((strip_size >> DEV_BSHIFT) - 1)) * (no_chunk - 2);
 			break;
-#endif /* not_yet */
+//#endif /* not_yet */
 #ifdef AOE
 #ifdef not_yet
 		case 'A':

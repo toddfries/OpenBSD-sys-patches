@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.175 2009/08/02 16:28:39 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.178 2009/08/11 19:17:16 miod Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff
@@ -48,9 +48,6 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/extent.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
@@ -289,7 +286,6 @@ hppa_init(start)
 {
 	extern u_long cpu_hzticks;
 	extern int kernel_text;
-	vaddr_t v, v1;
 	int error;
 
 	pdc_init();	/* init PDC iface, so we can call em easy */
@@ -388,25 +384,8 @@ hppa_init(start)
 	    EX_NOWAIT))
 		panic("cannot reserve main memory");
 
-	/*
-	 * Now allocate kernel dynamic variables
-	 */
-
-	v1 = v = round_page(start);
-#define valloc(name, type, num) (name) = (type *)v; v = (vaddr_t)((name)+(num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-#undef valloc
-	v = round_page(v);
-	bzero ((void *)v1, (v - v1));
-
 	/* sets resvphysmem */
-	pmap_bootstrap(v);
+	pmap_bootstrap(round_page(start));
 
 	/* space has been reserved in pmap_bootstrap() */
 	initmsgbuf((caddr_t)(ptoa(physmem) - round_page(MSGBUFSIZE)),
@@ -648,13 +627,6 @@ cpu_startup(void)
 	printf("real mem = %u (%uMB)\n", ptoa(physmem),
 	    ptoa(physmem) / 1024 / 1024);
 	printf("rsvd mem = %u (%uKB)\n", ptoa(resvmem), ptoa(resvmem) / 1024);
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively

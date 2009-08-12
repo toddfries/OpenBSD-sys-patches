@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vic.c,v 1.71 2009/06/02 12:32:06 deraadt Exp $	*/
+/*	$OpenBSD: if_vic.c,v 1.73 2009/08/10 17:25:07 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Reyk Floeter <reyk@openbsd.org>
@@ -314,7 +314,6 @@ struct cfattach vic_ca = {
 };
 
 int		vic_intr(void *);
-void		vic_shutdown(void *);
 
 int		vic_query(struct vic_softc *);
 int		vic_alloc_data(struct vic_softc *);
@@ -794,14 +793,6 @@ vic_link_state(struct vic_softc *sc)
 		ifp->if_link_state = link_state;
 		if_link_state_change(ifp);
 	}
-}
-
-void
-vic_shutdown(void *self)
-{
-	struct vic_softc *sc = (struct vic_softc *)self;
-
-	vic_stop(&sc->sc_ac.ac_if);
 }
 
 int
@@ -1340,15 +1331,9 @@ vic_alloc_mbuf(struct vic_softc *sc, bus_dmamap_t map, u_int pktlen)
 {
 	struct mbuf *m = NULL;
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->sc_ac.ac_if, pktlen);
+	if (!m)
 		return (NULL);
-
-	MCLGETI(m, M_DONTWAIT, &sc->sc_ac.ac_if, pktlen);
-	if ((m->m_flags & M_EXT) == 0) {
-		m_freem(m);
-		return (NULL);
-	}
 	m->m_data += ETHER_ALIGN;
 	m->m_len = m->m_pkthdr.len = pktlen - ETHER_ALIGN;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.277 2009/07/21 13:09:41 naddy Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.280 2009/08/09 11:40:56 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -36,7 +36,7 @@
  */
 
 /*
- * Broadcom BCM570x family gigabit ethernet driver for FreeBSD.
+ * Broadcom BCM57xx/BCM590x family ethernet driver for OpenBSD.
  *
  * Written by Bill Paul <wpaul@windriver.com>
  * Senior Engineer, Wind River Systems
@@ -719,15 +719,9 @@ bge_newbuf(struct bge_softc *sc, int i)
 	struct mbuf		*m;
 	int			error;
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->arpcom.ac_if, MCLBYTES);
+	if (!m)
 		return (ENOBUFS);
-
-	MCLGETI(m, M_DONTWAIT, &sc->arpcom.ac_if, MCLBYTES);
-	if (!(m->m_flags & M_EXT)) {
-		m_freem(m);
-		return (ENOBUFS);
-	}
 	m->m_len = m->m_pkthdr.len = MCLBYTES;
 	if (!(sc->bge_flags & BGE_RX_ALIGNBUG))
 	    m_adj(m, ETHER_ALIGN);
@@ -776,15 +770,9 @@ bge_newbuf_jumbo(struct bge_softc *sc, int i)
 	struct mbuf		*m;
 	int			error;
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->arpcom.ac_if, BGE_JLEN);
+	if (!m)
 		return (ENOBUFS);
-
-	MCLGETI(m, M_DONTWAIT, &sc->arpcom.ac_if, BGE_JLEN);
-	if (!(m->m_flags & M_EXT)) {
-		m_freem(m);
-		return (ENOBUFS);
-	}
 	m->m_len = m->m_pkthdr.len = BGE_JUMBO_FRAMELEN;
 	if (!(sc->bge_flags & BGE_RX_ALIGNBUG))
 	    m_adj(m, ETHER_ALIGN);
@@ -1225,10 +1213,6 @@ bge_chipinit(struct bge_softc *sc)
 		} else if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5704) {
 			/* 1536 bytes for read, 384 bytes for write. */
 			dma_rw_ctl |= BGE_PCIDMARWCTL_RD_WAT_SHIFT(7) |
-			    BGE_PCIDMARWCTL_WR_WAT_SHIFT(3);
-		} else if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5703) {
-			/* 512 bytes for read, 384 bytes for write. */
-			dma_rw_ctl |= BGE_PCIDMARWCTL_RD_WAT_SHIFT(4) |
 			    BGE_PCIDMARWCTL_WR_WAT_SHIFT(3);
 		} else {
 			/* 384 bytes for read and write. */

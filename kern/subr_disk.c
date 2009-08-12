@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.95 2009/06/17 01:30:30 thib Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.96 2009/08/09 14:06:52 marco Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*

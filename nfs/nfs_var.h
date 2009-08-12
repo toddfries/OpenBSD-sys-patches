@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_var.h,v 1.52 2009/08/04 17:12:39 thib Exp $	*/
+/*	$OpenBSD: nfs_var.h,v 1.54 2009/08/10 10:59:12 thib Exp $	*/
 /*	$NetBSD: nfs_var.h,v 1.3 1996/02/18 11:53:54 fvdl Exp $	*/
 
 /*
@@ -56,7 +56,6 @@ int nfs_doio(struct buf *, struct proc *);
 int nfs_boot_init(struct nfs_diskless *, struct proc *);
 
 /* nfs_node.c */
-void nfs_nhinit(void);
 int nfs_nget(struct mount *, nfsfh_t *, int, struct nfsnode **);
 int nfs_inactive(void *);
 int nfs_reclaim(void *);
@@ -139,9 +138,6 @@ int nfsrv_read(struct nfsrv_descript *, struct nfssvc_sock *,
 		    struct proc *, struct mbuf **);
 int nfsrv_write(struct nfsrv_descript *, struct nfssvc_sock *,
 		     struct proc *, struct mbuf **);
-int nfsrv_writegather(struct nfsrv_descript **, struct nfssvc_sock *,
-			   struct proc *, struct mbuf **);
-void nfsrvw_coalesce(struct nfsrv_descript *, struct nfsrv_descript *);
 int nfsrv_create(struct nfsrv_descript *, struct nfssvc_sock *,
 		      struct proc *, struct mbuf **);
 int nfsrv_mknod(struct nfsrv_descript *, struct nfssvc_sock *,
@@ -249,8 +245,6 @@ void nfs_add_tobecommitted_range(struct vnode *, struct buf *);
 void nfs_del_tobecommitted_range(struct vnode *, struct buf *);
 void nfs_merge_commit_ranges(struct vnode *);
 int nfsrv_errmap(struct nfsrv_descript *, int);
-void nfsrvw_sort(gid_t *, int);
-void nfsrv_setcred(struct ucred *, struct ucred *);
 int nfsm_srvsattr(struct mbuf **, struct vattr *, struct mbuf *, caddr_t *);
 void nfsm_fhtom(struct mbuf **, struct vnode *, int);
 void nfsm_srvfhtom(struct mbuf **, fhandle_t *, int);
