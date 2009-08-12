@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.11 2008/09/01 16:28:50 krw Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.16 2009/06/14 00:09:39 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1999 Michael Shalayeff
@@ -62,6 +62,7 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *),
 
 	if ((msg = initdisklabel(lp)))
 		goto done;
+	lp->d_flags |= D_VENDOR;
 
 	/* get a buffer and initialize it */
 	bp = geteblk((int)lp->d_secsize);
@@ -116,10 +117,8 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 	char *msg = NULL;
 	int i, *p, cs = 0;
 	int fsoffs = 0;
+	u_int fsend;
 	int offset;
-
-	if (partoffp)
-		*partoffp = fsoffs;
 
 	bp->b_blkno = 0;
 	bp->b_bcount = lp->d_secsize;
@@ -141,11 +140,9 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 		goto done;
 	}
 	fsoffs = dlp->partitions[0].first * (dlp->dp.dp_secbytes / DEV_BSIZE);
+	fsend = fsoffs + dlp->partitions[0].blocks * (dlp->dp.dp_secbytes / DEV_BSIZE);
 
-	/*
-	 * If the disklabel is about to be written to disk, don't modify it!
-	 * just bail out.
-	 */
+	/* Only came here to find the offset... */
 	if (partoffp) {
 		*partoffp = fsoffs;
 		goto finished;
@@ -171,25 +168,40 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 
 	for (i = 0; i < 16; i++) {
 		int bsd = maptab[i].m;
+		int type = maptab[i].b;
+
+		if (spoofonly && type != FS_UNUSED && type != FS_OTHER)
+			continue;
 
 		DL_SETPOFFSET(&lp->d_partitions[bsd],
 		    dlp->partitions[i].first);
 		DL_SETPSIZE(&lp->d_partitions[bsd],
 		    dlp->partitions[i].blocks);
-		lp->d_partitions[bsd].p_fstype = maptab[i].b;
-		if (lp->d_partitions[bsd].p_fstype == FS_BSDFFS) {
+		lp->d_partitions[bsd].p_fstype = type;
+		if (type == FS_BSDFFS) {
 			lp->d_partitions[bsd].p_fragblock =
 			    DISKLABELV1_FFS_FRAGBLOCK(1024, 8);
 			lp->d_partitions[bsd].p_cpg = 16;
 		}
 	}
 
+	DL_SETBSTART(lp, fsoffs);
+	DL_SETBEND(lp, fsend);
 	lp->d_version = 1;
 	lp->d_flags = D_VENDOR;
 	lp->d_checksum = 0;
 	lp->d_checksum = dkcksum(lp);
 
 finished:
+	/* record the OpenBSD partition's placement for the caller */
+	if (partoffp)
+		*partoffp = fsoffs;
+	else {
+		DL_SETBSTART(lp, fsoffs);
+		DL_SETBEND(lp, fsend);
+	}
+
+	/* don't read the on-disk label if we are in spoofed-only mode */
 	if (spoofonly)
 		goto done;
 
@@ -203,7 +215,7 @@ finished:
 		goto done;
 	}
 
-	return checkdisklabel(bp->b_data + offset, lp);
+	return checkdisklabel(bp->b_data + offset, lp, fsoffs, fsend);
 
 done:
 	return (msg);

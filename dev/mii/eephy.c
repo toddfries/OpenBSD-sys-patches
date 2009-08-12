@@ -1,4 +1,4 @@
-/*	$OpenBSD: eephy.c,v 1.46 2008/10/07 20:41:05 kettenis Exp $	*/
+/*	$OpenBSD: eephy.c,v 1.48 2009/06/04 05:19:38 kettenis Exp $	*/
 /*
  * Principal Author: Parag Patel
  * Copyright (c) 2001
@@ -220,13 +220,26 @@ eephyattach(struct device *parent, struct device *self, void *aux)
 
 	/* Disable energy detect; only available on some models. */
 	switch(sc->mii_model) {
+	case MII_MODEL_MARVELL_E3016:
+		reg &= ~E3000_SCR_EN_DETECT_MASK;
+		break;
 	case MII_MODEL_MARVELL_E1011:
 	case MII_MODEL_MARVELL_E1111:
 	case MII_MODEL_MARVELL_E1112:
-		/* Disable energy detect. */
 		reg &= ~E1000_SCR_EN_DETECT_MASK;
 		break;
 	}
+
+	/* Enable scrambler if necessary. */
+	if (sc->mii_model == MII_MODEL_MARVELL_E3016)
+		reg &= ~E3000_SCR_SCRAMBLER_DISABLE;
+
+	/*
+	 * Store next page in the Link Partner Next Page register for
+	 * compatibility with 802.3ab.
+	 */
+	if (sc->mii_model == MII_MODEL_MARVELL_E3016)
+		reg |= E3000_SCR_REG8_NEXT_PAGE;
 
 	PHY_WRITE(sc, E1000_SCR, reg);
 
@@ -234,6 +247,13 @@ eephyattach(struct device *parent, struct device *self, void *aux)
 	reg = PHY_READ(sc, E1000_ESCR);
 	reg |= E1000_ESCR_TX_CLK_25;
 	PHY_WRITE(sc, E1000_ESCR, reg);
+
+	/* Configure LEDs if they were left unconfigured. */
+	if (sc->mii_model == MII_MODEL_MARVELL_E3016 &&
+	    PHY_READ(sc, 0x16) == 0) {
+		reg = (0x0b << 8) | (0x05 << 4) | 0x04;	/* XXX */
+		PHY_WRITE(sc, 0x16, reg);
+	}
 
 	/*
 	 * Do a software reset for these settings to take effect.

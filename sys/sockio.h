@@ -1,4 +1,4 @@
-/*	$OpenBSD: sockio.h,v 1.41 2008/09/09 13:56:39 henning Exp $	*/
+/*	$OpenBSD: sockio.h,v 1.45 2009/06/05 00:05:22 claudio Exp $	*/
 /*	$NetBSD: sockio.h,v 1.5 1995/08/23 00:40:47 thorpej Exp $	*/
 
 /*-
@@ -167,13 +167,22 @@
 #define SIOCSETLABEL	 _IOW('i', 153, struct ifreq)	/* set MPLS label */
 #define SIOCGETLABEL	 _IOW('i', 154, struct ifreq)	/* get MPLS label */
 
+#define SIOCSIFPRIORITY	 _IOW('i', 155, struct ifreq)	/* set if priority */
+#define SIOCGIFPRIORITY	_IOWR('i', 156, struct ifreq)	/* get if priority */
+
+#define	SIOCSIFXFLAGS	 _IOW('i', 157, struct ifreq)	/* set ifnet xflags */
+#define	SIOCGIFXFLAGS	_IOWR('i', 158, struct ifreq)	/* get ifnet xflags */
+
+#define	SIOCSIFRTABLEID	 _IOW('i', 159, struct ifreq)	/* set ifnet VRF id */
+#define	SIOCGIFRTABLEID	_IOWR('i', 160, struct ifreq)	/* get ifnet VRF id */
+
 #define	SIOCSVH		_IOWR('i', 245, struct ifreq)	/* set carp param */
 #define	SIOCGVH		_IOWR('i', 246, struct ifreq)	/* get carp param */
 
 #define	SIOCSETPFSYNC	_IOW('i', 247, struct ifreq)
 #define	SIOCGETPFSYNC	_IOWR('i', 248, struct ifreq)
 
-#define	SIOCSETPFLOW	_IOW('i', 249, struct ifreq)
-#define	SIOCGETPFLOW	_IOWR('i', 250, struct ifreq)
+#define	SIOCSETPFLOW	_IOW('i', 253, struct ifreq)
+#define	SIOCGETPFLOW	_IOWR('i', 254, struct ifreq)
 
 #endif /* !_SYS_SOCKIO_H_ */

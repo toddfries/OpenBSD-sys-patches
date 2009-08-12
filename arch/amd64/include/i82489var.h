@@ -1,3 +1,4 @@
+/*	$OpenBSD: i82489var.h,v 1.10 2009/06/09 02:56:38 krw Exp $	*/
 /*	$NetBSD: i82489var.h,v 1.1 2003/02/26 21:26:10 fvdl Exp $	*/
 
 /*-

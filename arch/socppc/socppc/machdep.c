@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.6 2008/10/12 11:50:19 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.15 2009/08/02 16:28:39 beck Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -396,11 +396,6 @@ initppc(u_int startkernel, u_int endkernel, char *args)
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
-
-	printf("%02x:%02x:%02x:%02x:%02x:%02x\n", bootinfo.bi_enetaddr[0],
-	    bootinfo.bi_enetaddr[1], bootinfo.bi_enetaddr[2],
-	    bootinfo.bi_enetaddr[3],  bootinfo.bi_enetaddr[4],
-	    bootinfo.bi_enetaddr[5]);
 }
 
 void
@@ -434,20 +429,20 @@ lcsplx(int ipl)
 /* BUS functions */
 int
 bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
-    int cacheable, bus_space_handle_t *bshp)
+    int flags, bus_space_handle_t *bshp)
 {
 	int error;
 
 	if  (POWERPC_BUS_TAG_BASE(t) == 0) {
 		/* if bus has base of 0 fail. */
-		return 1;
+		return EINVAL;
 	}
 	bpa |= POWERPC_BUS_TAG_BASE(t);
 	if ((error = extent_alloc_region(devio_ex, bpa, size, EX_NOWAIT |
 	    (ppc_malloc_ok ? EX_MALLOCOK : 0))))
 		return error;
 
-	if ((error = bus_mem_add_mapping(bpa, size, cacheable, bshp))) {
+	if ((error = bus_mem_add_mapping(bpa, size, flags, bshp))) {
 		if (extent_free(devio_ex, bpa, size, EX_NOWAIT |
 			(ppc_malloc_ok ? EX_MALLOCOK : 0)))
 		{
@@ -503,7 +498,7 @@ bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 vaddr_t ppc_kvm_stolen = VM_KERN_ADDRESS_SIZE;
 
 int
-bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
+bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
 	bus_addr_t vaddr;
@@ -536,8 +531,7 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 		vaddr = uvm_km_kmemalloc(phys_map, NULL, len,
 		    UVM_KMF_NOWAIT|UVM_KMF_VALLOC);
 		if (vaddr == 0)
-			panic("bus_mem_add_mapping: kvm alloc of 0x%x failed",
-			    len);
+			return (ENOMEM);
 	}
 	*bshp = vaddr + off;
 #ifdef DEBUG_BUS_MEM_ADD_MAPPING
@@ -545,9 +539,9 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 		bpa, size, *bshp, spa);
 #endif
 	for (; len > 0; len -= PAGE_SIZE) {
-		pmap_kenter_cache(vaddr, spa,
-			VM_PROT_READ | VM_PROT_WRITE,
-			cacheable ? PMAP_CACHE_WT : PMAP_CACHE_CI);
+		pmap_kenter_cache(vaddr, spa, VM_PROT_READ | VM_PROT_WRITE,
+		    (flags & BUS_SPACE_MAP_CACHEABLE) ?
+		      PMAP_CACHE_WT : PMAP_CACHE_CI);
 		spa += PAGE_SIZE;
 		vaddr += PAGE_SIZE;
 	}
@@ -556,7 +550,7 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 
 int
 bus_space_alloc(bus_space_tag_t tag, bus_addr_t rstart, bus_addr_t rend,
-    bus_size_t size, bus_size_t alignment, bus_size_t boundary, int cacheable,
+    bus_size_t size, bus_size_t alignment, bus_size_t boundary, int flags,
     bus_addr_t *addrp, bus_space_handle_t *handlep)
 {
 
@@ -777,12 +771,6 @@ cpu_startup()
 	 */
 	if (bufpages == 0)
 		bufpages = physmem * bufcachepercent / 100;
-
-	/* Restrict to at most 25% filled kvm */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -1094,9 +1082,67 @@ boot(int howto)
 	while(1) /* forever */;
 }
 
+extern void ipic_do_pending_int(void);
+
 void
 do_pending_int(void)
 {
+	struct cpu_info *ci = curcpu();
+	int pcpl, s;
+
+	if (ci->ci_iactive)
+		return;
+
+	ci->ci_iactive = 1;
+	s = ppc_intr_disable();
+	pcpl = ci->ci_cpl;
+
+	ipic_do_pending_int();
+
+	do {
+		if((ci->ci_ipending & SINT_CLOCK) & ~pcpl) {
+			ci->ci_ipending &= ~SINT_CLOCK;
+			ci->ci_cpl = SINT_CLOCK|SINT_NET|SINT_TTY;
+			ppc_intr_enable(1);
+			KERNEL_LOCK();
+			softclock();
+			KERNEL_UNLOCK();
+			ppc_intr_disable();
+			continue;
+		}
+		if((ci->ci_ipending & SINT_NET) & ~pcpl) {
+			extern int netisr;
+			int pisr;
+		       
+			ci->ci_ipending &= ~SINT_NET;
+			ci->ci_cpl = SINT_NET|SINT_TTY;
+			while ((pisr = netisr) != 0) {
+				atomic_clearbits_int(&netisr, pisr);
+				ppc_intr_enable(1);
+				KERNEL_LOCK();
+				softnet(pisr);
+				KERNEL_UNLOCK();
+				ppc_intr_disable();
+			}
+			continue;
+		}
+#if 0
+		if((ci->ci_ipending & SINT_TTY) & ~pcpl) {
+			ci->ci_ipending &= ~SINT_TTY;
+			ci->ci_cpl = SINT_TTY;
+			ppc_intr_enable(1);
+			KERNEL_LOCK();
+			softtty();
+			KERNEL_UNLOCK();
+			ppc_intr_disable();
+			continue;
+		}
+#endif
+	} while ((ci->ci_ipending & SINT_MASK) & ~pcpl);
+	ci->ci_cpl = pcpl;	/* Don't use splx... we are here already! */
+
+	ci->ci_iactive = 0;
+	ppc_intr_enable(s);
 }
 
 /*

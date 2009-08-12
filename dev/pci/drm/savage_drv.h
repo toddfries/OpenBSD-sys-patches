@@ -54,12 +54,12 @@ typedef struct drm_savage_age {
 	unsigned int wrap;
 } drm_savage_age_t;
 
-typedef struct drm_savage_buf_priv {
-	struct drm_savage_buf_priv *next;
-	struct drm_savage_buf_priv *prev;
-	drm_savage_age_t age;
-	struct drm_buf *buf;
-} drm_savage_buf_priv_t;
+struct savagedrm_buf_priv {
+	TAILQ_ENTRY(savagedrm_buf_priv)	 link;
+	drm_savage_age_t		 age;
+	struct drm_buf			*buf;
+	int				 free;
+};
 
 typedef struct drm_savage_dma_page {
 	drm_savage_age_t age;
@@ -122,9 +122,17 @@ enum savage_family {
 #define SAVAGE_IS_AGP 1
 
 typedef struct drm_savage_private {
-	drm_savage_sarea_t *sarea_priv;
+	struct device		 dev;
+	struct device		*drmdev;
+	drm_savage_sarea_t	*sarea_priv;
 
-	drm_savage_buf_priv_t head, tail;
+	bus_space_tag_t		 bst;
+	bus_space_handle_t	 bsh;
+	bus_addr_t		 fb_base;
+	bus_size_t		 fb_size;
+	bus_addr_t		 aperture_base;
+
+	TAILQ_HEAD(savage_freelist, savagedrm_buf_priv)	freelist;
 
 	/* who am I? */
 	enum savage_family chipset;
@@ -148,14 +156,13 @@ typedef struct drm_savage_private {
 	unsigned int texture_size;
 
 	/* memory regions in physical memory */
-	drm_local_map_t *sarea;
-	drm_local_map_t *mmio;
-	drm_local_map_t *fb;
-	drm_local_map_t *aperture;
-	drm_local_map_t *status;
-	drm_local_map_t *agp_textures;
-	drm_local_map_t *cmd_dma;
-	drm_local_map_t fake_dma;
+	struct drm_local_map *sarea;
+	struct drm_local_map *fb;
+	struct drm_local_map *aperture;
+	struct drm_local_map *status;
+	struct drm_local_map *agp_textures;
+	struct drm_local_map *cmd_dma;
+	struct drm_local_map fake_dma;
 
 	struct {
 		int handle;
@@ -195,7 +202,8 @@ typedef struct drm_savage_private {
 
 /* ioctls */
 extern int savage_bci_cmdbuf(struct drm_device *dev, void *data, struct drm_file *file_priv);
-extern int savage_bci_buffers(struct drm_device *dev, void *data, struct drm_file *file_priv);
+extern int savage_bci_buffers(struct drm_device *, struct drm_dma *,
+    struct drm_file *);
 extern int savage_bci_init(struct drm_device *, void *, struct drm_file *);
 extern int savage_bci_event_emit(struct drm_device *, void *, struct drm_file *);
 extern int savage_bci_event_wait(struct drm_device *, void *, struct drm_file *);
@@ -208,10 +216,8 @@ extern void savage_dma_reset(drm_savage_private_t *dev_priv);
 extern void savage_dma_wait(drm_savage_private_t *dev_priv, unsigned int page);
 extern uint32_t *savage_dma_alloc(drm_savage_private_t *dev_priv,
 				  unsigned int n);
-extern int savage_driver_load(struct drm_device *dev, unsigned long chipset);
 extern int savage_driver_firstopen(struct drm_device *dev);
 extern void savage_driver_lastclose(struct drm_device *dev);
-extern int savage_driver_unload(struct drm_device *dev);
 extern void savage_reclaim_buffers(struct drm_device *dev,
 				   struct drm_file *file_priv);
 
@@ -485,8 +491,10 @@ extern void savage_emit_clip_rect_s4(drm_savage_private_t *dev_priv,
 /*
  * access to MMIO
  */
-#define SAVAGE_READ(reg)	DRM_READ32(  dev_priv->mmio, (reg) )
-#define SAVAGE_WRITE(reg)	DRM_WRITE32( dev_priv->mmio, (reg) )
+#define SAVAGE_READ(reg)	bus_space_read_4(dev_priv->bst,		\
+				    dev_priv->bsh, (reg))
+#define SAVAGE_WRITE(reg, val)	bus_space_write_4(dev_priv->bst,	\
+				    dev_priv->bsh, (reg), (val))
 
 /*
  * access to the burst command interface (BCI)

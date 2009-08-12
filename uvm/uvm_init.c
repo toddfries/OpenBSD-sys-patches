@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_init.c,v 1.18 2008/10/18 12:11:30 kettenis Exp $	*/
+/*	$OpenBSD: uvm_init.c,v 1.24 2009/06/16 23:54:58 oga Exp $	*/
 /*	$NetBSD: uvm_init.c,v 1.14 2000/06/27 17:29:23 mrg Exp $	*/
 
 /*
@@ -68,7 +68,7 @@ struct uvmexp uvmexp;	/* decl */
  */
 
 void
-uvm_init()
+uvm_init(void)
 {
 	vaddr_t kvm_start, kvm_end;
 
@@ -81,10 +81,8 @@ uvm_init()
 	}
 
 	/*
-	 * step 1: zero the uvm structure
+	 * step 1: set up stats.
 	 */
-
-	memset(&uvm, 0, sizeof(uvm));
 	averunnable.fscale = FSCALE;
 
 	/*
@@ -140,6 +138,11 @@ uvm_init()
 	amap_init();		/* init amap module */
 
 	/*
+	 * step 9: init uvm_km_page allocator memory.
+	 */
+	uvm_km_page_init();
+
+	/*
 	 * the VM system is now up!  now that malloc is up we can resize the
 	 * <obj,off> => <page> hash table for general use and enable paging
 	 * of kernel objects.
@@ -148,8 +151,6 @@ uvm_init()
 	uvm_page_rehash();
 	uao_create(VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS,
 	    UAO_FLAG_KERNSWAP);
-
-	uvm_km_page_init();
 
 	/*
 	 * reserve some unmapped space for malloc/pool use after free usage

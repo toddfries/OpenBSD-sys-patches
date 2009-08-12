@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.19 2008/10/22 19:53:31 kettenis Exp $	*/
+/*	$OpenBSD: intr.c,v 1.22 2008/12/06 19:59:38 tedu Exp $	*/
 /*	$NetBSD: intr.c,v 1.3 2003/03/03 22:16:20 fvdl Exp $	*/
 
 /*

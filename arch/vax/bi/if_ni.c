@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ni.c,v 1.12 2008/10/08 23:53:08 brad Exp $ */
+/*	$OpenBSD: if_ni.c,v 1.14 2009/03/29 21:53:52 sthen Exp $ */
 /*	$NetBSD: if_ni.c,v 1.15 2002/05/22 16:03:14 wiz Exp $ */
 /*
  * Copyright (c) 2000 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -191,11 +191,11 @@ ni_getpgs(struct ni_softc *sc, int size, caddr_t *v, paddr_t *p)
 
 	if ((error = bus_dmamem_alloc(sc->sc_dmat, size, NBPG, 0, &seg, 1,
 	    &nsegs, BUS_DMA_NOWAIT)) != 0)
-		panic(" unable to allocate memory: error %d", error);
+		panic(" can't allocate memory: error %d", error);
 
 	if ((error = bus_dmamem_map(sc->sc_dmat, &seg, nsegs, size, v,
 	    BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) != 0)
-		panic(" unable to map memory: error %d", error);
+		panic(" can't map mem space: error %d", error);
 
 	if (p)
 		*p = seg.ds_addr;
@@ -695,7 +695,6 @@ niioctl(ifp, cmd, data)
 	caddr_t data;
 {
 	struct ni_softc *sc = ifp->if_softc;
-	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
 	int s, error = 0;
 
@@ -739,28 +738,14 @@ niioctl(ifp, cmd, data)
 		}
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		/*
-		 * Update our multicast list.
-		 */
-		error = (cmd == SIOCADDMULTI) ?
-			ether_addmulti(ifr, &sc->sc_ec):
-			ether_delmulti(ifr, &sc->sc_ec);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				ni_setup(sc);
-			error = 0;
-		}
-		break;
-
 	default:
 		error = ether_ioctl(ifp, &sc->sc_ec, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			ni_setup(sc);
+		error = 0;
 	}
 
 	splx(s);

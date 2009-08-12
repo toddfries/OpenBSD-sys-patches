@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_acx_cardbus.c,v 1.11 2006/11/10 20:20:04 damien Exp $  */
+/*	$OpenBSD: if_acx_cardbus.c,v 1.15 2009/07/30 21:33:23 miod Exp $  */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -77,6 +77,8 @@ struct acx_cardbus_softc {
 	bus_space_tag_t		sc_io_bt;
 	bus_space_handle_t	sc_io_bh;
 	bus_size_t		sc_iomapsize;
+
+	int			sc_acx_attached;
 };
 
 int	acx_cardbus_match(struct device *, void *, void *);
@@ -133,7 +135,7 @@ acx_cardbus_attach(struct device *parent, struct device *self, void *aux)
 		    CARDBUS_MAPREG_TYPE_IO, 0, &csc->sc_io_bt, &csc->sc_io_bh,
 		    &base, &csc->sc_iomapsize);
 		if (error != 0) {
-			printf(": could not map i/o space\n");
+			printf(": can't map i/o space\n");
 			return;
 		}
 		csc->sc_iobar_val = base | CARDBUS_MAPREG_TYPE_IO;
@@ -145,7 +147,7 @@ acx_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	error = Cardbus_mapreg_map(ct, b1, CARDBUS_MAPREG_TYPE_MEM, 0,
 	    &sc->sc_mem1_bt, &sc->sc_mem1_bh, &base, &csc->sc_mapsize1);
 	if (error != 0) {
-		printf(": could not map memory1 space\n");
+		printf(": can't map mem1 space\n");
 		return;
 	}
 
@@ -155,7 +157,7 @@ acx_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	error = Cardbus_mapreg_map(ct, b2, CARDBUS_MAPREG_TYPE_MEM, 0,
 	    &sc->sc_mem2_bt, &sc->sc_mem2_bh, &base, &csc->sc_mapsize2);
 	if (error != 0) {
-		printf(": could not map memory2 space\n");
+		printf(": can't map mem2 space\n");
 		return;
 	}
 
@@ -171,7 +173,8 @@ acx_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	else
 		acx100_set_param(sc);
 
-	acx_attach(sc);
+	error = acx_attach(sc);
+	csc->sc_acx_attached = error == 0;
 
 	Cardbus_function_disable(ct);
 }
@@ -186,9 +189,11 @@ acx_cardbus_detach(struct device *self, int flags)
 	cardbus_function_tag_t cf = ct->ct_cf;
 	int error, b1 = CARDBUS_BASE0_REG, b2 = CARDBUS_BASE1_REG;
 
-	error = acx_detach(sc);
-	if (error != 0)
-		return (error);
+	if (csc->sc_acx_attached) {
+		error = acx_detach(sc);
+		if (error != 0)
+			return (error);
+	}
 
 	/* unhook the interrupt handler */
 	if (csc->sc_ih != NULL) {
@@ -215,13 +220,18 @@ acx_cardbus_detach(struct device *self, int flags)
 int
 acx_cardbus_enable(struct acx_softc *sc)
 {
-	struct acx_cardbus_softc *csc = (struct acx_cardbus_softc *)sc;
+	struct acx_cardbus_softc *csc;
+	int error;
+
+	csc = (struct acx_cardbus_softc *)sc;
 	cardbus_devfunc_t ct = csc->sc_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
 	cardbus_function_tag_t cf = ct->ct_cf;
 
 	/* power on the socket */
-	Cardbus_function_enable(ct);
+	error = Cardbus_function_enable(ct);
+	if (error)
+		return error;
 
 	/* setup the PCI configuration registers */
 	acx_cardbus_setup(csc);
@@ -277,7 +287,7 @@ acx_cardbus_setup(struct acx_cardbus_softc *csc)
 
 	if (csc->sc_iobar_val) {
 		cardbus_conf_write(cc, cf, csc->sc_tag, CARDBUS_BASE0_REG,
-		    csc->sc_bar1_val);
+		    csc->sc_iobar_val);
 		b1 = CARDBUS_BASE1_REG;
 		b2 = CARDBUS_BASE2_REG;
 		/* (*cf->cardbus_ctrl)(cc, CARDBUS_IO_ENABLE); */

@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_ixgb.c,v 1.51 2008/11/09 15:08:26 naddy Exp $ */
+/* $OpenBSD: if_ixgb.c,v 1.53 2009/06/24 13:36:56 deraadt Exp $ */
 
 #include <dev/pci/if_ixgb.h>
 
@@ -201,11 +201,8 @@ ixgb_attach(struct device *parent, struct device *self, void *aux)
 	/* Set the max frame size assuming standard ethernet sized frames */
 	sc->hw.max_frame_size = IXGB_MAX_JUMBO_FRAME_SIZE;
 
-	if (ixgb_allocate_pci_resources(sc)) {
-		printf("%s: Allocation of PCI resources failed\n",
-		       sc->sc_dv.dv_xname);
+	if (ixgb_allocate_pci_resources(sc))
 		goto err_pci;
-	}
 
 	tsize = IXGB_ROUNDUP(sc->num_tx_desc * sizeof(struct ixgb_tx_desc),
 	    IXGB_MAX_TXD * sizeof(struct ixgb_tx_desc));
@@ -364,10 +361,10 @@ ixgb_start(struct ifnet *ifp)
 int
 ixgb_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
-        int		s, error = 0;
-	struct ifreq   *ifr = (struct ifreq *) data;
-	struct ifaddr  *ifa = (struct ifaddr *)data;
 	struct ixgb_softc *sc = ifp->if_softc;
+	struct ifaddr	*ifa = (struct ifaddr *) data;
+	struct ifreq	*ifr = (struct ifreq *) data;
+	int		s, error = 0;
 
 	s = splnet();
 
@@ -383,13 +380,7 @@ ixgb_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			arp_ifinit(&sc->interface_data, ifa);
 #endif /* INET */
 		break;
-	case SIOCSIFMTU:
-		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFMTU (Set Interface MTU)");
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
+
 	case SIOCSIFFLAGS:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFFLAGS (Set Interface Flags)");
 		if (ifp->if_flags & IFF_UP) {
@@ -412,29 +403,24 @@ ixgb_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		sc->if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		IOCTL_DEBUGOUT("ioctl rcv'd: SIOC(ADD|DEL)MULTI");
-		error = (command == SIOCADDMULTI)
-			? ether_addmulti(ifr, &sc->interface_data)
-			: ether_delmulti(ifr, &sc->interface_data);
 
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING) {
-				ixgb_disable_intr(sc);
-				ixgb_set_multi(sc);
-				ixgb_enable_intr(sc);
-			}
-			error = 0;
-		}
-		break;
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCxIFMEDIA (Get/Set Interface Media)");
 		error = ifmedia_ioctl(ifp, ifr, &sc->media, command);
 		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->interface_data, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING) {
+			ixgb_disable_intr(sc);
+			ixgb_set_multi(sc);
+			ixgb_enable_intr(sc);
+		}
+		error = 0;
 	}
 
 	splx(s);

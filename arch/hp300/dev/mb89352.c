@@ -1,4 +1,4 @@
-/*	$OpenBSD: mb89352.c,v 1.15 2006/11/28 23:59:45 dlg Exp $	*/
+/*	$OpenBSD: mb89352.c,v 1.18 2009/07/23 21:10:37 blambert Exp $	*/
 /*	$NetBSD: mb89352.c,v 1.5 2000/03/23 07:01:31 thorpej Exp $	*/
 /*	NecBSD: mb89352.c,v 1.4 1998/03/14 07:31:20 kmatsuda Exp	*/
 
@@ -173,7 +173,7 @@ struct scsi_device spc_dev = {
 
 struct scsi_adapter spc_switch = {
 	spc_scsi_cmd,
-	minphys,
+	scsi_minphys,
 	NULL,
 	NULL
 };
@@ -412,7 +412,7 @@ spc_scsi_cmd(struct scsi_xfer *xs)
 
 	flags = xs->flags;
 	if ((acb = spc_get_acb(sc, flags)) == NULL) {
-		return TRY_AGAIN_LATER;
+		return (NO_CCB);
 	}
 
 	/* Initialize acb */
@@ -1622,8 +1622,8 @@ start:
 			if ((acb->xs->flags & SCSI_POLL) == 0) {
 				timeout_set(&acb->xs->stimeout, spc_timeout,
 				    acb);
-				timeout_add(&acb->xs->stimeout,
-				    (acb->timeout * hz) / 1000);
+				timeout_add_msec(&acb->xs->stimeout,
+				    acb->timeout);
 			}
 			sc->sc_state = SPC_CONNECTED;
 		} else if ((ints & INTS_TIMEOUT) != 0) {

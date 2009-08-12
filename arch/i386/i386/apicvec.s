@@ -1,4 +1,4 @@
-/* $OpenBSD: apicvec.s,v 1.16 2008/06/26 05:42:10 ray Exp $ */
+/* $OpenBSD: apicvec.s,v 1.19 2009/07/10 13:51:47 jsg Exp $ */
 /* $NetBSD: apicvec.s,v 1.1.2.2 2000/02/21 21:54:01 sommerfeld Exp $ */
 
 /*-
@@ -36,9 +36,9 @@
 #include <machine/i82489reg.h>
 
 #ifdef __ELF__
-#define XINTR(vec) Xintr/**/vec
+#define XINTR(vec) Xintr##vec
 #else
-#define XINTR(vec) _Xintr/**/vec
+#define XINTR(vec) _Xintr##vec
 #endif
 
 	.globl  _C_LABEL(apic_stray)
@@ -123,6 +123,33 @@ XINTR(ipi_invlrange):
 
 	popl	%ds
 	popl	%edx
+	popl	%eax
+	iret
+
+	.globl	XINTR(ipi_reloadcr3)
+	.p2align 4,0x90
+XINTR(ipi_reloadcr3):
+	pushl	%eax
+	pushl	%ds
+	movl	$GSEL(GDATA_SEL, SEL_KPL), %eax
+	movl	%eax, %ds
+	pushl	%fs
+	movl	$GSEL(GCPU_SEL, SEL_KPL),%eax
+	movw	%ax,%fs
+
+	ioapic_asm_ack()
+
+	movl	CPUVAR(CURPCB), %eax
+	movl	PCB_PMAP(%eax), %eax
+	movl	%eax, CPUVAR(CURPMAP)
+	movl	PM_PDIRPA(%eax), %eax
+	movl	%eax, %cr3
+
+	lock
+	decl	tlb_shoot_wait
+
+	popl	%fs
+	popl	%ds
 	popl	%eax
 	iret
 
@@ -244,7 +271,7 @@ XINTR(softtty):
 	 */
 
 #define APICINTR(name, num, early_ack, late_ack, mask, unmask, level_mask) \
-_C_LABEL(Xintr_/**/name/**/num):					\
+_C_LABEL(Xintr_##name##num):						\
 	pushl	$0							;\
 	pushl	$T_ASTFLT						;\
 	INTRENTRY							;\
@@ -261,7 +288,7 @@ _C_LABEL(Xintr_/**/name/**/num):					\
 	incl	_C_LABEL(apic_intrcount)(,%eax,4)			;\
 	movl	_C_LABEL(apic_intrhand)(,%eax,4),%ebx /* chain head */	;\
 	testl	%ebx,%ebx						;\
-	jz      _C_LABEL(Xstray_/**/name/**/num)			;\
+	jz      _C_LABEL(Xstray_##name##num)				;\
 	APIC_STRAY_INIT			/* nobody claimed it yet */	;\
 7:									 \
 	LOCK_KERNEL(IF_PPL(%esp))					;\
@@ -288,7 +315,7 @@ _C_LABEL(Xintr_/**/name/**/num):					\
 	unmask(num)			/* unmask it in hardware */	;\
 	late_ack(num)							;\
 	jmp	_C_LABEL(Xdoreti)					;\
-_C_LABEL(Xstray_/**/name/**/num):					 \
+_C_LABEL(Xstray_##name##num):					 \
 	pushl	$num							;\
 	call	_C_LABEL(apic_stray)					;\
 	addl	$4,%esp							;\
@@ -301,7 +328,7 @@ _C_LABEL(Xstray_/**/name/**/num):					 \
 	orl	%eax,%esi
 #define APIC_STRAY_TEST(name,num) \
 	testl 	%esi,%esi						;\
-	jz 	_C_LABEL(Xstray_/**/name/**/num)
+	jz 	_C_LABEL(Xstray_##name##num)
 #else /* !DEBUG */
 #define APIC_STRAY_INIT
 #define APIC_STRAY_INTEGRATE

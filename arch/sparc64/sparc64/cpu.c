@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.50 2008/10/15 23:23:50 deraadt Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.52 2009/04/13 08:31:36 kettenis Exp $	*/
 /*	$NetBSD: cpu.c,v 1.13 2001/05/26 21:27:15 chs Exp $ */
 
 /*
@@ -708,11 +708,11 @@ cpu_boot_secondary_processors(void)
 		else
 			cpuid = getpropint(ci->ci_node, "cpuid", -1);
 
-		if (cpuid == -1) {
-			prom_start_cpu(ci->ci_node,
+		if (OF_test("SUNW,start-cpu-by-cpuid") == 0) {
+			prom_start_cpu_by_cpuid(cpuid,
 			    (void *)cpu_mp_startup, ci->ci_paddr);
 		} else {
-			prom_start_cpu_by_cpuid(cpuid,
+			prom_start_cpu(ci->ci_node,
 			    (void *)cpu_mp_startup, ci->ci_paddr);
 		}
 
@@ -751,8 +751,13 @@ void
 need_resched(struct cpu_info *ci)
 {
 	ci->ci_want_resched = 1;
-	if (ci->ci_curproc != NULL)
+
+	/* There's a risk we'll be called before the idle threads start */
+	if (ci->ci_curproc) {
 		aston(ci->ci_curproc);
+		if (ci != curcpu())
+			cpu_unidle(ci);
+	}
 }
 
 /*

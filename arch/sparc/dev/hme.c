@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.57 2008/10/14 18:01:53 naddy Exp $	*/
+/*	$OpenBSD: hme.c,v 1.61 2009/07/16 07:18:47 sthen Exp $	*/
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)
@@ -91,6 +91,8 @@ void	hmestart(struct ifnet *);
 void	hmestop(struct hme_softc *);
 void	hmeinit(struct hme_softc *);
 void	hme_meminit(struct hme_softc *);
+
+void	hme_tick(void *);
 
 void	hme_tcvr_bb_writeb(struct hme_softc *, int);
 int	hme_tcvr_bb_readb(struct hme_softc *, int);
@@ -248,7 +250,6 @@ hmeattach(parent, self, aux)
 	ifp->if_watchdog = hmewatchdog;
 	ifp->if_flags =
 		IFF_BROADCAST | IFF_SIMPLEX | IFF_NOTRAILERS | IFF_MULTICAST;
-	sc->sc_if_flags = ifp->if_flags;
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 	IFQ_SET_MAXLEN(&ifp->if_snd, HME_TX_RING_SIZE);
 	IFQ_SET_READY(&ifp->if_snd);
@@ -263,6 +264,8 @@ hmeattach(parent, self, aux)
 	     (strcmp(bp->name, "qfe") == 0) ||
 	     (strcmp(bp->name, "SUNW,hme") == 0)))
 		bp->dev = &sc->sc_dev;
+
+	timeout_set(&sc->sc_tick, hme_tick, sc);
 }
 
 /*
@@ -331,14 +334,24 @@ void
 hmestop(sc)
 	struct hme_softc *sc;
 {
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	int tries = 0;
+
+	timeout_del(&sc->sc_tick);
+
+	/*
+	 * Mark the interface down and cancel the watchdog timer.
+	 */
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+	ifp->if_timer = 0;
+
+	mii_down(&sc->sc_mii);
 
 	sc->sc_gr->reset = GR_RESET_ALL;
 	while (sc->sc_gr->reset && (++tries != MAX_STOP_TRIES))
 		DELAY(20);
 	if (tries == MAX_STOP_TRIES)
 		printf("%s: stop failed\n", sc->sc_dev.dv_xname);
-	sc->sc_mii.mii_media_status &= ~IFM_ACTIVE;
 }
 
 /*
@@ -354,6 +367,19 @@ hmereset(sc)
 	hmestop(sc);
 	hmeinit(sc);
 	splx(s);
+}
+
+void
+hme_tick(void *arg)
+{
+	struct hme_softc *sc = arg;
+	int s;
+
+	s = splnet();
+	mii_tick(&sc->sc_mii);
+	splx(s);
+
+	timeout_add_sec(&sc->sc_tick, 1);
 }
 
 /*
@@ -387,84 +413,42 @@ hmeioctl(ifp, cmd, data)
 
 	switch (cmd) {
 	case SIOCSIFADDR:
-		switch (ifa->ifa_addr->sa_family) {
-#ifdef INET
-		case AF_INET:
-			if (ifp->if_flags & IFF_UP)
-				hme_mcreset(sc);
-			else {
-				ifp->if_flags |= IFF_UP;
-				hmeinit(sc);
-			}
-			arp_ifinit(&sc->sc_arpcom, ifa);
-			break;
-#endif /* INET */
-		default:
-			ifp->if_flags |= IFF_UP;
+		ifp->if_flags |= IFF_UP;
+		if (!(ifp->if_flags & IFF_RUNNING))
 			hmeinit(sc);
-			break;
-		}
+#ifdef INET
+		if (ifa->ifa_addr->sa_family == AF_INET)
+			arp_ifinit(&sc->sc_arpcom, ifa);
+#endif
 		break;
 
 	case SIOCSIFFLAGS:
-		if ((ifp->if_flags & IFF_UP) == 0 &&
-		    (ifp->if_flags & IFF_RUNNING) != 0) {
-			/*
-			 * If interface is marked down and it is running, then
-			 * stop it.
-			 */
-			hmestop(sc);
-			ifp->if_flags &= ~IFF_RUNNING;
-		} else if ((ifp->if_flags & IFF_UP) != 0 &&
-			   (ifp->if_flags & IFF_RUNNING) == 0) {
-			/*
-			 * If interface is marked up and it is stopped, then
-			 * start it.
-			 */
-			hmeinit(sc);
-		} else {
-			/*
-			 * If setting debug or promiscuous mode, do not reset
-			 * the chip; for everything else, call hmeinit()
-			 * which will trigger a reset.
-			 */
-#define RESETIGN (IFF_CANTCHANGE | IFF_DEBUG)
-			if (ifp->if_flags == sc->sc_if_flags)
-				break;
-			if ((ifp->if_flags & (~RESETIGN))
-			    == (sc->sc_if_flags & (~RESETIGN)))
-				hme_mcreset(sc);
+		if (ifp->if_flags & IFF_UP) {
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
 			else
 				hmeinit(sc);
-#undef RESETIGN
-		}
-		break;
-
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-			ether_addmulti(ifr, &sc->sc_arpcom):
-			ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
+		} else {
 			if (ifp->if_flags & IFF_RUNNING)
-				hme_mcreset(sc);
-			error = 0;
+				hmestop(sc);
 		}
 		break;
+
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr,  &sc->sc_mii.mii_media, cmd);
 		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
 
-	sc->sc_if_flags = ifp->if_flags;
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			hme_mcreset(sc);
+		error = 0;
+	}
+
 	splx(s);
 	return (error);
 }
@@ -606,10 +590,10 @@ hmeinit(sc)
 
 	mii_mediachg(&sc->sc_mii);
 
+	timeout_add_sec(&sc->sc_tick, 1);
+
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
-	sc->sc_if_flags = ifp->if_flags;
-	ifp->if_timer = 0;
 }
 
 void
@@ -1234,5 +1218,4 @@ hme_mii_statchg(self)
 		cr->tx_cfg &= ~CR_TXCFG_FULLDPLX;
 		sc->sc_arpcom.ac_if.if_flags &= ~IFF_SIMPLEX;
 	}
-	sc->sc_if_flags = sc->sc_arpcom.ac_if.if_flags;
 }

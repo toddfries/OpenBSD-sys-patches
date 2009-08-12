@@ -35,80 +35,38 @@
 #include "drm.h"
 #include "mga_drm.h"
 #include "mga_drv.h"
-#include "drm_pciids.h"
 
 int	mgadrm_probe(struct device *, void *, void *);
 void	mgadrm_attach(struct device *, struct device *, void *);
-int	mga_driver_device_is_agp(struct drm_device * );
+int	mgadrm_detach(struct device *, int);
 int	mgadrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
-/* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
-static drm_pci_id_list_t mga_pciidlist[] = {
-	mga_PCI_IDS
+#define MGA_DEFAULT_USEC_TIMEOUT	10000
+
+const static struct drm_pcidev mgadrm_pciidlist[] = {
+	{PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_MILL_II_G200_PCI,
+	    MGA_CARD_TYPE_G200},
+	{PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_MILL_II_G200_AGP,
+	    MGA_CARD_TYPE_G200},
+	{PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_MILL_II_G400_AGP,
+	    MGA_CARD_TYPE_G400},
+	{PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_MILL_II_G550_AGP,
+	    MGA_CARD_TYPE_G550},
+	{0, 0, 0}
 };
 
-/**
- * Determine if the device really is AGP or not.
- *
- * In addition to the usual tests performed by \c drm_device_is_agp, this
- * function detects PCI G450 cards that appear to the system exactly like
- * AGP G450 cards.
- *
- * \param dev   The device to be tested.
- *
- * \returns
- * If the device is a PCI G450, zero is returned.  Otherwise non-zero is
- * returned.
- *
- * \bug
- * This function needs to be filled in!  The implementation in
- * linux-core/mga_drv.c shows what needs to be done.
- */
-int
-mga_driver_device_is_agp(struct drm_device * dev)
-{
-#ifdef __FreeBSD__
-	device_t bus;
-
-	/* There are PCI versions of the G450.  These cards have the
-	 * same PCI ID as the AGP G450, but have an additional PCI-to-PCI
-	 * bridge chip.  We detect these cards, which are not currently
-	 * supported by this driver, by looking at the device ID of the
-	 * bus the "card" is on.  If vendor is 0x3388 (Hint Corp) and the
-	 * device is 0x0021 (HB6 Universal PCI-PCI bridge), we reject the
-	 * device.
-	 */
-#if __FreeBSD_version >= 700010
-	bus = device_get_parent(device_get_parent(dev->device));
-#else
-	bus = device_get_parent(dev->device);
-#endif
-	if (pci_get_device(dev->device) == 0x0525 &&
-	    pci_get_vendor(bus) == 0x3388 &&
-	    pci_get_device(bus) == 0x0021)
-		return DRM_IS_NOT_AGP;
-	else
-#endif /* XXX Fixme for non freebsd */
-		return DRM_MIGHT_BE_AGP;
-
-}
-
 static const struct drm_driver_info mga_driver = {
-	.buf_priv_size		= sizeof(drm_mga_buf_priv_t),
-	.load			= mga_driver_load,
-	.unload			= mga_driver_unload,
+	.buf_priv_size		= sizeof(struct mgadrm_buf_priv),
 	.ioctl			= mgadrm_ioctl,
 	.lastclose		= mga_driver_lastclose,
+	.vblank_pipes		= 1,
 	.enable_vblank		= mga_enable_vblank,
 	.disable_vblank		= mga_disable_vblank,
 	.get_vblank_counter	= mga_get_vblank_counter,
-	.irq_preinstall		= mga_driver_irq_preinstall,
-	.irq_postinstall	= mga_driver_irq_postinstall,
+	.irq_install		= mga_driver_irq_install,
 	.irq_uninstall		= mga_driver_irq_uninstall,
-	.irq_handler		= mga_driver_irq_handler,
 	.dma_ioctl		= mga_dma_buffers,
 	.dma_quiescent		= mga_driver_dma_quiescent,
-	.device_is_agp		= mga_driver_device_is_agp,
 
 	.name			= DRIVER_NAME,
 	.desc			= DRIVER_DESC,
@@ -124,22 +82,77 @@ static const struct drm_driver_info mga_driver = {
 int
 mgadrm_probe(struct device *parent, void *match, void *aux)
 {
-	return drm_probe((struct pci_attach_args *)aux, mga_pciidlist);
+	return drm_pciprobe((struct pci_attach_args *)aux, mgadrm_pciidlist);
 }
 
 void
 mgadrm_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pci_attach_args *pa = aux;
-	struct drm_device *dev = (struct drm_device *)self;
+	drm_mga_private_t	*dev_priv = (drm_mga_private_t *)self;
+	struct pci_attach_args	*pa = aux;
+	struct vga_pci_bar	*bar;
+	const struct drm_pcidev	*id_entry;
+	int			 is_agp;
 
-	dev->driver = &mga_driver;
-	return drm_attach(parent, self, pa, mga_pciidlist);
+	dev_priv->usec_timeout = MGA_DEFAULT_USEC_TIMEOUT;
+	dev_priv->pc = pa->pa_pc;
+
+	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
+	    PCI_PRODUCT(pa->pa_id), mgadrm_pciidlist);
+	dev_priv->chipset = id_entry->driver_private;
+
+	bar = vga_pci_bar_info((struct vga_pci_softc *)parent, 1);
+	if (bar == NULL) {
+		printf(": couldn't get BAR info\n");
+		return;
+	}
+	dev_priv->regs = vga_pci_bar_map((struct vga_pci_softc *)parent, 
+	    bar->addr, 0, 0);
+	if (dev_priv->regs == NULL) {
+		printf(": can't map mmio space\n");
+		return;
+	}
+
+	dev_priv->regs = vga_pci_bar_map((struct vga_pci_softc *)parent, 
+	    bar->addr, 0, 0);
+	if (dev_priv->regs == NULL) {
+		printf(": can't map mmio space\n");
+		return;
+	}
+
+	if (pci_intr_map(pa, &dev_priv->ih) != 0) {
+		printf(": couldn't map interrupt\n");
+		return;
+	}
+	printf(": %s\n", pci_intr_string(pa->pa_pc, dev_priv->ih));
+	mtx_init(&dev_priv->fence_lock, IPL_BIO);
+
+	/* XXX pcie */
+	is_agp = pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP,
+	    NULL, NULL);
+
+	dev_priv->drmdev = drm_attach_pci(&mga_driver, pa, is_agp, self);
+}
+
+int
+mgadrm_detach(struct device *self, int flags)
+{
+	drm_mga_private_t	*dev_priv = (drm_mga_private_t *)self;
+
+	if (dev_priv->drmdev != NULL) {
+		config_detach(dev_priv->drmdev, flags);
+		dev_priv->drmdev = NULL;
+	}
+
+	if (dev_priv->regs != NULL)
+		vga_pci_bar_unmap(dev_priv->regs);
+
+	return (0);
 }
 
 struct cfattach mgadrm_ca = {
-	sizeof(struct drm_device), mgadrm_probe, mgadrm_attach,
-	drm_detach, drm_activate
+	sizeof(drm_mga_private_t), mgadrm_probe, mgadrm_attach,
+	mgadrm_detach
 };
 
 struct cfdriver mgadrm_cd = {

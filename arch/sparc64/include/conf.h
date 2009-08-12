@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.18 2008/07/07 14:46:18 kettenis Exp $	*/
+/*	$OpenBSD: conf.h,v 1.20 2009/05/10 12:34:04 kettenis Exp $	*/
 /*	$NetBSD: conf.h,v 1.9 2001/03/26 12:33:26 lukem Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@ cdev_decl(openprom);
 
 /* open, close, ioctl */
 #define cdev_openprom_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
+	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
 	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
 	(dev_type_stop((*))) nullop, 0, (dev_type_poll((*))) enodev, \
 	(dev_type_mmap((*))) enodev }
@@ -99,6 +99,7 @@ cdev_decl(sabtty);
 
 cdev_decl(pcons);
 cdev_decl(vcons);
+cdev_decl(vcctty);
 cdev_decl(sbbc);
 
 cdev_decl(com);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: disk.h,v 1.18 2007/12/23 01:59:58 dlg Exp $	*/
+/*	$OpenBSD: disk.h,v 1.20 2009/06/17 01:30:32 thib Exp $	*/
 /*	$NetBSD: disk.h,v 1.11 1996/04/28 20:22:50 thorpej Exp $	*/
 
 /*

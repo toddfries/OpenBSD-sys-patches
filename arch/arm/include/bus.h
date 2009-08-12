@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.10 2008/06/26 05:42:09 ray Exp $	*/
+/*	$OpenBSD: bus.h,v 1.12 2009/07/26 18:48:55 miod Exp $	*/
 /*	$NetBSD: bus.h,v 1.12 2003/10/23 15:03:24 scw Exp $	*/
 
 /*-
@@ -386,7 +386,7 @@ bus_space_copy_4(bus_space_tag_t bst, bus_space_handle_t h1,
 
 #define bs_map_proto(f)							\
 int	__bs_c(f,_bs_map) (void *t, bus_addr_t addr,		\
-	    bus_size_t size, int cacheable, bus_space_handle_t *bshp);
+	    bus_size_t size, int flags, bus_space_handle_t *bshp);
 
 #define bs_unmap_proto(f)						\
 void	__bs_c(f,_bs_unmap) (void *t, bus_space_handle_t bsh,	\
@@ -400,7 +400,7 @@ int	__bs_c(f,_bs_subregion) (void *t, bus_space_handle_t bsh,	\
 #define bs_alloc_proto(f)						\
 int	__bs_c(f,_bs_alloc) (void *t, bus_addr_t rstart,		\
 	    bus_addr_t rend, bus_size_t size, bus_size_t align,		\
-	    bus_size_t boundary, int cacheable, bus_addr_t *addrp,	\
+	    bus_size_t boundary, int flags, bus_addr_t *addrp,	\
 	    bus_space_handle_t *bshp);
 
 #define bs_free_proto(f)						\
@@ -628,6 +628,7 @@ bs_c_8_proto(f);
 #define	BUS_DMA_READ		0x100	/* mapping is device -> memory only */
 #define	BUS_DMA_WRITE		0x200	/* mapping is memory -> device only */
 #define	BUS_DMA_NOCACHE		0x400	/* hint: map non-cached memory */
+#define	BUS_DMA_ZERO		0x800	/* dmamem_alloc returns zeroed mem */
 
 /*
  * Private flags stored in the DMA map.

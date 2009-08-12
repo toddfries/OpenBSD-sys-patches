@@ -1,4 +1,4 @@
-/*	$OpenBSD: piixpm.c,v 1.30 2008/09/17 06:14:09 brad Exp $	*/
+/*	$OpenBSD: piixpm.c,v 1.32 2009/06/24 13:49:48 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -92,6 +92,7 @@ const struct pci_matchid piixpm_ids[] = {
 	{ PCI_VENDOR_RCC, PCI_PRODUCT_RCC_CSB5 },
 	{ PCI_VENDOR_RCC, PCI_PRODUCT_RCC_CSB6 },
 	{ PCI_VENDOR_RCC, PCI_PRODUCT_RCC_HT_1000 },
+	{ PCI_VENDOR_RCC, PCI_PRODUCT_RCC_HT_1100 },
 	{ PCI_VENDOR_SMSC, PCI_PRODUCT_SMSC_VICTORY66_PM },
 	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB200_SMB },
 	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB300_SMB },
@@ -131,7 +132,7 @@ piixpm_attach(struct device *parent, struct device *self, void *aux)
 	if (PCI_MAPREG_IO_ADDR(base) == 0 ||
 	    bus_space_map(sc->sc_iot, PCI_MAPREG_IO_ADDR(base),
 	    PIIX_SMB_SIZE, 0, &sc->sc_ioh)) {
-		printf(": can't map I/O space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 

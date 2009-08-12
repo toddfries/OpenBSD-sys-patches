@@ -1,4 +1,4 @@
-/*	$OpenBSD: acx.c,v 1.87 2008/08/27 09:05:03 damien Exp $ */
+/*	$OpenBSD: acx.c,v 1.94 2009/07/28 11:39:52 blambert Exp $ */
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -164,7 +164,7 @@ void	 acx_rxeof(struct acx_softc *);
 
 int	 acx_dma_alloc(struct acx_softc *);
 void	 acx_dma_free(struct acx_softc *);
-int	 acx_init_tx_ring(struct acx_softc *);
+void	 acx_init_tx_ring(struct acx_softc *);
 int	 acx_init_rx_ring(struct acx_softc *);
 int	 acx_newbuf(struct acx_softc *, struct acx_rxbuf *, int);
 int	 acx_encap(struct acx_softc *, struct acx_txbuf *,
@@ -203,7 +203,6 @@ void	 acx_iter_func(void *, struct ieee80211_node *);
 void	 acx_amrr_timeout(void *);
 void	 acx_newassoc(struct ieee80211com *, struct ieee80211_node *, int);
 
-static int	acx_chanscan_rate = 5;	/* 5 channels per second */
 int		acx_beacon_intvl = 100;	/* 100 TU */
 
 /*
@@ -225,20 +224,24 @@ acx_attach(struct acx_softc *sc)
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int i, error;
 
-	ifp->if_softc = sc;
-
 	/* Initialize channel scanning timer */
 	timeout_set(&sc->sc_chanscan_timer, acx_next_scan, sc);
 
 	/* Allocate busdma stuffs */
 	error = acx_dma_alloc(sc);
-	if (error)
+	if (error) {
+		printf("%s: attach failed, could not allocate DMA!\n",
+		    sc->sc_dev.dv_xname);
 		return (error);
+	}
 
 	/* Reset Hardware */
 	error = acx_reset(sc);
-	if (error)
+	if (error) {
+		printf("%s: attach failed, could not reset device!\n",
+		    sc->sc_dev.dv_xname);
 		return (error);
+	}
 
 	/* Disable interrupts before firmware is loaded */
 	acx_disable_intr(sc);
@@ -256,19 +259,20 @@ acx_attach(struct acx_softc *sc)
 		}
 		DELAY(10000);
 	}
-	if (i == EEINFO_RETRY_MAX)
+	if (i == EEINFO_RETRY_MAX) {
+		printf("%s: attach failed, could not get radio type!\n",
+		    sc->sc_dev.dv_xname);
 		return (ENXIO);
+	}
 #undef EEINFO_RETRY_MAX
-
-	printf("%s: %s, radio %s (0x%02x)", sc->sc_dev.dv_xname,
-	    (sc->sc_flags & ACX_FLAG_ACX111) ? "ACX111" : "ACX100",
-	    acx_get_rf(sc->sc_radio_type), sc->sc_radio_type);
 
 #ifdef DUMP_EEPROM
 	for (i = 0; i < 0x40; ++i) {
 		uint8_t val;
 
 		error = acx_read_eeprom(sc, i, &val);
+		if (error)
+			return (error);
 		if (i % 10 == 0)
 			printf("\n");
 		printf("%02x ", val);
@@ -278,10 +282,11 @@ acx_attach(struct acx_softc *sc)
 
 	/* Get EEPROM version */
 	error = acx_read_eeprom(sc, ACX_EE_VERSION_OFS, &sc->sc_eeprom_ver);
-	if (error)
+	if (error) {
+		printf("%s: attach failed, could not get EEPROM version!\n",
+		    sc->sc_dev.dv_xname);
 		return (error);
-
-	printf(", EEPROM ver %u", sc->sc_eeprom_ver);
+	}
 
 	ifp->if_softc = sc;
 	ifp->if_init = acx_init;
@@ -319,9 +324,18 @@ acx_attach(struct acx_softc *sc)
 	for (i = 0; i < IEEE80211_ADDR_LEN; ++i) {
 		error = acx_read_eeprom(sc, sc->chip_ee_eaddr_ofs - i,
 		    &ic->ic_myaddr[i]);
+		if (error) {
+			printf("%s: attach failed, could not get station id\n",
+			    sc->sc_dev.dv_xname);
+			return error;
+		}
 	}
 
-	printf(", address %s\n", ether_sprintf(ic->ic_myaddr));
+	printf("%s: %s, radio %s (0x%02x), EEPROM ver %u, address %s\n",
+	    sc->sc_dev.dv_xname,
+	    (sc->sc_flags & ACX_FLAG_ACX111) ? "ACX111" : "ACX100",
+	    acx_get_rf(sc->sc_radio_type), sc->sc_radio_type,
+	    sc->sc_eeprom_ver, ether_sprintf(ic->ic_myaddr));
 
 	if_attach(ifp);
 	ieee80211_ifattach(ifp);
@@ -394,15 +408,13 @@ acx_init(struct ifnet *ifp)
 		return (EIO);
 
 	/* enable card if possible */
-	if (sc->sc_enable != NULL)
-		(*sc->sc_enable)(sc);
-
-	error = acx_init_tx_ring(sc);
-	if (error) {
-		printf("%s: can't initialize TX ring\n",
-		    sc->sc_dev.dv_xname);
-		goto back;
+	if (sc->sc_enable != NULL) {
+		error = (*sc->sc_enable)(sc);
+		if (error)
+			return (EIO);
 	}
+
+	acx_init_tx_ring(sc);
 
 	error = acx_init_rx_ring(sc);
 	if (error) {
@@ -479,11 +491,10 @@ acx_init(struct ifnet *ifp)
 		/* in monitor mode change directly into run state */
 		ieee80211_new_state(ic, IEEE80211_S_RUN, -1);
 
-back:
-	if (error)
-		acx_stop(sc);
-
 	return (0);
+back:
+	acx_stop(sc);
+	return (error);
 }
 
 void
@@ -850,10 +861,10 @@ acx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if ((ifp->if_flags & IFF_RUNNING) == 0)
-				acx_init(ifp);
+				error = acx_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
-				acx_stop(sc);
+				error = acx_stop(sc);
 		}
 		break;
 	case SIOCADDMULTI:
@@ -889,8 +900,9 @@ acx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	if (error == ENETRESET) {
 		if ((ifp->if_flags & (IFF_RUNNING | IFF_UP)) ==
 		    (IFF_RUNNING | IFF_UP))
-			acx_init(ifp);
-		error = 0;
+			error = acx_init(ifp);
+		else
+			error = 0;
 	}
 
 	splx(s);
@@ -1080,7 +1092,7 @@ acx_watchdog(struct ifnet *ifp)
 	if (sc->sc_txtimer) {
 		if (--sc->sc_txtimer == 0) {
 			printf("%s: watchdog timeout\n", ifp->if_xname);
-			acx_txeof(ifp->if_softc);
+			acx_init(ifp);
 			ifp->if_oerrors++;
 			return;
 		} else
@@ -1455,7 +1467,6 @@ int
 acx_read_eeprom(struct acx_softc *sc, uint32_t offset, uint8_t *val)
 {
 	int i;
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
 
 	CSR_WRITE_4(sc, ACXREG_EEPROM_CONF, 0);
 	CSR_WRITE_4(sc, ACXREG_EEPROM_ADDR, offset);
@@ -1469,7 +1480,7 @@ acx_read_eeprom(struct acx_softc *sc, uint32_t offset, uint8_t *val)
 	}
 	if (i == EE_READ_RETRY_MAX) {
 		printf("%s: can't read EEPROM offset %x (timeout)\n",
-		    ifp->if_xname, offset);
+		    sc->sc_dev.dv_xname, offset);
 		return (ETIMEDOUT);
 	}
 #undef EE_READ_RETRY_MAX
@@ -1732,10 +1743,13 @@ acx_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 			uint8_t chan;
 
 			chan = ieee80211_chan2ieee(ic, ic->ic_bss->ni_chan);
-			(void)acx_set_channel(sc, chan);
+			if (acx_set_channel(sc, chan) != 0) {
+				error = 1;
+				goto back;
+			}
 
-			timeout_add(&sc->sc_chanscan_timer,
-			    hz / acx_chanscan_rate);
+			/* 200ms => 5 channels per second */
+			timeout_add_msec(&sc->sc_chanscan_timer, 200);
 		}
 		break;
 	case IEEE80211_S_AUTH:
@@ -1820,7 +1834,7 @@ acx_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 
 		/* start automatic rate control timer */
 		if (ic->ic_fixed_rate == -1)
-			timeout_add(&sc->amrr_ch, hz / 2);
+			timeout_add_msec(&sc->amrr_ch, 500);
 		break;
 	default:
 		break;
@@ -1886,7 +1900,6 @@ acx_dma_alloc(struct acx_softc *sc)
 {
 	struct acx_ring_data *rd = &sc->sc_ring_data;
 	struct acx_buf_data *bd = &sc->sc_buf_data;
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int i, error, nsegs;
 
 	/* Allocate DMA stuffs for RX descriptors  */
@@ -1913,7 +1926,7 @@ acx_dma_alloc(struct acx_softc *sc)
 	    BUS_DMA_NOWAIT);
 
 	if (error != 0) {
-		printf("%s: could not map rx desc DMA memory\n",
+		printf("%s: can't map rx desc DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		return (error);
 	}
@@ -1935,7 +1948,8 @@ acx_dma_alloc(struct acx_softc *sc)
 	    ACX_TX_RING_SIZE, 0, BUS_DMA_NOWAIT, &rd->tx_ring_dmamap);
 
 	if (error) {
-		printf("%s: can't create tx ring dma tag\n", ifp->if_xname);
+		printf("%s: can't create tx ring dma tag\n",
+		    sc->sc_dev.dv_xname);
 		return (error);
 	}
 
@@ -1944,7 +1958,7 @@ acx_dma_alloc(struct acx_softc *sc)
 
 	if (error) {
 		printf("%s: can't allocate tx ring dma memory\n",
-		    ifp->if_xname);
+		    sc->sc_dev.dv_xname);
 		return (error);
 	}
 
@@ -1952,7 +1966,7 @@ acx_dma_alloc(struct acx_softc *sc)
 	    ACX_TX_RING_SIZE, (caddr_t *)&rd->tx_ring, BUS_DMA_NOWAIT);
 
 	if (error != 0) {
-		printf("%s: could not map tx desc DMA memory\n",
+		printf("%s: can't map tx desc DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		return (error);
 	}
@@ -1961,7 +1975,8 @@ acx_dma_alloc(struct acx_softc *sc)
 	    rd->tx_ring, ACX_TX_RING_SIZE, NULL, BUS_DMA_WAITOK);
 
 	if (error) {
-		printf("%s: can't get tx ring dma address\n", ifp->if_xname);
+		printf("%s: can't get tx ring dma address\n",
+		    sc->sc_dev.dv_xname);
 		bus_dmamem_free(sc->sc_dmat, &rd->tx_ring_seg, 1);
 		return (error);
 	}
@@ -1973,7 +1988,8 @@ acx_dma_alloc(struct acx_softc *sc)
 	    0, 0, &bd->mbuf_tmp_dmamap);
 
 	if (error) {
-		printf("%s: can't create tmp mbuf dma map\n", ifp->if_xname);
+		printf("%s: can't create tmp mbuf dma map\n",
+		    sc->sc_dev.dv_xname);
 		return (error);
 	}
 
@@ -1983,7 +1999,7 @@ acx_dma_alloc(struct acx_softc *sc)
 		    MCLBYTES, 0, 0, &bd->rx_buf[i].rb_mbuf_dmamap);
 		if (error) {
 			printf("%s: can't create rx mbuf dma map (%d)\n",
-			    ifp->if_xname, i);
+			    sc->sc_dev.dv_xname, i);
 			return (error);
 		}
 		bd->rx_buf[i].rb_desc = &rd->rx_ring[i];
@@ -1995,7 +2011,7 @@ acx_dma_alloc(struct acx_softc *sc)
 		    MCLBYTES, 0, 0, &bd->tx_buf[i].tb_mbuf_dmamap);
 		if (error) {
 			printf("%s: can't create tx mbuf dma map (%d)\n",
-			    ifp->if_xname, i);
+			    sc->sc_dev.dv_xname, i);
 			return (error);
 		}
 		bd->tx_buf[i].tb_desc1 = &rd->tx_ring[i * 2];
@@ -2050,7 +2066,7 @@ acx_dma_free(struct acx_softc *sc)
 		bus_dmamap_destroy(sc->sc_dmat, bd->mbuf_tmp_dmamap);
 }
 
-int
+void
 acx_init_tx_ring(struct acx_softc *sc)
 {
 	struct acx_ring_data *rd;
@@ -2079,8 +2095,6 @@ acx_init_tx_ring(struct acx_softc *sc)
 	bd->tx_free_start = 0;
 	bd->tx_used_start = 0;
 	bd->tx_used_count = 0;
-
-	return (0);
 }
 
 int
@@ -2432,8 +2446,7 @@ acx_beacon_locate(struct mbuf *m, u_int8_t type)
 		if (frm[off] == type)
 			return (off);
 	}
-	/* type not found */
-	return (m->m_len);
+	return (-1);
 }
 
 int
@@ -2453,6 +2466,10 @@ acx_set_beacon_tmplt(struct acx_softc *sc, struct ieee80211_node *ni)
 		return (1);
 
 	off = acx_beacon_locate(m, IEEE80211_ELEMID_TIM);
+	if (off < 0) {
+		m_free(m);
+		return (1);
+	}
 
 	m_copydata(m, 0, off, (caddr_t)&beacon.data);
 	len = off + sizeof(beacon.size);
@@ -2728,7 +2745,7 @@ acx_amrr_timeout(void *arg)
 	else
 		ieee80211_iterate_nodes(ic, acx_iter_func, sc);
 
-	timeout_add(&sc->amrr_ch, hz / 2);
+	timeout_add_msec(&sc->amrr_ch, 500);
 }
 
 void

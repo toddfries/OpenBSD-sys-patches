@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc.c,v 1.106 2008/10/15 19:12:19 blambert Exp $	*/
+/*	$OpenBSD: dc.c,v 1.111 2009/06/26 19:11:17 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -1651,6 +1651,18 @@ dc_attach(struct dc_softc *sc)
 		    &sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);
 		break;
 	case DC_TYPE_XIRCOM:
+		/* Some newer units have the MAC at offset 8 */
+		dc_read_eeprom(sc, (caddr_t)&sc->sc_arpcom.ac_enaddr, 8, 3, 0);
+
+		if (sc->sc_arpcom.ac_enaddr[0] == 0x00 &&
+		    sc->sc_arpcom.ac_enaddr[1] == 0x10 &&
+		    sc->sc_arpcom.ac_enaddr[2] == 0xa4)
+			break;
+		if (sc->sc_arpcom.ac_enaddr[0] == 0x00 &&
+		    sc->sc_arpcom.ac_enaddr[1] == 0x80 &&
+		    sc->sc_arpcom.ac_enaddr[2] == 0xc7)
+			break;
+		dc_read_eeprom(sc, (caddr_t)&sc->sc_arpcom.ac_enaddr, 3, 3, 0);
 		break;
 	default:
 		dc_read_eeprom(sc, (caddr_t)&sc->sc_arpcom.ac_enaddr,
@@ -2398,7 +2410,7 @@ dc_tick(void *xsc)
 	if (sc->dc_flags & DC_21143_NWAY && !sc->dc_link)
 		timeout_add(&sc->dc_tick_tmo, hz / 10);
 	else
-		timeout_add(&sc->dc_tick_tmo, hz);
+		timeout_add_sec(&sc->dc_tick_tmo, 1);
 
 	splx(s);
 }
@@ -3000,29 +3012,6 @@ dc_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		sc->dc_if_flags = ifp->if_flags;
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
-			error = EINVAL;
-		} else if (ifp->if_mtu != ifr->ifr_mtu) {
-			ifp->if_mtu = ifr->ifr_mtu;
-		}
-		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				dc_setfilt(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		mii = &sc->sc_mii;
@@ -3034,6 +3023,12 @@ dc_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		break;
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			dc_setfilt(sc);
+		error = 0;
 	}
 
 	splx(s);
@@ -3157,6 +3152,30 @@ dc_power(int why, void *arg)
 			dc_init(sc);
 	}
 	splx(s);
+}
+
+int
+dc_detach(struct dc_softc *sc)
+{
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+
+	if (LIST_FIRST(&sc->sc_mii.mii_phys) != NULL)
+		mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
+
+	if (sc->dc_srom)
+		free(sc->dc_srom, M_DEVBUF);
+
+	timeout_del(&sc->dc_tick_tmo);
+
+	ether_ifdetach(ifp);
+	if_detach(ifp);
+
+	if (sc->sc_dhook != NULL)
+		shutdownhook_disestablish(sc->sc_dhook);
+	if (sc->sc_pwrhook != NULL)
+		powerhook_disestablish(sc->sc_pwrhook);
+
+	return (0);
 }
 
 struct cfdriver dc_cd = {

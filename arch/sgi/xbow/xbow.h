@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbow.h,v 1.1 2008/04/07 22:47:40 miod Exp $	*/
+/*	$OpenBSD: xbow.h,v 1.6 2009/07/06 22:46:43 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Miodrag Vallat.
@@ -24,10 +24,12 @@
  * identified by a common widget memory area at the beginning of their
  * memory space.
  *
- * Each widget has its own memory space, upon which windows of different
- * sizes can be defined. OpenBSD only cares about the shortest window
- * (which fits in 32 bits of address space), and the longest window (which
- * provides access to the complete widget space).
+ * Each widget has its own memory space.  The lowest 16MB are always
+ * accessible as a so-called ``short window''.  Other `views' of the
+ * widget are possible, depending on the system (the whole widget
+ * address space is always visible on Octane, while Origin family
+ * systems can only map a few ``large windows'', which are a scarce
+ * resource).
  *
  * Apart from the crossbow itself being widget #0, the widgets are divided
  * in two groups: widgets #8 to #b are the ``upper'' widgets, while widgets
@@ -39,13 +41,12 @@
  * two parameters needed to map a widget.
  */
 
-extern	paddr_t (*xbow_widget_short)(int16_t, u_int);
-extern	paddr_t (*xbow_widget_long)(int16_t, u_int);
-extern	unsigned int xbow_long_shift;
+extern	paddr_t (*xbow_widget_base)(int16_t, u_int);
+extern	paddr_t	(*xbow_widget_map)(int16_t, u_int, bus_addr_t *, bus_size_t *);
 
 extern	int	(*xbow_widget_id)(int16_t, u_int, uint32_t *);
 extern	int	xbow_intr_widget;
-extern	unsigned int xbow_intr_widget_register;
+extern	paddr_t	xbow_intr_widget_register;
 
 extern	int	(*xbow_intr_widget_intr_register)(int, int, int *);
 extern	int	(*xbow_intr_widget_intr_establish)(int (*)(void *), void *,
@@ -99,27 +100,43 @@ extern	void	(*xbow_intr_widget_intr_disestablish)(int);
 #define	WIDGET_LINK_RESET		0x0034
 #define	WIDGET_LINK_AUX_STATUS		0x003c
 
+/*
+ * Valid widget values
+ */
+
+#define	WIDGET_MIN			8
+#define	WIDGET_MAX			15
+
 
 struct xbow_attach_args {
+	int16_t		xaa_nasid;
 	int		xaa_widget;
 
 	uint32_t	xaa_vendor;
 	uint32_t	xaa_product;
 	uint32_t	xaa_revision;
 
-	bus_space_tag_t xaa_short_tag;
-	bus_space_tag_t xaa_long_tag;
+	bus_space_tag_t xaa_iot;
 };
 
-void	xbow_build_bus_space(struct mips_bus_space *, int, int, int);
+void	xbow_build_bus_space(struct mips_bus_space *, int, int);
 int	xbow_intr_register(int, int, int *);
 int	xbow_intr_establish(int (*)(void *), void *, int, int, const char *);
 void	xbow_intr_disestablish(int);
 
+paddr_t	xbow_widget_map_space(struct device *, u_int,
+	    bus_addr_t *, bus_size_t *);
+
+int	xbow_space_map(bus_space_tag_t, bus_addr_t, bus_size_t, int,
+	    bus_space_handle_t *);
 uint8_t xbow_read_1(bus_space_tag_t, bus_space_handle_t, bus_size_t);
 uint16_t xbow_read_2(bus_space_tag_t, bus_space_handle_t, bus_size_t);
+void	xbow_read_raw_2(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
+	    uint8_t *, bus_size_t);
 void	xbow_write_1(bus_space_tag_t, bus_space_handle_t, bus_size_t, uint8_t);
 void	xbow_write_2(bus_space_tag_t, bus_space_handle_t, bus_size_t,
 	    uint16_t);
+void	xbow_write_raw_2(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
+	    const uint8_t *, bus_size_t);
 
 #endif	/* _XBOW_H_ */

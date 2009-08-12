@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.96 2008/11/21 17:08:42 deraadt Exp $ */
+/*	$OpenBSD: ehci.c,v 1.101 2009/07/24 08:15:38 blambert Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -193,7 +193,7 @@ void		ehci_free_sqh(ehci_softc_t *, ehci_soft_qh_t *);
 ehci_soft_qtd_t  *ehci_alloc_sqtd(ehci_softc_t *);
 void		ehci_free_sqtd(ehci_softc_t *, ehci_soft_qtd_t *);
 usbd_status	ehci_alloc_sqtd_chain(struct ehci_pipe *,
-			    ehci_softc_t *, int, int, usbd_xfer_handle,
+			    ehci_softc_t *, u_int, int, usbd_xfer_handle,
 			    ehci_soft_qtd_t **, ehci_soft_qtd_t **);
 void		ehci_free_sqtd_chain(ehci_softc_t *, ehci_soft_qtd_t *,
 			    ehci_soft_qtd_t *);
@@ -621,7 +621,6 @@ ehci_intr1(ehci_softc_t *sc)
 void
 ehci_pcd(ehci_softc_t *sc, usbd_xfer_handle xfer)
 {
-	usbd_pipe_handle pipe;
 	u_char *p;
 	int i, m;
 
@@ -629,8 +628,6 @@ ehci_pcd(ehci_softc_t *sc, usbd_xfer_handle xfer)
 		/* Just ignore the change. */
 		return;
 	}
-
-	pipe = xfer->pipe;
 
 	p = KERNADDR(&xfer->dmabuf, 0);
 	m = min(sc->sc_noport, xfer->length * 8 - 1);
@@ -876,6 +873,9 @@ ehci_idone(struct ehci_xfer *ex)
 
 				status = letoh32(itd->itd.itd_ctl[i]);
 				len = EHCI_ITD_GET_LEN(status);
+				if (EHCI_ITD_GET_STATUS(status) != 0)
+					len = 0; /*No valid data on error*/
+
 				xfer->frlengths[nframes++] = len;
 				actlen += len;
 			}
@@ -1265,7 +1265,7 @@ ehci_device_clear_toggle(usbd_pipe_handle pipe)
 
 	DPRINTF(("ehci_device_clear_toggle: epipe=%p status=0x%x\n",
 	    epipe, epipe->sqh->qh.qh_qtd.qtd_status));
-#ifdef EHCI_DEBUG
+#if defined(EHCI_DEBUG) && defined(USB_DEBUG)
 	if (ehcidebug)
 		usbd_dump_pipe(pipe);
 #endif
@@ -2445,14 +2445,14 @@ ehci_free_sqtd(ehci_softc_t *sc, ehci_soft_qtd_t *sqtd)
 }
 
 usbd_status
-ehci_alloc_sqtd_chain(struct ehci_pipe *epipe, ehci_softc_t *sc, int alen,
+ehci_alloc_sqtd_chain(struct ehci_pipe *epipe, ehci_softc_t *sc, u_int alen,
     int rd, usbd_xfer_handle xfer, ehci_soft_qtd_t **sp, ehci_soft_qtd_t **ep)
 {
 	ehci_soft_qtd_t *next, *cur;
 	ehci_physaddr_t dataphys, dataphyspage, dataphyslastpage, nextphys;
 	u_int32_t qtdstatus;
-	int len, curlen, mps;
-	int i, iscontrol, forceshort;
+	u_int len, curlen;
+	int mps, i, iscontrol, forceshort;
 	usb_dma_t *dma = &xfer->dmabuf;
 
 	DPRINTFN(alen<4*4096,("ehci_alloc_sqtd_chain: start len=%d\n", alen));
@@ -2493,8 +2493,8 @@ ehci_alloc_sqtd_chain(struct ehci_pipe *epipe, ehci_softc_t *sc, int alen,
 				 EHCI_PAGE_OFFSET(dataphys);
 #ifdef DIAGNOSTIC
 			if (curlen > len) {
-				printf("ehci_alloc_sqtd_chain: curlen=0x%x "
-				    "len=0x%x offs=0x%x\n", curlen, len,
+				printf("ehci_alloc_sqtd_chain: curlen=%u "
+				    "len=%u offs=0x%x\n", curlen, len,
 				    EHCI_PAGE_OFFSET(dataphys));
 				printf("lastpage=0x%x page=0x%x phys=0x%x\n",
 				    dataphyslastpage, dataphyspage, dataphys);
@@ -2504,14 +2504,15 @@ ehci_alloc_sqtd_chain(struct ehci_pipe *epipe, ehci_softc_t *sc, int alen,
 			/* the length must be a multiple of the max size */
 			curlen -= curlen % mps;
 			DPRINTFN(1,("ehci_alloc_sqtd_chain: multiple QTDs, "
-			    "curlen=%d\n", curlen));
+			    "curlen=%u\n", curlen));
 #ifdef DIAGNOSTIC
 			if (curlen == 0)
 				panic("ehci_alloc_std: curlen == 0");
 #endif
 		}
+
 		DPRINTFN(4,("ehci_alloc_sqtd_chain: dataphys=0x%08x "
-		    "dataphyslastpage=0x%08x len=%d curlen=%d\n",
+		    "dataphyslastpage=0x%08x len=%u curlen=%u\n",
 		    dataphys, dataphyslastpage, len, curlen));
 		len -= curlen;
 
@@ -2535,14 +2536,14 @@ ehci_alloc_sqtd_chain(struct ehci_pipe *epipe, ehci_softc_t *sc, int alen,
 			ehci_physaddr_t a = dataphys + i * EHCI_PAGE_SIZE;
 			if (i != 0) /* use offset only in first buffer */
 				a = EHCI_PAGE(a);
-			cur->qtd.qtd_buffer[i] = htole32(a);
-			cur->qtd.qtd_buffer_hi[i] = 0;
 #ifdef DIAGNOSTIC
 			if (i >= EHCI_QTD_NBUFFERS) {
 				printf("ehci_alloc_sqtd_chain: i=%d\n", i);
 				goto nomem;
 			}
 #endif
+			cur->qtd.qtd_buffer[i] = htole32(a);
+			cur->qtd.qtd_buffer_hi[i] = 0;
 		}
 		cur->nextqtd = next;
 		cur->qtd.qtd_next = cur->qtd.qtd_altnext = nextphys;
@@ -2552,7 +2553,7 @@ ehci_alloc_sqtd_chain(struct ehci_pipe *epipe, ehci_softc_t *sc, int alen,
 		cur->len = curlen;
 		DPRINTFN(10,("ehci_alloc_sqtd_chain: cbp=0x%08x end=0x%08x\n",
 		    dataphys, dataphys + curlen));
-		DPRINTFN(10,("ehci_alloc_sqtd_chain: curlen=%d\n", curlen));
+		DPRINTFN(10,("ehci_alloc_sqtd_chain: curlen=%u\n", curlen));
 		if (iscontrol) {
 			/*
 			 * adjust the toggle based on the number of packets
@@ -2860,7 +2861,6 @@ ehci_abort_xfer(usbd_xfer_handle xfer, usbd_status status)
 			if (sqtd == exfer->sqtdend)
 				break;
 		}
-		sqtd = sqtd->nextqtd;
 		/*
 		 * Only need to alter the QH if it was pointing at a qTD
 		 * that we are removing.
@@ -2983,7 +2983,7 @@ ehci_timeout(void *addr)
 	ehci_softc_t *sc = (ehci_softc_t *)epipe->pipe.device->bus;
 
 	DPRINTF(("ehci_timeout: exfer=%p\n", exfer));
-#ifdef ECHI_DEBUG
+#if defined(EHCI_DEBUG) && defined(USB_DEBUG)
 	if (ehcidebug > 1)
 		usbd_dump_pipe(exfer->xfer.pipe);
 #endif
@@ -3095,7 +3095,7 @@ ehci_device_ctrl_done(usbd_xfer_handle xfer)
 		ehci_free_sqtd_chain(sc, ex->sqtdstart, NULL);
 	}
 
-	DPRINTFN(5, ("ehci_ctrl_done: length=%d\n", xfer->actlen));
+	DPRINTFN(5, ("ehci_ctrl_done: length=%u\n", xfer->actlen));
 }
 
 /* Abort a device control request. */
@@ -3129,7 +3129,7 @@ ehci_device_request(usbd_xfer_handle xfer)
 	ehci_soft_qtd_t *setup, *stat, *next;
 	ehci_soft_qh_t *sqh;
 	int isread;
-	int len;
+	u_int len;
 	usbd_status err;
 	int s;
 
@@ -3137,7 +3137,7 @@ ehci_device_request(usbd_xfer_handle xfer)
 	len = UGETW(req->wLength);
 
 	DPRINTFN(3,("ehci_device_request: type=0x%02x, request=0x%02x, "
-	    "wValue=0x%04x, wIndex=0x%04x len=%d, addr=%d, endpt=%d\n",
+	    "wValue=0x%04x, wIndex=0x%04x len=%u, addr=%d, endpt=%d\n",
 	    req->bmRequestType, req->bRequest, UGETW(req->wValue),
 	    UGETW(req->wIndex), len, addr,
 	    epipe->pipe.endpoint->edesc->bEndpointAddress));
@@ -3235,7 +3235,7 @@ ehci_device_request(usbd_xfer_handle xfer)
 	if (xfer->timeout && !sc->sc_bus.use_polling) {
 		timeout_del(&xfer->timeout_handle);
 		timeout_set(&xfer->timeout_handle, ehci_timeout, xfer);
-		timeout_add(&xfer->timeout_handle, mstohz(xfer->timeout));
+		timeout_add_msec(&xfer->timeout_handle, xfer->timeout);
 	}
 	ehci_add_intr_list(sc, exfer);
 	xfer->status = USBD_IN_PROGRESS;
@@ -3293,10 +3293,11 @@ ehci_device_bulk_start(usbd_xfer_handle xfer)
 	ehci_soft_qtd_t *data, *dataend;
 	ehci_soft_qh_t *sqh;
 	usbd_status err;
-	int len, isread, endpt;
+	u_int len;
+	int isread, endpt;
 	int s;
 
-	DPRINTFN(2, ("ehci_device_bulk_start: xfer=%p len=%d flags=%d\n",
+	DPRINTFN(2, ("ehci_device_bulk_start: xfer=%p len=%u flags=%d\n",
 	    xfer, xfer->length, xfer->flags));
 
 	if (sc->sc_dying)
@@ -3346,7 +3347,7 @@ ehci_device_bulk_start(usbd_xfer_handle xfer)
 	if (xfer->timeout && !sc->sc_bus.use_polling) {
 		timeout_del(&xfer->timeout_handle);
 		timeout_set(&xfer->timeout_handle, ehci_timeout, xfer);
-		timeout_add(&xfer->timeout_handle, mstohz(xfer->timeout));
+		timeout_add_msec(&xfer->timeout_handle, xfer->timeout);
 	}
 	ehci_add_intr_list(sc, exfer);
 	xfer->status = USBD_IN_PROGRESS;
@@ -3468,10 +3469,11 @@ ehci_device_intr_start(usbd_xfer_handle xfer)
 	ehci_soft_qtd_t *data, *dataend;
 	ehci_soft_qh_t *sqh;
 	usbd_status err;
-	int len, isread, endpt;
+	u_int len;
+	int isread, endpt;
 	int s;
 
-	DPRINTFN(2, ("ehci_device_intr_start: xfer=%p len=%d flags=%d\n",
+	DPRINTFN(2, ("ehci_device_intr_start: xfer=%p len=%u flags=%d\n",
 	    xfer, xfer->length, xfer->flags));
 
 	if (sc->sc_dying)
@@ -3520,7 +3522,7 @@ ehci_device_intr_start(usbd_xfer_handle xfer)
 	if (xfer->timeout && !sc->sc_bus.use_polling) {
 		timeout_del(&xfer->timeout_handle);
 		timeout_set(&xfer->timeout_handle, ehci_timeout, xfer);
-		timeout_add(&xfer->timeout_handle, mstohz(xfer->timeout));
+		timeout_add_msec(&xfer->timeout_handle, xfer->timeout);
 	}
 	ehci_add_intr_list(sc, exfer);
 	xfer->status = USBD_IN_PROGRESS;
@@ -3582,7 +3584,8 @@ ehci_device_intr_done(usbd_xfer_handle xfer)
 	ehci_soft_qtd_t *data, *dataend;
 	ehci_soft_qh_t *sqh;
 	usbd_status err;
-	int len, isread, endpt, s;
+	u_int len;
+	int isread, endpt, s;
 
 	DPRINTFN(10, ("ehci_device_intr_done: xfer=%p, actlen=%d\n",
 	    xfer, xfer->actlen));
@@ -3620,8 +3623,7 @@ ehci_device_intr_done(usbd_xfer_handle xfer)
 		if (xfer->timeout && !sc->sc_bus.use_polling) {
 			timeout_del(&xfer->timeout_handle);
 			timeout_set(&xfer->timeout_handle, ehci_timeout, xfer);
-			timeout_add(&xfer->timeout_handle,
-			    mstohz(xfer->timeout));
+			timeout_add_msec(&xfer->timeout_handle, xfer->timeout);
 		}
 		splx(s);
 
@@ -3651,7 +3653,6 @@ usbd_status
 ehci_device_isoc_start(usbd_xfer_handle xfer)
 {
 	struct ehci_pipe *epipe;
-	usbd_device_handle dev;
 	ehci_softc_t *sc;
 	struct ehci_xfer *exfer;
 	ehci_soft_itd_t *itd, *prev, *start, *stop;
@@ -3667,7 +3668,6 @@ ehci_device_isoc_start(usbd_xfer_handle xfer)
 	total_length = 0;
 	exfer = (struct ehci_xfer *) xfer;
 	sc = (ehci_softc_t *)xfer->pipe->device->bus;
-	dev = xfer->pipe->device;
 	epipe = (struct ehci_pipe *)xfer->pipe;
 
 	/*
@@ -3680,7 +3680,7 @@ ehci_device_isoc_start(usbd_xfer_handle xfer)
 	if (exfer->itdstart != NULL)
 		return (USBD_IN_PROGRESS);
 
-	DPRINTFN(2, ("ehci_device_isoc_start: xfer %p len %d flags %d\n",
+	DPRINTFN(2, ("ehci_device_isoc_start: xfer %p len %u flags %d\n",
 	    xfer, xfer->length, xfer->flags));
 
 	if (sc->sc_dying)
@@ -3806,11 +3806,12 @@ ehci_device_isoc_start(usbd_xfer_handle xfer)
 			if (page_offs >= dma_buf->block->size)
 				break;
 
-			int page = DMAADDR(dma_buf, page_offs);
+			long long page = DMAADDR(dma_buf, page_offs);
 			page = EHCI_PAGE(page);
 			itd->itd.itd_bufr[j] =
-			    htole32(EHCI_ITD_SET_BPTR(page) | 
-			    EHCI_LINK_ITD);
+			    htole32(EHCI_ITD_SET_BPTR(page));
+			itd->itd.itd_bufr_hi[j] =
+			    htole32(page >> 32);
 		}
 
 		/*

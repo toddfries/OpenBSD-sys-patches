@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_txp.c,v 1.98 2008/11/09 15:08:26 naddy Exp $	*/
+/*	$OpenBSD: if_txp.c,v 1.100 2009/03/24 11:12:10 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2001
@@ -401,6 +401,11 @@ txp_download_fw(struct txp_softc *sc)
 
 	/* Tell boot firmware to get ready for image */
 	WRITE_REG(sc, TXP_H2A_1, letoh32(fileheader->addr));
+	WRITE_REG(sc, TXP_H2A_2, letoh32(fileheader->hmac[0]));
+	WRITE_REG(sc, TXP_H2A_3, letoh32(fileheader->hmac[1]));
+	WRITE_REG(sc, TXP_H2A_4, letoh32(fileheader->hmac[2]));
+	WRITE_REG(sc, TXP_H2A_5, letoh32(fileheader->hmac[3]));
+	WRITE_REG(sc, TXP_H2A_6, letoh32(fileheader->hmac[4]));
 	WRITE_REG(sc, TXP_H2A_0, TXP_BOOTCMD_RUNTIME_IMAGE);
 
 	if (txp_download_fw_wait(sc)) {
@@ -1190,8 +1195,8 @@ int
 txp_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct txp_softc *sc = ifp->if_softc;
-	struct ifreq *ifr = (struct ifreq *)data;
-	struct ifaddr *ifa = (struct ifaddr *)data;
+	struct ifaddr *ifa = (struct ifaddr *) data;
+	struct ifreq *ifr = (struct ifreq *) data;
 	int s, error = 0;
 
 	s = splnet();
@@ -1211,6 +1216,7 @@ txp_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			break;
 		}
 		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			txp_init(sc);
@@ -1219,28 +1225,20 @@ txp_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 				txp_stop(sc);
 		}
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				txp_set_filter(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_ifmedia, command);
 		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			txp_set_filter(sc);
+		error = 0;
 	}
 
 	splx(s);

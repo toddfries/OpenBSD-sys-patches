@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_carp.c,v 1.169 2008/10/28 23:07:12 mpf Exp $	*/
+/*	$OpenBSD: ip_carp.c,v 1.171 2009/06/17 20:17:19 mpf Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -424,9 +424,9 @@ carp_setroute(struct carp_softc *sc, int cmd)
 			info.rti_info[RTAX_DST] = ifa->ifa_addr;
 			info.rti_flags = RTF_HOST;
 			error = rtrequest1(RTM_DELETE, &info, RTP_CONNECTED,
-			    NULL, 0);
+			    NULL, sc->sc_if.if_rdomain);
 			rt_missmsg(RTM_DELETE, &info, info.rti_flags, NULL,
-			    error, 0);
+			    error, sc->sc_if.if_rdomain);
 
 			/* Check for our address on another interface */
 			/* XXX cries for proper API */
@@ -441,7 +441,7 @@ carp_setroute(struct carp_softc *sc, int cmd)
 			satosin(&sa)->sin_addr.s_addr = satosin(ifa->ifa_netmask
 			    )->sin_addr.s_addr & satosin(&sa)->sin_addr.s_addr;
 			rt = (struct rtentry *)rt_lookup(&sa,
-			    ifa->ifa_netmask, 0);
+			    ifa->ifa_netmask, sc->sc_if.if_rdomain);
 			nr_ourif = (rt && rt->rt_ifp == &sc->sc_if);
 
 			/* Restore the route label */
@@ -465,9 +465,11 @@ carp_setroute(struct carp_softc *sc, int cmd)
 					info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
 					info.rti_flags = RTF_UP | RTF_HOST;
 					error = rtrequest1(RTM_ADD, &info,
-					    RTP_CONNECTED, NULL, 0);
-					rt_missmsg(RTM_ADD, &info, info.rti_flags,
-					    &sc->sc_if, error, 0);
+					    RTP_CONNECTED, NULL,
+					    sc->sc_if.if_rdomain);
+					rt_missmsg(RTM_ADD, &info,
+					    info.rti_flags, &sc->sc_if,
+					    error, sc->sc_if.if_rdomain);
 				}
 				if (!hr_otherif || nr_ourif || !rt) {
 					if (nr_ourif && !(rt->rt_flags &
@@ -475,9 +477,11 @@ carp_setroute(struct carp_softc *sc, int cmd)
 						bzero(&info, sizeof(info));
 						info.rti_info[RTAX_DST] = &sa;
 						info.rti_info[RTAX_NETMASK] = ifa->ifa_netmask;
-						error = rtrequest1(RTM_DELETE, &info, RTP_CONNECTED, NULL, 0);
+						error = rtrequest1(RTM_DELETE,
+						    &info, RTP_CONNECTED, NULL,
+						    sc->sc_if.if_rdomain);
 						rt_missmsg(RTM_DELETE, &info, info.rti_flags, NULL,
-						    error, 0);
+						    error, sc->sc_if.if_rdomain);
 					}
 
 					ifa->ifa_rtrequest = arp_rtrequest;
@@ -489,11 +493,13 @@ carp_setroute(struct carp_softc *sc, int cmd)
 					info.rti_info[RTAX_NETMASK] = ifa->ifa_netmask;
 					info.rti_info[RTAX_LABEL] =
 					    (struct sockaddr *)&sa_rl;
-					error = rtrequest1(RTM_ADD, &info, RTP_CONNECTED, NULL, 0);
+					error = rtrequest1(RTM_ADD, &info,
+					    RTP_CONNECTED, NULL, 
+					    sc->sc_if.if_rdomain);
 					if (error == 0)
 						ifa->ifa_flags |= IFA_ROUTE;
 					rt_missmsg(RTM_ADD, &info, info.rti_flags,
-					    &sc->sc_if, error, 0);
+					    &sc->sc_if, error, sc->sc_if.if_rdomain);
 				}
 				break;
 			case RTM_DELETE:
@@ -747,12 +753,14 @@ carp_proto_input_c(struct mbuf *m, struct carp_header *ch, int ismulti,
 	case MASTER:
 		/*
 		 * If we receive an advertisement from a master who's going to
-		 * be more frequent than us, go into BACKUP state.
+		 * be more frequent than us, and whose demote count is not higher
+		 * than ours, go into BACKUP state. If his demote count is lower,
+		 * also go into BACKUP.
 		 */
-		if (timercmp(&sc_tv, &ch_tv, >) ||
-		    (timercmp(&sc_tv, &ch_tv, ==) &&
-		    ch->carp_demote <=
-		    (carp_group_demote_count(sc) & 0xff))) {
+		if (((timercmp(&sc_tv, &ch_tv, >) ||
+		    timercmp(&sc_tv, &ch_tv, ==)) &&
+		    (ch->carp_demote <= carp_group_demote_count(sc))) ||
+		    ch->carp_demote < carp_group_demote_count(sc)) {
 			timeout_del(&vhe->ad_tmo);
 			carp_set_state(vhe, BACKUP);
 			carp_setrun(vhe, 0);
@@ -763,9 +771,12 @@ carp_proto_input_c(struct mbuf *m, struct carp_header *ch, int ismulti,
 	case BACKUP:
 		/*
 		 * If we're pre-empting masters who advertise slower than us,
-		 * and this one claims to be slower, treat him as down.
+		 * and do not have a better demote count, treat them as down.
+		 * 
 		 */
-		if (carp_opts[CARPCTL_PREEMPT] && timercmp(&sc_tv, &ch_tv, <)) {
+		if (carp_opts[CARPCTL_PREEMPT] &&
+		    timercmp(&sc_tv, &ch_tv, <) &&
+		    ch->carp_demote >= carp_group_demote_count(sc)) {
 			carp_master_down(vhe);
 			break;
 		}
@@ -774,7 +785,7 @@ carp_proto_input_c(struct mbuf *m, struct carp_header *ch, int ismulti,
 		 * Take over masters advertising with a higher demote count,
 		 * regardless of CARPCTL_PREEMPT.
 		 */ 
-		if (ch->carp_demote > (carp_group_demote_count(sc) & 0xff)) {
+		if (ch->carp_demote > carp_group_demote_count(sc)) {
 			carp_master_down(vhe);
 			break;
 		}
@@ -1996,6 +2007,7 @@ carp_set_addr(struct carp_softc *sc, struct sockaddr_in *sin)
 		if (ia->ia_ifp != &sc->sc_if &&
 		    ia->ia_ifp->if_type != IFT_CARP &&
 		    (ia->ia_ifp->if_flags & IFF_MULTICAST) &&
+		    ia->ia_ifp->if_rdomain == sc->sc_if.if_rdomain &&
 		    (sin->sin_addr.s_addr & ia->ia_subnetmask) ==
 		    ia->ia_subnet) {
 			if (!ia_if)

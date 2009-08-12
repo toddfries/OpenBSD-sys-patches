@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.h,v 1.34 2008/11/10 13:15:51 mglocker Exp $ */
+/*	$OpenBSD: uvideo.h,v 1.45 2009/02/19 21:17:35 deraadt Exp $ */
 
 /*
  * Copyright (c) 2007 Robert Nagy <robert@openbsd.org>
@@ -285,7 +285,7 @@ struct usb_video_probe_commit {
 	uWord	wDelay;
 	uDWord	dwMaxVideoFrameSize;
 	uDWord	dwMaxPayloadTransferSize;
-	uDWord	wClockFrequency;
+	uDWord	dwClockFrequency;
 	uByte	bmFramingInfo;
 	uByte	bPreferedVersion;
 	uByte	bMinVersion;
@@ -302,6 +302,10 @@ struct usb_video_probe_commit {
 
 #define	UVIDEO_FORMAT_GUID_NV12	{			\
     0x4e, 0x56, 0x31, 0x32, 0x00, 0x00, 0x10, 0x00,	\
+    0x80, 0x00, 0x00, 0xaa, 0x00, 0x38,	0x9b, 0x71 }
+
+#define	UVIDEO_FORMAT_GUID_UYVY	{			\
+    0x55, 0x59, 0x56, 0x59, 0x00, 0x00, 0x10, 0x00,	\
     0x80, 0x00, 0x00, 0xaa, 0x00, 0x38,	0x9b, 0x71 }
 
 /*
@@ -426,20 +430,33 @@ struct uvideo_format_desc {
 } __packed;
 
 #define UVIDEO_NFRAMES_MAX	40
-struct uvideo_vs_iface {
+struct uvideo_isoc_xfer {
 	struct uvideo_softc	*sc;
 	usbd_xfer_handle	 xfer;
 	void			*buf;
-	usbd_interface_handle  	 ifaceh;
-	int			 endpoint;
-	usbd_pipe_handle	 pipeh;
 	uint16_t		 size[UVIDEO_NFRAMES_MAX];
+};
+
+struct uvideo_bulk_xfer {
+	struct uvideo_softc	*sc;
+	usbd_xfer_handle	 xfer;
+	void			*buf;
+	uint16_t		 size;
+};
+
+#define UVIDEO_IXFERS		3
+struct uvideo_vs_iface {
+	usbd_interface_handle  	 ifaceh;
+	usbd_pipe_handle	 pipeh;
+	int			 iface;
 	int			 numalts;
 	int			 curalt;
-	uint32_t		 max_packet_size;
-	int			 iface;
+	int			 endpoint;
+	uint32_t		 psize;
 	int			 bulk_endpoint;
 	int			 bulk_running;
+	struct uvideo_isoc_xfer	 ixfer[UVIDEO_IXFERS];
+	struct uvideo_bulk_xfer	 bxfer;
 };
 
 struct uvideo_frame_buffer {
@@ -538,6 +555,8 @@ struct uvideo_controls {
 struct uvideo_softc {
 	struct device				 sc_dev;
 	usbd_device_handle			 sc_udev;
+	int					 sc_nifaces;
+	usbd_interface_handle			*sc_ifaces;
 
 	struct device				*sc_videodev;
 
@@ -582,4 +601,9 @@ struct uvideo_softc {
 	int					*sc_uplayer_fsize;
 	uint8_t					*sc_uplayer_fbuffer;
 	void					 (*sc_uplayer_intr)(void *);
+
+	struct uvideo_devs			*sc_quirk;
+	usbd_status				(*sc_decode_stream_header)
+						    (struct uvideo_softc *,
+						    uint8_t *, int);
 };

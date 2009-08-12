@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.41 2008/10/15 23:23:49 deraadt Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.44 2009/03/26 17:24:33 oga Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 1996/09/30 16:34:21 ws Exp $	*/
 
 /*
@@ -95,7 +95,7 @@ curcpu(void)
 #define	curpcb			(curcpu()->ci_curpcb)
 #define	curpm			(curcpu()->ci_curpm)
 
-#define CPU_INFO_UNIT(ci)	((ci)->ci_dev->dv_unit)
+#define CPU_INFO_UNIT(ci)	((ci)->ci_dev ? (ci)->ci_dev->dv_unit : 0)
 
 #ifdef MULTIPROCESSOR
 
@@ -115,7 +115,9 @@ void	cpu_boot_secondary_processors(void);
 #define CPU_IS_PRIMARY(ci)	((ci)->ci_cpuid == 0)
 #define CPU_INFO_ITERATOR		int
 #define CPU_INFO_FOREACH(cii, ci)					\
-	for (cii = 0, ci = &cpu_info[0]; cii < PPC_MAXPROCS; cii++, ci++)
+	for (cii = 0, ci = &cpu_info[0]; cii < ncpus; cii++, ci++)
+
+void cpu_unidle(struct cpu_info *);
 
 #else
 
@@ -127,6 +129,8 @@ void	cpu_boot_secondary_processors(void);
 #define CPU_INFO_ITERATOR		int
 #define CPU_INFO_FOREACH(cii, ci)					\
 	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
+
+#define cpu_unidle(ci)
 
 #endif
 
@@ -142,8 +146,6 @@ extern struct cpu_info cpu_info[PPC_MAXPROCS];
  * This is used during profiling to integrate system time.
  */
 #define	PROC_PC(p)		(trapframe(p)->srr0)
-
-#define	cpu_wait(p)		do { /* nothing */ } while (0)
 
 void	delay(unsigned);
 #define	DELAY(n)		delay(n)

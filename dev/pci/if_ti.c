@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ti.c,v 1.93 2008/11/09 15:08:26 naddy Exp $	*/
+/*	$OpenBSD: if_ti.c,v 1.95 2009/07/28 07:20:28 claudio Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -427,7 +427,8 @@ ti_loadfw(struct ti_softc *sc)
 {
 	struct tigon_firmware *tf;
 	u_char *buf = NULL;
-	size_t buflen;
+	u_int32_t *b;
+	size_t buflen, i, cnt;
 	char *name;
 	int error;
 
@@ -447,6 +448,12 @@ ti_loadfw(struct ti_softc *sc)
 	error = loadfirmware(name, &buf, &buflen);
 	if (error)
 		return;
+	/* convert firmware to host byte order */
+	b = (u_int32_t *)buf;
+	cnt = buflen / sizeof(u_int32_t);
+	for (i = 0; i < cnt; i++) 
+		b[i] = letoh32(b[i]);
+
 	tf = (struct tigon_firmware *)buf;
 	if (tf->FwReleaseMajor != TI_FIRMWARE_MAJOR ||
 	    tf->FwReleaseMinor != TI_FIRMWARE_MINOR ||
@@ -2485,8 +2492,8 @@ int
 ti_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct ti_softc		*sc = ifp->if_softc;
-	struct ifreq		*ifr = (struct ifreq *)data;
 	struct ifaddr		*ifa = (struct ifaddr *)data;
+	struct ifreq		*ifr = (struct ifreq *)data;
 	int			s, error = 0;
 	struct ti_cmd_desc	cmd;
 
@@ -2502,12 +2509,7 @@ ti_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			arp_ifinit(&sc->arpcom, ifa);
 #endif /* INET */
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			/*
@@ -2538,24 +2540,20 @@ ti_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		sc->ti_if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				ti_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->ifmedia, command);
 		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			ti_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rnd.c,v 1.95 2008/10/15 03:30:57 djm Exp $	*/
+/*	$OpenBSD: rnd.c,v 1.100 2009/06/05 04:43:23 guenther Exp $	*/
 
 /*
  * rnd.c -- A strong random number generator
@@ -251,6 +251,7 @@
 #include <sys/timeout.h>
 #include <sys/poll.h>
 #include <sys/mutex.h>
+#include <sys/msgbuf.h>
 
 #include <crypto/md5.h>
 #include <crypto/arc4.h>
@@ -380,18 +381,6 @@ struct random_bucket {
 struct random_bucket random_state;
 struct mutex rndlock;
 
-/* Rotate bits in word 'w' by 'i' positions */
-static __inline u_int32_t roll(u_int32_t w, int i)
-{
-	/* XXX amd64 too? */
-#ifdef i386
-	__asm ("roll %%cl, %0" : "+r" (w) : "c" (i));
-#else
-	w = (w << i) | (w >> (32 - i));
-#endif
-	return w;
-}
-
 /*
  * This function adds a byte into the entropy pool.  It does not
  * update the entropy estimate.  The caller must do this if appropriate.
@@ -415,7 +404,8 @@ add_entropy_words(const u_int32_t *buf, u_int n)
 	};
 
 	for (; n--; buf++) {
-		u_int32_t w = roll(*buf, random_state.input_rotate);
+		u_int32_t w = (*buf << random_state.input_rotate) |
+		    (*buf >> (32 - random_state.input_rotate));
 		u_int i = random_state.add_ptr =
 		    (random_state.add_ptr - 1) & POOLMASK;
 		/*
@@ -594,10 +584,6 @@ enqueue_randomness(int state, int val)
 	struct timespec	tv;
 	u_int	time, nbits;
 
-	/* XXX on sparc we get here before randomattach() */
-	if (!rnd_attached)
-		return;
-
 #ifdef DIAGNOSTIC
 	if (state < 0 || state >= RND_SRC_NUM)
 		return;
@@ -605,6 +591,19 @@ enqueue_randomness(int state, int val)
 
 	p = &rnd_states[state];
 	val += state << 13;
+
+	if (!rnd_attached) {
+		if ((rep = rnd_put()) == NULL) {
+			rndstats.rnd_drops++;
+			return;
+		}
+
+		rep->re_state = &rnd_states[RND_SRC_TIMER];
+		rep->re_nbits = 0;
+		rep->re_time = 0;
+		rep->re_time = val;
+		return;
+	}
 
 	nanotime(&tv);
 	time = (tv.tv_nsec >> 10) + (tv.tv_sec << 20);
@@ -668,6 +667,10 @@ enqueue_randomness(int state, int val)
 		p->last_delta2 = delta2;
 	} else if (p->max_entropy)
 		nbits = 8 * sizeof(val) - 1;
+
+	/* given the multi-order delta logic above, this should never happen */
+	if (nbits >= 32)
+		return;
 
 	mtx_enter(&rndlock);
 	if ((rep = rnd_put()) == NULL) {
@@ -782,11 +785,9 @@ arc4_stir(void)
 	int len;
 
 	nanotime((struct timespec *) buf);
-	len = random_state.entropy_count / 8; /* XXX maybe a half? */
-	if (len > sizeof(buf) - sizeof(struct timeval))
-		len = sizeof(buf) - sizeof(struct timeval);
-	get_random_bytes(buf + sizeof (struct timeval), len);
-	len += sizeof(struct timeval);
+	len = sizeof(buf) - sizeof(struct timespec);
+	get_random_bytes(buf + sizeof (struct timespec), len);
+	len += sizeof(struct timespec);
 
 	mtx_enter(&rndlock);
 	if (rndstats.arc4_nstirs > 0)
@@ -851,13 +852,12 @@ randomattach(void)
 	rnd_states[RND_SRC_TRUE].dont_count_entropy = 1;
 	rnd_states[RND_SRC_TRUE].max_entropy = 1;
 
-	bzero(&rndstats, sizeof(rndstats));
-	bzero(&rnd_event_space, sizeof(rnd_event_space));
-
-	bzero(&arc4random_state, sizeof(arc4random_state));
 	mtx_init(&rndlock, IPL_HIGH);
 	arc4_reinit(NULL);
 
+	if (msgbufp && msgbufp->msg_magic == MSG_MAGIC)
+		add_entropy_words((u_int32_t *)msgbufp->msg_bufc,
+		    msgbufp->msg_bufs / sizeof(u_int32_t));
 	rnd_attached = 1;
 }
 

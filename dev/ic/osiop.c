@@ -1,4 +1,4 @@
-/*	$OpenBSD: osiop.c,v 1.34 2008/09/12 11:14:04 miod Exp $	*/
+/*	$OpenBSD: osiop.c,v 1.38 2009/03/03 19:08:25 miod Exp $	*/
 /*	$NetBSD: osiop.c,v 1.9 2002/04/05 18:27:54 bouyer Exp $	*/
 
 /*
@@ -90,7 +90,7 @@
 #include <dev/microcode/siop/osiop.out>
 
 void osiop_attach(struct osiop_softc *);
-void osiop_minphys(struct buf *);
+void osiop_minphys(struct buf *, struct scsi_link *);
 int osiop_scsicmd(struct scsi_xfer *xs);
 void osiop_poll(struct osiop_softc *, struct osiop_acb *);
 void osiop_sched(struct osiop_softc *);
@@ -355,10 +355,8 @@ osiop_attach(sc)
  * default minphys routine for osiop based controllers
  */
 void
-osiop_minphys(bp)
-	struct buf *bp;
+osiop_minphys(struct buf *bp, struct scsi_link *sl)
 {
-
 	if (bp->b_bcount > OSIOP_MAX_XFER)
 		bp->b_bcount = OSIOP_MAX_XFER;
 	minphys(bp);
@@ -376,6 +374,7 @@ osiop_scsicmd(xs)
 	struct osiop_acb *acb;
 	struct osiop_softc *sc = periph->adapter_softc;
 	int err, s;
+	int dopoll;
 
 	/* XXXX ?? */
 	if (sc->sc_nexus && (xs->flags & SCSI_POLL))
@@ -397,7 +396,7 @@ osiop_scsicmd(xs)
 		panic("osiop_scsipi_request");
 #endif
 		splx(s);
-		return (TRY_AGAIN_LATER);
+		return (NO_CCB);
 	}
 
 	acb->flags = 0;
@@ -441,15 +440,20 @@ osiop_scsicmd(xs)
 
 	TAILQ_INSERT_TAIL(&sc->ready_list, acb, chain);
 
+	if ((acb->xsflags & SCSI_POLL) || (sc->sc_flags & OSIOP_NODMA))
+		dopoll = 1;
+	else {
+		dopoll = 0;
+		/* start expire timer */
+		timeout_add_msec(&xs->stimeout, xs->timeout);
+	}
+
 	osiop_sched(sc);
 
 	splx(s);
 
-	if ((acb->xsflags & SCSI_POLL) || (sc->sc_flags & OSIOP_NODMA))
+	if (dopoll)
 		osiop_poll(sc, acb);
-	else
-		/* start expire timer */
-		timeout_add(&xs->stimeout, (xs->timeout/1000) * hz);
 
 	if (xs->flags & (SCSI_POLL | ITSDONE))
 		return (COMPLETE);
@@ -748,7 +752,7 @@ FREE:
 		TAILQ_INSERT_HEAD(&sc->ready_list, acb, chain);
 		if (((acb->xsflags & SCSI_POLL) == 0) && ((sc->sc_flags & OSIOP_NODMA) == 0))
 			/* start expire timer */
-			timeout_add(&xs->stimeout, (xs->timeout/1000) * hz);
+			timeout_add_msec(&xs->stimeout, xs->timeout);
 	}
 
 	osiop_sched(sc);

@@ -1,4 +1,4 @@
-/*      $OpenBSD: ath.c,v 1.79 2008/10/15 19:12:19 blambert Exp $  */
+/*      $OpenBSD: ath.c,v 1.81 2009/07/31 11:18:09 blambert Exp $  */
 /*	$NetBSD: ath.c,v 1.37 2004/08/18 21:59:39 dyoung Exp $	*/
 
 /*-
@@ -3027,10 +3027,10 @@ ath_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		timeout_add_sec(&sc->sc_cal_to, ath_calinterval);
 
 		if (ic->ic_opmode != IEEE80211_M_MONITOR)
-			timeout_add(&sc->sc_rssadapt_to, hz / 10);
+			timeout_add_msec(&sc->sc_rssadapt_to, 100);
 	} else if (nstate == IEEE80211_S_SCAN) {
 		/* start ap/neighbor scan timer */
-		timeout_add(&sc->sc_scan_to, (hz * ath_dwelltime) / 1000);
+		timeout_add_msec(&sc->sc_scan_to, ath_dwelltime);
 	}
 bad:
 	return error;
@@ -3224,7 +3224,7 @@ ath_rssadapt_updatestats(void *arg)
 		ieee80211_iterate_nodes(ic, ath_rssadapt_updatenode, arg);
 	}
 
-	timeout_add(&sc->sc_rssadapt_to, hz / 10);
+	timeout_add_msec(&sc->sc_rssadapt_to, 100);
 }
 
 #ifdef AR_DEBUG

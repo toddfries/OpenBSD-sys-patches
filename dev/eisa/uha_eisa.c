@@ -1,4 +1,4 @@
-/*	$OpenBSD: uha_eisa.c,v 1.7 2007/11/05 17:54:27 krw Exp $	*/
+/*	$OpenBSD: uha_eisa.c,v 1.9 2009/03/29 21:53:52 sthen Exp $	*/
 /*	$NetBSD: uha_eisa.c,v 1.5 1996/10/21 22:31:07 thorpej Exp $	*/
 
 /*
@@ -126,7 +126,7 @@ uha_eisa_attach(parent, self, aux)
 
 	if (bus_space_map(iot, EISA_SLOT_ADDR(ea->ea_slot) +
 	    UHA_EISA_SLOT_OFFSET, UHA_EISA_IOSIZE, 0, &ioh))
-		panic("uha_attach: could not map I/O addresses");
+		panic("uha_attach: can't map I/O addresses");
 
 	sc->sc_iot = iot;
 	sc->sc_ioh = ioh;
@@ -247,7 +247,7 @@ u24_start_mbox(sc, mscp)
 	bus_space_write_1(iot, ioh, U24_LINT, U24_OGMFULL);
 
 	if ((mscp->xs->flags & SCSI_POLL) == 0)
-		timeout_add(&mscp->xs->stimeout, (mscp->timeout * hz) / 1000);
+		timeout_add_msec(&mscp->xs->stimeout, mscp->timeout);
 }
 
 int

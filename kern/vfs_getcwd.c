@@ -1,4 +1,4 @@
-/* $OpenBSD: vfs_getcwd.c,v 1.13 2008/06/26 05:42:20 ray Exp $ */
+/* $OpenBSD: vfs_getcwd.c,v 1.15 2009/07/09 22:29:56 thib Exp $ */
 /* $NetBSD: vfs_getcwd.c,v 1.3.2.3 1999/07/11 10:24:09 sommerfeld Exp $ */
 
 /*
@@ -279,8 +279,8 @@ vfs_getcwd_common(struct vnode *lvp, struct vnode *rvp, char **bpp, char *bufp,
 			rvp = rootvnode;
 	}
 
-	VREF(rvp);
-	VREF(lvp);
+	vref(rvp);
+	vref(lvp);
 
 	error = vn_lock(lvp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (error) {
@@ -333,7 +333,7 @@ vfs_getcwd_common(struct vnode *lvp, struct vnode *rvp, char **bpp, char *bufp,
 				goto out;
 			}
 
-			VREF(lvp);
+			vref(lvp);
 
 			error = vn_lock(lvp, LK_EXCLUSIVE | LK_RETRY, p);
 			if (error) {
@@ -385,22 +385,6 @@ out:
 	vrele(rvp);
 
 	return (error);
-}
-
-/* True if p1's root directory is equal to or under p2's root directory */
-int
-proc_isunder(struct proc *p1, struct proc *p2)
-{
-	struct vnode *r1 = p1->p_fd->fd_rdir;
-	struct vnode *r2 = p2->p_fd->fd_rdir;
-
-	if (r1 == NULL)
-		return (r2 == NULL);
-
-	if (r2 == NULL)
-		return (1);
-
-	return (vn_isunder(r1, r2, p2));
 }
 
 /* Find pathname of a process's current directory */

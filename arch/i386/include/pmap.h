@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.48 2007/09/10 18:49:45 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.52 2009/06/03 00:49:12 art Exp $	*/
 /*	$NetBSD: pmap.h,v 1.44 2000/04/24 17:18:18 thorpej Exp $	*/
 
 /*
@@ -272,7 +272,6 @@ struct pmap {
 	union descriptor *pm_ldt;	/* user-set LDT */
 	int pm_ldt_len;			/* number of LDT entries */
 	int pm_ldt_sel;			/* LDT selector */
-	uint32_t pm_cpus;		/* mask of CPUs using map */
 };
 
 /* pm_flags */
@@ -292,6 +291,10 @@ struct pv_entry {			/* locked by its list's pvh_lock */
 	vaddr_t pv_va;			/* the virtual address */
 	struct vm_page *pv_ptp;		/* the vm_page of the PTP */
 };
+/*
+ * MD flags to pmap_enter:
+ */
+#define	PMAP_NOCACHE	PMAP_MD0
 
 /*
  * We keep mod/ref flags in struct vm_page->pg_flags.
@@ -347,6 +350,7 @@ extern int pmap_pg_g;			/* do we support PG_G? */
  */
 
 #define	pmap_kernel()			(&kernel_pmap_store)
+#define	pmap_wired_count(pmap)		((pmap)->pm_stats.wired_count)
 #define	pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)
 #define	pmap_update(pm)			/* nada */
 
@@ -379,6 +383,7 @@ void		pmap_write_protect(struct pmap *, vaddr_t,
 				vaddr_t, vm_prot_t);
 int		pmap_exec_fixup(struct vm_map *, struct trapframe *,
 		    struct pcb *);
+void		pmap_switch(struct proc *, struct proc *);
 
 vaddr_t reserve_dumppages(vaddr_t); /* XXX: not a pmap fn */
 
@@ -386,10 +391,13 @@ void	pmap_tlb_shootpage(struct pmap *, vaddr_t);
 void	pmap_tlb_shootrange(struct pmap *, vaddr_t, vaddr_t);
 void	pmap_tlb_shoottlb(void);
 #ifdef MULTIPROCESSOR
+void	pmap_tlb_droppmap(struct pmap *);
 void	pmap_tlb_shootwait(void);
 #else
 #define pmap_tlb_shootwait()
 #endif
+
+void	pmap_prealloc_lowmem_ptp(paddr_t);
 
 #define PMAP_GROWKERNEL		/* turn on pmap_growkernel interface */
 

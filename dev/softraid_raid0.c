@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid0.c,v 1.10 2008/10/04 19:21:00 miod Exp $ */
+/* $OpenBSD: softraid_raid0.c,v 1.15 2009/06/02 21:23:11 marco Exp $ */
 /*
  * Copyright (c) 2008 Marco Peereboom <marco@peereboom.us>
  *
@@ -43,7 +43,41 @@
 #include <dev/softraidvar.h>
 #include <dev/rndvar.h>
 
-/* RAID 0 functions */
+/* RAID 0 functions. */
+int	sr_raid0_alloc_resources(struct sr_discipline *);
+int	sr_raid0_free_resources(struct sr_discipline *);
+int	sr_raid0_rw(struct sr_workunit *);
+void	sr_raid0_intr(struct buf *);
+void	sr_raid0_set_chunk_state(struct sr_discipline *, int, int);
+void	sr_raid0_set_vol_state(struct sr_discipline *);
+
+/* Discipline initialisation. */
+void
+sr_raid0_discipline_init(struct sr_discipline *sd)
+{
+
+	/* Fill out discipline members. */
+	sd->sd_type = SR_MD_RAID0;
+	sd->sd_max_ccb_per_wu =
+	    (MAXPHYS / sd->sd_meta->ssdi.ssd_strip_size + 1) *
+	    SR_RAID0_NOWU * sd->sd_meta->ssdi.ssd_chunk_no;
+	sd->sd_max_wu = SR_RAID0_NOWU;
+
+	/* Setup discipline pointers. */
+	sd->sd_alloc_resources = sr_raid0_alloc_resources;
+	sd->sd_free_resources = sr_raid0_free_resources;
+	sd->sd_start_discipline = NULL;
+	sd->sd_scsi_inquiry = sr_raid_inquiry;
+	sd->sd_scsi_read_cap = sr_raid_read_cap;
+	sd->sd_scsi_tur = sr_raid_tur;
+	sd->sd_scsi_req_sense = sr_raid_request_sense;
+	sd->sd_scsi_start_stop = sr_raid_start_stop;
+	sd->sd_scsi_sync = sr_raid_sync;
+	sd->sd_scsi_rw = sr_raid0_rw;
+	sd->sd_set_chunk_state = sr_raid0_set_chunk_state;
+	sd->sd_set_vol_state = sr_raid0_set_vol_state;
+}
+
 int
 sr_raid0_alloc_resources(struct sr_discipline *sd)
 {
@@ -154,7 +188,7 @@ sr_raid0_set_vol_state(struct sr_discipline *sd)
 
 	for (i = 0; i < nd; i++) {
 		s = sd->sd_vol.sv_chunks[i]->src_meta.scm_status;
-		if (s > SR_MAX_STATES)
+		if (s >= SR_MAX_STATES)
 			panic("%s: %s: %s: invalid chunk state",
 			    DEVNAME(sd->sd_sc),
 			    sd->sd_meta->ssd_devname,
@@ -173,7 +207,7 @@ sr_raid0_set_vol_state(struct sr_discipline *sd)
 
 	switch (old_state) {
 	case BIOC_SVONLINE:
-		if (new_state == BIOC_SVOFFLINE)
+		if (new_state == BIOC_SVOFFLINE || new_state == BIOC_SVONLINE)
 			break;
 		else
 			goto die;
@@ -255,7 +289,7 @@ sr_raid0_rw(struct sr_workunit *wu)
 		    strip_no, chunk, stripoffs, chunkoffs, physoffs, length,
 		    leftover, data);
 
-		ccb->ccb_buf.b_flags = B_CALL;
+		ccb->ccb_buf.b_flags = B_CALL | B_PHYS;
 		ccb->ccb_buf.b_iodone = sr_raid0_intr;
 		ccb->ccb_buf.b_blkno = physoffs >> DEV_BSHIFT;
 		ccb->ccb_buf.b_bcount = length;
@@ -382,7 +416,7 @@ sr_raid0_intr(struct buf *bp)
 
 		/* do not change the order of these 2 functions */
 		sr_wu_put(wu);
-		scsi_done(xs);
+		sr_scsi_done(sd, xs);
 
 		if (sd->sd_sync && sd->sd_wu_pending == 0)
 			wakeup(sd);
@@ -394,6 +428,6 @@ bad:
 	xs->error = XS_DRIVER_STUFFUP;
 	xs->flags |= ITSDONE;
 	sr_wu_put(wu);
-	scsi_done(xs);
+	sr_scsi_done(sd, xs);
 	splx(s);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.11 2002/03/14 03:15:54 millert Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.16 2009/07/20 23:40:43 miod Exp $	*/
 /*	$NetBSD: pci_machdep.h,v 1.7 1997/06/06 23:29:18 thorpej Exp $	*/
 
 /*
@@ -55,7 +55,7 @@ union i386_pci_tag_u {
 	} mode2;
 };
 
-extern struct i386_bus_dma_tag pci_bus_dma_tag;
+extern struct bus_dma_tag pci_bus_dma_tag;
 
 /*
  * Types provided to machine-independent PCI code
@@ -77,6 +77,10 @@ struct {
 extern int pci_mode;
 int		pci_mode_detect(void);
 
+extern struct extent *pciio_ex;
+extern struct extent *pcimem_ex;
+void		pci_init_extents(void);
+
 /*
  * Functions provided to machine-independent PCI code.
  */
@@ -90,7 +94,7 @@ void		pci_conf_write(pci_chipset_tag_t, pcitag_t, int,
 struct pci_attach_args;
 int		pci_intr_map(struct pci_attach_args *,
 		    pci_intr_handle_t *);
-#define		pci_intr_line(ih)	((ih).line)
+#define		pci_intr_line(c, ih)	((ih).line)
 const char	*pci_intr_string(pci_chipset_tag_t, pci_intr_handle_t);
 void		*pci_intr_establish(pci_chipset_tag_t, pci_intr_handle_t,
 		    int, int (*)(void *), void *, char *);

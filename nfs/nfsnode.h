@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsnode.h,v 1.31 2008/06/14 19:33:58 beck Exp $	*/
+/*	$OpenBSD: nfsnode.h,v 1.33 2009/01/24 23:30:42 thib Exp $	*/
 /*	$NetBSD: nfsnode.h,v 1.16 1996/02/18 11:54:04 fvdl Exp $	*/
 
 /*
@@ -74,7 +74,7 @@ struct nfsnode {
 	u_quad_t		n_size;		/* Current size of file */
 	struct vattr		n_vattr;	/* Vnode attribute cache */
 	time_t			n_attrstamp;	/* Attr. cache timestamp */
-	time_t			n_mtime;	/* Prev modify time. */
+	struct timespec 	n_mtime;	/* Prev modify time. */
 	time_t			n_ctime;	/* Prev create time. */
 	nfsfh_t			*n_fhp;		/* NFS File Handle */
 	struct vnode		*n_vnode;	/* associated vnode */
@@ -128,6 +128,8 @@ struct nfsnode {
 #define	NACC		0x0100	/* Special file accessed */
 #define	NUPD		0x0200	/* Special file updated */
 #define	NCHG		0x0400	/* Special file times changed */
+
+#define NFS_INVALIDATE_ATTRCACHE(np)	((np)->n_attrstamp = 0)
 
 /*
  * Convert between nfsnode pointers and vnode pointers

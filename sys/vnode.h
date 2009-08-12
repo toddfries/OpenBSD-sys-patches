@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnode.h,v 1.96 2008/11/01 20:33:34 deraadt Exp $	*/
+/*	$OpenBSD: vnode.h,v 1.102 2009/08/02 16:28:40 beck Exp $	*/
 /*	$NetBSD: vnode.h,v 1.38 1996/02/29 20:59:05 cgd Exp $	*/
 
 /*
@@ -32,10 +32,12 @@
  *	@(#)vnode.h	8.11 (Berkeley) 11/21/94
  */
 
+#include <sys/buf.h>
 #include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/lock.h>
 #include <sys/selinfo.h>
+#include <sys/tree.h>
 
 #include <uvm/uvm.h>
 #include <uvm/uvm_vnode.h>
@@ -65,19 +67,21 @@ enum vtype	{ VNON, VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD };
 enum vtagtype	{
 	VT_NON, VT_UFS, VT_NFS, VT_MFS, VT_MSDOSFS,
 	VT_PORTAL, VT_PROCFS, VT_AFS, VT_ISOFS, VT_ADOSFS,
-	VT_EXT2FS, VT_VFS, VT_XFS, VT_NTFS, VT_UDF
+	VT_EXT2FS, VT_VFS, VT_NNPFS, VT_NTFS, VT_UDF, VT_XFS = VT_NNPFS
 };
 
 #define	VTAG_NAMES \
     "NON", "UFS", "NFS", "MFS", "MSDOSFS",			\
     "PORTAL", "PROCFS", "AFS", "ISOFS", "ADOSFS",		\
-    "EXT2FS", "VFS", "XFS", "NTFS", "UDF"
+    "EXT2FS", "VFS", "NNPFS", "NTFS", "UDF"
 
 /*
  * Each underlying filesystem allocates its own private area and hangs
  * it from v_data.  If non-null, this area is freed in getnewvnode().
  */
 LIST_HEAD(buflists, buf);
+
+RB_HEAD(buf_rb_bufs, buf);
 
 struct vnode {
 	struct uvm_vnode v_uvm;			/* uvm data */
@@ -94,6 +98,7 @@ struct vnode {
 	struct	mount *v_mount;			/* ptr to vfs we are in */
 	TAILQ_ENTRY(vnode) v_freelist;		/* vnode freelist */
 	LIST_ENTRY(vnode) v_mntvnodes;		/* vnodes for mount point */
+	struct	buf_rb_bufs v_bufs_tree;	/* lookup of all bufs */
 	struct	buflists v_cleanblkhd;		/* clean blocklist head */
 	struct	buflists v_dirtyblkhd;		/* dirty blocklist head */
 	u_int   v_numoutput;			/* num of writes in progress */
@@ -164,7 +169,7 @@ struct vattr {
 };
 
 /*
- * Flags for va_cflags.
+ * Flags for va_vaflags.
  */
 #define	VA_UTIMES_NULL	0x01		/* utimes argument was NULL */
 #define VA_EXCLUSIVE    0x02		/* exclusive create request */
@@ -230,7 +235,6 @@ extern struct freelst vnode_hold_list;	/* free vnodes referencing buffers */
 extern struct freelst vnode_free_list;	/* vnode free list */
 
 #define	VATTR_NULL(vap)	vattr_null(vap)
-#define	VREF(vp)	vref(vp)		/* increase reference */
 #define	NULLVP	((struct vnode *)NULL)
 #define	VN_KNOTE(vp, b)					\
 	KNOTE(&vp->v_selectinfo.si_note, (b))

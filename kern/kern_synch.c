@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_synch.c,v 1.87 2008/09/10 12:30:40 blambert Exp $	*/
+/*	$OpenBSD: kern_synch.c,v 1.91 2009/06/04 04:26:54 beck Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*
@@ -102,7 +102,7 @@ int safepri;
  * call should be interrupted by the signal (return EINTR).
  */
 int
-tsleep(void *ident, int priority, const char *wmesg, int timo)
+tsleep(const volatile void *ident, int priority, const char *wmesg, int timo)
 {
 	struct sleep_state sls;
 	int error, error1;
@@ -141,7 +141,8 @@ tsleep(void *ident, int priority, const char *wmesg, int timo)
  * entered the sleep queue we drop the mutex. After sleeping we re-lock.
  */
 int
-msleep(void *ident, struct mutex *mtx,  int priority, const char *wmesg, int timo)
+msleep(const volatile void *ident, struct mutex *mtx, int priority,
+    const char *wmesg, int timo)
 {
 	struct sleep_state sls;
 	int error, error1, spl;
@@ -164,9 +165,12 @@ msleep(void *ident, struct mutex *mtx,  int priority, const char *wmesg, int tim
 	error1 = sleep_finish_timeout(&sls);
 	error = sleep_finish_signal(&sls);
 
-	if (mtx && (priority & PNORELOCK) == 0) {
-		mtx_enter(mtx);
-		MUTEX_OLDIPL(mtx) = spl; /* put the ipl back */
+	if (mtx) {
+		if ((priority & PNORELOCK) == 0) {
+			mtx_enter(mtx);
+			MUTEX_OLDIPL(mtx) = spl; /* put the ipl back */
+		} else
+			splx(spl);
 	}
 	/* Signal errors are higher priority than timeouts. */
 	if (error == 0 && error1 != 0)
@@ -176,7 +180,8 @@ msleep(void *ident, struct mutex *mtx,  int priority, const char *wmesg, int tim
 }
 
 void
-sleep_setup(struct sleep_state *sls, void *ident, int prio, const char *wmesg)
+sleep_setup(struct sleep_state *sls, const volatile void *ident, int prio,
+    const char *wmesg)
 {
 	struct proc *p = curproc;
 
@@ -345,7 +350,7 @@ unsleep(struct proc *p)
  * Make a number of processes sleeping on the specified identifier runnable.
  */
 void
-wakeup_n(void *ident, int n)
+wakeup_n(const volatile void *ident, int n)
 {
 	struct slpque *qp;
 	struct proc *p;
@@ -370,18 +375,8 @@ wakeup_n(void *ident, int n)
 					updatepri(p);
 				p->p_slptime = 0;
 				p->p_stat = SRUN;
-
-				/*
-				 * Since curpriority is a user priority,
-				 * p->p_priority is always better than
-				 * curpriority on the last CPU on
-				 * which it ran.
-				 *
-				 * XXXSMP See affinity comment in
-				 * resched_proc().
-				 */
+				p->p_cpu = sched_choosecpu(p);
 				setrunqueue(p);
-				KASSERT(p->p_cpu != NULL);
 				need_resched(p->p_cpu);
 				/* END INLINE EXPANSION */
 
@@ -395,7 +390,7 @@ wakeup_n(void *ident, int n)
  * Make all processes sleeping on the specified identifier runnable.
  */
 void
-wakeup(void *chan)
+wakeup(const volatile void *chan)
 {
 	wakeup_n(chan, -1);
 }

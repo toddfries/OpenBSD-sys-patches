@@ -1,4 +1,4 @@
-/*	$OpenBSD: malo.c,v 1.86 2008/08/27 09:05:03 damien Exp $ */
+/*	$OpenBSD: malo.c,v 1.89 2009/07/12 18:24:23 mglocker Exp $ */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -563,7 +563,7 @@ malo_alloc_rx_ring(struct malo_softc *sc, struct malo_rx_ring *ring, int count)
 	    count * sizeof(struct malo_rx_desc), (caddr_t *)&ring->desc,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map desc DMA memory\n",
+		printf("%s: can't map desc DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -723,7 +723,7 @@ malo_alloc_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring,
 	    count * sizeof(struct malo_tx_desc), (caddr_t *)&ring->desc,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map desc DMA memory\n",
+		printf("%s: can't map desc DMA memory\n",
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
@@ -931,9 +931,9 @@ malo_init(struct ifnet *ifp)
 
 fail:
 	/* reset adapter */
-	DPRINTF(1, "%s: malo_init failed, reseting card\n",
+	DPRINTF(1, "%s: malo_init failed, resetting card\n",
 	    sc->sc_dev.dv_xname);
-	malo_ctl_write4(sc, 0x0c18, (1 << 15));
+	malo_stop(sc);
 	return (error);
 }
 
@@ -1133,7 +1133,7 @@ malo_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 
 			malo_cmd_set_channel(sc, chan);
 		}
-		timeout_add(&sc->sc_scan_to, hz / 2);
+		timeout_add_msec(&sc->sc_scan_to, 500);
 		break;
 	case IEEE80211_S_AUTH:
 		DPRINTF(1, "%s: newstate AUTH\n", sc->sc_dev.dv_xname);
@@ -1461,7 +1461,7 @@ malo_tx_mgt(struct malo_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map mbuf (error %d)\n",
+		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		m_freem(m0);
 		return (error);
@@ -1580,7 +1580,7 @@ malo_tx_data(struct malo_softc *sc, struct mbuf *m0,
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 	    BUS_DMA_NOWAIT);
 	if (error != 0) {
-		printf("%s: could not map mbuf (error %d)\n",
+		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
 		m_freem(m0);
 		return (error);

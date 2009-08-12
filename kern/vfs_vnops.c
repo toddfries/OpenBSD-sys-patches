@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_vnops.c,v 1.60 2008/09/19 12:24:55 art Exp $	*/
+/*	$OpenBSD: vfs_vnops.c,v 1.63 2009/07/09 22:29:56 thib Exp $	*/
 /*	$NetBSD: vfs_vnops.c,v 1.20 1996/02/04 02:18:41 christos Exp $	*/
 
 /*
@@ -97,6 +97,8 @@ vn_open(struct nameidata *ndp, int fmode, int cmode)
 			VATTR_NULL(&va);
 			va.va_type = VREG;
 			va.va_mode = cmode;
+			if (fmode & O_EXCL)
+				va.va_vaflags |= VA_EXCLUSIVE;
 			error = VOP_CREATE(ndp->ni_dvp, &ndp->ni_vp,
 					   &ndp->ni_cnd, &va);
 			if (error)
@@ -391,9 +393,9 @@ vn_stat(struct vnode *vp, struct stat *sb, struct proc *p)
 	sb->st_gid = va.va_gid;
 	sb->st_rdev = va.va_rdev;
 	sb->st_size = va.va_size;
-	sb->st_atimespec = va.va_atime;
-	sb->st_mtimespec = va.va_mtime;
-	sb->st_ctimespec = va.va_ctime;
+	sb->st_atim = va.va_atime;
+	sb->st_mtim = va.va_mtime;
+	sb->st_ctim = va.va_ctime;
 	sb->st_blksize = va.va_blocksize;
 	sb->st_flags = va.va_flags;
 	sb->st_gen = va.va_gen;
@@ -436,7 +438,7 @@ vn_ioctl(struct file *fp, u_long com, caddr_t data, struct proc *p)
 			if (p->p_session->s_ttyvp)
 				vrele(p->p_session->s_ttyvp);
 			p->p_session->s_ttyvp = vp;
-			VREF(vp);
+			vref(vp);
 		}
 		return (error);
 	}

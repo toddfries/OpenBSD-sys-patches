@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.69 2008/10/15 23:23:50 deraadt Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.72 2009/03/26 17:24:33 oga Exp $	*/
 /*	$NetBSD: cpu.h,v 1.28 2001/06/14 22:56:58 thorpej Exp $ */
 
 /*
@@ -183,7 +183,7 @@ void	cpu_boot_secondary_processors(void);
 void	sparc64_send_ipi(int, void (*)(void), u_int64_t, u_int64_t);
 void	sparc64_broadcast_ipi(void (*)(void), u_int64_t, u_int64_t);
 
-void	smp_signotify(struct proc *);
+void	cpu_unidle(struct cpu_info *);
 
 #else
 
@@ -197,13 +197,9 @@ void	smp_signotify(struct proc *);
 #define CPU_INFO_UNIT(ci)	0
 #define MAXCPUS 1
 
-#endif
+#define cpu_unidle(ci)
 
-/*
- * definitions of cpu-dependent requirements
- * referenced in generic code
- */
-#define	cpu_wait(p)	/* nothing */
+#endif
 
 /*
  * Arguments to hardclock, softclock and gatherstats encapsulate the
@@ -263,7 +259,7 @@ void	loadfpstate(struct fpstate64 *);
 void	clearfpstate(void);
 u_int64_t	probeget(paddr_t, int, int);
 #define	 write_all_windows() __asm __volatile("flushw" : : )
-#define	 write_user_windows() __asm __volatile("flushw" : : )
+void	write_user_windows(void);
 void 	proc_trampoline(void);
 struct pcb;
 void	snapshot(struct pcb *);

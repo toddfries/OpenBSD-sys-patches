@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtwvar.h,v 1.24 2008/07/21 18:43:19 damien Exp $	*/
+/*	$OpenBSD: rtwvar.h,v 1.26 2009/07/28 11:45:05 blambert Exp $	*/
 /*	$NetBSD: rtwvar.h,v 1.10 2004/12/26 22:37:57 mycroft Exp $	*/
 
 /*-
@@ -180,9 +180,6 @@ struct rtw_txsoft {
 
 #define RTW_MAXPKTSEGS		64	/* max 64 segments per Tx packet */
 
-#define CASSERT(cond, complaint)					\
-	complaint[(cond) ? 0 : -1] = complaint[(cond) ? 0 : -1]
-
 /* Note well: the descriptor rings must begin on RTW_DESC_ALIGNMENT
  * boundaries.  I allocate them consecutively from one buffer, so
  * just round up.
@@ -338,8 +335,8 @@ union rtw_keys {
 	u_int32_t	rk_words[16];
 };
 
-#define	RTW_LED_SLOW_TICKS	MAX(1, hz/2)
-#define	RTW_LED_FAST_TICKS	MAX(1, hz/10)
+#define	RTW_LED_SLOW_MSEC	500
+#define	RTW_LED_FAST_MSEC	100
 
 struct rtw_led_state {
 #define	RTW_LED0	0x1

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pchb.c,v 1.27 2008/11/09 15:11:19 oga Exp $	*/
+/*	$OpenBSD: pchb.c,v 1.29 2009/04/11 14:59:59 kettenis Exp $	*/
 /*	$NetBSD: pchb.c,v 1.1 2003/04/26 18:39:50 fvdl Exp $	*/
 /*
  * Copyright (c) 2000 Michael Shalayeff
@@ -150,7 +150,6 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 		switch (PCI_PRODUCT(pa->pa_id)) {
 		case PCI_PRODUCT_AMD_AMD64_0F_HT:
 		case PCI_PRODUCT_AMD_AMD64_10_HT:
-		case PCI_PRODUCT_AMD_AMD64_11_HT:
 			for (i = 0; i < AMD64HT_NUM_LDT; i++)
 				pchb_amd64ht_attach(self, pa, i);
 			break;
@@ -275,13 +274,13 @@ pchb_amd64ht_attach(struct device *self, struct pci_attach_args *pa, int i)
 	reg = AMD64HT_LDT0_BUS + i * 0x20;
 	bus = pci_conf_read(pa->pa_pc, pa->pa_tag, reg);
 	if (AMD64HT_LDT_SEC_BUS_NUM(bus) > 0) {
+		bzero(&pba, sizeof(pba));
 		pba.pba_busname = "pci";
 		pba.pba_iot = pa->pa_iot;
 		pba.pba_memt = pa->pa_memt;
 		pba.pba_dmat = pa->pa_dmat;
 		pba.pba_domain = pa->pa_domain;
 		pba.pba_bus = AMD64HT_LDT_SEC_BUS_NUM(bus);
-		pba.pba_bridgetag = NULL;
 		pba.pba_pc = pa->pa_pc;
 		config_found(self, &pba, pchb_print);
 	}

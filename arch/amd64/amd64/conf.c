@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.22 2008/06/10 07:12:24 mglocker Exp $	*/
+/*	$OpenBSD: conf.c,v 1.25 2009/06/03 14:45:50 jj Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.
@@ -154,9 +154,9 @@ cdev_decl(music);
 #include "bthub.h"
 #include "pctr.h"
 #include "iop.h"
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "bktr.h"
 #include "ksyms.h"
@@ -174,7 +174,7 @@ cdev_decl(cztty);
 cdev_decl(nvram);
 #include "agp.h"
 cdev_decl(agp);
-#include "drmbase.h"
+#include "drm.h"
 cdev_decl(drm);
 
 #include "wsdisplay.h"
@@ -196,7 +196,7 @@ struct cdevsw	cdevsw[] =
 	cdev_ctty_init(1,ctty),		/* 1: controlling terminal */
 	cdev_mm_init(1,mm),		/* 2: /dev/{null,mem,kmem,...} */
 	cdev_disk_init(NWD,wd),		/* 3: ST506/ESDI/IDE disk */
-	cdev_swap_init(1,sw),		/* 4: /dev/drum (swap pseudo-device) */
+	cdev_notdef(),			/* 4 was /dev/drum */
 	cdev_tty_init(NPTY,pts),	/* 5: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),	/* 6: pseudo-tty master */
 	cdev_log_init(1,log),		/* 7: /dev/klog */
@@ -252,8 +252,8 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48 */
 	cdev_bktr_init(NBKTR,bktr),     /* 49: Bt848 video capture device */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 50: Kernel symbols device */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 51 */
 #endif
@@ -299,7 +299,7 @@ struct cdevsw	cdevsw[] =
 	cdev_bthub_init(NBTHUB,bthub),	/* 84: bthub */
 	cdev_nvram_init(NNVRAM,nvram),	/* 85: NVRAM interface */
 	cdev_agp_init(NAGP,agp),	/* 86: agp */
-	cdev_drm_init(NDRMBASE,drm),	/* 87: drm */
+	cdev_drm_init(NDRM,drm),	/* 87: drm */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

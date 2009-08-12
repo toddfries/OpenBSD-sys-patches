@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sl.c,v 1.36 2008/10/22 23:04:45 mpf Exp $	*/
+/*	$OpenBSD: if_sl.c,v 1.38 2009/07/19 08:16:06 blambert Exp $	*/
 /*	$NetBSD: if_sl.c,v 1.39.4.1 1996/06/02 16:26:31 thorpej Exp $	*/
 
 /*
@@ -325,11 +325,7 @@ slopen(dev, tp)
 				sc->sc_oldbufquot = tp->t_outq.c_cq != 0;
 
 				clfree(&tp->t_outq);
-				error = clalloc(&tp->t_outq, 3*SLMTU, 0);
-				if (error) {
-					splx(s);
-					return (error);
-				}
+				clalloc(&tp->t_outq, 3*SLMTU, 0);
 			} else
 				sc->sc_oldbufsize = sc->sc_oldbufquot = 0;
 			splx(s);
@@ -428,6 +424,16 @@ sloutput(ifp, m, dst, rtp)
 		sc->sc_if.if_noproto++;
 		return (EAFNOSUPPORT);
 	}
+
+#ifdef DIAGNOSTIC
+	if (ifp->if_rdomain != m->m_pkthdr.rdomain) {
+		printf("%s: trying to send packet on wrong domain. "
+		    "%d vs. %d, AF %d\n", ifp->if_xname, ifp->if_rdomain,
+		    m->m_pkthdr.rdomain, dst->sa_family);
+		m_freem(m);
+		return (ENETDOWN);
+	}
+#endif
 
 	if (sc->sc_ttyp == NULL) {
 		m_freem(m);
@@ -746,6 +752,9 @@ slinput(c, tp)
 		return;
 	}
 	c &= TTY_CHARMASK;
+
+	/* mark incomming routing domain */
+	m->m_pkthdr.rdomain = sc->sc_if.if_rdomain;
 
 	++sc->sc_if.if_ibytes;
 

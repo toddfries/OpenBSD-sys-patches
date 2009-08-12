@@ -1,4 +1,4 @@
-/*	$OpenBSD: vpci.c,v 1.2 2008/04/08 22:05:19 kettenis Exp $	*/
+/*	$OpenBSD: vpci.c,v 1.4 2009/03/29 22:52:11 kettenis Exp $	*/
 /*
  * Copyright (c) 2008 Mark Kettenis <kettenis@openbsd.org>
  *
@@ -159,10 +159,10 @@ vpci_attach(struct device *parent, struct device *self, void *aux)
 
 	vpci_init_iommu(sc, pbm);
 
+	bzero(&pba, sizeof(pba));
 	pba.pba_busname = "pci";
 	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = busranges[0];
-	pba.pba_bridgetag = NULL;
 	pba.pba_pc = pbm->vp_pc;
 	pba.pba_dmat = pbm->vp_dmat;
 	pba.pba_memt = pbm->vp_memt;
@@ -309,8 +309,6 @@ vpci_alloc_dma_tag(struct vpci_pbm *pbm)
 	dt->_dmamap_sync = viommu_dvmamap_sync;
 	dt->_dmamem_alloc = viommu_dvmamem_alloc;
 	dt->_dmamem_free = viommu_dvmamem_free;
-	dt->_dmamem_map = viommu_dvmamem_map;
-	dt->_dmamem_unmap = viommu_dvmamem_unmap;
 	return (dt);
 }
 

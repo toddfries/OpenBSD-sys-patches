@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.222 2008/10/23 17:26:26 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.242 2009/07/12 19:17:50 kettenis Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -24,6 +24,7 @@ option		USBVERBOSE
 option		WSEMUL_SUN	# provide sun terminal emulation; required
 option		WSEMUL_NO_VT100	# do not provide vt100 terminal emulation
 option		WSEMUL_DUMB
+option		WSDISPLAY_COMPAT_RAWKBD	# provide raw scancodes; needed for X11
 
 config		bsd	swap generic
 
@@ -59,6 +60,7 @@ ebus*	at mainbus0
 ebus*	at pci?
 vbus0	at mainbus0
 sbbc*	at pci?
+cbus*	at vbus?
 
 # PCI Ethernet
 lmc*	at pci?			# Lan Media Corp SSI/T3/HSSI
@@ -109,7 +111,6 @@ scsibus* at ahc?
 siop*	at pci?			# NCR 538XX SCSI controllers
 scsibus* at siop?
 isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
-option ISP_COMPILE_FW=1
 pcscp*	at pci?			# AMD 53c974 PCscsi-PCI SCSI
 scsibus* at pcscp?
 mpi*	at pci?			# LSI Logic Fusion MPT Message Passing Interface
@@ -227,6 +228,8 @@ upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 ural*	at uhub?		# Ralink RT2500USB
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
+run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
+zyd*	at uhub?		# Zydas ZD1211
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
@@ -247,17 +250,16 @@ uvideo* at uhub?
 video*  at uvideo?
 
 # Bluetooth controllers
-#ubt*	at uhub?		# USB Bluetooth
+ubt*	at uhub?		# USB Bluetooth
+bthub*	at ubt?
 
-# Bluetooth bus support
-#bthub*	at ubt?
-
-# Bluetooth HID support
-#bthidev* at bthub?
-#btkbd*	at bthidev?
-#btms*	at bthidev?
-#wskbd*	at btkbd? mux 1
-#wsmouse* at btms? mux 0
+bthidev* at bthub?		# Bluetooth HID support
+btkbd*	at bthidev?
+btms*	at bthidev?
+wskbd*	at btkbd? mux 1
+wsmouse* at btms? mux 0
+btsco*	at bthub?		# Bluetooth audio support
+audio*	at btsco?
 
 # CardBus bus support
 cardbus* at cardslot?
@@ -280,23 +282,27 @@ sabtty* at sab?
 # NS16550 based serial ports
 com*	at ebus?
 comkbd*	at ebus?
-wskbd* at comkbd?
+wskbd* at comkbd? mux 1
+comms*	at ebus?
+wsmouse* at comms? mux 0
 
 # Z8530 based serial ports
 zs*	at sbus?
 zs*	at fhc?
 zstty*	at zs?
 zskbd*	at zs?
-wskbd*	at zskbd?
+wskbd*	at zskbd? mux 1
+zsms*	at zs?
+wsmouse* at zsms? mux 0
 
 # i8042 based serial ports (PS/2 ports)
 pckbc*	at ebus?			# controller
 pckbd*	at pckbc?			#  ps2 keyboard
-wskbd*	at pckbd?			#   generic keyboard layer
+wskbd*	at pckbd? mux 1			#   generic keyboard layer
 pms*	at pckbc?			#  ps2 mouse
-wsmouse* at pms?			#   generic mouse
+wsmouse* at pms? mux 0			#   generic mouse
 pmsi*	at pckbc?			#  ps2 "intelli"mouse
-wsmouse* at pmsi?			#   generic mouse
+wsmouse* at pmsi? mux 0			#   generic mouse
 
 audioce*	at ebus?		# ebus cs4231
 
@@ -334,6 +340,12 @@ timer*	at mainbus0
 # Virtual devices for sun4v systems.
 vcons0	at vbus?
 vrtc0	at vbus?
+vrng0	at vbus?
+vdsk*	at cbus?
+scsibus* at vdsk?
+vnet*	at cbus?
+vcc*	at cbus?
+vcctty*	at vcc?
 
 ## Lance Ethernet - AMD7990
 le*		at sbus?
@@ -348,7 +360,7 @@ qe*		at qec?
 be*		at qec?
 
 hme*		at sbus?
-#gem*		at sbus?
+gem*		at sbus?
 
 # Magma serial/parallel port devices
 magma*		at sbus?
@@ -381,9 +393,7 @@ wd*	at wdc? flags 0x0000
 dma*	at sbus?				# SBus
 esp*	at dma?					# SBus
 esp*	at sbus?
-
 isp*	at sbus?
-option ISP_COMPILE_1000_FW=1
 
 # SCSI bus layer.  SCSI devices attach to the SCSI bus, which attaches
 # to the underlying hardware controller.
@@ -426,6 +436,7 @@ gentbi*	at mii?				# Generic 1000BASE-X ten-bit PHY
 nsgphy*	at mii?				# NS gigabit PHYs
 tqphy*	at mii?				# TDK 78Q212x PHYs
 jmphy*	at mii?				# JMicron JMP202/JMP211 PHYs
+ipgphy*	at mii?				# IC Plus IP1000A PHYs
 ukphy*	at mii?				# Unknown PHYs
 
 # sensors
@@ -466,13 +477,23 @@ wsdisplay*	at cgtwelve?
 creator*	at mainbus0		# Creator3D/Elite3D framebuffers
 creator*	at upa0
 wsdisplay*	at creator?
+gfxp*		at pci?			# PGX32 framebuffer
+wsdisplay*	at gfxp?
+ifb*		at pci?			# Expert3D/XVR-500 framebuffers
+wsdisplay*	at ifb?
+machfb*		at pci?			# PGX/PGX64 framebuffers
+wsdisplay*	at machfb?
 mgx*		at sbus?		# SMS MGX/MGXPlus framebuffer
 wsdisplay*	at mgx?
+radeonfb*	at pci?			# XVR-100 framebuffer
+wsdisplay*	at radeonfb?
+raptor*		at pci?			# Raptor framebuffer
+wsdisplay*	at raptor?
 rfx*		at sbus?		# RasterFlex framebuffer series
 wsdisplay*	at rfx?
 tvtwo*		at sbus?		# Parallax XVideo/PowerVideo framebuffer
 wsdisplay*	at tvtwo?
-vgafb*		at pci?			# PCI display
+vgafb*		at pci?			# PCI display (except for Expert3D)
 wsdisplay*	at vgafb?
 vigra*		at sbus?		# Viagra framebuffer series
 wsdisplay*	at vigra?
@@ -510,6 +531,4 @@ owsbm*	at onewire?			# Smart Battery Monitor
 owtemp* at onewire?			# Temperature
 
 pseudo-device	hotplug	1		# devices hot plugging
-
-# mouse & keyboard multiplexor pseudo-devices
-#pseudo-device	wsmux	2
+pseudo-device	wsmux	2		# mouse & keyboard multiplexor

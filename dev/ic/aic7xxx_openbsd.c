@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic7xxx_openbsd.c,v 1.38 2008/05/13 02:24:08 brad Exp $	*/
+/*	$OpenBSD: aic7xxx_openbsd.c,v 1.42 2009/02/16 21:19:06 miod Exp $	*/
 /*	$NetBSD: aic7xxx_osm.c,v 1.14 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*
@@ -53,7 +53,7 @@ int	ahc_execute_scb(void *, bus_dma_segment_t *, int);
 int	ahc_poll(struct ahc_softc *, int);
 int	ahc_setup_data(struct ahc_softc *, struct scsi_xfer *, struct scb *);
 
-void	ahc_minphys(struct buf *);
+void	ahc_minphys(struct buf *, struct scsi_link *);
 void	ahc_adapter_req_set_xfer_mode(struct ahc_softc *, struct scb *);
 
 
@@ -284,8 +284,7 @@ ahc_done(struct ahc_softc *ahc, struct scb *scb)
 }
 
 void
-ahc_minphys(bp)
-	struct buf *bp;
+ahc_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	/*
 	 * Even though the card can transfer up to 16megs per command
@@ -309,13 +308,9 @@ ahc_action(struct scsi_xfer *xs)
 	u_int target_id;
 	u_int our_id;
 	int s;
-	int dontqueue = 0;
 
 	SC_DEBUG(xs->sc_link, SDEV_DB3, ("ahc_action\n"));
 	ahc = (struct ahc_softc *)xs->sc_link->adapter_softc;
-
-	/* determine safety of software queueing */
-	dontqueue = xs->flags & SCSI_POLL;
 
 	target_id = xs->sc_link->target;
 	our_id = SCSI_SCSI_ID(ahc, xs->sc_link);
@@ -326,7 +321,7 @@ ahc_action(struct scsi_xfer *xs)
 	s = splbio();
 	if ((scb = ahc_get_scb(ahc)) == NULL) {
 		splx(s);
-		return (TRY_AGAIN_LATER);
+		return (NO_CCB);
 	}
 	splx(s);
 
@@ -469,7 +464,7 @@ ahc_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 	LIST_INSERT_HEAD(&ahc->pending_scbs, scb, pending_links);
 
 	if (!(xs->flags & SCSI_POLL))
-		timeout_add(&xs->stimeout, (xs->timeout * hz) / 1000);
+		timeout_add_msec(&xs->stimeout, xs->timeout);
 
 	/*
 	 * We only allow one untagged transaction

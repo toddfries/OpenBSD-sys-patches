@@ -1,4 +1,4 @@
-/*	$OpenBSD: atwvar.h,v 1.15 2008/07/21 18:43:19 damien Exp $	*/
+/*	$OpenBSD: atwvar.h,v 1.17 2009/06/03 20:00:36 deraadt Exp $	*/
 /*	$NetBSD: atwvar.h,v 1.13 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*
@@ -130,22 +130,6 @@ struct atw_txthresh_tab {
 	const char *txth_name;		/* name of mode */
 };
 
-#define	ATW_TXTHRESH_TAB_LO_RATE {					\
-	{ ATW_NAR_TR_L64,	"64 bytes" },				\
-	{ ATW_NAR_TR_L160,	"160 bytes" },				\
-	{ ATW_NAR_TR_L192,	"192 bytes" },				\
-	{ ATW_NAR_SF,		"store and forward" },			\
-	{ 0,			NULL },					\
-}
-
-#define	ATW_TXTHRESH_TAB_HI_RATE {					\
-	{ ATW_NAR_TR_H96,	"96 bytes" },				\
-	{ ATW_NAR_TR_H288,	"288 bytes" },				\
-	{ ATW_NAR_TR_H544,	"544 bytes" },				\
-	{ ATW_NAR_SF,		"store and forward" },			\
-	{ 0,			NULL },					\
-}
-
 enum atw_rftype { ATW_RFTYPE_INTERSIL = 0, ATW_RFTYPE_RFMD  = 1,
        ATW_RFTYPE_MARVEL = 2 };
 
@@ -209,6 +193,7 @@ struct atw_softc {
 
 	bus_space_tag_t		sc_st;		/* bus space tag */
 	bus_space_handle_t	sc_sh;		/* bus space handle */
+	bus_size_t		sc_mapsize;	/* mapping size */
 	bus_dma_tag_t		sc_dmat;	/* bus dma tag */
 	void			*sc_sdhook;	/* shutdown hook */
 	void			*sc_powerhook;	/* power management hook */

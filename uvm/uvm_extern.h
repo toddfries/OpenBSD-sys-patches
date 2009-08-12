@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_extern.h,v 1.72 2008/11/04 21:37:06 deraadt Exp $	*/
+/*	$OpenBSD: uvm_extern.h,v 1.81 2009/06/16 23:54:58 oga Exp $	*/
 /*	$NetBSD: uvm_extern.h,v 1.57 2001/03/09 01:02:12 chs Exp $	*/
 
 /*
@@ -221,6 +221,13 @@ typedef int		vm_prot_t;
 #define	UVM_PGA_ZERO		0x0002	/* returned page must be zeroed */
 
 /*
+ * flags for uvm_pglistalloc()
+ */
+#define UVM_PLA_WAITOK		0x0001	/* may sleep */
+#define UVM_PLA_NOWAIT		0x0002	/* can't sleep (need one of the two) */
+#define UVM_PLA_ZERO		0x0004	/* zero all pages before returning */
+
+/*
  * lockflags that control the locking behavior of various functions.
  */
 #define	UVM_LK_ENTER	0x00000001	/* map locked on entry */
@@ -406,6 +413,20 @@ struct vmspace {
 #ifdef _KERNEL
 
 /*
+ * used to keep state while iterating over the map for a core dump.
+ */
+struct uvm_coredump_state {
+	void *cookie;		/* opaque for the caller */
+	vaddr_t start;		/* start of region */
+	vaddr_t realend;	/* real end of region */
+	vaddr_t end;		/* virtual end of region */
+	vm_prot_t prot;		/* protection of region */
+	int flags;		/* flags; see below */
+};
+
+#define	UVM_COREDUMP_STACK	0x01	/* region is user stack */
+
+/*
  * the various kernel maps, owned by MD code
  */
 extern struct vm_map *exec_map;
@@ -501,10 +522,6 @@ vaddr_t			uvm_km_valloc_align(vm_map_t, vsize_t, vsize_t);
 vaddr_t			uvm_km_valloc_wait(vm_map_t, vsize_t);
 vaddr_t			uvm_km_valloc_prefer_wait(vm_map_t, vsize_t,
 					voff_t);
-vaddr_t			uvm_km_alloc_poolpage1(vm_map_t,
-				struct uvm_object *, boolean_t);
-void			uvm_km_free_poolpage1(vm_map_t, vaddr_t);
-
 void			*uvm_km_getpage(boolean_t, int *);
 void			uvm_km_putpage(void *);
 
@@ -578,6 +595,10 @@ void			uvm_swap_init(void);
 /* uvm_unix.c */
 int			uvm_coredump(struct proc *, struct vnode *, 
 				struct ucred *, struct core *);
+int			uvm_coredump_walkmap(struct proc *,
+			    void *,
+			    int (*)(struct proc *, void *,
+				    struct uvm_coredump_state *), void *);
 void			uvm_grow(struct proc *, vaddr_t);
 
 /* uvm_user.c */

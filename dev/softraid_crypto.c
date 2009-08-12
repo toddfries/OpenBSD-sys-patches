@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_crypto.c,v 1.31 2008/09/22 19:44:00 miod Exp $ */
+/* $OpenBSD: softraid_crypto.c,v 1.39 2009/06/11 19:42:59 marco Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Hans-Joerg Hoexer <hshoexer@openbsd.org>
@@ -55,25 +55,51 @@
 #include <dev/rndvar.h>
 
 struct cryptop	*sr_crypto_getcryptop(struct sr_workunit *, int);
-int		 sr_crypto_create_keys(struct sr_discipline *);
+int		sr_crypto_create_keys(struct sr_discipline *);
 void		*sr_crypto_putcryptop(struct cryptop *);
-int		 sr_crypto_get_kdf(struct bioc_createraid *,
-		     struct sr_discipline *);
-int		 sr_crypto_decrypt_key(struct sr_discipline *);
-int		 sr_crypto_alloc_resources(struct sr_discipline *);
-int		 sr_crypto_free_resources(struct sr_discipline *);
-int		 sr_crypto_write(struct cryptop *);
-int		 sr_crypto_rw(struct sr_workunit *);
-int		 sr_crypto_rw2(struct sr_workunit *, struct cryptop *);
-void		 sr_crypto_intr(struct buf *);
-int		 sr_crypto_read(struct cryptop *);
-void		 sr_crypto_finish_io(struct sr_workunit *);
-void		 sr_crypto_calculate_check_hmac_sha1(struct sr_discipline *,
-		    u_char[SHA1_DIGEST_LENGTH]);
+int		sr_crypto_get_kdf(struct bioc_createraid *,
+		    struct sr_discipline *);
+int		sr_crypto_decrypt_key(struct sr_discipline *);
+int		sr_crypto_alloc_resources(struct sr_discipline *);
+int		sr_crypto_free_resources(struct sr_discipline *);
+int		sr_crypto_write(struct cryptop *);
+int		sr_crypto_rw(struct sr_workunit *);
+int		sr_crypto_rw2(struct sr_workunit *, struct cryptop *);
+void		sr_crypto_intr(struct buf *);
+int		sr_crypto_read(struct cryptop *);
+void		sr_crypto_finish_io(struct sr_workunit *);
+void		sr_crypto_calculate_check_hmac_sha1(struct sr_discipline *,
+		   u_char[SHA1_DIGEST_LENGTH]);
+void		sr_crypto_hotplug(struct sr_discipline *, struct disk *, int);
 
 #ifdef SR_DEBUG0
 void		 sr_crypto_dumpkeys(struct sr_discipline *);
 #endif
+
+/* Discipline initialisation. */
+void
+sr_crypto_discipline_init(struct sr_discipline *sd)
+{
+	/* Fill out discipline members. */
+	sd->sd_type = SR_MD_CRYPTO;
+	sd->sd_max_ccb_per_wu = sd->sd_meta->ssdi.ssd_chunk_no;
+	sd->sd_max_wu = SR_CRYPTO_NOWU;
+
+	/* Setup discipline pointers. */
+	sd->sd_alloc_resources = sr_crypto_alloc_resources;
+	sd->sd_free_resources = sr_crypto_free_resources;
+	sd->sd_start_discipline = NULL;
+	sd->sd_scsi_inquiry = sr_raid_inquiry;
+	sd->sd_scsi_read_cap = sr_raid_read_cap;
+	sd->sd_scsi_tur = sr_raid_tur;
+	sd->sd_scsi_req_sense = sr_raid_request_sense;
+	sd->sd_scsi_start_stop = sr_raid_start_stop;
+	sd->sd_scsi_sync = sr_raid_sync;
+	sd->sd_scsi_rw = sr_crypto_rw;
+	/* XXX reuse raid 1 functions for now FIXME */
+	sd->sd_set_chunk_state = sr_raid1_set_chunk_state;
+	sd->sd_set_vol_state = sr_raid1_set_vol_state;
+}
 
 struct cryptop *
 sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
@@ -125,7 +151,7 @@ sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
 
 	/* Select crypto session based on block number */
 	keyndx = blk >> SR_CRYPTO_KEY_BLKSHIFT;
-	if (keyndx > SR_CRYPTO_MAXKEYS)
+	if (keyndx >= SR_CRYPTO_MAXKEYS)
 		goto unwind;
 	crp->crp_sid = sd->mds.mdd_crypto.scr_sid[keyndx];
 	if (crp->crp_sid == (u_int64_t)-1)
@@ -159,8 +185,9 @@ sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
 unwind:
 	if (crp)
 		crypto_freereq(crp);
-	if (wu->swu_xs->flags & SCSI_DATA_OUT)
-		free(uio->uio_iov->iov_base, M_DEVBUF);
+	if (uio && uio->uio_iov)
+		if (wu->swu_xs->flags & SCSI_DATA_OUT)
+			free(uio->uio_iov->iov_base, M_DEVBUF);
 
 	s = splbio();
 	if (uio && uio->uio_iov)
@@ -197,8 +224,8 @@ sr_crypto_putcryptop(struct cryptop *crp)
 int
 sr_crypto_get_kdf(struct bioc_createraid *bc, struct sr_discipline *sd)
 {
-	struct sr_crypto_kdfinfo	*kdfinfo;
-	int				 rv = EINVAL;
+	int			rv = EINVAL;
+	struct sr_crypto_kdfinfo *kdfinfo;
 
 	if (!(bc->bc_opaque_flags & BIOC_SOIN))
 		return (rv);
@@ -246,9 +273,9 @@ void
 sr_crypto_calculate_check_hmac_sha1(struct sr_discipline *sd,
     u_char check_digest[SHA1_DIGEST_LENGTH])
 {
-	u_char		check_key[SHA1_DIGEST_LENGTH];
-	HMAC_SHA1_CTX	hmacctx;
-	SHA1_CTX	shactx;
+	u_char			check_key[SHA1_DIGEST_LENGTH];
+	HMAC_SHA1_CTX		hmacctx;
+	SHA1_CTX		shactx;
 
 	bzero(check_key, sizeof(check_key));
 	bzero(&hmacctx, sizeof(hmacctx));
@@ -274,11 +301,11 @@ sr_crypto_calculate_check_hmac_sha1(struct sr_discipline *sd,
 int
 sr_crypto_decrypt_key(struct sr_discipline *sd)
 {
-	rijndael_ctx	 ctx;
-	u_char		*p, *c;
-	size_t		 ksz;
-	int		 i, rv = 1;
-	u_char		check_digest[SHA1_DIGEST_LENGTH];
+	rijndael_ctx		ctx;
+	u_char			*p, *c;
+	size_t			ksz;
+	int			i, rv = 1;
+	u_char			check_digest[SHA1_DIGEST_LENGTH];
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_decrypt_key\n", DEVNAME(sd->sd_sc));
 
@@ -330,10 +357,10 @@ sr_crypto_decrypt_key(struct sr_discipline *sd)
 int
 sr_crypto_create_keys(struct sr_discipline *sd)
 {
-	rijndael_ctx	 ctx;
-	u_char		*p, *c;
-	size_t		 ksz;
-	int		 i;
+	rijndael_ctx		ctx;
+	u_char			*p, *c;
+	size_t			ksz;
+	int			i;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_create_keys\n",
 	    DEVNAME(sd->sd_sc));
@@ -387,7 +414,7 @@ int
 sr_crypto_alloc_resources(struct sr_discipline *sd)
 {
 	struct cryptoini	cri;
-	u_int num_keys, i;
+	u_int			num_keys, i;
 
 	if (!sd)
 		return (EINVAL);
@@ -408,7 +435,7 @@ sr_crypto_alloc_resources(struct sr_discipline *sd)
 	if (sr_ccb_alloc(sd))
 		return (ENOMEM);
 	if (sr_crypto_decrypt_key(sd))
-		return (EPERM);	
+		return (EPERM);
 
 	bzero(&cri, sizeof(cri));
 	cri.cri_alg = CRYPTO_AES_XTS;
@@ -442,20 +469,24 @@ sr_crypto_alloc_resources(struct sr_discipline *sd)
 		}
 	}
 
+	sr_hotplug_register(sd, sr_crypto_hotplug);
+
 	return (0);
 }
 
 int
 sr_crypto_free_resources(struct sr_discipline *sd)
 {
-	int		rv = EINVAL;
-	u_int		i;
+	int			rv = EINVAL;
+	u_int			i;
 
 	if (!sd)
 		return (rv);
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_free_resources\n",
 	    DEVNAME(sd->sd_sc));
+
+	sr_hotplug_unregister(sd, sr_crypto_hotplug);
 
 	for (i = 0; sd->mds.mdd_crypto.scr_sid[i] != (u_int64_t)-1; i++) {
 		crypto_freesession(
@@ -477,7 +508,7 @@ int
 sr_crypto_rw(struct sr_workunit *wu)
 {
 	struct cryptop		*crp;
-	int			 s, rv = 0;
+	int			s, rv = 0;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_rw wu: %p\n",
 	    DEVNAME(wu->swu_dis->sd_sc), wu);
@@ -501,7 +532,7 @@ sr_crypto_rw(struct sr_workunit *wu)
 int
 sr_crypto_write(struct cryptop *crp)
 {
-	int		 	 s;
+	int			s;
 	struct sr_workunit	*wu = crp->crp_opaque;
 
 	DNPRINTF(SR_D_INTR, "%s: sr_crypto_write: wu %x xs: %x\n",
@@ -526,8 +557,8 @@ sr_crypto_rw2(struct sr_workunit *wu, struct cryptop *crp)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_ccb		*ccb;
 	struct uio		*uio;
-	int			 s;
-	daddr64_t		 blk;
+	int			s;
+	daddr64_t		blk;
 
 	if (sr_validate_io(wu, &blk, "sr_crypto_rw2"))
 		goto bad;
@@ -544,7 +575,7 @@ sr_crypto_rw2(struct sr_workunit *wu, struct cryptop *crp)
 		goto bad;
 	}
 
-	ccb->ccb_buf.b_flags = B_CALL;
+	ccb->ccb_buf.b_flags = B_CALL | B_PHYS;
 	ccb->ccb_buf.b_iodone = sr_crypto_intr;
 	ccb->ccb_buf.b_blkno = blk;
 	ccb->ccb_buf.b_bcount = xs->datalen;
@@ -572,11 +603,11 @@ sr_crypto_rw2(struct sr_workunit *wu, struct cryptop *crp)
 
 	TAILQ_INSERT_TAIL(&wu->swu_ccb, ccb, ccb_link);
 
-        DNPRINTF(SR_D_DIS, "%s: %s: sr_crypto_rw2: b_bcount: %d "
-            "b_blkno: %x b_flags 0x%0x b_data %p\n",
-            DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
-            ccb->ccb_buf.b_bcount, ccb->ccb_buf.b_blkno,
-            ccb->ccb_buf.b_flags, ccb->ccb_buf.b_data);
+	DNPRINTF(SR_D_DIS, "%s: %s: sr_crypto_rw2: b_bcount: %d "
+	    "b_blkno: %x b_flags 0x%0x b_data %p\n",
+	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
+	    ccb->ccb_buf.b_bcount, ccb->ccb_buf.b_blkno,
+	    ccb->ccb_buf.b_flags, ccb->ccb_buf.b_data);
 
 	s = splbio();
 
@@ -604,16 +635,16 @@ sr_crypto_intr(struct buf *bp)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_softc		*sc = sd->sd_sc;
 	struct cryptop		*crp;
-	int			 s, s2, pend;
+	int			s, s2, pend;
 
-        DNPRINTF(SR_D_INTR, "%s: sr_crypto_intr bp: %x xs: %x\n",
-            DEVNAME(sc), bp, wu->swu_xs);
+	DNPRINTF(SR_D_INTR, "%s: sr_crypto_intr bp: %x xs: %x\n",
+	    DEVNAME(sc), bp, wu->swu_xs);
 
-        DNPRINTF(SR_D_INTR, "%s: sr_crypto_intr: b_bcount: %d b_resid: %d"
-            " b_flags: 0x%0x\n", DEVNAME(sc), ccb->ccb_buf.b_bcount,
-            ccb->ccb_buf.b_resid, ccb->ccb_buf.b_flags);
+	DNPRINTF(SR_D_INTR, "%s: sr_crypto_intr: b_bcount: %d b_resid: %d"
+	    " b_flags: 0x%0x\n", DEVNAME(sc), ccb->ccb_buf.b_bcount,
+	    ccb->ccb_buf.b_resid, ccb->ccb_buf.b_flags);
 
-        s = splbio();
+	s = splbio();
 
 	if (ccb->ccb_buf.b_flags & B_ERROR) {
 		printf("%s: i/o error on block %lld\n", DEVNAME(sc),
@@ -707,7 +738,7 @@ sr_crypto_finish_io(struct sr_workunit *wu)
 
 	/* do not change the order of these 2 functions */
 	sr_wu_put(wu);
-	scsi_done(xs);
+	sr_scsi_done(sd, xs);
 
 	if (sd->sd_sync && sd->sd_wu_pending == 0)
 		wakeup(sd);
@@ -716,7 +747,7 @@ sr_crypto_finish_io(struct sr_workunit *wu)
 int
 sr_crypto_read(struct cryptop *crp)
 {
-	int			 s;
+	int			s;
 	struct sr_workunit	*wu = crp->crp_opaque;
 
 	DNPRINTF(SR_D_INTR, "%s: sr_crypto_read: wu %x xs: %x\n",
@@ -732,11 +763,18 @@ sr_crypto_read(struct cryptop *crp)
 	return (0);
 }
 
+void
+sr_crypto_hotplug(struct sr_discipline *sd, struct disk *diskp, int action)
+{
+	DNPRINTF(SR_D_MISC, "%s: sr_crypto_hotplug: %s %d\n",
+	    DEVNAME(sd->sd_sc), diskp->dk_name, action);
+}
+
 #ifdef SR_DEBUG0
 void
 sr_crypto_dumpkeys(struct sr_discipline *sd)
 {
-	int	i, j;
+	int			i, j;
 
 	printf("sr_crypto_dumpkeys:\n");
 	for (i = 0; i < SR_CRYPTO_MAXKEYS; i++) {

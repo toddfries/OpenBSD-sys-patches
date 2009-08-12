@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9reg.h,v 1.58 2008/11/08 06:52:49 brad Exp $	*/
+/*	$OpenBSD: rtl81x9reg.h,v 1.66 2009/07/23 20:15:32 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -136,6 +136,8 @@
 #define RL_TBI_ANAR		0x0068
 #define RL_TBI_LPAR		0x006A
 #define RL_GMEDIASTAT		0x006C	/* 8 bits */
+#define RL_MACDBG		0x006D	/* 8 bits */
+#define RL_GPIO			0x006E	/* 8 bits */
 #define RL_LDPS			0x0082	/* Link Down Power Saving */
 #define RL_MAXRXPKTLEN		0x00DA	/* 16 bits, chip multiplies by 8 */
 #define RL_IM			0x00E2
@@ -158,11 +160,14 @@
 /* Known revision codes. */
 
 #define RL_HWREV_8169		0x00000000
-#define RL_HWREV_8110S		0x00800000
-#define RL_HWREV_8169S		0x04000000
+#define RL_HWREV_8169S		0x00800000
+#define RL_HWREV_8110S		0x04000000
 #define RL_HWREV_8169_8110SB	0x10000000
 #define RL_HWREV_8169_8110SCd	0x18000000
 #define RL_HWREV_8102EL		0x24800000
+#define RL_HWREV_8103E		0x24C00000
+#define RL_HWREV_8168D		0x28000000
+#define RL_HWREV_8168DP		0x28800000
 #define RL_HWREV_8168_SPIN1	0x30000000
 #define RL_HWREV_8100E_SPIN1	0x30800000
 #define RL_HWREV_8101E		0x34000000
@@ -313,6 +318,7 @@
 #define RL_CMD_TX_ENB		0x0004
 #define RL_CMD_RX_ENB		0x0008
 #define RL_CMD_RESET		0x0010
+#define RL_CMD_STOPREQ		0x0080
 
 /*
  * EEPROM control register
@@ -779,7 +785,9 @@ struct rl_list_data {
 	struct rl_rxsoft	rl_rxsoft[RL_RX_DESC_CNT];
 	bus_dmamap_t		rl_rx_list_map;
 	struct rl_desc		*rl_rx_list;
+	int			rl_rx_considx;
 	int			rl_rx_prodidx;
+	int			rl_rx_cnt;
 	bus_dma_segment_t	rl_rx_listseg;
 	int			rl_rx_listnseg;
 };
@@ -804,7 +812,6 @@ struct rl_softc {
 	int			rl_txthresh;
 	struct rl_chain_data	rl_cdata;
 	struct timeout		sc_tick_tmo;
-	int			if_flags;
 
 	struct rl_list_data	rl_ldata;
 	struct mbuf		*rl_head;
@@ -826,6 +833,10 @@ struct rl_softc {
 #define	RL_FLAG_MACSTAT		0x0100
 #define	RL_FLAG_HWIM		0x0200
 #define	RL_FLAG_TIMERINTR	0x0400
+#define	RL_FLAG_MACLDPS		0x0800
+#define	RL_FLAG_CMDSTOP		0x1000
+#define	RL_FLAG_MACSLEEP	0x2000
+#define	RL_FLAG_AUTOPAD		0x4000
 #define	RL_FLAG_LINK		0x8000
 
 	u_int16_t		rl_intrs;
@@ -994,3 +1005,4 @@ struct rl_softc {
 extern int rl_attach(struct rl_softc *);
 extern int rl_intr(void *);
 extern void rl_setmulti(struct rl_softc *);
+int rl_detach(struct rl_softc *);

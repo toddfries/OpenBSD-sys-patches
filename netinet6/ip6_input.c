@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.89 2008/11/02 10:37:29 claudio Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.91 2009/05/18 20:37:13 bluhm Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -196,7 +196,7 @@ ip6intr()
 }
 
 extern struct	route_in6 ip6_forward_rt;
-extern int	ip6_forward_rtableid;
+extern u_int	ip6_forward_rtableid;
 
 void
 ip6_input(struct mbuf *m)
@@ -210,7 +210,8 @@ ip6_input(struct mbuf *m)
 #if NPF > 0
 	struct in6_addr odst;
 #endif
-	int srcrt = 0, rtableid = 0, isanycast = 0;
+	int srcrt = 0, isanycast = 0;
+	u_int rtableid = 0;
 
 	/*
 	 * mbuf statistics by kazu
@@ -1471,6 +1472,8 @@ ip6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return sysctl_rdstring(oldp, oldlenp, newp, __KAME_VERSION);
 	case IPV6CTL_V6ONLY:
 		return sysctl_rdint(oldp, oldlenp, newp, ip6_v6only);
+	case IPV6CTL_DAD_PENDING:
+		return sysctl_rdint(oldp, oldlenp, newp, ip6_dad_pending);
 	case IPV6CTL_STATS:
 		if (newp != NULL)
 			return (EPERM);

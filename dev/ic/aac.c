@@ -1,4 +1,4 @@
-/*	$OpenBSD: aac.c,v 1.37 2007/10/01 04:03:51 krw Exp $	*/
+/*	$OpenBSD: aac.c,v 1.39 2009/02/16 21:19:06 miod Exp $	*/
 
 /*-
  * Copyright (c) 2000 Michael Smith
@@ -2479,7 +2479,7 @@ aac_internal_cache_cmd(struct scsi_xfer *xs)
 }
 
 void
-aacminphys(struct buf *bp)
+aacminphys(struct buf *bp, struct scsi_link *sl)
 {
 #if 0
 	u_int8_t *buf = bp->b_data;
@@ -2638,7 +2638,7 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 			 * in a little while.
 			 */
 			splx(s);
-			return (TRY_AGAIN_LATER);
+			return (NO_CCB);
 		}
 
 		/* fill out the command */

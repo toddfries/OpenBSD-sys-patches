@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.79 2008/10/14 18:01:53 naddy Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.97 2009/06/18 18:53:02 claudio Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -39,7 +39,7 @@
  *
  * Supports various network adapters based on the VIA Rhine
  * and Rhine II PCI controllers, including the D-Link DFE530TX.
- * Datasheets are available at http://www.via.com.tw.
+ * Datasheets are available at ftp://ftp.vtbridge.org/Docs/LAN/.
  *
  * Written by Bill Paul <wpaul@ctr.columbia.edu>
  * Electrical Engineering Department
@@ -54,9 +54,9 @@
  * multicast filter. Transmit and receive descriptors are similar
  * to the tulip.
  *
- * The Rhine has a serious flaw in its transmit DMA mechanism:
+ * Early Rhine has a serious flaw in its transmit DMA mechanism:
  * transmit buffers must be longword aligned. Unfortunately,
- * FreeBSD doesn't guarantee that mbufs will be filled in starting
+ * OpenBSD doesn't guarantee that mbufs will be filled in starting
  * at longword boundaries, so we have to do a buffer copy before
  * transmission.
  */
@@ -101,6 +101,7 @@
 #include <dev/pci/if_vrreg.h>
 
 int vr_probe(struct device *, void *, void *);
+int vr_quirks(struct pci_attach_args *);
 void vr_attach(struct device *, struct device *, void *);
 
 struct cfattach vr_ca = {
@@ -132,21 +133,41 @@ void vr_miibus_writereg(struct device *, int, int, int);
 void vr_miibus_statchg(struct device *);
 
 void vr_setcfg(struct vr_softc *, int);
-void vr_setmulti(struct vr_softc *);
+void vr_iff(struct vr_softc *);
 void vr_reset(struct vr_softc *);
 int vr_list_rx_init(struct vr_softc *);
+void vr_fill_rx_ring(struct vr_softc *);
 int vr_list_tx_init(struct vr_softc *);
 
-int vr_alloc_mbuf(struct vr_softc *, struct vr_chain_onefrag *, struct mbuf *);
+int vr_alloc_mbuf(struct vr_softc *, struct vr_chain_onefrag *);
 
-const struct pci_matchid vr_devices[] = {
-	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_RHINE },
-	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_RHINEII },
-	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_RHINEII_2 },
-	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT6105 },
-	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT6105M },
-	{ PCI_VENDOR_DELTA, PCI_PRODUCT_DELTA_RHINEII },
-	{ PCI_VENDOR_ADDTRON, PCI_PRODUCT_ADDTRON_RHINEII }
+/*
+ * Supported devices & quirks
+ */
+#define	VR_Q_NEEDALIGN		(1<<0)
+#define	VR_Q_CSUM		(1<<1)
+#define	VR_Q_CAM		(1<<2)
+#define	VR_Q_HWTAG		(1<<3)
+
+struct vr_type {
+	pci_vendor_id_t		vr_vid;
+	pci_product_id_t	vr_pid;
+	int			vr_quirks;
+} vr_devices[] = {
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_RHINE,
+	    VR_Q_NEEDALIGN },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_RHINEII,
+	    VR_Q_NEEDALIGN },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_RHINEII_2,
+	    0 },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT6105,
+	    0 },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT6105M,
+	    VR_Q_CSUM | VR_Q_CAM | VR_Q_HWTAG },
+	{ PCI_VENDOR_DELTA, PCI_PRODUCT_DELTA_RHINEII,
+	    VR_Q_NEEDALIGN },
+	{ PCI_VENDOR_ADDTRON, PCI_PRODUCT_ADDTRON_RHINEII,
+	    VR_Q_NEEDALIGN }
 };
 
 #define VR_SETBIT(sc, reg, x)				\
@@ -217,7 +238,7 @@ vr_mii_readreg(struct vr_softc *sc, struct vr_mii_frame *frame)
  */
 int
 vr_mii_writereg(struct vr_softc *sc, struct vr_mii_frame *frame)
-{      
+{
 	int			s, i;
 
 	s = splnet();
@@ -235,7 +256,7 @@ vr_mii_writereg(struct vr_softc *sc, struct vr_mii_frame *frame)
 	for (i = 0; i < 10000; i++) {
 		if ((CSR_READ_1(sc, VR_MIICMD) & VR_MIICMD_WRITE_ENB) == 0)
 			break;
-		DELAY(1); 
+		DELAY(1);
 	}
 
 	splx(s);
@@ -299,59 +320,51 @@ vr_miibus_statchg(struct device *dev)
 	vr_setcfg(sc, sc->sc_mii.mii_media_active);
 }
 
-/*
- * Program the 64-bit multicast hash filter.
- */
 void
-vr_setmulti(struct vr_softc *sc)
+vr_iff(struct vr_softc *sc)
 {
-	struct ifnet		*ifp;
+	struct arpcom		*ac = &sc->arpcom;
+	struct ifnet		*ifp = &sc->arpcom.ac_if;
 	int			h = 0;
-	u_int32_t		hashes[2] = { 0, 0 };
-	struct arpcom *ac = &sc->arpcom;
-	struct ether_multi *enm;
-	struct ether_multistep step;
+	u_int32_t		hashes[2];
+	struct ether_multi	*enm;
+	struct ether_multistep	step;
 	u_int8_t		rxfilt;
-	int			mcnt = 0;
-
-	ifp = &sc->arpcom.ac_if;
 
 	rxfilt = CSR_READ_1(sc, VR_RXCFG);
+	rxfilt &= ~(VR_RXCFG_RX_BROAD | VR_RXCFG_RX_MULTI |
+	    VR_RXCFG_RX_PROMISC);
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
-	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC) {
-allmulti:
+	/*
+	 * Always accept broadcast frames.
+	 */
+	rxfilt |= VR_RXCFG_RX_BROAD;
+
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
 		rxfilt |= VR_RXCFG_RX_MULTI;
-		CSR_WRITE_1(sc, VR_RXCFG, rxfilt);
-		CSR_WRITE_4(sc, VR_MAR0, 0xFFFFFFFF);
-		CSR_WRITE_4(sc, VR_MAR1, 0xFFFFFFFF);
-		return;
-	}
+		if (ifp->if_flags & IFF_PROMISC)
+			rxfilt |= VR_RXCFG_RX_PROMISC;
+		hashes[0] = hashes[1] = 0xFFFFFFFF;
+	} else {
+		/* Program new filter. */
+		rxfilt |= VR_RXCFG_RX_MULTI;
+		bzero(hashes, sizeof(hashes));
 
-	/* first, zot all the existing hash bits */
-	CSR_WRITE_4(sc, VR_MAR0, 0);
-	CSR_WRITE_4(sc, VR_MAR1, 0);
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			h = ether_crc32_be(enm->enm_addrlo,
+			    ETHER_ADDR_LEN) >> 26;
 
-	/* now program new ones */
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			goto allmulti;
+			if (h < 32)
+				hashes[0] |= (1 << h);
+			else
+				hashes[1] |= (1 << (h - 32));
+
+			ETHER_NEXT_MULTI(step, enm);
 		}
-		h = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) >> 26;
-		if (h < 32)
-			hashes[0] |= (1 << h);
-		else
-			hashes[1] |= (1 << (h - 32));
-		mcnt++;
-
-		ETHER_NEXT_MULTI(step, enm);
 	}
-
-	if (mcnt)
-		rxfilt |= VR_RXCFG_RX_MULTI;
-	else
-		rxfilt &= ~VR_RXCFG_RX_MULTI;
 
 	CSR_WRITE_4(sc, VR_MAR0, hashes[0]);
 	CSR_WRITE_4(sc, VR_MAR1, hashes[1]);
@@ -366,20 +379,38 @@ allmulti:
 void
 vr_setcfg(struct vr_softc *sc, int media)
 {
-	int restart = 0;
+	int i;
 
-	if (CSR_READ_2(sc, VR_COMMAND) & (VR_CMD_TX_ON|VR_CMD_RX_ON)) {
-		restart = 1;
-		VR_CLRBIT16(sc, VR_COMMAND, (VR_CMD_TX_ON|VR_CMD_RX_ON));
-	}
+	if (sc->sc_mii.mii_media_status & IFM_ACTIVE &&
+	    IFM_SUBTYPE(sc->sc_mii.mii_media_active) != IFM_NONE) {
+		sc->vr_link = 1;
 
-	if ((media & IFM_GMASK) == IFM_FDX)
-		VR_SETBIT16(sc, VR_COMMAND, VR_CMD_FULLDUPLEX);
-	else
-		VR_CLRBIT16(sc, VR_COMMAND, VR_CMD_FULLDUPLEX);
+		if (CSR_READ_2(sc, VR_COMMAND) & (VR_CMD_TX_ON|VR_CMD_RX_ON))
+			VR_CLRBIT16(sc, VR_COMMAND,
+			    (VR_CMD_TX_ON|VR_CMD_RX_ON));
 
-	if (restart)
+		if ((media & IFM_GMASK) == IFM_FDX)
+			VR_SETBIT16(sc, VR_COMMAND, VR_CMD_FULLDUPLEX);
+		else
+			VR_CLRBIT16(sc, VR_COMMAND, VR_CMD_FULLDUPLEX);
+
 		VR_SETBIT16(sc, VR_COMMAND, VR_CMD_TX_ON|VR_CMD_RX_ON);
+	} else {
+		sc->vr_link = 0;
+		VR_CLRBIT16(sc, VR_COMMAND, (VR_CMD_TX_ON|VR_CMD_RX_ON));
+		for (i = VR_TIMEOUT; i > 0; i--) {
+			DELAY(10);
+			if (!(CSR_READ_2(sc, VR_COMMAND) &
+			    (VR_CMD_TX_ON|VR_CMD_RX_ON)))
+				break;
+		}
+		if (i == 0) {
+#ifdef VR_DEBUG
+			printf("%s: rx shutdown error!\n", sc->sc_dev.dv_xname);
+#endif
+			sc->vr_flags |= VR_F_RESTART;
+		}
+	}
 }
 
 void
@@ -406,7 +437,7 @@ vr_reset(struct vr_softc *sc)
 #endif
 			VR_SETBIT(sc, VR_MISC_CR1, VR_MISCCR1_FORSRST);
 		}
-	}       
+	}
 
 	/* Wait a little while for the chip to get its brains in order. */
 	DELAY(1000);
@@ -418,8 +449,30 @@ vr_reset(struct vr_softc *sc)
 int
 vr_probe(struct device *parent, void *match, void *aux)
 {
-	return (pci_matchbyid((struct pci_attach_args *)aux, vr_devices,
-	    sizeof(vr_devices)/sizeof(vr_devices[0])));
+	const struct vr_type *vr;
+	struct pci_attach_args *pa = (struct pci_attach_args *)aux;
+	int i, nent = nitems(vr_devices);
+
+	for (i = 0, vr = vr_devices; i < nent; i++, vr++)
+		if (PCI_VENDOR(pa->pa_id) == vr->vr_vid &&
+		   PCI_PRODUCT(pa->pa_id) == vr->vr_pid)
+			return(1);
+
+	return(0);
+}
+
+int
+vr_quirks(struct pci_attach_args *pa)
+{
+	const struct vr_type *vr;
+	int i, nent = nitems(vr_devices);
+
+	for (i = 0, vr = vr_devices; i < nent; i++, vr++)
+		if (PCI_VENDOR(pa->pa_id) == vr->vr_vid &&
+		   PCI_PRODUCT(pa->pa_id) == vr->vr_pid)
+			return(vr->vr_quirks);
+
+	return(0);
 }
 
 /*
@@ -432,7 +485,7 @@ vr_attach(struct device *parent, struct device *self, void *aux)
 	int			i;
 	pcireg_t		command;
 	struct vr_softc		*sc = (struct vr_softc *)self;
-	struct pci_attach_args 	*pa = aux;
+	struct pci_attach_args	*pa = aux;
 	pci_chipset_tag_t	pc = pa->pa_pc;
 	pci_intr_handle_t	ih;
 	const char		*intrstr = NULL;
@@ -482,27 +535,27 @@ vr_attach(struct device *parent, struct device *self, void *aux)
 #ifdef VR_USEIOSPACE
 	if (pci_mapreg_map(pa, VR_PCI_LOIO, PCI_MAPREG_TYPE_IO, 0,
 	    &sc->vr_btag, &sc->vr_bhandle, NULL, &size, 0)) {
-		printf(": failed to map i/o space\n");
+		printf(": can't map i/o space\n");
 		return;
 	}
 #else
 	if (pci_mapreg_map(pa, VR_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
 	    &sc->vr_btag, &sc->vr_bhandle, NULL, &size, 0)) {
-		printf(": failed to map memory space\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 #endif
 
 	/* Allocate interrupt */
 	if (pci_intr_map(pa, &ih)) {
-		printf(": couldn't map interrupt\n");
+		printf(": can't map interrupt\n");
 		goto fail_1;
 	}
 	intrstr = pci_intr_string(pc, ih);
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, vr_intr, sc,
 				       self->dv_xname);
 	if (sc->sc_ih == NULL) {
-		printf(": could not establish interrupt");
+		printf(": can't establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
@@ -574,6 +627,7 @@ vr_attach(struct device *parent, struct device *self, void *aux)
 	}
 	sc->vr_ldata = (struct vr_list_data *)kva;
 	bzero(sc->vr_ldata, sizeof(struct vr_list_data));
+	sc->vr_quirks = vr_quirks(pa);
 
 	ifp = &sc->arpcom.ac_if;
 	ifp->if_softc = sc;
@@ -582,10 +636,14 @@ vr_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_start = vr_start;
 	ifp->if_watchdog = vr_watchdog;
 	ifp->if_baudrate = 10000000;
+	ifp->if_capabilities = 0;
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 
-	ifp->if_capabilities = IFCAP_VLAN_MTU;
+	ifp->if_capabilities |= IFCAP_VLAN_MTU;
+	if (sc->vr_quirks & VR_Q_CSUM)
+		ifp->if_capabilities |= IFCAP_CSUM_IPv4|IFCAP_CSUM_TCPv4|
+					IFCAP_CSUM_UDPv4;
 
 	/*
 	 * Do MII setup.
@@ -607,6 +665,7 @@ vr_attach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Call MI attach routines.
 	 */
+	m_clsetwms(ifp, MCLBYTES, 2, VR_RX_LIST_CNT - 1);
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
@@ -652,7 +711,7 @@ vr_list_tx_init(struct vr_softc *sc)
 			return (ENOBUFS);
 
 		if (i == (VR_TX_LIST_CNT - 1))
-			cd->vr_tx_chain[i].vr_nextdesc = 
+			cd->vr_tx_chain[i].vr_nextdesc =
 				&cd->vr_tx_chain[0];
 		else
 			cd->vr_tx_chain[i].vr_nextdesc =
@@ -682,7 +741,7 @@ vr_list_rx_init(struct vr_softc *sc)
 	ld = sc->vr_ldata;
 
 	for (i = 0; i < VR_RX_LIST_CNT; i++) {
-		if (bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES, 
+		if (bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES,
 		    0, BUS_DMA_NOWAIT | BUS_DMA_READ,
 		    &cd->vr_rx_chain[i].vr_map))
 			return (ENOBUFS);
@@ -693,12 +752,9 @@ vr_list_rx_init(struct vr_softc *sc)
 		    sc->sc_listmap->dm_segs[0].ds_addr +
 		    offsetof(struct vr_list_data, vr_rx_list[i]);
 
-		if (vr_alloc_mbuf(sc, &cd->vr_rx_chain[i], NULL))
-			return (ENOBUFS);
-
 		if (i == (VR_RX_LIST_CNT - 1))
 			nexti = 0;
-		else 
+		else
 			nexti = i + 1;
 
 		cd->vr_rx_chain[i].vr_nextdesc = &cd->vr_rx_chain[nexti];
@@ -707,9 +763,28 @@ vr_list_rx_init(struct vr_softc *sc)
 		    offsetof(struct vr_list_data, vr_rx_list[nexti]));
 	}
 
-	cd->vr_rx_head = &cd->vr_rx_chain[0];
+	cd->vr_rx_prod = cd->vr_rx_cons = &cd->vr_rx_chain[0];
+	cd->vr_rx_cnt = 0;
+	vr_fill_rx_ring(sc);
 
 	return (0);
+}
+
+void
+vr_fill_rx_ring(struct vr_softc *sc)
+{
+	struct vr_chain_data	*cd;
+	struct vr_list_data	*ld;
+
+	cd = &sc->vr_cdata;
+	ld = sc->vr_ldata;
+
+	while (cd->vr_rx_cnt < VR_RX_LIST_CNT) {
+		if (vr_alloc_mbuf(sc, cd->vr_rx_prod))
+			break;
+		cd->vr_rx_prod = cd->vr_rx_prod->vr_nextdesc;
+		cd->vr_rx_cnt++;
+	}
 }
 
 /*
@@ -719,34 +794,37 @@ vr_list_rx_init(struct vr_softc *sc)
 void
 vr_rxeof(struct vr_softc *sc)
 {
-	struct mbuf		*m0, *m;
+	struct mbuf		*m;
 	struct ifnet		*ifp;
 	struct vr_chain_onefrag	*cur_rx;
 	int			total_len = 0;
-	u_int32_t		rxstat;
+	u_int32_t		rxstat, rxctl;
 
 	ifp = &sc->arpcom.ac_if;
 
-	for (;;) {
-
+	while(sc->vr_cdata.vr_rx_cnt > 0) {
 		bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
 		    0, sc->sc_listmap->dm_mapsize,
 		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
-		rxstat = letoh32(sc->vr_cdata.vr_rx_head->vr_ptr->vr_status);
+		rxstat = letoh32(sc->vr_cdata.vr_rx_cons->vr_ptr->vr_status);
 		if (rxstat & VR_RXSTAT_OWN)
 			break;
 
-		m0 = NULL;
-		cur_rx = sc->vr_cdata.vr_rx_head;
-		sc->vr_cdata.vr_rx_head = cur_rx->vr_nextdesc;
+		rxctl = letoh32(sc->vr_cdata.vr_rx_cons->vr_ptr->vr_ctl);
+
+		cur_rx = sc->vr_cdata.vr_rx_cons;
+		m = cur_rx->vr_mbuf;
+		cur_rx->vr_mbuf = NULL;
+		sc->vr_cdata.vr_rx_cons = cur_rx->vr_nextdesc;
+		sc->vr_cdata.vr_rx_cnt--;
 
 		/*
 		 * If an error occurs, update stats, clear the
 		 * status word and leave the mbuf cluster in place:
 		 * it should simply get re-used next time this descriptor
-	 	 * comes up in the ring.
+		 * comes up in the ring.
 		 */
-		if (rxstat & VR_RXSTAT_RXERR) {
+		if ((rxstat & VR_RXSTAT_RX_OK) == 0) {
 			ifp->if_ierrors++;
 #ifdef VR_DEBUG
 			printf("%s: rx error (%02x):",
@@ -768,66 +846,66 @@ vr_rxeof(struct vr_softc *sc)
 			printf("\n");
 #endif
 
-			/* Reinitialize descriptor */
-			cur_rx->vr_ptr->vr_status = htole32(VR_RXSTAT);
-			cur_rx->vr_ptr->vr_data =
-			    htole32(cur_rx->vr_map->dm_segs[0].ds_addr +
-			    sizeof(u_int64_t));
-			cur_rx->vr_ptr->vr_ctl = htole32(VR_RXCTL | VR_RXLEN);
-			bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
-			    0, sc->sc_listmap->dm_mapsize,
-			    BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
+			m_freem(m);
 			continue;
 		}
 
-		/* No errors; receive the packet. */	
+		/* No errors; receive the packet. */
 		total_len = VR_RXBYTES(letoh32(cur_rx->vr_ptr->vr_status));
-
-		/*
-		 * XXX The VIA Rhine chip includes the CRC with every
-		 * received frame, and there's no way to turn this
-		 * behavior off (at least, I can't find anything in
-	 	 * the manual that explains how to do it) so we have
-		 * to trim off the CRC manually.
-		 */
-		total_len -= ETHER_CRC_LEN;
-
-		m = cur_rx->vr_mbuf;
-		cur_rx->vr_mbuf = NULL;
 
 		bus_dmamap_sync(sc->sc_dmat, cur_rx->vr_map, 0,
 		    cur_rx->vr_map->dm_mapsize, BUS_DMASYNC_POSTREAD);
 		bus_dmamap_unload(sc->sc_dmat, cur_rx->vr_map);
 
-#ifndef __STRICT_ALIGNMENT
-		if (vr_alloc_mbuf(sc, cur_rx, NULL) == 0) {
-			m->m_pkthdr.rcvif = ifp;
-			m->m_pkthdr.len = m->m_len = total_len;
-		} else
-#endif
+		/*
+		 * The VIA Rhine chip includes the CRC with every
+		 * received frame, and there's no way to turn this
+		 * behavior off so trim the CRC manually.
+		 */
+		total_len -= ETHER_CRC_LEN;
+
+#ifdef __STRICT_ALIGNMENT
 		{
+			struct mbuf *m0;
 			m0 = m_devget(mtod(m, caddr_t), total_len,
 			    ETHER_ALIGN, ifp, NULL);
-			vr_alloc_mbuf(sc, cur_rx, m);
+			m_freem(m);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;
 				continue;
 			}
 			m = m0;
-		}
+		} 
+#else
+		m->m_pkthdr.rcvif = ifp;
+		m->m_pkthdr.len = m->m_len = total_len;
+#endif
 
 		ifp->if_ipackets++;
+		if (sc->vr_quirks & VR_Q_CSUM &&
+		    (rxstat & VR_RXSTAT_FRAG) == 0 &&
+		    (rxctl & VR_RXCTL_IP) != 0) {
+			/* Checksum is valid for non-fragmented IP packets. */
+			if ((rxctl & VR_RXCTL_IPOK) == VR_RXCTL_IPOK)
+				m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
+			if (rxctl & (VR_RXCTL_TCP | VR_RXCTL_UDP) &&
+			    ((rxctl & VR_RXCTL_TCPUDPOK) != 0))
+				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK |
+				    M_UDP_CSUM_IN_OK;
+		}
 
 #if NBPFILTER > 0
 		/*
 		 * Handle BPF listeners. Let the BPF user see the packet.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		/* pass it on. */
 		ether_input_mbuf(ifp, m);
 	}
+
+	vr_fill_rx_ring(sc);
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
 	    0, sc->sc_listmap->dm_mapsize,
@@ -842,25 +920,25 @@ vr_rxeoc(struct vr_softc *sc)
 
 	ifp = &sc->arpcom.ac_if;
 
-	ifp->if_ierrors++;      
+	ifp->if_ierrors++;
 
-	VR_CLRBIT16(sc, VR_COMMAND, VR_CMD_RX_ON);      
-	DELAY(10000);  
+	VR_CLRBIT16(sc, VR_COMMAND, VR_CMD_RX_ON);
+	DELAY(10000);
 
-	for (i = 0x400; 
+	for (i = 0x400;
 	    i && (CSR_READ_2(sc, VR_COMMAND) & VR_CMD_RX_ON);
-	    i--)  
+	    i--)
 		;       /* Wait for receiver to stop */
 
-	if (!i) {       
+	if (!i) {
 		printf("%s: rx shutdown error!\n", sc->sc_dev.dv_xname);
 		sc->vr_flags |= VR_F_RESTART;
-		return; 
+		return;
 	}
 
 	vr_rxeof(sc);
 
-	CSR_WRITE_4(sc, VR_RXADDR, sc->vr_cdata.vr_rx_head->vr_paddr);
+	CSR_WRITE_4(sc, VR_RXADDR, sc->vr_cdata.vr_rx_cons->vr_paddr);
 	VR_SETBIT16(sc, VR_COMMAND, VR_CMD_RX_ON);
 	VR_SETBIT16(sc, VR_COMMAND, VR_CMD_RX_GO);
 }
@@ -932,7 +1010,7 @@ vr_txeof(struct vr_softc *sc)
 
 	sc->vr_cdata.vr_tx_cons = cur_tx;
 	if (cur_tx->vr_mbuf == NULL)
- 		ifp->if_timer = 0;
+		ifp->if_timer = 0;
 }
 
 void
@@ -945,10 +1023,10 @@ vr_tick(void *xsc)
 	if (sc->vr_flags & VR_F_RESTART) {
 		printf("%s: restarting\n", sc->sc_dev.dv_xname);
 		vr_stop(sc);
-		vr_reset(sc);   
+		vr_reset(sc);
 		vr_init(sc);
 		sc->vr_flags &= ~VR_F_RESTART;
-	}           
+	}
 
 	mii_tick(&sc->sc_mii);
 	timeout_add_sec(&sc->sc_to, 1);
@@ -994,7 +1072,7 @@ vr_intr(void *arg)
 			printf("%s: rx packet lost\n", sc->sc_dev.dv_xname);
 #endif
 			ifp->if_ierrors++;
-		}       
+		}
 
 		if ((status & VR_ISR_RX_ERR) || (status & VR_ISR_RX_NOBUF) ||
 		    (status & VR_ISR_RX_OFLOW)) {
@@ -1043,7 +1121,7 @@ vr_intr(void *arg)
 					VR_SETBIT16(sc, VR_COMMAND,
 					    VR_CMD_TX_ON);
 					VR_SETBIT16(sc, VR_COMMAND,
-					    VR_CMD_TX_GO); 
+					    VR_CMD_TX_GO);
 				}
 			}
 		}
@@ -1067,50 +1145,70 @@ vr_encap(struct vr_softc *sc, struct vr_chain *c, struct mbuf *m_head)
 {
 	struct vr_desc		*f = NULL;
 	struct mbuf		*m_new = NULL;
+	u_int32_t		vr_flags = 0, vr_status = 0;
 
-	MGETHDR(m_new, M_DONTWAIT, MT_DATA);
-	if (m_new == NULL)
-		return (1);
-	if (m_head->m_pkthdr.len > MHLEN) {
-		MCLGET(m_new, M_DONTWAIT);
-		if (!(m_new->m_flags & M_EXT)) {
+	if (sc->vr_quirks & VR_Q_CSUM) {
+		if (m_head->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
+			vr_flags |= VR_TXCTL_IPCSUM;
+		if (m_head->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+			vr_flags |= VR_TXCTL_TCPCSUM;
+		if (m_head->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+			vr_flags |= VR_TXCTL_UDPCSUM;
+	}
+
+	if (sc->vr_quirks & VR_Q_NEEDALIGN ||
+	    m_head->m_pkthdr.len < VR_MIN_FRAMELEN ||
+	    bus_dmamap_load_mbuf(sc->sc_dmat, c->vr_map, m_head,
+				 BUS_DMA_NOWAIT | BUS_DMA_WRITE)) {
+		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
+		if (m_new == NULL)
+			return (1);
+		if (m_head->m_pkthdr.len > MHLEN) {
+			MCLGET(m_new, M_DONTWAIT);
+			if (!(m_new->m_flags & M_EXT)) {
+				m_freem(m_new);
+				return (1);
+			}
+		}
+		m_copydata(m_head, 0, m_head->m_pkthdr.len,
+		    mtod(m_new, caddr_t));
+		m_new->m_pkthdr.len = m_new->m_len = m_head->m_pkthdr.len;
+
+		/*
+		 * The Rhine chip doesn't auto-pad, so we have to make
+		 * sure to pad short frames out to the minimum frame length
+		 * ourselves.
+		 */
+		if (m_head->m_pkthdr.len < VR_MIN_FRAMELEN) {
+			/* data field should be padded with octets of zero */
+			bzero(&m_new->m_data[m_new->m_len],
+			    VR_MIN_FRAMELEN-m_new->m_len);
+			m_new->m_pkthdr.len += VR_MIN_FRAMELEN - m_new->m_len;
+			m_new->m_len = m_new->m_pkthdr.len;
+		}
+
+		if (bus_dmamap_load_mbuf(sc->sc_dmat, c->vr_map, m_new,
+		    BUS_DMA_NOWAIT | BUS_DMA_WRITE)) {
 			m_freem(m_new);
 			return (1);
 		}
 	}
-	m_copydata(m_head, 0, m_head->m_pkthdr.len, mtod(m_new, caddr_t));
-	m_new->m_pkthdr.len = m_new->m_len = m_head->m_pkthdr.len;
 
-	/*
-	 * The Rhine chip doesn't auto-pad, so we have to make
-	 * sure to pad short frames out to the minimum frame length
-	 * ourselves.
-	 */
-	if (m_new->m_len < VR_MIN_FRAMELEN) {
-		/* data field should be padded with octets of zero */
-		bzero(&m_new->m_data[m_new->m_len],
-		    VR_MIN_FRAMELEN-m_new->m_len);
-		m_new->m_pkthdr.len += VR_MIN_FRAMELEN - m_new->m_len;
-		m_new->m_len = m_new->m_pkthdr.len;
-	}
-
-	if (bus_dmamap_load_mbuf(sc->sc_dmat, c->vr_map, m_new,
-	    BUS_DMA_NOWAIT | BUS_DMA_WRITE)) {
-		m_freem(m_new);
-		return (1);
-	}
 	bus_dmamap_sync(sc->sc_dmat, c->vr_map, 0, c->vr_map->dm_mapsize,
 	    BUS_DMASYNC_PREWRITE);
 
-	m_freem(m_head);
+	if (m_new != NULL) {
+		m_freem(m_head);
 
-	c->vr_mbuf = m_new;
+		c->vr_mbuf = m_new;
+	} else
+		c->vr_mbuf = m_head;
 
 	f = c->vr_ptr;
 	f->vr_data = htole32(c->vr_map->dm_segs[0].ds_addr);
 	f->vr_ctl = htole32(c->vr_map->dm_mapsize);
-	f->vr_ctl |= htole32(VR_TXCTL_TLINK|VR_TXCTL_FIRSTFRAG);
-	f->vr_status = htole32(0);
+	f->vr_ctl |= htole32(vr_flags|VR_TXCTL_TLINK|VR_TXCTL_FIRSTFRAG);
+	f->vr_status = htole32(vr_status);
 
 	f->vr_ctl |= htole32(VR_TXCTL_LASTFRAG|VR_TXCTL_FINT);
 	f->vr_next = htole32(c->vr_nextdesc->vr_paddr);
@@ -1132,10 +1230,10 @@ vr_start(struct ifnet *ifp)
 	struct mbuf		*m_head;
 	struct vr_chain		*cur_tx;
 
-	if (ifp->if_flags & IFF_OACTIVE)
-		return;
-
 	sc = ifp->if_softc;
+
+	if (ifp->if_flags & IFF_OACTIVE || sc->vr_link == 0)
+		return;
 
 	cur_tx = sc->vr_cdata.vr_tx_prod;
 	while (cur_tx->vr_mbuf == NULL) {
@@ -1161,7 +1259,7 @@ vr_start(struct ifnet *ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, cur_tx->vr_mbuf,
+			bpf_mtap_ether(ifp->if_bpf, cur_tx->vr_mbuf,
 			BPF_DIRECTION_OUT);
 #endif
 		cur_tx = cur_tx->vr_nextdesc;
@@ -1246,27 +1344,15 @@ vr_init(void *xsc)
 		return;
 	}
 
-	/* If we want promiscuous mode, set the allframes bit. */
-	if (ifp->if_flags & IFF_PROMISC)
-		VR_SETBIT(sc, VR_RXCFG, VR_RXCFG_RX_PROMISC);
-	else
-		VR_CLRBIT(sc, VR_RXCFG, VR_RXCFG_RX_PROMISC);
-
-	/* Set capture broadcast bit to capture broadcast frames. */
-	if (ifp->if_flags & IFF_BROADCAST)
-		VR_SETBIT(sc, VR_RXCFG, VR_RXCFG_RX_BROAD);
-	else
-		VR_CLRBIT(sc, VR_RXCFG, VR_RXCFG_RX_BROAD);
-
 	/*
-	 * Program the multicast filter, if necessary.
+	 * Program promiscuous mode and multicast filters.
 	 */
-	vr_setmulti(sc);
+	vr_iff(sc);
 
 	/*
 	 * Load the address of the RX list.
 	 */
-	CSR_WRITE_4(sc, VR_RXADDR, sc->vr_cdata.vr_rx_head->vr_paddr);
+	CSR_WRITE_4(sc, VR_RXADDR, sc->vr_cdata.vr_rx_cons->vr_paddr);
 
 	/* Enable receiver and transmitter. */
 	CSR_WRITE_2(sc, VR_COMMAND, VR_CMD_TX_NOPOLL|VR_CMD_START|
@@ -1283,6 +1369,7 @@ vr_init(void *xsc)
 	CSR_WRITE_2(sc, VR_IMR, VR_INTRS);
 
 	/* Restore state of BMCR */
+	sc->vr_link = 1;
 	mii_mediachg(mii);
 
 	ifp->if_flags |= IFF_RUNNING;
@@ -1326,9 +1413,9 @@ int
 vr_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct vr_softc		*sc = ifp->if_softc;
+	struct ifaddr		*ifa = (struct ifaddr *) data;
 	struct ifreq		*ifr = (struct ifreq *) data;
 	int			s, error = 0;
-	struct ifaddr *ifa = (struct ifaddr *)data;
 
 	s = splnet();
 
@@ -1342,61 +1429,32 @@ vr_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			arp_ifinit(&sc->arpcom, ifa);
 #endif
 		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if (ifp->if_flags & IFF_RUNNING &&
-			    ifp->if_flags & IFF_PROMISC &&
-			    !(sc->sc_if_flags & IFF_PROMISC)) {
-				VR_SETBIT(sc, VR_RXCFG,
-				    VR_RXCFG_RX_PROMISC);
-				vr_setmulti(sc);
-			} else if (ifp->if_flags & IFF_RUNNING &&
-			    !(ifp->if_flags & IFF_PROMISC) &&
-			    sc->sc_if_flags & IFF_PROMISC) {
-				VR_CLRBIT(sc, VR_RXCFG,
-				    VR_RXCFG_RX_PROMISC);
-				vr_setmulti(sc);
-			} else if (ifp->if_flags & IFF_RUNNING &&
-			    (ifp->if_flags ^ sc->sc_if_flags) & IFF_ALLMULTI) {
-				vr_setmulti(sc);
-			} else {
-				if (!(ifp->if_flags & IFF_RUNNING))
-					vr_init(sc);
-			}
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
+				vr_init(sc);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				vr_stop(sc);
 		}
-		sc->sc_if_flags = ifp->if_flags;
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				vr_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			vr_iff(sc);
+		error = 0;
 	}
 
 	splx(s);
@@ -1502,34 +1560,29 @@ vr_shutdown(void *arg)
 }
 
 int
-vr_alloc_mbuf(struct vr_softc *sc, struct vr_chain_onefrag *r, struct mbuf *mb)
+vr_alloc_mbuf(struct vr_softc *sc, struct vr_chain_onefrag *r)
 {
 	struct vr_desc	*d;
 	struct mbuf	*m;
 
-	if (mb == NULL) {
-		MGETHDR(m, M_DONTWAIT, MT_DATA);
-		if (m == NULL)
-			return (ENOBUFS);
+	if (r == NULL)
+		return (EINVAL);
 
-		MCLGET(m, M_DONTWAIT);
-		if (!(m->m_flags & M_EXT)) {
-			m_free(m);
-			return (ENOBUFS);
-		}
-	} else  {
-		m = mb;
-		m->m_data = m->m_ext.ext_buf;
+	MGETHDR(m, M_DONTWAIT, MT_DATA);
+	if (m == NULL)
+		return (ENOBUFS);
+
+	MCLGETI(m, M_DONTWAIT, &sc->arpcom.ac_if, MCLBYTES);
+	if (!(m->m_flags & M_EXT)) {
+		m_free(m);
+		return (ENOBUFS);
 	}
 
 	m->m_len = m->m_pkthdr.len = MCLBYTES;
-	r->vr_mbuf = m;
-
 	m_adj(m, sizeof(u_int64_t));
 
-	if (bus_dmamap_load_mbuf(sc->sc_dmat, r->vr_map, r->vr_mbuf,
-	    BUS_DMA_NOWAIT)) {
-		m_freem(r->vr_mbuf);
+	if (bus_dmamap_load_mbuf(sc->sc_dmat, r->vr_map, m, BUS_DMA_NOWAIT)) {
+		m_free(m);
 		return (ENOBUFS);
 	}
 
@@ -1537,10 +1590,11 @@ vr_alloc_mbuf(struct vr_softc *sc, struct vr_chain_onefrag *r, struct mbuf *mb)
 	    BUS_DMASYNC_PREREAD);
 
 	/* Reinitialize the RX descriptor */
+	r->vr_mbuf = m;
 	d = r->vr_ptr;
-	d->vr_status = htole32(VR_RXSTAT);
 	d->vr_data = htole32(r->vr_map->dm_segs[0].ds_addr);
 	d->vr_ctl = htole32(VR_RXCTL | VR_RXLEN);
+	d->vr_status = htole32(VR_RXSTAT);
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap, 0,
 	    sc->sc_listmap->dm_mapsize,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_gem_pci.c,v 1.28 2007/04/19 19:00:01 kettenis Exp $	*/
+/*	$OpenBSD: if_gem_pci.c,v 1.30 2009/07/23 19:30:42 kettenis Exp $	*/
 /*	$NetBSD: if_gem_pci.c,v 1.1 2001/09/16 00:11:42 eeh Exp $ */
 
 /*
@@ -137,24 +137,19 @@ gem_pci_enaddr(struct gem_softc *sc, struct pci_attach_args *pa)
 	struct pci_vpd *vpd;
 	bus_space_handle_t romh;
 	bus_space_tag_t romt;
-	bus_size_t romsize;
+	bus_size_t romsize = 0;
 	u_int8_t buf[32];
-	pcireg_t address, mask;
+	pcireg_t address;
 	int dataoff, vpdoff;
 	int rv = -1;
 
+	if (pci_mapreg_map(pa, PCI_ROM_REG, PCI_MAPREG_TYPE_MEM, 0,
+	    &romt, &romh, 0, &romsize, 0))
+		return (-1);
+
 	address = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_ROM_REG);
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_ROM_REG, 0xfffffffe);
-	mask = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_ROM_REG);
 	address |= PCI_ROM_ENABLE;
 	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_ROM_REG, address);
-
-	romt = pa->pa_memt;
-	romsize = PCI_ROM_SIZE(mask);
-	if (bus_space_map(romt, PCI_ROM_ADDR(address), romsize, 0, &romh)) {
-		romsize = 0;
-		goto fail;
-	}
 
 	bus_space_read_region_1(romt, romh, 0, buf, sizeof(buf));
 	if (bcmp(buf, gem_promhdr, sizeof(gem_promhdr)))
@@ -247,7 +242,7 @@ gem_attach_pci(struct device *parent, struct device *self, void *aux)
 #define PCI_GEM_BASEADDR	0x10
 	if (pci_mapreg_map(pa, PCI_GEM_BASEADDR, type, 0,
 	    &gsc->gsc_memt, &gsc->gsc_memh, NULL, &size, 0) != 0) {
-		printf(": could not map registers\n");
+		printf(": can't map registers\n");
 		return;
 	}
 

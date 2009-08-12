@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.28 2008/07/18 23:43:31 art Exp $ */
+/*	$OpenBSD: cpu.h,v 1.32 2009/03/26 17:24:33 oga Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -82,12 +82,6 @@
 #include <machine/intr.h>
 
 /*
- * definitions of cpu-dependent requirements
- * referenced in generic code
- */
-#define	cpu_wait(p)			/* nothing */
-
-/*
  * Arguments to hardclock and gatherstats encapsulate the previous
  * machine state in an opaque clockframe.  One the m68k, we use
  * what the hardware pushes on an interrupt (frame format 0).
@@ -152,6 +146,11 @@ extern	vaddr_t intiobase, intiolimit;
 extern	vaddr_t iiomapbase;
 extern	int iiomapsize;
 
+/* physical memory sections for mvme141 */
+#define	INTIOBASE_141	(0xfff50000)
+#define	INTIOTOP_141	(0xfffc0000)
+#define	INTIOSIZE_141	((INTIOTOP_141-INTIOBASE_141)/NBPG)
+
 /* physical memory sections for mvme147 */
 #define	INTIOBASE_147	(0xfffe0000)
 #define	INTIOTOP_147	(0xfffe5000)
@@ -161,6 +160,11 @@ extern	int iiomapsize;
 #define	INTIOBASE_162	(0xfff00000)
 #define	INTIOTOP_162	(0xfffd0000)		/* was 0xfff50000 */
 #define	INTIOSIZE_162	((INTIOTOP_162-INTIOBASE_162)/NBPG)
+
+/* physical memory sections for mvme165 */
+#define	INTIOBASE_165	(0xfff90000)
+#define	INTIOTOP_165	(0xffff0000)
+#define	INTIOSIZE_165	((INTIOTOP_165-INTIOBASE_165)/NBPG)
 
 /*
  * Internal IO space (iiomapsize).
@@ -176,12 +180,14 @@ extern	int iiomapsize;
 #define	IIOPOFF(pa)	((pa) - iiomapbase)
 
 extern int	cputyp;
+#define CPU_141			0x141
 #define CPU_147			0x147
 #define CPU_162			0x162
 #define CPU_165			0x165
 #define CPU_166			0x166
 #define CPU_167			0x167
 #define CPU_172			0x172
+#define CPU_176			0x176
 #define CPU_177			0x177
 
 #include <sys/evcount.h>
@@ -207,7 +213,6 @@ int badvaddr(vaddr_t, int);
 void nmihand(void *);
 int intr_findvec(int, int);
 
-void dma_cachectl(caddr_t, int);
 paddr_t kvtop(vaddr_t);
 
 #endif	/* _KERNEL */

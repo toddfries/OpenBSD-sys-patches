@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_msts.c,v 1.5 2008/09/10 14:01:23 blambert Exp $ */
+/*	$OpenBSD: tty_msts.c,v 1.15 2009/06/02 21:17:35 ckuethe Exp $ */
 
 /*
  * Copyright (c) 2008 Marc Balmer <mbalmer@openbsd.org>
@@ -23,7 +23,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/queue.h>
 #include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/sensors.h>
@@ -65,9 +64,8 @@ struct msts {
 	int64_t			gap;		/* gap between two sentences */
 	int64_t			last;		/* last time rcvd */
 	int			sync;		/* if 1, waiting for <STX> */
-	int			pos;		/* positon in rcv buffer */
+	int			pos;		/* position in rcv buffer */
 	int			no_pps;		/* no PPS although requested */
-	char			mode;		/* GPS mode */
 };
 
 /* MSTS decoding */
@@ -112,7 +110,6 @@ mstsopen(dev_t dev, struct tty *tp)
 	np->signal.type = SENSOR_PERCENT;
 	np->signal.status = SENSOR_S_UNKNOWN;
 	np->signal.value = 100000LL;
-	np->signal.flags = 0;
 	strlcpy(np->signal.desc, "Signal", sizeof(np->signal.desc));
 	sensor_attach(&np->timedev, &np->signal);
 
@@ -172,7 +169,7 @@ mstsinput(int c, struct tty *tp)
 		np->ts.tv_sec = ts.tv_sec;
 		np->ts.tv_nsec = ts.tv_nsec;
 		np->gap = gap;
-	
+
 		/*
 		 * If a tty timestamp is available, make sure its value is
 		 * reasonable by comparing against the timestamp just taken.
@@ -219,7 +216,7 @@ msts_scan(struct msts *np, struct tty *tp)
 	char *fld[MAXFLDS], *cs;
 
 	/* split into fields */
-	fld[fldcnt++] = &np->cbuf[0];	/* message type */
+	fld[fldcnt++] = &np->cbuf[0];
 	for (cs = NULL, n = 0; n < np->pos && cs == NULL; n++) {
 		switch (np->cbuf[n]) {
 		case 3:		/* ASCII <ETX> */
@@ -231,8 +228,8 @@ msts_scan(struct msts *np, struct tty *tp)
 				np->cbuf[n] = '\0';
 				fld[fldcnt++] = &np->cbuf[n + 1];
 			} else {
-				DPRINTF(("nr of fields in %s sentence exceeds "
-				    "maximum of %d\n", fld[0], MAXFLDS));
+				DPRINTF(("nr of fields in sentence exceeds "
+				    "maximum of %d\n", MAXFLDS));
 				return;
 			}
 			break;
@@ -246,8 +243,9 @@ void
 msts_decode(struct msts *np, struct tty *tp, char *fld[], int fldcnt)
 {
 	int64_t date_nano, time_nano, msts_now;
+	int jumped = 0;
 
-	if (fldcnt != 4) {
+	if (fldcnt != MAXFLDS) {
 		DPRINTF(("msts: field count mismatch, %d\n", fldcnt));
 		return;
 	}
@@ -266,7 +264,7 @@ msts_decode(struct msts *np, struct tty *tp, char *fld[], int fldcnt)
 		msts_now = msts_now - 2 * 3600 * 1000000000LL;
 	if (msts_now <= np->last) {
 		DPRINTF(("msts: time not monotonically increasing\n"));
-		return;
+		jumped = 1;
 	}
 	np->last = msts_now;
 	np->gap = 0LL;
@@ -275,7 +273,6 @@ msts_decode(struct msts *np, struct tty *tp, char *fld[], int fldcnt)
 		np->time.status = SENSOR_S_OK;
 		timeout_add_sec(&np->msts_tout, TRUSTTIME);
 	}
-	np->gapno = 0;
 #endif
 
 	np->time.value = np->ts.tv_sec * 1000000000LL +
@@ -285,8 +282,7 @@ msts_decode(struct msts *np, struct tty *tp, char *fld[], int fldcnt)
 	if (np->time.status == SENSOR_S_UNKNOWN) {
 		np->time.status = SENSOR_S_OK;
 		np->time.flags &= ~SENSOR_FINVALID;
-		if (fldcnt != 13)
-			strlcpy(np->time.desc, "MSTS", sizeof(np->time.desc));
+		strlcpy(np->time.desc, "MSTS", sizeof(np->time.desc));
 	}
 	/*
 	 * only update the timeout if the clock reports the time a valid,
@@ -298,12 +294,16 @@ msts_decode(struct msts *np, struct tty *tp, char *fld[], int fldcnt)
 	if (fld[3][0] == ' ' && fld[3][1] == ' ') {
 		np->time.status = SENSOR_S_OK;
 		np->signal.status = SENSOR_S_OK;
-		timeout_add_sec(&np->msts_tout, TRUSTTIME);
 	} else
 		np->signal.status = SENSOR_S_WARN;
 
+	if (jumped)
+		np->time.status = SENSOR_S_WARN;
+	if (np->time.status == SENSOR_S_OK)
+		timeout_add_sec(&np->msts_tout, TRUSTTIME);
+
 	/*
-	 * If tty timestamping is requested, but not PPS signal is present, set
+	 * If tty timestamping is requested, but no PPS signal is present, set
 	 * the sensor state to CRITICAL.
 	 */
 	if (np->no_pps)
@@ -311,7 +311,7 @@ msts_decode(struct msts *np, struct tty *tp, char *fld[], int fldcnt)
 }
 
 /*
- * Convert date field from MSTS to nanoseconds since midnight.
+ * Convert date field from MSTS to nanoseconds since the epoch.
  * The string must be of the form D:DD.MM.YY .
  * Return 0 on success, -1 if illegal characters are encountered.
  */

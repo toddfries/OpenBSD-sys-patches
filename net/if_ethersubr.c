@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.127 2008/10/16 19:12:51 naddy Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.133 2009/06/05 00:05:21 claudio Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -135,6 +135,10 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <net/if_trunk.h>
 #endif
 
+#ifdef AOE
+#include <net/if_aoe.h>
+#endif /* AOE */
+
 #ifdef INET6
 #ifndef INET
 #include <netinet/in.h>
@@ -226,6 +230,15 @@ ether_output(ifp0, m0, dst, rt0)
 	short mflags;
 	struct ifnet *ifp = ifp0;
 
+#ifdef DIAGNOSTIC
+	if (ifp->if_rdomain != m->m_pkthdr.rdomain) {
+		printf("%s: trying to send packet on wrong domain. "
+		    "%d vs. %d, AF %d\n", ifp->if_xname, ifp->if_rdomain,
+		    m->m_pkthdr.rdomain, dst->sa_family);
+		senderr(ENETDOWN);
+	}
+#endif
+
 #if NTRUNK > 0
 	if (ifp->if_type == IFT_IEEE8023ADLAG)
 		senderr(EBUSY);
@@ -237,7 +250,8 @@ ether_output(ifp0, m0, dst, rt0)
 
 		/* loop back if this is going to the carp interface */
 		if (dst != NULL && LINK_STATE_IS_UP(ifp0->if_link_state) &&
-		    (ifa = ifa_ifwithaddr(dst)) != NULL &&
+		    /* XXX why ifa_ifwithaddr() and not ifaof_ifpforaddr() */
+		    (ifa = ifa_ifwithaddr(dst, ifp->if_rdomain)) != NULL &&
 		    ifa->ifa_ifp == ifp0)
 			return (looutput(ifp0, m, dst, rt0));
 
@@ -254,17 +268,25 @@ ether_output(ifp0, m0, dst, rt0)
 		senderr(ENETDOWN);
 	if ((rt = rt0) != NULL) {
 		if ((rt->rt_flags & RTF_UP) == 0) {
-			if ((rt0 = rt = rtalloc1(dst, 1, 0)) != NULL)
+			if ((rt0 = rt = rtalloc1(dst, 1,
+			    m->m_pkthdr.pf.rtableid)) != NULL)
 				rt->rt_refcnt--;
 			else
 				senderr(EHOSTUNREACH);
 		}
+#ifdef MPLS
+		if (rt->rt_flags & RTF_MPLS) {
+			if ((m = mpls_output(m, rt)) == NULL)
+				senderr(EHOSTUNREACH);
+		}
+#endif
 		if (rt->rt_flags & RTF_GATEWAY) {
 			if (rt->rt_gwroute == 0)
 				goto lookup;
 			if (((rt = rt->rt_gwroute)->rt_flags & RTF_UP) == 0) {
 				rtfree(rt); rt = rt0;
-			lookup: rt->rt_gwroute = rtalloc1(rt->rt_gateway, 1, 0);
+			lookup: rt->rt_gwroute = rtalloc1(rt->rt_gateway, 1,
+			    ifp->if_rdomain);
 				if ((rt = rt->rt_gwroute) == 0)
 					senderr(EHOSTUNREACH);
 			}
@@ -285,7 +307,12 @@ ether_output(ifp0, m0, dst, rt0)
 		if ((m->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX) &&
 		    !m->m_pkthdr.pf.routed)
 			mcopy = m_copy(m, 0, (int)M_COPYALL);
-		etype = htons(ETHERTYPE_IP);
+#ifdef MPLS
+		if (rt0 != NULL && rt0->rt_flags & RTF_MPLS)
+			etype = htons(ETHERTYPE_MPLS);
+		else
+#endif
+			etype = htons(ETHERTYPE_IP);
 		break;
 #endif
 #ifdef INET6
@@ -515,6 +542,11 @@ ether_input(ifp0, eh, m)
 	struct ether_header *eh_tmp;
 #endif
 
+	m_cluncount(m, 1);
+
+	/* mark incomming routing domain */
+	m->m_pkthdr.rdomain = ifp->if_rdomain;
+
 	if (eh == NULL) {
 		eh = mtod(m, struct ether_header *);
 		m_adj(m, ETHER_HDR_LEN);
@@ -736,6 +768,11 @@ decapsulate:
 		schednetisr(NETISR_PPPOE);
 		break;
 #endif /* NPPPOE > 0 */
+#ifdef AOE
+	case ETHERTYPE_AOE:
+		aoe_input(ifp, m);
+		goto done;
+#endif /* AOE */
 #ifdef MPLS
 	case ETHERTYPE_MPLS:
 	case ETHERTYPE_MPLS_MCAST:

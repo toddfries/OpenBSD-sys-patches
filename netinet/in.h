@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.h,v 1.77 2008/05/09 02:56:36 markus Exp $	*/
+/*	$OpenBSD: in.h,v 1.79 2009/06/05 00:05:22 claudio Exp $	*/
 /*	$NetBSD: in.h,v 1.20 1996/02/13 23:41:47 christos Exp $	*/
 
 /*
@@ -614,7 +614,8 @@ struct ip_mreq {
 #define	IPCTL_STATS		33	/* IP statistics */
 #define	IPCTL_MRTPROTO		34	/* type of multicast */
 #define	IPCTL_MRTSTATS		35
-#define	IPCTL_MAXID		36
+#define	IPCTL_ARPQUEUED		36
+#define	IPCTL_MAXID		37
 
 #define	IPCTL_NAMES { \
 	{ 0, 0 }, \
@@ -653,6 +654,7 @@ struct ip_mreq {
 	{ "stats", CTLTYPE_STRUCT }, \
 	{ "mrtproto", CTLTYPE_INT }, \
 	{ "mrtstats", CTLTYPE_STRUCT }, \
+	{ "arpqueued", CTLTYPE_INT }, \
 }
 #define	IPCTL_VARS { \
 	NULL, \
@@ -690,7 +692,8 @@ struct ip_mreq {
 	&ipmultipath, \
 	NULL, \
 	NULL, \
-	NULL \
+	NULL, \
+	&la_hold_total \
 }
 
 /* INET6 stuff */
@@ -763,7 +766,7 @@ int	   in_canforward(struct in_addr);
 int	   in_cksum(struct mbuf *, int);
 int	   in4_cksum(struct mbuf *, u_int8_t, int, int);
 void	   in_delayed_cksum(struct mbuf *);
-int	   in_localaddr(struct in_addr);
+int	   in_localaddr(struct in_addr, u_int);
 void	   in_socktrim(struct sockaddr_in *);
 char	  *inet_ntoa(struct in_addr);
 

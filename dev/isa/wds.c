@@ -1,4 +1,4 @@
-/*	$OpenBSD: wds.c,v 1.25 2008/09/12 11:14:04 miod Exp $	*/
+/*	$OpenBSD: wds.c,v 1.28 2009/02/16 21:19:07 miod Exp $	*/
 /*	$NetBSD: wds.c,v 1.13 1996/11/03 16:20:31 mycroft Exp $	*/
 
 #undef	WDSDIAG
@@ -163,7 +163,7 @@ void    wds_done(struct wds_softc *, struct wds_scb *, u_char);
 int	wds_find(struct isa_attach_args *, struct wds_softc *);
 void	wds_init(struct wds_softc *);
 void	wds_inquire_setup_information(struct wds_softc *);
-void    wdsminphys(struct buf *);
+void    wdsminphys(struct buf *, struct scsi_link *);
 int     wds_scsi_cmd(struct scsi_xfer *);
 void	wds_sense(struct wds_softc *, struct wds_scb *);
 int	wds_poll(struct wds_softc *, struct scsi_xfer *, int);
@@ -741,7 +741,7 @@ wds_start_scbs(sc)
 
 		if ((scb->flags & SCB_POLLED) == 0) {
 			timeout_set(&scb->xs->stimeout, wds_timeout, scb);
-			timeout_add(&scb->xs->stimeout, (scb->timeout * hz) / 1000);
+			timeout_add_msec(&scb->xs->stimeout, scb->timeout);
 		}
 
 		++sc->sc_mbofull;
@@ -1032,8 +1032,7 @@ out:
 }
 
 void
-wdsminphys(bp)
-	struct buf *bp;
+wdsminphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > ((WDS_NSEG - 1) << PGSHIFT))
 		bp->b_bcount = ((WDS_NSEG - 1) << PGSHIFT);
@@ -1076,7 +1075,7 @@ wds_scsi_cmd(xs)
 		mflags = ISADMA_MAP_BOUNCE | ISADMA_MAP_WAITOK;
 #endif
 	if ((scb = wds_get_scb(sc, flags, NEEDBUFFER(sc))) == NULL) {
-		return TRY_AGAIN_LATER;
+		return (NO_CCB);
 	}
 	scb->xs = xs;
 	scb->timeout = xs->timeout;

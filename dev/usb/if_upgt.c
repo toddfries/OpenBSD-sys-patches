@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upgt.c,v 1.39 2008/10/14 18:01:53 naddy Exp $ */
+/*	$OpenBSD: if_upgt.c,v 1.46 2009/08/03 09:33:10 blambert Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -49,7 +49,6 @@
 #include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
-#include <net80211/ieee80211_amrr.h>
 #include <net80211/ieee80211_radiotap.h>
 
 #include <dev/usb/usb.h>
@@ -166,19 +165,26 @@ static const struct usb_devno upgt_devs_1[] = {
 static const struct usb_devno upgt_devs_2[] = {
 	/* version 2 devices */
 	{ USB_VENDOR_ACCTON,		USB_PRODUCT_ACCTON_PRISM_GT },
+	{ USB_VENDOR_ALCATELT,		USB_PRODUCT_ALCATELT_ST121G },
 	{ USB_VENDOR_BELKIN,		USB_PRODUCT_BELKIN_F5D7050 },
+	{ USB_VENDOR_CISCOLINKSYS,	USB_PRODUCT_CISCOLINKSYS_WUSB54AG },
+	{ USB_VENDOR_CISCOLINKSYS,	USB_PRODUCT_CISCOLINKSYS_WUSB54GV2 },
 	{ USB_VENDOR_CONCEPTRONIC,	USB_PRODUCT_CONCEPTRONIC_PRISM_GT },
 	{ USB_VENDOR_DELL,		USB_PRODUCT_DELL_PRISM_GT_1 },
 	{ USB_VENDOR_DELL,		USB_PRODUCT_DELL_PRISM_GT_2 },
+	{ USB_VENDOR_DLINK,		USB_PRODUCT_DLINK_DWLG122A2 },
 	{ USB_VENDOR_FSC,		USB_PRODUCT_FSC_E5400 },
 	{ USB_VENDOR_GLOBESPAN,		USB_PRODUCT_GLOBESPAN_PRISM_GT_1 },
 	{ USB_VENDOR_GLOBESPAN,		USB_PRODUCT_GLOBESPAN_PRISM_GT_2 },
 	{ USB_VENDOR_INTERSIL,		USB_PRODUCT_INTERSIL_PRISM_GT },
-	{ USB_VENDOR_NETGEAR,		USB_PRODUCT_NETGEAR_WG111V2_2 },
+	{ USB_VENDOR_PHEENET,		USB_PRODUCT_PHEENET_GWU513 },
+	{ USB_VENDOR_PHILIPS,		USB_PRODUCT_PHILIPS_CPWUA054 },
 	{ USB_VENDOR_SMC,		USB_PRODUCT_SMC_2862WG },
+	{ USB_VENDOR_USR,		USB_PRODUCT_USR_USR5422 },
 	{ USB_VENDOR_WISTRONNEWEB,	USB_PRODUCT_WISTRONNEWEB_UR045G },
 	{ USB_VENDOR_XYRATEX,		USB_PRODUCT_XYRATEX_PRISM_GT_1 },
 	{ USB_VENDOR_XYRATEX,		USB_PRODUCT_XYRATEX_PRISM_GT_2 },
+	{ USB_VENDOR_ZCOM,		USB_PRODUCT_ZCOM_MD40900 },
 	{ USB_VENDOR_ZCOM,		USB_PRODUCT_ZCOM_XG703A }
 };
 
@@ -529,8 +535,8 @@ upgt_activate(struct device *self, enum devact act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
-	case (DVACT_DEACTIVATE):
+		break;
+	case DVACT_DEACTIVATE:
 		break;
 	}
 
@@ -1340,10 +1346,7 @@ upgt_newstate_task(void *arg)
 	struct upgt_softc *sc = arg;
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211_node *ni;
-	enum ieee80211_state ostate;
 	unsigned channel;
-
-	ostate = ic->ic_state;
 
 	switch (sc->sc_state) {
 	case IEEE80211_S_INIT:
@@ -1360,7 +1363,7 @@ upgt_newstate_task(void *arg)
 
 		channel = ieee80211_chan2ieee(ic, ic->ic_bss->ni_chan);
 		upgt_set_channel(sc, channel);
-		timeout_add(&sc->scan_to, hz / 5);
+		timeout_add_msec(&sc->scan_to, 200);
 		break;
 	case IEEE80211_S_AUTH:
 		DPRINTF(1, "%s: newstate is IEEE80211_S_AUTH\n",

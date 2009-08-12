@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc,v 1.81 2008/04/25 14:51:35 jmc Exp $
+#	$OpenBSD: files.sparc,v 1.84 2009/07/13 19:53:58 kettenis Exp $
 #	$NetBSD: files.sparc,v 1.44 1997/08/31 21:29:16 pk Exp $
 
 # @(#)files.sparc	8.1 (Berkeley) 7/19/93
@@ -90,7 +90,7 @@ attach	zstty at zs
 file	arch/sparc/dev/z8530tty.c		zstty needs-flag
 file	arch/sparc/dev/zs_kgdb.c		kgdb
 
-device	zskbd: tty, wskbddev, sunkbd
+device	zskbd: wskbddev, sunkbd
 attach	zskbd at zs
 file	arch/sparc/dev/z8530kbd.c		zskbd needs-flag
 
@@ -129,6 +129,9 @@ file	arch/sparc/dev/be.c		be
 device	qe: ifnet, ether, ifmedia
 attach	qe at qec
 file	arch/sparc/dev/qe.c		qe
+
+attach	gem at sbus with gem_sbus
+file	arch/sparc/dev/if_gem_sbus.c	gem_sbus
 
 # HappyMeal (hme) ethernet
 device	hme: ifnet, ether, mii, ifmedia
@@ -258,11 +261,6 @@ attach	si at vmes
 device	sw: scsi, ncr5380sbc
 attach	sw at obio
 file	arch/sparc/dev/si.c		si | sw
-
-# Efficient Networks, Inc. ATM interface
-# device declaration in sys/conf/files
-#attach	en at sbus with en_sbus
-#file	arch/sparc/dev/if_en_sbus.c	en_sbus
 
 # Qlogic ISP 10x0 (SBus) family
 # device declaration in sys/conf/files

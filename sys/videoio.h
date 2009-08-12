@@ -1,4 +1,4 @@
-/*	$OpenBSD: videoio.h,v 1.1 2008/04/09 19:49:55 robert Exp $	*/
+/*	$OpenBSD: videoio.h,v 1.3 2008/12/17 08:39:01 mglocker Exp $	*/
 /*
  *  Video for Linux Two header file
  *

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lii.c,v 1.20 2008/10/07 16:03:37 jsing Exp $	*/
+/*	$OpenBSD: if_lii.c,v 1.23 2009/04/12 15:16:07 jsing Exp $	*/
 
 /*
  *  Copyright (c) 2007 The NetBSD Foundation.
@@ -216,7 +216,7 @@ lii_attach(struct device *parent, struct device *self, void *aux)
 	memtype = pci_mapreg_type(sc->sc_pc, sc->sc_tag, PCI_MAPREG_START);
 	if (pci_mapreg_map(pa, PCI_MAPREG_START, memtype, 0,  &sc->sc_mmiot, 
 	    &sc->sc_mmioh, NULL, &sc->sc_mmios, 0)) {
-		printf(": failed to map memory!\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 
@@ -233,13 +233,13 @@ lii_attach(struct device *parent, struct device *self, void *aux)
 	lii_read_macaddr(sc, sc->sc_ac.ac_enaddr);
 
 	if (pci_intr_map(pa, &ih) != 0) {
-		printf(": failed to map interrupt!\n");
+		printf(": can't map interrupt\n");
 		goto unmap;
 	}
 	sc->sc_ih = pci_intr_establish(sc->sc_pc, ih, IPL_NET,
 	    lii_intr, sc, DEVNAME(sc));
 	if (sc->sc_ih == NULL) {
-		printf(": failed to establish interrupt!\n");
+		printf(": can't establish interrupt\n");
 		goto unmap;
 	}
 
@@ -987,25 +987,25 @@ lii_alloc_rings(struct lii_softc *sc)
 
 	if (bus_dmamap_create(sc->sc_dmat, bs, 1, bs, (1<<30),
 	    BUS_DMA_NOWAIT, &sc->sc_ringmap) != 0) {
-		printf(": failed to create DMA map!\n");
+		printf(": failed to create DMA map\n");
 		return 1;
 	}
 
 	if (bus_dmamem_alloc(sc->sc_dmat, bs, PAGE_SIZE, (1<<30),
 	    &sc->sc_ringseg, 1, &nsegs, BUS_DMA_NOWAIT) != 0) {
-		printf(": failed to allocate DMA memory!\n");
+		printf(": failed to allocate DMA memory\n");
 		goto destroy;
 	}
 
 	if (bus_dmamem_map(sc->sc_dmat, &sc->sc_ringseg, nsegs, bs,
 	    (caddr_t *)&sc->sc_ring, BUS_DMA_NOWAIT) != 0) {
-		printf(": failed to map DMA memory!\n");
+		printf(": failed to map DMA memory\n");
 		goto free;
 	}
 
 	if (bus_dmamap_load(sc->sc_dmat, sc->sc_ringmap, sc->sc_ring,
 	    bs, NULL, BUS_DMA_NOWAIT) != 0) {
-		printf(": failed to load DMA memory!\n");
+		printf(": failed to load DMA memory\n");
 		goto unmap;
 	}
 
@@ -1044,8 +1044,8 @@ int
 lii_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 {
 	struct lii_softc *sc = ifp->if_softc;
+	struct ifaddr *ifa = (struct ifaddr *)addr;
 	struct ifreq *ifr = (struct ifreq *)addr;
-	struct ifaddr *ifa;
 	int s, error = 0;
 
 	s = splnet();
@@ -1054,11 +1054,11 @@ lii_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 	case SIOCSIFADDR:
 		SET(ifp->if_flags, IFF_UP);
 #ifdef INET
-		ifa = (struct ifaddr *)addr;
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_ac, ifa);
 #endif
 		/* FALLTHROUGH */
+
 	case SIOCSIFFLAGS:
 		if (ISSET(ifp->if_flags, IFF_UP)) {
 			if (ISSET(ifp->if_flags, IFF_RUNNING))
@@ -1071,17 +1071,11 @@ lii_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 		}
 		break;
 
-	case SIOCADDMULTI:
-		error = ether_addmulti(ifr, &sc->sc_ac);
-		break;
-	case SIOCDELMULTI:
-		error = ether_delmulti(ifr, &sc->sc_ac);
-		break;
-
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
 		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->sc_ac, cmd, addr);
 	}
@@ -1111,10 +1105,10 @@ lii_iff(struct lii_softc *sc)
 	ifp->if_flags &= ~IFF_ALLMULTI;
 
 	if (ifp->if_flags & IFF_PROMISC) {
-		ifp ->if_flags |= IFF_ALLMULTI;
+		ifp->if_flags |= IFF_ALLMULTI;
 		val |= MACC_PROMISC_EN;
 	} else if (ac->ac_multirangecnt > 0) {
-		ifp ->if_flags |= IFF_ALLMULTI;
+		ifp->if_flags |= IFF_ALLMULTI;
 		val |= MACC_ALLMULTI_EN;
 	} else {
 		/* Clear multicast hash table. */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.54 2007/10/13 07:18:32 miod Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.58 2009/06/03 00:49:12 art Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.61 1996/05/03 19:42:35 christos Exp $	*/
 
 /*-
@@ -97,15 +97,6 @@ cpu_fork(struct proc *p1, struct proc *p2, void *stack, size_t stacksize,
 #endif
 	*pcb = p1->p_addr->u_pcb;
 
-	/*
-	 * Preset these so that gdt_compact() doesn't get confused if called
-	 * during the allocations below.
-	 *
-	 * Note: pcb_ldt_sel is handled in the pmap_activate() call when
-	 * we run the new process.
-	 */
-	p2->p_md.md_tss_sel = GSEL(GNULL_SEL, SEL_KPL);
-
 	/* Fix up the TSS. */
 	pcb->pcb_tss.tss_ss0 = GSEL(GDATA_SEL, SEL_KPL);
 	pcb->pcb_tss.tss_esp0 = (int)p2->p_addr + USPACE - 16;
@@ -144,14 +135,8 @@ cpu_exit(struct proc *p)
 		npxsave_proc(p, 0);
 #endif
 
-	pmap_deactivate(p);
-	sched_exit(p);
-}
-
-void
-cpu_wait(struct proc *p)
-{
 	tss_free(p->p_md.md_tss_sel);
+	sched_exit(p);
 }
 
 /*

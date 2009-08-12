@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.80 2008/10/23 17:26:26 deraadt Exp $
+#	$OpenBSD: RAMDISK,v 1.89 2009/06/24 11:38:40 deraadt Exp $
 #
 # PPC GENERIC config file
 #
@@ -26,11 +26,13 @@ option		MSDOSFS		# MS-DOS file system
 option		INET		# IP + ICMP + TCP + UDP
 option		INET6		# IPv6 (needs INET)
 option		DDB		# kernel debugger
+option		CRYPTO		# Cryptographic framework
 
 config		bsd	root on rd0a swap on rd0b
 
 mainbus0	at root
-cpu*		at mainbus0
+softraid0	at root
+cpu0		at mainbus0
 
 mpcpcibr*	at mainbus0	# MPC106 PCI Bridge.
 memc*		at mainbus0
@@ -61,7 +63,6 @@ pcscp*		at pci?		# AMD Am53c974 PCscsi-PCI SCSI
 isp*		at pci?		# Qlogic ISP [12]0x0 SCSI/FibreChannel
 mpi*		at pci?		# LSI Logic MPT-Fusion Message Passing Interface
 arc*		at pci?		# Areca RAID Controllers
-option		ISP_COMPILE_FW
 pciide*		at pci?
 kauaiata*	at pci?		# Apple ATA 100
 wdc*		at kauaiata?
@@ -119,6 +120,7 @@ urlphy*		at mii?		# Realtek RTL8150L internal PHY
 rgephy*		at mii?		# Realtek 8169S/8110S PHY
 rlphy*		at mii?		# Realtek 8139 internal PHYs
 ciphy*		at mii?		# Cicada CS8201 10/100/1000 copper PHY
+ipgphy*		at mii?		# IC Plus IP1000A PHYs
 ukphy*		at mii?		# generic unknown PHYs
 
 macintr0	at macobio?	# old interrupt controller
@@ -152,6 +154,7 @@ scsibus*	at pcscp?
 scsibus*	at isp?
 scsibus*	at mpi?
 scsibus*	at arc?
+scsibus*	at softraid?
 
 mediabay*	at macobio?
 wdc*		at mediabay?
@@ -192,6 +195,7 @@ udav*		at uhub?		# Davicom DM9601 based Ethernet
 mos*		at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 ural*		at uhub?		# Ralink RT2500
 rum*		at uhub?		# Ralink RT2501USB/RT2601USB
+zyd*		at uhub?		# Zydas ZD1211
 url*		at uhub?		# Realtek RTL8150L based adapters
 wi*		at uhub?		# WaveLAN IEEE 802.11DS
 #uscanner*	at uhub?		# USB Scanner driver
@@ -227,6 +231,7 @@ cd*		at scsibus?
 
 pseudo-device	loop	1	# network loopback
 pseudo-device	bpfilter 1	# packet filter
+pseudo-device	vlan		# IEEE 802.1Q VLAN 
 pseudo-device	rd	1	# ram disk
 pseudo-device	wsmux	2	# mouse & keyboard multiplexor
 pseudo-device	bio	1	# ioctl multiplexing device

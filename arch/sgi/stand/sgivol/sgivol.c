@@ -1,4 +1,4 @@
-/*	$OpenBSD: sgivol.c,v 1.12 2008/08/25 14:53:34 jsing Exp $	*/
+/*	$OpenBSD: sgivol.c,v 1.15 2009/06/04 21:57:56 miod Exp $	*/
 /*	$NetBSD: sgivol.c,v 1.8 2003/11/08 04:59:00 sekiya Exp $	*/
 
 /*-
@@ -303,7 +303,7 @@ init_volhdr(void)
 	volhdr->root = htobe16(0);
 	volhdr->swap = htobe16(1);
 	strlcpy(volhdr->bootfile, "/bsd", sizeof(volhdr->bootfile));
-	volhdr->dp.dp_skew = lbl.d_trackskew;
+	volhdr->dp.dp_skew = 1; /* XXX */
 	volhdr->dp.dp_gap1 = 1; /* XXX */
 	volhdr->dp.dp_gap2 = 1; /* XXX */
 	volhdr->dp.dp_cyls = htobe16(lbl.d_ncylinders);
@@ -422,10 +422,12 @@ write_file(void)
 	i = st.st_size;
 	fp = fopen(ufilename, "r");
 	while (i > 0) {
+		bzero(fbuf, fbufsize);
 		fsize = i > fbufsize ? fbufsize : i;
-		fread(fbuf, 1, fsize, fp);
-		if (write(fd, fbuf, fsize) != fsize)
-			err(1, "write file");
+		if (fread(fbuf, 1, fsize, fp) != fsize)
+			err(1, "reading file from disk");
+		if (write(fd, fbuf, fbufsize) != fbufsize)
+			err(1, "writing file to SGI volume header");
 		i -= fsize;
 	}
 	fclose(fp);
@@ -512,8 +514,6 @@ modify_partition(void)
 void
 write_volhdr(void)
 {
-	int i;
-
 	checksum_vol();
 
 	if (!quiet)

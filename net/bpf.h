@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.h,v 1.36 2008/11/09 15:08:26 naddy Exp $	*/
+/*	$OpenBSD: bpf.h,v 1.38 2008/12/22 12:13:13 michele Exp $	*/
 /*	$NetBSD: bpf.h,v 1.15 1996/12/13 07:57:33 mikel Exp $	*/
 
 /*
@@ -185,7 +185,7 @@ struct bpf_hdr {
 #define DLT_IEEE802_11		105	/* IEEE 802.11 wireless */
 #define DLT_PFLOG		117	/* Packet filter logging, by pcap people */
 #define DLT_IEEE802_11_RADIO	127	/* IEEE 802.11 plus WLAN header */
-#define DLT_MPLS		128	/* MPLS Provider Edge header */
+#define DLT_MPLS		219	/* MPLS Provider Edge header */
 
 /*
  * The instruction encodings.
@@ -284,8 +284,5 @@ u_int	 bpf_filter(struct bpf_insn *, u_char *, u_int, u_int);
  * Number of scratch memory words (for BPF_LD|BPF_MEM and BPF_ST).
  */
 #define BPF_MEMWORDS 16
-
-extern int ticks;	/* from kern/kern_clock.c; incremented each */
-			/* clock tick. */
 
 #endif /* _NET_BPF_H_ */

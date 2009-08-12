@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.h,v 1.19 2008/07/28 20:58:41 fgsch Exp $	*/
+/*	$OpenBSD: cd.h,v 1.21 2009/06/17 01:30:30 thib Exp $	*/
 /*	$NetBSD: scsi_cd.h,v 1.6 1996/03/19 03:06:39 mycroft Exp $	*/
 
 /*

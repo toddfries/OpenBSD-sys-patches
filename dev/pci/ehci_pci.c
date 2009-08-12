@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci_pci.c,v 1.14 2008/06/26 05:42:17 ray Exp $ */
+/*	$OpenBSD: ehci_pci.c,v 1.18 2009/07/24 03:18:58 deraadt Exp $ */
 /*	$NetBSD: ehci_pci.c,v 1.15 2004/04/23 21:13:06 itojun Exp $	*/
 
 /*
@@ -65,6 +65,12 @@ struct ehci_pci_softc {
 	void 			*sc_ih;		/* interrupt vectoring */
 };
 
+int ehci_sb700_match(struct pci_attach_args *pa);
+
+#define EHCI_SBx00_WORKAROUND_REG	0x50
+#define EHCI_SBx00_WORKAROUND_ENABLE	(1 << 3)
+#define EHCI_VT6202_WORKAROUND_REG	0x48
+
 int	ehci_pci_match(struct device *, void *, void *);
 void	ehci_pci_attach(struct device *, struct device *, void *);
 int	ehci_pci_detach(struct device *, int);
@@ -76,7 +82,6 @@ struct cfattach ehci_pci_ca = {
 	sizeof(struct ehci_pci_softc), ehci_pci_match, ehci_pci_attach,
 	ehci_pci_detach, ehci_activate
 };
-
 
 int
 ehci_pci_match(struct device *parent, void *match, void *aux)
@@ -108,7 +113,7 @@ ehci_pci_attach(struct device *parent, struct device *self, void *aux)
 	/* Map I/O registers */
 	if (pci_mapreg_map(pa, PCI_CBMEM, PCI_MAPREG_TYPE_MEM, 0,
 			   &sc->sc.iot, &sc->sc.ioh, NULL, &sc->sc.sc_size, 0)) {
-		printf(": can't map memory space\n");
+		printf(": can't map mem space\n");
 		return;
 	}
 
@@ -121,6 +126,42 @@ ehci_pci_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc.sc_offs = EREAD1(&sc->sc, EHCI_CAPLENGTH);
 	DPRINTF(("%s: offs=%d\n", devname, sc->sc.sc_offs));
 	EOWRITE2(&sc->sc, EHCI_USBINTR, 0);
+
+	/* Handle quirks */
+	switch (PCI_VENDOR(pa->pa_id)) {
+	case PCI_VENDOR_ATI:
+		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ATI_SB600_EHCI ||
+		    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ATI_SB700_EHCI &&
+		     pci_find_device(NULL, ehci_sb700_match))) {
+			pcireg_t value;
+
+			/* apply the ATI SB600/SB700 workaround */
+			value = pci_conf_read(sc->sc_pc, sc->sc_tag,
+			    EHCI_SBx00_WORKAROUND_REG);
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    EHCI_SBx00_WORKAROUND_REG, value |
+			    EHCI_SBx00_WORKAROUND_ENABLE);
+		}
+		break;
+
+	case PCI_VENDOR_VIATECH:
+		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VT6202 &&
+		    (PCI_REVISION(pa->pa_class) & 0xf0) == 0x60) {
+			pcireg_t value;
+
+			/*
+			 * The VT6202 defaults to a 1 usec EHCI sleep time
+			 * which hogs the PCI bus *badly*. Setting bit 5 of
+			 * the register makes that sleep time use the conventional
+			 * 10 usec.
+			 */
+			value = pci_conf_read(sc->sc_pc, sc->sc_tag,
+			    EHCI_VT6202_WORKAROUND_REG);
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    EHCI_VT6202_WORKAROUND_REG, value | 0x20000000);
+		}
+		break;
+	}
 
 	/* Map and establish the interrupt. */
 	if (pci_intr_map(pa, &ih)) {
@@ -270,4 +311,16 @@ ehci_pci_shutdown(void *v)
 	/* best not to do this anymore; BIOS SMM spins? */
 	ehci_pci_givecontroller(sc);
 #endif
+}
+
+int
+ehci_sb700_match(struct pci_attach_args *pa)
+{
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ATI &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ATI_SBX00_SMB &&
+	    (PCI_REVISION(pa->pa_class) == 0x3a ||
+	     PCI_REVISION(pa->pa_class) == 0x3b))
+		return (1);
+
+	return (0);
 }

@@ -73,6 +73,14 @@ typedef struct drm_mach64_descriptor_ring {
 } drm_mach64_descriptor_ring_t;
 
 typedef struct drm_mach64_private {
+	struct device		 dev;
+	struct device		*drmdev;
+
+	pci_chipset_tag_t	 pc;
+	pci_intr_handle_t	 ih;
+	void			*irqh;
+
+	struct vga_pci_bar	*regs;
 	drm_mach64_sarea_t *sarea_priv;
 
 	int is_pci;
@@ -102,12 +110,11 @@ typedef struct drm_mach64_private {
 	u32 back_offset_pitch;
 	u32 depth_offset_pitch;
 
-	drm_local_map_t *sarea;
-	drm_local_map_t *fb;
-	drm_local_map_t *mmio;
-	drm_local_map_t *ring_map;
-	drm_local_map_t *dev_buffers;	/* this is a pointer to a structure in dev */
-	drm_local_map_t *agp_textures;
+	struct drm_local_map *sarea;
+	struct drm_local_map *fb;
+	struct drm_local_map *ring_map;
+	struct drm_local_map *dev_buffers;	/* this is a pointer to a structure in dev */
+	struct drm_local_map *agp_textures;
 } drm_mach64_private_t;
 
 				/* mach64_dma.c */
@@ -119,8 +126,8 @@ extern int mach64_dma_flush(struct drm_device *dev, void *data,
 			    struct drm_file *file_priv);
 extern int mach64_engine_reset(struct drm_device *dev, void *data,
 			       struct drm_file *file_priv);
-extern int mach64_dma_buffers(struct drm_device *dev, void *data,
-			      struct drm_file *file_priv);
+extern int mach64_dma_buffers(struct drm_device *, struct drm_dma *,
+    struct drm_file *);
 extern void mach64_driver_lastclose(struct drm_device * dev);
 
 extern int mach64_init_freelist(struct drm_device * dev);
@@ -163,9 +170,7 @@ extern int mach64_get_param(struct drm_device *dev, void *data,
 extern u32 mach64_get_vblank_counter(struct drm_device *dev, int crtc);
 extern int mach64_enable_vblank(struct drm_device *dev, int crtc);
 extern void mach64_disable_vblank(struct drm_device *dev, int crtc);
-extern irqreturn_t mach64_driver_irq_handler(DRM_IRQ_ARGS);
-extern void mach64_driver_irq_preinstall(struct drm_device *dev);
-extern int mach64_driver_irq_postinstall(struct drm_device *dev);
+extern int mach64_driver_irq_install(struct drm_device *dev);
 extern void mach64_driver_irq_uninstall(struct drm_device *dev);
 
 /* ================================================================
@@ -484,8 +489,10 @@ extern void mach64_driver_irq_uninstall(struct drm_device *dev);
 #define MACH64_DATATYPE_AYUV444				14
 #define MACH64_DATATYPE_ARGB4444			15
 
-#define MACH64_READ(reg)	DRM_READ32(dev_priv->mmio, (reg) )
-#define MACH64_WRITE(reg,val)	DRM_WRITE32(dev_priv->mmio, (reg), (val) )
+#define MACH64_READ(reg)	bus_space_read_4(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg))
+#define MACH64_WRITE(reg,val)	bus_space_write_4(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg), (val))
 
 #define DWMREG0		0x0400
 #define DWMREG0_END	0x07ff

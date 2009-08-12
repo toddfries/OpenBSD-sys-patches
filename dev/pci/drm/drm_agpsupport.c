@@ -40,31 +40,6 @@ void			 drm_agp_remove_entry(struct drm_device *,
 			     struct drm_agp_mem *);
 
 int
-drm_device_is_agp(struct drm_device *dev)
-{
-	if (dev->driver->device_is_agp != NULL) {
-		int ret;
-		/*
-		 * device_is_agp returns a tristate, 0 = not AGP, 1 = definitely
-		 * AGP, 2 = fall back to PCI capability
-		 */
-		ret = (*dev->driver->device_is_agp)(dev);
-		if (ret != DRM_MIGHT_BE_AGP)
-			return (ret);
-	}
-
-	return (pci_get_capability(dev->pa.pa_pc, dev->pa.pa_tag, PCI_CAP_AGP,
-	    NULL, NULL));
-}
-
-int
-drm_device_is_pcie(struct drm_device *dev)
-{
-	return (pci_get_capability(dev->pa.pa_pc, dev->pa.pa_tag,
-	    PCI_CAP_PCIEXPRESS, NULL, NULL));
-}
-
-int
 drm_agp_info(struct drm_device * dev, struct drm_agp_info *info)
 {
 	struct agp_info	*kern;
@@ -179,7 +154,7 @@ drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 	if (dev->agp == NULL || !dev->agp->acquired)
 		return (EINVAL);
 
-	entry = drm_alloc(sizeof(*entry), DRM_MEM_AGPLISTS);
+	entry = drm_alloc(sizeof(*entry));
 	if (entry == NULL)
 		return (ENOMEM);
 
@@ -189,7 +164,7 @@ drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 	handle = agp_alloc_memory(dev->agp->agpdev, type,
 	    pages << AGP_PAGE_SHIFT);
 	if (handle == NULL) {
-		drm_free(entry, sizeof(*entry), DRM_MEM_AGPLISTS);
+		drm_free(entry);
 		return (ENOMEM);
 	}
 	
@@ -316,7 +291,7 @@ drm_agp_remove_entry(struct drm_device *dev, struct drm_agp_mem *entry)
 	if (entry->bound)
 		agp_unbind_memory(dev->agp->agpdev, entry->handle);
 	agp_free_memory(dev->agp->agpdev, entry->handle);
-	drm_free(entry, sizeof(*entry), DRM_MEM_AGPLISTS);
+	drm_free(entry);
 }
 
 void
@@ -385,7 +360,7 @@ drm_agp_init(void)
 	DRM_DEBUG("agp_available = %d\n", agp_available);
 
 	if (agp_available) {
-		head = drm_calloc(1, sizeof(*head), DRM_MEM_AGPLISTS);
+		head = drm_calloc(1, sizeof(*head));
 		if (head == NULL)
 			return (NULL);
 		head->agpdev = agpdev;

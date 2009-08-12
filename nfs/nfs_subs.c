@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_subs.c,v 1.86 2008/08/25 09:26:17 pedro Exp $	*/
+/*	$OpenBSD: nfs_subs.c,v 1.99 2009/08/04 17:12:39 thib Exp $	*/
 /*	$NetBSD: nfs_subs.c,v 1.27.4.3 1996/07/08 20:34:24 jtc Exp $	*/
 
 /*
@@ -64,7 +64,6 @@
 #include <nfs/xdr_subs.h>
 #include <nfs/nfsm_subs.h>
 #include <nfs/nfsmount.h>
-#include <nfs/nfsrtt.h>
 #include <nfs/nfs_var.h>
 
 #include <miscfs/specfs/specdev.h>
@@ -121,9 +120,6 @@ int nfsv3_procid[NFS_NPROCS] = {
 	NFSPROC_NOOP,
 	NFSPROC_NOOP,
 	NFSPROC_NOOP,
-	NFSPROC_NOOP,
-	NFSPROC_NOOP,
-	NFSPROC_NOOP,
 	NFSPROC_NOOP
 };
 
@@ -153,10 +149,7 @@ int nfsv2_procid[NFS_NPROCS] = {
 	NFSV2PROC_NOOP,
 	NFSV2PROC_NOOP,
 	NFSV2PROC_NOOP,
-	NFSV2PROC_NOOP,
-	NFSV2PROC_NOOP,
-	NFSV2PROC_NOOP,
-	NFSV2PROC_NOOP,
+	NFSV2PROC_NOOP
 };
 
 /*
@@ -514,8 +507,6 @@ static short *nfsrv_v3errmap[] = {
 	nfsv3err_commit,
 };
 
-extern struct nfsrtt nfsrtt;
-
 struct pool nfsreqpl;
 
 /*
@@ -561,8 +552,7 @@ nfs_get_xid(void)
  * other authorization methods, such as Kerberos.
  */
 void
-nfsm_rpchead(struct nfsreq *req, struct ucred *cr, int auth_type,
-    struct mbuf *mrest, int mrest_len)
+nfsm_rpchead(struct nfsreq *req, struct ucred *cr, int auth_type)
 {
 	struct mbuf	*mb;
 	u_int32_t	*tl;
@@ -572,10 +562,10 @@ nfsm_rpchead(struct nfsreq *req, struct ucred *cr, int auth_type,
 
 	/*
 	 * RPCAUTH_UNIX fits in an hdr mbuf, in the future other
-	 * authorization methods need to figure out there own sizes
+	 * authorization methods need to figure out their own sizes
 	 * and allocate and chain mbuf's accorindgly.
 	 */
-	MGETHDR(mb, M_WAIT, MT_DATA);
+	mb = req->r_mreq;
 
 	/*
 	 * We need to start out by finding how big the authorization cred
@@ -640,10 +630,8 @@ nfsm_rpchead(struct nfsreq *req, struct ucred *cr, int auth_type,
 		break;
 	}
 
-	mb->m_next = mrest;
-	mb->m_pkthdr.len = authsiz + 10 * NFSX_UNSIGNED + mrest_len;
+	mb->m_pkthdr.len += authsiz + 10 * NFSX_UNSIGNED;
 	mb->m_pkthdr.rcvif = NULL;
-	req->r_mreq = mb;
 }
 
 /*
@@ -683,13 +671,6 @@ nfsm_mbuftouio(mrep, uiop, siz, dpos)
 				len = mp->m_len;
 			}
 			xfer = (left > len) ? len : left;
-#ifdef notdef
-			/* Not Yet.. */
-			if (uiop->uio_iov->iov_op != NULL)
-				(*(uiop->uio_iov->iov_op))
-				(mbufcp, uiocp, xfer);
-			else
-#endif
 			if (uiop->uio_segflg == UIO_SYSSPACE)
 				bcopy(mbufcp, uiocp, xfer);
 			else
@@ -705,7 +686,8 @@ nfsm_mbuftouio(mrep, uiop, siz, dpos)
 			uiop->uio_iovcnt--;
 			uiop->uio_iov++;
 		} else {
-			(char *)uiop->uio_iov->iov_base += uiosiz;
+			uiop->uio_iov->iov_base =
+			    (char *)uiop->uio_iov->iov_base + uiosiz;
 			uiop->uio_iov->iov_len -= uiosiz;
 		}
 		siz -= uiosiz;
@@ -915,7 +897,6 @@ nfs_init()
 {
 	static struct timeout nfs_timer_to;
 
-	nfsrtt.pos = 0;
 	rpc_vers = txdr_unsigned(RPC_VER2);
 	rpc_call = txdr_unsigned(RPC_CALL);
 	rpc_reply = txdr_unsigned(RPC_REPLY);
@@ -925,8 +906,8 @@ nfs_init()
 	rpc_autherr = txdr_unsigned(RPC_AUTHERR);
 	rpc_auth_unix = txdr_unsigned(RPCAUTH_UNIX);
 	nfs_prog = txdr_unsigned(NFS_PROG);
-	nfs_true = txdr_unsigned(TRUE);
-	nfs_false = txdr_unsigned(FALSE);
+	nfs_true = txdr_unsigned(1);
+	nfs_false = txdr_unsigned(0);
 	nfs_xdrneg1 = txdr_unsigned(-1);
 	nfs_ticks = (hz * NFS_TICKINTVL + 500) / 1000;
 	if (nfs_ticks < 1)
@@ -1065,7 +1046,7 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 				*vpp = vp = nvp;
 			}
 		}
-		np->n_mtime = mtime.tv_sec;
+		np->n_mtime = mtime;
 	}
 	vap = &np->n_vattr;
 	vap->va_type = vtyp;
@@ -1157,7 +1138,7 @@ nfs_attrtimeo (np)
 {
 	struct vnode *vp = np->n_vnode;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
-	int tenthage = (time_second - np->n_mtime) / 10;
+	int tenthage = (time_second - np->n_mtime.tv_sec) / 10;
 	int minto, maxto;
 
 	if (vp->v_type == VDIR) {
@@ -1243,7 +1224,7 @@ nfs_namei(ndp, fhp, len, slp, nam, mdp, dposp, retdirp, p)
 	int error, rdonly;
 	struct componentname *cnp = &ndp->ni_cnd;
 
-	*retdirp = (struct vnode *)0;
+	*retdirp = NULL;
 	cnp->cn_pnbuf = pool_get(&namei_pool, PR_WAITOK);
 	/*
 	 * Copy the name from the mbuf list to ndp->ni_pnbuf
@@ -1287,7 +1268,7 @@ nfs_namei(ndp, fhp, len, slp, nam, mdp, dposp, retdirp, p)
 	/*
 	 * Extract and set starting directory.
 	 */
-	error = nfsrv_fhtovp(fhp, FALSE, &dp, ndp->ni_cnd.cn_cred, slp,
+	error = nfsrv_fhtovp(fhp, 0, &dp, ndp->ni_cnd.cn_cred, slp,
 	    nam, &rdonly);
 	if (error)
 		goto out;
@@ -1296,7 +1277,7 @@ nfs_namei(ndp, fhp, len, slp, nam, mdp, dposp, retdirp, p)
 		error = ENOTDIR;
 		goto out;
 	}
-	VREF(dp);
+	vref(dp);
 	*retdirp = dp;
 	ndp->ni_startdir = dp;
 	if (rdonly)
@@ -1360,7 +1341,7 @@ nfsm_adj(mp, len, nul)
 	m = mp;
 	for (;;) {
 		count += m->m_len;
-		if (m->m_next == (struct mbuf *)0)
+		if (m->m_next == NULL)
 			break;
 		m = m->m_next;
 	}
@@ -1518,7 +1499,7 @@ nfsrv_fhtovp(fhp, lockflag, vpp, cred, slp, nam, rdonlyp)
 	int error, exflags;
 	struct sockaddr_in *saddr;
 
-	*vpp = (struct vnode *)0;
+	*vpp = NULL;
 	mp = vfs_getvfs(&fhp->fh_fsid);
 
 	if (!mp)
@@ -1557,9 +1538,8 @@ nfsrv_fhtovp(fhp, lockflag, vpp, cred, slp, nam, rdonlyp)
 }
 
 /*
- * This function compares two net addresses by family and returns TRUE
- * if they are the same host.
- * If there is any doubt, return FALSE.
+ * This function compares two net addresses by family and returns non zero
+ * if they are the same host, or if there is any doubt it returns 0.
  * The AF_INET family is handled as a special case so that address mbufs
  * don't need to be saved to store "struct in_addr", which is only 4 bytes.
  */
@@ -1804,7 +1784,7 @@ nfsrv_errmap(nd, err)
 	    } else
 		return (err & 0xffff);
 	}
-	if (err <= sizeof(nfsrv_v2errmap)/sizeof(nfsrv_v2errmap[0]))
+	if (err <= nitems(nfsrv_v2errmap))
 		return ((int)nfsrv_v2errmap[err - 1]);
 	return (NFSERR_IO);
 }
@@ -1852,7 +1832,7 @@ nfsrv_setcred(incred, outcred)
 }
 
 /*
- * If full is true, set all fields, otherwise just set mode and time fields
+ * If full is non zero, set all fields, otherwise just set mode and time fields
  */
 void
 nfsm_v3attrbuild(struct mbuf **mp, struct vattr *a, int full)
@@ -1950,4 +1930,92 @@ nfsm_build(struct mbuf **mp, u_int len)
 	*mp = mb;
 
 	return (bpos);
+}
+
+void
+nfsm_fhtom(struct mbuf **mp, struct vnode *v, int v3)
+{
+	struct nfsnode *n = VTONFS(v);
+
+	if (v3) {
+		nfsm_strtombuf(mp, n->n_fhp, n->n_fhsize);
+	} else {
+		nfsm_buftombuf(mp, n->n_fhp, NFSX_V2FH);
+	}
+}
+
+void
+nfsm_srvfhtom(struct mbuf **mp, fhandle_t *f, int v3)
+{
+	if (v3) {
+		nfsm_strtombuf(mp, f, NFSX_V3FH);
+	} else {
+		nfsm_buftombuf(mp, f, NFSX_V2FH);
+	}
+}
+
+int
+nfsm_srvsattr(struct mbuf **mp, struct vattr *va, struct mbuf *mrep,
+    caddr_t *dposp)
+{
+	struct nfsm_info	info;
+	uint32_t *tl, t1;
+	caddr_t cp2;
+	int error = 0;
+
+	info.nmi_md = *mp;
+	info.nmi_dpos = *dposp;
+
+	nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
+	if (*tl == nfs_true) {
+		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
+		va->va_mode = nfstov_mode(*tl);
+	}
+
+	nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
+	if (*tl == nfs_true) {
+		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
+		va->va_uid = fxdr_unsigned(uid_t, *tl);
+	}
+
+	nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
+	if (*tl == nfs_true) {
+		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
+		va->va_gid = fxdr_unsigned(gid_t, *tl);
+	}
+
+	nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
+	if (*tl == nfs_true) {
+		nfsm_dissect(tl, u_int32_t *, 2 * NFSX_UNSIGNED);
+		va->va_size = fxdr_hyper(tl);
+	}
+
+	nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
+	switch (fxdr_unsigned(int, *tl)) {
+	case NFSV3SATTRTIME_TOCLIENT:
+		va->va_vaflags &= ~VA_UTIMES_NULL;
+		nfsm_dissect(tl, u_int32_t *, 2 * NFSX_UNSIGNED);
+		fxdr_nfsv3time(tl, &va->va_atime);
+		break;
+	case NFSV3SATTRTIME_TOSERVER:
+		getnanotime(&va->va_atime);
+		break;
+	};
+
+	nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
+	switch (fxdr_unsigned(int, *tl)) {
+	case NFSV3SATTRTIME_TOCLIENT:
+		va->va_vaflags &= ~VA_UTIMES_NULL;
+		nfsm_dissect(tl, u_int32_t *, 2 * NFSX_UNSIGNED);
+		fxdr_nfsv3time(tl, &va->va_mtime);
+		break;
+	case NFSV3SATTRTIME_TOSERVER:
+		getnanotime(&va->va_mtime);
+		break;
+	};
+
+	*dposp = info.nmi_dpos;
+	*mp = info.nmi_md;
+nfsmout:
+	return (error);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci.c,v 1.58 2008/06/13 08:45:50 deraadt Exp $	*/
+/*	$OpenBSD: pci.c,v 1.67 2009/07/26 13:21:18 kettenis Exp $	*/
 /*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*
@@ -43,6 +43,7 @@
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
+#include <dev/pci/ppbreg.h>
 
 int pcimatch(struct device *, void *, void *);
 void pciattach(struct device *, struct device *, void *);
@@ -84,6 +85,7 @@ int	pcisubmatch(struct device *, void *, void *);
 int pci_enumerate_bus(struct pci_softc *,
     int (*)(struct pci_attach_args *), struct pci_attach_args *);
 #endif
+int	pci_reserve_resources(struct pci_attach_args *);
 
 /*
  * Important note about PCI-ISA bridges:
@@ -153,6 +155,9 @@ pciattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_memt = pba->pba_memt;
 	sc->sc_dmat = pba->pba_dmat;
 	sc->sc_pc = pba->pba_pc;
+	sc->sc_ioex = pba->pba_ioex;
+	sc->sc_memex = pba->pba_memex;
+	sc->sc_pmemex = pba->pba_pmemex;
 	sc->sc_domain = pba->pba_domain;
 	sc->sc_bus = pba->pba_bus;
 	sc->sc_bridgetag = pba->pba_bridgetag;
@@ -160,6 +165,7 @@ pciattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_maxndevs = pci_bus_maxdevs(pba->pba_pc, pba->pba_bus);
 	sc->sc_intrswiz = pba->pba_intrswiz;
 	sc->sc_intrtag = pba->pba_intrtag;
+	pci_enumerate_bus(sc, pci_reserve_resources, NULL);
 	pci_enumerate_bus(sc, NULL, NULL);
 }
 
@@ -276,6 +282,9 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 	pa.pa_memt = sc->sc_memt;
 	pa.pa_dmat = sc->sc_dmat;
 	pa.pa_pc = pc;
+	pa.pa_ioex = sc->sc_ioex;
+	pa.pa_memex = sc->sc_memex;
+	pa.pa_pmemex = sc->sc_pmemex;
 	pa.pa_domain = sc->sc_domain;
 	pa.pa_bus = bus;
 	pa.pa_device = device;
@@ -291,16 +300,6 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 	   on broken hardware. <csapuntz@stanford.edu> */
 	pa.pa_flags = PCI_FLAGS_IO_ENABLED | PCI_FLAGS_MEM_ENABLED;
 
-#ifdef __i386__
-	/*
-	 * on i386 we really need to know the device tag
-	 * and not the pci bridge tag, in intr_map
-	 * to be able to program the device and the
-	 * pci interrupt router.
-	 */
-	pa.pa_intrtag = tag;
-	pa.pa_intrswiz = 0;
-#else
 	if (sc->sc_bridgetag == NULL) {
 		pa.pa_intrswiz = 0;
 		pa.pa_intrtag = tag;
@@ -308,7 +307,6 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 		pa.pa_intrswiz = sc->sc_intrswiz + device;
 		pa.pa_intrtag = sc->sc_intrtag;
 	}
-#endif
 
 	intr = pci_conf_read(pc, tag, PCI_INTERRUPT_REG);
 
@@ -509,6 +507,143 @@ pci_enumerate_bus(struct pci_softc *sc,
 }
 #endif /* PCI_MACHDEP_ENUMERATE_BUS */
 
+int
+pci_reserve_resources(struct pci_attach_args *pa)
+{
+	pci_chipset_tag_t pc = pa->pa_pc;
+	pcitag_t tag = pa->pa_tag;
+	pcireg_t bhlc, blr, type;
+	bus_addr_t base, limit;
+	bus_size_t size;
+	int reg, reg_start, reg_end;
+	int flags;
+
+	bhlc = pci_conf_read(pc, tag, PCI_BHLC_REG);
+	switch (PCI_HDRTYPE_TYPE(bhlc)) {
+	case 0:
+		reg_start = PCI_MAPREG_START;
+		reg_end = PCI_MAPREG_END;
+		break;
+	case 1: /* PCI-PCI bridge */
+		reg_start = PCI_MAPREG_START;
+		reg_end = PCI_MAPREG_PPB_END;
+		break;
+	case 2: /* PCI-CardBus bridge */
+		reg_start = PCI_MAPREG_START;
+		reg_end = PCI_MAPREG_PCB_END;
+		break;
+	default:
+		return (0);
+	}
+    
+	for (reg = reg_start; reg < reg_end; reg += 4) {
+		if (!pci_mapreg_probe(pc, tag, reg, &type))
+			continue;
+
+		if (pci_mapreg_info(pc, tag, reg, type, &base, &size, &flags))
+			continue;
+
+		if (base == 0)
+			continue;
+
+		switch (type) {
+		case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT:
+		case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT:
+#ifdef BUS_SPACE_MAP_PREFETCHABLE
+			if (ISSET(flags, BUS_SPACE_MAP_PREFETCHABLE) &&
+			    pa->pa_pmemex && extent_alloc_region(pa->pa_pmemex,
+			    base, size, EX_NOWAIT) == 0) {
+				break;
+			}
+#endif
+			if (pa->pa_memex && extent_alloc_region(pa->pa_memex,
+			    base, size, EX_NOWAIT)) {
+				printf("mem address conflict 0x%x/0x%x\n",
+				    base, size);
+				pci_conf_write(pc, tag, reg, 0);
+				if (type & PCI_MAPREG_MEM_TYPE_64BIT)
+					pci_conf_write(pc, tag, reg + 4, 0);
+			}
+			break;
+		case PCI_MAPREG_TYPE_IO:
+			if (pa->pa_ioex && extent_alloc_region(pa->pa_ioex,
+			    base, size, EX_NOWAIT)) {
+				printf("io address conflict 0x%x/0x%x\n",
+				    base, size);
+				pci_conf_write(pc, tag, reg, 0);
+			}
+			break;
+		}
+
+		if (type & PCI_MAPREG_MEM_TYPE_64BIT)
+			reg += 4;
+	}
+
+	if (PCI_HDRTYPE_TYPE(bhlc) != 1)
+		return (0);
+
+	/* Figure out the I/O address range of the bridge. */
+	blr = pci_conf_read(pc, tag, PPB_REG_IOSTATUS);
+	base = (blr & 0x000000f0) << 8;
+	limit = (blr & 0x000f000) | 0x00000fff;
+	blr = pci_conf_read(pc, tag, PPB_REG_IO_HI);
+	base |= (blr & 0x0000ffff) << 16;
+	limit |= (blr & 0xffff0000);
+	if (limit > base)
+		size = (limit - base + 1);
+	else
+		size = 0;
+	if (pa->pa_ioex && base > 0 && size > 0) {
+		if (extent_alloc_region(pa->pa_ioex, base, size, EX_NOWAIT)) {
+			printf("bridge io address conflict 0x%x/0x%x\n",
+			       base, size);
+			blr &= 0xffff0000;
+			blr |= 0x000000f0;
+			pci_conf_write(pc, tag, PPB_REG_IOSTATUS, blr);
+		}
+	}
+
+	/* Figure out the memory mapped I/O address range of the bridge. */
+	blr = pci_conf_read(pc, tag, PPB_REG_MEM);
+	base = (blr & 0x0000fff0) << 16;
+	limit = (blr & 0xfff00000) | 0x000fffff;
+	if (limit > base)
+		size = (limit - base + 1);
+	else
+		size = 0;
+	if (pa->pa_memex && base > 0 && size > 0) {
+		if (extent_alloc_region(pa->pa_memex, base, size, EX_NOWAIT)) {
+			printf("bridge mem address conflict 0x%x/0x%x\n",
+			       base, size);
+			pci_conf_write(pc, tag, PPB_REG_MEM, 0x0000fff0);
+		}
+	}
+
+	/* Figure out the prefetchable memory address range of the bridge. */
+	blr = pci_conf_read(pc, tag, PPB_REG_PREFMEM);
+	base = (blr & 0x0000fff0) << 16;
+	limit = (blr & 0xfff00000) | 0x000fffff;
+	if (limit > base)
+		size = (limit - base + 1);
+	else
+		size = 0;
+	if (pa->pa_pmemex && base > 0 && size > 0) {
+		if (extent_alloc_region(pa->pa_pmemex, base, size, EX_NOWAIT)) {
+			printf("bridge mem address conflict 0x%x/0x%x\n",
+			       base, size);
+			pci_conf_write(pc, tag, PPB_REG_PREFMEM, 0x0000fff0);
+		}
+	} else if (pa->pa_memex && base > 0 && size > 0) {
+		if (extent_alloc_region(pa->pa_memex, base, size, EX_NOWAIT)) {
+			printf("bridge mem address conflict 0x%x/0x%x\n",
+			       base, size);
+			pci_conf_write(pc, tag, PPB_REG_PREFMEM, 0x0000fff0);
+		}
+	}
+
+	return (0);
+}
+
 /*
  * Vital Product Data (PCI 2.2)
  */
@@ -650,23 +785,31 @@ pciclose(dev_t dev, int flag, int devtype, struct proc *p)
 int
 pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
+	struct pcisel *sel = (struct pcisel *)data;
 	struct pci_io *io;
+	struct pci_rom *rom;
 	int i, error;
 	pcitag_t tag;
 	struct pci_softc *pci = NULL;
 	pci_chipset_tag_t pc;
 
-	io = (struct pci_io *)data;
-
-	PCIDEBUG(("pciioctl cmd %s", cmd == PCIOCREAD ? "pciocread" 
-		  : cmd == PCIOCWRITE ? "pciocwrite" : "unknown"));
-	PCIDEBUG(("  bus %d dev %d func %d reg %x\n", io->pi_sel.pc_bus,
-		  io->pi_sel.pc_dev, io->pi_sel.pc_func, io->pi_reg));
+	switch (cmd) {
+	case PCIOCREAD:
+		break;
+	case PCIOCWRITE:
+		if (!(flag & FWRITE))
+			return EPERM;
+		break;
+	case PCIOCGETROM:
+		break;
+	default:
+		return ENOTTY;
+	}
 
 	for (i = 0; i < pci_cd.cd_ndevs; i++) {
 		pci = pci_cd.cd_devs[i];
 		if (pci != NULL && pci->sc_domain == minor(dev) &&
-		    pci->sc_bus == io->pi_sel.pc_bus)
+		    pci->sc_bus == sel->pc_bus)
 			break;
 	}
 	if (i >= pci_cd.cd_ndevs)
@@ -674,21 +817,17 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 
 	/* Check bounds */
 	if (pci->sc_bus >= 256 || 
-	    io->pi_sel.pc_dev >= pci_bus_maxdevs(pci->sc_pc, pci->sc_bus) ||
-	    io->pi_sel.pc_func >= 8)
+	    sel->pc_dev >= pci_bus_maxdevs(pci->sc_pc, pci->sc_bus) ||
+	    sel->pc_func >= 8)
 		return EINVAL;
 
 	pc = pci->sc_pc;
-	tag = pci_make_tag(pc, io->pi_sel.pc_bus, io->pi_sel.pc_dev,
-			   io->pi_sel.pc_func);
+	tag = pci_make_tag(pc, sel->pc_bus, sel->pc_dev, sel->pc_func);
 
-	switch(cmd) {
-	case PCIOCGETCONF:
-		error = ENODEV;
-		break;
-
+	switch (cmd) {
 	case PCIOCREAD:
-		switch(io->pi_width) {
+		io = (struct pci_io *)data;
+		switch (io->pi_width) {
 		case 4:
 			/* Make sure the register is properly aligned */
 			if (io->pi_reg & 0x3) 
@@ -703,10 +842,8 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 
 	case PCIOCWRITE:
-		if (!(flag & FWRITE))
-			return EPERM;
-
-		switch(io->pi_width) {
+		io = (struct pci_io *)data;
+		switch (io->pi_width) {
 		case 4:
 			/* Make sure the register is properly aligned */
 			if (io->pi_reg & 0x3)
@@ -719,6 +856,71 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			break;
 		}
 		break;
+
+	case PCIOCGETROM:
+	{
+		pcireg_t addr, mask, bhlc;
+		bus_space_handle_t h;
+		bus_size_t len, off;
+		char buf[256];
+		int s;
+
+		bhlc = pci_conf_read(pc, tag, PCI_BHLC_REG);
+		if (PCI_HDRTYPE_TYPE(bhlc) != 0)
+			return (ENODEV);
+
+		s = splhigh();
+		addr = pci_conf_read(pc, tag, PCI_ROM_REG);
+		pci_conf_write(pc, tag, PCI_ROM_REG, ~PCI_ROM_ENABLE);
+		mask = pci_conf_read(pc, tag, PCI_ROM_REG);
+		pci_conf_write(pc, tag, PCI_ROM_REG, addr);
+		splx(s);
+
+		/*
+		 * Section 6.2.5.2 `Expansion ROM Base Addres Register',
+		 *
+		 * tells us that only the upper 21 bits are writable.
+		 * This means that the size of a ROM must be a
+		 * multiple of 2 KB.  So reading the ROM in chunks of
+		 * 256 bytes should work just fine.
+		 */
+		if ((PCI_ROM_ADDR(addr) == 0 ||
+		     PCI_ROM_SIZE(mask) % sizeof(buf)) != 0)
+			return (ENODEV);
+
+		rom = (struct pci_rom *)data;
+		if (rom->pr_romlen < PCI_ROM_SIZE(mask)) {
+			error = ENOMEM;
+			goto fail;
+		}
+
+		error = bus_space_map(pci->sc_memt, PCI_ROM_ADDR(addr),
+		    PCI_ROM_SIZE(mask), 0, &h);
+		if (error)
+			goto fail;
+
+		off = 0;
+		len = PCI_ROM_SIZE(mask);
+		while (len > 0 && error == 0) {
+			s = splhigh();
+			pci_conf_write(pc, tag, PCI_ROM_REG,
+			    addr | PCI_ROM_ENABLE);
+			bus_space_read_region_1(pci->sc_memt, h, off,
+			    buf, sizeof(buf));
+			pci_conf_write(pc, tag, PCI_ROM_REG, addr);
+			splx(s);
+
+			error = copyout(buf, rom->pr_rom + off, sizeof(buf));
+			off += sizeof(buf);
+			len -= sizeof(buf);
+		}
+
+		bus_space_unmap(pci->sc_memt, h, PCI_ROM_SIZE(mask));
+
+	fail:
+		rom->pr_romlen = PCI_ROM_SIZE(mask);
+		break;
+	}
 
 	default:
 		error = ENOTTY;

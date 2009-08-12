@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.97 2008/07/21 04:35:54 todd Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.106 2009/05/31 21:23:28 kettenis Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.51 2001/07/24 19:32:11 eeh Exp $ */
 
 /*
@@ -68,6 +68,7 @@
 #include <machine/bus.h>
 #include <machine/autoconf.h>
 #include <machine/hypervisor.h>
+#include <machine/mdesc.h>
 #include <machine/openfirm.h>
 #include <machine/sparc64.h>
 #include <machine/cpu.h>
@@ -75,6 +76,8 @@
 #include <machine/trap.h>
 #include <sparc64/sparc64/cache.h>
 #include <sparc64/sparc64/timerreg.h>
+#include <sparc64/dev/vbusvar.h>
+#include <sparc64/dev/cbusvar.h>
 
 #include <dev/ata/atavar.h>
 #include <dev/pci/pcivar.h>
@@ -101,7 +104,6 @@ int	fbnode;		/* node ID of ROM's console output device */
 int	optionsnode;	/* node ID of ROM's options */
 
 static	int rootnode;
-char platform_type[64];
 
 /* for hw.product/vendor see sys/kern/kern_sysctl.c */
 extern char *hw_prod, *hw_vendor;
@@ -114,7 +116,7 @@ static	void mainbus_attach(struct device *, struct device *, void *);
 int	get_ncpus(void);
 
 struct device *booted_device;
-struct	bootpath bootpath[8];
+struct	bootpath bootpath[16];
 int	nbootpath;
 int	bootnode;
 static	void bootpath_build(void);
@@ -142,6 +144,14 @@ struct intrmap intrmap[] = {
 	{ NULL,		0 }
 };
 
+#ifdef SUN4V
+void	sun4v_soft_state_init(void);
+void	sun4v_set_soft_state(int, const char *);
+
+#define __align32 __attribute__((__aligned__(32)))
+char sun4v_soft_state_booting[] __align32 = "OpenBSD booting";
+char sun4v_soft_state_running[] __align32 = "OpenBSD running";
+#endif
 
 #ifdef DEBUG
 #define ACDB_BOOTDEV	0x1
@@ -205,7 +215,6 @@ str2hex(char *str, long *vp)
 int
 get_ncpus(void)
 {
-#ifdef MULTIPROCESSOR
 	int node, child, stack[4], depth, ncpus;
 	char buf[32];
 
@@ -218,7 +227,7 @@ get_ncpus(void)
 
 		if (node == 0 || node == -1) {
 			if (--depth < 0)
-				return (ncpus);
+				goto done;
 			
 			stack[depth] = OF_peer(stack[depth]);
 			continue;
@@ -235,7 +244,10 @@ get_ncpus(void)
 			stack[depth] = OF_peer(stack[depth]);
 	}
 
-	return (0);
+done:
+	ncpusfound = ncpus;
+#ifdef MULTIPROCESSOR
+	return (ncpus);
 #else
 	return (1);
 #endif
@@ -384,6 +396,13 @@ bootstrap(nctx)
 
 	ncpus = get_ncpus();
 	pmap_bootstrap(KERNBASE, (u_long)&end, nctx, ncpus);
+
+#ifdef SUN4V
+	if (CPU_ISSUN4V) {
+		sun4v_soft_state_init();
+		sun4v_set_soft_state(SIS_TRANSITION, sun4v_soft_state_booting);
+	}
+#endif
 }
 
 void
@@ -596,6 +615,11 @@ bootpath_store(storep, bp)
 void
 cpu_configure()
 {
+#ifdef SUN4V
+	if (CPU_ISSUN4V)
+		mdesc_init();
+#endif
+
 	/* build the bootpath */
 	bootpath_build();
 
@@ -625,7 +649,48 @@ cpu_configure()
 
 	(void)spl0();
 	cold = 0;
+
+#ifdef SUN4V
+	if (CPU_ISSUN4V)
+		sun4v_set_soft_state(SIS_NORMAL, sun4v_soft_state_running);
+#endif
 }
+
+#ifdef SUN4V
+
+#define HSVC_GROUP_SOFT_STATE 0x003
+
+int sun4v_soft_state_initialized = 0;
+
+void
+sun4v_soft_state_init(void)
+{
+	uint64_t minor;
+
+	if (prom_set_sun4v_api_version(HSVC_GROUP_SOFT_STATE, 1, 0, &minor))
+		return;
+
+	prom_sun4v_soft_state_supported();
+	sun4v_soft_state_initialized = 1;
+}
+
+void
+sun4v_set_soft_state(int state, const char *desc)
+{
+	paddr_t pa;
+	int err;
+
+	if (!sun4v_soft_state_initialized)
+		return;
+
+	if (!pmap_extract(pmap_kernel(), (vaddr_t)desc, &pa))
+		panic("sun4v_set_soft_state: pmap_extract failed\n");
+
+	err = hv_soft_state_set(state, pa);
+	if (err != H_EOK)
+		printf("soft_state_set: %d\n", err);
+}
+#endif
 
 void
 diskconf(void)
@@ -746,7 +811,7 @@ extern struct sparc_bus_dma_tag mainbus_dma_tag;
 extern bus_space_tag_t mainbus_space_tag;
 
 	struct mainbus_attach_args ma;
-	char buf[32], *p;
+	char buf[64];
 	const char *const *ssp, *sp = NULL;
 	int node0, node, rv, len;
 
@@ -766,27 +831,46 @@ extern bus_space_tag_t mainbus_space_tag;
 		NULL
 	};
 
-	if ((len = OF_getprop(findroot(), "banner-name", platform_type,
-	    sizeof(platform_type))) <= 0)
-		OF_getprop(findroot(), "name", platform_type,
-		    sizeof(platform_type));
-	printf(": %s\n", platform_type);
+	/*
+	 * Print the "banner-name" property in dmesg.  It provides a
+	 * description of the machine that is generally more
+	 * informative than the "name" property.  However, if the
+	 * "banner-name" property is missing, fall back on the "name"
+	 * propery.
+	 */
+	if (OF_getprop(findroot(), "banner-name", buf, sizeof(buf)) > 0 ||
+	    OF_getprop(findroot(), "name", buf, sizeof(buf)) > 0)
+		printf(": %s\n", buf);
+	else
+		printf("\n");
 
-	hw_vendor = malloc(sizeof(platform_type), M_DEVBUF, M_NOWAIT);
-	if (len > 0 && hw_vendor != NULL) {
-		strlcpy(hw_vendor, platform_type, sizeof(platform_type));
-		if ((strncmp(hw_vendor, "SUNW,", 5)) == 0) {
-			p = hw_prod = hw_vendor + 5;
+	/*
+	 * Base the hw.product and hw.vendor strings on the "name"
+	 * property.  They describe the hardware in a much more
+	 * consistent way than the "banner-property".
+	 */
+	if ((len = OF_getprop(findroot(), "name", buf, sizeof(buf))) > 0) {
+		hw_prod = malloc(len, M_DEVBUF, M_NOWAIT);
+		if (hw_prod)
+			strlcpy(hw_prod, buf, len);
+
+		if (strncmp(buf, "SUNW,", 5) == 0)
 			hw_vendor = "Sun";
-		} else if ((strncmp(hw_vendor, "Sun (TM) ", 9)) == 0) {
-			p = hw_prod = hw_vendor + 9;
-			hw_vendor = "Sun";
-		} else if ((p = memchr(hw_vendor, ' ', len)) != NULL) {
-			*p = '\0';
-			hw_prod = ++p;
-		}
-		if ((p = memchr(hw_prod, '(', len - (p - hw_prod))) != NULL)
-			*p = '\0';
+		if (strncmp(buf, "FJSV,", 5) == 0)
+			hw_vendor = "Fujitsu";
+		if (strncmp(buf, "TAD,", 4) == 0)
+			hw_vendor = "Tadpole";
+		if (strncmp(buf, "NATE,", 5) == 0)
+			hw_vendor = "Naturetech";
+
+		/*
+		 * The Momentum Leopard-V advertises itself as
+		 * SUNW,UltraSPARC-IIi-Engine, but can be
+		 * distinguished by looking at the "model" property.
+		 */
+		if (OF_getprop(findroot(), "model", buf, sizeof(buf)) > 0 &&
+		    strncmp(buf, "MOMENTUM,", 9) == 0)
+			hw_vendor = "Momentum";
 	}
 
 	/* Establish the first component of the boot path */
@@ -1195,6 +1279,8 @@ device_register(struct device *dev, void *aux)
 	struct mainbus_attach_args *ma = aux;
 	struct pci_attach_args *pa = aux;
 	struct sbus_attach_args *sa = aux;
+	struct vbus_attach_args *va = aux;
+	struct cbus_attach_args *ca = aux;
 	struct bootpath *bp = bootpath_store(0, NULL);
 	struct device *busdev = dev->dv_parent;
 	const char *devname = dev->dv_cfdata->cf_driver->cd_name;
@@ -1230,10 +1316,29 @@ device_register(struct device *dev, void *aux)
 	else if (strcmp(busname, "sbus") == 0 ||
 	    strcmp(busname, "dma") == 0 || strcmp(busname, "ledma") == 0)
 		node = sa->sa_node;
+	else if (strcmp(busname, "vbus") == 0)
+		node = va->va_node;
+	else if (strcmp(busname, "cbus") == 0)
+		node = ca->ca_node;
 	else if (strcmp(busname, "pci") == 0)
 		node = PCITAG_NODE(pa->pa_tag);
 
 	if (node == bootnode) {
+		if (strcmp(devname, "vdsk") == 0) {
+			/*
+			 * For virtual disks, don't nail the boot
+			 * device just yet.  Instead, we add fake a
+			 * SCSI target/lun, such that we match it the
+			 * next time around.
+			 */
+			bp->dev = dev;
+			(bp + 1)->val[0] = 0;
+			(bp + 1)->val[1] = 0;
+			nbootpath++;
+			bootpath_store(1, bp + 1);
+			return;
+		}
+
 		nail_bootdev(dev, bp);
 		return;
 	}

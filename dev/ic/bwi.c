@@ -1,4 +1,4 @@
-/*	$OpenBSD: bwi.c,v 1.82 2008/10/15 19:12:19 blambert Exp $	*/
+/*	$OpenBSD: bwi.c,v 1.90 2009/08/02 19:33:01 blambert Exp $	*/
 
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
@@ -99,6 +99,8 @@ int bwi_debug = 1;
 
 #define __unused __attribute__((__unused__))
 
+extern int ticks;
+
 /* XXX end porting goop */
 
 /* MAC */
@@ -121,6 +123,13 @@ struct ieee80211_ds_plcp_hdr {
 	uint16_t	i_length;
 	uint16_t	i_crc;
 } __packed;
+
+enum bwi_modtype {
+	IEEE80211_MODTYPE_DS	= 0,	/* DS/CCK modulation */
+	IEEE80211_MODTYPE_PBCC	= 1,	/* PBCC modulation */
+	IEEE80211_MODTYPE_OFDM	= 2	/* OFDM modulation */
+};
+#define IEEE80211_MODTYPE_CCK   IEEE80211_MODTYPE_DS
 
 /* MAC */
 void		 bwi_tmplt_write_4(struct bwi_mac *, uint32_t, uint32_t);
@@ -334,8 +343,7 @@ void		 bwi_free_tx_ring32(struct bwi_softc *, int);
 void		 bwi_free_txstats64(struct bwi_softc *);
 void		 bwi_free_rx_ring64(struct bwi_softc *);
 void		 bwi_free_tx_ring64(struct bwi_softc *, int);
-uint8_t		 bwi_ofdm_plcp2rate(uint32_t *);
-uint8_t		 bwi_ds_plcp2rate(struct ieee80211_ds_plcp_hdr *);
+uint8_t		 bwi_plcp2rate(uint32_t, enum ieee80211_phymode);
 void		 bwi_ofdm_plcp_header(uint32_t *, int, uint8_t);
 void		 bwi_ds_plcp_header(struct ieee80211_ds_plcp_hdr *, int,
 		     uint8_t);
@@ -483,7 +491,7 @@ static const struct {
 } bwi_bbpid_map[] = {
 	{ 0x4301, 0x4301, 0x4301 },
 	{ 0x4305, 0x4307, 0x4307 },
-	{ 0x4403, 0x4403, 0x4402 },
+	{ 0x4402, 0x4403, 0x4402 },
 	{ 0x4610, 0x4615, 0x4610 },
 	{ 0x4710, 0x4715, 0x4710 },
 	{ 0x4720, 0x4725, 0x4309 }
@@ -571,13 +579,6 @@ const struct {
 
 static const uint8_t bwi_zero_addr[IEEE80211_ADDR_LEN];
 
-
-enum bwi_modtype {
-	IEEE80211_MODTYPE_DS	= 0,	/* DS/CCK modulation */
-	IEEE80211_MODTYPE_PBCC	= 1,	/* PBCC modulation */
-	IEEE80211_MODTYPE_OFDM	= 2	/* OFDM modulation */
-};
-#define IEEE80211_MODTYPE_CCK   IEEE80211_MODTYPE_DS
 
 /* CODE */
 
@@ -2509,17 +2510,15 @@ bwi_mac_attach(struct bwi_softc *sc, int id, uint8_t rev)
 	/*
 	 * Test whether the revision of this MAC is supported
 	 */
-#define N(arr)	(int)(sizeof(arr) / sizeof(arr[0]))
-	for (i = 0; i < N(bwi_sup_macrev); ++i) {
+	for (i = 0; i < nitems(bwi_sup_macrev); ++i) {
 		if (bwi_sup_macrev[i] == rev)
 			break;
 	}
-	if (i == N(bwi_sup_macrev)) {
+	if (i == nitems(bwi_sup_macrev)) {
 		printf("%s: MAC rev %u is not supported\n",
 		    sc->sc_dev.dv_xname, rev);
 		return (ENXIO);
 	}
-#undef N
 
 	BWI_CREATE_MAC(mac, sc, id, rev);
 	sc->sc_nmac++;
@@ -2873,19 +2872,17 @@ bwi_phy_attach(struct bwi_mac *mac)
 		phy->phy_tbl_data_hi = BWI_PHYR_TBL_DATA_HI_11A;
 		break;
 	case BWI_PHYINFO_TYPE_11B:
-#define N(arr)	(int)(sizeof(arr) / sizeof(arr[0]))
-		for (i = 0; i < N(bwi_sup_bphy); ++i) {
+		for (i = 0; i < nitems(bwi_sup_bphy); ++i) {
 			if (phyrev == bwi_sup_bphy[i].rev) {
 				phy->phy_init = bwi_sup_bphy[i].init;
 				break;
 			}
 		}
-		if (i == N(bwi_sup_bphy)) {
+		if (i == nitems(bwi_sup_bphy)) {
 			printf("%s: unsupported 11B PHY, rev %u\n",
 			    sc->sc_dev.dv_xname, phyrev);
 			return (ENXIO);
 		}
-#undef N
 		phy->phy_mode = IEEE80211_MODE_11B;
 		break;
 	case BWI_PHYINFO_TYPE_11G:
@@ -3428,7 +3425,6 @@ bwi_phy_init_11b_rev6(struct bwi_mac *mac)
 		CSR_WRITE_2(sc, BWI_BBP_ATTEN, 0);
 }
 
-#define N(arr)	(int)(sizeof(arr) / sizeof(arr[0]))
 void
 bwi_phy_config_11g(struct bwi_mac *mac)
 {
@@ -3445,19 +3441,19 @@ bwi_phy_config_11g(struct bwi_mac *mac)
 		PHY_WRITE(mac, 0x427, 0x1a);
 
 		/* Fill frequency table */
-		for (i = 0; i < N(bwi_phy_freq_11g_rev1); ++i) {
+		for (i = 0; i < nitems(bwi_phy_freq_11g_rev1); ++i) {
 			bwi_tbl_write_2(mac, BWI_PHYTBL_FREQ + i,
 			    bwi_phy_freq_11g_rev1[i]);
 		}
 
 		/* Fill noise table */
-		for (i = 0; i < N(bwi_phy_noise_11g_rev1); ++i) {
+		for (i = 0; i < nitems(bwi_phy_noise_11g_rev1); ++i) {
 			bwi_tbl_write_2(mac, BWI_PHYTBL_NOISE + i,
 			    bwi_phy_noise_11g_rev1[i]);
 		}
 
 		/* Fill rotor table */
-		for (i = 0; i < N(bwi_phy_rotor_11g_rev1); ++i) {
+		for (i = 0; i < nitems(bwi_phy_rotor_11g_rev1); ++i) {
 			/* NB: data length is 4 bytes */
 			bwi_tbl_write_4(mac, BWI_PHYTBL_ROTOR + i,
 			    bwi_phy_rotor_11g_rev1[i]);
@@ -3480,7 +3476,7 @@ bwi_phy_config_11g(struct bwi_mac *mac)
 			bwi_tbl_write_2(mac, BWI_PHYTBL_RSSI + i, i);
 
 		/* Fill noise table */
-		for (i = 0; i < sizeof(bwi_phy_noise_11g); ++i) {
+		for (i = 0; i < nitems(bwi_phy_noise_11g); ++i) {
 			bwi_tbl_write_2(mac, BWI_PHYTBL_NOISE + i,
 			    bwi_phy_noise_11g[i]);
 		}
@@ -3491,13 +3487,13 @@ bwi_phy_config_11g(struct bwi_mac *mac)
 	 */
 	if (phy->phy_rev <= 2) {
 		tbl = bwi_phy_noise_scale_11g_rev2;
-		n = N(bwi_phy_noise_scale_11g_rev2);
+		n = nitems(bwi_phy_noise_scale_11g_rev2);
 	} else if (phy->phy_rev >= 7 && (PHY_READ(mac, 0x449) & 0x200)) {
 		tbl = bwi_phy_noise_scale_11g_rev7;
-		n = N(bwi_phy_noise_scale_11g_rev7);
+		n = nitems(bwi_phy_noise_scale_11g_rev7);
 	} else {
 		tbl = bwi_phy_noise_scale_11g;
-		n = N(bwi_phy_noise_scale_11g);
+		n = nitems(bwi_phy_noise_scale_11g);
 	}
 	for (i = 0; i < n; ++i)
 		bwi_tbl_write_2(mac, BWI_PHYTBL_NOISE_SCALE + i, tbl[i]);
@@ -3507,10 +3503,10 @@ bwi_phy_config_11g(struct bwi_mac *mac)
 	 */
 	if (phy->phy_rev == 2) {
 		tbl = bwi_phy_sigma_sq_11g_rev2;
-		n = N(bwi_phy_sigma_sq_11g_rev2);
+		n = nitems(bwi_phy_sigma_sq_11g_rev2);
 	} else if (phy->phy_rev > 2 && phy->phy_rev <= 8) {
 		tbl = bwi_phy_sigma_sq_11g_rev7;
-		n = N(bwi_phy_sigma_sq_11g_rev7);
+		n = nitems(bwi_phy_sigma_sq_11g_rev7);
 	} else {
 		tbl = NULL;
 		n = 0;
@@ -3520,7 +3516,7 @@ bwi_phy_config_11g(struct bwi_mac *mac)
 
 	if (phy->phy_rev == 1) {
 		/* Fill delay table */
-		for (i = 0; i < N(bwi_phy_delay_11g_rev1); ++i) {
+		for (i = 0; i < nitems(bwi_phy_delay_11g_rev1); ++i) {
 			bwi_tbl_write_4(mac, BWI_PHYTBL_DELAY + i,
 			    bwi_phy_delay_11g_rev1[i]);
 		}
@@ -4703,7 +4699,6 @@ bwi_rf_map_txpower(struct bwi_mac *mac)
 	}
 
 #define IS_VALID_PA_PARAM(p)	((p) != 0 && (p) != -1)
-#define N(arr)	(int)(sizeof(arr) / sizeof(arr[0]))
 	/*
 	 * Extract PA parameters
 	 */
@@ -4711,10 +4706,10 @@ bwi_rf_map_txpower(struct bwi_mac *mac)
 		sprom_ofs = BWI_SPROM_PA_PARAM_11A;
 	else
 		sprom_ofs = BWI_SPROM_PA_PARAM_11BG;
-	for (i = 0; i < N(pa_params); ++i)
+	for (i = 0; i < nitems(pa_params); ++i)
 		pa_params[i] = (int16_t)bwi_read_sprom(sc, sprom_ofs + (i * 2));
 
-	for (i = 0; i < N(pa_params); ++i) {
+	for (i = 0; i < nitems(pa_params); ++i) {
 		/*
 		 * If one of the PA parameters from SPROM is not valid,
 		 * fall back to the default values, if there are any.
@@ -4742,7 +4737,6 @@ bwi_rf_map_txpower(struct bwi_mac *mac)
 			goto back;
 		}
 	}
-#undef N
 
 	/*
 	 * All of the PA parameters from SPROM are valid.
@@ -6381,9 +6375,7 @@ bwi_led_attach(struct bwi_softc *sc)
 	uint16_t gpio, val[BWI_LED_MAX];
 	int i;
 
-#define N(arr) (int)(sizeof(arr) / sizeof(arr[0]))
-
-	for (i = 0; i < N(bwi_vendor_led_act); ++i) {
+	for (i = 0; i < nitems(bwi_vendor_led_act); ++i) {
 		if (sc->sc_pci_subvid == bwi_vendor_led_act[i].vid) {
 			led_act = bwi_vendor_led_act[i].led_act;
 				break;
@@ -6391,8 +6383,6 @@ bwi_led_attach(struct bwi_softc *sc)
 	}
 	if (led_act == NULL)
 		led_act = bwi_default_led_act;
-
-#undef N
 
 	gpio = bwi_read_sprom(sc, BWI_SPROM_GPIO01);
 	val[0] = __SHIFTOUT(gpio, BWI_SPROM_GPIO_0);
@@ -6592,7 +6582,6 @@ bwi_led_blink_end(void *xsc)
 int
 bwi_bbp_attach(struct bwi_softc *sc)
 {
-#define N(arr)	(int)(sizeof(arr) / sizeof(arr[0]))
 	uint16_t bbp_id, rw_type;
 	uint8_t rw_rev;
 	uint32_t info;
@@ -6625,7 +6614,7 @@ bwi_bbp_attach(struct bwi_softc *sc)
 		uint16_t did = sc->sc_pci_did;
 		uint8_t revid = sc->sc_pci_revid;
 
-		for (i = 0; i < N(bwi_bbpid_map); ++i) {
+		for (i = 0; i < nitems(bwi_bbpid_map); ++i) {
 			if (did >= bwi_bbpid_map[i].did_min &&
 			    did <= bwi_bbpid_map[i].did_max) {
 				bbp_id = bwi_bbpid_map[i].bbp_id;
@@ -6649,7 +6638,7 @@ bwi_bbp_attach(struct bwi_softc *sc)
 	if (rw_type == BWI_REGWIN_T_COM && rw_rev >= 4) {
 		nregwin = __SHIFTOUT(info, BWI_INFO_NREGWIN_MASK);
 	} else {
-		for (i = 0; i < N(bwi_regwin_count); ++i) {
+		for (i = 0; i < nitems(bwi_regwin_count); ++i) {
 			if (bwi_regwin_count[i].bbp_id == bbp_id) {
 				nregwin = bwi_regwin_count[i].nregwin;
 				break;
@@ -6730,7 +6719,6 @@ bwi_bbp_attach(struct bwi_softc *sc)
 		return (error);
 
 	return (0);
-#undef N
 }
 
 int
@@ -7441,7 +7429,7 @@ bwi_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		if (ic->ic_opmode != IEEE80211_M_MONITOR) {
 			/* start automatic rate control timer */
 			if (ic->ic_fixed_rate == -1)
-				timeout_add(&sc->sc_amrr_ch, hz / 2);
+				timeout_add_msec(&sc->sc_amrr_ch, 500);
 		}
 	} else
 		bwi_set_bssid(sc, bwi_zero_addr);
@@ -7450,7 +7438,7 @@ back:
 	error = sc->sc_newstate(ic, nstate, arg);
 
 	if (nstate == IEEE80211_S_SCAN) {
-		timeout_add(&sc->sc_scan_ch, (sc->sc_dwell_time * hz) / 1000);
+		timeout_add_msec(&sc->sc_scan_ch, sc->sc_dwell_time);
 	} else if (nstate == IEEE80211_S_RUN) {
 		/* XXX 15 seconds */
 		timeout_add_sec(&sc->sc_calib_ch, 1);
@@ -7496,7 +7484,7 @@ bwi_amrr_timeout(void *arg)
 		ieee80211_iterate_nodes(ic, bwi_iter_func, sc);
 #endif
 
-	timeout_add(&sc->sc_amrr_ch, hz / 2);
+	timeout_add_msec(&sc->sc_amrr_ch, 500);
 }
 
 void
@@ -7647,10 +7635,11 @@ bwi_dma_alloc(struct bwi_softc *sc)
 void
 bwi_dma_free(struct bwi_softc *sc)
 {
+	struct bwi_ring_data *rd;
 	int i;
 
 	for (i = 0; i < BWI_TX_NRING; ++i) {
-		struct bwi_ring_data *rd = &sc->sc_tx_rdata[i];
+		rd = &sc->sc_tx_rdata[i];
 
 		if (rd->rdata_desc != NULL) {
 			bus_dmamap_unload(sc->sc_dmat,
@@ -7660,7 +7649,7 @@ bwi_dma_free(struct bwi_softc *sc)
 		}
 	}
 
-	struct bwi_ring_data *rd = &sc->sc_rx_rdata;
+	rd = &sc->sc_rx_rdata;
 
 	if (rd->rdata_desc != NULL) {
 		bus_dmamap_unload(sc->sc_dmat, rd->rdata_dmap);
@@ -8244,7 +8233,7 @@ bwi_rxeof(struct bwi_softc *sc, int end_idx)
 		struct ieee80211_rxinfo rxi;
 		struct ieee80211_node *ni;
 		struct mbuf *m;
-		void *plcp;
+		uint32_t plcp;
 		uint16_t flags2;
 		int buflen, wh_ofs, hdr_extra, rssi, type, rate;
 
@@ -8274,7 +8263,7 @@ bwi_rxeof(struct bwi_softc *sc, int end_idx)
 			goto next;
 		}
 
-		plcp = ((uint8_t *)(hdr + 1) + hdr_extra);
+		bcopy((uint8_t *)(hdr + 1) + hdr_extra, &plcp, sizeof(plcp));
 		rssi = bwi_calc_rssi(sc, hdr);
 
 		m->m_pkthdr.rcvif = ifp;
@@ -8282,9 +8271,9 @@ bwi_rxeof(struct bwi_softc *sc, int end_idx)
 		m_adj(m, sizeof(*hdr) + wh_ofs);
 
 		if (htole16(hdr->rxh_flags1) & BWI_RXH_F1_OFDM)
-			rate = bwi_ofdm_plcp2rate(plcp);
+			rate = bwi_plcp2rate(plcp, IEEE80211_MODE_11G);
 		else
-			rate = bwi_ds_plcp2rate(plcp);
+			rate = bwi_plcp2rate(plcp, IEEE80211_MODE_11B);
 
 #if NBPFILTER > 0
 		/* RX radio tap */
@@ -8498,21 +8487,10 @@ bwi_free_tx_ring64(struct bwi_softc *sc, int ring_idx)
 }
 
 uint8_t
-bwi_ofdm_plcp2rate(uint32_t *plcp0)
+bwi_plcp2rate(uint32_t plcp0, enum ieee80211_phymode phymode)
 {
-	uint32_t plcp;
-	uint8_t plcp_rate;
-
-	plcp = letoh32(*plcp0);
-	plcp_rate = __SHIFTOUT(plcp, IEEE80211_OFDM_PLCP_RATE_MASK);
-
-	return (ieee80211_plcp2rate(plcp_rate, IEEE80211_MODE_11G));
-}
-
-uint8_t
-bwi_ds_plcp2rate(struct ieee80211_ds_plcp_hdr *hdr)
-{
-	return (ieee80211_plcp2rate(hdr->i_signal, IEEE80211_MODE_11B));
+	uint32_t plcp = letoh32(plcp0) & IEEE80211_OFDM_PLCP_RATE_MASK;
+	return (ieee80211_plcp2rate(plcp, phymode));
 }
 
 void

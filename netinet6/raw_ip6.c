@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip6.c,v 1.37 2008/09/17 05:43:15 chl Exp $	*/
+/*	$OpenBSD: raw_ip6.c,v 1.39 2009/06/05 00:05:22 claudio Exp $	*/
 /*	$KAME: raw_ip6.c,v 1.69 2001/03/04 15:55:44 itojun Exp $	*/
 
 /*
@@ -437,10 +437,9 @@ rip6_output(struct mbuf *m, ...)
 			goto bad;
 		}
 		ip6->ip6_src = *in6a;
-		if (in6p->in6p_route.ro_rt) {
-			/* what if oifp contradicts ? */
-			oifp = ifindex2ifnet[in6p->in6p_route.ro_rt->rt_ifp->if_index];
-		}
+		if (in6p->in6p_route.ro_rt &&
+		    in6p->in6p_route.ro_rt->rt_flags & RTF_UP)
+			oifp = in6p->in6p_route.ro_rt->rt_ifp;
 	}
 
 	ip6->ip6_flow = in6p->in6p_flowinfo & IPV6_FLOWINFO_MASK;
@@ -674,7 +673,8 @@ rip6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		 * this in a more natural way.
 		 */
 		if (!IN6_IS_ADDR_UNSPECIFIED(&addr->sin6_addr) &&
-		    (ia = ifa_ifwithaddr((struct sockaddr *)addr)) == 0) {
+		    (ia = ifa_ifwithaddr((struct sockaddr *)addr,
+		    /* XXX */ 0)) == 0) {
 			error = EADDRNOTAVAIL;
 			break;
 		}

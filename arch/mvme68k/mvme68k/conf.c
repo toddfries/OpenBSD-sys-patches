@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.43 2008/05/14 20:49:48 miod Exp $ */
+/*	$OpenBSD: conf.c,v 1.46 2009/06/03 14:45:52 jj Exp $ */
 
 /*-
  * Copyright (c) 1995 Theo de Raadt
@@ -115,9 +115,10 @@ int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 #include "pty.h"
 cdev_decl(fd);
 
-#include "zs.h"
 #include "cl.h"
+#include "dart.h"
 #include "wl.h"
+#include "zs.h"
 
 /* open, close, write, ioctl */
 #define	cdev_lp_init(c,n) { \
@@ -135,9 +136,9 @@ cdev_decl(fd);
 #include "lp.h"
 #include "lptwo.h"
 cdev_decl(lptwo);
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "ksyms.h"
 
@@ -157,7 +158,7 @@ struct cdevsw	cdevsw[] =
 	cdev_cn_init(1,cn),		/* 0: virtual console */
 	cdev_ctty_init(1,ctty),		/* 1: controlling terminal */
 	cdev_mm_init(1,mm),		/* 2: /dev/{null,mem,kmem,...} */
-	cdev_swap_init(1,sw),		/* 3: /dev/drum (swap pseudo-device) */
+	cdev_notdef(),			/* 3 was /dev/drum */
 	cdev_tty_init(NPTY,pts),	/* 4: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),	/* 5: pseudo-tty master */
 	cdev_log_init(1,log),		/* 6: /dev/klog */
@@ -168,7 +169,7 @@ struct cdevsw	cdevsw[] =
 	cdev_mdev_init(NFLASH,flash),	/* 11: /dev/flashX */
 	cdev_tty_init(NZS,zs),		/* 12: SCC serial (tty[a-d]) */
 	cdev_tty_init(NCL,cl),		/* 13: CL-CD2400 serial (tty0[0-3]) */
-	cdev_notdef(),			/* 14 */
+	cdev_tty_init(NDART,dart),	/* 14: MC68681 serial (ttyd[0-1]) */
 	cdev_notdef(),			/* 15 */
 	cdev_notdef(),			/* 16 */
 	cdev_disk_init(NCCD,ccd),	/* 17: concatenated disk */
@@ -209,8 +210,8 @@ struct cdevsw	cdevsw[] =
 	cdev_lkm_dummy(),		/* 48 */
 	cdev_lkm_dummy(),		/* 49 */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_lkm_dummy(),		/* 51 */
 #endif
@@ -300,17 +301,22 @@ int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(chrtoblktbl[0]);
  */
 #include <dev/cons.h>
 
-#define zscnpollc      nullcnpollc
-cons_decl(zs);
-#define clcnpollc      nullcnpollc
+#define clcnpollc	nullcnpollc
 cons_decl(cl);
+#define dartcnpollc	nullcnpollc
+cons_decl(dart);
+#define zscnpollc	nullcnpollc
+cons_decl(zs);
 
 struct	consdev constab[] = {
-#if NZS > 0
-	cons_init(zs),
-#endif
 #if NCL > 0
 	cons_init(cl),
+#endif
+#if NDART > 0
+	cons_init(dart),
+#endif
+#if NZS > 0
+	cons_init(zs),
 #endif
 	{ 0 },
 };

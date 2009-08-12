@@ -1,4 +1,4 @@
-/*     $OpenBSD: ar5210.c,v 1.43 2008/08/29 10:05:00 reyk Exp $        */
+/*     $OpenBSD: ar5210.c,v 1.45 2009/06/02 12:39:02 reyk Exp $        */
 
 /*
  * Copyright (c) 2004, 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -28,7 +28,7 @@
 HAL_BOOL	 ar5k_ar5210_nic_reset(struct ath_hal *, u_int32_t);
 HAL_BOOL	 ar5k_ar5210_nic_wakeup(struct ath_hal *, HAL_BOOL, HAL_BOOL);
 void		 ar5k_ar5210_init_tx_queue(struct ath_hal *, u_int, HAL_BOOL);
-const void	 ar5k_ar5210_fill(struct ath_hal *);
+void		 ar5k_ar5210_fill(struct ath_hal *);
 HAL_BOOL	 ar5k_ar5210_do_calibrate(struct ath_hal *, HAL_CHANNEL *);
 HAL_BOOL	 ar5k_ar5210_noise_floor(struct ath_hal *, HAL_CHANNEL *);
 
@@ -40,7 +40,7 @@ static const struct ar5k_ini ar5210_ini[] =
 
 AR5K_HAL_FUNCTIONS(extern, ar5k_ar5210,);
 
-const void
+void
 ar5k_ar5210_fill(struct ath_hal *hal)
 {
 	hal->ah_magic = AR5K_AR5210_MAGIC;
@@ -387,7 +387,7 @@ ar5k_ar5210_reset(struct ath_hal *hal, HAL_OPMODE op_mode, HAL_CHANNEL *channel,
 	/*
 	 * Write initial mode register settings
 	 */
-	for (i = 0; i < AR5K_ELEMENTS(ar5210_ini); i++) {
+	for (i = 0; i < nitems(ar5210_ini); i++) {
 		if (change_channel == AH_TRUE &&
 		    ar5210_ini[i].ini_register >= AR5K_AR5210_PCU_MIN &&
 		    ar5210_ini[i].ini_register <= AR5K_AR5210_PCU_MAX)
@@ -808,7 +808,7 @@ ar5k_ar5210_init_tx_queue(struct ath_hal *hal, u_int aifs, HAL_BOOL turbo)
 	/*
 	 * Write initial mode register settings
 	 */
-	for (i = 0; i < AR5K_ELEMENTS(initial); i++)
+	for (i = 0; i < nitems(initial); i++)
 		AR5K_REG_WRITE((u_int32_t)initial[i].mode_register,
 		    turbo == AH_TRUE ?
 		    initial[i].mode_turbo : initial[i].mode_base);
@@ -1886,7 +1886,7 @@ ar5k_ar5210_set_key(struct ath_hal *hal, u_int16_t entry,
 		return (AH_FALSE);
 	}
 
-	for (i = 0; i < AR5K_ELEMENTS(key_v); i++)
+	for (i = 0; i < nitems(key_v); i++)
 		AR5K_REG_WRITE(AR5K_AR5210_KEYTABLE_OFF(entry, i), key_v[i]);
 
 	return (ar5k_ar5210_set_key_lladdr(hal, entry, mac));

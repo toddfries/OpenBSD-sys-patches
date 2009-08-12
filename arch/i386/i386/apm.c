@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.82 2008/08/16 00:26:26 krw Exp $	*/
+/*	$OpenBSD: apm.c,v 1.84 2009/06/24 13:54:42 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1998-2001 Michael Shalayeff. All rights reserved.
@@ -750,10 +750,8 @@ apmprobe(struct device *parent, void *match, void *aux)
 	bus_space_handle_t ch, dh;
 
 	if (apm_cd.cd_ndevs || strcmp(ba->ba_name, "apm") ||
-	    !(ba->ba_apmp->apm_detail & APM_32BIT_SUPPORTED)) {
-		DPRINTF(("%s: %x\n", ba->ba_name, ba->ba_apmp->apm_detail));
+	    !(ap->apm_detail & APM_32BIT_SUPPORTED))
 		return 0;
-	}
 
 	/* addresses check
 	   since pc* console and vga* probes much later
@@ -1145,7 +1143,20 @@ apmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			error = EIO;
 		}
 		break;
-
+	case APM_IOC_STANDBY_REQ:
+		if ((flag & FWRITE) == 0)
+			error = EBADF;
+		/* only fails if no one cares. apmd at least should */
+		else if (apm_record_event(sc, APM_USER_STANDBY_REQ))
+			error = EINVAL; /* ? */
+		break;
+	case APM_IOC_SUSPEND_REQ:
+		if ((flag & FWRITE) == 0)
+			error = EBADF;
+		/* only fails if no one cares. apmd at least should */
+		else if (apm_record_event(sc, APM_USER_SUSPEND_REQ))
+			error = EINVAL; /* ? */
+		break;
 	default:
 		error = ENOTTY;
 	}

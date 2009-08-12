@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.38 2008/10/15 23:23:46 deraadt Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.49 2009/07/22 20:33:13 deraadt Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -69,16 +69,12 @@ struct cpu_info {
 	struct simplelock ci_slock;
 	u_int ci_cpuid;
 	u_int ci_apicid;
-	u_long ci_spin_locks;
-	u_long ci_simple_locks;
 	u_int32_t ci_randseed;
 
 	u_int64_t ci_scratch;
 
 	struct proc *ci_fpcurproc;
 	int ci_fpsaving;
-
-	volatile u_int32_t ci_tlb_ipi_mask;
 
 	struct pcb *ci_curpcb;
 	struct pcb *ci_idle_pcb;
@@ -91,13 +87,14 @@ struct cpu_info {
 	u_int32_t	ci_imask[NIPL];
 	u_int32_t	ci_iunmask[NIPL];
 
-	paddr_t 	ci_idle_pcb_paddr;
 	u_int		ci_flags;
 	u_int32_t	ci_ipis;
 
 	u_int32_t	ci_feature_flags;
 	u_int32_t	ci_feature_eflags;
 	u_int32_t	ci_signature;
+	u_int32_t	ci_family;
+	u_int32_t	ci_model;
 	u_int64_t	ci_tsc_freq;
 
 	struct cpu_functions *ci_func;
@@ -107,11 +104,6 @@ struct cpu_info {
 	int		ci_want_resched;
 
 	struct x86_cache_info ci_cinfo[CAI_COUNT];
-
-	struct timeval 	ci_cc_time;
-	int64_t		ci_cc_cc;
-	int64_t		ci_cc_ms_delta;
-	int64_t		ci_cc_denom;
 
 	char		*ci_gdt;
 
@@ -155,7 +147,7 @@ extern struct cpu_info *cpu_info_list;
 #define CPU_INFO_FOREACH(cii, ci)	for (cii = 0, ci = cpu_info_list; \
 					    ci != NULL; ci = ci->ci_next)
 
-#define CPU_INFO_UNIT(ci)	((ci)->ci_dev->dv_unit)
+#define CPU_INFO_UNIT(ci)	((ci)->ci_dev ? (ci)->ci_dev->dv_unit : 0)
 
 /*      
  * Preempt the current process if in interrupt from user mode,
@@ -184,6 +176,8 @@ extern struct cpu_info *cpu_info[MAXCPUS];
 void cpu_boot_secondary_processors(void);
 void cpu_init_idle_pcbs(void);    
 
+void cpu_unidle(struct cpu_info *);
+
 #else /* !MULTIPROCESSOR */
 
 #define MAXCPUS		1
@@ -192,6 +186,8 @@ void cpu_init_idle_pcbs(void);
 extern struct cpu_info cpu_info_primary;
 
 #define curcpu()		(&cpu_info_primary)
+
+#define cpu_unidle(ci)
 
 #endif
 
@@ -278,6 +274,9 @@ void	x86_64_bufinit(void);
 void	x86_64_init_pcb_tss_ldt(struct cpu_info *);
 void	cpu_proc_fork(struct proc *, struct proc *);
 int	amd64_pa_used(paddr_t);
+extern void (*cpu_idle_enter_fcn)(void);
+extern void (*cpu_idle_cycle_fcn)(void);
+extern void (*cpu_idle_leave_fcn)(void);
 
 struct region_descriptor;
 void	lgdt(struct region_descriptor *);
@@ -341,7 +340,8 @@ void mp_setperf_init(void);
 #define CPU_APMWARN		9	/* APM battery warning percentage */
 #define CPU_KBDRESET		10	/* keyboard reset under pcvt */
 #define CPU_APMHALT		11	/* halt -p hack */
-#define CPU_MAXID		12	/* number of valid machdep ids */
+#define CPU_XCRYPT		12	/* supports VIA xcrypt in userland */
+#define CPU_MAXID		13	/* number of valid machdep ids */
 
 #define	CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
@@ -356,6 +356,7 @@ void mp_setperf_init(void);
 	{ "apmwarn", CTLTYPE_INT }, \
 	{ "kbdreset", CTLTYPE_INT }, \
 	{ "apmhalt", CTLTYPE_INT }, \
+	{ "xcrypt", CTLTYPE_INT }, \
 }
 
 /*

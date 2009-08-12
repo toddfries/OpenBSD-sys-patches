@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.58 2008/06/27 17:22:14 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.65 2009/08/02 16:28:39 beck Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -385,7 +385,8 @@ cpu_startup()
 	 */
 	printf(version);
 	identifycpu();
-	printf("real mem  = %d\n", ptoa(physmem));
+	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem) / 1024 / 1024);
 
 	/*
 	 * Check front DIP switch setting
@@ -469,12 +470,6 @@ cpu_startup()
 	if (bufpages == 0)
 		bufpages = physmem * bufcachepercent / 100;
 
-	/* Restrict to at most 25% filled kvm */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
-
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
@@ -489,7 +484,8 @@ cpu_startup()
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	printf("avail mem = %ld (%d pages)\n", ptoa(uvmexp.free), uvmexp.free);
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free) / 1024 / 1024);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -599,7 +595,7 @@ haltsys:
 	/*NOTREACHED*/
 }
 
-unsigned dumpmag = 0x8fca0101;	 /* magic number for savecore */
+u_long dumpmag = 0x8fca0101;	 /* magic number for savecore */
 int   dumpsize = 0;	/* also for savecore */
 long  dumplo = 0;
 cpu_kcore_hdr_t cpu_kcore_hdr;
@@ -839,7 +835,7 @@ secondary_main()
  */
 
 void 
-luna88k_ext_int(u_int v, struct trapframe *eframe)
+luna88k_ext_int(struct trapframe *eframe)
 {
 	int cpu = cpu_number();
 	u_int32_t cur_mask, cur_int;
@@ -1060,7 +1056,7 @@ luna88k_bootstrap()
 	 * currently-running CPU; initialize the others with similar settings
 	 * as well, after calling pmap_bootstrap() above.
 	 */
-	for (cpu = 0; cpu < max_cpus; cpu++) {
+	for (cpu = 0; cpu < ncpusfound; cpu++) {
 		if (cpu == master_cpu)
 			continue;
 		m8820x_initialize_cpu(cpu);

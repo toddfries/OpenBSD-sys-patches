@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_vnops.c,v 1.34 2008/11/08 01:27:51 chl Exp $	*/
+/*	$OpenBSD: udf_vnops.c,v 1.36 2009/07/09 22:29:56 thib Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
@@ -1006,7 +1006,7 @@ udf_lookup(void *v)
 	 * If dvp is what's being looked up, then return it.
 	 */
 	if (ap->a_cnp->cn_namelen == 1 && ap->a_cnp->cn_nameptr[0] == '.') {
-		VREF(dvp);
+		vref(dvp);
 		*vpp = dvp;
 		return (0);
 	}
@@ -1260,7 +1260,7 @@ udf_bmap_internal(struct unode *up, off_t offset, daddr64_t *sector,
 		} while(offset >= icblen);
 
 		lsector = (offset  >> ump->um_bshift) +
-		    letoh32(((struct short_ad *)(icb))->pos);
+		    letoh32(((struct short_ad *)(icb))->lb_num);
 
 		*max_size = GETICBLEN(short_ad, icb);
 

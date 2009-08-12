@@ -1,4 +1,4 @@
-/*	$OpenBSD: natm.h,v 1.7 2008/05/27 19:57:45 thib Exp $	*/
+/*	$OpenBSD: natm.h,v 1.9 2009/05/31 19:17:20 claudio Exp $	*/
 
 /*
  *
@@ -57,20 +57,6 @@ struct sockaddr_natm {
 };
 
 
-#if defined(__FreeBSD__) && defined(KERNEL)
-
-#ifndef _KERNEL
-#define _KERNEL
-#endif
-
-#define SPLSOFTNET() splnet()
-
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
-
-#define SPLSOFTNET() splsoftnet()
-
-#endif
-
 #ifdef _KERNEL
 
 /*
@@ -113,7 +99,7 @@ LIST_HEAD(npcblist, natmpcb);
 
 /* global data structures */
 
-struct npcblist natm_pcbs;		/* global list of pcbs */
+extern	struct npcblist natm_pcbs;	/* global list of pcbs */
 extern	struct ifqueue natmintrq;	/* natm packet input queue */
 #define	NATM_STAT
 #ifdef NATM_STAT

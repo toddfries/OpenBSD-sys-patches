@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.40 2008/06/26 05:42:11 ray Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.48 2009/04/29 18:28:37 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.28 1997/06/06 23:29:17 thorpej Exp $	*/
 
 /*-
@@ -79,17 +79,18 @@
 #include <sys/systm.h>
 #include <sys/errno.h>
 #include <sys/device.h>
+#include <sys/extent.h>
+#include <sys/malloc.h>
 
 #include <uvm/uvm_extern.h>
 
-#define _I386_BUS_DMA_PRIVATE
 #include <machine/bus.h>
 #include <machine/pio.h>
 #include <machine/i8259.h>
+#include <machine/biosvar.h>
 
 #include "bios.h"
 #if NBIOS > 0
-#include <machine/biosvar.h>
 extern bios_pciinfo_t *bios_pciinfo;
 #endif
 
@@ -112,6 +113,18 @@ extern bios_pciinfo_t *bios_pciinfo;
 #endif
 
 int pci_mode = -1;
+
+struct mutex pci_conf_lock = MUTEX_INITIALIZER(IPL_HIGH);
+
+#define	PCI_CONF_LOCK()							\
+do {									\
+	mtx_enter(&pci_conf_lock);					\
+} while (0)
+
+#define	PCI_CONF_UNLOCK()						\
+do {									\
+	mtx_leave(&pci_conf_lock);					\
+} while (0)
 
 #define	PCI_MODE1_ENABLE	0x80000000UL
 #define	PCI_MODE1_ADDRESS_REG	0x0cf8
@@ -145,7 +158,7 @@ struct {
  * PCI doesn't have any special needs; just use the generic versions
  * of these functions.
  */
-struct i386_bus_dma_tag pci_bus_dma_tag = {
+struct bus_dma_tag pci_bus_dma_tag = {
 	NULL,			/* _cookie */
 	_bus_dmamap_create, 
 	_bus_dmamap_destroy,
@@ -252,6 +265,7 @@ pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 {
 	pcireg_t data;
 
+	PCI_CONF_LOCK();
 	switch (pci_mode) {
 	case 1:
 		outl(PCI_MODE1_ADDRESS_REG, tag.mode1 | reg);
@@ -267,6 +281,7 @@ pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 	default:
 		panic("pci_conf_read: mode not configured");
 	}
+	PCI_CONF_UNLOCK();
 
 	return data;
 }
@@ -275,6 +290,7 @@ void
 pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 {
 
+	PCI_CONF_LOCK();
 	switch (pci_mode) {
 	case 1:
 		outl(PCI_MODE1_ADDRESS_REG, tag.mode1 | reg);
@@ -290,6 +306,7 @@ pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 	default:
 		panic("pci_conf_write: mode not configured");
 	}
+	PCI_CONF_UNLOCK();
 }
 
 int
@@ -403,17 +420,11 @@ not2:
 int
 pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 {
-	int pin = pa->pa_intrpin;
+	int pin = pa->pa_rawintrpin;
 	int line = pa->pa_intrline;
 #if NIOAPIC > 0
-	int rawpin = pa->pa_rawintrpin;
 	struct mp_intr_map *mip;
 	int bus, dev, func;
-#endif
-
-#if (NPCIBIOS > 0) || (NIOAPIC > 0)
-	pci_chipset_tag_t pc = pa->pa_pc;
-	pcitag_t intrtag = pa->pa_intrtag;
 #endif
 
 	if (pin == 0) {
@@ -426,11 +437,12 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 		goto bad;
 	}
 
+	ihp->tag = pa->pa_tag;
 	ihp->line = line;
 	ihp->pin = pin;
 
 #if NIOAPIC > 0
-	pci_decompose_tag (pc, intrtag, &bus, &dev, &func);
+	pci_decompose_tag (pa->pa_pc, pa->pa_tag, &bus, &dev, &func);
 
 	if (!(ihp->line & PCI_INT_VIA_ISA) && mp_busses != NULL) {
 		/*
@@ -448,9 +460,9 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 		}
 
 		if (pa->pa_bridgetag) {
-			int pin = PPB_INTERRUPT_SWIZZLE(rawpin, dev);
-			if (pa->pa_bridgeih[pin - 1].line != -1) {
-				ihp->line = pa->pa_bridgeih[pin - 1].line;
+			int swizpin = PPB_INTERRUPT_SWIZZLE(pin, dev);
+			if (pa->pa_bridgeih[swizpin - 1].line != -1) {
+				ihp->line = pa->pa_bridgeih[swizpin - 1].line;
 				ihp->line |= line;
 				return 0;
 			}
@@ -463,7 +475,7 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 #endif
 
 #if NPCIBIOS > 0
-	pci_intr_header_fixup(pc, intrtag, ihp);
+	pci_intr_header_fixup(pa->pa_pc, pa->pa_tag, ihp);
 	line = ihp->line & APIC_INT_LINE_MASK;
 #endif
 
@@ -550,12 +562,23 @@ pci_intr_string(pci_chipset_tag_t pc, pci_intr_handle_t ih)
 	return (irqstr);
 }
 
+#include "acpiprt.h"
+#if NACPIPRT > 0
+void	acpiprt_route_interrupt(int bus, int dev, int pin);
+#endif
+
 void *
 pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
     int (*func)(void *), void *arg, char *what)
 {
 	void *ret;
+	int bus, dev;
 	int l = ih.line & APIC_INT_LINE_MASK;
+
+	pci_decompose_tag(pc, ih.tag, &bus, &dev, NULL);
+#if NACPIPRT > 0
+	acpiprt_route_interrupt(bus, dev, ih.pin);
+#endif
 
 #if NIOAPIC > 0
 	if (l != -1 && ih.line & APIC_INT_VIA_APIC)
@@ -578,4 +601,55 @@ pci_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 {
 	/* XXX oh, unroute the pci int link? */
 	isa_intr_disestablish(NULL, cookie);
+}
+
+struct extent *pciio_ex;
+struct extent *pcimem_ex;
+
+void
+pci_init_extents(void)
+{
+	bios_memmap_t *bmp;
+	u_int64_t size;
+
+	if (pciio_ex == NULL) {
+		/*
+		 * We only have 64K of addressable I/O space.
+		 * However, since BARs may contain garbage, we cover
+		 * the full 32-bit address space defined by PCI of
+		 * which we only make the first 64K available.
+		 */
+		pciio_ex = extent_create("pciio", 0, 0xffffffff, M_DEVBUF,
+		    NULL, 0, EX_NOWAIT | EX_FILLED);
+		if (pciio_ex == NULL)
+			return;
+		extent_free(pciio_ex, 0, 0x10000, M_NOWAIT);
+	}
+
+	if (pcimem_ex == NULL) {
+		pcimem_ex = extent_create("pcimem", 0, 0xffffffff, M_DEVBUF,
+		    NULL, 0, EX_NOWAIT);
+		if (pcimem_ex == NULL)
+			return;
+
+		for (bmp = bios_memmap; bmp->type != BIOS_MAP_END; bmp++) {
+			/*
+			 * Ignore address space beyond 4G.
+			 */
+			if (bmp->addr >= 0x100000000ULL)
+				continue;
+			size = bmp->size;
+			if (bmp->addr + size >= 0x100000000ULL)
+				size = 0x100000000ULL - bmp->addr;
+
+			/* Ignore zero-sized regions. */
+			if (size == 0)
+				continue;
+
+			if (extent_alloc_region(pcimem_ex, bmp->addr, size,
+			    EX_NOWAIT))
+				printf("memory map conflict 0x%llx/0x%llx\n",
+				    bmp->addr, bmp->size);
+		}
+	}
 }

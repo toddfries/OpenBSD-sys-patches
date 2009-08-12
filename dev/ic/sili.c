@@ -1,4 +1,4 @@
-/*	$OpenBSD: sili.c,v 1.39 2007/11/28 13:47:09 dlg Exp $ */
+/*	$OpenBSD: sili.c,v 1.43 2009/06/05 03:57:32 ray Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -196,7 +196,7 @@ sili_attach(struct sili_softc *sc)
 	bzero(&aaa, sizeof(aaa));
 	aaa.aaa_cookie = sc;
 	aaa.aaa_methods = &sili_atascsi_methods;
-	aaa.aaa_minphys = minphys;
+	aaa.aaa_minphys = NULL;
 	aaa.aaa_nports = sc->sc_nports;
 	aaa.aaa_ncmds = SILI_MAX_CMDS;
 	aaa.aaa_capability = ASAA_CAP_NCQ;
@@ -698,7 +698,7 @@ sili_post_direct(struct sili_port *sp, u_int slot, void *buf, size_t buflen)
 
 #ifdef DIAGNOSTIC
 	if (buflen != 64 && buflen != 128)
-		panic("sili_pcopy: buflen of %zu is not 64 or 128", buflen);
+		panic("sili_pcopy: buflen of %lu is not 64 or 128", buflen);
 #endif
 
 	bus_space_write_raw_region_4(sp->sp_sc->sc_iot_port, sp->sp_ioh, r,
@@ -838,14 +838,14 @@ sili_ata_cmd(struct ata_xfer *xa)
 			atapi->control = htole16(SILI_PRB_PACKET_READ);
 
 		sgl = atapi->sgl;
-		sgllen = sizeofa(atapi->sgl);
+		sgllen = nitems(atapi->sgl);
 	} else {
 		ata = ccb->ccb_cmd;
 
 		ata->control = 0;
 
 		sgl = ata->sgl;
-		sgllen = sizeofa(ata->sgl);
+		sgllen = nitems(ata->sgl);
 	}
 
 	if (sili_load(ccb, sgl, sgllen) != 0)
@@ -863,7 +863,7 @@ sili_ata_cmd(struct ata_xfer *xa)
 		return (ATA_COMPLETE);
 	}
 
-	timeout_add(&xa->stimeout, (xa->timeout * hz) / 1000);
+	timeout_add_msec(&xa->stimeout, xa->timeout);
 
 	s = splbio();
 	sili_start(sp, ccb);

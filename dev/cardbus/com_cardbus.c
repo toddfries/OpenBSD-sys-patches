@@ -1,4 +1,4 @@
-/* $OpenBSD: com_cardbus.c,v 1.33 2008/09/11 21:00:56 brad Exp $ */
+/* $OpenBSD: com_cardbus.c,v 1.35 2009/06/26 17:41:30 deraadt Exp $ */
 /* $NetBSD: com_cardbus.c,v 1.4 2000/04/17 09:21:59 joda Exp $ */
 
 /*
@@ -99,6 +99,7 @@ struct cfattach com_cardbus_ca = {
 
 #define BUG_BROADCOM	0x01
 
+/* XXX Keep this list syncronized with the corresponding one in pucdata.c */
 static struct csdev {
 	u_short		vendor;
 	u_short		product;
@@ -244,7 +245,7 @@ com_cardbus_attach(struct device *parent, struct device *self, void *aux)
 
 	if (Cardbus_mapreg_map(ca->ca_ct, csc->cc_reg, csc->cc_type, 0,
 	    &sc->sc_iot, &sc->sc_ioh, &csc->cc_addr, &csc->cc_size) != 0) {
-		printf(": failed to map memory\n");
+		printf(": can't map memory\n");
 		return;
 	}
 

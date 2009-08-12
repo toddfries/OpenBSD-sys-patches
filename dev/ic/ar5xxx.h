@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5xxx.h,v 1.45 2008/08/29 10:05:00 reyk Exp $	*/
+/*	$OpenBSD: ar5xxx.h,v 1.47 2009/07/24 16:31:27 jsg Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -33,7 +33,6 @@
 #define _AR5K_H
 
 #include <sys/param.h>
-#include <sys/systm.h>
 #include <sys/sysctl.h>
 #include <sys/malloc.h>
 #include <sys/lock.h>
@@ -1295,7 +1294,6 @@ struct ar5k_srev_name {
 #define AR5K_TRACE
 #endif
 #define AR5K_DELAY(_n)		delay(_n)
-#define AR5K_ELEMENTS(_array)	(sizeof(_array) / sizeof(_array[0]))
 
 typedef struct ath_hal * (ar5k_attach_t)
 	(u_int16_t, void *, bus_space_tag_t, bus_space_handle_t, HAL_STATUS *);

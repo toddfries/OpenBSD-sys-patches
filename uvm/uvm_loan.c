@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_loan.c,v 1.28 2007/06/18 21:51:15 pedro Exp $	*/
+/*	$OpenBSD: uvm_loan.c,v 1.34 2009/07/22 21:05:37 oga Exp $	*/
 /*	$NetBSD: uvm_loan.c,v 1.22 2000/06/27 17:29:25 mrg Exp $	*/
 
 /*
@@ -127,10 +127,7 @@ static int	uvm_loanzero(struct uvm_faultinfo *, void ***, int);
  */
 
 static __inline int
-uvm_loanentry(ufi, output, flags)
-	struct uvm_faultinfo *ufi;
-	void ***output;
-	int flags;
+uvm_loanentry(struct uvm_faultinfo *ufi, void ***output, int flags)
 {
 	vaddr_t curaddr = ufi->orig_rvaddr;
 	vsize_t togo = ufi->size;
@@ -209,12 +206,8 @@ uvm_loanentry(ufi, output, flags)
  */
 
 int
-uvm_loan(map, start, len, result, flags)
-	struct vm_map *map;
-	vaddr_t start;
-	vsize_t len;
-	void **result;
-	int flags;
+uvm_loan(struct vm_map *map, vaddr_t start, vsize_t len,
+    void **result, int flags)
 {
 	struct uvm_faultinfo ufi;
 	void **output;
@@ -316,11 +309,8 @@ fail:
  */
 
 int
-uvm_loananon(ufi, output, flags, anon)
-	struct uvm_faultinfo *ufi;
-	void ***output;
-	int flags;
-	struct vm_anon *anon;
+uvm_loananon(struct uvm_faultinfo *ufi, void ***output, int flags,
+    struct vm_anon *anon)
 {
 	struct vm_page *pg;
 	int result;
@@ -405,11 +395,7 @@ uvm_loananon(ufi, output, flags, anon)
  */
 
 int
-uvm_loanuobj(ufi, output, flags, va)
-	struct uvm_faultinfo *ufi;
-	void ***output;
-	int flags;
-	vaddr_t va;
+uvm_loanuobj(struct uvm_faultinfo *ufi, void ***output, int flags, vaddr_t va)
 {
 	struct vm_amap *amap = ufi->entry->aref.ar_amap;
 	struct uvm_object *uobj = ufi->entry->object.uvm_obj;
@@ -476,14 +462,12 @@ uvm_loanuobj(ufi, output, flags, va)
 		simple_lock(&uobj->vmobjlock);
 
 		/*
-		 * verify that the page has not be released and re-verify
-		 * that amap slot is still free.   if there is a problem we
-		 * drop our lock (thus force a lookup refresh/retry).
+		 * Re-verify that amap slot is still free. if there is a
+		 * problem we drop our lock (thus force a lookup refresh/retry).
 		 */
 			
-		if ((pg->pg_flags & PG_RELEASED) != 0 ||
-		    (locked && amap && amap_lookup(&ufi->entry->aref,
-		    ufi->orig_rvaddr - ufi->entry->start))) {
+		if (locked && amap && amap_lookup(&ufi->entry->aref,
+		    ufi->orig_rvaddr - ufi->entry->start)) {
 			
 			if (locked)
 				uvmfault_unlockall(ufi, amap, NULL, NULL);
@@ -500,17 +484,6 @@ uvm_loanuobj(ufi, output, flags, va)
 				/* still holding object lock */
 				wakeup(pg);
 
-			if (pg->pg_flags & PG_RELEASED) {
-#ifdef DIAGNOSTIC
-				if (uobj->pgops->pgo_releasepg == NULL)
-			panic("uvm_loanuobj: object has no releasepg function");
-#endif
-				/* frees page */
-				if (uobj->pgops->pgo_releasepg(pg, NULL))
-					simple_unlock(&uobj->vmobjlock);
-				return (0);
-			}
-
 			uvm_lock_pageq();
 			uvm_pageactivate(pg); /* make sure it is in queues */
 			uvm_unlock_pageq();
@@ -523,8 +496,7 @@ uvm_loanuobj(ufi, output, flags, va)
 
 	/*
 	 * at this point we have the page we want ("pg") marked PG_BUSY for us
-	 * and we have all data structures locked.   do the loanout.   page can
-	 * not be PG_RELEASED (we caught this above).
+	 * and we have all data structures locked.   do the loanout.
 	 */
 
 	if ((flags & UVM_LOAN_TOANON) == 0) {	/* loan to wired-kernel page? */
@@ -608,10 +580,7 @@ uvm_loanuobj(ufi, output, flags, va)
  */
 
 int
-uvm_loanzero(ufi, output, flags)
-	struct uvm_faultinfo *ufi;
-	void ***output;
-	int flags;
+uvm_loanzero(struct uvm_faultinfo *ufi, void ***output, int flags)
 {
 	struct vm_anon *anon;
 	struct vm_page *pg;
@@ -688,9 +657,7 @@ uvm_loanzero(ufi, output, flags)
  */
 
 void
-uvm_unloananon(aloans, nanons)
-	struct vm_anon **aloans;
-	int nanons;
+uvm_unloananon(struct vm_anon **aloans, int nanons)
 {
 	struct vm_anon *anon;
 
@@ -715,9 +682,7 @@ uvm_unloananon(aloans, nanons)
  */
 
 void
-uvm_unloanpage(ploans, npages)
-	struct vm_page **ploans;
-	int npages;
+uvm_unloanpage(struct vm_page **ploans, int npages)
 {
 	struct vm_page *pg;
 

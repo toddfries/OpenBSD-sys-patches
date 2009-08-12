@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip30_machdep.c,v 1.2 2008/04/24 12:52:26 jsing Exp $	*/
+/*	$OpenBSD: ip30_machdep.c,v 1.8 2009/07/06 22:46:43 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Miodrag Vallat.
@@ -22,6 +22,8 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/device.h>
+#include <sys/tty.h>
 
 #include <mips64/arcbios.h>
 
@@ -39,13 +41,12 @@
 #include <sgi/xbow/xheartreg.h>
 #include <sgi/pci/iocreg.h>
 
+#include <dev/ic/comvar.h>
+
 paddr_t	ip30_widget_short(int16_t, u_int);
 paddr_t	ip30_widget_long(int16_t, u_int);
+paddr_t	ip30_widget_map(int16_t, u_int, bus_addr_t *, bus_size_t *);
 int	ip30_widget_id(int16_t, u_int, uint32_t *);
-
-extern bus_addr_t comconsaddr;
-extern bus_space_tag_t comconsiot;
-extern int comconsfreq;
 
 void
 ip30_setup()
@@ -93,8 +94,8 @@ ip30_setup()
 	}
 #endif
 
-	xbow_widget_short = ip30_widget_short;
-	xbow_widget_long = ip30_widget_long;
+	xbow_widget_base = ip30_widget_short;
+	xbow_widget_map = ip30_widget_map;
 	xbow_widget_id = ip30_widget_id;
 
 	/*
@@ -111,8 +112,9 @@ ip30_setup()
 	 * exactly what we need, since the IOC3 doesn't need any. Some
 	 * may consider this an evil abuse of bus_space knowledge, though.
 	 */
-	xbow_build_bus_space(&sys_config.console_io, 0, 15, 1);
-	sys_config.console_io.bus_base += BRIDGE_PCI_MEM_SPACE_BASE;
+	xbow_build_bus_space(&sys_config.console_io, 0, 15);
+	sys_config.console_io.bus_base = ip30_widget_long(0, 15) +
+	    BRIDGE_PCI_MEM_SPACE_BASE;
 
 	comconsaddr = 0x500000 + IOC3_UARTA_BASE;
 	comconsfreq = 22000000 / 3;
@@ -136,6 +138,21 @@ ip30_widget_long(int16_t nasid, u_int widget)
 	return ((uint64_t)(widget) << 36) | uncached_base;
 }
 
+paddr_t
+ip30_widget_map(int16_t nasid, u_int widget, bus_addr_t *offs, bus_size_t *len)
+{
+	paddr_t base;
+
+	/*
+	 * On Octane, the whole widget space is always accessible.
+	 */
+
+	base = ip30_widget_long(nasid, widget);
+	*len = (1ULL << 36) - *offs;
+
+	return base + *offs;
+}
+
 /*
  * Widget enumeration
  */
@@ -147,7 +164,7 @@ ip30_widget_id(int16_t nasid, u_int widget, uint32_t *wid)
 
 	if (widget != 0)
 	{
-		if (widget < 8 || widget > 15)
+		if (widget < WIDGET_MIN || widget > WIDGET_MAX)
 			return EINVAL;
 
 		linkpa = ip30_widget_short(nasid, 0) + XBOW_WIDGET_LINK(widget);
@@ -161,4 +178,15 @@ ip30_widget_id(int16_t nasid, u_int widget, uint32_t *wid)
 		*wid = *(uint32_t *)(wpa + WIDGET_ID);
 
 	return 0;
+}
+
+void
+hw_setintrmask(intrmask_t m)
+{
+	extern uint64_t heart_intem;
+
+	paddr_t heart;
+	heart = PHYS_TO_XKPHYS(HEART_PIU_BASE, CCA_NC);
+	*(volatile uint64_t *)(heart + HEART_IMR(0)) =
+	    heart_intem & ~((uint64_t)m);
 }

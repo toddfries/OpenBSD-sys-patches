@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.82 2008/08/25 11:27:00 krw Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.95 2009/06/17 01:30:30 thib Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -76,6 +76,9 @@ int	disk_change;		/* set if a disk has been attached/detached
 				 * since last we looked at this variable. This
 				 * is reset by hw_sysctl()
 				 */
+
+/* softraid callback, do not use! */
+void (*softraid_disk_attach)(struct disk *, int);
 
 /*
  * Seek sort for disks.  We depend on the driver which calls us using b_resid
@@ -198,7 +201,7 @@ initdisklabel(struct disklabel *lp)
 		DL_SETDSIZE(lp, MAXDISKSIZE);
 	if (lp->d_secpercyl == 0)
 		return ("invalid geometry");
-	lp->d_npartitions = RAW_PART + 1;
+	lp->d_npartitions = MAXPARTITIONS;
 	for (i = 0; i < RAW_PART; i++) {
 		DL_SETPSIZE(&lp->d_partitions[i], 0);
 		DL_SETPOFFSET(&lp->d_partitions[i], 0);
@@ -206,6 +209,8 @@ initdisklabel(struct disklabel *lp)
 	if (DL_GETPSIZE(&lp->d_partitions[RAW_PART]) == 0)
 		DL_SETPSIZE(&lp->d_partitions[RAW_PART], DL_GETDSIZE(lp));
 	DL_SETPOFFSET(&lp->d_partitions[RAW_PART], 0);
+	DL_SETBSTART(lp, 0);
+	DL_SETBEND(lp, DL_GETDSIZE(lp));
 	lp->d_version = 1;
 	lp->d_bbsize = 8192;
 	lp->d_sbsize = 64*1024;			/* XXX ? */
@@ -217,7 +222,8 @@ initdisklabel(struct disklabel *lp)
  * a newer version if needed, etc etc.
  */
 char *
-checkdisklabel(void *rlp, struct disklabel *lp)
+checkdisklabel(void *rlp, struct disklabel *lp,
+	u_int64_t boundstart, u_int64_t boundend)
 {
 	struct disklabel *dlp = rlp;
 	struct __partitionv0 *v0pp;
@@ -229,9 +235,13 @@ checkdisklabel(void *rlp, struct disklabel *lp)
 	if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC)
 		msg = "no disk label";
 	else if (dlp->d_npartitions > MAXPARTITIONS)
-		msg = "unreasonable partition count";
+		msg = "invalid label, partition count > MAXPARTITIONS";
+	else if (dlp->d_secpercyl == 0)
+		msg = "invalid label, d_secpercyl == 0";
+	else if (dlp->d_secsize == 0)
+		msg = "invalid label, d_secsize == 0";
 	else if (dkcksum(dlp) != 0)
-		msg = "disk label corrupted";
+		msg = "invalid label, incorrect checksum";
 
 	if (msg) {
 		u_int16_t *start, *end, sum = 0;
@@ -274,10 +284,6 @@ checkdisklabel(void *rlp, struct disklabel *lp)
 
 		dlp->d_rpm = swap16(dlp->d_rpm);
 		dlp->d_interleave = swap16(dlp->d_interleave);
-		dlp->d_trackskew = swap16(dlp->d_trackskew);
-		dlp->d_cylskew = swap16(dlp->d_cylskew);
-		dlp->d_headswitch = swap32(dlp->d_headswitch);
-		dlp->d_trkseek = swap32(dlp->d_trkseek);
 		dlp->d_flags = swap32(dlp->d_flags);
 
 		for (i = 0; i < NDDATA; i++)
@@ -354,6 +360,8 @@ checkdisklabel(void *rlp, struct disklabel *lp)
 	DL_SETDSIZE(lp, disksize);
 	DL_SETPSIZE(&lp->d_partitions[RAW_PART], disksize);
 	DL_SETPOFFSET(&lp->d_partitions[RAW_PART], 0);
+	DL_SETBSTART(lp, boundstart);
+	DL_SETBEND(lp, boundend < DL_GETDSIZE(lp) ? boundend : DL_GETDSIZE(lp));
 
 	lp->d_checksum = 0;
 	lp->d_checksum = dkcksum(lp);
@@ -373,12 +381,11 @@ char *
 readdoslabel(struct buf *bp, void (*strat)(struct buf *),
     struct disklabel *lp, int *partoffp, int spoofonly)
 {
+	u_int64_t dospartoff = 0, dospartend = DL_GETBEND(lp);
+	int i, ourpart = -1, wander = 1, n = 0, loop = 0, offset;
 	struct dos_partition dp[NDOSPART], *dp2;
-	u_int32_t extoff = 0;
 	daddr64_t part_blkno = DOSBBSECTOR;
-	int dospartoff = 0, i, ourpart = -1;
-	int wander = 1, n = 0, loop = 0;
-	int offset;
+	u_int32_t extoff = 0;
 
 	if (lp->d_secpercyl == 0)
 		return ("invalid label, d_secpercyl == 0");
@@ -411,6 +418,16 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 
 		bcopy(bp->b_data + offset, dp, sizeof(dp));
 
+		if (n == 0 && part_blkno == DOSBBSECTOR) {
+			u_int16_t fattest;
+
+			/* Check the end of sector marker. */
+			fattest = ((bp->b_data[510] << 8) & 0xff00) |
+			    (bp->b_data[511] & 0xff);
+			if (fattest != 0x55aa)
+				goto notfat;
+		}
+
 		if (ourpart == -1) {
 			/* Search for our MBR partition */
 			for (dp2=dp, i=0; i < NDOSPART && ourpart == -1;
@@ -427,6 +444,7 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 			 */
 			dp2 = &dp[ourpart];
 			dospartoff = letoh32(dp2->dp_start) + part_blkno;
+			dospartend = dospartoff + letoh32(dp2->dp_size);
 
 			/* found our OpenBSD partition, finish up */
 			if (partoffp)
@@ -491,6 +509,7 @@ donot:
 					part_blkno = 0;
 				}
 				wander = 1;
+				continue;
 				break;
 			default:
 				fstype = FS_OTHER;
@@ -499,11 +518,11 @@ donot:
 			}
 
 			/*
-			 * Don't set fstype/offset/size when wandering or just
-			 * looking for the offset of the OpenBSD partition. It
-			 * would invalidate the disklabel checksum!
+			 * Don't set fstype/offset/size when just looking for
+			 * the offset of the OpenBSD partition. It would
+			 * invalidate the disklabel checksum!
 			 */
-			if (wander || partoffp)
+			if (partoffp)
 				continue;
 
 			pp->p_fstype = fstype;
@@ -522,22 +541,31 @@ donot:
 	if (n == 0 && part_blkno == DOSBBSECTOR) {
 		u_int16_t fattest;
 
-		/* Check for a short jump instruction. */
-		fattest = ((bp->b_data[0] << 8) & 0xff00) |
-		    (bp->b_data[2] & 0xff);
-		if (fattest != 0xeb90 && fattest != 0xe900)
+		/* Check for a valid initial jmp instruction. */
+		switch ((u_int8_t)bp->b_data[0]) {
+		case 0xeb:
+			/*
+			 * Two-byte jmp instruction. The 2nd byte is the number
+			 * of bytes to jmp and the 3rd byte must be a NOP.
+			 */
+			if ((u_int8_t)bp->b_data[2] != 0x90)
+				goto notfat;
+			break;
+		case 0xe9:
+			/*
+			 * Three-byte jmp instruction. The next two bytes are a
+			 * little-endian 16 bit value.
+			 */
+			break;
+		default:
 			goto notfat;
+			break;
+		}
 
 		/* Check for a valid bytes per sector value. */
 		fattest = ((bp->b_data[12] << 8) & 0xff00) |
 		    (bp->b_data[11] & 0xff);
 		if (fattest < 512 || fattest > 4096 || (fattest % 512 != 0))
-			goto notfat;
-
-		/* Check the end of sector marker. */
-		fattest = ((bp->b_data[510] << 8) & 0xff00) |
-		    (bp->b_data[511] & 0xff);
-		if (fattest != 0x55aa)
 			goto notfat;
 
 		/* Looks like a FAT filesystem. Spoof 'i'. */
@@ -547,14 +575,18 @@ donot:
 		lp->d_partitions['i' - 'a'].p_fstype = FS_MSDOS;
 	}
 notfat:
-
 	/* record the OpenBSD partition's placement for the caller */
 	if (partoffp)
 		*partoffp = dospartoff;
+	else {
+		DL_SETBSTART(lp, dospartoff);
+		DL_SETBEND(lp,
+		    dospartend < DL_GETDSIZE(lp) ? dospartend : DL_GETDSIZE(lp));
+	}
 
 	/* don't read the on-disk label if we are in spoofed-only mode */
 	if (spoofonly)
-		return (NULL);
+		return (NULL);		/* jump to the checkdisklabel below?? */
 
 	bp->b_blkno = DL_BLKTOSEC(lp, dospartoff + DOS_LABELSECTOR) *
 	    DL_BLKSPERSEC(lp);
@@ -566,7 +598,7 @@ notfat:
 		return ("disk label I/O error");
 
 	/* sub-MBR disklabels are always at a LABELOFFSET of 0 */
-	return checkdisklabel(bp->b_data + offset, lp);
+	return checkdisklabel(bp->b_data + offset, lp, dospartoff, dospartend);
 }
 
 /*
@@ -733,9 +765,9 @@ disk_init(void)
 int
 disk_construct(struct disk *diskp, char *lockname)
 {
-	rw_init(&diskp->dk_lock, lockname);
+	rw_init(&diskp->dk_lock, "dklk");
 	mtx_init(&diskp->dk_mtx, IPL_BIO);
-	
+
 	diskp->dk_flags |= DKF_CONSTRUCTED;
 	    
 	return (0);
@@ -772,6 +804,9 @@ disk_attach(struct disk *diskp)
 	TAILQ_INSERT_TAIL(&disklist, diskp, dk_link);
 	++disk_count;
 	disk_change = 1;
+
+	if (softraid_disk_attach)
+		softraid_disk_attach(diskp, 1);
 }
 
 /*
@@ -780,6 +815,9 @@ disk_attach(struct disk *diskp)
 void
 disk_detach(struct disk *diskp)
 {
+
+	if (softraid_disk_attach)
+		softraid_disk_attach(diskp, -1);
 
 	/*
 	 * Free the space used by the disklabel structures.
@@ -939,63 +977,6 @@ dk_mountroot(void)
 #endif
 	}
 	return (*mountrootfn)();
-}
-
-struct bufq *
-bufq_default_alloc(void)
-{
-	struct bufq_default *bq;
-
-	bq = malloc(sizeof(*bq), M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (bq == NULL)
-		panic("bufq_default_alloc: no memory");
-
-	bq->bufq.bufq_free = bufq_default_free;
-	bq->bufq.bufq_add = bufq_default_add;
-	bq->bufq.bufq_get = bufq_default_get;
-
-	return ((struct bufq *)bq);
-}
-
-void
-bufq_default_free(struct bufq *bq)
-{
-	free(bq, M_DEVBUF);
-}
-
-void
-bufq_default_add(struct bufq *bq, struct buf *bp)
-{
-	struct bufq_default *bufq = (struct bufq_default *)bq;
-	struct proc *p = bp->b_proc;
-	struct buf *head;
-
-	if (p == NULL || p->p_nice < NZERO)
-		head = &bufq->bufq_head[0];
-	else if (p->p_nice == NZERO)
-		head = &bufq->bufq_head[1];
-	else
-		head = &bufq->bufq_head[2];
-
-	disksort(head, bp);
-}
-
-struct buf *
-bufq_default_get(struct bufq *bq)
-{
-	struct bufq_default *bufq = (struct bufq_default *)bq;
-	struct buf *bp, *head;
-	int i;
-
-	for (i = 0; i < 3; i++) {
-		head = &bufq->bufq_head[i];
-		if ((bp = head->b_actf))
-			break;
-	}
-	if (bp == NULL)
-		return (NULL);
-	head->b_actf = bp->b_actf;
-	return (bp);
 }
 
 struct device *

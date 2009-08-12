@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.33 2008/10/19 20:48:10 brad Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.35 2009/06/03 00:49:12 art Exp $	*/
 /* $NetBSD: cpu.c,v 1.1.2.7 2000/06/26 02:04:05 sommerfeld Exp $ */
 
 /*-
@@ -244,6 +244,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 
 	cpu_default_ldt(ci);	/* Use the `global' ldt until one alloc'd */
 #endif
+	ci->ci_curpmap = pmap_kernel();
 
 	/* further PCB init done later. */
 
@@ -464,9 +465,6 @@ cpu_copy_trampoline()
 	extern u_char cpu_spinup_trampoline[];
 	extern u_char cpu_spinup_trampoline_end[];
 
-	pmap_kenter_pa((vaddr_t)MP_TRAMPOLINE,	/* virtual */
-	    (paddr_t)MP_TRAMPOLINE,		/* physical */
-	    VM_PROT_ALL);			/* protection */
 	bcopy(cpu_spinup_trampoline, (caddr_t)MP_TRAMPOLINE,
 	    cpu_spinup_trampoline_end - cpu_spinup_trampoline);
 }
@@ -559,6 +557,8 @@ mp_cpu_start(struct cpu_info *ci)
 
 	dwordptr[0] = 0;
 	dwordptr[1] = MP_TRAMPOLINE >> 4;
+
+	pmap_activate(curproc);
 
 	pmap_kenter_pa(0, 0, VM_PROT_READ|VM_PROT_WRITE);
 	memcpy((u_int8_t *)0x467, dwordptr, 4);

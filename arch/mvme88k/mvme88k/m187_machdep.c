@@ -1,4 +1,4 @@
-/*	$OpenBSD: m187_machdep.c,v 1.16 2007/11/17 05:32:05 miod Exp $	*/
+/*	$OpenBSD: m187_machdep.c,v 1.20 2009/03/15 20:39:53 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -60,10 +60,11 @@
 #include <machine/mvme187.h>
 
 #include <mvme88k/dev/memcreg.h>
+#include <mvme88k/dev/pcctworeg.h>
 #include <mvme88k/mvme88k/clockvar.h>
 
 void	m187_bootstrap(void);
-void	m187_ext_int(u_int, struct trapframe *);
+void	m187_ext_int(struct trapframe *);
 u_int	m187_getipl(void);
 vaddr_t	m187_memsize(void);
 u_int	m187_raiseipl(u_int);
@@ -111,7 +112,7 @@ m187_startup()
  */
 
 void
-m187_ext_int(u_int v, struct trapframe *eframe)
+m187_ext_int(struct trapframe *eframe)
 {
 	int level;
 	struct intrhand *intr;
@@ -240,7 +241,14 @@ m187_raiseipl(u_int level)
 void
 m187_bootstrap()
 {
+	extern int cpuspeed;
 	extern struct cmmu_p cmmu8820x;
+
+	/*
+	 * Find out the processor speed, from the PCC2 prescaler
+	 * adjust register.
+	 */
+	cpuspeed = 256 - *(volatile u_int8_t *)(PCC2_BASE + PCCTWO_PSCALEADJ);
 
 	cmmu = &cmmu8820x;
 	md_interrupt_func_ptr = m187_ext_int;
@@ -248,4 +256,8 @@ m187_bootstrap()
 	md_setipl = m187_setipl;
 	md_raiseipl = m187_raiseipl;
 	md_init_clocks = m1x7_init_clocks;
+	md_delay = m1x7_delay;
+#ifdef MULTIPROCESSOR
+	md_smp_setup = m88100_smp_setup;
+#endif
 }

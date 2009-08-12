@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.80 2008/11/06 21:47:50 deraadt Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.85 2009/06/24 13:03:20 kurt Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -60,9 +60,6 @@
 #include <sys/ktrace.h>
 #include <sys/pool.h>
 #include <sys/mutex.h>
-#ifdef SYSVSHM
-#include <sys/shm.h>
-#endif
 #ifdef SYSVSEM
 #include <sys/sem.h>
 #endif
@@ -97,7 +94,9 @@ sys_exit(struct proc *p, void *v, register_t *retval)
 int
 sys_threxit(struct proc *p, void *v, register_t *retval)
 {
-	struct sys_threxit_args *uap = v;
+	struct sys_threxit_args /* {
+		syscallarg(int) rval;
+	} */ *uap = v;
 
 	exit1(p, W_EXITCODE(SCARG(uap, rval), 0), EXIT_THREAD);
 
@@ -129,7 +128,7 @@ exit1(struct proc *p, int rv, int flags)
 	 * we have to be careful not to get recursively caught.
 	 * this is kinda sick.
 	 */
-	if (flags == EXIT_NORMAL && p->p_p->ps_mainproc != p &&
+	if (flags == EXIT_NORMAL && (p->p_flag & P_THREAD) &&
 	    (p->p_p->ps_mainproc->p_flag & P_WEXIT) == 0) {
 		/*
 		 * we are one of the threads.  we SIGKILL the parent,
@@ -137,9 +136,9 @@ exit1(struct proc *p, int rv, int flags)
 		 */
 		atomic_setbits_int(&p->p_p->ps_mainproc->p_flag, P_IGNEXITRV);
 		p->p_p->ps_mainproc->p_xstat = rv;
-		psignal(p->p_p->ps_mainproc, SIGKILL);
+		ptsignal(p->p_p->ps_mainproc, SIGKILL, SPROPAGATED);
 		tsleep(p->p_p, PUSER, "thrdying", 0);
-	} else if (p == p->p_p->ps_mainproc) {
+	} else if ((p->p_flag & P_THREAD) == 0) {
 		atomic_setbits_int(&p->p_flag, P_WEXIT);
 		if (flags == EXIT_NORMAL) {
 			q = TAILQ_FIRST(&p->p_p->ps_threads);
@@ -147,7 +146,7 @@ exit1(struct proc *p, int rv, int flags)
 				nq = TAILQ_NEXT(q, p_thr_link);
 				atomic_setbits_int(&q->p_flag, P_IGNEXITRV);
 				q->p_xstat = rv;
-				psignal(q, SIGKILL);
+				ptsignal(q, SIGKILL, SPROPAGATED);
 			}
 		}
 		wakeup(p->p_p);
@@ -181,7 +180,8 @@ exit1(struct proc *p, int rv, int flags)
 	fdfree(p);
 
 #ifdef SYSVSEM
-	semexit(p);
+	if ((p->p_flag & P_THREAD) == 0)
+		semexit(p->p_p);
 #endif
 	if (SESS_LEADER(p)) {
 		struct session *sp = p->p_session;
@@ -304,10 +304,6 @@ exit1(struct proc *p, int rv, int flags)
 			wakeup(pp);
 	}
 
-	if (p->p_exitsig != 0)
-		psignal(p->p_pptr, P_EXITSIG(p));
-	wakeup(p->p_pptr);
-
 	/*
 	 * Release the process's signal state.
 	 */
@@ -338,6 +334,7 @@ exit1(struct proc *p, int rv, int flags)
 	 */
 	uvmexp.swtch++;
 	cpu_exit(p);
+	panic("cpu_exit returned");
 }
 
 /*
@@ -397,14 +394,6 @@ reaper(void)
 		KERNEL_PROC_LOCK(curproc);
 
 		/*
-		 * Give machine-dependent code a chance to free any
-		 * resources it couldn't free while still running on
-		 * that process's context.  This must be done before
-		 * uvm_exit(), in case these resources are in the PCB.
-		 */
-		cpu_wait(p);
-
-		/*
 		 * Free the VM resources we're still holding on to.
 		 * We must do this from a valid thread because doing
 		 * so may block.
@@ -415,8 +404,9 @@ reaper(void)
 		if ((p->p_flag & P_NOZOMBIE) == 0) {
 			p->p_stat = SZOMB;
 
+			if (P_EXITSIG(p) != 0)
+				psignal(p->p_pptr, P_EXITSIG(p));
 			/* Wake up the parent so it can get exit status. */
-			psignal(p->p_pptr, SIGCHLD);
 			wakeup(p->p_pptr);
 		} else {
 			/* Noone will wait for us. Just zap the process now */

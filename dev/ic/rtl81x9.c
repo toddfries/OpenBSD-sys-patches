@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9.c,v 1.61 2008/10/14 18:01:53 naddy Exp $ */
+/*	$OpenBSD: rtl81x9.c,v 1.66 2009/07/21 07:30:18 sthen Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -158,7 +158,7 @@ int rl_miibus_readreg(struct device *, int, int);
 void rl_miibus_writereg(struct device *, int, int, int);
 void rl_miibus_statchg(struct device *);
 
-void rl_setmulti(struct rl_softc *);
+void rl_iff(struct rl_softc *);
 void rl_reset(struct rl_softc *);
 int rl_list_tx_init(struct rl_softc *);
 
@@ -457,63 +457,56 @@ int rl_mii_writereg(sc, frame)
 	return(0);
 }
 
-/*
- * Program the 64-bit multicast hash filter.
- */
-void rl_setmulti(sc)
+void rl_iff(sc)
 	struct rl_softc		*sc;
 {
-	struct ifnet		*ifp;
+	struct ifnet		*ifp = &sc->sc_arpcom.ac_if;
 	int			h = 0;
-	u_int32_t		hashes[2] = { 0, 0 };
+	u_int32_t		hashes[2];
 	struct arpcom		*ac = &sc->sc_arpcom;
 	struct ether_multi	*enm;
 	struct ether_multistep	step;
 	u_int32_t		rxfilt;
-	int			mcnt = 0;
-
-	ifp = &sc->sc_arpcom.ac_if;
 
 	rxfilt = CSR_READ_4(sc, RL_RXCFG);
+	rxfilt &= ~(RL_RXCFG_RX_ALLPHYS | RL_RXCFG_RX_BROAD |
+	    RL_RXCFG_RX_INDIV | RL_RXCFG_RX_MULTI);
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
-allmulti:
-	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC) {
+	/*
+	 * Always accept frames destined to our station address.
+	 * Always accept broadcast frames.
+	 */
+	rxfilt |= RL_RXCFG_RX_INDIV | RL_RXCFG_RX_BROAD;
+
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp ->if_flags |= IFF_ALLMULTI;
 		rxfilt |= RL_RXCFG_RX_MULTI;
-		CSR_WRITE_4(sc, RL_RXCFG, rxfilt);
-		CSR_WRITE_4(sc, RL_MAR0, 0xFFFFFFFF);
-		CSR_WRITE_4(sc, RL_MAR4, 0xFFFFFFFF);
-		return;
-	}
+		if (ifp->if_flags & IFF_PROMISC)
+			rxfilt |= RL_RXCFG_RX_ALLPHYS;
+		hashes[0] = hashes[1] = 0xFFFFFFFF;
+	} else {
+		rxfilt |= RL_RXCFG_RX_MULTI;
+		/* Program new filter. */
+		bzero(hashes, sizeof(hashes));
 
-	/* first, zot all the existing hash bits */
-	CSR_WRITE_4(sc, RL_MAR0, 0);
-	CSR_WRITE_4(sc, RL_MAR4, 0);
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			h = ether_crc32_be(enm->enm_addrlo,
+			    ETHER_ADDR_LEN) >> 26;
 
-	/* now program new ones */
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			goto allmulti;
+			if (h < 32)
+				hashes[0] |= (1 << h);
+			else
+				hashes[1] |= (1 << (h - 32));
+
+			ETHER_NEXT_MULTI(step, enm);
 		}
-		mcnt++;
-		h = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) >> 26;
-		if (h < 32)
-			hashes[0] |= (1 << h);
-		else
-			hashes[1] |= (1 << (h - 32));
-		mcnt++;
-		ETHER_NEXT_MULTI(step, enm);
 	}
 
-	if (mcnt)
-		rxfilt |= RL_RXCFG_RX_MULTI;
-	else
-		rxfilt &= ~RL_RXCFG_RX_MULTI;
-
-	CSR_WRITE_4(sc, RL_RXCFG, rxfilt);
 	CSR_WRITE_4(sc, RL_MAR0, hashes[0]);
 	CSR_WRITE_4(sc, RL_MAR4, hashes[1]);
+	CSR_WRITE_4(sc, RL_RXCFG, rxfilt);
 }
 
 void
@@ -677,21 +670,18 @@ rl_rxeof(sc)
 
 		if (total_len > wrap) {
 			m = m_devget(rxbufpos, wrap, ETHER_ALIGN, ifp, NULL);
-			if (m == NULL)
-				ifp->if_ierrors++;
-			else {
+			if (m != NULL) {
 				m_copyback(m, wrap, total_len - wrap,
 				    sc->rl_cdata.rl_rx_buf);
-				m = m_pullup(m, sizeof(struct ip));
-				if (m == NULL)
-					ifp->if_ierrors++;
+				if (m->m_pkthdr.len < total_len) {
+					m_freem(m);
+					m = NULL;
+				}
 			}
 			cur_rx = (total_len - wrap + ETHER_CRC_LEN);
 		} else {
 			m = m_devget(rxbufpos, total_len, ETHER_ALIGN, ifp,
 			    NULL);
-			if (m == NULL)
-				ifp->if_ierrors++;
 			cur_rx += total_len + 4 + ETHER_CRC_LEN;
 		}
 
@@ -705,6 +695,7 @@ rl_rxeof(sc)
 			bus_dmamap_sync(sc->sc_dmat, sc->sc_rx_dmamap,
 			    0, sc->sc_rx_dmamap->dm_mapsize,
 			    BUS_DMASYNC_PREREAD);
+			ifp->if_ierrors++;
 			continue;
 		}
 
@@ -960,7 +951,6 @@ void rl_init(xsc)
 	struct rl_softc		*sc = xsc;
 	struct ifnet		*ifp = &sc->sc_arpcom.ac_if;
 	int			s;
-	u_int32_t		rxcfg = 0;
 
 	s = splnet();
 
@@ -998,30 +988,10 @@ void rl_init(xsc)
 	CSR_WRITE_4(sc, RL_TXCFG, RL_TXCFG_CONFIG);
 	CSR_WRITE_4(sc, RL_RXCFG, RL_RXCFG_CONFIG);
 
-	/* Set the individual bit to receive frames for this host only. */
-	rxcfg = CSR_READ_4(sc, RL_RXCFG);
-	rxcfg |= RL_RXCFG_RX_INDIV;
-
-	/* If we want promiscuous mode, set the allframes bit. */
-	if (ifp->if_flags & IFF_PROMISC)
-		rxcfg |= RL_RXCFG_RX_ALLPHYS;
-	else
-		rxcfg &= ~RL_RXCFG_RX_ALLPHYS;
-	CSR_WRITE_4(sc, RL_RXCFG, rxcfg);
-
 	/*
-	 * Set capture broadcast bit to capture broadcast frames.
+	 * Program promiscuous mode and multicast filters.
 	 */
-	if (ifp->if_flags & IFF_BROADCAST)
-		rxcfg |= RL_RXCFG_RX_BROAD;
-	else
-		rxcfg &= ~RL_RXCFG_RX_BROAD;
-	CSR_WRITE_4(sc, RL_RXCFG, rxcfg);
-
-	/*
-	 * Program the multicast filter, if necessary.
-	 */
-	rl_setmulti(sc);
+	rl_iff(sc);
 
 	/*
 	 * Enable interrupts.
@@ -1046,7 +1016,6 @@ void rl_init(xsc)
 
 	splx(s);
 
-	timeout_set(&sc->sc_tick_tmo, rl_tick, sc);
 	timeout_add_sec(&sc->sc_tick_tmo, 1);
 }
 
@@ -1083,7 +1052,7 @@ int rl_ioctl(ifp, command, data)
 {
 	struct rl_softc		*sc = ifp->if_softc;
 	struct ifreq		*ifr = (struct ifreq *) data;
-	struct ifaddr *ifa = (struct ifaddr *)data;
+	struct ifaddr		*ifa = (struct ifaddr *) data;
 	int			s, error = 0;
 
 	s = splnet();
@@ -1091,56 +1060,39 @@ int rl_ioctl(ifp, command, data)
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-		switch (ifa->ifa_addr->sa_family) {
+		if (!(ifp->if_flags & IFF_RUNNING))
+			rl_init(sc);
 #ifdef INET
-		case AF_INET:
-			rl_init(sc);
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-			break;
 #endif /* INET */
-		default:
-			rl_init(sc);
-			break;
-		}
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
-			error = EINVAL;
-		} else if (ifp->if_mtu != ifr->ifr_mtu) {
-			ifp->if_mtu = ifr->ifr_mtu;
-		}
-		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			rl_init(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
+				rl_init(sc);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				rl_stop(sc);
 		}
-		error = 0;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				rl_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			rl_iff(sc);
+		error = 0;
 	}
 
 	splx(s);
@@ -1303,6 +1255,8 @@ rl_attach(sc)
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
+	timeout_set(&sc->sc_tick_tmo, rl_tick, sc);
+
 	/*
 	 * Initialize our media structures and probe the MII.
 	 */
@@ -1462,6 +1416,32 @@ rl_tick(v)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 	timeout_add_sec(&sc->sc_tick_tmo, 1);
+}
+
+int
+rl_detach(struct rl_softc *sc)
+{
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+
+	/* Unhook our tick handler. */
+	timeout_del(&sc->sc_tick_tmo);
+
+	/* Detach any PHYs we might have. */
+	if (LIST_FIRST(&sc->sc_mii.mii_phys) != NULL)
+		mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
+
+	/* Delete any remaining media. */
+	ifmedia_delete_instance(&sc->sc_mii.mii_media, IFM_INST_ANY);
+
+	ether_ifdetach(ifp);
+	if_detach(ifp);
+
+	if (sc->sc_sdhook != NULL)
+		shutdownhook_disestablish(sc->sc_sdhook);
+	if (sc->sc_pwrhook != NULL)
+		powerhook_disestablish(sc->sc_pwrhook);
+
+	return (0);
 }
 
 struct cfdriver rl_cd = {

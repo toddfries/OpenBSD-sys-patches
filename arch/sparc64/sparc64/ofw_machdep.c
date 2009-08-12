@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofw_machdep.c,v 1.29 2008/08/09 21:06:05 kettenis Exp $	*/
+/*	$OpenBSD: ofw_machdep.c,v 1.31 2009/02/19 11:12:42 kettenis Exp $	*/
 /*	$NetBSD: ofw_machdep.c,v 1.16 2001/07/20 00:07:14 eeh Exp $	*/
 
 /*
@@ -812,6 +812,23 @@ prom_set_sun4v_api_version(uint64_t api_group, uint64_t major,
 	*supported_minor = args.supported_minor;
 	return (uint64_t)args.status;
 }
+
+void
+prom_sun4v_soft_state_supported(void)
+{
+	static struct {
+		cell_t  name;
+		cell_t  nargs;
+		cell_t  nreturns;
+	} args;
+
+	args.name = ADR2CELL("SUNW,soft-state-supported");
+	args.nargs = 0;
+	args.nreturns = 0;
+
+	openfirmware(&args);
+}
+
 
 #ifdef DEBUG
 int ofmapintrdebug = 0;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: seagate.c,v 1.23 2007/11/05 17:42:26 krw Exp $	*/
+/*	$OpenBSD: seagate.c,v 1.27 2009/02/16 21:19:07 miod Exp $	*/
 
 /*
  * ST01/02, Future Domain TMC-885, TMC-950 SCSI driver
@@ -291,7 +291,7 @@ void		sea_reselect(struct sea_softc *sea);
 
 struct scsi_adapter sea_switch = {
 	sea_scsi_cmd,
-	minphys,	/* no special minphys(), since driver uses PIO */
+	scsi_minphys,	/* no special minphys(), since driver uses PIO */
 	0,
 	0,
 };
@@ -549,7 +549,7 @@ sea_scsi_cmd(struct scsi_xfer *xs)
 		xs->flags &= ~ITSDONE;
 	}
 	if ((scb = sea_get_scb(sea, flags)) == NULL) {
-		return TRY_AGAIN_LATER;
+		return (NO_CCB);
 	}
 	scb->flags = SCB_ACTIVE;
 	scb->xs = xs;
@@ -583,7 +583,7 @@ sea_scsi_cmd(struct scsi_xfer *xs)
 	 */
 	if ((flags & SCSI_POLL) == 0) {
 		timeout_set(&scb->xs->stimeout, sea_timeout, scb);
-		timeout_add(&scb->xs->stimeout, (xs->timeout * hz) / 1000);
+		timeout_add_msec(&scb->xs->stimeout, xs->timeout);
 		splx(s);
 		return SUCCESSFULLY_QUEUED;
 	}
@@ -813,7 +813,7 @@ sea_timeout(void *arg)
 		/* 2 secs for the abort */
 		if ((xs->flags & SCSI_POLL) == 0) {
 			timeout_set(&scb->xs->stimeout, sea_timeout, scb);
-			timeout_add(&scb->xs->stimeout, 2 * hz);
+			timeout_add_sec(&scb->xs->stimeout, 2);
 		}
 	}
 

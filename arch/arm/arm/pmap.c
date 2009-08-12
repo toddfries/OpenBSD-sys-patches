@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.19 2008/10/28 20:16:58 drahn Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.24 2009/07/14 13:59:49 drahn Exp $	*/
 /*	$NetBSD: pmap.c,v 1.147 2004/01/18 13:03:50 scw Exp $	*/
 
 /*
@@ -289,7 +289,7 @@ static paddr_t pmap_kernel_l2ptp_phys;
 /*
  * pmap copy/zero page, and mem(5) hook point
  */
-static pt_entry_t *csrc_pte, *cdst_pte;
+pt_entry_t *csrc_pte, *cdst_pte;
 static vaddr_t csrcp, cdstp;
 char *memhook;
 extern caddr_t msgbufaddr;
@@ -2441,6 +2441,30 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 }
 
 void
+pmap_kenter_cache(vaddr_t va, paddr_t pa, vm_prot_t prot, int cacheable)
+{
+	struct vm_page *pg;
+	struct pv_entry *pv;
+	pt_entry_t *pte;
+
+	pmap_kenter_pa(va, pa, prot);
+
+	if (cacheable == 0) {
+		if ((pg = PHYS_TO_VM_PAGE(pa)) != NULL) {
+			simple_lock(&pg->mdpage.pvh_slock);
+			pv = pmap_find_pv(pg, pmap_kernel(), va);
+			if (pv != NULL)
+				pv->pv_flags |= PVF_NC;
+			simple_unlock(&pg->mdpage.pvh_slock);
+		}
+
+		pte = vtopte(va);
+		*pte &= ~L2_S_CACHE_MASK;
+		PTE_SYNC(pte);
+	}
+}
+
+void
 pmap_kremove(vaddr_t va, vsize_t len)
 {
 	struct l2_bucket *l2b;
@@ -3327,7 +3351,7 @@ pmap_pageidlezero(struct vm_page *pg)
 
 	for (i = 0, ptr = (int *)cdstp;
 			i < (PAGE_SIZE / sizeof(int)); i++) {
-		if (!sched_is_idle()) {
+		if (!curcpu_is_idle()) {
 			/*
 			 * A process has become ready.  Abort now,
 			 * so we don't keep it waiting while we
@@ -3443,6 +3467,50 @@ pmap_copy_page_xscale(struct vm_page *src_pg, struct vm_page *dst_pg)
 	xscale_cache_clean_minidata();
 }
 #endif /* ARM_MMU_XSCALE == 1 */
+
+#if defined(CPU_ARMv7)
+void pmap_copy_page_v7(struct vm_page *src_pg, struct vm_page *dst_pg);
+void
+pmap_copy_page_v7(struct vm_page *src_pg, struct vm_page *dst_pg)
+{
+	paddr_t src = VM_PAGE_TO_PHYS(src_pg);
+	paddr_t dst = VM_PAGE_TO_PHYS(dst_pg);
+#ifdef DEBUG
+	if (dst_pg->mdpage.pvh_list != NULL)
+		panic("pmap_copy_page: dst page has mappings");
+#endif
+
+	KDASSERT((src & PGOFSET) == 0);
+	KDASSERT((dst & PGOFSET) == 0);
+
+	/*
+	 * Clean the source page.  Hold the source page's lock for
+	 * the duration of the copy so that no other mappings can
+	 * be created while we have a potentially aliased mapping.
+	 */
+	simple_lock(&src_pg->mdpage.pvh_slock);
+	(void) pmap_clean_page(src_pg->mdpage.pvh_list, TRUE);
+
+	/*
+	 * Map the pages into the page hook points, copy them, and purge
+	 * the cache for the appropriate page. Invalidate the TLB
+	 * as required.
+	 */
+	*csrc_pte = L2_S_PROTO | src |
+	    L2_V7_AP(0x5) | pte_l2_s_cache_mode;
+	PTE_SYNC(csrc_pte);
+	*cdst_pte = L2_S_PROTO | dst |
+	    L2_S_PROT(PTE_KERNEL, VM_PROT_WRITE) | pte_l2_s_cache_mode;
+	PTE_SYNC(cdst_pte);
+	cpu_tlb_flushD_SE(csrcp);
+	cpu_tlb_flushD_SE(cdstp);
+	cpu_cpwait();
+	bcopy_page(csrcp, cdstp);
+	cpu_dcache_inv_range(csrcp, PAGE_SIZE);
+	simple_unlock(&src_pg->mdpage.pvh_slock); /* cache is safe again */
+	cpu_dcache_wbinv_range(cdstp, PAGE_SIZE);
+}
+#endif /* CPU_ARMv7 */
 
 /*
  * void pmap_virtual_space(vaddr_t *start, vaddr_t *end)
@@ -4140,7 +4208,7 @@ pmap_postinit(void)
 		TAILQ_INIT(&plist);
 
 		error = uvm_pglistalloc(L1_TABLE_SIZE, physical_start,
-		    physical_end, L1_TABLE_SIZE, 0, &plist, 1, M_WAITOK);
+		    physical_end, L1_TABLE_SIZE, 0, &plist, 1, UVM_PLA_WAITOK);
 		if (error)
 			panic("Cannot allocate L1 physical pages");
 
@@ -4688,6 +4756,61 @@ pmap_pte_init_arm10(void)
 
 }
 #endif /* CPU_ARM10 */
+
+#if defined(CPU_ARM11)
+void
+pmap_pte_init_arm11(void)
+{
+
+	/*
+	 * XXX 
+	 * ARM11 is compatible with generic, but we want to use
+	 * write-through caching for now.
+	 */
+	pmap_pte_init_generic();
+
+	pte_l1_s_cache_mode = L1_S_B | L1_S_C;
+	pte_l2_l_cache_mode = L2_B | L2_C;
+	pte_l2_s_cache_mode = L2_B | L2_C;
+
+	pte_l1_s_cache_mode_pt = L1_S_C;
+	pte_l2_l_cache_mode_pt = L2_C;
+	pte_l2_s_cache_mode_pt = L2_C;
+
+}
+#endif /* CPU_ARM11 */
+
+#if defined(CPU_ARMv7)
+void
+pmap_pte_init_armv7(void)
+{
+
+	/*
+	 * XXX 
+	 * ARMv7 is compatible with generic, but we to use proper TEX settings
+	 * - not yet however...
+	 */
+	pmap_pte_init_generic();
+
+	pte_l1_s_cache_mode = L1_S_B | L1_S_C;
+	pte_l2_l_cache_mode = L2_B | L2_C;
+	pte_l2_s_cache_mode = L2_B | L2_C;
+
+	pte_l1_s_cache_mode_pt = L1_S_C;
+	pte_l2_l_cache_mode_pt = L2_C;
+	pte_l2_s_cache_mode_pt = L2_C;
+
+	pte_l2_s_prot_u = L2_S_PROT_U_v7;
+	pte_l2_s_prot_w = L2_S_PROT_W_v7;
+	pte_l2_s_prot_mask = L2_S_PROT_MASK_v7;
+
+	pte_l1_s_proto = L1_S_PROTO_v7;
+	pte_l1_c_proto = L1_C_PROTO_v7;
+	pte_l2_s_proto = L2_S_PROTO_v7;
+
+	pmap_copy_page_func = pmap_copy_page_v7;
+}
+#endif /* CPU_ARMv7 */
 
 #if ARM_MMU_SA1 == 1
 void

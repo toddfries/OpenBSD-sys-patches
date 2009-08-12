@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.47 2008/04/08 14:31:54 claudio Exp $	*/
+/*	$OpenBSD: conf.c,v 1.49 2009/06/03 14:45:53 jj Exp $	*/
 /*	$NetBSD: conf.c,v 1.40 1996/04/11 19:20:03 thorpej Exp $ */
 
 /*
@@ -87,9 +87,9 @@
 #include "wsmouse.h"
 #include "wsmux.h"
 
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+#ifdef NNPFS
+#include <nnpfs/nnnpfs.h>
+cdev_decl(nnpfs_dev);
 #endif
 #include "ksyms.h"
 
@@ -138,7 +138,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 4 */
 	cdev_notdef(),			/* 5 */
 	cdev_notdef(),			/* 6 */
-	cdev_swap_init(1,sw),		/* 7: /dev/drum (swap pseudo-device) */
+	cdev_notdef(),			/* 7 was /dev/drum */
 	cdev_notdef(),			/* 8 */
 	cdev_disk_init(NXY,xy),		/* 9: SMD disk */
 	cdev_notdef(),			/* 10 */
@@ -182,8 +182,8 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48 */
 	cdev_notdef(),			/* 49 */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#ifdef NNPFS
+	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
 #else
 	cdev_notdef(),			/* 51 */
 #endif

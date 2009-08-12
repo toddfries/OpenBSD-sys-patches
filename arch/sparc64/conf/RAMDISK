@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.79 2008/10/23 17:26:26 deraadt Exp $
+#	$OpenBSD: RAMDISK,v 1.94 2009/07/12 19:17:50 kettenis Exp $
 
 # Machine architecture; required by config(8)
 machine		sparc64
@@ -69,6 +69,7 @@ ebus*	at mainbus0
 ebus*	at pci?
 vbus0	at mainbus0
 sbbc*	at pci?
+cbus*	at vbus?
 
 # CardBus bus support
 cardbus* at cardslot?
@@ -124,6 +125,9 @@ timer*	at mainbus0			# Timer chip
 # Virtual devices for sun4v systems.
 vcons0	at vbus?
 vrtc0	at vbus?
+vdsk*	at cbus?
+scsibus* at vdsk?
+vnet*	at cbus?
 
 ## Lance Ethernet - AMD7990
 le*		at sbus?
@@ -138,7 +142,7 @@ qe*	at qec?
 be*	at qec?
 
 hme*	at sbus?
-#gem*	at sbus?
+gem*	at sbus?
 
 pciide*	at pci? flags 0x0000
 wd*	at pciide? flags 0x0a00
@@ -159,9 +163,11 @@ dma*	at sbus?		# SBus
 esp*	at dma?			# SBus
 esp*	at sbus?
 isp*	at sbus?
-option ISP_COMPILE_1000_FW=1
 scsibus* at esp?
+softraid0	at root		# Software RAID
+scsibus* at softraid?
 
+ahc*	at pci?
 siop*	at pci?
 isp*	at pci?
 mpi*	at pci?
@@ -172,13 +178,13 @@ ahci*	at jmb?
 pciide*	at jmb?
 ahci*	at pci?
 
-option ISP_COMPILE_FW=1
+scsibus*	at ahc?
 scsibus*	at siop?
-scsibus*	at isp?
 scsibus*	at mpi?
 scsibus*	at sili?
 scsibus*	at arc?
 scsibus*	at ahci?
+scsibus*	at isp?
 
 # These entries find devices on all SCSI busses and assign
 # unit numers dynamically.
@@ -209,6 +215,7 @@ rgephy*	at mii?			# Realtek 8169S/8110S PHY
 gentbi*	at mii?			# Generic 1000BASE-X ten-bit PHY
 nsgphy*	at mii?			# NS gigabit PHYs
 jmphy*	at mii?			# JMicron JMP202/JMP211 PHYs
+ipgphy*	at mii?			# IC Plus IP1000A PHYs
 ukphy*	at mii?			# Unknown PHYs
 
 # PCI USB Controllers
@@ -278,8 +285,18 @@ wsdisplay*	at cgtwelve?
 creator*	at mainbus0		# Creator3D/Elite3D framebuffers
 creator*	at upa0
 wsdisplay*	at creator?
+gfxp*		at pci?			# PGX32 framebuffer
+wsdisplay*	at gfxp?
+ifb*		at pci?			# Expert3D/XVR-500 framebuffers
+wsdisplay*	at ifb?
+machfb*		at pci?			# PGX/PGX64 framebuffers
+wsdisplay*	at machfb?
 mgx*		at sbus?		# SMS MGX/MGXPlus framebuffer
 wsdisplay*	at mgx?
+radeonfb*	at pci?			# XVR-100 framebuffer
+wsdisplay*	at radeonfb?
+raptor*		at pci?			# Raptor framebuffer
+wsdisplay*	at raptor?
 rfx*		at sbus?		# RasterFlex framebuffer series
 wsdisplay*	at rfx?
 tvtwo*		at sbus?		# Parallax XVideo/PowerVideo framebuffer
@@ -305,3 +322,5 @@ prtc0	at mainbus0
 pseudo-device	rd	2	# ramdisk
 pseudo-device	loop	1	# network loopback
 pseudo-device	bpfilter 1	# packet filter
+pseudo-device	vlan		# IEEE 802.1Q VLAN 
+pseudo-device	bio	1	# ioctl multiplexing device

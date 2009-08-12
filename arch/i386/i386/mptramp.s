@@ -1,4 +1,4 @@
-/*	$OpenBSD: mptramp.s,v 1.10 2008/06/26 05:42:10 ray Exp $	*/
+/*	$OpenBSD: mptramp.s,v 1.12 2009/07/10 13:51:47 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -104,8 +104,8 @@
 #define HALT(x)	1: movl (%edi),%ebx;cmpl $ x,%ebx ; jle 1b ; movl $x,4(%edi)
 #define HALTT(x,y)	movl y,8(%edi); HALT(x)
 #else
-#define HALT(x)	/**/
-#define HALTT(x,y) /**/
+#define HALT(x)
+#define HALTT(x,y)
 #endif
 
 	.globl	_C_LABEL(cpu),_C_LABEL(cpu_id),_C_LABEL(cpu_vendor)
@@ -180,7 +180,7 @@ _TRMP_LABEL(mp_startup)
 
 # %ecx points at our cpu_info structure..
 
-	movw	$((MAXGDTSIZ*8) - 1), 6(%esp)	# prepare segment descriptor
+	movw	$(MAXGDTSIZ-1), 6(%esp)		# prepare segment descriptor
 	movl	CPU_INFO_GDT(%ecx), %eax	# for real gdt
 	movl	%eax, 8(%esp)
 	HALTT(0x8, %eax)
