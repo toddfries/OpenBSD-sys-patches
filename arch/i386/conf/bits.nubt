@@ -1,0 +1,23 @@
+option BLUETOOTH
+option BTKBD_REPEAT
+option BTKBD_LAYOUT
+# Bluetooth USB Controllers
+ubt* at uhub? #port ? configuration ? interface ?
+
+# Bluetooth Device Hub
+#bthub* at bt3c?
+bthub* at ubt?
+
+# Bluetooth HID support
+bthidev* at bthub?
+
+# Bluetooth Mouse
+btms* at bthidev? reportid ?
+wsmouse* at btms? mux 0
+
+# Bluetooth Keyboard
+btkbd* at bthidev? reportid ?
+wskbd* at btkbd? console ? mux 1
+
+# Bluetooth Audio support
+btsco* at bthub?
