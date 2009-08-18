@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_subs.c,v 1.101 2009/08/10 10:59:12 thib Exp $	*/
+/*	$OpenBSD: nfs_subs.c,v 1.103 2009/08/13 15:18:16 blambert Exp $	*/
 /*	$NetBSD: nfs_subs.c,v 1.27.4.3 1996/07/08 20:34:24 jtc Exp $	*/
 
 /*
@@ -1136,7 +1136,7 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 }
 
 int
-nfs_attrtimeo (np)
+nfs_attrtimeo(np)
 	struct nfsnode *np;
 {
 	struct vnode *vp = np->n_vnode;
@@ -1386,22 +1386,17 @@ nfsm_adj(mp, len, nul)
  * doesn't get too big...
  */
 void
-nfsm_srvwcc(nfsd, before_ret, before_vap, after_ret, after_vap, mbp)
-	struct nfsrv_descript *nfsd;
-	int before_ret;
-	struct vattr *before_vap;
-	int after_ret;
-	struct vattr *after_vap;
-	struct mbuf **mbp;
+nfsm_srvwcc(struct nfsrv_descript *nfsd, int before_ret,
+    struct vattr *before_vap, int after_ret, struct vattr *after_vap,
+    struct nfsm_info *info)
 {
-	struct mbuf *mb = *mbp;
 	u_int32_t *tl;
 
 	if (before_ret) {
-		tl = nfsm_build(&mb, NFSX_UNSIGNED);
+		tl = nfsm_build(&info->nmi_mb, NFSX_UNSIGNED);
 		*tl = nfs_false;
 	} else {
-		tl = nfsm_build(&mb, 7 * NFSX_UNSIGNED);
+		tl = nfsm_build(&info->nmi_mb, 7 * NFSX_UNSIGNED);
 		*tl++ = nfs_true;
 		txdr_hyper(before_vap->va_size, tl);
 		tl += 2;
@@ -1409,31 +1404,25 @@ nfsm_srvwcc(nfsd, before_ret, before_vap, after_ret, after_vap, mbp)
 		tl += 2;
 		txdr_nfsv3time(&(before_vap->va_ctime), tl);
 	}
-	*mbp = mb;
-	nfsm_srvpostop_attr(nfsd, after_ret, after_vap, mbp);
+	nfsm_srvpostop_attr(nfsd, after_ret, after_vap, info);
 }
 
 void
-nfsm_srvpostop_attr(nfsd, after_ret, after_vap, mbp)
-	struct nfsrv_descript *nfsd;
-	int after_ret;
-	struct vattr *after_vap;
-	struct mbuf **mbp;
+nfsm_srvpostop_attr(struct nfsrv_descript *nfsd, int after_ret,
+    struct vattr *after_vap, struct nfsm_info *info)
 {
-	struct mbuf *mb = *mbp;
 	u_int32_t *tl;
 	struct nfs_fattr *fp;
 
 	if (after_ret) {
-		tl = nfsm_build(&mb, NFSX_UNSIGNED);
+		tl = nfsm_build(&info->nmi_mb, NFSX_UNSIGNED);
 		*tl = nfs_false;
 	} else {
-		tl = nfsm_build(&mb, NFSX_UNSIGNED + NFSX_V3FATTR);
+		tl = nfsm_build(&info->nmi_mb, NFSX_UNSIGNED + NFSX_V3FATTR);
 		*tl++ = nfs_true;
 		fp = (struct nfs_fattr *)tl;
 		nfsm_srvfattr(nfsd, after_vap, fp);
 	}
-	*mbp = mb;
 }
 
 void
@@ -1894,14 +1883,14 @@ nfsm_build(struct mbuf **mp, u_int len)
 }
 
 void
-nfsm_fhtom(struct mbuf **mp, struct vnode *v, int v3)
+nfsm_fhtom(struct nfsm_info *info, struct vnode *v, int v3)
 {
 	struct nfsnode *n = VTONFS(v);
 
 	if (v3) {
-		nfsm_strtombuf(mp, n->n_fhp, n->n_fhsize);
+		nfsm_strtombuf(&info->nmi_mb, n->n_fhp, n->n_fhsize);
 	} else {
-		nfsm_buftombuf(mp, n->n_fhp, NFSX_V2FH);
+		nfsm_buftombuf(&info->nmi_mb, n->n_fhp, NFSX_V2FH);
 	}
 }
 

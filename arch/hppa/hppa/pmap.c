@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.143 2009/08/09 19:10:10 kettenis Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.145 2009/08/13 16:31:11 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -275,12 +275,12 @@ pmap_pte_set(volatile pt_entry_t *pde, vaddr_t va, pt_entry_t pte)
 void
 pmap_pte_flush(struct pmap *pmap, vaddr_t va, pt_entry_t pte)
 {
+	fdcache(pmap->pm_space, va, PAGE_SIZE);
+	pdtlb(pmap->pm_space, va);
 	if (pte & PTE_PROT(TLB_EXECUTE)) {
 		ficache(pmap->pm_space, va, PAGE_SIZE);
 		pitlb(pmap->pm_space, va);
 	}
-	fdcache(pmap->pm_space, va, PAGE_SIZE);
-	pdtlb(pmap->pm_space, va);
 #ifdef USE_HPT
 	if (pmap_hpt) {
 		struct vp_entry *hpt;
@@ -363,9 +363,11 @@ pmap_check_alias(struct pv_entry *pve, vaddr_t va, pt_entry_t pte)
 		pte |= pmap_vp_find(pve->pv_pmap, pve->pv_va);
 		if ((va & HPPA_PGAOFF) != (pve->pv_va & HPPA_PGAOFF) &&
 		    (pte & PTE_PROT(TLB_WRITE))) {
+#ifdef PMAPDEBUG
 			printf("pmap_check_alias: "
 			    "aliased writable mapping 0x%x:0x%x\n",
 			    pve->pv_pmap->pm_space, pve->pv_va);
+#endif
 			ret++;
 		}
 	}
@@ -415,11 +417,6 @@ pmap_pv_enter(struct vm_page *pg, struct pv_entry *pve, struct pmap *pm,
 	pve->pv_ptp	= pdep;
 	pve->pv_next = pg->mdpage.pvh_list;
 	pg->mdpage.pvh_list = pve;
-	if (pmap_check_alias(pve, va, 0))
-#ifdef PMAPDEBUG
-		Debugger()
-#endif
-		;
 }
 
 static __inline struct pv_entry *
@@ -847,6 +844,9 @@ pmap_enter(pmap, va, pa, prot, flags)
 			}
 			panic("pmap_enter: no pv entries available");
 		}
+		pte |= PTE_PROT(pmap_prot(pmap, prot));
+		if (pmap_check_alias(pg->mdpage.pvh_list, va, pte))
+			pmap_page_remove(pg);
 		pmap_pv_enter(pg, pve, pmap, va, ptp);
 	} else if (pve)
 		pmap_pv_free(pve);
