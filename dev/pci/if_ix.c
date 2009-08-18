@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.28 2009/08/12 16:56:59 jsg Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.30 2009/08/13 14:24:47 jasper Exp $	*/
 
 /******************************************************************************
 
@@ -134,7 +134,7 @@ void	desc_flip(void *);
  *********************************************************************/
 
 struct cfdriver ix_cd = {
-	0, "ix", DV_IFNET
+	NULL, "ix", DV_IFNET
 };
 
 struct cfattach ix_ca = {
@@ -2631,12 +2631,10 @@ ixgbe_rxeof(struct rx_ring *rxr, int count)
 			    rxr->last_rx_desc_filled);
 		}
 
+		m_cluncount(m, 1);
 		rxr->rx_ndescs--;
-		if (m_cluncount(m) == 0)
-			accept_frame = 1;
-		else
-			accept_frame = 0;
 
+		accept_frame = 1;
 		prev_len_adj = 0;
 		desc_len = letoh16(rxdesc->wb.upper.length);
 

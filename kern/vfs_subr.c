@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.181 2009/08/12 16:42:24 beck Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.183 2009/08/17 13:11:58 jasper Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -2162,8 +2162,9 @@ vn_isdisk(struct vnode *vp, int *errp)
 #include <ddb/db_output.h>
 
 void
-vfs_buf_print(struct buf *bp, int full, int (*pr)(const char *, ...))
+vfs_buf_print(void *b, int full, int (*pr)(const char *, ...))
 {
+	struct buf *bp = b;
 
 	(*pr)("  vp %p lblkno 0x%llx blkno 0x%llx dev 0x%x\n"
 	      "  proc %p error %d flags %b\n",
@@ -2188,8 +2189,9 @@ const char *vtypes[] = { VTYPE_NAMES };
 const char *vtags[] = { VTAG_NAMES };
 
 void
-vfs_vnode_print(struct vnode *vp, int full, int (*pr)(const char *, ...))
+vfs_vnode_print(void *v, int full, int (*pr)(const char *, ...))
 {
+	struct vnode *vp = v;
 
 #define	NENTS(n)	(sizeof n / sizeof(n[0]))
 	(*pr)("tag %s(%d) type %s(%d) mount %p typedata %p\n",
@@ -2307,4 +2309,3 @@ copy_statfs_info(struct statfs *sbp, const struct mount *mp)
 	bcopy(&mp->mnt_stat.mount_info.ufs_args, &sbp->mount_info.ufs_args,
 	    sizeof(struct ufs_args));
 }
-

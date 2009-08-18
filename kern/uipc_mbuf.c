@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.131 2009/08/12 14:39:05 dlg Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.133 2009/08/12 21:44:49 henning Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -223,19 +223,7 @@ m_gethdr(int nowait, int type)
 		m->m_nextpkt = (struct mbuf *)NULL;
 		m->m_data = m->m_pktdat;
 		m->m_flags = M_PKTHDR;
-		m->m_pkthdr.rcvif = NULL;
-		m->m_pkthdr.rdomain = 0;
-		SLIST_INIT(&m->m_pkthdr.tags);
-		m->m_pkthdr.tagsset = 0;
-		m->m_pkthdr.csum_flags = 0;
-		m->m_pkthdr.ether_vtag = 0;
-		m->m_pkthdr.pf.hdr = NULL;
-		m->m_pkthdr.pf.statekey = NULL;
-		m->m_pkthdr.pf.rtableid = 0;
-		m->m_pkthdr.pf.qid = 0;
-		m->m_pkthdr.pf.tag = 0;
-		m->m_pkthdr.pf.flags = 0;
-		m->m_pkthdr.pf.routed = 0;
+		bzero(&m->m_pkthdr, sizeof(m->m_pkthdr));
 	}
 	return (m);
 }
@@ -248,19 +236,7 @@ m_inithdr(struct mbuf *m)
 	m->m_nextpkt = (struct mbuf *)NULL;
 	m->m_data = m->m_pktdat;
 	m->m_flags = M_PKTHDR;
-	m->m_pkthdr.rcvif = NULL;
-	m->m_pkthdr.rdomain = 0;
-	SLIST_INIT(&m->m_pkthdr.tags);
-	m->m_pkthdr.tagsset = 0;
-	m->m_pkthdr.csum_flags = 0;
-	m->m_pkthdr.ether_vtag = 0;
-	m->m_pkthdr.pf.hdr = NULL;
-	m->m_pkthdr.pf.statekey = NULL;
-	m->m_pkthdr.pf.rtableid = 0;
-	m->m_pkthdr.pf.qid = 0;
-	m->m_pkthdr.pf.tag = 0;
-	m->m_pkthdr.pf.flags = 0;
-	m->m_pkthdr.pf.routed = 0;
+	bzero(&m->m_pkthdr, sizeof(m->m_pkthdr));
 
 	return (m);
 }
@@ -372,26 +348,20 @@ m_clcount(struct ifnet *ifp, int pi)
 	ifp->if_data.ifi_mclpool[pi].mcl_alive++;
 }
 
-int
-m_cluncount(struct mbuf *m)
+void
+m_cluncount(struct mbuf *m, int all)
 {
-	struct mbuf_ext *me = &m->m_ext;
-	int pi;
+	struct mbuf_ext *me;
 
-	splassert(IPL_NET);
+	do {
+		me = &m->m_ext;
+		if (((m->m_flags & (M_EXT|M_CLUSTER)) != (M_EXT|M_CLUSTER)) ||
+		    (me->ext_ifp == NULL))
+			continue;
 
-	if (((m->m_flags & (M_EXT|M_CLUSTER)) != (M_EXT|M_CLUSTER)) ||
-	    (me->ext_ifp == NULL))
-		return (0);
-
-	pi = me->ext_backend;
-	me->ext_ifp->if_data.ifi_mclpool[pi].mcl_alive--;
-	me->ext_ifp = NULL;
-
-	if (mclpools[pi].pr_nitems <= mclpools[pi].pr_minitems)
-		return (1);
-
-	return (0);
+		me->ext_ifp->if_data.ifi_mclpool[me->ext_backend].mcl_alive--;
+		me->ext_ifp = NULL;
+	} while (all && (m = m->m_next));
 }
 
 struct mbuf *
@@ -474,25 +444,21 @@ m_free(struct mbuf *m)
 void
 m_extfree(struct mbuf *m)
 {
-	struct mbuf_ext *me = &m->m_ext;
-	int pi;
-
 	if (MCLISREFERENCED(m)) {
-		me->ext_nextref->m_ext.ext_prevref = me->ext_prevref;
-		me->ext_prevref->m_ext.ext_nextref = me->ext_nextref;
+		m->m_ext.ext_nextref->m_ext.ext_prevref =
+		    m->m_ext.ext_prevref;
+		m->m_ext.ext_prevref->m_ext.ext_nextref =
+		    m->m_ext.ext_nextref;
 	} else if (m->m_flags & M_CLUSTER) {
-		pi = me->ext_backend;
-		if (me->ext_ifp != NULL) {
-			me->ext_ifp->if_data.ifi_mclpool[pi].mcl_alive--;
-			me->ext_ifp = NULL;
-		}
-		pool_put(&mclpools[pi], me->ext_buf);
-	} else if (me->ext_free)
-		me->ext_free(me->ext_buf, me->ext_size, me->ext_arg);
+		m_cluncount(m, 0);
+		pool_put(&mclpools[m->m_ext.ext_backend],
+		    m->m_ext.ext_buf);
+	} else if (m->m_ext.ext_free)
+		(*(m->m_ext.ext_free))(m->m_ext.ext_buf,
+		    m->m_ext.ext_size, m->m_ext.ext_arg);
 	else
 		panic("unknown type of extension buffer");
-
-	me->ext_size = 0;
+	m->m_ext.ext_size = 0;
 	m->m_flags &= ~(M_EXT|M_CLUSTER);
 }
 

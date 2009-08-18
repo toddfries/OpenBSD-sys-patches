@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtw.c,v 1.75 2009/08/10 20:29:54 deraadt Exp $	*/
+/*	$OpenBSD: rtw.c,v 1.77 2009/08/16 18:21:57 jsg Exp $	*/
 /*	$NetBSD: rtw.c,v 1.29 2004/12/27 19:49:16 dyoung Exp $ */
 
 /*-
@@ -794,13 +794,13 @@ rtw_identify_sta(struct rtw_regs *regs, u_int8_t (*addr)[IEEE80211_ADDR_LEN],
 	u_int32_t idr0 = RTW_READ(regs, RTW_IDR0),
 	    idr1 = RTW_READ(regs, RTW_IDR1);
 
-	(*addr)[0] = MASK_AND_RSHIFT(idr0, BITS(0,  7));
-	(*addr)[1] = MASK_AND_RSHIFT(idr0, BITS(8,  15));
-	(*addr)[2] = MASK_AND_RSHIFT(idr0, BITS(16, 23));
-	(*addr)[3] = MASK_AND_RSHIFT(idr0, BITS(24 ,31));
+	(*addr)[0] = MASK_AND_RSHIFT(idr0, 0xff);
+	(*addr)[1] = MASK_AND_RSHIFT(idr0, 0xff00);
+	(*addr)[2] = MASK_AND_RSHIFT(idr0, 0xff0000);
+	(*addr)[3] = MASK_AND_RSHIFT(idr0, 0xff000000);
 
-	(*addr)[4] = MASK_AND_RSHIFT(idr1, BITS(0,  7));
-	(*addr)[5] = MASK_AND_RSHIFT(idr1, BITS(8, 15));
+	(*addr)[4] = MASK_AND_RSHIFT(idr1, 0xff);
+	(*addr)[5] = MASK_AND_RSHIFT(idr1, 0xff00);
 
 	if (IEEE80211_ADDR_EQ(addr, empty_macaddr)) {
 		printf("\n%s: could not get mac address, attach failed\n",
@@ -4621,12 +4621,12 @@ rtw_grf5101_pwrstate(struct rtw_softc *sc, enum rtw_pwrstate power)
 {
 	switch (power) {
 	case RTW_OFF:
+		/* FALLTHROUGH */
 	case RTW_SLEEP:
 		rtw_rf_macwrite(sc, 0x07, 0x0000);
 		rtw_rf_macwrite(sc, 0x1f, 0x0045);
 		rtw_rf_macwrite(sc, 0x1f, 0x0005);
 		rtw_rf_macwrite(sc, 0x00, 0x08e4);
-	default:
 		break;
 	case RTW_ON:
 		rtw_rf_macwrite(sc, 0x1f, 0x0001);

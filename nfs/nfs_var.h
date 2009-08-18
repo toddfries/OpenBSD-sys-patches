@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_var.h,v 1.54 2009/08/10 10:59:12 thib Exp $	*/
+/*	$OpenBSD: nfs_var.h,v 1.56 2009/08/13 15:18:16 blambert Exp $	*/
 /*	$NetBSD: nfs_var.h,v 1.3 1996/02/18 11:53:54 fvdl Exp $	*/
 
 /*
@@ -228,9 +228,9 @@ int nfs_namei(struct nameidata *, fhandle_t *, int, struct nfssvc_sock *,
 void nfsm_v3attrbuild(struct mbuf **, struct vattr *, int);
 void nfsm_adj(struct mbuf *, int, int);
 void nfsm_srvwcc(struct nfsrv_descript *, int, struct vattr *, int,
-		      struct vattr *, struct mbuf **);
+		      struct vattr *, struct nfsm_info *);
 void nfsm_srvpostop_attr(struct nfsrv_descript *, int, struct vattr *,
-			     struct mbuf **);
+			     struct nfsm_info *);
 void nfsm_srvfattr(struct nfsrv_descript *, struct vattr *,
 			struct nfs_fattr *);
 int nfsrv_fhtovp(fhandle_t *, int, struct vnode **, struct ucred *,
@@ -246,7 +246,7 @@ void nfs_del_tobecommitted_range(struct vnode *, struct buf *);
 void nfs_merge_commit_ranges(struct vnode *);
 int nfsrv_errmap(struct nfsrv_descript *, int);
 int nfsm_srvsattr(struct mbuf **, struct vattr *, struct mbuf *, caddr_t *);
-void nfsm_fhtom(struct mbuf **, struct vnode *, int);
+void nfsm_fhtom(struct nfsm_info *, struct vnode *, int);
 void nfsm_srvfhtom(struct mbuf **, fhandle_t *, int);
 
 /* nfs_syscalls.c */
