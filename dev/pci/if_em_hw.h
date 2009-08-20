@@ -72,7 +72,6 @@ typedef enum {
     em_80003es2lan,
     em_ich8lan,
     em_ich9lan,
-    em_ich10lan,
     em_num_macs
 } em_mac_type;
 
