@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.196 2009/06/06 12:31:17 rainer Exp $	*/
+/*	$OpenBSD: if.c,v 1.199 2009/08/12 15:58:20 henning Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -307,7 +307,7 @@ if_attachsetup(struct ifnet *ifp)
 void
 if_alloc_sadl(struct ifnet *ifp)
 {
-	unsigned socksize, ifasize;
+	unsigned int socksize, ifasize;
 	int namelen, masklen;
 	struct sockaddr_dl *sdl;
 	struct ifaddr *ifa;
@@ -471,7 +471,8 @@ if_attach_common(struct ifnet *ifp)
 void
 if_start(struct ifnet *ifp)
 {
-	if (IF_QFULL(&ifp->if_snd) && !ISSET(ifp->if_flags, IFF_OACTIVE)) {
+	if (ifp->if_snd.ifq_len >= min(8, ifp->if_snd.ifq_maxlen) &&
+	    !ISSET(ifp->if_flags, IFF_OACTIVE)) {
 		if (ISSET(ifp->if_xflags, IFXF_TXREADY)) {
 			TAILQ_REMOVE(&iftxlist, ifp, if_txlist);
 			CLR(ifp->if_xflags, IFXF_TXREADY);
@@ -1055,6 +1056,32 @@ link_rtrequest(int cmd, struct rtentry *rt, struct rt_addrinfo *info)
 		if (ifa->ifa_rtrequest && ifa->ifa_rtrequest != link_rtrequest)
 			ifa->ifa_rtrequest(cmd, rt, info);
 	}
+}
+
+/*
+ * Bring down all interfaces
+ */
+void
+if_downall(void)
+{
+	struct ifreq ifrq;	/* XXX only partly built */
+	struct ifnet *ifp;
+	int s;
+
+	s = splnet();
+	for (ifp = TAILQ_FIRST(&ifnet); ifp; ifp = TAILQ_NEXT(ifp, if_list)) {
+		if ((ifp->if_flags & IFF_UP) == 0)
+			continue;
+		if_down(ifp);
+		ifp->if_flags &= ~IFF_UP;
+
+		if (ifp->if_ioctl) {
+			ifrq.ifr_flags = ifp->if_flags;
+			(void) (*ifp->if_ioctl)(ifp, SIOCSIFFLAGS,
+			    (caddr_t)&ifrq);
+		}
+	}
+	splx(s);
 }
 
 /*

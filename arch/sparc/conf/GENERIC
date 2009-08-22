@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.91 2009/05/20 18:22:32 miod Exp $
+#	$OpenBSD: GENERIC,v 1.93 2009/07/13 19:53:58 kettenis Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -160,7 +160,6 @@ esp*	at dma? flags 0x00ff000f			# depending on model
 
 #sun4c, sun4m
 isp*	at sbus?
-options ISP_COMPILE_1000_FW=1
 
 # sun4m Ethernet - an AMD 7990 LANCE behind
 # specialized DMA glue
@@ -198,6 +197,9 @@ hme*	at sbus?
 qec*	at sbus?
 qe*	at qec?
 be*	at qec?
+
+# Gigabit ethernet
+gem*	at sbus?
 
 # Xylogics 753 or 7053 VME SMD disk controllers and disks, found
 # on sun4 systems.
@@ -334,6 +336,7 @@ ep*	at pcmcia?		# PCMCIA based 3C5xx ethernet
 
 # Media Independent Interface (mii) drivers (required by hme, ne, ep)
 bmtphy*	at mii?			# Broadcom 10/100 PHYs
+gentbi*	at mii?			# Generic 1000BASE-X ten-bit PHY
 lxtphy*	at mii?			# Level1 LXT970 PHYs
 nsphy*	at mii?			# NS and compatible PHYs
 nsphyter* at mii?

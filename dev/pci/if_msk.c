@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_msk.c,v 1.75 2009/03/29 14:36:34 jsg Exp $	*/
+/*	$OpenBSD: if_msk.c,v 1.77 2009/08/13 14:24:47 jasper Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -503,15 +503,9 @@ msk_newbuf(struct sk_if_softc *sc_if)
 	int			error;
 	int			opcode, i;
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
+	m = MCLGETI(NULL, M_DONTWAIT, &sc_if->arpcom.ac_if, sc_if->sk_pktlen);
+	if (!m)
 		return (ENOBUFS);
-
-	MCLGETI(m, M_DONTWAIT, &sc_if->arpcom.ac_if, sc_if->sk_pktlen);
-	if ((m->m_flags & M_EXT) == 0) {
-		m_freem(m);
-		return (ENOBUFS);
-	}
 	m->m_len = m->m_pkthdr.len = sc_if->sk_pktlen;
 	m_adj(m, ETHER_ALIGN);
 
@@ -2110,7 +2104,7 @@ struct cfattach mskc_ca = {
 };
 
 struct cfdriver mskc_cd = {
-	0, "mskc", DV_DULL
+	NULL, "mskc", DV_DULL
 };
 
 struct cfattach msk_ca = {
@@ -2118,7 +2112,7 @@ struct cfattach msk_ca = {
 };
 
 struct cfdriver msk_cd = {
-	0, "msk", DV_IFNET
+	NULL, "msk", DV_IFNET
 };
 
 #ifdef MSK_DEBUG

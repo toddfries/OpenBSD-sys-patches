@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ti.c,v 1.94 2008/11/28 02:44:18 brad Exp $	*/
+/*	$OpenBSD: if_ti.c,v 1.98 2009/08/13 14:24:47 jasper Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -35,9 +35,7 @@
  */
 
 /*
- * Alteon Networks Tigon PCI gigabit ethernet driver for FreeBSD.
- * Manuals, sample driver and firmware source kits are available
- * from http://www.alteon.com/support/openkits.
+ * Alteon Networks Tigon PCI gigabit ethernet driver for OpenBSD.
  *
  * Written by Bill Paul <wpaul@ctr.columbia.edu>
  * Electrical Engineering Department
@@ -62,13 +60,6 @@
  * (although they really should have done it a long time ago). With
  * any luck, the other vendors will finally wise up and follow Alteon's
  * stellar example.
- *
- * The firmware for the Tigon 1 and 2 NICs is compiled directly into
- * this driver by #including it as a C header file. This bloats the
- * driver somewhat, but it's the easiest method considering that the
- * driver code and firmware code need to be kept in sync. The source
- * for the firmware is not provided with the FreeBSD distribution since
- * compiling it requires a GNU toolchain targeted for mips-sgi-irix5.3.
  *
  * The following people deserve special thanks:
  * - Terry Murphy of 3Com, for providing a 3c985 Tigon 1 board
@@ -131,7 +122,7 @@ struct cfattach ti_ca = {
 };
 
 struct cfdriver ti_cd = {
-	0, "ti", DV_IFNET
+	NULL, "ti", DV_IFNET
 };
 
 void ti_txeof_tigon1(struct ti_softc *);
@@ -427,7 +418,8 @@ ti_loadfw(struct ti_softc *sc)
 {
 	struct tigon_firmware *tf;
 	u_char *buf = NULL;
-	size_t buflen;
+	u_int32_t *b;
+	size_t buflen, i, cnt;
 	char *name;
 	int error;
 
@@ -447,6 +439,12 @@ ti_loadfw(struct ti_softc *sc)
 	error = loadfirmware(name, &buf, &buflen);
 	if (error)
 		return;
+	/* convert firmware to host byte order */
+	b = (u_int32_t *)buf;
+	cnt = buflen / sizeof(u_int32_t);
+	for (i = 0; i < cnt; i++) 
+		b[i] = letoh32(b[i]);
+
 	tf = (struct tigon_firmware *)buf;
 	if (tf->FwReleaseMajor != TI_FIRMWARE_MAJOR ||
 	    tf->FwReleaseMinor != TI_FIRMWARE_MINOR ||
@@ -1296,7 +1294,7 @@ ti_chipinit(struct ti_softc *sc)
 	default:
 		printf("\n");
 		printf("%s: unsupported chip revision: %x\n",
-		    chip_rev, sc->sc_dv.dv_xname);
+		    sc->sc_dv.dv_xname, chip_rev);
 		return (ENODEV);
 	}
 

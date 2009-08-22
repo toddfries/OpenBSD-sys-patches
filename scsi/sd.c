@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.155 2009/06/03 22:09:30 thib Exp $	*/
+/*	$OpenBSD: sd.c,v 1.157 2009/08/13 15:23:11 deraadt Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -81,7 +81,7 @@ int	sdactivate(struct device *, enum devact);
 int	sddetach(struct device *, int);
 
 void	sdminphys(struct buf *);
-void	sdgetdisklabel(dev_t, struct sd_softc *, struct disklabel *, int);
+int	sdgetdisklabel(dev_t, struct sd_softc *, struct disklabel *, int);
 void	sdstart(void *);
 void	sdrestart(void *);
 void	sddone(struct scsi_xfer *);
@@ -90,6 +90,7 @@ int	sd_reassign_blocks(struct sd_softc *, u_long);
 int	sd_interpret_sense(struct scsi_xfer *);
 int	sd_get_parms(struct sd_softc *, struct disk_parms *, int);
 void	sd_flush(struct sd_softc *, int);
+void	sd_kill_buffers(struct sd_softc *);
 
 void	viscpy(u_char *, u_char *, int);
 
@@ -267,7 +268,7 @@ sdactivate(struct device *self, enum devact act)
 
 	case DVACT_DEACTIVATE:
 		sd->flags |= SDF_DYING;
-		bufq_drain(sd->sc_dk.dk_bufq);
+		sd_kill_buffers(sd);
 		break;
 	}
 
@@ -281,7 +282,7 @@ sddetach(struct device *self, int flags)
 	struct sd_softc *sd = (struct sd_softc *)self;
 	int bmaj, cmaj, mn;
 
-	bufq_drain(sd->sc_dk.dk_bufq);
+	sd_kill_buffers(sd);
 
 	/* Locate the lowest minor number to be detached. */
 	mn = DISKMINOR(self->dv_unit, 0);
@@ -397,7 +398,10 @@ sdopen(dev_t dev, int flag, int fmt, struct proc *p)
 		SC_DEBUG(sc_link, SDEV_DB3, ("Params loaded\n"));
 
 		/* Load the partition info if not already loaded. */
-		sdgetdisklabel(dev, sd, sd->sc_dk.dk_label, 0);
+		if (sdgetdisklabel(dev, sd, sd->sc_dk.dk_label, 0) == EIO) {
+			error = EIO;
+			goto bad;
+		}
 		SC_DEBUG(sc_link, SDEV_DB3, ("Disklabel loaded\n"));
 	}
 
@@ -549,8 +553,10 @@ sdstrategy(struct buf *bp)
 
 	s = splbio();
 
-	/* Place it in the queue of disk activities for this disk */
-	BUFQ_ADD(sd->sc_dk.dk_bufq, bp);
+	/*
+	 * Place it in the queue of disk activities for this disk
+	 */
+	disksort(&sd->buf_queue, bp);
 
 	/*
 	 * Tell the device to get going on the transfer if it's
@@ -599,6 +605,7 @@ sdstart(void *v)
 	struct sd_softc *sd = (struct sd_softc *)v;
 	struct scsi_link *sc_link = sd->sc_link;
 	struct buf *bp = 0;
+	struct buf *dp;
 	struct scsi_rw_big cmd_big;
 	struct scsi_rw_12 cmd_12;
 	struct scsi_rw_16 cmd_16;
@@ -633,8 +640,10 @@ sdstart(void *v)
 		/*
 		 * See if there is a buf with work for us to do..
 		 */
-		if ((bp = BUFQ_GET(sd->sc_dk.dk_bufq)) == NULL)
+		dp = &sd->buf_queue;
+		if ((bp = dp->b_actf) == NULL)	/* yes, an assign */
 			return;
+		dp->b_actf = bp->b_actf;
 
 		/*
 		 * If the device has become invalid, abort all the
@@ -741,7 +750,7 @@ sdstart(void *v)
 			/*
 			 * The device can't start another i/o. Try again later.
 			 */
-			BUFQ_ADD(sd->sc_dk.dk_bufq, bp);
+			dp->b_actf = bp;
 			disk_unbusy(&sd->sc_dk, 0, 0);
 			timeout_add(&sd->sc_timeout, 1);
 			return;
@@ -986,12 +995,12 @@ sd_ioctl_inquiry(struct sd_softc *sd, struct dk_inquiry *di)
 /*
  * Load the label information on the named device
  */
-void
+int
 sdgetdisklabel(dev_t dev, struct sd_softc *sd, struct disklabel *lp,
     int spoofonly)
 {
 	size_t len;
-	char *errstring, packname[sizeof(lp->d_packname) + 1];
+	char packname[sizeof(lp->d_packname) + 1];
 	char product[17], vendor[9];
 
 	bzero(lp, sizeof(struct disklabel));
@@ -1051,10 +1060,7 @@ sdgetdisklabel(dev_t dev, struct sd_softc *sd, struct disklabel *lp,
 	/*
 	 * Call the generic disklabel extraction routine
 	 */
-	errstring = readdisklabel(DISKLABELDEV(dev), sdstrategy, lp, spoofonly);
-	if (errstring) {
-		/*printf("%s: %s\n", sd->sc_dev.dv_xname, errstring);*/
-	}
+	return readdisklabel(DISKLABELDEV(dev), sdstrategy, lp, spoofonly);
 }
 
 
@@ -1488,4 +1494,24 @@ sd_flush(struct sd_softc *sd, int flags)
 		SC_DEBUG(sc_link, SDEV_DB1, ("cache sync failed\n"));
 	} else
 		sd->flags &= ~SDF_DIRTY;
+}
+
+/*
+ * Remove unprocessed buffers from queue.
+ */
+void
+sd_kill_buffers(struct sd_softc *sd)
+{
+	struct buf *dp, *bp;
+	int s;
+
+	s = splbio();
+	for (dp = &sd->buf_queue; (bp = dp->b_actf) != NULL; ) {
+		dp->b_actf = bp->b_actf;
+
+		bp->b_error = ENXIO;
+		bp->b_flags |= B_ERROR;
+		biodone(bp);
+	}
+	splx(s);
 }

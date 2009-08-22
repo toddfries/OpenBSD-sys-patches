@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.178 2009/06/15 17:01:26 beck Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.183 2009/08/17 13:11:58 jasper Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -59,6 +59,7 @@
 #include <sys/mbuf.h>
 #include <sys/syscallargs.h>
 #include <sys/pool.h>
+#include <sys/tree.h>
 
 #include <uvm/uvm_extern.h>
 #include <sys/sysctl.h>
@@ -114,6 +115,19 @@ void printlockedvnodes(void);
 #endif
 
 struct pool vnode_pool;
+
+static int rb_buf_compare(struct buf *b1, struct buf *b2);
+RB_GENERATE(buf_rb_bufs, buf, b_rbbufs, rb_buf_compare);
+
+static int
+rb_buf_compare(struct buf *b1, struct buf *b2)
+{
+	if (b1->b_lblkno < b2->b_lblkno)
+		return(-1);
+	if (b1->b_lblkno > b2->b_lblkno)
+		return(1);
+	return(0);
+}
 
 /*
  * Initialize the vnode management data structures.
@@ -345,6 +359,9 @@ getnewvnode(enum vtagtype tag, struct mount *mp, int (**vops)(void *),
 	    ((TAILQ_FIRST(listhd = &vnode_hold_list) == NULL) || toggle))) {
 		splx(s);
 		vp = pool_get(&vnode_pool, PR_WAITOK | PR_ZERO);
+		RB_INIT(&vp->v_bufs_tree);
+		RB_INIT(&vp->v_nc_tree);
+		TAILQ_INIT(&vp->v_cache_dst);
 		numvnodes++;
 	} else {
 		for (vp = TAILQ_FIRST(listhd); vp != NULLVP;
@@ -1687,6 +1704,7 @@ vfs_syncwait(int verbose)
 			 */
 			if (bp->b_flags & B_DELWRI) {
 				s = splbio();
+				bremfree(bp);
 				buf_acquire(bp);
 				splx(s);
 				nbusy++;
@@ -1857,6 +1875,7 @@ loop:
 				}
 				break;
 			}
+			bremfree(bp);
 			buf_acquire(bp);
 			/*
 			 * XXX Since there are no node locks for NFS, I believe
@@ -1894,6 +1913,7 @@ loop:
 			continue;
 		if ((bp->b_flags & B_DELWRI) == 0)
 			panic("vflushbuf: not dirty");
+		bremfree(bp);
 		buf_acquire(bp);
 		splx(s);
 		/*
@@ -2142,8 +2162,9 @@ vn_isdisk(struct vnode *vp, int *errp)
 #include <ddb/db_output.h>
 
 void
-vfs_buf_print(struct buf *bp, int full, int (*pr)(const char *, ...))
+vfs_buf_print(void *b, int full, int (*pr)(const char *, ...))
 {
+	struct buf *bp = b;
 
 	(*pr)("  vp %p lblkno 0x%llx blkno 0x%llx dev 0x%x\n"
 	      "  proc %p error %d flags %b\n",
@@ -2168,8 +2189,9 @@ const char *vtypes[] = { VTYPE_NAMES };
 const char *vtags[] = { VTAG_NAMES };
 
 void
-vfs_vnode_print(struct vnode *vp, int full, int (*pr)(const char *, ...))
+vfs_vnode_print(void *v, int full, int (*pr)(const char *, ...))
 {
+	struct vnode *vp = v;
 
 #define	NENTS(n)	(sizeof n / sizeof(n[0]))
 	(*pr)("tag %s(%d) type %s(%d) mount %p typedata %p\n",
@@ -2287,4 +2309,3 @@ copy_statfs_info(struct statfs *sbp, const struct mount *mp)
 	bcopy(&mp->mnt_stat.mount_info.ufs_args, &sbp->mount_info.ufs_args,
 	    sizeof(struct ufs_args));
 }
-

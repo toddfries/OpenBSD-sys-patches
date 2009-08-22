@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbow.c,v 1.9 2009/06/13 21:48:03 miod Exp $	*/
+/*	$OpenBSD: xbow.c,v 1.17 2009/07/26 19:57:12 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -87,10 +87,6 @@ uint32_t xbow_read_4(bus_space_tag_t, bus_space_handle_t, bus_size_t);
 uint64_t xbow_read_8(bus_space_tag_t, bus_space_handle_t, bus_size_t);
 void	xbow_write_4(bus_space_tag_t, bus_space_handle_t, bus_size_t, uint32_t);
 void	xbow_write_8(bus_space_tag_t, bus_space_handle_t, bus_size_t, uint64_t);
-void	xbow_read_raw_2(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    uint8_t *, bus_size_t);
-void	xbow_write_raw_2(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    const uint8_t *, bus_size_t);
 void	xbow_read_raw_4(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
 	    uint8_t *, bus_size_t);
 void	xbow_write_raw_4(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
@@ -100,30 +96,29 @@ void	xbow_read_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
 void	xbow_write_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
 	    const uint8_t *, bus_size_t);
 
-int	xbow_space_map_long(bus_space_tag_t, bus_addr_t, bus_size_t, int,
-	    bus_space_handle_t *);
 void	xbow_space_unmap(bus_space_tag_t, bus_space_handle_t, bus_size_t);
-int	xbow_space_region_short(bus_space_tag_t, bus_space_handle_t, bus_size_t,
-	    bus_size_t, bus_space_handle_t *);
-int	xbow_space_region_long(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+int	xbow_space_region(bus_space_tag_t, bus_space_handle_t, bus_size_t,
 	    bus_size_t, bus_space_handle_t *);
 void	*xbow_space_vaddr(bus_space_tag_t, bus_space_handle_t);
 
 const struct xbow_product *xbow_identify(uint32_t, uint32_t);
 
+struct	xbow_softc {
+	struct device	sc_dev;
+	int16_t		sc_nasid;
+};
+
 const struct cfattach xbow_ca = {
-	sizeof(struct device), xbowmatch, xbowattach
+	sizeof(struct xbow_softc), xbowmatch, xbowattach
 };
 
 struct cfdriver xbow_cd = {
 	NULL, "xbow", DV_DULL
 };
 
-static const bus_space_t xbowbus_short_tag = {
-	NULL,
+static const bus_space_t xbowbus_tag = {
 	(bus_addr_t)0,		/* will be modified in widgets bus_space_t */
 	NULL,
-	0,
 	xbow_read_1,
 	xbow_write_1,
 	xbow_read_2,
@@ -138,34 +133,9 @@ static const bus_space_t xbowbus_short_tag = {
 	xbow_write_raw_4,
 	xbow_read_raw_8,
 	xbow_write_raw_8,
-	xbow_space_map_short,
+	xbow_space_map,
 	xbow_space_unmap,
-	xbow_space_region_short
-
-};
-
-static const bus_space_t xbowbus_long_tag = {
-	NULL,
-	(bus_addr_t)0,		/* will be modified in widgets bus_space_t */
-	NULL,
-	0,
-	xbow_read_1,
-	xbow_write_1,
-	xbow_read_2,
-	xbow_write_2,
-	xbow_read_4,
-	xbow_write_4,
-	xbow_read_8,
-	xbow_write_8,
-	xbow_read_raw_2,
-	xbow_write_raw_2,
-	xbow_read_raw_4,
-	xbow_write_raw_4,
-	xbow_read_raw_8,
-	xbow_write_raw_8,
-	xbow_space_map_long,
-	xbow_space_unmap,
-	xbow_space_region_long
+	xbow_space_region
 
 };
 
@@ -173,9 +143,8 @@ static const bus_space_t xbowbus_long_tag = {
  * Function pointers to hide widget window mapping differences accross
  * systems.
  */
-paddr_t	(*xbow_widget_short)(int16_t, u_int);
-paddr_t	(*xbow_widget_long)(int16_t, u_int);
-unsigned int xbow_long_shift = 29;
+paddr_t	(*xbow_widget_base)(int16_t, u_int);
+paddr_t	(*xbow_widget_map)(int16_t, u_int, bus_addr_t *, bus_size_t *);
 
 int	(*xbow_widget_id)(int16_t, u_int, uint32_t *);
 
@@ -186,6 +155,11 @@ int	(*xbow_widget_id)(int16_t, u_int, uint32_t *);
 int
 xbowmatch(struct device *parent, void *match, void *aux)
 {
+	struct confargs *ca = aux;
+
+	if (strcmp(ca->ca_name, xbow_cd.cd_name) != 0)
+		return (0);
+
 	switch (sys_config.system_type) {
 	case SGI_O200:
 	case SGI_O300:
@@ -225,7 +199,7 @@ xbowprint(void *aux, const char *pnp)
 		printf(" revision %d at %s",
 		    xaa->xaa_revision, pnp);
 	}
-	printf(" nasid %d widget %d", xaa->xaa_nasid, xaa->xaa_widget);
+	printf(" widget %d", xaa->xaa_widget);
 	if (pnp == NULL) {
 		if (p != NULL)
 			printf(": %s", p->productname);
@@ -240,9 +214,11 @@ xbowsubmatch(struct device *parent, void *vcf, void *aux)
 	struct xbow_attach_args *xaa = aux;
 	struct cfdata *cf = vcf;
 
-	if (cf->cf_loc[0] != -1 && cf->cf_loc[0] != xaa->xaa_vendor)
+	if (cf->cf_loc[0] != -1 && cf->cf_loc[0] != xaa->xaa_widget)
 		return 0;
-	if (cf->cf_loc[1] != -1 && cf->cf_loc[1] != xaa->xaa_product)
+	if (cf->cf_loc[1] != -1 && cf->cf_loc[1] != xaa->xaa_vendor)
+		return 0;
+	if (cf->cf_loc[2] != -1 && cf->cf_loc[2] != xaa->xaa_product)
 		return 0;
 
 	return (*cf->cf_attach->ca_match)(parent, vcf, aux);
@@ -257,7 +233,7 @@ const uint8_t xbow_probe_octane[] =
 	{ 0x08, 0x0f, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0 };
 /* Origin 200: probe onboard devices, and there is nothing more */
 const uint8_t xbow_probe_singlebridge[] =
-	{ 0x08 };
+	{ 0x08, 0 };
 /* Base I/O board: probe in ascending order */
 const uint8_t xbow_probe_baseio[] =
 	{ 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0 };
@@ -289,6 +265,7 @@ struct xbow_kl_config {
 void
 xbowattach(struct device *parent, struct device *self, void *aux)
 {
+	struct xbow_softc *sc = (struct xbow_softc *)self;
 	struct confargs *ca = aux;
 	int16_t nasid = ca->ca_nasid;
 	uint32_t wid, vendor, product;
@@ -296,6 +273,8 @@ xbowattach(struct device *parent, struct device *self, void *aux)
 	struct xbow_config cfg;
 	struct xbow_kl_config klcfg;
 	uint widget;
+
+	sc->sc_nasid = nasid;
 
 	/*
 	 * This assumes widget 0 is the XBow itself (or an XXBow).
@@ -383,26 +362,16 @@ xbow_attach_widget(struct device *self, int16_t nasid, int widget,
 {
 	struct xbow_attach_args xaa;
 	uint32_t wid;
-	struct mips_bus_space *bs, *bl;
+	struct mips_bus_space bs;
 	int rc;
 
 	if ((rc = xbow_widget_id(nasid, widget, &wid)) != 0)
 		return rc;
 
 	/*
-	 * Build a pair of bus_space_t suitable for this widget.
+	 * Build a bus_space_t suitable for this widget.
 	 */
-	bs = malloc(sizeof (*bs), M_DEVBUF, M_NOWAIT);
-	if (bs == NULL)
-		return ENOMEM;
-	bl = malloc(sizeof (*bl), M_DEVBUF, M_NOWAIT);
-	if (bl == NULL) {
-		free(bs, M_DEVBUF);
-		return ENOMEM;
-	}
-
-	xbow_build_bus_space(bs, nasid, widget, 0);
-	xbow_build_bus_space(bl, nasid, widget, 1);
+	xbow_build_bus_space(&bs, nasid, widget);
 
 	xaa.xaa_nasid = nasid;
 	xaa.xaa_widget = widget;
@@ -411,16 +380,10 @@ xbow_attach_widget(struct device *self, int16_t nasid, int widget,
 	xaa.xaa_product = (wid & WIDGET_ID_PRODUCT_MASK) >>
 	    WIDGET_ID_PRODUCT_SHIFT;
 	xaa.xaa_revision = (wid & WIDGET_ID_REV_MASK) >> WIDGET_ID_REV_SHIFT;
-	xaa.xaa_short_tag = bs;
-	xaa.xaa_long_tag = bl;
+	xaa.xaa_iot = &bs;
 
-	if (config_found_sm(self, &xaa, print, sm) == NULL) {
-		/* nothing attached, no need to keep the bus_space */
-		free(bs, M_DEVBUF);
-		free(bl, M_DEVBUF);
-
+	if (config_found_sm(self, &xaa, print, sm) == NULL)
 		return ENOENT;
-	}
 
 	return 0;
 }
@@ -506,15 +469,10 @@ xbow_kl_search_mplane(klinfo_t *c, void *arg)
  */
 
 void
-xbow_build_bus_space(struct mips_bus_space *bs, int nasid, int widget, int lwin)
+xbow_build_bus_space(struct mips_bus_space *bs, int nasid, int widget)
 {
-	if (lwin) {
-		bcopy(&xbowbus_long_tag, bs, sizeof (*bs));
-		bs->bus_base = (*xbow_widget_long)(nasid, widget);
-	} else {
-		bcopy(&xbowbus_short_tag, bs, sizeof (*bs));
-		bs->bus_base = (*xbow_widget_short)(nasid, widget);
-	}
+	bcopy(&xbowbus_tag, bs, sizeof (*bs));
+	bs->bus_base = (*xbow_widget_base)(nasid, widget);
 }
 
 uint8_t
@@ -569,9 +527,10 @@ void
 xbow_read_raw_2(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
     uint8_t *buf, bus_size_t len)
 {
+	volatile uint16_t *addr = (volatile uint16_t *)(h + o);
 	len >>= 1;
 	while (len-- != 0) {
-		*(uint16_t *)buf = *(volatile uint16_t *)(h + o);
+		*(uint16_t *)buf = *addr;
 		buf += 2;
 	}
 }
@@ -580,9 +539,10 @@ void
 xbow_write_raw_2(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
     const uint8_t *buf, bus_size_t len)
 {
+	volatile uint16_t *addr = (volatile uint16_t *)(h + o);
 	len >>= 1;
 	while (len-- != 0) {
-		*(volatile uint16_t *)(h + o) = *(uint16_t *)buf;
+		*addr = *(uint16_t *)buf;
 		buf += 2;
 	}
 }
@@ -591,9 +551,10 @@ void
 xbow_read_raw_4(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
     uint8_t *buf, bus_size_t len)
 {
+	volatile uint32_t *addr = (volatile uint32_t *)(h + o);
 	len >>= 2;
 	while (len-- != 0) {
-		*(uint32_t *)buf = *(volatile uint32_t *)(h + o);
+		*(uint32_t *)buf = *addr;
 		buf += 4;
 	}
 }
@@ -602,9 +563,10 @@ void
 xbow_write_raw_4(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
     const uint8_t *buf, bus_size_t len)
 {
+	volatile uint32_t *addr = (volatile uint32_t *)(h + o);
 	len >>= 2;
 	while (len-- != 0) {
-		*(volatile uint32_t *)(h + o) = *(uint32_t *)buf;
+		*addr = *(uint32_t *)buf;
 		buf += 4;
 	}
 }
@@ -613,9 +575,10 @@ void
 xbow_read_raw_8(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
     uint8_t *buf, bus_size_t len)
 {
+	volatile uint64_t *addr = (volatile uint64_t *)(h + o);
 	len >>= 3;
 	while (len-- != 0) {
-		*(uint64_t *)buf = *(volatile uint64_t *)(h + o);
+		*(uint64_t *)buf = *addr;
 		buf += 8;
 	}
 }
@@ -624,41 +587,27 @@ void
 xbow_write_raw_8(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
     const uint8_t *buf, bus_size_t len)
 {
+	volatile uint64_t *addr = (volatile uint64_t *)(h + o);
 	len >>= 3;
 	while (len-- != 0) {
-		*(volatile uint64_t *)(h + o) = *(uint64_t *)buf;
+		*addr = *(uint64_t *)buf;
 		buf += 8;
 	}
 }
 
 int
-xbow_space_map_short(bus_space_tag_t t, bus_addr_t offs, bus_size_t size,
-    int cacheable, bus_space_handle_t *bshp)
+xbow_space_map(bus_space_tag_t t, bus_addr_t offs, bus_size_t size,
+    int flags, bus_space_handle_t *bshp)
 {
 	bus_addr_t bpa;
 
 	bpa = t->bus_base + offs;
 
+#ifdef DIAGNOSTIC
 	/* check that this does not overflow the window */
 	if (((bpa + size - 1) >> 24) != (t->bus_base >> 24))
 		return (EINVAL);
-
-	*bshp = bpa;
-	return 0;
-}
-
-int
-xbow_space_map_long(bus_space_tag_t t, bus_addr_t offs, bus_size_t size,
-    int cacheable, bus_space_handle_t *bshp)
-{
-	bus_addr_t bpa;
-
-	bpa = t->bus_base + offs;
-
-	/* check that this does not overflow the window */
-	if (((bpa + size - 1) >> xbow_long_shift) !=
-	    (t->bus_base >> xbow_long_shift))
-		return (EINVAL);
+#endif
 
 	*bshp = bpa;
 	return 0;
@@ -670,24 +619,17 @@ xbow_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 }
 
 int
-xbow_space_region_short(bus_space_tag_t t, bus_space_handle_t bsh,
+xbow_space_region(bus_space_tag_t t, bus_space_handle_t bsh,
     bus_size_t offset, bus_size_t size, bus_space_handle_t *nbshp)
 {
-	/* check that this does not overflow the window */
-	if (((bsh + offset) >> 24) != (bsh >> 24))
-		return (EINVAL);
+#ifdef DIAGNOSTIC
+	bus_addr_t bpa;
 
-	*nbshp = bsh + offset;
-	return 0;
-}
-
-int
-xbow_space_region_long(bus_space_tag_t t, bus_space_handle_t bsh,
-    bus_size_t offset, bus_size_t size, bus_space_handle_t *nbshp)
-{
+	bpa = (bus_addr_t)bsh - t->bus_base;
 	/* check that this does not overflow the window */
-	if (((bsh + offset) >> xbow_long_shift) != (bsh >> xbow_long_shift))
+	if (((bpa + offset) >> 24) != (t->bus_base >> 24))
 		return (EINVAL);
+#endif
 
 	*nbshp = bsh + offset;
 	return 0;
@@ -740,4 +682,20 @@ xbow_intr_disestablish(int intrbit)
 		return;
 
 	(*xbow_intr_widget_intr_disestablish)(intrbit);
+}
+
+/*
+ * Widget mapping code.
+ */
+
+paddr_t
+xbow_widget_map_space(struct device *dev, u_int widget, bus_addr_t *offs,
+    bus_size_t *len)
+{
+	struct xbow_softc *sc = (struct xbow_softc *)dev;
+
+	if (xbow_widget_map == NULL)
+		return 0UL;
+
+	return (*xbow_widget_map)(sc->sc_nasid, widget, offs, len);
 }

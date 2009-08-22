@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc_io.c,v 1.13 2009/04/07 16:35:52 blambert Exp $	*/
+/*	$OpenBSD: sdmmc_io.c,v 1.15 2009/07/15 20:52:04 mk Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -31,7 +31,7 @@
 
 struct sdmmc_intr_handler {
 	struct sdmmc_softc *ih_softc;
-	char *ih_name;
+	const char *ih_name;
 	int (*ih_fun)(void *);
 	void *ih_arg;
 	TAILQ_ENTRY(sdmmc_intr_handler) entry;
@@ -624,12 +624,7 @@ sdmmc_intr_establish(struct device *sdmmc, int (*fun)(void *),
 	if (ih == NULL)
 		return NULL;
 
-	ih->ih_name = malloc(strlen(name), M_DEVBUF, M_WAITOK | M_CANFAIL);
-	if (ih->ih_name == NULL) {
-		free(ih, M_DEVBUF);
-		return NULL;
-	}
-	strlcpy(ih->ih_name, name, strlen(name));
+	ih->ih_name = name;
 	ih->ih_softc = sc;
 	ih->ih_fun = fun;
 	ih->ih_arg = arg;
@@ -665,7 +660,6 @@ sdmmc_intr_disestablish(void *cookie)
 	}
 	splx(s);
 
-	free(ih->ih_name, M_DEVBUF);
 	free(ih, M_DEVBUF);
 }
 

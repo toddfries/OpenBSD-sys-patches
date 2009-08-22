@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.139 2009/06/09 05:16:42 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.143 2009/08/13 23:59:15 jakemsr Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -184,8 +184,11 @@ int	azalia_intr(void *);
 void	azalia_print_codec(codec_t *);
 int	azalia_attach(azalia_t *);
 void	azalia_attach_intr(struct device *);
+void	azalia_shutdown(void *);
+int	azalia_halt_corb(azalia_t *);
 int	azalia_init_corb(azalia_t *);
 int	azalia_delete_corb(azalia_t *);
+int	azalia_halt_rirb(azalia_t *);
 int	azalia_init_rirb(azalia_t *);
 int	azalia_delete_rirb(azalia_t *);
 int	azalia_set_command(azalia_t *, nid_t, int, uint32_t,
@@ -311,6 +314,9 @@ static const char *wtypes[16] = {
 	"dac", "adc", "mix", "sel", "pin", "pow", "volume",
 	"beep", "wid08", "wid09", "wid0a", "wid0b", "wid0c",
 	"wid0d", "wid0e", "vendor"};
+static const char *line_colors[16] = {
+	"unk", "blk", "gry", "blu", "grn", "red", "org", "yel",
+	"pur", "pnk", "0xa", "0xb", "0xc", "0xd", "wht", "oth"};
 
 /* ================================================================
  * PCI functions
@@ -411,10 +417,10 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 	case PCI_PRODUCT_NVIDIA_MCP79_HDA_2:
 	case PCI_PRODUCT_NVIDIA_MCP79_HDA_3:
 	case PCI_PRODUCT_NVIDIA_MCP79_HDA_4:
-	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_1:
-	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_2:
-	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_3:
-	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_4:
+	case PCI_PRODUCT_NVIDIA_MCP89_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP89_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP89_HDA_3:
+	case PCI_PRODUCT_NVIDIA_MCP89_HDA_4:
 		reg = azalia_pci_read(pa->pa_pc, pa->pa_tag, NVIDIA_PCIE_SNOOP_REG);
 		reg &= NVIDIA_PCIE_SNOOP_MASK;
 		reg |= NVIDIA_PCIE_SNOOP_ENABLE;
@@ -448,6 +454,8 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	sc->subid = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
+
+	shutdownhook_establish(azalia_shutdown, sc);
 
 	azalia_attach_intr(self);
 }
@@ -546,6 +554,21 @@ azalia_intr(void *v)
 	}
 
 	return (1);
+}
+
+void
+azalia_shutdown(void *v)
+{
+	azalia_t *az = (azalia_t *)v;
+	uint32_t gctl;
+
+	/* disable unsolicited response */
+	gctl = AZ_READ_4(az, GCTL);
+	AZ_WRITE_4(az, GCTL, gctl & ~(HDA_GCTL_UNSOL));
+
+	/* halt CORB/RIRB */
+	azalia_halt_corb(az);
+	azalia_halt_rirb(az);
 }
 
 /* ================================================================
@@ -739,15 +762,12 @@ err_exit:
 	return;
 }
 
-
 int
-azalia_init_corb(azalia_t *az)
+azalia_halt_corb(azalia_t *az)
 {
-	int entries, err, i;
-	uint16_t corbrp, corbwp;
-	uint8_t corbsize, cap, corbctl;
+	uint8_t corbctl;
+	int i;
 
-	/* stop the CORB */
 	corbctl = AZ_READ_1(az, CORBCTL);
 	if (corbctl & HDA_CORBCTL_CORBRUN) { /* running? */
 		AZ_WRITE_1(az, CORBCTL, corbctl & ~HDA_CORBCTL_CORBRUN);
@@ -762,6 +782,19 @@ azalia_init_corb(azalia_t *az)
 			return EBUSY;
 		}
 	}
+	return(0);
+}
+
+int
+azalia_init_corb(azalia_t *az)
+{
+	int entries, err, i;
+	uint16_t corbrp, corbwp;
+	uint8_t corbsize, cap, corbctl;
+
+	err = azalia_halt_corb(az);
+	if (err)
+		return(err);
 
 	/* determine CORB size */
 	corbsize = AZ_READ_1(az, CORBSIZE);
@@ -843,13 +876,11 @@ azalia_delete_corb(azalia_t *az)
 }
 
 int
-azalia_init_rirb(azalia_t *az)
+azalia_halt_rirb(azalia_t *az)
 {
-	int entries, err, i;
-	uint16_t rirbwp;
-	uint8_t rirbsize, cap, rirbctl;
+	int i;
+	uint8_t rirbctl;
 
-	/* stop the RIRB */
 	rirbctl = AZ_READ_1(az, RIRBCTL);
 	if (rirbctl & HDA_RIRBCTL_RIRBDMAEN) { /* running? */
 		AZ_WRITE_1(az, RIRBCTL, rirbctl & ~HDA_RIRBCTL_RIRBDMAEN);
@@ -861,9 +892,22 @@ azalia_init_rirb(azalia_t *az)
 		}
 		if (i <= 0) {
 			printf("%s: RIRB is running\n", XNAME(az));
-			return EBUSY;
+			return(EBUSY);
 		}
 	}
+	return(0);
+}
+
+int
+azalia_init_rirb(azalia_t *az)
+{
+	int entries, err;
+	uint16_t rirbwp;
+	uint8_t rirbsize, cap, rirbctl;
+
+	err = azalia_halt_rirb(az);
+	if (err)
+		return(err);
 
 	/* determine RIRB size */
 	rirbsize = AZ_READ_1(az, RIRBSIZE);
@@ -1319,11 +1363,13 @@ azalia_codec_init(codec_t *this)
 				switch (this->w[i].d.pin.device) {
 				case CORB_CD_SPEAKER:
 					this->speaker = i;
-					this->spkr_dac = azalia_codec_find_defdac(this, i, 0);
+					this->spkr_dac =
+					    azalia_codec_find_defdac(this, i, 0);
 					break;
 				case CORB_CD_MICIN:
 					this->mic = i;
-					this->mic_adc = azalia_codec_find_defadc(this, i, 0);
+					this->mic_adc =
+					    azalia_codec_find_defadc(this, i, 0);
 					break;
 				}
 				break;
@@ -2636,10 +2682,28 @@ azalia_widget_label_widgets(codec_t *codec)
 	widget_t *w;
 	int types[16];
 	int pins[16];
+	int colors_used, use_colors;
 	int i, j;
 
 	bzero(&pins, sizeof(pins));
 	bzero(&types, sizeof(types));
+
+	/* If codec has more than one line-out jack, check if the jacks
+	 * have unique colors.  If so, use the colors in the mixer names.
+	 */
+	use_colors = 1;
+	colors_used = 0;
+	if (codec->nout_jacks < 2)
+		use_colors = 0;
+	for (i = 0; use_colors && i < codec->nopins; i++) {
+		w = &codec->w[codec->opins[i].nid];
+		if (w->d.pin.device != CORB_CD_LINEOUT)
+			continue;
+		if (colors_used & (1 << w->d.pin.color))
+			use_colors = 0;
+		else
+			colors_used |= (1 << w->d.pin.color);
+	}
 
 	FOR_EACH_WIDGET(codec, i) {
 		w = &codec->w[i];
@@ -2650,13 +2714,18 @@ azalia_widget_label_widgets(codec_t *codec)
 		switch (w->type) {
 		case COP_AWTYPE_PIN_COMPLEX:
 			pins[w->d.pin.device]++;
-			if (pins[w->d.pin.device] > 1)
+			if (use_colors && w->d.pin.device == CORB_CD_LINEOUT) {
+				snprintf(w->name, sizeof(w->name), "%s-%s",
+				    pin_devices[w->d.pin.device],
+				    line_colors[w->d.pin.color]);
+			} else if (pins[w->d.pin.device] > 1) {
 				snprintf(w->name, sizeof(w->name), "%s%d",
 				    pin_devices[w->d.pin.device],
 				    pins[w->d.pin.device]);
-			else
+			} else {
 				snprintf(w->name, sizeof(w->name), "%s",
 				    pin_devices[w->d.pin.device]);
+			}
 			break;
 		case COP_AWTYPE_AUDIO_OUTPUT:
 			if (codec->dacs.ngroups < 1)
@@ -2773,7 +2842,7 @@ azalia_widget_label_widgets(codec_t *codec)
 			if (codec->w[j].enable == 0) {
 				codec->w[i].enable = 0;
 				snprintf(codec->w[i].name,
-				    sizeof(codec->w[i].name), "%s",
+				    sizeof(codec->w[i].name),
 				    "u-wid%2.2x", i);
 				continue;
 			}

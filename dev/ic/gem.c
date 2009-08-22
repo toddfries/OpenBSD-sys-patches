@@ -1,4 +1,4 @@
-/*	$OpenBSD: gem.c,v 1.90 2009/03/29 11:53:47 kettenis Exp $	*/
+/*	$OpenBSD: gem.c,v 1.95 2009/08/10 20:29:54 deraadt Exp $	*/
 /*	$NetBSD: gem.c,v 1.1 2001/09/16 00:11:43 eeh Exp $ */
 
 /*
@@ -84,7 +84,6 @@ void		gem_stop(struct ifnet *);
 int		gem_ioctl(struct ifnet *, u_long, caddr_t);
 void		gem_tick(void *);
 void		gem_watchdog(struct ifnet *);
-void		gem_shutdown(void *);
 int		gem_init(struct ifnet *);
 void		gem_init_regs(struct gem_softc *);
 int		gem_ringsize(int);
@@ -101,7 +100,7 @@ void		gem_rx_watchdog(void *);
 void		gem_rxdrain(struct gem_softc *);
 void		gem_fill_rx_ring(struct gem_softc *);
 int		gem_add_rxbuf(struct gem_softc *, int idx);
-void		gem_setladrf(struct gem_softc *);
+void		gem_iff(struct gem_softc *);
 
 /* MII methods & callbacks */
 int		gem_mii_readreg(struct device *, int, int);
@@ -345,10 +344,6 @@ gem_config(struct gem_softc *sc)
 	/* Attach the interface. */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	sc->sc_sh = shutdownhook_establish(gem_shutdown, sc);
-	if (sc->sc_sh == NULL)
-		panic("gem_config: can't establish shutdownhook");
 
 	timeout_set(&sc->sc_tick_ch, gem_tick, sc);
 	timeout_set(&sc->sc_rx_watchdog, gem_rx_watchdog, sc);
@@ -700,7 +695,6 @@ gem_init(struct ifnet *ifp)
 	bus_space_tag_t t = sc->sc_bustag;
 	bus_space_handle_t h = sc->sc_h1;
 	int s;
-	u_int max_frame_size;
 	u_int32_t v;
 
 	s = splnet();
@@ -730,12 +724,9 @@ gem_init(struct ifnet *ifp)
 
 	/* step 4. TX MAC registers & counters */
 	gem_init_regs(sc);
-	max_frame_size = ETHER_MAX_LEN + ETHER_VLAN_ENCAP_LEN;
-	v = (max_frame_size) | (0x2000 << 16) /* Burst size */;
-	bus_space_write_4(t, h, GEM_MAC_MAC_MAX_FRAME, v);
 
 	/* step 5. RX MAC registers & counters */
-	gem_setladrf(sc);
+	gem_iff(sc);
 
 	/* step 6 & 7. Program Descriptor Ring Base Addresses */
 	bus_space_write_4(t, h, GEM_TX_RING_PTR_HI, 
@@ -784,8 +775,8 @@ gem_init(struct ifnet *ifp)
 	 */
 	bus_space_write_4(t, h, GEM_RX_PAUSE_THRESH,
 	    (3 * sc->sc_rxfifosize / 256) |
-	    (   (sc->sc_rxfifosize / 256) << 12));
-	bus_space_write_4(t, h, GEM_RX_BLANKING, (6<<12)|6);
+	    ((sc->sc_rxfifosize / 256) << 12));
+	bus_space_write_4(t, h, GEM_RX_BLANKING, (6 << 12) | 6);
 
 	/* step 11. Configure Media */
 	mii_mediachg(&sc->sc_mii);
@@ -809,7 +800,7 @@ gem_init(struct ifnet *ifp)
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
-	ifp->if_timer = 0;
+
 	splx(s);
 
 	return (0);
@@ -825,21 +816,19 @@ gem_init_regs(struct gem_softc *sc)
 	/* These regs are not cleared on reset */
 	sc->sc_inited = 0;
 	if (!sc->sc_inited) {
-
-		/* Wooo.  Magic values. */
-		bus_space_write_4(t, h, GEM_MAC_IPG0, 0);
-		bus_space_write_4(t, h, GEM_MAC_IPG1, 8);
-		bus_space_write_4(t, h, GEM_MAC_IPG2, 4);
+		/* Load recommended values */
+		bus_space_write_4(t, h, GEM_MAC_IPG0, 0x00);
+		bus_space_write_4(t, h, GEM_MAC_IPG1, 0x08);
+		bus_space_write_4(t, h, GEM_MAC_IPG2, 0x04);
 
 		bus_space_write_4(t, h, GEM_MAC_MAC_MIN_FRAME, ETHER_MIN_LEN);
 		/* Max frame and max burst size */
-		v = ETHER_MAX_LEN | (0x2000 << 16) /* Burst size */;
-		bus_space_write_4(t, h, GEM_MAC_MAC_MAX_FRAME, v);
+		bus_space_write_4(t, h, GEM_MAC_MAC_MAX_FRAME,
+		    (ETHER_MAX_LEN + ETHER_VLAN_ENCAP_LEN) | (0x2000 << 16));
 
-		bus_space_write_4(t, h, GEM_MAC_PREAMBLE_LEN, 0x7);
-		bus_space_write_4(t, h, GEM_MAC_JAM_SIZE, 0x4);
+		bus_space_write_4(t, h, GEM_MAC_PREAMBLE_LEN, 0x07);
+		bus_space_write_4(t, h, GEM_MAC_JAM_SIZE, 0x04);
 		bus_space_write_4(t, h, GEM_MAC_ATTEMPT_LIMIT, 0x10);
-		/* Dunno.... */
 		bus_space_write_4(t, h, GEM_MAC_CONTROL_TYPE, 0x8088);
 		bus_space_write_4(t, h, GEM_MAC_RANDOM_SEED,
 		    ((sc->sc_arpcom.ac_enaddr[5]<<8)|sc->sc_arpcom.ac_enaddr[4])&0x3ff);
@@ -848,6 +837,7 @@ gem_init_regs(struct gem_softc *sc)
 		bus_space_write_4(t, h, GEM_MAC_ADDR3, 0);
 		bus_space_write_4(t, h, GEM_MAC_ADDR4, 0);
 		bus_space_write_4(t, h, GEM_MAC_ADDR5, 0);
+
 		/* MAC control addr set to 0:1:c2:0:1:80 */
 		bus_space_write_4(t, h, GEM_MAC_ADDR6, 0x0001);
 		bus_space_write_4(t, h, GEM_MAC_ADDR7, 0xc200);
@@ -1011,15 +1001,9 @@ gem_add_rxbuf(struct gem_softc *sc, int idx)
 	struct mbuf *m;
 	int error;
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->sc_arpcom.ac_if, MCLBYTES);
+	if (!m)
 		return (ENOBUFS);
-
-	MCLGETI(m, M_DONTWAIT, &sc->sc_arpcom.ac_if, MCLBYTES);
-	if ((m->m_flags & M_EXT) == 0) {
-		m_freem(m);
-		return (ENOBUFS);
-	}
 	m->m_len = m->m_pkthdr.len = MCLBYTES;
 
 #ifdef GEM_DEBUG
@@ -1477,7 +1461,7 @@ gem_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING)
-				gem_setladrf(sc);
+				error = ENETRESET;
 			else
 				gem_init(ifp);
 		} else {
@@ -1500,7 +1484,7 @@ gem_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING)
-			gem_setladrf(sc);
+			gem_iff(sc);
 		error = 0;
 	}
 
@@ -1508,103 +1492,68 @@ gem_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	return (error);
 }
 
-
 void
-gem_shutdown(void *arg)
-{
-	struct gem_softc *sc = (struct gem_softc *)arg;
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-
-	gem_stop(ifp);
-}
-
-/*
- * Set up the logical address filter.
- */
-void
-gem_setladrf(struct gem_softc *sc)
+gem_iff(struct gem_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct arpcom *ac = &sc->sc_arpcom;
 	struct ether_multi *enm;
 	struct ether_multistep step;
-	struct arpcom *ac = &sc->sc_arpcom;
 	bus_space_tag_t t = sc->sc_bustag;
 	bus_space_handle_t h = sc->sc_h1;
-	u_int32_t crc, hash[16], v;
+	u_int32_t crc, hash[16], rxcfg;
 	int i;
 
-	/* Get current RX configuration */
-	v = bus_space_read_4(t, h, GEM_MAC_RX_CONFIG);
-
-
-	/*
-	 * Turn off promiscuous mode, promiscuous group mode (all multicast),
-	 * and hash filter.  Depending on the case, the right bit will be
-	 * enabled.
-	 */
-	v &= ~(GEM_MAC_RX_PROMISCUOUS|GEM_MAC_RX_HASH_FILTER|
+	rxcfg = bus_space_read_4(t, h, GEM_MAC_RX_CONFIG);
+	rxcfg &= ~(GEM_MAC_RX_HASH_FILTER | GEM_MAC_RX_PROMISCUOUS |
 	    GEM_MAC_RX_PROMISC_GRP);
-
-	if ((ifp->if_flags & IFF_PROMISC) != 0) {
-		/* Turn on promiscuous mode */
-		v |= GEM_MAC_RX_PROMISCUOUS;
-		ifp->if_flags |= IFF_ALLMULTI;
-		goto chipit;
-	}
-
-	/*
-	 * Set up multicast address filter by passing all multicast addresses
-	 * through a crc generator, and then using the high order 8 bits as an
-	 * index into the 256 bit logical address filter.  The high order 4
-	 * bits selects the word, while the other 4 bits select the bit within
-	 * the word (where bit 0 is the MSB).
-	 */
-
-	/* Clear hash table */
-	for (i = 0; i < 16; i++)
-		hash[i] = 0;
-
-
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			/*
-			 * We must listen to a range of multicast addresses.
-			 * For now, just accept all multicasts, rather than
-			 * trying to set only those filter bits needed to match
-			 * the range.  (At this time, the only use of address
-			 * ranges is for IP multicast routing, for which the
-			 * range is big enough to require all bits set.)
-			 * XXX use the addr filter for this
-			 */
-			ifp->if_flags |= IFF_ALLMULTI;
-			v |= GEM_MAC_RX_PROMISC_GRP;
-			goto chipit;
-		}
-
-		crc = ether_crc32_le(enm->enm_addrlo, ETHER_ADDR_LEN);
-
-		/* Just want the 8 most significant bits. */
-		crc >>= 24;
-
-		/* Set the corresponding bit in the filter. */
-		hash[crc >> 4] |= 1 << (15 - (crc & 15));
-
-		ETHER_NEXT_MULTI(step, enm);
-	}
-
-	v |= GEM_MAC_RX_HASH_FILTER;
 	ifp->if_flags &= ~IFF_ALLMULTI;
 
-	/* Now load the hash table into the chip (if we are using it) */
-	for (i = 0; i < 16; i++) {
-		bus_space_write_4(t, h,
-		    GEM_MAC_HASH0 + i * (GEM_MAC_HASH1-GEM_MAC_HASH0),
-		    hash[i]);
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
+		if (ifp->if_flags & IFF_PROMISC)
+			rxcfg |= GEM_MAC_RX_PROMISCUOUS;
+		else
+			rxcfg |= GEM_MAC_RX_PROMISC_GRP;
+	} else {
+		/*
+		 * Set up multicast address filter by passing all multicast
+		 * addresses through a crc generator, and then using the
+		 * high order 8 bits as an index into the 256 bit logical
+		 * address filter.  The high order 4 bits selects the word,
+		 * while the other 4 bits select the bit within the word
+		 * (where bit 0 is the MSB).
+		 */
+
+		rxcfg |= GEM_MAC_RX_HASH_FILTER;
+
+		/* Clear hash table */
+		for (i = 0; i < 16; i++)
+			hash[i] = 0;
+
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			crc = ether_crc32_le(enm->enm_addrlo,
+			    ETHER_ADDR_LEN);
+
+			/* Just want the 8 most significant bits. */
+			crc >>= 24;
+
+			/* Set the corresponding bit in the filter. */
+			hash[crc >> 4] |= 1 << (15 - (crc & 15));
+
+			ETHER_NEXT_MULTI(step, enm);
+		}
+
+		/* Now load the hash table into the chip (if we are using it) */
+		for (i = 0; i < 16; i++) {
+			bus_space_write_4(t, h,
+			    GEM_MAC_HASH0 + i * (GEM_MAC_HASH1 - GEM_MAC_HASH0),
+			    hash[i]);
+		}
 	}
 
-chipit:
-	bus_space_write_4(t, h, GEM_MAC_RX_CONFIG, v);
+	bus_space_write_4(t, h, GEM_MAC_RX_CONFIG, rxcfg);
 }
 
 /*

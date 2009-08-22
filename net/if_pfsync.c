@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.126 2009/06/14 00:16:50 dlg Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.128 2009/08/16 13:01:57 jsg Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -226,7 +226,6 @@ int	pfsyncioctl(struct ifnet *, u_long, caddr_t);
 void	pfsyncstart(struct ifnet *);
 
 struct mbuf *pfsync_if_dequeue(struct ifnet *);
-struct mbuf *pfsync_get_mbuf(struct pfsync_softc *);
 
 void	pfsync_deferred(struct pf_state *, int);
 void	pfsync_undefer(struct pfsync_deferral *, int);
@@ -238,11 +237,8 @@ void	pfsync_update_state_req(struct pf_state *);
 void	pfsync_drop(struct pfsync_softc *);
 void	pfsync_sendout(void);
 void	pfsync_send_plus(void *, size_t);
-int	pfsync_tdb_sendout(struct pfsync_softc *);
-int	pfsync_sendout_mbuf(struct pfsync_softc *, struct mbuf *);
 void	pfsync_timeout(void *);
 void	pfsync_tdb_timeout(void *);
-void	pfsync_send_bus(struct pfsync_softc *, u_int8_t);
 
 void	pfsync_bulk_start(void);
 void	pfsync_bulk_status(u_int8_t);
@@ -856,12 +852,15 @@ pfsync_upd_tcp(struct pf_state *st, struct pfsync_state_peer *src,
 	if ((st->src.state > src->state &&
 	    (st->src.state < PF_TCPS_PROXY_SRC ||
 	    src->state >= PF_TCPS_PROXY_SRC)) ||
-	    SEQ_GT(st->src.seqlo, ntohl(src->seqlo)))
+
+	    (st->src.state == src->state &&
+	    SEQ_GT(st->src.seqlo, ntohl(src->seqlo))))
 		sync++;
 	else
 		pf_state_peer_ntoh(src, &st->src);
 
-	if (st->dst.state > dst->state ||
+	if ((st->dst.state > dst->state) ||
+
 	    (st->dst.state >= TCPS_SYN_SENT &&
 	    SEQ_GT(st->dst.seqlo, ntohl(dst->seqlo))))
 		sync++;

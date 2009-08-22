@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_map.c,v 1.115 2009/06/14 02:53:09 deraadt Exp $	*/
+/*	$OpenBSD: uvm_map.c,v 1.121 2009/08/13 20:40:13 ariane Exp $	*/
 /*	$NetBSD: uvm_map.c,v 1.86 2000/11/27 08:40:03 chs Exp $	*/
 
 /* 
@@ -724,6 +724,38 @@ uvm_map_p(struct vm_map *map, vaddr_t *startp, vsize_t size,
 	    map, *startp, size, flags);
 	UVMHIST_LOG(maphist, "  uobj/offset %p/%ld", uobj, (u_long)uoffset,0,0);
 
+#ifdef KVA_GUARDPAGES
+	if (map == kernel_map) {
+		/*
+		 * kva_guardstart is initialized to the start of the kernelmap
+		 * and cycles through the kva space.
+		 * This way we should have a long time between re-use of kva.
+		 */
+		static vaddr_t kva_guardstart = 0;
+		if (kva_guardstart == 0) {
+			kva_guardstart = vm_map_min(map);
+			printf("uvm_map: kva guard pages enabled: %p\n",
+			    kva_guardstart);
+		}
+		size += PAGE_SIZE;	/* Add guard page at the end. */
+		/*
+		 * Try to fully exhaust kva prior to wrap-around.
+		 * (This may eat your ram!)
+		 */
+		if (VM_MAX_KERNEL_ADDRESS < (kva_guardstart + size)) {
+			static int wrap_counter = 0;
+			printf("uvm_map: kva guard page wrap-around %d\n",
+			    ++wrap_counter);
+			kva_guardstart = vm_map_min(map);
+		}
+		*startp = kva_guardstart;
+		/*
+		 * Prepare for next round.
+		 */
+		kva_guardstart += size;
+	}
+#endif
+
 	uvm_tree_sanity(map, "map entry");
 
 	if ((map->flags & VM_MAP_INTRSAFE) == 0)
@@ -1424,12 +1456,18 @@ uvm_unmap_p(vm_map_t map, vaddr_t start, vaddr_t end, struct proc *p)
 
 	UVMHIST_LOG(maphist, "  (map=%p, start=0x%lx, end=0x%lx)",
 	    map, start, end, 0);
+
+#ifdef KVA_GUARDPAGES
+	if (map == kernel_map)
+		end += PAGE_SIZE;	/* Add guardpage. */
+#endif
+
 	/*
 	 * work now done by helper functions.   wipe the pmap's and then
 	 * detach from the dead entries...
 	 */
 	vm_map_lock(map);
-	uvm_unmap_remove(map, start, end, &dead_entries, p);
+	uvm_unmap_remove(map, start, end, &dead_entries, p, FALSE);
 	vm_map_unlock(map);
 
 	if (dead_entries != NULL)
@@ -1454,7 +1492,7 @@ uvm_unmap_p(vm_map_t map, vaddr_t start, vaddr_t end, struct proc *p)
 
 void
 uvm_unmap_remove(struct vm_map *map, vaddr_t start, vaddr_t end,
-    struct vm_map_entry **entry_list, struct proc *p)
+    struct vm_map_entry **entry_list, struct proc *p, boolean_t remove_holes)
 {
 	struct vm_map_entry *entry, *first_entry, *next;
 	vaddr_t len;
@@ -1539,7 +1577,10 @@ uvm_unmap_remove(struct vm_map *map, vaddr_t start, vaddr_t end,
 		 * we want to free these pages right away...
 		 */
 		if (UVM_ET_ISHOLE(entry)) {
-			/* nothing to do! */
+			if (!remove_holes) {
+				entry = next;
+				continue;
+			}
 		} else if (map->flags & VM_MAP_INTRSAFE) {
 			uvm_km_pgremove_intrsafe(entry->start, entry->end);
 			pmap_kremove(entry->start, len);
@@ -3058,7 +3099,15 @@ uvm_map_clean(struct vm_map *map, vaddr_t start, vaddr_t end, int flags)
 				}
 				KASSERT(pg->uanon == anon);
 
-				/* Deactivate the page. */
+#ifdef UBC
+				/* ...and deactivate the page. */
+				pmap_clear_reference(pg);
+#else
+				/* zap all mappings for the page. */
+				pmap_page_protect(pg, VM_PROT_NONE);
+
+				/* ...and deactivate the page. */
+#endif
 				uvm_pagedeactivate(pg);
 
 				uvm_unlock_pageq();
@@ -3346,7 +3395,7 @@ uvmspace_free(struct vmspace *vm)
 		if (vm->vm_map.nentries) {
 			uvm_unmap_remove(&vm->vm_map,
 			    vm->vm_map.min_offset, vm->vm_map.max_offset,
-			    &dead_entries, NULL);
+			    &dead_entries, NULL, TRUE);
 			if (dead_entries != NULL)
 				uvm_unmap_detach(dead_entries, 0);
 		}
@@ -3812,12 +3861,12 @@ uvm_object_printit(uobj, full, pr)
 		return;
 	}
 	(*pr)("  PAGES <pg,offset>:\n  ");
-	RB_FOREACH(pg, uobj_pgs, &uobj->memt) {
-		cnt++;
+	RB_FOREACH(pg, uvm_objtree, &uobj->memt) {
 		(*pr)("<%p,0x%llx> ", pg, (long long)pg->offset);
 		if ((cnt % 3) == 2) {
 			(*pr)("\n  ");
 		}
+		cnt++;
 	}
 	if ((cnt % 3) != 2) {
 		(*pr)("\n");
@@ -3874,7 +3923,7 @@ uvm_page_printit(pg, full, pr)
 			uobj = pg->uobject;
 			if (uobj) {
 				(*pr)("  checking object list\n");
-				RB_FOREACH(pg, uobj_pgs, &uobj->memt) {
+				RB_FOREACH(tpg, uvm_objtree, &uobj->memt) {
 					if (tpg == pg) {
 						break;
 					}
@@ -3889,11 +3938,9 @@ uvm_page_printit(pg, full, pr)
 
 	/* cross-verify page queue */
 	if (pg->pg_flags & PQ_FREE) {
-		if (uvm_pmr_isfree(pg))
-			printf("  page found in uvm_pmemrange\n");
-		else
-			printf("  >>> page not found in uvm_pmemrange <<<\n");
-		pgl = NULL;
+		int fl = uvm_page_lookup_freelist(pg);
+		pgl = &uvm.page_free[fl].pgfl_queues[((pg)->pg_flags & PG_ZERO) ?
+		    PGFL_ZEROS : PGFL_UNKNOWN];
 	} else if (pg->pg_flags & PQ_INACTIVE) {
 		pgl = (pg->pg_flags & PQ_SWAPBACKED) ?
 		    &uvm.page_inactive_swp : &uvm.page_inactive_obj;

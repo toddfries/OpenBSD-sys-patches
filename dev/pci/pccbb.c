@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccbb.c,v 1.64 2009/06/03 04:32:10 jsg Exp $	*/
+/*	$OpenBSD: pccbb.c,v 1.67 2009/07/25 11:27:26 kettenis Exp $	*/
 /*	$NetBSD: pccbb.c,v 1.96 2004/03/28 09:49:31 nakayama Exp $	*/
 
 /*
@@ -363,10 +363,6 @@ pccbb_shutdown(void *arg)
 
 	DPRINTF(("%s: shutdown\n", sc->sc_dev.dv_xname));
 
-	/* Nothing for us to do if we didn't map any registers. */
-	if ((sc->sc_flags & CBB_MEMHMAPPED) == 0)
-		return;
-
 	/* turn off power */
 	pccbb_power((cardbus_chipset_tag_t)sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
 
@@ -407,8 +403,6 @@ pccbbattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_rbus_iot = rbus_pccbb_parent_io(self, pa);
 	sc->sc_rbus_memt = rbus_pccbb_parent_mem(self, pa);
 
-	sc->sc_flags &= ~CBB_MEMHMAPPED;
-
 	/*
 	 * MAP socket registers and ExCA registers on memory-space
 	 * When no valid address is set on socket base registers (on pci
@@ -416,41 +410,13 @@ pccbbattach(struct device *parent, struct device *self, void *aux)
 	 */
 	sock_base = pci_conf_read(pc, pa->pa_tag, PCI_SOCKBASE);
 
-	if (PCI_MAPREG_MEM_ADDR(sock_base) >= 0x100000 &&
-	    PCI_MAPREG_MEM_ADDR(sock_base) != 0xfffffff0) {
-		/* The address must be valid. */
-		if (pci_mapreg_map(pa, PCI_SOCKBASE, PCI_MAPREG_TYPE_MEM, 0,
-		    &sc->sc_base_memt, &sc->sc_base_memh, &sockbase, NULL, 0))
-		    {
-			printf("%s: can't map socket base address 0x%x\n",
-			    sc->sc_dev.dv_xname, sock_base);
-			/*
-			 * I think it's funny: socket base registers must be
-			 * mapped on memory space, but ...
-			 */
-			if (pci_mapreg_map(pa, PCI_SOCKBASE,
-			    PCI_MAPREG_TYPE_IO, 0, &sc->sc_base_memt,
-			    &sc->sc_base_memh, &sockbase, NULL, 0)) {
-				printf("%s: can't map socket base address"
-				    " 0x%lx: io mode\n", sc->sc_dev.dv_xname,
-				    sockbase);
-				/* give up... allocate reg space via rbus. */
-				pci_conf_write(pc, pa->pa_tag, PCI_SOCKBASE, 0);
-			} else
-				sc->sc_flags |= CBB_MEMHMAPPED;
-		} else {
-			DPRINTF(("%s: socket base address 0x%lx\n",
-			    sc->sc_dev.dv_xname, sockbase));
-			sc->sc_flags |= CBB_MEMHMAPPED;
-		}
+	if (pci_mapreg_map(pa, PCI_SOCKBASE, PCI_MAPREG_TYPE_MEM, 0,
+	    &sc->sc_base_memt, &sc->sc_base_memh, &sockbase, NULL, 0)) {
+		printf("can't map registers\n");
+		return;
 	}
 
-	sc->sc_mem_start = 0;	       /* XXX */
-	sc->sc_mem_end = 0xffffffff;   /* XXX */
-
 	busreg = pci_conf_read(pc, pa->pa_tag, PCI_BUSNUM);
-
-	/* pccbb_machdep.c end */
 
 #if defined CBB_DEBUG
 	{
@@ -481,7 +447,7 @@ pccbbattach(struct device *parent, struct device *self, void *aux)
 	}
 	intrstr = pci_intr_string(pc, ih);
 	/* must do this after intr is mapped and established */
-	sc->sc_intrline = pci_intr_line(ih);
+	sc->sc_intrline = pci_intr_line(pc, ih);
 
 	/*
 	 * XXX pccbbintr should be called under the priority lower
@@ -515,7 +481,7 @@ pccbbattach(struct device *parent, struct device *self, void *aux)
 
 	/* Disable legacy register mapping. */
 	switch (sc->sc_chipset) {
-	case CB_RX5C46X:	       /* fallthrough */
+	case CB_RX5C46X:
 #if 0
 	/* The RX5C47X-series requires writes to the PCI_LEGACY register. */
 	case CB_RX5C47X:
@@ -561,28 +527,11 @@ pccbb_pci_callback(struct device *self)
 	bus_space_tag_t base_memt;
 	bus_space_handle_t base_memh;
 	u_int32_t maskreg;
-	bus_addr_t sockbase;
 	struct cbslot_attach_args cba;
 	struct pcmciabus_attach_args paa;
 	struct cardslot_attach_args caa;
 	struct cardslot_softc *csc;
 	u_int32_t sockstat;
-
-	if (!(sc->sc_flags & CBB_MEMHMAPPED)) {
-		/* The socket registers aren't mapped correctly. */
-		if (rbus_space_alloc(sc->sc_rbus_memt, 0, 0x1000, 0x0fff,
-		    (sc->sc_chipset == CB_RX5C47X
-		    || sc->sc_chipset == CB_TI113X) ? 0x10000 : 0x1000,
-		    0, &sockbase, &sc->sc_base_memh)) {
-			return;
-		}
-		sc->sc_base_memt = sc->sc_memt;
-		pci_conf_write(pc, sc->sc_tag, PCI_SOCKBASE, sockbase);
-		DPRINTF(("%s: CardBus register address 0x%lx -> 0x%x\n",
-		    sc->sc_dev.dv_xname, sockbase, pci_conf_read(pc, sc->sc_tag,
-		    PCI_SOCKBASE)));
-		sc->sc_flags |= CBB_MEMHMAPPED;
-	}
 
 	base_memt = sc->sc_base_memt;  /* socket regs memory tag */
 	base_memh = sc->sc_base_memh;  /* socket regs memory handle */
@@ -1028,9 +977,9 @@ pccbbintr_function(struct pccbb_softc *sc)
 	for (pil = sc->sc_pil; pil != NULL; pil = pil->pil_next) {
 		/*
 		 * XXX priority change.  gross.  I use if-else
-		 * sentense instead of switch-case sentense because of
-		 * avoiding duplicate case value error.  More than one
-		 * IPL_XXX use same value.  It depends on
+		 * sentences instead of switch-case sentences in order
+		 * to avoid duplicate case value error.  More than one
+		 * IPL_XXX may use the same value.  It depends on the
 		 * implementation.
 		 */
 		splchanged = 1;
@@ -2844,10 +2793,10 @@ pccbb_winset(bus_addr_t align, struct pccbb_softc *sc, bus_space_tag_t bst)
 	win[0].win_flags = win[1].win_flags = 0;
 
 	chainp = TAILQ_FIRST(&sc->sc_iowindow);
-	offs = 0x2c;
+	offs = PCI_CB_IOBASE0;
 	if (sc->sc_memt == bst) {
 		chainp = TAILQ_FIRST(&sc->sc_memwindow);
-		offs = 0x1c;
+		offs = PCI_CB_MEMBASE0;
 	}
 
 	if (chainp != NULL) {
@@ -2906,7 +2855,7 @@ pccbb_winset(bus_addr_t align, struct pccbb_softc *sc, bus_space_tag_t bst)
 				win[1].win_flags = chainp->wc_flags;
 			}
 		} else {
-			/* the flags of win[0] and win[1] is different */
+			/* the flags of win[0] and win[1] are different */
 			if (win[0].win_flags == chainp->wc_flags) {
 				win[0].win_limit = chainp->wc_end & mask;
 				/*
@@ -2969,14 +2918,14 @@ pccbb_powerhook(int why, void *arg)
 	}
 
 	if (why == PWR_RESUME) {
-		if (pci_conf_read (sc->sc_pc, sc->sc_tag, PCI_SOCKBASE) == 0)
+		if (pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_SOCKBASE) == 0)
 			/* BIOS did not recover this register */
-			pci_conf_write (sc->sc_pc, sc->sc_tag,
-					PCI_SOCKBASE, sc->sc_sockbase);
-		if (pci_conf_read (sc->sc_pc, sc->sc_tag, PCI_BUSNUM) == 0)
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    PCI_SOCKBASE, sc->sc_sockbase);
+		if (pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_BUSNUM) == 0)
 			/* BIOS did not recover this register */
-			pci_conf_write (sc->sc_pc, sc->sc_tag,
-					PCI_BUSNUM, sc->sc_busnum);
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    PCI_BUSNUM, sc->sc_busnum);
 		/* CSC Interrupt: Card detect interrupt on */
 		reg = bus_space_read_4(base_memt, base_memh, CB_SOCKET_MASK);
 		/* Card detect intr is turned on. */

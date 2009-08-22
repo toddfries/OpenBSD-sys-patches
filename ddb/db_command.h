@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_command.h,v 1.23 2009/06/03 22:09:30 thib Exp $	*/
+/*	$OpenBSD: db_command.h,v 1.29 2009/08/17 13:11:58 jasper Exp $	*/
 /*	$NetBSD: db_command.h,v 1.8 1996/02/05 01:56:55 christos Exp $	*/
 
 /* 
@@ -39,11 +39,12 @@ int db_cmd_search(char *, struct db_command *, struct db_command **);
 void db_cmd_list(struct db_command *);
 void db_command(struct db_command **, struct db_command *);
 void db_buf_print_cmd(db_expr_t, int, db_expr_t, char *);
-void db_bufq_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_map_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_malloc_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_mount_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_show_all_mounts(db_expr_t, int, db_expr_t, char *);
+void db_show_all_vnodes(db_expr_t, int, db_expr_t, char *);
+void db_show_all_bufs(db_expr_t, int, db_expr_t, char *);
 void db_object_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_page_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_extent_print_cmd(db_expr_t, int, db_expr_t, char *);
@@ -52,6 +53,7 @@ void db_proc_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_uvmexp_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_vnode_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_nfsreq_print_cmd(db_expr_t, int, db_expr_t, char *);
+void db_nfsnode_print_cmd(db_expr_t, int, db_expr_t, char *);
 void db_machine_commands_install(struct db_command *);
 void db_help_cmd(db_expr_t, int, db_expr_t, char *);
 void db_command_loop(void);
@@ -66,6 +68,9 @@ void db_boot_poweroff_cmd(db_expr_t, int, db_expr_t, char *);
 void db_stack_trace_cmd(db_expr_t, int, db_expr_t, char *);
 void db_dmesg_cmd(db_expr_t, int, db_expr_t, char *);
 void db_show_panic_cmd(db_expr_t, int, db_expr_t, char *);
+void db_bcstats_print_cmd(db_expr_t, int, db_expr_t, char *);
+void db_struct_offset_cmd(db_expr_t, int, db_expr_t, char *);
+void db_struct_layout_cmd(db_expr_t, int, db_expr_t, char *);
 
 extern	db_addr_t db_dot, db_last_addr, db_prev, db_next;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.76 2009/06/02 12:32:08 deraadt Exp $	*/
+/*	$OpenBSD: fd.c,v 1.78 2009/08/13 15:23:12 deraadt Exp $	*/
 /*	$NetBSD: fd.c,v 1.90 1996/05/12 23:12:03 mycroft Exp $	*/
 
 /*-
@@ -139,7 +139,7 @@ struct cfdriver fd_cd = {
 	NULL, "fd", DV_DISK
 };
 
-void fdgetdisklabel(dev_t, struct fd_softc *, struct disklabel *, int);
+int fdgetdisklabel(dev_t, struct fd_softc *, struct disklabel *, int);
 int fd_get_parms(struct fd_softc *);
 void fdstrategy(struct buf *);
 void fdstart(struct fd_softc *);
@@ -156,12 +156,10 @@ static __inline struct fd_type *fd_dev_to_type(struct fd_softc *, dev_t);
 void fdretry(struct fd_softc *);
 void fdtimeout(void *);
 
-void
+int
 fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
     int spoofonly)
 {
-	char *errstring;
-
 	bzero(lp, sizeof(struct disklabel));
 
 	lp->d_type = DTYPE_FLOPPY;
@@ -186,10 +184,7 @@ fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
 	 * Call the generic disklabel extraction routine.  If there's
 	 * not a label there, fake it.
 	 */
-	errstring = readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, spoofonly);
-	if (errstring) {
-		/*printf("%s: %s\n", fd->sc_dev.dv_xname, errstring);*/
-	}
+	return readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, spoofonly);
 }
 
 int
@@ -734,7 +729,7 @@ loop:
 			fd_set_motor(fdc, 0);
 			fdc->sc_state = MOTORWAIT;
 			/* Allow .25s for motor to stabilize. */
-			timeout_add(&fd->fd_motor_on_to, hz / 4);
+			timeout_add_msec(&fd->fd_motor_on_to, 250);
 			return 1;
 		}
 		/* Make sure the right drive is selected. */
@@ -834,7 +829,7 @@ loop:
 		timeout_del(&fd->fdtimeout_to);
 		fdc->sc_state = SEEKCOMPLETE;
 		/* allow 1/50 second for heads to settle */
-		timeout_add(&fdc->fdcpseudointr_to, hz / 50);
+		timeout_add_msec(&fdc->fdcpseudointr_to, 20);
 		return 1;
 
 	case SEEKCOMPLETE:
@@ -902,7 +897,7 @@ loop:
 		delay(100);
 		fd_set_motor(fdc, 0);
 		fdc->sc_state = RESETCOMPLETE;
-		timeout_add(&fd->fdtimeout_to, hz / 2);
+		timeout_add_msec(&fd->fdtimeout_to, 500);
 		return 1;			/* will return later */
 
 	case RESETCOMPLETE:

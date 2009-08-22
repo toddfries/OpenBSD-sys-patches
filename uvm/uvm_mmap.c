@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_mmap.c,v 1.74 2009/06/01 20:53:30 millert Exp $	*/
+/*	$OpenBSD: uvm_mmap.c,v 1.79 2009/07/25 12:55:40 miod Exp $	*/
 /*	$NetBSD: uvm_mmap.c,v 1.49 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -577,9 +577,8 @@ sys_mmap(struct proc *p, void *v, register_t *retval)
 
 	if ((flags & MAP_ANON) != 0 ||
 	    ((flags & MAP_PRIVATE) != 0 && (prot & PROT_WRITE) != 0)) {
-		u_int64_t used = ptoa(p->p_vmspace->vm_dused);
-		if (p->p_rlimit[RLIMIT_DATA].rlim_cur < used ||
-		    size > p->p_rlimit[RLIMIT_DATA].rlim_cur - used) {
+		if (size >
+		    (p->p_rlimit[RLIMIT_DATA].rlim_cur - ptoa(p->p_vmspace->vm_dused))) {
 			error = ENOMEM;
 			goto out;
 		}
@@ -743,7 +742,7 @@ sys_munmap(struct proc *p, void *v, register_t *retval)
 	/*
 	 * doit!
 	 */
-	uvm_unmap_remove(map, addr, addr + size, &dead_entries, p);
+	uvm_unmap_remove(map, addr, addr + size, &dead_entries, p, FALSE);
 
 	vm_map_unlock(map);	/* and unlock */
 
@@ -1138,7 +1137,7 @@ uvm_mmap(vm_map_t map, vaddr_t *addr, vsize_t size, vm_prot_t prot,
 			}
 #else
 			/* XXX for now, attach doesn't gain a ref */
-			VREF(vp);
+			vref(vp);
 #endif
 		} else {
 			uobj = udv_attach((void *) &vp->v_rdev,

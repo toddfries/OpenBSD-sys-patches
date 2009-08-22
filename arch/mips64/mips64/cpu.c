@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.11 2007/10/18 04:32:25 miod Exp $ */
+/*	$OpenBSD: cpu.c,v 1.13 2009/08/06 21:11:39 miod Exp $ */
 
 /*
  * Copyright (c) 1997-2004 Opsycon AB (www.opsycon.se)
@@ -84,9 +84,12 @@ void
 cpuattach(struct device *parent, struct device *dev, void *aux)
 {
 	int cpuno = dev->dv_unit;
+	int isr16k = 0;
+	int displayver;
 
 	printf(": ");
 
+	displayver = 1;
 	switch (sys_config.cpu[cpuno].type) {
 	case MIPS_R4000:
 		if (CpuPrimaryInstCacheSize == 16384)
@@ -104,7 +107,11 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		printf("MIPS R12000 CPU");
 		break;
 	case MIPS_R14000:
-		printf("MIPS R14000 CPU");
+		if (sys_config.cpu[cpuno].vers_maj > 2) {
+			sys_config.cpu[cpuno].vers_maj -= 2;
+			isr16k = 1;
+		}
+		printf("R1%d000 CPU", isr16k ? 6 : 4);
 		break;
 	case MIPS_R4200:
 		printf("NEC VR4200 CPU (ICE)");
@@ -134,17 +141,24 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	case MIPS_RM9000:
 		printf("PMC-Sierra RM9000 CPU");
 		break;
+	case MIPS_LOONGSON2:
+		printf("STC Loongson2%c CPU",
+		    'C' + sys_config.cpu[cpuno].vers_min);
+		displayver = 0;
+		break;
 	default:
 		printf("Unknown CPU type (0x%x)",sys_config.cpu[cpuno].type);
 		break;
 	}
-	printf(" rev %d.%d %d MHz with ", sys_config.cpu[cpuno].vers_maj,
-	    sys_config.cpu[cpuno].vers_min,
-	    sys_config.cpu[cpuno].clock / 1000000);
+	if (displayver != 0)
+		printf(" rev %d.%d", sys_config.cpu[cpuno].vers_maj,
+		    sys_config.cpu[cpuno].vers_min);
+	printf(" %d MHz, ", sys_config.cpu[cpuno].clock / 1000000);
 
+	displayver = 1;
 	switch (sys_config.cpu[cpuno].fptype) {
 	case MIPS_SOFT:
-		printf("Software emulation float");
+		printf("Software FP emulation");
 		break;
 	case MIPS_R4000:
 		printf("R4010 FPC");
@@ -156,7 +170,7 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		printf("R12000 FPU");
 		break;
 	case MIPS_R14000:
-		printf("R14000 FPU");
+		printf("R1%d000 FPU", isr16k ? 6 : 4);
 		break;
 	case MIPS_R4200:
 		printf("VR4200 FPC (ICE)");
@@ -179,12 +193,19 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	case MIPS_RM9000:
 		printf("RM9000 FPC");
 		break;
+	case MIPS_LOONGSON2:
+		printf("STC Loongson2%c FPU",
+		    'C' + sys_config.cpu[cpuno].fpvers_min);
+		displayver = 0;
+		break;
 	default:
 		printf("Unknown FPU type (0x%x)", sys_config.cpu[cpuno].fptype);
 		break;
 	}
-	printf(" rev %d.%d\n", sys_config.cpu[cpuno].fpvers_maj,
-	    sys_config.cpu[cpuno].fpvers_min);
+	if (displayver != 0)
+		printf(" rev %d.%d", sys_config.cpu[cpuno].fpvers_maj,
+		    sys_config.cpu[cpuno].fpvers_min);
+	printf("\n");
 
 	printf("cpu%d: cache L1-I %dKB", cpuno, CpuPrimaryInstCacheSize / 1024);
 	printf(" D %dKB ", CpuPrimaryDataCacheSize / 1024);
@@ -210,6 +231,7 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 			break;
 		case MIPS_RM7000:
 		case MIPS_RM9000:
+		case MIPS_LOONGSON2:
 			printf(", L2 %dKB 4 way", CpuSecondaryCacheSize / 1024);
 			break;
 		default:

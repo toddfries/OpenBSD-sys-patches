@@ -1,0 +1,25 @@
+# On branch master
+# Changed but not updated:
+#   (use "git add <file>..." to update what will be committed)
+#   (use "git checkout -- <file>..." to discard changes in working directory)
+#
+#	modified:   arch/sgi/sgi/machdep.c
+#	modified:   arch/vax/include/macros.h
+#	modified:   arch/vax/vax/subr.s
+#	modified:   dev/pci/pcidevs
+#	modified:   dev/pci/pcidevs.h
+#	modified:   dev/pci/pcidevs_data.h
+#	modified:   lib/libkern/arch/vax/bcmp.S
+#	modified:   lib/libkern/arch/vax/bcopy.S
+#	modified:   lib/libkern/arch/vax/bzero.S
+#	modified:   lib/libkern/arch/vax/memmove.S
+#	modified:   lib/libkern/arch/vax/ovbcopy.S
+#	modified:   status.log
+#
+# Untracked files:
+#   (use "git add <file>..." to include in what will be committed)
+#
+#	lib/libkern/arch/vax/memcmp.S
+#	lib/libkern/arch/vax/memcpy.S
+#	lib/libkern/arch/vax/memset.S
+no changes added to commit (use "git add" and/or "git commit -a")

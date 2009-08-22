@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.18 2009/06/04 22:27:31 jsg Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.30 2009/08/13 14:24:47 jasper Exp $	*/
 
 /******************************************************************************
 
@@ -65,7 +65,6 @@ int	ixgbe_probe(struct device *, void *, void *);
 void	ixgbe_attach(struct device *, struct device *, void *);
 int	ixgbe_detach(struct device *, int);
 void	ixgbe_power(int, void *);
-void	ixgbe_shutdown(void *);
 void	ixgbe_start(struct ifnet *);
 void	ixgbe_start_locked(struct tx_ring *, struct ifnet *);
 int	ixgbe_ioctl(struct ifnet *, u_long, caddr_t);
@@ -130,16 +129,12 @@ int	ixgbe_legacy_irq(void *);
 void	desc_flip(void *);
 #endif
 
-struct rwlock ix_tx_pool_lk = RWLOCK_INITIALIZER("ixplinit");
-struct pool *ix_tx_pool = NULL;
-void	ix_alloc_pkts(void *, void *);
-
 /*********************************************************************
  *  OpenBSD Device Interface Entry Points
  *********************************************************************/
 
 struct cfdriver ix_cd = {
-	0, "ix", DV_IFNET
+	NULL, "ix", DV_IFNET
 };
 
 struct cfattach ix_ca = {
@@ -206,10 +201,8 @@ ixgbe_attach(struct device *parent, struct device *self, void *aux)
 	sc->rx_process_limit = 100;	// XXX
 
 	/* Do base PCI setup - map BAR0 */
-	if (ixgbe_allocate_pci_resources(sc)) {
-		printf(": allocation of PCI resources failed\n");
+	if (ixgbe_allocate_pci_resources(sc))
 		goto err_out;
-	}
 
 	/* Allocate our TX/RX Queues */
 	if (ixgbe_allocate_queues(sc))
@@ -245,7 +238,6 @@ ixgbe_attach(struct device *parent, struct device *self, void *aux)
 	IXGBE_WRITE_REG(&sc->hw, IXGBE_CTRL_EXT, ctrl_ext);
 
 	sc->powerhook = powerhook_establish(ixgbe_power, sc);
-	sc->shutdownhook = shutdownhook_establish(ixgbe_shutdown, sc);
 
 	printf(", address %s\n", ether_sprintf(sc->hw.mac.addr));
 
@@ -308,20 +300,6 @@ ixgbe_power(int why, void *arg)
 		if (ifp->if_flags & IFF_UP)
 			ixgbe_init(sc);
 	}
-}
-
-/*********************************************************************
- *
- *  Shutdown entry point
- *
- **********************************************************************/
-
-void
-ixgbe_shutdown(void *arg)
-{
-	struct ix_softc *sc = (struct ix_softc *)arg;
-
-	ixgbe_stop(sc);
 }
 
 /*********************************************************************
@@ -580,24 +558,8 @@ ixgbe_init(void *arg)
 	struct ifnet	*ifp = &sc->arpcom.ac_if;
 	uint32_t	 txdctl, rxdctl, mhadd, gpie;
 	int		 i, s;
-	int		 txpl = 1;
 
 	INIT_DEBUGOUT("ixgbe_init: begin");
-
-	if (rw_enter(&ix_tx_pool_lk, RW_WRITE | RW_INTR) != 0)
-		return;
-	if (ix_tx_pool == NULL) {
-		ix_tx_pool = malloc(sizeof(*ix_tx_pool), M_DEVBUF, M_WAITOK);
-		if (ix_tx_pool != NULL) {
-			pool_init(ix_tx_pool, sizeof(struct ix_pkt), 0, 0, 0,
-			    "ixpkts", &pool_allocator_nointr);
-		} else
-			txpl = 0;
-	}
-	rw_exit(&ix_tx_pool_lk);
-
-	if (!txpl)
-		return;
 
 	s = splnet();
 
@@ -777,26 +739,23 @@ ixgbe_media_status(struct ifnet * ifp, struct ifmediareq * ifmr)
 {
 	struct ix_softc *sc = ifp->if_softc;
 
+	ifmr->ifm_active = IFM_ETHER;
+	ifmr->ifm_status = IFM_AVALID;
+
 	INIT_DEBUGOUT("ixgbe_media_status: begin");
 	ixgbe_update_link_status(sc);
 
-	ifmr->ifm_status = IFM_AVALID;
-	ifmr->ifm_active = IFM_ETHER;
+	if (LINK_STATE_IS_UP(ifp->if_link_state)) {
+		ifmr->ifm_status |= IFM_ACTIVE;
 
-	if (!sc->link_active) {
-		ifmr->ifm_status |= IFM_NONE;
-		return;
-	}
-
-	ifmr->ifm_status |= IFM_ACTIVE;
-
-	switch (sc->link_speed) {
-	case IXGBE_LINK_SPEED_1GB_FULL:
-		ifmr->ifm_active |= IFM_1000_T | IFM_FDX;
-		break;
-	case IXGBE_LINK_SPEED_10GB_FULL:
-		ifmr->ifm_active |= sc->optics | IFM_FDX;
-		break;
+		switch (sc->link_speed) {
+		case IXGBE_LINK_SPEED_1GB_FULL:
+			ifmr->ifm_active |= IFM_1000_T | IFM_FDX;
+			break;
+		case IXGBE_LINK_SPEED_10GB_FULL:
+			ifmr->ifm_active |= sc->optics | IFM_FDX;
+			break;
+		}
 	}
 }
 
@@ -811,25 +770,7 @@ ixgbe_media_status(struct ifnet * ifp, struct ifmediareq * ifmr)
 int
 ixgbe_media_change(struct ifnet * ifp)
 {
-	struct ix_softc *sc = ifp->if_softc;
-	struct ifmedia *ifm = &sc->media;
-
-	INIT_DEBUGOUT("ixgbe_media_change: begin");
-
-	if (IFM_TYPE(ifm->ifm_media) != IFM_ETHER)
-		return (EINVAL);
-
-        switch (IFM_SUBTYPE(ifm->ifm_media)) {
-        case IFM_AUTO:
-                sc->hw.mac.autoneg = TRUE;
-                sc->hw.phy.autoneg_advertised =
-		    IXGBE_LINK_SPEED_1GB_FULL | IXGBE_LINK_SPEED_10GB_FULL;
-                break;
-        default:
-                printf("%s: Only auto media type\n", ifp->if_xname);
-		return (EINVAL);
-        }
-
+	/* ignore */
 	return (0);
 }
 
@@ -846,29 +787,15 @@ int
 ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
 {
 	struct ix_softc *sc = txr->sc;
-	struct ix_pkt	*pkt;
 	uint32_t	olinfo_status = 0, cmd_type_len = 0;
 	int             i, j, error;
 	int		first, last = 0;
 	bus_dmamap_t	map;
+	struct ixgbe_tx_buf *txbuf, *txbuf_mapped;
 	union ixgbe_adv_tx_desc *txd = NULL;
 #ifdef notyet
 	uint32_t	paylen = 0;
 #endif
-
-	mtx_enter(&txr->tx_pkt_mtx);
-	pkt = TAILQ_FIRST(&txr->tx_free_pkts);
-	if (pkt == NULL) {
-		if (txr->tx_pkt_count <= sc->num_tx_desc &&
-		    !ISSET(sc->ix_flags, IX_ALLOC_PKTS_FLAG) &&
-		    workq_add_task(NULL, 0, ix_alloc_pkts, sc, NULL) == 0)
-		        SET(sc->ix_flags, IX_ALLOC_PKTS_FLAG);
-
-		mtx_leave(&txr->tx_pkt_mtx);
-		return (ENOMEM);
-	}
-	TAILQ_REMOVE(&txr->tx_free_pkts, pkt, pkt_entry);
-	mtx_leave(&txr->tx_pkt_mtx);
 
 	/* Basic descriptor defines */
         cmd_type_len |= IXGBE_ADVTXD_DTYP_DATA;
@@ -879,7 +806,6 @@ ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
 		cmd_type_len |= IXGBE_ADVTXD_DCMD_VLE;
 #endif
 
-#if 0
 	/*
 	 * Force a cleanup if number of TX descriptors
 	 * available is below the threshold. If it fails
@@ -893,7 +819,6 @@ ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
 			return (ENOBUFS);
 		}
 	}
-#endif
 
         /*
          * Important to capture the first descriptor
@@ -901,16 +826,22 @@ ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
          * the one we tell the hardware to report back
          */
         first = txr->next_avail_tx_desc;
-	map = pkt->pkt_dmamap;
+	txbuf = &txr->tx_buffers[first];
+	txbuf_mapped = txbuf;
+	map = txbuf->map;
 
 	/*
 	 * Map the packet for DMA.
 	 */
 	error = bus_dmamap_load_mbuf(txr->txdma.dma_tag, map,
 	    m_head, BUS_DMA_NOWAIT);
-	if (error != 0) {
+
+	if (error == ENOMEM) {
 		sc->no_tx_dma_setup++;
-		goto maperr;
+		return (error);
+	} else if (error != 0) {
+		sc->no_tx_dma_setup++;
+		return (error);
 	}
 
 	/* Make certain there are enough descriptors */
@@ -939,6 +870,7 @@ ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
 
 	i = txr->next_avail_tx_desc;
 	for (j = 0; j < map->dm_nsegs; j++) {
+		txbuf = &txr->tx_buffers[i];
 		txd = &txr->tx_base[i];
 
 		txd->read.buffer_addr = htole64(map->dm_segs[j].ds_addr);
@@ -949,6 +881,8 @@ ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
 
 		if (++i == sc->num_tx_desc)
 			i = 0;
+
+		txbuf->m_head = NULL;
 
 		/*
 		 * we have to do this inside the loop right now
@@ -966,32 +900,22 @@ ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
 	txr->tx_avail -= map->dm_nsegs;
 	txr->next_avail_tx_desc = i;
 
-	pkt->pkt_mbuf = m_head;
-	pkt->pkt_start_desc = first;
-
-	mtx_enter(&txr->tx_pkt_mtx);
-	TAILQ_INSERT_TAIL(&txr->tx_used_pkts, pkt, pkt_entry);
-	mtx_leave(&txr->tx_pkt_mtx);
-
+	txbuf->m_head = m_head;
+	txbuf_mapped->map = txbuf->map;
+	txbuf->map = map;
 	bus_dmamap_sync(txr->txdma.dma_tag, map, 0, map->dm_mapsize,
 	    BUS_DMASYNC_PREWRITE);
 
-#if 0
         /* Set the index of the descriptor that will be marked done */
         txbuf = &txr->tx_buffers[first];
-#endif
 
 	++txr->tx_packets;
 	return (0);
 
 xmit_fail:
-	bus_dmamap_unload(txr->txdma.dma_tag, map);
-maperr:
-	mtx_enter(&txr->tx_pkt_mtx);
-	TAILQ_INSERT_TAIL(&txr->tx_free_pkts, pkt, pkt_entry);
-	mtx_leave(&txr->tx_pkt_mtx);
-	
-	return (ENOMEM);
+	bus_dmamap_unload(txr->txdma.dma_tag, txbuf->map);
+	return (error);
+
 }
 
 void
@@ -1141,43 +1065,41 @@ ixgbe_update_link_status(struct ix_softc *sc)
 	int link_up = FALSE;
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 	struct tx_ring *txr = sc->tx_rings;
+	int		link_state;
 	int		i;
 
 	ixgbe_hw(&sc->hw, check_link, &sc->link_speed, &link_up, 0);
 
-	switch (sc->link_speed) {
-	case IXGBE_LINK_SPEED_UNKNOWN:
-		ifp->if_baudrate = 0;
-		break;
-	case IXGBE_LINK_SPEED_100_FULL:
-		ifp->if_baudrate = IF_Mbps(100);
-		break;
-	case IXGBE_LINK_SPEED_1GB_FULL:
-		ifp->if_baudrate = IF_Gbps(1);
-		break;
-	case IXGBE_LINK_SPEED_10GB_FULL:
-		ifp->if_baudrate = IF_Gbps(10);
-		break;
+	link_state = link_up ? LINK_STATE_FULL_DUPLEX : LINK_STATE_DOWN;
+
+	if (ifp->if_link_state != link_state) {
+		sc->link_active = link_up;
+		ifp->if_link_state = link_state;
+		if_link_state_change(ifp);
 	}
 
-	if (link_up){ 
-		if (sc->link_active == FALSE) {
-			sc->link_active = TRUE;
-			ifp->if_link_state = LINK_STATE_FULL_DUPLEX;
-			if_link_state_change(ifp);
-		}
-	} else { /* Link down */
-		if (sc->link_active == TRUE) {
+	if (LINK_STATE_IS_UP(ifp->if_link_state)) {
+		switch (sc->link_speed) {
+		case IXGBE_LINK_SPEED_UNKNOWN:
 			ifp->if_baudrate = 0;
-			ifp->if_link_state = LINK_STATE_DOWN;
-			if_link_state_change(ifp);
-			sc->link_active = FALSE;
-			for (i = 0; i < sc->num_tx_queues;
-			    i++, txr++)
-				txr->watchdog_timer = FALSE;
-			ifp->if_timer = 0;
+			break;
+		case IXGBE_LINK_SPEED_100_FULL:
+			ifp->if_baudrate = IF_Mbps(100);
+			break;
+		case IXGBE_LINK_SPEED_1GB_FULL:
+			ifp->if_baudrate = IF_Gbps(1);
+			break;
+		case IXGBE_LINK_SPEED_10GB_FULL:
+			ifp->if_baudrate = IF_Gbps(10);
+			break;
 		}
+	} else {
+		ifp->if_baudrate = 0;
+		ifp->if_timer = 0;
+		for (i = 0; i < sc->num_tx_queues; i++)
+			txr[i].watchdog_timer = FALSE;
 	}
+
 
 	return;
 }
@@ -1203,9 +1125,9 @@ ixgbe_stop(void *arg)
 	INIT_DEBUGOUT("ixgbe_stop: begin\n");
 	ixgbe_disable_intr(sc);
 
-	ixgbe_hw(&sc->hw, reset_hw);
+	ixgbe_hw0(&sc->hw, reset_hw);
 	sc->hw.adapter_stopped = FALSE;
-	ixgbe_hw(&sc->hw, stop_adapter);
+	ixgbe_hw0(&sc->hw, stop_adapter);
 	timeout_del(&sc->timer);
 
 	/* reprogram the RAR[0] in case user changed it. */
@@ -1385,7 +1307,7 @@ ixgbe_hardware_init(struct ix_softc *sc)
 	csum = 0;
 	/* Issue a global reset */
 	sc->hw.adapter_stopped = FALSE;
-	ixgbe_hw(&sc->hw, stop_adapter);
+	ixgbe_hw0(&sc->hw, stop_adapter);
 
 	/* Make sure we have a good EEPROM before we read from it */
 	if (ixgbe_ee(&sc->hw, validate_checksum, &csum) < 0) {
@@ -1400,7 +1322,7 @@ ixgbe_hardware_init(struct ix_softc *sc)
 	sc->hw.fc.high_water = IXGBE_FC_HI;
 	sc->hw.fc.send_xon = TRUE;
 
-	if (ixgbe_hw(&sc->hw, init_hw) != 0) {
+	if (ixgbe_hw0(&sc->hw, init_hw) != 0) {
 		printf("%s: Hardware Initialization Failed", ifp->if_xname);
 		return (EIO);
 	}
@@ -1692,23 +1614,40 @@ ixgbe_allocate_transmit_buffers(struct tx_ring *txr)
 	struct ix_softc 	*sc;
 	struct ixgbe_osdep	*os;
 	struct ifnet		*ifp;
+	struct ixgbe_tx_buf	*txbuf;
+	int			 error, i;
 
 	sc = txr->sc;
 	os = &sc->osdep;
 	ifp = &sc->arpcom.ac_if;
 
+	if (!(txr->tx_buffers =
+	    (struct ixgbe_tx_buf *) malloc(sizeof(struct ixgbe_tx_buf) *
+	    sc->num_tx_desc, M_DEVBUF, M_NOWAIT | M_ZERO))) {
+		printf("%s: Unable to allocate tx_buffer memory\n",
+		    ifp->if_xname);
+		error = ENOMEM;
+		goto fail;
+	}
 	txr->txtag = txr->txdma.dma_tag;
 
-	/* Create lists to hold TX mbufs */
-	TAILQ_INIT(&txr->tx_free_pkts);
-	TAILQ_INIT(&txr->tx_used_pkts);
-	txr->tx_pkt_count = 0;
-	mtx_init(&txr->tx_pkt_mtx, IPL_NET);
+        /* Create the descriptor buffer dma maps */
+	for (i = 0; i < sc->num_tx_desc; i++) {
+		txbuf = &txr->tx_buffers[i];
+		error = bus_dmamap_create(txr->txdma.dma_tag, IXGBE_TSO_SIZE,
+			    IXGBE_MAX_SCATTER, PAGE_SIZE, 0,
+			    BUS_DMA_NOWAIT, &txbuf->map);
 
-	/* Force an allocate of some dmamaps for tx up front */
-	ix_alloc_pkts(sc, NULL);
+		if (error != 0) {
+			printf("%s: Unable to create TX DMA map\n",
+			    ifp->if_xname);
+			goto fail;
+		}
+	}
 
 	return 0;
+fail:
+	return (error);
 }
 
 /*********************************************************************
@@ -1843,36 +1782,41 @@ ixgbe_free_transmit_structures(struct ix_softc *sc)
 void
 ixgbe_free_transmit_buffers(struct tx_ring *txr)
 {
-	struct ix_pkt		*pkt;
+	struct ix_softc *sc = txr->sc;
+	struct ixgbe_tx_buf *tx_buffer;
+	int             i;
+
 	INIT_DEBUGOUT("free_transmit_ring: begin");
 
-	mtx_enter(&txr->tx_pkt_mtx);
-	while ((pkt = TAILQ_FIRST(&txr->tx_used_pkts)) != NULL) {
-		TAILQ_REMOVE(&txr->tx_used_pkts, pkt, pkt_entry);
-		mtx_leave(&txr->tx_pkt_mtx);
-	
-		bus_dmamap_sync(txr->txdma.dma_tag, pkt->pkt_dmamap,
-		    0, pkt->pkt_dmamap->dm_mapsize,
-		    BUS_DMASYNC_POSTWRITE);
-		bus_dmamap_unload(txr->txdma.dma_tag, pkt->pkt_dmamap);
-		m_freem(pkt->pkt_mbuf);
+	if (txr->tx_buffers == NULL)
+		return;
 
-		mtx_enter(&txr->tx_pkt_mtx);
-		TAILQ_INSERT_TAIL(&txr->tx_free_pkts, pkt, pkt_entry);
+	tx_buffer = txr->tx_buffers;
+	for (i = 0; i < sc->num_tx_desc; i++, tx_buffer++) {
+		if (tx_buffer->map != NULL && tx_buffer->map->dm_nsegs > 0) {
+			bus_dmamap_sync(txr->txdma.dma_tag, tx_buffer->map,
+			    0, tx_buffer->map->dm_mapsize,
+			    BUS_DMASYNC_POSTWRITE);
+			bus_dmamap_unload(txr->txdma.dma_tag,
+			    tx_buffer->map);
+		}
+		if (tx_buffer->m_head != NULL) {
+			m_freem(tx_buffer->m_head);
+			tx_buffer->m_head = NULL;
+		}
+		if (tx_buffer->map != NULL) {
+			bus_dmamap_destroy(txr->txdma.dma_tag,
+			    tx_buffer->map);
+			tx_buffer->map = NULL;
+		}
 	}
 
-	/* Destroy all the dmamaps we allocated for TX */
-	while ((pkt = TAILQ_FIRST(&txr->tx_free_pkts)) != NULL) {
-		TAILQ_REMOVE(&txr->tx_free_pkts, pkt, pkt_entry);
-		txr->tx_pkt_count--;
-		mtx_leave(&txr->tx_pkt_mtx);
-
-		bus_dmamap_destroy(txr->txdma.dma_tag, pkt->pkt_dmamap);
-		pool_put(ix_tx_pool, pkt);
-
-		mtx_enter(&txr->tx_pkt_mtx);
+	if (txr->tx_buffers != NULL) {
+		free(txr->tx_buffers, M_DEVBUF);
+		txr->tx_buffers = NULL;
 	}
-	mtx_leave(&txr->tx_pkt_mtx);
+	txr->tx_buffers = NULL;
+	txr->txtag = NULL;
 }
 
 /*********************************************************************
@@ -1887,6 +1831,7 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 	struct ix_softc *sc = txr->sc;
 	struct ifnet	*ifp = &sc->arpcom.ac_if;
 	struct ixgbe_adv_tx_context_desc *TXD;
+	struct ixgbe_tx_buf        *tx_buffer;
 	uint32_t vlan_macip_lens = 0, type_tucmd_mlhl = 0;
 	struct ip *ip;
 	struct ip6_hdr *ip6;
@@ -1904,6 +1849,7 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 	if ((ifp->if_capabilities & IFCAP_CSUM_IPv4) == 0)
 		offload = FALSE;
 
+	tx_buffer = &txr->tx_buffers[ctxd];
 	TXD = (struct ixgbe_adv_tx_context_desc *) &txr->tx_base[ctxd];
 
 	/*
@@ -1995,6 +1941,8 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 	if (sc->hw.revision_id == 0)
 		desc_flip(TXD);
 #endif
+
+	tx_buffer->m_head = NULL;
 
 	/* We've consumed the first desc, adjust counters */
 	if (++ctxd == sc->num_tx_desc)
@@ -2133,15 +2081,16 @@ ixgbe_txeof(struct tx_ring *txr)
 	struct ix_softc			*sc = txr->sc;
 	struct ifnet			*ifp = &sc->arpcom.ac_if;
 	uint				 first, last, done, num_avail;
-	struct ixgbe_legacy_tx_desc	*tx_desc;
-	struct ix_pkt			*pkt;
-	bus_dmamap_t			 map;
+	struct ixgbe_tx_buf		*tx_buffer;
+	struct ixgbe_legacy_tx_desc *tx_desc;
 
 	if (txr->tx_avail == sc->num_tx_desc)
 		return FALSE;
 
 	num_avail = txr->tx_avail;
 	first = txr->next_tx_to_clean;
+
+	tx_buffer = &txr->tx_buffers[first];
 
 	/* For cleanup we just use legacy struct */
 	tx_desc = (struct ixgbe_legacy_tx_desc *)&txr->tx_base[first];
@@ -2164,30 +2113,22 @@ ixgbe_txeof(struct tx_ring *txr)
 			tx_desc->buffer_addr = 0;
 			num_avail++;
 
-			mtx_enter(&txr->tx_pkt_mtx);
-			pkt = TAILQ_FIRST(&txr->tx_used_pkts);
-			if (pkt != NULL) {
-				TAILQ_REMOVE(&txr->tx_used_pkts, pkt, pkt_entry);
-				mtx_leave(&txr->tx_pkt_mtx);
-				/*
-				 * Free the associated mbuf.
-				 */
-				map = pkt->pkt_dmamap;
-				bus_dmamap_sync(txr->txdma.dma_tag, map,
-				    0, map->dm_mapsize,
-				    BUS_DMASYNC_POSTWRITE);
-				bus_dmamap_unload(txr->txdma.dma_tag, map);
-				m_freem(pkt->pkt_mbuf);
+			if (tx_buffer->m_head) {
 				ifp->if_opackets++;
-
-				mtx_enter(&txr->tx_pkt_mtx);
-				TAILQ_INSERT_TAIL(&txr->tx_free_pkts, pkt, pkt_entry);
+				bus_dmamap_sync(txr->txdma.dma_tag,
+				    tx_buffer->map,
+				    0, tx_buffer->map->dm_mapsize,
+				    BUS_DMASYNC_POSTWRITE);
+				bus_dmamap_unload(txr->txdma.dma_tag,
+				    tx_buffer->map);
+				m_freem(tx_buffer->m_head);
+				tx_buffer->m_head = NULL;
 			}
-			mtx_leave(&txr->tx_pkt_mtx);
 
 			if (++first == sc->num_tx_desc)
 				first = 0;
 
+			tx_buffer = &txr->tx_buffers[first];
 			tx_desc = (struct ixgbe_legacy_tx_desc *)
 			    &txr->tx_base[first];
 		}
@@ -2260,14 +2201,8 @@ ixgbe_get_buf(struct rx_ring *rxr, int i)
 		return (ENOBUFS);
 	}
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL) {
-		sc->mbuf_alloc_failed++;
-		return (ENOBUFS);
-	}
-	MCLGETI(m, M_DONTWAIT, &sc->arpcom.ac_if, size);
-	if ((m->m_flags & M_EXT) == 0) {
-		m_freem(m);
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->arpcom.ac_if, size);
+	if (!m) {
 		sc->mbuf_cluster_failed++;
 		return (ENOBUFS);
 	}
@@ -2315,51 +2250,6 @@ ixgbe_get_buf(struct rx_ring *rxr, int i)
 	rxr->rx_ndescs++;
 
         return (0);
-}
-
-void
-ix_alloc_pkts(void *xsc, void *arg)
-{
-	struct ix_softc *sc = (struct ix_softc *)xsc;
-	struct tx_ring	*txr = &sc->tx_rings[0];	/* XXX */
-	struct ifnet	*ifp = &sc->arpcom.ac_if;
-	struct ix_pkt	*pkt;
-	int		 i, s;
-
-	for (i = 0; i < 4; i++) { /* magic! */
-		pkt = pool_get(ix_tx_pool, PR_WAITOK);
-		if (pkt == NULL)
-			break;
-
-		if (bus_dmamap_create(txr->txdma.dma_tag, IXGBE_TSO_SIZE,
-		    IXGBE_MAX_SCATTER, PAGE_SIZE, 0,
-		    BUS_DMA_WAITOK | BUS_DMA_ALLOCNOW, &pkt->pkt_dmamap) != 0)
-			goto put;
-
-		if (!ISSET(ifp->if_flags, IFF_UP))
-			goto stopping;
-
-		mtx_enter(&txr->tx_pkt_mtx);
-		TAILQ_INSERT_TAIL(&txr->tx_free_pkts, pkt, pkt_entry);
-		txr->tx_pkt_count++;
-		mtx_leave(&txr->tx_pkt_mtx);
-	}
-
-	mtx_enter(&txr->tx_pkt_mtx);
-	CLR(sc->ix_flags, IX_ALLOC_PKTS_FLAG);
-	mtx_leave(&txr->tx_pkt_mtx);
-
-	s = splnet();
-	if (!IFQ_IS_EMPTY(&ifp->if_snd))
-		ixgbe_start(ifp);
-	splx(s);
-
-	return;
-
-stopping:
-	bus_dmamap_destroy(txr->txdma.dma_tag, pkt->pkt_dmamap);
-put:
-	pool_put(ix_tx_pool, pkt);
 }
 
 /*********************************************************************

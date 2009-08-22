@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ale.c,v 1.4 2009/03/29 21:53:52 sthen Exp $	*/
+/*	$OpenBSD: if_ale.c,v 1.8 2009/08/09 03:03:19 kevlo Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -146,6 +146,11 @@ ale_miibus_readreg(struct device *dev, int phy, int reg)
 	if (phy != sc->ale_phyaddr)
 		return (0);
 
+	if (sc->ale_flags & ALE_FLAG_FASTETHER) {
+		if (reg == MII_100T2CR || reg == MII_100T2SR ||
+		    reg == MII_EXTSR)
+			return (0);
+	}
 	CSR_WRITE_4(sc, ALE_MDIO, MDIO_OP_EXECUTE | MDIO_OP_READ |
 	    MDIO_SUP_PREAMBLE | MDIO_CLK_25_4 | MDIO_REG_ADDR(reg));
 	for (i = ALE_PHY_TIMEOUT; i > 0; i--) {
@@ -173,6 +178,12 @@ ale_miibus_writereg(struct device *dev, int phy, int reg, int val)
 
 	if (phy != sc->ale_phyaddr)
 		return;
+
+	if (sc->ale_flags & ALE_FLAG_FASTETHER) {
+		if (reg == MII_100T2CR || reg == MII_100T2SR ||
+		    reg == MII_EXTSR)
+			return;
+	}
 
 	CSR_WRITE_4(sc, ALE_MDIO, MDIO_OP_EXECUTE | MDIO_OP_WRITE |
 	    (val & MDIO_DATA_MASK) << MDIO_DATA_SHIFT |
@@ -372,8 +383,9 @@ ale_attach(struct device *parent, struct device *self, void *aux)
 	const char *intrstr;
 	struct ifnet *ifp;
 	pcireg_t memtype;
-	int error = 0;
+	int mii_flags, error = 0;
 	uint32_t rxf_len, txf_len;
+	const char *chipname;
 
 	/*
 	 * Allocate IO memory
@@ -403,7 +415,6 @@ ale_attach(struct device *parent, struct device *self, void *aux)
 		printf("\n");
 		goto fail;
 	}
-	printf(": %s", intrstr);
 
 	sc->sc_dmat = pa->pa_dmat;
 	sc->sc_pct = pa->pa_pc;
@@ -423,15 +434,20 @@ ale_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->ale_rev >= 0xF0) {
 		/* L2E Rev. B. AR8114 */
 		sc->ale_flags |= ALE_FLAG_FASTETHER;
+		chipname = "AR8114";
 	} else {
 		if ((CSR_READ_4(sc, ALE_PHY_STATUS) & PHY_STATUS_100M) != 0) {
 			/* L1E AR8121 */
 			sc->ale_flags |= ALE_FLAG_JUMBO;
+			chipname = "AR8121";
 		} else {
 			/* L2E Rev. A. AR8113 */
 			sc->ale_flags |= ALE_FLAG_FASTETHER;
+			chipname = "AR8113";
 		}
 	}
+
+	printf(": %s, %s", chipname, intrstr);
 
 	/*
 	 * All known controllers seems to require 4 bytes alignment
@@ -526,8 +542,11 @@ ale_attach(struct device *parent, struct device *self, void *aux)
 
 	ifmedia_init(&sc->sc_miibus.mii_media, 0, ale_mediachange,
 	    ale_mediastatus);
+	mii_flags = 0;
+	if ((sc->ale_flags & ALE_FLAG_JUMBO) != 0)
+		mii_flags |= MIIF_DOPAUSE;
 	mii_attach(self, &sc->sc_miibus, 0xffffffff, MII_PHY_ANY,
-	    MII_OFFSET_ANY, 0);
+	    MII_OFFSET_ANY, mii_flags);
 
 	if (LIST_FIRST(&sc->sc_miibus.mii_phys) == NULL) {
 		printf("%s: no PHY found!\n", sc->sc_dev.dv_xname);
@@ -1153,12 +1172,10 @@ ale_mac_config(struct ale_softc *sc)
 	}
 	if ((IFM_OPTIONS(mii->mii_media_active) & IFM_FDX) != 0) {
 		reg |= MAC_CFG_FULL_DUPLEX;
-#ifdef notyet
 		if ((IFM_OPTIONS(mii->mii_media_active) & IFM_ETH_TXPAUSE) != 0)
 			reg |= MAC_CFG_TX_FC;
 		if ((IFM_OPTIONS(mii->mii_media_active) & IFM_ETH_RXPAUSE) != 0)
 			reg |= MAC_CFG_RX_FC;
-#endif
 	}
 	CSR_WRITE_4(sc, ALE_MAC_CFG, reg);
 }
@@ -2013,15 +2030,15 @@ ale_rxfilter(struct ale_softc *sc)
 
 	rxcfg = CSR_READ_4(sc, ALE_MAC_CFG);
 	rxcfg &= ~(MAC_CFG_ALLMULTI | MAC_CFG_BCAST | MAC_CFG_PROMISC);
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
 	/*
 	 * Always accept broadcast frames.
 	 */
 	rxcfg |= MAC_CFG_BCAST;
 
-	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC || 
-	    ac->ac_multirangecnt > 0) {
-allmulti:
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
 		if (ifp->if_flags & IFF_PROMISC)
 			rxcfg |= MAC_CFG_PROMISC;
 		else
@@ -2033,14 +2050,10 @@ allmulti:
 
 		ETHER_FIRST_MULTI(step, ac, enm);
 		while (enm != NULL) {
-			if (bcmp(enm->enm_addrlo, enm->enm_addrhi,
-			    ETHER_ADDR_LEN)) {
-			    	ifp->if_flags |= IFF_ALLMULTI;
-				goto allmulti;
-			}
 			crc = ether_crc32_le(enm->enm_addrlo, ETHER_ADDR_LEN);
 
 			mchash[crc >> 31] |= 1 << ((crc >> 26) & 0x1f);
+
 			ETHER_NEXT_MULTI(step, enm);
 		}
 	}

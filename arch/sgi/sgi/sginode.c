@@ -1,4 +1,4 @@
-/*	$OpenBSD: sginode.c,v 1.8 2009/06/13 16:28:11 miod Exp $	*/
+/*	$OpenBSD: sginode.c,v 1.11 2009/07/06 22:46:43 miod Exp $	*/
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
  *
@@ -72,10 +72,11 @@ int	kl_n_mode = 0;
 u_int	kl_n_shift = 32;
 
 void
-kl_init(uint64_t nibase)
+kl_init(int ip35)
 {
 	kl_config_hdr_t *cfghdr;
-	u_int64_t val;
+	uint64_t val;
+	uint64_t nibase = ip35 ? HUBNIBASE_IP35 : HUBNIBASE_IP27;
 
 	/* will be recomputed when processing memory information */
 	physmem = 0;
@@ -88,7 +89,7 @@ kl_init(uint64_t nibase)
 
 	val = IP27_LHUB_L(nibase | HUBNI_STATUS);
 	kl_n_mode = (val & NI_MORENODES) != 0;
-	kl_n_shift = 32 - kl_n_mode;
+	kl_n_shift = (ip35 ? 33 : 32) - kl_n_mode;
         bios_printf("Machine is in %c mode.\n", kl_n_mode + 'M');
 
 	val = IP27_LHUB_L(HUBPI_REGION_PRESENT);
@@ -324,6 +325,13 @@ kl_add_memory_ip27(int16_t nasid, int16_t *sizes, unsigned int cnt)
 	 */
 	basepa = (paddr_t)nasid << kl_n_shift;
 	while (cnt-- != 0) {
+		/*
+		 * XXX Temporary until there is a way to cope with
+		 * XXX xbridge ATE shortage.
+		 */
+		if (basepa >= (2UL << 30))
+			return;
+
 		nmeg = *sizes++;
 		for (seg = 0; seg < 4; basepa += (1 << 27), seg++) {
 			if (nmeg <= 128)
@@ -333,7 +341,7 @@ kl_add_memory_ip27(int16_t nasid, int16_t *sizes, unsigned int cnt)
 			if (np == 0)
 				continue;
 
-			DB_PRF(("memory from %p to %p (%u MB)\n",
+			DB_PRF(("IP27 memory from %p to %p (%u MB)\n",
 			    basepa, basepa + (np << 20), np));
 
 			np = atop(np << 20);	/* MB to pages */
@@ -369,8 +377,16 @@ kl_add_memory_ip27(int16_t nasid, int16_t *sizes, unsigned int cnt)
 				if (md->mem_first_page == 0)
 					break;
 
+				/*
+				 * Do not try to merge segments if they are
+				 * not covering the same node.
+				 */
+				if ((ptoa(md->mem_first_page) >> kl_n_shift) !=
+				    nasid)
+					continue;
+
 				if (md->mem_first_page == lp &&
-				    lp != atop(2 << 30)) {
+				    lp != atop(2UL << 30)) {
 					md->mem_first_page = fp;
 					physmem += np;
 					md = NULL;
@@ -378,7 +394,7 @@ kl_add_memory_ip27(int16_t nasid, int16_t *sizes, unsigned int cnt)
 				}
 
 				if (md->mem_last_page == fp &&
-				    fp != atop(2 << 30)) {
+				    fp != atop(2UL << 30)) {
 					md->mem_last_page = lp;
 					physmem += np;
 					md = NULL;
@@ -388,7 +404,7 @@ kl_add_memory_ip27(int16_t nasid, int16_t *sizes, unsigned int cnt)
 			if (descno != MAXMEMSEGS && md != NULL) {
 				md->mem_first_page = fp;
 				md->mem_last_page = lp;
-				md->mem_freelist = lp <= atop(2 << 30) ?
+				md->mem_freelist = lp <= atop(2UL << 30) ?
 				    VM_FREELIST_DMA32 : VM_FREELIST_DEFAULT;
 				physmem += np;
 				md = NULL;
@@ -422,9 +438,16 @@ kl_add_memory_ip35(int16_t nasid, int16_t *sizes, unsigned int cnt)
 
 	basepa = (paddr_t)nasid << kl_n_shift;
 	while (cnt-- != 0) {
+		/*
+		 * XXX Temporary until there is a way to cope with
+		 * XXX xbridge ATE shortage.
+		 */
+		if (basepa >= (2UL << 30))
+			return;
+
 		np = *sizes++;
 		if (np != 0) {
-			DB_PRF(("memory from %p to %p (%u MB)\n",
+			DB_PRF(("IP35 memory from %p to %p (%u MB)\n",
 			    basepa, basepa + (np << 20), np));
 
 			fp = atop(basepa);
@@ -460,8 +483,16 @@ kl_add_memory_ip35(int16_t nasid, int16_t *sizes, unsigned int cnt)
 				if (md->mem_first_page == 0)
 					break;
 
+				/*
+				 * Do not try to merge segments if they are
+				 * not covering the same node.
+				 */
+				if ((ptoa(md->mem_first_page) >> kl_n_shift) !=
+				    nasid)
+					continue;
+
 				if (md->mem_first_page == lp &&
-				    lp != atop(2 << 30)) {
+				    lp != atop(2UL << 30)) {
 					md->mem_first_page = fp;
 					physmem += np;
 					md = NULL;
@@ -469,7 +500,7 @@ kl_add_memory_ip35(int16_t nasid, int16_t *sizes, unsigned int cnt)
 				}
 
 				if (md->mem_last_page == fp &&
-				    fp != atop(2 << 30)) {
+				    fp != atop(2UL << 30)) {
 					md->mem_last_page = lp;
 					physmem += np;
 					md = NULL;
@@ -479,7 +510,7 @@ kl_add_memory_ip35(int16_t nasid, int16_t *sizes, unsigned int cnt)
 			if (descno != MAXMEMSEGS && md != NULL) {
 				md->mem_first_page = fp;
 				md->mem_last_page = lp;
-				md->mem_freelist = lp <= atop(2 << 30) ?
+				md->mem_freelist = lp <= atop(2UL << 30) ?
 				    VM_FREELIST_DMA32 : VM_FREELIST_DEFAULT;
 				physmem += np;
 				md = NULL;
@@ -495,6 +526,6 @@ kl_add_memory_ip35(int16_t nasid, int16_t *sizes, unsigned int cnt)
 				    atop(np) >> 20);
 			}
 		}
-		basepa += 1 << 30;	/* 1 GB */
+		basepa += 1UL << 30;	/* 1 GB */
 	}
 }

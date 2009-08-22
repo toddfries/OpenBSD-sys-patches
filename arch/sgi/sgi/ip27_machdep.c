@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.14 2009/06/13 21:48:03 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.19 2009/08/18 19:31:56 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -51,9 +51,12 @@ extern void (*md_halt)(int);
 
 paddr_t	ip27_widget_short(int16_t, u_int);
 paddr_t	ip27_widget_long(int16_t, u_int);
+paddr_t	ip27_widget_map(int16_t, u_int,bus_addr_t *, bus_size_t *);
 int	ip27_widget_id(int16_t, u_int, uint32_t *);
 
 void	ip27_halt(int);
+
+unsigned int xbow_long_shift = 29;
 
 static paddr_t io_base;
 static gda_t *gda;
@@ -84,8 +87,8 @@ ip27_setup()
 
 	ip35 = sys_config.system_type == SGI_O300;
 
-	xbow_widget_short = ip27_widget_short;
-	xbow_widget_long = ip27_widget_long;
+	xbow_widget_base = ip27_widget_short;
+	xbow_widget_map = ip27_widget_map;
 	xbow_widget_id = ip27_widget_id;
 
 	md_halt = ip27_halt;
@@ -95,7 +98,7 @@ ip27_setup()
 	 * or N mode.
 	 */
 
-	kl_init(ip35 ? HUBNI_IP35 : HUBNI_IP27);
+	kl_init(ip35);
 	if (kl_n_mode != 0)
 		xbow_long_shift = 28;
 
@@ -139,8 +142,8 @@ ip27_setup()
 	 * This assumes IOC3 is accessible through a widget small window.
 	 */
 
-	xbow_build_bus_space(&sys_config.console_io, 0, 8 /* whatever */, 0);
-	/* Constrain to a short window */
+	xbow_build_bus_space(&sys_config.console_io, 0, 8 /* whatever */);
+	/* Constrain to the correct window */
 	sys_config.console_io.bus_base =
 	    kl_get_console_base() & 0xffffffffff000000UL;
 
@@ -260,16 +263,105 @@ ip27_widget_short(int16_t nasid, u_int widget)
 	 * big window #6 (the last programmable big window).
 	 */
 	if (widget == 0)
-		return ip27_widget_long(nasid, 6);
+		return ip27_widget_long(nasid, IOTTE_SWIN0);
 
-	return ((uint64_t)(widget) << 24) | ((uint64_t)(nasid) << 32) | io_base;
+	return ((uint64_t)(widget) << 24) |
+	    ((uint64_t)(nasid) << kl_n_shift) | io_base;
 }
 
 paddr_t
-ip27_widget_long(int16_t nasid, u_int widget)
+ip27_widget_long(int16_t nasid, u_int window)
 {
-	return ((uint64_t)(widget + 1) << xbow_long_shift) |
-	    ((uint64_t)(nasid) << 32) | io_base;
+	return ((uint64_t)(window + 1) << xbow_long_shift) |
+	    ((uint64_t)(nasid) << kl_n_shift) | io_base;
+}
+
+paddr_t
+ip27_widget_map(int16_t nasid, u_int widget, bus_addr_t *offs, bus_size_t *len)
+{
+	uint tte, avail_tte;
+	uint64_t iotte;
+	paddr_t delta, start, end;
+	int s;
+
+	/*
+	 * On Origin systems, we can only have partial views of the widget
+	 * address space, due to the addressing scheme limiting each node's
+	 * address space to 31 to 33 bits.
+	 *
+	 * The largest window is 256MB or 512MB large, depending on the
+	 * mode the system is in (M/N).
+	 */
+
+	/*
+	 * Round the requested range to a large window boundary.
+	 */
+
+	start = *offs;
+	end = start + *len;
+
+	start = (start >> xbow_long_shift);
+	end = (end + (1 << xbow_long_shift) - 1) >> xbow_long_shift;
+
+	/*
+	 * See if an existing IOTTE covers part of the mapping we are asking
+	 * for.  If so, reuse it and truncate the caller's range.
+	 */
+
+	s = splhigh();	/* XXX or disable interrupts completely? */
+
+	avail_tte = IOTTE_MAX;
+	for (tte = 0; tte < IOTTE_MAX; tte++) {
+		if (tte == IOTTE_SWIN0)
+			continue;
+
+		iotte = IP27_RHUB_L(nasid, HUBIOBASE + HUBIO_IOTTE(tte));
+		if (IOTTE_WIDGET(iotte) == 0) {
+			if (avail_tte == IOTTE_MAX)
+				avail_tte = tte;
+			continue;
+		}
+		if (IOTTE_WIDGET(iotte) != widget)
+			continue;
+
+		if (IOTTE_OFFSET(iotte) < start ||
+		    (IOTTE_OFFSET(iotte) + 1) >= end)
+			continue;
+
+		/*
+		 * We found a matching IOTTE (an exact match if we asked for
+		 * less than the large window size, a partial match otherwise).
+		 * Reuse it (since we never unmap IOTTE at this point, there
+		 * is no need to maintain a reference count).
+		 */
+		break;
+	}
+
+	/*
+	 * If we found an unused IOTTE while searching above, program it
+	 * to map the beginning of the requested range.
+	 */
+
+	if (tte == IOTTE_MAX && avail_tte != IOTTE_MAX) {
+		tte = avail_tte;
+
+		/* XXX I don't understand why it's not device space. */
+		iotte = IOTTE(IOTTE_SPACE_MEMORY, widget, start);
+		IP27_RHUB_S(nasid, HUBIOBASE + HUBIO_IOTTE(tte), iotte);
+		(void)IP27_RHUB_L(nasid, HUBIOBASE + HUBIO_IOTTE(tte));
+	}
+
+	splx(s);
+
+	if (tte != IOTTE_MAX) {
+		delta = *offs - (start << xbow_long_shift);
+		/* *offs unmodified */
+		*len = (1 << xbow_long_shift) - delta;
+
+		return ip27_widget_long(nasid, tte) + delta;
+	}
+
+	return 0UL;
 }
 
 /*
@@ -289,7 +381,7 @@ ip27_widget_id(int16_t nasid, u_int widget, uint32_t *wid)
 	}
 
 	wpa = ip27_widget_short(nasid, widget);
-	if (guarded_read_4(wpa + WIDGET_ID, &id) != 0)
+	if (guarded_read_4(wpa + (WIDGET_ID | 4), &id) != 0)
 		return ENXIO;
 
 	if (wid != NULL)
@@ -305,27 +397,80 @@ ip27_widget_id(int16_t nasid, u_int widget, uint32_t *wid)
 void
 ip27_halt(int howto)
 {
+	uint32_t promop;
+	uint node;
+	uint64_t nibase, action;
+
 	/*
 	 * Even if ARCBios TLB and exception vectors are restored,
 	 * returning to ARCBios doesn't work.
 	 *
 	 * So, instead, send a reset through the network interface
-	 * of the Hub space.  Unfortunately there is no known way
-	 * to tell the PROM which action we want it to take afterwards.
+	 * of the Hub space.  Although there seems to be a way to tell
+	 * the PROM which action we want it to take afterwards, it
+	 * always reboots for me...
 	 */
 
-	if (howto & RB_HALT)
-		return;	/* caller will spin */
+	if (howto & RB_HALT) {
+#if 0
+		if (howto & RB_POWERDOWN)
+			promop = GDA_PROMOP_HALT;
+		else
+			promop = GDA_PROMOP_EIM;
+#else
+		if (howto & RB_POWERDOWN)
+			printf("Software powerdown not supported, "
+			    "please switch off power manually.\n");
+		for (;;) ;
+		/* NOTREACHED */
+#endif
+	} else
+		promop = GDA_PROMOP_REBOOT;
+
+	promop |= GDA_PROMOP_MAGIC | GDA_PROMOP_NO_DIAGS |
+	    GDA_PROMOP_NO_MEMINIT;
+
+#if 0
+	/*
+	 * That's what one would expect, based on the gda layout...
+	 */
+	gda->promop = promop;
+#else
+	/*
+	 * ...but the magic location is in a different castle.
+	 * And it's not even the same between IP27 and IP35.
+	 * Laugh, everyone! It's what SGI wants us to.
+	 */
+	if (ip35)
+		IP27_LHUB_S(HUBLBBASE_IP35 + 0x8010, promop);
+	else
+		IP27_LHUB_S(HUBPIBASE + 0x418, promop);
+#endif
 
 	if (ip35) {
-		IP27_LHUB_S(HUBNI_IP35 + HUBNI_RESET_ENABLE, NI_RESET_ENABLE);
-		IP27_LHUB_S(HUBNI_IP35 + HUBNI_RESET,
-		    NI_RESET_LOCAL | NI_RESET_ACTION);
+		nibase = HUBNIBASE_IP35;
+		action = NI_RESET_LOCAL_IP35 | NI_RESET_ACTION_IP35;
 	} else {
-		IP27_LHUB_S(HUBNI_IP27 + HUBNI_RESET_ENABLE, NI_RESET_ENABLE);
-		IP27_LHUB_S(HUBNI_IP27 + HUBNI_RESET,
-		    NI_RESET_LOCAL | NI_RESET_ACTION);
+		nibase = HUBNIBASE_IP27;
+		action = NI_RESET_LOCAL_IP27 | NI_RESET_ACTION_IP27;
 	}
+
+	/*
+	 * Reset all other nodes, if present.
+	 */
+
+	for (node = 0; node < maxnodes; node++) {
+		if (gda->nasid[node] < 0)
+			continue;
+		if (gda->nasid[node] == masternasid)
+			continue;
+		IP27_RHUB_S(gda->nasid[node],
+		    nibase + HUBNI_RESET_ENABLE, NI_RESET_ENABLE);
+		IP27_RHUB_S(gda->nasid[node],
+		    nibase + HUBNI_RESET, action);
+	}
+	IP27_LHUB_S(nibase + HUBNI_RESET_ENABLE, NI_RESET_ENABLE);
+	IP27_LHUB_S(nibase + HUBNI_RESET, action);
 }
 
 /*

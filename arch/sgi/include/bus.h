@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.15 2009/05/31 17:42:13 miod Exp $	*/
+/*	$OpenBSD: bus.h,v 1.21 2009/07/30 21:39:15 miod Exp $	*/
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB Sweden.  All rights reserved.
@@ -46,10 +46,8 @@ typedef struct mips_bus_space *bus_space_tag_t;
 typedef struct mips_bus_space bus_space_t;
 
 struct mips_bus_space {
-	struct extent	*bus_extent;
 	bus_addr_t	bus_base;
 	void		*bus_private;
-	int32_t		bus_reverse;
 	u_int8_t	(*_space_read_1)(bus_space_tag_t , bus_space_handle_t,
 			  bus_size_t);
 	void		(*_space_write_1)(bus_space_tag_t , bus_space_handle_t,
@@ -116,11 +114,11 @@ struct mips_bus_space {
 #define	bus_space_subregion(t, h, o, s, p) \
     (*(t)->_space_subregion)((t), (h), (o), (s), (p))
 
+#define	BUS_SPACE_MAP_CACHEABLE		0x01
+#define	BUS_SPACE_MAP_LINEAR		0x02
+#define	BUS_SPACE_MAP_PREFETCHABLE	0x04
+
 #define	bus_space_vaddr(t, h)	(*(t)->_space_vaddr)((t), (h))
-
-/* Helper function in pmap.c */
-int bus_mem_add_mapping(bus_addr_t, bus_size_t, int, bus_space_handle_t *);
-
 
 /*----------------------------------------------------------------------------*/
 #define bus_space_read_multi(n,m)					      \
@@ -300,12 +298,6 @@ bus_space_copy_8(void *v, bus_space_handle_t h1, bus_size_t o1,
 #define BUS_SPACE_BARRIER_READ  0x01		/* force read barrier */
 #define BUS_SPACE_BARRIER_WRITE 0x02		/* force write barrier */
 
-/* Compatibility defines */
-#define BUS_BARRIER_READ	BUS_SPACE_BARRIER_READ
-#define BUS_BARRIER_WRITE	BUS_SPACE_BARRIER_WRITE
-
-#define BUS_SPACE_MAP_LINEAR	0x02
-
 #define	BUS_DMA_WAITOK		0x000
 #define	BUS_DMA_NOWAIT		0x001
 #define	BUS_DMA_ALLOCNOW	0x002
@@ -370,6 +362,8 @@ struct machine_bus_dma_tag {
 		    struct uio *, int);
 	int	(*_dmamap_load_raw)(bus_dma_tag_t , bus_dmamap_t,
 		    bus_dma_segment_t *, int, bus_size_t, int);
+	int	(*_dmamap_load_buffer)(bus_dma_tag_t, bus_dmamap_t, void *,
+		    bus_size_t, struct proc *, int, paddr_t *, int *, int);
 	void	(*_dmamap_unload)(bus_dma_tag_t , bus_dmamap_t);
 	void	(*_dmamap_sync)(bus_dma_tag_t , bus_dmamap_t,
 		    bus_addr_t, bus_size_t, int);
@@ -432,6 +426,8 @@ int	_dmamap_load_mbuf(bus_dma_tag_t, bus_dmamap_t, struct mbuf *, int);
 int	_dmamap_load_uio(bus_dma_tag_t, bus_dmamap_t, struct uio *, int);
 int	_dmamap_load_raw(bus_dma_tag_t, bus_dmamap_t,
 	    bus_dma_segment_t *, int, bus_size_t, int);
+int	_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *,
+	    bus_size_t, struct proc *, int, paddr_t *, int *, int);
 void	_dmamap_unload(bus_dma_tag_t, bus_dmamap_t);
 void	_dmamap_sync(bus_dma_tag_t, bus_dmamap_t, bus_addr_t,
 	    bus_size_t, int);

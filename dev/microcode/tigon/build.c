@@ -1,4 +1,4 @@
-/*	$OpenBSD: build.c,v 1.3 2005/05/17 18:48:52 jason Exp $	*/
+/*	$OpenBSD: build.c,v 1.5 2009/08/07 00:10:17 martynas Exp $	*/
 
 /*
  * Copyright (c) 2004 Theo de Raadt <deraadt@openbsd.org>
@@ -17,8 +17,12 @@
  */
 #include <sys/types.h>
 #include <dev/pci/if_tivar.h>
+#include <err.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "ti_fw.h"
 #include "ti_fw2.h"
@@ -37,11 +41,12 @@ output(const char *name,
     const u_int32_t *FwData, int sizedata)
 {
 	struct	tigon_firmware tfproto, *tf;
-	int len, fd, i;
+	int len, fd, i, cnt;
+	u_int32_t *b;
 	ssize_t rlen;
 
-	len = sizeof tf - sizeof(tfproto.data) + sizetext + sizerodata +
-	    sizedata;
+	len = sizeof(tfproto) - sizeof(tfproto.data) + sizetext +
+	    sizerodata + sizedata;
 	tf = (struct tigon_firmware *)malloc(len);
 	bzero(tf, len);
 
@@ -72,6 +77,11 @@ output(const char *name,
 	bcopy(FwText, &tf->data[tf->FwTextOffset], FwTextLen);
 	bcopy(FwRodata, &tf->data[tf->FwRodataOffset], FwRodataLen);
 	bcopy(FwData, &tf->data[tf->FwDataOffset], FwDataLen);
+
+	b = (u_int32_t *)tf;
+	cnt = len / sizeof(u_int32_t);
+	for (i = 0; i < cnt; i++)
+		 b[i] = htole32(b[i]);
 
 	printf("creating %s length %d [%d+%d+%d] [%d+%d+%d]\n",
 	    name, len, FwTextLen, FwRodataLen, FwDataLen,

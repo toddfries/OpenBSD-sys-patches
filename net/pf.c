@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.651 2009/06/08 03:56:14 henning Exp $ */
+/*	$OpenBSD: pf.c,v 1.657 2009/07/28 11:22:33 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -195,7 +195,7 @@ int			 pf_test_state_udp(struct pf_state **, int,
 int			 pf_icmp_state_lookup(struct pf_state_key_cmp *,
 			    struct pf_pdesc *, struct pf_state **, struct mbuf *,
 			    int, struct pfi_kif *, u_int16_t, u_int16_t,
-			    int, int *, int);
+			    int, int *, int, int);
 int			 pf_test_state_icmp(struct pf_state **, int,
 			    struct pfi_kif *, struct mbuf *, int,
 			    void *, struct pf_pdesc *, u_short *);
@@ -2676,6 +2676,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 
 	bzero(&act, sizeof(act));
 	act.rtableid = -1;
+	SLIST_INIT(&rules);
 
 	if (direction == PF_IN && pf_check_congestion(ifq)) {
 		REASON_SET(&reason, PFRES_CONGEST);
@@ -2798,6 +2799,9 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 			break;
 #ifdef INET
 		case IPPROTO_ICMP:
+			if (af != AF_INET)
+				break;
+
 			if (PF_ANEQ(saddr, &nk->addr[pd->sidx], AF_INET))
 				pf_change_a(&saddr->v4.s_addr, pd->ip_sum,
 				    nk->addr[pd->sidx].v4.s_addr, 0);
@@ -2819,6 +2823,9 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 #endif /* INET */
 #ifdef INET6
 		case IPPROTO_ICMPV6:
+			if (af != AF_INET6)
+				break;
+
 			if (PF_ANEQ(saddr, &nk->addr[pd->sidx], AF_INET6))
 				pf_change_a6(saddr, &pd->hdr.icmp6->icmp6_cksum,
 				    &nk->addr[pd->sidx], 0);
@@ -2865,7 +2872,6 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 		pd->nat_rule = nr;
 	}
 
-	SLIST_INIT(&rules);
 	while (r != NULL) {
 		r->evaluations++;
 		if (pfi_kif_match(r->kif, kif) == r->ifnot)
@@ -2931,8 +2937,12 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 			if (r->anchor == NULL) {
 				lastr = r;
 				if (r->action == PF_MATCH) {
-					ri = pool_get(&pf_rule_item_pl,
-					    PR_NOWAIT);
+					if ((ri = pool_get(&pf_rule_item_pl,
+					    PR_NOWAIT)) == NULL) {
+						REASON_SET(&reason,
+						    PFRES_MEMORY);
+						goto cleanup;
+					}
 					ri->r = r;
 					/* order is irrelevant */
 					SLIST_INSERT_HEAD(&rules, ri, entry);
@@ -3060,6 +3070,10 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 			pool_put(&pf_state_key_pl, sk);
 		if (nk != NULL)
 			pool_put(&pf_state_key_pl, nk);
+		while ((ri = SLIST_FIRST(&rules))) {
+			SLIST_REMOVE_HEAD(&rules, entry);
+			pool_put(&pf_rule_item_pl, ri);
+		}
 	}
 
 	/* copy back packet headers if we performed NAT operations */
@@ -3087,6 +3101,11 @@ cleanup:
 		pool_put(&pf_state_key_pl, sk);
 	if (nk != NULL)
 		pool_put(&pf_state_key_pl, nk);
+	while ((ri = SLIST_FIRST(&rules))) {
+		SLIST_REMOVE_HEAD(&rules, entry);
+		pool_put(&pf_rule_item_pl, ri);
+	}
+
 	return (PF_DROP);
 }
 
@@ -4044,7 +4063,8 @@ pf_test_state_udp(struct pf_state **state, int direction, struct pfi_kif *kif,
 int
 pf_icmp_state_lookup(struct pf_state_key_cmp *key, struct pf_pdesc *pd,
     struct pf_state **state, struct mbuf *m, int direction, struct pfi_kif *kif,
-    u_int16_t icmpid, u_int16_t type, int icmp_dir, int *iidx, int multi)
+    u_int16_t icmpid, u_int16_t type, int icmp_dir, int *iidx, int multi,
+    int inner)
 {
 	key->af = pd->af;
 	key->proto = pd->proto;
@@ -4081,7 +4101,8 @@ pf_icmp_state_lookup(struct pf_state_key_cmp *key, struct pf_pdesc *pd,
 
 	/* Is this ICMP message flowing in right direction? */
 	if ((*state)->rule.ptr->type && 
-	    (((*state)->direction == direction) ?
+	    (((!inner && (*state)->direction == direction) ||
+	    (inner && (*state)->direction != direction)) ?
 	    PF_IN : PF_OUT) != icmp_dir) {
 		if (pf_status.debug >= PF_DEBUG_MISC) {
 			printf("pf: icmp type %d in wrong direction (%d): ",
@@ -4129,13 +4150,13 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 		 */
 		ret = pf_icmp_state_lookup(&key, pd, state, m, direction,
 		    kif, virtual_id, virtual_type, icmp_dir, &iidx,
-		    PF_ICMP_MULTI_NONE);
+		    PF_ICMP_MULTI_NONE, 0);
 		if (ret >= 0) {
 			if (ret == PF_DROP && pd->af == AF_INET6 &&
 			    icmp_dir == PF_OUT) {
 				ret = pf_icmp_state_lookup(&key, pd, state, m,
 				    direction, kif, virtual_id, virtual_type,
-				    icmp_dir, &iidx, multi);
+				    icmp_dir, &iidx, multi, 0);
 				if (ret >= 0)
 					return (ret);
 			} else
@@ -4526,7 +4547,7 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 
 			ret = pf_icmp_state_lookup(&key, &pd2, state, m,
 			    direction, kif, virtual_id, virtual_type,
-			    icmp_dir, &iidx, PF_ICMP_MULTI_NONE);
+			    icmp_dir, &iidx, PF_ICMP_MULTI_NONE, 1);
 			if (ret >= 0)
 				return (ret);
 
@@ -4581,14 +4602,14 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 			    &icmp_dir, &multi, &virtual_id, &virtual_type);
 			ret = pf_icmp_state_lookup(&key, &pd2, state, m,
 			    direction, kif, virtual_id, virtual_type,
-			    icmp_dir, &iidx, PF_ICMP_MULTI_NONE);
+			    icmp_dir, &iidx, PF_ICMP_MULTI_NONE, 1);
 			if (ret >= 0) {
 				if (ret == PF_DROP && pd->af == AF_INET6 &&
 				    icmp_dir == PF_OUT) {
 					ret = pf_icmp_state_lookup(&key, pd,
 					    state, m, direction, kif,
 					    virtual_id, virtual_type,
-					    icmp_dir, &iidx, multi);
+					    icmp_dir, &iidx, multi, 1);
 					if (ret >= 0)
 						return (ret);
 				} else
@@ -5562,14 +5583,12 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 		break;
 	}
 
-#ifdef INET6
 	case IPPROTO_ICMPV6: {
 		action = PF_DROP;
 		DPFPRINTF(PF_DEBUG_MISC,
 		    ("pf: dropping IPv4 packet with ICMPv6 payload\n"));
 		goto done;
 	}
-#endif
 
 	default:
 		action = pf_test_state_other(&s, dir, kif, m, &pd);
@@ -5915,6 +5934,13 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
 			    m, off, h, &pd, &a, &ruleset, &ip6intrq);
+
+		if (s) {
+			if (s->max_mss)
+				pf_normalize_mss(m, off, &pd, s->max_mss);
+		} else if (r->max_mss)
+			pf_normalize_mss(m, off, &pd, r->max_mss);
+
 		break;
 	}
 

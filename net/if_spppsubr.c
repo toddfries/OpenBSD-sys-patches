@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_spppsubr.c,v 1.75 2009/02/18 08:36:20 canacar Exp $	*/
+/*	$OpenBSD: if_spppsubr.c,v 1.77 2009/07/27 11:40:59 blambert Exp $	*/
 /*
  * Synchronous PPP/Cisco link level subroutines.
  * Keepalive protocol implemented in both Cisco and PPP modes.
@@ -521,6 +521,9 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 		return;
 	}
 
+	/* mark incomming routing domain */
+	m->m_pkthdr.rdomain = ifp->if_rdomain;
+
 	if (sp->pp_flags & PP_NOFRAMING) {
 		memcpy(&ht.protocol, mtod(m, char *), sizeof(ht.protocol));
 		m_adj(m, 2);
@@ -694,6 +697,16 @@ sppp_output(struct ifnet *ifp, struct mbuf *m,
 	struct timeval tv;
 	int s, len, rv = 0;
 	u_int16_t protocol;
+
+#ifdef DIAGNOSTIC
+	if (ifp->if_rdomain != m->m_pkthdr.rdomain) {
+		printf("%s: trying to send packet on wrong domain. "
+		    "%d vs. %d, AF %d\n", ifp->if_xname, ifp->if_rdomain,
+		    m->m_pkthdr.rdomain, dst->sa_family);
+		m_freem (m);
+		return (ENETDOWN);
+	}
+#endif
 
 	s = splnet();
 
@@ -908,7 +921,7 @@ sppp_attach(struct ifnet *ifp)
 		keepalive_ch = timeout(sppp_keepalive, 0, hz * 10);
 #elif defined(__OpenBSD__)
 		timeout_set(&keepalive_ch, sppp_keepalive, NULL);
-		timeout_add(&keepalive_ch, hz * 10);
+		timeout_add_sec(&keepalive_ch, 10);
 #endif
 	}
 
@@ -4023,7 +4036,7 @@ sppp_chap_tlu(struct sppp *sp)
 #if defined (__FreeBSD__)
 		sp->ch[IDX_CHAP] = timeout(chap.TO, (void *)sp, i * hz);
 #elif defined(__OpenBSD__)
-		timeout_add(&sp->ch[IDX_CHAP], i * hz);
+		timeout_add_sec(&sp->ch[IDX_CHAP], i);
 #endif
 	}
 
@@ -4587,7 +4600,7 @@ sppp_keepalive(void *dummy)
 	keepalive_ch = timeout(sppp_keepalive, 0, hz * 10);
 #endif
 #if defined (__OpenBSD__)
-	timeout_add(&keepalive_ch, hz * 10);
+	timeout_add_sec(&keepalive_ch, 10);
 #endif
 }
 

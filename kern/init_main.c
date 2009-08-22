@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.159 2009/04/19 17:53:38 deraadt Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.162 2009/08/11 18:43:33 blambert Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -99,6 +99,7 @@
 extern void nfs_init(void);
 #endif
 
+#include "mpath.h"
 #include "vscsi.h"
 #include "softraid.h"
 
@@ -444,6 +445,9 @@ main(void *framep)
 
 	dostartuphooks();
 
+#if NMPATH > 0
+	config_rootfound("mpath", NULL);
+#endif
 #if NVSCSI > 0
 	config_rootfound("vscsi", NULL);
 #endif
@@ -463,7 +467,7 @@ main(void *framep)
 	if (VFS_ROOT(CIRCLEQ_FIRST(&mountlist), &rootvnode))
 		panic("cannot find root vnode");
 	p->p_fd->fd_cdir = rootvnode;
-	VREF(p->p_fd->fd_cdir);
+	vref(p->p_fd->fd_cdir);
 	VOP_UNLOCK(rootvnode, 0, p);
 	p->p_fd->fd_rdir = NULL;
 
@@ -473,7 +477,7 @@ main(void *framep)
 	 * share proc0's CWD info.
 	 */
 	initproc->p_fd->fd_cdir = rootvnode;
-	VREF(initproc->p_fd->fd_cdir);
+	vref(initproc->p_fd->fd_cdir);
 	initproc->p_fd->fd_rdir = NULL;
 
 	/*
@@ -537,8 +541,11 @@ main(void *framep)
 	start_init_exec = 1;
 	wakeup((void *)&start_init_exec);
 
-	/* The scheduler is an infinite loop. */
-	uvm_scheduler();
+        /*
+         * proc0: nothing to do, back to sleep
+         */
+        while (1)
+                tsleep(&proc0, PVM, "scheduler", 0);
 	/* NOTREACHED */
 }
 

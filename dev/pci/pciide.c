@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.295 2009/05/31 04:42:16 jsg Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.297 2009/08/02 09:48:53 sthen Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -639,6 +639,10 @@ const struct pciide_product_desc pciide_via_products[] =  {
 	  apollo_chip_map
 	},
 	{ PCI_PRODUCT_VIATECH_VX700_IDE, /* VIA VX700 IDE */
+	  0,
+	  apollo_chip_map
+	},
+	{ PCI_PRODUCT_VIATECH_VX855_IDE, /* VIA VX855 IDE */
 	  0,
 	  apollo_chip_map
 	},
@@ -2728,7 +2732,7 @@ piix3_4_setup_channel(struct channel_softc *chp)
 			} else {
 				sidetim |= piix_setup_sidetim_timings(
 					drvp->DMA_mode, 1, channel);
-				idetim =PIIX_IDETIM_SET(idetim,
+				idetim = PIIX_IDETIM_SET(idetim,
 				    PIIX_IDETIM_SITRE, channel);
 			}
 		}
@@ -2742,7 +2746,7 @@ pio:		/* use PIO mode */
 		} else {
 			sidetim |= piix_setup_sidetim_timings(
 				drvp->PIO_mode, 0, channel);
-			idetim =PIIX_IDETIM_SET(idetim,
+			idetim = PIIX_IDETIM_SET(idetim,
 			    PIIX_IDETIM_SITRE, channel);
 		}
 	}
@@ -3050,7 +3054,8 @@ apollo_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 
 	if ((PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VT6410) ||
 	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_CX700_IDE) ||
-	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VX700_IDE)) { 
+	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VX700_IDE) ||
+	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VX855_IDE)) { 
 		printf(": ATA133");
 		sc->sc_wdcdev.UDMA_cap = 6;
 	} else {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vfsops.c,v 1.83 2009/06/04 00:31:42 blambert Exp $	*/
+/*	$OpenBSD: nfs_vfsops.c,v 1.88 2009/08/13 15:18:16 blambert Exp $	*/
 /*	$NetBSD: nfs_vfsops.c,v 1.46.4.1 1996/05/25 22:40:35 fvdl Exp $	*/
 
 /*
@@ -105,15 +105,17 @@ nfs_statfs(mp, sbp, p)
 {
 	struct vnode *vp;
 	struct nfs_statfs *sfp = NULL;
+	struct nfsm_info	info;
 	u_int32_t *tl;
 	int32_t t1;
-	caddr_t dpos, cp2;
+	caddr_t cp2;
 	struct nfsmount *nmp = VFSTONFS(mp);
-	int error = 0, v3 = (nmp->nm_flag & NFSMNT_NFSV3), retattr;
-	struct mbuf *mreq, *mrep = NULL, *md, *mb;
+	int error = 0, retattr;
 	struct ucred *cred;
 	struct nfsnode *np;
 	u_quad_t tquad;
+
+	info.nmi_v3 = (nmp->nm_flag & NFSMNT_NFSV3);
 
 	error = nfs_nget(mp, (nfsfh_t *)nmp->nm_fh, nmp->nm_fhsize, &np);
 	if (error)
@@ -121,28 +123,25 @@ nfs_statfs(mp, sbp, p)
 	vp = NFSTOV(np);
 	cred = crget();
 	cred->cr_ngroups = 0;
-	if (v3 && (nmp->nm_flag & NFSMNT_GOTFSINFO) == 0)
+	if (info.nmi_v3 && (nmp->nm_flag & NFSMNT_GOTFSINFO) == 0)
 		(void)nfs_fsinfo(nmp, vp, cred, p);
 	nfsstats.rpccnt[NFSPROC_FSSTAT]++;
-	mb = mreq = nfsm_reqhead(NFSX_FH(v3));
-	nfsm_fhtom(&mb, vp, v3);
-	if ((error = nfs_request(vp, mreq, NFSPROC_FSSTAT, p, cred, &mrep,
-	    &md, &dpos)) != 0) {
-		if (error & NFSERR_RETERR)
-			error &= ~NFSERR_RETERR;
-		else
-			goto nfsmout;
-	}
-	if (v3)
+	info.nmi_mb = info.nmi_mreq = nfsm_reqhead(NFSX_FH(info.nmi_v3));
+	nfsm_fhtom(&info, vp, info.nmi_v3);
+
+	info.nmi_procp = p;
+	info.nmi_cred = cred;
+	error = nfs_request(vp, NFSPROC_FSSTAT, &info);
+	if (info.nmi_v3)
 		nfsm_postop_attr(vp, retattr);
 	if (error) {
-		if (mrep != NULL)
-			m_freem(mrep);
+		m_freem(info.nmi_mrep);
 		goto nfsmout;
 	}
-	nfsm_dissect(sfp, struct nfs_statfs *, NFSX_STATFS(v3));
+
+	nfsm_dissect(sfp, struct nfs_statfs *, NFSX_STATFS(info.nmi_v3));
 	sbp->f_iosize = min(nmp->nm_rsize, nmp->nm_wsize);
-	if (v3) {
+	if (info.nmi_v3) {
 		sbp->f_bsize = NFS_FABLKSIZE;
 		tquad = fxdr_hyper(&sfp->sf_tbytes);
 		sbp->f_blocks = tquad / (u_quad_t)NFS_FABLKSIZE;
@@ -166,7 +165,7 @@ nfs_statfs(mp, sbp, p)
 		sbp->f_ffree = 0;
 	}
 	copy_statfs_info(sbp, mp);
-	m_freem(mrep);
+	m_freem(info.nmi_mrep);
 nfsmout: 
 	vrele(vp);
 	crfree(cred);
@@ -184,57 +183,59 @@ nfs_fsinfo(nmp, vp, cred, p)
 	struct proc *p;
 {
 	struct nfsv3_fsinfo *fsp;
+	struct nfsm_info	info;
 	int32_t t1;
 	u_int32_t *tl, pref, max;
-	caddr_t dpos, cp2;
+	caddr_t cp2;
 	int error = 0, retattr;
-	struct mbuf *mreq, *mrep, *md, *mb;
 
 	nfsstats.rpccnt[NFSPROC_FSINFO]++;
-	mb = mreq = nfsm_reqhead(NFSX_FH(1));
-	nfsm_fhtom(&mb, vp, 1);
-	if ((error = nfs_request(vp, mreq, NFSPROC_FSINFO, p, cred, &mrep,
-	    &md, &dpos)) != 0) {
-		if (error & NFSERR_RETERR)
-			error &= ~NFSERR_RETERR;
-		else
-			goto nfsmout;
-	}
+	info.nmi_mb = info.nmi_mreq = nfsm_reqhead(NFSX_FH(1));
+	nfsm_fhtom(&info, vp, 1);
+
+	info.nmi_procp = p;
+	info.nmi_cred = cred;
+	error = nfs_request(vp, NFSPROC_FSINFO, &info);
+
 	nfsm_postop_attr(vp, retattr);
-	if (!error) {
-		nfsm_dissect(fsp, struct nfsv3_fsinfo *, NFSX_V3FSINFO);
-		pref = fxdr_unsigned(u_int32_t, fsp->fs_wtpref);
-		if (pref < nmp->nm_wsize)
-			nmp->nm_wsize = (pref + NFS_FABLKSIZE - 1) &
-				~(NFS_FABLKSIZE - 1);
-		max = fxdr_unsigned(u_int32_t, fsp->fs_wtmax);
-		if (max < nmp->nm_wsize) {
-			nmp->nm_wsize = max & ~(NFS_FABLKSIZE - 1);
-			if (nmp->nm_wsize == 0)
-				nmp->nm_wsize = max;
-		}
-		pref = fxdr_unsigned(u_int32_t, fsp->fs_rtpref);
-		if (pref < nmp->nm_rsize)
-			nmp->nm_rsize = (pref + NFS_FABLKSIZE - 1) &
-				~(NFS_FABLKSIZE - 1);
-		max = fxdr_unsigned(u_int32_t, fsp->fs_rtmax);
-		if (max < nmp->nm_rsize) {
-			nmp->nm_rsize = max & ~(NFS_FABLKSIZE - 1);
-			if (nmp->nm_rsize == 0)
-				nmp->nm_rsize = max;
-		}
-		pref = fxdr_unsigned(u_int32_t, fsp->fs_dtpref);
-		if (pref < nmp->nm_readdirsize)
-			nmp->nm_readdirsize = (pref + NFS_DIRBLKSIZ - 1) &
-				~(NFS_DIRBLKSIZ - 1);
-		if (max < nmp->nm_readdirsize) {
-			nmp->nm_readdirsize = max & ~(NFS_DIRBLKSIZ - 1);
-			if (nmp->nm_readdirsize == 0)
-				nmp->nm_readdirsize = max;
-		}
-		nmp->nm_flag |= NFSMNT_GOTFSINFO;
+	if (error) {
+		m_freem(info.nmi_mrep);
+		goto nfsmout;
 	}
-	m_freem(mrep);
+
+	nfsm_dissect(fsp, struct nfsv3_fsinfo *, NFSX_V3FSINFO);
+	pref = fxdr_unsigned(u_int32_t, fsp->fs_wtpref);
+	if (pref < nmp->nm_wsize)
+		nmp->nm_wsize = (pref + NFS_FABLKSIZE - 1) &
+			~(NFS_FABLKSIZE - 1);
+	max = fxdr_unsigned(u_int32_t, fsp->fs_wtmax);
+	if (max < nmp->nm_wsize) {
+		nmp->nm_wsize = max & ~(NFS_FABLKSIZE - 1);
+		if (nmp->nm_wsize == 0)
+			nmp->nm_wsize = max;
+	}
+	pref = fxdr_unsigned(u_int32_t, fsp->fs_rtpref);
+	if (pref < nmp->nm_rsize)
+		nmp->nm_rsize = (pref + NFS_FABLKSIZE - 1) &
+			~(NFS_FABLKSIZE - 1);
+	max = fxdr_unsigned(u_int32_t, fsp->fs_rtmax);
+	if (max < nmp->nm_rsize) {
+		nmp->nm_rsize = max & ~(NFS_FABLKSIZE - 1);
+		if (nmp->nm_rsize == 0)
+			nmp->nm_rsize = max;
+	}
+	pref = fxdr_unsigned(u_int32_t, fsp->fs_dtpref);
+	if (pref < nmp->nm_readdirsize)
+		nmp->nm_readdirsize = (pref + NFS_DIRBLKSIZ - 1) &
+			~(NFS_DIRBLKSIZ - 1);
+	if (max < nmp->nm_readdirsize) {
+		nmp->nm_readdirsize = max & ~(NFS_DIRBLKSIZ - 1);
+		if (nmp->nm_readdirsize == 0)
+			nmp->nm_readdirsize = max;
+	}
+	nmp->nm_flag |= NFSMNT_GOTFSINFO;
+
+	m_freem(info.nmi_mrep);
 nfsmout: 
 	return (error);
 }
@@ -544,7 +545,7 @@ nfs_decode_args(nmp, argp, nargp)
 	if (nmp->nm_so && adjsock) {
 		nfs_disconnect(nmp);
 		if (nmp->nm_sotype == SOCK_DGRAM)
-			while (nfs_connect(nmp, (struct nfsreq *)0)) {
+			while (nfs_connect(nmp, NULL)) {
 				printf("nfs_args: retrying connect\n");
 				(void) tsleep((caddr_t)&lbolt,
 					      PSOCK, "nfscon", 0);
@@ -697,6 +698,8 @@ mountnfs(argp, mp, nam, pth, hst)
 	nmp->nm_nam = nam;
 	nfs_decode_args(nmp, argp, &mp->mnt_stat.mount_info.nfs_args);
 
+	RB_INIT(&nmp->nm_ntree);
+
 	/* Set up the sockets and per-host congestion */
 	nmp->nm_sotype = argp->sotype;
 	nmp->nm_soproto = argp->proto;
@@ -706,7 +709,7 @@ mountnfs(argp, mp, nam, pth, hst)
 	 * the first request, in case the server is not responding.
 	 */
 	if (nmp->nm_sotype == SOCK_DGRAM &&
-	    (error = nfs_connect(nmp, (struct nfsreq *)0)))
+	    (error = nfs_connect(nmp, NULL)))
 		goto bad;
 
 	/*

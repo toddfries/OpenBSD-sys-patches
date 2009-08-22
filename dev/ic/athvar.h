@@ -1,4 +1,4 @@
-/*      $OpenBSD: athvar.h,v 1.25 2008/08/29 11:15:32 reyk Exp $  */
+/*      $OpenBSD: athvar.h,v 1.27 2009/08/10 20:29:54 deraadt Exp $  */
 /*	$NetBSD: athvar.h,v 1.10 2004/08/10 01:03:53 dyoung Exp $	*/
 
 /*-
@@ -40,6 +40,8 @@
  */
 #ifndef _DEV_ATH_ATHVAR_H
 #define _DEV_ATH_ATHVAR_H
+
+#ifdef _KERNEL
 
 #include <net80211/ieee80211_radiotap.h>
 #include <dev/ic/ar5xxx.h>
@@ -118,8 +120,6 @@ struct ath_stats {
 	u_int32_t	ast_rate_raise;	/* rate control raised xmit rate */
 	u_int32_t	ast_rate_drop;	/* rate control dropped xmit rate */
 };
-
-#define	SIOCGATHSTATS	_IOWR('i', 137, struct ifreq)
 
 /*
  * Radio capture format.
@@ -307,7 +307,6 @@ struct ath_softc {
 	HAL_MIB_STATS		sc_mib_stats;	/* MIB counter statistics */
 
 #ifndef __FreeBSD__
-	void			*sc_sdhook;	/* shutdown hook */
 	void			*sc_powerhook;	/* power management hook */
 	u_int			sc_flags;	/* misc flags */
 #endif
@@ -414,7 +413,6 @@ void	ath_suspend(struct ath_softc *, int);
 int	ath_activate(struct device *, enum devact);
 void	ath_power(int, void *);
 #endif
-void	ath_shutdown(void *);
 int	ath_intr(void *);
 int	ath_enable(struct ath_softc *);
 
@@ -556,5 +554,9 @@ int	ath_enable(struct ath_softc *);
 	((*(_ah)->ah_fill_tx_desc)((_ah), (_ds), (_l), (_first), (_last)))
 #define	ath_hal_proc_tx_desc(_ah, _ds) \
 	((*(_ah)->ah_proc_tx_desc)((_ah), (_ds)))
+
+#endif /* _KERNEL */
+
+#define	SIOCGATHSTATS	_IOWR('i', 137, struct ifreq)
 
 #endif /* _DEV_ATH_ATHVAR_H */

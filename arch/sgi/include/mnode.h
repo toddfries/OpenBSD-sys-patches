@@ -1,4 +1,4 @@
-/*	$OpenBSD: mnode.h,v 1.7 2009/06/13 18:47:30 miod Exp $ */
+/*	$OpenBSD: mnode.h,v 1.9 2009/07/11 19:56:02 miod Exp $ */
 
 /*
  * Copyright (c) 2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -373,7 +373,7 @@ typedef struct gda {
 	uint32_t	 magic;			/* GDA_MAGIC */
 	uint16_t	 ver;
 	uint16_t	 masternasid;		/* NASID of the master cpu */
-	uint32_t	 promop;
+	uint32_t	 promop;		/* Request to pass to PROM */
 	uint32_t	 switches;
 	void		*tlb_handlers[3];
 	uint		 partid;
@@ -385,6 +385,18 @@ typedef struct gda {
 	int16_t		 nasid[GDA_MAXNODES];	/* NASID of connected nodes */
 } gda_t;
 
+#define	GDA_PROMOP_MAGIC	0x0ead0000
+/* commands */
+#define	GDA_PROMOP_HALT		0x00000010
+#define	GDA_PROMOP_POWERDOWN	0x00000020
+#define	GDA_PROMOP_RESTART	0x00000030
+#define	GDA_PROMOP_REBOOT	0x00000040
+#define	GDA_PROMOP_EIM		0x00000050
+/* options */
+#define	GDA_PROMOP_NO_DIAGS	0x00000100	/* don't run diagnostics */
+#define	GDA_PROMOP_NO_MEMINIT	0x00000200	/* don't initialize memory */
+#define	GDA_PROMOP_NO_DEVINIT	0x00000400	/* don't initialize devices */
+
 /* ========== */
 
 /*
@@ -392,7 +404,7 @@ typedef struct gda {
  */
 
 vaddr_t	kl_get_console_base(void);
-void	kl_init(uint64_t);
+void	kl_init(int);
 void	kl_scan_config(int);
 void	kl_scan_done(void);
 int	kl_scan_node(int, uint, int (*)(lboard_t *, void *), void *);

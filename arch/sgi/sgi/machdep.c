@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.74 2009/06/15 17:01:26 beck Exp $ */
+/*	$OpenBSD: machdep.c,v 1.82 2009/08/19 12:33:06 jasper Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -27,33 +27,24 @@
  */
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/signalvar.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/buf.h>
 #include <sys/reboot.h>
 #include <sys/conf.h>
 #include <sys/file.h>
-#include <sys/malloc.h>
-#include <sys/mbuf.h>
 #include <sys/msgbuf.h>
-#include <sys/ioctl.h>
-#include <sys/tty.h>
 #include <sys/user.h>
 #include <sys/exec.h>
 #include <sys/sysctl.h>
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 #include <sys/exec_elf.h>
-#include <sys/extent.h>
 #ifdef SYSVSHM
 #include <sys/shm.h>
 #endif
 #ifdef SYSVSEM
 #include <sys/sem.h>
-#endif
-#ifdef SYSVMSG
-#include <sys/msg.h>
 #endif
 
 #include <uvm/uvm_extern.h>
@@ -105,8 +96,6 @@ int	bufcachepercent = BUFCACHEPERCENT;
 vm_map_t exec_map;
 vm_map_t phys_map;
 
-int	extent_malloc_flags = 0;
-
 caddr_t	msgbufbase;
 vaddr_t	uncached_base;
 
@@ -133,7 +122,6 @@ caddr_t	mips_init(int, void *, caddr_t);
 void	initcpu(void);
 void	dumpsys(void);
 void	dumpconf(void);
-caddr_t	allocsys(caddr_t);
 
 static void dobootopts(int, void *);
 static int atoi(const char *, int, const char **);
@@ -153,7 +141,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 {
 	char *cp;
 	int i;
-	caddr_t sd;
 	u_int cputype;
 	vaddr_t tlb_handler, xtlb_handler;
 	extern char start[], edata[], end[];
@@ -460,7 +447,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 		Mips10k_ConfigCache();
 		sys_config._SyncCache = Mips10k_SyncCache;
 		sys_config._InvalidateICache = Mips10k_InvalidateICache;
-		sys_config._InvalidateICachePage = Mips10k_InvalidateICachePage;
 		sys_config._SyncDCachePage = Mips10k_SyncDCachePage;
 		sys_config._HitSyncDCache = Mips10k_HitSyncDCache;
 		sys_config._IOSyncDCache = Mips10k_IOSyncDCache;
@@ -471,7 +457,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 		Mips5k_ConfigCache();
 		sys_config._SyncCache = Mips5k_SyncCache;
 		sys_config._InvalidateICache = Mips5k_InvalidateICache;
-		sys_config._InvalidateICachePage = Mips5k_InvalidateICachePage;
 		sys_config._SyncDCachePage = Mips5k_SyncDCachePage;
 		sys_config._HitSyncDCache = Mips5k_HitSyncDCache;
 		sys_config._IOSyncDCache = Mips5k_IOSyncDCache;
@@ -509,13 +494,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	    (struct user *)pmap_steal_memory(USPACE, NULL, NULL);
 	proc0.p_md.md_regs = (struct trap_frame *)&proc0paddr->u_pcb.pcb_regs;
 	tlb_set_pid(1);
-
-	/*
-	 * Allocate system data structures.
-	 */
-	i = (vsize_t)allocsys(NULL);
-	sd = (caddr_t)pmap_steal_memory(i, NULL, NULL);
-	allocsys(sd);
 
 	/*
 	 * Bootstrap VM system.
@@ -577,28 +555,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	 * Return new stack pointer.
 	 */
 	return ((caddr_t)proc0paddr + USPACE - 64);
-}
-
-/*
- * Allocate space for system data structures. Doesn't need to be mapped.
- */
-caddr_t
-allocsys(caddr_t v)
-{
-	caddr_t start;
-
-	start = v;
-
-#define	valloc(name, type, num) \
-	    (name) = (type *)v; v = (caddr_t)((name)+(num))
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return(v);
 }
 
 /*
@@ -762,19 +718,6 @@ cpu_startup()
 	    ptoa(rsvdmem)/1024/1024);
 
 	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-
-	/* Restrict to at most 25% filled kvm. */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
-
-	/*
 	 * Allocate a submap for exec arguments. This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
@@ -790,8 +733,6 @@ cpu_startup()
 #endif
 	printf("avail mem = %u (%uMB)\n", ptoa(uvmexp.free),
 	    ptoa(uvmexp.free)/1024/1024);
-
-	extent_malloc_flags = EX_MALLOCOK;
 
 	/*
 	 * Set up CPU-specific registers, cache, etc.
@@ -1028,7 +969,7 @@ dumpsys()
 	if (dumplo < 0)
 		return;
 	printf("\ndumping to dev %x, offset %d\n", dumpdev, dumplo);
-	printf("dump not yet implemented");
+	printf("dump not yet implemented\n");
 #if 0 /* XXX HAVE TO FIX XXX */
 	switch (error = (*bdevsw[major(dumpdev)].d_dump)(dumpdev, dumplo,)) {
 
@@ -1147,6 +1088,8 @@ atoi(const char *s, int b, const char **o)
 	return val;
 }
 
+#ifdef	RM7K_PERFCNTR
+
 /*
  * RM7000 Performance counter support.
  */
@@ -1215,6 +1158,8 @@ rm7k_watchintr(trapframe)
 {
 	return(0);
 }
+
+#endif	/* RM7K_PERFCNTR */
 
 #ifdef DEBUG
 /*

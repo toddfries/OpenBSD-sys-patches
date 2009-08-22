@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_aobj.c,v 1.42 2009/06/06 17:46:44 art Exp $	*/
+/*	$OpenBSD: uvm_aobj.c,v 1.47 2009/08/06 15:28:14 oga Exp $	*/
 /*	$NetBSD: uvm_aobj.c,v 1.39 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -144,7 +144,7 @@ struct pool uao_swhash_elt_pool;
  */
 
 struct uvm_aobj {
-	struct uvm_object u_obj; /* has: lock, pgops, memq, #pages, #refs */
+	struct uvm_object u_obj; /* has: lock, pgops, memt, #pages, #refs */
 	int u_pages;		 /* number of pages in entire object */
 	int u_flags;		 /* the flags (see uvm_aobj.h) */
 	int *u_swslots;		 /* array of offset->swapslot mappings */
@@ -167,15 +167,17 @@ struct pool uvm_aobj_pool;
  * local functions
  */
 
-struct uao_swhash_elt	*uao_find_swhash_elt(struct uvm_aobj *, int,
-			     boolean_t);
-static int		 uao_find_swslot(struct uvm_aobj *, int);
-boolean_t		 uao_flush(struct uvm_object *, voff_t, voff_t, int);
-void			 uao_free(struct uvm_aobj *);
-int			 uao_get(struct uvm_object *, voff_t, vm_page_t *,
-			     int *, int, vm_prot_t, int, int);
-boolean_t		 uao_pagein(struct uvm_aobj *, int, int);
-boolean_t		 uao_pagein_page(struct uvm_aobj *, int);
+static struct uao_swhash_elt	*uao_find_swhash_elt(struct uvm_aobj *, int,
+				     boolean_t);
+static int			 uao_find_swslot(struct uvm_aobj *, int);
+static boolean_t		 uao_flush(struct uvm_object *, voff_t,
+				     voff_t, int);
+static void			 uao_free(struct uvm_aobj *);
+static int			 uao_get(struct uvm_object *, voff_t,
+				     vm_page_t *, int *, int, vm_prot_t,
+				     int, int);
+static boolean_t		 uao_pagein(struct uvm_aobj *, int, int);
+static boolean_t		 uao_pagein_page(struct uvm_aobj *, int);
 
 /*
  * aobj_pager
@@ -215,7 +217,7 @@ static simple_lock_data_t uao_list_lock;
  * => the object should be locked by the caller
  */
 
-struct uao_swhash_elt *
+static struct uao_swhash_elt *
 uao_find_swhash_elt(struct uvm_aobj *aobj, int pageidx, boolean_t create)
 {
 	struct uao_swhash *swhash;
@@ -253,7 +255,7 @@ uao_find_swhash_elt(struct uvm_aobj *aobj, int pageidx, boolean_t create)
  *
  * => object must be locked by caller 
  */
-static __inline int
+__inline static int
 uao_find_swslot(struct uvm_aobj *aobj, int pageidx)
 {
 
@@ -370,7 +372,7 @@ uao_set_swslot(struct uvm_object *uobj, int pageidx, int slot)
  *
  * => the aobj should be dead
  */
-void
+static void
 uao_free(struct uvm_aobj *aobj)
 {
 
@@ -700,11 +702,6 @@ uao_detach_locked(struct uvm_object *uobj)
  *	or block.
  * => if PGO_ALLPAGE is set, then all pages in the object are valid targets
  *	for flushing.
- * => NOTE: we rely on the fact that the object's memq is a TAILQ and
- *	that new pages are inserted on the tail end of the list.  thus,
- *	we can make a complete pass through the object in one go by starting
- *	at the head and working towards the tail (new pages are put in
- *	front of us).
  * => NOTE: we are allowed to lock the page queues, so the caller
  *	must not be holding the lock on them [e.g. pagedaemon had
  *	better not call us with the queues locked]
@@ -790,8 +787,10 @@ uao_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
 				continue;
 
 			uvm_lock_pageq();
+			/* zap all mappings for the page. */
+			pmap_page_protect(pp, VM_PROT_NONE);
 
-			/* Deactivate the page. */
+			/* ...and deactivate the page. */
 			uvm_pagedeactivate(pp);
 			uvm_unlock_pageq();
 
@@ -849,7 +848,7 @@ uao_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
  * => NOTE: offset is the offset of pps[0], _NOT_ pps[centeridx]
  * => NOTE: caller must check for released pages!!
  */
-int
+static int
 uao_get(struct uvm_object *uobj, voff_t offset, struct vm_page **pps,
     int *npagesp, int centeridx, vm_prot_t access_type, int advice, int flags)
 {
@@ -1230,7 +1229,7 @@ restart:
  * => aobj must be locked and is returned locked.
  * => returns TRUE if pagein was aborted due to lack of memory.
  */
-boolean_t
+static boolean_t
 uao_pagein(struct uvm_aobj *aobj, int startslot, int endslot)
 {
 	boolean_t rv;
@@ -1304,7 +1303,7 @@ restart:
  *
  * => aobj must be locked and is returned locked.
  */
-boolean_t
+static boolean_t
 uao_pagein_page(struct uvm_aobj *aobj, int pageidx)
 {
 	struct vm_page *pg;
@@ -1350,6 +1349,9 @@ uao_pagein_page(struct uvm_aobj *aobj, int pageidx)
 	 * deactivate the page (to put it on a page queue).
 	 */
 	pmap_clear_reference(pg);
+#ifndef UBC
+	pmap_page_protect(pg, VM_PROT_NONE);
+#endif
 	uvm_lock_pageq();
 	uvm_pagedeactivate(pg);
 	uvm_unlock_pageq();

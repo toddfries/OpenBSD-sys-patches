@@ -1,4 +1,4 @@
-/*	$OpenBSD: bwi.c,v 1.87 2009/06/02 11:54:00 deraadt Exp $	*/
+/*	$OpenBSD: bwi.c,v 1.90 2009/08/02 19:33:01 blambert Exp $	*/
 
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
@@ -343,8 +343,7 @@ void		 bwi_free_tx_ring32(struct bwi_softc *, int);
 void		 bwi_free_txstats64(struct bwi_softc *);
 void		 bwi_free_rx_ring64(struct bwi_softc *);
 void		 bwi_free_tx_ring64(struct bwi_softc *, int);
-uint8_t		 bwi_ofdm_plcp2rate(uint32_t *);
-uint8_t		 bwi_ds_plcp2rate(struct ieee80211_ds_plcp_hdr *);
+uint8_t		 bwi_plcp2rate(uint32_t, enum ieee80211_phymode);
 void		 bwi_ofdm_plcp_header(uint32_t *, int, uint8_t);
 void		 bwi_ds_plcp_header(struct ieee80211_ds_plcp_hdr *, int,
 		     uint8_t);
@@ -492,7 +491,7 @@ static const struct {
 } bwi_bbpid_map[] = {
 	{ 0x4301, 0x4301, 0x4301 },
 	{ 0x4305, 0x4307, 0x4307 },
-	{ 0x4403, 0x4403, 0x4402 },
+	{ 0x4402, 0x4403, 0x4402 },
 	{ 0x4610, 0x4615, 0x4610 },
 	{ 0x4710, 0x4715, 0x4710 },
 	{ 0x4720, 0x4725, 0x4309 }
@@ -7430,7 +7429,7 @@ bwi_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		if (ic->ic_opmode != IEEE80211_M_MONITOR) {
 			/* start automatic rate control timer */
 			if (ic->ic_fixed_rate == -1)
-				timeout_add(&sc->sc_amrr_ch, hz / 2);
+				timeout_add_msec(&sc->sc_amrr_ch, 500);
 		}
 	} else
 		bwi_set_bssid(sc, bwi_zero_addr);
@@ -7485,7 +7484,7 @@ bwi_amrr_timeout(void *arg)
 		ieee80211_iterate_nodes(ic, bwi_iter_func, sc);
 #endif
 
-	timeout_add(&sc->sc_amrr_ch, hz / 2);
+	timeout_add_msec(&sc->sc_amrr_ch, 500);
 }
 
 void
@@ -8234,7 +8233,7 @@ bwi_rxeof(struct bwi_softc *sc, int end_idx)
 		struct ieee80211_rxinfo rxi;
 		struct ieee80211_node *ni;
 		struct mbuf *m;
-		void *plcp;
+		uint32_t plcp;
 		uint16_t flags2;
 		int buflen, wh_ofs, hdr_extra, rssi, type, rate;
 
@@ -8264,7 +8263,7 @@ bwi_rxeof(struct bwi_softc *sc, int end_idx)
 			goto next;
 		}
 
-		plcp = ((uint8_t *)(hdr + 1) + hdr_extra);
+		bcopy((uint8_t *)(hdr + 1) + hdr_extra, &plcp, sizeof(plcp));
 		rssi = bwi_calc_rssi(sc, hdr);
 
 		m->m_pkthdr.rcvif = ifp;
@@ -8272,9 +8271,9 @@ bwi_rxeof(struct bwi_softc *sc, int end_idx)
 		m_adj(m, sizeof(*hdr) + wh_ofs);
 
 		if (htole16(hdr->rxh_flags1) & BWI_RXH_F1_OFDM)
-			rate = bwi_ofdm_plcp2rate(plcp);
+			rate = bwi_plcp2rate(plcp, IEEE80211_MODE_11G);
 		else
-			rate = bwi_ds_plcp2rate(plcp);
+			rate = bwi_plcp2rate(plcp, IEEE80211_MODE_11B);
 
 #if NBPFILTER > 0
 		/* RX radio tap */
@@ -8488,21 +8487,10 @@ bwi_free_tx_ring64(struct bwi_softc *sc, int ring_idx)
 }
 
 uint8_t
-bwi_ofdm_plcp2rate(uint32_t *plcp0)
+bwi_plcp2rate(uint32_t plcp0, enum ieee80211_phymode phymode)
 {
-	uint32_t plcp;
-	uint8_t plcp_rate;
-
-	plcp = letoh32(*plcp0);
-	plcp_rate = __SHIFTOUT(plcp, IEEE80211_OFDM_PLCP_RATE_MASK);
-
-	return (ieee80211_plcp2rate(plcp_rate, IEEE80211_MODE_11G));
-}
-
-uint8_t
-bwi_ds_plcp2rate(struct ieee80211_ds_plcp_hdr *hdr)
-{
-	return (ieee80211_plcp2rate(hdr->i_signal, IEEE80211_MODE_11B));
+	uint32_t plcp = letoh32(plcp0) & IEEE80211_OFDM_PLCP_RATE_MASK;
+	return (ieee80211_plcp2rate(plcp, phymode));
 }
 
 void

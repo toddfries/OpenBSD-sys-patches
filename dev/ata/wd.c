@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.74 2009/06/03 22:09:30 thib Exp $ */
+/*	$OpenBSD: wd.c,v 1.76 2009/08/13 15:23:12 deraadt Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -119,7 +119,7 @@ struct wd_softc {
 	/* General disk infos */
 	struct device sc_dev;
 	struct disk sc_dk;
-
+	struct buf sc_q;
 	/* IDE disk soft states */
 	struct ata_bio sc_wdc_bio; /* current transfer */
 	struct buf *sc_bp; /* buf being transferred */
@@ -169,7 +169,7 @@ struct cfdriver wd_cd = {
 };
 
 void  wdgetdefaultlabel(struct wd_softc *, struct disklabel *);
-void  wdgetdisklabel(dev_t dev, struct wd_softc *, struct disklabel *, int);
+int   wdgetdisklabel(dev_t dev, struct wd_softc *, struct disklabel *, int);
 void  wdstrategy(struct buf *);
 void  wdstart(void *);
 void  __wdstart(struct wd_softc*, struct buf *);
@@ -396,12 +396,13 @@ int
 wddetach(struct device *self, int flags)
 {
 	struct wd_softc *sc = (struct wd_softc *)self;
-	struct buf *bp;
+	struct buf *dp, *bp;
 	int s, bmaj, cmaj, mn;
 
 	/* Remove unprocessed buffers from queue */
 	s = splbio();
-	while ((bp = BUFQ_GET(sc->sc_dk.dk_bufq)) != NULL) {
+	for (dp = &sc->sc_q; (bp = dp->b_actf) != NULL; ) {
+		dp->b_actf = bp->b_actf;
 		bp->b_error = ENXIO;
 		bp->b_flags |= B_ERROR;
 		biodone(bp);
@@ -474,7 +475,7 @@ wdstrategy(struct buf *bp)
 		goto done;
 	/* Queue transfer on drive, activate drive and controller if idle. */
 	s = splbio();
-	BUFQ_ADD(wd->sc_dk.dk_bufq, bp);
+	disksort(&wd->sc_q, bp);
 	wdstart(wd);
 	splx(s);
 	device_unref(&wd->sc_dev);
@@ -498,15 +499,18 @@ void
 wdstart(void *arg)
 {
 	struct wd_softc *wd = arg;
-	struct buf *bp = NULL;
+	struct buf *dp, *bp = NULL;
 
 	WDCDEBUG_PRINT(("wdstart %s\n", wd->sc_dev.dv_xname),
 	    DEBUG_XFERS);
 	while (wd->openings > 0) {
 
 		/* Is there a buf for us ? */
-		if ((bp = BUFQ_GET(wd->sc_dk.dk_bufq)) == NULL)
+		dp = &wd->sc_q;
+		if ((bp = dp->b_actf) == NULL)  /* yes, an assign */
 			return;
+		dp->b_actf = bp->b_actf;
+
 		/*
 		 * Make the command. First lock the device
 		 */
@@ -699,7 +703,11 @@ wdopen(dev_t dev, int flag, int fmt, struct proc *p)
 			wd_get_params(wd, AT_WAIT, &wd->sc_params);
 
 			/* Load the partition info if not already loaded. */
-			wdgetdisklabel(dev, wd, wd->sc_dk.dk_label, 0);
+			if (wdgetdisklabel(dev, wd,
+			    wd->sc_dk.dk_label, 0) == EIO) {
+				error = EIO;
+				goto bad;
+			}
 		}
 	}
 
@@ -812,11 +820,11 @@ wdgetdefaultlabel(struct wd_softc *wd, struct disklabel *lp)
 /*
  * Fabricate a default disk label, and try to read the correct one.
  */
-void
+int
 wdgetdisklabel(dev_t dev, struct wd_softc *wd, struct disklabel *lp,
     int spoofonly)
 {
-	char *errstring;
+	int error;
 
 	WDCDEBUG_PRINT(("wdgetdisklabel\n"), DEBUG_FUNCS);
 
@@ -824,13 +832,11 @@ wdgetdisklabel(dev_t dev, struct wd_softc *wd, struct disklabel *lp,
 
 	if (wd->drvp->state > RECAL)
 		wd->drvp->drive_flags |= DRIVE_RESET;
-	errstring = readdisklabel(DISKLABELDEV(dev), wdstrategy, lp,
+	error = readdisklabel(DISKLABELDEV(dev), wdstrategy, lp,
 	    spoofonly);
 	if (wd->drvp->state > RECAL)
 		wd->drvp->drive_flags |= DRIVE_RESET;
-	if (errstring) {
-		/*printf("%s: %s\n", wd->sc_dev.dv_xname, errstring);*/
-	}
+	return (error);
 }
 
 int

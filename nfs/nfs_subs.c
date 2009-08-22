@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_subs.c,v 1.96 2009/05/30 17:20:29 thib Exp $	*/
+/*	$OpenBSD: nfs_subs.c,v 1.103 2009/08/13 15:18:16 blambert Exp $	*/
 /*	$NetBSD: nfs_subs.c,v 1.27.4.3 1996/07/08 20:34:24 jtc Exp $	*/
 
 /*
@@ -671,13 +671,6 @@ nfsm_mbuftouio(mrep, uiop, siz, dpos)
 				len = mp->m_len;
 			}
 			xfer = (left > len) ? len : left;
-#ifdef notdef
-			/* Not Yet.. */
-			if (uiop->uio_iov->iov_op != NULL)
-				(*(uiop->uio_iov->iov_op))
-				(mbufcp, uiocp, xfer);
-			else
-#endif
 			if (uiop->uio_segflg == UIO_SYSSPACE)
 				bcopy(mbufcp, uiocp, xfer);
 			else
@@ -938,11 +931,14 @@ nfs_init()
 
 #ifdef NFSCLIENT
 int
-nfs_vfs_init(vfsp)
-	struct vfsconf *vfsp;
+nfs_vfs_init(struct vfsconf *vfsp)
 {
+	extern struct pool nfs_node_pool;
+
 	TAILQ_INIT(&nfs_bufq);
-	nfs_nhinit();			/* Init the nfsnode table */
+
+	pool_init(&nfs_node_pool, sizeof(struct nfsnode), 0, 0, 0,
+	    "nfsnodepl", NULL);
 
 	return (0);
 }
@@ -1140,7 +1136,7 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 }
 
 int
-nfs_attrtimeo (np)
+nfs_attrtimeo(np)
 	struct nfsnode *np;
 {
 	struct vnode *vp = np->n_vnode;
@@ -1231,7 +1227,7 @@ nfs_namei(ndp, fhp, len, slp, nam, mdp, dposp, retdirp, p)
 	int error, rdonly;
 	struct componentname *cnp = &ndp->ni_cnd;
 
-	*retdirp = (struct vnode *)0;
+	*retdirp = NULL;
 	cnp->cn_pnbuf = pool_get(&namei_pool, PR_WAITOK);
 	/*
 	 * Copy the name from the mbuf list to ndp->ni_pnbuf
@@ -1284,7 +1280,7 @@ nfs_namei(ndp, fhp, len, slp, nam, mdp, dposp, retdirp, p)
 		error = ENOTDIR;
 		goto out;
 	}
-	VREF(dp);
+	vref(dp);
 	*retdirp = dp;
 	ndp->ni_startdir = dp;
 	if (rdonly)
@@ -1348,7 +1344,7 @@ nfsm_adj(mp, len, nul)
 	m = mp;
 	for (;;) {
 		count += m->m_len;
-		if (m->m_next == (struct mbuf *)0)
+		if (m->m_next == NULL)
 			break;
 		m = m->m_next;
 	}
@@ -1390,22 +1386,17 @@ nfsm_adj(mp, len, nul)
  * doesn't get too big...
  */
 void
-nfsm_srvwcc(nfsd, before_ret, before_vap, after_ret, after_vap, mbp)
-	struct nfsrv_descript *nfsd;
-	int before_ret;
-	struct vattr *before_vap;
-	int after_ret;
-	struct vattr *after_vap;
-	struct mbuf **mbp;
+nfsm_srvwcc(struct nfsrv_descript *nfsd, int before_ret,
+    struct vattr *before_vap, int after_ret, struct vattr *after_vap,
+    struct nfsm_info *info)
 {
-	struct mbuf *mb = *mbp;
 	u_int32_t *tl;
 
 	if (before_ret) {
-		tl = nfsm_build(&mb, NFSX_UNSIGNED);
+		tl = nfsm_build(&info->nmi_mb, NFSX_UNSIGNED);
 		*tl = nfs_false;
 	} else {
-		tl = nfsm_build(&mb, 7 * NFSX_UNSIGNED);
+		tl = nfsm_build(&info->nmi_mb, 7 * NFSX_UNSIGNED);
 		*tl++ = nfs_true;
 		txdr_hyper(before_vap->va_size, tl);
 		tl += 2;
@@ -1413,31 +1404,25 @@ nfsm_srvwcc(nfsd, before_ret, before_vap, after_ret, after_vap, mbp)
 		tl += 2;
 		txdr_nfsv3time(&(before_vap->va_ctime), tl);
 	}
-	*mbp = mb;
-	nfsm_srvpostop_attr(nfsd, after_ret, after_vap, mbp);
+	nfsm_srvpostop_attr(nfsd, after_ret, after_vap, info);
 }
 
 void
-nfsm_srvpostop_attr(nfsd, after_ret, after_vap, mbp)
-	struct nfsrv_descript *nfsd;
-	int after_ret;
-	struct vattr *after_vap;
-	struct mbuf **mbp;
+nfsm_srvpostop_attr(struct nfsrv_descript *nfsd, int after_ret,
+    struct vattr *after_vap, struct nfsm_info *info)
 {
-	struct mbuf *mb = *mbp;
 	u_int32_t *tl;
 	struct nfs_fattr *fp;
 
 	if (after_ret) {
-		tl = nfsm_build(&mb, NFSX_UNSIGNED);
+		tl = nfsm_build(&info->nmi_mb, NFSX_UNSIGNED);
 		*tl = nfs_false;
 	} else {
-		tl = nfsm_build(&mb, NFSX_UNSIGNED + NFSX_V3FATTR);
+		tl = nfsm_build(&info->nmi_mb, NFSX_UNSIGNED + NFSX_V3FATTR);
 		*tl++ = nfs_true;
 		fp = (struct nfs_fattr *)tl;
 		nfsm_srvfattr(nfsd, after_vap, fp);
 	}
-	*mbp = mb;
 }
 
 void
@@ -1506,7 +1491,7 @@ nfsrv_fhtovp(fhp, lockflag, vpp, cred, slp, nam, rdonlyp)
 	int error, exflags;
 	struct sockaddr_in *saddr;
 
-	*vpp = (struct vnode *)0;
+	*vpp = NULL;
 	mp = vfs_getvfs(&fhp->fh_fsid);
 
 	if (!mp)
@@ -1797,48 +1782,6 @@ nfsrv_errmap(nd, err)
 }
 
 /*
- * Sort the group list in increasing numerical order.
- * (Insertion sort by Chris Torek, who was grossed out by the bubble sort
- *  that used to be here.)
- */
-void
-nfsrvw_sort(list, num)
-        gid_t *list;
-        int num;
-{
-	int i, j;
-	gid_t v;
-
-	/* Insertion sort. */
-	for (i = 1; i < num; i++) {
-		v = list[i];
-		/* find correct slot for value v, moving others up */
-		for (j = i; --j >= 0 && v < list[j];)
-			list[j + 1] = list[j];
-		list[j + 1] = v;
-	}
-}
-
-/*
- * copy credentials making sure that the result can be compared with bcmp().
- */
-void
-nfsrv_setcred(incred, outcred)
-	struct ucred *incred, *outcred;
-{
-	int i;
-
-	bzero((caddr_t)outcred, sizeof (struct ucred));
-	outcred->cr_ref = 1;
-	outcred->cr_uid = incred->cr_uid;
-	outcred->cr_gid = incred->cr_gid;
-	outcred->cr_ngroups = incred->cr_ngroups;
-	for (i = 0; i < incred->cr_ngroups; i++)
-		outcred->cr_groups[i] = incred->cr_groups[i];
-	nfsrvw_sort(outcred->cr_groups, outcred->cr_ngroups);
-}
-
-/*
  * If full is non zero, set all fields, otherwise just set mode and time fields
  */
 void
@@ -1940,14 +1883,14 @@ nfsm_build(struct mbuf **mp, u_int len)
 }
 
 void
-nfsm_fhtom(struct mbuf **mp, struct vnode *v, int v3)
+nfsm_fhtom(struct nfsm_info *info, struct vnode *v, int v3)
 {
 	struct nfsnode *n = VTONFS(v);
 
 	if (v3) {
-		nfsm_strtombuf(mp, n->n_fhp, n->n_fhsize);
+		nfsm_strtombuf(&info->nmi_mb, n->n_fhp, n->n_fhsize);
 	} else {
-		nfsm_buftombuf(mp, n->n_fhp, NFSX_V2FH);
+		nfsm_buftombuf(&info->nmi_mb, n->n_fhp, NFSX_V2FH);
 	}
 }
 
@@ -1965,13 +1908,13 @@ int
 nfsm_srvsattr(struct mbuf **mp, struct vattr *va, struct mbuf *mrep,
     caddr_t *dposp)
 {
-	struct mbuf *md;
+	struct nfsm_info	info;
 	uint32_t *tl, t1;
-	caddr_t dpos, cp2;
+	caddr_t cp2;
 	int error = 0;
 
-	md = *mp;
-	dpos = *dposp;
+	info.nmi_md = *mp;
+	info.nmi_dpos = *dposp;
 
 	nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
 	if (*tl == nfs_true) {
@@ -2021,8 +1964,8 @@ nfsm_srvsattr(struct mbuf **mp, struct vattr *va, struct mbuf *mrep,
 		break;
 	};
 
-	*dposp = dpos;
-	*mp = md;
+	*dposp = info.nmi_dpos;
+	*mp = info.nmi_md;
 nfsmout:
 	return (error);
 }

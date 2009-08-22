@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sgi,v 1.26 2009/06/13 21:48:03 miod Exp $
+#	$OpenBSD: files.sgi,v 1.32 2009/08/18 19:34:14 miod Exp $
 #
 # maxpartitions must be first item in files.${ARCH}
 #
@@ -8,6 +8,7 @@ maxusers 2 8 64
 
 #	Required files
 
+file	dev/cninit.c
 file	arch/sgi/sgi/autoconf.c
 file	arch/sgi/sgi/bus_dma.c
 file	arch/sgi/sgi/conf.c
@@ -20,6 +21,9 @@ file	arch/sgi/sgi/mainbus.c
 file	arch/sgi/sgi/mutex.c
 file	arch/sgi/sgi/sginode.c			tgt_origin200 | tgt_origin2000
 file	arch/sgi/sgi/wscons_machdep.c		wsdisplay
+
+# RAM disk for boot
+major	{rd = 8}
 
 #
 # Media Indepedent Interface (mii)
@@ -68,10 +72,10 @@ include "dev/onewire/files.onewire"
 #
 #	PCI Bus bridges
 #
+
 device	macepcibr {} : pcibus
 attach	macepcibr at macebus
-file	arch/sgi/pci/macepcibridge.c		macepcibr needs-flag
-file	arch/sgi/pci/macepcimap.c		macepcibr
+file	arch/sgi/pci/macepcibridge.c		macepcibr
 
 #	Use machine independent SCSI driver routines
 include	"scsi/files.scsi"
@@ -80,7 +84,18 @@ major	{cd = 3}
 
 include	"dev/i2o/files.i2o"
 
+#
+#	PCI Bus support
+#
+
 include	"dev/pci/files.pci"
+file	arch/sgi/pci/pci_machdep.c		pci
+
+# Sun HME Ethernet controllers
+device	hme: ether, ifnet, mii, ifmedia
+file	dev/ic/hme.c				hme
+attach	hme at pci with hme_pci
+file	dev/pci/if_hme_pci.c			hme_pci
 
 # IOC3
 define	ioc {[base = -1]}
@@ -88,9 +103,17 @@ device	ioc: onewirebus
 attach	ioc at pci
 file	arch/sgi/pci/ioc.c			ioc
 
-# IOC3 serial ports
+# IOC4
+define	iof {[base = -1]}
+device	iof
+attach	iof at pci
+file	arch/sgi/pci/iof.c			iof
+
+# IOC3/4 serial ports
 attach	com at ioc with com_ioc
 file	arch/sgi/dev/com_ioc.c			com_ioc
+attach	com at iof with com_iof
+file	arch/sgi/dev/com_iof.c			com_iof
 
 # DS1687 Time-Of-Day calendar device
 device	dsrtc
@@ -106,11 +129,6 @@ file	arch/sgi/dev/gbe.c			gbe	needs-flag
 # 16[45]50-based "com" ports on localbus
 attach	com at macebus with com_macebus
 file	arch/sgi/localbus/com_lbus.c		com_macebus
-
-# IOC Ethernet
-device	ef: ether, ifnet, ifmedia, mii
-attach	ef at ioc
-file	arch/sgi/dev/if_ef.c			ef
 
 # MACE MAC-110 ethernet
 device	mec: ether, ifnet, ifmedia, mii
@@ -143,8 +161,10 @@ include	"dev/wsfont/files.wsfont"
 include	"dev/wscons/files.wscons"
 
 #
-#	PCI Bus support
+# CardBus and PCMCIA bus support
 #
+include	"dev/cardbus/files.cardbus"
+include	"dev/pcmcia/files.pcmcia"
 
 #
 # Machine-independent USB drivers
@@ -164,15 +184,3 @@ device	owserial
 attach	owserial at onewire
 file	arch/sgi/dev/owserial.c			owserial
 file	arch/sgi/dev/owmem_subr.c		owmac | owserial
-
-#
-# Specials.
-#
-# RAM disk for boot
-major	{rd = 8}
-
-#
-#	Common files
-#
-
-file	dev/cninit.c

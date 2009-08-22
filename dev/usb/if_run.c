@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_run.c,v 1.28 2009/06/04 19:04:25 damien Exp $	*/
+/*	$OpenBSD: if_run.c,v 1.31 2009/08/10 17:27:03 damien Exp $	*/
 
 /*-
  * Copyright (c) 2008,2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -150,6 +150,7 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(HAWKING,		RT3070),
 	USB_ID(IODATA,		RT3072),
 	USB_ID(LINKSYS4,	WUSB100),
+	USB_ID(LINKSYS4,	WUSB54GCV3),
 	USB_ID(LINKSYS4,	WUSB600N),
 	USB_ID(LOGITEC,		RT2870_1),
 	USB_ID(LOGITEC,		RT2870_2),
@@ -1791,7 +1792,7 @@ run_rx_frame(struct run_softc *sc, uint8_t *buf, int dmalen)
 		rxi.rxi_flags |= IEEE80211_RXI_HWDEC;
 	}
 
-	if (rxd->flags & RT2860_RX_L2PAD) {
+	if (flags & RT2860_RX_L2PAD) {
 		u_int hdrlen = ieee80211_get_hdrlen(wh);
 		ovbcopy(wh, (caddr_t)wh + 2, hdrlen);
 		wh = (struct ieee80211_frame *)((caddr_t)wh + 2);
@@ -1908,7 +1909,7 @@ run_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		dmalen = letoh32(*(uint32_t *)buf) & 0xffff;
 
 		if (__predict_false(dmalen == 0 || (dmalen & 3) != 0)) {
-			DPRINTF(("bad DMA length %u (%x)\n", dmalen));
+			DPRINTF(("bad DMA length %u\n", dmalen));
 			break;
 		}
 		if (__predict_false(dmalen + 8 > xferlen)) {

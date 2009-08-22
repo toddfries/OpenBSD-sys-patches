@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.453 2009/06/15 17:01:26 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.459 2009/08/11 18:46:32 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -91,9 +91,6 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/sensors.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 
 #ifdef KGDB
 #include <sys/kgdb.h>
@@ -266,8 +263,6 @@ struct	extent *ioport_ex;
 struct	extent *iomem_ex;
 static	int ioport_malloc_safe;
 
-caddr_t	allocsys(caddr_t);
-void	setup_buffers(void);
 void	dumpsys(void);
 int	cpu_dump(void);
 void	init386(paddr_t);
@@ -373,8 +368,6 @@ void
 cpu_startup()
 {
 	unsigned i;
-	caddr_t v;
-	int sz;
 	vaddr_t minaddr, maxaddr, va;
 	paddr_t pa;
 
@@ -410,20 +403,11 @@ cpu_startup()
 	    (unsigned long long)ptoa((psize_t)physmem)/1024U/1024U);
 
 	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
+	 * Determine how many buffers to allocate.  We use bufcachepercent%
+	 * of the memory below 4GB.
 	 */
-	sz = (int)allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
-	 */
-	setup_buffers();
+	if (bufpages == 0)
+		bufpages = atop(avail_end) * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -509,50 +493,6 @@ i386_init_pcb_tss_ldt(struct cpu_info *ci)
 	ci->ci_idle_tss_sel = tss_alloc(pcb);
 }
 #endif	/* MULTIPROCESSOR */
-
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(caddr_t v)
-{
-
-#define	valloc(name, type, num) \
-	    v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return v;
-}
-
-void
-setup_buffers()
-{
-	/*
-	 * Determine how many buffers to allocate.  We use bufcachepercent%
-	 * of the memory below 4GB.
-	 */
-	if (bufpages == 0)
-		bufpages = atop(avail_end) * bufcachepercent / 100;
-
-	/* Restrict to at most 25% filled kvm */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4)
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
-}
 
 /*
  * Info for CTL_HW
@@ -2021,6 +1961,9 @@ p3_get_bus_clock(struct cpu_info *ci)
 			goto print_msr;
 		}
 		break;
+       case 0x1a: /* Nehalem based Core i7 and Xeon */
+               bus_clock = BUS133;
+               break;
 	case 0x1c: /* Atom */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
@@ -3539,7 +3482,6 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
 {
 	u_long pa, endpa;
 	vaddr_t va;
-	pt_entry_t *pte;
 	bus_size_t map_size;
 
 	pa = trunc_page(bpa);
@@ -3559,18 +3501,9 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
 	*bshp = (bus_space_handle_t)(va + (bpa & PGOFSET));
 
 	for (; map_size > 0;
-	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE) {
-		pmap_kenter_pa(va, pa, VM_PROT_READ | VM_PROT_WRITE);
-
-		pte = kvtopte(va);
-		if (flags & BUS_SPACE_MAP_CACHEABLE)
-			*pte &= ~PG_N;
-		else
-			*pte |= PG_N;
-		pmap_tlb_shootpage(pmap_kernel(), va);
-	}
-
-	pmap_tlb_shootwait();
+	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE)
+		pmap_kenter_pa(va, pa | ((flags & BUS_SPACE_MAP_CACHEABLE) ?
+		    0 : PMAP_NOCACHE), VM_PROT_READ | VM_PROT_WRITE);
 	pmap_update(pmap_kernel());
 
 	return 0;
@@ -3701,15 +3634,11 @@ i386_intlock(int ipl)
 {
 	if (ipl < IPL_SCHED)
 		__mp_lock(&kernel_lock);
-
-	curcpu()->ci_idepth++;
 }
 
 void
 i386_intunlock(int ipl)
 {
-	curcpu()->ci_idepth--;
-
 	if (ipl < IPL_SCHED)
 		__mp_unlock(&kernel_lock);
 }
@@ -3718,13 +3647,11 @@ void
 i386_softintlock(void)
 {
 	__mp_lock(&kernel_lock);
-	curcpu()->ci_idepth++;
 }
 
 void
 i386_softintunlock(void)
 {
-	curcpu()->ci_idepth--;
 	__mp_unlock(&kernel_lock);
 }
 #endif

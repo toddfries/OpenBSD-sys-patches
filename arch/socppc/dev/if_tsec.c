@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tsec.c,v 1.22 2009/02/22 20:03:19 kettenis Exp $	*/
+/*	$OpenBSD: if_tsec.c,v 1.24 2009/08/13 10:03:35 jasper Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -280,7 +280,7 @@ struct cfattach tsec_ca = {
 };
 
 struct cfdriver tsec_cd = {
-	NULL, "tsec", DV_DULL
+	NULL, "tsec", DV_IFNET
 };
 
 uint32_t tsec_read(struct tsec_softc *, bus_addr_t);
@@ -1196,15 +1196,9 @@ tsec_alloc_mbuf(struct tsec_softc *sc, bus_dmamap_t map)
 {
 	struct mbuf *m = NULL;
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->sc_ac.ac_if, MCLBYTES);
+	if (!m)
 		return (NULL);
-
-	MCLGETI(m, M_DONTWAIT, &sc->sc_ac.ac_if, MCLBYTES);
-	if ((m->m_flags & M_EXT) == 0) {
-		m_freem(m);
-		return (NULL);
-	}
 	m->m_len = m->m_pkthdr.len = MCLBYTES;
 
 	if (bus_dmamap_load_mbuf(sc->sc_dmat, map, m, BUS_DMA_NOWAIT) != 0) {

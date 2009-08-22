@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwn.c,v 1.59 2009/06/02 16:28:21 damien Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.62 2009/08/10 17:21:15 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007-2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -1010,16 +1010,9 @@ iwn_alloc_rx_ring(struct iwn_softc *sc, struct iwn_rx_ring *ring)
 			goto fail;
 		}
 
-		MGETHDR(data->m, M_DONTWAIT, MT_DATA);
+		data->m = MCLGETI(NULL, M_DONTWAIT, NULL, IWN_RBUF_SIZE);
 		if (data->m == NULL) {
 			printf("%s: could not allocate RX mbuf\n",
-			    sc->sc_dev.dv_xname);
-			error = ENOMEM;
-			goto fail;
-		}
-		MCLGETI(data->m, M_DONTWAIT, NULL, IWN_RBUF_SIZE);
-		if (!(data->m->m_flags & M_EXT)) {
-			printf("%s: could not allocate RX mbuf cluster\n",
 			    sc->sc_dev.dv_xname);
 			error = ENOBUFS;
 			goto fail;
@@ -1566,7 +1559,7 @@ iwn_calib_timeout(void *arg)
 		sc->calib_cnt = 0;
 	}
 	/* Automatic rate control triggered every 500ms. */
-	timeout_add(&sc->calib_to, hz / 2);
+	timeout_add_msec(&sc->calib_to, 500);
 }
 
 int
@@ -1704,15 +1697,8 @@ iwn_rx_done(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 		return;
 	}
 
-	MGETHDR(m1, M_DONTWAIT, MT_DATA);
+	m1 = MCLGETI(NULL, M_DONTWAIT, NULL, IWN_RBUF_SIZE);
 	if (m1 == NULL) {
-		ic->ic_stats.is_rx_nombuf++;
-		ifp->if_ierrors++;
-		return;
-	}
-	MCLGETI(m1, M_DONTWAIT, NULL, IWN_RBUF_SIZE);
-	if (!(m1->m_flags & M_EXT)) {
-		m_freem(m1);
 		ic->ic_stats.is_rx_nombuf++;
 		ifp->if_ierrors++;
 		return;
@@ -4170,7 +4156,7 @@ iwn_run(struct iwn_softc *sc)
 	/* Start periodic calibration timer. */
 	sc->calib.state = IWN_CALIB_STATE_ASSOC;
 	sc->calib_cnt = 0;
-	timeout_add(&sc->calib_to, hz / 2);
+	timeout_add_msec(&sc->calib_to, 500);
 
 	/* Link LED always on while associated. */
 	iwn_set_led(sc, IWN_LED_LINK, 0, 1);

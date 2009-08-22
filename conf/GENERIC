@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.145 2009/06/03 14:45:54 jj Exp $
+#	$OpenBSD: GENERIC,v 1.147 2009/08/13 15:04:20 dlg Exp $
 #
 #	Machine-independent option; used by all architectures for their
 #	GENERIC kernel
@@ -64,8 +64,14 @@ option		PPP_DEFLATE
 option		MROUTING	# Multicast router
 #option		PIM		# Protocol Independent Multicast
 
+#mpath0		at root		# SCSI Multipathing
+#scsibus*	at mpath?
+
 softraid0	at root		# Software RAID
 scsibus*	at softraid?
+
+vscsi0		at root		# Userland backed Virtual SCSI
+scsibus*	at vscsi?
 
 pseudo-device	pf		# packet filter
 pseudo-device	pflog		# pf log if

@@ -1,4 +1,4 @@
-/*      $OpenBSD: ath.c,v 1.80 2009/01/21 21:53:59 grange Exp $  */
+/*      $OpenBSD: ath.c,v 1.82 2009/08/10 20:29:54 deraadt Exp $  */
 /*	$NetBSD: ath.c,v 1.37 2004/08/18 21:59:39 dyoung Exp $	*/
 
 /*-
@@ -427,9 +427,6 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 	/*
 	 * Make sure the interface is shutdown during reboot.
 	 */
-	sc->sc_sdhook = shutdownhook_establish(ath_shutdown, sc);
-	if (sc->sc_sdhook == NULL)
-		printf(": WARNING: unable to establish shutdown hook\n");
 	sc->sc_powerhook = powerhook_establish(ath_power, sc);
 	if (sc->sc_powerhook == NULL)
 		printf(": WARNING: unable to establish power hook\n");
@@ -484,8 +481,6 @@ ath_detach(struct ath_softc *sc, int flags)
 	splx(s);
 	if (sc->sc_powerhook != NULL)
 		powerhook_disestablish(sc->sc_powerhook);
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
 #ifdef __FreeBSD__
 	ATH_TXBUF_LOCK_DESTROY(sc);
 	ATH_TXQ_LOCK_DESTROY(sc);
@@ -550,14 +545,6 @@ ath_resume(struct ath_softc *sc, int why)
 		if (ifp->if_flags & IFF_RUNNING)
 			ath_start(ifp);
 	}
-}
-
-void
-ath_shutdown(void *arg)
-{
-	struct ath_softc *sc = arg;
-
-	ath_stop(&sc->sc_ic.ic_if);
 }
 
 int
@@ -3027,7 +3014,7 @@ ath_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		timeout_add_sec(&sc->sc_cal_to, ath_calinterval);
 
 		if (ic->ic_opmode != IEEE80211_M_MONITOR)
-			timeout_add(&sc->sc_rssadapt_to, hz / 10);
+			timeout_add_msec(&sc->sc_rssadapt_to, 100);
 	} else if (nstate == IEEE80211_S_SCAN) {
 		/* start ap/neighbor scan timer */
 		timeout_add_msec(&sc->sc_scan_to, ath_dwelltime);
@@ -3224,7 +3211,7 @@ ath_rssadapt_updatestats(void *arg)
 		ieee80211_iterate_nodes(ic, ath_rssadapt_updatenode, arg);
 	}
 
-	timeout_add(&sc->sc_rssadapt_to, hz / 10);
+	timeout_add_msec(&sc->sc_rssadapt_to, 100);
 }
 
 #ifdef AR_DEBUG
