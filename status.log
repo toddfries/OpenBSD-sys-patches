@@ -1,27 +1,134 @@
 # On branch master
 # Changed but not updated:
-#   (use "git add <file>..." to update what will be committed)
+#   (use "git add/rm <file>..." to update what will be committed)
 #   (use "git checkout -- <file>..." to discard changes in working directory)
 #
+#	modified:   arch/alpha/eisa/eisa_machdep.h
+#	modified:   arch/alpha/isa/isa_machdep.h
+#	modified:   arch/alpha/pci/pci_1000.c
+#	modified:   arch/alpha/pci/pci_1000a.c
+#	modified:   arch/alpha/pci/pci_2100_a50.c
+#	modified:   arch/alpha/pci/pci_550.c
+#	modified:   arch/alpha/pci/pci_6600.c
+#	modified:   arch/alpha/pci/pci_axppci_33.c
+#	modified:   arch/alpha/pci/pci_eb164.c
+#	modified:   arch/alpha/pci/pci_eb64plus.c
+#	modified:   arch/alpha/pci/pci_kn20aa.c
+#	modified:   arch/alpha/pci/pci_kn300.c
+#	modified:   arch/alpha/pci/pci_machdep.h
+#	modified:   arch/alpha/pci/pci_up1000.c
+#	modified:   arch/alpha/pci/sio_pic.c
+#	modified:   arch/alpha/pci/siovar.h
+#	modified:   arch/alpha/stand/installboot.c
+#	modified:   arch/amd64/amd64/intr.c
+#	modified:   arch/amd64/amd64/wscons_machdep.c
+#	modified:   arch/amd64/conf/GENERIC
+#	modified:   arch/amd64/include/intr.h
+#	modified:   arch/amd64/include/pci_machdep.h
+#	modified:   arch/amd64/pci/pci_machdep.c
+#	modified:   arch/arm/armv7/avic_intr.h
+#	modified:   arch/arm/include/pci_machdep.h
+#	modified:   arch/arm/sa11x0/sa11x0_var.h
+#	modified:   arch/arm/xscale/i80321_intr.c
+#	modified:   arch/arm/xscale/i80321var.h
+#	modified:   arch/arm/xscale/pxa2x0_gpio.c
+#	modified:   arch/arm/xscale/pxa2x0_gpio.h
+#	modified:   arch/arm/xscale/pxa2x0_intr.c
+#	modified:   arch/armish/dev/iq80321_pci.c
+#	modified:   arch/armish/include/armish_intr.h
+#	modified:   arch/hp300/dev/hd.c
+#	modified:   arch/hppa/dev/apic.c
+#	modified:   arch/hppa/dev/dino.c
+#	modified:   arch/hppa/dev/elroyvar.h
+#	modified:   arch/hppa/include/pci_machdep.h
+#	modified:   arch/hppa64/dev/apic.c
+#	modified:   arch/hppa64/dev/elroyvar.h
+#	modified:   arch/hppa64/include/pci_machdep.h
+#	modified:   arch/i386/i386/ioapic.c
+#	modified:   arch/i386/i386/wscons_machdep.c
+#	modified:   arch/i386/include/i82093var.h
+#	modified:   arch/i386/isa/isa_machdep.c
+#	modified:   arch/i386/isa/isa_machdep.h
+#	modified:   arch/i386/pci/pci_machdep.c
+#	modified:   arch/i386/pci/pci_machdep.h
+#	modified:   arch/m68k/include/pmap_motorola.h
+#	modified:   arch/m68k/include/vmparam.h
+#	modified:   arch/m68k/m68k/pmap_motorola.c
+#	modified:   arch/macppc/dev/macintr.c
+#	modified:   arch/macppc/dev/openpic.c
+#	modified:   arch/macppc/include/autoconf.h
+#	modified:   arch/macppc/macppc/machdep.c
+#	modified:   arch/macppc/pci/ht.c
+#	modified:   arch/macppc/pci/macobio.c
+#	modified:   arch/macppc/pci/mpcpcibus.c
+#	modified:   arch/mvmeppc/mvmeppc/machdep.c
+#	modified:   arch/mvmeppc/pci/mpcpcibr.c
+#	modified:   arch/powerpc/include/cpu.h
+#	modified:   arch/powerpc/include/intr.h
+#	modified:   arch/powerpc/pci/pci_machdep.h
+#	modified:   arch/sgi/include/intr.h
+#	modified:   arch/sgi/localbus/macebus.c
+#	modified:   arch/sgi/localbus/macebus.h
+#	modified:   arch/sgi/pci/macepcibridge.c
+#	modified:   arch/sgi/pci/pci_machdep.h
+#	modified:   arch/sgi/sgi/autoconf.c
+#	modified:   arch/sgi/xbow/xbridge.c
+#	modified:   arch/socppc/conf/files.socppc
+#	modified:   arch/socppc/dev/socpcic.c
+#	modified:   arch/sparc/dev/fd.c
+#	modified:   arch/sparc64/dev/pci_machdep.c
+#	modified:   arch/sparc64/include/pci_machdep.h
+#	modified:   conf/GENERIC
 #	modified:   conf/files
-#	modified:   dev/cardbus/com_cardbus.c
-#	modified:   dev/cardbus/if_re_cardbus.c
-#	modified:   dev/cardbus/uhci_cardbus.c
-#	modified:   netinet/tcp_input.c
+#	modified:   dev/acpi/dsdt.h
+#	modified:   dev/ccd.c
+#	modified:   dev/ic/fxp.c
+#	modified:   dev/ic/pckbc.c
+#	modified:   dev/isa/fd.c
+#	modified:   dev/isa/mcd.c
+#	modified:   dev/isa/sch311x.c
+#	modified:   dev/microcode/Makefile
+#	modified:   dev/pci/if_em.c
+#	modified:   dev/pci/if_em_hw.c
+#	modified:   dev/pci/if_em_hw.h
+#	modified:   dev/pckbc/pckbd.c
+#	modified:   dev/raidframe/rf_openbsdkintf.c
+#	modified:   dev/usb/udl.c
+#	modified:   dev/usb/udl.h
+#	modified:   dev/usb/umsm.c
+#	modified:   dev/usb/usbdevs
+#	modified:   dev/usb/usbdevs.h
+#	modified:   dev/usb/usbdevs_data.h
+#	modified:   dev/vnd.c
+#	modified:   kern/kern_malloc.c
+#	modified:   kern/tty_conf.c
+#	modified:   kern/vfs_cache.c
+#	deleted:    net/if_strip.c
+#	deleted:    net/if_stripvar.h
+#	modified:   net/pf_if.c
+#	modified:   netinet/ip_input.c
 #	modified:   nfs/nfs.h
-#	modified:   nfs/nfs_bio.c
+#	modified:   nfs/nfs_socket.c
 #	modified:   nfs/nfs_subs.c
-#	modified:   nfs/nfs_syscalls.c
-#	modified:   nfs/nfs_var.h
 #	modified:   nfs/nfs_vfsops.c
-#	modified:   nfs/nfs_vnops.c
 #	modified:   nfs/nfsmount.h
-#	modified:   nfs/nfsnode.h
+#	modified:   nnpfs/nnpfs_locl.h
 #	modified:   status.log
-#	modified:   ufs/ufs/ufs_dirhash.c
+#	modified:   sys/malloc.h
+#	modified:   ufs/ext2fs/ext2fs_balloc.c
+#	modified:   ufs/ext2fs/ext2fs_subr.c
+#	modified:   up.log
+#	modified:   uvm/uvm_map.c
 #
 # Untracked files:
 #   (use "git add <file>..." to include in what will be committed)
 #
-#	nfs/nfs_aiod.c
+#	arch/m68k/include/pmap_motorola.h.orig
+#	arch/m68k/include/vmparam.h.orig
+#	arch/m68k/m68k/pmap_motorola.c.orig
+#	arch/socppc/dev/wdc_obio.c
+#	arch/socppc/include/fdt.h
+#	arch/socppc/socppc/fdt.c
+#	dev/microcode/udl/
+#	nnpfs/nnpfs_locl.h.orig
 no changes added to commit (use "git add" and/or "git commit -a")
