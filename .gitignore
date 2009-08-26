@@ -4,3 +4,4 @@ obj
 .#*
 *.sh
 *.orig
+*.log
