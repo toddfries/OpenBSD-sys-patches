@@ -1,4 +1,4 @@
-/*	$OpenBSD: build.c,v 1.1 2009/08/25 19:04:49 mglocker Exp $ */
+/*	$OpenBSD: build.c,v 1.5 2009/08/26 12:32:27 mglocker Exp $ */
 
 /*
  * Copyright (c) 2009 Marcus Glocker <mglocker@openbsd.org>
@@ -30,14 +30,20 @@ int
 main(void)
 {
 	int fd, i;
+	uint32_t bit_count;
+	uint32_t bit_pattern;
 
 	fd = open(FILENAME, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (fd == -1)
 		err(1, "%s", FILENAME);
 
 	for (i = 0; i < UDL_HUFFMAN_RECORDS; i++) {
-		udl_huffman[i].value = htobe32(udl_huffman[i].value);
-		write(fd, &udl_huffman[i], 5);
+		bit_count = udl_huffman[i].bit_count;
+		bit_pattern = htobe32(udl_huffman[i].bit_pattern);
+		if (write(fd, &bit_count, sizeof(bit_count)) == -1)
+			err(1, "write");
+		if (write(fd, &bit_pattern, sizeof(bit_pattern)) == -1)
+			err(1, "write");
 	}
 
 	close(fd);
