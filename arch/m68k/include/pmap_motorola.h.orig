@@ -86,31 +86,6 @@ typedef struct pmap	*pmap_t;
                 loadustp(atop((paddr_t)(pmap)->pm_stpa));		\
 }
 
-/* XXX - struct pv_entry moved to vmparam.h because of include ordering issues */
-
-struct pv_page;
-
-struct pv_page_info {
-	TAILQ_ENTRY(pv_page) pgi_list;
-	struct pv_entry *pgi_freelist;
-	int pgi_nfree;
-};
-
-/*
- * This is basically:
- * ((PAGE_SIZE - sizeof(struct pv_page_info)) / sizeof(struct pv_entry))
- */
-#if PAGE_SHIFT == 13
-#define	NPVPPG	340
-#elif PAGE_SHIFT == 12
-#define	NPVPPG	170
-#endif
-
-struct pv_page {
-	struct pv_page_info pvp_pgi;
-	struct pv_entry pvp_pv[NPVPPG];
-};
-
 extern struct pmap	kernel_pmap_store;
 
 #define pmap_kernel()	(&kernel_pmap_store)
@@ -119,8 +94,6 @@ extern struct pmap	kernel_pmap_store;
 #define	active_user_pmap(pm) \
 	(curproc && \
 	 (pm) != pmap_kernel() && (pm) == curproc->p_vmspace->vm_map.pmap)
-
-extern struct pv_entry	*pv_table;	/* array of entries, one per page */
 
 #define	pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)
 #define	pmap_wired_count(pmap)		((pmap)->pm_stats.wired_count)

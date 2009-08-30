@@ -1,4 +1,4 @@
-/*	$OpenBSD: udl.c,v 1.24 2009/08/26 12:23:39 mglocker Exp $ */
+/*	$OpenBSD: udl.c,v 1.29 2009/08/30 12:05:23 maja Exp $ */
 
 /*
  * Copyright (c) 2009 Marcus Glocker <mglocker@openbsd.org>
@@ -26,9 +26,6 @@
  * This driver has been inspired by the cfxga(4) driver because we have
  * to deal with similar challenges, like no direct access to the video
  * memory.
- *
- * TODO: - Cleanup the bcopy() and endianess mess.
- *	 - Reduce padding overhead in compressed blocks.
  */
 
 #include <sys/param.h>
@@ -212,6 +209,7 @@ struct wsdisplay_accessops udl_accessops = {
 static const struct usb_devno udl_devs[] = {
 	{ USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_LCD4300U },
 	{ USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_LCD8000U },
+	{ USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_LD220 },
 	{ USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_VCUD60 },
 	{ USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_DLDVI },
 	{ USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_VGA10 },
@@ -219,7 +217,8 @@ static const struct usb_devno udl_devs[] = {
 	{ USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_EC008 },
 	{ USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_HPDOCK },
 	{ USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_M01061 },
-	{ USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_SWDVI }
+	{ USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_SWDVI },
+	{ USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_UM7X0 }
 };
 
 int
@@ -1056,7 +1055,7 @@ udl_cmd_insert_buf_comp(struct udl_softc *sc, uint8_t *buf, uint32_t len)
 	uint16_t *pixels, prev;
 	int16_t diff;
 	uint32_t bit_count, bit_pattern, bit_cur;
-	int i, j, bytes, eob, padding;
+	int i, j, bytes, eob, padding, next;
 
 	udl_cmd_insert_check(cb, len);
 
@@ -1068,7 +1067,7 @@ udl_cmd_insert_buf_comp(struct udl_softc *sc, uint8_t *buf, uint32_t len)
 	 * skip the header and finish up the main-block.  We return zero
 	 * to signal our caller that the header has been skipped.
 	 */
-	if (cb->compblock >= UDL_CB_RESTART1_SIZE) {
+	if (cb->compblock > UDL_CB_RESTART_SIZE) {
 		cb->off -= UDL_CMD_WRITE_HEAD_SIZE;
 		cb->compblock -= UDL_CMD_WRITE_HEAD_SIZE;
 		eob = 1;
@@ -1091,6 +1090,18 @@ udl_cmd_insert_buf_comp(struct udl_softc *sc, uint8_t *buf, uint32_t len)
 		bit_count = h->bit_count;
 		bit_pattern = betoh32(h->bit_pattern);
 
+
+		/* we are near the end of the main-block, so quit loop */
+		if (bit_count % 8 == 0)
+			next = bit_count / 8;
+		else
+			next = (bit_count / 8) + 1;
+
+		if (cb->compblock + next >= UDL_CB_BODY_SIZE) {
+			eob = 1;
+			break;
+		}
+
 		/* generate one pixel compressed data */
 		for (j = 0; j < bit_count; j++) {
 			if (bit_pos == 0)
@@ -1106,10 +1117,6 @@ udl_cmd_insert_buf_comp(struct udl_softc *sc, uint8_t *buf, uint32_t len)
 			}
 		}
 		bytes += 2;
-
-		/* we are near the end of the main-block, so quit loop */
-		if (cb->compblock >= UDL_CB_RESTART1_SIZE)
-			eob = 1;
 	}
 
 	/*
@@ -1149,7 +1156,7 @@ udl_cmd_insert_head_comp(struct udl_softc *sc, uint32_t len)
 
 	udl_cmd_insert_check(cb, len);
 
-	if (cb->compblock >= UDL_CB_RESTART2_SIZE) {
+	if (cb->compblock > UDL_CB_BODY_SIZE) {
 		cb->off -= UDL_CMD_COPY_HEAD_SIZE;
 		cb->compblock -= UDL_CMD_COPY_HEAD_SIZE;
 
