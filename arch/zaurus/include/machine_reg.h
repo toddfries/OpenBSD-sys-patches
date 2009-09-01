@@ -79,6 +79,5 @@
 #define PXA_USB_CONNECT_PIN	41	/* connection interrupt */
 #define PXA_USB_PULLUP_PIN	45	/* show/hide device presence */
 #define GPIO_HP_IN_C3000	116	/* headphone jack */
-#define GPIO9_MMC_DETECT	9	/* card detect */
 
 #endif /* _ZAURUS_REG_H */

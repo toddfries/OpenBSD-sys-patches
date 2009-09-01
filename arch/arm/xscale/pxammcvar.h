@@ -36,7 +36,6 @@ struct pxammc_softc {
 #define PMF_CARD_INITED	0x0001		/* card init sequence sent */
 	int sc_clkdiv;			/* current clock divider */
 	struct sdmmc_command * volatile sc_cmd;	/* command in progress */
-	int sc_gpio_detect;		/* card detect GPIO */
 };
 
 int	pxammc_match(void);
