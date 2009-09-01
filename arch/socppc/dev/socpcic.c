@@ -1,4 +1,4 @@
-/*	$OpenBSD: socpcic.c,v 1.3 2009/03/30 20:09:50 kettenis Exp $	*/
+/*	$OpenBSD: socpcic.c,v 1.6 2009/08/26 20:53:51 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -58,7 +58,7 @@ int	 socpcic_intr_map(void *, pcitag_t, int, int, pci_intr_handle_t *);
 const char *socpcic_intr_string(void *, pci_intr_handle_t);
 int	 socpcic_intr_line(void *, pci_intr_handle_t);
 void	*socpcic_intr_establish(void *, pci_intr_handle_t, int,
-	     int (*)(void *), void *, char *);
+	     int (*)(void *), void *, const char *);
 void	 socpcic_intr_disestablish(void *, void *);
 int	 socpcic_ether_hw_addr(struct ppc_pci_chipset *, u_int8_t *);
 
@@ -76,6 +76,8 @@ socpcic_attach(struct device *parent, struct device *self, void *aux)
 	struct socpcic_softc *sc = (void *)self;
 	struct obio_attach_args *oa = aux;
 	struct pcibus_attach_args pba;
+	struct extent *io_ex;
+	struct extent *mem_ex;
 
 	sc->sc_iot = oa->oa_iot;
 	if (bus_space_map(sc->sc_iot, oa->oa_offset, 16, 0, &sc->sc_cfg_ioh)) {
@@ -83,8 +85,12 @@ socpcic_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
+	sc->sc_mem_bus_space.bus_base = 0x80000000;
+	sc->sc_mem_bus_space.bus_size = 0x21000000;
+	sc->sc_mem_bus_space.bus_io = 0;
 	sc->sc_io_bus_space.bus_base = 0xe2000000;
 	sc->sc_io_bus_space.bus_size = 0x01000000;
+	sc->sc_io_bus_space.bus_io = 1;
 
 	sc->sc_pc.pc_conf_v = sc;
 	sc->sc_pc.pc_attach_hook = socpcic_attach_hook;
@@ -102,11 +108,22 @@ socpcic_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_pc.pc_intr_disestablish = socpcic_intr_disestablish;
 	sc->sc_pc.pc_ether_hw_addr = socpcic_ether_hw_addr;
 
+	io_ex = extent_create("pciio", 0, 0xffffffff, M_DEVBUF, NULL, 0,
+	    EX_NOWAIT | EX_FILLED);
+	if (io_ex != NULL)
+		extent_free(io_ex, 0x00000000, 0x01000000, EX_NOWAIT);
+	mem_ex = extent_create("pcimem", 0, 0xffffffff, M_DEVBUF, NULL, 0,
+	    EX_NOWAIT | EX_FILLED);
+	if (mem_ex != NULL)
+		extent_free(mem_ex, 0x80000000, 0x20000000, EX_NOWAIT);
+
 	bzero(&pba, sizeof(pba));
 	pba.pba_busname = "pci";
 	pba.pba_iot = &sc->sc_io_bus_space;
 	pba.pba_memt = &sc->sc_mem_bus_space;
 	pba.pba_dmat = oa->oa_dmat;
+	pba.pba_ioex = io_ex;
+	pba.pba_memex = mem_ex;
 	pba.pba_pc = &sc->sc_pc;
 	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
@@ -197,7 +214,11 @@ int
 socpcic_intr_map(void *cpv, pcitag_t tag, int pin, int line,
     pci_intr_handle_t *ihp)
 {
+#ifdef RB600
+	*ihp = 21;		/* XXX */
+#else
 	*ihp = 20;		/* XXX */
+#endif
 	return (0);
 }
 
@@ -218,7 +239,7 @@ socpcic_intr_line(void *cpv, pci_intr_handle_t ih)
 
 void *
 socpcic_intr_establish(void *cpv, pci_intr_handle_t ih, int level,
-    int (*func)(void *), void *arg, char *name)
+    int (*func)(void *), void *arg, const char *name)
 {
 	return (intr_establish(ih, IST_LEVEL, level, func, arg, name));
 }

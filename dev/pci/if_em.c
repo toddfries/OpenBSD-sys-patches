@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.220 2009/08/13 14:24:47 jasper Exp $ */
+/* $OpenBSD: if_em.c,v 1.221 2009/08/21 22:54:10 dms Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -333,14 +333,13 @@ em_attach(struct device *parent, struct device *self, void *aux)
 		case em_82574:
 		case em_82575:
 		case em_ich9lan:
-		case em_80003es2lan:
-			/* Limit Jumbo Frame size */
+		case em_80003es2lan:	/* Limit Jumbo Frame size */
 			sc->hw.max_frame_size = 9234;
 			break;
+			/* Adapters that do not support Jumbo frames */
 		case em_82542_rev2_0:
 		case em_82542_rev2_1:
 		case em_ich8lan:
-			/* Adapters that do not support Jumbo frames */
 			sc->hw.max_frame_size = ETHER_MAX_LEN;
 			break;
 		default:

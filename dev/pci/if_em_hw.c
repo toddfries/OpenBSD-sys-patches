@@ -31,7 +31,7 @@
 
 *******************************************************************************/
 
-/* $OpenBSD: if_em_hw.c,v 1.36 2009/07/03 06:54:39 markus Exp $ */
+/* $OpenBSD: if_em_hw.c,v 1.37 2009/08/21 22:54:10 dms Exp $ */
 
 /* if_em_hw.c
  * Shared functions for accessing and configuring the MAC

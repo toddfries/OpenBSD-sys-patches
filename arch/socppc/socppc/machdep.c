@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.18 2009/08/11 19:17:17 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.21 2009/08/26 19:09:44 kettenis Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -52,6 +52,7 @@
 
 #include <machine/bat.h>
 #include <machine/bus.h>
+#include <machine/fdt.h>
 #include <machine/pio.h>
 #include <machine/powerpc.h>
 #include <machine/trap.h>
@@ -112,6 +113,7 @@ struct bd_info {
 } bootinfo;
 
 extern struct bd_info **fwargsave;
+extern struct fdt_head *fwfdtsave;
 
 void uboot_mem_regions(struct mem_region **, struct mem_region **);
 void uboot_vmon(void);
@@ -173,13 +175,66 @@ initppc(u_int startkernel, u_int endkernel, char *args)
 #endif
 	extern void *msgbuf_addr;
 	int exc, scratch;
+	void *node;
 
 	extern char __bss_start[], __end[];
 	bzero(__bss_start, __end - __bss_start);
 
 	/* Make a copy of the args! */
 	strlcpy(bootpathbuf, args ? args : "wd0a", sizeof bootpathbuf);
-	memcpy(&bootinfo, *fwargsave, sizeof bootinfo);
+
+	if (fwfdtsave == NULL) {
+		/*
+		 * We were loaded by an old U-Boot that didn't provide
+		 * a flattened device tree.  It should have provided a
+		 * valid bootinfo structure which we'll use to build
+		 * such a device tree ourselves.
+		 *
+		 * XXX We don't build a flattened device tree yet.
+		 */
+		memcpy(&bootinfo, *fwargsave, sizeof bootinfo);
+	}
+
+	if (fwfdtsave && fwfdtsave->fh_magic == FDT_MAGIC) {
+		/* 
+		 * Save the FDT firmware blob passed by the bootloader
+		 * before we zero all memory.
+		 * 
+		 */
+		void *fdt = (void *)endkernel;
+		memcpy(fdt, fwfdtsave, fwfdtsave->fh_size);
+		endkernel += fwfdtsave->fh_size;
+
+		fdt_init(fdt);
+
+		/*
+		 * XXX Create a fake bootinfo structure if we were
+		 * loaded by RouterBOOT.
+		 */
+		node = fdt_find_node("/memory");
+		if (node) {
+			char *reg;
+
+			if (fdt_node_property(node, "reg", &reg)) {
+				bootinfo.bi_memstart = *(u_int32_t *)reg;
+				bootinfo.bi_memsize = *((u_int32_t *)reg + 1);
+			}
+		}
+		node = fdt_find_node("/soc8343");
+		if (node) {
+			char *reg;
+
+			if (fdt_node_property(node, "reg", &reg))
+				bootinfo.bi_immr_base = *(u_int32_t *)reg;
+		}
+		node = fdt_find_node("/soc8343/ethernet");
+		if (node) {
+			char *addr;
+
+			if (fdt_node_property(node, "mac-address", &addr))
+				memcpy(bootinfo.bi_enetaddr, addr, 6);
+		}
+	}
 
 	proc0.p_cpu = &cpu_info[0];
 	proc0.p_addr = proc0paddr;
@@ -378,6 +433,24 @@ initppc(u_int startkernel, u_int endkernel, char *args)
 	comconsrate = 115200;
 	comconsaddr = 0x00004500;
 	comconsiot = &mainbus_bus_space;
+
+	node = fdt_find_node("/chosen");
+	if (node) {
+		char *console;
+
+		fdt_node_property(node, "linux,stdout-path", &console);
+		node = fdt_find_node(console);
+		if (node) {
+			char *freq;
+			char *reg;
+
+			if (fdt_node_property(node, "clock-frequency", &freq))
+				comconsfreq = *(u_int32_t *)freq;
+			if (fdt_node_property(node, "reg", &reg))
+				comconsaddr = *(u_int32_t *)reg;
+		}
+	}
+
 	consinit();
 
 #ifdef DDB
