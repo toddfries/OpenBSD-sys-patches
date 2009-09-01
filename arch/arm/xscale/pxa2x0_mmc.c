@@ -44,6 +44,7 @@
 #include <dev/sdmmc/sdmmcvar.h>
 
 /* GPIO pins */
+#define PXAMMC_CARD_DETECT	9 /* XXX zaurus-specific */
 #define PXAMMC_MMCLK		32
 #define PXAMMC_MMCMD		112
 #define PXAMMC_MMDAT0		92
@@ -62,8 +63,8 @@ void	pxammc_clock_stop(struct pxammc_softc *);
 void	pxammc_clock_start(struct pxammc_softc *);
 int	pxammc_card_intr(void *);
 int	pxammc_intr(void *);
-inline void	pxammc_intr_cmd(struct pxammc_softc *);
-inline void	pxammc_intr_data(struct pxammc_softc *);
+void	pxammc_intr_cmd(struct pxammc_softc *);
+void	pxammc_intr_data(struct pxammc_softc *);
 void	pxammc_intr_done(struct pxammc_softc *);
 
 #define CSR_READ_1(sc, reg) \
@@ -134,8 +135,8 @@ pxammc_attach(struct pxammc_softc *sc, void *aux)
 	 */
 	s = splsdmmc();
 
-	pxa2x0_gpio_set_function(sc->sc_gpio_detect, GPIO_IN);
-	sc->sc_card_ih = pxa2x0_gpio_intr_establish(sc->sc_gpio_detect,
+	pxa2x0_gpio_set_function(PXAMMC_CARD_DETECT, GPIO_IN);
+	sc->sc_card_ih = pxa2x0_gpio_intr_establish(PXAMMC_CARD_DETECT,
 	    IST_EDGE_BOTH, IPL_SDMMC, pxammc_card_intr, sc, "mmccd");
 	if (sc->sc_card_ih == NULL) {
 		splx(s);
@@ -254,8 +255,7 @@ pxammc_host_ocr(sdmmc_chipset_handle_t sch)
 int
 pxammc_card_detect(sdmmc_chipset_handle_t sch)
 {
-	struct pxammc_softc *sc = sch;
-	return !pxa2x0_gpio_get_bit(sc->sc_gpio_detect);
+	return !pxa2x0_gpio_get_bit(PXAMMC_CARD_DETECT);
 }
 
 int
@@ -562,7 +562,7 @@ end:
 	return 1;
 }
 
-inline void
+void
 pxammc_intr_cmd(struct pxammc_softc *sc)
 {
 	struct sdmmc_command *cmd = sc->sc_cmd;
@@ -633,19 +633,19 @@ pxammc_intr_cmd(struct pxammc_softc *sc)
 		pxammc_intr_done(sc);
 }
 
-inline void
+void
 pxammc_intr_data(struct pxammc_softc *sc)
 {
 	struct sdmmc_command *cmd = sc->sc_cmd;
-	int n;
-
-	n = MIN(32, cmd->c_resid);
-	cmd->c_resid -= n;
 
 	DPRINTF(2,("%s: cmd %p resid %d\n", sc->sc_dev.dv_xname,
 	    cmd, cmd->c_resid));
 
 	if (ISSET(cmd->c_flags, SCF_CMD_READ)) {
+		int n;
+
+		n = MIN(32, cmd->c_resid);
+		cmd->c_resid -= n;
 		while (n-- > 0)
 			*cmd->c_buf++ = CSR_READ_1(sc, MMC_RXFIFO);
 
@@ -654,9 +654,12 @@ pxammc_intr_data(struct pxammc_softc *sc)
 		else
 			CSR_SET_4(sc, MMC_I_MASK, MMC_I_RXFIFO_RD_REQ);
 	} else {
+		int n;
 		int short_xfer = cmd->c_resid < 32;
 
-		while (n-- > 0)
+		n = MIN(32, cmd->c_resid);
+		cmd->c_resid -= n;
+		for (n = MIN(32, cmd->c_resid); n > 0; n--)
 			CSR_WRITE_1(sc, MMC_TXFIFO, *cmd->c_buf++);
 		if (short_xfer)
 			CSR_WRITE_4(sc, MMC_PRTBUF, 1);

@@ -53,8 +53,6 @@ scoop_mmc_attach(struct device *parent, struct device *self, void *aux)
 	sc->tag.get_ocr = scoop_mmc_get_ocr;
 	sc->tag.set_power = scoop_mmc_set_power;
 
-	sc->sc_gpio_detect = GPIO9_MMC_DETECT;
-
 	pxammc_attach(sc, aux);
 }
 
