@@ -527,6 +527,11 @@ pxammc_intr(void *arg)
 	if (ISSET(status, MMC_I_TXFIFO_WR_REQ | MMC_I_RXFIFO_RD_REQ)) {
 		pxammc_intr_data(sc);
 		CLR(status, MMC_I_TXFIFO_WR_REQ | MMC_I_RXFIFO_RD_REQ);
+		/* 'status' is invalid from this point, but probably contains
+		 * new interesting bits. Exiting the interrupt handler here with
+		 * those bits set causes an interrupt immediatelly again
+		 */
+		return 1;
 	}
 
 	if (ISSET(status, MMC_I_DAT_ERR)) {
@@ -674,11 +679,8 @@ pxammc_intr_data(struct pxammc_softc *sc)
 void
 pxammc_intr_done(struct pxammc_softc *sc)
 {
-	u_int32_t status;
-
-	status = CSR_READ_4(sc, MMC_STAT);
 	DPRINTF(1,("%s: status %b\n", sc->sc_dev.dv_xname,
-	    status, MMC_STAT_STR));
+	    CSR_READ_4(sc, MMC_STAT), MMC_STAT_STR));
 
 	CSR_SET_4(sc, MMC_I_MASK, MMC_I_TXFIFO_WR_REQ |
 	    MMC_I_RXFIFO_RD_REQ | MMC_I_DATA_TRAN_DONE |
