@@ -190,7 +190,9 @@ sbt_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* Enable the HCI packet transport read interrupt. */
+	SDMMC_LOCK(sc->sc_sf->sc);
 	CSR_WRITE_1(sc, SBT_REG_IENA, ISTAT_INTRD);
+	SDMMC_UNLOCK(sc->sc_sf->sc);
 
 	/* Enable the card interrupt for this function. */
 	sc->sc_ih = sdmmc_intr_establish(parent, sbt_intr, sc, DEVNAME(sc));
@@ -308,6 +310,7 @@ sbt_read_packet(struct sbt_softc *sc, u_char *buf, size_t *lenp)
 	}
 
 out:
+	SDMMC_LOCK(sc->sc_sf->sc);
 	if (error) {
 		if (sc->sc_rxtry >= SBT_RXTRY_MAX) {
 			/* Drop and request the next packet. */
@@ -318,11 +321,14 @@ out:
 			sc->sc_rxtry++;
 			CSR_WRITE_1(sc, SBT_REG_RPC, RPC_PCRRT);
 		}
+		SDMMC_UNLOCK(sc->sc_sf->sc);
 		return error;
 	}
 
 	/* acknowledge read packet */
 	CSR_WRITE_1(sc, SBT_REG_RPC, 0);
+
+	SDMMC_UNLOCK(sc->sc_sf->sc);
 
 	*lenp = len;
 	return 0;
@@ -345,8 +351,10 @@ sbt_intr(void *arg)
 	/* Block further SDIO interrupts; XXX not really needed? */
 	s = splsdmmc();
 
+	SDMMC_LOCK(sc->sc_sf->sc);
 	status = CSR_READ_1(sc, SBT_REG_ISTAT);
 	CSR_WRITE_1(sc, SBT_REG_ICLR, status);
+	SDMMC_UNLOCK(sc->sc_sf->sc);
 
 	if ((status & ISTAT_INTRD) == 0)
 		return 0;	/* shared SDIO card interrupt? */

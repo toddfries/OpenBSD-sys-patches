@@ -200,10 +200,13 @@ sdmmc_io_function_ready(struct sdmmc_function *sf)
 	struct sdmmc_function *sf0 = sc->sc_fn0;
 	u_int8_t rv;
 
+	SDMMC_ASSERT_LOCKED(sc);
+
 	if (sf->number == 0)
 		return 1;	/* FN0 is always ready */
 
 	rv = sdmmc_io_read_1(sf0, SD_IO_CCCR_FN_READY);
+
 	return (rv & (1 << sf->number)) != 0;
 }
 
@@ -352,7 +355,7 @@ sdmmc_io_rw_direct(struct sdmmc_softc *sc, struct sdmmc_function *sf,
 	struct sdmmc_command cmd;
 	int error;
 
-	SDMMC_LOCK(sc);
+	SDMMC_ASSERT_LOCKED(sc);
 
 	/* Make sure the card is selected. */
 	if ((error = sdmmc_select_card(sc, sf)) != 0) {
@@ -375,7 +378,6 @@ sdmmc_io_rw_direct(struct sdmmc_softc *sc, struct sdmmc_function *sf,
 	error = sdmmc_mmc_command(sc, &cmd);
 	*datap = SD_R5_DATA(cmd.c_resp);
 
-	SDMMC_UNLOCK(sc);
 	return error;
 }
 
@@ -392,7 +394,7 @@ sdmmc_io_rw_extended(struct sdmmc_softc *sc, struct sdmmc_function *sf,
 	struct sdmmc_command cmd;
 	int error;
 
-	SDMMC_LOCK(sc);
+	SDMMC_ASSERT_LOCKED(sc);
 
 #if 0
 	/* Make sure the card is selected. */
@@ -429,6 +431,8 @@ u_int8_t
 sdmmc_io_read_1(struct sdmmc_function *sf, int reg)
 {
 	u_int8_t data = 0;
+
+	SDMMC_ASSERT_LOCKED(sf->sc);
 	
 	(void)sdmmc_io_rw_direct(sf->sc, sf, reg, (u_char *)&data,
 	    SD_ARG_CMD52_READ);
@@ -438,6 +442,8 @@ sdmmc_io_read_1(struct sdmmc_function *sf, int reg)
 void
 sdmmc_io_write_1(struct sdmmc_function *sf, int reg, u_int8_t data)
 {
+	SDMMC_ASSERT_LOCKED(sf->sc);
+
 	(void)sdmmc_io_rw_direct(sf->sc, sf, reg, (u_char *)&data,
 	    SD_ARG_CMD52_WRITE);
 }
@@ -447,6 +453,8 @@ sdmmc_io_read_2(struct sdmmc_function *sf, int reg)
 {
 	u_int16_t data = 0;
 	
+	SDMMC_ASSERT_LOCKED(sf->sc);
+
 	(void)sdmmc_io_rw_extended(sf->sc, sf, reg, (u_char *)&data, 2,
 	    SD_ARG_CMD53_READ | SD_ARG_CMD53_INCREMENT);
 	return data;
@@ -455,6 +463,8 @@ sdmmc_io_read_2(struct sdmmc_function *sf, int reg)
 void
 sdmmc_io_write_2(struct sdmmc_function *sf, int reg, u_int16_t data)
 {
+	SDMMC_ASSERT_LOCKED(sf->sc);
+
 	(void)sdmmc_io_rw_extended(sf->sc, sf, reg, (u_char *)&data, 2,
 	    SD_ARG_CMD53_WRITE | SD_ARG_CMD53_INCREMENT);
 }
@@ -464,6 +474,8 @@ sdmmc_io_read_4(struct sdmmc_function *sf, int reg)
 {
 	u_int32_t data = 0;
 	
+	SDMMC_ASSERT_LOCKED(sf->sc);
+
 	(void)sdmmc_io_rw_extended(sf->sc, sf, reg, (u_char *)&data, 4,
 	    SD_ARG_CMD53_READ | SD_ARG_CMD53_INCREMENT);
 	return data;
@@ -472,6 +484,8 @@ sdmmc_io_read_4(struct sdmmc_function *sf, int reg)
 void
 sdmmc_io_write_4(struct sdmmc_function *sf, int reg, u_int32_t data)
 {
+	SDMMC_ASSERT_LOCKED(sf->sc);
+
 	(void)sdmmc_io_rw_extended(sf->sc, sf, reg, (u_char *)&data, 4,
 	    SD_ARG_CMD53_WRITE | SD_ARG_CMD53_INCREMENT);
 }
@@ -481,6 +495,8 @@ sdmmc_io_read_multi_1(struct sdmmc_function *sf, int reg, u_char *data,
     int datalen)
 {
 	int error;
+
+	SDMMC_ASSERT_LOCKED(sf->sc);
 
 	while (datalen > SD_ARG_CMD53_LENGTH_MAX) {
 		error = sdmmc_io_rw_extended(sf->sc, sf, reg, data,
@@ -501,6 +517,8 @@ sdmmc_io_write_multi_1(struct sdmmc_function *sf, int reg, u_char *data,
 {
 	int error;
 
+	SDMMC_ASSERT_LOCKED(sf->sc);
+
 	while (datalen > SD_ARG_CMD53_LENGTH_MAX) {
 		error = sdmmc_io_rw_extended(sf->sc, sf, reg, data,
 		    SD_ARG_CMD53_LENGTH_MAX, SD_ARG_CMD53_WRITE);
@@ -518,6 +536,9 @@ int
 sdmmc_io_xchg(struct sdmmc_softc *sc, struct sdmmc_function *sf,
     int reg, u_char *datap)
 {
+
+	SDMMC_ASSERT_LOCKED(sc);
+
 	return sdmmc_io_rw_direct(sc, sf, reg, datap,
 	    SD_ARG_CMD52_WRITE|SD_ARG_CMD52_EXCHANGE);
 }

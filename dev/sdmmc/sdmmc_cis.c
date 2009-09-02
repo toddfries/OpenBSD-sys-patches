@@ -42,10 +42,13 @@ sdmmc_cisptr(struct sdmmc_function *sf)
 	if (sf->number != 0)
 		return SD_IO_CIS_START;
 
+	SDMMC_ASSERT_LOCKED(sf->sc);
+
 	/* XXX is the CIS pointer stored in little-endian format? */
 	cisptr |= sdmmc_io_read_1(sf, SD_IO_CCCR_CISPTR+0) << 0;
 	cisptr |= sdmmc_io_read_1(sf, SD_IO_CCCR_CISPTR+1) << 8;
 	cisptr |= sdmmc_io_read_1(sf, SD_IO_CCCR_CISPTR+2) << 16;
+
 	return cisptr;
 }
 
@@ -68,6 +71,8 @@ sdmmc_read_cis(struct sdmmc_function *sf, struct sdmmc_cis *cis)
 		printf("%s: bad CIS ptr %#x\n", SDMMCDEVNAME(sf->sc), reg);
 		return 1;
 	}
+
+	SDMMC_ASSERT_LOCKED(sf->sc);
 
 	for (;;) {
 		tplcode = sdmmc_io_read_1(sf, reg++);
@@ -141,6 +146,7 @@ sdmmc_read_cis(struct sdmmc_function *sf, struct sdmmc_cis *cis)
 			break;
 		}
 	}
+
 	return 0;
 }
 
