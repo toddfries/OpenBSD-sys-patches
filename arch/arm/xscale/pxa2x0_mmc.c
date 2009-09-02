@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_mmc.c,v 1.5 2009/02/23 18:09:55 miod Exp $	*/
+/*	$OpenBSD: pxa2x0_mmc.c,v 1.6 2009/09/02 02:40:43 marex Exp $	*/
 
 /*
  * Copyright (c) 2007 Uwe Stuehler <uwe@openbsd.org>
