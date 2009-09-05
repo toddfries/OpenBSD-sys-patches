@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_mmc.c,v 1.6 2009/09/02 02:40:43 marex Exp $	*/
+/*	$OpenBSD: pxa2x0_mmc.c,v 1.9 2009/09/03 21:40:29 marex Exp $	*/
 
 /*
  * Copyright (c) 2007 Uwe Stuehler <uwe@openbsd.org>
@@ -44,7 +44,6 @@
 #include <dev/sdmmc/sdmmcvar.h>
 
 /* GPIO pins */
-#define PXAMMC_CARD_DETECT	9 /* XXX zaurus-specific */
 #define PXAMMC_MMCLK		32
 #define PXAMMC_MMCMD		112
 #define PXAMMC_MMDAT0		92
@@ -135,8 +134,8 @@ pxammc_attach(struct pxammc_softc *sc, void *aux)
 	 */
 	s = splsdmmc();
 
-	pxa2x0_gpio_set_function(PXAMMC_CARD_DETECT, GPIO_IN);
-	sc->sc_card_ih = pxa2x0_gpio_intr_establish(PXAMMC_CARD_DETECT,
+	pxa2x0_gpio_set_function(sc->sc_gpio_detect, GPIO_IN);
+	sc->sc_card_ih = pxa2x0_gpio_intr_establish(sc->sc_gpio_detect,
 	    IST_EDGE_BOTH, IPL_SDMMC, pxammc_card_intr, sc, "mmccd");
 	if (sc->sc_card_ih == NULL) {
 		splx(s);
@@ -255,7 +254,8 @@ pxammc_host_ocr(sdmmc_chipset_handle_t sch)
 int
 pxammc_card_detect(sdmmc_chipset_handle_t sch)
 {
-	return !pxa2x0_gpio_get_bit(PXAMMC_CARD_DETECT);
+	struct pxammc_softc *sc = sch;
+	return !pxa2x0_gpio_get_bit(sc->sc_gpio_detect);
 }
 
 int
@@ -395,7 +395,7 @@ pxammc_exec_command(sdmmc_chipset_handle_t sch,
 		CSR_WRITE_4(sc, MMC_NUMBLK, numblk);
 
 		/* Enable data interrupts. */
-		CSR_CLR_4(sc, MMC_I_MASK, MMC_I_DATA_TRAN_DONE |
+		CSR_CLR_4(sc, MMC_I_MASK,
 		    MMC_I_RXFIFO_RD_REQ | MMC_I_TXFIFO_WR_REQ |
 		    MMC_I_DAT_ERR);
 
@@ -524,16 +524,6 @@ pxammc_intr(void *arg)
 			goto end;
 	}
 
-	if (ISSET(status, MMC_I_TXFIFO_WR_REQ | MMC_I_RXFIFO_RD_REQ)) {
-		pxammc_intr_data(sc);
-		CLR(status, MMC_I_TXFIFO_WR_REQ | MMC_I_RXFIFO_RD_REQ);
-		/* 'status' is invalid from this point, but probably contains
-		 * new interesting bits. Exiting the interrupt handler here with
-		 * those bits set causes an interrupt immediatelly again
-		 */
-		return 1;
-	}
-
 	if (ISSET(status, MMC_I_DAT_ERR)) {
 		sc->sc_cmd->c_error = EIO;
 		pxammc_intr_done(sc);
@@ -551,6 +541,11 @@ pxammc_intr(void *arg)
 		pxammc_intr_done(sc);
 		CSR_SET_4(sc, MMC_I_MASK, MMC_I_DATA_TRAN_DONE);
 		CLR(status, MMC_I_DATA_TRAN_DONE);
+	}
+
+	if (ISSET(status, MMC_I_TXFIFO_WR_REQ | MMC_I_RXFIFO_RD_REQ)) {
+		pxammc_intr_data(sc);
+		CLR(status, MMC_I_TXFIFO_WR_REQ | MMC_I_RXFIFO_RD_REQ);
 	}
 
 end:
@@ -656,10 +651,12 @@ pxammc_intr_data(struct pxammc_softc *sc)
 
 		if (cmd->c_resid > 0)
 			CSR_CLR_4(sc, MMC_I_MASK, MMC_I_RXFIFO_RD_REQ);
-		else
+		else {
 			CSR_SET_4(sc, MMC_I_MASK, MMC_I_RXFIFO_RD_REQ);
+			CSR_CLR_4(sc, MMC_I_MASK, MMC_I_DATA_TRAN_DONE);
+		}
 	} else {
-		int short_xfer = n < 32;
+		int short_xfer = (n != 0 && n != 32);
 
 		while (n-- > 0)
 			CSR_WRITE_1(sc, MMC_TXFIFO, *cmd->c_buf++);
@@ -668,8 +665,10 @@ pxammc_intr_data(struct pxammc_softc *sc)
 
 		if (cmd->c_resid > 0)
 			CSR_CLR_4(sc, MMC_I_MASK, MMC_I_TXFIFO_WR_REQ);
-		else
+		else {
 			CSR_SET_4(sc, MMC_I_MASK, MMC_I_TXFIFO_WR_REQ);
+			CSR_CLR_4(sc, MMC_I_MASK, MMC_I_DATA_TRAN_DONE);
+		}
 	}
 }
 
