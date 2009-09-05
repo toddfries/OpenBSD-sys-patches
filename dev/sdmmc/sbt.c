@@ -162,6 +162,8 @@ sbt_attach(struct device *parent, struct device *self, void *aux)
 	struct sbt_softc *sc = (struct sbt_softc *)self;
 	struct sdmmc_attach_args *sa = aux;
 
+	SDMMC_ASSERT_LOCKED(sc->sc_sf->sc);
+
 	printf("\n");
 
 	sc->sc_sf = sa->sf;

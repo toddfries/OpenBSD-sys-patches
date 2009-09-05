@@ -38,6 +38,8 @@ sdmmc_cisptr(struct sdmmc_function *sf)
 {
 	u_int32_t cisptr = 0;
 
+	SDMMC_ASSERT_LOCKED(sf->sc);
+
 	/* XXX where is the per-function CIS pointer register? */
 	if (sf->number != 0)
 		return SD_IO_CIS_START;
@@ -58,6 +60,8 @@ sdmmc_read_cis(struct sdmmc_function *sf, struct sdmmc_cis *cis)
 	int reg;
 	u_int8_t tplcode;
 	u_int8_t tpllen;
+
+	SDMMC_ASSERT_LOCKED(sf->sc);
 
 	bzero(cis, sizeof *cis);
 

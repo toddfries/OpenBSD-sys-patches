@@ -247,14 +247,14 @@ sdmmc_io_function_disable(struct sdmmc_function *sf)
 	struct sdmmc_function *sf0 = sc->sc_fn0;
 	u_int8_t rv;
 
+	SDMMC_ASSERT_LOCKED(sc);
+
 	if (sf->number == 0)
 		return;		/* FN0 is always enabled */
 
-	SDMMC_LOCK(sc);
 	rv = sdmmc_io_read_1(sf0, SD_IO_CCCR_FN_ENABLE);
 	rv &= ~(1<<sf->number);
 	sdmmc_io_write_1(sf0, SD_IO_CCCR_FN_ENABLE, rv);
-	SDMMC_UNLOCK(sc);
 }
 
 void
