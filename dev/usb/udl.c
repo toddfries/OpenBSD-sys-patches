@@ -1,4 +1,4 @@
-/*	$OpenBSD: udl.c,v 1.31 2009/09/05 20:35:30 mglocker Exp $ */
+/*	$OpenBSD: udl.c,v 1.34 2009/09/09 07:01:20 mglocker Exp $ */
 
 /*
  * Copyright (c) 2009 Marcus Glocker <mglocker@openbsd.org>
@@ -574,7 +574,11 @@ udl_copycols(void *cookie, int row, int src, int dst, int num)
 	cx = num * ri->ri_font->fontwidth;
 	cy = ri->ri_font->fontheight;
 
-	(sc->udl_fb_block_copy)(sc, sx, sy, dx, dy, cx, cy);
+	/* copy row block to off-screen first to fix overlay-copy problem */
+	(sc->udl_fb_block_copy)(sc, sx, sy, 0, sc->sc_ri.ri_emuheight, cx, cy);
+
+	/* copy row block back from off-screen now */
+	(sc->udl_fb_block_copy)(sc, 0, sc->sc_ri.ri_emuheight, dx, dy, cx, cy);
 
 	error = udl_cmd_send_async(sc);
 	if (error != USBD_NORMAL_COMPLETION) {
@@ -760,7 +764,7 @@ udl_do_cursor(struct rasops_info *ri)
 	y = ri->ri_crow * ri->ri_font->fontheight;
 
 	if (sc->sc_cursor_on == 0) {
-		/* safe the last character block to off-screen */
+		/* save the last character block to off-screen */
 		(sc->udl_fb_block_copy)(sc, x, y, 0, sc->sc_ri.ri_emuheight,
 		    ri->ri_font->fontwidth, ri->ri_font->fontheight);
 
@@ -770,7 +774,7 @@ udl_do_cursor(struct rasops_info *ri)
 
 		sc->sc_cursor_on = 1;
 	} else {
-		/* restore the last safed character from off-screen */
+		/* restore the last saved character from off-screen */
 		(sc->udl_fb_block_copy)(sc, 0, sc->sc_ri.ri_emuheight, x, y,
 		    ri->ri_font->fontwidth, ri->ri_font->fontheight);
 
@@ -1802,9 +1806,9 @@ udl_draw_char(struct udl_softc *sc, uint16_t fg, uint16_t bg, u_int uc,
     uint32_t x, uint32_t y)
 {
 	int i, j, ly;
-	uint8_t *fontchar, fontbits, luc;
+	uint8_t *fontchar;
 	uint8_t buf[UDL_CMD_MAX_DATA_SIZE];
-	uint16_t *line, lrgb16;
+	uint16_t *line, lrgb16, fontbits, luc;
 	struct wsdisplay_font *font = sc->sc_ri.ri_font;
 
 	fontchar = (uint8_t *)(font->data + (uc - font->firstchar) *
@@ -1812,10 +1816,15 @@ udl_draw_char(struct udl_softc *sc, uint16_t fg, uint16_t bg, u_int uc,
 
 	ly = y;
 	for (i = 0; i < font->fontheight; i++) {
-		fontbits = *fontchar;
+		if (font->fontwidth > 8) {
+			fontbits = betoh16(*(uint16_t *)fontchar);
+		} else {
+			fontbits = *fontchar;
+			fontbits = fontbits << 8;
+		}
 		line = (uint16_t *)buf;
 
-		for (j = (font->fontwidth - 1); j != -1; j--) {
+		for (j = 15; j > (15 - font->fontwidth); j--) {
 			luc = 1 << j;
 			if (fontbits & luc)
 				lrgb16 = htobe16(fg);

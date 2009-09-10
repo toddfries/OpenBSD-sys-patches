@@ -1,8 +1,7 @@
-/*	$OpenBSD: fdt.c,v 1.6 2009/09/06 19:28:12 kettenis Exp $	*/
+/*     $OpenBSD: fdt.c,v 1.1 2009/09/07 21:16:57 dms Exp $       */
 
 /*
  * Copyright (c) 2009 Dariusz Swiderski <sfires@sfires.net>
- * Copyright (c) 2009 Mark Kettenis <kettenis@sfires.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -20,17 +19,18 @@
 
 #include <sys/types.h>
 #include <sys/param.h>
-#include <sys/user.h>
-
+//#include <sys/user.h>
 #include <machine/fdt.h>
 
-#include <dev/ofw/openfirm.h>
+#include "libsa.h"
+
 
 unsigned int fdt_check_head(void *);
 char	*fdt_get_str(u_int32_t);
 void	*skip_property(u_int32_t *);
 void	*skip_props(u_int32_t *);
 void	*skip_node_name(u_int32_t *);
+void	*fdt_find_node_recurse(void *node, char *name);
 #ifdef DEBUG
 void 	 fdt_print_node_recurse(void *, int);
 #endif
@@ -112,7 +112,7 @@ fdt_init(void *fdt)
 }
 
 /*
- * Retrieve string pointer from strings table.
+ * Retrieve string pointer from srtings table.
  */
 char *
 fdt_get_str(u_int32_t num)
@@ -346,7 +346,7 @@ fdt_print_property(void *node, int level)
 		for (cnt = 0; cnt < size; cnt++) {
 			if ((cnt % sizeof(u_int32_t)) == 0)
 				printf(" ");
-			printf("%02x", value[cnt]);
+			printf("%x", value[cnt]);
 		}
 	}
 	ptr += roundup(size, sizeof(u_int32_t)) / sizeof(u_int32_t);
@@ -393,72 +393,3 @@ fdt_print_tree(void)
 	fdt_print_node_recurse(fdt_next_node(0), 0);
 }
 #endif
-
-int
-OF_peer(int handle)
-{
-	void *node = (char *)tree.header + handle;
-
-	if (handle == 0)
-		node = fdt_find_node("/");
-	else
-		node = fdt_next_node(node);
-	return node ? ((char *)node - (char *)tree.header) : 0;
-}
-
-int
-OF_child(int handle)
-{
-	void *node = (char *)tree.header + handle;
-
-	node = fdt_child_node(node);
-	return node ? ((char *)node - (char *)tree.header) : 0;
-}
-
-int
-OF_finddevice(char *name)
-{
-	void *node;
-
-	node = fdt_find_node(name);
-	return node ? ((char *)node - (char *)tree.header) : -1;
-}
-
-int
-OF_getproplen(int handle, char *prop)
-{
-	void *node = (char *)tree.header + handle;
-	char *data;
-
-	return fdt_node_property(node, prop, &data);
-}
-
-int
-OF_getprop(int handle, char *prop, void *buf, int buflen)
-{
-	void *node = (char *)tree.header + handle;
-	char *data;
-	int len;
-
-	len = fdt_node_property(node, prop, &data);
-
-	/*
-	 * The "name" property is optional since version 16 of the
-	 * flattened device tree specification, so we synthesize one
-	 * from the unit name of the node if it is missing.
-	 */
-	if (len == 0 && strcmp(prop, "name") == 0) {
-		data = fdt_node_name(node);
-		if (data) {
-			len = strlcpy(buf, data, buflen);
-			data = strchr(buf, '@');
-			if (data)
-				*data = 0;
-			return len + 1;
-		}
-	}
-
-	if (len > 0)
-		memcpy(buf, data, min(len, buflen));
-	return len;
-}
