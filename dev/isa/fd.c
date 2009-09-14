@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.81 2009/08/24 08:51:18 jasper Exp $	*/
+/*	$OpenBSD: fd.c,v 1.83 2009/09/12 01:23:30 krw Exp $	*/
 /*	$NetBSD: fd.c,v 1.90 1996/05/12 23:12:03 mycroft Exp $	*/
 
 /*-
@@ -1022,7 +1022,7 @@ fdioctl(dev, cmd, addr, flag, p)
 	struct proc *p;
 {
 	struct fd_softc *fd = fd_cd.cd_devs[FDUNIT(dev)];
-	struct disklabel dl, *lp = &dl;
+	struct disklabel *lp;
 	int error;
 
 	switch (cmd) {
@@ -1059,14 +1059,17 @@ fdioctl(dev, cmd, addr, flag, p)
 		return 0;
 
 	case DIOCWDINFO:
+	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 
-		error = setdisklabel(lp, (struct disklabel *)addr, 0);
-		if (error)
-			return error;
-
-		error = writedisklabel(DISKLABELDEV(dev), fdstrategy, lp);
+		error = setdisklabel(fd->sc_dk.dk_label,
+		    (struct disklabel *)addr, 0);
+		if (error == 0) {
+			if (cmd == DIOCWDINFO)
+				error = writedisklabel(DISKLABELDEV(dev),
+				    fdstrategy, fd->sc_dk.dk_label);
+		}
 		return error;
 
         case FD_FORM:
