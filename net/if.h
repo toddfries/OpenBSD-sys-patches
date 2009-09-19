@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.108 2009/08/10 11:22:10 deraadt Exp $	*/
+/*	$OpenBSD: if.h,v 1.110 2009/09/17 13:27:24 claudio Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -161,12 +161,53 @@ struct	ifqueue {
 /*
  * Values for if_link_state.
  */
-#define	LINK_STATE_UNKNOWN	0	/* link invalid/unknown */
-#define	LINK_STATE_DOWN		1	/* link is down */
-#define	LINK_STATE_UP		2	/* link is up */
-#define LINK_STATE_HALF_DUPLEX	3	/* link is up and half duplex */
-#define LINK_STATE_FULL_DUPLEX	4	/* link is up and full duplex */
+#define LINK_STATE_UNKNOWN	0	/* link unknown */
+#define LINK_STATE_INVALID	1	/* link invalid */
+#define LINK_STATE_DOWN		2	/* link is down */
+#define LINK_STATE_KALIVE_DOWN	3	/* keepalive reports down */
+#define LINK_STATE_UP		4	/* link is up */
+#define LINK_STATE_HALF_DUPLEX	5	/* link is up and half duplex */
+#define LINK_STATE_FULL_DUPLEX	6	/* link is up and full duplex */
+
 #define LINK_STATE_IS_UP(_s)	((_s) >= LINK_STATE_UP)
+
+/*
+ * Status bit descriptions for the various interface types.
+ */
+struct if_status_description {
+	u_char	ifs_type;
+	u_char	ifs_state;
+	const char *ifs_string;
+};
+
+#define LINK_STATE_DESC_MATCH(_ifs, _t, _s)				\
+	(((_ifs)->ifs_type == (_t) || (_ifs)->ifs_type == 0) &&		\
+	    (_ifs)->ifs_state == (_s))
+		
+	
+
+#define LINK_STATE_DESCRIPTIONS {					\
+	{ IFT_ETHER, LINK_STATE_DOWN, "no carrier" },			\
+									\
+	{ IFT_IEEE80211, LINK_STATE_DOWN, "no network" },		\
+									\
+	{ IFT_PPP, LINK_STATE_DOWN, "no carrier" },			\
+									\
+	{ IFT_CARP, LINK_STATE_DOWN, "backup" },			\
+	{ IFT_CARP, LINK_STATE_UP, "master" },				\
+	{ IFT_CARP, LINK_STATE_HALF_DUPLEX, "master" },			\
+	{ IFT_CARP, LINK_STATE_FULL_DUPLEX, "master" },			\
+									\
+	{ 0, LINK_STATE_UP, "active" },					\
+	{ 0, LINK_STATE_HALF_DUPLEX, "active" },			\
+	{ 0, LINK_STATE_FULL_DUPLEX, "active" },			\
+									\
+	{ 0, LINK_STATE_UNKNOWN, "unknown" },				\
+	{ 0, LINK_STATE_INVALID, "invalid" },				\
+	{ 0, LINK_STATE_DOWN, "down" },					\
+	{ 0, LINK_STATE_KALIVE_DOWN, "keepalive down" },		\
+	{ 0, 0, NULL }							\
+}
 
 /*
  * Structure defining a queue for a network interface.
@@ -463,55 +504,6 @@ struct if_announcemsghdr {
 
 #define IFAN_ARRIVAL	0	/* interface arrival */
 #define IFAN_DEPARTURE	1	/* interface departure */
-
-/*
- * Comaptibility structures for version 3 messages.
- * Keep them till after OpenBSD 4.4
- */
-struct	if_odata {
-	/* generic interface information */
-	u_char	ifi_type;		/* ethernet, tokenring, etc. */
-	u_char	ifi_addrlen;		/* media address length */
-	u_char	ifi_hdrlen;		/* media header length */
-	u_char	ifi_link_state;		/* current link state */
-	u_long	ifi_mtu;		/* maximum transmission unit */
-	u_long	ifi_metric;		/* routing metric (external only) */
-	u_long	ifi_baudrate;		/* linespeed */
-	/* volatile statistics */
-	u_long	ifi_ipackets;		/* packets received on interface */
-	u_long	ifi_ierrors;		/* input errors on interface */
-	u_long	ifi_opackets;		/* packets sent on interface */
-	u_long	ifi_oerrors;		/* output errors on interface */
-	u_long	ifi_collisions;		/* collisions on csma interfaces */
-	u_long	ifi_ibytes;		/* total number of octets received */
-	u_long	ifi_obytes;		/* total number of octets sent */
-	u_long	ifi_imcasts;		/* packets received via multicast */
-	u_long	ifi_omcasts;		/* packets sent via multicast */
-	u_long	ifi_iqdrops;		/* dropped on input, this interface */
-	u_long	ifi_noproto;		/* destined for unsupported protocol */
-	struct	timeval ifi_lastchange;	/* last operational state change */
-};
-
-struct if_omsghdr {
-	u_short	ifm_msglen;	/* to skip over non-understood messages */
-	u_char	ifm_version;	/* future binary compatibility */
-	u_char	ifm_type;	/* message type */
-	int	ifm_addrs;	/* like rtm_addrs */
-	int	ifm_flags;	/* value of if_flags */
-	u_short	ifm_index;	/* index for associated ifp */
-	struct	if_odata ifm_data;/* statistics and other data about if */
-};
-
-struct ifa_omsghdr {
-	u_short	ifam_msglen;	/* to skip over non-understood messages */
-	u_char	ifam_version;	/* future binary compatibility */
-	u_char	ifam_type;	/* message type */
-	int	ifam_addrs;	/* like rtm_addrs */
-	int	ifam_flags;	/* value of ifa_flags */
-	u_short	ifam_index;	/* index for associated ifp */
-	int	ifam_metric;	/* value of ifa_metric */
-};
-
 
 /*
  * interface groups
