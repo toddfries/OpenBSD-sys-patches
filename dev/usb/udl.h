@@ -1,4 +1,4 @@
-/*	$OpenBSD: udl.h,v 1.9 2009/09/19 11:54:16 mglocker Exp $ */
+/*	$OpenBSD: udl.h,v 1.13 2009/09/21 07:41:18 mglocker Exp $ */
 
 /*
  * Copyright (c) 2009 Marcus Glocker <mglocker@openbsd.org>
@@ -38,7 +38,7 @@ struct udl_cmd_xfer {
 struct udl_cmd_buf {
 #define UDL_CMD_XFER_SYNC	 0
 #define UDL_CMD_XFER_ASYNC	 1
-	uint8_t			 xfer_method;
+	uint8_t			 xfer_type;
 	uint16_t		 compblock;
 	uint16_t		 compblock_save;
 	uint32_t		 off;
@@ -59,6 +59,8 @@ struct udl_softc {
 	struct device		*sc_wsdisplay;
 	struct rasops_info	 sc_ri;
 	uint8_t			 sc_nscreens;
+
+	int			 sc_mode;
 
 #define UDL_CMD_XFER_COUNT	 8
 	int			 sc_cmd_xfer_cnt;
@@ -99,17 +101,6 @@ struct udl_softc {
 				     (struct udl_softc *, uint32_t, uint32_t,
 				     uint32_t, uint32_t, uint32_t, uint32_t);
 };
-
-/*
- * udl IOCTLs.
- */
-struct udl_ioctl_damage {
-	int	x1;
-	int	x2;
-	int	y1;
-	int	y2;
-};
-#define	UDLIO_DAMAGE			_IOWR('W', 0, struct udl_ioctl_damage)
 
 /*
  * Chip commands.
