@@ -1,4 +1,4 @@
-/*	$OpenBSD: udl.c,v 1.42 2009/09/19 11:54:16 mglocker Exp $ */
+/*	$OpenBSD: udl.c,v 1.52 2009/09/27 18:17:45 mglocker Exp $ */
 
 /*
  * Copyright (c) 2009 Marcus Glocker <mglocker@openbsd.org>
@@ -30,7 +30,9 @@
 
 #include <sys/param.h>
 #include <sys/device.h>
+#include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/proc.h>
 #include <uvm/uvm.h>
 
 #include <machine/bus.h>
@@ -45,6 +47,7 @@
 #include <dev/rasops/rasops.h>
 
 #include <dev/usb/udl.h>
+#include <dev/usb/udlio.h>
 
 /*
  * Defines.
@@ -119,9 +122,9 @@ int		udl_cmd_insert_buf_comp(struct udl_softc *, uint8_t *,
 		    uint32_t);
 int		udl_cmd_insert_head_comp(struct udl_softc *, uint32_t);
 int		udl_cmd_insert_check(struct udl_softc *, int);
-void		udl_cmd_set_xfer(struct udl_softc *, int);
-void		udl_cmd_get_offset(struct udl_softc *);
-void		udl_cmd_set_offset(struct udl_softc *);
+void		udl_cmd_set_xfer_type(struct udl_softc *, int);
+void		udl_cmd_save_offset(struct udl_softc *);
+void		udl_cmd_restore_offset(struct udl_softc *);
 void		udl_cmd_write_reg_1(struct udl_softc *, uint8_t, uint8_t);
 void		udl_cmd_write_reg_3(struct udl_softc *, uint8_t, uint32_t);
 usbd_status	udl_cmd_send(struct udl_softc *);
@@ -133,6 +136,7 @@ usbd_status	udl_init_chip(struct udl_softc *);
 void		udl_init_fb_offsets(struct udl_softc *, uint32_t, uint32_t,
 		    uint32_t, uint32_t);
 usbd_status	udl_init_resolution(struct udl_softc *, uint8_t *, uint8_t);
+usbd_status	udl_clear_screen(struct udl_softc *);
 int		udl_fb_buf_write(struct udl_softc *, uint8_t *, uint32_t,
 		    uint32_t, uint16_t);
 int		udl_fb_block_write(struct udl_softc *, uint16_t, uint32_t,
@@ -294,7 +298,7 @@ udl_attach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Device initialization is done per synchronous xfers.
 	 */
-	udl_cmd_set_xfer(sc, UDL_CMD_XFER_SYNC);
+	udl_cmd_set_xfer_type(sc, UDL_CMD_XFER_SYNC);
 
 	/*
 	 * Initialize chip.
@@ -345,22 +349,22 @@ udl_attach_hook(void *arg)
 	if (udl_load_huffman(sc) != 0) {
 		/* compression not possible */
 		printf("%s: run in uncompressed mode\n", DN(sc));
-		sc->udl_fb_off_write = udl_fb_off_write;
-		sc->udl_fb_line_write = udl_fb_line_write;
-		sc->udl_fb_block_write = udl_fb_block_write;
 		sc->udl_fb_buf_write = udl_fb_buf_write;
-		sc->udl_fb_off_copy = udl_fb_off_copy;
-		sc->udl_fb_line_copy = udl_fb_line_copy;
+		sc->udl_fb_block_write = udl_fb_block_write;
+		sc->udl_fb_line_write = udl_fb_line_write;
+		sc->udl_fb_off_write = udl_fb_off_write;
 		sc->udl_fb_block_copy = udl_fb_block_copy;
+		sc->udl_fb_line_copy = udl_fb_line_copy;
+		sc->udl_fb_off_copy = udl_fb_off_copy;
 	} else {
 		/* compression possible */
-		sc->udl_fb_off_write = udl_fb_off_write_comp;
-		sc->udl_fb_line_write = udl_fb_line_write_comp;
-		sc->udl_fb_block_write = udl_fb_block_write_comp;
 		sc->udl_fb_buf_write = udl_fb_buf_write_comp;
-		sc->udl_fb_off_copy = udl_fb_off_copy_comp;
-		sc->udl_fb_line_copy = udl_fb_line_copy_comp;
+		sc->udl_fb_block_write = udl_fb_block_write_comp;
+		sc->udl_fb_line_write = udl_fb_line_write_comp;
+		sc->udl_fb_off_write = udl_fb_off_write_comp;
 		sc->udl_fb_block_copy = udl_fb_block_copy_comp;
+		sc->udl_fb_line_copy = udl_fb_line_copy_comp;
+		sc->udl_fb_off_copy = udl_fb_off_copy_comp;
 	}
 #ifdef UDL_DEBUG
 	if (udl_debug >= 4)
@@ -369,7 +373,12 @@ udl_attach_hook(void *arg)
 	/*
 	 * From this point on we do asynchronous xfers.
 	 */
-	udl_cmd_set_xfer(sc, UDL_CMD_XFER_ASYNC);
+	udl_cmd_set_xfer_type(sc, UDL_CMD_XFER_ASYNC);
+
+	/*
+	 * Set initial wsdisplay emulation mode.
+	 */
+	sc->sc_mode = WSDISPLAYIO_MODE_EMUL;
 }
 
 int
@@ -437,14 +446,13 @@ udl_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 	struct udl_softc *sc;
 	struct wsdisplay_fbinfo *wdf;
 	struct udl_ioctl_damage *d;
-	int r;
+	int r, error, mode;
 
 	sc = v;
 
 	DPRINTF(1, "%s: %s: ('%c', %d, %d)\n",
 	    DN(sc), FUNC, IOCGROUP(cmd), cmd & 0xff, IOCPARM_LEN(cmd));
 
-	/* TODO */
 	switch (cmd) {
 	case WSDISPLAYIO_GTYPE:
 		*(u_int *)data = WSDISPLAY_TYPE_DL;
@@ -456,15 +464,44 @@ udl_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 		wdf->depth = sc->sc_depth;
 		wdf->cmsize = 0;	/* XXX fill up colormap size */
 		break;
+	case WSDISPLAYIO_SMODE:
+		mode = *(u_int *)data;
+		if (mode == sc->sc_mode)
+			break;
+		switch (mode) {
+		case WSDISPLAYIO_MODE_EMUL:
+			/* clear screen */
+			(void)udl_clear_screen(sc);
+			break;
+		case WSDISPLAYIO_MODE_DUMBFB:
+			/* TODO */
+			break;
+		default:
+			return (EINVAL);
+		}
+		sc->sc_mode = mode;
+		break;
 	case WSDISPLAYIO_LINEBYTES:
 		*(u_int *)data = sc->sc_width * (sc->sc_depth / 8);
 		break;
+	case WSDISPLAYIO_SVIDEO:
+	case WSDISPLAYIO_GVIDEO:
+		/* handled for us by wscons */
+		break;
 	case UDLIO_DAMAGE:
 		d = (struct udl_ioctl_damage *)data;
+		d->status = UDLIO_STATUS_OK;
 		r = udl_damage(sc, sc->sc_fbmem, d->x1, d->x2, d->y1, d->y2);
 		if (r != 0) {
-			/* XXX we need to inform X11 when we failed to draw */
-			printf("%s: %s: damage draw failed!\n", DN(sc), FUNC);
+			error = tsleep(sc, 0, "udlio", hz / 100);
+			if (error) {
+				d->status = UDLIO_STATUS_FAILED;
+			} else {
+				r = udl_damage(sc, sc->sc_fbmem, d->x1, d->x2,
+				    d->y1, d->y2);
+				if (r != 0)
+					d->status = UDLIO_STATUS_FAILED;
+			}
 		}
 		break;
 	default:
@@ -624,7 +661,7 @@ udl_copycols(void *cookie, int row, int src, int dst, int num)
 	DPRINTF(2, "%s: %s: row=%d, src=%d, dst=%d, num=%d\n",
 	    DN(sc), FUNC, row, src, dst, num);
 
-	udl_cmd_get_offset(sc);
+	udl_cmd_save_offset(sc);
 
 	sx = src * ri->ri_font->fontwidth;
 	sy = row * ri->ri_font->fontheight;
@@ -648,7 +685,7 @@ udl_copycols(void *cookie, int row, int src, int dst, int num)
 	error = udl_cmd_send_async(sc);
 	if (error != USBD_NORMAL_COMPLETION) {
 fail:
-		udl_cmd_set_offset(sc);
+		udl_cmd_restore_offset(sc);
 		return (EAGAIN);
 	}
 
@@ -668,7 +705,7 @@ udl_copyrows(void *cookie, int src, int dst, int num)
 	DPRINTF(2, "%s: %s: src=%d, dst=%d, num=%d\n",
 	    DN(sc), FUNC, src, dst, num);
 
-	udl_cmd_get_offset(sc);
+	udl_cmd_save_offset(sc);
 
 	sy = src * sc->sc_ri.ri_font->fontheight;
 	dy = dst * sc->sc_ri.ri_font->fontheight;
@@ -690,7 +727,7 @@ udl_copyrows(void *cookie, int src, int dst, int num)
 	error = udl_cmd_send_async(sc);
 	if (error != USBD_NORMAL_COMPLETION) {
 fail:
-		udl_cmd_set_offset(sc);
+		udl_cmd_restore_offset(sc);
 		return (EAGAIN);
 	}
 
@@ -712,7 +749,7 @@ udl_erasecols(void *cookie, int row, int col, int num, long attr)
 	DPRINTF(2, "%s: %s: row=%d, col=%d, num=%d\n",
 	    DN(sc), FUNC, row, col, num);
 
-	udl_cmd_get_offset(sc);
+	udl_cmd_save_offset(sc);
 
 	sc->sc_ri.ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
 	bgc = (uint16_t)sc->sc_ri.ri_devcmap[bg];
@@ -729,7 +766,7 @@ udl_erasecols(void *cookie, int row, int col, int num, long attr)
 	error = udl_cmd_send_async(sc);
 	if (error != USBD_NORMAL_COMPLETION) {
 fail:
-		udl_cmd_set_offset(sc);
+		udl_cmd_restore_offset(sc);
 		return (EAGAIN);
 	}
 
@@ -750,7 +787,7 @@ udl_eraserows(void *cookie, int row, int num, long attr)
 
 	DPRINTF(2, "%s: %s: row=%d, num=%d\n", DN(sc), FUNC, row, num);
 
-	udl_cmd_get_offset(sc);
+	udl_cmd_save_offset(sc);
 
 	sc->sc_ri.ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
 	bgc = (uint16_t)sc->sc_ri.ri_devcmap[bg];
@@ -767,7 +804,7 @@ udl_eraserows(void *cookie, int row, int num, long attr)
 	error = udl_cmd_send_async(sc);
 	if (error != USBD_NORMAL_COMPLETION) {
 fail:
-		udl_cmd_set_offset(sc);
+		udl_cmd_restore_offset(sc);
 		return (EAGAIN);
 	}
 
@@ -785,7 +822,7 @@ udl_putchar(void *cookie, int row, int col, u_int uc, long attr)
 
 	DPRINTF(4, "%s: %s\n", DN(sc), FUNC);
 
-	udl_cmd_get_offset(sc);
+	udl_cmd_save_offset(sc);
 
 	sc->sc_ri.ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
 	fgc = (uint16_t)sc->sc_ri.ri_devcmap[fg];
@@ -820,7 +857,7 @@ udl_putchar(void *cookie, int row, int col, u_int uc, long attr)
 	return (0);
 
 fail:
-	udl_cmd_set_offset(sc);
+	udl_cmd_restore_offset(sc);
 	return (EAGAIN);
 }
 
@@ -844,7 +881,7 @@ udl_do_cursor(struct rasops_info *ri)
 	DPRINTF(2, "%s: %s: ccol=%d, crow=%d\n",
 	    DN(sc), FUNC, ri->ri_ccol, ri->ri_crow);
 
-	udl_cmd_get_offset(sc);
+	udl_cmd_save_offset(sc);
 	save_cursor = sc->sc_cursor_on;
 
 	x = ri->ri_ccol * ri->ri_font->fontwidth;
@@ -877,7 +914,7 @@ udl_do_cursor(struct rasops_info *ri)
 	error = udl_cmd_send_async(sc);
 	if (error != USBD_NORMAL_COMPLETION) {
 fail:
-		udl_cmd_set_offset(sc);
+		udl_cmd_restore_offset(sc);
 		sc->sc_cursor_on = save_cursor;
 		return (EAGAIN);
 	}
@@ -934,6 +971,9 @@ udl_damage(struct udl_softc *sc, uint8_t *image,
 {
 	int r;
 	int x, y, width, height;
+	usbd_status error;
+
+	udl_cmd_save_offset(sc);
 
 	x = x1;
 	y = y1;
@@ -942,11 +982,14 @@ udl_damage(struct udl_softc *sc, uint8_t *image,
 
 	r = udl_draw_image(sc, image, x, y, width, height);
 	if (r != 0)
-		return (r);
+		goto fail;
 
-	r = udl_cmd_send_async(sc);
-	if (r != 0)
-		return (r);
+	error = udl_cmd_send_async(sc);
+	if (error != USBD_NORMAL_COMPLETION) {
+fail:
+		udl_cmd_restore_offset(sc);
+		return (EAGAIN);
+	}
 
 	return (0);
 }
@@ -1345,7 +1388,7 @@ udl_cmd_insert_buf_comp(struct udl_softc *sc, uint8_t *buf, uint32_t len)
 	 * skip the header and finish up the main-block.  We return zero
 	 * to signal our caller that the header has been skipped.
 	 */
-	if (cb->compblock > UDL_CB_RESTART_SIZE) {
+	if (cb->compblock >= UDL_CB_RESTART_SIZE) {
 		cb->off -= UDL_CMD_WRITE_HEAD_SIZE;
 		cb->compblock -= UDL_CMD_WRITE_HEAD_SIZE;
 		eob = 1;
@@ -1461,7 +1504,7 @@ udl_cmd_insert_check(struct udl_softc *sc, int len)
 
 	if (total > UDL_CMD_MAX_XFER_SIZE) {
 		/* command buffer is almost full, try to flush it */
-		if (cb->xfer_method == UDL_CMD_XFER_ASYNC)
+		if (cb->xfer_type == UDL_CMD_XFER_ASYNC)
 			error = udl_cmd_send_async(sc);
 		else
 			error = udl_cmd_send(sc);
@@ -1476,15 +1519,15 @@ udl_cmd_insert_check(struct udl_softc *sc, int len)
 }
 
 void
-udl_cmd_set_xfer(struct udl_softc *sc, int xfer_method)
+udl_cmd_set_xfer_type(struct udl_softc *sc, int xfer_type)
 {
 	struct udl_cmd_buf *cb = &sc->sc_cmd_buf;
 
-	cb->xfer_method = xfer_method;
+	cb->xfer_type = xfer_type;
 }
 
 void
-udl_cmd_get_offset(struct udl_softc *sc)
+udl_cmd_save_offset(struct udl_softc *sc)
 {
 	struct udl_cmd_buf *cb = &sc->sc_cmd_buf;
 
@@ -1493,7 +1536,7 @@ udl_cmd_get_offset(struct udl_softc *sc)
 }
 
 void
-udl_cmd_set_offset(struct udl_softc *sc)
+udl_cmd_restore_offset(struct udl_softc *sc)
 {
 	struct udl_cmd_buf *cb = &sc->sc_cmd_buf;
 
@@ -1629,6 +1672,9 @@ skip:
 	/* free xfer buffer */
 	cx->busy = 0;
 	sc->sc_cmd_xfer_cnt--;
+
+	/* wakeup UDLIO_DAMAGE if it sleeps for a free xfer buffer */
+	wakeup(sc);
 }
 
 /* ---------- */
@@ -1712,8 +1758,7 @@ udl_init_resolution(struct udl_softc *sc, uint8_t *buf, uint8_t len)
 		return (error);
 
 	/* clear screen */
-	udl_fb_block_write(sc, 0x0000, 0, 0, sc->sc_width, sc->sc_height);
-	error = udl_cmd_send(sc);
+	error = udl_clear_screen(sc);
 	if (error != USBD_NORMAL_COMPLETION)
 		return (error);
 
@@ -1721,6 +1766,24 @@ udl_init_resolution(struct udl_softc *sc, uint8_t *buf, uint8_t len)
 	udl_cmd_write_reg_1(sc, UDL_REG_SCREEN, UDL_REG_SCREEN_ON);
 	udl_cmd_write_reg_1(sc, UDL_REG_SYNC, 0xff);
 	error = udl_cmd_send(sc);
+	if (error != USBD_NORMAL_COMPLETION)
+		return (error);
+
+	return (USBD_NORMAL_COMPLETION);
+}
+
+usbd_status
+udl_clear_screen(struct udl_softc *sc)
+{
+	struct udl_cmd_buf *cb = &sc->sc_cmd_buf;
+	usbd_status error;
+
+	/* clear screen */
+	udl_fb_block_write(sc, 0x0000, 0, 0, sc->sc_width, sc->sc_height);
+	if (cb->xfer_type == UDL_CMD_XFER_ASYNC)
+		error = udl_cmd_send_async(sc);
+	else
+		error = udl_cmd_send(sc);
 	if (error != USBD_NORMAL_COMPLETION)
 		return (error);
 

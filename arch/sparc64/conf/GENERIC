@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.243 2009/09/01 19:15:42 kettenis Exp $
+#	$OpenBSD: GENERIC,v 1.245 2009/10/03 19:56:14 kettenis Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -312,8 +312,12 @@ lpt*	at ebus?
 
 bbc*	at ebus?
 led*	at ebus?
+lom*	at ebus?
 pmc*	at ebus?
 ppm*	at ebus?
+wbsd*	at ebus?
+sdmmc*	at wbsd?
+scsibus* at sdmmc?
 
 # performance counters
 uperf*	at ebus?

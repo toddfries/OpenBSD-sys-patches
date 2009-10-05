@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc64,v 1.126 2009/07/05 17:13:25 kettenis Exp $
+#	$OpenBSD: files.sparc64,v 1.129 2009/10/04 17:49:33 deraadt Exp $
 #	$NetBSD: files.sparc64,v 1.50 2001/08/10 20:53:50 eeh Exp $
 
 # maxpartitions must be first item in files.${ARCH}
@@ -217,6 +217,10 @@ device	led
 attach	led at ebus
 file	arch/sparc64/dev/led.c			led
 
+device	lom
+attach	lom at ebus
+file	arch/sparc64/dev/lom.c			lom
+
 device	pmc
 attach	pmc at ebus
 file	arch/sparc64/dev/pmc.c			pmc
@@ -244,6 +248,9 @@ attach	audioce at ebus
 file	arch/sparc64/dev/ce4231.c		audioce
 
 file	arch/sparc64/dev/stp_sbus.c		stp_sbus
+
+attach	wbsd at ebus with wbsd_ebus
+file	arch/sparc64/dev/wbsd_ebus.c		wbsd
 
 #
 # Console related stuff
@@ -353,6 +360,11 @@ major	{rd = 5}
 #
 include "dev/i2c/files.i2c"
 file	arch/sparc64/dev/ofwi2c.c		i2cbus
+
+#
+# Machine-independent SD/MMC drivers
+#
+include "dev/sdmmc/files.sdmmc"
 
 #
 # Machine-independent USB drivers
