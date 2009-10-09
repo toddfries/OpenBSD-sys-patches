@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbridge.c,v 1.48 2009/10/07 20:39:14 miod Exp $	*/
+/*	$OpenBSD: xbridge.c,v 1.50 2009/10/08 19:14:23 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009  Miodrag Vallat.
@@ -309,10 +309,8 @@ static const struct {
 	{ XBOW_VENDOR_SGI4, XBOW_PRODUCT_SGI4_BRIDGE,	0 },
 	/* XBridge */
 	{ XBOW_VENDOR_SGI3, XBOW_PRODUCT_SGI3_XBRIDGE,	XF_XBRIDGE },
-	/* PIC first half */
-	{ XBOW_VENDOR_SGI3, XBOW_PRODUCT_SGI3_PIC0,	XF_PIC },
-	/* PIC second half */
-	{ XBOW_VENDOR_SGI3, XBOW_PRODUCT_SGI3_PIC1,	XF_PIC }
+	/* PIC */
+	{ XBOW_VENDOR_SGI3, XBOW_PRODUCT_SGI3_PIC,	XF_PIC }
 };
 
 int
@@ -853,7 +851,8 @@ xbridge_intr_establish(void *cookie, pci_intr_handle_t ih, int level,
 
 		xi->xi_intrsrc = intrsrc;
 		xb->xb_intr[intrbit] = xi;
-	}
+	} else
+		intrsrc = xi->xi_intrsrc;
 	
 	/*
 	 * Register the interrupt at the Heart or Hub level if this is the
@@ -2035,10 +2034,17 @@ xbridge_setup(struct xbridge_bus *xb)
 	xbridge_write_reg(xb, BRIDGE_INT_MODE, 0);
 	xbridge_write_reg(xb, BRIDGE_INT_DEV, 0);
 
-	xbridge_write_reg(xb, WIDGET_INTDEST_ADDR_UPPER,
-	    (xbow_intr_widget_register >> 32) | (xbow_intr_widget << 16));
-	xbridge_write_reg(xb, WIDGET_INTDEST_ADDR_LOWER,
-	    (uint32_t)xbow_intr_widget_register);
+	if (ISSET(xb->xb_flags, XF_PIC)) {
+		xbridge_write_reg(xb, WIDGET_INTDEST_ADDR_LOWER,
+		    ((uint64_t)xbow_intr_widget << 48) |
+		    (xbow_intr_widget_register & ((1UL << 48) - 1)));
+	} else {
+		xbridge_write_reg(xb, WIDGET_INTDEST_ADDR_UPPER,
+		    (xbow_intr_widget_register >> 32) |
+		    (xbow_intr_widget << 16));
+		xbridge_write_reg(xb, WIDGET_INTDEST_ADDR_LOWER,
+		    (uint32_t)xbow_intr_widget_register);
+	}
 
 	(void)xbridge_read_reg(xb, WIDGET_TFLUSH);
 }
