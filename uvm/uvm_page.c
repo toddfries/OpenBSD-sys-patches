@@ -794,7 +794,7 @@ uvm_pagealloc_strat(struct uvm_object *obj, voff_t off, struct vm_anon *anon,
 	 */
 	if ((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freemin ||
 	    ((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freetarg &&
-	     uvmexp.inactive < uvmexp.inactarg))
+	    (uvmexp.inactive + BUFPAGES_INACT) < uvmexp.inactarg))
 		wakeup(&uvm.pagedaemon);
 
 	/*
