@@ -509,6 +509,8 @@ extern struct bcachestats bcstats;
 extern long buflowpages, bufhighpages, bufbackpages;
 #define BUFPAGES_DEFICIT (((buflowpages - bcstats.numbufpages) < 0) ? 0 \
     : buflowpages - bcstats.numbufpages)
+#define BUFPAGES_INACT (((bcstats.numcleanpages - buflowpages) < 0) ? 0 \
+    : bcstats.numcleanpages - buflowpages)
 extern int bufcachepercent;
 extern void bufadjust(int);
 extern int bufbackoff(void);
