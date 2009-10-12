@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbridge.c,v 1.46 2009/08/22 02:54:51 mk Exp $	*/
+/*	$OpenBSD: xbridge.c,v 1.48 2009/10/07 20:39:14 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009  Miodrag Vallat.
@@ -81,10 +81,10 @@ struct xbridge_bus {
 	 * with 64 bit operations, although the hardware was supposed
 	 * to be directly compatible with XBridge on that aspect.
 	 */
-	uint32_t	(*xb_read_reg)(bus_space_tag_t, bus_space_handle_t,
+	uint64_t	(*xb_read_reg)(bus_space_tag_t, bus_space_handle_t,
 			    bus_addr_t);
 	void		(*xb_write_reg)(bus_space_tag_t, bus_space_handle_t,
-			    bus_addr_t, uint32_t);
+			    bus_addr_t, uint64_t);
 
 	uint		xb_busno;
 	uint		xb_nslots;
@@ -257,20 +257,20 @@ void	xbridge_resource_setup(struct xbridge_bus *);
 void	xbridge_rrb_setup(struct xbridge_bus *, int);
 void	xbridge_setup(struct xbridge_bus *);
 
-uint32_t bridge_read_reg(bus_space_tag_t, bus_space_handle_t, bus_addr_t);
+uint64_t bridge_read_reg(bus_space_tag_t, bus_space_handle_t, bus_addr_t);
 void	bridge_write_reg(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    uint32_t);
-uint32_t pic_read_reg(bus_space_tag_t, bus_space_handle_t, bus_addr_t);
+	    uint64_t);
+uint64_t pic_read_reg(bus_space_tag_t, bus_space_handle_t, bus_addr_t);
 void	pic_write_reg(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    uint32_t);
+	    uint64_t);
 
-static __inline__ uint32_t
+static __inline__ uint64_t
 xbridge_read_reg(struct xbridge_bus *xb, bus_addr_t a)
 {
 	return (*xb->xb_read_reg)(xb->xb_regt, xb->xb_regh, a);
 }
 static __inline__ void
-xbridge_write_reg(struct xbridge_bus *xb, bus_addr_t a, uint32_t v)
+xbridge_write_reg(struct xbridge_bus *xb, bus_addr_t a, uint64_t v)
 {
 	(*xb->xb_write_reg)(xb->xb_regt, xb->xb_regh, a, v);
 }
@@ -507,6 +507,12 @@ xbridge_attach_bus(struct xbridge_softc *sc, uint busno, bus_space_tag_t regt)
 	pba.pba_dmat = xb->xb_dmat;
 	pba.pba_ioex = xb->xb_ioex;
 	pba.pba_memex = xb->xb_memex;
+#ifdef DEBUG
+	if (xb->xb_ioex != NULL)
+		extent_print(xb->xb_ioex);
+	if (xb->xb_memex != NULL)
+		extent_print(xb->xb_memex);
+#endif
 	pba.pba_pc = &xb->xb_pc;
 	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
@@ -820,7 +826,7 @@ xbridge_intr_establish(void *cookie, pci_intr_handle_t ih, int level,
 	struct xbridge_bus *xb = (struct xbridge_bus *)cookie;
 	struct xbridge_intr *xi;
 	struct xbridge_intrhandler *xih;
-	uint32_t int_addr;
+	uint64_t int_addr;
 	int intrbit = XBRIDGE_INTR_BIT(ih);
 	int device = XBRIDGE_INTR_DEVICE(ih);
 	int intrsrc;
@@ -1031,29 +1037,29 @@ xbridge_intr_handler(void *v)
  ********************* chip register access.
  */
 
-uint32_t
+uint64_t
 bridge_read_reg(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t a)
 {
-	return widget_read_4(t, h, a);
+	return (uint64_t)widget_read_4(t, h, a);
 }
 void
 bridge_write_reg(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t a,
-    uint32_t v)
+    uint64_t v)
 {
-	widget_write_4(t, h, a, v);
+	widget_write_4(t, h, a, (uint32_t)v);
 }
 
-uint32_t
+uint64_t
 pic_read_reg(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t a)
 {
-	return (uint32_t)widget_read_8(t, h, a);
+	return widget_read_8(t, h, a);
 }
 
 void
 pic_write_reg(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t a,
-    uint32_t v)
+    uint64_t v)
 {
-	widget_write_8(t, h, a, (uint64_t)v);
+	widget_write_8(t, h, a, v);
 }
 
 /*
@@ -1964,8 +1970,12 @@ xbridge_setup(struct xbridge_bus *xb)
 	 */
 
 	for (dev = 0; dev < xb->xb_nslots; dev++) {
-		pa = xb->xb_regh + BRIDGE_PCI_CFG_SPACE +
-		    (dev << 12) + PCI_ID_REG;
+		if (ISSET(xb->xb_flags, XF_PIC))
+			pa = xb->xb_regh + BRIDGE_PCI_CFG_SPACE +
+			    ((dev + 1) << 12) + PCI_ID_REG;
+		else
+			pa = xb->xb_regh + BRIDGE_PCI_CFG_SPACE +
+			    (dev << 12) + PCI_ID_REG;
 		if (guarded_read_4(pa, &xb->xb_devices[dev].id) != 0)
 			xb->xb_devices[dev].id =
 			    PCI_ID_CODE(PCI_VENDOR_INVALID, 0xffff);
@@ -2156,6 +2166,11 @@ xbridge_resource_setup(struct xbridge_bus *xb)
 	 * Configure all regular PCI devices.
 	 */
 
+#ifdef DEBUG
+	for (dev = 0; dev < xb->xb_nslots; dev++)
+		printf("device %d: devio %08x\n",
+		    dev, xbridge_read_reg(xb, BRIDGE_DEVICE(dev)));
+#endif
 	nppb = npccbb = 0;
 	for (dev = 0; dev < xb->xb_nslots; dev++) {
 		id = xb->xb_devices[dev].id;
@@ -2192,10 +2207,8 @@ xbridge_resource_setup(struct xbridge_bus *xb)
 		 */
 
 		devio = xbridge_read_reg(xb, BRIDGE_DEVICE(dev));
-#ifdef DEBUG
-		printf("device %d: devio %08x\n", dev, devio);
-#endif
-		if (id != PCI_ID_CODE(PCI_VENDOR_SGI, PCI_PRODUCT_SGI_IOC3))
+		if (id != PCI_ID_CODE(PCI_VENDOR_SGI, PCI_PRODUCT_SGI_IOC3) &&
+		    id != PCI_ID_CODE(PCI_VENDOR_SGI, PCI_PRODUCT_SGI_IOC4))
 			need_setup = 1;
 		else
 			need_setup = xb->xb_devio_skew !=
@@ -2212,6 +2225,7 @@ xbridge_resource_setup(struct xbridge_bus *xb)
 			devio |= BRIDGE_DEVICE_SWAP_PMU;
 		devio |= BRIDGE_DEVICE_SWAP_DIR;
 		if (id == PCI_ID_CODE(PCI_VENDOR_SGI, PCI_PRODUCT_SGI_IOC3) ||
+		    id == PCI_ID_CODE(PCI_VENDOR_SGI, PCI_PRODUCT_SGI_IOC4) ||
 		    id == PCI_ID_CODE(PCI_VENDOR_SGI, PCI_PRODUCT_SGI_RAD1))
 			devio &=
 			    ~(BRIDGE_DEVICE_SWAP_DIR | BRIDGE_DEVICE_SWAP_PMU);
@@ -2325,8 +2339,8 @@ xbridge_extent_setup(struct xbridge_bus *xb)
 	bus_addr_t start, end;
 	uint32_t devio;
 
-	snprintf(xb->xb_ioexname, sizeof(xb->xb_ioexname), "%s_io",
-	    DEVNAME(xb));
+	snprintf(xb->xb_ioexname, sizeof(xb->xb_ioexname), "%s_io%d",
+	    DEVNAME(xb), xb->xb_busno);
 	xb->xb_ioex = extent_create(xb->xb_ioexname, 0, 0xffffffff,
 	    M_DEVBUF, NULL, 0, EX_NOWAIT | EX_FILLED);
 
@@ -2374,8 +2388,8 @@ xbridge_extent_setup(struct xbridge_bus *xb)
 		}
 	}
 
-	snprintf(xb->xb_memexname, sizeof(xb->xb_memexname), "%s_mem",
-	    DEVNAME(xb));
+	snprintf(xb->xb_memexname, sizeof(xb->xb_memexname), "%s_mem%d",
+	    DEVNAME(xb), xb->xb_busno);
 	xb->xb_memex = extent_create(xb->xb_memexname, 0, 0xffffffff,
 	    M_DEVBUF, NULL, 0, EX_NOWAIT | EX_FILLED);
 
@@ -2703,8 +2717,8 @@ xbridge_resource_manage(struct xbridge_bus *xb, pcitag_t tag,
 		 * ARCS but can be reinitialized as we see fit).
 		 */
 #ifdef DEBUG
-		printf("bar %02x type %d base %p size %p",
-		    reg, type, base, size);
+		printf("tag %04x bar %02x type %d base %p size %p",
+		    tag, reg, type, base, size);
 #endif
 		switch (type) {
 		case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT:

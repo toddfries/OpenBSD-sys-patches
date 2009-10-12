@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.19 2009/08/18 19:31:56 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.21 2009/10/07 08:35:47 syuu Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -80,6 +80,7 @@ ip27_setup()
 {
 	size_t gsz;
 	uint node;
+	uint32_t ctrl;
 	nmi_t *nmi;
 
 	uncached_base = PHYS_TO_XKPHYS_UNCACHED(0, SP_NC);
@@ -139,16 +140,51 @@ ip27_setup()
 
 	/*
 	 * Initialize the early console parameters.
-	 * This assumes IOC3 is accessible through a widget small window.
+	 * This assumes it is either on IOC3 or IOC4, accessible through
+	 * a widget small window.
+	 *
+	 * Since IOC3 and IOC4 use different clocks, we need to tell them
+	 * apart early. We rely on the serial port offset within the IOC
+	 * space.
 	 */
 
-	xbow_build_bus_space(&sys_config.console_io, 0, 8 /* whatever */);
+	xbow_build_bus_space(&sys_config.console_io, 0,
+	    8 /* whatever nonzero */);
 	/* Constrain to the correct window */
 	sys_config.console_io.bus_base =
 	    kl_get_console_base() & 0xffffffffff000000UL;
 
 	comconsaddr = kl_get_console_base() & 0x0000000000ffffffUL;
-	comconsfreq = 22000000 / 3;
+	if ((comconsaddr & 0xfff) < 0x380) {
+		/* IOC3 */
+		comconsfreq = 22000000 / 3;
+		bios_printf("IOC3 style console\n");
+	} else {
+		/* IOC4 */
+		/*
+		 * IOC4 clocks are derived from the PCI clock, so we need to
+		 * figure out whether this is an 66MHz or a 33MHz bus.
+		 * Note that this assumes the IOC4 is connected to a Bridge
+		 * or PIC widget, and that even if this is a PIC widget,
+		 * the common widget register space can be correctly read
+		 * with non-doubleword aligned word reads.
+		 */
+		comconsfreq = 66666667;
+		bios_printf("IOC4 style console\n");
+		ctrl = *(volatile uint32_t *)
+		    ((sys_config.console_io.bus_base + WIDGET_CONTROL) | 4);
+		switch (ctrl & BRIDGE_WIDGET_CONTROL_SPEED_MASK) {
+		default:
+			bios_printf("WARNING! UNRECOGNIZED IOC4 SPEED\n"
+			    "ASSUMING 66MHZ\n");
+			break;
+		case BRIDGE_WIDGET_CONTROL_SPEED_66MHZ:
+			break;
+		case BRIDGE_WIDGET_CONTROL_SPEED_33MHZ:
+			comconsfreq >>= 1;
+			break;
+		}
+	}
 	comconsiot = &sys_config.console_io;
 
 	/*
@@ -630,19 +666,23 @@ ip27_hub_intr_makemasks()
 	imask[IPL_NONE] = 0;
 	imask[IPL_HIGH] = -1;
 
-	hw_setintrmask(0);
+	if(CPU_IS_PRIMARY(curcpu()))
+		hw_setintrmask(0);
 }
 
 void
 ip27_hub_do_pending_int(int newcpl)
 {
+	struct cpu_info *ci = curcpu();
+
 	/* Update masks to new cpl. Order highly important! */
 	__asm__ (" .set noreorder\n");
-	cpl = newcpl;
+	ci->ci_cpl = newcpl;
 	__asm__ (" sync\n .set reorder\n");
-	hw_setintrmask(newcpl);
+	if(CPU_IS_PRIMARY(ci))
+		hw_setintrmask(newcpl);
 	/* If we still have softints pending trigger processing. */
-	if (ipending & SINT_ALLMASK & ~newcpl)
+	if (ci->ci_ipending & SINT_ALLMASK & ~newcpl)
 		setsoftintr0();
 }
 
@@ -655,6 +695,7 @@ ip27_hub_intr_handler(intrmask_t hwpend, struct trap_frame *frame)
 	intrmask_t mask;
 	struct intrhand *ih;
 	int rc;
+	struct cpu_info *ci = curcpu();
 
 	/* XXX this assumes we run on cpu0 */
 	isr = IP27_LHUB_L(HUBPI_IR0);
@@ -674,7 +715,7 @@ ip27_hub_intr_handler(intrmask_t hwpend, struct trap_frame *frame)
 	 * If interrupts are spl-masked, mark them as pending only.
 	 */
 	if ((mask = isr & frame->cpl) != 0) {
-		atomic_setbits_int(&ipending, mask);
+		atomic_setbits_int(&ci->ci_ipending, mask);
 		isr &= ~mask;
 		imr &= ~mask;
 	}
@@ -683,10 +724,10 @@ ip27_hub_intr_handler(intrmask_t hwpend, struct trap_frame *frame)
 	 * Now process unmasked interrupts.
 	 */
 	if (isr != 0) {
-		atomic_clearbits_int(&ipending, isr);
+		atomic_clearbits_int(&ci->ci_ipending, isr);
 
 		__asm__ (" .set noreorder\n");
-		icpl = cpl;
+		icpl = ci->ci_cpl;
 		__asm__ (" sync\n .set reorder\n");
 
 		/* XXX Rework this to dispatch in decreasing levels */
@@ -718,7 +759,7 @@ ip27_hub_intr_handler(intrmask_t hwpend, struct trap_frame *frame)
 		(void)IP27_LHUB_L(HUBPI_IR0);
 		
 		__asm__ (" .set noreorder\n");
-		cpl = icpl;
+		ci->ci_cpl = icpl;
 		__asm__ (" sync\n .set reorder\n");
 	}
 
