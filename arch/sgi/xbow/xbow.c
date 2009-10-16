@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbow.c,v 1.17 2009/07/26 19:57:12 miod Exp $	*/
+/*	$OpenBSD: xbow.c,v 1.20 2009/10/08 19:14:23 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -285,8 +285,12 @@ xbowattach(struct device *parent, struct device *self, void *aux)
 	vendor = (wid & WIDGET_ID_VENDOR_MASK) >> WIDGET_ID_VENDOR_SHIFT;
 	product = (wid & WIDGET_ID_PRODUCT_MASK) >> WIDGET_ID_PRODUCT_SHIFT;
 	p = xbow_identify(vendor, product);
-	printf(": %s revision %d\n",
-	    p != NULL ? p->productname : "unknown xbow",
+	if (p == NULL)
+		printf(": unknown xbow (vendor %x product %x)",
+		    vendor, product);
+	else
+		printf(": %s", p->productname);
+	printf(" revision %d\n",
 	    (wid & WIDGET_ID_REV_MASK) >> WIDGET_ID_REV_SHIFT);
 
 	memset(&cfg, 0, sizeof cfg);
@@ -302,7 +306,9 @@ xbowattach(struct device *parent, struct device *self, void *aux)
 		if (xbow_intr_widget_register == 0)
 			xbow_intr_widget_register =
 			    (1UL << 47) /* XIO I/O space */ |
-			    ((paddr_t)IP27_RHUB_ADDR(nasid, HUBPI_IR_CHANGE) -
+			    (nasid <<
+			      (sys_config.system_type == SGI_O300 ? 39 : 38)) |
+			    ((paddr_t)IP27_RHUB_ADDR(0, HUBPI_IR_CHANGE) -
 			     IP27_NODE_IO_BASE(0)) /* HUB register offset */;
 
 		klcfg.cfg = &cfg;
@@ -425,16 +431,18 @@ xbow_kl_search_brd(lboard_t *brd, void *arg)
 		if (cfg->probe_order == NULL)
 			switch (brd->brd_type) {
 			case IP27_BRD_IBRICK:
+			case IP27_BRD_IXBRICK:
 				cfg->probe_order = xbow_probe_ibrick;
 				break;
 			case IP27_BRD_PBRICK:
+			case IP27_BRD_PXBRICK:
 				cfg->probe_order = xbow_probe_pbrick;
 				break;
 			case IP27_BRD_XBRICK:
 				cfg->probe_order = xbow_probe_xbrick;
 				break;
 			default:
-				/* unknown brick */
+				/* other brick */
 				break;
 			}
 		break;

@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.222 2009/09/04 22:13:51 dms Exp $ */
+/* $OpenBSD: if_em.c,v 1.228 2009/10/13 23:55:20 deraadt Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -140,6 +140,7 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_C },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_M },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_M_AMT },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_M_V },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH10_D_BM_LF },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH10_D_BM_LM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH10_R_BM_LF },
@@ -152,13 +153,14 @@ const struct pci_matchid em_devices[] = {
  *********************************************************************/
 int  em_probe(struct device *, void *, void *);
 void em_attach(struct device *, struct device *, void *);
+int  em_detach(struct device *, int);
 int  em_intr(void *);
 void em_power(int, void *);
 void em_start(struct ifnet *);
 int  em_ioctl(struct ifnet *, u_long, caddr_t);
 void em_watchdog(struct ifnet *);
 void em_init(void *);
-void em_stop(void *);
+void em_stop(void *, int);
 void em_media_status(struct ifnet *, struct ifmediareq *);
 int  em_media_change(struct ifnet *);
 int  em_flowstatus(struct em_softc *);
@@ -219,7 +221,7 @@ u_int32_t em_fill_descriptors(u_int64_t address, u_int32_t length,
  *********************************************************************/
 
 struct cfattach em_ca = {
-	sizeof(struct em_softc), em_probe, em_attach
+	sizeof(struct em_softc), em_probe, em_attach, em_detach
 };
 
 struct cfdriver em_cd = {
@@ -572,7 +574,7 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 				em_init(sc);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
-				em_stop(sc);
+				em_stop(sc, 0);
 		}
 		break;
 
@@ -656,7 +658,7 @@ em_init(void *arg)
 
 	INIT_DEBUGOUT("em_init: begin");
 
-	em_stop(sc);
+	em_stop(sc, 0);
 
 	/*
 	 * Packet Buffer Allocation (PBA)
@@ -731,7 +733,7 @@ em_init(void *arg)
 	if (em_setup_transmit_structures(sc)) {
 		printf("%s: Could not setup transmit structures\n", 
 		       sc->sc_dv.dv_xname);
-		em_stop(sc);
+		em_stop(sc, 0);
 		splx(s);
 		return;
 	}
@@ -741,7 +743,7 @@ em_init(void *arg)
 	if (em_setup_receive_structures(sc)) {
 		printf("%s: Could not setup receive structures\n", 
 		       sc->sc_dv.dv_xname);
-		em_stop(sc);
+		em_stop(sc, 0);
 		splx(s);
 		return;
 	}
@@ -806,7 +808,6 @@ em_intr(void *arg)
 
 		if (reg_icr & E1000_ICR_RXO) {
 			sc->rx_overruns++;
-			ifp->if_ierrors++;
 			refill = 1;
 		}
 
@@ -1423,20 +1424,24 @@ em_update_link_status(struct em_softc *sc)
  **********************************************************************/
 
 void
-em_stop(void *arg)
+em_stop(void *arg, int softonly)
 {
-	struct ifnet   *ifp;
 	struct em_softc *sc = arg;
-	ifp = &sc->interface_data.ac_if;
+	struct ifnet   *ifp = &sc->interface_data.ac_if;
 
 	/* Tell the stack that the interface is no longer active */
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+	ifp->if_timer = 0;
 
 	INIT_DEBUGOUT("em_stop: begin");
-	em_disable_intr(sc);
-	em_reset_hw(&sc->hw);
+
 	timeout_del(&sc->timer_handle);
 	timeout_del(&sc->tx_fifo_timer_handle);
+
+	if (!softonly) {
+		em_disable_intr(sc);
+		em_reset_hw(&sc->hw);
+	}
 
 	em_free_transmit_structures(sc);
 	em_free_receive_structures(sc);
@@ -1751,6 +1756,33 @@ em_setup_interface(struct em_softc *sc)
 
 	if_attach(ifp);
 	ether_ifattach(ifp);
+}
+
+int
+em_detach(struct device *self, int flags)
+{
+	struct em_softc *sc = (struct em_softc *)self;
+	struct ifnet *ifp = &sc->interface_data.ac_if;
+	struct pci_attach_args *pa = &sc->osdep.em_pa;
+	pci_chipset_tag_t	pc = pa->pa_pc;
+
+	if (sc->sc_intrhand)
+		pci_intr_disestablish(pc, sc->sc_intrhand);
+	sc->sc_intrhand = 0;
+
+	if (sc->sc_powerhook != NULL)
+		powerhook_disestablish(sc->sc_powerhook);
+
+	em_stop(sc, 1);
+
+	em_free_pci_resources(sc);
+	em_dma_free(sc, &sc->rxdma);
+	em_dma_free(sc, &sc->txdma);
+
+	ether_ifdetach(ifp);
+	if_detach(ifp);
+
+	return (0);
 }
 
 

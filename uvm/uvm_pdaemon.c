@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pdaemon.c,v 1.54 2009/08/08 13:43:59 beck Exp $	*/
+/*	$OpenBSD: uvm_pdaemon.c,v 1.55 2009/10/14 17:53:30 beck Exp $	*/
 /*	$NetBSD: uvm_pdaemon.c,v 1.23 2000/08/20 10:24:14 bjh21 Exp $	*/
 
 /* 

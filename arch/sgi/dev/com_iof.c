@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_iof.c,v 1.2 2009/10/07 04:17:46 miod Exp $	*/
+/*	$OpenBSD: com_iof.c,v 1.4 2009/10/13 21:17:11 miod Exp $	*/
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -52,6 +52,7 @@ extern struct cfdriver com_cd;
 int
 com_iof_probe(struct device *parent, void *match, void *aux)
 {
+	struct cfdata *cf = match;
 	struct iof_attach_args *iaa = aux;
 	bus_space_tag_t iot = iaa->iaa_memt;
 	bus_space_handle_t ioh;
@@ -71,6 +72,10 @@ com_iof_probe(struct device *parent, void *match, void *aux)
 	} else
 		rv = 1;
 
+	/* make a config stanza with exact locators match over a generic line */
+	if (cf->cf_loc[0] != -1)
+		rv += rv;
+
 	return rv;
 }
 
@@ -87,10 +92,7 @@ com_iof_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_hwflags = 0;
 	sc->sc_swflags = 0;
-	/* XXX need to get PCI bus speed from parent */
-	sc->sc_frequency = 66666667;
-	if (0)
-		sc->sc_frequency >>= 1;
+	sc->sc_frequency = iaa->iaa_clock;
 
 	/* if it's in use as console, it's there. */
 	if (!(console && !comconsattached)) {
