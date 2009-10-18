@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.302 2009/10/13 22:05:13 jsg Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.304 2009/10/18 10:40:03 jsg Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -531,6 +531,30 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_6321ESB_SATA, /* Intel 6321ESB SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_3400_SATA_1, /* Intel 3400 SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_3400_SATA_2, /* Intel 3400 SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_3400_SATA_3, /* Intel 3400 SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_3400_SATA_4, /* Intel 3400 SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_3400_SATA_5, /* Intel 3400 SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_3400_SATA_6, /* Intel 3400 SATA */
 	  0,
 	  piixsata_chip_map
 	},
@@ -1079,6 +1103,10 @@ const struct pciide_product_desc pciide_nvidia_products[] = {
 	  sata_chip_map
 	},
 	{ PCI_PRODUCT_NVIDIA_MCP67_SATA4,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP77_SATA_1,
 	  0,
 	  sata_chip_map
 	},
