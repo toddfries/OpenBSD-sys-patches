@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.23 2009/05/06 20:02:45 miod Exp $ */
+/*	$OpenBSD: clock.c,v 1.25 2009/10/22 22:08:54 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -52,7 +52,7 @@ struct cfattach clock_ca = {
 	sizeof(struct device), clockmatch, clockattach
 };
 
-intrmask_t clock_int5(intrmask_t, struct trap_frame *);
+uint32_t clock_int5(uint32_t, struct trap_frame *);
 
 int	clock_started;
 u_int32_t cpu_counter_last;
@@ -119,8 +119,8 @@ clockattach(struct device *parent, struct device *self, void *aux)
  *  can not be run the tick is just counted and handled later when
  *  the clock is unmasked again.
  */
-intrmask_t
-clock_int5(intrmask_t mask, struct trap_frame *tf)
+uint32_t
+clock_int5(uint32_t mask, struct trap_frame *tf)
 {
 	u_int32_t clkdiff;
 
@@ -161,13 +161,12 @@ clock_int5(intrmask_t mask, struct trap_frame *tf)
 	/*
 	 * Process clock interrupt unless it is currently masked.
 	 */
-	if ((tf->cpl & SPL_CLOCKMASK) == 0) {
+	if (tf->ipl < IPL_CLOCK)
 		while (pendingticks) {
 			clk_count.ec_count++;
 			hardclock(tf);
 			pendingticks--;
 		}
-	}
 
 	return CR_INT_5;	/* Clock is always on 5 */
 }
