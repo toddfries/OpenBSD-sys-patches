@@ -1,4 +1,4 @@
-/*	$OpenBSD: context.S,v 1.25 2009/10/07 08:35:47 syuu Exp $ */
+/*	$OpenBSD: context.S,v 1.30 2009/10/22 22:08:54 miod Exp $ */
 
 /*
  * Copyright (c) 2002-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -61,9 +61,11 @@ LEAF(savectx, 0)
 	REG_S	ra, PCB_CONTEXT+10*REGSZ(a0)
 	REG_S	v0, PCB_CONTEXT+11*REGSZ(a0)
 	GET_CPU_INFO(t0, t1)
-	lw	t0, CI_CPL(t0)
+	lw	t0, CI_IPL(t0)
+#ifdef RM7000_ICR
 	cfc0	t1, COP_0_ICR
 	REG_S	t1, PCB_CONTEXT+12*REGSZ(a0)	# save status register
+#endif
 	REG_S	t0, PCB_CONTEXT+13*REGSZ(a0)
 	j	ra
 	move	v0, zero
@@ -115,7 +117,7 @@ NON_LEAF(cpu_switchto, FRAMESZ(CF_SZ), ra)
 	beqz	a0, 1f
 	mfc0	v0, COP_0_STATUS_REG
 
-	lw	t0, CI_CPL(t1)
+	lw	t0, CI_IPL(t1)
 	REG_S	s0, PCB_CONTEXT+0*REGSZ(t3)	# do a 'savectx()'
 	REG_S	s1, PCB_CONTEXT+1*REGSZ(t3)
 	REG_S	s2, PCB_CONTEXT+2*REGSZ(t3)
@@ -126,9 +128,11 @@ NON_LEAF(cpu_switchto, FRAMESZ(CF_SZ), ra)
 	REG_S	s7, PCB_CONTEXT+7*REGSZ(t3)
 	REG_S	s8, PCB_CONTEXT+9*REGSZ(t3)
 	REG_S	ra, PCB_CONTEXT+10*REGSZ(t3)
-	cfc0	t1, COP_0_ICR
 	REG_S	v0, PCB_CONTEXT+11*REGSZ(t3)
+#ifdef RM7000_ICR
+	cfc0	t1, COP_0_ICR
 	REG_S	t1, PCB_CONTEXT+12*REGSZ(t3)
+#endif
 	REG_S	t0, PCB_CONTEXT+13*REGSZ(t3)
 
 1:
@@ -273,7 +277,6 @@ ctx3:
 	 * Restore registers and return.
 	 */
 
-	REG_L	a0, PCB_CONTEXT+13*REGSZ(t3)
 	REG_L	s0, PCB_CONTEXT+0*REGSZ(t3)
 	REG_L	s1, PCB_CONTEXT+1*REGSZ(t3)
 	REG_L	s2, PCB_CONTEXT+2*REGSZ(t3)
@@ -284,16 +287,12 @@ ctx3:
 	REG_L	s7, PCB_CONTEXT+7*REGSZ(t3)
 	REG_L	sp, PCB_CONTEXT+8*REGSZ(t3)
 	REG_L	s8, PCB_CONTEXT+9*REGSZ(t3)
-	GET_CPU_INFO(t1, t0)
-	sw	a0, CI_CPL(t1)
-#ifdef IMASK_EXTERNAL
-	jal	hw_setintrmask
-	nop
-#endif
+	jal	splx
+	REG_L	a0, PCB_CONTEXT+13*REGSZ(t3)
 	REG_L	ra, PCB_CONTEXT+10*REGSZ(t3)
 	REG_L	v0, PCB_CONTEXT+11*REGSZ(t3)
+#ifdef RM7000_ICR
 	REG_L	v1, PCB_CONTEXT+12*REGSZ(t3)
-#ifndef IMASK_EXTERNAL
 	ctc0	v1, COP_0_ICR		# XXX RM7000
 #endif
 	ori	v0, v0, SR_INT_ENAB

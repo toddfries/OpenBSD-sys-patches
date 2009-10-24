@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.102 2009/10/14 01:33:22 dlg Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.105 2009/10/23 01:02:29 dlg Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -351,7 +351,6 @@ struct scsi_link {
 	u_int64_t node_wwn;		/* world wide name of node */
 	u_int16_t adapter_target;	/* what are we on the scsi bus */
 	u_int16_t adapter_buswidth;	/* 8 (regular) or 16 (wide). (0 becomes 8) */
-	u_int16_t active;		/* operations in progress */
 	u_int16_t flags;		/* flags that all devices have */
 #define	SDEV_REMOVABLE	 	0x0001	/* media is removable */
 #define	SDEV_MEDIA_LOADED 	0x0002	/* device figures are still valid */
@@ -572,6 +571,8 @@ int	scsi_detach_lun(struct scsibus_softc *, int, int, int);
 int	scsi_req_probe(struct scsibus_softc *, int, int);
 int	scsi_req_detach(struct scsibus_softc *, int, int, int);
 
+void	scsi_activate(struct scsibus_softc *, int, int, int);
+
 extern const u_int8_t version_to_spc[];
 #define SCSISPC(x)(version_to_spc[(x) & SID_ANSII])
 
@@ -584,6 +585,9 @@ void			scsi_xs_put(struct scsi_xfer *);
  */
 int	mpath_path_attach(struct scsi_link *);
 int	mpath_path_detach(struct scsi_link *, int);
+
+void	mpath_path_activate(struct scsi_link *);
+void	mpath_path_deactivate(struct scsi_link *);
 
 #endif /* _KERNEL */
 #endif /* SCSI_SCSICONF_H */
