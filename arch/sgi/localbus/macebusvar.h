@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.22 2009/10/26 20:14:42 miod Exp $ */
+/*	$OpenBSD: macebusvar.h,v 1.1 2009/10/26 18:01:40 miod Exp $	*/
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -26,66 +26,27 @@
  *
  */
 
-/*
- * Definitions used by autoconfiguration.
- */
-
-#ifndef _MACHINE_AUTOCONF_H_
-#define _MACHINE_AUTOCONF_H_
+#ifndef	_MACEBUSVAR_H_
+#define	_MACEBUSVAR_H_
 
 #include <machine/bus.h>
 
-/*
- * Structure holding all misc config information.
- */
-#define MAX_CPUS	4
+extern bus_space_t macebus_tag;
+extern struct machine_bus_dma_tag mace_bus_dma_tag;
 
-struct sys_rec {
-	int	system_type;
+struct macebus_attach_args {
+	char		*maa_name;
 
-	struct cpuinfo {
-		u_int16_t type;
-		u_int8_t  vers_maj;
-		u_int8_t  vers_min;
-		u_int16_t fptype;
-		u_int8_t  fpvers_maj;
-		u_int8_t  fpvers_min;
-		u_int32_t clock;
-		u_int32_t clock_bus;
-		u_int32_t tlbsize;
-		u_int32_t tlbwired;
-	} cpu[MAX_CPUS];
-
-	/* Published cache operations. */
-	void    (*_SyncCache)(void);
-	void    (*_InvalidateICache)(vaddr_t, int);
-	void    (*_SyncDCachePage)(vaddr_t);
-	void    (*_HitSyncDCache)(vaddr_t, int);
-	void    (*_IOSyncDCache)(vaddr_t, int, int);
-	void    (*_HitInvalidateDCache)(vaddr_t, int);
-
-	/* Serial console configuration. */
-	struct mips_bus_space console_io;
+	bus_space_tag_t  maa_iot;
+	bus_space_tag_t  maa_memt;
+	bus_dma_tag_t	 maa_dmat;
+	bus_addr_t	 maa_baseaddr;
+	int	 	 maa_intr;		/* crime intr bit */
+	uint32_t	 maa_mace_intr;		/* narrowing mace intr mask */
 };
 
-extern struct sys_rec sys_config;
+void   *macebus_intr_establish(int, uint32_t, int, int, int (*)(void *),
+	    void *, const char *);
+void	macebus_intr_disestablish(void *);
 
-struct mainbus_attach_args {
-	const char	*maa_name;
-	int16_t		 maa_nasid;
-};
-
-void	enaddr_aton(const char *, u_int8_t *);
-u_long	bios_getenvint(const char *);
-
-struct device;
-
-void	ip27_setup(void);
-void	ip27_autoconf(struct device *);
-void	ip30_setup(void);
-void	ip32_setup(void);
-
-extern char osloadpartition[256];
-extern int16_t masternasid;
-
-#endif /* _MACHINE_AUTOCONF_H_ */
+#endif	/* _MACEBUSVAR_H_ */
