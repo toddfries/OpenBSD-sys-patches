@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbridge.c,v 1.55 2009/10/22 22:08:54 miod Exp $	*/
+/*	$OpenBSD: xbridge.c,v 1.58 2009/10/26 18:37:13 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009  Miodrag Vallat.
@@ -54,7 +54,6 @@
 #include <dev/cardbus/rbus.h>
 
 #include <mips64/archtype.h>
-#include <sgi/xbow/hub.h>
 #include <sgi/xbow/xbow.h>
 #include <sgi/xbow/xbowdevs.h>
 
@@ -62,7 +61,6 @@
 
 #ifdef TGT_OCTANE
 #include <sgi/sgi/ip30.h>
-#include <sgi/xbow/xheartreg.h>
 #endif
 
 #include "cardbus.h"
@@ -127,6 +125,7 @@ struct xbpci_softc {
 	struct machine_bus_dma_tag *xb_dmat;
 
 	struct xbridge_intr	*xb_intr[BRIDGE_NINTRS];
+	char	xb_intrstr[BRIDGE_NINTRS][sizeof("irq #, xbow irq ###")];
 
 	/*
 	 * Device information.
@@ -892,10 +891,13 @@ xbridge_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 const char *
 xbridge_intr_string(void *cookie, pci_intr_handle_t ih)
 {
-	static char str[16];
+	struct xbpci_softc *xb = (struct xbpci_softc *)cookie;
+	int intrbit = XBRIDGE_INTR_BIT(ih);
 
-	snprintf(str, sizeof(str), "irq %d", XBRIDGE_INTR_BIT(ih));
-	return(str);
+	if (xb->xb_intrstr[intrbit][0] == '\0')
+		snprintf(xb->xb_intrstr[intrbit],
+		    sizeof xb->xb_intrstr[intrbit], "irq %d", ih);
+	return xb->xb_intrstr[intrbit];
 }
 
 void *
@@ -932,6 +934,9 @@ xbridge_intr_establish(void *cookie, pci_intr_handle_t ih, int level,
 
 		xi->xi_intrsrc = intrsrc;
 		xb->xb_intr[intrbit] = xi;
+		snprintf(xb->xb_intrstr[intrbit],
+		    sizeof xb->xb_intrstr[intrbit],
+		    "irq %d, xbow irq %d", intrbit, intrsrc);
 	} else
 		intrsrc = xi->xi_intrsrc;
 	
@@ -964,7 +969,7 @@ xbridge_intr_establish(void *cookie, pci_intr_handle_t ih, int level,
 	xih->xih_arg = arg;
 	xih->xih_level = level;
 	xih->xih_device = device;
-	evcount_attach(&xih->xih_count, name, &xi->xi_intrbit, &evcount_intr);
+	evcount_attach(&xih->xih_count, name, &xi->xi_intrsrc, &evcount_intr);
 	LIST_INSERT_HEAD(&xi->xi_handlers, xih, xih_nxt);
 
 	if (new) {
@@ -1046,10 +1051,10 @@ xbridge_intr_handler(void *v)
 	struct xbridge_intr *xi = (struct xbridge_intr *)v;
 	struct xbpci_softc *xb = xi->xi_bus;
 	struct xbridge_intrhandler *xih;
-	int rc = 0;
-	int spurious;
-	uint32_t isr;
+	int rc;
+	uint64_t isr;
 
+	/* XXX shouldn't happen, and assumes interrupt is not shared */
 	if (LIST_EMPTY(&xi->xi_handlers)) {
 		printf("%s: spurious irq %d\n", DEVNAME(xb), xi->xi_intrbit);
 		return 0;
@@ -1062,31 +1067,38 @@ xbridge_intr_handler(void *v)
 		xbridge_read_reg(xb, BRIDGE_DEVICE_WBFLUSH(xih->xih_device));
 
 	isr = xbridge_read_reg(xb, BRIDGE_ISR);
-	if ((isr & (1 << xi->xi_intrbit)) == 0) {
-		spurious = 1;
+	if ((isr & (1L << xi->xi_intrbit)) == 0) {
+		/*
+		 * May be a result of the lost interrupt workaround (see
+		 * near the end of this function); don't complain in that
+		 * case.
+		 */
+		rc = -1;
 #ifdef DEBUG
 		printf("%s: irq %d but not pending in ISR %08x\n",
 		    DEVNAME(xb), xi->xi_intrbit, isr);
 #endif
-	} else
-		spurious = 0;
-
-	LIST_FOREACH(xih, &xi->xi_handlers, xih_nxt) {
-		splraise(xih->xih_level);
-		if ((*xih->xih_func)(xih->xih_arg) != 0) {
-			xih->xih_count.ec_count++;
-			rc = 1;
+	} else {
+		rc = 0;
+		LIST_FOREACH(xih, &xi->xi_handlers, xih_nxt) {
+			splraise(xih->xih_level);
+			if ((*xih->xih_func)(xih->xih_arg) != 0) {
+				xih->xih_count.ec_count++;
+				rc = 1;
+			}
+			/*
+			 * No need to lower spl here, as our caller will
+			 * lower spl upon our return.
+			 * However that splraise() is necessary so that
+			 * interrupt handler code calling splx() will not
+			 * cause our interrupt source to be unmasked.
+			 */
 		}
-		/*
-		 * No need to lower spl here, as our caller will lower
-		 * spl upon our return.
-		 * However that splraise() is necessary so that interrupt
-		 * handler code calling splx() will not cause our interrupt
-		 * source to be unmasked.
-		 */
+		/* XXX assumes interrupt is not shared */
+		if (rc == 0)
+			printf("%s: spurious irq %d\n",
+			    DEVNAME(xb), xi->xi_intrbit);
 	}
-	if (rc == 0 && spurious == 0)
-		printf("%s: spurious irq %d\n", DEVNAME(xb), xi->xi_intrbit);
 
 	/*
 	 * There is a known BRIDGE race in which, if two interrupts
@@ -1105,30 +1117,11 @@ xbridge_intr_handler(void *v)
 	if (ISSET(xb->xb_flags, XF_XBRIDGE))
 		xbridge_write_reg(xb, BRIDGE_INT_FORCE_PIN(xi->xi_intrbit), 1);
 	else {
-		if (xbridge_read_reg(xb, BRIDGE_ISR) & (1 << xi->xi_intrbit)) {
-			switch (sys_config.system_type) {
-#if defined(TGT_OCTANE)
-			case SGI_OCTANE:
-			    {
-				paddr_t heart;
-				heart = PHYS_TO_XKPHYS(HEART_PIU_BASE, CCA_NC);
-				*(volatile uint64_t *)(heart + HEART_ISR_SET) =
-				    xi->xi_intrsrc;
-			    }
-				break;
-#endif
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
-			case SGI_O200:
-			case SGI_O300:
-				IP27_RHUB_PI_S(xb->xb_nasid, 0, HUBPI_IR_CHANGE,
-				    PI_IR_SET | xi->xi_intrsrc);
-				break;
-#endif
-			}
-		}
+		if (xbridge_read_reg(xb, BRIDGE_ISR) & (1 << xi->xi_intrbit))
+			xbow_intr_set(xi->xi_intrsrc);
 	}
 
-	return 1;
+	return rc;
 }
 
 /*
@@ -2157,17 +2150,31 @@ xbridge_setup(struct xbpci_softc *xb)
 
 	/*
 	 * Setup interrupt handling.
+	 *
 	 * Note that, on PIC, the `lower address' register is a 64 bit
 	 * register and thus need to be initialized with the whole 64 bit
 	 * address; the `upper address' register is hardwired to zero and
 	 * ignores writes, so we can use the same logic on Bridge and PIC.
+	 *
+	 * Also, on Octane, we need to keep otherwise unused interrupt source
+	 * #6 enabled on the obio widget, as it controls routing of the
+	 * power button interrupt (and to make things more complicated than
+	 * necessary, this pin is wired to a particular Heart interrupt
+	 * register bit, so interrupts on this pin will never be seen at the
+	 * Bridge level.
 	 */
 
-	int_addr = ((uint64_t)xbow_intr_widget << 48) |
-	    (xbow_intr_widget_register & ((1UL << 48) - 1));
-	xbridge_write_reg(xb, BRIDGE_IER, 0);
+#ifdef TGT_OCTANE
+	if (sys_config.system_type == SGI_OCTANE &&
+	    xb->xb_widget == IP30_BRIDGE_WIDGET)
+		xbridge_write_reg(xb, BRIDGE_IER, 1 << 6);
+	else
+#endif
+		xbridge_write_reg(xb, BRIDGE_IER, 0);
 	xbridge_write_reg(xb, BRIDGE_INT_MODE, 0);
 	xbridge_write_reg(xb, BRIDGE_INT_DEV, 0);
+	int_addr = ((uint64_t)xbow_intr_widget << 48) |
+	    (xbow_intr_widget_register & ((1UL << 48) - 1));
 	xbridge_write_reg(xb, WIDGET_INTDEST_ADDR_LOWER, int_addr);
 	xbridge_write_reg(xb, WIDGET_INTDEST_ADDR_UPPER, int_addr >> 32);
 

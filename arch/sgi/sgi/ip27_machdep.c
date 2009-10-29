@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.29 2009/10/23 21:19:17 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.31 2009/10/26 20:14:42 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -70,6 +70,8 @@ int	ip27_hub_intr_register(int, int, int *);
 int	ip27_hub_intr_establish(int (*)(void *), void *, int, int,
 	    const char *);
 void	ip27_hub_intr_disestablish(int);
+void	ip27_hub_intr_clear(int);
+void	ip27_hub_intr_set(int);
 uint32_t hubpi_intr0(uint32_t, struct trap_frame *);
 uint32_t hubpi_intr1(uint32_t, struct trap_frame *);
 void	ip27_hub_intr_makemasks(void);
@@ -253,6 +255,8 @@ ip27_setup()
 	xbow_intr_widget_intr_register = ip27_hub_intr_register;
 	xbow_intr_widget_intr_establish = ip27_hub_intr_establish;
 	xbow_intr_widget_intr_disestablish = ip27_hub_intr_disestablish;
+	xbow_intr_widget_intr_clear = ip27_hub_intr_clear;
+	xbow_intr_widget_intr_set = ip27_hub_intr_set;
 
 	set_intr(INTPRI_XBOW_HW1, CR_INT_1, hubpi_intr1);
 	set_intr(INTPRI_XBOW_HW0, CR_INT_0, hubpi_intr0);
@@ -306,7 +310,7 @@ ip27_setup()
 void
 ip27_autoconf(struct device *parent)
 {
-	struct confargs nca;
+	struct mainbus_attach_args maa;
 	uint node;
 
 	/*
@@ -314,12 +318,12 @@ ip27_autoconf(struct device *parent)
 	 * if any, will get attached as they are discovered.
 	 */
 
-	bzero(&nca, sizeof nca);
-	nca.ca_nasid = masternasid;
-	nca.ca_name = "cpu";
-	config_found(parent, &nca, ip27_print);
-	nca.ca_name = "clock";
-	config_found(parent, &nca, ip27_print);
+	bzero(&maa, sizeof maa);
+	maa.maa_nasid = masternasid;
+	maa.maa_name = "cpu";
+	config_found(parent, &maa, ip27_print);
+	maa.maa_name = "clock";
+	config_found(parent, &maa, ip27_print);
 
 	/*
 	 * Now attach all nodes' I/O devices.
@@ -338,20 +342,20 @@ ip27_autoconf(struct device *parent)
 void
 ip27_attach_node(struct device *parent, int16_t nasid)
 {
-	struct confargs nca;
+	struct mainbus_attach_args maa;
 
-	bzero(&nca, sizeof nca);
-	nca.ca_name = "xbow";
-	nca.ca_nasid = nasid;
-	config_found(parent, &nca, ip27_print);
+	bzero(&maa, sizeof maa);
+	maa.maa_name = "xbow";
+	maa.maa_nasid = nasid;
+	config_found(parent, &maa, ip27_print);
 }
 
 int
 ip27_print(void *aux, const char *pnp)
 {
-	struct confargs *ca = aux;
+	struct mainbus_attach_args *maa = aux;
 
-	printf(" nasid %d", ca->ca_nasid);
+	printf(" nasid %d", maa->maa_nasid);
 
 	return UNCONF;
 }
@@ -704,6 +708,18 @@ ip27_hub_intr_disestablish(int intrbit)
 	splx(s);
 
 	free(ih, M_DEVBUF);
+}
+
+void
+ip27_hub_intr_clear(int intrbit)
+{
+	IP27_RHUB_PI_S(masternasid, 0, HUBPI_IR_CHANGE, PI_IR_CLR | intrbit);
+}
+
+void
+ip27_hub_intr_set(int intrbit)
+{
+	IP27_RHUB_PI_S(masternasid, 0, HUBPI_IR_CHANGE, PI_IR_SET | intrbit);
 }
 
 /*

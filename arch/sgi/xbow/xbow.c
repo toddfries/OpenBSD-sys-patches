@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbow.c,v 1.20 2009/10/08 19:14:23 miod Exp $	*/
+/*	$OpenBSD: xbow.c,v 1.22 2009/10/26 20:14:42 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -155,9 +155,9 @@ int	(*xbow_widget_id)(int16_t, u_int, uint32_t *);
 int
 xbowmatch(struct device *parent, void *match, void *aux)
 {
-	struct confargs *ca = aux;
+	struct mainbus_attach_args *maa = aux;
 
-	if (strcmp(ca->ca_name, xbow_cd.cd_name) != 0)
+	if (strcmp(maa->maa_name, xbow_cd.cd_name) != 0)
 		return (0);
 
 	switch (sys_config.system_type) {
@@ -266,8 +266,8 @@ void
 xbowattach(struct device *parent, struct device *self, void *aux)
 {
 	struct xbow_softc *sc = (struct xbow_softc *)self;
-	struct confargs *ca = aux;
-	int16_t nasid = ca->ca_nasid;
+	struct mainbus_attach_args *maa = aux;
+	int16_t nasid = maa->maa_nasid;
 	uint32_t wid, vendor, product;
 	const struct xbow_product *p;
 	struct xbow_config cfg;
@@ -654,6 +654,9 @@ xbow_space_vaddr(bus_space_tag_t t, bus_space_handle_t h)
  *
  * Interrupt handling should be done at the Heart/Hub driver level, we only
  * act as a proxy here.
+ *
+ * Note that, for the time being, interrupt handling is implicitly done at
+ * the master nasid; other nodes do not handle interrupts.
  */
 
 int	xbow_intr_widget = 0;
@@ -662,6 +665,8 @@ int	(*xbow_intr_widget_intr_register)(int, int, int *) = NULL;
 int	(*xbow_intr_widget_intr_establish)(int (*)(void *), void *, int, int,
 	    const char *) = NULL;
 void	(*xbow_intr_widget_intr_disestablish)(int) = NULL;
+void	(*xbow_intr_widget_intr_set)(int) = NULL;
+void	(*xbow_intr_widget_intr_clear)(int) = NULL;
 
 int
 xbow_intr_register(int widget, int level, int *intrbit)
@@ -690,6 +695,24 @@ xbow_intr_disestablish(int intrbit)
 		return;
 
 	(*xbow_intr_widget_intr_disestablish)(intrbit);
+}
+
+void
+xbow_intr_clear(int intrbit)
+{
+	if (xbow_intr_widget_intr_clear == NULL)
+		return;
+
+	(*xbow_intr_widget_intr_clear)(intrbit);
+}
+
+void
+xbow_intr_set(int intrbit)
+{
+	if (xbow_intr_widget_intr_set == NULL)
+		return;
+
+	(*xbow_intr_widget_intr_set)(intrbit);
 }
 
 /*

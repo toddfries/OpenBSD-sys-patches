@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpi.c,v 1.92 2009/09/20 20:04:07 damien Exp $	*/
+/*	$OpenBSD: if_wpi.c,v 1.96 2009/10/26 18:38:32 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006-2008
@@ -346,7 +346,7 @@ fail1:	wpi_free_fwmem(sc);
 
 #ifndef SMALL_KERNEL
 /*
- * Attach the adapter's on-board thermal sensor to the sensors framework.
+ * Attach the adapter on-board thermal sensor to the sensors framework.
  */
 void
 wpi_sensor_attach(struct wpi_softc *sc)
@@ -477,6 +477,7 @@ static __inline uint32_t
 wpi_prph_read(struct wpi_softc *sc, uint32_t addr)
 {
 	WPI_WRITE(sc, WPI_PRPH_RADDR, WPI_PRPH_DWORD | addr);
+	WPI_BARRIER_READ_WRITE(sc);
 	return WPI_READ(sc, WPI_PRPH_RDATA);
 }
 
@@ -484,6 +485,7 @@ static __inline void
 wpi_prph_write(struct wpi_softc *sc, uint32_t addr, uint32_t data)
 {
 	WPI_WRITE(sc, WPI_PRPH_WADDR, WPI_PRPH_DWORD | addr);
+	WPI_BARRIER_WRITE(sc);
 	WPI_WRITE(sc, WPI_PRPH_WDATA, data);
 }
 
@@ -511,6 +513,7 @@ static __inline uint32_t
 wpi_mem_read(struct wpi_softc *sc, uint32_t addr)
 {
 	WPI_WRITE(sc, WPI_MEM_RADDR, addr);
+	WPI_BARRIER_READ_WRITE(sc);
 	return WPI_READ(sc, WPI_MEM_RDATA);
 }
 
@@ -518,6 +521,7 @@ static __inline void
 wpi_mem_write(struct wpi_softc *sc, uint32_t addr, uint32_t data)
 {
 	WPI_WRITE(sc, WPI_MEM_WADDR, addr);
+	WPI_BARRIER_WRITE(sc);
 	WPI_WRITE(sc, WPI_MEM_WDATA, data);
 }
 
@@ -583,7 +587,7 @@ wpi_dma_contig_alloc(bus_dma_tag_t tag, struct wpi_dma_info *dma, void **kvap,
 		goto fail;
 
 	error = bus_dmamem_map(tag, &dma->seg, 1, size, &dma->vaddr,
-	    BUS_DMA_NOWAIT);
+	    BUS_DMA_NOWAIT | BUS_DMA_COHERENT);
 	if (error != 0)
 		goto fail;
 
@@ -771,7 +775,7 @@ wpi_alloc_tx_ring(struct wpi_softc *sc, struct wpi_tx_ring *ring, int qid)
 		goto fail;
 	}
 
-	/* Update shared area with ring's physical address. */
+	/* Update shared area with ring physical address. */
 	sc->shared->txbase[qid] = htole32(ring->desc_dma.paddr);
 	bus_dmamap_sync(sc->sc_dmat, sc->shared_dma.map, 0,
 	    sizeof (struct wpi_shared), BUS_DMASYNC_PREWRITE);
@@ -996,6 +1000,8 @@ wpi_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
 	int ridx, i;
 
 	ieee80211_amrr_node_init(&sc->amrr, &wn->amn);
+	/* Start at lowest available bit-rate, AMRR will raise. */
+	ni->ni_txrate = 0;
 
 	for (i = 0; i < ni->ni_rates.rs_nrates; i++) {
 		rate = ni->ni_rates.rs_rates[i] & IEEE80211_RATE_VAL;
@@ -1004,9 +1010,6 @@ wpi_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
 			if (wpi_rates[ridx].rate == rate)
 				break;
 		wn->ridx[i] = ridx;
-		/* Initial TX rate <= 24Mbps. */
-		if (rate <= 48)
-			ni->ni_txrate = i;
 	}
 }
 
@@ -1109,14 +1112,13 @@ wpi_calib_timeout(void *arg)
 	struct ieee80211com *ic = &sc->sc_ic;
 	int temp, s;
 
+	s = splnet();
 	/* Automatic rate control triggered every 500ms. */
 	if (ic->ic_fixed_rate == -1) {
-		s = splnet();
 		if (ic->ic_opmode == IEEE80211_M_STA)
 			wpi_iter_func(sc, ic->ic_bss);
 		else
 			ieee80211_iterate_nodes(ic, wpi_iter_func, sc);
-		splx(s);
 	}
 	/* Update sensor. */
 	temp = (int)WPI_READ(sc, WPI_UCODE_GP2);
@@ -1127,6 +1129,8 @@ wpi_calib_timeout(void *arg)
 		wpi_power_calibration(sc, temp);
 		sc->calib_cnt = 0;
 	}
+	splx(s);
+
 	/* Automatic rate control triggered every 500ms. */
 	timeout_add_msec(&sc->calib_to, 500);
 }
@@ -2341,7 +2345,7 @@ wpi_get_power_index(struct wpi_softc *sc, struct wpi_power_group *group,
 	/* Get channel number. */
 	chan = ieee80211_chan2ieee(ic, c);
 
-	/* Default TX power is group's maximum TX power minus 3dB. */
+	/* Default TX power is group maximum TX power minus 3dB. */
 	pwr = group->maxpwr / 2;
 
 	/* Decrease TX power for highest OFDM rates to reduce distortion. */
@@ -2357,7 +2361,7 @@ wpi_get_power_index(struct wpi_softc *sc, struct wpi_power_group *group,
 		break;
 	}
 
-	/* Never exceed the channel's maximum allowed TX power. */
+	/* Never exceed the channel maximum allowed TX power. */
 	pwr = MIN(pwr, sc->maxpwr[chan]);
 
 	/* Retrieve TX power index into gain tables from samples. */
@@ -2459,9 +2463,9 @@ wpi_config(struct wpi_softc *sc)
 
 	/* Configure bluetooth coexistence. */
 	memset(&bluetooth, 0, sizeof bluetooth);
-	bluetooth.flags = 3;
-	bluetooth.lead = 0xaa;
-	bluetooth.kill = 1;
+	bluetooth.flags = WPI_BT_COEX_MODE_4WIRE;
+	bluetooth.lead_time = WPI_BT_LEAD_TIME_DEF;
+	bluetooth.max_kill = WPI_BT_MAX_KILL_DEF;
 	error = wpi_cmd(sc, WPI_CMD_BT_COEX, &bluetooth, sizeof bluetooth, 0);
 	if (error != 0) {
 		printf("%s: could not configure bluetooth coexistence\n",
@@ -2495,10 +2499,10 @@ wpi_config(struct wpi_softc *sc)
 	sc->rxon.cck_mask  = 0x0f;	/* not yet negotiated */
 	sc->rxon.ofdm_mask = 0xff;	/* not yet negotiated */
 	DPRINTF(("setting configuration\n"));
-	error = wpi_cmd(sc, WPI_CMD_CONFIGURE, &sc->rxon,
-	    sizeof (struct wpi_rxon), 0);
+	error = wpi_cmd(sc, WPI_CMD_RXON, &sc->rxon, sizeof (struct wpi_rxon),
+	    0);
 	if (error != 0) {
-		printf("%s: configure command failed\n", sc->sc_dev.dv_xname);
+		printf("%s: RXON command failed\n", sc->sc_dev.dv_xname);
 		return error;
 	}
 
@@ -2647,7 +2651,7 @@ wpi_auth(struct wpi_softc *sc)
 	struct wpi_node_info node;
 	int error;
 
-	/* Update adapter's configuration. */
+	/* Update adapter configuration. */
 	IEEE80211_ADDR_COPY(sc->rxon.bssid, ni->ni_bssid);
 	sc->rxon.chan = ieee80211_chan2ieee(ic, ni->ni_chan);
 	sc->rxon.flags = htole32(WPI_RXON_TSF);
@@ -2672,10 +2676,10 @@ wpi_auth(struct wpi_softc *sc)
 	}
 	DPRINTF(("rxon chan %d flags %x cck %x ofdm %x\n", sc->rxon.chan,
 	    sc->rxon.flags, sc->rxon.cck_mask, sc->rxon.ofdm_mask));
-	error = wpi_cmd(sc, WPI_CMD_CONFIGURE, &sc->rxon,
-	    sizeof (struct wpi_rxon), 1);
+	error = wpi_cmd(sc, WPI_CMD_RXON, &sc->rxon, sizeof (struct wpi_rxon),
+	    1);
 	if (error != 0) {
-		printf("%s: could not configure\n", sc->sc_dev.dv_xname);
+		printf("%s: RXON command failed\n", sc->sc_dev.dv_xname);
 		return error;
 	}
 
@@ -2685,7 +2689,7 @@ wpi_auth(struct wpi_softc *sc)
 		return error;
 	}
 	/*
-	 * Reconfiguring RXON clears the firmware's nodes table so we must
+	 * Reconfiguring RXON clears the firmware nodes table so we must
 	 * add the broadcast node again.
 	 */
 	memset(&node, 0, sizeof node);
@@ -2722,7 +2726,7 @@ wpi_run(struct wpi_softc *sc)
 		return error;
 	}
 
-	/* Update adapter's configuration. */
+	/* Update adapter configuration. */
 	sc->rxon.associd = htole16(IEEE80211_AID(ni->ni_associd));
 	/* Short preamble and slot time are negotiated when associating. */
 	sc->rxon.flags &= ~htole32(WPI_RXON_SHPREAMBLE | WPI_RXON_SHSLOT);
@@ -2732,11 +2736,10 @@ wpi_run(struct wpi_softc *sc)
 		sc->rxon.flags |= htole32(WPI_RXON_SHPREAMBLE);
 	sc->rxon.filter |= htole32(WPI_FILTER_BSS);
 	DPRINTF(("rxon chan %d flags %x\n", sc->rxon.chan, sc->rxon.flags));
-	error = wpi_cmd(sc, WPI_CMD_CONFIGURE, &sc->rxon,
-	    sizeof (struct wpi_rxon), 1);
+	error = wpi_cmd(sc, WPI_CMD_RXON, &sc->rxon, sizeof (struct wpi_rxon),
+	    1);
 	if (error != 0) {
-		printf("%s: could not update configuration\n",
-		    sc->sc_dev.dv_xname);
+		printf("%s: RXON command failed\n", sc->sc_dev.dv_xname);
 		return error;
 	}
 
@@ -3260,6 +3263,7 @@ wpi_hw_stop(struct wpi_softc *sc)
 	if (wpi_nic_lock(sc) == 0) {
 		/* Stop TX scheduler. */
 		wpi_prph_write(sc, WPI_ALM_SCHED_MODE, 0);
+		wpi_prph_write(sc, WPI_ALM_SCHED_TXFACT, 0);
 
 		/* Stop all DMA channels. */
 		for (chnl = 0; chnl < WPI_NDMACHNLS; chnl++) {
