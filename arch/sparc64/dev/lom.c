@@ -1,4 +1,4 @@
-/*	$OpenBSD: lom.c,v 1.16 2009/10/28 22:53:26 kettenis Exp $	*/
+/*	$OpenBSD: lom.c,v 1.18 2009/10/31 20:26:43 kettenis Exp $	*/
 /*
  * Copyright (c) 2009 Mark Kettenis
  *
@@ -191,6 +191,7 @@ struct cfdriver lom_cd = {
 int	lom_read(struct lom_softc *, uint8_t, uint8_t *);
 int	lom_write(struct lom_softc *, uint8_t, uint8_t);
 void	lom_queue_cmd(struct lom_softc *, struct lom_cmd *);
+void	lom_dequeue_cmd(struct lom_softc *, struct lom_cmd *);
 int	lom1_read(struct lom_softc *, uint8_t, uint8_t *);
 int	lom1_write(struct lom_softc *, uint8_t, uint8_t);
 int	lom1_read_polled(struct lom_softc *, uint8_t, uint8_t *);
@@ -210,6 +211,8 @@ void	lom2_write_hostname(struct lom_softc *);
 
 void	lom_wdog_pat(void *);
 int	lom_wdog_cb(void *, int);
+
+void	lom_shutdown(void *);
 
 int
 lom_match(struct device *parent, void *match, void *aux)
@@ -339,6 +342,8 @@ lom_attach(struct device *parent, struct device *self, void *aux)
 	printf(": %s rev %d.%d\n",
 	    sc->sc_type < LOM_LOMLITE2 ? "LOMlite" : "LOMlite2",
 	    fw_rev >> 4, fw_rev & 0x0f);
+
+	shutdownhook_establish(lom_shutdown, sc);
 }
 
 int
@@ -366,6 +371,13 @@ lom_queue_cmd(struct lom_softc *sc, struct lom_cmd *lc)
 		return lom1_queue_cmd(sc, lc);
 	else
 		return lom2_queue_cmd(sc, lc);
+}
+
+void
+lom_dequeue_cmd(struct lom_softc *sc, struct lom_cmd *lc)
+{
+	if (sc->sc_type < LOM_LOMLITE2)
+		return lom1_dequeue_cmd(sc, lc);
 }
 
 int
@@ -901,6 +913,7 @@ lom_wdog_cb(void *arg, int period)
 			timeout_del(&sc->sc_wdog_to);
 		} else {
 			/* Pat the dog. */
+			lom_dequeue_cmd(sc, &sc->sc_wdog_pat);
 			sc->sc_wdog_pat.lc_cmd = LOM_IDX_WDOG_CTL | LOM_IDX_WRITE;
 			sc->sc_wdog_pat.lc_data = sc->sc_wdog_ctl;
 			lom_queue_cmd(sc, &sc->sc_wdog_pat);
@@ -909,4 +922,13 @@ lom_wdog_cb(void *arg, int period)
 	sc->sc_wdog_period = period;
 
 	return (period);
+}
+
+void
+lom_shutdown(void *arg)
+{
+	struct lom_softc *sc = arg;
+
+	sc->sc_wdog_ctl &= ~LOM_WDOG_ENABLE;
+	lom_write(sc, LOM_IDX_WDOG_CTL, sc->sc_wdog_ctl);
 }

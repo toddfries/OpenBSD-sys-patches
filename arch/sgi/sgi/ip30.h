@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip30.h,v 1.3 2009/10/15 23:40:54 miod Exp $	*/
+/*	$OpenBSD: ip30.h,v 1.5 2009/10/31 00:20:46 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -38,8 +38,8 @@
  * On-board IOC3 specific GPIO registers wiring
  */
 
-/* LED bar control: 0 to dim, 1 to lit */
-#define	IP30_GPIO_WHITE_LED		0
+/* Light bar control: 0 to dim, 1 to lit */
+#define	IP30_GPIO_WHITE_LED		0	/* actually lightbulbs */
 #define	IP30_GPIO_RED_LED		1
 /* Classic Octane (1) vs Octane 2 (0), read only */
 #define	IP30_GPIO_CLASSIC		2
@@ -51,3 +51,25 @@
 #define	IP30_FLASH_BASE			0xc00000
 #define	IP30_FLASH_SIZE			0x200000
 #define	IP30_FLASH_ALT			0xe00000
+
+/*
+ * Multiprocessor configuration area
+ */
+
+#define MPCONF_BASE         0x0000000000000600UL
+#define MPCONF_LEN          0x80
+
+#define MPCONF_MAGIC(i)     ((i) * MPCONF_LEN + 0x00)
+#define MPCONF_PRID(i)      ((i) * MPCONF_LEN + 0x04)
+#define MPCONF_PHYSID(i)    ((i) * MPCONF_LEN + 0x08)
+#define MPCONF_VIRTID(i)    ((i) * MPCONF_LEN + 0x0c)
+#define MPCONF_SCACHESZ(i)  ((i) * MPCONF_LEN + 0x10)
+#define MPCONF_FANLOADS(i)  ((i) * MPCONF_LEN + 0x14)
+#define MPCONF_LAUNCH(i)    ((i) * MPCONF_LEN + 0x18)
+#define MPCONF_RNDVZ(i)     ((i) * MPCONF_LEN + 0x20)
+#define MPCONF_STACKADDR(i) ((i) * MPCONF_LEN + 0x40)
+#define MPCONF_LPARAM(i)    ((i) * MPCONF_LEN + 0x48)
+#define MPCONF_RPARAM(i)    ((i) * MPCONF_LEN + 0x50)
+#define MPCONF_IDLEFLAG(i)  ((i) * MPCONF_LEN + 0x58)
+
+#define MPCONF_MAGIC_VAL    0xbaddeed2

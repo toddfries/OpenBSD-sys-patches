@@ -1,4 +1,4 @@
-/*	$OpenBSD: scif.c,v 1.7 2008/10/15 19:12:19 blambert Exp $	*/
+/*	$OpenBSD: scif.c,v 1.9 2009/10/31 12:00:07 fgsch Exp $	*/
 /*	$NetBSD: scif.c,v 1.47 2006/07/23 22:06:06 ad Exp $ */
 
 /*-
@@ -491,6 +491,7 @@ scifstart(struct tty *tp)
 			wakeup(&tp->t_outq);
 		}
 		selwakeup(&tp->t_wsel);
+		KNOTE(&tp->t_wsel.si_note, 0);
 		if (tp->t_outq.c_cc == 0)
 			goto out;
 	}
@@ -697,7 +698,7 @@ scifopen(dev_t dev, int flag, int mode, struct proc *p)
 
 	if (ISSET(tp->t_state, TS_ISOPEN) &&
 	    ISSET(tp->t_state, TS_XCLUDE) &&
-	    p->p_ucred->cr_uid != 0)
+	    suser(p, 0) != 0)
 		return (EBUSY);
 
 	s = spltty();

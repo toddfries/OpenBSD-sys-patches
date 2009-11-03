@@ -1,4 +1,4 @@
-/*	$OpenBSD: spif.c,v 1.21 2009/04/10 20:53:51 miod Exp $	*/
+/*	$OpenBSD: spif.c,v 1.23 2009/10/31 12:00:07 fgsch Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -321,7 +321,7 @@ sttyopen(dev, flags, mode, p)
 		else
 			CLR(tp->t_state, TS_CARR_ON);
 	}
-	else if (ISSET(tp->t_state, TS_XCLUDE) && p->p_ucred->cr_uid != 0) {
+	else if (ISSET(tp->t_state, TS_XCLUDE) && suser(p, 0) != 0) {
 		return (EBUSY);
 	} else {
 		s = spltty();
@@ -682,6 +682,7 @@ stty_start(tp)
 				wakeup(&tp->t_outq);
 			}
 			selwakeup(&tp->t_wsel);
+			KNOTE(&tp->t_wsel.si_note, 0);
 		}
 		if (tp->t_outq.c_cc) {
 			sp->sp_txc = ndqb(&tp->t_outq, 0);

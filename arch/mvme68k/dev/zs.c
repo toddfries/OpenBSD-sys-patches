@@ -1,4 +1,4 @@
-/*	$OpenBSD: zs.c,v 1.27 2009/03/15 20:40:25 miod Exp $ */
+/*	$OpenBSD: zs.c,v 1.29 2009/10/31 12:00:07 fgsch Exp $ */
 
 /*
  * Copyright (c) 2000 Steve Murphree, Jr.
@@ -365,7 +365,7 @@ zsopen(dev, flag, mode, p)
 		zs_init(zp);
 		if ((zp->modem_state & SCC_DCD) != 0)
 			tp->t_state |= TS_CARR_ON;
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0)
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0)
 		return (EBUSY);
 
 	error = ((*linesw[tp->t_line].l_open) (dev, tp));
@@ -564,6 +564,7 @@ zsstop(tp, flag)
 				wakeup((caddr_t) & tp->t_outq);
 			}
 			selwakeup(&tp->t_wsel);
+			KNOTE(&tp->t_wsel.si_note, 0);
 		}
 	}
 	splx(s);
@@ -912,6 +913,7 @@ zs_softint(arg)
 					wakeup((caddr_t) & tp->t_outq);
 				}
 				selwakeup(&tp->t_wsel);
+				KNOTE(&tp->t_wsel.si_note, 0);
 			}
 			if (tp->t_line != 0)
 				(*linesw[tp->t_line].l_start) (tp);

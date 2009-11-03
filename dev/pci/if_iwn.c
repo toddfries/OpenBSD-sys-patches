@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwn.c,v 1.72 2009/10/28 18:42:47 damien Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.74 2009/11/01 12:01:16 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007-2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -553,10 +553,6 @@ iwn_hal_attach(struct iwn_softc *sc, pci_product_id_t pid)
 		sc->sc_hal = &iwn4965_hal;
 		sc->limits = &iwn4965_sensitivity_limits;
 		sc->fwname = "iwn-4965";
-		/*
-		 * The 4965 is supposed to have 3 RX chains, but the
-		 * Intel driver only activates 2.
-		 */
 		sc->txchainmask = IWN_ANT_AB;
 		sc->rxchainmask = IWN_ANT_ABC;
 		break;
@@ -667,18 +663,16 @@ iwn_detach(struct device *self, int flags)
 {
 	struct iwn_softc *sc = (struct iwn_softc *)self;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
-	int s, qid;
+	int qid;
 
-	s = splnet();
 	timeout_del(&sc->calib_to);
 
 	/* Uninstall interrupt handler. */
 	if (sc->sc_ih != NULL)
 		pci_intr_disestablish(sc->sc_pct, sc->sc_ih);
 
-	ieee80211_ifdetach(ifp);
- 	if_detach(ifp);
-	splx(s);
+	if (sc->powerhook != NULL)
+		powerhook_disestablish(sc->powerhook);
 
 	/* Free DMA resources. */
 	iwn_free_rx_ring(sc, &sc->rxq);
@@ -690,16 +684,16 @@ iwn_detach(struct device *self, int flags)
 		iwn_free_ict(sc);
 	iwn_free_fwmem(sc);
 
+	bus_space_unmap(sc->sc_st, sc->sc_sh, sc->sc_sz);
+
 #ifndef SMALL_KERNEL
 	/* Detach the thermal sensor. */
 	sensor_detach(&sc->sensordev, &sc->sensor);
 	sensordev_deinstall(&sc->sensordev);
 #endif
 
-	if (sc->powerhook != NULL)
-		powerhook_disestablish(sc->powerhook);
-
-	bus_space_unmap(sc->sc_st, sc->sc_sh, sc->sc_sz);
+	ieee80211_ifdetach(ifp);
+	if_detach(ifp);
 
 	return 0;
 }
@@ -2039,7 +2033,8 @@ iwn5000_rx_calib_results(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 		idx = 2;
 		break;
 	case IWN5000_PHY_CALIB_TX_IQ_PERD:
-		if (sc->hw_type != IWN_HW_REV_TYPE_5150)
+		if (sc->hw_type < IWN_HW_REV_TYPE_6000 &&
+		    sc->hw_type != IWN_HW_REV_TYPE_5150)
 			idx = 3;
 		break;
 	case IWN5000_PHY_CALIB_BASE_BAND:
@@ -4172,14 +4167,16 @@ iwn_scan(struct iwn_softc *sc, uint16_t flags)
 	hdr->quiet_threshold = htole16(1);	/* min # of packets */
 
 	/* Select antennas for scanning. */
-	rxchain = IWN_RXCHAIN_FORCE | IWN_RXCHAIN_VALID(IWN_ANT_ABC) |
-	    IWN_RXCHAIN_MIMO(IWN_ANT_ABC);
+	rxchain =
+	    IWN_RXCHAIN_VALID(sc->rxchainmask) |
+	    IWN_RXCHAIN_FORCE_MIMO_SEL(sc->rxchainmask) |
+	    IWN_RXCHAIN_DRIVER_FORCE;
 	if ((flags & IEEE80211_CHAN_5GHZ) &&
 	    sc->hw_type == IWN_HW_REV_TYPE_4965) {
 		/* Ant A must be avoided in 5GHz because of an HW bug. */
-		rxchain |= IWN_RXCHAIN_SEL(IWN_ANT_BC);
+		rxchain |= IWN_RXCHAIN_FORCE_SEL(IWN_ANT_BC);
 	} else	/* Use all available RX antennas. */
-		rxchain |= IWN_RXCHAIN_SEL(IWN_ANT_ABC);
+		rxchain |= IWN_RXCHAIN_FORCE_SEL(sc->rxchainmask);
 	hdr->rxchain = htole16(rxchain);
 	hdr->filter = htole32(IWN_FILTER_MULTICAST | IWN_FILTER_BEACON);
 

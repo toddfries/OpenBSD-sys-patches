@@ -1,4 +1,4 @@
-/*	$OpenBSD: com.c,v 1.132 2009/10/13 19:33:16 pirofti Exp $	*/
+/*	$OpenBSD: com.c,v 1.135 2009/11/01 20:29:00 nicm Exp $	*/
 /*	$NetBSD: com.c,v 1.82.4.1 1996/06/02 09:08:00 mrg Exp $	*/
 
 /*
@@ -431,7 +431,7 @@ comopen(dev_t dev, int flag, int mode, struct proc *p)
 #endif
 		}
 #endif
-	} else if (ISSET(tp->t_state, TS_XCLUDE) && p->p_ucred->cr_uid != 0)
+	} else if (ISSET(tp->t_state, TS_XCLUDE) && suser(p, 0) != 0)
 		return EBUSY;
 	else
 		s = spltty();
@@ -899,9 +899,10 @@ comstart(struct tty *tp)
 			CLR(tp->t_state, TS_ASLEEP);
 			wakeup(&tp->t_outq);
 		}
+		selwakeup(&tp->t_wsel);
+		KNOTE(&tp->t_wsel.si_note, 0);
 		if (tp->t_outq.c_cc == 0)
 			goto stopped;
-		selwakeup(&tp->t_wsel);
 	}
 	SET(tp->t_state, TS_BUSY);
 
