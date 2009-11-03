@@ -1,4 +1,4 @@
-/*	$OpenBSD: dart.c,v 1.51 2008/01/23 16:37:57 jsing Exp $	*/
+/*	$OpenBSD: dart.c,v 1.53 2009/10/31 12:00:07 fgsch Exp $	*/
 
 /*
  * Mach Operating System
@@ -312,6 +312,7 @@ dartstart(struct tty *tp)
 			wakeup((caddr_t)&tp->t_outq);
 		}
 		selwakeup(&tp->t_wsel);
+		KNOTE(&tp->t_wsel.si_note, 0);
 		if (tp->t_outq.c_cc == 0)
 			goto bail;
 	}
@@ -664,7 +665,7 @@ dartopen(dev_t dev, int flag, int mode, struct proc *p)
 		ttsetwater(tp);
 		(void)dartmctl(dev, TIOCM_DTR | TIOCM_RTS, DMSET);
 		tp->t_state |= TS_CARR_ON;
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0) {
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0) {
 		splx(s);
 		return (EBUSY);
 	}

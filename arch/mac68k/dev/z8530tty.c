@@ -1,4 +1,4 @@
-/*	$OpenBSD: z8530tty.c,v 1.18 2009/03/15 20:40:25 miod Exp $	*/
+/*	$OpenBSD: z8530tty.c,v 1.20 2009/10/31 12:00:05 fgsch Exp $	*/
 /*	$NetBSD: z8530tty.c,v 1.14 1996/12/17 20:42:43 gwr Exp $	*/
 
 /*
@@ -346,7 +346,7 @@ zsopen(dev, flags, mode, p)
 	/* It's simpler to do this up here. */
 	if (((tp->t_state & (TS_ISOPEN | TS_XCLUDE))
 	     ==             (TS_ISOPEN | TS_XCLUDE))
-	    && (p->p_ucred->cr_uid != 0) )
+	    && (suser(p, 0) != 0) )
 	{
 		return (EBUSY);
 	}
@@ -645,6 +645,7 @@ zsstart(tp)
 			wakeup((caddr_t)&tp->t_outq);
 		}
 		selwakeup(&tp->t_wsel);
+		KNOTE(&tp->t_wsel.si_note, 0);
 	}
 
 	nch = ndqb(&tp->t_outq, 0);	/* XXX */

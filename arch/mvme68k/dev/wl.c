@@ -1,4 +1,4 @@
-/*	$OpenBSD: wl.c,v 1.18 2005/11/24 22:43:16 miod Exp $ */
+/*	$OpenBSD: wl.c,v 1.20 2009/10/31 12:00:07 fgsch Exp $ */
 
 /*
  * Copyright (c) 1995 Dale Rahn. All rights reserved.
@@ -558,7 +558,7 @@ wlopen(dev, flag, mode, p)
 			sc->cl_reg->cl_ier = IER_MDM | IER_RXD;
 			sc->cl_reg->cl_car = save;
 		}
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0) {
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0) {
 		splx(s);
 		return(EBUSY);
 	}
@@ -1218,6 +1218,7 @@ cl_txintr(sc)
 					wakeup((caddr_t) &tp->t_outq);
 				}
 				selwakeup(&tp->t_wsel);
+				KNOTE(&tp->t_wsel.si_note, 0);
 			}
 			sc->cl_reg->cl_ier = sc->cl_reg->cl_ier & ~(IER_TXMPTY|IER_TXD);
 		}
