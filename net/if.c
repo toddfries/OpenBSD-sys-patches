@@ -1333,36 +1333,14 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 #ifdef INET6
 		/* when IFXF_NOINET6 gets changed, detach/attach */
 		if (ifp->if_flags & IFF_UP && ifr->ifr_flags & IFXF_NOINET6 &&
-		    !(ifp->if_xflags & IFXF_NOINET6)) {
+		    !(ifp->if_xflags & IFXF_NOINET6))
 			in6_ifdetach(ifp);
-			ifp->if_xflags &= IFXF_NOINET6;
-		}
 		if (ifp->if_flags & IFF_UP && ifp->if_xflags & IFXF_NOINET6 &&
 		    !(ifr->ifr_flags & IFXF_NOINET6)) {
 			ifp->if_xflags &= ~IFXF_NOINET6;
 			in6_if_up(ifp);
 		}
-		if (ifr->ifr_xflags & IFXF_RTSOL &&
-		    !(ifp->if_xflags & IFXF_RTSOL)) {
-			ifp->if_xflags &= IFXF_RTSOL;
-			rt_ifmsg(ifp);
-		}
-		if (ifp->if_xflags & IFXF_RTSOL &&
-		    !(ifr->ifr_xflags & IFXF_RTSOL)) {
-			ifp->if_xflags &= ~IFXF_RTSOL;
-			rt_ifmsg(ifp);
-		}
 #endif
-		if (ifr->ifr_xflags & IFXF_DHCP &&
-		    !(ifp->if_xflags & IFXF_DHCP)) {
-			ifp->if_xflags &= IFXF_DHCP;
-			rt_ifmsg(ifp);
-		}
-		if (ifp->if_xflags & IFXF_DHCP &&
-		    !(ifr->ifr_xflags & IFXF_DHCP)) {
-			ifp->if_xflags &= ~IFXF_DHCP;
-			rt_ifmsg(ifp);
-		}
 
 		ifp->if_xflags = (ifp->if_xflags & IFXF_CANTCHANGE) |
 			(ifr->ifr_flags &~ IFXF_CANTCHANGE);
