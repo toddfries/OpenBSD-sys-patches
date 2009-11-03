@@ -1,4 +1,4 @@
-/*	$OpenBSD: z8530tty.c,v 1.8 2009/01/11 16:54:59 blambert Exp $ */
+/*	$OpenBSD: z8530tty.c,v 1.10 2009/10/31 12:00:06 fgsch Exp $ */
 /*	$NetBSD: z8530tty.c,v 1.13 1996/10/16 20:42:14 gwr Exp $	*/
 
 /*-
@@ -506,7 +506,7 @@ zsopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	if (ISSET(tp->t_state, TS_ISOPEN) &&
 	    ISSET(tp->t_state, TS_XCLUDE) &&
-	    p->p_ucred->cr_uid != 0)
+	    suser(p, 0) != 0)
 		return (EBUSY);
 
 	s = spltty();
@@ -787,6 +787,7 @@ zsstart(struct tty *tp)
 			wakeup((caddr_t)&tp->t_outq);
 		}
 		selwakeup(&tp->t_wsel);
+		KNOTE(&tp->t_wsel.si_note, 0);
 		if (tp->t_outq.c_cc == 0)
 			goto out;
 	}

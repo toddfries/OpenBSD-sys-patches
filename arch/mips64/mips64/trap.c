@@ -1,5 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.42 2009/05/22 20:37:53 miod Exp $	*/
-/* tracked to 1.23 */
+/*	$OpenBSD: trap.c,v 1.46 2009/10/22 20:10:44 miod Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -43,9 +42,6 @@
  *	from: @(#)trap.c	8.5 (Berkeley) 1/11/94
  */
 
-/*
- *		THIS CODE SHOULD BE REWRITTEN!
- */
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -92,10 +88,9 @@
 
 #define	USERMODE(ps)	(((ps) & SR_KSU_MASK) == SR_KSU_USER)
 
-int	want_resched;	/* resched() was called */
 struct	proc *machFPCurProcPtr;		/* pointer to last proc to use FP */
 
-char	*trap_type[] = {
+const char *trap_type[] = {
 	"external interrupt",
 	"TLB modification",
 	"TLB miss (load or instr. fetch)",
@@ -127,33 +122,30 @@ char	*trap_type[] = {
 	"reserved 28",
 	"reserved 29",
 	"reserved 30",
-	"virtual coherency data",
+	"virtual coherency data"
 };
 
 #if defined(DDB) || defined(DEBUG)
-extern register_t *tlbtrcptr;
 struct trapdebug trapdebug[TRAPSIZE], *trp = trapdebug;
 
-void stacktrace(struct trap_frame *);
-void logstacktrace(struct trap_frame *);
-int  kdbpeek(void *);
-/* extern functions printed by name in stack backtraces */
-extern void idle(void);
+void	stacktrace(struct trap_frame *);
+int	kdbpeek(void *);
 #endif	/* DDB || DEBUG */
 
 #if defined(DDB)
-int  kdb_trap(int, db_regs_t *);
+extern int kdb_trap(int, db_regs_t *);
 #endif
 
 extern void MipsSwitchFPState(struct proc *, struct trap_frame *);
 extern void MipsSwitchFPState16(struct proc *, struct trap_frame *);
 extern void MipsFPTrap(u_int, u_int, u_int, union sigval);
 
-void trap(struct trap_frame *);
+void	ast(void);
+void	trap(struct trap_frame *);
 #ifdef PTRACE
-int cpu_singlestep(struct proc *);
+int	cpu_singlestep(struct proc *);
 #endif
-u_long MipsEmulateBranch(struct trap_frame *, long, int, u_int);
+u_long	MipsEmulateBranch(struct trap_frame *, long, int, u_int);
 
 static __inline__ void
 userret(struct proc *p)
@@ -165,6 +157,27 @@ userret(struct proc *p)
 		postsig(sig);
 
 	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
+}
+
+/*
+ * Handle an AST for the current process.
+ */
+void
+ast()
+{
+	struct cpu_info *ci = curcpu();
+	struct proc *p = ci->ci_curproc;
+
+	uvmexp.softs++;
+
+	p->p_md.md_astpending = 0;
+	if (p->p_flag & P_OWEUPC) {
+		ADDUPROF(p);
+	}
+	if (ci->ci_want_resched)
+		preempt(NULL);
+
+	userret(p);
 }
 
 /*
@@ -197,9 +210,6 @@ trap(trapframe)
 	 */
 	if (trapframe->sr & SR_INT_ENAB) {
 		if (type != T_BREAK) {
-#ifndef IMASK_EXTERNAL
-			updateimask(trapframe->cpl);
-#endif
 			enableintr();
 		}
 	}
@@ -591,9 +601,6 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 #endif
 		/* Reenable interrupts if necessary */
 		if (trapframe->sr & SR_INT_ENAB) {
-#ifndef IMASK_EXTERNAL
-			updateimask(trapframe->cpl);
-#endif
 			enableintr();
 		}
 		return;
@@ -693,10 +700,12 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		if ((int)trapframe->cause & CR_BR_DELAY)
 			va += 4;
 		printf("watch exception @ %p\n", va);
+#ifdef RM7K_PERFCNTR
 		if (rm7k_watchintr(trapframe)) {
 			/* Return to user, don't add any more overhead */
 			return;
 		}
+#endif
 		i = SIGTRAP;
 		typ = TRAP_BRKPT;
 		break;
@@ -720,6 +729,7 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		} else {
 			locr0->pc += 4;
 		}
+#ifdef RM7K_PERFCNTR
 		if (instr == 0x040c0000) { /* Performance cntr trap */
 			int result;
 
@@ -728,8 +738,9 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 			locr0->v0 = -result;
 			/* Return to user, don't add any more overhead */
 			return;
-		}
-		else {
+		} else
+#endif
+		{
 			i = SIGEMT;	/* Stuff it with something for now */
 			typ = 0;
 		}
@@ -1114,13 +1125,6 @@ stacktrace(regs)
 	struct trap_frame *regs;
 {
 	stacktrace_subr(regs, printf);
-}
-
-void
-logstacktrace(regs)
-	struct trap_frame *regs;
-{
-	stacktrace_subr(regs, addlog);
 }
 
 void

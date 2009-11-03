@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.125 2009/04/18 07:30:50 mk Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.129 2009/10/26 15:34:16 deraadt Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -66,7 +66,7 @@ int		uvideo_match(struct device *, void *, void *);
 void		uvideo_attach(struct device *, struct device *, void *);
 void		uvideo_attach_hook(void *);
 int		uvideo_detach(struct device *, int);
-int		uvideo_activate(struct device *, enum devact);
+int		uvideo_activate(struct device *, int);
 
 usbd_status	uvideo_vc_parse_desc(struct uvideo_softc *);
 usbd_status	uvideo_vc_parse_desc_header(struct uvideo_softc *,
@@ -555,7 +555,7 @@ uvideo_detach(struct device *self, int flags)
 }
 
 int
-uvideo_activate(struct device *self, enum devact act)
+uvideo_activate(struct device *self, int act)
 {
 	struct uvideo_softc *sc = (struct uvideo_softc *) self;
 	int rv = 0;
@@ -665,7 +665,7 @@ uvideo_vc_parse_desc_pu(struct uvideo_softc *sc,
 
 	/* XXX support variable bmControls fields */
 	if (d->bControlSize != 2) {
-		printf("%s: just 2 bytes bmControls supported yet!\n",
+		printf("%s: video control not supported for this device.\n",
 		    DEVNAME(sc));
 		return (USBD_INVAL);
 	}
@@ -1708,7 +1708,8 @@ uvideo_vs_open(struct uvideo_softc *sc)
 	}
 
 	/* calculate optimal isoc xfer size */
-	if (strncmp(sc->sc_udev->bus->bdev.dv_xname, "ohci", 4) == 0) {
+	if (strcmp(sc->sc_udev->bus->bdev.dv_cfdata->cf_driver->cd_name,
+	    "ohci") == 0) {
 		/* ohci workaround */
 		sc->sc_nframes = 8;
 	} else {
@@ -2647,7 +2648,7 @@ uvideo_querycap(void *v, struct v4l2_capability *caps)
 {
 	struct uvideo_softc *sc = v;
 
-	bzero(caps, sizeof(caps));
+	bzero(caps, sizeof(*caps));
 	strlcpy(caps->driver, DEVNAME(sc), sizeof(caps->driver));
 	strlcpy(caps->card, "Generic USB video class device",
 	    sizeof(caps->card));

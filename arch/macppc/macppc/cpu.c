@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.62 2009/06/02 21:38:09 drahn Exp $ */
+/*	$OpenBSD: cpu.c,v 1.64 2009/08/27 20:42:01 miod Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -231,7 +231,7 @@ ppc_check_procid()
 		for (p = &nop32_start; p->s; p++) {
 			for (inst = p->s; inst < p->e; inst++)
 				*inst = nop_inst;
-			syncicache(p->s, (p->e - p->s) * sizeof(p->e));
+			syncicache(p->s, (p->e - p->s) * sizeof(*p->e));
 		}
 	}
 }
@@ -790,7 +790,7 @@ cpu_hatch(void)
 	ppc_intr_enable(intrstate);
 
 	/* Enable inter-processor interrupts. */
-	openpic_set_priority(14);
+	openpic_set_priority(curcpu()->ci_cpuid, 14);
 
 	SCHED_LOCK(s);
 	cpu_switchto(NULL, sched_chooseproc());

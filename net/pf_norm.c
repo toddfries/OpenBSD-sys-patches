@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_norm.c,v 1.117 2009/04/07 13:26:23 henning Exp $ */
+/*	$OpenBSD: pf_norm.c,v 1.120 2009/09/01 15:51:06 jsing Exp $ */
 
 /*
  * Copyright 2001 Niels Provos <provos@citi.umich.edu>
@@ -113,11 +113,6 @@ void			 pf_free_fragment(struct pf_fragment *);
 struct pf_fragment	*pf_find_fragment(struct ip *, struct pf_frag_tree *);
 struct mbuf		*pf_reassemble(struct mbuf **, struct pf_fragment **,
 			    struct pf_frent *, int);
-void			 pf_scrub_ip(struct mbuf **, u_int8_t, u_int8_t,
-			    u_int8_t);
-#ifdef INET6
-void			 pf_scrub_ip6(struct mbuf **, u_int8_t);
-#endif
 
 #define	DPFPRINTF(x) do {				\
 	if (pf_status.debug >= PF_DEBUG_MISC) {		\
@@ -541,7 +536,7 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kif *kif, u_short *reason,
 		goto drop;
 
 	/* Clear IP_DF if we're in no-df mode */
-	if (!(pf_status.reass & PF_REASS_NODF) && h->ip_off & htons(IP_DF)) {
+	if (pf_status.reass & PF_REASS_NODF && h->ip_off & htons(IP_DF)) {
 		u_int16_t ip_off = h->ip_off;
 
 		h->ip_off &= htons(~IP_DF);
@@ -1373,7 +1368,7 @@ pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd, u_int16_t maxmss)
 }
 
 void
-pf_scrub_ip(struct mbuf **m0, u_int8_t flags, u_int8_t min_ttl, u_int8_t tos)
+pf_scrub_ip(struct mbuf **m0, u_int16_t flags, u_int8_t min_ttl, u_int8_t tos)
 {
 	struct mbuf		*m = *m0;
 	struct ip		*h = mtod(m, struct ip *);

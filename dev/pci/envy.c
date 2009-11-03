@@ -1,4 +1,4 @@
-/*	$OpenBSD: envy.c,v 1.28 2009/05/18 20:10:12 ratchov Exp $	*/
+/*	$OpenBSD: envy.c,v 1.31 2009/11/02 05:54:16 ratchov Exp $	*/
 /*
  * Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
  *
@@ -66,6 +66,9 @@ int  envy_gpio_getmask(struct envy_softc *);
 void envy_gpio_setmask(struct envy_softc *, int);
 int  envy_gpio_getdir(struct envy_softc *);
 void envy_gpio_setdir(struct envy_softc *, int);
+void envy_gpio_i2c_start_bit(struct envy_softc *, int, int);
+void envy_gpio_i2c_stop_bit(struct envy_softc *, int, int);
+void envy_gpio_i2c_byte_out(struct envy_softc *, int, int, int);
 int  envy_eeprom_gpioxxx(struct envy_softc *, int);
 void envy_reset(struct envy_softc *);
 int  envy_codec_read(struct envy_softc *, int, int);
@@ -103,6 +106,9 @@ int envy_get_props(void *);
 void delta_init(struct envy_softc *);
 void delta_codec_write(struct envy_softc *, int, int, int);
 
+void revo51_init(struct envy_softc *);
+void revo51_codec_write(struct envy_softc *, int, int, int);
+
 void julia_init(struct envy_softc *);
 void julia_codec_write(struct envy_softc *, int, int, int);
 
@@ -123,6 +129,11 @@ int ak4358_dac_ndev(struct envy_softc *);
 void ak4358_dac_devinfo(struct envy_softc *, struct mixer_devinfo *, int);
 void ak4358_dac_get(struct envy_softc *, struct mixer_ctrl *, int);
 int ak4358_dac_set(struct envy_softc *, struct mixer_ctrl *, int);
+
+int ak5365_adc_ndev(struct envy_softc *);
+void ak5365_adc_devinfo(struct envy_softc *, struct mixer_devinfo *, int);
+void ak5365_adc_get(struct envy_softc *, struct mixer_ctrl *, int);
+int ak5365_adc_set(struct envy_softc *, struct mixer_ctrl *, int);
 
 struct cfattach envy_ca = {
 	sizeof(struct envy_softc), envymatch, envyattach, envydetach
@@ -188,7 +199,7 @@ static unsigned char julia_eeprom[ENVY_EEPROM_MAXSZ] = {
 	0x20, 0x80, 0xf8, 0xc3, 
 	0x9f, 0xff, 0x7f, 
 	0x9f, 0xff, 0x7f,
-	0x16, 0x80, 0x00
+	0x60, 0x00, 0x00
 };
 
 struct envy_codec ak4524_dac = {
@@ -197,6 +208,8 @@ struct envy_codec ak4524_dac = {
 	"ak4524 adc", ak4524_adc_ndev, ak4524_adc_devinfo, ak4524_adc_get, ak4524_adc_set
 }, ak4358_dac = {
 	"ak4358 dac", ak4358_dac_ndev, ak4358_dac_devinfo, ak4358_dac_get, ak4358_dac_set
+}, ak5365_adc = {
+	"ak5365 adc", ak5365_adc_ndev, ak5365_adc_devinfo, ak5365_adc_get, ak5365_adc_set
 }, unkenvy_codec = {
 	"unknown codec", unkenvy_codec_ndev, NULL, NULL, NULL
 };
@@ -234,6 +247,13 @@ struct envy_card envy_cards[] = {
 		delta_codec_write,
 		NULL
 	}, {
+		PCI_ID_CODE(0x1412, 0xd634),
+		"M-Audio Audiophile 2496",
+		2, &ak4524_adc, 2, &ak4524_dac,
+		delta_init,
+		delta_codec_write,
+		NULL
+	}, {
 		0,
 		"unknown 1712-based card",
 		8, &unkenvy_codec, 8, &unkenvy_codec,
@@ -248,6 +268,12 @@ struct envy_card envy_cards[] = {
 		julia_init,
 		julia_codec_write,
 		julia_eeprom
+	}, {
+		PCI_ID_CODE(0x1412, 0x3631),
+		"M-Audio Revolution 5.1",
+		2, &ak5365_adc, 6, &ak4358_dac,
+		revo51_init,
+		revo51_codec_write
 	}, {
 		0,
 		"unknown 1724-based card",
@@ -311,6 +337,104 @@ delta_codec_write(struct envy_softc *sc, int dev, int addr, int data)
 	delay(1);
 }
 
+/*
+ * m-audio revolution 5.1 specific code
+ */
+
+#define REVO51_GPIO_CSMASK	0x30 
+#define REVO51_GPIO_CS(dev)	((dev) ? 0x10 : 0x20)
+#define REVO51_MUTE		0x400000
+#define REVO51_PT2258S_SDA	0x40
+#define REVO51_PT2258S_SCL	0x80
+#define REVO51_PT2258S_ADDR	0x80
+#define REVO51_PT2258S_MUTE	6
+
+void
+revo51_init(struct envy_softc *sc)
+{
+	int i, reg;
+
+	/* AK4358 */
+	envy_codec_write(sc, 0, 0, 0);	/* reset */
+	delay(300);
+	envy_codec_write(sc, 0, 0, 0x87);	/* i2s mode */
+	for (i = 0; i < sc->card->noch; i++) {
+		sc->shadow[0][AK4358_ATT(i)] = 0xff;
+	}
+
+	/* AK5365 */
+	envy_codec_write(sc, 1, AK5365_RST, 0);	/* reset */
+	delay(300);
+	envy_codec_write(sc, 1, AK5365_CTRL, AK5365_CTRL_I2S);	/* i2s mode */
+	envy_codec_write(sc, 1, AK5365_RST , AK5365_RST_NORM);
+	sc->shadow[1][AK5365_ATT(0)] = 0x7f;
+	sc->shadow[1][AK5365_ATT(1)] = 0x7f;
+
+	/* PT2258S */
+	envy_codec_write(sc, 2, REVO51_PT2258S_MUTE, 0xc0);	/* reset */
+	envy_codec_write(sc, 2, REVO51_PT2258S_MUTE, 0xf9);	/* mute */
+
+	reg = envy_gpio_getstate(sc);
+	reg |= REVO51_MUTE;
+	envy_gpio_setstate(sc, reg);
+}
+
+void
+revo51_codec_write(struct envy_softc *sc, int dev, int addr, int data)
+{
+	int attn, bits, mask, reg;
+	int xlat[6] = {0x90, 0x50, 0x10, 0x30, 0x70, 0xb0};
+
+	/* AK4358 & AK5365 */
+	if (dev < 2) {
+		reg = envy_gpio_getstate(sc);
+		reg &= ~REVO51_GPIO_CSMASK;
+		reg |=  REVO51_GPIO_CS(dev);
+		envy_gpio_setstate(sc, reg);
+		delay(1);
+
+		bits  = 0xa000 | (addr << 8) | data;
+		for (mask = 0x8000; mask != 0; mask >>= 1) {
+			reg &= ~(ENVY_GPIO_CLK | ENVY_GPIO_DOUT);
+			reg |= (bits & mask) ? ENVY_GPIO_DOUT : 0;
+			envy_gpio_setstate(sc, reg);
+			delay(1);
+
+			reg |= ENVY_GPIO_CLK;
+			envy_gpio_setstate(sc, reg);
+			delay(1);
+		}
+
+		reg |= REVO51_GPIO_CSMASK;
+		envy_gpio_setstate(sc, reg);
+		delay(1);
+		return;
+	}
+
+	/* PT2258S */
+	envy_gpio_i2c_start_bit(sc, REVO51_PT2258S_SDA, REVO51_PT2258S_SCL);
+	envy_gpio_i2c_byte_out(sc, REVO51_PT2258S_SDA, REVO51_PT2258S_SCL,
+	    REVO51_PT2258S_ADDR);
+
+	if (addr == REVO51_PT2258S_MUTE) {
+		envy_gpio_i2c_byte_out(sc, REVO51_PT2258S_SDA,
+		    REVO51_PT2258S_SCL, data);
+	} else {
+		/* 1's digit */
+		attn = data % 10;
+		attn += xlat[addr];
+		envy_gpio_i2c_byte_out(sc, REVO51_PT2258S_SDA,
+		    REVO51_PT2258S_SCL, attn);
+
+		/* 10's digit */
+		attn = data / 10;
+		attn += xlat[addr] - 0x10;
+		envy_gpio_i2c_byte_out(sc, REVO51_PT2258S_SDA,
+		    REVO51_PT2258S_SCL, attn);
+	}
+
+	envy_gpio_i2c_stop_bit(sc, REVO51_PT2258S_SDA, REVO51_PT2258S_SCL);
+}
 
 /*
  * esi julia specific code
@@ -367,7 +491,6 @@ ak4358_dac_ndev(struct envy_softc *sc)
 	return sc->card->noch;
 }
 
-
 void
 ak4358_dac_devinfo(struct envy_softc *sc, struct mixer_devinfo *dev, int idx)
 {
@@ -413,7 +536,6 @@ ak4524_dac_ndev(struct envy_softc *sc)
 	return 3 * (sc->card->noch / 2);
 }
 
-
 void
 ak4524_dac_devinfo(struct envy_softc *sc, struct mixer_devinfo *dev, int idx)
 {
@@ -439,7 +561,7 @@ ak4524_dac_devinfo(struct envy_softc *sc, struct mixer_devinfo *dev, int idx)
 		dev->un.e.member[1].ord = 1;
 		strlcpy(dev->un.e.member[1].label.name, AudioNon,
 		   MAX_AUDIO_DEV_LEN);
-		dev->un.s.num_mem = 2;
+		dev->un.e.num_mem = 2;
 		snprintf(dev->label.name, MAX_AUDIO_DEV_LEN,
 		    AudioNmute "%d-%d", 2 * idx, 2 * idx + 1);
 	}
@@ -525,6 +647,80 @@ ak4524_adc_set(struct envy_softc *sc, struct mixer_ctrl *ctl, int idx)
 		return EINVAL;
 	val = ctl->un.value.level[0] / 2;
 	envy_codec_write(sc, idx / 2, (idx % 2) + AK4524_ADC_GAIN0, val);
+	return 0;
+}
+
+/*
+ * AK 5365 ADC specific code
+ */
+int
+ak5365_adc_ndev(struct envy_softc *sc)
+{
+	/* 1 source + 2 volume knobs per channel pair */
+	return (sc->card->nich + 1);
+}
+
+void
+ak5365_adc_devinfo(struct envy_softc *sc, struct mixer_devinfo *dev, int idx)
+{
+	int ndev, i;
+
+	ndev = sc->card->nich;
+	if (idx < ndev) {
+		dev->type = AUDIO_MIXER_VALUE;
+		dev->mixer_class = ENVY_MIX_CLASSIN;
+		dev->un.v.delta = 2;
+		dev->un.v.num_channels = 1;
+		snprintf(dev->label.name, MAX_AUDIO_DEV_LEN,
+		    AudioNline "%d", idx);
+		strlcpy(dev->un.v.units.name, AudioNvolume,
+		    MAX_AUDIO_DEV_LEN);
+	} else {
+		dev->type = AUDIO_MIXER_ENUM;
+		dev->mixer_class = ENVY_MIX_CLASSIN;
+		for (i = 0; i < 5; i++) {
+			dev->un.e.member[i].ord = i;
+			snprintf(dev->un.e.member[i].label.name,
+			    MAX_AUDIO_DEV_LEN, AudioNline "%d", i);
+		}
+		dev->un.e.num_mem = 5;
+		strlcpy(dev->label.name, AudioNsource,
+		    MAX_AUDIO_DEV_LEN);
+	}
+}
+
+void
+ak5365_adc_get(struct envy_softc *sc, struct mixer_ctrl *ctl, int idx)
+{
+	int val, ndev;
+
+	ndev = sc->card->nich;
+	if (idx < ndev) {
+		val = envy_codec_read(sc, 1, AK5365_ATT(idx));
+		ctl->un.value.num_channels = 1;
+		ctl->un.value.level[0] = 2 * val;
+	} else {
+		ctl->un.ord = envy_codec_read(sc, 1, AK5365_SRC);
+	}
+}
+
+int
+ak5365_adc_set(struct envy_softc *sc, struct mixer_ctrl *ctl, int idx)
+{
+	int val, ndev;
+
+	ndev = sc->card->nich;
+	if (idx < ndev) {
+		if (ctl->un.value.num_channels != 1)
+			return EINVAL;
+		val = ctl->un.value.level[0] / 2;
+		envy_codec_write(sc, 1, AK5365_ATT(idx), val);
+	} else {
+		if (ctl->un.ord >= 5)
+			return EINVAL;
+		val = ctl->un.ord & AK5365_SRC_MASK;
+		envy_codec_write(sc, 1, AK5365_SRC, val);
+	}
 	return 0;
 }
 
@@ -624,6 +820,65 @@ envy_gpio_setdir(struct envy_softc *sc, int dir)
 		envy_ccs_write(sc, ENVY_CCS_GPIODIR2, (dir >> 16) & 0xff);
 	} else
 		envy_cci_write(sc, ENVY_CCI_GPIODIR, dir);
+}
+
+void
+envy_gpio_i2c_start_bit(struct envy_softc *sc, int sda, int scl)
+{
+	int reg;
+
+	reg = envy_gpio_getstate(sc);
+	reg |= (sda | scl);
+	envy_gpio_setstate(sc, reg);
+	delay(5);
+	reg &= ~sda;
+	envy_gpio_setstate(sc, reg);
+	delay(4);
+	reg &= ~scl;
+	envy_gpio_setstate(sc, reg);
+	delay(5);
+}
+
+void
+envy_gpio_i2c_stop_bit(struct envy_softc *sc, int sda, int scl)
+{
+	int reg;
+
+	reg = envy_gpio_getstate(sc);
+	reg &= ~sda;
+	reg |= scl;
+	envy_gpio_setstate(sc, reg);
+	delay(4);
+	reg |= sda;
+	envy_gpio_setstate(sc, reg);
+}
+
+void
+envy_gpio_i2c_byte_out(struct envy_softc *sc, int sda, int scl, int val)
+{
+	int mask, reg;
+
+	reg = envy_gpio_getstate(sc);
+
+	for (mask = 0x80; mask != 0; mask >>= 1) {
+		reg &= ~sda;
+		reg |= (val & mask) ? sda : 0;
+		envy_gpio_setstate(sc, reg);
+		delay(1);
+		reg |= scl;
+		envy_gpio_setstate(sc, reg);
+		delay(4);
+		reg &= ~scl;
+		envy_gpio_setstate(sc, reg);
+		delay(5);
+	}
+
+	reg |= scl;
+	envy_gpio_setstate(sc, reg);
+	delay(4);
+	reg &= ~scl;
+	envy_gpio_setstate(sc, reg);
+	delay(5);
 }
 
 void
@@ -729,13 +984,24 @@ envy_reset(struct envy_softc *sc)
 	/*
 	 * write eeprom values to corresponding registers
 	 */
-	pci_conf_write(sc->pci_pc, sc->pci_tag, ENVY_CONF, 
-	    sc->eeprom[ENVY_EEPROM_CONF] |
-	    (sc->eeprom[ENVY_EEPROM_ACLINK] << 8) |
-	    (sc->eeprom[ENVY_EEPROM_I2S] << 16) |
-	    (sc->eeprom[ENVY_EEPROM_SPDIF] << 24));
+	if (sc->isht) {
+		envy_ccs_write(sc, ENVY_CCS_CONF,
+		    sc->eeprom[ENVY_EEPROM_CONF]);
+		envy_ccs_write(sc, ENVY_CCS_ACLINK,
+		    sc->eeprom[ENVY_EEPROM_ACLINK]);
+		envy_ccs_write(sc, ENVY_CCS_I2S,
+		    sc->eeprom[ENVY_EEPROM_I2S]);
+		envy_ccs_write(sc, ENVY_CCS_SPDIF,
+		    sc->eeprom[ENVY_EEPROM_SPDIF]);
+	} else {
+		pci_conf_write(sc->pci_pc, sc->pci_tag, ENVY_CONF, 
+		    sc->eeprom[ENVY_EEPROM_CONF] |
+		    (sc->eeprom[ENVY_EEPROM_ACLINK] << 8) |
+		    (sc->eeprom[ENVY_EEPROM_I2S] << 16) |
+		    (sc->eeprom[ENVY_EEPROM_SPDIF] << 24));
+	}
 
-	envy_gpio_setmask(sc, envy_eeprom_gpioxxx(sc, ENVY_EEPROM_GPIOMASK));
+	envy_gpio_setmask(sc, envy_eeprom_gpioxxx(sc, ENVY_EEPROM_GPIOMASK(sc)));
 	envy_gpio_setdir(sc, envy_eeprom_gpioxxx(sc, ENVY_EEPROM_GPIODIR(sc)));
 	envy_gpio_setstate(sc, envy_eeprom_gpioxxx(sc, ENVY_EEPROM_GPIOST(sc)));
 

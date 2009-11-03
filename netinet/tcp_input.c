@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.226 2009/06/05 00:05:22 claudio Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.229 2009/11/03 10:59:04 claudio Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -719,7 +719,8 @@ findpcb:
 		if (so->so_options & SO_ACCEPTCONN) {
 			if ((tiflags & (TH_RST|TH_ACK|TH_SYN)) != TH_SYN) {
 				if (tiflags & TH_RST) {
-					syn_cache_reset(&src.sa, &dst.sa, th);
+					syn_cache_reset(&src.sa, &dst.sa, th,
+					    inp->inp_rdomain);
 				} else if ((tiflags & (TH_ACK|TH_SYN)) ==
 				    (TH_ACK|TH_SYN)) {
 					/*
@@ -877,11 +878,10 @@ after_listen:
 #endif
 
 #if NPF > 0
-		if (m->m_pkthdr.pf.statekey) {
-			((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp =
-			    inp;
-			inp->inp_pf_sk = m->m_pkthdr.pf.statekey;
-		}
+	if (m->m_pkthdr.pf.statekey) {
+		((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp = inp;
+		inp->inp_pf_sk = m->m_pkthdr.pf.statekey;
+	}
 #endif
 
 #ifdef IPSEC
@@ -3561,7 +3561,7 @@ syn_cache_cleanup(struct tcpcb *tp)
  */
 struct syn_cache *
 syn_cache_lookup(struct sockaddr *src, struct sockaddr *dst,
-    struct syn_cache_head **headp)
+    struct syn_cache_head **headp, u_int rdomain)
 {
 	struct syn_cache *sc;
 	struct syn_cache_head *scp;
@@ -3578,7 +3578,8 @@ syn_cache_lookup(struct sockaddr *src, struct sockaddr *dst,
 		if (sc->sc_hash != hash)
 			continue;
 		if (!bcmp(&sc->sc_src, src, src->sa_len) &&
-		    !bcmp(&sc->sc_dst, dst, dst->sa_len)) {
+		    !bcmp(&sc->sc_dst, dst, dst->sa_len) &&
+		    rtable_l2(rdomain) == rtable_l2(sc->sc_rdomain)) {
 			splx(s);
 			return (sc);
 		}
@@ -3623,7 +3624,8 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	struct socket *oso;
 
 	s = splsoftnet();
-	if ((sc = syn_cache_lookup(src, dst, &scp)) == NULL) {
+	if ((sc = syn_cache_lookup(src, dst, &scp,
+	    sotoinpcb(so)->inp_rdomain)) == NULL) {
 		splx(s);
 		return (NULL);
 	}
@@ -3656,6 +3658,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 		goto resetandabort;
 
 	inp = sotoinpcb(oso);
+
 #ifdef IPSEC
 	/*
 	 * We need to copy the required security levels
@@ -3701,6 +3704,9 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 #else /* INET6 */
 	inp = (struct inpcb *)so->so_pcb;
 #endif /* INET6 */
+
+	/* inherit rdomain from listening socket */
+	inp->inp_rdomain = sc->sc_rdomain;
 
 	inp->inp_lport = th->th_dport;
 	switch (src->sa_family) {
@@ -3856,13 +3862,14 @@ abort:
  */
 
 void
-syn_cache_reset(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th)
+syn_cache_reset(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
+    u_int rdomain)
 {
 	struct syn_cache *sc;
 	struct syn_cache_head *scp;
 	int s = splsoftnet();
 
-	if ((sc = syn_cache_lookup(src, dst, &scp)) == NULL) {
+	if ((sc = syn_cache_lookup(src, dst, &scp, rdomain)) == NULL) {
 		splx(s);
 		return;
 	}
@@ -3878,14 +3885,15 @@ syn_cache_reset(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th)
 }
 
 void
-syn_cache_unreach(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th)
+syn_cache_unreach(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
+    u_int rdomain)
 {
 	struct syn_cache *sc;
 	struct syn_cache_head *scp;
 	int s;
 
 	s = splsoftnet();
-	if ((sc = syn_cache_lookup(src, dst, &scp)) == NULL) {
+	if ((sc = syn_cache_lookup(src, dst, &scp, rdomain)) == NULL) {
 		splx(s);
 		return;
 	}
@@ -3993,7 +4001,8 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	 * If we do, resend the SYN,ACK.  We do not count this
 	 * as a retransmission (XXX though maybe we should).
 	 */
-	if ((sc = syn_cache_lookup(src, dst, &scp)) != NULL) {
+	if ((sc = syn_cache_lookup(src, dst, &scp, sotoinpcb(so)->inp_rdomain))
+	    != NULL) {
 		tcpstat.tcps_sc_dupesyn++;
 		if (ipopts) {
 			/*
@@ -4027,6 +4036,7 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	bzero(&sc->sc_timer, sizeof(sc->sc_timer));
 	bcopy(src, &sc->sc_src, src->sa_len);
 	bcopy(dst, &sc->sc_dst, dst->sa_len);
+	sc->sc_rdomain = sotoinpcb(so)->inp_rdomain;
 	sc->sc_flags = 0;
 	sc->sc_ipopts = ipopts;
 	sc->sc_irs = th->th_seq;
@@ -4154,6 +4164,7 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 	m->m_data += max_linkhdr;
 	m->m_len = m->m_pkthdr.len = tlen;
 	m->m_pkthdr.rcvif = NULL;
+	m->m_pkthdr.rdomain = sc->sc_rdomain;
 	memset(mtod(m, u_char *), 0, tlen);
 
 	switch (sc->sc_src.sa.sa_family) {

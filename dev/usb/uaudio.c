@@ -1,4 +1,4 @@
-/*	$OpenBSD: uaudio.c,v 1.61 2008/11/21 17:55:02 robert Exp $ */
+/*	$OpenBSD: uaudio.c,v 1.68 2009/11/03 08:31:44 jakemsr Exp $ */
 /*	$NetBSD: uaudio.c,v 1.90 2004/10/29 17:12:53 kent Exp $	*/
 
 /*
@@ -78,6 +78,7 @@ int	uaudiodebug = 0;
 #define UAUDIO_NCHANBUFS 6	/* number of outstanding request */
 #define UAUDIO_NFRAMES   10	/* ms of sound in each request */
 
+#define UAUDIO_MAX_ALTS  32	/* max alt settings allowed by driver */
 
 #define MIX_MAX_CHAN 8
 struct mixerctl {
@@ -293,13 +294,8 @@ int	uaudio_query_encoding(void *, struct audio_encoding *);
 void	uaudio_get_minmax_rates
 	(int, const struct as_info *, const struct audio_params *,
 	 int, int, int, u_long *, u_long *);
-int	uaudio_match_alt_sub
-	(int, const struct as_info *, const struct audio_params *, 
-	 int, int, int, u_long);
-int	uaudio_match_alt_chan
-	(int, const struct as_info *, struct audio_params *, int, int, int);
-int	uaudio_match_alt
-	(int, const struct as_info *, struct audio_params *, int, int, int);
+int	uaudio_match_alt_rate(void *, int, int);
+int	uaudio_match_alt(void *, struct audio_params *, int, int, int);
 int	uaudio_set_params
 	(void *, int, int, struct audio_params *, struct audio_params *);
 int	uaudio_round_blocksize(void *, int);
@@ -316,6 +312,7 @@ int	uaudio_mixer_set_port(void *, mixer_ctrl_t *);
 int	uaudio_mixer_get_port(void *, mixer_ctrl_t *);
 int	uaudio_query_devinfo(void *, mixer_devinfo_t *);
 int	uaudio_get_props(void *);
+void	uaudio_get_default_params(void *, int, struct audio_params *);
 
 struct audio_hw_if uaudio_hw_if = {
 	uaudio_open,
@@ -344,7 +341,7 @@ struct audio_hw_if uaudio_hw_if = {
 	uaudio_get_props,
 	uaudio_trigger_output,
 	uaudio_trigger_input,
-	NULL
+	uaudio_get_default_params
 };
 
 struct audio_device uaudio_device = {
@@ -356,7 +353,7 @@ struct audio_device uaudio_device = {
 int uaudio_match(struct device *, void *, void *); 
 void uaudio_attach(struct device *, struct device *, void *); 
 int uaudio_detach(struct device *, int); 
-int uaudio_activate(struct device *, enum devact); 
+int uaudio_activate(struct device *, int); 
 
 struct cfdriver uaudio_cd = { 
 	NULL, "uaudio", DV_DULL 
@@ -464,7 +461,7 @@ uaudio_attach(struct device *parent, struct device *self, void *aux)
 }
 
 int
-uaudio_activate(struct device *self, enum devact act)
+uaudio_activate(struct device *self, int act)
 {
 	struct uaudio_softc *sc = (struct uaudio_softc *)self;
 	int rv = 0;
@@ -1549,27 +1546,32 @@ uaudio_process_as(struct uaudio_softc *sc, const char *buf, int *offsp,
 
 	dir = UE_GET_DIR(ed->bEndpointAddress);
 	type = UE_GET_ISO_TYPE(ed->bmAttributes);
-	if ((usbd_get_quirks(sc->sc_udev)->uq_flags & UQ_AU_INP_ASYNC) &&
-	    dir == UE_DIR_IN && type == UE_ISO_ADAPT)
-		type = UE_ISO_ASYNC;
 
 	/* We can't handle endpoints that need a sync pipe yet. */
 	sync = FALSE;
-	if (dir == UE_DIR_IN && type == UE_ISO_ADAPT) {
-		sync = TRUE;
+	/* bSynchAddress set to 0 indicates sync pipe is not needed. */
+	if (ed->bSynchAddress != 0) {
+		if (dir == UE_DIR_IN && type == UE_ISO_ADAPT) {
+			sync = TRUE;
 #ifndef UAUDIO_MULTIPLE_ENDPOINTS
-		printf("%s: ignored input endpoint of type adaptive\n",
-		       sc->sc_dev.dv_xname);
-		return (USBD_NORMAL_COMPLETION);
+			printf("%s: ignored input endpoint of type adaptive\n",
+			       sc->sc_dev.dv_xname);
+			return (USBD_NORMAL_COMPLETION);
 #endif
+		}
+		if (dir != UE_DIR_IN && type == UE_ISO_ASYNC) {
+			sync = TRUE;
+#ifndef UAUDIO_MULTIPLE_ENDPOINTS
+			printf("%s: ignored output endpoint of type async\n",
+			       sc->sc_dev.dv_xname);
+			return (USBD_NORMAL_COMPLETION);
+#endif
+		}
 	}
-	if (dir != UE_DIR_IN && type == UE_ISO_ASYNC) {
-		sync = TRUE;
-#ifndef UAUDIO_MULTIPLE_ENDPOINTS
-		printf("%s: ignored output endpoint of type async\n",
+	if (sync && id->bNumEndpoints < 2) {
+		printf("%s: sync pipe needed, but no sync endpoint given\n",
 		       sc->sc_dev.dv_xname);
 		return (USBD_NORMAL_COMPLETION);
-#endif
 	}
 
 	sed = (const void *)(buf + offs);
@@ -1581,18 +1583,9 @@ uaudio_process_as(struct uaudio_softc *sc, const char *buf, int *offsp,
 	if (offs > size)
 		return (USBD_INVAL);
 
-	if (sync && id->bNumEndpoints <= 1) {
-		printf("%s: a sync-pipe endpoint but no other endpoint\n",
-		       sc->sc_dev.dv_xname);
-		return USBD_INVAL;
-	}
-	if (!sync && id->bNumEndpoints > 1) {
-		printf("%s: non sync-pipe endpoint but multiple endpoints\n",
-		       sc->sc_dev.dv_xname);
-		return USBD_INVAL;
-	}
 	epdesc1 = NULL;
-	if (id->bNumEndpoints > 1) {
+#ifdef UAUDIO_MULTIPLE_ENDPOINTS
+	if (sync) {
 		epdesc1 = (const void*)(buf + offs);
 		if (epdesc1->bDescriptorType != UDESC_ENDPOINT)
 			return USBD_INVAL;
@@ -1627,6 +1620,7 @@ uaudio_process_as(struct uaudio_softc *sc, const char *buf, int *offsp,
 		}
 		/* UE_GET_ADDR(epdesc1->bEndpointAddress), and epdesc1->bRefresh */
 	}
+#endif
 
 	format = UGETW(asid->wFormatTag);
 	chan = asf1d->bNrChannels;
@@ -1691,7 +1685,8 @@ uaudio_process_as(struct uaudio_softc *sc, const char *buf, int *offsp,
 	ai.edesc1 = epdesc1;
 	ai.asf1desc = asf1d;
 	ai.sc_busy = 0;
-	uaudio_add_alt(sc, &ai);
+	if (sc->sc_nalts < UAUDIO_MAX_ALTS)
+		uaudio_add_alt(sc, &ai);
 #ifdef UAUDIO_DEBUG
 	if (ai.attributes & UA_SED_FREQ_CONTROL)
 		DPRINTFN(1, ("uaudio_process_as:  FREQ_CONTROL\n"));
@@ -2153,7 +2148,8 @@ uaudio_round_blocksize(void *addr, int blk)
 	DPRINTF(("uaudio_round_blocksize: p.bpf=%d r.bpf=%d\n",
 		 sc->sc_playchan.bytes_per_frame,
 		 sc->sc_recchan.bytes_per_frame));
-	if (sc->sc_playchan.bytes_per_frame > sc->sc_recchan.bytes_per_frame) {
+	if ((sc->sc_mode & AUMODE_PLAY) &&
+	    sc->sc_playchan.bytes_per_frame > sc->sc_recchan.bytes_per_frame) {
 		bpf = sc->sc_playchan.bytes_per_frame
 		    + sc->sc_playchan.sample_size;
 	} else {
@@ -2182,8 +2178,55 @@ uaudio_round_blocksize(void *addr, int blk)
 int
 uaudio_get_props(void *addr)
 {
-	return (AUDIO_PROP_FULLDUPLEX | AUDIO_PROP_INDEPENDENT);
+	struct uaudio_softc *sc = addr;
+	int props;
 
+	props = AUDIO_PROP_INDEPENDENT;
+	if ((sc->sc_mode & (AUMODE_PLAY | AUMODE_RECORD)) ==
+	    (AUMODE_PLAY | AUMODE_RECORD))
+		props |= AUDIO_PROP_FULLDUPLEX;
+
+	return props;
+}
+
+void
+uaudio_get_default_params(void *addr, int mode, struct audio_params *p)
+{
+	struct uaudio_softc *sc = addr;
+	int flags;
+
+	/* try aucat(1) defaults: 44100 Hz stereo s16le */
+	p->sample_rate = 44100;
+	p->encoding = AUDIO_ENCODING_SLINEAR_LE;
+	p->precision = 16;
+	p->channels = 2;
+	p->sw_code = NULL;
+	p->factor = 1;
+
+	/* If the device doesn't support the current mode, there's no
+	 * need to find better parameters.
+	 */
+	if (!(sc->sc_mode & mode))
+		return;
+
+	flags = sc->sc_altflags;
+	if (flags & HAS_16)
+		;
+	else if (flags & HAS_24)
+		p->precision = 24;
+	else {
+		p->precision = 8;
+		if (flags & HAS_8)
+			;
+		else if (flags & HAS_8U)
+			p->encoding = AUDIO_ENCODING_ULINEAR_LE;
+		else if (flags & HAS_MULAW)
+			p->encoding = AUDIO_ENCODING_ULAW;
+		else if (flags & HAS_ALAW)
+			p->encoding = AUDIO_ENCODING_ALAW;
+	}
+
+	uaudio_match_alt(sc, p, mode, p->encoding, p->precision);
 }
 
 int
@@ -2862,155 +2905,121 @@ uaudio_chan_set_param(struct chan *ch, u_char *start, u_char *end, int blksize)
 	ch->curchanbuf = 0;
 }
 
-void
-uaudio_get_minmax_rates(int nalts, const struct as_info *alts,
-			const struct audio_params *p, int mode,
-			int enc, int pre,
-			u_long *min, u_long *max)
-{
-	const struct usb_audio_streaming_type1_descriptor *a1d;
-	int i, j;
-
-	*min = ULONG_MAX;
-	*max = 0;
-	for (i = 0; i < nalts; i++) {
-		a1d = alts[i].asf1desc;
-		if (alts[i].sc_busy)
-			continue;
-		if (p->channels != a1d->bNrChannels)
-			continue;
-		if (pre != a1d->bBitResolution)
-			continue;
-		if (enc != alts[i].encoding)
-			continue;
-		if (mode != UE_GET_DIR(alts[i].edesc->bEndpointAddress))
-			continue;
-		if (a1d->bSamFreqType == UA_SAMP_CONTNUOUS) {
-			DPRINTFN(2,("uaudio_get_minmax_rates: cont %d-%d\n",
-				    UA_SAMP_LO(a1d), UA_SAMP_HI(a1d)));
-			if (UA_SAMP_LO(a1d) < *min)
-				*min = UA_SAMP_LO(a1d);
-			if (UA_SAMP_HI(a1d) > *max)
-				*max = UA_SAMP_HI(a1d);
-		} else {
-			for (j = 0; j < a1d->bSamFreqType; j++) {
-				DPRINTFN(2,("uaudio_get_minmax_rates: disc #%d: %d\n",
-					    j, UA_GETSAMP(a1d, j)));
-				if (UA_GETSAMP(a1d, j) < *min)
-					*min = UA_GETSAMP(a1d, j);
-				if (UA_GETSAMP(a1d, j) > *max)
-					*max = UA_GETSAMP(a1d, j);
-			}
-		}
-	}
-}
-
 int
-uaudio_match_alt_sub(int nalts, const struct as_info *alts, 
-		     const struct audio_params *p, int mode, 
-		     int enc, int pre, u_long rate)
+uaudio_match_alt_rate(void *addr, int alt, int rate)
 {
+	struct uaudio_softc *sc = addr;
 	const struct usb_audio_streaming_type1_descriptor *a1d;
-	int i, j;
+	int i, j, r;
 
-	DPRINTF(("uaudio_match_alt_sub: search for %luHz %dch\n",
-		 rate, p->channels));
-	for (i = 0; i < nalts; i++) {
-		a1d = alts[i].asf1desc;
-		if (alts[i].sc_busy)
-			continue;
-		if (p->channels != a1d->bNrChannels)
-			continue;
-		if (pre != a1d->bBitResolution)
-			continue;
-		if (enc != alts[i].encoding)
-			continue;
-		if (mode != UE_GET_DIR(alts[i].edesc->bEndpointAddress))
-			continue;
-		if (a1d->bSamFreqType == UA_SAMP_CONTNUOUS) {
-			DPRINTFN(3,("uaudio_match_alt_sub: cont %d-%d\n",
-				    UA_SAMP_LO(a1d), UA_SAMP_HI(a1d)));
-			if (UA_SAMP_LO(a1d) <= rate && rate <= UA_SAMP_HI(a1d))
-				return i;
+	a1d = sc->sc_alts[alt].asf1desc;
+	if (a1d->bSamFreqType == UA_SAMP_CONTNUOUS) {
+		if ((UA_SAMP_LO(a1d) <= rate) &&
+		    (UA_SAMP_HI(a1d) >= rate)) {
+			return rate;
 		} else {
-			for (j = 0; j < a1d->bSamFreqType; j++) {
-				DPRINTFN(3,("uaudio_match_alt_sub: disc #%d: %d\n",
-					    j, UA_GETSAMP(a1d, j)));
-				/* XXX allow for some slack */
-				if (UA_GETSAMP(a1d, j) == rate)
-					return i;
-			}
-		}
-	}
-	return -1;
-}
-
-int
-uaudio_match_alt_chan(int nalts, const struct as_info *alts,
-		      struct audio_params *p, int mode, int enc, int pre)
-{
-	int i, n;
-	u_long min, max;
-	u_long rate;
-
-	/* Exact match */
-	DPRINTF(("uaudio_match_alt_chan: examine %ldHz %dch %dbit.\n",
-		 p->sample_rate, p->channels, pre));
-	i = uaudio_match_alt_sub(nalts, alts, p, mode, enc, pre, p->sample_rate);
-	if (i >= 0)
-		return i;
-
-	uaudio_get_minmax_rates(nalts, alts, p, mode, enc, pre, &min, &max);
-	DPRINTF(("uaudio_match_alt_chan: min=%lu max=%lu\n", min, max));
-	if (max <= 0)
-		return -1;
-	/* Search for biggers */
-	n = 2;
-	while ((rate = p->sample_rate * n++) <= max) {
-		i = uaudio_match_alt_sub(nalts, alts, p, mode, enc, pre, rate);
-		if (i >= 0) {
-			p->sample_rate = rate;
-			return i;
-		}
-	}
-	if (p->sample_rate >= min) {
-		i = uaudio_match_alt_sub(nalts, alts, p, mode, enc, pre, max);
-		if (i >= 0) {
-			p->sample_rate = max;
-			return i;
+			if (UA_SAMP_LO(a1d) > rate)
+				return UA_SAMP_LO(a1d);
+			else
+				return UA_SAMP_HI(a1d);
 		}
 	} else {
-		i = uaudio_match_alt_sub(nalts, alts, p, mode, enc, pre, min);
-		if (i >= 0) {
-			p->sample_rate = min;
-			return i;
+		for (i = 0; i < 100; i++) {
+			for (j = 0; j < a1d->bSamFreqType; j++) {
+				r = UA_GETSAMP(a1d, j);
+				if ((r - (500 * i) <= rate) &&
+				    (r + (500 * i) >= rate))
+					return r;
+			}
 		}
+		/* assumes rates are listed in order from lowest to highest */
+		if (rate < UA_GETSAMP(a1d, 0))
+			j = 0;
+		else
+			j = a1d->bSamFreqType - 1;
+		return UA_GETSAMP(a1d, j);
 	}
-	return -1;
+	DPRINTF(("%s: could not match rate\n", __func__));
+	return rate;
 }
 
 int
-uaudio_match_alt(int nalts, const struct as_info *alts,
-		 struct audio_params *p, int mode, int enc, int pre)
+uaudio_match_alt(void *addr, struct audio_params *p, int mode, int enc, int pre)
 {
-	int i, n;
+	struct uaudio_softc *sc = addr;
+	const struct usb_audio_streaming_type1_descriptor *a1d;
+	int i, j, dir, rate;
+	int alts_eh, alts_ch, ualt;
 
-	mode = mode == AUMODE_PLAY ? UE_DIR_OUT : UE_DIR_IN;
-	i = uaudio_match_alt_chan(nalts, alts, p, mode, enc, pre);
-	if (i >= 0)
-		return i;
-
-	for (n = p->channels + 1; n <= AUDIO_MAX_CHANNELS; n++) {
-		p->channels = n;
-		i = uaudio_match_alt_chan(nalts, alts, p, mode, enc, pre);
-		if (i >= 0)
-			return i;
+	alts_eh = 0;
+	for (i = 0; i < sc->sc_nalts; i++) {
+		dir = UE_GET_DIR(sc->sc_alts[i].edesc->bEndpointAddress);
+		if ((mode == AUMODE_RECORD && dir != UE_DIR_IN) ||
+		    (mode == AUMODE_PLAY && dir == UE_DIR_IN))
+			continue;
+		if (sc->sc_alts[i].encoding != enc)
+			continue;
+		a1d = sc->sc_alts[i].asf1desc;
+		if (a1d->bBitResolution != pre)
+			continue;
+		alts_eh |= 1 << i;
+	}
+	if (alts_eh == 0) {
+		DPRINTF(("%s: could not match dir/enc/prec\n", __func__));
+		return -1;
 	}
 
-	if (p->channels != 2)
-		return -1;
-	p->channels = 1;
-	return uaudio_match_alt_chan(nalts, alts, p, mode, enc, pre);
+	alts_ch = 0;
+	for (i = 0; i < 3; i++) {
+		for (j = 0; j < sc->sc_nalts; j++) {
+			if (!(alts_eh & (1 << j)))
+				continue;
+			a1d = sc->sc_alts[j].asf1desc;
+			if (a1d->bNrChannels == p->channels)
+				alts_ch |= 1 << j;
+		}
+		if (alts_ch)
+			break;
+		if (p->channels == 2)
+			p->channels = 1;
+		else
+			p->channels = 2;
+	}
+	if (!alts_ch) {
+		/* just use the first alt that matched the encoding */
+		for (i = 0; i < sc->sc_nalts; i++)
+			if (alts_eh & (1 << i))
+				break;
+		alts_ch = 1 << i;
+		a1d = sc->sc_alts[i].asf1desc;
+		p->channels = a1d->bNrChannels;
+	}
+
+	ualt = -1;
+	for (i = 0; i < sc->sc_nalts; i++) {
+		if (alts_ch & (1 << i)) {
+			rate = uaudio_match_alt_rate(sc, i, p->sample_rate);
+			if (rate - 50 <= p->sample_rate &&
+			    rate + 50 >= p->sample_rate) {
+				p->sample_rate = rate;
+				break;
+			}
+		}
+	}
+	if (i < sc->sc_nalts) {
+		ualt = i;
+	} else {
+		for (i = 0; i < sc->sc_nalts; i++) {
+			if (alts_ch & (1 << i)) {
+				ualt = i;
+				p->sample_rate = uaudio_match_alt_rate(sc,
+				    i, p->sample_rate);
+				break;
+			}
+		}
+	}
+
+	return ualt;
 }
 
 int
@@ -3165,7 +3174,7 @@ uaudio_set_params(void *addr, int setmode, int usemode,
 		DPRINTF(("uaudio_set_params: chan=%d prec=%d enc=%d rate=%ld\n",
 			 p->channels, pre, enc, p->sample_rate));
 
-		i = uaudio_match_alt(sc->sc_nalts, sc->sc_alts, p, mode, enc, pre);
+		i = uaudio_match_alt(sc, p, mode, enc, pre);
 		if (i < 0)
 			return (EINVAL);
 

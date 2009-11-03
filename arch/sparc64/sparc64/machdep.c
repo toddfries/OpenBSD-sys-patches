@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.118 2009/04/20 00:42:06 oga Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.121 2009/08/11 19:17:17 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -96,10 +96,6 @@
 #include <sys/sysctl.h>
 #include <sys/exec_elf.h>
 #include <dev/rndvar.h>
-
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 
 #define _SPARC_BUS_DMA_PRIVATE
 #include <machine/autoconf.h>
@@ -211,7 +207,6 @@ extern int64_t cecclast;
 int   safepri = 0;
 
 void blink_led_timeout(void *);
-caddr_t	allocsys(caddr_t);
 void	dumpsys(void);
 void	stackdump(void);
 
@@ -221,8 +216,6 @@ void	stackdump(void);
 void
 cpu_startup()
 {
-	caddr_t v;
-	long sz;
 #ifdef DEBUG
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
@@ -243,22 +236,6 @@ cpu_startup()
 	/*identifycpu();*/
 	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
 	    ptoa((psize_t)physmem)/1024/1024);
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = (long)allocsys(NULL);
-	if ((v = (caddr_t)uvm_km_alloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for %lx bytes of tables", sz);
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -282,21 +259,6 @@ cpu_startup()
 #if 0
 	pmap_redzone();
 #endif
-}
-
-caddr_t
-allocsys(caddr_t v)
-{
-#define valloc(name, type, num) \
-	    v = (caddr_t)(((name) = (type *)v) + (num))
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return (v);
 }
 
 /*

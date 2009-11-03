@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.11 2007/10/18 04:32:25 miod Exp $ */
+/*	$OpenBSD: cpu.c,v 1.16 2009/10/30 08:13:57 syuu Exp $ */
 
 /*
  * Copyright (c) 1997-2004 Opsycon AB (www.opsycon.se)
@@ -39,6 +39,17 @@ int	cpumatch(struct device *, void *, void *);
 void	cpuattach(struct device *, struct device *, void *);
 
 struct cpu_info cpu_info_primary;
+struct cpu_info *cpu_info_list = &cpu_info_primary;
+#ifdef MULTIPROCESSOR
+struct cpuset cpus_running;
+
+/*
+ * Array of CPU info structures.  Must be statically-allocated because
+ * curproc, etc. are used early.
+ */
+
+struct cpu_info *cpu_info[MAXCPUS] = { &cpu_info_primary };
+#endif
 
 u_int	CpuPrimaryInstCacheSize;
 u_int	CpuPrimaryInstCacheLSize;
@@ -59,7 +70,7 @@ u_int	CpuOnboardCacheOn;	/* RM7K */
 int cpu_is_rm7k = 0;
 
 struct cfattach cpu_ca = {
-	sizeof(struct device), cpumatch, cpuattach
+	sizeof(struct cpu_info), cpumatch, cpuattach
 };
 struct cfdriver cpu_cd = {
 	NULL, "cpu", DV_DULL, NULL, 0
@@ -69,10 +80,10 @@ int
 cpumatch(struct device *parent, void *match, void *aux)
 {
 	struct cfdata *cf = match;
-	struct confargs *ca = aux;
+	struct mainbus_attach_args *maa = aux;
 
 	/* make sure that we're looking for a CPU. */
-	if (strcmp(ca->ca_name, cpu_cd.cd_name) != 0)
+	if (strcmp(maa->maa_name, cpu_cd.cd_name) != 0)
 		return 0;
 	if (cf->cf_unit >= MAX_CPUS)
 		return 0;
@@ -83,10 +94,34 @@ cpumatch(struct device *parent, void *match, void *aux)
 void
 cpuattach(struct device *parent, struct device *dev, void *aux)
 {
+	struct cpu_info *ci = (struct cpu_info *)dev;
 	int cpuno = dev->dv_unit;
+	int isr16k = 0;
+	int displayver;
+
+	if (cpuno == 0) {
+		ci = &cpu_info_primary;
+#ifdef MULTIPROCESSOR
+		ci->ci_flags |= CPUF_RUNNING | CPUF_PRESENT | CPUF_PRIMARY;
+		cpuset_add(&cpus_running, ci);
+#endif
+		bcopy(dev, &ci->ci_dev, sizeof *dev);
+	}
+#ifdef MULTIPROCESSOR
+	else {
+		ci->ci_next = cpu_info_list->ci_next;
+		cpu_info_list->ci_next = ci;
+		ci->ci_flags |= CPUF_PRESENT;
+	}
+	cpu_info[cpuno] = ci;
+	ncpus++;
+#endif
+	ci->ci_self = ci;
+	ci->ci_cpuid = cpuno;
 
 	printf(": ");
 
+	displayver = 1;
 	switch (sys_config.cpu[cpuno].type) {
 	case MIPS_R4000:
 		if (CpuPrimaryInstCacheSize == 16384)
@@ -104,7 +139,11 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		printf("MIPS R12000 CPU");
 		break;
 	case MIPS_R14000:
-		printf("MIPS R14000 CPU");
+		if (sys_config.cpu[cpuno].vers_maj > 2) {
+			sys_config.cpu[cpuno].vers_maj -= 2;
+			isr16k = 1;
+		}
+		printf("R1%d000 CPU", isr16k ? 6 : 4);
 		break;
 	case MIPS_R4200:
 		printf("NEC VR4200 CPU (ICE)");
@@ -134,17 +173,24 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	case MIPS_RM9000:
 		printf("PMC-Sierra RM9000 CPU");
 		break;
+	case MIPS_LOONGSON2:
+		printf("STC Loongson2%c CPU",
+		    'C' + sys_config.cpu[cpuno].vers_min);
+		displayver = 0;
+		break;
 	default:
 		printf("Unknown CPU type (0x%x)",sys_config.cpu[cpuno].type);
 		break;
 	}
-	printf(" rev %d.%d %d MHz with ", sys_config.cpu[cpuno].vers_maj,
-	    sys_config.cpu[cpuno].vers_min,
-	    sys_config.cpu[cpuno].clock / 1000000);
+	if (displayver != 0)
+		printf(" rev %d.%d", sys_config.cpu[cpuno].vers_maj,
+		    sys_config.cpu[cpuno].vers_min);
+	printf(" %d MHz, ", sys_config.cpu[cpuno].clock / 1000000);
 
+	displayver = 1;
 	switch (sys_config.cpu[cpuno].fptype) {
 	case MIPS_SOFT:
-		printf("Software emulation float");
+		printf("Software FP emulation");
 		break;
 	case MIPS_R4000:
 		printf("R4010 FPC");
@@ -156,7 +202,7 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		printf("R12000 FPU");
 		break;
 	case MIPS_R14000:
-		printf("R14000 FPU");
+		printf("R1%d000 FPU", isr16k ? 6 : 4);
 		break;
 	case MIPS_R4200:
 		printf("VR4200 FPC (ICE)");
@@ -179,12 +225,19 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	case MIPS_RM9000:
 		printf("RM9000 FPC");
 		break;
+	case MIPS_LOONGSON2:
+		printf("STC Loongson2%c FPU",
+		    'C' + sys_config.cpu[cpuno].fpvers_min);
+		displayver = 0;
+		break;
 	default:
 		printf("Unknown FPU type (0x%x)", sys_config.cpu[cpuno].fptype);
 		break;
 	}
-	printf(" rev %d.%d\n", sys_config.cpu[cpuno].fpvers_maj,
-	    sys_config.cpu[cpuno].fpvers_min);
+	if (displayver != 0)
+		printf(" rev %d.%d", sys_config.cpu[cpuno].fpvers_maj,
+		    sys_config.cpu[cpuno].fpvers_min);
+	printf("\n");
 
 	printf("cpu%d: cache L1-I %dKB", cpuno, CpuPrimaryInstCacheSize / 1024);
 	printf(" D %dKB ", CpuPrimaryDataCacheSize / 1024);
@@ -210,6 +263,7 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 			break;
 		case MIPS_RM7000:
 		case MIPS_RM9000:
+		case MIPS_LOONGSON2:
 			printf(", L2 %dKB 4 way", CpuSecondaryCacheSize / 1024);
 			break;
 		default:
@@ -254,3 +308,28 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	printf("cpu%d: Status Register %x\n", cpuno, CpuStatusRegister);
 #endif
 }
+
+#ifdef MULTIPROCESSOR
+void
+cpu_boot_secondary_processors(void)
+{
+       struct cpu_info *ci;
+       u_long i;
+
+       for (i = 0; i < MAXCPUS; i++) {
+               ci = cpu_info[i];
+               if (ci == NULL)
+                       continue;
+               if ((ci->ci_flags & CPUF_PRESENT) == 0)
+                       continue;
+               if (ci->ci_flags & CPUF_PRIMARY)
+                       continue;
+               cpu_boot_secondary(ci);
+       }
+}
+
+void
+cpu_unidle(struct cpu_info *ci)
+{
+}
+#endif

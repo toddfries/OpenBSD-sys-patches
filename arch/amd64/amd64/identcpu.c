@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.20 2009/06/01 03:50:57 gwk Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.24 2009/10/07 02:15:48 kevlo Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -48,9 +48,7 @@
 /* sysctl wants this. */
 char cpu_model[48];
 int cpuspeed;
-#ifdef CRYPTO
 int amd64_has_xcrypt;
-#endif
 
 const struct {
 	u_int32_t	bit;
@@ -245,6 +243,23 @@ via_nano_setup(struct cpu_info *ci)
 	}
 }
 
+#ifndef SMALL_KERNEL
+void via_update_sensor(void *args);
+void
+via_update_sensor(void *args)
+{
+	struct cpu_info *ci = (struct cpu_info *) args;
+	u_int64_t msr;
+
+	msr = rdmsr(MSR_CENT_TMTEMPERATURE);
+	ci->ci_sensor.value = (msr & 0xffffff);
+	/* micro degrees */
+	ci->ci_sensor.value *= 1000000;
+	ci->ci_sensor.value += 273150000;
+	ci->ci_sensor.flags &= ~SENSOR_FINVALID;
+}
+#endif
+
 void
 identifycpu(struct cpu_info *ci)
 {
@@ -358,8 +373,17 @@ identifycpu(struct cpu_info *ci)
 	    vendor[2] == 0x444d4163)	/* DMAc */
 		amd64_errata(ci);
 
-	if (strncmp(cpu_model, "VIA Nano processor", 18) == 0)
+	if (strncmp(cpu_model, "VIA Nano processor", 18) == 0) {
 		ci->cpu_setup = via_nano_setup;
+#ifndef SMALL_KERNEL
+		strlcpy(ci->ci_sensordev.xname, ci->ci_dev->dv_xname,
+		    sizeof(ci->ci_sensordev.xname));
+		ci->ci_sensor.type = SENSOR_TEMP;
+		sensor_task_register(ci, via_update_sensor, 5);
+		sensor_attach(&ci->ci_sensordev, &ci->ci_sensor);
+		sensordev_install(&ci->ci_sensordev);
+#endif
+	}
 }
 
 void

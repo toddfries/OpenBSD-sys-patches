@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rum.c,v 1.84 2009/03/27 14:59:31 jsg Exp $	*/
+/*	$OpenBSD: if_rum.c,v 1.87 2009/10/13 19:33:17 pirofti Exp $	*/
 
 /*-
  * Copyright (c) 2005-2007 Damien Bergamini <damien.bergamini@free.fr>
@@ -224,7 +224,7 @@ static const struct rfprog {
 int rum_match(struct device *, void *, void *); 
 void rum_attach(struct device *, struct device *, void *); 
 int rum_detach(struct device *, int); 
-int rum_activate(struct device *, enum devact); 
+int rum_activate(struct device *, int); 
 
 struct cfdriver rum_cd = { 
 	NULL, "rum", DV_IFNET 
@@ -668,7 +668,7 @@ rum_task(void *arg)
 
 	case IEEE80211_S_SCAN:
 		rum_set_chan(sc, ic->ic_bss->ni_chan);
-		timeout_add(&sc->scan_to, hz / 5);
+		timeout_add_msec(&sc->scan_to, 200);
 		break;
 
 	case IEEE80211_S_AUTH:
@@ -2282,11 +2282,11 @@ rum_amrr_update(usbd_xfer_handle xfer, usbd_private_handle priv,
 }
 
 int
-rum_activate(struct device *self, enum devact act)
+rum_activate(struct device *self, int act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return EOPNOTSUPP;
+		break;
 
 	case DVACT_DEACTIVATE:
 		break;

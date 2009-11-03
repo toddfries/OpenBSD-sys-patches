@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtwvar.h,v 1.24 2008/07/21 18:43:19 damien Exp $	*/
+/*	$OpenBSD: rtwvar.h,v 1.28 2009/10/13 19:33:16 pirofti Exp $	*/
 /*	$NetBSD: rtwvar.h,v 1.10 2004/12/26 22:37:57 mycroft Exp $	*/
 
 /*-
@@ -180,9 +180,6 @@ struct rtw_txsoft {
 
 #define RTW_MAXPKTSEGS		64	/* max 64 segments per Tx packet */
 
-#define CASSERT(cond, complaint)					\
-	complaint[(cond) ? 0 : -1] = complaint[(cond) ? 0 : -1]
-
 /* Note well: the descriptor rings must begin on RTW_DESC_ALIGNMENT
  * boundaries.  I allocate them consecutively from one buffer, so
  * just round up.
@@ -291,7 +288,6 @@ struct rtw_tx_radiotap_header {
 } __packed;
 
 struct rtw_hooks {
-	void			*rh_shutdown;	/* shutdown hook */
 	void			*rh_power;	/* power management hook */
 };
 
@@ -338,8 +334,8 @@ union rtw_keys {
 	u_int32_t	rk_words[16];
 };
 
-#define	RTW_LED_SLOW_TICKS	MAX(1, hz/2)
-#define	RTW_LED_FAST_TICKS	MAX(1, hz/10)
+#define	RTW_LED_SLOW_MSEC	500
+#define	RTW_LED_FAST_MSEC	100
 
 struct rtw_led_state {
 #define	RTW_LED0	0x1
@@ -456,7 +452,7 @@ int rtw_intr(void *);
 void rtw_disable(struct rtw_softc *);
 int rtw_enable(struct rtw_softc *);
 
-int rtw_activate(struct device *, enum devact);
+int rtw_activate(struct device *, int);
 void rtw_power(int, void *);
 void rtw_shutdown(void *);
 

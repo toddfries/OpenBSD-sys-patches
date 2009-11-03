@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_subr.c,v 1.106 2009/06/05 00:05:22 claudio Exp $	*/
+/*	$OpenBSD: tcp_subr.c,v 1.108 2009/11/03 10:59:04 claudio Exp $	*/
 /*	$NetBSD: tcp_subr.c,v 1.22 1996/02/13 23:44:00 christos Exp $	*/
 
 /*
@@ -759,7 +759,7 @@ tcp6_ctlinput(cmd, sa, d)
 		     inet6ctlerrmap[cmd] == ENETUNREACH ||
 		     inet6ctlerrmap[cmd] == EHOSTDOWN))
 			syn_cache_unreach((struct sockaddr *)sa6_src,
-			    sa, &th);
+			    sa, &th, /* XXX */ 0);
 	} else {
 		(void) in6_pcbnotify(&tcbtable, sa, 0,
 		    (struct sockaddr *)sa6_src, 0, cmd, NULL, notify);
@@ -832,8 +832,7 @@ tcp_ctlinput(cmd, sa, v)
 				 * route (traditional PMTUD).
 				 */
 				tp->t_flags &= ~TF_PMTUD_PEND;
-				/* XXX inherit rdomain from PCB */
-				icmp_mtudisc(icp, 0);
+				icmp_mtudisc(icp, inp->inp_rdomain);
 			} else {
 				/*
 				 * Record the information got in the ICMP
@@ -889,7 +888,7 @@ tcp_ctlinput(cmd, sa, v)
 			sin.sin_port = th->th_sport;
 			sin.sin_addr = ip->ip_src;
 			syn_cache_unreach((struct sockaddr *)&sin,
-			    sa, th);
+			    sa, th, /* XXX */ 0);
 		}
 	} else
 		in_pcbnotifyall(&tcbtable, sa, errno, notify);

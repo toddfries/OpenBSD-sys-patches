@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mec.c,v 1.19 2009/05/18 15:21:31 jsing Exp $ */
+/*	$OpenBSD: if_mec.c,v 1.22 2009/10/26 18:00:06 miod Exp $ */
 /*	$NetBSD: if_mec_mace.c,v 1.5 2004/08/01 06:36:36 tsutsui Exp $ */
 
 /*
@@ -106,7 +106,7 @@
 #include <mips64/arcbios.h>
 #include <sgi/dev/if_mecreg.h>
 
-#include <sgi/localbus/macebus.h>
+#include <sgi/localbus/macebusvar.h>
 
 #ifdef MEC_DEBUG
 #define MEC_DEBUG_RESET		0x01
@@ -271,7 +271,6 @@ struct mec_softc {
 	bus_space_tag_t sc_st;		/* bus_space tag. */
 	bus_space_handle_t sc_sh;	/* bus_space handle. */
 	bus_dma_tag_t sc_dmat;		/* bus_dma tag. */
-	void *sc_sdhook;		/* Shutdown hook. */
 
 	struct mii_data sc_mii;		/* MII/media information. */
 	int sc_phyaddr;			/* MII address. */
@@ -345,7 +344,6 @@ int	mec_intr(void *arg);
 void	mec_stop(struct ifnet *);
 void	mec_rxintr(struct mec_softc *, uint32_t);
 void	mec_txintr(struct mec_softc *, uint32_t);
-void	mec_shutdown(void *);
 
 int
 mec_match(struct device *parent, void *match, void *aux)
@@ -357,22 +355,22 @@ void
 mec_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct mec_softc *sc = (void *)self;
-	struct confargs *ca = aux;
+	struct macebus_attach_args *maa = aux;
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
 	uint32_t command;
 	struct mii_softc *child;
 	bus_dma_segment_t seg;
 	int i, err, rseg;
 
-	sc->sc_st = ca->ca_iot;
-	if (bus_space_map(sc->sc_st, ca->ca_baseaddr, MEC_NREGS, 0,
+	sc->sc_st = maa->maa_iot;
+	if (bus_space_map(sc->sc_st, maa->maa_baseaddr, MEC_NREGS, 0,
 	    &sc->sc_sh) != 0) {
 		printf(": can't map i/o space\n");
 		return;
 	}
 
 	/* Set up DMA structures. */
-	sc->sc_dmat = ca->ca_dmat;
+	sc->sc_dmat = maa->maa_dmat;
 
 	/*
 	 * Allocate the control data structures, and create and load the
@@ -478,11 +476,8 @@ mec_attach(struct device *parent, struct device *self, void *aux)
 	ether_ifattach(ifp);
 
 	/* Establish interrupt handler. */
-	macebus_intr_establish(NULL, ca->ca_intr, IST_EDGE, IPL_NET,
-	    mec_intr, sc, sc->sc_dev.dv_xname);
-
-	/* Set hook to stop interface on shutdown. */
-	sc->sc_sdhook = shutdownhook_establish(mec_shutdown, sc);
+	macebus_intr_establish(maa->maa_intr, maa->maa_mace_intr,
+	    IST_EDGE, IPL_NET, mec_intr, sc, sc->sc_dev.dv_xname);
 
 	return;
 
@@ -695,7 +690,7 @@ mec_reset(struct mec_softc *sc)
 {
 	bus_space_tag_t st = sc->sc_st;
 	bus_space_handle_t sh = sc->sc_sh;
-	uint64_t address, control;
+	uint64_t address;
 	int i;
 
 	/* Reset chip. */
@@ -713,10 +708,9 @@ mec_reset(struct mec_softc *sc)
 	bus_space_write_8(st, sh, MEC_STATION, address);
 
 	/* Default to 100/half and let auto-negotiation work its magic. */
-	control = MEC_MAC_SPEED_SELECT | MEC_MAC_FILTER_MATCHMULTI |
-	    MEC_MAC_IPG_DEFAULT;
+	bus_space_write_8(st, sh, MEC_MAC_CONTROL,
+	    MEC_MAC_SPEED_SELECT | MEC_MAC_IPG_DEFAULT);
 
-	bus_space_write_8(st, sh, MEC_MAC_CONTROL, control);
 	bus_space_write_8(st, sh, MEC_DMA_CONTROL, 0);
 
 	DPRINTF(MEC_DEBUG_RESET, ("mec: control now %llx\n",
@@ -1416,12 +1410,4 @@ mec_txintr(struct mec_softc *sc, uint32_t stat)
 	else if (!(stat & MEC_INT_TX_EMPTY))
 		bus_space_write_8(sc->sc_st, sc->sc_sh, MEC_TX_ALIAS,
 		    MEC_TX_ALIAS_INT_ENABLE);
-}
-
-void
-mec_shutdown(void *arg)
-{
-	struct mec_softc *sc = arg;
-
-	mec_stop(&sc->sc_ac.ac_if);
 }

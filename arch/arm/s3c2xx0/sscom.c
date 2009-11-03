@@ -1,4 +1,4 @@
-/*	$OpenBSD: sscom.c,v 1.9 2009/01/02 19:42:54 drahn Exp $ */
+/*	$OpenBSD: sscom.c,v 1.13 2009/11/01 20:29:00 nicm Exp $ */
 /*	$NetBSD: sscom.c,v 1.29 2008/06/11 22:37:21 cegger Exp $ */
 
 /*
@@ -541,7 +541,7 @@ sscom_detach(struct device *self, int flags)
 }
 
 int
-sscom_activate(struct device *self, enum devact act)
+sscom_activate(struct device *self, int act)
 {
 #ifdef notyet
 	struct sscom_softc *sc = (struct sscom_softc *)self;
@@ -551,7 +551,7 @@ sscom_activate(struct device *self, enum devact act)
 	SSCOM_LOCK(sc);
 	switch (act) {
 	case DVACT_ACTIVATE:
-		rv = EOPNOTSUPP;
+		rv = 0;
 		break;
 
 	case DVACT_DEACTIVATE:
@@ -1375,9 +1375,10 @@ sscomstart(struct tty *tp)
 			CLR(tp->t_state, TS_ASLEEP);
 			wakeup(&tp->t_outq);
 		}
+		selwakeup(&tp->t_wsel);
+		KNOTE(&tp->t_wsel.si_note, 0);
 		if (tp->t_outq.c_cc == 0)
 			goto out;
-		selwakeup(&tp->t_wsel);
 	}
 
 	SET(tp->t_state, TS_BUSY);

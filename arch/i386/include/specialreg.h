@@ -1,4 +1,4 @@
-/*	$OpenBSD: specialreg.h,v 1.34 2008/08/13 15:46:21 art Exp $	*/
+/*	$OpenBSD: specialreg.h,v 1.37 2009/10/07 02:15:48 kevlo Exp $	*/
 /*	$NetBSD: specialreg.h,v 1.7 1994/10/27 04:16:26 cgd Exp $	*/
 
 /*-
@@ -243,6 +243,10 @@
 #define MSR_MC3_STATUS		0x411
 #define MSR_MC3_ADDR		0x412
 #define MSR_MC3_MISC		0x413
+
+/* VIA MSRs */
+#define MSR_CENT_TMTEMPERATURE	0x1423	/* Thermal monitor temperature */
+#define MSR_C7M_TMTEMPERATURE	0x1169
 
 /* AMD MSRs */
 #define MSR_K6_EPMR		0xc0000086

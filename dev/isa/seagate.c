@@ -1,4 +1,4 @@
-/*	$OpenBSD: seagate.c,v 1.27 2009/02/16 21:19:07 miod Exp $	*/
+/*	$OpenBSD: seagate.c,v 1.30 2009/09/24 19:48:50 miod Exp $	*/
 
 /*
  * ST01/02, Future Domain TMC-885, TMC-950 SCSI driver
@@ -553,6 +553,7 @@ sea_scsi_cmd(struct scsi_xfer *xs)
 	}
 	scb->flags = SCB_ACTIVE;
 	scb->xs = xs;
+	timeout_set(&scb->xs->stimeout, sea_timeout, scb);
 
 	if (flags & SCSI_RESET) {
 		/*
@@ -561,6 +562,9 @@ sea_scsi_cmd(struct scsi_xfer *xs)
 		 */
 		printf("%s: resetting\n", sea->sc_dev.dv_xname);
 		xs->error = XS_DRIVER_STUFFUP;
+		s = splbio();
+		scsi_done(xs);
+		splx(s);
 		return COMPLETE;
 	}
 
@@ -582,7 +586,6 @@ sea_scsi_cmd(struct scsi_xfer *xs)
 	 * Usually return SUCCESSFULLY QUEUED
 	 */
 	if ((flags & SCSI_POLL) == 0) {
-		timeout_set(&scb->xs->stimeout, sea_timeout, scb);
 		timeout_add_msec(&scb->xs->stimeout, xs->timeout);
 		splx(s);
 		return SUCCESSFULLY_QUEUED;
@@ -811,10 +814,8 @@ sea_timeout(void *arg)
 		scb->flags |= SCB_ABORTED;
 		sea_abort(sea, scb);
 		/* 2 secs for the abort */
-		if ((xs->flags & SCSI_POLL) == 0) {
-			timeout_set(&scb->xs->stimeout, sea_timeout, scb);
+		if ((xs->flags & SCSI_POLL) == 0)
 			timeout_add_sec(&scb->xs->stimeout, 2);
-		}
 	}
 
 	splx(s);
@@ -1275,9 +1276,9 @@ sea_information_transfer(struct sea_softc *sea)
 					if ((tmp & PH_MASK) != phase)
 						break;
 					if (!(phase & STAT_IO)) {
+#ifdef SEA_ASSEMBLER
 						int block = BLOCK_SIZE;
 						void *a = sea->maddr_dr;
-#ifdef SEA_ASSEMBLER
 						asm("shr $2, %%ecx\n\t\
 						    cld\n\t\
 						    rep\n\t\
@@ -1289,15 +1290,16 @@ sea_information_transfer(struct sea_softc *sea)
 						    "2" (a),
 						    "1" (block) );
 #else
+						int count;
 						for (count = 0;
 						    count < BLOCK_SIZE;
 						    count++)
 							DATA = *(scb->data++);
 #endif
 					} else {
+#ifdef SEA_ASSEMBLER
 						int block = BLOCK_SIZE;
 						void *a = sea->maddr_dr;
-#ifdef SEA_ASSEMBLER
 						asm("shr $2, %%ecx\n\t\
 						    cld\n\t\
 						    rep\n\t\
@@ -1308,6 +1310,7 @@ sea_information_transfer(struct sea_softc *sea)
 							"2" (a) ,
 						    "1" (block) );
 #else
+						int count;
 					        for (count = 0;
 						    count < BLOCK_SIZE;
 						    count++)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.15 2009/06/05 09:12:25 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.18 2009/10/09 04:25:34 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1999 Michael Shalayeff
@@ -40,8 +40,8 @@
 #include <sys/syslog.h>
 #include <sys/disk.h>
 
-char   *readsgilabel(struct buf *, void (*)(struct buf *),
-    struct disklabel *, int *, int);
+int	readsgilabel(struct buf *, void (*)(struct buf *),
+	    struct disklabel *, int *, int);
 
 /*
  * Attempt to read a disk label from a device
@@ -53,14 +53,14 @@ char   *readsgilabel(struct buf *, void (*)(struct buf *),
  *
  * Returns null on success and an error string on failure.
  */
-char *
+int
 readdisklabel(dev_t dev, void (*strat)(struct buf *),
     struct disklabel *lp, int spoofonly)
 {
 	struct buf *bp = NULL;
-	char *msg;
+	int error;
 
-	if ((msg = initdisklabel(lp)))
+	if ((error = initdisklabel(lp)))
 		goto done;
 	lp->d_flags |= D_VENDOR;
 
@@ -68,25 +68,23 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *),
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
 
-	msg = readsgilabel(bp, strat, lp, NULL, spoofonly);
-	if (msg == NULL)
+	error = readsgilabel(bp, strat, lp, NULL, spoofonly);
+	if (error == 0)
 		goto done;
 
-	msg = readdoslabel(bp, strat, lp, NULL, spoofonly);
-	if (msg == NULL)
+	error = readdoslabel(bp, strat, lp, NULL, spoofonly);
+	if (error == 0)
 		goto done;
 
 #if defined(CD9660)
-	if (iso_disklabelspoof(dev, strat, lp) == 0) {
-		msg = NULL;
+	error = iso_disklabelspoof(dev, strat, lp);
+	if (error == 0)
 		goto done;
-	}
 #endif
 #if defined(UDF)
-	if (udf_disklabelspoof(dev, strat, lp) == 0) {
-		msg = NULL;
+	error = udf_disklabelspoof(dev, strat, lp);
+	if (error == 0)
 		goto done;
-	}
 #endif
 
 done:
@@ -94,7 +92,7 @@ done:
 		bp->b_flags |= B_INVAL;
 		brelse(bp);
 	}
-	return (msg);
+	return (error);
 }
 
 static struct {
@@ -109,19 +107,15 @@ static struct {
     { 8,	FS_BSDFFS}
 };
 
-char *
+int
 readsgilabel(struct buf *bp, void (*strat)(struct buf *),
     struct disklabel *lp, int *partoffp, int spoofonly)
 {
 	struct sgilabel *dlp;
-	char *msg = NULL;
 	int i, *p, cs = 0;
-	int fsoffs = 0;
-	u_int fsend;
+	u_int64_t fsoffs = 0;
+	u_int64_t fsend = DL_GETBEND(lp);
 	int offset;
-
-	if (partoffp)
-		*partoffp = fsoffs;
 
 	bp->b_blkno = 0;
 	bp->b_bcount = lp->d_secsize;
@@ -129,26 +123,20 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 	(*strat)(bp);
 
 	/* if successful, locate disk label within block and validate */
-	if (biowait(bp)) {
-		msg = "disk label I/O error";
-		goto done;
-	}
+	if (biowait(bp))
+		return (bp->b_error);
 
 	dlp = (struct sgilabel *)(bp->b_data + LABELOFFSET);
 	if (dlp->magic != htobe32(SGILABEL_MAGIC))
 		goto finished;
 
-	if (dlp->partitions[0].blocks == 0) {
-		msg = "no BSD partition";
-		goto done;
-	}
+	if (dlp->partitions[0].blocks == 0)
+		return (EINVAL);
 	fsoffs = dlp->partitions[0].first * (dlp->dp.dp_secbytes / DEV_BSIZE);
-	fsend = fsoffs + dlp->partitions[0].blocks * (dlp->dp.dp_secbytes / DEV_BSIZE);
+	fsend = fsoffs + dlp->partitions[0].blocks *
+	    (dlp->dp.dp_secbytes / DEV_BSIZE);
 
-	/*
-	 * If the disklabel is about to be written to disk, don't modify it!
-	 * just bail out.
-	 */
+	/* Only came here to find the offset... */
 	if (partoffp) {
 		*partoffp = fsoffs;
 		goto finished;
@@ -158,10 +146,8 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 	i = sizeof(struct sgilabel) / sizeof(int);
 	while (i--)
 		cs += *p++;
-	if (cs != 0) {
-		msg = "sgilabel checksum error";
-		goto done;
-	}
+	if (cs != 0)
+		return (EINVAL);	/* sgilabel checksum error */
 
 	/* Spoof info from sgi label, in case there is no OpenBSD label. */
 	DL_SETDSIZE(lp, (DL_GETDSIZE(lp)*lp->d_secsize) / dlp->dp.dp_secbytes);
@@ -199,23 +185,28 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 	lp->d_checksum = dkcksum(lp);
 
 finished:
-	if (spoofonly)
-		goto done;
+	/* record the OpenBSD partition's placement for the caller */
+	if (partoffp)
+		*partoffp = fsoffs;
+	else {
+		DL_SETBSTART(lp, fsoffs);
+		DL_SETBEND(lp, fsend);
+	}
 
-	bp->b_blkno = DL_BLKTOSEC(lp, fsoffs + LABELSECTOR) * DL_BLKSPERSEC(lp);
+	/* don't read the on-disk label if we are in spoofed-only mode */
+	if (spoofonly)
+		return (0);
+
+	bp->b_blkno = DL_BLKTOSEC(lp, fsoffs + LABELSECTOR) *
+	    DL_BLKSPERSEC(lp);
 	offset = DL_BLKOFFSET(lp, fsoffs + LABELSECTOR) + LABELOFFSET;
 	bp->b_bcount = lp->d_secsize;
 	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
-	if (biowait(bp)) {
-		msg = "disk label I/O error";
-		goto done;
-	}
+	if (biowait(bp))
+		return (bp->b_error);
 
 	return checkdisklabel(bp->b_data + offset, lp, fsoffs, fsend);
-
-done:
-	return (msg);
 }
 
 /*

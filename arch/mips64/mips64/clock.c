@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.23 2009/05/06 20:02:45 miod Exp $ */
+/*	$OpenBSD: clock.c,v 1.26 2009/10/26 20:14:40 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -52,7 +52,7 @@ struct cfattach clock_ca = {
 	sizeof(struct device), clockmatch, clockattach
 };
 
-intrmask_t clock_int5(intrmask_t, struct trap_frame *);
+uint32_t clock_int5(uint32_t, struct trap_frame *);
 
 int	clock_started;
 u_int32_t cpu_counter_last;
@@ -80,9 +80,9 @@ struct timecounter cp0_timecounter = {
 int
 clockmatch(struct device *parent, void *vcf, void *aux)
 {
-	struct confargs *ca = aux;
+	struct mainbus_attach_args *maa = aux;
 
-	if (strcmp(ca->ca_name, clock_cd.cd_name) != 0)
+	if (strcmp(maa->maa_name, clock_cd.cd_name) != 0)
 		return 0;
 
 	return 10;	/* Try to get clock early */
@@ -119,8 +119,8 @@ clockattach(struct device *parent, struct device *self, void *aux)
  *  can not be run the tick is just counted and handled later when
  *  the clock is unmasked again.
  */
-intrmask_t
-clock_int5(intrmask_t mask, struct trap_frame *tf)
+uint32_t
+clock_int5(uint32_t mask, struct trap_frame *tf)
 {
 	u_int32_t clkdiff;
 
@@ -161,13 +161,12 @@ clock_int5(intrmask_t mask, struct trap_frame *tf)
 	/*
 	 * Process clock interrupt unless it is currently masked.
 	 */
-	if ((tf->cpl & SPL_CLOCKMASK) == 0) {
+	if (tf->ipl < IPL_CLOCK)
 		while (pendingticks) {
 			clk_count.ec_count++;
 			hardclock(tf);
 			pendingticks--;
 		}
-	}
 
 	return CR_INT_5;	/* Clock is always on 5 */
 }

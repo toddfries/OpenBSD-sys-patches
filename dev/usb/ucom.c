@@ -1,4 +1,4 @@
-/*	$OpenBSD: ucom.c,v 1.42 2008/06/26 05:42:18 ray Exp $ */
+/*	$OpenBSD: ucom.c,v 1.45 2009/10/31 12:00:08 fgsch Exp $ */
 /*	$NetBSD: ucom.c,v 1.49 2003/01/01 00:10:25 thorpej Exp $	*/
 
 /*
@@ -144,7 +144,7 @@ void	ucom_unlock(struct ucom_softc *);
 int ucom_match(struct device *, void *, void *); 
 void ucom_attach(struct device *, struct device *, void *); 
 int ucom_detach(struct device *, int); 
-int ucom_activate(struct device *, enum devact); 
+int ucom_activate(struct device *, int); 
 
 struct cfdriver ucom_cd = { 
 	NULL, "ucom", DV_DULL 
@@ -266,7 +266,7 @@ ucom_detach(struct device *self, int flags)
 }
 
 int
-ucom_activate(struct device *self, enum devact act)
+ucom_activate(struct device *self, int act)
 {
 	struct ucom_softc *sc = (struct ucom_softc *)self;
 
@@ -462,7 +462,7 @@ ucomopen(dev_t dev, int flag, int mode, struct proc *p)
 			SET(tp->t_state, TS_CARR_ON);
 		else
 			CLR(tp->t_state, TS_CARR_ON);
-	} else if (ISSET(tp->t_state, TS_XCLUDE) && p->p_ucred->cr_uid != 0) {
+	} else if (ISSET(tp->t_state, TS_XCLUDE) && suser(p, 0) != 0) {
 		error = EBUSY;
 		goto bad;
 	} else
@@ -949,6 +949,7 @@ ucomstart(struct tty *tp)
 			wakeup(&tp->t_outq);
 		}
 		selwakeup(&tp->t_wsel);
+		KNOTE(&tp->t_wsel.si_note, 0);
 		if (tp->t_outq.c_cc == 0)
 			goto out;
 	}

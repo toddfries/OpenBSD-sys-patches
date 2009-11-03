@@ -1,4 +1,4 @@
-/*	$OpenBSD: safe.c,v 1.24 2008/10/15 19:12:18 blambert Exp $	*/
+/*	$OpenBSD: safe.c,v 1.26 2009/09/13 14:42:52 krw Exp $	*/
 
 /*-
  * Copyright (c) 2003 Sam Leffler, Errno Consulting
@@ -109,7 +109,7 @@ void safe_reset_board(struct safe_softc *);
 void safe_init_board(struct safe_softc *);
 void safe_init_pciregs(struct safe_softc *);
 void safe_cleanchip(struct safe_softc *);
-__inline u_int32_t safe_rng_read(struct safe_softc *);
+static __inline u_int32_t safe_rng_read(struct safe_softc *);
 
 int safe_free_entry(struct safe_softc *, struct safe_ringentry *);
 
@@ -806,8 +806,13 @@ safe_process(struct cryptop *crp)
 					err = sc->sc_nqchip ? ERESTART : ENOMEM;
 					goto errout;
 				}
-				if (len == MHLEN)
-					M_DUP_PKTHDR(m, re->re_src_m);
+				if (len == MHLEN) {
+					err = m_dup_pkthdr(m, re->re_src_m);
+					if (err) {
+						m_free(m);
+						goto errout;
+					}
+				}
 				if (totlen >= MINCLSIZE) {
 					MCLGET(m, M_DONTWAIT);
 					if ((m->m_flags & M_EXT) == 0) {
@@ -1187,7 +1192,7 @@ safe_rng_init(struct safe_softc *sc)
 	} while (++i < SAFE_RNG_MAXWAIT);
 }
 
-__inline u_int32_t
+static __inline u_int32_t
 safe_rng_read(struct safe_softc *sc)
 {
 	int i;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhid.c,v 1.42 2008/06/26 05:42:18 ray Exp $ */
+/*	$OpenBSD: uhid.c,v 1.45 2009/10/31 06:40:17 deraadt Exp $ */
 /*	$NetBSD: uhid.c,v 1.57 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -104,7 +104,7 @@ int uhid_do_ioctl(struct uhid_softc*, u_long, caddr_t, int,
 int uhid_match(struct device *, void *, void *); 
 void uhid_attach(struct device *, struct device *, void *); 
 int uhid_detach(struct device *, int); 
-int uhid_activate(struct device *, enum devact); 
+int uhid_activate(struct device *, int); 
 
 struct cfdriver uhid_cd = { 
 	NULL, "uhid", DV_DULL 
@@ -155,7 +155,7 @@ uhid_attach(struct device *parent, struct device *self, void *aux)
 }
 
 int
-uhid_activate(struct device *self, enum devact act)
+uhid_activate(struct device *self, int act)
 {
 	struct uhid_softc *sc = (struct uhid_softc *)self;
 
@@ -234,6 +234,7 @@ uhid_intr(struct uhidev *addr, void *data, u_int len)
 		wakeup(&sc->sc_q);
 	}
 	selwakeup(&sc->sc_rsel);
+	KNOTE(&sc->sc_rsel.si_note, 0);
 	if (sc->sc_async != NULL) {
 		DPRINTFN(3, ("uhid_intr: sending SIGIO %p\n", sc->sc_async));
 		psignal(sc->sc_async, SIGIO);
@@ -261,10 +262,8 @@ uhidopen(dev_t dev, int flag, int mode, struct proc *p)
 	if (error)
 		return (error);
 
-	if (clalloc(&sc->sc_q, UHID_BSIZE, 0) == -1) {
-		uhidev_close(&sc->sc_hdev);
-		return (ENOMEM);
-	}
+	clalloc(&sc->sc_q, UHID_BSIZE, 0);
+
 	sc->sc_obuf = malloc(sc->sc_osize, M_USBDEV, M_WAITOK);
 	sc->sc_state &= ~UHID_IMMED;
 	sc->sc_async = NULL;

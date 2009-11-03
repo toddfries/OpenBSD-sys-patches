@@ -1,4 +1,4 @@
-/*	$OpenBSD: uark.c,v 1.11 2007/10/11 18:33:14 deraadt Exp $	*/
+/*	$OpenBSD: uark.c,v 1.13 2009/10/13 19:33:17 pirofti Exp $	*/
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -74,7 +74,6 @@ struct uark_softc {
 void	uark_get_status(void *, int portno, u_char *lsr, u_char *msr);
 void	uark_set(void *, int, int, int);
 int	uark_param(void *, int, struct termios *);
-int	uark_open(void *sc, int);
 void	uark_break(void *, int, int);
 int	uark_cmd(struct uark_softc *, uint16_t, uint16_t);
 
@@ -96,7 +95,7 @@ static const struct usb_devno uark_devs[] = {
 int uark_match(struct device *, void *, void *); 
 void uark_attach(struct device *, struct device *, void *); 
 int uark_detach(struct device *, int); 
-int uark_activate(struct device *, enum devact); 
+int uark_activate(struct device *, int); 
 
 struct cfdriver uark_cd = { 
 	NULL, "uark", DV_DULL 
@@ -214,7 +213,7 @@ uark_detach(struct device *self, int flags)
 }
 
 int
-uark_activate(struct device *self, enum devact act)
+uark_activate(struct device *self, int act)
 {
 	struct uark_softc *sc = (struct uark_softc *)self;
 	int rv = 0;

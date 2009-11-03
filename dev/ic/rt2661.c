@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2661.c,v 1.48 2009/03/29 21:53:52 sthen Exp $	*/
+/*	$OpenBSD: rt2661.c,v 1.51 2009/11/01 12:08:36 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -330,15 +330,6 @@ rt2661_attach(void *xsc, int id)
 	sc->sc_txtap.wt_ihdr.it_present = htole32(RT2661_TX_RADIOTAP_PRESENT);
 #endif
 
-	/*
-	 * Make sure the interface is shutdown during reboot.
-	 */
-	sc->sc_sdhook = shutdownhook_establish(rt2661_shutdown, sc);
-	if (sc->sc_sdhook == NULL) {
-		printf("%s: WARNING: unable to establish shutdown hook\n",
-		    sc->sc_dev.dv_xname);
-	}
-
 	sc->sc_powerhook = powerhook_establish(rt2661_power, sc);
 	if (sc->sc_powerhook == NULL) {
 		printf("%s: WARNING: unable to establish power hook\n",
@@ -363,14 +354,11 @@ rt2661_detach(void *xsc)
 	timeout_del(&sc->scan_to);
 	timeout_del(&sc->amrr_to);
 
-	ieee80211_ifdetach(ifp);	/* free all nodes */
-	if_detach(ifp);
-
 	if (sc->sc_powerhook != NULL)
 		powerhook_disestablish(sc->sc_powerhook);
 
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
+	ieee80211_ifdetach(ifp);	/* free all nodes */
+	if_detach(ifp);
 
 	for (ac = 0; ac < 4; ac++)
 		rt2661_free_tx_ring(sc, &sc->txq[ac]);
@@ -749,7 +737,7 @@ rt2661_updatestats(void *arg)
 		rt2661_rx_tune(sc);
 	splx(s);
 
-	timeout_add(&sc->amrr_to, hz / 2);
+	timeout_add_msec(&sc->amrr_to, 500);
 }
 
 void
@@ -790,7 +778,7 @@ rt2661_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 
 	case IEEE80211_S_SCAN:
 		rt2661_set_chan(sc, ic->ic_bss->ni_chan);
-		timeout_add(&sc->scan_to, hz / 5);
+		timeout_add_msec(&sc->scan_to, 200);
 		break;
 
 	case IEEE80211_S_AUTH:
@@ -825,7 +813,7 @@ rt2661_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		if (ic->ic_opmode != IEEE80211_M_MONITOR) {
 			sc->ncalls = 0;
 			sc->avg_rssi = -95;	/* reset EMA */
-			timeout_add(&sc->amrr_to, hz / 2);
+			timeout_add_msec(&sc->amrr_to, 500);
 			rt2661_enable_tsf_sync(sc);
 		}
 		break;
@@ -2943,13 +2931,4 @@ rt2661_power(int why, void *arg)
 		break;
 	}
 	splx(s);
-}
-
-void
-rt2661_shutdown(void *arg)
-{
-	struct rt2661_softc *sc = arg;
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
-
-	rt2661_stop(ifp, 1);
 }

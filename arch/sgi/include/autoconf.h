@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.17 2009/05/21 16:28:11 miod Exp $ */
+/*	$OpenBSD: autoconf.h,v 1.23 2009/10/30 08:13:57 syuu Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -59,7 +59,6 @@ struct sys_rec {
 	/* Published cache operations. */
 	void    (*_SyncCache)(void);
 	void    (*_InvalidateICache)(vaddr_t, int);
-	void    (*_InvalidateICachePage)(vaddr_t);
 	void    (*_SyncDCachePage)(vaddr_t);
 	void    (*_HitSyncDCache)(vaddr_t, int);
 	void    (*_IOSyncDCache)(vaddr_t, int, int);
@@ -71,24 +70,23 @@ struct sys_rec {
 
 extern struct sys_rec sys_config;
 
-/**/
-struct confargs;
-
-struct confargs {
-	char		*ca_name;	/* Device name. */
-	bus_space_tag_t ca_iot;
-	bus_space_tag_t ca_memt;
-	bus_dma_tag_t	ca_dmat;
-	int32_t		ca_intr;
-	bus_addr_t	ca_baseaddr;
+struct mainbus_attach_args {
+	const char	*maa_name;
+	int16_t		 maa_nasid;
 };
 
 void	enaddr_aton(const char *, u_int8_t *);
+u_long	bios_getenvint(const char *);
+
+struct device;
 
 void	ip27_setup(void);
+void	ip27_autoconf(struct device *);
 void	ip30_setup(void);
+void	ip30_autoconf(struct device *);
 void	ip32_setup(void);
 
 extern char osloadpartition[256];
+extern int16_t masternasid;
 
 #endif /* _MACHINE_AUTOCONF_H_ */

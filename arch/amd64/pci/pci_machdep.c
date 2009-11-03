@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.29 2009/04/29 18:28:38 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.32 2009/09/28 15:58:30 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.3 2003/05/07 21:33:58 fvdl Exp $	*/
 
 /*-
@@ -309,11 +309,12 @@ pci_intr_string(pci_chipset_tag_t pc, pci_intr_handle_t ih)
 		snprintf(irqstr, sizeof(irqstr), "apic %d int %d (irq %d)",
 		    APIC_IRQ_APIC(ih.line),
 		    APIC_IRQ_PIN(ih.line),
-		    pci_intr_line(ih));
+		    pci_intr_line(pc, ih));
 	else
-		snprintf(irqstr, sizeof(irqstr), "irq %d", pci_intr_line(ih));
+		snprintf(irqstr, sizeof(irqstr), "irq %d",
+		    pci_intr_line(pc, ih));
 #else
-	snprintf(irqstr, sizeof(irqstr), "irq %d", pci_intr_line(ih));
+	snprintf(irqstr, sizeof(irqstr), "irq %d", pci_intr_line(pc, ih));
 #endif
 	return (irqstr);
 }
@@ -325,7 +326,7 @@ void	acpiprt_route_interrupt(int bus, int dev, int pin);
 
 void *
 pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
-    int (*func)(void *), void *arg, char *what)
+    int (*func)(void *), void *arg, const char *what)
 {
 	int pin, irq;
 	int bus, dev;
@@ -411,5 +412,9 @@ pci_init_extents(void)
 				printf("memory map conflict 0x%llx/0x%llx\n",
 				    bmp->addr, bmp->size);
 		}
+
+		/* Take out the video buffer area and BIOS areas. */
+		extent_alloc_region(pcimem_ex, IOM_BEGIN, IOM_SIZE,
+		    EX_CONFLICTOK | EX_NOWAIT);
 	}
 }

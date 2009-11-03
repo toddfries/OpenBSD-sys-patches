@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioc.c,v 1.16 2009/05/27 19:04:45 miod Exp $	*/
+/*	$OpenBSD: ioc.c,v 1.24 2009/11/02 17:20:47 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Joel Sing.
@@ -18,7 +18,7 @@
  */
 
 /*
- * IOC device driver.
+ * IOC3 device driver.
  */
 
 #include <sys/param.h>
@@ -30,7 +30,6 @@
 #include <mips64/archtype.h>
 #include <machine/autoconf.h>
 #include <machine/bus.h>
-#include <machine/cpu.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -49,7 +48,8 @@
 
 int	ioc_match(struct device *, void *, void *);
 void	ioc_attach(struct device *, struct device *, void *);
-void	ioc_attach_child(struct device *, const char *, bus_addr_t, int);
+struct device *
+	ioc_attach_child(struct device *, const char *, bus_addr_t, int);
 int	ioc_search_onewire(struct device *, void *, void *);
 int	ioc_search_mundane(struct device *, void *, void *);
 int	ioc_print(void *, const char *);
@@ -124,8 +124,9 @@ ioc_print(void *aux, const char *iocname)
 	if (iocname != NULL)
 		printf("%s at %s", iaa->iaa_name, iocname);
 
-	if ((int)iaa->iaa_base > 0)
-		printf(" base 0x%08x", iaa->iaa_base);
+	/* no base for onewire, and don't display it for rtc */
+	if ((int)iaa->iaa_base > 0 && (int)iaa->iaa_base < IOC3_BYTEBUS_0)
+		printf(" base 0x%x", iaa->iaa_base);
 
 	return (UNCONF);
 }
@@ -141,7 +142,9 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 	bus_size_t memsize;
 	uint32_t data;
 	int dev;
-	int dual_irq, shared_handler, has_ethernet, has_ps2, has_serial;
+	int dual_irq, shared_handler;
+	int device_mask;
+	bus_addr_t rtcbase;
 
 	if (pci_mapreg_map(pa, PCI_MAPREG_START, PCI_MAPREG_TYPE_MEM, 0,
 	    &memt, &memh, NULL, &memsize, 0)) {
@@ -158,13 +161,13 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 	data = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 	data |= PCI_COMMAND_MEM_ENABLE | PCI_COMMAND_PARITY_ENABLE |
 	    PCI_COMMAND_SERR_ENABLE;
+	data &= ~PCI_COMMAND_INTERRUPT_DISABLE;
 	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, data);
 
 	printf("\n");
 
 	/*
-	 * Build a suitable bus_space_handle by rebasing the xbridge
-	 * inherited one to our BAR, and restoring the original
+	 * Build a suitable bus_space_handle by restoring the original
 	 * non-swapped subword access methods.
 	 *
 	 * XXX This is horrible and will need to be rethought if
@@ -175,19 +178,16 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 	    M_DEVBUF, M_NOWAIT);
 	if (sc->sc_mem_bus_space == NULL) {
 		printf("%s: can't allocate bus_space\n", self->dv_xname);
-		goto unregister2;
+		goto unmap;
 	}
 
 	bcopy(memt, sc->sc_mem_bus_space, sizeof(*sc->sc_mem_bus_space));
-	sc->sc_mem_bus_space->bus_base = memh;
 	sc->sc_mem_bus_space->_space_read_1 = xbow_read_1;
 	sc->sc_mem_bus_space->_space_read_2 = xbow_read_2;
+	sc->sc_mem_bus_space->_space_read_raw_2 = xbow_read_raw_2;
 	sc->sc_mem_bus_space->_space_write_1 = xbow_write_1;
 	sc->sc_mem_bus_space->_space_write_2 = xbow_write_2;
-
-	/* XXX undo IP27 xbridge weird mapping */
-	if (sys_config.system_type != SGI_OCTANE)
-		sc->sc_mem_bus_space->_space_map = xbow_space_map_short;
+	sc->sc_mem_bus_space->_space_write_raw_2 = xbow_write_raw_2;
 
 	sc->sc_memt = sc->sc_mem_bus_space;
 	sc->sc_memh = memh;
@@ -198,6 +198,9 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 	 * board.
 	 */
 
+	bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_GPCR_S,
+	    IOC3_GPCR_MLAN);
+	(void)bus_space_read_4(sc->sc_memt, sc->sc_memh, IOC3_GPCR_S);
 	config_search(ioc_search_onewire, self, aux);
 
 	/*
@@ -207,27 +210,33 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 	printf("%s: ", self->dv_xname);
 
 	dual_irq = shared_handler = 0;
-	has_ethernet = has_ps2 = has_serial = 0;
+	device_mask = 0;
 	if (sc->sc_owserial != NULL) {
 		if (strncmp(sc->sc_owserial->sc_product, "030-0873-", 9) == 0) {
 			/* MENET board */
-			has_ethernet = has_serial = 1;
+			device_mask = (1 << IOCDEV_SERIAL_A) |
+			    (1 << IOCDEV_SERIAL_B) | (1 << IOCDEV_EF);
 			shared_handler = 1;
 		} else
 		if (strncmp(sc->sc_owserial->sc_product, "030-0891-", 9) == 0) {
 			/* IP30 on-board IOC3 */
-			has_ethernet = has_ps2 = has_serial = 1;
+			device_mask = (1 << IOCDEV_SERIAL_A) |
+			    (1 << IOCDEV_SERIAL_B) | (1 << IOCDEV_LPT) |
+			    (1 << IOCDEV_KBC) | (1 << IOCDEV_RTC) |
+			    (1 << IOCDEV_EF);
+			rtcbase = IOC3_BYTEBUS_1;
 			dual_irq = 1;
 		} else
 		if (strncmp(sc->sc_owserial->sc_product, "030-1155-", 9) == 0) {
 			/* CADDuo board */
-			has_ps2 = has_ethernet = 1;
+			device_mask = (1 << IOCDEV_KBC) | (1 << IOCDEV_EF);
 			shared_handler = 1;
 		} else
 		if (strncmp(sc->sc_owserial->sc_product, "030-1657-", 9) == 0 ||
 		    strncmp(sc->sc_owserial->sc_product, "030-1664-", 9) == 0) {
 			/* PCI_SIO_UFC dual serial board */
-			has_serial = 1;
+			device_mask = (1 << IOCDEV_SERIAL_A) |
+			    (1 << IOCDEV_SERIAL_B);
 		} else {
 			goto unknown;
 		}
@@ -239,7 +248,11 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 		 */
 		if (sys_config.system_type == SGI_O200 ||
 		    sys_config.system_type == SGI_O300) {
-			has_ethernet = has_ps2 = has_serial = 1;
+			device_mask = (1 << IOCDEV_SERIAL_A) |
+			    (1 << IOCDEV_SERIAL_B) | (1 << IOCDEV_LPT) |
+			    (1 << IOCDEV_KBC) | (1 << IOCDEV_RTC) |
+			    (1 << IOCDEV_EF);
+			rtcbase = IOC3_BYTEBUS_0;
 			dual_irq = 1;
 			/*
 			 * XXX On IP35 class machines, there are no
@@ -268,7 +281,7 @@ unknown:
 	 *
 	 * Since our pci layer doesn't handle this, we have to compute
 	 * the superio interrupt cookie ourselves, with the help of the
-	 * pci bridge driver. This is ugly, and depends on xbridge knowledge.
+	 * pci bridge driver.
 	 *
 	 * (What the above means is that you should wear peril-sensitive
 	 * sunglasses from now on).
@@ -290,51 +303,6 @@ unknown:
 	 * slot.
 	 */
 	if (dual_irq) {
-		/*
-		 * First, try to get reliable interrupt information
-		 * from the pci bridge.
-		 *
-		 * In order to do this, we trigger the superio interrupt
-		 * and read a magic register in configuration space.
-		 * See the xbridge code for details.
-		 */
-
-		/* enable TX empty interrupt */
-		delay(20 * 1000);	/* let console output drain */
-		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IEC, ~0x0);
-		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IES,
-		    0x0201);
-
-		/* read pseudo interrupt register */
-		data = pci_conf_read(pa->pa_pc, pa->pa_tag,
-		    PCI_INTERRUPT_REG + 4);
-
-		/* disable interrupt again */
-		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IEC,
-		    0x0201);
-
-		if (data != 0) {
-			/*
-			 * If the interrupt has been received as the
-			 * regular PCI interrupt, then we probably don't
-			 * have separate interrupts.
-			 */
-			if (PCI_INTERRUPT_LINE(data) == pa->pa_intrline)
-				goto single;
-
-			pa->pa_intrline = PCI_INTERRUPT_LINE(data);
-			pa->pa_rawintrpin = pa->pa_intrpin =
-			    PCI_INTERRUPT_PIN(data);
-
-			if (pci_intr_map(pa, &ih2) == 0)
-				goto establish;
-		}
-
-		/*
-		 * If there was no bridge hint or it did not work, use the
-		 * heuristic of picking the lowest free slot.
-		 */
-
 		for (dev = 0;
 		    dev < pci_bus_maxdevs(pa->pa_pc, pa->pa_bus); dev++) {
 			pcitag_t tag;
@@ -367,7 +335,6 @@ unknown:
 		 * situation, but it's probably safe to revert to
 		 * a shared, single interrupt.
 		 */
-single:
 		shared_handler = 1;
 		dual_irq = 0;
 	}
@@ -405,10 +372,6 @@ establish:
 	printf("%s%s\n", dual_irq ? ", ethernet " : "",
 	    pci_intr_string(sc->sc_pc, ih1));
 
-	/* Initialise interrupt handling structures. */
-	for (dev = 0; dev < IOC_NDEVS; dev++)
-		sc->sc_intr[dev] = NULL;
-
 	/*
 	 * Acknowledge all pending interrupts, and disable them.
 	 */
@@ -417,26 +380,35 @@ establish:
 	bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IES, 0x0);
 	bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IR,
 	    bus_space_read_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IR));
+	if (ISSET(device_mask, 1 << IOCDEV_EF))
+		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_ENET_IER, 0);
 
 	/*
 	 * Attach other sub-devices.
 	 */
 
-	if (has_serial) {
+	if (ISSET(device_mask, 1 << IOCDEV_SERIAL_A)) {
+		/*
+		 * Put serial ports in passthrough mode,
+		 * to use the MI com(4) 16550 support.
+		 */
+		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_UARTA_SSCR, 0);
+		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_UARTB_SSCR, 0);
+
 		ioc_attach_child(self, "com", IOC3_UARTA_BASE, IOCDEV_SERIAL_A);
 		ioc_attach_child(self, "com", IOC3_UARTB_BASE, IOCDEV_SERIAL_B);
 	}
-	if (has_ps2)
-		ioc_attach_child(self, "iockbc", 0, IOCDEV_KEYBOARD);
-	if (has_ethernet)
-		ioc_attach_child(self, "iec", IOC3_EF_BASE, IOCDEV_EF);
-	/* XXX what about the parallel port? */
-	ioc_attach_child(self, "dsrtc", 0, IOCDEV_RTC);
+	if (ISSET(device_mask, 1 << IOCDEV_KBC))
+		ioc_attach_child(self, "iockbc", 0, IOCDEV_KBC);
+	if (ISSET(device_mask, 1 << IOCDEV_EF))
+		ioc_attach_child(self, "iec", 0, IOCDEV_EF);
+	if (ISSET(device_mask, 1 << IOCDEV_LPT))
+		ioc_attach_child(self, "lpt", 0, IOCDEV_LPT);
+	if (ISSET(device_mask, 1 << IOCDEV_RTC))
+		ioc_attach_child(self, "dsrtc", rtcbase, IOCDEV_RTC);
 
 	return;
 
-unregister2:
-	pci_intr_disestablish(sc->sc_pc, sc->sc_ih1);
 unregister:
 	if (dual_irq)
 		pci_intr_disestablish(sc->sc_pc, sc->sc_ih2);
@@ -444,7 +416,7 @@ unmap:
 	bus_space_unmap(memt, memh, memsize);
 }
 
-void
+struct device *
 ioc_attach_child(struct device *ioc, const char *name, bus_addr_t base, int dev)
 {
 	struct ioc_softc *sc = (struct ioc_softc *)ioc;
@@ -452,6 +424,7 @@ ioc_attach_child(struct device *ioc, const char *name, bus_addr_t base, int dev)
 
 	iaa.iaa_name = name;
 	iaa.iaa_memt = sc->sc_memt;
+	iaa.iaa_memh = sc->sc_memh;
 	iaa.iaa_dmat = sc->sc_dmat;
 	iaa.iaa_base = base;
 	iaa.iaa_dev = dev;
@@ -466,10 +439,10 @@ ioc_attach_child(struct device *ioc, const char *name, bus_addr_t base, int dev)
 		 * XXX queried by sending the appropriate L1 command
 		 * XXX to the L1 UART. This L1 code is not written yet.
 		 */
-		bzero(iaa.iaa_enaddr, 6);
+		memset(iaa.iaa_enaddr, 0xff, 6);
 	}
 
-	config_found_sm(ioc, &iaa, ioc_print, ioc_search_mundane);
+	return config_found_sm(ioc, &iaa, ioc_print, ioc_search_mundane);
 }
 
 int
@@ -654,13 +627,13 @@ iocow_pulse(struct ioc_softc *sc, int pulse, int data)
  * let com(4) tinker with the appropriate registers, instead of adding
  * an unnecessary layer there.
  */
-const uint32_t ioc_intrbits[IOC_NDEVS] = {
-	0x00000040,	/* serial A */
-	0x00008000,	/* serial B */
-	0x00040000,	/* parallel port */
-	0x00400000,	/* PS/2 port */
-	0x08000000,	/* rtc */
-	0x00000000	/* Ethernet (handled differently) */
+static const uint32_t ioc_intrbits[IOC_NDEVS] = {
+	IOC3_IRQ_UARTA,
+	IOC3_IRQ_UARTB,
+	IOC3_IRQ_LPT,
+	IOC3_IRQ_KBC,
+	0,	/* RTC */
+	0	/* Ethernet, handled differently */
 };
 
 void *
@@ -696,7 +669,7 @@ int
 ioc_intr_superio(void *v)
 {
 	struct ioc_softc *sc = (struct ioc_softc *)v;
-	uint32_t pending;
+	uint32_t pending, mask;
 	int dev;
 
 	pending = bus_space_read_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IR) &
@@ -709,14 +682,15 @@ ioc_intr_superio(void *v)
 	bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IEC, pending);
 
 	for (dev = 0; dev < IOC_NDEVS - 1 /* skip Ethernet */; dev++) {
-		if (pending & ioc_intrbits[dev]) {
+		mask = pending & ioc_intrbits[dev];
+		if (mask != 0) {
 			(void)ioc_intr_dispatch(sc, dev);
 
 			/* Ack, then reenable, pending interrupts */
 			bus_space_write_4(sc->sc_memt, sc->sc_memh,
-			    IOC3_SIO_IR, pending & ioc_intrbits[dev]);
+			    IOC3_SIO_IR, mask);
 			bus_space_write_4(sc->sc_memt, sc->sc_memh,
-			    IOC3_SIO_IES, pending & ioc_intrbits[dev]);
+			    IOC3_SIO_IES, mask);
 		}
 	}
 

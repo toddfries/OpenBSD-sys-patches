@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhidev.c,v 1.34 2009/06/02 21:43:41 miod Exp $	*/
+/*	$OpenBSD: uhidev.c,v 1.36 2009/10/13 19:33:19 pirofti Exp $	*/
 /*	$NetBSD: uhidev.c,v 1.14 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -76,7 +76,7 @@ int uhidevsubmatch(struct device *parent, void *cf, void *aux);
 int uhidev_match(struct device *, void *, void *); 
 void uhidev_attach(struct device *, struct device *, void *); 
 int uhidev_detach(struct device *, int); 
-int uhidev_activate(struct device *, enum devact); 
+int uhidev_activate(struct device *, int); 
 
 struct cfdriver uhidev_cd = { 
 	NULL, "uhidev", DV_DULL 
@@ -333,7 +333,7 @@ int uhidevsubmatch(struct device *parent, void *match, void *aux)
 }
 
 int
-uhidev_activate(struct device *self, enum devact act)
+uhidev_activate(struct device *self, int act)
 {
 	struct uhidev_softc *sc = (struct uhidev_softc *)self;
 	int i, rv = 0;
@@ -599,7 +599,7 @@ uhidev_set_report(struct uhidev *scd, int type, void *data, int len)
 	memcpy(buf+1, data, len);
 
 	retstat = usbd_set_report(scd->sc_parent->sc_iface, type,
-				  scd->sc_report_id, data, len + 1);
+				  scd->sc_report_id, buf, len + 1);
 
 	free(buf, M_TEMP);
 

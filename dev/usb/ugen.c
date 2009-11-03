@@ -1,4 +1,4 @@
-/*	$OpenBSD: ugen.c,v 1.57 2009/06/05 20:18:03 yuo Exp $ */
+/*	$OpenBSD: ugen.c,v 1.60 2009/10/31 06:40:17 deraadt Exp $ */
 /*	$NetBSD: ugen.c,v 1.63 2002/11/26 18:49:48 christos Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ugen.c,v 1.26 1999/11/17 22:33:41 n_hibma Exp $	*/
 
@@ -126,7 +126,7 @@ int ugen_get_alt_index(struct ugen_softc *sc, int ifaceidx);
 int ugen_match(struct device *, void *, void *); 
 void ugen_attach(struct device *, struct device *, void *); 
 int ugen_detach(struct device *, int); 
-int ugen_activate(struct device *, enum devact); 
+int ugen_activate(struct device *, int); 
 
 struct cfdriver ugen_cd = { 
 	NULL, "ugen", DV_DULL 
@@ -323,8 +323,7 @@ ugenopen(dev_t dev, int flag, int mode, struct proc *p)
 			sce->ibuf = malloc(isize, M_USBDEV, M_WAITOK);
 			DPRINTFN(5, ("ugenopen: intr endpt=%d,isize=%d\n",
 				     endpt, isize));
-			if (clalloc(&sce->q, UGEN_IBSIZE, 0) == -1)
-				return (ENOMEM);
+			clalloc(&sce->q, UGEN_IBSIZE, 0);
 			err = usbd_open_pipe_intr(sce->iface,
 				  edesc->bEndpointAddress,
 				  USBD_SHORT_XFER_OK, &sce->pipeh, sce,
@@ -728,7 +727,7 @@ ugenwrite(dev_t dev, struct uio *uio, int flag)
 }
 
 int
-ugen_activate(struct device *self, enum devact act)
+ugen_activate(struct device *self, int act)
 {
 	struct ugen_softc *sc = (struct ugen_softc *)self;
 
@@ -823,6 +822,7 @@ ugenintr(usbd_xfer_handle xfer, usbd_private_handle addr, usbd_status status)
 		wakeup(sce);
 	}
 	selwakeup(&sce->rsel);
+	KNOTE(&sce->rsel.si_note, 0);
 }
 
 void
@@ -882,6 +882,7 @@ ugen_isoc_rintr(usbd_xfer_handle xfer, usbd_private_handle addr,
 		wakeup(sce);
 	}
 	selwakeup(&sce->rsel);
+	KNOTE(&sce->rsel.si_note, 0);
 }
 
 usbd_status

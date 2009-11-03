@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.194 2009/06/05 00:05:22 claudio Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.197 2009/11/03 10:59:04 claudio Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -244,6 +244,10 @@ ip_output(struct mbuf *m0, ...)
 		if (!IN_MULTICAST(ip->ip_dst.s_addr))
 			ip->ip_src = ia->ia_addr.sin_addr;
 	}
+
+#if NPF > 0
+reroute:
+#endif
 
 #ifdef IPSEC
 	if (!ipsec_in_use && inp == NULL)
@@ -594,6 +598,13 @@ sendit:
 		}
 		ip = mtod(m, struct ip *);
 		hlen = ip->ip_hl << 2;
+		/*
+		 * PF_TAG_REROUTE handling or not...
+		 * Packet is entering IPsec so the routing is
+		 * already overruled by the IPsec policy.
+		 * Until now the change was not reconsidered.
+		 * What's the behaviour?
+		 */
 #endif
 
 		tdb = gettdb(sspi, &sdst, sproto);
@@ -703,9 +714,19 @@ sendit:
 	}
 	if (m == NULL)
 		goto done;
-
 	ip = mtod(m, struct ip *);
 	hlen = ip->ip_hl << 2;
+	if ((m->m_pkthdr.pf.flags & (PF_TAG_REROUTE | PF_TAG_GENERATED)) ==
+	    (PF_TAG_REROUTE | PF_TAG_GENERATED))
+		/* already rerun the route lookup, go on */
+		m->m_pkthdr.pf.flags &= ~(PF_TAG_GENERATED | PF_TAG_REROUTE);
+	else if (m->m_pkthdr.pf.flags & PF_TAG_REROUTE) {
+		/* tag as generated to skip over pf_test on rerun */
+		m->m_pkthdr.pf.flags |= PF_TAG_GENERATED;
+		ro = NULL;
+		donerouting = 0;
+		goto reroute;
+	}
 #endif
 
 #ifdef IPSEC
@@ -1401,7 +1422,8 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 			}
 			rtid = *mtod(m, u_int *);
-			if (!rtable_exists(rtid)) {
+			/* table must exist and be a domain */
+			if (!rtable_exists(rtid) || rtid != rtable_l2(rtid)) {
 				error = EINVAL;
 				break;
 			}
@@ -1505,6 +1527,7 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_ESP_TRANS_LEVEL:
 		case IP_ESP_NETWORK_LEVEL:
 		case IP_IPCOMP_LEVEL:
+			*mp = m = m_get(M_WAIT, MT_SOOPTS);
 #ifndef IPSEC
 			m->m_len = sizeof(int);
 			*mtod(m, int *) = IPSEC_LEVEL_NONE;

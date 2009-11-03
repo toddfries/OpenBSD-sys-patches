@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.100 2009/06/02 23:49:33 deraadt Exp $ */
+/*	$OpenBSD: ehci.c,v 1.103 2009/10/13 19:33:17 pirofti Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -1028,7 +1028,7 @@ ehci_detach(struct ehci_softc *sc, int flags)
 
 
 int
-ehci_activate(struct device *self, enum devact act)
+ehci_activate(struct device *self, int act)
 {
 	struct ehci_softc *sc = (struct ehci_softc *)self;
 	int rv = 0;
@@ -1592,7 +1592,10 @@ ehci_open(usbd_pipe_handle pipe)
 		ival = pipe->interval;
 		if (ival == USBD_DEFAULT_INTERVAL)
 			ival = ed->bInterval;
-		return (ehci_device_setintr(sc, sqh, ival));
+		s = splusb();
+		err = ehci_device_setintr(sc, sqh, ival);
+		splx(s);
+		return (err);
 	case UE_ISOCHRONOUS:
 		pipe->methods = &ehci_device_isoc_methods;
 		if (ed->bInterval == 0 || ed->bInterval > 16) {
@@ -3235,7 +3238,7 @@ ehci_device_request(usbd_xfer_handle xfer)
 	if (xfer->timeout && !sc->sc_bus.use_polling) {
 		timeout_del(&xfer->timeout_handle);
 		timeout_set(&xfer->timeout_handle, ehci_timeout, xfer);
-		timeout_add(&xfer->timeout_handle, mstohz(xfer->timeout));
+		timeout_add_msec(&xfer->timeout_handle, xfer->timeout);
 	}
 	ehci_add_intr_list(sc, exfer);
 	xfer->status = USBD_IN_PROGRESS;
@@ -3347,7 +3350,7 @@ ehci_device_bulk_start(usbd_xfer_handle xfer)
 	if (xfer->timeout && !sc->sc_bus.use_polling) {
 		timeout_del(&xfer->timeout_handle);
 		timeout_set(&xfer->timeout_handle, ehci_timeout, xfer);
-		timeout_add(&xfer->timeout_handle, mstohz(xfer->timeout));
+		timeout_add_msec(&xfer->timeout_handle, xfer->timeout);
 	}
 	ehci_add_intr_list(sc, exfer);
 	xfer->status = USBD_IN_PROGRESS;
@@ -3522,7 +3525,7 @@ ehci_device_intr_start(usbd_xfer_handle xfer)
 	if (xfer->timeout && !sc->sc_bus.use_polling) {
 		timeout_del(&xfer->timeout_handle);
 		timeout_set(&xfer->timeout_handle, ehci_timeout, xfer);
-		timeout_add(&xfer->timeout_handle, mstohz(xfer->timeout));
+		timeout_add_msec(&xfer->timeout_handle, xfer->timeout);
 	}
 	ehci_add_intr_list(sc, exfer);
 	xfer->status = USBD_IN_PROGRESS;
@@ -3623,8 +3626,7 @@ ehci_device_intr_done(usbd_xfer_handle xfer)
 		if (xfer->timeout && !sc->sc_bus.use_polling) {
 			timeout_del(&xfer->timeout_handle);
 			timeout_set(&xfer->timeout_handle, ehci_timeout, xfer);
-			timeout_add(&xfer->timeout_handle,
-			    mstohz(xfer->timeout));
+			timeout_add_msec(&xfer->timeout_handle, xfer->timeout);
 		}
 		splx(s);
 

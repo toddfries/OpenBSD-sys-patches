@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.32 2009/06/02 17:55:37 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.42 2009/10/30 08:13:57 syuu Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -240,6 +240,7 @@ extern vaddr_t uncached_base;
 #define	COP_0_WATCH_HI		$19
 #define	COP_0_TLB_XCONTEXT	$20
 #define	COP_0_TLB_FR_MASK	$21	/* R10000 onwards */
+#define	COP_0_DIAG		$22	/* Loongson 2F */
 #define	COP_0_ECC		$26
 #define	COP_0_CACHE_ERR		$27
 #define	COP_0_TAG_LO		$28
@@ -355,31 +356,70 @@ extern vaddr_t uncached_base;
 
 #ifndef _LOCORE
 
+#include <sys/device.h>
+#include <sys/lock.h>
 #include <sys/sched.h>
 
-struct cpu_info {
-	struct schedstate_percpu ci_schedstate;
+#include <machine/intr.h>
 
-	struct proc *ci_curproc;
-	u_int32_t ci_randseed;
+struct cpu_info {
+	struct device   ci_dev;		/* our device */
+	struct cpu_info *ci_self;	/* pointer to this structure */
+	struct cpu_info *ci_next;	/* next cpu */
+	struct proc	*ci_curproc;
+	struct user *ci_curprocpaddr;
+
+	struct schedstate_percpu
+			 ci_schedstate;
+	int		 ci_want_resched;	/* need_resched() invoked */
+	cpuid_t          ci_cpuid;              /* our CPU ID */
+	uint32_t	 ci_randseed;		/* per cpu random seed */
+	int		 ci_ipl;		/* software IPL */
+	uint32_t	 ci_softpending;	/* pending soft interrupts */
+#ifdef MULTIPROCESSOR
+	u_long           ci_flags;		/* flags; see below */
+#endif
 };
 
+#define	CPUF_PRIMARY	0x01		/* CPU is primary CPU */
+#define	CPUF_PRESENT	0x02		/* CPU is present */
+#define	CPUF_RUNNING	0x04		/* CPU is running */
+
 extern struct cpu_info cpu_info_primary;
+extern struct cpu_info *cpu_info_list;
+#define CPU_INFO_ITERATOR		int
+#define	CPU_INFO_FOREACH(cii, ci)	for (cii = 0, ci = cpu_info_list; \
+					    ci != NULL; ci = ci->ci_next)
 
-#define	curcpu()	(&cpu_info_primary)
+#define CPU_INFO_UNIT(ci)		((ci)->ci_dev.dv_unit)
 
-#define	CPU_IS_PRIMARY(ci)	1
-#define	CPU_INFO_ITERATOR	int
-#define	CPU_INFO_FOREACH(cii, ci)					\
-	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
-#define	CPU_INFO_UNIT(ci)	0
-#define	MAXCPUS	1
-#define	cpu_unidle(ci)
+#ifdef MULTIPROCESSOR
+#define MAXCPUS				4
+#define curcpu()			(cpu_info[cpu_number()])
+#define	CPU_IS_PRIMARY(ci)		((ci)->ci_flags & CPUF_PRIMARY)
+#define cpu_number()			hw_cpu_number()
 
-#define	cpu_number()	0
+extern struct cpuset cpus_running;
+extern struct cpu_info *cpu_info[];
+void cpu_unidle(struct cpu_info *);
+void cpu_boot_secondary_processors(void);
+#define cpu_boot_secondary(ci)          hw_cpu_boot_secondary(ci)
+#define cpu_hatch(ci)                   hw_cpu_hatch(ci)
+
+#include <sys/mplock.h>
+#else
+#define MAXCPUS				1
+#define curcpu()			(&cpu_info_primary)
+#define	CPU_IS_PRIMARY(ci)		1
+#define cpu_number()			0
+#define cpu_unidle(ci)
+#endif
 
 #include <machine/frame.h>
-#include <machine/intr.h>
+
+#endif	/* _LOCORE */
+
+#ifndef _LOCORE
 
 /*
  * Arguments to hardclock encapsulate the previous machine state in
@@ -401,25 +441,28 @@ extern int int_nest_cntr;
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
-#define	need_resched(info)	{ want_resched = 1; aston(); }
-#define	clear_resched(ci) 	want_resched = 0
+#define	need_resched(ci) \
+	do { \
+		(ci)->ci_want_resched = 1; \
+		if ((ci)->ci_curproc != NULL) \
+			aston((ci)->ci_curproc); \
+	} while(0)
+#define	clear_resched(ci) 	(ci)->ci_want_resched = 0
 
 /*
  * Give a profiling tick to the current process when the user profiling
  * buffer pages are invalid.  On the PICA, request an ast to send us
  * through trap, marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)	aston()
+#define	need_proftick(p)	aston(p)
 
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#define	signotify(p)	aston()
+#define	signotify(p)		aston(p)
 
-#define	aston()		(astpending = 1)
-
-extern int want_resched;	/* resched() was called */
+#define	aston(p)		p->p_md.md_astpending = 1
 
 #endif /* !_LOCORE */
 #endif /* _KERNEL */
@@ -461,7 +504,9 @@ extern int want_resched;	/* resched() was called */
 #define	MIPS_RM7000	0x27	/* PMCS RM7000 CPU		ISA IV  */
 #define	MIPS_RM52X0	0x28	/* PMCS RM52X0 CPU		ISA IV  */
 #define	MIPS_RM9000	0x34	/* PMCS RM9000 CPU		ISA IV  */
+#define	MIPS_LOONGSON	0x42	/* STC LoongSon CPU		ISA III */
 #define	MIPS_VR5400	0x54	/* NEC Vr5400 CPU		ISA IV+ */
+#define	MIPS_LOONGSON2	0x63	/* STC LoongSon2 CPU		ISA III */
 
 /*
  * MIPS FPU types. Only soft, rest is the same as cpu type.
@@ -503,8 +548,6 @@ void	cp0_set_compare(u_int);
 #define	Mips_SyncCache()	(*(sys_config._SyncCache))()
 #define	Mips_InvalidateICache(a, l)	\
 				(*(sys_config._InvalidateICache))((a), (l))
-#define	Mips_InvalidateICachePage(a)	\
-				(*(sys_config._InvalidateICachePage))((a))
 #define	Mips_SyncDCachePage(a)		\
 				(*(sys_config._SyncDCachePage))((a))
 #define	Mips_HitSyncDCache(a, l)	\
@@ -514,10 +557,17 @@ void	cp0_set_compare(u_int);
 #define	Mips_HitInvalidateDCache(a, l)	\
 				(*(sys_config._HitInvalidateDCache))((a), (l))
 
+int	Loongson2_ConfigCache(void);
+void	Loongson2_SyncCache(void);
+void	Loongson2_InvalidateICache(vaddr_t, int);
+void	Loongson2_SyncDCachePage(vaddr_t);
+void	Loongson2_HitSyncDCache(vaddr_t, int);
+void	Loongson2_IOSyncDCache(vaddr_t, int, int);
+void	Loongson2_HitInvalidateDCache(vaddr_t, int);
+
 int	Mips5k_ConfigCache(void);
 void	Mips5k_SyncCache(void);
 void	Mips5k_InvalidateICache(vaddr_t, int);
-void	Mips5k_InvalidateICachePage(vaddr_t);
 void	Mips5k_SyncDCachePage(vaddr_t);
 void	Mips5k_HitSyncDCache(vaddr_t, int);
 void	Mips5k_IOSyncDCache(vaddr_t, int, int);
@@ -526,7 +576,6 @@ void	Mips5k_HitInvalidateDCache(vaddr_t, int);
 int	Mips10k_ConfigCache(void);
 void	Mips10k_SyncCache(void);
 void	Mips10k_InvalidateICache(vaddr_t, int);
-void	Mips10k_InvalidateICachePage(vaddr_t);
 void	Mips10k_SyncDCachePage(vaddr_t);
 void	Mips10k_HitSyncDCache(vaddr_t, int);
 void	Mips10k_IOSyncDCache(vaddr_t, int, int);

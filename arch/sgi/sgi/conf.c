@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.20 2009/06/03 18:32:24 jasper Exp $ */
+/*	$OpenBSD: conf.c,v 1.22 2009/08/13 15:04:20 dlg Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -43,7 +43,8 @@
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/tty.h>
-#include <sys/conf.h>
+
+#include <machine/conf.h>
 
 /*
  *	Block devices.
@@ -84,12 +85,6 @@ int	nblkdev = sizeof (bdevsw) / sizeof (bdevsw[0]);
 /*
  *	Character devices.
  */
-
-/* open, close, write, ioctl */
-#define	cdev_lpt_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, seltrue, (dev_type_mmap((*))) enodev }
 
 #define mmread mmrw
 #define mmwrite mmrw
@@ -135,6 +130,7 @@ cdev_decl(pci);
 #include "ulpt.h"
 #include "urio.h"
 #include "ucom.h"
+#include "vscsi.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -213,7 +209,8 @@ struct cdevsw	cdevsw[] =
 	cdev_ulpt_init(NULPT,ulpt),	/* 64: USB printers */
 	cdev_urio_init(NURIO,urio),	/* 65: USB Diamond Rio 500 */
 	cdev_tty_init(NUCOM,ucom),	/* 66: USB tty */
-	cdev_hotplug_init(NHOTPLUG,hotplug) /* 67: devices hotplugging */
+	cdev_hotplug_init(NHOTPLUG,hotplug), /* 67: devices hotplugging */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 68: vscsi */
 };
 
 int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);

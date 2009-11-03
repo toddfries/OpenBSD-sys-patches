@@ -31,7 +31,7 @@
 
 *******************************************************************************/
 
-/* $OpenBSD: if_em_hw.h,v 1.29 2009/06/04 05:08:43 claudio Exp $ */
+/* $OpenBSD: if_em_hw.h,v 1.34 2009/10/31 12:26:36 sobrado Exp $ */
 /* $FreeBSD: if_em_hw.h,v 1.15 2005/05/26 23:32:02 tackerman Exp $ */
 
 /* if_em_hw.h
@@ -67,10 +67,12 @@ typedef enum {
     em_82571,
     em_82572,
     em_82573,
+    em_82574,
     em_82575,
     em_80003es2lan,
     em_ich8lan,
     em_ich9lan,
+    em_ich10lan,
     em_num_macs
 } em_mac_type;
 
@@ -228,6 +230,7 @@ typedef enum {
     em_phy_gg82563,
     em_phy_igp_3,
     em_phy_ife,
+    em_phy_bm,		/* phy used in i82574L, ICH10 and some ICH9 */
     em_phy_undefined = 0xFF
 } em_phy_type;
 
@@ -518,6 +521,7 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_82576_SERDES	 0x10E7
 #define E1000_DEV_ID_82576_QUAD_COPPER	 0x10E8
 #define E1000_DEV_ID_82576_NS		 0x150A
+#define E1000_DEV_ID_82574L		 0x10D3
 
 #define NODE_ADDRESS_SIZE 6
 #define ETH_LENGTH_OF_ADDRESS 6
@@ -1545,7 +1549,7 @@ struct em_hw {
 #define E1000_STATUS_DOCK_CI    0x00000800      /* Change in Dock/Undock state. Clear on write '0'. */
 #define E1000_STATUS_GIO_MASTER_ENABLE 0x00080000 /* Status of Master requests. */
 #define E1000_STATUS_MTXCKOK    0x00000400      /* MTX clock running OK */
-#define E1000_STATUS_PCI66      0x00000800      /* In 66Mhz slot */
+#define E1000_STATUS_PCI66      0x00000800      /* In 66MHz slot */
 #define E1000_STATUS_BUS64      0x00001000      /* In 64 bit slot */
 #define E1000_STATUS_PCIX_MODE  0x00002000      /* PCI-X mode */
 #define E1000_STATUS_PCIX_SPEED 0x0000C000      /* PCI-X bus speed */
@@ -2596,6 +2600,12 @@ struct em_host_command_info {
 #define M88E1000_PHY_VCO_REG_BIT8  0x100 /* Bits 8 & 11 are adjusted for */
 #define M88E1000_PHY_VCO_REG_BIT11 0x800    /* improved BER performance */
 
+/* BME1000 PHY Specific Control Register */
+#define BME1000_PSCR_ENABLE_DOWNSHIFT   0x0800 /* 1 = enable downshift */
+#define BM_PHY_PAGE_SELECT                22   /* Page Select for BM */
+#define BM_REG_BIAS1                      29
+#define BM_REG_BIAS2                      30
+
 #define IGP01E1000_IEEE_REGS_PAGE  0x0000
 #define IGP01E1000_IEEE_RESTART_AUTONEG 0x3300
 #define IGP01E1000_IEEE_FORCE_GIGA      0x0140
@@ -3169,6 +3179,7 @@ struct em_host_command_info {
 #define M88E1111_I_PHY_ID  0x01410CC0
 #define L1LXT971A_PHY_ID   0x001378E0
 #define GG82563_E_PHY_ID   0x01410CA0
+#define BME1000_E_PHY_ID   0x01410CB0
 
 /* Bits...
  * 15-5: page

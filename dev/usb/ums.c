@@ -1,4 +1,4 @@
-/*	$OpenBSD: ums.c,v 1.29 2008/06/26 05:42:19 ray Exp $ */
+/*	$OpenBSD: ums.c,v 1.31 2009/10/13 19:33:19 pirofti Exp $ */
 /*	$NetBSD: ums.c,v 1.60 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -117,7 +117,7 @@ const struct wsmouse_accessops ums_accessops = {
 int ums_match(struct device *, void *, void *); 
 void ums_attach(struct device *, struct device *, void *); 
 int ums_detach(struct device *, int); 
-int ums_activate(struct device *, enum devact); 
+int ums_activate(struct device *, int); 
 
 struct cfdriver ums_cd = { 
 	NULL, "ums", DV_DULL 
@@ -158,7 +158,6 @@ ums_attach(struct device *parent, struct device *self, void *aux)
 	void *desc;
 	u_int32_t flags, quirks;
 	int i, wheel, twheel;
-	struct hid_location loc_btn;
 
 	sc->sc_hdev.sc_intr = ums_intr;
 	sc->sc_hdev.sc_parent = uha->parent;
@@ -269,7 +268,7 @@ ums_attach(struct device *parent, struct device *self, void *aux)
 	/* figure out the number of buttons */
 	for (i = 1; i <= MAX_BUTTONS; i++)
 		if (!hid_locate(desc, size, HID_USAGE2(HUP_BUTTON, i),
-			uha->reportid, hid_input, &loc_btn, 0))
+		    uha->reportid, hid_input, &sc->sc_loc_btn[i - 1], 0))
 			break;
 	sc->nbuttons = i - 1;
 
@@ -328,26 +327,21 @@ ums_attach(struct device *parent, struct device *self, void *aux)
 	}
 	printf("\n");
 
-	for (i = 1; i <= sc->nbuttons; i++)
-		hid_locate(desc, size, HID_USAGE2(HUP_BUTTON, i),
-			   uha->reportid, hid_input,
-			   &sc->sc_loc_btn[i-1], 0);
-
 #ifdef USB_DEBUG
 	DPRINTF(("ums_attach: sc=%p\n", sc));
 	DPRINTF(("ums_attach: X\t%d/%d\n",
-		 sc->sc_loc_x.pos, sc->sc_loc_x.size));
+	     sc->sc_loc_x.pos, sc->sc_loc_x.size));
 	DPRINTF(("ums_attach: Y\t%d/%d\n",
-		 sc->sc_loc_y.pos, sc->sc_loc_y.size));
+	    sc->sc_loc_y.pos, sc->sc_loc_y.size));
 	if (sc->flags & UMS_Z)
 		DPRINTF(("ums_attach: Z\t%d/%d\n",
-			 sc->sc_loc_z.pos, sc->sc_loc_z.size));
+		    sc->sc_loc_z.pos, sc->sc_loc_z.size));
 	if (sc->flags & UMS_W)
 		DPRINTF(("ums_attach: W\t%d/%d\n",
-			 sc->sc_loc_w.pos, sc->sc_loc_w.size));
+		    sc->sc_loc_w.pos, sc->sc_loc_w.size));
 	for (i = 1; i <= sc->nbuttons; i++) {
 		DPRINTF(("ums_attach: B%d\t%d/%d\n",
-			 i, sc->sc_loc_btn[i-1].pos,sc->sc_loc_btn[i-1].size));
+		    i, sc->sc_loc_btn[i - 1].pos, sc->sc_loc_btn[i - 1].size));
 	}
 #endif
 
@@ -358,7 +352,7 @@ ums_attach(struct device *parent, struct device *self, void *aux)
 }
 
 int
-ums_activate(struct device *self, enum devact act)
+ums_activate(struct device *self, int act)
 {
 	struct ums_softc *sc = (struct ums_softc *)self;
 	int rv = 0;

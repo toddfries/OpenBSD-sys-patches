@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_pty.c,v 1.38 2008/08/02 11:39:38 stefan Exp $	*/
+/*	$OpenBSD: tty_pty.c,v 1.42 2009/10/31 12:00:08 fgsch Exp $	*/
 /*	$NetBSD: tty_pty.c,v 1.33.4.1 1996/06/02 09:08:11 mrg Exp $	*/
 
 /*
@@ -185,10 +185,6 @@ check_pty(int minor)
 			newnpty = maxptys;
 		newpt = ptyarralloc(newnpty);
 
-		if (maxptys == npty) {
-			goto limit_reached;
-		}
-
 		memcpy(newpt, pt_softc, npty * sizeof(struct pt_softc *));
 		free(pt_softc, M_DEVBUF);
 		pt_softc = newpt;
@@ -256,7 +252,7 @@ ptsopen(dev_t dev, int flag, int devtype, struct proc *p)
 		tp->t_cflag = TTYDEF_CFLAG;
 		tp->t_ispeed = tp->t_ospeed = TTYDEF_SPEED;
 		ttsetwater(tp);		/* would be done in xxparam() */
-	} else if (tp->t_state&TS_XCLUDE && p->p_ucred->cr_uid != 0)
+	} else if (tp->t_state&TS_XCLUDE && suser(p, 0) != 0)
 		return (EBUSY);
 	if (tp->t_oproc)			/* Ctrlr still around. */
 		tp->t_state |= TS_CARR_ON;
@@ -514,6 +510,7 @@ ptcread(dev_t dev, struct uio *uio, int flag)
 			wakeup(&tp->t_outq);
 		}
 		selwakeup(&tp->t_wsel);
+		KNOTE(&tp->t_wsel.si_note, 0);
 	}
 	if (bufcc)
 		bzero(buf, bufcc);
@@ -985,10 +982,11 @@ sysctl_pty(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 /*
  * Check if a pty is free to use.
  */
-static __inline int
+static int
 pty_isfree_locked(int minor)
 {
 	struct pt_softc *pt = pt_softc[minor];
+
 	return (pt == NULL || pt->pt_tty == NULL ||
 	    pt->pt_tty->t_oproc == NULL);
 }

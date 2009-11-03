@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.196 2009/06/06 12:31:17 rainer Exp $	*/
+/*	$OpenBSD: if.c,v 1.200 2009/11/03 10:59:04 claudio Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -307,7 +307,7 @@ if_attachsetup(struct ifnet *ifp)
 void
 if_alloc_sadl(struct ifnet *ifp)
 {
-	unsigned socksize, ifasize;
+	unsigned int socksize, ifasize;
 	int namelen, masklen;
 	struct sockaddr_dl *sdl;
 	struct ifaddr *ifa;
@@ -471,7 +471,8 @@ if_attach_common(struct ifnet *ifp)
 void
 if_start(struct ifnet *ifp)
 {
-	if (IF_QFULL(&ifp->if_snd) && !ISSET(ifp->if_flags, IFF_OACTIVE)) {
+	if (ifp->if_snd.ifq_len >= min(8, ifp->if_snd.ifq_maxlen) &&
+	    !ISSET(ifp->if_flags, IFF_OACTIVE)) {
 		if (ISSET(ifp->if_xflags, IFXF_TXREADY)) {
 			TAILQ_REMOVE(&iftxlist, ifp, if_txlist);
 			CLR(ifp->if_xflags, IFXF_TXREADY);
@@ -886,6 +887,8 @@ ifa_ifwithaddr(struct sockaddr *addr, u_int rdomain)
 #define	equal(a1, a2)	\
 	(bcmp((caddr_t)(a1), (caddr_t)(a2),	\
 	((struct sockaddr *)(a1))->sa_len) == 0)
+
+	rdomain = rtable_l2(rdomain);
 	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 	    if (ifp->if_rdomain != rdomain)
 		continue;
@@ -913,6 +916,7 @@ ifa_ifwithdstaddr(struct sockaddr *addr, u_int rdomain)
 	struct ifnet *ifp;
 	struct ifaddr *ifa;
 
+	rdomain = rtable_l2(rdomain);
 	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 		if (ifp->if_rdomain != rdomain)
 			continue;
@@ -941,6 +945,7 @@ ifa_ifwithnet(struct sockaddr *addr, u_int rdomain)
 	u_int af = addr->sa_family;
 	char *addr_data = addr->sa_data, *cplim;
 
+	rdomain = rtable_l2(rdomain);
 	if (af == AF_LINK) {
 		struct sockaddr_dl *sdl = (struct sockaddr_dl *)addr;
 		if (sdl->sdl_index && sdl->sdl_index < if_indexlim &&
@@ -983,6 +988,7 @@ ifa_ifwithaf(int af, u_int rdomain)
 	struct ifnet *ifp;
 	struct ifaddr *ifa;
 
+	rdomain = rtable_l2(rdomain);
 	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 		if (ifp->if_rdomain != rdomain)
 			continue;
@@ -1055,6 +1061,32 @@ link_rtrequest(int cmd, struct rtentry *rt, struct rt_addrinfo *info)
 		if (ifa->ifa_rtrequest && ifa->ifa_rtrequest != link_rtrequest)
 			ifa->ifa_rtrequest(cmd, rt, info);
 	}
+}
+
+/*
+ * Bring down all interfaces
+ */
+void
+if_downall(void)
+{
+	struct ifreq ifrq;	/* XXX only partly built */
+	struct ifnet *ifp;
+	int s;
+
+	s = splnet();
+	for (ifp = TAILQ_FIRST(&ifnet); ifp; ifp = TAILQ_NEXT(ifp, if_list)) {
+		if ((ifp->if_flags & IFF_UP) == 0)
+			continue;
+		if_down(ifp);
+		ifp->if_flags &= ~IFF_UP;
+
+		if (ifp->if_ioctl) {
+			ifrq.ifr_flags = ifp->if_flags;
+			(void) (*ifp->if_ioctl)(ifp, SIOCSIFFLAGS,
+			    (caddr_t)&ifrq);
+		}
+	}
+	splx(s);
 }
 
 /*
@@ -1484,6 +1516,10 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		if (!rtable_exists(ifr->ifr_rdomainid)) {
 			if (rtable_add(ifr->ifr_rdomainid) == -1)
 				panic("rtinit: rtable_add");
+		}
+		if (ifr->ifr_rdomainid != rtable_l2(ifr->ifr_rdomainid)) {
+			/* XXX we should probably flush the table */
+			rtable_l2set(ifr->ifr_rdomainid, ifr->ifr_rdomainid);
 		}
 
 		ifp->if_rdomain = ifr->ifr_rdomainid;

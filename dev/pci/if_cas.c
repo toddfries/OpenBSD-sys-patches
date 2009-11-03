@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cas.c,v 1.25 2009/03/29 21:53:52 sthen Exp $	*/
+/*	$OpenBSD: if_cas.c,v 1.27 2009/07/23 19:35:32 kettenis Exp $	*/
 
 /*
  *
@@ -189,24 +189,19 @@ cas_pci_enaddr(struct cas_softc *sc, struct pci_attach_args *pa)
 	struct pci_vpd *vpd;
 	bus_space_handle_t romh;
 	bus_space_tag_t romt;
-	bus_size_t romsize;
+	bus_size_t romsize = 0;
 	u_int8_t buf[32], *desc;
-	pcireg_t address, mask;
+	pcireg_t address;
 	int dataoff, vpdoff, len;
 	int rv = -1;
 
+	if (pci_mapreg_map(pa, PCI_ROM_REG, PCI_MAPREG_TYPE_MEM, 0,
+	    &romt, &romh, 0, &romsize, 0))
+		return (-1);
+
 	address = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_ROM_REG);
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_ROM_REG, 0xfffffffe);
-	mask = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_ROM_REG);
 	address |= PCI_ROM_ENABLE;
 	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_ROM_REG, address);
-
-	romt = pa->pa_memt;
-	romsize = PCI_ROM_SIZE(mask);
-	if (bus_space_map(romt, PCI_ROM_ADDR(address), romsize, 0, &romh)) {
-		romsize = 0;
-		goto fail;
-	}
 
 	bus_space_read_region_1(romt, romh, 0, buf, sizeof(buf));
 	if (bcmp(buf, cas_promhdr, sizeof(cas_promhdr)))
@@ -1699,20 +1694,14 @@ cas_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if ((ifp->if_flags & IFF_RUNNING) &&
-			    ((ifp->if_flags ^ sc->sc_if_flags) &
-			     (IFF_ALLMULTI | IFF_PROMISC)) != 0)
-				cas_setladrf(sc);
-			else {
-				if ((ifp->if_flags & IFF_RUNNING) == 0)
-					cas_init(ifp);
-			}
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
+				cas_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				cas_stop(ifp, 1);
 		}
-		sc->sc_if_flags = ifp->if_flags;
-
 #ifdef CAS_DEBUG
 		sc->sc_debug = (ifp->if_flags & IFF_DEBUG) != 0 ? 1 : 0;
 #endif

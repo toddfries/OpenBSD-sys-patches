@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.172 2009/06/03 21:30:19 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.178 2009/08/11 19:17:16 miod Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff
@@ -48,9 +48,6 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/extent.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
@@ -164,6 +161,7 @@ paddr_t	avail_end;
 struct user *proc0paddr;
 long mem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(64) / sizeof(long)];
 struct extent *hppa_ex;
+struct pool hppa_fppl;
 
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
@@ -288,7 +286,6 @@ hppa_init(start)
 {
 	extern u_long cpu_hzticks;
 	extern int kernel_text;
-	vaddr_t v, v1;
 	int error;
 
 	pdc_init();	/* init PDC iface, so we can call em easy */
@@ -387,25 +384,8 @@ hppa_init(start)
 	    EX_NOWAIT))
 		panic("cannot reserve main memory");
 
-	/*
-	 * Now allocate kernel dynamic variables
-	 */
-
-	v1 = v = round_page(start);
-#define valloc(name, type, num) (name) = (type *)v; v = (vaddr_t)((name)+(num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-#undef valloc
-	v = round_page(v);
-	bzero ((void *)v1, (v - v1));
-
 	/* sets resvphysmem */
-	pmap_bootstrap(v);
+	pmap_bootstrap(round_page(start));
 
 	/* space has been reserved in pmap_bootstrap() */
 	initmsgbuf((caddr_t)(ptoa(physmem) - round_page(MSGBUFSIZE)),
@@ -421,6 +401,8 @@ hppa_init(start)
 #endif
 	ficacheall();
 	fdcacheall();
+
+	pool_init(&hppa_fppl, sizeof(struct fpreg), 16, 0, 0, "hppafp", NULL);
 }
 
 void
@@ -645,13 +627,6 @@ cpu_startup(void)
 	printf("real mem = %u (%uMB)\n", ptoa(physmem),
 	    ptoa(physmem) / 1024 / 1024);
 	printf("rsvd mem = %u (%uKB)\n", ptoa(resvmem), ptoa(resvmem) / 1024);
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -1227,11 +1202,10 @@ setregs(p, pack, stack, retval)
 		fpu_exit();
 		fpu_curpcb = 0;
 	}
-	pcb->pcb_fpregs[0] = ((u_int64_t)HPPA_FPU_INIT) << 32;
-	pcb->pcb_fpregs[1] = 0;
-	pcb->pcb_fpregs[2] = 0;
-	pcb->pcb_fpregs[3] = 0;
-	fdcache(HPPA_SID_KERNEL, (vaddr_t)pcb->pcb_fpregs, 8 * 4);
+	pcb->pcb_fpregs->fpr_regs[0] = ((u_int64_t)HPPA_FPU_INIT) << 32;
+	pcb->pcb_fpregs->fpr_regs[1] = 0;
+	pcb->pcb_fpregs->fpr_regs[2] = 0;
+	pcb->pcb_fpregs->fpr_regs[3] = 0;
 
 	retval[1] = 0;
 }
@@ -1449,8 +1423,6 @@ sys_sigreturn(p, v, retval)
 	tf->tf_ret1 = ksc.sc_regs[30];
 	tf->tf_r31 = ksc.sc_regs[31];
 	bcopy(ksc.sc_fpregs, p->p_addr->u_pcb.pcb_fpregs,
-	    sizeof(ksc.sc_fpregs));
-	fdcache(HPPA_SID_KERNEL, (vaddr_t)p->p_addr->u_pcb.pcb_fpregs,
 	    sizeof(ksc.sc_fpregs));
 
 	tf->tf_iioq_head = ksc.sc_pcoqh | HPPA_PC_PRIV_USER;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uha.c,v 1.12 2009/02/16 21:19:07 miod Exp $	*/
+/*	$OpenBSD: uha.c,v 1.14 2009/09/04 04:57:14 miod Exp $	*/
 /*	$NetBSD: uha.c,v 1.3 1996/10/13 01:37:29 christos Exp $	*/
 
 #undef UHADEBUG
@@ -79,10 +79,6 @@
 
 #include <dev/ic/uhareg.h>
 #include <dev/ic/uhavar.h>
-
-#ifndef	DDB
-#define Debugger() panic("should call debugger here (ultra14f.c)")
-#endif /* ! DDB */
 
 #define KVTOPHYS(x)	vtophys((vaddr_t)x)
 
@@ -299,8 +295,7 @@ uha_done(sc, mscp)
 	 * into the xfer and call whoever started it
 	 */
 	if ((mscp->flags & MSCP_ALLOC) == 0) {
-		printf("%s: exiting ccb not allocated!\n", sc->sc_dev.dv_xname);
-		Debugger();
+		panic("%s: exiting ccb not allocated!\n", sc->sc_dev.dv_xname);
 		return;
 	}
 	if (xs->error == XS_NOERROR) {
@@ -497,6 +492,10 @@ uha_scsi_cmd(xs)
 
 bad:
 	xs->error = XS_DRIVER_STUFFUP;
+	xs->flags |= ITSDONE;
+	s = splbio();
+	scsi_done(xs);
+	splx(s);
 	uha_free_mscp(sc, mscp);
 	return (COMPLETE);
 }

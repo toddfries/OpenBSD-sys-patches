@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccd.c,v 1.86 2009/06/04 05:57:27 krw Exp $	*/
+/*	$OpenBSD: ccd.c,v 1.88 2009/08/24 08:51:18 jasper Exp $	*/
 /*	$NetBSD: ccd.c,v 1.33 1996/05/05 04:21:14 thorpej Exp $	*/
 
 /*-
@@ -175,7 +175,7 @@ int	ccdinit(struct ccddevice *, char **, struct proc *);
 int	ccdlookup(char *, struct proc *p, struct vnode **);
 long	ccdbuffer(struct ccd_softc *, struct buf *, daddr64_t, caddr_t,
     long, struct ccdbuf **);
-void	ccdgetdisklabel(dev_t, struct ccd_softc *, struct disklabel *, int);
+int	ccdgetdisklabel(dev_t, struct ccd_softc *, struct disklabel *, int);
 INLINE struct ccdbuf *getccdbuf(void);
 INLINE void putccdbuf(struct ccdbuf *);
 
@@ -809,7 +809,7 @@ ccdbuffer(struct ccd_softc *cs, struct buf *bp, daddr64_t bn, caddr_t addr,
 		}
 		cbn *= cs->sc_ileave;
 		ci = &cs->sc_cinfo[ccdisk];
-		CCD_DPRINTF(CCDB_IO, ("ccdisk %d cbn %d ci %p ci2 %p\n",
+		CCD_DPRINTF(CCDB_IO, ("ccdisk %d cbn %lld ci %p ci2 %p\n",
 		    ccdisk, cbn, ci, ci2));
 	}
 
@@ -863,7 +863,7 @@ ccdbuffer(struct ccd_softc *cs, struct buf *bp, daddr64_t bn, caddr_t addr,
 		cbp->cb_dep = cbp2;
 	}
 
-	CCD_DPRINTF(CCDB_IO, (" dev %x(u%d): cbp %p bn %d addr %p bcnt %ld\n",
+	CCD_DPRINTF(CCDB_IO, (" dev %x(u%d): cbp %p bn %lld addr %p bcnt %ld\n",
 	    ci->ci_dev, ci-cs->sc_cinfo, cbp, bp->b_blkno,
 	    bp->b_data, bp->b_bcount));
 
@@ -909,7 +909,7 @@ ccdiodone(struct buf *vbp)
 	    "ccdiodone: mirror component\n" : 
 	    "ccdiodone: bp %p bcount %ld resid %ld\n",
 	    bp, bp->b_bcount, bp->b_resid));
-	CCD_DPRINTF(CCDB_IO, (" dev %x(u%d), cbp %p bn %d addr %p bcnt %ld\n",
+	CCD_DPRINTF(CCDB_IO, (" dev %x(u%d), cbp %p bn %lld addr %p bcnt %ld\n",
 	    vbp->b_dev, cbp->cb_comp, cbp, vbp->b_blkno,
 	    vbp->b_data, vbp->b_bcount));
 
@@ -1353,12 +1353,11 @@ ccdlookup(char *path, struct proc *p, struct vnode **vpp)
  * Read the disklabel from the ccd.  If one is not present, fake one
  * up.
  */
-void
+int
 ccdgetdisklabel(dev_t dev, struct ccd_softc *cs, struct disklabel *lp,
     int spoofonly)
 {
 	struct ccdgeom *ccg = &cs->sc_geom;
-	char *errstring;
 
 	bzero(lp, sizeof(*lp));
 
@@ -1384,11 +1383,8 @@ ccdgetdisklabel(dev_t dev, struct ccd_softc *cs, struct disklabel *lp,
 	/*
 	 * Call the generic disklabel extraction routine.
 	 */
-	errstring = readdisklabel(DISKLABELDEV(dev), ccdstrategy,
+	return readdisklabel(DISKLABELDEV(dev), ccdstrategy,
 	    cs->sc_dkdev.dk_label, spoofonly);
-	/* It's actually extremely common to have unlabeled ccds. */
-	if (errstring != NULL)
-		CCD_DPRINTF(CCDB_LABEL, ("%s: %s\n", cs->sc_xname, errstring));
 }
 
 #ifdef CCDDEBUG

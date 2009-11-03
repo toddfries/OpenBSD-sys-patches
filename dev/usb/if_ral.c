@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ral.c,v 1.109 2008/10/15 19:12:18 blambert Exp $	*/
+/*	$OpenBSD: if_ral.c,v 1.111 2009/10/13 19:33:17 pirofti Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2006
@@ -193,7 +193,7 @@ static const uint32_t ural_rf2526_r2[] =    RAL_RF2526_R2;
 int ural_match(struct device *, void *, void *); 
 void ural_attach(struct device *, struct device *, void *); 
 int ural_detach(struct device *, int); 
-int ural_activate(struct device *, enum devact); 
+int ural_activate(struct device *, int); 
 
 struct cfdriver ural_cd = { 
 	NULL, "ural", DV_IFNET 
@@ -572,7 +572,7 @@ ural_task(void *arg)
 
 	case IEEE80211_S_SCAN:
 		ural_set_chan(sc, ic->ic_bss->ni_chan);
-		timeout_add(&sc->scan_to, hz / 5);
+		timeout_add_msec(&sc->scan_to, 200);
 		break;
 
 	case IEEE80211_S_AUTH:
@@ -2205,7 +2205,7 @@ ural_amrr_update(usbd_xfer_handle xfer, usbd_private_handle priv,
 }
 
 int
-ural_activate(struct device *self, enum devact act)
+ural_activate(struct device *self, int act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:

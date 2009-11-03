@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK-IP32,v 1.2 2009/05/14 21:27:02 miod Exp $
+#	$OpenBSD: RAMDISK-IP32,v 1.8 2009/10/26 18:00:04 miod Exp $
 #
 # THIS KERNEL IS FOR O2 (IP32) SYSTEMS ONLY.
 
@@ -53,10 +53,10 @@ macebus0	at mainbus0	# MACE controller localbus.
 gbe0		at mainbus0
 
 #### Localbus devices
-mec0		at macebus0 base 0x00280000 irq 4
-mkbc0		at macebus0 base 0x00320000 irq 6
-com0		at macebus0 base 0x00390000 irq 5
-com1		at macebus0 base 0x00398000 irq 5
+mec0		at macebus0
+mkbc0		at macebus0
+com0		at macebus0 base 0x00390000
+com1		at macebus0 base 0x00398000
 dsrtc0		at macebus0
 
 #### PCI Bus
@@ -65,6 +65,8 @@ pci*		at macepcibr?	# PCI is on pci bridge
 
 #### SCSI controllers
 ahc*		at pci?
+isp*		at pci?
+mpi*		at pci?
 siop*		at pci?
 
 # USB Controllers
@@ -88,6 +90,8 @@ ubsa*		at uhub?	# Belkin serial adapter
 ucom*		at ubsa?
 ulpt*		at uhub?	# USB Printers	
 umass*		at uhub?	# USB Mass Storage devices
+atapiscsi*	at umass?
+scsibus*	at atapiscsi?
 scsibus*	at umass?
 uhidev*		at uhub?	# Human Interface Devices
 ums*		at uhidev?	# USB mouse
@@ -95,18 +99,50 @@ wsmouse*	at ums? mux 0
 ukbd*		at uhidev?	# USB keyboard
 wskbd*		at ukbd? mux 1
 uhid*		at uhidev?	# USB generic HID support
+atu*		at uhub?	# Atmel AT76c50x based 802.11b
 aue*		at uhub?	# ADMtek AN986 Pegasus Ethernet  
+axe*		at uhub?	# ASIX Electronics AX88172 USB Ethernet
+cdce*		at uhub?	# CDC Ethernet
+cue*		at uhub?	# CATC USB-EL1201A based Ethernet
+kue*		at uhub?	# Kawasaki KL5KUSB101B based Ethernet
+mos*		at uhub?	# MOSCHIP MCS7730/7830 10/100 Ethernet
+otus*		at uhub?	# Atheros AR9001U
+rum*		at uhub?	# Ralink RT2501USB/RT2601USB
+run*		at uhub?	# Ralink RT2700U/RT2800U/RT3000U
+uath*		at uhub?	# Atheros AR5005UG/AR5005UX
+udav*		at uhub?	# Davicom DM9601 based Ethernet
+upgt*		at uhub?	# Conexant/Intersil PrismGT SoftMAC USB
+upl*		at uhub?	# Prolific PL2301/PL2302 host-to-host `network'
+ural*		at uhub?	# Ralink RT2500USB
+url*		at uhub?	# Realtek RTL8150L based adapters
+urtw*		at uhub?	# RealTek 8187
+wi*		at uhub?	# WaveLAN IEEE 802.11DS
+zyd*		at uhub?	# Zydas ZD1211
 ugen*		at uhub?	# USB Generic driver
+
+ppb*		at pci?		# PCI-PCI bridges
+pci*		at ppb?
 
 #### NICs
 dc*		at pci?		# 21143, "tulip" clone ethernet
+em*		at pci?		# Intel Pro/1000 ethernet
 ep*		at pci?		# 3Com 3c59x
 fxp*		at pci?		# EtherExpress 10/100B ethernet
 mtd*		at pci?		# Myson MTD803 3-in-1 Ethernet
 ne*		at pci?		# NE2000-compatible Ethernet
 ti*		at pci?		# Alteon ACEnic gigabit Ethernet
+stge*		at pci?		# Sundance TC9021 GigE
 vr*		at pci?		# VIA Rhine Fast Ethernet
 xl*		at pci?		# 3C9xx ethernet
+re*		at pci?		# Realtek 8169/8169S/8110S
+rl*		at pci?		# Realtek 81[23]9 ethernet
+hme*		at pci?		# Sun Happy Meal
+gem*		at pci?		# Sun 'gem' ethernet
+skc*		at pci?		# SysKonnect GEnesis 984x
+sk*		at skc?		#  each port of above
+mskc*		at pci?		# Marvell Yukon-2
+msk*		at mskc?	#  each port of above
+bge*		at pci?		# Broadcom BCM570x (aka Tigon3)
 
 ##### Media Independent Interface (mii) drivers
 exphy*		at mii?		# 3Com internal PHYs
@@ -118,6 +154,7 @@ nsphy*		at mii?		# NS and compatible PHYs
 nsphyter*	at mii?		# NS and compatible PHYs
 qsphy*		at mii?		# Quality Semi QS6612 PHYs
 sqphy*		at mii?		# Seeq 8x220 PHYs
+luphy*		at mii?		# Lucent LU6612 PHY
 rlphy*		at mii?		# RealTek 8139 internal PHYs
 mtdphy*		at mii?		# Myson MTD972 PHYs
 dcphy*		at mii?		# Digital Clone PHYs
@@ -131,6 +168,8 @@ xmphy*		at mii?		# XaQti XMAC-II PHYs
 nsgphy*		at mii?		# NS gigabit PHYs
 urlphy*		at mii?		# Realtek RTL8150L internal PHY
 rgephy*		at mii?		# Realtek 8169S/8110S PHY
+ipgphy*		at mii?		# IC Plus IP1000A PHYs
+gentbi*		at mii?		# Generic 1000BASE-X ten-bit PHY
 ukphy*		at mii?		# "unknown" PHYs
 
 #### WS console
@@ -142,6 +181,8 @@ wskbd*		at pckbd? console ?
 
 #### SCSI Bus devices
 scsibus*	at ahc?
+scsibus*	at isp?
+scsibus*	at mpi?
 scsibus*	at siop?
 
 sd*		at scsibus?

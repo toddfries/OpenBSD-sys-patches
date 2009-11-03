@@ -1,4 +1,4 @@
-/* $OpenBSD: tga.c,v 1.31 2009/03/29 21:53:52 sthen Exp $ */
+/* $OpenBSD: tga.c,v 1.33 2009/09/05 14:09:35 miod Exp $ */
 /* $NetBSD: tga.c,v 1.40 2002/03/13 15:05:18 ad Exp $ */
 
 /*
@@ -88,8 +88,8 @@ struct tga_devconfig tga_console_dc;
 
 int	tga_ioctl(void *, u_long, caddr_t, int, struct proc *);
 paddr_t	tga_mmap(void *, off_t, int);
-void	tga_copyrows(void *, int, int, int);
-void	tga_copycols(void *, int, int, int, int);
+int	tga_copyrows(void *, int, int, int);
+int	tga_copycols(void *, int, int, int, int);
 int	tga_alloc_screen(void *, const struct wsscreen_descr *,
 	    void **, int *, int *, long *);
 void	tga_free_screen(void *, void *);
@@ -100,9 +100,9 @@ int	tga_rop(struct rasops_info *, int, int, int, int,
 	struct rasops_info *, int, int);
 int	tga_rop_vtov(struct rasops_info *, int, int, int,
 	int, struct rasops_info *, int, int );
-void	tga_putchar(void *c, int row, int col, u_int uc, long attr);
-void	tga_eraserows(void *, int, int, long);
-void	tga_erasecols(void *, int, int, int, long);
+int	tga_putchar(void *c, int row, int col, u_int uc, long attr);
+int	tga_eraserows(void *, int, int, long);
+int	tga_erasecols(void *, int, int, int, long);
 void	tga2_init(struct tga_devconfig *);
 
 void	tga_config_interrupts(struct device *);
@@ -219,14 +219,12 @@ tga_getdevconfig(memt, pc, tag, dc)
 		return;
 
 	DPRINTF("tga_getdevconfig: preparing to map\n");
-#ifdef __OpenBSD__
-	if (bus_space_map(memt, dc->dc_pcipaddr, pcisize, 1, &dc->dc_memh))
-		return;
-	dc->dc_vaddr = dc->dc_memh;
-#else
 	if (bus_space_map(memt, dc->dc_pcipaddr, pcisize,
 	    BUS_SPACE_MAP_PREFETCHABLE | BUS_SPACE_MAP_LINEAR, &dc->dc_memh))
 		return;
+#ifdef __OpenBSD__
+	dc->dc_vaddr = dc->dc_memh;
+#else
 	dc->dc_vaddr = (vaddr_t) bus_space_vaddr(memt, dc->dc_memh);
 #endif
 	DPRINTF("tga_getdevconfig: mapped\n");
@@ -986,7 +984,7 @@ tga_builtin_get_curmax(dc, curposp)
 /*
  * Copy columns (characters) in a row (line).
  */
-void
+int
 tga_copycols(id, row, srccol, dstcol, ncols)
 	void *id;
 	int row, srccol, dstcol, ncols;
@@ -1000,12 +998,14 @@ tga_copycols(id, row, srccol, dstcol, ncols)
 	nx = ri->ri_font->fontwidth * ncols;
 
 	tga_rop(ri, dstx, y, nx, ri->ri_font->fontheight, ri, srcx, y);
+
+	return 0;
 }
 
 /*
  * Copy rows (lines).
  */
-void
+int
 tga_copyrows(id, srcrow, dstrow, nrows)
 	void *id;
 	int srcrow, dstrow, nrows;
@@ -1018,6 +1018,8 @@ tga_copyrows(id, srcrow, dstrow, nrows)
 	ny = ri->ri_font->fontheight * nrows;
 
 	tga_rop(ri, 0, dsty, ri->ri_emuwidth, ny, ri, 0, srcy);
+
+	return 0;
 }
 
 /*
@@ -1249,7 +1251,7 @@ tga_rop_vtov(dst, dx, dy, w, h, src, sx, sy)
 }
 
 
-void
+int
 tga_putchar(c, row, col, uc, attr)
 	void *c;
 	int row, col;
@@ -1313,9 +1315,11 @@ tga_putchar(c, row, col, uc, attr)
 	/* Set grapics mode back to normal. */
 	TGAWREG(dc, TGA_REG_GMOR, 0);
 	TGAWREG(dc, TGA_REG_GPXR_P, 0xffffffff);
+
+	return 0;
 }
 
-void
+int
 tga_eraserows(c, row, num, attr)
 	void *c;
 	int row, num;
@@ -1369,9 +1373,10 @@ tga_eraserows(c, row, num, attr)
 	/* Set grapics mode back to normal. */
 	TGAWREG(dc, TGA_REG_GMOR, 0);
 	
+	return 0;
 }
 
-void
+int
 tga_erasecols (c, row, col, num, attr)
 	void *c;
 	int row, col, num;
@@ -1424,6 +1429,8 @@ tga_erasecols (c, row, col, num, attr)
 
 	/* Set grapics mode back to normal. */
 	TGAWREG(dc, TGA_REG_GMOR, 0);
+
+	return 0;
 }
 
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trunklacp.c,v 1.9 2008/12/01 10:40:57 brad Exp $ */
+/*	$OpenBSD: trunklacp.c,v 1.12 2009/09/17 13:17:55 claudio Exp $ */
 /*	$NetBSD: ieee8023ad_lacp.c,v 1.3 2005/12/11 12:24:54 christos Exp $ */
 /*	$FreeBSD:ieee8023ad_lacp.c,v 1.15 2008/03/16 19:25:30 thompsa Exp $ */
 
@@ -224,16 +224,18 @@ struct mbuf *
 lacp_input(struct trunk_port *tp, struct ether_header *eh, struct mbuf *m)
 {
 	struct lacp_port *lp = LACP_PORT(tp);
+	struct lacp_softc *lsc = lp->lp_lsc;
+	struct lacp_aggregator *la = lp->lp_aggregator;
 	u_int8_t subtype;
 
-	if (m->m_pkthdr.len < sizeof(subtype)) {
-		m_freem(m);
-		return (NULL);
-	}
-	subtype = *mtod(m, u_int8_t *);
+	if (ntohs(eh->ether_type) == ETHERTYPE_SLOW) {
+		if (m->m_pkthdr.len < sizeof(subtype)) {
+			m_freem(m);
+			return (NULL);
+		}
+		subtype = *mtod(m, u_int8_t *);
 
-	switch (subtype) {
-		/* FALLTHROUGH */
+		switch (subtype) {
 		case SLOWPROTOCOLS_SUBTYPE_LACP:
 			lacp_pdu_input(lp, eh, m);
 			return (NULL);
@@ -241,6 +243,18 @@ lacp_input(struct trunk_port *tp, struct ether_header *eh, struct mbuf *m)
 		case SLOWPROTOCOLS_SUBTYPE_MARKER:
 			lacp_marker_input(lp, eh, m);
 			return (NULL);
+		}
+	}
+
+	/*
+	 * If the port is not collecting or not in the active aggregator then
+	 * free and return.
+	 */
+	/* This port is joined to the active aggregator */
+	if ((lp->lp_state & LACP_STATE_COLLECTING) == 0 ||
+	    la == NULL || la != lsc->lsc_active_aggregator) {
+		m_freem(m);
+		return (NULL);
 	}
 
 	/* Not a subtype we are interested in */
@@ -303,36 +317,6 @@ bad:
 	return (EINVAL);
 }
 
-__inline int
-lacp_isactive(struct trunk_port *lgp)
-{
-	struct lacp_port *lp = LACP_PORT(lgp);
-	struct lacp_softc *lsc = lp->lp_lsc;
-	struct lacp_aggregator *la = lp->lp_aggregator;
-
-	/* This port is joined to the active aggregator */
-	if (la != NULL && la == lsc->lsc_active_aggregator)
-		return (1);
-
-	return (0);
-}
-
-__inline int
-lacp_iscollecting(struct trunk_port *lgp)
-{
-	struct lacp_port *lp = LACP_PORT(lgp);
-
-	return ((lp->lp_state & LACP_STATE_COLLECTING) != 0);
-}
-
-__inline int
-lacp_isdistributing(struct trunk_port *lgp)
-{
-	struct lacp_port *lp = LACP_PORT(lgp);
-
-	return ((lp->lp_state & LACP_STATE_DISTRIBUTING) != 0);
-}
-
 void
 lacp_fill_actorinfo(struct lacp_port *lp, struct lacp_peerinfo *info)
 {
@@ -365,7 +349,7 @@ lacp_xmit_lacpdu(struct lacp_port *lp)
 	struct mbuf *m;
 	struct ether_header *eh;
 	struct lacpdu *du;
-	int error;
+	int error, s;
 
 	m = m_gethdr(M_DONTWAIT, MT_DATA);
 	if (m == NULL)
@@ -409,7 +393,9 @@ lacp_xmit_lacpdu(struct lacp_port *lp)
 	 * XXX should use higher priority queue.
 	 * otherwise network congestion can break aggregation.
 	 */
+	s = splnet();
 	error = trunk_enqueue(lp->lp_ifp, m);
+	splx(s);
 	return (error);
 }
 
@@ -420,7 +406,7 @@ lacp_xmit_marker(struct lacp_port *lp)
 	struct mbuf *m;
 	struct ether_header *eh;
 	struct markerdu *mdu;
-	int error;
+	int error, s;
 
 	m = m_gethdr(M_DONTWAIT, MT_DATA);
 	if (m == NULL)
@@ -452,7 +438,9 @@ lacp_xmit_marker(struct lacp_port *lp)
 	    ntohl(mdu->mdu_info.mi_rq_xid)));
 
 	m->m_flags |= M_MCAST;
+	s = splnet();
 	error = trunk_enqueue(lp->lp_ifp, m);
+	splx(s);
 	return (error);
 }
 
@@ -598,6 +586,26 @@ lacp_req(struct trunk_softc *sc, caddr_t data)
 		    ntohs(la->la_partner.lip_portid.lpi_portno);
 		req->partner_state = la->la_partner.lip_state;
 	}
+}
+
+u_int
+lacp_port_status(struct trunk_port *lgp)
+{
+	struct lacp_port	*lp = LACP_PORT(lgp);
+	struct lacp_softc	*lsc = lp->lp_lsc;
+	struct lacp_aggregator	*la = lp->lp_aggregator;
+	u_int			 flags = 0;
+
+	/* This port is joined to the active aggregator */
+	if (la != NULL && la == lsc->lsc_active_aggregator)
+		flags |= TRUNK_PORT_ACTIVE;
+
+	if (lp->lp_state & LACP_STATE_COLLECTING)
+		flags |= TRUNK_PORT_COLLECTING;
+	if (lp->lp_state & LACP_STATE_DISTRIBUTING)
+		flags |= TRUNK_PORT_DISTRIBUTING;
+
+	return (flags);
 }
 
 void
@@ -822,7 +830,7 @@ lacp_suppress_distributing(struct lacp_softc *lsc, struct lacp_aggregator *la)
 	}
 
 	/* set a timeout for the marker frames */
-	timeout_add(&lsc->lsc_transit_callout, LACP_TRANSIT_DELAY * hz / 1000);
+	timeout_add_msec(&lsc->lsc_transit_callout, LACP_TRANSIT_DELAY);
 }
 
 int

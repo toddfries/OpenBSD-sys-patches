@@ -1,4 +1,4 @@
-/*	$OpenBSD: context.S,v 1.22 2009/05/22 20:37:53 miod Exp $ */
+/*	$OpenBSD: context.S,v 1.30 2009/10/22 22:08:54 miod Exp $ */
 
 /*
  * Copyright (c) 2002-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -33,10 +33,11 @@
 #include <machine/cpu.h>
 #include <machine/regnum.h>
 #include <machine/cpustate.h>
+#ifdef CPU_LOONGSON2
+#include <machine/loongson2.h>
+#endif
 
 #include "assym.h"
-
-#define curproc	(cpu_info_primary + CI_CURPROC)
 
 	.set	mips3
 
@@ -59,9 +60,12 @@ LEAF(savectx, 0)
 	REG_S	s8, PCB_CONTEXT+9*REGSZ(a0)
 	REG_S	ra, PCB_CONTEXT+10*REGSZ(a0)
 	REG_S	v0, PCB_CONTEXT+11*REGSZ(a0)
+	GET_CPU_INFO(t0, t1)
+	lw	t0, CI_IPL(t0)
+#ifdef RM7000_ICR
 	cfc0	t1, COP_0_ICR
-	lw	t0, cpl
 	REG_S	t1, PCB_CONTEXT+12*REGSZ(a0)	# save status register
+#endif
 	REG_S	t0, PCB_CONTEXT+13*REGSZ(a0)
 	j	ra
 	move	v0, zero
@@ -102,7 +106,8 @@ END(cpu_idle_cycle)
  * cpu_switchto(struct proc *oldproc, struct proc *newproc)
  */
 NON_LEAF(cpu_switchto, FRAMESZ(CF_SZ), ra)
-	PTR_L	t3, curprocpaddr
+	GET_CPU_INFO(t1, t3)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
 	REG_S	sp, PCB_CONTEXT+8*REGSZ(t3)	# save old sp
 
 	PTR_SUBU sp, sp, FRAMESZ(CF_SZ)
@@ -112,7 +117,7 @@ NON_LEAF(cpu_switchto, FRAMESZ(CF_SZ), ra)
 	beqz	a0, 1f
 	mfc0	v0, COP_0_STATUS_REG
 
-	lw	t0, cpl
+	lw	t0, CI_IPL(t1)
 	REG_S	s0, PCB_CONTEXT+0*REGSZ(t3)	# do a 'savectx()'
 	REG_S	s1, PCB_CONTEXT+1*REGSZ(t3)
 	REG_S	s2, PCB_CONTEXT+2*REGSZ(t3)
@@ -123,9 +128,11 @@ NON_LEAF(cpu_switchto, FRAMESZ(CF_SZ), ra)
 	REG_S	s7, PCB_CONTEXT+7*REGSZ(t3)
 	REG_S	s8, PCB_CONTEXT+9*REGSZ(t3)
 	REG_S	ra, PCB_CONTEXT+10*REGSZ(t3)
-	cfc0	t1, COP_0_ICR
 	REG_S	v0, PCB_CONTEXT+11*REGSZ(t3)
+#ifdef RM7000_ICR
+	cfc0	t1, COP_0_ICR
 	REG_S	t1, PCB_CONTEXT+12*REGSZ(t3)
+#endif
 	REG_S	t0, PCB_CONTEXT+13*REGSZ(t3)
 
 1:
@@ -145,9 +152,10 @@ NON_LEAF(cpu_switchto, FRAMESZ(CF_SZ), ra)
 	move	a0, s0
 
 	PTR_L	t3, P_ADDR(s0)			# get uarea pointer.
-	PTR_S	s0, curproc			# set curproc
-	PTR_S	t3, curprocpaddr
-
+	GET_CPU_INFO(t1, t0)
+	PTR_S	s0, CI_CURPROC(t1)		# set curproc
+	PTR_S	t3, CI_CURPROCPADDR(t1)
+	
 	li	t1, SONPROC
 	sb	t1, P_STAT(s0)			# set to onproc.
 
@@ -252,11 +260,23 @@ ctx2:
 
 ctx3:
 
+#ifdef CPU_LOONGSON2
+#if 0	/* enable if Loongson2 + R5K|R10K kernel ever exist... */
+	mfc0	v0, COP_0_PRID
+	and	v0, 0xff00
+	subi	v0, (MIPS_LOONGSON2 << 8)
+	bnez	v0, 7f
+	nop
+#endif
+	li	v0, COP_0_DIAG_ITLB_CLEAR | COP_0_DIAG_BTB_CLEAR | COP_0_DIAG_RAS_CLEAR
+	mfc0	v0, COP_0_DIAG
+7:
+#endif
+
 	/*
 	 * Restore registers and return.
 	 */
 
-	REG_L	a0, PCB_CONTEXT+13*REGSZ(t3)
 	REG_L	s0, PCB_CONTEXT+0*REGSZ(t3)
 	REG_L	s1, PCB_CONTEXT+1*REGSZ(t3)
 	REG_L	s2, PCB_CONTEXT+2*REGSZ(t3)
@@ -267,15 +287,12 @@ ctx3:
 	REG_L	s7, PCB_CONTEXT+7*REGSZ(t3)
 	REG_L	sp, PCB_CONTEXT+8*REGSZ(t3)
 	REG_L	s8, PCB_CONTEXT+9*REGSZ(t3)
-	sw	a0, cpl
-#ifdef IMASK_EXTERNAL
-	jal	hw_setintrmask
-	nop
-#endif
+	jal	splx
+	REG_L	a0, PCB_CONTEXT+13*REGSZ(t3)
 	REG_L	ra, PCB_CONTEXT+10*REGSZ(t3)
 	REG_L	v0, PCB_CONTEXT+11*REGSZ(t3)
+#ifdef RM7000_ICR
 	REG_L	v1, PCB_CONTEXT+12*REGSZ(t3)
-#ifndef IMASK_EXTERNAL
 	ctc0	v1, COP_0_ICR		# XXX RM7000
 #endif
 	ori	v0, v0, SR_INT_ENAB

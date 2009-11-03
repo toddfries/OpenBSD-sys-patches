@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tsec.c,v 1.22 2009/02/22 20:03:19 kettenis Exp $	*/
+/*	$OpenBSD: if_tsec.c,v 1.27 2009/09/14 18:59:20 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -39,6 +39,8 @@
 #include <net/if.h>
 #include <net/if_media.h>
 #include <net/if_types.h>
+
+#include <dev/ofw/openfirm.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -246,6 +248,7 @@ struct tsec_softc {
 	struct device		sc_dev;
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
+	bus_space_handle_t	sc_mii_ioh;
 	bus_dma_tag_t		sc_dmat;
 
 	struct arpcom		sc_ac;
@@ -280,11 +283,15 @@ struct cfattach tsec_ca = {
 };
 
 struct cfdriver tsec_cd = {
-	NULL, "tsec", DV_DULL
+	NULL, "tsec", DV_IFNET
 };
+
+int	tsec_find_phy(int, int);
 
 uint32_t tsec_read(struct tsec_softc *, bus_addr_t);
 void	tsec_write(struct tsec_softc *, bus_addr_t, uint32_t);
+uint32_t tsec_mii_read(struct tsec_softc *, bus_addr_t);
+void	tsec_mii_write(struct tsec_softc *, bus_addr_t, uint32_t);
 
 int	tsec_ioctl(struct ifnet *, u_long, caddr_t);
 void	tsec_start(struct ifnet *);
@@ -322,9 +329,34 @@ void	tsec_dmamem_free(struct tsec_softc *, struct tsec_dmamem *);
 struct mbuf *tsec_alloc_mbuf(struct tsec_softc *, bus_dmamap_t);
 void	tsec_fill_rx_ring(struct tsec_softc *);
 
+/*
+ * The MPC8349E processor has two TSECs but only one external
+ * management interface to control external PHYs.  The registers
+ * controlling the management interface are part of TSEC1. So to
+ * control a PHY attached to TSEC2, one needs to access TSEC1's
+ * registers.  To deal with this, the first TSEC that attaches maps
+ * the register space for both TSEC1 and TSEC2 and stores the bus
+ * space tag and bus space handle in these global variables.  We use
+ * these to create subregions for each individual interface and the
+ * management interface.
+ */
+bus_space_tag_t		tsec_iot;
+bus_space_handle_t	tsec_ioh;
+
 int
 tsec_match(struct device *parent, void *cfdata, void *aux)
 {
+	struct obio_attach_args *oa = aux;
+	char buf[32];
+
+	if (OF_getprop(oa->oa_node, "device_type", buf, sizeof(buf)) <= 0 ||
+	    strcmp(buf, "network") != 0)
+		return (0);
+
+	if (OF_getprop(oa->oa_node, "compatible", buf, sizeof(buf)) <= 0 ||
+	    strcmp(buf, "gianfar") != 0)
+		return (0);
+
 	return (1);
 }
 
@@ -334,14 +366,41 @@ tsec_attach(struct device *parent, struct device *self, void *aux)
 	struct tsec_softc *sc = (void *)self;
 	struct obio_attach_args *oa = aux;
 	struct ifnet *ifp;
-	int n;
+	int phy, n;
 
-	sc->sc_iot = oa->oa_iot;
-	if (bus_space_map(sc->sc_iot, oa->oa_offset, 3072, 0, &sc->sc_ioh)) {
-		printf(": can't map registers\n");
-		return;
+	if (OF_getprop(oa->oa_node, "phy-handle", &phy,
+	    sizeof(phy)) == sizeof(phy)) {
+		int node, reg;
+
+		node = tsec_find_phy(OF_peer(0), phy);
+		if (node == -1 || OF_getprop(node, "reg", &reg,
+		    sizeof(reg)) != sizeof(reg)) {
+			printf(": can't find PHY\n");
+			return;
+		}
+
+		oa->oa_phy = reg;
 	}
+
+	/* Map registers for TSEC1 & TSEC2 if they're not mapped yet. */
+	if (oa->oa_iot != tsec_iot) {
+		tsec_iot = oa->oa_iot;
+		if (bus_space_map(tsec_iot, oa->oa_offset & 0xffffc000,
+		    8192, 0, &tsec_ioh)) {
+			printf(": can't map registers\n");
+			return;
+		}
+	}
+
+	sc->sc_iot = tsec_iot;
 	sc->sc_dmat = oa->oa_dmat;
+
+	/* Ethernet Controller registers. */
+	bus_space_subregion(tsec_iot, tsec_ioh, oa->oa_offset & 0x3fff,
+	    3072, &sc->sc_ioh);
+
+	/* MII Management registers. */
+	bus_space_subregion(tsec_iot, tsec_ioh, 0, 3072, &sc->sc_mii_ioh);
 
 	myetheraddr(sc->sc_lladdr);
 	printf(": address %s\n", ether_sprintf(sc->sc_lladdr));
@@ -400,6 +459,24 @@ tsec_attach(struct device *parent, struct device *self, void *aux)
 	    sc->sc_dev.dv_xname);
 }
 
+int
+tsec_find_phy(int node, int phy)
+{
+	int child, handle;
+
+	if (OF_getprop(node, "linux,phandle", &handle,
+	    sizeof(handle)) == sizeof(handle) && phy == handle)
+		return (node);
+
+	for (child = OF_child(node); child != 0; child = OF_peer(child)) {
+		node = tsec_find_phy(child, phy);
+		if (node != -1)
+			return node;
+	}
+
+	return (-1);
+}
+
 uint32_t
 tsec_read(struct tsec_softc *sc, bus_addr_t addr)
 {
@@ -410,6 +487,18 @@ void
 tsec_write(struct tsec_softc *sc, bus_addr_t addr, uint32_t data)
 {
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, addr, htole32(data));
+}
+
+uint32_t
+tsec_mii_read(struct tsec_softc *sc, bus_addr_t addr)
+{
+	return (letoh32(bus_space_read_4(sc->sc_iot, sc->sc_mii_ioh, addr)));
+}
+
+void
+tsec_mii_write(struct tsec_softc *sc, bus_addr_t addr, uint32_t data)
+{
+	bus_space_write_4(sc->sc_iot, sc->sc_mii_ioh, addr, htole32(data));
 }
 
 void
@@ -552,13 +641,13 @@ tsec_mii_readreg(struct device *self, int phy, int reg)
 	uint32_t v;
 	int n;
 
-	tsec_write(sc, TSEC_MIIMADD, (phy << 8) | reg);
-	tsec_write(sc, TSEC_MIIMCOM, 0);
-	tsec_write(sc, TSEC_MIIMCOM, TSEC_MIIMCOM_READ);
+	tsec_mii_write(sc, TSEC_MIIMADD, (phy << 8) | reg);
+	tsec_mii_write(sc, TSEC_MIIMCOM, 0);
+	tsec_mii_write(sc, TSEC_MIIMCOM, TSEC_MIIMCOM_READ);
 	for (n = 0; n < 100; n++) {
-		v = tsec_read(sc, TSEC_MIIMIND);
+		v = tsec_mii_read(sc, TSEC_MIIMIND);
 		if ((v & (TSEC_MIIMIND_NOTVALID | TSEC_MIIMIND_BUSY)) == 0)
-			return (tsec_read(sc, TSEC_MIIMSTAT));
+			return (tsec_mii_read(sc, TSEC_MIIMSTAT));
 		delay(10);
 	}
 
@@ -573,10 +662,10 @@ tsec_mii_writereg(struct device *self, int phy, int reg, int val)
 	uint32_t v;
 	int n;
 
-	tsec_write(sc, TSEC_MIIMADD, (phy << 8) | reg);
-	tsec_write(sc, TSEC_MIIMCON, val);
+	tsec_mii_write(sc, TSEC_MIIMADD, (phy << 8) | reg);
+	tsec_mii_write(sc, TSEC_MIIMCON, val);
 	for (n = 0; n < 100; n++) {
-		v = tsec_read(sc, TSEC_MIIMIND);
+		v = tsec_mii_read(sc, TSEC_MIIMIND);
 		if ((v & TSEC_MIIMIND_BUSY) == 0)
 			return;
 		delay(10);
@@ -824,7 +913,7 @@ tsec_up(struct tsec_softc *sc)
 	sc->sc_txdesc = TSEC_DMA_KVA(sc->sc_txring);
 
 	sc->sc_txbuf = malloc(sizeof(struct tsec_buf) * TSEC_NTXDESC,
-	    M_WAIT, M_DEVBUF);
+	    M_DEVBUF, M_WAITOK);
 	for (i = 0; i < TSEC_NTXDESC; i++) {
 		txb = &sc->sc_txbuf[i];
 		bus_dmamap_create(sc->sc_dmat, MCLBYTES, TSEC_NTXSEGS,
@@ -850,7 +939,7 @@ tsec_up(struct tsec_softc *sc)
 	sc->sc_rxdesc = TSEC_DMA_KVA(sc->sc_rxring);
 
 	sc->sc_rxbuf = malloc(sizeof(struct tsec_buf) * TSEC_NRXDESC,
-	    M_WAIT, M_DEVBUF);
+	    M_DEVBUF, M_WAITOK);
 
 	for (i = 0; i < TSEC_NRXDESC; i++) {
 		rxb = &sc->sc_rxbuf[i];
@@ -1196,15 +1285,9 @@ tsec_alloc_mbuf(struct tsec_softc *sc, bus_dmamap_t map)
 {
 	struct mbuf *m = NULL;
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->sc_ac.ac_if, MCLBYTES);
+	if (!m)
 		return (NULL);
-
-	MCLGETI(m, M_DONTWAIT, &sc->sc_ac.ac_if, MCLBYTES);
-	if ((m->m_flags & M_EXT) == 0) {
-		m_freem(m);
-		return (NULL);
-	}
 	m->m_len = m->m_pkthdr.len = MCLBYTES;
 
 	if (bus_dmamap_load_mbuf(sc->sc_dmat, map, m, BUS_DMA_NOWAIT) != 0) {

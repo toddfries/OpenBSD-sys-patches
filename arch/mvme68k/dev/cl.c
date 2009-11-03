@@ -1,4 +1,4 @@
-/*	$OpenBSD: cl.c,v 1.47 2009/05/31 12:25:52 miod Exp $ */
+/*	$OpenBSD: cl.c,v 1.49 2009/10/31 12:00:06 fgsch Exp $ */
 
 /*
  * Copyright (c) 1995 Dale Rahn. All rights reserved.
@@ -650,7 +650,7 @@ if (channel == 2) { /* test one channel now */
 #endif /* CL_DMA_WORKS */
 			sc->cl_reg->cl_car = save;
 		}
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0) {
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0) {
 		splx(s);
 		return(EBUSY);
 	}
@@ -1555,6 +1555,7 @@ cl_txintr(arg)
 							wakeup((caddr_t) &tp->t_outq);
 						}
 						selwakeup(&tp->t_wsel);
+						KNOTE(&tp->t_wsel.si_note, 0);
 					}
 					sc->cl_reg->cl_ier = sc->cl_reg->cl_ier & ~0x3;
 				}
@@ -1588,6 +1589,7 @@ cl_txintr(arg)
 					wakeup((caddr_t) &tp->t_outq);
 				}
 				selwakeup(&tp->t_wsel);
+				KNOTE(&tp->t_wsel.si_note, 0);
 			}
 			sc->cl_reg->cl_ier = sc->cl_reg->cl_ier & ~0x3;
 		}

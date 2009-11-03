@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.664 2009/06/06 03:20:57 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.669 2009/08/14 20:39:02 cnst Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -66,6 +66,7 @@ acpithinkpad*	at acpi?
 acpivideo*	at acpi?
 acpivout*	at acpivideo?
 acpipwrres*	at acpi?
+#aibs*		at acpi?
 
 option		PCIVERBOSE
 option		EISAVERBOSE
@@ -161,6 +162,7 @@ admtm*	at iic?				# Analog Devices ADM1025
 admtmp*	at iic?				# Analog Devices ADM1030
 admtt*	at iic?				# Analog Devices ADM1031
 adt*	at iic?				# Analog Devices ADT7460
+lisa*	at iic?				# STMicroelectronics LIS331DL motion
 lm*	at iic?				# National Semiconductor LM78/79
 lmenv*	at iic?				# National Semiconductor LM87
 lmtemp*	at iic?				# National Semiconductor LM75/LM77
@@ -364,7 +366,7 @@ agp*		at sisagp?	# AGP bridges
 agp*		at viaagp?	# AGP bridges
 
 #option		DRM_DEBUG
-inteldrm*	at vga? 	# Intel i915, i945 DRM driver
+inteldrm*	at vga?		# Intel i915, i945 DRM driver
 drm*		at inteldrm?
 #machdrm*	at vga?		# mach64 (3D Rage Pro, Rage) DRM driver
 #drm*		at machdrm?
@@ -627,6 +629,7 @@ gem*	at pci?				# Sun 'gem' ethernet
 vic*	at pci?				# VMware VMXnet virtual interface
 et*	at pci?				# Agere/LSI ET1310
 age*	at pci?				# Attansic L1 Ethernet
+alc*	at pci?				# Attansic L1C/L2C Ethernet
 ale*	at pci?				# Attansic L1E Ethernet
 lii*	at pci?				# Attansic L2 Ethernet
 jme*	at pci?				# JMicron JMC250/JMC260 Ethernet

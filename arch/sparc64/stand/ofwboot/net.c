@@ -1,4 +1,4 @@
-/*	$OpenBSD: net.c,v 1.3 2002/03/14 01:26:46 millert Exp $	*/
+/*	$OpenBSD: net.c,v 1.5 2009/09/03 16:49:13 jsing Exp $	*/
 /*	$NetBSD: net.c,v 1.1 2000/08/20 14:58:38 mrg Exp $	*/
 
 /*
@@ -62,6 +62,7 @@
 #include <lib/libsa/net.h>
 #include <lib/libsa/netif.h>
 
+#include "ofdev.h"
 
 static int net_mountroot_bootparams(void);
 static int net_mountroot_bootp(void);
@@ -76,8 +77,7 @@ static	int open_count;
  * This opens the low-level device and sets f->f_devdata.
  */
 int
-net_open(op)
-	struct of_dev *op;
+net_open(struct of_dev *op)
 {
 	int error = 0;
 	
@@ -103,8 +103,7 @@ bad:
 }
 
 int
-net_close(op)
-	struct of_dev *op;
+net_close(struct of_dev *op)
 {
 	/*
 	 * On last close, do netif close, etc.
@@ -117,7 +116,7 @@ net_close(op)
 }
 
 int
-net_mountroot_bootparams()
+net_mountroot_bootparams(void)
 {
 	/* Get our IP address.  (rarp.c) */
 	if (rarp_getipaddress(netdev_sock) == -1)
@@ -140,7 +139,7 @@ net_mountroot_bootparams()
 }
 
 int
-net_mountroot_bootp()
+net_mountroot_bootp(void)
 {
 	bootp(netdev_sock);
 
@@ -162,7 +161,7 @@ net_mountroot_bootp()
 }
 
 int
-net_mountroot()
+net_mountroot(void)
 {
 	int error;
 
