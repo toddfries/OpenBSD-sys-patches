@@ -327,6 +327,9 @@ struct ifnet {				/* and the entries */
 #define	IFXF_DHCP	0x4		/* IPv4 autoconfiguration */
 #define IFXF_RTSOL	0x8		/* IPv6 autoconfiguration */
 
+#define IFXF_RTSOL	0x100		/* ipv6 autoconfiguration */
+#define IFXF_AUTOCONF	0xF00		/* ip autoconfiguration */
+
 #define	IFXF_CANTCHANGE \
 	(IFXF_TXREADY)
 
