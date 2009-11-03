@@ -324,8 +324,6 @@ struct ifnet {				/* and the entries */
 
 #define IFXF_TXREADY	0x1		/* interface is ready to tx */
 #define	IFXF_NOINET6	0x2		/* don't do inet6 */
-#define	IFXF_DHCP	0x4		/* IPv4 autoconfiguration */
-#define IFXF_RTSOL	0x8		/* IPv6 autoconfiguration */
 
 #define IFXF_RTSOL	0x100		/* ipv6 autoconfiguration */
 #define IFXF_AUTOCONF	0xF00		/* ip autoconfiguration */
@@ -470,7 +468,7 @@ struct if_msghdr {
 	u_short ifm_pad;
 	int	ifm_addrs;	/* like rtm_addrs */
 	int	ifm_flags;	/* value of if_flags */
-	int	ifm_xflags;	/* value of if_xflags */
+	int	ifm_xflags;
 	struct	if_data ifm_data;/* statistics and other data about if */
 };
 
@@ -576,7 +574,6 @@ struct	ifreq {
 		struct	sockaddr ifru_dstaddr;
 		struct	sockaddr ifru_broadaddr;
 		short	ifru_flags;
-		int	ifru_xflags;
 		int	ifru_metric;
 		caddr_t	ifru_data;
 	} ifr_ifru;
@@ -584,7 +581,6 @@ struct	ifreq {
 #define	ifr_dstaddr	ifr_ifru.ifru_dstaddr	/* other end of p-to-p link */
 #define	ifr_broadaddr	ifr_ifru.ifru_broadaddr	/* broadcast address */
 #define	ifr_flags	ifr_ifru.ifru_flags	/* flags */
-#define ifr_xflags	ifr_ifru.ifru_xflags	/* xflags */
 #define	ifr_metric	ifr_ifru.ifru_metric	/* metric */
 #define	ifr_mtu		ifr_ifru.ifru_metric	/* mtu (overload) */
 #define	ifr_media	ifr_ifru.ifru_metric	/* media options (overload) */
