@@ -325,6 +325,9 @@ struct ifnet {				/* and the entries */
 #define IFXF_TXREADY	0x1		/* interface is ready to tx */
 #define	IFXF_NOINET6	0x2		/* don't do inet6 */
 
+#define IFXF_RTSOL	0x100		/* ipv6 autoconfiguration */
+#define IFXF_AUTOCONF	0xF00		/* ip autoconfiguration */
+
 #define	IFXF_CANTCHANGE \
 	(IFXF_TXREADY)
 
