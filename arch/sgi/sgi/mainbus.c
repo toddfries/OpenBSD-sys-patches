@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.5 2009/10/30 08:13:57 syuu Exp $ */
+/*	$OpenBSD: mainbus.c,v 1.7 2009/11/07 18:56:55 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -73,9 +73,9 @@ mbattach(struct device *parent, struct device *self, void *aux)
 	 * code.
 	 */
 	switch (sys_config.system_type) {
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
-	case SGI_O200:
-	case SGI_O300:
+#ifdef TGT_ORIGIN
+	case SGI_IP27:
+	case SGI_IP35:
 		ip27_autoconf(self);
 		return;
 #endif

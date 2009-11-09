@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbow.c,v 1.22 2009/10/26 20:14:42 miod Exp $	*/
+/*	$OpenBSD: xbow.c,v 1.24 2009/11/07 18:56:55 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -161,8 +161,8 @@ xbowmatch(struct device *parent, void *match, void *aux)
 		return (0);
 
 	switch (sys_config.system_type) {
-	case SGI_O200:
-	case SGI_O300:
+	case SGI_IP27:
+	case SGI_IP35:
 	case SGI_OCTANE:
 		return (1);
 	default:
@@ -298,7 +298,7 @@ xbowattach(struct device *parent, struct device *self, void *aux)
 	case SGI_OCTANE:
 		klcfg.probe_order = xbow_probe_octane;
 		break;
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 	default:
 		/*
 		 * Default value for the interrupt register.
@@ -307,7 +307,7 @@ xbowattach(struct device *parent, struct device *self, void *aux)
 			xbow_intr_widget_register =
 			    (1UL << 47) /* XIO I/O space */ |
 			    (nasid <<
-			      (sys_config.system_type == SGI_O300 ? 39 : 38)) |
+			      (sys_config.system_type == SGI_IP35 ? 39 : 38)) |
 			    ((paddr_t)IP27_RHUB_ADDR(0, HUBPI_IR_CHANGE) -
 			     IP27_NODE_IO_BASE(0)) /* HUB register offset */;
 
@@ -394,7 +394,7 @@ xbow_attach_widget(struct device *self, int16_t nasid, int widget,
 	return 0;
 }
 
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 
 /*
  * These two functions try to figure out the configuration of the XBow

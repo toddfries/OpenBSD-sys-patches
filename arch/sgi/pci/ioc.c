@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioc.c,v 1.24 2009/11/02 17:20:47 miod Exp $	*/
+/*	$OpenBSD: ioc.c,v 1.28 2009/11/08 22:44:16 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Joel Sing.
@@ -30,6 +30,11 @@
 #include <mips64/archtype.h>
 #include <machine/autoconf.h>
 #include <machine/bus.h>
+
+#ifdef TGT_ORIGIN
+#include <sgi/sgi/ip27.h>
+#include <sgi/sgi/l1.h>
+#endif
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -103,6 +108,17 @@ int	iocow_send_bit(void *, int);
 int	iocow_read_byte(void *);
 int	iocow_triplet(void *, int);
 int	iocow_pulse(struct ioc_softc *, int, int);
+
+#ifdef TGT_ORIGIN
+/*
+ * A mask of nodes on which an ioc driver has attached.
+ * We use this to prevent attaching a pci IOC3 card which NIC has failed,
+ * as the onboard IOC3.
+ *
+ * XXX This obviously will not work in N mode...
+ */
+static	uint64_t ioc_nodemask = 0;
+#endif
 
 int
 ioc_match(struct device *parent, void *match, void *aux)
@@ -213,9 +229,15 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 	device_mask = 0;
 	if (sc->sc_owserial != NULL) {
 		if (strncmp(sc->sc_owserial->sc_product, "030-0873-", 9) == 0) {
-			/* MENET board */
-			device_mask = (1 << IOCDEV_SERIAL_A) |
-			    (1 << IOCDEV_SERIAL_B) | (1 << IOCDEV_EF);
+			/*
+			 * MENET board; these attach as four ioc devices
+			 * behind an xbridge. However the fourth one lacks
+			 * the superio chip.
+			 */
+			device_mask = (1 << IOCDEV_EF);
+			if (pa->pa_device != 3)
+				device_mask = (1 << IOCDEV_SERIAL_A) |
+				    (1 << IOCDEV_SERIAL_B);
 			shared_handler = 1;
 		} else
 		if (strncmp(sc->sc_owserial->sc_product, "030-0891-", 9) == 0) {
@@ -241,26 +263,38 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 			goto unknown;
 		}
 	} else {
+#ifdef TGT_ORIGIN
 		/*
 		 * If no owserial device has been found, then it is
 		 * very likely that we are the on-board IOC3 found
-		 * on IP27 and IP35 systems.
+		 * on IP27 and IP35 systems, unless we have already
+		 * found an on-board IOC3 on this node.
 		 */
-		if (sys_config.system_type == SGI_O200 ||
-		    sys_config.system_type == SGI_O300) {
+		if ((sys_config.system_type == SGI_IP27 ||
+		    sys_config.system_type == SGI_IP35) &&
+		    !ISSET(ioc_nodemask, 1UL << currentnasid)) {
+			SET(ioc_nodemask, 1UL << currentnasid);
+
 			device_mask = (1 << IOCDEV_SERIAL_A) |
 			    (1 << IOCDEV_SERIAL_B) | (1 << IOCDEV_LPT) |
 			    (1 << IOCDEV_KBC) | (1 << IOCDEV_RTC) |
 			    (1 << IOCDEV_EF);
+			/*
+			 * Origin 300 onboard IOC3 do not have PS/2 ports;
+			 * since they can only be connected to other 300 or
+			 * 350 bricks (the latter using IOC4 devices),
+			 * it is safe to do this regardless of the current
+			 * nasid.
+			 */
+			if (sys_config.system_type == SGI_IP35 &&
+			    sys_config.system_subtype == IP35_O300)
+				device_mask &= ~(1 << IOCDEV_KBC);
+
 			rtcbase = IOC3_BYTEBUS_0;
 			dual_irq = 1;
-			/*
-			 * XXX On IP35 class machines, there are no
-			 * XXX Number-In-a-Can chips to tell us the
-			 * XXX Ethernet address, we need to query
-			 * XXX the L1 controller.
-			 */
-		} else {
+		} else
+#endif
+		{
 unknown:
 			/*
 			 * Well, we don't really know what kind of device
@@ -369,19 +403,24 @@ establish:
 		    self->dv_xname, dual_irq ? "ethernet " : "");
 		goto unregister;
 	}
-	printf("%s%s\n", dual_irq ? ", ethernet " : "",
+	printf("%s%s\n", dual_irq ? "; ethernet " : "",
 	    pci_intr_string(sc->sc_pc, ih1));
 
 	/*
 	 * Acknowledge all pending interrupts, and disable them.
+	 * Be careful not all registers may be wired depending on what
+	 * devices are actually present.
 	 */
 
-	bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IEC, ~0x0);
-	bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IES, 0x0);
-	bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IR,
-	    bus_space_read_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IR));
-	if (ISSET(device_mask, 1 << IOCDEV_EF))
+	if ((device_mask & ~(1 << IOCDEV_EF)) != 0) {
+		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IEC, ~0x0);
+		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IES, 0x0);
+		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IR,
+		    bus_space_read_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IR));
+	}
+	if ((device_mask & (1 << IOCDEV_EF)) != 0) {
 		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_ENET_IER, 0);
+	}
 
 	/*
 	 * Attach other sub-devices.
@@ -394,6 +433,11 @@ establish:
 		 */
 		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_UARTA_SSCR, 0);
 		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_UARTB_SSCR, 0);
+
+		bus_space_write_4(sc->sc_memt, sc->sc_memh,
+		    IOC3_UARTA_SHADOW, 0);
+		bus_space_write_4(sc->sc_memt, sc->sc_memh,
+		    IOC3_UARTB_SHADOW, 0);
 
 		ioc_attach_child(self, "com", IOC3_UARTA_BASE, IOCDEV_SERIAL_A);
 		ioc_attach_child(self, "com", IOC3_UARTB_BASE, IOCDEV_SERIAL_B);
@@ -422,6 +466,8 @@ ioc_attach_child(struct device *ioc, const char *name, bus_addr_t base, int dev)
 	struct ioc_softc *sc = (struct ioc_softc *)ioc;
 	struct ioc_attach_args iaa;
 
+	memset(&iaa, 0, sizeof iaa);
+
 	iaa.iaa_name = name;
 	iaa.iaa_memt = sc->sc_memt;
 	iaa.iaa_memh = sc->sc_memh;
@@ -429,17 +475,23 @@ ioc_attach_child(struct device *ioc, const char *name, bus_addr_t base, int dev)
 	iaa.iaa_base = base;
 	iaa.iaa_dev = dev;
 
-	if (sc->sc_owmac != NULL)
-		memcpy(iaa.iaa_enaddr, sc->sc_owmac->sc_enaddr, 6);
-	else {
-		/*
-		 * XXX On IP35, there is no Number-In-a-Can attached to
-		 * XXX the onboard IOC3; instead, the Ethernet address
-		 * XXX is stored in the machine eeprom and can be
-		 * XXX queried by sending the appropriate L1 command
-		 * XXX to the L1 UART. This L1 code is not written yet.
-		 */
-		memset(iaa.iaa_enaddr, 0xff, 6);
+	if (dev == IOCDEV_EF) {
+		if (sc->sc_owmac != NULL)
+			memcpy(iaa.iaa_enaddr, sc->sc_owmac->sc_enaddr, 6);
+		else {
+#ifdef TGT_ORIGIN
+			/*
+			 * On IP35 class machines, there are no
+			 * Number-In-a-Can attached to the onboard
+			 * IOC3; instead, the Ethernet address is
+			 * stored in the Brick EEPROM, and can be
+			 * retrieved with an L1 controller query.
+			 */
+			if (l1_get_brick_ethernet_address(currentnasid,
+			    iaa.iaa_enaddr) != 0)
+#endif
+				memset(iaa.iaa_enaddr, 0xff, 6);
+		}
 	}
 
 	return config_found_sm(ioc, &iaa, ioc_print, ioc_search_mundane);

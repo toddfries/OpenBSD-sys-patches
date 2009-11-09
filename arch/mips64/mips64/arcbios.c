@@ -1,4 +1,4 @@
-/*	$OpenBSD: arcbios.c,v 1.22 2009/07/15 20:34:57 martynas Exp $	*/
+/*	$OpenBSD: arcbios.c,v 1.24 2009/11/07 18:56:54 miod Exp $	*/
 /*-
  * Copyright (c) 1996 M. Warner Losh.  All rights reserved.
  * Copyright (c) 1996-2004 Opsycon AB.  All rights reserved.
@@ -37,7 +37,7 @@
 #include <mips64/arcbios.h>
 #include <mips64/archtype.h>
 
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 #include <machine/mnode.h>
 #endif
 
@@ -219,7 +219,7 @@ bios_configure_memory()
 	uint64_t start, count;
 	MEMORYTYPE type;
 	vaddr_t seg_start, seg_end;
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 	int seen_free = 0;
 #endif
 	int i;
@@ -247,10 +247,8 @@ bios_configure_memory()
 				type = FreeMemory;
 #endif
 
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
-			if ((sys_config.system_type == SGI_O200 ||
-			     sys_config.system_type == SGI_O300)) {
-
+#ifdef TGT_ORIGIN
+			if (sys_config.system_type == SGI_IP27) {
 				/*
 				 * For the lack of a better way to tell
 				 * IP27 apart from IP35, look at the
@@ -264,7 +262,7 @@ bios_configure_memory()
 					seen_free = 1;
 					if (start >= 0x20)	/* IP35 */
 						sys_config.system_type =
-						    SGI_O300;
+						    SGI_IP35;
 				}
 
 				/*
@@ -287,7 +285,7 @@ bios_configure_memory()
 				if (type == FirmwarePermanent) {
 					descr = NULL; /* abort loop */
 					count = ((sys_config.system_type ==
-					    SGI_O200 ?  32 : 64) << (20 - 12)) -
+					    SGI_IP27 ?  32 : 64) << (20 - 12)) -
 					    start;
 				}
 			}
@@ -347,7 +345,7 @@ bios_configure_memory()
 		default:		/* Unknown type, leave it alone... */
 			break;
 		}
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 		if (descr == NULL)
 			break;
 #endif
@@ -423,13 +421,13 @@ bios_get_system_type()
 			}
 		}
 	} else {
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 		if (IP27_KLD_KLCONFIG(0)->magic == IP27_KLDIR_MAGIC) {
 			/*
 			 * If we find a kldir assume IP27 for now.
 			 * We'll decide whether this is IP27 or IP35 later.
 			 */
-			return SGI_O200;
+			return SGI_IP27;
 		}
 #endif
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.26 2009/10/26 20:14:42 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.28 2009/11/07 22:48:37 miod Exp $	*/
 /*
  * Copyright (c) 2009 Miodrag Vallat.
  *
@@ -119,6 +119,7 @@ void	bootpath_next(void);
  */
 int	cold = 1;			/* if 1, still working on cold-start */
 struct device *bootdv = NULL;
+int16_t	currentnasid = 0;
 
 char	osloadpartition[256];
 
@@ -157,7 +158,7 @@ static char bootpath_store[sizeof osloadpartition];
 static char *bootpath_curpos;
 static char *bootpath_lastpos;
 static int bootpath_lastunit;
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 static int dksc_ctrl, dksc_mode;
 #endif
 
@@ -170,7 +171,7 @@ bootpath_init()
 	strlcpy(bootpath_store, osloadpartition, sizeof bootpath_store);
 	bootpath_curpos = bootpath_store;
 
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 	/*
 	 * If this is the first time we're ever invoked,
 	 * check for a dksc() syntax and rewrite it as
@@ -181,7 +182,7 @@ bootpath_init()
 #endif
 }
 
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 /*
  * Convert a `dksc()' bootpath into an ARC-friendly bootpath.
  */
@@ -377,7 +378,7 @@ device_register(struct device *dev, void *aux)
 		 * we need to count scsi controllers, until we find ours.
 		 */
 
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 		if (dksc_mode) {
 			if (strcmp(cd->cd_name, "scsibus") == 0 &&
 			    dev->dv_unit == dksc_ctrl)
@@ -391,7 +392,7 @@ device_register(struct device *dev, void *aux)
 			if (parent == lastparent)
 				goto found_advance;
 
-#if defined(TGT_O2)
+#ifdef TGT_O2
 			/*
 			 * On O2, the pci(0) component may be omitted from
 			 * the bootpath, in which case we fake the missing
