@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.32 2009/11/06 07:37:49 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.34 2009/11/07 22:48:37 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -110,14 +110,13 @@ ip27_setup()
 	size_t gsz;
 	uint node;
 	uint64_t synergy0_0;
-	int brick;
 	console_t *cons;
 	nmi_t *nmi;
 
 	uncached_base = PHYS_TO_XKPHYS_UNCACHED(0, SP_NC);
 	io_base = PHYS_TO_XKPHYS_UNCACHED(0, SP_IO);
 
-	ip35 = sys_config.system_type == SGI_O300;
+	ip35 = sys_config.system_type == SGI_IP35;
 
 	if (ip35) {
 		/*
@@ -127,22 +126,22 @@ ip27_setup()
 		 * Synergy0 register #0 is a 16 bits identification register.
 		 */
 		synergy0_0 = IP27_RHSPEC_L(0, HSPEC_SYNERGY(0, 0));
-		brick = (synergy0_0 & 0xf000) >> 12;
-		switch (brick) {
-		case 0x02:	/* Chimera */
+		sys_config.system_subtype = (synergy0_0 & 0xf000) >> 12;
+		switch (sys_config.system_subtype) {
+		case IP35_O350:	/* Chimera */
 			hw_prod = "Origin 350";
 			break;
-		case 0x04:	/* Asterix */
+		case IP35_FUEL:	/* Asterix */
 			hw_prod = "Fuel";
 			break;
-		case 0x08:	/* Speedo2 */
+		case IP35_O300:	/* Speedo2 */
 			hw_prod = "Origin 300";
 			break;
 		default:
 		    {
 			static char unknown_model[20];
 			snprintf(unknown_model, sizeof unknown_model,
-			    "Unknown IP35 type %x", brick);
+			    "Unknown IP35 type %x", sys_config.system_subtype);
 			hw_prod = unknown_model;
 		    }
 			break;
@@ -319,7 +318,7 @@ ip27_autoconf(struct device *parent)
 	 */
 
 	bzero(&maa, sizeof maa);
-	maa.maa_nasid = masternasid;
+	maa.maa_nasid = currentnasid = masternasid;
 	maa.maa_name = "cpu";
 	config_found(parent, &maa, ip27_print);
 	maa.maa_name = "clock";
@@ -346,7 +345,7 @@ ip27_attach_node(struct device *parent, int16_t nasid)
 
 	bzero(&maa, sizeof maa);
 	maa.maa_name = "xbow";
-	maa.maa_nasid = nasid;
+	maa.maa_nasid = currentnasid = nasid;
 	config_found(parent, &maa, ip27_print);
 }
 

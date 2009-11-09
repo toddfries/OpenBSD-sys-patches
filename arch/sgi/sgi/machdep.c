@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.85 2009/10/16 00:15:49 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.87 2009/11/07 18:56:55 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -57,7 +57,7 @@
 #include <machine/autoconf.h>
 #include <machine/memconf.h>
 #include <machine/regnum.h>
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 #include <machine/mnode.h>
 #endif
 
@@ -213,7 +213,7 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	 */
 	hw_vendor = "SGI";
 	switch (sys_config.system_type) {
-#if defined(TGT_O2)
+#ifdef TGT_O2
 	case SGI_O2:
 		bios_printf("Found SGI-IP32, setting up.\n");
 		strlcpy(cpu_model, "IP32", sizeof(cpu_model));
@@ -221,15 +221,15 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 		break;
 #endif
 
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
-	case SGI_O200:
+#ifdef TGT_ORIGIN
+	case SGI_IP27:
 		bios_printf("Found SGI-IP27, setting up.\n");
 		strlcpy(cpu_model, "IP27", sizeof(cpu_model));
 		ip27_setup();
 
 		break;
 
-	case SGI_O300:
+	case SGI_IP35:
 		bios_printf("Found SGI-IP35, setting up.\n");
 		/* IP27 is intentional, we use the same kernel */
 		strlcpy(cpu_model, "IP27", sizeof(cpu_model));
@@ -238,7 +238,7 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 		break;
 #endif
 
-#if defined(TGT_OCTANE)
+#ifdef TGT_OCTANE
 	case SGI_OCTANE:
 		bios_printf("Found SGI-IP30, setting up.\n");
 		strlcpy(cpu_model, "IP30", sizeof(cpu_model));
@@ -286,7 +286,7 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	 * Read platform-specific environment variables.
 	 */
 	switch (sys_config.system_type) {
-#if defined(TGT_O2)
+#ifdef TGT_O2
 	case SGI_O2:
 		/* Get Ethernet address from ARCBIOS. */
 		cp = Bios_GetEnvironmentVariable("eaddr");
@@ -416,8 +416,8 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 			break;
 		default:
 		case SGI_OCTANE:
-		case SGI_O200:
-		case SGI_O300:
+		case SGI_IP27:
+		case SGI_IP35:
 			cputype = MIPS_R10000;
 			break;
 		}
