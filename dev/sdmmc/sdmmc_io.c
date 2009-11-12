@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc_io.c,v 1.16 2009/10/03 18:42:36 kettenis Exp $	*/
+/*	$OpenBSD: sdmmc_io.c,v 1.17 2009/11/11 21:59:16 jasper Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
