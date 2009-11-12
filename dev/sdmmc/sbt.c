@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbt.c,v 1.12 2008/11/01 09:24:35 tedu Exp $	*/
+/*	$OpenBSD: sbt.c,v 1.13 2009/11/11 21:59:16 jasper Exp $	*/
 
 /*
  * Copyright (c) 2007 Uwe Stuehler <uwe@openbsd.org>
