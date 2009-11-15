@@ -1,4 +1,4 @@
-/*	$OpenBSD: macebus.c,v 1.38 2009/03/20 18:41:07 miod Exp $ */
+/*	$OpenBSD: macebus.c,v 1.55 2009/11/12 19:38:53 miod Exp $ */
 
 /*
  * Copyright (c) 2000-2004 Opsycon AB  (www.opsycon.se)
@@ -37,15 +37,7 @@
 #include <sys/conf.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/tty.h>
-#include <sys/extent.h>
-#include <net/netisr.h>
-#include <uvm/uvm_extern.h>
-
-#include <dev/pci/pcidevs.h>
-#include <dev/pci/pcivar.h>
-
-#include <dev/ic/comvar.h>
+#include <sys/proc.h>
 
 #include <mips64/archtype.h>
 
@@ -55,50 +47,57 @@
 
 #include <sgi/localbus/crimebus.h>
 #include <sgi/localbus/macebus.h>
+#include <sgi/localbus/macebusvar.h>
 
-int	macebusmatch(struct device *, void *, void *);
-void	macebusattach(struct device *, struct device *, void *);
-int	macebusprint(void *, const char *);
-int	macebussearch(struct device *, void *, void *);
+int	 macebusmatch(struct device *, void *, void *);
+void	 macebusattach(struct device *, struct device *, void *);
+int	 macebusprint(void *, const char *);
+int	 macebussubmatch(struct device *, void *, void *);
 
-void	macebus_intr_makemasks(void);
-void	macebus_do_pending_int(int);
-intrmask_t macebus_iointr(intrmask_t, struct trap_frame *);
-intrmask_t macebus_aux(intrmask_t, struct trap_frame *);
+void	 macebus_intr_makemasks(void);
+void	 macebus_splx(int);
+uint32_t macebus_iointr(uint32_t, struct trap_frame *);
+uint32_t macebus_aux(uint32_t, struct trap_frame *);
+int	 macebus_iointr_skip(struct intrhand *, uint64_t, uint64_t);
+void	 crime_setintrmask(int);
 
 u_int8_t mace_read_1(bus_space_tag_t, bus_space_handle_t, bus_size_t);
 u_int16_t mace_read_2(bus_space_tag_t, bus_space_handle_t, bus_size_t);
 u_int32_t mace_read_4(bus_space_tag_t, bus_space_handle_t, bus_size_t);
 u_int64_t mace_read_8(bus_space_tag_t, bus_space_handle_t, bus_size_t);
 
-void mace_write_1(bus_space_tag_t, bus_space_handle_t, bus_size_t, u_int8_t);
-void mace_write_2(bus_space_tag_t, bus_space_handle_t, bus_size_t, u_int16_t);
-void mace_write_4(bus_space_tag_t, bus_space_handle_t, bus_size_t, u_int32_t);
-void mace_write_8(bus_space_tag_t, bus_space_handle_t, bus_size_t, u_int64_t);
+void	 mace_write_1(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    u_int8_t);
+void	 mace_write_2(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    u_int16_t);
+void	 mace_write_4(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    u_int32_t);
+void	 mace_write_8(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    u_int64_t);
 
-void mace_read_raw_2(bus_space_tag_t, bus_space_handle_t,
-	    bus_addr_t, u_int8_t *, bus_size_t);
-void mace_write_raw_2(bus_space_tag_t, bus_space_handle_t,
-	    bus_addr_t, const u_int8_t *, bus_size_t);
-void mace_read_raw_4(bus_space_tag_t, bus_space_handle_t,
-	    bus_addr_t, u_int8_t *, bus_size_t);
-void mace_write_raw_4(bus_space_tag_t, bus_space_handle_t,
-	    bus_addr_t, const u_int8_t *, bus_size_t);
-void mace_read_raw_8(bus_space_tag_t, bus_space_handle_t,
-	    bus_addr_t, u_int8_t *, bus_size_t);
-void mace_write_raw_8(bus_space_tag_t, bus_space_handle_t,
-	    bus_addr_t, const u_int8_t *, bus_size_t);
+void	 mace_read_raw_2(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
+	    u_int8_t *, bus_size_t);
+void	 mace_write_raw_2(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
+	    const u_int8_t *, bus_size_t);
+void	 mace_read_raw_4(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
+	    u_int8_t *, bus_size_t);
+void	 mace_write_raw_4(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
+	    const u_int8_t *, bus_size_t);
+void	 mace_read_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
+	    u_int8_t *, bus_size_t);
+void	 mace_write_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
+	    const u_int8_t *, bus_size_t);
 
-int mace_space_map(bus_space_tag_t, bus_addr_t, bus_size_t, int, bus_space_handle_t *);
-void mace_space_unmap(bus_space_tag_t, bus_space_handle_t, bus_size_t);
-int mace_space_region(bus_space_tag_t, bus_space_handle_t, bus_size_t, bus_size_t, bus_space_handle_t *);
+int	 mace_space_map(bus_space_tag_t, bus_addr_t, bus_size_t, int,
+	    bus_space_handle_t *);
+void	 mace_space_unmap(bus_space_tag_t, bus_space_handle_t, bus_size_t);
+int	 mace_space_region(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+	    bus_size_t, bus_space_handle_t *);
 
-void *mace_space_vaddr(bus_space_tag_t, bus_space_handle_t);
+void	*mace_space_vaddr(bus_space_tag_t, bus_space_handle_t);
 
 bus_addr_t macebus_pa_to_device(paddr_t);
-paddr_t	macebus_device_to_pa(bus_addr_t);
-
-int maceticks;		/* Time tracker for special events. */
+paddr_t	 macebus_device_to_pa(bus_addr_t);
 
 struct cfattach macebus_ca = {
 	sizeof(struct device), macebusmatch, macebusattach
@@ -109,10 +108,8 @@ struct cfdriver macebus_cd = {
 };
 
 bus_space_t macebus_tag = {
+	PHYS_TO_XKPHYS(MACEBUS_BASE, CCA_NC),
 	NULL,
-	(bus_addr_t)MACEBUS_BASE,
-	NULL,
-	0,
 	mace_read_1, mace_write_1,
 	mace_read_2, mace_write_2,
 	mace_read_4, mace_write_4,
@@ -125,10 +122,8 @@ bus_space_t macebus_tag = {
 };
 
 bus_space_t crimebus_tag = {
+	PHYS_TO_XKPHYS(CRIMEBUS_BASE, CCA_NC),
 	NULL,
-	(bus_addr_t)CRIMEBUS_BASE,
-	NULL,
-	0,
 	mace_read_1, mace_write_1,
 	mace_read_2, mace_write_2,
 	mace_read_4, mace_write_4,
@@ -151,6 +146,7 @@ struct machine_bus_dma_tag mace_bus_dma_tag = {
 	_dmamap_load_mbuf,
 	_dmamap_load_uio,
 	_dmamap_load_raw,
+	_dmamap_load_buffer,
 	_dmamap_unload,
 	_dmamap_sync,
 	_dmamem_alloc,
@@ -162,6 +158,47 @@ struct machine_bus_dma_tag mace_bus_dma_tag = {
 	macebus_device_to_pa,
 	CRIME_MEMORY_MASK
 };
+
+/*
+ * CRIME/MACE interrupt handling declarations: 32 CRIME sources, 32 MACE
+ * sources (multiplexed by CRIME); 1 level.
+ * We define another level for periodic tasks as well.
+ */
+
+struct crime_intrhand {
+	struct	intrhand	ih;
+	uint32_t		mace_irqmask;
+};
+struct crime_intrhand *crime_intrhand[CRIME_NINTS];
+
+#define	INTPRI_MACEIO	(INTPRI_CLOCK + 1)
+#define	INTPRI_MACEAUX	(INTPRI_MACEIO + 1)
+
+uint64_t crime_intem, mace_intem;
+uint64_t crime_imask[NIPLS];
+
+/*
+ * List of macebus child devices.
+ */
+
+#define	MACEBUSDEV(name, addr, i, i2) \
+	{ name, &macebus_tag, &macebus_tag, &mace_bus_dma_tag, addr, i, i2 }
+struct macebus_attach_args macebus_children[] = {
+	MACEBUSDEV("com", MACE_ISA_SER1_OFFS, 4, MACE_ISA_INT_SERIAL_1),
+	MACEBUSDEV("com", MACE_ISA_SER2_OFFS, 4, MACE_ISA_INT_SERIAL_2),
+	MACEBUSDEV("dsrtc", MACE_ISA_RTC_OFFS, -1, 0),
+#if 0
+	MACEBUSDEV("lpt", MACE_ISA_EPP_OFFS, 4, MACE_ISA_INT_PARALLEL),
+#endif
+	MACEBUSDEV("macepcibr", MACE_PCI_OFFS, 7, 0),
+	MACEBUSDEV("mavb", MACE_IO_AUDIO_OFFS, 6, MACE_ISA_INT_AUDIO),
+	MACEBUSDEV("mec", MACE_ETHERNET_OFFS, 3, 0),
+	MACEBUSDEV("mkbc", MACE_IO_KBC_OFFS, 5,
+	    MACE_ISA_INT_KBD | MACE_ISA_INT_KBD_POLL |
+	    MACE_ISA_INT_MOUSE | MACE_ISA_INT_MOUSE_POLL),
+	MACEBUSDEV("power", 0, 5, MACE_ISA_INT_RTC)
+};
+#undef	MACEBUSDEV
 
 /*
  * Match bus only to targets which have this bus.
@@ -177,71 +214,47 @@ macebusmatch(struct device *parent, void *match, void *aux)
 int
 macebusprint(void *aux, const char *macebus)
 {
-	struct confargs *ca = aux;
+	struct macebus_attach_args *maa = aux;
 
 	if (macebus != NULL)
-		printf("%s at %s", ca->ca_name, macebus);
+		printf("%s at %s", maa->maa_name, macebus);
 
-	if (ca->ca_baseaddr != 0)
-		printf(" base 0x%08x", ca->ca_baseaddr);
-	if (ca->ca_intr != 0)
-		printf(" irq %d", ca->ca_intr);
+	if (maa->maa_baseaddr != 0)
+		printf(" base 0x%08x", maa->maa_baseaddr);
+	if (maa->maa_intr >= 0)
+		printf(" irq %d", maa->maa_intr);
 
 	return (UNCONF);
 }
 
 int
-macebussearch(struct device *parent, void *child, void *args)
+macebussubmatch(struct device *parent, void *vcf, void *args)
 {
-	struct cfdata *cf = child;
-	struct confargs ca;
+	struct cfdata *cf = vcf;
+	struct macebus_attach_args *maa = args;
 
-	ca.ca_name = cf->cf_driver->cd_name;
-	ca.ca_iot = &macebus_tag;
-	ca.ca_memt = &macebus_tag;
-	ca.ca_dmat = &mace_bus_dma_tag;
-	if (cf->cf_loc[0] == -1)
-		ca.ca_baseaddr = 0;
-	else
-		ca.ca_baseaddr = cf->cf_loc[0];
-	if (cf->cf_loc[1] == -1)
-		ca.ca_intr = 0;
-	else
-		ca.ca_intr = cf->cf_loc[1];
+	if (strcmp(cf->cf_driver->cd_name, maa->maa_name) != 0)
+		return 0;
 
-	if ((*cf->cf_attach->ca_match)(parent, cf, &ca) == 0)
-		return (0);
+	if (cf->cf_loc[0] != -1 && cf->cf_loc[0] != (int)maa->maa_baseaddr)
+		return 0;
 
-	config_attach(parent, cf, &ca, macebusprint);
-	return (1);
+	return (*cf->cf_attach->ca_match)(parent, cf, maa);
 }
 
 void
 macebusattach(struct device *parent, struct device *self, void *aux)
 {
 	u_int32_t creg;
-	u_int64_t mask;
-
-	/*
-	 * Create an extent for the localbus control registers.
-	 */
-	macebus_tag.bus_extent = extent_create("mace_space",
-	    macebus_tag.bus_base, macebus_tag.bus_base + 0x00400000,
-	    M_DEVBUF, NULL, 0, EX_NOCOALESCE | EX_NOWAIT);
-
-	crimebus_tag.bus_extent = extent_create("crime_space",
-	    crimebus_tag.bus_base, crimebus_tag.bus_base + 0x03000000,
-	    M_DEVBUF, NULL, 0, EX_NOCOALESCE | EX_NOWAIT);
+	uint i;
 
 	/*
 	 * Map and setup CRIME control registers.
 	 */
 	if (bus_space_map(&crimebus_tag, 0x00000000, 0x400, 0, &crime_h)) {
-		printf(": cannot map CRIME control registers\n");
+		printf(": can't map CRIME control registers\n");
 		return;
 	}
-	hwmask_addr = (void *)(PHYS_TO_UNCACHED(CRIMEBUS_BASE) +
-	    CRIME_INT_MASK);
 
 	creg = bus_space_read_8(&crimebus_tag, crime_h, CRIME_REVISION);
 	printf(": crime rev %d.%d\n", (creg & 0xf0) >> 4, creg & 0xf);
@@ -249,24 +262,21 @@ macebusattach(struct device *parent, struct device *self, void *aux)
 	bus_space_write_8(&crimebus_tag, crime_h, CRIME_CPU_ERROR_STAT, 0);
 	bus_space_write_8(&crimebus_tag, crime_h, CRIME_MEM_ERROR_STAT, 0);
 
-	mask = 0;
-	bus_space_write_8(&crimebus_tag, crime_h, CRIME_INT_MASK, mask);
+	bus_space_write_8(&crimebus_tag, crime_h, CRIME_INT_MASK, 0);
 	bus_space_write_8(&crimebus_tag, crime_h, CRIME_INT_SOFT, 0);
 	bus_space_write_8(&crimebus_tag, crime_h, CRIME_INT_HARD, 0);
 	bus_space_write_8(&crimebus_tag, crime_h, CRIME_INT_STAT, 0);
-
 
 	/*
 	 * Map and setup MACE ISA control registers.
 	 */
 	if (bus_space_map(&macebus_tag, MACE_ISA_OFFS, 0x400, 0, &mace_h)) {
-		printf("UH-OH! Can't map MACE ISA control registers!\n");
+		printf("%s: can't map MACE control registers\n",
+		    self->dv_xname);
 		return;
 	}
 
-	/* Turn on all interrupts except for MACE compare/timer. */
-	bus_space_write_8(&macebus_tag, mace_h, MACE_ISA_INT_MASK, 
-			  0xffffffff & ~MACE_ISA_INT_TIMER);
+	bus_space_write_8(&macebus_tag, mace_h, MACE_ISA_INT_MASK, 0);
 	bus_space_write_8(&macebus_tag, mace_h, MACE_ISA_INT_STAT, 0);
 
 	/*
@@ -274,12 +284,17 @@ macebusattach(struct device *parent, struct device *self, void *aux)
 	 * handler. Register all except clock.
 	 */
 	set_intr(INTPRI_MACEIO, CR_INT_0, macebus_iointr);
-	register_pending_int_handler(macebus_do_pending_int);
+	register_splx_handler(macebus_splx);
 
-	/* DEBUG: Set up a handler called when clock interrupts go off. */
+	/* Set up a handler called when clock interrupts go off. */
 	set_intr(INTPRI_MACEAUX, CR_INT_5, macebus_aux);
 
-	config_search(macebussearch, self, aux);
+	/*
+	 * Attach subdevices.
+	 */
+	for (i = 0; i < nitems(macebus_children); i++)
+		config_found_sm(self, macebus_children + i,
+		    macebusprint, macebussubmatch);
 }
 
 /*
@@ -295,7 +310,7 @@ mace_read_1(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o)
 u_int16_t
 mace_read_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o)
 {
-	panic("mace_read_2");
+	panic(__func__);
 }
 
 u_int32_t
@@ -319,7 +334,7 @@ mace_write_1(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o, u_int8_t v)
 void
 mace_write_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o, u_int16_t v)
 {
-	panic("mace_write_2");
+	panic(__func__);
 }
 
 void
@@ -396,76 +411,20 @@ mace_write_raw_8(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
 	}
 }
 
-extern int extent_malloc_flags;
-
 int
 mace_space_map(bus_space_tag_t t, bus_addr_t offs, bus_size_t size,
-    int cacheable, bus_space_handle_t *bshp)
+    int flags, bus_space_handle_t *bshp)
 {
-	bus_addr_t bpa;
-	int error;
-
-	bpa = t->bus_base + offs;
-
-	/* Handle special mapping separately. */
-	if ((bpa >= (MACEBUS_BASE + MACE_IO_OFFS) &&
-	    (bpa + size) < (MACEBUS_BASE + MACE_IO_OFFS + MACE_IO_SIZE))
-	    || (bpa >= (MACEBUS_BASE + MACE_ISAX_OFFS) &&
-	    (bpa + size) < (MACEBUS_BASE + MACE_ISAX_OFFS + MACE_ISAX_SIZE))) {
-		*bshp = PHYS_TO_UNCACHED(bpa);
-		return 0;
-	}
-
-	if ((error = extent_alloc_region(t->bus_extent, bpa, size,
-	    EX_NOWAIT | extent_malloc_flags))) {
-		return error;
-	}
-
-	if ((error = bus_mem_add_mapping(bpa, size, cacheable, bshp))) {
-		if (extent_free(t->bus_extent, bpa, size,
-		    EX_NOWAIT | extent_malloc_flags)) {
-			printf("bus_space_map: pa %p, size %p\n", bpa, size);
-			printf("bus_space_map: can't free region\n");
-		}
-	}
-
-	return (error);
+	if (ISSET(flags, BUS_SPACE_MAP_CACHEABLE))
+		offs +=
+		    PHYS_TO_XKPHYS(0, CCA_CACHED) - PHYS_TO_XKPHYS(0, CCA_NC);
+	*bshp = t->bus_base + offs;
+	return 0;
 }
 
 void
 mace_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 {
-	bus_addr_t sva, paddr;
-	bus_size_t off, len;
-
-	/* Should this verify that the proper size is freed? */
-	sva = trunc_page(bsh);
-	off = bsh - sva;
-	len = size+off;
-
-	if (IS_XKPHYS(bsh)) {
-		paddr = XKPHYS_TO_PHYS(bsh);
-		if ((paddr >= (MACEBUS_BASE + MACE_IO_OFFS) &&
-		    (paddr + size) <=
-		    (MACEBUS_BASE + MACE_IO_OFFS + MACE_IO_SIZE))
-		    || (paddr >= (MACEBUS_BASE + MACE_ISAX_OFFS) &&
-		    (paddr + size) <=
-		    (MACEBUS_BASE + MACE_ISAX_OFFS + MACE_ISAX_SIZE)))
-			return;
-	}
-
-	if (pmap_extract(pmap_kernel(), bsh, (void *)&paddr) == 0) {
-		printf("bus_space_unmap: no pa for va %p\n", bsh);
-		return;
-	}
-
-	uvm_km_free(kernel_map, sva, len);
-
-	if (extent_free(t->bus_extent, paddr, size,
-	    EX_NOWAIT | extent_malloc_flags)) {
-		printf("bus_space_map: pa %p, size %p\n", paddr, size);
-		printf("bus_space_map: can't free region\n");
-	}
 }
 
 int
@@ -508,261 +467,161 @@ macebus_device_to_pa(bus_addr_t addr)
  * Macebus interrupt handler driver.
  */
 
-intrmask_t mace_intem = 0x0;
-static intrmask_t intrtype[INTMASKSIZE];
-static intrmask_t intrmask[INTMASKSIZE];
-static intrmask_t intrlevel[INTMASKSIZE];
-
-static int fakeintr(void *);
-static int fakeintr(void *a) {return 0;}
-
 /*
  * Establish an interrupt handler called from the dispatcher.
  * The interrupt function established should return zero if there was nothing
  * to serve (no int) and non-zero when an interrupt was serviced.
+ *
  * Interrupts are numbered from 1 and up where 1 maps to HW int 0.
+ * XXX There is no reason to keep this... except for hardcoded interrupts
+ * XXX in kernel configuration files...
  */
 void *
-macebus_intr_establish(void *icp, u_long irq, int type, int level,
-    int (*ih_fun)(void *), void *ih_arg, char *ih_what)
+macebus_intr_establish(int irq, uint32_t mace_irqmask, int type, int level,
+    int (*ih_fun)(void *), void *ih_arg, const char *ih_what)
 {
-	struct intrhand **p, *q, *ih;
-	static struct intrhand fakehand = {NULL, fakeintr};
-	int edge;
-	extern int cold;
-	static int initialized = 0;
+	struct crime_intrhand **p, *q, *ih;
+	int s;
 
-	if (!initialized) {
-		/*INIT CODE HERE*/
-		initialized = 1;
-	}
-
-	if (irq > 62 || irq < 1) {
+#ifdef DIAGNOSTIC
+	if (irq >= CRIME_NINTS || irq < 0)
 		panic("intr_establish: illegal irq %d", irq);
-	}
-	irq -= 1;	/* Adjust for 1 being first (0 is no int) */
+#endif
 
-	/* No point in sleeping unless someone can free memory. */
-	ih = malloc(sizeof *ih, M_DEVBUF, cold ? M_NOWAIT : M_WAITOK);
+	ih = malloc(sizeof *ih, M_DEVBUF, M_NOWAIT);
 	if (ih == NULL)
-		panic("intr_establish: can't malloc handler info");
+		return NULL;
 
-	if (type == IST_NONE || type == IST_PULSE)
-		panic("intr_establish: bogus type");
+	ih->ih.ih_next = NULL;
+	ih->ih.ih_fun = ih_fun;
+	ih->ih.ih_arg = ih_arg;
+	ih->ih.ih_level = level;
+	ih->ih.ih_irq = irq;
+	ih->mace_irqmask = mace_irqmask;
+	evcount_attach(&ih->ih.ih_count, ih_what, (void *)&ih->ih.ih_irq,
+	    &evcount_intr);
 
-	switch (intrtype[irq]) {
-	case IST_EDGE:
-	case IST_LEVEL:
-		if (type == intrtype[irq])
-			break;
-	}
-
-	switch (type) {
-	case IST_EDGE:
-		edge |= 1 << irq;
-		break;
-	case IST_LEVEL:
-		edge &= ~(1 << irq);
-		break;
-	}
+	s = splhigh();
 
 	/*
 	 * Figure out where to put the handler.
 	 * This is O(N^2), but we want to preserve the order, and N is
 	 * generally small.
 	 */
-	for (p = &intrhand[irq]; (q = *p) != NULL; p = &q->ih_next)
+	for (p = &crime_intrhand[irq]; (q = *p) != NULL;
+	    p = (struct crime_intrhand **)&q->ih.ih_next)
 		;
+	*p = ih;
 
-	/*
-	 * Actually install a fake handler momentarily, since we might be doing
-	 * this with interrupts enabled and don't want the real routine called
-	 * until masking is set up.
-	 */
-	fakehand.ih_level = level;
-	*p = &fakehand;
-
+	crime_intem |= 1UL << irq;
 	macebus_intr_makemasks();
 
-	/*
-	 * Poke the real handler in now.
-	 */
-	ih->ih_fun = ih_fun;
-	ih->ih_arg = ih_arg;
-	ih->ih_next = NULL;
-	ih->ih_level = level;
-	ih->ih_irq = irq;
-	ih->ih_what = ih_what;
-	evcount_attach(&ih->ih_count, ih_what, (void *)&ih->ih_irq,
-	    &evcount_intr);
-	*p = ih;
+	/* enable further MACE sources if necessary */
+	if (mace_irqmask != 0) {
+		mace_intem |= mace_irqmask;
+		bus_space_write_8(&macebus_tag, mace_h, MACE_ISA_INT_MASK,
+		    mace_intem);
+	}
+
+	splx(s);	/* causes hw mask update */
 
 	return (ih);
 }
 
 void
-macebus_intr_disestablish(void *p1, void *p2)
+macebus_intr_disestablish(void *ih)
 {
-}
-
-/*
- * Regenerate interrupt masks to reflect reality.
- */
-void
-macebus_intr_makemasks(void)
-{
-	int irq, level;
-	struct intrhand *q;
-
-	/* First, figure out which levels each IRQ uses. */
-	for (irq = 0; irq < INTMASKSIZE; irq++) {
-		int levels = 0;
-		for (q = intrhand[irq]; q; q = q->ih_next)
-			levels |= 1 << q->ih_level;
-		intrlevel[irq] = levels;
-	}
-
-	/* Then figure out which IRQs use each level. */
-	for (level = IPL_NONE; level < NIPLS; level++) {
-		int irqs = 0;
-		for (irq = 0; irq < INTMASKSIZE; irq++)
-			if (intrlevel[irq] & (1 << level))
-				irqs |= 1 << irq;
-		if (level != IPL_NONE)
-			irqs |= SINT_ALLMASK;
-		imask[level] = irqs;
-	}
-
-	/*
-	 * There are tty, network and disk drivers that use free() at interrupt
-	 * time, so imp > (tty | net | bio).
-	 *
-	 * Enforce a hierarchy that gives slow devices a better chance at not
-	 * dropping data.
-	 */
-	imask[IPL_NET] |= imask[IPL_BIO];
-	imask[IPL_TTY] |= imask[IPL_NET];
-	imask[IPL_VM] |= imask[IPL_TTY];
-	imask[IPL_CLOCK] |= imask[IPL_VM] | SPL_CLOCKMASK;
-
-	/*
-	 * These are pseudo-levels.
-	 */
-	imask[IPL_NONE] = 0;
-	imask[IPL_HIGH] = -1;
-
-	/* And eventually calculate the complete masks. */
-	for (irq = 0; irq < INTMASKSIZE; irq++) {
-		int irqs = 1 << irq;
-		for (q = intrhand[irq]; q; q = q->ih_next)
-			irqs |= imask[q->ih_level];
-		intrmask[irq] = irqs | SINT_ALLMASK;
-	}
-
-	/* Lastly, determine which IRQs are actually in use. */
-	irq = 0;
-	for (level = 0; level < INTMASKSIZE; level++) {
-		if (intrhand[level]) {
-			irq |= 1 << level;
-		}
-	}
-	mace_intem = irq & 0x0000ffff;
-	hw_setintrmask(0);
+	/* XXX */
+	panic("%s not implemented", __func__);
 }
 
 void
-macebus_do_pending_int(int newcpl)
+macebus_splx(int newipl)
 {
-	/* Update masks to new cpl. Order highly important! */
-	__asm__ (" .set noreorder\n");
-	cpl = newcpl;
-	__asm__ (" sync\n .set reorder\n");
-	hw_setintrmask(newcpl);
+	struct cpu_info *ci = curcpu();
+
+	/* Update masks to new ipl. Order highly important! */
+	__asm__ (".set noreorder\n");
+	ci->ci_ipl = newipl;
+	__asm__ ("sync\n\t.set reorder\n");
+	crime_setintrmask(newipl);
 	/* If we still have softints pending trigger processing. */
-	if (ipending & SINT_ALLMASK & ~newcpl)
+	if (ci->ci_softpending != 0 && newipl < IPL_SOFTINT)
 		setsoftintr0();
 }
 
 /*
- * Process interrupts. The parameter pending has non-masked interrupts.
+ * Crime interrupt handler.
  */
-intrmask_t
-macebus_iointr(intrmask_t hwpend, struct trap_frame *cf)
+
+#define	INTR_FUNCTIONNAME	macebus_iointr
+#define	MASK_FUNCTIONNAME	macebus_intr_makemasks
+
+#define	INTR_LOCAL_DECLS \
+	uint64_t mace_isr, mace_imr;
+#define	INTR_GETMASKS \
+do { \
+	isr = bus_space_read_8(&crimebus_tag, crime_h, CRIME_INT_STAT); \
+	imr = bus_space_read_8(&crimebus_tag, crime_h, CRIME_INT_MASK); \
+	if (((CRIME_INT_SUPER_IO | CRIME_INT_SUB_MISC | CRIME_INT_SUB_AUDIO) & \
+	    isr & imr) != 0) { \
+		mace_isr = bus_space_read_8(&macebus_tag, mace_h, \
+		    MACE_ISA_INT_STAT); \
+		mace_imr = bus_space_read_8(&macebus_tag, mace_h, \
+		    MACE_ISA_INT_MASK); \
+	} else \
+		mace_isr = mace_imr = 0; \
+	bit = 63; \
+} while (0)
+#define	INTR_MASKPENDING \
+	bus_space_write_8(&crimebus_tag, crime_h, CRIME_INT_MASK, imr & ~isr)
+#define	INTR_IMASK(ipl)		crime_imask[ipl]
+#define	INTR_HANDLER(bit)	(struct intrhand *)crime_intrhand[bit]
+#define	INTR_SPURIOUS(bit) \
+do { \
+	if (((CRIME_INT_SUPER_IO | CRIME_INT_SUB_MISC | CRIME_INT_SUB_AUDIO) & \
+	    (1 << (bit))) != 0) { \
+		if ((mace_isr & mace_imr) != 0) \
+			printf("spurious crime interrupt %d" \
+			    " mace isr %p imr %p\n", bit, mace_isr, mace_imr); \
+	} else \
+		printf("spurious crime interrupt %d\n", bit); \
+} while (0)
+#define	INTR_MASKRESTORE \
+	bus_space_write_8(&crimebus_tag, crime_h, CRIME_INT_MASK, imr)
+#define	INTR_MASKSIZE		CRIME_NINTS
+
+#define	INTR_HANDLER_SKIP(ih) \
+	macebus_iointr_skip((void *)ih, mace_isr, mace_imr)
+
+#include <sgi/sgi/intr_template.c>
+
+int
+macebus_iointr_skip(struct intrhand *ih, uint64_t mace_isr, uint64_t mace_imr)
 {
-	struct intrhand *ih;
-	intrmask_t caught, vm;
-	int v;
-	intrmask_t pending;
-	u_int64_t intstat, isastat, mask;
-#ifdef DIAGNOSTIC
-	static int spurious = 0;
-#endif
+	struct crime_intrhand *mih = (struct crime_intrhand *)ih;
 
-	intstat = bus_space_read_8(&crimebus_tag, crime_h, CRIME_INT_STAT);
-	intstat &= 0xffff;
+	/* do not skip pure CRIME interrupts */
+	if (mih->mace_irqmask == 0)
+		return 0;
 
-	isastat = bus_space_read_8(&macebus_tag, mace_h, MACE_ISA_INT_STAT);
-	caught = 0;
+	/*
+	 * Several CRIME interrupts (such as superio and miscellaneous) are
+	 * shared by multiple devices, so narrow the selection with the
+	 * MACE interrupt status.
+	 */
 
-	/* Mask off masked interrupts and save them as pending. */
-	if (intstat & cf->cpl) {
-		atomic_setbits_int(&ipending, intstat & cf->cpl);
-		mask = bus_space_read_8(&crimebus_tag, crime_h, CRIME_INT_MASK);
-		mask &= ~ipending;
-		bus_space_write_8(&crimebus_tag, crime_h, CRIME_INT_MASK, mask);
-		caught++;
-	}
+	if ((mace_isr & mace_imr & mih->mace_irqmask) != 0)
+		return 0;
 
-	/* Scan all unmasked. Scan the first 16 for now. */
-	pending = intstat & ~cf->cpl;
-	atomic_clearbits_int(&ipending, pending);
-
-	for (v = 0, vm = 1; pending != 0 && v < 16 ; v++, vm <<= 1) {
-		if (pending & vm) {
-			ih = intrhand[v];
-
-			while (ih) {
-				ih->frame = cf;
-				if ((*ih->ih_fun)(ih->ih_arg)) {
-					caught |= vm;
-					ih->ih_count.ec_count++;
-				}
-				ih = ih->ih_next;
-			}
-		}
-	}
-
-	if (caught) {
-#ifdef DIAGNOSTIC
-		spurious = 0;
-#endif
-		return CR_INT_0;
-	}
-
-#ifdef DIAGNOSTIC
-	if (pending != 0) {
-		printf("stray interrupt, mace mask %lx stat %lx\n"
-		    "crime mask %lx stat %lx hard %lx (pending %lx caught %lx)\n",
-		    bus_space_read_8(&macebus_tag, mace_h, MACE_ISA_INT_MASK),
-		    bus_space_read_8(&macebus_tag, mace_h, MACE_ISA_INT_STAT),
-		    bus_space_read_8(&crimebus_tag, crime_h, CRIME_INT_MASK),
-		    bus_space_read_8(&crimebus_tag, crime_h, CRIME_INT_STAT),
-		    bus_space_read_8(&crimebus_tag, crime_h, CRIME_INT_HARD),
-		    pending, caught);
-		if (++spurious >= 10)
-			panic("too many stray interrupts");
-	}
-#endif
-
-	return 0;  /* Not found here. */
+	return 1;
 }
-
 
 /*
  * Macebus auxilary functions run each clock interrupt.
  */
-intrmask_t
-macebus_aux(intrmask_t hwpend, struct trap_frame *cf)
+uint32_t
+macebus_aux(uint32_t hwpend, struct trap_frame *cf)
 {
 	u_int64_t mask;
 
@@ -776,15 +635,18 @@ macebus_aux(intrmask_t hwpend, struct trap_frame *cf)
 		mask &= ~MACE_ISA_MISC_RLED_OFF;
 	} else if (curproc == NULL ||
 	    curproc == curcpu()->ci_schedstate.spc_idleproc) {
-		mask &= ~MACE_ISA_MISC_GLED_OFF;	
+		mask &= ~MACE_ISA_MISC_GLED_OFF;
 	} else {
 		mask &= ~(MACE_ISA_MISC_RLED_OFF | MACE_ISA_MISC_GLED_OFF);
 	}
 	bus_space_write_8(&macebus_tag, mace_h, MACE_ISA_MISC_REG, mask);
 
-	if (maceticks++ > 100*5) {
-		maceticks = 0;
-	}
+	return 0;	/* Real clock int handler will claim the interrupt. */
+}
 
-	return 0; /* Real clock int handler registers. */
+void
+crime_setintrmask(int level)
+{
+	*(volatile uint64_t *)(PHYS_TO_XKPHYS(CRIMEBUS_BASE, CCA_NC) +
+	    CRIME_INT_MASK) = crime_intem & ~crime_imask[level];
 }

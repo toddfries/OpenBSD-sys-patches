@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.h,v 1.95 2009/06/15 17:01:26 beck Exp $	*/
+/*	$OpenBSD: mount.h,v 1.99 2009/10/14 17:53:30 beck Exp $	*/
 /*	$NetBSD: mount.h,v 1.48 1996/02/18 11:55:47 fvdl Exp $	*/
 
 /*
@@ -502,10 +502,18 @@ struct bcachestats {
 	int64_t numwrites;		/* total writes started */
 	int64_t numreads;		/* total reads started */
 	int64_t cachehits;		/* total reads found in cache */
+	int64_t busymapped;		/* number of busy and mapped buffers */
 };
 #ifdef _KERNEL
 extern struct bcachestats bcstats;
-#define BUFPAGES_DEFICIT (bufpages - bcstats.numbufpages)
+extern long buflowpages, bufhighpages, bufbackpages;
+#define BUFPAGES_DEFICIT (((buflowpages - bcstats.numbufpages) < 0) ? 0 \
+    : buflowpages - bcstats.numbufpages)
+#define BUFPAGES_INACT (((bcstats.numcleanpages - buflowpages) < 0) ? 0 \
+    : bcstats.numcleanpages - buflowpages)
+extern int bufcachepercent;
+extern void bufadjust(int);
+extern int bufbackoff(void);
 #endif
 
 /*

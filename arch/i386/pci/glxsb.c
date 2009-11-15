@@ -1,4 +1,4 @@
-/*	$OpenBSD: glxsb.c,v 1.15 2008/09/19 10:44:11 markus Exp $	*/
+/*	$OpenBSD: glxsb.c,v 1.17 2009/10/30 18:18:09 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Tom Cosgrove <tom@openbsd.org>
@@ -110,15 +110,15 @@
 #define SB_CTL_CBC		0x0020		/* CBC (0 is ECB) */
 
 						/* For SB_AES_INT */
-#define SB_AI_DISABLE_AES_A	0x0001		/* Disable AES A compl int */
-#define SB_AI_ENABLE_AES_A	0x0000		/* Enable AES A compl int */
-#define SB_AI_DISABLE_AES_B	0x0002		/* Disable AES B compl int */
-#define SB_AI_ENABLE_AES_B	0x0000		/* Enable AES B compl int */
-#define SB_AI_DISABLE_EEPROM	0x0004		/* Disable EEPROM op comp int */
-#define SB_AI_ENABLE_EEPROM	0x0000		/* Enable EEPROM op compl int */
-#define SB_AI_AES_A_COMPLETE	0x0100		/* AES A operation complete */
-#define SB_AI_AES_B_COMPLETE	0x0200		/* AES B operation complete */
-#define SB_AI_EEPROM_COMPLETE	0x0400		/* EEPROM operation complete */
+#define SB_AI_DISABLE_AES_A	0x00001		/* Disable AES A compl int */
+#define SB_AI_ENABLE_AES_A	0x00000		/* Enable AES A compl int */
+#define SB_AI_DISABLE_AES_B	0x00002		/* Disable AES B compl int */
+#define SB_AI_ENABLE_AES_B	0x00000		/* Enable AES B compl int */
+#define SB_AI_DISABLE_EEPROM	0x00004		/* Disable EEPROM op comp int */
+#define SB_AI_ENABLE_EEPROM	0x00000		/* Enable EEPROM op compl int */
+#define SB_AI_AES_A_COMPLETE	0x10000		/* AES A operation complete */
+#define SB_AI_AES_B_COMPLETE	0x20000		/* AES B operation complete */
+#define SB_AI_EEPROM_COMPLETE	0x40000		/* EEPROM operation complete */
 
 #define SB_RNS_TRNG_VALID	0x0001		/* in SB_RANDOM_NUM_STATUS */
 
@@ -290,7 +290,6 @@ glxsb_rnd(void *v)
 {
 	struct glxsb_softc *sc = v;
 	uint32_t status, value;
-	extern int hz;
 
 	status = bus_space_read_4(sc->sc_iot, sc->sc_ioh, SB_RANDOM_NUM_STATUS);
 	if (status & SB_RNS_TRNG_VALID) {
@@ -298,7 +297,7 @@ glxsb_rnd(void *v)
 		add_true_randomness(value);
 	}
 
-	timeout_add(&sc->sc_to, (hz > 100) ? (hz / 100) : 1);
+	timeout_add_msec(&sc->sc_to, 10);
 }
 
 #ifdef CRYPTO

@@ -1,4 +1,4 @@
-/* $OpenBSD: apicvec.s,v 1.18 2009/06/06 22:37:34 guenther Exp $ */
+/* $OpenBSD: apicvec.s,v 1.20 2009/08/10 16:40:50 oga Exp $ */
 /* $NetBSD: apicvec.s,v 1.1.2.2 2000/02/21 21:54:01 sommerfeld Exp $ */
 
 /*-
@@ -36,9 +36,9 @@
 #include <machine/i82489reg.h>
 
 #ifdef __ELF__
-#define XINTR(vec) Xintr/**/vec
+#define XINTR(vec) Xintr##vec
 #else
-#define XINTR(vec) _Xintr/**/vec
+#define XINTR(vec) _Xintr##vec
 #endif
 
 	.globl  _C_LABEL(apic_stray)
@@ -169,6 +169,7 @@ XINTR(ltimer):
 	movl	%eax,CPL
 	ioapic_asm_ack()
 	sti
+	incl	CPUVAR(IDEPTH)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
@@ -179,6 +180,7 @@ XINTR(ltimer):
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
+	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 
 	.globl	XINTR(softclock), XINTR(softnet), XINTR(softtty)
@@ -192,6 +194,7 @@ XINTR(softclock):
 	andl	$~(1<<SIR_CLOCK),CPUVAR(IPENDING)
 	ioapic_asm_ack()
 	sti
+	incl	CPUVAR(IDEPTH)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
@@ -201,6 +204,7 @@ XINTR(softclock):
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
+	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 
 #define DONETISR(s, c) \
@@ -220,6 +224,7 @@ XINTR(softnet):
 	andl	$~(1<<SIR_NET),CPUVAR(IPENDING)
 	ioapic_asm_ack()
 	sti
+	incl	CPUVAR(IDEPTH)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
@@ -234,6 +239,7 @@ XINTR(softnet):
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
+	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 #undef DONETISR
 
@@ -247,6 +253,7 @@ XINTR(softtty):
 	andl	$~(1<<SIR_TTY),CPUVAR(IPENDING)
 	ioapic_asm_ack()
 	sti
+	incl	CPUVAR(IDEPTH)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
@@ -256,6 +263,7 @@ XINTR(softtty):
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
+	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 
 #if NIOAPIC > 0
@@ -271,7 +279,7 @@ XINTR(softtty):
 	 */
 
 #define APICINTR(name, num, early_ack, late_ack, mask, unmask, level_mask) \
-_C_LABEL(Xintr_/**/name/**/num):					\
+_C_LABEL(Xintr_##name##num):						\
 	pushl	$0							;\
 	pushl	$T_ASTFLT						;\
 	INTRENTRY							;\
@@ -288,7 +296,7 @@ _C_LABEL(Xintr_/**/name/**/num):					\
 	incl	_C_LABEL(apic_intrcount)(,%eax,4)			;\
 	movl	_C_LABEL(apic_intrhand)(,%eax,4),%ebx /* chain head */	;\
 	testl	%ebx,%ebx						;\
-	jz      _C_LABEL(Xstray_/**/name/**/num)			;\
+	jz      _C_LABEL(Xstray_##name##num)				;\
 	APIC_STRAY_INIT			/* nobody claimed it yet */	;\
 7:									 \
 	LOCK_KERNEL(IF_PPL(%esp))					;\
@@ -315,7 +323,7 @@ _C_LABEL(Xintr_/**/name/**/num):					\
 	unmask(num)			/* unmask it in hardware */	;\
 	late_ack(num)							;\
 	jmp	_C_LABEL(Xdoreti)					;\
-_C_LABEL(Xstray_/**/name/**/num):					 \
+_C_LABEL(Xstray_##name##num):					 \
 	pushl	$num							;\
 	call	_C_LABEL(apic_stray)					;\
 	addl	$4,%esp							;\
@@ -328,7 +336,7 @@ _C_LABEL(Xstray_/**/name/**/num):					 \
 	orl	%eax,%esi
 #define APIC_STRAY_TEST(name,num) \
 	testl 	%esi,%esi						;\
-	jz 	_C_LABEL(Xstray_/**/name/**/num)
+	jz 	_C_LABEL(Xstray_##name##num)
 #else /* !DEBUG */
 #define APIC_STRAY_INIT
 #define APIC_STRAY_INTEGRATE

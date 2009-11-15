@@ -31,7 +31,7 @@
 
 *******************************************************************************/
 
-/* $OpenBSD: if_em_hw.c,v 1.35 2009/06/26 14:30:35 claudio Exp $ */
+/* $OpenBSD: if_em_hw.c,v 1.41 2009/10/11 23:54:49 dms Exp $ */
 
 /* if_em_hw.c
  * Shared functions for accessing and configuring the MAC
@@ -484,6 +484,7 @@ em_set_mac_type(struct em_hw *hw)
     case E1000_DEV_ID_ICH9_IGP_C:
     case E1000_DEV_ID_ICH9_IGP_M:
     case E1000_DEV_ID_ICH9_IGP_M_AMT:
+    case E1000_DEV_ID_ICH9_IGP_M_V:
     case E1000_DEV_ID_ICH10_R_BM_LF:
     case E1000_DEV_ID_ICH10_R_BM_LM:
     case E1000_DEV_ID_ICH10_R_BM_V:
@@ -1268,6 +1269,14 @@ em_setup_link(struct em_hw *hw)
         E1000_WRITE_REG(hw, CTRL_EXT, ctrl_ext);
     }
 
+    /* Make sure we have a valid PHY */
+    ret_val = em_detect_gig_phy(hw);
+    if (ret_val) {
+        DEBUGOUT("Error, did not detect valid phy.\n");
+        return ret_val;
+    }
+    DEBUGOUT1("Phy ID = %x \n", hw->phy_id);
+
     /* Call the necessary subroutine to configure the link. */
     ret_val = (hw->media_type == em_media_type_copper) ?
               em_setup_copper_link(hw) :
@@ -1499,14 +1508,6 @@ em_copper_link_preconfig(struct em_hw *hw)
         if (ret_val)
             return ret_val;
     }
-
-    /* Make sure we have a valid PHY */
-    ret_val = em_detect_gig_phy(hw);
-    if (ret_val) {
-        DEBUGOUT("Error, did not detect valid phy.\n");
-        return ret_val;
-    }
-    DEBUGOUT1("Phy ID = %x \n", hw->phy_id);
 
     /* Set PHY to class A mode (if necessary) */
     ret_val = em_set_phy_mode(hw);
@@ -4232,14 +4233,26 @@ em_detect_gig_phy(struct em_hw *hw)
         hw->phy_type = em_phy_igp_2;
         return E1000_SUCCESS;
     }
-
-    /* until something better comes along... makes the Lenovo X200 work */
-    if (hw->mac_type == em_ich9lan &&
-        (hw->device_id == E1000_DEV_ID_ICH9_IGP_M ||
-         hw->device_id == E1000_DEV_ID_ICH9_IGP_M_AMT)) {
-        hw->phy_id = IGP03E1000_E_PHY_ID;
-        hw->phy_type = em_phy_igp_3;
+    
+    /* Some of the fiber cards dont have a phy, so we must exit cleanly here */
+    if ((hw->media_type == em_media_type_fiber) && 
+        (hw->mac_type == em_82542_rev2_0 ||
+        hw->mac_type == em_82542_rev2_1 ||
+        hw->mac_type == em_82543 ||
+        hw->mac_type == em_82574 ||
+        hw->mac_type == em_82573 ||
+        hw->mac_type == em_82574 ||
+        hw->mac_type == em_80003es2lan)) {
+        hw->phy_type = em_phy_undefined;
         return E1000_SUCCESS;
+    }
+
+    /* Up to 82543 (incl), we need reset the phy, or it might not get 
+     * detected */
+    if (hw->mac_type <= em_82543) {
+        ret_val = em_phy_hw_reset(hw);
+        if (ret_val)
+            return ret_val;
     }
 
     /* ESB-2 PHY reads require em_phy_gg82563 to be set because of a work-
@@ -5613,6 +5626,7 @@ em_read_mac_addr(struct em_hw * hw)
     case em_82546:
     case em_82546_rev_3:
     case em_82571:
+    case em_82575:
     case em_80003es2lan:
         if (E1000_READ_REG(hw, STATUS) & E1000_STATUS_FUNC_1)
             hw->perm_mac_addr[5] ^= 0x01;

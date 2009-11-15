@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_bio.c,v 1.59 2009/06/23 08:08:50 jasper Exp $	*/
+/*	$OpenBSD: nfs_bio.c,v 1.68 2009/10/19 22:24:18 jsg Exp $	*/
 /*	$NetBSD: nfs_bio.c,v 1.25.4.2 1996/07/08 20:47:04 jtc Exp $	*/
 
 /*
@@ -67,11 +67,7 @@ uint32_t nfs_bufqmax, nfs_bufqlen;
  * Any similarity to readip() is purely coincidental
  */
 int
-nfs_bioread(vp, uio, ioflag, cred)
-	struct vnode *vp;
-	struct uio *uio;
-	int ioflag;
-	struct ucred *cred;
+nfs_bioread(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred)
 {
 	struct nfsnode *np = VTONFS(vp);
 	int biosize, diff;
@@ -170,30 +166,18 @@ nfs_bioread(vp, uio, ioflag, cred)
 		    }
 		}
 
-		/*
-		 * If the block is in the cache and has the required data
-		 * in a valid region, just copy it out.
-		 * Otherwise, get the block and write back/read in,
-		 * as required.
-		 */
-		if ((bp = incore(vp, bn)) &&
-		    (bp->b_flags & (B_BUSY | B_WRITEINPROG)) ==
-		    (B_BUSY | B_WRITEINPROG))
-			got_buf = 0;
-		else {
 again:
-			bp = nfs_getcacheblk(vp, bn, biosize, p);
-			if (!bp)
-				return (EINTR);
-			got_buf = 1;
-			if ((bp->b_flags & (B_DONE | B_DELWRI)) == 0) {
-				bp->b_flags |= B_READ;
-				not_readin = 0;
-				error = nfs_doio(bp, p);
-				if (error) {
-				    brelse(bp);
-				    return (error);
-				}
+		bp = nfs_getcacheblk(vp, bn, biosize, p);
+		if (!bp)
+			return (EINTR);
+		got_buf = 1;
+		if ((bp->b_flags & (B_DONE | B_DELWRI)) == 0) {
+			bp->b_flags |= B_READ;
+			not_readin = 0;
+			error = nfs_doio(bp, p);
+			if (error) {
+			    brelse(bp);
+			    return (error);
 			}
 		}
 		n = min((unsigned)(biosize - on), uio->uio_resid);
@@ -202,12 +186,6 @@ again:
 			n = (int)offdiff;
 		if (not_readin && n > 0) {
 			if (on < bp->b_validoff || (on + n) > bp->b_validend) {
-				if (!got_buf) {
-				    bp = nfs_getcacheblk(vp, bn, biosize, p);
-				    if (!bp)
-					return (EINTR);
-				    got_buf = 1;
-				}
 				bp->b_flags |= B_INVAFTERWRITE;
 				if (bp->b_dirtyend > 0) {
 				    if ((bp->b_flags & B_DELWRI) == 0)
@@ -269,8 +247,7 @@ again:
  * Vnode op for write using bio
  */
 int
-nfs_write(v)
-	void *v;
+nfs_write(void *v)
 {
 	struct vop_write_args *ap = v;
 	int biosize;
@@ -420,16 +397,13 @@ again:
 		} else 
 			bp->b_flags &= ~B_NEEDCOMMIT;
 
-		/*
-		 * If the lease is non-cachable or IO_SYNC do bwrite().
-		 */
 		if (ioflag & IO_SYNC) {
 			bp->b_proc = p;
 			error = VOP_BWRITE(bp);
 			if (error)
 				return (error);
 		} else if ((n + on) == biosize) {
-			bp->b_proc = (struct proc *)0;
+			bp->b_proc = NULL;
 			bp->b_flags |= B_ASYNC;
 			(void)nfs_writebp(bp, 0);
 		} else {
@@ -452,20 +426,16 @@ again:
  * NULL.
  */
 struct buf *
-nfs_getcacheblk(vp, bn, size, p)
-	struct vnode *vp;
-	daddr64_t bn;
-	int size;
-	struct proc *p;
+nfs_getcacheblk(struct vnode *vp, daddr64_t bn, int size, struct proc *p)
 {
 	struct buf *bp;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
 
 	if (nmp->nm_flag & NFSMNT_INT) {
 		bp = getblk(vp, bn, size, PCATCH, 0);
-		while (bp == (struct buf *)0) {
-			if (nfs_sigintr(nmp, (struct nfsreq *)0, p))
-				return ((struct buf *)0);
+		while (bp == NULL) {
+			if (nfs_sigintr(nmp, NULL, p))
+				return (NULL);
 			bp = getblk(vp, bn, size, 0, 2 * hz);
 		}
 	} else
@@ -527,8 +497,7 @@ nfs_vinvalbuf(struct vnode *vp, int flags, struct ucred *cred, struct proc *p)
  * are all hung on a dead server.
  */
 int
-nfs_asyncio(bp)
-	struct buf *bp;
+nfs_asyncio(struct buf *bp)
 {
 	if (nfs_numasync == 0)
 		goto out;
@@ -556,9 +525,7 @@ out:
  * synchronously or from an nfsiod.
  */
 int
-nfs_doio(bp, p)
-	struct buf *bp;
-	struct proc *p;
+nfs_doio(struct buf *bp, struct proc *p)
 {
 	struct uio *uiop;
 	struct vnode *vp;

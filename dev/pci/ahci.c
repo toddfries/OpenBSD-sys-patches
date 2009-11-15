@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.147 2009/02/16 21:19:07 miod Exp $ */
+/*	$OpenBSD: ahci.c,v 1.153 2009/11/01 01:50:15 dlg Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -96,6 +96,7 @@ int ahcidebug = AHCI_D_VERBOSE;
 #define  AHCI_REG_VS_1_0		0x00010000 /* 1.0 */
 #define  AHCI_REG_VS_1_1		0x00010100 /* 1.1 */
 #define  AHCI_REG_VS_1_2		0x00010200 /* 1.2 */
+#define  AHCI_REG_VS_1_3		0x00010300 /* 1.3 */
 #define AHCI_REG_CCC_CTL	0x014 /* Coalescing Control */
 #define  AHCI_REG_CCC_CTL_INT(_r)	(((_r) & 0xf8) >> 3) /* CCC INT slot */
 #define AHCI_REG_CCC_PORTS	0x018 /* Coalescing Ports */
@@ -421,22 +422,37 @@ const struct ahci_device *ahci_lookup_device(struct pci_attach_args *);
 int			ahci_no_match(struct pci_attach_args *);
 int			ahci_vt8251_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
+void			ahci_ati_sb_idetoahci(struct ahci_softc *,
+			    struct pci_attach_args *pa);
 int			ahci_ati_sb600_attach(struct ahci_softc *,
+			    struct pci_attach_args *);
+int			ahci_amd_hudson2_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
 int			ahci_nvidia_mcp_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
 
 static const struct ahci_device ahci_devices[] = {
-	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8251_SATA,
-	    ahci_no_match,	ahci_vt8251_attach },
+	{ PCI_VENDOR_AMD,	PCI_PRODUCT_AMD_HUDSON2_SATA,
+	    NULL,		ahci_amd_hudson2_attach },
+
 	{ PCI_VENDOR_ATI,	PCI_PRODUCT_ATI_SB600_SATA,
 	    NULL,		ahci_ati_sb600_attach },
+	{ PCI_VENDOR_ATI,	PCI_PRODUCT_ATI_SBX00_SATA_1,
+	    NULL,		ahci_ati_sb600_attach },
+
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP65_AHCI_2,
 	    NULL,		ahci_nvidia_mcp_attach },
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP67_AHCI_1,
 	    NULL,		ahci_nvidia_mcp_attach },
+	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP73_AHCI_9,
+	    NULL,		ahci_nvidia_mcp_attach },
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP77_AHCI_5,
-	    NULL,		ahci_nvidia_mcp_attach }
+	    NULL,		ahci_nvidia_mcp_attach },
+	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP77_AHCI_6,
+	    NULL,		ahci_nvidia_mcp_attach },
+
+	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8251_SATA,
+	  ahci_no_match,	ahci_vt8251_attach }
 };
 
 int			ahci_pci_match(struct device *, void *, void *);
@@ -569,8 +585,8 @@ ahci_vt8251_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 	return (0);
 }
 
-int
-ahci_ati_sb600_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
+void
+ahci_ati_sb_idetoahci(struct ahci_softc *sc, struct pci_attach_args *pa)
 {
 	pcireg_t			magic;
 
@@ -590,8 +606,22 @@ ahci_ati_sb600_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 		pci_conf_write(pa->pa_pc, pa->pa_tag,
 		    AHCI_PCI_ATI_SB600_MAGIC, magic);
 	}
+}
+
+int
+ahci_ati_sb600_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
+{
+	ahci_ati_sb_idetoahci(sc, pa);
 
 	sc->sc_flags |= AHCI_F_IGN_FR;
+
+	return (0);
+}
+
+int
+ahci_amd_hudson2_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
+{
+	ahci_ati_sb_idetoahci(sc, pa);
 
 	return (0);
 }
@@ -886,6 +916,9 @@ ahci_init(struct ahci_softc *sc)
 		break;
 	case AHCI_REG_VS_1_2:
 		revision = "1.2";
+		break;
+	case AHCI_REG_VS_1_3:
+		revision = "1.3";
 		break;
 
 	default:

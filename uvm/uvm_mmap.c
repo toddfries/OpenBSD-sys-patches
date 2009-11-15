@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_mmap.c,v 1.76 2009/06/17 00:13:59 oga Exp $	*/
+/*	$OpenBSD: uvm_mmap.c,v 1.79 2009/07/25 12:55:40 miod Exp $	*/
 /*	$NetBSD: uvm_mmap.c,v 1.49 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -298,8 +298,7 @@ sys_mincore(struct proc *p, void *v, register_t *retval)
 		 */
 		if (UVM_ET_ISOBJ(entry)) {
 			KASSERT(!UVM_OBJ_IS_KERN_OBJECT(entry->object.uvm_obj));
-			if (entry->object.uvm_obj->pgops->pgo_releasepg
-			    == NULL) {
+			if (entry->object.uvm_obj->pgops->pgo_fault != NULL) {
 				pgi = 1;
 				for (/* nothing */; start < lim;
 				     start += PAGE_SIZE, vec++)
@@ -743,7 +742,7 @@ sys_munmap(struct proc *p, void *v, register_t *retval)
 	/*
 	 * doit!
 	 */
-	uvm_unmap_remove(map, addr, addr + size, &dead_entries, p);
+	uvm_unmap_remove(map, addr, addr + size, &dead_entries, p, FALSE);
 
 	vm_map_unlock(map);	/* and unlock */
 
@@ -1138,7 +1137,7 @@ uvm_mmap(vm_map_t map, vaddr_t *addr, vsize_t size, vm_prot_t prot,
 			}
 #else
 			/* XXX for now, attach doesn't gain a ref */
-			VREF(vp);
+			vref(vp);
 #endif
 		} else {
 			uobj = udv_attach((void *) &vp->v_rdev,

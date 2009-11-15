@@ -1,4 +1,4 @@
-/*	$OpenBSD: tlbhandler.S,v 1.18 2009/05/25 17:10:38 miod Exp $ */
+/*	$OpenBSD: tlbhandler.S,v 1.20 2009/09/30 06:22:00 syuu Exp $ */
 
 /*
  * Copyright (c) 1995-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -36,6 +36,9 @@
 #include <machine/cpu.h>
 #include <machine/regnum.h>
 #include <machine/cpustate.h>
+#ifdef CPU_LOONGSON2
+#include <machine/loongson2.h>
+#endif
 
 #include "assym.h"
 
@@ -81,7 +84,8 @@ tlb_miss_err_r5k:
 	.globl	tlb_miss
 	.ent	tlb_miss, 0
 tlb_miss:
-	PTR_L	k1, curprocpaddr
+	GET_CPU_INFO(k1, k0)
+	PTR_L	k1, CI_CURPROCPADDR(k1)
 	dmfc0	k0, COP_0_BAD_VADDR
 	bltz	k0, _k_miss		# kernel address space
 	PTR_SRL	k0, k0, SEGSHIFT - LOGREGSZ
@@ -138,8 +142,12 @@ xtlb_miss:
 	PTR_SRL	k0, k0, SEGSHIFT
 	sltiu	k1, k0, PMAP_SEGTABSIZE
 	beqz	k1, _inv_seg		# wrong if outside pm_segtab
+	nop
+	GET_CPU_INFO(k1, k0)
+	PTR_L	k1, CI_CURPROCPADDR(k1)
+	dmfc0	k0, COP_0_BAD_VADDR
+	PTR_SRL	k0, k0, SEGSHIFT
 	PTR_SLL	k0, k0, LOGREGSZ
-	PTR_L	k1, curprocpaddr
 	PTR_L	k1, PCB_SEGTAB(k1)
 	PTR_ADDU k1, k1, k0
 	PTR_L	k1, 0(k1)		# get pointer to page table
@@ -219,6 +227,20 @@ NLEAF(k_tlb_inv, 0)
 	nop
 	nop
 	nop
+
+#ifdef CPU_LOONGSON2
+#if 0	/* enable if Loongson2 + R5K|R10K kernel ever exist... */
+	mfc0	v0, COP_0_PRID
+	and	v0, 0xff00
+	subi	v0, (MIPS_LOONGSON2 << 8)
+	bnez	v0, 7f
+	nop
+#endif
+	li	v0, COP_0_DIAG_ITLB_CLEAR
+	mfc0	v0, COP_0_DIAG
+7:
+#endif
+
 	eret
 
 k_tlb_inv_odd:
@@ -244,6 +266,20 @@ k_tlb_inv_odd:
 	nop
 	nop
 	nop
+
+#ifdef CPU_LOONGSON2
+#if 0	/* enable if Loongson2 + R5K|R10K kernel ever exist... */
+	mfc0	v0, COP_0_PRID
+	and	v0, 0xff00
+	subi	v0, (MIPS_LOONGSON2 << 8)
+	bnez	v0, 7f
+	nop
+#endif
+	li	v0, COP_0_DIAG_ITLB_CLEAR
+	mfc0	v0, COP_0_DIAG
+7:
+#endif
+
 	eret
 END(k_tlb_inv)
 
@@ -290,7 +326,8 @@ NLEAF(k_tlb_miss, 0)
 	eret
 
 sys_stk_chk:
-	PTR_L	k1, curprocpaddr
+	GET_CPU_INFO(k1, k0)
+	PTR_L	k1, CI_CURPROCPADDR(k1)
 	PTR_SUBU k0, sp, k1			# check to see if we have a
 	sltiu	k0, 2048			#  valid kernel stack
 	beqz	k0, go_k_general		# yes, handle.
@@ -345,6 +382,7 @@ go_u_general:
 	.set	at
 END(k_tlb_miss)
 
+#if 0
 /*---------------------------------------------------------------- tlb_write_i
  *	Write the given entry into the TLB at the given index.
  */
@@ -375,6 +413,19 @@ LEAF(tlb_write_indexed, 0)
 	nop
 	nop
 
+#ifdef CPU_LOONGSON2
+#if 0	/* enable if Loongson2 + R5K|R10K kernel ever exist... */
+	mfc0	v0, COP_0_PRID
+	and	v0, 0xff00
+	subi	v0, (MIPS_LOONGSON2 << 8)
+	bnez	v0, 7f
+	nop
+#endif
+	li	v0, COP_0_DIAG_ITLB_CLEAR
+	mfc0	v0, COP_0_DIAG
+7:
+#endif
+
 	dmtc0	ta0, COP_0_TLB_HI		# Restore the PID.
 	nop
 	dmtc0	zero, COP_0_TLB_PG_MASK	# Default mask value.
@@ -383,6 +434,7 @@ LEAF(tlb_write_indexed, 0)
 	j	ra
 	nop
 END(tlb_write_indexed)
+#endif
 
 /*---------------------------------------------------------------- tlb_flush
  *	Flush the "random" entries from the TLB.
@@ -417,6 +469,19 @@ LEAF(tlb_flush, 0)
 	nop
 	bne	ta1, a0, 1b
 	nop
+
+#ifdef CPU_LOONGSON2
+#if 0	/* enable if Loongson2 + R5K|R10K kernel ever exist... */
+	mfc0	v0, COP_0_PRID
+	and	v0, 0xff00
+	subi	v0, (MIPS_LOONGSON2 << 8)
+	bnez	v0, 7f
+	nop
+#endif
+	li	v0, COP_0_DIAG_ITLB_CLEAR
+	mfc0	v0, COP_0_DIAG
+7:
+#endif
 
 	dmtc0	ta0, COP_0_TLB_HI	# Restore the PID
 	mtc0	v1, COP_0_STATUS_REG	# Restore the status register
@@ -463,6 +528,20 @@ LEAF(tlb_flush_addr, 0)
 	nop
 	nop
 	nop
+
+#ifdef CPU_LOONGSON2
+#if 0	/* enable if Loongson2 + R5K|R10K kernel ever exist... */
+	mfc0	v0, COP_0_PRID
+	and	v0, 0xff00
+	subi	v0, (MIPS_LOONGSON2 << 8)
+	bnez	v0, 7f
+	nop
+#endif
+	li	v0, COP_0_DIAG_ITLB_CLEAR
+	mfc0	v0, COP_0_DIAG
+7:
+#endif
+
 1:
 	dmtc0	ta0, COP_0_TLB_HI	# restore PID
 	mtc0	v1, COP_0_STATUS_REG	# Restore the status register
@@ -556,6 +635,20 @@ LEAF(tlb_update, 0)
 4:					# Make sure pipeline
 	nop				# advances before we
 	nop				# use the tlb.
+
+#ifdef CPU_LOONGSON2
+#if 0	/* enable if Loongson2 + R5K|R10K kernel ever exist... */
+	mfc0	v0, COP_0_PRID
+	and	v0, 0xff00
+	subi	v0, (MIPS_LOONGSON2 << 8)
+	bnez	v0, 7f
+	nop
+#endif
+	li	v0, COP_0_DIAG_ITLB_CLEAR
+	mfc0	v0, COP_0_DIAG
+7:
+#endif
+
 	dmtc0	ta0, COP_0_TLB_HI	# restore PID
 	mtc0	v1, COP_0_STATUS_REG	# Restore the status register
 	ITLBNOPFIX

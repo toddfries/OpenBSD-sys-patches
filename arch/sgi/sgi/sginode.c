@@ -1,4 +1,4 @@
-/*	$OpenBSD: sginode.c,v 1.10 2009/06/21 18:04:41 miod Exp $	*/
+/*	$OpenBSD: sginode.c,v 1.14 2009/11/07 14:49:01 miod Exp $	*/
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
  *
@@ -72,10 +72,11 @@ int	kl_n_mode = 0;
 u_int	kl_n_shift = 32;
 
 void
-kl_init(uint64_t nibase)
+kl_init(int ip35)
 {
 	kl_config_hdr_t *cfghdr;
-	u_int64_t val;
+	uint64_t val;
+	uint64_t nibase = ip35 ? HUBNIBASE_IP35 : HUBNIBASE_IP27;
 
 	/* will be recomputed when processing memory information */
 	physmem = 0;
@@ -88,7 +89,7 @@ kl_init(uint64_t nibase)
 
 	val = IP27_LHUB_L(nibase | HUBNI_STATUS);
 	kl_n_mode = (val & NI_MORENODES) != 0;
-	kl_n_shift = 32 - kl_n_mode;
+	kl_n_shift = (ip35 ? 33 : 32) - kl_n_mode;
         bios_printf("Machine is in %c mode.\n", kl_n_mode + 'M');
 
 	val = IP27_LHUB_L(HUBPI_REGION_PRESENT);
@@ -114,7 +115,7 @@ kl_scan_done()
 }
 
 /*
- * Callback routine for the initial enumration (boards).
+ * Callback routine for the initial enumeration (boards).
  */
 int
 kl_first_pass_board(lboard_t *boardinfo, void *arg)
@@ -149,7 +150,7 @@ kl_first_pass_comp(klinfo_t *comp, void *arg)
 	switch (comp->struct_type) {
 	case KLSTRUCT_CPU:
 		cpucomp = (klcpu_t *)comp;
-		DB_PRF(("\tcpu type %x/%x %dMhz cache %dMB speed %dMhz\n",
+		DB_PRF(("\tcpu type %x/%x %dMHz cache %dMB speed %dMHz\n",
 		    cpucomp->cpu_prid, cpucomp->cpu_fpirr, cpucomp->cpu_speed,
 		    cpucomp->cpu_scachesz, cpucomp->cpu_scachespeed));
 
@@ -197,7 +198,7 @@ kl_first_pass_comp(klinfo_t *comp, void *arg)
 		}
 #endif
 
-		if (sys_config.system_type == SGI_O200)
+		if (sys_config.system_type == SGI_IP27)
 			kl_add_memory_ip27(comp->nasid, memcomp_m->membnk_bnksz,
 			    kl_n_mode ? MD_MEM_BANKS_N : MD_MEM_BANKS_M);
 		else
@@ -292,14 +293,14 @@ kl_scan_board(lboard_t *boardinfo, uint type, int (*cb)(klinfo_t *, void *),
 }
 
 /*
- * Return the virtual address of the console device.
+ * Return the console device information.
  */
-vaddr_t
-kl_get_console_base()
+console_t *
+kl_get_console()
 {
 	kl_config_hdr_t *cfghdr = IP27_KLCONFIG_HDR(0);
 
-	return (vaddr_t)cfghdr->cons_info.uart_base;
+	return &cfghdr->cons_info;
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.64 2009/06/15 17:01:26 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.69 2009/08/30 12:11:33 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -69,9 +69,6 @@
 #include <sys/mount.h>
 #include <sys/msgbuf.h>
 #include <sys/syscallargs.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 #include <sys/exec.h>
 #include <sys/sysctl.h>
 #include <sys/errno.h>
@@ -105,7 +102,6 @@
 #include <ddb/db_output.h>		/* db_printf()		*/
 #endif /* DDB */
 
-caddr_t	allocsys(caddr_t);
 void	consinit(void);
 void	cpu_boot_secondary_processors(void);
 void	dumpconf(void);
@@ -356,8 +352,7 @@ identifycpu()
 void
 cpu_startup()
 {
-	caddr_t v;
-	int sz, i;
+	int i;
 	vaddr_t minaddr, maxaddr;
 
 	/*
@@ -442,39 +437,15 @@ cpu_startup()
 #endif
 
 	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = (int)allocsys((caddr_t)0);
-
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
 	 * Grab the OBIO space that we hardwired in pmap_bootstrap
 	 */
 	obiova = OBIO_START;
 	uvm_map(kernel_map, (vaddr_t *)&obiova, OBIO_SIZE,
 	    NULL, UVM_UNKNOWN_OFFSET, 0,
 	      UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-	        UVM_ADV_NORMAL, 0));
+	        UVM_ADV_NORMAL, UVM_FLAG_FIXED));
 	if (obiova != OBIO_START)
 		panic("obiova %lx: OBIO not free", obiova);
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-
-	/* Restrict to at most 25% filled kvm */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -513,33 +484,6 @@ cpu_startup()
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
-}
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(v)
-	caddr_t v;
-{
-
-#define	valloc(name, type, num) \
-	    v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return v;
 }
 
 __dead void

@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC-IP30,v 1.9 2009/06/24 17:27:40 miod Exp $
+#	$OpenBSD: GENERIC-IP30,v 1.19 2009/11/10 15:50:09 jsing Exp $
 #
 # THIS KERNEL IS FOR Octane and Octane 2 (IP30) SYSTEMS ONLY.
 #
@@ -38,6 +38,7 @@ config		bsd	swap generic
 mainbus0	at root
 cpu*		at mainbus0
 clock0		at mainbus0
+power0		at mainbus0
 
 #### Main local buses
 xbow0		at mainbus0
@@ -46,26 +47,33 @@ xbow0		at mainbus0
 xheart*		at xbow?
 onewire*	at xheart?
 xbridge*	at xbow?
-pci*		at xbridge?
+xbpci*		at xbridge?
+pci*		at xbpci?
 
 # IOC3
 ioc*		at pci?
 com0		at ioc? base 0x00020178
 com1		at ioc? base 0x00020170
+com*		at ioc?
 dsrtc0		at ioc?
+iec*		at ioc?
+iockbc*		at ioc?
 
 onewire*	at ioc?
-option ONEWIREVERBOSE
+option		ONEWIREVERBOSE
 owmac*		at onewire?
 owserial*	at onewire?
 
 #### SCSI
+ahc*		at pci?
 isp*		at pci?
-siop*		at pci?
 mpi*		at pci?
+siop*		at pci?
+
+scsibus*	at ahc?
 scsibus*	at isp?
-scsibus*	at siop?
 scsibus*	at mpi?
+scsibus*	at siop?
 
 # USB Controllers
 ohci*		at pci?	# Open Host Controller
@@ -86,7 +94,7 @@ uvscom*		at uhub?	# SUNTAC Slipper U VS-10U serial
 ucom*		at uvscom?
 ubsa*		at uhub?	# Belkin serial adapter
 ucom*		at ubsa?
-uaudio*	at uhub?	# USB Audio
+uaudio*		at uhub?	# USB Audio
 audio*		at uaudio?
 ulpt*		at uhub?	# USB Printers	
 umass*		at uhub?	# USB Mass Storage devices
@@ -127,7 +135,13 @@ video*		at uvideo?
 udl*		at uhub?
 wsdisplay*	at udl?
 
+ppb*		at pci?		# PCI-PCI bridges
+pci*		at ppb?
+
 #### NICs
+pcn*		at pci?		# AMD PCnet-PCI Ethernet
+epic*		at pci?		# SMC EPIC/100 ethernet
+de*		at pci?		# DC21X4X-based ethernet
 dc*		at pci?		# 21143, "tulip" clone ethernet
 em*		at pci?		# Intel Pro/1000 ethernet
 ep*		at pci?		# 3Com 3c59x
@@ -180,8 +194,26 @@ ukphy*		at mii?		# "unknown" PHYs
 wi*		at pci?
 
 #### Audio
-emu*		at pci?
+cmpci*		at pci?		# C-Media CMI8338/8738
+eap*		at pci?		# Ensoniq AudioPCI S5016
+emu*		at pci?		# SB Live!
+
+audio*		at cmpci?
+audio*		at eap?
 audio*		at emu?
+
+# OPL[23] FM synthesizers
+opl*		at cmpci?
+
+# MIDI support
+midi*		at opl?
+midi*		at eap?
+
+#### Keyboard and Mouse
+pckbd*		at iockbc?
+pms*		at iockbc?
+wskbd*		at pckbd? mux 1
+wsmouse*	at pms? mux 0
 
 #### SCSI Bus devices
 sd*		at scsibus?

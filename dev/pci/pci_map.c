@@ -1,4 +1,4 @@
-/*      $OpenBSD: pci_map.c,v 1.24 2009/04/06 20:51:48 kettenis Exp $     */
+/*      $OpenBSD: pci_map.c,v 1.27 2009/10/06 21:35:43 kettenis Exp $     */
 /*	$NetBSD: pci_map.c,v 1.7 2000/05/10 16:58:42 thorpej Exp $	*/
 
 /*-
@@ -40,6 +40,22 @@
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
+
+#ifndef PCI_IO_START
+#define PCI_IO_START	0
+#endif
+
+#ifndef PCI_IO_END
+#define PCI_IO_END	0xffffffff
+#endif
+
+#ifndef PCI_MEM_START
+#define PCI_MEM_START	0
+#endif
+
+#ifndef PCI_MEM_END
+#define PCI_MEM_END	0xffffffff
+#endif
 
 
 int obsd_pci_io_find(pci_chipset_tag_t, pcitag_t, int, pcireg_t,
@@ -152,7 +168,7 @@ obsd_pci_mem_find(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t type,
 		pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG,
 		    csr & ~PCI_COMMAND_MEM_ENABLE);
 	address = pci_conf_read(pc, tag, reg);
-	pci_conf_write(pc, tag, reg, 0xffffffff);
+	pci_conf_write(pc, tag, reg, PCI_MAPREG_MEM_ADDR_MASK);
 	mask = pci_conf_read(pc, tag, reg);
 	pci_conf_write(pc, tag, reg, address);
 	if (is64bit) {
@@ -319,16 +335,23 @@ pci_mapreg_map(struct pci_attach_args *pa, int reg, pcireg_t type, int busflags,
 	if ((rv = pci_mapreg_info(pa->pa_pc, pa->pa_tag, reg, type,
 	    &base, &size, &flags)) != 0)
 		return (rv);
-#if !defined(__sparc64__) && !defined(__socppc__)
+#if !defined(__sparc64__)
 	if (base == 0) {
 		struct extent *ex;
+		bus_addr_t start, end;
 
-		if (PCI_MAPREG_TYPE(type) == PCI_MAPREG_TYPE_IO)
+		if (PCI_MAPREG_TYPE(type) == PCI_MAPREG_TYPE_IO) {
 			ex = pa->pa_ioex;
-		else
+			start = max(PCI_IO_START, ex->ex_start);
+			end = min(PCI_IO_END, ex->ex_end);
+		} else {
 			ex = pa->pa_memex;
+			start = max(PCI_MEM_START, ex->ex_start);
+			end = min(PCI_MEM_END, ex->ex_end);
+		}
 
-		if (ex == NULL || extent_alloc(ex, size, size, 0, 0, 0, &base))
+		if (ex == NULL || extent_alloc_subregion(ex, start, end,
+		    size, size, 0, 0, 0, &base))
 			return (EINVAL); /* disabled because of invalid BAR */
 
 		pci_conf_write(pa->pa_pc, pa->pa_tag, reg, base);

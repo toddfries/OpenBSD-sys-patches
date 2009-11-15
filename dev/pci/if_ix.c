@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.23 2009/06/29 16:40:46 jsg Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.30 2009/08/13 14:24:47 jasper Exp $	*/
 
 /******************************************************************************
 
@@ -65,7 +65,6 @@ int	ixgbe_probe(struct device *, void *, void *);
 void	ixgbe_attach(struct device *, struct device *, void *);
 int	ixgbe_detach(struct device *, int);
 void	ixgbe_power(int, void *);
-void	ixgbe_shutdown(void *);
 void	ixgbe_start(struct ifnet *);
 void	ixgbe_start_locked(struct tx_ring *, struct ifnet *);
 int	ixgbe_ioctl(struct ifnet *, u_long, caddr_t);
@@ -135,7 +134,7 @@ void	desc_flip(void *);
  *********************************************************************/
 
 struct cfdriver ix_cd = {
-	0, "ix", DV_IFNET
+	NULL, "ix", DV_IFNET
 };
 
 struct cfattach ix_ca = {
@@ -239,7 +238,6 @@ ixgbe_attach(struct device *parent, struct device *self, void *aux)
 	IXGBE_WRITE_REG(&sc->hw, IXGBE_CTRL_EXT, ctrl_ext);
 
 	sc->powerhook = powerhook_establish(ixgbe_power, sc);
-	sc->shutdownhook = shutdownhook_establish(ixgbe_shutdown, sc);
 
 	printf(", address %s\n", ether_sprintf(sc->hw.mac.addr));
 
@@ -302,20 +300,6 @@ ixgbe_power(int why, void *arg)
 		if (ifp->if_flags & IFF_UP)
 			ixgbe_init(sc);
 	}
-}
-
-/*********************************************************************
- *
- *  Shutdown entry point
- *
- **********************************************************************/
-
-void
-ixgbe_shutdown(void *arg)
-{
-	struct ix_softc *sc = (struct ix_softc *)arg;
-
-	ixgbe_stop(sc);
 }
 
 /*********************************************************************
@@ -755,26 +739,23 @@ ixgbe_media_status(struct ifnet * ifp, struct ifmediareq * ifmr)
 {
 	struct ix_softc *sc = ifp->if_softc;
 
+	ifmr->ifm_active = IFM_ETHER;
+	ifmr->ifm_status = IFM_AVALID;
+
 	INIT_DEBUGOUT("ixgbe_media_status: begin");
 	ixgbe_update_link_status(sc);
 
-	ifmr->ifm_status = IFM_AVALID;
-	ifmr->ifm_active = IFM_ETHER;
+	if (LINK_STATE_IS_UP(ifp->if_link_state)) {
+		ifmr->ifm_status |= IFM_ACTIVE;
 
-	if (!sc->link_active) {
-		ifmr->ifm_status |= IFM_NONE;
-		return;
-	}
-
-	ifmr->ifm_status |= IFM_ACTIVE;
-
-	switch (sc->link_speed) {
-	case IXGBE_LINK_SPEED_1GB_FULL:
-		ifmr->ifm_active |= IFM_1000_T | IFM_FDX;
-		break;
-	case IXGBE_LINK_SPEED_10GB_FULL:
-		ifmr->ifm_active |= sc->optics | IFM_FDX;
-		break;
+		switch (sc->link_speed) {
+		case IXGBE_LINK_SPEED_1GB_FULL:
+			ifmr->ifm_active |= IFM_1000_T | IFM_FDX;
+			break;
+		case IXGBE_LINK_SPEED_10GB_FULL:
+			ifmr->ifm_active |= sc->optics | IFM_FDX;
+			break;
+		}
 	}
 }
 
@@ -789,25 +770,7 @@ ixgbe_media_status(struct ifnet * ifp, struct ifmediareq * ifmr)
 int
 ixgbe_media_change(struct ifnet * ifp)
 {
-	struct ix_softc *sc = ifp->if_softc;
-	struct ifmedia *ifm = &sc->media;
-
-	INIT_DEBUGOUT("ixgbe_media_change: begin");
-
-	if (IFM_TYPE(ifm->ifm_media) != IFM_ETHER)
-		return (EINVAL);
-
-        switch (IFM_SUBTYPE(ifm->ifm_media)) {
-        case IFM_AUTO:
-                sc->hw.mac.autoneg = TRUE;
-                sc->hw.phy.autoneg_advertised =
-		    IXGBE_LINK_SPEED_1GB_FULL | IXGBE_LINK_SPEED_10GB_FULL;
-                break;
-        default:
-                printf("%s: Only auto media type\n", ifp->if_xname);
-		return (EINVAL);
-        }
-
+	/* ignore */
 	return (0);
 }
 
@@ -1102,43 +1065,41 @@ ixgbe_update_link_status(struct ix_softc *sc)
 	int link_up = FALSE;
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 	struct tx_ring *txr = sc->tx_rings;
+	int		link_state;
 	int		i;
 
 	ixgbe_hw(&sc->hw, check_link, &sc->link_speed, &link_up, 0);
 
-	switch (sc->link_speed) {
-	case IXGBE_LINK_SPEED_UNKNOWN:
-		ifp->if_baudrate = 0;
-		break;
-	case IXGBE_LINK_SPEED_100_FULL:
-		ifp->if_baudrate = IF_Mbps(100);
-		break;
-	case IXGBE_LINK_SPEED_1GB_FULL:
-		ifp->if_baudrate = IF_Gbps(1);
-		break;
-	case IXGBE_LINK_SPEED_10GB_FULL:
-		ifp->if_baudrate = IF_Gbps(10);
-		break;
+	link_state = link_up ? LINK_STATE_FULL_DUPLEX : LINK_STATE_DOWN;
+
+	if (ifp->if_link_state != link_state) {
+		sc->link_active = link_up;
+		ifp->if_link_state = link_state;
+		if_link_state_change(ifp);
 	}
 
-	if (link_up){ 
-		if (sc->link_active == FALSE) {
-			sc->link_active = TRUE;
-			ifp->if_link_state = LINK_STATE_FULL_DUPLEX;
-			if_link_state_change(ifp);
-		}
-	} else { /* Link down */
-		if (sc->link_active == TRUE) {
+	if (LINK_STATE_IS_UP(ifp->if_link_state)) {
+		switch (sc->link_speed) {
+		case IXGBE_LINK_SPEED_UNKNOWN:
 			ifp->if_baudrate = 0;
-			ifp->if_link_state = LINK_STATE_DOWN;
-			if_link_state_change(ifp);
-			sc->link_active = FALSE;
-			for (i = 0; i < sc->num_tx_queues;
-			    i++, txr++)
-				txr->watchdog_timer = FALSE;
-			ifp->if_timer = 0;
+			break;
+		case IXGBE_LINK_SPEED_100_FULL:
+			ifp->if_baudrate = IF_Mbps(100);
+			break;
+		case IXGBE_LINK_SPEED_1GB_FULL:
+			ifp->if_baudrate = IF_Gbps(1);
+			break;
+		case IXGBE_LINK_SPEED_10GB_FULL:
+			ifp->if_baudrate = IF_Gbps(10);
+			break;
 		}
+	} else {
+		ifp->if_baudrate = 0;
+		ifp->if_timer = 0;
+		for (i = 0; i < sc->num_tx_queues; i++)
+			txr[i].watchdog_timer = FALSE;
 	}
+
 
 	return;
 }
@@ -1164,9 +1125,9 @@ ixgbe_stop(void *arg)
 	INIT_DEBUGOUT("ixgbe_stop: begin\n");
 	ixgbe_disable_intr(sc);
 
-	ixgbe_hw(&sc->hw, reset_hw);
+	ixgbe_hw0(&sc->hw, reset_hw);
 	sc->hw.adapter_stopped = FALSE;
-	ixgbe_hw(&sc->hw, stop_adapter);
+	ixgbe_hw0(&sc->hw, stop_adapter);
 	timeout_del(&sc->timer);
 
 	/* reprogram the RAR[0] in case user changed it. */
@@ -1346,7 +1307,7 @@ ixgbe_hardware_init(struct ix_softc *sc)
 	csum = 0;
 	/* Issue a global reset */
 	sc->hw.adapter_stopped = FALSE;
-	ixgbe_hw(&sc->hw, stop_adapter);
+	ixgbe_hw0(&sc->hw, stop_adapter);
 
 	/* Make sure we have a good EEPROM before we read from it */
 	if (ixgbe_ee(&sc->hw, validate_checksum, &csum) < 0) {
@@ -1361,7 +1322,7 @@ ixgbe_hardware_init(struct ix_softc *sc)
 	sc->hw.fc.high_water = IXGBE_FC_HI;
 	sc->hw.fc.send_xon = TRUE;
 
-	if (ixgbe_hw(&sc->hw, init_hw) != 0) {
+	if (ixgbe_hw0(&sc->hw, init_hw) != 0) {
 		printf("%s: Hardware Initialization Failed", ifp->if_xname);
 		return (EIO);
 	}
@@ -2240,14 +2201,8 @@ ixgbe_get_buf(struct rx_ring *rxr, int i)
 		return (ENOBUFS);
 	}
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL) {
-		sc->mbuf_alloc_failed++;
-		return (ENOBUFS);
-	}
-	MCLGETI(m, M_DONTWAIT, &sc->arpcom.ac_if, size);
-	if ((m->m_flags & M_EXT) == 0) {
-		m_freem(m);
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->arpcom.ac_if, size);
+	if (!m) {
 		sc->mbuf_cluster_failed++;
 		return (ENOBUFS);
 	}

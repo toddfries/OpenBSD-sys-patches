@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci.c,v 1.63 2009/06/29 19:19:17 kettenis Exp $	*/
+/*	$OpenBSD: pci.c,v 1.68 2009/11/05 20:30:47 kettenis Exp $	*/
 /*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*
@@ -586,6 +586,9 @@ pci_reserve_resources(struct pci_attach_args *pa)
 	blr = pci_conf_read(pc, tag, PPB_REG_IOSTATUS);
 	base = (blr & 0x000000f0) << 8;
 	limit = (blr & 0x000f000) | 0x00000fff;
+	blr = pci_conf_read(pc, tag, PPB_REG_IO_HI);
+	base |= (blr & 0x0000ffff) << 16;
+	limit |= (blr & 0xffff0000);
 	if (limit > base)
 		size = (limit - base + 1);
 	else
@@ -782,23 +785,32 @@ pciclose(dev_t dev, int flag, int devtype, struct proc *p)
 int
 pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
+	struct pcisel *sel = (struct pcisel *)data;
 	struct pci_io *io;
+	struct pci_rom *rom;
 	int i, error;
 	pcitag_t tag;
 	struct pci_softc *pci = NULL;
 	pci_chipset_tag_t pc;
 
-	io = (struct pci_io *)data;
-
-	PCIDEBUG(("pciioctl cmd %s", cmd == PCIOCREAD ? "pciocread" 
-		  : cmd == PCIOCWRITE ? "pciocwrite" : "unknown"));
-	PCIDEBUG(("  bus %d dev %d func %d reg %x\n", io->pi_sel.pc_bus,
-		  io->pi_sel.pc_dev, io->pi_sel.pc_func, io->pi_reg));
+	switch (cmd) {
+	case PCIOCREAD:
+		break;
+	case PCIOCWRITE:
+		if (!(flag & FWRITE))
+			return EPERM;
+		break;
+	case PCIOCGETROMLEN:
+	case PCIOCGETROM:
+		break;
+	default:
+		return ENOTTY;
+	}
 
 	for (i = 0; i < pci_cd.cd_ndevs; i++) {
 		pci = pci_cd.cd_devs[i];
 		if (pci != NULL && pci->sc_domain == minor(dev) &&
-		    pci->sc_bus == io->pi_sel.pc_bus)
+		    pci->sc_bus == sel->pc_bus)
 			break;
 	}
 	if (i >= pci_cd.cd_ndevs)
@@ -806,21 +818,17 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 
 	/* Check bounds */
 	if (pci->sc_bus >= 256 || 
-	    io->pi_sel.pc_dev >= pci_bus_maxdevs(pci->sc_pc, pci->sc_bus) ||
-	    io->pi_sel.pc_func >= 8)
+	    sel->pc_dev >= pci_bus_maxdevs(pci->sc_pc, pci->sc_bus) ||
+	    sel->pc_func >= 8)
 		return EINVAL;
 
 	pc = pci->sc_pc;
-	tag = pci_make_tag(pc, io->pi_sel.pc_bus, io->pi_sel.pc_dev,
-			   io->pi_sel.pc_func);
+	tag = pci_make_tag(pc, sel->pc_bus, sel->pc_dev, sel->pc_func);
 
-	switch(cmd) {
-	case PCIOCGETCONF:
-		error = ENODEV;
-		break;
-
+	switch (cmd) {
 	case PCIOCREAD:
-		switch(io->pi_width) {
+		io = (struct pci_io *)data;
+		switch (io->pi_width) {
 		case 4:
 			/* Make sure the register is properly aligned */
 			if (io->pi_reg & 0x3) 
@@ -835,10 +843,8 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 
 	case PCIOCWRITE:
-		if (!(flag & FWRITE))
-			return EPERM;
-
-		switch(io->pi_width) {
+		io = (struct pci_io *)data;
+		switch (io->pi_width) {
 		case 4:
 			/* Make sure the register is properly aligned */
 			if (io->pi_reg & 0x3)
@@ -851,6 +857,79 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			break;
 		}
 		break;
+
+	case PCIOCGETROMLEN:
+	case PCIOCGETROM:
+	{
+		pcireg_t addr, mask, bhlc;
+		bus_space_handle_t h;
+		bus_size_t len, off;
+		char buf[256];
+		int s;
+
+		rom = (struct pci_rom *)data;
+
+		bhlc = pci_conf_read(pc, tag, PCI_BHLC_REG);
+		if (PCI_HDRTYPE_TYPE(bhlc) != 0)
+			return (ENODEV);
+
+		s = splhigh();
+		addr = pci_conf_read(pc, tag, PCI_ROM_REG);
+		pci_conf_write(pc, tag, PCI_ROM_REG, ~PCI_ROM_ENABLE);
+		mask = pci_conf_read(pc, tag, PCI_ROM_REG);
+		pci_conf_write(pc, tag, PCI_ROM_REG, addr);
+		splx(s);
+
+		/*
+		 * Section 6.2.5.2 `Expansion ROM Base Addres Register',
+		 *
+		 * tells us that only the upper 21 bits are writable.
+		 * This means that the size of a ROM must be a
+		 * multiple of 2 KB.  So reading the ROM in chunks of
+		 * 256 bytes should work just fine.
+		 */
+		if ((PCI_ROM_ADDR(addr) == 0 ||
+		     PCI_ROM_SIZE(mask) % sizeof(buf)) != 0)
+			return (ENODEV);
+
+		/* If we're just after the size, skip reading the ROM. */
+		if (cmd == PCIOCGETROMLEN) {
+			error = 0;
+			goto fail;
+		}
+
+		if (rom->pr_romlen < PCI_ROM_SIZE(mask)) {
+			error = ENOMEM;
+			goto fail;
+		}
+
+		error = bus_space_map(pci->sc_memt, PCI_ROM_ADDR(addr),
+		    PCI_ROM_SIZE(mask), 0, &h);
+		if (error)
+			goto fail;
+
+		off = 0;
+		len = PCI_ROM_SIZE(mask);
+		while (len > 0 && error == 0) {
+			s = splhigh();
+			pci_conf_write(pc, tag, PCI_ROM_REG,
+			    addr | PCI_ROM_ENABLE);
+			bus_space_read_region_1(pci->sc_memt, h, off,
+			    buf, sizeof(buf));
+			pci_conf_write(pc, tag, PCI_ROM_REG, addr);
+			splx(s);
+
+			error = copyout(buf, rom->pr_rom + off, sizeof(buf));
+			off += sizeof(buf);
+			len -= sizeof(buf);
+		}
+
+		bus_space_unmap(pci->sc_memt, h, PCI_ROM_SIZE(mask));
+
+	fail:
+		rom->pr_romlen = PCI_ROM_SIZE(mask);
+		break;
+	}
 
 	default:
 		error = ENOTTY;

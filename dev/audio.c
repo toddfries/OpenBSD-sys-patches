@@ -1,4 +1,4 @@
-/*	$OpenBSD: audio.c,v 1.104 2009/06/18 22:55:56 jakemsr Exp $	*/
+/*	$OpenBSD: audio.c,v 1.107 2009/11/09 17:53:39 nicm Exp $	*/
 /*	$NetBSD: audio.c,v 1.119 1999/11/09 16:50:47 augustss Exp $	*/
 
 /*
@@ -153,7 +153,7 @@ int	audioprint(void *, const char *);
 int	audioprobe(struct device *, void *, void *);
 void	audioattach(struct device *, struct device *, void *);
 int	audiodetach(struct device *, int);
-int	audioactivate(struct device *, enum devact);
+int	audioactivate(struct device *, int);
 
 struct portname {
 	char	*name;
@@ -314,8 +314,8 @@ audioattach(struct device *parent, struct device *self, void *aux)
 	 */
 
 	if (hwp->get_default_params) {
-		hwp->get_default_params(sc, AUMODE_PLAY, &sc->sc_pparams);
-		hwp->get_default_params(sc, AUMODE_RECORD, &sc->sc_rparams);
+		hwp->get_default_params(hdlp, AUMODE_PLAY, &sc->sc_pparams);
+		hwp->get_default_params(hdlp, AUMODE_RECORD, &sc->sc_rparams);
 	} else {
 		sc->sc_pparams = audio_default;
 		sc->sc_rparams = audio_default;
@@ -364,7 +364,7 @@ audioattach(struct device *parent, struct device *self, void *aux)
 }
 
 int
-audioactivate(struct device *self, enum devact act)
+audioactivate(struct device *self, int act)
 {
 	struct audio_softc *sc = (struct audio_softc *)self;
 
@@ -1014,9 +1014,9 @@ audio_open(dev_t dev, struct audio_softc *sc, int flags, int ifmt,
 	if (ISDEVAUDIO(dev)) {
 		/* /dev/audio */
 		if (sc->hw_if->get_default_params) {
-			sc->hw_if->get_default_params(sc, AUMODE_PLAY,
+			sc->hw_if->get_default_params(sc->hw_hdl, AUMODE_PLAY,
 			    &sc->sc_pparams);
-			sc->hw_if->get_default_params(sc, AUMODE_RECORD,
+			sc->hw_if->get_default_params(sc->hw_hdl, AUMODE_RECORD,
 			    &sc->sc_rparams);
 		} else {
 			sc->sc_rparams = audio_default;
@@ -1764,7 +1764,6 @@ audio_selwakeup(struct audio_softc *sc, int play)
 	selwakeup(si);
 	if (sc->sc_async_audio)
 		psignal(sc->sc_async_audio, SIGIO);
-	KNOTE(&si->si_note, 0);
 }
 
 #define	AUDIO_FILTREAD(sc) ( \

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.142 2009/06/16 16:42:41 ariane Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.145 2009/08/11 17:15:54 oga Exp $	*/
 /*	$NetBSD: pmap.c,v 1.91 2000/06/02 17:46:37 thorpej Exp $	*/
 
 /*
@@ -686,8 +686,8 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 	pt_entry_t *pte, opte, npte;
 
 	pte = vtopte(va);
-	npte = pa | ((prot & VM_PROT_WRITE)? PG_RW : PG_RO) | PG_V |
-	    PG_U | PG_M;
+	npte = (pa & PMAP_PA_MASK) | ((prot & VM_PROT_WRITE)? PG_RW : PG_RO) |
+	    PG_V | PG_U | PG_M | ((pa & PMAP_NOCACHE) ? PG_N : 0);
 
 	/* special 1:1 mappings in the first 4MB must not be global */
 	if (va >= (vaddr_t)NBPD)
@@ -695,6 +695,8 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 
 	opte = i386_atomic_testset_ul(pte, npte);
 	if (pmap_valid_entry(opte)) {
+		if (pa & PMAP_NOCACHE && (opte & PG_N) == 0)
+			wbinvd();
 		/* NB. - this should not happen. */
 		pmap_tlb_shootpage(pmap_kernel(), va);
 		pmap_tlb_shootwait();
@@ -805,7 +807,7 @@ pmap_bootstrap(vaddr_t kva_start)
 	kpm = pmap_kernel();
 	simple_lock_init(&kpm->pm_obj.vmobjlock);
 	kpm->pm_obj.pgops = NULL;
-	TAILQ_INIT(&kpm->pm_obj.memq);
+	RB_INIT(&kpm->pm_obj.memt);
 	kpm->pm_obj.uo_npages = 0;
 	kpm->pm_obj.uo_refs = 1;
 	bzero(&kpm->pm_list, sizeof(kpm->pm_list));  /* pm_list not used */
@@ -1269,7 +1271,7 @@ pmap_free_pvpage(void)
 		/* unmap the page */
 		dead_entries = NULL;
 		uvm_unmap_remove(map, (vaddr_t)pvp, ((vaddr_t)pvp) + PAGE_SIZE,
-		    &dead_entries, NULL);
+		    &dead_entries, NULL, FALSE);
 		vm_map_unlock(map);
 
 		if (dead_entries != NULL)
@@ -1424,7 +1426,7 @@ pmap_drop_ptp(struct pmap *pm, vaddr_t va, struct vm_page *ptp,
 	pm->pm_stats.resident_count--;
 	/* update hint */
 	if (pm->pm_ptphint == ptp)
-		pm->pm_ptphint = TAILQ_FIRST(&pm->pm_obj.memq);
+		pm->pm_ptphint = RB_ROOT(&pm->pm_obj.memt);
 	ptp->wire_count = 0;
 	/* Postpone free to after shootdown. */
 	uvm_pagerealloc(ptp, NULL, 0);
@@ -1461,7 +1463,7 @@ pmap_pinit(struct pmap *pmap)
 	/* init uvm_object */
 	simple_lock_init(&pmap->pm_obj.vmobjlock);
 	pmap->pm_obj.pgops = NULL;	/* currently not a mappable object */
-	TAILQ_INIT(&pmap->pm_obj.memq);
+	RB_INIT(&pmap->pm_obj.memt);
 	pmap->pm_obj.uo_npages = 0;
 	pmap->pm_obj.uo_refs = 1;
 	pmap->pm_stats.wired_count = 0;
@@ -1533,8 +1535,7 @@ pmap_destroy(struct pmap *pmap)
 	simple_unlock(&pmaps_lock);
 
 	/* Free any remaining PTPs. */
-	while (!TAILQ_EMPTY(&pmap->pm_obj.memq)) {
-		pg = TAILQ_FIRST(&pmap->pm_obj.memq);
+	while ((pg = RB_ROOT(&pmap->pm_obj.memt)) != NULL) {
 		pg->wire_count = 0;
 		uvm_pagefree(pg);
 	}
@@ -2009,7 +2010,7 @@ pmap_do_remove(struct pmap *pmap, vaddr_t sva, vaddr_t eva, int flags)
 		/* If PTP is no longer being used, free it. */
 		if (ptp && ptp->wire_count <= 1) {
 			pmap_drop_ptp(pmap, va, ptp, ptes);
-			TAILQ_INSERT_TAIL(&empty_ptps, ptp, listq);
+			TAILQ_INSERT_TAIL(&empty_ptps, ptp, pageq);
 		}
 
 		if (!shootall)
@@ -2023,7 +2024,7 @@ pmap_do_remove(struct pmap *pmap, vaddr_t sva, vaddr_t eva, int flags)
 	pmap_unmap_ptes(pmap);
 	PMAP_MAP_TO_HEAD_UNLOCK();
 	while ((ptp = TAILQ_FIRST(&empty_ptps)) != NULL) {
-		TAILQ_REMOVE(&empty_ptps, ptp, listq);
+		TAILQ_REMOVE(&empty_ptps, ptp, pageq);
 		uvm_pagefree(ptp);
 	}
 }
@@ -2080,7 +2081,7 @@ pmap_page_remove(struct vm_page *pg)
 		if (pve->pv_ptp && --pve->pv_ptp->wire_count <= 1) {
 			pmap_drop_ptp(pve->pv_pmap, pve->pv_va,
 			    pve->pv_ptp, ptes);
-			TAILQ_INSERT_TAIL(&empty_ptps, pve->pv_ptp, listq);
+			TAILQ_INSERT_TAIL(&empty_ptps, pve->pv_ptp, pageq);
 		}
 
 		pmap_tlb_shootpage(pve->pv_pmap, pve->pv_va);
@@ -2093,7 +2094,7 @@ pmap_page_remove(struct vm_page *pg)
 	pmap_tlb_shootwait();
 
 	while ((ptp = TAILQ_FIRST(&empty_ptps)) != NULL) {
-		TAILQ_REMOVE(&empty_ptps, ptp, listq);
+		TAILQ_REMOVE(&empty_ptps, ptp, pageq);
 		uvm_pagefree(ptp);
 	}
 }
@@ -2372,8 +2373,11 @@ pmap_enter(struct pmap *pmap, vaddr_t va, paddr_t pa,
 	struct vm_page *ptp;
 	struct pv_entry *pve = NULL, *freepve;
 	boolean_t wired = (flags & PMAP_WIRED) != 0;
+	boolean_t nocache = (pa & PMAP_NOCACHE) != 0;
 	struct vm_page *pg = NULL;
 	int error, wired_count, resident_count, ptp_count;
+
+	pa &= PMAP_PA_MASK;	/* nuke flags from pa */
 
 #ifdef DIAGNOSTIC
 	/* sanity check: totally out of range? */
@@ -2526,7 +2530,7 @@ enter_now:
 	pmap_exec_account(pmap, va, opte, npte);
 	if (wired)
 		npte |= PG_W;
-	if (flags & PMAP_NOCACHE)
+	if (nocache)
 		npte |= PG_N;
 	if (va < VM_MAXUSER_ADDRESS)
 		npte |= PG_u;
@@ -2549,7 +2553,9 @@ enter_now:
 	pmap->pm_stats.resident_count += resident_count;
 	pmap->pm_stats.wired_count += wired_count;
 
-	if (opte & PG_V) {
+	if (pmap_valid_entry(opte)) {
+		if (nocache && (opte & PG_N) == 0)
+			wbinvd(); /* XXX clflush before we enter? */
 		pmap_tlb_shootpage(pmap, va);
 		pmap_tlb_shootwait();
 	}

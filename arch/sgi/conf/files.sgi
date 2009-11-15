@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sgi,v 1.27 2009/06/24 17:27:40 miod Exp $
+#	$OpenBSD: files.sgi,v 1.40 2009/11/10 15:50:09 jsing Exp $
 #
 # maxpartitions must be first item in files.${ARCH}
 #
@@ -13,13 +13,14 @@ file	arch/sgi/sgi/autoconf.c
 file	arch/sgi/sgi/bus_dma.c
 file	arch/sgi/sgi/conf.c
 file	arch/sgi/sgi/disksubr.c			disk
-file	arch/sgi/sgi/ip27_machdep.c		tgt_origin200 | tgt_origin2000
+file	arch/sgi/sgi/ip27_machdep.c		tgt_origin
 file	arch/sgi/sgi/ip30_machdep.c		tgt_octane
 file	arch/sgi/sgi/ip32_machdep.c		tgt_o2
+file	arch/sgi/sgi/l1.c			tgt_origin
 file	arch/sgi/sgi/machdep.c
 file	arch/sgi/sgi/mainbus.c
 file	arch/sgi/sgi/mutex.c
-file	arch/sgi/sgi/sginode.c			tgt_origin200 | tgt_origin2000
+file	arch/sgi/sgi/sginode.c			tgt_origin
 file	arch/sgi/sgi/wscons_machdep.c		wsdisplay
 
 # RAM disk for boot
@@ -55,11 +56,10 @@ attach	clock at mainbus
 #
 #	O2 MACE localbus autoconfiguration devices
 #
-define	macebus {[base = -1], [irq = -1]}
+define	macebus {[base = -1]}
 device	macebus
 attach	macebus at mainbus
 file	arch/sgi/localbus/macebus.c		macebus
-file	arch/sgi/localbus/macectrl.S		macebus
 
 #
 #	Origin200/Origin2000 node configuration enumerator, and
@@ -72,10 +72,10 @@ include "dev/onewire/files.onewire"
 #
 #	PCI Bus bridges
 #
+
 device	macepcibr {} : pcibus
 attach	macepcibr at macebus
-file	arch/sgi/pci/macepcibridge.c		macepcibr needs-flag
-file	arch/sgi/pci/macepcimap.c		macepcibr
+file	arch/sgi/pci/macepcibridge.c		macepcibr
 
 #	Use machine independent SCSI driver routines
 include	"scsi/files.scsi"
@@ -89,6 +89,7 @@ include	"dev/i2o/files.i2o"
 #
 
 include	"dev/pci/files.pci"
+file	arch/sgi/pci/pci_machdep.c		pci
 
 # Sun HME Ethernet controllers
 device	hme: ether, ifnet, mii, ifmedia
@@ -102,14 +103,33 @@ device	ioc: onewirebus
 attach	ioc at pci
 file	arch/sgi/pci/ioc.c			ioc
 
-# IOC3 serial ports
+# IOC4
+define	iof {[base = -1]}
+device	iof
+attach	iof at pci
+file	arch/sgi/pci/iof.c			iof
+
+# IOC3/4 serial ports
 attach	com at ioc with com_ioc
 file	arch/sgi/dev/com_ioc.c			com_ioc
+attach	com at iof with com_iof
+file	arch/sgi/dev/com_iof.c			com_iof
+
+# IOC3 onboard Ethernet
+device	iec: ether, ifnet, ifmedia, mii
+attach	iec at ioc
+file	arch/sgi/dev/if_iec.c			iec
+
+# IOC3 PS/2 controller
+device	iockbc: pckbcslot
+attach	iockbc at ioc
+file	arch/sgi/dev/iockbc.c			iockbc	needs-flag
 
 # DS1687 Time-Of-Day calendar device
 device	dsrtc
 attach	dsrtc at macebus with dsrtc_macebus
 attach	dsrtc at ioc with dsrtc_ioc
+attach	dsrtc at iof with dsrtc_iof
 file	arch/sgi/dev/dsrtc.c			dsrtc
 
 # GBE framebuffer
@@ -120,11 +140,6 @@ file	arch/sgi/dev/gbe.c			gbe	needs-flag
 # 16[45]50-based "com" ports on localbus
 attach	com at macebus with com_macebus
 file	arch/sgi/localbus/com_lbus.c		com_macebus
-
-# IOC Ethernet
-device	ef: ether, ifnet, ifmedia, mii
-attach	ef at ioc
-file	arch/sgi/dev/if_ef.c			ef
 
 # MACE MAC-110 ethernet
 device	mec: ether, ifnet, ifmedia, mii
@@ -144,8 +159,11 @@ file	arch/sgi/dev/mkbc.c			mkbc	needs-flag
 
 # Power button
 device	power
-attach	power at macebus
-file 	arch/sgi/dev/power.c			power
+attach	power at macebus with power_macebus
+attach	power at mainbus with power_mainbus
+file 	arch/sgi/dev/power.c			power |
+						power_macebus | power_mainbus
+							needs-flag
 
 # Raster operations
 include	"dev/rasops/files.rasops"
@@ -155,6 +173,12 @@ include	"dev/wsfont/files.wsfont"
 # wscons console
 #
 include	"dev/wscons/files.wscons"
+
+#
+# CardBus and PCMCIA bus support
+#
+include	"dev/cardbus/files.cardbus"
+include	"dev/pcmcia/files.pcmcia"
 
 #
 # Machine-independent USB drivers

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpireg.h,v 1.35 2008/10/28 11:00:40 marco Exp $ */
+/*	$OpenBSD: mpireg.h,v 1.37 2009/10/23 00:52:55 dlg Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -635,6 +635,39 @@ struct mpi_evt_change {
 	u_int8_t		reserved[3];
 } __packed;
 
+struct mpi_evt_link_status_change {
+	u_int8_t		state;
+#define MPI_EVT_LINK_STATUS_CHANGE_OFFLINE		0x00
+#define MPI_EVT_LINK_STATUS_CHANGE_ACTIVE		0x01
+	u_int8_t		_reserved1[3];
+
+	u_int8_t		_reserved2[1];
+	u_int8_t		port;
+	u_int8_t		_reserved3[2];
+} __packed;
+
+struct mpi_evt_loop_status_change {
+	u_int8_t		character4;
+	u_int8_t		character3;
+	u_int8_t		type;
+#define MPI_EVT_LOOP_STATUS_CHANGE_TYPE_LIP		0x01
+#define MPI_EVT_LOOP_STATUS_CHANGE_TYPE_LPE		0x02
+#define MPI_EVT_LOOP_STATUS_CHANGE_TYPE_LPB		0x03
+	u_int8_t		_reserved1[1];
+
+	u_int8_t		_reserved2[1];
+	u_int8_t		port;
+	u_int8_t		_reserved3[2];
+} __packed;
+
+struct mpi_evt_logout {
+	u_int32_t		n_portid;
+
+	u_int8_t		alias_index;
+	u_int8_t		port;
+	u_int8_t		_reserved[2];
+} __packed;
+
 struct mpi_evt_sas_phy {
 	u_int8_t		phy_num;
 	u_int8_t		link_rates;
@@ -1168,6 +1201,20 @@ struct mpi_cfg_manufacturing_pg0 {
 	char			board_name[16];
 	char			board_assembly[16];
 	char			board_tracer_number[16];
+} __packed;
+
+struct mpi_cfg_ioc_pg1 {
+	struct mpi_cfg_hdr	config_header;
+
+	u_int32_t		flags;
+#define MPI_CFG_IOC_1_REPLY_COALESCING			(1<<0)
+#define MPI_CFG_IOC_1_CTX_REPLY_DISABLE			(1<<4)
+
+	u_int32_t		coalescing_timeout;
+
+	u_int8_t		coalescing_depth;
+	u_int8_t		pci_slot_num;
+	u_int8_t		_reserved[2];
 } __packed;
 
 struct mpi_cfg_ioc_pg2 {

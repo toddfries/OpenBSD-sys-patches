@@ -1,4 +1,4 @@
-/*	$OpenBSD: sscom.c,v 1.9 2009/01/02 19:42:54 drahn Exp $ */
+/*	$OpenBSD: sscom.c,v 1.15 2009/11/09 17:53:38 nicm Exp $ */
 /*	$NetBSD: sscom.c,v 1.29 2008/06/11 22:37:21 cegger Exp $ */
 
 /*
@@ -515,14 +515,10 @@ sscom_attach_subr(struct sscom_softc *sc)
 	/* if there are no enable/disable functions, assume the device
 	   is always enabled */
 
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	sc->sc_si = softintr_establish(IPL_TTY, sscomsoft, sc);
 	if (sc->sc_si == NULL)
 		panic("%s: can't establish soft interrupt",
 		    sc->sc_dev.dv_xname);
-#else           
-	timeout_set(&sc->sc_comsoft_tmo, comsoft, sc);
-#endif
 
 	SET(sc->sc_hwflags, SSCOM_HW_DEV_OK);
 
@@ -541,7 +537,7 @@ sscom_detach(struct device *self, int flags)
 }
 
 int
-sscom_activate(struct device *self, enum devact act)
+sscom_activate(struct device *self, int act)
 {
 #ifdef notyet
 	struct sscom_softc *sc = (struct sscom_softc *)self;
@@ -551,7 +547,7 @@ sscom_activate(struct device *self, enum devact act)
 	SSCOM_LOCK(sc);
 	switch (act) {
 	case DVACT_ACTIVATE:
-		rv = EOPNOTSUPP;
+		rv = 0;
 		break;
 
 	case DVACT_DEACTIVATE:
@@ -963,9 +959,7 @@ sscom_schedrx(struct sscom_softc *sc)
 	sc->sc_rx_ready = 1;
 
 	/* Wake up the poller. */
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	softintr_schedule(sc->sc_si);
-#endif
 }
 
 void
@@ -1375,9 +1369,9 @@ sscomstart(struct tty *tp)
 			CLR(tp->t_state, TS_ASLEEP);
 			wakeup(&tp->t_outq);
 		}
+		selwakeup(&tp->t_wsel);
 		if (tp->t_outq.c_cc == 0)
 			goto out;
-		selwakeup(&tp->t_wsel);
 	}
 
 	SET(tp->t_state, TS_BUSY);
@@ -1609,12 +1603,6 @@ sscomsoft(void *arg)
 			sscom_stsoft(sc, tp);
 		}
 	}
-#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
-        timeout_add(&sc->sc_comsoft_tmo, 1);
-#else 
-        ;
-#endif
-
 }
 
 
@@ -1806,10 +1794,7 @@ next:
 	SSCOM_UNLOCK(sc);
 
 	/* Wake up the poller. */
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	softintr_schedule(sc->sc_si);
-#endif
-
 
 
 #if NRND > 0 && defined(RND_COM)

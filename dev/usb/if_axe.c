@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.92 2009/05/13 16:46:55 jsg Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.94 2009/10/13 19:33:17 pirofti Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>
@@ -149,6 +149,7 @@ const struct axe_type axe_devs[] = {
 	{ { USB_VENDOR_APPLE, USB_PRODUCT_APPLE_ETHERNET }, AX772 },
 	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88172}, 0 },
 	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88772}, AX772 },
+	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88772A}, AX772 },
 	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88178}, AX178 },
 	{ { USB_VENDOR_ATEN, USB_PRODUCT_ATEN_UC210T}, 0 },
 	{ { USB_VENDOR_BELKIN, USB_PRODUCT_BELKIN_F5D5055 }, AX178 },
@@ -178,7 +179,7 @@ const struct axe_type axe_devs[] = {
 int axe_match(struct device *, void *, void *); 
 void axe_attach(struct device *, struct device *, void *); 
 int axe_detach(struct device *, int); 
-int axe_activate(struct device *, enum devact); 
+int axe_activate(struct device *, int); 
 
 struct cfdriver axe_cd = { 
 	NULL, "axe", DV_IFNET 
@@ -809,7 +810,7 @@ axe_detach(struct device *self, int flags)
 }
 
 int
-axe_activate(struct device *self, enum devact act)
+axe_activate(struct device *self, int act)
 {
 	struct axe_softc *sc = (struct axe_softc *)self;
 

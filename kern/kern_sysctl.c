@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.175 2009/06/15 17:59:45 deraadt Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.179 2009/08/09 10:40:17 blambert Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -555,12 +555,21 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (sysctl_cptime2(name + 1, namelen -1, oldp, oldlenp,
 		    newp, newlen));
 	case KERN_CACHEPCT: {
-		int opct = 0;
-
+		int opct, pgs;
+		opct = bufcachepercent;
 		error = sysctl_int(oldp, oldlenp, newp, newlen,
-		    &opct);
+		    &bufcachepercent);
 		if (error)
 			return(error);
+		if (bufcachepercent > 90 || bufcachepercent < 5) {
+			bufcachepercent = opct;
+			return (EINVAL);
+		}
+		if (bufcachepercent != opct) {
+			pgs = bufcachepercent * physmem / 100;
+			bufadjust(pgs); /* adjust bufpages */
+			bufhighpages = bufpages; /* set high water mark */
+		}
 		return(0);
 	}
 	default:
@@ -1086,6 +1095,8 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 		kf->so_pcb = PTRTOINT64(so->so_pcb);
 		kf->so_protocol = so->so_proto->pr_protocol;
 		kf->so_family = so->so_proto->pr_domain->dom_family;
+		if (!so->so_pcb)
+			break;
 		switch (kf->so_family) {
 		case AF_INET: {
 			struct inpcb *inpcb = so->so_pcb;
@@ -1232,6 +1243,8 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 				continue;
 			}
 			fdp = pp->p_fd;
+			if (pp->p_textvp)
+				FILLIT(NULL, NULL, KERN_FILE_TEXT, pp->p_textvp, pp);
 			if (fdp->fd_cdir)
 				FILLIT(NULL, NULL, KERN_FILE_CDIR, fdp->fd_cdir, pp);
 			if (fdp->fd_rdir)
@@ -1956,9 +1969,6 @@ sysctl_diskinit(int update, struct proc *p)
 int
 sysctl_sysvipc(int *name, u_int namelen, void *where, size_t *sizep)
 {
-#ifdef SYSVMSG
-	struct msg_sysctl_info *msgsi;
-#endif
 #ifdef SYSVSEM
 	struct sem_sysctl_info *semsi;
 #endif
@@ -1977,10 +1987,7 @@ sysctl_sysvipc(int *name, u_int namelen, void *where, size_t *sizep)
 	switch (*name) {
 	case KERN_SYSVIPC_MSG_INFO:
 #ifdef SYSVMSG
-		infosize = sizeof(msgsi->msginfo);
-		nds = msginfo.msgmni;
-		dssize = sizeof(msgsi->msgids[0]);
-		break;
+		return (sysctl_sysvmsg(name, namelen, where, sizep));
 #else
 		return (EOPNOTSUPP);
 #endif
@@ -2021,12 +2028,6 @@ sysctl_sysvipc(int *name, u_int namelen, void *where, size_t *sizep)
 	buf = malloc(min(tsize, buflen), M_TEMP, M_WAITOK|M_ZERO);
 
 	switch (*name) {
-#ifdef SYSVMSG
-	case KERN_SYSVIPC_MSG_INFO:
-		msgsi = (struct msg_sysctl_info *)buf;
-		msgsi->msginfo = msginfo;
-		break;
-#endif
 #ifdef SYSVSEM
 	case KERN_SYSVIPC_SEM_INFO:
 		semsi = (struct sem_sysctl_info *)buf;
@@ -2051,11 +2052,6 @@ sysctl_sysvipc(int *name, u_int namelen, void *where, size_t *sizep)
 				break;
 			}
 			switch (*name) {
-#ifdef SYSVMSG
-			case KERN_SYSVIPC_MSG_INFO:
-				bcopy(&msqids[i], &msgsi->msgids[i], dssize);
-				break;
-#endif
 #ifdef SYSVSEM
 			case KERN_SYSVIPC_SEM_INFO:
 				if (sema[i] != NULL)

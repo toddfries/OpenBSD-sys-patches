@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.97 2009/06/18 18:53:02 claudio Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.100 2009/08/13 14:24:47 jasper Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -108,7 +108,7 @@ struct cfattach vr_ca = {
 	sizeof(struct vr_softc), vr_probe, vr_attach
 };
 struct cfdriver vr_cd = {
-	0, "vr", DV_IFNET
+	NULL, "vr", DV_IFNET
 };
 
 int vr_encap(struct vr_softc *, struct vr_chain *, struct mbuf *);
@@ -122,7 +122,6 @@ int vr_ioctl(struct ifnet *, u_long, caddr_t);
 void vr_init(void *);
 void vr_stop(struct vr_softc *);
 void vr_watchdog(struct ifnet *);
-void vr_shutdown(void *);
 int vr_ifmedia_upd(struct ifnet *);
 void vr_ifmedia_sts(struct ifnet *, struct ifmediareq *);
 
@@ -668,8 +667,6 @@ vr_attach(struct device *parent, struct device *self, void *aux)
 	m_clsetwms(ifp, MCLBYTES, 2, VR_RX_LIST_CNT - 1);
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	shutdownhook_establish(vr_shutdown, sc);
 	return;
 
 fail_5:
@@ -1547,18 +1544,6 @@ vr_stop(struct vr_softc *sc)
 		sizeof(sc->vr_ldata->vr_tx_list));
 }
 
-/*
- * Stop all chip I/O so that the kernel's probe routines don't
- * get confused by errant DMAs when rebooting.
- */
-void
-vr_shutdown(void *arg)
-{
-	struct vr_softc		*sc = (struct vr_softc *)arg;
-
-	vr_stop(sc);
-}
-
 int
 vr_alloc_mbuf(struct vr_softc *sc, struct vr_chain_onefrag *r)
 {
@@ -1568,15 +1553,9 @@ vr_alloc_mbuf(struct vr_softc *sc, struct vr_chain_onefrag *r)
 	if (r == NULL)
 		return (EINVAL);
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->arpcom.ac_if, MCLBYTES);
+	if (!m)
 		return (ENOBUFS);
-
-	MCLGETI(m, M_DONTWAIT, &sc->arpcom.ac_if, MCLBYTES);
-	if (!(m->m_flags & M_EXT)) {
-		m_free(m);
-		return (ENOBUFS);
-	}
 
 	m->m_len = m->m_pkthdr.len = MCLBYTES;
 	m_adj(m, sizeof(u_int64_t));

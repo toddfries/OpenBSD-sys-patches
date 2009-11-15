@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.240 2009/06/24 11:38:40 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.246 2009/11/15 17:24:06 deraadt Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -96,6 +96,8 @@ jme*	at pci?			# JMicron JMC250/JMC260 Ethernet
 
 ath*	at pci?			# Atheros AR5k (802.11a/b/g)
 ath*	at cardbus?		# Atheros AR5k (802.11a/b/g)
+athn*	at pci?				# Atheros AR9k (802.11a/g/n)
+athn*	at cardbus?			# Atheros AR9k (802.11a/g/n)
 pgt*	at pci?			# Prism54 (only full-mac varients)
 acx*	at pci?			# TI ACX100/ACX111 (802.11b/g)
 acx*	at cardbus?		# TI ACX100/ACX111 (802.11b/g)
@@ -312,8 +314,12 @@ lpt*	at ebus?
 
 bbc*	at ebus?
 led*	at ebus?
+lom*	at ebus?
 pmc*	at ebus?
 ppm*	at ebus?
+wbsd*	at ebus?
+sdmmc*	at wbsd?
+scsibus* at sdmmc?
 
 # performance counters
 uperf*	at ebus?
@@ -360,7 +366,8 @@ qe*		at qec?
 be*		at qec?
 
 hme*		at sbus?
-#gem*		at sbus?
+ti*		at sbus?
+gem*		at sbus?
 
 # Magma serial/parallel port devices
 magma*		at sbus?
@@ -485,6 +492,8 @@ machfb*		at pci?			# PGX/PGX64 framebuffers
 wsdisplay*	at machfb?
 mgx*		at sbus?		# SMS MGX/MGXPlus framebuffer
 wsdisplay*	at mgx?
+radeonfb*	at pci?			# XVR-100 framebuffer
+wsdisplay*	at radeonfb?
 raptor*		at pci?			# Raptor framebuffer
 wsdisplay*	at raptor?
 rfx*		at sbus?		# RasterFlex framebuffer series

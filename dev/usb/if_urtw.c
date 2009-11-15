@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtw.c,v 1.23 2009/06/24 01:07:12 martynas Exp $	*/
+/*	$OpenBSD: if_urtw.c,v 1.28 2009/10/13 19:33:17 pirofti Exp $	*/
 
 /*-
  * Copyright (c) 2009 Martynas Venckus <martynas@openbsd.org>
@@ -83,10 +83,13 @@ static const struct urtw_type {
 #define	URTW_DEV_RTL8187B(v, p)	\
 	    { { USB_VENDOR_##v, USB_PRODUCT_##v##_##p }, URTW_HWREV_8187B }
 	/* Realtek RTL8187 devices. */
+	URTW_DEV_RTL8187(ASUS,		P5B_WIFI),
 	URTW_DEV_RTL8187(DICKSMITH,	RTL8187),
+	URTW_DEV_RTL8187(LINKSYS4,	WUSB54GCV2),
 	URTW_DEV_RTL8187(LOGITEC,	RTL8187),
 	URTW_DEV_RTL8187(NETGEAR,	WG111V2),
 	URTW_DEV_RTL8187(REALTEK,	RTL8187),
+	URTW_DEV_RTL8187(SITECOMEU,	WL168V1),
 	URTW_DEV_RTL8187(SPHAIRON,	RTL8187),
 	URTW_DEV_RTL8187(SURECOM,	EP9001G2A),
 	/* Realtek RTL8187B devices. */
@@ -95,7 +98,7 @@ static const struct urtw_type {
 	URTW_DEV_RTL8187B(REALTEK,	RTL8187B_0),
 	URTW_DEV_RTL8187B(REALTEK,	RTL8187B_1),
 	URTW_DEV_RTL8187B(REALTEK,	RTL8187B_2),
-	URTW_DEV_RTL8187B(SITECOMEU,	WL168)
+	URTW_DEV_RTL8187B(SITECOMEU,	WL168V4)
 #undef	URTW_DEV_RTL8187
 #undef	URTW_DEV_RTL8187B
 };
@@ -575,7 +578,7 @@ usbd_status	urtw_8225v2_b_set_txpwrlvl(struct urtw_softc *, int);
 int urtw_match(struct device *, void *, void *);
 void urtw_attach(struct device *, struct device *, void *);
 int urtw_detach(struct device *, int);
-int urtw_activate(struct device *, enum devact);
+int urtw_activate(struct device *, int);
 
 struct cfdriver urtw_cd = {
 	NULL, "urtw", DV_IFNET
@@ -791,12 +794,12 @@ urtw_detach(struct device *self, int flags)
 }
 
 int
-urtw_activate(struct device *self, enum devact act)
+urtw_activate(struct device *self, int act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
-	case (DVACT_DEACTIVATE):
+		break;
+	case DVACT_DEACTIVATE:
 		break;
 	}
 
@@ -3523,7 +3526,7 @@ urtw_task(void *arg)
 
 	case IEEE80211_S_SCAN:
 		urtw_set_chan(sc, ic->ic_bss->ni_chan);
-		timeout_add(&sc->scan_to, hz / 5);
+		timeout_add_msec(&sc->scan_to, 200);
 		break;
 
 	case IEEE80211_S_AUTH:

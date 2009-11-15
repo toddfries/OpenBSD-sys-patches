@@ -1,4 +1,4 @@
-/*	$OpenBSD: dart.c,v 1.4 2008/01/23 16:37:58 jsing Exp $	*/
+/*	$OpenBSD: dart.c,v 1.7 2009/11/09 17:53:38 nicm Exp $	*/
 
 /*
  * Mach Operating System
@@ -639,7 +639,7 @@ dartopen(dev_t dev, int flag, int mode, struct proc *p)
 
 		(void)dartmctl(sc, port, TIOCM_DTR | TIOCM_RTS, DMSET);
 		tp->t_state |= TS_CARR_ON;
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0) {
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0) {
 		splx(s);
 		return (EBUSY);
 	}

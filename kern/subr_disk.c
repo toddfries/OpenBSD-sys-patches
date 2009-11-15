@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.95 2009/06/17 01:30:30 thib Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.97 2009/08/13 15:23:11 deraadt Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -56,6 +56,7 @@
 #include <sys/dkio.h>
 #include <sys/dkstat.h>		/* XXX */
 #include <sys/proc.h>
+#include <sys/vnode.h>
 #include <uvm/uvm_extern.h>
 
 #include <sys/socket.h>
@@ -189,7 +190,7 @@ dkcksum(struct disklabel *lp)
 	return (sum);
 }
 
-char *
+int
 initdisklabel(struct disklabel *lp)
 {
 	int i;
@@ -200,7 +201,7 @@ initdisklabel(struct disklabel *lp)
 	if (DL_GETDSIZE(lp) == 0)
 		DL_SETDSIZE(lp, MAXDISKSIZE);
 	if (lp->d_secpercyl == 0)
-		return ("invalid geometry");
+		return (ERANGE);
 	lp->d_npartitions = MAXPARTITIONS;
 	for (i = 0; i < RAW_PART; i++) {
 		DL_SETPSIZE(&lp->d_partitions[i], 0);
@@ -214,14 +215,14 @@ initdisklabel(struct disklabel *lp)
 	lp->d_version = 1;
 	lp->d_bbsize = 8192;
 	lp->d_sbsize = 64*1024;			/* XXX ? */
-	return (NULL);
+	return (0);
 }
 
 /*
  * Check an incoming block to make sure it is a disklabel, convert it to
  * a newer version if needed, etc etc.
  */
-char *
+int
 checkdisklabel(void *rlp, struct disklabel *lp,
 	u_int64_t boundstart, u_int64_t boundend)
 {
@@ -229,28 +230,28 @@ checkdisklabel(void *rlp, struct disklabel *lp,
 	struct __partitionv0 *v0pp;
 	struct partition *pp;
 	daddr64_t disksize;
-	char *msg = NULL;
+	int error = 0;
 	int i;
 
 	if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC)
-		msg = "no disk label";
+		error = ENOENT;	/* no disk label */
 	else if (dlp->d_npartitions > MAXPARTITIONS)
-		msg = "invalid label, partition count > MAXPARTITIONS";
+		error = E2BIG;	/* too many partitions */
 	else if (dlp->d_secpercyl == 0)
-		msg = "invalid label, d_secpercyl == 0";
+		error = EINVAL;	/* invalid label */
 	else if (dlp->d_secsize == 0)
-		msg = "invalid label, d_secsize == 0";
+		error = ENOSPC;	/* disk too small */
 	else if (dkcksum(dlp) != 0)
-		msg = "invalid label, incorrect checksum";
+		error = EINVAL;	/* incorrect checksum */
 
-	if (msg) {
+	if (error) {
 		u_int16_t *start, *end, sum = 0;
 
 		/* If it is byte-swapped, attempt to convert it */
 		if (swap32(dlp->d_magic) != DISKMAGIC ||
 		    swap32(dlp->d_magic2) != DISKMAGIC ||
 		    swap16(dlp->d_npartitions) > MAXPARTITIONS)
-			return (msg);
+			return (error);
 
 		/*
 		 * Need a byte-swap aware dkcksum varient
@@ -262,7 +263,7 @@ checkdisklabel(void *rlp, struct disklabel *lp,
 		while (start < end)
 			sum ^= *start++;
 		if (sum != 0)
-			return (msg);
+			return (error);
 
 		dlp->d_magic = swap32(dlp->d_magic);
 		dlp->d_type = swap16(dlp->d_type);
@@ -318,13 +319,13 @@ checkdisklabel(void *rlp, struct disklabel *lp,
 
 		dlp->d_checksum = 0;
 		dlp->d_checksum = dkcksum(dlp);
-		msg = NULL;
+		error = 0;
 	}
 
 	/* XXX should verify lots of other fields and whine a lot */
 
-	if (msg)
-		return (msg);
+	if (error)
+		return (error);
 
 	/* Initial passed in lp contains the real disk size. */
 	disksize = DL_GETDSIZE(lp);
@@ -365,7 +366,7 @@ checkdisklabel(void *rlp, struct disklabel *lp,
 
 	lp->d_checksum = 0;
 	lp->d_checksum = dkcksum(lp);
-	return (msg);
+	return (0);
 }
 
 /*
@@ -377,7 +378,7 @@ checkdisklabel(void *rlp, struct disklabel *lp,
  * we cannot because it doesn't always exist. So.. we assume the
  * MBR is valid.
  */
-char *
+int
 readdoslabel(struct buf *bp, void (*strat)(struct buf *),
     struct disklabel *lp, int *partoffp, int spoofonly)
 {
@@ -386,11 +387,12 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 	struct dos_partition dp[NDOSPART], *dp2;
 	daddr64_t part_blkno = DOSBBSECTOR;
 	u_int32_t extoff = 0;
+	int error;
 
 	if (lp->d_secpercyl == 0)
-		return ("invalid label, d_secpercyl == 0");
+		return (EINVAL);	/* invalid label */
 	if (lp->d_secsize == 0)
-		return ("invalid label, d_secsize == 0");
+		return (ENOSPC);	/* disk too small */
 
 	/* do DOS partitions in the process of getting disklabel? */
 
@@ -410,10 +412,11 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 		bp->b_bcount = lp->d_secsize;
 		bp->b_flags = B_BUSY | B_READ | B_RAW;
 		(*strat)(bp);
-		if (biowait(bp)) {
+		error = biowait(bp);
+		if (error) {
 /*wrong*/		if (partoffp)
 /*wrong*/			*partoffp = -1;
-			return ("dos partition I/O error");
+			return (error);
 		}
 
 		bcopy(bp->b_data + offset, dp, sizeof(dp));
@@ -586,7 +589,7 @@ notfat:
 
 	/* don't read the on-disk label if we are in spoofed-only mode */
 	if (spoofonly)
-		return (NULL);		/* jump to the checkdisklabel below?? */
+		return (0);
 
 	bp->b_blkno = DL_BLKTOSEC(lp, dospartoff + DOS_LABELSECTOR) *
 	    DL_BLKSPERSEC(lp);
@@ -595,7 +598,7 @@ notfat:
 	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
 	if (biowait(bp))
-		return ("disk label I/O error");
+		return (bp->b_error);
 
 	/* sub-MBR disklabels are always at a LABELOFFSET of 0 */
 	return checkdisklabel(bp->b_data + offset, lp, dospartoff, dospartend);
@@ -910,6 +913,7 @@ dk_mountroot(void)
 	int part = DISKPART(rootdev);
 	int (*mountrootfn)(void);
 	struct disklabel dl;
+	struct vnode *vn;
 	int error;
 
 	rrootdev = blktochr(rootdev);
@@ -922,18 +926,21 @@ dk_mountroot(void)
 	/*
 	 * open device, ioctl for the disklabel, and close it.
 	 */
-	error = (cdevsw[major(rrootdev)].d_open)(rawdev, FREAD,
-	    S_IFCHR, curproc);
+	if (cdevvp(rawdev, &vn))
+		panic("cannot obtain vnode for 0x%x/0x%x", rootdev, rrootdev);
+	error = VOP_OPEN(vn, FREAD, NOCRED, curproc);
 	if (error)
 		panic("cannot open disk, 0x%x/0x%x, error %d",
 		    rootdev, rrootdev, error);
-	error = (cdevsw[major(rrootdev)].d_ioctl)(rawdev, DIOCGDINFO,
-	    (caddr_t)&dl, FREAD, curproc);
+	error = VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&dl, FREAD, NOCRED, 0);
 	if (error)
 		panic("cannot read disk label, 0x%x/0x%x, error %d",
 		    rootdev, rrootdev, error);
-	(void) (cdevsw[major(rrootdev)].d_close)(rawdev, FREAD,
-	    S_IFCHR, curproc);
+	error = VOP_CLOSE(vn, FREAD, NOCRED, 0);
+	if (error)
+		panic("cannot close disk , 0x%x/0x%x, error %d",
+		    rootdev, rrootdev, error);
+	vput(vn);
 
 	if (DL_GETPSIZE(&dl.d_partitions[part]) == 0)
 		panic("root filesystem has size 0");

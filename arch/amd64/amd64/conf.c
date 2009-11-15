@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.25 2009/06/03 14:45:50 jj Exp $	*/
+/*	$OpenBSD: conf.c,v 1.27 2009/08/13 15:04:20 dlg Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.
@@ -189,6 +189,8 @@ cdev_decl(pci);
 
 #include "pf.h"
 #include "hotplug.h"
+#include "gpio.h"
+#include "vscsi.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -300,6 +302,8 @@ struct cdevsw	cdevsw[] =
 	cdev_nvram_init(NNVRAM,nvram),	/* 85: NVRAM interface */
 	cdev_agp_init(NAGP,agp),	/* 86: agp */
 	cdev_drm_init(NDRM,drm),	/* 87: drm */
+	cdev_gpio_init(NGPIO,gpio),	/* 88: gpio */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 89: vscsi */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

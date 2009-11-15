@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.108 2009/06/15 17:01:26 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.115 2009/10/01 20:19:19 kettenis Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -53,11 +53,6 @@
 #include <sys/kcore.h>
 
 #include <uvm/uvm_extern.h>
-
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
-#include <net/netisr.h>
 
 #include <dev/cons.h>
 
@@ -145,7 +140,6 @@ int allowaperture = 0;
 
 void ofw_dbg(char *str);
 
-caddr_t allocsys(caddr_t);
 void dumpsys(void);
 void systype(char *name);
 int lcsplx(int ipl);	/* called from LCore */
@@ -153,8 +147,8 @@ int power4e_get_eth_addr(void);
 void ppc_intr_setup(intr_establish_t *establish,
     intr_disestablish_t *disestablish);
 void *ppc_intr_establish(void *lcv, pci_intr_handle_t ih, int type,
-    int level, int (*func)(void *), void *arg, char *name);
-int bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
+    int level, int (*func)(void *), void *arg, const char *name);
+int bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp);
 bus_addr_t bus_space_unmap_p(bus_space_tag_t t, bus_space_handle_t bsh,
     bus_size_t size);
@@ -480,40 +474,14 @@ install_extint(void (*handler)(void))
 void
 cpu_startup()
 {
-	int sz;
-	caddr_t v;
 	vaddr_t minaddr, maxaddr;
 
-	v = (caddr_t)proc0paddr + USPACE;
 	proc0.p_addr = proc0paddr;
 
 	printf("%s", version);
 
 	printf("real mem = %u (%uMB)\n", ptoa(physmem),
 	    ptoa(physmem)/1024/1024);
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = (int)allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-
-	/* Restrict to at most 25% filled kvm */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -539,25 +507,6 @@ cpu_startup()
 	bufinit();
 
 	devio_malloc_safe = 1;
-}
-
-/*
- * Allocate space for system data structures.
- */
-caddr_t
-allocsys(caddr_t v)
-{
-#define	valloc(name, type, num) \
-	v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef	SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return v;
 }
 
 /*
@@ -879,37 +828,6 @@ dumpsys()
 
 int imask[IPL_NUM];
 
-/*
- * this is a hack interface to allow zs to work better until
- * a true soft interrupt mechanism is created.
- */
-#include "zstty.h"
-#if NZSTTY > 0
-	extern void zssoft(void *);
-#endif
-void
-softtty()
-{
-#if NZSTTY > 0
-	zssoft(0);
-#endif
-}
-
-int netisr;
-
-/*
- * Soft networking interrupts.
- */
-void
-softnet(int isr)
-{
-#define DONETISR(flag, func) \
-	if (isr & (1 << flag))\
-		func();
-
-#include <net/netisr_dispatch.h>
-}
-
 int
 lcsplx(int ipl)
 {
@@ -1083,7 +1001,7 @@ struct intrhand ppc_configed_intr[MAX_PRECONF_INTR];
 
 void *
 ppc_intr_establish(void *lcv, pci_intr_handle_t ih, int type, int level,
-    int (*func)(void *), void *arg, char *name)
+    int (*func)(void *), void *arg, const char *name)
 {
 	if (ppc_configed_intr_cnt < MAX_PRECONF_INTR) {
 		ppc_configed_intr[ppc_configed_intr_cnt].ih_fun = func;
@@ -1129,20 +1047,20 @@ ppc_send_ipi(struct cpu_info *ci, int id)
 /* BUS functions */
 int
 bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
-    int cacheable, bus_space_handle_t *bshp)
+    int flags, bus_space_handle_t *bshp)
 {
 	int error;
 
 	if  (POWERPC_BUS_TAG_BASE(t) == 0) {
 		/* if bus has base of 0 fail. */
-		return 1;
+		return EINVAL;
 	}
 	bpa |= POWERPC_BUS_TAG_BASE(t);
 	if ((error = extent_alloc_region(devio_ex, bpa, size, EX_NOWAIT |
 	    (ppc_malloc_ok ? EX_MALLOCOK : 0))))
 		return error;
 
-	if ((error  = bus_mem_add_mapping(bpa, size, cacheable, bshp))) {
+	if ((error = bus_mem_add_mapping(bpa, size, flags, bshp))) {
 		if (extent_free(devio_ex, bpa, size, EX_NOWAIT |
 			(ppc_malloc_ok ? EX_MALLOCOK : 0)))
 		{
@@ -1196,7 +1114,7 @@ bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 vaddr_t ppc_kvm_stolen = VM_KERN_ADDRESS_SIZE;
 
 int
-bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
+bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
 	bus_addr_t vaddr;
@@ -1237,9 +1155,9 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 		bpa, size, *bshp, spa);
 #endif
 	for (; len > 0; len -= PAGE_SIZE) {
-		pmap_kenter_cache(vaddr, spa,
-			VM_PROT_READ | VM_PROT_WRITE,
-			cacheable ? PMAP_CACHE_WT : PMAP_CACHE_CI);
+		pmap_kenter_cache(vaddr, spa, VM_PROT_READ | VM_PROT_WRITE,
+		    (flags & BUS_SPACE_MAP_CACHEABLE) ?
+		      PMAP_CACHE_WT : PMAP_CACHE_CI);
 		spa += PAGE_SIZE;
 		vaddr += PAGE_SIZE;
 	}
@@ -1248,7 +1166,7 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 
 int
 bus_space_alloc(bus_space_tag_t tag, bus_addr_t rstart, bus_addr_t rend,
-    bus_size_t size, bus_size_t alignment, bus_size_t boundary, int cacheable,
+    bus_size_t size, bus_size_t alignment, bus_size_t boundary, int flags,
     bus_addr_t *addrp, bus_space_handle_t *handlep)
 {
 

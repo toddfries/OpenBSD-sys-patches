@@ -1,4 +1,4 @@
-/*	$OpenBSD: vcons.c,v 1.5 2008/11/24 16:19:33 kettenis Exp $	*/
+/*	$OpenBSD: vcons.c,v 1.7 2009/11/09 17:53:39 nicm Exp $	*/
 /*
  * Copyright (c) 2008 Mark Kettenis
  *

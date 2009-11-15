@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK-IP30,v 1.6 2009/06/24 17:27:40 miod Exp $
+#	$OpenBSD: RAMDISK-IP30,v 1.12 2009/11/07 21:42:07 miod Exp $
 #
 # THIS KERNEL IS FOR Octane and Octane 2 (IP30) SYSTEMS ONLY.
 
@@ -54,13 +54,16 @@ xbow0		at mainbus0
 xheart*		at xbow?
 onewire*	at xheart?
 xbridge*	at xbow?
-pci*		at xbridge?
+xbpci*		at xbridge?
+pci*		at xbpci?
 
 # IOC3
 ioc*		at pci?
 com0		at ioc? base 0x00020178
 com1		at ioc? base 0x00020170
+com*		at ioc?
 dsrtc0		at ioc?
+iec*		at ioc?
 
 onewire*	at ioc?
 option ONEWIREVERBOSE
@@ -68,7 +71,9 @@ owmac*		at onewire?
 owserial*	at onewire?
 
 #### SCSI controllers
+ahc*		at pci?
 isp*		at pci?
+mpi*		at pci?
 siop*		at pci?
 
 # USB Controllers
@@ -122,7 +127,13 @@ wi*		at uhub?	# WaveLAN IEEE 802.11DS
 zyd*		at uhub?	# Zydas ZD1211
 ugen*		at uhub?	# USB Generic driver
 
+ppb*		at pci?		# PCI-PCI bridges
+pci*		at ppb?
+
 #### NICs
+pcn*		at pci?		# AMD PCnet-PCI Ethernet
+epic*		at pci?		# SMC EPIC/100 ethernet
+de*		at pci?		# DC21X4X-based ethernet
 dc*		at pci?		# 21143, "tulip" clone ethernet
 em*		at pci?		# Intel Pro/1000 ethernet
 ep*		at pci?		# 3Com 3c59x
@@ -172,7 +183,9 @@ gentbi*		at mii?		# Generic 1000BASE-X ten-bit PHY
 ukphy*		at mii?		# "unknown" PHYs
 
 #### SCSI Bus devices
+scsibus*	at ahc?
 scsibus*	at isp?
+scsibus*	at mpi?
 scsibus*	at siop?
 
 sd*		at scsibus?

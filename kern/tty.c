@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty.c,v 1.79 2008/12/24 11:20:31 kettenis Exp $	*/
+/*	$OpenBSD: tty.c,v 1.83 2009/11/09 17:53:39 nicm Exp $	*/
 /*	$NetBSD: tty.c,v 1.68.4.2 1996/06/06 16:04:52 thorpej Exp $	*/
 
 /*-
@@ -75,7 +75,7 @@ int	filt_ttyread(struct knote *kn, long hint);
 void 	filt_ttyrdetach(struct knote *kn);
 int	filt_ttywrite(struct knote *kn, long hint);
 void 	filt_ttywdetach(struct knote *kn);
-int	ttystats_init(void);
+void	ttystats_init(struct itty **);
 
 /* Symbolic sleep message strings. */
 char ttclos[]	= "ttycls";
@@ -875,6 +875,13 @@ ttioctl(struct tty *tp, u_long cmd, caddr_t data, int flag, struct proc *p)
 				ttyflush(tp, FREAD);
 		}
 		if (!ISSET(t->c_cflag, CIGNORE)) {
+			/*
+			 * Some minor validation is neccessary.
+			 */
+			if (t->c_ispeed < 0 || t->c_ospeed < 0) {
+				splx(s);
+				return (EINVAL);
+			}
 			/*
 			 * Set device hardware.
 			 */
@@ -2013,7 +2020,6 @@ ttwakeup(struct tty *tp)
 	if (ISSET(tp->t_state, TS_ASYNC))
 		pgsignal(tp->t_pgrp, SIGIO, 1);
 	wakeup((caddr_t)&tp->t_rawq);
-	KNOTE(&tp->t_rsel.si_note, 0);
 }
 
 /*
@@ -2284,17 +2290,15 @@ ttyfree(struct tty *tp)
 	free(tp, M_TTYS);
 }
 
-struct itty *ttystats;
-
-int
-ttystats_init(void)
+void
+ttystats_init(struct itty **ttystats)
 {
 	struct itty *itp;
 	struct tty *tp;
 
-	ttystats = malloc(tty_count * sizeof(struct itty),
+	*ttystats = malloc(tty_count * sizeof(struct itty),
 	    M_SYSCTL, M_WAITOK);
-	for (tp = TAILQ_FIRST(&ttylist), itp = ttystats; tp;
+	for (tp = TAILQ_FIRST(&ttylist), itp = *ttystats; tp;
 	    tp = TAILQ_NEXT(tp, tty_link), itp++) {
 		itp->t_dev = tp->t_dev;
 		itp->t_rawq_c_cc = tp->t_rawq.c_cc;
@@ -2311,7 +2315,6 @@ ttystats_init(void)
 			itp->t_pgrp_pg_id = 0;
 		itp->t_line = tp->t_line;
 	}
-	return (0);
 }
 
 /*
@@ -2336,13 +2339,15 @@ sysctl_tty(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case KERN_TTY_TKCANCC:
 		return (sysctl_rdquad(oldp, oldlenp, newp, tk_cancc));
 	case KERN_TTY_INFO:
-		err = ttystats_init();
-		if (err)
-			return (err);
+	    {
+		struct itty *ttystats;
+
+		ttystats_init(&ttystats);
 		err = sysctl_rdstruct(oldp, oldlenp, newp, ttystats,
 		    tty_count * sizeof(struct itty));
 		free(ttystats, M_SYSCTL);
 		return (err);
+	    }
 	default:
 #if NPTY > 0
 		return (sysctl_pty(name, namelen, oldp, oldlenp, newp, newlen));

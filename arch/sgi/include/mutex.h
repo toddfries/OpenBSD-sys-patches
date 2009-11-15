@@ -1,4 +1,4 @@
-/*	$OpenBSD: mutex.h,v 1.3 2007/05/14 17:32:15 miod Exp $	*/
+/*	$OpenBSD: mutex.h,v 1.5 2009/11/04 02:26:24 syuu Exp $	*/
 
 /*
  * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>
@@ -34,7 +34,8 @@
 struct mutex {
 	int mtx_lock;
 	int mtx_wantipl;
-	int mtx_oldcpl;
+	int mtx_oldipl;
+	void *mtx_owner;
 };
 
 void mtx_init(struct mutex *, int);
@@ -56,6 +57,6 @@ void mtx_init(struct mutex *, int);
 #define MUTEX_ASSERT_UNLOCKED(mtx) do { } while (0)
 #endif
 
-#define MUTEX_OLDIPL(mtx)	(mtx)->mtx_oldcpl
+#define MUTEX_OLDIPL(mtx)	(mtx)->mtx_oldipl
 
 #endif

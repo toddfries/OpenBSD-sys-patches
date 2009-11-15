@@ -1,4 +1,4 @@
-/* $OpenBSD: tc_bus_mem.c,v 1.13 2002/05/02 22:56:06 miod Exp $ */
+/* $OpenBSD: tc_bus_mem.c,v 1.15 2009/09/17 19:28:22 miod Exp $ */
 /* $NetBSD: tc_bus_mem.c,v 1.25 2001/09/04 05:31:28 thorpej Exp $ */
 
 /*
@@ -231,13 +231,19 @@ tc_bus_mem_init(memv)
 
 /* ARGSUSED */
 int
-tc_mem_map(v, memaddr, memsize, cacheable, memhp)
+tc_mem_map(v, memaddr, memsize, flags, memhp)
 	void *v;
 	bus_addr_t memaddr;
 	bus_size_t memsize;
-	int cacheable;
+	int flags;
 	bus_space_handle_t *memhp;
 {
+	int cacheable = flags & BUS_SPACE_MAP_CACHEABLE;
+	int linear = flags & BUS_SPACE_MAP_LINEAR;
+
+	/* Requests for linear uncacheable space can't be satisfied. */
+	if (linear && !cacheable)
+		return (EOPNOTSUPP);
 
 	if (memaddr & 0x7)
 		panic("tc_mem_map needs 8 byte alignment");

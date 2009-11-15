@@ -1,4 +1,4 @@
-/*	$OpenBSD: pool.h,v 1.31 2008/12/23 06:54:12 dlg Exp $	*/
+/*	$OpenBSD: pool.h,v 1.33 2009/08/13 13:49:20 thib Exp $	*/
 /*	$NetBSD: pool.h,v 1.27 2001/06/06 22:00:17 rafal Exp $	*/
 
 /*-
@@ -103,7 +103,7 @@ struct pool {
 
 	int			pr_ipl;
 
-	SPLAY_HEAD(phtree, pool_item_header) pr_phtree;
+	RB_HEAD(phtree, pool_item_header) pr_phtree;
 
 	int		pr_maxcolor;	/* Cache colouring */
 	int		pr_curcolor;
@@ -160,7 +160,8 @@ int		pool_prime(struct pool *, int);
 void		pool_printit(struct pool *, const char *,
 		    int (*)(const char *, ...));
 int		pool_chk(struct pool *, const char *);
-void		pool_walk(struct pool *, void (*)(void *));
+void		pool_walk(struct pool *, int, int (*)(const char *, ...),
+		    void (*)(void *, int, int (*)(const char *, ...)));
 #endif
 #endif /* _KERNEL */
 

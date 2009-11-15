@@ -1,4 +1,4 @@
-/*	$OpenBSD: umsm.c,v 1.47 2009/05/24 08:30:32 sthen Exp $	*/
+/*	$OpenBSD: umsm.c,v 1.52 2009/10/22 14:27:33 sthen Exp $	*/
 
 /*
  * Copyright (c) 2008 Yojiro UO <yuo@nui.org>
@@ -57,7 +57,7 @@ int     umsmdebug = 0;
 int umsm_match(struct device *, void *, void *); 
 void umsm_attach(struct device *, struct device *, void *); 
 int umsm_detach(struct device *, int); 
-int umsm_activate(struct device *, enum devact); 
+int umsm_activate(struct device *, int); 
 
 int umsm_open(void *, int);
 void umsm_close(void *, int);
@@ -111,7 +111,8 @@ struct umsm_type {
 #define	DEV_UMASS1	0x0010
 #define	DEV_UMASS2	0x0020
 #define	DEV_UMASS3	0x0040
-#define DEV_UMASS	(DEV_UMASS1 | DEV_UMASS2 | DEV_UMASS3)
+#define	DEV_UMASS4	0x0080
+#define DEV_UMASS	(DEV_UMASS1 | DEV_UMASS2 | DEV_UMASS3 | DEV_UMASS4)
 };
  
 static const struct umsm_type umsm_devs[] = {
@@ -148,12 +149,13 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINU740_2 }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_U870 }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_XU870 }, 0},
+	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_EU870D }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_X950D }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_ES620 }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_U720 }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_U727 }, DEV_UMASS1},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MC950D }, 0},
-	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINX950D }, 0},
+	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINX950D }, DEV_UMASS4},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_ZEROCD2 }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_U760 }, 0},
 
@@ -165,6 +167,7 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GQUADPLUS }, 0},
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GSICON72 }, DEV_UMASS1},
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GTHSDPA225 }, DEV_UMASS2},
+	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GTHSUPA380E }, 0},
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GTMAX36 }, 0},
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_SCORPION }, 0},
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_VODAFONEMC3G }, 0},
@@ -196,6 +199,9 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_AC881U }, 0},
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_AC885U }, 0},
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_TRUINSTALL }, DEV_TRUINSTALL},
+
+	{{ USB_VENDOR_TCTMOBILE, USB_PRODUCT_TCTMOBILE_UMASS }, DEV_UMASS3},
+	{{ USB_VENDOR_TCTMOBILE, USB_PRODUCT_TCTMOBILE_UMSM }, 0},
 
 	{{ USB_VENDOR_HP, USB_PRODUCT_HP_HS2300 }, 0},
 
@@ -383,7 +389,7 @@ umsm_detach(struct device *self, int flags)
 }
 
 int
-umsm_activate(struct device *self, enum devact act)
+umsm_activate(struct device *self, int act)
 {
 	struct umsm_softc *sc = (struct umsm_softc *)self;
 	int rv = 0;
@@ -605,6 +611,8 @@ usbd_status
 umsm_umass_changemode(struct umsm_softc *sc) 
 {
 #define UMASS_CMD_REZERO_UNIT	0x01
+#define UMASS_CMD_START_STOP	0x1b
+#define UMASS_CMDPARAM_EJECT	0x02
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	usbd_xfer_handle xfer;
@@ -645,6 +653,13 @@ umsm_umass_changemode(struct umsm_softc *sc)
 		cbw.CBWCDB[3] = 0x02;
 		cbw.CBWCDB[4] = 0x52;
 		cbw.CBWCDB[5] = 0x70;
+		break;
+	case DEV_UMASS4:
+		USETDW(cbw.dCBWDataTransferLength, 0x0); 
+		cbw.bCBWFlags = CBWFLAGS_OUT;
+		cbw.CBWCDB[0] = UMASS_CMD_START_STOP;
+		cbw.CBWCDB[1] = 0x00;	/* target LUN: 0 */
+		cbw.CBWCDB[4] = UMASS_CMDPARAM_EJECT;
 		break;
 	default:
 		DPRINTF(("%s: unknown device type.\n", sc->sc_dev.dv_xname));

@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivar.h,v 1.48 2009/06/03 00:36:59 pirofti Exp $	*/
+/*	$OpenBSD: acpivar.h,v 1.52 2009/11/02 19:27:46 kettenis Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -79,6 +79,7 @@ struct acpi_mem_map {
 
 struct acpi_q {
 	SIMPLEQ_ENTRY(acpi_q)	 q_next;
+	int			 q_id;
 	void			*q_table;
 	u_int8_t		 q_data[0];
 };
@@ -149,6 +150,13 @@ struct gpe_block {
 	int   active;
 };
 
+struct acpi_devlist {
+	struct aml_node			*dev_node;
+	TAILQ_ENTRY(acpi_devlist)	dev_link;
+};
+
+TAILQ_HEAD(acpi_devlist_head, acpi_devlist);
+
 struct acpi_ac {
 	struct acpiac_softc	*aac_softc;
 	SLIST_ENTRY(acpi_ac)	aac_link;
@@ -190,11 +198,6 @@ struct acpi_softc {
 	bus_space_handle_t	sc_ioh_pm1a_evt;
 
 	void			*sc_interrupt;
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
-	void			*sc_softih;
-#else
-	struct timeout		sc_timeout;
-#endif
 
 	int			sc_powerbtn;
 	int			sc_sleepbtn;
@@ -228,6 +231,8 @@ struct acpi_softc {
 	int			sc_poll;
 
 	int			sc_revision;
+
+	int			sc_pse;		/* passive cooling enabled */
 };
 
 #define GPE_NONE  0x00

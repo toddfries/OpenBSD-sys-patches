@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_malo.c,v 1.65 2009/03/29 21:53:53 sthen Exp $ */
+/*      $OpenBSD: if_malo.c,v 1.67 2009/10/13 19:33:16 pirofti Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -70,7 +70,7 @@ int cmalo_d = 1;
 int	malo_pcmcia_match(struct device *, void *, void *);
 void	malo_pcmcia_attach(struct device *, struct device *, void *);
 int	malo_pcmcia_detach(struct device *, int);
-int	malo_pcmcia_activate(struct device *, enum devact);
+int	malo_pcmcia_activate(struct device *, int);
 
 void	cmalo_attach(void *);
 int	cmalo_ioctl(struct ifnet *, u_long, caddr_t);
@@ -230,7 +230,7 @@ malo_pcmcia_detach(struct device *dev, int flags)
 }
 
 int
-malo_pcmcia_activate(struct device *dev, enum devact act)
+malo_pcmcia_activate(struct device *dev, int act)
 {
 	struct malo_pcmcia_softc *psc = (struct malo_pcmcia_softc *)dev;
 	struct malo_softc *sc = &psc->sc_malo;
@@ -544,7 +544,7 @@ int
 cmalo_fw_load_main(struct malo_softc *sc)
 {
 	uint16_t val16, bsize, *uc;
-	int offset, i, retry;
+	int offset, i, retry = 0;
 
 	/* verify if the helper firmware has been loaded correctly */
 	for (i = 0; i < 10; i++) {

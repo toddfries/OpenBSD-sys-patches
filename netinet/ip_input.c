@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.164 2009/06/05 00:05:22 claudio Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.172 2009/11/03 10:59:04 claudio Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -681,6 +681,7 @@ in_iawithaddr(struct in_addr ina, struct mbuf *m, u_int rdomain)
 {
 	struct in_ifaddr *ia;
 
+	rdomain = rtable_l2(rdomain);
 	TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
 		if (ia->ia_ifp->if_rdomain != rdomain)
 			continue;
@@ -1076,8 +1077,7 @@ ip_dooptions(m)
 				ia = (INA)ifa_ifwithnet((SA)&ipaddr,
 				    m->m_pkthdr.rdomain);
 			} else
-				/* keep packet in the original VRF instance */
-				/* XXX rdomain or rtableid ??? */
+				/* keep packet in the virtual instance */
 				ia = ip_rtaddr(ipaddr.sin_addr,
 				    m->m_pkthdr.rdomain);
 			if (ia == 0) {
@@ -1116,8 +1116,7 @@ ip_dooptions(m)
 			/*
 			 * locate outgoing interface; if we're the destination,
 			 * use the incoming interface (should be same).
-			 * Again keep the packet inside the VRF instance.
-			 * XXX rdomain vs. rtableid ???
+			 * Again keep the packet inside the virtual instance.
 			 */
 			if ((ia = (INA)ifa_ifwithaddr((SA)&ipaddr,
 			    m->m_pkthdr.rdomain)) == 0 &&
@@ -1276,6 +1275,7 @@ ip_weadvertise(u_int32_t addr, u_int rtableid)
 		return 0;
 	}
 
+	rtableid = rtable_l2(rtableid);
 	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 		if (ifp->if_rdomain != rtableid)
 			continue;
@@ -1445,8 +1445,6 @@ ip_forward(m, srcrt)
 	}
 
 	rtableid = m->m_pkthdr.rdomain;
-	if (m->m_pkthdr.pf.rtableid)
-		rtableid = m->m_pkthdr.pf.rtableid;
 
 	sin = satosin(&ipforward_rt.ro_dst);
 	if ((rt = ipforward_rt.ro_rt) == 0 ||
@@ -1561,7 +1559,6 @@ ip_forward(m, srcrt)
 		break;
 
 	case ENOBUFS:
-#if 1
 		/*
 		 * a router should not generate ICMP_SOURCEQUENCH as
 		 * required in RFC1812 Requirements for IP Version 4 Routers.
@@ -1569,11 +1566,6 @@ ip_forward(m, srcrt)
 		 * or the underlying interface is rate-limited.
 		 */
 		goto freecopy;
-#else
-		type = ICMP_SOURCEQUENCH;
-		code = 0;
-		break;
-#endif
 	}
 
 	icmp_error(mcopy, type, code, dest, destmtu);

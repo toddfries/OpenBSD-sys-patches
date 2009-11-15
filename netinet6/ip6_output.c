@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.106 2008/10/22 14:36:08 markus Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.108 2009/10/28 21:03:17 deraadt Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -453,6 +453,10 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 	/*
 	 * Route packet.
 	 */
+#if NPF > 0
+reroute:
+#endif
+
 	/* initialize cached route */
 	if (ro == 0) {
 		ro = &ip6route;
@@ -509,6 +513,13 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 			goto done;
 		}
 		ip6 = mtod(m, struct ip6_hdr *);
+		/*
+		 * PF_TAG_REROUTE handling or not...
+		 * Packet is entering IPsec so the routing is
+		 * already overruled by the IPsec policy.
+		 * Until now the change was not reconsidered.
+		 * What's the behaviour?
+		 */
 #endif
 		/*
 		 * XXX what should we do if ip6_hlim == 0 and the
@@ -785,6 +796,17 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 	if (m == NULL)
 		goto done;
 	ip6 = mtod(m, struct ip6_hdr *);
+	if ((m->m_pkthdr.pf.flags & (PF_TAG_REROUTE | PF_TAG_GENERATED)) ==
+	    (PF_TAG_REROUTE | PF_TAG_GENERATED)) {
+		/* already rerun the route lookup, go on */
+		m->m_pkthdr.pf.flags &= ~(PF_TAG_GENERATED | PF_TAG_REROUTE);
+	} else if (m->m_pkthdr.pf.flags & PF_TAG_REROUTE) {
+		/* tag as generated to skip over pf_test on rerun */
+		m->m_pkthdr.pf.flags |= PF_TAG_GENERATED;
+		finaldst = ip6->ip6_dst;
+		ro = NULL;
+		goto reroute;
+	}
 #endif
 
 	/*
@@ -1892,6 +1914,7 @@ do { \
 			case IPV6_ESP_TRANS_LEVEL:
 			case IPV6_ESP_NETWORK_LEVEL:
 			case IPV6_IPCOMP_LEVEL:
+				*mp = m = m_get(M_WAIT, MT_SOOPTS);
 #ifndef IPSEC
 				m->m_len = sizeof(int);
 				*mtod(m, int *) = IPSEC_LEVEL_NONE;
@@ -3174,4 +3197,3 @@ ip6_randomid_init(void)
 {
 	idgen32_init(&ip6_id_ctx);
 }
-

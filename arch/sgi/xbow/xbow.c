@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbow.c,v 1.13 2009/07/01 21:56:38 miod Exp $	*/
+/*	$OpenBSD: xbow.c,v 1.24 2009/11/07 18:56:55 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -103,8 +103,13 @@ void	*xbow_space_vaddr(bus_space_tag_t, bus_space_handle_t);
 
 const struct xbow_product *xbow_identify(uint32_t, uint32_t);
 
+struct	xbow_softc {
+	struct device	sc_dev;
+	int16_t		sc_nasid;
+};
+
 const struct cfattach xbow_ca = {
-	sizeof(struct device), xbowmatch, xbowattach
+	sizeof(struct xbow_softc), xbowmatch, xbowattach
 };
 
 struct cfdriver xbow_cd = {
@@ -112,10 +117,8 @@ struct cfdriver xbow_cd = {
 };
 
 static const bus_space_t xbowbus_tag = {
-	NULL,
 	(bus_addr_t)0,		/* will be modified in widgets bus_space_t */
 	NULL,
-	0,
 	xbow_read_1,
 	xbow_write_1,
 	xbow_read_2,
@@ -141,6 +144,7 @@ static const bus_space_t xbowbus_tag = {
  * systems.
  */
 paddr_t	(*xbow_widget_base)(int16_t, u_int);
+paddr_t	(*xbow_widget_map)(int16_t, u_int, bus_addr_t *, bus_size_t *);
 
 int	(*xbow_widget_id)(int16_t, u_int, uint32_t *);
 
@@ -151,14 +155,14 @@ int	(*xbow_widget_id)(int16_t, u_int, uint32_t *);
 int
 xbowmatch(struct device *parent, void *match, void *aux)
 {
-	struct confargs *ca = aux;
+	struct mainbus_attach_args *maa = aux;
 
-	if (strcmp(ca->ca_name, xbow_cd.cd_name) != 0)
+	if (strcmp(maa->maa_name, xbow_cd.cd_name) != 0)
 		return (0);
 
 	switch (sys_config.system_type) {
-	case SGI_O200:
-	case SGI_O300:
+	case SGI_IP27:
+	case SGI_IP35:
 	case SGI_OCTANE:
 		return (1);
 	default:
@@ -261,13 +265,16 @@ struct xbow_kl_config {
 void
 xbowattach(struct device *parent, struct device *self, void *aux)
 {
-	struct confargs *ca = aux;
-	int16_t nasid = ca->ca_nasid;
+	struct xbow_softc *sc = (struct xbow_softc *)self;
+	struct mainbus_attach_args *maa = aux;
+	int16_t nasid = maa->maa_nasid;
 	uint32_t wid, vendor, product;
 	const struct xbow_product *p;
 	struct xbow_config cfg;
 	struct xbow_kl_config klcfg;
 	uint widget;
+
+	sc->sc_nasid = nasid;
 
 	/*
 	 * This assumes widget 0 is the XBow itself (or an XXBow).
@@ -278,8 +285,12 @@ xbowattach(struct device *parent, struct device *self, void *aux)
 	vendor = (wid & WIDGET_ID_VENDOR_MASK) >> WIDGET_ID_VENDOR_SHIFT;
 	product = (wid & WIDGET_ID_PRODUCT_MASK) >> WIDGET_ID_PRODUCT_SHIFT;
 	p = xbow_identify(vendor, product);
-	printf(": %s revision %d\n",
-	    p != NULL ? p->productname : "unknown xbow",
+	if (p == NULL)
+		printf(": unknown xbow (vendor %x product %x)",
+		    vendor, product);
+	else
+		printf(": %s", p->productname);
+	printf(" revision %d\n",
 	    (wid & WIDGET_ID_REV_MASK) >> WIDGET_ID_REV_SHIFT);
 
 	memset(&cfg, 0, sizeof cfg);
@@ -287,7 +298,7 @@ xbowattach(struct device *parent, struct device *self, void *aux)
 	case SGI_OCTANE:
 		klcfg.probe_order = xbow_probe_octane;
 		break;
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 	default:
 		/*
 		 * Default value for the interrupt register.
@@ -295,7 +306,9 @@ xbowattach(struct device *parent, struct device *self, void *aux)
 		if (xbow_intr_widget_register == 0)
 			xbow_intr_widget_register =
 			    (1UL << 47) /* XIO I/O space */ |
-			    ((paddr_t)IP27_RHUB_ADDR(nasid, HUBPI_IR_CHANGE) -
+			    (nasid <<
+			      (sys_config.system_type == SGI_IP35 ? 39 : 38)) |
+			    ((paddr_t)IP27_RHUB_ADDR(0, HUBPI_IR_CHANGE) -
 			     IP27_NODE_IO_BASE(0)) /* HUB register offset */;
 
 		klcfg.cfg = &cfg;
@@ -381,7 +394,7 @@ xbow_attach_widget(struct device *self, int16_t nasid, int widget,
 	return 0;
 }
 
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 
 /*
  * These two functions try to figure out the configuration of the XBow
@@ -418,16 +431,18 @@ xbow_kl_search_brd(lboard_t *brd, void *arg)
 		if (cfg->probe_order == NULL)
 			switch (brd->brd_type) {
 			case IP27_BRD_IBRICK:
+			case IP27_BRD_IXBRICK:
 				cfg->probe_order = xbow_probe_ibrick;
 				break;
 			case IP27_BRD_PBRICK:
+			case IP27_BRD_PXBRICK:
 				cfg->probe_order = xbow_probe_pbrick;
 				break;
 			case IP27_BRD_XBRICK:
 				cfg->probe_order = xbow_probe_xbrick;
 				break;
 			default:
-				/* unknown brick */
+				/* other brick */
 				break;
 			}
 		break;
@@ -590,15 +605,17 @@ xbow_write_raw_8(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
 
 int
 xbow_space_map(bus_space_tag_t t, bus_addr_t offs, bus_size_t size,
-    int cacheable, bus_space_handle_t *bshp)
+    int flags, bus_space_handle_t *bshp)
 {
 	bus_addr_t bpa;
 
 	bpa = t->bus_base + offs;
 
+#ifdef DIAGNOSTIC
 	/* check that this does not overflow the window */
 	if (((bpa + size - 1) >> 24) != (t->bus_base >> 24))
 		return (EINVAL);
+#endif
 
 	*bshp = bpa;
 	return 0;
@@ -613,6 +630,15 @@ int
 xbow_space_region(bus_space_tag_t t, bus_space_handle_t bsh,
     bus_size_t offset, bus_size_t size, bus_space_handle_t *nbshp)
 {
+#ifdef DIAGNOSTIC
+	bus_addr_t bpa;
+
+	bpa = (bus_addr_t)bsh - t->bus_base;
+	/* check that this does not overflow the window */
+	if (((bpa + offset) >> 24) != (t->bus_base >> 24))
+		return (EINVAL);
+#endif
+
 	*nbshp = bsh + offset;
 	return 0;
 }
@@ -628,6 +654,9 @@ xbow_space_vaddr(bus_space_tag_t t, bus_space_handle_t h)
  *
  * Interrupt handling should be done at the Heart/Hub driver level, we only
  * act as a proxy here.
+ *
+ * Note that, for the time being, interrupt handling is implicitly done at
+ * the master nasid; other nodes do not handle interrupts.
  */
 
 int	xbow_intr_widget = 0;
@@ -636,6 +665,8 @@ int	(*xbow_intr_widget_intr_register)(int, int, int *) = NULL;
 int	(*xbow_intr_widget_intr_establish)(int (*)(void *), void *, int, int,
 	    const char *) = NULL;
 void	(*xbow_intr_widget_intr_disestablish)(int) = NULL;
+void	(*xbow_intr_widget_intr_set)(int) = NULL;
+void	(*xbow_intr_widget_intr_clear)(int) = NULL;
 
 int
 xbow_intr_register(int widget, int level, int *intrbit)
@@ -664,4 +695,38 @@ xbow_intr_disestablish(int intrbit)
 		return;
 
 	(*xbow_intr_widget_intr_disestablish)(intrbit);
+}
+
+void
+xbow_intr_clear(int intrbit)
+{
+	if (xbow_intr_widget_intr_clear == NULL)
+		return;
+
+	(*xbow_intr_widget_intr_clear)(intrbit);
+}
+
+void
+xbow_intr_set(int intrbit)
+{
+	if (xbow_intr_widget_intr_set == NULL)
+		return;
+
+	(*xbow_intr_widget_intr_set)(intrbit);
+}
+
+/*
+ * Widget mapping code.
+ */
+
+paddr_t
+xbow_widget_map_space(struct device *dev, u_int widget, bus_addr_t *offs,
+    bus_size_t *len)
+{
+	struct xbow_softc *sc = (struct xbow_softc *)dev;
+
+	if (xbow_widget_map == NULL)
+		return 0UL;
+
+	return (*xbow_widget_map)(sc->sc_nasid, widget, offs, len);
 }

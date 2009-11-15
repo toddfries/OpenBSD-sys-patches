@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.14 2007/05/29 00:03:13 deraadt Exp $	*/
+/*	$OpenBSD: boot.c,v 1.16 2009/11/04 12:03:57 jsing Exp $	*/
 /*	$NetBSD: boot.c,v 1.3 2001/05/31 08:55:19 mrg Exp $	*/
 /*
  * Copyright (c) 1997, 1999 Eduardo E. Horvath.  All rights reserved.
@@ -59,6 +59,13 @@
 #include "ofdev.h"
 #include "openfirm.h"
 
+#ifdef BOOT_DEBUG
+uint32_t	boot_debug = 0
+		    /* | BOOT_D_OFDEV */
+		    /* | BOOT_D_OFNET */
+		;
+#endif
+
 #define	MEG	(1024*1024)
 
 /*
@@ -82,8 +89,7 @@ int	elf64_exec(int, Elf64_Ehdr *, u_int64_t *, void **, void **);
 
 #if 0
 static void
-prom2boot(dev)
-	char *dev;
+prom2boot(char *dev)
 {
 	char *cp, *lp = 0;
 	int handle;
@@ -107,9 +113,7 @@ prom2boot(dev)
  */
 
 static int
-parseargs(str, howtop)
-	char *str;
-	int *howtop;
+parseargs(char *str, int *howtop)
 {
 	char *cp;
 	int i;
@@ -153,11 +157,7 @@ parseargs(str, howtop)
 
 
 static void
-chain(pentry, args, ssym, esym)
-	u_int64_t pentry;
-	char *args;
-	void *ssym;
-	void *esym;
+chain(u_int64_t pentry, char *args, void *ssym, void *esym)
 {
 	extern char end[];
 	void (*entry)();
@@ -210,9 +210,7 @@ chain(pentry, args, ssym, esym)
 }
 
 int
-loadfile(fd, args)
-	int fd;
-	char *args;
+loadfile(int fd, char *args)
 {
 	union {
 #ifdef SPARC_BOOT_ELF

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc_io.c,v 1.14 2009/06/29 19:42:09 mk Exp $	*/
+/*	$OpenBSD: sdmmc_io.c,v 1.17 2009/11/11 21:59:16 jasper Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -19,6 +19,7 @@
 /* Routines for SD I/O cards. */
 
 #include <sys/param.h>
+#include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
@@ -31,7 +32,7 @@
 
 struct sdmmc_intr_handler {
 	struct sdmmc_softc *ih_softc;
-	char *ih_name;
+	const char *ih_name;
 	int (*ih_fun)(void *);
 	void *ih_arg;
 	TAILQ_ENTRY(sdmmc_intr_handler) entry;
@@ -200,10 +201,13 @@ sdmmc_io_function_ready(struct sdmmc_function *sf)
 	struct sdmmc_function *sf0 = sc->sc_fn0;
 	u_int8_t rv;
 
+	SDMMC_ASSERT_LOCKED(sc);
+
 	if (sf->number == 0)
 		return 1;	/* FN0 is always ready */
 
 	rv = sdmmc_io_read_1(sf0, SD_IO_CCCR_FN_READY);
+
 	return (rv & (1 << sf->number)) != 0;
 }
 
@@ -244,14 +248,14 @@ sdmmc_io_function_disable(struct sdmmc_function *sf)
 	struct sdmmc_function *sf0 = sc->sc_fn0;
 	u_int8_t rv;
 
+	SDMMC_ASSERT_LOCKED(sc);
+
 	if (sf->number == 0)
 		return;		/* FN0 is always enabled */
 
-	SDMMC_LOCK(sc);
 	rv = sdmmc_io_read_1(sf0, SD_IO_CCCR_FN_ENABLE);
 	rv &= ~(1<<sf->number);
 	sdmmc_io_write_1(sf0, SD_IO_CCCR_FN_ENABLE, rv);
-	SDMMC_UNLOCK(sc);
 }
 
 void
@@ -352,7 +356,7 @@ sdmmc_io_rw_direct(struct sdmmc_softc *sc, struct sdmmc_function *sf,
 	struct sdmmc_command cmd;
 	int error;
 
-	SDMMC_LOCK(sc);
+	SDMMC_ASSERT_LOCKED(sc);
 
 	/* Make sure the card is selected. */
 	if ((error = sdmmc_select_card(sc, sf)) != 0) {
@@ -375,7 +379,6 @@ sdmmc_io_rw_direct(struct sdmmc_softc *sc, struct sdmmc_function *sf,
 	error = sdmmc_mmc_command(sc, &cmd);
 	*datap = SD_R5_DATA(cmd.c_resp);
 
-	SDMMC_UNLOCK(sc);
 	return error;
 }
 
@@ -392,7 +395,7 @@ sdmmc_io_rw_extended(struct sdmmc_softc *sc, struct sdmmc_function *sf,
 	struct sdmmc_command cmd;
 	int error;
 
-	SDMMC_LOCK(sc);
+	SDMMC_ASSERT_LOCKED(sc);
 
 #if 0
 	/* Make sure the card is selected. */
@@ -429,6 +432,8 @@ u_int8_t
 sdmmc_io_read_1(struct sdmmc_function *sf, int reg)
 {
 	u_int8_t data = 0;
+
+	SDMMC_ASSERT_LOCKED(sf->sc);
 	
 	(void)sdmmc_io_rw_direct(sf->sc, sf, reg, (u_char *)&data,
 	    SD_ARG_CMD52_READ);
@@ -438,6 +443,8 @@ sdmmc_io_read_1(struct sdmmc_function *sf, int reg)
 void
 sdmmc_io_write_1(struct sdmmc_function *sf, int reg, u_int8_t data)
 {
+	SDMMC_ASSERT_LOCKED(sf->sc);
+
 	(void)sdmmc_io_rw_direct(sf->sc, sf, reg, (u_char *)&data,
 	    SD_ARG_CMD52_WRITE);
 }
@@ -447,6 +454,8 @@ sdmmc_io_read_2(struct sdmmc_function *sf, int reg)
 {
 	u_int16_t data = 0;
 	
+	SDMMC_ASSERT_LOCKED(sf->sc);
+
 	(void)sdmmc_io_rw_extended(sf->sc, sf, reg, (u_char *)&data, 2,
 	    SD_ARG_CMD53_READ | SD_ARG_CMD53_INCREMENT);
 	return data;
@@ -455,6 +464,8 @@ sdmmc_io_read_2(struct sdmmc_function *sf, int reg)
 void
 sdmmc_io_write_2(struct sdmmc_function *sf, int reg, u_int16_t data)
 {
+	SDMMC_ASSERT_LOCKED(sf->sc);
+
 	(void)sdmmc_io_rw_extended(sf->sc, sf, reg, (u_char *)&data, 2,
 	    SD_ARG_CMD53_WRITE | SD_ARG_CMD53_INCREMENT);
 }
@@ -464,6 +475,8 @@ sdmmc_io_read_4(struct sdmmc_function *sf, int reg)
 {
 	u_int32_t data = 0;
 	
+	SDMMC_ASSERT_LOCKED(sf->sc);
+
 	(void)sdmmc_io_rw_extended(sf->sc, sf, reg, (u_char *)&data, 4,
 	    SD_ARG_CMD53_READ | SD_ARG_CMD53_INCREMENT);
 	return data;
@@ -472,6 +485,8 @@ sdmmc_io_read_4(struct sdmmc_function *sf, int reg)
 void
 sdmmc_io_write_4(struct sdmmc_function *sf, int reg, u_int32_t data)
 {
+	SDMMC_ASSERT_LOCKED(sf->sc);
+
 	(void)sdmmc_io_rw_extended(sf->sc, sf, reg, (u_char *)&data, 4,
 	    SD_ARG_CMD53_WRITE | SD_ARG_CMD53_INCREMENT);
 }
@@ -481,6 +496,8 @@ sdmmc_io_read_multi_1(struct sdmmc_function *sf, int reg, u_char *data,
     int datalen)
 {
 	int error;
+
+	SDMMC_ASSERT_LOCKED(sf->sc);
 
 	while (datalen > SD_ARG_CMD53_LENGTH_MAX) {
 		error = sdmmc_io_rw_extended(sf->sc, sf, reg, data,
@@ -501,6 +518,8 @@ sdmmc_io_write_multi_1(struct sdmmc_function *sf, int reg, u_char *data,
 {
 	int error;
 
+	SDMMC_ASSERT_LOCKED(sf->sc);
+
 	while (datalen > SD_ARG_CMD53_LENGTH_MAX) {
 		error = sdmmc_io_rw_extended(sf->sc, sf, reg, data,
 		    SD_ARG_CMD53_LENGTH_MAX, SD_ARG_CMD53_WRITE);
@@ -518,6 +537,9 @@ int
 sdmmc_io_xchg(struct sdmmc_softc *sc, struct sdmmc_function *sf,
     int reg, u_char *datap)
 {
+
+	SDMMC_ASSERT_LOCKED(sc);
+
 	return sdmmc_io_rw_direct(sc, sf, reg, datap,
 	    SD_ARG_CMD52_WRITE|SD_ARG_CMD52_EXCHANGE);
 }
@@ -616,7 +638,6 @@ sdmmc_intr_establish(struct device *sdmmc, int (*fun)(void *),
 	struct sdmmc_softc *sc = (struct sdmmc_softc *)sdmmc;
 	struct sdmmc_intr_handler *ih;
 	int s;
-	size_t namesz;
 
 	if (sc->sct->card_intr_mask == NULL)
 		return NULL;
@@ -625,13 +646,7 @@ sdmmc_intr_establish(struct device *sdmmc, int (*fun)(void *),
 	if (ih == NULL)
 		return NULL;
 
-	namesz = strlen(name) + 1;
-	ih->ih_name = malloc(namesz, M_DEVBUF, M_WAITOK | M_CANFAIL);
-	if (ih->ih_name == NULL) {
-		free(ih, M_DEVBUF);
-		return NULL;
-	}
-	strlcpy(ih->ih_name, name, namesz);
+	ih->ih_name = name;
 	ih->ih_softc = sc;
 	ih->ih_fun = fun;
 	ih->ih_arg = arg;
@@ -667,7 +682,6 @@ sdmmc_intr_disestablish(void *cookie)
 	}
 	splx(s);
 
-	free(ih->ih_name, M_DEVBUF);
 	free(ih, M_DEVBUF);
 }
 

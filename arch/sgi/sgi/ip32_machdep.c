@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip32_machdep.c,v 1.6 2009/05/21 16:28:12 miod Exp $ */
+/*	$OpenBSD: ip32_machdep.c,v 1.10 2009/10/26 18:00:06 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -45,8 +45,11 @@
 
 #include <sgi/localbus/crimebus.h>
 #include <sgi/localbus/macebus.h>
+#include <sgi/localbus/macebusvar.h>
 
 #include <dev/ic/comvar.h>
+
+extern char *hw_prod;
 
 void crime_configure_memory(void);
 
@@ -131,6 +134,8 @@ crime_configure_memory(void)
 void
 ip32_setup()
 {
+	u_long cpuspeed;
+
 	uncached_base = PHYS_TO_XKPHYS(0, CCA_NC);
 
 	crime_configure_memory();
@@ -142,7 +147,18 @@ ip32_setup()
 		break;
 	}
 
+	cpuspeed = bios_getenvint("cpufreq");
+	if (cpuspeed < 100)
+		cpuspeed = 180;		/* reasonable default */
+	sys_config.cpu[0].clock = cpuspeed * 1000000;
+
 	comconsaddr = MACE_ISA_SER1_OFFS;
 	comconsfreq = 1843200;
 	comconsiot = &macebus_tag;
+	comconsrate = bios_getenvint("dbaud");
+	if (comconsrate < 50 || comconsrate > 115200)
+		comconsrate = 9600;
+
+	/* not sure if there is a way to tell O2 and O2+ apart */
+	hw_prod = "O2";
 }

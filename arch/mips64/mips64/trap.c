@@ -1,5 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.43 2009/06/10 18:05:31 miod Exp $	*/
-/* tracked to 1.23 */
+/*	$OpenBSD: trap.c,v 1.46 2009/10/22 20:10:44 miod Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -43,9 +42,6 @@
  *	from: @(#)trap.c	8.5 (Berkeley) 1/11/94
  */
 
-/*
- *		THIS CODE SHOULD BE REWRITTEN!
- */
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -174,8 +170,6 @@ ast()
 
 	uvmexp.softs++;
 
-if (p->p_md.md_astpending == 0)
-panic("unexpected ast p %p astpending %p\n", p, &p->p_md.md_astpending);
 	p->p_md.md_astpending = 0;
 	if (p->p_flag & P_OWEUPC) {
 		ADDUPROF(p);
@@ -216,9 +210,6 @@ trap(trapframe)
 	 */
 	if (trapframe->sr & SR_INT_ENAB) {
 		if (type != T_BREAK) {
-#ifndef IMASK_EXTERNAL
-			updateimask(trapframe->cpl);
-#endif
 			enableintr();
 		}
 	}
@@ -610,9 +601,6 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 #endif
 		/* Reenable interrupts if necessary */
 		if (trapframe->sr & SR_INT_ENAB) {
-#ifndef IMASK_EXTERNAL
-			updateimask(trapframe->cpl);
-#endif
 			enableintr();
 		}
 		return;
@@ -712,10 +700,12 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		if ((int)trapframe->cause & CR_BR_DELAY)
 			va += 4;
 		printf("watch exception @ %p\n", va);
+#ifdef RM7K_PERFCNTR
 		if (rm7k_watchintr(trapframe)) {
 			/* Return to user, don't add any more overhead */
 			return;
 		}
+#endif
 		i = SIGTRAP;
 		typ = TRAP_BRKPT;
 		break;
@@ -739,6 +729,7 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		} else {
 			locr0->pc += 4;
 		}
+#ifdef RM7K_PERFCNTR
 		if (instr == 0x040c0000) { /* Performance cntr trap */
 			int result;
 
@@ -747,8 +738,9 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 			locr0->v0 = -result;
 			/* Return to user, don't add any more overhead */
 			return;
-		}
-		else {
+		} else
+#endif
+		{
 			i = SIGEMT;	/* Stuff it with something for now */
 			typ = 0;
 		}

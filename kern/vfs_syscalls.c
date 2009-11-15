@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.155 2009/06/04 00:24:02 blambert Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.159 2009/10/31 12:00:08 fgsch Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -145,7 +145,7 @@ sys_mount(struct proc *p, void *v, register_t *retval)
 		 * enforce MNT_NOSUID and MNT_NODEV for non-root users, and
 		 * inherit MNT_NOEXEC from the mount point.
 		 */
-		if (p->p_ucred->cr_uid != 0) {
+		if (suser(p, 0) != 0) {
 			if (SCARG(uap, flags) & MNT_EXPORTED) {
 				vput(vp);
 				return (EPERM);
@@ -176,7 +176,7 @@ sys_mount(struct proc *p, void *v, register_t *retval)
 	 * enforce MNT_NOSUID and MNT_NODEV for non-root users, and inherit
 	 * MNT_NOEXEC from the mount point.
 	 */
-	if (p->p_ucred->cr_uid != 0) {
+	if (suser(p, 0) != 0) {
 		if (SCARG(uap, flags) & MNT_EXPORTED) {
 			vput(vp);
 			return (EPERM);
@@ -335,14 +335,14 @@ again:
 		fdp = p->p_fd;
 		if (fdp->fd_cdir == olddp) {
 			vp = fdp->fd_cdir;
-			VREF(newdp);
+			vref(newdp);
 			fdp->fd_cdir = newdp;
 			if (vrele(vp))
 				goto again;
 		}
 		if (fdp->fd_rdir == olddp) {
 			vp = fdp->fd_rdir;
-			VREF(newdp);
+			vref(newdp);
 			fdp->fd_rdir = newdp;
 			if (vrele(vp))
 				goto again;
@@ -350,7 +350,7 @@ again:
 	}
 	if (rootvnode == olddp) {
 		vrele(rootvnode);
-		VREF(newdp);
+		vref(newdp);
 		rootvnode = newdp;
 	}
 	vput(newdp);
@@ -698,7 +698,7 @@ sys_fchdir(struct proc *p, void *v, register_t *retval)
 	if ((error = getvnode(fdp, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 	vp = (struct vnode *)fp->f_data;
-	VREF(vp);
+	vref(vp);
 	FRELE(fp);
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (vp->v_type != VDIR)
@@ -776,7 +776,7 @@ sys_chroot(struct proc *p, void *v, register_t *retval)
 		 */
 		vrele(fdp->fd_rdir);
 		vrele(fdp->fd_cdir);
-		VREF(nd.ni_vp);
+		vref(nd.ni_vp);
 		fdp->fd_cdir = nd.ni_vp;
 	}
 	fdp->fd_rdir = nd.ni_vp;
@@ -1018,8 +1018,8 @@ sys_fhopen(struct proc *p, void *v, register_t *retval)
 			error = EISDIR;
 			goto bad;
 		}
-		if ((error = vn_writechk(vp)) != 0 ||
-		    (error = VOP_ACCESS(vp, VWRITE, cred, p)) != 0)
+		if ((error = VOP_ACCESS(vp, VWRITE, cred, p)) != 0 ||
+		    (error = vn_writechk(vp)) != 0)
 			goto bad;
 	}
 	if (flags & O_TRUNC) {
@@ -1116,7 +1116,7 @@ sys_fhstat(struct proc *p, void *v, register_t *retval)
 int
 sys_fhstatfs(struct proc *p, void *v, register_t *retval)
 {
-	struct sys_fhstatfs_args /*
+	struct sys_fhstatfs_args /* {
 		syscallarg(const fhandle_t *) fhp;
 		syscallarg(struct statfs *) buf;
 	} */ *uap = v;
@@ -1145,7 +1145,7 @@ sys_fhstatfs(struct proc *p, void *v, register_t *retval)
 	if ((error = VFS_STATFS(mp, sp, p)) != 0)
 		return (error);
 	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
-	return (copyout(sp, SCARG(uap, buf), sizeof(sp)));
+	return (copyout(sp, SCARG(uap, buf), sizeof(*sp)));
 }
 
 /*
@@ -1480,8 +1480,10 @@ sys_access(struct proc *p, void *v, register_t *retval)
 			flags |= VWRITE;
 		if (SCARG(uap, flags) & X_OK)
 			flags |= VEXEC;
-		if ((flags & VWRITE) == 0 || (error = vn_writechk(vp)) == 0)
-			error = VOP_ACCESS(vp, flags, cred, p);
+
+		error = VOP_ACCESS(vp, flags, cred, p);
+		if (!error && (flags & VWRITE))
+			error = vn_writechk(vp);
 	}
 	vput(vp);
 out1:
@@ -2041,8 +2043,8 @@ sys_truncate(struct proc *p, void *v, register_t *retval)
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (vp->v_type == VDIR)
 		error = EISDIR;
-	else if ((error = vn_writechk(vp)) == 0 &&
-	    (error = VOP_ACCESS(vp, VWRITE, p->p_ucred, p)) == 0) {
+	else if ((error = VOP_ACCESS(vp, VWRITE, p->p_ucred, p)) == 0 &&
+	    (error = vn_writechk(vp)) == 0) {
 		VATTR_NULL(&vattr);
 		vattr.va_size = SCARG(uap, length);
 		error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);

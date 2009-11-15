@@ -1,4 +1,4 @@
-/*	$OpenBSD: wl.c,v 1.18 2005/11/24 22:43:16 miod Exp $ */
+/*	$OpenBSD: wl.c,v 1.21 2009/11/09 17:53:39 nicm Exp $ */
 
 /*
  * Copyright (c) 1995 Dale Rahn. All rights reserved.
@@ -558,7 +558,7 @@ wlopen(dev, flag, mode, p)
 			sc->cl_reg->cl_ier = IER_MDM | IER_RXD;
 			sc->cl_reg->cl_car = save;
 		}
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0) {
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0) {
 		splx(s);
 		return(EBUSY);
 	}

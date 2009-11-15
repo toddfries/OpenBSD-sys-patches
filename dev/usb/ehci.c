@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.100 2009/06/02 23:49:33 deraadt Exp $ */
+/*	$OpenBSD: ehci.c,v 1.104 2009/11/04 19:14:10 kettenis Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -672,12 +672,10 @@ ehci_softintr(void *v)
 		timeout_add_sec(&sc->sc_tmo_intrlist, 1);
 	}
 
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	if (sc->sc_softwake) {
 		sc->sc_softwake = 0;
 		wakeup(&sc->sc_softwake);
 	}
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 
 	sc->sc_bus.intr_context--;
 }
@@ -1028,7 +1026,7 @@ ehci_detach(struct ehci_softc *sc, int flags)
 
 
 int
-ehci_activate(struct device *self, enum devact act)
+ehci_activate(struct device *self, int act)
 {
 	struct ehci_softc *sc = (struct ehci_softc *)self;
 	int rv = 0;
@@ -1592,7 +1590,10 @@ ehci_open(usbd_pipe_handle pipe)
 		ival = pipe->interval;
 		if (ival == USBD_DEFAULT_INTERVAL)
 			ival = ed->bInterval;
-		return (ehci_device_setintr(sc, sqh, ival));
+		s = splusb();
+		err = ehci_device_setintr(sc, sqh, ival);
+		splx(s);
+		return (err);
 	case UE_ISOCHRONOUS:
 		pipe->methods = &ehci_device_isoc_methods;
 		if (ed->bInterval == 0 || ed->bInterval > 16) {
@@ -2792,13 +2793,9 @@ ehci_abort_xfer(usbd_xfer_handle xfer, usbd_status status)
 	 * has run.
 	 */
 	s = splusb();
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	sc->sc_softwake = 1;
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 	usb_schedsoftintr(&sc->sc_bus);
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	tsleep(&sc->sc_softwake, PZERO, "ehciab", 0);
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 
 	/*
 	 * Step 5: Remove any vestiges of the xfer from the hardware.
@@ -2954,13 +2951,9 @@ ehci_abort_isoc_xfer(usbd_xfer_handle xfer, usbd_status status)
 	splx(s);
 
 	s = splusb();
-#ifdef USB_USE_SOFTINTR
 	sc->sc_softwake = 1;
-#endif /* USB_USE_SOFTINTR */
 	usb_schedsoftintr(&sc->sc_bus);
-#ifdef USB_USE_SOFTINTR
 	tsleep(&sc->sc_softwake, PZERO, "ehciab", 0);
-#endif /* USB_USE_SOFTINTR */
 	splx(s);
 
 #ifdef DIAGNOSTIC
@@ -3235,7 +3228,7 @@ ehci_device_request(usbd_xfer_handle xfer)
 	if (xfer->timeout && !sc->sc_bus.use_polling) {
 		timeout_del(&xfer->timeout_handle);
 		timeout_set(&xfer->timeout_handle, ehci_timeout, xfer);
-		timeout_add(&xfer->timeout_handle, mstohz(xfer->timeout));
+		timeout_add_msec(&xfer->timeout_handle, xfer->timeout);
 	}
 	ehci_add_intr_list(sc, exfer);
 	xfer->status = USBD_IN_PROGRESS;
@@ -3347,7 +3340,7 @@ ehci_device_bulk_start(usbd_xfer_handle xfer)
 	if (xfer->timeout && !sc->sc_bus.use_polling) {
 		timeout_del(&xfer->timeout_handle);
 		timeout_set(&xfer->timeout_handle, ehci_timeout, xfer);
-		timeout_add(&xfer->timeout_handle, mstohz(xfer->timeout));
+		timeout_add_msec(&xfer->timeout_handle, xfer->timeout);
 	}
 	ehci_add_intr_list(sc, exfer);
 	xfer->status = USBD_IN_PROGRESS;
@@ -3522,7 +3515,7 @@ ehci_device_intr_start(usbd_xfer_handle xfer)
 	if (xfer->timeout && !sc->sc_bus.use_polling) {
 		timeout_del(&xfer->timeout_handle);
 		timeout_set(&xfer->timeout_handle, ehci_timeout, xfer);
-		timeout_add(&xfer->timeout_handle, mstohz(xfer->timeout));
+		timeout_add_msec(&xfer->timeout_handle, xfer->timeout);
 	}
 	ehci_add_intr_list(sc, exfer);
 	xfer->status = USBD_IN_PROGRESS;
@@ -3623,8 +3616,7 @@ ehci_device_intr_done(usbd_xfer_handle xfer)
 		if (xfer->timeout && !sc->sc_bus.use_polling) {
 			timeout_del(&xfer->timeout_handle);
 			timeout_set(&xfer->timeout_handle, ehci_timeout, xfer);
-			timeout_add(&xfer->timeout_handle,
-			    mstohz(xfer->timeout));
+			timeout_add_msec(&xfer->timeout_handle, xfer->timeout);
 		}
 		splx(s);
 

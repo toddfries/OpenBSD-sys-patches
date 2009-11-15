@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_run.c,v 1.29 2009/06/17 16:04:29 damien Exp $	*/
+/*	$OpenBSD: if_run.c,v 1.33 2009/11/03 17:36:58 damien Exp $	*/
 
 /*-
  * Copyright (c) 2008,2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -150,6 +150,7 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(HAWKING,		RT3070),
 	USB_ID(IODATA,		RT3072),
 	USB_ID(LINKSYS4,	WUSB100),
+	USB_ID(LINKSYS4,	WUSB54GCV3),
 	USB_ID(LINKSYS4,	WUSB600N),
 	USB_ID(LOGITEC,		RT2870_1),
 	USB_ID(LOGITEC,		RT2870_2),
@@ -1302,8 +1303,11 @@ run_media_change(struct ifnet *ifp)
 		sc->fixed_ridx = ridx;
 	}
 
-	if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) == (IFF_UP | IFF_RUNNING))
+	if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) ==
+	    (IFF_UP | IFF_RUNNING)) {
+		run_stop(ifp, 0);
 		run_init(ifp);
+	}
 
 	return 0;
 }
@@ -1510,6 +1514,11 @@ run_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 {
 	struct run_softc *sc = ic->ic_softc;
 	struct run_cmd_key cmd;
+
+	/* defer setting of WEP keys until interface is brought up */
+	if ((ic->ic_if.if_flags & (IFF_UP | IFF_RUNNING)) !=
+	    (IFF_UP | IFF_RUNNING))
+		return 0;
 
 	/* do it in a process context */
 	cmd.key = *k;
@@ -1908,7 +1917,7 @@ run_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		dmalen = letoh32(*(uint32_t *)buf) & 0xffff;
 
 		if (__predict_false(dmalen == 0 || (dmalen & 3) != 0)) {
-			DPRINTF(("bad DMA length %u (%x)\n", dmalen));
+			DPRINTF(("bad DMA length %u\n", dmalen));
 			break;
 		}
 		if (__predict_false(dmalen + 8 > xferlen)) {
@@ -2196,8 +2205,7 @@ run_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCS80211CHANNEL:
 		/*
 		 * This allows for fast channel switching in monitor mode
-		 * (used by kismet). In IBSS mode, we must explicitly reset
-		 * the interface to generate a new beacon frame.
+		 * (used by kismet).
 		 */
 		error = ieee80211_ioctl(ifp, cmd, data);
 		if (error == ENETRESET &&
@@ -2215,8 +2223,10 @@ run_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	if (error == ENETRESET) {
 		if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) ==
-		    (IFF_UP | IFF_RUNNING))
+		    (IFF_UP | IFF_RUNNING)) {
+			run_stop(ifp, 0);
 			run_init(ifp);
+		}
 		error = 0;
 	}
 
@@ -3008,12 +3018,6 @@ run_init(struct ifnet *ifp)
 	/* turn radio LED on */
 	run_set_leds(sc, RT2860_LED_RADIO);
 
-	if (ic->ic_flags & IEEE80211_F_WEPON) {
-		/* install WEP keys */
-		for (i = 0; i < IEEE80211_WEP_NKID; i++)
-			(void)run_set_key(ic, NULL, &ic->ic_nw_keys[i]);
-	}
-
 	for (i = 0; i < RUN_RX_RING_COUNT; i++) {
 		struct run_rx_data *data = &sc->rxq.data[i];
 
@@ -3030,6 +3034,12 @@ run_init(struct ifnet *ifp)
 
 	ifp->if_flags &= ~IFF_OACTIVE;
 	ifp->if_flags |= IFF_RUNNING;
+
+	if (ic->ic_flags & IEEE80211_F_WEPON) {
+		/* install WEP keys */
+		for (i = 0; i < IEEE80211_WEP_NKID; i++)
+			(void)run_set_key(ic, NULL, &ic->ic_nw_keys[i]);
+	}
 
 	if (ic->ic_opmode == IEEE80211_M_MONITOR)
 		ieee80211_new_state(ic, IEEE80211_S_RUN, -1);

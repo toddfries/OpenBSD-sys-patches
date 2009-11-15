@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_ioctl.c,v 1.31 2009/02/16 21:19:07 miod Exp $	*/
+/*	$OpenBSD: scsi_ioctl.c,v 1.37 2009/11/12 06:20:27 dlg Exp $	*/
 /*	$NetBSD: scsi_ioctl.c,v 1.23 1996/10/12 23:23:17 christos Exp $	*/
 
 /*

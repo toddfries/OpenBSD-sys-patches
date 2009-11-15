@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.666 2009/06/25 14:22:58 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.671 2009/11/14 16:55:11 damien Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -66,6 +66,7 @@ acpithinkpad*	at acpi?
 acpivideo*	at acpi?
 acpivout*	at acpivideo?
 acpipwrres*	at acpi?
+#aibs*		at acpi?
 
 option		PCIVERBOSE
 option		EISAVERBOSE
@@ -161,6 +162,7 @@ admtm*	at iic?				# Analog Devices ADM1025
 admtmp*	at iic?				# Analog Devices ADM1030
 admtt*	at iic?				# Analog Devices ADM1031
 adt*	at iic?				# Analog Devices ADT7460
+lisa*	at iic?				# STMicroelectronics LIS331DL motion
 lm*	at iic?				# National Semiconductor LM78/79
 lmenv*	at iic?				# National Semiconductor LM87
 lmtemp*	at iic?				# National Semiconductor LM75/LM77
@@ -627,6 +629,7 @@ gem*	at pci?				# Sun 'gem' ethernet
 vic*	at pci?				# VMware VMXnet virtual interface
 et*	at pci?				# Agere/LSI ET1310
 age*	at pci?				# Attansic L1 Ethernet
+alc*	at pci?				# Attansic L1C/L2C Ethernet
 ale*	at pci?				# Attansic L1E Ethernet
 lii*	at pci?				# Attansic L2 Ethernet
 jme*	at pci?				# JMicron JMC250/JMC260 Ethernet
@@ -636,6 +639,8 @@ acx*	at pci?				# TI ACX100/ACX111 (802.11b/g)
 acx*	at cardbus?			# TI ACX100/ACX111 (802.11b/g)
 ath*	at pci?				# Atheros AR5k (802.11a/b/g)
 ath*	at cardbus?			# Atheros AR5k (802.11a/b/g)
+athn*	at pci?				# Atheros AR9k (802.11a/g/n)
+athn*	at cardbus?			# Atheros AR9k (802.11a/g/n)
 atw*	at pci?				# ADMtek ADM8211 (802.11)
 atw*	at cardbus?			# ADMtek ADM8211 (802.11)
 bwi*	at pci?				# Broadcom AirForce (802.11b/g)
@@ -650,7 +655,7 @@ ray*	at pcmcia?			# Raylink Aviator2.4/Pro 802.11FH
 ipw*	at pci?				# Intel PRO/Wireless 2100
 iwi*	at pci?				# Intel PRO/Wireless 2200BG/2915ABG
 wpi*	at pci?				# Intel PRO/Wireless 3945ABG
-iwn*	at pci?				# Intel Wireless WiFi Link 4965AGN
+iwn*	at pci?				# Intel WiFi Link 4965/5000/1000/6000
 ral*	at pci?				# Ralink RT2500/RT2501/RT2600
 ral*	at cardbus?			# Ralink RT2500/RT2501/RT2600
 rtw*	at pci?				# Realtek 8180

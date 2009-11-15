@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.21 2009/06/13 21:48:03 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.28 2009/11/07 22:48:37 miod Exp $	*/
 /*
  * Copyright (c) 2009 Miodrag Vallat.
  *
@@ -13,6 +13,31 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+/*
+ * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
+ * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
  */
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -70,6 +95,7 @@
 #include <sys/device.h>
 
 #include <machine/autoconf.h>
+#include <mips64/arcbios.h>
 #include <mips64/archtype.h>
 
 #include <sgi/xbow/xbow.h>
@@ -78,6 +104,8 @@
 #include <scsi/scsiconf.h>
 
 extern void dumpconf(void);
+
+static u_long atoi(const char *, int, const char **);
 
 void	bootpath_convert(void);
 const char *bootpath_get(int *);
@@ -91,6 +119,7 @@ void	bootpath_next(void);
  */
 int	cold = 1;			/* if 1, still working on cold-start */
 struct device *bootdv = NULL;
+int16_t	currentnasid = 0;
 
 char	osloadpartition[256];
 
@@ -129,7 +158,7 @@ static char bootpath_store[sizeof osloadpartition];
 static char *bootpath_curpos;
 static char *bootpath_lastpos;
 static int bootpath_lastunit;
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 static int dksc_ctrl, dksc_mode;
 #endif
 
@@ -142,7 +171,7 @@ bootpath_init()
 	strlcpy(bootpath_store, osloadpartition, sizeof bootpath_store);
 	bootpath_curpos = bootpath_store;
 
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 	/*
 	 * If this is the first time we're ever invoked,
 	 * check for a dksc() syntax and rewrite it as
@@ -153,7 +182,7 @@ bootpath_init()
 #endif
 }
 
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 /*
  * Convert a `dksc()' bootpath into an ARC-friendly bootpath.
  */
@@ -260,6 +289,7 @@ device_register(struct device *dev, void *aux)
 {
 	static struct device *lastparent = NULL;
 	static struct device *pciparent = NULL;
+	static int component_pos = 0;
 
 	struct device *parent = dev->dv_parent;
 	struct cfdata *cf = dev->dv_cfdata;
@@ -267,6 +297,9 @@ device_register(struct device *dev, void *aux)
 
 	const char *component;
 	int unit;
+
+	if (parent == NULL)
+		return;		/* one of the @root devices */
 
 	if (bootdv != NULL)
 		return;
@@ -281,6 +314,9 @@ device_register(struct device *dev, void *aux)
 	 * pci() matches any pci controller (macepcibr, xbridge), with the
 	 *   unit number being ignored on O2 and the widget number of the
 	 *   controller elsewhere.
+	 *   XXX I have no idea how this works when PIC devices are involved
+	 *   XXX since they provide two distinct PCI buses...
+	 *   XXX ...and our device numbering is off by one in that case.
 	 * scsi() matches any pci scsi controller, with the unit number
 	 *   being the pci device number (minus one on the O2, grr),
 	 *   or the scsibus number in dksc mode.
@@ -292,9 +328,9 @@ device_register(struct device *dev, void *aux)
 	 */
 
 	if (strcmp(component, "xio") == 0) {
-		struct confargs *ca = aux;
+		struct mainbus_attach_args *maa = aux;
 
-		if (strcmp(cd->cd_name, "xbow") == 0 && unit == ca->ca_nasid)
+		if (strcmp(cd->cd_name, "xbow") == 0 && unit == maa->maa_nasid)
 			goto found_advance;
 	}
 
@@ -322,6 +358,11 @@ device_register(struct device *dev, void *aux)
 			if (unit == xaa->xaa_widget)
 				goto found;
 		}
+		if (strcmp(cd->cd_name, "xbpci") == 0 &&
+		    parent == lastparent) {
+			if (1)	/* how to match the exact bus number? */
+				goto found;
+		}
 	}
 
 	if (strcmp(component, "scsi") == 0) {
@@ -337,7 +378,7 @@ device_register(struct device *dev, void *aux)
 		 * we need to count scsi controllers, until we find ours.
 		 */
 
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 		if (dksc_mode) {
 			if (strcmp(cd->cd_name, "scsibus") == 0 &&
 			    dev->dv_unit == dksc_ctrl)
@@ -347,9 +388,27 @@ device_register(struct device *dev, void *aux)
 		}
 #endif
 
-		if (strcmp(cd->cd_name, "scsibus") == 0 &&
-		    parent == lastparent)
-			goto found_advance;
+		if (strcmp(cd->cd_name, "scsibus") == 0) {
+			if (parent == lastparent)
+				goto found_advance;
+
+#ifdef TGT_O2
+			/*
+			 * On O2, the pci(0) component may be omitted from
+			 * the bootpath, in which case we fake the missing
+			 * pci(0) component.
+			 */
+			if (sys_config.system_type == SGI_O2 &&
+			    component_pos == 0) {
+				if (parent->dv_parent != NULL &&
+				    strcmp(parent->dv_parent->dv_cfdata->cf_driver->cd_name,
+				      "pci") == 0) {
+					pciparent = parent->dv_parent;
+					goto found_advance;
+				}
+			}
+#endif
+		}
 
 		if (parent == lastparent) {
 			if (parent == pciparent) {
@@ -392,6 +451,7 @@ device_register(struct device *dev, void *aux)
 
 found_advance:
 	bootpath_next();
+	component_pos++;
 found:
 	lastparent = dev;
 }
@@ -403,3 +463,110 @@ struct nam2blk nam2blk[] = {
 	{ "vnd",	2 },
 	{ NULL,		-1 }
 };
+
+/*
+ * Convert "xx:xx:xx:xx:xx:xx" string to Ethernet hardware address.
+ */
+void
+enaddr_aton(const char *s, u_int8_t *a)
+{
+	int i;
+
+	if (s != NULL) {
+		for (i = 0; i < 6; i++) {
+			a[i] = atoi(s, 16, &s);
+			if (*s == ':')
+				s++;
+		}
+	}
+}
+
+/*
+ * Get a numeric environment variable
+ */
+u_long
+bios_getenvint(const char *name)
+{
+	const char *envvar;
+	u_long value;
+
+	envvar = Bios_GetEnvironmentVariable(name);
+	if (envvar != NULL) {
+		value = atoi(envvar, 10, &envvar);
+		if (*envvar != '\0')
+			value = 0;
+	} else
+		value = 0;
+
+	return value;
+}
+
+/*
+ * Convert an ASCII string into an integer.
+ */
+static u_long
+atoi(const char *s, int b, const char **o)
+{
+	int c;
+	unsigned base = b, d;
+	int neg = 0;
+	u_long val = 0;
+
+	if (s == NULL || *s == 0) {
+		if (o != NULL)
+			*o = s;
+		return 0;
+	}
+
+	/* Skip spaces if any. */
+	do {
+		c = *s++;
+	} while (c == ' ' || c == '\t');
+
+	/* Parse sign, allow more than one (compat). */
+	while (c == '-') {
+		neg = !neg;
+		c = *s++;
+	}
+
+	/* Parse base specification, if any. */
+	if (base == 0 && c == '0') {
+		c = *s++;
+		switch (c) {
+		case 'X':
+		case 'x':
+			base = 16;
+			c = *s++;
+			break;
+		case 'B':
+		case 'b':
+			base = 2;
+			c = *s++;
+			break;
+		default:
+			base = 8;
+		}
+	}
+
+	/* Parse number proper. */
+	for (;;) {
+		if (c >= '0' && c <= '9')
+			d = c - '0';
+		else if (c >= 'a' && c <= 'z')
+			d = c - 'a' + 10;
+		else if (c >= 'A' && c <= 'Z')
+			d = c - 'A' + 10;
+		else
+			break;
+		if (d >= base)
+			break;
+		val *= base;
+		val += d;
+		c = *s++;
+	}
+	if (neg)
+		val = -val;
+	if (o != NULL)
+		*o = s - 1;
+	return val;
+}

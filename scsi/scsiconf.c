@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.138 2009/02/16 21:19:07 miod Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.151 2009/11/12 06:20:27 dlg Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -48,6 +48,7 @@
  */
 
 #include "bio.h"
+#include "mpath.h"
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -82,7 +83,7 @@ struct scsi_device probe_switch = {
 
 int	scsibusmatch(struct device *, void *, void *);
 void	scsibusattach(struct device *, struct device *, void *);
-int	scsibusactivate(struct device *, enum devact);
+int	scsibusactivate(struct device *, int);
 int	scsibusdetach(struct device *, int);
 
 int	scsibussubmatch(struct device *, void *, void *);
@@ -110,6 +111,7 @@ int scsidebug_level = SCSIDEBUG_LEVEL;
 int scsi_autoconf = SCSI_AUTOCONF;
 
 int scsibusprint(void *, const char *);
+void scsibus_printlink(struct scsi_link *);
 
 const u_int8_t version_to_spc [] = {
 	0, /* 0x00: The device does not claim conformance to any standard. */
@@ -165,6 +167,11 @@ scsibusattach(struct device *parent, struct device *self, void *aux)
 	printf(": %d targets", sb->sc_buswidth);
 	if (sb->adapter_link->adapter_target < sb->sc_buswidth)
 		printf(", initiator %d", sb->adapter_link->adapter_target);
+	if (sb->adapter_link->port_wwn != 0x0 &&
+	    sb->adapter_link->node_wwn != 0x0) {
+		printf(", WWPN %016llx, WWNN %016llx",
+		    sb->adapter_link->port_wwn, sb->adapter_link->node_wwn);
+	}
 	printf("\n");
 
 	/* Initialize shared data. */
@@ -190,7 +197,7 @@ scsibusattach(struct device *parent, struct device *self, void *aux)
 }
 
 int
-scsibusactivate(struct device *dev, enum devact act)
+scsibusactivate(struct device *dev, int act)
 {
 	return (config_activate_children(dev, act));
 }
@@ -431,7 +438,13 @@ scsi_detach_lun(struct scsibus_softc *sc, int target, int lun, int flags)
 	/* detaching a device from scsibus is a three step process... */
 
 	/* 1. detach the device */
-	rv = config_detach(link->device_softc, flags);
+#if NMPATH > 0
+	if (link->device_softc == NULL)
+		rv = mpath_path_detach(link, flags);
+	else
+#endif /* NMPATH */
+		rv = config_detach(link->device_softc, flags);
+
 	if (rv != 0)
 		return (rv);
 
@@ -578,34 +591,16 @@ const struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 };
 
 
-/*
- * Print out autoconfiguration information for a subdevice.
- *
- * This is a slight abuse of 'standard' autoconfiguration semantics,
- * because 'print' functions don't normally print the colon and
- * device information.  However, in this case that's better than
- * either printing redundant information before the attach message,
- * or having the device driver call a special function to print out
- * the standard device information.
- */
-int
-scsibusprint(void *aux, const char *pnp)
+void
+scsibus_printlink(struct scsi_link *link)
 {
-	struct scsi_attach_args		*sa = aux;
+	char				vendor[33], product[65], revision[17];
 	struct scsi_inquiry_data	*inqbuf;
 	u_int8_t			type;
 	int				removable;
-	char				*dtype, *qtype;
-	char				vendor[33], product[65], revision[17];
-	int				target, lun;
+	char				*dtype = NULL, *qtype = NULL;
 
-	if (pnp != NULL)
-		printf("%s", pnp);
-
-	inqbuf = sa->sa_inqbuf;
-
-	target = sa->sa_sc_link->target;
-	lun = sa->sa_sc_link->lun;
+	inqbuf = &link->inqdata;
 
 	type = inqbuf->device & SID_TYPE;
 	removable = inqbuf->dev_qual2 & SID_REMOVABLE ? 1 : 0;
@@ -613,7 +608,6 @@ scsibusprint(void *aux, const char *pnp)
 	/*
 	 * Figure out basic device type and qualifier.
 	 */
-	dtype = 0;
 	switch (inqbuf->device & SID_QUAL) {
 	case SID_QUAL_LU_OK:
 		qtype = "";
@@ -625,7 +619,6 @@ scsibusprint(void *aux, const char *pnp)
 
 	case SID_QUAL_RSVD:
 		panic("scsibusprint: qualifier == SID_QUAL_RSVD");
-
 	case SID_QUAL_BAD_LU:
 		panic("scsibusprint: qualifier == SID_QUAL_BAD_LU");
 
@@ -634,7 +627,7 @@ scsibusprint(void *aux, const char *pnp)
 		dtype = "vendor-unique";
 		break;
 	}
-	if (dtype == 0) {
+	if (dtype == NULL) {
 		switch (type) {
 		case T_DIRECT:
 			dtype = "direct";
@@ -684,14 +677,35 @@ scsibusprint(void *aux, const char *pnp)
 	scsi_strvis(product, inqbuf->product, 16);
 	scsi_strvis(revision, inqbuf->revision, 4);
 
-	printf(" targ %d lun %d: <%s, %s, %s> ", target, lun, vendor, product,
-	    revision);
-	if (sa->sa_sc_link->flags & SDEV_ATAPI)
+	printf(" targ %d lun %d: <%s, %s, %s> ", link->target, link->lun,
+	    vendor, product, revision);
+	if (link->flags & SDEV_ATAPI)
 		printf("ATAPI");
 	else
 		printf("SCSI%d", SCSISPC(inqbuf->version));
 	printf(" %d/%s %s%s", type, dtype, removable ? "removable" : "fixed",
 	    qtype);
+}
+
+/*
+ * Print out autoconfiguration information for a subdevice.
+ *
+ * This is a slight abuse of 'standard' autoconfiguration semantics,
+ * because 'print' functions don't normally print the colon and
+ * device information.  However, in this case that's better than
+ * either printing redundant information before the attach message,
+ * or having the device driver call a special function to print out
+ * the standard device information.
+ */
+int
+scsibusprint(void *aux, const char *pnp)
+{
+	struct scsi_attach_args		*sa = aux;
+
+	if (pnp != NULL)
+		printf("%s", pnp);
+
+	scsibus_printlink(sa->sa_sc_link);
 
 	return (UNCONF);
 }
@@ -806,6 +820,18 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 		rslt = EINVAL;
 		goto bad;
 	}
+
+#if NMPATH > 0
+	/* should multipathing steal the link? */
+	if (mpath_path_attach(sc_link) == 0) {
+		printf("%s: path to", scsi->sc_dev.dv_xname);
+		scsibus_printlink(sc_link);
+		printf("\n");
+
+		scsi->sc_link[target][lun] = sc_link;
+		return (0);
+	}
+#endif /* NMPATH */
 
 	finger = (const struct scsi_quirk_inquiry_pattern *)scsi_inqmatch(
 	    inqbuf, scsi_quirk_patterns,

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.78 2009/06/26 14:50:44 jsing Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.81 2009/08/09 14:12:25 marco Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -20,11 +20,15 @@
 #define SOFTRAIDVAR_H
 
 #include <crypto/md5.h>
+#include <sys/vnode.h>
 
 #define SR_UUID_MAX		16
 struct sr_uuid {
 	u_int8_t		sui_id[SR_UUID_MAX];
 } __packed;
+
+#define SR_HOTSPARE_LEVEL	0xffffffff
+#define SR_HOTSPARE_VOLID	0xffffffff
 
 #define SR_META_SIZE		64	/* save space at chunk beginning */
 #define SR_META_OFFSET		16	/* skip 8192 bytes at chunk beginning */
@@ -261,6 +265,8 @@ struct sr_workunit {
 	int			swu_flags;	/* additional hints */
 #define SR_WUF_REBUILD		(1<<0)		/* rebuild io */
 #define SR_WUF_REBUILDIOCOMP	(1<<1)		/* rbuild io complete */
+#define SR_WUF_FAIL		(1<<2)		/* RAID6: failure */
+#define SR_WUF_FAILIOCOMP	(1<<3)
 
 	int			swu_fake;	/* faked wu */
 	/* workunit io range */
@@ -304,6 +310,12 @@ struct sr_raidp {
 	int32_t			srp_strip_bits;
 };
 
+/* RAID 6 */
+#define SR_RAID6_NOWU		16
+struct sr_raid6 {
+	int32_t			sr6_strip_bits;
+};
+
 /* CRYPTO */
 #define SR_CRYPTO_NOWU		16
 struct sr_crypto {
@@ -330,6 +342,7 @@ struct sr_aoe {
 struct sr_metadata_list {
 	u_int8_t		sml_metadata[SR_META_SIZE * 512];
 	dev_t			sml_mm;
+	struct vnode		*sml_vn;
 	u_int32_t		sml_chunk_id;
 	int			sml_used;
 
@@ -358,6 +371,7 @@ struct sr_chunk {
 
 	/* runtime data */
 	dev_t			src_dev_mm;	/* major/minor */
+	struct vnode		*src_vn;	/* vnode */
 
 	/* helper members before metadata makes it onto the chunk  */
 	int			src_meta_ondisk;/* set when meta is on disk */
@@ -391,6 +405,7 @@ struct sr_discipline {
 #define	SR_MD_AOE_INIT		5
 #define	SR_MD_AOE_TARG		6
 #define	SR_MD_RAID4		7
+#define	SR_MD_RAID6		8
 	char			sd_name[10];	/* human readable dis name */
 	u_int8_t		sd_scsibus;	/* scsibus discipline uses */
 	struct scsi_link	sd_link;	/* link to midlayer */
@@ -399,6 +414,7 @@ struct sr_discipline {
 	    struct sr_raid0	mdd_raid0;
 	    struct sr_raid1	mdd_raid1;
 	    struct sr_raidp	mdd_raidp;
+	    struct sr_raid6	mdd_raid6;
 	    struct sr_crypto	mdd_crypto;
 #ifdef AOE
 	    struct sr_aoe	mdd_aoe;
@@ -474,6 +490,11 @@ struct sr_softc {
 
 	struct rwlock		sc_lock;
 
+	struct sr_chunk_head	sc_hotspare_list;	/* List of hotspares. */
+	struct sr_chunk		**sc_hotspares;	/* Array to hotspare chunks. */
+	struct rwlock		sc_hs_lock;	/* Lock for hotspares list. */
+	int			sc_hotspare_no; /* Number of hotspares. */
+
 	int			sc_sensors_running;
 	/*
 	 * during scsibus attach this is the discipline that is in use
@@ -492,6 +513,9 @@ struct sr_softc {
 /* hotplug */
 void			sr_hotplug_register(struct sr_discipline *, void *);
 void			sr_hotplug_unregister(struct sr_discipline *, void *);
+
+/* Hotspare and rebuild. */
+void			sr_hotspare_rebuild_callback(void *, void *);
 
 /* work units & ccbs */
 int			sr_ccb_alloc(struct sr_discipline *);
@@ -525,6 +549,7 @@ void			sr_raid_startwu(struct sr_workunit *);
 void			sr_raid0_discipline_init(struct sr_discipline *);
 void			sr_raid1_discipline_init(struct sr_discipline *);
 void			sr_raidp_discipline_init(struct sr_discipline *);
+void			sr_raid6_discipline_init(struct sr_discipline *);
 void			sr_crypto_discipline_init(struct sr_discipline *);
 void			sr_aoe_discipline_init(struct sr_discipline *);
 void			sr_aoe_server_discipline_init(struct sr_discipline *);
