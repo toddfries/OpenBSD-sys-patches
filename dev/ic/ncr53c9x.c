@@ -811,7 +811,7 @@ ncr53c9x_scsi_cmd(xs)
 	if (li == NULL) {
 		/* Initialize LUN info and add to list. */
 		if ((li = malloc(sizeof(*li), M_DEVBUF, M_NOWAIT)) == NULL) {
-			return (TRY_AGAIN_LATER);
+			return (NO_CCB);
 		}
 		bzero(li, sizeof(*li));
 		li->last_used = time_second;
