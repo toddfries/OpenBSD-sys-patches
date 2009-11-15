@@ -73,6 +73,7 @@ struct cfdriver ppb_cd = {
 	NULL, "ppb", DV_DULL
 };
 
+void	ppb_alloc_resources(struct ppb_softc *, struct pci_attach_args *);
 int	ppb_intr(void *);
 void	ppb_hotplug_insert(void *, void *);
 void	ppb_hotplug_insert_finish(void *);
@@ -162,6 +163,8 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 	}
 
 	printf("\n");
+
+	ppb_alloc_resources(sc, pa);
 
 	for (pin = PCI_INTERRUPT_PIN_A; pin <= PCI_INTERRUPT_PIN_D; pin++) {
 		pa->pa_intrpin = pa->pa_rawintrpin = pin;
@@ -306,6 +309,121 @@ ppbdetach(struct device *self, int flags)
 	}
 
 	return (rv);
+}
+
+void
+ppb_alloc_resources(struct ppb_softc *sc, struct pci_attach_args *pa)
+{
+	pcireg_t id, busdata, blr, bhlcr, type;
+	pcitag_t tag;
+	int bus, dev;
+	int reg, reg_start, reg_end;
+	int io_count = 0;
+	int mem_count = 0;
+	bus_addr_t base;
+	bus_size_t size;
+
+	if (pa->pa_memex == NULL)
+		return;
+
+	busdata = pci_conf_read(sc->sc_pc, sc->sc_tag, PPB_REG_BUSINFO);
+	bus = PPB_BUSINFO_SECONDARY(busdata);
+	if (bus == 0)
+		return;
+
+	/*
+	 * Count number of devices.  If there are no devices behind
+	 * this bridge, there's no point in allocating any address
+	 * space.
+	 */
+	for (dev = 0; dev < pci_bus_maxdevs(sc->sc_pc, bus); dev++) {
+		tag = pci_make_tag(sc->sc_pc, bus, dev, 0);
+		id = pci_conf_read(sc->sc_pc, tag, PCI_ID_REG);
+
+		if (PCI_VENDOR(id) == PCI_VENDOR_INVALID ||
+		    PCI_VENDOR(id) == 0)
+			continue;
+
+		bhlcr = pci_conf_read(sc->sc_pc, tag, PCI_BHLC_REG);
+		switch (PCI_HDRTYPE_TYPE(bhlcr)) {
+		case 0:
+			reg_start = PCI_MAPREG_START;
+			reg_end = PCI_MAPREG_END;
+			break;
+		case 1:	/* PCI-PCI bridge */
+			reg_start = PCI_MAPREG_START;
+			reg_end = PCI_MAPREG_PPB_END;
+			break;
+		case 2:	/* PCI-Cardbus bridge */
+			reg_start = PCI_MAPREG_START;
+			reg_end = PCI_MAPREG_PCB_END;
+			break;
+		default:
+			return;
+		}
+
+		for (reg = reg_start; reg < reg_end; reg += 4) {
+			if (pci_mapreg_probe(sc->sc_pc, tag, reg, &type) == 0)
+				continue;
+
+			if (type == PCI_MAPREG_TYPE_IO)
+				io_count++;
+			else
+				mem_count++;
+		}
+	}
+
+	/* Allocate I/O address space if necessary. */
+	if (io_count > 0) {
+		blr = pci_conf_read(sc->sc_pc, sc->sc_tag, PPB_REG_IOSTATUS);
+		sc->sc_iobase = (blr << PPB_IO_SHIFT) & PPB_IO_MASK;
+		sc->sc_iolimit = (blr & PPB_IO_MASK) | 0x00000fff;
+		blr = pci_conf_read(sc->sc_pc, sc->sc_tag, PPB_REG_IO_HI);
+		sc->sc_iobase |= (blr & 0x0000ffff) << 16;
+		sc->sc_iolimit |= (blr & 0xffff0000);
+		if (sc->sc_iolimit < sc->sc_iobase || sc->sc_iobase == 0) {
+			for (size = 0x2000; size >= PPB_IO_MIN; size >>= 1)
+				if (extent_alloc(pa->pa_ioex, size, size,
+				    0, 0, 0, &base) == 0)
+					break;
+			if (size >= PPB_IO_MIN) {
+				sc->sc_iobase = base;
+				sc->sc_iolimit = base + size - 1;
+				blr = pci_conf_read(sc->sc_pc, sc->sc_tag,
+				    PPB_REG_IOSTATUS);
+				blr &= 0xffff0000;
+				blr |= sc->sc_iolimit & PPB_IO_MASK;
+				blr |= (sc->sc_iobase >> PPB_IO_SHIFT);
+				pci_conf_write(sc->sc_pc, sc->sc_tag,
+				    PPB_REG_IOSTATUS, blr);
+				blr = (sc->sc_iobase & 0xffff0000) >> 16;
+				blr |= sc->sc_iolimit & 0xffff0000;
+				pci_conf_write(sc->sc_pc, sc->sc_tag,
+				    PPB_REG_IO_HI, blr);
+			}
+		}
+	}
+
+	if (mem_count > 0) {
+		/* Allocate memory mapped I/O address space if necessary. */
+		blr = pci_conf_read(sc->sc_pc, sc->sc_tag, PPB_REG_MEM);
+		sc->sc_membase = (blr << PPB_MEM_SHIFT) & PPB_MEM_MASK;
+		sc->sc_memlimit = (blr & PPB_MEM_MASK) | 0x000fffff;
+		if (sc->sc_memlimit < sc->sc_membase || sc->sc_membase == 0) {
+			for (size = 0x2000000; size >= PPB_MEM_MIN; size >>= 1)
+				if (extent_alloc(pa->pa_memex, size, size,
+				    0, 0, 0, &base) == 0)
+					break;
+			if (size >= PPB_MEM_MIN) {
+				sc->sc_membase = base;
+				sc->sc_memlimit = base + size - 1;
+				blr = sc->sc_memlimit & PPB_MEM_MASK;
+				blr |= (sc->sc_membase >> PPB_MEM_SHIFT);
+				pci_conf_write(sc->sc_pc, sc->sc_tag,
+				    PPB_REG_MEM, blr);
+			}
+		}
+	}
 }
 
 int
