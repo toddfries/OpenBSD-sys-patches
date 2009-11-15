@@ -78,6 +78,7 @@
 #define PPB_IOBASE_SHIFT   0
 #define PPB_IOLIMIT_SHIFT  8
 #define PPB_IO_MASK   0xf000
+#define PPB_IO_SHIFT  8
 #define PPB_IO_MIN    4096
 
 /*
