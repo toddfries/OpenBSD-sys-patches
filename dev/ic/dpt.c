@@ -1062,7 +1062,7 @@ dpt_scsi_cmd(xs)
 	if (dpt_cmd(sc, &ccb->ccb_eata_cp, ccb->ccb_ccbpa, CP_DMA_CMD, 0)) {
 		printf("%s: dpt_cmd failed\n", sc->sc_dv.dv_xname);
 		dpt_free_ccb(sc, ccb);
-		return (TRY_AGAIN_LATER);
+		return (NO_CCB);
 	}
 
 	if ((xs->flags & SCSI_POLL) == 0)

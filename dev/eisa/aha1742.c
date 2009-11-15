@@ -971,7 +971,7 @@ ahb_scsi_cmd(xs)
 	if (flags & SCSI_RESET) {
 		ecb->flags |= ECB_IMMED;
 		if (sc->immed_ecb)
-			return TRY_AGAIN_LATER;
+			return NO_CCB;
 		sc->immed_ecb = ecb;
 
 		s = splbio();

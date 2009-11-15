@@ -326,7 +326,7 @@ ispcmd(XS_T *xs)
 	if (isp->isp_osinfo.blocked) {
 		if (xs->flags & SCSI_POLL) {
 			ISP_UNLOCK(isp);
-			return (TRY_AGAIN_LATER);
+			return (NO_CCB);
 		}
 		if (isp->isp_osinfo.blocked == 2) {
 			isp_restart(isp);
@@ -399,7 +399,7 @@ isp_polled_cmd(struct ispsoftc *isp, XS_T *xs)
 		break;
 	case CMD_RQLATER:
 	case CMD_EAGAIN:
-		result = TRY_AGAIN_LATER;
+		result = NO_CCB;
 		break;
 	case CMD_COMPLETE:
 		result = COMPLETE;
