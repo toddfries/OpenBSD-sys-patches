@@ -607,7 +607,7 @@ ahc_setup_data(struct ahc_softc *ahc, struct scsi_xfer *xs,
 			s = splbio();
 			ahc_free_scb(ahc, scb);
 			splx(s);
-			return (TRY_AGAIN_LATER);	/* XXX fvdl */
+			return (NO_CCB);	/* XXX fvdl */
 }
 		error = ahc_execute_scb(scb,
 					scb->dmamap->dm_segs,

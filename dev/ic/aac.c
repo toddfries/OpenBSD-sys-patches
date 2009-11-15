@@ -2674,7 +2674,7 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 				printf("%s: command timed out\n",
 				       sc->aac_dev.dv_xname);
 				splx(s);
-				return (TRY_AGAIN_LATER);
+				return (NO_CCB);
 			}
 			xs->flags |= ITSDONE;
 			scsi_done(xs);

@@ -763,7 +763,7 @@ gdt_scsi_cmd(struct scsi_xfer *xs)
 					printf("%s: command %d timed out\n",
 					    DEVNAME(sc),
 					    ccb->gc_cmd_index);
-					return (TRY_AGAIN_LATER);
+					return (NO_CCB);
 				}
 				xs->flags |= ITSDONE;
 				scsi_done(xs);

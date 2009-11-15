@@ -574,7 +574,7 @@ ahd_setup_data(struct ahd_softc *ahd, struct scsi_xfer *xs,
 			ahd_lock(ahd, &s);
 			ahd_free_scb(ahd, scb);
 			ahd_unlock(ahd, &s);
-			return (TRY_AGAIN_LATER);       /* XXX fvdl */
+			return (NO_CCB);       /* XXX fvdl */
 		}
 		error = ahd_execute_scb(scb, scb->dmamap->dm_segs,
 		    scb->dmamap->dm_nsegs);

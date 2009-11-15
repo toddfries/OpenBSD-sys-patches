@@ -521,7 +521,7 @@ ioprbs_scsi_cmd(xs)
 					splx(s);
 					printf("%s: command timed out\n",
 					    sc->sc_dv.dv_xname);
-					return (TRY_AGAIN_LATER);
+					return (NO_CCB);
 				}
 				xs->flags |= ITSDONE;
 				scsi_done(xs);
