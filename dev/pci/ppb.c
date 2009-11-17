@@ -314,14 +314,13 @@ ppbdetach(struct device *self, int flags)
 void
 ppb_alloc_resources(struct ppb_softc *sc, struct pci_attach_args *pa)
 {
-	pcireg_t id, busdata, blr, bhlcr, type;
+	pcireg_t id, busdata, blr, bhlcr, type, csr;
 	pcitag_t tag;
 	int bus, dev;
 	int reg, reg_start, reg_end;
 	int io_count = 0;
 	int mem_count = 0;
-	bus_addr_t base;
-	bus_size_t size;
+	u_long base, size;
 
 	if (pa->pa_memex == NULL)
 		return;
@@ -373,6 +372,19 @@ ppb_alloc_resources(struct ppb_softc *sc, struct pci_attach_args *pa)
 		}
 	}
 
+	csr = pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_COMMAND_STATUS_REG);
+
+	/*
+	 * Get the bridge in a consistent state.  If memory mapped I/O
+	 * is disabled, disabled the associated windows as well.  
+	 */
+	if ((csr & PCI_COMMAND_MEM_ENABLE) == 0) {
+		pci_conf_write(sc->sc_pc, sc->sc_tag, PPB_REG_MEM, 0x0000ffff);
+		pci_conf_write(sc->sc_pc, sc->sc_tag, PPB_REG_PREFMEM, 0x0000ffff);
+		pci_conf_write(sc->sc_pc, sc->sc_tag, PPB_REG_PREFBASE_HI32, 0);
+		pci_conf_write(sc->sc_pc, sc->sc_tag, PPB_REG_PREFLIM_HI32, 0);
+	}
+
 	/* Allocate I/O address space if necessary. */
 	if (io_count > 0) {
 		blr = pci_conf_read(sc->sc_pc, sc->sc_tag, PPB_REG_IOSTATUS);
@@ -400,12 +412,14 @@ ppb_alloc_resources(struct ppb_softc *sc, struct pci_attach_args *pa)
 				blr |= sc->sc_iolimit & 0xffff0000;
 				pci_conf_write(sc->sc_pc, sc->sc_tag,
 				    PPB_REG_IO_HI, blr);
+
+				csr |= PCI_COMMAND_IO_ENABLE;
 			}
 		}
 	}
 
+	/* Allocate memory mapped I/O address space if necessary. */
 	if (mem_count > 0) {
-		/* Allocate memory mapped I/O address space if necessary. */
 		blr = pci_conf_read(sc->sc_pc, sc->sc_tag, PPB_REG_MEM);
 		sc->sc_membase = (blr << PPB_MEM_SHIFT) & PPB_MEM_MASK;
 		sc->sc_memlimit = (blr & PPB_MEM_MASK) | 0x000fffff;
@@ -421,9 +435,13 @@ ppb_alloc_resources(struct ppb_softc *sc, struct pci_attach_args *pa)
 				blr |= (sc->sc_membase >> PPB_MEM_SHIFT);
 				pci_conf_write(sc->sc_pc, sc->sc_tag,
 				    PPB_REG_MEM, blr);
+
+				csr |= PCI_COMMAND_MEM_ENABLE;
 			}
 		}
 	}
+
+	pci_conf_write(sc->sc_pc, sc->sc_tag, PCI_COMMAND_STATUS_REG, csr);
 }
 
 int
