@@ -1,4 +1,4 @@
-/*	$OpenBSD: athnvar.h,v 1.2 2009/11/15 14:04:02 damien Exp $	*/
+/*	$OpenBSD: athnvar.h,v 1.4 2009/11/17 18:21:07 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -415,6 +415,7 @@ struct athn_softc {
 	SIMPLEQ_HEAD(, athn_tx_buf)	txbufs;
 	struct athn_tx_buf		txpool[ATHN_NTXBUFS];
 
+	int				sc_if_flags;
 	int				sc_tx_timer;
 
 	const struct athn_ini		*ini;
@@ -428,6 +429,7 @@ struct athn_softc {
 	struct athn_ops			ops;
 
 	int				fixed_ridx;
+	int				sifs;
 
 	int16_t				def_nf;
 	struct {

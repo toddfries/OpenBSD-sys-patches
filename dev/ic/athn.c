@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.5 2009/11/16 17:09:31 damien Exp $	*/
+/*	$OpenBSD: athn.c,v 1.10 2009/11/17 20:38:29 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -64,7 +64,7 @@
 #include <dev/ic/athnvar.h>
 
 #ifdef ATHN_DEBUG
-int athn_debug = 4;
+int athn_debug = 1;
 #endif
 
 void		athn_radiotap_attach(struct athn_softc *);
@@ -160,6 +160,7 @@ void		athn_updateedca(struct ieee80211com *);
 void		athn_updateslot(struct ieee80211com *);
 void		athn_start(struct ifnet *);
 void		athn_watchdog(struct ifnet *);
+void		athn_set_multi(struct athn_softc *);
 int		athn_ioctl(struct ifnet *, u_long, caddr_t);
 int		athn_init(struct ifnet *);
 void		athn_stop(struct ifnet *, int);
@@ -1279,7 +1280,7 @@ athn_switch_chan(struct athn_softc *sc, struct ieee80211_channel *c,
 
 	/* If band or bandwidth changes, we need to do a full reset. */
 	if (c->ic_flags != ic->ic_bss->ni_chan->ic_flags) {
-		DPRINTF(("channel band switch\n"));
+		DPRINTFN(2, ("channel band switch\n"));
 		goto reset;
 	}
 	error = athn_set_power_awake(sc);
@@ -1289,7 +1290,7 @@ athn_switch_chan(struct athn_softc *sc, struct ieee80211_channel *c,
 	error = athn_set_chan(sc, c, extc);
 	if (error != 0) {
  reset:		/* Error found, try a full reset. */
-		DPRINTF(("needs a full reset\n"));
+		DPRINTFN(3, ("needs a full reset\n"));
 		error = athn_hw_reset(sc, c, extc);
 		if (error != 0)	/* Hopeless case. */
 			return (error);
@@ -1372,6 +1373,8 @@ athn_set_phy(struct athn_softc *sc, struct ieee80211_channel *c,
 
 	AR_WRITE(sc, AR_GTXTO, SM(AR_GTXTO_TIMEOUT_LIMIT, 25));
 	AR_WRITE(sc, AR_CST, SM(AR_CST_TIMEOUT_LIMIT, 15));
+	/* Set Short Interframe Space. */
+	sc->sifs = IEEE80211_IS_CHAN_5GHZ(c) ? 16 : 10;
 }
 
 int
@@ -1695,8 +1698,8 @@ athn_rfsilent_init(struct athn_softc *sc)
 	/* Get polarity of hardware radio switch. */
 	if (base->rfSilent & AR_EEP_RFSILENT_POLARITY)
 		sc->flags |= ATHN_FLAG_RFSILENT_REVERSED;
-	printf("%s: Found RF switch connected to GPIO pin %d\n",
-	    sc->sc_dev.dv_xname, sc->rfsilent_pin);
+	DPRINTFN(2, ("Found RF switch connected to GPIO pin %d\n",
+	    sc->rfsilent_pin));
 
 	/* Configure hardware radio switch. */
 	AR_SETBITS(sc, AR_GPIO_INPUT_EN_VAL, AR_GPIO_INPUT_EN_VAL_RFSILENT_BB);
@@ -1822,7 +1825,7 @@ athn_calib_iq(struct athn_softc *sc)
 		else if (q_coff <= -16)
 			q_coff = 16;
 
-		DPRINTF(("IQ calibration for chain %d\n", i));
+		DPRINTFN(2, ("IQ calibration for chain %d\n", i));
 		reg = AR_READ(sc, AR_PHY_TIMING_CTRL4(i));
 		reg = RW(reg, AR_PHY_TIMING_CTRL4_IQCORR_Q_I_COFF, i_coff);
 		reg = RW(reg, AR_PHY_TIMING_CTRL4_IQCORR_Q_Q_COFF, q_coff);
@@ -1866,7 +1869,7 @@ athn_calib_adc_gain(struct athn_softc *sc)
 		gain_mismatch_q =
 		    (cal->pwr_meas_odd_q * 32) / cal->pwr_meas_even_q;
 
-		DPRINTF(("ADC gain calibration for chain %d\n", i));
+		DPRINTFN(2, ("ADC gain calibration for chain %d\n", i));
 		reg = AR_READ(sc, AR_PHY_NEW_ADC_DC_GAIN_CORR(i));
 		reg = RW(reg, AR_PHY_NEW_ADC_DC_GAIN_IGAIN, gain_mismatch_i);
 		reg = RW(reg, AR_PHY_NEW_ADC_DC_GAIN_QGAIN, gain_mismatch_q);
@@ -1910,7 +1913,7 @@ athn_calib_adc_dc_off(struct athn_softc *sc)
 		dc_offset_mismatch_q =
 		    (cal->pwr_meas_odd_q - cal->pwr_meas_even_q * 2) / count;
 
-		DPRINTF(("ADC DC offset calibration for chain %d\n", i));
+		DPRINTFN(2, ("ADC DC offset calibration for chain %d\n", i));
 		reg = AR_READ(sc, AR_PHY_NEW_ADC_DC_GAIN_CORR(i));
 		reg = RW(reg, AR_PHY_NEW_ADC_DC_GAIN_QDC,
 		    dc_offset_mismatch_q);
@@ -3481,7 +3484,7 @@ athn_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 		/* Compute duration for each series. */
 		for (i = 0; i < 4; i++) {
 			series[i].dur = athn_txtime(sc, IEEE80211_ACK_LEN,
-			    ridx[i], ic->ic_flags);
+			    ridx[i], ic->ic_flags) + sc->sifs;
 		}
 	}
 
@@ -3946,7 +3949,7 @@ athn_hw_init(struct athn_softc *sc, struct ieee80211_channel *c,
 		else
 			pvals = ini->vals_5g20;
 	}
-	DPRINTF(("writing per-mode init vals\n"));
+	DPRINTFN(4, ("writing per-mode init vals\n"));
 	for (i = 0; i < ini->nregs; i++) {
 		AR_WRITE(sc, ini->regs[i], pvals[i]);
 		if (AR_IS_ANALOG_REG(ini->regs[i]))
@@ -3962,7 +3965,7 @@ athn_hw_init(struct athn_softc *sc, struct ieee80211_channel *c,
 		ar9280_reset_tx_gain(sc, c);
 
 	/* Second initialization step (common to all channels). */
-	DPRINTF(("writing common init vals\n"));
+	DPRINTFN(4, ("writing common init vals\n"));
 	for (i = 0; i < ini->ncmregs; i++) {
 		AR_WRITE(sc, ini->cmregs[i], ini->cmvals[i]);
 		if (AR_IS_ANALOG_REG(ini->cmregs[i]))
@@ -4482,6 +4485,47 @@ athn_watchdog(struct ifnet *ifp)
 	ieee80211_watchdog(ifp);
 }
 
+void
+athn_set_multi(struct athn_softc *sc)
+{
+	struct arpcom *ac = &sc->sc_ic.ic_ac;
+	struct ifnet *ifp = &ac->ac_if;
+	struct ether_multi *enm;
+	struct ether_multistep step;
+	const uint8_t *addr;
+	uint32_t val, lo, hi;
+	uint8_t bit;
+
+	if ((ifp->if_flags & (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
+		lo = hi = 0xffffffff;
+		goto done;
+	}
+	lo = hi = 0;
+	ETHER_FIRST_MULTI(step, ac, enm);
+	while (enm != NULL) {
+		if (memcmp(enm->enm_addrlo, enm->enm_addrhi, 6) != 0) {
+			ifp->if_flags |= IFF_ALLMULTI;
+			lo = hi = 0xffffffff;
+			goto done;
+		}
+		addr = enm->enm_addrlo;
+		/* Calculate the XOR value of all eight 6-bit words. */
+		val = addr[0] | addr[1] << 8 | addr[2] << 16;
+		bit  = (val >> 18) ^ (val >> 12) ^ (val >> 6) ^ val;
+		val = addr[3] | addr[4] << 8 | addr[5] << 16;
+		bit ^= (val >> 18) ^ (val >> 12) ^ (val >> 6) ^ val;
+		bit &= 0x3f;
+		if (bit < 32)
+			lo |= 1 << bit;
+		else
+			hi |= 1 << (bit - 32);
+		ETHER_NEXT_MULTI(step, enm);
+	}
+ done:
+	AR_WRITE(sc, AR_MCAST_FIL0, lo);
+	AR_WRITE(sc, AR_MCAST_FIL1, hi);
+}
+
 int
 athn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
@@ -4504,12 +4548,17 @@ athn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if (!(ifp->if_flags & IFF_RUNNING))
+			if ((ifp->if_flags & IFF_RUNNING) &&
+			    ((ifp->if_flags ^ sc->sc_if_flags) &
+			     (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
+				athn_set_multi(sc);
+			} else if (!(ifp->if_flags & IFF_RUNNING))
 				error = athn_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				athn_stop(ifp, 1);
 		}
+		sc->sc_if_flags = ifp->if_flags;
 		break;
 
 	case SIOCADDMULTI:
