@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.87 2009/11/07 18:56:55 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.90 2009/11/19 20:16:27 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -158,7 +158,7 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 
 #ifdef notyet
 	/*
-	 * Make sure KSEG0 cacheability match what we intend to use.
+	 * Make sure CKSEG0 cacheability match what we intend to use.
 	 *
 	 * XXX This does not work as expected on IP30. Does ARCBios
 	 * XXX depend on this?
@@ -305,20 +305,20 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	uvmexp.pagesize = PAGE_SIZE;
 	uvm_setpagesize();
 
-	for (i = 0; i < MAXMEMSEGS && mem_layout[i].mem_first_page != 0; i++) {
-		u_int32_t fp, lp;
-		u_int32_t firstkernpage, lastkernpage;
+	for (i = 0; i < MAXMEMSEGS && mem_layout[i].mem_last_page != 0; i++) {
+		uint64_t fp, lp;
+		uint64_t firstkernpage, lastkernpage;
 		unsigned int freelist;
 		paddr_t firstkernpa, lastkernpa;
 
 		if (IS_XKPHYS((vaddr_t)start))
 			firstkernpa = XKPHYS_TO_PHYS((vaddr_t)start);
 		else
-			firstkernpa = KSEG0_TO_PHYS((vaddr_t)start);
+			firstkernpa = CKSEG0_TO_PHYS((vaddr_t)start);
 		if (IS_XKPHYS((vaddr_t)ekern))
 			lastkernpa = XKPHYS_TO_PHYS((vaddr_t)ekern);
 		else
-			lastkernpa = KSEG0_TO_PHYS((vaddr_t)ekern);
+			lastkernpa = CKSEG0_TO_PHYS((vaddr_t)ekern);
 
 		firstkernpage = atop(trunc_page(firstkernpa));
 		lastkernpage = atop(round_page(lastkernpa));
@@ -341,12 +341,13 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 		else if (lp < lastkernpage)
 			lp = firstkernpage;
 		else { /* Need to split! */
-			u_int32_t xp = firstkernpage;
+			uint64_t xp = firstkernpage;
 			uvm_page_physload(fp, xp, fp, xp, freelist);
 			fp = lastkernpage;
 		}
-		if (lp > fp)
+		if (lp > fp) {
 			uvm_page_physload(fp, lp, fp, lp, freelist);
+		}
 	}
 
 	switch (sys_config.system_type) {
@@ -775,36 +776,16 @@ setregs(p, pack, stack, retval)
 	register_t *retval;
 {
 	extern struct proc *machFPCurProcPtr;
-#if 0
-/* XXX should check validity of header and perhaps be 32/64 indep. */
-	Elf64_Ehdr *eh = pack->ep_hdr;
-
-	if ((((eh->e_flags & EF_MIPS_ABI) != E_MIPS_ABI_NONE) &&
-	    ((eh->e_flags & EF_MIPS_ABI) != E_MIPS_ABI_O32)) ||
-	    ((eh->e_flags & EF_MIPS_ARCH) >= E_MIPS_ARCH_3) ||
-	    (eh->e_ident[EI_CLASS] != ELFCLASS32)) {
-		p->p_md.md_flags |= MDP_O32;
-	}
-#endif
-
-#if !defined(__LP64__)
-	p->p_md.md_flags |= MDP_O32;
-#else
-	p->p_md.md_flags &= ~MDP_O32;
-#endif
 
 	bzero((caddr_t)p->p_md.md_regs, sizeof(struct trap_frame));
 	p->p_md.md_regs->sp = stack;
 	p->p_md.md_regs->pc = pack->ep_entry & ~3;
 	p->p_md.md_regs->t9 = pack->ep_entry & ~3; /* abicall req */
-#if defined(__LP64__)
 	p->p_md.md_regs->sr = SR_FR_32 | SR_XX | SR_KSU_USER | SR_KX | SR_UX |
 	    SR_EXL | SR_INT_ENAB;
-	if (sys_config.cpu[0].type == MIPS_R12000 &&
-	    sys_config.system_type == SGI_O2)
+#if !defined(TGT_COHERENT)
+	if (sys_config.cpu[0].type == MIPS_R12000)
 		p->p_md.md_regs->sr |= SR_DSD;
-#else
-	p->p_md.md_regs->sr = SR_KSU_USER|SR_XX|SR_EXL|SR_INT_ENAB;
 #endif
 	p->p_md.md_regs->sr |= idle_mask & SR_INT_MASK;
 	p->p_md.md_regs->ic = (idle_mask << 8) & IC_INT_MASK;
@@ -1042,7 +1023,9 @@ rm7k_perfintr(trapframe)
 {
 	struct proc *p = curproc;
 
+#ifdef DEBUG
 	printf("perfintr proc %p!\n", p);
+#endif
 	cp0_setperfcount(cp0_getperfcount() & 0x7fffffff);
 	if (p != NULL) {
 		p->p_md.md_pc_spill++;
