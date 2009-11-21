@@ -1,4 +1,4 @@
-/*	$OpenBSD: tlbhandler.S,v 1.20 2009/09/30 06:22:00 syuu Exp $ */
+/*	$OpenBSD: tlbhandler.S,v 1.22 2009/11/19 20:16:27 miod Exp $ */
 
 /*
  * Copyright (c) 1995-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -448,7 +448,7 @@ LEAF(tlb_flush, 0)
 	mtc0	v0, COP_0_STATUS_REG	# Disable interrupts
 	ITLBNOPFIX
 	mfc0	ta1, COP_0_TLB_WIRED
-	LA	v0, KSEG0_BASE		# invalid address
+	LA	v0, CKSEG0_BASE		# invalid address
 	dmfc0	ta0, COP_0_TLB_HI	# Save the PID
 
 	dmtc0	v0, COP_0_TLB_HI	# Mark entry high as invalid
@@ -499,7 +499,7 @@ LEAF(tlb_flush_addr, 0)
 	xori	v0, v0, SR_INT_ENAB
 	mtc0	v0, COP_0_STATUS_REG	# Disable interrupts
 	ITLBNOPFIX
-	li	v0, (PG_HVPN | PG_ASID)
+	dli	v0, (PG_HVPN | PG_ASID)
 	and	a0, a0, v0		# Make sure valid hi value.
 	dmfc0	ta0, COP_0_TLB_HI	# Get current PID
 	dmtc0	a0, COP_0_TLB_HI	# look for addr & PID
@@ -511,7 +511,7 @@ LEAF(tlb_flush_addr, 0)
 	nop
 	nop				# Delay for effect
 	nop
-	LA	ta1, KSEG0_BASE		# Load invalid entry.
+	LA	ta1, CKSEG0_BASE	# Load invalid entry.
 	mfc0	v0, COP_0_TLB_INDEX	# See what we got
 	bltz	v0, 1f			# index < 0 => !found
 	nop
@@ -559,8 +559,8 @@ LEAF(tlb_update, 0)
 	xori	v0, v0, SR_INT_ENAB
 	mtc0	v0, COP_0_STATUS_REG	# Disable interrupts
 	ITLBNOPFIX
-	and	ta1, a0, 0x1000		# ta1 = Even/Odd flag
-	li	v0, (PG_HVPN | PG_ASID)
+	and	ta1, a0, PG_ODDPG	# ta1 = Even/Odd flag
+	dli	v0, (PG_HVPN | PG_ASID)
 	and	a0, a0, v0
 	dmfc0	ta0, COP_0_TLB_HI	# Save current PID
 	dmtc0	a0, COP_0_TLB_HI	# Init high reg
