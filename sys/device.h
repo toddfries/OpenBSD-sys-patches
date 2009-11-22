@@ -1,4 +1,4 @@
-/*	$OpenBSD: device.h,v 1.38 2009/10/13 19:33:19 pirofti Exp $	*/
+/*	$OpenBSD: device.h,v 1.40 2009/11/22 21:36:06 pirofti Exp $	*/
 /*	$NetBSD: device.h,v 1.15 1996/04/09 20:55:24 cgd Exp $	*/
 
 /*
@@ -64,6 +64,8 @@ enum devclass {
  */
 #define	DVACT_ACTIVATE		0	/* activate the device */
 #define	DVACT_DEACTIVATE	1	/* deactivate the device */
+#define	DVACT_SUSPEND		2	/* suspend the device */
+#define	DVACT_RESUME		3	/* resume the device */
 
 struct device {
 	enum	devclass dv_class;	/* this device's classification */
@@ -78,6 +80,7 @@ struct device {
 
 /* dv_flags */
 #define	DVF_ACTIVE	0x0001		/* device is activated */
+#define	DVF_SUSPEND	0x0002		/* device is suspended */
 
 TAILQ_HEAD(devicelist, device);
 
@@ -184,6 +187,8 @@ int config_detach(struct device *, int);
 int config_detach_children(struct device *, int);
 int config_activate(struct device *);
 int config_deactivate(struct device *);
+int config_suspend(struct device *);
+int config_resume(struct device *);
 int config_activate_children(struct device *, int);
 struct device *config_make_softc(struct device *parent,
     struct cfdata *cf);

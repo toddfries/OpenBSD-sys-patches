@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip30_machdep.c,v 1.19 2009/11/21 20:55:44 miod Exp $	*/
+/*	$OpenBSD: ip30_machdep.c,v 1.22 2009/11/22 22:44:58 syuu Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -56,12 +56,10 @@ int	ip30_widget_id(int16_t, u_int, uint32_t *);
 
 static	paddr_t ip30_iocbase;
 
-#ifdef MULTIPROCESSOR
 static const paddr_t mpconf =
     PHYS_TO_XKPHYS(MPCONF_BASE, CCA_COHERENT_EXCLWRITE);
 
 static int ip30_cpu_exists(int);
-#endif
 
 void
 ip30_setup()
@@ -188,12 +186,15 @@ ip30_autoconf(struct device *parent)
 	maa.maa_nasid = masternasid;
 	maa.maa_name = "cpu";
 	config_found(parent, &maa, mbprint);
-#ifdef MULTIPROCESSOR
+
 	int cpuid;
 	for(cpuid = 1; cpuid < MAX_CPUS; cpuid++)
-		if (ip30_cpu_exists(cpuid) == 0)
+		if (ip30_cpu_exists(cpuid) == 0) {
+			ncpusfound++;
+#ifdef MULTIPROCESSOR
 			config_found(parent, &maa, mbprint);
 #endif
+		}
 	maa.maa_name = "clock";
 	config_found(parent, &maa, mbprint);
 	maa.maa_name = "xbow";
@@ -290,7 +291,6 @@ ip30_lights_frob(uint32_t hwpend, struct trap_frame *cf)
 	return 0;	/* Real clock int handler will claim the interrupt. */
 }
 
-#ifdef MULTIPROCESSOR
 static int
 ip30_cpu_exists(int cpuid)
 {
@@ -302,10 +302,15 @@ ip30_cpu_exists(int cpuid)
                return 1;
 }
 
+#ifdef MULTIPROCESSOR
 void
 hw_cpu_boot_secondary(struct cpu_info *ci)
 {
        int cpuid =  ci->ci_cpuid;
+       struct pglist mlist;
+       struct vm_page *m;
+       int error;
+       vaddr_t kstack;
 
 #ifdef DEBUG
         uint64_t stackaddr =
@@ -340,12 +345,16 @@ hw_cpu_boot_secondary(struct cpu_info *ci)
            scachesz, fanloads, launch, rndvz,
            stackaddr, lparam, rparam, idleflag);
 #endif
-       vaddr_t kstack;
-       kstack = uvm_km_alloc(kernel_map, USPACE);
-       if (kstack == 0) {
-               panic("prom_boot_secondary: unable to allocate idle stack");
-               return;
-       }
+
+       TAILQ_INIT(&mlist);
+       error = uvm_pglistalloc(USPACE, 0, -1L, 0, 0,
+           &mlist, 1, UVM_PLA_WAITOK);
+       if (error)
+	       panic("unable to allocate idle stack\n");
+
+       m = TAILQ_FIRST(&mlist);
+       kstack = (vaddr_t)PHYS_TO_XKPHYS(VM_PAGE_TO_PHYS(m), CCA_CACHED);
+       bzero((char *)kstack, USPACE);
 
        *(volatile uint64_t *)(mpconf + MPCONF_STACKADDR(cpuid)) =
            (uint64_t)(kstack + USPACE);
@@ -401,9 +410,19 @@ hw_cpu_hatch(struct cpu_info *ci)
         */
        Mips_SyncCache();
 
+       ncpus++;
        cpuset_add(&cpus_running, ci);
 
-       for (;;)
-               ;
+       cpu_startclock(ci);
+
+       spl0();
+       (void)updateimask(0);
+#ifdef notyet
+       SCHED_LOCK(s);
+       cpu_switchto(NULL, sched_chooseproc());
+#else
+       for(;;)
+	       ;
+#endif
 }
 #endif
