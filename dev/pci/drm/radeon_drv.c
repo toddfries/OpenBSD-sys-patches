@@ -479,6 +479,13 @@ const static struct drm_pcidev radeondrm_pciidlist[] = {
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1250IGP,
 	    CHIP_RS690|RADEON_IS_IGP|RADEON_NEW_MEMMAP|RADEON_IS_IGPGART},
 #endif
+	{PCI_VENDOR_ATI, 0x9505, CHIP_RV670|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3450,
+	    CHIP_RV620|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3650,
+	    CHIP_RV635|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3300,
+	    CHIP_RS780|RADEON_NEW_MEMMAP|RADEON_IS_IGP},
         {0, 0, 0}
 };
 
@@ -734,9 +741,17 @@ u_int32_t
 radeondrm_get_scratch(struct drm_radeon_private *dev_priv, u_int32_t off)
 {
 	if (dev_priv->writeback_works)
-		return (radeondrm_read_rptr(dev_priv, RADEON_SCRATCHOFF(off)));
+		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
+			return radeondrm_read_rptr(dev_priv,
+			    R600_SCRATCHOFF(off));
+		else
+			return radeondrm_read_rptr(dev_priv,
+			    RADEON_SCRATCHOFF(off));
 	else
-		return (RADEON_READ( RADEON_SCRATCH_REG0 + 4*(off) ));
+		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
+			return RADEON_READ(R600_SCRATCH_REG0 + 4 * off);
+		else
+			return RADEON_READ(RADEON_SCRATCH_REG0 + 4 * off);
 }
 
 void
@@ -769,12 +784,19 @@ radeondrm_advance_ring(struct drm_radeon_private *dev_priv)
 void
 radeondrm_commit_ring(struct drm_radeon_private *dev_priv)
 {
+	/* XXX 128byte aligned stuff */
 	/* flush write combining buffer and writes to ring */
 	DRM_MEMORYBARRIER();
 	radeondrm_get_ring_head(dev_priv);
-	RADEON_WRITE(RADEON_CP_RB_WPTR, dev_priv->ring.tail);
-	/* read from PCI bus to ensure correct posting */
-	RADEON_READ(RADEON_CP_RB_RPTR);
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600) {
+		RADEON_WRITE(R600_CP_RB_WPTR, dev_priv->ring.tail);
+		/* read from PCI bus to ensure correct posting */
+		RADEON_READ(R600_CP_RB_RPTR);
+	} else {
+		RADEON_WRITE(RADEON_CP_RB_WPTR, dev_priv->ring.tail);
+		/* read from PCI bus to ensure correct posting */
+		RADEON_READ(RADEON_CP_RB_RPTR);
+	}
 }
 
 void
