@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic7xxx_openbsd.c,v 1.42 2009/02/16 21:19:06 miod Exp $	*/
+/*	$OpenBSD: aic7xxx_openbsd.c,v 1.43 2009/11/22 14:14:10 krw Exp $	*/
 /*	$NetBSD: aic7xxx_osm.c,v 1.14 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*
