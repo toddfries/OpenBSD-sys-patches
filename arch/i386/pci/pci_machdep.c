@@ -603,6 +603,7 @@ pci_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 	isa_intr_disestablish(NULL, cookie);
 }
 
+struct extent *pcibus_ex;
 struct extent *pciio_ex;
 struct extent *pcimem_ex;
 
@@ -611,6 +612,14 @@ pci_init_extents(void)
 {
 	bios_memmap_t *bmp;
 	u_int64_t size;
+
+	if (pcibus_ex == NULL) {
+		pcibus_ex = extent_create("pcibus", 0, 255, M_DEVBUF,
+		    NULL, 0, EX_NOWAIT);
+		if (pcibus_ex == NULL)
+			return;
+		extent_alloc_region(pcibus_ex, 0, 1, M_NOWAIT);
+	}
 
 	if (pciio_ex == NULL) {
 		/*

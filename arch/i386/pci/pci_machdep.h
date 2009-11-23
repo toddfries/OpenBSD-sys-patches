@@ -77,6 +77,7 @@ struct {
 extern int pci_mode;
 int		pci_mode_detect(void);
 
+extern struct extent *pcibus_ex;
 extern struct extent *pciio_ex;
 extern struct extent *pcimem_ex;
 void		pci_init_extents(void);
