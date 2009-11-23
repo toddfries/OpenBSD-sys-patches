@@ -181,6 +181,16 @@ struct sr_crypto_kdfinfo {
 #define pbkdf2		_kdfhint.pbkdf2
 };
 
+#define SR_IOCTL_GET_KDFHINT		0x01	/* Get KDF hint. */
+#define SR_IOCTL_CHANGE_PASSPHRASE	0x02	/* Change passphase. */
+
+struct sr_crypto_kdfpair {
+	void		*kdfinfo1;
+	u_int32_t	kdfsize1;
+	void		*kdfinfo2;
+	u_int32_t	kdfsize2;
+};
+
 #ifdef _KERNEL
 #include <dev/biovar.h>
 
@@ -532,6 +542,9 @@ void			sr_wu_put(struct sr_workunit *);
 /* misc functions */
 int32_t			sr_validate_stripsize(u_int32_t);
 void			sr_meta_save_callback(void *, void *);
+int			sr_meta_save(struct sr_discipline *, u_int32_t);
+void			sr_checksum(struct sr_softc *, void *, void *,
+			    u_int32_t);
 int			sr_validate_io(struct sr_workunit *, daddr64_t *,
 			    char *);
 int			sr_check_io_collision(struct sr_workunit *);
@@ -566,6 +579,10 @@ void			sr_raid1_set_vol_state(struct sr_discipline *);
 int			sr_crypto_get_kdf(struct bioc_createraid *,
 			    struct sr_discipline *);
 int			sr_crypto_create_keys(struct sr_discipline *);
+int			sr_crypto_change_maskkey(struct sr_discipline *,
+			    struct sr_crypto_kdfinfo *,
+			    struct sr_crypto_kdfinfo *);
+
 
 #ifdef SR_DEBUG
 void			sr_dump_mem(u_int8_t *, int);
