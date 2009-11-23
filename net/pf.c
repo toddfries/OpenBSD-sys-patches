@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.670 2009/11/22 22:34:50 henning Exp $ */
+/*	$OpenBSD: pf.c,v 1.673 2009/11/23 17:22:11 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -275,10 +275,6 @@ enum { PF_ICMP_MULTI_NONE, PF_ICMP_MULTI_SOLICITED, PF_ICMP_MULTI_LINK };
 			s->anchor.ptr->states_cur++;		\
 			s->anchor.ptr->states_tot++;		\
 		}						\
-		if (s->nat_rule.ptr != NULL) {			\
-			s->nat_rule.ptr->states_cur++;		\
-			s->nat_rule.ptr->states_tot++;		\
-		}						\
 		SLIST_FOREACH(mrm, &s->match_rules, entry) {	\
 			mrm->r->states_cur++;			\
 			mrm->r->states_tot++;			\
@@ -288,8 +284,6 @@ enum { PF_ICMP_MULTI_NONE, PF_ICMP_MULTI_SOLICITED, PF_ICMP_MULTI_LINK };
 #define STATE_DEC_COUNTERS(s)					\
 	do {							\
 		struct pf_rule_item *mrm;			\
-		if (s->nat_rule.ptr != NULL)			\
-			s->nat_rule.ptr->states_cur--;		\
 		if (s->anchor.ptr != NULL)			\
 			s->anchor.ptr->states_cur--;		\
 		s->rule.ptr->states_cur--;			\
@@ -666,8 +660,7 @@ pf_state_key_attach(struct pf_state_key *sk, struct pf_state *s, int idx)
 	struct pf_state_key     *cur;
 	struct pf_state		*olds = NULL;
 
-	KASSERT(s->key[idx] == NULL);	/* XXX handle this? */
-
+	KASSERT(s->key[idx] == NULL);
 	if ((cur = RB_INSERT(pf_state_tree, &pf_statetbl, sk)) != NULL) {
 		/* key exists. check for same kif, if none, add to key */
 		TAILQ_FOREACH(si, &cur->states, entry)
@@ -1103,16 +1096,7 @@ pf_src_tree_remove_state(struct pf_state *s)
 			s->src_node->expire = time_second + timeout;
 		}
 	}
-	if (s->nat_src_node != s->src_node && s->nat_src_node != NULL) {
-		if (--s->nat_src_node->states <= 0) {
-			timeout = s->rule.ptr->timeout[PFTM_SRC_NODE];
-			if (!timeout)
-				timeout =
-				    pf_default_rule.timeout[PFTM_SRC_NODE];
-			s->nat_src_node->expire = time_second + timeout;
-		}
-	}
-	s->src_node = s->nat_src_node = NULL;
+	s->src_node = NULL;
 }
 
 /* callers should be at splsoftnet */
@@ -1122,7 +1106,6 @@ pf_unlink_state(struct pf_state *cur)
 	splsoftassert(IPL_SOFTNET);
 
 	if (cur->src.state == PF_TCPS_PROXY_DST) {
-		/* XXX wire key the right one? */
 		pf_send_tcp(cur->rule.ptr, cur->key[PF_SK_WIRE]->af,
 		    &cur->key[PF_SK_WIRE]->addr[1],
 		    &cur->key[PF_SK_WIRE]->addr[0],
@@ -1162,10 +1145,6 @@ pf_free_state(struct pf_state *cur)
 	if (--cur->rule.ptr->states_cur <= 0 &&
 	    cur->rule.ptr->src_nodes <= 0)
 		pf_rm_rule(NULL, cur->rule.ptr);
-	if (cur->nat_rule.ptr != NULL)
-		if (--cur->nat_rule.ptr->states_cur <= 0 &&
-			cur->nat_rule.ptr->src_nodes <= 0)
-			pf_rm_rule(NULL, cur->nat_rule.ptr);
 	if (cur->anchor.ptr != NULL)
 		if (--cur->anchor.ptr->states_cur <= 0)
 			pf_rm_rule(NULL, cur->anchor.ptr);
@@ -3053,7 +3032,7 @@ pf_create_state(struct pf_rule *r, struct pf_rule *a, struct pf_pdesc *pd,
 	s->qid = act->qid;
 	s->pqid = act->pqid;
 	s->rtableid[pd->didx] = act->rtableid;
-	s->rtableid[pd->sidx] = -1;	/* return traffic is routed normaly */
+	s->rtableid[pd->sidx] = -1;	/* return traffic is routed normally */
 	s->min_ttl = act->min_ttl;
 	s->set_tos = act->set_tos;
 	s->max_mss = act->max_mss;
@@ -3363,7 +3342,7 @@ pf_test_fragment(struct pf_rule **rm, int direction, struct pfi_kif *kif,
 		PFLOG_PACKET(kif, h, m, af, direction, reason, r, a, ruleset,
 		    pd);
 
-	if (r->action != PF_PASS)
+	if (r->action == PF_DROP)
 		return (PF_DROP);
 
 	if (pf_tag_packet(m, tag, -1)) {
@@ -5415,7 +5394,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 	u_short			 action, reason = 0, log = 0;
 	struct mbuf		*m = *m0;
 	struct ip		*h;
-	struct pf_rule		*a = NULL, *r = &pf_default_rule, *tr, *nr;
+	struct pf_rule		*a = NULL, *r = &pf_default_rule;
 	struct pf_state		*s = NULL;
 	struct pf_ruleset	*ruleset = NULL;
 	struct pf_pdesc		 pd;
@@ -5688,16 +5667,10 @@ done:
 	}
 
 	if (log) {
-		struct pf_rule		*lr;
 		struct pf_rule_item	*ri;
 
-		if (s != NULL && s->nat_rule.ptr != NULL &&
-		    s->nat_rule.ptr->log & PF_LOG_ALL)
-			lr = s->nat_rule.ptr;
-		else
-			lr = r;
-		if (log & PF_LOG_FORCE || lr->log & PF_LOG_ALL)
-			PFLOG_PACKET(kif, h, m, AF_INET, dir, reason, lr, a,
+		if (log & PF_LOG_FORCE || r->log & PF_LOG_ALL)
+			PFLOG_PACKET(kif, h, m, AF_INET, dir, reason, r, a,
 			    ruleset, &pd);
 		if (s) {
 			SLIST_FOREACH(ri, &s->match_rules, entry)
@@ -5721,17 +5694,9 @@ done:
 		if (s != NULL) {
 			struct pf_rule_item	*ri;
 
-			if (s->nat_rule.ptr != NULL) {
-				s->nat_rule.ptr->packets[dirndx]++;
-				s->nat_rule.ptr->bytes[dirndx] += pd.tot_len;
-			}
 			if (s->src_node != NULL) {
 				s->src_node->packets[dirndx]++;
 				s->src_node->bytes[dirndx] += pd.tot_len;
-			}
-			if (s->nat_src_node != NULL) {
-				s->nat_src_node->packets[dirndx]++;
-				s->nat_src_node->bytes[dirndx] += pd.tot_len;
 			}
 			dirndx = (dir == s->direction) ? 0 : 1;
 			s->packets[dirndx]++;
@@ -5741,24 +5706,20 @@ done:
 				ri->r->bytes[dirndx] += pd.tot_len;
 			}
 		}
-		tr = r;
-		nr = (s != NULL) ? s->nat_rule.ptr : pd.nat_rule;
-		if (nr != NULL && r == &pf_default_rule)
-			tr = nr;
-		if (tr->src.addr.type == PF_ADDR_TABLE)
-			pfr_update_stats(tr->src.addr.p.tbl,
+		if (r->src.addr.type == PF_ADDR_TABLE)
+			pfr_update_stats(r->src.addr.p.tbl,
 			    (s == NULL) ? pd.src :
 			    &s->key[(s->direction == PF_IN)]->
 				addr[(s->direction == PF_OUT)],
 			    pd.af, pd.tot_len, dir == PF_OUT,
-			    r->action == PF_PASS, tr->src.neg);
-		if (tr->dst.addr.type == PF_ADDR_TABLE)
-			pfr_update_stats(tr->dst.addr.p.tbl,
+			    r->action == PF_PASS, r->src.neg);
+		if (r->dst.addr.type == PF_ADDR_TABLE)
+			pfr_update_stats(r->dst.addr.p.tbl,
 			    (s == NULL) ? pd.dst :
 			    &s->key[(s->direction == PF_IN)]->
 				addr[(s->direction == PF_IN)],
 			    pd.af, pd.tot_len, dir == PF_OUT,
-			    r->action == PF_PASS, tr->dst.neg);
+			    r->action == PF_PASS, r->dst.neg);
 	}
 
 	switch (action) {
@@ -5793,7 +5754,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 	u_short			 action, reason = 0, log = 0;
 	struct mbuf		*m = *m0, *n = NULL;
 	struct ip6_hdr		*h;
-	struct pf_rule		*a = NULL, *r = &pf_default_rule, *tr, *nr;
+	struct pf_rule		*a = NULL, *r = &pf_default_rule;
 	struct pf_state		*s = NULL;
 	struct pf_ruleset	*ruleset = NULL;
 	struct pf_pdesc		 pd;
@@ -6142,17 +6103,9 @@ done:
 		action = PF_DIVERT;
 	}
 
-	if (log) {
-		struct pf_rule *lr;
-
-		if (s != NULL && s->nat_rule.ptr != NULL &&
-		    s->nat_rule.ptr->log & PF_LOG_ALL)
-			lr = s->nat_rule.ptr;
-		else
-			lr = r;
-		PFLOG_PACKET(kif, h, m, AF_INET6, dir, reason, lr, a, ruleset,
+	if (log)
+		PFLOG_PACKET(kif, h, m, AF_INET6, dir, reason, r, a, ruleset,
 		    &pd);
-	}
 
 	kif->pfik_bytes[1][dir == PF_OUT][action != PF_PASS] += pd.tot_len;
 	kif->pfik_packets[1][dir == PF_OUT][action != PF_PASS]++;
@@ -6166,38 +6119,26 @@ done:
 			a->bytes[dirndx] += pd.tot_len;
 		}
 		if (s != NULL) {
-			if (s->nat_rule.ptr != NULL) {
-				s->nat_rule.ptr->packets[dirndx]++;
-				s->nat_rule.ptr->bytes[dirndx] += pd.tot_len;
-			}
 			if (s->src_node != NULL) {
 				s->src_node->packets[dirndx]++;
 				s->src_node->bytes[dirndx] += pd.tot_len;
-			}
-			if (s->nat_src_node != NULL) {
-				s->nat_src_node->packets[dirndx]++;
-				s->nat_src_node->bytes[dirndx] += pd.tot_len;
 			}
 			dirndx = (dir == s->direction) ? 0 : 1;
 			s->packets[dirndx]++;
 			s->bytes[dirndx] += pd.tot_len;
 		}
-		tr = r;
-		nr = (s != NULL) ? s->nat_rule.ptr : pd.nat_rule;
-		if (nr != NULL && r == &pf_default_rule)
-			tr = nr;
-		if (tr->src.addr.type == PF_ADDR_TABLE)
-			pfr_update_stats(tr->src.addr.p.tbl,
+		if (r->src.addr.type == PF_ADDR_TABLE)
+			pfr_update_stats(r->src.addr.p.tbl,
 			    (s == NULL) ? pd.src :
 			    &s->key[(s->direction == PF_IN)]->addr[0],
 			    pd.af, pd.tot_len, dir == PF_OUT,
-			    r->action == PF_PASS, tr->src.neg);
-		if (tr->dst.addr.type == PF_ADDR_TABLE)
-			pfr_update_stats(tr->dst.addr.p.tbl,
+			    r->action == PF_PASS, r->src.neg);
+		if (r->dst.addr.type == PF_ADDR_TABLE)
+			pfr_update_stats(r->dst.addr.p.tbl,
 			    (s == NULL) ? pd.dst :
 			    &s->key[(s->direction == PF_IN)]->addr[1],
 			    pd.af, pd.tot_len, dir == PF_OUT,
-			    r->action == PF_PASS, tr->dst.neg);
+			    r->action == PF_PASS, r->dst.neg);
 	}
 
 	switch (action) {
