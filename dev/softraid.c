@@ -115,8 +115,6 @@ void			sr_shutdown(void *);
 void			sr_uuid_get(struct sr_uuid *);
 void			sr_uuid_print(struct sr_uuid *, int);
 void			sr_checksum_print(u_int8_t *);
-void			sr_checksum(struct sr_softc *, void *, void *,
-			    u_int32_t);
 int			sr_boot_assembly(struct sr_softc *);
 int			sr_already_assembled(struct sr_discipline *);
 int			sr_hotspare(struct sr_softc *, dev_t);
@@ -143,7 +141,6 @@ int			sr_meta_rw(struct sr_discipline *, dev_t, void *,
 			    size_t, daddr64_t, long);
 int			sr_meta_clear(struct sr_discipline *);
 int			sr_meta_read(struct sr_discipline *);
-int			sr_meta_save(struct sr_discipline *, u_int32_t);
 int			sr_meta_validate(struct sr_discipline *, dev_t,
 			    struct sr_metadata *, void *);
 void			sr_meta_chunks_create(struct sr_softc *,
