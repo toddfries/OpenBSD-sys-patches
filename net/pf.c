@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.673 2009/11/23 17:22:11 henning Exp $ */
+/*	$OpenBSD: pf.c,v 1.676 2009/11/23 18:41:21 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -2663,7 +2663,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	struct pf_rule_slist	 rules;
 	struct pf_rule_item	*ri;
 	struct tcphdr		*th = pd->hdr.tcp;
-	struct pf_state_key	*skw = NULL, *sks = NULL;
+	struct pf_state_key	*skw, *sks;
 	struct pf_rule_actions	 act;
 	u_short			 reason;
 	int			 rewrite = 0, hdrlen = 0;
@@ -2942,10 +2942,6 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 			rewrite = 1;
 		}
 	} else {
-		if (sks != NULL)
-			pool_put(&pf_state_key_pl, sks);
-		if (skw != NULL)
-			pool_put(&pf_state_key_pl, skw);
 		while ((ri = SLIST_FIRST(&rules))) {
 			SLIST_REMOVE_HEAD(&rules, entry);
 			pool_put(&pf_rule_item_pl, ri);
@@ -2973,10 +2969,6 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	return (PF_PASS);
 
 cleanup:
-	if (sks != NULL)
-		pool_put(&pf_state_key_pl, sks);
-	if (skw != NULL)
-		pool_put(&pf_state_key_pl, skw);
 	while ((ri = SLIST_FIRST(&rules))) {
 		SLIST_REMOVE_HEAD(&rules, entry);
 		pool_put(&pf_rule_item_pl, ri);
@@ -5785,7 +5777,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 	if (m->m_pkthdr.len < (int)sizeof(*h)) {
 		action = PF_DROP;
 		REASON_SET(&reason, PFRES_SHORT);
-		log = 1;
+		log |= PF_LOG_FORCE;
 		goto done;
 	}
 
@@ -5811,6 +5803,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 	if (htons(h->ip6_plen) == 0) {
 		action = PF_DROP;
 		REASON_SET(&reason, PFRES_NORM);	/*XXX*/
+		log |= PF_LOG_FORCE;
 		goto done;
 	}
 #endif
@@ -5846,7 +5839,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 				    ("pf: IPv6 more than one rthdr\n"));
 				action = PF_DROP;
 				REASON_SET(&reason, PFRES_IPOPTIONS);
-				log = 1;
+				log |= PF_LOG_FORCE;
 				goto done;
 			}
 			if (!pf_pull_hdr(m, off, &rthdr, sizeof(rthdr), NULL,
@@ -5855,7 +5848,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 				    ("pf: IPv6 short rthdr\n"));
 				action = PF_DROP;
 				REASON_SET(&reason, PFRES_SHORT);
-				log = 1;
+				log |= PF_LOG_FORCE;
 				goto done;
 			}
 			if (rthdr.ip6r_type == IPV6_RTHDR_TYPE_0) {
@@ -5863,7 +5856,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 				    ("pf: IPv6 rthdr0\n"));
 				action = PF_DROP;
 				REASON_SET(&reason, PFRES_IPOPTIONS);
-				log = 1;
+				log |= PF_LOG_FORCE;
 				goto done;
 			}
 			/* FALLTHROUGH */
@@ -5879,7 +5872,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 				DPFPRINTF(PF_DEBUG_MISC,
 				    ("pf: IPv6 short opt\n"));
 				action = PF_DROP;
-				log = 1;
+				log |= PF_LOG_FORCE;
 				goto done;
 			}
 			if (pd.proto == IPPROTO_AH)
@@ -5908,7 +5901,8 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 		pd.hdr.tcp = &th;
 		if (!pf_pull_hdr(m, off, &th, sizeof(th),
 		    &action, &reason, AF_INET6)) {
-			log = action != PF_PASS;
+			if (action != PF_PASS)
+				log |= PF_LOG_FORCE;
 			goto done;
 		}
 		pd.p_len = pd.tot_len - off - (th.th_off << 2);
@@ -5925,7 +5919,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
 			a = s->anchor.ptr;
-			log = s->log;
+			log |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
 			    m, off, h, &pd, &a, &ruleset, &ip6intrq);
@@ -5945,7 +5939,8 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 		pd.hdr.udp = &uh;
 		if (!pf_pull_hdr(m, off, &uh, sizeof(uh),
 		    &action, &reason, AF_INET6)) {
-			log = action != PF_PASS;
+			if (action != PF_PASS)
+				log |= PF_LOG_FORCE;
 			goto done;
 		}
 		if (uh.uh_dport == 0 ||
@@ -5964,7 +5959,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
 			a = s->anchor.ptr;
-			log = s->log;
+			log |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
 			    m, off, h, &pd, &a, &ruleset, &ip6intrq);
@@ -5989,7 +5984,8 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 		pd.hdr.icmp6 = &ih.icmp6;
 		if (!pf_pull_hdr(m, off, &ih, icmp_hlen,
 		    &action, &reason, AF_INET6)) {
-			log = action != PF_PASS;
+			if (action != PF_PASS)
+				log |= PF_LOG_FORCE;
 			goto done;
 		}
 		/* ICMP headers we look further into to match state */
@@ -6006,7 +6002,8 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 		if (icmp_hlen > sizeof(struct icmp6_hdr) &&
 		    !pf_pull_hdr(m, off, &ih, icmp_hlen,
 		    &action, &reason, AF_INET6)) {
-			log = action != PF_PASS;
+			if (action != PF_PASS)
+				log |= PF_LOG_FORCE;
 			goto done;
 		}
 		action = pf_test_state_icmp(&s, dir, kif,
@@ -6017,7 +6014,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
 			a = s->anchor.ptr;
-			log = s->log;
+			log |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif,
 			    m, off, h, &pd, &a, &ruleset, &ip6intrq);
@@ -6032,7 +6029,7 @@ pf_test6(int dir, struct ifnet *ifp, struct mbuf **m0,
 #endif /* NPFSYNC */
 			r = s->rule.ptr;
 			a = s->anchor.ptr;
-			log = s->log;
+			log |= s->log;
 		} else if (s == NULL)
 			action = pf_test_rule(&r, &s, dir, kif, m, off, h,
 			    &pd, &a, &ruleset, &ip6intrq);
@@ -6050,7 +6047,7 @@ done:
 	    !((s && s->state_flags & PFSTATE_ALLOWOPTS) || r->allow_opts)) {
 		action = PF_DROP;
 		REASON_SET(&reason, PFRES_IPOPTIONS);
-		log = 1;
+		log |= PF_LOG_FORCE;;
 		DPFPRINTF(PF_DEBUG_MISC,
 		    ("pf: dropping packet with dangerous v6 headers\n"));
 	}
@@ -6103,9 +6100,19 @@ done:
 		action = PF_DIVERT;
 	}
 
-	if (log)
-		PFLOG_PACKET(kif, h, m, AF_INET6, dir, reason, r, a, ruleset,
-		    &pd);
+	if (log) {
+		struct pf_rule_item	*ri;
+
+		if (log & PF_LOG_FORCE || r->log & PF_LOG_ALL)
+			PFLOG_PACKET(kif, h, m, AF_INET6, dir, reason, r, a,
+			    ruleset, &pd);
+		if (s) {
+			SLIST_FOREACH(ri, &s->match_rules, entry)
+				if (ri->r->log & PF_LOG_ALL)
+					PFLOG_PACKET(kif, h, m, AF_INET6, dir,
+					    reason, ri->r, a, ruleset, &pd);
+		}
+	}
 
 	kif->pfik_bytes[1][dir == PF_OUT][action != PF_PASS] += pd.tot_len;
 	kif->pfik_packets[1][dir == PF_OUT][action != PF_PASS]++;

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_crypto.c,v 1.39 2009/06/11 19:42:59 marco Exp $ */
+/* $OpenBSD: softraid_crypto.c,v 1.42 2009/11/24 02:19:35 jsing Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Hans-Joerg Hoexer <hshoexer@openbsd.org>
@@ -62,6 +62,8 @@ int		sr_crypto_get_kdf(struct bioc_createraid *,
 int		sr_crypto_decrypt(u_char *, u_char *, u_char *, size_t, int);
 int		sr_crypto_encrypt(u_char *, u_char *, u_char *, size_t, int);
 int		sr_crypto_decrypt_key(struct sr_discipline *);
+int		sr_crypto_change_maskkey(struct sr_discipline *,
+		    struct sr_crypto_kdfinfo *, struct sr_crypto_kdfinfo *);
 int		sr_crypto_alloc_resources(struct sr_discipline *);
 int		sr_crypto_free_resources(struct sr_discipline *);
 int		sr_crypto_ioctl(struct sr_discipline *,
@@ -289,9 +291,10 @@ sr_crypto_encrypt(u_char *p, u_char *c, u_char *key, size_t size, int alg)
 		rv = 0;
 		break;
 	default:
-		DNPRINTF(SR_D_DIS, "%s: unsuppored encryption algorithm %u\n",
+		DNPRINTF(SR_D_DIS, "%s: unsupported encryption algorithm %u\n",
 		    DEVNAME(sd->sd_sc), alg);
 		rv = -1;
+		goto out;
 	}
 
 out:
@@ -314,9 +317,10 @@ sr_crypto_decrypt(u_char *c, u_char *p, u_char *key, size_t size, int alg)
 		rv = 0;
 		break;
 	default:
-		DNPRINTF(SR_D_DIS, "%s: unsuppored encryption algorithm %u\n",
+		DNPRINTF(SR_D_DIS, "%s: unsupported encryption algorithm %u\n",
 		    DEVNAME(sd->sd_sc), alg);
 		rv = -1;
+		goto out;
 	}
 
 out:
@@ -354,8 +358,8 @@ sr_crypto_calculate_check_hmac_sha1(u_int8_t *maskkey, int maskkey_size,
 int
 sr_crypto_decrypt_key(struct sr_discipline *sd)
 {
-	int			rv = 1;
 	u_char			check_digest[SHA1_DIGEST_LENGTH];
+	int			rv = 1;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_decrypt_key\n", DEVNAME(sd->sd_sc));
 
@@ -365,15 +369,14 @@ sr_crypto_decrypt_key(struct sr_discipline *sd)
 	if (sr_crypto_decrypt((u_char *)sd->mds.mdd_crypto.scr_meta.scm_key,
 	    (u_char *)sd->mds.mdd_crypto.scr_key,
 	    sd->mds.mdd_crypto.scr_maskkey, sizeof(sd->mds.mdd_crypto.scr_key),
-	    sd->mds.mdd_crypto.scr_meta.scm_mask_alg) == -1) {
+	    sd->mds.mdd_crypto.scr_meta.scm_mask_alg) == -1)
 		goto out;
-	}
 
 #ifdef SR_DEBUG0
 	sr_crypto_dumpkeys(sd);
 #endif
 
-	/* Check that the key decrypted properly */
+	/* Check that the key decrypted properly. */
 	sr_crypto_calculate_check_hmac_sha1(sd->mds.mdd_crypto.scr_maskkey,
 	    sizeof(sd->mds.mdd_crypto.scr_maskkey),
 	    (u_int8_t *)sd->mds.mdd_crypto.scr_key,
@@ -383,17 +386,17 @@ sr_crypto_decrypt_key(struct sr_discipline *sd)
 	    check_digest, sizeof(check_digest)) != 0) {
 		bzero(sd->mds.mdd_crypto.scr_key,
 		    sizeof(sd->mds.mdd_crypto.scr_key));
-		bzero(check_digest, sizeof(check_digest));
 		goto out;
 	}
-	bzero(check_digest, sizeof(check_digest));
 
 	rv = 0; /* Success */
- out:
+out:
 	/* we don't need the mask key anymore */
 	bzero(&sd->mds.mdd_crypto.scr_maskkey,
 	    sizeof(sd->mds.mdd_crypto.scr_maskkey));
 	
+	bzero(check_digest, sizeof(check_digest));
+
 	return rv;
 }
 
@@ -414,14 +417,14 @@ sr_crypto_create_keys(struct sr_discipline *sd)
 	arc4random_buf(sd->mds.mdd_crypto.scr_key,
 	    sizeof(sd->mds.mdd_crypto.scr_key));
 
-	/* Mask the disk keys */
+	/* Mask the disk keys. */
 	sd->mds.mdd_crypto.scr_meta.scm_mask_alg = SR_CRYPTOM_AES_ECB_256;
 	sr_crypto_encrypt((u_char *)sd->mds.mdd_crypto.scr_key,
 	    (u_char *)sd->mds.mdd_crypto.scr_meta.scm_key,
 	    sd->mds.mdd_crypto.scr_maskkey, sizeof(sd->mds.mdd_crypto.scr_key),
 	    sd->mds.mdd_crypto.scr_meta.scm_mask_alg);
 
-	/* Prepare key decryption check code */
+	/* Prepare key decryption check code. */
 	sd->mds.mdd_crypto.scr_meta.scm_check_alg = SR_CRYPTOC_HMAC_SHA1;
 	sr_crypto_calculate_check_hmac_sha1(sd->mds.mdd_crypto.scr_maskkey,
 	    sizeof(sd->mds.mdd_crypto.scr_maskkey),
@@ -479,13 +482,13 @@ sr_crypto_change_maskkey(struct sr_discipline *sd,
 		goto out;
 	}
 
-	/* Mask the disk keys */
+	/* Mask the disk keys. */
 	c = (u_char *)sd->mds.mdd_crypto.scr_meta.scm_key;
 	if (sr_crypto_encrypt(p, c, kdfinfo2->maskkey, ksz,
 	    sd->mds.mdd_crypto.scr_meta.scm_mask_alg) == -1)
 		goto out;
 
-	/* Prepare key decryption check code */
+	/* Prepare key decryption check code. */
 	sd->mds.mdd_crypto.scr_meta.scm_check_alg = SR_CRYPTOC_HMAC_SHA1;
 	sr_crypto_calculate_check_hmac_sha1(kdfinfo2->maskkey,
 	    sizeof(kdfinfo2->maskkey), (u_int8_t *)sd->mds.mdd_crypto.scr_key,
