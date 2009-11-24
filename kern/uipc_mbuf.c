@@ -94,6 +94,7 @@
 
 struct	mbstat mbstat;		/* mbuf stats */
 struct	pool mbpool;		/* mbuf pool */
+extern struct pool ifaddr_item_pl;
 
 /* mbuf cluster pools */
 u_int	mclsizes[] = {
@@ -143,6 +144,8 @@ mbinit(void)
 	}
 
 	nmbclust_update();
+	pool_init(&ifaddr_item_pl, sizeof(struct ifaddr_item), 0, 0, 0,
+	    "ifaddritempool", NULL);
 }
 
 void
