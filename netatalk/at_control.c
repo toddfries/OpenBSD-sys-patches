@@ -190,8 +190,7 @@ at_control( cmd, data, ifp, p )
 
 	    aa = aa0;
 
-	    ifa_add(ifp, (struct ifaddr *)aa);
-
+	    TAILQ_INSERT_TAIL(&ifp->if_addrlist, (struct ifaddr *)aa, ifa_list);
 	    /* FreeBSD found this. Whew */
 	    aa->aa_ifa.ifa_refcnt++;
 
@@ -259,7 +258,7 @@ at_control( cmd, data, ifp, p )
     case SIOCDIFADDR:
 	at_scrub( ifp, aa );
 	ifa0 = (struct ifaddr *)aa;
-	ifa_del(ifp, ifa0);
+	TAILQ_REMOVE(&ifp->if_addrlist, ifa0, ifa_list);
 
 	/* FreeBSD */
 	IFAFREE(ifa0);
