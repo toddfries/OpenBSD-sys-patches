@@ -944,8 +944,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 			oia->ia_next = ia;
 		} else
 			in6_ifaddr = ia;
-		TAILQ_INSERT_TAIL(&ifp->if_addrlist, &ia->ia_ifa,
-				  ifa_list);
+		ifa_add(ifp, &ia->ia_ifa);
 	}
 
 	/* set prefix mask */
@@ -1277,7 +1276,7 @@ in6_unlink_ifa(struct in6_ifaddr *ia, struct ifnet *ifp)
 	struct in6_ifaddr *oia;
 	int	s = splnet();
 
-	TAILQ_REMOVE(&ifp->if_addrlist, &ia->ia_ifa, ifa_list);
+	ifa_del(ifp, &ia->ia_ifa);
 
 	oia = ia;
 	if (oia == (ia = in6_ifaddr))
