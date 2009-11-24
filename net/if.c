@@ -148,20 +148,12 @@ struct if_clone	*if_clone_lookup(const char *, int *);
 void	if_congestion_clear(void *);
 int	if_group_egress_build(void);
 
-int	ifai_cmp(struct ifaddr_item *,  struct ifaddr_item *);
-void	ifa_item_insert(struct sockaddr *, struct ifaddr *, struct ifnet *);
-void	ifa_item_remove(struct sockaddr *, struct ifaddr *, struct ifnet *);
-RB_HEAD(ifaddr_items, ifaddr_item) ifaddr_items = RB_INITIALIZER(&ifaddr_items);
-RB_PROTOTYPE(ifaddr_items, ifaddr_item, ifai_entry, ifai_cmp);
-RB_GENERATE(ifaddr_items, ifaddr_item, ifai_entry, ifai_cmp);
-
 TAILQ_HEAD(, ifg_group) ifg_head;
 LIST_HEAD(, if_clone) if_cloners = LIST_HEAD_INITIALIZER(if_cloners);
 int if_cloners_count;
 
 struct timeout m_cltick_tmo;
 int m_clticks;
-struct pool ifaddr_item_pl;
 
 /*
  * Record when the last timeout has been run.  If the delta is
@@ -348,6 +340,7 @@ if_alloc_sadl(struct ifnet *ifp)
 	ifnet_addrs[ifp->if_index] = ifa;
 	ifa->ifa_ifp = ifp;
 	ifa->ifa_rtrequest = link_rtrequest;
+	TAILQ_INSERT_HEAD(&ifp->if_addrlist, ifa, ifa_list);
 	ifa->ifa_addr = (struct sockaddr *)sdl;
 	ifp->if_sadl = sdl;
 	sdl = (struct sockaddr_dl *)(socksize + (caddr_t)sdl);
@@ -355,7 +348,6 @@ if_alloc_sadl(struct ifnet *ifp)
 	sdl->sdl_len = masklen;
 	while (namelen != 0)
 		sdl->sdl_data[--namelen] = 0xff;
-	ifa_add(ifp, ifa);
 }
 
 /*
@@ -376,7 +368,7 @@ if_free_sadl(struct ifnet *ifp)
 	s = splnet();
 	rtinit(ifa, RTM_DELETE, 0);
 #if 0
-	ifa_del(ifp, ifa);
+	TAILQ_REMOVE(&ifp->if_addrlist, ifa, ifa_list);
 	ifnet_addrs[ifp->if_index] = NULL;
 #endif
 	ifp->if_sadl = NULL;
@@ -618,7 +610,7 @@ do { \
 	 * Deallocate private resources.
 	 */
 	while ((ifa = TAILQ_FIRST(&ifp->if_addrlist)) != NULL) {
-		ifa_del(ifp, ifa);
+		TAILQ_REMOVE(&ifp->if_addrlist, ifa, ifa_list);
 #ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			TAILQ_REMOVE(&in_ifaddr, (struct in_ifaddr *)ifa,
@@ -889,20 +881,31 @@ if_congestion_clear(void *arg)
 struct ifaddr *
 ifa_ifwithaddr(struct sockaddr *addr, u_int rdomain)
 {
-	struct ifaddr_item *ifai, key;
-
-	key.ifai_addr = addr;
-	key.ifai_rdomain = rtable_l2(rdomain);
-	ifai = RB_FIND(ifaddr_items, &ifaddr_items, &key);
-	if (ifai)
-		return (ifai->ifai_ifa);
-	return (NULL);
-}
+	struct ifnet *ifp;
+	struct ifaddr *ifa;
 
 #define	equal(a1, a2)	\
 	(bcmp((caddr_t)(a1), (caddr_t)(a2),	\
 	((struct sockaddr *)(a1))->sa_len) == 0)
 
+	rdomain = rtable_l2(rdomain);
+	TAILQ_FOREACH(ifp, &ifnet, if_list) {
+	    if (ifp->if_rdomain != rdomain)
+		continue;
+	    TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
+		if (ifa->ifa_addr->sa_family != addr->sa_family)
+			continue;
+		if (equal(addr, ifa->ifa_addr))
+			return (ifa);
+		if ((ifp->if_flags & IFF_BROADCAST) && ifa->ifa_broadaddr &&
+		    /* IP6 doesn't have broadcast */
+		    ifa->ifa_broadaddr->sa_len != 0 &&
+		    equal(ifa->ifa_broadaddr, addr))
+			return (ifa);
+	    }
+	}
+	return (NULL);
+}
 /*
  * Locate the point to point interface with a given destination address.
  */
@@ -1482,7 +1485,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 
 				TAILQ_REMOVE(&in_ifaddr,
 				    (struct in_ifaddr *)ifa, ia_list);
-				ifa_del(ifp, ifa);
+				TAILQ_REMOVE(&ifp->if_addrlist, ifa, ifa_list);
 				ifa->ifa_ifp = NULL;
 				IFAFREE(ifa);
 			}
@@ -2155,81 +2158,4 @@ sysctl_ifq(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return (EOPNOTSUPP);
 	}
 	/* NOTREACHED */
-}
-
-void
-ifa_add(struct ifnet *ifp, struct ifaddr *ifa)
-{
-	if (ifa->ifa_addr->sa_family == AF_LINK)
-		TAILQ_INSERT_HEAD(&ifp->if_addrlist, ifa, ifa_list);
-	else
-		TAILQ_INSERT_TAIL(&ifp->if_addrlist, ifa, ifa_list);
-	ifa_item_insert(ifa->ifa_addr, ifa, ifp);
-	if (ifp->if_flags & IFF_BROADCAST && ifa->ifa_broadaddr)
-		ifa_item_insert(ifa->ifa_broadaddr, ifa, ifp);
-}
-
-void
-ifa_del(struct ifnet *ifp, struct ifaddr *ifa)
-{
-	TAILQ_REMOVE(&ifp->if_addrlist, ifa, ifa_list);
-	ifa_item_remove(ifa->ifa_addr, ifa, ifp);
-	if (ifp->if_flags & IFF_BROADCAST && ifa->ifa_broadaddr)
-		ifa_item_remove(ifa->ifa_broadaddr, ifa, ifp);
-}
-
-int
-ifai_cmp(struct ifaddr_item *a, struct ifaddr_item *b)
-{
-	if (a->ifai_rdomain != b->ifai_rdomain)
-		return (a->ifai_rdomain > b->ifai_rdomain ? 1 : -1);
-	/* safe even with a's sa_len > b's because bcmp aborts early */
-	return(bcmp(a->ifai_addr, b->ifai_addr, a->ifai_addr->sa_len));
-}
-
-void
-ifa_item_insert(struct sockaddr *sa, struct ifaddr *ifa, struct ifnet *ifp)
-{
-	struct ifaddr_item	*ifai, *p;
-
-	ifai = pool_get(&ifaddr_item_pl, PR_WAITOK);
-	ifai->ifai_addr = sa;
-	ifai->ifai_ifa = ifa;
-	ifai->ifai_rdomain = ifp->if_rdomain;
-	ifai->ifai_next = NULL;
-	if ((p = RB_INSERT(ifaddr_items, &ifaddr_items, ifai)) != NULL) {
-		if (sa->sa_family == AF_LINK) {
-			RB_REMOVE(ifaddr_items, &ifaddr_items, p);
-			ifai->ifai_next = p;
-			RB_INSERT(ifaddr_items, &ifaddr_items, ifai);
-		} else {
-			while(p->ifai_next)
-				p = p->ifai_next;
-			p->ifai_next = ifai;
-		}
-	}
-}
-
-void
-ifa_item_remove(struct sockaddr *sa, struct ifaddr *ifa, struct ifnet *ifp)
-{
-	struct ifaddr_item	*ifai, *ifai_first, *ifai_last, key;
-
-	bzero(&key, sizeof(key));
-	key.ifai_addr = sa;
-	key.ifai_rdomain = ifp->if_rdomain;
-	ifai_first = RB_FIND(ifaddr_items, &ifaddr_items, &key);
-	for (ifai = ifai_first; ifai; ifai = ifai->ifai_next) {
-		if (ifai->ifai_ifa == ifa)
-			break;
-		ifai_last = ifai;
-	}
-	if (!ifai)
-		panic("ifaddr_item_remove: no such item");
-	if (ifai == ifai_first) {
-		RB_REMOVE(ifaddr_items, &ifaddr_items, ifai);
-		if (ifai->ifai_next)
-			RB_INSERT(ifaddr_items, &ifaddr_items, ifai->ifai_next);
-	} else
-		ifai_last->ifai_next = ifai->ifai_next;
 }

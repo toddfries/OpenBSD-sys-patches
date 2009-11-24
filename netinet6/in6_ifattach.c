@@ -697,7 +697,7 @@ in6_ifdetach(struct ifnet *ifp)
 		}
 
 		/* remove from the linked list */
-		ifa_del(ifp, (struct ifaddr *)ia);
+		TAILQ_REMOVE(&ifp->if_addrlist, (struct ifaddr *)ia, ifa_list);
 		IFAFREE(&ia->ia_ifa);
 
 		/* also remove from the IPv6 address chain(itojun&jinmei) */

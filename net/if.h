@@ -36,7 +36,6 @@
 #define _NET_IF_H_
 
 #include <sys/queue.h>
-#include <sys/tree.h>
 
 /*
  * Always include ALTQ glue here -- we use the ALTQ interface queue
@@ -455,14 +454,6 @@ struct ifaddr {
 };
 #define	IFA_ROUTE	RTF_UP		/* route installed */
 
-struct ifaddr_item {
-	RB_ENTRY(ifaddr_item)	 ifai_entry;
-	struct sockaddr		*ifai_addr;
-	struct ifaddr		*ifai_ifa;
-	struct ifaddr_item	*ifai_next;
-	u_int			 ifai_rdomain;
-};
-
 /*
  * Message format for use in obtaining information about interfaces
  * from sysctl and the routing socket.
@@ -836,7 +827,5 @@ void	loopattach(int);
 int	looutput(struct ifnet *,
 	    struct mbuf *, struct sockaddr *, struct rtentry *);
 void	lortrequest(int, struct rtentry *, struct rt_addrinfo *);
-void	ifa_add(struct ifnet *, struct ifaddr *);
-void	ifa_del(struct ifnet *, struct ifaddr *);
 #endif /* _KERNEL */
 #endif /* _NET_IF_H_ */
