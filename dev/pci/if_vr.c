@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.100 2009/08/13 14:24:47 jasper Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.104 2009/11/25 13:14:47 claudio Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -1019,8 +1019,6 @@ vr_tick(void *xsc)
 	s = splnet();
 	if (sc->vr_flags & VR_F_RESTART) {
 		printf("%s: restarting\n", sc->sc_dev.dv_xname);
-		vr_stop(sc);
-		vr_reset(sc);
 		vr_init(sc);
 		sc->vr_flags &= ~VR_F_RESTART;
 	}
@@ -1086,14 +1084,12 @@ vr_intr(void *arg)
 		}
 
 		if ((status & VR_ISR_BUSERR) || (status & VR_ISR_TX_UNDERRUN)) {
-#ifdef VR_DEBUG
 			if (status & VR_ISR_BUSERR)
 				printf("%s: PCI bus error\n",
 				    sc->sc_dev.dv_xname);
 			if (status & VR_ISR_TX_UNDERRUN)
 				printf("%s: transmit underrun\n",
 				    sc->sc_dev.dv_xname);
-#endif
 			vr_reset(sc);
 			vr_init(sc);
 			break;
@@ -1467,9 +1463,6 @@ vr_watchdog(struct ifnet *ifp)
 
 	ifp->if_oerrors++;
 	printf("%s: watchdog timeout\n", sc->sc_dev.dv_xname);
-
-	vr_stop(sc);
-	vr_reset(sc);
 	vr_init(sc);
 
 	if (!IFQ_IS_EMPTY(&ifp->if_snd))
@@ -1504,12 +1497,10 @@ vr_stop(struct vr_softc *sc)
 	 * Free data in the RX lists.
 	 */
 	for (i = 0; i < VR_RX_LIST_CNT; i++) {
-
 		if (sc->vr_cdata.vr_rx_chain[i].vr_mbuf != NULL) {
 			m_freem(sc->vr_cdata.vr_rx_chain[i].vr_mbuf);
 			sc->vr_cdata.vr_rx_chain[i].vr_mbuf = NULL;
 		}
-
 		map = sc->vr_cdata.vr_rx_chain[i].vr_map;
 		if (map != NULL) {
 			if (map->dm_nsegs > 0)
@@ -1525,11 +1516,10 @@ vr_stop(struct vr_softc *sc)
 	 * Free the TX list buffers.
 	 */
 	for (i = 0; i < VR_TX_LIST_CNT; i++) {
-		bus_dmamap_t map;
-
 		if (sc->vr_cdata.vr_tx_chain[i].vr_mbuf != NULL) {
 			m_freem(sc->vr_cdata.vr_tx_chain[i].vr_mbuf);
 			sc->vr_cdata.vr_tx_chain[i].vr_mbuf = NULL;
+			ifp->if_oerrors++;
 		}
 		map = sc->vr_cdata.vr_tx_chain[i].vr_map;
 		if (map != NULL) {
@@ -1539,7 +1529,6 @@ vr_stop(struct vr_softc *sc)
 			sc->vr_cdata.vr_tx_chain[i].vr_map = NULL;
 		}
 	}
-
 	bzero((char *)&sc->vr_ldata->vr_tx_list,
 		sizeof(sc->vr_ldata->vr_tx_list));
 }
