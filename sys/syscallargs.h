@@ -1211,7 +1211,8 @@ struct sys_msgctl_args {
 
 struct sys_thrsleep_args {
 	syscallarg(void *) ident;
-	syscallarg(int) timeout;
+	syscallarg(clockid_t) clock_id;
+	syscallarg(const struct timespec *) tp;
 	syscallarg(void *) lock;
 };
 

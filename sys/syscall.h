@@ -668,7 +668,7 @@
 /* syscall: "getthrid" ret: "pid_t" args: */
 #define	SYS_getthrid	299
 
-/* syscall: "thrsleep" ret: "int" args: "void *" "int" "void *" */
+/* syscall: "thrsleep" ret: "int" args: "void *" "clockid_t" "const struct timespec *" "void *" */
 #define	SYS_thrsleep	300
 
 /* syscall: "thrwakeup" ret: "int" args: "void *" "int" */

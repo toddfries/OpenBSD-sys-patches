@@ -804,7 +804,7 @@ struct sysent sysent[] = {
 #ifdef RTHREADS
 	{ 0, 0, 0,
 	    sys_getthrid },			/* 299 = getthrid */
-	{ 3, s(struct sys_thrsleep_args), 0,
+	{ 4, s(struct sys_thrsleep_args), 0,
 	    sys_thrsleep },			/* 300 = thrsleep */
 	{ 2, s(struct sys_thrwakeup_args), 0,
 	    sys_thrwakeup },			/* 301 = thrwakeup */

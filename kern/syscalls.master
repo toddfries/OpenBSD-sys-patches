@@ -597,7 +597,8 @@
 298	STD		{ int sys_sched_yield(void); }
 #ifdef RTHREADS
 299	STD		{ pid_t sys_getthrid(void); }
-300	STD		{ int sys_thrsleep(void *ident, int timeout, void *lock); }
+300	STD		{ int sys_thrsleep(void *ident, clockid_t clock_id, \
+			    const struct timespec *tp, void *lock); }
 301	STD		{ int sys_thrwakeup(void *ident, int n); }
 302	STD		{ void sys_threxit(pid_t *notdead); }
 303	STD		{ int sys_thrsigdivert(sigset_t sigmask, \
