@@ -1226,6 +1226,8 @@ struct sys_threxit_args {
 
 struct sys_thrsigdivert_args {
 	syscallarg(sigset_t) sigmask;
+	syscallarg(siginfo_t *) info;
+	syscallarg(const struct timespec *) timeout;
 };
 
 struct sys___getcwd_args {
