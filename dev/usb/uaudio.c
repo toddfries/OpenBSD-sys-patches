@@ -1,4 +1,4 @@
-/*	$OpenBSD: uaudio.c,v 1.68 2009/11/03 08:31:44 jakemsr Exp $ */
+/*	$OpenBSD: uaudio.c,v 1.70 2009/11/26 15:45:25 jakemsr Exp $ */
 /*	$NetBSD: uaudio.c,v 1.90 2004/10/29 17:12:53 kent Exp $	*/
 
 /*
@@ -75,8 +75,9 @@ int	uaudiodebug = 0;
 #define DPRINTFN(n,x)
 #endif
 
-#define UAUDIO_NCHANBUFS 6	/* number of outstanding request */
-#define UAUDIO_NFRAMES   10	/* ms of sound in each request */
+#define UAUDIO_NCHANBUFS 3	/* number of outstanding request */
+#define UAUDIO_MIN_FRAMES 2	/* ms of sound in each request */
+#define UAUDIO_MAX_FRAMES 16
 
 #define UAUDIO_MAX_ALTS  32	/* max alt settings allowed by driver */
 
@@ -126,6 +127,10 @@ struct chan {
 	u_int	bytes_per_frame;
 	u_int	fraction;	/* fraction/1000 is the extra samples/frame */
 	u_int	residue;	/* accumulates the fractional samples */
+	u_int	nframes;	/* # of frames per transfer */
+	u_int   usb_fps;
+	u_int	maxpktsize;
+	u_int	reqms;		/* usb request data duration, in ms */
 
 	u_char	*start;		/* upper layer buffer start */
 	u_char	*end;		/* upper layer buffer end */
@@ -140,8 +145,8 @@ struct chan {
 		struct chan	*chan;
 		usbd_xfer_handle xfer;
 		u_char		*buffer;
-		u_int16_t	sizes[UAUDIO_NFRAMES];
-		u_int16_t	offsets[UAUDIO_NFRAMES];
+		u_int16_t	sizes[UAUDIO_MAX_FRAMES];
+		u_int16_t	offsets[UAUDIO_MAX_FRAMES];
 		u_int16_t	size;
 	} chanbufs[UAUDIO_NCHANBUFS];
 
@@ -482,10 +487,14 @@ int
 uaudio_detach(struct device *self, int flags)
 {
 	struct uaudio_softc *sc = (struct uaudio_softc *)self;
-	int rv = 0;
+	struct chan *pchan = &sc->sc_playchan;
+	struct chan *rchan = &sc->sc_recchan;
+	int ms, rv = 0;
 
 	/* Wait for outstanding requests to complete. */
-	usbd_delay_ms(sc->sc_udev, UAUDIO_NCHANBUFS * UAUDIO_NFRAMES);
+	ms = max(sc->sc_alts[pchan->altidx].sc_busy ? pchan->reqms : 0,
+	    sc->sc_alts[rchan->altidx].sc_busy ? rchan->reqms : 0);
+	usbd_delay_ms(sc->sc_udev, UAUDIO_NCHANBUFS * ms);
 
 	if (sc->sc_audiodev != NULL)
 		rv = config_detach(sc->sc_audiodev, flags);
@@ -2087,8 +2096,14 @@ int
 uaudio_drain(void *addr)
 {
 	struct uaudio_softc *sc = addr;
+	struct chan *pchan = &sc->sc_playchan;
+	struct chan *rchan = &sc->sc_recchan;
+	int ms;
 
-	usbd_delay_ms(sc->sc_udev, UAUDIO_NCHANBUFS * UAUDIO_NFRAMES);
+	/* Wait for outstanding requests to complete. */
+	ms = max(sc->sc_alts[pchan->altidx].sc_busy ? pchan->reqms : 0,
+	    sc->sc_alts[rchan->altidx].sc_busy ? rchan->reqms : 0);
+	usbd_delay_ms(sc->sc_udev, UAUDIO_NCHANBUFS * ms);
 
 	return (0);
 }
@@ -2137,27 +2152,33 @@ uaudio_getdev(void *addr, struct audio_device *retp)
 }
 
 /*
- * Make sure the block size is large enough to hold all outstanding transfers.
+ * Make sure the block size is large enough to hold at least 1 transfer.
+ * Ideally, the block size should be a multiple of the transfer size.
+ * Currently, the transfer size for play and record can differ, and there's
+ * no way to round playback and record blocksizes separately.
  */
 int
 uaudio_round_blocksize(void *addr, int blk)
 {
 	struct uaudio_softc *sc = addr;
-	int bpf;
+	int bpf, pbpf, rbpf;
 
 	DPRINTF(("uaudio_round_blocksize: p.bpf=%d r.bpf=%d\n",
 		 sc->sc_playchan.bytes_per_frame,
 		 sc->sc_recchan.bytes_per_frame));
-	if ((sc->sc_mode & AUMODE_PLAY) &&
-	    sc->sc_playchan.bytes_per_frame > sc->sc_recchan.bytes_per_frame) {
-		bpf = sc->sc_playchan.bytes_per_frame
-		    + sc->sc_playchan.sample_size;
-	} else {
-		bpf = sc->sc_recchan.bytes_per_frame
-		    + sc->sc_recchan.sample_size;
+
+	pbpf = rbpf = 0;
+	if (sc->sc_mode & AUMODE_PLAY) {
+		pbpf = (sc->sc_playchan.bytes_per_frame +
+		    sc->sc_playchan.sample_size) *
+		    sc->sc_playchan.nframes;
 	}
-	/* XXX */
-	bpf *= UAUDIO_NFRAMES * UAUDIO_NCHANBUFS;
+	if (sc->sc_mode & AUMODE_RECORD) {
+		rbpf = (sc->sc_recchan.bytes_per_frame +
+		    sc->sc_recchan.sample_size) *
+		    sc->sc_recchan.nframes;
+	}
+	bpf = max(pbpf, rbpf);
 
 	bpf = (bpf + 15) &~ 15;
 
@@ -2512,7 +2533,7 @@ uaudio_trigger_input(void *addr, void *start, void *end, int blksize,
 	ch->arg = arg;
 
 	s = splusb();
-	for (i = 0; i < UAUDIO_NCHANBUFS-1; i++) /* XXX -1 shouldn't be needed */
+	for (i = 0; i < UAUDIO_NCHANBUFS; i++)
 		uaudio_chan_rtransfer(ch);
 	splx(s);
 
@@ -2554,7 +2575,7 @@ uaudio_trigger_output(void *addr, void *start, void *end, int blksize,
 	ch->arg = arg;
 
 	s = splusb();
-	for (i = 0; i < UAUDIO_NCHANBUFS-1; i++) /* XXX */
+	for (i = 0; i < UAUDIO_NCHANBUFS; i++)
 		uaudio_chan_ptransfer(ch);
 	splx(s);
 
@@ -2631,7 +2652,7 @@ uaudio_chan_alloc_buffers(struct uaudio_softc *sc, struct chan *ch)
 	void *buf;
 	int i, size;
 
-	size = (ch->bytes_per_frame + ch->sample_size) * UAUDIO_NFRAMES;
+	size = (ch->bytes_per_frame + ch->sample_size) * ch->nframes;
 	for (i = 0; i < UAUDIO_NCHANBUFS; i++) {
 		xfer = usbd_alloc_xfer(sc->sc_udev);
 		if (xfer == 0)
@@ -2669,7 +2690,9 @@ void
 uaudio_chan_ptransfer(struct chan *ch)
 {
 	struct chanbuf *cb;
+	u_char *pos;
 	int i, n, size, residue, total;
+	int s;
 
 	if (ch->sc->sc_dying)
 		return;
@@ -2682,13 +2705,13 @@ uaudio_chan_ptransfer(struct chan *ch)
 	/* Compute the size of each frame in the next transfer. */
 	residue = ch->residue;
 	total = 0;
-	for (i = 0; i < UAUDIO_NFRAMES; i++) {
+	for (i = 0; i < ch->nframes; i++) {
 		size = ch->bytes_per_frame;
 		residue += ch->fraction;
-		if (residue >= USB_FRAMES_PER_SECOND) {
+		if (residue >= ch->usb_fps) {
 			if ((ch->sc->sc_altflags & UA_NOFRAC) == 0)
 				size += ch->sample_size;
-			residue -= USB_FRAMES_PER_SECOND;
+			residue -= ch->usb_fps;
 		}
 		cb->sizes[i] = size;
 		total += size;
@@ -2697,34 +2720,47 @@ uaudio_chan_ptransfer(struct chan *ch)
 	cb->size = total;
 
 	/*
-	 * Transfer data from upper layer buffer to channel buffer, taking
-	 * care of wrapping the upper layer buffer.
+	 * Transfer data from upper layer buffer to channel buffer.  Be sure
+	 * to let the upper layer know each time a block is moved, so it can
+	 * add more.
 	 */
-	n = min(total, ch->end - ch->cur);
-	memcpy(cb->buffer, ch->cur, n);
-	ch->cur += n;
-	if (ch->cur >= ch->end)
-		ch->cur = ch->start;
-	if (total > n) {
+	pos = cb->buffer;
+	while (total > 0) {
+		n = min(total, ch->end - ch->cur);
+		n = min(n, ch->blksize - ch->transferred);
+		memcpy(pos, ch->cur, n);
 		total -= n;
-		memcpy(cb->buffer + n, ch->cur, total);
-		ch->cur += total;
+		pos += n;
+		ch->cur += n;
+		if (ch->cur >= ch->end)
+			ch->cur = ch->start;
+
+		ch->transferred += n;
+		/* Call back to upper layer */
+		if (ch->transferred >= ch->blksize) {
+			DPRINTFN(5,("uaudio_chan_ptransfer: call %p(%p)\n",
+				    ch->intr, ch->arg));
+			s = splaudio();
+			ch->intr(ch->arg);
+			splx(s);
+			ch->transferred -= ch->blksize;
+		}
 	}
 
 #ifdef UAUDIO_DEBUG
 	if (uaudiodebug > 8) {
 		DPRINTF(("uaudio_chan_ptransfer: buffer=%p, residue=0.%03d\n",
 			 cb->buffer, ch->residue));
-		for (i = 0; i < UAUDIO_NFRAMES; i++) {
+		for (i = 0; i < ch->nframes; i++) {
 			DPRINTF(("   [%d] length %d\n", i, cb->sizes[i]));
 		}
 	}
 #endif
 
-	DPRINTFN(5,("uaudio_chan_transfer: ptransfer xfer=%p\n", cb->xfer));
+	DPRINTFN(5,("uaudio_chan_ptransfer: transfer xfer=%p\n", cb->xfer));
 	/* Fill the request */
 	usbd_setup_isoc_xfer(cb->xfer, ch->pipe, cb, cb->sizes,
-			     UAUDIO_NFRAMES, USBD_NO_COPY,
+			     ch->nframes, USBD_NO_COPY,
 			     uaudio_chan_pintr);
 
 	(void)usbd_transfer(cb->xfer);
@@ -2737,7 +2773,6 @@ uaudio_chan_pintr(usbd_xfer_handle xfer, usbd_private_handle priv,
 	struct chanbuf *cb = priv;
 	struct chan *ch = cb->chan;
 	u_int32_t count;
-	int s;
 
 	/* Return if we are aborting. */
 	if (status == USBD_CANCELLED)
@@ -2752,17 +2787,6 @@ uaudio_chan_pintr(usbd_xfer_handle xfer, usbd_private_handle priv,
 		       count, cb->size);
 	}
 #endif
-
-	ch->transferred += cb->size;
-	s = splaudio();
-	/* Call back to upper layer */
-	while (ch->transferred >= ch->blksize) {
-		ch->transferred -= ch->blksize;
-		DPRINTFN(5,("uaudio_chan_pintr: call %p(%p)\n",
-			    ch->intr, ch->arg));
-		ch->intr(ch->arg);
-	}
-	splx(s);
 
 	/* start next transfer */
 	uaudio_chan_ptransfer(ch);
@@ -2786,7 +2810,7 @@ uaudio_chan_rtransfer(struct chan *ch)
 	/* Compute the size of each frame in the next transfer. */
 	residue = ch->residue;
 	total = 0;
-	for (i = 0; i < UAUDIO_NFRAMES; i++) {
+	for (i = 0; i < ch->nframes; i++) {
 		size = ch->bytes_per_frame;
 		cb->sizes[i] = size;
 		cb->offsets[i] = total;
@@ -2799,7 +2823,7 @@ uaudio_chan_rtransfer(struct chan *ch)
 	if (uaudiodebug > 8) {
 		DPRINTF(("uaudio_chan_rtransfer: buffer=%p, residue=0.%03d\n",
 			 cb->buffer, ch->residue));
-		for (i = 0; i < UAUDIO_NFRAMES; i++) {
+		for (i = 0; i < ch->nframes; i++) {
 			DPRINTF(("   [%d] length %d\n", i, cb->sizes[i]));
 		}
 	}
@@ -2808,7 +2832,7 @@ uaudio_chan_rtransfer(struct chan *ch)
 	DPRINTFN(5,("uaudio_chan_rtransfer: transfer xfer=%p\n", cb->xfer));
 	/* Fill the request */
 	usbd_setup_isoc_xfer(cb->xfer, ch->pipe, cb, cb->sizes,
-			     UAUDIO_NFRAMES, USBD_NO_COPY,
+			     ch->nframes, USBD_NO_COPY,
 			     uaudio_chan_rintr);
 
 	(void)usbd_transfer(cb->xfer);
@@ -2820,6 +2844,7 @@ uaudio_chan_rintr(usbd_xfer_handle xfer, usbd_private_handle priv,
 {
 	struct chanbuf *cb = priv;
 	struct chan *ch = cb->chan;
+	u_int16_t pos;
 	u_int32_t count;
 	int s, i, n, frsize;
 
@@ -2843,30 +2868,39 @@ uaudio_chan_rintr(usbd_xfer_handle xfer, usbd_private_handle priv,
 	 * Transfer data from channel buffer to upper layer buffer, taking
 	 * care of wrapping the upper layer buffer.
 	 */
-	for(i = 0; i < UAUDIO_NFRAMES; i++) {
+	for (i = 0; i < ch->nframes; i++) {
 		frsize = cb->sizes[i];
-		n = min(frsize, ch->end - ch->cur);
-		memcpy(ch->cur, cb->buffer + cb->offsets[i], n);
-		ch->cur += n;
-		if (ch->cur >= ch->end)
-			ch->cur = ch->start;
-		if (frsize > n) {
-			memcpy(ch->cur, cb->buffer + cb->offsets[i] + n,
-			    frsize - n);
-			ch->cur += frsize - n;
+		pos = cb->offsets[i];
+		while (frsize > 0) {
+			n = min(frsize, ch->end - ch->cur);
+			n = min(n, ch->blksize - ch->transferred);
+			memcpy(ch->cur, cb->buffer + pos, n);
+			frsize -= n;
+			pos += n;
+			ch->cur += n;
+			if (ch->cur >= ch->end)
+				ch->cur = ch->start;
+
+			ch->transferred += n;
+			/* Call back to upper layer */
+			if (ch->transferred >= ch->blksize) {
+				DPRINTFN(5,("uaudio_chan_rintr: call %p(%p)\n",
+					    ch->intr, ch->arg));
+				s = splaudio();
+				ch->intr(ch->arg);
+				splx(s);
+				ch->transferred -= ch->blksize;
+			}
+			if (count < n)
+				printf("%s: count < n\n", __func__);
+			else
+				count -= n;
 		}
 	}
-
-	/* Call back to upper layer */
-	ch->transferred += count;
-	s = splaudio();
-	while (ch->transferred >= ch->blksize) {
-		ch->transferred -= ch->blksize;
-		DPRINTFN(5,("uaudio_chan_rintr: call %p(%p)\n",
-			    ch->intr, ch->arg));
-		ch->intr(ch->arg);
+	if (count != 0) {
+		printf("%s: transfer count - frame total = %d\n",
+		    __func__, count);
 	}
-	splx(s);
 
 	/* start next transfer */
 	uaudio_chan_rtransfer(ch);
@@ -2876,19 +2910,33 @@ void
 uaudio_chan_init(struct chan *ch, int altidx, const struct audio_params *param,
     int maxpktsize)
 {
-	int samples_per_frame, sample_size;
+	int samples_per_frame;
 
 	ch->altidx = altidx;
-	sample_size = param->precision * param->factor * param->channels / 8;
-	samples_per_frame = param->sample_rate / USB_FRAMES_PER_SECOND;
-	ch->sample_size = sample_size;
+	ch->maxpktsize = maxpktsize;
 	ch->sample_rate = param->sample_rate;
-	if (maxpktsize == 0) {
-		ch->fraction = param->sample_rate % USB_FRAMES_PER_SECOND;
-		ch->bytes_per_frame = samples_per_frame * sample_size;
+	ch->sample_size = param->factor * param->channels *
+	    param->precision / NBBY;
+	ch->usb_fps = USB_FRAMES_PER_SECOND;
+
+	/*
+	 * Use UAUDIO_MIN_FRAMES here, so uaudio_round_blocksize() can
+	 * make sure the blocksize duration will be > 1 USB frame.
+	 */
+	samples_per_frame = ch->sample_rate / ch->usb_fps;
+	if (ch->maxpktsize == 0) {
+		ch->fraction = ch->sample_rate % ch->usb_fps;
+		ch->bytes_per_frame = samples_per_frame * ch->sample_size;
+		ch->nframes = UAUDIO_MIN_FRAMES;
 	} else {
 		ch->fraction = 0;
-		ch->bytes_per_frame = maxpktsize;
+		ch->bytes_per_frame = ch->maxpktsize;
+		ch->nframes = UAUDIO_MIN_FRAMES * samples_per_frame *
+		    ch->sample_size / ch->maxpktsize;
+		if (ch->nframes > UAUDIO_MAX_FRAMES)
+			ch->nframes = UAUDIO_MAX_FRAMES;
+		else if (ch->nframes < 1)
+			ch->nframes = 1;
 	}
 	ch->residue = 0;
 }
@@ -2899,10 +2947,32 @@ uaudio_chan_set_param(struct chan *ch, u_char *start, u_char *end, int blksize)
 	ch->start = start;
 	ch->end = end;
 	ch->cur = start;
-	ch->blksize = blksize;
 	ch->transferred = 0;
-
 	ch->curchanbuf = 0;
+	ch->blksize = blksize;
+
+	/*
+	 * Recompute nframes based on blksize, but make sure nframes
+	 * is not longer in time duration than blksize.  Rounding helps.
+	 */
+	if (ch->maxpktsize) {
+		ch->nframes = ch->blksize / ch->maxpktsize;
+	} else {
+		ch->nframes = (ch->blksize / ch->sample_size) *
+		    ch->usb_fps / ch->sample_rate;
+	}
+	ch->nframes = ch->blksize / ch->bytes_per_frame;
+	if (ch->nframes > UAUDIO_MAX_FRAMES)
+		ch->nframes = UAUDIO_MAX_FRAMES;
+	else if (ch->nframes < 1)
+		ch->nframes = 1;
+
+	ch->reqms = ch->bytes_per_frame / ch->sample_size *
+	    ch->nframes * 1000 / ch->sample_rate;
+
+	DPRINTF(("%s: alt=%d blk=%d maxpkt=%u bpf=%u rate=%u nframes=%u reqms=%u\n",
+	    __func__, ch->altidx, ch->blksize, ch->maxpktsize,
+	    ch->bytes_per_frame, ch->sample_rate, ch->nframes, ch->reqms));
 }
 
 int

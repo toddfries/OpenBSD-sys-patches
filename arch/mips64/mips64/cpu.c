@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.18 2009/11/24 22:46:59 syuu Exp $ */
+/*	$OpenBSD: cpu.c,v 1.20 2009/11/26 14:14:08 syuu Exp $ */
 
 /*
  * Copyright (c) 1997-2004 Opsycon AB (www.opsycon.se)
@@ -112,6 +112,11 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		ci = (struct cpu_info *)smp_malloc(sizeof(*ci));
 		if (ci == NULL)
 			panic("unable to allocate cpu_info\n");
+		bzero((char *)ci, sizeof(*ci));
+		ci->ci_ipiih = 
+			(struct intrhand *)smp_malloc(sizeof(*ci->ci_ipiih));
+		if (ci->ci_ipiih == NULL)
+			panic("unable to allocate ipi intrhand\n");
 		ci->ci_next = cpu_info_list->ci_next;
 		cpu_info_list->ci_next = ci;
 		ci->ci_flags |= CPUF_PRESENT;
@@ -329,6 +334,11 @@ cpu_boot_secondary_processors(void)
                        continue;
                cpu_boot_secondary(ci);
        }
+
+       /* This must called after xheart0 has initialized, so here is 
+	* the best place to do so.
+	*/
+       mips64_ipi_init();
 }
 
 void

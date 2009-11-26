@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.26 2009/11/24 17:39:59 mlarkin Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.31 2009/11/26 22:08:30 mlarkin Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -34,6 +34,7 @@
 #include <dev/acpi/acpivar.h>
 #include <dev/acpi/acpidev.h>
 
+#include "isa.h"
 #include "ioapic.h"
 #include "lapic.h"
 
@@ -227,23 +228,18 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	if (acpi_savecpu()) {
 		fpusave_cpu(curcpu(), 1);
 		wbinvd();
-		acpi_enter_sleep_state(sc, state);
-		panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
+		if (acpi_enter_sleep_state(sc, state) != 0)
+			panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
 	}
-
-	/*
-	 * On resume, the execution path will actually occur here.
-	 * This is because we previously saved the stack location
-	 * in acpi_savecpu, and issued a far jmp to the restore
-	 * routine in the wakeup code. This means we are
-	 * returning to the location immediately following the
-	 * last call instruction - after the call to acpi_savecpu.
-	 */
+#if 0
+	/* Temporarily disabled for debugging purposes */
+	/* Reset the wakeup vector to avoid resuming on reboot */
+	sc->sc_facs->wakeup_vector = 0;
+#endif
 
 #if NISA > 0
 	i8259_default_setup();
 #endif
-
 	intr_calculatemasks(curcpu());
 
 #if NLAPIC > 0
@@ -251,6 +247,9 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	lapic_initclocks();
 	lapic_set_lvt();
 #endif
+
+	fpuinit(&cpu_info_primary);
+
 #if NIOAPIC > 0
 	ioapic_enable();
 #endif
