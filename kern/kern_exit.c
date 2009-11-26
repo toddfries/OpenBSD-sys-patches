@@ -95,10 +95,16 @@ int
 sys_threxit(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_threxit_args /* {
-		syscallarg(int) rval;
+		syscallarg(pid_t *) notdead;
 	} */ *uap = v;
 
-	exit1(p, W_EXITCODE(SCARG(uap, rval), 0), EXIT_THREAD);
+	if (SCARG(uap, notdead) != NULL) {
+		pid_t zero = 0;
+		if (copyout(&zero, SCARG(uap, notdead), sizeof(zero))) {
+			psignal(p, SIGSEGV);
+		}
+	}
+	exit1(p, 0, EXIT_THREAD);
 
 	return (0);
 }

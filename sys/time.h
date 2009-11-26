@@ -304,6 +304,10 @@ void	microuptime(struct timeval *);
 void	getnanouptime(struct timespec *);
 void	getmicrouptime(struct timeval *);
 
+struct proc;
+int	clock_gettime(struct proc *, clockid_t, struct timespec *);
+
+int	timespecfix(struct timespec *);
 int	itimerfix(struct timeval *);
 int	itimerdecr(struct itimerval *itp, int usec);
 int	settime(struct timespec *);

@@ -804,13 +804,13 @@ struct sysent sysent[] = {
 #ifdef RTHREADS
 	{ 0, 0, 0,
 	    sys_getthrid },			/* 299 = getthrid */
-	{ 3, s(struct sys_thrsleep_args), 0,
+	{ 4, s(struct sys_thrsleep_args), 0,
 	    sys_thrsleep },			/* 300 = thrsleep */
 	{ 2, s(struct sys_thrwakeup_args), 0,
 	    sys_thrwakeup },			/* 301 = thrwakeup */
 	{ 1, s(struct sys_threxit_args), 0,
 	    sys_threxit },			/* 302 = threxit */
-	{ 1, s(struct sys_thrsigdivert_args), 0,
+	{ 3, s(struct sys_thrsigdivert_args), 0,
 	    sys_thrsigdivert },			/* 303 = thrsigdivert */
 #else
 	{ 0, 0, 0,

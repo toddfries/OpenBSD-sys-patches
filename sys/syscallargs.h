@@ -1211,7 +1211,8 @@ struct sys_msgctl_args {
 
 struct sys_thrsleep_args {
 	syscallarg(void *) ident;
-	syscallarg(int) timeout;
+	syscallarg(clockid_t) clock_id;
+	syscallarg(const struct timespec *) tp;
 	syscallarg(void *) lock;
 };
 
@@ -1226,6 +1227,8 @@ struct sys_threxit_args {
 
 struct sys_thrsigdivert_args {
 	syscallarg(sigset_t) sigmask;
+	syscallarg(siginfo_t *) info;
+	syscallarg(const struct timespec *) timeout;
 };
 
 struct sys___getcwd_args {
