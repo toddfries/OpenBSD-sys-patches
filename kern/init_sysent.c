@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_sysent.c,v 1.107 2009/06/15 17:31:49 deraadt Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * System call switch table.
