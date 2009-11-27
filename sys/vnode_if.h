@@ -5,7 +5,7 @@
  * Created from the file:
  *	OpenBSD: vnode_if.src,v 1.32 2007/01/16 17:52:18 thib Exp 
  * by the script:
- *	OpenBSD: vnode_if.sh,v 1.15 2006/01/02 05:05:11 jsg Exp 
+ *	OpenBSD: vnode_if.sh,v 1.16 2007/12/12 16:24:49 thib Exp 
  */
 
 /*
