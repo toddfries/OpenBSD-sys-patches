@@ -104,6 +104,7 @@
 
 int	vga_pci_match(struct device *, void *, void *);
 void	vga_pci_attach(struct device *, struct device *, void *);
+int	vga_pci_activate(struct device *, int);
 paddr_t	vga_pci_mmap(void* v, off_t off, int prot);
 void	vga_pci_bar_init(struct vga_pci_softc *, struct pci_attach_args *);
 
@@ -133,7 +134,10 @@ int	(*ws_set_param)(struct wsdisplay_param *);
 
 struct cfattach vga_pci_ca = {
 	sizeof(struct vga_pci_softc), vga_pci_match, vga_pci_attach,
+	NULL, vga_pci_activate
 };
+
+int do_vga_pci_post = 1;
 
 int
 vga_pci_match(struct device *parent, void *match, void *aux)
@@ -211,6 +215,23 @@ vga_pci_attach(struct device *parent, struct device *self, void *aux)
 #if NDRM > 0
 	config_found_sm(self, aux, NULL, drmsubmatch);
 #endif
+}
+
+int
+vga_pci_activate(struct device *self, int act)
+{
+	struct vga_pci_softc *sc = (struct vga_pci_softc *)self;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		break;
+	case DVACT_RESUME:
+		if (do_vga_pci_post)
+			vga_post_call(sc->sc_posth);
+		break;
+	}
+
+	return (0);
 }
 
 #if NINTAGP > 0

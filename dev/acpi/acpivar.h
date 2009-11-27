@@ -19,6 +19,7 @@
 #define _DEV_ACPI_ACPIVAR_H_
 
 #define ACPI_TRAMPOLINE		(NBPG*4)
+#define ACPI_TRAMP_DATA		0x0400
 
 #ifndef _ACPI_WAKECODE
 
@@ -279,6 +280,7 @@ int	 acpi_map(paddr_t, size_t, struct acpi_mem_map *);
 void	 acpi_unmap(struct acpi_mem_map *);
 int	 acpi_probe(struct device *, struct cfdata *, struct bios_attach_args *);
 u_int	 acpi_checksum(const void *, size_t);
+void	 acpi_set_trampoline_tweaks(void);
 void	 acpi_attach_machdep(struct acpi_softc *);
 int	 acpi_interrupt(void *);
 void	 acpi_powerdown(void);

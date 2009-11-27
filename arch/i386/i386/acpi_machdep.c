@@ -225,6 +225,8 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 		KASSERT(rcr3() == pmap_kernel()->pm_pdirpa);
 	}
 
+	acpi_set_trampoline_tweaks();
+
 	/*
 	 *
 	 * ACPI defines two wakeup vectors. One is used for ACPI 1.0
