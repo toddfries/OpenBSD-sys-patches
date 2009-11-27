@@ -1,4 +1,4 @@
-/*	$OpenBSD: syscall.h,v 1.107 2009/08/02 16:28:40 beck Exp $	*/
+/*	$OpenBSD$	*/
 
 /*
  * System call numbers.
@@ -674,7 +674,7 @@
 /* syscall: "thrwakeup" ret: "int" args: "void *" "int" */
 #define	SYS_thrwakeup	301
 
-/* syscall: "threxit" ret: "void" args: "int" */
+/* syscall: "threxit" ret: "void" args: "pid_t *" */
 #define	SYS_threxit	302
 
 /* syscall: "thrsigdivert" ret: "int" args: "sigset_t" "siginfo_t *" "const struct timespec *" */
