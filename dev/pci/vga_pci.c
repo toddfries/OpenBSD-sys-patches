@@ -1,4 +1,4 @@
-/* $OpenBSD: vga_pci.c,v 1.44 2009/06/06 04:38:18 pirofti Exp $ */
+/* $OpenBSD: vga_pci.c,v 1.46 2009/11/28 22:43:22 kettenis Exp $ */
 /* $NetBSD: vga_pci.c,v 1.3 1998/06/08 06:55:58 thorpej Exp $ */
 
 /*
@@ -221,17 +221,20 @@ int
 vga_pci_activate(struct device *self, int act)
 {
 	struct vga_pci_softc *sc = (struct vga_pci_softc *)self;
+	int rv = 0;
 
 	switch (act) {
 	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
 		if (do_vga_pci_post)
 			vga_post_call(sc->sc_posth);
+		rv = config_activate_children(self, act);
 		break;
 	}
 
-	return (0);
+	return (rv);
 }
 
 #if NINTAGP > 0
