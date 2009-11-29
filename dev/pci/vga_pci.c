@@ -220,6 +220,7 @@ vga_pci_attach(struct device *parent, struct device *self, void *aux)
 int
 vga_pci_activate(struct device *self, int act)
 {
+	struct vga_pci_softc *sc = (struct vga_pci_softc *)self;
 	int rv = 0;
 
 	switch (act) {
@@ -227,9 +228,9 @@ vga_pci_activate(struct device *self, int act)
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
-		rv = config_activate_children(self, act);
 		if (do_vga_pci_post)
 			vga_post_call(sc->sc_posth);
+		rv = config_activate_children(self, act);
 		break;
 	}
 
