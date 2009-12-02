@@ -54,6 +54,7 @@ struct acpitz_softc {
 	int			sc_tc1;
 	int			sc_tc2;
 	int			sc_lasttmp;
+	int			sc_perflevel;
 
 	struct ksensor		sc_sens;
 	struct ksensordev	sc_sensdev;
@@ -86,7 +87,6 @@ int	acpitz_setcpu(struct acpitz_softc *, int);
 
 extern void (*cpu_setperf)(int);
 extern int perflevel;
-extern int kern_perflevel;
 #define PERFSTEP 10
 
 #define ACPITZ_TRIPS	(1L << 0)
@@ -170,6 +170,7 @@ acpitz_attach(struct device *parent, struct device *self, void *aux)
 		printf(": failed to read _TMP\n");
 		return;
 	}
+	sc->sc_perflevel = 100;
 
 	if ((sc->sc_crt = acpitz_gettempreading(sc, "_CRT")) == -1)
 		printf(": no critical temperature defined\n");
@@ -332,7 +333,6 @@ acpitz_refresh(void *arg)
 		    "tc2: %d psv: %d\n", DEVNAME(sc), sc->sc_lasttmp,
 		    sc->sc_tc1, sc->sc_tc2, sc->sc_psv);
 
-		nperf = kern_perflevel;
 		if (sc->sc_psv <= sc->sc_tmp) {
 			/* Passive cooling enabled */
 			dnprintf(1, "%s: enabling passive %d %d\n", 
@@ -346,9 +346,9 @@ acpitz_refresh(void *arg)
 
 			/* Depending on trend, slow down/speed up */
 			if (trend > 0)
-				nperf -= PERFSTEP;
+				sc->sc_perflevel -= PERFSTEP;
 			else 
-				nperf += PERFSTEP;
+				sc->sc_perflevel += PERFSTEP;
 		}
 		else {
 			/* Passive cooling disabled, increase % */
@@ -357,7 +357,7 @@ acpitz_refresh(void *arg)
 			if (sc->sc_pse)
 				sc->sc_acpi->sc_pse--;
 			sc->sc_pse = 0;
-			nperf += PERFSTEP;
+			sc->sc_perflevel += PERFSTEP;
 		}
 		if (nperf < 0)
 			nperf = 0;
@@ -365,9 +365,8 @@ acpitz_refresh(void *arg)
 			nperf = 100;
 
 		/* Perform CPU setperf */
-		if (cpu_setperf && nperf != kern_perflevel) {
-			kern_perflevel = nperf;
-			cpu_setperf(min(perflevel,kern_perflevel));
+		if (cpu_setperf && sc->sc_perflevel < perflevel) {
+			cpu_setperf(sc->sc_perflevel);
 		}
 	}
 	sc->sc_lasttmp = sc->sc_tmp;
