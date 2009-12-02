@@ -333,6 +333,7 @@ acpitz_refresh(void *arg)
 		    "tc2: %d psv: %d\n", DEVNAME(sc), sc->sc_lasttmp,
 		    sc->sc_tc1, sc->sc_tc2, sc->sc_psv);
 
+		nperf = sc->sc_perflevel;
 		if (sc->sc_psv <= sc->sc_tmp) {
 			/* Passive cooling enabled */
 			dnprintf(1, "%s: enabling passive %d %d\n", 
@@ -346,9 +347,9 @@ acpitz_refresh(void *arg)
 
 			/* Depending on trend, slow down/speed up */
 			if (trend > 0)
-				sc->sc_perflevel -= PERFSTEP;
+				nperf -= PERFSTEP;
 			else 
-				sc->sc_perflevel += PERFSTEP;
+				nperf += PERFSTEP;
 		}
 		else {
 			/* Passive cooling disabled, increase % */
@@ -357,16 +358,17 @@ acpitz_refresh(void *arg)
 			if (sc->sc_pse)
 				sc->sc_acpi->sc_pse--;
 			sc->sc_pse = 0;
-			sc->sc_perflevel += PERFSTEP;
+			nperf += PERFSTEP;
 		}
 		if (nperf < 0)
 			nperf = 0;
 		else if (nperf > 100)
 			nperf = 100;
+		sc->sc_perflevel = nperf;
 
 		/* Perform CPU setperf */
-		if (cpu_setperf && sc->sc_perflevel < perflevel) {
-			cpu_setperf(sc->sc_perflevel);
+		if (cpu_setperf && nperf < perflevel) {
+			cpu_setperf(nperf);
 		}
 	}
 	sc->sc_lasttmp = sc->sc_tmp;
