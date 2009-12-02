@@ -122,6 +122,7 @@ int sysctl_cptime2(int *, u_int, void *, size_t *, void *, size_t);
 int (*cpu_cpuspeed)(int *);
 void (*cpu_setperf)(int);
 int perflevel = 100;
+int kern_perflevel = 100;
 
 /*
  * Lock to avoid too many processes vslocking a large amount of memory
@@ -652,7 +653,7 @@ hw_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		if (perflevel < 0)
 			perflevel = 0;
 		if (newp)
-			cpu_setperf(perflevel);
+			cpu_setperf(min(perflevel,kern_perflevel));
 		return (0);
 	case HW_VENDOR:
 		if (hw_vendor)
