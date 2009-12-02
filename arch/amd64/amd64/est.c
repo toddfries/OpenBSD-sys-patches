@@ -105,7 +105,6 @@ static struct fqlist *est_fqlist;
 
 extern int setperf_prio;
 extern int perflevel;
-extern int kern_perflevel;
 
 int bus_clock;
 
@@ -303,7 +302,7 @@ est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 	est_fqlist = acpilist;
 
 	if (needtran) {
-		est_setperf(min(perflevel,kern_perflevel));
+		est_setperf(perflevel);
 	}
 }
 #endif

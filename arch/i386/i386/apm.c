@@ -339,7 +339,6 @@ void
 apm_resume(struct apm_softc *sc, struct apmregs *regs)
 {
 	extern int perflevel;
-	extern int kern_perflevel;
 
 	apm_resumes = APM_RESUME_HOLDOFF;
 
@@ -356,7 +355,7 @@ apm_resume(struct apm_softc *sc, struct apmregs *regs)
 
 	/* restore hw.setperf */
 	if (cpu_setperf != NULL)
-		cpu_setperf(min(perflevel,kern_perflevel));
+		cpu_setperf(perflevel);
 }
 
 int
