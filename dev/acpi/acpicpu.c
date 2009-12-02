@@ -687,6 +687,7 @@ acpicpu_setperf(int level)
 	struct acpicpu_pss	*pss = NULL;
 	int			idx, len;
 	u_int32_t		status = 0;
+	extern int		tzperflevel;
 
 	sc = acpicpu_sc[cpu_number()];
 
@@ -698,6 +699,7 @@ acpicpu_setperf(int level)
 		    sc->sc_devnode->name);
 		return;
 	}
+	level = min(level, tzperflevel);
 
 	/*
 	 * XXX this should be handled more gracefully and it needs to also do
