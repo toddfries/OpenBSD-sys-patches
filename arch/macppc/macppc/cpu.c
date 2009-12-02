@@ -167,7 +167,7 @@ ppc64_scale_frequency(u_int freq_scale)
 	ppc_intr_enable(s);
 }
 
-extern int perflevel;
+extern int kern_perflevel;
 
 void
 ppc64_setperf(int speed)
@@ -359,7 +359,7 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 
 		if ((psr & PSR_FREQ_MASK) == PSR_FREQ_HALF) {
 			ppc_curfreq = ppc_maxfreq / 2;
-			perflevel = 50;
+			kern_perflevel = 50;
 		}
 
 		if (OF_getprop(qhandle, "power-mode-data",
