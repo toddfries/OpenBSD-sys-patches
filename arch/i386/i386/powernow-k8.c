@@ -141,7 +141,6 @@ struct pst_s {
 
 struct k8pnow_cpu_state *k8pnow_current_state = NULL;
 extern int setperf_prio;
-extern int perflevel;
 
 int k8pnow_read_pending_wait(uint64_t *);
 int k8pnow_decode_pst(struct k8pnow_cpu_state *, uint8_t *);

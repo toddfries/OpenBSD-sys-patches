@@ -672,11 +672,12 @@ void
 acpicpu_setperf_ppc_change(struct acpicpu_pss *pss, int npss)
 {
 	struct acpicpu_softc    *sc;
+	extern int perflevel;
 
 	sc = acpicpu_sc[0];
 
 	if (sc != NULL)
-		cpu_setperf(sc->sc_level);
+		cpu_setperf(min(perflevel,sc->sc_level));
 }
 
 void

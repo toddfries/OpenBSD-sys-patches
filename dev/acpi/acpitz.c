@@ -86,6 +86,7 @@ int	acpitz_setcpu(struct acpitz_softc *, int);
 
 extern void (*cpu_setperf)(int);
 extern int perflevel;
+extern int kern_perflevel;
 #define PERFSTEP 10
 
 #define ACPITZ_TRIPS	(1L << 0)
@@ -331,7 +332,7 @@ acpitz_refresh(void *arg)
 		    "tc2: %d psv: %d\n", DEVNAME(sc), sc->sc_lasttmp,
 		    sc->sc_tc1, sc->sc_tc2, sc->sc_psv);
 
-		nperf = perflevel;
+		nperf = kern_perflevel;
 		if (sc->sc_psv <= sc->sc_tmp) {
 			/* Passive cooling enabled */
 			dnprintf(1, "%s: enabling passive %d %d\n", 
@@ -364,9 +365,9 @@ acpitz_refresh(void *arg)
 			nperf = 100;
 
 		/* Perform CPU setperf */
-		if (cpu_setperf && nperf != perflevel) {
-			perflevel = nperf;
-			cpu_setperf(nperf);
+		if (cpu_setperf && nperf != kern_perflevel) {
+			kern_perflevel = nperf;
+			cpu_setperf(min(perflevel,kern_perflevel));
 		}
 	}
 	sc->sc_lasttmp = sc->sc_tmp;
