@@ -1,4 +1,4 @@
-/*	$OpenBSD: uaudio.c,v 1.70 2009/11/26 15:45:25 jakemsr Exp $ */
+/*	$OpenBSD: uaudio.c,v 1.73 2009/12/04 20:50:59 jakemsr Exp $ */
 /*	$NetBSD: uaudio.c,v 1.90 2004/10/29 17:12:53 kent Exp $	*/
 
 /*
@@ -230,7 +230,7 @@ const usb_interface_descriptor_t *uaudio_find_iface
 void	uaudio_mixer_add_ctl(struct uaudio_softc *, struct mixerctl *);
 char	*uaudio_id_name
 	(struct uaudio_softc *, const struct io_terminal *, int);
-struct usb_audio_cluster uaudio_get_cluster
+uByte	uaudio_get_cluster_nchan
 	(int, const struct io_terminal *);
 void	uaudio_add_input
 	(struct uaudio_softc *, const struct io_terminal *, int);
@@ -491,6 +491,12 @@ uaudio_detach(struct device *self, int flags)
 	struct chan *rchan = &sc->sc_recchan;
 	int ms, rv = 0;
 
+	/*
+	 * sc_alts may be NULL if uaudio_identify_as() failed
+	 */
+	if (sc->sc_alts == NULL)
+		return rv;
+
 	/* Wait for outstanding requests to complete. */
 	ms = max(sc->sc_alts[pchan->altidx].sc_busy ? pchan->reqms : 0,
 	    sc->sc_alts[rchan->altidx].sc_busy ? rchan->reqms : 0);
@@ -663,8 +669,8 @@ uaudio_id_name(struct uaudio_softc *sc, const struct io_terminal *iot, int id)
 	return (buf);
 }
 
-struct usb_audio_cluster
-uaudio_get_cluster(int id, const struct io_terminal *iot)
+uByte
+uaudio_get_cluster_nchan(int id, const struct io_terminal *iot)
 {
 	struct usb_audio_cluster r;
 	const usb_descriptor_t *dp;
@@ -676,17 +682,14 @@ uaudio_get_cluster(int id, const struct io_terminal *iot)
 			goto bad;
 		switch (dp->bDescriptorSubtype) {
 		case UDESCSUB_AC_INPUT:
-			r.bNrChannels = iot[id].d.it->bNrChannels;
-			USETW(r.wChannelConfig, UGETW(iot[id].d.it->wChannelConfig));
-			r.iChannelNames = iot[id].d.it->iChannelNames;
-			return (r);
+			return (iot[id].d.it->bNrChannels);
 		case UDESCSUB_AC_OUTPUT:
 			id = iot[id].d.ot->bSourceId;
 			break;
 		case UDESCSUB_AC_MIXER:
 			r = *(struct usb_audio_cluster *)
 				&iot[id].d.mu->baSourceId[iot[id].d.mu->bNrInPins];
-			return (r);
+			return (r.bNrChannels);
 		case UDESCSUB_AC_SELECTOR:
 			/* XXX This is not really right */
 			id = iot[id].d.su->baSourceId[0];
@@ -697,20 +700,18 @@ uaudio_get_cluster(int id, const struct io_terminal *iot)
 		case UDESCSUB_AC_PROCESSING:
 			r = *(struct usb_audio_cluster *)
 				&iot[id].d.pu->baSourceId[iot[id].d.pu->bNrInPins];
-			return (r);
+			return (r.bNrChannels);
 		case UDESCSUB_AC_EXTENSION:
 			r = *(struct usb_audio_cluster *)
 				&iot[id].d.eu->baSourceId[iot[id].d.eu->bNrInPins];
-			return (r);
+			return (r.bNrChannels);
 		default:
 			goto bad;
 		}
 	}
- bad:
-	printf("uaudio_get_cluster: bad data\n");
-	memset(&r, 0, sizeof r);
-	return (r);
-
+bad:
+	printf("uaudio_get_cluster_nchan: bad data\n");
+	return (0);
 }
 
 void
@@ -756,7 +757,7 @@ uaudio_add_mixer(struct uaudio_softc *sc, const struct io_terminal *iot, int id)
 	/* Compute the number of input channels */
 	ichs = 0;
 	for (i = 0; i < d->bNrInPins; i++)
-		ichs += uaudio_get_cluster(d->baSourceId[i], iot).bNrChannels;
+		ichs += uaudio_get_cluster_nchan(d->baSourceId[i], iot);
 
 	/* and the number of output channels */
 	d1 = (struct usb_audio_mixer_unit_1 *)&d->baSourceId[d->bNrInPins];
@@ -770,7 +771,7 @@ uaudio_add_mixer(struct uaudio_softc *sc, const struct io_terminal *iot, int id)
 	mix.ctlunit = AudioNvolume;
 #define BIT(bno) ((bm[bno / 8] >> (7 - bno % 8)) & 1)
 	for (p = i = 0; i < d->bNrInPins; i++) {
-		chs = uaudio_get_cluster(d->baSourceId[i], iot).bNrChannels;
+		chs = uaudio_get_cluster_nchan(d->baSourceId[i], iot);
 		mc = 0;
 		for (c = 0; c < chs; c++) {
 			mo = 0;
@@ -2953,15 +2954,11 @@ uaudio_chan_set_param(struct chan *ch, u_char *start, u_char *end, int blksize)
 
 	/*
 	 * Recompute nframes based on blksize, but make sure nframes
-	 * is not longer in time duration than blksize.  Rounding helps.
+	 * is not longer in time duration than blksize.
 	 */
-	if (ch->maxpktsize) {
-		ch->nframes = ch->blksize / ch->maxpktsize;
-	} else {
-		ch->nframes = (ch->blksize / ch->sample_size) *
-		    ch->usb_fps / ch->sample_rate;
-	}
-	ch->nframes = ch->blksize / ch->bytes_per_frame;
+	ch->nframes = ch->blksize * ch->usb_fps /
+	    (ch->bytes_per_frame * ch->usb_fps +
+	    ch->sample_size * ch->fraction);
 	if (ch->nframes > UAUDIO_MAX_FRAMES)
 		ch->nframes = UAUDIO_MAX_FRAMES;
 	else if (ch->nframes < 1)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.150 2009/10/13 19:33:19 pirofti Exp $	*/
+/*	$OpenBSD: cd.c,v 1.153 2009/12/06 01:12:52 dlg Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -116,13 +116,13 @@ int	cd_get_parms(struct cd_softc *, int);
 int	cd_load_toc(struct cd_softc *, struct cd_toc *, int);
 int	cd_interpret_sense(struct scsi_xfer *);
 
-int    dvd_auth(struct cd_softc *, union dvd_authinfo *);
-int    dvd_read_physical(struct cd_softc *, union dvd_struct *);
-int    dvd_read_copyright(struct cd_softc *, union dvd_struct *);
-int    dvd_read_disckey(struct cd_softc *, union dvd_struct *);
-int    dvd_read_bca(struct cd_softc *, union dvd_struct *);
-int    dvd_read_manufact(struct cd_softc *, union dvd_struct *);
-int    dvd_read_struct(struct cd_softc *, union dvd_struct *);
+int	dvd_auth(struct cd_softc *, union dvd_authinfo *);
+int	dvd_read_physical(struct cd_softc *, union dvd_struct *);
+int	dvd_read_copyright(struct cd_softc *, union dvd_struct *);
+int	dvd_read_disckey(struct cd_softc *, union dvd_struct *);
+int	dvd_read_bca(struct cd_softc *, union dvd_struct *);
+int	dvd_read_manufact(struct cd_softc *, union dvd_struct *);
+int	dvd_read_struct(struct cd_softc *, union dvd_struct *);
 
 void	cd_powerhook(int why, void *arg);
 
@@ -171,9 +171,9 @@ cdmatch(struct device *parent, void *match, void *aux)
 	struct scsi_attach_args *sa = aux;
 	int priority;
 
-	scsi_inqmatch(sa->sa_inqbuf, cd_patterns,
-	    sizeof(cd_patterns)/sizeof(cd_patterns[0]), sizeof(cd_patterns[0]),
-	    &priority);
+	scsi_inqmatch(sa->sa_inqbuf, cd_patterns, nitems(cd_patterns),
+	    sizeof(cd_patterns[0]), &priority);
+
 	return (priority);
 }
 
@@ -202,7 +202,7 @@ cdattach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Initialize and attach the disk structure.
 	 */
-  	cd->sc_dk.dk_driver = &cddkdriver;
+	cd->sc_dk.dk_driver = &cddkdriver;
 	cd->sc_dk.dk_name = cd->sc_dev.dv_xname;
 	disk_attach(&cd->sc_dk);
 
@@ -875,8 +875,7 @@ cdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			break;
 		}
 		error = cd_read_subchannel(cd, args->address_format,
-					   args->data_format, args->track,
-					   &data, len);
+		    args->data_format, args->track, &data, len);
 		if (error)
 			break;
 		len = min(len, _2btol(data.header.data_len) +
@@ -896,7 +895,7 @@ cdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		bcopy(&th, addr, sizeof(th));
 		break;
 	}
-	case CDIOREADTOCENTRYS:  {
+	case CDIOREADTOCENTRYS: {
 		struct cd_toc *toc;
 		struct ioc_read_toc_entry *te =
 		    (struct ioc_read_toc_entry *)addr;
@@ -959,8 +958,8 @@ cdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		toc = malloc(sizeof(*toc), M_TEMP, M_WAITOK | M_ZERO);
 
 		error = cd_read_toc(cd, 0, 0, toc,
-		  sizeof(struct ioc_toc_header) + sizeof(struct cd_toc_entry),
-		  0x40 /* control word for "get MS info" */);
+		    sizeof(struct ioc_toc_header) + sizeof(struct cd_toc_entry),
+		    0x40 /* control word for "get MS info" */);
 
 		if (error) {
 			free(toc, M_TEMP);
@@ -1330,8 +1329,7 @@ cd_set_pa_immed(struct cd_softc *cd, int flags)
 		if (audio->flags != oflags) {
 			if (big)
 				error = scsi_mode_select_big(cd->sc_link,
-				    SMS_PF, &data->hdr_big, flags,
-				    20000);
+				    SMS_PF, &data->hdr_big, flags, 20000);
 			else
 				error = scsi_mode_select(cd->sc_link, SMS_PF,
 				    &data->hdr, flags, 20000);
@@ -1715,9 +1713,7 @@ dvd_auth(struct cd_softc *cd, union dvd_authinfo *a)
 }
 
 int
-dvd_read_physical(cd, s)
-	struct cd_softc *cd;
-	union dvd_struct *s;
+dvd_read_physical(struct cd_softc *cd, union dvd_struct *s)
 {
 	struct scsi_generic cmd;
 	u_int8_t buf[4 + 4 * 20], *bufp;
@@ -1757,9 +1753,7 @@ dvd_read_physical(cd, s)
 }
 
 int
-dvd_read_copyright(cd, s)
-	struct cd_softc *cd;
-	union dvd_struct *s;
+dvd_read_copyright(struct cd_softc *cd, union dvd_struct *s)
 {
 	struct scsi_generic cmd;
 	u_int8_t buf[8];
@@ -1782,9 +1776,7 @@ dvd_read_copyright(cd, s)
 }
 
 int
-dvd_read_disckey(cd, s)
-	struct cd_softc *cd;
-	union dvd_struct *s;
+dvd_read_disckey(struct cd_softc *cd, union dvd_struct *s)
 {
 	struct scsi_read_dvd_structure cmd;
 	struct scsi_read_dvd_structure_data *buf;
@@ -1811,9 +1803,7 @@ dvd_read_disckey(cd, s)
 }
 
 int
-dvd_read_bca(cd, s)
-	struct cd_softc *cd;
-	union dvd_struct *s;
+dvd_read_bca(struct cd_softc *cd, union dvd_struct *s)
 {
 	struct scsi_generic cmd;
 	u_int8_t buf[4 + 188];
@@ -1837,9 +1827,7 @@ dvd_read_bca(cd, s)
 }
 
 int
-dvd_read_manufact(cd, s)
-	struct cd_softc *cd;
-	union dvd_struct *s;
+dvd_read_manufact(struct cd_softc *cd, union dvd_struct *s)
 {
 	struct scsi_read_dvd_structure cmd;
 	struct scsi_read_dvd_structure_data *buf;
@@ -1870,9 +1858,7 @@ dvd_read_manufact(cd, s)
 }
 
 int
-dvd_read_struct(cd, s)
-	struct cd_softc *cd;
-	union dvd_struct *s;
+dvd_read_struct(struct cd_softc *cd, union dvd_struct *s)
 {
 
 	switch (s->type) {
@@ -1935,7 +1921,7 @@ cd_interpret_sense(struct scsi_xfer *xs)
 		if ((xs->flags & SCSI_IGNORE_NOT_READY) != 0)
 			return (0);
 		if (ASC_ASCQ(sense) == SENSE_NOT_READY_BECOMING_READY) {
-		    	SC_DEBUG(sc_link, SDEV_DB1, ("not ready: busy (%#x)\n",
+			SC_DEBUG(sc_link, SDEV_DB1, ("not ready: busy (%#x)\n",
 			    sense->add_sense_code_qual));
 			/* don't count this as a retry */
 			xs->retries++;
