@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raidp.c,v 1.10 2009/08/09 14:12:25 marco Exp $ */
+/* $OpenBSD: softraid_raidp.c,v 1.12 2009/12/07 14:33:38 jsing Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -65,13 +65,14 @@ void	sr_put_block(struct sr_discipline *, void *);
 
 /* discipline initialisation. */
 void
-sr_raidp_discipline_init(struct sr_discipline *sd)
+sr_raidp_discipline_init(struct sr_discipline *sd, u_int8_t type)
 {
 
 	/* fill out discipline members. */
+	sd->sd_type = type;
+	sd->sd_capabilities = SR_CAP_SYSTEM_DISK | SR_CAP_AUTO_ASSEMBLE;
 	sd->sd_max_ccb_per_wu = 4; /* only if stripsize <= MAXPHYS */
 	sd->sd_max_wu = SR_RAIDP_NOWU;
-	sd->sd_rebuild = 0;
 
 	/* setup discipline pointers. */
 	sd->sd_alloc_resources = sr_raidp_alloc_resources;

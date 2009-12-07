@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.84 2009/11/24 02:19:35 jsing Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.86 2009/12/07 14:33:38 jsing Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -420,6 +420,11 @@ struct sr_discipline {
 	u_int8_t		sd_scsibus;	/* scsibus discipline uses */
 	struct scsi_link	sd_link;	/* link to midlayer */
 
+	u_int32_t		sd_capabilities;
+#define SR_CAP_SYSTEM_DISK	0x00000001
+#define SR_CAP_AUTO_ASSEMBLE	0x00000002
+#define SR_CAP_REBUILD		0x00000004
+
 	union {
 	    struct sr_raid0	mdd_raid0;
 	    struct sr_raid1	mdd_raid1;
@@ -456,7 +461,6 @@ struct sr_discipline {
 
 	struct sr_workunit	*sd_wu;		/* all workunits */
 	u_int32_t		sd_max_wu;
-	int			sd_rebuild;	/* can we rebuild? */
 	int			sd_reb_active;	/* rebuild in progress */
 	int			sd_reb_abort;	/* abort rebuild */
 	int			sd_ready;	/* fully operational */
@@ -563,7 +567,8 @@ void			sr_raid_startwu(struct sr_workunit *);
 /* Discipline specific initialisation. */
 void			sr_raid0_discipline_init(struct sr_discipline *);
 void			sr_raid1_discipline_init(struct sr_discipline *);
-void			sr_raidp_discipline_init(struct sr_discipline *);
+void			sr_raidp_discipline_init(struct sr_discipline *,
+			    u_int8_t);
 void			sr_raid6_discipline_init(struct sr_discipline *);
 void			sr_crypto_discipline_init(struct sr_discipline *);
 void			sr_aoe_discipline_init(struct sr_discipline *);
