@@ -1,4 +1,4 @@
-/*	$OpenBSD: igmp.c,v 1.26 2007/12/14 18:33:40 deraadt Exp $	*/
+/*	$OpenBSD: igmp.c,v 1.29 2009/12/15 13:28:23 jsing Exp $	*/
 /*	$NetBSD: igmp.c,v 1.15 1996/02/13 23:41:25 christos Exp $	*/
 
 /*
@@ -108,7 +108,7 @@ int rti_fill(struct in_multi *);
 struct router_info * rti_find(struct ifnet *);
 
 void
-igmp_init()
+igmp_init(void)
 {
 
 	/*
@@ -120,8 +120,7 @@ igmp_init()
 
 /* Return -1 for error. */
 int
-rti_fill(inm)
-	struct in_multi *inm;
+rti_fill(struct in_multi *inm)
 {
 	struct router_info *rti;
 
@@ -148,8 +147,7 @@ rti_fill(inm)
 }
 
 struct router_info *
-rti_find(ifp)
-	struct ifnet *ifp;
+rti_find(struct ifnet *ifp)
 {
 	struct router_info *rti;
 
@@ -170,8 +168,7 @@ rti_find(ifp)
 }
 
 void
-rti_delete(ifp)
-	struct ifnet *ifp;
+rti_delete(struct ifnet *ifp)
 {
 	struct router_info *rti, **prti = &rti_head;
 
@@ -460,14 +457,14 @@ igmp_input(struct mbuf *m, ...)
 }
 
 void
-igmp_joingroup(inm)
-	struct in_multi *inm;
+igmp_joingroup(struct in_multi *inm)
 {
 	int i, s = splsoftnet();
 
 	inm->inm_state = IGMP_IDLE_MEMBER;
 
 	if (!IN_LOCAL_GROUP(inm->inm_addr.s_addr) &&
+	    inm->inm_ia->ia_ifp &&
 	    (inm->inm_ia->ia_ifp->if_flags & IFF_LOOPBACK) == 0) {
 		if ((i = rti_fill(inm)) == -1) {
 			splx(s);
@@ -484,14 +481,14 @@ igmp_joingroup(inm)
 }
 
 void
-igmp_leavegroup(inm)
-	struct in_multi *inm;
+igmp_leavegroup(struct in_multi *inm)
 {
 
 	switch (inm->inm_state) {
 	case IGMP_DELAYING_MEMBER:
 	case IGMP_IDLE_MEMBER:
 		if (!IN_LOCAL_GROUP(inm->inm_addr.s_addr) &&
+		    inm->inm_ia->ia_ifp &&
 		    (inm->inm_ia->ia_ifp->if_flags & IFF_LOOPBACK) == 0)
 			if (inm->inm_rti->rti_type != IGMP_v1_ROUTER)
 				igmp_sendpkt(inm, IGMP_HOST_LEAVE_MESSAGE,
@@ -505,7 +502,7 @@ igmp_leavegroup(inm)
 }
 
 void
-igmp_fasttimo()
+igmp_fasttimo(void)
 {
 	struct in_multi *inm;
 	struct in_multistep step;
@@ -543,7 +540,7 @@ igmp_fasttimo()
 }
 
 void
-igmp_slowtimo()
+igmp_slowtimo(void)
 {
 	struct router_info *rti;
 	int s;
@@ -559,10 +556,7 @@ igmp_slowtimo()
 }
 
 void
-igmp_sendpkt(inm, type, addr)
-	struct in_multi *inm;
-	int type;
-	in_addr_t addr;
+igmp_sendpkt(struct in_multi *inm, int type, in_addr_t addr)
 {
 	struct mbuf *m;
 	struct igmp *igmp;
