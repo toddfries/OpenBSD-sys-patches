@@ -1,4 +1,4 @@
-/*      $OpenBSD: param.h,v 1.23 2009/12/08 22:13:20 miod Exp $ */
+/*      $OpenBSD: param.h,v 1.26 2009/12/13 08:27:15 deraadt Exp $ */
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -53,9 +53,6 @@
 #define	ALIGN(p)	(((u_long)(p) + ALIGNBYTES) &~ ALIGNBYTES)
 #define ALIGNED_POINTER(p, t)  ((((u_long)(p)) & (sizeof (t) - 1)) == 0)
 
-#ifndef	PAGE_SHIFT
-#error	PAGE_SHIFT is not defined
-#endif
 #define PAGE_SIZE	(1 << PAGE_SHIFT)
 #define PAGE_MASK	(PAGE_SIZE - 1)
 
@@ -71,18 +68,21 @@
 #define	MAXPHYS		(64 * 1024)	/* max raw I/O transfer size */
 
 #define USPACE		(16384)
+#ifdef _KERNEL
 #define	UPAGES		(USPACE >> PAGE_SHIFT)
 #if PAGE_SHIFT > 12
 #define	USPACE_ALIGN	0
 #else
 #define	USPACE_ALIGN	(2 * PAGE_SIZE)	/* align to an even TLB boundary */
 #endif
+#endif	/* _KERNEL */
 
 /*
  * Constants related to network buffer management.
  */
 #define	NMBCLUSTERS	4096		/* map size, max cluster allocation */
 
+#ifdef _KERNEL
 #if PAGE_SHIFT > 12
 #define	MSGBUFSIZE	PAGE_SIZE
 #else
@@ -92,6 +92,7 @@
 /* Default malloc arena size */
 #define	NKMEMPAGES_MIN_DEFAULT  ((8 * 1024 * 1024) >> PAGE_SHIFT)
 #define	NKMEMPAGES_MAX_DEFAULT  ((128 * 1024 * 1024) >> PAGE_SHIFT)
+#endif /* _KERNEL */
 
 /* pages ("clicks") (4096 bytes) to disk blocks */
 #define	ctod(x)	((x) << (PGSHIFT - DEV_BSHIFT))
@@ -103,10 +104,9 @@
 
 #ifdef _KERNEL
 #ifndef _LOCORE
-
 #define	DELAY(n)	delay(n)
 void delay(int);
 #endif
-#endif /* !_KERNEL */
+#endif /* _KERNEL */
 
 #endif /* !_MIPS_PARAM_H_ */
