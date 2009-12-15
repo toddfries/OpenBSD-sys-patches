@@ -88,31 +88,12 @@ _C_LABEL(acpi_real_mode_resume):
 	cli
 	cld
 
-	cmpb	$0x1, acpi_rm_clean_registers
-	jne	no_clean_required
-
-	/* Fix selectors and IDT for machines that need it */
-	movw	$0x10,	%cx
-	lgdtl	%cs:clean_gdt
-	movl	%cr0,	%eax
-	orb	$(CR0_PE), %al
-	movl	%eax,	%cr0
-	jmp	1f
-1:	ljmpw	$0x8, $clean1
-
-_ACPI_TRMP_OFFSET(clean1)
-	movw	%cx,	%ds	
-	movw	%cx,	%es
-	movw	%cx,	%ss
-	movw	%cx,	%fs
-	movw	%cx,	%gs
-	
-	andb	$~(CR0_PE), %al
-	movl	%eax,	%cr0
-	ljmpw	$_ACPI_RM_SEGMENT , $clean2
-
-_ACPI_TRMP_OFFSET(clean2)
-
+	/*
+	 * Set up segment registers for real mode. 
+	 * We'll only be in real mode for a moment, and we don't have
+	 * want real dependencies on data or stack, so we'll just use
+	 * the code segment for data and stack (eg, a 64k memory space).
+	 */
 	movw	%cs,%ax
 	movw	%ax,%ds
 	movw	%ax,%es
@@ -405,22 +386,6 @@ _ACPI_TRMP_OFFSET(clean_idt)
 	.word	0xffff
 	.long	0
 	.word	0
-
-_ACPI_TRMP_OFFSET(clean_gdt)
-	.word	clean_gdt_end - clean_gdtable
-	.long	clean_gdtable
-
-	.align 8
-_ACPI_TRMP_LABEL(clean_gdtable)
-	.word	0, 0
-	.byte	0, 0, 0, 0
-
-	.word	0xffff, ACPI_TRAMPOLINE
-	.byte	0, 0x9b, 0, 0
-
-	.word	0xffff, ACPI_TRAMPOLINE
-	.byte	0, 0x93, 0, 0
-_ACPI_TRMP_LABEL(clean_gdt_end)
 
 	.align 4
 _ACPI_TRMP_LABEL(acpi_saved_ebx)

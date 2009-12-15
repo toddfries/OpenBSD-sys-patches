@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.24 2009/10/07 02:15:48 kevlo Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.26 2009/12/09 21:42:10 deraadt Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -354,6 +354,11 @@ identifycpu(struct cpu_info *ci)
 	}
 
 	if (!strncmp(cpu_model, "Intel", 5)) {
+		u_int32_t cflushsz;
+
+		CPUID(0x01, dummy, cflushsz, dummy, dummy);
+		/* cflush cacheline size is equal to bits 15-8 of ebx * 8 */
+		ci->ci_cflushsz = ((cflushsz >> 8) & 0xff) * 8;
 		CPUID(0x06, val, dummy, dummy, dummy);
 		if (val & 0x1) {
 			strlcpy(ci->ci_sensordev.xname, ci->ci_dev->dv_xname,
