@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.47 2009/12/07 19:05:57 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.49 2009/12/28 06:55:27 syuu Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -212,7 +212,7 @@ extern vaddr_t uncached_base;
 /*
  * Location of exception vectors.
  */
-#define	RESET_EXC_VEC		(CKSEG0_BASE + 0x3fc00000)
+#define	RESET_EXC_VEC		(CKSEG1_BASE + 0x1fc00000)
 #define	TLB_MISS_EXC_VEC	(CKSEG0_BASE + 0x00000000)
 #define	XTLB_MISS_EXC_VEC	(CKSEG0_BASE + 0x00000080)
 #define	CACHE_ERR_EXC_VEC	(CKSEG0_BASE + 0x00000100)
@@ -384,7 +384,7 @@ struct cpu_info {
 	u_int32_t        ci_pendingticks;
 #ifdef MULTIPROCESSOR
 	u_long           ci_flags;		/* flags; see below */
-	struct intrhand  *ci_ipiih;
+	struct intrhand  ci_ipiih;
 #endif
 };
 
@@ -416,12 +416,12 @@ void cpu_boot_secondary_processors(void);
 vaddr_t smp_malloc(size_t);
 
 #define MIPS64_IPI_NOP		0x00000001
-#define MIPS64_NIPIS		1	/* must not exceed 32 */
+#define MIPS64_IPI_RENDEZVOUS	0x00000002
+#define MIPS64_NIPIS		2	/* must not exceed 32 */
 
-void    mips64_ipi_init(void);
-void    mips64_send_ipi(unsigned int, unsigned int);
-void    mips64_broadcast_ipi(unsigned int);
-void    mips64_multicast_ipi(unsigned int, unsigned int);
+void	mips64_ipi_init(void);
+void	mips64_send_ipi(unsigned int, unsigned int);
+void	smp_rendezvous_cpus(unsigned long, void (*)(void *), void *arg);
 
 #include <sys/mplock.h>
 #else
@@ -479,7 +479,11 @@ extern int int_nest_cntr;
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
+#ifdef MULTIPROCESSOR
+#define	signotify(p)		(aston(p), cpu_unidle(p->p_cpu))
+#else
 #define	signotify(p)		aston(p)
+#endif
 
 #define	aston(p)		p->p_md.md_astpending = 1
 
@@ -563,43 +567,32 @@ void	tlb_set_pid(int);
 void	tlb_set_wired(int);
 
 /*
- * Define soft selected cache functions.
+ * Available cache operation routines. See <machine/cpu.h> for more.
  */
-#define	Mips_SyncCache()	(*(sys_config._SyncCache))()
-#define	Mips_InvalidateICache(a, l)	\
-				(*(sys_config._InvalidateICache))((a), (l))
-#define	Mips_SyncDCachePage(a)		\
-				(*(sys_config._SyncDCachePage))((a))
-#define	Mips_HitSyncDCache(a, l)	\
-				(*(sys_config._HitSyncDCache))((a), (l))
-#define	Mips_IOSyncDCache(a, l, h)	\
-				(*(sys_config._IOSyncDCache))((a), (l), (h))
-#define	Mips_HitInvalidateDCache(a, l)	\
-				(*(sys_config._HitInvalidateDCache))((a), (l))
 
 int	Loongson2_ConfigCache(void);
 void	Loongson2_SyncCache(void);
-void	Loongson2_InvalidateICache(vaddr_t, int);
-void	Loongson2_SyncDCachePage(vaddr_t);
-void	Loongson2_HitSyncDCache(vaddr_t, int);
-void	Loongson2_IOSyncDCache(vaddr_t, int, int);
-void	Loongson2_HitInvalidateDCache(vaddr_t, int);
+void	Loongson2_InvalidateICache(vaddr_t, size_t);
+void	Loongson2_SyncDCachePage(paddr_t);
+void	Loongson2_HitSyncDCache(paddr_t, size_t);
+void	Loongson2_HitInvalidateDCache(paddr_t, size_t);
+void	Loongson2_IOSyncDCache(paddr_t, size_t, int);
 
 int	Mips5k_ConfigCache(void);
 void	Mips5k_SyncCache(void);
-void	Mips5k_InvalidateICache(vaddr_t, int);
+void	Mips5k_InvalidateICache(vaddr_t, size_t);
 void	Mips5k_SyncDCachePage(vaddr_t);
-void	Mips5k_HitSyncDCache(vaddr_t, int);
-void	Mips5k_IOSyncDCache(vaddr_t, int, int);
-void	Mips5k_HitInvalidateDCache(vaddr_t, int);
+void	Mips5k_HitSyncDCache(vaddr_t, size_t);
+void	Mips5k_HitInvalidateDCache(vaddr_t, size_t);
+void	Mips5k_IOSyncDCache(vaddr_t, size_t, int);
 
 int	Mips10k_ConfigCache(void);
 void	Mips10k_SyncCache(void);
-void	Mips10k_InvalidateICache(vaddr_t, int);
+void	Mips10k_InvalidateICache(vaddr_t, size_t);
 void	Mips10k_SyncDCachePage(vaddr_t);
-void	Mips10k_HitSyncDCache(vaddr_t, int);
-void	Mips10k_IOSyncDCache(vaddr_t, int, int);
-void	Mips10k_HitInvalidateDCache(vaddr_t, int);
+void	Mips10k_HitSyncDCache(vaddr_t, size_t);
+void	Mips10k_HitInvalidateDCache(vaddr_t, size_t);
+void	Mips10k_IOSyncDCache(vaddr_t, size_t, int);
 
 void	tlb_flush(int);
 void	tlb_flush_addr(vaddr_t);

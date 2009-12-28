@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.162 2009/11/24 10:00:39 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.166 2009/12/24 10:12:19 jakemsr Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -45,6 +45,8 @@
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/systm.h>
+#include <sys/types.h>
+#include <sys/timeout.h>
 #include <uvm/uvm_param.h>
 #include <dev/audio_if.h>
 #include <dev/auconv.h>
@@ -167,6 +169,7 @@ typedef struct azalia_t {
 	int unsolq_wp;
 	int unsolq_rp;
 	boolean_t unsolq_kick;
+	struct timeout unsol_to;
 
 	boolean_t ok64;
 	int nistreams, nostreams, nbstreams;
@@ -206,7 +209,7 @@ int	azalia_init_rirb(azalia_t *, int);
 int	azalia_delete_rirb(azalia_t *);
 int	azalia_set_command(azalia_t *, nid_t, int, uint32_t, uint32_t);
 int	azalia_get_response(azalia_t *, uint32_t *);
-void	azalia_rirb_kick_unsol_events(azalia_t *);
+void	azalia_rirb_kick_unsol_events(void *);
 void	azalia_rirb_intr(azalia_t *);
 int	azalia_alloc_dmamem(azalia_t *, size_t, size_t, azalia_dma_t *);
 int	azalia_free_dmamem(const azalia_t *, azalia_dma_t*);
@@ -543,6 +546,7 @@ int
 azalia_pci_detach(struct device *self, int flags)
 {
 	azalia_t *az;
+	uint32_t gctl;
 	int i;
 
 	DPRINTF(("%s\n", __func__));
@@ -551,6 +555,12 @@ azalia_pci_detach(struct device *self, int flags)
 		config_detach(az->audiodev, flags);
 		az->audiodev = NULL;
 	}
+
+	/* disable unsolicited response */
+	gctl = AZ_READ_4(az, GCTL);
+	AZ_WRITE_4(az, GCTL, gctl & ~(HDA_GCTL_UNSOL));
+
+	timeout_del(&az->unsol_to);
 
 	DPRINTF(("%s: delete streams\n", __func__));
 	azalia_stream_delete(&az->rstream, az);
@@ -629,6 +639,8 @@ azalia_shutdown(void *v)
 	/* disable unsolicited response */
 	gctl = AZ_READ_4(az, GCTL);
 	AZ_WRITE_4(az, GCTL, gctl & ~(HDA_GCTL_UNSOL));
+
+	timeout_del(&az->unsol_to);
 
 	/* halt CORB/RIRB */
 	azalia_halt_corb(az);
@@ -947,6 +959,7 @@ azalia_init_corb(azalia_t *az, int resuming)
 		}
 		DPRINTF(("%s: CORB allocation succeeded.\n", __func__));
 	}
+	timeout_set(&az->unsol_to, azalia_rirb_kick_unsol_events, az);
 
 	AZ_WRITE_4(az, CORBLBASE, (uint32_t)AZALIA_DMA_DMAADDR(&az->corb_dma));
 	AZ_WRITE_4(az, CORBUBASE, PTR_UPPER32(AZALIA_DMA_DMAADDR(&az->corb_dma)));
@@ -1196,8 +1209,10 @@ azalia_get_response(azalia_t *az, uint32_t *result)
 }
 
 void
-azalia_rirb_kick_unsol_events(azalia_t *az)
+azalia_rirb_kick_unsol_events(void *v)
 {
+	azalia_t *az = v;
+
 	if (az->unsolq_kick)
 		return;
 	az->unsolq_kick = TRUE;
@@ -1238,7 +1253,7 @@ azalia_rirb_intr(azalia_t *az)
 			DPRINTF(("%s: dropped solicited response\n", __func__));
 		}
 	}
-	azalia_rirb_kick_unsol_events(az);
+	timeout_add_msec(&az->unsol_to, 1);
 
 	AZ_WRITE_1(az, RIRBSTS,
 	    rirbsts | HDA_RIRBSTS_RIRBOIS | HDA_RIRBSTS_RINTFL);
@@ -1306,6 +1321,8 @@ azalia_suspend(azalia_t *az)
 
 	/* disable unsolicited responses */
 	AZ_WRITE_4(az, GCTL, AZ_READ_4(az, GCTL) & ~HDA_GCTL_UNSOL);
+
+	timeout_del(&az->unsol_to);
 
 	azalia_save_mixer(&az->codecs[az->codecno]);
 
@@ -1643,7 +1660,8 @@ azalia_codec_init(codec_t *this)
 
 	this->na_dacs = this->na_dacs_d = 0;
 	this->na_adcs = this->na_adcs_d = 0;
-	this->speaker = this->spkr_dac = this->mic = this->mic_adc = -1;
+	this->speaker = this->spkr_dac = this->fhp = this->fhp_dac =
+	    this->mic = this->mic_adc = -1;
 	this->nsense_pins = 0;
 	this->nout_jacks = 0;
 	nspdif = nhdmi = 0;
@@ -1704,6 +1722,13 @@ azalia_codec_init(codec_t *this)
 			case CORB_CD_JACK:
 				if (w->d.pin.device == CORB_CD_LINEOUT)
 					this->nout_jacks++;
+				else if (w->d.pin.device == CORB_CD_HEADPHONE &&
+				    CORB_CD_LOC_GEO(w->d.pin.config) ==
+				    CORB_CD_FRONT) {
+					this->fhp = i;
+					this->fhp_dac =
+					    azalia_codec_find_defdac(this, i, 0);
+				}
 				if (this->nsense_pins >= HDA_MAX_SENSE_PINS ||
 				    !(w->d.pin.cap & COP_PINCAP_PRESENCE))
 					break;
@@ -1749,10 +1774,9 @@ azalia_codec_init(codec_t *this)
 		return err;
 
 	/* If the codec can do multichannel, select different DACs for
-	 * the multichannel jack group.  Also select a unique DAC for
-	 * the front headphone jack, if one exists.
+	 * the multichannel jack group.  Also be sure to keep track of
+	 * which DAC the front headphone is connected to.
 	 */
-	this->fhp_dac = -1;
 	if (this->na_dacs >= 3 && this->nopins >= 3) {
 		err = azalia_codec_select_dacs(this);
 		if (err)
@@ -2106,7 +2130,7 @@ azalia_codec_select_dacs(codec_t *this)
 	widget_t *w;
 	nid_t *convs;
 	int nconv, conv;
-	int i, j, k, err, isfhp;
+	int i, j, k, err;
 
 	convs = malloc(this->na_dacs * sizeof(nid_t), M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
@@ -2116,13 +2140,7 @@ azalia_codec_select_dacs(codec_t *this)
 	err = 0;
 	nconv = 0;
 	for (i = 0; i < this->nopins; i++) {
-		isfhp = 0;
 		w = &this->w[this->opins[i].nid];
-
-		if (w->d.pin.device == CORB_CD_HEADPHONE &&
-		    CORB_CD_LOC_GEO(w->d.pin.config) == CORB_CD_FRONT) {
-			isfhp = 1;
-		}
 
 		conv = this->opins[i].conv;
 		for (j = 0; j < nconv; j++) {
@@ -2131,7 +2149,7 @@ azalia_codec_select_dacs(codec_t *this)
 		}
 		if (j == nconv) {
 			convs[nconv++] = conv;
-			if (isfhp)
+			if (w->nid == this->fhp)
 				this->fhp_dac = conv;
 			if (nconv >= this->na_dacs) {
 				break;
@@ -2161,7 +2179,7 @@ azalia_codec_select_dacs(codec_t *this)
 					break;
 				w->selected = j;
 				this->opins[i].conv = conv;
-				if (isfhp)
+				if (w->nid == this->fhp)
 					this->fhp_dac = conv;
 				convs[nconv++] = conv;
 				if (nconv >= this->na_dacs)
@@ -2391,7 +2409,8 @@ azalia_codec_init_volgroups(codec_t *this)
 	for (i = 0; i < this->playvols.nslaves; i++) {
 		w = &this->w[this->playvols.slaves[i]];
 		if (w->nid == this->input_mixer ||
-		    w->parent == this->input_mixer)
+		    w->parent == this->input_mixer ||
+		    WIDGET_CHANNELS(w) < 2)
 			continue;
 		j = 0;
 		/* azalia_codec_find_defdac only goes 10 connections deep.
@@ -2405,7 +2424,7 @@ azalia_codec_init_volgroups(codec_t *this)
 		if (dac == -1)
 			continue;
 		if (dac != this->dacs.groups[this->dacs.cur].conv[0] &&
-		    dac != this->spkr_dac)
+		    dac != this->spkr_dac && dac != this->fhp_dac)
 			continue;
 		cap = w->outamp_cap;
 		if ((cap & COP_AMPCAP_MUTE) && COP_AMPCAP_NUMSTEPS(cap)) {
@@ -2431,7 +2450,7 @@ azalia_codec_init_volgroups(codec_t *this)
 			if (dac == -1)
 				continue;
 			if (dac != this->dacs.groups[this->dacs.cur].conv[0] &&
-			    dac != this->spkr_dac)
+			    dac != this->spkr_dac && dac != this->fhp_dac)
 				continue;
 			if (w->type == COP_AWTYPE_BEEP_GENERATOR)
 				continue;
@@ -2911,6 +2930,8 @@ azalia_widget_init(widget_t *this, const codec_t *codec, nid_t nid)
 		this->d.volume.cap = result;
 		break;
 	case COP_AWTYPE_POWER:
+		/* FALLTHROUGH */
+	case COP_AWTYPE_VENDOR_DEFINED:
 		this->enable = 0;
 		break;
 	}

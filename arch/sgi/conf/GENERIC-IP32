@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC-IP32,v 1.13 2009/12/12 20:07:10 miod Exp $
+#	$OpenBSD: GENERIC-IP32,v 1.16 2009/12/23 18:03:07 jasper Exp $
 #
 # THIS KERNEL IS FOR O2 (IP32) SYSTEMS ONLY.
 #
@@ -124,6 +124,7 @@ urtw*		at uhub?	# RealTek 8187
 wi*		at uhub?	# WaveLAN IEEE 802.11DS
 zyd*		at uhub?	# Zydas ZD1211
 ugen*		at uhub?	# USB Generic driver
+uthum*		at uhidev?	# TEMPerHUM sensor
 
 # USB Video
 uvideo*		at uhub?
@@ -140,6 +141,7 @@ pcn*		at pci?		# AMD PCnet-PCI Ethernet
 epic*		at pci?		# SMC EPIC/100 ethernet
 de*		at pci?		# DC21X4X-based ethernet
 dc*		at pci?		# 21143, "tulip" clone ethernet
+sf*		at pci?		# Adaptec AIC-6915 ethernet
 em*		at pci?		# Intel Pro/1000 ethernet
 ep*		at pci?		# 3Com 3c59x
 fxp*		at pci?		# EtherExpress 10/100B ethernet
@@ -153,11 +155,13 @@ re*		at pci?		# Realtek 8169/8169S/8110S
 rl*		at pci?		# Realtek 81[23]9 ethernet
 hme*		at pci?		# Sun Happy Meal
 gem*		at pci?		# Sun 'gem' ethernet
+cas*		at pci?		# Sun Cassini 100/Gigabit
 skc*		at pci?		# SysKonnect GEnesis 984x
 sk*		at skc?		#  each port of above
 mskc*		at pci?		# Marvell Yukon-2
 msk*		at mskc?	#  each port of above
 bge*		at pci?		# Broadcom BCM570x (aka Tigon3)
+vge*		at pci?		# VIA VT612x
 
 ##### Media Independent Interface (mii) drivers
 exphy*		at mii?		# 3Com internal PHYs
@@ -178,6 +182,7 @@ amphy*		at mii?		# AMD 79C873 PHYs
 tqphy*		at mii?		# TDK 78Q212x PHYs
 bmtphy*		at mii?		# Broadcom 10/100 PHYs
 brgphy*		at mii?		# Broadcom Gigabit PHYs
+ciphy*		at mii?		# Cicada CS8201 10/100/1000 copper PHY
 eephy*		at mii?		# Marvell 88E1000 series PHY
 xmphy*		at mii?		# XaQti XMAC-II PHYs
 nsgphy*		at mii?		# NS gigabit PHYs
@@ -227,7 +232,9 @@ ses*		at scsibus?
 uk*		at scsibus?
 
 #### Crypto devices
-hifn*		at pci?		# Hi/fn 7751 crypto card
+lofn*		at pci?		# Hifn6500
+hifn*		at pci?		# Hifn7751/7811/7951
+ubsec*		at pci?		# Broadcom 58xx
 
 pseudo-device	wsmux	2       # Mouse and keyboard multiplexor
 pseudo-device	crypto	1
