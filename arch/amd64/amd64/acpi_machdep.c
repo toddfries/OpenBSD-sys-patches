@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.25 2009/11/23 16:21:54 pirofti Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.32 2009/11/29 21:21:06 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -34,6 +34,7 @@
 #include <dev/acpi/acpivar.h>
 #include <dev/acpi/acpidev.h>
 
+#include "isa.h"
 #include "ioapic.h"
 #include "lapic.h"
 
@@ -201,11 +202,7 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 		return (ENXIO);
 	}
 
-	if (rcr3() != pmap_kernel()->pm_pdirpa) {
-		pmap_activate(curproc);
-
-		KASSERT(rcr3() == pmap_kernel()->pm_pdirpa);
-	}
+	/* amd64 does not do lazy pmap_activate */
 
 	/*
 	 *
@@ -225,24 +222,20 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 
 	/* Copy the current cpu registers into a safe place for resume. */
 	if (acpi_savecpu()) {
+		fpusave_cpu(curcpu(), 1);
 		wbinvd();
-		acpi_enter_sleep_state(sc, state);
-		panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
+		if (acpi_enter_sleep_state(sc, state) != 0)
+			panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
 	}
-
-	/*
-	 * On resume, the execution path will actually occur here.
-	 * This is because we previously saved the stack location
-	 * in acpi_savecpu, and issued a far jmp to the restore
-	 * routine in the wakeup code. This means we are
-	 * returning to the location immediately following the
-	 * last call instruction - after the call to acpi_savecpu.
-	 */
+#if 0
+	/* Temporarily disabled for debugging purposes */
+	/* Reset the wakeup vector to avoid resuming on reboot */
+	sc->sc_facs->wakeup_vector = 0;
+#endif
 
 #if NISA > 0
 	i8259_default_setup();
 #endif
-
 	intr_calculatemasks(curcpu());
 
 #if NLAPIC > 0
@@ -250,6 +243,9 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	lapic_initclocks();
 	lapic_set_lvt();
 #endif
+
+	fpuinit(&cpu_info_primary);
+
 #if NIOAPIC > 0
 	ioapic_enable();
 #endif

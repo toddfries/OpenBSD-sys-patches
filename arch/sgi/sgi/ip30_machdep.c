@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip30_machdep.c,v 1.22 2009/11/22 22:44:58 syuu Exp $	*/
+/*	$OpenBSD: ip30_machdep.c,v 1.28 2009/12/28 06:55:27 syuu Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -44,9 +44,23 @@
 
 #include <dev/ic/comvar.h>
 
+#ifdef MULTIPROCESSOR
+#include <sgi/xbow/xheartreg.h>
+#endif
+
 extern char *hw_prod;
 
 extern int	mbprint(void *, const char *);
+
+#ifdef MULTIPROCESSOR
+extern int      xheart_intr_establish(int (*)(void *), void *, int, int, 
+    const char *, struct intrhand *);
+extern void     xheart_intr_set(int);
+extern void     xheart_intr_clear(int);
+extern void	xheart_setintrmask(int);
+
+extern struct	user *proc0paddr;
+#endif
 
 uint32_t ip30_lights_frob(uint32_t, struct trap_frame *);
 paddr_t	ip30_widget_short(int16_t, u_int);
@@ -188,7 +202,7 @@ ip30_autoconf(struct device *parent)
 	config_found(parent, &maa, mbprint);
 
 	int cpuid;
-	for(cpuid = 1; cpuid < MAX_CPUS; cpuid++)
+	for(cpuid = 1; cpuid < MAXCPUS; cpuid++)
 		if (ip30_cpu_exists(cpuid) == 0) {
 			ncpusfound++;
 #ifdef MULTIPROCESSOR
@@ -307,9 +321,6 @@ void
 hw_cpu_boot_secondary(struct cpu_info *ci)
 {
        int cpuid =  ci->ci_cpuid;
-       struct pglist mlist;
-       struct vm_page *m;
-       int error;
        vaddr_t kstack;
 
 #ifdef DEBUG
@@ -345,16 +356,11 @@ hw_cpu_boot_secondary(struct cpu_info *ci)
            scachesz, fanloads, launch, rndvz,
            stackaddr, lparam, rparam, idleflag);
 #endif
-
-       TAILQ_INIT(&mlist);
-       error = uvm_pglistalloc(USPACE, 0, -1L, 0, 0,
-           &mlist, 1, UVM_PLA_WAITOK);
-       if (error)
+       kstack = smp_malloc(USPACE);
+       if (kstack == NULL)
 	       panic("unable to allocate idle stack\n");
-
-       m = TAILQ_FIRST(&mlist);
-       kstack = (vaddr_t)PHYS_TO_XKPHYS(VM_PAGE_TO_PHYS(m), CCA_CACHED);
        bzero((char *)kstack, USPACE);
+       ci->ci_curprocpaddr = (void *)kstack;
 
        *(volatile uint64_t *)(mpconf + MPCONF_STACKADDR(cpuid)) =
            (uint64_t)(kstack + USPACE);
@@ -371,6 +377,7 @@ void
 hw_cpu_hatch(struct cpu_info *ci)
 {
        int cpuid = ci->ci_cpuid;
+       int s;
 
        /*
         * Make sure we can access the extended address space.
@@ -394,11 +401,12 @@ hw_cpu_hatch(struct cpu_info *ci)
        Mips10k_ConfigCache();
 
        sys_config.cpu[cpuid].tlbwired = UPAGES / 2;
+	tlb_set_page_mask(TLB_PAGE_MASK);
        tlb_set_wired(0);
        tlb_flush(sys_config.cpu[cpuid].tlbsize);
        tlb_set_wired(sys_config.cpu[cpuid].tlbwired);
 
-       tlb_set_pid(1);
+       tlb_set_pid(0);
 
        /*
         * Turn off bootstrap exception vectors.
@@ -415,14 +423,30 @@ hw_cpu_hatch(struct cpu_info *ci)
 
        cpu_startclock(ci);
 
+       mips64_ipi_init();
+       xheart_setintrmask(0);
+
        spl0();
        (void)updateimask(0);
-#ifdef notyet
+
        SCHED_LOCK(s);
        cpu_switchto(NULL, sched_chooseproc());
-#else
-       for(;;)
-	       ;
-#endif
 }
+
+int hw_ipi_intr_establish(int (*func)(void *), u_long cpuid)
+{
+	return xheart_intr_establish(func, (void *)cpuid, HEART_ISR_IPI(cpuid), 
+	    IPL_IPI, NULL, &curcpu()->ci_ipiih);
+};
+
+void hw_ipi_intr_set(u_long cpuid)
+{
+	xheart_intr_set(HEART_ISR_IPI(cpuid));
+}
+
+void hw_ipi_intr_clear(u_long cpuid)
+{
+	xheart_intr_clear(HEART_ISR_IPI(cpuid));
+}
+
 #endif

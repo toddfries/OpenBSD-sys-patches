@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sched.c,v 1.14 2009/10/05 17:43:08 deraadt Exp $	*/
+/*	$OpenBSD: kern_sched.c,v 1.16 2009/11/29 23:12:30 kettenis Exp $	*/
 /*
  * Copyright (c) 2007, 2008 Artur Grabowski <art@openbsd.org>
  *

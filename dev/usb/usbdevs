@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.460 2009/11/23 15:03:09 yuo Exp $
+$OpenBSD: usbdevs,v 1.466 2009/12/27 21:07:23 jsg Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -523,6 +523,7 @@ vendor AXESSTEL		0x1726	Axesstel
 vendor LINKSYS4		0x1737	Linksys
 vendor SENAO		0x1740	Senao
 vendor ASUS2		0x1761	ASUS
+vendor STRAWBERRYLINUX	0x1774	Strawberry linux Co., Ltd.
 vendor SWEEX2		0x177f	Sweex
 vendor MECANIQUE	0x1781	Mecanique
 vendor DISPLAYLINK	0x17e9	DisplayLink
@@ -1136,6 +1137,7 @@ product COREGA RT2870_2		0x003c	RT2870
 product COREGA RT2870_3		0x003f	RT2870
 product COREGA RT3070		0x0041	RT3070
 product COREGA CGWLUSB300GNM	0x0042	CG-WLUSB300GNM
+product COREGA CGWLUSB300N	0x0043	CG-WLUSB300N
 product COREGA WLUSB_11_STICK	0x7613	WLAN USB Stick 11
 product COREGA FETHER_USB_TXC	0x9601	FEther USB-TXC
 
@@ -1222,6 +1224,7 @@ product DIGITALSTREAM PS2	0x0001	PS/2 Active
 product DLINK DUBE100		0x1a00	10/100 ethernet
 product DLINK DSB650TX4		0x200c	10/100 ethernet
 product DLINK DWL120E		0x3200	DWL-120 rev E
+product DLINK DWA130C		0x3301	DWA-130 rev C
 product DLINK DWL122		0x3700	DWL-122
 product DLINK DWLG120		0x3701	DWL-G120
 product DLINK DWL120F		0x3702	DWL-120 rev F
@@ -1412,6 +1415,7 @@ product FTDI FT232_6		0x6009	Serial
 product FTDI SERIAL_2232C	0x6010	2232C Serial
 product FTDI PS2KBDMS		0x8371	PS/2 Keyboard/Mouse
 product FTDI SERIAL_8U100AX	0x8372	Serial
+product FTDI OPENRD		0x9e90	OpenRD JTAGKey
 product FTDI LOCOBUFFER		0xc7d0	RR-CirKits LocoBuffer
 product FTDI DMX4ALL		0xc850	DMX4ALL DMX interface
 product FTDI ASK_RDR4X7_1	0xc990	ASK RDR 4X7
@@ -1721,7 +1725,9 @@ product HTC SMARTPHONE		0x0a51	SmartPhone
 product HUAWEI E618		0x1001	HUAWEI Mobile E618
 product HUAWEI E220		0x1003	HUAWEI Mobile Modem
 product HUAWEI Mobile		0x1008	HUAWEI Mobile Modem
+product HUAWEI E180		0x140c	HUAWEI Mobile E180
 product HUAWEI E510		0x1411	HUAWEI Mobile E510
+product HUAWEI E161		0x1446	HUAWEI Mobile E161
 
 /* HUMAX products */
 product HUMAX PVRSMART		0x138c	PVR-SMART
@@ -2235,9 +2241,10 @@ product NATIONAL BEARPAW1200	0x1000	BearPaw 1200
 product NATIONAL BEARPAW2400	0x1001	BearPaw 2400
 
 /* NEC products */
+product NEC HUB			0x005a	hub
 product NEC USB2EXTEND		0x0409	Repeater
-product NEC HUB			0x55aa	hub
-product NEC HUB_B		0x55ab	hub
+product NEC HUB_B		0x55aa	hub
+product NEC HUB_C		0x55ab	hub
 product NEC PICTY760		0xbef4	Picty760
 product NEC PICTY900		0xefbe	Picty900
 product NEC PICTY920		0xf0be	Picty920
@@ -2601,6 +2608,7 @@ product REALTEK RTL8151		0x8151	RTL8151 PNA
 product REALTEK RTL8187		0x8187	RTL8187
 product REALTEK RTL8187B_0	0x8189	RTL8187B
 product REALTEK RTL8187B_1	0x8197	RTL8187B
+product REALTEK RTL8192U	0x8192	RTL8192U
 product REALTEK RTL8187B_2	0x8198	RTL8187B
 
 /* Research In Motion products */
@@ -2964,6 +2972,9 @@ product	STARTECH ICUSB232X	0x3410	ICUSB2321X/2X/4X
 /* STMicroelectronics products */
 product STMICRO BIOMETRIC_COPR	0x2016	Biometric Coprocessor
 product STMICRO COMMUNICATOR	0x7554	Communicator
+
+/* Strawberry Linux products */
+product STRAWBERRYLINUX USBRH 	0x1001	USBRH sensor
 
 /* STSN products */
 product STSN STSN0001		0x0001	Internet Access Device

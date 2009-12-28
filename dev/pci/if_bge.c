@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.286 2009/10/11 16:53:13 sthen Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.289 2009/12/17 00:55:19 sthen Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -127,9 +127,10 @@
 const struct bge_revision * bge_lookup_rev(u_int32_t);
 int bge_probe(struct device *, void *, void *);
 void bge_attach(struct device *, struct device *, void *);
+int bge_activate(struct device *, int);
 
 struct cfattach bge_ca = {
-	sizeof(struct bge_softc), bge_probe, bge_attach
+	sizeof(struct bge_softc), bge_probe, bge_attach, NULL, bge_activate
 };
 
 struct cfdriver bge_cd = {
@@ -240,14 +241,13 @@ const struct pci_matchid bge_devices[] = {
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5714S },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5715 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5715S },
-	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5717C },
-	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5717S },
-	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5718C },
-	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5718S },
+	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5717 },
+	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5718 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5720 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5721 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5722 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5723 },
+	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5724 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5750 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5750M },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5751 },
@@ -1839,10 +1839,9 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	      >> BGE_PCIMISCCTL_ASICREV_SHIFT);
 
 	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_USE_PRODID_REG) {
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM5717C ||
-		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM5717S ||
-		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM5718C ||
-		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM5718S)
+		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM5717 ||
+		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM5718 ||
+		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM5724)
 			sc->bge_chipid = pci_conf_read(pc, pa->pa_tag,
 			    BGE_PCI_GEN2_PRODID_ASICREV);
 		else
@@ -2259,6 +2258,20 @@ fail_1:
 	bus_space_unmap(sc->bge_btag, sc->bge_bhandle, size);
 }
 
+int
+bge_activate(struct device *self, int act)
+{
+	switch(act) {
+	case DVACT_SUSPEND:
+		break;
+	case DVACT_RESUME:
+		bge_power(PWR_RESUME, self);
+		break;
+	}
+
+	return (0);
+}
+
 void
 bge_reset(struct bge_softc *sc)
 {
@@ -2521,7 +2534,6 @@ bge_rxeof(struct bge_softc *sc)
 
 			if (cur_rx->bge_flags & BGE_RXBDFLAG_ERROR) {
 				m_freem(m);
-				ifp->if_ierrors++;
 				continue;
 			}
 		} else {
@@ -2538,7 +2550,6 @@ bge_rxeof(struct bge_softc *sc)
 
 			if (cur_rx->bge_flags & BGE_RXBDFLAG_ERROR) {
 				m_freem(m);
-				ifp->if_ierrors++;
 				continue;
 			}
 		}

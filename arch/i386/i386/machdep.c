@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.465 2009/11/23 16:21:54 pirofti Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.468 2009/12/09 14:27:34 oga Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -1081,13 +1081,15 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 	case 13: /* C7-M Type D */
 	case 15: /* Nano */
 #if !defined(SMALL_KERNEL)
-		/* Setup the sensors structures */
-		strlcpy(ci->ci_sensordev.xname, ci->ci_dev.dv_xname,
-		    sizeof(ci->ci_sensordev.xname));
-		ci->ci_sensor.type = SENSOR_TEMP;
-		sensor_task_register(ci, via_update_sensor, 5);
-		sensor_attach(&ci->ci_sensordev, &ci->ci_sensor);
-		sensordev_install(&ci->ci_sensordev);
+		if (model == 10 || model == 13 || model == 15) {
+			/* Setup the sensors structures */
+			strlcpy(ci->ci_sensordev.xname, ci->ci_dev.dv_xname,
+			    sizeof(ci->ci_sensordev.xname));
+			ci->ci_sensor.type = SENSOR_TEMP;
+			sensor_task_register(ci, via_update_sensor, 5);
+			sensor_attach(&ci->ci_sensordev, &ci->ci_sensor);
+			sensordev_install(&ci->ci_sensordev);
+		}
 #endif
 
 	default:
@@ -1718,6 +1720,15 @@ identifycpu(struct cpu_info *ci)
 		}
 	}
 
+	if (vendor == CPUVENDOR_INTEL &&
+	    curcpu()->ci_feature_flags & CPUID_CFLUSH) {
+		/* to get the cachline size you must do cpuid with eax 0x01 */
+		u_int regs[4];
+
+		cpuid(0x01, regs); 
+		ci->ci_cflushsz = ((regs[1] >> 8) & 0xff) * 8;
+	}
+
 	/* Remove leading and duplicated spaces from cpu_brandstr */
 	brandstr_from = brandstr_to = cpu_brandstr;
 	skipspace = 1;
@@ -2002,9 +2013,6 @@ p3_get_bus_clock(struct cpu_info *ci)
 			goto print_msr;
 		}
 		break;
-       case 0x1a: /* Nehalem based Core i7 and Xeon */
-               bus_clock = BUS133;
-               break;
 	case 0x1c: /* Atom */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;

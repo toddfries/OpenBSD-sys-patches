@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.86 2009/10/05 17:43:07 deraadt Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.89 2009/12/20 23:54:11 guenther Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -95,10 +95,16 @@ int
 sys_threxit(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_threxit_args /* {
-		syscallarg(int) rval;
+		syscallarg(pid_t *) notdead;
 	} */ *uap = v;
 
-	exit1(p, W_EXITCODE(SCARG(uap, rval), 0), EXIT_THREAD);
+	if (SCARG(uap, notdead) != NULL) {
+		pid_t zero = 0;
+		if (copyout(&zero, SCARG(uap, notdead), sizeof(zero))) {
+			psignal(p, SIGSEGV);
+		}
+	}
+	exit1(p, 0, EXIT_THREAD);
 
 	return (0);
 }
@@ -163,7 +169,6 @@ exit1(struct proc *p, int rv, int flags)
 	 * wake up the parent early to avoid deadlock.
 	 */
 	atomic_setbits_int(&p->p_flag, P_WEXIT);
-	atomic_clearbits_int(&p->p_flag, P_TRACED);
 	if (p->p_flag & P_PPWAIT) {
 		atomic_clearbits_int(&p->p_flag, P_PPWAIT);
 		wakeup(p->p_pptr);
@@ -424,7 +429,7 @@ sys_wait4(struct proc *q, void *v, register_t *retval)
 		syscallarg(struct rusage *) rusage;
 	} */ *uap = v;
 	int nfound;
-	struct proc *p, *t;
+	struct proc *p;
 	int status, error;
 
 	if (SCARG(uap, pid) == 0)
@@ -465,26 +470,7 @@ loop:
 			    (error = copyout(p->p_ru,
 			    SCARG(uap, rusage), sizeof(struct rusage))))
 				return (error);
-
-			/*
-			 * If we got the child via a ptrace 'attach',
-			 * we need to give it back to the old parent.
-			 */
-			if (p->p_oppid && (t = pfind(p->p_oppid))) {
-				p->p_oppid = 0;
-				proc_reparent(p, t);
-				if (p->p_exitsig != 0)
-					psignal(t, P_EXITSIG(p));
-				wakeup(t);
-				return (0);
-			}
-
-			scheduler_wait_hook(q, p);
-			p->p_xstat = 0;
-			ruadd(&q->p_stats->p_cru, p->p_ru);
-
-			proc_zap(p);
-
+			proc_finish_wait(q, p);
 			return (0);
 		}
 		if (p->p_stat == SSTOP && (p->p_flag & P_WAITED) == 0 &&
@@ -522,6 +508,30 @@ loop:
 	if ((error = tsleep(q, PWAIT | PCATCH, "wait", 0)) != 0)
 		return (error);
 	goto loop;
+}
+
+void
+proc_finish_wait(struct proc *waiter, struct proc *p)
+{
+	struct proc *t;
+
+	/*
+	 * If we got the child via a ptrace 'attach',
+	 * we need to give it back to the old parent.
+	 */
+	if (p->p_oppid && (t = pfind(p->p_oppid))) {
+		atomic_clearbits_int(&p->p_flag, P_TRACED);
+		p->p_oppid = 0;
+		proc_reparent(p, t);
+		if (p->p_exitsig != 0)
+			psignal(t, p->p_exitsig);
+		wakeup(t);
+	} else {
+		scheduler_wait_hook(waiter, p);
+		p->p_xstat = 0;
+		ruadd(&waiter->p_stats->p_cru, p->p_ru);
+		proc_zap(p);
+	}
 }
 
 /*

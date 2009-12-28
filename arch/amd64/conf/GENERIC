@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.277 2009/11/14 16:55:11 damien Exp $
+#	$OpenBSD: GENERIC,v 1.283 2009/12/28 14:22:09 dlg Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -59,6 +59,7 @@ acpipwrres*	at acpi?
 mpbios0		at bios0
 
 ipmi0	at mainbus? disable	# IPMI
+vmt0	at mainbus?		# VMware Tools
 
 option		PCIVERBOSE
 option		USBVERBOSE
@@ -199,6 +200,8 @@ atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
 ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
+uhts*	 at uhidev?		# USB HID touch screen
+wsmouse* at uhts? mux 0
 uts*	at uhub?		# USB touchscreen
 wsmouse* at uts? mux 0
 ukbd*	at uhidev?		# USB keyboard
@@ -235,15 +238,14 @@ zyd*	at uhub?		# Zydas ZD1211
 upgt*	at uhub?		# Conexant/Intersil PrismGT SoftMAC USB
 urtw*	at uhub?		# RealTek 8187
 udcf*	at uhub?		# Gude Expert mouseCLOCK
+uthum*	at uhidev?		# TEMPerHUM sensor
+utrh*	at uhidev?		# USBRH sensor
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
-
-# USB Video
-uvideo*	at uhub?
+uvideo*	at uhub?		# USB Video
 video*	at uvideo?
-
-udl*		at uhub?
-wsdisplay*	at udl?
+udl*	at uhub?		# DisplayLink USB displays
+wsdisplay* at udl?
 
 puc*	at pci?			# PCI "universal" communication device
 #puc*	at cardbus?
@@ -393,6 +395,8 @@ fd*	at fdc? flags 0x00
 # IDE controllers
 pciide* at pci? flags 0x0000
 
+wdc0	at isa? disable port 0x1f0 irq 14 flags 0x00
+wdc1	at isa? disable port 0x170 irq 15 flags 0x00
 wdc*	at pcmcia?
 
 # IDE hard drives

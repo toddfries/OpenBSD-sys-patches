@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.121 2009/11/12 06:20:27 dlg Exp $ */
+/*	$OpenBSD: mpi.c,v 1.124 2009/12/10 00:20:38 chl Exp $ */
 
 /*
  * Copyright (c) 2005, 2006, 2009 David Gwynne <dlg@openbsd.org>
@@ -2176,7 +2176,6 @@ mpi_eventnotify_done(struct mpi_ccb *ccb)
 void
 mpi_evt_sas(struct mpi_softc *sc, struct mpi_rcb *rcb)
 {
-#if 0
 	struct mpi_evt_sas_change		*ch;
 	u_int8_t				*data;
 
@@ -2214,7 +2213,6 @@ mpi_evt_sas(struct mpi_softc *sc, struct mpi_rcb *rcb)
 		    "0x%02x\n", DEVNAME(sc), ch->reason);
 		break;
 	}
-#endif
 }
 
 void
@@ -2258,7 +2256,6 @@ mpi_portenable(struct mpi_softc *sc)
 {
 	struct mpi_ccb				*ccb;
 	struct mpi_msg_portenable_request	*peq;
-	struct mpi_msg_portenable_repy		*pep;
 	int					s;
 
 	DNPRINTF(MPI_D_MISC, "%s: mpi_portenable\n", DEVNAME(sc));
@@ -2289,7 +2286,6 @@ mpi_portenable(struct mpi_softc *sc)
 		    DEVNAME(sc));
 		return (1);
 	}
-	pep = ccb->ccb_rcb->rcb_reply;
 
 	mpi_push_reply(sc, ccb->ccb_rcb->rcb_reply_dva);
 	mpi_put_ccb(sc, ccb);
@@ -2728,7 +2724,8 @@ mpi_bio_get_pg0_raid(struct mpi_softc *sc, int id)
 	    address, &hdr) != 0)
 		goto done;
 	if (mpi_cfg_page(sc, address, &hdr, 1, rpg0, len)) {
-		printf("%s: can't get RAID vol cfg page 0\n", DEVNAME(sc));
+		DNPRINTF(MPI_D_RAID, "%s: can't get RAID vol cfg page 0\n",
+		    DEVNAME(sc));
 		goto done;
 	}
 

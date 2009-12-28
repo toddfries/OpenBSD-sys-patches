@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi_wakecode.S,v 1.4 2009/11/22 22:00:51 mlarkin Exp $ */
+/* $OpenBSD: acpi_wakecode.S,v 1.9 2009/12/09 16:20:33 pirofti Exp $ */
 /*
  * Copyright (c) 2001 Takanori Watanabe <takawata@jp.freebsd.org>
  * Copyright (c) 2001 Mitsuru IWASAKI <iwasaki@jp.freebsd.org>
@@ -57,6 +57,7 @@
 
 #define _ACPI_TRMP_LABEL(a) a = . - _C_LABEL(acpi_real_mode_resume) + ACPI_TRAMPOLINE
 #define _ACPI_TRMP_OFFSET(a) a = . - _C_LABEL(acpi_real_mode_resume)
+#define _ACPI_RM_SEGMENT (ACPI_TRAMPOLINE >> 4)
 
 /*
  * On wakeup, we'll start executing at acpi_real_mode_resume.
@@ -80,7 +81,7 @@
 
 	.text
 	.code16
-	.align 4,0
+	.align 4
 	.global _C_LABEL(acpi_real_mode_resume)
 	.global _C_LABEL(acpi_protected_mode_resume)
 	.global _C_LABEL(acpi_long_mode_resume)
@@ -99,7 +100,9 @@ _C_LABEL(acpi_real_mode_resume):
 	 */
 	movw	%cs,%ax
 	movw	%ax,%ds
+	movw	%ax,%es
 	movw	%ax,%ss
+	lidtl	clean_idt
 
 	/*
 	 * Set up stack to grow down from offset 0x0FFE.
@@ -367,6 +370,10 @@ _C_LABEL(acpi_long_mode_resume):
 	movq    acpi_saved_r14, %r14
 	movq    acpi_saved_r15, %r15
 
+	/* Poke CR3 one more time. Might not be necessary */	
+	movq	acpi_saved_cr3, %rax
+	movq	%rax, %cr3
+
 	xorq	%rax, %rax	
 	jmp   	*acpi_saved_ret
 
@@ -375,7 +382,7 @@ _ACPI_TRMP_OFFSET(tmp_gdt)
 	.word	tmp_gdt_end - tmp_gdtable
 	.long	tmp_gdtable
 
-	.align 8,0
+	.align 8
 _ACPI_TRMP_LABEL(tmp_gdtable)
 	/*
 	 * null
@@ -416,11 +423,17 @@ _ACPI_TRMP_LABEL(tmp_gdtable)
 _ACPI_TRMP_LABEL(tmp_gdt_end)
 
 	.align 8
+_ACPI_TRMP_OFFSET(clean_idt)
+	.word	0xffff
+	.long	0
+	.word	0
+
+	.align 8
 _ACPI_TRMP_LABEL(tmp_gdt64)
 	.word 	tmp_gdt64_end - tmp_gdtable64
 	.long	tmp_gdtable64
 
-	.align 8,0
+	.align 8
 _ACPI_TRMP_LABEL(tmp_gdtable64)
 	.quad	0x0000000000000000
 	.quad	0x00af9a000000ffff
@@ -535,6 +548,7 @@ NENTRY(acpi_savecpu)
 	movq	%rsi, acpi_saved_rsi
 	movq	%rdi, acpi_saved_rdi
 	movq	%rsp, acpi_saved_rsp
+	addq	$0x8, acpi_saved_rsp
 
 	movq	%r8, acpi_saved_r8
 	movq	%r9, acpi_saved_r9

@@ -1,4 +1,4 @@
-/*      $OpenBSD: pmap.h,v 1.15 2009/11/18 20:58:50 miod Exp $ */
+/*      $OpenBSD: pmap.h,v 1.17 2009/12/28 06:55:27 syuu Exp $ */
 
 /*
  * Copyright (c) 1987 Carnegie-Mellon University
@@ -64,11 +64,28 @@
  * dynamically allocated at boot time.
  */
 
+/*
+ * Size of second level page structs (page tables, and segment table) used
+ * by this pmap.
+ */
+
+#define	PMAP_L2SHIFT		12
+#define	PMAP_L2SIZE		(1UL << PMAP_L2SHIFT)
+
+/*
+ * Segment sizes
+ */
+
+/* -2 below is for log2(sizeof pt_entry_t) */
+#define	SEGSHIFT		(PAGE_SHIFT + PMAP_L2SHIFT - 2)
+#define NBSEG			(1UL << SEGSHIFT)
+#define	SEGOFSET		(NBSEG - 1)
+
 #define mips_trunc_seg(x)	((vaddr_t)(x) & ~SEGOFSET)
 #define mips_round_seg(x)	(((vaddr_t)(x) + SEGOFSET) & ~SEGOFSET)
 #define pmap_segmap(m, v)	((m)->pm_segtab->seg_tab[((v) >> SEGSHIFT)])
 
-#define PMAP_SEGTABSIZE		512
+#define PMAP_SEGTABSIZE		(PMAP_L2SIZE / sizeof(void *))
 
 struct segtab {
 	pt_entry_t	*seg_tab[PMAP_SEGTABSIZE];
@@ -81,8 +98,9 @@ typedef struct pmap {
 	int			pm_count;	/* pmap reference count */
 	simple_lock_data_t	pm_lock;	/* lock on pmap */
 	struct pmap_statistics	pm_stats;	/* pmap statistics */
-	u_int			pm_tlbpid;	/* address space tag */
-	u_int			pm_tlbgen;	/* TLB PID generation number */
+	u_int			pm_tlbpid[MAXCPUS];	/* address space tag */
+	u_int			pm_tlbgen[MAXCPUS];	/* TLB PID generation number */
+	int                     pm_active;
 	struct segtab		*pm_segtab;	/* pointers to pages of PTEs */
 } *pmap_t;
 
@@ -119,6 +137,8 @@ void	pmap_page_cache(vm_page_t, int);
 #define pmap_unuse_final(p)		do { /* nothing yet */ } while (0)
 #define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
 
+void pmap_update_user_page(pmap_t, vaddr_t, pt_entry_t);
+void pmap_update_kernel_page(vaddr_t, pt_entry_t);
 #endif	/* _KERNEL */
 
 #endif	/* !_MIPS_PMAP_H_ */

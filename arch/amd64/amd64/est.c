@@ -1,4 +1,4 @@
-/*	$OpenBSD: est.c,v 1.15 2009/11/22 20:13:12 jsg Exp $ */
+/*	$OpenBSD: est.c,v 1.17 2009/12/01 18:59:13 jsg Exp $ */
 /*
  * Copyright (c) 2003 Michael Eriksson.
  * All rights reserved.
@@ -196,9 +196,6 @@ p3_get_bus_clock(struct cpu_info *ci)
 			break;
 		}
 		break;
-	case 0x1a: /* Nehalem based Core i7 and Xeon */
-		bus_clock = BUS133; 
-		break;
 	case 0x1c: /* Atom */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
@@ -327,6 +324,12 @@ est_init(struct cpu_info *ci)
 		p4_get_bus_clock(ci);
 	} else if (family == 6) {
 		p3_get_bus_clock(ci);
+	}
+
+	if (bus_clock == 0) {
+		printf("%s: EST: PSS not yet available for this processor\n",
+		    cpu_device);
+		return;
 	}
 
 #if NACPICPU > 0

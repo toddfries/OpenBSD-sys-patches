@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.227 2009/11/23 16:03:10 henning Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.230 2009/12/24 04:24:19 dlg Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -159,6 +159,8 @@ pfattach(int num)
 	    &pool_allocator_nointr);
 	pool_init(&pf_src_tree_pl, sizeof(struct pf_src_node), 0, 0, 0,
 	    "pfsrctrpl", NULL);
+	pool_init(&pf_sn_item_pl, sizeof(struct pf_sn_item), 0, 0, 0,
+	    "pfsnitempl", NULL);
 	pool_init(&pf_state_pl, sizeof(struct pf_state), 0, 0, 0, "pfstatepl",
 	    NULL);
 	pool_init(&pf_state_key_pl, sizeof(struct pf_state_key), 0, 0, 0,
@@ -364,6 +366,7 @@ pf_rm_rule(struct pf_rulequeue *rulequeue, struct pf_rule *rule)
 		if (rule->overload_tbl)
 			pfr_detach_table(rule->overload_tbl);
 	}
+	pfi_kif_unref(rule->rcv_kif, PFI_KIF_REF_RULE);
 	pfi_kif_unref(rule->kif, PFI_KIF_REF_RULE);
 	pf_anchor_remove(rule);
 	pf_empty_pool(&rule->rdr.list);
@@ -771,6 +774,7 @@ pf_hash_rule(MD5_CTX *ctx, struct pf_rule *rule)
 	pf_hash_rule_addr(ctx, &rule->dst);
 	PF_MD5_UPD_STR(rule, label);
 	PF_MD5_UPD_STR(rule, ifname);
+	PF_MD5_UPD_STR(rule, rcv_ifname);
 	PF_MD5_UPD_STR(rule, match_tagname);
 	PF_MD5_UPD_HTONS(rule, match_tag, x); /* dup? */
 	PF_MD5_UPD_HTONL(rule, os_fingerprint, y);
@@ -788,7 +792,6 @@ pf_hash_rule(MD5_CTX *ctx, struct pf_rule *rule)
 	PF_MD5_UPD(rule, quick);
 	PF_MD5_UPD(rule, ifnot);
 	PF_MD5_UPD(rule, match_tag_not);
-	PF_MD5_UPD(rule, natpass);
 	PF_MD5_UPD(rule, keep_state);
 	PF_MD5_UPD(rule, proto);
 	PF_MD5_UPD(rule, type);
@@ -1075,6 +1078,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		rule->cpid = p->p_pid;
 		rule->anchor = NULL;
 		rule->kif = NULL;
+		rule->rcv_kif = NULL;
 		TAILQ_INIT(&rule->rdr.list);
 		TAILQ_INIT(&rule->nat.list);
 		TAILQ_INIT(&rule->route.list);
@@ -1113,6 +1117,13 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 				break;
 			}
 			pfi_kif_ref(rule->kif, PFI_KIF_REF_RULE);
+		}
+		if (rule->rcv_ifname[0]) {
+			rule->rcv_kif = pfi_kif_get(rule->rcv_ifname);
+			if (rule->rcv_kif == NULL) {
+				error = EINVAL;
+			} else
+				pfi_kif_ref(rule->rcv_kif, PFI_KIF_REF_RULE);
 		}
 
 		if (rule->rtableid > 0 && !rtable_exists(rule->rtableid))
@@ -1343,6 +1354,18 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 					break;
 				}
 				pfi_kif_ref(newrule->kif, PFI_KIF_REF_RULE);
+			} else
+				newrule->kif = NULL;
+
+			if (newrule->rcv_ifname[0]) {
+				newrule->rcv_kif =
+				    pfi_kif_get(newrule->rcv_ifname);
+				if (newrule->rcv_kif == NULL) {
+					error = EINVAL;
+				} else {
+					pfi_kif_ref(newrule->rcv_kif,
+					    PFI_KIF_REF_RULE);
+				}
 			} else
 				newrule->kif = NULL;
 
@@ -2794,13 +2817,10 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		struct pf_state		*state;
 
 		RB_FOREACH(state, pf_state_tree_id, &tree_id)
-			state->src_node = NULL;
-		RB_FOREACH(n, pf_src_tree, &tree_src_tracking) {
+			pf_src_tree_remove_state(state);
+		RB_FOREACH(n, pf_src_tree, &tree_src_tracking)
 			n->expire = 1;
-			n->states = 0;
-		}
 		pf_purge_expired_src_nodes(1);
-		pf_status.src_nodes = 0;
 		break;
 	}
 
@@ -2821,13 +2841,10 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 				&psnk->psnk_dst.addr.v.a.mask,
 				&sn->raddr, sn->af)) {
 				/* Handle state to src_node linkage */
-				if (sn->states != 0) {
+				if (sn->states != 0)
 					RB_FOREACH(s, pf_state_tree_id,
-					    &tree_id)
-						if (s->src_node == sn)
-							s->src_node = NULL;
-					sn->states = 0;
-				}
+					   &tree_id)
+						pf_state_rm_src_node(s, sn);
 				sn->expire = 1;
 				killed++;
 			}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_xxx.c,v 1.12 2009/08/10 11:22:10 deraadt Exp $	*/
+/*	$OpenBSD: kern_xxx.c,v 1.14 2009/11/29 23:12:30 kettenis Exp $	*/
 /*	$NetBSD: kern_xxx.c,v 1.32 1996/04/22 01:38:41 christos Exp $	*/
 
 /*

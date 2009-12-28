@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.671 2009/11/14 16:55:11 damien Exp $
+#	$OpenBSD: GENERIC,v 1.677 2009/12/20 15:36:10 deraadt Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -259,6 +259,8 @@ ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
 uts*	at uhub?		# USB touchscreen
 wsmouse* at uts? mux 0
+uhts*	 at uhidev?		# USB HID touch screen
+wsmouse* at uhts? mux 0
 ukbd*	at uhidev?		# USB keyboard
 wskbd*	at ukbd? mux 1
 ucycom*	at uhidev?		# Cypress serial
@@ -298,17 +300,17 @@ urtw*	at uhub?		# RealTek 8187
 #ueagle* at uhub?		# Analog Devices Eagle ADSL
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 umbg*	at uhub?		# Meinberg Funkuhren USB5131
+uthum*	at uhidev?		# TEMPerHUM sensor
+utrh*	at uhidev?		# USBRH sensor
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
+uvideo* at uhub?		# USB video
+video*  at uvideo?
+udl*	at uhub?		# DisplayLink USB displays
+wsdisplay* at udl?
+
 puc*	at pci?			# PCI "universal" communication device
 #puc*	at cardbus?
-
-# USB Video
-uvideo* at uhub?
-video*  at uvideo?
-
-udl*		at uhub?
-wsdisplay*	at udl?
 
 sdhc*	at pci?			# SD Host Controller
 sdmmc*	at sdhc?		# SD/MMC bus
@@ -319,7 +321,6 @@ sbt*	at sdmmc?		# SDIO Bluetooth
 bthub*	at sbt?
 ubt*	at uhub?		# USB Bluetooth
 bthub*	at ubt?
-
 bthidev* at bthub?		# Bluetooth HID support
 btkbd*	at bthidev?
 btms*	at bthidev?
@@ -365,7 +366,7 @@ agp*		at intelagp?	# AGP bridges
 agp*		at sisagp?	# AGP bridges
 agp*		at viaagp?	# AGP bridges
 
-#option		DRM_DEBUG
+#option		DRMDEBUG
 inteldrm*	at vga?		# Intel i915, i945 DRM driver
 drm*		at inteldrm?
 #machdrm*	at vga?		# mach64 (3D Rage Pro, Rage) DRM driver
@@ -606,6 +607,7 @@ sk*	at skc?				#  each port of above
 mskc*	at pci?				# Marvell Yukon-2
 msk*	at mskc?			#  each port of above
 em*	at pci?				# Intel Pro/1000 ethernet
+gcu*	at pci?				# Intel Pro/1000 ethernet GCU
 ixgb*	at pci?				# Intel Pro/10Gb ethernet
 ix*	at pci?				# Intel 82598EB 10Gb ethernet
 txp*	at pci?				# 3com 3CR990

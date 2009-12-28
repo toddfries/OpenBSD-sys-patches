@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.35 2009/10/26 20:14:14 miod Exp $ */
+/*	$OpenBSD: intr.h,v 1.40 2009/12/28 06:55:27 syuu Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -55,7 +55,8 @@
 #define	IPL_VM		5	/* memory allocation */
 #define	IPL_CLOCK	6	/* clock */
 #define	IPL_HIGH	7	/* everything */
-#define	NIPLS		8	/* Number of levels */
+#define	IPL_IPI         8       /* interprocessor interrupt */
+#define	NIPLS		9	/* Number of levels */
 
 /* Interrupt sharing types. */
 #define	IST_NONE	0	/* none */
@@ -162,6 +163,8 @@ struct intrhand {
 	int			 ih_level;
 	int			 ih_irq;
 	struct evcount		 ih_count;
+	int			 ih_flags;
+#define	IH_ALLOCATED		0x01
 };
 
 /*
@@ -169,7 +172,8 @@ struct intrhand {
  */
 
 /* Schedule priorities for base interrupts (CPU) */
-#define	INTPRI_CLOCK	0
+#define	INTPRI_IPI	0
+#define	INTPRI_CLOCK	1
 /* other values are system-specific */
 
 #define NLOWINT	16		/* Number of low level registrations possible */
@@ -181,6 +185,14 @@ void	set_intr(int, uint32_t, uint32_t(*)(uint32_t, struct trap_frame *));
 
 uint32_t updateimask(uint32_t);
 void	dosoftint(void);
+
+#ifdef MULTIPROCESSOR
+#if defined (TGT_OCTANE)
+#define ENABLEIPI() updateimask(~CR_INT_2) /* enable IPI interrupt level */
+#else
+#error MULTIPROCESSOR kernel not supported on this configuration
+#endif
+#endif
 
 #endif /* _LOCORE */
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr_template.c,v 1.5 2009/11/12 17:13:33 miod Exp $	*/
+/*	$OpenBSD: intr_template.c,v 1.9 2009/12/28 06:55:27 syuu Exp $	*/
 
 /*
  * Copyright (c) 2009 Miodrag Vallat.
@@ -28,6 +28,7 @@
  * INTR_HANDLER(bit)	logic to access intrhand array head for `bit'
  * INTR_IMASK(ipl)	logic to access imask array for `ipl'
  * INTR_LOCAL_DECLS	local declarations (may be empty)
+ * MASK_LOCAL_DECLS	local declarations (may be empty)
  * INTR_MASKPENDING	logic to mask `isr'
  * INTR_MASKRESTORE	logic to reset `imr'
  * INTR_MASKSIZE	size of interrupt mask in bits
@@ -47,6 +48,8 @@ MASK_FUNCTIONNAME()
 	struct intrhand *q;
 	uint intrlevel[INTR_MASKSIZE];
 
+	MASK_LOCAL_DECLS
+
 	/* First, figure out which levels each IRQ uses. */
 	for (irq = 0; irq < INTR_MASKSIZE; irq++) {
 		uint levels = 0;
@@ -61,7 +64,7 @@ MASK_FUNCTIONNAME()
 	 * case an interrupt occurs during intr_disestablish() and causes
 	 * an unfortunate splx() while we are here recomputing the masks.
 	 */
-	for (level = IPL_NONE; level < IPL_HIGH; level++) {
+	for (level = IPL_NONE; level < NIPLS; level++) {
 		uint64_t irqs = 0;
 		for (irq = 0; irq < INTR_MASKSIZE; irq++)
 			if (intrlevel[irq] & (1 << level))
@@ -80,12 +83,13 @@ MASK_FUNCTIONNAME()
 	INTR_IMASK(IPL_TTY) |= INTR_IMASK(IPL_NET);
 	INTR_IMASK(IPL_VM) |= INTR_IMASK(IPL_TTY);
 	INTR_IMASK(IPL_CLOCK) |= INTR_IMASK(IPL_VM);
+	INTR_IMASK(IPL_HIGH) |= INTR_IMASK(IPL_CLOCK);
+	INTR_IMASK(IPL_IPI) |= INTR_IMASK(IPL_HIGH);
 
 	/*
 	 * These are pseudo-levels.
 	 */
 	INTR_IMASK(IPL_NONE) = 0;
-	INTR_IMASK(IPL_HIGH) = -1UL;
 }
 
 /*
@@ -134,7 +138,7 @@ INTR_FUNCTIONNAME(uint32_t hwpend, struct trap_frame *frame)
 		__asm__ ("sync\n\t.set reorder\n");
 
 		/* Service higher level interrupts first */
-		for (lvl = IPL_HIGH - 1; lvl != IPL_NONE; lvl--) {
+		for (lvl = NIPLS - 1; lvl != IPL_NONE; lvl--) {
 			tmpisr = isr & (INTR_IMASK(lvl) ^ INTR_IMASK(lvl - 1));
 			if (tmpisr == 0)
 				continue;
@@ -146,15 +150,31 @@ INTR_FUNCTIONNAME(uint32_t hwpend, struct trap_frame *frame)
 				rc = 0;
 				for (ih = INTR_HANDLER(bitno); ih != NULL;
 				    ih = ih->ih_next) {
+#ifdef MULTIPROCESSOR
+					u_int32_t sr;
+#endif
 #if defined(INTR_HANDLER_SKIP)
 					if (INTR_HANDLER_SKIP(ih) != 0)
 						continue;
 #endif
 					splraise(ih->ih_level);
+#ifdef MULTIPROCESSOR
+					if (ih->ih_level < IPL_IPI) {
+						sr = getsr();
+						ENABLEIPI();
+						__mp_lock(&kernel_lock);
+					}
+#endif
 					if ((*ih->ih_fun)(ih->ih_arg) != 0) {
 						rc = 1;
-						ih->ih_count.ec_count++;
+						atomic_add_uint64(&ih->ih_count.ec_count, 1);
 					}
+#ifdef MULTIPROCESSOR
+					if (ih->ih_level < IPL_IPI) {
+						__mp_unlock(&kernel_lock);
+						setsr(sr);
+					}
+#endif
 					__asm__ (".set noreorder\n");
 					ci->ci_ipl = ipl;
 					__asm__ ("sync\n\t.set reorder\n");
@@ -184,6 +204,7 @@ INTR_FUNCTIONNAME(uint32_t hwpend, struct trap_frame *frame)
 #undef	INTR_HANDLER_SKIP
 #undef	INTR_IMASK
 #undef	INTR_LOCAL_DECLS
+#undef	MASK_LOCAL_DECLS
 #undef	INTR_MASKPENDING
 #undef	INTR_MASKRESTORE
 #undef	INTR_SPURIOUS

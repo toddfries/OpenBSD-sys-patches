@@ -1,4 +1,4 @@
-/*	$OpenBSD: context.S,v 1.31 2009/11/19 20:16:27 miod Exp $ */
+/*	$OpenBSD: context.S,v 1.35 2009/12/28 06:55:27 syuu Exp $ */
 
 /*
  * Copyright (c) 2002-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -72,27 +72,11 @@ LEAF(savectx, 0)
 END(savectx)
 
 LEAF(cpu_idle_enter, 0)
-#if defined(TGT_CP7000) || defined(TGT_CP7000G)
-	PTR_L	t2, misc_h		# if non zero, do Ocelot LEDs.
-	beqz	t2, 1f
-	li	t0, 0x40
-	sb	t0, 0x0d(t2)
-1:
-#endif
-
 	j	ra
 	nop
 END(cpu_idle_enter)
 
 LEAF(cpu_idle_leave, 0)
-#if defined(TGT_CP7000) || defined(TGT_CP7000G)
-	PTR_L	t2, misc_h		# if non zero, do Ocelot LEDs.
-	beqz	t2, 1f
-	li	t0, 0x40
-	sb	t0, 0x0c(t2)
-1:
-#endif
-
 	j	ra
 	nop
 END(cpu_idle_leave)
@@ -159,6 +143,20 @@ NON_LEAF(cpu_switchto, FRAMESZ(CF_SZ), ra)
 	li	t1, SONPROC
 	sb	t1, P_STAT(s0)			# set to onproc.
 
+	/* get process ASID */
+	PTR_L	t0, P_VMSPACE(s0)		# p->p_vmspace
+	PTR_L	t1, VMSPACE_PMAP(t0)		# ->vm_map.pmap
+#ifdef MULTIPROCESSOR
+	HW_CPU_NUMBER(v0)			# cpuid
+	PTR_SLL	v0, v0, 0x2
+	PTR_ADDU t1, t1, v0
+#endif
+	lw	v0, PM_TLBPID(t1)		# ->pm_tlbpid[cpuid]
+
+#if UPAGES > 1
+	or	v0, t3
+	dmtc0	v0, COP_0_TLB_HI		# init high entry (tlbid)
+
 	/*
 	 * We need to wire the process kernel stack mapping so there
 	 * will be no tlb misses in exception handlers. This is done
@@ -166,14 +164,10 @@ NON_LEAF(cpu_switchto, FRAMESZ(CF_SZ), ra)
 	 * put valid mappings in tlb entries 0 and 1.
 	 */
 
-	/* get process ASID */
-	PTR_L	t0, P_VMSPACE(s0)		# p->p_vmspace
-	PTR_L	t1, VMSPACE_PMAP(t0)		# ->vm_map.pmap
-	lw	v0, PM_TLBPID(t1)		# ->pm_tlbpid
-
-	or	v0, t3
-	dmtc0	v0, COP_0_TLB_HI		# init high entry (tlbid)
-	LA	t1, (VM_MIN_KERNEL_ADDRESS)
+	LA	t1, CKSEG0_BASE
+	PTR_SUBU t2, t3, t1
+	bgez	t2, ctx3			# in CKSEG0
+	LA	t1, VM_MIN_KERNEL_ADDRESS	# safe if expands to > 1 insn
 	PTR_SUBU t2, t3, t1
 	bltz	t2, ctx3			# not mapped.
 	PTR_SRL	t2, PGSHIFT+1
@@ -184,7 +178,7 @@ NON_LEAF(cpu_switchto, FRAMESZ(CF_SZ), ra)
 	mfc0	t0, COP_0_TLB_INDEX
 	nop
 	bltz	t0, ctx1			# not in tlb
-	LA	t2, CKSEG0_BASE		# NOTE: if > 1 ins, does not matter
+	LA	t2, CKSEG0_BASE			# safe if expands to > 1 insn
 
 	dmtc0	t2, COP_0_TLB_HI		# invalidate it.
 	dmtc0	zero, COP_0_TLB_LO0
@@ -215,7 +209,7 @@ ctx1:
 	nop
 	tlbwi
 
-#if (UPAGES != 2)
+#if UPAGES > 2
 	dmtc0	v0, COP_0_TLB_HI		# init high entry (tlbid)
 	lw	ta0, 8(t1)
 	lw	ta1, 12(t1)
@@ -252,11 +246,14 @@ ctx2:
 	nop
 	nop
 	tlbwi
-#endif
+#endif	/* UPAGES > 2 */
 	nop
 	nop
 	nop
 	nop
+#else	/* UPAGES > 1 */
+	dmtc0	v0, COP_0_TLB_HI		# init high entry (tlbid)
+#endif	/* UPAGES > 1 */
 
 ctx3:
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.90 2009/11/19 20:16:27 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.94 2009/12/12 20:07:10 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -61,7 +61,9 @@
 #include <machine/mnode.h>
 #endif
 
+#ifdef CPU_RM7000
 #include <mips64/rm7000.h>
+#endif
 
 #include <dev/cons.h>
 
@@ -144,10 +146,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	extern char start[], edata[], end[];
 	extern char exception[], e_exception[];
 	extern char *hw_vendor;
-	extern void tlb_miss;
-	extern void tlb_miss_err_r5k;
-	extern void xtlb_miss;
-	extern void xtlb_miss_err_r5k;
 
 	/*
 	 * Make sure we can access the extended address space.
@@ -155,16 +153,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	 * from kernel mode unless SR_UX is set.
 	 */
 	setsr(getsr() | SR_KX | SR_UX);
-
-#ifdef notyet
-	/*
-	 * Make sure CKSEG0 cacheability match what we intend to use.
-	 *
-	 * XXX This does not work as expected on IP30. Does ARCBios
-	 * XXX depend on this?
-	 */
-	cp0_setcfg((cp0_getcfg() & ~0x07) | CCA_CACHED);
-#endif
 
 	/*
 	 * Clear the compiled BSS segment in OpenBSD code.
@@ -365,21 +353,58 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 		 * Configure TLB.
 		 */
 		switch(sys_config.cpu[0].type) {
+#ifdef CPU_RM7000
 		case MIPS_RM7000:
-			/* Rev A (version >= 2) CPU's have 64 TLB entries. */
-			if (sys_config.cpu[0].vers_maj < 2) {
-				sys_config.cpu[0].tlbsize = 48;
-			} else {
-				sys_config.cpu[0].tlbsize = 64;
+			/*
+			 * Rev A (version >= 2) CPU's have 64 TLB entries.
+			 *
+			 * However, the last 16 are only enabled if one
+			 * particular configuration bit (mode bit #24)
+			 * is set on cpu reset, so check whether the
+			 * extra TLB are really usable.
+			 *
+			 * If they are disabled, they are nevertheless
+			 * writable, but random TLB insert operations
+			 * will never use any of them. This can be
+			 * checked by inserting dummy entries and check
+			 * if any of the last 16 entries have been used.
+			 *
+			 * Of course, due to the way the random replacement
+			 * works (hashing various parts of the TLB data,
+			 * such as address bits and ASID), not all the
+			 * available TLB will be used; we simply check
+			 * the highest valid TLB entry we can find and
+			 * see if it is in the upper 16 entries or not.
+			 */
+			sys_config.cpu[0].tlbsize = 48;
+			if (sys_config.cpu[0].vers_maj >= 2) {
+				struct tlb_entry te;
+				int e, lastvalid;
+
+				tlb_set_wired(0);
+				tlb_flush(64);
+				for (e = 0; e < 64 * 8; e++)
+					tlb_update(XKSSEG_BASE + ptoa(2 * e),
+					    pfn_to_pad(0) | PG_ROPAGE);
+				lastvalid = 0;
+				for (e = 0; e < 64; e++) {
+					tlb_read(e, &te);
+					if ((te.tlb_lo0 & PG_V) != 0)
+						lastvalid = e;
+				}
+				tlb_flush(64);
+				if (lastvalid >= 48)
+					sys_config.cpu[0].tlbsize = 64;
 			}
 			break;
-
+#endif
+#ifdef CPU_R10000
 		case MIPS_R10000:
 		case MIPS_R12000:
 		case MIPS_R14000:
 			sys_config.cpu[0].tlbsize = 64;
 			break;
-
+#endif
 		default:
 			sys_config.cpu[0].tlbsize = 48;
 			break;
@@ -394,17 +419,25 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	 * Configure cache.
 	 */
 	switch(sys_config.cpu[0].type) {
+#ifdef CPU_R10000
 	case MIPS_R10000:
 	case MIPS_R12000:
 	case MIPS_R14000:
 		cputype = MIPS_R10000;
 		break;
+#endif
+#ifdef CPU_R5000
 	case MIPS_R5000:
-	case MIPS_RM7000:
 	case MIPS_RM52X0:
+		cputype = MIPS_R5000;
+		break;
+#endif
+#ifdef CPU_RM7000
+	case MIPS_RM7000:
 	case MIPS_RM9000:
 		cputype = MIPS_R5000;
 		break;
+#endif
 	default:
 		/*
 		 * If we can't identify the cpu type, it must be
@@ -425,16 +458,8 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 		break;
 	}
 	switch (cputype) {
-	case MIPS_R10000:
-		Mips10k_ConfigCache();
-		sys_config._SyncCache = Mips10k_SyncCache;
-		sys_config._InvalidateICache = Mips10k_InvalidateICache;
-		sys_config._SyncDCachePage = Mips10k_SyncDCachePage;
-		sys_config._HitSyncDCache = Mips10k_HitSyncDCache;
-		sys_config._IOSyncDCache = Mips10k_IOSyncDCache;
-		sys_config._HitInvalidateDCache = Mips10k_HitInvalidateDCache;
-		break;
 	default:
+#if defined(CPU_R5000) || defined(CPU_RM7000)
 	case MIPS_R5000:
 		Mips5k_ConfigCache();
 		sys_config._SyncCache = Mips5k_SyncCache;
@@ -444,6 +469,18 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 		sys_config._IOSyncDCache = Mips5k_IOSyncDCache;
 		sys_config._HitInvalidateDCache = Mips5k_HitInvalidateDCache;
 		break;
+#endif
+#ifdef CPU_R10000
+	case MIPS_R10000:
+		Mips10k_ConfigCache();
+		sys_config._SyncCache = Mips10k_SyncCache;
+		sys_config._InvalidateICache = Mips10k_InvalidateICache;
+		sys_config._SyncDCachePage = Mips10k_SyncDCachePage;
+		sys_config._HitSyncDCache = Mips10k_HitSyncDCache;
+		sys_config._IOSyncDCache = Mips10k_IOSyncDCache;
+		sys_config._HitInvalidateDCache = Mips10k_HitInvalidateDCache;
+		break;
+#endif
 	}
 
 	/*
@@ -453,6 +490,7 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	delay(20*1000);		/* Let any UART FIFO drain... */
 
 	sys_config.cpu[0].tlbwired = UPAGES / 2;
+	tlb_set_page_mask(TLB_PAGE_MASK);
 	tlb_set_wired(0);
 	tlb_flush(sys_config.cpu[0].tlbsize);
 	tlb_set_wired(sys_config.cpu[0].tlbwired);
@@ -492,24 +530,32 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	 * Build proper TLB refill handler trampolines.
 	 */
 	switch (cputype) {
+#if defined(CPU_R5000) || defined(CPU_RM7000)
 	case MIPS_R5000:
+	    {
 		/*
 		 * R5000 processors need a specific chip bug workaround
 		 * in their tlb handlers.  Theoretically only revision 1
 		 * of the processor need it, but there is evidence
 		 * later versions also need it.
 		 *
-		 * This is also necessary on RM52x0; we test on the `rounded'
-		 * cputype value instead of sys_config.cpu[0].type; this
-		 * causes RM7k and RM9k to be included, just to be on the
-		 * safe side.
+		 * This is also necessary on RM52x0 and most RM7k/RM9k,
+		 * and is a documented errata for these chips.
 		 */
+		extern void tlb_miss_err_r5k;
+		extern void xtlb_miss_err_r5k;
 		tlb_handler = (vaddr_t)&tlb_miss_err_r5k;
 		xtlb_handler = (vaddr_t)&xtlb_miss_err_r5k;
+	    }
 		break;
+#endif
 	default:
+	    {
+		extern void tlb_miss;
+		extern void xtlb_miss;
 		tlb_handler = (vaddr_t)&tlb_miss;
 		xtlb_handler = (vaddr_t)&xtlb_miss;
+	    }
 		break;
 	}
 
@@ -783,7 +829,7 @@ setregs(p, pack, stack, retval)
 	p->p_md.md_regs->t9 = pack->ep_entry & ~3; /* abicall req */
 	p->p_md.md_regs->sr = SR_FR_32 | SR_XX | SR_KSU_USER | SR_KX | SR_UX |
 	    SR_EXL | SR_INT_ENAB;
-#if !defined(TGT_COHERENT)
+#if defined(CPU_R10000) && !defined(TGT_COHERENT)
 	if (sys_config.cpu[0].type == MIPS_R12000)
 		p->p_md.md_regs->sr |= SR_DSD;
 #endif
@@ -872,6 +918,15 @@ haltsys:
 void
 arcbios_halt(int howto)
 {
+	uint32_t sr;
+
+	sr = disableintr();
+
+#if 0
+	/* restore ARCBios page size... */
+	tlb_set_page_mask(PG_SIZE_4K);
+#endif
+
 	if (howto & RB_HALT) {
 		if (howto & RB_POWERDOWN)
 			Bios_PowerDown();
@@ -879,6 +934,8 @@ arcbios_halt(int howto)
 			Bios_EnterInteractiveMode();
 	} else
 		Bios_Reboot();
+
+	setsr(sr);
 }
 
 u_long	dumpmag = 0x8fca0101;	/* Magic number for savecore. */
@@ -966,8 +1023,8 @@ initcpu()
 {
 }
 
+#ifdef CPU_RM7000
 #ifdef	RM7K_PERFCNTR
-
 /*
  * RM7000 Performance counter support.
  */
@@ -1040,6 +1097,7 @@ rm7k_watchintr(trapframe)
 }
 
 #endif	/* RM7K_PERFCNTR */
+#endif	/* CPU_RM7000 */
 
 #ifdef DEBUG
 /*

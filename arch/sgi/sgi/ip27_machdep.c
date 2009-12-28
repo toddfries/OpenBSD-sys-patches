@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.36 2009/11/18 19:05:51 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.41 2009/12/04 22:48:11 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -40,12 +40,15 @@
 #include <uvm/uvm_extern.h>
 
 #include <sgi/sgi/ip27.h>
+#include <sgi/sgi/l1.h>
 #include <sgi/xbow/hub.h>
 #include <sgi/xbow/widget.h>
 #include <sgi/xbow/xbow.h>
 
 #include <sgi/pci/iofreg.h>
 #include <dev/ic/comvar.h>
+
+#include <dev/cons.h>
 
 extern char *hw_prod;
 
@@ -67,7 +70,7 @@ static uint maxnodes;
 
 int	ip27_hub_intr_register(int, int, int *);
 int	ip27_hub_intr_establish(int (*)(void *), void *, int, int,
-	    const char *);
+	    const char *, struct intrhand *);
 void	ip27_hub_intr_disestablish(int);
 void	ip27_hub_intr_clear(int);
 void	ip27_hub_intr_set(int);
@@ -529,11 +532,23 @@ ip27_halt(int howto)
 		else
 			promop = GDA_PROMOP_EIM;
 #else
-		if (howto & RB_POWERDOWN)
-			printf("Software powerdown not supported, "
-			    "please switch off power manually.\n");
-		for (;;) ;
-		/* NOTREACHED */
+		if (howto & RB_POWERDOWN) {
+			if (ip35) {
+				l1_exec_command(masternasid, "* pwr d");
+				delay(1000000);
+				printf("Powerdown failed, "
+				    "please switch off power manually.\n");
+			} else {
+				printf("Software powerdown not supported, "
+				    "please switch off power manually.\n");
+			}
+			for (;;) ;
+		} else {
+			printf("System halted.\n"
+			    "Press any key to restart\n");
+			cngetc();
+			promop = GDA_PROMOP_REBOOT;
+		}
 #endif
 	} else
 		promop = GDA_PROMOP_REBOOT;
@@ -625,7 +640,7 @@ found:
  */
 int
 ip27_hub_intr_establish(int (*func)(void *), void *arg, int intrbit,
-    int level, const char *name)
+    int level, const char *name, struct intrhand *ihstore)
 {
 	struct intrhand *ih, **anchor;
 	int s;
@@ -650,9 +665,15 @@ ip27_hub_intr_establish(int (*func)(void *), void *arg, int intrbit,
 	if (*anchor != NULL)
 		return EEXIST;
 
-	ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT);
-	if (ih == NULL)
-		return ENOMEM;
+	if (ihstore == NULL) {
+		ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT);
+		if (ih == NULL)
+			return ENOMEM;
+		ih->ih_flags = IH_ALLOCATED;
+	} else {
+		ih = ihstore;
+		ih->ih_flags = 0;
+	}
 
 	ih->ih_next = NULL;
 	ih->ih_fun = func;
@@ -712,7 +733,8 @@ ip27_hub_intr_disestablish(int intrbit)
 
 	splx(s);
 
-	free(ih, M_DEVBUF);
+	if (ISSET(ih->ih_flags, IH_ALLOCATED))
+		free(ih, M_DEVBUF);
 }
 
 void
@@ -750,6 +772,7 @@ ip27_hub_splx(int newipl)
 #define	INTR_FUNCTIONNAME	hubpi_intr0
 #define	MASK_FUNCTIONNAME	ip27_hub_intr_makemasks0
 #define	INTR_LOCAL_DECLS
+#define	MASK_LOCAL_DECLS
 #define	INTR_GETMASKS \
 do { \
 	/* XXX this assumes we run on cpu0 */ \
@@ -780,6 +803,7 @@ do { \
 #define	INTR_FUNCTIONNAME	hubpi_intr1
 #define	MASK_FUNCTIONNAME	ip27_hub_intr_makemasks1
 #define	INTR_LOCAL_DECLS
+#define	MASK_LOCAL_DECLS
 #define	INTR_GETMASKS \
 do { \
 	/* XXX this assumes we run on cpu0 */ \

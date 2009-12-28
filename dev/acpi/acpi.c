@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.146 2009/11/23 16:21:54 pirofti Exp $ */
+/* $OpenBSD: acpi.c,v 1.152 2009/11/26 23:44:38 mlarkin Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -66,6 +66,7 @@ int	acpi_match(struct device *, void *, void *);
 void	acpi_attach(struct device *, struct device *, void *);
 int	acpi_submatch(struct device *, void *, void *);
 int	acpi_print(void *, const char *);
+void	acpi_handle_suspend_failure(struct acpi_softc *);
 
 void	acpi_map_pmregs(struct acpi_softc *);
 
@@ -135,7 +136,8 @@ struct filterops acpiread_filtops = {
 };
 
 struct cfattach acpi_ca = {
-	sizeof(struct acpi_softc), acpi_match, acpi_attach
+	sizeof(struct acpi_softc), acpi_match, acpi_attach, NULL,
+	config_activate_children
 };
 
 struct cfdriver acpi_cd = {
@@ -958,6 +960,11 @@ acpiioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case APM_IOC_SUSPEND_REQ:
 	case APM_IOC_SUSPEND:
 	case APM_IOC_STANDBY:
+		/*
+		 * Must use a workq to get out of this process's address
+		 * space and into a kernel thread which has the kernel
+		 * address space (with the ACPI trampoline way low).
+		 */
 		workq_add_task(NULL, 0, (workq_fn)acpi_sleep_state,
 		    acpi_softc, (void *)ACPI_STATE_S3);
 		break;
@@ -1772,7 +1779,7 @@ acpi_init_pm(struct acpi_softc *sc)
 	sc->sc_wak = aml_searchname(&aml_root, "_WAK");
 	sc->sc_bfs = aml_searchname(&aml_root, "_BFS");
 	sc->sc_gts = aml_searchname(&aml_root, "_GTS");
-	sc->sc_sst = aml_searchname(&aml_root, "_SST");
+	sc->sc_sst = aml_searchname(&aml_root, "_SI_._SST");
 }
 
 #ifndef SMALL_KERNEL
@@ -1816,6 +1823,10 @@ acpi_sleep_state(struct acpi_softc *sc, int state)
 {
 	int ret;
 
+#ifdef MULTIPROCESSOR
+	if (ncpus > 1)	/* cannot suspend MP yet */
+		return (0);
+#endif
 	switch (state) {
 	case ACPI_STATE_S0:
 		return (0);
@@ -1910,19 +1921,26 @@ acpi_resume(struct acpi_softc *sc, int state)
 			    DEVNAME(sc));
 		}
 
-	/* Disable wake GPEs */
-	acpi_susp_resume_gpewalk(sc, state, 0);
-
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_RESUME);
-
-	enable_intr();
-	splx(acpi_saved_spl);
-
 	if (sc->sc_wak)
 		if (aml_evalnode(sc, sc->sc_wak, 1, &env, NULL) != 0) {
 			dnprintf(10, "%s evaluating method _WAK failed.\n",
 			    DEVNAME(sc));
 		}
+
+	/* Reset the indicator lights to "waking" */
+	if (sc->sc_sst) {
+		env.v_integer = ACPI_SST_WAKING;
+		aml_evalnode(sc, sc->sc_sst, 1, &env, NULL);
+	}
+
+	/* Disable wake GPEs */
+	acpi_susp_resume_gpewalk(sc, state, 0);
+
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_RESUME);
+
+	cold = 0;
+	enable_intr();
+	splx(acpi_saved_spl);
 
 	sc->sc_state = ACPI_STATE_S0;
 	if (sc->sc_tts) {
@@ -1932,8 +1950,44 @@ acpi_resume(struct acpi_softc *sc, int state)
 			    DEVNAME(sc));
 		}
 	}
+
+	/* Reset the indicator lights to "working" */
+	if (sc->sc_sst) {
+		env.v_integer = ACPI_SST_WORKING;
+		aml_evalnode(sc, sc->sc_sst, 1, &env, NULL);
+	}
 }
 #endif /* ! SMALL_KERNEL */
+
+void
+acpi_handle_suspend_failure(struct acpi_softc *sc)
+{
+	struct aml_value env;
+
+	/* Undo a partial suspend. Devices will have already been resumed */
+	cold = 0;
+	enable_intr();
+	splx(acpi_saved_spl);
+
+
+	/* Tell ACPI to go back to S0 */
+	memset(&env, 0, sizeof(env));
+	env.type = AML_OBJTYPE_INTEGER;
+	sc->sc_state = ACPI_STATE_S0;
+	if (sc->sc_tts) {
+		env.v_integer = sc->sc_state;
+		if (aml_evalnode(sc, sc->sc_tts, 1, &env, NULL) != 0) {
+			dnprintf(10, "%s evaluating method _TTS failed.\n",
+			    DEVNAME(sc));
+		}
+	}
+
+	/* Reset the indicator lights to "working" */
+	if (sc->sc_sst) {
+		env.v_integer = ACPI_SST_WORKING;
+		aml_evalnode(sc, sc->sc_sst, 1, &env, NULL);
+	}
+}
 
 int
 acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
@@ -1963,9 +2017,13 @@ acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
 
 	acpi_saved_spl = splhigh();
 	disable_intr();
+	cold = 1;
 #ifndef SMALL_KERNEL
 	if (state == ACPI_STATE_S3)
- 		config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
+		if (config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND) != 0) {
+			acpi_handle_suspend_failure(sc);
+			return (1);
+		}
 #endif /* ! SMALL_KERNEL */
 
 	/* _PTS(state) */
@@ -1984,9 +2042,6 @@ acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
 			    DEVNAME(sc));
 			return (ENXIO);
 		}
-
-	if (sc->sc_sst)
-		aml_evalnode(sc, sc->sc_sst, 1, &env, NULL);
 
 	/* Enable wake GPEs */
 	acpi_susp_resume_gpewalk(sc, state, 1);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdvar.h,v 1.23 2009/11/12 06:20:27 dlg Exp $	*/
+/*	$OpenBSD: sdvar.h,v 1.25 2009/12/03 14:31:03 dlg Exp $	*/
 /*	$NetBSD: sdvar.h,v 1.7 1998/08/17 00:49:03 mycroft Exp $	*/
 
 /*-
@@ -49,10 +49,10 @@
 
 #ifdef _KERNEL
 struct sd_softc {
-	struct device sc_dev;
-	struct disk sc_dk;
+	struct device		sc_dev;
+	struct disk		sc_dk;
 
-	int flags;
+	int			flags;
 #define	SDF_LOCKED	0x01
 #define	SDF_WANTED	0x02
 #define	SDF_WLABEL	0x04		/* label is writable */
@@ -60,7 +60,9 @@ struct sd_softc {
 #define	SDF_ANCIENT	0x10		/* disk is ancient; for minphys */
 #define	SDF_DIRTY	0x20		/* disk is dirty; needs cache flush */
 #define	SDF_DYING	0x40		/* dying, when deactivated */
-	struct scsi_link *sc_link;	/* contains our targ, lun, etc. */
+#define SDF_WAITING	0x80		/* bus is busy, try again later */
+#define SDF_STARTING	0x100		/* sdstart is already running */
+	struct scsi_link	*sc_link; /* contains our targ, lun, etc. */
 	struct disk_parms {
 		u_long	heads;		/* number of heads */
 		u_long	cyls;		/* number of cylinders */
@@ -69,9 +71,12 @@ struct sd_softc {
 		u_long	rot_rate;	/* rotational rate, in RPM */
 		daddr64_t	disksize;	/* total number sectors */
 	} params;
-	struct buf buf_queue;
+	struct mutex sc_buf_mtx;
+	struct mutex sc_start_mtx;
+	struct buf sc_buf_queue;
 	void *sc_sdhook;		/* our shutdown hook */
 	struct timeout sc_timeout;
+	
 };
 
 #define	SDGP_RESULT_OK		0	/* parameters obtained */

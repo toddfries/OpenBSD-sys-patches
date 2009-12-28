@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.162 2009/08/11 18:43:33 blambert Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.164 2009/12/23 07:40:31 guenther Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -263,6 +263,9 @@ main(void *framep)
 	TAILQ_INSERT_TAIL(&process0.ps_threads, p, p_thr_link);
 	process0.ps_refcnt = 1;
 	p->p_p = &process0;
+
+	/* Set the default routing domain. */
+	process0.ps_rdomain = 0;
 
 	LIST_INSERT_HEAD(&allproc, p, p_list);
 	p->p_pgrp = &pgrp0;

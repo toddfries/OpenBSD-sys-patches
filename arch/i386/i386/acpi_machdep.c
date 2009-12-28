@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.24 2009/11/23 16:21:54 pirofti Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.27 2009/11/29 21:21:06 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -219,11 +219,8 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 		return (ENXIO);
 	}
 
-	if (rcr3() != pmap_kernel()->pm_pdirpa) {
-		pmap_activate(curproc);
-
-		KASSERT(rcr3() == pmap_kernel()->pm_pdirpa);
-	}
+	/* i386 does lazy pmap_activate */
+	pmap_activate(curproc);
 
 	/*
 	 *
@@ -243,6 +240,7 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 
 	/* Copy the current cpu registers into a safe place for resume. */
 	if (acpi_savecpu()) {
+		npxsave_cpu(curcpu(), 1);
 		wbinvd();
 		acpi_enter_sleep_state(sc, state);
 		panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
@@ -257,6 +255,12 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	 * last call instruction - after the call to acpi_savecpu.
 	 */
 	
+#if 0
+        /* Temporarily disabled for debugging purposes */
+        /* Reset the wakeup vector to avoid resuming on reboot */
+        sc->sc_facs->wakeup_vector = 0;
+#endif	
+
 #if NISA > 0
 	isa_defaultirq();
 #endif

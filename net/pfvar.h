@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.300 2009/11/23 16:03:10 henning Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.303 2009/12/24 04:24:19 dlg Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -529,6 +529,7 @@ struct pf_rule {
 	char			 label[PF_RULE_LABEL_SIZE];
 #define PF_QNAME_SIZE		 64
 	char			 ifname[IFNAMSIZ];
+	char			 rcv_ifname[IFNAMSIZ];
 	char			 qname[PF_QNAME_SIZE];
 	char			 pqname[PF_QNAME_SIZE];
 #define	PF_TAG_NAME_SIZE	 64
@@ -547,6 +548,7 @@ struct pf_rule {
 	u_int64_t		 bytes[2];
 
 	struct pfi_kif		*kif;
+	struct pfi_kif		*rcv_kif;
 	struct pf_anchor	*anchor;
 	struct pfr_ktable	*overload_tbl;
 
@@ -578,6 +580,7 @@ struct pf_rule {
 	u_int16_t		 max_mss;
 	u_int16_t		 tag;
 	u_int16_t		 match_tag;
+	u_int16_t		 scrub_flags;
 
 	struct pf_rule_uid	 uid;
 	struct pf_rule_gid	 gid;
@@ -590,7 +593,6 @@ struct pf_rule {
 	u_int8_t		 quick;
 	u_int8_t		 ifnot;
 	u_int8_t		 match_tag_not;
-	u_int8_t		 natpass;
 
 #define PF_STATE_NORMAL		0x1
 #define PF_STATE_MODULATE	0x2
@@ -614,8 +616,7 @@ struct pf_rule {
 #define PF_FLUSH		0x01
 #define PF_FLUSH_GLOBAL		0x02
 	u_int8_t		 flush;
-	u_int16_t		 scrub_flags;
-	u_int8_t		 pad2[2];
+	u_int8_t		 pad2[3];
 
 	struct {
 		struct pf_addr		addr;
@@ -659,22 +660,31 @@ struct pf_rule_item {
 
 SLIST_HEAD(pf_rule_slist, pf_rule_item);
 
+enum pf_sn_types { PF_SN_NONE, PF_SN_NAT, PF_SN_RDR, PF_SN_ROUTE, PF_SN_MAX };
+
 struct pf_src_node {
-	RB_ENTRY(pf_src_node) entry;
-	struct pf_addr	 addr;
-	struct pf_addr	 raddr;
-	union pf_rule_ptr rule;
-	struct pfi_kif	*kif;
-	u_int64_t	 bytes[2];
-	u_int64_t	 packets[2];
-	u_int32_t	 states;
-	u_int32_t	 conn;
-	struct pf_threshold	conn_rate;
-	u_int32_t	 creation;
-	u_int32_t	 expire;
-	sa_family_t	 af;
-	u_int8_t	 ruletype;
+	RB_ENTRY(pf_src_node)	 entry;
+	struct pf_addr		 addr;
+	struct pf_addr		 raddr;
+	union pf_rule_ptr	 rule;
+	struct pfi_kif		*kif;
+	u_int64_t		 bytes[2];
+	u_int64_t		 packets[2];
+	u_int32_t		 states;
+	u_int32_t		 conn;
+	struct pf_threshold	 conn_rate;
+	u_int32_t		 creation;
+	u_int32_t		 expire;
+	sa_family_t		 af;
+	u_int8_t		 type;
 };
+
+struct pf_sn_item {
+	SLIST_ENTRY(pf_sn_item)	 next;
+	struct pf_src_node	*sn;
+};
+
+SLIST_HEAD(pf_sn_head, pf_sn_item);
 
 #define PFSNODE_HIWAT		10000	/* default source node table size */
 
@@ -767,10 +777,10 @@ struct pf_state {
 	union pf_rule_ptr	 rule;
 	union pf_rule_ptr	 anchor;
 	struct pf_addr		 rt_addr;
+	struct pf_sn_head	 src_nodes;
 	struct pf_state_key	*key[2];	/* addresses stack and wire  */
 	struct pfi_kif		*kif;
 	struct pfi_kif		*rt_kif;
-	struct pf_src_node	*src_node;
 	u_int64_t		 packets[2];
 	u_int64_t		 bytes[2];
 	u_int32_t		 creation;
@@ -1650,7 +1660,7 @@ extern int			 pf_tbladdr_setup(struct pf_ruleset *,
 extern void			 pf_tbladdr_remove(struct pf_addr_wrap *);
 extern void			 pf_tbladdr_copyout(struct pf_addr_wrap *);
 extern void			 pf_calc_skip_steps(struct pf_rulequeue *);
-extern struct pool		 pf_src_tree_pl, pf_rule_pl;
+extern struct pool		 pf_src_tree_pl, pf_sn_item_pl, pf_rule_pl;
 extern struct pool		 pf_state_pl, pf_state_key_pl, pf_state_item_pl,
 				    pf_altq_pl, pf_pooladdr_pl, pf_rule_item_pl;
 extern struct pool		 pf_state_scrub_pl;
@@ -1663,10 +1673,17 @@ extern int			 pf_state_insert(struct pfi_kif *,
 				    struct pf_state_key *,
 				    struct pf_state_key *,
 				    struct pf_state *);
-extern int			 pf_insert_src_node(struct pf_src_node **,
-				    struct pf_rule *, struct pf_addr *,
-				    sa_family_t);
+int				 pf_insert_src_node(struct pf_src_node **,
+				    struct pf_rule *, enum pf_sn_types,
+				    sa_family_t, struct pf_addr *,
+				    struct pf_addr *, int);
+void				 pf_remove_src_node(struct pf_src_node *);
+struct pf_src_node		*pf_get_src_node(struct pf_state *,
+				    enum pf_sn_types);
 void				 pf_src_tree_remove_state(struct pf_state *);
+void				 pf_state_rm_src_node(struct pf_state *,
+				    struct pf_src_node *);
+
 extern struct pf_state		*pf_find_state_byid(struct pf_state_cmp *);
 extern struct pf_state		*pf_find_state_all(struct pf_state_key_cmp *,
 				    u_int, int *);
@@ -1871,12 +1888,12 @@ int			 pf_step_out_of_anchor(int *, struct pf_ruleset **,
 
 int			 pf_get_transaddr(struct pf_rule *, struct pf_pdesc *,
 			    struct pf_addr *, u_int16_t *, struct pf_addr *,
-			    u_int16_t *);
+			    u_int16_t *, struct pf_src_node **);
 
 int			 pf_map_addr(sa_family_t, struct pf_rule *,
 			    struct pf_addr *, struct pf_addr *,
 			    struct pf_addr *, struct pf_src_node **,
-			    struct pf_pool *);
+			    struct pf_pool *, enum pf_sn_types);
 
 int			 pf_state_key_setup(struct pf_pdesc *,
 			    struct pf_state_key **, struct pf_state_key **,

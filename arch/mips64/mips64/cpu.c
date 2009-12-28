@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.17 2009/11/22 19:41:41 syuu Exp $ */
+/*	$OpenBSD: cpu.c,v 1.22 2009/12/28 06:55:27 syuu Exp $ */
 
 /*
  * Copyright (c) 1997-2004 Opsycon AB (www.opsycon.se)
@@ -31,6 +31,7 @@
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/device.h>
+#include <sys/malloc.h>
 
 #include <machine/cpu.h>
 #include <machine/autoconf.h>
@@ -70,7 +71,7 @@ u_int	CpuOnboardCacheOn;	/* RM7K */
 int cpu_is_rm7k = 0;
 
 struct cfattach cpu_ca = {
-	sizeof(struct cpu_info), cpumatch, cpuattach
+	sizeof(struct device), cpumatch, cpuattach
 };
 struct cfdriver cpu_cd = {
 	NULL, "cpu", DV_DULL, NULL, 0
@@ -94,7 +95,7 @@ cpumatch(struct device *parent, void *match, void *aux)
 void
 cpuattach(struct device *parent, struct device *dev, void *aux)
 {
-	struct cpu_info *ci = (struct cpu_info *)dev;
+	struct cpu_info *ci;
 	int cpuno = dev->dv_unit;
 	int isr16k = 0;
 	int displayver;
@@ -105,18 +106,22 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		ci->ci_flags |= CPUF_RUNNING | CPUF_PRESENT | CPUF_PRIMARY;
 		cpuset_add(&cpus_running, ci);
 #endif
-		bcopy(dev, &ci->ci_dev, sizeof *dev);
 	}
 #ifdef MULTIPROCESSOR
 	else {
+		ci = (struct cpu_info *)smp_malloc(sizeof(*ci));
+		if (ci == NULL)
+			panic("unable to allocate cpu_info\n");
+		bzero((char *)ci, sizeof(*ci));
 		ci->ci_next = cpu_info_list->ci_next;
 		cpu_info_list->ci_next = ci;
 		ci->ci_flags |= CPUF_PRESENT;
+		cpu_info[cpuno] = ci;
 	}
-	cpu_info[cpuno] = ci;
 #endif
 	ci->ci_self = ci;
 	ci->ci_cpuid = cpuno;
+	ci->ci_dev = dev;
 
 	printf(": ");
 
@@ -323,12 +328,51 @@ cpu_boot_secondary_processors(void)
                        continue;
                if (ci->ci_flags & CPUF_PRIMARY)
                        continue;
+
+               sched_init_cpu(ci);
+               ci->ci_randseed = random();
                cpu_boot_secondary(ci);
        }
+
+       /* This must called after xheart0 has initialized, so here is 
+	* the best place to do so.
+	*/
+       mips64_ipi_init();
 }
 
 void
 cpu_unidle(struct cpu_info *ci)
 {
+	if (ci != curcpu())
+		mips64_send_ipi(ci->ci_cpuid, MIPS64_IPI_NOP);
+}
+
+vaddr_t 
+smp_malloc(size_t size)
+{
+       struct pglist mlist;
+       struct vm_page *m;
+       int error;
+       vaddr_t va;
+       paddr_t pa;
+
+       if (size < PAGE_SIZE) {
+	       va = (vaddr_t)malloc(size, M_DEVBUF, M_NOWAIT);
+	       if (va == NULL)
+		       return NULL;
+	       error = pmap_extract(pmap_kernel(), va, &pa);
+	       if (error == FALSE)
+		       return NULL;
+       } else { 
+	       TAILQ_INIT(&mlist);
+	       error = uvm_pglistalloc(size, 0, -1L, 0, 0,
+		   &mlist, 1, UVM_PLA_NOWAIT);
+	       if (error)
+		       return NULL;
+	       m = TAILQ_FIRST(&mlist);
+	       pa = VM_PAGE_TO_PHYS(m);
+       }
+
+       return PHYS_TO_XKPHYS(pa, CCA_CACHED);
 }
 #endif
