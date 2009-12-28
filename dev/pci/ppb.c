@@ -428,6 +428,7 @@ ppb_alloc_resources(struct ppb_softc *sc)
 	int reg, reg_start, reg_end, reg_rom;
 	int io_count = 0;
 	int mem_count = 0;
+	int ppb_count = 0;
 	bus_addr_t start, end;
 	u_long base, size;
 	char *name;
