@@ -91,7 +91,6 @@ struct pcibus_attach_args {
 	bus_dma_tag_t pba_dmat;		/* DMA tag */
 	pci_chipset_tag_t pba_pc;
 
-	struct extent	*pba_busex;
 	struct extent	*pba_ioex;
 	struct extent	*pba_memex;
 	struct extent	*pba_pmemex;
@@ -124,7 +123,6 @@ struct pci_attach_args {
 	pci_chipset_tag_t pa_pc;
 	int		pa_flags;	/* flags; see below */
 
-	struct extent	*pa_busex;
 	struct extent	*pa_ioex;
 	struct extent	*pa_memex;
 	struct extent	*pa_pmemex;
@@ -182,7 +180,6 @@ struct pci_softc {
 	bus_space_tag_t sc_iot, sc_memt;
 	bus_dma_tag_t sc_dmat;
 	pci_chipset_tag_t sc_pc;
-	struct extent *sc_busex;
 	struct extent *sc_ioex;
 	struct extent *sc_memex;
 	struct extent *sc_pmemex;
