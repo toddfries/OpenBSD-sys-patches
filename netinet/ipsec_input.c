@@ -274,7 +274,8 @@ int
 ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
     struct m_tag *mt)
 {
-	int prot, af, sproto;
+	int af, sproto;
+	u_char prot;
 
 #if NBPFILTER > 0
 	struct ifnet *bpfif;
@@ -426,7 +427,7 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 		ip6->ip6_plen = htons(m->m_pkthdr.len - skip);
 
 		/* Save protocol */
-		m_copydata(m, protoff, 1, (unsigned char *) &prot);
+		m_copydata(m, protoff, 1, (caddr_t) &prot);
 
 #ifdef INET
 		/* IP-in-IP encapsulation */

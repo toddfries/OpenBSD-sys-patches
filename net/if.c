@@ -1334,14 +1334,21 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 			return (error);
 
 #ifdef INET6
-		/* when IFXF_NOINET6 gets changed, detach/attach */
-		if (ifp->if_flags & IFF_UP && ifr->ifr_flags & IFXF_NOINET6 &&
-		    !(ifp->if_xflags & IFXF_NOINET6))
+		if (ifr->ifr_flags & IFXF_NOINET6 &&
+		    !(ifp->if_xflags & IFXF_NOINET6)) {
+			int s = splnet();
 			in6_ifdetach(ifp);
-		if (ifp->if_flags & IFF_UP && ifp->if_xflags & IFXF_NOINET6 &&
+			splx(s);
+		}
+		if (ifp->if_xflags & IFXF_NOINET6 &&
 		    !(ifr->ifr_flags & IFXF_NOINET6)) {
 			ifp->if_xflags &= ~IFXF_NOINET6;
-			in6_if_up(ifp);
+			if (ifp->if_flags & IFF_UP) {
+				/* configure link-local address */
+				int s = splnet();
+				in6_if_up(ifp);
+				splx(s);
+			}
 		}
 #endif
 
