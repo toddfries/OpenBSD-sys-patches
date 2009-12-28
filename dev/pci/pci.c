@@ -156,7 +156,6 @@ pciattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_memt = pba->pba_memt;
 	sc->sc_dmat = pba->pba_dmat;
 	sc->sc_pc = pba->pba_pc;
-	sc->sc_busex = pba->pba_busex;
 	sc->sc_ioex = pba->pba_ioex;
 	sc->sc_memex = pba->pba_memex;
 	sc->sc_pmemex = pba->pba_pmemex;
@@ -302,7 +301,6 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 	pa.pa_memt = sc->sc_memt;
 	pa.pa_dmat = sc->sc_dmat;
 	pa.pa_pc = pc;
-	pa.pa_busex = sc->sc_busex;
 	pa.pa_ioex = sc->sc_ioex;
 	pa.pa_memex = sc->sc_memex;
 	pa.pa_pmemex = sc->sc_pmemex;
@@ -533,7 +531,7 @@ pci_reserve_resources(struct pci_attach_args *pa)
 {
 	pci_chipset_tag_t pc = pa->pa_pc;
 	pcitag_t tag = pa->pa_tag;
-	pcireg_t bhlc, bir, blr, type;
+	pcireg_t bhlc, blr, type;
 	bus_addr_t base, limit;
 	bus_size_t size;
 	int reg, reg_start, reg_end;
@@ -548,12 +546,6 @@ pci_reserve_resources(struct pci_attach_args *pa)
 	case 1: /* PCI-PCI bridge */
 		reg_start = PCI_MAPREG_START;
 		reg_end = PCI_MAPREG_PPB_END;
-		bir = pci_conf_read(pc, tag, PPB_REG_BUSINFO);
-		base = PPB_BUSINFO_SECONDARY(bir);
-		size = PPB_BUSINFO_SUBORDINATE(bir) - base + 1;
-		if (pa->pa_busex && base != 0 &&
-		    extent_alloc_region(pa->pa_busex, base, size, EX_NOWAIT))
-			    printf("bus conflict %d/%d\n", base, size);
 		break;
 	case 2: /* PCI-CardBus bridge */
 		reg_start = PCI_MAPREG_START;
