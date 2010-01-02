@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.147 2009/12/09 21:02:51 krw Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.149 2010/01/01 07:06:27 dlg Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -193,7 +193,7 @@ scsi_xs_get(struct scsi_link *link, int flags)
 			return (NULL);
 		}
 
-		SET(link->flags, SDEV_WAITING);
+		atomic_setbits_int(&link->state, SDEV_S_WAITING);
 		msleep(link, &link->mtx, PRIBIO, "getxs", 0);
 	}
 	link->openings--;
@@ -239,8 +239,8 @@ scsi_xs_put(struct scsi_xfer *xs)
 	link->openings++;
 
 	/* If someone is waiting for scsi_xfer, wake them up. */
-	if (ISSET(link->flags, SDEV_WAITING)) {
-		CLR(link->flags, SDEV_WAITING);
+	if (ISSET(link->state, SDEV_S_WAITING)) {
+		atomic_clearbits_int(&link->state, SDEV_S_WAITING);
 		wakeup(link);
 	}
 	mtx_leave(&link->mtx);
@@ -708,7 +708,6 @@ scsi_report_luns(struct scsi_link *sc_link, int selectreport,
 void
 scsi_xs_exec(struct scsi_xfer *xs)
 {
-	int rv;
 	int s;
 
 	xs->flags &= ~ITSDONE;
@@ -731,8 +730,7 @@ scsi_xs_exec(struct scsi_xfer *xs)
 	 * In those cases we must call scsi_done() for it.
 	 */
 
-	rv = xs->sc_link->adapter->scsi_cmd(xs);
-	if (rv == NO_CCB) {
+	if (xs->sc_link->adapter->scsi_cmd(xs) == NO_CCB) {
 		/*
 		 * Give the xs back to the device driver to retry on its own.
 		 */
@@ -742,10 +740,6 @@ scsi_xs_exec(struct scsi_xfer *xs)
 		scsi_done(xs);
 		splx(s);
 	}
-
-	/*
-	 * The adapter has called or will call scsi_done().
-	 */
 }
 
 /*

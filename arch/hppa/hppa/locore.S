@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.162 2009/07/29 20:00:47 kettenis Exp $	*/
+/*	$OpenBSD: locore.S,v 1.164 2009/12/31 12:52:35 jsing Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -101,6 +101,7 @@
 	.import	panic, code
 
 #define curproc	(cpu_info_primary + CI_CURPROC)
+#define cpl	(cpu_info_primary + CI_CPL)
 
 #define	EMRG_STACKSIZE	(1*NBPG)
 #define	FPEMU_STACKSIZE	(1*NBPG)
@@ -2103,7 +2104,6 @@ intr_ticks
 #define	INTR_PROF_AFT	/* */
 #endif
 
-	.import	cpl, data
 	.import	ipending, data
 	.import	imask, data
 	.import	intr_table, data
@@ -2898,6 +2898,14 @@ LEAF_ENTRY(cpu_idle_leave)
 EXIT(cpu_idle_leave)
 
 ENTRY(switch_trampoline,0)
+#ifdef MULTIPROCESSOR
+	copy	t4, r3
+	copy	arg0, r4
+	bl	proc_trampoline_mp, rp
+	nop
+	copy	r4, arg0
+	copy	r3, t4
+#endif
 	ldil	L%cpl, t1
 	stw	r0, R%cpl(t1)
 	.call

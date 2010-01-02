@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.25 2009/03/15 19:40:40 miod Exp $	*/
+/*	$OpenBSD: intr.h,v 1.28 2009/12/31 13:22:02 jsing Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Michael Shalayeff
@@ -57,9 +57,7 @@
 
 #include <machine/atomic.h>
 
-extern volatile int cpl;
 extern volatile u_long ipending, imask[NIPL];
-extern int astpending;
 
 #ifdef DIAGNOSTIC
 void splassert_fail(int, int, const char *);
@@ -92,11 +90,12 @@ spllower(int ncpl)
 static __inline int
 splraise(int ncpl)
 {
-	int ocpl = cpl;
+	struct cpu_info *ci = curcpu();
+	int ocpl = ci->ci_cpl;
 
 	if (ocpl < ncpl)
-		cpl = ncpl;
-	__asm __volatile ("sync" : "+r" (cpl));
+		ci->ci_cpl = ncpl;
+	__asm __volatile ("sync" : "+r" (ci->ci_cpl));
 
 	return (ocpl);
 }
@@ -105,6 +104,23 @@ static __inline void
 splx(int ncpl)
 {
 	(void)spllower(ncpl);
+}
+
+static __inline register_t
+hppa_intr_disable(void)
+{
+	register_t eiem;
+
+	__asm __volatile("mfctl %%cr15, %0": "=r" (eiem));
+	__asm __volatile("mtctl %r0, %cr15");
+
+	return eiem;
+}
+
+static __inline void
+hppa_intr_enable(register_t eiem)
+{
+	__asm __volatile("mtctl %0, %%cr15":: "r" (eiem));
 }
 
 #define	splsoftclock()	splraise(IPL_SOFTCLOCK)
@@ -126,7 +142,7 @@ splx(int ncpl)
 #define	SOFTINT_MASK ((1 << (IPL_SOFTCLOCK - 1)) | \
     (1 << (IPL_SOFTNET - 1)) | (1 << (IPL_SOFTTTY - 1)))
 
-#define	setsoftast()	(astpending = 1)
+#define	setsoftast(p)	(p->p_md.md_astpending = 1)
 #define	setsoftnet()	softintr(1 << (IPL_SOFTNET - 1))
 
 void	*softintr_establish(int, void (*)(void *), void *);
