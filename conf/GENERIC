@@ -67,6 +67,7 @@ option		PPP_BSDCOMP	# PPP BSD compression
 option		PPP_DEFLATE
 option		MROUTING	# Multicast router
 #option		PIM		# Protocol Independent Multicast
+option		MPLS		# MPLS
 
 #mpath0		at root		# SCSI Multipathing
 #scsibus*	at mpath?
@@ -100,6 +101,7 @@ pseudo-device	carp		# CARP protocol support
 pseudo-device	gif		# IPv[46] over IPv[46] tunnel (RFC1933)
 pseudo-device	gre		# GRE encapsulation interface
 pseudo-device	loop		# network loopback
+pseudo-device	mpe		# MPLS Provider Edge
 pseudo-device	ppp		# PPP
 pseudo-device	sl		# CSLIP
 pseudo-device	tun		# network tunneling over tty
