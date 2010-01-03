@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpivar.h,v 1.25 2009/11/02 23:20:41 marco Exp $ */
+/*	$OpenBSD: mpivar.h,v 1.28 2010/01/03 06:47:58 dlg Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -69,6 +69,7 @@ struct mpi_softc;
 
 struct mpi_rcb {
 	void			*rcb_reply;
+	bus_addr_t		rcb_offset;
 	u_int32_t		rcb_reply_dva;
 };
 
@@ -76,7 +77,7 @@ struct mpi_ccb {
 	struct mpi_softc	*ccb_sc;
 	int			ccb_id;
 
-	struct scsi_xfer	*ccb_xs;
+	void 			*ccb_cookie;
 	bus_dmamap_t		ccb_dmamap;
 
 	bus_addr_t		ccb_offset;
@@ -111,6 +112,8 @@ struct mpi_softc {
 	bus_size_t		sc_ios;
 	bus_dma_tag_t		sc_dmat;
 
+	struct mutex		sc_reply_mtx;
+
 	u_int8_t		sc_porttype;
 	int			sc_maxcmds;
 	int			sc_maxchdepth;
@@ -125,10 +128,13 @@ struct mpi_softc {
 	struct mpi_dmamem	*sc_requests;
 	struct mpi_ccb		*sc_ccbs;
 	struct mpi_ccb_list	sc_ccb_free;
+	struct mutex		sc_ccb_mtx;
 
 	struct mpi_dmamem	*sc_replies;
 	struct mpi_rcb		*sc_rcbs;
 	int			sc_repq;
+
+	struct mpi_ccb		*sc_evt_ccb;
 
 	size_t			sc_fw_len;
 	struct mpi_dmamem	*sc_fw;
