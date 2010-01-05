@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.173 2009/12/07 00:09:27 krw Exp $	*/
+/*	$OpenBSD: sd.c,v 1.175 2010/01/05 01:21:34 dlg Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -782,9 +782,6 @@ sd_buf_done(struct scsi_xfer *xs)
 
 	splassert(IPL_BIO);
 
-	disk_unbusy(&sc->sc_dk, bp->b_bcount - xs->resid,
-	    bp->b_flags & B_READ);
-
 	switch (xs->error) {
 	case XS_NOERROR:
 		bp->b_error = 0;
@@ -793,6 +790,8 @@ sd_buf_done(struct scsi_xfer *xs)
 
 	case XS_NO_CCB:
 		/* The adapter is busy, requeue the buf and try it later. */
+		disk_unbusy(&sc->sc_dk, bp->b_bcount - xs->resid,
+		    bp->b_flags & B_READ);
 		sd_buf_requeue(sc, bp);
 		scsi_xs_put(xs);
 		SET(sc->flags, SDF_WAITING); /* break out of sdstart loop */
@@ -819,6 +818,9 @@ sd_buf_done(struct scsi_xfer *xs)
 		bp->b_resid = bp->b_bcount;
 		break;
 	}
+
+	disk_unbusy(&sc->sc_dk, bp->b_bcount - xs->resid,
+	    bp->b_flags & B_READ);
 
 	biodone(bp);
 	scsi_xs_put(xs);
@@ -1471,8 +1473,6 @@ validate:
 
 	return (SDGP_RESULT_OK);
 }
-void
-sd_flush_done(struct scsi_xfer *xs);
 
 void
 sd_flush(struct sd_softc *sc, int flags)
@@ -1502,29 +1502,12 @@ sd_flush(struct sd_softc *sc, int flags)
 	xs->cmdlen = sizeof(*cmd);
 	xs->timeout = 100000;
 
-	xs->done = sd_flush_done;
-
-	do {
-		scsi_xs_exec(xs);
-		if (!ISSET(xs->flags, SCSI_POLL)) {
-			while (!ISSET(xs->flags, ITSDONE))
-				tsleep(xs, PRIBIO, "sdflush", 0);
-		}
-	} while (xs->status == XS_NO_CCB);
-
-	if (xs->error == XS_NOERROR)
+	if (scsi_xs_sync(xs) == 0)
 		sc->flags &= ~SDF_DIRTY;
 	else
 		SC_DEBUG(link, SDEV_DB1, ("cache sync failed\n"));
 
 	scsi_xs_put(xs);
-}
-
-void
-sd_flush_done(struct scsi_xfer *xs)
-{
-	if (!ISSET(xs->flags, SCSI_POLL))
-		wakeup_one(xs);
 }
 
 /*
