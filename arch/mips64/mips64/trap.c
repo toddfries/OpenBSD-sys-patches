@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.54 2010/01/01 15:04:00 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.57 2010/01/08 01:35:52 syuu Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -88,8 +88,6 @@
 
 #define	USERMODE(ps)	(((ps) & SR_KSU_MASK) == SR_KSU_USER)
 
-struct	proc *machFPCurProcPtr;		/* pointer to last proc to use FP */
-
 const char *trap_type[] = {
 	"external interrupt",
 	"TLB modification",
@@ -136,8 +134,6 @@ int	kdbpeek(void *);
 extern int kdb_trap(int, db_regs_t *);
 #endif
 
-extern void MipsSwitchFPState(struct proc *, struct trap_frame *);
-extern void MipsSwitchFPState16(struct proc *, struct trap_frame *);
 extern void MipsFPTrap(u_int, u_int, u_int, union sigval);
 
 void	ast(void);
@@ -209,11 +205,16 @@ trap(trapframe)
 	}
 
 	/*
-	 * Enable hardware interrupts if they were on before the trap.
+	 * Enable hardware interrupts if they were on before the trap;
+	 * enable IPI interrupts only otherwise.
 	 */
-	if (trapframe->sr & SR_INT_ENAB) {
-		if (type != T_BREAK) {
+	if (type != T_BREAK) {
+		if (ISSET(trapframe->sr, SR_INT_ENAB))
 			enableintr();
+		else {
+#ifdef MULTIPROCESSOR
+			ENABLEIPI();
+#endif
 		}
 	}
 
@@ -759,14 +760,7 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 			break;
 		}
 
-		if (p->p_md.md_regs->sr & SR_FR_32)
-			MipsSwitchFPState(machFPCurProcPtr, p->p_md.md_regs);
-		else
-			MipsSwitchFPState16(machFPCurProcPtr, p->p_md.md_regs);
-
-		machFPCurProcPtr = p;
-		p->p_md.md_regs->sr |= SR_COP_1_BIT;
-		p->p_md.md_flags |= MDP_FPUSED;
+		enable_fpu(p);
 		goto out;
 
 	case T_FPE:

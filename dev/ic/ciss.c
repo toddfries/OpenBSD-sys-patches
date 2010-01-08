@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss.c,v 1.36 2009/12/17 19:42:39 krw Exp $	*/
+/*	$OpenBSD: ciss.c,v 1.38 2010/01/07 11:03:37 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff
@@ -892,8 +892,12 @@ ciss_scsi_raw_cmd(struct scsi_xfer *xs)	/* TODO */
 	/* TODO check this target has not yet employed w/ any volume */
 
 	ccb = ciss_get_ccb(sc);
-	if (ccb == NULL)
-		return NO_CCB;
+	if (ccb == NULL) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		CISS_UNLOCK(sc, lock);
+		return (COMPLETE);
+	}
 
 	cmd = &ccb->ccb_cmd;
 	ccb->ccb_len = xs->datalen;
@@ -919,7 +923,7 @@ ciss_scsi_raw_cmd(struct scsi_xfer *xs)	/* TODO */
 	}
 
 	CISS_UNLOCK(sc, lock);
-	return xs->flags & SCSI_POLL? COMPLETE : SUCCESSFULLY_QUEUED;
+	return (COMPLETE);
 }
 
 int
@@ -952,8 +956,12 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 	/* XXX emulate SYNCHRONIZE_CACHE ??? */
 
 	ccb = ciss_get_ccb(sc);
-	if (ccb == NULL)
-		return NO_CCB;
+	if (ccb == NULL) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		CISS_UNLOCK(sc, lock);
+		return (COMPLETE);
+	}
 
 	cmd = &ccb->ccb_cmd;
 	ccb->ccb_len = xs->datalen;
@@ -980,7 +988,7 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 	}
 
 	CISS_UNLOCK(sc, lock);
-	return xs->flags & SCSI_POLL? COMPLETE : SUCCESSFULLY_QUEUED;
+	return (COMPLETE);
 }
 
 int
