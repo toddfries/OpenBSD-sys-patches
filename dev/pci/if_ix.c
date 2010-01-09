@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.30 2009/08/13 14:24:47 jasper Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.32 2010/01/09 05:44:41 reyk Exp $	*/
 
 /******************************************************************************
 
@@ -1925,9 +1925,6 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 			if (mp->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
 				type_tucmd_mlhl |= IXGBE_ADVTXD_TUCMD_L4T_UDP;
 			break;
-		default:
-			offload = FALSE;
-			break;
 		}
 	}
 
@@ -2493,9 +2490,9 @@ ixgbe_initialize_receive_units(struct ix_softc *sc)
 		rxcsum |= IXGBE_RXCSUM_PCSD;
 	}
 
-#if defined(IX_CSUM_OFFLOAD)
-	rxcsum |= IXGBE_RXCSUM_PCSD;
-#endif
+	if (ifp->if_capabilities & IFCAP_CSUM_IPv4)
+		rxcsum |= IXGBE_RXCSUM_PCSD;
+
 	if (!(rxcsum & IXGBE_RXCSUM_PCSD))
 		rxcsum |= IXGBE_RXCSUM_IPPCSE;
 
