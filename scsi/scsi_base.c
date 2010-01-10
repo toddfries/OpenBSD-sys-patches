@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.152 2010/01/07 00:11:15 dlg Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.155 2010/01/10 00:10:23 krw Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -232,6 +232,7 @@ void
 scsi_xs_put(struct scsi_xfer *xs)
 {
 	struct scsi_link *link = xs->sc_link;
+	int start = 1;
 
 	pool_put(&scsi_xfer_pool, xs);
 
@@ -242,8 +243,12 @@ scsi_xs_put(struct scsi_xfer *xs)
 	if (ISSET(link->state, SDEV_S_WAITING)) {
 		atomic_clearbits_int(&link->state, SDEV_S_WAITING);
 		wakeup(link);
+		start = 0;
 	}
 	mtx_leave(&link->mtx);
+
+	if (start && link->device->start)
+		link->device->start(link->device_softc);
 }
 
 /*
@@ -769,6 +774,7 @@ scsi_done(struct scsi_xfer *xs)
 	}
 #endif /* SCSIDEBUG */
 
+	SET(xs->flags, ITSDONE);
 	xs->done(xs);
 }
 
@@ -808,13 +814,8 @@ scsi_xs_sync_done(struct scsi_xfer *xs)
 {
 	struct mutex *cookie = xs->cookie;
 
-	if (cookie == NULL) {
-#ifdef DIAGNOSTIC
-		sc_print_addr(xs->sc_link);
-		printf("scsi_done already called on xs(%p)\n", xs);
-#endif
-		return;
-	}
+	if (cookie == NULL)
+		panic("scsi_done calle twice on xs(%p)", xs);
 
 	mtx_enter(cookie);
 	xs->cookie = NULL;
