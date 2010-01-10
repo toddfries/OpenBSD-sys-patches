@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.c,v 1.21 2009/12/25 21:02:15 miod Exp $ */
+/*	$OpenBSD: db_machdep.c,v 1.23 2010/01/09 23:34:29 miod Exp $ */
 
 /*
  * Copyright (c) 1998-2003 Opsycon AB (www.opsycon.se)
@@ -197,10 +197,12 @@ db_write_bytes(addr, size, data)
 		kdbpokeb(ptr, *data++);
 	}
 	if (addr < VM_MAXUSER_ADDRESS) {
+		struct cpu_info *ci = curcpu();
+
 		/* XXX we don't know where this page is mapped... */
-		Mips_HitSyncDCache(addr, PHYS_TO_XKPHYS(addr, CCA_CACHED),
+		Mips_HitSyncDCache(ci, addr, PHYS_TO_XKPHYS(addr, CCA_CACHED),
 		    size);
-		Mips_InvalidateICache(PHYS_TO_CKSEG0(addr & 0xffff), size);
+		Mips_InvalidateICache(ci, PHYS_TO_CKSEG0(addr & 0xffff), size);
 	}
 }
 
@@ -552,6 +554,7 @@ db_dump_tlb_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *m)
 {
 	int tlbno, last, check, pid;
 	struct tlb_entry tlb, tlbp;
+	struct cpu_info *ci = curcpu();
 char *attr[] = {
 	"WTNA", "WTA ", "UCBL", "CWB ", "RES ", "RES ", "UCNB", "BPAS"
 };
@@ -562,10 +565,10 @@ char *attr[] = {
 		if (have_addr && addr < 256) {
 			pid = addr;
 			tlbno = 0;
-			count = sys_config.cpu[0].tlbsize;
+			count = ci->ci_hw.tlbsize;
 		}
 	} else if (m[0] == 'c') {
-		last = sys_config.cpu[0].tlbsize;
+		last = ci->ci_hw.tlbsize;
 		for (tlbno = 0; tlbno < last; tlbno++) {
 			tlb_read(tlbno, &tlb);
 			for (check = tlbno + 1; check < last; check++) {
@@ -581,17 +584,16 @@ if ((tlbp.tlb_hi == tlb.tlb_hi && (tlb.tlb_lo0 & PG_V || tlb.tlb_lo1 & PG_V)) ||
 		}
 		return;
 	} else {
-		if (have_addr && addr < sys_config.cpu[0].tlbsize) {
+		if (have_addr && addr < ci->ci_hw.tlbsize) {
 			tlbno = addr;
-		}
-			else {
+		} else {
 			tlbno = 0;
-			count = sys_config.cpu[0].tlbsize;
+			count = ci->ci_hw.tlbsize;
 		}
 	}
 	last = tlbno + count;
 
-	for (; tlbno < sys_config.cpu[0].tlbsize && tlbno < last; tlbno++) {
+	for (; tlbno < ci->ci_hw.tlbsize && tlbno < last; tlbno++) {
 		tlb_read(tlbno, &tlb);
 
 		if (pid >= 0 && (tlb.tlb_hi & 0xff) != pid)
