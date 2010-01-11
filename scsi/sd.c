@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.176 2010/01/09 21:12:06 dlg Exp $	*/
+/*	$OpenBSD: sd.c,v 1.178 2010/01/11 00:44:40 krw Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -600,6 +600,8 @@ sd_buf_dequeue(struct sd_softc *sc)
 	bp = sc->sc_buf_queue.b_actf;
 	if (bp != NULL)
 		sc->sc_buf_queue.b_actf = bp->b_actf;
+	if (sc->sc_buf_queue.b_actf == NULL)
+		sc->sc_buf_queue.b_actb = &sc->sc_buf_queue.b_actf;
 	mtx_leave(&sc->sc_buf_mtx);
 
 	return (bp);
@@ -611,6 +613,8 @@ sd_buf_requeue(struct sd_softc *sc, struct buf *bp)
 	mtx_enter(&sc->sc_buf_mtx);
 	bp->b_actf = sc->sc_buf_queue.b_actf;
 	sc->sc_buf_queue.b_actf = bp;
+	if (bp->b_actf == NULL)
+		sc->sc_buf_queue.b_actb = &bp->b_actf;
 	mtx_leave(&sc->sc_buf_mtx);
 }
 
@@ -693,6 +697,14 @@ sdstart(void *v)
 
 	SC_DEBUG(link, SDEV_DB2, ("sdstart\n"));
 
+	mtx_enter(&sc->sc_start_mtx);
+	sc->sc_start_count++;
+	if (sc->sc_start_count > 1) {
+		mtx_leave(&sc->sc_start_mtx);
+		return;
+	}
+	mtx_leave(&sc->sc_start_mtx);
+restart:
 	CLR(sc->flags, SDF_WAITING);
 	while (!ISSET(sc->flags, SDF_WAITING) &&
 	    (bp = sd_buf_dequeue(sc)) != NULL) {
@@ -759,6 +771,14 @@ sdstart(void *v)
 
 		scsi_xs_exec(xs);
 	}
+	mtx_enter(&sc->sc_start_mtx);
+	sc->sc_start_count--;
+	if (sc->sc_start_count != 0) {
+		sc->sc_start_count = 1;
+		mtx_leave(&sc->sc_start_mtx);
+		goto restart;
+	}
+	mtx_leave(&sc->sc_start_mtx);
 }
 
 void
