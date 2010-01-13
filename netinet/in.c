@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.c,v 1.57 2010/01/13 02:13:12 henning Exp $	*/
+/*	$OpenBSD: in.c,v 1.60 2010/01/13 10:45:21 henning Exp $	*/
 /*	$NetBSD: in.c,v 1.26 1996/02/13 23:41:39 christos Exp $	*/
 
 /*
@@ -95,43 +95,18 @@ int in_lifaddr_ioctl(struct socket *, u_long, caddr_t,
 int in_addprefix(struct in_ifaddr *, int);
 int in_scrubprefix(struct in_ifaddr *);
 
-#ifndef SUBNETSARELOCAL
-#define	SUBNETSARELOCAL	0
-#endif
-
-#ifndef HOSTZEROBROADCAST
-#define HOSTZEROBROADCAST 1
-#endif
-
-int subnetsarelocal = SUBNETSARELOCAL;
-int hostzeroisbroadcast = HOSTZEROBROADCAST;
-
-/*
- * Return 1 if an internet address is for a ``local'' host
- * (one to which we have a connection).  If subnetsarelocal
- * is true, this includes other subnets of the local net.
- * Otherwise, it includes only the directly-connected (sub)nets.
- */
+/* Return 1 if an internet address is for a directly connected host */
 int
 in_localaddr(struct in_addr in, u_int rdomain)
 {
 	struct in_ifaddr *ia;
 
 	rdomain = rtable_l2(rdomain);
-	if (subnetsarelocal) {
-		TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
-			if (ia->ia_ifp->if_rdomain != rdomain)
-				continue;
-			if ((in.s_addr & ia->ia_netmask) == ia->ia_net)
-				return (1);
-		}
-	} else {
-		TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
-			if (ia->ia_ifp->if_rdomain != rdomain)
-				continue;
-			if ((in.s_addr & ia->ia_netmask) == ia->ia_net)
-				return (1);
-		}
+	TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
+		if (ia->ia_ifp->if_rdomain != rdomain)
+			continue;
+		if ((in.s_addr & ia->ia_netmask) == ia->ia_net)
+			return (1);
 	}
 	return (0);
 }
@@ -735,8 +710,6 @@ in_ifinit(ifp, ia, sin, scrub)
 	if (ifp->if_flags & IFF_BROADCAST) {
 		ia->ia_broadaddr.sin_addr.s_addr =
 			ia->ia_net | ~ia->ia_netmask;
-		ia->ia_netbroadcast.s_addr =
-			ia->ia_net | ~ia->ia_netmask;
 	} else if (ifp->if_flags & IFF_LOOPBACK) {
 		ia->ia_dstaddr = ia->ia_addr;
 		flags |= RTF_HOST;
@@ -924,13 +897,7 @@ in_broadcast(in, ifp)
 		TAILQ_FOREACH(ifa, &ifn->if_addrlist, ifa_list)
 			if (ifa->ifa_addr->sa_family == AF_INET &&
 			    in.s_addr != ia->ia_addr.sin_addr.s_addr &&
-			    (in.s_addr == ia->ia_broadaddr.sin_addr.s_addr ||
-			     in.s_addr == ia->ia_netbroadcast.s_addr ||
-			     (hostzeroisbroadcast &&
-			      /*
-			       * Check for old-style (host 0) broadcast.
-			       */
-			      in.s_addr == ia->ia_net)))
+			    in.s_addr == ia->ia_broadaddr.sin_addr.s_addr)
 				return 1;
 	}
 	return (0);
