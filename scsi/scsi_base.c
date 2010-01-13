@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.156 2010/01/10 23:06:43 krw Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.160 2010/01/13 05:08:55 dlg Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -784,6 +784,9 @@ scsi_xs_sync(struct scsi_xfer *xs)
 	struct mutex cookie = MUTEX_INITIALIZER(IPL_BIO);
 	int error;
 
+	if (xs->done != NULL || xs->cookie != NULL)
+		panic("scsi_xs_sync: xs done or cookie is set!");
+
 	/*
 	 * If we cant sleep while waiting for completion, get the adapter to
 	 * complete it for us.
@@ -815,7 +818,7 @@ scsi_xs_sync_done(struct scsi_xfer *xs)
 	struct mutex *cookie = xs->cookie;
 
 	if (cookie == NULL)
-		panic("scsi_done calle twice on xs(%p)", xs);
+		panic("scsi_done called twice on xs(%p)", xs);
 
 	mtx_enter(cookie);
 	xs->cookie = NULL;
@@ -897,6 +900,9 @@ scsi_xs_error(struct scsi_xfer *xs)
 	SC_DEBUG(xs->sc_link, SDEV_DB3, ("scsi_xs_error,err = 0x%x\n",
 	    xs->error));
 
+	if (ISSET(xs->sc_link->state, SDEV_S_DYING))
+		return (ENXIO);
+
 	switch (xs->error) {
 	case XS_NOERROR:	/* nearly always hit this one */
 		error = 0;
@@ -933,7 +939,7 @@ scsi_xs_error(struct scsi_xfer *xs)
 		break;
 	}
 
-	if (error == ERESTART && xs->retries < 1)
+	if (error == ERESTART && xs->retries-- < 1)
 		return (EIO);
 	else
 		return (error);

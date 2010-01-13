@@ -1,4 +1,4 @@
-/* $OpenBSD: if_vether.c,v 1.7 2010/01/12 03:41:29 deraadt Exp $ */
+/* $OpenBSD: if_vether.c,v 1.11 2010/01/12 11:37:08 deraadt Exp $ */
 
 /*
  * Copyright (c) 2009 Theo de Raadt
@@ -16,9 +16,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "vether.h"
-#include "bpfilter.h"
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -30,28 +27,10 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
-#include <net/if_types.h>
-
-#include <net/if_types.h>
-#include <net/netisr.h>
-#include <net/route.h>
 
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#include <netinet/in_var.h>
-#endif
-
-#include <dev/rndvar.h>
-
-#if NBPFILTER > 0
-#include <net/bpf.h>
-#endif
-
-#ifdef VETHER_DEBUG
-#define DPRINTF(x)    do { if (vetherdebug) printf x ; } while (0)
-#else
-#define DPRINTF(x)
 #endif
 
 void	vetherattach(int);
@@ -71,7 +50,6 @@ struct vether_softc {
 LIST_HEAD(, vether_softc)	vether_list;
 struct if_clone	vether_cloner =
     IF_CLONE_INITIALIZER("vether", vether_clone_create, vether_clone_destroy);
-
 
 int
 vether_media_change(struct ifnet *ifp)
@@ -178,7 +156,6 @@ vetherioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ifreq		*ifr = (struct ifreq *)data;
 	int			 error = 0, link_state;
 
-	ifr = (struct ifreq *)data;
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
