@@ -222,8 +222,6 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	/* i386 does lazy pmap_activate */
 	pmap_activate(curproc);
 
-	acpi_set_trampoline_tweaks();
-
 	/*
 	 *
 	 * ACPI defines two wakeup vectors. One is used for ACPI 1.0

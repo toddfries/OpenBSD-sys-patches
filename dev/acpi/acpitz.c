@@ -369,7 +369,6 @@ acpitz_refresh(void *arg)
 			nperf = 0;
 		else if (nperf > 100)
 			nperf = 100;
-		tzperflevel = nperf;
 
 		/* clamp passive cooling request */
 		if (nperf > perflevel)

@@ -672,12 +672,11 @@ void
 acpicpu_setperf_ppc_change(struct acpicpu_pss *pss, int npss)
 {
 	struct acpicpu_softc    *sc;
-	extern int perflevel;
 
 	sc = acpicpu_sc[0];
 
 	if (sc != NULL)
-		cpu_setperf(min(perflevel,sc->sc_level));
+		cpu_setperf(sc->sc_level);
 }
 
 void
@@ -687,7 +686,6 @@ acpicpu_setperf(int level)
 	struct acpicpu_pss	*pss = NULL;
 	int			idx, len;
 	u_int32_t		status = 0;
-	extern int		tzperflevel;
 
 	sc = acpicpu_sc[cpu_number()];
 
@@ -699,7 +697,6 @@ acpicpu_setperf(int level)
 		    sc->sc_devnode->name);
 		return;
 	}
-	level = min(level, tzperflevel);
 
 	/*
 	 * XXX this should be handled more gracefully and it needs to also do

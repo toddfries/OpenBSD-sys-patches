@@ -99,15 +99,7 @@ _C_LABEL(acpi_real_mode_resume):
 	movw	%ax,%es
 	movw	%ax,%ss
 	lidtl	clean_idt
-	jmp	clean4
 
-no_clean_required:
-	movw	%cs,%ax
-	movw	%ax,%ds
-	movw	%ax,%es
-	movw	%ax,%ss
-
-clean4:
 	/*
 	 * Set up stack to grow down from offset 0x0FFE.
 	 * We will only be doing a few push/pops and no calls in real 
@@ -135,11 +127,9 @@ clean4:
 	 * laptops), we might not restore the proper VGA mode
 	 * on resume. Caveat emptor.
 	 */
-	cmpb	$0x1, acpi_rm_video_resume
-	jne	no_rm_video_repost
+ 	/* jmp	nobiosreset */  	/* XXX make this a tunable */ 
 	lcall	$0xc000,$3
 
-no_rm_video_repost:
 	/*
 	 * Restore our segment registers in case the call to 
 	 * reset the video hardware clobbered them.
@@ -329,12 +319,6 @@ _C_LABEL(acpi_protected_mode_resume):
 	 */
 	xorl  %eax, %eax
 	jmp	*acpi_saved_ret
-
-	.org ACPI_TRAMP_DATA
-_ACPI_TRMP_OFFSET(acpi_rm_video_resume)
-	.byte 0
-_ACPI_TRMP_OFFSET(acpi_rm_clean_registers)
-	.byte 0
 
 	.align 8
 _ACPI_TRMP_OFFSET(tmp_gdt)
