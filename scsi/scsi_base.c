@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.164 2010/01/14 04:56:08 krw Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.166 2010/01/15 06:27:12 krw Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -993,19 +993,8 @@ scsi_interpret_sense(struct scsi_xfer *xs)
 #ifdef SCSIDEBUG
 	if (xs->sc_link->flags & SDEV_DB1)
 		scsi_show_mem((u_char *)&xs->sense, sizeof(xs->sense));
+	scsi_print_sense(xs);
 #endif /* SCSIDEBUG */
-
-	serr = sense->error_code & SSD_ERRCODE;
-	if (serr != SSD_ERRCODE_CURRENT && serr != SSD_ERRCODE_DEFERRED)
-		skey = 0xff;	/* Invalid value, since key is 4 bit value. */
-	else
-		skey = sense->flags & SSD_KEY;
-
-#ifndef SCSIDEBUG
-	/* If not SCSIDEBUG, only print sense in some cases. */
-	if (skey && (xs->flags & SCSI_SILENT) == 0)
-#endif /* SCSIDEBUG */
-		scsi_print_sense(xs);
 
 	/*
 	 * If the device has its own error handler, call it first.
@@ -1020,9 +1009,14 @@ scsi_interpret_sense(struct scsi_xfer *xs)
 			return (error); /* error >= 0  better ? */
 	}
 
+	/* Default sense interpretation. */
+	serr = sense->error_code & SSD_ERRCODE;
+	if (serr != SSD_ERRCODE_CURRENT && serr != SSD_ERRCODE_DEFERRED)
+		skey = 0xff;	/* Invalid value, since key is 4 bit value. */
+	else
+		skey = sense->flags & SSD_KEY;
+
 	/*
-	 * Default sense interpretation.
-	 *
 	 * Interpret the key/asc/ascq information where appropriate.
 	 */
 	error = 0;
@@ -1138,6 +1132,12 @@ scsi_interpret_sense(struct scsi_xfer *xs)
 		error = EIO;
 		break;
 	}
+
+#ifndef SCSIDEBUG
+	/* SCSIDEBUG would mean it has already been printed. */
+	if (skey && (xs->flags & SCSI_SILENT) == 0)
+		scsi_print_sense(xs);
+#endif /* SCSIDEBUG */
 
 	return (error);
 }
@@ -1889,6 +1889,62 @@ scsi_decode_sense(struct scsi_sense_data *sense, int flag)
 	}
 
 	return (rqsbuf);
+}
+
+void
+scsi_buf_enqueue(struct buf *head, struct buf *bp, struct mutex *mtx)
+{
+	struct buf *dp;
+
+	mtx_enter(mtx);
+	dp = head;
+	bp->b_actf = NULL;
+	bp->b_actb = dp->b_actb;
+	*dp->b_actb = bp;
+	dp->b_actb = &bp->b_actf;
+	mtx_leave(mtx);
+}
+
+struct buf *
+scsi_buf_dequeue(struct buf *head, struct mutex *mtx)
+{
+	struct buf *bp;
+
+	mtx_enter(mtx);
+	bp = head->b_actf;
+	if (bp != NULL)
+		head->b_actf = bp->b_actf;
+	if (head->b_actf == NULL)
+		head->b_actb = &head->b_actf;
+	mtx_leave(mtx);
+
+	return (bp);
+}
+
+void
+scsi_buf_requeue(struct buf *head, struct buf *bp, struct mutex *mtx)
+{
+	mtx_enter(mtx);
+	bp->b_actf = head->b_actf;
+	head->b_actf = bp;
+	if (bp->b_actf == NULL)
+		head->b_actb = &bp->b_actf;
+	mtx_leave(mtx);
+}
+
+void
+scsi_buf_killqueue(struct buf *head, struct mutex *mtx)
+{
+	struct buf *bp;
+	int s;
+
+	while ((bp = scsi_buf_dequeue(head, mtx)) != NULL) {
+		bp->b_error = ENXIO;
+		bp->b_flags |= B_ERROR;
+		s = splbio();
+		biodone(bp);
+		splx(s);
+	}
 }
 
 #ifdef SCSIDEBUG
