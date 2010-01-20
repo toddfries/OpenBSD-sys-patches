@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.60 2010/01/16 23:28:10 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.62 2010/01/18 18:27:32 miod Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -124,7 +124,8 @@ const char *trap_type[] = {
 };
 
 #if defined(DDB) || defined(DEBUG)
-struct trapdebug trapdebug[TRAPSIZE], *trp = trapdebug;
+struct trapdebug trapdebug[MAXCPUS * TRAPSIZE];
+uint trppos[MAXCPUS];
 
 void	stacktrace(struct trap_frame *);
 uint32_t kdbpeek(vaddr_t);
@@ -186,19 +187,19 @@ ast()
  * pcb_onfault is set, otherwise, return old pc.
  */
 void
-trap(trapframe)
-	struct trap_frame *trapframe;
+trap(struct trap_frame *trapframe)
 {
+	struct cpu_info *ci = curcpu();
 	int type, i;
 	unsigned ucode = 0;
-	struct proc *p = curproc;
+	struct proc *p = ci->ci_curproc;
 	vm_prot_t ftype;
 	extern vaddr_t onfault_table[];
 	int onfault;
 	int typ = 0;
 	union sigval sv;
 
-	trapdebug_enter(trapframe, -1);
+	trapdebug_enter(ci, trapframe, -1);
 
 	type = (trapframe->cause & CR_EXC_CODE) >> CR_EXC_CODE_SHIFT;
 	if (USERMODE(trapframe->sr)) {
@@ -541,10 +542,8 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		rval[0] = 0;
 		rval[1] = locr0->v1;
 #if defined(DDB) || defined(DEBUG)
-		if (trp == trapdebug)
-			trapdebug[TRAPSIZE - 1].code = code;
-		else
-			trp[-1].code = code;
+		trapdebug[TRAPSIZE * ci->ci_cpuid + (trppos[ci->ci_cpuid] == 0 ?
+		    TRAPSIZE : trppos[ci->ci_cpuid]) - 1].code = code;
 #endif
 
 #if NSYSTRACE > 0
@@ -857,32 +856,47 @@ fpu_trapsignal(struct proc *p, u_long ucode, int typ, union sigval sv)
 
 #if defined(DDB) || defined(DEBUG)
 void
-trapDump(msg)
-	char *msg;
+trapDump(char *msg)
 {
-	struct trapdebug *ptrp;
+#ifdef MULTIPROCESSOR
+	CPU_INFO_ITERATOR cii;
+#endif
+	struct cpu_info *ci;
+	struct trapdebug *base, *ptrp;
 	int i;
+	uint pos;
 	int s;
 
 	s = splhigh();
-	ptrp = trp;
 	printf("trapDump(%s)\n", msg);
-	for (i = 0; i < TRAPSIZE; i++) {
-		if (ptrp == trapdebug) {
-			ptrp = &trapdebug[TRAPSIZE - 1];
+#ifndef MULTIPROCESSOR
+	ci = curcpu();
+#else
+	CPU_INFO_FOREACH(cii, ci)
+#endif
+	{
+#ifdef MULTIPROCESSOR
+		printf("cpu%d\n", ci->ci_cpuid);
+#endif
+		/* walk in reverse order */
+		pos = trppos[ci->ci_cpuid];
+		base = trapdebug + ci->ci_cpuid * TRAPSIZE;
+		for (i = TRAPSIZE - 1; i >= 0; i--) {
+			if (pos + i >= TRAPSIZE)
+				ptrp = base + pos + i - TRAPSIZE;
+			else
+				ptrp = base + pos + i;
+
+			if (ptrp->cause == 0)
+				break;
+
+			printf("%s: PC %p CR 0x%08x SR 0x%08x\n",
+			    trap_type[(ptrp->cause & CR_EXC_CODE) >>
+			      CR_EXC_CODE_SHIFT],
+			    ptrp->pc, ptrp->cause, ptrp->status);
+			printf(" RA %p SP %p ADR %p\n",
+			    ptrp->ra, ptrp->sp, ptrp->vadr);
 		}
-		else {
-			ptrp--;
-		}
-
-		if (ptrp->cause == 0)
-			break;
-
-		printf("%s: PC %p CR 0x%x SR 0x%x\n",
-		    trap_type[(ptrp->cause & CR_EXC_CODE) >> CR_EXC_CODE_SHIFT],
-		    ptrp->pc, ptrp->cause, ptrp->status);
-
-		printf(" RA %p SP %p ADR %p\n", ptrp->ra, ptrp->sp, ptrp->vadr);
 	}
 
 	splx(s);
@@ -1187,14 +1201,14 @@ loop:
 	if (sp & 3 || !VALID_ADDRESS(sp)) {
 		(*pr)("SP %p: not in kernel\n", sp);
 		ra = 0;
-		goto done;
+		goto end;
 	}
 
 	/* check for bad PC */
 	if (pc & 3 || !VALID_ADDRESS(pc)) {
 		(*pr)("PC %p: not in kernel\n", pc);
 		ra = 0;
-		goto done;
+		goto end;
 	}
 
 #ifdef DDB
@@ -1309,7 +1323,6 @@ loop:
 		}
 	}
 
-done:
 #ifdef DDB
 	if (symname == NULL)
 		(*pr)("%p ", subr);
