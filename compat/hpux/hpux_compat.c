@@ -1,4 +1,4 @@
-/*	$OpenBSD: hpux_compat.c,v 1.30 2008/11/01 05:59:21 deraadt Exp $	*/
+/*	$OpenBSD: hpux_compat.c,v 1.32 2010/01/28 19:59:07 miod Exp $	*/
 /*	$NetBSD: hpux_compat.c,v 1.35 1997/05/08 16:19:48 mycroft Exp $	*/
 
 /*
@@ -946,31 +946,6 @@ out:
 }
 
 /* hpux_sys_getcontext() is found in hpux_machdep.c */
-
-/*
- * This is the equivalent of BSD getpgrp but with more restrictions.
- * Note we do not check the real uid or "saved" uid.
- */
-int
-hpux_sys_getpgrp2(cp, v, retval)
-	struct proc *cp;
-	void *v;
-	register_t *retval;
-{
-	struct hpux_sys_getpgrp2_args *uap = v;
-	struct proc *p;
-
-	if (SCARG(uap, pid) == 0)
-		SCARG(uap, pid) = cp->p_pid;
-	p = pfind(SCARG(uap, pid));
-	if (p == 0)
-		return (ESRCH);
-	if (cp->p_ucred->cr_uid && p->p_ucred->cr_uid != cp->p_ucred->cr_uid &&
-	    !inferior(p))
-		return (EPERM);
-	*retval = p->p_pgid;
-	return (0);
-}
 
 /*
  * This is the equivalent of BSD setpgrp but with more restrictions.
