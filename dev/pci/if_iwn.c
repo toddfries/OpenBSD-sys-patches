@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwn.c,v 1.82 2010/01/23 09:14:13 damien Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.84 2010/02/02 17:06:53 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007-2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -884,8 +884,7 @@ iwn_eeprom_unlock(struct iwn_softc *sc)
 int
 iwn_init_otprom(struct iwn_softc *sc)
 {
-	uint32_t base;
-	uint16_t next;
+	uint16_t prev, base, next;
 	int count, error;
 
 	/* Wait for clock stabilization before accessing prph. */
@@ -910,8 +909,8 @@ iwn_init_otprom(struct iwn_softc *sc)
 	    IWN_OTP_GP_ECC_CORR_STTS | IWN_OTP_GP_ECC_UNCORR_STTS);
 
 	/*
-	 * Find last valid OTP block (contains the EEPROM image) for HW
-	 * without OTP shadow RAM.
+	 * Find the block before last block (contains the EEPROM image)
+	 * for HW without OTP shadow RAM.
 	 */
 	if (sc->hw_type == IWN_HW_REV_TYPE_1000) {
 		/* Switch to absolute addressing mode. */
@@ -923,12 +922,13 @@ iwn_init_otprom(struct iwn_softc *sc)
 				return error;
 			if (next == 0)	/* End of linked-list. */
 				break;
+			prev = base;
 			base = letoh16(next);
 		}
-		if (base == 0 || count == IWN1000_OTP_NBLOCKS)
+		if (count == 0 || count == IWN1000_OTP_NBLOCKS)
 			return EIO;
 		/* Skip "next" word. */
-		sc->prom_base = base + 1;
+		sc->prom_base = prev + 1;
 	}
 	return 0;
 }
@@ -3770,9 +3770,6 @@ iwn5000_init_gains(struct iwn_softc *sc)
 {
 	struct iwn_phy_calib cmd;
 
-	if (sc->hw_type == IWN_HW_REV_TYPE_6050)
-		return 0;
-
 	memset(&cmd, 0, sizeof cmd);
 	cmd.code = IWN5000_PHY_CALIB_RESET_NOISE_GAIN;
 	cmd.ngroups = 1;
@@ -3818,10 +3815,10 @@ iwn5000_set_gains(struct iwn_softc *sc)
 {
 	struct iwn_calib_state *calib = &sc->calib;
 	struct iwn_phy_calib_gain cmd;
-	int i, ant, delta;
+	int i, ant, div, delta;
 
-	if (sc->hw_type == IWN_HW_REV_TYPE_6050)
-		return 0;
+	/* We collected 20 beacons and !=6050 need a 1.5 factor. */
+	div = (sc->hw_type == IWN_HW_REV_TYPE_6050) ? 20 : 30;
 
 	memset(&cmd, 0, sizeof cmd);
 	cmd.code = IWN5000_PHY_CALIB_NOISE_GAIN;
@@ -3834,7 +3831,7 @@ iwn5000_set_gains(struct iwn_softc *sc)
 		if (sc->chainmask & (1 << i)) {
 			/* The delta is relative to antenna "ant". */
 			delta = ((int32_t)calib->noise[ant] -
-			    (int32_t)calib->noise[i]) / 30;
+			    (int32_t)calib->noise[i]) / div;
 			/* Limit to [-4.5dB,+4.5dB]. */
 			cmd.gain[i - 1] = MIN(abs(delta), 3);
 			if (delta < 0)

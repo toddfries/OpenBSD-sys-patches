@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.3 2010/01/09 23:34:29 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.6 2010/02/01 05:38:09 miod Exp $ */
 
 /*
  * Copyright (c) 2009 Miodrag Vallat.
@@ -325,6 +325,10 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv)
 		break;
 	default:
 	case 0x2f:
+#define	I_HEART_SCARY_ERRATA_FROM_HELL
+#ifdef	I_HEART_SCARY_ERRATA_FROM_HELL
+		memhi = 0;
+#endif
 		loongson2f_setup(memlo, memhi);
 		break;
 	}
@@ -351,13 +355,11 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv)
 		/* kernel is linked in CKSEG0 */
 		firstkernpa = CKSEG0_TO_PHYS((vaddr_t)start);
 		lastkernpa = CKSEG0_TO_PHYS((vaddr_t)ekern);
-		if (loongson_ver == 0x2f) {
-			firstkernpa |= 0x80000000;
-			lastkernpa |= 0x80000000;
-		}
 
-		firstkernpage = atop(trunc_page(firstkernpa));
-		lastkernpage = atop(round_page(lastkernpa));
+		firstkernpage = atop(trunc_page(firstkernpa)) +
+		    mem_layout[0].mem_first_page - 1;
+		lastkernpage = atop(round_page(lastkernpa)) +
+		    mem_layout[0].mem_first_page - 1;
 
 		fp = mem_layout[i].mem_first_page;
 		lp = mem_layout[i].mem_last_page;
