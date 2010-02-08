@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_runvar.h,v 1.3 2009/03/26 20:17:27 damien Exp $	*/
+/*	$OpenBSD: if_runvar.h,v 1.7 2010/02/07 11:02:24 damien Exp $	*/
 
 /*-
  * Copyright (c) 2008,2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -142,21 +142,28 @@ struct run_softc {
 	usbd_device_handle		sc_udev;
 	usbd_interface_handle		sc_iface;
 
-	uint32_t			mac_rev;
+	uint16_t			mac_ver;
+	uint16_t			mac_rev;
 	uint8_t				rf_rev;
 	uint8_t				freq;
 	uint8_t				ntxchains;
 	uint8_t				nrxchains;
 	int				fixed_ridx;
 
+	uint8_t				bbp25;
+	uint8_t				bbp26;
 	uint8_t				rf24_20mhz;
 	uint8_t				rf24_40mhz;
+	uint8_t				patch_dac;
+	uint8_t				rfswitch;
 	uint8_t				ext_2ghz_lna;
 	uint8_t				ext_5ghz_lna;
 	uint8_t				calib_2ghz;
 	uint8_t				calib_5ghz;
-	int8_t				txpow1[50];
-	int8_t				txpow2[50];
+	uint8_t				txmixgain_2ghz;
+	uint8_t				txmixgain_5ghz;
+	int8_t				txpow1[54];
+	int8_t				txpow2[54];
 	int8_t				rssi_2ghz[3];
 	int8_t				rssi_5ghz[3];
 	uint8_t				lna[4];
@@ -164,7 +171,7 @@ struct run_softc {
 	struct {
 		uint8_t	reg;
 		uint8_t	val;
-	}				bbp[8];
+	}				bbp[10], rf[10];
 	uint8_t				leds;
 	uint16_t			led[3];
 	uint32_t			txpow20mhz[5];
