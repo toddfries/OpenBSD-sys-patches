@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsock.c,v 1.95 2009/11/03 10:59:04 claudio Exp $	*/
+/*	$OpenBSD: rtsock.c,v 1.97 2010/02/09 16:34:57 claudio Exp $	*/
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -638,6 +638,11 @@ report:
 				    rt->rt_ifa = ifa;
 				    ifa->ifa_refcnt++;
 				    rt->rt_ifp = ifp;
+#ifndef SMALL_KERNEL
+				    /* recheck link state after ifp change */
+				    rt_if_linkstate_change(
+					(struct radix_node *)rt, ifp);
+#endif
 				}
 			}
 
@@ -651,6 +656,7 @@ report:
 			    &rt->rt_rmx);
 			rtm->rtm_index = rt->rt_ifp->if_index;
 			rtm->rtm_priority = rt->rt_priority & RTP_MASK;
+			rtm->rtm_flags = rt->rt_flags;
 			if (rt->rt_ifa && rt->rt_ifa->ifa_rtrequest)
 				rt->rt_ifa->ifa_rtrequest(RTM_ADD, rt, &info);
 			if (genmask)
@@ -1054,6 +1060,7 @@ rt_newaddrmsg(int cmd, struct ifaddr *ifa, int error, struct rtentry *rt)
 			rtm = mtod(m, struct rt_msghdr *);
 			rtm->rtm_index = ifp->if_index;
 			rtm->rtm_flags |= rt->rt_flags;
+			rtm->rtm_priority = rt->rt_priority & RTP_MASK;
 			rtm->rtm_errno = error;
 			rtm->rtm_addrs = info.rti_addrs;
 			rtm->rtm_tableid = ifp->if_rdomain;
