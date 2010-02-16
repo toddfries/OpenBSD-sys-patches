@@ -1,5 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.5 2010/02/14 15:16:49 kettenis Exp $	*/
-/*	$NetBSD: conf.c,v 1.4 2005/12/11 12:17:06 christos Exp $	*/
+/*	$OpenBSD: conf.c,v 1.1 2010/02/14 22:39:33 miod Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -38,15 +37,19 @@
 
 #include "libsa.h"
 #include <lib/libsa/ufs.h>
+#include <lib/libsa/cd9660.h>
 
-const char version[] = "1.0";
+const char version[] = "0.1";
+#if 0	/* network code not compiled in */
 int	debug = 0;
+#endif
 
 /*
  * Device configuration
  */
 struct devsw devsw[] = {
-	{ "wd",	wdstrategy, wdopen, wdclose, noioctl },
+	{ "wd",		pmon_iostrategy, pmon_ioopen, pmon_ioclose, noioctl },
+	{ "usbg",	pmon_iostrategy, pmon_ioopen, pmon_ioclose, noioctl }
 };
 int ndevs = NENTS(devsw);
 
@@ -55,7 +58,9 @@ int ndevs = NENTS(devsw);
  */
 struct fs_ops file_system[] = {
 	{ ufs_open,    ufs_close,    ufs_read,    ufs_write,    ufs_seek,
-	  ufs_stat,    ufs_readdir }
+	  ufs_stat,    ufs_readdir },
+	{ cd9660_open, cd9660_close, cd9660_read, cd9660_write, cd9660_seek,
+	  cd9660_stat, cd9660_readdir }
 };
 int nfsys = NENTS(file_system);
 
@@ -63,7 +68,7 @@ int nfsys = NENTS(file_system);
  * Console configuration
  */
 struct consdev constab[] = {
-	{ com_probe, com_init, com_getc, com_putc },
+	{ pmon_cnprobe, pmon_cninit, pmon_cngetc, pmon_cnputc },
 	{ NULL }
 };
 struct consdev *cn_tab;

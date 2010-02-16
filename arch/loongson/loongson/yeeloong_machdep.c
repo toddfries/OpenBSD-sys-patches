@@ -1,4 +1,4 @@
-/*	$OpenBSD: yeeloong_machdep.c,v 1.3 2010/02/12 08:14:02 miod Exp $	*/
+/*	$OpenBSD: yeeloong_machdep.c,v 1.5 2010/02/12 19:43:43 otto Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -26,6 +26,7 @@
 
 #include <mips64/archtype.h>
 #include <machine/autoconf.h>
+#include <machine/pmon.h>
 
 #include <dev/isa/isareg.h>
 
@@ -35,12 +36,24 @@
 #include <loongson/dev/bonitoreg.h>
 #include <loongson/dev/bonitovar.h>
 #include <loongson/dev/bonito_irq.h>
+#include <loongson/dev/glxreg.h>
 #include <loongson/dev/glxvar.h>
+
+#include "com.h"
+
+#if NCOM > 0
+#include <sys/termios.h>
+#include <dev/ic/comvar.h>
+extern struct mips_bus_space bonito_pci_io_space_tag;
+#endif
 
 void	yeeloong_attach_hook(pci_chipset_tag_t);
 int	yeeloong_intr_map(int, int, int);
 
+void	fuloong_powerdown(void);
 void	yeeloong_powerdown(void);
+void	yeeloong_reset(void);
+void	fuloong_setup(void);
 
 const struct bonito_config yeeloong_bonito = {
 	.bc_adbase = 11,
@@ -100,7 +113,9 @@ const struct platform fuloong_platform = {
 	.bonito_config = &yeeloong_bonito,
 	.legacy_io_ranges = fuloong_legacy_ranges,
 
-	.powerdown = NULL	/* XXX TBD */
+	.setup = fuloong_setup,
+	.powerdown = fuloong_powerdown,
+	.reset = yeeloong_reset
 };
 
 const struct platform yeeloong_platform = {
@@ -111,7 +126,9 @@ const struct platform yeeloong_platform = {
 	.bonito_config = &yeeloong_bonito,
 	.legacy_io_ranges = yeeloong_legacy_ranges,
 
-	.powerdown = yeeloong_powerdown
+	.setup = NULL,
+	.powerdown = yeeloong_powerdown,
+	.reset = yeeloong_reset
 };
 
 void
@@ -174,8 +191,47 @@ yeeloong_intr_map(int dev, int fn, int pin)
 }
 
 void
+fuloong_powerdown()
+{
+	vaddr_t gpiobase;
+
+	gpiobase = BONITO_PCIIO_BASE + (rdmsr(DIVIL_LBAR_GPIO) & 0xff00);
+	/* enable GPIO 13 */
+	REGVAL(gpiobase + GPIOL_OUT_EN) = GPIO_ATOMIC_VALUE(13, 1);
+	/* set GPIO13 value to zero */
+	REGVAL(gpiobase + GPIOL_OUT_VAL) = GPIO_ATOMIC_VALUE(13, 0);
+}
+
+void
 yeeloong_powerdown()
 {
 	REGVAL(BONITO_GPIODATA) &= ~0x00000001;
 	REGVAL(BONITO_GPIOIE) &= ~0x00000001;
+}
+
+void
+yeeloong_reset()
+{
+	wrmsr(GLCP_SYS_RST, rdmsr(GLCP_SYS_RST) | 1);
+}
+
+void
+fuloong_setup(void)
+{
+#if NCOM > 0
+	const char *envvar;
+	int serial;
+
+	envvar = pmon_getenv("nokbd");
+	serial = envvar == 0;
+	envvar = pmon_getenv("novga");
+	serial = serial && envvar == 0;
+
+	/* XXX always switch to serial until we have framebuffer */
+	if (serial || 1) {
+                comconsiot = &bonito_pci_io_space_tag;
+                comconsaddr = 0x2f8;
+                comconsrate = 115200; /* default PMON console speed */
+	}
+#endif
 }
