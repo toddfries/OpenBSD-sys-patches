@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.190 2010/02/08 23:28:06 krw Exp $ */
+/* $OpenBSD: softraid.c,v 1.194 2010/02/13 22:10:01 jsing Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -120,7 +120,7 @@ int			sr_boot_assembly(struct sr_softc *);
 int			sr_already_assembled(struct sr_discipline *);
 int			sr_hotspare(struct sr_softc *, dev_t);
 void			sr_hotspare_rebuild(struct sr_discipline *);
-int			sr_rebuild_init(struct sr_discipline *, dev_t);
+int			sr_rebuild_init(struct sr_discipline *, dev_t, int);
 void			sr_rebuild(void *);
 void			sr_rebuild_thread(void *);
 void			sr_roam_chunks(struct sr_discipline *);
@@ -135,7 +135,7 @@ void			sr_sensors_delete(struct sr_discipline *);
 
 /* metadata */
 int			sr_meta_probe(struct sr_discipline *, dev_t *, int);
-int			sr_meta_attach(struct sr_discipline *, int);
+int			sr_meta_attach(struct sr_discipline *, int, int);
 int			sr_meta_rw(struct sr_discipline *, dev_t, void *,
 			    size_t, daddr64_t, long);
 int			sr_meta_clear(struct sr_discipline *);
@@ -208,11 +208,11 @@ struct sr_meta_driver {
 };
 
 int
-sr_meta_attach(struct sr_discipline *sd, int force)
+sr_meta_attach(struct sr_discipline *sd, int chunk_no, int force)
 {
 	struct sr_softc		*sc = sd->sd_sc;
 	struct sr_chunk_head	*cl;
-	struct sr_chunk		*ch_entry;
+	struct sr_chunk		*ch_entry, *chunk1, *chunk2;
 	int			rv = 1, i = 0;
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_attach(%d)\n", DEVNAME(sc));
@@ -239,10 +239,7 @@ sr_meta_attach(struct sr_discipline *sd, int force)
 
 	/* we have a valid list now create an array index */
 	cl = &sd->sd_vol.sv_chunk_list;
-	SLIST_FOREACH(ch_entry, cl, src_link) {
-		i++;
-	}
-	sd->sd_vol.sv_chunks = malloc(sizeof(struct sr_chunk *) * i,
+	sd->sd_vol.sv_chunks = malloc(sizeof(struct sr_chunk *) * chunk_no,
 	    M_DEVBUF, M_WAITOK | M_ZERO);
 
 	/* fill out chunk array */
@@ -253,6 +250,27 @@ sr_meta_attach(struct sr_discipline *sd, int force)
 	/* attach metadata */
 	if (smd[sd->sd_meta_type].smd_attach(sd, force))
 		goto bad;
+
+	/* Force chunks into correct order now that metadata is attached. */
+	SLIST_FOREACH(ch_entry, cl, src_link)
+		SLIST_REMOVE(cl, ch_entry, sr_chunk, src_link);
+	for (i = 0; i < chunk_no; i++) {
+		ch_entry = sd->sd_vol.sv_chunks[i];
+		chunk2 = NULL;
+		SLIST_FOREACH(chunk1, cl, src_link) {
+			if (chunk1->src_meta.scmi.scm_chunk_id >
+			    ch_entry->src_meta.scmi.scm_chunk_id)
+				break;
+			chunk2 = chunk1;
+		}
+		if (chunk2 == NULL)
+			SLIST_INSERT_HEAD(cl, ch_entry, src_link);
+		else
+			SLIST_INSERT_AFTER(chunk2, ch_entry, src_link);
+	}
+	i = 0;
+	SLIST_FOREACH(ch_entry, cl, src_link)
+		sd->sd_vol.sv_chunks[i++] = ch_entry;
 
 	rv = 0;
 bad:
@@ -962,7 +980,6 @@ sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
 				bcopy(md, &mle->sml_metadata,
 				    SR_META_SIZE * 512);
 				mle->sml_mm = devr;
-				mle->sml_vn = vn;
 				SLIST_INSERT_HEAD(mlh, mle, sml_link);
 				rv = SR_META_CLAIMED;
 			}
@@ -1150,7 +1167,6 @@ sr_boot_assembly(struct sr_softc *sc)
 		mle = SLIST_FIRST(&vol->sml);
 		sr_meta_getdevname(sc, mle->sml_mm, devname, sizeof(devname));
 		hotspare->src_dev_mm = mle->sml_mm;
-		hotspare->src_vn = mle->sml_vn;
 		strlcpy(hotspare->src_devname, devname,
 		    sizeof(hotspare->src_devname));
 		hotspare->src_size = metadata->ssdi.ssd_size;
@@ -1379,6 +1395,8 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 
 		if (md->ssdi.ssd_magic == SR_MAGIC) {
 			sr++;
+			ch_entry->src_meta.scmi.scm_chunk_id =
+			    md->ssdi.ssd_chunk_id;
 			if (d == 0) {
 				bcopy(&md->ssdi.ssd_uuid, &uuid, sizeof uuid);
 				expected = md->ssdi.ssd_chunk_no;
@@ -2226,7 +2244,7 @@ sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 		break;
 
 	case BIOC_SSREBUILD:
-		rv = sr_rebuild_init(sd, (dev_t)bs->bs_other_id);
+		rv = sr_rebuild_init(sd, (dev_t)bs->bs_other_id, 0);
 		break;
 
 	default:
@@ -2527,7 +2545,7 @@ sr_hotspare_rebuild(struct sr_discipline *sd)
 
 		s = splbio();
 		rw_enter_write(&sd->sd_sc->sc_lock);
-		if (sr_rebuild_init(sd, hotspare->src_dev_mm) == 0) {
+		if (sr_rebuild_init(sd, hotspare->src_dev_mm, 1) == 0) {
 
 			/* Remove hotspare from available list. */
 			sd->sd_sc->sc_hotspare_no--;
@@ -2543,7 +2561,7 @@ done:
 }
 
 int
-sr_rebuild_init(struct sr_discipline *sd, dev_t dev)
+sr_rebuild_init(struct sr_discipline *sd, dev_t dev, int hotspare)
 {
 	struct sr_softc		*sc = sd->sd_sc;
 	int			rv = EINVAL, part;
@@ -2638,7 +2656,8 @@ sr_rebuild_init(struct sr_discipline *sd, dev_t dev)
 
 	/* make sure we are not stomping on some other partition */
 	c = sr_chunk_in_use(sc, dev);
-	if (c != BIOC_SDINVALID && c != BIOC_SDOFFLINE) {
+	if (c != BIOC_SDINVALID && c != BIOC_SDOFFLINE &&
+	    !(hotspare && c == BIOC_SDHOTSPARE)) {
 		printf("%s: %s is already in use\n", DEVNAME(sc), devname);
 		goto done;
 	}
@@ -2769,7 +2788,7 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 		goto unwind;
 	}
 
-	if (sr_meta_attach(sd, bc->bc_flags & BIOC_SCFORCE)) {
+	if (sr_meta_attach(sd, no_chunk, bc->bc_flags & BIOC_SCFORCE)) {
 		printf("%s: can't attach metadata type %d\n", DEVNAME(sc),
 		    sd->sd_meta_type);
 		goto unwind;

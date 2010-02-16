@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.22 2010/01/27 18:26:45 damien Exp $	*/
+/*	$OpenBSD: athn.c,v 1.24 2010/02/15 17:16:36 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -1233,6 +1233,9 @@ athn_set_chan(struct athn_softc *sc, struct ieee80211_channel *c,
 	if ((error = ops->set_synth(sc, c, extc)) != 0)
 		return (error);
 
+	sc->curchan = c;
+	sc->curchanext = extc;
+
 	/* Set transmit power values for new channel. */
 	ops->set_txpower(sc, c, extc);
 
@@ -1256,7 +1259,6 @@ int
 athn_switch_chan(struct athn_softc *sc, struct ieee80211_channel *c,
     struct ieee80211_channel *extc)
 {
-	struct ieee80211com *ic = &sc->sc_ic;
 	int error, qid;
 
 	/* Disable interrupts. */
@@ -1284,7 +1286,8 @@ athn_switch_chan(struct athn_softc *sc, struct ieee80211_channel *c,
 		goto reset;
 
 	/* If band or bandwidth changes, we need to do a full reset. */
-	if (c->ic_flags != ic->ic_bss->ni_chan->ic_flags) {
+	if (c->ic_flags != sc->curchan->ic_flags ||
+	    ((extc != NULL) ^ (sc->curchanext != NULL))) {
 		DPRINTFN(2, ("channel band switch\n"));
 		goto reset;
 	}
@@ -4589,13 +4592,25 @@ athn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		/* XXX Update hardware multicast filter. */
 		ifr = (struct ifreq *)data;
 		error = (cmd == SIOCADDMULTI) ?
 		    ether_addmulti(ifr, &ic->ic_ac) :
 		    ether_delmulti(ifr, &ic->ic_ac);
-		if (error == ENETRESET)
+		if (error == ENETRESET) {
+			athn_set_multi(sc);
 			error = 0;
+		}
+		break;
+
+	case SIOCS80211CHANNEL:
+		error = ieee80211_ioctl(ifp, cmd, data);
+		if (error == ENETRESET &&
+		    ic->ic_opmode == IEEE80211_M_MONITOR) {
+			if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) ==
+			    (IFF_UP | IFF_RUNNING))
+				athn_switch_chan(sc, ic->ic_ibss_chan, NULL);
+			error = 0;
+		}
 		break;
 
 	default:
@@ -4623,8 +4638,8 @@ athn_init(struct ifnet *ifp)
 	struct ieee80211_channel *c, *extc;
 	int i, error;
 
-	c = ic->ic_bss->ni_chan = ic->ic_ibss_chan;
-	extc = NULL;
+	c = sc->curchan = ic->ic_bss->ni_chan = ic->ic_ibss_chan;
+	extc = sc->curchanext = NULL;
 
 	/* In case a new MAC address has been configured. */
 	IEEE80211_ADDR_COPY(ic->ic_myaddr, LLADDR(ifp->if_sadl));
