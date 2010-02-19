@@ -148,9 +148,6 @@ bsdtocpulabel(struct disklabel *lp, struct mvmedisklabel *clp)
 
 	clp->secpercyl = lp->d_secpercyl;
 	clp->secperunit = DL_GETDSIZE(lp);
-	clp->sparespertrack = lp->d_sparespertrack;
-	clp->sparespercyl = lp->d_sparespercyl;
-	clp->acylinders = lp->d_acylinders;
 	clp->rpm = lp->d_rpm;
 
 	clp->cfg_ilv = lp->d_interleave;
@@ -204,9 +201,6 @@ cputobsdlabel(struct disklabel *lp, struct mvmedisklabel *clp)
 	lp->d_secpercyl = clp->secpercyl;
 	if (DL_GETDSIZE(lp) == 0)
 		DL_SETDSIZE(lp, clp->secperunit);
-	lp->d_sparespertrack = clp->sparespertrack;
-	lp->d_sparespercyl = clp->sparespercyl;
-	lp->d_acylinders = clp->acylinders;
 	lp->d_rpm = clp->rpm;
 	lp->d_interleave = clp->cfg_ilv;
 	lp->d_flags = clp->flags;

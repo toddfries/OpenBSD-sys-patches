@@ -148,6 +148,7 @@ struct bdevsw	bdevsw[] =
 	bdev_lkm_dummy(),		/* 23 */
 	bdev_lkm_dummy(),		/* 24 */
 	bdev_disk_init(NRAID,raid),	/* 25: RAIDframe disk driver */
+	bdev_disk_init(1,disk),         /* 26: Disk mapper */
 };
 int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 

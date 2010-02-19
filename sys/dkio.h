@@ -68,4 +68,14 @@ struct dk_inquiry {
 
 #define DIOCINQ		_IOR('d', 116, struct dk_inquiry)
 
+struct dk_diskmap {
+	char		*device;
+	int		fd;
+	int		flags;
+#define	DM_OPENPART	0x1		/* Open raw partition. */
+#define	DM_OPENBLCK	0x2		/* Open block device. */
+};
+
+#define DIOCMAP		_IOWR('d', 117, struct dk_diskmap)
+
 #endif /* _SYS_DKIO_H_ */

@@ -108,19 +108,7 @@ struct disklabel {
 	u_int32_t d_secpercyl;		/* # of data sectors per cylinder */
 	u_int32_t d_secperunit;		/* # of data sectors per unit */
 
-	/*
-	 * Spares (bad sector replacements) below are not counted in
-	 * d_nsectors or d_secpercyl.  Spare sectors are assumed to
-	 * be physical sectors which occupy space at the end of each
-	 * track and/or cylinder.
-	 */
-	u_int16_t d_sparespertrack;	/* # of spare sectors per track */
-	u_int16_t d_sparespercyl;	/* # of spare sectors per cylinder */
-	/*
-	 * Alternate cylinders include maintenance, replacement, configuration
-	 * description areas, etc.
-	 */
-	u_int32_t d_acylinders;		/* # of alt. cylinders per unit */
+	u_int64_t d_label_uid;		/* Unique label identifier. */
 
 			/* hardware characteristics: */
 	/*

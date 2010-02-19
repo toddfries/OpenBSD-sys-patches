@@ -258,8 +258,6 @@ disklabel_sun_to_bsd(char *cp, struct disklabel *lp)
 	lp->d_secpercyl  = secpercyl;
 	lp->d_secperunit = secpercyl * sl->sl_ncylinders;
 
-	lp->d_sparespercyl = sl->sl_sparespercyl;
-	lp->d_acylinders   = sl->sl_acylinders;
 	lp->d_rpm          = sl->sl_rpm;
 	lp->d_interleave   = sl->sl_interleave;
 
