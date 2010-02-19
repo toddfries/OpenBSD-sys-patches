@@ -264,8 +264,6 @@ disklabel_om_to_bsd(struct sun_disklabel *sl, struct disklabel *lp)
 		DL_SETDSIZE(lp, (daddr64_t)secpercyl * sl->sl_ncylinders);
 	lp->d_version = 1;
 
-	lp->d_sparespercyl = 0;				/* no way to know */
-	lp->d_acylinders = sl->sl_acylinders;
 	lp->d_rpm = sl->sl_rpm;				/* UniOS - (empty) */
 	lp->d_interleave = sl->sl_interleave;		/* UniOS - ndisk */
 
@@ -335,13 +333,8 @@ disklabel_bsd_to_om(struct disklabel *lp, struct sun_disklabel *sl)
 	/* Format conversion. */
 	memcpy(sl->sl_text, lp->d_packname, sizeof(lp->d_packname));
 	sl->sl_rpm = 0;					/* UniOS */
-#if 0 /* leave as was */
-	sl->sl_pcyl = lp->d_ncylinders + lp->d_acylinders;	/* XXX */
-	sl->sl_sparespercyl = lp->d_sparespercyl;
-#endif
 	sl->sl_interleave = lp->d_interleave;
 	sl->sl_ncylinders = lp->d_ncylinders;
-	sl->sl_acylinders = lp->d_acylinders;
 	sl->sl_ntracks = lp->d_ntracks;
 	sl->sl_nsectors = lp->d_nsectors;
 
