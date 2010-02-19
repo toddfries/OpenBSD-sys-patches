@@ -608,8 +608,9 @@ notfat:
 int
 setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_int openmask)
 {
-	int i;
 	struct partition *opp, *npp;
+	struct disk *dk = NULL;
+	int i;
 
 	/* sanity clause */
 	if (nlp->d_secpercyl == 0 || nlp->d_secsize == 0 ||
@@ -648,9 +649,29 @@ setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_int openmask)
 			npp->p_cpg = opp->p_cpg;
 		}
 	}
+
+	/* Generate a UID if the disklabel does not already have one. */
+	if (nlp->d_label_uid == 0) {
+		do {
+			nlp->d_label_uid = arc4random();
+			nlp->d_label_uid <<= 32;
+			nlp->d_label_uid |= arc4random();
+
+			/* Check for collisions. */
+			TAILQ_FOREACH(dk, &disklist, dk_link)
+				if (dk->dk_label &&
+				    dk->dk_label->d_label_uid ==
+				    nlp->d_label_uid)
+					break;
+		} while (dk != NULL);
+	}
+
 	nlp->d_checksum = 0;
 	nlp->d_checksum = dkcksum(nlp);
 	*olp = *nlp;
+
+	disk_change = 1;
+
 	return (0);
 }
 
@@ -789,6 +810,10 @@ disk_attach(struct disk *diskp)
 	    M_NOWAIT|M_ZERO);
 	if (diskp->dk_label == NULL)
 		panic("disk_attach: can't allocate storage for disklabel");
+
+	/*
+	 * Read disk label from disk and ensure UID is unique.
+	 */
 
 	/*
 	 * Set the attached timestamp.
@@ -1267,4 +1292,64 @@ findblkname(int maj)
 		if (nam2blk[i].maj == maj)
 			return (nam2blk[i].name);
 	return (NULL);
+}
+
+int
+disk_map(char *path, int size, int flags)
+{
+	struct disk *dk;
+	u_int64_t uid = 0;
+	char c, part;
+	int i;
+
+	/*
+	 * Attempt to map a request for a disklabel UID to the correct device.
+	 * We should be supplied with a disklabel UID which has the following
+	 * format:
+	 *
+	 * 0 [dk_label_uid] 0 [partition]
+	 *
+	 */
+
+	if (strchr(path, '/') != NULL)
+		return -1;
+
+	/* Verify that the device name is properly formed. */
+	if (size < 19 || path[0] != '0' || path[17] != '0')
+		return -1;
+
+	/* Get partition. */
+	if (flags & DM_OPENPART)
+		part = 'a' + RAW_PART;
+	else
+		part = path[18];
+
+	if (part < 'a' || part >= 'a' + MAXPARTITIONS)
+		return -1;
+
+	/* Derive label UID. */
+        for (i = 1; i < 17; i++) {
+		c = path[i];
+		if (c >= '0' && c <= '9')
+			c -= '0';
+		else if (c >= 'a' && c <= 'f')
+			c -= ('a' - 10);
+                else
+			c = 0;
+
+		uid <<= 4;
+		uid |= c & 0xf;
+	}
+
+	TAILQ_FOREACH(dk, &disklist, dk_link)
+		if (dk->dk_label && dk->dk_label->d_label_uid == uid)
+			break;
+
+	if (dk == NULL || dk->dk_name == NULL)
+		return -1;
+
+	snprintf(path, size, "/dev/%s%s%c", (flags & DM_OPENBLCK) ? "" : "r",
+	    dk->dk_name, part);
+
+	return 0;
 }

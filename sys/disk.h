@@ -165,4 +165,6 @@ void	disk_unbusy(struct disk *, long, int);
 
 int	disk_lock(struct disk *);
 void    disk_unlock(struct disk *);
+
+int	disk_map(char *path, int size, int flags);
 #endif
