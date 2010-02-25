@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_run.c,v 1.57 2010/02/10 21:46:56 damien Exp $	*/
+/*	$OpenBSD: if_run.c,v 1.61 2010/02/24 21:15:28 damien Exp $	*/
 
 /*-
  * Copyright (c) 2008-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -97,6 +97,13 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(ACCTON,		RT3070_3),
 	USB_ID(ACCTON,		RT3070_4),
 	USB_ID(AIRTIES,		RT3070),
+	USB_ID(ALLWIN,		RT2070),
+	USB_ID(ALLWIN,		RT2770),
+	USB_ID(ALLWIN,		RT2870),
+	USB_ID(ALLWIN,		RT3070),
+	USB_ID(ALLWIN,		RT3071),
+	USB_ID(ALLWIN,		RT3072),
+	USB_ID(ALLWIN,		RT3572),
 	USB_ID(AMIGO,		RT2870_1),
 	USB_ID(AMIGO,		RT2870_2),
 	USB_ID(AMIT,		CGWLUSB2GNR),
@@ -183,10 +190,12 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(MSI,		RT3070_5),
 	USB_ID(MSI,		RT3070_6),
 	USB_ID(MSI,		RT3070_7),
+	USB_ID(OVISLINK,	RT3072),
 	USB_ID(PARA,		RT3070),
 	USB_ID(PEGATRON,	RT2870),
 	USB_ID(PEGATRON,	RT3070),
 	USB_ID(PEGATRON,	RT3070_2),
+	USB_ID(PEGATRON,	RT3070_3),
 	USB_ID(PHILIPS,		RT2870),
 	USB_ID(PLANEX2,		GWUS300MINIS),
 	USB_ID(PLANEX2,		GWUSMICRON),
@@ -231,6 +240,7 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(SITECOMEU,	WL608),
 	USB_ID(SPARKLAN,	RT2870_1),
 	USB_ID(SPARKLAN,	RT3070),
+	USB_ID(SWEEX2,		LW153),
 	USB_ID(SWEEX2,		LW303),
 	USB_ID(SWEEX2,		LW313),
 	USB_ID(UMEDIA,		RT2870_1),
@@ -842,13 +852,12 @@ run_write_region_1(struct run_softc *sc, uint16_t reg, const uint8_t *buf,
 }
 
 int
-run_set_region_4(struct run_softc *sc, uint16_t reg, uint32_t val, int len)
+run_set_region_4(struct run_softc *sc, uint16_t reg, uint32_t val, int count)
 {
-	int i, error = 0;
+	int error = 0;
 
-	KASSERT((len & 3) == 0);
-	for (i = 0; i < len && error == 0; i += 4)
-		error = run_write(sc, reg + i, val);
+	for (; count > 0 && error == 0; count--, reg += 4)
+		error = run_write(sc, reg, val);
 	return error;
 }
 

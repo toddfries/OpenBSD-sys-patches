@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.25 2010/02/16 18:49:31 damien Exp $	*/
+/*	$OpenBSD: athn.c,v 1.28 2010/02/24 20:09:19 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -783,14 +783,14 @@ athn_intr(void *xsc)
 
 	if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) !=
 	    (IFF_UP | IFF_RUNNING))
-		return (1);
+		return (0);
 
 	/* Get pending interrupts. */
 	intr = AR_READ(sc, AR_INTR_ASYNC_CAUSE);
 	if (!(intr & AR_INTR_MAC_IRQ) || intr == AR_INTR_SPURIOUS) {
 		intr = AR_READ(sc, AR_INTR_SYNC_CAUSE);
 		if (intr == AR_INTR_SPURIOUS || (intr & sc->isync) == 0)
-			return (1);	/* Not for us. */
+			return (0);	/* Not for us. */
 	}
 
 	if ((AR_READ(sc, AR_INTR_ASYNC_CAUSE) & AR_INTR_MAC_IRQ) &&
@@ -800,7 +800,7 @@ athn_intr(void *xsc)
 		intr = 0;
 	sync = AR_READ(sc, AR_INTR_SYNC_CAUSE) & sc->isync;
 	if (intr == 0 && sync == 0)
-		return (1);	/* Not for us. */
+		return (0);	/* Not for us. */
 
 	if (intr != 0) {
 		if (intr & AR_ISR_BCNMISC) {
@@ -812,7 +812,7 @@ athn_intr(void *xsc)
 		}
 		intr = AR_READ(sc, AR_ISR_RAC);
 		if (intr == AR_INTR_SPURIOUS)
-			return (0);
+			return (1);
 
 		if (intr & (AR_ISR_RXMINTR | AR_ISR_RXINTM))
 			athn_rx_intr(sc);
@@ -853,13 +853,13 @@ athn_intr(void *xsc)
 			/* Turn the interface down. */
 			ifp->if_flags &= ~IFF_UP;
 			athn_stop(ifp, 1);
-			return (0);
+			return (1);
 		}
 
 		AR_WRITE(sc, AR_INTR_SYNC_CAUSE, sync);
 		(void)AR_READ(sc, AR_INTR_SYNC_CAUSE);
 	}
-	return (0);
+	return (1);
 }
 
 /*
@@ -4032,6 +4032,12 @@ athn_hw_init(struct athn_softc *sc, struct ieee80211_channel *c,
 	if (AR_SREV_5416_20_OR_LATER(sc) && !AR_SREV_9280_10_OR_LATER(sc)) {
 		/* Disable baseband clock gating. */
 		AR_WRITE(sc, AR_PHY(651), 0x11);
+
+		if (AR_SREV_9160(sc)) {
+			/* Disable RIFS search to fix baseband hang. */
+			AR_CLRBITS(sc, AR_PHY_HEAVY_CLIP_FACTOR_RIFS,
+			    AR_PHY_RIFS_INIT_DELAY_M);
+		}
 	}
 
 	athn_set_phy(sc, c, extc);
@@ -4190,11 +4196,12 @@ athn_hw_reset(struct athn_softc *sc, struct ieee80211_channel *c,
 
 	AR_WRITE(sc, AR_RSSI_THR, SM(AR_RSSI_THR_BM_THR, 7));
 
-	error = ops->set_synth(sc, c, extc);
-	if (error != 0) {
+	if ((error = ops->set_synth(sc, c, extc)) != 0) {
 		printf("%s: could not set channel\n", sc->sc_dev.dv_xname);
 		return (error);
 	}
+	sc->curchan = c;
+	sc->curchanext = extc;
 
 	for (i = 0; i < AR_NUM_DCU; i++)
 		AR_WRITE(sc, AR_DQCUMASK(i), 1 << i);
@@ -4638,8 +4645,8 @@ athn_init(struct ifnet *ifp)
 	struct ieee80211_channel *c, *extc;
 	int i, error;
 
-	c = sc->curchan = ic->ic_bss->ni_chan = ic->ic_ibss_chan;
-	extc = sc->curchanext = NULL;
+	c = ic->ic_bss->ni_chan = ic->ic_ibss_chan;
+	extc = NULL;
 
 	/* In case a new MAC address has been configured. */
 	IEEE80211_ADDR_COPY(ic->ic_myaddr, LLADDR(ifp->if_sadl));

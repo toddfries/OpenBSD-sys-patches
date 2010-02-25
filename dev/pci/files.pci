@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.267 2009/11/25 13:28:13 dms Exp $
+#	$OpenBSD: files.pci,v 1.270 2010/02/23 18:43:15 jsg Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -136,7 +136,7 @@ file	dev/pci/azalia.c		azalia
 file	dev/pci/azalia_codec.c		azalia
 
 # VIA Envy24 (aka ICE1712)
-device	envy: audio, auconv, mulaw
+device	envy: audio, auconv, mulaw, ac97
 attach	envy at pci
 file	dev/pci/envy.c			envy
 
@@ -366,6 +366,7 @@ attach	ix at pci
 file	dev/pci/if_ix.c			ix
 file	dev/pci/ixgbe.c			ix
 file	dev/pci/ixgbe_82598.c		ix
+file	dev/pci/ixgbe_82599.c		ix
 file	dev/pci/ixgbe_phy.c		ix
 
 # Neterion Xframe 10 Gigabit ethernet 
@@ -794,4 +795,9 @@ file	dev/pci/km.c			km
 device	gcu
 attach	gcu at pci
 file	dev/pci/gcu.c			gcu
+
+# AMD Geode CS5536 Audio
+device	auglx: audio, ac97
+attach	auglx at pci
+file	dev/pci/auglx.c			auglx
 

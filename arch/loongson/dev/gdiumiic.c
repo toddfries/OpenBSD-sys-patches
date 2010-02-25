@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdiumiic.c,v 1.2 2010/02/19 00:21:45 miod Exp $	*/
+/*	$OpenBSD: gdiumiic.c,v 1.4 2010/02/24 22:16:18 miod Exp $	*/
 
 /*
  * Copyright (c) 2010 Miodrag Vallat.
@@ -29,6 +29,9 @@
 #include <sys/device.h>
 #include <sys/gpio.h>
 #include <sys/rwlock.h>
+
+#include <machine/autoconf.h>
+#include <mips64/archtype.h>
 
 #include <dev/gpio/gpiovar.h>
 
@@ -133,7 +136,8 @@ gdiumiic_match(struct device *parent, void *match, void *aux)
 	if (ga->ga_offset == -1 || gdiumiic_bustype(ga) < 0)
 		return 0;
 
-	return (strcmp(cf->cf_driver->cd_name, "gdiumiic") == 0);
+	return (sys_platform->system_type == LOONGSON_GDIUM &&
+	    strcmp(cf->cf_driver->cd_name, "gdiumiic") == 0);
 }
 
 void
@@ -345,6 +349,13 @@ gdiumiic_sensors_scan(struct device *iicdev, struct i2cbus_attach_args *iba,
 	struct i2c_attach_args ia;
 	/* not worth #define'ing _I2C_PRIVATE for */
 	extern int iic_print(void *, const char *);
+
+	bzero(&ia, sizeof ia);
+	ia.ia_tag = iba->iba_tag;
+	ia.ia_addr = 0x40;
+	ia.ia_size = 1;
+	ia.ia_name = "stsec";
+	config_found(iicdev, &ia, iic_print);
 
 	bzero(&ia, sizeof ia);
 	ia.ia_tag = iba->iba_tag;
