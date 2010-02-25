@@ -1,4 +1,4 @@
-#	$OpenBSD: files.loongson,v 1.4 2010/02/19 00:21:43 miod Exp $
+#	$OpenBSD: files.loongson,v 1.6 2010/02/24 22:16:18 miod Exp $
 
 # Standard stanzas config(8) can't run without
 maxpartitions 16
@@ -73,6 +73,11 @@ attach	mcclock at isa with mcclock_isa
 file	arch/loongson/dev/mcclock.c			mcclock
 file	arch/loongson/dev/mcclock_isa.c			mcclock_isa
 
+# Lemote Yeeloong KB3310B Embedded Controller
+device	ykbec
+attach	ykbec at isa
+file	arch/loongson/dev/kb3310.c			ykbec
+
 # Silicon Motion SM502 master device
 device	voyager {}: gpiobus
 attach	voyager at pci
@@ -82,6 +87,11 @@ file	arch/loongson/dev/voyager.c			voyager
 device	gdiumiic: i2cbus, i2c_bitbang
 attach	gdiumiic at gpio
 file	arch/loongson/dev/gdiumiic.c			gdiumiic
+
+# Gdium ST7 controller
+device	stsec
+attach	stsec at i2c
+file	arch/loongson/dev/stsec.c			stsec
 
 # Gdium M41T8x RTC
 device	mfokclock
