@@ -1,4 +1,4 @@
-\	$OpenBSD: bootblk.fth,v 1.4 2009/09/03 16:39:37 jsing Exp $
+\	$OpenBSD: bootblk.fth,v 1.6 2010/02/26 23:03:50 deraadt Exp $
 \	$NetBSD: bootblk.fth,v 1.3 2001/08/15 20:10:24 eeh Exp $
 \
 \	IEEE 1275 Open Firmware Boot Block
@@ -603,11 +603,7 @@ h# 6000 constant loader-base
    loader-base				( buf-len addr )
    2dup read-file			( buf-len addr )
    ufs-close				( buf-len addr )
-
-   dup l@ is-elf? false = if
-      ." load-file: not an elf executable" cr
-      abort
-   then
+   dup is-elf?  if ." load-file: not an elf executable" cr abort then
 
    \ Luckily the prom should be able to handle ELF executables by itself
 
@@ -615,7 +611,7 @@ h# 6000 constant loader-base
 ;
 
 : do-boot ( bootfile -- )
-   ." OpenBSD IEEE 1275 Bootblock 1.1" cr
+   ." OpenBSD IEEE 1275 Bootblock 1.2" cr
    boot-path load-file ( -- load-base )
    dup 0<> if  " to load-base init-program" evaluate then
 ;
