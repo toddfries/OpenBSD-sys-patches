@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.15 2010/02/26 14:53:11 miod Exp $
+#	$OpenBSD: GENERIC,v 1.18 2010/02/28 22:39:13 miod Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -30,6 +30,7 @@ config	bsd	swap generic
 mainbus0	at root
 cpu0		at mainbus0
 clock0		at mainbus0
+apm0		at mainbus0
 
 # Main local buses
 bonito*		at mainbus0
@@ -46,9 +47,13 @@ pmsi*		at pckbc?			# Yeeloong only
 wsmouse*	at pmsi? mux 0			# Yeeloong only
 ykbec0		at isa? port 0x381		# Yeeloong only
 com0		at isa? port 0x2f8 irq 3	# Fuloong 2F only
+com1		at isa? port 0x3f8 irq 4	# Fuloong 2F only (IR port)
 pciide*		at pci?
 wd*		at pciide? flags 0x0000
+sisfb*		at pci?				# Fuloong 2F only
+wsdisplay*	at sisfb?
 smfb*		at pci?				# Yeeloong only
+wsdisplay*	at smfb?
 auglx*		at pci?
 audio*		at auglx?
 

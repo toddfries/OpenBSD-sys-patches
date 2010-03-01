@@ -1,4 +1,4 @@
-/*	$OpenBSD: yeeloong_machdep.c,v 1.7 2010/02/23 21:04:16 otto Exp $	*/
+/*	$OpenBSD: yeeloong_machdep.c,v 1.9 2010/02/28 22:39:14 miod Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -85,6 +85,7 @@ const struct legacy_io_range fuloong_legacy_ranges[] = {
 	{ 0x376,	0x376 },
 	{ 0x3f6,	0x3f6 },
 	/* com */
+	{ IO_COM1,	IO_COM1 + 8 },
 	{ IO_COM2,	IO_COM2 + 8 },
 
 	{ 0 }
@@ -235,8 +236,7 @@ fuloong_setup(void)
 	envvar = pmon_getenv("novga");
 	serial = serial && envvar == 0;
 
-	/* XXX always switch to serial until we have framebuffer */
-	if (serial || 1) {
+	if (serial) {
                 comconsiot = &bonito_pci_io_space_tag;
                 comconsaddr = 0x2f8;
                 comconsrate = 115200; /* default PMON console speed */
