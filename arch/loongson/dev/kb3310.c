@@ -1,4 +1,4 @@
-/*	$OpenBSD: kb3310.c,v 1.4 2010/02/24 18:29:39 otto Exp $	*/
+/*	$OpenBSD: kb3310.c,v 1.7 2010/02/28 17:32:30 miod Exp $	*/
 /*
  * Copyright (c) 2010 Otto Moerbeek <otto@drijf.net>
  *
@@ -20,9 +20,21 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/sensors.h>
+#include <sys/timeout.h>
 
+#include <machine/apmvar.h>
 #include <machine/bus.h>
 #include <dev/isa/isavar.h>
+
+#include "apm.h"
+#include "pckbd.h"
+#include "ukbd.h"
+
+#if NPCKBD > 0 || NUKBD > 0
+#include <dev/ic/pckbcvar.h>
+#include <dev/pckbc/pckbdvar.h>
+#include <dev/usb/ukbdvar.h>
+#endif
 
 struct cfdriver ykbec_cd = {
 	NULL, "ykbec", DV_DULL,
@@ -31,28 +43,73 @@ struct cfdriver ykbec_cd = {
 #define IO_YKBEC		0x381
 #define IO_YKBECSIZE		0x3
 
-#define KB3310_NUM_SENSORS	12
+static const struct {
+	const char *desc;	
+	int type;
+} ykbec_table[] = {
+#define YKBEC_FAN	0
+	{ NULL,				SENSOR_FANRPM },
+#define YKBEC_ITEMP	1
+	{ "Internal temperature",	SENSOR_TEMP },
+#define YKBEC_DCAP	2
+	{ "Battery design capacity",	SENSOR_AMPHOUR },
+#define YKBEC_FCAP	3
+	{ "Battery full charge capacity", SENSOR_AMPHOUR },
+#define YKBEC_DVOLT	4
+	{ "Battery design voltage",	SENSOR_VOLTS_DC },
+#define YKBEC_BCURRENT	5
+	{ "Battery current", 		SENSOR_AMPS },
+#define YKBEC_BVOLT	6
+	{ "Battery voltage",		SENSOR_VOLTS_DC },
+#define YKBEC_BTEMP	7
+	{ "Battery temperature",	SENSOR_TEMP },
+#define YKBEC_CAP	8
+	{ "Battery capacity", 		SENSOR_PERCENT },
+#define YKBEC_CHARGING	9
+	{ "Battery charging",		SENSOR_INDICATOR },
+#define YKBEC_AC	10
+	{ "AC-Power",			SENSOR_INDICATOR }
+#define YKBEC_NSENSORS	11
+};
 
 struct ykbec_softc {
 	struct device		sc_dev;
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
-	struct ksensor		sc_sensor[KB3310_NUM_SENSORS];
+	struct ksensor		sc_sensor[YKBEC_NSENSORS];
 	struct ksensordev	sc_sensordev;
-
+#if NPCKBD > 0 || NUKBD > 0
+	struct timeout		sc_bell_tmo;
+#endif
 };
 
 int	ykbec_match(struct device *, void *, void *);
 void	ykbec_attach(struct device *, struct device *, void *);
-void	ykbec_refresh(void *arg);
 
 const struct cfattach ykbec_ca = {
 	sizeof(struct ykbec_softc), ykbec_match, ykbec_attach
 };
 
-void	ykbec_write(struct ykbec_softc *, u_int, u_int);
+int	ykbec_apminfo(struct apm_power_info *);
+void	ykbec_bell(void *, u_int, u_int, u_int, int);
+void	ykbec_bell_stop(void *);
 u_int	ykbec_read(struct ykbec_softc *, u_int);
 u_int	ykbec_read16(struct ykbec_softc *, u_int);
+void	ykbec_refresh(void *arg);
+void	ykbec_write(struct ykbec_softc *, u_int, u_int);
+
+#if NAPM > 0
+struct apm_power_info ykbec_apmdata;
+const char *ykbec_batstate[] = {
+	"high",
+	"low",
+	"critical",
+	"charging",
+	"unknown"
+};
+#define BATTERY_STRING(x) ((x) < nitems(ykbec_batstate) ? \
+	ykbec_batstate[x] : ykbec_batstate[4])
+#endif
 
 int
 ykbec_match(struct device *parent, void *match, void *aux)
@@ -77,12 +134,12 @@ ykbec_match(struct device *parent, void *match, void *aux)
 	return (1);
 }
 
-
 void
 ykbec_attach( struct device *parent, struct device *self, void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	struct ykbec_softc *sc = (struct ykbec_softc *)self;
+	int i;
 
 	sc->sc_iot = ia->ia_iot;
 	if (bus_space_map(sc->sc_iot, ia->ia_iobase, ia->ia_iosize, 0,
@@ -98,67 +155,33 @@ ykbec_attach( struct device *parent, struct device *self, void *aux)
 		printf(", unable to register update task\n");
 		return;
 	}
-	sc->sc_sensor[0].type = SENSOR_FANRPM;
-	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor[0]);
 
-	sc->sc_sensor[1].type = SENSOR_TEMP;
-	strlcpy(sc->sc_sensor[1].desc, "Internal temperature",
-	    sizeof(sc->sc_sensor[1].desc));
-	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor[1]);
+	printf("\n");
 
-	sc->sc_sensor[2].type = SENSOR_AMPHOUR;
-	strlcpy(sc->sc_sensor[2].desc, "Battery design capacity",
-	    sizeof(sc->sc_sensor[2].desc));
-	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor[2]);
-
-	sc->sc_sensor[3].type = SENSOR_AMPHOUR;
-	strlcpy(sc->sc_sensor[3].desc, "Battery full charge capacity",
-	    sizeof(sc->sc_sensor[3].desc));
-	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor[3]);
-
-	sc->sc_sensor[4].type = SENSOR_VOLTS_DC;
-	strlcpy(sc->sc_sensor[4].desc, "Battery design voltage",
-	    sizeof(sc->sc_sensor[4].desc));
-	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor[4]);
-
-	sc->sc_sensor[5].type = SENSOR_AMPS;
-	strlcpy(sc->sc_sensor[5].desc, "Battery current",
-	    sizeof(sc->sc_sensor[5].desc));
-	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor[5]);
-
-	sc->sc_sensor[6].type = SENSOR_VOLTS_DC;
-	strlcpy(sc->sc_sensor[6].desc, "Battery voltage",
-	    sizeof(sc->sc_sensor[6].desc));
-	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor[6]);
-
-	sc->sc_sensor[7].type = SENSOR_TEMP;
-	strlcpy(sc->sc_sensor[7].desc, "Battery temperature",
-	    sizeof(sc->sc_sensor[7].desc));
-	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor[7]);
-
-	sc->sc_sensor[8].type = SENSOR_PERCENT;
-	strlcpy(sc->sc_sensor[8].desc, "Battery capacity",
-	    sizeof(sc->sc_sensor[8].desc));
-	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor[8]);
-
-	sc->sc_sensor[9].type = SENSOR_INDICATOR;
-	strlcpy(sc->sc_sensor[9].desc, "Battery charging",
-	    sizeof(sc->sc_sensor[9].desc));
-	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor[9]);
-
-	sc->sc_sensor[10].type = SENSOR_INDICATOR;
-	strlcpy(sc->sc_sensor[10].desc, "AC-Power",
-	    sizeof(sc->sc_sensor[10].desc));
-	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor[10]);
-
-	sc->sc_sensor[11].type = SENSOR_INTEGER;
-	strlcpy(sc->sc_sensor[11].desc, "Battery low-level status",
-	    sizeof(sc->sc_sensor[11].desc));
-	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor[11]);
+	for (i = 0; i < YKBEC_NSENSORS; i++) {
+		sc->sc_sensor[i].type = ykbec_table[i].type; 
+		if (ykbec_table[i].desc) 
+			strlcpy(sc->sc_sensor[i].desc, ykbec_table[i].desc,
+			    sizeof(sc->sc_sensor[i].desc));
+		sensor_attach(&sc->sc_sensordev, &sc->sc_sensor[i]);
+	}
 
 	sensordev_install(&sc->sc_sensordev);
 
-	printf("\n");
+#if NAPM > 0
+	/* make sure we have the apm state initialized before apm attaches */
+	ykbec_refresh(sc);
+	apm_setinfohook(ykbec_apminfo);
+#endif
+#if NPCKBD > 0 || NUKBD > 0
+	timeout_set(&sc->sc_bell_tmo, ykbec_bell_stop, sc);
+#if NPCKBD > 0
+	pckbd_hookup_bell(ykbec_bell, sc);
+#endif
+#if NUKBD > 0
+	ukbd_hookup_bell(ykbec_bell, sc);
+#endif
+#endif
 }
 
 void
@@ -242,38 +265,51 @@ ykbec_read16(struct ykbec_softc *mcsc, u_int reg)
 #define BAT_STATE_DISCHARGING		(1<<0)
 #define BAT_STATE_CHARGING		(1<<1)
 
+#define	REG_BEEP_CONTROL		0xf4d0
+#define	BEEP_ENABLE			(1<<0)
+
 void
 ykbec_refresh(void *arg)
 {
 	struct ykbec_softc *sc = (struct ykbec_softc *)arg;
 	u_int val, bat_charge, bat_status, charge_status, bat_state, power_flag;
+	u_int cap_pct, fullcap;
 	int current;
+#if NAPM > 0
+	struct apm_power_info old;
+#endif
 
 	val = ykbec_read16(sc, REG_FAN_SPEED_HIGH) & 0xfffff;
-	if (val != 0)
+	if (val != 0) {
 		val = KB3310_FAN_SPEED_DIVIDER / val;
-	else
-		val = UINT_MAX;
-	sc->sc_sensor[0].value = val;
+		sc->sc_sensor[YKBEC_FAN].value = val;
+		sc->sc_sensor[YKBEC_FAN].flags &= ~SENSOR_FINVALID;
+	} else
+		sc->sc_sensor[YKBEC_FAN].flags |= SENSOR_FINVALID;
 
 	val = ykbec_read(sc, ECTEMP_CURRENT_REG);
-	sc->sc_sensor[1].value = val * 1000000 + 273150000;
+	sc->sc_sensor[YKBEC_ITEMP].value = val * 1000000 + 273150000;
 
-	sc->sc_sensor[2].value = ykbec_read16(sc, REG_DESIGN_CAP_HIGH) * 1000;
-	sc->sc_sensor[3].value = ykbec_read16(sc, REG_FULLCHG_CAP_HIGH) * 1000;
-	sc->sc_sensor[4].value = ykbec_read16(sc, REG_DESIGN_VOL_HIGH) * 1000;
+	sc->sc_sensor[YKBEC_DCAP].value = ykbec_read16(sc, REG_DESIGN_CAP_HIGH)
+	    * 1000;
+	fullcap = ykbec_read16(sc, REG_FULLCHG_CAP_HIGH);
+	sc->sc_sensor[YKBEC_FCAP].value = fullcap * 1000;
+	sc->sc_sensor[YKBEC_DVOLT].value = ykbec_read16(sc, REG_DESIGN_VOL_HIGH)
+	    * 1000;
 
 	current = ykbec_read16(sc, REG_CURRENT_HIGH);
 	/* sign extend short -> int, int -> int64 will be done next statement */
 	current |= -(current & 0x8000);
-	sc->sc_sensor[5].value = current * -1000;
+	sc->sc_sensor[YKBEC_BCURRENT].value = -1000 * current;
 
-	sc->sc_sensor[6].value = ykbec_read16(sc, REG_VOLTAGE_HIGH) * 1000;
+	sc->sc_sensor[YKBEC_BVOLT].value = ykbec_read16(sc, REG_VOLTAGE_HIGH) *
+	    1000;
 
 	val = ykbec_read16(sc, REG_TEMPERATURE_HIGH);
-	sc->sc_sensor[7].value = val * 1000000 + 273150000;
+	sc->sc_sensor[YKBEC_BTEMP].value = val * 1000000 + 273150000;
 
-	sc->sc_sensor[8].value = ykbec_read16(sc, REG_RELATIVE_CAT_HIGH) * 1000;
+	cap_pct = ykbec_read16(sc, REG_RELATIVE_CAT_HIGH);
+	sc->sc_sensor[YKBEC_CAP].value = cap_pct * 1000;
 
 	bat_charge = ykbec_read(sc, REG_BAT_CHARGE);
 	bat_status = ykbec_read(sc, REG_BAT_STATUS);
@@ -281,8 +317,104 @@ ykbec_refresh(void *arg)
 	bat_state = ykbec_read(sc, REG_BAT_STATE);
 	power_flag = ykbec_read(sc, REG_POWER_FLAG);
 
-	sc->sc_sensor[9].value = (bat_state & BAT_STATE_CHARGING) ? 1 : 0;
-	sc->sc_sensor[10].value = (power_flag & POWER_FLAG_ADAPTER_IN) ? 1 : 0;
-	sc->sc_sensor[11].value = (bat_state << 24) | (charge_status << 16) |
-	    (bat_status << 8) | bat_charge;
+	sc->sc_sensor[YKBEC_CHARGING].value = (bat_state & BAT_STATE_CHARGING) ?
+	    1 : 0;
+	sc->sc_sensor[YKBEC_AC].value = (power_flag & POWER_FLAG_ADAPTER_IN) ?
+	    1 : 0;
+
+#if NAPM > 0
+	bcopy(&ykbec_apmdata, &old, sizeof(old));
+	ykbec_apmdata.battery_life = cap_pct;
+	ykbec_apmdata.ac_state = (power_flag & POWER_FLAG_ADAPTER_IN) ?
+	    APM_AC_ON : APM_AC_OFF;
+	if ((bat_status & BAT_STATUS_BAT_EXISTS) == 0) {
+		ykbec_apmdata.battery_state = APM_BATTERY_ABSENT;
+		ykbec_apmdata.minutes_left = 0;
+		ykbec_apmdata.battery_life = 0;
+	} else {
+		if (bat_state & BAT_STATE_CHARGING)
+			ykbec_apmdata.battery_state = APM_BATT_CHARGING;
+		/* XXX arbitrary */
+		else if (cap_pct > 60)
+			ykbec_apmdata.battery_state = APM_BATT_HIGH;
+		else if (cap_pct < 10)
+			ykbec_apmdata.battery_state = APM_BATT_CRITICAL;
+		else
+			ykbec_apmdata.battery_state = APM_BATT_LOW;
+
+		/* if charging, current is positive */
+		if (bat_state & BAT_STATE_CHARGING)
+			current = 0;
+		else
+			current = -current;
+		/* XXX Yeeloong draw is about 1A */
+		if (current <= 0)
+			current = 1000;
+		/* XXX at 5?%, the Yeeloong shuts down */
+		if (cap_pct <= 5)
+			cap_pct = 0;
+		else
+			cap_pct -= 5;
+		fullcap = cap_pct * 60 * fullcap / 100;
+		ykbec_apmdata.minutes_left = fullcap / current;
+
+	}
+	if (old.ac_state != ykbec_apmdata.ac_state) 
+		apm_record_event(APM_POWER_CHANGE, "AC power",
+			ykbec_apmdata.ac_state ? "restored" : "lost");
+	if (old.battery_state != ykbec_apmdata.battery_state) 
+		apm_record_event(APM_POWER_CHANGE, "battery",
+		    BATTERY_STRING(ykbec_apmdata.battery_state));
+#endif
 }
+
+
+#if NAPM > 0
+int
+ykbec_apminfo(struct apm_power_info *info)
+{
+	 bcopy(&ykbec_apmdata, info, sizeof(struct apm_power_info));
+	 return 0;
+}
+#endif
+
+#if NPCKBD > 0 || NUKBD > 0
+void
+ykbec_bell(void *arg, u_int pitch, u_int period, u_int volume, int poll)
+{
+	struct ykbec_softc *sc = (struct ykbec_softc *)arg;
+	int bctrl;
+	int s;
+
+	s = spltty();
+	bctrl = ykbec_read(sc, REG_BEEP_CONTROL);
+	if (volume == 0 || timeout_pending(&sc->sc_bell_tmo)) {
+		timeout_del(&sc->sc_bell_tmo);
+		/* inline ykbec_bell_stop(arg); */
+		ykbec_write(sc, REG_BEEP_CONTROL, bctrl & ~BEEP_ENABLE);
+	}
+
+	if (volume != 0) {
+		ykbec_write(sc, REG_BEEP_CONTROL, bctrl | BEEP_ENABLE);
+		if (poll) {
+			delay(period * 1000);
+			ykbec_write(sc, REG_BEEP_CONTROL, bctrl & ~BEEP_ENABLE);
+		} else {
+			timeout_add_msec(&sc->sc_bell_tmo, period);
+		}
+	}
+	splx(s);
+}
+
+void
+ykbec_bell_stop(void *arg)
+{
+	struct ykbec_softc *sc = (struct ykbec_softc *)arg;
+	int s;
+
+	s = spltty();
+	ykbec_write(sc, REG_BEEP_CONTROL,
+	    ykbec_read(sc, REG_BEEP_CONTROL) & ~BEEP_ENABLE);
+	splx(s);
+}
+#endif
