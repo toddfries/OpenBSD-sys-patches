@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urndisreg.h,v 1.1 2010/03/01 23:35:56 mk Exp $ */
+/*	$OpenBSD: if_urndisreg.h,v 1.5 2010/03/02 20:54:27 mk Exp $ */
 
 /*
  * Copyright (c) 2010 Jonathan Armani <dbd@asystant.net>
@@ -23,13 +23,8 @@
 #define RNDIS_TX_LIST_CNT	1
 #define RNDIS_BUFSZ		1542
 
-struct urndis_notification {
-	u_int32_t	notification;
-	u_int32_t	reserved;
-};
-
 struct urndis_chain {
-	struct urndis_softc	*sc_sc;
+	struct urndis_softc	*sc_softc;
 	usbd_xfer_handle	 sc_xfer;
 	char			*sc_buf;
 	struct mbuf		*sc_mbuf;
@@ -64,11 +59,6 @@ struct urndis_softc {
 	int				sc_ifaceno_ctl;
 	usbd_interface_handle		sc_iface_ctl;
 	usbd_interface_handle		sc_iface_data;
-
-	int				sc_intr_no;
-	usbd_pipe_handle		sc_intr_pipe;
-	int				sc_intr_size;
-	struct urndis_notification	sc_intr_buf;
 
 	int				sc_bulkin_no;
 	usbd_pipe_handle		sc_bulkin_pipe;
@@ -162,7 +152,7 @@ struct urndis_packet_msg {
 	u_int32_t	rm_oobdataelements;
 	u_int32_t	rm_pktinfooffset;
 	u_int32_t	rm_pktinfolen;
-	u_int32_t	rm_vchandle; /* XXX zero */
+	u_int32_t	rm_vchandle;
 	u_int32_t	rm_reserved;
 };
 
@@ -225,7 +215,7 @@ struct urndis_query_req {
 	urndis_oid	rm_oid;
 	u_int32_t	rm_infobuflen;
 	u_int32_t	rm_infobufoffset;
-	u_int32_t	rm_devicevchdl; /* XXX DeviceVcHandle */
+	u_int32_t	rm_devicevchdl;
 };
 
 struct urndis_query_comp {
@@ -248,7 +238,7 @@ struct urndis_set_req {
 	urndis_oid	rm_oid;
 	u_int32_t	rm_infobuflen;
 	u_int32_t	rm_infobufoffset;
-	u_int32_t	rm_devicevchdl; /* XXX DeviceVcHandle */
+	u_int32_t	rm_devicevchdl;
 };
 
 struct urndis_set_comp {
@@ -288,19 +278,6 @@ struct urndis_reset_comp {
 
 /* 802.3 link-state or undefined message error. */
 #define REMOTE_NDIS_INDICATE_STATUS_MSG	0x00000007
-
-struct urndis_status_msg { /* XXX unhappy about the name */
-	u_int32_t	rm_type;
-	u_int32_t	rm_len;
-	urndis_status	rm_status;
-	u_int32_t	rm_statusbuflen;
-	u_int32_t	rm_statusbufoffset;
-	urndis_status	rm_diagstatus;
-	u_int32_t	rm_erroroffset;
-#if 0
-	(RNDIS_MESSAGE) Message; /* XXX */
-#endif
-};
 
 /* Keepalive messsage.  May be sent by device. */
 #define REMOTE_NDIS_KEEPALIVE_MSG	0x00000008
