@@ -16,7 +16,7 @@ option		ACCOUNTING	# acct(2) process accounting
 option		KMEMSTATS	# collect malloc(9) statistics
 option		PTRACE		# ptrace(2) system call
 
-#option		PAGEFASTRECYCLE	# fast physical page recycling 
+option		PAGEFASTRECYCLE	# fast physical page recycling 
 #option		KVA_GUARDPAGES	# slow virtual address recycling (+ guarding)
 option		POOL_DEBUG	# pool corruption detection 
 #option		VFSDEBUG	# VFS locking checks
