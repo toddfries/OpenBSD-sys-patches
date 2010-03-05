@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urndis.c,v 1.3 2010/03/02 20:54:27 mk Exp $ */
+/*	$OpenBSD: if_urndis.c,v 1.9 2010/03/05 18:20:50 armani Exp $ */
 
 /*
  * Copyright (c) 2010 Jonathan Armani <dbd@asystant.net>
@@ -88,27 +88,27 @@ usbd_status urndis_ctrl_msg(struct urndis_softc *, uint8_t, uint8_t,
 usbd_status urndis_ctrl_send(struct urndis_softc *, void *, size_t);
 struct urndis_comp_hdr *urndis_ctrl_recv(struct urndis_softc *);
 
-urndis_status urndis_ctrl_handle(struct urndis_softc *,
+u_int32_t urndis_ctrl_handle(struct urndis_softc *,
     struct urndis_comp_hdr *, void **, size_t *);
-urndis_status urndis_ctrl_handle_init(struct urndis_softc *,
+u_int32_t urndis_ctrl_handle_init(struct urndis_softc *,
     const struct urndis_comp_hdr *);
-urndis_status urndis_ctrl_handle_query(struct urndis_softc *,
+u_int32_t urndis_ctrl_handle_query(struct urndis_softc *,
     const struct urndis_comp_hdr *, void **, size_t *);
-urndis_status urndis_ctrl_handle_reset(struct urndis_softc *,
+u_int32_t urndis_ctrl_handle_reset(struct urndis_softc *,
     const struct urndis_comp_hdr *);
 
-urndis_status urndis_ctrl_init(struct urndis_softc *);
-urndis_status urndis_ctrl_halt(struct urndis_softc *);
-urndis_status urndis_ctrl_query(struct urndis_softc *, urndis_oid, void *, size_t,
+u_int32_t urndis_ctrl_init(struct urndis_softc *);
+u_int32_t urndis_ctrl_halt(struct urndis_softc *);
+u_int32_t urndis_ctrl_query(struct urndis_softc *, u_int32_t, void *, size_t,
     void **, size_t *);
-urndis_status urndis_ctrl_set(struct urndis_softc *, urndis_oid, void *, size_t);
-urndis_status urndis_ctrl_set_param(struct urndis_softc *, const char *, u_int32_t,
+u_int32_t urndis_ctrl_set(struct urndis_softc *, u_int32_t, void *, size_t);
+u_int32_t urndis_ctrl_set_param(struct urndis_softc *, const char *, u_int32_t,
     void *, size_t);
-urndis_status urndis_ctrl_reset(struct urndis_softc *);
-urndis_status urndis_ctrl_keepalive(struct urndis_softc *);
+u_int32_t urndis_ctrl_reset(struct urndis_softc *);
+u_int32_t urndis_ctrl_keepalive(struct urndis_softc *);
 
 int urndis_encap(struct urndis_softc *, struct mbuf *, int);
-void urndis_decap(struct urndis_softc *, struct urndis_chain *, size_t);
+void urndis_decap(struct urndis_softc *, struct urndis_chain *, u_int32_t);
 
 int urndis_match(struct device *, void *, void *);
 void urndis_attach(struct device *, struct device *, void *);
@@ -162,8 +162,8 @@ urndis_ctrl_send(struct urndis_softc *sc, void *buf, size_t len)
 struct urndis_comp_hdr *
 urndis_ctrl_recv(struct urndis_softc *sc)
 {
-#define RNDIS_RESPONSE_LEN 0x400 /* XXX seriously? */
-	struct urndis_comp_hdr	*hdr, *pkt;
+#define RNDIS_RESPONSE_LEN 0x400
+	struct urndis_comp_hdr	*hdr;
 	char			*buf;
 	usbd_status		 err;
 
@@ -197,29 +197,14 @@ urndis_ctrl_recv(struct urndis_softc *sc)
 		return NULL;
 	}
 
-	if (letoh32(hdr->rm_len) < 128) {
-		pkt = malloc(letoh32(hdr->rm_len),
-		    M_TEMP, M_WAITOK | M_CANFAIL);
-		if (pkt == NULL) {
-			printf("%s: out of memory\n", DEVNAME(sc));
-			/* XXX just use buf? */
-			free(buf, M_TEMP);
-		} else {
-			memcpy(pkt, hdr, letoh32(hdr->rm_len));
-			free(buf, M_TEMP);
-		}
-	} else {
-		pkt = hdr;
-	}
-
-	return pkt;
+	return hdr;
 }
 
-urndis_status
+u_int32_t
 urndis_ctrl_handle(struct urndis_softc *sc, struct urndis_comp_hdr *hdr,
     void **buf, size_t *bufsz)
 {
-	urndis_status rval;
+	u_int32_t rval;
 
 	DPRINTF(("%s: urndis_ctrl_handle\n", DEVNAME(sc)));
 
@@ -257,7 +242,7 @@ urndis_ctrl_handle(struct urndis_softc *sc, struct urndis_comp_hdr *hdr,
 	return rval;
 }
 
-urndis_status
+u_int32_t
 urndis_ctrl_handle_init(struct urndis_softc *sc, const struct urndis_comp_hdr *hdr)
 {
 	const struct urndis_init_comp	*msg;
@@ -311,7 +296,7 @@ urndis_ctrl_handle_init(struct urndis_softc *sc, const struct urndis_comp_hdr *h
 	return letoh32(msg->rm_status);
 }
 
-urndis_status
+u_int32_t
 urndis_ctrl_handle_query(struct urndis_softc *sc,
     const struct urndis_comp_hdr *hdr, void **buf, size_t *bufsz)
 {
@@ -340,9 +325,9 @@ urndis_ctrl_handle_query(struct urndis_softc *sc,
 
 		return letoh32(msg->rm_status);
 	}
-	/* XXX : 8 -> rid offset in struct */
+
 	if (letoh32(msg->rm_infobuflen) + letoh32(msg->rm_infobufoffset) +
-	    8 > letoh32(msg->rm_len)) {
+	    RNDIS_HEADER_OFFSET > letoh32(msg->rm_len)) {
 		printf("%s: ctrl message error: invalid query info "
 		    "len/offset/end_position(%d/%d/%d) -> "
 		    "go out of buffer limit %d\n",
@@ -350,7 +335,7 @@ urndis_ctrl_handle_query(struct urndis_softc *sc,
 		    letoh32(msg->rm_infobuflen),
 		    letoh32(msg->rm_infobufoffset), 
 		    letoh32(msg->rm_infobuflen) +
-		    letoh32(msg->rm_infobufoffset) + 8,
+		    letoh32(msg->rm_infobufoffset) + RNDIS_HEADER_OFFSET,
 		    letoh32(msg->rm_len));
 		return RNDIS_STATUS_FAILURE;
 	}
@@ -374,12 +359,12 @@ urndis_ctrl_handle_query(struct urndis_softc *sc,
 	return letoh32(msg->rm_status);
 }
 
-urndis_status
+u_int32_t
 urndis_ctrl_handle_reset(struct urndis_softc *sc,
     const struct urndis_comp_hdr *hdr)
 {
 	const struct urndis_reset_comp	*msg;
-	urndis_status			 rval;
+	u_int32_t			 rval;
 
 	msg = (struct urndis_reset_comp *) hdr;
 
@@ -413,11 +398,11 @@ urndis_ctrl_handle_reset(struct urndis_softc *sc,
 	return rval;
 }
 
-urndis_status
+u_int32_t
 urndis_ctrl_init(struct urndis_softc *sc)
 {
 	struct urndis_init_req	*msg;
-	urndis_status		 rval;
+	u_int32_t		 rval;
 	struct urndis_comp_hdr	*hdr;
 
 	msg = malloc(sizeof(*msg), M_TEMP, M_WAITOK);
@@ -460,11 +445,11 @@ urndis_ctrl_init(struct urndis_softc *sc)
 	return rval;
 }
 
-urndis_status
+u_int32_t
 urndis_ctrl_halt(struct urndis_softc *sc)
 {
 	struct urndis_halt_req	*msg;
-	urndis_status		 rval;
+	u_int32_t		 rval;
 
 	msg = malloc(sizeof(*msg), M_TEMP, M_WAITOK);
 	if (msg == NULL) {
@@ -491,13 +476,13 @@ urndis_ctrl_halt(struct urndis_softc *sc)
 	return rval;
 }
 
-urndis_status
-urndis_ctrl_query(struct urndis_softc *sc, urndis_oid oid,
+u_int32_t
+urndis_ctrl_query(struct urndis_softc *sc, u_int32_t oid,
     void *qbuf, size_t qlen,
     void **rbuf, size_t *rbufsz)
 {
 	struct urndis_query_req	*msg;
-	urndis_status		 rval;
+	u_int32_t		 rval;
 	struct urndis_comp_hdr	*hdr;
 
 	msg = malloc(sizeof(*msg) + qlen, M_TEMP, M_WAITOK);
@@ -546,11 +531,11 @@ urndis_ctrl_query(struct urndis_softc *sc, urndis_oid oid,
 	return rval;
 }
 
-urndis_status
-urndis_ctrl_set(struct urndis_softc *sc, urndis_oid oid, void *buf, size_t len)
+u_int32_t
+urndis_ctrl_set(struct urndis_softc *sc, u_int32_t oid, void *buf, size_t len)
 {
 	struct urndis_set_req	*msg;
-	urndis_status		 rval;
+	u_int32_t		 rval;
 	struct urndis_comp_hdr	*hdr;
 
 	msg = malloc(sizeof(*msg) + len, M_TEMP, M_WAITOK);
@@ -601,12 +586,12 @@ urndis_ctrl_set(struct urndis_softc *sc, urndis_oid oid, void *buf, size_t len)
 	return rval;
 }
 
-urndis_status
+u_int32_t
 urndis_ctrl_set_param(struct urndis_softc *sc, const char *name, u_int32_t type,
     void *buf, size_t len)
 {
 	struct urndis_set_parameter	*param;
-	urndis_status			 rval;
+	u_int32_t			 rval;
 	size_t				 namelen, tlen;
 
 	if (name)
@@ -652,11 +637,11 @@ urndis_ctrl_set_param(struct urndis_softc *sc, const char *name, u_int32_t type,
 }
 
 /* XXX : adrreset, get it from response */
-urndis_status
+u_int32_t
 urndis_ctrl_reset(struct urndis_softc *sc)
 {
 	struct urndis_reset_req		*reset;
-	urndis_status			 rval;
+	u_int32_t			 rval;
 	struct urndis_comp_hdr		*hdr;
 
 	reset = malloc(sizeof(*reset), M_TEMP, M_WAITOK);
@@ -692,11 +677,11 @@ urndis_ctrl_reset(struct urndis_softc *sc)
 	return rval;
 }
 
-urndis_status
+u_int32_t
 urndis_ctrl_keepalive(struct urndis_softc *sc)
 {
 	struct urndis_keepalive_req	*keep;
-	urndis_status			 rval;
+	u_int32_t			 rval;
 	struct urndis_comp_hdr		*hdr;
 
 	keep = malloc(sizeof(*keep), M_TEMP, M_WAITOK);
@@ -709,7 +694,7 @@ urndis_ctrl_keepalive(struct urndis_softc *sc)
 	keep->rm_len = htole32(sizeof(*keep));
 	keep->rm_rid = 0; /* XXX rm_rid == reserved ... remove ? */
 
-	DPRINTF(("%s: urndis_ctrl_reset send: type %u len %u rid %u\n",
+	DPRINTF(("%s: urndis_ctrl_keepalive: type %u len %u rid %u\n",
 	    DEVNAME(sc),
 	    letoh32(keep->rm_type),
 	    letoh32(keep->rm_len),
@@ -751,13 +736,11 @@ urndis_encap(struct urndis_softc *sc, struct mbuf *m, int idx)
 	msg->rm_type = htole32(REMOTE_NDIS_PACKET_MSG);
 	msg->rm_len = htole32(sizeof(*msg) + m->m_pkthdr.len);
 
-	/* XXX : 36 -> dataoffset corresponding in this struct */
-	msg->rm_dataoffset = htole32(36);
+	msg->rm_dataoffset = htole32(RNDIS_DATA_OFFSET);
 	msg->rm_datalen = htole32(m->m_pkthdr.len);
 
-	/* XXX : 8 -> dataoffset offset in struct */
 	m_copydata(m, 0, m->m_pkthdr.len,
-	    ((char*)msg + 36 + 8));
+	    ((char*)msg + RNDIS_DATA_OFFSET + RNDIS_HEADER_OFFSET));
 
 	DPRINTF(("%s: urndis_encap type 0x%x len %u data(off %u len %u)\n",
 	    DEVNAME(sc),
@@ -784,9 +767,8 @@ urndis_encap(struct urndis_softc *sc, struct mbuf *m, int idx)
 	return(0);
 }
 
-/* XXX draft, must implement Multi-Packets Transfer ... :( */
 void
-urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, size_t len)
+urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 {
 	struct mbuf		*m;
 	struct urndis_packet_msg	*msg;
@@ -846,9 +828,10 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, size_t len)
 			    len);
 			return;
 		}
-		/* XXX : 8 -> dataoffset offset in struct */
+
 		if (letoh32(msg->rm_dataoffset) +
-		    letoh32(msg->rm_datalen) + 8 > letoh32(msg->rm_len)) {
+		    letoh32(msg->rm_datalen) + RNDIS_HEADER_OFFSET 
+		        > letoh32(msg->rm_len)) {
 			printf("%s: urndis_decap invalid data "
 			    "len/offset/end_position(%u/%u/%u) -> "
 			    "go out of receive buffer limit %u\n",
@@ -856,7 +839,7 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, size_t len)
 			    letoh32(msg->rm_datalen),
 			    letoh32(msg->rm_dataoffset),
 			    letoh32(msg->rm_dataoffset) +
-			    letoh32(msg->rm_datalen) + 8,
+			    letoh32(msg->rm_datalen) + RNDIS_HEADER_OFFSET,
 			    letoh32(msg->rm_len));
 			return;
 		}
@@ -1225,7 +1208,7 @@ urndis_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status
 	struct urndis_chain	*c;
 	struct urndis_softc	*sc;
 	struct ifnet		*ifp;
-	size_t			 total_len;
+	u_int32_t		 total_len;
 
 	c = priv;
 	sc = c->sc_softc;
@@ -1262,7 +1245,7 @@ urndis_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status
 	sc->sc_rxeof_errors = 0;
 #endif
 
-	usbd_get_xfer_status(xfer, NULL, NULL, (u_int32_t*)&total_len, NULL);
+	usbd_get_xfer_status(xfer, NULL, NULL, &total_len, NULL);
 	urndis_decap(sc, c, total_len);
 
 done:
