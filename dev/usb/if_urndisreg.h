@@ -1,8 +1,8 @@
-/*	$OpenBSD: if_urndisreg.h,v 1.8 2010/03/06 19:04:57 armani Exp $ */
+/*	$OpenBSD: if_urndisreg.h,v 1.13 2010/03/07 17:17:33 mk Exp $ */
 
 /*
- * Copyright (c) 2010 Jonathan Armani <dbd@asystant.net>
- * Copyright (c) 2010 Fabien Romano <fromano@asystant.net>
+ * Copyright (c) 2010 Jonathan Armani <armani@openbsd.org>
+ * Copyright (c) 2010 Fabien Romano <fabien@openbsd.org>
  * Copyright (c) 2010 Michael Knudsen <mk@openbsd.org>
  * All rights reserved.
  *
@@ -28,17 +28,13 @@ struct urndis_chain {
 	usbd_xfer_handle	 sc_xfer;
 	char			*sc_buf;
 	struct mbuf		*sc_mbuf;
-	int			 sc_accum;
 	int			 sc_idx;
 };
 
 struct urndis_cdata {
 	struct urndis_chain	sc_rx_chain[RNDIS_RX_LIST_CNT];
 	struct urndis_chain	sc_tx_chain[RNDIS_TX_LIST_CNT];
-	int			sc_tx_prod;
-	int			sc_tx_cons;
 	int			sc_tx_cnt;
-	int			sc_rx_prod;
 };
 
 #define GET_IFP(sc) (&(sc)->sc_arpcom.ac_if)
@@ -50,9 +46,7 @@ struct urndis_softc {
 	struct arpcom			sc_arpcom;
 
 	/* RNDIS device info */
-	u_int32_t			sc_lim_pktcnt;
 	u_int32_t			sc_lim_pktsz;
-	u_int32_t			sc_pktalign;
 	u_int32_t			sc_filter;
 
 	/* USB goo */
@@ -61,6 +55,7 @@ struct urndis_softc {
 	usbd_interface_handle		sc_iface_ctl;
 	usbd_interface_handle		sc_iface_data;
 
+	struct timeval			sc_rx_notice;
 	int				sc_bulkin_no;
 	usbd_pipe_handle		sc_bulkin_pipe;
 	int				sc_bulkout_no;
