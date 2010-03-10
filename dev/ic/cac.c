@@ -1,4 +1,4 @@
-/*	$OpenBSD: cac.c,v 1.32 2009/09/30 19:16:23 miod Exp $	*/
+/*	$OpenBSD: cac.c,v 1.34 2010/01/09 23:15:06 krw Exp $	*/
 /*	$NetBSD: cac.c,v 1.15 2000/11/08 19:20:35 ad Exp $	*/
 
 /*
@@ -507,7 +507,6 @@ cac_ccb_done(struct cac_softc *sc, struct cac_ccb *ccb)
 		else
 			xs->resid = 0;
 
-		xs->flags |= ITSDONE;
 		scsi_done(xs);
 	}
 }
@@ -599,7 +598,6 @@ cac_scsi_cmd(xs)
 
 	if (target >= sc->sc_nunits || link->lun != 0) {
 		xs->error = XS_DRIVER_STUFFUP;
-		xs->flags |= ITSDONE;
 		s = splbio();
 		scsi_done(xs);
 		splx(s);
@@ -718,12 +716,9 @@ cac_scsi_cmd(xs)
 		if ((error = cac_cmd(sc, op, xs->data, blockcnt * DEV_BSIZE,
 		    target, blockno, flags, xs))) {
 
-			if (error == ENOMEM) {
+			if (error == ENOMEM || error == EBUSY) {
 				splx(s);
 				return (NO_CCB);
-			} else if (poll) {
-				splx(s);
-				return (TRY_AGAIN_LATER);
 			} else {
 				xs->error = XS_DRIVER_STUFFUP;
 				scsi_done(xs);

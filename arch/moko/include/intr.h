@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.2 2009/07/14 13:59:49 drahn Exp $	*/
+/*	$OpenBSD: intr.h,v 1.4 2010/02/01 23:53:58 drahn Exp $	*/
 /*	$NetBSD: intr.h,v 1.12 2003/06/16 20:00:59 thorpej Exp $	*/
 
 /*
@@ -56,9 +56,8 @@
 #define	IPL_CLOCK	10	/* clock interrupt */
 #define	IPL_STATCLOCK	11	/* statistics clock interrupt */
 #define	IPL_HIGH	12	/* everything */
-#define	IPL_SERIAL	13	/* serial device */
 
-#define	NIPL		14
+#define	NIPL		13
 
 /* Interrupt sharing types. */
 #define	IST_NONE	0	/* none */
@@ -88,7 +87,6 @@
 #define	splaudio()	_splraise(IPL_AUDIO)
 #define	splclock()	_splraise(IPL_CLOCK)
 #define	splstatclock()	_splraise(IPL_STATCLOCK)
-#define	splserial()	_splraise(IPL_SERIAL)
 
 #define	spl0()		_spllower(IPL_NONE)
 
@@ -102,4 +100,3 @@
 #endif /* _KERNEL */
 
 #endif	/* _EVBARM_INTR_H_ */
-

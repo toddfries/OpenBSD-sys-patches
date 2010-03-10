@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.107 2009/11/15 01:36:11 deraadt Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.110 2010/02/28 19:39:54 jsg Exp $
 
 machine		amd64		# architecture, used by config; REQUIRED
 
@@ -174,6 +174,8 @@ arc*	at pci?			# Areca RAID Controller
 scsibus* at arc?
 mpi*	at pci?			# LSI Logic Message Passing Interface
 scsibus* at mpi?
+mpii*	at pci?			# LSI Message Passing Interface II
+scsibus* at mpii?
 gdt*	at pci?			# ICP Vortex GDT RAID controllers
 scsibus* at gdt?
 #aac*	at pci?			# Adaptec FSA RAID controllers
@@ -229,6 +231,8 @@ cd*	at scsibus?		# SCSI CD-ROM drives
 # IDE controllers
 pciide* at pci? flags 0x0000
 
+wdc0	at isa? disable port 0x1f0 irq 14 flags 0x00
+wdc1	at isa? disable port 0x170 irq 15 flags 0x00
 wdc*	at pcmcia?
 
 # IDE hard drives

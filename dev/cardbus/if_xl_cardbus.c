@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xl_cardbus.c,v 1.22 2009/10/15 17:54:56 deraadt Exp $ */
+/*	$OpenBSD: if_xl_cardbus.c,v 1.24 2010/01/13 09:10:33 jsg Exp $ */
 /*	$NetBSD: if_xl_cardbus.c,v 1.13 2000/03/07 00:32:52 mycroft Exp $	*/
 
 /*
@@ -15,12 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the author.
- * 4. Neither the name of the author nor the names of any co-contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY HAYAKAWA KOICHI ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -202,7 +196,7 @@ xl_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	cardbus_devfunc_t ct = ca->ca_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
 	cardbus_function_tag_t cf = ct->ct_cf;
-	cardbusreg_t iob, command, bhlc;
+	cardbusreg_t command, bhlc;
 	const struct xl_cardbus_product *ecp;
 	bus_space_handle_t ioh;
 	bus_addr_t adr;
@@ -222,7 +216,6 @@ xl_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	sc->xl_flags = ecp->ecp_flags;
 	sc->sc_dmat = ca->ca_dmat;
 
-	iob = adr;
 	sc->xl_bhandle = ioh;
 
 	(ct->ct_cf->cardbus_ctrl)(cc, CARDBUS_IO_ENABLE);

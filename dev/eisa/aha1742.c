@@ -1,4 +1,4 @@
-/*	$OpenBSD: aha1742.c,v 1.34 2009/09/05 11:28:54 dlg Exp $	*/
+/*	$OpenBSD: aha1742.c,v 1.37 2010/01/10 00:40:25 krw Exp $	*/
 /*	$NetBSD: aha1742.c,v 1.61 1996/05/12 23:40:01 mycroft Exp $	*/
 
 /*
@@ -684,7 +684,6 @@ ahb_done(sc, ecb)
 			xs->resid = 0;
 	}
 done:
-	xs->flags |= ITSDONE;
 	ahb_free_ecb(sc, ecb, xs->flags);
 	scsi_done(xs);
 }
@@ -952,10 +951,6 @@ ahb_scsi_cmd(xs)
 	 * then we can't allow it to sleep
 	 */
 	flags = xs->flags;
-	if (flags & ITSDONE) {
-		printf("%s: done?\n", sc->sc_dev.dv_xname);
-		xs->flags &= ~ITSDONE;
-	}
 	if ((ecb = ahb_get_ecb(sc, flags)) == NULL) {
 		return (NO_CCB);
 	}
@@ -971,7 +966,7 @@ ahb_scsi_cmd(xs)
 	if (flags & SCSI_RESET) {
 		ecb->flags |= ECB_IMMED;
 		if (sc->immed_ecb)
-			return TRY_AGAIN_LATER;
+			return NO_CCB;
 		sc->immed_ecb = ecb;
 
 		s = splbio();

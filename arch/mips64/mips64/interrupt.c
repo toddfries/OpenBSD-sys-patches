@@ -1,4 +1,4 @@
-/*	$OpenBSD: interrupt.c,v 1.53 2009/11/22 00:31:03 syuu Exp $ */
+/*	$OpenBSD: interrupt.c,v 1.58 2010/02/13 14:04:45 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -111,23 +111,19 @@ interrupt(struct trap_frame *trapframe)
 	if (!(trapframe->sr & SR_INT_ENAB))
 		return;
 
+	ci->ci_intrdepth++;
+
 #ifdef DEBUG_INTERRUPT
-	trapdebug_enter(trapframe, 0);
+	trapdebug_enter(ci, trapframe, T_INT);
 #endif
-
-#ifdef MULTIPROCESSOR
-	if (ci->ci_ipl < IPL_SCHED)
-		__mp_lock(&kernel_lock);
-#endif
-
-	uvmexp.intrs++;
+	atomic_add_int(&uvmexp.intrs, 1);
 
 	/* Mask out interrupts from cause that are unmasked */
 	pending = trapframe->cause & CR_IPEND & trapframe->sr;
 
 	if (pending & SOFT_INT_MASK_0) {
 		clearsoftintr0();
-		soft_count.ec_count++;
+		atomic_add_uint64(&soft_count.ec_count, 1);
 	}
 
 #ifdef RM7K_PERFCNTR
@@ -153,10 +149,7 @@ interrupt(struct trap_frame *trapframe)
 		__asm__ ("sync\n\t.set reorder\n");
 	}
 
-#ifdef MULTIPROCESSOR
-	if (ci->ci_ipl < IPL_SCHED)
-		__mp_unlock(&kernel_lock);
-#endif
+	ci->ci_intrdepth--;
 }
 
 
@@ -214,7 +207,6 @@ splinit()
 	/*
 	 * Update proc0 pcb to contain proper values.
 	 */
-	pcb->pcb_context.val[13] = IPL_NONE;
 #ifdef RM7000_ICR
 	pcb->pcb_context.val[12] = (idle_mask << 8) & IC_INT_MASK;
 #endif

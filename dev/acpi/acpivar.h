@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivar.h,v 1.52 2009/11/02 19:27:46 kettenis Exp $	*/
+/*	$OpenBSD: acpivar.h,v 1.55 2009/11/26 23:44:38 mlarkin Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -35,8 +35,6 @@ extern int acpi_debug;
 #define dprintf(x...)
 #define dnprintf(n,x...)
 #endif
-
-/* #define ACPI_SLEEP_ENABLED */
 
 extern int acpi_hasprocfvs;
 
@@ -116,6 +114,13 @@ typedef SIMPLEQ_HEAD(, acpi_wakeq) acpi_wakeqhead_t;
 #define ACPIREG_PM1_CNT		0x10
 #define ACPIREG_GPE_STS		0x11
 #define ACPIREG_GPE_EN		0x12
+
+/* System status (_SST) codes */
+#define ACPI_SST_INDICATOR_OFF	0
+#define ACPI_SST_WORKING	1
+#define ACPI_SST_WAKING		2
+#define ACPI_SST_SLEEPING	3
+#define ACPI_SST_SLEEP_CONTEXT	4
 
 struct acpi_parsestate {
 	u_int8_t		*start;
@@ -220,6 +225,7 @@ struct acpi_softc {
 	struct aml_node		*sc_pts;
 	struct aml_node		*sc_bfs;
 	struct aml_node		*sc_gts;
+	struct aml_node		*sc_sst;
 	struct aml_node		*sc_wak;
 	int			sc_state;
 	struct acpiec_softc	*sc_ec;		/* XXX assume single EC */
@@ -279,7 +285,6 @@ void	 acpi_powerdown(void);
 void	 acpi_reset(void);
 void	 acpi_cpu_flush(struct acpi_softc *, int);
 int	 acpi_sleep_state(struct acpi_softc *, int);
-void	 acpi_resume(struct acpi_softc *);
 int	 acpi_prepare_sleep_state(struct acpi_softc *, int);
 int	 acpi_enter_sleep_state(struct acpi_softc *, int);
 int	 acpi_sleep_machdep(struct acpi_softc *, int);

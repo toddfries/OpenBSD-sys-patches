@@ -1,4 +1,4 @@
-/*      $OpenBSD: atapiscsi.c,v 1.83 2009/09/05 11:20:24 dlg Exp $     */
+/*      $OpenBSD: atapiscsi.c,v 1.87 2010/01/11 00:00:53 krw Exp $     */
 
 /*
  * This code is derived from code with the copyright below.
@@ -327,7 +327,7 @@ wdc_atapi_send_cmd(sc_xfer)
  	struct channel_softc *chp = as->chp;
 	struct ata_drive_datas *drvp = &chp->ch_drive[as->drive];
 	struct wdc_xfer *xfer;
-	int s, ret;
+	int s;
 	int idx;
 
 	WDCDEBUG_PRINT(("wdc_atapi_send_cmd %s:%d:%d start\n",
@@ -425,14 +425,12 @@ wdc_atapi_send_cmd(sc_xfer)
 	}
 
 	wdc_exec_xfer(chp, xfer);
-#ifdef DIAGNOSTIC
-	if ((xfer->c_flags & C_POLL) != 0 &&
-	    (sc_xfer->flags & ITSDONE) == 0)
-		panic("wdc_atapi_send_cmd: polled command not done");
-#endif
-	ret = (sc_xfer->flags & ITSDONE) ? COMPLETE : SUCCESSFULLY_QUEUED;
 	splx(s);
-	return (ret);
+
+	if (xfer->c_flags & C_POLL)
+		return (COMPLETE);
+	else
+		return (SUCCESSFULLY_QUEUED);
 }
 
 void
@@ -824,7 +822,7 @@ wdc_atapi_send_packet(chp, xfer, timeout, ret)
 	struct ata_drive_datas *drvp = &chp->ch_drive[xfer->drive];
 
 	/*
-	 * Even with WDCS_ERR, the device should accept a command packet
+	 * Even with WDCS_ERR, the device should accept a command packet.
 	 * Limit length to what can be stuffed into the cylinder register
 	 * (16 bits).  Some CD-ROMs seem to interpret '0' as 65536,
 	 * but not all devices do that and it's not obvious from the
@@ -1573,16 +1571,12 @@ wdc_atapi_done(chp, xfer, timeout, ret)
 	    (u_int)xfer->c_flags, sc_xfer->error), DEBUG_XFERS);
 	WDC_LOG_ATAPI_DONE(chp, xfer->drive, xfer->c_flags, sc_xfer->error);
 
-	sc_xfer->flags |= ITSDONE;
-
-	if (xfer->c_flags & C_POLL) {
+	if (xfer->c_flags & C_POLL)
 		wdc_enable_intr(chp);
-	} else {
-		WDCDEBUG_PRINT(("wdc_atapi_done: scsi_done\n"), DEBUG_XFERS);
-		s = splbio();
-		scsi_done(sc_xfer);
-		splx(s);
-	}
+
+	s = splbio();
+	scsi_done(sc_xfer);
+	splx(s);
 
 	xfer->next = NULL;
 	return;

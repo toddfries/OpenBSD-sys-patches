@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.115 2009/11/13 23:50:30 sthen Exp $	*/
+/*	$OpenBSD: re.c,v 1.117 2010/02/17 22:16:34 kettenis Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -187,7 +187,6 @@ void	re_miibus_writereg(struct device *, int, int, int);
 void	re_miibus_statchg(struct device *);
 
 void	re_iff(struct rl_softc *);
-void	re_reset(struct rl_softc *);
 
 void	re_setup_hw_im(struct rl_softc *);
 void	re_setup_sim_im(struct rl_softc *);
@@ -1602,6 +1601,9 @@ re_intr(void *arg)
 			break;
 		if (status)
 			CSR_WRITE_2(sc, RL_ISR, status);
+
+		if (status & RL_ISR_TIMEOUT_EXPIRED)
+			claimed = 1;
 
 		if ((status & RL_INTRS_CPLUS) == 0)
 			break;

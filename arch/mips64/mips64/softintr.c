@@ -1,4 +1,4 @@
-/*	$OpenBSD: softintr.c,v 1.6 2009/11/21 23:28:14 syuu Exp $	*/
+/*	$OpenBSD: softintr.c,v 1.11 2010/01/18 17:00:28 miod Exp $	*/
 /*	$NetBSD: softintr.c,v 1.2 2003/07/15 00:24:39 lukem Exp $	*/
 
 /*
@@ -100,9 +100,7 @@ softintr_dispatch(int si)
 
 		mtx_leave(&siq->siq_mtx);
 
-		KERNEL_LOCK();
 		(*sih->sih_func)(sih->sih_arg);
-		KERNEL_UNLOCK();
 	}
 }
 
@@ -206,6 +204,14 @@ dosoftint()
 {
 	struct cpu_info *ci = curcpu();
 	int sir, q, mask;
+#ifdef MULTIPROCESSOR
+	u_int32_t sr;
+
+	/* Enable interrupts */
+	sr = getsr();
+	ENABLEIPI();
+	__mp_lock(&kernel_lock);
+#endif
 
 	while ((sir = ci->ci_softpending) != 0) {
 		atomic_clearbits_int(&ci->ci_softpending, sir);
@@ -216,4 +222,9 @@ dosoftint()
 				softintr_dispatch(q);
 		}
 	}
+
+#ifdef MULTIPROCESSOR
+	__mp_unlock(&kernel_lock);
+	setsr(sr);
+#endif
 }

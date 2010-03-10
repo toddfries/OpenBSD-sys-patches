@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbic.c,v 1.22 2009/02/16 21:19:06 miod Exp $ */
+/*	$OpenBSD: sbic.c,v 1.24 2010/01/09 23:15:06 krw Exp $ */
 /*	$NetBSD: sbic.c,v 1.2 1996/04/23 16:32:54 chuck Exp $	*/
 
 /*
@@ -352,9 +352,6 @@ sbic_scsicmd(xs)
     if ( dev->sc_nexus && (flags & SCSI_POLL) )
         panic("sbic_scsicmd: busy");
 
-    if ( slp->target == slp->adapter_target )
-        return ESCAPE_NOT_SUPPORTED;
-
     s = splbio();
 
     if ( (acb = TAILQ_FIRST(&dev->free_list)) != NULL )
@@ -605,8 +602,6 @@ sbic_scsidone(acb, stat)
     } else {
         xs->resid = 0;      /* XXXX */
     }
-
-    xs->flags |= ITSDONE;
 
     /*
      * Remove the ACB from whatever queue it's on.  We have to do a bit of

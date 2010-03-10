@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_athn_cardbus.c,v 1.1 2009/11/14 16:55:11 damien Exp $	*/
+/*	$OpenBSD: if_athn_cardbus.c,v 1.5 2010/02/02 17:16:47 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -89,6 +89,7 @@ static const struct cardbus_matchid athn_cardbus_devices[] = {
 	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR9280 },
 	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR9281 },
 	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR9285 },
+	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR2427 },
 	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR9227 },
 	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR9287 }
 };
@@ -131,17 +132,12 @@ athn_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	csc->sc_bar_val = base | CARDBUS_MAPREG_TYPE_MEM;
 
 	/* Set up the PCI configuration registers. */
-#ifdef notyet
 	athn_cardbus_setup(csc);
-#else
-	athn_cardbus_enable(sc);
-#endif
+
 	printf(": irq %d", csc->sc_intrline);
 
 	athn_attach(sc);
-#ifdef notyet
 	Cardbus_function_disable(ct);
-#endif
 }
 
 int

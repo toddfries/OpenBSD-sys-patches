@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr53c9x.c,v 1.41 2009/11/01 23:06:03 fgsch Exp $	*/
+/*	$OpenBSD: ncr53c9x.c,v 1.44 2010/01/13 06:09:44 krw Exp $	*/
 /*     $NetBSD: ncr53c9x.c,v 1.56 2000/11/30 14:41:46 thorpej Exp $    */
 
 /*
@@ -811,7 +811,7 @@ ncr53c9x_scsi_cmd(xs)
 	if (li == NULL) {
 		/* Initialize LUN info and add to list. */
 		if ((li = malloc(sizeof(*li), M_DEVBUF, M_NOWAIT)) == NULL) {
-			return (TRY_AGAIN_LATER);
+			return (NO_CCB);
 		}
 		bzero(li, sizeof(*li));
 		li->last_used = time_second;
@@ -942,8 +942,6 @@ ncr53c9x_sched(sc)
 			tag = 0;
 		else if ((ecb->flags & ECB_SENSE) != 0)
 			tag = 0;
-		else if (ecb->xs->flags & SCSI_URGENT)
-			tag = MSG_HEAD_OF_Q_TAG;
 		else
 			tag = MSG_SIMPLE_Q_TAG;
 #if 0
@@ -1131,8 +1129,6 @@ ncr53c9x_done(sc, ecb)
 			xs->resid = ecb->dleft;
 		}
 	}
-
-	xs->flags |= ITSDONE;
 
 #ifdef NCR53C9X_DEBUG
 	if (ncr53c9x_debug & NCR_SHOWMISC) {

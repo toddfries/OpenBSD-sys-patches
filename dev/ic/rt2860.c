@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860.c,v 1.37 2009/11/03 17:36:58 damien Exp $	*/
+/*	$OpenBSD: rt2860.c,v 1.41 2010/02/08 18:46:47 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -789,7 +789,7 @@ rt2860_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
 	for (i = 0; i < rs->rs_nrates; i++) {
 		rate = rs->rs_rates[i] & IEEE80211_RATE_VAL;
 		/* convert 802.11 rate to hardware rate index */
-		for (ridx = 0; ridx <= RT2860_RIDX_MAX; ridx++)
+		for (ridx = 0; ridx < RT2860_RIDX_MAX; ridx++)
 			if (rt2860_rates[ridx].rate == rate)
 				break;
 		rn->ridx[i] = ridx;
@@ -1437,7 +1437,7 @@ rt2860_tx(struct rt2860_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 			dur = rt2860_rates[ctl_ridx].sp_ack_dur;
 		else
 			dur = rt2860_rates[ctl_ridx].lp_ack_dur;
-		*(uint16_t *)wh->i_dur = htole16(dur + sc->sifs);
+		*(uint16_t *)wh->i_dur = htole16(dur);
 	}
 #ifndef IEEE80211_STA_ONLY
 	/* ask MAC to insert timestamp into probe responses */
@@ -2023,9 +2023,6 @@ rt2860_set_chan(struct rt2860_softc *sc, struct ieee80211_channel *c)
 	rt2860_rf_write(sc, RT2860_RF3, r3);
 	rt2860_rf_write(sc, RT2860_RF4, r4);
 
-	/* 802.11a uses a 16 microseconds short interframe space */
-	sc->sifs = IEEE80211_IS_CHAN_5GHZ(c) ? 16 : 10;
-
 	/* determine channel group */
 	if (chan <= 14)
 		group = 0;
@@ -2466,7 +2463,7 @@ rt2860_read_eeprom(struct rt2860_softc *sc)
 		    rt2860_rf2850[i].chan, sc->txpow1[i], sc->txpow2[i]));
 	}
 	/* read power settings for 5GHz channels */
-	for (i = 0; i < 36; i += 2) {
+	for (i = 0; i < 40; i += 2) {
 		val = rt2860_eeprom_read(sc,
 		    RT2860_EEPROM_PWR5GHZ_BASE1 + i / 2);
 		sc->txpow1[i + 14] = (int8_t)(val & 0xff);
@@ -2478,7 +2475,7 @@ rt2860_read_eeprom(struct rt2860_softc *sc)
 		sc->txpow2[i + 15] = (int8_t)(val >> 8);
 	}
 	/* fix broken Tx power entries */
-	for (i = 0; i < 36; i++) {
+	for (i = 0; i < 40; i++) {
 		if (sc->txpow1[14 + i] < -7 || sc->txpow1[14 + i] > 15)
 			sc->txpow1[14 + i] = 5;
 		if (sc->txpow2[14 + i] < -7 || sc->txpow2[14 + i] > 15)
@@ -2880,8 +2877,8 @@ rt2860_init(struct ifnet *ifp)
 	ic->ic_bss->ni_chan = ic->ic_ibss_chan;
 	rt2860_set_chan(sc, ic->ic_ibss_chan);
 
-	/* XXX not clear what the following 8051 command does.. */
-	(void)rt2860_mcu_cmd(sc, RT2860_MCU_CMD_BOOT, 0);
+	/* reset RF from MCU */
+	(void)rt2860_mcu_cmd(sc, RT2860_MCU_CMD_RFRESET, 0);
 
 	/* set RTS threshold */
 	tmp = RAL_READ(sc, RT2860_TX_RTS_CFG);

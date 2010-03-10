@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.101 2009/02/04 17:23:18 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.104 2009/12/31 12:52:35 jsing Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -93,8 +93,6 @@ const char *trap_type[] = {
 };
 int trap_types = sizeof(trap_type)/sizeof(trap_type[0]);
 
-int want_resched, astpending;
-
 #define	frame_regmap(tf,r)	(((u_int *)(tf))[hppa_regmap[(r)]])
 u_char hppa_regmap[32] = {
 	offsetof(struct trapframe, tf_pad[0]) / 4,	/* r0 XXX */
@@ -134,15 +132,16 @@ u_char hppa_regmap[32] = {
 void
 userret(struct proc *p)
 {
+	struct cpu_info *ci = curcpu();
 	int sig;
 
-	if (astpending) {
-		astpending = 0;
+	if (p->p_md.md_astpending) {
+		p->p_md.md_astpending = 0;
 		uvmexp.softs++;
 		if (p->p_flag & P_OWEUPC) {
 			ADDUPROF(p);
 		}
-		if (want_resched)
+		if (ci->ci_want_resched)
 			preempt(NULL);
 	}
 
@@ -157,6 +156,7 @@ trap(type, frame)
 	int type;
 	struct trapframe *frame;
 {
+	struct cpu_info *ci = curcpu();
 	struct proc *p = curproc;
 	vaddr_t va;
 	struct vm_map *map;
@@ -169,7 +169,7 @@ trap(type, frame)
 	const char *tts;
 	vm_fault_t fault = VM_FAULT_INVALID;
 #ifdef DIAGNOSTIC
-	int oldcpl = cpl;
+	int oldcpl = ci->ci_cpl;
 #endif
 
 	trapnum = type & ~T_USER;
@@ -563,13 +563,13 @@ if (kdb_trap (type, va, frame))
 	}
 
 #ifdef DIAGNOSTIC
-	if (cpl != oldcpl)
+	if (ci->ci_cpl != oldcpl)
 		printf("WARNING: SPL (%d) NOT LOWERED ON "
-		    "TRAP (%d) EXIT\n", cpl, trapnum);
+		    "TRAP (%d) EXIT\n", ci->ci_cpl, trapnum);
 #endif
 
 	if (trapnum != T_INTERRUPT)
-		splx(cpl);	/* process softints */
+		splx(ci->ci_cpl);	/* process softints */
 
 	/*
 	 * in case we were interrupted from the syscall gate page
@@ -703,12 +703,13 @@ process_sstep(struct proc *p, int sstep)
 void
 syscall(struct trapframe *frame)
 {
+	struct cpu_info *ci = curcpu();
 	register struct proc *p = curproc;
 	register const struct sysent *callp;
 	int retq, nsys, code, argsize, argoff, oerror, error;
 	register_t args[8], rval[2];
 #ifdef DIAGNOSTIC
-	int oldcpl = cpl;
+	int oldcpl = ci->ci_cpl;
 #endif
 
 	uvmexp.syscalls++;
@@ -849,14 +850,14 @@ syscall(struct trapframe *frame)
 		ktrsysret(p, code, oerror, rval[0]);
 #endif
 #ifdef DIAGNOSTIC
-	if (cpl != oldcpl) {
+	if (ci->ci_cpl != oldcpl) {
 		printf("WARNING: SPL (0x%x) NOT LOWERED ON "
 		    "syscall(0x%x, 0x%x, 0x%x, 0x%x...) EXIT, PID %d\n",
-		    cpl, code, args[0], args[1], args[2], p->p_pid);
-		cpl = oldcpl;
+		    ci->ci_cpl, code, args[0], args[1], args[2], p->p_pid);
+		ci->ci_cpl = oldcpl;
 	}
 #endif
-	splx(cpl);	/* process softints */
+	splx(ci->ci_cpl);	/* process softints */
 }
 
 /*

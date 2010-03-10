@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.13 2009/11/21 16:36:59 damien Exp $	*/
+/*	$OpenBSD: athn.c,v 1.28 2010/02/24 20:09:19 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -76,6 +76,7 @@ void		athn_tx_free(struct athn_softc *);
 int		athn_rx_alloc(struct athn_softc *);
 void		athn_rx_free(struct athn_softc *);
 void		athn_rx_start(struct athn_softc *);
+void		athn_led_init(struct athn_softc *);
 void		athn_btcoex_init(struct athn_softc *);
 void		athn_btcoex_enable(struct athn_softc *);
 void		athn_btcoex_disable(struct athn_softc *);
@@ -200,7 +201,7 @@ athn_attach(struct athn_softc *sc)
 	struct ifnet *ifp = &ic->ic_if;
 	struct ar_base_eep_header *base;
 	uint8_t eep_ver, kc_entries_exp;
-	int i, error;
+	int error;
 
 	if ((error = athn_reset_power_on(sc)) != 0) {
 		printf(": could not reset chip\n");
@@ -241,6 +242,9 @@ athn_attach(struct athn_softc *sc)
 	}
 	base = sc->eep;
 
+	/* We can put the chip in sleep state now. */
+	athn_set_power_sleep(sc);
+
 	eep_ver = (base->version >> 12) & 0xf;
 	sc->eep_rev = (base->version & 0xfff);
 	if (eep_ver != AR_EEP_VER || sc->eep_rev == 0) {
@@ -254,8 +258,18 @@ athn_attach(struct athn_softc *sc)
 	IEEE80211_ADDR_COPY(ic->ic_myaddr, base->macAddr);
 	printf(", address %s\n", ether_sprintf(ic->ic_myaddr));
 
-	if (base->rfSilent & AR_EEP_RFSILENT_ENABLED)
+	/* Check if we have a hardware radio switch. */
+	if (base->rfSilent & AR_EEP_RFSILENT_ENABLED) {
 		sc->flags |= ATHN_FLAG_RFSILENT;
+		/* Get GPIO pin used by hardware radio switch. */
+		sc->rfsilent_pin = MS(base->rfSilent,
+		    AR_EEP_RFSILENT_GPIO_SEL);
+		/* Get polarity of hardware radio switch. */
+		if (base->rfSilent & AR_EEP_RFSILENT_POLARITY)
+			sc->flags |= ATHN_FLAG_RFSILENT_REVERSED;
+		DPRINTF(("Found RF switch connected to GPIO pin %d\n",
+		    sc->rfsilent_pin));
+	}
 
 	/* Get the number of HW key cache entries. */
 	kc_entries_exp = MS(base->deviceCap, AR_EEP_DEVCAP_KC_ENTRIES);
@@ -265,8 +279,9 @@ athn_attach(struct athn_softc *sc)
 	/*
 	 * In HostAP mode, the number of STAs that we can handle is
 	 * limited by the number of entries in the HW key cache.
+	 * XXX TKIP MMIC
 	 */
-	ic->ic_max_nnodes = sc->kc_entries;	/* XXX MIC. */
+	ic->ic_max_nnodes = sc->kc_entries - IEEE80211_GROUP_NKID;
 
 	DPRINTF(("using %s loop power control\n",
 	    (sc->flags & ATHN_FLAG_OLPC) ? "open" : "closed"));
@@ -303,25 +318,6 @@ athn_attach(struct athn_softc *sc)
 		    sc->sc_dev.dv_xname);
 		return (error);
 	}
-
-	/* Reset HW key cache entries (XXX not here.) */
-	for (i = 0; i < sc->kc_entries; i++)
-		athn_reset_key(sc, i);
-
-	/* XXX not here. */
-	AR_SETBITS(sc, AR_PHY_CCK_DETECT,
-	    AR_PHY_CCK_DETECT_BB_ENABLE_ANT_FAST_DIV);
-
-#ifdef ATHN_BT_COEXISTENCE
-	/* Initialize bluetooth coexistence for combo chips. */
-	if (sc->flags & ATHN_FLAG_BTCOEX)
-		athn_btcoex_init(sc);
-#endif
-
-	athn_gpio_config_output(sc, sc->led_pin,
-	    AR_GPIO_OUTPUT_MUX_AS_OUTPUT);
-	/* LED off, active low. */
-	athn_gpio_write(sc, sc->led_pin, 1);
 
 	if (AR_SINGLE_CHIP(sc)) {
 		printf("%s: %s rev %d (%dT%dR), ROM rev %d\n",
@@ -787,14 +783,14 @@ athn_intr(void *xsc)
 
 	if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) !=
 	    (IFF_UP | IFF_RUNNING))
-		return (1);
+		return (0);
 
 	/* Get pending interrupts. */
 	intr = AR_READ(sc, AR_INTR_ASYNC_CAUSE);
 	if (!(intr & AR_INTR_MAC_IRQ) || intr == AR_INTR_SPURIOUS) {
 		intr = AR_READ(sc, AR_INTR_SYNC_CAUSE);
 		if (intr == AR_INTR_SPURIOUS || (intr & sc->isync) == 0)
-			return (1);	/* Not for us. */
+			return (0);	/* Not for us. */
 	}
 
 	if ((AR_READ(sc, AR_INTR_ASYNC_CAUSE) & AR_INTR_MAC_IRQ) &&
@@ -804,7 +800,7 @@ athn_intr(void *xsc)
 		intr = 0;
 	sync = AR_READ(sc, AR_INTR_SYNC_CAUSE) & sc->isync;
 	if (intr == 0 && sync == 0)
-		return (1);	/* Not for us. */
+		return (0);	/* Not for us. */
 
 	if (intr != 0) {
 		if (intr & AR_ISR_BCNMISC) {
@@ -816,7 +812,7 @@ athn_intr(void *xsc)
 		}
 		intr = AR_READ(sc, AR_ISR_RAC);
 		if (intr == AR_INTR_SPURIOUS)
-			return (0);
+			return (1);
 
 		if (intr & (AR_ISR_RXMINTR | AR_ISR_RXINTM))
 			athn_rx_intr(sc);
@@ -857,13 +853,13 @@ athn_intr(void *xsc)
 			/* Turn the interface down. */
 			ifp->if_flags &= ~IFF_UP;
 			athn_stop(ifp, 1);
-			return (0);
+			return (1);
 		}
 
 		AR_WRITE(sc, AR_INTR_SYNC_CAUSE, sync);
 		(void)AR_READ(sc, AR_INTR_SYNC_CAUSE);
 	}
-	return (0);
+	return (1);
 }
 
 /*
@@ -1237,6 +1233,9 @@ athn_set_chan(struct athn_softc *sc, struct ieee80211_channel *c,
 	if ((error = ops->set_synth(sc, c, extc)) != 0)
 		return (error);
 
+	sc->curchan = c;
+	sc->curchanext = extc;
+
 	/* Set transmit power values for new channel. */
 	ops->set_txpower(sc, c, extc);
 
@@ -1260,7 +1259,6 @@ int
 athn_switch_chan(struct athn_softc *sc, struct ieee80211_channel *c,
     struct ieee80211_channel *extc)
 {
-	struct ieee80211com *ic = &sc->sc_ic;
 	int error, qid;
 
 	/* Disable interrupts. */
@@ -1288,7 +1286,8 @@ athn_switch_chan(struct athn_softc *sc, struct ieee80211_channel *c,
 		goto reset;
 
 	/* If band or bandwidth changes, we need to do a full reset. */
-	if (c->ic_flags != ic->ic_bss->ni_chan->ic_flags) {
+	if (c->ic_flags != sc->curchan->ic_flags ||
+	    ((extc != NULL) ^ (sc->curchanext != NULL))) {
 		DPRINTFN(2, ("channel band switch\n"));
 		goto reset;
 	}
@@ -1382,8 +1381,6 @@ athn_set_phy(struct athn_softc *sc, struct ieee80211_channel *c,
 
 	AR_WRITE(sc, AR_GTXTO, SM(AR_GTXTO_TIMEOUT_LIMIT, 25));
 	AR_WRITE(sc, AR_CST, SM(AR_CST_TIMEOUT_LIMIT, 15));
-	/* Set Short Interframe Space. */
-	sc->sifs = IEEE80211_IS_CHAN_5GHZ(c) ? 16 : 10;
 }
 
 int
@@ -1503,7 +1500,7 @@ athn_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 {
 	struct athn_softc *sc = ic->ic_softc;
 	uint32_t type, lo, hi;
-	uint32_t keybuf[4], micbuf[4];
+	uint16_t keybuf[8], micbuf[8];
 	const uint8_t *addr;
 	uintptr_t entry, micentry;
 
@@ -1528,10 +1525,10 @@ athn_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 	memset(keybuf, 0, sizeof keybuf);
 	memcpy(keybuf, k->k_key, MIN(k->k_len, 16));
 
-	if (k->k_flags & IEEE80211_KEY_GROUP)
-		entry = k->k_id;
+	if (!(k->k_flags & IEEE80211_KEY_GROUP))
+		entry = IEEE80211_GROUP_NKID + IEEE80211_AID(ni->ni_associd);
 	else
-		entry = IEEE80211_AID(ni->ni_associd);	/* XXX +offset. */
+		entry = k->k_id;
 	k->k_priv = (void *)entry;
 
 	/* NB: See note about key cache registers access above. */
@@ -1539,26 +1536,32 @@ athn_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 		micentry = entry + 64;
 
 		/* XXX Split MIC. */
-		AR_WRITE(sc, AR_KEYTABLE_KEY0(micentry), micbuf[0]);
-		AR_WRITE(sc, AR_KEYTABLE_KEY1(micentry), micbuf[1]);
+		AR_WRITE(sc, AR_KEYTABLE_KEY0(micentry),
+		    micbuf[0] | micbuf[1] << 16);
+		AR_WRITE(sc, AR_KEYTABLE_KEY1(micentry), micbuf[2]);
 
-		AR_WRITE(sc, AR_KEYTABLE_KEY2(micentry), micbuf[2]);
-		AR_WRITE(sc, AR_KEYTABLE_KEY3(micentry), micbuf[3]);
+		AR_WRITE(sc, AR_KEYTABLE_KEY2(micentry),
+		    micbuf[3] | micbuf[4] << 16);
+		AR_WRITE(sc, AR_KEYTABLE_KEY3(micentry), micbuf[5]);
 
-		AR_WRITE(sc, AR_KEYTABLE_KEY4(micentry), micbuf[4]);
+		AR_WRITE(sc, AR_KEYTABLE_KEY4(micentry),
+		    micbuf[6] | micbuf[7] << 16);
 		AR_WRITE(sc, AR_KEYTABLE_TYPE(micentry), AR_KEYTABLE_TYPE_CLR);
 
 		/* MAC address registers are reserved for the MIC entry. */
 		AR_WRITE(sc, AR_KEYTABLE_MAC0(micentry), 0);
 		AR_WRITE(sc, AR_KEYTABLE_MAC1(micentry), 0);
 	} else {
-		AR_WRITE(sc, AR_KEYTABLE_KEY0(entry), keybuf[0]);
-		AR_WRITE(sc, AR_KEYTABLE_KEY1(entry), keybuf[1]);
+		AR_WRITE(sc, AR_KEYTABLE_KEY0(entry),
+		    keybuf[0] | keybuf[1] << 16);
+		AR_WRITE(sc, AR_KEYTABLE_KEY1(entry), keybuf[2]);
 
-		AR_WRITE(sc, AR_KEYTABLE_KEY2(entry), keybuf[2]);
-		AR_WRITE(sc, AR_KEYTABLE_KEY3(entry), keybuf[3]);
+		AR_WRITE(sc, AR_KEYTABLE_KEY2(entry),
+		    keybuf[3] | keybuf[4] << 16);
+		AR_WRITE(sc, AR_KEYTABLE_KEY3(entry), keybuf[5]);
 
-		AR_WRITE(sc, AR_KEYTABLE_KEY4(entry), keybuf[4]);
+		AR_WRITE(sc, AR_KEYTABLE_KEY4(entry),
+		    keybuf[6] | keybuf[7] << 16);
 		AR_WRITE(sc, AR_KEYTABLE_TYPE(entry), type);
 	}
 
@@ -1566,12 +1569,14 @@ athn_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 	memset(keybuf, 0, sizeof keybuf);
 	memset(micbuf, 0, sizeof micbuf);
 
-	/* XXX Group keys? */
-	addr = ni->ni_macaddr;
-	lo = addr[0] | addr[1] << 8 | addr[2] << 16 | addr[3] << 24;
-	hi = addr[4] | addr[5] << 8;
-	lo = lo >> 1 | hi << 31;
-	hi = hi >> 1;
+	if (!(k->k_flags & IEEE80211_KEY_GROUP)) {
+		addr = ni->ni_macaddr;
+		lo = addr[0] | addr[1] << 8 | addr[2] << 16 | addr[3] << 24;
+		hi = addr[4] | addr[5] << 8;
+		lo = lo >> 1 | hi << 31;
+		hi = hi >> 1;
+	} else
+		lo = hi = 0;
 	AR_WRITE(sc, AR_KEYTABLE_MAC0(entry), lo);
 	AR_WRITE(sc, AR_KEYTABLE_MAC1(entry), hi | AR_KEYTABLE_VALID);
 	return (0);
@@ -1596,6 +1601,14 @@ athn_delete_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 		/* Fallback to software crypto for other ciphers. */
 		ieee80211_delete_key(ic, ni, k);
 	}
+}
+
+void
+athn_led_init(struct athn_softc *sc)
+{
+	athn_gpio_config_output(sc, sc->led_pin, AR_GPIO_OUTPUT_MUX_AS_OUTPUT);
+	/* LED off, active low. */
+	athn_gpio_write(sc, sc->led_pin, 1);
 }
 
 #ifdef ATHN_BT_COEXISTENCE
@@ -1699,16 +1712,7 @@ athn_btcoex_disable(struct athn_softc *sc)
 void
 athn_rfsilent_init(struct athn_softc *sc)
 {
-	struct ar_base_eep_header *base = sc->eep;
 	uint32_t reg;
-
-	/* Get GPIO pin used by hardware radio switch. */
-	sc->rfsilent_pin = MS(base->rfSilent, AR_EEP_RFSILENT_GPIO_SEL);
-	/* Get polarity of hardware radio switch. */
-	if (base->rfSilent & AR_EEP_RFSILENT_POLARITY)
-		sc->flags |= ATHN_FLAG_RFSILENT_REVERSED;
-	DPRINTFN(2, ("Found RF switch connected to GPIO pin %d\n",
-	    sc->rfsilent_pin));
 
 	/* Configure hardware radio switch. */
 	AR_SETBITS(sc, AR_GPIO_INPUT_EN_VAL, AR_GPIO_INPUT_EN_VAL_RFSILENT_BB);
@@ -2795,13 +2799,17 @@ athn_init_dma(struct athn_softc *sc)
 void
 athn_inc_tx_trigger_level(struct athn_softc *sc)
 {
-	uint32_t reg;
+	uint32_t reg, ftrig;
 
-	/* XXX Disable interrupts? */
 	reg = AR_READ(sc, AR_TXCFG);
-	if ((reg & 0x3f0) == 0x3f0)	/* Already at max. */
-		return;
-	reg += 0x10;	/* Increment Tx trigger level by 1. */
+	ftrig = MS(reg, AR_TXCFG_FTRIG);
+	/*
+	 * NB: The AR9285 and all single-stream parts have an issue that
+	 * limits the size of the PCU Tx FIFO to 2KB instead of 4KB.
+	 */
+	if (ftrig == (AR_SREV_9285(sc) ? 0x1f : 0x3f))
+		return;		/* Already at max. */
+	reg = RW(reg, AR_TXCFG_FTRIG, ftrig + 1);
 	AR_WRITE(sc, AR_TXCFG, reg);
 }
 
@@ -3185,8 +3193,8 @@ athn_tx_process(struct athn_softc *sc, int qid)
 	 * each series that was fully processed.
 	 */
 	failcnt  = MS(ds->ds_status1, AR_TXS1_DATA_FAIL_CNT);
-	/* XXX Assume one single try per series. */
-	failcnt += MS(ds->ds_status9, AR_TXS9_FINAL_IDX);
+	/* XXX Assume two tries per series. */
+	failcnt += MS(ds->ds_status9, AR_TXS9_FINAL_IDX) * 2;
 
 	/* Update rate control statistics. */
 	an->amn.amn_txcnt++;
@@ -3247,13 +3255,15 @@ athn_txtime(struct athn_softc *sc, int len, int ridx, u_int flags)
 	/* XXX HT. */
 	if (athn_rates[ridx].phy == IEEE80211_T_OFDM) {
 		txtime = divround(8 + 4 * len + 3, athn_rates[ridx].rate);
-		txtime = 16 + 4 + 4 * txtime + 6;
+		/* SIFS is 10us for 11g but Signal Extension adds 6us. */
+		txtime = 16 + 4 + 4 * txtime + 16;
 	} else {
 		txtime = divround(16 * len, athn_rates[ridx].rate);
 		if (ridx != ATHN_RIDX_CCK1 && (flags & IEEE80211_F_SHPREAMBLE))
 			txtime +=  72 + 24;
 		else
 			txtime += 144 + 48;
+		txtime += 10;	/* 10us SIFS. */
 	}
 	return (txtime);
 #undef divround
@@ -3475,17 +3485,19 @@ athn_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 		if (totlen > ic->ic_rtsthreshold) {
 			ds->ds_ctl0 |= AR_TXC0_RTS_ENABLE;
 		} else if ((ic->ic_flags & IEEE80211_F_USEPROT) &&
-		    ATHN_IS_OFDM_RIDX(ridx[0])) {
+		    athn_rates[ridx[0]].phy == IEEE80211_T_OFDM) {
 			if (ic->ic_protmode == IEEE80211_PROT_RTSCTS)
 				ds->ds_ctl0 |= AR_TXC0_RTS_ENABLE;
 			else if (ic->ic_protmode == IEEE80211_PROT_CTSONLY)
 				ds->ds_ctl0 |= AR_TXC0_CTS_ENABLE;
 		}
 	}
-
+	if (ds->ds_ctl0 & (AR_TXC0_RTS_ENABLE | AR_TXC0_CTS_ENABLE)) {
+		/* Disable multi-rate retries when protection is used. */
+		ridx[1] = ridx[2] = ridx[3] = ridx[0];
+	}
 	/* Setup multi-rate retries. */
 	for (i = 0; i < 4; i++) {
-		series[i].tries = 1;	/* XXX more for last. */
 		series[i].hwrate = athn_rates[ridx[i]].hwrate;
 		if (athn_rates[ridx[i]].phy == IEEE80211_T_DS &&
 		    ridx[i] != ATHN_RIDX_CCK1 &&
@@ -3497,16 +3509,16 @@ athn_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 		/* Compute duration for each series. */
 		for (i = 0; i < 4; i++) {
 			series[i].dur = athn_txtime(sc, IEEE80211_ACK_LEN,
-			    ridx[i], ic->ic_flags) + sc->sifs;
+			    athn_rates[ridx[i]].rspridx, ic->ic_flags);
 		}
 	}
 
 	/* Write number of tries for each series. */
 	ds->ds_ctl2 =
-	    SM(AR_TXC2_XMIT_DATA_TRIES0, series[0].tries) |
-	    SM(AR_TXC2_XMIT_DATA_TRIES1, series[1].tries) |
-	    SM(AR_TXC2_XMIT_DATA_TRIES2, series[2].tries) |
-	    SM(AR_TXC2_XMIT_DATA_TRIES3, series[3].tries);
+	    SM(AR_TXC2_XMIT_DATA_TRIES0, 2) |
+	    SM(AR_TXC2_XMIT_DATA_TRIES1, 2) |
+	    SM(AR_TXC2_XMIT_DATA_TRIES2, 2) |
+	    SM(AR_TXC2_XMIT_DATA_TRIES3, 4);
 
 	/* Tell HW to update duration field in 802.11 header. */
 	if (type != AR_FRAME_TYPE_PSPOLL)
@@ -3545,16 +3557,35 @@ athn_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 #endif
 
 	if (ds->ds_ctl0 & (AR_TXC0_RTS_ENABLE | AR_TXC0_CTS_ENABLE)) {
+		uint8_t protridx, hwrate;
+		uint16_t dur = 0;
+
 		/* Use the same protection mode for all tries. */
 		if (ds->ds_ctl0 & AR_TXC0_RTS_ENABLE) {
 			ds->ds_ctl4 |= AR_TXC4_RTSCTS_QUAL01;
 			ds->ds_ctl5 |= AR_TXC5_RTSCTS_QUAL23;
 		}
+		/* Select protection rate (suboptimal but ok.) */
+		protridx = (ic->ic_curmode == IEEE80211_MODE_11A) ?
+		    ATHN_RIDX_OFDM6 : ATHN_RIDX_CCK2;
+		if (ds->ds_ctl0 & AR_TXC0_RTS_ENABLE) {
+			/* Account for CTS duration. */
+			dur += athn_txtime(sc, IEEE80211_ACK_LEN,
+			    athn_rates[protridx].rspridx, ic->ic_flags);
+		}
+		dur += athn_txtime(sc, totlen, ridx[0], ic->ic_flags);
+		if (!(ds->ds_ctl1 & AR_TXC1_NO_ACK)) {
+			/* Account for ACK duration. */
+			dur += athn_txtime(sc, IEEE80211_ACK_LEN,
+			    athn_rates[ridx[0]].rspridx, ic->ic_flags);
+		}
 		/* Write protection frame duration and rate. */
-		ds->ds_ctl2 |= SM(AR_TXC2_BURST_DUR, 0 /* XXX */);
-		ds->ds_ctl7 |= SM(AR_TXC7_RTSCTS_RATE,
-		    athn_rates[0].hwrate /* XXX */);
-		/* XXX short preamble. */
+		ds->ds_ctl2 |= SM(AR_TXC2_BURST_DUR, dur);
+		hwrate = athn_rates[protridx].hwrate;
+		if (protridx == ATHN_RIDX_CCK2 &&
+		    (ic->ic_flags & IEEE80211_F_SHPREAMBLE))
+			hwrate |= 0x04;
+		ds->ds_ctl7 |= SM(AR_TXC7_RTSCTS_RATE, hwrate);
 	}
 
 	/* Finalize first Tx descriptor and fill others (if any.) */
@@ -3805,7 +3836,7 @@ athn_set_beacon_timers(struct athn_softc *sc)
 	    SM(AR_SLEEP2_BEACON_TIMEOUT, AR_MIN_BEACON_TIMEOUT_VAL));
 
 	AR_WRITE(sc, AR_TIM_PERIOD, intval * IEEE80211_DUR_TU);
-	AR_WRITE(sc, AR_DTIM_PERIOD, dtim_period * IEEE80211_DUR_TU);
+	AR_WRITE(sc, AR_DTIM_PERIOD, dtim_period * intval * IEEE80211_DUR_TU);
 
 	AR_SETBITS(sc, AR_TIMER_MODE,
 	    AR_TBTT_TIMER_EN | AR_TIM_TIMER_EN | AR_DTIM_TIMER_EN);
@@ -4001,6 +4032,12 @@ athn_hw_init(struct athn_softc *sc, struct ieee80211_channel *c,
 	if (AR_SREV_5416_20_OR_LATER(sc) && !AR_SREV_9280_10_OR_LATER(sc)) {
 		/* Disable baseband clock gating. */
 		AR_WRITE(sc, AR_PHY(651), 0x11);
+
+		if (AR_SREV_9160(sc)) {
+			/* Disable RIFS search to fix baseband hang. */
+			AR_CLRBITS(sc, AR_PHY_HEAVY_CLIP_FACTOR_RIFS,
+			    AR_PHY_RIFS_INIT_DELAY_M);
+		}
 	}
 
 	athn_set_phy(sc, c, extc);
@@ -4084,10 +4121,6 @@ athn_hw_reset(struct athn_softc *sc, struct ieee80211_channel *c,
 	athn_init_pll(sc, c);
 	athn_set_rf_mode(sc, c);
 
-	/* XXX move to attach? */
-	if (sc->flags & ATHN_FLAG_RFSILENT)
-		athn_rfsilent_init(sc);
-
 	if (sc->flags & ATHN_FLAG_RFSILENT) {
 		/* Check that the radio is not disabled by hardware switch. */
 		reg = athn_gpio_read(sc, sc->rfsilent_pin);
@@ -4163,11 +4196,12 @@ athn_hw_reset(struct athn_softc *sc, struct ieee80211_channel *c,
 
 	AR_WRITE(sc, AR_RSSI_THR, SM(AR_RSSI_THR_BM_THR, 7));
 
-	error = ops->set_synth(sc, c, extc);
-	if (error != 0) {
+	if ((error = ops->set_synth(sc, c, extc)) != 0) {
 		printf("%s: could not set channel\n", sc->sc_dev.dv_xname);
 		return (error);
 	}
+	sc->curchan = c;
+	sc->curchanext = extc;
 
 	for (i = 0; i < AR_NUM_DCU; i++)
 		AR_WRITE(sc, AR_DQCUMASK(i), 1 << i);
@@ -4259,6 +4293,7 @@ athn_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
 			if (athn_rates[ridx].rate == rate)
 				break;
 		an->ridx[i] = ridx;
+		DPRINTFN(2, ("rate %d index %d\n", rate, ridx));
 
 		/* Compute fallback rate for retries. */
 		an->fallback[i] = i;
@@ -4269,18 +4304,7 @@ athn_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
 				break;
 			}
 		}
-#if 0
-		/* Compute rate for protection frames. */
-		an->ctlridx[i] = athn_rates[ridx].ctlridx;
-		for (j = i; j >= 0; j--) {
-			if ((rs->rs_rates[j] & IEEE80211_RATE_BASIC) &&
-			    athn_rates[an->ridx[j]].phy ==
-			    athn_rates[an->ridx[i]].phy) {
-				an->ctlridx[i] = an->ridx[j];
-				break;
-			}
-		}
-#endif
+		DPRINTFN(2, ("%d fallbacks to %d\n", i, an->fallback[i]));
 	}
 }
 
@@ -4334,7 +4358,7 @@ athn_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 	int error;
 
 	timeout_del(&sc->calib_to);
-	if (ic->ic_state != IEEE80211_S_SCAN)
+	if (nstate != IEEE80211_S_SCAN)
 		athn_gpio_write(sc, sc->led_pin, 1);
 
 	switch (nstate) {
@@ -4412,9 +4436,9 @@ athn_updateslot(struct ieee80211com *ic)
 	struct athn_softc *sc = ic->ic_softc;
 	uint32_t clks;
 
-	if (ic->ic_opmode == IEEE80211_MODE_11B)
+	if (ic->ic_curmode == IEEE80211_MODE_11B)
 		clks = AR_CLOCK_RATE_CCK;
-	else if (ic->ic_opmode == IEEE80211_MODE_11A)
+	else if (ic->ic_curmode == IEEE80211_MODE_11A)
 		clks = AR_CLOCK_RATE_5GHZ_OFDM;
 	else
 		clks = AR_CLOCK_RATE_2GHZ_OFDM;
@@ -4575,13 +4599,25 @@ athn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		/* XXX Update hardware multicast filter. */
 		ifr = (struct ifreq *)data;
 		error = (cmd == SIOCADDMULTI) ?
 		    ether_addmulti(ifr, &ic->ic_ac) :
 		    ether_delmulti(ifr, &ic->ic_ac);
-		if (error == ENETRESET)
+		if (error == ENETRESET) {
+			athn_set_multi(sc);
 			error = 0;
+		}
+		break;
+
+	case SIOCS80211CHANNEL:
+		error = ieee80211_ioctl(ifp, cmd, data);
+		if (error == ENETRESET &&
+		    ic->ic_opmode == IEEE80211_M_MONITOR) {
+			if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) ==
+			    (IFF_UP | IFF_RUNNING))
+				athn_switch_chan(sc, ic->ic_ibss_chan, NULL);
+			error = 0;
+		}
 		break;
 
 	default:
@@ -4607,7 +4643,7 @@ athn_init(struct ifnet *ifp)
 	struct athn_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211_channel *c, *extc;
-	int error;
+	int i, error;
 
 	c = ic->ic_bss->ni_chan = ic->ic_ibss_chan;
 	extc = NULL;
@@ -4615,7 +4651,6 @@ athn_init(struct ifnet *ifp)
 	/* In case a new MAC address has been configured. */
 	IEEE80211_ADDR_COPY(ic->ic_myaddr, LLADDR(ifp->if_sadl));
 
-#ifdef notyet
 	/* For CardBus, power on the socket. */
 	if (sc->sc_enable != NULL) {
 		if ((error = sc->sc_enable(sc)) != 0) {
@@ -4629,10 +4664,30 @@ athn_init(struct ifnet *ifp)
 			goto fail;
 		}
 	}
+	if (!(sc->flags & ATHN_FLAG_PCIE))
+		athn_config_nonpcie(sc);
+	else
+		athn_config_pcie(sc);
+
+	/* Reset HW key cache entries. */
+	for (i = 0; i < sc->kc_entries; i++)
+		athn_reset_key(sc, i);
+
+	AR_SETBITS(sc, AR_PHY_CCK_DETECT,
+	    AR_PHY_CCK_DETECT_BB_ENABLE_ANT_FAST_DIV);
+
+#ifdef ATHN_BT_COEXISTENCE
+	/* Configure bluetooth coexistence for combo chips. */
+	if (sc->flags & ATHN_FLAG_BTCOEX)
+		athn_btcoex_init(sc);
 #endif
 
-	if (sc->flags & ATHN_FLAG_PCIE)
-		athn_config_pcie(sc);
+	/* Configure LED. */
+	athn_led_init(sc);
+
+	/* Configure hardware radio switch. */
+	if (sc->flags & ATHN_FLAG_RFSILENT)
+		athn_rfsilent_init(sc);
 
 	if ((error = athn_hw_reset(sc, c, extc)) != 0) {
 		printf("%s: unable to reset hardware; reset status %d\n",
@@ -4697,6 +4752,9 @@ athn_stop(struct ifnet *ifp, int disable)
 
 	/* Disable interrupts. */
 	athn_disable_interrupts(sc);
+	/* Acknowledge interrupts (avoids interrupt storms.) */
+	AR_WRITE(sc, AR_INTR_SYNC_CAUSE, 0xffffffff);
+	AR_WRITE(sc, AR_INTR_SYNC_MASK, 0);
 
 	for (qid = 0; qid < ATHN_QID_COUNT; qid++)
 		athn_stop_tx_dma(sc, qid);
@@ -4721,9 +4779,7 @@ athn_stop(struct ifnet *ifp, int disable)
 
 	athn_set_power_sleep(sc);
 
-#ifdef notyet
 	/* For CardBus, power down the socket. */
 	if (disable && sc->sc_disable != NULL)
 		sc->sc_disable(sc);
-#endif
 }

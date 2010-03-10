@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnet.c,v 1.17 2009/08/09 11:40:58 deraadt Exp $	*/
+/*	$OpenBSD: vnet.c,v 1.24 2010/02/21 14:48:42 kettenis Exp $	*/
 /*
  * Copyright (c) 2009 Mark Kettenis
  *
@@ -93,6 +93,15 @@ struct vnet_desc {
 	struct ldc_cookie	cookie[2];
 };
 
+struct vnet_desc_msg {
+	struct vio_msg_tag	tag;
+	uint64_t		seq_no;
+	uint64_t		desc_handle;
+	uint32_t		nbytes;
+	uint32_t		ncookies;
+	struct ldc_cookie	cookie[1];
+};
+
 struct vnet_dring {
 	bus_dmamap_t		vd_map;
 	bus_dma_segment_t	vd_seg;
@@ -125,6 +134,8 @@ struct vnet_softc {
 	bus_space_tag_t	sc_bustag;
 	bus_dma_tag_t	sc_dmatag;
 
+	uint64_t	sc_tx_sysino;
+	uint64_t	sc_rx_sysino;
 	void		*sc_tx_ih;
 	void		*sc_rx_ih;
 
@@ -143,7 +154,8 @@ struct vnet_softc {
 #define VIO_SND_RDX		0x0200
 #define VIO_ACK_RDX		0x0400
 #define VIO_RCV_RDX		0x0800
-#define VIO_ESTABLISHED		0x0fff
+
+	uint8_t		sc_xfer_mode;
 
 	uint32_t	sc_local_sid;
 	uint64_t	sc_dring_ident;
@@ -152,6 +164,8 @@ struct vnet_softc {
 	int		sc_tx_cnt;
 	int		sc_tx_prod;
 	int		sc_tx_cons;
+
+	uint8_t		sc_peer_state;
 
 	struct ldc_map	*sc_lm;
 	struct vnet_dring *sc_vd;
@@ -188,6 +202,7 @@ void	vnet_rx_vio_attr_info(struct vnet_softc *, struct vio_msg_tag *);
 void	vnet_rx_vio_dring_reg(struct vnet_softc *, struct vio_msg_tag *);
 void	vnet_rx_vio_rdx(struct vnet_softc *sc, struct vio_msg_tag *);
 void	vnet_rx_vio_data(struct vnet_softc *sc, struct vio_msg *);
+void	vnet_rx_vio_desc_data(struct vnet_softc *sc, struct vio_msg_tag *);
 void	vnet_rx_vio_dring_data(struct vnet_softc *sc, struct vio_msg_tag *);
 
 void	vnet_ldc_reset(struct ldc_conn *);
@@ -198,8 +213,10 @@ void	vnet_send_ver_info(struct vnet_softc *, uint16_t, uint16_t);
 void	vnet_send_attr_info(struct vnet_softc *);
 void	vnet_send_dring_reg(struct vnet_softc *);
 void	vio_send_rdx(struct vnet_softc *);
+void	vnet_send_dring_data(struct vnet_softc *, uint32_t);
 
 void	vnet_start(struct ifnet *);
+void	vnet_start_desc(struct ifnet *);
 int	vnet_ioctl(struct ifnet *, u_long, caddr_t);
 void	vnet_watchdog(struct ifnet *);
 
@@ -231,7 +248,6 @@ vnet_attach(struct device *parent, struct device *self, void *aux)
 	struct cbus_attach_args *ca = aux;
 	struct ldc_conn *lc;
 	struct ifnet *ifp;
-	uint64_t sysino[2];
 
 	sc->sc_bustag = ca->ca_bustag;
 	sc->sc_dmatag = ca->ca_dmatag;
@@ -240,12 +256,12 @@ vnet_attach(struct device *parent, struct device *self, void *aux)
 	    ETHER_ADDR_LEN) <= 0)
 		myetheraddr(sc->sc_ac.ac_enaddr);
 
-	if (cbus_intr_map(ca->ca_node, ca->ca_tx_ino, &sysino[0]) ||
-	    cbus_intr_map(ca->ca_node, ca->ca_rx_ino, &sysino[1])) {
+	if (cbus_intr_map(ca->ca_node, ca->ca_tx_ino, &sc->sc_tx_sysino) ||
+	    cbus_intr_map(ca->ca_node, ca->ca_rx_ino, &sc->sc_rx_sysino)) {
 		printf(": can't map interrupt\n");
 		return;
 	}
-	printf(": ivec 0x%lx, 0x%lx", sysino[0], sysino[1]);
+	printf(": ivec 0x%lx, 0x%lx", sc->sc_tx_sysino, sc->sc_tx_sysino);
 
 	/*
 	 * Un-configure queues before registering interrupt handlers,
@@ -254,14 +270,22 @@ vnet_attach(struct device *parent, struct device *self, void *aux)
 	hv_ldc_tx_qconf(ca->ca_id, 0, 0);
 	hv_ldc_rx_qconf(ca->ca_id, 0, 0);
 
-	sc->sc_tx_ih = bus_intr_establish(ca->ca_bustag, sysino[0], IPL_NET,
-	    0, vnet_tx_intr, sc, sc->sc_dv.dv_xname);
-	sc->sc_rx_ih = bus_intr_establish(ca->ca_bustag, sysino[1], IPL_NET,
-	    0, vnet_rx_intr, sc, sc->sc_dv.dv_xname);
+	sc->sc_tx_ih = bus_intr_establish(ca->ca_bustag, sc->sc_tx_sysino,
+	    IPL_NET, 0, vnet_tx_intr, sc, sc->sc_dv.dv_xname);
+	sc->sc_rx_ih = bus_intr_establish(ca->ca_bustag, sc->sc_rx_sysino,
+	    IPL_NET, 0, vnet_rx_intr, sc, sc->sc_dv.dv_xname);
 	if (sc->sc_tx_ih == NULL || sc->sc_rx_ih == NULL) {
 		printf(", can't establish interrupt\n");
 		return;
 	}
+
+	/*
+	 * Disable interrupts while we have no queues allocated.
+	 * Otherwise we may end up with an interrupt storm as soon as
+	 * our peer places a packet in their transmit queue.
+	 */
+	cbus_intr_setenabled(sc->sc_tx_sysino, INTR_DISABLED);
+	cbus_intr_setenabled(sc->sc_rx_sysino, INTR_DISABLED);
 
 	lc = &sc->sc_lc;
 	lc->lc_id = ca->ca_id;
@@ -344,7 +368,6 @@ vnet_rx_intr(void *arg)
 	struct ldc_conn *lc = &sc->sc_lc;
 	uint64_t rx_head, rx_tail, rx_state;
 	struct ldc_pkt *lp;
-	uint64_t *msg;
 	int err;
 
 	err = hv_ldc_rx_get_state(lc->lc_id, &rx_head, &rx_tail, &rx_state);
@@ -356,27 +379,27 @@ vnet_rx_intr(void *arg)
 	}
 
 	if (rx_state != lc->lc_rx_state) {
-		sc->sc_tx_cnt = sc->sc_tx_prod = sc->sc_tx_cons = 0;
-		sc->sc_vio_state = 0;
-		lc->lc_tx_seqid = 0;
-		lc->lc_state = 0;
 		switch (rx_state) {
 		case LDC_CHANNEL_DOWN:
 			DPRINTF(("Rx link down\n"));
+			lc->lc_tx_seqid = 0;
+			lc->lc_state = 0;
+			lc->lc_reset(lc);
 			break;
 		case LDC_CHANNEL_UP:
 			DPRINTF(("Rx link up\n"));
-			ldc_send_vers(lc);
 			break;
 		case LDC_CHANNEL_RESET:
 			DPRINTF(("Rx link reset\n"));
+			lc->lc_tx_seqid = 0;
+			lc->lc_state = 0;
+			lc->lc_reset(lc);
 			break;
 		}
 		lc->lc_rx_state = rx_state;
 		return (1);
 	}
 
-	msg = (uint64_t *)(lc->lc_rxq->lq_va + rx_head);
 	lp = (struct ldc_pkt *)(lc->lc_rxq->lq_va + rx_head);
 	switch (lp->type) {
 	case LDC_CTRL:
@@ -517,6 +540,7 @@ vnet_rx_vio_attr_info(struct vnet_softc *sc, struct vio_msg_tag *tag)
 	switch (ai->tag.stype) {
 	case VIO_SUBTYPE_INFO:
 		DPRINTF(("CTRL/INFO/ATTR_INFO\n"));
+		sc->sc_xfer_mode = ai->xfer_mode;
 
 		ai->tag.stype = VIO_SUBTYPE_ACK;
 		ai->tag.sid = sc->sc_local_sid;
@@ -539,8 +563,12 @@ vnet_rx_vio_attr_info(struct vnet_softc *sc, struct vio_msg_tag *tag)
 	}
 
 	if (ISSET(sc->sc_vio_state, VIO_RCV_ATTR_INFO) &&
-	    ISSET(sc->sc_vio_state, VIO_ACK_ATTR_INFO))
-		vnet_send_dring_reg(sc);
+	    ISSET(sc->sc_vio_state, VIO_ACK_ATTR_INFO)) {
+		if (sc->sc_xfer_mode == VIO_DRING_MODE)
+			vnet_send_dring_reg(sc);
+		else
+			vio_send_rdx(sc);
+	}
 }
 
 void
@@ -614,7 +642,8 @@ vnet_rx_vio_rdx(struct vnet_softc *sc, struct vio_msg_tag *tag)
 		break;
 	}
 
-	if (sc->sc_vio_state == VIO_ESTABLISHED) {
+	if (ISSET(sc->sc_vio_state, VIO_RCV_RDX) &&
+	    ISSET(sc->sc_vio_state, VIO_ACK_RDX)) {
 		/* Link is up! */
 		vnet_link_state(sc);
 
@@ -629,19 +658,107 @@ vnet_rx_vio_data(struct vnet_softc *sc, struct vio_msg *vm)
 {
 	struct vio_msg_tag *tag = (struct vio_msg_tag *)&vm->type;
 
-	if (sc->sc_vio_state != VIO_ESTABLISHED) {
+	if (!ISSET(sc->sc_vio_state, VIO_RCV_RDX) ||
+	    !ISSET(sc->sc_vio_state, VIO_ACK_RDX)) {
 		DPRINTF(("Spurious DATA/0x%02x/0x%04x\n", tag->stype,
 		    tag->stype_env));
 		return;
 	}
 
 	switch(tag->stype_env) {
+	case VIO_DESC_DATA:
+		vnet_rx_vio_desc_data(sc, tag);
+		break;
+
 	case VIO_DRING_DATA:
 		vnet_rx_vio_dring_data(sc, tag);
 		break;
 
 	default:
 		DPRINTF(("DATA/0x%02x/0x%04x\n", tag->stype, tag->stype_env));
+		break;
+	}
+}
+
+void
+vnet_rx_vio_desc_data(struct vnet_softc *sc, struct vio_msg_tag *tag)
+{
+	struct vnet_desc_msg *dm = (struct vnet_desc_msg *)tag;
+	struct ldc_conn *lc = &sc->sc_lc;
+	struct ldc_map *map = sc->sc_lm;
+	struct ifnet *ifp = &sc->sc_ac.ac_if;
+	struct mbuf *m;
+	caddr_t buf;
+	paddr_t pa;
+	psize_t nbytes;
+	int err;
+
+	switch(tag->stype) {
+	case VIO_SUBTYPE_INFO:
+		buf = pool_get(&sc->sc_pool, PR_NOWAIT|PR_ZERO);
+		if (buf == NULL) {
+			ifp->if_ierrors++;
+			goto skip;
+		}
+		nbytes = roundup(dm->nbytes, 8);
+
+		pmap_extract(pmap_kernel(), (vaddr_t)buf, &pa);
+		err = hv_ldc_copy(lc->lc_id, LDC_COPY_IN,
+		    dm->cookie[0].addr, pa, nbytes, &nbytes);
+		if (err != H_EOK) {
+			pool_put(&sc->sc_pool, buf);
+			ifp->if_ierrors++;
+			goto skip;
+		}
+
+		/* Stupid OBP doesn't align properly. */
+                m = m_devget(buf, dm->nbytes, ETHER_ALIGN, ifp, NULL);
+		pool_put(&sc->sc_pool, buf);
+		if (m == NULL) {
+			ifp->if_ierrors++;
+			goto skip;
+		}
+
+		ifp->if_ipackets++;
+
+#if NBPFILTER > 0
+		if (ifp->if_bpf)
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+#endif /* NBPFILTER > 0 */
+
+		/* Pass it on. */
+		ether_input_mbuf(ifp, m);
+
+	skip:
+		dm->tag.stype = VIO_SUBTYPE_ACK;
+		dm->tag.sid = sc->sc_local_sid;
+		vio_sendmsg(sc, dm, sizeof(*dm));
+		break;
+
+	case VIO_SUBTYPE_ACK:
+		DPRINTF(("DATA/ACK/DESC_DATA\n"));
+
+		if (dm->desc_handle != sc->sc_tx_cons) {
+			printf("out of order\n");
+			return;
+		}
+
+		map->lm_slot[sc->sc_vsd[sc->sc_tx_cons].vsd_map_idx].entry = 0;
+		map->lm_count--;
+
+		pool_put(&sc->sc_pool, sc->sc_vsd[sc->sc_tx_cons].vsd_buf);
+
+		sc->sc_tx_cons++;
+		sc->sc_tx_cons &= (sc->sc_vd->vd_nentries - 1);
+		sc->sc_tx_cnt--;
+		break;
+
+	case VIO_SUBTYPE_NACK:
+		DPRINTF(("DATA/NACK/DESC_DATA\n"));
+		break;
+
+	default:
+		DPRINTF(("DATA/0x%02x/DESC_DATA\n", tag->stype));
 		break;
 	}
 }
@@ -737,6 +854,8 @@ vnet_rx_vio_dring_data(struct vnet_softc *sc, struct vio_msg_tag *tag)
 		struct ldc_map *map = sc->sc_lm;
 		int cons;
 
+		sc->sc_peer_state = dm->proc_state;
+
 		cons = sc->sc_tx_cons;
 		while (sc->sc_vd->vd_desc[cons].hdr.dstate == VIO_DESC_DONE) {
 			map->lm_slot[sc->sc_vsd[cons].vsd_map_idx].entry = 0;
@@ -750,8 +869,13 @@ vnet_rx_vio_dring_data(struct vnet_softc *sc, struct vio_msg_tag *tag)
 		}
 		sc->sc_tx_cons = cons;
 
+		if (sc->sc_tx_cnt > 0 && sc->sc_peer_state != VIO_DP_ACTIVE)
+			vnet_send_dring_data(sc, sc->sc_tx_cons);
+
 		if (sc->sc_tx_cnt < sc->sc_vd->vd_nentries)
 			ifp->if_flags &= ~IFF_OACTIVE;
+		if (sc->sc_tx_cnt == 0)
+			ifp->if_timer = 0;
 
 		vnet_start(ifp);
 		break;
@@ -772,6 +896,7 @@ vnet_ldc_reset(struct ldc_conn *lc)
 {
 	struct vnet_softc *sc = lc->lc_sc;
 
+	sc->sc_tx_cnt = sc->sc_tx_prod = sc->sc_tx_cons = 0;
 	sc->sc_vio_state = 0;
 	vnet_link_state(sc);
 }
@@ -892,12 +1017,30 @@ vio_send_rdx(struct vnet_softc *sc)
 }
 
 void
+vnet_send_dring_data(struct vnet_softc *sc, uint32_t start_idx)
+{
+	struct vio_dring_msg dm;
+
+	bzero(&dm, sizeof(dm));
+	dm.tag.type = VIO_TYPE_DATA;
+	dm.tag.stype = VIO_SUBTYPE_INFO;
+	dm.tag.stype_env = VIO_DRING_DATA;
+	dm.tag.sid = sc->sc_local_sid;
+	dm.seq_no = sc->sc_seq_no++;
+	dm.dring_ident = sc->sc_dring_ident;
+	dm.start_idx = start_idx;
+	dm.end_idx = -1;
+	vio_sendmsg(sc, &dm, sizeof(dm));
+
+	sc->sc_peer_state = VIO_DP_ACTIVE;
+}
+
+void
 vnet_start(struct ifnet *ifp)
 {
 	struct vnet_softc *sc = ifp->if_softc;
 	struct ldc_conn *lc = &sc->sc_lc;
 	struct ldc_map *map = sc->sc_lm;
-	struct vio_dring_msg dm;
 	struct mbuf *m;
 	paddr_t pa;
 	caddr_t buf;
@@ -914,7 +1057,8 @@ vnet_start(struct ifnet *ifp)
 	 * We cannot transmit packets until a VIO connection has been
 	 * established.
 	 */
-	if (sc->sc_vio_state != VIO_ESTABLISHED)
+	if (!ISSET(sc->sc_vio_state, VIO_RCV_RDX) ||
+	    !ISSET(sc->sc_vio_state, VIO_ACK_RDX))
 		return;
 
 	/*
@@ -928,6 +1072,11 @@ vnet_start(struct ifnet *ifp)
 	tx_tail &= ((lc->lc_txq->lq_nentries * sizeof(struct ldc_pkt)) - 1);
 	if (tx_tail == tx_head) {
 		ifp->if_flags |= IFF_OACTIVE;
+		return;
+	}
+
+	if (sc->sc_xfer_mode == VIO_DESC_MODE) {
+		vnet_start_desc(ifp);
 		return;
 	}
 
@@ -988,20 +1137,85 @@ vnet_start(struct ifnet *ifp)
 		m_freem(m);
 	}
 
-	if (desc != sc->sc_tx_prod) {
-		bzero(&dm, sizeof(dm));
-		dm.tag.type = VIO_TYPE_DATA;
-		dm.tag.stype = VIO_SUBTYPE_INFO;
-		dm.tag.stype_env = VIO_DRING_DATA;
-		dm.tag.sid = sc->sc_local_sid;
-		dm.seq_no = sc->sc_seq_no++;
-		dm.dring_ident = sc->sc_dring_ident;
-		dm.start_idx = sc->sc_tx_prod;
-		dm.end_idx = -1;
-		vio_sendmsg(sc, &dm, sizeof(dm));
+	if (sc->sc_tx_cnt > 0 && sc->sc_peer_state != VIO_DP_ACTIVE) {
+		vnet_send_dring_data(sc, sc->sc_tx_prod);
+		ifp->if_timer = 5;
 	}
 
 	sc->sc_tx_prod = desc;
+}
+
+void
+vnet_start_desc(struct ifnet *ifp)
+{
+	struct vnet_softc *sc = ifp->if_softc;
+	struct ldc_map *map = sc->sc_lm;
+	struct vnet_desc_msg dm;
+	struct mbuf *m;
+	paddr_t pa;
+	caddr_t buf;
+
+	for (;;) {
+		IFQ_POLL(&ifp->if_snd, m);
+		if (m == NULL)
+			break;
+
+		if (sc->sc_tx_cnt >= sc->sc_vd->vd_nentries ||
+		    map->lm_count >= map->lm_nentries) {
+			ifp->if_flags |= IFF_OACTIVE;
+			return;
+		}
+
+		buf = pool_get(&sc->sc_pool, PR_NOWAIT|PR_ZERO);
+		if (buf == NULL) {
+			ifp->if_flags |= IFF_OACTIVE;
+			return;
+		}
+		m_copydata(m, 0, m->m_pkthdr.len, buf);
+		IFQ_DEQUEUE(&ifp->if_snd, m);
+
+#if NBPFILTER > 0
+		/*
+		 * If BPF is listening on this interface, let it see the
+		 * packet before we commit it to the wire.
+		 */
+		if (ifp->if_bpf)
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
+#endif
+
+		pmap_extract(pmap_kernel(), (vaddr_t)buf, &pa);
+		KASSERT((pa & ~PAGE_MASK) == (pa & LDC_MTE_RA_MASK));
+		while (map->lm_slot[map->lm_next].entry != 0) {
+			map->lm_next++;
+			map->lm_next &= (map->lm_nentries - 1);
+		}
+		map->lm_slot[map->lm_next].entry = (pa & LDC_MTE_RA_MASK);
+		map->lm_slot[map->lm_next].entry |= LDC_MTE_CPR;
+		map->lm_count++;
+
+		sc->sc_vsd[sc->sc_tx_prod].vsd_map_idx = map->lm_next;
+		sc->sc_vsd[sc->sc_tx_prod].vsd_buf = buf;
+
+		bzero(&dm, sizeof(dm));
+		dm.tag.type = VIO_TYPE_DATA;
+		dm.tag.stype = VIO_SUBTYPE_INFO;
+		dm.tag.stype_env = VIO_DESC_DATA;
+		dm.tag.sid = sc->sc_local_sid;
+		dm.seq_no = sc->sc_seq_no++;
+		dm.desc_handle = sc->sc_tx_prod;
+		dm.nbytes = max(m->m_pkthdr.len, 60);
+		dm.ncookies = 1;
+		dm.cookie[0].addr =
+			map->lm_next << PAGE_SHIFT | (pa & PAGE_MASK);
+		dm.cookie[0].size = 2048;
+		vio_sendmsg(sc, &dm, sizeof(dm));
+
+		sc->sc_tx_prod++;
+		sc->sc_tx_prod &= (sc->sc_vd->vd_nentries - 1);
+		sc->sc_tx_cnt++;
+
+		m_freem(m);
+	}
 }
 
 int
@@ -1061,6 +1275,9 @@ vnet_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 void
 vnet_watchdog(struct ifnet *ifp)
 {
+	struct vnet_softc *sc = ifp->if_softc;
+
+	printf("%s: watchdog timeout\n", sc->sc_dv.dv_xname);
 }
 
 int
@@ -1086,7 +1303,8 @@ vnet_link_state(struct vnet_softc *sc)
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
 	int link_state = LINK_STATE_DOWN;
 
-	if (sc->sc_vio_state == VIO_ESTABLISHED)
+	if (ISSET(sc->sc_vio_state, VIO_RCV_RDX) &&
+	    ISSET(sc->sc_vio_state, VIO_ACK_RDX))
 		link_state = LINK_STATE_FULL_DUPLEX;
 	if (ifp->if_link_state != link_state) {
 		ifp->if_link_state = link_state;
@@ -1103,7 +1321,8 @@ vnet_setmulti(struct vnet_softc *sc, int set)
 	struct vnet_mcast_info mi;
 	int count = 0;
 
-	if (sc->sc_vio_state != VIO_ESTABLISHED)
+	if (!ISSET(sc->sc_vio_state, VIO_RCV_RDX) ||
+	    !ISSET(sc->sc_vio_state, VIO_ACK_RDX))
 		return;
 
 	bzero(&mi, sizeof(mi));
@@ -1174,6 +1393,9 @@ vnet_init(struct ifnet *ifp)
 	if (err != H_EOK)
 		printf("hv_ldc_rx_qconf %d\n", err);
 
+	cbus_intr_setenabled(sc->sc_tx_sysino, INTR_ENABLED);
+	cbus_intr_setenabled(sc->sc_rx_sysino, INTR_ENABLED);
+
 	ldc_send_vers(lc);
 
 	ifp->if_flags |= IFF_RUNNING;
@@ -1187,6 +1409,10 @@ vnet_stop(struct ifnet *ifp)
 	struct ldc_conn *lc = &sc->sc_lc;
 
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+	ifp->if_timer = 0;
+
+	cbus_intr_setenabled(sc->sc_tx_sysino, INTR_DISABLED);
+	cbus_intr_setenabled(sc->sc_rx_sysino, INTR_DISABLED);
 
 	hv_ldc_tx_qconf(lc->lc_id, 0, 0);
 	hv_ldc_rx_qconf(lc->lc_id, 0, 0);

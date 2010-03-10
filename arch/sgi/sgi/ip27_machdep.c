@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.36 2009/11/18 19:05:51 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.43 2010/03/07 13:44:26 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -29,6 +29,7 @@
 #include <sys/reboot.h>
 #include <sys/tty.h>
 
+#include <mips64/arcbios.h>
 #include <mips64/archtype.h>
 
 #include <machine/autoconf.h>
@@ -40,12 +41,15 @@
 #include <uvm/uvm_extern.h>
 
 #include <sgi/sgi/ip27.h>
+#include <sgi/sgi/l1.h>
 #include <sgi/xbow/hub.h>
 #include <sgi/xbow/widget.h>
 #include <sgi/xbow/xbow.h>
 
 #include <sgi/pci/iofreg.h>
 #include <dev/ic/comvar.h>
+
+#include <dev/cons.h>
 
 extern char *hw_prod;
 
@@ -55,6 +59,7 @@ paddr_t	ip27_widget_short(int16_t, u_int);
 paddr_t	ip27_widget_long(int16_t, u_int);
 paddr_t	ip27_widget_map(int16_t, u_int,bus_addr_t *, bus_size_t *);
 int	ip27_widget_id(int16_t, u_int, uint32_t *);
+int	ip27_widget_id_early(int16_t, u_int, uint32_t *);
 
 void	ip27_halt(int);
 
@@ -67,7 +72,7 @@ static uint maxnodes;
 
 int	ip27_hub_intr_register(int, int, int *);
 int	ip27_hub_intr_establish(int (*)(void *), void *, int, int,
-	    const char *);
+	    const char *, struct intrhand *);
 void	ip27_hub_intr_disestablish(int);
 void	ip27_hub_intr_clear(int);
 void	ip27_hub_intr_set(int);
@@ -156,7 +161,7 @@ ip27_setup()
 
 	xbow_widget_base = ip27_widget_short;
 	xbow_widget_map = ip27_widget_map;
-	xbow_widget_id = ip27_widget_id;
+	xbow_widget_id = ip27_widget_id_early;
 
 	md_halt = ip27_halt;
 
@@ -202,7 +207,6 @@ ip27_setup()
 			continue;
 		kl_scan_config(gda->nasid[node]);
 	}
-	kl_scan_done();
 
 	/*
 	 * Initialize the early console parameters.
@@ -217,11 +221,10 @@ ip27_setup()
 	cons = kl_get_console();
 	xbow_build_bus_space(&sys_config.console_io, 0,
 	    8 /* whatever nonzero */);
-	/* Constrain to the correct window */
+	/* point to devio base */
 	sys_config.console_io.bus_base =
-	    cons->uart_base & 0xffffffffff000000UL;
-
-	comconsaddr = cons->uart_base & 0x0000000000ffffffUL;
+	    cons->uart_base & 0xfffffffffff00000UL;
+	comconsaddr = cons->uart_base & 0x00000000000fffffUL;
 	comconsrate = cons->baud;
 	if (comconsrate < 50 || comconsrate > 115200)
 		comconsrate = 9600;
@@ -234,10 +237,11 @@ ip27_setup()
 		paddr_t ioc4_base;
 
 		/*
-		 * IOC4 clocks are derived from the PCI clock, so we need to
-		 * figure out whether this is an 66MHz or a 33MHz bus.
+		 * IOC4 clocks are derived from the PCI clock,
+		 * so we need to figure out whether this is an 66MHz
+		 * or a 33MHz bus.
 		 */
-		ioc4_base = cons->uart_base & ~0xfffffUL; /* point to devio */
+		ioc4_base = sys_config.console_io.bus_base;
 		ioc4_mcr = *(volatile uint32_t *)(ioc4_base + IOC4_MCR);
 		if (ioc4_mcr & IOC4_MCR_PCI_66MHZ)
 			comconsfreq = 66666667;
@@ -309,20 +313,23 @@ ip27_setup()
 void
 ip27_autoconf(struct device *parent)
 {
-	struct mainbus_attach_args maa;
+	struct cpu_attach_args caa;
 	uint node;
+
+	xbow_widget_id = ip27_widget_id;
 
 	/*
 	 * Attach the CPU we are running on early; other processors,
 	 * if any, will get attached as they are discovered.
 	 */
 
-	bzero(&maa, sizeof maa);
-	maa.maa_nasid = currentnasid = masternasid;
-	maa.maa_name = "cpu";
-	config_found(parent, &maa, ip27_print);
-	maa.maa_name = "clock";
-	config_found(parent, &maa, ip27_print);
+	bzero(&caa, sizeof caa);
+	caa.caa_maa.maa_name = "cpu";
+	caa.caa_maa.maa_nasid = currentnasid = masternasid;
+	caa.caa_hw = &bootcpu_hwinfo;
+	config_found(parent, &caa, ip27_print);
+	caa.caa_maa.maa_name = "clock";
+	config_found(parent, &caa.caa_maa, ip27_print);
 
 	/*
 	 * Now attach all nodes' I/O devices.
@@ -502,6 +509,28 @@ ip27_widget_id(int16_t nasid, u_int widget, uint32_t *wid)
 }
 
 /*
+ * Same as the above, but usable before we can handle faults.
+ * Expects the caller to only use valid widget numbers...
+ */
+int
+ip27_widget_id_early(int16_t nasid, u_int widget, uint32_t *wid)
+{
+	paddr_t wpa;
+
+	if (widget != 0)
+	{
+		if (widget < WIDGET_MIN || widget > WIDGET_MAX)
+			return EINVAL;
+	}
+
+	wpa = ip27_widget_short(nasid, widget);
+	if (wid != NULL)
+		*wid = *(uint32_t *)(wpa + (WIDGET_ID | 4));
+
+	return 0;
+}
+
+/*
  * Reboot code
  */
 
@@ -529,11 +558,23 @@ ip27_halt(int howto)
 		else
 			promop = GDA_PROMOP_EIM;
 #else
-		if (howto & RB_POWERDOWN)
-			printf("Software powerdown not supported, "
-			    "please switch off power manually.\n");
-		for (;;) ;
-		/* NOTREACHED */
+		if (howto & RB_POWERDOWN) {
+			if (ip35) {
+				l1_exec_command(masternasid, "* pwr d");
+				delay(1000000);
+				printf("Powerdown failed, "
+				    "please switch off power manually.\n");
+			} else {
+				printf("Software powerdown not supported, "
+				    "please switch off power manually.\n");
+			}
+			for (;;) ;
+		} else {
+			printf("System halted.\n"
+			    "Press any key to restart\n");
+			cngetc();
+			promop = GDA_PROMOP_REBOOT;
+		}
 #endif
 	} else
 		promop = GDA_PROMOP_REBOOT;
@@ -625,7 +666,7 @@ found:
  */
 int
 ip27_hub_intr_establish(int (*func)(void *), void *arg, int intrbit,
-    int level, const char *name)
+    int level, const char *name, struct intrhand *ihstore)
 {
 	struct intrhand *ih, **anchor;
 	int s;
@@ -650,9 +691,15 @@ ip27_hub_intr_establish(int (*func)(void *), void *arg, int intrbit,
 	if (*anchor != NULL)
 		return EEXIST;
 
-	ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT);
-	if (ih == NULL)
-		return ENOMEM;
+	if (ihstore == NULL) {
+		ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT);
+		if (ih == NULL)
+			return ENOMEM;
+		ih->ih_flags = IH_ALLOCATED;
+	} else {
+		ih = ihstore;
+		ih->ih_flags = 0;
+	}
 
 	ih->ih_next = NULL;
 	ih->ih_fun = func;
@@ -712,7 +759,8 @@ ip27_hub_intr_disestablish(int intrbit)
 
 	splx(s);
 
-	free(ih, M_DEVBUF);
+	if (ISSET(ih->ih_flags, IH_ALLOCATED))
+		free(ih, M_DEVBUF);
 }
 
 void
@@ -750,6 +798,7 @@ ip27_hub_splx(int newipl)
 #define	INTR_FUNCTIONNAME	hubpi_intr0
 #define	MASK_FUNCTIONNAME	ip27_hub_intr_makemasks0
 #define	INTR_LOCAL_DECLS
+#define	MASK_LOCAL_DECLS
 #define	INTR_GETMASKS \
 do { \
 	/* XXX this assumes we run on cpu0 */ \
@@ -780,6 +829,7 @@ do { \
 #define	INTR_FUNCTIONNAME	hubpi_intr1
 #define	MASK_FUNCTIONNAME	ip27_hub_intr_makemasks1
 #define	INTR_LOCAL_DECLS
+#define	MASK_LOCAL_DECLS
 #define	INTR_GETMASKS \
 do { \
 	/* XXX this assumes we run on cpu0 */ \

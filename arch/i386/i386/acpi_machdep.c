@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.23 2009/08/13 15:33:20 kettenis Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.28 2010/02/23 21:54:53 kettenis Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -20,6 +20,7 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
+#include <sys/memrange.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -191,7 +192,6 @@ acpi_attach_machdep(struct acpi_softc *sc)
 	acpiapm_kqfilter = acpikqfilter;
 	cpuresetfn = acpi_reset;
 
-#ifdef ACPI_SLEEP_ENABLED
 	/*
 	 * Sanity check before setting up trampoline.
 	 * Ensure the trampoline size is < PAGE_SIZE
@@ -200,7 +200,6 @@ acpi_attach_machdep(struct acpi_softc *sc)
 
 	bcopy(acpi_real_mode_resume, (caddr_t)ACPI_TRAMPOLINE,
 	    acpi_resume_end - acpi_real_mode_resume);
-#endif /* ACPI_SLEEP_ENABLED */
 }
 
 void
@@ -216,17 +215,13 @@ acpi_cpu_flush(struct acpi_softc *sc, int state)
 int
 acpi_sleep_machdep(struct acpi_softc *sc, int state)
 {
-#ifdef ACPI_SLEEP_ENABLED
 	if (sc->sc_facs == NULL) {
 		printf("%s: acpi_sleep_machdep: no FACS\n", DEVNAME(sc));
 		return (ENXIO);
 	}
 
-	if (rcr3() != pmap_kernel()->pm_pdirpa) {
-		pmap_activate(curproc);
-
-		KASSERT(rcr3() == pmap_kernel()->pm_pdirpa);
-	}
+	/* i386 does lazy pmap_activate */
+	pmap_activate(curproc);
 
 	/*
 	 *
@@ -246,6 +241,7 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 
 	/* Copy the current cpu registers into a safe place for resume. */
 	if (acpi_savecpu()) {
+		npxsave_cpu(curcpu(), 1);
 		wbinvd();
 		acpi_enter_sleep_state(sc, state);
 		panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
@@ -260,6 +256,12 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	 * last call instruction - after the call to acpi_savecpu.
 	 */
 	
+#if 0
+        /* Temporarily disabled for debugging purposes */
+        /* Reset the wakeup vector to avoid resuming on reboot */
+        sc->sc_facs->wakeup_vector = 0;
+#endif	
+
 #if NISA > 0
 	isa_defaultirq();
 #endif
@@ -273,12 +275,15 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 
 	npxinit(&cpu_info_primary);
 
+	/* Re-initialise memory range handling */
+	if (mem_range_softc.mr_op != NULL)
+		mem_range_softc.mr_op->initAP(&mem_range_softc);
+
 #if NIOAPIC > 0
 	ioapic_enable();
 #endif
 	initrtclock();
 	inittodr(time_second);
-#endif /* ACPI_SLEEP_ENABLED */
 
 	return (0);
 }

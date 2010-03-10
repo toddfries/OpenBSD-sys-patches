@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss.c,v 1.35 2009/11/15 14:13:12 krw Exp $	*/
+/*	$OpenBSD: ciss.c,v 1.40 2010/01/09 23:15:06 krw Exp $	*/
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff
@@ -125,6 +125,7 @@ ciss_get_ccb(struct ciss_softc *sc)
 	if ((ccb = TAILQ_LAST(&sc->sc_free_ccb, ciss_queue_head))) {
 		TAILQ_REMOVE(&sc->sc_free_ccb, ccb, ccb_link);
 		ccb->ccb_state = CISS_CCB_READY;
+		ccb->ccb_xs = NULL;
 	}
 	return ccb;
 }
@@ -135,6 +136,8 @@ ciss_put_ccb(struct ciss_ccb *ccb)
 	struct ciss_softc *sc = ccb->ccb_sc;
 
 	ccb->ccb_state = CISS_CCB_FREE;
+	ccb->ccb_xs = NULL;
+	ccb->ccb_data = NULL;
 	TAILQ_INSERT_TAIL(&sc->sc_free_ccb, ccb, ccb_link);
 }
 
@@ -501,6 +504,10 @@ ciss_cmd(struct ciss_ccb *ccb, int flags, int wait)
 				printf("more than %d dma segs\n", sc->maxsg);
 			else
 				printf("error %d loading dma map\n", error);
+			if (ccb->ccb_xs) {
+				ccb->ccb_xs->error = XS_DRIVER_STUFFUP;
+				scsi_done(ccb->ccb_xs);
+			}
 			ciss_put_ccb(ccb);
 			return (error);
 		}
@@ -672,15 +679,12 @@ ciss_done(struct ciss_ccb *ccb)
 		    ccb->ccb_dmamap->dm_mapsize, (xs->flags & SCSI_DATA_IN) ?
 		    BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
 		bus_dmamap_unload(sc->dmat, ccb->ccb_dmamap);
-		ccb->ccb_xs = NULL;
-		ccb->ccb_data = NULL;
 	}
 
 	ciss_put_ccb(ccb);
 
 	if (xs) {
 		xs->resid = 0;
-		xs->flags |= ITSDONE;
 		CISS_DPRINTF(CISS_D_CMD, ("scsi_done(%p) ", xs));
 		scsi_done(xs);
 	}
@@ -891,8 +895,12 @@ ciss_scsi_raw_cmd(struct scsi_xfer *xs)	/* TODO */
 	/* TODO check this target has not yet employed w/ any volume */
 
 	ccb = ciss_get_ccb(sc);
-	if (ccb == NULL)
-		return NO_CCB;
+	if (ccb == NULL) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		CISS_UNLOCK(sc, lock);
+		return (COMPLETE);
+	}
 
 	cmd = &ccb->ccb_cmd;
 	ccb->ccb_len = xs->datalen;
@@ -909,16 +917,10 @@ ciss_scsi_raw_cmd(struct scsi_xfer *xs)	/* TODO */
 	bzero(&cmd->cdb[0], sizeof(cmd->cdb));
 	bcopy(xs->cmd, &cmd->cdb[0], CISS_MAX_CDB);
 
-	if (ciss_cmd(ccb, BUS_DMA_WAITOK,
-	    xs->flags & (SCSI_POLL|SCSI_NOSLEEP))) {
-		xs->error = XS_DRIVER_STUFFUP;
-		scsi_done(xs);
-		CISS_UNLOCK(sc, lock);
-		return (COMPLETE);
-	}
+	ciss_cmd(ccb, BUS_DMA_WAITOK, xs->flags & (SCSI_POLL|SCSI_NOSLEEP));
 
 	CISS_UNLOCK(sc, lock);
-	return xs->flags & SCSI_POLL? COMPLETE : SUCCESSFULLY_QUEUED;
+	return (COMPLETE);
 }
 
 int
@@ -951,8 +953,12 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 	/* XXX emulate SYNCHRONIZE_CACHE ??? */
 
 	ccb = ciss_get_ccb(sc);
-	if (ccb == NULL)
-		return NO_CCB;
+	if (ccb == NULL) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		CISS_UNLOCK(sc, lock);
+		return (COMPLETE);
+	}
 
 	cmd = &ccb->ccb_cmd;
 	ccb->ccb_len = xs->datalen;
@@ -970,16 +976,10 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 	bzero(&cmd->cdb[0], sizeof(cmd->cdb));
 	bcopy(xs->cmd, &cmd->cdb[0], CISS_MAX_CDB);
 
-	if (ciss_cmd(ccb, BUS_DMA_WAITOK,
-	    xs->flags & (SCSI_POLL|SCSI_NOSLEEP))) {
-		xs->error = XS_DRIVER_STUFFUP;
-		scsi_done(xs);
-		CISS_UNLOCK(sc, lock);
-		return (COMPLETE);
-	}
+	ciss_cmd(ccb, BUS_DMA_WAITOK, xs->flags & (SCSI_POLL|SCSI_NOSLEEP));
 
 	CISS_UNLOCK(sc, lock);
-	return xs->flags & SCSI_POLL? COMPLETE : SUCCESSFULLY_QUEUED;
+	return (COMPLETE);
 }
 
 int

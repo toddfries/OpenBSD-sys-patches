@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbow.c,v 1.25 2009/11/18 19:05:53 miod Exp $	*/
+/*	$OpenBSD: xbow.c,v 1.27 2010/03/06 16:29:46 jsing Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -44,13 +44,13 @@
 /*
  *  XBOW is the mux between two nodes and XIO.
  *
- *  A Crossbow (XBOW) connects two nodeboards via their respecive
+ *  A Crossbow (XBOW) connects two nodeboards via their respective
  *  HUB to up to six different I/O controllers in XIO slots. In a
  *  multiprocessor system all processors have access to the XIO
  *  slots but may need to pass traffic via the routers.
  *
  *  To each XIO port on the XBOW a XIO interface is attached. Such
- *  interfaces can be for example PCI bridges wich then add another
+ *  interfaces can be for example PCI bridges which then add another
  *  level to the hierarchy.
  */
 
@@ -665,7 +665,7 @@ int	xbow_intr_widget = 0;
 paddr_t	xbow_intr_widget_register;
 int	(*xbow_intr_widget_intr_register)(int, int, int *) = NULL;
 int	(*xbow_intr_widget_intr_establish)(int (*)(void *), void *, int, int,
-	    const char *) = NULL;
+	    const char *, struct intrhand *) = NULL;
 void	(*xbow_intr_widget_intr_disestablish)(int) = NULL;
 void	(*xbow_intr_widget_intr_set)(int) = NULL;
 void	(*xbow_intr_widget_intr_clear)(int) = NULL;
@@ -681,13 +681,13 @@ xbow_intr_register(int widget, int level, int *intrbit)
 
 int
 xbow_intr_establish(int (*func)(void *), void *arg, int intrbit, int level,
-    const char *name)
+    const char *name, struct intrhand *ihstore)
 {
 	if (xbow_intr_widget_intr_establish == NULL)
 		return EINVAL;
 
 	return (*xbow_intr_widget_intr_establish)(func, arg, intrbit, level,
-	    name);
+	    name, ihstore);
 }
 
 void

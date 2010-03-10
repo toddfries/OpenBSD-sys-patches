@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.246 2009/11/15 17:24:06 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.251 2010/03/03 20:57:28 mk Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -83,6 +83,7 @@ epic*	at pci?			# SMC EPIC/100 ethernet
 em*	at pci?			# Intel Pro/1000 ethernet
 #ixgb*	at pci?			# Intel Pro/10Gb ethernet
 bge*	at pci?			# Broadcom BCM570x (aka Tigon3)
+bnx*	at pci?			# Broadcom BCM5706/5708 GigE
 stge*	at pci?			# Sundance TC9021 GigE
 rl*	at pci?			# RealTek 81[23]9 ethernet
 vr*	at pci?			# VIA Rhine ethernet
@@ -224,6 +225,7 @@ axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 cdce*	at uhub?		# CDC Ethernet
+urndis*	at uhub?		# Remote NDIS devices
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
@@ -244,6 +246,7 @@ radio*	at udsbr?		# USB radio
 ugen*	at uhub?		# USB Generic driver
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 umbg*	at uhub?		# Meinberg Funkuhren USB5131
+uthum*	at uhidev?		# TEMPerHUM sensor
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 
@@ -352,6 +355,10 @@ scsibus* at vdsk?
 vnet*	at cbus?
 vcc*	at cbus?
 vcctty*	at vcc?
+vds*	at cbus?
+vdsp*	at vds?
+vsw*	at cbus?
+vnet*	at vsw?
 
 ## Lance Ethernet - AMD7990
 le*		at sbus?

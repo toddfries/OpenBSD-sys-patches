@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.26 2009/11/12 19:46:46 miod Exp $ */
+/*	$OpenBSD: autoconf.h,v 1.29 2010/01/09 23:34:29 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -38,31 +38,19 @@
 /*
  * Structure holding all misc config information.
  */
-#define MAX_CPUS	4
+struct cpu_info;
 
 struct sys_rec {
 	int	system_type;
 	int	system_subtype;		/* IP35 only */
 
-	struct cpuinfo {
-		u_int16_t type;
-		u_int8_t  vers_maj;
-		u_int8_t  vers_min;
-		u_int16_t fptype;
-		u_int8_t  fpvers_maj;
-		u_int8_t  fpvers_min;
-		u_int32_t clock;
-		u_int32_t tlbsize;
-		u_int32_t tlbwired;
-	} cpu[MAX_CPUS];
-
 	/* Published cache operations. */
-	void    (*_SyncCache)(void);
-	void    (*_InvalidateICache)(vaddr_t, int);
-	void    (*_SyncDCachePage)(vaddr_t);
-	void    (*_HitSyncDCache)(vaddr_t, int);
-	void    (*_IOSyncDCache)(vaddr_t, int, int);
-	void    (*_HitInvalidateDCache)(vaddr_t, int);
+	void    (*_SyncCache)(struct cpu_info *);
+	void    (*_InvalidateICache)(struct cpu_info *, vaddr_t, size_t);
+	void    (*_SyncDCachePage)(struct cpu_info *, vaddr_t);
+	void    (*_HitSyncDCache)(struct cpu_info *, vaddr_t, size_t);
+	void    (*_IOSyncDCache)(struct cpu_info *, vaddr_t, size_t, int);
+	void    (*_HitInvalidateDCache)(struct cpu_info *, vaddr_t, size_t);
 
 	/* Serial console configuration. */
 	struct mips_bus_space console_io;
@@ -74,6 +62,8 @@ struct mainbus_attach_args {
 	const char	*maa_name;
 	int16_t		 maa_nasid;
 };
+
+#include <mips64/autoconf.h>
 
 void	enaddr_aton(const char *, u_int8_t *);
 u_long	bios_getenvint(const char *);
