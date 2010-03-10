@@ -486,6 +486,10 @@ const static struct drm_pcidev radeondrm_pciidlist[] = {
 	    CHIP_RV635|RADEON_NEW_MEMMAP},
 	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3300,
 	    CHIP_RS780|RADEON_NEW_MEMMAP|RADEON_IS_IGP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4350,
+	    CHIP_RV710|RADEON_NEW_MEMMAP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4870,
+	    CHIP_RV770|RADEON_NEW_MEMMAP},
         {0, 0, 0}
 };
 
@@ -757,8 +761,14 @@ radeondrm_get_scratch(struct drm_radeon_private *dev_priv, u_int32_t off)
 void
 radeondrm_begin_ring(struct drm_radeon_private *dev_priv, int ncmd)
 {
+	int align_nr;
 	RADEON_VPRINTF("%d\n", ncmd);
-	if (dev_priv->ring.space <= ncmd) {
+
+	align_nr = RADEON_RING_ALIGN - ((dev_priv->ring.tail + ncmd) &
+		(RADEON_RING_ALIGN - 1));
+	align_nr += ncmd;
+
+	if (dev_priv->ring.space <= align_nr) {
 		radeondrm_commit_ring(dev_priv);
 		radeon_wait_ring(dev_priv, ncmd);
 	}
@@ -784,6 +794,25 @@ radeondrm_advance_ring(struct drm_radeon_private *dev_priv)
 void
 radeondrm_commit_ring(struct drm_radeon_private *dev_priv)
 {
+	int		 i, tail_aligned, num_p2;
+	u_int32_t	*ring;
+
+	/* check if the ring is padded out to 16-dword alignment */
+
+	tail_aligned = dev_priv->ring.tail & (RADEON_RING_ALIGN - 1);
+	if (tail_aligned) {
+		num_p2 = RADEON_RING_ALIGN - tail_aligned;
+
+		ring = dev_priv->ring.start;
+		/* pad with some CP_PACKET2 */
+		for (i = 0; i < num_p2; i++)
+			ring[dev_priv->ring.tail + i] = CP_PACKET2();
+
+		dev_priv->ring.tail += i;
+		dev_priv->ring.space -= num_p2;
+		
+	}
+	dev_priv->ring.tail &= dev_priv->ring.tail_mask;
 	/* XXX 128byte aligned stuff */
 	/* flush write combining buffer and writes to ring */
 	DRM_MEMORYBARRIER();

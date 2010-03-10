@@ -857,9 +857,9 @@ static void r600_gfx_init(struct drm_device *dev,
 
 }
 
-static u32 r700_get_tile_pipe_to_backend_map(u32 num_tile_pipes,
-					     u32 num_backends,
-					     u32 backend_disable_mask)
+static u32
+r700_get_tile_pipe_to_backend_map(u32 num_tile_pipes, u32 num_backends,
+    u32 backend_disable_mask)
 {
 	u32 backend_map = 0;
 	u32 enabled_backends_mask;
@@ -1009,31 +1009,6 @@ static void r700_gfx_init(struct drm_device *dev,
 		dev_priv->r700_sc_hiz_tile_fifo_size = 0x30;
 		dev_priv->r700_sc_earlyz_tile_fifo_fize = 0x130;
 		break;
-	case CHIP_RV740:
-		dev_priv->r600_max_pipes = 4;
-		dev_priv->r600_max_tile_pipes = 4;
-		dev_priv->r600_max_simds = 8;
-		dev_priv->r600_max_backends = 4;
-		dev_priv->r600_max_gprs = 256;
-		dev_priv->r600_max_threads = 248;
-		dev_priv->r600_max_stack_entries = 512;
-		dev_priv->r600_max_hw_contexts = 8;
-		dev_priv->r600_max_gs_threads = 16 * 2;
-		dev_priv->r600_sx_max_export_size = 256;
-		dev_priv->r600_sx_max_export_pos_size = 32;
-		dev_priv->r600_sx_max_export_smx_size = 224;
-		dev_priv->r600_sq_num_cf_insts = 2;
-
-		dev_priv->r700_sx_num_of_sets = 7;
-		dev_priv->r700_sc_prim_fifo_size = 0x100;
-		dev_priv->r700_sc_hiz_tile_fifo_size = 0x30;
-		dev_priv->r700_sc_earlyz_tile_fifo_fize = 0x130;
-
-		if (dev_priv->r600_sx_max_export_pos_size > 16) {
-			dev_priv->r600_sx_max_export_pos_size -= 16;
-			dev_priv->r600_sx_max_export_smx_size += 16;
-		}
-		break;
 	case CHIP_RV730:
 		dev_priv->r600_max_pipes = 2;
 		dev_priv->r600_max_tile_pipes = 4;
@@ -1053,7 +1028,6 @@ static void r700_gfx_init(struct drm_device *dev,
 		dev_priv->r700_sc_prim_fifo_size = 0xf9;
 		dev_priv->r700_sc_hiz_tile_fifo_size = 0x30;
 		dev_priv->r700_sc_earlyz_tile_fifo_fize = 0x130;
-
 		if (dev_priv->r600_sx_max_export_pos_size > 16) {
 			dev_priv->r600_sx_max_export_pos_size -= 16;
 			dev_priv->r600_sx_max_export_smx_size += 16;
@@ -1078,6 +1052,31 @@ static void r700_gfx_init(struct drm_device *dev,
 		dev_priv->r700_sc_prim_fifo_size = 0x40;
 		dev_priv->r700_sc_hiz_tile_fifo_size = 0x30;
 		dev_priv->r700_sc_earlyz_tile_fifo_fize = 0x130;
+		break;
+	case CHIP_RV740:
+		dev_priv->r600_max_pipes = 4;
+		dev_priv->r600_max_tile_pipes = 4;
+		dev_priv->r600_max_simds = 8;
+		dev_priv->r600_max_backends = 4;
+		dev_priv->r600_max_gprs = 256;
+		dev_priv->r600_max_threads = 248;
+		dev_priv->r600_max_stack_entries = 512;
+		dev_priv->r600_max_hw_contexts = 8;
+		dev_priv->r600_max_gs_threads = 16 * 2;
+		dev_priv->r600_sx_max_export_size = 256;
+		dev_priv->r600_sx_max_export_pos_size = 32;
+		dev_priv->r600_sx_max_export_smx_size = 224;
+		dev_priv->r600_sq_num_cf_insts = 2;
+
+		dev_priv->r700_sx_num_of_sets = 7;
+		dev_priv->r700_sc_prim_fifo_size = 0x100;
+		dev_priv->r700_sc_hiz_tile_fifo_size = 0x30;
+		dev_priv->r700_sc_earlyz_tile_fifo_fize = 0x130;
+
+		if (dev_priv->r600_sx_max_export_pos_size > 16) {
+			dev_priv->r600_sx_max_export_pos_size -= 16;
+			dev_priv->r600_sx_max_export_smx_size += 16;
+		}
 		break;
 	default:
 		break;
@@ -1225,9 +1224,9 @@ static void r700_gfx_init(struct drm_device *dev,
 	case CHIP_RV770:
 		sq_ms_fifo_sizes |= R600_FETCH_FIFO_HIWATER(0x1);
 		break;
-	case CHIP_RV740:
 	case CHIP_RV730:
 	case CHIP_RV710:
+	case CHIP_RV740:
 	default:
 		sq_ms_fifo_sizes |= R600_FETCH_FIFO_HIWATER(0x4);
 		break;
@@ -1303,8 +1302,8 @@ static void r700_gfx_init(struct drm_device *dev,
 
 	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
 	case CHIP_RV770:
-	case CHIP_RV740:
 	case CHIP_RV730:
+	case CHIP_RV740:
 		gs_prim_buffer_depth = 384;
 		break;
 	case CHIP_RV710:
@@ -1982,6 +1981,18 @@ radeon_do_cp_start(drm_radeon_private_t *dev_priv)
 
 		RADEON_WRITE(RADEON_CP_CSQ_CNTL, dev_priv->cp_mode);
 
+		/* on r420, any DMA from CP to system memory while 2D is active
+		 * can cause a hang.  workaround is to queue a CP RESYNC token
+		 */
+		if ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R420) {
+			BEGIN_RING(3);
+			OUT_RING(CP_PACKET0(R300_CP_RESYNC_ADDR, 1));
+			OUT_RING(5); /* scratch reg 5 */
+			OUT_RING(0xdeadbeef);
+			ADVANCE_RING();
+			COMMIT_RING();
+		}
+
 		BEGIN_RING(8);
 		/* isync can only be written through cp on r5xx write it here */
 		OUT_RING(CP_PACKET0(RADEON_ISYNC_CNTL, 0));
@@ -2031,6 +2042,16 @@ void
 radeon_do_cp_stop(drm_radeon_private_t *dev_priv)
 {
 	DRM_DEBUG("\n");
+
+	/* finish the pending CP_RESYNC token */
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R420) {
+		BEGIN_RING(2);
+		OUT_RING(CP_PACKET0(R300_RB3D_DSTCACHE_CTLSTAT, 0));
+		OUT_RING(R300_RB3D_DC_FINISH);
+		ADVANCE_RING();
+		COMMIT_RING();
+		radeon_do_wait_for_idle(dev_priv);
+	}
 
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
 		RADEON_WRITE(R600_CP_ME_CNTL, 0xff | R600_CP_ME_HALT);
@@ -2592,6 +2613,7 @@ radeondrm_setup_pcigart(struct drm_radeon_private *dev_priv)
 	}
 
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) < CHIP_R600) {
+		/* clear surfaces while we write the gart */
 		sctrl = RADEON_READ(RADEON_SURFACE_CNTL);
 		RADEON_WRITE(RADEON_SURFACE_CNTL, 0);
 	}
@@ -2625,8 +2647,7 @@ radeondrm_setup_pcigart(struct drm_radeon_private *dev_priv)
 
 /* Enable or disable IGP GART on the chip */
 void
-radeon_set_igpgart(drm_radeon_private_t *dev_priv, int on)
-{
+radeon_set_igpgart(drm_radeon_private_t *dev_priv, int on) {
 	u32 temp;
 
 	if (on) {
@@ -2873,7 +2894,7 @@ radeon_setup_pcigart_surface(drm_radeon_private_t *dev_priv)
 			break;
 	}
 	if (i >= 2 * RADEON_MAX_SURFACES)
-		return -ENOMEM;
+		return ENOMEM;
 	vp = &dev_priv->virt_surfaces[i];
 
 	for (i = 0; i < RADEON_MAX_SURFACES; i++) {
@@ -2898,7 +2919,7 @@ radeon_setup_pcigart_surface(drm_radeon_private_t *dev_priv)
 		return 0;
 	}
 
-	return -ENOMEM;
+	return ENOMEM;
 }
 
 int
@@ -3354,6 +3375,8 @@ radeon_driver_lastclose(struct drm_device *dev)
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	int i, ret;
 
+	radeon_surfaces_release(PCIGART_FILE_PRIV, dev->dev_private);
+
 	if (dev_priv->cp_running) {
 		/* Stop the cp */
 		while ((ret = radeon_do_cp_idle(dev_priv)) != 0) {
@@ -3483,7 +3506,6 @@ radeon_cp_resume(struct drm_device *dev)
  * they can't get the lock.
  */
 
-/* XXX check this! */
 struct drm_buf *
 radeon_freelist_get(struct drm_device *dev)
 {
@@ -3503,15 +3525,16 @@ radeon_freelist_get(struct drm_device *dev)
 		u_int32_t done_age = radeondrm_get_scratch(dev_priv, 1);
 
 		DRM_DEBUG("done_age = %d\n", done_age);
-		for (i = start; i < dma->buf_count; i++) {
-			buf = dma->buflist[i];
+		for (i = 0; i < dma->buf_count; i++) {
+			buf = dma->buflist[start];
 			buf_priv = buf->dev_private;
 			if (buf->file_priv == NULL || (buf->pending &&
 			    buf_priv->age <= done_age)) {
 				buf->pending = 0;
 				return buf;
 			}
-			start = 0;
+			if (++start >=dma->buf_count)
+				start = 0;
 		}
 
 		if (t) {
@@ -3519,44 +3542,8 @@ radeon_freelist_get(struct drm_device *dev)
 		}
 	}
 
-	DRM_DEBUG("returning NULL!\n");
 	return NULL;
 }
-
-#if 0
-struct drm_buf *radeon_freelist_get(struct drm_device * dev)
-{
-	struct drm_device_dma *dma = dev->dma;
-	drm_radeon_private_t *dev_priv = dev->dev_private;
-	drm_radeon_buf_priv_t *buf_priv;
-	struct drm_buf *buf;
-	int i, t;
-	int start;
-	u32 done_age;
-
-	done_age = radeondrm_get_scratch(dev_priv, 1);
-
-	if (++dev_priv->last_buf >= dma->buf_count)
-		dev_priv->last_buf = 0;
-
-	start = dev_priv->last_buf;
-
-	for (t = 0; t < 2; t++) {
-		for (i = start; i < dma->buf_count; i++) {
-			buf = dma->buflist[i];
-			buf_priv = buf->dev_private;
-			if (buf->file_priv == 0 || (buf->pending &&
-			    buf_priv->age <= done_age)) {
-				buf->pending = 0;
-				return buf;
-			}
-		}
-		start = 0;
-	}
-
-	return NULL;
-}
-#endif
 
 void
 radeon_freelist_reset(struct drm_device *dev)

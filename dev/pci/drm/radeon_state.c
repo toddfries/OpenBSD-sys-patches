@@ -54,7 +54,6 @@ void	radeon_apply_surface_regs(int, drm_radeon_private_t *);
 int	alloc_surface(drm_radeon_surface_alloc_t *, drm_radeon_private_t *,
 	    struct drm_file *);
 int	free_surface(struct drm_file *, drm_radeon_private_t *, int);
-void	radeon_surfaces_release(struct drm_file *, drm_radeon_private_t *);
 int	radeon_do_init_pageflip(struct drm_device *);
 int	radeon_emit_packets(drm_radeon_private_t *, struct drm_file *,
 	    drm_radeon_cmd_header_t, drm_radeon_kcmd_buffer_t *);
@@ -1078,7 +1077,7 @@ radeon_cp_dispatch_clear(struct drm_device * dev, drm_radeon_clear_t * clear,
 }
 
 void
-r600_cp_dispatch_swap(struct drm_device *dev)
+r600_cp_dispatch_swap(struct drm_device *dev, struct drm_file *file_priv)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	drm_radeon_sarea_t *sarea_priv = dev_priv->sarea_priv;
@@ -1105,7 +1104,7 @@ r600_cp_dispatch_swap(struct drm_device *dev)
 		dst = dev_priv->back_offset + dev_priv->fb_location;
 	}
 
-	if (r600_prepare_blit_copy(dev)) {
+	if (r600_prepare_blit_copy(dev, file_priv)) {
 		DRM_ERROR("unable to allocate vertex buffer for swap buffer\n");
 		return;
 	}
@@ -1256,9 +1255,15 @@ radeon_cp_discard_buffer(struct drm_device * dev, struct drm_buf * buf)
 	buf_priv->age = ++dev_priv->sarea_priv->last_dispatch;
 
 	/* Emit the vertex buffer age */
-	BEGIN_RING(2);
-	RADEON_DISPATCH_AGE(buf_priv->age);
-	ADVANCE_RING();
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600) {
+		BEGIN_RING(3);
+		R600_DISPATCH_AGE(buf_priv->age);
+		ADVANCE_RING();
+	} else {
+		BEGIN_RING(2);
+		RADEON_DISPATCH_AGE(buf_priv->age);
+		ADVANCE_RING();
+	}
 
 	buf->pending = 1;
 	buf->used = 0;
@@ -1367,7 +1372,7 @@ r600_cp_dispatch_texture(struct drm_device *dev, struct drm_file *file_priv,
 
 	dst_offset = tex->offset;
 
-	r600_prepare_blit_copy(dev);
+	r600_prepare_blit_copy(dev, file_priv);
 	do {
 		data = (const u8 __user *)image->data;
 		pass_size = size;
@@ -1963,7 +1968,7 @@ radeon_cp_swap(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		sarea_priv->nbox = RADEON_NR_SAREA_CLIPRECTS;
 
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
-		r600_cp_dispatch_swap(dev);
+		r600_cp_dispatch_swap(dev, file_priv);
 	else
 		radeon_cp_dispatch_swap(dev);
 	dev_priv->sarea_priv->ctx_owner = 0;
@@ -2157,7 +2162,8 @@ int
 radeon_emit_scalars2(drm_radeon_private_t *dev_priv,
     drm_radeon_cmd_header_t header, drm_radeon_kcmd_buffer_t *cmdbuf)
 {
-	int sz = header.scalars.count; int start = ((unsigned int)header.scalars.offset) + 0x100;
+	int sz = header.scalars.count;
+	int start = ((unsigned int)header.scalars.offset) + 0x100;
 	int stride = header.scalars.stride;
 
 	BEGIN_RING(3 + sz);
