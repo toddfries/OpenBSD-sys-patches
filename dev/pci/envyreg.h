@@ -1,4 +1,4 @@
-/*	$OpenBSD: envyreg.h,v 1.11 2009/11/02 05:54:16 ratchov Exp $	*/
+/*	$OpenBSD: envyreg.h,v 1.14 2010/03/07 18:55:45 ratchov Exp $	*/
 /*
  * Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
  *
@@ -66,7 +66,7 @@
 #define ENVY_I2C_ADDR		0x11
 #define ENVY_I2C_DATA		0x12
 #define ENVY_I2C_CTL		0x13
-#define	  ENVY_I2C_CTL_BUSY	0x1
+#define   ENVY_I2C_CTL_BUSY	0x1
 
 /*
  * CCI registers to access GPIO pins
@@ -100,6 +100,7 @@
 #define ENVY_MT_INTR		0
 #define   ENVY_MT_INTR_PACK	0x01
 #define   ENVY_MT_INTR_RACK	0x02
+#define   ENVY_MT_INTR_ERR	0x08	/* HT only fifo error */
 #define   ENVY_MT_INTR_PMASK	0x40	/* !HT only */
 #define   ENVY_MT_INTR_RMASK	0x80	/* !HT only */
 #define ENVY_MT_RATE		1
@@ -107,6 +108,15 @@
 #define ENVY_MT_IMASK		3	/* HT only */
 #define   ENVY_MT_IMASK_PDMA0	0x1
 #define   ENVY_MT_IMASK_RDMA0	0x2
+#define   ENVY_MT_IMASK_ERR	0x8
+#define ENVY_MT_AC97_IDX	4
+#define ENVY_MT_AC97_CMD	5
+#define   ENVY_MT_AC97_READY	0x08
+#define   ENVY_MT_AC97_CMD_MASK	0x30
+#define   ENVY_MT_AC97_CMD_RD	0x10
+#define   ENVY_MT_AC97_CMD_WR	0x20
+#define   ENVY_MT_AC97_CMD_RST	0x80
+#define ENVY_MT_AC97_DATA	6
 #define ENVY_MT_PADDR		0x10
 #define ENVY_MT_PBUFSZ		0x14
 #define ENVY_MT_PBLKSZ(s)	((s)->isht ? 0x1c : 0x16)
@@ -114,6 +124,7 @@
 #define   ENVY_MT_CTL_PSTART	0x01
 #define   ENVY_MT_CTL_RSTART(s)	((s)->isht ? 0x02 : 0x04)
 #define ENVY_MT_NSTREAM		0x19	/* HT only: 4 - active DACs */
+#define ENVY_MT_ERR		0x1a	/* HT only: fifo error */
 #define ENVY_MT_RADDR		0x20
 #define ENVY_MT_RBUFSZ		0x24
 #define ENVY_MT_RBLKSZ		0x26
@@ -156,6 +167,7 @@
 #define   ENVY_MT_HTSRC_LINE	0x02
 #define   ENVY_MT_HTSRC_SPD	0x04
 #define   ENVY_MT_HTSRC_MASK	0x07
+
 /*
  * AK4524 control registers
  */
@@ -168,7 +180,7 @@
 #define   AK4524_RST_AD		0x02
 #define AK4524_FMT		0x02
 #define   AK4524_FMT_NORM	0
-#define   AK4524_FMT_DBL       	0x01
+#define   AK4524_FMT_DBL	0x01
 #define   AK4524_FMT_QUA	0x02
 #define   AK4524_FMT_QAUDFILT	0x04
 #define   AK4524_FMT_256	0
@@ -188,7 +200,7 @@
 #define   AK4524_DEEM_32K	0x03
 #define   AK4524_MUTE		0x80
 #define AK4524_ADC_GAIN0	0x04
-#define	AK4524_ADC_GAIN1	0x05
+#define AK4524_ADC_GAIN1	0x05
 #define AK4524_DAC_GAIN0	0x06
 #define AK4524_DAC_GAIN1	0x07
 

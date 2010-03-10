@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.136 2009/11/03 10:59:04 claudio Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.139 2010/01/12 06:47:25 yasuoka Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -145,6 +145,10 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #endif
 #include <netinet6/in6_var.h>
 #include <netinet6/nd6.h>
+#endif
+
+#ifdef PIPEX
+#include <net/pipex.h>
 #endif
 
 #ifdef NETATALK
@@ -736,7 +740,7 @@ decapsulate:
 		aarpinput((struct arpcom *)ifp, m);
 		goto done;
 #endif
-#if NPPPOE > 0
+#if NPPPOE > 0 || defined(PIPEX)
 	case ETHERTYPE_PPPOEDISC:
 	case ETHERTYPE_PPPOE:
 		/* XXX we dont have this flag */
@@ -758,7 +762,16 @@ decapsulate:
 
 		eh_tmp = mtod(m, struct ether_header *);
 		bcopy(eh, eh_tmp, sizeof(struct ether_header));
+#ifdef PIPEX
+	{
+		struct pipex_session *session;
 
+		if ((session = pipex_pppoe_lookup_session(m)) != NULL) {
+			pipex_pppoe_input(m, session);
+			goto done;
+		}
+	}
+#endif
 		if (etype == ETHERTYPE_PPPOEDISC)
 			inq = &pppoediscinq;
 		else
@@ -766,7 +779,7 @@ decapsulate:
 
 		schednetisr(NETISR_PPPOE);
 		break;
-#endif /* NPPPOE > 0 */
+#endif /* NPPPOE > 0 || defined(PIPEX) */
 #ifdef AOE
 	case ETHERTYPE_AOE:
 		aoe_input(ifp, m);
@@ -866,30 +879,36 @@ ether_sprintf(ap)
 }
 
 /*
+ * Generate a (hopefully) acceptable MAC address, if asked.
+ */
+void
+ether_fakeaddr(struct ifnet *ifp)
+{
+	static int unit;
+	int rng;
+
+	((struct arpcom *)ifp)->ac_enaddr[0] = 0xfe;
+	((struct arpcom *)ifp)->ac_enaddr[1] = 0xe1;
+	((struct arpcom *)ifp)->ac_enaddr[2] = 0xba;
+	((struct arpcom *)ifp)->ac_enaddr[3] = 0xd0 | (unit++ & 0xf);
+	rng = cold ? random() ^ (long)ifp : arc4random();
+	((struct arpcom *)ifp)->ac_enaddr[4] = rng;
+	((struct arpcom *)ifp)->ac_enaddr[5] = rng >> 8;
+}
+
+/*
  * Perform common duties while attaching to interface list
  */
 void
 ether_ifattach(ifp)
 	struct ifnet *ifp;
 {
-
 	/*
 	 * Any interface which provides a MAC address which is obviously
 	 * invalid gets whacked, so that users will notice.
 	 */
-	if (ETHER_IS_MULTICAST(((struct arpcom *)ifp)->ac_enaddr)) {
-		((struct arpcom *)ifp)->ac_enaddr[0] = 0x00;
-		((struct arpcom *)ifp)->ac_enaddr[1] = 0xfe;
-		((struct arpcom *)ifp)->ac_enaddr[2] = 0xe1;
-		((struct arpcom *)ifp)->ac_enaddr[3] = 0xba;
-		((struct arpcom *)ifp)->ac_enaddr[4] = 0xd0;
-		/*
-		 * XXX use of random() by anything except the scheduler is
-		 * normally invalid, but this is boot time, so pre-scheduler,
-		 * and the random subsystem is not alive yet
-		 */
-		((struct arpcom *)ifp)->ac_enaddr[5] = (u_char)random() & 0xff;
-	}
+	if (ETHER_IS_MULTICAST(((struct arpcom *)ifp)->ac_enaddr))
+		ether_fakeaddr(ifp);
 
 	ifp->if_type = IFT_ETHER;
 	ifp->if_addrlen = ETHER_ADDR_LEN;

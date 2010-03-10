@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vnops.c,v 1.125 2009/10/19 22:24:18 jsg Exp $	*/
+/*	$OpenBSD: nfs_vnops.c,v 1.127 2009/12/15 15:53:48 beck Exp $	*/
 /*	$NetBSD: nfs_vnops.c,v 1.62.4.1 1996/07/08 20:26:52 jtc Exp $	*/
 
 /*
@@ -185,7 +185,6 @@ extern u_int32_t nfs_xdrneg1;
 extern struct nfsstats nfsstats;
 extern nfstype nfsv3_type[9];
 int nfs_numasync = 0;
-
 
 void
 nfs_cache_enter(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
@@ -1465,7 +1464,16 @@ nfs_remove(void *v)
 int
 nfs_removeit(struct sillyrename *sp)
 {
-
+	/*
+	 * Make sure that the directory vnode is still valid.
+	 * XXX we should lock sp->s_dvp here.
+	 *
+	 * NFS can potentially try to nuke a silly *after* the directory
+	 * has already been pushed out on a forced unmount. Since the silly
+	 * is going to go away anyway, this is fine.
+	 */
+	if (sp->s_dvp->v_type == VBAD)
+		return (0);
 	return (nfs_removerpc(sp->s_dvp, sp->s_name, sp->s_namlen, sp->s_cred,
 		NULL));
 }
@@ -2510,21 +2518,19 @@ nfs_sillyrename(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 		goto bad;
 	}
 
-	/* Fudge together a funny name */
-	sp->s_namlen = snprintf(sp->s_name, sizeof sp->s_name,
-	    ".nfsA%05x4.4", cnp->cn_proc->p_pid);
-	if (sp->s_namlen > sizeof sp->s_name)
-		sp->s_namlen = strlen(sp->s_name);
-
 	/* Try lookitups until we get one that isn't there */
-	while (nfs_lookitup(dvp, sp->s_name, sp->s_namlen, sp->s_cred,
-		cnp->cn_proc, NULL) == 0) {
-		sp->s_name[4]++;
-		if (sp->s_name[4] > 'z') {
-			error = EINVAL;
-			goto bad;
-		}
+	while (1) {
+		/* Fudge together a funny name */
+		sp->s_namlen = snprintf(sp->s_name, sizeof sp->s_name,
+		    ".nfs%08X%08X", arc4random(), arc4random());
+		if (sp->s_namlen > sizeof sp->s_name)
+			sp->s_namlen = strlen(sp->s_name);
+
+		if (nfs_lookitup(dvp, sp->s_name, sp->s_namlen, sp->s_cred,
+		    cnp->cn_proc, NULL))
+			break;
 	}
+
 	error = nfs_renameit(dvp, cnp, sp);
 	if (error)
 		goto bad;

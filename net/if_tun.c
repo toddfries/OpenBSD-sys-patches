@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.100 2009/11/09 17:53:39 nicm Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.105 2010/01/13 07:23:38 yasuoka Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -72,6 +72,10 @@
 #include <netinet/if_ether.h>
 #endif
 
+#ifdef PIPEX
+#include <net/pipex.h>
+#endif
+
 #ifdef NETATALK
 #include <netatalk/at.h>
 #include <netatalk/at_var.h>
@@ -81,9 +85,6 @@
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
-
-/* for arc4random() */
-#include <dev/rndvar.h>
 
 #include <net/if_tun.h>
 
@@ -99,6 +100,9 @@ struct tun_softc {
 	pid_t		tun_pgid;	/* the process group - if any */
 	u_short		tun_flags;	/* misc flags */
 #define tun_if	arpcom.ac_if
+#ifdef PIPEX
+	struct pipex_iface_context pipex_iface; /* pipex context */
+#endif
 };
 
 #ifdef	TUN_DEBUG
@@ -155,6 +159,9 @@ tunattach(int n)
 {
 	LIST_INIT(&tun_softc_list);
 	if_clone_attach(&tun_cloner);
+#ifdef PIPEX
+	pipex_init();
+#endif
 }
 
 int
@@ -168,7 +175,6 @@ tun_create(struct if_clone *ifc, int unit, int flags)
 {
 	struct tun_softc	*tp;
 	struct ifnet		*ifp;
-	u_int32_t		 macaddr_rnd;
 	int			 s;
 
 	tp = malloc(sizeof(*tp), M_DEVBUF, M_NOWAIT|M_ZERO);
@@ -178,20 +184,11 @@ tun_create(struct if_clone *ifc, int unit, int flags)
 	tp->tun_unit = unit;
 	tp->tun_flags = TUN_INITED|TUN_STAYUP;
 
-	/* generate fake MAC address: 00 bd xx xx xx unit_no */
-	tp->arpcom.ac_enaddr[0] = 0x00;
-	tp->arpcom.ac_enaddr[1] = 0xbd;
-	/*
-	 * This no longer happens pre-scheduler so let's use the real
-	 * random subsystem instead of random().
-	 */
-	macaddr_rnd = arc4random();
-	bcopy(&macaddr_rnd, &tp->arpcom.ac_enaddr[2], sizeof(u_int32_t));
-	tp->arpcom.ac_enaddr[5] = (u_char)unit + 1;
-
 	ifp = &tp->tun_if;
 	snprintf(ifp->if_xname, sizeof ifp->if_xname, "%s%d", ifc->ifc_name,
 	    unit);
+	ether_fakeaddr(ifp);
+
 	ifp->if_softc = tp;
 	ifp->if_ioctl = tun_ioctl;
 	ifp->if_output = tun_output;
@@ -231,6 +228,9 @@ tun_create(struct if_clone *ifc, int unit, int flags)
 	s = splnet();
 	LIST_INSERT_HEAD(&tun_softc_list, tp, tun_list);
 	splx(s);
+#ifdef PIPEX
+	pipex_iface_init(&tp->pipex_iface, ifp);
+#endif
 
 	return (0);
 }
@@ -241,6 +241,9 @@ tun_clone_destroy(struct ifnet *ifp)
 	struct tun_softc	*tp = ifp->if_softc;
 	int			 s;
 
+#ifdef PIPEX
+	pipex_iface_stop(&tp->pipex_iface);
+#endif
 	tun_wakeup(tp);
 
 	s = splhigh();
@@ -583,6 +586,9 @@ tun_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 	struct tun_softc	*tp = ifp->if_softc;
 	int			 s, len, error;
 	u_int32_t		*af;
+#ifdef PIPEX
+	struct pipex_session	*session;
+#endif
 
 	if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING)) {
 		m_freem(m0);
@@ -613,6 +619,13 @@ tun_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 #if NBPFILTER > 0
 	if (ifp->if_bpf)
 		bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
+#endif
+#ifdef PIPEX
+	if ((session = pipex_ip_lookup_session(m0, &tp->pipex_iface)) != NULL) {
+		pipex_ip_output(m0, session);
+		splx(s);
+		return (0);
+	}
 #endif
 
 	len = m0->m_pkthdr.len;
@@ -746,8 +759,17 @@ tunioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		    sizeof(tp->arpcom.ac_enaddr));
 		break;
 	default:
+#ifdef PIPEX
+	    {
+		int ret;
+		ret = pipex_ioctl(&tp->pipex_iface, cmd, data);
+		splx(s);
+		return (ret);
+	    }
+#else
 		splx(s);
 		return (ENOTTY);
+#endif
 	}
 	splx(s);
 	return (0);

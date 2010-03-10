@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.173 2009/11/19 22:07:17 otto Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.177 2010/01/13 10:31:17 henning Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -689,19 +689,12 @@ in_iawithaddr(struct in_addr ina, struct mbuf *m, u_int rdomain)
 		if ((ina.s_addr == ia->ia_addr.sin_addr.s_addr) ||
 		    ((ia->ia_ifp->if_flags & (IFF_LOOPBACK|IFF_LINK1)) ==
 			(IFF_LOOPBACK|IFF_LINK1) &&
-		     ia->ia_subnet == (ina.s_addr & ia->ia_subnetmask)))
+		     ia->ia_net == (ina.s_addr & ia->ia_netmask)))
 			return ia;
 		if (((ip_directedbcast == 0) || (m && ip_directedbcast &&
 		    ia->ia_ifp == m->m_pkthdr.rcvif)) &&
 		    (ia->ia_ifp->if_flags & IFF_BROADCAST)) {
-			if (ina.s_addr == ia->ia_broadaddr.sin_addr.s_addr ||
-			    ina.s_addr == ia->ia_netbroadcast.s_addr ||
-			    /*
-			     * Look for all-0's host part (old broadcast addr),
-			     * either for subnet or net.
-			     */
-			    ina.s_addr == ia->ia_subnet ||
-			    ina.s_addr == ia->ia_net) {
+			if (ina.s_addr == ia->ia_broadaddr.sin_addr.s_addr) {
 				/* Make sure M_BCAST is set */
 				if (m)
 					m->m_flags |= M_BCAST;
@@ -1435,7 +1428,7 @@ ip_forward(m, srcrt)
 		printf("forward: src %x dst %x ttl %x\n", ip->ip_src.s_addr,
 		    ip->ip_dst.s_addr, ip->ip_ttl);
 #endif
-	if (m->m_flags & M_BCAST || in_canforward(ip->ip_dst) == 0) {
+	if (m->m_flags & (M_BCAST|M_MCAST) || in_canforward(ip->ip_dst) == 0) {
 		ipstat.ips_cantforward++;
 		m_freem(m);
 		return;
@@ -1496,8 +1489,8 @@ ip_forward(m, srcrt)
 	    !ip_weadvertise(satosin(rt_key(rt))->sin_addr.s_addr,
 	    m->m_pkthdr.rdomain)) {
 		if (rt->rt_ifa &&
-		    (ip->ip_src.s_addr & ifatoia(rt->rt_ifa)->ia_subnetmask) ==
-		    ifatoia(rt->rt_ifa)->ia_subnet) {
+		    (ip->ip_src.s_addr & ifatoia(rt->rt_ifa)->ia_netmask) ==
+		    ifatoia(rt->rt_ifa)->ia_net) {
 		    if (rt->rt_flags & RTF_GATEWAY)
 			dest = satosin(rt->rt_gateway)->sin_addr.s_addr;
 		    else

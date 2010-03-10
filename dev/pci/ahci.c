@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.153 2009/11/01 01:50:15 dlg Exp $ */
+/*	$OpenBSD: ahci.c,v 1.158 2010/01/21 10:16:44 sthen Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -440,15 +440,22 @@ static const struct ahci_device ahci_devices[] = {
 	{ PCI_VENDOR_ATI,	PCI_PRODUCT_ATI_SBX00_SATA_1,
 	    NULL,		ahci_ati_sb600_attach },
 
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801H_RAID,
+	    NULL,		NULL },
+
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP65_AHCI_2,
 	    NULL,		ahci_nvidia_mcp_attach },
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP67_AHCI_1,
+	    NULL,		ahci_nvidia_mcp_attach },
+	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP73_AHCI_5,
 	    NULL,		ahci_nvidia_mcp_attach },
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP73_AHCI_9,
 	    NULL,		ahci_nvidia_mcp_attach },
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP77_AHCI_5,
 	    NULL,		ahci_nvidia_mcp_attach },
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP77_AHCI_6,
+	    NULL,		ahci_nvidia_mcp_attach },
+	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP79_AHCI_1,
 	    NULL,		ahci_nvidia_mcp_attach },
 
 	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8251_SATA,
@@ -541,7 +548,7 @@ int			ahci_ata_probe(void *, int);
 void			ahci_ata_free(void *, int);
 struct ata_xfer *	ahci_ata_get_xfer(void *, int);
 void			ahci_ata_put_xfer(struct ata_xfer *);
-int			ahci_ata_cmd(struct ata_xfer *);
+void			ahci_ata_cmd(struct ata_xfer *);
 
 struct atascsi_methods ahci_atascsi_methods = {
 	ahci_ata_probe,
@@ -1765,6 +1772,20 @@ ahci_port_intr(struct ahci_port *ap, u_int32_t ci_mask)
 			/* Errored slot is easy to determine from CMD. */
 			err_slot = AHCI_PREG_CMD_CCS(ahci_pread(ap,
 			    AHCI_PREG_CMD));
+
+			if ((ci_saved & (1 << err_slot)) == 0) {
+				/*
+				 * Hardware doesn't seem to report correct
+				 * slot number. If there's only one
+				 * outstanding command we can cope,
+				 * otherwise fail all active commands.
+				 */
+				if (ap->ap_active_cnt == 1)
+					err_slot = ffs(ap->ap_active) - 1;
+				else
+					goto failall;
+			}
+
 			ccb = &ap->ap_ccbs[err_slot];
 
 			/* Preserve received taskfile data from the RFIS. */
@@ -2326,7 +2347,7 @@ ahci_ata_put_xfer(struct ata_xfer *xa)
 	ahci_put_ccb(ccb);
 }
 
-int
+void
 ahci_ata_cmd(struct ata_xfer *xa)
 {
 	struct ahci_ccb			*ccb = (struct ahci_ccb *)xa;
@@ -2356,24 +2377,23 @@ ahci_ata_cmd(struct ata_xfer *xa)
 
 	xa->state = ATA_S_PENDING;
 
-	if (xa->flags & ATA_F_POLL) {
+	if (xa->flags & ATA_F_POLL)
 		ahci_poll(ccb, xa->timeout, ahci_ata_cmd_timeout);
-		return (ATA_COMPLETE);
+	else {
+		timeout_add_msec(&xa->stimeout, xa->timeout);
+
+		s = splbio();
+		ahci_start(ccb);
+		splx(s);
 	}
 
-	timeout_add_msec(&xa->stimeout, xa->timeout);
-
-	s = splbio();
-	ahci_start(ccb);
-	splx(s);
-	return (ATA_QUEUED);
+	return;
 
 failcmd:
 	s = splbio();
 	xa->state = ATA_S_ERROR;
-	xa->complete(xa);
+	ata_complete(xa);
 	splx(s);
-	return (ATA_ERROR);
 }
 
 void
@@ -2398,7 +2418,7 @@ ahci_ata_cmd_done(struct ahci_ccb *ccb)
 		    ccb->ccb_slot);
 #endif
 	if (xa->state != ATA_S_TIMEOUT)
-		xa->complete(xa);
+		ata_complete(xa);
 }
 
 void
@@ -2483,7 +2503,7 @@ ahci_ata_cmd_timeout(void *arg)
 
 	/* Complete the timed out ata_xfer I/O (may generate new I/O). */
 	DPRINTF(AHCI_D_TIMEOUT, "%s: run completion (2)\n", PORTNAME(ap));
-	xa->complete(xa);
+	ata_complete(xa);
 
 	DPRINTF(AHCI_D_TIMEOUT, "%s: splx\n", PORTNAME(ap));
 ret:

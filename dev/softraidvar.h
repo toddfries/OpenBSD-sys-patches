@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.81 2009/08/09 14:12:25 marco Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.89 2010/02/13 21:19:26 jsing Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -29,10 +29,16 @@ struct sr_uuid {
 
 #define SR_HOTSPARE_LEVEL	0xffffffff
 #define SR_HOTSPARE_VOLID	0xffffffff
+#define SR_KEYDISK_LEVEL	0xfffffffe
+#define SR_KEYDISK_VOLID	0xfffffffe
 
 #define SR_META_SIZE		64	/* save space at chunk beginning */
 #define SR_META_OFFSET		16	/* skip 8192 bytes at chunk beginning */
 #define SR_META_VERSION		3	/* bump when sr_metadata changes */
+
+#define SR_META_F_NATIVE	0	/* Native metadata format. */
+#define SR_META_F_INVALID	-1
+
 struct sr_metadata {
 	struct sr_meta_invariant {
 		/* do not change order of ssd_magic, ssd_version */
@@ -150,8 +156,9 @@ struct sr_meta_opt {
 struct sr_crypto_genkdf {
 	u_int32_t	len;
 	u_int32_t	type;
-#define SR_CRYPTOKDFT_INVALID	(0)
-#define SR_CRYPTOKDFT_PBKDF2	(1<<0)
+#define SR_CRYPTOKDFT_INVALID	0
+#define SR_CRYPTOKDFT_PBKDF2	1
+#define SR_CRYPTOKDFT_KEYDISK	2
 };
 
 /* this is a hint for KDF using PKCS#5.  Not interpreted by the kernel */
@@ -179,6 +186,16 @@ struct sr_crypto_kdfinfo {
 	}		_kdfhint;
 #define genkdf		_kdfhint.generic
 #define pbkdf2		_kdfhint.pbkdf2
+};
+
+#define SR_IOCTL_GET_KDFHINT		0x01	/* Get KDF hint. */
+#define SR_IOCTL_CHANGE_PASSPHRASE	0x02	/* Change passphase. */
+
+struct sr_crypto_kdfpair {
+	void		*kdfinfo1;
+	u_int32_t	kdfsize1;
+	void		*kdfinfo2;
+	u_int32_t	kdfsize2;
 };
 
 #ifdef _KERNEL
@@ -320,6 +337,7 @@ struct sr_raid6 {
 #define SR_CRYPTO_NOWU		16
 struct sr_crypto {
 	struct sr_meta_crypto	scr_meta;
+	struct sr_chunk		*key_disk;
 
 	struct pool		sr_uiopl;
 	struct pool		sr_iovpl;
@@ -342,7 +360,6 @@ struct sr_aoe {
 struct sr_metadata_list {
 	u_int8_t		sml_metadata[SR_META_SIZE * 512];
 	dev_t			sml_mm;
-	struct vnode		*sml_vn;
 	u_int32_t		sml_chunk_id;
 	int			sml_used;
 
@@ -410,6 +427,11 @@ struct sr_discipline {
 	u_int8_t		sd_scsibus;	/* scsibus discipline uses */
 	struct scsi_link	sd_link;	/* link to midlayer */
 
+	u_int32_t		sd_capabilities;
+#define SR_CAP_SYSTEM_DISK	0x00000001
+#define SR_CAP_AUTO_ASSEMBLE	0x00000002
+#define SR_CAP_REBUILD		0x00000004
+
 	union {
 	    struct sr_raid0	mdd_raid0;
 	    struct sr_raid1	mdd_raid1;
@@ -446,7 +468,6 @@ struct sr_discipline {
 
 	struct sr_workunit	*sd_wu;		/* all workunits */
 	u_int32_t		sd_max_wu;
-	int			sd_rebuild;	/* can we rebuild? */
 	int			sd_reb_active;	/* rebuild in progress */
 	int			sd_reb_abort;	/* abort rebuild */
 	int			sd_ready;	/* fully operational */
@@ -461,8 +482,14 @@ struct sr_discipline {
 	u_int64_t		sd_wu_collisions;
 
 	/* discipline functions */
+	int			(*sd_create)(struct sr_discipline *,
+				    struct bioc_createraid *, int, int64_t);
+	int			(*sd_assemble)(struct sr_discipline *,
+				    struct bioc_createraid *, int);
 	int			(*sd_alloc_resources)(struct sr_discipline *);
 	int			(*sd_free_resources)(struct sr_discipline *);
+	int			(*sd_ioctl_handler)(struct sr_discipline *,
+				    struct bioc_discipline *);
 	int			(*sd_start_discipline)(struct sr_discipline *);
 	void			(*sd_set_chunk_state)(struct sr_discipline *,
 				    int, int);
@@ -529,12 +556,23 @@ void			sr_wu_put(struct sr_workunit *);
 
 /* misc functions */
 int32_t			sr_validate_stripsize(u_int32_t);
+int			sr_meta_read(struct sr_discipline *);
+int			sr_meta_native_read(struct sr_discipline *, dev_t,
+			    struct sr_metadata *, void *);
+int			sr_meta_validate(struct sr_discipline *, dev_t,
+			    struct sr_metadata *, void *);
 void			sr_meta_save_callback(void *, void *);
+int			sr_meta_save(struct sr_discipline *, u_int32_t);
+void			sr_meta_getdevname(struct sr_softc *, dev_t, char *,
+			    int);
+void			sr_checksum(struct sr_softc *, void *, void *,
+			    u_int32_t);
 int			sr_validate_io(struct sr_workunit *, daddr64_t *,
 			    char *);
 int			sr_check_io_collision(struct sr_workunit *);
 void			sr_scsi_done(struct sr_discipline *,
 			    struct scsi_xfer *);
+int			sr_chunk_in_use(struct sr_softc *, dev_t);
 
 /* discipline functions */
 int			sr_raid_inquiry(struct sr_workunit *);
@@ -548,7 +586,8 @@ void			sr_raid_startwu(struct sr_workunit *);
 /* Discipline specific initialisation. */
 void			sr_raid0_discipline_init(struct sr_discipline *);
 void			sr_raid1_discipline_init(struct sr_discipline *);
-void			sr_raidp_discipline_init(struct sr_discipline *);
+void			sr_raidp_discipline_init(struct sr_discipline *,
+			    u_int8_t);
 void			sr_raid6_discipline_init(struct sr_discipline *);
 void			sr_crypto_discipline_init(struct sr_discipline *);
 void			sr_aoe_discipline_init(struct sr_discipline *);
@@ -564,6 +603,8 @@ void			sr_raid1_set_vol_state(struct sr_discipline *);
 int			sr_crypto_get_kdf(struct bioc_createraid *,
 			    struct sr_discipline *);
 int			sr_crypto_create_keys(struct sr_discipline *);
+struct sr_chunk *	sr_crypto_create_key_disk(struct sr_discipline *, dev_t);
+struct sr_chunk *	sr_crypto_read_key_disk(struct sr_discipline *, dev_t);
 
 #ifdef SR_DEBUG
 void			sr_dump_mem(u_int8_t *, int);

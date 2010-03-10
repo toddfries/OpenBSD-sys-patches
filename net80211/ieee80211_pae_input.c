@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_pae_input.c,v 1.15 2009/01/26 19:09:41 damien Exp $	*/
+/*	$OpenBSD: ieee80211_pae_input.c,v 1.17 2010/02/06 15:16:27 jcs Exp $	*/
 
 /*-
  * Copyright (c) 2007,2008 Damien Bergamini <damien.bergamini@free.fr>
@@ -600,6 +600,7 @@ ieee80211_recv_4way_msg3(struct ieee80211com *ic,
 			DPRINTF(("marking port %s valid\n",
 			    ether_sprintf(ni->ni_macaddr)));
 			ni->ni_port_valid = 1;
+			ieee80211_set_link_state(ic, LINK_STATE_UP);
 		}
 	}
  deauth:
@@ -812,6 +813,7 @@ ieee80211_recv_rsn_group_msg1(struct ieee80211com *ic,
 		k->k_flags |= IEEE80211_KEY_TX;
 	k->k_rsc[0] = LE_READ_6(key->rsc);
 	k->k_len = keylen;
+	memcpy(k->k_key, &gtk[8], k->k_len);
 	/* install the GTK */
 	if ((*ic->ic_set_key)(ic, ni, k) != 0) {
 		reason = IEEE80211_REASON_AUTH_LEAVE;
@@ -853,6 +855,7 @@ ieee80211_recv_rsn_group_msg1(struct ieee80211com *ic,
 			DPRINTF(("marking port %s valid\n",
 			    ether_sprintf(ni->ni_macaddr)));
 			ni->ni_port_valid = 1;
+			ieee80211_set_link_state(ic, LINK_STATE_UP);
 		}
 	}
 	/* update the last seen value of the key replay counter field */
@@ -947,6 +950,7 @@ ieee80211_recv_wpa_group_msg1(struct ieee80211com *ic,
 			DPRINTF(("marking port %s valid\n",
 			    ether_sprintf(ni->ni_macaddr)));
 			ni->ni_port_valid = 1;
+			ieee80211_set_link_state(ic, LINK_STATE_UP);
 		}
 	}
 	/* update the last seen value of the key replay counter field */

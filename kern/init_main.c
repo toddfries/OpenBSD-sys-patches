@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.162 2009/08/11 18:43:33 blambert Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.166 2010/01/12 04:06:26 deraadt Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -106,7 +106,7 @@ extern void nfs_init(void);
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-"Copyright (c) 1995-2009 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+"Copyright (c) 1995-2010 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -264,6 +264,9 @@ main(void *framep)
 	process0.ps_refcnt = 1;
 	p->p_p = &process0;
 
+	/* Set the default routing domain. */
+	process0.ps_rdomain = 0;
+
 	LIST_INSERT_HEAD(&allproc, p, p_list);
 	p->p_pgrp = &pgrp0;
 	LIST_INSERT_HEAD(PIDHASH(0), p, p_hash);
@@ -340,6 +343,9 @@ main(void *framep)
 	/* Initialize work queues */
 	workq_init();
 
+	/* Initialize the interface/address trees */
+	ifinit();
+
 	/* Configure the devices */
 	cpu_configure();
 
@@ -388,7 +394,6 @@ main(void *framep)
 	 * until everything is ready.
 	 */
 	s = splnet();
-	ifinit();
 	domaininit();
 	if_attachdomain();
 	splx(s);

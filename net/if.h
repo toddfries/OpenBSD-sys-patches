@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.110 2009/09/17 13:27:24 claudio Exp $	*/
+/*	$OpenBSD: if.h,v 1.113 2010/01/13 02:26:49 henning Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -36,6 +36,7 @@
 #define _NET_IF_H_
 
 #include <sys/queue.h>
+#include <sys/tree.h>
 
 /*
  * Always include ALTQ glue here -- we use the ALTQ interface queue
@@ -451,6 +452,14 @@ struct ifaddr {
 };
 #define	IFA_ROUTE	RTF_UP		/* route installed */
 
+struct ifaddr_item {
+	RB_ENTRY(ifaddr_item)	 ifai_entry;
+	struct sockaddr		*ifai_addr;
+	struct ifaddr		*ifai_ifa;
+	struct ifaddr_item	*ifai_next;
+	u_int			 ifai_rdomain;
+};
+
 /*
  * Message format for use in obtaining information about interfaces
  * from sysctl and the routing socket.
@@ -462,7 +471,8 @@ struct if_msghdr {
 	u_short ifm_hdrlen;	/* sizeof(if_msghdr) to skip over the header */
 	u_short	ifm_index;	/* index for associated ifp */
 	u_short	ifm_tableid;	/* routing table id */
-	u_short ifm_pad;
+	u_char	ifm_pad1;
+	u_char	ifm_pad2;
 	int	ifm_addrs;	/* like rtm_addrs */
 	int	ifm_flags;	/* value of if_flags */
 	int	ifm_xflags;
@@ -480,7 +490,8 @@ struct ifa_msghdr {
 	u_short ifam_hdrlen;	/* sizeof(ifa_msghdr) to skip over the header */
 	u_short	ifam_index;	/* index for associated ifp */
 	u_short	ifam_tableid;	/* routing table id */
-	u_short ifam_pad;
+	u_char	ifam_pad1;
+	u_char	ifam_pad2;
 	int	ifam_addrs;	/* like rtm_addrs */
 	int	ifam_flags;	/* value of ifa_flags */
 	int	ifam_metric;	/* value of ifa_metric */
@@ -824,5 +835,7 @@ void	loopattach(int);
 int	looutput(struct ifnet *,
 	    struct mbuf *, struct sockaddr *, struct rtentry *);
 void	lortrequest(int, struct rtentry *, struct rt_addrinfo *);
+void	ifa_add(struct ifnet *, struct ifaddr *);
+void	ifa_del(struct ifnet *, struct ifaddr *);
 #endif /* _KERNEL */
 #endif /* _NET_IF_H_ */

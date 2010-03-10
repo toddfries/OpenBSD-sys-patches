@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_carp.c,v 1.171 2009/06/17 20:17:19 mpf Exp $	*/
+/*	$OpenBSD: ip_carp.c,v 1.174 2010/01/13 01:26:28 henning Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -740,10 +740,7 @@ carp_proto_input_c(struct mbuf *m, struct carp_header *ch, int ismulti,
 	}
 
 	sc_tv.tv_sec = sc->sc_advbase;
-	if (carp_group_demote_count(sc) && vhe->advskew <  240)
-		sc_tv.tv_usec = 240 * 1000000 / 256;
-	else
-		sc_tv.tv_usec = vhe->advskew * 1000000 / 256;
+	sc_tv.tv_usec = vhe->advskew * 1000000 / 256;
 	ch_tv.tv_sec = ch->carp_advbase;
 	ch_tv.tv_usec = ch->carp_advskew * 1000000 / 256;
 
@@ -858,10 +855,9 @@ carp_clone_create(ifc, unit)
 	struct carp_softc *sc;
 	struct ifnet *ifp;
 
-	sc = malloc(sizeof(*sc), M_DEVBUF, M_NOWAIT);
+	sc = malloc(sizeof(*sc), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (!sc)
 		return (ENOMEM);
-	bzero(sc, sizeof(*sc));
 
 	LIST_INIT(&sc->carp_vhosts);
 	sc->sc_vhe_count = 0;
@@ -1112,10 +1108,7 @@ carp_send_ad(void *v)
 		advskew = 255;
 	} else {
 		advbase = sc->sc_advbase;
-		if (!carp_group_demote_count(sc) || vhe->advskew > 240)
-			advskew = vhe->advskew;
-		else
-			advskew = 240;
+		advskew = vhe->advskew;
 		tv.tv_sec = advbase;
 		tv.tv_usec = advskew * 1000000 / 256;
 	}
@@ -2008,8 +2001,8 @@ carp_set_addr(struct carp_softc *sc, struct sockaddr_in *sin)
 		    ia->ia_ifp->if_type != IFT_CARP &&
 		    (ia->ia_ifp->if_flags & IFF_MULTICAST) &&
 		    ia->ia_ifp->if_rdomain == sc->sc_if.if_rdomain &&
-		    (sin->sin_addr.s_addr & ia->ia_subnetmask) ==
-		    ia->ia_subnet) {
+		    (sin->sin_addr.s_addr & ia->ia_netmask) ==
+		    ia->ia_net) {
 			if (!ia_if)
 				ia_if = ia;
 		}

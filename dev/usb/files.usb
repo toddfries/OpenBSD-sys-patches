@@ -1,4 +1,4 @@
-#	$OpenBSD: files.usb,v 1.84 2009/10/10 08:59:18 maja Exp $
+#	$OpenBSD: files.usb,v 1.89 2010/03/01 23:35:56 mk Exp $
 #	$NetBSD: files.usb,v 1.16 2000/02/14 20:29:54 augustss Exp $
 #
 # Config file and device description for machine-independent USB code.
@@ -95,6 +95,10 @@ device	uts: wsmousedev
 attach	uts at uhub
 file	dev/usb/uts.c			uts
 
+device	uhts: wsmousedev
+attach	uhts at uhidbus
+file	dev/usb/uhts.c			uhts
+
 # Cypress microcontroller based serial adpaters
 device	ucycom: hid, ucombus
 attach	ucycom at uhidbus
@@ -145,6 +149,20 @@ device	udsbr: radiobus
 attach	udsbr at uhub
 file	dev/usb/udsbr.c			udsbr
 
+# TEMPerHUM HID
+device	uthum: hid
+attach	uthum at uhidbus
+file	dev/usb/uthum.c			uthum
+
+# Strawberry Linux USBRH
+device	utrh: hid
+attach	utrh at uhidbus
+file	dev/usb/utrh.c			utrh
+
+# Maywa-denki/Kayac YUREX
+device	uyurex: hid
+attach	uyurex at uhidbus
+file	dev/usb/uyurex.c		uyurex
 
 # Ethernet adapters
 # ADMtek AN986 Pegasus
@@ -172,6 +190,11 @@ file	dev/usb/if_kue.c		kue
 device	cdce: ether, ifnet, ifmedia
 attach	cdce at uhub
 file	dev/usb/if_cdce.c		cdce
+
+# RNDIS
+device urndis: ether, ifnet, ifmedia
+attach urndis at uhub
+file	dev/usb/if_urndis.c		urndis
 
 # Moschip MCS7x30 Ethernet
 device	mos: ether, ifnet, mii, ifmedia
@@ -337,7 +360,6 @@ file	dev/usb/usbf_subr.c		usbf
 device	cdcef {}
 attach	cdcef at usbf
 file	dev/usb/if_cdcef.c		cdcef
-
 
 # Atheros AR5005UG/AR5005UX
 device	uath: ether, ifnet, ifmedia, wlan, firmload

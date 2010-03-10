@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.199 2009/11/20 09:02:21 guenther Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.204 2010/01/13 12:09:36 claudio Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -542,7 +542,7 @@ reroute:
 	}
 
 	/*
-	 * Look for broadcast address and and verify user is allowed to send
+	 * Look for broadcast address and verify user is allowed to send
 	 * such a packet; if the packet is going in an IPsec tunnel, skip
 	 * this check.
 	 */
@@ -933,8 +933,12 @@ sendorfree:
 	/*
 	 * If there is no room for all the fragments, don't queue
 	 * any of them.
+	 *
+	 * Queue them anyway on virtual interfaces
+	 * (vlan, etc) with queue length 1 and hope the
+	 * underlying interface can cope.
 	 */
-	if (ifp != NULL) {
+	if (ifp != NULL && ifp->if_snd.ifq_maxlen != 1) {
 		s = splnet();
 		if (ifp->if_snd.ifq_maxlen - ifp->if_snd.ifq_len < fragments &&
 		    error == 0) {
@@ -1061,8 +1065,8 @@ ip_ctloutput(op, so, level, optname, mp)
 	struct inpcb *inp = sotoinpcb(so);
 	struct mbuf *m = *mp;
 	int optval = 0;
-#ifdef IPSEC
 	struct proc *p = curproc; /* XXX */
+#ifdef IPSEC
 	struct ipsec_ref *ipr;
 	u_int16_t opt16val;
 #endif
@@ -1423,6 +1427,12 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 			}
 			rtid = *mtod(m, u_int *);
+			if (p->p_p->ps_rdomain != 0 &&
+			    p->p_p->ps_rdomain != rtid &&
+			    (error = suser(p, 0)) != 0) {
+				error = EACCES;
+				break;
+			}
 			/* table must exist and be a domain */
 			if (!rtable_exists(rtid) || rtid != rtable_l2(rtid)) {
 				error = EINVAL;
@@ -1588,9 +1598,11 @@ ip_ctloutput(op, so, level, optname, mp)
 			case IP_IPSEC_LOCAL_AUTH:
 				if (inp->inp_ipo != NULL)
 					ipr = inp->inp_ipo->ipo_local_auth;
+				opt16val = IPSP_AUTH_NONE;
 				break;
 			case IP_IPSEC_REMOTE_AUTH:
 				ipr = inp->inp_ipsec_remoteauth;
+				opt16val = IPSP_AUTH_NONE;
 				break;
 			}
 			if (ipr == NULL)

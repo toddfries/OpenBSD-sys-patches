@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.139 2009/11/03 17:31:30 jakemsr Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.141 2010/02/11 21:33:39 jakemsr Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -166,6 +166,9 @@ azalia_codec_init_vtbl(codec_t *this)
 		break;
 	case 0x111d7675:
 		this->name = "IDT 92HD73C1";	/* aka 92HDW74C1 */
+		if ((this->subid & 0x0000ffff) == 0x00001028) {	/* DELL */
+			this->qrks |= AZ_QRK_GPIO_UNMUTE_0;
+		}
 		break;
 	case 0x111d7676:
 		this->name = "IDT 92HD73E1";	/* aka 92HDW74E1 */
@@ -175,10 +178,7 @@ azalia_codec_init_vtbl(codec_t *this)
 		break;
 	case 0x111d76b2:
 		this->name = "IDT 92HD71B7";
-		if (this->subid == 0x02631028 ||	/* DELL_E5500 */
-                   this->subid == 0x02501028 ||	/* DELL_M4400 */
-		    this->subid == 0x02331028 ||	/* DELL_E6400 */
-		    this->subid == 0x024f1028) {	/* DELL_E6500 */
+		if ((this->subid & 0x0000ffff) == 0x00001028) {	/* DELL */
 			this->qrks |= AZ_QRK_GPIO_UNMUTE_0;
 		}
 		break;

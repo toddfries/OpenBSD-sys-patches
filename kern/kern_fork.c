@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.104 2009/07/09 22:29:56 thib Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.108 2010/01/14 23:12:11 schwarze Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -141,10 +141,9 @@ sys_rfork(struct proc *p, void *v, register_t *retval)
 
 	if (rforkflags & RFMEM)
 		flags |= FORK_SHAREVM;
-#ifdef RTHREADS
+
 	if (rforkflags & RFTHREAD)
-		flags |= FORK_THREAD | FORK_SIGHAND;
-#endif
+		flags |= FORK_THREAD | FORK_SIGHAND | FORK_NOZOMBIE;
 
 	return (fork1(p, SIGCHLD, flags, NULL, 0, NULL, NULL, retval, NULL));
 }
@@ -153,15 +152,19 @@ sys_rfork(struct proc *p, void *v, register_t *retval)
  * Allocate and initialize a new process.
  */
 void
-process_new(struct proc *newproc, struct proc *parent)
+process_new(struct proc *newproc, struct proc *parentproc)
 {
-	struct process *pr;
+	struct process *pr, *parent;
 
 	pr = pool_get(&process_pool, PR_WAITOK);
 	pr->ps_mainproc = newproc;
 	TAILQ_INIT(&pr->ps_threads);
 	TAILQ_INSERT_TAIL(&pr->ps_threads, newproc, p_thr_link);
 	pr->ps_refcnt = 1;
+
+	parent = parentproc->p_p;
+	pr->ps_rdomain = parent->ps_rdomain;
+
 	newproc->p_p = pr;
 }
 
@@ -185,6 +188,20 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 #if NSYSTRACE > 0
 	void *newstrp = NULL;
 #endif
+
+	/* sanity check some flag combinations */
+	if (flags & FORK_THREAD)
+	{
+#ifdef RTHREADS
+		if ((flags & (FORK_SIGHAND | FORK_NOZOMBIE)) !=
+		    (FORK_SIGHAND | FORK_NOZOMBIE))
+			return (EINVAL);
+#else
+		return (ENOTSUP);
+#endif
+	}
+	if (flags & FORK_SIGHAND && (flags & FORK_SHAREVM) == 0)
+		return (EINVAL);
 
 	/*
 	 * Although process entries are dynamically created, we still keep
@@ -265,7 +282,6 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	 * Increase reference counts on shared objects.
 	 * The p_stats and p_sigacts substructs are set in vm_fork.
 	 */
-	p2->p_emul = p1->p_emul;
 	if (p1->p_flag & P_PROFIL)
 		startprofclock(p2);
 	atomic_setbits_int(&p2->p_flag, p1->p_flag & (P_SUGID | P_SUGIDEXEC));
@@ -445,7 +461,7 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	KNOTE(&p1->p_klist, NOTE_FORK | p2->p_pid);
 
 	/*
-	 * Update stats now that we know the fork was successfull.
+	 * Update stats now that we know the fork was successful.
 	 */
 	uvmexp.forks++;
 	if (flags & FORK_PPWAIT)

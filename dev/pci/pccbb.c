@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccbb.c,v 1.68 2009/08/28 15:54:52 kettenis Exp $	*/
+/*	$OpenBSD: pccbb.c,v 1.70 2010/01/13 09:10:33 jsg Exp $	*/
 /*	$NetBSD: pccbb.c,v 1.96 2004/03/28 09:49:31 nakayama Exp $	*/
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by HAYAKAWA Koichi.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -2602,30 +2597,19 @@ pccbb_rbus_cb_space_alloc(cardbus_chipset_tag_t ct, rbus_tag_t rb,
 	    ("pccbb_rbus_cb_space_alloc: adr %lx, size %lx, mask %lx, align %lx\n",
 	    addr, size, mask, align));
 
-	if (align == 0) {
-		align = size;
+	align = max(align, 4);
+	mask = max(mask, (4 - 1));
+	if (rb->rb_bt == sc->sc_memt) {
+		align = max(align, 0x1000);
+		mask = max(mask, (0x1000 - 1));
 	}
 
-	if (rb->rb_bt == sc->sc_memt) {
-		if (align < 16) {
-			return 1;
-		}
-	} else if (rb->rb_bt == sc->sc_iot) {
-		if (align < 4) {
-			return 1;
-		}
+	if (rb->rb_bt == sc->sc_iot) {
 		/* XXX: hack for avoiding ISA image */
 		if (mask < 0x0100) {
 			mask = 0x3ff;
 			addr = 0x300;
 		}
-
-	} else {
-		DPRINTF(
-		    ("pccbb_rbus_cb_space_alloc: Bus space tag %x is NOT used.\n",
-		    rb->rb_bt));
-		return 1;
-		/* XXX: panic here? */
 	}
 
 	if (rbus_space_alloc(rb, addr, size, mask, align, flags, addrp, bshp)) {

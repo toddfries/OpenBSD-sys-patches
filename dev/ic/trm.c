@@ -1,4 +1,4 @@
-/*	$OpenBSD: trm.c,v 1.14 2009/09/24 19:47:09 miod Exp $
+/*	$OpenBSD: trm.c,v 1.17 2010/02/27 00:39:40 krw Exp $
  * ------------------------------------------------------------
  *   O.S       : OpenBSD
  *   File Name : trm.c
@@ -392,13 +392,6 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 		return COMPLETE;
 	}
 
-	if (xferflags & ITSDONE) {
-#ifdef TRM_DEBUG0
-		printf("%s: Is it done?\n", sc->sc_device.dv_xname);
-#endif
-		xs->flags &= ~ITSDONE;
-	}
-
 	xs->error  = XS_NOERROR;
 	xs->status = SCSI_OK;
 	xs->resid  = 0;
@@ -483,7 +476,6 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 	if (xs->timeout == 0)
 		trm_timeout(pSRB);
 
-	scsi_done(xs);
 	splx(intflag);
 	return COMPLETE;
 }
@@ -2090,8 +2082,6 @@ trm_FinishSRB(struct trm_softc *sc, struct trm_scsi_req_q *pSRB)
 	}
 
 	trm_ReleaseSRB(sc, pSRB);
-
-	xs->flags |= ITSDONE;
 
 	/*
 	 * Notify cmd done

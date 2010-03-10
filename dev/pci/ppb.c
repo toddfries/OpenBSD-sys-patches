@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppb.c,v 1.36 2009/11/19 20:46:16 kettenis Exp $	*/
+/*	$OpenBSD: ppb.c,v 1.40 2009/12/27 20:03:52 kettenis Exp $	*/
 /*	$NetBSD: ppb.c,v 1.16 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -43,6 +43,22 @@
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/ppbreg.h>
 
+#ifndef PCI_IO_START
+#define PCI_IO_START	0
+#endif
+
+#ifndef PCI_IO_END
+#define PCI_IO_END	0xffffffff
+#endif
+
+#ifndef PCI_MEM_START
+#define PCI_MEM_START	0
+#endif
+
+#ifndef PCI_MEM_END
+#define PCI_MEM_END	0xffffffff
+#endif
+
 struct ppb_softc {
 	struct device sc_dev;		/* generic device glue */
 	pci_chipset_tag_t sc_pc;	/* our PCI chipset... */
@@ -59,14 +75,21 @@ struct ppb_softc {
 	bus_addr_t sc_iobase, sc_iolimit;
 	bus_addr_t sc_membase, sc_memlimit;
 	bus_addr_t sc_pmembase, sc_pmemlimit;
+
+	pcireg_t sc_csr;
+	pcireg_t sc_bhlcr;
+	pcireg_t sc_bir;
+	pcireg_t sc_bcr;
+	pcireg_t sc_int;
 };
 
 int	ppbmatch(struct device *, void *, void *);
 void	ppbattach(struct device *, struct device *, void *);
 int	ppbdetach(struct device *self, int flags);
+int	ppbactivate(struct device *self, int act);
 
 struct cfattach ppb_ca = {
-	sizeof(struct ppb_softc), ppbmatch, ppbattach, ppbdetach
+	sizeof(struct ppb_softc), ppbmatch, ppbattach, ppbdetach, ppbactivate
 };
 
 struct cfdriver ppb_cd = {
@@ -164,7 +187,10 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n");
 
-	ppb_alloc_resources(sc, pa);
+	if (PCI_VENDOR(pa->pa_id) != PCI_VENDOR_INTEL ||
+	    (PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_INTEL_82801BA_HPB &&
+	    PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_INTEL_82801BAM_HPB))
+		ppb_alloc_resources(sc, pa);
 
 	for (pin = PCI_INTERRUPT_PIN_A; pin <= PCI_INTERRUPT_PIN_D; pin++) {
 		pa->pa_intrpin = pa->pa_rawintrpin = pin;
@@ -242,7 +268,8 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 	 * in general.
 	 */
 	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_INTEL &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801BAM_HPB) {
+	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801BA_HPB ||
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801BAM_HPB)) {
 		if (sc->sc_ioex == NULL)
 			sc->sc_ioex = pa->pa_ioex;
 		if (sc->sc_memex == NULL)
@@ -311,6 +338,71 @@ ppbdetach(struct device *self, int flags)
 	return (rv);
 }
 
+int
+ppbactivate(struct device *self, int act)
+{
+	struct ppb_softc *sc = (void *)self;
+	pci_chipset_tag_t pc = sc->sc_pc;
+	pcitag_t tag = sc->sc_tag;
+	pcireg_t blr;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
+
+		/* Save registers that may get lost. */
+		sc->sc_csr = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
+		sc->sc_bhlcr = pci_conf_read(pc, tag, PCI_BHLC_REG);
+		sc->sc_bir = pci_conf_read(pc, tag, PPB_REG_BUSINFO);
+		sc->sc_bcr = pci_conf_read(pc, tag, PPB_REG_BRIDGECONTROL);
+		sc->sc_int = pci_conf_read(pc, tag, PCI_INTERRUPT_REG);
+		break;
+	case DVACT_RESUME:
+		/* Restore the registers saved above. */
+		pci_conf_write(pc, tag, PCI_BHLC_REG, sc->sc_bhlcr);
+		pci_conf_write(pc, tag, PPB_REG_BUSINFO, sc->sc_bir);
+		pci_conf_write(pc, tag, PPB_REG_BRIDGECONTROL, sc->sc_bcr);
+		pci_conf_write(pc, tag, PCI_INTERRUPT_REG, sc->sc_int);
+
+		/* Restore I/O window. */
+		blr = pci_conf_read(pc, tag, PPB_REG_IOSTATUS);
+		blr &= 0xffff0000;
+		blr |= sc->sc_iolimit & PPB_IO_MASK;
+		blr |= (sc->sc_iobase >> PPB_IO_SHIFT);
+		pci_conf_write(pc, tag, PPB_REG_IOSTATUS, blr);
+		blr = (sc->sc_iobase & 0xffff0000) >> 16;
+		blr |= sc->sc_iolimit & 0xffff0000;
+		pci_conf_write(pc, tag, PPB_REG_IO_HI, blr);
+
+		/* Restore memory mapped I/O window. */
+		blr = sc->sc_memlimit & PPB_MEM_MASK;
+		blr |= (sc->sc_membase >> PPB_MEM_SHIFT);
+		pci_conf_write(pc, tag, PPB_REG_MEM, blr);
+
+		/* Restore prefetchable MMI/O window. */
+		blr = sc->sc_pmemlimit & PPB_MEM_MASK;
+		blr |= (sc->sc_pmembase >> PPB_MEM_SHIFT);
+		pci_conf_write(pc, tag, PPB_REG_PREFMEM, blr);
+#ifdef __LP64__
+		pci_conf_write(pc, tag, PPB_REG_PREFBASE_HI32,
+		    sc->sc_pmembase >> 32);
+		pci_conf_write(pc, tag, PPB_REG_PREFLIM_HI32,
+		    sc->sc_pmemlimit >> 32);
+#endif
+
+		/*
+		 * Restore command register last to avoid exposing
+		 * uninitialised windows.
+		 */
+		pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, sc->sc_csr);
+
+		rv = config_activate_children(self, act);
+		break;
+	}
+	return (rv);
+}
+
 void
 ppb_alloc_resources(struct ppb_softc *sc, struct pci_attach_args *pa)
 {
@@ -322,6 +414,7 @@ ppb_alloc_resources(struct ppb_softc *sc, struct pci_attach_args *pa)
 	int reg, reg_start, reg_end, reg_rom;
 	int io_count = 0;
 	int mem_count = 0;
+	bus_addr_t start, end;
 	u_long base, size;
 
 	if (pa->pa_memex == NULL)
@@ -408,9 +501,11 @@ ppb_alloc_resources(struct ppb_softc *sc, struct pci_attach_args *pa)
 		sc->sc_iobase |= (blr & 0x0000ffff) << 16;
 		sc->sc_iolimit |= (blr & 0xffff0000);
 		if (sc->sc_iolimit < sc->sc_iobase || sc->sc_iobase == 0) {
+			start = max(PCI_IO_START, pa->pa_ioex->ex_start);
+			end = min(PCI_IO_END, pa->pa_ioex->ex_end);
 			for (size = 0x2000; size >= PPB_IO_MIN; size >>= 1)
-				if (extent_alloc(pa->pa_ioex, size, size,
-				    0, 0, 0, &base) == 0)
+				if (extent_alloc_subregion(pa->pa_ioex, start,
+				    end, size, size, 0, 0, 0, &base) == 0)
 					break;
 			if (size >= PPB_IO_MIN) {
 				sc->sc_iobase = base;
@@ -438,9 +533,11 @@ ppb_alloc_resources(struct ppb_softc *sc, struct pci_attach_args *pa)
 		sc->sc_membase = (blr << PPB_MEM_SHIFT) & PPB_MEM_MASK;
 		sc->sc_memlimit = (blr & PPB_MEM_MASK) | 0x000fffff;
 		if (sc->sc_memlimit < sc->sc_membase || sc->sc_membase == 0) {
+			start = max(PCI_MEM_START, pa->pa_memex->ex_start);
+			end = min(PCI_MEM_END, pa->pa_memex->ex_end);
 			for (size = 0x2000000; size >= PPB_MEM_MIN; size >>= 1)
-				if (extent_alloc(pa->pa_memex, size, size,
-				    0, 0, 0, &base) == 0)
+				if (extent_alloc_subregion(pa->pa_memex, start,
+				    end, size, size, 0, 0, 0, &base) == 0)
 					break;
 			if (size >= PPB_MEM_MIN) {
 				sc->sc_membase = base;

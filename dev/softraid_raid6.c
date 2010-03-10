@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid6.c,v 1.7 2009/11/13 23:34:24 jordan Exp $ */
+/* $OpenBSD: softraid_raid6.c,v 1.15 2010/02/09 01:18:05 jordan Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -49,6 +49,10 @@ uint8_t	gf_pow[768];
 int	gf_log[256];
 
 /* RAID 6 functions. */
+int	sr_raid6_create(struct sr_discipline *, struct bioc_createraid *,
+	    int, int64_t);
+int	sr_raid6_assemble(struct sr_discipline *, struct bioc_createraid *,
+	    int);
 int	sr_raid6_alloc_resources(struct sr_discipline *);
 int	sr_raid6_free_resources(struct sr_discipline *);
 int	sr_raid6_rw(struct sr_workunit *);
@@ -72,6 +76,7 @@ void	sr_put_block(struct sr_discipline *, void *);
 void	gf_init(void);
 uint8_t gf_inv(uint8_t);
 int	gf_premul(uint8_t);
+uint8_t gf_mul(uint8_t, uint8_t);
 
 #define SR_NOFAIL		0x00
 #define SR_FAILX		(1L << 0)
@@ -124,15 +129,18 @@ struct sr_raid6_opaque {
 void
 sr_raid6_discipline_init(struct sr_discipline *sd)
 {
+
 	/* Initialize GF256 tables */
 	gf_init();
 
 	/* fill out discipline members. */
-	sd->sd_max_ccb_per_wu = max(6, 2 * sd->sd_meta->ssdi.ssd_chunk_no); /* only if stripsize <= MAXPHYS */
+	sd->sd_type = SR_MD_RAID6;
+	sd->sd_capabilities = SR_CAP_SYSTEM_DISK | SR_CAP_AUTO_ASSEMBLE;
 	sd->sd_max_wu = SR_RAID6_NOWU;
-	sd->sd_rebuild = 0;
 
 	/* setup discipline pointers. */
+	sd->sd_create = sr_raid6_create;
+	sd->sd_assemble = sr_raid6_assemble;
 	sd->sd_alloc_resources = sr_raid6_alloc_resources;
 	sd->sd_free_resources = sr_raid6_free_resources;
 	sd->sd_start_discipline = NULL;
@@ -146,6 +154,42 @@ sr_raid6_discipline_init(struct sr_discipline *sd)
 	sd->sd_set_chunk_state = sr_raid6_set_chunk_state;
 	sd->sd_set_vol_state = sr_raid6_set_vol_state;
 	sd->sd_openings = sr_raid6_openings;
+}
+
+int
+sr_raid6_create(struct sr_discipline *sd, struct bioc_createraid *bc,
+    int no_chunk, int64_t coerced_size)
+{
+
+	if (no_chunk < 4)
+		return EINVAL;
+
+	strlcpy(sd->sd_name, "RAID 6", sizeof(sd->sd_name));
+
+	/*
+	 * XXX add variable strip size later even though MAXPHYS is really
+	 * the clever value, users like * to tinker with that type of stuff.
+	 */
+        sd->sd_meta->ssdi.ssd_strip_size = MAXPHYS;
+        sd->sd_meta->ssdi.ssd_size = (coerced_size &
+	    ~((sd->sd_meta->ssdi.ssd_strip_size >> DEV_BSHIFT) - 1)) *
+	    (no_chunk - 2);
+
+	/* only if stripsize <= MAXPHYS */
+	sd->sd_max_ccb_per_wu = max(6, 2 * no_chunk);
+
+	return 0;
+}
+
+int
+sr_raid6_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
+    int no_chunk)
+{
+
+	/* only if stripsize <= MAXPHYS */
+	sd->sd_max_ccb_per_wu = max(6, 2 * sd->sd_meta->ssdi.ssd_chunk_no);
+
+	return 0;
 }
 
 int
@@ -414,10 +458,10 @@ sr_raid6_rw(struct sr_workunit *wu)
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_chunk		*scp;
-	int			s, fail, i, rwmode;
+	int			s, fail, i, rwmode, gxinv, pxinv;
 	daddr64_t		blk, lbaoffs, strip_no, chunk, qchunk, pchunk, fchunk;
 	daddr64_t		strip_size, no_chunk, lba, chunk_offs, phys_offs;
-	daddr64_t		strip_bits, length, strip_offs, datalen;
+	daddr64_t		strip_bits, length, strip_offs, datalen, row_size;
 	void		        *pbuf, *data, *qbuf;
 
 	/* blk and scsi error will be handled by sr_validate_io */
@@ -427,6 +471,7 @@ sr_raid6_rw(struct sr_workunit *wu)
 	strip_size = sd->sd_meta->ssdi.ssd_strip_size;
 	strip_bits = sd->mds.mdd_raid6.sr6_strip_bits;
 	no_chunk = sd->sd_meta->ssdi.ssd_chunk_no - 2;
+	row_size = (no_chunk << strip_bits) >> DEV_BSHIFT;
 
 	data = xs->data;
 	datalen = xs->datalen;
@@ -468,8 +513,8 @@ sr_raid6_rw(struct sr_workunit *wu)
 	
 		/* XXX big hammer.. exclude I/O from entire stripe */
 		if (wu->swu_blk_start == 0)
-			wu->swu_blk_start = chunk_offs >> DEV_BSHIFT;
-		wu->swu_blk_end = ((chunk_offs + (no_chunk << strip_bits)) >> DEV_BSHIFT) - 1;
+			wu->swu_blk_start = (strip_no / no_chunk) * row_size;
+		wu->swu_blk_end = (strip_no / no_chunk) * row_size + (row_size - 1);
 
 		fail = 0;
 		fchunk = -1;
@@ -506,53 +551,50 @@ sr_raid6_rw(struct sr_workunit *wu)
 				printf("Disk %llx offline, "
 				    "regenerating Dx+P\n", chunk);
 
-				qbuf = sr_get_block(sd, length);
-				if (qbuf == NULL)
-					goto bad;
+				gxinv = gf_inv(gf_pow[chunk]);
 
-				/* Calculate: Dx*gx = Q^(Dz*gz)
-				 *   Q:  sr_raid6_xorp(data, --, length);
-				 *   Dz: sr_raid6_xorq(data, --, length, gf_pow[i]);
-				 */
+				/* Calculate: Dx = (Q^Dz*gz)*inv(gx) */
 				memset(data, 0, length);
+				if (sr_raid6_addio(wu, qchunk, lba, length, NULL,
+				    SCSI_DATA_IN, SR_CCBF_FREEBUF, NULL, data,
+				    gxinv))
+					goto bad;
+			
+				/* Read Dz * gz * inv(gx) */
 				for (i = 0; i < no_chunk+2; i++) {
-					if  (i == qchunk) {
-						/* Read Q */
-						if (sr_raid6_addio(wu, i, lba, 
-						    length, NULL, SCSI_DATA_IN, 
-						    SR_CCBF_FREEBUF, qbuf, 
-						    NULL, 0))
-						    	goto bad;
-					} else if (i != chunk && i != pchunk) {
-						/* Read Dz * gz */
-						if (sr_raid6_addio(wu, i, lba, 
-						   length, NULL, SCSI_DATA_IN,
-						   SR_CCBF_FREEBUF, NULL,
-						   qbuf, gf_pow[i]))
-						   	goto bad;
-					}
+					if  (i == qchunk || i == pchunk || i == chunk) 
+						continue;
+
+					if (sr_raid6_addio(wu, i, lba, 
+					   length, NULL, SCSI_DATA_IN,
+					   SR_CCBF_FREEBUF, NULL,
+					   data, gf_mul(gf_pow[i], gxinv)))
+					   	goto bad;
 				}
 
-				/* run fake wu when read i/o is complete */
-				if (wu_w == NULL && 
-				    (wu_w = sr_wu_get(sd, 0)) == NULL)
-					goto bad;
-
-				wu_w->swu_flags |= SR_WUF_FAIL;
-				if (sr_raid6_addio(wu_w, 0, 0, length, qbuf, 0,
-				    SR_CCBF_FREEBUF, NULL, data,
-				    gf_inv(gf_pow[chunk])))
-					goto bad;
+				/* data will contain correct value on completion */
 			} else if (fail & SR_FAILY) {
 				/* Dx, Dy failed */
 				printf("Disk %llx & %llx offline, "
 				    "regenerating Dx+Dy\n", chunk, fchunk);
-				qbuf = sr_get_block(sd, length);
-				if (qbuf == NULL)
-					goto bad;
-				pbuf = sr_get_block(sd, length);
-				if (pbuf == NULL)
-					goto bad;
+
+				gxinv = gf_inv(gf_pow[chunk] ^ gf_pow[fchunk]);
+				pxinv = gf_mul(gf_pow[fchunk], gxinv);
+
+				/* read Q * inv(gx + gy) */
+				memset(data, 0, length);
+				if (sr_raid6_addio(wu, qchunk, lba, 
+				    length,  NULL, SCSI_DATA_IN,
+				    SR_CCBF_FREEBUF, NULL,
+				    data, gxinv))
+				    	goto bad;
+
+				/* read P * gy * inv(gx + gy) */
+				if (sr_raid6_addio(wu, pchunk, lba,
+				    length,  NULL, SCSI_DATA_IN,
+				    SR_CCBF_FREEBUF, NULL,
+				    data, pxinv))
+				    	goto bad;
 
 				/* Calculate: Dx*gx^Dy*gy = Q^(Dz*gz) ; Dx^Dy = P^Dz
 				 *   Q:  sr_raid6_xorp(qbuf, --, length);
@@ -560,46 +602,18 @@ sr_raid6_rw(struct sr_workunit *wu)
 				 *   Dz: sr_raid6_xorp(pbuf, --, length);
 				 *	 sr_raid6_xorq(qbuf, --, length, gf_pow[i]);
 				 */
-				memset(data, 0, length);
 				for (i = 0; i < no_chunk+2; i++) {
-					if (i == qchunk) {
-						/* read Q */
-						if (sr_raid6_addio(wu, i, lba, 
-						    length,  NULL, SCSI_DATA_IN,
-						    SR_CCBF_FREEBUF, qbuf, 
-						    NULL, 0))
-						    	goto bad;
-					} else if (i == pchunk) {
-						/* read P */
-						if (sr_raid6_addio(wu, i, lba,
-						    length,  NULL, SCSI_DATA_IN,
-						    SR_CCBF_FREEBUF, pbuf, 
-						    NULL, 0))
-						    	goto bad;
-					} else if (i != chunk) {
-						/* read Dz * gz */
-						if (sr_raid6_addio(wu, i, lba,
-						    length, NULL, SCSI_DATA_IN,
-						    SR_CCBF_FREEBUF, pbuf,
-						    qbuf, gf_pow[i]))
-						    	goto bad;
-					}
+					if (i == qchunk || i == pchunk ||
+					    i == chunk || i == fchunk)
+						continue;
+
+					/* read Dz * (gz + gy) * inv(gx + gy) */
+					if (sr_raid6_addio(wu, i, lba,
+					    length, NULL, SCSI_DATA_IN,
+					    SR_CCBF_FREEBUF, NULL, data,
+					    pxinv ^ gf_mul(gf_pow[i], gxinv)))
+					    	goto bad;
 				}
-
-				/* run fake wu when read i/o is complete */
-				if (wu_w == NULL && 
-				    (wu_w = sr_wu_get(sd, 0)) == NULL)
-					goto bad;
-
-				wu_w->swu_flags |= SR_WUF_FAIL;
-				if (sr_raid6_addio(wu_w, 0, 0, length, pbuf, 0,
-				    SR_CCBF_FREEBUF, NULL, data,
-				    gf_inv(gf_pow[255+chunk-fchunk] ^ 1)))
-					goto bad;
-				if (sr_raid6_addio(wu_w, 0, 0, length, qbuf, 0,
-				    SR_CCBF_FREEBUF, NULL, data,
-				    gf_inv(gf_pow[chunk] ^ gf_pow[fchunk])))
-					goto bad;
 			} else {
 				/* Two cases: single disk (Dx) or (Dx+Q)
 				 *   Dx = Dz ^ P (same as RAID5) 
@@ -839,7 +853,6 @@ sr_raid6_intr(struct buf *bp)
 		if (xs != NULL) {
 			xs->error = XS_NOERROR;
 			xs->resid = 0;
-			xs->flags |= ITSDONE;
 		}
 
 		pend = 0;
@@ -891,7 +904,6 @@ retry:
 	return;
 bad:
 	xs->error = XS_DRIVER_STUFFUP;
-	xs->flags |= ITSDONE;
 	if (wu->swu_flags & SR_WUF_REBUILD) {
 		wu->swu_flags |= SR_WUF_REBUILDIOCOMP;
 		wakeup(wu);
@@ -1054,6 +1066,12 @@ uint8_t
 gf_inv(uint8_t a)
 {
 	return gf_pow[255 - gf_log[a]];
+}
+
+uint8_t
+gf_mul(uint8_t a, uint8_t b)
+{
+	return gf_pow[gf_log[a] + gf_log[b]];
 }
 
 /* Precalculate multiplication tables for drive gn */

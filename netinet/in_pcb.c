@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.108 2009/11/13 20:54:05 claudio Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.111 2010/01/15 18:20:23 chl Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -188,16 +188,16 @@ in_pcballoc(so, v)
 		    "inpcbpl", NULL);
 		inpcb_pool_initialized = 1;
 	}
-	inp = pool_get(&inpcb_pool, PR_NOWAIT);
+	inp = pool_get(&inpcb_pool, PR_NOWAIT|PR_ZERO);
 	if (inp == NULL)
 		return (ENOBUFS);
-	bzero((caddr_t)inp, sizeof(*inp));
 	inp->inp_table = table;
 	inp->inp_socket = so;
 	inp->inp_seclevel[SL_AUTH] = ipsec_auth_default_level;
 	inp->inp_seclevel[SL_ESP_TRANS] = ipsec_esp_trans_default_level;
 	inp->inp_seclevel[SL_ESP_NETWORK] = ipsec_esp_network_default_level;
 	inp->inp_seclevel[SL_IPCOMP] = ipsec_ipcomp_default_level;
+	inp->inp_rdomain = curproc->p_p->ps_rdomain;
 	s = splnet();
 	CIRCLEQ_INSERT_HEAD(&table->inpt_queue, inp, inp_queue);
 	LIST_INSERT_HEAD(INPCBLHASH(table, inp->inp_lport,

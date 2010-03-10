@@ -1,4 +1,4 @@
-/* $OpenBSD: if_vether.c,v 1.5 2009/11/18 02:11:53 deraadt Exp $ */
+/* $OpenBSD: if_vether.c,v 1.11 2010/01/12 11:37:08 deraadt Exp $ */
 
 /*
  * Copyright (c) 2009 Theo de Raadt
@@ -16,9 +16,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "vether.h"
-#include "bpfilter.h"
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -30,28 +27,10 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
-#include <net/if_types.h>
-
-#include <net/if_types.h>
-#include <net/netisr.h>
-#include <net/route.h>
 
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#include <netinet/in_var.h>
-#endif
-
-#include <dev/rndvar.h>
-
-#if NBPFILTER > 0
-#include <net/bpf.h>
-#endif
-
-#ifdef VETHER_DEBUG
-#define DPRINTF(x)    do { if (vetherdebug) printf x ; } while (0)
-#else
-#define DPRINTF(x)
 #endif
 
 void	vetherattach(int);
@@ -71,7 +50,6 @@ struct vether_softc {
 LIST_HEAD(, vether_softc)	vether_list;
 struct if_clone	vether_cloner =
     IF_CLONE_INITIALIZER("vether", vether_clone_create, vether_clone_destroy);
-
 
 int
 vether_media_change(struct ifnet *ifp)
@@ -98,27 +76,16 @@ vether_clone_create(struct if_clone *ifc, int unit)
 {
 	struct ifnet 		*ifp;
 	struct vether_softc	*sc;
-	u_int32_t		 macaddr_rnd;
 	int 			 s;
 
 	if ((sc = malloc(sizeof(*sc),
 	    M_DEVBUF, M_NOWAIT|M_ZERO)) == NULL)
 		return (ENOMEM);
 
-	/* from if_tun.c: generate fake MAC address: 00 bd xx xx xx unit_no */
-	sc->sc_ac.ac_enaddr[0] = 0x00;
-	sc->sc_ac.ac_enaddr[1] = 0xbd;
-	/*
-	 * This no longer happens pre-scheduler so let's use the real
-	 * random subsystem instead of random().
-	 */
-	macaddr_rnd = arc4random();
-	bcopy(&macaddr_rnd, &sc->sc_ac.ac_enaddr[2], sizeof(u_int32_t));
-	sc->sc_ac.ac_enaddr[5] = (u_char)unit + 1;
-
 	ifp = &sc->sc_ac.ac_if;
 	snprintf(ifp->if_xname, sizeof ifp->if_xname, "vether%d", unit);
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
+	ether_fakeaddr(ifp);
 
 	ifp->if_softc = sc;
 	ifp->if_ioctl = vetherioctl;
@@ -159,13 +126,14 @@ vether_clone_destroy(struct ifnet *ifp)
 }
 
 /*
- * Start output on the vether interface.
+ * The bridge has magically already done all the work for us,
+ * and we only need to discard the packets.
  */
 void
 vetherstart(struct ifnet *ifp)
 {
 	struct mbuf 		*m;
-	int			 s, inout;
+	int			 s;
 
 	for (;;) {
 		s = splnet();
@@ -174,27 +142,8 @@ vetherstart(struct ifnet *ifp)
 
 		if (m == NULL)
 			return;
-
-		inout = (m->m_flags & M_PROTO1) ?
-		    BPF_DIRECTION_IN : BPF_DIRECTION_OUT;
-		m->m_flags &= ~M_PROTO1;
-
-		if (inout == BPF_DIRECTION_IN) {
-#if NBPFILTER > 0
-			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m, inout);
-#endif
-			ether_input_mbuf(ifp, m);
-			ifp->if_ipackets++;
-		} else {
-#if NBPFILTER > 0
-			if (ifp->if_bpf)
-				bpf_mtap_ether(ifp->if_bpf, m, inout);
-#endif
-			ifp->if_opackets++;
-			ifp->if_obytes += m->m_pkthdr.len;
-			m_freem(m);
-		}
+		ifp->if_opackets++;
+		m_freem(m);
 	}
 }
 
@@ -207,7 +156,6 @@ vetherioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ifreq		*ifr = (struct ifreq *)data;
 	int			 error = 0, link_state;
 
-	ifr = (struct ifreq *)data;
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
