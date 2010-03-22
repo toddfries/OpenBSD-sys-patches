@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.7 2004/10/20 12:49:15 pefo Exp $ */
+/*	$OpenBSD: asm.h,v 1.10 2010/01/09 23:34:29 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2002 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -185,17 +185,17 @@
  */
 #if defined(XGPROF) || defined(XPROF)
 #define	MCOUNT			\
-	PTR_SUBU sp, sp, 32;	\
+	PTR_SUBU sp, sp, 64;	\
 	SAVE_GP(16);		\
-	sw	ra, 28(sp);	\
-	sw	gp, 24(sp);	\
+	sd	ra, 56(sp);	\
+	sd	gp, 48(sp);	\
 	.set	noat;		\
 	.set	noreorder;	\
 	move	AT, ra;		\
 	jal	_mcount;	\
-	PTR_SUBU sp, sp, 8;	\
-	lw	ra, 28(sp);	\
-	PTR_ADDU sp, sp, 32;	\
+	PTR_SUBU sp, sp, 16;	\
+	ld	ra, 56(sp);	\
+	PTR_ADDU sp, sp, 64;	\
 	.set reorder;		\
 	.set	at;
 #else
@@ -279,7 +279,7 @@ x: ;				\
 	MSG(msg)
 
 #define	PRINTF(msg) \
-	la	a0, 9f; \
+	LA	a0, 9f; \
 	jal	printf; \
 	nop	;	\
 	MSG(msg)
@@ -292,5 +292,21 @@ x: ;				\
 #define ASMSTR(str) \
 	.asciiz str; \
 	.align	3
+
+#define	LOAD_XKPHYS(reg, cca) \
+	li	reg, cca | 0x10; \
+	dsll	reg, reg, 59
+
+#ifdef MULTIPROCESSOR
+#define GET_CPU_INFO(ci, tmp)		\
+	HW_CPU_NUMBER(tmp);		\
+	PTR_SLL	 tmp, tmp, LOGREGSZ;	\
+	LA	 ci, cpu_info;		\
+	PTR_ADDU ci, ci, tmp;		\
+	PTR_L	 ci, 0(ci)
+#else  /* MULTIPROCESSOR */
+#define GET_CPU_INFO(ci, tmp)		\
+	LA	ci, cpu_info_primary
+#endif /* MULTIPROCESSOR */
 
 #endif /* !_MIPS_ASM_H */

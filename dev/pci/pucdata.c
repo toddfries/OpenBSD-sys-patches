@@ -1,4 +1,4 @@
-/*	$OpenBSD: pucdata.c,v 1.62 2009/03/29 22:11:19 deraadt Exp $	*/
+/*	$OpenBSD: pucdata.c,v 1.66 2009/11/23 02:06:38 yuo Exp $	*/
 /*	$NetBSD: pucdata.c,v 1.6 1999/07/03 05:55:23 cgd Exp $	*/
 
 /*
@@ -1080,6 +1080,18 @@ const struct puc_device_description puc_devices[] = {
 	    },
 	},
 
+	/* Lava Computers Octopus-550 serial ports */
+	{   /* "Lava Computers Octopus-550 8-port serial", */
+	    {   PCI_VENDOR_LAVA, PCI_PRODUCT_LAVA_OCTOPUS550_1,	0, 0	},
+	    {   0xffff, 0xfffc,					0, 0	},
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ },
+		{ PUC_PORT_TYPE_COM, 0x14, 0x00, COM_FREQ },
+		{ PUC_PORT_TYPE_COM, 0x18, 0x00, COM_FREQ },
+		{ PUC_PORT_TYPE_COM, 0x1c, 0x00, COM_FREQ },
+	    },
+	},
+
 	/* US Robotics (3Com) PCI Modems */
 	{   /* "US Robotics (3Com) 3CP5610 PCI 16550 Modem", */
 	    {	PCI_VENDOR_USR, PCI_PRODUCT_USR_3CP5610,	0, 0	},
@@ -1276,6 +1288,24 @@ const struct puc_device_description puc_devices[] = {
 	    },
 	},
 
+	/* NetMos PCIe Peripheral Controller :UART part */
+	{   /* "NetMos NM9901 UART" */
+	    {   PCI_VENDOR_NETMOS, PCI_PRODUCT_NETMOS_NM9901, 0xa000, 0x1000 },
+	    {	0xffff,	0xffff,				      0xffff, 0xffff },
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ },
+	    },
+	},
+
+	/* NetMos PCIe Peripheral Controller :parallel part */
+	{   /* "NetMos NM9901 UART" */
+	    {   PCI_VENDOR_NETMOS, PCI_PRODUCT_NETMOS_NM9901, 0xa000, 0x2000 },
+	    {	0xffff,	0xffff,				      0xffff, 0xffff },
+	    {
+		{ PUC_PORT_TYPE_LPT, 0x10, 0x00 },
+	    },
+	},
+
 	{ /* Sunix 4018A : 2-port parallel */
 	    {   PCI_VENDOR_SUNIX, PCI_PRODUCT_SUNIX_4018A,	0, 0	},
 	    {	0xffff,	0xffff,					0, 0	},
@@ -1335,7 +1365,7 @@ const struct puc_device_description puc_devices[] = {
 
 	{   /* SUNIX 405X 4S */
 	    {	PCI_VENDOR_SUNIX, PCI_PRODUCT_SUNIX_40XX, 0x1409, 0x4050 },
-	    {	0xffff,	0xffff,	0xffff,	0xeff0 },
+	    {	0xffff,	0xffff,	0xffff,	0xe0f0 },
 	    {
 		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8 },
 		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8 },
@@ -1346,16 +1376,16 @@ const struct puc_device_description puc_devices[] = {
 
 	{   /* SUNIX 406X 8S */
 	    {	PCI_VENDOR_SUNIX, PCI_PRODUCT_SUNIX_40XX, 0x1409, 0x4060 },
-	    {	0xffff,	0xffff,	0xffff,	0xeff0 },
+	    {	0xffff,	0xffff,	0xffff,	0xe0f0 },
 	    {
 		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 8 },
 		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 8 },
-		{ PUC_PORT_TYPE_COM, 0x14, 0x00, COM_FREQ },
-		{ PUC_PORT_TYPE_COM, 0x14, 0x08, COM_FREQ },
-		{ PUC_PORT_TYPE_COM, 0x18, 0x00, COM_FREQ },
-		{ PUC_PORT_TYPE_COM, 0x1c, 0x00, COM_FREQ },
-		{ PUC_PORT_TYPE_COM, 0x20, 0x00, COM_FREQ },
-		{ PUC_PORT_TYPE_COM, 0x24, 0x00, COM_FREQ },
+		{ PUC_PORT_TYPE_COM, 0x14, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x14, 0x08, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x18, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x1c, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x20, 0x00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x24, 0x00, COM_FREQ * 8 },
 	    },
 	},
 
@@ -1570,6 +1600,83 @@ const struct puc_device_description puc_devices[] = {
 	    {   0xffff, 0xffff,					0, 0 },
 	    {
 		{ PUC_PORT_TYPE_COM, 0x14, 0x0000, COM_FREQ * 128 },
+	    },
+	},
+
+	/*
+	 * Cardbus devices which can potentially show up because of
+	 * Expresscard adapters
+	 * XXX Keep this list syncronized with cardbus/com_cardbus.c
+	*/
+
+	{   /* "", */
+	    {	PCI_VENDOR_3COM, PCI_PRODUCT_3COM_GLOBALMODEM56,0, 0	},
+	    {	0xffff,	0xffff,					0, 0	},
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ },
+	    },
+	},
+	{   /* "", */
+	    {	PCI_VENDOR_3COM, PCI_PRODUCT_3COM_MODEM56,	0, 0	},
+	    {	0xffff,	0xffff,					0, 0	},
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ },
+	    },
+	},
+	{   /* "", */
+	    {	PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_SERIAL,0, 0	},
+	    {	0xffff,	0xffff,					0, 0	},
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ },
+	    },
+	},
+	{   /* "", */
+	    {	PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_SERIAL_2,0, 0	},
+	    {	0xffff,	0xffff,					0, 0	},
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ },
+	    },
+	},
+	{   /* "", */
+	    {	PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_SERIAL_GC,0, 0	},
+	    {	0xffff,	0xffff,					0, 0	},
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ },
+	    },
+	},
+	{   /* "", */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_MODEM56,	0, 0	},
+	    {	0xffff,	0xffff,					0, 0	},
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ },
+	    },
+	},
+	{   /* "", */
+	    {	PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OXCB950,0, 0	},
+	    {	0xffff,	0xffff,					0, 0	},
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ },
+	    },
+	},
+	{   /* "Xircom Cardbus 56K Modem", */
+	    {	PCI_VENDOR_XIRCOM, PCI_PRODUCT_XIRCOM_MODEM_56K,0, 0	},
+	    {	0xffff,	0xffff,					0, 0	},
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ },
+	    },
+	},
+	{   /* "Xircom CBEM56G Modem", */
+	    {	PCI_VENDOR_XIRCOM, PCI_PRODUCT_XIRCOM_CBEM56G,	0, 0	},
+	    {	0xffff,	0xffff,					0, 0	},
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ },
+	    },
+	},
+	{   /* "Xircom 56k Modem", */
+	    {	PCI_VENDOR_XIRCOM, PCI_PRODUCT_XIRCOM_MODEM56,	0, 0	},
+	    {	0xffff,	0xffff,					0, 0	},
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ },
 	    },
 	},
 

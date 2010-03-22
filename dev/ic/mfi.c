@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi.c,v 1.95 2009/04/30 01:24:05 marco Exp $ */
+/* $OpenBSD: mfi.c,v 1.99 2010/01/09 23:15:06 krw Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -152,15 +152,14 @@ struct mfi_ccb *
 mfi_get_ccb(struct mfi_softc *sc)
 {
 	struct mfi_ccb		*ccb;
-	int			s;
 
-	s = splbio();
+	mtx_enter(&sc->sc_ccb_mtx);
 	ccb = TAILQ_FIRST(&sc->sc_ccb_freeq);
-	if (ccb) {
+	if (ccb != NULL) {
 		TAILQ_REMOVE(&sc->sc_ccb_freeq, ccb, ccb_link);
 		ccb->ccb_state = MFI_CCB_READY;
 	}
-	splx(s);
+	mtx_leave(&sc->sc_ccb_mtx);
 
 	DNPRINTF(MFI_D_CCB, "%s: mfi_get_ccb: %p\n", DEVNAME(sc), ccb);
 
@@ -172,14 +171,13 @@ mfi_put_ccb(struct mfi_ccb *ccb)
 {
 	struct mfi_softc	*sc = ccb->ccb_sc;
 	struct mfi_frame_header	*hdr = &ccb->ccb_frame->mfr_header;
-	int			s;
 
 	DNPRINTF(MFI_D_CCB, "%s: mfi_put_ccb: %p\n", DEVNAME(sc), ccb);
 
 	hdr->mfh_cmd_status = 0x0;
 	hdr->mfh_flags = 0x0;
 	ccb->ccb_state = MFI_CCB_FREE;
-	ccb->ccb_xs = NULL;
+	ccb->ccb_cookie = NULL;
 	ccb->ccb_flags = 0;
 	ccb->ccb_done = NULL;
 	ccb->ccb_direction = 0;
@@ -189,9 +187,9 @@ mfi_put_ccb(struct mfi_ccb *ccb)
 	ccb->ccb_data = NULL;
 	ccb->ccb_len = 0;
 
-	s = splbio();
+	mtx_enter(&sc->sc_ccb_mtx);
 	TAILQ_INSERT_TAIL(&sc->sc_ccb_freeq, ccb, ccb_link);
-	splx(s);
+	mtx_leave(&sc->sc_ccb_mtx);
 }
 
 int
@@ -641,6 +639,7 @@ mfi_attach(struct mfi_softc *sc, enum mfi_iop iop)
 		return (1);
 
 	TAILQ_INIT(&sc->sc_ccb_freeq);
+	mtx_init(&sc->sc_ccb_mtx, IPL_BIO);
 
 	rw_init(&sc->sc_lock, "mfi_lock");
 
@@ -871,7 +870,7 @@ mfi_scsi_io(struct mfi_ccb *ccb, struct scsi_xfer *xs, uint64_t blockno,
 	io->mif_sense_addr_hi = 0;
 
 	ccb->ccb_done = mfi_scsi_xs_done;
-	ccb->ccb_xs = xs;
+	ccb->ccb_cookie = xs;
 	ccb->ccb_frame_size = MFI_IO_FRAME_SIZE;
 	ccb->ccb_sgl = &io->mif_sgl;
 	ccb->ccb_data = xs->data;
@@ -887,7 +886,7 @@ mfi_scsi_io(struct mfi_ccb *ccb, struct scsi_xfer *xs, uint64_t blockno,
 void
 mfi_scsi_xs_done(struct mfi_ccb *ccb)
 {
-	struct scsi_xfer	*xs = ccb->ccb_xs;
+	struct scsi_xfer	*xs = ccb->ccb_cookie;
 	struct mfi_softc	*sc = ccb->ccb_sc;
 	struct mfi_frame_header	*hdr = &ccb->ccb_frame->mfr_header;
 
@@ -923,7 +922,6 @@ mfi_scsi_xs_done(struct mfi_ccb *ccb)
 	}
 
 	xs->resid = 0;
-	xs->flags |= ITSDONE;
 
 	mfi_put_ccb(ccb);
 	scsi_done(xs);
@@ -954,7 +952,7 @@ mfi_scsi_ld(struct mfi_ccb *ccb, struct scsi_xfer *xs)
 	memcpy(pf->mpf_cdb, &xs->cmdstore, xs->cmdlen);
 
 	ccb->ccb_done = mfi_scsi_xs_done;
-	ccb->ccb_xs = xs;
+	ccb->ccb_cookie = xs;
 	ccb->ccb_frame_size = MFI_PASS_FRAME_SIZE;
 	ccb->ccb_sgl = &pf->mpf_sgl;
 
@@ -1087,7 +1085,6 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 		}
 
 		mfi_put_ccb(ccb);
-		xs->flags |= ITSDONE;
 		s = splbio();
 		scsi_done(xs);
 		splx(s);
@@ -1104,7 +1101,6 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 stuffup:
 	xs->error = XS_DRIVER_STUFFUP;
 complete:
-	xs->flags |= ITSDONE;
 	s = splbio();
 	scsi_done(xs);
 	splx(s);
@@ -1920,7 +1916,7 @@ mfi_create_sensors(struct mfi_softc *sc)
 		return (1);
 
 	sc->sc_sensors = malloc(sizeof(struct ksensor) * sc->sc_ld_cnt,
-	    M_DEVBUF, M_WAITOK|M_ZERO);
+	    M_DEVBUF, M_WAITOK | M_CANFAIL | M_ZERO);
 	if (sc->sc_sensors == NULL)
 		return (1);
 

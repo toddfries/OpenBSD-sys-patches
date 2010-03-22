@@ -1,4 +1,4 @@
-/*	$OpenBSD: hdc9224.c,v 1.23 2009/06/04 21:38:10 miod Exp $	*/
+/*	$OpenBSD: hdc9224.c,v 1.26 2009/09/05 15:37:04 deraadt Exp $	*/
 /*	$NetBSD: hdc9224.c,v 1.16 2001/07/26 15:05:09 wiz Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -345,7 +345,7 @@ hdattach(struct device *parent, struct device *self, void *aux)
 	struct hdsoftc *hd = (void*)self;
 	struct hdc_attach_args *ha = aux;
 	struct disklabel *dl;
-	char *msg;
+	int error;
 
 	hd->sc_drive = ha->ha_drive;
 	/*
@@ -362,14 +362,11 @@ hdattach(struct device *parent, struct device *self, void *aux)
 	disk_printtype(hd->sc_drive, hd->sc_xbn.media_id);
 	dl = hd->sc_disk.dk_label;
 	hdmakelabel(dl, &hd->sc_xbn);
-	msg = readdisklabel(MAKEDISKDEV(HDMAJOR, hd->sc_dev.dv_unit, RAW_PART),
+	error = readdisklabel(MAKEDISKDEV(HDMAJOR, hd->sc_dev.dv_unit, RAW_PART),
 	    hdstrategy, dl, 0);
 	printf("%s: %luMB, %lu sectors\n",
 	    hd->sc_dev.dv_xname, DL_GETDSIZE(dl) / (1048576 / DEV_BSIZE),
 	    DL_GETDSIZE(dl));
-	if (msg) {
-		/*printf("%s: %s\n", hd->sc_dev.dv_xname, msg);*/
-	}
 #ifdef HDDEBUG
 	hdc_printgeom(&hd->sc_xbn);
 #endif
@@ -701,7 +698,7 @@ hdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 {
 	struct hdsoftc *hd = hd_cd.cd_devs[DISKUNIT(dev)];
 	struct disklabel *lp = hd->sc_disk.dk_label;
-	int err = 0;
+	int error = 0;
 
 	switch (cmd) {
 	case DIOCGDINFO:
@@ -718,22 +715,23 @@ hdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0)
 			return EBADF;
-		else
-			err = (cmd == DIOCSDINFO ?
-			    setdisklabel(lp, (struct disklabel *)addr, 0) :
-			    writedisklabel(dev, hdstrategy, lp));
+		error = setdisklabel(lp, (struct disklabel *)addr, 0);
+		if (error == 0) {
+			if (cmd == DIOCWDINFO)
+				error = writedisklabel(dev, hdstrategy, lp);
+		}
 		break;
 
 	case DIOCWLABEL:
 		if ((flag & FWRITE) == 0)
-			err = EBADF;
+			error = EBADF;
 		break;
 
 	default:
-		err = ENOTTY;
+		error = ENOTTY;
 		break;
 	}
-	return err;
+	return error;
 }
 
 /*

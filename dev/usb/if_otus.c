@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_otus.c,v 1.10 2009/05/23 18:03:41 jsg Exp $	*/
+/*	$OpenBSD: if_otus.c,v 1.14 2009/11/17 18:07:09 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -68,8 +68,6 @@
 #define OTUS_DEBUG
 #endif
 
-#define OTUS_DEBUG
-
 #ifdef OTUS_DEBUG
 #define DPRINTF(x)	do { if (otus_debug) printf x; } while (0)
 #define DPRINTFN(n, x)	do { if (otus_debug >= (n)) printf x; } while (0)
@@ -83,10 +81,12 @@ static const struct usb_devno otus_devs[] = {
 	{ USB_VENDOR_ACCTON,	USB_PRODUCT_ACCTON_WN7512 },
 	{ USB_VENDOR_ATHEROS2,	USB_PRODUCT_ATHEROS2_TG121N },
 	{ USB_VENDOR_ATHEROS2,	USB_PRODUCT_ATHEROS2_AR9170 },
+	{ USB_VENDOR_ATHEROS2,	USB_PRODUCT_ATHEROS2_WN821NV2 },
 	{ USB_VENDOR_AVM,	USB_PRODUCT_AVM_FRITZWLAN },
 	{ USB_VENDOR_CACE,	USB_PRODUCT_CACE_AIRPCAPNX },
 	{ USB_VENDOR_DLINK2,	USB_PRODUCT_DLINK2_DWA130D1 },
-	{ USB_VENDOR_DLINK2,	USB_PRODUCT_DLINK2_DWA160A },
+	{ USB_VENDOR_DLINK2,	USB_PRODUCT_DLINK2_DWA160A1 },
+	{ USB_VENDOR_DLINK2,	USB_PRODUCT_DLINK2_DWA160A2 },
 	{ USB_VENDOR_IODATA,	USB_PRODUCT_IODATA_WNGDNUS2 },
 	{ USB_VENDOR_NETGEAR,	USB_PRODUCT_NETGEAR_WN111V2 },
 	{ USB_VENDOR_NETGEAR,	USB_PRODUCT_NETGEAR_WNDA3100 },
@@ -2047,6 +2047,11 @@ otus_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 {
 	struct otus_softc *sc = ic->ic_softc;
 	struct otus_cmd_key cmd;
+
+	/* Defer setting of WEP keys until interface is brought up. */
+	if ((ic->ic_if.if_flags & (IFF_UP | IFF_RUNNING)) !=
+	    (IFF_UP | IFF_RUNNING))
+		return 0;
 
 	/* Do it in a process context. */
 	cmd.key = *k;

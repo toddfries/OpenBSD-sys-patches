@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.105 2009/06/05 00:05:22 claudio Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.111 2010/01/15 18:20:23 chl Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -188,22 +188,23 @@ in_pcballoc(so, v)
 		    "inpcbpl", NULL);
 		inpcb_pool_initialized = 1;
 	}
-	inp = pool_get(&inpcb_pool, PR_NOWAIT);
+	inp = pool_get(&inpcb_pool, PR_NOWAIT|PR_ZERO);
 	if (inp == NULL)
 		return (ENOBUFS);
-	bzero((caddr_t)inp, sizeof(*inp));
 	inp->inp_table = table;
 	inp->inp_socket = so;
 	inp->inp_seclevel[SL_AUTH] = ipsec_auth_default_level;
 	inp->inp_seclevel[SL_ESP_TRANS] = ipsec_esp_trans_default_level;
 	inp->inp_seclevel[SL_ESP_NETWORK] = ipsec_esp_network_default_level;
 	inp->inp_seclevel[SL_IPCOMP] = ipsec_ipcomp_default_level;
+	inp->inp_rdomain = curproc->p_p->ps_rdomain;
 	s = splnet();
 	CIRCLEQ_INSERT_HEAD(&table->inpt_queue, inp, inp_queue);
-	LIST_INSERT_HEAD(INPCBLHASH(table, inp->inp_lport, inp->inp_rdomain),
-	    inp, inp_lhash);
+	LIST_INSERT_HEAD(INPCBLHASH(table, inp->inp_lport,
+	    inp->inp_rdomain), inp, inp_lhash);
 	LIST_INSERT_HEAD(INPCBHASH(table, &inp->inp_faddr, inp->inp_fport,
-	    &inp->inp_laddr, inp->inp_lport, inp->inp_rdomain), inp, inp_hash);
+	    &inp->inp_laddr, inp->inp_lport, inp->inp_rdomain),
+	    inp, inp_hash);
 	splx(s);
 	so->so_pcb = inp;
 	inp->inp_hops = -1;
@@ -480,7 +481,7 @@ in_pcbdetach(v)
 	so->so_pcb = 0;
 	sofree(so);
 	if (inp->inp_options)
-		(void)m_freem(inp->inp_options);
+		m_freem(inp->inp_options);
 	if (inp->inp_route.ro_rt)
 		rtfree(inp->inp_route.ro_rt);
 #ifdef INET6
@@ -569,9 +570,10 @@ in_setpeeraddr(inp, nam)
  * Must be called at splsoftnet.
  */
 void
-in_pcbnotifyall(table, dst, errno, notify)
+in_pcbnotifyall(table, dst, rdomain, errno, notify)
 	struct inpcbtable *table;
 	struct sockaddr *dst;
+	u_int rdomain;
 	int errno;
 	void (*notify)(struct inpcb *, int);
 {
@@ -603,6 +605,7 @@ in_pcbnotifyall(table, dst, errno, notify)
 		}
 #endif
 		if (inp->inp_faddr.s_addr != faddr.s_addr ||
+		    inp->inp_rdomain != rdomain ||
 		    inp->inp_socket == 0) {
 			inp = CIRCLEQ_NEXT(inp, inp_queue);
 			continue;
@@ -677,6 +680,7 @@ in_pcblookup(struct inpcbtable *table, void *faddrp, u_int fport_arg, void *ladd
 	struct in_addr faddr = *(struct in_addr *)faddrp;
 	struct in_addr laddr = *(struct in_addr *)laddrp;
 
+	rdomain = rtable_l2(rdomain);
 	for (inp = LIST_FIRST(INPCBLHASH(table, lport, rdomain)); inp;
 	    inp = LIST_NEXT(inp, inp_lhash)) {
 		if (inp->inp_rdomain != rdomain)
@@ -786,7 +790,8 @@ in_pcbrtentry(inp)
 			ro->ro_dst.sa_family = AF_INET;
 			ro->ro_dst.sa_len = sizeof(ro->ro_dst);
 			satosin(&ro->ro_dst)->sin_addr = inp->inp_faddr;
-			rtalloc_mpath(ro, &inp->inp_laddr.s_addr, 0);
+			rtalloc_mpath(ro, &inp->inp_laddr.s_addr,
+			    inp->inp_rdomain);
 			break;
 		}
 	}
@@ -924,6 +929,7 @@ in_pcbhashlookup(struct inpcbtable *table, struct in_addr faddr,
 	struct inpcb *inp;
 	u_int16_t fport = fport_arg, lport = lport_arg;
 
+	rdomain = rtable_l2(rdomain);
 	head = INPCBHASH(table, &faddr, fport, &laddr, lport, rdomain);
 	LIST_FOREACH(inp, head, inp_hash) {
 #ifdef INET6
@@ -1012,6 +1018,7 @@ in_pcblookup_listen(struct inpcbtable *table, struct in_addr laddr,
 	struct inpcb *inp;
 	u_int16_t lport = lport_arg;
 
+	rdomain = rtable_l2(rdomain);
 #if NPF > 0
 	if (m && m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
 		struct pf_divert *divert;

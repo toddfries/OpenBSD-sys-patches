@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pager.c,v 1.51 2009/05/23 14:06:37 oga Exp $	*/
+/*	$OpenBSD: uvm_pager.c,v 1.55 2010/02/12 01:35:14 tedu Exp $	*/
 /*	$NetBSD: uvm_pager.c,v 1.36 2000/11/27 18:26:41 chs Exp $	*/
 
 /*
@@ -138,7 +138,7 @@ uvm_pseg_init(struct uvm_pseg *pseg)
 {
 	KASSERT(pseg->start == 0);
 	KASSERT(pseg->use == 0);
-	pseg->start = uvm_km_valloc(kernel_map, MAX_PAGER_SEGS * MAXBSIZE);
+	pseg->start = uvm_km_valloc_try(kernel_map, MAX_PAGER_SEGS * MAXBSIZE);
 }
 
 /*
@@ -816,7 +816,7 @@ uvm_aio_biodone(struct buf *bp)
 
 	mtx_enter(&uvm.aiodoned_lock);	/* locks uvm.aio_done */
 	TAILQ_INSERT_TAIL(&uvm.aio_done, bp, b_freelist);
-	wakeup(&uvm.aiodoned_proc);
+	wakeup(&uvm.aiodoned);
 	mtx_leave(&uvm.aiodoned_lock);
 }
 

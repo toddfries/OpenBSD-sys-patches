@@ -1,4 +1,4 @@
-/*	$OpenBSD: xd.c,v 1.44 2009/01/04 16:51:05 miod Exp $	*/
+/*	$OpenBSD: xd.c,v 1.47 2009/09/05 15:37:04 deraadt Exp $	*/
 /*	$NetBSD: xd.c,v 1.37 1997/07/29 09:58:16 fair Exp $	*/
 
 /*
@@ -296,7 +296,7 @@ xdgetdisklabel(xd, b)
 {
 	struct disklabel *lp = xd->sc_dk.dk_label;
 	struct sun_disklabel *sl = b;
-	char *err;
+	int error;
 
 	bzero(lp, sizeof(struct disklabel));
 	/* Required parameters for readdisklabel() */
@@ -311,12 +311,10 @@ xdgetdisklabel(xd, b)
 	/* We already have the label data in `b'; setup for dummy strategy */
 	xd_labeldata = b;
 
-	err = readdisklabel(MAKEDISKDEV(0, xd->sc_dev.dv_unit, RAW_PART),
+	error = readdisklabel(MAKEDISKDEV(0, xd->sc_dev.dv_unit, RAW_PART),
 	    xddummystrat, lp, 0);
-	if (err) {
-		/*printf("%s: %s\n", xd->sc_dev.dv_xname, err);*/
-		return (XD_ERR_FAIL);
-	}
+	if (error)
+		return (error);
 
 	/* Ok, we have the label; fill in `pcyl' if there's SunOS magic */
 	sl = b;
@@ -336,7 +334,7 @@ xdgetdisklabel(xd, b)
 	xd->nhead = lp->d_ntracks;
 	xd->nsect = lp->d_nsectors;
 	xd->sectpercyl = lp->d_secpercyl;
-	return (XD_ERR_AOK);
+	return (0);
 }
 
 /*
@@ -856,17 +854,6 @@ xdioctl(dev, command, addr, flag, p)
 		    &xd->sc_dk.dk_label->d_partitions[DISKPART(dev)];
 		return 0;
 
-	case DIOCSDINFO:	/* set disk label */
-		if ((flag & FWRITE) == 0)
-			return EBADF;
-		error = setdisklabel(xd->sc_dk.dk_label,
-		    (struct disklabel *) addr, /* xd->sc_dk.dk_openmask : */ 0);
-		if (error == 0) {
-			if (xd->state == XD_DRIVE_NOLABEL)
-				xd->state = XD_DRIVE_ONLINE;
-		}
-		return error;
-
 	case DIOCWLABEL:	/* change write status of disk label */
 		if ((flag & FWRITE) == 0)
 			return EBADF;
@@ -877,6 +864,7 @@ xdioctl(dev, command, addr, flag, p)
 		return 0;
 
 	case DIOCWDINFO:	/* write disk label */
+	case DIOCSDINFO:	/* set disk label */
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 		error = setdisklabel(xd->sc_dk.dk_label,
@@ -885,12 +873,17 @@ xdioctl(dev, command, addr, flag, p)
 			if (xd->state == XD_DRIVE_NOLABEL)
 				xd->state = XD_DRIVE_ONLINE;
 
-			/* Simulate opening partition 0 so write succeeds. */
-			xd->sc_dk.dk_openmask |= (1 << 0);
-			error = writedisklabel(DISKLABELDEV(dev), xdstrategy,
-			    xd->sc_dk.dk_label);
-			xd->sc_dk.dk_openmask =
-			    xd->sc_dk.dk_copenmask | xd->sc_dk.dk_bopenmask;
+			if (command == DIOCWDINFO) {
+				/*
+				 * Simulate opening partition 0 so write
+				 * succeeds.
+				 */
+				xd->sc_dk.dk_openmask |= (1 << 0);
+				error = writedisklabel(DISKLABELDEV(dev),
+				    xdstrategy, xd->sc_dk.dk_label);
+				xd->sc_dk.dk_openmask = xd->sc_dk.dk_copenmask |
+				    xd->sc_dk.dk_bopenmask;
+			}
 		}
 		return error;
 

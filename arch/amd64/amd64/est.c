@@ -1,4 +1,4 @@
-/*	$OpenBSD: est.c,v 1.13 2009/06/08 23:18:05 gwk Exp $ */
+/*	$OpenBSD: est.c,v 1.17 2009/12/01 18:59:13 jsg Exp $ */
 /*
  * Copyright (c) 2003 Michael Eriksson.
  * All rights reserved.
@@ -325,24 +325,32 @@ est_init(struct cpu_info *ci)
 	} else if (family == 6) {
 		p3_get_bus_clock(ci);
 	}
+
 	if (bus_clock == 0) {
-		printf("%s: EST: unknown system bus clock\n", cpu_device);
+		printf("%s: EST: PSS not yet available for this processor\n",
+		    cpu_device);
 		return;
 	}
-
-	msr = rdmsr(MSR_PERF_STATUS);
-	idhi = (msr >> 32) & 0xffff;
-	idlo = (msr >> 48) & 0xffff;
-	cur = msr & 0xffff;
-	crhi = (idhi  >> 8) & 0xff;
-	crlo = (idlo  >> 8) & 0xff;
-	crcur = (cur >> 8) & 0xff;
 
 #if NACPICPU > 0
 	est_fqlist = est_acpi_init();
 #endif
 
 	if (est_fqlist == NULL) {
+		if (bus_clock == 0) {
+			printf("%s: EST: unknown system bus clock\n",
+			    cpu_device);
+			return;
+		}
+
+		msr = rdmsr(MSR_PERF_STATUS);
+		idhi = (msr >> 32) & 0xffff;
+		idlo = (msr >> 48) & 0xffff;
+		cur = msr & 0xffff;
+		crhi = (idhi  >> 8) & 0xff;
+		crlo = (idlo  >> 8) & 0xff;
+		crcur = (cur >> 8) & 0xff;
+
 		if (crhi == 0 || crcur == 0 || crlo > crhi ||
 		    crcur < crlo || crcur > crhi) {
 			/*
@@ -354,7 +362,7 @@ est_init(struct cpu_info *ci)
 			    cpu_device, msr);
 			return;
 		}
-		if   (crlo == 0 || crhi == crlo) {
+		if (crlo == 0 || crhi == crlo) {
 			/*
 			 * Don't complain about these cases, and silently
 			 * disable EST: - A lowest clock ratio of 0, which

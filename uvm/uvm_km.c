@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_km.c,v 1.71 2009/05/05 05:27:53 oga Exp $	*/
+/*	$OpenBSD: uvm_km.c,v 1.76 2010/02/12 01:35:14 tedu Exp $	*/
 /*	$NetBSD: uvm_km.c,v 1.42 2001/01/14 02:10:01 thorpej Exp $	*/
 
 /* 
@@ -462,7 +462,7 @@ uvm_km_free_wakeup(struct vm_map *map, vaddr_t addr, vsize_t size)
 
 	vm_map_lock(map);
 	uvm_unmap_remove(map, trunc_page(addr), round_page(addr+size), 
-			 &dead_entries, NULL);
+	     &dead_entries, NULL, FALSE);
 	wakeup(map);
 	vm_map_unlock(map);
 
@@ -571,11 +571,17 @@ uvm_km_alloc1(struct vm_map *map, vsize_t size, vsize_t align, boolean_t zeroit)
 vaddr_t
 uvm_km_valloc(struct vm_map *map, vsize_t size)
 {
-	return(uvm_km_valloc_align(map, size, 0));
+	return(uvm_km_valloc_align(map, size, 0, 0));
 }
 
 vaddr_t
-uvm_km_valloc_align(struct vm_map *map, vsize_t size, vsize_t align)
+uvm_km_valloc_try(struct vm_map *map, vsize_t size)
+{
+	return(uvm_km_valloc_align(map, size, 0, UVM_FLAG_TRYLOCK));
+}
+
+vaddr_t
+uvm_km_valloc_align(struct vm_map *map, vsize_t size, vsize_t align, int flags)
 {
 	vaddr_t kva;
 	UVMHIST_FUNC("uvm_km_valloc"); UVMHIST_CALLED(maphist);
@@ -592,7 +598,7 @@ uvm_km_valloc_align(struct vm_map *map, vsize_t size, vsize_t align)
 
 	if (__predict_false(uvm_map(map, &kva, size, uvm.kernel_object,
 	    UVM_UNKNOWN_OFFSET, align, UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL,
-	    UVM_INH_NONE, UVM_ADV_RANDOM, 0)) != 0)) {
+	    UVM_INH_NONE, UVM_ADV_RANDOM, flags)) != 0)) {
 		UVMHIST_LOG(maphist, "<- done (no VM)", 0,0,0,0);
 		return(0);
 	}

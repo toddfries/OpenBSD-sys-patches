@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.106 2008/10/22 14:36:08 markus Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.111 2010/02/08 12:16:02 jsing Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -119,21 +119,21 @@ struct ip6_exthdrs {
 	struct mbuf *ip6e_dest2;
 };
 
-static int ip6_pcbopt(int, u_char *, int, struct ip6_pktopts **, int, int);
-static int ip6_pcbopts(struct ip6_pktopts **, struct mbuf *, struct socket *);
-static int ip6_getpcbopt(struct ip6_pktopts *, int, struct mbuf **);
-static int ip6_setpktopt(int, u_char *, int, struct ip6_pktopts *, int, int,
+int ip6_pcbopt(int, u_char *, int, struct ip6_pktopts **, int, int);
+int ip6_pcbopts(struct ip6_pktopts **, struct mbuf *, struct socket *);
+int ip6_getpcbopt(struct ip6_pktopts *, int, struct mbuf **);
+int ip6_setpktopt(int, u_char *, int, struct ip6_pktopts *, int, int,
 	int, int);
-static int ip6_setmoptions(int, struct ip6_moptions **, struct mbuf *);
-static int ip6_getmoptions(int, struct ip6_moptions *, struct mbuf **);
-static int ip6_copyexthdr(struct mbuf **, caddr_t, int);
-static int ip6_insertfraghdr(struct mbuf *, struct mbuf *, int,
+int ip6_setmoptions(int, struct ip6_moptions **, struct mbuf *);
+int ip6_getmoptions(int, struct ip6_moptions *, struct mbuf **);
+int ip6_copyexthdr(struct mbuf **, caddr_t, int);
+int ip6_insertfraghdr(struct mbuf *, struct mbuf *, int,
 	struct ip6_frag **);
-static int ip6_insert_jumboopt(struct ip6_exthdrs *, u_int32_t);
-static int ip6_splithdr(struct mbuf *, struct ip6_exthdrs *);
-static int ip6_getpmtu(struct route_in6 *, struct route_in6 *,
+int ip6_insert_jumboopt(struct ip6_exthdrs *, u_int32_t);
+int ip6_splithdr(struct mbuf *, struct ip6_exthdrs *);
+int ip6_getpmtu(struct route_in6 *, struct route_in6 *,
 	struct ifnet *, struct in6_addr *, u_long *, int *);
-static int copypktopts(struct ip6_pktopts *, struct ip6_pktopts *, int);
+int copypktopts(struct ip6_pktopts *, struct ip6_pktopts *, int);
 
 /* Context for non-repeating IDs */
 struct idgen32_ctx ip6_id_ctx;
@@ -153,8 +153,8 @@ struct idgen32_ctx ip6_id_ctx;
  */
 int
 ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
-	int flags, struct ip6_moptions *im6o, struct ifnet **ifpp, 
-	struct inpcb *inp)
+    int flags, struct ip6_moptions *im6o, struct ifnet **ifpp, 
+    struct inpcb *inp)
 {
 	struct ip6_hdr *ip6, *mhip6;
 	struct ifnet *ifp, *origifp = NULL;
@@ -453,6 +453,10 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 	/*
 	 * Route packet.
 	 */
+#if NPF > 0
+reroute:
+#endif
+
 	/* initialize cached route */
 	if (ro == 0) {
 		ro = &ip6route;
@@ -509,6 +513,13 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 			goto done;
 		}
 		ip6 = mtod(m, struct ip6_hdr *);
+		/*
+		 * PF_TAG_REROUTE handling or not...
+		 * Packet is entering IPsec so the routing is
+		 * already overruled by the IPsec policy.
+		 * Until now the change was not reconsidered.
+		 * What's the behaviour?
+		 */
 #endif
 		/*
 		 * XXX what should we do if ip6_hlim == 0 and the
@@ -785,6 +796,17 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 	if (m == NULL)
 		goto done;
 	ip6 = mtod(m, struct ip6_hdr *);
+	if ((m->m_pkthdr.pf.flags & (PF_TAG_REROUTE | PF_TAG_GENERATED)) ==
+	    (PF_TAG_REROUTE | PF_TAG_GENERATED)) {
+		/* already rerun the route lookup, go on */
+		m->m_pkthdr.pf.flags &= ~(PF_TAG_GENERATED | PF_TAG_REROUTE);
+	} else if (m->m_pkthdr.pf.flags & PF_TAG_REROUTE) {
+		/* tag as generated to skip over pf_test on rerun */
+		m->m_pkthdr.pf.flags |= PF_TAG_GENERATED;
+		finaldst = ip6->ip6_dst;
+		ro = NULL;
+		goto reroute;
+	}
 #endif
 
 	/*
@@ -1011,7 +1033,7 @@ bad:
 	goto done;
 }
 
-static int
+int
 ip6_copyexthdr(struct mbuf **mp, caddr_t hdr, int hlen)
 {
 	struct mbuf *m;
@@ -1041,7 +1063,7 @@ ip6_copyexthdr(struct mbuf **mp, caddr_t hdr, int hlen)
 /*
  * Insert jumbo payload option.
  */
-static int
+int
 ip6_insert_jumboopt(struct ip6_exthdrs *exthdrs, u_int32_t plen)
 {
 	struct mbuf *mopt;
@@ -1136,9 +1158,9 @@ ip6_insert_jumboopt(struct ip6_exthdrs *exthdrs, u_int32_t plen)
 /*
  * Insert fragment header and copy unfragmentable header portions.
  */
-static int
+int
 ip6_insertfraghdr(struct mbuf *m0, struct mbuf *m, int hlen, 
-	struct ip6_frag **frghdrp)
+    struct ip6_frag **frghdrp)
 {
 	struct mbuf *n, *mlast;
 
@@ -1177,10 +1199,9 @@ ip6_insertfraghdr(struct mbuf *m0, struct mbuf *m, int hlen,
 	return (0);
 }
 
-static int
+int
 ip6_getpmtu(struct route_in6 *ro_pmtu, struct route_in6 *ro, 
-	struct ifnet *ifp, struct in6_addr *dst, u_long *mtup, 
-	int *alwaysfragp)
+    struct ifnet *ifp, struct in6_addr *dst, u_long *mtup, int *alwaysfragp)
 {
 	u_int32_t mtu = 0;
 	int alwaysfrag = 0;
@@ -1254,14 +1275,13 @@ ip6_getpmtu(struct route_in6 *ro_pmtu, struct route_in6 *ro,
  */
 int
 ip6_ctloutput(int op, struct socket *so, int level, int optname, 
-	struct mbuf **mp)
+    struct mbuf **mp)
 {
 	int privileged, optdatalen, uproto;
 	void *optdata;
 	struct inpcb *inp = sotoinpcb(so);
 	struct mbuf *m = *mp;
 	int error, optval;
-	int optlen;
 #ifdef IPSEC
 	struct proc *p = curproc; /* XXX */
 	struct tdb *tdb;
@@ -1269,7 +1289,6 @@ ip6_ctloutput(int op, struct socket *so, int level, int optname,
 	int s;
 #endif
 
-	optlen = m ? m->m_len : 0;
 	error = optval = 0;
 
 	privileged = (inp->inp_socket->so_state & SS_PRIV);
@@ -1318,7 +1337,7 @@ ip6_ctloutput(int op, struct socket *so, int level, int optname,
 			case IPV6_RECVTCLASS:
 			case IPV6_V6ONLY:
 			case IPV6_AUTOFLOWLABEL:
-				if (optlen != sizeof(int)) {
+				if (m == NULL || m->m_len != sizeof(int)) {
 					error = EINVAL;
 					break;
 				}
@@ -1472,7 +1491,7 @@ do { \
 			case IPV6_TCLASS:
 			case IPV6_DONTFRAG:
 			case IPV6_USE_MIN_MTU:
-				if (optlen != sizeof(optval)) {
+				if (m == NULL || m->m_len != sizeof(optval)) {
 					error = EINVAL;
 					break;
 				}
@@ -1494,7 +1513,7 @@ do { \
 			case IPV6_2292DSTOPTS:
 			case IPV6_2292RTHDR:
 				/* RFC 2292 */
-				if (optlen != sizeof(int)) {
+				if (m == NULL || m->m_len != sizeof(int)) {
 					error = EINVAL;
 					break;
 				}
@@ -1573,6 +1592,10 @@ do { \
 				break;
 
 			case IPV6_PORTRANGE:
+				if (m == NULL || m->m_len != sizeof(int)) {
+					error = EINVAL;
+					break;
+				}
 				optval = *mtod(m, int *);
 
 				switch (optval) {
@@ -1601,18 +1624,19 @@ do { \
 #ifndef IPSEC
 				error = EINVAL;
 #else
-				s = spltdb();
-				if (m == 0 || m->m_len != sizeof(struct tdb_ident)) {
+				if (m == NULL ||
+				    m->m_len != sizeof(struct tdb_ident)) {
 					error = EINVAL;
-				} else {
-					tdbip = mtod(m, struct tdb_ident *);
-					tdb = gettdb(tdbip->spi, &tdbip->dst,
-					    tdbip->proto);
-					if (tdb == NULL)
-						error = ESRCH;
-					else
-						tdb_add_inp(tdb, inp, 0);
+					break;
 				}
+				tdbip = mtod(m, struct tdb_ident *);
+				s = spltdb();
+				tdb = gettdb(tdbip->spi, &tdbip->dst,
+				    tdbip->proto);
+				if (tdb == NULL)
+					error = ESRCH;
+				else
+					tdb_add_inp(tdb, inp, 0);
 				splx(s);
 #endif
 				break;
@@ -1892,6 +1916,7 @@ do { \
 			case IPV6_ESP_TRANS_LEVEL:
 			case IPV6_ESP_NETWORK_LEVEL:
 			case IPV6_IPCOMP_LEVEL:
+				*mp = m = m_get(M_WAIT, MT_SOOPTS);
 #ifndef IPSEC
 				m->m_len = sizeof(int);
 				*mtod(m, int *) = IPSEC_LEVEL_NONE;
@@ -1936,14 +1961,12 @@ do { \
 
 int
 ip6_raw_ctloutput(int op, struct socket *so, int level, int optname, 
-	struct mbuf **mp)
+    struct mbuf **mp)
 {
-	int error = 0, optval, optlen;
+	int error = 0, optval;
 	const int icmp6off = offsetof(struct icmp6_hdr, icmp6_cksum);
 	struct inpcb *inp = sotoinpcb(so);
 	struct mbuf *m = *mp;
-
-	optlen = m ? m->m_len : 0;
 
 	if (level != IPPROTO_IPV6) {
 		if (op == PRCO_SETOPT && *mp)
@@ -1963,7 +1986,7 @@ ip6_raw_ctloutput(int op, struct socket *so, int level, int optname,
 		 */
 		switch (op) {
 		case PRCO_SETOPT:
-			if (optlen != sizeof(int)) {
+			if (m == NULL || m->m_len != sizeof(int)) {
 				error = EINVAL;
 				break;
 			}
@@ -2011,7 +2034,7 @@ ip6_raw_ctloutput(int op, struct socket *so, int level, int optname,
  * Store in mbuf with pointer in pcbopt, adding pseudo-option
  * with destination address if source routed.
  */
-static int
+int
 ip6_pcbopts(struct ip6_pktopts **pktopt, struct mbuf *m, struct socket *so)
 {
 	struct ip6_pktopts *opt = *pktopt;
@@ -2063,9 +2086,9 @@ ip6_initpktopts(struct ip6_pktopts *opt)
 }
 
 #define sin6tosa(sin6)	((struct sockaddr *)(sin6)) /* XXX */
-static int
+int
 ip6_pcbopt(int optname, u_char *buf, int len, struct ip6_pktopts **pktopt,
-	int priv, int uproto)
+    int priv, int uproto)
 {
 	struct ip6_pktopts *opt;
 
@@ -2079,7 +2102,7 @@ ip6_pcbopt(int optname, u_char *buf, int len, struct ip6_pktopts **pktopt,
 	return (ip6_setpktopt(optname, buf, len, opt, priv, 1, 0, uproto));
 }
 
-static int
+int
 ip6_getpcbopt(struct ip6_pktopts *pktopt, int optname, struct mbuf **mp)
 {
 	void *optdata = NULL;
@@ -2235,7 +2258,7 @@ do {\
 	}\
 } while (/*CONSTCOND*/ 0)
 
-static int
+int
 copypktopts(struct ip6_pktopts *dst, struct ip6_pktopts *src, int canwait)
 {
 	dst->ip6po_hlim = src->ip6po_hlim;
@@ -2282,7 +2305,7 @@ ip6_freepcbopts(struct ip6_pktopts *pktopt)
 /*
  * Set the IP6 multicast options in response to user setsockopt().
  */
-static int
+int
 ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 {
 	int error = 0;
@@ -2567,7 +2590,7 @@ ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 /*
  * Return the IP6 multicast options in response to user getsockopt().
  */
-static int
+int
 ip6_getmoptions(int optname, struct ip6_moptions *im6o, struct mbuf **mp)
 {
 	u_int *hlim, *loop, *ifindex;
@@ -2632,7 +2655,7 @@ ip6_freemoptions(struct ip6_moptions *im6o)
  */
 int
 ip6_setpktopts(struct mbuf *control, struct ip6_pktopts *opt, 
-	struct ip6_pktopts *stickyopt, int priv, int uproto)
+    struct ip6_pktopts *stickyopt, int priv, int uproto)
 {
 	u_int clen;
 	struct cmsghdr *cm = 0;
@@ -2698,9 +2721,9 @@ ip6_setpktopts(struct mbuf *control, struct ip6_pktopts *opt,
  * "sticky=1, cmsg=0": RFC3542 socket option
  * "sticky=1, cmsg=1": RFC2292 socket option
  */
-static int
+int
 ip6_setpktopt(int optname, u_char *buf, int len, struct ip6_pktopts *opt,
-	int priv, int sticky, int cmsg, int uproto)
+    int priv, int sticky, int cmsg, int uproto)
 {
 	int minmtupolicy;
 
@@ -3114,7 +3137,7 @@ ip6_mloopback(struct ifnet *ifp, struct mbuf *m, struct sockaddr_in6 *dst)
 /*
  * Chop IPv6 header off from the payload.
  */
-static int
+int
 ip6_splithdr(struct mbuf *m, struct ip6_exthdrs *exthdrs)
 {
 	struct mbuf *mh;
@@ -3174,4 +3197,3 @@ ip6_randomid_init(void)
 {
 	idgen32_init(&ip6_id_ctx);
 }
-

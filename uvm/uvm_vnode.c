@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_vnode.c,v 1.62 2009/06/06 17:46:44 art Exp $	*/
+/*	$OpenBSD: uvm_vnode.c,v 1.69 2009/08/06 15:28:14 oga Exp $	*/
 /*	$NetBSD: uvm_vnode.c,v 1.36 2000/11/24 20:34:01 chs Exp $	*/
 
 /*
@@ -189,10 +189,10 @@ uvn_attach(void *arg, vm_prot_t accessprot)
 	 */
 	if (uvn->u_flags & UVM_VNODE_VALID) {	/* already active? */
 
-		/* regain VREF if we were persisting */
+		/* regain vref if we were persisting */
 		if (uvn->u_obj.uo_refs == 0) {
-			VREF(vp);
-			UVMHIST_LOG(maphist," VREF (reclaim persisting vnode)",
+			vref(vp);
+			UVMHIST_LOG(maphist," vref (reclaim persisting vnode)",
 			    0,0,0,0);
 		}
 		uvn->u_obj.uo_refs++;		/* bump uvn ref! */
@@ -290,12 +290,12 @@ uvn_attach(void *arg, vm_prot_t accessprot)
 	 * as there is a valid mapping of the vnode.   dropped when the
 	 * reference count goes to zero [and we either free or persist].
 	 */
-	VREF(vp);
+	vref(vp);
 	simple_unlock(&uvn->u_obj.vmobjlock);
 	if (oldflags & UVM_VNODE_WANTED)
 		wakeup(uvn);
 
-	UVMHIST_LOG(maphist,"<- done/VREF, ret %p", &uvn->u_obj,0,0,0);
+	UVMHIST_LOG(maphist,"<- done/vref, ret %p", &uvn->u_obj,0,0,0);
 	return(&uvn->u_obj);
 }
 
@@ -555,7 +555,7 @@ uvm_vnp_terminate(struct vnode *vp)
 	while (uvn->u_obj.uo_npages) {
 #ifdef DEBUG
 		struct vm_page *pp;
-		RB_FOREACH(pp, uobj_pgs, &uvn->u_obj.memt) {
+		RB_FOREACH(pp, uvm_objtree, &uvn->u_obj.memt) {
 			if ((pp->pg_flags & PG_BUSY) == 0)
 				panic("uvm_vnp_terminate: detected unbusy pg");
 		}
@@ -594,7 +594,7 @@ uvm_vnp_terminate(struct vnode *vp)
 	} else {
 
 		/*
-		 * free the uvn now.   note that the VREF reference is already
+		 * free the uvn now.   note that the vref reference is already
 		 * gone [it is dropped when we enter the persist state].
 		 */
 		if (uvn->u_flags & UVM_VNODE_IOSYNCWANTED)
@@ -665,11 +665,6 @@ uvm_vnp_terminate(struct vnode *vp)
  *	or block.
  * => if PGO_ALLPAGE is set, then all pages in the object are valid targets
  *	for flushing.
- * => NOTE: we rely on the fact that the object's memq is a TAILQ and
- *	that new pages are inserted on the tail end of the list.   thus,
- *	we can make a complete pass through the object in one go by starting
- *	at the head and working towards the tail (new pages are put in
- *	front of us).
  * => NOTE: we are allowed to lock the page queues, so the caller
  *	must not be holding the lock on them [e.g. pagedaemon had
  *	better not call us with the queues locked]
@@ -688,19 +683,6 @@ uvm_vnp_terminate(struct vnode *vp)
  *	object we need to wait for the other PG_BUSY pages to clear
  *	off (i.e. we need to do an iosync).   also note that once a
  *	page is PG_BUSY it must stay in its object until it is un-busyed.
- *
- * note on page traversal:
- *	we can traverse the pages in an object either by going down the
- *	linked list in "uobj->memq", or we can go over the address range
- *	by page doing hash table lookups for each address.    depending
- *	on how many pages are in the object it may be cheaper to do one
- *	or the other.   we set "by_list" to true if we are using memq.
- *	if the cost of a hash lookup was equal to the cost of the list
- *	traversal we could compare the number of pages in the start->stop
- *	range to the total number of pages in the object.   however, it
- *	seems that a hash table lookup is more expensive than the linked
- *	list traversal, so we multiply the number of pages in the
- *	start->stop range by a penalty which we define below.
  */
 
 #define UVN_HASH_PENALTY 4	/* XXX: a guess */
@@ -802,6 +784,7 @@ uvn_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
 			if (flags & PGO_DEACTIVATE) {
 				if ((pp->pg_flags & PQ_INACTIVE) == 0 &&
 				    pp->wire_count == 0) {
+					pmap_page_protect(pp, VM_PROT_NONE);
 					uvm_pagedeactivate(pp);
 				}
 			} else if (flags & PGO_FREE) {
@@ -945,6 +928,7 @@ ReTry:
 			if (flags & PGO_DEACTIVATE) {
 				if ((pp->pg_flags & PQ_INACTIVE) == 0 &&
 				    pp->wire_count == 0) {
+					pmap_page_protect(ptmp, VM_PROT_NONE);
 					uvm_pagedeactivate(ptmp);
 				}
 			} else if (flags & PGO_FREE &&
@@ -1554,7 +1538,7 @@ uvm_vnp_uncache(struct vnode *vp)
 	 * it so that we can call uvn_detach to kill the uvn.
 	 */
 
-	VREF(vp);			/* seems ok, even with VOP_LOCK */
+	vref(vp);			/* seems ok, even with VOP_LOCK */
 	uvn->u_obj.uo_refs++;		/* value is now 1 */
 	simple_unlock(&uvn->u_obj.vmobjlock);
 
@@ -1686,7 +1670,7 @@ uvm_vnp_sync(struct mount *mp)
 		 * regain vnode REF).
 		 */
 		if (uvn->u_obj.uo_refs == 0)
-			VREF(vp);
+			vref(vp);
 		uvn->u_obj.uo_refs++;
 
 		SIMPLEQ_INSERT_HEAD(&uvn_sync_q, uvn, u_syncq);

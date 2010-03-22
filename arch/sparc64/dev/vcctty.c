@@ -1,4 +1,4 @@
-/*	$OpenBSD: vcctty.c,v 1.1 2009/05/10 12:24:04 kettenis Exp $	*/
+/*	$OpenBSD: vcctty.c,v 1.3 2009/11/09 17:53:39 nicm Exp $	*/
 /*
  * Copyright (c) 2009 Mark Kettenis
  *

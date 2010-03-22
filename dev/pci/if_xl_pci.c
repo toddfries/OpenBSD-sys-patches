@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xl_pci.c,v 1.25 2009/06/02 05:29:47 jsg Exp $	*/
+/*	$OpenBSD: if_xl_pci.c,v 1.28 2010/01/11 23:21:24 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -98,6 +98,7 @@ struct xl_pci_softc {
 	struct xl_softc		psc_softc;
 	pci_chipset_tag_t	psc_pc;
 	bus_size_t		psc_iosize;
+	bus_size_t		psc_funsize;
 };
 
 struct cfattach xl_pci_ca = {
@@ -189,24 +190,29 @@ xl_pci_attach(struct device *parent, struct device *self, void *aux)
 	case PCI_PRODUCT_3COM_3CCFE575BT:
 		sc->xl_flags = XL_FLAG_PHYOK | XL_FLAG_EEPROM_OFFSET_30 |
 		    XL_FLAG_8BITROM | XL_FLAG_INVERT_LED_PWR;
+		sc->xl_flags |= XL_FLAG_FUNCREG;
 		break;
 	case PCI_PRODUCT_3COM_3CCFE575CT:
 		sc->xl_flags = XL_FLAG_PHYOK | XL_FLAG_EEPROM_OFFSET_30 |
 		    XL_FLAG_8BITROM | XL_FLAG_INVERT_MII_PWR;
+		sc->xl_flags |= XL_FLAG_FUNCREG;
 		break;
 	case PCI_PRODUCT_3COM_3CCFEM656:
 		sc->xl_flags = XL_FLAG_PHYOK | XL_FLAG_EEPROM_OFFSET_30 |
 		    XL_FLAG_8BITROM | XL_FLAG_INVERT_LED_PWR |
 		    XL_FLAG_INVERT_MII_PWR;
+		sc->xl_flags |= XL_FLAG_FUNCREG;
 		break;
 	case PCI_PRODUCT_3COM_3CCFEM656B:
 		sc->xl_flags = XL_FLAG_PHYOK | XL_FLAG_EEPROM_OFFSET_30 |
 		    XL_FLAG_8BITROM | XL_FLAG_INVERT_LED_PWR |
 		    XL_FLAG_INVERT_MII_PWR;
+		sc->xl_flags |= XL_FLAG_FUNCREG;
 		break;
 	case PCI_PRODUCT_3COM_3CCFEM656C:
 		sc->xl_flags = XL_FLAG_PHYOK | XL_FLAG_EEPROM_OFFSET_30 |
 		    XL_FLAG_8BITROM | XL_FLAG_INVERT_MII_PWR;
+		sc->xl_flags |= XL_FLAG_FUNCREG;
 		break;
 	default:
 		break;
@@ -272,6 +278,7 @@ xl_pci_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 #endif
+	psc->psc_iosize = iosize;
 
 	if (sc->xl_flags & XL_FLAG_FUNCREG) {
 		if (pci_mapreg_map(pa, XL_PCI_FUNCMEM, PCI_MAPREG_TYPE_MEM, 0,
@@ -280,6 +287,7 @@ xl_pci_attach(struct device *parent, struct device *self, void *aux)
 			bus_space_unmap(sc->xl_btag, sc->xl_bhandle, iosize);
 			return;
 		}
+		psc->psc_funsize = funsize;
 		sc->intr_ack = xl_pci_intr_ack;
 	}
 
@@ -306,7 +314,6 @@ xl_pci_attach(struct device *parent, struct device *self, void *aux)
 			bus_space_unmap(sc->xl_funct, sc->xl_funch, funsize);
 		return;
 	}
-	psc->psc_iosize = iosize;
 	printf(": %s", intrstr);
 
 	xl_attach(sc);
@@ -317,15 +324,16 @@ xl_pci_detach(struct device *self, int flags)
 {
 	struct xl_pci_softc *psc = (void *)self;
 	struct xl_softc *sc = &psc->psc_softc;
-	int rv = 0;
 
-	rv = xl_detach(sc);
-	if (rv == 0) {
+	if (sc->xl_intrhand != NULL) {
 		pci_intr_disestablish(psc->psc_pc, sc->xl_intrhand);
-		bus_space_unmap(sc->xl_btag, sc->xl_bhandle, psc->psc_iosize);
+		xl_detach(sc);
 	}
-
-	return (rv);
+	if (psc->psc_iosize > 0)
+		bus_space_unmap(sc->xl_btag, sc->xl_bhandle, psc->psc_iosize);
+	if (psc->psc_funsize > 0)
+		bus_space_unmap(sc->xl_funct, sc->xl_funch, psc->psc_funsize);
+	return (0);
 }
 
 void            

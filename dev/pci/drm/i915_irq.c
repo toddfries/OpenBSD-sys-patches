@@ -32,7 +32,6 @@
 #include "i915_drv.h"
 
 int	inteldrm_intr(void *);
-int	i915_pipe_enabled(struct drm_device *, int);
 void	i915_enable_irq(drm_i915_private_t *, u_int32_t);
 void	i915_disable_irq(drm_i915_private_t *, u_int32_t);
 void	i915_enable_pipestat(drm_i915_private_t *, int, u_int32_t);
@@ -103,74 +102,17 @@ i915_disable_pipestat(drm_i915_private_t *dev_priv, int pipe, u_int32_t mask)
 	}
 }
 
-/**
- * i915_get_pipe - return the pipe associated with a given plane
- * @dev: DRM device
- * @plane: plane to look for
- *
- * The Intel Mesa & 2D drivers call the vblank routines with a plane number
- * rather than a pipe number, since they may not always be equal.  This routine
- * maps the given @plane back to a pipe number.
- */
-static int
-i915_get_pipe(struct drm_device *dev, int plane)
-{
-	drm_i915_private_t	*dev_priv = dev->dev_private;
-	u_int32_t		 dspcntr;
-
-	dspcntr = plane ? I915_READ(DSPBCNTR) : I915_READ(DSPACNTR);
-
-	return dspcntr & DISPPLANE_SEL_PIPE_MASK ? 1 : 0;
-}
-
-/**
- * i915_get_plane - return the the plane associated with a given pipe
- * @dev: DRM device
- * @pipe: pipe to look for
- *
- * The Intel Mesa & 2D drivers call the vblank routines with a plane number
- * rather than a plane number, since they may not always be equal.  This routine
- * maps the given @pipe back to a plane number.
- */
-static int
-i915_get_plane(struct drm_device *dev, int pipe)
-{
-	if (i915_get_pipe(dev, 0) == pipe)
-		return 0;
-	return 1;
-}
-
-/**
- * i915_pipe_enabled - check if a pipe is enabled
- * @dev: DRM device
- * @pipe: pipe to check
- *
- * Reading certain registers when the pipe is disabled can hang the chip.
- * Use this routine to make sure the PLL is running and the pipe is active
- * before reading such registers if unsure.
- */
-int
-i915_pipe_enabled(struct drm_device *dev, int pipe)
-{
-	drm_i915_private_t	*dev_priv = dev->dev_private;
-	bus_size_t		 pipeconf = pipe ? PIPEBCONF : PIPEACONF;
-
-	return ((I915_READ(pipeconf) & PIPEACONF_ENABLE) == PIPEACONF_ENABLE);
-}
-
 u_int32_t
-i915_get_vblank_counter(struct drm_device *dev, int plane)
+i915_get_vblank_counter(struct drm_device *dev, int pipe)
 {
 	drm_i915_private_t	*dev_priv = dev->dev_private;
 	bus_size_t		 high_frame, low_frame;
 	u_int32_t		 high1, high2, low;
-	int			 pipe;
 
-	pipe = i915_get_pipe(dev, plane);
 	high_frame = pipe ? PIPEBFRAMEHIGH : PIPEAFRAMEHIGH;
 	low_frame = pipe ? PIPEBFRAMEPIXEL : PIPEAFRAMEPIXEL;
 
-	if (i915_pipe_enabled(dev, pipe) == 0) {
+	if (inteldrm_pipe_enabled(dev_priv, pipe) == 0) {
 		DRM_DEBUG("trying to get vblank count for disabled pipe %d\n",
 		    pipe);
 		return (0);
@@ -234,16 +176,16 @@ inteldrm_intr(void *arg)
 	if (dev_priv->sarea_priv != NULL)
 		dev_priv->sarea_priv->last_dispatch = READ_BREADCRUMB(dev_priv);
 
-	if (iir & I915_USER_INTERRUPT) {
+	if (iir & I915_USER_INTERRUPT)
 		wakeup(dev_priv);
-	}
+
 	mtx_leave(&dev_priv->user_irq_lock);
 
 	if (pipea_stats & I915_VBLANK_INTERRUPT_STATUS)
-		drm_handle_vblank(dev, i915_get_plane(dev, 0));
+		drm_handle_vblank(dev, 0);
 
 	if (pipeb_stats & I915_VBLANK_INTERRUPT_STATUS)
-		drm_handle_vblank(dev, i915_get_plane(dev, 1));
+		drm_handle_vblank(dev, 1);
 
 	return (1);
 }
@@ -268,25 +210,21 @@ i915_emit_irq(struct drm_device *dev)
 }
 
 void
-i915_user_irq_get(struct drm_device *dev)
+i915_user_irq_get(struct drm_i915_private *dev_priv)
 {
-	drm_i915_private_t	*dev_priv = dev->dev_private;
+	struct drm_device	*dev = (struct drm_device *)dev_priv->drmdev;
 
-	mtx_enter(&dev_priv->user_irq_lock);
 	if (dev->irq_enabled && (++dev_priv->user_irq_refcount == 1))
 		i915_enable_irq(dev_priv, I915_USER_INTERRUPT);
-	mtx_leave(&dev_priv->user_irq_lock);
 }
 
 void
-i915_user_irq_put(struct drm_device *dev)
+i915_user_irq_put(struct drm_i915_private *dev_priv)
 {
-	drm_i915_private_t	*dev_priv = dev->dev_private;
+	struct drm_device	*dev = (struct drm_device *)dev_priv->drmdev;
 
-	mtx_enter(&dev_priv->user_irq_lock);
 	if (dev->irq_enabled && (--dev_priv->user_irq_refcount == 0))
 		i915_disable_irq(dev_priv, I915_USER_INTERRUPT);
-	mtx_leave(&dev_priv->user_irq_lock);
 }
 
 
@@ -299,10 +237,16 @@ i915_wait_irq(struct drm_device *dev, int irq_nr)
 	DRM_DEBUG("irq_nr=%d breadcrumb=%d\n", irq_nr,
 		  READ_BREADCRUMB(dev_priv));
 
-	i915_user_irq_get(dev);
-	DRM_WAIT_ON(ret, dev_priv, &dev_priv->user_irq_lock, 3 * hz, "i915wt",
-	    READ_BREADCRUMB(dev_priv) >= irq_nr);
-	i915_user_irq_put(dev);
+	mtx_enter(&dev_priv->user_irq_lock);
+	i915_user_irq_get(dev_priv);
+	while (ret == 0) {
+		if (READ_BREADCRUMB(dev_priv) >= irq_nr)
+			break;
+		ret = msleep(dev_priv, &dev_priv->user_irq_lock,
+		    PZERO | PCATCH, "i915wt", 3 * hz);
+	}
+	i915_user_irq_put(dev_priv);
+	mtx_leave(&dev_priv->user_irq_lock);
 
 	if (dev_priv->sarea_priv != NULL)
 		dev_priv->sarea_priv->last_dispatch = READ_BREADCRUMB(dev_priv);
@@ -349,12 +293,11 @@ i915_irq_wait(struct drm_device *dev, void *data, struct drm_file *file_priv)
 }
 
 int
-i915_enable_vblank(struct drm_device *dev, int plane)
+i915_enable_vblank(struct drm_device *dev, int pipe)
 {
 	drm_i915_private_t	*dev_priv = dev->dev_private;
-	int			 pipe = i915_get_pipe(dev, plane);
 
-	if (i915_pipe_enabled(dev, pipe) == 0)
+	if (inteldrm_pipe_enabled(dev_priv, pipe) == 0)
 		return (EINVAL);
 
 	mtx_enter(&dev_priv->user_irq_lock);
@@ -366,10 +309,9 @@ i915_enable_vblank(struct drm_device *dev, int plane)
 }
 
 void
-i915_disable_vblank(struct drm_device *dev, int plane)
+i915_disable_vblank(struct drm_device *dev, int pipe)
 {
 	drm_i915_private_t	*dev_priv = dev->dev_private;
-	int			 pipe = i915_get_pipe(dev, plane);
 
 	mtx_enter(&dev_priv->user_irq_lock);
 	i915_disable_pipestat(dev_priv, pipe, 
@@ -414,6 +356,8 @@ i915_driver_irq_install(struct drm_device *dev)
 		return (ENOENT);
 
 	dev->vblank->vb_max = 0xffffff; /* only 24 bits of frame count */
+	if (IS_G4X(dev_priv))
+		dev->vblank->vb_max = 0xffffffff;
 
 	/* Unmask the interrupts that we always want on. */
 	dev_priv->irq_mask_reg = ~I915_INTERRUPT_ENABLE_FIX;

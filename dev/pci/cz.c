@@ -1,4 +1,4 @@
-/*	$OpenBSD: cz.c,v 1.11 2009/01/11 16:54:59 blambert Exp $ */
+/*	$OpenBSD: cz.c,v 1.15 2009/11/09 17:53:39 nicm Exp $ */
 /*	$NetBSD: cz.c,v 1.15 2001/01/20 19:10:36 thorpej Exp $	*/
 
 /*-
@@ -964,7 +964,7 @@ czttyopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	if (ISSET(tp->t_state, TS_ISOPEN) &&
 	    ISSET(tp->t_state, TS_XCLUDE) &&
-	    p->p_ucred->cr_uid != 0)
+	    suser(p, 0) != 0)
 		return (EBUSY);
 
 	s = spltty();
@@ -1124,7 +1124,7 @@ czttywrite(dev_t dev, struct uio *uio, int flags)
  *	Poll a Cyclades-Z serial port.
  */
 int
-czttypoll(dev_t dev, int events, struct proc p)
+czttypoll(dev_t dev, int events, struct proc *p)
 {
 	struct cztty_softc *sc = CZTTY_SOFTC(dev);
 	struct tty *tp = sc->sc_tty;

@@ -1,4 +1,4 @@
-/* $OpenBSD: qli_pci.c,v 1.13 2009/02/16 21:19:07 miod Exp $ */
+/* $OpenBSD: qli_pci.c,v 1.15 2010/01/09 23:15:07 krw Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2007 David Collins <dave@davec.name>
@@ -504,7 +504,6 @@ qli_get_fw_state(struct qli_softc *sc, u_int32_t *mbox)
 
 	DNPRINTF(QLI_D_MISC, "%s: qli_get_fw_state\n", DEVNAME(sc));
 
-	bzero(mbox, sizeof(mbox));
 	mbox[0] = QLI_MBOX_OPC_GET_FW_STATE;
 	if (qli_mgmt(sc, 1, mbox))
 		goto done;
@@ -1016,7 +1015,6 @@ qli_scsi_cmd(struct scsi_xfer *xs)
 
 stuffup:
 	xs->error = XS_DRIVER_STUFFUP;
-	xs->flags |= ITSDONE;
 	s = splbio();
 	scsi_done(xs);
 	splx(s);

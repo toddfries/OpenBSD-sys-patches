@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.14 2009/06/03 21:30:19 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.20 2009/11/25 23:20:59 jsing Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -39,9 +39,6 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/extent.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
@@ -266,24 +263,8 @@ TODO hpmc/toc/pfr
 	    EX_NOWAIT))
 		panic("cannot reserve main memory");
 
-#ifdef SYSVMSG
-{
-	vaddr_t v;
-
-	v = round_page(start);
-#define valloc(name, type, num) (name) = (type *)v; v = (vaddr_t)((name)+(num))
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#undef valloc
-	v = round_page(v);
-	bzero ((void *)start, (v - start));
-	start = v;
-}
-#endif
 	/* sets resvphysmem */
-	pmap_bootstrap(start);
+	pmap_bootstrap(round_page(start));
 
 	/* space has been reserved in pmap_bootstrap() */
 	msgbufp = (struct msgbuf *)((vaddr_t)ptoa(physmem) -
@@ -396,15 +377,8 @@ cpu_startup(void)
 	 */
 	printf("%s%s\n", version, cpu_model);
 	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
-	    ptoa((psize_t)phsymem) / 1024 / 1024);
+	    ptoa((psize_t)physmem) / 1024 / 1024);
 	printf("rsvd mem = %u (%uKB)\n", ptoa(resvmem), ptoa(resvmem) / 1024);
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
 
 printf("here3\n");
 	/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss.c,v 1.34 2009/04/29 08:24:26 reyk Exp $	*/
+/*	$OpenBSD: ciss.c,v 1.40 2010/01/09 23:15:06 krw Exp $	*/
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff
@@ -125,6 +125,7 @@ ciss_get_ccb(struct ciss_softc *sc)
 	if ((ccb = TAILQ_LAST(&sc->sc_free_ccb, ciss_queue_head))) {
 		TAILQ_REMOVE(&sc->sc_free_ccb, ccb, ccb_link);
 		ccb->ccb_state = CISS_CCB_READY;
+		ccb->ccb_xs = NULL;
 	}
 	return ccb;
 }
@@ -135,6 +136,8 @@ ciss_put_ccb(struct ciss_ccb *ccb)
 	struct ciss_softc *sc = ccb->ccb_sc;
 
 	ccb->ccb_state = CISS_CCB_FREE;
+	ccb->ccb_xs = NULL;
+	ccb->ccb_data = NULL;
 	TAILQ_INSERT_TAIL(&sc->sc_free_ccb, ccb, ccb_link);
 }
 
@@ -382,12 +385,8 @@ ciss_attach(struct ciss_softc *sc)
 	sc->sc_link.device = &ciss_dev;
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.openings = sc->maxcmd / (sc->maxunits? sc->maxunits : 1);
-#if NBIO > 0
-	/* XXX Reserve some ccb's for sensor and bioctl. */
-	if (sc->maxunits < 2 && sc->sc_link.openings > 2)
-		sc->sc_link.openings -= 2;
-#endif
 	sc->sc_link.adapter = &ciss_switch;
+	sc->sc_link.luns = 1;
 	sc->sc_link.adapter_target = sc->maxunits;
 	sc->sc_link.adapter_buswidth = sc->maxunits;
 	bzero(&saa, sizeof(saa));
@@ -409,8 +408,8 @@ ciss_attach(struct ciss_softc *sc)
 #endif
 
 #if NBIO > 0
-	/* XXX for now we can only deal w/ one volume and need reserved ccbs. */
-	if (!scsibus || sc->maxunits > 1 || sc->sc_link.openings == sc->maxcmd)
+	/* XXX for now we can only deal w/ one volume. */
+	if (!scsibus || sc->maxunits > 1)
 		return 0;
 
 	/* now map all the physdevs into their lds */
@@ -505,6 +504,10 @@ ciss_cmd(struct ciss_ccb *ccb, int flags, int wait)
 				printf("more than %d dma segs\n", sc->maxsg);
 			else
 				printf("error %d loading dma map\n", error);
+			if (ccb->ccb_xs) {
+				ccb->ccb_xs->error = XS_DRIVER_STUFFUP;
+				scsi_done(ccb->ccb_xs);
+			}
 			ciss_put_ccb(ccb);
 			return (error);
 		}
@@ -676,15 +679,12 @@ ciss_done(struct ciss_ccb *ccb)
 		    ccb->ccb_dmamap->dm_mapsize, (xs->flags & SCSI_DATA_IN) ?
 		    BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
 		bus_dmamap_unload(sc->dmat, ccb->ccb_dmamap);
-		ccb->ccb_xs = NULL;
-		ccb->ccb_data = NULL;
 	}
 
 	ciss_put_ccb(ccb);
 
 	if (xs) {
 		xs->resid = 0;
-		xs->flags |= ITSDONE;
 		CISS_DPRINTF(CISS_D_CMD, ("scsi_done(%p) ", xs));
 		scsi_done(xs);
 	}
@@ -764,6 +764,9 @@ ciss_inq(struct ciss_softc *sc, struct ciss_inquiry *inq)
 	struct ciss_cmd *cmd;
 
 	ccb = ciss_get_ccb(sc);
+	if (ccb == NULL)
+		return ENOMEM;
+
 	ccb->ccb_len = sizeof(*inq);
 	ccb->ccb_data = inq;
 	cmd = &ccb->ccb_cmd;
@@ -796,6 +799,9 @@ ciss_ldmap(struct ciss_softc *sc)
 	total = sizeof(*lmap) + (sc->maxunits - 1) * sizeof(lmap->map);
 
 	ccb = ciss_get_ccb(sc);
+	if (ccb == NULL)
+		return ENOMEM;
+
 	ccb->ccb_len = total;
 	ccb->ccb_data = lmap;
 	cmd = &ccb->ccb_cmd;
@@ -836,6 +842,9 @@ ciss_sync(struct ciss_softc *sc)
 	flush->flush = sc->sc_flush;
 
 	ccb = ciss_get_ccb(sc);
+	if (ccb == NULL)
+		return ENOMEM;
+
 	ccb->ccb_len = sizeof(*flush);
 	ccb->ccb_data = flush;
 	cmd = &ccb->ccb_cmd;
@@ -886,12 +895,17 @@ ciss_scsi_raw_cmd(struct scsi_xfer *xs)	/* TODO */
 	/* TODO check this target has not yet employed w/ any volume */
 
 	ccb = ciss_get_ccb(sc);
+	if (ccb == NULL) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		CISS_UNLOCK(sc, lock);
+		return (COMPLETE);
+	}
+
 	cmd = &ccb->ccb_cmd;
 	ccb->ccb_len = xs->datalen;
 	ccb->ccb_data = xs->data;
 	ccb->ccb_xs = xs;
-
-
 
 	cmd->cdblen = xs->cmdlen;
 	cmd->flags = CISS_CDB_CMD | CISS_CDB_SIMPL;
@@ -903,16 +917,10 @@ ciss_scsi_raw_cmd(struct scsi_xfer *xs)	/* TODO */
 	bzero(&cmd->cdb[0], sizeof(cmd->cdb));
 	bcopy(xs->cmd, &cmd->cdb[0], CISS_MAX_CDB);
 
-	if (ciss_cmd(ccb, BUS_DMA_WAITOK,
-	    xs->flags & (SCSI_POLL|SCSI_NOSLEEP))) {
-		xs->error = XS_DRIVER_STUFFUP;
-		scsi_done(xs);
-		CISS_UNLOCK(sc, lock);
-		return (COMPLETE);
-	}
+	ciss_cmd(ccb, BUS_DMA_WAITOK, xs->flags & (SCSI_POLL|SCSI_NOSLEEP));
 
 	CISS_UNLOCK(sc, lock);
-	return xs->flags & SCSI_POLL? COMPLETE : SUCCESSFULLY_QUEUED;
+	return (COMPLETE);
 }
 
 int
@@ -945,6 +953,13 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 	/* XXX emulate SYNCHRONIZE_CACHE ??? */
 
 	ccb = ciss_get_ccb(sc);
+	if (ccb == NULL) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		CISS_UNLOCK(sc, lock);
+		return (COMPLETE);
+	}
+
 	cmd = &ccb->ccb_cmd;
 	ccb->ccb_len = xs->datalen;
 	ccb->ccb_data = xs->data;
@@ -961,16 +976,10 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 	bzero(&cmd->cdb[0], sizeof(cmd->cdb));
 	bcopy(xs->cmd, &cmd->cdb[0], CISS_MAX_CDB);
 
-	if (ciss_cmd(ccb, BUS_DMA_WAITOK,
-	    xs->flags & (SCSI_POLL|SCSI_NOSLEEP))) {
-		xs->error = XS_DRIVER_STUFFUP;
-		scsi_done(xs);
-		CISS_UNLOCK(sc, lock);
-		return (COMPLETE);
-	}
+	ciss_cmd(ccb, BUS_DMA_WAITOK, xs->flags & (SCSI_POLL|SCSI_NOSLEEP));
 
 	CISS_UNLOCK(sc, lock);
-	return xs->flags & SCSI_POLL? COMPLETE : SUCCESSFULLY_QUEUED;
+	return (COMPLETE);
 }
 
 int
@@ -1291,6 +1300,7 @@ ciss_ldid(struct ciss_softc *sc, int target, struct ciss_ldid *id)
 	ccb = ciss_get_ccb(sc);
 	if (ccb == NULL)
 		return ENOMEM;
+
 	ccb->ccb_len = sizeof(*id);
 	ccb->ccb_data = id;
 	ccb->ccb_xs = NULL;
@@ -1319,6 +1329,7 @@ ciss_ldstat(struct ciss_softc *sc, int target, struct ciss_ldstat *stat)
 	ccb = ciss_get_ccb(sc);
 	if (ccb == NULL)
 		return ENOMEM;
+
 	ccb->ccb_len = sizeof(*stat);
 	ccb->ccb_data = stat;
 	ccb->ccb_xs = NULL;
@@ -1347,6 +1358,7 @@ ciss_pdid(struct ciss_softc *sc, u_int8_t drv, struct ciss_pdid *id, int wait)
 	ccb = ciss_get_ccb(sc);
 	if (ccb == NULL)
 		return ENOMEM;
+
 	ccb->ccb_len = sizeof(*id);
 	ccb->ccb_data = id;
 	ccb->ccb_xs = NULL;
@@ -1425,6 +1437,7 @@ ciss_blink(struct ciss_softc *sc, int ld, int pd, int stat,
 	ccb = ciss_get_ccb(sc);
 	if (ccb == NULL)
 		return ENOMEM;
+
 	ccb->ccb_len = sizeof(*blink);
 	ccb->ccb_data = blink;
 	ccb->ccb_xs = NULL;

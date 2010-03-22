@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.27 2009/06/09 02:56:38 krw Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.30 2009/12/09 18:45:49 deraadt Exp $	*/
 /*	$NetBSD: pmap.h,v 1.1 2003/04/26 18:39:46 fvdl Exp $	*/
 
 /*
@@ -329,9 +329,10 @@ struct pmap {
 };
 
 /*
- * MD flags that we use for pmap_enter:
+ * MD flags that we use for pmap_enter (in the pa):
  */
-#define	PMAP_NOCACHE	PMAP_MD0 /* set the non-cacheable bit. */
+#define PMAP_PA_MASK	~((paddr_t)PAGE_MASK) /* to remove the flags */
+#define	PMAP_NOCACHE	0x1 /* set the non-cacheable bit. */
 
 /*
  * We keep mod/ref flags in struct vm_page->pg_flags.
@@ -431,6 +432,17 @@ void	pmap_tlb_shootwait(void);
 paddr_t	pmap_prealloc_lowmem_ptps(paddr_t);
 
 void	pagezero(vaddr_t);
+
+/* 
+ * functions for flushing the cache for vaddrs and pages.
+ * these functions are not part of the MI pmap interface and thus
+ * should not be used as such.
+ */
+void	pmap_flush_cache(vaddr_t, vsize_t);
+#define pmap_flush_page(paddr) do {					\
+	KDASSERT(PHYS_TO_VM_PAGE(paddr) != NULL);			\
+	pmap_flush_cache(PMAP_DIRECT_MAP(paddr), PAGE_SIZE);		\
+} while (/* CONSTCOND */ 0)
 
 #define	PMAP_STEAL_MEMORY	/* enable pmap_steal_memory() */
 #define PMAP_GROWKERNEL		/* turn on pmap_growkernel interface */

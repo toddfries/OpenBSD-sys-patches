@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.98 2009/02/16 21:19:07 miod Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.119 2010/01/15 05:50:31 krw Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -53,6 +53,7 @@
 #include <sys/queue.h>
 #include <sys/timeout.h>
 #include <sys/workq.h>
+#include <sys/mutex.h>
 #include <machine/cpu.h>
 #include <scsi/scsi_debug.h>
 
@@ -234,19 +235,30 @@ _4ltol(u_int8_t *bytes)
 #define DEVID_T10	3
 
 struct devid {
-	int		 d_type;
-	u_int		 d_len;
-	u_int8_t	*d_id;
+	u_int8_t	d_type;
+	u_int8_t	d_flags;
+#define DEVID_F_PRINT		(1<<0)
+	u_int8_t	d_refcount;
+	u_int8_t	d_len;
+
+	/*
+	 * the devid struct is basically a header, the actual id is allocated
+	 * immediately after it.
+	 */
 };
 
-#define DEVID_CMP(_a, _b) (				\
-	(_a) != NULL &&					\
-	(_b) != NULL &&					\
-	(_a)->d_type != DEVID_NONE &&			\
-	(_a)->d_type == (_b)->d_type &&			\
-	(_a)->d_len == (_b)->d_len &&			\
-	bcmp((_a)->d_id, (_b)->d_id, (_a)->d_len) == 0	\
+#define DEVID_CMP(_a, _b) (					\
+	(_a) != NULL && (_b) != NULL &&				\
+	((_a) == (_b) ||					\
+	((_a)->d_type != DEVID_NONE &&				\
+	 (_a)->d_type == (_b)->d_type &&			\
+	 (_a)->d_len == (_b)->d_len &&				\
+	 bcmp((_a) + 1, (_b) + 1, (_a)->d_len) == 0))		\
 )
+
+struct devid *	devid_alloc(u_int8_t, u_int8_t, u_int8_t, u_int8_t *);
+struct devid *	devid_copy(struct devid *);
+void		devid_free(struct devid *);
 
 /*
  * The following documentation tries to describe the relationship between the
@@ -304,9 +316,7 @@ struct scsi_adapter {
  * return values for scsi_cmd()
  */
 #define SUCCESSFULLY_QUEUED	0
-#define TRY_AGAIN_LATER		1
 #define	COMPLETE		2
-#define	ESCAPE_NOT_SUPPORTED	3
 #define NO_CCB			4
 
 /*
@@ -330,6 +340,10 @@ struct scsi_device {
  * as well.
  */
 struct scsi_link {
+	u_int		state;
+#define SDEV_S_WAITING		(1<<0)
+#define SDEV_S_DYING		(1<<1)
+
 	u_int8_t scsibus;		/* the Nth scsibus */
 	u_int8_t luns;
 	u_int16_t target;		/* targ of this dev */
@@ -339,11 +353,9 @@ struct scsi_link {
 	u_int64_t node_wwn;		/* world wide name of node */
 	u_int16_t adapter_target;	/* what are we on the scsi bus */
 	u_int16_t adapter_buswidth;	/* 8 (regular) or 16 (wide). (0 becomes 8) */
-	u_int16_t active;		/* operations in progress */
 	u_int16_t flags;		/* flags that all devices have */
 #define	SDEV_REMOVABLE	 	0x0001	/* media is removable */
 #define	SDEV_MEDIA_LOADED 	0x0002	/* device figures are still valid */
-#define	SDEV_WAITING	 	0x0004	/* a process is waiting for this */
 #define	SDEV_OPEN	 	0x0008	/* at least 1 open session */
 #define	SDEV_DBX		0x00f0	/* debugging flags (scsi_debug.h) */
 #define	SDEV_EJECTING		0x0100	/* eject on device close */
@@ -368,7 +380,8 @@ struct scsi_link {
 	void	*adapter_softc;		/* needed for call to foo_scsi_cmd */
 	struct	scsibus_softc *bus;	/* link to the scsibus we're on */
 	struct	scsi_inquiry_data inqdata; /* copy of INQUIRY data from probe */
-	struct  devid id;
+	struct  devid *id;
+	struct	mutex mtx;
 };
 
 int	scsiprint(void *, const char *);
@@ -444,6 +457,8 @@ struct scsi_xfer {
 	 * timeout structure for hba's to use for a command
 	 */
 	struct timeout stimeout;
+	void *cookie;
+	void (*done)(struct scsi_xfer *);
 };
 
 /*
@@ -452,7 +467,6 @@ struct scsi_xfer {
 #define	SCSI_NOSLEEP	0x00001	/* don't sleep */
 #define	SCSI_POLL	0x00002	/* poll for completion */
 #define	SCSI_AUTOCONF	0x00003	/* shorthand for SCSI_POLL | SCSI_NOSLEEP */
-#define	SCSI_USER	0x00004	/* Is a user cmd, call scsi_user_done	*/
 #define	ITSDONE		0x00008	/* the transfer is as done as it gets	*/
 #define	SCSI_SILENT	0x00020	/* don't announce NOT READY or MEDIA CHANGE */
 #define	SCSI_IGNORE_NOT_READY		0x00040	/* ignore NOT READY */
@@ -463,7 +477,6 @@ struct scsi_xfer {
 #define	SCSI_DATA_OUT	0x01000	/* expect data to flow OUT of memory	*/
 #define	SCSI_TARGET	0x02000	/* This defines a TARGET mode op.	*/
 #define	SCSI_ESCAPE	0x04000	/* Escape operation			*/
-#define SCSI_URGENT	0x08000	/* Urgent operation (e.g., HTAG)	*/
 #define	SCSI_PRIVATE	0xf0000	/* private to each HBA flags */
 
 /*
@@ -486,6 +499,7 @@ struct scsi_xfer {
 #define XS_BUSY		5	/* The device busy, try again later?	  */
 #define XS_SHORTSENSE   6	/* Check the ATAPI sense for the error */
 #define XS_RESET	8	/* bus was reset; possible retry command  */
+#define XS_NO_CCB	9	/* device should requeue io and retry */
 
 /*
  * Possible retries for scsi_test_unit_ready()
@@ -539,10 +553,16 @@ void	sc_print_addr(struct scsi_link *);
 int	scsi_report_luns(struct scsi_link *, int,
 	    struct scsi_report_luns_data *, u_int32_t, int, int);
 void	scsi_minphys(struct buf *, struct scsi_link *);
+int	scsi_interpret_sense(struct scsi_xfer *);
 
-void	show_scsi_xs(struct scsi_xfer *);
+void		 scsi_buf_enqueue(struct buf *, struct buf *, struct mutex *);
+struct buf	*scsi_buf_dequeue(struct buf *, struct mutex *);
+void		 scsi_buf_requeue(struct buf *, struct buf *, struct mutex *);
+void		 scsi_buf_killqueue(struct buf *, struct mutex *);
+
+void	scsi_xs_show(struct scsi_xfer *);
 void	scsi_print_sense(struct scsi_xfer *);
-void	show_mem(u_char *, int);
+void	scsi_show_mem(u_char *, int);
 void	scsi_strvis(u_char *, u_char *, int);
 int	scsi_delay(struct scsi_xfer *, int);
 
@@ -554,8 +574,27 @@ int	scsi_detach_bus(struct scsibus_softc *, int);
 int	scsi_detach_target(struct scsibus_softc *, int, int);
 int	scsi_detach_lun(struct scsibus_softc *, int, int, int);
 
+int	scsi_req_probe(struct scsibus_softc *, int, int);
+int	scsi_req_detach(struct scsibus_softc *, int, int, int);
+
+void	scsi_activate(struct scsibus_softc *, int, int, int);
+
 extern const u_int8_t version_to_spc[];
 #define SCSISPC(x)(version_to_spc[(x) & SID_ANSII])
+
+struct scsi_xfer *	scsi_xs_get(struct scsi_link *, int);
+void			scsi_xs_exec(struct scsi_xfer *);
+int			scsi_xs_sync(struct scsi_xfer *);
+void			scsi_xs_put(struct scsi_xfer *);
+
+/*
+ * Entrypoints for multipathing
+ */
+int	mpath_path_attach(struct scsi_link *);
+int	mpath_path_detach(struct scsi_link *, int);
+
+void	mpath_path_activate(struct scsi_link *);
+void	mpath_path_deactivate(struct scsi_link *);
 
 #endif /* _KERNEL */
 #endif /* SCSI_SCSICONF_H */

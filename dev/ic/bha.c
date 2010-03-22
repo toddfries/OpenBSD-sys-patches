@@ -1,4 +1,4 @@
-/*	$OpenBSD: bha.c,v 1.17 2009/02/16 21:19:06 miod Exp $	*/
+/*	$OpenBSD: bha.c,v 1.20 2010/01/10 00:10:23 krw Exp $	*/
 /*	$NetBSD: bha.c,v 1.27 1998/11/19 21:53:00 thorpej Exp $	*/
 
 #undef BHADEBUG
@@ -73,10 +73,6 @@
 
 #include <dev/ic/bhareg.h>
 #include <dev/ic/bhavar.h>
-
-#ifndef DDB
-#define Debugger() panic("should call debugger here (bha.c)")
-#endif /* ! DDB */
 
 #define	BHA_MAXXFER	((BHA_NSEG - 1) << PGSHIFT)
 #define	ISWIDE(sc)	((sc)->sc_iswide)
@@ -754,16 +750,14 @@ bha_done(sc, ccb)
 	 */
 #ifdef BHADIAG
 	if (ccb->flags & CCB_SENDING) {
-		printf("%s: exiting ccb still in transit!\n",
+		panic("%s: exiting ccb still in transit!\n",
 		    sc->sc_dev.dv_xname);
-		Debugger();
 		return;
 	}
 #endif
 	if ((ccb->flags & CCB_ALLOC) == 0) {
-		printf("%s: exiting ccb not allocated!\n",
+		panic("%s: exiting ccb not allocated!\n",
 		    sc->sc_dev.dv_xname);
-		Debugger();
 		return;
 	}
 	if (xs->error == XS_NOERROR) {
@@ -799,7 +793,6 @@ bha_done(sc, ccb)
 			xs->resid = 0;
 	}
 	bha_free_ccb(sc, ccb);
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 }
 
@@ -1412,6 +1405,9 @@ bha_scsi_cmd(xs)
 bad:
 	xs->error = XS_DRIVER_STUFFUP;
 	bha_free_ccb(sc, ccb);
+	s = splbio();
+	scsi_done(xs);
+	splx(s);
 	return (COMPLETE);
 }
 
@@ -1468,10 +1464,8 @@ bha_timeout(arg)
 	 * If the ccb's mbx is not free, then the board has gone Far East?
 	 */
 	bha_collect_mbo(sc);
-	if (ccb->flags & CCB_SENDING) {
-		printf("%s: not taking commands!\n", sc->sc_dev.dv_xname);
-		Debugger();
-	}
+	if (ccb->flags & CCB_SENDING)
+		panic("%s: not taking commands!\n", sc->sc_dev.dv_xname);
 #endif
 
 	/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.70 2009/06/06 21:25:19 deraadt Exp $	*/
+/*	$OpenBSD: exec_elf.c,v 1.72 2010/01/14 23:12:11 schwarze Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -201,7 +201,7 @@ ELFNAME(check_header)(Elf_Ehdr *ehdr)
 	/*
 	 * We need to check magic, class size, endianess, and version before
 	 * we look at the rest of the Elf_Ehdr structure. These few elements
-	 * are represented in a machine independant fashion.
+	 * are represented in a machine independent fashion.
 	 */
 	if (!IS_ELF(*ehdr) ||
 	    ehdr->e_ident[EI_CLASS] != ELF_TARG_CLASS ||
@@ -209,7 +209,7 @@ ELFNAME(check_header)(Elf_Ehdr *ehdr)
 	    ehdr->e_ident[EI_VERSION] != ELF_TARG_VER)
 		return (ENOEXEC);
 
-	/* Now check the machine dependant header */
+	/* Now check the machine dependent header */
 	if (ehdr->e_machine != ELF_TARG_MACH ||
 	    ehdr->e_version != ELF_TARG_VER)
 		return (ENOEXEC);
@@ -641,7 +641,7 @@ native:
 			    pp, &addr, &size, &prot, flags);
 
 			/*
-			 * Update exe_base in case allignment was off.
+			 * Update exe_base in case alignment was off.
 			 * For PIE, addr is relative to exe_base so
 			 * adjust it (non PIE exe_base is 0 so no change).
 			 */
@@ -752,15 +752,6 @@ native:
 		epp->ep_emul_arg = ap;
 		epp->ep_interp_pos = pos;
 	}
-
-#if defined(COMPAT_SVR4) && defined(i386) && 0	/* nothing sets OOS_DELL... */
-#ifndef ELF_MAP_PAGE_ZERO
-	/* Dell SVR4 maps page zero, yeuch! */
-	if (p->p_os == OOS_DELL)
-#endif
-		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_readvn, PAGE_SIZE, 0,
-		    epp->ep_vp, 0, VM_PROT_READ);
-#endif
 
 	free(ph, M_TEMP);
 	vn_marktext(epp->ep_vp);

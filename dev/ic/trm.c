@@ -1,4 +1,4 @@
-/*	$OpenBSD: trm.c,v 1.12 2009/02/16 21:19:07 miod Exp $
+/*	$OpenBSD: trm.c,v 1.17 2010/02/27 00:39:40 krw Exp $
  * ------------------------------------------------------------
  *   O.S       : OpenBSD
  *   File Name : trm.c
@@ -354,12 +354,18 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 		printf("%s: target=%d >= %d\n",
 		    sc->sc_device.dv_xname, target, TRM_MAX_TARGETS);
 		xs->error = XS_DRIVER_STUFFUP;
+		intflag = splbio();
+		scsi_done(xs);
+		splx(intflag);
 		return COMPLETE;
 	}
 	if (lun >= TRM_MAX_LUNS) {
 		printf("%s: lun=%d >= %d\n",
 		    sc->sc_device.dv_xname, lun, TRM_MAX_LUNS);
 		xs->error = XS_DRIVER_STUFFUP;
+		intflag = splbio();
+		scsi_done(xs);
+		splx(intflag);
 		return COMPLETE;
 	}
 
@@ -367,6 +373,9 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 	if (pDCB == NULL) {
 		/* Removed as a result of INQUIRY proving no device present */
 		xs->error = XS_DRIVER_STUFFUP;
+		intflag = splbio();
+		scsi_done(xs);
+		splx(intflag);
 		return COMPLETE;
  	}
  
@@ -377,14 +386,10 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 #endif
 		trm_reset(sc);
 		xs->error = XS_NOERROR;
+		intflag = splbio();
+		scsi_done(xs);
+		splx(intflag);
 		return COMPLETE;
-	}
-
-	if (xferflags & ITSDONE) {
-#ifdef TRM_DEBUG0
-		printf("%s: Is it done?\n", sc->sc_device.dv_xname);
-#endif
-		xs->flags &= ~ITSDONE;
 	}
 
 	xs->error  = XS_NOERROR;
@@ -425,6 +430,7 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 			 * free SRB
 			 */
 			TAILQ_INSERT_HEAD(&sc->freeSRB, pSRB, link);
+			scsi_done(xs);
 			splx(intflag);
 			return COMPLETE;
 		}
@@ -450,11 +456,7 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 
 	memcpy(pSRB->CmdBlock, xs->cmd, xs->cmdlen);
 
-	splx (intflag);
-
 	timeout_set(&xs->stimeout, trm_timeout, pSRB);
-
-	intflag = splbio();
 
 	pSRB->SRBFlag |= TRM_ON_WAITING_SRB;
 	TAILQ_INSERT_TAIL(&sc->waitingSRB, pSRB, link);
@@ -2080,8 +2082,6 @@ trm_FinishSRB(struct trm_softc *sc, struct trm_scsi_req_q *pSRB)
 	}
 
 	trm_ReleaseSRB(sc, pSRB);
-
-	xs->flags |= ITSDONE;
 
 	/*
 	 * Notify cmd done

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sab.c,v 1.25 2008/05/24 00:11:31 kettenis Exp $	*/
+/*	$OpenBSD: sab.c,v 1.27 2009/11/09 17:53:39 nicm Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)

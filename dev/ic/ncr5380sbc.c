@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr5380sbc.c,v 1.21 2008/11/24 00:31:35 krw Exp $	*/
+/*	$OpenBSD: ncr5380sbc.c,v 1.23 2010/01/09 23:15:06 krw Exp $	*/
 /*	$NetBSD: ncr5380sbc.c,v 1.13 1996/10/13 01:37:25 christos Exp $	*/
 
 /*
@@ -803,7 +803,6 @@ finish:
 	sc->sc_ncmds--;
 
 	/* Tell common SCSI code it is done. */
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 
 	sc->sc_state = NCR_IDLE;
@@ -1529,10 +1528,6 @@ success:
  * SYNCHRONOUS DATA TRANSFER REQUEST	if appropriate
  * NOOP				if nothing else fits the bill ...
  */
-
-#define IS1BYTEMSG(m) (((m) != 0x01 && (m) < 0x20) || (m) >= 0x80)
-#define IS2BYTEMSG(m) (((m) & 0xf0) == 0x20)
-#define ISEXTMSG(m) ((m) == 0x01)
 
 /*
  * Precondition:

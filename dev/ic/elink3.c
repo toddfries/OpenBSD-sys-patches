@@ -1,4 +1,4 @@
-/*	$OpenBSD: elink3.c,v 1.73 2008/11/28 02:44:17 brad Exp $	*/
+/*	$OpenBSD: elink3.c,v 1.76 2009/11/24 18:12:39 claudio Exp $	*/
 /*	$NetBSD: elink3.c,v 1.32 1997/05/14 00:22:00 thorpej Exp $	*/
 
 /*
@@ -94,7 +94,7 @@ struct ep_media {
  * (i.e., EPMEDIA_ constants)  forcing order of entries. 
  *  Note that 3 is reserved.
  */
-const struct ep_media ep_vortex_media[8] = {
+const struct ep_media ep_vortex_media[] = {
   { EP_PCI_UTP,        EPC_UTP, "utp",	    IFM_ETHER|IFM_10_T,
        EPMEDIA_10BASE_T },
   { EP_PCI_AUI,        EPC_AUI, "aui",	    IFM_ETHER|IFM_10_5,
@@ -117,14 +117,14 @@ const struct ep_media ep_vortex_media[8] = {
  * map from media-present bits in register CNFG_CNTRL
  * (window 0, offset ?) to  ifmedia "media words" and printable names.
  */
-struct ep_media ep_isa_media[3] = {
+struct ep_media ep_isa_media[] = {
   { EP_W0_CC_UTP,  EPC_UTP, "utp",   IFM_ETHER|IFM_10_T, EPMEDIA_10BASE_T },
   { EP_W0_CC_AUI,  EPC_AUI, "aui",   IFM_ETHER|IFM_10_5, EPMEDIA_AUI },
   { EP_W0_CC_BNC,  EPC_BNC, "bnc",   IFM_ETHER|IFM_10_2, EPMEDIA_10BASE_2 },
 };
 
 /* Map vortex reset_options bits to if_media codes. */
-const u_int ep_default_to_media[8] = {
+const u_int ep_default_to_media[] = {
 	IFM_ETHER | IFM_10_T,
 	IFM_ETHER | IFM_10_5,
 	0, 			/* reserved by 3Com */
@@ -352,6 +352,8 @@ epconfig(sc, chipset, enaddr)
 	ifp->if_watchdog = epwatchdog;
 	ifp->if_flags =
 	    IFF_BROADCAST | IFF_SIMPLEX | IFF_NOTRAILERS | IFF_MULTICAST;
+	/* 64 packets are around 100ms on 10Mbps */
+	IFQ_SET_MAXLEN(&ifp->if_snd, 64);
 	IFQ_SET_READY(&ifp->if_snd);
 
 	if_attach(ifp);
@@ -480,7 +482,7 @@ ep_isa_probemedia(sc)
 	conn = 0;
 	GO_WINDOW(0);
 	ep_w0_config = bus_space_read_2(iot, ioh, EP_W0_CONFIG_CTRL);
-	for (i = 0; i < 3; i++) {
+	for (i = 0; i < nitems(ep_isa_media); i++) {
 		struct ep_media * epm = ep_isa_media + i;
 
 		if ((ep_w0_config & epm->epm_eeprom_data) != 0) {
@@ -544,7 +546,7 @@ ep_vortex_probemedia(sc)
 
 	/* set available media options */
 	conn = 0;
-	for (i = 0; i < 8; i++) {
+	for (i = 0; i < nitems(ep_vortex_media); i++) {
 		const struct ep_media *epm = ep_vortex_media + i;
 
 		if ((reset_options & epm->epm_eeprom_data) != 0) {
@@ -559,7 +561,7 @@ ep_vortex_probemedia(sc)
 	sc->ep_connectors = conn;
 
 	/* Show  eeprom's idea of default media.  */
-	medium_name = (default_media > 8)
+	medium_name = (default_media > nitems(ep_vortex_media) - 1)
 		? "(unknown/impossible media)"
 		: ep_vortex_media[default_media].epm_name;
 	printf(" default %s%s",
@@ -1372,36 +1374,31 @@ epget(sc, totlen)
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-	struct mbuf *top, **mp, *m;
-	int len, pad, sh, rxreg;
+	struct mbuf *m;
+	int len, pad, off, sh, rxreg;
+
+	splassert(IPL_NET);
 
 	m = sc->mb[sc->next_mb];
 	sc->mb[sc->next_mb] = NULL;
 	if (m == NULL) {
-		MGETHDR(m, M_DONTWAIT, MT_DATA);
-		if (m == NULL)
-			return (NULL);
-	} else {
+		m = MCLGETI(NULL, M_DONTWAIT, NULL, MCLBYTES);
 		/* If the queue is no longer full, refill. */
-		if (sc->last_mb == sc->next_mb)
+		if (!timeout_pending(&sc->sc_epmbuffill_tmo))
 			timeout_add(&sc->sc_epmbuffill_tmo, 1);
-		/* Convert one of our saved mbuf's. */
-		sc->next_mb = (sc->next_mb + 1) % MAX_MBS;
-		m = m_inithdr(m);
 	}
+	if (!m)
+		return (NULL);
+
+	sc->next_mb = (sc->next_mb + 1) % MAX_MBS;
+
+	len = MCLBYTES;
 	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = totlen;
+	m->m_len = totlen;
 	pad = ALIGN(sizeof(struct ether_header)) - sizeof(struct ether_header);
-	len = MHLEN;
-	if (totlen >= MINCLSIZE) {
-		MCLGET(m, M_DONTWAIT);
-		if (m->m_flags & M_EXT)
-			len = MCLBYTES;
-	}
 	m->m_data += pad;
 	len -= pad;
-	top = 0;
-	mp = &top;
 
 	/*
 	 * We read the packet at splhigh() so that an interrupt from another
@@ -1412,56 +1409,41 @@ epget(sc, totlen)
 
 	rxreg = ep_w1_reg(sc, EP_W1_RX_PIO_RD_1);
 
-	while (totlen > 0) {
-		if (top) {
-			m = sc->mb[sc->next_mb];
-			sc->mb[sc->next_mb] = NULL;
-			if (m == NULL) {
-				MGET(m, M_DONTWAIT, MT_DATA);
-				if (m == NULL) {
-					splx(sh);
-					m_freem(top);
-					return (NULL);
-				}
-			} else
-				sc->next_mb = (sc->next_mb + 1) % MAX_MBS;
+	off = 0;
+	while (totlen) {
+		len = min(totlen, M_TRAILINGSPACE(m));
+		if (len == 0)
+			panic("ep_get: packet does not fit in MCLBYTES");
 
-			len = MLEN;
-		}
-		if (top && totlen >= MINCLSIZE) {
-			MCLGET(m, M_DONTWAIT);
-			if (m->m_flags & M_EXT)
-				len = MCLBYTES;
-		}
-		len = min(totlen, len);
-		if (EP_IS_BUS_32(sc->bustype)) {
-			if (len > 3) {
-				len &= ~3;
-				bus_space_read_raw_multi_4(iot, ioh, rxreg,
-				    mtod(m, u_int8_t *), len);
-			} else
-				bus_space_read_multi_1(iot, ioh, rxreg,
-				    mtod(m, u_int8_t *), len);
+		if (EP_IS_BUS_32(sc->bustype))
+			pad = (u_long)(mtod(m, u_int8_t *) + off) & 0x3;
+		else
+			pad = (u_long)(mtod(m, u_int8_t *) + off) & 0x1;
+
+		if (pad) {
+			bus_space_read_multi_1(iot, ioh, rxreg,
+			    mtod(m, u_int8_t *) + off, pad);
+		} else if (EP_IS_BUS_32(sc->bustype) && len > 3) {
+			len &= ~3;
+			bus_space_read_raw_multi_4(iot, ioh, rxreg,
+			    mtod(m, u_int8_t *) + off, len);
+		} else if (len > 1) {
+			len &= ~1;
+			bus_space_read_raw_multi_2(iot, ioh, rxreg,
+			    mtod(m, u_int8_t *) + off, len);
 		} else {
-			if (len > 1) {
-				len &= ~1;
-				bus_space_read_raw_multi_2(iot, ioh, rxreg,
-				    mtod(m, u_int8_t *), len);
-			} else
-				*(mtod(m, u_int8_t *)) =
-				    bus_space_read_1(iot, ioh, rxreg);
+			bus_space_read_multi_1(iot, ioh, rxreg,
+			    mtod(m, u_int8_t *) + off, len);
 		}
-		m->m_len = len;
+		off += len;
 		totlen -= len;
-		*mp = m;
-		mp = &m->m_next;
 	}
 
 	ep_discard_rxtop(iot, ioh);
 
 	splx(sh);
 
-	return top;
+	return m;
 }
 
 int
@@ -1693,17 +1675,15 @@ epmbuffill(v)
 	int s, i;
 
 	s = splnet();
-	i = sc->last_mb;
-	do {
-		if (sc->mb[i] == NULL)
-			MGET(sc->mb[i], M_DONTWAIT, MT_DATA);
-		if (sc->mb[i] == NULL)
-			break;
-		i = (i + 1) % MAX_MBS;
-	} while (i != sc->next_mb);
-	sc->last_mb = i;
+	for (i = 0; i < MAX_MBS; i++) {
+		if (sc->mb[i] == NULL) {
+			sc->mb[i] = MCLGETI(NULL, M_DONTWAIT, NULL, MCLBYTES);
+			if (sc->mb[i] == NULL)
+				break;
+		}
+	}
 	/* If the queue was not filled, try again. */
-	if (sc->last_mb != sc->next_mb)
+	if (i < MAX_MBS)
 		timeout_add(&sc->sc_epmbuffill_tmo, 1);
 	splx(s);
 }
@@ -1721,7 +1701,7 @@ epmbufempty(sc)
 			sc->mb[i] = NULL;
 		}
 	}
-	sc->last_mb = sc->next_mb = 0;
+	sc->next_mb = 0;
 	timeout_del(&sc->sc_epmbuffill_tmo);
 	splx(s);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dpt.c,v 1.20 2009/02/16 21:19:06 miod Exp $	*/
+/*	$OpenBSD: dpt.c,v 1.23 2010/01/09 23:15:06 krw Exp $	*/
 /*	$NetBSD: dpt.c,v 1.12 1999/10/23 16:26:33 ad Exp $	*/
 
 /*-
@@ -854,7 +854,6 @@ dpt_done_ccb(sc, ccb)
 	scsipi_done(xs);
 #endif /* __NetBSD__ */
 #ifdef __OpenBSD__
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 #endif /* __OpenBSD__ */
 }
@@ -902,8 +901,9 @@ dpt_scsi_cmd(xs)
 
 	/* Cmds must be no more than 12 bytes for us */
 	if (xs->cmdlen > 12) {
-		splx(s);
 		xs->error = XS_DRIVER_STUFFUP;
+		scsi_done(xs);
+		splx(s);
 		return (COMPLETE);
 	}
 
@@ -914,8 +914,9 @@ dpt_scsi_cmd(xs)
 #ifdef __OpenBSD__
 		if ((xs->flags & SCSI_RESET) != 0) {
 #endif /* __OpenBSD__ */
-			splx(s);
 			xs->error = XS_DRIVER_STUFFUP;
+			scsi_done(xs);
+			splx(s);
 			return (COMPLETE);
 		}
 
@@ -1001,6 +1002,9 @@ dpt_scsi_cmd(xs)
 		
 			xs->error = XS_DRIVER_STUFFUP;
 			dpt_free_ccb(sc, ccb);
+			s = splbio();
+			scsi_done(xs);
+			splx(s);
 			return (COMPLETE);
 		}
 
@@ -1054,7 +1058,7 @@ dpt_scsi_cmd(xs)
 	if (dpt_cmd(sc, &ccb->ccb_eata_cp, ccb->ccb_ccbpa, CP_DMA_CMD, 0)) {
 		printf("%s: dpt_cmd failed\n", sc->sc_dv.dv_xname);
 		dpt_free_ccb(sc, ccb);
-		return (TRY_AGAIN_LATER);
+		return (NO_CCB);
 	}
 
 	if ((xs->flags & SCSI_POLL) == 0)

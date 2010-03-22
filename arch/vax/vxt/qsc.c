@@ -1,4 +1,4 @@
-/*	$OpenBSD: qsc.c,v 1.2 2008/01/23 16:37:57 jsing Exp $	*/
+/*	$OpenBSD: qsc.c,v 1.5 2009/11/09 17:53:39 nicm Exp $	*/
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *
@@ -602,7 +602,7 @@ qscopen(dev_t dev, int flag, int mode, struct proc *p)
 		ttsetwater(tp);
 
 		tp->t_state |= TS_CARR_ON;
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0) {
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0) {
 		splx(s);
 		return (EBUSY);
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic79xx_openbsd.c,v 1.32 2009/02/16 21:19:06 miod Exp $	*/
+/*	$OpenBSD: aic79xx_openbsd.c,v 1.35 2010/01/20 08:40:41 krw Exp $	*/
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom
@@ -200,14 +200,7 @@ ahd_done(struct ahd_softc *ahd, struct scb *scb)
 	case CAM_REQ_CMP:
 		switch (xs->status) {
 		case SCSI_TASKSET_FULL:
-			/* SCSI Layer won't requeue, so we force infinite
-			 * retries until queue space is available. XS_BUSY
-			 * is dangerous because if the NOSLEEP flag is set
-			 * it can cause the I/O to return EIO. XS_BUSY code
-			 * falls through to XS_TIMEOUT anyway.
-			 */ 
-			xs->error = XS_TIMEOUT;
-			xs->retries++;
+			xs->error = XS_NO_CCB;
 			break;
 		case SCSI_BUSY:
 			xs->error = XS_BUSY;
@@ -236,8 +229,7 @@ ahd_done(struct ahd_softc *ahd, struct scb *scb)
 		xs->error = XS_RESET;
 		break;
 	case CAM_REQUEUE_REQ:
-		xs->error = XS_TIMEOUT;
-		xs->retries++;
+		xs->error = XS_NO_CCB;
 		break;
 	case CAM_SEL_TIMEOUT:
 		xs->error = XS_SELTIMEOUT;
@@ -278,7 +270,6 @@ ahd_done(struct ahd_softc *ahd, struct scb *scb)
 
 	ahd_lock(ahd, &s);
 	ahd_free_scb(ahd, scb);
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 	ahd_unlock(ahd, &s);
 }
@@ -322,7 +313,6 @@ ahd_action(struct scsi_xfer *xs)
 	ahd_lock(ahd, &s);
 	if ((ahd->flags & AHD_INITIATORROLE) == 0) {
 		xs->error = XS_DRIVER_STUFFUP;
-		xs->flags |= ITSDONE;
 		scsi_done(xs);
 		ahd_unlock(ahd, &s);
 		return (COMPLETE);
@@ -546,7 +536,6 @@ ahd_setup_data(struct ahd_softc *ahd, struct scsi_xfer *xs,
 		ahd_lock(ahd, &s);
 		ahd_free_scb(ahd, scb);
 		xs->error = XS_DRIVER_STUFFUP;
-		xs->flags |= ITSDONE;
 		scsi_done(xs);
 		ahd_unlock(ahd, &s);
 		return (COMPLETE);
@@ -574,7 +563,7 @@ ahd_setup_data(struct ahd_softc *ahd, struct scsi_xfer *xs,
 			ahd_lock(ahd, &s);
 			ahd_free_scb(ahd, scb);
 			ahd_unlock(ahd, &s);
-			return (TRY_AGAIN_LATER);       /* XXX fvdl */
+			return (NO_CCB);       /* XXX fvdl */
 		}
 		error = ahd_execute_scb(scb, scb->dmamap->dm_segs,
 		    scb->dmamap->dm_nsegs);

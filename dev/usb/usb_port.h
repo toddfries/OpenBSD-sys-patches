@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_port.h,v 1.97 2008/06/26 05:42:19 ray Exp $ */
+/*	$OpenBSD: usb_port.h,v 1.99 2009/11/04 19:14:10 kettenis Exp $ */
 /*	$NetBSD: usb_port.h,v 1.62 2003/02/15 18:33:30 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_port.h,v 1.21 1999/11/17 22:33:47 n_hibma Exp $	*/
 
@@ -39,12 +39,6 @@
  * Macros to ease the import of USB drivers from other operating systems, e.g.
  * NetBSD or FreeBSD.
  */
-
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
-#define USB_USE_SOFTINTR
-#else
-#undef USB_USE_SOFTINTR
-#endif
 
 #define Static
 
@@ -111,7 +105,7 @@ typedef struct timeout usb_callout_t;
 int __CONCAT(dname,_match)(struct device *, void *, void *); \
 void __CONCAT(dname,_attach)(struct device *, struct device *, void *); \
 int __CONCAT(dname,_detach)(struct device *, int); \
-int __CONCAT(dname,_activate)(struct device *, enum devact); \
+int __CONCAT(dname,_activate)(struct device *, int); \
 \
 struct cfdriver __CONCAT(dname,_cd) = { \
 	NULL, #dname, devclass \

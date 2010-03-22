@@ -1,4 +1,4 @@
-/*	$OpenBSD: arc.c,v 1.78 2009/02/16 21:19:07 miod Exp $ */
+/*	$OpenBSD: arc.c,v 1.80 2010/01/09 23:15:06 krw Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -844,9 +844,6 @@ arc_scsi_cmd_done(struct arc_softc *sc, struct arc_ccb *ccb, u_int32_t reg)
 		    BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
 		bus_dmamap_unload(sc->sc_dmat, ccb->ccb_dmamap);
 	}
-
-	/* timeout_del */
-	xs->flags |= ITSDONE;
 
 	if (reg & ARC_RA_REPLY_QUEUE_ERR) {
 		cmd = &ccb->ccb_cmd->cmd;

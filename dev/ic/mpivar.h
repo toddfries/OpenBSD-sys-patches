@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpivar.h,v 1.24 2008/11/01 18:42:26 marco Exp $ */
+/*	$OpenBSD: mpivar.h,v 1.29 2010/01/11 03:51:57 dlg Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -39,7 +39,8 @@ extern uint32_t			mpi_debug;
 #endif
 
 #define MPI_REQUEST_SIZE	512
-#define MPI_REPLY_SIZE		128
+#define MPI_REPLY_SIZE		80
+#define MPI_REPLYQ_DEPTH	128
 #define MPI_REPLY_COUNT		(PAGE_SIZE / MPI_REPLY_SIZE)
 
 /*
@@ -68,6 +69,7 @@ struct mpi_softc;
 
 struct mpi_rcb {
 	void			*rcb_reply;
+	bus_addr_t		rcb_offset;
 	u_int32_t		rcb_reply_dva;
 };
 
@@ -75,7 +77,7 @@ struct mpi_ccb {
 	struct mpi_softc	*ccb_sc;
 	int			ccb_id;
 
-	struct scsi_xfer	*ccb_xs;
+	void 			*ccb_cookie;
 	bus_dmamap_t		ccb_dmamap;
 
 	bus_addr_t		ccb_offset;
@@ -124,9 +126,13 @@ struct mpi_softc {
 	struct mpi_dmamem	*sc_requests;
 	struct mpi_ccb		*sc_ccbs;
 	struct mpi_ccb_list	sc_ccb_free;
+	struct mutex		sc_ccb_mtx;
 
 	struct mpi_dmamem	*sc_replies;
 	struct mpi_rcb		*sc_rcbs;
+	int			sc_repq;
+
+	struct mpi_ccb		*sc_evt_ccb;
 
 	size_t			sc_fw_len;
 	struct mpi_dmamem	*sc_fw;

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.261 2009/04/24 17:52:55 mk Exp $
+#	$OpenBSD: files.pci,v 1.270 2010/02/23 18:43:15 jsg Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -136,7 +136,7 @@ file	dev/pci/azalia.c		azalia
 file	dev/pci/azalia_codec.c		azalia
 
 # VIA Envy24 (aka ICE1712)
-device	envy: audio, auconv, mulaw
+device	envy: audio, auconv, mulaw, ac97
 attach	envy at pci
 file	dev/pci/envy.c			envy
 
@@ -221,6 +221,11 @@ file	dev/pci/isp_pci.c		isp_pci
 # LSI Logic Fusion-MPT Message Passing Interface
 attach	mpi at pci with mpi_pci
 file	dev/pci/mpi_pci.c		mpi_pci
+
+# LSI Logic Fusion-MPT Message Passing Interface 2.0
+device	mpii: scsi
+attach	mpii at pci with mpii_pci
+file	dev/pci/mpii.c			mpii_pci
 
 # Emulex Light Pulse Fibre Channel (Service Level Interface)
 attach	sli at pci with sli_pci
@@ -346,6 +351,7 @@ device	em: ether, ifnet, ifmedia
 attach	em at pci
 file	dev/pci/if_em.c			em
 file	dev/pci/if_em_hw.c		em
+file	dev/pci/if_em_soc.c		em
 
 # Intel Pro/10GbE
 device	ixgb: ether, ifnet, ifmedia
@@ -360,6 +366,7 @@ attach	ix at pci
 file	dev/pci/if_ix.c			ix
 file	dev/pci/ixgbe.c			ix
 file	dev/pci/ixgbe_82598.c		ix
+file	dev/pci/ixgbe_82599.c		ix
 file	dev/pci/ixgbe_phy.c		ix
 
 # Neterion Xframe 10 Gigabit ethernet 
@@ -400,9 +407,8 @@ attach	epic at pci with epic_pci
 file	dev/pci/if_epic_pci.c		epic_pci
 
 # Alteon Tigon I & II
-device	ti: ether, ifnet, ifmedia, firmload
-attach	ti at pci
-file	dev/pci/if_ti.c			ti
+attach	ti at pci with ti_pci
+file	dev/pci/if_ti_pci.c		ti_pci
 
 # NE2000-compatible PCI Ethernet cards
 attach	ne at pci with ne_pci: rtl80x9
@@ -636,6 +642,11 @@ device	age: ether, ifnet, mii, ifmedia, mii_phy
 attach	age at pci
 file	dev/pci/if_age.c		age
 
+# Attansic/Atheros L1C/L2C Gigabit Ethernet
+device	alc: ether, ifnet, mii, ifmedia, mii_phy
+attach	alc at pci
+file	dev/pci/if_alc.c		alc
+
 # Attansic/Atheros L1E Gigabit Ethernet
 device	ale: ether, ifnet, mii, ifmedia, mii_phy
 attach	ale at pci
@@ -659,6 +670,10 @@ file	dev/pci/if_bce.c		bce
 # Atheros AR5k (802.11a/b/g) PCI/Mini-PCI
 attach	ath at pci with ath_pci
 file	dev/pci/if_ath_pci.c		ath_pci
+
+# Atheros AR9k (802.11a/g/n)
+attach	athn at pci with athn_pci
+file	dev/pci/if_athn_pci.c		athn_pci
 
 # ADMtek ADM8211 PCI/Mini-PCI
 attach	atw at pci with atw_pci
@@ -775,3 +790,14 @@ file	dev/pci/kate.c			kate
 device	km
 attach	km at pci
 file	dev/pci/km.c			km
+
+# Intel SOC GCU
+device	gcu
+attach	gcu at pci
+file	dev/pci/gcu.c			gcu
+
+# AMD Geode CS5536 Audio
+device	auglx: audio, ac97
+attach	auglx at pci
+file	dev/pci/auglx.c			auglx
+

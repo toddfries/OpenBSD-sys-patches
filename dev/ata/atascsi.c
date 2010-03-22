@@ -1,4 +1,4 @@
-/*	$OpenBSD: atascsi.c,v 1.64 2009/02/16 21:19:06 miod Exp $ */
+/*	$OpenBSD: atascsi.c,v 1.71 2010/01/09 23:15:06 krw Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -66,31 +66,32 @@ struct scsi_device atascsi_device = {
 	NULL, NULL, NULL, NULL
 };
 
-void		ata_fix_identify(struct ata_identify *);
+void		ata_swapcopy(void *, void *, size_t);
 
-int		atascsi_disk_cmd(struct scsi_xfer *);
+void		atascsi_disk_cmd(struct scsi_xfer *);
 void		atascsi_disk_cmd_done(struct ata_xfer *);
-int		atascsi_disk_inq(struct scsi_xfer *);
-int		atascsi_disk_inquiry(struct scsi_xfer *);
-int		atascsi_disk_vpd_supported(struct scsi_xfer *);
-int		atascsi_disk_vpd_serial(struct scsi_xfer *);
-int		atascsi_disk_vpd_ident(struct scsi_xfer *);
-int		atascsi_disk_capacity(struct scsi_xfer *);
-int		atascsi_disk_sync(struct scsi_xfer *);
+void		atascsi_disk_inq(struct scsi_xfer *);
+void		atascsi_disk_inquiry(struct scsi_xfer *);
+void		atascsi_disk_vpd_supported(struct scsi_xfer *);
+void		atascsi_disk_vpd_serial(struct scsi_xfer *);
+void		atascsi_disk_vpd_ident(struct scsi_xfer *);
+void		atascsi_disk_capacity(struct scsi_xfer *);
+void		atascsi_disk_sync(struct scsi_xfer *);
 void		atascsi_disk_sync_done(struct ata_xfer *);
-int		atascsi_disk_sense(struct scsi_xfer *);
+void		atascsi_disk_sense(struct scsi_xfer *);
 
-int		atascsi_atapi_cmd(struct scsi_xfer *);
+void		atascsi_atapi_cmd(struct scsi_xfer *);
 void		atascsi_atapi_cmd_done(struct ata_xfer *);
 
-int		atascsi_done(struct scsi_xfer *, int);
+void		atascsi_done(struct scsi_xfer *, int);
 
-int		ata_running = 0;
-
-int		ata_exec(struct atascsi *, struct ata_xfer *);
+void		ata_exec(struct atascsi *, struct ata_xfer *);
 
 struct ata_xfer	*ata_get_xfer(struct ata_port *);
 void		ata_put_xfer(struct ata_xfer *);
+
+void		ata_polled_complete(struct ata_xfer *);
+int		ata_polled(struct ata_xfer *);
 
 struct atascsi *
 atascsi_attach(struct device *self, struct atascsi_attach_args *aaa)
@@ -203,17 +204,16 @@ atascsi_probe(struct scsi_link *link)
 	xa->data = &ap->ap_identify;
 	xa->datalen = sizeof(ap->ap_identify);
 	xa->fis->flags = ATA_H2D_FLAGS_CMD;
-	xa->fis->command = ATA_C_IDENTIFY;
+	xa->fis->command = (type == ATA_PORT_T_DISK) ?
+	    ATA_C_IDENTIFY : ATA_C_IDENTIFY_PACKET;
 	xa->fis->device = 0;
 	xa->flags = ATA_F_READ | ATA_F_PIO | ATA_F_POLL;
-	xa->complete = ata_put_xfer;
 	xa->timeout = 1000;
-	if (ata_exec(as, xa) != COMPLETE) {
-		rv = EIO;
+	xa->complete = ata_polled_complete;
+	ata_exec(as, xa);
+	rv = ata_polled(xa);
+	if (rv != 0)
 		goto error;
-	}
-
-	ata_fix_identify(&ap->ap_identify);
 
 	as->as_ports[port] = ap;
 
@@ -229,9 +229,10 @@ atascsi_probe(struct scsi_link *link)
 		xa->fis->features = ATA_SF_WRITECACHE_EN;
 		xa->fis->flags = ATA_H2D_FLAGS_CMD;
 		xa->flags = ATA_F_READ | ATA_F_PIO | ATA_F_POLL;
-		xa->complete = ata_put_xfer;
 		xa->timeout = 1000;
-		ata_exec(as, xa); /* we dont care if this works or not */
+		xa->complete = ata_polled_complete;
+		ata_exec(as, xa);
+		ata_polled(xa); /* we dont care if it doesnt work */
 	}
 
 	/* Enable read lookahead if supported */
@@ -243,9 +244,10 @@ atascsi_probe(struct scsi_link *link)
 		xa->fis->features = ATA_SF_LOOKAHEAD_EN;
 		xa->fis->flags = ATA_H2D_FLAGS_CMD;
 		xa->flags = ATA_F_READ | ATA_F_PIO | ATA_F_POLL;
-		xa->complete = ata_put_xfer;
 		xa->timeout = 1000;
-		ata_exec(as, xa); /* we dont care if this works or not */
+		xa->complete = ata_polled_complete;
+		ata_exec(as, xa);
+		ata_polled(xa); /* we dont care if it doesnt work */
 	}
 
 	/*
@@ -261,9 +263,10 @@ atascsi_probe(struct scsi_link *link)
 	xa->fis->command = ATA_C_SEC_FREEZE_LOCK;
 	xa->fis->flags = ATA_H2D_FLAGS_CMD;
 	xa->flags = ATA_F_READ | ATA_F_PIO | ATA_F_POLL;
-	xa->complete = ata_put_xfer;
 	xa->timeout = 1000;
-	ata_exec(as, xa); /* we dont care if this works or not */
+	xa->complete = ata_polled_complete;
+	ata_exec(as, xa);
+	ata_polled(xa); /* we dont care if it doesnt work */
 
 	return (0);
 error:
@@ -297,25 +300,6 @@ atascsi_free(struct scsi_link *link)
 	as->as_methods->free(as->as_cookie, port);
 }
 
-void
-ata_fix_identify(struct ata_identify *id)
-{
-	u_int16_t		*swap;
-	int			i;
-
-	swap = (u_int16_t *)id->serial;
-	for (i = 0; i < sizeof(id->serial) / sizeof(u_int16_t); i++)
-		swap[i] = swap16(swap[i]);
-
-	swap = (u_int16_t *)id->firmware;
-	for (i = 0; i < sizeof(id->firmware) / sizeof(u_int16_t); i++)
-		swap[i] = swap16(swap[i]);
-
-	swap = (u_int16_t *)id->model;
-	for (i = 0; i < sizeof(id->model) / sizeof(u_int16_t); i++)
-		swap[i] = swap16(swap[i]);
-}
-
 int
 atascsi_cmd(struct scsi_xfer *xs)
 {
@@ -323,22 +307,29 @@ atascsi_cmd(struct scsi_xfer *xs)
 	struct atascsi		*as = link->adapter_softc;
 	struct ata_port		*ap = as->as_ports[link->target];
 
-	if (ap == NULL)
-		return (atascsi_done(xs, XS_DRIVER_STUFFUP));
+	if (ap == NULL) {
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return (COMPLETE);
+	}
 
 	switch (ap->ap_type) {
 	case ATA_PORT_T_DISK:
-		return (atascsi_disk_cmd(xs));
+		atascsi_disk_cmd(xs);
+		break;
 	case ATA_PORT_T_ATAPI:
-		return (atascsi_atapi_cmd(xs));
+		atascsi_atapi_cmd(xs);
+		break;
 
 	case ATA_PORT_T_NONE:
 	default:
-		return (atascsi_done(xs, XS_DRIVER_STUFFUP));
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		break;
 	}
+
+	return (COMPLETE);
 }
 
-int
+void
 atascsi_disk_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link	*link = xs->sc_link;
@@ -364,26 +355,34 @@ atascsi_disk_cmd(struct scsi_xfer *xs)
 		break;
 
 	case SYNCHRONIZE_CACHE:
-		return (atascsi_disk_sync(xs));
+		atascsi_disk_sync(xs);
+		return;
 	case REQUEST_SENSE:
-		return (atascsi_disk_sense(xs));
+		atascsi_disk_sense(xs);
+		return;
 	case INQUIRY:
-		return (atascsi_disk_inq(xs));
+		atascsi_disk_inq(xs);
+		return;
 	case READ_CAPACITY:
-		return (atascsi_disk_capacity(xs));
+		atascsi_disk_capacity(xs);
+		return;
 
 	case TEST_UNIT_READY:
 	case START_STOP:
 	case PREVENT_ALLOW:
-		return (atascsi_done(xs, XS_NOERROR));
+		atascsi_done(xs, XS_NOERROR);
+		return;
 
 	default:
-		return (atascsi_done(xs, XS_DRIVER_STUFFUP));
+		atascsi_done(xs, XS_DRIVER_STUFFUP);
+		return;
 	}
 
 	xa = ata_get_xfer(ap);
-	if (xa == NULL)
-		return (NO_CCB);
+	if (xa == NULL) {
+		atascsi_done(xs, XS_NO_CCB);
+		return;
+	}
 
 	xa->flags = flags;
 	if (xs->cmdlen == 6) {
@@ -441,7 +440,7 @@ atascsi_disk_cmd(struct scsi_xfer *xs)
 	if (xs->flags & SCSI_POLL)
 		xa->flags |= ATA_F_POLL;
 
-	return (ata_exec(as, xa));
+	ata_exec(as, xa);
 }
 
 void
@@ -468,11 +467,10 @@ atascsi_disk_cmd_done(struct ata_xfer *xa)
 	xs->resid = xa->resid;
 	ata_put_xfer(xa);
 
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 }
 
-int
+void
 atascsi_disk_inq(struct scsi_xfer *xs)
 {
 	struct scsi_inquiry	*inq = (struct scsi_inquiry *)xs->cmd;
@@ -480,27 +478,29 @@ atascsi_disk_inq(struct scsi_xfer *xs)
 	if (ISSET(inq->flags, SI_EVPD)) {
 		switch (inq->pagecode) {
 		case SI_PG_SUPPORTED:
-			return (atascsi_disk_vpd_supported(xs));
+			atascsi_disk_vpd_supported(xs);
+			break;
 		case SI_PG_SERIAL:
-			return (atascsi_disk_vpd_serial(xs));
+			atascsi_disk_vpd_serial(xs);
+			break;
 		case SI_PG_DEVID:
-			return (atascsi_disk_vpd_ident(xs));
+			atascsi_disk_vpd_ident(xs);
+			break;
 		default:
-			return (atascsi_done(xs, XS_DRIVER_STUFFUP));
+			atascsi_done(xs, XS_DRIVER_STUFFUP);
+			break;
 		}
-	}
-
-	return (atascsi_disk_inquiry(xs));
+	} else
+		atascsi_disk_inquiry(xs);
 }
 
-int
+void
 atascsi_disk_inquiry(struct scsi_xfer *xs)
 {
 	struct scsi_link        *link = xs->sc_link;
 	struct atascsi          *as = link->adapter_softc;
 	struct ata_port		*ap = as->as_ports[link->target];
 	struct scsi_inquiry_data inq;
-	int			rv;
 
 	bzero(&inq, sizeof(inq));
 
@@ -509,15 +509,17 @@ atascsi_disk_inquiry(struct scsi_xfer *xs)
 	inq.response_format = 2;
 	inq.additional_length = 32;
 	bcopy("ATA     ", inq.vendor, sizeof(inq.vendor));
-	bcopy(ap->ap_identify.model, inq.product, sizeof(inq.product));
-	bcopy(ap->ap_identify.firmware, inq.revision, sizeof(inq.revision));
+	ata_swapcopy(ap->ap_identify.model, inq.product,
+	    sizeof(inq.product));
+	ata_swapcopy(ap->ap_identify.firmware, inq.revision,
+	    sizeof(inq.revision));
 
 	bcopy(&inq, xs->data, MIN(sizeof(inq), xs->datalen));
 
-	rv = atascsi_done(xs, XS_NOERROR);
+	atascsi_done(xs, XS_NOERROR);
 
 	if (ap->ap_features & ATA_PORT_F_PROBED)
-		return (rv);
+		return;
 
 	ap->ap_features = ATA_PORT_F_PROBED;
 
@@ -552,11 +554,9 @@ atascsi_disk_inquiry(struct scsi_xfer *xs)
 			}
 		}
 	}
-
-	return (rv);
 }
 
-int
+void
 atascsi_disk_vpd_supported(struct scsi_xfer *xs)
 {
 	struct {
@@ -575,10 +575,10 @@ atascsi_disk_vpd_supported(struct scsi_xfer *xs)
 
 	bcopy(&pg, xs->data, MIN(sizeof(pg), xs->datalen));
 
-	return (atascsi_done(xs, XS_NOERROR));
+	atascsi_done(xs, XS_NOERROR);
 }
 
-int
+void
 atascsi_disk_vpd_serial(struct scsi_xfer *xs)
 {
 	struct scsi_link        *link = xs->sc_link;
@@ -591,15 +591,15 @@ atascsi_disk_vpd_serial(struct scsi_xfer *xs)
 	pg.hdr.device = T_DIRECT;
 	pg.hdr.page_code = SI_PG_SERIAL;
 	pg.hdr.page_length = sizeof(ap->ap_identify.serial);
-	bcopy(ap->ap_identify.serial, pg.serial,
+	ata_swapcopy(ap->ap_identify.serial, pg.serial,
 	    sizeof(ap->ap_identify.serial));
 
 	bcopy(&pg, xs->data, MIN(sizeof(pg), xs->datalen));
 
-	return (atascsi_done(xs, XS_NOERROR));
+	atascsi_done(xs, XS_NOERROR);
 }
 
-int
+void
 atascsi_disk_vpd_ident(struct scsi_xfer *xs)
 {
 	struct scsi_link        *link = xs->sc_link;
@@ -614,14 +614,13 @@ atascsi_disk_vpd_ident(struct scsi_xfer *xs)
 	size_t			pg_len;
 
 	bzero(&pg, sizeof(pg));
-	if (ap->ap_identify.features87 & ATA_ID_F87_WWN) {
+	if (letoh16(ap->ap_identify.features87) & ATA_ID_F87_WWN) {
 		pg_len = 8;
 
 		pg.devid_hdr.pi_code = VPD_DEVID_CODE_BINARY;
 		pg.devid_hdr.flags = VPD_DEVID_ASSOC_LU | VPD_DEVID_TYPE_NAA;
 
-		/* XXX ata_identify field(s) should be renamed */
-		bcopy(&ap->ap_identify.naa_ieee_oui, pg.devid, pg_len);
+		ata_swapcopy(&ap->ap_identify.naa_ieee_oui, pg.devid, pg_len);
 	} else {
 		pg_len = 68;
 
@@ -631,10 +630,10 @@ atascsi_disk_vpd_ident(struct scsi_xfer *xs)
 		p = pg.devid;
 		bcopy("ATA     ", p, 8);
 		p += 8;
-		bcopy(ap->ap_identify.model, p,
+		ata_swapcopy(ap->ap_identify.model, p,
 		    sizeof(ap->ap_identify.model));
 		p += sizeof(ap->ap_identify.model);
-		bcopy(ap->ap_identify.serial, p,
+		ata_swapcopy(ap->ap_identify.serial, p,
 		    sizeof(ap->ap_identify.serial));
 	}
 
@@ -648,10 +647,10 @@ atascsi_disk_vpd_ident(struct scsi_xfer *xs)
 
 	bcopy(&pg, xs->data, MIN(pg_len, xs->datalen));
 
-	return (atascsi_done(xs, XS_NOERROR));
+	atascsi_done(xs, XS_NOERROR);
 }
 
-int
+void
 atascsi_disk_sync(struct scsi_xfer *xs)
 {
 	struct scsi_link	*link = xs->sc_link;
@@ -660,8 +659,10 @@ atascsi_disk_sync(struct scsi_xfer *xs)
 	struct ata_xfer		*xa;
 
 	xa = ata_get_xfer(ap);
-	if (xa == NULL)
-		return (NO_CCB);
+	if (xa == NULL) {
+		atascsi_done(xs, XS_NO_CCB);
+		return;
+	}
 
 	xa->datalen = 0;
 	xa->flags = ATA_F_READ;
@@ -676,7 +677,7 @@ atascsi_disk_sync(struct scsi_xfer *xs)
 	xa->fis->command = ATA_C_FLUSH_CACHE;
 	xa->fis->device = 0;
 
-	return (ata_exec(as, xa));
+	ata_exec(as, xa);
 }
 
 void
@@ -704,11 +705,10 @@ atascsi_disk_sync_done(struct ata_xfer *xa)
 
 	ata_put_xfer(xa);
 
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 }
 
-int
+void
 atascsi_disk_capacity(struct scsi_xfer *xs)
 {
 	struct scsi_link	*link = xs->sc_link;
@@ -740,10 +740,10 @@ atascsi_disk_capacity(struct scsi_xfer *xs)
 
 	bcopy(&rcd, xs->data, MIN(sizeof(rcd), xs->datalen));
 
-	return (atascsi_done(xs, XS_NOERROR));
+	atascsi_done(xs, XS_NOERROR);
 }
 
-int
+void
 atascsi_disk_sense(struct scsi_xfer *xs)
 {
 	struct scsi_sense_data	*sd = (struct scsi_sense_data *)xs->data;
@@ -753,10 +753,10 @@ atascsi_disk_sense(struct scsi_xfer *xs)
 	sd->error_code = 0x70; /* XXX magic */
 	sd->flags = SKEY_NO_SENSE;
 
-	return (atascsi_done(xs, XS_NOERROR));
+	atascsi_done(xs, XS_NOERROR);
 }
 
-int
+void
 atascsi_atapi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link	*link = xs->sc_link;
@@ -766,8 +766,10 @@ atascsi_atapi_cmd(struct scsi_xfer *xs)
 	struct ata_fis_h2d	*fis;
 
 	xa = ata_get_xfer(ap);
-	if (xa == NULL)
-		return (NO_CCB);
+	if (xa == NULL) {
+		atascsi_done(xs, XS_NO_CCB);
+		return;
+	}
 
 	switch (xs->flags & (SCSI_DATA_IN | SCSI_DATA_OUT)) {
 	case SCSI_DATA_IN:
@@ -801,7 +803,7 @@ atascsi_atapi_cmd(struct scsi_xfer *xs)
 	/* Copy SCSI command into ATAPI packet. */
 	memcpy(xa->packetcmd, xs->cmd, xs->cmdlen);
 
-	return (ata_exec(as, xa));
+	ata_exec(as, xa);
 }
 
 void
@@ -838,22 +840,19 @@ atascsi_atapi_cmd_done(struct ata_xfer *xa)
 	xs->resid = xa->resid;
 	ata_put_xfer(xa);
 
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 }
 
-int
+void
 atascsi_done(struct scsi_xfer *xs, int error)
 {
 	int			s;
 
 	xs->error = error;
-	xs->flags |= ITSDONE;
 
 	s = splbio();
 	scsi_done(xs);
 	splx(s);
-	return (COMPLETE);
 }
 
 int atascsi_ioctl_cmd(struct atascsi *, struct ata_port *, atareq_t *);
@@ -880,6 +879,8 @@ atascsi_ioctl_cmd(struct atascsi *as, struct ata_port *ap, atareq_t *atareq)
 	struct ata_xfer		*xa;
 	struct ata_fis_h2d	*fis;
 	void			*buf;
+	int			 rc = 0;
+	int			 s;
 
 	xa = ata_get_xfer(ap);
 	if (xa == NULL)
@@ -910,27 +911,17 @@ atascsi_ioctl_cmd(struct atascsi *as, struct ata_port *ap, atareq_t *atareq)
 	}
 	xa->atascsi_private = NULL;
 
-	switch (as->as_methods->ata_cmd(xa)) {
-	case ATA_COMPLETE:
-		break;
-	case ATA_QUEUED:
-		while (xa->state == ATA_S_PENDING || xa->state == ATA_S_ONCHIP)
-			tsleep(xa, PRIBIO, "atascsi", 0);
-		break;
-	case ATA_ERROR:
-		free(buf, M_TEMP);
-		ata_put_xfer(xa);
-		atareq->retsts = ATACMD_ERROR;
-		return (EIO);
-	default:
-		panic("atascsi_ioctl_cmd: unexpected return from ata_cmd");
-	}
+	as->as_methods->ata_cmd(xa);
+	s = splbio();
+	while (!ISSET(xa->flags, ATA_F_DONE))
+		tsleep(xa, PRIBIO, "atascsi", 0);
+	splx(s);
 
 	switch (xa->state) {
 	case ATA_S_COMPLETE:
 		atareq->retsts = ATACMD_OK;
 		if (atareq->flags & ATACMD_READ)
-			copyout(buf, atareq->databuf, atareq->datalen);
+			rc = copyout(buf, atareq->databuf, atareq->datalen);
 		break;
 	case ATA_S_ERROR:
 		atareq->retsts = ATACMD_ERROR;
@@ -947,7 +938,7 @@ atascsi_ioctl_cmd(struct atascsi *as, struct ata_port *ap, atareq_t *atareq)
 
 	ata_put_xfer(xa);
 
-	return (0);
+	return (rc);
 }
 
 void
@@ -956,21 +947,10 @@ atascsi_ioctl_done(struct ata_xfer *xa)
 	wakeup(xa);
 }
 
-int
+void
 ata_exec(struct atascsi *as, struct ata_xfer *xa)
 {
-	int polled = xa->flags & ATA_F_POLL;
-
-	switch (as->as_methods->ata_cmd(xa)) {
-	case ATA_COMPLETE:
-	case ATA_ERROR:
-		return (COMPLETE);
-	case ATA_QUEUED:
-		if (!polled)
-			return (SUCCESSFULLY_QUEUED);
-	default:
-		panic("unexpected return from ata_exec");
-	}
+	as->as_methods->ata_cmd(xa);
 }
 
 struct ata_xfer *
@@ -991,3 +971,55 @@ ata_put_xfer(struct ata_xfer *xa)
 {
 	xa->ata_put_xfer(xa);
 }
+
+void
+ata_polled_complete(struct ata_xfer *xa)
+{
+	/* do nothing */
+}
+
+int
+ata_polled(struct ata_xfer *xa)
+{
+	int			rv;
+
+	if (!ISSET(xa->flags, ATA_F_DONE))
+		panic("ata_polled: xa isnt complete");
+
+	switch (xa->state) {
+	case ATA_S_COMPLETE:
+		rv = 0;
+		break;
+	case ATA_S_ERROR:
+	case ATA_S_TIMEOUT:
+		rv = EIO;
+		break;
+	default:
+		panic("ata_polled: xa state (%d)",
+		    xa->state);
+	}
+
+	ata_put_xfer(xa);
+
+	return (rv);
+}
+
+void
+ata_complete(struct ata_xfer *xa)
+{
+	SET(xa->flags, ATA_F_DONE);
+	xa->complete(xa);
+}
+
+void
+ata_swapcopy(void *src, void *dst, size_t len)
+{
+	u_int16_t *s = src, *d = dst;
+	int i;
+
+	len /= 2;
+
+	for (i = 0; i < len; i++)
+		d[i] = swap16(s[i]);
+}
+

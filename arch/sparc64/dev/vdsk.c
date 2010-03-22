@@ -1,4 +1,4 @@
-/*	$OpenBSD: vdsk.c,v 1.12 2009/05/12 20:20:35 kettenis Exp $	*/
+/*	$OpenBSD: vdsk.c,v 1.17 2010/01/09 23:15:06 krw Exp $	*/
 /*
  * Copyright (c) 2009 Mark Kettenis
  *
@@ -141,6 +141,9 @@ struct vdsk_softc {
 #define VIO_SND_RDX		0x0040
 #define VIO_ACK_RDX		0x0080
 #define VIO_ESTABLISHED		0x00ff
+
+	uint16_t	sc_major;
+	uint16_t	sc_minor;
 
 	uint32_t	sc_local_sid;
 	uint64_t	sc_dring_ident;
@@ -411,7 +414,6 @@ vdsk_rx_intr(void *arg)
 	}
 
 	if (rx_state != lc->lc_rx_state) {
-		sc->sc_tx_cnt = sc->sc_tx_prod = sc->sc_tx_cons = 0;
 		sc->sc_vio_state = 0;
 		lc->lc_tx_seqid = 0;
 		lc->lc_state = 0;
@@ -530,6 +532,8 @@ vdsk_rx_vio_ver_info(struct vdsk_softc *sc, struct vio_msg_tag *tag)
 			ldc_reset(&sc->sc_lc);
 			break;
 		}
+		sc->sc_major = vi->major;
+		sc->sc_minor = vi->minor;
 		sc->sc_vio_state |= VIO_ACK_VER_INFO;
 		break;
 
@@ -616,13 +620,34 @@ vdsk_rx_vio_rdx(struct vdsk_softc *sc, struct vio_msg_tag *tag)
 		break;
 
 	case VIO_SUBTYPE_ACK:
+	{
+		int prod;
+
 		DPRINTF(("CTRL/ACK/RDX\n"));
 		if (!ISSET(sc->sc_vio_state, VIO_SND_RDX)) {
 			ldc_reset(&sc->sc_lc);
 			break;
 		}
 		sc->sc_vio_state |= VIO_ACK_RDX;
+
+		/*
+		 * If this ACK is the result of a reconnect, we may
+		 * have pending I/O that we need to resubmit.  We need
+		 * to rebuild the ring descriptors though since the
+		 * vDisk server on the other side may have touched
+		 * them already.  So we just clean up the ring and the
+		 * LDC map and resubmit the SCSI commands based on our
+		 * soft descriptors.
+		 */
+		prod = sc->sc_tx_prod;
+		sc->sc_tx_prod = sc->sc_tx_cons;
+		sc->sc_tx_cnt = 0;
+		sc->sc_lm->lm_next = 1;
+		sc->sc_lm->lm_count = 1;
+		while (sc->sc_tx_prod != prod)
+			vdsk_scsi_cmd(sc->sc_vsd[sc->sc_tx_prod].vsd_xs);
 		break;
+	}
 
 	default:
 		DPRINTF(("CTRL/0x%02x/RDX (VIO)\n", tag->stype));
@@ -711,7 +736,6 @@ vdsk_ldc_reset(struct ldc_conn *lc)
 {
 	struct vdsk_softc *sc = lc->lc_sc;
 
-	sc->sc_tx_cnt = sc->sc_tx_prod = sc->sc_tx_cons = 0;
 	sc->sc_vio_state = 0;
 }
 
@@ -951,8 +975,12 @@ vdsk_scsi_cmd(struct scsi_xfer *xs)
 	int desc, s;
 	int timeout;
 
-	if (sc->sc_tx_cnt >= sc->sc_vd->vd_nentries)
+	s = splbio();
+	if (sc->sc_vio_state != VIO_ESTABLISHED ||
+	    sc->sc_tx_cnt >= sc->sc_vd->vd_nentries) {
+		splx(s);
 		return (NO_CCB);
+	}
 
 	desc = sc->sc_tx_prod;
 
@@ -1008,10 +1036,11 @@ vdsk_scsi_cmd(struct scsi_xfer *xs)
 	dm.start_idx = dm.end_idx = desc;
 	vdsk_sendmsg(sc, &dm, sizeof(dm));
 
-	if (!ISSET(xs->flags, SCSI_POLL))
+	if (!ISSET(xs->flags, SCSI_POLL)) {
+		splx(s);
 		return (SUCCESSFULLY_QUEUED);
+	}
 
-	s = splbio();
 	timeout = 1000;
 	do {
 		if (vdsk_rx_intr(sc) &&
@@ -1040,7 +1069,9 @@ vdsk_scsi_inq(struct scsi_xfer *xs)
 int
 vdsk_scsi_inquiry(struct scsi_xfer *xs)
 {
+	struct vdsk_softc *sc = xs->sc_link->adapter_softc;
 	struct scsi_inquiry_data inq;
+	char buf[5];
 
 	bzero(&inq, sizeof(inq));
 
@@ -1050,7 +1081,8 @@ vdsk_scsi_inquiry(struct scsi_xfer *xs)
 	inq.additional_length = 32;
 	bcopy("SUN     ", inq.vendor, sizeof(inq.vendor));
 	bcopy("Virtual Disk    ", inq.product, sizeof(inq.product));
-	bcopy("1.0 ", inq.revision, sizeof(inq.revision));
+	snprintf(buf, sizeof(buf), "%u.%u ", sc->sc_major, sc->sc_minor);
+	bcopy(buf, inq.revision, sizeof(inq.revision));
 
 	bcopy(&inq, xs->data, MIN(sizeof(inq), xs->datalen));
 
@@ -1084,7 +1116,6 @@ vdsk_scsi_done(struct scsi_xfer *xs, int error)
 	int s;
 
 	xs->error = error;
-	xs->flags |= ITSDONE;
 
 	s = splbio();
 	scsi_done(xs);
@@ -1116,4 +1147,3 @@ vdsk_ioctl(struct scsi_link *link, u_long cmd, caddr_t addr, int flags,
 	printf("%s\n", __func__);
 	return (ENOTTY);
 }
-

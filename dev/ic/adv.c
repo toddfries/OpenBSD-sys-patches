@@ -1,4 +1,4 @@
-/*	$OpenBSD: adv.c,v 1.24 2009/02/16 21:19:06 miod Exp $	*/
+/*	$OpenBSD: adv.c,v 1.27 2010/01/10 00:10:23 krw Exp $	*/
 /*	$NetBSD: adv.c,v 1.6 1998/10/28 20:39:45 dante Exp $	*/
 
 /*
@@ -51,11 +51,6 @@
 
 #include <dev/ic/adv.h>
 #include <dev/ic/advlib.h>
-
-#ifndef DDB
-#define	Debugger()	panic("should call debugger here (adv.c)")
-#endif /* ! DDB */
-
 
 /* #define ASC_DEBUG */
 
@@ -658,6 +653,9 @@ adv_scsi_cmd(xs)
 
 			xs->error = XS_DRIVER_STUFFUP;
 			adv_free_ccb(sc, ccb);
+			s = splbio();
+			scsi_done(xs);
+			splx(s);
 			return (COMPLETE);
 		}
 		bus_dmamap_sync(dmat, ccb->dmamap_xfer,
@@ -711,6 +709,7 @@ adv_scsi_cmd(xs)
 		if (adv_poll(sc, xs, ccb->timeout))
 			adv_timeout(ccb);
 	}
+
 	return (COMPLETE);
 }
 
@@ -866,8 +865,7 @@ adv_narrow_isr_callback(sc, qdonep)
 		bus_dmamap_unload(dmat, ccb->dmamap_xfer);
 	}
 	if ((ccb->flags & CCB_ALLOC) == 0) {
-		printf("%s: exiting ccb not allocated!\n", sc->sc_dev.dv_xname);
-		Debugger();
+		panic("%s: exiting ccb not allocated!\n", sc->sc_dev.dv_xname);
 		return;
 	}
 	/*
@@ -931,6 +929,5 @@ adv_narrow_isr_callback(sc, qdonep)
 
 
 	adv_free_ccb(sc, ccb);
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 }

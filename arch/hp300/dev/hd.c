@@ -1,4 +1,4 @@
-/*	$OpenBSD: hd.c,v 1.57 2009/06/13 21:35:58 miod Exp $	*/
+/*	$OpenBSD: hd.c,v 1.59 2009/08/24 08:52:13 jasper Exp $	*/
 /*	$NetBSD: rd.c,v 1.33 1997/07/10 18:14:08 kleink Exp $	*/
 
 /*
@@ -238,7 +238,7 @@ int	hdident(struct device *, struct hd_softc *,
 	    struct hpibbus_attach_args *);
 void	hdreset(int, int, int);
 void	hdustart(struct hd_softc *);
-void	hdgetdisklabel(dev_t, struct hd_softc *, struct disklabel *, int);
+int	hdgetdisklabel(dev_t, struct hd_softc *, struct disklabel *, int);
 void	hdrestart(void *);
 struct buf *hdfinish(struct hd_softc *, struct buf *);
 
@@ -476,15 +476,13 @@ hdreset(ctlr, slave, punit)
 /*
  * Read or construct a disklabel
  */
-void
+int
 hdgetdisklabel(dev, rs, lp, spoofonly)
 	dev_t dev;
 	struct hd_softc *rs;
 	struct disklabel *lp;
 	int spoofonly;
 {
-	char *errstring;
-
 	bzero(lp, sizeof(struct disklabel));
 
 	/*
@@ -523,12 +521,7 @@ hdgetdisklabel(dev, rs, lp, spoofonly)
 	/*
 	 * Now try to read the disklabel
 	 */
-	errstring = readdisklabel(DISKLABELDEV(dev), hdstrategy, lp,
-	    spoofonly);
-	if (errstring) {
-		/* printf("%s: %s\n", rs->sc_dev.dv_xname, errstring); */
-		return;
-	}
+	return readdisklabel(DISKLABELDEV(dev), hdstrategy, lp, spoofonly);
 }
 
 int
@@ -566,8 +559,10 @@ hdopen(dev, flags, mode, p)
 	 */
 	if (rs->sc_dkdev.dk_openmask == 0) {
 		rs->sc_flags |= HDF_OPENING;
-		hdgetdisklabel(dev, rs, rs->sc_dkdev.dk_label, 0);
+		error = hdgetdisklabel(dev, rs, rs->sc_dkdev.dk_label, 0);
 		rs->sc_flags &= ~HDF_OPENING;
+		if (error == EIO)
+			goto out;
 	}
 
 	part = DISKPART(dev);
@@ -1084,7 +1079,7 @@ hderror(unit)
 		hdprinterr("fault", sp->c_fef, err_fault);
 		hdprinterr("access", sp->c_aef, err_access);
 		hdprinterr("info", sp->c_ief, err_info);
-		printf("    block: %d, P1-P10: ", hwbn);
+		printf("    block: %lld, P1-P10: ", hwbn);
 		printf("0x%04x", *(u_int *)&sp->c_raw[0]);
 		printf("%04x", *(u_int *)&sp->c_raw[4]);
 		printf("%02x\n", *(u_short *)&sp->c_raw[8]);

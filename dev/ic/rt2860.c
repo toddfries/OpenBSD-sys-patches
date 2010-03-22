@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860.c,v 1.34 2009/05/11 19:20:27 damien Exp $	*/
+/*	$OpenBSD: rt2860.c,v 1.41 2010/02/08 18:46:47 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -316,14 +316,6 @@ rt2860_attach(void *xsc, int id)
 	sc->sc_txtap.wt_ihdr.it_len = htole16(sc->sc_txtap_len);
 	sc->sc_txtap.wt_ihdr.it_present = htole32(RT2860_TX_RADIOTAP_PRESENT);
 #endif
-	/*
-	 * Make sure the interface is shutdown during reboot.
-	 */
-	sc->sc_sdhook = shutdownhook_establish(rt2860_shutdown, sc);
-	if (sc->sc_sdhook == NULL) {
-		printf("%s: WARNING: unable to establish shutdown hook\n",
-		    sc->sc_dev.dv_xname);
-	}
 
 	sc->sc_powerhook = powerhook_establish(rt2860_power, sc);
 	if (sc->sc_powerhook == NULL) {
@@ -346,14 +338,11 @@ rt2860_detach(void *xsc)
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int qid;
 
-	ieee80211_ifdetach(ifp);	/* free all nodes */
-	if_detach(ifp);
-
 	if (sc->sc_powerhook != NULL)
 		powerhook_disestablish(sc->sc_powerhook);
 
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
+	ieee80211_ifdetach(ifp);	/* free all nodes */
+	if_detach(ifp);
 
 	for (qid = 0; qid < 6; qid++)
 		rt2860_free_tx_ring(sc, &sc->txq[qid]);
@@ -800,7 +789,7 @@ rt2860_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
 	for (i = 0; i < rs->rs_nrates; i++) {
 		rate = rs->rs_rates[i] & IEEE80211_RATE_VAL;
 		/* convert 802.11 rate to hardware rate index */
-		for (ridx = 0; ridx <= RT2860_RIDX_MAX; ridx++)
+		for (ridx = 0; ridx < RT2860_RIDX_MAX; ridx++)
 			if (rt2860_rates[ridx].rate == rate)
 				break;
 		rn->ridx[i] = ridx;
@@ -1448,7 +1437,7 @@ rt2860_tx(struct rt2860_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 			dur = rt2860_rates[ctl_ridx].sp_ack_dur;
 		else
 			dur = rt2860_rates[ctl_ridx].lp_ack_dur;
-		*(uint16_t *)wh->i_dur = htole16(dur + sc->sifs);
+		*(uint16_t *)wh->i_dur = htole16(dur);
 	}
 #ifndef IEEE80211_STA_ONLY
 	/* ask MAC to insert timestamp into probe responses */
@@ -2034,9 +2023,6 @@ rt2860_set_chan(struct rt2860_softc *sc, struct ieee80211_channel *c)
 	rt2860_rf_write(sc, RT2860_RF3, r3);
 	rt2860_rf_write(sc, RT2860_RF4, r4);
 
-	/* 802.11a uses a 16 microseconds short interframe space */
-	sc->sifs = IEEE80211_IS_CHAN_5GHZ(c) ? 16 : 10;
-
 	/* determine channel group */
 	if (chan <= 14)
 		group = 0;
@@ -2187,6 +2173,11 @@ rt2860_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 	bus_size_t base;
 	uint32_t attr;
 	uint8_t mode, wcid, iv[8];
+
+	/* defer setting of WEP keys until interface is brought up */
+	if ((ic->ic_if.if_flags & (IFF_UP | IFF_RUNNING)) !=
+	    (IFF_UP | IFF_RUNNING))
+		return 0;
 
 	/* map net80211 cipher to RT2860 security mode */
 	switch (k->k_cipher) {
@@ -2472,7 +2463,7 @@ rt2860_read_eeprom(struct rt2860_softc *sc)
 		    rt2860_rf2850[i].chan, sc->txpow1[i], sc->txpow2[i]));
 	}
 	/* read power settings for 5GHz channels */
-	for (i = 0; i < 36; i += 2) {
+	for (i = 0; i < 40; i += 2) {
 		val = rt2860_eeprom_read(sc,
 		    RT2860_EEPROM_PWR5GHZ_BASE1 + i / 2);
 		sc->txpow1[i + 14] = (int8_t)(val & 0xff);
@@ -2484,7 +2475,7 @@ rt2860_read_eeprom(struct rt2860_softc *sc)
 		sc->txpow2[i + 15] = (int8_t)(val >> 8);
 	}
 	/* fix broken Tx power entries */
-	for (i = 0; i < 36; i++) {
+	for (i = 0; i < 40; i++) {
 		if (sc->txpow1[14 + i] < -7 || sc->txpow1[14 + i] > 15)
 			sc->txpow1[14 + i] = 5;
 		if (sc->txpow2[14 + i] < -7 || sc->txpow2[14 + i] > 15)
@@ -2886,8 +2877,8 @@ rt2860_init(struct ifnet *ifp)
 	ic->ic_bss->ni_chan = ic->ic_ibss_chan;
 	rt2860_set_chan(sc, ic->ic_ibss_chan);
 
-	/* XXX not clear what the following 8051 command does.. */
-	(void)rt2860_mcu_cmd(sc, RT2860_MCU_CMD_BOOT, 0);
+	/* reset RF from MCU */
+	(void)rt2860_mcu_cmd(sc, RT2860_MCU_CMD_RFRESET, 0);
 
 	/* set RTS threshold */
 	tmp = RAL_READ(sc, RT2860_TX_RTS_CFG);
@@ -2901,12 +2892,6 @@ rt2860_init(struct ifnet *ifp)
 
 	/* turn radio LED on */
 	rt2860_set_leds(sc, RT2860_LED_RADIO);
-
-	if (ic->ic_flags & IEEE80211_F_WEPON) {
-		/* install WEP keys */
-		for (i = 0; i < IEEE80211_WEP_NKID; i++)
-			(void)rt2860_set_key(ic, NULL, &ic->ic_nw_keys[i]);
-	}
 
 	/* enable Tx/Rx DMA engine */
 	if ((error = rt2860_txrx_enable(sc)) != 0) {
@@ -2924,6 +2909,12 @@ rt2860_init(struct ifnet *ifp)
 
 	ifp->if_flags &= ~IFF_OACTIVE;
 	ifp->if_flags |= IFF_RUNNING;
+
+	if (ic->ic_flags & IEEE80211_F_WEPON) {
+		/* install WEP keys */
+		for (i = 0; i < IEEE80211_WEP_NKID; i++)
+			(void)rt2860_set_key(ic, NULL, &ic->ic_nw_keys[i]);
+	}
 
 	if (ic->ic_opmode != IEEE80211_M_MONITOR)
 		ieee80211_new_state(ic, IEEE80211_S_SCAN, -1);
@@ -3169,13 +3160,4 @@ rt2860_power(int why, void *arg)
 		break;
 	}
 	splx(s);
-}
-
-void
-rt2860_shutdown(void *arg)
-{
-	struct rt2860_softc *sc = arg;
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
-
-	rt2860_stop(ifp, 1);
 }

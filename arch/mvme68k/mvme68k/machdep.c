@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.115 2009/06/03 21:30:20 beck Exp $ */
+/*	$OpenBSD: machdep.c,v 1.120 2009/08/11 19:17:16 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -85,9 +85,6 @@
 #include <sys/vnode.h>
 #include <sys/sysctl.h>
 #include <sys/syscallargs.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 #include <sys/evcount.h>
 
 #include <machine/atomic.h>
@@ -167,7 +164,6 @@ int fpu_gettype(void);
 int memsize162(void);
 int memsize1x7(void);	/* in locore */
 int memsize(void);
-caddr_t allocsys(caddr_t);
 
 void
 mvme68k_init()
@@ -220,9 +216,7 @@ void
 cpu_startup()
 {
 	unsigned i;
-	caddr_t v;
 	vaddr_t minaddr, maxaddr;
-	vsize_t size;
 #ifdef DEBUG
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
@@ -247,23 +241,6 @@ cpu_startup()
 	identifycpu();
 	printf("real mem = %u (%uMB)\n", ptoa(physmem),
 	    ptoa(physmem) / 1024 / 1024);
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	size = (vsize_t)allocsys((caddr_t)0);
-	if ((v = (caddr_t) uvm_km_zalloc(kernel_map, round_page(size))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != size)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -301,31 +278,6 @@ cpu_startup()
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
-}
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * You call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(caddr_t v)
-{
-
-#define	valloc(name, type, num) \
-	    (name) = (type *)v; v = (caddr_t)((name) + (num))
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return (v);
 }
 
 /*

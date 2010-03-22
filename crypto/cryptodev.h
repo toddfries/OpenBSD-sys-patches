@@ -1,4 +1,4 @@
-/*	$OpenBSD: cryptodev.h,v 1.47 2008/06/09 16:07:00 djm Exp $	*/
+/*	$OpenBSD: cryptodev.h,v 1.49 2010/01/10 12:43:07 markus Exp $	*/
 
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
@@ -53,13 +53,20 @@
 #define _CRYPTO_CRYPTO_H_
 
 #include <sys/ioccom.h>
+#include <sys/workq.h>
 
 /* Some initial values */
 #define CRYPTO_DRIVERS_INITIAL	4
 #define CRYPTO_SW_SESSIONS	32
 
 /* HMAC values */
-#define HMAC_BLOCK_LEN		64
+#define HMAC_MD5_BLOCK_LEN	64
+#define HMAC_SHA1_BLOCK_LEN	64
+#define HMAC_RIPEMD160_BLOCK_LEN 64
+#define HMAC_SHA2_256_BLOCK_LEN	64
+#define HMAC_SHA2_384_BLOCK_LEN	128
+#define HMAC_SHA2_512_BLOCK_LEN	128
+#define HMAC_MAX_BLOCK_LEN	HMAC_SHA2_512_BLOCK_LEN	/* keep in sync */
 #define HMAC_IPAD_VAL		0x36
 #define HMAC_OPAD_VAL		0x5C
 
@@ -143,6 +150,8 @@ struct cryptodesc {
 
 /* Structure describing complete operation */
 struct cryptop {
+	struct workq_task crp_wqt;
+
 	u_int64_t	crp_sid;	/* Session ID */
 	int		crp_ilen;	/* Input data total length */
 	int		crp_olen;	/* Result total length */
@@ -211,6 +220,8 @@ struct crypt_kop {
 #define CRF_DH_COMPUTE_KEY	(1 << CRK_DH_COMPUTE_KEY)
 
 struct cryptkop {
+	struct workq_task krp_wqt;
+
 	u_int		krp_op;		/* ie. CRK_MOD_EXP or other */
 	u_int		krp_status;	/* return status */
 	u_short		krp_iparams;	/* # of input parameters */

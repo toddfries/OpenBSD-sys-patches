@@ -1,4 +1,4 @@
-/*	$OpenBSD: vs.c,v 1.76 2009/02/16 21:19:06 miod Exp $	*/
+/*	$OpenBSD: vs.c,v 1.78 2010/01/09 23:15:06 krw Exp $	*/
 
 /*
  * Copyright (c) 2004, 2009, Miodrag Vallat.
@@ -326,7 +326,6 @@ vs_poll(struct vs_softc *sc, struct vs_cb *cb)
 	if (rc != 0) {
 		xs->error = XS_SELTIMEOUT;
 		xs->status = -1;
-		xs->flags |= ITSDONE;
 #ifdef VS_DEBUG
 		printf("%s: polled command timed out\n", __func__);
 #endif
@@ -400,7 +399,6 @@ vs_scsidone(struct vs_softc *sc, struct vs_cb *cb)
 		vs_chksense(cb, xs);
 	}
 
-	xs->flags |= ITSDONE;
 	vs_free(sc, cb);
 	scsi_done(xs);
 }
@@ -434,7 +432,7 @@ vs_scsicmd(struct scsi_xfer *xs)
 		if (cb->cb_xs != NULL) {
 			printf("%s: master command not idle\n",
 			    sc->sc_dev.dv_xname);
-			return (TRY_AGAIN_LATER);
+			return (NO_CCB);
 		}
 #endif
 		s = splbio();
@@ -447,7 +445,7 @@ vs_scsicmd(struct scsi_xfer *xs)
 			printf("%s: queue for target %d is busy\n",
 			    sc->sc_dev.dv_xname, slp->target);
 #endif
-			return (TRY_AGAIN_LATER);
+			return (NO_CCB);
 		}
 		if (vs_getcqe(sc, &cqep, &iopb)) {
 			/* XXX shouldn't happen since our queue is ready */
@@ -455,7 +453,7 @@ vs_scsicmd(struct scsi_xfer *xs)
 #ifdef VS_DEBUG
 			printf("%s: no free CQEs\n", sc->sc_dev.dv_xname);
 #endif
-			return (TRY_AGAIN_LATER);
+			return (NO_CCB);
 		}
 	}
 
@@ -1227,7 +1225,6 @@ vs_eintr(void *vsc)
 	if (xs != NULL) {
 		xs->error = XS_SELTIMEOUT;
 		xs->status = -1;
-		xs->flags |= ITSDONE;
 		scsi_done(xs);
 	}
 

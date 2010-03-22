@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.148 2009/06/03 21:30:20 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.153 2009/08/11 19:17:16 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.207 1998/07/08 04:39:34 thorpej Exp $	*/
 
 /*
@@ -94,9 +94,6 @@
 #include <sys/mount.h>
 #include <sys/extent.h>
 #include <sys/syscallargs.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 
 #include <machine/db_machdep.h>
 #include <ddb/db_sym.h>
@@ -212,7 +209,6 @@ int	astpending = 0;
 void	identifycpu(void);
 u_long	get_physical(u_int, u_long *);
 
-caddr_t	allocsys(caddr_t);
 void	initcpu(void);
 int	cpu_dumpsize(void);
 int	cpu_dump(int (*)(dev_t, daddr64_t, caddr_t, size_t), daddr64_t *);
@@ -356,11 +352,9 @@ consinit(void)
 void
 cpu_startup(void)
 {
-	caddr_t v;
 	unsigned i;
 	int vers;
 	vaddr_t minaddr, maxaddr;
-	vsize_t size = 0;	/* To avoid compiler warning */
 	int delay;
 
 	/*
@@ -403,23 +397,6 @@ cpu_startup(void)
 	    ptoa(physmem)/1024/1024);
 
 	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addressses.
-	 */
-	size = (vsize_t)allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(size))) == 0)
-		panic("startup: no room for tables");
-	if ((allocsys(v) - v) != size)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-
-	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
@@ -459,35 +436,6 @@ cpu_startup(void)
 
 	/* Safe for extent allocation to use malloc now. */
 	iomem_malloc_safe = 1;
-}
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(v)
-	caddr_t v;
-{
-
-#define	valloc(name, type, num) \
-	    (name) = (type *)v; v = (caddr_t)((name)+(num))
-#define	valloclim(name, type, num, lim) \
-	    (name) = (type *)v; v = (caddr_t)((lim) = ((name)+(num)))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return (v);
 }
 
 void

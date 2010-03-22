@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.c,v 1.71 2008/11/26 18:01:43 dlg Exp $	*/
+/*	$OpenBSD: bpf.c,v 1.75 2009/11/09 17:53:39 nicm Exp $	*/
 /*	$NetBSD: bpf.c,v 1.33 1997/02/21 23:59:35 thorpej Exp $	*/
 
 /*
@@ -95,7 +95,7 @@ void	bpf_detachd(struct bpf_d *);
 int	bpf_setif(struct bpf_d *, struct ifreq *);
 int	bpfpoll(dev_t, int, struct proc *);
 int	bpfkqfilter(dev_t, struct knote *);
-static __inline void bpf_wakeup(struct bpf_d *);
+void	bpf_wakeup(struct bpf_d *);
 void	bpf_catchpacket(struct bpf_d *, u_char *, size_t, size_t,
 	    void (*)(const void *, void *, size_t));
 void	bpf_reset_d(struct bpf_d *);
@@ -495,7 +495,7 @@ bpfread(dev_t dev, struct uio *uio, int ioflag)
 /*
  * If there are processes sleeping on this descriptor, wake them up.
  */
-static __inline void
+void
 bpf_wakeup(struct bpf_d *d)
 {
 	wakeup((caddr_t)d);
@@ -506,7 +506,6 @@ bpf_wakeup(struct bpf_d *d)
 	selwakeup(&d->bd_sel);
 	/* XXX */
 	d->bd_sel.si_selpid = 0;
-	KNOTE(&d->bd_sel.si_note, 0);
 }
 
 int
@@ -539,6 +538,8 @@ bpfwrite(dev_t dev, struct uio *uio, int ioflag)
 		m_freem(m);
 		return (EMSGSIZE);
 	}
+
+	m->m_pkthdr.rdomain = ifp->if_rdomain;
 
 	if (d->bd_hdrcmplt)
 		dst.ss_family = pseudo_AF_HDRCMPLT;
@@ -1070,6 +1071,7 @@ bpfkqfilter(dev_t dev, struct knote *kn)
 	kn->kn_hook = (caddr_t)((u_long)dev);
 
 	s = splnet();
+	D_GET(d);
 	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
 	splx(s);
 
@@ -1086,6 +1088,7 @@ filt_bpfrdetach(struct knote *kn)
 	d = bpfilter_lookup(minor(dev));
 	s = splnet();
 	SLIST_REMOVE(&d->bd_sel.si_note, kn, knote, kn_selnext);
+	D_PUT(d);
 	splx(s);
 }
 

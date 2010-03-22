@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pglist.c,v 1.30 2009/06/01 17:42:33 ariane Exp $	*/
+/*	$OpenBSD: uvm_pglist.c,v 1.35 2009/08/13 15:29:59 deraadt Exp $	*/
 /*	$NetBSD: uvm_pglist.c,v 1.13 2001/02/18 21:19:08 chs Exp $	*/
 
 /*-
@@ -75,9 +75,9 @@ u_long	uvm_pglistalloc_npages;
  *			power-of-two boundary (relative to zero).
  * => flags:
  *	UVM_PLA_NOWAIT	fail if allocation fails
- *	UVM_PLA_WAITOK	wait for memory to become avail if allocation fails
+ *	UVM_PLA_WAITOK	wait for memory to become avail
  *	UVM_PLA_ZERO	return zeroed memory
- *	UVM_PLA_TRY_CONTIG device prefers p-lineair mem
+ *	UVM_PLA_TRYCONTIG caller (device) prefers p-lineair memory
  */
 
 int
@@ -93,17 +93,26 @@ uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
 	if (size == 0)
 		return (EINVAL);
 
+	if ((high & PAGE_MASK) != PAGE_MASK) {
+		printf("uvm_pglistalloc: Upper boundary 0x%lx "
+		    "not on pagemask.\n", (unsigned long)high);
+	}
+
 	/*
-	 * Convert byte addresses to page numbers.
+	 * Our allocations are always page granularity, so our alignment
+	 * must be, too.
 	 */
 	if (alignment < PAGE_SIZE)
 		alignment = PAGE_SIZE;
+
 	low = atop(roundup(low, alignment));
-	/* Allows for overflow: 0xffff + 1 = 0x0000 */
-	if ((high & PAGE_MASK) == PAGE_MASK)
-		high = atop(high) + 1;
-	else
-		high = atop(high);
+	/*
+	 * high + 1 may result in overflow, in which case high becomes 0x0,
+	 * which is the 'don't care' value.
+	 * The only requirement in that case is that low is also 0x0, or the
+	 * low<high assert will fail.
+	 */
+	high = atop(high + 1);
 	size = atop(round_page(size));
 	alignment = atop(alignment);
 	if (boundary < PAGE_SIZE && boundary != 0)
@@ -123,22 +132,6 @@ uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
 void
 uvm_pglistfree(struct pglist *list)
 {
-	struct vm_page *m;
 	UVMHIST_FUNC("uvm_pglistfree"); UVMHIST_CALLED(pghist);
-
-	TAILQ_FOREACH(m, list, pageq) {
-		KASSERT((m->pg_flags & (PQ_ACTIVE|PQ_INACTIVE)) == 0);
-#ifdef DEBUG
-		if (m->uobject == (void *)0xdeadbeef &&
-		    m->uanon == (void *)0xdeadbeef) {
-			panic("uvm_pglistfree: freeing free page %p", m);
-		}
-
-		m->uobject = (void *)0xdeadbeef;
-		m->offset = 0xdeadbeef;
-		m->uanon = (void *)0xdeadbeef;
-#endif
-		atomic_clearbits_int(&m->pg_flags, PQ_MASK);
-	}
 	uvm_pmr_freepageq(list);
 }

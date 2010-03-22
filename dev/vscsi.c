@@ -1,4 +1,4 @@
-/*	$OpenBSD: vscsi.c,v 1.2 2009/02/16 21:19:06 miod Exp $ */
+/*	$OpenBSD: vscsi.c,v 1.6 2010/03/14 01:43:43 dlg Exp $ */
 
 /*
  * Copyright (c) 2008 David Gwynne <dlg@openbsd.org>
@@ -194,7 +194,6 @@ vscsi_cmd(struct scsi_xfer *xs)
 	mtx_leave(&sc->sc_ccb_mtx);
 
 	selwakeup(&sc->sc_sel);
-	KNOTE(&sc->sc_sel.si_note, 0);
 
 	if (polled) {
 		rw_enter_read(&sc->sc_ccb_polling);
@@ -214,7 +213,6 @@ vscsi_xs_stuffup(struct scsi_xfer *xs)
 	int				s;
 
 	xs->error = XS_DRIVER_STUFFUP;
-	xs->flags |= ITSDONE;
 	s = splbio();
 	scsi_done(xs);
 	splx(s);
@@ -261,6 +259,7 @@ int
 vscsiioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 {
 	struct vscsi_softc		*sc = DEV2SC(dev);
+	struct vscsi_ioc_devevent	*de = (struct vscsi_ioc_devevent *)addr;
 	int				read = 0;
 	int				err = 0;
 
@@ -277,6 +276,15 @@ vscsiioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 
 	case VSCSI_T2I:
 		err = vscsi_t2i(sc, (struct vscsi_ioc_t2i *)addr);
+		break;
+
+	case VSCSI_REQPROBE:
+		err = scsi_req_probe(sc->sc_scsibus, de->target, de->lun);
+		break;
+
+	case VSCSI_REQDETACH:
+		err = scsi_req_detach(sc->sc_scsibus, de->target, de->lun,
+		    DETACH_FORCE);
 		break;
 
 	default:
@@ -421,7 +429,6 @@ vscsi_t2i(struct vscsi_softc *sc, struct vscsi_ioc_t2i *t2i)
 
 	polled = ISSET(xs->flags, SCSI_POLL);
 
-	xs->flags |= ITSDONE;
 	s = splbio();
 	scsi_done(xs);
 	splx(s);
@@ -515,7 +522,7 @@ vscsiclose(dev_t dev, int flags, int mode, struct proc *p)
 	sc->sc_opened = 0;
 
 	while ((ccb = TAILQ_FIRST(&sc->sc_ccb_t2i)) != NULL) {
-		TAILQ_REMOVE(&sc->sc_ccb_i2t, ccb, ccb_entry);
+		TAILQ_REMOVE(&sc->sc_ccb_t2i, ccb, ccb_entry);
 		polled = ISSET(ccb->ccb_xs->flags, SCSI_POLL);
 
 		vscsi_xs_stuffup(ccb->ccb_xs);

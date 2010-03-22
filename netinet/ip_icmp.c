@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_icmp.c,v 1.84 2009/06/09 11:52:54 sthen Exp $	*/
+/*	$OpenBSD: ip_icmp.c,v 1.87 2010/02/09 13:23:39 claudio Exp $	*/
 /*	$NetBSD: ip_icmp.c,v 1.19 1996/02/13 23:42:22 christos Exp $	*/
 
 /*
@@ -308,7 +308,7 @@ icmp_input(struct mbuf *m, ...)
 	int icmplen;
 	int i;
 	struct in_ifaddr *ia;
-	void *(*ctlfunc)(int, struct sockaddr *, void *);
+	void *(*ctlfunc)(int, struct sockaddr *, u_int, void *);
 	int code;
 	extern u_char ip_protox[];
 	int hlen;
@@ -469,7 +469,8 @@ icmp_input(struct mbuf *m, ...)
 		 */
 		ctlfunc = inetsw[ip_protox[icp->icmp_ip.ip_p]].pr_ctlinput;
 		if (ctlfunc)
-			(*ctlfunc)(code, sintosa(&icmpsrc), &icp->icmp_ip);
+			(*ctlfunc)(code, sintosa(&icmpsrc), m->m_pkthdr.rdomain,
+			    &icp->icmp_ip);
 		break;
 
 	badcode:
@@ -589,7 +590,6 @@ reflect:
 			goto freeit;
 #endif
 		rt = NULL;
-		/* XXX rdomain vs. rtable */
 		rtredirect(sintosa(&icmpsrc), sintosa(&icmpdst),
 		    (struct sockaddr *)0, RTF_GATEWAY | RTF_HOST,
 		    sintosa(&icmpgw), (struct rtentry **)&rt,
@@ -663,7 +663,7 @@ icmp_reflect(struct mbuf *m)
 	 * the address which corresponds to the incoming interface.
 	 */
 	TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
-		if (ia->ia_ifp->if_rdomain != m->m_pkthdr.rdomain)
+		if (ia->ia_ifp->if_rdomain != rtable_l2(m->m_pkthdr.rdomain))
 			continue;
 		if (t.s_addr == ia->ia_addr.sin_addr.s_addr)
 			break;
@@ -686,7 +686,7 @@ icmp_reflect(struct mbuf *m)
 		dst->sin_len = sizeof(*dst);
 		dst->sin_addr = ip->ip_src;
 
-		/* keep packet in the original VRF instance */
+		/* keep packet in the original virtual instance */
 		ro.ro_rt = rtalloc1(&ro.ro_dst, 1,
 		     m->m_pkthdr.rdomain);
 		if (ro.ro_rt == 0) {
@@ -881,6 +881,11 @@ icmp_mtudisc_clone(struct sockaddr *dst, u_int rtableid)
 	if (rt == 0)
 		return (NULL);
 
+	/* Check if the route is actually usable */
+	if (rt->rt_flags & (RTF_REJECT | RTF_BLACKHOLE) ||
+	    (rt->rt_flags & RTF_UP) == 0)
+		return (NULL);
+
 	/* If we didn't get a host route, allocate one */
 
 	if ((rt->rt_flags & RTF_HOST) == 0) {
@@ -981,7 +986,7 @@ icmp_mtudisc_timeout(struct rtentry *rt, struct rttimer *r)
 		panic("icmp_mtudisc_timeout:  bad route to timeout");
 	if ((rt->rt_flags & (RTF_DYNAMIC | RTF_HOST)) ==
 	    (RTF_DYNAMIC | RTF_HOST)) {
-		void *(*ctlfunc)(int, struct sockaddr *, void *);
+		void *(*ctlfunc)(int, struct sockaddr *, u_int, void *);
 		extern u_char ip_protox[];
 		struct sockaddr_in sa;
 		struct rt_addrinfo info;
@@ -998,7 +1003,7 @@ icmp_mtudisc_timeout(struct rtentry *rt, struct rttimer *r)
 		/* Notify TCP layer of increased Path MTU estimate */
 		ctlfunc = inetsw[ip_protox[IPPROTO_TCP]].pr_ctlinput;
 		if (ctlfunc)
-			(*ctlfunc)(PRC_MTUINC,(struct sockaddr *)&sa, NULL);
+			(*ctlfunc)(PRC_MTUINC,(struct sockaddr *)&sa, 0, NULL);
 	} else
 		if ((rt->rt_rmx.rmx_locks & RTV_MTU) == 0)
 			rt->rt_rmx.rmx_mtu = 0;

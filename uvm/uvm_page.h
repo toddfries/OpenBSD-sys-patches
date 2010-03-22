@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.h,v 1.35 2009/06/07 02:01:54 oga Exp $	*/
+/*	$OpenBSD: uvm_page.h,v 1.40 2009/08/06 15:28:14 oga Exp $	*/
 /*	$NetBSD: uvm_page.h,v 1.19 2000/12/28 08:24:55 chs Exp $	*/
 
 /* 
@@ -83,16 +83,8 @@
  *
  *	A small structure is kept for each resident
  *	page, indexed by page number.  Each structure
- *	is an element of several lists:
- *
- *		A hash table bucket used to quickly
- *		perform object/offset lookups
- *
- *		A list of all pages for a given object,
- *		so they can be quickly deactivated at
- *		time of deallocation.
- *
- *		An ordered list of pages due for pageout.
+ *	contains a list used for manipulating pages, and
+ *	a tree structure for in object/offset lookups
  *
  *	In addition, the structure contains the object
  *	and offset to which this page belongs (for pageout),
@@ -106,22 +98,11 @@
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm_pglist.h>
 
-union vm_page_fq {
-	struct {
-		RB_ENTRY(vm_page)	tree;	/* hash table links (O)*/
-		TAILQ_ENTRY(vm_page)	listq;	/* pages in same object (O)*/
-	}	queues;
-
-	struct {
-		RB_ENTRY(vm_page)	tree;	/* Free chunks, addr/size */
-		psize_t			pages;
-	}	free;
-};
-
 struct vm_page {
-	union vm_page_fq	fq;		/* free and queue management */
 	TAILQ_ENTRY(vm_page)	pageq;		/* queue info for FIFO
 						 * queue or free list (P) */
+	RB_ENTRY(vm_page)	objt;		/* object tree (O)*/
+
 	struct vm_anon		*uanon;		/* anon (O,P) */
 	struct uvm_object	*uobject;	/* object (O,P) */
 	voff_t			offset;		/* offset into object (O,P) */
@@ -135,6 +116,7 @@ struct vm_page {
 						 * to read: [O or P]
 						 * to modify: [O _and_ P] */
 	paddr_t			phys_addr;	/* physical address of page */
+	psize_t			fpgsz;		/* free page range size */
 	char			*pmr_tag;
 
 #ifdef __HAVE_VM_PAGE_MD
@@ -174,7 +156,6 @@ struct vm_page {
 #define	PG_FAKE		0x00000040	/* page is not yet initialized */
 #define PG_RDONLY	0x00000080	/* page must be mapped read-only */
 #define PG_ZERO		0x00000100	/* page is pre-zero'd */
-#define PG_DEV		0x00000200	/* page is in device space, lay off */
 
 #define PG_PAGER1	0x00001000	/* pager-specific flag */
 #define PG_MASK		0x0000ffff
@@ -319,9 +300,6 @@ int		vm_physseg_find(paddr_t, int *);
 #define uvm_unlock_pageq()	simple_unlock(&uvm.pageqlock)
 #define uvm_lock_fpageq()	mtx_enter(&uvm.fpageqlock);
 #define uvm_unlock_fpageq()	mtx_leave(&uvm.fpageqlock);
-
-#define uvm_pagehash(obj,off) \
-	(((unsigned long)obj+(unsigned long)atop(off)) & uvm.page_hashmask)
 
 #define	UVM_PAGEZERO_TARGET	(uvmexp.free)
 

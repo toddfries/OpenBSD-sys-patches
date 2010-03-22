@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860var.h,v 1.11 2008/12/29 13:27:27 damien Exp $	*/
+/*	$OpenBSD: rt2860var.h,v 1.14 2010/02/08 18:46:47 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007
@@ -136,7 +136,6 @@ struct rt2860_softc {
 
 	int				sc_tx_timer;
 	int				mgtqid;
-	int				sifs;
 	uint8_t				qfullmsk;
 
 	uint32_t			mac_rev;
@@ -145,8 +144,8 @@ struct rt2860_softc {
 	uint8_t				ntxchains;
 	uint8_t				nrxchains;
 	uint8_t				pslevel;
-	int8_t				txpow1[50];
-	int8_t				txpow2[50];
+	int8_t				txpow1[54];
+	int8_t				txpow2[54];
 	int8_t				rssi_2ghz[3];
 	int8_t				rssi_5ghz[3];
 	uint8_t				lna[4];
@@ -186,11 +185,9 @@ struct rt2860_softc {
 #define sc_txtap			sc_txtapu.th
 	int				sc_txtap_len;
 #endif
-	void				*sc_sdhook;
 	void				*sc_powerhook;
 };
 
 int	rt2860_attach(void *, int);
 int	rt2860_detach(void *);
 int	rt2860_intr(void *);
-void	rt2860_shutdown(void *);

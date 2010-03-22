@@ -1,4 +1,4 @@
-/* $OpenBSD: if_mpe.c,v 1.15 2009/01/28 22:18:44 michele Exp $ */
+/* $OpenBSD: if_mpe.c,v 1.18 2010/01/09 20:29:42 claudio Exp $ */
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@spootnik.org>
@@ -101,7 +101,6 @@ mpe_clone_create(struct if_clone *ifc, int unit)
 	ifp->if_output = mpeoutput;
 	ifp->if_start = mpestart;
 	ifp->if_type = IFT_MPLS;
-	ifp->if_snd.ifq_maxlen = ifqmaxlen;
 	ifp->if_hdrlen = MPE_HDRLEN;
 	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
 	IFQ_SET_READY(&ifp->if_snd);
@@ -128,9 +127,6 @@ mpe_clone_destroy(struct ifnet *ifp)
 	LIST_REMOVE(mpeif, sc_list);
 	splx(s);
 
-#if NBPFILTER > 0
-	bpfdetach(ifp);
-#endif
 	if_detach(ifp);
 	free(mpeif, M_DEVBUF);
 	return (0);
@@ -155,6 +151,14 @@ mpestart(struct ifnet *ifp)
 		if (m == NULL)
 			return;
 
+#ifdef DIAGNOSTIC
+		if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.rdomain)) {
+			printf("%s: trying to send packet on wrong domain. "
+			    "if %d vs. mbuf %d\n", ifp->if_xname,
+			    ifp->if_rdomain, rtable_l2(m->m_pkthdr.rdomain));
+		}
+#endif
+
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
 			bpf_mtap_af(ifp->if_bpf, AF_INET, m, BPF_DIRECTION_OUT);
@@ -168,6 +172,8 @@ mpestart(struct ifnet *ifp)
 			continue;
 		}
 		m->m_pkthdr.rcvif = ifp;
+		/* XXX assumes MPLS is always in rdomain 0 */
+		m->m_pkthdr.rdomain = 0;
 		mpls_output(m, NULL);
 	}
 }
@@ -312,6 +318,10 @@ mpe_input(struct mbuf *m, struct ifnet *ifp, struct sockaddr_mpls *smpls,
 		ip->ip_sum = in_cksum(m, hlen);
 	}
 	
+	/* new receive if and move into correct rdomain */
+	m->m_pkthdr.rcvif = ifp;
+	m->m_pkthdr.rdomain = ifp->if_rdomain;
+
 #if NBPFILTER > 0
 	if (ifp && ifp->if_bpf)
 		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
@@ -341,6 +351,10 @@ mpe_input6(struct mbuf *m, struct ifnet *ifp, struct sockaddr_mpls *smpls,
 		/* set IPv6 ttl from MPLS ttl */
 		ip6hdr->ip6_hlim = ttl;
 	}
+
+	/* new receive if and move into correct rdomain */
+	m->m_pkthdr.rcvif = ifp;
+	m->m_pkthdr.rdomain = ifp->if_rdomain;
 
 #if NBPFILTER > 0
 	if (ifp && ifp->if_bpf)

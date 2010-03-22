@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhub.c,v 1.49 2008/06/26 05:42:18 ray Exp $ */
+/*	$OpenBSD: uhub.c,v 1.52 2009/11/13 18:06:57 deraadt Exp $ */
 /*	$NetBSD: uhub.c,v 1.64 2003/02/08 03:32:51 ichiro Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhub.c,v 1.18 1999/11/17 22:33:43 n_hibma Exp $	*/
 
@@ -84,7 +84,7 @@ void uhub_intr(usbd_xfer_handle, usbd_private_handle,usbd_status);
 int uhub_match(struct device *, void *, void *); 
 void uhub_attach(struct device *, struct device *, void *); 
 int uhub_detach(struct device *, int); 
-int uhub_activate(struct device *, enum devact); 
+int uhub_activate(struct device *, int); 
 
 struct cfdriver uhub_cd = { 
 	NULL, "uhub", DV_DULL 
@@ -191,10 +191,15 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 		goto bad;
 	}
 
-	hub = malloc(sizeof(*hub) + (nports-1) * sizeof(struct usbd_port),
-		     M_USBDEV, M_NOWAIT);
+	hub = malloc(sizeof(*hub), M_USBDEV, M_NOWAIT);
 	if (hub == NULL)
 		return;
+	hub->ports = malloc(sizeof(struct usbd_port) * nports,
+	    M_USBDEV, M_NOWAIT);
+	if (hub->ports == NULL) {
+		free(hub, M_USBDEV);
+		return;
+	}
 	dev->hub = hub;
 	dev->hub->hubsoftc = sc;
 	hub->explore = uhub_explore;
@@ -320,6 +325,8 @@ uhub_attach(struct device *parent, struct device *self, void *aux)
 	return;
 
  bad:
+	if (hub->ports)
+		free(hub->ports, M_USBDEV);
 	if (hub)
 		free(hub, M_USBDEV);
 	dev->hub = NULL;
@@ -497,7 +504,7 @@ uhub_explore(usbd_device_handle dev)
 }
 
 int
-uhub_activate(struct device *self, enum devact act)
+uhub_activate(struct device *self, int act)
 {
 	struct uhub_softc *sc = (struct uhub_softc *)self;
 	struct usbd_hub *hub = sc->sc_hub->hub;
@@ -556,6 +563,8 @@ uhub_detach(struct device *self, int flags)
 
 	if (hub->ports[0].tt)
 		free(hub->ports[0].tt, M_USBDEV);
+	if (hub->ports)
+		free(hub->ports, M_USBDEV);
 	free(hub, M_USBDEV);
 	sc->sc_hub->hub = NULL;
 

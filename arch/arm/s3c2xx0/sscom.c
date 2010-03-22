@@ -1,4 +1,4 @@
-/*	$OpenBSD: sscom.c,v 1.9 2009/01/02 19:42:54 drahn Exp $ */
+/*	$OpenBSD: sscom.c,v 1.16 2010/02/01 23:53:58 drahn Exp $ */
 /*	$NetBSD: sscom.c,v 1.29 2008/06/11 22:37:21 cegger Exp $ */
 
 /*
@@ -369,7 +369,7 @@ sscom_enable_debugport(struct sscom_softc *sc)
 	int s;
 
 	/* Turn on line break interrupt, set carrier. */
-	s = splserial();
+	s = spltty();
 	SSCOM_LOCK(sc);
 	sc->sc_ucon = UCON_DEBUGPORT;
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, SSCOM_UCON, sc->sc_ucon);
@@ -515,14 +515,10 @@ sscom_attach_subr(struct sscom_softc *sc)
 	/* if there are no enable/disable functions, assume the device
 	   is always enabled */
 
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	sc->sc_si = softintr_establish(IPL_TTY, sscomsoft, sc);
 	if (sc->sc_si == NULL)
 		panic("%s: can't establish soft interrupt",
 		    sc->sc_dev.dv_xname);
-#else           
-	timeout_set(&sc->sc_comsoft_tmo, comsoft, sc);
-#endif
 
 	SET(sc->sc_hwflags, SSCOM_HW_DEV_OK);
 
@@ -541,17 +537,17 @@ sscom_detach(struct device *self, int flags)
 }
 
 int
-sscom_activate(struct device *self, enum devact act)
+sscom_activate(struct device *self, int act)
 {
 #ifdef notyet
 	struct sscom_softc *sc = (struct sscom_softc *)self;
 	int s, rv = 0;
 
-	s = splserial();
+	s = spltty();
 	SSCOM_LOCK(sc);
 	switch (act) {
 	case DVACT_ACTIVATE:
-		rv = EOPNOTSUPP;
+		rv = 0;
 		break;
 
 	case DVACT_DEACTIVATE:
@@ -579,7 +575,7 @@ sscom_shutdown(struct sscom_softc *sc)
 	struct tty *tp = sc->sc_tty;
 	int s;
 
-	s = splserial();
+	s = spltty();
 	SSCOM_LOCK(sc);	
 
 	/* If we were asserting flow control, then deassert it. */
@@ -600,7 +596,7 @@ sscom_shutdown(struct sscom_softc *sc)
 		splx(s);
 		/* XXX tsleep will only timeout */
 		(void) tsleep(sc, TTIPRI, ttclos, hz);
-		s = splserial();
+		s = spltty();
 		SSCOM_LOCK(sc);	
 	}
 
@@ -626,7 +622,7 @@ sscomopen(dev_t dev, int flag, int mode, struct proc *p)
 {
 	struct sscom_softc *sc;
 	struct tty *tp;
-	int s, s2;
+	int s;
 	int error;
 	int unit = DEVUNIT(dev);
 
@@ -662,7 +658,6 @@ sscomopen(dev_t dev, int flag, int mode, struct proc *p)
 	if (!ISSET(tp->t_state, TS_ISOPEN)) {
 		tp->t_dev = dev;
 
-		s2 = splserial();
 		SSCOM_LOCK(sc);
 
 		/* Fetch the current modem control status, needed later. */
@@ -675,7 +670,6 @@ sscomopen(dev_t dev, int flag, int mode, struct proc *p)
 #endif
 
 		SSCOM_UNLOCK(sc);
-		splx(s2);
 
 		/*
 		 * Initialize the termios status to the defaults.  Add in the
@@ -702,7 +696,6 @@ sscomopen(dev_t dev, int flag, int mode, struct proc *p)
 		ttychars(tp);
 		ttsetwater(tp);
 
-		s2 = splserial();
 		SSCOM_LOCK(sc);
 
 		sscom_loadchannelregs(sc);
@@ -731,7 +724,6 @@ sscomopen(dev_t dev, int flag, int mode, struct proc *p)
 
 
 		SSCOM_UNLOCK(sc);
-		splx(s2);
 	}
 	
 	if (SSCOMDIALOUT(dev)) {
@@ -963,9 +955,7 @@ sscom_schedrx(struct sscom_softc *sc)
 	sc->sc_rx_ready = 1;
 
 	/* Wake up the poller. */
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	softintr_schedule(sc->sc_si);
-#endif
 }
 
 void
@@ -1151,7 +1141,7 @@ sscomparam(struct tty *tp, struct termios *t)
 
 	lcr = cflag2lcr(t->c_cflag);
 
-	s = splserial();
+	s = spltty();
 	SSCOM_LOCK(sc);	
 
 	sc->sc_ulcon = lcr;
@@ -1310,7 +1300,7 @@ sscomhwiflow(struct tty *tp, int block)
 	if (sc->sc_mcr_rts == 0)
 		return 0;
 
-	s = splserial();
+	s = spltty();
 	SSCOM_LOCK(sc);
 	
 	if (block) {
@@ -1375,9 +1365,9 @@ sscomstart(struct tty *tp)
 			CLR(tp->t_state, TS_ASLEEP);
 			wakeup(&tp->t_outq);
 		}
+		selwakeup(&tp->t_wsel);
 		if (tp->t_outq.c_cc == 0)
 			goto out;
-		selwakeup(&tp->t_wsel);
 	}
 
 	SET(tp->t_state, TS_BUSY);
@@ -1410,7 +1400,7 @@ sscomstop(struct tty *tp, int flag)
         struct sscom_softc *sc = sscom_cd.cd_devs[DEVUNIT(tp->t_dev)];
 	int s;
 
-	s = splserial();
+	s = spltty();
 	SSCOM_LOCK(sc);
 	if (ISSET(tp->t_state, TS_BUSY)) {
 		/* Stop transmitting at the next chunk. */
@@ -1431,7 +1421,7 @@ sscomdiag(void *arg)
 	int overflows, floods;
 	int s;
 
-	s = splserial();
+	s = spltty();
 	SSCOM_LOCK(sc);
 	overflows = sc->sc_overflows;
 	sc->sc_overflows = 0;
@@ -1523,7 +1513,7 @@ sscom_rxsoft(struct sscom_softc *sc, struct tty *tp)
 
 	if (cc != scc) {
 		sc->sc_rbget = get;
-		s = splserial();
+		s = spltty();
 		SSCOM_LOCK(sc);
 		
 		cc = sc->sc_rbavail += scc - cc;
@@ -1553,7 +1543,7 @@ sscom_stsoft(struct sscom_softc *sc, struct tty *tp)
 	u_char msr, delta;
 	int s;
 
-	s = splserial();
+	s = spltty();
 	SSCOM_LOCK(sc);
 	msr = sc->sc_msts;
 	delta = sc->sc_msr_delta;
@@ -1609,12 +1599,6 @@ sscomsoft(void *arg)
 			sscom_stsoft(sc, tp);
 		}
 	}
-#ifndef __HAVE_GENERIC_SOFT_INTERRUPTS
-        timeout_add(&sc->sc_comsoft_tmo, 1);
-#else 
-        ;
-#endif
-
 }
 
 
@@ -1806,10 +1790,7 @@ next:
 	SSCOM_UNLOCK(sc);
 
 	/* Wake up the poller. */
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	softintr_schedule(sc->sc_si);
-#endif
-
 
 
 #if NRND > 0 && defined(RND_COM)
@@ -2022,7 +2003,7 @@ static int sscom_readaheadcount = 0;
 int
 sscomcngetc(dev_t dev)
 {
-	int s = splserial();
+	int s = spltty();
 	u_char stat, c;
 
 	/* got a character from reading things earlier */
@@ -2065,7 +2046,7 @@ sscomcngetc(dev_t dev)
 void
 sscomcnputc(dev_t dev, int c)
 {
-	int s = splserial();
+	int s = spltty();
 	int timo;
 
 	int cin, stat;

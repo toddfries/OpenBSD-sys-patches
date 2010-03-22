@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_trunk.c,v 1.65 2009/01/27 16:40:54 naddy Exp $	*/
+/*	$OpenBSD: if_trunk.c,v 1.71 2010/01/12 01:36:33 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -187,17 +187,14 @@ trunk_clone_create(struct if_clone *ifc, int unit)
 	ifmedia_set(&tr->tr_media, IFM_ETHER | IFM_AUTO);
 
 	ifp = &tr->tr_ac.ac_if;
-	ifp->if_carp = NULL;
-	ifp->if_type = IFT_ETHER;
 	ifp->if_softc = tr;
 	ifp->if_start = trunk_start;
 	ifp->if_watchdog = trunk_watchdog;
 	ifp->if_ioctl = trunk_ioctl;
-	ifp->if_output = ether_output;
 	ifp->if_flags = IFF_SIMPLEX | IFF_BROADCAST | IFF_MULTICAST;
 	ifp->if_capabilities = trunk_capabilities(tr);
 
-	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&ifp->if_snd, 1);
 	IFQ_SET_READY(&ifp->if_snd);
 
 	snprintf(ifp->if_xname, sizeof(ifp->if_xname), "%s%d",
@@ -609,14 +606,8 @@ trunk_port2req(struct trunk_port *tp, struct trunk_reqport *rp)
 		break;
 
 	case TRUNK_PROTO_LACP:
-		rp->rp_flags = 0;
 		/* LACP has a different definition of active */
-		if (lacp_isactive(tp))
-			rp->rp_flags |= TRUNK_PORT_ACTIVE;
-		if (lacp_iscollecting(tp))
-			rp->rp_flags |= TRUNK_PORT_COLLECTING;
-		if (lacp_isdistributing(tp))
-			rp->rp_flags |= TRUNK_PORT_DISTRIBUTING;
+		rp->rp_flags = lacp_port_status(tp);
 		break;
 	default:
 		break;
@@ -927,9 +918,9 @@ trunk_start(struct ifnet *ifp)
 {
 	struct trunk_softc *tr = (struct trunk_softc *)ifp->if_softc;
 	struct mbuf *m;
-	int error = 0;
+	int error;
 
-	for (;; error = 0) {
+	for (;;) {
 		IFQ_DEQUEUE(&ifp->if_snd, m);
 		if (m == NULL)
 			break;
@@ -958,6 +949,8 @@ trunk_enqueue(struct ifnet *ifp, struct mbuf *m)
 {
 	int len, error = 0;
 	u_short mflags;
+
+	splassert(IPL_NET);
 
 	/* Send mbuf */
 	mflags = m->m_flags;
@@ -1631,25 +1624,10 @@ trunk_lacp_input(struct trunk_softc *tr, struct trunk_port *tp,
     struct ether_header *eh, struct mbuf *m)
 {
 	struct ifnet *ifp = &tr->tr_ac.ac_if;
-	u_short etype;
 
-	etype = ntohs(eh->ether_type);
-
-	/* Tap off LACP control messages */
-	if (etype == ETHERTYPE_SLOW) {
-		m = lacp_input(tp, eh, m);
-		if (m == NULL)
-			return (-1);
-	}
-
-	/*
-	 * If the port is not collecting or not in the active aggregator then
-	 * free and return.
-	 */
-	if (lacp_iscollecting(tp) == 0 || lacp_isactive(tp) == 0) {
-		m_freem(m);
+	m = lacp_input(tp, eh, m);
+	if (m == NULL)
 		return (-1);
-	}
 
 	m->m_pkthdr.rcvif = ifp;
 	return (0);

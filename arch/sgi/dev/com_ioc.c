@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_ioc.c,v 1.4 2009/04/12 17:56:58 miod Exp $ */
+/*	$OpenBSD: com_ioc.c,v 1.8 2010/03/07 13:44:24 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -49,24 +49,35 @@ struct cfattach com_ioc_ca = {
 	sizeof(struct com_softc), com_ioc_probe, com_ioc_attach
 };
 
+extern struct cfdriver com_cd;
+
 int
 com_ioc_probe(struct device *parent, void *match, void *aux)
 {
+	struct cfdata *cf = match;
 	struct ioc_attach_args *iaa = aux;
 	bus_space_tag_t iot = iaa->iaa_memt;
 	bus_space_handle_t ioh;
-	int rv = 0, console;
+	int rv = 0, console = 0;
 
-	console = iot->bus_base + iaa->iaa_base ==
-	    comconsiot->bus_base + comconsaddr;
+	if (strcmp(iaa->iaa_name, com_cd.cd_name) != 0)
+		return 0;
+
+	if (comconsiot != NULL)
+		console = iaa->iaa_memh + iaa->iaa_base ==
+		    comconsiot->bus_base + comconsaddr;
 
 	/* if it's in use as console, it's there. */
 	if (!(console && !comconsattached)) {
-		bus_space_map(iot, iaa->iaa_base, COM_NPORTS, 0, &ioh);
-		rv = comprobe1(iot, ioh);
-		bus_space_unmap(iot, ioh, COM_NPORTS);
+		if (bus_space_subregion(iot, iaa->iaa_memh,
+		    iaa->iaa_base, COM_NPORTS, &ioh) == 0)
+			rv = comprobe1(iot, ioh);
 	} else
 		rv = 1;
+
+	/* make a config stanza with exact locators match over a generic line */
+	if (cf->cf_loc[0] != -1)
+		rv += rv;
 
 	return rv;
 }
@@ -77,29 +88,39 @@ com_ioc_attach(struct device *parent, struct device *self, void *aux)
 	struct com_softc *sc = (void *)self;
 	struct ioc_attach_args *iaa = aux;
 	bus_space_handle_t ioh;
-	int console;
+	int console = 0;
 
-	console = iaa->iaa_memt->bus_base + iaa->iaa_base ==
-	    comconsiot->bus_base + comconsaddr;
+	if (comconsiot != NULL)
+		console = iaa->iaa_memh + iaa->iaa_base ==
+		    comconsiot->bus_base + comconsaddr;
 
 	sc->sc_hwflags = 0;
 	sc->sc_swflags = 0;
-	sc->sc_iobase = iaa->iaa_base;
 	sc->sc_frequency = 22000000 / 3;
-	sc->sc_iot = iaa->iaa_memt;
 
 	/* if it's in use as console, it's there. */
 	if (!(console && !comconsattached)) {
-		if (bus_space_map(sc->sc_iot, sc->sc_iobase, COM_NPORTS, 0,
-		    &ioh)) {
+		sc->sc_iot = iaa->iaa_memt;
+		sc->sc_iobase = iaa->iaa_base;
+
+		if (bus_space_subregion(iaa->iaa_memt, iaa->iaa_memh,
+		    iaa->iaa_base, COM_NPORTS, &ioh) != 0) {
 			printf(": can't map registers\n");
 			return;
 		}
 	} else {
-		ioh = comconsioh;
-		if (comcnattach(sc->sc_iot, sc->sc_iobase, TTYDEF_SPEED,
+		/*
+		 * If we are the console, reuse the existing bus_space
+		 * information, so that comcnattach() invokes bus_space_map()
+		 * with correct parameters.
+		 */
+		sc->sc_iot = comconsiot;
+		sc->sc_iobase = comconsaddr;
+
+		if (comcnattach(sc->sc_iot, sc->sc_iobase, comconsrate,
 		    sc->sc_frequency, (TTYDEF_CFLAG & ~(CSIZE | PARENB)) | CS8))
 			panic("can't setup serial console");
+		ioh = comconsioh;
 	}
 
 	sc->sc_ioh = ioh;

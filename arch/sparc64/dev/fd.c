@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.26 2008/10/15 19:12:19 blambert Exp $	*/
+/*	$OpenBSD: fd.c,v 1.29 2009/09/12 01:23:30 krw Exp $	*/
 /*	$NetBSD: fd.c,v 1.112 2003/08/07 16:29:35 agc Exp $	*/
 
 /*-
@@ -283,7 +283,7 @@ struct cfdriver fd_cd = {
 	NULL, "fd", DV_DISK
 };
 
-void fdgetdisklabel(dev_t, struct fd_softc *, struct disklabel *, int);
+int fdgetdisklabel(dev_t, struct fd_softc *, struct disklabel *, int);
 int fd_get_parms(struct fd_softc *);
 void fdstrategy(struct buf *);
 void fdstart(struct fd_softc *);
@@ -1340,7 +1340,7 @@ loop:
 			fdc->sc_state = MOTORWAIT;
 			if ((fdc->sc_flags & FDC_NEEDMOTORWAIT) != 0) { /*XXX*/
 				/* Allow .25s for motor to stabilize. */
-				timeout_add(&fd->sc_motoron_to, hz / 4);
+				timeout_add_msec(&fd->sc_motoron_to, 250);
 			} else {
 				fd->sc_flags &= ~FD_MOTOR_WAIT;
 				goto loop;
@@ -1508,7 +1508,7 @@ loop:
 		fdc->sc_state = SEEKCOMPLETE;
 		if (fdc->sc_flags & FDC_NEEDHEADSETTLE) {
 			/* allow 1/50 second for heads to settle */
-			timeout_add(&fdc->fdcpseudointr_to, hz / 50);
+			timeout_add_msec(&fdc->fdcpseudointr_to, 20);
 			return (1);		/* will return later */
 		}
 		/*FALLTHROUGH*/
@@ -1539,7 +1539,7 @@ loop:
 		fdc->sc_state = IOCLEANUPWAIT;
 		fdc->sc_nstat = 0;
 		/* 1/10 second should be enough */
-		timeout_add(&fdc->fdctimeout_to, hz / 10);
+		timeout_add_msec(&fdc->fdctimeout_to, 100);
 		return (1);
 
 	case IOCLEANUPTIMEDOUT:
@@ -1648,7 +1648,7 @@ loop:
 		fdc->sc_nstat = 0;
 		fdc->sc_itask = FDC_ITASK_SENSEI;
 		fdc->sc_state = RESETCOMPLETE;
-		timeout_add(&fdc->fdctimeout_to, hz / 2);
+		timeout_add_msec(&fdc->fdctimeout_to, 500);
 		fdc_reset(fdc);
 		return (1);			/* will return later */
 
@@ -1862,16 +1862,17 @@ fdioctl(dev, cmd, addr, flag, p)
 		return (0);
 
 	case DIOCWDINFO:
+	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0)
 			return (EBADF);
 
 		error = setdisklabel(fd->sc_dk.dk_label,
 		    (struct disklabel *)addr, 0);
-		if (error)
-			return (error);
-
-		error = writedisklabel(DISKLABELDEV(dev), fdstrategy,
-		    fd->sc_dk.dk_label);
+		if (error == 0) {
+			if (cmd == DIOCWDINFO)
+				error = writedisklabel(DISKLABELDEV(dev),
+				    fdstrategy, fd->sc_dk.dk_label);
+		}
 		return (error);
 
 	case DIOCLOCK:
@@ -2007,12 +2008,10 @@ fdformat(dev, finfo, p)
 	return (rv);
 }
 
-void
+int
 fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
     int spoofonly)
 {
-	char *errstring;
-
 	bzero(lp, sizeof(struct disklabel));
 
 	lp->d_type = DTYPE_FLOPPY;
@@ -2037,10 +2036,7 @@ fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
 	 * Call the generic disklabel extraction routine.  If there's
 	 * not a label there, fake it.
 	 */
-	errstring = readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, spoofonly);
-	if (errstring) {
-		/*printf("%s: %s\n", fd->sc_dv.dv_xname, errstring);*/
-	}
+	return readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, spoofonly);
 }
 
 void

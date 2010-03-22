@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.57 2009/06/03 21:30:20 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.63 2009/08/22 02:54:50 mk Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -44,9 +44,6 @@
 #include <sys/signalvar.h>
 #include <sys/reboot.h>
 #include <sys/syscallargs.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 #include <sys/syslog.h>
 #include <sys/extent.h>
 #include <sys/systm.h>
@@ -137,8 +134,6 @@ int system_type = SYS_TYPE;	/* XXX Hardwire it for now */
 
 struct firmware *fw = NULL;
 extern struct firmware ppc1_firmware;
-
-caddr_t allocsys(caddr_t);
 
 /*
  * Extent maps to manage I/O. Allocate storage for 8 regions in each,
@@ -387,8 +382,6 @@ install_extint(handler)
 void
 cpu_startup()
 {
-	int sz;
-	caddr_t v;
 	vaddr_t minaddr, maxaddr;
 
 	proc0.p_addr = proc0paddr;
@@ -397,23 +390,6 @@ cpu_startup()
 	
 	printf("real mem = %u (%uMB)\n", ptoa(physmem),
 	    ptoa(physmem)/1024/1024);
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = (int)allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -444,26 +420,6 @@ cpu_startup()
 	devio_malloc_safe = 1;
 	nvram_map();
 	prep_bus_space_init();	
-}
-
-/*
- * Allocate space for system data structures.
- */
-caddr_t
-allocsys(v)
-	caddr_t v;
-{
-#define	valloc(name, type, num) \
-	v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef	SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return v;
 }
 
 /*
@@ -750,7 +706,7 @@ int ppc_configed_intr_cnt = 0;
 struct intrhand ppc_configed_intr[MAX_PRECONF_INTR];
 
 void *ppc_intr_establish(void *, pci_intr_handle_t, int, int, int (*)(void *),
-    void *, char *);
+    void *, const char *);
 void ppc_intr_setup(intr_establish_t *, intr_disestablish_t *);
 void ppc_intr_enable(int);
 int ppc_intr_disable(void);
@@ -763,7 +719,7 @@ ppc_intr_establish(lcv, ih, type, level, func, arg, name)
 	int level;
 	int (*func)(void *);
 	void *arg;
-	char *name;
+	const char *name;
 {
 	if (ppc_configed_intr_cnt < MAX_PRECONF_INTR) {
 		ppc_configed_intr[ppc_configed_intr_cnt].ih_fun = func;

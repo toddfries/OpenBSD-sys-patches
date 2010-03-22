@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ruleset.c,v 1.4 2009/04/06 12:05:55 henning Exp $ */
+/*	$OpenBSD: pf_ruleset.c,v 1.6 2010/01/18 23:52:46 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -41,6 +41,7 @@
 # include <sys/systm.h>
 #endif /* _KERNEL */
 #include <sys/mbuf.h>
+#include <sys/syslog.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -56,9 +57,6 @@
 
 
 #ifdef _KERNEL
-# define DPFPRINTF(format, x...)		\
-	if (pf_status.debug >= PF_DEBUG_NOISY)	\
-		printf(format , ##x)
 #define rs_malloc(x)		malloc(x, M_TEMP, M_WAITOK|M_CANFAIL|M_ZERO)
 #define rs_free(x)		free(x, M_TEMP)
 
@@ -74,11 +72,8 @@
 # define rs_free(x)		 free(x)
 
 # ifdef PFDEBUG
-#  include <sys/stdarg.h>
-#  define DPFPRINTF(format, x...)	fprintf(stderr, format , ##x)
-# else
-#  define DPFPRINTF(format, x...)	((void)0)
-# endif /* PFDEBUG */
+#  include <sys/stdarg.h>	/* for DPFPRINTF() */
+# endif
 #endif /* _KERNEL */
 
 
@@ -98,45 +93,14 @@ pf_anchor_compare(struct pf_anchor *a, struct pf_anchor *b)
 	return (c ? (c < 0 ? -1 : 1) : 0);
 }
 
-int
-pf_get_ruleset_number(u_int8_t action)
-{
-	switch (action) {
-	case PF_PASS:
-	case PF_MATCH:
-	case PF_DROP:
-		return (PF_RULESET_FILTER);
-		break;
-	case PF_NAT:
-	case PF_NONAT:
-		return (PF_RULESET_NAT);
-		break;
-	case PF_BINAT:
-	case PF_NOBINAT:
-		return (PF_RULESET_BINAT);
-		break;
-	case PF_RDR:
-	case PF_NORDR:
-		return (PF_RULESET_RDR);
-		break;
-	default:
-		return (PF_RULESET_MAX);
-		break;
-	}
-}
-
 void
 pf_init_ruleset(struct pf_ruleset *ruleset)
 {
-	int	i;
-
 	memset(ruleset, 0, sizeof(struct pf_ruleset));
-	for (i = 0; i < PF_RULESET_MAX; i++) {
-		TAILQ_INIT(&ruleset->rules[i].queues[0]);
-		TAILQ_INIT(&ruleset->rules[i].queues[1]);
-		ruleset->rules[i].active.ptr = &ruleset->rules[i].queues[0];
-		ruleset->rules[i].inactive.ptr = &ruleset->rules[i].queues[1];
-	}
+	TAILQ_INIT(&ruleset->rules.queues[0]);
+	TAILQ_INIT(&ruleset->rules.queues[1]);
+	ruleset->rules.active.ptr = &ruleset->rules.queues[0];
+	ruleset->rules.inactive.ptr = &ruleset->rules.queues[1];
 }
 
 struct pf_anchor *
@@ -227,8 +191,9 @@ pf_find_or_create_ruleset(const char *path)
 		strlcat(anchor->path, anchor->name, sizeof(anchor->path));
 		if ((dup = RB_INSERT(pf_anchor_global, &pf_anchors, anchor)) !=
 		    NULL) {
-			printf("pf_find_or_create_ruleset: RB_INSERT1 "
-			    "'%s' '%s' collides with '%s' '%s'\n",
+			DPFPRINTF(LOG_NOTICE,
+			    "pf_find_or_create_ruleset: RB_INSERT1 "
+			    "'%s' '%s' collides with '%s' '%s'",
 			    anchor->path, anchor->name, dup->path, dup->name);
 			rs_free(anchor);
 			rs_free(p);
@@ -238,9 +203,10 @@ pf_find_or_create_ruleset(const char *path)
 			anchor->parent = parent;
 			if ((dup = RB_INSERT(pf_anchor_node, &parent->children,
 			    anchor)) != NULL) {
-				printf("pf_find_or_create_ruleset: "
+				DPFPRINTF(LOG_NOTICE,
+				    "pf_find_or_create_ruleset: "
 				    "RB_INSERT2 '%s' '%s' collides with "
-				    "'%s' '%s'\n", anchor->path, anchor->name,
+				    "'%s' '%s'", anchor->path, anchor->name,
 				    dup->path, dup->name);
 				RB_REMOVE(pf_anchor_global, &pf_anchors,
 				    anchor);
@@ -265,7 +231,6 @@ void
 pf_remove_if_empty_ruleset(struct pf_ruleset *ruleset)
 {
 	struct pf_anchor	*parent;
-	int			 i;
 
 	while (ruleset != NULL) {
 		if (ruleset == &pf_main_ruleset || ruleset->anchor == NULL ||
@@ -273,11 +238,10 @@ pf_remove_if_empty_ruleset(struct pf_ruleset *ruleset)
 		    ruleset->anchor->refcnt > 0 || ruleset->tables > 0 ||
 		    ruleset->topen)
 			return;
-		for (i = 0; i < PF_RULESET_MAX; ++i)
-			if (!TAILQ_EMPTY(ruleset->rules[i].active.ptr) ||
-			    !TAILQ_EMPTY(ruleset->rules[i].inactive.ptr) ||
-			    ruleset->rules[i].inactive.open)
-				return;
+		if (!TAILQ_EMPTY(ruleset->rules.active.ptr) ||
+		    !TAILQ_EMPTY(ruleset->rules.inactive.ptr) ||
+		    ruleset->rules.inactive.open)
+			return;
 		RB_REMOVE(pf_anchor_global, &pf_anchors, ruleset->anchor);
 		if ((parent = ruleset->anchor->parent) != NULL)
 			RB_REMOVE(pf_anchor_node, &parent->children,
@@ -315,7 +279,8 @@ pf_anchor_setup(struct pf_rule *r, const struct pf_ruleset *s,
 			strlcpy(path, s->anchor->path, MAXPATHLEN);
 		while (name[0] == '.' && name[1] == '.' && name[2] == '/') {
 			if (!path[0]) {
-				printf("pf_anchor_setup: .. beyond root\n");
+				DPFPRINTF(LOG_NOTICE,
+				    "pf_anchor_setup: .. beyond root");
 				rs_free(path);
 				return (1);
 			}
@@ -337,7 +302,8 @@ pf_anchor_setup(struct pf_rule *r, const struct pf_ruleset *s,
 	ruleset = pf_find_or_create_ruleset(path);
 	rs_free(path);
 	if (ruleset == NULL || ruleset->anchor == NULL) {
-		printf("pf_anchor_setup: ruleset\n");
+		DPFPRINTF(LOG_NOTICE,
+		    "pf_anchor_setup: ruleset");
 		return (1);
 	}
 	r->anchor = ruleset->anchor;
@@ -375,7 +341,8 @@ pf_anchor_copyout(const struct pf_ruleset *rs, const struct pf_rule *r,
 			    sizeof(pr->anchor_call));
 		}
 		if (strncmp(a, r->anchor->path, strlen(a))) {
-			printf("pf_anchor_copyout: '%s' '%s'\n", a,
+			DPFPRINTF(LOG_NOTICE,
+			    "pf_anchor_copyout: '%s' '%s'", a,
 			    r->anchor->path);
 			rs_free(a);
 			return (1);
@@ -397,7 +364,8 @@ pf_anchor_remove(struct pf_rule *r)
 	if (r->anchor == NULL)
 		return;
 	if (r->anchor->refcnt <= 0) {
-		printf("pf_anchor_remove: broken refcount\n");
+		DPFPRINTF(LOG_NOTICE,
+		    "pf_anchor_remove: broken refcount");
 		r->anchor = NULL;
 		return;
 	}

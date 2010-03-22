@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic7xxx_openbsd.c,v 1.42 2009/02/16 21:19:06 miod Exp $	*/
+/*	$OpenBSD: aic7xxx_openbsd.c,v 1.45 2010/01/20 08:40:41 krw Exp $	*/
 /*	$NetBSD: aic7xxx_osm.c,v 1.14 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*
@@ -209,14 +209,7 @@ ahc_done(struct ahc_softc *ahc, struct scb *scb)
 	case CAM_REQ_CMP:
 		switch (xs->status) {
 		case SCSI_TASKSET_FULL:
-			/* SCSI Layer won't requeue, so we force infinite
-			 * retries until queue space is available. XS_BUSY
-			 * is dangerous because if the NOSLEEP flag is set
-			 * it can cause the I/O to return EIO. XS_BUSY code
-			 * falls through to XS_TIMEOUT anyway.
-			 */
-			xs->error = XS_TIMEOUT;
-			xs->retries++;
+			xs->error = XS_NO_CCB;
 			break;
 		case SCSI_BUSY:
 			xs->error = XS_BUSY;
@@ -245,8 +238,7 @@ ahc_done(struct ahc_softc *ahc, struct scb *scb)
 		xs->error = XS_RESET;
 		break;
 	case CAM_REQUEUE_REQ:
-		xs->error = XS_TIMEOUT;
-		xs->retries++;
+		xs->error = XS_NO_CCB;
 		break;
 	case CAM_SEL_TIMEOUT:
 		xs->error = XS_SELTIMEOUT;
@@ -278,7 +270,6 @@ ahc_done(struct ahc_softc *ahc, struct scb *scb)
 
         s = splbio();       
 	ahc_free_scb(ahc, scb);
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
         splx(s);       
 }
@@ -576,7 +567,6 @@ ahc_setup_data(struct ahc_softc *ahc, struct scsi_xfer *xs,
 		s = splbio();
 		ahc_free_scb(ahc, scb);
 		xs->error = XS_DRIVER_STUFFUP;
-		xs->flags |= ITSDONE;
 		scsi_done(xs);
 		splx(s);
 		return (COMPLETE);
@@ -607,7 +597,7 @@ ahc_setup_data(struct ahc_softc *ahc, struct scsi_xfer *xs,
 			s = splbio();
 			ahc_free_scb(ahc, scb);
 			splx(s);
-			return (TRY_AGAIN_LATER);	/* XXX fvdl */
+			return (NO_CCB);	/* XXX fvdl */
 }
 		error = ahc_execute_scb(scb,
 					scb->dmamap->dm_segs,

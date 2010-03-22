@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_input.c,v 1.91 2008/10/22 23:04:45 mpf Exp $	*/
+/*	$OpenBSD: ipsec_input.c,v 1.94 2010/01/02 18:35:48 markus Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -274,7 +274,8 @@ int
 ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
     struct m_tag *mt)
 {
-	int prot, af, sproto;
+	int af, sproto;
+	u_char prot;
 
 #if NBPFILTER > 0
 	struct ifnet *bpfif;
@@ -426,7 +427,7 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 		ip6->ip6_plen = htons(m->m_pkthdr.len - skip);
 
 		/* Save protocol */
-		m_copydata(m, protoff, 1, (unsigned char *) &prot);
+		m_copydata(m, protoff, 1, (caddr_t) &prot);
 
 #ifdef INET
 		/* IP-in-IP encapsulation */
@@ -520,7 +521,7 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 	 * with a PACKET_TAG_IPSEC_IN_CRYPTO_DONE as opposed to
 	 * PACKET_TAG_IPSEC_IN_DONE type; in that case, just change the type.
 	 */
-	if (mt == NULL && tdbp->tdb_sproto != IPPROTO_IPCOMP) {
+	if (tdbp->tdb_sproto != IPPROTO_IPCOMP) {
 		mtag = m_tag_get(PACKET_TAG_IPSEC_IN_DONE,
 		    sizeof(struct tdb_ident), M_NOWAIT);
 		if (mtag == NULL) {
@@ -539,9 +540,6 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 		tdbi->spi = tdbp->tdb_spi;
 
 		m_tag_prepend(m, mtag);
-	} else {
-		if (mt != NULL)
-			mt->m_tag_id = PACKET_TAG_IPSEC_IN_DONE;
 	}
 
 	if (sproto == IPPROTO_ESP) {
@@ -749,8 +747,9 @@ ah4_input_cb(struct mbuf *m, ...)
 }
 
 
+/* XXX rdomain */
 void *
-ah4_ctlinput(int cmd, struct sockaddr *sa, void *v)
+ah4_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *v)
 {
 	if (sa->sa_family != AF_INET ||
 	    sa->sa_len != sizeof(struct sockaddr_in))
@@ -910,8 +909,9 @@ ipsec_common_ctlinput(int cmd, struct sockaddr *sa, void *v, int proto)
 	return (NULL);
 }
 
+/* XXX rdomain */
 void *
-udpencap_ctlinput(int cmd, struct sockaddr *sa, void *v)
+udpencap_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *v)
 {
 	struct ip *ip = v;
 	struct tdb *tdbp;
@@ -968,8 +968,9 @@ udpencap_ctlinput(int cmd, struct sockaddr *sa, void *v)
 	return (NULL);
 }
 
+/* XXX rdomain */
 void *
-esp4_ctlinput(int cmd, struct sockaddr *sa, void *v)
+esp4_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *v)
 {
 	if (sa->sa_family != AF_INET ||
 	    sa->sa_len != sizeof(struct sockaddr_in))

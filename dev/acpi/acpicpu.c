@@ -1,4 +1,4 @@
-/* $OpenBSD: acpicpu.c,v 1.54 2009/06/10 03:42:20 gwk Exp $ */
+/* $OpenBSD: acpicpu.c,v 1.56 2009/08/29 11:01:15 miod Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -215,7 +215,7 @@ acpicpu_set_pdc(struct acpicpu_softc *sc)
 
 	aml_evalname(sc->sc_acpi, sc->sc_devnode, "_PDC", 1, &cmd, &res);
 
-	/* Evalualte _OSC */
+	/* Evaluate _OSC */
 	memset(&osc_cmd, 0, sizeof(cmd) * 4);
 	osc_cmd[0].type = AML_OBJTYPE_BUFFER;
 	osc_cmd[0].v_buffer = (uint8_t *)&cpu_oscuuid;
@@ -392,8 +392,7 @@ acpicpu_attach(struct device *parent, struct device *self, void *aux)
 		acpicpu_getppc(sc);
 		if (acpicpu_getpct(sc))
 			sc->sc_flags |= FLAGS_NOPCT;
-		else {
-
+		else if (sc->sc_pss_len > 0) {
 			/* Notify BIOS we are handing p-states */
 			if (sc->sc_acpi->sc_fadt->pstate_cnt)
 				acpi_write_pmreg(sc->sc_acpi, ACPIREG_SMICMD, 0,

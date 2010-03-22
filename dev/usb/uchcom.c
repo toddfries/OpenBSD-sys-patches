@@ -1,4 +1,4 @@
-/*	$OpenBSD: uchcom.c,v 1.7 2008/06/26 05:42:18 ray Exp $	*/
+/*	$OpenBSD: uchcom.c,v 1.10 2010/02/20 11:44:56 jsg Exp $	*/
 /*	$NetBSD: uchcom.c,v 1.1 2007/09/03 17:57:37 tshiozak Exp $	*/
 
 /*
@@ -207,7 +207,7 @@ int		uchcom_setup_intr_pipe(struct uchcom_softc *);
 int		uchcom_match(struct device *, void *, void *); 
 void		uchcom_attach(struct device *, struct device *, void *); 
 int		uchcom_detach(struct device *, int); 
-int		uchcom_activate(struct device *, enum devact);
+int		uchcom_activate(struct device *, int);
 
 struct	ucom_methods uchcom_methods = {
 	uchcom_get_status,
@@ -222,7 +222,8 @@ struct	ucom_methods uchcom_methods = {
 
 static const struct usb_devno uchcom_devs[] = {
 	{ USB_VENDOR_WCH, USB_PRODUCT_WCH_CH341 },
-	{ USB_VENDOR_WCH2, USB_PRODUCT_WCH2_CH341 },
+	{ USB_VENDOR_WCH2, USB_PRODUCT_WCH2_CH340 },
+	{ USB_VENDOR_WCH2, USB_PRODUCT_WCH2_CH341A }
 };
 #define uchcom_lookup(v, p)	usb_lookup(uchcom_devs, v, p)
 
@@ -340,14 +341,13 @@ uchcom_detach(struct device *self, int flags)
 }
 
 int
-uchcom_activate(struct device *self, enum devact act)
+uchcom_activate(struct device *self, int act)
 {
 	struct uchcom_softc *sc = (struct uchcom_softc *)self;
 	int rv = 0;
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		rv = EOPNOTSUPP;
 		break;
 	case DVACT_DEACTIVATE:
 		uchcom_close_intr_pipe(sc);

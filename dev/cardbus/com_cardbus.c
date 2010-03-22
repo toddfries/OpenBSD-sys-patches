@@ -1,4 +1,4 @@
-/* $OpenBSD: com_cardbus.c,v 1.34 2009/03/29 21:53:52 sthen Exp $ */
+/* $OpenBSD: com_cardbus.c,v 1.36 2009/08/20 18:47:03 martynas Exp $ */
 /* $NetBSD: com_cardbus.c,v 1.4 2000/04/17 09:21:59 joda Exp $ */
 
 /*
@@ -99,6 +99,7 @@ struct cfattach com_cardbus_ca = {
 
 #define BUG_BROADCOM	0x01
 
+/* XXX Keep this list syncronized with the corresponding one in pucdata.c */
 static struct csdev {
 	u_short		vendor;
 	u_short		product;
@@ -328,7 +329,7 @@ com_cardbus_enable(struct com_softc *sc)
 	csc->cc_ih = cardbus_intr_establish(cc, cf, psc->sc_intrline,
 	    IPL_TTY, comintr, sc, DEVNAME(csc));
 	if (csc->cc_ih == NULL) {
-		printf(": couldn't establish interrupt\n", DEVNAME(csc));
+		printf(": couldn't establish interrupt\n");
 		return (1);
 	}
 

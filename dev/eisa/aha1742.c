@@ -1,4 +1,4 @@
-/*	$OpenBSD: aha1742.c,v 1.32 2009/03/29 21:53:52 sthen Exp $	*/
+/*	$OpenBSD: aha1742.c,v 1.37 2010/01/10 00:40:25 krw Exp $	*/
 /*	$NetBSD: aha1742.c,v 1.61 1996/05/12 23:40:01 mycroft Exp $	*/
 
 /*
@@ -68,10 +68,6 @@
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
-
-#ifndef DDB
-#define Debugger() panic("should call debugger here (aha1742.c)")
-#endif /* ! DDB */
 
 typedef u_long physaddr;
 typedef u_long physlen;
@@ -351,10 +347,8 @@ ahb_send_mbox(sc, opcode, ecb)
 			break;
 		delay(10);
 	}
-	if (!wait) {
-		printf("%s: board not responding\n", sc->sc_dev.dv_xname);
-		Debugger();
-	}
+	if (!wait)
+		panic("%s: board not responding\n", sc->sc_dev.dv_xname);
 
 	/* don't know this will work */
 	bus_space_write_4(iot, ioh, MBOXOUT0, KVTOPHYS(ecb));
@@ -411,10 +405,8 @@ ahb_send_immed(sc, target, cmd)
 			break;
 		delay(10);
 	}
-	if (!wait) {
-		printf("%s: board not responding\n", sc->sc_dev.dv_xname);
-		Debugger();
-	}
+	if (!wait)
+		panic("%s: board not responding\n", sc->sc_dev.dv_xname);
 
 	/* don't know this will work */
 	bus_space_write_4(iot, ioh, MBOXOUT0, cmd);
@@ -692,7 +684,6 @@ ahb_done(sc, ecb)
 			xs->resid = 0;
 	}
 done:
-	xs->flags |= ITSDONE;
 	ahb_free_ecb(sc, ecb, xs->flags);
 	scsi_done(xs);
 }
@@ -960,10 +951,6 @@ ahb_scsi_cmd(xs)
 	 * then we can't allow it to sleep
 	 */
 	flags = xs->flags;
-	if (flags & ITSDONE) {
-		printf("%s: done?\n", sc->sc_dev.dv_xname);
-		xs->flags &= ~ITSDONE;
-	}
 	if ((ecb = ahb_get_ecb(sc, flags)) == NULL) {
 		return (NO_CCB);
 	}
@@ -979,7 +966,7 @@ ahb_scsi_cmd(xs)
 	if (flags & SCSI_RESET) {
 		ecb->flags |= ECB_IMMED;
 		if (sc->immed_ecb)
-			return TRY_AGAIN_LATER;
+			return NO_CCB;
 		sc->immed_ecb = ecb;
 
 		s = splbio();
@@ -1081,6 +1068,9 @@ ahb_scsi_cmd(xs)
 			    sc->sc_dev.dv_xname, AHB_NSEG);
 			xs->error = XS_DRIVER_STUFFUP;
 			ahb_free_ecb(sc, ecb, flags);
+			s = splbio();
+			scsi_done(xs);
+			splx(s);
 			return COMPLETE;
 		}
 	} else {	/* No data xfer, use non S/G values */

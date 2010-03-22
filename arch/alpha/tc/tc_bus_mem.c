@@ -1,4 +1,4 @@
-/* $OpenBSD: tc_bus_mem.c,v 1.13 2002/05/02 22:56:06 miod Exp $ */
+/* $OpenBSD: tc_bus_mem.c,v 1.16 2009/12/25 20:52:36 miod Exp $ */
 /* $NetBSD: tc_bus_mem.c,v 1.25 2001/09/04 05:31:28 thorpej Exp $ */
 
 /*
@@ -57,6 +57,9 @@ int		tc_mem_alloc(void *, bus_addr_t, bus_addr_t, bus_size_t,
 		    bus_size_t, bus_addr_t, int, bus_addr_t *,
 		    bus_space_handle_t *);
 void		tc_mem_free(void *, bus_space_handle_t, bus_size_t);
+
+/* get kernel virtual address */
+void *		tc_mem_vaddr(void *, bus_space_handle_t);
 
 /* barrier */
 inline void	tc_mem_barrier(void *, bus_space_handle_t,
@@ -161,6 +164,9 @@ struct alpha_bus_space tc_mem_space = {
 	tc_mem_alloc,
 	tc_mem_free,
 
+	/* get kernel virtual address */
+	tc_mem_vaddr,
+
 	/* barrier */
 	tc_mem_barrier,
 
@@ -231,13 +237,19 @@ tc_bus_mem_init(memv)
 
 /* ARGSUSED */
 int
-tc_mem_map(v, memaddr, memsize, cacheable, memhp)
+tc_mem_map(v, memaddr, memsize, flags, memhp)
 	void *v;
 	bus_addr_t memaddr;
 	bus_size_t memsize;
-	int cacheable;
+	int flags;
 	bus_space_handle_t *memhp;
 {
+	int cacheable = flags & BUS_SPACE_MAP_CACHEABLE;
+	int linear = flags & BUS_SPACE_MAP_LINEAR;
+
+	/* Requests for linear uncacheable space can't be satisfied. */
+	if (linear && !cacheable)
+		return (EOPNOTSUPP);
 
 	if (memaddr & 0x7)
 		panic("tc_mem_map needs 8 byte alignment");
@@ -300,6 +312,21 @@ tc_mem_free(v, bsh, size)
 
 	/* XXX XXX XXX XXX XXX XXX */
 	panic("tc_mem_free unimplemented");
+}
+
+void *
+tc_mem_vaddr(void *v, bus_space_handle_t bsh)
+{
+#ifdef DIAGNOSTIC
+	if ((bsh & TC_SPACE_SPARSE) != 0) {
+		/*
+		 * tc_mem_map() catches linear && !cacheable,
+		 * so we shouldn't come here
+		 */
+		panic("tc_mem_vaddr");
+	}
+#endif
+	return ((void *)bsh);
 }
 
 inline void

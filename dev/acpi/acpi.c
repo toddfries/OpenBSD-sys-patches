@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.140 2009/06/03 07:13:48 pirofti Exp $ */
+/* $OpenBSD: acpi.c,v 1.152 2009/11/26 23:44:38 mlarkin Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -55,6 +55,7 @@ int acpi_enabled;
 int acpi_poll_enabled;
 int acpi_hasprocfvs;
 int acpi_thinkpad_enabled;
+int acpi_saved_spl;
 
 #define ACPIEN_RETRIES 15
 
@@ -65,6 +66,7 @@ int	acpi_match(struct device *, void *, void *);
 void	acpi_attach(struct device *, struct device *, void *);
 int	acpi_submatch(struct device *, void *, void *);
 int	acpi_print(void *, const char *);
+void	acpi_handle_suspend_failure(struct acpi_softc *);
 
 void	acpi_map_pmregs(struct acpi_softc *);
 
@@ -79,21 +81,18 @@ int	acpi_foundvideo(struct aml_node *, void *);
 int	acpi_inidev(struct aml_node *, void *);
 
 int	acpi_loadtables(struct acpi_softc *, struct acpi_rsdp *);
-void	acpi_load_table(paddr_t, size_t, acpi_qhead_t *);
-void	acpi_load_dsdt(paddr_t, struct acpi_q **);
 
 void	acpi_init_states(struct acpi_softc *);
 void	acpi_init_gpes(struct acpi_softc *);
 void	acpi_init_pm(struct acpi_softc *);
-
-void	acpi_dev_sort(void);
-void	acpi_dev_free(void);
 
 int acpi_foundide(struct aml_node *node, void *arg);
 int acpiide_notify(struct aml_node *, int, void *);
 
 void  wdcattach(struct channel_softc *);
 int   wdcdetach(struct channel_softc *, int);
+
+struct acpi_q *acpi_maptable(paddr_t, const char *, const char *, const char *);
 
 struct idechnl
 {
@@ -107,9 +106,10 @@ int is_ejectable_bay(struct aml_node *node);
 int is_ata(struct aml_node *node);
 int is_ejectable(struct aml_node *node);
 
-#ifdef ACPI_SLEEP_ENABLED
-void acpi_sleep_walk(struct acpi_softc *, int);
-#endif /* ACPI_SLEEP_ENABLED */
+#ifndef SMALL_KERNEL
+void	acpi_resume(struct acpi_softc *, int);
+void	acpi_susp_resume_gpewalk(struct acpi_softc *, int, int);
+#endif /* SMALL_KERNEL */
 
 #ifndef SMALL_KERNEL
 int acpi_add_device(struct aml_node *node, void *arg);
@@ -136,7 +136,8 @@ struct filterops acpiread_filtops = {
 };
 
 struct cfattach acpi_ca = {
-	sizeof(struct acpi_softc), acpi_match, acpi_attach
+	sizeof(struct acpi_softc), acpi_match, acpi_attach, NULL,
+	config_activate_children
 };
 
 struct cfdriver acpi_cd = {
@@ -314,7 +315,7 @@ acpi_inidev(struct aml_node *node, void *arg)
 		aml_evalnode(sc, node, 0, NULL, NULL);
 
 	/* If we are functioning, we walk/search our children */
-	if(st & STA_DEV_OK)
+	if (st & STA_DEV_OK)
 		return 0;
 
 	/* If we are not enabled, or not present, terminate search */
@@ -350,7 +351,7 @@ acpi_foundprt(struct aml_node *node, void *arg)
 	}
 
 	/* If we are functioning, we walk/search our children */
-	if(st & STA_DEV_OK)
+	if (st & STA_DEV_OK)
 		return 0;
 
 	/* If we are not enabled, or not present, terminate search */
@@ -395,12 +396,12 @@ acpiide_notify(struct aml_node *node, int ntype, void *arg)
 	if (aml_evalinteger(sc, node, "_STA", 0, NULL, &sta) != 0)
 		return (0);
 
-	dnprintf(10, "IDE notify! %s %d status:%llx\n", aml_nodename(node), 
+	dnprintf(10, "IDE notify! %s %d status:%llx\n", aml_nodename(node),
 	    ntype, sta);
 
 	/* Walk device list looking for IDE device match */
 	TAILQ_FOREACH(dev, &alldevs, dv_list) {
-		if (strncmp(dev->dv_xname, "pciide", 6))
+		if (strcmp(dev->dv_cfdata->cf_driver->cd_name, "pciide"))
 			continue;
 
 		wsc = (struct pciide_softc *)dev;
@@ -449,17 +450,17 @@ acpi_foundide(struct aml_node *node, void *arg)
 
 	/* Get PCI address and channel */
 	if (lvl == 3) {
-		aml_evalinteger(sc, node->parent, "_ADR", 0, NULL, 
+		aml_evalinteger(sc, node->parent, "_ADR", 0, NULL,
 		    &ide->chnl);
 		aml_rdpciaddr(node->parent->parent, &pi);
 		ide->addr = pi.addr;
 	} else if (lvl == 4) {
-		aml_evalinteger(sc, node->parent->parent, "_ADR", 0, NULL, 
+		aml_evalinteger(sc, node->parent->parent, "_ADR", 0, NULL,
 		    &ide->chnl);
 		aml_rdpciaddr(node->parent->parent->parent, &pi);
 		ide->addr = pi.addr;
 	}
-	dnprintf(10, "%s %llx channel:%llx\n", 
+	dnprintf(10, "%s %llx channel:%llx\n",
 	    aml_nodename(node), ide->addr, ide->chnl);
 
 	aml_evalinteger(sc, node, "_STA", 0, NULL, &ide->sta);
@@ -585,9 +586,9 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	 * extended (64-bit) pointer if it exists
 	 */
 	if (sc->sc_fadt->hdr_revision < 3 || sc->sc_fadt->x_dsdt == 0)
-		acpi_load_dsdt(sc->sc_fadt->dsdt, &entry);
+		entry = acpi_maptable(sc->sc_fadt->dsdt, NULL, NULL, NULL);
 	else
-		acpi_load_dsdt(sc->sc_fadt->x_dsdt, &entry);
+		entry = acpi_maptable(sc->sc_fadt->x_dsdt, NULL, NULL, NULL);
 
 	if (entry == NULL)
 		printf(" !DSDT");
@@ -729,12 +730,11 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	SLIST_INIT(&sc->sc_ac);
 	SLIST_INIT(&sc->sc_bat);
 	TAILQ_FOREACH(dev, &alldevs, dv_list) {
-		if (!strncmp(dev->dv_xname, "acpiac", strlen("acpiac"))) {
+		if (!strcmp(dev->dv_cfdata->cf_driver->cd_name, "acpiac")) {
 			ac = malloc(sizeof(*ac), M_DEVBUF, M_WAITOK | M_ZERO);
 			ac->aac_softc = (struct acpiac_softc *)dev;
 			SLIST_INSERT_HEAD(&sc->sc_ac, ac, aac_link);
-		}
-		if (!strncmp(dev->dv_xname, "acpibat", strlen("acpibat"))) {
+		} else if (!strcmp(dev->dv_cfdata->cf_driver->cd_name, "acpibat")) {
 			bat = malloc(sizeof(*bat), M_DEVBUF, M_WAITOK | M_ZERO);
 			bat->aba_softc = (struct acpibat_softc *)dev;
 			SLIST_INSERT_HEAD(&sc->sc_bat, bat, aba_link);
@@ -778,118 +778,104 @@ acpi_print(void *aux, const char *pnp)
 	return (UNCONF);
 }
 
+struct acpi_q *
+acpi_maptable(paddr_t addr, const char *sig, const char *oem, const char *tbl)
+{
+	static int tblid;
+	struct acpi_mem_map handle;
+	struct acpi_table_header *hdr;
+	struct acpi_q *entry;
+	size_t len;
+
+	/* Check if we can map address */
+	if (addr == 0)
+		return NULL;
+	if (acpi_map(addr, sizeof(*hdr), &handle))
+		return NULL;
+	hdr = (struct acpi_table_header *)handle.va;
+	len = hdr->length;
+	acpi_unmap(&handle);
+
+	/* Validate length/checksum */
+	if (acpi_map(addr, len, &handle))
+		return NULL;
+	hdr = (struct acpi_table_header *)handle.va;
+	if (acpi_checksum(hdr, len)) {
+		acpi_unmap(&handle);
+		return NULL;
+	}
+	if ((sig && memcmp(sig, hdr->signature, 4)) ||
+	    (oem && memcmp(oem, hdr->oemid, 6)) ||
+	    (tbl && memcmp(tbl, hdr->oemtableid, 8))) {
+		acpi_unmap(&handle);
+		return NULL;
+	}
+
+	/* Allocate copy */
+	entry = malloc(len + sizeof(*entry), M_DEVBUF, M_NOWAIT);
+	if (entry != NULL) {
+		memcpy(entry->q_data, handle.va, len);
+		entry->q_table = entry->q_data;
+		entry->q_id = ++tblid;
+	}
+	acpi_unmap(&handle);
+	return entry;
+}
+
 int
 acpi_loadtables(struct acpi_softc *sc, struct acpi_rsdp *rsdp)
 {
-	struct acpi_mem_map hrsdt, handle;
-	struct acpi_table_header *hdr;
+	struct acpi_q *entry, *sdt;
 	int i, ntables;
 	size_t len;
 
 	if (rsdp->rsdp_revision == 2 && rsdp->rsdp_xsdt) {
 		struct acpi_xsdt *xsdt;
 
-		if (acpi_map(rsdp->rsdp_xsdt, sizeof(*hdr), &handle)) {
+		sdt = acpi_maptable(rsdp->rsdp_xsdt, NULL, NULL, NULL);
+		if (sdt == NULL) {
 			printf("couldn't map rsdt\n");
 			return (ENOMEM);
 		}
 
-		hdr = (struct acpi_table_header *)handle.va;
-		len = hdr->length;
-		acpi_unmap(&handle);
-		hdr = NULL;
-
-		acpi_map(rsdp->rsdp_xsdt, len, &hrsdt);
-		xsdt = (struct acpi_xsdt *)hrsdt.va;
-
+		xsdt = (struct acpi_xsdt *)sdt->q_data;
+		len  = xsdt->hdr.length;
 		ntables = (len - sizeof(struct acpi_table_header)) /
 		    sizeof(xsdt->table_offsets[0]);
 
 		for (i = 0; i < ntables; i++) {
-			acpi_map(xsdt->table_offsets[i], sizeof(*hdr), &handle);
-			hdr = (struct acpi_table_header *)handle.va;
-			acpi_load_table(xsdt->table_offsets[i], hdr->length,
-			    &sc->sc_tables);
-			acpi_unmap(&handle);
+			entry = acpi_maptable(xsdt->table_offsets[i], NULL, NULL,
+			    NULL);
+			if (entry != NULL)
+				SIMPLEQ_INSERT_TAIL(&sc->sc_tables, entry,
+				    q_next);
 		}
-		acpi_unmap(&hrsdt);
+		free(sdt, M_DEVBUF);
 	} else {
 		struct acpi_rsdt *rsdt;
 
-		if (acpi_map(rsdp->rsdp_rsdt, sizeof(*hdr), &handle)) {
+		sdt = acpi_maptable(rsdp->rsdp_rsdt, NULL, NULL, NULL);
+		if (sdt == NULL) {
 			printf("couldn't map rsdt\n");
 			return (ENOMEM);
 		}
 
-		hdr = (struct acpi_table_header *)handle.va;
-		len = hdr->length;
-		acpi_unmap(&handle);
-		hdr = NULL;
-
-		acpi_map(rsdp->rsdp_rsdt, len, &hrsdt);
-		rsdt = (struct acpi_rsdt *)hrsdt.va;
-
+		rsdt = (struct acpi_rsdt *)sdt->q_data;
+		len  = rsdt->hdr.length;
 		ntables = (len - sizeof(struct acpi_table_header)) /
 		    sizeof(rsdt->table_offsets[0]);
 
 		for (i = 0; i < ntables; i++) {
-			acpi_map(rsdt->table_offsets[i], sizeof(*hdr), &handle);
-			hdr = (struct acpi_table_header *)handle.va;
-			acpi_load_table(rsdt->table_offsets[i], hdr->length,
-			    &sc->sc_tables);
-			acpi_unmap(&handle);
+			entry = acpi_maptable(rsdt->table_offsets[i], NULL, NULL,
+			    NULL);
+			if (entry != NULL)
+				SIMPLEQ_INSERT_TAIL(&sc->sc_tables, entry,
+				    q_next);
 		}
-		acpi_unmap(&hrsdt);
+		free(sdt, M_DEVBUF);
 	}
 
 	return (0);
-}
-
-void
-acpi_load_table(paddr_t pa, size_t len, acpi_qhead_t *queue)
-{
-	struct acpi_mem_map handle;
-	struct acpi_q *entry;
-
-	entry = malloc(len + sizeof(struct acpi_q), M_DEVBUF, M_NOWAIT);
-
-	if (entry != NULL) {
-		if (acpi_map(pa, len, &handle)) {
-			free(entry, M_DEVBUF);
-			return;
-		}
-		memcpy(entry->q_data, handle.va, len);
-		entry->q_table = entry->q_data;
-		acpi_unmap(&handle);
-		SIMPLEQ_INSERT_TAIL(queue, entry, q_next);
-	}
-}
-
-void
-acpi_load_dsdt(paddr_t pa, struct acpi_q **dsdt)
-{
-	struct acpi_mem_map handle;
-	struct acpi_table_header *hdr;
-	size_t len;
-
-	if (acpi_map(pa, sizeof(*hdr), &handle))
-		return;
-	hdr = (struct acpi_table_header *)handle.va;
-	len = hdr->length;
-	acpi_unmap(&handle);
-
-	*dsdt = malloc(len + sizeof(struct acpi_q), M_DEVBUF, M_NOWAIT);
-
-	if (*dsdt != NULL) {
-		if (acpi_map(pa, len, &handle)) {
-			free(*dsdt, M_DEVBUF);
-			*dsdt = NULL;
-			return;
-		}
-		memcpy((*dsdt)->q_data, handle.va, len);
-		(*dsdt)->q_table = (*dsdt)->q_data;
-		acpi_unmap(&handle);
-	}
 }
 
 int
@@ -970,15 +956,18 @@ acpiioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	ACPI_LOCK(sc);
 	/* fake APM */
 	switch (cmd) {
-#ifdef ACPI_SLEEP_ENABLED
 	case APM_IOC_STANDBY_REQ:
 	case APM_IOC_SUSPEND_REQ:
 	case APM_IOC_SUSPEND:
 	case APM_IOC_STANDBY:
+		/*
+		 * Must use a workq to get out of this process's address
+		 * space and into a kernel thread which has the kernel
+		 * address space (with the ACPI trampoline way low).
+		 */
 		workq_add_task(NULL, 0, (workq_fn)acpi_sleep_state,
 		    acpi_softc, (void *)ACPI_STATE_S3);
 		break;
-#endif /* ACPI_SLEEP_ENABLED */
 	case APM_IOC_GETPOWER:
 		/* A/C */
 		pi->ac_state = APM_AC_UNKNOWN;
@@ -1395,7 +1384,7 @@ acpi_interrupt(void *arg)
 
 #if 0
 	acpi_add_gpeblock(sc, sc->sc_fadt->gpe0_blk, sc->sc_fadt->gpe0_blk_len>>1, 0);
-	acpi_add_gpeblock(sc, sc->sc_fadt->gpe1_blk, sc->sc_fadt->gpe1_blk_len>>1, 
+	acpi_add_gpeblock(sc, sc->sc_fadt->gpe1_blk, sc->sc_fadt->gpe1_blk_len>>1,
 	    sc->sc_fadt->gpe1_base);
 #endif
 
@@ -1629,7 +1618,7 @@ acpi_init_gpeblock(struct acpi_softc *sc, int reg, int len, int base)
 
 	if (!reg || !len)
 		return;
-	for (i=0; i<len; i++) {
+	for (i = 0; i < len; i++) {
 		pgpe = acpi_os_malloc(sizeof(gpeblock));
 		if (pgpe == NULL)
 			return;
@@ -1646,7 +1635,7 @@ acpi_init_gpeblock(struct acpi_softc *sc, int reg, int len, int base)
 	}
 
 	/* Search for GPE handlers */
-	for (i=0; i<len*8; i++) {
+	for (i = 0; i < len*8; i++) {
 		char gpestr[32];
 		struct aml_node *h;
 
@@ -1667,14 +1656,14 @@ acpi_handle_gpes(struct acpi_softc *sc)
 	uint8_t en, sts;
 	int processed, i;
 
-	processed=0;
+	processed = 0;
 	SIMPLEQ_FOREACH(pgpe, &sc->sc_gpes, gpe_link) {
 		sts = bus_space_read_1(sc->sc_iot, pgpe->sts_ioh, 0);
 		en = bus_space_read_1(sc->sc_iot, pgpe->en_ioh, 0);
-		for (i=0; i<8; i++) {
+		for (i = 0; i< 8 ; i++) {
 			if (en & sts & (1L << i)) {
 				pgpe->table[i].active = 1;
-				processed=1;
+				processed = 1;
 			}
 		}
 	}
@@ -1691,12 +1680,12 @@ acpi_add_gpeblock(struct acpi_softc *sc, int reg, int len, int gpe)
 
 	if (!reg || !len)
 		return;
-	for (idx=0; idx<len; idx++) {
+	for (idx = 0; idx < len; idx++) {
 		sts = inb(reg + idx);
 		en  = inb(reg + len + idx);
 		printf("-- gpe %.2x-%.2x : en:%.2x sts:%.2x  %.2x\n",
 		    gpe+idx*8, gpe+idx*8+7, en, sts, en&sts);
-		for (jdx=0; jdx<8; jdx++) {
+		for (jdx = 0; jdx < 8; jdx++) {
 			char gpestr[32];
 			struct aml_node *l, *e;
 
@@ -1721,7 +1710,7 @@ acpi_init_gpes(struct acpi_softc *sc)
 
 #if 0
 	acpi_add_gpeblock(sc, sc->sc_fadt->gpe0_blk, sc->sc_fadt->gpe0_blk_len>>1, 0);
-	acpi_add_gpeblock(sc, sc->sc_fadt->gpe1_blk, sc->sc_fadt->gpe1_blk_len>>1, 
+	acpi_add_gpeblock(sc, sc->sc_fadt->gpe1_blk, sc->sc_fadt->gpe1_blk_len>>1,
 	    sc->sc_fadt->gpe1_base);
 #endif
 
@@ -1790,14 +1779,17 @@ acpi_init_pm(struct acpi_softc *sc)
 	sc->sc_wak = aml_searchname(&aml_root, "_WAK");
 	sc->sc_bfs = aml_searchname(&aml_root, "_BFS");
 	sc->sc_gts = aml_searchname(&aml_root, "_GTS");
+	sc->sc_sst = aml_searchname(&aml_root, "_SI_._SST");
 }
 
 #ifndef SMALL_KERNEL
 void
-acpi_sleep_walk(struct acpi_softc *sc, int state)
+acpi_susp_resume_gpewalk(struct acpi_softc *sc, int state,
+    int wake_gpe_state)
 {
 	struct acpi_wakeq *wentry;
 	int idx;
+	u_int32_t gpe;
 
 	/* Clear GPE status */
 	for (idx = 0; idx < sc->sc_lastgpe; idx += 8) {
@@ -1810,8 +1802,18 @@ acpi_sleep_walk(struct acpi_softc *sc, int state)
 		    wentry->q_state,
 		    wentry->q_gpe);
 
-	if (state <= wentry->q_state)
-		acpi_enable_onegpe(sc, wentry->q_gpe, 1);
+		if (state <= wentry->q_state)
+			acpi_enable_onegpe(sc, wentry->q_gpe,
+			    wake_gpe_state);
+	}
+
+	/* If we are resuming (disabling wake GPEs), enable other GPEs */
+
+	if (wake_gpe_state == 0) {
+		for (gpe = 0; gpe < sc->sc_lastgpe; gpe++) {
+			if (sc->gpe_table[gpe].handler)
+				acpi_enable_onegpe(sc, gpe, 1);
+		}
 	}
 }
 #endif /* ! SMALL_KERNEL */
@@ -1821,6 +1823,10 @@ acpi_sleep_state(struct acpi_softc *sc, int state)
 {
 	int ret;
 
+#ifdef MULTIPROCESSOR
+	if (ncpus > 1)	/* cannot suspend MP yet */
+		return (0);
+#endif
 	switch (state) {
 	case ACPI_STATE_S0:
 		return (0);
@@ -1836,8 +1842,6 @@ acpi_sleep_state(struct acpi_softc *sc, int state)
 			return (EOPNOTSUPP);
 	}
 
-	acpi_sleep_walk(sc, state);
-
 	if ((ret = acpi_prepare_sleep_state(sc, state)) != 0)
 		return (ret);
 
@@ -1847,8 +1851,9 @@ acpi_sleep_state(struct acpi_softc *sc, int state)
 		ret = acpi_enter_sleep_state(sc, state);
 
 #ifndef SMALL_KERNEL
-	acpi_resume(sc);
-#endif /* ! SMALL_KERNEL */
+	if (state == ACPI_STATE_S3)
+		acpi_resume(sc, state);
+#endif /* !SMALL_KERNEL */
 	return (ret);
 }
 
@@ -1886,6 +1891,7 @@ acpi_enter_sleep_state(struct acpi_softc *sc, int state)
 
 	acpi_write_pmreg(sc, ACPIREG_PM1A_CNT, 0, rega);
 	acpi_write_pmreg(sc, ACPIREG_PM1B_CNT, 0, regb);
+
 	/* Loop on WAK_STS */
 	for (retries = 1000; retries > 0; retries--) {
 		rega = acpi_read_pmreg(sc, ACPIREG_PM1A_STS, 0);
@@ -1901,7 +1907,7 @@ acpi_enter_sleep_state(struct acpi_softc *sc, int state)
 
 #ifndef SMALL_KERNEL
 void
-acpi_resume(struct acpi_softc *sc)
+acpi_resume(struct acpi_softc *sc, int state)
 {
 	struct aml_value env;
 
@@ -1915,14 +1921,26 @@ acpi_resume(struct acpi_softc *sc)
 			    DEVNAME(sc));
 		}
 
-	dopowerhooks(PWR_RESUME);
-	inittodr(0);
-
 	if (sc->sc_wak)
 		if (aml_evalnode(sc, sc->sc_wak, 1, &env, NULL) != 0) {
 			dnprintf(10, "%s evaluating method _WAK failed.\n",
 			    DEVNAME(sc));
 		}
+
+	/* Reset the indicator lights to "waking" */
+	if (sc->sc_sst) {
+		env.v_integer = ACPI_SST_WAKING;
+		aml_evalnode(sc, sc->sc_sst, 1, &env, NULL);
+	}
+
+	/* Disable wake GPEs */
+	acpi_susp_resume_gpewalk(sc, state, 0);
+
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_RESUME);
+
+	cold = 0;
+	enable_intr();
+	splx(acpi_saved_spl);
 
 	sc->sc_state = ACPI_STATE_S0;
 	if (sc->sc_tts) {
@@ -1932,8 +1950,44 @@ acpi_resume(struct acpi_softc *sc)
 			    DEVNAME(sc));
 		}
 	}
+
+	/* Reset the indicator lights to "working" */
+	if (sc->sc_sst) {
+		env.v_integer = ACPI_SST_WORKING;
+		aml_evalnode(sc, sc->sc_sst, 1, &env, NULL);
+	}
 }
 #endif /* ! SMALL_KERNEL */
+
+void
+acpi_handle_suspend_failure(struct acpi_softc *sc)
+{
+	struct aml_value env;
+
+	/* Undo a partial suspend. Devices will have already been resumed */
+	cold = 0;
+	enable_intr();
+	splx(acpi_saved_spl);
+
+
+	/* Tell ACPI to go back to S0 */
+	memset(&env, 0, sizeof(env));
+	env.type = AML_OBJTYPE_INTEGER;
+	sc->sc_state = ACPI_STATE_S0;
+	if (sc->sc_tts) {
+		env.v_integer = sc->sc_state;
+		if (aml_evalnode(sc, sc->sc_tts, 1, &env, NULL) != 0) {
+			dnprintf(10, "%s evaluating method _TTS failed.\n",
+			    DEVNAME(sc));
+		}
+	}
+
+	/* Reset the indicator lights to "working" */
+	if (sc->sc_sst) {
+		env.v_integer = ACPI_SST_WORKING;
+		aml_evalnode(sc, sc->sc_sst, 1, &env, NULL);
+	}
+}
 
 int
 acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
@@ -1961,17 +2015,16 @@ acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
 			return (ENXIO);
 		}
 
-	switch (state) {
-	case ACPI_STATE_S1:
-	case ACPI_STATE_S2:
-		resettodr();
-		dopowerhooks(PWR_SUSPEND);
-		break;
-	case ACPI_STATE_S3:
-		resettodr();
-		dopowerhooks(PWR_STANDBY);
-		break;
-	}
+	acpi_saved_spl = splhigh();
+	disable_intr();
+	cold = 1;
+#ifndef SMALL_KERNEL
+	if (state == ACPI_STATE_S3)
+		if (config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND) != 0) {
+			acpi_handle_suspend_failure(sc);
+			return (1);
+		}
+#endif /* ! SMALL_KERNEL */
 
 	/* _PTS(state) */
 	if (sc->sc_pts)
@@ -1990,9 +2043,8 @@ acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
 			return (ENXIO);
 		}
 
-	disable_intr();
-	aml_evalname(sc, &aml_root, "\\_SST", 1, &env, NULL);
-	sc->sc_state = state;
+	/* Enable wake GPEs */
+	acpi_susp_resume_gpewalk(sc, state, 1);
 
 	return (0);
 }
@@ -2006,7 +2058,7 @@ acpi_powerdown(void)
 	 * In case acpi_prepare_sleep fails, we shouldn't try to enter
 	 * the sleep state. It might cost us the battery.
 	 */
-	acpi_sleep_walk(acpi_softc, ACPI_STATE_S5);
+	acpi_susp_resume_gpewalk(acpi_softc, ACPI_STATE_S5, 1);
 	if (acpi_prepare_sleep_state(acpi_softc, ACPI_STATE_S5) == 0)
 		acpi_enter_sleep_state(acpi_softc, ACPI_STATE_S5);
 }
@@ -2244,7 +2296,8 @@ acpi_foundhid(struct aml_node *node, void *arg)
 	else if (!strcmp(dev, ACPI_DEV_THINKPAD)) {
 		aaa.aaa_name = "acpithinkpad";
 		acpi_thinkpad_enabled = 1;
-	}
+	} else if (!strcmp(dev, ACPI_DEV_ASUSAIBOOSTER))
+		aaa.aaa_name = "aibs";
 
 	if (aaa.aaa_name)
 		config_found(self, &aaa, acpi_print);
@@ -2290,50 +2343,5 @@ acpi_foundvideo(struct aml_node *node, void *arg)
 	config_found(self, &aaa, acpi_print);
 
 	return (0);
-}
-
-TAILQ_HEAD(acpi_dv_hn, acpi_dev_rank) acpi_dv_h;
-void
-acpi_dev_sort(void)
-{
-	struct device		*dev, *idev;
-	struct acpi_dev_rank	*rentry, *ientry;
-	int			rank;
-
-	TAILQ_INIT(&acpi_dv_h);
-
-	TAILQ_FOREACH(dev, &alldevs, dv_list) {
-		for (rank = -1, idev = dev; idev != NULL;
-		    idev = idev->dv_parent, rank++)
-			;	/* nothing */
-
-		rentry = malloc(sizeof(*rentry), M_DEVBUF, M_WAITOK | M_ZERO);
-		rentry->rank = rank;
-		rentry->dev = dev;
-
-		if (TAILQ_FIRST(&acpi_dv_h) == NULL)
-			TAILQ_INSERT_HEAD(&acpi_dv_h, rentry, link);
-		TAILQ_FOREACH_REVERSE(ientry, &acpi_dv_h, acpi_dv_hn, link) {
-			if (rentry->rank > ientry->rank) {
-				TAILQ_INSERT_AFTER(&acpi_dv_h, ientry, rentry, 
-				    link);
-				break;
-			}
-		}
-	}
-}
-
-void
-acpi_dev_free(void)
-{
-	struct acpi_dev_rank	*dvr;
-
-	while ((dvr = TAILQ_FIRST(&acpi_dv_h)) != NULL) {
-		TAILQ_REMOVE(&acpi_dv_h, dvr, link);
-		if (dvr != NULL) {
-			free(dvr, M_DEVBUF);
-			dvr = NULL;
-		}
-	}
 }
 #endif /* SMALL_KERNEL */

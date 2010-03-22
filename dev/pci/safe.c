@@ -1,4 +1,4 @@
-/*	$OpenBSD: safe.c,v 1.24 2008/10/15 19:12:18 blambert Exp $	*/
+/*	$OpenBSD: safe.c,v 1.27 2010/01/10 12:43:07 markus Exp $	*/
 
 /*-
  * Copyright (c) 2003 Sam Leffler, Errno Consulting
@@ -109,7 +109,7 @@ void safe_reset_board(struct safe_softc *);
 void safe_init_board(struct safe_softc *);
 void safe_init_pciregs(struct safe_softc *);
 void safe_cleanchip(struct safe_softc *);
-__inline u_int32_t safe_rng_read(struct safe_softc *);
+static __inline u_int32_t safe_rng_read(struct safe_softc *);
 
 int safe_free_entry(struct safe_softc *, struct safe_ringentry *);
 
@@ -806,8 +806,13 @@ safe_process(struct cryptop *crp)
 					err = sc->sc_nqchip ? ERESTART : ENOMEM;
 					goto errout;
 				}
-				if (len == MHLEN)
-					M_DUP_PKTHDR(m, re->re_src_m);
+				if (len == MHLEN) {
+					err = m_dup_pkthdr(m, re->re_src_m);
+					if (err) {
+						m_free(m);
+						goto errout;
+					}
+				}
 				if (totlen >= MINCLSIZE) {
 					MCLGET(m, M_DONTWAIT);
 					if ((m->m_flags & M_EXT) == 0) {
@@ -1187,7 +1192,7 @@ safe_rng_init(struct safe_softc *sc)
 	} while (++i < SAFE_RNG_MAXWAIT);
 }
 
-__inline u_int32_t
+static __inline u_int32_t
 safe_rng_read(struct safe_softc *sc)
 {
 	int i;
@@ -1377,7 +1382,7 @@ safe_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			MD5Update(&md5ctx, macini->cri_key,
 			    macini->cri_klen / 8);
 			MD5Update(&md5ctx, hmac_ipad_buffer,
-			    HMAC_BLOCK_LEN - (macini->cri_klen / 8));
+			    HMAC_MD5_BLOCK_LEN - (macini->cri_klen / 8));
 			bcopy(md5ctx.state, ses->ses_hminner,
 			    sizeof(md5ctx.state));
 		} else {
@@ -1385,7 +1390,7 @@ safe_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			SHA1Update(&sha1ctx, macini->cri_key,
 			    macini->cri_klen / 8);
 			SHA1Update(&sha1ctx, hmac_ipad_buffer,
-			    HMAC_BLOCK_LEN - (macini->cri_klen / 8));
+			    HMAC_SHA1_BLOCK_LEN - (macini->cri_klen / 8));
 			bcopy(sha1ctx.state, ses->ses_hminner,
 			    sizeof(sha1ctx.state));
 		}
@@ -1398,7 +1403,7 @@ safe_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			MD5Update(&md5ctx, macini->cri_key,
 			    macini->cri_klen / 8);
 			MD5Update(&md5ctx, hmac_opad_buffer,
-			    HMAC_BLOCK_LEN - (macini->cri_klen / 8));
+			    HMAC_MD5_BLOCK_LEN - (macini->cri_klen / 8));
 			bcopy(md5ctx.state, ses->ses_hmouter,
 			    sizeof(md5ctx.state));
 		} else {
@@ -1406,7 +1411,7 @@ safe_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			SHA1Update(&sha1ctx, macini->cri_key,
 			    macini->cri_klen / 8);
 			SHA1Update(&sha1ctx, hmac_opad_buffer,
-			    HMAC_BLOCK_LEN - (macini->cri_klen / 8));
+			    HMAC_SHA1_BLOCK_LEN - (macini->cri_klen / 8));
 			bcopy(sha1ctx.state, ses->ses_hmouter,
 			    sizeof(sha1ctx.state));
 		}

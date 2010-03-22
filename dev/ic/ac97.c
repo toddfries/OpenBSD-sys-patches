@@ -1,4 +1,4 @@
-/*	$OpenBSD: ac97.c,v 1.70 2008/10/23 21:50:01 jakemsr Exp $	*/
+/*	$OpenBSD: ac97.c,v 1.72 2010/02/25 21:22:42 ratchov Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Constantine Sapuntzakis
@@ -310,8 +310,6 @@ const struct ac97_source_info {
 	/* Missing features: Simulated Stereo, POP, Loopback mode */
 };
 
-#define SOURCE_INFO_SIZE (sizeof(source_info)/sizeof(source_info[0]))
-
 /*
  * Check out http://www.intel.com/technology/computing/audio/index.htm
  * for information on AC-97
@@ -321,7 +319,7 @@ struct ac97_softc {
 	/* ac97_codec_if must be at the first of ac97_softc. */
 	struct ac97_codec_if codec_if;
 	struct ac97_host_if *host_if;
-#define MAX_SOURCES	(2 * SOURCE_INFO_SIZE)
+#define MAX_SOURCES	(2 * nitems(source_info))
 	struct ac97_source_info source_info[MAX_SOURCES];
 	int num_source_info;
 	enum ac97_host_flags host_flags;
@@ -481,6 +479,7 @@ const struct ac97_codecid {
 	{ 0x84,	0xff, 0, 0,	"STAC9784/85" },
 }, ac97_vi[] = {
 	{ 0x61, 0xff, 0, 0,	"VT1612A" },
+	{ 0x70, 0xff, 0, 0,	"VT1617" },
 }, ac97_tt[] = {
 	{ 0x02,	0xff, 0, 0,	"TR28022" },
 	{ 0x03,	0xff, 0, 0,	"TR28023" },
@@ -504,7 +503,7 @@ const struct ac97_codecid {
 	{ 0x03, 0xff, 0, 0,	"YMF753-S" },
 };
 
-#define	cl(n)	n, sizeof(n)/sizeof(n[0])
+#define	cl(n)	n, nitems(n)
 const struct ac97_vendorid {
 	u_int32_t id;
 	char * const name;
@@ -646,7 +645,7 @@ ac97_setup_defaults(struct ac97_softc *as)
 
 	bzero(as->shadow_reg, sizeof(as->shadow_reg));
 
-	for (idx = 0; idx < SOURCE_INFO_SIZE; idx++) {
+	for (idx = 0; idx < nitems(source_info); idx++) {
 		const struct ac97_source_info *si = &source_info[idx];
 
 		ac97_write(as, si->reg, si->default_value);
@@ -659,7 +658,7 @@ ac97_restore_shadow(struct ac97_codec_if *self)
 	struct ac97_softc *as = (struct ac97_softc *)self;
 	int idx;
 
-	for (idx = 0; idx < SOURCE_INFO_SIZE; idx++) {
+	for (idx = 0; idx < nitems(source_info); idx++) {
 		const struct ac97_source_info *si = &source_info[idx];
 
 		ac97_write(as, si->reg, as->shadow_reg[si->reg >> 1]);
@@ -708,7 +707,7 @@ ac97_setup_source_info(struct ac97_softc *as)
 	struct ac97_source_info *si, *si2;
 	int idx, ouridx;
 
-	for (idx = 0, ouridx = 0; idx < SOURCE_INFO_SIZE; idx++) {
+	for (idx = 0, ouridx = 0; idx < nitems(source_info); idx++) {
 		si = &as->source_info[ouridx];
 
 		if (!ac97_check_capability(as, source_info[idx].req_feature))

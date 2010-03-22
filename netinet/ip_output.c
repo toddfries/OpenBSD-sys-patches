@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.194 2009/06/05 00:05:22 claudio Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.204 2010/01/13 12:09:36 claudio Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -244,6 +244,10 @@ ip_output(struct mbuf *m0, ...)
 		if (!IN_MULTICAST(ip->ip_dst.s_addr))
 			ip->ip_src = ia->ia_addr.sin_addr;
 	}
+
+#if NPF > 0
+reroute:
+#endif
 
 #ifdef IPSEC
 	if (!ipsec_in_use && inp == NULL)
@@ -538,7 +542,7 @@ ip_output(struct mbuf *m0, ...)
 	}
 
 	/*
-	 * Look for broadcast address and and verify user is allowed to send
+	 * Look for broadcast address and verify user is allowed to send
 	 * such a packet; if the packet is going in an IPsec tunnel, skip
 	 * this check.
 	 */
@@ -594,6 +598,13 @@ sendit:
 		}
 		ip = mtod(m, struct ip *);
 		hlen = ip->ip_hl << 2;
+		/*
+		 * PF_TAG_REROUTE handling or not...
+		 * Packet is entering IPsec so the routing is
+		 * already overruled by the IPsec policy.
+		 * Until now the change was not reconsidered.
+		 * What's the behaviour?
+		 */
 #endif
 
 		tdb = gettdb(sspi, &sdst, sproto);
@@ -703,9 +714,19 @@ sendit:
 	}
 	if (m == NULL)
 		goto done;
-
 	ip = mtod(m, struct ip *);
 	hlen = ip->ip_hl << 2;
+	if ((m->m_pkthdr.pf.flags & (PF_TAG_REROUTE | PF_TAG_GENERATED)) ==
+	    (PF_TAG_REROUTE | PF_TAG_GENERATED))
+		/* already rerun the route lookup, go on */
+		m->m_pkthdr.pf.flags &= ~(PF_TAG_GENERATED | PF_TAG_REROUTE);
+	else if (m->m_pkthdr.pf.flags & PF_TAG_REROUTE) {
+		/* tag as generated to skip over pf_test on rerun */
+		m->m_pkthdr.pf.flags |= PF_TAG_GENERATED;
+		ro = NULL;
+		donerouting = 0;
+		goto reroute;
+	}
 #endif
 
 #ifdef IPSEC
@@ -854,8 +875,9 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 		m->m_data += max_linkhdr;
 		mhip = mtod(m, struct ip *);
 		*mhip = *ip;
-		/* we must inherit MCAST and BCAST flags */
+		/* we must inherit MCAST and BCAST flags and rdomain */
 		m->m_flags |= m0->m_flags & (M_MCAST|M_BCAST);
+		m->m_pkthdr.rdomain = m0->m_pkthdr.rdomain;
 		if (hlen > sizeof (struct ip)) {
 			mhlen = ip_optcopy(ip, mhip) + sizeof (struct ip);
 			mhip->ip_hl = mhlen >> 2;
@@ -911,8 +933,12 @@ sendorfree:
 	/*
 	 * If there is no room for all the fragments, don't queue
 	 * any of them.
+	 *
+	 * Queue them anyway on virtual interfaces
+	 * (vlan, etc) with queue length 1 and hope the
+	 * underlying interface can cope.
 	 */
-	if (ifp != NULL) {
+	if (ifp != NULL && ifp->if_snd.ifq_maxlen != 1) {
 		s = splnet();
 		if (ifp->if_snd.ifq_maxlen - ifp->if_snd.ifq_len < fragments &&
 		    error == 0) {
@@ -1039,8 +1065,8 @@ ip_ctloutput(op, so, level, optname, mp)
 	struct inpcb *inp = sotoinpcb(so);
 	struct mbuf *m = *mp;
 	int optval = 0;
-#ifdef IPSEC
 	struct proc *p = curproc; /* XXX */
+#ifdef IPSEC
 	struct ipsec_ref *ipr;
 	u_int16_t opt16val;
 #endif
@@ -1252,7 +1278,7 @@ ip_ctloutput(op, so, level, optname, mp)
 #ifndef IPSEC
 			error = EOPNOTSUPP;
 #else
-			if (m->m_len < 2) {
+			if (m == NULL || m->m_len < 2) {
 				error = EINVAL;
 				break;
 			}
@@ -1401,7 +1427,14 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 			}
 			rtid = *mtod(m, u_int *);
-			if (!rtable_exists(rtid)) {
+			if (p->p_p->ps_rdomain != 0 &&
+			    p->p_p->ps_rdomain != rtid &&
+			    (error = suser(p, 0)) != 0) {
+				error = EACCES;
+				break;
+			}
+			/* table must exist and be a domain */
+			if (!rtable_exists(rtid) || rtid != rtable_l2(rtid)) {
 				error = EINVAL;
 				break;
 			}
@@ -1505,6 +1538,7 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_ESP_TRANS_LEVEL:
 		case IP_ESP_NETWORK_LEVEL:
 		case IP_IPCOMP_LEVEL:
+			*mp = m = m_get(M_WAIT, MT_SOOPTS);
 #ifndef IPSEC
 			m->m_len = sizeof(int);
 			*mtod(m, int *) = IPSEC_LEVEL_NONE;
@@ -1564,9 +1598,11 @@ ip_ctloutput(op, so, level, optname, mp)
 			case IP_IPSEC_LOCAL_AUTH:
 				if (inp->inp_ipo != NULL)
 					ipr = inp->inp_ipo->ipo_local_auth;
+				opt16val = IPSP_AUTH_NONE;
 				break;
 			case IP_IPSEC_REMOTE_AUTH:
 				ipr = inp->inp_ipsec_remoteauth;
+				opt16val = IPSP_AUTH_NONE;
 				break;
 			}
 			if (ipr == NULL)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_input.c,v 1.111 2009/03/26 20:34:54 damien Exp $	*/
+/*	$OpenBSD: ieee80211_input.c,v 1.113 2010/02/25 17:49:16 damien Exp $	*/
 
 /*-
  * Copyright (c) 2001 Atsushi Onoe
@@ -861,7 +861,11 @@ ieee80211_align_mbuf(struct mbuf *m)
 				m_freem(m);
 				return NULL;
 			}
-			M_DUP_PKTHDR(n, m);
+			if (m_dup_pkthdr(n, m)) {
+				m_free(n);
+				m_freem(m);
+				return (NULL);
+			}
 			n->m_len = MHLEN;
 		} else {
 			MGET(n, M_DONTWAIT, MT_DATA);
@@ -2563,9 +2567,9 @@ ieee80211_recv_delba(struct ieee80211com *ic, struct mbuf *m,
 
 /*-
  * SA Query Request frame format:
- * [1]  Category
- * [1]  Action
- * [16] Transaction Identifier
+ * [1] Category
+ * [1] Action
+ * [2] Transaction Identifier
  */
 void
 ieee80211_recv_sa_query_req(struct ieee80211com *ic, struct mbuf *m,
@@ -2600,9 +2604,9 @@ ieee80211_recv_sa_query_req(struct ieee80211com *ic, struct mbuf *m,
 #ifndef IEEE80211_STA_ONLY
 /*-
  * SA Query Response frame format:
- * [1]  Category
- * [1]  Action
- * [16] Transaction Identifier
+ * [1] Category
+ * [1] Action
+ * [2] Transaction Identifier
  */
 void
 ieee80211_recv_sa_query_resp(struct ieee80211com *ic, struct mbuf *m,

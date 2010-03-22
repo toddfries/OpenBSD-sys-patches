@@ -1,4 +1,4 @@
-/*	$OpenBSD: siop.c,v 1.53 2009/01/18 05:09:43 krw Exp $ */
+/*	$OpenBSD: siop.c,v 1.56 2010/01/10 00:10:23 krw Exp $ */
 /*	$NetBSD: siop.c,v 1.79 2005/11/18 23:10:32 bouyer Exp $	*/
 
 /*
@@ -1202,7 +1202,6 @@ siop_scsicmd_end(siop_cmd)
 	}
 out:
 	siop_lun->lun_flags &= ~SIOP_LUNF_FULL;
-	xs->flags |= ITSDONE;
 	siop_cmd->cmd_c.status = CMDST_FREE;
 	TAILQ_INSERT_TAIL(&sc->free_list, siop_cmd, next);
 #if 0
@@ -1386,7 +1385,7 @@ siop_scsicmd(xs)
 			    "target %d\n", sc->sc_c.sc_dev.dv_xname,
 			    target);
 			splx(s);
-			return(TRY_AGAIN_LATER);
+			return(NO_CCB);
 		}
 		siop_target =
 		    (struct siop_target*)sc->sc_c.targets[target];
@@ -1403,7 +1402,7 @@ siop_scsicmd(xs)
 			printf("%s: can't alloc lunsw for target %d\n",
 			    sc->sc_c.sc_dev.dv_xname, target);
 			splx(s);
-			return(TRY_AGAIN_LATER);
+			return(NO_CCB);
 		}
 		for (i=0; i < 8; i++)
 			siop_target->siop_lun[i] = NULL;
@@ -1418,7 +1417,7 @@ siop_scsicmd(xs)
 			    "target %d lun %d\n",
 			    sc->sc_c.sc_dev.dv_xname, target, lun);
 			splx(s);
-			return(TRY_AGAIN_LATER);
+			return(NO_CCB);
 		}
 	}
 
@@ -1461,7 +1460,7 @@ siop_scsicmd(xs)
 			siop_cmd->cmd_c.status = CMDST_FREE;
 			TAILQ_INSERT_TAIL(&sc->free_list, siop_cmd, next);
 			splx(s);
-			return(TRY_AGAIN_LATER);
+			return(NO_CCB);
 		}
 		bus_dmamap_sync(sc->sc_c.sc_dmat,
 		    siop_cmd->cmd_c.dmamap_data, 0,
@@ -1652,13 +1651,7 @@ again:
 				    sc->sc_c.sc_dev.dv_xname, target, lun, tag,
 				    msgcount);
 #endif
-			if (siop_cmd->cmd_c.xs->bp != NULL &&
-			    (siop_cmd->cmd_c.xs->bp->b_flags & B_ASYNC))
-				siop_cmd->cmd_tables->msg_out[1] =
-				    MSG_SIMPLE_Q_TAG;
-			else
-				siop_cmd->cmd_tables->msg_out[1] =
-				    MSG_ORDERED_Q_TAG;
+			siop_cmd->cmd_tables->msg_out[1] = MSG_SIMPLE_Q_TAG;
 			siop_cmd->cmd_tables->msg_out[2] = tag;
 			siop_cmd->cmd_tables->t_msgout.count =
 			    siop_htoc32(&sc->sc_c, 3);

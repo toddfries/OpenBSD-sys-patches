@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.160 2009/02/14 19:03:50 kettenis Exp $	*/
+/*	$OpenBSD: locore.S,v 1.164 2009/12/31 12:52:35 jsing Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -101,6 +101,7 @@
 	.import	panic, code
 
 #define curproc	(cpu_info_primary + CI_CURPROC)
+#define cpl	(cpu_info_primary + CI_CPL)
 
 #define	EMRG_STACKSIZE	(1*NBPG)
 #define	FPEMU_STACKSIZE	(1*NBPG)
@@ -198,7 +199,6 @@ $start_zero_tf
 	mtctl	arg3, cr30
 	stw	r0, U_PCB+PCB_ONFAULT(arg3)
 	stw	r0, U_PCB+PCB_SPACE(arg3)	/* XXX HPPA_SID_KERNEL == 0 */
-	stw	arg3, U_PCB+PCB_UVA(arg3)
 	ldil	L%(USPACE+NBPG), arg0		/* normal U plus red zone */
 	add	arg0, arg3, arg0
 	ldil	L%proc0paddr, t1
@@ -712,7 +712,7 @@ $syscall
 $syscall_return
 	/* t3 == VA trapframe */
 
-	/* splhigh(), just in case */
+	/* disable interrupts, just in case */
 	mtctl	r0, eiem
 
 	/*
@@ -1628,10 +1628,11 @@ ENTRY(TLABEL(all),0)
 	comb,<>	t1, t2, $trap_from_kernel
 	dep	r0, 31, 6, sp
 
-	mfctl	cr30, t2
+	ldil	L%curproc, t2
+	ldw	R%curproc(t2), t2
 	depi	1, T_USER_POS, 1, r1
 	depi	1, TFF_LAST_POS, 1, r1
-	ldw	U_PCB+PCB_UVA(t2), sp
+	ldw	P_ADDR(t2), sp
 	ldo	NBPG(sp), sp
 
 $trap_from_kernel
@@ -2103,7 +2104,6 @@ intr_ticks
 #define	INTR_PROF_AFT	/* */
 #endif
 
-	.import	cpl, data
 	.import	ipending, data
 	.import	imask, data
 	.import	intr_table, data
@@ -2898,6 +2898,14 @@ LEAF_ENTRY(cpu_idle_leave)
 EXIT(cpu_idle_leave)
 
 ENTRY(switch_trampoline,0)
+#ifdef MULTIPROCESSOR
+	copy	t4, r3
+	copy	arg0, r4
+	bl	proc_trampoline_mp, rp
+	nop
+	copy	r4, arg0
+	copy	r3, t4
+#endif
 	ldil	L%cpl, t1
 	stw	r0, R%cpl(t1)
 	.call

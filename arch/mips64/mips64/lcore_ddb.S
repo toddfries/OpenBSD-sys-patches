@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcore_ddb.S,v 1.9 2009/05/22 20:37:53 miod Exp $ */
+/*	$OpenBSD: lcore_ddb.S,v 1.11 2010/01/31 19:39:04 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -39,9 +39,9 @@
 
 	.set	noreorder		# Noreorder is default style!
 
-#ifdef __LP64__
 LEAF(kdbpeekd, 0)
-	PTR_L	t0, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t0, CI_CURPROCPADDR(t1)
 	li	v0, KT_DDBERR
 	and	v1, a0, 7			# unaligned ?
 	bne	v1, zero, 1f
@@ -57,10 +57,10 @@ LEAF(kdbpeekd, 0)
 	jr	ra
 	sw	zero, PCB_ONFAULT(t0)
 END(kdbpeekd)
-#endif
 
 LEAF(kdbpeek, 0)
-	PTR_L	t0, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t0, CI_CURPROCPADDR(t1)
 	li	v0, KT_DDBERR
 	and	v1, a0, 3			# unaligned ?
 	bne	v1, zero, 1f
@@ -78,7 +78,8 @@ LEAF(kdbpeek, 0)
 END(kdbpeek)
 
 LEAF(kdbpeekw, 0)
-	PTR_L	t0, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t0, CI_CURPROCPADDR(t1)
 	li	v0, KT_DDBERR
 	and	v1, a0, 1			# unaligned ?
 	bne	v1, zero, 1f
@@ -95,7 +96,8 @@ LEAF(kdbpeekw, 0)
 END(kdbpeekw)
 
 LEAF(kdbpeekb, 0)
-	PTR_L	t0, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t0, CI_CURPROCPADDR(t1)
 	li	v0, KT_DDBERR
 	sw	v0, PCB_ONFAULT(t0)
 	lb	v0, 0(a0)
@@ -108,9 +110,9 @@ kt_ddberr:
 	jr	ra
 	li	v0, -1
 
-#ifdef __LP64__
 LEAF(kdbpoked, 0)
-	PTR_L	t0, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t0, CI_CURPROCPADDR(t1)
 	li	v0, KT_DDBERR
 	and	v1, a0, 7			# unaligned ?
 	bne	v1, zero, 1f
@@ -126,11 +128,10 @@ LEAF(kdbpoked, 0)
 	jr	ra
 	sw	zero, PCB_ONFAULT(t0)
 END(kdbpoked)
-#endif
-
 
 LEAF(kdbpoke, 0)
-	PTR_L	t0, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t0, CI_CURPROCPADDR(t1)
 	li	v0, KT_DDBERR
 	and	v1, a0, 3			# unaligned ?
 	bne	v1, zero, 1f
@@ -148,7 +149,8 @@ LEAF(kdbpoke, 0)
 END(kdbpoke)
 
 LEAF(kdbpokew, 0)
-	PTR_L	t0, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t0, CI_CURPROCPADDR(t1)
 	li	v0, KT_DDBERR
 	and	v1, a0, 1			# unaligned ?
 	bne	v1, zero, 1f
@@ -164,7 +166,8 @@ LEAF(kdbpokew, 0)
 END(kdbpokew)
 
 LEAF(kdbpokeb, 0)
-	PTR_L	t0, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t0, CI_CURPROCPADDR(t1)
 	li	v0, KT_DDBERR
 	sw	v0, PCB_ONFAULT(t0)
 	sb	a1, 0(a0)
@@ -214,4 +217,3 @@ LEAF(longjmp, 0)
 	jr	ra
 	li	v0, 1			# longjmp return
 END(longjmp)
-

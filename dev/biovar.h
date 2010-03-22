@@ -1,4 +1,4 @@
-/*	$OpenBSD: biovar.h,v 1.34 2008/08/22 02:00:12 marco Exp $	*/
+/*	$OpenBSD: biovar.h,v 1.37 2009/12/31 14:00:45 jsing Exp $	*/
 
 /*
  * Copyright (c) 2002 Niklas Hallqvist.  All rights reserved.
@@ -177,6 +177,7 @@ struct bioc_createraid {
 	void		*bc_cookie;
 	void		*bc_dev_list;
 	u_int16_t	bc_dev_list_len;
+	int32_t		bc_key_disk;
 #define BIOC_CRMAXLEN		1024
 	u_int16_t	bc_level;
 	u_int32_t	bc_flags;
@@ -202,6 +203,15 @@ struct bioc_deleteraid {
 	char		bd_dev[16];	/* device */
 };
 
+#define BIOCDISCIPLINE _IOWR('B', 40, struct bioc_discipline)
+struct bioc_discipline {
+	void		*bd_cookie;
+	char		bd_dev[16];
+	u_int32_t	bd_cmd;
+	u_int32_t	bd_size;
+	void		*bd_data;
+};
+
 /* kernel and userspace defines */
 #define BIOC_INQ		0x0001
 #define BIOC_DISK		0x0002
@@ -211,6 +221,7 @@ struct bioc_deleteraid {
 #define BIOC_SETSTATE		0x0020
 #define BIOC_CREATERAID		0x0040
 #define BIOC_DELETERAID		0x0080
+#define BIOC_DISCIPLINE		0x0100
 
 /* user space defines */
 #define BIOC_DEVLIST		0x10000

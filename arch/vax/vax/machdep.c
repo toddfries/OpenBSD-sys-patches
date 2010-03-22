@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.100 2009/06/03 21:30:20 beck Exp $ */
+/* $OpenBSD: machdep.c,v 1.106 2009/08/11 19:17:17 miod Exp $ */
 /* $NetBSD: machdep.c,v 1.108 2000/09/13 15:00:23 thorpej Exp $	 */
 
 /*
@@ -77,10 +77,6 @@
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm_swap.h>
 
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
-
 #include <net/netisr.h>
 #include <net/if.h>
 
@@ -117,8 +113,6 @@
 #include <vax/vax/db_disasm.h>
 
 #include "led.h"
-
-caddr_t allocsys(caddr_t);
 
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 5
@@ -171,8 +165,6 @@ void dumpconf(void);
 void
 cpu_startup()
 {
-	caddr_t		v;
-	int		sz;
 	vaddr_t		minaddr, maxaddr;
 	extern char	cpu_model[];
 
@@ -193,24 +185,6 @@ cpu_startup()
 	    ptoa(physmem)/1024/1024);
 	mtpr(AST_NO, PR_ASTLVL);
 	spl0();
-
-	/*
-	 * Find out how much space we need, allocate it, and then give
-	 * everything true virtual addresses.
-	 */
-
-	sz = (int) allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (((unsigned long)allocsys(v) - (unsigned long)v) != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively limits
@@ -379,6 +353,25 @@ consinit()
 #endif
 }
 
+/*
+ * Old sigcontext structure, still used by userland until setjmp is fixed.
+ */
+struct	osigcontext {
+	int	sc_onstack;		/* sigstack state to restore */
+	int	sc_mask;		/* signal mask to restore */
+	int	sc_sp;			/* sp to restore */
+	int	sc_fp;			/* fp to restore */
+	int	sc_ap;			/* ap to restore */
+	int	sc_pc;			/* pc to restore */
+	int	sc_ps;			/* psl to restore */
+};
+
+/*
+ * Internal flags in the low order bits of sc_ap, to know whether this
+ * is an osigcontext or a sigcontext.
+ */
+#define	SIGCONTEXT_NEW		0x01
+
 int
 sys_sigreturn(p, v, retval)
 	struct proc *p;
@@ -391,12 +384,20 @@ sys_sigreturn(p, v, retval)
 	struct trapframe *scf;
 	struct sigcontext *cntx;
 	struct sigcontext ksc;
+	int error;
 
 	scf = p->p_addr->u_pcb.framep;
 	cntx = SCARG(uap, sigcntxp);
 
-	if (copyin((caddr_t)cntx, (caddr_t)&ksc, sizeof(struct sigcontext)))
-		return (EINVAL);
+	error = copyin((caddr_t)cntx, (caddr_t)&ksc,
+	    sizeof(struct osigcontext));
+	if (error == 0 && (ksc.sc_ap & SIGCONTEXT_NEW)) {
+		error = copyin((caddr_t)cntx + sizeof(struct osigcontext),
+		    (caddr_t)&ksc.sc_r,
+		    sizeof(struct sigcontext) - sizeof(struct osigcontext));
+	}
+	if (error != 0)
+		return (error);
 
 	/* Compatibility mode? */
 	if ((ksc.sc_ps & (PSL_IPL | PSL_IS)) ||
@@ -412,20 +413,37 @@ sys_sigreturn(p, v, retval)
 	p->p_sigmask = ksc.sc_mask & ~sigcantmask;
 
 	scf->fp = ksc.sc_fp;
-	scf->ap = ksc.sc_ap;
-	scf->pc = ksc.sc_pc;
+	scf->ap = ksc.sc_ap & ~SIGCONTEXT_NEW;
 	scf->sp = ksc.sc_sp;
+	if (ksc.sc_ap & SIGCONTEXT_NEW) {
+		scf->r0 = ksc.sc_r[0];
+		scf->r1 = ksc.sc_r[1];
+		scf->r2 = ksc.sc_r[2];
+		scf->r3 = ksc.sc_r[3];
+		scf->r4 = ksc.sc_r[4];
+		scf->r5 = ksc.sc_r[5];
+		scf->r6 = ksc.sc_r[6];
+		scf->r7 = ksc.sc_r[7];
+		scf->r8 = ksc.sc_r[8];
+		scf->r9 = ksc.sc_r[9];
+		scf->r10 = ksc.sc_r[10];
+		scf->r11 = ksc.sc_r[11];
+	}
+	scf->pc = ksc.sc_pc;
 	scf->psl = ksc.sc_ps;
 	return (EJUSTRETURN);
 }
 
 struct sigframe {
+	/* arguments of the signal handler */
 	int		 sf_signum;
 	siginfo_t 	*sf_sip;
 	struct sigcontext *sf_scp;
-	register_t 	 sf_r0, sf_r1, sf_r2, sf_r3, sf_r4, sf_r5;
+	/* address of the signal handler */
 	register_t 	 sf_pc;
-	register_t 	 sf_arg;
+	/* sigcontext pointer for sigreturn */
+	register_t	 sf_arg;
+
 	siginfo_t 	 sf_si;
 	struct sigcontext sf_sc;
 };
@@ -458,9 +476,9 @@ sendsig(catcher, sig, mask, code, type, val)
 	sigf = (struct sigframe *) (cursp - sizeof(struct sigframe));
 
 	bzero(&gsigf, sizeof gsigf);
-	gsigf.sf_arg = (register_t)&sigf->sf_sc;
 	gsigf.sf_pc = (register_t)catcher;
 	gsigf.sf_scp = &sigf->sf_sc;
+	gsigf.sf_arg = (register_t)&sigf->sf_sc;
 	gsigf.sf_signum = sig;
 
 	if (psp->ps_siginfo & sigmask(sig)) {
@@ -468,13 +486,25 @@ sendsig(catcher, sig, mask, code, type, val)
 		initsiginfo(&gsigf.sf_si, sig, code, type, val);
 	}
 
-	gsigf.sf_sc.sc_pc = syscf->pc;
-	gsigf.sf_sc.sc_ps = syscf->psl;
-	gsigf.sf_sc.sc_ap = syscf->ap;
-	gsigf.sf_sc.sc_fp = syscf->fp; 
-	gsigf.sf_sc.sc_sp = syscf->sp; 
 	gsigf.sf_sc.sc_onstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
 	gsigf.sf_sc.sc_mask = mask;
+	gsigf.sf_sc.sc_sp = syscf->sp; 
+	gsigf.sf_sc.sc_fp = syscf->fp; 
+	gsigf.sf_sc.sc_ap = syscf->ap | SIGCONTEXT_NEW;
+	gsigf.sf_sc.sc_pc = syscf->pc;
+	gsigf.sf_sc.sc_ps = syscf->psl;
+	gsigf.sf_sc.sc_r[0] = syscf->r0;
+	gsigf.sf_sc.sc_r[1] = syscf->r1;
+	gsigf.sf_sc.sc_r[2] = syscf->r2;
+	gsigf.sf_sc.sc_r[3] = syscf->r3;
+	gsigf.sf_sc.sc_r[4] = syscf->r4;
+	gsigf.sf_sc.sc_r[5] = syscf->r5;
+	gsigf.sf_sc.sc_r[6] = syscf->r6;
+	gsigf.sf_sc.sc_r[7] = syscf->r7;
+	gsigf.sf_sc.sc_r[8] = syscf->r8;
+	gsigf.sf_sc.sc_r[9] = syscf->r9;
+	gsigf.sf_sc.sc_r[10] = syscf->r10;
+	gsigf.sf_sc.sc_r[11] = syscf->r11;
 
 #if defined(COMPAT_ULTRIX)
 	native_sigset_to_sigset13(mask, &gsigf.sf_sc.__sc_mask13);
@@ -488,10 +518,11 @@ sendsig(catcher, sig, mask, code, type, val)
 	/*
 	 * Place sp at the beginning of sigf; this ensures that possible
 	 * further calls to sendsig won't overwrite this struct
-	 * sigframe/struct sigcontext pair with their own.
+	 * sigframe/struct sigcontext pair with their own. Also, set up
+	 * ap for the sigreturn call from sigcode.
 	 */
-	syscf->sp = syscf->ap =
-	    (unsigned) sigf + offsetof(struct sigframe, sf_pc);
+	syscf->sp = (unsigned)sigf;
+	syscf->ap = (unsigned)sigf + offsetof(struct sigframe, sf_pc);
 
 	if (onstack)
 		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
@@ -836,32 +867,6 @@ vax_unmap_physmem(addr, size)
 	else
 		extent_free(extio, (u_long)addr & ~VAX_PGOFSET,
 		    size * VAX_NBPG, EX_NOWAIT);
-}
-
-/*
- * Allocate space for system data structures.  We are given a starting
- * virtual address and we return a final virtual address; along the way we
- * set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want, allocate that
- * much and fill it with zeroes, and then call allocsys() again with the
- * correct base virtual address.
- */
-#define VALLOC(name, type, num) v = (caddr_t)(((name) = (type *)v) + (num))
-
-caddr_t
-allocsys(v)
-    register caddr_t v;
-{
-
-#ifdef SYSVMSG
-    VALLOC(msgpool, char, msginfo.msgmax);
-    VALLOC(msgmaps, struct msgmap, msginfo.msgseg);
-    VALLOC(msghdrs, struct msg, msginfo.msgtql);
-    VALLOC(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-    return (v);
 }
 
 /*

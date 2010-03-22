@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.47 2009/06/09 02:56:38 krw Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.52 2009/12/09 14:31:57 oga Exp $	*/
 /*	$NetBSD: pmap.c,v 1.3 2003/05/08 18:13:13 thorpej Exp $	*/
 
 /*
@@ -447,7 +447,8 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 
 	pte = kvtopte(va);
 
-	npte = pa | ((prot & VM_PROT_WRITE) ? PG_RW : PG_RO) | PG_V;
+	npte = (pa & PMAP_PA_MASK) | ((prot & VM_PROT_WRITE) ? PG_RW : PG_RO) |
+	    ((pa & PMAP_NOCACHE) ? PG_N : 0) | PG_V;
 
 	/* special 1:1 mappings in the first 2MB must not be global */
 	if (va >= (vaddr_t)NBPD_L2)
@@ -462,6 +463,8 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 		panic("pmap_kenter_pa: PG_PS");
 #endif
 	if (pmap_valid_entry(opte)) {
+		if (pa & PMAP_NOCACHE && (opte & PG_N) == 0)
+			wbinvd();
 		/* This shouldn't happen */
 		pmap_tlb_shootpage(pmap_kernel(), va);
 		pmap_tlb_shootwait();
@@ -835,7 +838,7 @@ pmap_freepage(struct pmap *pmap, struct vm_page *ptp, int level,
 		pmap->pm_ptphint[lidx] = RB_ROOT(&obj->memt);
 	ptp->wire_count = 0;
 	uvm_pagerealloc(ptp, NULL, 0);
-	TAILQ_INSERT_TAIL(pagelist, ptp, fq.queues.listq);
+	TAILQ_INSERT_TAIL(pagelist, ptp, pageq);
 }
 
 void
@@ -1259,6 +1262,26 @@ pmap_zero_page(struct vm_page *pg)
 }
 
 /*
+ * pmap_flush_cache: flush the cache for a virtual address.
+ */
+void
+pmap_flush_cache(vaddr_t addr, vsize_t len)
+{
+	vaddr_t	i;
+
+	if (curcpu()->ci_cflushsz == 0) {
+		wbinvd();
+		return;
+	}
+
+	/* all cpus that have clflush also have mfence. */
+	mfence();
+	for (i = addr; i < addr + len; i += curcpu()->ci_cflushsz)
+		clflush(i);
+	mfence();
+}
+
+/*
  * pmap_pagezeroidle: the same, for the idle loop page zero'er.
  * Returns TRUE if the page was zero'd, FALSE if we aborted for
  * some reason.
@@ -1537,7 +1560,7 @@ pmap_do_remove(struct pmap *pmap, vaddr_t sva, vaddr_t eva, int flags)
 		PMAP_MAP_TO_HEAD_UNLOCK();
 
 		while ((ptp = TAILQ_FIRST(&empty_ptps)) != NULL) {
-			TAILQ_REMOVE(&empty_ptps, ptp, fq.queues.listq);
+			TAILQ_REMOVE(&empty_ptps, ptp, pageq);
 			uvm_pagefree(ptp);
                 }
 
@@ -1609,7 +1632,7 @@ pmap_do_remove(struct pmap *pmap, vaddr_t sva, vaddr_t eva, int flags)
 	PMAP_MAP_TO_HEAD_UNLOCK();
 
 	while ((ptp = TAILQ_FIRST(&empty_ptps)) != NULL) {
-		TAILQ_REMOVE(&empty_ptps, ptp, fq.queues.listq);
+		TAILQ_REMOVE(&empty_ptps, ptp, pageq);
 		uvm_pagefree(ptp);
 	}
 }
@@ -1682,7 +1705,7 @@ pmap_page_remove(struct vm_page *pg)
 	pmap_tlb_shootwait();
 
 	while ((ptp = TAILQ_FIRST(&empty_ptps)) != NULL) {
-		TAILQ_REMOVE(&empty_ptps, ptp, fq.queues.listq);
+		TAILQ_REMOVE(&empty_ptps, ptp, pageq);
 		uvm_pagefree(ptp);
 	}
 }
@@ -1963,7 +1986,10 @@ pmap_enter(struct pmap *pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	struct pv_entry *pve = NULL;
 	int ptpdelta, wireddelta, resdelta;
 	boolean_t wired = (flags & PMAP_WIRED) != 0;
+	boolean_t nocache = (pa & PMAP_NOCACHE) != 0;
 	int error;
+
+	pa &= PMAP_PA_MASK;
 
 #ifdef DIAGNOSTIC
 	if (va == (vaddr_t) PDP_BASE || va == (vaddr_t) APDP_BASE)
@@ -2127,7 +2153,7 @@ enter_now:
 		npte |= PG_PVLIST;
 	if (wired)
 		npte |= PG_W;
-	if (flags & PMAP_NOCACHE)
+	if (nocache)
 		npte |= PG_N;
 	if (va < VM_MAXUSER_ADDRESS)
 		npte |= PG_u;
@@ -2143,6 +2169,8 @@ enter_now:
 	 * flush the TLB.  (is this overkill?)
 	 */
 	if (opte & PG_V) {
+		if (nocache && (opte & PG_N) == 0)
+			wbinvd();
 		pmap_tlb_shootpage(pmap, va);
 		pmap_tlb_shootwait();
 	}

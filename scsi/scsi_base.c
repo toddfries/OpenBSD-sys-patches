@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.132 2009/06/02 06:33:04 yuo Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.166 2010/01/15 06:27:12 krw Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -50,14 +50,12 @@
 #include <scsi/scsi_disk.h>
 #include <scsi/scsiconf.h>
 
-static __inline struct scsi_xfer *scsi_make_xs(struct scsi_link *,
-    struct scsi_generic *, int cmdlen, u_char *data_addr,
-    int datalen, int retries, int timeout, struct buf *, int flags);
 static __inline void asc2ascii(u_int8_t, u_int8_t ascq, char *result,
     size_t len);
-int	sc_err1(struct scsi_xfer *);
-int	scsi_interpret_sense(struct scsi_xfer *);
+int	scsi_xs_error(struct scsi_xfer *);
 char   *scsi_decode_sense(struct scsi_sense_data *, int);
+
+void	scsi_xs_sync_done(struct scsi_xfer *);
 
 /* Values for flag parameter to scsi_decode_sense. */
 #define	DECODE_SENSE_KEY	1
@@ -66,6 +64,17 @@ char   *scsi_decode_sense(struct scsi_sense_data *, int);
 
 int			scsi_running = 0;
 struct pool		scsi_xfer_pool;
+struct pool		scsi_plug_pool;
+
+struct scsi_plug {
+	struct workq_task	wqt;
+	int			target;
+	int			lun;
+	int			how;
+};
+
+void	scsi_plug_probe(void *, void *);
+void	scsi_plug_detach(void *, void *);
 
 /*
  * Called when a scsibus is attached to initialize global data.
@@ -84,6 +93,74 @@ scsi_init()
 	/* Initialize the scsi_xfer pool. */
 	pool_init(&scsi_xfer_pool, sizeof(struct scsi_xfer), 0,
 	    0, 0, "scxspl", NULL);
+	pool_setipl(&scsi_xfer_pool, IPL_BIO);
+	/* Initialize the scsi_plug pool */
+	pool_init(&scsi_plug_pool, sizeof(struct scsi_plug), 0,
+	    0, 0, "scsiplug", NULL);
+	pool_setipl(&scsi_plug_pool, IPL_BIO);
+}
+
+int
+scsi_req_probe(struct scsibus_softc *sc, int target, int lun)
+{
+	struct scsi_plug *p;
+
+	p = pool_get(&scsi_plug_pool, PR_NOWAIT);
+	if (p == NULL)
+		return (ENOMEM);
+
+	p->target = target;
+	p->lun = lun;
+
+	workq_queue_task(NULL, &p->wqt, 0, scsi_plug_probe, sc, p);
+
+	return (0);
+}
+
+int
+scsi_req_detach(struct scsibus_softc *sc, int target, int lun, int how)
+{
+	struct scsi_plug *p;
+
+	p = pool_get(&scsi_plug_pool, PR_NOWAIT);
+	if (p == NULL)
+		return (ENOMEM);
+
+	p->target = target;
+	p->lun = lun;
+	p->how = how;
+
+	workq_queue_task(NULL, &p->wqt, 0, scsi_plug_detach, sc, p);
+
+	return (0);
+}
+
+void
+scsi_plug_probe(void *xsc, void *xp)
+{
+	struct scsibus_softc *sc = xsc;
+	struct scsi_plug *p = xp;
+
+	if (p->lun == -1)
+		scsi_probe_target(sc, p->target);
+	else
+		scsi_probe_lun(sc, p->target, p->lun);
+
+	pool_put(&scsi_plug_pool, p);
+}
+
+void
+scsi_plug_detach(void *xsc, void *xp)
+{
+	struct scsibus_softc *sc = xsc;
+	struct scsi_plug *p = xp;
+
+	if (p->lun == -1)
+		scsi_detach_target(sc, p->target, p->how);
+	else
+		scsi_detach_lun(sc, p->target, p->lun, p->how);
+
+	pool_put(&scsi_plug_pool, p);
 }
 
 void
@@ -105,42 +182,37 @@ scsi_deinit()
  */
 
 struct scsi_xfer *
-scsi_get_xs(struct scsi_link *sc_link, int flags)
+scsi_xs_get(struct scsi_link *link, int flags)
 {
-	struct scsi_xfer		*xs;
-	int				s;
+	struct scsi_xfer *xs;
 
-	SC_DEBUG(sc_link, SDEV_DB3, ("scsi_get_xs\n"));
-
-	s = splbio();
-	while (sc_link->openings == 0) {
-		SC_DEBUG(sc_link, SDEV_DB3, ("sleeping\n"));
-		if ((flags & SCSI_NOSLEEP) != 0) {
-			splx(s);
+	mtx_enter(&link->mtx);
+	while (link->openings == 0) {
+		if (ISSET(flags, SCSI_NOSLEEP)) {
+			mtx_leave(&link->mtx);
 			return (NULL);
 		}
-		sc_link->flags |= SDEV_WAITING;
-		if (tsleep(sc_link, PRIBIO|PCATCH, "getxs", 0)) {
-			/* Bail out on getting a signal. */
-			sc_link->flags &= ~SDEV_WAITING;
-			splx(s);
-			return (NULL);
-		}
+
+		atomic_setbits_int(&link->state, SDEV_S_WAITING);
+		msleep(link, &link->mtx, PRIBIO, "getxs", 0);
 	}
-	SC_DEBUG(sc_link, SDEV_DB3, ("calling pool_get\n"));
-	xs = pool_get(&scsi_xfer_pool,
-	    ((flags & SCSI_NOSLEEP) != 0 ? PR_NOWAIT : PR_WAITOK));
-	if (xs != NULL) {
-		bzero(xs, sizeof(*xs));
-		sc_link->openings--;
-		xs->flags = flags;
+	link->openings--;
+	mtx_leave(&link->mtx);
+
+	/* pool is shared, link mtx is not */
+	xs = pool_get(&scsi_xfer_pool, PR_ZERO |
+	    (ISSET(flags, SCSI_NOSLEEP) ? PR_NOWAIT : PR_WAITOK));
+	if (xs == NULL) {
+		mtx_enter(&link->mtx);
+		link->openings++;
+		mtx_leave(&link->mtx);
 	} else {
-		sc_print_addr(sc_link);
-		printf("cannot allocate scsi xs\n");
+		xs->flags = flags;
+		xs->sc_link = link;
+		xs->retries = SCSI_RETRIES;
+		xs->timeout = 10000;
+		xs->cmd = &xs->cmdstore;
 	}
-	splx(s);
-
-	SC_DEBUG(sc_link, SDEV_DB3, ("returning\n"));
 
 	return (xs);
 }
@@ -151,75 +223,26 @@ scsi_get_xs(struct scsi_link *sc_link, int flags)
  * If another process is waiting for an xs, do a wakeup, let it proceed
  */
 void
-scsi_free_xs(struct scsi_xfer *xs, int start)
+scsi_xs_put(struct scsi_xfer *xs)
 {
-	struct scsi_link *sc_link = xs->sc_link;
-
-	splassert(IPL_BIO);
-
-	SC_DEBUG(sc_link, SDEV_DB3, ("scsi_free_xs\n"));
+	struct scsi_link *link = xs->sc_link;
+	int start = 1;
 
 	pool_put(&scsi_xfer_pool, xs);
-	sc_link->openings++;
+
+	mtx_enter(&link->mtx);
+	link->openings++;
 
 	/* If someone is waiting for scsi_xfer, wake them up. */
-	if ((sc_link->flags & SDEV_WAITING) != 0) {
-		sc_link->flags &= ~SDEV_WAITING;
-		wakeup(sc_link);
-	} else if (start && sc_link->device->start) {
-		SC_DEBUG(sc_link, SDEV_DB2,
-		    ("calling private start()\n"));
-		(*(sc_link->device->start)) (sc_link->device_softc);
+	if (ISSET(link->state, SDEV_S_WAITING)) {
+		atomic_clearbits_int(&link->state, SDEV_S_WAITING);
+		wakeup(link);
+		start = 0;
 	}
-}
+	mtx_leave(&link->mtx);
 
-/*
- * Make a scsi_xfer, and return a pointer to it.
- */
-static __inline struct scsi_xfer *
-scsi_make_xs(struct scsi_link *sc_link, struct scsi_generic *scsi_cmd,
-    int cmdlen, u_char *data_addr, int datalen, int retries, int timeout,
-    struct buf *bp, int flags)
-{
-	struct scsi_xfer		*xs;
-
-	if ((xs = scsi_get_xs(sc_link, flags)) == NULL)
-		return (NULL);
-
-	/*
-	 * Fill out the scsi_xfer structure.  We don't know whose context
-	 * the cmd is in, so copy it.
-	 */
-	xs->sc_link = sc_link;
-	bcopy(scsi_cmd, &xs->cmdstore, cmdlen);
-	xs->cmd = &xs->cmdstore;
-	xs->cmdlen = cmdlen;
-	xs->data = data_addr;
-	xs->datalen = datalen;
-	xs->retries = retries;
-	xs->timeout = timeout;
-	xs->bp = bp;
-
-	/*
-	 * Set the LUN in the CDB if it fits in the three bits available. This
-	 * may only be needed if we have an older device.  However, we also set
-	 * it for more modern SCSI devices "just in case".  The old code
-	 * assumed everything newer than SCSI-2 would not need it, but why risk
-	 * it?  This was the old conditional:
-	 *
-	 * if ((SCSISPC(sc_link->inqdata.version) <= 2))
-	 */
-	xs->cmd->bytes[0] &= ~SCSI_CMD_LUN_MASK;
-	if (sc_link->lun < 8)
-		xs->cmd->bytes[0] |= ((sc_link->lun << SCSI_CMD_LUN_SHIFT) &
-		    SCSI_CMD_LUN_MASK);
-
-#ifdef	SCSIDEBUG
-	if ((sc_link->flags & SDEV_DB1) != 0)
-		show_scsi_xs(xs);
-#endif /* SCSIDEBUG */
-
-	return (xs);
+	if (start && link->device->start)
+		link->device->start(link->device_softc);
 }
 
 /*
@@ -310,32 +333,43 @@ scsi_test_unit_ready(struct scsi_link *sc_link, int retries, int flags)
  * Use the scsi_cmd routine in the switch table.
  */
 int
-scsi_inquire(struct scsi_link *sc_link, struct scsi_inquiry_data *inqbuf,
+scsi_inquire(struct scsi_link *link, struct scsi_inquiry_data *inqbuf,
     int flags)
 {
-	struct scsi_inquiry			scsi_cmd;
-	int					length;
-	int					error;
+	struct scsi_xfer *xs;
+	struct scsi_inquiry *cdb;
+	size_t length;
+	int error;
 
-	bzero(&scsi_cmd, sizeof(scsi_cmd));
-	scsi_cmd.opcode = INQUIRY;
-
-	bzero(inqbuf, sizeof(*inqbuf));
-
-	memset(&inqbuf->vendor, ' ', sizeof inqbuf->vendor);
-	memset(&inqbuf->product, ' ', sizeof inqbuf->product);
-	memset(&inqbuf->revision, ' ', sizeof inqbuf->revision);
-	memset(&inqbuf->extra, ' ', sizeof inqbuf->extra);
+	xs = scsi_xs_get(link, flags);
+	if (xs == NULL)
+		return (EBUSY);
 
 	/*
 	 * Ask for only the basic 36 bytes of SCSI2 inquiry information. This
 	 * avoids problems with devices that choke trying to supply more.
 	 */
 	length = SID_INQUIRY_HDR + SID_SCSI2_ALEN;
-	_lto2b(length, scsi_cmd.length);
-	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
-	    sizeof(scsi_cmd), (u_char *)inqbuf, length, 2, 10000, NULL,
-	    SCSI_DATA_IN | flags);
+
+	cdb = (struct scsi_inquiry *)xs->cmd;
+	cdb->opcode = INQUIRY;
+	_lto2b(length, cdb->length);
+
+	xs->cmdlen = sizeof(*cdb);
+
+	xs->flags |= SCSI_DATA_IN;
+	xs->data = (void *)inqbuf;
+	xs->datalen = length;
+
+	bzero(inqbuf, sizeof(*inqbuf));
+	memset(&inqbuf->vendor, ' ', sizeof inqbuf->vendor);
+	memset(&inqbuf->product, ' ', sizeof inqbuf->product);
+	memset(&inqbuf->revision, ' ', sizeof inqbuf->revision);
+	memset(&inqbuf->extra, ' ', sizeof inqbuf->extra);
+
+	error = scsi_xs_sync(xs);
+
+	scsi_xs_put(xs);
 
 	return (error);
 }
@@ -681,179 +715,112 @@ scsi_report_luns(struct scsi_link *sc_link, int selectreport,
 	return (error);
 }
 
-/*
- * This routine is called by the scsi interrupt when the transfer is complete.
- */
 void
-scsi_done(struct scsi_xfer *xs)
+scsi_xs_exec(struct scsi_xfer *xs)
 {
-	struct scsi_link			*sc_link = xs->sc_link;
-	struct buf				*bp;
-	int					error;
+	int s;
 
-	splassert(IPL_BIO);
-
-	SC_DEBUG(sc_link, SDEV_DB2, ("scsi_done\n"));
-
-	/*
- 	 * If it's a user level request, bypass all usual completion processing,
- 	 * let the user work it out.. We take reponsibility for freeing the
- 	 * xs when the user returns (and restarting the device's queue).
- 	 */
-	if ((xs->flags & SCSI_USER) != 0) {
-		SC_DEBUG(sc_link, SDEV_DB3, ("calling user done()\n"));
-		scsi_user_done(xs); /* to take a copy of the sense etc. */
-		SC_DEBUG(sc_link, SDEV_DB3, ("returned from user done()\n"));
-
-		scsi_free_xs(xs, 1); /* restarts queue too */
-		SC_DEBUG(sc_link, SDEV_DB3, ("returning to adapter\n"));
-		return;
-	}
-
-	if (!((xs->flags & (SCSI_NOSLEEP | SCSI_POLL)) == SCSI_NOSLEEP)) {
-		/*
-		 * if it's a normal upper level request, then ask
-		 * the upper level code to handle error checking
-		 * rather than doing it here at interrupt time
-		 */
-		wakeup(xs);
-		return;
-	}
-
-	/*
-	 * Go and handle errors now.
-	 * If it returns ERESTART then we should RETRY
-	 */
-retry:
-	error = sc_err1(xs);
-	if (error == ERESTART) {
-		switch ((*(sc_link->adapter->scsi_cmd)) (xs)) {
-		case SUCCESSFULLY_QUEUED:
-			return;
-
-		case TRY_AGAIN_LATER:
-			xs->error = XS_BUSY;
-			/* FALLTHROUGH */
-		case COMPLETE:
-			goto retry;
-		}
-	}
-
-	bp = xs->bp;
-	if (bp != NULL) {
-		if (error) {
-			bp->b_error = error;
-			bp->b_flags |= B_ERROR;
-			bp->b_resid = bp->b_bcount;
-		} else {
-			bp->b_error = 0;
-			bp->b_resid = xs->resid;
-		}
-	}
-
-	if (sc_link->device->done) {
-		/*
-		 * Tell the device the operation is actually complete.
-		 * No more will happen with this xfer.  This for
-		 * notification of the upper-level driver only; they
-		 * won't be returning any meaningful information to us.
-		 */
-		(*sc_link->device->done)(xs);
-	}
-	scsi_free_xs(xs, 1);
-	if (bp != NULL)
-		biodone(bp);
-}
-
-int
-scsi_execute_xs(struct scsi_xfer *xs)
-{
-	int					error, flags, rslt, s;
-
-	xs->flags &= ~ITSDONE;
 	xs->error = XS_NOERROR;
 	xs->resid = xs->datalen;
 	xs->status = 0;
 
-	/*
-	 * Do the transfer. If we are polling we will return:
-	 * COMPLETE,  Was poll, and scsi_done has been called
-	 * TRY_AGAIN_LATER, Adapter short resources, try again
-	 *
-	 * if under full steam (interrupts) it will return:
-	 * SUCCESSFULLY_QUEUED, will do a wakeup when complete
-	 * TRY_AGAIN_LATER, (as for polling)
-	 * After the wakeup, we must still check if it succeeded
-	 *
-	 * If we have a SCSI_NOSLEEP (typically because we have a buf)
-	 * we just return.  All the error processing and the buffer
-	 * code both expect us to return straight to them, so as soon
-	 * as the command is queued, return.
-	 */
-
-	/*
-	 * We save the flags here because the xs structure may already
-	 * be freed by scsi_done by the time adapter->scsi_cmd returns.
-	 *
-	 * scsi_done is responsible for freeing the xs if either
-	 * (flags & (SCSI_NOSLEEP | SCSI_POLL)) == SCSI_NOSLEEP
-	 * -or-
-	 * (flags & SCSI_USER) != 0
-	 *
-	 * Note: SCSI_USER must always be called with SCSI_NOSLEEP
-	 * and never with SCSI_POLL, so the second expression should be
-	 * is equivalent to the first.
-	 */
-
-	flags = xs->flags;
-#ifdef DIAGNOSTIC
-	if ((flags & (SCSI_USER | SCSI_NOSLEEP)) == SCSI_USER)
-		panic("scsi_execute_xs: USER without NOSLEEP");
-	if ((flags & (SCSI_USER | SCSI_POLL)) == (SCSI_USER | SCSI_POLL))
-		panic("scsi_execute_xs: USER with POLL");
-#endif
-retry:
-	rslt = (*(xs->sc_link->adapter->scsi_cmd))(xs);
-	switch (rslt) {
-	case SUCCESSFULLY_QUEUED:
-		if ((flags & (SCSI_NOSLEEP | SCSI_POLL)) == SCSI_NOSLEEP)
-			return (EJUSTRETURN);
-#ifdef DIAGNOSTIC
-		if (flags & SCSI_NOSLEEP)
-			panic("scsi_execute_xs: NOSLEEP and POLL");
-#endif
-		s = splbio();
-		/* Since the xs is active we can't bail out on a signal. */
-		while ((xs->flags & ITSDONE) == 0)
-			tsleep(xs, PRIBIO + 1, "scsicmd", 0);
-		splx(s);
-		/* FALLTHROUGH */
-	case COMPLETE:		/* Polling command completed ok */
-		if ((flags & (SCSI_NOSLEEP | SCSI_POLL)) == SCSI_NOSLEEP)
-			return (EJUSTRETURN);
-		if (xs->bp)
-			return (EJUSTRETURN);
-	doit:
-		SC_DEBUG(xs->sc_link, SDEV_DB3, ("back in cmd()\n"));
-		if ((error = sc_err1(xs)) != ERESTART)
-			return (error);
-		goto retry;
-
-	case TRY_AGAIN_LATER:	/* adapter resource shortage */
-		xs->error = XS_BUSY;
-		goto doit;
-
-	case NO_CCB:
-		return (EAGAIN);
-
-	default:
-		panic("scsi_execute_xs: invalid return code (%#x)", rslt);
+#ifdef SCSIDEBUG
+	if (xs->sc_link->flags & SDEV_DB1) {
+		scsi_xs_show(xs);
+		if (xs->datalen && (xs->flags & SCSI_DATA_OUT))
+			scsi_show_mem(xs->data, min(64, xs->datalen));
 	}
+#endif /* SCSIDEBUG */
+
+	/*
+	 * scsi_xs_exec() guarantees that scsi_done() will be called on the xs
+	 * it was given. The adapter is responsible for calling scsi_done()
+	 * except if its scsi_cmd() routine returns NO_CCB.
+	 * In those cases we must call scsi_done() for it.
+	 */
+
+	if (xs->sc_link->adapter->scsi_cmd(xs) == NO_CCB) {
+		/*
+		 * Give the xs back to the device driver to retry on its own.
+		 */
+
+		xs->error = XS_NO_CCB;
+		s = splbio();
+		scsi_done(xs);
+		splx(s);
+	}
+}
+
+/*
+ * This routine is called by the adapter when its xs handling is done.
+ */
+void
+scsi_done(struct scsi_xfer *xs)
+{
+	splassert(IPL_BIO);
+
+#ifdef SCSIDEBUG
+	if (xs->sc_link->flags & SDEV_DB1) {
+		if (xs->datalen && (xs->flags & SCSI_DATA_IN))
+			scsi_show_mem(xs->data, min(64, xs->datalen));
+	}
+#endif /* SCSIDEBUG */
+
+	SET(xs->flags, ITSDONE);
+	xs->done(xs);
+}
+
+int
+scsi_xs_sync(struct scsi_xfer *xs)
+{
+	struct mutex cookie = MUTEX_INITIALIZER(IPL_BIO);
+	int error;
 
 #ifdef DIAGNOSTIC
-	panic("scsi_execute_xs: impossible");
+	if (xs->cookie != NULL)
+		panic("xs->cookie != NULL in scsi_xs_sync\n");
+	if (xs->done != NULL)
+		panic("xs->done != NULL in scsi_xs_sync\n");
 #endif
-	return (EINVAL);
+
+	/*
+	 * If we cant sleep while waiting for completion, get the adapter to
+	 * complete it for us.
+	 */
+	if (ISSET(xs->flags, SCSI_NOSLEEP))
+		SET(xs->flags, SCSI_POLL);
+
+	xs->done = scsi_xs_sync_done;
+
+	do {
+		xs->cookie = &cookie;
+
+		scsi_xs_exec(xs);
+
+		mtx_enter(&cookie);
+		while (xs->cookie != NULL)
+			msleep(xs, &cookie, PRIBIO, "syncxs", 0);
+		mtx_leave(&cookie);
+
+		error = scsi_xs_error(xs);
+	} while (error == ERESTART);
+
+	return (error);
+}
+
+void
+scsi_xs_sync_done(struct scsi_xfer *xs)
+{
+	struct mutex *cookie = xs->cookie;
+
+	if (cookie == NULL)
+		panic("scsi_done called twice on xs(%p)", xs);
+
+	mtx_enter(cookie);
+	xs->cookie = NULL;
+	if (!ISSET(xs->flags, SCSI_NOSLEEP))
+		wakeup_one(xs);
+	mtx_leave(cookie);
 }
 
 /*
@@ -863,123 +830,115 @@ retry:
  * to associate with the transfer, we need that too.
  */
 int
-scsi_scsi_cmd(struct scsi_link *sc_link, struct scsi_generic *scsi_cmd,
+scsi_scsi_cmd(struct scsi_link *link, struct scsi_generic *scsi_cmd,
     int cmdlen, u_char *data_addr, int datalen, int retries, int timeout,
     struct buf *bp, int flags)
 {
-	struct scsi_xfer			*xs;
-	int					error;
-	int					s;
-
-	SC_DEBUG(sc_link, SDEV_DB2, ("scsi_cmd\n"));
+	struct scsi_xfer *xs;
+	int error;
+	int s;
 
 #ifdef DIAGNOSTIC
 	if (bp != NULL && (flags & SCSI_NOSLEEP) == 0)
 		panic("scsi_scsi_cmd: buffer without nosleep");
 #endif
 
-	if ((xs = scsi_make_xs(sc_link, scsi_cmd, cmdlen, data_addr, datalen,
-	    retries, timeout, bp, flags)) == NULL)
+	xs = scsi_xs_get(link, flags);
+	if (xs == NULL)
 		return (ENOMEM);
 
-#ifdef	SCSIDEBUG
-	if ((sc_link->flags & SDEV_DB1) != 0)
-		if (xs->datalen && (xs->flags & SCSI_DATA_OUT))
-			show_mem(xs->data, min(64, xs->datalen));
-#endif	/* SCSIDEBUG */
+	memcpy(xs->cmd, scsi_cmd, cmdlen);
+	xs->cmdlen = cmdlen;
+	xs->data = data_addr;
+	xs->datalen = datalen;
+	xs->retries = retries;
+	xs->timeout = timeout;
 
-	error = scsi_execute_xs(xs);
+	error = scsi_xs_sync(xs);
 
-#ifdef	SCSIDEBUG
-	if ((sc_link->flags & SDEV_DB1) != 0)
-		if (xs->datalen && (xs->flags & SCSI_DATA_IN))
-			show_mem(xs->data, min(64, xs->datalen));
-#endif	/* SCSIDEBUG */
+	if (error != EAGAIN) {
+		if (bp != NULL) {
+			if (error) {
+				bp->b_error = error;
+				bp->b_flags |= B_ERROR;
+				bp->b_resid = bp->b_bcount;
+			} else {  
+				bp->b_error = 0;
+				bp->b_resid = xs->resid;
+			}
+	
+			s = splbio();
+			biodone(bp);
+			splx(s);
+		}
 
-	if (error == EJUSTRETURN)
-		return (0);
+		if (link->device->done) {
+			/*
+			 * Tell the device the operation is actually complete.
+			 * No more will happen with this xfer.  This for
+			 * notification of the upper-level driver only; they
+			 * won't be returning any meaningful information to us.
+			 */
+			link->device->done(xs);
+		}
+	}
 
-	s = splbio();
-
-	if (error == EAGAIN)
-		scsi_free_xs(xs, 0); /* Don't restart queue. */
-	else
-		scsi_free_xs(xs, 1);
-
-	splx(s);
+	scsi_xs_put(xs);
 
 	return (error);
 }
 
 int
-sc_err1(struct scsi_xfer *xs)
+scsi_xs_error(struct scsi_xfer *xs)
 {
-	int					error;
+	int error = EIO;
 
-	SC_DEBUG(xs->sc_link, SDEV_DB3, ("sc_err1,err = 0x%x\n", xs->error));
+	SC_DEBUG(xs->sc_link, SDEV_DB3, ("scsi_xs_error,err = 0x%x\n",
+	    xs->error));
 
-	/*
-	 * If it has a buf, we might be working with
-	 * a request from the buffer cache or some other
-	 * piece of code that requires us to process
-	 * errors at interrupt time. We have probably
-	 * been called by scsi_done()
-	 */
+	if (ISSET(xs->sc_link->state, SDEV_S_DYING))
+		return (ENXIO);
+
 	switch (xs->error) {
 	case XS_NOERROR:	/* nearly always hit this one */
 		error = 0;
 		break;
 
+	case XS_NO_CCB:
+		error = EAGAIN;
+		break;
+
 	case XS_SENSE:
 	case XS_SHORTSENSE:
-		if ((error = scsi_interpret_sense(xs)) == ERESTART)
-			goto retry;
+		error = scsi_interpret_sense(xs);
 		SC_DEBUG(xs->sc_link, SDEV_DB3,
 		    ("scsi_interpret_sense returned %#x\n", error));
 		break;
 
 	case XS_BUSY:
-		if (xs->retries) {
-			if ((error = scsi_delay(xs, 1)) == EIO)
-				goto lose;
-		}
-		/* FALLTHROUGH */
+		error = scsi_delay(xs, 1);
+		break;
+
 	case XS_TIMEOUT:
-	retry:
-		if (xs->retries--) {
-			xs->error = XS_NOERROR;
-			xs->flags &= ~ITSDONE;
-			return ERESTART;
-		}
-		/* FALLTHROUGH */
-	case XS_DRIVER_STUFFUP:
-	lose:
-		error = EIO;
-		break;
-
-	case XS_SELTIMEOUT:
-		/* XXX Disable device? */
-		error = EIO;
-		break;
-
 	case XS_RESET:
-		if (xs->retries) {
-			SC_DEBUG(xs->sc_link, SDEV_DB3,
-			    ("restarting command destroyed by reset\n"));
-			goto retry;
-		}
-		error = EIO;
+		error = ERESTART;
+		break;
+
+	case XS_DRIVER_STUFFUP:
+	case XS_SELTIMEOUT:
 		break;
 
 	default:
 		sc_print_addr(xs->sc_link);
 		printf("unknown error category (0x%x) from scsi driver\n",
 		    xs->error);
-		error = EIO;
 		break;
 	}
 
-	return (error);
+	if (error == ERESTART && xs->retries-- < 1)
+		return (EIO);
+	else
+		return (error);
 }
 
 int
@@ -1030,10 +989,12 @@ scsi_interpret_sense(struct scsi_xfer *xs)
 	    sense->flags & SSD_EOM ? 1 : 0,
 	    sense->flags & SSD_FILEMARK ? 1 : 0,
 	    sense->extra_len));
-#ifdef	SCSIDEBUG
-	if ((sc_link->flags & SDEV_DB1) != 0)
-		show_mem((u_char *)&xs->sense, sizeof xs->sense);
-#endif	/* SCSIDEBUG */
+
+#ifdef SCSIDEBUG
+	if (xs->sc_link->flags & SDEV_DB1)
+		scsi_show_mem((u_char *)&xs->sense, sizeof(xs->sense));
+	scsi_print_sense(xs);
+#endif /* SCSIDEBUG */
 
 	/*
 	 * If the device has its own error handler, call it first.
@@ -1172,8 +1133,11 @@ scsi_interpret_sense(struct scsi_xfer *xs)
 		break;
 	}
 
+#ifndef SCSIDEBUG
+	/* SCSIDEBUG would mean it has already been printed. */
 	if (skey && (xs->flags & SCSI_SILENT) == 0)
 		scsi_print_sense(xs);
+#endif /* SCSIDEBUG */
 
 	return (error);
 }
@@ -1927,33 +1891,86 @@ scsi_decode_sense(struct scsi_sense_data *sense, int flag)
 	return (rqsbuf);
 }
 
+void
+scsi_buf_enqueue(struct buf *head, struct buf *bp, struct mutex *mtx)
+{
+	struct buf *dp;
+
+	mtx_enter(mtx);
+	dp = head;
+	bp->b_actf = NULL;
+	bp->b_actb = dp->b_actb;
+	*dp->b_actb = bp;
+	dp->b_actb = &bp->b_actf;
+	mtx_leave(mtx);
+}
+
+struct buf *
+scsi_buf_dequeue(struct buf *head, struct mutex *mtx)
+{
+	struct buf *bp;
+
+	mtx_enter(mtx);
+	bp = head->b_actf;
+	if (bp != NULL)
+		head->b_actf = bp->b_actf;
+	if (head->b_actf == NULL)
+		head->b_actb = &head->b_actf;
+	mtx_leave(mtx);
+
+	return (bp);
+}
+
+void
+scsi_buf_requeue(struct buf *head, struct buf *bp, struct mutex *mtx)
+{
+	mtx_enter(mtx);
+	bp->b_actf = head->b_actf;
+	head->b_actf = bp;
+	if (bp->b_actf == NULL)
+		head->b_actb = &bp->b_actf;
+	mtx_leave(mtx);
+}
+
+void
+scsi_buf_killqueue(struct buf *head, struct mutex *mtx)
+{
+	struct buf *bp;
+	int s;
+
+	while ((bp = scsi_buf_dequeue(head, mtx)) != NULL) {
+		bp->b_error = ENXIO;
+		bp->b_flags |= B_ERROR;
+		s = splbio();
+		biodone(bp);
+		splx(s);
+	}
+}
+
 #ifdef SCSIDEBUG
 /*
  * Given a scsi_xfer, dump the request, in all its glory
  */
 void
-show_scsi_xs(struct scsi_xfer *xs)
+scsi_xs_show(struct scsi_xfer *xs)
 {
-	u_char *b = (u_char *) xs->cmd;
+	u_char *b = (u_char *)xs->cmd;
 	int i = 0;
 
 	sc_print_addr(xs->sc_link);
-
-	printf("xs(%p): ", xs);
+	printf("xs  (%p): ", xs);
 
 	printf("flg(0x%x)", xs->flags);
 	printf("sc_link(%p)", xs->sc_link);
 	printf("retr(0x%x)", xs->retries);
 	printf("timo(0x%x)", xs->timeout);
-	printf("cmd(%p)", xs->cmd);
-	printf("len(0x%x)", xs->cmdlen);
 	printf("data(%p)", xs->data);
-	printf("len(0x%x)", xs->datalen);
 	printf("res(0x%x)", xs->resid);
 	printf("err(0x%x)", xs->error);
 	printf("bp(%p)\n", xs->bp);
 
-	printf("command: ");
+	sc_print_addr(xs->sc_link);
+	printf("cmd (%p): ", xs->cmd);
 
 	if ((xs->flags & SCSI_RESET) == 0) {
 		while (i < xs->cmdlen) {
@@ -1967,9 +1984,9 @@ show_scsi_xs(struct scsi_xfer *xs)
 }
 
 void
-show_mem(u_char *address, int num)
+scsi_show_mem(u_char *address, int num)
 {
-	int					x;
+	int x;
 
 	printf("------------------------------");
 	for (x = 0; x < num; x++) {
@@ -1980,3 +1997,4 @@ show_mem(u_char *address, int num)
 	printf("\n------------------------------\n");
 }
 #endif /* SCSIDEBUG */
+

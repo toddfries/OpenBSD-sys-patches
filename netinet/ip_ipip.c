@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipip.c,v 1.43 2009/06/05 00:05:22 claudio Exp $ */
+/*	$OpenBSD: ip_ipip.c,v 1.45 2010/01/28 23:23:54 chl Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -148,12 +148,12 @@ ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp)
 	struct ifaddr *ifa;
 	struct ifqueue *ifq = NULL;
 	struct ip *ipo;
+	u_int rdomain;
 #ifdef INET6
 	struct sockaddr_in6 *sin6;
 	struct ip6_hdr *ip6 = NULL;
 	u_int8_t itos;
 #endif
-	u_int8_t nxt;
 	int isr;
 	u_int8_t otos;
 	u_int8_t v;
@@ -259,7 +259,6 @@ ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp)
 #ifdef INET
     	case 4:
                 ipo = mtod(m, struct ip *);
-                nxt = ipo->ip_p;
 		if (!ip_ecn_egress(ECN_ALLOWED, &otos, &ipo->ip_tos)) {
 			m_freem(m);
 			return;
@@ -269,7 +268,6 @@ ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp)
 #ifdef INET6
     	case 6:
                 ip6 = (struct ip6_hdr *) ipo;
-                nxt = ip6->ip6_nxt;
 		itos = (ntohl(ip6->ip6_flow) >> 20) & 0xff;
 		if (!ip_ecn_egress(ECN_ALLOWED, &otos, &itos)) {
 			m_freem(m);
@@ -287,8 +285,9 @@ ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp)
 	if ((m->m_pkthdr.rcvif == NULL ||
 	    !(m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK)) &&
 	    ipip_allow != 2) {
+		rdomain = rtable_l2(m->m_pkthdr.rdomain);
 		TAILQ_FOREACH(ifp, &ifnet, if_list) {
-			if (ifp->if_rdomain != m->m_pkthdr.rdomain)
+			if (ifp->if_rdomain != rdomain)
 				continue;
 			TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 #ifdef INET

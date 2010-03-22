@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.1 2009/06/13 21:48:03 miod Exp $ */
+/*	$OpenBSD: mainbus.c,v 1.8 2010/01/09 20:33:16 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -61,19 +61,27 @@ mbmatch(struct device *parent, void *cfdata, void *aux)
 void
 mbattach(struct device *parent, struct device *self, void *aux)
 {
-	struct confargs nca;
+	struct cpu_attach_args caa;
+	extern char *hw_prod;
 
+	if (hw_prod != NULL)
+		printf(": %s", hw_prod);
 	printf("\n");
 
 	/*
-	 * On IP27 and IP35 system, delegate everything to the IP-specific
-	 * code.
+	 * On multiprocessor capable systems, delegate everything to the
+	 * IP-specific code.
 	 */
 	switch (sys_config.system_type) {
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
-	case SGI_O200:
-	case SGI_O300:
+#ifdef TGT_ORIGIN
+	case SGI_IP27:
+	case SGI_IP35:
 		ip27_autoconf(self);
+		return;
+#endif
+#ifdef TGT_OCTANE
+	case SGI_OCTANE:
+		ip30_autoconf(self);
 		return;
 #endif
 	default:
@@ -86,25 +94,21 @@ mbattach(struct device *parent, struct device *self, void *aux)
 	 * discovered.
 	 */
 
-	bzero(&nca, sizeof nca);
-	nca.ca_name = "cpu";
-	config_found(self, &nca, mbprint);
-	nca.ca_name = "clock";
-	config_found(self, &nca, mbprint);
+	bzero(&caa, sizeof caa);
+	caa.caa_maa.maa_name = "cpu";
+	caa.caa_hw = &bootcpu_hwinfo;
+	config_found(self, &caa, mbprint);
+
+	caa.caa_maa.maa_name = "clock";
+	config_found(self, &caa.caa_maa, mbprint);
 
 	switch (sys_config.system_type) {
 #ifdef TGT_O2
 	case SGI_O2:
-		nca.ca_name = "macebus";
-		config_found(self, &nca, mbprint);
-		nca.ca_name = "gbe";
-		config_found(self, &nca, mbprint);
-		break;
-#endif
-#ifdef TGT_OCTANE
-	case SGI_OCTANE:
-		nca.ca_name = "xbow";
-		config_found(self, &nca, mbprint);
+		caa.caa_maa.maa_name = "macebus";
+		config_found(self, &caa.caa_maa, mbprint);
+		caa.caa_maa.maa_name = "gbe";
+		config_found(self, &caa.caa_maa, mbprint);
 		break;
 #endif
 	default:

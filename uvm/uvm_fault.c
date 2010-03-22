@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_fault.c,v 1.55 2009/06/06 17:46:44 art Exp $	*/
+/*	$OpenBSD: uvm_fault.c,v 1.58 2009/07/22 21:05:37 oga Exp $	*/
 /*	$NetBSD: uvm_fault.c,v 1.51 2000/08/06 00:22:53 thorpej Exp $	*/
 
 /*
@@ -175,7 +175,7 @@ static struct uvm_advice uvmadvice[] = {
  * private prototypes
  */
 
-void uvmfault_amapcopy(struct uvm_faultinfo *);
+static void uvmfault_amapcopy(struct uvm_faultinfo *);
 static __inline void uvmfault_anonflush(struct vm_anon **, int);
 void	uvmfault_unlockmaps(struct uvm_faultinfo *, boolean_t);
 
@@ -203,6 +203,11 @@ uvmfault_anonflush(struct vm_anon **anons, int n)
 		if (pg && (pg->pg_flags & PG_BUSY) == 0 && pg->loan_count == 0) {
 			uvm_lock_pageq();
 			if (pg->wire_count == 0) {
+#ifdef UBC
+				pmap_clear_reference(pg);
+#else
+				pmap_page_protect(pg, VM_PROT_NONE);
+#endif
 				uvm_pagedeactivate(pg);
 			}
 			uvm_unlock_pageq();
@@ -223,7 +228,7 @@ uvmfault_anonflush(struct vm_anon **anons, int n)
  * => if we are out of RAM we sleep (waiting for more)
  */
 
-void
+static void
 uvmfault_amapcopy(struct uvm_faultinfo *ufi)
 {
 

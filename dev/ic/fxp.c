@@ -1,4 +1,4 @@
-/*	$OpenBSD: fxp.c,v 1.96 2009/06/06 02:49:39 naddy Exp $	*/
+/*	$OpenBSD: fxp.c,v 1.100 2009/10/15 17:54:54 deraadt Exp $	*/
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -149,7 +149,7 @@ void fxp_start(struct ifnet *);
 int fxp_ioctl(struct ifnet *, u_long, caddr_t);
 void fxp_init(void *);
 void fxp_load_ucode(struct fxp_softc *);
-void fxp_stop(struct fxp_softc *, int);
+void fxp_stop(struct fxp_softc *, int, int);
 void fxp_watchdog(struct ifnet *);
 int fxp_add_rfabuf(struct fxp_softc *, struct mbuf *);
 int fxp_mdi_read(struct device *, int, int);
@@ -284,7 +284,6 @@ fxp_write_eeprom(struct fxp_softc *sc, u_short *data, int offset, int words)
  * Operating system-specific autoconfiguration glue
  *************************************************************/
 
-void	fxp_shutdown(void *);
 void	fxp_power(int, void *);
 
 struct cfdriver fxp_cd = {
@@ -292,21 +291,10 @@ struct cfdriver fxp_cd = {
 };
 
 /*
- * Device shutdown routine. Called at system shutdown after sync. The
- * main purpose of this routine is to shut off receiver DMA so that
- * kernel memory doesn't get clobbered during warmboot.
- */
-void
-fxp_shutdown(void *sc)
-{
-	fxp_stop((struct fxp_softc *) sc, 0);
-}
-
-/*
  * Power handler routine. Called when the system is transitioning
- * into/out of power save modes.  As with fxp_shutdown, the main
- * purpose of this routine is to shut off receiver DMA so it doesn't
- * clobber kernel memory at the wrong time.
+ * into/out of power save modes.  The main purpose of this routine
+ * is to shut off receiver DMA so it doesn't clobber kernel memory
+ * at the wrong time.
  */
 void
 fxp_power(int why, void *arg)
@@ -317,7 +305,7 @@ fxp_power(int why, void *arg)
 
 	s = splnet();
 	if (why != PWR_RESUME)
-		fxp_stop(sc, 0);
+		fxp_stop(sc, 0, 0);
 	else {
 		ifp = &sc->sc_arpcom.ac_if;
 		if (ifp->if_flags & IFF_UP)
@@ -510,14 +498,9 @@ fxp_attach(struct fxp_softc *sc, const char *intrstr)
 	ether_ifattach(ifp);
 
 	/*
-	 * Add shutdown hook so that DMA is disabled prior to reboot. Not
+	 * Add power hook, so that DMA is disabled prior to reboot. Not
 	 * doing so could allow DMA to corrupt kernel memory during the
 	 * reboot before the driver initializes.
-	 */
-	sc->sc_sdhook = shutdownhook_establish(fxp_shutdown, sc);
-
-	/*
-	 * Add suspend hook, for similiar reasons..
 	 */
 	sc->sc_powerhook = powerhook_establish(fxp_power, sc);
 
@@ -1052,13 +1035,13 @@ fxp_stats_update(void *arg)
 	timeout_add_sec(&sc->stats_update_to, 1);
 }
 
-int
+void
 fxp_detach(struct fxp_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 
-	/* Unhook our tick handler. */
-	timeout_del(&sc->stats_update_to);
+	/* Get rid of our timeouts and mbufs */
+	fxp_stop(sc, 1, 1);
 
 	/* Detach any PHYs we might have. */
 	if (LIST_FIRST(&sc->sc_mii.mii_phys) != NULL)
@@ -1070,12 +1053,8 @@ fxp_detach(struct fxp_softc *sc)
 	ether_ifdetach(ifp);
 	if_detach(ifp);
 
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
 	if (sc->sc_powerhook != NULL)
 		powerhook_disestablish(sc->sc_powerhook);
-
-	return (0);
 }
 
 /*
@@ -1083,29 +1062,33 @@ fxp_detach(struct fxp_softc *sc)
  * the interface.
  */
 void
-fxp_stop(struct fxp_softc *sc, int drain)
+fxp_stop(struct fxp_softc *sc, int drain, int softonly)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	int i;
 
 	/*
+	 * Cancel stats updater.
+	 */
+	timeout_del(&sc->stats_update_to);
+
+	/*
 	 * Turn down interface (done early to avoid bad interactions
-	 * between panics, shutdown hooks, and the watchdog timer)
+	 * between panics, and the watchdog timer)
 	 */
 	ifp->if_timer = 0;
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
-	/*
-	 * Cancel stats updater.
-	 */
-	timeout_del(&sc->stats_update_to);
-	mii_down(&sc->sc_mii);
+	if (!softonly)
+		mii_down(&sc->sc_mii);
 
 	/*
 	 * Issue software reset.
 	 */
-	CSR_WRITE_4(sc, FXP_CSR_PORT, FXP_PORT_SELECTIVE_RESET);
-	DELAY(10);
+	if (!softonly) {
+		CSR_WRITE_4(sc, FXP_CSR_PORT, FXP_PORT_SELECTIVE_RESET);
+		DELAY(10);
+	}
 
 	/*
 	 * Release any xmit buffers.
@@ -1192,7 +1175,7 @@ fxp_init(void *xsc)
 	/*
 	 * Cancel any pending I/O
 	 */
-	fxp_stop(sc, 0);
+	fxp_stop(sc, 0, 0);
 
 	/*
 	 * Initialize base of CBL and RFA memory. Loading with zero
@@ -1284,7 +1267,8 @@ fxp_init(void *xsc)
 	cbp->mc_all =		allm;
 #else
 	cbp->cb_command = htole16(FXP_CB_COMMAND_CONFIG | FXP_CB_COMMAND_EL);
-	if (allm)
+
+	if (allm && !prm)
 		cbp->mc_all |= 0x08;		/* accept all multicasts */
 	else
 		cbp->mc_all &= ~0x08;		/* reject all multicasts */
@@ -1678,7 +1662,7 @@ fxp_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 				fxp_init(sc);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
-				fxp_stop(sc, 1);
+				fxp_stop(sc, 1, 0);
 		}
 		break;
 
@@ -1718,44 +1702,39 @@ fxp_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 void
 fxp_mc_setup(struct fxp_softc *sc, int doit)
 {
-	struct fxp_cb_mcs *mcsp = &sc->sc_ctrl->u.mcs;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	struct arpcom *ac = &sc->sc_arpcom;
+	struct fxp_cb_mcs *mcsp = &sc->sc_ctrl->u.mcs;
 	struct ether_multistep step;
 	struct ether_multi *enm;
-	int i, nmcasts;
+	int i, nmcasts = 0;
 
-	/*
+	ifp->if_flags &= ~IFF_ALLMULTI;
+
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0 ||
+	    ac->ac_multicnt >= MAXMCADDR) {
+		ifp->if_flags |= IFF_ALLMULTI;
+	} else {
+		ETHER_FIRST_MULTI(step, &sc->sc_arpcom, enm);
+		while (enm != NULL) {
+			bcopy(enm->enm_addrlo,
+			    (void *)&mcsp->mc_addr[nmcasts][0], ETHER_ADDR_LEN);
+
+			nmcasts++;
+
+			ETHER_NEXT_MULTI(step, enm);
+		}
+	}
+
+	if (doit == 0)
+		return;
+
+	/* 
 	 * Initialize multicast setup descriptor.
 	 */
 	mcsp->cb_status = htole16(0);
 	mcsp->cb_command = htole16(FXP_CB_COMMAND_MCAS | FXP_CB_COMMAND_EL);
 	mcsp->link_addr = htole32(-1);
-
-	nmcasts = 0;
-	if (!(ifp->if_flags & IFF_ALLMULTI)) {
-		ETHER_FIRST_MULTI(step, &sc->sc_arpcom, enm);
-		while (enm != NULL) {
-			if (nmcasts >= MAXMCADDR) {
-				ifp->if_flags |= IFF_ALLMULTI;
-				nmcasts = 0;
-				break;
-			}
-
-			/* Punt on ranges. */
-			if (bcmp(enm->enm_addrlo, enm->enm_addrhi,
-			    sizeof(enm->enm_addrlo)) != 0) {
-				ifp->if_flags |= IFF_ALLMULTI;
-				nmcasts = 0;
-				break;
-			}
-			bcopy(enm->enm_addrlo,
-			    (void *)&mcsp->mc_addr[nmcasts][0], ETHER_ADDR_LEN);
-			nmcasts++;
-			ETHER_NEXT_MULTI(step, enm);
-		}
-	}
-	if (doit == 0)
-		return;
 	mcsp->mc_cnt = htole16(nmcasts * ETHER_ADDR_LEN);
 
 	/*

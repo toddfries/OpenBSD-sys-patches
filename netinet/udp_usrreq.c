@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.130 2009/06/08 23:07:08 sthen Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.133 2010/03/11 00:24:58 sthen Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -104,6 +104,9 @@ extern int ip6_defhlim;
 #endif /* INET6 */
 
 #include "faith.h"
+#if NFAITH > 0
+#include <net/if_types.h>
+#endif
 
 #include "pf.h"
 #if NPF > 0
@@ -440,7 +443,7 @@ udp_input(struct mbuf *m, ...)
 			if (!ip6 && (inp->inp_flags & INP_IPV6))
 				continue;
 #endif
-			if (inp->inp_rdomain != m->m_pkthdr.rdomain)
+			if (inp->inp_rdomain != rtable_l2(m->m_pkthdr.rdomain))
 				continue;
 			if (inp->inp_lport != uh->uh_dport)
 				continue;
@@ -864,7 +867,7 @@ udp6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 #endif
 
 void *
-udp_ctlinput(int cmd, struct sockaddr *sa, void *v)
+udp_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *v)
 {
 	struct ip *ip = v;
 	struct udphdr *uhp;
@@ -899,17 +902,17 @@ udp_ctlinput(int cmd, struct sockaddr *sa, void *v)
 		/* PMTU discovery for udpencap */
 		if (cmd == PRC_MSGSIZE && ip_mtudisc && udpencap_enable &&
 		    udpencap_port && uhp->uh_sport == htons(udpencap_port)) {
-			udpencap_ctlinput(cmd, sa, v);
+			udpencap_ctlinput(cmd, sa, rdomain, v);
 			return (NULL);
 		}
 #endif
 		inp = in_pcbhashlookup(&udbtable,
 		    ip->ip_dst, uhp->uh_dport, ip->ip_src, uhp->uh_sport,
-		    /* XXX */ 0);
+		    rdomain);
 		if (inp && inp->inp_socket != NULL)
 			notify(inp, errno);
 	} else
-		in_pcbnotifyall(&udbtable, sa, errno, notify);
+		in_pcbnotifyall(&udbtable, sa, rdomain, errno, notify);
 	return (NULL);
 }
 

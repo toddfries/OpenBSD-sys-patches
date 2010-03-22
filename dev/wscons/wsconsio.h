@@ -1,4 +1,4 @@
-/* $OpenBSD: wsconsio.h,v 1.54 2009/06/03 21:30:11 kettenis Exp $ */
+/* $OpenBSD: wsconsio.h,v 1.60 2010/03/07 21:26:24 miod Exp $ */
 /* $NetBSD: wsconsio.h,v 1.74 2005/04/28 07:15:44 martin Exp $ */
 
 /*
@@ -42,7 +42,8 @@
  *	32-63	mouse ioctls (WSMOUSEIO)
  *	64-95	display ioctls (WSDISPLAYIO)
  *	96-127	mux ioctls (WSMUXIO)
- *	128-255	reserved for future use
+ *	128-159 driver private ioctls
+ *	160-255 reserved for future use
  */
 
 #include <sys/types.h>
@@ -123,6 +124,7 @@ struct wscons_event {
 #define		WSKBD_TYPE_ZAURUS	16	/* Sharp Zaurus */
 #define		WSKBD_TYPE_DOMAIN	17	/* Apollo Domain */
 #define		WSKBD_TYPE_BLUETOOTH	18	/* Bluetooth keyboard */
+#define		WSKBD_TYPE_KPC		19	/* Palm keypad */
 
 /* Manipulate the keyboard bell. */
 struct wskbd_bell_data {
@@ -307,6 +309,11 @@ struct wsmouse_calibcoords {
 #define		WSDISPLAY_TYPE_DL	58	/* DisplayLink DL-120/DL-160 */
 #define		WSDISPLAY_TYPE_MACHFB	59	/* Sun PGX/PGX64 */
 #define		WSDISPLAY_TYPE_GFXP	60	/* Sun PGX32 */
+#define		WSDISPLAY_TYPE_RADEONFB	61	/* Sun XVR-100 */
+#define		WSDISPLAY_TYPE_SMFB	62	/* SiliconMotion SM712 */
+#define		WSDISPLAY_TYPE_SISFB	63	/* SiS 315 Pro */
+#define		WSDISPLAY_TYPE_ODYSSEY	64	/* SGI Odyssey */
+#define		WSDISPLAY_TYPE_IMPACT	65	/* SGI Impact */
 
 /* Basic display information.  Not applicable to all display types. */
 struct wsdisplay_fbinfo {

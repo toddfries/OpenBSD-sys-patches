@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_init.c,v 1.22 2009/06/02 23:00:19 oga Exp $	*/
+/*	$OpenBSD: uvm_init.c,v 1.25 2009/08/06 15:28:14 oga Exp $	*/
 /*	$NetBSD: uvm_init.c,v 1.14 2000/06/27 17:29:23 mrg Exp $	*/
 
 /*
@@ -143,9 +143,8 @@ uvm_init(void)
 	uvm_km_page_init();
 
 	/*
-	 * the VM system is now up!  now that malloc is up we can resize the
-	 * <obj,off> => <page> hash table for general use and enable paging
-	 * of kernel objects.
+	 * the VM system is now up!  now that malloc is up we can
+	 * enable paging of kernel objects.
 	 */
 
 	uao_create(VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS,

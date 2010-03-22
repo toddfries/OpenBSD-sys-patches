@@ -1,4 +1,4 @@
-/*	$OpenBSD: rbus.c,v 1.11 2007/09/17 20:29:47 miod Exp $	*/
+/*	$OpenBSD: rbus.c,v 1.14 2010/01/13 09:10:33 jsg Exp $	*/
 /*	$NetBSD: rbus.c,v 1.3 1999/11/06 06:20:53 soren Exp $	*/
 /*
  * Copyright (c) 1999
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by HAYAKAWA Koichi.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -54,9 +49,6 @@
 #define DPRINTF(a)
 #endif
 
-
-STATIC rbus_tag_t rbus_new_body(bus_space_tag_t, rbus_tag_t, struct extent *,
-		      bus_addr_t, bus_addr_t, bus_addr_t, int);
 
 int
 rbus_space_alloc(rbus_tag_t rbt, bus_addr_t addr, bus_size_t size,
@@ -144,7 +136,7 @@ rbus_space_alloc_subregion(rbus_tag_t rbt, bus_addr_t substart,
 			}
 		}
 
-		if (md_space_map(rbt->rb_bt, result, size, flags, bshp)) {
+		if (md_space_map(rbt, result, size, flags, bshp)) {
 			/* map failed */
 			extent_free(rbt->rb_ext, result, size, exflags);
 			return (1);
@@ -172,7 +164,7 @@ rbus_space_free(rbus_tag_t rbt, bus_space_handle_t bsh, bus_size_t size,
 		status = rbus_space_free(rbt->rb_parent, bsh, size, &addr);
 	} else if (rbt->rb_flags == RBUS_SPACE_SHARE ||
 	    rbt->rb_flags == RBUS_SPACE_DEDICATE) {
-		md_space_unmap(rbt->rb_bt, bsh, size, &addr);
+		md_space_unmap(rbt, bsh, size, &addr);
 
 		extent_free(rbt->rb_ext, addr, size, exflags);
 
@@ -189,13 +181,13 @@ rbus_space_free(rbus_tag_t rbt, bus_space_handle_t bsh, bus_size_t size,
 }
 
 /*
- * STATIC rbus_tag_t
+ * rbus_tag_t
  * rbus_new_body(bus_space_tag_t bt, rbus_tag_t parent,
  *               struct extent *ex, bus_addr_t start, bus_size_t end,
  *               bus_addr_t offset, int flags)
  *
  */
-STATIC rbus_tag_t
+rbus_tag_t
 rbus_new_body(bus_space_tag_t bt, rbus_tag_t parent, struct extent *ex,
     bus_addr_t start, bus_addr_t end, bus_addr_t offset, int flags)
 {

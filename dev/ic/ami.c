@@ -1,4 +1,4 @@
-/*	$OpenBSD: ami.c,v 1.195 2009/06/11 15:48:10 chl Exp $	*/
+/*	$OpenBSD: ami.c,v 1.199 2010/01/09 23:15:06 krw Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -1195,7 +1195,6 @@ ami_done_pt(struct ami_softc *sc, struct ami_ccb *ccb)
 
 	timeout_del(&xs->stimeout);
 	xs->resid = 0;
-	xs->flags |= ITSDONE;
 
 	if (ccb->ccb_flags & AMI_CCB_F_ERR)
 		xs->error = XS_DRIVER_STUFFUP;
@@ -1234,7 +1233,6 @@ ami_done_xs(struct ami_softc *sc, struct ami_ccb *ccb)
 
 	timeout_del(&xs->stimeout);
 	xs->resid = 0;
-	xs->flags |= ITSDONE;
 
 	if (ccb->ccb_flags & AMI_CCB_F_ERR)
 		xs->error = XS_DRIVER_STUFFUP;
@@ -1253,7 +1251,6 @@ ami_done_flush(struct ami_softc *sc, struct ami_ccb *ccb)
 	if (ccb->ccb_flags & AMI_CCB_F_ERR) {
 		xs->error = XS_DRIVER_STUFFUP;
 		xs->resid = 0;
-		xs->flags |= ITSDONE;
 
 		ami_put_ccb(ccb);
 		scsi_done(xs);
@@ -1274,7 +1271,6 @@ ami_done_sysflush(struct ami_softc *sc, struct ami_ccb *ccb)
 
 	timeout_del(&xs->stimeout);
 	xs->resid = 0;
-	xs->flags |= ITSDONE;
 	if (ccb->ccb_flags & AMI_CCB_F_ERR)
 		xs->error = XS_DRIVER_STUFFUP;
 
@@ -1358,11 +1354,7 @@ ami_scsi_raw_cmd(struct scsi_xfer *xs)
 	ccb = ami_get_ccb(sc);
 	splx(s);
 	if (ccb == NULL) {
-		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
-		scsi_done(xs);
-		splx(s);
-		return (COMPLETE);
+		return (NO_CCB);
 	}
 
 	memset(ccb->ccb_pt, 0, sizeof(struct ami_passthrough));
@@ -1470,7 +1462,6 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		AMI_DPRINTF(AMI_D_CMD, ("no target %d ", target));
 		/* XXX should be XS_SENSE and sense filled out */
 		xs->error = XS_DRIVER_STUFFUP;
-		xs->flags |= ITSDONE;
 		s = splbio();
 		scsi_done(xs);
 		splx(s);
@@ -1493,11 +1484,7 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		ccb = ami_get_ccb(sc);
 		splx(s);
 		if (ccb == NULL) {
-			xs->error = XS_DRIVER_STUFFUP;
-			s = splbio();
-			scsi_done(xs);
-			splx(s);
-			return (COMPLETE);
+			return (NO_CCB);
 		}
 
 		ccb->ccb_xs = xs;
@@ -1522,6 +1509,10 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 	case PREVENT_ALLOW:
 		AMI_DPRINTF(AMI_D_CMD, ("opc %d tgt %d ", xs->cmd->opcode,
 		    target));
+		xs->error = XS_NOERROR;
+		s = splbio();
+		scsi_done(xs);
+		splx(s);
 		return (COMPLETE);
 
 	case REQUEST_SENSE:
@@ -1533,6 +1524,8 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		*(u_int32_t*)sd.info = htole32(0);
 		sd.extra_len = 0;
 		ami_copy_internal_data(xs, &sd, sizeof(sd));
+
+		xs->error = XS_NOERROR;
 		s = splbio();
 		scsi_done(xs);
 		splx(s);
@@ -1551,6 +1544,8 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		    "Host drive  #%02d", target);
 		strlcpy(inq.revision, "   ", sizeof(inq.revision));
 		ami_copy_internal_data(xs, &inq, sizeof(inq));
+
+		xs->error = XS_NOERROR;
 		s = splbio();
 		scsi_done(xs);
 		splx(s);
@@ -1562,6 +1557,8 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		_lto4b(sc->sc_hdr[target].hd_size - 1, rcd.addr);
 		_lto4b(AMI_SECTOR_SIZE, rcd.length);
 		ami_copy_internal_data(xs, &rcd, sizeof(rcd));
+
+		xs->error = XS_NOERROR;
 		s = splbio();
 		scsi_done(xs);
 		splx(s);
@@ -1570,6 +1567,7 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 	default:
 		AMI_DPRINTF(AMI_D_CMD, ("unsupported scsi command %#x tgt %d ",
 		    xs->cmd->opcode, target));
+
 		xs->error = XS_DRIVER_STUFFUP;
 		s = splbio();
 		scsi_done(xs);
@@ -1603,11 +1601,7 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 	ccb = ami_get_ccb(sc);
 	splx(s);
 	if (ccb == NULL) {
-		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
-		scsi_done(xs);
-		splx(s);
-		return (COMPLETE);
+		return (NO_CCB);
 	}
 
 	ccb->ccb_xs = xs;
@@ -2527,7 +2521,7 @@ ami_create_sensors(struct ami_softc *sc)
 		return (1);
 
 	sc->sc_sensors = malloc(sizeof(struct ksensor) * sc->sc_nunits,
-	    M_DEVBUF, M_WAITOK|M_ZERO);
+	    M_DEVBUF, M_WAITOK|M_CANFAIL|M_ZERO);
 	if (sc->sc_sensors == NULL)
 		return (1);
 
@@ -2549,7 +2543,7 @@ ami_create_sensors(struct ami_softc *sc)
 		sensor_attach(&sc->sc_sensordev, &sc->sc_sensors[i]);
 	}
 
-	sc->sc_bd = malloc(sizeof(*sc->sc_bd), M_DEVBUF, M_WAITOK);
+	sc->sc_bd = malloc(sizeof(*sc->sc_bd), M_DEVBUF, M_WAITOK|M_CANFAIL);
 	if (sc->sc_bd == NULL)
 		goto bad;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jme.c,v 1.19 2009/06/05 06:05:06 naddy Exp $	*/
+/*	$OpenBSD: if_jme.c,v 1.21 2010/01/07 12:26:06 sthen Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -112,7 +112,7 @@ void	jme_tick(void *);
 void	jme_stop(struct jme_softc *);
 void	jme_reset(struct jme_softc *);
 void	jme_set_vlan(struct jme_softc *);
-void	jme_set_filter(struct jme_softc *);
+void	jme_iff(struct jme_softc *);
 void	jme_stop_tx(struct jme_softc *);
 void	jme_stop_rx(struct jme_softc *);
 void	jme_mac_config(struct jme_softc *);
@@ -1084,44 +1084,19 @@ jme_encap(struct jme_softc *sc, struct mbuf **m_head)
 		error = EFBIG;
 	}
 	if (error == EFBIG) {
-		error = 0;
-
-		MGETHDR(m, M_DONTWAIT, MT_DATA);
-		if (m == NULL) {
+		if (m_defrag(*m_head, M_DONTWAIT)) {
 			printf("%s: can't defrag TX mbuf\n",
 			    sc->sc_dev.dv_xname);
 			m_freem(*m_head);
 			*m_head = NULL;
 			return (ENOBUFS);
 		}
-
-		M_DUP_PKTHDR(m, *m_head);
-		if ((*m_head)->m_pkthdr.len > MHLEN) {
-			MCLGET(m, M_DONTWAIT);
-			if (!(m->m_flags & M_EXT)) {
-				m_freem(*m_head);
-				m_freem(m);
-				*m_head = NULL;
-				return (ENOBUFS);
-			}
-		}
-		
-		m_copydata(*m_head, 0, (*m_head)->m_pkthdr.len, mtod(m, caddr_t));
-		m_freem(*m_head);
-		m->m_len = m->m_pkthdr.len;
-		*m_head = m;
-
 		error = bus_dmamap_load_mbuf(sc->sc_dmat,
 					     txd->tx_dmamap, *m_head,
 					     BUS_DMA_NOWAIT);
 		if (error != 0) {
 			printf("%s: could not load defragged TX mbuf\n",
 			    sc->sc_dev.dv_xname);
-			if (!error) {
-				bus_dmamap_unload(sc->sc_dmat,
-						  txd->tx_dmamap);
-				error = EFBIG;
-			}
 			m_freem(*m_head);
 			*m_head = NULL;
 			return (error);
@@ -1336,7 +1311,7 @@ jme_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING)
-			jme_set_filter(sc);
+			jme_iff(sc);
 		error = 0;
 	}
 
@@ -1925,7 +1900,8 @@ jme_init(struct ifnet *ifp)
 	CSR_WRITE_4(sc, JME_RXMAC, 0);
 
 	/* Set up the receive filter. */
-	jme_set_filter(sc);
+	jme_iff(sc);
+
 	jme_set_vlan(sc);
 
 	/*
@@ -2285,7 +2261,7 @@ jme_set_vlan(struct jme_softc *sc)
 }
 
 void
-jme_set_filter(struct jme_softc *sc)
+jme_iff(struct jme_softc *sc)
 {
 	struct arpcom *ac = &sc->sc_arpcom;
 	struct ifnet *ifp = &ac->ac_if;

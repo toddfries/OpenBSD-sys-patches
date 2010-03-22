@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.52 2009/04/13 08:31:36 kettenis Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.54 2010/02/12 01:35:14 tedu Exp $	*/
 /*	$NetBSD: cpu.c,v 1.13 2001/05/26 21:27:15 chs Exp $ */
 
 /*
@@ -136,7 +136,7 @@ alloc_cpuinfo(struct mainbus_attach_args *ma)
 		if (cpi->ci_upaid == portid)
 			return cpi;
 
-	va = uvm_km_valloc_align(kernel_map, sz, 8 * PAGE_SIZE);
+	va = uvm_km_valloc_align(kernel_map, sz, 8 * PAGE_SIZE, 0);
 	if (va == 0)
 		panic("alloc_cpuinfo: no virtual space");
 	va0 = va;
@@ -260,7 +260,7 @@ cpu_attach(parent, dev, aux)
 	vers = IU_VERS(ver);
 
 	/* tell them what we have */
-	if (strncmp(parent->dv_xname, "core", 4) == 0)
+	if (strcmp(parent->dv_cfdata->cf_driver->cd_name, "core") == 0)
 		node = OF_parent(ma->ma_node);
 	else
 		node = ma->ma_node;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.119 2009/06/05 00:30:05 guenther Exp $	*/
+/*	$OpenBSD: proc.h,v 1.123 2010/01/28 19:23:06 guenther Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -145,6 +145,8 @@ struct process {
 
 	TAILQ_HEAD(,proc) ps_threads;	/* Threads in this process. */
 	int	ps_refcnt;		/* Number of references. */
+
+	u_int	ps_rdomain;		/* Process routing domain. */
 };
 #else
 struct process;
@@ -220,7 +222,6 @@ struct proc {
 
 	struct	vnode *p_textvp;	/* Vnode of executable. */
 
-	struct	emul *p_emul;		/* Emulation information */
 	void	*p_emuldata;		/* Per-process emulation data, or */
 					/* NULL. Malloc type M_EMULDATA */
 	struct	klist p_klist;		/* knotes attached to this process */
@@ -243,6 +244,7 @@ struct proc {
 	char	p_nice;		/* Process "nice" value. */
 	char	p_comm[MAXCOMLEN+1];
 
+	struct	emul *p_emul;		/* Emulation information */
 	struct 	pgrp *p_pgrp;	/* Pointer to process group. */
 	vaddr_t	p_sigcode;	/* user pointer to the signal code. */
 
@@ -417,7 +419,7 @@ int	chgproccnt(uid_t uid, int diff);
 int	enterpgrp(struct proc *p, pid_t pgid, struct pgrp *newpgrp,
 	    struct session *newsess);
 void	fixjobc(struct proc *p, struct pgrp *pgrp, int entering);
-int	inferior(struct proc *p);
+int	inferior(struct proc *, struct proc *);
 int	leavepgrp(struct proc *p);
 void	yield(void);
 void	preempt(struct proc *);
@@ -440,6 +442,7 @@ int	groupmember(gid_t, struct ucred *);
 void	child_return(void *);
 
 int	proc_cansugid(struct proc *);
+void	proc_finish_wait(struct proc *, struct proc *);
 void	proc_zap(struct proc *);
 
 struct sleep_state {

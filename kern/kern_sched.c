@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sched.c,v 1.13 2009/04/22 08:35:54 art Exp $	*/
+/*	$OpenBSD: kern_sched.c,v 1.17 2010/01/09 02:44:17 kettenis Exp $	*/
 /*
  * Copyright (c) 2007, 2008 Artur Grabowski <art@openbsd.org>
  *
@@ -148,8 +148,14 @@ sched_idle(void *v)
 
 		cpuset_add(&sched_idle_cpus, ci);
 		cpu_idle_enter();
-		while (spc->spc_whichqs == 0)
+		while (spc->spc_whichqs == 0) {
+			if (spc->spc_schedflags & SPCF_SHOULDHALT) {
+				atomic_setbits_int(&spc->spc_schedflags,
+				    SPCF_HALTED);
+				wakeup(spc);
+			}
 			cpu_idle_cycle();
+		}
 		cpu_idle_leave();
 		cpuset_del(&sched_idle_cpus, ci);
 	}
@@ -180,9 +186,8 @@ sched_exit(struct proc *p)
 
 	LIST_INSERT_HEAD(&spc->spc_deadproc, p, p_hash);
 
-#ifdef MULTIPROCESSOR
-	KASSERT(__mp_lock_held(&kernel_lock) == 0);
-#endif
+	/* This process no longer needs to hold the kernel lock. */
+	KERNEL_PROC_UNLOCK(p);
 
 	SCHED_LOCK(s);
 	idle = spc->spc_idleproc;
@@ -246,6 +251,13 @@ sched_chooseproc(void)
 	int queue;
 
 	SCHED_ASSERT_LOCKED();
+
+	if (spc->spc_schedflags & SPCF_SHOULDHALT) {
+		p = spc->spc_idleproc;
+		KASSERT(p);
+		p->p_stat = SRUN;
+		return (p);
+	}
 
 again:
 	if (spc->spc_whichqs) {

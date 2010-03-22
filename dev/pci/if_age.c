@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_age.c,v 1.4 2009/03/29 21:53:52 sthen Exp $	*/
+/*	$OpenBSD: if_age.c,v 1.9 2010/02/27 08:19:47 kevlo Exp $	*/
 
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
@@ -93,7 +93,6 @@ void	age_mediastatus(struct ifnet *, struct ifmediareq *);
 int	age_mediachange(struct ifnet *);
 
 int	age_intr(void *);
-int	age_read_vpd_word(struct age_softc *, uint32_t, uint32_t, uint32_t *);
 int	age_dma_alloc(struct age_softc *);
 void	age_dma_free(struct age_softc *);
 void	age_get_macaddr(struct age_softc *);
@@ -117,7 +116,7 @@ void	age_stats_update(struct age_softc *);
 void	age_stop_txmac(struct age_softc *);
 void	age_stop_rxmac(struct age_softc *);
 void	age_rxvlan(struct age_softc *sc);
-void	age_rxfilter(struct age_softc *);
+void	age_iff(struct age_softc *);
 
 const struct pci_matchid age_devices[] = {
 	{ PCI_VENDOR_ATTANSIC, PCI_PRODUCT_ATTANSIC_L1 }
@@ -262,7 +261,7 @@ age_attach(struct device *parent, struct device *self, void *aux)
 	ifmedia_init(&sc->sc_miibus.mii_media, 0, age_mediachange,
 	    age_mediastatus);
 	mii_attach(self, &sc->sc_miibus, 0xffffffff, MII_PHY_ANY,
-	   MII_OFFSET_ANY, 0);
+	   MII_OFFSET_ANY, MIIF_DOPAUSE);
 
 	if (LIST_FIRST(&sc->sc_miibus.mii_phys) == NULL) {
 		printf("%s: no PHY found!\n", sc->sc_dev.dv_xname);
@@ -526,38 +525,11 @@ back:
 	return (1);
 }
 
-int
-age_read_vpd_word(struct age_softc *sc, uint32_t vpdc, uint32_t offset,
-    uint32_t *word)
-{
-	int i;
-	pcireg_t rv;
-
-	pci_conf_write(sc->sc_pct, sc->sc_pcitag, PCI_VPD_ADDRESS(vpdc),
-	    offset << PCI_VPD_ADDRESS_SHIFT);
-
-	for (i = AGE_TIMEOUT; i > 0; i--) {
-		DELAY(10);
-		rv = pci_conf_read(sc->sc_pct, sc->sc_pcitag,
-		    PCI_VPD_ADDRESS(vpdc));
-		if ((rv & PCI_VPD_OPFLAG) == PCI_VPD_OPFLAG)
-			break;
-	}
-	if (i == 0) {
-		printf("%s: VPD read timeout!\n", sc->sc_dev.dv_xname);
-		*word = 0;
-		return (ETIMEDOUT);
-	}
-
-	*word = pci_conf_read(sc->sc_pct, sc->sc_pcitag, PCI_VPD_DATAREG(vpdc));
-	return (0);
-}
-
 void
 age_get_macaddr(struct age_softc *sc)
 {
-	uint32_t ea[2], off, reg, word;
-	int vpd_error, match, vpdc;
+	uint32_t ea[2], reg;
+	int i, vpdc;
 
 	reg = CSR_READ_4(sc, AGE_SPI_CTRL);
 	if ((reg & SPI_VPD_ENB) != 0) {
@@ -566,94 +538,31 @@ age_get_macaddr(struct age_softc *sc)
 		CSR_WRITE_4(sc, AGE_SPI_CTRL, reg);
 	}
 
-	vpd_error = 0;
-	ea[0] = ea[1] = 0;
-	if ((vpd_error = pci_get_capability(sc->sc_pct, sc->sc_pcitag,
-	    PCI_CAP_VPD, &vpdc, NULL))) {
+	if (pci_get_capability(sc->sc_pct, sc->sc_pcitag,
+	    PCI_CAP_VPD, &vpdc, NULL)) {
 		/*
-		 * PCI VPD capability exists, but it seems that it's
-		 * not in the standard form as stated in PCI VPD
-		 * specification such that driver could not use
-		 * pci_get_vpd_readonly(9) with keyword 'NA'.
-		 * Search VPD data starting at address 0x0100. The data
-		 * should be used as initializers to set AGE_PAR0,
-		 * AGE_PAR1 register including other PCI configuration
-		 * registers.
+		 * PCI VPD capability found, let TWSI reload EEPROM.
+		 * This will set Ethernet address of controller.
 		 */
-		word = 0;
-		match = 0;
-		reg = 0;
-		for (off = AGE_VPD_REG_CONF_START; off < AGE_VPD_REG_CONF_END;
-		    off += sizeof(uint32_t)) {
-			vpd_error = age_read_vpd_word(sc, vpdc, off, &word);
-			if (vpd_error != 0)
-				break;
-			if (match != 0) {
-				switch (reg) {
-				case AGE_PAR0:
-					ea[0] = word;
-					break;
-				case AGE_PAR1:
-					ea[1] = word;
-					break;
-				default:
-					break;
-				}
-				match = 0;
-			} else if ((word & 0xFF) == AGE_VPD_REG_CONF_SIG) {
-				match = 1;
-				reg = word >> 16;
-			} else
+		CSR_WRITE_4(sc, AGE_TWSI_CTRL, CSR_READ_4(sc, AGE_TWSI_CTRL) |
+		    TWSI_CTRL_SW_LD_START);
+		for (i = 100; i > 0; i--) {
+			DELAY(1000);
+			reg = CSR_READ_4(sc, AGE_TWSI_CTRL);
+			if ((reg & TWSI_CTRL_SW_LD_START) == 0)
 				break;
 		}
-		if (off >= AGE_VPD_REG_CONF_END)
-			vpd_error = ENOENT;
-		if (vpd_error == 0) {
-			/*
-			 * Don't blindly trust ethernet address obtained
-			 * from VPD. Check whether ethernet address is
-			 * valid one. Otherwise fall-back to reading
-			 * PAR register.
-			 */
-			ea[1] &= 0xFFFF;
-			if ((ea[0] == 0 && ea[1] == 0) ||
-			    (ea[0] == 0xFFFFFFFF && ea[1] == 0xFFFF)) {
-				if (agedebug)
-					printf("%s: invalid ethernet address "
-				    	    "returned from VPD.\n", 
-				    	    sc->sc_dev.dv_xname);
-				vpd_error = EINVAL;
-			}
-		}
-		if (vpd_error != 0 && (agedebug))
-			printf("%s: VPD access failure!\n", 
-			    sc->sc_dev.dv_xname);	
+		if (i == 0)
+			printf("%s: reloading EEPROM timeout!\n",
+			    sc->sc_dev.dv_xname);
 	} else {
 		if (agedebug)
 			printf("%s: PCI VPD capability not found!\n", 
 			    sc->sc_dev.dv_xname);
 	}
 
-	/*
-	 * It seems that L1 also provides a way to extract ethernet
-	 * address via SPI flash interface. Because SPI flash memory
-	 * device of different vendors vary in their instruction
-	 * codes for read ID instruction, it's very hard to get
-	 * instructions codes without detailed information for the
-	 * flash memory device used on ethernet controller. To simplify
-	 * code, just read AGE_PAR0/AGE_PAR1 register to get ethernet
-	 * address which is supposed to be set by hardware during
-	 * power on reset.
-	 */
-	if (vpd_error != 0) {
-		/*
-		 * VPD is mapped to SPI flash memory or BIOS set it.
-		 */
-		ea[0] = CSR_READ_4(sc, AGE_PAR0);
-		ea[1] = CSR_READ_4(sc, AGE_PAR1);
-	}
-
-	ea[1] &= 0xFFFF;
+	ea[0] = CSR_READ_4(sc, AGE_PAR0);
+	ea[1] = CSR_READ_4(sc, AGE_PAR1);
 	sc->age_eaddr[0] = (ea[1] >> 8) & 0xFF;
 	sc->age_eaddr[1] = (ea[1] >> 0) & 0xFF;
 	sc->age_eaddr[2] = (ea[0] >> 24) & 0xFF;
@@ -665,11 +574,79 @@ age_get_macaddr(struct age_softc *sc)
 void
 age_phy_reset(struct age_softc *sc)
 {
+	uint16_t reg, pn;
+	int i, linkup;
+
 	/* Reset PHY. */
 	CSR_WRITE_4(sc, AGE_GPHY_CTRL, GPHY_CTRL_RST);
-	DELAY(1000);
+	DELAY(2000);
 	CSR_WRITE_4(sc, AGE_GPHY_CTRL, GPHY_CTRL_CLR);
-	DELAY(1000);
+	DELAY(2000);
+
+#define	ATPHY_DBG_ADDR		0x1D
+#define	ATPHY_DBG_DATA		0x1E
+#define	ATPHY_CDTC		0x16
+#define	PHY_CDTC_ENB		0x0001
+#define	PHY_CDTC_POFF		8
+#define	ATPHY_CDTS		0x1C
+#define	PHY_CDTS_STAT_OK	0x0000
+#define	PHY_CDTS_STAT_SHORT	0x0100
+#define	PHY_CDTS_STAT_OPEN	0x0200
+#define	PHY_CDTS_STAT_INVAL	0x0300
+#define	PHY_CDTS_STAT_MASK	0x0300
+
+	/* Check power saving mode. Magic from Linux. */
+	age_miibus_writereg(&sc->sc_dev, sc->age_phyaddr, MII_BMCR, BMCR_RESET);
+	for (linkup = 0, pn = 0; pn < 4; pn++) {
+		age_miibus_writereg(&sc->sc_dev, sc->age_phyaddr, ATPHY_CDTC,
+		    (pn << PHY_CDTC_POFF) | PHY_CDTC_ENB);
+		for (i = 200; i > 0; i--) {
+			DELAY(1000);
+			reg = age_miibus_readreg(&sc->sc_dev, sc->age_phyaddr,
+			    ATPHY_CDTC);
+			if ((reg & PHY_CDTC_ENB) == 0)
+				break;
+		}
+		DELAY(1000);
+		reg = age_miibus_readreg(&sc->sc_dev, sc->age_phyaddr,
+		    ATPHY_CDTS);
+		if ((reg & PHY_CDTS_STAT_MASK) != PHY_CDTS_STAT_OPEN) {
+			linkup++;
+			break;
+		}
+	}
+	age_miibus_writereg(&sc->sc_dev, sc->age_phyaddr, MII_BMCR,
+	    BMCR_RESET | BMCR_AUTOEN | BMCR_STARTNEG);
+	if (linkup == 0) {
+		age_miibus_writereg(&sc->sc_dev, sc->age_phyaddr,
+		    ATPHY_DBG_ADDR, 0);
+		age_miibus_writereg(&sc->sc_dev, sc->age_phyaddr,
+		    ATPHY_DBG_DATA, 0x124E);
+		age_miibus_writereg(&sc->sc_dev, sc->age_phyaddr,
+		    ATPHY_DBG_ADDR, 1);
+		reg = age_miibus_readreg(&sc->sc_dev, sc->age_phyaddr,
+		    ATPHY_DBG_DATA);
+		age_miibus_writereg(&sc->sc_dev, sc->age_phyaddr,
+		    ATPHY_DBG_DATA, reg | 0x03);
+		/* XXX */
+		DELAY(1500 * 1000);
+		age_miibus_writereg(&sc->sc_dev, sc->age_phyaddr,
+		    ATPHY_DBG_ADDR, 0);
+		age_miibus_writereg(&sc->sc_dev, sc->age_phyaddr,
+		    ATPHY_DBG_DATA, 0x024E);
+	}
+
+#undef	ATPHY_DBG_ADDR
+#undef	ATPHY_DBG_DATA
+#undef	ATPHY_CDTC
+#undef	PHY_CDTC_ENB
+#undef	PHY_CDTC_POFF
+#undef	ATPHY_CDTS
+#undef	PHY_CDTS_STAT_OK
+#undef	PHY_CDTS_STAT_SHORT
+#undef	PHY_CDTS_STAT_OPEN
+#undef	PHY_CDTS_STAT_INVAL
+#undef	PHY_CDTS_STAT_MASK
 }
 
 int
@@ -1123,7 +1100,7 @@ age_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING)
-			age_rxfilter(sc);
+			age_iff(sc);
 		error = 0;
 	}
 
@@ -1156,12 +1133,10 @@ age_mac_config(struct age_softc *sc)
 	}
 	if ((IFM_OPTIONS(mii->mii_media_active) & IFM_FDX) != 0) {
 		reg |= MAC_CFG_FULL_DUPLEX;
-#ifdef notyet
 		if ((IFM_OPTIONS(mii->mii_media_active) & IFM_ETH_TXPAUSE) != 0)
 			reg |= MAC_CFG_TX_FC;
 		if ((IFM_OPTIONS(mii->mii_media_active) & IFM_ETH_RXPAUSE) != 0)
 			reg |= MAC_CFG_RX_FC;
-#endif
 	}
 
 	CSR_WRITE_4(sc, AGE_MAC_CFG, reg);
@@ -1193,43 +1168,18 @@ age_encap(struct age_softc *sc, struct mbuf **m_head)
 		error = EFBIG;
 	}
 	if (error == EFBIG) {
-		error = 0;
-
-		MGETHDR(m, M_DONTWAIT, MT_DATA);
-		if (m == NULL) {
+		if (m_defrag(*m_head, M_DONTWAIT)) {
 			printf("%s: can't defrag TX mbuf\n", 
 			    sc->sc_dev.dv_xname);
 			m_freem(*m_head);
 			*m_head = NULL;
 			return (ENOBUFS);
 		}
-
-		M_DUP_PKTHDR(m, *m_head);
-		if ((*m_head)->m_pkthdr.len > MHLEN) {
-			MCLGET(m, M_DONTWAIT);
-			if (!(m->m_flags & M_EXT)) {
-				m_freem(*m_head);
-				m_freem(m);
-				*m_head = NULL;
-				return (ENOBUFS);
-			}
-		}
-		m_copydata(*m_head, 0, (*m_head)->m_pkthdr.len,
-		    mtod(m, caddr_t));
-		m_freem(*m_head);
-		m->m_len = m->m_pkthdr.len;
-		*m_head = m;
-
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, map, *m_head,
 		  	    BUS_DMA_NOWAIT);
-
 		if (error != 0) {
 			printf("%s: could not load defragged TX mbuf\n",
 			    sc->sc_dev.dv_xname);
-			if (!error) {
-				bus_dmamap_unload(sc->sc_dmat, map);
-				error = EFBIG;
-			}
 			m_freem(*m_head);
 			*m_head = NULL;
 			return (error);
@@ -1590,14 +1540,8 @@ age_reset(struct age_softc *sc)
 	int i;
 
 	CSR_WRITE_4(sc, AGE_MASTER_CFG, MASTER_RESET);
-	for (i = AGE_RESET_TIMEOUT; i > 0; i--) {
-		DELAY(1);
-		if ((CSR_READ_4(sc, AGE_MASTER_CFG) & MASTER_RESET) == 0)
-			break;
-	}
-	if (i == 0)
-		printf("%s: master reset timeout!\n", sc->sc_dev.dv_xname);
-
+	CSR_READ_4(sc, AGE_MASTER_CFG);
+	DELAY(1000);
 	for (i = AGE_RESET_TIMEOUT; i > 0; i--) {
 		if ((reg = CSR_READ_4(sc, AGE_IDLE_STATUS)) == 0)
 			break;
@@ -1864,7 +1808,8 @@ age_init(struct ifnet *ifp)
 	    MAC_CFG_PREAMBLE_MASK));
 
 	/* Set up the receive filter. */
-	age_rxfilter(sc);
+	age_iff(sc);
+
 	age_rxvlan(sc);
 
 	reg = CSR_READ_4(sc, AGE_MAC_CFG);
@@ -2267,7 +2212,7 @@ age_rxvlan(struct age_softc *sc)
 }
 
 void
-age_rxfilter(struct age_softc *sc)
+age_iff(struct age_softc *sc)
 {
 	struct arpcom *ac = &sc->sc_arpcom;
 	struct ifnet *ifp = &ac->ac_if;
@@ -2299,7 +2244,7 @@ age_rxfilter(struct age_softc *sc)
 
 		ETHER_FIRST_MULTI(step, ac, enm);
 		while (enm != NULL) {
-			crc = ether_crc32_le(enm->enm_addrlo, 
+			crc = ether_crc32_be(enm->enm_addrlo, 
 			    ETHER_ADDR_LEN);
 
 			mchash[crc >> 31] |= 1 << ((crc >> 26) & 0x1f);

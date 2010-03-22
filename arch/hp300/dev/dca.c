@@ -1,4 +1,4 @@
-/*	$OpenBSD: dca.c,v 1.34 2009/01/25 13:49:49 miod Exp $	*/
+/*	$OpenBSD: dca.c,v 1.38 2009/11/09 17:53:38 nicm Exp $	*/
 /*	$NetBSD: dca.c,v 1.35 1997/05/05 20:58:18 thorpej Exp $	*/
 
 /*
@@ -349,7 +349,7 @@ dcaopen(dev, flag, mode, p)
 		while ((dca->dca_iir & IIR_IMASK) == IIR_RXRDY)
 			code = dca->dca_data;
 
-	} else if (tp->t_state&TS_XCLUDE && p->p_ucred->cr_uid != 0)
+	} else if (tp->t_state&TS_XCLUDE && suser(p, 0) != 0)
 		return (EBUSY);
 	else
 		s = spltty();
@@ -866,9 +866,9 @@ dcastart(tp)
 			tp->t_state &= ~TS_ASLEEP;
 			wakeup((caddr_t)&tp->t_outq);
 		}
+		selwakeup(&tp->t_wsel);
 		if (tp->t_outq.c_cc == 0)
 			goto out;
-		selwakeup(&tp->t_wsel);
 	}
 	if (dca->dca_lsr & LSR_TXRDY) {
 		tp->t_state |= TS_BUSY;

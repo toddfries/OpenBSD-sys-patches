@@ -1,4 +1,4 @@
-/*	$OpenBSD: apci.c,v 1.33 2008/10/15 19:12:19 blambert Exp $	*/
+/*	$OpenBSD: apci.c,v 1.37 2009/11/09 17:53:38 nicm Exp $	*/
 /*	$NetBSD: apci.c,v 1.9 2000/11/02 00:35:05 eeh Exp $	*/
 
 /*-
@@ -316,7 +316,7 @@ apciopen(dev, flag, mode, p)
 		/* Flush any pending I/O. */
 		while ((apci->ap_iir & IIR_IMASK) == IIR_RXRDY)
 			code = apci->ap_data;
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0)
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0)
 		return (EBUSY);
 	else
 		s = spltty();
@@ -767,9 +767,9 @@ apcistart(tp)
 			tp->t_state &= ~TS_ASLEEP;
 			wakeup((caddr_t)&tp->t_outq);
 		}
+		selwakeup(&tp->t_wsel);
 		if (tp->t_outq.c_cc == 0)
 			goto out;
-		selwakeup(&tp->t_wsel);
 	}
 	if (apci->ap_lsr & LSR_TXRDY) {
 		tp->t_state |= TS_BUSY;

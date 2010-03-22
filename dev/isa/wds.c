@@ -1,4 +1,4 @@
-/*	$OpenBSD: wds.c,v 1.28 2009/02/16 21:19:07 miod Exp $	*/
+/*	$OpenBSD: wds.c,v 1.32 2010/01/10 00:10:23 krw Exp $	*/
 /*	$NetBSD: wds.c,v 1.13 1996/11/03 16:20:31 mycroft Exp $	*/
 
 #undef	WDSDIAG
@@ -78,10 +78,6 @@
 #include <dev/isa/isavar.h>
 #include <dev/isa/isadmavar.h>
 #include <dev/isa/wdsreg.h>
-
-#ifndef DDB
-#define Debugger() panic("should call debugger here (wds.c)")
-#endif /* ! DDB */
 
 #define WDS_MBX_SIZE	16
 
@@ -720,6 +716,7 @@ wds_start_scbs(sc)
 #ifdef WDSDIAG
 		scb->flags |= SCB_SENDING;
 #endif
+		timeout_set(&scb->xs->stimeout, wds_timeout, scb);
 
 		/* Link scb to mbo. */
 #ifdef notyet
@@ -739,10 +736,8 @@ wds_start_scbs(sc)
 		c = WDSC_MSTART(wmbo - wmbx->mbo);
 		wds_cmd(sc, &c, sizeof c);
 
-		if ((scb->flags & SCB_POLLED) == 0) {
-			timeout_set(&scb->xs->stimeout, wds_timeout, scb);
+		if ((scb->flags & SCB_POLLED) == 0)
 			timeout_add_msec(&scb->xs->stimeout, scb->timeout);
-		}
 
 		++sc->sc_mbofull;
 		wds_nextmbx(wmbo, wmbx, mbo);
@@ -849,7 +844,6 @@ wds_done(sc, scb, stat)
 	}
 #endif
 	wds_free_scb(sc, scb);
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 }
 
@@ -1064,6 +1058,9 @@ wds_scsi_cmd(xs)
 		/* XXX Fix me! */
 		printf("%s: reset!\n", sc->sc_dev.dv_xname);
 		wds_init(sc);
+		s = splbio();
+		scsi_done(xs);
+		splx(s);
 		return COMPLETE;
 	}
 
@@ -1403,10 +1400,8 @@ wds_timeout(arg)
 	 * If The scb's mbx is not free, then the board has gone south?
 	 */
 	wds_collect_mbo(sc);
-	if (scb->flags & SCB_SENDING) {
-		printf("%s: not taking commands!\n", sc->sc_dev.dv_xname);
-		Debugger();
-	}
+	if (scb->flags & SCB_SENDING)
+		panic("%s: not taking commands!", sc->sc_dev.dv_xname);
 #endif
 
 	/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.452 2009/06/03 21:30:19 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.468 2009/12/09 14:27:34 oga Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -91,9 +91,6 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/sensors.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 
 #ifdef KGDB
 #include <sys/kgdb.h>
@@ -234,6 +231,7 @@ struct vm_map *phys_map = NULL;
 int p4_model;
 int p3_early;
 void (*update_cpuspeed)(void) = NULL;
+void	via_update_sensor(void *args);
 #endif
 int kbd_reset;
 
@@ -266,8 +264,6 @@ struct	extent *ioport_ex;
 struct	extent *iomem_ex;
 static	int ioport_malloc_safe;
 
-caddr_t	allocsys(caddr_t);
-void	setup_buffers(void);
 void	dumpsys(void);
 int	cpu_dump(void);
 void	init386(paddr_t);
@@ -373,8 +369,6 @@ void
 cpu_startup()
 {
 	unsigned i;
-	caddr_t v;
-	int sz;
 	vaddr_t minaddr, maxaddr, va;
 	paddr_t pa;
 
@@ -410,20 +404,11 @@ cpu_startup()
 	    (unsigned long long)ptoa((psize_t)physmem)/1024U/1024U);
 
 	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
+	 * Determine how many buffers to allocate.  We use bufcachepercent%
+	 * of the memory below 4GB.
 	 */
-	sz = (int)allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
-	 */
-	setup_buffers();
+	if (bufpages == 0)
+		bufpages = atop(avail_end) * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -509,45 +494,6 @@ i386_init_pcb_tss_ldt(struct cpu_info *ci)
 	ci->ci_idle_tss_sel = tss_alloc(pcb);
 }
 #endif	/* MULTIPROCESSOR */
-
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(caddr_t v)
-{
-
-#define	valloc(name, type, num) \
-	    v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return v;
-}
-
-void
-setup_buffers()
-{
-	/*
-	 * Determine how many buffers to allocate.  We use bufcachepercent%
-	 * of the memory below 4GB.
-	 */
-	if (bufpages == 0)
-		bufpages = atop(avail_end) * bufcachepercent / 100;
-
-}
 
 /*
  * Info for CTL_HW
@@ -1130,6 +1076,22 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 		/*
 		 * C3 Nehemiah & later: fall through.
 		 */
+	
+	case 10: /* C7-M Type A */
+	case 13: /* C7-M Type D */
+	case 15: /* Nano */
+#if !defined(SMALL_KERNEL)
+		if (model == 10 || model == 13 || model == 15) {
+			/* Setup the sensors structures */
+			strlcpy(ci->ci_sensordev.xname, ci->ci_dev.dv_xname,
+			    sizeof(ci->ci_sensordev.xname));
+			ci->ci_sensor.type = SENSOR_TEMP;
+			sensor_task_register(ci, via_update_sensor, 5);
+			sensor_attach(&ci->ci_sensordev, &ci->ci_sensor);
+			sensordev_install(&ci->ci_sensordev);
+		}
+#endif
+
 	default:
 		/*
 		 * C3 Nehemiah/Esther & later models:
@@ -1222,6 +1184,30 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 		break;
 	}
 }
+
+#if !defined(SMALL_KERNEL)
+void
+via_update_sensor(void *args)
+{
+	struct cpu_info *ci = (struct cpu_info *) args;
+	u_int64_t msr;
+
+	switch (ci->ci_model) {
+	case 0xa:
+	case 0xd:
+		msr = rdmsr(MSR_C7M_TMTEMPERATURE);
+		break;
+	case 0xf:
+		msr = rdmsr(MSR_CENT_TMTEMPERATURE);
+		break;
+	}
+	ci->ci_sensor.value = (msr & 0xffffff);
+	/* micro degrees */
+	ci->ci_sensor.value *= 1000000;
+	ci->ci_sensor.value += 273150000;
+	ci->ci_sensor.flags &= ~SENSOR_FINVALID;
+}
+#endif
 
 void
 cyrix6x86_cpu_setup(struct cpu_info *ci)
@@ -1734,6 +1720,15 @@ identifycpu(struct cpu_info *ci)
 		}
 	}
 
+	if (vendor == CPUVENDOR_INTEL &&
+	    curcpu()->ci_feature_flags & CPUID_CFLUSH) {
+		/* to get the cachline size you must do cpuid with eax 0x01 */
+		u_int regs[4];
+
+		cpuid(0x01, regs); 
+		ci->ci_cflushsz = ((regs[1] >> 8) & 0xff) * 8;
+	}
+
 	/* Remove leading and duplicated spaces from cpu_brandstr */
 	brandstr_from = brandstr_to = cpu_brandstr;
 	skipspace = 1;
@@ -1984,6 +1979,8 @@ p3_get_bus_clock(struct cpu_info *ci)
 			    ci->ci_dev.dv_xname, bus);
 			goto print_msr;
 		}
+		break;
+	case 0x15:	/* EP80579 no FSB */
 		break;
 	case 0xe: /* Core Duo/Solo */
 	case 0xf: /* Core Xeon */
@@ -3108,7 +3105,7 @@ init386(paddr_t first_avail)
 #endif
 
 #if defined(MULTIPROCESSOR) || \
-    (NACPI > 0 && defined(ACPI_SLEEP_ENABLED) && !defined(SMALL_KERNEL))
+    (NACPI > 0 && !defined(SMALL_KERNEL))
 	/* install the lowmem ptp after boot args for 1:1 mappings */
 	pmap_prealloc_lowmem_ptp(PTP0_PA);
 #endif
@@ -3119,7 +3116,7 @@ init386(paddr_t first_avail)
 	    VM_PROT_ALL);                       /* protection */
 #endif
 
-#if NACPI > 0 && defined(ACPI_SLEEP_ENABLED) && !defined(SMALL_KERNEL)
+#if NACPI > 0 && !defined(SMALL_KERNEL)
 	pmap_kenter_pa((vaddr_t)ACPI_TRAMPOLINE,/* virtual */
 	    (paddr_t)ACPI_TRAMPOLINE,           /* physical */
 	    VM_PROT_ALL);                       /* protection */
@@ -3534,7 +3531,6 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
 {
 	u_long pa, endpa;
 	vaddr_t va;
-	pt_entry_t *pte;
 	bus_size_t map_size;
 
 	pa = trunc_page(bpa);
@@ -3554,18 +3550,9 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
 	*bshp = (bus_space_handle_t)(va + (bpa & PGOFSET));
 
 	for (; map_size > 0;
-	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE) {
-		pmap_kenter_pa(va, pa, VM_PROT_READ | VM_PROT_WRITE);
-
-		pte = kvtopte(va);
-		if (flags & BUS_SPACE_MAP_CACHEABLE)
-			*pte &= ~PG_N;
-		else
-			*pte |= PG_N;
-		pmap_tlb_shootpage(pmap_kernel(), va);
-	}
-
-	pmap_tlb_shootwait();
+	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE)
+		pmap_kenter_pa(va, pa | ((flags & BUS_SPACE_MAP_CACHEABLE) ?
+		    0 : PMAP_NOCACHE), VM_PROT_READ | VM_PROT_WRITE);
 	pmap_update(pmap_kernel());
 
 	return 0;
@@ -3696,15 +3683,11 @@ i386_intlock(int ipl)
 {
 	if (ipl < IPL_SCHED)
 		__mp_lock(&kernel_lock);
-
-	curcpu()->ci_idepth++;
 }
 
 void
 i386_intunlock(int ipl)
 {
-	curcpu()->ci_idepth--;
-
 	if (ipl < IPL_SCHED)
 		__mp_unlock(&kernel_lock);
 }
@@ -3713,13 +3696,11 @@ void
 i386_softintlock(void)
 {
 	__mp_lock(&kernel_lock);
-	curcpu()->ci_idepth++;
 }
 
 void
 i386_softintunlock(void)
 {
-	curcpu()->ci_idepth--;
 	__mp_unlock(&kernel_lock);
 }
 #endif

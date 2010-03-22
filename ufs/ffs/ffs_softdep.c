@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_softdep.c,v 1.99 2009/06/06 18:06:22 art Exp $	*/
+/*	$OpenBSD: ffs_softdep.c,v 1.101 2009/09/03 07:47:47 jasper Exp $	*/
 
 /*
  * Copyright 1998, 2000 Marshall Kirk McKusick. All Rights Reserved.
@@ -4700,6 +4700,7 @@ softdep_fsync_mountdev(vp, waitfor)
 		    wk->wk_type != D_BMSAFEMAP) {
 			continue;
 		}
+		bremfree(bp);
 		buf_acquire(bp);
 		FREE_LOCK(&lk);
 		(void) bawrite(bp);
@@ -5607,6 +5608,7 @@ getdirtybuf(bp, waitfor)
 	}
 	if ((bp->b_flags & B_DELWRI) == 0)
 		return (0);
+	bremfree(bp);
 	buf_acquire(bp);
 	return (1);
 }
@@ -5722,7 +5724,7 @@ worklist_print(struct worklist *wk, int full, int (*pr)(const char *, ...))
 		break;
 	case D_NEWBLK:
 		newblk = WK_NEWBLK(wk);
-		(*pr)("fs %p newblk %d state %d bmsafemap %p\n",
+		(*pr)("fs %p newblk %lld state %d bmsafemap %p\n",
 		    newblk->nb_fs, newblk->nb_newblkno, newblk->nb_state,
 		    newblk->nb_bmsafemap);
 		break;
@@ -5752,7 +5754,7 @@ worklist_print(struct worklist *wk, int full, int (*pr)(const char *, ...))
 		break;
 	case D_FREEFRAG:
 		freefrag = WK_FREEFRAG(wk);
-		(*pr)("vnode %p mp %p blkno %d fsize %ld ino %u\n",
+		(*pr)("vnode %p mp %p blkno %lld fsize %ld ino %u\n",
 		    freefrag->ff_devvp, freefrag->ff_mnt, freefrag->ff_blkno,
 		    freefrag->ff_fragsize, freefrag->ff_inum);
 		break;
