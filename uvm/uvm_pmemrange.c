@@ -963,8 +963,8 @@ DrainFound:
 		 *	memtype %= MEMTYPE_MAX;
 		 * } while (memtype != memtype_init);
 		 */
-		memtype = memtype + 1;
-		if (memtype > UVM_PMR_MEMTYPE_MAX)
+		memtype += 1;
+		if (memtype == UVM_PMR_MEMTYPE_MAX)
 			memtype = 0;
 		if (memtype != memtype_init)
 			goto ReScanMemtype;
@@ -1568,14 +1568,14 @@ uvm_pmr_get1page(psize_t count, int memtype_init, struct pglist *result,
 				 */
 				uvm_pmr_remove_addr(pmr, found);
 				uvm_pmr_assertvalid(pmr);
+			} else {
+				/*
+				 * Skip to the next memtype.
+				 */
+				memtype += 1;
+				if (memtype == UVM_PMR_MEMTYPE_MAX)
+					memtype = 0;
 			}
-
-			/*
-			 * Skip to the next memtype.
-			 */
-			memtype += 1;
-			if (memtype == UVM_PMR_MEMTYPE_MAX)
-				memtype = 0;
 		} while (memtype != memtype_init && fcount != count);
 	}
 
