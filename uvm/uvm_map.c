@@ -3999,11 +3999,9 @@ uvm_page_printit(pg, full, pr)
 
 	/* cross-verify page queue */
 	if (pg->pg_flags & PQ_FREE) {
-		if (uvm_pmr_isfree(pg))
-			printf("  page found in uvm_pmemrange\n");
-		else
-			printf("  >>> page not found in uvm_pmemrange <<<\n");
-		pgl = NULL;
+		int fl = uvm_page_lookup_freelist(pg);
+		pgl = &uvm.page_free[fl].pgfl_queues[((pg)->pg_flags & PG_ZERO) ?
+		    PGFL_ZEROS : PGFL_UNKNOWN];
 	} else if (pg->pg_flags & PQ_INACTIVE) {
 		pgl = (pg->pg_flags & PQ_SWAPBACKED) ?
 		    &uvm.page_inactive_swp : &uvm.page_inactive_obj;

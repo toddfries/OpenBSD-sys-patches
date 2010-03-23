@@ -58,7 +58,6 @@
 #include <uvm/uvm_pager.h>
 #include <uvm/uvm_pdaemon.h>
 #include <uvm/uvm_swap.h>
-#include <uvm/uvm_pmemrange.h>
 #ifdef UVM_SWAP_ENCRYPT
 #include <uvm/uvm_swap_encrypt.h>
 #endif
@@ -69,34 +68,6 @@
 #include <machine/vmparam.h>
 
 /*
- * UVM_IO_RANGES: paddr_t pairs, describing the lowest and highest address
- * that should be reserved. These ranges (which may overlap) will have their
- * use counter increased, causing them to be avoided if an allocation can be
- * satisfied from another range of memory.
- *
- * UVM_IO_RANGES actually results into a call to uvm_pmr_use_inc() per range
- * at uvm initialization. uvm_pmr_use_inc() can also be called after uvm_init()
- * has completed.
- *
- * Note: the upper bound is specified in the same way as to uvm_pglistalloc.
- * Ex: a memory range of 16 bit is specified as: { 0, 0xffff }.
- * Default: no special ranges in use.
- */
-#ifndef UVM_IO_RANGES
-#define UVM_IO_RANGES							\
-	{								\
-		{ 0, 0x00ffffffUL }, /* ISA memory */			\
-		{ 0, 0xffffffffUL }, /* 32-bit PCI memory */		\
-	}
-#endif
-
-/* UVM IO ranges are described in an array of struct uvm_io_ranges. */
-struct uvm_io_ranges {
-	paddr_t low;
-	paddr_t high;
-};
-
-/*
  * uvm structure (vm global state: collected in one structure for ease
  * of reference...)
  */
@@ -105,6 +76,7 @@ struct uvm {
 	/* vm_page related parameters */
 
 		/* vm_page queues */
+	struct pgfreelist page_free[VM_NFREELIST]; /* unallocated pages */
 	struct pglist page_active;	/* allocated pages, in use */
 	struct pglist page_inactive_swp;/* pages inactive (reclaim or free) */
 	struct pglist page_inactive_obj;/* pages inactive (reclaim or free) */
@@ -114,7 +86,6 @@ struct uvm {
 	boolean_t page_init_done;	/* TRUE if uvm_page_init() finished */
 	boolean_t page_idle_zero;	/* TRUE if we should try to zero
 					   pages in the idle loop */
-	struct uvm_pmr_control pmr_control; /* pmemrange data */
 
 		/* page daemon trigger */
 	int pagedaemon;			/* daemon sleeps on this */
