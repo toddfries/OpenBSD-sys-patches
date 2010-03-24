@@ -651,13 +651,19 @@ uvm_page_physload_flags(paddr_t start, paddr_t end, paddr_t avail_start,
 				} else {
 #if defined(VM_PHYSSEG_NOADD)
 		panic("uvm_page_physload: tried to add RAM after vm_mem_init");
-#else
-					uvm_pagefree(&pgs[lcv]);
 #endif
 				}
 			}
 		}
-		/* XXXCDC: incomplete: need to update uvmexp.free, what else? */
+
+		/*
+		 * Add pages to free pool.
+		 */
+		if ((flags & PHYSLOAD_DEVICE) == 0) {
+			uvm_pmr_freepages(&pgs[avail_start - start],
+			    avail_end - avail_start);
+		}
+
 		/* XXXCDC: need hook to tell pmap to rebuild pv_list, etc... */
 	} else {
 
@@ -819,124 +825,39 @@ uvm_pagealloc(struct uvm_object *obj, voff_t off, struct vm_anon *anon,
 	      (curproc == syncerproc))))
 		goto fail;
 
-#if PGFL_NQUEUES != 2
-#error uvm_pagealloc_strat needs to be updated
-#endif
-
-	/*
-	 * If we want a zero'd page, try the ZEROS queue first, otherwise
-	 * we try the UNKNOWN queue first.
-	 */
-	if (flags & UVM_PGA_ZERO) {
-		try1 = PGFL_ZEROS;
-		try2 = PGFL_UNKNOWN;
-	} else {
-		try1 = PGFL_UNKNOWN;
-		try2 = PGFL_ZEROS;
-	}
-
-	UVMHIST_LOG(pghist, "obj=%p off=%lx anon=%p flags=%lx",
-	    obj, (u_long)off, anon, flags);
-	UVMHIST_LOG(pghist, "strat=%ld free_list=%ld", strat, free_list, 0, 0);
- again:
-	switch (strat) {
-	case UVM_PGA_STRAT_NORMAL:
-		/* Check all freelists in descending priority order. */
-		for (lcv = 0; lcv < VM_NFREELIST; lcv++) {
-			pgfl = &uvm.page_free[lcv];
-			if ((pg = TAILQ_FIRST((freeq =
-			      &pgfl->pgfl_queues[try1]))) != NULL ||
-			    (pg = TAILQ_FIRST((freeq =
-			      &pgfl->pgfl_queues[try2]))) != NULL)
-				goto gotit;
-		}
-
-		/* No pages free! */
+	pmr_flags = UVM_PLA_NOWAIT;
+	if (flags & UVM_PGA_ZERO)
+		pmr_flags |= UVM_PLA_ZERO;
+	TAILQ_INIT(&pgl);
+	if (uvm_pmr_getpages(1, 0, 0, 1, 0, 1, pmr_flags, &pgl) != 0)
 		goto fail;
 
-	case UVM_PGA_STRAT_ONLY:
-	case UVM_PGA_STRAT_FALLBACK:
-		/* Attempt to allocate from the specified free list. */
-		KASSERT(free_list >= 0 && free_list < VM_NFREELIST);
-		pgfl = &uvm.page_free[free_list];
-		if ((pg = TAILQ_FIRST((freeq =
-		      &pgfl->pgfl_queues[try1]))) != NULL ||
-		    (pg = TAILQ_FIRST((freeq =
-		      &pgfl->pgfl_queues[try2]))) != NULL)
-			goto gotit;
-
-		/* Fall back, if possible. */
-		if (strat == UVM_PGA_STRAT_FALLBACK) {
-			strat = UVM_PGA_STRAT_NORMAL;
-			goto again;
-		}
-
-		/* No pages free! */
-		goto fail;
-
-	default:
-		panic("uvm_pagealloc_strat: bad strat %d", strat);
-		/* NOTREACHED */
-	}
-
- gotit:
-	TAILQ_REMOVE(freeq, pg, pageq);
-	uvmexp.free--;
-
-	/* update zero'd page count */
-	if (pg->pg_flags & PG_ZERO)
-		uvmexp.zeropages--;
-
-	/*
-	 * update allocation statistics and remember if we have to
-	 * zero the page
-	 */
-	if (flags & UVM_PGA_ZERO) {
-		if (pg->pg_flags & PG_ZERO) {
-			uvmexp.pga_zerohit++;
-			zeroit = 0;
-		} else {
-			uvmexp.pga_zeromiss++;
-			zeroit = 1;
-		}
-	}
-
-	uvm_unlock_fpageq();		/* unlock free page queue */
+	pg = TAILQ_FIRST(&pgl);
+	KASSERT(pg != NULL && TAILQ_NEXT(pg, pageq) == NULL);
 
 	pg->offset = off;
 	pg->uobject = obj;
 	pg->uanon = anon;
 	KASSERT((pg->pg_flags & PG_DEV) == 0);
-	pg->pg_flags = PG_BUSY|PG_CLEAN|PG_FAKE;
-	pg->pg_version++;
+	atomic_setbits_int(&pg->pg_flags, PG_BUSY|PG_CLEAN|PG_FAKE);
+	if (flags & UVM_PGA_ZERO)
+		atomic_clearbits_int(&pg->pg_flags, PG_CLEAN);
 	if (anon) {
 		anon->an_page = pg;
 		atomic_setbits_int(&pg->pg_flags, PQ_ANON);
-	} else {
-		if (obj)
-			uvm_pageinsert(pg);
-	}
+	} else if (obj)
+		uvm_pageinsert(pg);
+
 #if defined(UVM_PAGE_TRKOWN)
 	pg->owner_tag = NULL;
 #endif
 	UVM_PAGE_OWN(pg, "new alloc");
-
-	if (flags & UVM_PGA_ZERO) {
-		/*
-		 * A zero'd page is not clean.  If we got a page not already
-		 * zero'd, then we have to zero it ourselves.
-		 */
-		atomic_clearbits_int(&pg->pg_flags, PG_CLEAN);
-		if (zeroit)
-			pmap_zero_page(pg);
-	}
 
 	UVMHIST_LOG(pghist, "allocated pg %p/%lx", pg,
 	    (u_long)VM_PAGE_TO_PHYS(pg), 0, 0);
 	return(pg);
 
  fail:
-	uvm_unlock_fpageq();
 	UVMHIST_LOG(pghist, "failed!", 0, 0, 0, 0);
 	return (NULL);
 }
