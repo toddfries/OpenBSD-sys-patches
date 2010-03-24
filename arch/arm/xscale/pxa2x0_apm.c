@@ -55,6 +55,9 @@
 #include <arm/xscale/pxa2x0var.h>
 #include <arm/xscale/pxa2x0_apm.h>
 #include <arm/xscale/pxa2x0_gpio.h>
+#include <dev/wscons/wsdisplayvar.h>
+
+#include "wsdisplay.h"
 
 #if defined(APMDEBUG)
 #define DPRINTF(x)	printf x
@@ -302,6 +305,9 @@ apm_power_info(struct pxa2x0_apm_softc *sc,
 void
 apm_suspend(struct pxa2x0_apm_softc *sc)
 {
+#if NWSDISPLAY > 0
+	wsdisplay_suspend();
+#endif /* NWSDISPLAY > 0 */
 
 	resettodr();
 
@@ -332,6 +338,9 @@ apm_resume(struct pxa2x0_apm_softc *sc)
 	 */
 	/* XXX ifdef NPXAUDC > 0 */
 	bus_space_write_4(sc->sc_iot, sc->sc_pm_ioh, POWMAN_PSSR, PSSR_OTGPH);
+#if NWSDISPLAY > 0
+	wsdisplay_resume();
+#endif /* NWSDISPLAY > 0 */
 }
 
 int
