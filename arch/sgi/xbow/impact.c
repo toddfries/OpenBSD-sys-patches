@@ -1,4 +1,4 @@
-/*	$OpenBSD: impact.c,v 1.2 2010/03/08 04:32:28 deraadt Exp $	*/
+/*	$OpenBSD: impact.c,v 1.4 2010/03/21 17:05:01 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2010 Miodrag Vallat.
@@ -191,7 +191,7 @@ impact_attach(struct device *parent, struct device *self, void *aux)
 		 * Setup screen data.
 		 */
 		scr = malloc(sizeof(struct impact_screen), M_DEVBUF,
-		    M_NOWAIT);
+		    M_NOWAIT | M_ZERO);
 		if (scr == NULL) {
 			printf("failed to allocate screen memory!\n");
 			return;
@@ -349,7 +349,9 @@ int
 impact_cmd_fifo_wait(struct impact_screen *scr)
 {
 	u_int32_t val, timeout = 1000000;
+#ifdef DIAGNOSTIC
 	struct impact_softc *sc = scr->sc;
+#endif
 
 	val = bus_space_read_4(scr->iot, scr->ioh, IMPACTSR_FIFOSTATUS);
 	while ((val & IMPACTSR_FIFO_MASK) != 0) {

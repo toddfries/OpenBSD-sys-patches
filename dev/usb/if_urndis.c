@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urndis.c,v 1.15 2010/03/07 17:17:33 mk Exp $ */
+/*	$OpenBSD: if_urndis.c,v 1.18 2010/03/15 11:13:40 fabien Exp $ */
 
 /*
  * Copyright (c) 2010 Jonathan Armani <armani@openbsd.org>
@@ -125,6 +125,16 @@ struct cfattach urndis_ca = {
 	urndis_attach,
 	urndis_detach,
 	urndis_activate,
+};
+
+/*
+ * Supported devices that we can't match by class IDs.
+ */
+struct urndis_type {
+	u_int16_t	urndis_vid;
+	u_int16_t	urndis_pid;
+} urndis_devs[] = {
+	{ USB_VENDOR_HTC,	USB_PRODUCT_HTC_HERO },
 };
 
 usbd_status
@@ -784,6 +794,15 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 		DPRINTF(("%s: urndis_decap buffer size left %u\n", DEVNAME(sc),
 		    len));
 
+		if (len < sizeof(*msg)) {
+			printf("%s: urndis_decap invalid buffer len %u < "
+			    "minimum header %u\n",
+			    DEVNAME(sc),
+			    len,
+			    sizeof(*msg));
+			return;
+		}
+
 		DPRINTF(("%s: urndis_decap len %u data(off:%u len:%u) "
 		    "oobdata(off:%u len:%u nb:%u) perpacket(off:%u len:%u)\n",
 		    DEVNAME(sc),
@@ -796,14 +815,6 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 		    letoh32(msg->rm_pktinfooffset),
 		    letoh32(msg->rm_pktinfooffset)));
 
-		if (len < sizeof(*msg)) {
-			printf("%s: urndis_decap invalid buffer len %u < "
-			    "minimum header %u\n",
-			    DEVNAME(sc),
-			    letoh32(msg->rm_len),
-			    sizeof(*msg));
-			return;
-		}
 		if (letoh32(msg->rm_type) != REMOTE_NDIS_PACKET_MSG) {
 			printf("%s: urndis_decap invalid type 0x%x != 0x%x\n",
 			    DEVNAME(sc),
@@ -1300,6 +1311,7 @@ urndis_match(struct device *parent, void *match, void *aux)
 {
 	struct usb_attach_arg		*uaa;
 	usb_interface_descriptor_t	*id;
+	int				 i;
 
 	uaa = aux;
 
@@ -1315,11 +1327,15 @@ urndis_match(struct device *parent, void *match, void *aux)
 	    id->bInterfaceProtocol == UIPROTO_RNDIS)
 		return (UMATCH_IFACECLASS_IFACESUBCLASS_IFACEPROTO);
 
-	/* XXX Hack for HTC Hero for now */
-	if (id->bInterfaceClass == UICLASS_CDC &&
-	    id->bInterfaceSubClass == UISUBCLASS_ABSTRACT_CONTROL_MODEL)
-		return (UMATCH_IFACECLASS_GENERIC);
+	for (i = 0; i < sizeof(urndis_devs) / sizeof(urndis_devs[0]); i++) {
+		struct urndis_type *t;
 
+		t = &urndis_devs[i];
+
+		if (uaa->vendor == t->urndis_vid &&
+		    uaa->product == t->urndis_pid)
+			return UMATCH_VENDOR_PRODUCT;
+	}
 
 	return (UMATCH_NONE);
 }
@@ -1463,6 +1479,8 @@ urndis_attach(struct device *parent, struct device *self, void *aux)
 	if (urndis_ctrl_query(sc, OID_802_3_PERMANENT_ADDRESS, NULL, 0,
 	    &buf, &bufsz) != RNDIS_STATUS_SUCCESS) {
 		printf("%s: unable to get hardware address\n", DEVNAME(sc));
+		urndis_stop(sc);
+		splx(s);
 		return;
 	}
 
@@ -1474,9 +1492,10 @@ urndis_attach(struct device *parent, struct device *self, void *aux)
 		printf("%s: invalid address\n", DEVNAME(sc));
 		free(buf, M_TEMP);
 		urndis_stop(sc);
+		splx(s);
 		return;
 	}
-	
+
 	/* Initialize packet filter */
 	sc->sc_filter = RNDIS_PACKET_TYPE_BROADCAST; 
 	sc->sc_filter |= RNDIS_PACKET_TYPE_ALL_MULTICAST;
@@ -1485,6 +1504,7 @@ urndis_attach(struct device *parent, struct device *self, void *aux)
 	    sizeof(filter)) != RNDIS_STATUS_SUCCESS) {
 		printf("%s: unable to set data filters\n", DEVNAME(sc));
 		urndis_stop(sc);
+		splx(s);
 		return;
 	}
 

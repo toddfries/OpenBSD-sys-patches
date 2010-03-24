@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.43 2010/03/07 13:44:26 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.46 2010/03/22 21:22:08 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -114,9 +114,11 @@ ip27_setup()
 {
 	size_t gsz;
 	uint node;
+	struct ip27_config *ip27_config;
 	uint64_t synergy0_0;
 	console_t *cons;
 	nmi_t *nmi;
+	static char unknown_model[20];
 
 	uncached_base = PHYS_TO_XKPHYS_UNCACHED(0, SP_NC);
 	io_base = PHYS_TO_XKPHYS_UNCACHED(0, SP_IO);
@@ -143,20 +145,31 @@ ip27_setup()
 			hw_prod = "Origin 300";
 			break;
 		default:
-		    {
-			static char unknown_model[20];
 			snprintf(unknown_model, sizeof unknown_model,
 			    "Unknown IP35 type %x", sys_config.system_subtype);
 			hw_prod = unknown_model;
-		    }
 			break;
 		}
 	} else {
-		/*
-		 * XXX need to look for Sn00 type in LBOOT space to tell
-		 * XXX Origin 2000 and Origin 200 apart.
-		 */
-		hw_prod = "Origin 200";
+		ip27_config = (struct ip27_config *)
+		    IP27_LHSPEC_ADDR(LBOOTBASE_IP27 + IP27_CONFIG_OFFSET);
+		if (ip27_config->magic == IP27_CONFIG_MAGIC)
+			sys_config.system_subtype = ip27_config->ip27_subtype;
+		else
+			sys_config.system_subtype = IP27_UNKNOWN;
+		switch (sys_config.system_subtype) {
+		case IP27_O2K:
+			hw_prod = "Origin 2000";
+			break;
+		case IP27_O200:
+			hw_prod = "Origin 200";
+			break;
+		default:
+			snprintf(unknown_model, sizeof unknown_model,
+			    "Unknown IP27 type %x", sys_config.system_subtype);
+			hw_prod = unknown_model;
+			break;
+		}
 	}
 
 	xbow_widget_base = ip27_widget_short;
@@ -199,13 +212,13 @@ ip27_setup()
 	 * information, starting with the master node.
 	 */
 
-	kl_scan_config(masternasid);
+	kl_scan_config(ip35, masternasid);
 	for (node = 0; node < maxnodes; node++) {
 		if (gda->nasid[node] < 0)
 			continue;
 		if (gda->nasid[node] == masternasid)
 			continue;
-		kl_scan_config(gda->nasid[node]);
+		kl_scan_config(ip35, gda->nasid[node]);
 	}
 
 	/*
@@ -313,7 +326,10 @@ ip27_setup()
 void
 ip27_autoconf(struct device *parent)
 {
-	struct cpu_attach_args caa;
+	union {
+		struct mainbus_attach_args maa;
+		struct cpu_attach_args caa;
+	} u;
 	uint node;
 
 	xbow_widget_id = ip27_widget_id;
@@ -323,13 +339,13 @@ ip27_autoconf(struct device *parent)
 	 * if any, will get attached as they are discovered.
 	 */
 
-	bzero(&caa, sizeof caa);
-	caa.caa_maa.maa_name = "cpu";
-	caa.caa_maa.maa_nasid = currentnasid = masternasid;
-	caa.caa_hw = &bootcpu_hwinfo;
-	config_found(parent, &caa, ip27_print);
-	caa.caa_maa.maa_name = "clock";
-	config_found(parent, &caa.caa_maa, ip27_print);
+	bzero(&u, sizeof u);
+	u.maa.maa_name = "cpu";
+	u.maa.maa_nasid = currentnasid = masternasid;
+	u.caa.caa_hw = &bootcpu_hwinfo;
+	config_found(parent, &u, ip27_print);
+	u.maa.maa_name = "clock";
+	config_found(parent, &u, ip27_print);
 
 	/*
 	 * Now attach all nodes' I/O devices.
@@ -348,12 +364,30 @@ ip27_autoconf(struct device *parent)
 void
 ip27_attach_node(struct device *parent, int16_t nasid)
 {
-	struct mainbus_attach_args maa;
+	union {
+		struct mainbus_attach_args maa;
+		struct spdmem_attach_args saa;
+	} u;
+	uint dimm;
+	void *match;
 
-	bzero(&maa, sizeof maa);
-	maa.maa_name = "xbow";
-	maa.maa_nasid = currentnasid = nasid;
-	config_found(parent, &maa, ip27_print);
+	bzero(&u, sizeof u);
+	if (ip35) {
+		u.maa.maa_name = "spdmem";
+		for (dimm = 0; dimm < L1_SPD_DIMM_MAX; dimm++) {
+			u.saa.dimm = dimm;
+			/*
+			 * inline config_found_sm() without printing a message
+			 * if match() fails, to avoid getting
+			 * ``spdmem not configured'' for empty memory slots.
+			 */
+			if ((match = config_search(NULL, parent, &u)) != NULL)
+				config_attach(parent, match, &u, ip27_print);
+		}
+	}
+	u.maa.maa_name = "xbow";
+	u.maa.maa_nasid = currentnasid = nasid;
+	config_found(parent, &u, ip27_print);
 }
 
 int
@@ -361,6 +395,8 @@ ip27_print(void *aux, const char *pnp)
 {
 	struct mainbus_attach_args *maa = aux;
 
+	if (pnp != NULL)
+		printf("%s at %s", maa->maa_name, pnp);
 	printf(" nasid %d", maa->maa_nasid);
 
 	return UNCONF;
