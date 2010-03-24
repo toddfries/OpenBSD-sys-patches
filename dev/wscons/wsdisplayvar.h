@@ -209,6 +209,8 @@ int wsdisplay_cfg_ioctl(struct wsdisplay_softc *sc,
  */
 #define WSDISPLAY_NULLSCREEN	-1
 void wsdisplay_switchtoconsole(void);
+void wsdisplay_suspend(void);
+void wsdisplay_resume(void);
 const struct wsscreen_descr *
     wsdisplay_screentype_pick(const struct wsscreen_list *, const char *);
 
