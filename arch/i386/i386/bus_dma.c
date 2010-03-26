@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.19 2009/11/03 17:21:46 damien Exp $	*/
+/*	$OpenBSD: bus_dma.c,v 1.20 2010/03/25 22:44:57 oga Exp $	*/
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
  * All rights reserved.
