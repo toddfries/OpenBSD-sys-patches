@@ -1924,6 +1924,8 @@ radeon_do_cp_idle(drm_radeon_private_t *dev_priv)
 {
 	DRM_DEBUG("\n");
 
+	if (dev_priv->cp_running == 0)
+		return (0);
 
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600) {
 		BEGIN_RING(5);
@@ -2373,8 +2375,8 @@ radeon_cp_init_ring_buffer(struct drm_device *dev,
 #if __OS_HAS_AGP
 	if (dev_priv->flags & RADEON_IS_AGP) {
 		RADEON_WRITE(RADEON_CP_RB_RPTR_ADDR,
-			     dev_priv->ring_rptr->offset
-			     - dev->agp->base + dev_priv->gart_vm_start);
+		    dev_priv->ring_rptr->offset - dev->agp->base +
+		    dev_priv->gart_vm_start);
 	} else
 #endif
 	{
