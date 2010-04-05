@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.148 2010/03/16 17:12:50 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.150 2010/03/30 02:38:03 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -886,14 +886,14 @@ pmap_remove(pmap, sva, eva)
 
 	simple_lock(&pmap->pm_lock);
 
-	for (batch = 0, pdemask = 1; sva < eva; sva += PAGE_SIZE) {
-		if (pdemask != (sva & PDE_MASK)) {
-			pdemask = sva & PDE_MASK;
-			if (!(pde = pmap_pde_get(pmap->pm_pdir, sva))) {
-				sva = pdemask + (~PDE_MASK + 1) - PAGE_SIZE;
-				continue;
-			}
-			if (pdemask == sva && sva + (~PDE_MASK + 1) <= eva)
+	for (batch = 0; sva < eva; sva += PAGE_SIZE) {
+		pdemask = sva & PDE_MASK;
+		if (!(pde = pmap_pde_get(pmap->pm_pdir, sva))) {
+			sva = pdemask + (~PDE_MASK + 1) - PAGE_SIZE;
+			continue;
+		}
+		if (pdemask == sva) {
+			if (sva + (~PDE_MASK + 1) <= eva)
 				batch = 1;
 			else
 				batch = 0;
@@ -1171,7 +1171,6 @@ pmap_flush_page(struct vm_page *pg, int purge)
 			pdcache(pve->pv_pmap->pm_space, pve->pv_va, PAGE_SIZE);
 		else
 			fdcache(pve->pv_pmap->pm_space, pve->pv_va, PAGE_SIZE);
-		/* XXX Conditionalize ficache on PTE_PROT(TLB_EXECUTE)? */
 		ficache(pve->pv_pmap->pm_space, pve->pv_va, PAGE_SIZE);
 		pdtlb(pve->pv_pmap->pm_space, pve->pv_va);
 		pitlb(pve->pv_pmap->pm_space, pve->pv_va);

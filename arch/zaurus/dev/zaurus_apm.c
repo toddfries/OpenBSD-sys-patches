@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_apm.c,v 1.13 2006/12/12 23:14:28 dim Exp $	*/
+/*	$OpenBSD: zaurus_apm.c,v 1.14 2010/03/30 17:40:55 oga Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.84 2009/06/24 13:54:42 deraadt Exp $	*/
+/*	$OpenBSD: apm.c,v 1.85 2010/03/30 17:40:55 oga Exp $	*/
 
 /*-
  * Copyright (c) 1998-2001 Michael Shalayeff. All rights reserved.

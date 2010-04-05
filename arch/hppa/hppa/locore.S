@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.164 2009/12/31 12:52:35 jsing Exp $	*/
+/*	$OpenBSD: locore.S,v 1.166 2010/04/01 12:30:38 jsing Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -92,16 +92,12 @@
 	.import	boothowto, data
 	.import	bootdev, data
 	.import	esym, data
-	.import	curproc, data
-	.import cpu_info_primary, data
+	.import cpu_info, data
 	.import virtual_avail, data
 	.import	proc0, data
 	.import	proc0paddr, data
 	.import	kpsw, data
 	.import	panic, code
-
-#define curproc	(cpu_info_primary + CI_CURPROC)
-#define cpl	(cpu_info_primary + CI_CPL)
 
 #define	EMRG_STACKSIZE	(1*NBPG)
 #define	FPEMU_STACKSIZE	(1*NBPG)
@@ -216,6 +212,11 @@ $start_zero_tf
 	 * disable all coprocessors
 	 */
 	mtctl	r0, ccr
+
+	/* Store pointer to cpu_info in CR29. */
+	ldil	L%cpu_info, r1
+	ldo	R%cpu_info(r1), r1
+	mtctl	r1, cr29
 
 	copy	sp, arg1
 	ldil	L%$qisnowon, rp
@@ -561,8 +562,8 @@ $syscall
 	 * t4:	user stack
 	 *
 	 */
-	ldil	L%curproc, t2
-	ldw	R%curproc(sr1, t2), t2
+	mfctl	cr29, t2
+	ldw	CI_CURPROC(sr1, t2), t2
 	ldw	P_ADDR(sr1, t2), t3	/* XXX can use ,sl */
 
 	/* calculate kernel sp, load, create kernel stack frame */
@@ -697,8 +698,8 @@ $syscall
 	bv,n	0(r1)
 	nop
 
-	ldil	L%curproc, r1
-	ldw	R%curproc(r1), r1
+	mfctl	cr29, r1
+	ldw	CI_CURPROC(r1), r1
 	ldw	P_MD_REGS(r1), t3
 
 	.exit
@@ -1628,8 +1629,8 @@ ENTRY(TLABEL(all),0)
 	comb,<>	t1, t2, $trap_from_kernel
 	dep	r0, 31, 6, sp
 
-	ldil	L%curproc, t2
-	ldw	R%curproc(t2), t2
+	mfctl	cr29, t2
+	ldw	CI_CURPROC(t2), t2
 	depi	1, T_USER_POS, 1, r1
 	depi	1, TFF_LAST_POS, 1, r1
 	ldw	P_ADDR(t2), sp
@@ -1816,8 +1817,8 @@ $trapnowvirt
 	b	$syscall_return
 
 	/* see if curproc have really changed */
-	ldil	L%curproc, t1
-	ldw	R%curproc(t1), t2
+	mfctl	cr29, t1
+	ldw	CI_CURPROC(t1), t2
 	sub,<>	r0, t2, r0
 	ldw	P_MD_REGS(t2), t3
 
@@ -2146,8 +2147,8 @@ $intr_cont
 
 	ldil	L%ipending, r25
 	stw	r24, R%ipending(r25)
-	ldil	L%cpl, r17
-	ldw	R%cpl(r17), r17
+	mfctl	cr29, r17
+	ldw	CI_CPL(r17), r17
 	ldil	L%imask, r16
 	ldo	R%imask(r16), r16
 	ldwx,s	r17(r16), r25
@@ -2269,10 +2270,10 @@ $ibrk_spllower
 	ldw	R%ipending(r8), r8
 	ldil	L%imask, r9
 	ldo	R%imask(r9), r9
-	ldil	L%cpl, r17
-	ldw	R%cpl(r17), ret0
+	mfctl	cr29, r17
+	ldw	CI_CPL(r17), ret0
 	ldwx,s	arg0(r9), r16
-	stw	arg0, R%cpl(r17)
+	stw	arg0, CI_CPL(r17)
 	ldi	T_INTERRUPT, r1
 	andcm,=	r8, r16, r0
 	b	TLABEL(all)
@@ -2544,7 +2545,7 @@ LEAF_ENTRY(pdcache)
 	ldw	R%dcache_stride(t1), arg3
 
 	mtsp	arg0, sr1		/* move the space register to sr1 */
-	add	arg1, arg2, arg0	/* get the last byte to flush in arg0 */
+	add	arg1, arg2, arg0	/* get the last byte to purge in arg0 */
 
 	zdep	arg3, 27, 28, t1	/* get size of a 16X loop in t1 */
 	comb,<	arg2, t1, pdc_short	/* check for count < 16 * stride */
@@ -2553,7 +2554,7 @@ LEAF_ENTRY(pdcache)
 	andcm	arg2, t1, t1		/* L = count - (count mod lenbigloop) */
 	add	arg1, t1, t1		/* ub for big loop is lb + L */
 
-	pdc,m	arg3(sr1, arg1)		/* Start flushing first cache line. */
+	pdc,m	arg3(sr1, arg1)		/* Start purging first cache line. */
 pdc_long
 	pdc,m	arg3(sr1, arg1)
 	pdc,m	arg3(sr1, arg1)
@@ -2572,7 +2573,7 @@ pdc_long
 	pdc,m	arg3(sr1, arg1)
 	comb,<<,n arg1, t1, pdc_long
 	pdc,m	arg3(sr1, arg1)
-pdc_short				/* flush one line at a time */
+pdc_short				/* purge one line at a time */
 	comb,<<,n arg1, arg0, pdc_short
 	pdc,m	arg3(sr1, arg1)
 
@@ -2716,8 +2717,8 @@ LEAF_ENTRY(spstrcpy)
 	add	t2, arg1, t2
 	stw	rp, HPPA_FRAME_CRP(sp)
 	/* setup fault handler */
-	ldil	L%curproc, t1
-	ldw	R%curproc(t1), t3
+	mfctl	cr29, t1
+	ldw	CI_CURPROC(t1), t3
 	ldil	L%copy_on_fault, t4
 	ldw	P_ADDR(t3), r2
 	ldo	R%copy_on_fault(t4), t4
@@ -2805,8 +2806,8 @@ kstack_ok
 	/* Record new proc. */
 	ldi	SONPROC, t1
 	stb	t1, P_STAT(arg1)
-	ldil	L%curproc, t1
-	stw	arg1, R%curproc(t1)
+	mfctl	cr29, t1
+	stw	arg1, CI_CURPROC(t1)
 
 	/* If old process exited, don't bother. */
 	comb,=,n r0, arg0, switch_exited
@@ -2906,14 +2907,14 @@ ENTRY(switch_trampoline,0)
 	copy	r4, arg0
 	copy	r3, t4
 #endif
-	ldil	L%cpl, t1
-	stw	r0, R%cpl(t1)
+	mfctl	cr29, t1
+	stw	r0, CI_CPL(t1)
 	.call
 	blr	r0, rp
 	bv,n	r0(t4)
 	nop
-	ldil	L%curproc, t1
-	ldw	R%curproc(t1), t2
+	mfctl	cr29, t1
+	ldw	CI_CURPROC(t1), t2
 	.call
 	b	$syscall_return
 	ldw	P_MD_REGS(t2), t3

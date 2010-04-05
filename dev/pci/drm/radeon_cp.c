@@ -1663,38 +1663,38 @@ static void r600_cp_load_microcode(drm_radeon_private_t *dev_priv)
 
 	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
 	case CHIP_R600:
-		DRM_INFO("Loading R600 Microcode\n");
+		DRM_DEBUG("Loading R600 Microcode\n");
 		cp  = R600_cp_microcode;
 		pfp = R600_pfp_microcode;
 		break;
 	case CHIP_RV610:
-		DRM_INFO("Loading RV610 Microcode\n");
+		DRM_DEBUG("Loading RV610 Microcode\n");
 		cp  = RV610_cp_microcode;
 		pfp = RV610_pfp_microcode;
 		break;
 	case CHIP_RV630:
-		DRM_INFO("Loading RV630 Microcode\n");
+		DRM_DEBUG("Loading RV630 Microcode\n");
 		cp  = RV630_cp_microcode;
 		pfp = RV630_pfp_microcode;
 		break;
 	case CHIP_RV620:
-		DRM_INFO("Loading RV620 Microcode\n");
+		DRM_DEBUG("Loading RV620 Microcode\n");
 		cp  = RV620_cp_microcode;
 		pfp = RV620_pfp_microcode;
 		break;
 	case CHIP_RV635:
-		DRM_INFO("Loading RV635 Microcode\n");
+		DRM_DEBUG("Loading RV635 Microcode\n");
 		cp  = RV635_cp_microcode;
 		pfp = RV635_pfp_microcode;
 		break;
 	case CHIP_RV670:
-		DRM_INFO("Loading RV670 Microcode\n");
+		DRM_DEBUG("Loading RV670 Microcode\n");
 		cp  = RV670_cp_microcode;
 		pfp = RV670_pfp_microcode;
 		break;
 	case CHIP_RS780:
 	case CHIP_RS880:
-		DRM_INFO("Loading RS780/RS880 Microcode\n");
+		DRM_DEBUG("Loading RS780/RS880 Microcode\n");
 		cp  = RS780_cp_microcode;
 		pfp = RS780_pfp_microcode;
 		break;
@@ -1791,18 +1791,18 @@ static void r700_cp_load_microcode(drm_radeon_private_t *dev_priv)
 
 	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
 	case CHIP_RV770:
-		DRM_INFO("Loading RV770/RV790 Microcode\n");
+		DRM_DEBUG("Loading RV770/RV790 Microcode\n");
 		pfp = RV770_pfp_microcode;
 		cp  = RV770_cp_microcode;
 		break;
 	case CHIP_RV730:
 	case CHIP_RV740:
-		DRM_INFO("Loading RV730/RV740 Microcode\n");
+		DRM_DEBUG("Loading RV730/RV740 Microcode\n");
 		pfp = RV730_pfp_microcode;
 		cp  = RV730_cp_microcode;
 		break;
 	case CHIP_RV710:
-		DRM_INFO("Loading RV710 Microcode\n");
+		DRM_DEBUG("Loading RV710 Microcode\n");
 		pfp = RV710_pfp_microcode;
 		cp  = RV710_cp_microcode;
 		break;
@@ -1924,6 +1924,8 @@ radeon_do_cp_idle(drm_radeon_private_t *dev_priv)
 {
 	DRM_DEBUG("\n");
 
+	if (dev_priv->cp_running == 0)
+		return (0);
 
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600) {
 		BEGIN_RING(5);
@@ -2066,7 +2068,7 @@ int r600_do_engine_reset(struct drm_device *dev)
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	u32 cp_ptr, cp_me_cntl, cp_rb_cntl;
 
-	DRM_INFO("Resetting GPU\n");
+	DRM_DEBUG("Resetting GPU\n");
 
 	cp_ptr = RADEON_READ(R600_CP_RB_WPTR);
 	cp_me_cntl = RADEON_READ(R600_CP_ME_CNTL);
@@ -2373,8 +2375,8 @@ radeon_cp_init_ring_buffer(struct drm_device *dev,
 #if __OS_HAS_AGP
 	if (dev_priv->flags & RADEON_IS_AGP) {
 		RADEON_WRITE(RADEON_CP_RB_RPTR_ADDR,
-			     dev_priv->ring_rptr->offset
-			     - dev->agp->base + dev_priv->gart_vm_start);
+		    dev_priv->ring_rptr->offset - dev->agp->base +
+		    dev_priv->gart_vm_start);
 	} else
 #endif
 	{

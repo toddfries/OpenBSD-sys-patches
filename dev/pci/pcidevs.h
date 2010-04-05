@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1540 2010/03/25 00:35:57 ckuethe Exp 
+ *	OpenBSD: pcidevs,v 1.1543 2010/03/30 14:43:06 oga Exp 
  */
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
@@ -1319,6 +1319,7 @@
 #define	PCI_PRODUCT_ATI_RADEON_HD2600PROAGP	0x9587		/* Radeon HD 2600 Pro AGP */
 #define	PCI_PRODUCT_ATI_RADEON_HD2600_PRO	0x9589		/* Radeon HD 2600 Pro */
 #define	PCI_PRODUCT_ATI_RADEON_HD3650_M	0x9591		/* Mobility Radeon HD 3650 */
+#define	PCI_PRODUCT_ATI_RADEON_HD3670_M	0x9593		/* Mobility Radeon HD 3670 */
 #define	PCI_PRODUCT_ATI_RADEON_HD3650_AGP	0x9596		/* Radeon HD 3650 AGP */
 #define	PCI_PRODUCT_ATI_RADEON_HD3650	0x9598		/* Radeon HD 3650 */
 #define	PCI_PRODUCT_ATI_RADEON_HD3470	0x95c0		/* Radeon HD 3470 */
@@ -3575,6 +3576,7 @@
 #define	PCI_PRODUCT_NETMOS_NM9805	0x9805		/* Nm9805 */
 #define	PCI_PRODUCT_NETMOS_NM9835	0x9835		/* Nm9835 */
 #define	PCI_PRODUCT_NETMOS_NM9845	0x9845		/* Nm9845 */
+#define	PCI_PRODUCT_NETMOS_NM9865	0x9865		/* Nm9865 */
 #define	PCI_PRODUCT_NETMOS_NM9901	0x9901		/* Nm9901 */
 
 /* Network Security Technologies */

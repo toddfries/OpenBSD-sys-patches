@@ -1,4 +1,4 @@
-/* $OpenBSD: wsdisplay.c,v 1.97 2009/11/09 17:53:39 nicm Exp $ */
+/* $OpenBSD: wsdisplay.c,v 1.98 2010/03/30 17:40:55 oga Exp $ */
 /* $NetBSD: wsdisplay.c,v 1.82 2005/02/27 00:27:52 perry Exp $ */
 
 /*
@@ -2188,8 +2188,7 @@ wsdisplay_suspend_device(struct device *dev)
 	struct wsscreen		*scr;
 	int			 active, idx, ret = 0, s;
 	
-	if (sc == NULL || (active = wsdisplay_getactivescreen(sc)) ==
-	    WSDISPLAY_NULLSCREEN)
+	if ((active = wsdisplay_getactivescreen(sc)) == WSDISPLAY_NULLSCREEN)
 		return;
 
 	scr = sc->sc_scr[active];
@@ -2253,11 +2252,11 @@ wsdisplay_resume_device(struct device *dev)
 	struct wsdisplay_softc	*sc = (struct wsdisplay_softc *)dev;
 	int			 idx, s;
 
-	if (sc != NULL && sc->sc_resumescreen != WSDISPLAY_NULLSCREEN) {
+	if (sc->sc_resumescreen != WSDISPLAY_NULLSCREEN) {
 		s = spltty();
 		idx = sc->sc_resumescreen;
 		sc->sc_resumescreen = WSDISPLAY_NULLSCREEN;
-		wakeup (&sc->sc_resumescreen);
+		wakeup(&sc->sc_resumescreen);
 		splx(s);
 		(void)wsdisplay_switch((struct device *)sc, idx, 1);
 	}
