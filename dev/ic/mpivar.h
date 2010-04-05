@@ -127,6 +127,7 @@ struct mpi_softc {
 	struct mpi_ccb		*sc_ccbs;
 	struct mpi_ccb_list	sc_ccb_free;
 	struct mutex		sc_ccb_mtx;
+	struct scsi_iopool	sc_iopool;
 
 	struct mpi_dmamem	*sc_replies;
 	struct mpi_rcb		*sc_rcbs;
