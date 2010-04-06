@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_run.c,v 1.63 2010/03/27 16:13:24 damien Exp $	*/
+/*	$OpenBSD: if_run.c,v 1.65 2010/04/06 08:58:51 halex Exp $	*/
 
 /*-
  * Copyright (c) 2008-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -126,6 +126,7 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(AZUREWAVE,	RT3070_3),
 	USB_ID(BELKIN,		F5D8053V3),
 	USB_ID(BELKIN,		F5D8055),
+	USB_ID(BELKIN,		F5D8055V2),
 	USB_ID(BELKIN,		F6D4050V1),
 	USB_ID(BELKIN,		RT2870_1),
 	USB_ID(BELKIN,		RT2870_2),
@@ -2445,13 +2446,13 @@ run_rt2870_set_chan(struct run_softc *sc, u_int chan)
 	txpow2 = sc->txpow2[i];
 	if (chan > 14) {
 		if (txpow1 >= 0)
-			txpow1 = txpow1 << 1;
+			txpow1 = txpow1 << 1 | 1;
 		else
-			txpow1 = (7 + txpow1) << 1 | 1;
+			txpow1 = (7 + txpow1) << 1;
 		if (txpow2 >= 0)
-			txpow2 = txpow2 << 1;
+			txpow2 = txpow2 << 1 | 1;
 		else
-			txpow2 = (7 + txpow2) << 1 | 1;
+			txpow2 = (7 + txpow2) << 1;
 	}
 	r3 = rfprog[i].r3 | txpow1 << 7;
 	r4 = rfprog[i].r4 | sc->freq << 13 | txpow2 << 4;

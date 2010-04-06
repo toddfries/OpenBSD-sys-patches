@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.136 2010/04/03 08:00:42 dlg Exp $ */
+/*	$OpenBSD: mpi.c,v 1.138 2010/04/06 01:24:43 dlg Exp $ */
 
 /*
  * Copyright (c) 2005, 2006, 2009 David Gwynne <dlg@openbsd.org>
@@ -294,6 +294,7 @@ mpi_attach(struct mpi_softc *sc)
 	sc->sc_link.adapter_target = sc->sc_target;
 	sc->sc_link.adapter_buswidth = sc->sc_buswidth;
 	sc->sc_link.openings = sc->sc_maxcmds / sc->sc_buswidth;
+	sc->sc_link.pool = &sc->sc_iopool;
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &sc->sc_link;
@@ -953,7 +954,7 @@ mpi_alloc_ccbs(struct mpi_softc *sc)
 	u_int8_t			*cmd;
 	int				i;
 
-	TAILQ_INIT(&sc->sc_ccb_free);
+	SLIST_INIT(&sc->sc_ccb_free);
 	mtx_init(&sc->sc_ccb_mtx, IPL_BIO);
 
 	sc->sc_ccbs = malloc(sizeof(struct mpi_ccb) * sc->sc_maxcmds,
@@ -986,6 +987,7 @@ mpi_alloc_ccbs(struct mpi_softc *sc)
 		ccb->ccb_sc = sc;
 		ccb->ccb_id = i;
 		ccb->ccb_offset = MPI_REQUEST_SIZE * i;
+		ccb->ccb_state = MPI_CCB_READY;
 
 		ccb->ccb_cmd = &cmd[ccb->ccb_offset];
 		ccb->ccb_cmd_dva = (u_int32_t)MPI_DMA_DVA(sc->sc_requests) +
@@ -999,6 +1001,10 @@ mpi_alloc_ccbs(struct mpi_softc *sc)
 
 		mpi_put_ccb(sc, ccb);
 	}
+
+	scsi_iopool_init(&sc->sc_iopool, sc,
+	    (void *(*)(void *))mpi_get_ccb,
+	    (void (*)(void *, void *))mpi_put_ccb);
 
 	return (0);
 
@@ -1019,9 +1025,9 @@ mpi_get_ccb(struct mpi_softc *sc)
 	struct mpi_ccb			*ccb;
 
 	mtx_enter(&sc->sc_ccb_mtx);
-	ccb = TAILQ_FIRST(&sc->sc_ccb_free);
+	ccb = SLIST_FIRST(&sc->sc_ccb_free);
 	if (ccb != NULL) {
-		TAILQ_REMOVE(&sc->sc_ccb_free, ccb, ccb_link);
+		SLIST_REMOVE_HEAD(&sc->sc_ccb_free, ccb_link);
 		ccb->ccb_state = MPI_CCB_READY;
 	}
 	mtx_leave(&sc->sc_ccb_mtx);
@@ -1036,12 +1042,17 @@ mpi_put_ccb(struct mpi_softc *sc, struct mpi_ccb *ccb)
 {
 	DNPRINTF(MPI_D_CCB, "%s: mpi_put_ccb %p\n", DEVNAME(sc), ccb);
 
+#ifdef DIAGNOSTIC
+	if (ccb->ccb_state == MPI_CCB_FREE)
+		panic("mpi_put_ccb: double free");
+#endif
+
 	ccb->ccb_state = MPI_CCB_FREE;
 	ccb->ccb_cookie = NULL;
 	ccb->ccb_done = NULL;
 	bzero(ccb->ccb_cmd, MPI_REQUEST_SIZE);
 	mtx_enter(&sc->sc_ccb_mtx);
-	TAILQ_INSERT_TAIL(&sc->sc_ccb_free, ccb, ccb_link);
+	SLIST_INSERT_HEAD(&sc->sc_ccb_free, ccb, ccb_link);
 	mtx_leave(&sc->sc_ccb_mtx);
 }
 
@@ -1214,14 +1225,7 @@ mpi_scsi_cmd(struct scsi_xfer *xs)
 		return;
 	}
 
-	ccb = mpi_get_ccb(sc);
-	if (ccb == NULL) {
-		xs->error = XS_NO_CCB;
-		s = splbio();
-		scsi_done(xs);
-		splx(s);
-		return;
-	}
+	ccb = xs->io;
 
 	DNPRINTF(MPI_D_CMD, "%s: ccb_id: %d xs->flags: 0x%x\n",
 	    DEVNAME(sc), ccb->ccb_id, xs->flags);
@@ -1320,7 +1324,6 @@ mpi_scsi_cmd_done(struct mpi_ccb *ccb)
 
 	if (ccb->ccb_rcb == NULL) {
 		/* no scsi error, we're ok so drop out early */
-		mpi_put_ccb(sc, ccb);
 		xs->status = SCSI_OK;
 		s = splbio();
 		scsi_done(xs);
@@ -1409,7 +1412,6 @@ mpi_scsi_cmd_done(struct mpi_ccb *ccb)
 	    xs->error, xs->status);
 
 	mpi_push_reply(sc, ccb->ccb_rcb);
-	mpi_put_ccb(sc, ccb);
 	s = splbio();
 	scsi_done(xs);
 	splx(s);
@@ -2501,7 +2503,8 @@ mpi_req_cfg_header(struct mpi_softc *sc, u_int8_t type, u_int8_t number,
 	    "address: 0x%08x flags: 0x%b\n", DEVNAME(sc), type, number,
 	    address, flags, MPI_PG_FMT);
 
-	ccb = mpi_get_ccb(sc);
+	ccb = scsi_io_get(&sc->sc_iopool,
+	    ISSET(flags, MPI_PG_POLL) ? SCSI_NOSLEEP : 0);
 	if (ccb == NULL) {
 		DNPRINTF(MPI_D_MISC, "%s: mpi_cfg_header ccb_get\n",
 		    DEVNAME(sc));
@@ -2573,7 +2576,7 @@ mpi_req_cfg_header(struct mpi_softc *sc, u_int8_t type, u_int8_t number,
 		*hdr = cp->config_header;
 
 	mpi_push_reply(sc, ccb->ccb_rcb);
-	mpi_put_ccb(sc, ccb);
+	scsi_io_put(&sc->sc_iopool, ccb);
 
 	return (rv);
 }
@@ -2602,7 +2605,8 @@ mpi_req_cfg_page(struct mpi_softc *sc, u_int32_t address, int flags,
 	    len < page_length * 4)
 		return (1);
 
-	ccb = mpi_get_ccb(sc);
+	ccb = scsi_io_get(&sc->sc_iopool,
+	    ISSET(flags, MPI_PG_POLL) ? SCSI_NOSLEEP : 0);
 	if (ccb == NULL) {
 		DNPRINTF(MPI_D_MISC, "%s: mpi_cfg_page ccb_get\n", DEVNAME(sc));
 		return (1);
@@ -2683,7 +2687,7 @@ mpi_req_cfg_page(struct mpi_softc *sc, u_int32_t address, int flags,
 		bcopy(kva, page, len);
 
 	mpi_push_reply(sc, ccb->ccb_rcb);
-	mpi_put_ccb(sc, ccb);
+	scsi_io_put(&sc->sc_iopool, ccb);
 
 	return (rv);
 }
