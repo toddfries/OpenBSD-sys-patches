@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.154 2010/01/01 14:28:59 miod Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.155 2010/04/06 00:58:00 dlg Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*

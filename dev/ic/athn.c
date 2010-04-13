@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.29 2010/03/28 13:02:57 krw Exp $	*/
+/*	$OpenBSD: athn.c,v 1.31 2010/04/05 19:09:00 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
