@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.31 2010/04/05 19:09:00 damien Exp $	*/
+/*	$OpenBSD: athn.c,v 1.35 2010/04/10 19:07:24 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -242,9 +242,6 @@ athn_attach(struct athn_softc *sc)
 	}
 	base = sc->eep;
 
-	/* We can put the chip in sleep state now. */
-	athn_set_power_sleep(sc);
-
 	eep_ver = (base->version >> 12) & 0xf;
 	sc->eep_rev = (base->version & 0xfff);
 	if (eep_ver != AR_EEP_VER || sc->eep_rev == 0) {
@@ -252,8 +249,10 @@ athn_attach(struct athn_softc *sc)
 		    sc->eep_rev);
 		return (EINVAL);
 	}
-
 	sc->ops.setup(sc);
+
+	/* We can put the chip in sleep state now. */
+	athn_set_power_sleep(sc);
 
 	IEEE80211_ADDR_COPY(ic->ic_myaddr, base->macAddr);
 	printf(", address %s\n", ether_sprintf(ic->ic_myaddr));
@@ -1282,7 +1281,7 @@ athn_switch_chan(struct athn_softc *sc, struct ieee80211_channel *c,
 		goto reset;
 
 	/* AR9280 always needs a full reset. */
-	if (AR_SREV_9280(sc))
+/*	if (AR_SREV_9280(sc)) */
 		goto reset;
 
 	/* If band or bandwidth changes, we need to do a full reset. */
@@ -2873,7 +2872,7 @@ athn_stop_tx_dma(struct athn_softc *sc, int qid)
 			AR_WRITE(sc, AR_QUIET_PERIOD, 100);
 			AR_WRITE(sc, AR_NEXT_QUIET_TIMER, tsflo);
 			AR_SETBITS(sc, AR_TIMER_MODE, AR_QUIET_TIMER_EN);
-			if (AR_READ(sc, AR_TSF_L32) / 1024 != tsflo)
+			if (AR_READ(sc, AR_TSF_L32) / 1024 == tsflo)
 				break;
 		}
 		AR_SETBITS(sc, AR_DIAG_SW, AR_DIAG_FORCE_CH_IDLE_HIGH);
@@ -3606,7 +3605,7 @@ athn_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 			lastds->ds_link = bf->bf_daddr + i * sizeof (*ds);
 		lastds = ds;
 	}
-	if (txq->lastds != NULL)
+	if (!SIMPLEQ_EMPTY(&txq->head))
 		txq->lastds->ds_link = bf->bf_daddr;
 	else
 		AR_WRITE(sc, AR_QTXDP(qid), bf->bf_daddr);
