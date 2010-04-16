@@ -1899,8 +1899,8 @@ i915_write_fence_reg(struct inteldrm_fence *reg)
 
 	if ((obj_priv->gtt_offset & ~I915_FENCE_START_MASK) ||
 	    (obj_priv->gtt_offset & (obj->size - 1))) {
-		DRM_ERROR("%s: object 0x%08x not 1M or size (0x%zx) aligned\n",
-		     __func__, obj_priv->gtt_offset, obj->size);
+		DRM_ERROR("object 0x%lx not 1M or size (0x%zx) aligned\n",
+		     obj_priv->gtt_offset, obj->size);
 		return;
 	}
 
@@ -1940,8 +1940,8 @@ i830_write_fence_reg(struct inteldrm_fence *reg)
 
 	if ((obj_priv->gtt_offset & ~I830_FENCE_START_MASK) ||
 	    (obj_priv->gtt_offset & (obj->size - 1))) {
-		DRM_ERROR("object 0x%08x not 512K or size aligned\n",
-		     obj_priv->gtt_offset);
+		DRM_ERROR("object 0x%08x not 512K or size aligned 0x%lx\n",
+		     obj_priv->gtt_offset, obj->size);
 		return;
 	}
 
@@ -2139,9 +2139,8 @@ inteldrm_fault(struct drm_obj *obj, struct uvm_faultinfo *ufi, off_t offset,
 
 	DRM_LOCK();
 	/*
-	 * XXX is it ok to sleep in fault handlers? If not, we may have some
-	 * problems...  (i can has race plz? -> judicious use of
-	 * uvmfault_unlockall ahoy)
+	 * XXX this locking is wrong, must be fixed. uvm using simple_locks
+	 * saves us for now.
 	 */
 	if (obj_priv->dmamap == NULL) {
 		ret = i915_gem_object_bind_to_gtt(obj, 0, 0);
@@ -2791,7 +2790,6 @@ err:
 	drm_gem_object_unreference(target_obj);
 	i915_gem_object_unpin(obj);
 	return (ret);
-	
 }
 
 /** Dispatch a batchbuffer to the ring
@@ -3172,9 +3170,11 @@ i915_gem_object_pin(struct drm_obj *obj, uint32_t alignment, int needs_fence)
 	 * otherwise, so just fail the pin (with a printf so we can fix a
 	 * wrong userland).
 	 */
-	if ((alignment && obj_priv->dmamap != NULL &&
-	    obj_priv->gtt_offset & (alignment - 1)) || (needs_fence &&
-	    !i915_gem_object_fence_offset_ok(obj, obj_priv->tiling_mode))) {
+	if (obj_priv->dmamap != NULL &&
+	    ((alignment && obj_priv->gtt_offset & (alignment - 1)) ||
+	    obj_priv->gtt_offset & (i915_gem_get_gtt_alignment(obj) - 1) ||
+	    (needs_fence && !i915_gem_object_fence_offset_ok(obj,
+	    obj_priv->tiling_mode)))) {
 		if (obj_priv->pin_count == 0) {
 			ret = i915_gem_object_unbind(obj, 1);
 			if (ret)
@@ -3440,7 +3440,7 @@ i915_gem_free_object(struct drm_obj *obj)
 	/* XXX dmatag went away? */
 }
 
-/** Unbinds all objects that are on the given buffer list. */
+/* Clear out the inactive list and unbind everything in it. */
 int
 i915_gem_evict_inactive(struct drm_i915_private *dev_priv)
 {
@@ -3727,8 +3727,9 @@ i915_gem_leavevt_ioctl(struct drm_device *dev, void *data,
 	struct drm_i915_private	*dev_priv = dev->dev_private;
 	int			 ret;
 
-	ret = i915_gem_idle(dev_priv);
-	drm_irq_uninstall(dev);
+	/* don't unistall if we fail, repeat calls on failure will screw us */
+	if ((ret = i915_gem_idle(dev_priv)) == 0)
+		drm_irq_uninstall(dev);
 	return (ret);
 }
 
@@ -4132,7 +4133,8 @@ inteldrm_teardown_mchbar(struct drm_i915_private *dev_priv,
 			high = pci_conf_read(bpa->pa_pc, bpa->pa_tag, reg + 4);
 		low = pci_conf_read(bpa->pa_pc, bpa->pa_tag, reg);
 		mchbar_addr = ((u_int64_t)high << 32) | low;
-		extent_free(bpa->pa_memex, mchbar_addr, MCHBAR_SIZE, 0);
+		if (bpa->pa_memex)
+			extent_free(bpa->pa_memex, mchbar_addr, MCHBAR_SIZE, 0);
 		/* FALLTHROUGH */
 	case 1:
 		if (IS_I915G(dev_priv) || IS_I915GM(dev_priv)) {
@@ -4429,7 +4431,6 @@ i915_tiling_ok(struct drm_device *dev, int stride, int size, int tiling_mode)
 	if (IS_I965G(dev_priv))
 		return ((stride & (tile_width - 1)) == 0);
 
-
 	/* Pre-965 needs power-of-two */
 	if (stride < tile_width || stride & (stride - 1) ||
 	    i915_get_fence_size(dev_priv, size) != size)
@@ -4511,7 +4512,7 @@ i915_gem_set_tiling(struct drm_device *dev, void *data,
 		 * mode. Otherwise we can leave it alone, but must clear any
 		 * fence register.
 		 */
-		if (i915_gem_object_fence_offset_ok(obj, args->tiling_mode)) {
+		if (!i915_gem_object_fence_offset_ok(obj, args->tiling_mode)) {
 			if (obj_priv->pin_count)
 				ret = EINVAL;
 			else
