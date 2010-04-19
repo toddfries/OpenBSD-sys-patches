@@ -208,53 +208,53 @@ void inteldrm_verify_inactive(struct drm_i915_private *, char *, int);
 
 const static struct drm_pcidev inteldrm_pciidlist[] = {
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82830M_IGD,
-	    CHIP_I830|CHIP_M},
+	    CHIP_I830|CHIP_M|CHIP_GEN2},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82845G_IGD,
-	    CHIP_I845G},
+	    CHIP_I845G|CHIP_GEN2},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82855GM_IGD,
-	    CHIP_I85X|CHIP_M},
+	    CHIP_I85X|CHIP_M|CHIP_GEN2},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82865G_IGD,
-	    CHIP_I865G},
+	    CHIP_I865G|CHIP_GEN2},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82915G_IGD_1,
-	    CHIP_I915G|CHIP_I9XX},
+	    CHIP_I915G|CHIP_I9XX|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E7221_IGD,
-	    CHIP_I915G|CHIP_I9XX},
+	    CHIP_I915G|CHIP_I9XX|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82915GM_IGD_1,
-	    CHIP_I915GM|CHIP_I9XX|CHIP_M},
+	    CHIP_I915GM|CHIP_I9XX|CHIP_M|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945G_IGD_1,
-	    CHIP_I945G|CHIP_I9XX},
+	    CHIP_I945G|CHIP_I9XX|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945GM_IGD_1,
-	    CHIP_I945GM|CHIP_I9XX|CHIP_M},
+	    CHIP_I945GM|CHIP_I9XX|CHIP_M|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945GME_IGD_1,
-	    CHIP_I945GM|CHIP_I9XX|CHIP_M},
+	    CHIP_I945GM|CHIP_I9XX|CHIP_M|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82946GZ_IGD_1,
-	    CHIP_I965|CHIP_I9XX},
+	    CHIP_I965|CHIP_I9XX|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G35_IGD_1,
-	    CHIP_I965|CHIP_I9XX},
+	    CHIP_I965|CHIP_I9XX|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q965_IGD_1,
-	    CHIP_I965|CHIP_I9XX},
+	    CHIP_I965|CHIP_I9XX|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G965_IGD_1,
-	    CHIP_I965|CHIP_I9XX},
+	    CHIP_I965|CHIP_I9XX|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM965_IGD_1,
-	    CHIP_I965GM|CHIP_I965|CHIP_I9XX|CHIP_M},
+	    CHIP_I965GM|CHIP_I965|CHIP_I9XX|CHIP_M|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GME965_IGD_1,
-	    CHIP_I965|CHIP_I9XX},
+	    CHIP_I965|CHIP_I9XX|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G33_IGD_1,
-	    CHIP_G33|CHIP_I9XX|CHIP_HWS},
+	    CHIP_G33|CHIP_I9XX|CHIP_HWS|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q35_IGD_1,
-	    CHIP_G33|CHIP_I9XX|CHIP_HWS},
+	    CHIP_G33|CHIP_I9XX|CHIP_HWS|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q33_IGD_1,
-	    CHIP_G33|CHIP_I9XX|CHIP_HWS},
+	    CHIP_G33|CHIP_I9XX|CHIP_HWS|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_IGD_1,
-	    CHIP_G4X|CHIP_GM45|CHIP_I965|CHIP_I9XX|CHIP_M|CHIP_HWS},
+	    CHIP_G4X|CHIP_GM45|CHIP_I965|CHIP_I9XX|CHIP_M|CHIP_HWS|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, 0x2E02,
-	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS},
+	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q45_IGD_1,
-	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS},
+	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G45_IGD_1,
-	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS},
+	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G41_IGD_1,
-	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS},
+	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS|CHIP_GEN4},
 	{0, 0, 0}
 };
 
@@ -1913,6 +1913,12 @@ i915_write_fence_reg(struct inteldrm_fence *reg)
 	/* Note: pitch better be a power of two tile widths */
 	pitch_val = obj_priv->stride / tile_width;
 	pitch_val = ffs(pitch_val) - 1;
+
+	if ((obj_priv->tiling_mode == I915_TILING_Y &&
+	    HAS_128_BYTE_Y_TILING(dev_priv) &&
+	    pitch_val > I830_FENCE_MAX_PITCH_VAL) ||
+	    pitch_val > I915_FENCE_MAX_PITCH_VAL)
+		printf("%s: invalid pitch provided"); /* XXX print more */
 
 	val = obj_priv->gtt_offset;
 	if (obj_priv->tiling_mode == I915_TILING_Y)
@@ -3670,6 +3676,10 @@ inteldrm_start_ring(struct drm_i915_private *dev_priv)
 	/* Update our cache of the ring state */
 	inteldrm_update_ring(dev_priv);
 
+	if (IS_I9XX(dev_priv) && !IS_GEN3(dev_priv))
+		I915_WRITE(MI_MODE, (VS_TIMER_DISPATCH) << 15 |
+		    VS_TIMER_DISPATCH);
+
 	return (0);
 }
 
@@ -4295,7 +4305,7 @@ i915_gem_bit_17_swizzle(struct drm_obj *obj)
 	struct vm_page		*pg;
 	bus_dma_segment_t	*segp;
 	int			 page_count = obj->size >> PAGE_SHIFT;
-	int			 i, n, ret;
+	int			 i = 0, n = 0, ret;
 
 	if (dev_priv->mm.bit_6_swizzle_x != I915_BIT_6_SWIZZLE_9_10_17 ||
 	    obj_priv->bit_17 == NULL)
@@ -4410,20 +4420,13 @@ i915_tiling_ok(struct drm_device *dev, int stride, int size, int tiling_mode)
 		/* fence reg has end address, so size is ok */
 		if (stride / 128 > I965_FENCE_MAX_PITCH_VAL)
 			return (0);
-	} else if (IS_I9XX(dev_priv)) {
-		u_int32_t pitch_val = ffs(stride / tile_width) - 1;
-		/*
-		 * XXX: for Y tiling, max pitch is actually 6 (8k) instead of 4
-		 * (2k) on the 945.
-		 */
-		if (pitch_val > I915_FENCE_MAX_PITCH_VAL ||
-		    size > (I830_FENCE_MAX_SIZE_VAL << 20))
+	} else if (IS_GEN3(dev_priv) || IS_GEN2(dev_priv)) {
+		if (stride > 8192)
 			return (0);
-	} else {
-		u_int32_t pitch_val = ffs(stride / tile_width) - 1;
-
-		if (pitch_val > I830_FENCE_MAX_PITCH_VAL ||
-		    size > (I830_FENCE_MAX_SIZE_VAL << 19))
+		if (IS_GEN3(dev_priv)) {
+			if (size > I830_FENCE_MAX_SIZE_VAL << 20)
+				return (0);
+		} else if (size > I830_FENCE_MAX_SIZE_VAL << 19)
 			return (0);
 	}
 

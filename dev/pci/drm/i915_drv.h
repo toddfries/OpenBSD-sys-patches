@@ -332,22 +332,26 @@ struct inteldrm_file {
 };
 
 /* chip type flags */
-#define CHIP_I830	0x0001
-#define CHIP_I845G	0x0002
-#define CHIP_I85X	0x0004
-#define CHIP_I865G	0x0008
-#define CHIP_I9XX	0x0010
-#define CHIP_I915G	0x0020
-#define CHIP_I915GM	0x0040
-#define CHIP_I945G	0x0080
-#define CHIP_I945GM	0x0100
-#define CHIP_I965	0x0200
-#define CHIP_I965GM	0x0400
-#define CHIP_G33	0x0800
-#define CHIP_GM45	0x1000
-#define CHIP_G4X	0x2000
-#define CHIP_M		0x4000
-#define CHIP_HWS	0x8000
+#define CHIP_I830	0x00001
+#define CHIP_I845G	0x00002
+#define CHIP_I85X	0x00004
+#define CHIP_I865G	0x00008
+#define CHIP_I9XX	0x00010
+#define CHIP_I915G	0x00020
+#define CHIP_I915GM	0x00040
+#define CHIP_I945G	0x00080
+#define CHIP_I945GM	0x00100
+#define CHIP_I965	0x00200
+#define CHIP_I965GM	0x00400
+#define CHIP_G33	0x00800
+#define CHIP_GM45	0x01000
+#define CHIP_G4X	0x02000
+#define CHIP_M		0x04000
+#define CHIP_HWS	0x08000
+#define CHIP_GEN2	0x10000
+#define CHIP_GEN3	0x20000
+#define CHIP_GEN4	0x40000
+#define CHIP_GEN6	0x80000
 
 /** driver private structure attached to each drm_gem_object */
 struct inteldrm_obj {
@@ -708,7 +712,7 @@ read64(struct drm_i915_private *dev_priv, bus_size_t off)
 #define   I830_FENCE_SIZE_BITS(size)	((ffs((size) >> 19) - 1) << 8)
 #define   I830_FENCE_PITCH_SHIFT	4
 #define   I830_FENCE_REG_VALID		(1<<0)
-#define   I915_FENCE_MAX_PITCH_VAL	0x10
+#define   I915_FENCE_MAX_PITCH_VAL	4
 #define   I830_FENCE_MAX_PITCH_VAL	6
 #define   I830_FENCE_MAX_SIZE_VAL	(1<<8)
 
@@ -760,6 +764,10 @@ read64(struct drm_i915_private *dev_priv, bus_size_t off)
 #define INSTDONE	0x02090
 #define NOPID		0x02094
 #define HWSTAM		0x02098
+
+#define MI_MODE		0x0209c
+#define VS_TIMER_DISPATCH	(1 << 6)
+
 #define SCPD0		0x0209c /* 915+ only */
 #define IER		0x020a0
 #define IIR		0x020a4
@@ -2323,6 +2331,11 @@ read64(struct drm_i915_private *dev_priv, bus_size_t off)
 #define I915_NEED_GFX_HWS(dev_priv) (dev_priv->flags & CHIP_HWS)
 
 #define HAS_RESET(dev_priv)	IS_I965G(dev_priv)
+
+#define IS_GEN2(dev_priv)	(dev_priv->flags & CHIP_GEN2)
+#define IS_GEN3(dev_priv)	(dev_priv->flags & CHIP_GEN3)
+#define IS_GEN4(dev_priv)	(dev_priv->flags & CHIP_GEN4)
+#define IS_GEN6(dev_priv)	(dev_priv->flags & CHIP_GEN6)
 
 /*
  * Interrupts that are always left unmasked.
