@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.27 2009/12/31 12:52:35 jsing Exp $	*/
+/*	$OpenBSD: intr.c,v 1.29 2010/04/19 16:32:53 jsing Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Michael Shalayeff
@@ -60,7 +60,6 @@ struct hppa_iv {
 	struct evcount *cnt;
 } __packed;
 
-register_t kpsw = PSL_Q | PSL_P | PSL_C | PSL_D;
 u_long cpu_mask;
 struct hppa_iv intr_store[8*2*CPU_NINTS] __attribute__ ((aligned(32))),
     *intr_more = intr_store, *intr_list;
@@ -70,7 +69,7 @@ struct hppa_iv intr_table[CPU_NINTS] __attribute__ ((aligned(32))) = {
 	{ 0 }, { 0 },
 	{ IPL_SOFTTTY  , 0, HPPA_IV_SOFT, 0, 0, NULL }
 };
-volatile u_long ipending, imask[NIPL] = {
+volatile u_long imask[NIPL] = {
 	0,
 	1 << (IPL_SOFTCLOCK - 1),
 	1 << (IPL_SOFTNET - 1),
@@ -146,7 +145,7 @@ cpu_intr_init(void)
 	mtctl(mask & (1 << 31), CR_EIRR);
 
 	/* in spl*() we trust, clock is started in initclocks() */
-	kpsw |= PSL_I;
+	curcpu()->ci_psw |= PSL_I;
 	ssm(PSL_I, mask);
 }
 
@@ -293,11 +292,11 @@ cpu_intr(void *v)
 	if (ci->ci_in_intr++)
 		frame->tf_flags |= TFF_INTR;
 
-	while ((mask = ipending & ~imask[s])) {
+	while ((mask = ci->ci_ipending & ~imask[s])) {
 		int r, bit = fls(mask) - 1;
 		struct hppa_iv *iv = &intr_table[bit];
 
-		ipending &= ~(1L << bit);
+		ci->ci_ipending &= ~(1L << bit);
 		if (iv->flags & HPPA_IV_CALL)
 			continue;
 

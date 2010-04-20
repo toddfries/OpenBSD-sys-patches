@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.166 2010/04/01 12:30:38 jsing Exp $	*/
+/*	$OpenBSD: locore.S,v 1.168 2010/04/19 16:32:53 jsing Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -96,7 +96,6 @@
 	.import virtual_avail, data
 	.import	proc0, data
 	.import	proc0paddr, data
-	.import	kpsw, data
 	.import	panic, code
 
 #define	EMRG_STACKSIZE	(1*NBPG)
@@ -252,8 +251,8 @@ $qisnowon
 	mtctl	t1, pcoq
 	ldo	4(t1), t1
 	mtctl	t1, pcoq
-	ldil	L%kpsw, t1
-	ldw	R%kpsw(t1), t2
+	mfctl	r29, t1
+	ldw	CI_PSW(t1), t2
 	mtctl	t2, ipsw
 	rfi
 	nop
@@ -582,8 +581,8 @@ $syscall
 	copy	t3, sp
 	stw,ma	r0, HPPA_FRAME_SIZE+HPPA_FRAME_MAXARGS(sr1, sp)
 	stw	r0, HPPA_FRAME_CRP(sr1, sp)
-	ldil	L%kpsw, t1
-	ldw	R%kpsw(sr1, t1), t1
+	mfctl	r29, t1
+	ldw	CI_PSW(sr1, t1), t1
 	stw	r1, TF_CR15-TRAPFRAME_SIZEOF(sr1, t3)	/* eiem ,bc */
 	stw	t1, TF_CR22-TRAPFRAME_SIZEOF(sr1, t3)	/* ipsw */
 	mfsp	sr3, t1
@@ -1592,8 +1591,8 @@ ENTRY(TLABEL(all),0)
 	mtsp	r0, sr3
 
 	/* this will enable interrupts after `cold' */
-	ldil	L%kpsw, t1
-	ldw	R%kpsw(t1), t2
+	mfctl	cr29, t1
+	ldw	CI_PSW(t1), t2
 	mtctl	r0, eiem
 	mtctl	t2, ipsw
 
@@ -2007,10 +2006,10 @@ ENTRY(TLABEL(hpmc),0)
 	.import	hpmc_dump, code
 	ldil	L%hpmc_dump, rp
 	ldo	R%hpmc_dump(rp), rp
-	ldil	L%kpsw, %arg2
-	ldw	R%kpsw(%arg2), %arg2
+	mfctl	cr29, %arg2
+	ldw	CI_PSW(%arg2), %arg2
 	depi	0, PSL_I_POS, 1, %arg2
-	stw	%arg2, R%kpsw(t1)
+	stw	%arg2, CI_PSW(t1)
 	ldil	L%emrg_stack, arg1
 	b	$kernel_setup
 	ldw	R%emrg_stack(arg1), arg1
@@ -2039,10 +2038,10 @@ ENTRY(hppa_toc,0)
 	.import	boot, code
 	ldil	L%boot, rp
 	ldo	R%boot(rp), rp
-	ldil	L%kpsw, %arg2
-	ldw	R%kpsw(%arg2), %arg2
+	mfctl	cr29, %arg2
+	ldw	CI_PSW(%arg2), %arg2
 	depi	0, PSL_I_POS, 1, %arg2
-	stw	%arg2, R%kpsw(t1)
+	stw	%arg2, CI_PSW(t1)
 	ldi	0, arg0
 	ldil	L%emrg_stack, arg1
 	b	$kernel_setup
@@ -2067,10 +2066,10 @@ ENTRY(hppa_pfr,0)
 	.import	boot, code
 	ldil	L%boot, rp
 	ldo	R%boot(rp), rp
-	ldil	L%kpsw, %arg2
-	ldw	R%kpsw(%arg2), %arg2
+	mfctl	cr29, %arg2
+	ldw	CI_PSW(%arg2), %arg2
 	depi	0, PSL_I_POS, 1, %arg2
-	stw	%arg2, R%kpsw(t1)
+	stw	%arg2, CI_PSW(t1)
 	ldi	RB_HALT|RB_POWERDOWN, arg0
 	ldil	L%emrg_stack, arg1
 	b	$kernel_setup
@@ -2105,7 +2104,6 @@ intr_ticks
 #define	INTR_PROF_AFT	/* */
 #endif
 
-	.import	ipending, data
 	.import	imask, data
 	.import	intr_table, data
 	.align	32
@@ -2118,9 +2116,9 @@ ENTRY(TLABEL(intr),0)
 
 	ldil	L%intr_table + 32*32, r1
 	ldo	R%intr_table + 32*32(r1), r1
-	ldil	L%ipending, r17
+	mfctl	cr29, r17
 	b	$intr_cont
-	ldw	R%ipending(r17), r24
+	ldw	CI_IPENDING(r17), r24
 
 $intr_ffs
 	addi	-32, r1, r1
@@ -2145,8 +2143,8 @@ $intr_cont
 	comb,<>,n r0, r8, $intr_ffs
 	ldw	-32(r1), r0	/* preload cache */
 
-	ldil	L%ipending, r25
-	stw	r24, R%ipending(r25)
+	mfctl	cr29, r25
+	stw	r24, CI_IPENDING(r25)
 	mfctl	cr29, r17
 	ldw	CI_CPL(r17), r17
 	ldil	L%imask, r16
@@ -2266,8 +2264,8 @@ $ibrk_spllower
 	ldo	4(r9), r9
 	mtctl	r9, pcoq
 
-	ldil	L%ipending, r8
-	ldw	R%ipending(r8), r8
+	mfctl	cr29, r8
+	ldw	CI_IPENDING(r8), r8
 	ldil	L%imask, r9
 	ldo	R%imask(r9), r9
 	mfctl	cr29, r17

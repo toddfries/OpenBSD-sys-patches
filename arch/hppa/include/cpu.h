@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.65 2010/04/01 12:30:38 jsing Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.67 2010/04/19 16:32:53 jsing Exp $	*/
 
 /*
  * Copyright (c) 2000-2004 Michael Shalayeff
@@ -75,7 +75,9 @@ struct cpu_info {
 
 	struct proc	*ci_curproc;
 
+	register_t	ci_psw;			/* Processor Status Word. */
 	volatile int	ci_cpl;
+	volatile u_long	ci_ipending;
 	volatile int	ci_in_intr;
 	int		ci_want_resched;
 
@@ -120,7 +122,6 @@ enum hppa_cpu_type {
 extern enum hppa_cpu_type cpu_type;
 extern const char *cpu_typename;
 extern int cpu_hvers;
-extern register_t kpsw;
 #endif
 #endif
 

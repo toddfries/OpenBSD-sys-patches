@@ -208,53 +208,53 @@ void inteldrm_verify_inactive(struct drm_i915_private *, char *, int);
 
 const static struct drm_pcidev inteldrm_pciidlist[] = {
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82830M_IGD,
-	    CHIP_I830|CHIP_M},
+	    CHIP_I830|CHIP_M|CHIP_GEN2},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82845G_IGD,
-	    CHIP_I845G},
+	    CHIP_I845G|CHIP_GEN2},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82855GM_IGD,
-	    CHIP_I85X|CHIP_M},
+	    CHIP_I85X|CHIP_M|CHIP_GEN2},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82865G_IGD,
-	    CHIP_I865G},
+	    CHIP_I865G|CHIP_GEN2},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82915G_IGD_1,
-	    CHIP_I915G|CHIP_I9XX},
+	    CHIP_I915G|CHIP_I9XX|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E7221_IGD,
-	    CHIP_I915G|CHIP_I9XX},
+	    CHIP_I915G|CHIP_I9XX|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82915GM_IGD_1,
-	    CHIP_I915GM|CHIP_I9XX|CHIP_M},
+	    CHIP_I915GM|CHIP_I9XX|CHIP_M|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945G_IGD_1,
-	    CHIP_I945G|CHIP_I9XX},
+	    CHIP_I945G|CHIP_I9XX|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945GM_IGD_1,
-	    CHIP_I945GM|CHIP_I9XX|CHIP_M},
+	    CHIP_I945GM|CHIP_I9XX|CHIP_M|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945GME_IGD_1,
-	    CHIP_I945GM|CHIP_I9XX|CHIP_M},
+	    CHIP_I945GM|CHIP_I9XX|CHIP_M|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82946GZ_IGD_1,
-	    CHIP_I965|CHIP_I9XX},
+	    CHIP_I965|CHIP_I9XX|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G35_IGD_1,
-	    CHIP_I965|CHIP_I9XX},
+	    CHIP_I965|CHIP_I9XX|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q965_IGD_1,
-	    CHIP_I965|CHIP_I9XX},
+	    CHIP_I965|CHIP_I9XX|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G965_IGD_1,
-	    CHIP_I965|CHIP_I9XX},
+	    CHIP_I965|CHIP_I9XX|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM965_IGD_1,
-	    CHIP_I965GM|CHIP_I965|CHIP_I9XX|CHIP_M},
+	    CHIP_I965GM|CHIP_I965|CHIP_I9XX|CHIP_M|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GME965_IGD_1,
-	    CHIP_I965|CHIP_I9XX},
+	    CHIP_I965|CHIP_I9XX|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G33_IGD_1,
-	    CHIP_G33|CHIP_I9XX|CHIP_HWS},
+	    CHIP_G33|CHIP_I9XX|CHIP_HWS|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q35_IGD_1,
-	    CHIP_G33|CHIP_I9XX|CHIP_HWS},
+	    CHIP_G33|CHIP_I9XX|CHIP_HWS|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q33_IGD_1,
-	    CHIP_G33|CHIP_I9XX|CHIP_HWS},
+	    CHIP_G33|CHIP_I9XX|CHIP_HWS|CHIP_GEN3},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_IGD_1,
-	    CHIP_G4X|CHIP_GM45|CHIP_I965|CHIP_I9XX|CHIP_M|CHIP_HWS},
+	    CHIP_G4X|CHIP_GM45|CHIP_I965|CHIP_I9XX|CHIP_M|CHIP_HWS|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, 0x2E02,
-	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS},
+	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q45_IGD_1,
-	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS},
+	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G45_IGD_1,
-	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS},
+	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G41_IGD_1,
-	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS},
+	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS|CHIP_GEN4},
 	{0, 0, 0}
 };
 
@@ -1036,7 +1036,6 @@ i915_gem_pread_ioctl(struct drm_device *dev, void *data,
 	obj = drm_gem_object_lookup(dev, file_priv, args->handle);
 	if (obj == NULL)
 		return (EBADF);
-	obj_priv = (struct inteldrm_obj *)obj;
 
 	/*
 	 * Bounds check source.
@@ -1107,7 +1106,6 @@ i915_gem_pwrite_ioctl(struct drm_device *dev, void *data,
 	obj = drm_gem_object_lookup(dev, file_priv, args->handle);
 	if (obj == NULL)
 		return (EBADF);
-	obj_priv = (struct inteldrm_obj *)obj;
 
 	DRM_LOCK();
 	/* Bounds check destination. */
@@ -1899,8 +1897,8 @@ i915_write_fence_reg(struct inteldrm_fence *reg)
 
 	if ((obj_priv->gtt_offset & ~I915_FENCE_START_MASK) ||
 	    (obj_priv->gtt_offset & (obj->size - 1))) {
-		DRM_ERROR("%s: object 0x%08x not 1M or size (0x%zx) aligned\n",
-		     __func__, obj_priv->gtt_offset, obj->size);
+		DRM_ERROR("object 0x%lx not 1M or size (0x%zx) aligned\n",
+		     obj_priv->gtt_offset, obj->size);
 		return;
 	}
 
@@ -1913,6 +1911,12 @@ i915_write_fence_reg(struct inteldrm_fence *reg)
 	/* Note: pitch better be a power of two tile widths */
 	pitch_val = obj_priv->stride / tile_width;
 	pitch_val = ffs(pitch_val) - 1;
+
+	if ((obj_priv->tiling_mode == I915_TILING_Y &&
+	    HAS_128_BYTE_Y_TILING(dev_priv) &&
+	    pitch_val > I830_FENCE_MAX_PITCH_VAL) ||
+	    pitch_val > I915_FENCE_MAX_PITCH_VAL)
+		printf("%s: invalid pitch provided"); /* XXX print more */
 
 	val = obj_priv->gtt_offset;
 	if (obj_priv->tiling_mode == I915_TILING_Y)
@@ -1940,8 +1944,8 @@ i830_write_fence_reg(struct inteldrm_fence *reg)
 
 	if ((obj_priv->gtt_offset & ~I830_FENCE_START_MASK) ||
 	    (obj_priv->gtt_offset & (obj->size - 1))) {
-		DRM_ERROR("object 0x%08x not 512K or size aligned\n",
-		     obj_priv->gtt_offset);
+		DRM_ERROR("object 0x%08x not 512K or size aligned 0x%lx\n",
+		     obj_priv->gtt_offset, obj->size);
 		return;
 	}
 
@@ -2139,9 +2143,8 @@ inteldrm_fault(struct drm_obj *obj, struct uvm_faultinfo *ufi, off_t offset,
 
 	DRM_LOCK();
 	/*
-	 * XXX is it ok to sleep in fault handlers? If not, we may have some
-	 * problems...  (i can has race plz? -> judicious use of
-	 * uvmfault_unlockall ahoy)
+	 * XXX this locking is wrong, must be fixed. uvm using simple_locks
+	 * saves us for now.
 	 */
 	if (obj_priv->dmamap == NULL) {
 		ret = i915_gem_object_bind_to_gtt(obj, 0, 0);
@@ -2791,7 +2794,6 @@ err:
 	drm_gem_object_unreference(target_obj);
 	i915_gem_object_unpin(obj);
 	return (ret);
-	
 }
 
 /** Dispatch a batchbuffer to the ring
@@ -2925,7 +2927,7 @@ i915_gem_execbuffer2(struct drm_device *dev, void *data,
 	drm_i915_private_t			*dev_priv = dev->dev_private;
 	struct drm_i915_gem_execbuffer2		*args = data;
 	struct drm_i915_gem_exec_object2	*exec_list = NULL;
-	struct drm_i915_gem_relocation_entry	*relocs;
+	struct drm_i915_gem_relocation_entry	*relocs = NULL;
 	struct inteldrm_obj			*obj_priv, *batch_obj_priv;
 	struct drm_obj				**object_list = NULL;
 	struct drm_obj				*batch_obj, *obj;
@@ -3172,9 +3174,11 @@ i915_gem_object_pin(struct drm_obj *obj, uint32_t alignment, int needs_fence)
 	 * otherwise, so just fail the pin (with a printf so we can fix a
 	 * wrong userland).
 	 */
-	if ((alignment && obj_priv->dmamap != NULL &&
-	    obj_priv->gtt_offset & (alignment - 1)) || (needs_fence &&
-	    !i915_gem_object_fence_offset_ok(obj, obj_priv->tiling_mode))) {
+	if (obj_priv->dmamap != NULL &&
+	    ((alignment && obj_priv->gtt_offset & (alignment - 1)) ||
+	    obj_priv->gtt_offset & (i915_gem_get_gtt_alignment(obj) - 1) ||
+	    (needs_fence && !i915_gem_object_fence_offset_ok(obj,
+	    obj_priv->tiling_mode)))) {
 		if (obj_priv->pin_count == 0) {
 			ret = i915_gem_object_unbind(obj, 1);
 			if (ret)
@@ -3440,12 +3444,12 @@ i915_gem_free_object(struct drm_obj *obj)
 	/* XXX dmatag went away? */
 }
 
-/** Unbinds all objects that are on the given buffer list. */
+/* Clear out the inactive list and unbind everything in it. */
 int
 i915_gem_evict_inactive(struct drm_i915_private *dev_priv)
 {
 	struct inteldrm_obj	*obj_priv;
-	int			 ret;
+	int			 ret = 0;
 
 	while ((obj_priv = TAILQ_FIRST(&dev_priv->mm.inactive_list)) != NULL) {
 		if (obj_priv->pin_count != 0) {
@@ -3557,13 +3561,11 @@ void
 i915_gem_cleanup_hws(struct drm_i915_private *dev_priv)
 {
 	struct drm_obj		*obj;
-	struct inteldrm_obj	*obj_priv;
 
 	if (dev_priv->hws_obj == NULL)
 		return;
 
 	obj = dev_priv->hws_obj;
-	obj_priv = (struct inteldrm_obj *)obj;
 
 	uvm_unmap(kernel_map, (vaddr_t)dev_priv->hw_status_page,
 	    (vaddr_t)dev_priv->hw_status_page + PAGE_SIZE);
@@ -3670,6 +3672,10 @@ inteldrm_start_ring(struct drm_i915_private *dev_priv)
 	/* Update our cache of the ring state */
 	inteldrm_update_ring(dev_priv);
 
+	if (IS_I9XX(dev_priv) && !IS_GEN3(dev_priv))
+		I915_WRITE(MI_MODE, (VS_TIMER_DISPATCH) << 15 |
+		    VS_TIMER_DISPATCH);
+
 	return (0);
 }
 
@@ -3727,8 +3733,9 @@ i915_gem_leavevt_ioctl(struct drm_device *dev, void *data,
 	struct drm_i915_private	*dev_priv = dev->dev_private;
 	int			 ret;
 
-	ret = i915_gem_idle(dev_priv);
-	drm_irq_uninstall(dev);
+	/* don't unistall if we fail, repeat calls on failure will screw us */
+	if ((ret = i915_gem_idle(dev_priv)) == 0)
+		drm_irq_uninstall(dev);
 	return (ret);
 }
 
@@ -4132,7 +4139,8 @@ inteldrm_teardown_mchbar(struct drm_i915_private *dev_priv,
 			high = pci_conf_read(bpa->pa_pc, bpa->pa_tag, reg + 4);
 		low = pci_conf_read(bpa->pa_pc, bpa->pa_tag, reg);
 		mchbar_addr = ((u_int64_t)high << 32) | low;
-		extent_free(bpa->pa_memex, mchbar_addr, MCHBAR_SIZE, 0);
+		if (bpa->pa_memex)
+			extent_free(bpa->pa_memex, mchbar_addr, MCHBAR_SIZE, 0);
 		/* FALLTHROUGH */
 	case 1:
 		if (IS_I915G(dev_priv) || IS_I915GM(dev_priv)) {
@@ -4293,7 +4301,7 @@ i915_gem_bit_17_swizzle(struct drm_obj *obj)
 	struct vm_page		*pg;
 	bus_dma_segment_t	*segp;
 	int			 page_count = obj->size >> PAGE_SHIFT;
-	int			 i, n, ret;
+	int			 i = 0, n = 0, ret;
 
 	if (dev_priv->mm.bit_6_swizzle_x != I915_BIT_6_SWIZZLE_9_10_17 ||
 	    obj_priv->bit_17 == NULL)
@@ -4349,6 +4357,7 @@ i915_gem_save_bit_17_swizzle(struct drm_obj *obj)
 
 	segp = &obj_priv->dma_segs[0];
 	n = 0;
+	i = 0;
 	while (i < page_count) {
 		if ((segp->ds_addr + (n * PAGE_SIZE)) & (1 << 17))
 			set_bit(i, obj_priv->bit_17);
@@ -4408,27 +4417,19 @@ i915_tiling_ok(struct drm_device *dev, int stride, int size, int tiling_mode)
 		/* fence reg has end address, so size is ok */
 		if (stride / 128 > I965_FENCE_MAX_PITCH_VAL)
 			return (0);
-	} else if (IS_I9XX(dev_priv)) {
-		u_int32_t pitch_val = ffs(stride / tile_width) - 1;
-		/*
-		 * XXX: for Y tiling, max pitch is actually 6 (8k) instead of 4
-		 * (2k) on the 945.
-		 */
-		if (pitch_val > I915_FENCE_MAX_PITCH_VAL ||
-		    size > (I830_FENCE_MAX_SIZE_VAL << 20))
+	} else if (IS_GEN3(dev_priv) || IS_GEN2(dev_priv)) {
+		if (stride > 8192)
 			return (0);
-	} else {
-		u_int32_t pitch_val = ffs(stride / tile_width) - 1;
-
-		if (pitch_val > I830_FENCE_MAX_PITCH_VAL ||
-		    size > (I830_FENCE_MAX_SIZE_VAL << 19))
+		if (IS_GEN3(dev_priv)) {
+			if (size > I830_FENCE_MAX_SIZE_VAL << 20)
+				return (0);
+		} else if (size > I830_FENCE_MAX_SIZE_VAL << 19)
 			return (0);
 	}
 
 	/* 965+ just needs multiples of the tile width */
 	if (IS_I965G(dev_priv))
 		return ((stride & (tile_width - 1)) == 0);
-
 
 	/* Pre-965 needs power-of-two */
 	if (stride < tile_width || stride & (stride - 1) ||
@@ -4511,7 +4512,7 @@ i915_gem_set_tiling(struct drm_device *dev, void *data,
 		 * mode. Otherwise we can leave it alone, but must clear any
 		 * fence register.
 		 */
-		if (i915_gem_object_fence_offset_ok(obj, args->tiling_mode)) {
+		if (!i915_gem_object_fence_offset_ok(obj, args->tiling_mode)) {
 			if (obj_priv->pin_count)
 				ret = EINVAL;
 			else

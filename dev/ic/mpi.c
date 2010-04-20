@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.141 2010/04/16 01:10:19 deraadt Exp $ */
+/*	$OpenBSD: mpi.c,v 1.143 2010/04/19 09:51:09 dlg Exp $ */
 
 /*
  * Copyright (c) 2005, 2006, 2009 David Gwynne <dlg@openbsd.org>
@@ -293,7 +293,7 @@ mpi_attach(struct mpi_softc *sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_target;
 	sc->sc_link.adapter_buswidth = sc->sc_buswidth;
-	sc->sc_link.openings = sc->sc_maxcmds / sc->sc_buswidth;
+	sc->sc_link.openings = sc->sc_maxcmds;
 	sc->sc_link.pool = &sc->sc_iopool;
 
 	bzero(&saa, sizeof(saa));
@@ -2958,7 +2958,7 @@ mpi_ioctl_disk(struct mpi_softc *sc, struct bioc_disk *bd)
 	bd->bd_channel = pdpg0.phys_disk_bus;
 	bd->bd_target = pdpg0.phys_disk_id;
 	bd->bd_lun = 0;
-	bd->bd_size = (u_quad_t)pdpg0.max_lba * 512;
+	bd->bd_size = (u_quad_t)letoh32(pdpg0.max_lba) * 512;
 	strlcpy(bd->bd_vendor, pdpg0.vendor_id, sizeof(bd->bd_vendor));
 
 	switch (pdpg0.phys_disk_state) {

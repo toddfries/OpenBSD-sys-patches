@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.121 2010/04/06 00:58:00 dlg Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.124 2010/04/17 00:51:13 dlg Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -331,7 +331,11 @@ struct scsi_device {
  */
 
 struct scsi_runq_entry {
-        TAILQ_ENTRY(scsi_runq_entry) e;
+	TAILQ_ENTRY(scsi_runq_entry) e;
+	u_int state;
+#define RUNQ_IDLE	0
+#define RUNQ_LINKQ	1
+#define RUNQ_POOLQ	3
 };
 TAILQ_HEAD(scsi_runq, scsi_runq_entry);
 
@@ -339,7 +343,6 @@ struct scsi_iopool;
 
 struct scsi_iohandler {
 	struct scsi_runq_entry entry; /* must be first */
-	u_int onq;
 
 	struct scsi_iopool *pool;
 	void (*handler)(void *, void *);
@@ -366,7 +369,6 @@ struct scsi_iopool {
 
 struct scsi_xshandler {
 	struct scsi_iohandler ioh; /* must be first */
-	u_int onq;
 
 	struct scsi_link *link;
 	void (*handler)(struct scsi_xfer *);
@@ -421,7 +423,6 @@ struct scsi_link {
 	struct	scsibus_softc *bus;	/* link to the scsibus we're on */
 	struct	scsi_inquiry_data inqdata; /* copy of INQUIRY data from probe */
 	struct  devid *id;
-	struct	mutex mtx;
 
 	struct	scsi_runq queue;
 	u_int	running;
