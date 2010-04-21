@@ -1,4 +1,4 @@
-/*	$OpenBSD: sensors.h,v 1.27 2010/04/20 19:44:07 oga Exp $	*/
+/*	$OpenBSD: sensors.h,v 1.29 2010/04/21 04:07:11 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Alexander Yurchenko <grange@openbsd.org>
@@ -48,6 +48,7 @@ enum sensor_type {
 	SENSOR_TIMEDELTA,		/* system time error (nSec) */
 	SENSOR_HUMIDITY,		/* humidity (m%RH) */
 	SENSOR_FREQ,			/* frequency (Hz) */
+	SENSOR_ANGLE,			/* degrees */
 	SENSOR_MAX_TYPES
 };
 
@@ -70,6 +71,7 @@ static const char * const sensor_type_s[SENSOR_MAX_TYPES + 1] = {
 	"timedelta",
 	"humidity",
 	"frequency",
+	"angle",
 	"undefined"
 };
 #endif	/* !_KERNEL */
@@ -119,8 +121,6 @@ struct sensordev {
 	int sensors_count;
 };
 
-#define MAXSENSORDEVICES 32
-
 #ifdef _KERNEL
 
 /* Sensor data */
@@ -149,12 +149,12 @@ struct ksensordev {
 /* struct ksensordev */
 void			 sensordev_install(struct ksensordev *);
 void			 sensordev_deinstall(struct ksensordev *);
-struct ksensordev	*sensordev_get(int);
+int			 sensordev_get(int, struct ksensordev **);
 
 /* struct ksensor */
 void			 sensor_attach(struct ksensordev *, struct ksensor *);
 void			 sensor_detach(struct ksensordev *, struct ksensor *);
-struct ksensor		*sensor_find(int, enum sensor_type, int);
+int			 sensor_find(int, enum sensor_type, int, struct ksensor **);
 
 /* task scheduling */
 struct sensor_task;
