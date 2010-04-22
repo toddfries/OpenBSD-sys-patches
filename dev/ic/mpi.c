@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.143 2010/04/19 09:51:09 dlg Exp $ */
+/*	$OpenBSD: mpi.c,v 1.145 2010/04/22 12:33:30 oga Exp $ */
 
 /*
  * Copyright (c) 2005, 2006, 2009 David Gwynne <dlg@openbsd.org>
@@ -904,7 +904,7 @@ mpi_dmamem_alloc(struct mpi_softc *sc, size_t size)
 		goto mdmfree;
 
 	if (bus_dmamem_alloc(sc->sc_dmat, size, PAGE_SIZE, 0, &mdm->mdm_seg,
-	    1, &nsegs, BUS_DMA_NOWAIT) != 0)
+	    1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0)
 		goto destroy;
 
 	if (bus_dmamem_map(sc->sc_dmat, &mdm->mdm_seg, nsegs, size,
@@ -914,8 +914,6 @@ mpi_dmamem_alloc(struct mpi_softc *sc, size_t size)
 	if (bus_dmamap_load(sc->sc_dmat, mdm->mdm_map, mdm->mdm_kva, size,
 	    NULL, BUS_DMA_NOWAIT) != 0)
 		goto unmap;
-
-	bzero(mdm->mdm_kva, size);
 
 	DNPRINTF(MPI_D_MEM, "%s: mpi_dmamem_alloc size: %d mdm: %#x "
 	    "map: %#x nsegs: %d segs: %#x kva: %x\n",
@@ -2099,8 +2097,8 @@ mpi_cfg_coalescing(struct mpi_softc *sc)
 	}
 
 	if (mpi_cfg_page(sc, 0, &hdr, 1, &pg, sizeof(pg)) != 0) {
-		DNPRINTF(MPI_D_MISC, "%s: mpi_get_raid unable to fetch IOC "
-		    "page 1\n", DEVNAME(sc));
+		DNPRINTF(MPI_D_MISC, "%s: unable to fetch IOC page 1\n",
+		    DEVNAME(sc));
 		return (1);
 	}
 
