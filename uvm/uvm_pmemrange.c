@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pmemrange.c,v 1.5 2009/06/12 00:01:21 ariane Exp $	*/
+/*	$OpenBSD: uvm_pmemrange.c,v 1.10 2010/04/22 19:02:55 oga Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Ariane van der Steldt <ariane@stack.nl>
@@ -19,8 +19,7 @@
 #include <sys/param.h>
 #include <uvm/uvm.h>
 #include <sys/malloc.h>
-
-#include <sys/proc.h>
+#include <sys/proc.h>		/* XXX for atomic */
 
 /*
  * 2 trees: addr tree and size tree.
@@ -145,6 +144,8 @@ struct vm_page		*uvm_pmr_extract_range(struct uvm_pmemrange *,
 			    struct vm_page *, paddr_t, paddr_t,
 			    struct pglist *);
 psize_t			 pow2divide(psize_t, psize_t);
+struct vm_page		*uvm_pmr_rootupdate(struct uvm_pmemrange *,
+			    struct vm_page *, paddr_t, paddr_t, int);
 
 /*
  * Computes num/denom and rounds it up to the next power-of-2.
@@ -175,6 +176,18 @@ pow2divide(psize_t num, psize_t denom)
 #define PMR_IS_SUBRANGE_OF(lhs_low, lhs_high, rhs_low, rhs_high)	\
 	(((rhs_low) == 0 || (lhs_low) >= (rhs_low)) &&			\
 	((rhs_high) == 0 || (lhs_high) <= (rhs_high)))
+
+/*
+ * Predicate: lhs intersects with rhs.
+ *
+ * If rhs_low == 0: don't care about lower bound.
+ * If rhs_high == 0: don't care about upper bound.
+ * Ranges don't intersect if they don't have any page in common, array
+ * semantics mean that < instead of <= should be used here.
+ */
+#define PMR_INTERSECTS_WITH(lhs_low, lhs_high, rhs_low, rhs_high)	\
+	(((rhs_low) == 0 || (rhs_low) < (lhs_high)) &&			\
+	((rhs_high) == 0 || (lhs_low) < (rhs_high)))
 
 /*
  * Align to power-of-2 alignment.
@@ -423,12 +436,6 @@ uvm_pmr_insert_addr(struct uvm_pmemrange *pmr, struct vm_page *pg, int no_join)
 			return prev;
 		}
 	}
-#ifdef DEBUG
-	else {
-		uvm_pmr_pnaddr(pmr, pg, &prev, &next);
-		KDASSERT(prev == NULL && next == NULL);
-	}
-#endif /* DEBUG */
 
 	RB_INSERT(uvm_pmr_addr, &pmr->addr, pg);
 
@@ -884,7 +891,7 @@ ReTryDesperate:
 			continue;
 
 		/* Outside requested range. */
-		if (!PMR_IS_SUBRANGE_OF(pmr->low, pmr->high, start, end))
+		if (!PMR_INTERSECTS_WITH(pmr->low, pmr->high, start, end))
 			continue;
 
 		memtype = memtype_init;
@@ -899,6 +906,8 @@ ReScan:		/* Return point at try++. */
 			f_next = uvm_pmr_nextsz(pmr, found, memtype);
 
 			fstart = atop(VM_PAGE_TO_PHYS(found));
+			if (start != 0)
+				fstart = MAX(start, fstart);
 DrainFound:
 			/*
 			 * Throw away the first segment if fnsegs == maxseg
@@ -916,14 +925,15 @@ DrainFound:
 			}
 
 			fstart = PMR_ALIGN(fstart, align);
-			fend = atop(VM_PAGE_TO_PHYS(found)) +
-			    found->fpgsz;
+			fend = atop(VM_PAGE_TO_PHYS(found)) + found->fpgsz;
 			if (fstart >= fend)
 				continue;
 			if (boundary != 0) {
 				fend =
 				    MIN(fend, PMR_ALIGN(fstart + 1, boundary));
 			}
+			if (end != 0)
+				fend = MIN(end, fend);
 			if (fend - fstart > count - fcount)
 				fend = fstart + (count - fcount);
 
@@ -1040,6 +1050,9 @@ Out:
 
 	/* Update statistics and zero pages if UVM_PLA_ZERO. */
 	TAILQ_FOREACH(found, result, pageq) {
+		atomic_clearbits_int(&found->pg_flags,
+		    PG_PMAP0|PG_PMAP1|PG_PMAP2|PG_PMAP3);
+
 		if (found->pg_flags & PG_ZERO) {
 			uvmexp.zeropages--;
 		}
@@ -1056,6 +1069,12 @@ Out:
 		found->uobject = NULL;
 		found->uanon = NULL;
 		found->pg_version++;
+
+		/*
+		 * Validate that the page matches range criterium.
+		 */
+		KDASSERT(start == 0 || atop(VM_PAGE_TO_PHYS(found)) >= start);
+		KDASSERT(end == 0 || atop(VM_PAGE_TO_PHYS(found)) < end);
 	}
 
 	return 0;
@@ -1505,6 +1524,108 @@ uvm_pmr_isfree(struct vm_page *pg)
 #endif /* DEBUG */
 
 /*
+ * Given a root of a tree, find a range which intersects start, end and
+ * is of the same memtype.
+ *
+ * Page must be in the address tree.
+ */
+struct vm_page*
+uvm_pmr_rootupdate(struct uvm_pmemrange *pmr, struct vm_page *init_root,
+    paddr_t start, paddr_t end, int memtype)
+{
+	int	direction;
+	struct	vm_page *root;
+	struct	vm_page *high, *high_next;
+	struct	vm_page *low, *low_next;
+
+	KDASSERT(pmr != NULL && init_root != NULL);
+	root = init_root;
+
+	/*
+	 * Which direction to use for searching.
+	 */
+	if (start != 0 && atop(VM_PAGE_TO_PHYS(root)) + root->fpgsz <= start)
+		direction =  1;
+	else if (end != 0 && atop(VM_PAGE_TO_PHYS(root)) >= end)
+		direction = -1;
+	else /* nothing to do */
+		return root;
+
+	/*
+	 * First, update root to fall within the chosen range.
+	 */
+	while (root && !PMR_INTERSECTS_WITH(
+	    atop(VM_PAGE_TO_PHYS(root)),
+	    atop(VM_PAGE_TO_PHYS(root)) + root->fpgsz,
+	    start, end)) {
+		if (direction == 1)
+			root = RB_RIGHT(root, objt);
+		else
+			root = RB_LEFT(root, objt);
+	}
+	if (root == NULL || uvm_pmr_pg_to_memtype(root) == memtype)
+		return root;
+
+	/*
+	 * Root is valid, but of the wrong memtype.
+	 *
+	 * Try to find a range that has the given memtype in the subtree
+	 * (memtype mismatches are costly, either because the conversion
+	 * is expensive, or a later allocation will need to do the opposite
+	 * conversion, which will be expensive).
+	 *
+	 *
+	 * First, simply increase address until we hit something we can use.
+	 * Cache the upper page, so we can page-walk later.
+	 */
+	high = root;
+	high_next = RB_RIGHT(high, objt);
+	while (high_next != NULL && PMR_INTERSECTS_WITH(
+	    atop(VM_PAGE_TO_PHYS(high_next)),
+	    atop(VM_PAGE_TO_PHYS(high_next)) + high_next->fpgsz,
+	    start, end)) {
+		high = high_next;
+		if (uvm_pmr_pg_to_memtype(high) == memtype)
+			return high;
+		high_next = RB_RIGHT(high, objt);
+	}
+
+	/*
+	 * Second, decrease the address until we hit something we can use.
+	 * Cache the lower page, so we can page-walk later.
+	 */
+	low = root;
+	low_next = RB_RIGHT(low, objt);
+	while (low_next != NULL && PMR_INTERSECTS_WITH(
+	    atop(VM_PAGE_TO_PHYS(low_next)),
+	    atop(VM_PAGE_TO_PHYS(low_next)) + low_next->fpgsz,
+	    start, end)) {
+		low = low_next;
+		if (uvm_pmr_pg_to_memtype(low) == memtype)
+			return low;
+		low_next = RB_RIGHT(low, objt);
+	}
+
+	/*
+	 * Ack, no hits. Walk the address tree until to find something usable.
+	 */
+	for (low = RB_NEXT(uvm_pmr_addr, &pmr->addr, low);
+	    low != high;
+	    low = RB_NEXT(uvm_pmr_addr, &pmr->addr, low)) {
+		KASSERT(PMR_IS_SUBRANGE_OF(atop(VM_PAGE_TO_PHYS(high_next)),
+	    	    atop(VM_PAGE_TO_PHYS(high_next)) + high_next->fpgsz,
+	    	    start, end));
+		if (uvm_pmr_pg_to_memtype(low) == memtype)
+			return low;
+	}
+
+	/*
+	 * Nothing found.
+	 */
+	return NULL;
+}
+
+/*
  * Allocate any page, the fastest way. Page number constraints only.
  */
 int
@@ -1512,7 +1633,7 @@ uvm_pmr_get1page(psize_t count, int memtype_init, struct pglist *result,
     paddr_t start, paddr_t end)
 {
 	struct	uvm_pmemrange *pmr;
-	struct	vm_page *found;
+	struct	vm_page *found, *splitpg;
 	psize_t	fcount;
 	int	memtype;
 
@@ -1521,7 +1642,7 @@ uvm_pmr_get1page(psize_t count, int memtype_init, struct pglist *result,
 	    pmr != NULL && fcount != count; pmr = TAILQ_NEXT(pmr, pmr_use)) {
 		/* Outside requested range. */
 		if (!(start == 0 && end == 0) &&
-		    !PMR_IS_SUBRANGE_OF(pmr->low, pmr->high, start, end))
+		    !PMR_INTERSECTS_WITH(pmr->low, pmr->high, start, end))
 			continue;
 
 		/* Range is empty. */
@@ -1534,15 +1655,64 @@ uvm_pmr_get1page(psize_t count, int memtype_init, struct pglist *result,
 		memtype = memtype_init;
 		do {
 			found = TAILQ_FIRST(&pmr->single[memtype]);
+			/*
+			 * If found is outside the range, walk the list
+			 * until we find something that intersects with
+			 * boundaries.
+			 */
+			while (found && !PMR_INTERSECTS_WITH(
+			    atop(VM_PAGE_TO_PHYS(found)),
+			    atop(VM_PAGE_TO_PHYS(found)) + 1,
+			    start, end))
+				found = TAILQ_NEXT(found, pageq);
+
 			if (found == NULL) {
 				found = RB_ROOT(&pmr->size[memtype]);
 				/* Size tree gives pg[1] instead of pg[0] */
 				if (found != NULL)
 					found--;
+
+				found = uvm_pmr_rootupdate(pmr, found,
+				    start, end, memtype);
 			}
 			if (found != NULL) {
 				uvm_pmr_assertvalid(pmr);
 				uvm_pmr_remove_size(pmr, found);
+
+				/*
+				 * If the page intersects the end, then it'll
+				 * need splitting.
+				 *
+				 * Note that we don't need to split if the page
+				 * intersects start: the drain function will
+				 * simply stop on hitting start.
+				 */
+				if (end != 0 && atop(VM_PAGE_TO_PHYS(found)) +
+				    found->fpgsz > end) {
+					psize_t splitsz =
+					    atop(VM_PAGE_TO_PHYS(found)) +
+					    found->fpgsz - end;
+
+					uvm_pmr_remove_addr(pmr, found);
+					uvm_pmr_assertvalid(pmr);
+					found->fpgsz -= splitsz;
+					splitpg = found + found->fpgsz;
+					splitpg->fpgsz = splitsz;
+					uvm_pmr_insert(pmr, splitpg, 1);
+
+					/*
+					 * At this point, splitpg and found
+					 * actually should be joined.
+					 * But we explicitly disable that,
+					 * because we will start subtracting
+					 * from found.
+					 */
+					KASSERT(start == 0 ||
+					    atop(VM_PAGE_TO_PHYS(found)) +
+					    found->fpgsz > start);
+					uvm_pmr_insert_addr(pmr, found, 1);
+				}
+
 				/*
 				 * Fetch pages from the end.
 				 * If the range is larger than the requested
@@ -1552,7 +1722,10 @@ uvm_pmr_get1page(psize_t count, int memtype_init, struct pglist *result,
 				 * Since we take from the end and insert at
 				 * the head, any ranges keep preserved.
 				 */
-				while (found->fpgsz > 0 && fcount < count) {
+				while (found->fpgsz > 0 && fcount < count &&
+				    (start == 0 ||
+				    atop(VM_PAGE_TO_PHYS(found)) +
+				    found->fpgsz > start)) {
 					found->fpgsz--;
 					fcount++;
 					TAILQ_INSERT_HEAD(result,
