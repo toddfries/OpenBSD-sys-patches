@@ -20,6 +20,8 @@
 #include <uvm/uvm.h>
 #include <sys/malloc.h>
 
+#include <sys/proc.h>
+
 /*
  * 2 trees: addr tree and size tree.
  *
