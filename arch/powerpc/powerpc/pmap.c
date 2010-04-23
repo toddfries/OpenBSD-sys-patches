@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.108 2009/07/21 22:34:02 kettenis Exp $ */
+/*	$OpenBSD: pmap.c,v 1.113 2010/04/15 21:30:29 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001, 2002, 2007 Dale Rahn.
@@ -29,6 +29,50 @@
  * Agency (DARPA) and Air Force Research Laboratory, Air Force
  * Materiel Command, USAF, under agreement number F30602-01-2-0537.
  */  
+
+/*
+ * powerpc lazy icache managment.
+ * The icache does not snoop dcache accesses. The icache also will not load
+ * modified data from the dcache, but the unmodified data in ram.
+ * Before the icache is loaded, the dcache must be synced to ram to prevent
+ * the icache from loading stale data.
+ * pg->pg_flags PG_PMAP_EXE bit is used to track if the dcache is clean
+ * and the icache may have valid data in it.
+ * if the PG_PMAP_EXE bit is set (and the page is not currently RWX)
+ * the icache will only have valid code in it. If the bit is clear
+ * memory may not match the dcache contents or the icache may contain
+ * data from a previous page.
+ *
+ * pmap enter
+ * !E  NONE 	-> R	no action
+ * !E  NONE|R 	-> RW	no action
+ * !E  NONE|R 	-> RX	flush dcache, inval icache (that page only), set E
+ * !E  NONE|R 	-> RWX	flush dcache, inval icache (that page only), set E
+ * !E  NONE|RW 	-> RWX	flush dcache, inval icache (that page only), set E
+ *  E  NONE 	-> R	no action
+ *  E  NONE|R 	-> RW	clear PG_PMAP_EXE bit
+ *  E  NONE|R 	-> RX	no action
+ *  E  NONE|R 	-> RWX	no action
+ *  E  NONE|RW 	-> RWX	-invalid source state
+ *
+ * pamp_protect
+ *  E RW -> R	- invalid source state
+ * !E RW -> R	- no action
+ *  * RX -> R	- no action
+ *  * RWX -> R	- sync dcache, inval icache
+ *  * RWX -> RW	- clear PG_PMAP_EXE
+ *  * RWX -> RX	- sync dcache, inval icache
+ *  * * -> NONE	- no action
+ * 
+ * pmap_page_protect (called with arg PROT_NONE if page is to be reused)
+ *  * RW -> R	- as pmap_protect
+ *  * RX -> R	- as pmap_protect
+ *  * RWX -> R	- as pmap_protect
+ *  * RWX -> RW	- as pmap_protect
+ *  * RWX -> RX	- as pmap_protect
+ *  * * -> NONE - clear PG_PMAP_EXE
+ * 
+ */
 
 #include <sys/param.h>
 #include <sys/malloc.h>
@@ -74,9 +118,9 @@ struct pte_desc {
 	/* Linked list of phys -> virt entries */
 	LIST_ENTRY(pte_desc) pted_pv_list;
 	union {
-	struct pte_32 pted_pte32;
-	struct pte_64 pted_pte64;
-	}p;
+		struct pte_32 pted_pte32;
+		struct pte_64 pted_pte64;
+	} p;
 	pmap_t pted_pmap;
 	vaddr_t pted_va;
 };
@@ -89,7 +133,7 @@ void tlbia(void);
 
 void pmap_attr_save(paddr_t pa, u_int32_t bits);
 void pmap_page_ro64(pmap_t pm, vaddr_t va, vm_prot_t prot);
-void pmap_page_ro32(pmap_t pm, vaddr_t va);
+void pmap_page_ro32(pmap_t pm, vaddr_t va, vm_prot_t prot);
 
 /*
  * LOCKING structures.
@@ -529,13 +573,16 @@ pmap_enter(pmap_t pm, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	if (pted == NULL) {
 		pted = pool_get(&pmap_pted_pool, PR_NOWAIT | PR_ZERO);	
 		if (pted == NULL) {
-			if ((flags & PMAP_CANFAIL) == 0)
+			if ((flags & PMAP_CANFAIL) == 0) {
+				splx(s);
 				return ENOMEM;
+			}
 			panic("pmap_enter: failed to allocate pted");
 		}
 		error = pmap_vp_enter(pm, va, pted, flags);
 		if (error) {
 			pool_put(&pmap_pted_pool, pted);
+			splx(s);
 			return error;
 		}
 	}
@@ -575,7 +622,12 @@ pmap_enter(pmap_t pm, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 
 		if (pg != NULL) {
 			need_sync = ((pg->pg_flags & PG_PMAP_EXE) == 0);
-			atomic_setbits_int(&pg->pg_flags, PG_PMAP_EXE);
+			if (prot & VM_PROT_WRITE)
+				atomic_clearbits_int(&pg->pg_flags,
+				    PG_PMAP_EXE);
+			else
+				atomic_setbits_int(&pg->pg_flags,
+				    PG_PMAP_EXE);
 		} else
 			need_sync = 1;
 	} else {
@@ -725,6 +777,7 @@ void
 _pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot, int flags, int cache)
 {
 	struct pte_desc *pted;
+	struct vm_page *pg;
 	int s;
 	pmap_t pm;
 
@@ -738,6 +791,11 @@ _pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot, int flags, int cache)
 		pmap_kremove_pg(va); /* pted is reused */
 
 	pm->pm_stats.resident_count++;
+	if (prot & VM_PROT_WRITE) {
+		pg = PHYS_TO_VM_PAGE(pa);
+		if (pg != NULL)
+			atomic_clearbits_int(&pg->pg_flags, PG_PMAP_EXE);
+	}
 
 	/* Do not have pted for this, get one and put it in VP */
 	if (pted == NULL) {
@@ -895,6 +953,7 @@ pmap_hash_remove(struct pte_desc *pted)
 	struct pte_64 *ptp64;
 	struct pte_32 *ptp32;
 	int sr, idx;
+	int s;
 
 	sr = ptesr(pm->pm_sr, va);
 	idx = pteidx(sr, va);
@@ -906,6 +965,7 @@ pmap_hash_remove(struct pte_desc *pted)
 		int entry = PTED_PTEGIDX(pted); 
 		ptp64 = pmap_ptable64 + (idx * 8);
 		ptp64 += entry; /* increment by entry into pteg */
+		s = ppc_intr_disable();
 		pmap_hash_lock(entry);
 		/*
 		 * We now have the pointer to where it will be, if it is
@@ -918,10 +978,12 @@ pmap_hash_remove(struct pte_desc *pted)
 			pte_zap((void*)ptp64, pted);
 		}
 		pmap_hash_unlock(entry);
+		ppc_intr_enable(s);
 	} else {
 		int entry = PTED_PTEGIDX(pted); 
 		ptp32 = pmap_ptable32 + (idx * 8);
 		ptp32 += entry; /* increment by entry into pteg */
+		s = ppc_intr_disable();
 		pmap_hash_lock(entry);
 		/*
 		 * We now have the pointer to where it will be, if it is
@@ -934,6 +996,7 @@ pmap_hash_remove(struct pte_desc *pted)
 			pte_zap((void*)ptp32, pted);
 		}
 		pmap_hash_unlock(entry);
+		ppc_intr_enable(s);
 	}
 }
 
@@ -1996,11 +2059,21 @@ pmap_page_ro64(pmap_t pm, vaddr_t va, vm_prot_t prot)
 {
 	struct pte_64 *ptp64;
 	struct pte_desc *pted;
+	struct vm_page *pg;
 	int sr, idx;
 
 	pted = pmap_vp_lookup(pm, va);
 	if (pted == NULL || !PTED_VALID(pted))
 		return;
+
+	pg = PHYS_TO_VM_PAGE(pted->p.pted_pte64.pte_lo & PTE_RPGN_64);
+	if (pg->pg_flags & PG_PMAP_EXE) {
+		if ((prot & (VM_PROT_WRITE|VM_PROT_EXECUTE)) == VM_PROT_WRITE) {
+			atomic_clearbits_int(&pg->pg_flags, PG_PMAP_EXE);
+		} else {
+			pmap_syncicache_user_virt(pm, va);
+		}
+	}
 
 	pted->p.pted_pte64.pte_lo &= ~PTE_PP_64;
 	pted->p.pted_pte64.pte_lo |= PTE_RO_64;
@@ -2039,16 +2112,27 @@ pmap_page_ro64(pmap_t pm, vaddr_t va, vm_prot_t prot)
 		ptp64->pte_hi |= PTE_VALID_64;
 	}
 }
+
 void
-pmap_page_ro32(pmap_t pm, vaddr_t va)
+pmap_page_ro32(pmap_t pm, vaddr_t va, vm_prot_t prot)
 {
 	struct pte_32 *ptp32;
 	struct pte_desc *pted;
+	struct vm_page *pg = NULL;
 	int sr, idx;
 
 	pted = pmap_vp_lookup(pm, va);
 	if (pted == NULL || !PTED_VALID(pted))
 		return;
+
+	pg = PHYS_TO_VM_PAGE(pted->p.pted_pte32.pte_lo & PTE_RPGN_32);
+	if (pg->pg_flags & PG_PMAP_EXE) {
+		if ((prot & (VM_PROT_WRITE|VM_PROT_EXECUTE)) == VM_PROT_WRITE) {
+			atomic_clearbits_int(&pg->pg_flags, PG_PMAP_EXE);
+		} else {
+			pmap_syncicache_user_virt(pm, va);
+		}
+	}
 
 	pted->p.pted_pte32.pte_lo &= ~PTE_PP_32;
 	pted->p.pted_pte32.pte_lo |= PTE_RO_32;
@@ -2115,7 +2199,7 @@ pmap_page_protect(struct vm_page *pg, vm_prot_t prot)
 		if (ppc_proc_is_64b)
 			pmap_page_ro64(pted->pted_pmap, pted->pted_va, prot);
 		else
-			pmap_page_ro32(pted->pted_pmap, pted->pted_va);
+			pmap_page_ro32(pted->pted_pmap, pted->pted_va, prot);
 	}
 	splx(s);
 }
@@ -2133,7 +2217,7 @@ pmap_protect(pmap_t pm, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 			}
 		} else {
 			while (sva < eva) {
-				pmap_page_ro32(pm, sva);
+				pmap_page_ro32(pm, sva, prot);
 				sva += PAGE_SIZE;
 			}
 		}
@@ -2346,7 +2430,7 @@ pte_insert64(struct pte_desc *pted)
 	int secondary;
 	struct pte_64 *ptp64;
 	int sr, idx;
-	int i;
+	int i, s;
 
 
 	sr = ptesr(pted->pted_pmap->pm_sr, pted->pted_va);
@@ -2373,8 +2457,11 @@ pte_insert64(struct pte_desc *pted)
 	for (i = 0; i < 8; i++) {
 		if (ptp64[i].pte_hi & PTE_VALID_64)
 			continue;
-		if (pmap_hash_lock_try(i) == 0)
+		s = ppc_intr_disable();
+		if (pmap_hash_lock_try(i) == 0) {
+			ppc_intr_enable(s);
 			continue;
+		}
 
 		/* not valid, just load */
 		pted->pted_va |= i;
@@ -2386,6 +2473,7 @@ pte_insert64(struct pte_desc *pted)
 		__asm volatile ("sync");
 
 		pmap_hash_unlock(i);
+		ppc_intr_enable(s);
 		return;
 	}
 	/* try fill of secondary hash */
@@ -2393,8 +2481,11 @@ pte_insert64(struct pte_desc *pted)
 	for (i = 0; i < 8; i++) {
 		if (ptp64[i].pte_hi & PTE_VALID_64)
 			continue;
-		if (pmap_hash_lock_try(i) == 0)
+		s = ppc_intr_disable();
+		if (pmap_hash_lock_try(i) == 0) {
+			ppc_intr_enable(s);
 			continue;
+		}
 
 		pted->pted_va |= (i | PTED_VA_HID_M);
 		ptp64[i].pte_hi =
@@ -2405,6 +2496,7 @@ pte_insert64(struct pte_desc *pted)
 		__asm volatile ("sync");
 
 		pmap_hash_unlock(i);
+		ppc_intr_enable(s);
 		return;
 	}
 
@@ -2413,8 +2505,11 @@ busy:
 	__asm__ volatile ("mftb %0" : "=r"(off));
 	secondary = off & 8;
 
-	if (pmap_hash_lock_try(off & 7) == 0)
+	s = ppc_intr_disable();
+	if (pmap_hash_lock_try(off & 7) == 0) {
+		ppc_intr_enable(s);
 		goto busy;
+	}
 
 	pted->pted_va |= off & (PTED_VA_PTEGIDX_M|PTED_VA_HID_M);
 
@@ -2457,6 +2552,7 @@ busy:
 	ptp64->pte_hi |= PTE_VALID_64;
 
 	pmap_hash_unlock(off & 7);
+	ppc_intr_enable(s);
 }
 
 void
@@ -2466,7 +2562,7 @@ pte_insert32(struct pte_desc *pted)
 	int secondary;
 	struct pte_32 *ptp32;
 	int sr, idx;
-	int i;
+	int i, s;
 
 	sr = ptesr(pted->pted_pmap->pm_sr, pted->pted_va);
 	idx = pteidx(sr, pted->pted_va);
@@ -2494,8 +2590,11 @@ pte_insert32(struct pte_desc *pted)
 	for (i = 0; i < 8; i++) {
 		if (ptp32[i].pte_hi & PTE_VALID_32)
 			continue;
-		if (pmap_hash_lock_try(i) == 0)
+		s = ppc_intr_disable();
+		if (pmap_hash_lock_try(i) == 0) {
+			ppc_intr_enable(s);
 			continue;
+		}
 
 		/* not valid, just load */
 		pted->pted_va |= i;
@@ -2506,6 +2605,7 @@ pte_insert32(struct pte_desc *pted)
 		__asm volatile ("sync");
 
 		pmap_hash_unlock(i);
+		ppc_intr_enable(s);
 		return;
 	}
 	/* try fill of secondary hash */
@@ -2513,8 +2613,11 @@ pte_insert32(struct pte_desc *pted)
 	for (i = 0; i < 8; i++) {
 		if (ptp32[i].pte_hi & PTE_VALID_32)
 			continue;
-		if (pmap_hash_lock_try(i) == 0)
+		s = ppc_intr_disable();
+		if (pmap_hash_lock_try(i) == 0) {
+			ppc_intr_enable(s);
 			continue;
+		}
 
 		pted->pted_va |= (i | PTED_VA_HID_M);
 		ptp32[i].pte_hi =
@@ -2525,6 +2628,7 @@ pte_insert32(struct pte_desc *pted)
 		__asm volatile ("sync");
 
 		pmap_hash_unlock(i);
+		ppc_intr_enable(s);
 		return;
 	}
 
@@ -2532,8 +2636,11 @@ pte_insert32(struct pte_desc *pted)
 busy:
 	__asm__ volatile ("mftb %0" : "=r"(off));
 	secondary = off & 8;
-	if (pmap_hash_lock_try(off & 7) == 0)
+	s = ppc_intr_disable();
+	if (pmap_hash_lock_try(off & 7) == 0) {
+		ppc_intr_enable(s);
 		goto busy;
+	}
 
 	pted->pted_va |= off & (PTED_VA_PTEGIDX_M|PTED_VA_HID_M);
 
@@ -2566,6 +2673,7 @@ busy:
 	ptp32->pte_hi |= PTE_VALID_32;
 
 	pmap_hash_unlock(off & 7);
+	ppc_intr_enable(s);
 }
 
 #ifdef DEBUG_PMAP

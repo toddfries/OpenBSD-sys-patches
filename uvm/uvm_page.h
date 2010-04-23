@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.h,v 1.40 2009/08/06 15:28:14 oga Exp $	*/
+/*	$OpenBSD: uvm_page.h,v 1.42 2010/04/22 19:02:55 oga Exp $	*/
 /*	$NetBSD: uvm_page.h,v 1.19 2000/12/28 08:24:55 chs Exp $	*/
 
 /* 
@@ -116,6 +116,7 @@ struct vm_page {
 						 * to read: [O or P]
 						 * to modify: [O _and_ P] */
 	paddr_t			phys_addr;	/* physical address of page */
+	psize_t			fpgsz;		/* free page range size */
 
 #ifdef __HAVE_VM_PAGE_MD
 	struct vm_page_md	mdpage;		/* pmap-specific data */
@@ -154,6 +155,7 @@ struct vm_page {
 #define	PG_FAKE		0x00000040	/* page is not yet initialized */
 #define PG_RDONLY	0x00000080	/* page must be mapped read-only */
 #define PG_ZERO		0x00000100	/* page is pre-zero'd */
+#define PG_DEV		0x00000200	/* page is in device space, lay off */
 
 #define PG_PAGER1	0x00001000	/* pager-specific flag */
 #define PG_MASK		0x0000ffff

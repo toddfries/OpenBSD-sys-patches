@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.141 2010/02/11 21:33:39 jakemsr Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.143 2010/03/21 15:04:35 jakemsr Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -132,7 +132,8 @@ azalia_codec_init_vtbl(codec_t *this)
 		    this->subid == 0x00a3106b) {	/* APPLE_MB4 */
 			this->qrks |= AZ_QRK_GPIO_UNMUTE_0;
 		}
-		if (this->subid == 0x00a0106b)
+		if (this->subid == 0x00a1106b ||
+		    this->subid == 0x00a0106b)
 			this->qrks |= AZ_QRK_WID_OVREF50;
 		break;
 	case 0x10ec0888:
@@ -547,11 +548,21 @@ azalia_unsol_event(codec_t *this, int tag)
 			mc.un.ord = vol;
 			err = azalia_mixer_set(this, this->speaker,
 			    MI_TARGET_OUTAMP, &mc);
+			if (!err && this->speaker2 != -1 &&
+			    (this->w[this->speaker2].widgetcap & COP_AWCAP_OUTAMP) &&
+			    (this->w[this->speaker2].outamp_cap & COP_AMPCAP_MUTE))
+				err = azalia_mixer_set(this, this->speaker2,
+				    MI_TARGET_OUTAMP, &mc);
 			break;
 		case AZ_SPKR_MUTE_SPKR_DIR:
 			mc.un.ord = vol ? 0 : 1;
 			err = azalia_mixer_set(this, this->speaker,
 			    MI_TARGET_PINDIR, &mc);
+			if (!err && this->speaker2 != -1 &&
+			    (this->w[this->speaker2].d.pin.cap & COP_PINCAP_OUTPUT) &&
+			    (this->w[this->speaker2].d.pin.cap & COP_PINCAP_INPUT))
+				err = azalia_mixer_set(this, this->speaker2,
+				    MI_TARGET_PINDIR, &mc);
 			break;
 		case AZ_SPKR_MUTE_DAC_MUTE:
 			mc.un.ord = vol;
@@ -763,7 +774,8 @@ azalia_mixer_init(codec_t *this)
 		/* input mute */
 		if (w->widgetcap & COP_AWCAP_INAMP &&
 		    w->inamp_cap & COP_AMPCAP_MUTE &&
-		    w->nid != this->speaker) {
+		    w->nid != this->speaker &&
+		    w->nid != this->speaker2) {
 			if (w->type != COP_AWTYPE_AUDIO_MIXER) {
 				MIXER_REG_PROLOG;
 				snprintf(d->label.name, sizeof(d->label.name),
@@ -790,7 +802,8 @@ azalia_mixer_init(codec_t *this)
 					if (!azalia_widget_enabled(this,
 					    w->connections[j]))
 						continue;
-					if (w->connections[j] == this->speaker)
+					if (w->connections[j] == this->speaker ||
+					    w->connections[j] == this->speaker2)
 						continue;
 					d->un.s.member[k].mask = 1 << j;
 					strlcpy(d->un.s.member[k].label.name,
@@ -807,7 +820,8 @@ azalia_mixer_init(codec_t *this)
 		/* input gain */
 		if (w->widgetcap & COP_AWCAP_INAMP &&
 		    COP_AMPCAP_NUMSTEPS(w->inamp_cap) &&
-		    w->nid != this->speaker) {
+		    w->nid != this->speaker &&
+		    w->nid != this->speaker2) {
 			if (w->type != COP_AWTYPE_AUDIO_SELECTOR &&
 			    w->type != COP_AWTYPE_AUDIO_MIXER) {
 				MIXER_REG_PROLOG;
@@ -829,7 +843,8 @@ azalia_mixer_init(codec_t *this)
 					if (!azalia_widget_enabled(this,
 					    w->connections[j]))
 						continue;
-					if (w->connections[j] == this->speaker)
+					if (w->connections[j] == this->speaker ||
+					    w->connections[j] == this->speaker2)
 						continue;
 					MIXER_REG_PROLOG;
 					snprintf(d->label.name,
@@ -868,7 +883,8 @@ azalia_mixer_init(codec_t *this)
 				if (!azalia_widget_enabled(this,
 				    w->connections[j]))
 					continue;
-				if (w->connections[j] == this->speaker)
+				if (w->connections[j] == this->speaker ||
+				    w->connections[j] == this->speaker2)
 					continue;
 				d->un.s.member[k].mask = 1 << j;
 				strlcpy(d->un.s.member[k].label.name,

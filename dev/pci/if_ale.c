@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ale.c,v 1.10 2010/01/07 12:26:06 sthen Exp $	*/
+/*	$OpenBSD: if_ale.c,v 1.12 2010/04/08 00:23:53 tedu Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -34,7 +34,6 @@
 #include "vlan.h"
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/endian.h>
 #include <sys/systm.h>
 #include <sys/types.h>
@@ -2026,7 +2025,7 @@ ale_iff(struct ale_softc *sc)
 
 		ETHER_FIRST_MULTI(step, ac, enm);
 		while (enm != NULL) {
-			crc = ether_crc32_le(enm->enm_addrlo, ETHER_ADDR_LEN);
+			crc = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN);
 
 			mchash[crc >> 31] |= 1 << ((crc >> 26) & 0x1f);
 

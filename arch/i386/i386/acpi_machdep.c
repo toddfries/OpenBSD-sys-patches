@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.27 2009/11/29 21:21:06 deraadt Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.30 2010/04/20 22:05:41 tedu Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -20,6 +20,9 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
+#include <sys/memrange.h>
+#include <sys/proc.h>
+#include <sys/user.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -28,7 +31,9 @@
 #include <machine/acpiapm.h>
 #include <i386/isa/isa_machdep.h>
 
+#include <machine/cpu.h>
 #include <machine/cpufunc.h>
+#include <machine/cpuvar.h>
 #include <machine/npx.h>
 
 #include <dev/isa/isareg.h>
@@ -241,6 +246,10 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	/* Copy the current cpu registers into a safe place for resume. */
 	if (acpi_savecpu()) {
 		npxsave_cpu(curcpu(), 1);
+#ifdef MULTIPROCESSOR
+		i386_broadcast_ipi(I386_IPI_FLUSH_FPU);
+		i386_broadcast_ipi(I386_IPI_HALT);
+#endif
 		wbinvd();
 		acpi_enter_sleep_state(sc, state);
 		panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
@@ -274,6 +283,10 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 
 	npxinit(&cpu_info_primary);
 
+	/* Re-initialise memory range handling */
+	if (mem_range_softc.mr_op != NULL)
+		mem_range_softc.mr_op->initAP(&mem_range_softc);
+
 #if NIOAPIC > 0
 	ioapic_enable();
 #endif
@@ -281,6 +294,46 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	inittodr(time_second);
 
 	return (0);
+}
+
+void
+acpi_resume_machdep(void)
+{
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci;
+	struct proc *p;
+	struct pcb *pcb;
+	struct trapframe *tf;
+	struct switchframe *sf;
+	int i;
+
+	/* XXX refactor with matching code in cpu.c */
+
+	for (i = 0; i < MAXCPUS; i++) {
+		ci = cpu_info[i];
+		if (ci == NULL)
+			continue;
+		if (ci->ci_idle_pcb == NULL)
+			continue;
+		if (ci->ci_flags & (CPUF_BSP|CPUF_SP|CPUF_PRIMARY))
+			continue;
+		KASSERT((ci->ci_flags & CPUF_RUNNING) == 0);
+
+		p = ci->ci_schedstate.spc_idleproc;
+		pcb = &p->p_addr->u_pcb;
+
+		tf = (struct trapframe *)pcb->pcb_tss.tss_esp0 - 1;
+		sf = (struct switchframe *)tf - 1;
+		sf->sf_esi = (int)sched_idle;
+		sf->sf_ebx = (int)ci;
+		sf->sf_eip = (int)proc_trampoline;
+		pcb->pcb_esp = (int)sf;
+
+		ci->ci_idepth = 0;
+	}
+
+	cpu_boot_secondary_processors();
+#endif /* MULTIPROCESSOR */
 }
 
 #endif /* ! SMALL_KERNEL */

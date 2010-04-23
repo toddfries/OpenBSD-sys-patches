@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.26 2010/02/02 01:29:56 syuu Exp $ */
+/*	$OpenBSD: cpu.c,v 1.28 2010/03/28 17:09:36 miod Exp $ */
 
 /*
  * Copyright (c) 1997-2004 Opsycon AB (www.opsycon.se)
@@ -109,6 +109,23 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	ci->ci_cpuid = cpuno;
 	ci->ci_dev = dev;
 	bcopy(ch, &ci->ci_hw, sizeof(struct cpu_hwinfo));
+#ifdef MULTIPROCESSOR
+	/*
+	 * When attaching secondary processors, cache information is not
+	 * available yet.  But since the MP-capable systems we run on
+	 * currently all have R10k-style caches, we can quickly compute
+	 * the needed values.
+	 */
+	if (!ISSET(ci->ci_flags, CPUF_PRIMARY)) {
+		ci->ci_cacheways = 2;
+		ci->ci_l1instcachesize = 32 * 1024;
+		ci->ci_l1instcacheline = 64;
+		ci->ci_l1datacachesize = 32 * 1024;
+		ci->ci_l1datacacheline = 64;
+		ci->ci_l2size = ch->l2size;
+		ci->ci_l3size = 0;
+	}
+#endif
 
 	printf(": ");
 
@@ -185,6 +202,7 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	switch (fptype) {
 	case MIPS_SOFT:
 		printf("Software FP emulation");
+		displayver = 0;
 		break;
 	case MIPS_R4000:
 		printf("R4010 FPC");
@@ -196,7 +214,12 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		printf("R12000 FPU");
 		break;
 	case MIPS_R14000:
-		printf("R1%d000 FPU", isr16k ? 6 : 4);
+		if (isr16k) {
+			if (ch->c0prid == ch->c1prid)
+				vers_maj -= 2;
+			printf("R16000 FPU");
+		} else
+			printf("R14000 FPU");
 		break;
 	case MIPS_R4200:
 		printf("VR4200 FPC (ICE)");

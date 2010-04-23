@@ -1,4 +1,4 @@
-/*	$OpenBSD: oosiop.c,v 1.13 2010/01/10 00:10:23 krw Exp $	*/
+/*	$OpenBSD: oosiop.c,v 1.15 2010/04/20 20:21:56 miod Exp $	*/
 /*	$NetBSD: oosiop.c,v 1.4 2003/10/29 17:45:55 tsutsui Exp $	*/
 
 /*
@@ -79,7 +79,7 @@ void	oosiop_phasemismatch(struct oosiop_softc *);
 void	oosiop_setup_syncxfer(struct oosiop_softc *);
 void	oosiop_set_syncparam(struct oosiop_softc *, int, int, int);
 void	oosiop_minphys(struct buf *, struct scsi_link *);
-int	oosiop_scsicmd(struct scsi_xfer *);
+void	oosiop_scsicmd(struct scsi_xfer *);
 void	oosiop_done(struct oosiop_softc *, struct oosiop_cb *);
 void	oosiop_timeout(void *);
 void	oosiop_reset(struct oosiop_softc *);
@@ -712,7 +712,7 @@ oosiop_minphys(struct buf *bp, struct scsi_link *sl)
 	minphys(bp);
 }
 
-int
+void
 oosiop_scsicmd(struct scsi_xfer *xs)
 {
 	struct oosiop_softc *sc;
@@ -748,7 +748,7 @@ oosiop_scsicmd(struct scsi_xfer *xs)
 		scsi_done(xs);
 		TAILQ_INSERT_TAIL(&sc->sc_free_cb, cb, chain);
 		splx(s);
-		return (COMPLETE);
+		return;
 	}
 	bus_dmamap_sync(sc->sc_dmat, cb->cmddma, 0, xs->cmdlen,
 	    BUS_DMASYNC_PREWRITE);
@@ -771,7 +771,7 @@ oosiop_scsicmd(struct scsi_xfer *xs)
 			scsi_done(xs);
 			TAILQ_INSERT_TAIL(&sc->sc_free_cb, cb, chain);
 			splx(s);
-			return (COMPLETE);
+			return;
 		}
 		bus_dmamap_sync(sc->sc_dmat, cb->datadma,
 		    0, xs->datalen,
@@ -806,11 +806,6 @@ oosiop_scsicmd(struct scsi_xfer *xs)
 	}
 	if (dopoll)
 		oosiop_poll(sc, cb);
-
-	if (xs->flags & (SCSI_POLL | ITSDONE))
-		return (COMPLETE);
-	else
-		return (SUCCESSFULLY_QUEUED);
 }
 
 void
@@ -1049,13 +1044,13 @@ oosiop_reset(struct oosiop_softc *sc)
 	delay(10000);
 
 	/* Set up various chip parameters */
-	oosiop_write_1(sc, OOSIOP_SCNTL0, OOSIOP_ARB_FULL | OOSIOP_SCNTL0_EPG);
+	oosiop_write_1(sc, OOSIOP_SCNTL0, OOSIOP_ARB_FULL | sc->sc_scntl0);
 	oosiop_write_1(sc, OOSIOP_SCNTL1, OOSIOP_SCNTL1_ESR);
 	oosiop_write_1(sc, OOSIOP_DCNTL, sc->sc_dcntl);
-	oosiop_write_1(sc, OOSIOP_DMODE, OOSIOP_DMODE_BL_8);
+	oosiop_write_1(sc, OOSIOP_DMODE, sc->sc_dmode);
 	oosiop_write_1(sc, OOSIOP_SCID, OOSIOP_SCID_VALUE(sc->sc_id));
-	oosiop_write_1(sc, OOSIOP_DWT, 0xff);	/* Enable DMA timeout */
-	oosiop_write_1(sc, OOSIOP_CTEST7, 0);
+	oosiop_write_1(sc, OOSIOP_DWT, sc->sc_dwt);
+	oosiop_write_1(sc, OOSIOP_CTEST7, sc->sc_ctest7);
 	oosiop_write_1(sc, OOSIOP_SXFER, 0);
 
 	/* Clear all interrupts */

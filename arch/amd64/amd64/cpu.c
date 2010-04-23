@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.28 2009/06/09 02:56:38 krw Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.32 2010/04/16 17:44:00 kettenis Exp $	*/
 /* $NetBSD: cpu.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $ */
 
 /*-
@@ -145,9 +145,9 @@ u_int32_t cpus_attached = 0;
 struct cpu_info *cpu_info[MAXCPUS] = { &cpu_info_primary };
 
 void    	cpu_hatch(void *);
-static void    	cpu_boot_secondary(struct cpu_info *ci);
-static void    	cpu_start_secondary(struct cpu_info *ci);
-static void	cpu_copy_trampoline(void);
+void    	cpu_boot_secondary(struct cpu_info *ci);
+void    	cpu_start_secondary(struct cpu_info *ci);
+void		cpu_copy_trampoline(void);
 
 /*
  * Runs once per boot once multiprocessor goo has been detected and
@@ -158,13 +158,6 @@ static void	cpu_copy_trampoline(void);
 void
 cpu_init_first(void)
 {
-	int cpunum = lapic_cpu_number();
-
-	if (cpunum != 0) {
-		cpu_info[0] = NULL;
-		cpu_info[cpunum] = &cpu_info_primary;
-	}
-
 	cpu_copy_trampoline();
 }
 #endif
@@ -225,7 +218,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	struct cpu_attach_args *caa = aux;
 	struct cpu_info *ci;
 #if defined(MULTIPROCESSOR)
-	int cpunum = caa->cpu_number;
+	int cpunum = sc->sc_dev.dv_unit;
 	vaddr_t kstack;
 	struct pcb *pcb;
 #endif
@@ -248,10 +241,10 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	} else {
 		ci = &cpu_info_primary;
 #if defined(MULTIPROCESSOR)
-		if (cpunum != lapic_cpu_number()) {
+		if (caa->cpu_number != lapic_cpu_number()) {
 			panic("%s: running cpu is at apic %d"
 			    " instead of at expected %d",
-			    sc->sc_dev.dv_xname, lapic_cpu_number(), cpunum);
+			    sc->sc_dev.dv_xname, lapic_cpu_number(), caa->cpu_number);
 		}
 #endif
 	}
@@ -262,7 +255,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	ci->ci_dev = self;
 	ci->ci_apicid = caa->cpu_number;
 #ifdef MULTIPROCESSOR
-	ci->ci_cpuid = ci->ci_apicid;
+	ci->ci_cpuid = cpunum;
 #else
 	ci->ci_cpuid = 0;	/* False for APs, but they're not used anyway */
 #endif
@@ -382,6 +375,7 @@ cpu_init(struct cpu_info *ci)
 
 #ifdef MULTIPROCESSOR
 	ci->ci_flags |= CPUF_RUNNING;
+	tlbflushg();
 #endif
 }
 
@@ -555,7 +549,7 @@ cpu_debug_dump(void)
 }
 #endif
 
-static void
+void
 cpu_copy_trampoline(void)
 {
 	/*

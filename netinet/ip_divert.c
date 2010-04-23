@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip_divert.c,v 1.3 2009/10/04 16:08:37 michele Exp $ */
+/*      $OpenBSD: ip_divert.c,v 1.6 2010/04/20 22:05:43 tedu Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -22,6 +22,7 @@
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -56,6 +57,8 @@ u_int   divert_recvspace = DIVERT_RECVSPACE;
 int *divertctl_vars[DIVERTCTL_MAXID] = DIVERTCTL_VARS;
 
 int divbhashsize = DIVERTHASHSIZE;
+
+static struct sockaddr_in ipaddr = { sizeof(ipaddr), AF_INET };
 
 void divert_detach(struct inpcb *);
 
@@ -102,7 +105,8 @@ divert_output(struct mbuf *m, ...)
 	m->m_pkthdr.pf.flags |= PF_TAG_DIVERTED_PACKET;
 
 	if (sin->sin_addr.s_addr != INADDR_ANY) {
-		ifa = ifa_ifwithaddr((struct sockaddr *)sin, 0);
+		ipaddr.sin_addr = sin->sin_addr;
+		ifa = ifa_ifwithaddr(sintosa(&ipaddr), m->m_pkthdr.rdomain);
 		if (ifa == NULL) {
 			divstat.divs_errors++;
 			m_freem(m);

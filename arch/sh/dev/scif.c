@@ -1,4 +1,4 @@
-/*	$OpenBSD: scif.c,v 1.10 2009/11/09 17:53:39 nicm Exp $	*/
+/*	$OpenBSD: scif.c,v 1.12 2010/04/16 02:20:25 deraadt Exp $	*/
 /*	$NetBSD: scif.c,v 1.47 2006/07/23 22:06:06 ad Exp $ */
 
 /*-
@@ -767,11 +767,11 @@ scifopen(dev_t dev, int flag, int mode, struct proc *p)
 
 	splx(s);
 
-	error = ttyopen(dev, tp);
+	error = ttyopen(dev, tp, p);
 	if (error)
 		goto bad;
 
-	error = (*linesw[tp->t_line].l_open)(dev, tp);
+	error = (*linesw[tp->t_line].l_open)(dev, tp, p);
 	if (error)
 		goto bad;
 
@@ -792,7 +792,7 @@ scifclose(dev_t dev, int flag, int mode, struct proc *p)
 	if (!ISSET(tp->t_state, TS_ISOPEN))
 		return (0);
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	ttyclose(tp);
 
 	return (0);

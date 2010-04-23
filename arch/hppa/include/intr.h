@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.28 2009/12/31 13:22:02 jsing Exp $	*/
+/*	$OpenBSD: intr.h,v 1.30 2010/04/23 03:50:22 miod Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Michael Shalayeff
@@ -45,6 +45,7 @@
 #define	IPL_AUDIO	8
 #define	IPL_CLOCK	9
 #define	IPL_STATCLOCK	10
+#define	IPL_SCHED	10
 #define	IPL_HIGH	10
 #define	IPL_NESTED	11	/* pseudo-level for sub-tables */
 
@@ -57,7 +58,7 @@
 
 #include <machine/atomic.h>
 
-extern volatile u_long ipending, imask[NIPL];
+extern volatile u_long imask[NIPL];
 
 #ifdef DIAGNOSTIC
 void splassert_fail(int, int, const char *);
@@ -137,7 +138,7 @@ hppa_intr_enable(register_t eiem)
 #define	splhigh()	splraise(IPL_HIGH)
 #define	spl0()		spllower(IPL_NONE)
 
-#define	softintr(mask)	atomic_setbits_long(&ipending, mask)
+#define	softintr(mask)	atomic_setbits_long(&curcpu()->ci_ipending, mask)
 
 #define	SOFTINT_MASK ((1 << (IPL_SOFTCLOCK - 1)) | \
     (1 << (IPL_SOFTNET - 1)) | (1 << (IPL_SOFTTTY - 1)))

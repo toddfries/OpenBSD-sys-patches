@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.123 2010/01/28 19:23:06 guenther Exp $	*/
+/*	$OpenBSD: proc.h,v 1.126 2010/04/20 22:05:44 tedu Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -48,7 +48,6 @@
 #include <sys/mutex.h>			/* For struct mutex */
 #include <machine/atomic.h>
 
-#define curproc curcpu()->ci_curproc
 #ifdef _KERNEL
 #define __need_process
 #endif
@@ -395,6 +394,7 @@ extern int randompid;			/* fork() should create random pid's */
 
 LIST_HEAD(proclist, proc);
 extern struct proclist allproc;		/* List of all processes. */
+extern struct rwlock allproclk;		/* also used for zombie list */
 extern struct proclist zombproc;	/* List of zombie processes. */
 
 extern struct proc *initproc;		/* Process slots for init, pager. */
@@ -421,16 +421,12 @@ int	enterpgrp(struct proc *p, pid_t pgid, struct pgrp *newpgrp,
 void	fixjobc(struct proc *p, struct pgrp *pgrp, int entering);
 int	inferior(struct proc *, struct proc *);
 int	leavepgrp(struct proc *p);
-void	yield(void);
 void	preempt(struct proc *);
 void	pgdelete(struct pgrp *pgrp);
 void	procinit(void);
 void	resetpriority(struct proc *);
 void	setrunnable(struct proc *);
 void	unsleep(struct proc *);
-void    wakeup_n(const volatile void *, int);
-void    wakeup(const volatile void *);
-#define wakeup_one(c) wakeup_n((c), 1)
 void	reaper(void);
 void	exit1(struct proc *, int, int);
 void	exit2(struct proc *);
@@ -451,18 +447,6 @@ struct sleep_state {
 	int sls_do_sleep;
 	int sls_sig;
 };
-
-void	sleep_setup(struct sleep_state *, const volatile void *, int,
-	    const char *);
-void	sleep_setup_timeout(struct sleep_state *, int);
-void	sleep_setup_signal(struct sleep_state *, int);
-void	sleep_finish(struct sleep_state *, int);
-int	sleep_finish_timeout(struct sleep_state *);
-int	sleep_finish_signal(struct sleep_state *);
-void	sleep_queue_init(void);
-
-int	tsleep(const volatile void *, int, const char *, int);
-int	msleep(const volatile void *, struct mutex *, int,  const char*, int);
 
 #if defined(MULTIPROCESSOR)
 void	proc_trampoline_mp(void);	/* XXX */

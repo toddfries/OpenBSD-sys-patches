@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.166 2009/12/24 10:12:19 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.172 2010/04/20 02:17:24 jakemsr Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -100,6 +100,8 @@ int az_debug = 0;
 #define		ICH_PCI_HDCTL_SIGNALMODE	0x01
 #define ICH_PCI_HDTCSEL	0x44
 #define		ICH_PCI_HDTCSEL_MASK	0x7
+#define ICH_PCI_MMC	0x62
+#define		ICH_PCI_MMC_ME		0x1
 
 /* internal types */
 
@@ -145,6 +147,7 @@ typedef struct azalia_t {
 	struct device *audiodev;
 
 	pci_chipset_tag_t pc;
+	pcitag_t tag;
 	void *ih;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
@@ -175,7 +178,6 @@ typedef struct azalia_t {
 	int nistreams, nostreams, nbstreams;
 	stream_t pstream;
 	stream_t rstream;
-	struct pci_attach_args *saved_pa;
 } azalia_t;
 #define XNAME(sc)		((sc)->dev.dv_xname)
 #define AZ_READ_1(z, r)		bus_space_read_1((z)->iot, (z)->ioh, HDA_##r)
@@ -394,7 +396,6 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	sc = (azalia_t*)self;
 	pa = aux;
-	sc->saved_pa = pa;
 
 	sc->dmat = pa->pa_dmat;
 
@@ -415,7 +416,14 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 	v = pci_conf_read(pa->pa_pc, pa->pa_tag, ICH_PCI_HDTCSEL);
 	pci_conf_write(pa->pa_pc, pa->pa_tag, ICH_PCI_HDTCSEL,
 	    v & ~(ICH_PCI_HDTCSEL_MASK));
- 
+
+	/* disable MSI, use INTx instead */
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_INTEL) {
+		reg = azalia_pci_read(pa->pa_pc, pa->pa_tag, ICH_PCI_MMC);
+		reg &= ~(ICH_PCI_MMC_ME);
+		azalia_pci_write(pa->pa_pc, pa->pa_tag, ICH_PCI_MMC, reg);
+	}
+
 	/* enable PCIe snoop */
 	switch (PCI_PRODUCT(pa->pa_id)) {
 	case PCI_PRODUCT_ATI_SB450_HDA:
@@ -482,6 +490,7 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	sc->pc = pa->pa_pc;
+	sc->tag = pa->pa_tag;
 	interrupt_str = pci_intr_string(pa->pa_pc, ih);
 	sc->ih = pci_intr_establish(pa->pa_pc, ih, IPL_AUDIO, azalia_intr,
 	    sc, sc->dev.dv_xname);
@@ -792,7 +801,6 @@ int
 azalia_init(azalia_t *az, int resuming)
 {
 	int err;
-	uint32_t gctl;
 
 	err = azalia_reset(az);
 	if (err)
@@ -823,10 +831,6 @@ azalia_init(azalia_t *az, int resuming)
 
 	AZ_WRITE_4(az, INTCTL,
 	    AZ_READ_4(az, INTCTL) | HDA_INTCTL_CIE | HDA_INTCTL_GIE);
-
-	/* enable unsolicited response */
-	gctl = AZ_READ_4(az, GCTL);
-	AZ_WRITE_4(az, GCTL, gctl | HDA_GCTL_UNSOL);
 
 	return(0);
 }
@@ -894,6 +898,9 @@ azalia_init_codecs(azalia_t *az)
 			azalia_codec_delete(codec);
 		}
 	}
+
+	/* Enable unsolicited responses now that az->codecno is set. */
+	AZ_WRITE_4(az, GCTL, AZ_READ_4(az, GCTL) | HDA_GCTL_UNSOL);
 
 	return(0);
 }
@@ -1212,21 +1219,22 @@ void
 azalia_rirb_kick_unsol_events(void *v)
 {
 	azalia_t *az = v;
+	int addr, tag;
 
 	if (az->unsolq_kick)
 		return;
 	az->unsolq_kick = TRUE;
 	while (az->unsolq_rp != az->unsolq_wp) {
-		int i;
-		int tag;
-		codec_t *codec;
-		i = RIRB_RESP_CODEC(az->unsolq[az->unsolq_rp].resp_ex);
+		addr = RIRB_RESP_CODEC(az->unsolq[az->unsolq_rp].resp_ex);
 		tag = RIRB_UNSOL_TAG(az->unsolq[az->unsolq_rp].resp);
-		codec = &az->codecs[i];
-		DPRINTF(("%s: codec#=%d tag=%d\n", __func__, i, tag));
+		DPRINTF(("%s: codec address=%d tag=%d\n", __func__, addr, tag));
+
 		az->unsolq_rp++;
 		az->unsolq_rp %= UNSOLQ_SIZE;
-		azalia_unsol_event(codec, tag);
+
+		/* We only care about events on the using codec. */
+		if (az->codecs[az->codecno].address == addr)
+			azalia_unsol_event(&az->codecs[az->codecno], tag);
 	}
 	az->unsolq_kick = FALSE;
 }
@@ -1395,19 +1403,8 @@ azalia_resume_codec(codec_t *this)
 			    CORB_PS_D0, &result);
 			DELAY(100);
 		}
-		if ((w->type == COP_AWTYPE_PIN_COMPLEX) &&
-		    (w->d.pin.cap & COP_PINCAP_EAPD)) {
-			err = azalia_comresp(this, w->nid,
-			    CORB_GET_EAPD_BTL_ENABLE, 0, &result);
-			if (err)
-				return err;
-			result &= 0xff;
-			result |= CORB_EAPD_EAPD;
-			err = azalia_comresp(this, w->nid,
-			    CORB_SET_EAPD_BTL_ENABLE, result, &result);
-			if (err)
-				return err;
-		}
+		if (w->type == COP_AWTYPE_PIN_COMPLEX)
+			azalia_widget_init_pin(w, this);
 	}
 
 	if (this->qrks & AZ_QRK_GPIO_MASK) {
@@ -1428,24 +1425,21 @@ azalia_resume_codec(codec_t *this)
 int
 azalia_resume(azalia_t *az)
 {
-	struct pci_attach_args *pa;
 	pcireg_t v;
 	int err;
 
-	pa = az->saved_pa;
-
 	/* enable back-to-back */
-	v = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+	v = pci_conf_read(az->pc, az->tag, PCI_COMMAND_STATUS_REG);
+	pci_conf_write(az->pc, az->tag, PCI_COMMAND_STATUS_REG,
 	    v | PCI_COMMAND_BACKTOBACK_ENABLE);
 
 	/* traffic class select */
-	v = pci_conf_read(pa->pa_pc, pa->pa_tag, ICH_PCI_HDTCSEL);
-	pci_conf_write(pa->pa_pc, pa->pa_tag, ICH_PCI_HDTCSEL,
+	v = pci_conf_read(az->pc, az->tag, ICH_PCI_HDTCSEL);
+	pci_conf_write(az->pc, az->tag, ICH_PCI_HDTCSEL,
 	    v & ~(ICH_PCI_HDTCSEL_MASK));
 
 	/* is this necessary? */
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG, az->subid);
+	pci_conf_write(az->pc, az->tag, PCI_SUBSYS_ID_REG, az->subid);
 
 	err = azalia_init(az, 1);
 	if (err)
@@ -1660,7 +1654,8 @@ azalia_codec_init(codec_t *this)
 
 	this->na_dacs = this->na_dacs_d = 0;
 	this->na_adcs = this->na_adcs_d = 0;
-	this->speaker = this->spkr_dac = this->fhp = this->fhp_dac =
+	this->speaker = this->speaker2 = this->spkr_dac =
+	    this->fhp = this->fhp_dac =
 	    this->mic = this->mic_adc = -1;
 	this->nsense_pins = 0;
 	this->nout_jacks = 0;
@@ -1704,13 +1699,22 @@ azalia_codec_init(codec_t *this)
 			case CORB_CD_FIXED:
 				switch (w->d.pin.device) {
 				case CORB_CD_SPEAKER:
-					if ((this->speaker == -1) ||
-					    (w->d.pin.association <
-					    this->w[this->speaker].d.pin.association)) {
+					if (this->speaker == -1) {
 						this->speaker = i;
+					} else if (w->d.pin.association <
+					    this->w[this->speaker].d.pin.association ||
+					    (w->d.pin.association ==
+					    this->w[this->speaker].d.pin.association &&
+					    w->d.pin.sequence <
+					    this->w[this->speaker].d.pin.sequence)) {
+						this->speaker2 = this->speaker;
+						this->speaker = i;
+					} else {
+						this->speaker2 = i;
+					}
+					if (this->speaker == i)
 						this->spkr_dac =
 						    azalia_codec_find_defdac(this, i, 0);
-					}
 					break;
 				case CORB_CD_MICIN:
 					this->mic = i;
@@ -1938,7 +1942,8 @@ azalia_codec_sort_pins(codec_t *this)
 			switch(w->d.pin.device) {
 			/* primary - output by default */
 			case CORB_CD_SPEAKER:
-				if (w->nid == this->speaker)
+				if (w->nid == this->speaker ||
+				    w->nid == this->speaker2)
 					break;
 				/* FALLTHROUGH */
 			case CORB_CD_HEADPHONE:
@@ -1991,7 +1996,8 @@ azalia_codec_sort_pins(codec_t *this)
 				break;
 			/* secondary - output by default */
 			case CORB_CD_SPEAKER:
-				if (w->nid == this->speaker)
+				if (w->nid == this->speaker ||
+				    w->nid == this->speaker2)
 					break;
 				/* FALLTHROUGH */
 			case CORB_CD_HEADPHONE:
@@ -2264,6 +2270,27 @@ azalia_codec_select_spkrdac(codec_t *this)
 				this->spkr_dac = conv;
 			else
 				this->opins[0].conv = conv;
+		}
+	}
+
+	/* If there is a speaker2, try to connect it to spkr_dac. */
+	if (this->speaker2 != -1) {
+		conn = conv = -1;
+		w = &this->w[this->speaker2];
+		for (i = 0; i < w->nconnections; i++) {
+			conv = azalia_codec_find_defdac(this,
+			    w->connections[i], 1);
+			if (conv == this->spkr_dac) {
+				conn = i;
+				break;
+			}
+		}
+		if (conn != -1) {
+			err = azalia_comresp(this, w->nid,
+			    CORB_SET_CONNECTION_SELECT_CONTROL, conn, 0);
+			if (err)
+				return(err);
+			w->selected = conn;
 		}
 	}
 
@@ -3830,7 +3857,7 @@ azalia_query_encoding(void *v, audio_encoding_t *enc)
 	az = v;
 	codec = &az->codecs[az->codecno];
 
-	if (enc->index >= codec->nencs)
+	if (enc->index < 0 || enc->index >= codec->nencs)
 		return (EINVAL);
 
 	*enc = codec->encs[enc->index];

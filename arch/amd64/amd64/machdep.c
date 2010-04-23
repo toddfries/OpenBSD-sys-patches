@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.102 2009/11/23 16:21:54 pirofti Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.106 2010/03/24 00:36:04 oga Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -1264,10 +1264,10 @@ init_x86_64(paddr_t first_avail)
 		avail_start = MP_TRAMPOLINE + PAGE_SIZE;
 #endif
 
-#ifndef SMALL_KERNEL
+#if (NACPI > 0 && !defined(SMALL_KERNEL))
 	if (avail_start < ACPI_TRAMPOLINE + PAGE_SIZE)
 		avail_start = ACPI_TRAMPOLINE + PAGE_SIZE;
-#endif /* !SMALL_KERNEL */
+#endif
 
 	/* Let us know if we're supporting > 4GB ram load */
 	if (bigmem)
@@ -1657,10 +1657,11 @@ cpu_dump_mempagecnt(void)
 int
 amd64_pa_used(paddr_t addr)
 {
-	bios_memmap_t *bmp;
+	struct vm_page	*pg;
+	bios_memmap_t	*bmp;
 
 	/* Kernel manages these */
-	if (PHYS_TO_VM_PAGE(addr))
+	if ((pg = PHYS_TO_VM_PAGE(addr)) && (pg->pg_flags & PG_DEV) == 0)
 		return 1;
 
 	/* Kernel is loaded here */

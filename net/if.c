@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.207 2010/01/13 02:29:51 henning Exp $	*/
+/*	$OpenBSD: if.c,v 1.213 2010/04/17 18:31:41 stsp Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -103,6 +103,8 @@
 #endif
 #include <netinet6/in6_ifattach.h>
 #include <netinet6/nd6.h>
+#include <netinet/ip6.h>
+#include <netinet6/ip6_var.h>
 #endif
 
 #if NBPFILTER > 0
@@ -875,21 +877,31 @@ if_congestion_clear(void *arg)
 struct ifaddr *
 ifa_ifwithaddr(struct sockaddr *addr, u_int rdomain)
 {
-	struct ifaddr_item *ifai, key;
-
-	bzero(&key, sizeof(key));
-	key.ifai_addr = addr;
-	key.ifai_rdomain = rtable_l2(rdomain);
-
-	ifai = RB_FIND(ifaddr_items, &ifaddr_items, &key);
-	if (ifai)
-		return (ifai->ifai_ifa);
-	return (NULL);
-}
+	struct ifnet *ifp;
+	struct ifaddr *ifa;
 
 #define	equal(a1, a2)	\
 	(bcmp((caddr_t)(a1), (caddr_t)(a2),	\
 	((struct sockaddr *)(a1))->sa_len) == 0)
+
+	rdomain = rtable_l2(rdomain);
+	TAILQ_FOREACH(ifp, &ifnet, if_list) {
+	    if (ifp->if_rdomain != rdomain)
+		continue;
+	    TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
+		if (ifa->ifa_addr->sa_family != addr->sa_family)
+			continue;
+		if (equal(addr, ifa->ifa_addr))
+			return (ifa);
+		if ((ifp->if_flags & IFF_BROADCAST) && ifa->ifa_broadaddr &&
+		    /* IP6 doesn't have broadcast */
+		    ifa->ifa_broadaddr->sa_len != 0 &&
+		    equal(ifa->ifa_broadaddr, addr))
+			return (ifa);
+	    }
+	}
+	return (NULL);
+}
 
 /*
  * Locate the point to point interface with a given destination address.
@@ -1549,22 +1561,8 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		default:
 			return (ENODEV);
 		}
-		if (ifp->if_flags & IFF_UP) {
-			struct ifreq ifrq;
-			int s = splnet();
-			ifp->if_flags &= ~IFF_UP;
-			ifrq.ifr_flags = ifp->if_flags;
-			(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifrq);
-			ifp->if_flags |= IFF_UP;
-			ifrq.ifr_flags = ifp->if_flags;
-			(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifrq);
-			splx(s);
-			TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-				if (ifa->ifa_addr != NULL &&
-				    ifa->ifa_addr->sa_family == AF_INET)
-					arp_ifinit((struct arpcom *)ifp, ifa);
-			}
-		}
+
+		ifnewlladdr(ifp);
 		break;
 
 	default:
@@ -2159,18 +2157,12 @@ ifa_add(struct ifnet *ifp, struct ifaddr *ifa)
 		TAILQ_INSERT_HEAD(&ifp->if_addrlist, ifa, ifa_list);
 	else
 		TAILQ_INSERT_TAIL(&ifp->if_addrlist, ifa, ifa_list);
-	ifa_item_insert(ifa->ifa_addr, ifa, ifp);
-	if (ifp->if_flags & IFF_BROADCAST && ifa->ifa_broadaddr)
-		ifa_item_insert(ifa->ifa_broadaddr, ifa, ifp);
 }
 
 void
 ifa_del(struct ifnet *ifp, struct ifaddr *ifa)
 {
 	TAILQ_REMOVE(&ifp->if_addrlist, ifa, ifa_list);
-	ifa_item_remove(ifa->ifa_addr, ifa, ifp);
-	if (ifp->if_flags & IFF_BROADCAST && ifa->ifa_broadaddr)
-		ifa_item_remove(ifa->ifa_broadaddr, ifa, ifp);
 }
 
 int
@@ -2228,4 +2220,57 @@ ifa_item_remove(struct sockaddr *sa, struct ifaddr *ifa, struct ifnet *ifp)
 	} else
 		ifai_last->ifai_next = ifai->ifai_next;
 	pool_put(&ifaddr_item_pl, ifai);
+}
+
+void
+ifnewlladdr(struct ifnet *ifp)
+{
+	struct ifaddr *ifa;
+	struct ifreq ifrq;
+	short up;
+	int s;
+
+	s = splnet();
+	up = ifp->if_flags & IFF_UP;
+
+	if (up) {
+		/* go down for a moment... */
+		ifp->if_flags &= ~IFF_UP;
+		ifrq.ifr_flags = ifp->if_flags;
+		(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifrq);
+	}
+
+	ifp->if_flags |= IFF_UP;
+	ifrq.ifr_flags = ifp->if_flags;
+	(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifrq);
+
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
+		if (ifa->ifa_addr != NULL &&
+		    ifa->ifa_addr->sa_family == AF_INET)
+			arp_ifinit((struct arpcom *)ifp, ifa);
+	}
+#ifdef INET6
+	/* Update the link-local address. Don't do it if we're
+	 * a router to avoid confusing hosts on the network. */
+	if (!(ifp->if_xflags & IFXF_NOINET6) && !ip6_forwarding) {
+		ifa = (struct ifaddr *)in6ifa_ifpforlinklocal(ifp, 0);
+		if (ifa) {
+			in6_purgeaddr(ifa);
+			in6_ifattach_linklocal(ifp, NULL);
+			if (in6if_do_dad(ifp)) {
+				ifa = (struct ifaddr *)
+				    in6ifa_ifpforlinklocal(ifp, 0);
+				if (ifa)
+					nd6_dad_start(ifa, NULL);
+			}
+		}
+	}
+#endif
+	if (!up) {
+		/* go back down */
+		ifp->if_flags &= ~IFF_UP;
+		ifrq.ifr_flags = ifp->if_flags;
+		(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifrq);
+	}
+	splx(s);
 }

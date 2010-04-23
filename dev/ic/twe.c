@@ -1,4 +1,4 @@
-/*	$OpenBSD: twe.c,v 1.33 2010/01/09 23:15:06 krw Exp $	*/
+/*	$OpenBSD: twe.c,v 1.35 2010/03/29 23:33:39 krw Exp $	*/
 
 /*
  * Copyright (c) 2000-2002 Michael Shalayeff.  All rights reserved.
@@ -64,7 +64,7 @@ struct cfdriver twe_cd = {
 	NULL, "twe", DV_DULL
 };
 
-int	twe_scsi_cmd(struct scsi_xfer *);
+void	twe_scsi_cmd(struct scsi_xfer *);
 
 struct scsi_adapter twe_switch = {
 	twe_scsi_cmd, tweminphys, 0, 0,
@@ -770,7 +770,7 @@ twe_copy_internal_data(xs, v, size)
 	}
 }
 
-int
+void
 twe_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -795,7 +795,7 @@ twe_scsi_cmd(xs)
 		lock = TWE_LOCK(sc);
 		scsi_done(xs);
 		TWE_UNLOCK(sc, lock);
-		return (COMPLETE);
+		return;
 	}
 
 	TWE_DPRINTF(TWE_D_CMD, ("twe_scsi_cmd "));
@@ -854,7 +854,7 @@ twe_scsi_cmd(xs)
 		lock = TWE_LOCK(sc);
 		scsi_done(xs);
 		TWE_UNLOCK(sc, lock);
-		return (COMPLETE);
+		return;
 
 	case READ_COMMAND:
 	case READ_BIG:
@@ -864,7 +864,9 @@ twe_scsi_cmd(xs)
 		lock = TWE_LOCK(sc);
 
 		flags = 0;
-		if (xs->cmd->opcode != SYNCHRONIZE_CACHE) {
+		if (xs->cmd->opcode == SYNCHRONIZE_CACHE) {
+			blockno = blockcnt = 0;
+		} else {
 			/* A read or write operation. */
 			if (xs->cmdlen == 6) {
 				rw = (struct scsi_rw *)xs->cmd;
@@ -888,7 +890,7 @@ twe_scsi_cmd(xs)
 				xs->error = XS_DRIVER_STUFFUP;
 				scsi_done(xs);
 				TWE_UNLOCK(sc, lock);
-				return (COMPLETE);
+				return;
 			}
 		}
 
@@ -900,8 +902,12 @@ twe_scsi_cmd(xs)
 		default:		op = TWE_CMD_NOP;	break;
 		}
 
-		if ((ccb = twe_get_ccb(sc)) == NULL)
-			return (NO_CCB);
+		if ((ccb = twe_get_ccb(sc)) == NULL) {
+			xs->error = XS_NO_CCB;
+			scsi_done(xs);
+			TWE_UNLOCK(sc, lock);
+			return;
+		}
 
 		ccb->ccb_xs = xs;
 		ccb->ccb_data = xs->data;
@@ -923,16 +929,10 @@ twe_scsi_cmd(xs)
 			TWE_DPRINTF(TWE_D_CMD, ("failed %p ", xs));
 			xs->error = XS_DRIVER_STUFFUP;
 			scsi_done(xs);
-			TWE_UNLOCK(sc, lock);
-			return (COMPLETE);
 		}
 
 		TWE_UNLOCK(sc, lock);
-
-		if (wait & SCSI_POLL)
-			return (COMPLETE);
-		else
-			return (SUCCESSFULLY_QUEUED);
+		return;
 
 	default:
 		TWE_DPRINTF(TWE_D_CMD, ("unsupported scsi command %#x tgt %d ",
@@ -943,8 +943,6 @@ twe_scsi_cmd(xs)
 	lock = TWE_LOCK(sc);
 	scsi_done(xs);
 	TWE_UNLOCK(sc, lock);
-
-	return (COMPLETE);
 }
 
 int

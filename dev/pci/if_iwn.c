@@ -1,7 +1,7 @@
-/*	$OpenBSD: if_iwn.c,v 1.85 2010/02/03 17:51:11 damien Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.89 2010/04/20 22:05:43 tedu Exp $	*/
 
 /*-
- * Copyright (c) 2007-2009 Damien Bergamini <damien.bergamini@free.fr>
+ * Copyright (c) 2007-2010 Damien Bergamini <damien.bergamini@free.fr>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -25,7 +25,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -83,7 +82,9 @@ static const struct pci_matchid iwn_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_IPA_1 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_IPA_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_2X2_1 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_2X2_2 }
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_2X2_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005_2X2_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005_2X2_2 }
 };
 
 int		iwn_match(struct device *, void *, void *);
@@ -630,7 +631,14 @@ iwn_hal_attach(struct iwn_softc *sc, pci_product_id_t pid)
 	case IWN_HW_REV_TYPE_6050:
 		sc->sc_hal = &iwn5000_hal;
 		sc->limits = &iwn6000_sensitivity_limits;
-		sc->fwname = "iwn-6000";
+		sc->fwname = "iwn-6050";
+		sc->txchainmask = IWN_ANT_AB;
+		sc->rxchainmask = IWN_ANT_AB;
+		break;
+	case IWN_HW_REV_TYPE_6005:
+		sc->sc_hal = &iwn5000_hal;
+		sc->limits = &iwn6000_sensitivity_limits;
+		sc->fwname = "iwn-6005";
 		sc->txchainmask = IWN_ANT_AB;
 		sc->rxchainmask = IWN_ANT_AB;
 		break;
@@ -1472,6 +1480,7 @@ iwn4965_print_power_group(struct iwn_softc *sc, int i)
 void
 iwn5000_read_eeprom(struct iwn_softc *sc)
 {
+	struct iwn5000_eeprom_calib_hdr hdr;
 	int32_t temp, volt;
 	uint32_t base, addr;
 	uint16_t val;
@@ -1495,6 +1504,11 @@ iwn5000_read_eeprom(struct iwn_softc *sc)
 
 	iwn_read_prom_data(sc, IWN5000_EEPROM_CAL, &val, 2);
 	base = letoh16(val);
+	iwn_read_prom_data(sc, base, &hdr, sizeof hdr);
+	DPRINTF(("calib version=%u pa type=%u voltage=%u\n",
+	    hdr.version, hdr.pa_type, letoh16(hdr.volt)));
+	sc->calib_ver = hdr.version;
+
 	if (sc->hw_type == IWN_HW_REV_TYPE_5150) {
 		/* Compute temperature offset. */
 		iwn_read_prom_data(sc, base + IWN5000_EEPROM_TEMP, &val, 2);
@@ -3731,10 +3745,13 @@ iwn_collect_noise(struct iwn_softc *sc,
 	val = MAX(calib->rssi[2], val);
 
 	/* Determine which antennas are connected. */
-	sc->chainmask = 0;
+	sc->chainmask = sc->rxchainmask;
 	for (i = 0; i < 3; i++)
-		if (val - calib->rssi[i] <= 15 * 20)
-			sc->chainmask |= 1 << i;
+		if (val - calib->rssi[i] > 15 * 20)
+			sc->chainmask &= ~(1 << i);
+	DPRINTF(("RX chains mask: theoretical=0x%x, actual=0x%x\n",
+	    sc->rxchainmask, sc->chainmask));
+
 	/* If none of the TX antennas are connected, keep at least one. */
 	if ((sc->chainmask & sc->txchainmask) == 0)
 		sc->chainmask |= IWN_LSB(sc->txchainmask);
@@ -5260,8 +5277,7 @@ iwn_apm_init(struct iwn_softc *sc)
 		IWN_CLRBITS(sc, IWN_GIO, IWN_GIO_L0S_ENA);
 
 	if (sc->hw_type != IWN_HW_REV_TYPE_4965 &&
-	    sc->hw_type != IWN_HW_REV_TYPE_6000 &&
-	    sc->hw_type != IWN_HW_REV_TYPE_6050)
+	    sc->hw_type <= IWN_HW_REV_TYPE_1000)
 		IWN_SETBITS(sc, IWN_ANA_PLL, IWN_ANA_PLL_INIT);
 
 	/* Wait for clock stabilization before accessing prph. */
@@ -5369,6 +5385,10 @@ iwn5000_nic_config(struct iwn_softc *sc)
 	if (sc->sc_flags & IWN_FLAG_INTERNAL_PA) {
 		/* Use internal power amplifier only. */
 		IWN_WRITE(sc, IWN_GP_DRIVER, IWN_GP_DRIVER_RADIO_2X2_IPA);
+	}
+	if (sc->hw_type == IWN_HW_REV_TYPE_6050 && sc->calib_ver >= 6) {
+		/* Indicate that ROM calibration version is >=6. */
+		IWN_SETBITS(sc, IWN_GP_DRIVER, IWN_GP_DRIVER_CALIB_VER6);
 	}
 	return 0;
 }

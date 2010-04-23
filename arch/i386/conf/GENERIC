@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.678 2010/01/03 18:37:24 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.683 2010/04/02 20:07:28 deraadt Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -148,6 +148,7 @@ viasio*	at isa? port 0x4e flags 0x0000
 wbsio*	at isa? port 0x2e		# Winbond LPC Super I/O
 wbsio*	at isa? port 0x4e
 lm*	at wbsio?
+uguru0	at isa? port 0xe0		# ABIT uGuru
 fins0	at isa? port 0x4e		# Fintek F71805 Super I/O
 
 aps0	at isa? port 0x1600		# ThinkPad Active Protection System
@@ -274,6 +275,7 @@ axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 cdce*	at uhub?		# CDC Ethernet
+urndis*	at uhub?		# Remote NDIS Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
@@ -462,6 +464,8 @@ arc*	at pci?			# Areca RAID Controllers
 scsibus* at arc?
 mpi*	at pci?			# LSI Logic Fusion MPT Message Passing Interface
 scsibus* at mpi?
+mpii*	at pci?			# LSI Fusion MPT Message Passing Interface II
+scsibus* at mpii?
 gdt*	at pci?			# ICP Vortex GDT RAID controllers
 scsibus* at gdt?
 twe*	at pci?			# 3ware Escalade RAID controllers
@@ -598,6 +602,7 @@ vr*	at pci?				# VIA Rhine ethernet
 wb*	at pci?				# Winbond W89C840F ethernet
 sf*	at pci?				# Adaptec AIC-6915 ethernet
 sis*	at pci?				# SiS 900/7016 ethernet
+se*	at pci?				# SiS 190/191 ethernet
 ste*	at pci?				# Sundance ST201 ethernet
 dc*	at pci?				# 21143, "tulip" clone ethernet
 dc*	at cardbus?			# 21143, "tulip" clone ethernet
@@ -734,7 +739,6 @@ gus0	at isa? port 0x220 irq 7 drq 1 drq2 6	# Gravis (drq2 is record drq)
 ym*	at isapnp?
 mpu*	at isapnp?
 mpu*	at isa? port 0x300		# generic MPU, Yamaha SW60XG
-#aria0	at isa? port 0x280 irq 10 drq 0 flags 0x1 # Prometheus Aria 16
 
 # OPL[23] FM synthesizers
 #opl0	at isa? port 0x388	# use only if not attached to sound card

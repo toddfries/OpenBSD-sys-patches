@@ -1,4 +1,4 @@
-/*	$OpenBSD: envy.c,v 1.31 2009/11/02 05:54:16 ratchov Exp $	*/
+/*	$OpenBSD: envy.c,v 1.36 2010/04/08 00:23:53 tedu Exp $	*/
 /*
  * Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
  *
@@ -32,11 +32,13 @@
 #include <sys/ioctl.h>
 #include <sys/audioio.h>
 #include <sys/malloc.h>
+#include <sys/kernel.h>
+#include <dev/audio_if.h>
+#include <dev/ic/ac97.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/envyvar.h>
 #include <dev/pci/envyreg.h>
-#include <dev/audio_if.h>
 #include <machine/bus.h>
 
 #ifdef ENVY_DEBUG
@@ -73,6 +75,7 @@ int  envy_eeprom_gpioxxx(struct envy_softc *, int);
 void envy_reset(struct envy_softc *);
 int  envy_codec_read(struct envy_softc *, int, int);
 void envy_codec_write(struct envy_softc *, int, int, int);
+void envy_pintr(struct envy_softc *);
 int  envy_intr(void *);
 
 int envy_lineout_getsrc(struct envy_softc *, int);
@@ -87,7 +90,7 @@ void envy_close(void *);
 void *envy_allocm(void *, int, size_t, int, int);
 void envy_freem(void *, void *, int);
 int envy_query_encoding(void *, struct audio_encoding *);
-int envy_set_params(void *, int, int, struct audio_params *, 
+int envy_set_params(void *, int, int, struct audio_params *,
     struct audio_params *);
 int envy_round_blocksize(void *, int);
 size_t envy_round_buffersize(void *, int, size_t);
@@ -103,11 +106,20 @@ int envy_get_port(void *, struct mixer_ctrl *);
 int envy_set_port(void *, struct mixer_ctrl *);
 int envy_get_props(void *);
 
+int  envy_ac97_wait(struct envy_softc *);
+int  envy_ac97_attach_codec(void *, struct ac97_codec_if *);
+int  envy_ac97_read_codec(void *, u_int8_t, u_int16_t *);
+int  envy_ac97_write_codec(void *, u_int8_t, u_int16_t);
+void envy_ac97_reset_codec(void *);
+enum ac97_host_flags envy_ac97_flags_codec(void *);
+
 void delta_init(struct envy_softc *);
 void delta_codec_write(struct envy_softc *, int, int, int);
 
 void revo51_init(struct envy_softc *);
 void revo51_codec_write(struct envy_softc *, int, int, int);
+
+void tremor51_init(struct envy_softc *);
 
 void julia_init(struct envy_softc *);
 void julia_codec_write(struct envy_softc *, int, int, int);
@@ -191,13 +203,13 @@ struct {
 };
 
 /*
- * ESI julia cards don't have EEPROM, use this copy
+ * ESI Julia cards don't have EEPROM, use this copy
  */
 static unsigned char julia_eeprom[ENVY_EEPROM_MAXSZ] = {
 	/* gpio mask/dir/state is from linux */
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-	0x20, 0x80, 0xf8, 0xc3, 
-	0x9f, 0xff, 0x7f, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x20, 0x80, 0xf8, 0xc3,
+	0x9f, 0xff, 0x7f,
 	0x9f, 0xff, 0x7f,
 	0x60, 0x00, 0x00
 };
@@ -275,6 +287,12 @@ struct envy_card envy_cards[] = {
 		revo51_init,
 		revo51_codec_write
 	}, {
+		PCI_ID_CODE(0x1412, 0x2403),
+		"VIA Tremor 5.1",
+		2, &unkenvy_codec, 6, &unkenvy_codec,
+		tremor51_init,
+		unkenvy_codec_write
+	}, {
 		0,
 		"unknown 1724-based card",
 		2, &unkenvy_codec, 8, &unkenvy_codec,
@@ -285,7 +303,7 @@ struct envy_card envy_cards[] = {
 
 
 /*
- * m-audio delta specific code
+ * M-Audio Delta specific code
  */
 
 void
@@ -338,10 +356,10 @@ delta_codec_write(struct envy_softc *sc, int dev, int addr, int data)
 }
 
 /*
- * m-audio revolution 5.1 specific code
+ * M-Audio Revolution 5.1 specific code
  */
 
-#define REVO51_GPIO_CSMASK	0x30 
+#define REVO51_GPIO_CSMASK	0x30
 #define REVO51_GPIO_CS(dev)	((dev) ? 0x10 : 0x20)
 #define REVO51_MUTE		0x400000
 #define REVO51_PT2258S_SDA	0x40
@@ -437,7 +455,27 @@ revo51_codec_write(struct envy_softc *sc, int dev, int addr, int data)
 }
 
 /*
- * esi julia specific code
+ * VIA Tremor 5.1 specific code
+ */
+
+void
+tremor51_init(struct envy_softc *sc)
+{
+	sc->isac97 = 1;
+	sc->host_if.arg = sc;
+	sc->host_if.attach = envy_ac97_attach_codec;
+	sc->host_if.read = envy_ac97_read_codec;
+	sc->host_if.write = envy_ac97_write_codec;
+	sc->host_if.reset = envy_ac97_reset_codec;
+	sc->host_if.flags = envy_ac97_flags_codec;
+	sc->codec_flags = 0;
+
+	if (ac97_attach(&sc->host_if) != 0)
+		printf("%s: can't attach ac97\n", DEVNAME(sc));
+}
+
+/*
+ * ESI Julia specific code
  */
 
 void
@@ -729,7 +767,7 @@ ak5365_adc_set(struct envy_softc *sc, struct mixer_ctrl *ctl, int idx)
  */
 
 int
-envy_ccs_read(struct envy_softc *sc, int reg) 
+envy_ccs_read(struct envy_softc *sc, int reg)
 {
 	return bus_space_read_1(sc->ccs_iot, sc->ccs_ioh, reg);
 }
@@ -762,7 +800,7 @@ envy_gpio_getstate(struct envy_softc *sc)
 	if (sc->isht) {
 		return envy_ccs_read(sc, ENVY_CCS_GPIODATA0) |
 		    (envy_ccs_read(sc, ENVY_CCS_GPIODATA1) << 8) |
-		    (envy_ccs_read(sc, ENVY_CCS_GPIODATA2) << 16); 
+		    (envy_ccs_read(sc, ENVY_CCS_GPIODATA2) << 16);
 	} else
 		return envy_cci_read(sc, ENVY_CCI_GPIODATA);
 }
@@ -784,7 +822,7 @@ envy_gpio_getmask(struct envy_softc *sc)
 	if (sc->isht) {
 		return envy_ccs_read(sc, ENVY_CCS_GPIOMASK0) |
 		    (envy_ccs_read(sc, ENVY_CCS_GPIOMASK1) << 8) |
-		    (envy_ccs_read(sc, ENVY_CCS_GPIOMASK2) << 16); 
+		    (envy_ccs_read(sc, ENVY_CCS_GPIOMASK2) << 16);
 	} else
 		return envy_cci_read(sc, ENVY_CCI_GPIOMASK);
 }
@@ -806,7 +844,7 @@ envy_gpio_getdir(struct envy_softc *sc)
 	if (sc->isht) {
 		return envy_ccs_read(sc, ENVY_CCS_GPIODIR0) |
 		    (envy_ccs_read(sc, ENVY_CCS_GPIODIR1) << 8) |
-		    (envy_ccs_read(sc, ENVY_CCS_GPIODIR2) << 16); 
+		    (envy_ccs_read(sc, ENVY_CCS_GPIODIR2) << 16);
 	} else
 		return envy_cci_read(sc, ENVY_CCI_GPIODIR);
 }
@@ -886,9 +924,9 @@ envy_i2c_wait(struct envy_softc *sc)
 {
 	int timeout = 50, st;
 
-        for (;;) {
+	for (;;) {
 		st = envy_ccs_read(sc, ENVY_I2C_CTL);
-		if (!(st & ENVY_I2C_CTL_BUSY)) 
+		if (!(st & ENVY_I2C_CTL_BUSY))
 			break;
 		if (timeout == 0) {
 			printf("%s: i2c busy timeout\n", DEVNAME(sc));
@@ -951,6 +989,108 @@ envy_eeprom_gpioxxx(struct envy_softc *sc, int addr)
 	return val;
 }
 
+int
+envy_ac97_wait(struct envy_softc *sc)
+{
+	int timeout = 50, st;
+
+	for (;;) {
+		st = bus_space_read_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_AC97_CMD);
+		if ((st & ENVY_MT_AC97_READY) && !(st & ENVY_MT_AC97_CMD_MASK)) {
+			st = 0;
+			break;
+		}
+		if (timeout == 0) {
+			st = -1;
+			break;
+		}
+		delay(50);
+		timeout--;
+	}
+
+	return (st);
+}
+
+int
+envy_ac97_attach_codec(void *hdl, struct ac97_codec_if *codec_if)
+{
+	struct envy_softc *sc = hdl;
+
+	sc->codec_if = codec_if;
+
+	return (0);
+}
+
+int
+envy_ac97_read_codec(void *hdl, u_int8_t reg, u_int16_t *result)
+{
+	struct envy_softc *sc = hdl;
+
+	if (envy_ac97_wait(sc)) {
+		printf("%s: envy_ac97_read_codec: timed out\n", DEVNAME(sc));
+		return (-1);
+	}
+
+	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_AC97_IDX, reg & 0x7f);
+	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_AC97_CMD,
+	    ENVY_MT_AC97_CMD_RD);
+	delay(50);
+
+	if (envy_ac97_wait(sc)) {
+		printf("%s: envy_ac97_read_codec: timed out\n", DEVNAME(sc));
+		return (-1);
+	}
+
+	*result = bus_space_read_2(sc->mt_iot, sc->mt_ioh, ENVY_MT_AC97_DATA);
+
+	return (0);
+}
+
+int
+envy_ac97_write_codec(void *hdl, u_int8_t reg, u_int16_t data)
+{
+	struct envy_softc *sc = hdl;
+
+	if (envy_ac97_wait(sc)) {
+		printf("%s: envy_ac97_write_codec: timed out\n", DEVNAME(sc));
+		return (-1);
+	}
+
+	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_AC97_IDX, reg & 0x7f);
+	bus_space_write_2(sc->mt_iot, sc->mt_ioh, ENVY_MT_AC97_DATA, data);
+	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_AC97_CMD,
+	    ENVY_MT_AC97_CMD_WR);
+	delay(50);
+
+	return (0);
+}
+
+void
+envy_ac97_reset_codec(void *hdl)
+{
+	struct envy_softc *sc = hdl;
+
+	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_AC97_CMD,
+	    ENVY_MT_AC97_CMD_RST);
+	delay(50);
+	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_AC97_CMD, 0);
+	delay(50);
+
+	if (envy_ac97_wait(sc)) {
+		printf("%s: envy_ac97_reset_codec: timed out\n", DEVNAME(sc));
+	}
+
+	return;
+}
+
+enum ac97_host_flags
+envy_ac97_flags_codec(void *hdl)
+{
+	struct envy_softc *sc = hdl;
+
+	return (sc->codec_flags);
+}
+
 void
 envy_reset(struct envy_softc *sc)
 {
@@ -965,7 +1105,7 @@ envy_reset(struct envy_softc *sc)
 	delay(200);
 
 	/*
-	 * read eeprom using i2c device or from a static array
+	 * read EEPROM using i2c device or from a static array
 	 */
 	if (sc->card->eeprom == NULL) {
 		for (i = 0; i < ENVY_EEPROM_MAXSZ; i++) {
@@ -978,11 +1118,11 @@ envy_reset(struct envy_softc *sc)
 		}
 		printf("\n");
 #endif
-	} else 
+	} else
 		memcpy(sc->eeprom, sc->card->eeprom, ENVY_EEPROM_MAXSZ);
 
 	/*
-	 * write eeprom values to corresponding registers
+	 * write EEPROM values to corresponding registers
 	 */
 	if (sc->isht) {
 		envy_ccs_write(sc, ENVY_CCS_CONF,
@@ -994,7 +1134,7 @@ envy_reset(struct envy_softc *sc)
 		envy_ccs_write(sc, ENVY_CCS_SPDIF,
 		    sc->eeprom[ENVY_EEPROM_SPDIF]);
 	} else {
-		pci_conf_write(sc->pci_pc, sc->pci_tag, ENVY_CONF, 
+		pci_conf_write(sc->pci_pc, sc->pci_tag, ENVY_CONF,
 		    sc->eeprom[ENVY_EEPROM_CONF] |
 		    (sc->eeprom[ENVY_EEPROM_ACLINK] << 8) |
 		    (sc->eeprom[ENVY_EEPROM_I2S] << 16) |
@@ -1005,48 +1145,28 @@ envy_reset(struct envy_softc *sc)
 	envy_gpio_setdir(sc, envy_eeprom_gpioxxx(sc, ENVY_EEPROM_GPIODIR(sc)));
 	envy_gpio_setstate(sc, envy_eeprom_gpioxxx(sc, ENVY_EEPROM_GPIOST(sc)));
 
-	DPRINTF("%s: gpio_mask = %02x\n", DEVNAME(sc), 
+	DPRINTF("%s: gpio_mask = %02x\n", DEVNAME(sc),
 		envy_gpio_getmask(sc));
-	DPRINTF("%s: gpio_dir = %02x\n", DEVNAME(sc), 
+	DPRINTF("%s: gpio_dir = %02x\n", DEVNAME(sc),
 		envy_gpio_getdir(sc));
-	DPRINTF("%s: gpio_state = %02x\n", DEVNAME(sc), 
+	DPRINTF("%s: gpio_state = %02x\n", DEVNAME(sc),
 		envy_gpio_getstate(sc));
 
 	/*
 	 * clear all interrupts and unmask used ones
-	 */ 
+	 */
 	envy_ccs_write(sc, ENVY_CCS_INTSTAT, 0xff);
 	envy_ccs_write(sc, ENVY_CCS_INTMASK, ~ENVY_CCS_INT_MT);
 	if (sc->isht) {
 		bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_NSTREAM,
 		    4 - sc->card->noch / 2);
-		bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_IMASK,
-		    ~(ENVY_MT_IMASK_PDMA0 | ENVY_MT_IMASK_RDMA0));
+		bus_space_write_1(sc->mt_iot, sc->mt_ioh,
+		    ENVY_MT_IMASK, ~(ENVY_MT_IMASK_PDMA0 |
+		    ENVY_MT_IMASK_RDMA0 | ENVY_MT_IMASK_ERR));
 	}
+	sc->iactive = 0;
+	sc->oactive = 0;
 	sc->card->init(sc);
-}
-
-int
-envy_intr(void *self)
-{
-	struct envy_softc *sc = (struct envy_softc *)self;
-	int st;
-
-	st = bus_space_read_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_INTR);
-	if (!(st & (ENVY_MT_INTR_PACK | ENVY_MT_INTR_RACK))) {
-		return 0;
-	}
-	if (st & ENVY_MT_INTR_PACK) {
-		st = ENVY_MT_INTR_PACK;
-		bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_INTR, st);
-		sc->ointr(sc->oarg);
-	}
-	if (st & ENVY_MT_INTR_RACK) {
-		st = ENVY_MT_INTR_RACK;
-		bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_INTR, st);
-		sc->iintr(sc->iarg);
-	}
-	return 1;
 }
 
 int
@@ -1089,7 +1209,7 @@ void
 envy_lineout_setsrc(struct envy_softc *sc, int out, int src)
 {
 	int reg, shift, mask, sel;
-	
+
 	if (sc->isht) {
 		if (src < ENVY_MIX_OUTSRC_SPDIN) {
 			sel = ENVY_MT_HTSRC_LINE;
@@ -1110,7 +1230,7 @@ envy_lineout_setsrc(struct envy_softc *sc, int out, int src)
 	}
 
 	if (src < ENVY_MIX_OUTSRC_DMA) {
-		/* 
+		/*
 		 * linein and spdin are used as output source so we
 		 * must select the input source channel number
 		 */
@@ -1175,10 +1295,10 @@ void
 envy_spdout_setsrc(struct envy_softc *sc, int out, int src)
 {
 	int reg, shift, mask, sel;
-	
+
 	reg = bus_space_read_2(sc->mt_iot, sc->mt_ioh, ENVY_MT_SPDROUTE);
 	if (src < ENVY_MIX_OUTSRC_DMA) {
-		/* 
+		/*
 		 * linein and spdin are used as output source so we
 		 * must select the input source channel number
 		 */
@@ -1257,18 +1377,18 @@ envyattach(struct device *parent, struct device *self, void *aux)
 	sc->mt_iosz = 0;
 	sc->isht = (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ICENSEMBLE_VT172x);
 
-	if (pci_mapreg_map(pa, ENVY_CTL_BAR, PCI_MAPREG_TYPE_IO, 0, 
+	if (pci_mapreg_map(pa, ENVY_CTL_BAR, PCI_MAPREG_TYPE_IO, 0,
 		&sc->ccs_iot, &sc->ccs_ioh, NULL, &sc->ccs_iosz, 0)) {
 		printf(": can't map ctl i/o space\n");
 		sc->ccs_iosz = 0;
 		return;
-        }
+	}
 	if (pci_mapreg_map(pa, ENVY_MT_BAR(sc->isht), PCI_MAPREG_TYPE_IO, 0,
 		&sc->mt_iot, &sc->mt_ioh, NULL, &sc->mt_iosz, 0)) {
 		printf(": can't map mt i/o space\n");
 		sc->mt_iosz = 0;
 		return;
-        }
+	}
 	if (pci_intr_map(pa, &ih)) {
 		printf(": can't map interrupt\n");
 	}
@@ -1349,46 +1469,46 @@ envy_allocm(void *self, int dir, size_t size, int type, int flags)
 #define ENVY_ALIGN	4
 #define ENVY_BOUNDARY	0
 
-	err = bus_dmamem_alloc(sc->pci_dmat, buf->size, ENVY_ALIGN, 
+	err = bus_dmamem_alloc(sc->pci_dmat, buf->size, ENVY_ALIGN,
 	    ENVY_BOUNDARY, &buf->seg, 1, &rsegs, wait);
 	if (err) {
 		DPRINTF("%s: dmamem_alloc: failed %d\n", DEVNAME(sc), err);
 		goto err_ret;
 	}
 
-	err = bus_dmamem_map(sc->pci_dmat, &buf->seg, rsegs, buf->size, 
-            &buf->addr, wait | BUS_DMA_COHERENT);
+	err = bus_dmamem_map(sc->pci_dmat, &buf->seg, rsegs, buf->size,
+	    &buf->addr, wait | BUS_DMA_COHERENT);
 	if (err) {
 		DPRINTF("%s: dmamem_map: failed %d\n", DEVNAME(sc), err);
 		goto err_free;
 	}
-	
+
 	err = bus_dmamap_create(sc->pci_dmat, buf->size, 1, buf->size, 0,
 	    wait, &buf->map);
 	if (err) {
 		DPRINTF("%s: dmamap_create: failed %d\n", DEVNAME(sc), err);
 		goto err_unmap;
 	}
-	
-	err = bus_dmamap_load(sc->pci_dmat, buf->map, buf->addr, 
-            buf->size, NULL, wait);
+
+	err = bus_dmamap_load(sc->pci_dmat, buf->map, buf->addr,
+	    buf->size, NULL, wait);
 	if (err) {
 		DPRINTF("%s: dmamap_load: failed %d\n", DEVNAME(sc), err);
 		goto err_destroy;
 	}
 	bus_space_write_4(sc->mt_iot, sc->mt_ioh, basereg, buf->seg.ds_addr);
-	DPRINTF("%s: allocated %ld bytes dir=%d, ka=%p, da=%p\n", 
+	DPRINTF("%s: allocated %ld bytes dir=%d, ka=%p, da=%p\n",
 		DEVNAME(sc), buf->size, dir, buf->addr, (void *)buf->seg.ds_addr);
 	return buf->addr;
 
  err_destroy:
-	bus_dmamap_destroy(sc->pci_dmat, buf->map);	
+	bus_dmamap_destroy(sc->pci_dmat, buf->map);
  err_unmap:
 	bus_dmamem_unmap(sc->pci_dmat, buf->addr, buf->size);
  err_free:
 	bus_dmamem_free(sc->pci_dmat, &buf->seg, 1);
  err_ret:
-	return NULL;	
+	return NULL;
 }
 
 void
@@ -1408,7 +1528,7 @@ envy_freem(void *self, void *addr, int type)
 		DPRINTF("%s: no buf to free\n", DEVNAME(sc));
 		return;
 	}
-	bus_dmamap_destroy(sc->pci_dmat, buf->map);	
+	bus_dmamap_destroy(sc->pci_dmat, buf->map);
 	bus_dmamem_unmap(sc->pci_dmat, buf->addr, buf->size);
 	bus_dmamem_free(sc->pci_dmat, &buf->seg, 1);
 	buf->addr = NULL;
@@ -1435,10 +1555,8 @@ envy_set_params(void *self, int setmode, int usemode,
 	struct envy_softc *sc = (struct envy_softc *)self;
 	int i, rate, reg;
 
-	if (setmode == 0) {
-		DPRINTF("%s: no params to set\n", DEVNAME(sc));
+	if (setmode == 0)
 		return 0;
-	}
 	if (setmode == (AUMODE_PLAY | AUMODE_RECORD) &&
 	    p->sample_rate != r->sample_rate) {
 		DPRINTF("%s: play/rec rates mismatch\n", DEVNAME(sc));
@@ -1501,13 +1619,115 @@ envy_round_buffersize(void *self, int dir, size_t bufsz)
 	return bufsz;
 }
 
+#ifdef ENVY_DEBUG
+void
+envy_pintr(struct envy_softc *sc)
+{
+	int i;
+
+	if (sc->spurious > 0 || envydebug >= 2) {
+		printf("%s: spurious = %u, start = %u.%ld\n", 
+			DEVNAME(sc), sc->spurious,
+			sc->start_ts.tv_sec, sc->start_ts.tv_nsec);
+		for (i = 0; i < sc->nintr; i++) {
+			printf("%u.%09ld: "
+			    "active=%d/%d pos=%d/%d st=%x/%x, ctl=%x\n",
+			    sc->intrs[i].ts.tv_sec,
+			    sc->intrs[i].ts.tv_nsec,
+			    sc->intrs[i].iactive,
+			    sc->intrs[i].oactive,
+			    sc->intrs[i].ipos,
+			    sc->intrs[i].opos,
+			    sc->intrs[i].st,
+			    sc->intrs[i].mask,
+			    sc->intrs[i].ctl);
+		}
+	}
+}
+#endif
+
+int
+envy_intr(void *self)
+{
+	struct envy_softc *sc = (struct envy_softc *)self;
+	int st, err, ctl;
+
+
+	st = bus_space_read_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_INTR);
+	if (st == 0)
+		return 0;
+#ifdef ENVY_DEBUG
+	if (sc->nintr < ENVY_NINTR) {
+		sc->intrs[sc->nintr].iactive = sc->iactive;
+		sc->intrs[sc->nintr].oactive = sc->oactive;
+		sc->intrs[sc->nintr].st = st;
+		sc->intrs[sc->nintr].ipos = 
+		    bus_space_read_2(sc->mt_iot, sc->mt_ioh, ENVY_MT_RBUFSZ);
+		sc->intrs[sc->nintr].opos = 
+		    bus_space_read_2(sc->mt_iot, sc->mt_ioh, ENVY_MT_PBUFSZ);
+		sc->intrs[sc->nintr].ctl = 
+		    bus_space_read_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL);
+		sc->intrs[sc->nintr].mask = 
+		    bus_space_read_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_IMASK);
+		nanouptime(&sc->intrs[sc->nintr].ts);
+		sc->nintr++;
+	}
+#endif
+	if (st & ENVY_MT_INTR_PACK) {
+		if (sc->oactive)
+			sc->ointr(sc->oarg);
+		else {
+			ctl = bus_space_read_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL);
+			if (ctl & ENVY_MT_CTL_PSTART) {
+				bus_space_write_1(sc->mt_iot, sc->mt_ioh,
+				    ENVY_MT_INTR, ENVY_MT_INTR_PACK);
+				bus_space_write_1(sc->mt_iot, sc->mt_ioh,
+				    ENVY_MT_CTL, ctl & ~ENVY_MT_CTL_PSTART);
+				st &= ~ENVY_MT_INTR_PACK;
+				sc->obusy = 0;
+				wakeup(&sc->obusy);
+			}
+#ifdef ENVY_DEBUG
+			else
+				sc->spurious++;
+#endif
+		}
+	}
+	if (st & ENVY_MT_INTR_RACK) {
+		if (sc->iactive)
+			sc->iintr(sc->iarg);
+		else {
+			ctl = bus_space_read_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL);
+			if (ctl & ENVY_MT_CTL_RSTART(sc)) {
+				bus_space_write_1(sc->mt_iot, sc->mt_ioh,
+				    ENVY_MT_INTR, ENVY_MT_INTR_RACK);
+				bus_space_write_1(sc->mt_iot, sc->mt_ioh,
+				    ENVY_MT_CTL, ctl & ~ENVY_MT_CTL_RSTART(sc));
+				st &= ~ENVY_MT_INTR_RACK;
+				sc->ibusy = 0;
+				wakeup(&sc->ibusy);
+			}
+#ifdef ENVY_DEBUG
+			else
+				sc->spurious++;
+#endif
+		}
+	}
+	if (sc->isht && (st & ENVY_MT_INTR_ERR)) {
+		err = bus_space_read_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_ERR);
+		bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_ERR, err);
+	}
+	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_INTR, st);
+	return 1;
+}
+
 int
 envy_trigger_output(void *self, void *start, void *end, int blksz,
     void (*intr)(void *), void *arg, struct audio_params *param)
 {
 	struct envy_softc *sc = (struct envy_softc *)self;
 	size_t bufsz;
-	int st;
+	int s, st;
 
 	bufsz = (char *)end - (char *)start;
 #ifdef ENVY_DEBUG
@@ -1520,20 +1740,29 @@ envy_trigger_output(void *self, void *start, void *end, int blksz,
 		return EINVAL;
 	}
 #endif
-	bus_space_write_2(sc->mt_iot, sc->mt_ioh, 
+	s = splaudio();
+	bus_space_write_2(sc->mt_iot, sc->mt_ioh,
 	    ENVY_MT_PBUFSZ, bufsz / 4 - 1);
-	bus_space_write_2(sc->mt_iot, sc->mt_ioh, 
+	bus_space_write_2(sc->mt_iot, sc->mt_ioh,
 	    ENVY_MT_PBLKSZ(sc), blksz / 4 - 1);
 
+#ifdef ENVY_DEBUG
+	if (!sc->iactive) {
+		sc->nintr = 0;
+		sc->spurious = 0;
+		nanouptime(&sc->start_ts);
+	}
+#endif
 	sc->ointr = intr;
 	sc->oarg = arg;
-
+	sc->oactive = 1;
+	sc->obusy = 1;
 	st = ENVY_MT_INTR_PACK;
 	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_INTR, st);
-
 	st = bus_space_read_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL);
 	st |= ENVY_MT_CTL_PSTART;
 	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL, st);
+	splx(s);
 	return 0;
 }
 
@@ -1543,8 +1772,8 @@ envy_trigger_input(void *self, void *start, void *end, int blksz,
 {
 	struct envy_softc *sc = (struct envy_softc *)self;
 	size_t bufsz;
-	int st;
-	
+	int s, st;
+
 	bufsz = (char *)end - (char *)start;
 #ifdef ENVY_DEBUG
 	if (blksz % (sc->isht ? sc->card->nich * 4 : ENVY_RFRAME_SIZE) != 0) {
@@ -1556,20 +1785,29 @@ envy_trigger_input(void *self, void *start, void *end, int blksz,
 		return EINVAL;
 	}
 #endif
-	bus_space_write_2(sc->mt_iot, sc->mt_ioh, 
+	s = splaudio();
+	bus_space_write_2(sc->mt_iot, sc->mt_ioh,
 	    ENVY_MT_RBUFSZ, bufsz / 4 - 1);
-	bus_space_write_2(sc->mt_iot, sc->mt_ioh, 
+	bus_space_write_2(sc->mt_iot, sc->mt_ioh,
 	    ENVY_MT_RBLKSZ, blksz / 4 - 1);
 
+#ifdef ENVY_DEBUG
+	if (!sc->oactive) {
+		sc->nintr = 0;
+		sc->spurious = 0;
+		nanouptime(&sc->start_ts);
+	}
+#endif
 	sc->iintr = intr;
 	sc->iarg = arg;
-
+	sc->iactive = 1;
+	sc->ibusy = 1;
 	st = ENVY_MT_INTR_RACK;
 	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_INTR, st);
-
 	st = bus_space_read_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL);
 	st |= ENVY_MT_CTL_RSTART(sc);
 	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL, st);
+	splx(s);
 	return 0;
 }
 
@@ -1577,11 +1815,20 @@ int
 envy_halt_output(void *self)
 {
 	struct envy_softc *sc = (struct envy_softc *)self;
-	int st;
+	int s, err;
 
-	st = bus_space_read_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL);
-	st &= ~ENVY_MT_CTL_PSTART;
-	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL, st);
+	s = splaudio();
+	sc->oactive = 0;
+	if (sc->obusy) {
+		err = tsleep(&sc->obusy, PWAIT, "envyobus", 4 * hz); 
+		if (err)
+			printf("%s: output DMA halt timeout\n", DEVNAME(sc));
+	}
+	splx(s);
+#ifdef ENVY_DEBUG
+	if (!sc->iactive)
+		envy_pintr(sc);
+#endif
 	return 0;
 }
 
@@ -1589,11 +1836,20 @@ int
 envy_halt_input(void *self)
 {
 	struct envy_softc *sc = (struct envy_softc *)self;
-	int st;
+	int s, err;
 
-	st = bus_space_read_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL);
-	st &= ~ENVY_MT_CTL_RSTART(sc);
-	bus_space_write_1(sc->mt_iot, sc->mt_ioh, ENVY_MT_CTL, st);
+	s = splaudio();
+	sc->iactive = 0;
+	if (sc->ibusy) {
+		err = tsleep(&sc->ibusy, PWAIT, "envyibus", 4 * hz); 
+		if (err)
+			printf("%s: input DMA halt timeout\n", DEVNAME(sc));
+	}
+#ifdef ENVY_DEBUG
+	if (!sc->oactive)
+		envy_pintr(sc);
+#endif
+	splx(s);
 	return 0;
 }
 
@@ -1613,9 +1869,12 @@ envy_query_devinfo(void *self, struct mixer_devinfo *dev)
 {
 	struct envy_softc *sc = (struct envy_softc *)self;
 	int i, n, idx, ndev;
-	char *classes[] = { 
-		AudioCinputs, AudioCoutputs, AudioCmonitor 
+	char *classes[] = {
+		AudioCinputs, AudioCoutputs, AudioCmonitor
 	};
+
+	if (sc->isac97)
+		return (sc->codec_if->vtbl->query_devinfo(sc->codec_if, dev));
 
 	if (dev->index < 0)
 		return ENXIO;
@@ -1649,14 +1908,14 @@ envy_query_devinfo(void *self, struct mixer_devinfo *dev)
 			    MAX_AUDIO_DEV_LEN, AudioNline "%d", i);
 		}
 		dev->un.e.member[n].ord = n;
-		snprintf(dev->un.e.member[n++].label.name, 
+		snprintf(dev->un.e.member[n++].label.name,
 			 MAX_AUDIO_DEV_LEN, "play%d", idx);
 		if (!sc->isht && idx < 2) {
 			dev->un.e.member[n].ord = n;
-			snprintf(dev->un.e.member[n++].label.name, 
+			snprintf(dev->un.e.member[n++].label.name,
 			    MAX_AUDIO_DEV_LEN, "mon%d", idx);
 		}
-		snprintf(dev->label.name, MAX_AUDIO_DEV_LEN, 
+		snprintf(dev->label.name, MAX_AUDIO_DEV_LEN,
 		    "line%u_" AudioNsource, idx);
 		dev->un.s.num_mem = n;
 		return 0;
@@ -1672,7 +1931,7 @@ envy_query_devinfo(void *self, struct mixer_devinfo *dev)
 		dev->mixer_class = ENVY_MIX_CLASSMON;
 		dev->un.v.delta = 2;
 		dev->un.v.num_channels = 1;
-		snprintf(dev->label.name, MAX_AUDIO_DEV_LEN, 
+		snprintf(dev->label.name, MAX_AUDIO_DEV_LEN,
 			 "%s%d", idx < 10 ? "play" : "rec", idx % 10);
 		strlcpy(dev->un.v.units.name, AudioNvolume, MAX_AUDIO_DEV_LEN);
 		return 0;
@@ -1705,6 +1964,9 @@ envy_get_port(void *self, struct mixer_ctrl *ctl)
 {
 	struct envy_softc *sc = (struct envy_softc *)self;
 	int val, idx, ndev;
+
+	if (sc->isac97)
+		return (sc->codec_if->vtbl->mixer_get_port(sc->codec_if, ctl));
 
 	if (ctl->dev < ENVY_MIX_NCLASS) {
 		return EINVAL;
@@ -1747,15 +2009,18 @@ envy_set_port(void *self, struct mixer_ctrl *ctl)
 	struct envy_softc *sc = (struct envy_softc *)self;
 	int maxsrc, val, idx, ndev;
 
+	if (sc->isac97)
+		return (sc->codec_if->vtbl->mixer_set_port(sc->codec_if, ctl));
+
 	if (ctl->dev < ENVY_MIX_NCLASS) {
 		return EINVAL;
 	}
-	
+
 	idx = ctl->dev - ENVY_MIX_NCLASS;
 	ndev = sc->card->noch;
 	if (idx < ndev) {
 		maxsrc = sc->card->nich + 1;
-		if (idx < 2) 
+		if (idx < 2)
 			maxsrc++;
 		if (ctl->un.ord < 0 || ctl->un.ord >= maxsrc)
 			return EINVAL;

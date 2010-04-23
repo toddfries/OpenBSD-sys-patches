@@ -1,4 +1,4 @@
-/*	$OpenBSD: yeeloong_machdep.c,v 1.6 2010/02/16 21:31:36 miod Exp $	*/
+/*	$OpenBSD: yeeloong_machdep.c,v 1.11 2010/03/02 20:54:51 miod Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -17,7 +17,8 @@
  */
 
 /*
- * Lemote Fuloong 2F and Yeeloong specific code and configuration data.
+ * Lemote {Fu,Lyn,Yee}loong specific code and configuration data.
+ * (this file really ought to be named lemote_machdep.c by now)
  */
 
 #include <sys/param.h>
@@ -85,7 +86,26 @@ const struct legacy_io_range fuloong_legacy_ranges[] = {
 	{ 0x376,	0x376 },
 	{ 0x3f6,	0x3f6 },
 	/* com */
+	{ IO_COM1,	IO_COM1 + 8 },		/* IR port */
+	{ IO_COM2,	IO_COM2 + 8 },		/* serial port */
+
+	{ 0 }
+};
+
+const struct legacy_io_range lynloong_legacy_ranges[] = {
+	/* isa */
+	{ IO_DMAPG + 4,	IO_DMAPG + 4 },
+	/* mcclock */
+	{ IO_RTC,	IO_RTC + 1 },
+	/* pciide */
+	{ 0x170,	0x170 + 7 },
+	{ 0x1f0,	0x1f0 + 7 },
+	{ 0x376,	0x376 },
+	{ 0x3f6,	0x3f6 },
+#if 0	/* no external connector */
+	/* com */
 	{ IO_COM2,	IO_COM2 + 8 },
+#endif
 
 	{ 0 }
 };
@@ -103,6 +123,8 @@ const struct legacy_io_range yeeloong_legacy_ranges[] = {
 	{ 0x1f0,	0x1f0 + 7 },
 	{ 0x376,	0x376 },
 	{ 0x3f6,	0x3f6 },
+	/* kb3110b embedded controller */
+	{ 0x381,	0x383 },
 
 	{ 0 }
 };
@@ -114,6 +136,21 @@ const struct platform fuloong_platform = {
 
 	.bonito_config = &lemote_bonito,
 	.legacy_io_ranges = fuloong_legacy_ranges,
+
+	.setup = fuloong_setup,
+	.device_register = lemote_device_register,
+
+	.powerdown = fuloong_powerdown,
+	.reset = lemote_reset
+};
+
+const struct platform lynloong_platform = {
+	.system_type = LOONGSON_LYNLOONG,
+	.vendor = "Lemote",
+	.product = "Lynloong",
+
+	.bonito_config = &lemote_bonito,
+	.legacy_io_ranges = lynloong_legacy_ranges,
 
 	.setup = fuloong_setup,
 	.device_register = lemote_device_register,
@@ -229,12 +266,11 @@ fuloong_setup(void)
 	int serial;
 
 	envvar = pmon_getenv("nokbd");
-	serial = envvar == 0;
+	serial = envvar != NULL;
 	envvar = pmon_getenv("novga");
-	serial = serial && envvar == 0;
+	serial = serial && envvar != NULL;
 
-	/* XXX always switch to serial until we have framebuffer */
-	if (serial || 1) {
+	if (serial) {
                 comconsiot = &bonito_pci_io_space_tag;
                 comconsaddr = 0x2f8;
                 comconsrate = 115200; /* default PMON console speed */

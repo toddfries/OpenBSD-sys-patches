@@ -1,4 +1,4 @@
-/*      $OpenBSD: glxpcib.c,v 1.3 2010/02/05 22:19:24 miod Exp $	*/
+/*      $OpenBSD: glxpcib.c,v 1.5 2010/04/21 03:03:26 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2007 Marc Balmer <mbalmer@openbsd.org>
@@ -24,9 +24,9 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/device.h>
 #include <sys/gpio.h>
-#include <sys/sysctl.h>
 #include <sys/timetc.h>
 
 #include <machine/bus.h>
@@ -183,6 +183,7 @@ glxpcib_attach(struct device *parent, struct device *self, void *aux)
 	struct glxpcib_softc *sc = (struct glxpcib_softc *)self;
 	struct timecounter *tc = &sc->sc_timecounter;
 #if NGPIO > 0
+	struct pci_attach_args *pa = (struct pci_attach_args *)aux;
 	u_int64_t wa, ga;
 	struct gpiobus_attach_args gba;
 	int i, gpio = 0;

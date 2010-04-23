@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.158 2010/01/21 10:16:44 sthen Exp $ */
+/*	$OpenBSD: ahci.c,v 1.163 2010/04/16 22:15:39 kettenis Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -22,7 +22,7 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/queue.h>
 #include <sys/mutex.h>
 
@@ -439,9 +439,6 @@ static const struct ahci_device ahci_devices[] = {
 	    NULL,		ahci_ati_sb600_attach },
 	{ PCI_VENDOR_ATI,	PCI_PRODUCT_ATI_SBX00_SATA_1,
 	    NULL,		ahci_ati_sb600_attach },
-
-	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801H_RAID,
-	    NULL,		NULL },
 
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP65_AHCI_2,
 	    NULL,		ahci_nvidia_mcp_attach },

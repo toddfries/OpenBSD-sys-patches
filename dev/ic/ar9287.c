@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar9287.c,v 1.4 2009/11/17 19:32:22 damien Exp $	*/
+/*	$OpenBSD: ar9287.c,v 1.9 2010/04/23 16:05:39 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -26,7 +26,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -116,14 +115,14 @@ ar9287_setup(struct athn_softc *sc)
 	/* Determine if open loop power control should be used. */
 	if (eep->baseEepHeader.openLoopPwrCntl)
 		sc->flags |= ATHN_FLAG_OLPC;
-	if (AR_SREV_9287_10(sc))
-		sc->rx_gain = &ar9287_1_0_rx_gain;
-	else
+
+	if (AR_SREV_9287_11_OR_LATER(sc)) {
 		sc->rx_gain = &ar9287_1_1_rx_gain;
-	if (AR_SREV_9287_10(sc))
-		sc->tx_gain = &ar9287_1_0_tx_gain;
-	else
 		sc->tx_gain = &ar9287_1_1_tx_gain;
+	} else {
+		sc->rx_gain = &ar9287_1_0_rx_gain;
+		sc->tx_gain = &ar9287_1_0_tx_gain;
+	}
 }
 
 void
@@ -432,8 +431,10 @@ ar9287_set_txpower(struct athn_softc *sc, struct ieee80211_channel *c,
 	uint8_t tpow_ht20[8], tpow_ht40[8];
 	uint8_t ht40inc;
 #endif
-	int16_t pwr, max_ant_gain, power[ATHN_POWER_COUNT];
+	int16_t pwr = 0, max_ant_gain, power[ATHN_POWER_COUNT];
 	int i;
+
+	ar9287_set_power_calib(sc, c);
 
 	/* Compute transmit power reduction due to antenna gain. */
 	max_ant_gain = MAX(modal->antennaGainCh[0], modal->antennaGainCh[1]);
@@ -590,6 +591,10 @@ ar9287_1_2_setup_async_fifo(struct athn_softc *sc)
 {
 	uint32_t reg;
 
+	/*
+	 * MAC runs at 117MHz (instead of 88/44MHz) when ASYNC FIFO is
+	 * enabled, so the following counters have to be changed.
+	 */
 	AR_WRITE(sc, AR_D_GBL_IFS_SIFS, AR_D_GBL_IFS_SIFS_ASYNC_FIFO_DUR);
 	AR_WRITE(sc, AR_D_GBL_IFS_SLOT, AR_D_GBL_IFS_SLOT_ASYNC_FIFO_DUR);
 	AR_WRITE(sc, AR_D_GBL_IFS_EIFS, AR_D_GBL_IFS_EIFS_ASYNC_FIFO_DUR);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.163 2010/01/15 05:50:31 krw Exp $	*/
+/*	$OpenBSD: cd.c,v 1.166 2010/04/23 15:25:21 jsing Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -683,9 +683,8 @@ cd_buf_done(struct scsi_xfer *xs)
 {
 	struct cd_softc *sc = xs->sc_link->device_softc;
 	struct buf *bp = xs->cookie;
+	int s;
 
-	splassert(IPL_BIO);
-         
 	switch (xs->error) {
 	case XS_NOERROR:
 		bp->b_error = 0;
@@ -733,7 +732,9 @@ retry:
 	disk_unbusy(&sc->sc_dk, bp->b_bcount - xs->resid,
 	    bp->b_flags & B_READ);
 
+	s = splbio();
 	biodone(bp);
+	splx(s);
 	scsi_xs_put(xs);
 	cdstart(sc); /* restart io */
 }
@@ -942,7 +943,10 @@ cdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			th.len = letoh16(th.len);
 		else
 			th.len = betoh16(th.len);
-		bcopy(&th, addr, sizeof(th));
+		if (th.len > 0)
+			bcopy(&th, addr, sizeof(th));
+		else
+			error = EIO;
 		break;
 	}
 	case CDIOREADTOCENTRYS: {
@@ -1194,8 +1198,6 @@ cdgetdisklabel(dev_t dev, struct cd_softc *sc, struct disklabel *lp,
 
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
 	DL_SETDSIZE(lp, sc->sc_params.disksize);
-	lp->d_rpm = 300;
-	lp->d_interleave = 1;
 	lp->d_version = 1;
 
 	/* XXX - these values for BBSIZE and SBSIZE assume ffs */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: umsm.c,v 1.57 2010/02/08 22:24:21 mpf Exp $	*/
+/*	$OpenBSD: umsm.c,v 1.61 2010/04/14 02:47:58 kevlo Exp $	*/
 
 /*
  * Copyright (c) 2008 Yojiro UO <yuo@nui.org>
@@ -112,7 +112,9 @@ struct umsm_type {
 #define	DEV_UMASS2	0x0020
 #define	DEV_UMASS3	0x0040
 #define	DEV_UMASS4	0x0080
-#define DEV_UMASS	(DEV_UMASS1 | DEV_UMASS2 | DEV_UMASS3 | DEV_UMASS4)
+#define	DEV_UMASS5	0x0100
+#define DEV_UMASS	(DEV_UMASS1 | DEV_UMASS2 | DEV_UMASS3 | DEV_UMASS4 | \
+    DEV_UMASS5)
 };
  
 static const struct umsm_type umsm_devs[] = {
@@ -131,6 +133,8 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E510 }, DEV_HUAWEI},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E618 }, DEV_HUAWEI},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_Mobile }, DEV_HUAWEI},
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_K3765_INIT }, DEV_UMASS5},
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_K3765 }, 0},
 	
 	{{ USB_VENDOR_HYUNDAI,	USB_PRODUCT_HYUNDAI_UM175 }, 0},
 	
@@ -144,9 +148,12 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_QUALCOMM,	USB_PRODUCT_QUALCOMM_MSM_HSDPA }, 0},
 	{{ USB_VENDOR_QUALCOMM,	USB_PRODUCT_QUALCOMM_MSM_HSDPA2 }, 0},
 
-	{{ USB_VENDOR_QUALCOMM3, USB_PRODUCT_QUALCOMM3_K3565Z_UMASS },
-	    DEV_UMASS4},
-	{{ USB_VENDOR_QUALCOMM3, USB_PRODUCT_QUALCOMM3_K3565Z }, 0},
+	{{ USB_VENDOR_QUANTA2, USB_PRODUCT_QUANTA2_UMASS }, DEV_UMASS4},
+	{{ USB_VENDOR_QUANTA2, USB_PRODUCT_QUANTA2_Q101 }, 0},
+
+	{{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_UMASS }, DEV_UMASS4},
+	{{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_K3565Z }, 0},
+	{{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_MF637 }, 0},
 
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_EXPRESSCARD }, 0},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINV620 }, 0},
@@ -167,6 +174,9 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_U760 }, DEV_UMASS4},
 
 	{{ USB_VENDOR_NOVATEL1,	USB_PRODUCT_NOVATEL1_FLEXPACKGPS }, 0},
+
+	{{ USB_VENDOR_NOKIA2, USB_PRODUCT_NOKIA2_CS15UMASS }, DEV_UMASS4},
+	{{ USB_VENDOR_NOKIA2, USB_PRODUCT_NOKIA2_CS15 }, 0},
 
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GFUSION }, 0},
 	{{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GPLUS }, 0},
@@ -256,7 +266,7 @@ umsm_match(struct device *parent, void *match, void *aux)
 			 * Some high-speed modems require special care.
 			 */
 			if (flag & DEV_HUAWEI) {
-				if  (uaa->ifaceno != 2) 
+				if (uaa->ifaceno != 2) 
 					return UMATCH_VENDOR_IFACESUBCLASS;
 				else
 					return UMATCH_NONE;
@@ -668,6 +678,11 @@ umsm_umass_changemode(struct umsm_softc *sc)
 		cbw.CBWCDB[0] = UMASS_CMD_START_STOP;
 		cbw.CBWCDB[1] = 0x00;	/* target LUN: 0 */
 		cbw.CBWCDB[4] = UMASS_CMDPARAM_EJECT;
+		break;
+	case DEV_UMASS5:
+		cbw.bCBWFlags = CBWFLAGS_OUT;
+		cbw.CBWCDB[0] = 0x11;
+		cbw.CBWCDB[1] = 0x06;
 		break;
 	default:
 		DPRINTF(("%s: unknown device type.\n", sc->sc_dev.dv_xname));

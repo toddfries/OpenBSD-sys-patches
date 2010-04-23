@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched.h,v 1.25 2010/01/09 02:44:17 kettenis Exp $	*/
+/*	$OpenBSD: sched.h,v 1.27 2010/04/23 03:50:22 miod Exp $	*/
 /* $NetBSD: sched.h,v 1.2 1999/02/28 18:14:58 ross Exp $ */
 
 /*-
@@ -138,6 +138,7 @@ struct cpu_info;
 void roundrobin(struct cpu_info *);
 
 void sched_init_cpu(struct cpu_info *);
+void sched_idle(void *);
 void sched_exit(struct proc *);
 void mi_switch(void);
 void cpu_switchto(struct proc *, struct proc *);
@@ -148,6 +149,11 @@ void cpu_idle_enter(void);
 void cpu_idle_cycle(void);
 void cpu_idle_leave(void);
 void sched_peg_curproc(struct cpu_info *ci);
+
+#ifdef MULTIPROCESSOR
+void sched_start_secondary_cpus(void);
+void sched_stop_secondary_cpus(void);
+#endif
 
 #define curcpu_is_idle()	(curcpu()->ci_schedstate.spc_whichqs == 0)
 
@@ -164,10 +170,6 @@ void remrunqueue(struct proc *);
 #define scheduler_wait_hook(parent, child) do {				\
 	(parent)->p_estcpu = ESTCPULIM((parent)->p_estcpu + (child)->p_estcpu);\
 } while (0)
-
-#ifndef IPL_SCHED
-#define IPL_SCHED IPL_HIGH
-#endif
 
 #if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
 #include <sys/lock.h>

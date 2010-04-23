@@ -1,4 +1,4 @@
-/* $OpenBSD: i686_mem.c,v 1.11 2009/11/29 17:11:30 kettenis Exp $ */
+/* $OpenBSD: i686_mem.c,v 1.13 2010/03/23 19:31:18 kettenis Exp $ */
 /*-
  * Copyright (c) 1999 Michael Smith <msmith@freebsd.org>
  * All rights reserved.
@@ -64,18 +64,19 @@ char *mem_owner_bios = "BIOS";
 void	i686_mrinit(struct mem_range_softc *sc);
 int	i686_mrset(struct mem_range_softc *sc,
 	    struct mem_range_desc *mrd, int *arg);
-void	i686_mrAPinit(struct mem_range_softc *sc);
-void	i686_mrreload(struct mem_range_softc *sc);
+void	i686_mrinit_cpu(struct mem_range_softc *sc);
+void	i686_mrreload_cpu(struct mem_range_softc *sc);
 
 struct mem_range_ops i686_mrops = {
 	i686_mrinit,
 	i686_mrset,
-	i686_mrAPinit,
-	i686_mrreload
+	i686_mrinit_cpu,
+	i686_mrreload_cpu
 };
 
 /* XXX for AP startup hook */
 u_int64_t	mtrrcap, mtrrdef;
+u_int64_t	mtrrmask = 0x0000000ffffff000ULL;
 
 struct mem_range_desc	*mem_range_match(struct mem_range_softc *sc,
 			     struct mem_range_desc *mrd);
@@ -209,13 +210,13 @@ i686_mrfetch(struct mem_range_softc *sc)
 		msrv = rdmsr(msr);
 		mrd->mr_flags = (mrd->mr_flags & ~MDF_ATTRMASK) |
 			i686_mtrr2mrt(msrv & 0xff);
-		mrd->mr_base = msrv & 0x0000000ffffff000LL;
+		mrd->mr_base = msrv & mtrrmask;
 		msrv = rdmsr(msr + 1);
 		mrd->mr_flags = (msrv & 0x800) ?
 			(mrd->mr_flags | MDF_ACTIVE) :
 			(mrd->mr_flags & ~MDF_ACTIVE);
 		/* Compute the range from the mask. Ick. */
-		mrd->mr_len = (~(msrv & 0x0000000ffffff000LL) & 0x0000000fffffffffLL) + 1;
+		mrd->mr_len = (~(msrv & mtrrmask) & mtrrmask) + 0x1000;
 		if (!mrvalid(mrd->mr_base, mrd->mr_len))
 			mrd->mr_flags |= MDF_BOGUS;
 		/* If unclaimed and active, must be the BIOS */
@@ -534,6 +535,7 @@ void
 i686_mrinit(struct mem_range_softc *sc)
 {
 	struct mem_range_desc	*mrd;
+	uint32_t		 regs[4];
 	int			 nmdesc = 0;
 	int			 i;
 
@@ -580,6 +582,21 @@ i686_mrinit(struct mem_range_softc *sc)
 	}
 	
 	/*
+	 * Fetch maximum physical address size supported by the
+	 * processor as supported by CPUID leaf function 0x80000008.
+	 * If CPUID does not support leaf function 0x80000008, use the
+	 * default a 36-bit address size.
+	 */
+	cpuid(0x80000000, regs);
+	if (regs[0] >= 0x80000008) {
+		cpuid(0x80000008, regs);
+		if (regs[0] & 0xff) {
+			mtrrmask = (1ULL << (regs[0] & 0xff)) - 1;
+			mtrrmask &= ~0x0000000000000fffULL;
+		}
+	}
+
+	/*
 	 * Get current settings, anything set now is considered to have
 	 * been set by the firmware. (XXX has something already played here?)
 	 */
@@ -592,17 +609,18 @@ i686_mrinit(struct mem_range_softc *sc)
 }
 
 /*
- * Initialise MTRRs on an AP after the BSP has run the init code.
+ * Initialise MTRRs on an AP after the BSP has run the init code (or
+ * re-initialise the MTRRs on the BSP after suspend).
  */
 void
-i686_mrAPinit(struct mem_range_softc *sc)
+i686_mrinit_cpu(struct mem_range_softc *sc)
 {
 	i686_mrstoreone(sc); /* set MTRRs to match BSP */
 	wrmsr(MSR_MTRRdefType, mtrrdef); /* set MTRR behaviour to match BSP */
 }
 
 void
-i686_mrreload(struct mem_range_softc *sc)
+i686_mrreload_cpu(struct mem_range_softc *sc)
 {
 	disable_intr();				/* disable interrupts */
 	i686_mrstoreone(sc); /* set MTRRs to match BSP */

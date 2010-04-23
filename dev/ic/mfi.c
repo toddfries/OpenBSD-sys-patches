@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi.c,v 1.99 2010/01/09 23:15:06 krw Exp $ */
+/* $OpenBSD: mfi.c,v 1.103 2010/04/22 12:33:30 oga Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -55,7 +55,7 @@ struct cfdriver mfi_cd = {
 	NULL, "mfi", DV_DULL
 };
 
-int	mfi_scsi_cmd(struct scsi_xfer *);
+void	mfi_scsi_cmd(struct scsi_xfer *);
 int	mfi_scsi_ioctl(struct scsi_link *, u_long, caddr_t, int, struct proc *);
 void	mfiminphys(struct buf *bp, struct scsi_link *sl);
 
@@ -107,10 +107,12 @@ void		mfi_refresh_sensors(void *);
 #endif /* SMALL_KERNEL */
 #endif /* NBIO > 0 */
 
-u_int32_t	mfi_xscale_fw_state(struct mfi_softc *sc);
-void		mfi_xscale_intr_ena(struct mfi_softc *sc);
-int		mfi_xscale_intr(struct mfi_softc *sc);
-void		mfi_xscale_post(struct mfi_softc *sc, struct mfi_ccb *ccb);
+void		mfi_start(struct mfi_softc *, struct mfi_ccb *);
+void		mfi_done(struct mfi_ccb *);
+u_int32_t	mfi_xscale_fw_state(struct mfi_softc *);
+void		mfi_xscale_intr_ena(struct mfi_softc *);
+int		mfi_xscale_intr(struct mfi_softc *);
+void		mfi_xscale_post(struct mfi_softc *, struct mfi_ccb *);
 
 static const struct mfi_iop_ops mfi_iop_xscale = {
 	mfi_xscale_fw_state,
@@ -119,10 +121,10 @@ static const struct mfi_iop_ops mfi_iop_xscale = {
 	mfi_xscale_post
 };
 
-u_int32_t	mfi_ppc_fw_state(struct mfi_softc *sc);
-void		mfi_ppc_intr_ena(struct mfi_softc *sc);
-int		mfi_ppc_intr(struct mfi_softc *sc);
-void		mfi_ppc_post(struct mfi_softc *sc, struct mfi_ccb *ccb);
+u_int32_t	mfi_ppc_fw_state(struct mfi_softc *);
+void		mfi_ppc_intr_ena(struct mfi_softc *);
+int		mfi_ppc_intr(struct mfi_softc *);
+void		mfi_ppc_post(struct mfi_softc *, struct mfi_ccb *);
 
 static const struct mfi_iop_ops mfi_iop_ppc = {
 	mfi_ppc_fw_state,
@@ -131,10 +133,10 @@ static const struct mfi_iop_ops mfi_iop_ppc = {
 	mfi_ppc_post
 };
 
-u_int32_t	mfi_gen2_fw_state(struct mfi_softc *sc);
-void		mfi_gen2_intr_ena(struct mfi_softc *sc);
-int		mfi_gen2_intr(struct mfi_softc *sc);
-void		mfi_gen2_post(struct mfi_softc *sc, struct mfi_ccb *ccb);
+u_int32_t	mfi_gen2_fw_state(struct mfi_softc *);
+void		mfi_gen2_intr_ena(struct mfi_softc *);
+int		mfi_gen2_intr(struct mfi_softc *);
+void		mfi_gen2_post(struct mfi_softc *, struct mfi_ccb *);
 
 static const struct mfi_iop_ops mfi_iop_gen2 = {
 	mfi_gen2_fw_state,
@@ -214,6 +216,7 @@ mfi_init_ccb(struct mfi_softc *sc)
 		    (MFIMEM_KVA(sc->sc_frames) + sc->sc_frames_size * i);
 		ccb->ccb_pframe =
 		    MFIMEM_DVA(sc->sc_frames) + sc->sc_frames_size * i;
+		ccb->ccb_pframe_offset = sc->sc_frames_size * i;
 		ccb->ccb_frame->mfr_header.mfh_context = i;
 
 		/* select i'th sense */
@@ -300,7 +303,7 @@ mfi_allocmem(struct mfi_softc *sc, size_t size)
 		goto amfree; 
 
 	if (bus_dmamem_alloc(sc->sc_dmat, size, PAGE_SIZE, 0, &mm->am_seg, 1,
-	    &nsegs, BUS_DMA_NOWAIT) != 0)
+	    &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0)
 		goto destroy;
 
 	if (bus_dmamem_map(sc->sc_dmat, &mm->am_seg, nsegs, size, &mm->am_kva,
@@ -314,7 +317,6 @@ mfi_allocmem(struct mfi_softc *sc, size_t size)
 	DNPRINTF(MFI_D_MEM, "  kva: %p  dva: %p  map: %p\n",
 	    mm->am_kva, mm->am_map->dm_segs[0].ds_addr, mm->am_map);
 
-	memset(mm->am_kva, 0, size);
 	return (mm);
 
 unmap:
@@ -766,7 +768,7 @@ mfi_poll(struct mfi_ccb *ccb)
 	hdr->mfh_cmd_status = 0xff;
 	hdr->mfh_flags |= MFI_FRAME_DONT_POST_IN_REPLY_QUEUE;
 
-	mfi_post(sc, ccb);
+	mfi_start(sc, ccb);
 
 	while (hdr->mfh_cmd_status == 0xff) {
 		delay(1000);
@@ -824,7 +826,7 @@ mfi_intr(void *arg)
 			ccb = &sc->sc_ccb[ctx];
 			DNPRINTF(MFI_D_INTR, "%s: mfi_intr context %#x\n",
 			    DEVNAME(sc), ctx);
-			ccb->ccb_done(ccb);
+			mfi_done(ccb);
 
 			claimed = 1;
 		}
@@ -974,7 +976,7 @@ mfi_scsi_ld(struct mfi_ccb *ccb, struct scsi_xfer *xs)
 	return (0);
 }
 
-int
+void
 mfi_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link	*link = xs->sc_link;
@@ -1002,7 +1004,11 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 
 	if ((ccb = mfi_get_ccb(sc)) == NULL) {
 		DNPRINTF(MFI_D_CMD, "%s: mfi_scsi_cmd no ccb\n", DEVNAME(sc));
-		return (NO_CCB);
+		xs->error = XS_NO_CCB;
+		s = splbio();
+		scsi_done(xs);
+		splx(s);
+		return;
 	}
 
 	xs->error = XS_NOERROR;
@@ -1088,15 +1094,15 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 		s = splbio();
 		scsi_done(xs);
 		splx(s);
-		return (COMPLETE);
+		return;
 	}
 
-	mfi_post(sc, ccb);
+	mfi_start(sc, ccb);
 
 	DNPRINTF(MFI_D_DMA, "%s: mfi_scsi_cmd queued %d\n", DEVNAME(sc),
 	    ccb->ccb_dmamap->dm_nsegs);
 
-	return (SUCCESSFULLY_QUEUED);
+	return;
 
 stuffup:
 	xs->error = XS_DRIVER_STUFFUP;
@@ -1104,7 +1110,6 @@ complete:
 	s = splbio();
 	scsi_done(xs);
 	splx(s);
-	return (COMPLETE);
 }
 
 int
@@ -1216,7 +1221,7 @@ mfi_mgmt(struct mfi_softc *sc, uint32_t opc, uint32_t dir, uint32_t len,
 			goto done;
 	} else {
 		s = splbio();
-		mfi_post(sc, ccb);
+		mfi_start(sc, ccb);
 
 		DNPRINTF(MFI_D_MISC, "%s: mfi_mgmt sleeping\n", DEVNAME(sc));
 		while (ccb->ccb_state != MFI_CCB_DONE)
@@ -1993,6 +1998,27 @@ mfi_refresh_sensors(void *arg)
 }
 #endif /* SMALL_KERNEL */
 #endif /* NBIO > 0 */
+
+void
+mfi_start(struct mfi_softc *sc, struct mfi_ccb *ccb)
+{
+	bus_dmamap_sync(sc->sc_dmat, MFIMEM_MAP(sc->sc_frames),
+	    ccb->ccb_pframe_offset, sc->sc_frames_size,
+	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+
+	mfi_post(sc, ccb);
+}
+
+void
+mfi_done(struct mfi_ccb *ccb)
+{
+	struct mfi_softc	*sc = ccb->ccb_sc;
+
+	bus_dmamap_sync(sc->sc_dmat, MFIMEM_MAP(sc->sc_frames),
+	    ccb->ccb_pframe_offset, sc->sc_frames_size, BUS_DMASYNC_PREREAD);
+
+	ccb->ccb_done(ccb);
+}
 
 u_int32_t
 mfi_xscale_fw_state(struct mfi_softc *sc)

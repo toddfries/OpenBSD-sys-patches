@@ -1,4 +1,4 @@
-/*	$OpenBSD: atascsi.h,v 1.35 2009/12/08 08:07:51 dlg Exp $ */
+/*	$OpenBSD: atascsi.h,v 1.40 2010/04/22 00:58:32 dlg Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -110,7 +110,12 @@ struct ata_identify {
 	u_int16_t	addrsecxt[4];	/* 100 */
 	u_int16_t	stream_xfer_p;	/* 104 */
 	u_int16_t	padding1;	/* 105 */
-	u_int16_t	phys_sect_sz;	/* 106 */
+	u_int16_t	p2l_sect;	/* 106 */
+#define ATA_ID_P2L_SECT_MASK	0xc000
+#define ATA_ID_P2L_SECT_VALID	0x4000
+#define ATA_ID_P2L_SECT_SET	0x2000
+#define ATA_ID_P2L_SECT_SIZESET	0x1000
+#define ATA_ID_P2L_SECT_SIZE	0x000f
 	u_int16_t	seek_delay;	/* 107 */
 	u_int16_t	naa_ieee_oui;	/* 108 */
 	u_int16_t	ieee_oui_uid;	/* 109 */
@@ -125,10 +130,19 @@ struct ata_identify {
 	u_int16_t	rmsn;		/* 127 */
 	u_int16_t	securestatus;	/* 128 */
 	u_int16_t	vendor[31];	/* 129 */
-	u_int16_t	padding3[16];	/* 160 */
+	u_int16_t	padding3[8];	/* 160 */
+	u_int16_t	form;		/* 168 */
+#define ATA_ID_FORM_MASK	0x000f
+	u_int16_t	padding4[7];	/* 169 */
 	u_int16_t	curmedser[30];	/* 176 */
 	u_int16_t	sctsupport;	/* 206 */
-	u_int16_t	padding4[48];	/* 207 */
+	u_int16_t	rpm;		/* 207 */
+	u_int16_t	padding5[1];	/* 208 */
+	u_int16_t	logical_align;	/* 209 */
+#define ATA_ID_LALIGN_MASK	0xc000
+#define ATA_ID_LALIGN_VALID	0x4000
+#define ATA_ID_LALIGN		0x3fff
+	u_int16_t	padding6[45];	/* 210 */
 	u_int16_t	integrity;	/* 255 */
 } __packed;
 
@@ -249,19 +263,6 @@ struct ata_log_page_10h {
  * ATA interface
  */
 
-struct ata_port {
-	struct ata_identify	ap_identify;
-	struct atascsi		*ap_as;
-	int			ap_port;
-	int			ap_type;
-#define ATA_PORT_T_NONE			0
-#define ATA_PORT_T_DISK			1
-#define ATA_PORT_T_ATAPI		2
-	int			ap_features;
-#define ATA_PORT_F_PROBED		(1 << 0)
-	int			ap_ncqdepth;
-};
-
 struct ata_xfer {
 	struct ata_fis_h2d	*fis;
 	struct ata_fis_d2h	rfis;
@@ -327,6 +328,10 @@ struct atascsi_attach_args {
 #define ASAA_CAP_NCQ		(1 << 0)
 #define ASAA_CAP_NEEDS_RESERVED	(1 << 1)
 };
+
+#define ATA_PORT_T_NONE		0
+#define ATA_PORT_T_DISK		1
+#define ATA_PORT_T_ATAPI	2
 
 struct atascsi	*atascsi_attach(struct device *, struct atascsi_attach_args *);
 int		atascsi_detach(struct atascsi *, int);

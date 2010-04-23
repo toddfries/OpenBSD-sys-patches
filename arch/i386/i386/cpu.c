@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.35 2009/06/03 00:49:12 art Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.38 2010/04/16 17:44:00 kettenis Exp $	*/
 /* $NetBSD: cpu.c,v 1.1.2.7 2000/06/26 02:04:05 sommerfeld Exp $ */
 
 /*-
@@ -144,13 +144,6 @@ void	cpu_copy_trampoline(void);
 void
 cpu_init_first()
 {
-	int cpunum = lapic_cpu_number();
-
-	if (cpunum != 0) {
-		cpu_info[0] = NULL;
-		cpu_info[cpunum] = &cpu_info_primary;
-	}
-
 	cpu_copy_trampoline();
 }
 #endif
@@ -181,7 +174,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	struct cpu_attach_args *caa = (struct cpu_attach_args *)aux;
 
 #ifdef MULTIPROCESSOR
-	int cpunum = caa->cpu_number;
+	int cpunum = ci->ci_dev.dv_unit;
 	vaddr_t kstack;
 	struct pcb *pcb;
 #endif
@@ -195,10 +188,10 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	} else {
 		ci = &cpu_info_primary;
 #ifdef MULTIPROCESSOR
-		if (cpunum != lapic_cpu_number()) {
+		if (caa->cpu_number != lapic_cpu_number()) {
 			panic("%s: running cpu is at apic %d"
 			    " instead of at expected %d",
-			    self->dv_xname, lapic_cpu_number(), cpunum);
+			    self->dv_xname, lapic_cpu_number(), caa->cpu_number);
 		}
 #endif
 		bcopy(self, &ci->ci_dev, sizeof *self);
@@ -207,7 +200,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	ci->ci_self = ci;
 	ci->ci_apicid = caa->cpu_number;
 #ifdef MULTIPROCESSOR
-	ci->ci_cpuid = ci->ci_apicid;
+	ci->ci_cpuid = cpunum;
 #else
 	ci->ci_cpuid = 0;	/* False for APs, so what, they're not used */
 #endif
@@ -328,7 +321,11 @@ cpu_init(struct cpu_info *ci)
 	if (cpu_feature & CPUID_PGE)
 		lcr4(rcr4() | CR4_PGE);	/* enable global TLB caching */
 
+#ifdef MULTIPROCESSOR
 	ci->ci_flags |= CPUF_RUNNING;
+	tlbflushg();
+#endif
+
 	/*
 	 * If we have FXSAVE/FXRESTOR, use them.
 	 */

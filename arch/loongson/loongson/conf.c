@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.2 2010/02/11 20:14:49 otto Exp $ */
+/*	$OpenBSD: conf.c,v 1.4 2010/03/30 19:16:09 matthieu Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -43,7 +43,8 @@
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/tty.h>
-#include <sys/conf.h>
+
+#include <machine/conf.h>
 
 /*
  *	Block devices.
@@ -101,6 +102,7 @@ cdev_decl(fd);
 #include "st.h"
 #include "bpfilter.h"
 #include "tun.h"
+#include "apm.h"
 #include "com.h"
 cdev_decl(com);
 #include "lpt.h"
@@ -136,6 +138,8 @@ cdev_decl(pci);
 #include "urio.h"
 #include "ucom.h"
 
+#include "bthub.h"
+
 struct cdevsw	cdevsw[] =
 {
 	cdev_cn_init(1,cn),		/* 0: virtual console */
@@ -152,7 +156,7 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NVND,vnd),	/* 11: vnode disk */
 	cdev_bpf_init(NBPFILTER,bpf),	/* 12: berkeley packet filter */
 	cdev_tun_init(NTUN,tun),	/* 13: network tunnel */
-	cdev_notdef(),			/* 14: */
+	cdev_apm_init(NAPM,apm),	/* 14: apm */
 	cdev_notdef(),			/* 15: */
 	cdev_lpt_init(NLPT,lpt),	/* 16: Parallel printer interface */
 	cdev_tty_init(NCOM,com),	/* 17: 16C450 serial interface */
@@ -213,7 +217,8 @@ struct cdevsw	cdevsw[] =
 	cdev_ulpt_init(NULPT,ulpt),	/* 64: USB printers */
 	cdev_urio_init(NURIO,urio),	/* 65: USB Diamond Rio 500 */
 	cdev_tty_init(NUCOM,ucom),	/* 66: USB tty */
-	cdev_hotplug_init(NHOTPLUG,hotplug) /* 67: devices hotplugging */
+	cdev_hotplug_init(NHOTPLUG,hotplug), /* 67: devices hotplugging */
+	cdev_bthub_init(NBTHUB,bthub),	/* 68: bluetooth hub */
 };
 
 int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);

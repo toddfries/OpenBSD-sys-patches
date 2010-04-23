@@ -1,4 +1,4 @@
-/*	$OpenBSD: mesh.c,v 1.24 2010/01/13 06:09:44 krw Exp $	*/
+/*	$OpenBSD: mesh.c,v 1.26 2010/04/09 17:01:30 jasper Exp $	*/
 /*	$NetBSD: mesh.c,v 1.1 1999/02/19 13:06:03 tsubai Exp $	*/
 
 /*-
@@ -236,7 +236,7 @@ int mesh_stp(struct mesh_softc *, int);
 void mesh_setsync(struct mesh_softc *, struct mesh_tinfo *);
 struct mesh_scb *mesh_get_scb(struct mesh_softc *);
 void mesh_free_scb(struct mesh_softc *, struct mesh_scb *);
-int mesh_scsi_cmd(struct scsi_xfer *);
+void mesh_scsi_cmd(struct scsi_xfer *);
 void mesh_sched(struct mesh_softc *);
 int mesh_poll(struct scsi_xfer *);
 void mesh_done(struct mesh_softc *, struct mesh_scb *);
@@ -283,7 +283,7 @@ mesh_match(struct device *parent, void *vcf, void *aux)
 	if (strcmp(ca->ca_name, "mesh") == 0)
 		return 1;
 
-	memset(compat, 0, sizeof(compat));
+	bzero(compat, sizeof(compat));
 	OF_getprop(ca->ca_node, "compatible", compat, sizeof(compat));
 	if (strcmp(compat, "chrp,mesh0") == 0)
 		return 1;
@@ -1030,7 +1030,7 @@ mesh_free_scb(struct mesh_softc *sc, struct mesh_scb *scb)
 	TAILQ_INSERT_TAIL(&sc->free_scb, scb, chain);
 }
 
-int
+void
 mesh_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link *sc_link = xs->sc_link;;
@@ -1042,9 +1042,13 @@ mesh_scsi_cmd(struct scsi_xfer *xs)
 	flags = xs->flags;
 	s = splbio();
 	scb = mesh_get_scb(sc);
+	if (scb == NULL) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		splx(s);
+		return;
+	}
 	splx(s);
-	if (scb == NULL)
-		return (NO_CCB);
 	DPRINTF("cmdlen: %d\n", xs->cmdlen);
 	scb->xs = xs;
 	scb->flags = 0;
@@ -1075,10 +1079,7 @@ mesh_scsi_cmd(struct scsi_xfer *xs)
 			    sc->sc_dev.dv_xname);
 
 		}
-		return COMPLETE;
 	}
-
-	return SUCCESSFULLY_QUEUED;
 }
 
 void

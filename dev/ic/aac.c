@@ -1,4 +1,4 @@
-/*	$OpenBSD: aac.c,v 1.42 2010/01/09 23:15:06 krw Exp $	*/
+/*	$OpenBSD: aac.c,v 1.44 2010/04/10 16:17:38 oga Exp $	*/
 
 /*-
  * Copyright (c) 2000 Michael Smith
@@ -114,7 +114,7 @@ void	aac_unmap_command(struct aac_command *);
 #if 0
 int	aac_raw_scsi_cmd(struct scsi_xfer *);
 #endif
-int	aac_scsi_cmd(struct scsi_xfer *);
+void	aac_scsi_cmd(struct scsi_xfer *);
 void	aac_startio(struct aac_softc *);
 void	aac_startup(struct aac_softc *);
 void	aac_add_container(struct aac_softc *, struct aac_mntinforesp *, int);
@@ -2483,12 +2483,6 @@ aac_internal_cache_cmd(struct scsi_xfer *xs)
 void
 aacminphys(struct buf *bp, struct scsi_link *sl)
 {
-#if 0
-	u_int8_t *buf = bp->b_data;
-	paddr_t pa;
-	long off;
-#endif
-
 	AAC_DPRINTF(AAC_D_MISC, ("aacminphys(0x%x)\n", bp));
 
 #if 0	/* As this is way more than MAXPHYS it's really not necessary. */
@@ -2496,14 +2490,6 @@ aacminphys(struct buf *bp, struct scsi_link *sl)
 		bp->b_bcount = ((AAC_MAXOFFSETS - 1) * PAGE_SIZE);
 #endif
 
-#if 0
-	for (off = PAGE_SIZE, pa = vtophys(buf); off < bp->b_bcount;
-	    off += PAGE_SIZE)
-		if (pa + off != vtophys(buf + off)) {
-			bp->b_bcount = off;
-			break;
-		}
-#endif
 	minphys(bp);
 }
 
@@ -2524,11 +2510,10 @@ aac_raw_scsi_cmd(struct scsi_xfer *xs)
 	s = splbio();
 	scsi_done(xs);
 	splx(s);
-	return (COMPLETE);
 }
 #endif
 
-int
+void
 aac_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link *link = xs->sc_link;
@@ -2538,7 +2523,6 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 	u_int32_t blockno, blockcnt;
 	struct scsi_rw *rw;
 	struct scsi_rw_big *rwb;
-	int retval = SUCCESSFULLY_QUEUED;
 	int s = splbio();
 
 	xs->error = XS_NOERROR;
@@ -2552,7 +2536,7 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 		xs->error = XS_DRIVER_STUFFUP;
 		scsi_done(xs);
 		splx(s);
-		return (COMPLETE);
+		return;
 	}
 
 	AAC_DPRINTF(AAC_D_CMD, ("%s: aac_scsi_cmd: ", sc->aac_dev.dv_xname));
@@ -2640,8 +2624,10 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 			 * We are out of commands, try again
 			 * in a little while.
 			 */
+			xs->error = XS_NO_CCB;
+			scsi_done(xs);
 			splx(s);
-			return (NO_CCB);
+			return;
 		}
 
 		/* fill out the command */
@@ -2664,24 +2650,19 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 			{
 				printf("%s: command timed out\n",
 				       sc->aac_dev.dv_xname);
+				xs->error = XS_NO_CCB;
+				scsi_done(xs);
 				splx(s);
-				return (NO_CCB);
+				return;
 			}
 			scsi_done(xs);
 		}
 	}
 
  ready:
-	/*
-	 * Don't process the queue if we are polling.
-	 */
-	if (xs->flags & SCSI_POLL)
-		retval = COMPLETE;
-
 	splx(s);
 	AAC_DPRINTF(AAC_D_CMD, ("%s: scsi_cmd complete\n",
 				sc->aac_dev.dv_xname));
-	return (retval);
 }
 
 /*
