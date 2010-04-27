@@ -1,8 +1,5 @@
-#	$OpenBSD: Makefile.mac68k,v 1.44 2009/10/19 19:46:56 guenther Exp $
-#	$NetBSD: Makefile.mac68k,v 1.53 1997/04/15 06:11:38 scottr Exp $
+#	$OpenBSD: Makefile.mac68k,v 1.48 2010/04/26 22:21:15 deraadt Exp $
 
-# Makefile for OpenBSD
-#
 # This makefile is constructed from a machine description:
 #	config machineid
 # Most changes should be made in the machine description
@@ -19,8 +16,8 @@
 # -DTRACE	compile in kernel tracing hooks
 # -DQUOTA	compile in file system quotas
 
-# DEBUG is set to -g if debugging.
-# PROF is set to -pg if profiling.
+# DEBUG is set to -g by config if debugging is requested (config -g).
+# PROF is set to -pg by config if profiling is requested (config -p).
 
 .include <bsd.own.mk>
 
@@ -32,8 +29,11 @@ STRIP?=	strip
 .ifndef S
 S!=	cd ../../../..; pwd
 .endif
-MAC68K=	$S/arch/mac68k
-M68K=	$S/arch/m68k
+
+_mach?=		mac68k
+_arch?=		m68k
+_machdir?=	$S/arch/${_mach}
+_archdir?=	$S/arch/${_arch}
 
 INCLUDES=	-I. -I$S -I$S/arch -nostdinc
 CPPFLAGS=	${INCLUDES} ${IDENT} ${PARAM} -D_KERNEL \
@@ -45,7 +45,7 @@ CMACHFLAGS=	-msoft-float -fno-builtin-printf -fno-builtin-log
 .if ${IDENT:M-DNO_PROPOLICE}
 CMACHFLAGS+=	-fno-stack-protector
 .endif
-COPTS?= 	-O2
+COPTS?=		-O2
 CFLAGS=		${DEBUG} ${COPTS} ${CWARNFLAGS} ${CMACHFLAGS} ${PIPE}
 AFLAGS=		-x assembler-with-cpp -traditional-cpp -D_LOCORE
 LINKFLAGS=	-n -Ttext 0 -e start
@@ -62,7 +62,7 @@ HOSTED_CPPFLAGS=${CPPFLAGS:S/^-nostdinc$//}
 HOSTED_CFLAGS=	${CFLAGS}
 
 ### for the Motorola 68040 Floating Point Software Product
-.include "${M68K}/fpsp/Makefile.inc"
+.include "${_archdir}/fpsp/Makefile.inc"
 
 # compile rules: rules are named ${TYPE}_${SUFFIX}${CONFIG_DEP}
 # where TYPE is NORMAL, DRIVER, or PROFILE}; SUFFIX is the file suffix,
@@ -111,12 +111,12 @@ LINKFLAGS+=	-S
 
 %LOAD
 
-assym.h: $S/kern/genassym.sh \
-	 ${M68K}/m68k/genassym.cf ${MAC68K}/mac68k/genassym.cf Makefile
-	cat ${M68K}/m68k/genassym.cf ${MAC68K}/mac68k/genassym.cf | \
-	    sh $S/kern/genassym.sh ${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} \
-	    > assym.h.tmp && \
-	mv -f assym.h.tmp assym.h
+assym.h: $S/kern/genassym.sh Makefile \
+	 ${_archdir}/${_arch}/genassym.cf ${_machdir}/${_mach}/genassym.cf
+	cat ${_archdir}/${_arch}/genassym.cf ${_machdir}/${_mach}/genassym.cf | \
+	    sh $S/kern/genassym.sh ${CC} ${CFLAGS} ${CPPFLAGS} ${PARAM} | \
+	    sort -u > assym.h.tmp && \
+	    mv -f assym.h.tmp assym.h
 
 param.c: $S/conf/param.c
 	rm -f param.c
@@ -156,18 +156,19 @@ links:
 	  sed 's,../.*/\(.*.o\),rm -f \1; ln -s ../GENERIC/\1 \1,' > makelinks
 	sh makelinks && rm -f dontlink
 
-SRCS=	${MAC68K}/mac68k/locore.s \
+SRCS=	${_machdir}/mac68k/locore.s \
 	param.c ioconf.c ${CFILES} ${SFILES}
 depend:: .depend
 .depend: ${SRCS} assym.h param.c ${DB_STRUCTINFO}
-	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${MAC68K}/mac68k/locore.s
+	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${_machdir}/mac68k/locore.s
 	${MKDEP} -a ${CFLAGS} ${CPPFLAGS} param.c ioconf.c ${CFILES}
 	${MKDEP} -a ${AFLAGS} ${CPPFLAGS} ${SFILES}
 	-if test -n "${SFILES}"; then \
 		${MKDEP} -a ${AFLAGS} ${CPPFLAGS} ${SFILES}; \
 	fi
-	sh $S/kern/genassym.sh ${MKDEP} -f assym.dep ${CFLAGS} \
-	    ${CPPFLAGS} < ${MAC68K}/mac68k/genassym.cf
+	cat ${_archdir}/${_arch}/genassym.cf ${_machdir}/${_mach}/genassym.cf | \
+	    sh $S/kern/genassym.sh ${MKDEP} ${CFLAGS} ${CPPFLAGS} | \
+	    sort -u > assym.dep
 	@sed -e 's/.*\.o: /assym.h: /' -e 's/\/tmp\/genassym_c.[^ ]*//' \
 	    < assym.dep >> .depend
 	@rm -f assym.dep
@@ -180,18 +181,18 @@ db_structinfo.h: $S/ddb/db_structinfo.c $S/ddb/parse_structinfo.awk
 
 # depend on root or device configuration
 autoconf.o conf.o: Makefile
- 
-# depend on network or filesystem configuration 
-uipc_proto.o vfs_conf.o: Makefile 
+
+# depend on network or filesystem configuration
+uipc_proto.o vfs_conf.o: Makefile
 
 # depend on maxusers
 assym.h machdep.o: Makefile
 
-# depend on CPU configuration 
+# depend on CPU configuration
 locore.o pmap.o trap.o: Makefile
 
 
-locore.o: ${MAC68K}/mac68k/locore.s assym.h
+locore.o: ${_machdir}/mac68k/locore.s assym.h
 	${NORMAL_S}
 
 # The install target can be redefined by putting a

@@ -1,7 +1,5 @@
-#	$OpenBSD: Makefile.hppa,v 1.37 2009/10/19 19:46:56 guenther Exp $
+#	$OpenBSD: Makefile.hppa,v 1.41 2010/04/26 22:21:14 deraadt Exp $
 
-# Makefile for OpenBSD
-#
 # This makefile is constructed from a machine description:
 #	config machineid
 # Most changes should be made in the machine description
@@ -18,8 +16,8 @@
 # -DTRACE	compile in kernel tracing hooks
 # -DQUOTA	compile in file system quotas
 
-# DEBUG is set to -g if debugging.
-# PROF is set to -pg if profiling.
+# DEBUG is set to -g by config if debugging is requested (config -g).
+# PROF is set to -pg by config if profiling is requested (config -p).
 
 .include <bsd.own.mk>
 
@@ -31,7 +29,11 @@ STRIP?=	strip
 .ifndef S
 S!=	cd ../../../..; pwd
 .endif
-HPPA=	$S/arch/hppa
+
+_mach?=		hppa
+_arch?=		hppa
+_machdir?=	$S/arch/${_mach}
+_archdir?=	$S/arch/${_arch}
 
 INCLUDES=	-I. -I$S -I$S/arch -nostdinc
 CPPFLAGS=	${INCLUDES} ${IDENT} ${PARAM} -D_KERNEL \
@@ -44,7 +46,7 @@ CMACHFLAGS=	-mfast-indirect-calls -mportable-runtime -mno-space-regs \
 COPTS?=		-Os
 CFLAGS=		${DEBUG} ${COPTS} ${CWARNFLAGS} ${CMACHFLAGS} ${PIPE}
 AFLAGS=		-x assembler-with-cpp -traditional-cpp -D_LOCORE
-LINKFLAGS=	-X -T ${HPPA}/conf/ld.script -Ttext 80000 --warn-common
+LINKFLAGS=	-X -T ${_machdir}/conf/ld.script -Ttext 80000 --warn-common
 STRIPFLAGS=	-g -x
 
 .if ${IDENT:M-DDDB} != ""
@@ -61,7 +63,8 @@ CFLAGS+=	-mpa-risc-1-1
 
 .if ${IDENT:M-DFPEMUL} != ""
 CFLAGS+=	-msoft-float -mdisable-fpregs
-.include "${HPPA}/spmath/Makefile.inc"
+HPPA=		${_machdir}
+.include "${_machdir}/spmath/Makefile.inc"
 .ifndef PROF
 LIBSPMATH=	${SPMATH}
 .else
@@ -121,9 +124,11 @@ LINKFLAGS+=	-S -x
 
 %LOAD
 
-assym.h: $S/kern/genassym.sh ${HPPA}/hppa/genassym.cf Makefile
-	sh $S/kern/genassym.sh ${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} \
-	    < ${HPPA}/hppa/genassym.cf > assym.h.tmp && \
+assym.h: $S/kern/genassym.sh Makefile \
+	 ${_archdir}/${_arch}/genassym.cf ${_machdir}/${_mach}/genassym.cf
+	cat ${_archdir}/${_arch}/genassym.cf ${_machdir}/${_mach}/genassym.cf | \
+	    sh $S/kern/genassym.sh ${CC} ${CFLAGS} ${CPPFLAGS} ${PARAM} | \
+	    sort -u > assym.h.tmp && \
 	    mv -f assym.h.tmp assym.h
 
 param.c: $S/conf/param.c
@@ -164,16 +169,17 @@ links:
 	  sed 's,../.*/\(.*.o\),rm -f \1; ln -s ../GENERIC/\1 \1,' > makelinks
 	sh makelinks && rm -f dontlink
 
-SRCS=	${HPPA}/hppa/locore.S \
+SRCS=	${_machdir}/hppa/locore.S \
 	param.c ioconf.c ${CFILES} ${SFILES}
 .depend: ${SRCS} assym.h param.c ${DB_STRUCTINFO}
-	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${HPPA}/hppa/locore.S
+	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${_machdir}/hppa/locore.S
 	${MKDEP} -a ${CFLAGS} ${CPPFLAGS} param.c ioconf.c ${CFILES}
 	-if test -n "${SFILES}"; then \
 		${MKDEP} -a ${AFLAGS} ${CPPFLAGS} ${SFILES}; \
 	fi
-	sh $S/kern/genassym.sh ${MKDEP} -f assym.dep ${CFLAGS} \
-	    ${CPPFLAGS} < ${HPPA}/hppa/genassym.cf
+	cat ${_archdir}/${_arch}/genassym.cf ${_machdir}/${_mach}/genassym.cf | \
+	    sh $S/kern/genassym.sh ${MKDEP} ${CFLAGS} ${CPPFLAGS} | \
+	    sort -u > assym.dep
 	@sed -e 's/.*\.o: /assym.h: /' -e 's/\/tmp\/genassym_c.[^ ]*//' \
 	    < assym.dep >> .depend
 	@rm -f assym.dep
@@ -185,17 +191,17 @@ db_structinfo.h: $S/ddb/db_structinfo.c $S/ddb/parse_structinfo.awk
 
 # depend on root or device configuration
 autoconf.o conf.o: Makefile
- 
-# depend on network or filesystem configuration 
-uipc_proto.o vfs_conf.o: Makefile 
+
+# depend on network or filesystem configuration
+uipc_proto.o vfs_conf.o: Makefile
 
 # depend on maxusers
 assym.h machdep.o: Makefile
 
-# depend on CPU configuration 
+# depend on CPU configuration
 locore.o machdep.o trap.o: Makefile
 
-locore.o: ${HPPA}/hppa/locore.S assym.h
+locore.o: ${_machdir}/hppa/locore.S assym.h
 	${NORMAL_S}
 
 fpemu.o: assym.h
