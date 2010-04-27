@@ -1,8 +1,5 @@
-#	$OpenBSD: Makefile.hp300,v 1.47 2009/10/19 19:46:56 guenther Exp $
-#	$NetBSD: Makefile.hp300,v 1.54 1997/04/01 23:16:41 scottr Exp $
+#	$OpenBSD: Makefile.hp300,v 1.51 2010/04/26 22:21:14 deraadt Exp $
 
-# Makefile for OpenBSD
-#
 # This makefile is constructed from a machine description:
 #	config machineid
 # Most changes should be made in the machine description
@@ -19,8 +16,8 @@
 # -DTRACE	compile in kernel tracing hooks
 # -DQUOTA	compile in file system quotas
 
-# DEBUG is set to -g if debugging.
-# PROF is set to -pg if profiling.
+# DEBUG is set to -g by config if debugging is requested (config -g).
+# PROF is set to -pg by config if profiling is requested (config -p).
 
 .include <bsd.own.mk>
 
@@ -32,8 +29,11 @@ STRIP?=	strip
 .ifndef S
 S!=	cd ../../../..; pwd
 .endif
-HP300=	$S/arch/hp300
-M68K=	$S/arch/m68k
+
+_mach?=		hp300
+_arch?=		m68k
+_machdir?=	$S/arch/${_mach}
+_archdir?=	$S/arch/${_arch}
 
 INCLUDES=	-I. -I$S -I$S/arch -nostdinc
 CPPFLAGS=	${INCLUDES} ${IDENT} ${PARAM} -D_KERNEL \
@@ -99,7 +99,7 @@ CPPFLAGS+=	-DM68K_MMU_MOTOROLA
 .endif
 
 ### for the Motorola 68040 Floating Point Software Product
-.include "${M68K}/fpsp/Makefile.inc"
+.include "${_archdir}/fpsp/Makefile.inc"
 
 # compile rules: rules are named ${TYPE}_${SUFFIX} where TYPE is NORMAL or
 # HOSTED}, and SUFFIX is the file suffix, capitalized (e.g. C for a .c file).
@@ -140,12 +140,12 @@ LINKFLAGS+=	-S
 
 %LOAD
 
-assym.h: $S/kern/genassym.sh \
-	 ${M68K}/m68k/genassym.cf ${HP300}/hp300/genassym.cf Makefile
-	cat ${M68K}/m68k/genassym.cf ${HP300}/hp300/genassym.cf | \
-	    sh $S/kern/genassym.sh ${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} \
-	    > assym.h.tmp && \
-	mv -f assym.h.tmp assym.h
+assym.h: $S/kern/genassym.sh Makefile \
+	 ${_archdir}/${_arch}/genassym.cf ${_machdir}/${_mach}/genassym.cf
+	cat ${_archdir}/${_arch}/genassym.cf ${_machdir}/${_mach}/genassym.cf | \
+	    sh $S/kern/genassym.sh ${CC} ${CFLAGS} ${CPPFLAGS} ${PARAM} | \
+	    sort -u > assym.h.tmp && \
+	    mv -f assym.h.tmp assym.h
 
 param.c: $S/conf/param.c
 	rm -f param.c
@@ -185,17 +185,18 @@ links:
 	  sed 's,../.*/\(.*.o\),rm -f \1; ln -s ../GENERIC/\1 \1,' > makelinks
 	sh makelinks && rm -f dontlink
 
-SRCS=	${HP300}/hp300/locore.s \
+SRCS=	${_machdir}/hp300/locore.s \
 	param.c ioconf.c ${CFILES} ${SFILES}
 depend:: .depend
 .depend: ${SRCS} assym.h param.c ${DB_STRUCTINFO}
-	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${HP300}/hp300/locore.s
+	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${_machdir}/hp300/locore.s
 	${MKDEP} -a ${CFLAGS} ${CPPFLAGS} param.c ioconf.c ${CFILES}
 	-if test -n "${SFILES}"; then \
 		${MKDEP} -a ${AFLAGS} ${CPPFLAGS} ${SFILES}; \
 	fi
-	sh $S/kern/genassym.sh ${MKDEP} -f assym.dep ${CFLAGS} \
-	    ${CPPFLAGS} < ${HP300}/hp300/genassym.cf
+	cat ${_archdir}/${_arch}/genassym.cf ${_machdir}/${_mach}/genassym.cf | \
+	    sh $S/kern/genassym.sh ${MKDEP} ${CFLAGS} ${CPPFLAGS} | \
+	    sort -u > assym.dep
 	@sed -e 's/.*\.o: /assym.h: /' -e 's/\/tmp\/genassym_c.[^ ]*//' \
 	    < assym.dep >> .depend
 	@rm -f assym.dep
@@ -218,7 +219,7 @@ assym.h machdep.o: Makefile
 dma.o hpux_machdep.o locore.o machdep.o pmap.o pmap_boostrap.o sys_machdep.o trap.o: Makefile
 
 
-locore.o: ${HP300}/hp300/locore.s assym.h
+locore.o: ${_machdir}/hp300/locore.s assym.h
 	${NORMAL_S}
 
 # The install target can be redefined by putting a
