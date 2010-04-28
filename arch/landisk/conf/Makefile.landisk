@@ -1,27 +1,14 @@
-#	$OpenBSD: Makefile.landisk,v 1.16 2010/04/26 22:21:14 deraadt Exp $
+#	$OpenBSD: Makefile.landisk,v 1.26 2010/04/27 17:25:19 drahn Exp $
 
-# This makefile is constructed from a machine description:
-#	config machineid
-# Most changes should be made in the machine description
-#	/sys/arch/landisk/conf/``machineid''
-# after which you should do
-#	config machineid
-# Machine generic makefile changes should be made in
-#	/sys/arch/landisk/conf/Makefile.landisk
-# after which config should be rerun for all machines of that type.
+# For instructions on building kernels consult the config(8) and options(4)
+# manual pages.
 #
 # N.B.: NO DEPENDENCIES ON FOLLOWING FLAGS ARE VISIBLE TO MAKEFILE
 #	IF YOU CHANGE THE DEFINITION OF ANY OF THESE RECOMPILE EVERYTHING
-#
-# -DTRACE	compile in kernel tracing hooks
-# -DQUOTA	compile in file system quotas
-
 # DEBUG is set to -g by config if debugging is requested (config -g).
 # PROF is set to -pg by config if profiling is requested (config -p).
 
 .include <bsd.own.mk>
-
-.SUFFIXES:	.S .c .o
 
 MKDEP?=	mkdep
 STRIP?=	strip
@@ -37,13 +24,14 @@ _arch?=		sh
 _machdir?=	$S/arch/${_mach}
 _archdir?=	$S/arch/${_arch}
 
-INCLUDES=	-I. -I$S -I$S/arch -nostdinc
-CPPFLAGS=	${INCLUDES} ${IDENT} -D_KERNEL -Dlandisk
+INCLUDES=	-nostdinc -I. -I$S -I$S/arch
+CPPFLAGS=	${INCLUDES} ${IDENT} -D_KERNEL -D${_mach}
 CWARNFLAGS=	-Werror -Wall -Wstrict-prototypes -Wmissing-prototypes \
 		-Wno-uninitialized -Wno-format -Wno-main \
 		-Wstack-larger-than-2047 -Wvariable-decl
 CMACHFLAGS=	-m4-nofpu \
-		-fno-builtin-printf -fno-builtin-log -fno-builtin-main
+		-fno-builtin-printf -fno-builtin-log -fno-builtin-log2 \
+		-fno-builtin-main -fno-builtin-malloc
 .if ${IDENT:M-DNO_PROPOLICE}
 CMACHFLAGS+=	-fno-stack-protector
 .endif
@@ -139,9 +127,9 @@ clean::
 	    [Ee]rrs linterrs makelinks assym.h ${DB_STRUCTINFO}
 
 lint:
-	@lint -hbxncez -DGENERIC -Dvolatile= ${CPPFLAGS} -UKGDB ${CFILES} \
-		ioconf.c param.c | \
-		grep -v 'static function .* unused'
+	@lint -hbxncez -DGENERIC -Dvolatile= ${CPPFLAGS} -UKGDB \
+	    ${CFILES} ioconf.c param.c | \
+	    grep -v 'static function .* unused'
 
 tags:
 	@echo "see $S/kern/Makefile for tags"
@@ -154,18 +142,17 @@ links:
 	  sed 's,../.*/\(.*.o\),rm -f \1; ln -s ../GENERIC/\1 \1,' > makelinks
 	sh makelinks && rm -f dontlink
 
-SRCS=	${_machdir}/landisk/locore.S \
+SRCS=	${_machdir}/${_mach}/locore.S \
 	param.c ioconf.c ${CFILES} ${SFILES}
 depend:: .depend
 .depend: ${SRCS} assym.h param.c ${DB_STRUCTINFO}
-	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${_machdir}/landisk/locore.S
+	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${_machdir}/${_mach}/locore.S
 	${MKDEP} -a ${CFLAGS} ${CPPFLAGS} param.c ioconf.c ${CFILES}
 .if ${SFILES} != ""
 	${MKDEP} -a ${AFLAGS} ${CPPFLAGS} ${SFILES}
 .endif
 	cat ${_archdir}/${_arch}/genassym.cf ${_machdir}/${_mach}/genassym.cf | \
-	    sh $S/kern/genassym.sh ${MKDEP} ${CFLAGS} ${CPPFLAGS} | \
-	    sort -u > assym.dep
+	    sh $S/kern/genassym.sh ${MKDEP} -f assym.dep ${CFLAGS} ${CPPFLAGS}
 	@sed -e 's/.*\.o: /assym.h: /' -e 's/\/tmp\/genassym_c.[^ ]*//' \
 	    < assym.dep >> .depend
 	@rm -f assym.dep
@@ -175,19 +162,7 @@ db_structinfo.h: $S/ddb/db_structinfo.c $S/ddb/parse_structinfo.awk
 	objdump -g db_structinfo.o | awk -f $S/ddb/parse_structinfo.awk > $@
 	rm -f db_structinfo.o
 
-# depend on root or device configuration
-autoconf.o conf.o: Makefile
-
-# depend on network or filesystem configuration
-uipc_proto.o vfs_conf.o: Makefile
-
-# depend on maxusers
-assym.h machdep.o: Makefile
-
-# depend on CPU configuration
-locore.o machdep.o: Makefile
-
-locore.o: ${_machdir}/landisk/locore.S assym.h
+locore.o: ${_machdir}/${_mach}/locore.S assym.h
 	${NORMAL_S}
 
 # The install target can be redefined by putting a
