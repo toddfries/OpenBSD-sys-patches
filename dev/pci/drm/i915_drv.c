@@ -469,10 +469,9 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	/* array of vm pages that physload introduced. */
 	dev_priv->pgs = PHYS_TO_VM_PAGE(dev->agp->base);
 	KASSERT(dev_priv->pgs != NULL);
-	/* XXX wc and do earlier */
 	if (bus_space_map(dev_priv->bst, dev->agp->base,
-	    dev->agp->info.ai_aperture_size, BUS_SPACE_MAP_LINEAR,
-	    &dev_priv->aperture_bsh) != 0)
+	    dev->agp->info.ai_aperture_size, BUS_SPACE_MAP_LINEAR |
+	    BUS_SPACE_MAP_PREFETCHABLE, &dev_priv->aperture_bsh) != 0)
 		panic("can't map aperture");
 #endif /* INTELDRM_GEM */
 }
@@ -2326,8 +2325,7 @@ inteldrm_fault(struct drm_obj *obj, struct uvm_faultinfo *ufi, off_t offset,
 		UVMHIST_LOG(maphist,
 		    "  MAPPING: device: pm=%p, va=0x%lx, pa=0x%lx, at=%ld",
 		    ufi->orig_map->pmap, vaddr, (u_long)paddr, mapprot);
-		/* XXX writecombining */
-		if (pmap_enter(ufi->orig_map->pmap, vaddr, paddr | PMAP_NOCACHE,
+		if (pmap_enter(ufi->orig_map->pmap, vaddr, paddr,
 		    mapprot, PMAP_CANFAIL | mapprot) != 0) {
 			drm_unhold_object(obj);
 			uvmfault_unlockall(ufi, ufi->entry->aref.ar_amap,
@@ -3650,6 +3648,8 @@ i915_gem_free_object(struct drm_obj *obj)
 		i915_gem_object_unpin(obj);
 
 	i915_gem_object_unbind(obj, 0);
+	drm_free(obj_priv->bit_17);
+	obj_priv->bit_17 = NULL;
 	/* XXX dmatag went away? */
 }
 
@@ -3831,7 +3831,6 @@ i915_gem_init_ringbuffer(struct drm_i915_private *dev_priv)
 	/* Set up the kernel mapping for the ring. */
 	dev_priv->ring.size = obj->size;
 
-	/* XXX WC */
 	if ((ret = bus_space_subregion(dev_priv->bst, dev_priv->aperture_bsh, 
 	    obj_priv->gtt_offset, obj->size, &dev_priv->ring.bsh)) != 0) {
 		DRM_INFO("can't map ringbuffer\n");
@@ -4518,7 +4517,7 @@ inteldrm_swizzle_page(struct vm_page *pg)
 #if defined (__HAVE_PMAP_DIRECT)
 	pmap_unmap_direct(va);
 #else
-	pmap_kremove(va, va + PAGE_SIZE);
+	pmap_kremove(va, PAGE_SIZE);
 	pmap_update(pmap_kernel());
 	uvm_km_free(kernel_map, va, PAGE_SIZE);
 #endif
@@ -4534,12 +4533,14 @@ i915_gem_bit_17_swizzle(struct drm_obj *obj)
 	struct vm_page		*pg;
 	bus_dma_segment_t	*segp;
 	int			 page_count = obj->size >> PAGE_SHIFT;
-	int			 i = 0, n = 0, ret;
+	int                      i, n, ret;
 
 	if (dev_priv->mm.bit_6_swizzle_x != I915_BIT_6_SWIZZLE_9_10_17 ||
 	    obj_priv->bit_17 == NULL)
 		return;
 
+	segp = &obj_priv->dma_segs[0];
+	n = 0;
 	for (i = 0; i < page_count; i++) {
 		/* compare bit 17 with previous one (in case we swapped).
 		 * if they don't match we'll have to swizzle the page
@@ -4547,7 +4548,7 @@ i915_gem_bit_17_swizzle(struct drm_obj *obj)
 		if ((((segp->ds_addr + n) >> 17) & 0x1) !=
 		    test_bit(i, obj_priv->bit_17)) {
 			/* XXX move this to somewhere where we already have pg */
-			pg = PHYS_TO_VM_PAGE(segp->ds_addr + n * PAGE_SIZE);
+			pg = PHYS_TO_VM_PAGE(segp->ds_addr + n);
 			KASSERT(pg != NULL);
 			ret = inteldrm_swizzle_page(pg);
 			if (ret)
@@ -4555,7 +4556,8 @@ i915_gem_bit_17_swizzle(struct drm_obj *obj)
 			atomic_clearbits_int(&pg->pg_flags, PG_CLEAN);
 		}
 
-		if (++n * PAGE_SIZE > segp->ds_len) {
+		n += PAGE_SIZE;
+		if (n >= segp->ds_len) {
 			n = 0;
 			segp++;
 		}
@@ -4590,14 +4592,14 @@ i915_gem_save_bit_17_swizzle(struct drm_obj *obj)
 
 	segp = &obj_priv->dma_segs[0];
 	n = 0;
-	i = 0;
 	for (i = 0; i < page_count; i++) {
-		if ((segp->ds_addr + (n * PAGE_SIZE)) & (1 << 17))
+		if ((segp->ds_addr + n) & (1 << 17))
 			set_bit(i, obj_priv->bit_17);
 		else
 			clear_bit(i, obj_priv->bit_17);
 
-		if (++n * PAGE_SIZE > segp->ds_len) {
+		n += PAGE_SIZE;
+		if (n >= segp->ds_len) {
 			n = 0;
 			segp++;
 		}
