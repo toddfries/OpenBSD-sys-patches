@@ -79,6 +79,7 @@ int	inteldrm_fault(struct drm_obj *, struct uvm_faultinfo *, off_t,
 	    vaddr_t, vm_page_t *, int, int, vm_prot_t, int );
 void	inteldrm_wipe_mappings(struct drm_obj *);
 void	inteldrm_purge_obj(struct drm_obj *);
+void	inteldrm_set_max_obj_size(struct drm_i915_private *);
 
 /* For reset and suspend */
 int	inteldrm_save_state(struct drm_i915_private *);
@@ -256,6 +257,10 @@ const static struct drm_pcidev inteldrm_pciidlist[] = {
 	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS|CHIP_GEN4},
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G41_IGD_1,
 	    CHIP_G4X|CHIP_I965|CHIP_I9XX|CHIP_HWS|CHIP_GEN4},
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PINEVIEW_IGC_1,
+	    CHIP_G33|CHIP_PINEVIEW|CHIP_M|CHIP_I9XX|CHIP_HWS|CHIP_GEN3},
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PINEVIEW_M_IGC_1,
+	    CHIP_G33|CHIP_PINEVIEW|CHIP_M|CHIP_I9XX|CHIP_HWS|CHIP_GEN3},
 	{0, 0, 0}
 };
 
@@ -271,12 +276,10 @@ static const struct drm_driver_info inteldrm_driver = {
 	.irq_install		= i915_driver_irq_install,
 	.irq_uninstall		= i915_driver_irq_uninstall,
 
-#ifdef INTELDRM_GEM
 	.gem_init_object	= i915_gem_init_object,
 	.gem_free_object	= i915_gem_free_object,
 	.gem_fault		= inteldrm_fault,
 	.gem_size		= sizeof(struct inteldrm_obj),
-#endif /* INTELDRM_GEM */
 
 	.name			= DRIVER_NAME,
 	.desc			= DRIVER_DESC,
@@ -287,9 +290,7 @@ static const struct drm_driver_info inteldrm_driver = {
 
 	.flags			= DRIVER_AGP | DRIVER_AGP_REQUIRE |
 				    DRIVER_MTRR | DRIVER_IRQ
-#ifdef INTELDRM_GEM
 				    | DRIVER_GEM,
-#endif /* INTELDRM_GEM */
 };
 
 int
@@ -368,7 +369,6 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	/* Unmask the interrupts that we always want on. */
 	dev_priv->irq_mask_reg = ~I915_INTERRUPT_ENABLE_FIX;
 
-#ifdef INTELDRM_GEM
 	dev_priv->workq = workq_create("intelrel", 1, IPL_TTY);
 	if (dev_priv->workq == NULL) {
 		printf("couldn't create workq\n");
@@ -386,7 +386,6 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	timeout_set(&dev_priv->mm.hang_timer, inteldrm_hangcheck, dev_priv);
 	dev_priv->mm.next_gem_seqno = 1;
 	dev_priv->mm.suspended = 1;
-#endif /* INTELDRM_GEM */
 
 	/* For the X server, in kms mode this will not be needed */
 	dev_priv->fence_reg_start = 3;
@@ -437,9 +436,7 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 
-#ifdef INTELDRM_GEM
 	inteldrm_detect_bit_6_swizzle(dev_priv, &bpa);
-#endif /* INTELDRM_GEM */
 	/* Init HWS */
 	if (!I915_NEED_GFX_HWS(dev_priv)) {
 		if (i915_init_phys_hws(dev_priv, pa->pa_dmat) != 0) {
@@ -460,7 +457,6 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 
 	dev = (struct drm_device *)dev_priv->drmdev;
 
-#ifdef INTELDRM_GEM
 	/* XXX would be a lot nicer to get agp info before now */
 	uvm_page_physload_flags(atop(dev->agp->base), atop(dev->agp->base +
 	    dev->agp->info.ai_aperture_size), atop(dev->agp->base),
@@ -469,11 +465,17 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	/* array of vm pages that physload introduced. */
 	dev_priv->pgs = PHYS_TO_VM_PAGE(dev->agp->base);
 	KASSERT(dev_priv->pgs != NULL);
-	if (bus_space_map(dev_priv->bst, dev->agp->base,
+	/*
+	 * XXX mark all pages write combining so user mmaps get the right
+	 * bits. We really need a proper MI api for doing this, but for now
+	 * this allows us to use PAT where available.
+	 */
+	for (i = 0; i < atop(dev->agp->info.ai_aperture_size); i++)
+		atomic_setbits_int(&(dev_priv->pgs[i].pg_flags), PG_PMAP_WC);
+	if (agp_init_map(dev_priv->bst, dev->agp->base,
 	    dev->agp->info.ai_aperture_size, BUS_SPACE_MAP_LINEAR |
-	    BUS_SPACE_MAP_PREFETCHABLE, &dev_priv->aperture_bsh) != 0)
+	    BUS_SPACE_MAP_PREFETCHABLE, &dev_priv->agph))
 		panic("can't map aperture");
-#endif /* INTELDRM_GEM */
 }
 
 int
@@ -553,7 +555,6 @@ inteldrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 			return (i915_cmdbuffer(dev, data, file_priv));
 		case DRM_IOCTL_I915_GET_VBLANK_PIPE:
 			return (i915_vblank_pipe_get(dev, data, file_priv));
-#ifdef INTELDRM_GEM
 		case DRM_IOCTL_I915_GEM_EXECBUFFER2:
 			return (i915_gem_execbuffer2(dev, data, file_priv));
 		case DRM_IOCTL_I915_GEM_BUSY:
@@ -580,7 +581,6 @@ inteldrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 			    file_priv));
 		case DRM_IOCTL_I915_GEM_MADVISE:
 			return (i915_gem_madvise_ioctl(dev, data, file_priv));
-#endif /* INTELDRM_GEM */
 		default:
 			break;
 		}
@@ -599,7 +599,6 @@ inteldrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 		case DRM_IOCTL_I915_DESTROY_HEAP:
 		case DRM_IOCTL_I915_SET_VBLANK_PIPE:
 			return (0);
-#ifdef INTELDRM_GEM
 		case DRM_IOCTL_I915_GEM_INIT:
 			return (i915_gem_init_ioctl(dev, data, file_priv));
 		case DRM_IOCTL_I915_GEM_ENTERVT:
@@ -610,7 +609,6 @@ inteldrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 			return (i915_gem_pin_ioctl(dev, data, file_priv));
 		case DRM_IOCTL_I915_GEM_UNPIN:
 			return (i915_gem_unpin_ioctl(dev, data, file_priv));
-#endif /* INTELDRM_GEM */
 		}
 	}
 	return (EINVAL);
@@ -647,10 +645,8 @@ inteldrm_intr(void *arg)
 		pipeb_stats = I915_READ(PIPEBSTAT);
 		I915_WRITE(PIPEBSTAT, pipeb_stats);
 	}
-#ifdef INTELDRM_GEM
 	if (iir & I915_RENDER_COMMAND_PARSER_ERROR_INTERRUPT)
 		inteldrm_error(dev_priv);
-#endif /* INTELDRM_GEM */
 
 	I915_WRITE(IIR, iir);
 	(void)I915_READ(IIR); /* Flush posted writes */
@@ -660,10 +656,8 @@ inteldrm_intr(void *arg)
 
 	if (iir & I915_USER_INTERRUPT) {
 		wakeup(dev_priv);
-#ifdef INTELDRM_GEM
 		dev_priv->mm.hang_cnt = 0;
 		timeout_add_msec(&dev_priv->mm.hang_timer, 750);
-#endif /* INTELDRM_GEM */
 	}
 
 	mtx_leave(&dev_priv->user_irq_lock);
@@ -904,7 +898,6 @@ void
 inteldrm_lastclose(struct drm_device *dev)
 {
 	drm_i915_private_t	*dev_priv = dev->dev_private;
-#ifdef INTELDRM_GEM
 	struct vm_page		*p;
 	int			 ret;
 
@@ -925,7 +918,6 @@ inteldrm_lastclose(struct drm_device *dev)
 		agp_bus_dma_destroy((struct agp_softc *)dev->agp->agpdev,
 		    dev_priv->agpdmat);
 	}
-#endif /* INTELDRM_GEM */
 	dev_priv->agpdmat = NULL;
 
 
@@ -934,7 +926,6 @@ inteldrm_lastclose(struct drm_device *dev)
 	i915_dma_cleanup(dev);
 }
 
-#ifdef INTELDRM_GEM
 
 int
 i915_gem_init_ioctl(struct drm_device *dev, void *data,
@@ -969,10 +960,25 @@ i915_gem_init_ioctl(struct drm_device *dev, void *data,
 	}
 
 	dev->gtt_total = (uint32_t)(args->gtt_end - args->gtt_start);
+	inteldrm_set_max_obj_size(dev_priv);
 
 	DRM_UNLOCK();
 
 	return 0;
+}
+
+void
+inteldrm_set_max_obj_size(struct drm_i915_private *dev_priv)
+{
+	struct drm_device	*dev = (struct drm_device *)dev_priv->drmdev;
+
+	/*
+	 * Allow max obj size up to the size where ony 2 would fit the
+	 * aperture, but some slop exists due to alignment etc
+	 */
+	dev_priv->max_gem_obj_size = (dev->gtt_total -
+	    atomic_read(&dev->pin_memory)) * 3 / 4 / 2;
+
 }
 
 int
@@ -998,11 +1004,20 @@ int
 i915_gem_create_ioctl(struct drm_device *dev, void *data,
     struct drm_file *file_priv)
 {
+	struct drm_i915_private		*dev_priv = dev->dev_private;
 	struct drm_i915_gem_create	*args = data;
 	struct drm_obj			*obj;
 	int				 handle, ret;
 
 	args->size = round_page(args->size);
+	/*
+	 * XXX to avoid copying between 2 objs more than half the aperture size
+	 * we don't allow allocations that are that big. This will be fixed
+	 * eventually by intelligently falling back to cpu reads/writes in
+	 * such cases. (linux allows this but does cpu maps in the ddx instead).
+	 */
+	if (args->size > dev_priv->max_gem_obj_size)
+		return (EFBIG);
 
 	/* Allocate the new object */
 	obj = drm_gem_object_alloc(dev, args->size);
@@ -1067,21 +1082,20 @@ i915_gem_pread_ioctl(struct drm_device *dev, void *data,
 
 	bsize = round_page(offset + args->size) - trunc_page(offset);
 
-	if ((ret = bus_space_subregion(dev_priv->bst, dev_priv->aperture_bsh,
+	if ((ret = agp_map_subregion(dev_priv->agph,
 	    trunc_page(offset), bsize, &bsh)) != 0)
 		goto unpin;
 	vaddr = bus_space_vaddr(dev->bst, bsh);
 	if (vaddr == NULL) {
 		ret = EFAULT;
-		goto unpin;
+		goto unmap;
 	}
 
 	ret = copyout(vaddr + (offset & PAGE_MASK),
 	    (char *)(uintptr_t)args->data_ptr, args->size);
 
-	if (ret)
-		goto unpin;
-
+unmap:
+	agp_unmap_subregion(dev_priv->agph, bsh, bsize);
 unpin:
 	i915_gem_object_unpin(obj);
 out:
@@ -1130,26 +1144,28 @@ i915_gem_pwrite_ioctl(struct drm_device *dev, void *data,
 	}
 	ret = i915_gem_object_set_to_gtt_domain(obj, 1, 1);
 	if (ret)
-		goto done;
+		goto unpin;
 
 	obj_priv = (struct inteldrm_obj *)obj;
 	offset = obj_priv->gtt_offset + args->offset;
 	bsize = round_page(offset + args->size) - trunc_page(offset);
 
-	if ((ret = bus_space_subregion(dev_priv->bst, dev_priv->aperture_bsh,
+	if ((ret = agp_map_subregion(dev_priv->agph,
 	    trunc_page(offset), bsize, &bsh)) != 0)
-		goto done;
+		goto unpin;
 	vaddr = bus_space_vaddr(dev_priv->bst, bsh);
 	if (vaddr == NULL) {
 		ret = EFAULT;
-		goto done;
+		goto unmap;
 	}
 
 	ret = copyin((char *)(uintptr_t)args->data_ptr,
 	    vaddr + (offset & PAGE_MASK), args->size);
 
 
-done:
+unmap:
+	agp_unmap_subregion(dev_priv->agph, bsh, bsize);
+unpin:
 	i915_gem_object_unpin(obj);
 out:
 	drm_unhold_and_unref(obj);
@@ -2921,40 +2937,27 @@ i915_gem_object_pin_and_relocate(struct drm_obj *obj,
 		reloc_offset = obj_priv->gtt_offset + reloc->offset;
 		reloc_val = target_obj_priv->gtt_offset + reloc->delta;
 
-		if ((ret = bus_space_subregion(dev_priv->bst,
-		    dev_priv->aperture_bsh, trunc_page(reloc_offset),
-		    PAGE_SIZE, &bsh)) != 0) {
-			DRM_ERROR("map failed...\n");
-			goto err;
-		}
-		/*
-		 * we do this differently to linux, in the case where the
-		 * presumed offset matches we actually read to check it's
-		 * correct, but at least it won't involve idling the gpu if
-		 * it was reading from it before, only if writing (which would
-		 * be bad anyway since we're now using it as a command buffer).
-		 */
 		if (target_obj_priv->gtt_offset == reloc->presumed_offset) {
-			ret = i915_gem_object_set_to_gtt_domain(obj, 0, 1);
-			if (ret != 0)
-				goto err;
-			if (bus_space_read_4(dev_priv->bst, bsh,
-			    reloc_offset & PAGE_MASK) == reloc_val) {
-				drm_gem_object_unreference(target_obj);
-				continue;
-			}
-			DRM_DEBUG("reloc tested and found incorrect\n");
+			drm_gem_object_unreference(target_obj);
+			 continue;
 		}
 
 		ret = i915_gem_object_set_to_gtt_domain(obj, 1, 1);
 		if (ret != 0)
 			goto err;
 
+		if ((ret = agp_map_subregion(dev_priv->agph,
+		    trunc_page(reloc_offset), PAGE_SIZE, &bsh)) != 0) {
+			DRM_ERROR("map failed...\n");
+			goto err;
+		}
+
 		bus_space_write_4(dev_priv->bst, bsh, reloc_offset & PAGE_MASK,
 		     reloc_val);
 
 		reloc->presumed_offset = target_obj_priv->gtt_offset;
 
+		agp_unmap_subregion(dev_priv->agph, bsh, PAGE_SIZE);
 		drm_gem_object_unreference(target_obj);
 	}
 
@@ -3446,6 +3449,7 @@ int
 i915_gem_pin_ioctl(struct drm_device *dev, void *data,
 		   struct drm_file *file_priv)
 {
+	struct drm_i915_private	*dev_priv = dev->dev_private;
 	struct drm_i915_gem_pin	*args = data;
 	struct drm_obj		*obj;
 	struct inteldrm_obj	*obj_priv;
@@ -3468,6 +3472,7 @@ i915_gem_pin_ioctl(struct drm_device *dev, void *data,
 		ret = i915_gem_object_pin(obj, args->alignment, 1);
 		if (ret != 0)
 			goto out;
+		inteldrm_set_max_obj_size(dev_priv);
 	}
 
 	/* XXX - flush the CPU caches for pinned objects
@@ -3487,6 +3492,7 @@ int
 i915_gem_unpin_ioctl(struct drm_device *dev, void *data,
 		     struct drm_file *file_priv)
 {
+	struct drm_i915_private	*dev_priv = dev->dev_private;
 	struct drm_i915_gem_pin	*args = data;
 	struct inteldrm_obj	*obj_priv;
 	struct drm_obj		*obj;
@@ -3505,8 +3511,10 @@ i915_gem_unpin_ioctl(struct drm_device *dev, void *data,
 		goto out;
 	}
 
-	if (--obj_priv->user_pin_count == 0)
+	if (--obj_priv->user_pin_count == 0) {
 		i915_gem_object_unpin(obj);
+		inteldrm_set_max_obj_size(dev_priv);
+	}
 
 out:
 	drm_unhold_and_unref(obj);
@@ -3831,8 +3839,8 @@ i915_gem_init_ringbuffer(struct drm_i915_private *dev_priv)
 	/* Set up the kernel mapping for the ring. */
 	dev_priv->ring.size = obj->size;
 
-	if ((ret = bus_space_subregion(dev_priv->bst, dev_priv->aperture_bsh, 
-	    obj_priv->gtt_offset, obj->size, &dev_priv->ring.bsh)) != 0) {
+	if ((ret = agp_map_subregion(dev_priv->agph, obj_priv->gtt_offset,
+	    obj->size, &dev_priv->ring.bsh)) != 0) {
 		DRM_INFO("can't map ringbuffer\n");
 		goto unpin;
 	}
@@ -3845,6 +3853,7 @@ i915_gem_init_ringbuffer(struct drm_i915_private *dev_priv)
 	return (0);
 
 unmap:
+	agp_unmap_subregion(dev_priv->agph, dev_priv->ring.bsh, obj->size);
 unpin:
 	memset(&dev_priv->ring, 0, sizeof(dev_priv->ring));
 	i915_gem_object_unpin(obj);
@@ -3908,6 +3917,8 @@ i915_gem_cleanup_ringbuffer(struct drm_i915_private *dev_priv)
 {
 	if (dev_priv->ring.ring_obj == NULL)
 		return;
+	agp_unmap_subregion(dev_priv->agph, dev_priv->ring.bsh,
+	    dev_priv->ring.ring_obj->size);
 	drm_hold_object(dev_priv->ring.ring_obj);
 	i915_gem_object_unpin(dev_priv->ring.ring_obj);
 	drm_unhold_and_unref(dev_priv->ring.ring_obj);
@@ -4803,7 +4814,6 @@ i915_gem_get_tiling(struct drm_device *dev, void *data,
 	return 0;
 }
 
-#endif /* INTELDRM_GEM */
 
 /**
  * inteldrm_pipe_enabled - check if a pipe is enabled
@@ -5474,7 +5484,6 @@ inteldrm_restore_state(struct drm_i915_private *dev_priv)
 	return 0;
 }
 
-#ifdef INTELDRM_GEM
 /* 
  * Reset the chip after a hang (965 only)
  *
@@ -5549,7 +5558,6 @@ inteldrm_965_reset(struct drm_i915_private *dev_priv, u_int8_t flags)
 	 if (flags == GDRST_FULL)
 		inteldrm_restore_display(dev_priv);
 }
-#endif /* INTELDRM_GEM */
 
 /*
  * Debug code from here. 
@@ -5717,15 +5725,16 @@ i915_batchbuffer_info(int kdev)
 	TAILQ_FOREACH(obj_priv, &dev_priv->mm.active_list, list) {
 		obj = &obj_priv->obj;
 		if (obj->read_domains & I915_GEM_DOMAIN_COMMAND) {
-			if ((ret = bus_space_subregion(dev_priv->bst,
-			    dev_priv->aperture_bsh, obj_priv->gtt_offset,
-			    obj->size, &bsh)) != 0) {
+			if ((ret = agp_map_subregion(dev_priv->agph,
+			    obj_priv->gtt_offset, obj->size, &bsh)) != 0) {
 				DRM_ERROR("Failed to map pages: %d\n", ret);
 				return;
 			}
 			printf("--- gtt_offset = 0x%08x\n",
 			    obj_priv->gtt_offset);
 			i915_dump_pages(dev_priv->bst, bsh, obj->size);
+			agp_unmap_subregion(dev_priv->agph, dev_priv->ring.bsh,
+			    obj->size);
 		}
 	}
 }

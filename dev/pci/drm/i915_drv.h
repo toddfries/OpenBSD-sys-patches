@@ -90,7 +90,7 @@ typedef struct drm_i915_private {
 	bus_dma_tag_t		 agpdmat; /* tag from intagp for GEM */
 	bus_dma_tag_t		 dmat;
 	bus_space_tag_t		 bst;
-	bus_space_handle_t	 aperture_bsh;
+	struct agp_map		*agph;
 
 	u_long			 flags;
 	u_int16_t		 pci_device;
@@ -124,6 +124,7 @@ typedef struct drm_i915_private {
 	void			*hw_status_page;
 	unsigned int		 status_gfx_addr;
 	u_int32_t		 counter;
+	size_t			 max_gem_obj_size; /* XXX */
 
 	/* Protects user_irq_refcount and irq_mask reg */
 	struct mutex		 user_irq_lock;
@@ -367,6 +368,7 @@ struct inteldrm_file {
 #define CHIP_GEN3	0x20000
 #define CHIP_GEN4	0x40000
 #define CHIP_GEN6	0x80000
+#define	CHIP_PINEVIEW	0x100000
 
 /* flags we use in drm_obj's do_flags */
 #define I915_ACTIVE		0x0010	/* being used by the gpu. */
