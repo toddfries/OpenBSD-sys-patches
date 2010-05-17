@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.38 2010/05/11 19:34:20 damien Exp $	*/
+/*	$OpenBSD: athn.c,v 1.47 2010/05/16 18:01:15 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -112,7 +112,8 @@ void		athn_tx_reclaim(struct athn_softc *, int);
 int		athn_tx_pending(struct athn_softc *, int);
 void		athn_stop_tx_dma(struct athn_softc *, int);
 int		athn_txtime(struct athn_softc *, int, int, u_int);
-void		athn_set_beacon_timers(struct athn_softc *);
+void		athn_set_sta_timers(struct athn_softc *);
+void		athn_set_hostap_timers(struct athn_softc *);
 void		athn_set_opmode(struct athn_softc *);
 void		athn_set_bss(struct athn_softc *, struct ieee80211_node *);
 void		athn_enable_interrupts(struct athn_softc *);
@@ -194,6 +195,7 @@ athn_attach(struct athn_softc *sc)
 		printf(": could not attach chip\n");
 		return (error);
 	}
+	printf(", address %s\n", ether_sprintf(ic->ic_myaddr));
 
 	/* We can put the chip in sleep state now. */
 	athn_set_power_sleep(sc);
@@ -204,21 +206,27 @@ athn_attach(struct athn_softc *sc)
 		    sc->sc_dev.dv_xname);
 		return (error);
 	}
-
-	printf(", address %s\n", ether_sprintf(ic->ic_myaddr));
+	/* Steal one Tx buffer for beacons. */
+	sc->bcnbuf = SIMPLEQ_FIRST(&sc->txbufs);
+	SIMPLEQ_REMOVE_HEAD(&sc->txbufs, bf_list);
 
 	if (sc->flags & ATHN_FLAG_RFSILENT) {
 		DPRINTF(("found RF switch connected to GPIO pin %d\n",
 		    sc->rfsilent_pin));
 	}
 	DPRINTF(("%d key cache entries\n", sc->kc_entries));
-
 	/*
 	 * In HostAP mode, the number of STAs that we can handle is
 	 * limited by the number of entries in the HW key cache.
-	 * XXX TKIP MMIC
+	 * TKIP keys consume 2 or 4 entries in the cache.
 	 */
-	ic->ic_max_nnodes = sc->kc_entries - IEEE80211_GROUP_NKID;
+	if (sc->flags & ATHN_FLAG_SPLIT_TKIP_MIC)
+		ic->ic_max_nnodes = sc->kc_entries / 4;
+	else
+		ic->ic_max_nnodes = sc->kc_entries / 2;
+	ic->ic_max_nnodes -= IEEE80211_WEP_NKID;
+	if (ic->ic_max_nnodes > IEEE80211_CACHE_SIZE)
+		ic->ic_max_nnodes = IEEE80211_CACHE_SIZE;
 
 	DPRINTF(("using %s loop power control\n",
 	    (sc->flags & ATHN_FLAG_OLPC) ? "open" : "closed"));
@@ -258,12 +266,15 @@ athn_attach(struct athn_softc *sc)
 
 	/* Set device capabilities. */
 	ic->ic_caps =
-	    IEEE80211_C_WEP |		/* WEP */
-	    IEEE80211_C_RSN |		/* WPA/RSN */
-	    IEEE80211_C_MONITOR |	/* monitor mode supported */
-	    IEEE80211_C_SHSLOT |	/* short slot time supported */
-	    IEEE80211_C_SHPREAMBLE |	/* short preamble supported */
-	    IEEE80211_C_PMGT;		/* power saving supported */
+	    IEEE80211_C_WEP |		/* WEP. */
+	    IEEE80211_C_RSN |		/* WPA/RSN. */
+#ifndef IEEE80211_STA_ONLY
+	    IEEE80211_C_HOSTAP |	/* Host Ap mode supported. */
+#endif
+	    IEEE80211_C_MONITOR |	/* Monitor mode supported. */
+	    IEEE80211_C_SHSLOT |	/* Short slot time supported. */
+	    IEEE80211_C_SHPREAMBLE |	/* Short preamble supported. */
+	    IEEE80211_C_PMGT;		/* Power saving supported. */
 
 #ifndef IEEE80211_NO_HT
 	if (sc->flags & ATHN_FLAG_11N) {
@@ -275,6 +286,8 @@ athn_attach(struct athn_softc *sc)
 		    IEEE80211_HTCAP_CBW20_40 |
 		    IEEE80211_HTCAP_SGI40 |
 		    IEEE80211_HTCAP_DSSSCCK40;
+		if (AR_SREV_9287_10_OR_LATER(sc))
+			ic->ic_htcaps |= IEEE80211_HTCAP_SGI20;
 		if (AR_SREV_9380_10_OR_LATER(sc))
 			ic->ic_htcaps |= IEEE80211_HTCAP_LDPC;
 		if (AR_SREV_9280_10_OR_LATER(sc)) {
@@ -381,13 +394,13 @@ void
 athn_radiotap_attach(struct athn_softc *sc)
 {
 	bpfattach(&sc->sc_drvbpf, &sc->sc_ic.ic_if, DLT_IEEE802_11_RADIO,
-	    sizeof (struct ieee80211_frame) + IEEE80211_RADIOTAP_HDRLEN);
+	    sizeof(struct ieee80211_frame) + IEEE80211_RADIOTAP_HDRLEN);
 
-	sc->sc_rxtap_len = sizeof sc->sc_rxtapu;
+	sc->sc_rxtap_len = sizeof(sc->sc_rxtapu);
 	sc->sc_rxtap.wr_ihdr.it_len = htole16(sc->sc_rxtap_len);
 	sc->sc_rxtap.wr_ihdr.it_present = htole32(ATHN_RX_RADIOTAP_PRESENT);
 
-	sc->sc_txtap_len = sizeof sc->sc_txtapu;
+	sc->sc_txtap_len = sizeof(sc->sc_txtapu);
 	sc->sc_txtap.wt_ihdr.it_len = htole16(sc->sc_txtap_len);
 	sc->sc_txtap.wt_ihdr.it_present = htole32(ATHN_TX_RADIOTAP_PRESENT);
 }
@@ -931,52 +944,65 @@ athn_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 		return (ieee80211_set_key(ic, ni, k));
 	}
 
-	memset(keybuf, 0, sizeof keybuf);
+	memset(keybuf, 0, sizeof(keybuf));
 	memcpy(keybuf, k->k_key, MIN(k->k_len, 16));
 
 	if (!(k->k_flags & IEEE80211_KEY_GROUP))
-		entry = IEEE80211_GROUP_NKID + IEEE80211_AID(ni->ni_associd);
+		entry = IEEE80211_WEP_NKID + IEEE80211_AID(ni->ni_associd);
 	else
 		entry = k->k_id;
 	k->k_priv = (void *)entry;
 
 	/* NB: See note about key cache registers access above. */
 	if (type == AR_KEYTABLE_TYPE_TKIP) {
-		micentry = entry + 64;
+		if (sc->flags & ATHN_FLAG_SPLIT_TKIP_MIC) {
+			/* Tx MIC is at entry + 64. */
+			micentry = entry + 64;
+			memcpy(micbuf, &k->k_key[16], 8);
+			AR_WRITE(sc, AR_KEYTABLE_KEY0(micentry),
+			    micbuf[0] | micbuf[1] << 16);
+			AR_WRITE(sc, AR_KEYTABLE_KEY2(micentry),
+			    micbuf[2] | micbuf[3] << 16);
+			AR_WRITE(sc, AR_KEYTABLE_TYPE(micentry),
+			    AR_KEYTABLE_TYPE_CLR);
 
-		/* XXX Split MIC. */
-		AR_WRITE(sc, AR_KEYTABLE_KEY0(micentry),
-		    micbuf[0] | micbuf[1] << 16);
-		AR_WRITE(sc, AR_KEYTABLE_KEY1(micentry), micbuf[2]);
-
-		AR_WRITE(sc, AR_KEYTABLE_KEY2(micentry),
-		    micbuf[3] | micbuf[4] << 16);
-		AR_WRITE(sc, AR_KEYTABLE_KEY3(micentry), micbuf[5]);
-
-		AR_WRITE(sc, AR_KEYTABLE_KEY4(micentry),
-		    micbuf[6] | micbuf[7] << 16);
-		AR_WRITE(sc, AR_KEYTABLE_TYPE(micentry), AR_KEYTABLE_TYPE_CLR);
-
-		/* MAC address registers are reserved for the MIC entry. */
-		AR_WRITE(sc, AR_KEYTABLE_MAC0(micentry), 0);
-		AR_WRITE(sc, AR_KEYTABLE_MAC1(micentry), 0);
-	} else {
-		AR_WRITE(sc, AR_KEYTABLE_KEY0(entry),
-		    keybuf[0] | keybuf[1] << 16);
-		AR_WRITE(sc, AR_KEYTABLE_KEY1(entry), keybuf[2]);
-
-		AR_WRITE(sc, AR_KEYTABLE_KEY2(entry),
-		    keybuf[3] | keybuf[4] << 16);
-		AR_WRITE(sc, AR_KEYTABLE_KEY3(entry), keybuf[5]);
-
-		AR_WRITE(sc, AR_KEYTABLE_KEY4(entry),
-		    keybuf[6] | keybuf[7] << 16);
-		AR_WRITE(sc, AR_KEYTABLE_TYPE(entry), type);
+			/* Rx MIC is at entry + 64 + 32. */
+			micentry = entry + 64 + 32;
+			memcpy(micbuf, &k->k_key[24], 8);
+			AR_WRITE(sc, AR_KEYTABLE_KEY0(micentry),
+			    micbuf[0] | micbuf[1] << 16);
+			AR_WRITE(sc, AR_KEYTABLE_KEY2(micentry),
+			    micbuf[2] | micbuf[3] << 16);
+			AR_WRITE(sc, AR_KEYTABLE_TYPE(micentry),
+			    AR_KEYTABLE_TYPE_CLR);
+		} else {
+			/* Tx+Rx MIC is at entry + 64. */
+			micentry = entry + 64;
+			memcpy(micbuf, &k->k_key[16], 16);
+			AR_WRITE(sc, AR_KEYTABLE_KEY0(micentry),
+			    micbuf[0] | micbuf[1] << 16);
+			AR_WRITE(sc, AR_KEYTABLE_KEY1(micentry),
+			    micbuf[5]);
+			AR_WRITE(sc, AR_KEYTABLE_KEY2(micentry),
+			    micbuf[2] | micbuf[3] << 16);
+			AR_WRITE(sc, AR_KEYTABLE_KEY3(micentry),
+			    micbuf[4]);
+			AR_WRITE(sc, AR_KEYTABLE_KEY4(micentry),
+			    micbuf[6] | micbuf[7] << 16);
+			AR_WRITE(sc, AR_KEYTABLE_TYPE(micentry),
+			    AR_KEYTABLE_TYPE_CLR);
+		}
 	}
+	AR_WRITE(sc, AR_KEYTABLE_KEY0(entry), keybuf[0] | keybuf[1] << 16);
+	AR_WRITE(sc, AR_KEYTABLE_KEY1(entry), keybuf[2]);
+	AR_WRITE(sc, AR_KEYTABLE_KEY2(entry), keybuf[3] | keybuf[4] << 16);
+	AR_WRITE(sc, AR_KEYTABLE_KEY3(entry), keybuf[5]);
+	AR_WRITE(sc, AR_KEYTABLE_KEY4(entry), keybuf[6] | keybuf[7] << 16);
+	AR_WRITE(sc, AR_KEYTABLE_TYPE(entry), type);
 
 	/* Clear keys from the stack. */
-	memset(keybuf, 0, sizeof keybuf);
-	memset(micbuf, 0, sizeof micbuf);
+	memset(keybuf, 0, sizeof(keybuf));
+	memset(micbuf, 0, sizeof(micbuf));
 
 	if (!(k->k_flags & IEEE80211_KEY_GROUP)) {
 		addr = ni->ni_macaddr;
@@ -1001,10 +1027,16 @@ athn_delete_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 	switch (k->k_cipher) {
 	case IEEE80211_CIPHER_WEP40:
 	case IEEE80211_CIPHER_WEP104:
-	case IEEE80211_CIPHER_TKIP:
 	case IEEE80211_CIPHER_CCMP:
 		entry = (uintptr_t)k->k_priv;
 		athn_reset_key(sc, entry);
+		break;
+	case IEEE80211_CIPHER_TKIP:
+		entry = (uintptr_t)k->k_priv;
+		athn_reset_key(sc, entry);
+		athn_reset_key(sc, entry + 64);
+		if (sc->flags & ATHN_FLAG_SPLIT_TKIP_MIC)
+			athn_reset_key(sc, entry + 64 + 32);
 		break;
 	default:
 		/* Fallback to software crypto for other ciphers. */
@@ -1174,26 +1206,27 @@ athn_init_calib(struct athn_softc *sc, struct ieee80211_channel *c,
 	if (error != 0)
 		return (error);
 
-	/* Do PA calibration. */
-	if (AR_SREV_9285_11_OR_LATER(sc))
-		ar9285_pa_calib(sc);
+	if (!AR_SREV_9380_10_OR_LATER(sc)) {
+		/* Do PA calibration. */
+		if (AR_SREV_9285_11_OR_LATER(sc))
+			ar9285_pa_calib(sc);
 
-	/* Do noisefloor calibration. */
-	ops->noisefloor_calib(sc);
-
-	if (!AR_SREV_9160_10_OR_LATER(sc))
-		return (0);
-
-	/* Enable IQ calibration. */
-	sc->calib_mask = ATHN_CAL_IQ;
-
-	if (!AR_SREV_9380_10_OR_LATER(sc) &&
-	    (IEEE80211_IS_CHAN_5GHZ(c) || extc != NULL)) {
-		/* Enable ADC gain and ADC DC offset calibrations. */
-		sc->calib_mask |= ATHN_CAL_ADC_GAIN | ATHN_CAL_ADC_DC;
+		/* Do noisefloor calibration. */
+		ops->noisefloor_calib(sc);
 	}
-
-	ops->do_calib(sc);
+	if (AR_SREV_9160_10_OR_LATER(sc)) {
+		/* Support IQ calibration. */
+		sc->sup_calib_mask = ATHN_CAL_IQ;
+		if (AR_SREV_9380_10_OR_LATER(sc)) {
+			/* Support temperature compensation calibration. */
+			sc->sup_calib_mask |= ATHN_CAL_TEMP;
+		} else if (IEEE80211_IS_CHAN_5GHZ(c) || extc != NULL) {
+			/* Support ADC gain calibration. */
+			sc->sup_calib_mask |= ATHN_CAL_ADC_GAIN;
+			/* Support ADC DC offset calibration. */
+			sc->sup_calib_mask |= ATHN_CAL_ADC_DC;
+		}
+	}
 	return (0);
 }
 
@@ -1686,7 +1719,6 @@ athn_txtime(struct athn_softc *sc, int len, int ridx, u_int flags)
 void
 athn_init_tx_queues(struct athn_softc *sc)
 {
-	uint32_t reg;
 	int qid;
 
 	for (qid = 0; qid < ATHN_QID_COUNT; qid++) {
@@ -1713,13 +1745,10 @@ athn_init_tx_queues(struct athn_softc *sc)
 	       AR_D_MISC_ARB_LOCKOUT_CNTRL_GLOBAL) |
 	    AR_D_MISC_BEACON_USE |
 	    AR_D_MISC_POST_FR_BKOFF_DIS);
-	if (AR_SREV_9380_10_OR_LATER(sc)) {
-		/* CWmin and CWmax should be 0 for beacon queue. */
-		reg = AR_READ(sc, AR_DLCL_IFS(ATHN_QID_BEACON));
-		reg = RW(reg, AR_D_LCL_IFS_CWMIN, 0);
-		reg = RW(reg, AR_D_LCL_IFS_CWMAX, 0);
-		AR_WRITE(sc, AR_DLCL_IFS(ATHN_QID_BEACON), reg);
-	}
+	AR_WRITE(sc, AR_DLCL_IFS(ATHN_QID_BEACON),
+	    SM(AR_D_LCL_IFS_CWMIN, 0) |
+	    SM(AR_D_LCL_IFS_CWMAX, 0) |
+	    SM(AR_D_LCL_IFS_AIFS,  1));
 
 	/* Init CAB (Content After Beacon) queue. */
 	AR_SETBITS(sc, AR_QMISC(ATHN_QID_CAB),
@@ -1748,10 +1777,9 @@ athn_init_tx_queues(struct athn_softc *sc)
 }
 
 void
-athn_set_beacon_timers(struct athn_softc *sc)
+athn_set_sta_timers(struct athn_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
-	struct ieee80211_node *ni = ic->ic_bss;
 	uint32_t tsfhi, tsflo, tsftu, reg;
 	uint32_t intval, next_tbtt, next_dtim;
 	int dtim_period, dtim_count, rem_dtim_count;
@@ -1761,7 +1789,7 @@ athn_set_beacon_timers(struct athn_softc *sc)
 	tsftu = AR_TSF_TO_TU(tsfhi, tsflo) + AR_FUDGE;
 
 	/* Beacon interval in TU. */
-	intval = ni->ni_intval;
+	intval = ic->ic_bss->ni_intval;
 
 	next_tbtt = roundup(tsftu, intval);
 #ifdef notyet
@@ -1814,6 +1842,33 @@ athn_set_beacon_timers(struct athn_softc *sc)
 	AR_WRITE(sc, AR_TSFOOR_THRESHOLD, 0x4240);
 }
 
+#ifndef IEEE80211_STA_ONLY
+void
+athn_set_hostap_timers(struct athn_softc *sc)
+{
+	struct ieee80211com *ic = &sc->sc_ic;
+	uint32_t intval, next_tbtt;
+
+	/* Beacon interval in TU. */
+	intval = ic->ic_bss->ni_intval;
+	next_tbtt = intval;
+
+	AR_WRITE(sc, AR_NEXT_TBTT_TIMER, next_tbtt * IEEE80211_DUR_TU);
+	AR_WRITE(sc, AR_NEXT_DMA_BEACON_ALERT,
+	    (next_tbtt - AR_BEACON_DMA_DELAY) * IEEE80211_DUR_TU);
+	AR_WRITE(sc, AR_NEXT_CFP,
+	    (next_tbtt - AR_SWBA_DELAY) * IEEE80211_DUR_TU);
+
+	AR_WRITE(sc, AR_BEACON_PERIOD, intval * IEEE80211_DUR_TU);
+	AR_WRITE(sc, AR_DMA_BEACON_PERIOD, intval * IEEE80211_DUR_TU);
+	AR_WRITE(sc, AR_SWBA_PERIOD, intval * IEEE80211_DUR_TU);
+	AR_WRITE(sc, AR_NDP_PERIOD, intval * IEEE80211_DUR_TU);
+
+	AR_WRITE(sc, AR_TIMER_MODE,
+	    AR_TBTT_TIMER_EN | AR_DBA_TIMER_EN | AR_SWBA_TIMER_EN);
+}
+#endif
+
 void
 athn_set_opmode(struct athn_softc *sc)
 {
@@ -1862,17 +1917,11 @@ athn_set_bss(struct athn_softc *sc, struct ieee80211_node *ni)
 void
 athn_enable_interrupts(struct athn_softc *sc)
 {
-	uint32_t mask, mask2;
+	uint32_t mask2;
 
 	athn_disable_interrupts(sc);	/* XXX */
 
-	/* XXX cleanup, use sc->imask */
-	mask = AR_IMR_TXDESC | AR_IMR_TXEOL | AR_IMR_RXERR | AR_IMR_RXEOL |
-	    AR_IMR_RXORN | AR_IMR_GENTMR | AR_IMR_BCNMISC | AR_IMR_RXMINTR |
-	    AR_IMR_RXINTM;
-	if (AR_SREV_9380_10_OR_LATER(sc))
-		mask |= AR_IMR_RXERR | AR_IMR_HP_RXOK;
-	AR_WRITE(sc, AR_IMR, mask);
+	AR_WRITE(sc, AR_IMR, sc->imask);
 
 	mask2 = AR_READ(sc, AR_IMR_S2);
 	mask2 &= ~(AR_IMR_S2_TIM | AR_IMR_S2_DTIM | AR_IMR_S2_DTIMSYNC |
@@ -2069,11 +2118,15 @@ athn_hw_reset(struct athn_softc *sc, struct ieee80211_channel *c,
 	athn_init_tx_queues(sc);
 
 	/* Initialize interrupt mask. */
-	sc->imask = AR_IMR_DEFAULT;
+	sc->imask =
+	    AR_IMR_TXDESC | AR_IMR_TXEOL |
+	    AR_IMR_RXERR | AR_IMR_RXEOL | AR_IMR_RXORN |
+	    AR_IMR_RXMINTR | AR_IMR_RXINTM |
+	    AR_IMR_GENTMR | AR_IMR_BCNMISC;
 	if (AR_SREV_9380_10_OR_LATER(sc))
-		sc->imask |= AR_IMR_HP_RXOK;
+		sc->imask |= AR_IMR_RXERR | AR_IMR_HP_RXOK;
 #ifndef IEEE80211_STA_ONLY
-	if (ic->ic_opmode == IEEE80211_M_HOSTAP)
+	if (0 && ic->ic_opmode == IEEE80211_M_HOSTAP)
 		sc->imask |= AR_IMR_MIB;
 #endif
 	AR_WRITE(sc, AR_IMR, sc->imask);
@@ -2093,7 +2146,7 @@ athn_hw_reset(struct athn_softc *sc, struct ieee80211_channel *c,
 
 	athn_init_qos(sc);
 
-	if (!AR_SREV_9280_10(sc))
+	if (!(sc->flags & ATHN_FLAG_SPLIT_TKIP_MIC))
 		AR_SETBITS(sc, AR_PCU_MISC, AR_PCU_MIC_NEW_LOC_ENA);
 
 	if (AR_SREV_9287_12_OR_LATER(sc))
@@ -2132,8 +2185,7 @@ athn_hw_reset(struct athn_softc *sc, struct ieee80211_channel *c,
 struct ieee80211_node *
 athn_node_alloc(struct ieee80211com *ic)
 {
-	return (malloc(sizeof (struct athn_node), M_DEVBUF,
-	    M_NOWAIT | M_ZERO));
+	return (malloc(sizeof(struct athn_node), M_DEVBUF, M_NOWAIT | M_ZERO));
 }
 
 void
@@ -2256,9 +2308,25 @@ athn_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 
 		athn_set_bss(sc, ic->ic_bss);
 		athn_disable_interrupts(sc);
-		athn_set_beacon_timers(sc);
-		/* XXX Enable BMISS interrupts. */
+#ifndef IEEE80211_STA_ONLY
+		if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
+			athn_set_hostap_timers(sc);
+			/* Enable sotfware beacon alert interrupts. */
+			sc->imask |= AR_IMR_SWBA;
+		} else
+#endif
+		{
+			athn_set_sta_timers(sc);
+			/* Enable beacon miss interrupts. */
+			sc->imask |= AR_IMR_BMISS;
+		}
 		athn_enable_interrupts(sc);
+
+		if (sc->sup_calib_mask != 0) {
+			memset(&sc->calib, 0, sizeof(sc->calib));
+			sc->cur_calib_mask = sc->sup_calib_mask;
+			/* ops->do_calib(sc); */
+		}
 		/* XXX Start ANI. */
 
 		timeout_add_msec(&sc->calib_to, 500);
@@ -2301,15 +2369,20 @@ athn_updateslot(struct ieee80211com *ic)
 	struct athn_softc *sc = ic->ic_softc;
 	uint32_t clks;
 
-	if (ic->ic_curmode == IEEE80211_MODE_11B)
+	if (ic->ic_curmode == IEEE80211_MODE_11A) {
+		if (sc->flags & ATHN_FLAG_FAST_PLL_CLOCK)
+			clks = AR_CLOCK_RATE_FAST_5GHZ_OFDM;
+		else
+			clks = AR_CLOCK_RATE_5GHZ_OFDM;
+	} else if (ic->ic_curmode == IEEE80211_MODE_11B) {
 		clks = AR_CLOCK_RATE_CCK;
-	else if (ic->ic_curmode == IEEE80211_MODE_11A)
-		clks = AR_CLOCK_RATE_5GHZ_OFDM;
-	else
+	} else
 		clks = AR_CLOCK_RATE_2GHZ_OFDM;
+#ifndef IEEE80211_NO_HT
+	if (sc->curchanext != NULL)
+		clks *= 2;
+#endif
 	clks *= (ic->ic_flags & IEEE80211_F_SHSLOT) ? 9 : 20;
-
-	/* XXX 40MHz. */
 
 	AR_WRITE(sc, AR_D_GBL_IFS_SLOT, clks);
 }

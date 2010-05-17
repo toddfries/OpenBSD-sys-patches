@@ -1,4 +1,4 @@
-/*	$OpenBSD: athnreg.h,v 1.8 2010/05/10 17:44:21 damien Exp $	*/
+/*	$OpenBSD: athnreg.h,v 1.11 2010/05/16 09:19:48 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -1268,9 +1268,10 @@
 
 #define AR_BASE_PHY_ACTIVE_DELAY	100
 
-#define AR_CLOCK_RATE_CCK	22
-#define AR_CLOCK_RATE_5GHZ_OFDM	40
-#define AR_CLOCK_RATE_2GHZ_OFDM	44
+#define AR_CLOCK_RATE_CCK		22
+#define AR_CLOCK_RATE_5GHZ_OFDM		40
+#define AR_CLOCK_RATE_FAST_5GHZ_OFDM	44
+#define AR_CLOCK_RATE_2GHZ_OFDM		44
 
 #define AR_PWR_DECREASE_FOR_2_CHAIN	6	/* 10 * log10(2) * 2 */
 #define AR_PWR_DECREASE_FOR_3_CHAIN	9	/* 10 * log10(3) * 2 */
@@ -1279,6 +1280,8 @@
 
 #define AR_MIN_BEACON_TIMEOUT_VAL	1
 #define AR_FUDGE			2
+#define AR_BEACON_DMA_DELAY		2
+#define AR_SWBA_DELAY			10
 /* Divides by 1024 (usecs to TU) without doing 64-bit arithmetic. */
 #define AR_TSF_TO_TU(hi, lo)	((hi) << 22 | (lo) >> 10)
 
@@ -1374,6 +1377,9 @@
 	((sc)->mac_ver == AR_SREV_VERSION_9380)
 #define AR_SREV_9380_10_OR_LATER(sc) \
 	((sc)->mac_ver >= AR_SREV_VERSION_9380)
+#define AR_SREV_9380_20(sc) \
+	(AR_SREV_9380(sc) && \
+	 (sc)->mac_rev == AR_SREV_REVISION_9380_20)
 #define AR_SREV_9380_20_OR_LATER(sc) \
 	((sc)->mac_ver > AR_SREV_VERSION_9380 || \
 	 (AR_SREV_9380(sc) && (sc)->mac_rev >= AR_SREV_REVISION_9380_20))

@@ -1,4 +1,4 @@
-/*	$OpenBSD: athnvar.h,v 1.11 2010/05/11 19:34:20 damien Exp $	*/
+/*	$OpenBSD: athnvar.h,v 1.14 2010/05/16 14:34:19 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -427,6 +427,7 @@ struct athn_softc {
 #define ATHN_FLAG_11A			(1 << 8)
 #define ATHN_FLAG_11G			(1 << 9)
 #define ATHN_FLAG_11N			(1 << 10)
+#define ATHN_FLAG_SPLIT_TKIP_MIC	(1 << 11)
 
 	uint8_t				ngpiopins;
 	int				led_pin;
@@ -444,7 +445,8 @@ struct athn_softc {
 	uint8_t				ntxchains;
 	uint8_t				nrxchains;
 
-	uint8_t				calib_mask;
+	uint8_t				sup_calib_mask;
+	uint8_t				cur_calib_mask;
 #define ATHN_CAL_IQ		(1 << 0)
 #define ATHN_CAL_ADC_GAIN	(1 << 1)
 #define ATHN_CAL_ADC_DC		(1 << 2)
@@ -474,6 +476,7 @@ struct athn_softc {
 	bus_dmamap_t			map;
 	bus_dma_segment_t		seg;
 	SIMPLEQ_HEAD(, athn_tx_buf)	txbufs;
+	struct athn_tx_buf		*bcnbuf;
 	struct athn_tx_buf		txpool[ATHN_NTXBUFS];
 
 	bus_dmamap_t			txsmap;
