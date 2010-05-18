@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1554 2010/05/13 09:22:29 damien Exp 
+ *	OpenBSD: pcidevs,v 1.1556 2010/05/18 21:23:28 jsg Exp 
  */
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
@@ -248,6 +248,7 @@
 #define	PCI_VENDOR_CHELSIO	0x1425		/* Chelsio */
 #define	PCI_VENDOR_EDIMAX	0x1432		/* Edimax */
 #define	PCI_VENDOR_TAMARACK	0x143d		/* Tamarack */
+#define	PCI_VENDOR_WORKBIT	0x1145		/* Workbit */
 #define	PCI_VENDOR_ASKEY	0x144f		/* Askey */
 #define	PCI_VENDOR_AVERMEDIA	0x1461		/* Avermedia */
 #define	PCI_VENDOR_MSI	0x1462		/* Micro Star International */
@@ -2195,6 +2196,8 @@
 /* Intel products */
 #define	PCI_PRODUCT_INTEL_EESISA	0x0008		/* EES ISA */
 #define	PCI_PRODUCT_INTEL_21145	0x0039		/* 21145 */
+#define	PCI_PRODUCT_INTEL_CORE_HB	0x0040		/* Core Host */
+#define	PCI_PRODUCT_INTEL_CORE_PCIE_0	0x0041		/* Core PCIE */
 #define	PCI_PRODUCT_INTEL_CLARKDALE_IGD	0x0042		/* Intel HD graphics */
 #define	PCI_PRODUCT_INTEL_ARRANDALE_IGD	0x0046		/* Intel HD graphics */
 #define	PCI_PRODUCT_INTEL_WIFI_LINK_6005A_2X2_1	0x0082		/* Centrino Advanced-N 6205a */
@@ -2416,7 +2419,9 @@
 #define	PCI_PRODUCT_INTEL_82599_SFP_EM	0x1507		/* 10GbE SFP EM (82599) */
 #define	PCI_PRODUCT_INTEL_82598_BX	0x1508		/* 10GbE BX (82598) */
 #define	PCI_PRODUCT_INTEL_82576_NS	0x150a		/* PRO/1000 (82576NS) */
+#define	PCI_PRODUCT_INTEL_82583V	0x150c		/* PRO/1000 (82583V) */
 #define	PCI_PRODUCT_INTEL_82599_KX4_MEZZ	0x1514		/* 10GbE KX4 (82599) */
+#define	PCI_PRODUCT_INTEL_82576_QUAD_CU_ET2	0x1526		/* PRO/1000 QP (82576) */
 #define	PCI_PRODUCT_INTEL_80960RP_ATU	0x1960		/* 80960RP ATU */
 #define	PCI_PRODUCT_INTEL_82840_HB	0x1a21		/* 82840 Host */
 #define	PCI_PRODUCT_INTEL_82840_AGP	0x1a23		/* 82840 AGP */
@@ -2998,6 +3003,7 @@
 #define	PCI_PRODUCT_INTEL_3400_LPC_1	0x3b07		/* 3400 LPC */
 #define	PCI_PRODUCT_INTEL_3400_LPC_2	0x3b10		/* 3400 LPC */
 #define	PCI_PRODUCT_INTEL_3400_LPC	0x3b14		/* 3400 LPC */
+#define	PCI_PRODUCT_INTEL_3450_LPC	0x3b16		/* 3450 LPC */
 #define	PCI_PRODUCT_INTEL_3400_SATA_1	0x3b20		/* 3400 SATA */
 #define	PCI_PRODUCT_INTEL_3400_SATA_2	0x3b21		/* 3400 SATA */
 #define	PCI_PRODUCT_INTEL_3400_AHCI_1	0x3b22		/* 3400 AHCI */
@@ -3031,6 +3037,9 @@
 #define	PCI_PRODUCT_INTEL_3400_PCIE_7	0x3b4e		/* 3400 PCIE */
 #define	PCI_PRODUCT_INTEL_3400_PCIE_8	0x3b50		/* 3400 PCIE */
 #define	PCI_PRODUCT_INTEL_3400_HDA	0x3b56		/* 3400 HD Audio */
+#define	PCI_PRODUCT_INTEL_3400_MEI_1	0x3b64		/* 3400 MEI */
+#define	PCI_PRODUCT_INTEL_3400_MEI_2	0x3b65		/* 3400 MEI */
+#define	PCI_PRODUCT_INTEL_3400_KT	0x3b67		/* 3400 KT */
 #define	PCI_PRODUCT_INTEL_E5400_HB	0x4000		/* E5400 Host */
 #define	PCI_PRODUCT_INTEL_E5400A_HB	0x4001		/* E5400A Host */
 #define	PCI_PRODUCT_INTEL_E5400B_HB	0x4003		/* E5400B Host */
@@ -5502,6 +5511,10 @@
 
 /* Winbond Electronics products (PCI products set 2) */
 #define	PCI_PRODUCT_WINBOND2_W89C940	0x1980		/* Linksys EtherPCI */
+
+/* Workbit products */
+#define	PCI_PRODUCT_WORKBIT_CF32A_1	0xf021		/* CF32A */
+#define	PCI_PRODUCT_WORKBIT_CF32A_2	0xf024		/* CF32A */
 
 /* XenSource products */
 #define	PCI_PRODUCT_XENSOURCE_PLATFORMDEV	0x0001		/* Platform Device */
