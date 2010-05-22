@@ -1,4 +1,4 @@
-/*	$OpenBSD: ami.c,v 1.200 2010/03/23 01:57:19 krw Exp $	*/
+/*	$OpenBSD: ami.c,v 1.204 2010/05/20 00:55:17 krw Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -272,7 +272,7 @@ ami_allocmem(struct ami_softc *sc, size_t size)
 		goto amfree; 
 
 	if (bus_dmamem_alloc(sc->sc_dmat, size, PAGE_SIZE, 0, &am->am_seg, 1,
-	    &nsegs, BUS_DMA_NOWAIT) != 0)
+	    &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0)
 		goto destroy;
 
 	if (bus_dmamem_map(sc->sc_dmat, &am->am_seg, nsegs, size, &am->am_kva,
@@ -283,7 +283,6 @@ ami_allocmem(struct ami_softc *sc, size_t size)
 	    BUS_DMA_NOWAIT) != 0)
 		goto unmap;
 
-	memset(am->am_kva, 0, size);
 	return (am);
 
 unmap:
@@ -1017,7 +1016,7 @@ ami_runqueue(struct ami_softc *sc)
 
 	while ((ccb = TAILQ_FIRST(&sc->sc_ccb_preq)) != NULL) {
 		if (sc->sc_exec(sc, &ccb->ccb_cmd) != 0) {
-			/* this is now raceable too with other incomming io */
+			/* this is now raceable too with other incoming io */
 			timeout_add(&sc->sc_run_tmo, 1);
 			break;
 		}
@@ -1340,9 +1339,7 @@ ami_scsi_raw_cmd(struct scsi_xfer *xs)
 		xs->sense.flags = SKEY_ILLEGAL_REQUEST;
 		xs->sense.add_sense_code = 0x20; /* illcmd, 0x24 illfield */
 		xs->error = XS_SENSE;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
@@ -1353,9 +1350,7 @@ ami_scsi_raw_cmd(struct scsi_xfer *xs)
 	splx(s);
 	if (ccb == NULL) {
 		xs->error = XS_NO_CCB;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
@@ -1381,8 +1376,8 @@ ami_scsi_raw_cmd(struct scsi_xfer *xs)
 		xs->error = XS_DRIVER_STUFFUP;
 		s = splbio();
 		ami_put_ccb(ccb);
-		scsi_done(xs);
 		splx(s);
+		scsi_done(xs);
 		return;
 	}
 
@@ -1464,9 +1459,7 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		AMI_DPRINTF(AMI_D_CMD, ("no target %d ", target));
 		/* XXX should be XS_SENSE and sense filled out */
 		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
@@ -1487,9 +1480,7 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		splx(s);
 		if (ccb == NULL) {
 			xs->error = XS_NO_CCB;
-			s = splbio();
 			scsi_done(xs);
-			splx(s);
 			return;
 		}
 
@@ -1516,9 +1507,7 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		AMI_DPRINTF(AMI_D_CMD, ("opc %d tgt %d ", xs->cmd->opcode,
 		    target));
 		xs->error = XS_NOERROR;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 
 	case REQUEST_SENSE:
@@ -1532,9 +1521,7 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		ami_copy_internal_data(xs, &sd, sizeof(sd));
 
 		xs->error = XS_NOERROR;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 
 	case INQUIRY:
@@ -1552,9 +1539,7 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		ami_copy_internal_data(xs, &inq, sizeof(inq));
 
 		xs->error = XS_NOERROR;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 
 	case READ_CAPACITY:
@@ -1565,9 +1550,7 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		ami_copy_internal_data(xs, &rcd, sizeof(rcd));
 
 		xs->error = XS_NOERROR;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 
 	default:
@@ -1575,9 +1558,7 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		    xs->cmd->opcode, target));
 
 		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
@@ -1597,9 +1578,7 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		printf("%s: out of bounds %u-%u >= %u\n", DEVNAME(sc),
 		    blockno, blockcnt, sc->sc_hdr[target].hd_size);
 		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
@@ -1608,9 +1587,7 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 	splx(s);
 	if (ccb == NULL) {
 		xs->error = XS_NO_CCB;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
@@ -1635,8 +1612,8 @@ ami_scsi_cmd(struct scsi_xfer *xs)
 		xs->error = XS_DRIVER_STUFFUP;
 		s = splbio();
 		ami_put_ccb(ccb);
-		scsi_done(xs);
 		splx(s);
+		scsi_done(xs);
 		return;
 	}
 
@@ -2137,7 +2114,7 @@ int
 ami_disk(struct ami_softc *sc, struct bioc_disk *bd,
     struct ami_big_diskarray *p)
 {
-	char vend[8+16+4+1];
+	char vend[8+16+4+1], *vendp;
 	char ser[32 + 1];
 	struct scsi_inquiry_data inqbuf;
 	struct scsi_vpd_serial vpdbuf;
@@ -2161,7 +2138,8 @@ ami_disk(struct ami_softc *sc, struct bioc_disk *bd,
 		if (ami_drv_inq(sc, ch, tg, 0, &inqbuf)) 
 			goto bail;
 		
-		bcopy(inqbuf.vendor, vend, sizeof vend - 1);
+		vendp = inqbuf.vendor;
+		bcopy(vendp, vend, sizeof vend - 1);
 
 		vend[sizeof vend - 1] = '\0';
 		strlcpy(bd->bd_vendor, vend, sizeof(bd->bd_vendor));
@@ -2331,7 +2309,7 @@ ami_ioctl_disk(struct ami_softc *sc, struct bioc_disk *bd)
 	int off;
 	int error = EINVAL;
 	u_int16_t ch, tg;
-	char vend[8+16+4+1];
+	char vend[8+16+4+1], *vendp;
 	char ser[32 + 1];
 
 	p = malloc(sizeof *p, M_DEVBUF, M_NOWAIT);
@@ -2405,7 +2383,8 @@ ami_ioctl_disk(struct ami_softc *sc, struct bioc_disk *bd)
 			}
 
 			if (!ami_drv_inq(sc, ch, tg, 0, &inqbuf)) {
-				bcopy(inqbuf.vendor, vend, sizeof vend - 1);
+				vendp = inqbuf.vendor;
+				bcopy(vendp, vend, sizeof vend - 1);
 				vend[sizeof vend - 1] = '\0';
 				strlcpy(bd->bd_vendor, vend,
 				    sizeof(bd->bd_vendor));

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.185 2010/04/23 15:25:21 jsing Exp $	*/
+/*	$OpenBSD: sd.c,v 1.190 2010/05/20 00:04:38 krw Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -65,6 +65,7 @@
 #include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/scsiio.h>
+#include <sys/dkio.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsi_disk.h>
@@ -91,6 +92,7 @@ void	sd_flush(struct sd_softc *, int);
 void	viscpy(u_char *, u_char *, int);
 
 int	sd_ioctl_inquiry(struct sd_softc *, struct dk_inquiry *);
+int	sd_ioctl_cache(struct sd_softc *, long, struct dk_cache *);
 
 void	sd_cmd_rw6(struct scsi_xfer *, int, daddr64_t, u_int);
 void	sd_cmd_rw10(struct scsi_xfer *, int, daddr64_t, u_int);
@@ -742,7 +744,6 @@ sd_buf_done(struct scsi_xfer *xs)
 		    bp->b_flags & B_READ);
 		scsi_buf_requeue(&sc->sc_buf_queue, bp, &sc->sc_buf_mtx);
 		scsi_xs_put(xs);
-		SET(sc->flags, SDF_WAITING); /* break out of sdstart loop */
 		timeout_add(&sc->sc_timeout, 1);
 		return;
 
@@ -956,6 +957,14 @@ sdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			    (struct dk_inquiry *)addr);
 		goto exit;
 
+	case DIOCGCACHE:
+	case DIOCSCACHE:
+		error = scsi_do_ioctl(sc->sc_link, dev, cmd, addr, flag, p);
+		if (error == ENOTTY)
+			error = sd_ioctl_cache(sc, cmd,
+			    (struct dk_cache *)addr);
+		goto exit;
+
 	default:
 		if (part != RAW_PART) {
 			error = ENOTTY;
@@ -990,6 +999,68 @@ sd_ioctl_inquiry(struct sd_softc *sc, struct dk_inquiry *di)
 		strlcpy(di->serial, "(unknown)", sizeof(vpd.serial));
 
 	return (0);
+}
+
+int
+sd_ioctl_cache(struct sd_softc *sc, long cmd, struct dk_cache *dkc)
+{
+	union scsi_mode_sense_buf *buf;
+	struct page_caching_mode *mode = NULL;
+	u_int wrcache, rdcache;
+	int big;
+	int rv;
+
+	buf = malloc(sizeof(*buf), M_TEMP, M_WAITOK|M_CANFAIL);
+	if (buf == NULL)
+		return (ENOMEM);
+
+	rv = scsi_do_mode_sense(sc->sc_link, PAGE_CACHING_MODE,
+	    buf, (void **)&mode, NULL, NULL, NULL,
+	    sizeof(*mode) - 4, SCSI_SILENT, &big);
+	if (rv != 0)
+		goto done;
+
+	if (!DISK_PGCODE(mode, PAGE_CACHING_MODE)) {
+		rv = EIO;
+		goto done;
+	}
+
+	wrcache = (ISSET(mode->flags, PG_CACHE_FL_WCE) ? 1 : 0);
+	rdcache = (ISSET(mode->flags, PG_CACHE_FL_RCD) ? 0 : 1);
+
+	switch (cmd) {
+	case DIOCGCACHE:
+		dkc->wrcache = wrcache;
+		dkc->rdcache = rdcache;
+		break;
+
+	case DIOCSCACHE:
+		if (dkc->wrcache == wrcache && dkc->rdcache == rdcache)
+			break;
+
+		if (dkc->wrcache)
+			SET(mode->flags, PG_CACHE_FL_WCE);
+		else
+			CLR(mode->flags, PG_CACHE_FL_WCE);
+
+		if (dkc->rdcache)
+			CLR(mode->flags, PG_CACHE_FL_RCD);
+		else
+			SET(mode->flags, PG_CACHE_FL_RCD);
+
+		if (big) {
+			rv = scsi_mode_select_big(sc->sc_link, SMS_PF,
+			    &buf->hdr_big, SCSI_SILENT, 20000);
+		} else {
+			rv = scsi_mode_select(sc->sc_link, SMS_PF,
+			    &buf->hdr, SCSI_SILENT, 20000);
+		}
+		break;
+	}
+
+done:
+	free(buf, M_TEMP);
+	return (rv);
 }
 
 /*
@@ -1186,6 +1257,7 @@ sddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
 	int	totwrt;		/* total number of sectors left to write */
 	int	nwrt;		/* current number of sectors to write */
 	struct scsi_xfer *xs;	/* ... convenience */
+	int rv;
 
 	/* Check if recursive dump; if so, punt. */
 	if (sddoingadump)
@@ -1239,16 +1311,16 @@ sddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
 			return (ENOMEM);
 
 		xs->timeout = 10000;
-		xs->flags = SCSI_POLL | SCSI_NOSLEEP | SCSI_DATA_OUT;
+		xs->flags = SCSI_POLL | SCSI_DATA_OUT;
 		xs->data = va;
 		xs->datalen = nwrt * sectorsize;
 
 		sd_cmd_rw10(xs, 0, blkno, nwrt); /* XXX */
 
-		scsi_xs_exec(xs);
-		if (xs->error != XS_NOERROR)
-			return (ENXIO);
+		rv = scsi_xs_sync(xs);
 		scsi_xs_put(xs);
+		if (rv != 0)
+			return (ENXIO);
 #else	/* SD_DUMP_NOT_TRUSTED */
 		/* Let's just talk about this first... */
 		printf("sd%d: dump addr 0x%x, blk %d\n", unit, va, blkno);

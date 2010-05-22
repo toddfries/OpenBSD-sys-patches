@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.151 2010/04/20 23:27:01 deraadt Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.153 2010/05/05 19:34:27 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -466,11 +466,7 @@ pmap_bootstrap(vstart)
 	 */
 	kpm = &kernel_pmap_store;
 	bzero(kpm, sizeof(*kpm));
-	simple_lock_init(&kpm->pm_lock);
-	kpm->pm_obj.pgops = NULL;
-	RB_INIT(&kpm->pm_obj.memt);
-	kpm->pm_obj.uo_npages = 0;
-	kpm->pm_obj.uo_refs = 1;
+	uvm_objinit(&kpm->pm_obj, NULL, 1);
 	kpm->pm_space = HPPA_SID_KERNEL;
 	kpm->pm_pid = HPPA_PID_KERNEL;
 	kpm->pm_pdir_pg = NULL;
@@ -652,11 +648,7 @@ pmap_create()
 
 	pmap = pool_get(&pmap_pmap_pool, PR_WAITOK);
 
-	simple_lock_init(&pmap->pm_lock);
-	pmap->pm_obj.pgops = NULL;	/* currently not a mappable object */
-	RB_INIT(&pmap->pm_obj.memt);
-	pmap->pm_obj.uo_npages = 0;
-	pmap->pm_obj.uo_refs = 1;
+	uvm_objinit(&pmap->pm_obj, NULL, 1);
 
 	for (space = 1 + arc4random_uniform(hppa_sid_max);
 	    pmap_sdir_get(space); space = (space + 1) % hppa_sid_max);
@@ -1188,9 +1180,7 @@ pmap_zero_page(struct vm_page *pg)
 	pmap_flush_page(pg, 1);
 	bzero((void *)pa, PAGE_SIZE);
 	fdcache(HPPA_SID_KERNEL, pa, PAGE_SIZE);
-	ficache(HPPA_SID_KERNEL, pa, PAGE_SIZE);
 	pdtlb(HPPA_SID_KERNEL, pa);
-	pitlb(HPPA_SID_KERNEL, pa);
 }
 
 void
@@ -1205,12 +1195,8 @@ pmap_copy_page(struct vm_page *srcpg, struct vm_page *dstpg)
 	bcopy((void *)spa, (void *)dpa, PAGE_SIZE);
 	pdcache(HPPA_SID_KERNEL, spa, PAGE_SIZE);
 	fdcache(HPPA_SID_KERNEL, dpa, PAGE_SIZE);
-	ficache(HPPA_SID_KERNEL, spa, PAGE_SIZE);
-	ficache(HPPA_SID_KERNEL, dpa, PAGE_SIZE);
 	pdtlb(HPPA_SID_KERNEL, spa);
 	pdtlb(HPPA_SID_KERNEL, dpa);
-	pitlb(HPPA_SID_KERNEL, spa);
-	pitlb(HPPA_SID_KERNEL, dpa);
 }
 
 void
@@ -1329,8 +1315,6 @@ struct vm_page *
 pmap_unmap_direct(vaddr_t va)
 {
 	fdcache(HPPA_SID_KERNEL, va, PAGE_SIZE);
-	ficache(HPPA_SID_KERNEL, va, PAGE_SIZE);
 	pdtlb(HPPA_SID_KERNEL, va);
-	pitlb(HPPA_SID_KERNEL, va);
 	return (PHYS_TO_VM_PAGE(va));
 }

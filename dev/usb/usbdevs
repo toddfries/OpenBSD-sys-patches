@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.495 2010/04/26 12:42:56 stephan Exp $
+$OpenBSD: usbdevs,v 1.498 2010/05/20 11:00:11 yuo Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -925,6 +925,7 @@ product ATHEROS2 TG121N		0x1001	TG121N
 product ATHEROS2 WN821NV2	0x1002	WN821NV2
 product ATHEROS2 3CRUSBN275	0x1010	3CRUSBN275
 product ATHEROS2 WN612		0x1011	WN612
+product ATHEROS2 AR3011		0x3000	AR3011
 product ATHEROS2 AR9170		0x9170	AR9170
 
 /* ATI products */
@@ -1026,6 +1027,7 @@ product BELKIN F5D8055V2	0x825b	F5D8055 v2
 product BELKIN F5D9050C		0x905c	F5D9050C
 product BELKIN F5D9050V3	0x905b	F5D9050 ver 3
 product BELKIN F6D4050V1	0x935a	F6D4050 ver 1
+product BELKIN F6D4050V2	0x935b	F6D4050 ver 2
 
 /* Belkin(2) products */
 product BELKIN2 F5U002		0x0002	F5U002 Parallel
@@ -1915,6 +1917,7 @@ product INSIDEOUT EDGEPORT4DIN	0x0011	Edgeport/4 RS232/DIN
 product INSIDEOUT EDGEPORT16DC	0x0012	1/2 Edgeport/16
 product INSIDEOUT EDGEPORTCOMP	0x0013	Edgeport Compatible
 product INSIDEOUT EDGEPORT8I	0x0014	Edgeport/8 RS422
+product	INSIDEOUT WATCHPORTH	0x0305	WatchPort/H
 product INSIDEOUT MT4X56USB	0x1403	OEM device
 
 /* In-System products */
@@ -2991,9 +2994,11 @@ product QUALCOMM2 MSM_PHONE	0x6000	CDMA MSM phone
 
 /* ZTE products */
 product ZTE CDMA_MSM		0x0001	CDMA Technologies MSM modem
+product ZTE MF633		0x0016	ZTE MF633 USUPA USB modem
 product ZTE MF637		0x0031	ZTE MF637 HSUPA USB modem
 product ZTE K3565Z		0x0063	ZTE K3565-Z USB MSM modem
-product ZTE UMASS		0x2000	ZTE USB MSM (umass mode)
+product	ZTE UMASS_INSTALLER2	0x0103	ZTE USB MSM installer 
+product ZTE UMASS_INSTALLER	0x2000	ZTE USB MSM installer
 product ZTE AC8700		0xfffe	AC8700 CDMA USB modem
 
 /* Quanta products */

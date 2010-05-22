@@ -1,4 +1,4 @@
-/*	$OpenBSD: dkio.h,v 1.6 2007/04/03 04:51:07 dlg Exp $	*/
+/*	$OpenBSD: dkio.h,v 1.7 2010/05/19 05:29:14 dlg Exp $	*/
 /*	$NetBSD: dkio.h,v 1.1 1996/01/30 18:21:48 thorpej Exp $	*/
 
 /*
@@ -68,14 +68,12 @@ struct dk_inquiry {
 
 #define DIOCINQ		_IOR('d', 116, struct dk_inquiry)
 
-struct dk_diskmap {
-	char		*device;
-	int		fd;
-	int		flags;
-#define	DM_OPENPART	0x1		/* Open raw partition. */
-#define	DM_OPENBLCK	0x2		/* Open block device. */
+struct dk_cache {
+	unsigned int	wrcache;
+	unsigned int	rdcache;
 };
 
-#define DIOCMAP		_IOWR('d', 117, struct dk_diskmap)
+#define DIOCGCACHE	_IOR('d', 117, struct dk_cache)	/* get cache enabled */
+#define DIOCSCACHE	_IOW('d', 118, struct dk_cache)	/* set cache enabled */
 
 #endif /* _SYS_DKIO_H_ */
