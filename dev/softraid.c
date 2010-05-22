@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.201 2010/03/28 16:38:57 jsing Exp $ */
+/* $OpenBSD: softraid.c,v 1.204 2010/05/21 20:52:38 marco Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -40,6 +40,7 @@
 #include <sys/uio.h>
 #include <sys/workq.h>
 #include <sys/kthread.h>
+#include <sys/dkio.h>
 
 #ifdef AOE
 #include <sys/mbuf.h>
@@ -1548,10 +1549,12 @@ sr_attach(struct device *parent, struct device *self, void *aux)
 	SLIST_INIT(&sr_hotplug_callbacks);
 	SLIST_INIT(&sc->sc_hotspare_list);
 
+#if NBIO > 0
 	if (bio_register(&sc->sc_dev, sr_ioctl) != 0)
 		printf("%s: controller registration failed", DEVNAME(sc));
 	else
 		sc->sc_ioctl = sr_ioctl;
+#endif /* NBIO > 0 */
 
 	printf("\n");
 
@@ -1816,13 +1819,9 @@ sr_wu_get(struct sr_discipline *sd, int canwait)
 void
 sr_scsi_done(struct sr_discipline *sd, struct scsi_xfer *xs)
 {
-	int			s;
-
 	DNPRINTF(SR_D_DIS, "%s: sr_scsi_done: xs %p\n", DEVNAME(sd->sd_sc), xs);
 
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 void

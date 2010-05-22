@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.67 2010/04/19 16:32:53 jsing Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.72 2010/05/21 15:24:29 jsing Exp $	*/
 
 /*
  * Copyright (c) 2000-2004 Michael Shalayeff
@@ -68,27 +68,45 @@
 #include <sys/queue.h>
 #include <sys/sched.h>
 
+#include <machine/mutex.h>
+
+/*
+ * Note that the alignment of ci_trap_save is important since we want to keep
+ * it within a single cache line. As a result, it must be kept as the first
+ * entry within the cpu_info struct.
+ */
 struct cpu_info {
+	register_t	ci_trap_save[16];
+
 	struct device	*ci_dev;
 	int		ci_cpuid;
 	hppa_hpa_t	ci_hpa;
+	volatile int	ci_flags;
 
 	struct proc	*ci_curproc;
+	paddr_t		ci_spinup_stack;
 
 	register_t	ci_psw;			/* Processor Status Word. */
 	volatile int	ci_cpl;
+	volatile u_long	ci_mask;		/* Hardware interrupt mask. */
 	volatile u_long	ci_ipending;
 	volatile int	ci_in_intr;
 	int		ci_want_resched;
+	u_long		ci_itmr;
+
+	volatile u_long	ci_ipi;			/* IPIs pending. */
+	struct mutex	ci_ipi_mtx;
 
 	struct schedstate_percpu ci_schedstate;
 	u_int32_t	ci_randseed;
-};
+} __attribute__((__aligned__(64)));
+
+#define		CPUF_RUNNING	0x0001		/* CPU is running. */
 
 #ifdef MULTIPROCESSOR
-#define        HPPA_MAXCPUS            1
+#define		HPPA_MAXCPUS	4
 #else
-#define        HPPA_MAXCPUS            4
+#define		HPPA_MAXCPUS	1
 #endif
 
 extern struct cpu_info cpu_info[HPPA_MAXCPUS];

@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi.c,v 1.103 2010/04/22 12:33:30 oga Exp $ */
+/* $OpenBSD: mfi.c,v 1.105 2010/05/20 00:55:17 krw Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -1009,7 +1009,6 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 	uint32_t		blockcnt;
 	uint8_t			target = link->target;
 	uint8_t			mbox[MFI_MBOX_SIZE];
-	int			s;
 
 	DNPRINTF(MFI_D_CMD, "%s: mfi_scsi_cmd opcode: %#x\n",
 	    DEVNAME(sc), xs->cmd->opcode);
@@ -1021,7 +1020,13 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 		goto stuffup;
 	}
 
-	ccb = xs->io;
+	if ((ccb = mfi_get_ccb(sc)) == NULL) {
+		DNPRINTF(MFI_D_CMD, "%s: mfi_scsi_cmd no ccb\n", DEVNAME(sc));
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		return;
+	}
+
 	xs->error = XS_NOERROR;
 
 	switch (xs->cmd->opcode) {
@@ -1095,9 +1100,8 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 			xs->error = XS_SENSE;
 		}
 
-		s = splbio();
+		mfi_put_ccb(ccb);
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
@@ -1111,9 +1115,7 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 stuffup:
 	xs->error = XS_DRIVER_STUFFUP;
 complete:
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 int
@@ -1532,7 +1534,7 @@ mfi_ioctl_disk(struct mfi_softc *sc, struct bioc_disk *bd)
 	struct mfi_ld_cfg	*ld;
 	struct mfi_pd_details	*pd;
 	struct scsi_inquiry_data *inqbuf;
-	char			vend[8+16+4+1];
+	char			vend[8+16+4+1], *vendp;
 	int			rv = EINVAL;
 	int			arr, vol, disk, span;
 	uint8_t			mbox[MFI_MBOX_SIZE];
@@ -1618,7 +1620,8 @@ mfi_ioctl_disk(struct mfi_softc *sc, struct bioc_disk *bd)
 	bd->bd_channel = pd->mpd_enc_idx;
 
 	inqbuf = (struct scsi_inquiry_data *)&pd->mpd_inq_data;
-	memcpy(vend, inqbuf->vendor, sizeof vend - 1);
+	vendp = inqbuf->vendor;
+	memcpy(vend, vendp, sizeof vend - 1);
 	vend[sizeof vend - 1] = '\0';
 	strlcpy(bd->bd_vendor, vend, sizeof(bd->bd_vendor));
 
@@ -1815,7 +1818,7 @@ mfi_bio_hs(struct mfi_softc *sc, int volid, int type, void *bio_hs)
 	struct bioc_disk	*sdhs;
 	struct bioc_vol		*vdhs;
 	struct scsi_inquiry_data *inqbuf;
-	char			vend[8+16+4+1];
+	char			vend[8+16+4+1], *vendp;
 	int			i, rv = EINVAL;
 	uint32_t		size;
 	uint8_t			mbox[MFI_MBOX_SIZE];
@@ -1885,7 +1888,8 @@ mfi_bio_hs(struct mfi_softc *sc, int volid, int type, void *bio_hs)
 		sdhs->bd_channel = pd->mpd_enc_idx;
 		sdhs->bd_target = pd->mpd_enc_slot;
 		inqbuf = (struct scsi_inquiry_data *)&pd->mpd_inq_data;
-		memcpy(vend, inqbuf->vendor, sizeof vend - 1);
+		vendp = inqbuf->vendor;
+		memcpy(vend, vendp, sizeof vend - 1);
 		vend[sizeof vend - 1] = '\0';
 		strlcpy(sdhs->bd_vendor, vend, sizeof(sdhs->bd_vendor));
 		break;

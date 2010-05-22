@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwnvar.h,v 1.17 2010/02/17 18:23:00 damien Exp $	*/
+/*	$OpenBSD: if_iwnvar.h,v 1.19 2010/05/05 19:47:43 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -150,6 +150,7 @@ struct iwn_fw_part {
 
 struct iwn_fw_info {
 	u_char			*data;
+	size_t			size;
 	struct iwn_fw_part	init;
 	struct iwn_fw_part	main;
 	struct iwn_fw_part	boot;
@@ -206,6 +207,7 @@ struct iwn_softc {
 #define IWN_FLAG_CALIB_DONE	(1 << 2)
 #define IWN_FLAG_USE_ICT	(1 << 3)
 #define IWN_FLAG_INTERNAL_PA	(1 << 4)
+#define IWN_FLAG_BUSY		(1 << 5)
 
 	uint8_t 		hw_type;
 	const struct iwn_hal	*sc_hal;

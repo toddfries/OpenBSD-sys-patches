@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.101 2010/04/25 06:15:17 deraadt Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.103 2010/05/03 15:27:28 jsing Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -602,14 +602,14 @@ notfat:
 }
 
 /*
- * Check new disk label for sensibility
- * before setting it.
+ * Check new disk label for sensibility before setting it.
  */
 int
 setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_int openmask)
 {
 	struct partition *opp, *npp;
-	struct disk *dk = NULL;
+	struct disk *dk;
+	u_int64_t uid;
 	int i;
 
 	/* sanity clause */
@@ -651,17 +651,13 @@ setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_int openmask)
 	}
 
 	/* Generate a UID if the disklabel does not already have one. */
-	if (nlp->d_label_uid == 0) {
+	uid = 0;
+	if (bcmp(nlp->d_uid, &uid, sizeof(nlp->d_uid)) == 0) {
 		do {
-			nlp->d_label_uid = arc4random();
-			nlp->d_label_uid <<= 32;
-			nlp->d_label_uid |= arc4random();
-
-			/* Check for collisions. */
+			arc4random_buf(nlp->d_uid, sizeof(nlp->d_uid));
 			TAILQ_FOREACH(dk, &disklist, dk_link)
-				if (dk->dk_label &&
-				    dk->dk_label->d_label_uid ==
-				    nlp->d_label_uid)
+				if (dk->dk_label && bcmp(dk->dk_label->d_uid,
+				    nlp->d_uid, sizeof(nlp->d_uid)) == 0)
 					break;
 		} while (dk != NULL);
 	}
@@ -1295,10 +1291,10 @@ findblkname(int maj)
 }
 
 int
-disk_map(char *path, int size, int flags)
+disk_map(char *path, char *mappath, int size, int flags)
 {
-	struct disk *dk;
-	u_int64_t uid = 0;
+	struct disk *dk, *mdk;
+	u_char uid[8];
 	char c, part;
 	int i;
 
@@ -1307,49 +1303,60 @@ disk_map(char *path, int size, int flags)
 	 * We should be supplied with a disklabel UID which has the following
 	 * format:
 	 *
-	 * 0 [dk_label_uid] 0 [partition]
+	 * [disklabel uid] . [partition]
 	 *
+	 * Alternatively, if the DM_OPENPART flag is set the disklabel UID can
+	 * based passed on its own.
 	 */
 
 	if (strchr(path, '/') != NULL)
 		return -1;
 
 	/* Verify that the device name is properly formed. */
-	if (size < 19 || path[0] != '0' || path[17] != '0')
+	if (!((strlen(path) == 16 && (flags & DM_OPENPART)) ||
+	    (strlen(path) == 18 && path[16] == '.')))
 		return -1;
 
 	/* Get partition. */
 	if (flags & DM_OPENPART)
 		part = 'a' + RAW_PART;
 	else
-		part = path[18];
+		part = path[17];
 
 	if (part < 'a' || part >= 'a' + MAXPARTITIONS)
 		return -1;
 
 	/* Derive label UID. */
-        for (i = 1; i < 17; i++) {
+	bzero(uid, sizeof(uid));
+	for (i = 0; i < 16; i++) {
 		c = path[i];
 		if (c >= '0' && c <= '9')
 			c -= '0';
 		else if (c >= 'a' && c <= 'f')
 			c -= ('a' - 10);
                 else
-			c = 0;
+			return -1;
 
-		uid <<= 4;
-		uid |= c & 0xf;
+		uid[i / 2] <<= 4;
+		uid[i / 2] |= c & 0xf;
 	}
 
-	TAILQ_FOREACH(dk, &disklist, dk_link)
-		if (dk->dk_label && dk->dk_label->d_label_uid == uid)
-			break;
+	mdk = NULL;
+	TAILQ_FOREACH(dk, &disklist, dk_link) {
+		if (dk->dk_label && bcmp(dk->dk_label->d_uid, uid,
+		    sizeof(dk->dk_label->d_uid)) == 0) {
+			/* Fail if there are duplicate UIDs! */
+			if (mdk != NULL)
+				return -1;
+			mdk = dk;
+		}
+	}
 
-	if (dk == NULL || dk->dk_name == NULL)
+	if (mdk == NULL || mdk->dk_name == NULL)
 		return -1;
 
-	snprintf(path, size, "/dev/%s%s%c", (flags & DM_OPENBLCK) ? "" : "r",
-	    dk->dk_name, part);
+	snprintf(mappath, size, "/dev/%s%s%c",
+	    (flags & DM_OPENBLCK) ? "" : "r", mdk->dk_name, part);
 
 	return 0;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.76 2010/04/20 23:27:00 deraadt Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.79 2010/05/06 14:39:52 jsing Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -446,65 +446,73 @@ void mbus_wrm_8(void *v, bus_space_handle_t h,
 void
 mbus_rr_1(void *v, bus_space_handle_t h, bus_size_t o, u_int8_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int8_t *p = (u_int8_t *)(h + o);
+
 	while (c--)
-		*(a++) = *((volatile u_int8_t *)h)++;
+		*a++ = *p++;
 }
 
 void
 mbus_rr_2(void *v, bus_space_handle_t h, bus_size_t o, u_int16_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int16_t *p = (u_int16_t *)(h + o);
+
 	while (c--)
-		*(a++) = *((volatile u_int16_t *)h)++;
+		*a++ = *p++;
 }
 
 void
 mbus_rr_4(void *v, bus_space_handle_t h, bus_size_t o, u_int32_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int32_t *p = (u_int32_t *)(h + o);
+
 	while (c--)
-		*(a++) = *((volatile u_int32_t *)h)++;
+		*a++ = *p++;
 }
 
 void
 mbus_rr_8(void *v, bus_space_handle_t h, bus_size_t o, u_int64_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int64_t *p = (u_int64_t *)(h + o);
+
 	while (c--)
-		*(a++) = *((volatile u_int64_t *)h)++;
+		*a++ = *p++;
 }
 
 void
 mbus_wr_1(void *v, bus_space_handle_t h, bus_size_t o, const u_int8_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int8_t *p = (u_int8_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int8_t *)h)++ = *(a++);
+		*p++ = *a++;
 }
 
 void
 mbus_wr_2(void *v, bus_space_handle_t h, bus_size_t o, const u_int16_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int16_t *p = (u_int16_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int16_t *)h)++ = *(a++);
+		*p++ = *a++;
 }
 
 void
 mbus_wr_4(void *v, bus_space_handle_t h, bus_size_t o, const u_int32_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int32_t *p = (u_int32_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int32_t *)h)++ = *(a++);
+		*p++ = *a++;
 }
 
 void
 mbus_wr_8(void *v, bus_space_handle_t h, bus_size_t o, const u_int64_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int64_t *p = (u_int64_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int64_t *)h)++ = *(a++);
+		*p++ = *a++;
 }
 
 void mbus_rrr_2(void *v, bus_space_handle_t h,
@@ -524,77 +532,81 @@ void mbus_wrr_8(void *v, bus_space_handle_t h,
 void
 mbus_sr_1(void *v, bus_space_handle_t h, bus_size_t o, u_int8_t vv, bus_size_t c)
 {
-	h += o;
+	volatile u_int8_t *p = (u_int8_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int8_t *)h)++ = vv;
+		*p++ = vv;
 }
 
 void
 mbus_sr_2(void *v, bus_space_handle_t h, bus_size_t o, u_int16_t vv, bus_size_t c)
 {
-	h += o;
+	volatile u_int16_t *p = (u_int16_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int16_t *)h)++ = vv;
+		*p++ = vv;
 }
 
 void
 mbus_sr_4(void *v, bus_space_handle_t h, bus_size_t o, u_int32_t vv, bus_size_t c)
 {
-	h += o;
+	volatile u_int32_t *p = (u_int32_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int32_t *)h)++ = vv;
+		*p++ = vv;
 }
 
 void
 mbus_sr_8(void *v, bus_space_handle_t h, bus_size_t o, u_int64_t vv, bus_size_t c)
 {
-	h += o;
+	volatile u_int64_t *p = (u_int64_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int64_t *)h)++ = vv;
+		*p++ = vv;
 }
 
 void
 mbus_cp_1(void *v, bus_space_handle_t h1, bus_size_t o1,
 	  bus_space_handle_t h2, bus_size_t o2, bus_size_t c)
 {
-	h1 += o1;
-	h2 += o2;
+	volatile u_int8_t *p1 = (u_int8_t *)(h1 + o1);
+	volatile u_int8_t *p2 = (u_int8_t *)(h2 + o2);
+
 	while (c--)
-		*((volatile u_int8_t *)h1)++ =
-			*((volatile u_int8_t *)h2)++;
+		*p1++ = *p2++;
 }
 
 void
 mbus_cp_2(void *v, bus_space_handle_t h1, bus_size_t o1,
 	  bus_space_handle_t h2, bus_size_t o2, bus_size_t c)
 {
-	h1 += o1;
-	h2 += o2;
+	volatile u_int16_t *p1 = (u_int16_t *)(h1 + o1);
+	volatile u_int16_t *p2 = (u_int16_t *)(h2 + o2);
+
 	while (c--)
-		*((volatile u_int16_t *)h1)++ =
-			*((volatile u_int16_t *)h2)++;
+		*p1++ = *p2++;
 }
 
 void
 mbus_cp_4(void *v, bus_space_handle_t h1, bus_size_t o1,
 	  bus_space_handle_t h2, bus_size_t o2, bus_size_t c)
 {
-	h1 += o1;
-	h2 += o2;
+	volatile u_int32_t *p1 = (u_int32_t *)(h1 + o1);
+	volatile u_int32_t *p2 = (u_int32_t *)(h2 + o2);
+
 	while (c--)
-		*((volatile u_int32_t *)h1)++ =
-			*((volatile u_int32_t *)h2)++;
+		*p1++ = *p2++;
 }
 
 void
 mbus_cp_8(void *v, bus_space_handle_t h1, bus_size_t o1,
 	  bus_space_handle_t h2, bus_size_t o2, bus_size_t c)
 {
-	h1 += o1;
-	h2 += o2;
+	volatile u_int64_t *p1 = (u_int64_t *)(h1 + o1);
+	volatile u_int64_t *p2 = (u_int64_t *)(h2 + o2);
+
 	while (c--)
-		*((volatile u_int64_t *)h1)++ =
-			*((volatile u_int64_t *)h2)++;
+		*p1++ = *p2++;
 }
 
 
@@ -1128,11 +1140,16 @@ mbattach(parent, self, aux)
 	case HPPA_BOARD_HP780_C230:
 	case HPPA_BOARD_HP780_C240:
 	case HPPA_BOARD_HP785_C360:
-		pdc_scanbus(self, &nca, MAXMODBUS, HPPA_FPA);
+		/* Attach CPUs first, then everything else... */
+		ncpusfound = 0;
+		pdc_scanbus(self, &nca, MAXMODBUS, HPPA_FPA, 1);
+		pdc_scanbus(self, &nca, MAXMODBUS, HPPA_FPA, 0);
 	break;
 	default:
-		pdc_scanbus(self, &nca, MAXMODBUS, 0);
-	break;
+		/* Attach CPUs first, then everything else... */
+		ncpusfound = 0;
+		pdc_scanbus(self, &nca, MAXMODBUS, 0, 1);
+		pdc_scanbus(self, &nca, MAXMODBUS, 0, 0);
 	}
 }
 

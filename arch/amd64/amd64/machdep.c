@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.106 2010/03/24 00:36:04 oga Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.109 2010/05/18 19:42:48 oga Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -859,16 +859,7 @@ dumpconf(void)
  * getting on the dump stack, either when called above, or by
  * the auto-restart code.
  */
-#define BYTES_PER_DUMP  PAGE_SIZE /* must be a multiple of pagesize XXX small */
-static vaddr_t dumpspace;
-
-vaddr_t
-reserve_dumppages(vaddr_t p)
-{
-
-	dumpspace = p;
-	return (p + BYTES_PER_DUMP);
-}
+#define BYTES_PER_DUMP  MAXPHYS /* must be a multiple of pagesize */
 
 void
 dumpsys(void)
@@ -924,7 +915,7 @@ dumpsys(void)
 
 		for (i = 0; i < bytes; i += n, totalbytesleft -= n) {
 			/* Print out how many MBs we have left to go. */
-			if ((totalbytesleft % (1024*1024)) == 0)
+			if ((totalbytesleft % (1024*1024)) < BYTES_PER_DUMP)
 				printf("%ld ", totalbytesleft / (1024 * 1024));
 
 			/* Limit size for next transfer. */
@@ -932,10 +923,8 @@ dumpsys(void)
 			if (n > BYTES_PER_DUMP)
 				n = BYTES_PER_DUMP;
 
-			(void) pmap_map(dumpspace, maddr, maddr + n,
-			    VM_PROT_READ);
-
-			error = (*dump)(dumpdev, blkno, (caddr_t)dumpspace, n);
+			error = (*dump)(dumpdev, blkno,
+			    (caddr_t)PMAP_DIRECT_MAP(maddr), n);
 			if (error)
 				goto err;
 			maddr += n;
