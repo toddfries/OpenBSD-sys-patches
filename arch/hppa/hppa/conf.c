@@ -77,7 +77,6 @@ struct bdevsw   bdevsw[] =
 	bdev_lkm_dummy(),		/* 12: */
 	bdev_lkm_dummy(),		/* 13: */
 	bdev_lkm_dummy(),		/* 14: */
-	bdev_disk_init(1,disk)		/* 15: Disk mapper */
 };
 int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 

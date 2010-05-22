@@ -591,7 +591,6 @@ file dev/auconv.c			auconv
 file dev/audio.c			audio			needs-flag
 file dev/ccd.c				ccd			needs-flag
 file dev/cons.c
-file dev/disk.c
 file dev/firmload.c			firmload
 file dev/flash.c			flash			needs-flag
 file dev/ic/ncr5380sbc.c		ncr5380sbc
