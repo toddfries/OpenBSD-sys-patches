@@ -1,28 +1,14 @@
-#	$OpenBSD: Makefile.socppc,v 1.9 2010/04/26 22:21:15 deraadt Exp $
+#	$OpenBSD: Makefile.socppc,v 1.19 2010/04/28 15:31:33 deraadt Exp $
 
-# This makefile is constructed from a machine description:
-#	config machineid
-# Most changes should be made in the machine description
-#	/sys/arch/socppc/conf/``machineid''
-# after which you should do
-#	config machineid
-# Machine generic makefile changes should be made in
-#	/sys/arch/socppc/conf/Makefile.socppc
-# after which config should be rerun for all machines of that type.
+# For instructions on building kernels consult the config(8) and options(4)
+# manual pages.
 #
 # N.B.: NO DEPENDENCIES ON FOLLOWING FLAGS ARE VISIBLE TO MAKEFILE
 #	IF YOU CHANGE THE DEFINITION OF ANY OF THESE RECOMPILE EVERYTHING
-#
-# -DTRACE	compile in kernel tracing hooks
-# -DQUOTA	compile in file system quotas
-#
-
 # DEBUG is set to -g by config if debugging is requested (config -g).
 # PROF is set to -pg by config if profiling is requested (config -p).
 
 .include <bsd.own.mk>
-
-.SUFFIXES:	.S .c .o
 
 MKDEP?=	mkdep
 STRIP?=	strip
@@ -38,13 +24,13 @@ _arch?=		powerpc
 _machdir?=	$S/arch/${_mach}
 _archdir?=	$S/arch/${_arch}
 
-INCLUDES=	-I. -I$S -I$S/arch -nostdinc
-CPPFLAGS=	${INCLUDES} ${IDENT} -D_KERNEL \
-		-D__socppc__
+INCLUDES=	-nostdinc -I. -I$S -I$S/arch
+CPPFLAGS=	${INCLUDES} ${IDENT} -D_KERNEL -D__${_mach}__
 CWARNFLAGS=	-Werror -Wall -Wstrict-prototypes -Wmissing-prototypes \
 		-Wno-uninitialized -Wno-format -Wno-main \
 		-Wstack-larger-than-2047 -Wvariable-decl
-CMACHFLAGS=	-msoft-float -Wa,-many -fno-builtin-printf -fno-builtin-log
+CMACHFLAGS=	-msoft-float -Wa,-many -fno-builtin-printf -fno-builtin-log \
+		-fno-builtin-log2 -fno-builtin-malloc
 .if ${IDENT:M-DNO_PROPOLICE}
 CMACHFLAGS+=	-fno-stack-protector
 .endif
@@ -65,16 +51,13 @@ HOSTED_CPPFLAGS=${CPPFLAGS:S/^-nostdinc$//}
 HOSTED_CFLAGS=	${CFLAGS}
 
 # compile rules: rules are named ${TYPE}_${SUFFIX}${CONFIG_DEP}
-# where TYPE is NORMAL, DRIVER, or PROFILE}; SUFFIX is the file suffix,
+# where TYPE is NORMAL, or PROFILE}; SUFFIX is the file suffix,
 # capitalized (e.g. C for a .c file), and CONFIG_DEP is _C if the file
 # is marked as config-dependent.
 
 NORMAL_C_NOP=	${CC} ${CFLAGS} ${CPPFLAGS} -c $<
 NORMAL_C=	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} -c $<
 NORMAL_C_C=	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} ${PARAM} -c $<
-
-DRIVER_C=	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} -c $<
-DRIVER_C_C=	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} ${PARAM} -c $<
 
 NORMAL_S=	${CC} ${AFLAGS} ${CPPFLAGS} -c $<
 NORMAL_S_C=	${AS}  ${COPTS} ${PARAM} $< -o $@
@@ -153,20 +136,19 @@ links:
 	echo ${CFILES} | tr -s ' ' '\12' | sed 's/\.c/.o/' | \
 	  sort -u | comm -23 - dontlink | \
 	  sed 's,../.*/\(.*.o\),rm -f \1; ln -s ../GENERIC/\1 \1,' > makelinks
-	sh makelinks && rm -f dontlink
+	sh makelinks && rm -f dontlink makelinks
 
-SRCS=	${_machdir}/socppc/locore.S \
+SRCS=	${_machdir}/${_mach}/locore.S \
 	param.c ioconf.c ${CFILES} ${SFILES}
 depend:: .depend
 .depend: ${SRCS} assym.h param.c ${DB_STRUCTINFO}
-	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${_machdir}/socppc/locore.S
+	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${_machdir}/${_mach}/locore.S
 	${MKDEP} -a ${CFLAGS} ${CPPFLAGS} param.c ioconf.c ${CFILES}
 .if ${SFILES} != ""
 	${MKDEP} -a ${AFLAGS} ${CPPFLAGS} ${SFILES}
 .endif
 	cat ${_archdir}/${_arch}/genassym.cf ${_machdir}/${_mach}/genassym.cf | \
-	    sh $S/kern/genassym.sh ${MKDEP} ${CFLAGS} ${CPPFLAGS} | \
-	    sort -u > assym.dep
+	    sh $S/kern/genassym.sh ${MKDEP} -f assym.dep ${CFLAGS} ${CPPFLAGS}
 	@sed -e 's/.*\.o: /assym.h: /' -e 's/\/tmp\/genassym_c.[^ ]*//' \
 	    < assym.dep >> .depend
 	@rm -f assym.dep
@@ -176,19 +158,7 @@ db_structinfo.h: $S/ddb/db_structinfo.c $S/ddb/parse_structinfo.awk
 	objdump -g db_structinfo.o | awk -f $S/ddb/parse_structinfo.awk > $@
 	rm -f db_structinfo.o
 
-# depend on root or device configuration
-autoconf.o conf.o: Makefile
-
-# depend on network or filesystem configuration
-uipc_proto.o vfs_conf.o: Makefile
-
-# depend on maxusers
-genassym.o machdep.o: Makefile
-
-# depend on CPU configuration
-locore.o machdep.o: Makefile
-
-locore.o: ${_machdir}/socppc/locore.S assym.h
+locore.o: ${_machdir}/${_mach}/locore.S assym.h
 	${NORMAL_S}
 
 # The install target can be redefined by putting a
