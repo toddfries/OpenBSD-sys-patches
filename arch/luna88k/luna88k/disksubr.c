@@ -340,6 +340,7 @@ disklabel_bsd_to_om(struct disklabel *lp, struct sun_disklabel *sl)
 #endif
 	sl->sl_interleave = 1;
 	sl->sl_ncylinders = lp->d_ncylinders;
+	sl->sl_acylinders = lp->d_acylinders;
 	sl->sl_ntracks = lp->d_ntracks;
 	sl->sl_nsectors = lp->d_nsectors;
 

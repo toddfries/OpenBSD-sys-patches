@@ -639,8 +639,6 @@ cdev_decl(rd);
 bdev_decl(uk);
 cdev_decl(uk);
 
-bdev_decl(disk);
-
 cdev_decl(bpf);
 
 cdev_decl(pf);

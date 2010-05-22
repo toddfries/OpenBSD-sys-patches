@@ -409,6 +409,7 @@ disklabel_bsd_to_sun(struct disklabel *lp, struct sun_disklabel *sl)
 	memcpy(sl->sl_text, lp->d_packname, sizeof(lp->d_packname));
 	sl->sl_pcylinders = lp->d_ncylinders + lp->d_acylinders; /* XXX */
 	sl->sl_ncylinders = lp->d_ncylinders;
+	sl->sl_acylinders = lp->d_acylinders;
 	sl->sl_ntracks = lp->d_ntracks;
 	sl->sl_nsectors = lp->d_nsectors;
 

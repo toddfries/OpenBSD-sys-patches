@@ -665,9 +665,6 @@ setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_int openmask)
 	nlp->d_checksum = 0;
 	nlp->d_checksum = dkcksum(nlp);
 	*olp = *nlp;
-
-	disk_change = 1;
-
 	return (0);
 }
 
@@ -806,10 +803,6 @@ disk_attach(struct disk *diskp)
 	    M_NOWAIT|M_ZERO);
 	if (diskp->dk_label == NULL)
 		panic("disk_attach: can't allocate storage for disklabel");
-
-	/*
-	 * Read disk label from disk and ensure UID is unique.
-	 */
 
 	/*
 	 * Set the attached timestamp.

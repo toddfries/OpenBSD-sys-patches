@@ -1802,11 +1802,8 @@ sysctl_diskinit(int update, struct proc *p)
 
 	if (disk_change) {
 		for (dk = TAILQ_FIRST(&disklist), tlen = 0; dk;
-		    dk = TAILQ_NEXT(dk, dk_link)) {
-			if (dk->dk_name)
-				tlen += strlen(dk->dk_name);
-			tlen += 20;	/* label uid + separators */
-		}
+		    dk = TAILQ_NEXT(dk, dk_link))
+			tlen += strlen(dk->dk_name) + 1;
 		tlen++;
 
 		if (disknames)
@@ -1822,14 +1819,8 @@ sysctl_diskinit(int update, struct proc *p)
 
 		for (dk = TAILQ_FIRST(&disklist), i = 0, l = 0; dk;
 		    dk = TAILQ_NEXT(dk, dk_link), i++) {
-			if (dk->dk_label && dk->dk_label->d_label_uid != 0)
-				snprintf(disknames + l, tlen - l,
-				    "%s:0%016llx0,",
-			    	    dk->dk_name ? dk->dk_name : "",
-				    dk->dk_label->d_label_uid);
-			else
-				snprintf(disknames + l, tlen - l, "%s:,",
-			    	    dk->dk_name ? dk->dk_name : "");
+			snprintf(disknames + l, tlen - l, "%s,",
+			    dk->dk_name ? dk->dk_name : "");
 			l += strlen(disknames + l);
 			sdk = diskstats + i;
 			strlcpy(sdk->ds_name, dk->dk_name,

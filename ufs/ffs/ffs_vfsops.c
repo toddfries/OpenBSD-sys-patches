@@ -173,7 +173,6 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 	int ronly;
 	mode_t accessmode;
 	size_t size;
-	char *fspec;
 
 	error = copyin(data, &args, sizeof (struct ufs_args));
 	if (error)
@@ -328,16 +327,11 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 				goto success;
 		}
 	}
-
 	/*
 	 * Not an update, or updating the name: look up the name
 	 * and verify that it refers to a sensible block device.
 	 */
-	fspec = malloc(MNAMELEN, M_MOUNT, M_WAITOK);
-	copyinstr(args.fspec, fspec, MNAMELEN - 1, &size);
-	disk_map(fspec, MNAMELEN, DM_OPENBLCK);
-
-	NDINIT(ndp, LOOKUP, FOLLOW, UIO_SYSSPACE, fspec, p);
+	NDINIT(ndp, LOOKUP, FOLLOW, UIO_USERSPACE, args.fspec, p);
 	if ((error = namei(ndp)) != 0)
 		goto error_1;
 
@@ -390,8 +384,10 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 			/*
 			 * Save "mounted from" info for mount point (NULL pad)
 			 */
-			size = strlcpy(mp->mnt_stat.f_mntfromname, fspec,
-			    MNAMELEN - 1);
+			copyinstr(args.fspec,
+				  mp->mnt_stat.f_mntfromname,
+				  MNAMELEN - 1,
+				  &size);
 			bzero(mp->mnt_stat.f_mntfromname + size,
 			      MNAMELEN - size);
 		}
@@ -410,7 +406,10 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 		bzero(mp->mnt_stat.f_mntonname + size, MNAMELEN - size);
 
 		/* Save "mounted from" info for mount point (NULL pad)*/
-		size = strlcpy(mp->mnt_stat.f_mntfromname, fspec, MNAMELEN - 1);
+		copyinstr(args.fspec,			/* device name*/
+			  mp->mnt_stat.f_mntfromname,	/* save area*/
+			  MNAMELEN - 1,			/* max size*/
+			  &size);			/* real size*/
 		bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
 
 		error = ffs_mountfs(devvp, mp, p);
@@ -451,12 +450,7 @@ success:
 
 error_2:	/* error with devvp held */
 	vrele (devvp);
-
 error_1:	/* no state to back out */
-
-	if (fspec)
-		free(fspec, M_MOUNT);
-
 	return (error);
 }
 
