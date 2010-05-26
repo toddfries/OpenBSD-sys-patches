@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.beagle,v 1.21 2010/04/28 15:31:32 deraadt Exp $
+#	$OpenBSD: Makefile.beagle,v 1.27 2010/05/25 17:27:55 deraadt Exp $
 
 # For instructions on building kernels consult the config(8) and options(4)
 # manual pages.
@@ -19,31 +19,29 @@ STRIP?=	strip
 S!=	cd ../../../..; pwd
 .endif
 
-_mach?=		beagle
-_arch?=		arm
 _machdir?=	$S/arch/${_mach}
 _archdir?=	$S/arch/${_arch}
 
 INCLUDES=	-nostdinc -I. -I$S -I$S/arch
-CPPFLAGS=	${INCLUDES} ${IDENT} -D_KERNEL -D__${_mach}__
-CDIAGFLAGS=	-Werror -Wall -Wstrict-prototypes -Wmissing-prototypes \
-		-Wno-uninitialized -Wno-format -Wno-main \
-		-Wstack-larger-than-2047 -Wvariable-decl
+CPPFLAGS=	${INCLUDES} ${IDENT} ${PARAM} -D_KERNEL -D__${_mach}__
+CWARNFLAGS=	-Werror -Wall -Wstrict-prototypes -Wmissing-prototypes \
+		-Wno-main -Wno-uninitialized -Wno-format \
+		-Wstack-larger-than-2047
 
-CMACHFLAGS= -ffreestanding
-#CMACHFLAGS=	-march=armv4 -mtune=strongarm -ffreestanding
+CMACHFLAGS=	-ffreestanding -msoft-float # -march=armv4 -mtune=strongarm
+CMACHFLAGS+=	-fno-builtin-printf -fno-builtin-snprintf \
+		-fno-builtin-vsnprintf -fno-builtin-log \
+		-fno-builtin-log2 -fno-builtin-malloc 
 .if ${IDENT:M-DNO_PROPOLICE}
 CMACHFLAGS+=	-fno-stack-protector
 .endif
-CMACHFLAGS+=	-msoft-float -fno-builtin-printf -fno-builtin-log \
-		-fno-builtin-log2 -fno-builtin-malloc
 
 COPTS?=		-O2
-CFLAGS=		${DEBUG} ${CDIAGFLAGS} ${CMACHFLAGS} ${COPTS} ${PIPE}
-AFLAGS=		-x assembler-with-cpp -D_LOCORE ${CMACHFLAGS}
+CFLAGS=		${DEBUG} ${CWARNFLAGS} ${CMACHFLAGS} ${COPTS} ${PIPE}
+AFLAGS=		-D_LOCORE -x assembler-with-cpp ${CMACHFLAGS}
 LINKFLAGS=	-T ldscript
 LINKFLAGS+=	--warn-common
-STRIPFLAGS=	-g -X -x
+STRIPFLAGS=	-g -x
 
 .if ${IDENT:M-DDDB_STRUCT}
 DB_STRUCTINFO=	db_structinfo.h
@@ -51,23 +49,14 @@ DB_STRUCTINFO=	db_structinfo.h
 DB_STRUCTINFO=
 .endif
 
-HOSTCC= ${CC}
+HOSTCC?=	${CC}
 HOSTED_CPPFLAGS=${CPPFLAGS:S/^-nostdinc$//}
 HOSTED_CFLAGS=	${CFLAGS}
-
-# compile rules: rules are named ${TYPE}_${SUFFIX}${CONFIG_DEP}
-# where TYPE is NORMAL, or PROFILE; SUFFIX is the file suffix,
-# capitalized (e.g. C for a .c file), and CONFIG_DEP is _C if the file
-# is marked as config-dependent.
+HOSTED_C=	${HOSTCC} ${HOSTED_CFLAGS} ${HOSTED_CPPFLAGS} -c $<
 
 NORMAL_C_NOP=	${CC} ${CFLAGS} ${CPPFLAGS} -c $<
 NORMAL_C=	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} -c $<
-NORMAL_C_C=	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} ${PARAM} -c $<
-
 NORMAL_S=	${CC} ${AFLAGS} ${CPPFLAGS} -c $<
-NORMAL_S_C=	${CC} ${AFLAGS} ${CPPFLAGS} ${PARAM} -c $<
-
-HOSTED_C=	${HOSTCC} ${HOSTED_CFLAGS} ${HOSTED_CPPFLAGS} -c $<
 
 %OBJS
 
@@ -82,7 +71,7 @@ HOSTED_C=	${HOSTCC} ${HOSTED_CFLAGS} ${HOSTED_CPPFLAGS} -c $<
 #	${SYSTEM_LD_TAIL}
 SYSTEM_OBJ=	${_mach}_start.o locore.o param.o ioconf.o ${OBJS}
 SYSTEM_DEP=	Makefile ${SYSTEM_OBJ}
-SYSTEM_LD_HEAD=	rm -f $@
+SYSTEM_LD_HEAD=	@rm -f $@
 SYSTEM_LD_HEAD+=; \
 		cat ${_archdir}/conf/ldscript.head ${_archdir}/conf/ldscript.tail | \
 		    sed -e 's/@KERNEL_BASE_PHYS@/${KERNEL_BASE_PHYS}/' \
@@ -117,7 +106,7 @@ param.c: $S/conf/param.c
 	cp $S/conf/param.c .
 
 param.o: param.c Makefile
-	${NORMAL_C_C}
+	${NORMAL_C}
 
 mcount.o: $S/lib/libkern/mcount.c Makefile
 	${NORMAL_C_NOP}
@@ -129,34 +118,24 @@ vers.o: ${SYSTEM_DEP} ${SYSTEM_SWAP_DEP}
 	sh $S/conf/newvers.sh
 	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} -c vers.c
 
-
 clean::
-	rm -f eddep *bsd bsd.gdb tags *.[io] [a-z]*.s \
-	    [Ee]rrs linterrs makelinks assym.h ${DB_STRUCTINFO}
+	rm -f eddep *bsd *bsd.gdb tags *.[io] [a-z]*.s \
+	    [Ee]rrs linterrs assym.h ${DB_STRUCTINFO}
 
 lint:
-	@lint -hbxncez -Dvolatile= ${CPPFLAGS} ${PARAM} -UKGDB \
+	@lint -hbxncez -Dvolatile= ${CPPFLAGS} -UKGDB \
 	    ${CFILES} ioconf.c param.c | \
 	    grep -v 'static function .* unused'
 
 tags:
 	@echo "see $S/kern/Makefile for tags"
 
-links:
-	egrep '#if' ${CFILES} | sed -f $S/conf/defines | \
-	  sed -e 's/:.*//' -e 's/\.c/.o/' | sort -u > dontlink
-	echo ${CFILES} | tr -s ' ' '\12' | sed 's/\.c/.o/' | \
-	  sort -u | comm -23 - dontlink | \
-	  sed 's,.*/\(.*.o\),rm -f \1; ln -s ../GENERIC/\1 \1,' > makelinks
-	sh makelinks && rm -f dontlink makelinks
-
-SRCS=	${_archdir}/${_arch}/locore.S \
-	param.c ioconf.c ${CFILES} ${SFILES}
+AFILES=	${_machdir}/${_mach}/${_mach}_start.S ${_archdir}/${_arch}/locore.S
 depend:: .depend
-.depend: ${SRCS} assym.h param.c ${DB_STRUCTINFO}
-	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${_archdir}/${_arch}/locore.S
+.depend: ${AFILES} param.c ioconf.c ${CFILES} ${SFILES} assym.h ${DB_STRUCTINFO}
+	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${AFILES}
 	${MKDEP} -a ${CFLAGS} ${CPPFLAGS} param.c ioconf.c ${CFILES}
-.if ${SFILES} != ""
+.if !empty(SFILES)
 	${MKDEP} -a ${AFLAGS} ${CPPFLAGS} ${SFILES}
 .endif
 	cat ${_archdir}/${_arch}/genassym.cf ${_machdir}/${_mach}/genassym.cf | \
@@ -170,11 +149,10 @@ db_structinfo.h: $S/ddb/db_structinfo.c $S/ddb/parse_structinfo.awk
 	objdump -g db_structinfo.o | awk -f $S/ddb/parse_structinfo.awk > $@
 	rm -f db_structinfo.o
 
-${_mach}_start.o: ${_machdir}/${_mach}/${_mach}_start.S assym.h
-	${NORMAL_S}
-
+${_mach}_start.o: ${_machdir}/${_mach}/${_mach}_start.S
 locore.o: ${_archdir}/${_arch}/locore.S assym.h
-	${NORMAL_S}
+in_cksum_arm.o fiq_subr.o bcopyinout.o copystr.o sigcode.o: assym.h
+vectors.o cpuswitch.o exception.o bcopy_page.o irq_dispatch.o: assym.h
 
 # The install target can be redefined by putting a
 # install-kernel-${MACHINE_NAME} target into /etc/mk.conf
