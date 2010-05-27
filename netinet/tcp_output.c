@@ -212,7 +212,8 @@ tcp_output(struct tcpcb *tp)
 	int off, flags, error;
 	struct mbuf *m;
 	struct tcphdr *th;
-	u_char opt[MAX_TCPOPTLEN];
+	u_int32_t tcpopt[(MAX_TCPOPTLEN / sizeof(u_int32_t)) + 1];
+	u_char *opt;
 	unsigned int optlen, hdrlen, packetlen;
 	int idle, sendalot = 0;
 #ifdef TCP_SACK
@@ -226,6 +227,8 @@ tcp_output(struct tcpcb *tp)
 #ifdef TCP_ECN
 	int needect;
 #endif
+
+	opt = (u_char *)tcpopt;
 
 #if defined(TCP_SACK) && defined(TCP_SIGNATURE) && defined(DIAGNOSTIC)
 	if (tp->sack_enable && (tp->t_flags & TF_SIGNATURE))
