@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss.c,v 1.43 2010/05/31 19:35:03 halex Exp $	*/
+/*	$OpenBSD: ciss.c,v 1.50 2010/06/02 05:38:00 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff
@@ -82,16 +82,6 @@ struct scsi_device ciss_dev = {
 	NULL, NULL, NULL, NULL
 };
 
-void	ciss_scsi_raw_cmd(struct scsi_xfer *xs);
-
-struct scsi_adapter ciss_raw_switch = {
-	ciss_scsi_raw_cmd, cissminphys, NULL, NULL,
-};
-
-struct scsi_device ciss_raw_dev = {
-	NULL, NULL, NULL, NULL
-};
-
 #if NBIO > 0
 int	ciss_ioctl(struct device *, u_long, caddr_t);
 #endif
@@ -122,12 +112,15 @@ ciss_get_ccb(struct ciss_softc *sc)
 {
 	struct ciss_ccb *ccb;
 
+	mtx_enter(&sc->sc_free_ccb_mtx);
 	if ((ccb = TAILQ_LAST(&sc->sc_free_ccb, ciss_queue_head))) {
 		TAILQ_REMOVE(&sc->sc_free_ccb, ccb, ccb_link);
 		ccb->ccb_state = CISS_CCB_READY;
 		ccb->ccb_xs = NULL;
 	}
-	return ccb;
+	mtx_leave(&sc->sc_free_ccb_mtx);
+
+	return (ccb);
 }
 
 void
@@ -135,15 +128,13 @@ ciss_put_ccb(struct ciss_ccb *ccb)
 {
 	struct ciss_softc *sc = ccb->ccb_sc;
 
-	if (ccb->ccb_xs) {
-		CISS_DPRINTF(CISS_D_CMD, ("scsi_done(%p) ", ccb->ccb_xs));
-		scsi_done(ccb->ccb_xs);
-	}
-
 	ccb->ccb_state = CISS_CCB_FREE;
 	ccb->ccb_xs = NULL;
 	ccb->ccb_data = NULL;
+
+	mtx_enter(&sc->sc_free_ccb_mtx);
 	TAILQ_INSERT_TAIL(&sc->sc_free_ccb, ccb, ccb_link);
+	mtx_leave(&sc->sc_free_ccb_mtx);
 }
 
 int
@@ -264,9 +255,8 @@ ciss_attach(struct ciss_softc *sc)
 		return -1;
 	}
 
-	TAILQ_INIT(&sc->sc_ccbq);
-	TAILQ_INIT(&sc->sc_ccbdone);
 	TAILQ_INIT(&sc->sc_free_ccb);
+	mtx_init(&sc->sc_free_ccb_mtx, IPL_BIO);
 
 	maxfer = sc->maxsg * PAGE_SIZE;
 	for (i = 0; total; i++, total -= sc->ccblen) {
@@ -397,19 +387,6 @@ ciss_attach(struct ciss_softc *sc)
 	scsibus = (struct scsibus_softc *)config_found_sm(&sc->sc_dev,
 	    &saa, scsiprint, NULL);
 
-#if 0
-	sc->sc_link_raw.device = &ciss_raw_dev;
-	sc->sc_link_raw.adapter_softc = sc;
-	sc->sc_link.openings = sc->maxcmd / (sc->maxunits? sc->maxunits : 1);
-	sc->sc_link_raw.adapter = &ciss_raw_switch;
-	sc->sc_link_raw.adapter_target = sc->ndrives;
-	sc->sc_link_raw.adapter_buswidth = sc->ndrives;
-	bzero(&saa, sizeof(saa));
-	saa.saa_sc_link = &sc->sc_link_raw;
-	rawbus = (struct scsibus_softc *)config_found_sm(&sc->sc_dev,
-	    &saa, scsiprint, NULL);
-#endif
-
 #if NBIO > 0
 	/* XXX for now we can only deal w/ one volume. */
 	if (!scsibus || sc->maxunits > 1)
@@ -492,6 +469,8 @@ ciss_cmd(struct ciss_ccb *ccb, int flags, int wait)
 	u_int32_t id;
 	int i, tohz, error = 0;
 
+	splassert(IPL_BIO);
+
 	if (ccb->ccb_state != CISS_CCB_READY) {
 		printf("%s: ccb %d not ready state=%b\n", sc->sc_dev.dv_xname,
 		    cmd->id, ccb->ccb_state, CISS_CCB_BITS);
@@ -507,8 +486,10 @@ ciss_cmd(struct ciss_ccb *ccb, int flags, int wait)
 				printf("more than %d dma segs\n", sc->maxsg);
 			else
 				printf("error %d loading dma map\n", error);
-			if (ccb->ccb_xs)
+			if (ccb->ccb_xs) {
 				ccb->ccb_xs->error = XS_DRIVER_STUFFUP;
+				scsi_done(ccb->ccb_xs);
+			}
 			ciss_put_ccb(ccb);
 			return (error);
 		}
@@ -545,7 +526,6 @@ ciss_cmd(struct ciss_ccb *ccb, int flags, int wait)
 		bus_space_write_4(sc->iot, sc->ioh, CISS_IMR,
 		    bus_space_read_4(sc->iot, sc->ioh, CISS_IMR) | sc->iem);
 
-	TAILQ_INSERT_TAIL(&sc->sc_ccbq, ccb, ccb_link);
 	ccb->ccb_state = CISS_CCB_ONQ;
 	CISS_DPRINTF(CISS_D_CMD, ("submit=0x%x ", cmd->id));
 	if (sc->cfg.methods & (CISS_METH_FIFO64|CISS_METH_FIFO64_RRO)) {
@@ -670,7 +650,6 @@ ciss_done(struct ciss_ccb *ccb)
 
 	lock = CISS_LOCK(sc);
 	ccb->ccb_state = CISS_CCB_READY;
-	TAILQ_REMOVE(&sc->sc_ccbq, ccb, ccb_link);
 
 	if (ccb->ccb_cmd.id & CISS_CMD_ERR)
 		error = ciss_error(ccb);
@@ -682,8 +661,10 @@ ciss_done(struct ciss_ccb *ccb)
 		bus_dmamap_unload(sc->dmat, ccb->ccb_dmamap);
 	}
 
-	if (xs)
+	if (xs) {
 		xs->resid = 0;
+		scsi_done(ccb->ccb_xs);
+	}
 
 	ciss_put_ccb(ccb);
 
@@ -761,6 +742,8 @@ ciss_inq(struct ciss_softc *sc, struct ciss_inquiry *inq)
 {
 	struct ciss_ccb *ccb;
 	struct ciss_cmd *cmd;
+	int rv;
+	int s;
 
 	ccb = ciss_get_ccb(sc);
 	if (ccb == NULL)
@@ -780,7 +763,11 @@ ciss_inq(struct ciss_softc *sc, struct ciss_inquiry *inq)
 	cmd->cdb[7] = sizeof(*inq) >> 8;	/* biiiig endian */
 	cmd->cdb[8] = sizeof(*inq) & 0xff;
 
-	return ciss_cmd(ccb, BUS_DMA_NOWAIT, SCSI_POLL|SCSI_NOSLEEP);
+	s = splbio();
+	rv = ciss_cmd(ccb, BUS_DMA_NOWAIT, SCSI_POLL|SCSI_NOSLEEP);
+	splx(s);
+
+	return (rv);
 }
 
 int
@@ -865,63 +852,6 @@ ciss_sync(struct ciss_softc *sc)
 }
 
 void
-ciss_scsi_raw_cmd(struct scsi_xfer *xs)	/* TODO */
-{
-	struct scsi_link *link = xs->sc_link;
-	struct ciss_rawsoftc *rsc = link->adapter_softc;
-	struct ciss_softc *sc = rsc->sc_softc;
-	struct ciss_ccb *ccb;
-	struct ciss_cmd *cmd;
-	ciss_lock_t lock;
-
-	CISS_DPRINTF(CISS_D_CMD, ("ciss_scsi_raw_cmd "));
-
-	lock = CISS_LOCK(sc);
-	if (xs->cmdlen > CISS_MAX_CDB) {
-		CISS_DPRINTF(CISS_D_CMD, ("CDB too big %p ", xs));
-		bzero(&xs->sense, sizeof(xs->sense));
-		xs->sense.error_code = SSD_ERRCODE_VALID | 0x70;
-		xs->sense.flags = SKEY_ILLEGAL_REQUEST;
-		xs->sense.add_sense_code = 0x20; /* illcmd, 0x24 illfield */
-		xs->error = XS_SENSE;
-		scsi_done(xs);
-		CISS_UNLOCK(sc, lock);
-		return;
-	}
-
-	xs->error = XS_NOERROR;
-
-	/* TODO check this target has not yet employed w/ any volume */
-
-	ccb = ciss_get_ccb(sc);
-	if (ccb == NULL) {
-		xs->error = XS_NO_CCB;
-		scsi_done(xs);
-		CISS_UNLOCK(sc, lock);
-		return;
-	}
-
-	cmd = &ccb->ccb_cmd;
-	ccb->ccb_len = xs->datalen;
-	ccb->ccb_data = xs->data;
-	ccb->ccb_xs = xs;
-
-	cmd->cdblen = xs->cmdlen;
-	cmd->flags = CISS_CDB_CMD | CISS_CDB_SIMPL;
-	if (xs->flags & SCSI_DATA_IN)
-		cmd->flags |= CISS_CDB_IN;
-	else if (xs->flags & SCSI_DATA_OUT)
-		cmd->flags |= CISS_CDB_OUT;
-	cmd->tmo = htole16(xs->timeout < 1000? 1 : xs->timeout / 1000);
-	bzero(&cmd->cdb[0], sizeof(cmd->cdb));
-	bcopy(xs->cmd, &cmd->cdb[0], CISS_MAX_CDB);
-
-	ciss_cmd(ccb, BUS_DMA_WAITOK, xs->flags & (SCSI_POLL|SCSI_NOSLEEP));
-
-	CISS_UNLOCK(sc, lock);
-}
-
-void
 ciss_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link *link = xs->sc_link;
@@ -933,7 +863,6 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 
 	CISS_DPRINTF(CISS_D_CMD, ("ciss_scsi_cmd "));
 
-	lock = CISS_LOCK(sc);
 	if (xs->cmdlen > CISS_MAX_CDB) {
 		CISS_DPRINTF(CISS_D_CMD, ("CDB too big %p ", xs));
 		bzero(&xs->sense, sizeof(xs->sense));
@@ -942,7 +871,6 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 		xs->sense.add_sense_code = 0x20; /* illcmd, 0x24 illfield */
 		xs->error = XS_SENSE;
 		scsi_done(xs);
-		CISS_UNLOCK(sc, lock);
 		return;
 	}
 
@@ -954,7 +882,6 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 	if (ccb == NULL) {
 		xs->error = XS_NO_CCB;
 		scsi_done(xs);
-		CISS_UNLOCK(sc, lock);
 		return;
 	}
 
@@ -974,8 +901,8 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 	bzero(&cmd->cdb[0], sizeof(cmd->cdb));
 	bcopy(xs->cmd, &cmd->cdb[0], CISS_MAX_CDB);
 
+	lock = CISS_LOCK(sc);
 	ciss_cmd(ccb, BUS_DMA_WAITOK, xs->flags & (SCSI_POLL|SCSI_NOSLEEP));
-
 	CISS_UNLOCK(sc, lock);
 }
 
@@ -984,7 +911,6 @@ ciss_intr(void *v)
 {
 	struct ciss_softc *sc = v;
 	struct ciss_ccb *ccb;
-	ciss_lock_t lock;
 	bus_size_t reg;
 	u_int32_t id;
 	int hit = 0;
@@ -993,8 +919,6 @@ ciss_intr(void *v)
 
 	if (!(bus_space_read_4(sc->iot, sc->ioh, CISS_ISR) & sc->iem))
 		return 0;
-
-	lock = CISS_LOCK(sc);
 
 	if (sc->cfg.methods & CISS_METH_FIFO64)
 		reg = CISS_OUTQ64_HI;
@@ -1020,8 +944,6 @@ ciss_intr(void *v)
 
 		hit = 1;
 	}
-	CISS_UNLOCK(sc, lock);
-
 	CISS_DPRINTF(CISS_D_INTR, ("exit "));
 	return hit;
 }
@@ -1306,6 +1228,8 @@ ciss_ldid(struct ciss_softc *sc, int target, struct ciss_ldid *id)
 {
 	struct ciss_ccb *ccb;
 	struct ciss_cmd *cmd;
+	int rv;
+	int s;
 
 	ccb = ciss_get_ccb(sc);
 	if (ccb == NULL)
@@ -1326,7 +1250,11 @@ ciss_ldid(struct ciss_softc *sc, int target, struct ciss_ldid *id)
 	cmd->cdb[7] = sizeof(*id) >> 8;	/* biiiig endian */
 	cmd->cdb[8] = sizeof(*id) & 0xff;
 
-	return ciss_cmd(ccb, BUS_DMA_NOWAIT, SCSI_POLL);
+	s = splbio();
+	rv = ciss_cmd(ccb, BUS_DMA_NOWAIT, SCSI_POLL);
+	splx(s);
+
+	return (rv);
 }
 
 int
@@ -1334,6 +1262,8 @@ ciss_ldstat(struct ciss_softc *sc, int target, struct ciss_ldstat *stat)
 {
 	struct ciss_ccb *ccb;
 	struct ciss_cmd *cmd;
+	int rv;
+	int s;
 
 	ccb = ciss_get_ccb(sc);
 	if (ccb == NULL)
@@ -1354,7 +1284,11 @@ ciss_ldstat(struct ciss_softc *sc, int target, struct ciss_ldstat *stat)
 	cmd->cdb[7] = sizeof(*stat) >> 8;	/* biiiig endian */
 	cmd->cdb[8] = sizeof(*stat) & 0xff;
 
-	return ciss_cmd(ccb, BUS_DMA_NOWAIT, SCSI_POLL);
+	s = splbio();
+	rv = ciss_cmd(ccb, BUS_DMA_NOWAIT, SCSI_POLL);
+	splx(s);
+
+	return (rv);
 }
 
 int
@@ -1362,6 +1296,8 @@ ciss_pdid(struct ciss_softc *sc, u_int8_t drv, struct ciss_pdid *id, int wait)
 {
 	struct ciss_ccb *ccb;
 	struct ciss_cmd *cmd;
+	int rv;
+	int s;
 
 	ccb = ciss_get_ccb(sc);
 	if (ccb == NULL)
@@ -1382,7 +1318,11 @@ ciss_pdid(struct ciss_softc *sc, u_int8_t drv, struct ciss_pdid *id, int wait)
 	cmd->cdb[7] = sizeof(*id) >> 8;	/* biiiig endian */
 	cmd->cdb[8] = sizeof(*id) & 0xff;
 
-	return ciss_cmd(ccb, BUS_DMA_NOWAIT, wait);
+	s = splbio();
+	rv = ciss_cmd(ccb, BUS_DMA_NOWAIT, wait);
+	splx(s);
+
+	return (rv);
 }
 
 
@@ -1429,6 +1369,8 @@ ciss_blink(struct ciss_softc *sc, int ld, int pd, int stat,
 	struct ciss_ccb *ccb;
 	struct ciss_cmd *cmd;
 	struct ciss_ld *ldp;
+	int rv;
+	int s;
 
 	if (ld > sc->maxunits)
 		return EINVAL;
@@ -1459,6 +1401,10 @@ ciss_blink(struct ciss_softc *sc, int ld, int pd, int stat,
 	cmd->cdb[7] = sizeof(*blink) >> 8;	/* biiiig endian */
 	cmd->cdb[8] = sizeof(*blink) & 0xff;
 
-	return ciss_cmd(ccb, BUS_DMA_NOWAIT, SCSI_POLL);
+	s = splbio();
+	rv = ciss_cmd(ccb, BUS_DMA_NOWAIT, SCSI_POLL);
+	splx(s);
+
+	return (rv);
 }
 #endif
