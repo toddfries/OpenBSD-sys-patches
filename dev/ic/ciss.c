@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss.c,v 1.50 2010/06/02 05:38:00 dlg Exp $	*/
+/*	$OpenBSD: ciss.c,v 1.54 2010/06/03 01:03:55 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff
@@ -29,7 +29,6 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
-#include <sys/kthread.h>
 
 #include <machine/bus.h>
 
@@ -88,13 +87,12 @@ int	ciss_ioctl(struct device *, u_long, caddr_t);
 int	ciss_sync(struct ciss_softc *sc);
 void	ciss_heartbeat(void *v);
 void	ciss_shutdown(void *v);
-void	ciss_kthread(void *v);
 #ifndef SMALL_KERNEL
 void	ciss_sensors(void *);
 #endif
 
-struct ciss_ccb *ciss_get_ccb(struct ciss_softc *sc);
-void	ciss_put_ccb(struct ciss_ccb *ccb);
+void *	ciss_get_ccb(void *);
+void	ciss_put_ccb(void *, void *);
 int	ciss_cmd(struct ciss_ccb *ccb, int flags, int wait);
 int	ciss_done(struct ciss_ccb *ccb);
 int	ciss_error(struct ciss_ccb *ccb);
@@ -107,14 +105,16 @@ int	ciss_ldstat(struct ciss_softc *, int, struct ciss_ldstat *);
 int	ciss_pdid(struct ciss_softc *, u_int8_t, struct ciss_pdid *, int);
 int	ciss_blink(struct ciss_softc *, int, int, int, struct ciss_blink *);
 
-struct ciss_ccb *
-ciss_get_ccb(struct ciss_softc *sc)
+void *
+ciss_get_ccb(void *xsc)
 {
+	struct ciss_softc *sc = xsc;
 	struct ciss_ccb *ccb;
 
 	mtx_enter(&sc->sc_free_ccb_mtx);
-	if ((ccb = TAILQ_LAST(&sc->sc_free_ccb, ciss_queue_head))) {
-		TAILQ_REMOVE(&sc->sc_free_ccb, ccb, ccb_link);
+	ccb = SLIST_FIRST(&sc->sc_free_ccb);
+	if (ccb != NULL) {
+		SLIST_REMOVE_HEAD(&sc->sc_free_ccb, ccb_link);
 		ccb->ccb_state = CISS_CCB_READY;
 		ccb->ccb_xs = NULL;
 	}
@@ -124,16 +124,17 @@ ciss_get_ccb(struct ciss_softc *sc)
 }
 
 void
-ciss_put_ccb(struct ciss_ccb *ccb)
+ciss_put_ccb(void *xsc, void *xccb)
 {
-	struct ciss_softc *sc = ccb->ccb_sc;
+	struct ciss_softc *sc = xsc;
+	struct ciss_ccb *ccb = xccb;
 
 	ccb->ccb_state = CISS_CCB_FREE;
 	ccb->ccb_xs = NULL;
 	ccb->ccb_data = NULL;
 
 	mtx_enter(&sc->sc_free_ccb_mtx);
-	TAILQ_INSERT_TAIL(&sc->sc_free_ccb, ccb, ccb_link);
+	SLIST_INSERT_HEAD(&sc->sc_free_ccb, ccb, ccb_link);
 	mtx_leave(&sc->sc_free_ccb_mtx);
 }
 
@@ -255,7 +256,7 @@ ciss_attach(struct ciss_softc *sc)
 		return -1;
 	}
 
-	TAILQ_INIT(&sc->sc_free_ccb);
+	SLIST_INIT(&sc->sc_free_ccb);
 	mtx_init(&sc->sc_free_ccb_mtx, IPL_BIO);
 
 	maxfer = sc->maxsg * PAGE_SIZE;
@@ -281,8 +282,10 @@ ciss_attach(struct ciss_softc *sc)
 		    &ccb->ccb_dmamap)))
 			break;
 
-		TAILQ_INSERT_TAIL(&sc->sc_free_ccb, ccb, ccb_link);
+		SLIST_INSERT_HEAD(&sc->sc_free_ccb, ccb, ccb_link);
 	}
+
+	scsi_iopool_init(&sc->sc_iopool, sc, ciss_get_ccb, ciss_put_ccb);
 
 	if (i < sc->maxcmd) {
 		printf(": cannot create ccb#%d dmamap (%d)\n", i, error);
@@ -365,16 +368,6 @@ ciss_attach(struct ciss_softc *sc)
 		return -1;
 	}
 
-#if 0
-	if (kthread_create(ciss_kthread, sc, NULL, "%s", sc->sc_dev.dv_xname)) {
-		printf(": unable to create kernel thread\n");
-		shutdownhook_disestablish(sc->sc_sh);
-		bus_dmamem_free(sc->dmat, sc->cmdseg, 1);
-		bus_dmamap_destroy(sc->dmat, sc->cmdmap);
-		return -1;
-	}
-#endif
-
 	sc->sc_link.device = &ciss_dev;
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.openings = sc->maxcmd / (sc->maxunits? sc->maxunits : 1);
@@ -382,6 +375,7 @@ ciss_attach(struct ciss_softc *sc)
 	sc->sc_link.luns = 1;
 	sc->sc_link.adapter_target = sc->maxunits;
 	sc->sc_link.adapter_buswidth = sc->maxunits;
+	sc->sc_link.pool = &sc->sc_iopool;
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &sc->sc_link;
 	scsibus = (struct scsibus_softc *)config_found_sm(&sc->sc_dev,
@@ -490,7 +484,6 @@ ciss_cmd(struct ciss_ccb *ccb, int flags, int wait)
 				ccb->ccb_xs->error = XS_DRIVER_STUFFUP;
 				scsi_done(ccb->ccb_xs);
 			}
-			ciss_put_ccb(ccb);
 			return (error);
 		}
 		cmd->sgin = dmap->dm_nsegs;
@@ -521,10 +514,6 @@ ciss_cmd(struct ciss_ccb *ccb, int flags, int wait)
 
 	bus_dmamap_sync(sc->dmat, sc->cmdmap, 0, sc->cmdmap->dm_mapsize,
 	    BUS_DMASYNC_PREWRITE);
-
-	if ((wait & (SCSI_POLL|SCSI_NOSLEEP)) == (SCSI_POLL|SCSI_NOSLEEP))
-		bus_space_write_4(sc->iot, sc->ioh, CISS_IMR,
-		    bus_space_read_4(sc->iot, sc->ioh, CISS_IMR) | sc->iem);
 
 	ccb->ccb_state = CISS_CCB_ONQ;
 	CISS_DPRINTF(CISS_D_CMD, ("submit=0x%x ", cmd->id));
@@ -612,22 +601,16 @@ ciss_cmd(struct ciss_ccb *ccb, int flags, int wait)
 
 			error = ciss_done(ccb1);
 			if (ccb1 == ccb)
-				break;
+				return (error);
 		}
 
 		/* if never got a chance to be done above... */
-		if (ccb->ccb_state != CISS_CCB_FREE) {
-			ccb->ccb_err.cmd_stat = CISS_ERR_TMO;
-			error = ciss_done(ccb);
-		}
+		ccb->ccb_err.cmd_stat = CISS_ERR_TMO;
+		error = ciss_done(ccb);
 
 		CISS_DPRINTF(CISS_D_CMD, ("done %d:%d",
 		    ccb->ccb_err.cmd_stat, ccb->ccb_err.scsi_stat));
 	}
-
-	if ((wait & (SCSI_POLL|SCSI_NOSLEEP)) == (SCSI_POLL|SCSI_NOSLEEP))
-		bus_space_write_4(sc->iot, sc->ioh, CISS_IMR,
-		    bus_space_read_4(sc->iot, sc->ioh, CISS_IMR) & ~sc->iem);
 
 	return (error);
 }
@@ -665,8 +648,6 @@ ciss_done(struct ciss_ccb *ccb)
 		xs->resid = 0;
 		scsi_done(ccb->ccb_xs);
 	}
-
-	ciss_put_ccb(ccb);
 
 	CISS_UNLOCK(sc, lock);
 
@@ -745,7 +726,7 @@ ciss_inq(struct ciss_softc *sc, struct ciss_inquiry *inq)
 	int rv;
 	int s;
 
-	ccb = ciss_get_ccb(sc);
+	ccb = scsi_io_get(&sc->sc_iopool, SCSI_POLL|SCSI_NOSLEEP);
 	if (ccb == NULL)
 		return ENOMEM;
 
@@ -767,6 +748,8 @@ ciss_inq(struct ciss_softc *sc, struct ciss_inquiry *inq)
 	rv = ciss_cmd(ccb, BUS_DMA_NOWAIT, SCSI_POLL|SCSI_NOSLEEP);
 	splx(s);
 
+	scsi_io_put(&sc->sc_iopool, ccb);
+
 	return (rv);
 }
 
@@ -784,7 +767,7 @@ ciss_ldmap(struct ciss_softc *sc)
 	lmap->size = htobe32(sc->maxunits * sizeof(lmap->map));
 	total = sizeof(*lmap) + (sc->maxunits - 1) * sizeof(lmap->map);
 
-	ccb = ciss_get_ccb(sc);
+	ccb = scsi_io_get(&sc->sc_iopool, SCSI_POLL|SCSI_NOSLEEP);
 	if (ccb == NULL)
 		return ENOMEM;
 
@@ -802,6 +785,7 @@ ciss_ldmap(struct ciss_softc *sc)
 	cmd->cdb[9] = total & 0xff;
 
 	rv = ciss_cmd(ccb, BUS_DMA_NOWAIT, SCSI_POLL|SCSI_NOSLEEP);
+	scsi_io_put(&sc->sc_iopool, ccb);
 	CISS_UNLOCK_SCRATCH(sc, lock);
 
 	if (rv)
@@ -827,7 +811,7 @@ ciss_sync(struct ciss_softc *sc)
 	bzero(flush, sizeof(*flush));
 	flush->flush = sc->sc_flush;
 
-	ccb = ciss_get_ccb(sc);
+	ccb = scsi_io_get(&sc->sc_iopool, SCSI_POLL|SCSI_NOSLEEP);
 	if (ccb == NULL)
 		return ENOMEM;
 
@@ -846,6 +830,7 @@ ciss_sync(struct ciss_softc *sc)
 	cmd->cdb[8] = sizeof(*flush) & 0xff;
 
 	rv = ciss_cmd(ccb, BUS_DMA_NOWAIT, SCSI_POLL|SCSI_NOSLEEP);
+	scsi_io_put(&sc->sc_iopool, ccb);
 	CISS_UNLOCK_SCRATCH(sc, lock);
 
 	return rv;
@@ -855,7 +840,6 @@ void
 ciss_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link *link = xs->sc_link;
-	struct ciss_softc *sc = link->adapter_softc;
 	u_int8_t target = link->target;
 	struct ciss_ccb *ccb;
 	struct ciss_cmd *cmd;
@@ -878,12 +862,7 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 
 	/* XXX emulate SYNCHRONIZE_CACHE ??? */
 
-	ccb = ciss_get_ccb(sc);
-	if (ccb == NULL) {
-		xs->error = XS_NO_CCB;
-		scsi_done(xs);
-		return;
-	}
+	ccb = xs->io;
 
 	cmd = &ccb->ccb_cmd;
 	ccb->ccb_len = xs->datalen;
@@ -975,23 +954,6 @@ ciss_heartbeat(void *v)
 	}
 
 	timeout_add_sec(&sc->sc_hb, 3);
-}
-
-void
-ciss_kthread(void *v)
-{
-	struct ciss_softc *sc = v;
-	ciss_lock_t lock;
-
-	for (;;) {
-		tsleep(sc, PRIBIO, sc->sc_dev.dv_xname, 0);
-
-		lock = CISS_LOCK(sc);
-
-
-
-		CISS_UNLOCK(sc, lock);
-	}
 }
 
 int
@@ -1231,7 +1193,7 @@ ciss_ldid(struct ciss_softc *sc, int target, struct ciss_ldid *id)
 	int rv;
 	int s;
 
-	ccb = ciss_get_ccb(sc);
+	ccb = scsi_io_get(&sc->sc_iopool, SCSI_POLL);
 	if (ccb == NULL)
 		return ENOMEM;
 
@@ -1254,6 +1216,8 @@ ciss_ldid(struct ciss_softc *sc, int target, struct ciss_ldid *id)
 	rv = ciss_cmd(ccb, BUS_DMA_NOWAIT, SCSI_POLL);
 	splx(s);
 
+	scsi_io_put(&sc->sc_iopool, ccb);
+
 	return (rv);
 }
 
@@ -1265,7 +1229,7 @@ ciss_ldstat(struct ciss_softc *sc, int target, struct ciss_ldstat *stat)
 	int rv;
 	int s;
 
-	ccb = ciss_get_ccb(sc);
+	ccb = scsi_io_get(&sc->sc_iopool, SCSI_POLL);
 	if (ccb == NULL)
 		return ENOMEM;
 
@@ -1288,6 +1252,8 @@ ciss_ldstat(struct ciss_softc *sc, int target, struct ciss_ldstat *stat)
 	rv = ciss_cmd(ccb, BUS_DMA_NOWAIT, SCSI_POLL);
 	splx(s);
 
+	scsi_io_put(&sc->sc_iopool, ccb);
+
 	return (rv);
 }
 
@@ -1299,7 +1265,7 @@ ciss_pdid(struct ciss_softc *sc, u_int8_t drv, struct ciss_pdid *id, int wait)
 	int rv;
 	int s;
 
-	ccb = ciss_get_ccb(sc);
+	ccb = scsi_io_get(&sc->sc_iopool, SCSI_POLL);
 	if (ccb == NULL)
 		return ENOMEM;
 
@@ -1321,6 +1287,8 @@ ciss_pdid(struct ciss_softc *sc, u_int8_t drv, struct ciss_pdid *id, int wait)
 	s = splbio();
 	rv = ciss_cmd(ccb, BUS_DMA_NOWAIT, wait);
 	splx(s);
+
+	scsi_io_put(&sc->sc_iopool, ccb);
 
 	return (rv);
 }
@@ -1383,7 +1351,7 @@ ciss_blink(struct ciss_softc *sc, int ld, int pd, int stat,
 	    CISS_BLINK_ALL;
 	bcopy(&ldp->bling, blink, sizeof(*blink));
 
-	ccb = ciss_get_ccb(sc);
+	ccb = scsi_io_get(&sc->sc_iopool, SCSI_POLL);
 	if (ccb == NULL)
 		return ENOMEM;
 
@@ -1404,6 +1372,8 @@ ciss_blink(struct ciss_softc *sc, int ld, int pd, int stat,
 	s = splbio();
 	rv = ciss_cmd(ccb, BUS_DMA_NOWAIT, SCSI_POLL);
 	splx(s);
+
+	scsi_io_put(&sc->sc_iopool, ccb);
 
 	return (rv);
 }
