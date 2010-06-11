@@ -1244,16 +1244,16 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 		}
 		rw_enter_read(&allproclk);
 		LIST_FOREACH(pp, &allproc, p_list) {
-			/* skip system, embryonic and undead processes */
-			if ((pp->p_flag & P_SYSTEM) ||
-			    pp->p_stat == SIDL || pp->p_stat == SZOMB)
+			/* skip system, exiting, embryonic and undead processes */
+			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_WEXIT)
+			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
+
 			if (arg > 0 && pp->p_pid != (pid_t)arg) {
 				/* not the pid we are looking for */
 				continue;
 			}
 			fdp = pp->p_fd;
-			fdplock(fdp);
 			if (pp->p_textvp)
 				FILLIT(NULL, NULL, KERN_FILE_TEXT, pp->p_textvp, pp);
 			if (fdp->fd_cdir)
@@ -1269,23 +1269,22 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 					continue;
 				FILLIT(fp, fdp, i, NULL, pp);
 			}
-			fdpunlock(fdp);
 		}
 		rw_exit_read(&allproclk);
 		break;
 	case KERN_FILE_BYUID:
 		rw_enter_read(&allproclk);
 		LIST_FOREACH(pp, &allproc, p_list) {
-			/* skip system, embryonic and undead processes */
-			if ((pp->p_flag & P_SYSTEM) ||
-			    pp->p_stat == SIDL || pp->p_stat == SZOMB)
+			/* skip system, exiting, embryonic and undead processes */
+			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_WEXIT)
+			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
+
 			if (arg > 0 && pp->p_ucred->cr_uid != (uid_t)arg) {
 				/* not the uid we are looking for */
 				continue;
 			}
 			fdp = pp->p_fd;
-			fdplock(fdp);
 			if (fdp->fd_cdir)
 				FILLIT(NULL, NULL, KERN_FILE_CDIR, fdp->fd_cdir, pp);
 			if (fdp->fd_rdir)
@@ -1299,7 +1298,6 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 					continue;
 				FILLIT(fp, fdp, i, NULL, pp);
 			}
-			fdpunlock(fdp);
 		}
 		rw_exit_read(&allproclk);
 		break;
