@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.49 2010/06/05 18:43:57 damien Exp $	*/
+/*	$OpenBSD: athn.c,v 1.53 2010/06/21 19:56:42 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -129,6 +129,7 @@ void		athn_next_scan(void *);
 int		athn_newstate(struct ieee80211com *, enum ieee80211_state,
 		    int);
 void		athn_updateedca(struct ieee80211com *);
+int		athn_clock_rate(struct athn_softc *);
 void		athn_updateslot(struct ieee80211com *);
 void		athn_start(struct ifnet *);
 void		athn_watchdog(struct ifnet *);
@@ -1012,8 +1013,8 @@ athn_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 
 	if (!(k->k_flags & IEEE80211_KEY_GROUP)) {
 		addr = ni->ni_macaddr;
-		lo = addr[0] | addr[1] << 8 | addr[2] << 16 | addr[3] << 24;
-		hi = addr[4] | addr[5] << 8;
+		lo = LE_READ_4(&addr[0]);
+		hi = LE_READ_2(&addr[4]);
 		lo = lo >> 1 | hi << 31;
 		hi = hi >> 1;
 	} else
@@ -1454,7 +1455,9 @@ athn_ani_monitor(struct athn_softc *sc)
 		cycdelta = cyccnt - ani->cyccnt;
 		txfdelta = txfcnt - ani->txfcnt;
 		rxfdelta = rxfcnt - ani->rxfcnt;
-		listen_time = (cycdelta - txfdelta - rxfdelta) / 44000;
+
+		listen_time = (cycdelta - txfdelta - rxfdelta) /
+		    (athn_clock_rate(sc) * 1000);
 	} else
 		listen_time = 0;
 
@@ -2024,7 +2027,7 @@ athn_hw_reset(struct athn_softc *sc, struct ieee80211_channel *c,
 		error = athn_reset(sc, 0);
 	if (error != 0) {
 		printf("%s: could not reset chip (error=%d)\n",
-		    sc->sc_dev.dv_xname);
+		    sc->sc_dev.dv_xname, error);
 		return (error);
 	}
 
@@ -2367,28 +2370,36 @@ athn_updateedca(struct ieee80211com *ic)
 #undef ATHN_EXP2
 }
 
+int
+athn_clock_rate(struct athn_softc *sc)
+{
+	struct ieee80211com *ic = &sc->sc_ic;
+	int clockrate;	/* MHz. */
+
+	if (ic->ic_curmode == IEEE80211_MODE_11A) {
+		if (sc->flags & ATHN_FLAG_FAST_PLL_CLOCK)
+			clockrate = AR_CLOCK_RATE_FAST_5GHZ_OFDM;
+		else
+			clockrate = AR_CLOCK_RATE_5GHZ_OFDM;
+	} else if (ic->ic_curmode == IEEE80211_MODE_11B) {
+		clockrate = AR_CLOCK_RATE_CCK;
+	} else
+		clockrate = AR_CLOCK_RATE_2GHZ_OFDM;
+#ifndef IEEE80211_NO_HT
+	if (sc->curchanext != NULL)
+		clockrate *= 2;
+#endif
+	return (clockrate);
+}
+
 void
 athn_updateslot(struct ieee80211com *ic)
 {
 	struct athn_softc *sc = ic->ic_softc;
-	uint32_t clks;
+	int slot;
 
-	if (ic->ic_curmode == IEEE80211_MODE_11A) {
-		if (sc->flags & ATHN_FLAG_FAST_PLL_CLOCK)
-			clks = AR_CLOCK_RATE_FAST_5GHZ_OFDM;
-		else
-			clks = AR_CLOCK_RATE_5GHZ_OFDM;
-	} else if (ic->ic_curmode == IEEE80211_MODE_11B) {
-		clks = AR_CLOCK_RATE_CCK;
-	} else
-		clks = AR_CLOCK_RATE_2GHZ_OFDM;
-#ifndef IEEE80211_NO_HT
-	if (sc->curchanext != NULL)
-		clks *= 2;
-#endif
-	clks *= (ic->ic_flags & IEEE80211_F_SHSLOT) ? 9 : 20;
-
-	AR_WRITE(sc, AR_D_GBL_IFS_SLOT, clks);
+	slot = (ic->ic_flags & IEEE80211_F_SHSLOT) ? 9 : 20;
+	AR_WRITE(sc, AR_D_GBL_IFS_SLOT, slot * athn_clock_rate(sc));
 }
 
 void
@@ -2431,7 +2442,7 @@ athn_start(struct ifnet *ifp)
 		if (ic->ic_rawbpf != NULL)
 			bpf_mtap(ic->ic_rawbpf, m, BPF_DIRECTION_OUT);
 #endif
-		if (sc->ops.tx(sc, m, ni) != 0) {
+		if (sc->ops.tx(sc, m, ni, 0) != 0) {
 			ieee80211_release_node(ic, ni);
 			ifp->if_oerrors++;
 			continue;

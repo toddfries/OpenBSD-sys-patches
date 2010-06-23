@@ -31,7 +31,7 @@
 
 *******************************************************************************/
 
-/* $OpenBSD: if_em_hw.h,v 1.37 2010/05/18 21:51:10 jsg Exp $ */
+/* $OpenBSD: if_em_hw.h,v 1.39 2010/06/21 21:11:53 jsg Exp $ */
 /* $FreeBSD: if_em_hw.h,v 1.15 2005/05/26 23:32:02 tackerman Exp $ */
 
 /* if_em_hw.h
@@ -74,6 +74,7 @@ typedef enum {
     em_ich8lan,
     em_ich9lan,
     em_ich10lan,
+    em_pchlan,
     em_num_macs
 } em_mac_type;
 
@@ -235,6 +236,7 @@ typedef enum {
     em_phy_ife,
     em_phy_bm,		/* phy used in i82574L, ICH10 and some ICH9 */
     em_phy_oem,
+    em_phy_82577,
     em_phy_undefined = 0xFF
 } em_phy_type;
 
@@ -487,6 +489,7 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_82573E_IAMT         0x108C
 #define E1000_DEV_ID_82573L              0x109A
 #define E1000_DEV_ID_82574L              0x10D3
+#define E1000_DEV_ID_82574LA             0x10F6
 #define E1000_DEV_ID_82546GB_2           0x109B
 #define E1000_DEV_ID_82571EB_AT          0x10A0
 #define E1000_DEV_ID_82571EB_AF          0x10A1
@@ -499,6 +502,7 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_80003ES2LAN_SERDES_DPT 0x1098
 #define E1000_DEV_ID_80003ES2LAN_COPPER_SPT 0x10BA
 #define E1000_DEV_ID_80003ES2LAN_SERDES_SPT 0x10BB
+#define E1000_DEV_ID_ICH8_82567V_3       0x1501
 #define E1000_DEV_ID_ICH8_IGP_M_AMT      0x1049
 #define E1000_DEV_ID_ICH8_IGP_AMT        0x104A
 #define E1000_DEV_ID_ICH8_IGP_C          0x104B
@@ -520,19 +524,31 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_ICH10_R_BM_V        0x10CE
 #define E1000_DEV_ID_ICH10_D_BM_LM       0x10DE
 #define E1000_DEV_ID_ICH10_D_BM_LF       0x10DF
+#define E1000_DEV_ID_PCH_M_HV_LM         0x10EA
+#define E1000_DEV_ID_PCH_M_HV_LC         0x10EB
+#define E1000_DEV_ID_PCH_D_HV_DM         0x10EF
+#define E1000_DEV_ID_PCH_D_HV_DC         0x10F0
 #define E1000_DEV_ID_82575EB_PT          0x10A7
 #define E1000_DEV_ID_82575EB_PF          0x10A9
-#define E1000_DEV_ID_82575GB_QP		 0x10D6
-#define E1000_DEV_ID_82576		 0x10C9
-#define E1000_DEV_ID_82576_FIBER	 0x10E6
-#define E1000_DEV_ID_82576_SERDES	 0x10E7
-#define E1000_DEV_ID_82576_QUAD_COPPER	 0x10E8
-#define E1000_DEV_ID_82576_NS		 0x150A
-#define E1000_DEV_ID_82576_QUAD_CU_ET2	 0x1526
-#define E1000_DEV_ID_82574L		 0x10D3
-#define E1000_DEV_ID_EP80579_LAN_1	 0x5040          /* EP80579 LAN */
-#define E1000_DEV_ID_EP80579_LAN_2	 0x5044          /* EP80579 LAN */
-#define E1000_DEV_ID_EP80579_LAN_3	 0x5048          /* EP80579 LAN */
+#define E1000_DEV_ID_82575GB_QP          0x10D6
+#define E1000_DEV_ID_82575GB_QP_PM       0x10E2
+#define E1000_DEV_ID_82576               0x10C9
+#define E1000_DEV_ID_82576_FIBER         0x10E6
+#define E1000_DEV_ID_82576_SERDES        0x10E7
+#define E1000_DEV_ID_82576_QUAD_COPPER   0x10E8
+#define E1000_DEV_ID_82576_NS            0x150A
+#define E1000_DEV_ID_82576_NS_SERDES     0x1518
+#define E1000_DEV_ID_82576_SERDES_QUAD   0x150D
+#define E1000_DEV_ID_82580_COPPER        0x150E
+#define E1000_DEV_ID_82580_FIBER         0x150F
+#define E1000_DEV_ID_82580_SERDES        0x1510
+#define E1000_DEV_ID_82580_SGMII         0x1511
+#define E1000_DEV_ID_82580_COPPER_DUAL   0x1516
+#define E1000_DEV_ID_82576_QUAD_CU_ET2   0x1526
+#define E1000_DEV_ID_82574L              0x10D3
+#define E1000_DEV_ID_EP80579_LAN_1       0x5040
+#define E1000_DEV_ID_EP80579_LAN_2       0x5044
+#define E1000_DEV_ID_EP80579_LAN_3       0x5048
 
 #define NODE_ADDRESS_SIZE 6
 #define ETH_LENGTH_OF_ADDRESS 6
@@ -1090,6 +1106,7 @@ struct em_ffvt_entry {
 #define E1000_WUPL     0x05900  /* Wakeup Packet Length - RW */
 #define E1000_WUPM     0x05A00  /* Wakeup Packet Memory - RO A */
 #define E1000_FFLT     0x05F00  /* Flexible Filter Length Table - RW Array */
+#define E1000_CRC_OFFSET 0x05F50  /* CRC Offset Register */
 #define E1000_HOST_IF  0x08800  /* Host Interface */
 #define E1000_FFMT     0x09000  /* Flexible Filter Mask Table - RW Array */
 #define E1000_FFVT     0x09800  /* Flexible Filter Value Table - RW Array */
@@ -1293,6 +1310,7 @@ struct em_ffvt_entry {
 #define E1000_82542_TDFT     0x08018
 #define E1000_82542_FFMT     E1000_FFMT
 #define E1000_82542_FFVT     E1000_FFVT
+#define E1000_82542_CRC_OFFSET E1000_CRC_OFFSET
 #define E1000_82542_HOST_IF  E1000_HOST_IF
 #define E1000_82542_IAM         E1000_IAM
 #define E1000_82542_EEMNGCTL    E1000_EEMNGCTL
@@ -2471,6 +2489,7 @@ struct em_host_command_info {
 #define E1000_PBA_16K 0x0010    /* 16KB, default TX allocation */
 #define E1000_PBA_22K 0x0016
 #define E1000_PBA_24K 0x0018
+#define E1000_PBA_26K 0x001A
 #define E1000_PBA_30K 0x001E
 #define E1000_PBA_32K 0x0020
 #define E1000_PBA_34K 0x0022
@@ -2755,6 +2774,15 @@ struct em_host_command_info {
         GG82563_REG(194, 25) /* Link Partner Advertised Next page */
 #define GG82563_PHY_KMRN_MISC           \
         GG82563_REG(194, 26) /* Misc. */
+        
+/* I82577 Specific Registers */
+#define I82577_PHY_ADDR_REG 16
+#define I82577_PHY_CFG_REG  22
+#define I82577_PHY_CTRL_REG 23
+
+/* I82577 Config Register */
+#define I82577_PHY_CFG_ENABLE_CRS_ON_TX (1 << 15)
+#define I82577_PHY_CFG_ENABLE_DOWNSHIFT ((1 << 10) + (1 << 11))
 
 /* PHY Control Register */
 #define MII_CR_SPEED_SELECT_MSB 0x0040  /* bits 6,13: 10=1000, 01=100, 00=10 */
@@ -3194,19 +3222,24 @@ struct em_host_command_info {
 /* I = Integrated
  * E = External
  */
-#define M88_VENDOR         0x0141
-#define M88E1000_E_PHY_ID  0x01410C50
-#define M88E1000_I_PHY_ID  0x01410C30
-#define M88E1011_I_PHY_ID  0x01410C20
+#define M88_VENDOR           0x0141
+#define M88E1000_E_PHY_ID    0x01410C50
+#define M88E1000_I_PHY_ID    0x01410C30
+#define M88E1011_I_PHY_ID    0x01410C20
 #define IGP01E1000_I_PHY_ID  0x02A80380
-#define M88E1000_12_PHY_ID M88E1000_E_PHY_ID
-#define M88E1000_14_PHY_ID M88E1000_E_PHY_ID
-#define M88E1011_I_REV_4   0x04
-#define M88E1111_I_PHY_ID  0x01410CC0
-#define L1LXT971A_PHY_ID   0x001378E0
-#define GG82563_E_PHY_ID   0x01410CA0
-#define BME1000_E_PHY_ID   0x01410CB0
-#define M88E1141_E_PHY_ID  0x01410CD0
+#define M88E1000_12_PHY_ID   M88E1000_E_PHY_ID
+#define M88E1000_14_PHY_ID   M88E1000_E_PHY_ID
+#define M88E1011_I_REV_4     0x04
+#define M88E1111_I_PHY_ID    0x01410CC0
+#define L1LXT971A_PHY_ID     0x001378E0
+#define GG82563_E_PHY_ID     0x01410CA0
+#define BME1000_E_PHY_ID     0x01410CB0
+#define BME1000_E_PHY_ID_R2  0x01410CB1
+#define I82577_E_PHY_ID      0x01540050
+#define I82578_E_PHY_ID      0x004DD040
+#define I82580_I_PHY_ID      0x015403A0
+#define IGP04E1000_E_PHY_ID  0x02A80391
+#define M88E1141_E_PHY_ID    0x01410CD0
 
 /* Bits...
  * 15-5: page

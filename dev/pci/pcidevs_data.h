@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1557 2010/05/24 20:36:29 jsg Exp 
+ *	OpenBSD: pcidevs,v 1.1561 2010/06/23 06:27:15 dlg Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -2926,6 +2926,70 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD790_PCIE_4,
 	    "RD790 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_0,
+	    "RD890 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_1,
+	    "RD890 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_2,
+	    "RD890 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_3,
+	    "RD890 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_4,
+	    "RD890 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_5,
+	    "RD890 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_6,
+	    "RD890 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_7,
+	    "RD890 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_8,
+	    "RD890 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_9,
+	    "RD890 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_A,
+	    "RD890 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_B,
+	    "RD890 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_C,
+	    "RD890 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_D,
+	    "RD890 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_E,
+	    "RD890 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_F,
+	    "RD890 PCIE",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RX200_HB,
@@ -5968,6 +6032,22 @@ static const struct pci_known_product pci_known_products[] = {
 	    "PRIMEPOWER250/450 LAN",
 	},
 	{
+	    PCI_VENDOR_FUSIONIO, PCI_PRODUCT_FUSIONIO_IODRIVE_1_2,
+	    "ioDrive v1.2",
+	},
+	{
+	    PCI_VENDOR_FUSIONIO, PCI_PRODUCT_FUSIONIO_IODRIVE,
+	    "ioDrive",
+	},
+	{
+	    PCI_VENDOR_FUSIONIO, PCI_PRODUCT_FUSIONIO_IOXTREME,
+	    "ioXtreme",
+	},
+	{
+	    PCI_VENDOR_FUSIONIO, PCI_PRODUCT_FUSIONIO_IOXTREME_PRO,
+	    "ioXtreme Pro",
+	},
+	{
 	    PCI_VENDOR_FUTUREDOMAIN, PCI_PRODUCT_FUTUREDOMAIN_TMC_18C30,
 	    "TMC-18C30 (36C70)",
 	},
@@ -7188,6 +7268,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "10GbE SR Dual (82598)",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575GB_QP_PM,
+	    "PRO/1000 QP (82575GB)",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_BM,
 	    "ICH9 BM",
 	},
@@ -7204,12 +7288,24 @@ static const struct pci_known_product pci_known_products[] = {
 	    "PRO/1000 QP (82576)",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82577LM,
+	    "82577LM",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82577LC,
+	    "82577LC",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598EB_CX4_DUAL,
 	    "10GbE CX4 Dual (82598EB)",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DM,
 	    "82578DM",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DC,
+	    "82578DC",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598_DA_DUAL,
@@ -7222,6 +7318,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_M_AMT,
 	    "ICH9 IGP M AMT",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82574LA,
+	    "82574L",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_KX4,
@@ -7348,6 +7448,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "82870P2 Hot Plug",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_82567V_3,
+	    "ICH8 82567V-3",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_SFP_EM,
 	    "10GbE SFP EM (82599)",
 	},
@@ -7364,8 +7468,36 @@ static const struct pci_known_product pci_known_products[] = {
 	    "PRO/1000 (82583V)",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_SERDES_QUAD,
+	    "82576 SerDes QP",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_COPPER,
+	    "I340-T4 (82580)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_FIBER,
+	    "82580 Fiber",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_SERDES,
+	    "82580 SerDes",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_SGMII,
+	    "82580 SFP",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_COPPER_DUAL,
+	    "I340-T2 (82580)",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_KX4_MEZZ,
 	    "10GbE KX4 (82599)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_NS_SERDES,
+	    "82576NS SerDes",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_QUAD_CU_ET2,
@@ -14988,6 +15120,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "PEX 8548",
 	},
 	{
+	    PCI_VENDOR_PLX, PCI_PRODUCT_PLX_PEX_8624,
+	    "PEX 8624",
+	},
+	{
 	    PCI_VENDOR_PLX, PCI_PRODUCT_PLX_PEX_8648,
 	    "PEX 8648",
 	},
@@ -19706,6 +19842,10 @@ static const struct pci_known_vendor pci_known_vendors[] = {
 	{
 	    PCI_VENDOR_AWT,
 	    "AWT",
+	},
+	{
+	    PCI_VENDOR_FUSIONIO,
+	    "Fusion-io",
 	},
 	{
 	    PCI_VENDOR_QUMRANET,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.193 2010/06/11 12:02:44 krw Exp $	*/
+/*	$OpenBSD: sd.c,v 1.196 2010/06/16 02:58:02 krw Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -165,6 +165,7 @@ sdattach(struct device *parent, struct device *self, void *aux)
 	struct scsi_link *sc_link = sa->sa_sc_link;
 	int sd_autoconf = scsi_autoconf | SCSI_SILENT |
 	    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE;
+	struct dk_cache dkc;
 	int error, result;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("sdattach:\n"));
@@ -250,6 +251,12 @@ sdattach(struct device *parent, struct device *self, void *aux)
 #endif
 	}
 	printf("\n");
+
+	memset(&dkc, 0, sizeof(dkc));
+	if (sd_ioctl_cache(sc, DIOCGCACHE, &dkc) == 0 && dkc.wrcache == 0) {
+		dkc.wrcache = 1;
+		sd_ioctl_cache(sc, DIOCSCACHE, &dkc);
+	}
 
 	/*
 	 * Establish a shutdown hook so that we can ensure that
@@ -957,18 +964,20 @@ sdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		goto exit;
 
 	case DIOCINQ:
-		error = scsi_do_ioctl(sc->sc_link, dev, cmd, addr, flag, p);
+		error = scsi_do_ioctl(sc->sc_link, cmd, addr, flag);
 		if (error == ENOTTY)
 			error = sd_ioctl_inquiry(sc,
 			    (struct dk_inquiry *)addr);
 		goto exit;
 
-	case DIOCGCACHE:
 	case DIOCSCACHE:
-		error = scsi_do_ioctl(sc->sc_link, dev, cmd, addr, flag, p);
-		if (error == ENOTTY)
-			error = sd_ioctl_cache(sc, cmd,
-			    (struct dk_cache *)addr);
+		if (!ISSET(flag, FWRITE)) {
+			error = EBADF;
+			goto exit;
+		}
+		/* FALLTHROUGH */
+	case DIOCGCACHE:
+		error = sd_ioctl_cache(sc, cmd, (struct dk_cache *)addr);
 		goto exit;
 
 	default:
@@ -976,7 +985,7 @@ sdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			error = ENOTTY;
 			goto exit;
 		}
-		error = scsi_do_ioctl(sc->sc_link, dev, cmd, addr, flag, p);
+		error = scsi_do_ioctl(sc->sc_link, cmd, addr, flag);
 	}
 
  exit:
@@ -1016,17 +1025,23 @@ sd_ioctl_cache(struct sd_softc *sc, long cmd, struct dk_cache *dkc)
 	int big;
 	int rv;
 
+	/* see if the adapter has special handling */
+	rv = scsi_do_ioctl(sc->sc_link, cmd, (caddr_t)dkc, 0);
+	if (rv != ENOTTY) {
+		return (rv);
+	}
+
 	buf = malloc(sizeof(*buf), M_TEMP, M_WAITOK|M_CANFAIL);
 	if (buf == NULL)
 		return (ENOMEM);
 
 	rv = scsi_do_mode_sense(sc->sc_link, PAGE_CACHING_MODE,
 	    buf, (void **)&mode, NULL, NULL, NULL,
-	    sizeof(*mode) - 4, SCSI_SILENT, &big);
+	    sizeof(*mode) - 4, scsi_autoconf | SCSI_SILENT, &big);
 	if (rv != 0)
 		goto done;
 
-	if (!DISK_PGCODE(mode, PAGE_CACHING_MODE)) {
+	if ((mode == NULL) || (!DISK_PGCODE(mode, PAGE_CACHING_MODE))) {
 		rv = EIO;
 		goto done;
 	}
@@ -1056,10 +1071,10 @@ sd_ioctl_cache(struct sd_softc *sc, long cmd, struct dk_cache *dkc)
 
 		if (big) {
 			rv = scsi_mode_select_big(sc->sc_link, SMS_PF,
-			    &buf->hdr_big, SCSI_SILENT, 20000);
+			    &buf->hdr_big, scsi_autoconf | SCSI_SILENT, 20000);
 		} else {
 			rv = scsi_mode_select(sc->sc_link, SMS_PF,
-			    &buf->hdr, SCSI_SILENT, 20000);
+			    &buf->hdr, scsi_autoconf | SCSI_SILENT, 20000);
 		}
 		break;
 	}
@@ -1373,11 +1388,12 @@ int
 sd_get_parms(struct sd_softc *sc, struct disk_parms *dp, int flags)
 {
 	union scsi_mode_sense_buf *buf = NULL;
-	struct page_rigid_geometry *rigid;
-	struct page_flex_geometry *flex;
-	struct page_reduced_geometry *reduced;
+	struct page_rigid_geometry *rigid = NULL;
+	struct page_flex_geometry *flex = NULL;
+	struct page_reduced_geometry *reduced = NULL;
 	u_int32_t heads = 0, sectors = 0, cyls = 0, blksize = 0, ssblksize;
 	u_int16_t rpm = 0;
+	int err;
 
 	dp->disksize = scsi_size(sc->sc_link, flags, &ssblksize);
 
@@ -1400,10 +1416,11 @@ sd_get_parms(struct sd_softc *sc, struct disk_parms *dp, int flags)
 
 	case T_RDIRECT:
 		/* T_RDIRECT supports only PAGE_REDUCED_GEOMETRY (6). */
-		scsi_do_mode_sense(sc->sc_link, PAGE_REDUCED_GEOMETRY, buf,
-		    (void **)&reduced, NULL, NULL, &blksize, sizeof(*reduced),
-		    flags | SCSI_SILENT, NULL);
-		if (DISK_PGCODE(reduced, PAGE_REDUCED_GEOMETRY)) {
+		err = scsi_do_mode_sense(sc->sc_link, PAGE_REDUCED_GEOMETRY,
+		    buf, (void **)&reduced, NULL, NULL, &blksize,
+		    sizeof(*reduced), flags | SCSI_SILENT, NULL);
+		if (!err && reduced &&
+		    DISK_PGCODE(reduced, PAGE_REDUCED_GEOMETRY)) {
 			if (dp->disksize == 0)
 				dp->disksize = _5btol(reduced->sectors);
 			if (blksize == 0)
@@ -1419,23 +1436,25 @@ sd_get_parms(struct sd_softc *sc, struct disk_parms *dp, int flags)
 		 * so accept the page. The extra bytes will be zero and RPM will
 		 * end up with the default value of 3600.
 		 */
-		rigid = NULL;
 		if (((sc->sc_link->flags & SDEV_ATAPI) == 0) ||
 		    ((sc->sc_link->flags & SDEV_REMOVABLE) == 0))
-			scsi_do_mode_sense(sc->sc_link, PAGE_RIGID_GEOMETRY,
-			    buf, (void **)&rigid, NULL, NULL, &blksize,
-			    sizeof(*rigid) - 4, flags | SCSI_SILENT, NULL);
-		if (DISK_PGCODE(rigid, PAGE_RIGID_GEOMETRY)) {
+			err = scsi_do_mode_sense(sc->sc_link,
+			    PAGE_RIGID_GEOMETRY, buf, (void **)&rigid, NULL,
+			    NULL, &blksize, sizeof(*rigid) - 4,
+			    flags | SCSI_SILENT, NULL);
+		if (!err && rigid && DISK_PGCODE(rigid, PAGE_RIGID_GEOMETRY)) {
 			heads = rigid->nheads;
 			cyls = _3btol(rigid->ncyl);
 			rpm = _2btol(rigid->rpm);
 			if (heads * cyls > 0)
 				sectors = dp->disksize / (heads * cyls);
 		} else {
-			scsi_do_mode_sense(sc->sc_link, PAGE_FLEX_GEOMETRY,
-			    buf, (void **)&flex, NULL, NULL, &blksize,
-			    sizeof(*flex) - 4, flags | SCSI_SILENT, NULL);
-			if (DISK_PGCODE(flex, PAGE_FLEX_GEOMETRY)) {
+			err = scsi_do_mode_sense(sc->sc_link,
+			    PAGE_FLEX_GEOMETRY, buf, (void **)&flex, NULL, NULL,
+			    &blksize, sizeof(*flex) - 4,
+			    flags | SCSI_SILENT, NULL);
+			if (!err && flex &&
+			    DISK_PGCODE(flex, PAGE_FLEX_GEOMETRY)) {
 				sectors = flex->ph_sec_tr;
 				heads = flex->nheads;
 				cyls = _2btol(flex->ncyl);
