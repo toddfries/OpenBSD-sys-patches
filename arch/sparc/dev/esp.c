@@ -1,4 +1,4 @@
-/*	$OpenBSD: esp.c,v 1.29 2010/06/07 19:54:33 miod Exp $	*/
+/*	$OpenBSD: esp.c,v 1.31 2010/06/27 05:52:01 beck Exp $	*/
 /*	$NetBSD: esp.c,v 1.69 1997/08/27 11:24:18 bouyer Exp $	*/
 
 /*
@@ -105,13 +105,14 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/queue.h>
 #include <sys/malloc.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
 #include <scsi/scsi_message.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <machine/cpu.h>
 #include <machine/autoconf.h>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.143 2010/03/21 15:04:35 jakemsr Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.145 2010/06/27 01:13:25 jakemsr Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -179,7 +179,8 @@ azalia_codec_init_vtbl(codec_t *this)
 		break;
 	case 0x111d76b2:
 		this->name = "IDT 92HD71B7";
-		if ((this->subid & 0x0000ffff) == 0x00001028) {	/* DELL */
+		if ((this->subid & 0x0000ffff) == 0x00001028 || /* DELL */
+		    (this->subid & 0x0000ffff) == 0x0000103c) { /* HP */
 			this->qrks |= AZ_QRK_GPIO_UNMUTE_0;
 		}
 		break;
@@ -1327,6 +1328,26 @@ azalia_mixer_default(codec_t *this)
 			    w->connections[j] == this->mic)
 				continue;
 			mc.un.mask |= 1 << j;
+		}
+		azalia_mixer_set(this, m->nid, m->target, &mc);
+	}
+
+	/* make sure default connection is valid */
+	for (i = 0; i < this->nmixers; i++) {
+		m = &this->mixers[i];
+		if (m->target != MI_TARGET_CONNLIST)
+			continue;
+
+		azalia_mixer_get(this, m->nid, m->target, &mc);
+		for (j = 0; j < m->devinfo.un.e.num_mem; j++) {
+			if (mc.un.ord == m->devinfo.un.e.member[j].ord)
+				break;
+		}
+		if (j >= m->devinfo.un.e.num_mem) {
+			bzero(&mc, sizeof(mc));
+			mc.dev = i;
+			mc.type = AUDIO_MIXER_ENUM;
+			mc.un.ord = m->devinfo.un.e.member[0].ord;
 		}
 		azalia_mixer_set(this, m->nid, m->target, &mc);
 	}
