@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.238 2010/06/21 21:11:52 jsg Exp $ */
+/* $OpenBSD: if_em.c,v 1.240 2010/06/28 20:24:39 jsg Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -133,6 +133,8 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_SERDES_QUAD },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82577LC },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82577LM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DC },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_82567V_3 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE_G },
@@ -1533,9 +1535,6 @@ em_identify_hardware(struct em_softc *sc)
 	sc->hw.vendor_id = PCI_VENDOR(pa->pa_id);
 	sc->hw.device_id = PCI_PRODUCT(pa->pa_id);
 
-	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_CLASS_REG);
-	sc->hw.revision_id = PCI_REVISION(reg);
-
 	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
 	sc->hw.subsystem_vendor_id = PCI_VENDOR(reg);
 	sc->hw.subsystem_id = PCI_PRODUCT(reg);
@@ -1543,6 +1542,13 @@ em_identify_hardware(struct em_softc *sc)
 	/* Identify the MAC */
 	if (em_set_mac_type(&sc->hw))
 		printf("%s: Unknown MAC Type\n", sc->sc_dv.dv_xname);
+
+	if (sc->hw.mac_type == em_pchlan)
+		sc->hw.revision_id = PCI_PRODUCT(pa->pa_id) & 0x0f;
+	else {
+		reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_CLASS_REG);
+		sc->hw.revision_id = PCI_REVISION(reg);
+	}
 
 	if (sc->hw.mac_type == em_82541 ||
 	    sc->hw.mac_type == em_82541_rev_2 ||

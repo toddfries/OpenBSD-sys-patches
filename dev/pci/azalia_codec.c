@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.145 2010/06/27 01:13:25 jakemsr Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.147 2010/06/27 21:47:07 jakemsr Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -1043,9 +1043,9 @@ azalia_mixer_init(codec_t *this)
 		this->spkr_muters = 0;
 		for (i = 0, j = 0; i < this->nsense_pins; i++) {
 			ww = &this->w[this->sense_pins[i]];
-			if (!(w->d.pin.cap & COP_PINCAP_OUTPUT))
+			if (!(ww->d.pin.cap & COP_PINCAP_OUTPUT))
 				continue;
-			if (!(w->widgetcap & COP_AWCAP_UNSOL))
+			if (!(ww->widgetcap & COP_AWCAP_UNSOL))
 				continue;
 			d->un.s.member[j].mask = 1 << i;
 			this->spkr_muters |= (1 << i);
@@ -1390,7 +1390,7 @@ azalia_mixer_default(codec_t *this)
  	}
 	this->recvols.mute = 0;
 
-	err = azalia_codec_enable_unsol(this);
+	err = azalia_codec_enable_unsol(this, 0);
 	if (err)
 		return(err);
 
@@ -1398,7 +1398,7 @@ azalia_mixer_default(codec_t *this)
 }
 
 int
-azalia_codec_enable_unsol(codec_t *this)
+azalia_codec_enable_unsol(codec_t *this, int resuming)
 {
 	widget_t *w;
 	uint32_t result;
@@ -1416,7 +1416,7 @@ azalia_codec_enable_unsol(codec_t *this)
 		azalia_unsol_event(this, AZ_TAG_SPKR);
 
 	/* volume knob */
-	if (this->playvols.master != this->audiofunc) {
+	if (this->playvols.master != this->audiofunc && !resuming) {
 
 		w = &this->w[this->playvols.master];
 		err = azalia_comresp(this, w->nid, CORB_GET_VOLUME_KNOB,
