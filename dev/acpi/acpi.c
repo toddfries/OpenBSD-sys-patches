@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.158 2010/06/27 07:26:31 jordan Exp $ */
+/* $OpenBSD: acpi.c,v 1.160 2010/06/27 19:42:57 jordan Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -92,6 +92,8 @@ void	acpi_init_pm(struct acpi_softc *);
 
 int acpi_foundide(struct aml_node *node, void *arg);
 int acpiide_notify(struct aml_node *, int, void *);
+
+int	_acpi_matchhids(const char *, const char *[]);
 
 void  wdcattach(struct channel_softc *);
 int   wdcdetach(struct channel_softc *, int);
@@ -2095,6 +2097,10 @@ acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
 			goto fail;
 		}
 
+	/* Clear fixed event status */
+	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 1,
+	    ACPI_PM1_ALL_STS);
+
 	/* Enable wake GPEs */
 	acpi_susp_resume_gpewalk(sc, state, 1);
 
@@ -2286,18 +2292,26 @@ acpi_foundec(struct aml_node *node, void *arg)
 }
 
 int
-acpi_matchhids(struct acpi_attach_args *aa, const char *hids[],
-    const char *driver)
+_acpi_matchhids(const char *hid, const char *hids[])
 {
 	int i;
 
+	for (i = 0; hids[i]; i++) 
+		if (!strcmp(hid, hids[i]))
+			return (1);
+	return (0);
+}
+
+int
+acpi_matchhids(struct acpi_attach_args *aa, const char *hids[],
+    const char *driver)
+{
+
 	if (aa->aaa_dev == NULL || aa->aaa_node == NULL)
 		return (0);
-	for (i = 0; hids[i]; i++) {
-		if (!strcmp(aa->aaa_dev, hids[i])) {
-			dnprintf(5, "driver %s matches %s\n", driver, hids[i]);
-			return (1);
-		}
+	if (_acpi_matchhids(aa->aaa_dev, hids)) {
+		dnprintf(5, "driver %s matches %s\n", driver, hids[i]);
+		return (1);
 	}
 	return (0);
 }

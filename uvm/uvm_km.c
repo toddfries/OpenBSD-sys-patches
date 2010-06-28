@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_km.c,v 1.77 2010/06/27 03:03:49 thib Exp $	*/
+/*	$OpenBSD: uvm_km.c,v 1.79 2010/06/28 04:20:29 miod Exp $	*/
 /*	$NetBSD: uvm_km.c,v 1.42 2001/01/14 02:10:01 thorpej Exp $	*/
 
 /* 
@@ -700,23 +700,6 @@ uvm_km_page_init(void)
  * not zero filled.
  */
 
-#define UVM_KM_PAGES_LOWAT_MAX	(2048)
-#define UVM_KM_PAGES_HIWAT_MAX	(4 * UVM_KM_PAGES_LOWAT_MAX)
-
-struct uvm_km_pages {
-	struct	mutex mtx;
-
-	/* Low and high water mark for addresses. */
-	int	lowat;
-	int	hiwat;
-
-	/* Kernel address pool. */
-	int	free;
-	vaddr_t	page[UVM_KM_PAGES_HIWAT_MAX];
-
-	struct	proc *km_proc;
-};
-
 struct uvm_km_pages uvm_km_pages;
 
 void uvm_km_createthread(void *);
@@ -789,6 +772,7 @@ uvm_km_thread(void *arg)
 			msleep(&uvm_km_pages.km_proc, &uvm_km_pages.mtx,
 			    PVM, "kmalloc", 0);
 		}
+		mtx_leave(&uvm_km_pages.mtx);
 
 		for (i = 0; i < nitems(pg); i++) {
 			pg[i] = (vaddr_t)uvm_km_kmemalloc(kernel_map, NULL,
@@ -863,8 +847,7 @@ uvm_km_getpage_pla(int flags, int *slowdown, paddr_t low, paddr_t high,
 	atomic_setbits_int(&pg->pg_flags, PG_FAKE);
 	UVM_PAGE_OWN(pg, NULL);
 
-	pmap_enter(kernel_map->pmap, va, VM_PAGE_TO_PHYS(pg), UVM_PROT_RW,
-	    PMAP_WIRED | VM_PROT_READ | VM_PROT_WRITE);
+	pmap_kenter_pa(va, VM_PAGE_TO_PHYS(pg), UVM_PROT_RW);
 	pmap_update(kernel_map->pmap);
 
 #endif	/* !__HAVE_PMAP_DIRECT */
@@ -887,7 +870,7 @@ uvm_km_putpage(void *v)
 
 	KASSERT(pg != NULL);
 
-	pmap_remove(kernel_map->pmap, va, va + PAGE_SIZE);
+	pmap_kremove(va, PAGE_SIZE);
 	pmap_update(kernel_map->pmap);
 
 	mtx_enter(&uvm_km_pages.mtx);
