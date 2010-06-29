@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.70 2010/05/02 22:59:11 kettenis Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.73 2010/06/29 04:54:26 jsing Exp $	*/
 
 /*
  * Copyright (c) 1999-2004 Michael Shalayeff
@@ -41,6 +41,7 @@
 #include <sys/pool.h>
 
 #include <machine/cpufunc.h>
+#include <machine/fpu.h>
 #include <machine/pmap.h>
 #include <machine/pcb.h>
 
@@ -52,11 +53,8 @@ extern struct pool hppa_fppl;
  * Dump the machine specific header information at the start of a core dump.
  */
 int
-cpu_coredump(p, vp, cred, core)
-	struct proc *p;
-	struct vnode *vp;
-	struct ucred *cred;
-	struct core *core;
+cpu_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
+    struct core *core)
 {
 	struct md_coredump md_core;
 	struct coreseg cseg;
@@ -93,15 +91,9 @@ cpu_coredump(p, vp, cred, core)
 }
 
 void
-cpu_fork(p1, p2, stack, stacksize, func, arg)
-	struct proc *p1, *p2;
-	void *stack;
-	size_t stacksize;
-	void (*func)(void *);
-	void *arg;
+cpu_fork(struct proc *p1, struct proc *p2, void *stack, size_t stacksize,
+    void (*func)(void *), void *arg)
 {
-	extern paddr_t fpu_curpcb;	/* from locore.S */
-	extern u_int fpu_enable;
 	struct pcb *pcbp;
 	struct trapframe *tf;
 	register_t sp, osp;
@@ -110,11 +102,7 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	if (round_page(sizeof(struct user)) > NBPG)
 		panic("USPACE too small for user");
 #endif
-	if (p1->p_md.md_regs->tf_cr30 == fpu_curpcb) {
-		mtctl(fpu_enable, CR_CCR);
-		fpu_save(fpu_curpcb);
-		mtctl(0, CR_CCR);
-	}
+	fpu_proc_save(p1);
 
 	pcbp = &p2->p_addr->u_pcb;
 	bcopy(&p1->p_addr->u_pcb, pcbp, sizeof(*pcbp));
@@ -176,17 +164,12 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 }
 
 void
-cpu_exit(p)
-	struct proc *p;
+cpu_exit(struct proc *p)
 {
-	extern paddr_t fpu_curpcb;	/* from locore.S */
-	struct trapframe *tf = p->p_md.md_regs;
 	struct pcb *pcb = &p->p_addr->u_pcb;
 
-	if (fpu_curpcb == tf->tf_cr30) {
-		fpu_exit();
-		fpu_curpcb = 0;
-	}
+	fpu_proc_flush(p);
+
 	pool_put(&hppa_fppl, pcb->pcb_fpregs);
 
 	pmap_deactivate(p);
@@ -197,9 +180,7 @@ cpu_exit(p)
  * Map an IO request into kernel virtual address space.
  */
 void
-vmapbuf(bp, len)
-	struct buf *bp;
-	vsize_t len;
+vmapbuf(struct buf *bp, vsize_t len)
 {
 	struct pmap *pm = vm_map_pmap(&bp->b_proc->p_vmspace->vm_map);
 	vaddr_t kva, uva;
@@ -234,9 +215,7 @@ vmapbuf(bp, len)
  * Unmap IO request from the kernel virtual address space.
  */
 void
-vunmapbuf(bp, len)
-	struct buf *bp;
-	vsize_t len;
+vunmapbuf(struct buf *bp, vsize_t len)
 {
 	vaddr_t addr, off;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.109 2010/06/28 23:00:30 guenther Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.111 2010/06/29 02:46:43 tedu Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -97,12 +97,10 @@ cansignal(struct proc *p, struct pcred *pc, struct proc *q, int signum)
 	if (p == q)
 		return (1);		/* process can always signal itself */
 
-#ifdef RTHREADS
 	/* a thread can only be signalled from within the same process */
 	if (q->p_flag & P_THREAD) {
 		return (p->p_p == q->p_p);
 	}
-#endif
 
 	if (signum == SIGCONT && q->p_session == p->p_session)
 		return (1);		/* SIGCONT in session */
@@ -572,45 +570,41 @@ sys_kill(struct proc *cp, void *v, register_t *retval)
 	} */ *uap = v;
 	struct proc *p;
 	struct pcred *pc = cp->p_cred;
+	int pid = SCARG(uap, pid);
+	int signum = SCARG(uap, signum);
 
-	if ((u_int)SCARG(uap, signum) >= NSIG)
+	if (((u_int)signum) >= NSIG)
 		return (EINVAL);
-	if (SCARG(uap, pid) > 0) {
+	if (pid > 0) {
 		enum signal_type type = SPROCESS;
 
-#ifdef RTHREADS
-		if (SCARG(uap, pid) > THREAD_PID_OFFSET) {
-			if ((p = pfind(SCARG(uap, pid)
-					- THREAD_PID_OFFSET)) == NULL)
+		if (pid > THREAD_PID_OFFSET) {
+			if ((p = pfind(pid - THREAD_PID_OFFSET)) == NULL)
 				return (ESRCH);
 			if (p->p_flag & P_THREAD)
 				return (ESRCH);
 			type = STHREAD;
-		} else
-#endif
-		{
-			if ((p = pfind(SCARG(uap, pid))) == NULL)
+		} else {
+			if ((p = pfind(pid)) == NULL)
 				return (ESRCH);
-#ifdef RTHREADS
 			if (p->p_flag & P_THREAD)
 				type = STHREAD;
-#endif
 		}
 
 		/* kill single process */
-		if (!cansignal(cp, pc, p, SCARG(uap, signum)))
+		if (!cansignal(cp, pc, p, signum))
 			return (EPERM);
-		if (SCARG(uap, signum))
-			ptsignal(p, SCARG(uap, signum), type);
+		if (signum)
+			ptsignal(p, signum, type);
 		return (0);
 	}
-	switch (SCARG(uap, pid)) {
+	switch (pid) {
 	case -1:		/* broadcast signal */
-		return (killpg1(cp, SCARG(uap, signum), 0, 1));
+		return (killpg1(cp, signum, 0, 1));
 	case 0:			/* signal own process group */
-		return (killpg1(cp, SCARG(uap, signum), 0, 0));
+		return (killpg1(cp, signum, 0, 0));
 	default:		/* negative explicit process group */
-		return (killpg1(cp, SCARG(uap, signum), -SCARG(uap, pid), 0));
+		return (killpg1(cp, signum, -pid, 0));
 	}
 	/* NOTREACHED */
 }
@@ -800,9 +794,7 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 	int s, prop;
 	sig_t action;
 	int mask;
-#ifdef RTHREADS
 	struct proc *q;
-#endif
 	int wakeparent = 0;
 
 #ifdef DIAGNOSTIC
@@ -816,7 +808,6 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 
 	mask = sigmask(signum);
 
-#ifdef RTHREADS
 	if (type == SPROCESS) {
 		TAILQ_FOREACH(q, &p->p_p->ps_threads, p_thr_link) {
 			/* ignore exiting threads */
@@ -830,7 +821,6 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 			}
 		}
 	}
-#endif
 
 	if (type != SPROPAGATED)
 		KNOTE(&p->p_p->ps_klist, NOTE_SIGNAL | signum);
@@ -842,15 +832,12 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 	 */
 	if (p->p_flag & P_TRACED)
 		action = SIG_DFL;
-#ifdef RTHREADS
 	else if (p->p_sigdivert & mask) {
 		p->p_sigwait = signum;
 		atomic_clearbits_int(&p->p_sigdivert, ~0);
 		action = SIG_CATCH;
 		wakeup(&p->p_sigdivert);
-	}
-#endif
-	else {
+	} else {
 		/*
 		 * If the signal is being ignored,
 		 * then we forget about it immediately.
@@ -892,7 +879,6 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 
 	atomic_setbits_int(&p->p_siglist, mask);
 
-#ifdef RTHREADS
 	/*
 	 * XXX delay processing of SA_STOP signals unless action == SIG_DFL?
 	 */
@@ -902,7 +888,6 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 				ptsignal(q, signum, SPROPAGATED);
 		}
 	}
-#endif
 
 	/*
 	 * Defer further processing for signals which are held,
@@ -1550,7 +1535,6 @@ sys_nosys(struct proc *p, void *v, register_t *retval)
 	return (ENOSYS);
 }
 
-#ifdef RTHREADS
 int
 sys_thrsigdivert(struct proc *p, void *v, register_t *retval)
 {
@@ -1563,6 +1547,9 @@ sys_thrsigdivert(struct proc *p, void *v, register_t *retval)
 	sigset_t *m;
 	long long to_ticks = 0;
 	int error;
+
+	if (!rthreads_enabled)
+		return (ENOTSUP);
 
 	m = NULL;
 	mask = SCARG(uap, sigmask) &~ sigcantmask;
@@ -1618,7 +1605,6 @@ sys_thrsigdivert(struct proc *p, void *v, register_t *retval)
 	}
 	return (error);
 }
-#endif
 
 void
 initsiginfo(siginfo_t *si, int sig, u_long code, int type, union sigval val)
