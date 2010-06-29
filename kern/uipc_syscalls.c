@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_syscalls.c,v 1.70 2009/02/22 07:47:22 otto Exp $	*/
+/*	$OpenBSD: uipc_syscalls.c,v 1.74 2009/12/23 07:40:31 guenther Exp $	*/
 /*	$NetBSD: uipc_syscalls.c,v 1.19 1996/02/09 19:00:48 christos Exp $	*/
 
 /*
@@ -53,6 +53,8 @@
 
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
+
+#include <net/route.h>
 
 /*
  * System call interface to the socket abstraction.
@@ -176,7 +178,7 @@ sys_accept(struct proc *p, void *v, register_t *retval)
 			head->so_error = ECONNABORTED;
 			break;
 		}
-		error = tsleep(&head->so_timeo, PSOCK | PCATCH, netcon, 0);
+		error = tsleep(&head->so_timeo, PSOCK | PCATCH, "netcon", 0);
 		if (error) {
 			goto bad;
 		}
@@ -209,10 +211,7 @@ sys_accept(struct proc *p, void *v, register_t *retval)
 		 * do another wakeup so some other process might
 		 * have a chance at it.
 		 */
-		so->so_head = head;
-		head->so_qlen++;
-		so->so_onq = &head->so_q;
-		TAILQ_INSERT_HEAD(so->so_onq, so, so_qe);
+		soqinsque(head, so, 1);
 		wakeup_one(&head->so_timeo);
 		goto bad;
 	}
@@ -287,7 +286,7 @@ sys_connect(struct proc *p, void *v, register_t *retval)
 	s = splsoftnet();
 	while ((so->so_state & SS_ISCONNECTING) && so->so_error == 0) {
 		error = tsleep(&so->so_timeo, PSOCK | PCATCH,
-		    netcon, 0);
+		    "netcon2", 0);
 		if (error)
 			break;
 	}
@@ -1092,5 +1091,35 @@ getsock(struct filedesc *fdp, int fdes, struct file **fpp)
 	*fpp = fp;
 	FREF(fp);
 
+	return (0);
+}
+
+/* ARGSUSED */
+int
+sys_setrdomain(struct proc *p, void *v, register_t *retval)
+{
+	struct sys_setrdomain_args /* {
+		syscallarg(int) rdomain;
+	} */ *uap = v;
+	int rdomain, error;
+
+	rdomain = SCARG(uap, rdomain);
+
+	if (p->p_p->ps_rdomain == (u_int)rdomain)
+		return (0);
+	if (p->p_p->ps_rdomain != 0 && (error = suser(p, 0)) != 0)
+		return (error);
+	if (rdomain < 0 || !rtable_exists((u_int)rdomain))
+		return (EINVAL);
+
+	p->p_p->ps_rdomain = (u_int)rdomain;
+	return (0);
+}
+
+/* ARGSUSED */
+int
+sys_getrdomain(struct proc *p, void *v, register_t *retval)
+{
+	*retval = (int)p->p_p->ps_rdomain;
 	return (0);
 }

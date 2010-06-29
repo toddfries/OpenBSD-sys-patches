@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.2 2006/05/20 12:06:51 miod Exp $
+#	$OpenBSD: GENERIC,v 1.5 2010/04/21 19:33:47 miod Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -19,7 +19,7 @@ option		M88100
 
 # Supported models
 option		AV400		# 100, 200, 300, 400, 3000, 4000, 4300
-#option		AV530		# 4600, 530
+option		AV530		# 4600, 530
 #option		AV5000		# 5000, 6000
 #option		AV6280		# 6280, 8000-8
 
@@ -60,7 +60,8 @@ le0	at syscon? offset 0x8c000 ipl 1		# on-board ethernet
 
 dart1	at syscon? offset 0x82040 ipl 3
 #ssi0	at syscon? offset 0x8d000 ipl 3
-#oosiop0	at syscon? offset 0xb0000 ipl 2
+oosiop0	at syscon? offset 0xb0000 ipl 2
+oosiop1	at syscon? offset 0xb0080 ipl 2
 #ile0	at syscon? offset 0xb00c0 ipl 1
 #ile1	at syscon? offset 0xb0140 ipl 1
 
@@ -80,3 +81,18 @@ le*	at vme? a32 0x55980000 a16 0x5000 ipl 1
 
 # VDA/255 Serial Host Adapter (on-board on model 4300)
 #vda0	at vme? a32 0x60000000
+
+#
+# SCSI devices
+#
+
+scsibus* at oosiop?
+
+sd*	at scsibus?
+st*	at scsibus?
+cd*	at scsibus?
+ch*	at scsibus?
+ss*	at scsibus?
+safte*	at scsibus?
+ses*	at scsibus?
+uk*	at scsibus?

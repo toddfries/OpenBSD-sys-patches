@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.c,v 1.87 2009/06/07 02:01:54 oga Exp $	*/
+/*	$OpenBSD: uvm_page.c,v 1.101 2010/06/27 03:03:49 thib Exp $	*/
 /*	$NetBSD: uvm_page.c,v 1.44 2000/11/27 08:40:04 chs Exp $	*/
 
 /* 
@@ -77,8 +77,20 @@
 #include <sys/kernel.h>
 #include <sys/vnode.h>
 #include <sys/mount.h>
+#include <sys/proc.h>
 
 #include <uvm/uvm.h>
+
+/*
+ * for object trees
+ */
+RB_GENERATE(uvm_objtree, vm_page, objt, uvm_pagecmp);
+
+int
+uvm_pagecmp(struct vm_page *a, struct vm_page *b)
+{
+	return (a->offset < b->offset ? -1 : a->offset > b->offset);
+}
 
 /*
  * global vars... XXXCDC: move to uvm. structure.
@@ -136,7 +148,7 @@ static void uvm_pageremove(struct vm_page *);
  * uvm_pageinsert: insert a page in the object
  *
  * => caller must lock object
- * => caller must lock page queues
+ * => caller must lock page queues XXX questionable
  * => call should have already set pg's object and offset pointers
  *    and bumped the version counter
  */
@@ -147,8 +159,8 @@ uvm_pageinsert(struct vm_page *pg)
 	UVMHIST_FUNC("uvm_pageinsert"); UVMHIST_CALLED(pghist);
 
 	KASSERT((pg->pg_flags & PG_TABLED) == 0);
-
-	RB_INSERT(uobj_pgs, &pg->uobject->memt, pg);
+	/* XXX should we check duplicates? */	
+	RB_INSERT(uvm_objtree, &pg->uobject->memt, pg);
 	atomic_setbits_int(&pg->pg_flags, PG_TABLED);
 	pg->uobject->uo_npages++;
 }
@@ -166,22 +178,13 @@ uvm_pageremove(struct vm_page *pg)
 	UVMHIST_FUNC("uvm_pageremove"); UVMHIST_CALLED(pghist);
 
 	KASSERT(pg->pg_flags & PG_TABLED);
-	/* object should be locked */
-	RB_REMOVE(uobj_pgs, &pg->uobject->memt, pg);
+	RB_REMOVE(uvm_objtree, &pg->uobject->memt, pg);
 
-	atomic_clearbits_int(&pg->pg_flags, PG_TABLED|PQ_AOBJ);
+	atomic_clearbits_int(&pg->pg_flags, PG_TABLED);
 	pg->uobject->uo_npages--;
 	pg->uobject = NULL;
 	pg->pg_version++;
 }
-
-int
-uvm_pagecmp(struct vm_page *a, struct vm_page *b)
-{
-	return (a->offset < b->offset ? -1 : a->offset > b->offset);
-}
-
-RB_GENERATE(uobj_pgs, vm_page, fq.queues.tree, uvm_pagecmp);
 
 /*
  * uvm_page_init: init the page system.   called from uvm_init().
@@ -264,9 +267,9 @@ uvm_page_init(vaddr_t *kvm_startp, vaddr_t *kvm_endp)
 	for (lcv = 0 ; lcv < vm_nphysseg ; lcv++) {
 		n = vm_physmem[lcv].end - vm_physmem[lcv].start;
 		if (n > pagecount) {
-			printf("uvm_page_init: lost %ld page(s) in init\n",
+			panic("uvm_page_init: lost %ld page(s) in init\n",
 			    (long)(n - pagecount));
-			panic("uvm_page_init");  /* XXXCDC: shouldn't happen? */
+			    /* XXXCDC: shouldn't happen? */
 			/* n = pagecount; */
 		}
 
@@ -289,7 +292,9 @@ uvm_page_init(vaddr_t *kvm_startp, vaddr_t *kvm_endp)
 			}
 		}
 
-		/* add pages to free pool */
+		/*
+		 * Add pages to free pool.
+		 */
 		uvm_pmr_freepages(&vm_physmem[lcv].pgs[
 		    vm_physmem[lcv].avail_start - vm_physmem[lcv].start],
 		    vm_physmem[lcv].avail_end - vm_physmem[lcv].avail_start);
@@ -453,9 +458,9 @@ uvm_pageboot_alloc(vsize_t size)
  */
 
 /* subroutine: try to allocate from memory chunks on the specified freelist */
-boolean_t uvm_page_physget_freelist(paddr_t *, int);
+static boolean_t uvm_page_physget_freelist(paddr_t *, int);
 
-boolean_t
+static boolean_t
 uvm_page_physget_freelist(paddr_t *paddrp, int freelist)
 {
 	int lcv, x;
@@ -619,19 +624,18 @@ uvm_page_physload_flags(paddr_t start, paddr_t end, paddr_t avail_start,
 		 * XXXCDC: need some sort of lockout for this case
 		 * right now it is only used by devices so it should be alright.
 		 */
-		paddr_t paddr;
+ 		paddr_t paddr;
 
-		npages = end - start;  /* # of pages */
+ 		npages = end - start;  /* # of pages */
 
 		pgs = (struct vm_page *)uvm_km_zalloc(kernel_map,
-		    sizeof(struct vm_page) * npages);
+		    npages * sizeof(*pgs));
 		if (pgs == NULL) {
 			printf("uvm_page_physload: can not malloc vm_page "
 			    "structs for segment\n");
 			printf("\tignoring 0x%lx -> 0x%lx\n", start, end);
 			return;
 		}
-
 		/* init phys_addr and free pages, XXX uvmexp.npages */
 		for (lcv = 0, paddr = ptoa(start); lcv < npages;
 		    lcv++, paddr += PAGE_SIZE) {
@@ -648,13 +652,19 @@ uvm_page_physload_flags(paddr_t start, paddr_t end, paddr_t avail_start,
 				} else {
 #if defined(VM_PHYSSEG_NOADD)
 		panic("uvm_page_physload: tried to add RAM after vm_mem_init");
-#else
-					uvm_pagefree(&pgs[lcv]);
 #endif
 				}
 			}
 		}
-		/* XXXCDC: incomplete: need to update uvmexp.free, what else? */
+
+		/*
+		 * Add pages to free pool.
+		 */
+		if ((flags & PHYSLOAD_DEVICE) == 0) {
+			uvm_pmr_freepages(&pgs[avail_start - start],
+			    avail_end - avail_start);
+		}
+
 		/* XXXCDC: need hook to tell pmap to rebuild pv_list, etc... */
 	} else {
 
@@ -740,8 +750,8 @@ uvm_page_physdump(void)
 {
 	int lcv;
 
-	printf("rehash: physical memory config [segs=%d of %d]:\n",
-				 vm_nphysseg, VM_PHYSSEG_MAX);
+	printf("uvm_page_physdump: physical memory config [segs=%d of %d]:\n",
+	    vm_nphysseg, VM_PHYSSEG_MAX);
 	for (lcv = 0 ; lcv < vm_nphysseg ; lcv++)
 		printf("0x%llx->0x%llx [0x%llx->0x%llx]\n",
 		    (long long)vm_physmem[lcv].start,
@@ -767,32 +777,52 @@ uvm_shutdown(void)
 }
 
 /*
+ * Perform insert of a given page in the specified anon of obj.
+ * This is basically, uvm_pagealloc, but with the page already given.
+ */
+void
+uvm_pagealloc_pg(struct vm_page *pg, struct uvm_object *obj, voff_t off,
+    struct vm_anon *anon)
+{
+	int	flags;
+
+	flags = PG_BUSY | PG_FAKE;
+	pg->offset = off;
+	pg->uobject = obj;
+	pg->uanon = anon;
+
+	if (anon) {
+		anon->an_page = pg;
+		flags |= PQ_ANON;
+	} else if (obj)
+		uvm_pageinsert(pg);
+	atomic_setbits_int(&pg->pg_flags, flags);
+#if defined(UVM_PAGE_TRKOWN)
+	pg->owner_tag = NULL;
+#endif
+	UVM_PAGE_OWN(pg, "new alloc");
+}
+
+/*
  * uvm_pagealloc_strat: allocate vm_page from a particular free list.
  *
  * => return null if no pages free
  * => wake up pagedaemon if number of free pages drops below low water mark
- * => if obj != NULL, obj must be locked (to put in hash)
+ * => if obj != NULL, obj must be locked (to put in tree)
  * => if anon != NULL, anon must be locked (to put in anon)
  * => only one of obj or anon can be non-null
  * => caller must activate/deactivate page if it is not wired.
- * => free_list is ignored if strat == UVM_PGA_STRAT_NORMAL.
- * => policy decision: it is more important to pull a page off of the
- *	appropriate priority free list than it is to get a zero'd or
- *	unknown contents page.  This is because we live with the
- *	consequences of a bad free list decision for the entire
- *	lifetime of the page, e.g. if the page comes from memory that
- *	is slower to access.
  */
 
 struct vm_page *
-uvm_pagealloc_strat(struct uvm_object *obj, voff_t off, struct vm_anon *anon,
-    int flags, int strat, int free_list)
+uvm_pagealloc(struct uvm_object *obj, voff_t off, struct vm_anon *anon,
+    int flags)
 {
+	struct vm_page *pg;
 	struct pglist pgl;
 	int pmr_flags;
-	struct vm_page *pg;
 	boolean_t use_reserve;
-	UVMHIST_FUNC("uvm_pagealloc_strat"); UVMHIST_CALLED(pghist);
+	UVMHIST_FUNC("uvm_pagealloc"); UVMHIST_CALLED(pghist);
 
 	KASSERT(obj == NULL || anon == NULL);
 	KASSERT(off == trunc_page(off));
@@ -803,8 +833,8 @@ uvm_pagealloc_strat(struct uvm_object *obj, voff_t off, struct vm_anon *anon,
 	 */
 	if ((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freemin ||
 	    ((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freetarg &&
-	     uvmexp.inactive < uvmexp.inactarg))
-		wakeup(&uvm.pagedaemon_proc);
+	    (uvmexp.inactive + BUFPAGES_INACT) < uvmexp.inactarg))
+		wakeup(&uvm.pagedaemon);
 
 	/*
 	 * fail if any of these conditions is true:
@@ -829,28 +859,15 @@ uvm_pagealloc_strat(struct uvm_object *obj, voff_t off, struct vm_anon *anon,
 	TAILQ_INIT(&pgl);
 	if (uvm_pmr_getpages(1, 0, 0, 1, 0, 1, pmr_flags, &pgl) != 0)
 		goto fail;
-	pg = TAILQ_FIRST(&pgl);
-	KASSERT(pg != NULL);
-	KASSERT(TAILQ_NEXT(pg, pageq) == NULL);
 
-	pg->offset = off;
-	pg->uobject = obj;
-	pg->uanon = anon;
+	pg = TAILQ_FIRST(&pgl);
+	KASSERT(pg != NULL && TAILQ_NEXT(pg, pageq) == NULL);
+
+	uvm_pagealloc_pg(pg, obj, off, anon);
 	KASSERT((pg->pg_flags & PG_DEV) == 0);
-	pg->pg_flags = PG_BUSY|PG_FAKE;
-	if (!(flags & UVM_PGA_ZERO))
-		atomic_setbits_int(&pg->pg_flags, PG_CLEAN);
-	if (anon) {
-		anon->an_page = pg;
-		atomic_setbits_int(&pg->pg_flags, PQ_ANON);
-	} else {
-		if (obj)
-			uvm_pageinsert(pg);
-	}
-#if defined(UVM_PAGE_TRKOWN)
-	pg->owner_tag = NULL;
-#endif
-	UVM_PAGE_OWN(pg, "new alloc");
+	atomic_setbits_int(&pg->pg_flags, PG_BUSY|PG_CLEAN|PG_FAKE);
+	if (flags & UVM_PGA_ZERO)
+		atomic_clearbits_int(&pg->pg_flags, PG_CLEAN);
 
 	UVMHIST_LOG(pghist, "allocated pg %p/%lx", pg,
 	    (u_long)VM_PAGE_TO_PHYS(pg), 0, 0);
@@ -907,7 +924,6 @@ uvm_pagerealloc(struct vm_page *pg, struct uvm_object *newobj, voff_t newoff)
 void
 uvm_pagefree(struct vm_page *pg)
 {
-	struct pglist pgl;
 	int saved_loan_count = pg->loan_count;
 	UVMHIST_FUNC("uvm_pagefree"); UVMHIST_CALLED(pghist);
 
@@ -941,7 +957,7 @@ uvm_pagefree(struct vm_page *pg)
 		if (saved_loan_count)
 			atomic_clearbits_int(&pg->pg_flags, PG_CLEAN);
 		uvm_pageremove(pg);
-		
+
 		/*
 		 * if our page was on loan, then we just lost control over it
 		 * (in fact, if it was loaned to an anon, the anon may have
@@ -995,41 +1011,29 @@ uvm_pagefree(struct vm_page *pg)
 		uvmexp.wired--;
 	}
 	if (pg->uanon) {
-		atomic_clearbits_int(&pg->pg_flags, PQ_ANON);
 		pg->uanon->an_page = NULL;
 		pg->uanon = NULL;
-#ifdef UBC
-		uvm_pgcnt_anon--;
-#endif
+		atomic_clearbits_int(&pg->pg_flags, PQ_ANON);
 	}
 
 	/*
 	 * Clean page state bits.
 	 */
-	atomic_clearbits_int(&pg->pg_flags, PG_ZERO|PG_FAKE|PG_BUSY|
-	    PG_RELEASED|PG_CLEAN|PG_CLEANCHK|PQ_ENCRYPT);
-	/*
-	 * Pmap flag cleaning.
-	 * XXX: Shouldn't pmap do this?
-	 */
-	atomic_clearbits_int(&pg->pg_flags,
-	    PG_PMAP0|PG_PMAP1|PG_PMAP2|PG_PMAP3);
+	atomic_clearbits_int(&pg->pg_flags, PQ_AOBJ); /* XXX: find culprit */
+	atomic_clearbits_int(&pg->pg_flags, PQ_ENCRYPT|
+	    PG_ZERO|PG_FAKE|PG_BUSY|PG_RELEASED|PG_CLEAN|PG_CLEANCHK);
 
-#if defined(DIAGNOSTIC)
-	if (pg->pg_flags != 0) {
-		panic("uvm_pagefree: expected page %p pg_flags to be 0\n"
-		    "uvm_pagefree: instead of pg->pg_flags = %x\n",
-		    VM_PAGE_TO_PHYS(pg), pg->pg_flags);
-	}
-#endif
+	/*
+	 * and put on free queue
+	 */
+
 #ifdef DEBUG
 	pg->uobject = (void *)0xdeadbeef;
 	pg->offset = 0xdeadbeef;
 	pg->uanon = (void *)0xdeadbeef;
 #endif
-	TAILQ_INIT(&pgl);
-	TAILQ_INSERT_HEAD(&pgl, pg, pageq);
-	uvm_pmr_freepageq(&pgl);
+
+	uvm_pmr_freepages(pg, 1);
 
 	if (uvmexp.zeropages < UVM_PAGEZERO_TARGET)
 		uvm.page_idle_zero = vm_page_zero_enable;
@@ -1132,7 +1136,7 @@ uvm_page_own(struct vm_page *pg, char *tag)
 void
 uvm_pageidlezero(void)
 {
-#if 0 /* Disabled for now. */
+#if 0 /* disabled: need new code */
 	struct vm_page *pg;
 	struct pgfreelist *pgfl;
 	int free_list;
@@ -1296,10 +1300,11 @@ PHYS_TO_VM_PAGE(paddr_t pa)
 struct vm_page *
 uvm_pagelookup(struct uvm_object *obj, voff_t off)
 {
-	struct vm_page find;
+	/* XXX if stack is too much, handroll */
+	struct vm_page pg;
 
-	find.offset = off;
-	return (RB_FIND(uobj_pgs, &obj->memt, &find));
+	pg.offset = off;
+	return (RB_FIND(uvm_objtree, &obj->memt, &pg));
 }
 
 /*
@@ -1357,8 +1362,6 @@ uvm_pageunwire(struct vm_page *pg)
 void
 uvm_pagedeactivate(struct vm_page *pg)
 {
-	pmap_page_protect(pg, VM_PROT_NONE);
-
 	if (pg->pg_flags & PQ_ACTIVE) {
 		TAILQ_REMOVE(&uvm.page_active, pg, pageq);
 		atomic_clearbits_int(&pg->pg_flags, PQ_ACTIVE);

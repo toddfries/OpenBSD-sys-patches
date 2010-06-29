@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.103 2009/04/14 09:13:25 art Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.112 2010/06/27 03:26:39 guenther Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -141,10 +141,9 @@ sys_rfork(struct proc *p, void *v, register_t *retval)
 
 	if (rforkflags & RFMEM)
 		flags |= FORK_SHAREVM;
-#ifdef RTHREADS
+
 	if (rforkflags & RFTHREAD)
-		flags |= FORK_THREAD | FORK_SIGHAND;
-#endif
+		flags |= FORK_THREAD | FORK_SIGHAND | FORK_NOZOMBIE;
 
 	return (fork1(p, SIGCHLD, flags, NULL, 0, NULL, NULL, retval, NULL));
 }
@@ -153,15 +152,19 @@ sys_rfork(struct proc *p, void *v, register_t *retval)
  * Allocate and initialize a new process.
  */
 void
-process_new(struct proc *newproc, struct proc *parent)
+process_new(struct proc *newproc, struct proc *parentproc)
 {
-	struct process *pr;
+	struct process *pr, *parent;
 
-	pr = pool_get(&process_pool, PR_WAITOK);
+	pr = pool_get(&process_pool, PR_WAITOK | PR_ZERO);
 	pr->ps_mainproc = newproc;
 	TAILQ_INIT(&pr->ps_threads);
 	TAILQ_INSERT_TAIL(&pr->ps_threads, newproc, p_thr_link);
 	pr->ps_refcnt = 1;
+
+	parent = parentproc->p_p;
+	pr->ps_rdomain = parent->ps_rdomain;
+
 	newproc->p_p = pr;
 }
 
@@ -185,6 +188,20 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 #if NSYSTRACE > 0
 	void *newstrp = NULL;
 #endif
+
+	/* sanity check some flag combinations */
+	if (flags & FORK_THREAD)
+	{
+#ifdef RTHREADS
+		if ((flags & (FORK_SIGHAND | FORK_NOZOMBIE)) !=
+		    (FORK_SIGHAND | FORK_NOZOMBIE))
+			return (EINVAL);
+#else
+		return (ENOTSUP);
+#endif
+	}
+	if (flags & FORK_SIGHAND && (flags & FORK_SHAREVM) == 0)
+		return (EINVAL);
 
 	/*
 	 * Although process entries are dynamically created, we still keep
@@ -265,7 +282,6 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	 * Increase reference counts on shared objects.
 	 * The p_stats and p_sigacts substructs are set in vm_fork.
 	 */
-	p2->p_emul = p1->p_emul;
 	if (p1->p_flag & P_PROFIL)
 		startprofclock(p2);
 	atomic_setbits_int(&p2->p_flag, p1->p_flag & (P_SUGID | P_SUGIDEXEC));
@@ -286,7 +302,7 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	/* bump references to the text vnode (for procfs) */
 	p2->p_textvp = p1->p_textvp;
 	if (p2->p_textvp)
-		VREF(p2->p_textvp);
+		vref(p2->p_textvp);
 
 	if (flags & FORK_CLEANFILES)
 		p2->p_fd = fdinit(p1);
@@ -332,7 +348,7 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	if (p1->p_traceflag & KTRFAC_INHERIT) {
 		p2->p_traceflag = p1->p_traceflag;
 		if ((p2->p_tracep = p1->p_tracep) != NULL)
-			VREF(p2->p_tracep);
+			vref(p2->p_tracep);
 	}
 #endif
 
@@ -393,6 +409,7 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 #endif
 
 	/* Find an unused pid satisfying 1 <= lastpid <= PID_MAX */
+	rw_enter_write(&allproclk);
 	do {
 		lastpid = 1 + (randompid ? arc4random() : lastpid) % PID_MAX;
 	} while (pidtaken(lastpid));
@@ -400,6 +417,7 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 
 	LIST_INSERT_HEAD(&allproc, p2, p_list);
 	LIST_INSERT_HEAD(PIDHASH(p2->p_pid), p2, p_hash);
+	rw_exit_write(&allproclk);
 	LIST_INSERT_HEAD(&p1->p_children, p2, p_sibling);
 	LIST_INSERT_AFTER(p1, p2, p_pglist);
 	if (p2->p_flag & P_TRACED) {
@@ -442,10 +460,11 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	/*
 	 * Notify any interested parties about the new process.
 	 */
-	KNOTE(&p1->p_klist, NOTE_FORK | p2->p_pid);
+	if ((flags & FORK_THREAD) == 0)
+		KNOTE(&p1->p_p->ps_klist, NOTE_FORK | p2->p_pid);
 
 	/*
-	 * Update stats now that we know the fork was successfull.
+	 * Update stats now that we know the fork was successful.
 	 */
 	uvmexp.forks++;
 	if (flags & FORK_PPWAIT)
@@ -498,7 +517,7 @@ pidtaken(pid_t pid)
 	if (pgfind(pid) != NULL)
 		return (1);
 	LIST_FOREACH(p, &zombproc, p_list)
-		if (p->p_pid == pid || p->p_pgid == pid)
+		if (p->p_pid == pid || (p->p_pgrp && p->p_pgrp->pg_id == pid))
 			return (1);
 	return (0);
 }

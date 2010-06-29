@@ -1,4 +1,4 @@
-/*	$OpenBSD: sockio.h,v 1.45 2009/06/05 00:05:22 claudio Exp $	*/
+/*	$OpenBSD: sockio.h,v 1.47 2010/06/26 19:49:54 claudio Exp $	*/
 /*	$NetBSD: sockio.h,v 1.5 1995/08/23 00:40:47 thorpej Exp $	*/
 
 /*-
@@ -175,6 +175,12 @@
 
 #define	SIOCSIFRTABLEID	 _IOW('i', 159, struct ifreq)	/* set ifnet VRF id */
 #define	SIOCGIFRTABLEID	_IOWR('i', 160, struct ifreq)	/* get ifnet VRF id */
+
+#define	SIOCSLIFPHYRTABLEID _IOW('i', 161, struct ifreq) /* set tunnel VRF id */
+#define	SIOCGLIFPHYRTABLEID _IOWR('i', 162, struct ifreq) /* get tunnel id */
+
+#define SIOCSETKALIVE	_IOW('i', 163, struct ifkalivereq)
+#define SIOCGETKALIVE	_IOWR('i', 164, struct ifkalivereq)
 
 #define	SIOCSVH		_IOWR('i', 245, struct ifreq)	/* set carp param */
 #define	SIOCGVH		_IOWR('i', 246, struct ifreq)	/* get carp param */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.172 2009/06/03 21:30:19 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.189 2010/06/27 03:03:48 thib Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff
@@ -48,9 +48,6 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/extent.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
@@ -119,7 +116,7 @@ int dcache_stride, dcache_line_mask;
  */
 volatile u_int8_t *machine_ledaddr;
 int machine_ledword, machine_leds;
-struct cpu_info cpu_info_primary;
+struct cpu_info cpu_info[HPPA_MAXCPUS];
 
 /*
  * CPU params (should be the same for all cpus in the system)
@@ -158,12 +155,19 @@ dev_t	bootdev;
 int	physmem, resvmem, resvphysmem, esym;
 paddr_t	avail_end;
 
+#ifdef MULTIPROCESSOR
+struct mutex mtx_atomic = MUTEX_INITIALIZER(IPL_NONE);
+#endif
+
 /*
  * Things for MI glue to stick on.
  */
 struct user *proc0paddr;
 long mem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(64) / sizeof(long)];
 struct extent *hppa_ex;
+struct pool hppa_fppl;
+struct fpreg proc0fpregs;
+struct consdev *cn_tab;
 
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
@@ -176,6 +180,12 @@ void dumpsys(void);
 void hpmc_dump(void);
 void cpuid(void);
 void blink_led_timeout(void *);
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
 
 /*
  * wide used hardware params
@@ -191,6 +201,9 @@ int sigdebug = 0;
 pid_t sigpid = 0;
 #define SDB_FOLLOW	0x01
 #endif
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 /*
  * Whatever CPU types we support
@@ -274,6 +287,8 @@ const struct hppa_cpu_typed {
 	{ "", 0 }
 };
 
+int	hppa_cpuspeed(int *mhz);
+
 int
 hppa_cpuspeed(int *mhz)
 {
@@ -288,7 +303,7 @@ hppa_init(start)
 {
 	extern u_long cpu_hzticks;
 	extern int kernel_text;
-	vaddr_t v, v1;
+	struct cpu_info *ci;
 	int error;
 
 	pdc_init();	/* init PDC iface, so we can call em easy */
@@ -358,6 +373,10 @@ hppa_init(start)
 		PAGE0->ivec_mempflen = (hppa_pfr_end - hppa_pfr + 1) * 4;
 	}
 
+	ci = curcpu();
+	ci->ci_cpl = IPL_NESTED;
+	ci->ci_psw = PSL_Q | PSL_P | PSL_C | PSL_D;
+
 	cpuid();
 	ptlball();
 	ficacheall();
@@ -387,25 +406,8 @@ hppa_init(start)
 	    EX_NOWAIT))
 		panic("cannot reserve main memory");
 
-	/*
-	 * Now allocate kernel dynamic variables
-	 */
-
-	v1 = v = round_page(start);
-#define valloc(name, type, num) (name) = (type *)v; v = (vaddr_t)((name)+(num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-#undef valloc
-	v = round_page(v);
-	bzero ((void *)v1, (v - v1));
-
 	/* sets resvphysmem */
-	pmap_bootstrap(v);
+	pmap_bootstrap(round_page(start));
 
 	/* space has been reserved in pmap_bootstrap() */
 	initmsgbuf((caddr_t)(ptoa(physmem) - round_page(MSGBUFSIZE)),
@@ -421,6 +423,9 @@ hppa_init(start)
 #endif
 	ficacheall();
 	fdcacheall();
+
+	proc0paddr->u_pcb.pcb_fpregs = &proc0fpregs;
+	pool_init(&hppa_fppl, sizeof(struct fpreg), 16, 0, 0, "hppafp", NULL);
 }
 
 void
@@ -570,7 +575,7 @@ cpuid()
 
 	/* force strong ordering for now */
 	if (p->features & HPPA_FTRS_W32B) {
-		kpsw |= PSL_O;
+		curcpu()->ci_psw |= PSL_O;
 	}
 
 	{
@@ -645,13 +650,6 @@ cpu_startup(void)
 	printf("real mem = %u (%uMB)\n", ptoa(physmem),
 	    ptoa(physmem) / 1024 / 1024);
 	printf("rsvd mem = %u (%uKB)\n", ptoa(resvmem), ptoa(resvmem) / 1024);
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -1227,11 +1225,12 @@ setregs(p, pack, stack, retval)
 		fpu_exit();
 		fpu_curpcb = 0;
 	}
-	pcb->pcb_fpregs[0] = ((u_int64_t)HPPA_FPU_INIT) << 32;
-	pcb->pcb_fpregs[1] = 0;
-	pcb->pcb_fpregs[2] = 0;
-	pcb->pcb_fpregs[3] = 0;
-	fdcache(HPPA_SID_KERNEL, (vaddr_t)pcb->pcb_fpregs, 8 * 4);
+	pcb->pcb_fpregs->fpr_regs[0] = ((u_int64_t)HPPA_FPU_INIT) << 32;
+	pcb->pcb_fpregs->fpr_regs[1] = 0;
+	pcb->pcb_fpregs->fpr_regs[2] = 0;
+	pcb->pcb_fpregs->fpr_regs[3] = 0;
+
+	p->p_md.md_bpva = 0;
 
 	retval[1] = 0;
 }
@@ -1343,7 +1342,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	tf->tf_arg2 = tf->tf_r4 = scp;
 	tf->tf_arg3 = (register_t)catcher;
 	tf->tf_sp = scp + sss;
-	tf->tf_ipsw &= ~(PSL_N|PSL_B);
+	tf->tf_ipsw &= ~(PSL_N|PSL_B|PSL_T);
 	tf->tf_iioq_head = HPPA_PC_PRIV_USER | p->p_sigcode;
 	tf->tf_iioq_tail = tf->tf_iioq_head + 4;
 	tf->tf_iisq_tail = tf->tf_iisq_head = pcb->pcb_space;
@@ -1450,8 +1449,6 @@ sys_sigreturn(p, v, retval)
 	tf->tf_r31 = ksc.sc_regs[31];
 	bcopy(ksc.sc_fpregs, p->p_addr->u_pcb.pcb_fpregs,
 	    sizeof(ksc.sc_fpregs));
-	fdcache(HPPA_SID_KERNEL, (vaddr_t)p->p_addr->u_pcb.pcb_fpregs,
-	    sizeof(ksc.sc_fpregs));
 
 	tf->tf_iioq_head = ksc.sc_pcoqh | HPPA_PC_PRIV_USER;
 	tf->tf_iioq_tail = ksc.sc_pcoqt | HPPA_PC_PRIV_USER;
@@ -1463,7 +1460,7 @@ sys_sigreturn(p, v, retval)
 		tf->tf_iisq_tail = HPPA_SID_KERNEL;
 	else
 		tf->tf_iisq_tail = p->p_addr->u_pcb.pcb_space;
-	tf->tf_ipsw = ksc.sc_ps | (kpsw & PSL_O);
+	tf->tf_ipsw = ksc.sc_ps | (curcpu()->ci_psw & PSL_O);
 
 #ifdef DEBUG
 	if ((sigdebug & SDB_FOLLOW) && (!sigpid || p->p_pid == sigpid))

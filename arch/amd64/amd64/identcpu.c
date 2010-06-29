@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.20 2009/06/01 03:50:57 gwk Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.28 2010/06/26 23:24:43 guenther Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -40,7 +40,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/sysctl.h>
 #include <machine/cpu.h>
 #include <machine/cpufunc.h>
@@ -48,9 +47,7 @@
 /* sysctl wants this. */
 char cpu_model[48];
 int cpuspeed;
-#ifdef CRYPTO
 int amd64_has_xcrypt;
-#endif
 
 const struct {
 	u_int32_t	bit;
@@ -95,15 +92,29 @@ const struct {
 	{ CPUID_3DNOW,	"3DNOW" }
 }, cpu_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_SSE3,	"SSE3" },
+	{ CPUIDECX_PCLMUL,	"PCLMUL" },
 	{ CPUIDECX_MWAIT,	"MWAIT" },
 	{ CPUIDECX_DSCPL,	"DS-CPL" },
 	{ CPUIDECX_VMX,		"VMX" },
 	{ CPUIDECX_SMX,		"SMX" },
 	{ CPUIDECX_EST,		"EST" },
 	{ CPUIDECX_TM2,		"TM2" },
+	{ CPUIDECX_SSSE3,	"SSSE3" },
 	{ CPUIDECX_CNXTID,	"CNXT-ID" },
+	{ CPUIDECX_FMA3,	"FMA3" },
 	{ CPUIDECX_CX16,	"CX16" },
-	{ CPUIDECX_XTPR,	"xTPR" }
+	{ CPUIDECX_XTPR,	"xTPR" },
+	{ CPUIDECX_PDCM,	"PDCM" },
+	{ CPUIDECX_DCA,		"DCA" },
+	{ CPUIDECX_SSE41,	"SSE4.1" },
+	{ CPUIDECX_SSE42,	"SSE4.2" },
+	{ CPUIDECX_X2APIC,	"x2APIC" },
+	{ CPUIDECX_MOVBE,	"MOVBE" },
+	{ CPUIDECX_POPCNT,	"POPCNT" },
+	{ CPUIDECX_AES,		"AES" },
+	{ CPUIDECX_XSAVE,	"XSAVE" },
+	{ CPUIDECX_OSXSAVE,	"OSXSAVE" },
+	{ CPUIDECX_AVX,		"AVX" }
 };
 
 int
@@ -245,6 +256,23 @@ via_nano_setup(struct cpu_info *ci)
 	}
 }
 
+#ifndef SMALL_KERNEL
+void via_update_sensor(void *args);
+void
+via_update_sensor(void *args)
+{
+	struct cpu_info *ci = (struct cpu_info *) args;
+	u_int64_t msr;
+
+	msr = rdmsr(MSR_CENT_TMTEMPERATURE);
+	ci->ci_sensor.value = (msr & 0xffffff);
+	/* micro degrees */
+	ci->ci_sensor.value *= 1000000;
+	ci->ci_sensor.value += 273150000;
+	ci->ci_sensor.flags &= ~SENSOR_FINVALID;
+}
+#endif
+
 void
 identifycpu(struct cpu_info *ci)
 {
@@ -339,6 +367,11 @@ identifycpu(struct cpu_info *ci)
 	}
 
 	if (!strncmp(cpu_model, "Intel", 5)) {
+		u_int32_t cflushsz;
+
+		CPUID(0x01, dummy, cflushsz, dummy, dummy);
+		/* cflush cacheline size is equal to bits 15-8 of ebx * 8 */
+		ci->ci_cflushsz = ((cflushsz >> 8) & 0xff) * 8;
 		CPUID(0x06, val, dummy, dummy, dummy);
 		if (val & 0x1) {
 			strlcpy(ci->ci_sensordev.xname, ci->ci_dev->dv_xname,
@@ -358,8 +391,17 @@ identifycpu(struct cpu_info *ci)
 	    vendor[2] == 0x444d4163)	/* DMAc */
 		amd64_errata(ci);
 
-	if (strncmp(cpu_model, "VIA Nano processor", 18) == 0)
+	if (strncmp(cpu_model, "VIA Nano processor", 18) == 0) {
 		ci->cpu_setup = via_nano_setup;
+#ifndef SMALL_KERNEL
+		strlcpy(ci->ci_sensordev.xname, ci->ci_dev->dv_xname,
+		    sizeof(ci->ci_sensordev.xname));
+		ci->ci_sensor.type = SENSOR_TEMP;
+		sensor_task_register(ci, via_update_sensor, 5);
+		sensor_attach(&ci->ci_sensordev, &ci->ci_sensor);
+		sensordev_install(&ci->ci_sensordev);
+#endif
+	}
 }
 
 void

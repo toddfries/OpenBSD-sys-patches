@@ -1,4 +1,4 @@
-/* $OpenBSD: scc.c,v 1.22 2008/08/09 16:42:29 miod Exp $ */
+/* $OpenBSD: scc.c,v 1.28 2010/06/28 14:13:26 deraadt Exp $ */
 /* $NetBSD: scc.c,v 1.58 2002/03/17 19:40:27 atatat Exp $ */
 
 /*
@@ -106,6 +106,8 @@
 #ifdef DEBUG
 int	debugChar;
 #endif
+
+int	alpha_donot_kludge_scc;
 
 struct scc_softc {
 	struct device sc_dv;
@@ -324,7 +326,7 @@ sccattach(parent, self, aux)
 	/* init pseudo DMA structures */
 	for (cntr = 0; cntr < 2; cntr++) {
 		pdp->p_addr = (void *)sccaddr;
-		tp = sc->scc_tty[cntr] = ttymalloc();
+		tp = sc->scc_tty[cntr] = ttymalloc(0);
 		pdp->p_arg = (long)tp;
 		pdp->p_fcn = (void (*)(struct tty*))0;
 		tp->t_dev = (dev_t)((sc->sc_dv.dv_unit << 1) | cntr);
@@ -459,7 +461,7 @@ sccopen(dev, flag, mode, p)
 		return (ENXIO);
 	tp = sc->scc_tty[line];
 	if (tp == NULL) {
-		tp = sc->scc_tty[line] = ttymalloc();
+		tp = sc->scc_tty[line] = ttymalloc(0);
 	}
 	tp->t_oproc = sccstart;
 	tp->t_param = sccparam;
@@ -482,7 +484,7 @@ sccopen(dev, flag, mode, p)
 #endif
 		(void) sccparam(tp, &tp->t_termios);
 		ttsetwater(tp);
-	} else if ((tp->t_state & TS_XCLUDE) && curproc->p_ucred->cr_uid != 0)
+	} else if ((tp->t_state & TS_XCLUDE) && suser(curproc, 0) != 0)
 		return (EBUSY);
 	(void) sccmctl(sc, SCCLINE(dev), DML_DTR, DMSET);
 	s = spltty();
@@ -498,7 +500,7 @@ sccopen(dev, flag, mode, p)
 	splx(s);
 	if (error)
 		return (error);
-	error = (*linesw[tp->t_line].l_open)(dev, tp);
+	error = (*linesw[tp->t_line].l_open)(dev, tp, p);
 
 	return (error);
 }
@@ -520,7 +522,7 @@ sccclose(dev, flag, mode, p)
 		sc->scc_wreg[line].wr5 &= ~ZSWR5_BREAK;
 		ttyoutput(0, tp);
 	}
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	if ((tp->t_cflag & HUPCL) || (tp->t_state & TS_WOPEN) ||
 	    !(tp->t_state & TS_ISOPEN))
 		(void) sccmctl(sc, line, 0, DMSET);

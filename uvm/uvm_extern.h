@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_extern.h,v 1.78 2009/06/07 02:01:54 oga Exp $	*/
+/*	$OpenBSD: uvm_extern.h,v 1.87 2010/06/27 03:03:49 thib Exp $	*/
 /*	$NetBSD: uvm_extern.h,v 1.57 2001/03/09 01:02:12 chs Exp $	*/
 
 /*
@@ -205,28 +205,29 @@ typedef int		vm_prot_t;
 #define UVM_KMF_NOWAIT	0x1			/* matches M_NOWAIT */
 #define UVM_KMF_VALLOC	0x2			/* allocate VA only */
 #define UVM_KMF_CANFAIL	0x4			/* caller handles failure */
+#define UVM_KMF_ZERO	0x08			/* zero pages */
 #define UVM_KMF_TRYLOCK	UVM_FLAG_TRYLOCK	/* try locking only */
 
 /*
- * the following defines the strategies for uvm_pagealloc_strat()
+ * the following defines the strategies for uvm_pagealloc()
  */
 #define	UVM_PGA_STRAT_NORMAL	0	/* high -> low free list walk */
 #define	UVM_PGA_STRAT_ONLY	1	/* only specified free list */
 #define	UVM_PGA_STRAT_FALLBACK	2	/* ONLY falls back on NORMAL */
 
 /*
- * flags for uvm_pagealloc_strat()
+ * flags for uvm_pagealloc()
  */
 #define UVM_PGA_USERESERVE	0x0001	/* ok to use reserve pages */
 #define	UVM_PGA_ZERO		0x0002	/* returned page must be zeroed */
 
 /*
- * flags for uvm_pglistalloc() and uvm_pmr_getpages()
+ * flags for uvm_pglistalloc()
  */
 #define UVM_PLA_WAITOK		0x0001	/* may sleep */
 #define UVM_PLA_NOWAIT		0x0002	/* can't sleep (need one of the two) */
 #define UVM_PLA_ZERO		0x0004	/* zero all pages before returning */
-#define UVM_PLA_TRY_CONTIG	0x0008	/* try to allocate a contig range */
+#define UVM_PLA_TRYCONTIG	0x0008	/* try to allocate contig physmem */
 
 /*
  * lockflags that control the locking behavior of various functions.
@@ -497,7 +498,6 @@ void			uvm_fork(struct proc *, struct proc *, boolean_t,
 void			uvm_exit(struct proc *);
 void			uvm_init_limits(struct proc *);
 boolean_t		uvm_kernacc(caddr_t, size_t, int);
-__dead void		uvm_scheduler(void);
 
 int			uvm_vslock(struct proc *, caddr_t, size_t,
 			    vm_prot_t);
@@ -518,17 +518,27 @@ vaddr_t			uvm_km_alloc1(vm_map_t, vsize_t, vsize_t, boolean_t);
 void			uvm_km_free(vm_map_t, vaddr_t, vsize_t);
 void			uvm_km_free_wakeup(vm_map_t, vaddr_t,
 						vsize_t);
-vaddr_t			uvm_km_kmemalloc(vm_map_t, struct uvm_object *,
-						vsize_t, int);
+vaddr_t			uvm_km_kmemalloc_pla(struct vm_map *,
+			    struct uvm_object *, vsize_t, int, paddr_t,
+			    paddr_t, paddr_t, paddr_t, int);
+#define uvm_km_kmemalloc(map, obj, sz, flags)				\
+	uvm_km_kmemalloc_pla(map, obj, sz, flags, 0, (paddr_t)-1, 0, 0, 0)
 struct vm_map		*uvm_km_suballoc(vm_map_t, vaddr_t *,
 				vaddr_t *, vsize_t, int,
 				boolean_t, vm_map_t);
 vaddr_t			uvm_km_valloc(vm_map_t, vsize_t);
-vaddr_t			uvm_km_valloc_align(vm_map_t, vsize_t, vsize_t);
+vaddr_t			uvm_km_valloc_try(vm_map_t, vsize_t);
 vaddr_t			uvm_km_valloc_wait(vm_map_t, vsize_t);
+vaddr_t			uvm_km_valloc_align(struct vm_map *, vsize_t, vsize_t, int);
 vaddr_t			uvm_km_valloc_prefer_wait(vm_map_t, vsize_t,
 					voff_t);
-void			*uvm_km_getpage(boolean_t, int *);
+void			*uvm_km_getpage_pla(boolean_t, int *, paddr_t, paddr_t,
+			    paddr_t, paddr_t);
+/* Wrapper around old function prototype. */
+#define uvm_km_getpage(waitok, slowdown)				\
+	uvm_km_getpage_pla(((waitok) ? 0 : UVM_KMF_NOWAIT), (slowdown),	\
+	    (paddr_t)0, (paddr_t)-1, 0, 0)
+
 void			uvm_km_putpage(void *);
 
 /* uvm_map.c */
@@ -565,11 +575,8 @@ int			uvm_mmap(vm_map_t, vaddr_t *, vsize_t,
 				caddr_t, voff_t, vsize_t, struct proc *);
 
 /* uvm_page.c */
-struct vm_page		*uvm_pagealloc_strat(struct uvm_object *,
-				voff_t, struct vm_anon *, int, int, int);
-#define	uvm_pagealloc(obj, off, anon, flags) \
-	    uvm_pagealloc_strat((obj), (off), (anon), (flags), \
-				UVM_PGA_STRAT_NORMAL, 0)
+struct vm_page		*uvm_pagealloc(struct uvm_object *,
+				voff_t, struct vm_anon *, int);
 vaddr_t			uvm_pagealloc_contig(vaddr_t, vaddr_t,
 				vaddr_t, vaddr_t);
 void			uvm_pagerealloc(struct vm_page *, 
@@ -590,6 +597,7 @@ void			uvm_aio_aiodone(struct buf *);
 /* uvm_pdaemon.c */
 void			uvm_pageout(void *);
 void			uvm_aiodone_daemon(void *);
+void			uvm_wait(const char *);
 
 /* uvm_pglist.c */
 int			uvm_pglistalloc(psize_t, paddr_t,
@@ -598,7 +606,6 @@ int			uvm_pglistalloc(psize_t, paddr_t,
 void			uvm_pglistfree(struct pglist *);
 
 /* uvm_pmemrange.c */
-
 void			uvm_pmr_use_inc(paddr_t, paddr_t);
 
 /* uvm_swap.c */

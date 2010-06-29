@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.92 2009/05/13 16:46:55 jsg Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.96 2010/01/09 05:33:08 jsg Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>
@@ -149,6 +149,7 @@ const struct axe_type axe_devs[] = {
 	{ { USB_VENDOR_APPLE, USB_PRODUCT_APPLE_ETHERNET }, AX772 },
 	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88172}, 0 },
 	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88772}, AX772 },
+	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88772A}, AX772 },
 	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88178}, AX178 },
 	{ { USB_VENDOR_ATEN, USB_PRODUCT_ATEN_UC210T}, 0 },
 	{ { USB_VENDOR_BELKIN, USB_PRODUCT_BELKIN_F5D5055 }, AX178 },
@@ -165,6 +166,7 @@ const struct axe_type axe_devs[] = {
 	{ { USB_VENDOR_LOGITEC, USB_PRODUCT_LOGITEC_LAN_GTJU2}, AX178 },
 	{ { USB_VENDOR_MELCO, USB_PRODUCT_MELCO_LUAU2GT}, AX178 },
 	{ { USB_VENDOR_MELCO, USB_PRODUCT_MELCO_LUAU2KTX}, 0 },
+	{ { USB_VENDOR_MSI, USB_PRODUCT_MSI_AX88772A}, AX772 },
 	{ { USB_VENDOR_NETGEAR, USB_PRODUCT_NETGEAR_FA120}, 0 },
 	{ { USB_VENDOR_OQO, USB_PRODUCT_OQO_ETHER01PLUS }, AX772 },
 	{ { USB_VENDOR_PLANEX3, USB_PRODUCT_PLANEX3_GU1000T }, AX178 },
@@ -178,7 +180,7 @@ const struct axe_type axe_devs[] = {
 int axe_match(struct device *, void *, void *); 
 void axe_attach(struct device *, struct device *, void *); 
 int axe_detach(struct device *, int); 
-int axe_activate(struct device *, enum devact); 
+int axe_activate(struct device *, int); 
 
 struct cfdriver axe_cd = { 
 	NULL, "axe", DV_IFNET 
@@ -516,6 +518,9 @@ axe_ax88178_init(struct axe_softc *sc)
 	axe_cmd(sc, AXE_CMD_SW_RESET_REG, 0,
 	    AXE_SW_RESET_PRL | AXE_178_RESET_MAGIC, NULL);
 	usbd_delay_ms(sc->axe_udev, 150);
+	/* Enable MII/GMII/RGMII for external PHY */
+	axe_cmd(sc, AXE_CMD_SW_PHY_SELECT, 0, 0, NULL);
+	usbd_delay_ms(sc->axe_udev, 10);
 	axe_cmd(sc, AXE_CMD_RXCTL_WRITE, 0, 0, NULL);
 }
 
@@ -809,7 +814,7 @@ axe_detach(struct device *self, int flags)
 }
 
 int
-axe_activate(struct device *self, enum devact act)
+axe_activate(struct device *self, int act)
 {
 	struct axe_softc *sc = (struct axe_softc *)self;
 

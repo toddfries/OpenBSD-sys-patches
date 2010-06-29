@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.49 2009/06/06 05:43:13 oga Exp $	*/
+/*	$OpenBSD: bus.h,v 1.52 2010/04/08 00:55:25 oga Exp $	*/
 /*	$NetBSD: bus.h,v 1.6 1996/11/10 03:19:25 thorpej Exp $	*/
 
 /*-
@@ -67,6 +67,7 @@
 #define _I386_BUS_H_
 
 #include <sys/mutex.h>
+#include <sys/tree.h>
 
 #include <machine/pio.h>
 
@@ -89,10 +90,10 @@ typedef	int bus_space_tag_t;
 typedef	u_long bus_space_handle_t;
 
 int	bus_space_map(bus_space_tag_t t, bus_addr_t addr,
-	    bus_size_t size, int cacheable, bus_space_handle_t *bshp);
+	    bus_size_t size, int flags, bus_space_handle_t *bshp);
 /* like bus_space_map(), but without extent map checking/allocation */
 int	_bus_space_map(bus_space_tag_t t, bus_addr_t addr,
-	    bus_size_t size, int cacheable, bus_space_handle_t *bshp);
+	    bus_size_t size, int flags, bus_space_handle_t *bshp);
 void	bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh,
 	    bus_size_t size);
 /* like bus_space_unmap(), but without extent map deallocation */
@@ -103,7 +104,7 @@ int	bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
 
 int	bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart,
 	    bus_addr_t rend, bus_size_t size, bus_size_t align,
-	    bus_size_t boundary, int cacheable, bus_addr_t *addrp,
+	    bus_size_t boundary, int flags, bus_addr_t *addrp,
 	    bus_space_handle_t *bshp);
 void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
 	    bus_size_t size);
@@ -424,9 +425,7 @@ void	bus_space_copy_4(bus_space_tag_t, bus_space_handle_t, bus_size_t,
 	((void)((void)(t), (void)(h), (void)(o), (void)(l), (void)(f)))
 #define	BUS_SPACE_BARRIER_READ	0x01		/* force read barrier */
 #define	BUS_SPACE_BARRIER_WRITE	0x02		/* force write barrier */
-/* Compatibility defines */
-#define	BUS_BARRIER_READ	BUS_SPACE_BARRIER_READ
-#define	BUS_BARRIER_WRITE	BUS_SPACE_BARRIER_WRITE
+
 #define	BUS_SPACE_MAP_CACHEABLE		0x0001
 #define	BUS_SPACE_MAP_LINEAR		0x0002
 #define	BUS_SPACE_MAP_PREFETCHABLE	0x0008
@@ -457,6 +456,13 @@ void	bus_space_copy_4(bus_space_tag_t, bus_space_handle_t, bus_size_t,
 #define	BUS_DMA_NOCACHE		0x0800	/* map memory uncached */
 #define	BUS_DMA_ZERO		0x1000	/* dmamem_alloc return zeroed mem */
 #define	BUS_DMA_SG		0x2000	/* Internal. memory is for SG map */
+
+/* types for _dm_buftype */
+#define	BUS_BUFTYPE_INVALID	0
+#define	BUS_BUFTYPE_LINEAR	1
+#define	BUS_BUFTYPE_MBUF	2
+#define	BUS_BUFTYPE_UIO		3
+#define	BUS_BUFTYPE_RAW		4
 
 /* Forwards needed by prototypes below. */
 struct mbuf;
@@ -631,6 +637,30 @@ struct sg_cookie {
 	void		(*bind_page)(void *, bus_addr_t, paddr_t, int);
 	void		(*unbind_page)(void *, bus_addr_t);
 	void		(*flush_tlb)(void *);
+};
+
+/* 
+ * per-map DVMA page table
+ */
+struct sg_page_entry {
+	SPLAY_ENTRY(sg_page_entry)	spe_node;
+	paddr_t				spe_pa;
+	bus_addr_t			spe_va;
+};
+
+/* for sg_dma this will be in the map's dm_cookie. */
+struct sg_page_map {
+	SPLAY_HEAD(sg_page_tree, sg_page_entry) spm_tree;
+
+	void			*spm_origbuf;	/* pointer to original data */
+	int			 spm_buftype;	/* type of data */
+	struct proc		*spm_proc;	/* proc that owns the mapping */
+
+	int			 spm_maxpage;	/* Size of allocated page map */
+	int			 spm_pagecnt;	/* Number of entries in use */
+	bus_addr_t		 spm_start;	/* dva when bound */
+	bus_size_t		 spm_size;	/* size of bound map */
+	struct sg_page_entry	 spm_map[1];
 };
 
 struct sg_cookie	*sg_dmatag_init(char *, void *, bus_addr_t, bus_size_t,

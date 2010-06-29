@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2560.c,v 1.43 2009/03/29 21:53:52 sthen Exp $  */
+/*	$OpenBSD: rt2560.c,v 1.48 2010/05/19 15:27:35 oga Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006
@@ -26,7 +26,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -297,14 +296,6 @@ rt2560_attach(void *xsc, int id)
 	sc->sc_txtap.wt_ihdr.it_present = htole32(RT2560_TX_RADIOTAP_PRESENT);
 #endif
 
-	/*
-	 * Make sure the interface is shutdown during reboot.
-	 */
-	sc->sc_sdhook = shutdownhook_establish(rt2560_shutdown, sc);
-	if (sc->sc_sdhook == NULL) {
-		printf("%s: WARNING: unable to establish shutdown hook\n",
-		    sc->sc_dev.dv_xname);
-	}
 	sc->sc_powerhook = powerhook_establish(rt2560_power, sc);
 	if (sc->sc_powerhook == NULL) {
 		printf("%s: WARNING: unable to establish power hook\n",
@@ -328,13 +319,11 @@ rt2560_detach(void *xsc)
 	timeout_del(&sc->scan_to);
 	timeout_del(&sc->amrr_to);
 
-	ieee80211_ifdetach(ifp);	/* free all nodes */
-	if_detach(ifp);
-	
 	if (sc->sc_powerhook != NULL)
 		powerhook_disestablish(sc->sc_powerhook);
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
+
+	ieee80211_ifdetach(ifp);	/* free all nodes */
+	if_detach(ifp);
 
 	rt2560_free_tx_ring(sc, &sc->txq);
 	rt2560_free_tx_ring(sc, &sc->atimq);
@@ -365,7 +354,7 @@ rt2560_alloc_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring,
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, count * RT2560_TX_DESC_SIZE,
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -389,7 +378,6 @@ rt2560_alloc_tx_ring(struct rt2560_softc *sc, struct rt2560_tx_ring *ring,
 		goto fail;
 	}
 
-	memset(ring->desc, 0, count * RT2560_TX_DESC_SIZE);
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
 	ring->data = malloc(count * sizeof (struct rt2560_tx_data), M_DEVBUF,
@@ -510,7 +498,7 @@ rt2560_alloc_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring,
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, count * RT2560_RX_DESC_SIZE,
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -534,7 +522,6 @@ rt2560_alloc_rx_ring(struct rt2560_softc *sc, struct rt2560_rx_ring *ring,
 		goto fail;
 	}
 
-	memset(ring->desc, 0, count * RT2560_RX_DESC_SIZE);
 	ring->physaddr = ring->map->dm_segs->ds_addr;
 
 	ring->data = malloc(count * sizeof (struct rt2560_rx_data), M_DEVBUF,
@@ -715,7 +702,7 @@ rt2560_amrr_timeout(void *arg)
 #endif
 	splx(s);
 
-	timeout_add(&sc->amrr_to, hz / 2);
+	timeout_add_msec(&sc->amrr_to, 500);
 }
 
 void
@@ -758,7 +745,7 @@ rt2560_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 
 	case IEEE80211_S_SCAN:
 		rt2560_set_chan(sc, ic->ic_bss->ni_chan);
-		timeout_add(&sc->scan_to, hz / 5);
+		timeout_add_msec(&sc->scan_to, 200);
 		break;
 
 	case IEEE80211_S_AUTH:
@@ -809,7 +796,7 @@ rt2560_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		if (ic->ic_opmode != IEEE80211_M_MONITOR) {
 			/* start automatic rate control timer */
 			if (ic->ic_fixed_rate == -1)
-				timeout_add(&sc->amrr_to, hz / 2);
+				timeout_add_msec(&sc->amrr_to, 500);
 
 			rt2560_enable_tsf_sync(sc);
 		}
@@ -2751,14 +2738,6 @@ rt2560_power(int why, void *arg)
 		break;
 	}
 	splx(s);
-}
-
-void
-rt2560_shutdown(void *arg)
-{
-	struct rt2560_softc *sc = arg;
-
-	rt2560_stop(&sc->sc_ic.ic_if, 1);
 }
 
 struct cfdriver ral_cd = {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.159 2009/04/19 17:53:38 deraadt Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.167 2010/05/14 18:47:56 kettenis Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -99,13 +99,14 @@
 extern void nfs_init(void);
 #endif
 
+#include "mpath.h"
 #include "vscsi.h"
 #include "softraid.h"
 
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-"Copyright (c) 1995-2009 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+"Copyright (c) 1995-2010 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -215,6 +216,7 @@ main(void *framep)
 	printf("%s\n", copyright);
 
 	KERNEL_LOCK_INIT();
+	SCHED_LOCK_INIT();
 
 	uvm_init();
 	disk_init();		/* must come before autoconfiguration */
@@ -262,6 +264,9 @@ main(void *framep)
 	TAILQ_INSERT_TAIL(&process0.ps_threads, p, p_thr_link);
 	process0.ps_refcnt = 1;
 	p->p_p = &process0;
+
+	/* Set the default routing domain. */
+	process0.ps_rdomain = 0;
 
 	LIST_INSERT_HEAD(&allproc, p, p_list);
 	p->p_pgrp = &pgrp0;
@@ -339,6 +344,9 @@ main(void *framep)
 	/* Initialize work queues */
 	workq_init();
 
+	/* Initialize the interface/address trees */
+	ifinit();
+
 	/* Configure the devices */
 	cpu_configure();
 
@@ -387,7 +395,6 @@ main(void *framep)
 	 * until everything is ready.
 	 */
 	s = splnet();
-	ifinit();
 	domaininit();
 	if_attachdomain();
 	splx(s);
@@ -444,6 +451,9 @@ main(void *framep)
 
 	dostartuphooks();
 
+#if NMPATH > 0
+	config_rootfound("mpath", NULL);
+#endif
 #if NVSCSI > 0
 	config_rootfound("vscsi", NULL);
 #endif
@@ -463,7 +473,7 @@ main(void *framep)
 	if (VFS_ROOT(CIRCLEQ_FIRST(&mountlist), &rootvnode))
 		panic("cannot find root vnode");
 	p->p_fd->fd_cdir = rootvnode;
-	VREF(p->p_fd->fd_cdir);
+	vref(p->p_fd->fd_cdir);
 	VOP_UNLOCK(rootvnode, 0, p);
 	p->p_fd->fd_rdir = NULL;
 
@@ -473,7 +483,7 @@ main(void *framep)
 	 * share proc0's CWD info.
 	 */
 	initproc->p_fd->fd_cdir = rootvnode;
-	VREF(initproc->p_fd->fd_cdir);
+	vref(initproc->p_fd->fd_cdir);
 	initproc->p_fd->fd_rdir = NULL;
 
 	/*
@@ -537,8 +547,11 @@ main(void *framep)
 	start_init_exec = 1;
 	wakeup((void *)&start_init_exec);
 
-	/* The scheduler is an infinite loop. */
-	uvm_scheduler();
+        /*
+         * proc0: nothing to do, back to sleep
+         */
+        while (1)
+                tsleep(&proc0, PVM, "scheduler", 0);
 	/* NOTREACHED */
 }
 

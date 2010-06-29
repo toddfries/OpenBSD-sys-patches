@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.59 2009/06/03 14:45:50 jj Exp $	*/
+/*	$OpenBSD: conf.c,v 1.62 2010/06/09 15:25:32 jsing Exp $	*/
 /*	$NetBSD: conf.c,v 1.16 1996/10/18 21:26:57 cgd Exp $	*/
 
 /*-
@@ -131,9 +131,11 @@ cdev_decl(nnpfs_dev);
 #include "pci.h"
 cdev_decl(pci);
 #endif
+#include "bthub.h"
 
 #include "systrace.h"
 #include "hotplug.h"
+#include "vscsi.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -206,6 +208,9 @@ struct cdevsw	cdevsw[] =
 	cdev_bktr_init(NBKTR,bktr),	/* 58: Bt848 video capture device */
 	cdev_radio_init(NRADIO,radio), /* 59: generic radio I/O */
 	cdev_mouse_init(NWSMUX, wsmux),	/* 60: ws multiplexor */
+	cdev_vscsi_init(NVSCSI, vscsi),	/* 61: vscsi */
+	cdev_bthub_init(NBTHUB, bthub), /* 62: bthub */
+	cdev_disk_init(1,diskmap),	/* 63: disk mapper */
 };
 int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);
 

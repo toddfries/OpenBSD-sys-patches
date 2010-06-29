@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_misc.c,v 1.49 2007/10/01 12:10:55 martin Exp $	 */
+/*	$OpenBSD: svr4_misc.c,v 1.54 2010/05/25 16:39:15 thib Exp $	 */
 /*	$NetBSD: svr4_misc.c,v 1.42 1996/12/06 03:22:34 christos Exp $	 */
 
 /*
@@ -440,7 +440,7 @@ svr4_sys_fchroot(p, v, retval)
 		FRELE(fp);
 		return error;
 	}
-	VREF(vp);
+	vref(vp);
 	if (fdp->fd_rdir != NULL)
 		vrele(fdp->fd_rdir);
 	fdp->fd_rdir = vp;
@@ -1042,7 +1042,7 @@ svr4_sys_waitsys(q, v, retval)
 	struct svr4_sys_waitsys_args *uap = v;
 	int nfound;
 	int error;
-	struct proc *p, *t;
+	struct proc *p;
 
 	switch (SCARG(uap, grp)) {
 	case SVR4_P_PID:	
@@ -1086,24 +1086,7 @@ loop:
 				DPRINTF(("Don't wait\n"));
 				return (0);
 			}
-
-			/*
-			 * If we got the child via a ptrace 'attach',
-			 * we need to give it back to the old parent.
-			 */
-			if (p->p_oppid && (t = pfind(p->p_oppid))) {
-				p->p_oppid = 0;
-				proc_reparent(p, t);
-				psignal(t, SIGCHLD);
-				wakeup((caddr_t)t);
-				return (0);
-			}
-
-			scheduler_wait_hook(q, p);
-			p->p_xstat = 0;
-			ruadd(&q->p_stats->p_cru, p->p_ru);
-
-			proc_zap(p);
+			proc_finish_wait(q, p);
 			return (0);
 		}
 		if (p->p_stat == SSTOP && (p->p_flag & P_WAITED) == 0 &&
@@ -1138,6 +1121,7 @@ bsd_statfs_to_svr4_statvfs(bfs, sfs)
 	const struct statfs *bfs;
 	struct svr4_statvfs *sfs;
 {
+	bzero(sfs, sizeof(*sfs));
 	sfs->f_bsize = bfs->f_iosize; /* XXX */
 	sfs->f_frsize = bfs->f_bsize;
 	sfs->f_blocks = bfs->f_blocks;
@@ -1148,14 +1132,13 @@ bsd_statfs_to_svr4_statvfs(bfs, sfs)
 	sfs->f_favail = bfs->f_ffree;
 	sfs->f_fsid = bfs->f_fsid.val[0];
 	bcopy(bfs->f_fstypename, sfs->f_basetype, sizeof(sfs->f_basetype));
-	sfs->f_flag = 0;
 	if (bfs->f_flags & MNT_RDONLY)
 		sfs->f_flag |= SVR4_ST_RDONLY;
 	if (bfs->f_flags & MNT_NOSUID)
 		sfs->f_flag |= SVR4_ST_NOSUID;
 	sfs->f_namemax = MAXNAMLEN;
-	bcopy(bfs->f_fstypename, sfs->f_fstr, sizeof(sfs->f_fstr)); /* XXX */
-	bzero(sfs->f_filler, sizeof(sfs->f_filler));
+	bcopy(bfs->f_fstypename, sfs->f_fstr,
+	    MIN(sizeof(bfs->f_fstypename), sizeof(sfs->f_fstr)));
 }
 
 
@@ -1164,6 +1147,7 @@ bsd_statfs_to_svr4_statvfs64(bfs, sfs)
 	const struct statfs *bfs;
 	struct svr4_statvfs64 *sfs; 
 {
+	bzero(sfs, sizeof(*sfs));
 	sfs->f_bsize = bfs->f_iosize; /* XXX */
 	sfs->f_frsize = bfs->f_bsize;
 	sfs->f_blocks = bfs->f_blocks;
@@ -1174,14 +1158,13 @@ bsd_statfs_to_svr4_statvfs64(bfs, sfs)
 	sfs->f_favail = bfs->f_ffree;
 	sfs->f_fsid = bfs->f_fsid.val[0];
 	bcopy(bfs->f_fstypename, sfs->f_basetype, sizeof(sfs->f_basetype));
-	sfs->f_flag = 0;
 	if (bfs->f_flags & MNT_RDONLY)
 		sfs->f_flag |= SVR4_ST_RDONLY;
 	if (bfs->f_flags & MNT_NOSUID)
 		sfs->f_flag |= SVR4_ST_NOSUID;
 	sfs->f_namemax = MAXNAMLEN;   
-	bcopy(bfs->f_fstypename, sfs->f_fstr, sizeof(sfs->f_fstr)); /* XXX */
-	bzero(sfs->f_filler, sizeof(sfs->f_filler));
+	bcopy(bfs->f_fstypename, sfs->f_fstr,
+	    MIN(sizeof(bfs->f_fstypename), sizeof(sfs->f_fstr)));
 }
 
 
@@ -1431,7 +1414,7 @@ svr4_sys_setegid(p, v, retval)
 		syscallarg(gid_t) egid;
         } */ *uap = v;
 
-#if defined(COMPAT_LINUX) && defined(i386)
+#if defined(COMPAT_LINUX) && defined(__i386__)
 	if (SCARG(uap, egid) > 60000) {
 		/*
 		 * One great fuckup deserves another.  The Linux people

@@ -1,4 +1,4 @@
-/*	$OpenBSD: magma.c,v 1.17 2008/11/29 05:56:41 deraadt Exp $	*/
+/*	$OpenBSD: magma.c,v 1.22 2010/06/28 14:13:34 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1998 Iain Hibbert
@@ -805,7 +805,7 @@ mtty_attach(struct device *parent, struct device *dev, void *args)
 		}
 		mp->mp_channel = chan;
 
-		tp = ttymalloc();
+		tp = ttymalloc(0);
 		tp->t_oproc = mtty_start;
 		tp->t_param = mtty_param;
 
@@ -892,7 +892,7 @@ mttyopen(dev_t dev, int flags, int mode, struct proc *p)
 			SET(tp->t_state, TS_CARR_ON);
 		else
 			CLR(tp->t_state, TS_CARR_ON);
-	} else if (ISSET(tp->t_state, TS_XCLUDE) && p->p_ucred->cr_uid != 0) {
+	} else if (ISSET(tp->t_state, TS_XCLUDE) && suser(p, 0) != 0) {
 		return (EBUSY);	/* superuser can break exclusive access */
 	} else {
 		s = spltty();
@@ -915,7 +915,7 @@ mttyopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	splx(s);
 
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 /*
@@ -929,7 +929,7 @@ mttyclose(dev_t dev, int flag, int mode, struct proc *p)
 	struct tty *tp = mp->mp_tty;
 	int s;
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	s = spltty();
 
 	/* if HUPCL is set, and the tty is no longer open

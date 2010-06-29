@@ -1,4 +1,4 @@
-/*	$OpenBSD: st.c,v 1.86 2009/02/16 21:19:07 miod Exp $	*/
+/*	$OpenBSD: st.c,v 1.100 2010/06/26 23:24:45 guenther Exp $	*/
 /*	$NetBSD: st.c,v 1.71 1997/02/21 23:03:49 thorpej Exp $	*/
 
 /*
@@ -65,7 +65,6 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/mtio.h>
 #include <sys/device.h>
 #include <sys/conf.h>
@@ -216,25 +215,25 @@ struct st_softc {
 #define BLKSIZE_SET_BY_USER	0x04
 #define BLKSIZE_SET_BY_QUIRK	0x08
 
-	struct buf buf_queue;		/* the queue of pending IO operations */
+	struct bufq *sc_bufq;
 	struct timeout sc_timeout;
+	struct scsi_xshandler sc_xsh;
 };
 
 
 int	stmatch(struct device *, void *, void *);
 void	stattach(struct device *, struct device *, void *);
-int	stactivate(struct device *, enum devact);
+int	stactivate(struct device *, int);
 int	stdetach(struct device *, int);
 
 void	stminphys(struct buf *);
-void	st_kill_buffers(struct st_softc *);
 void	st_identify_drive(struct st_softc *, struct scsi_inquiry_data *);
 void	st_loadquirks(struct st_softc *);
 int	st_mount_tape(dev_t, int);
 void	st_unmount(struct st_softc *, int, int);
 int	st_decide_mode(struct st_softc *, int);
-void	ststart(void *);
-void	strestart(void *);
+void	ststart(struct scsi_xfer *);
+void	st_buf_done(struct scsi_xfer *);
 int	st_read(struct st_softc *, char *, int, int);
 int	st_read_block_limits(struct st_softc *, int);
 int	st_mode_sense(struct st_softc *, int);
@@ -259,7 +258,7 @@ struct cfdriver st_cd = {
 
 struct scsi_device st_switch = {
 	st_interpret_sense,
-	ststart,
+	NULL,
 	NULL,
 	NULL,
 };
@@ -281,6 +280,7 @@ struct scsi_device st_switch = {
 #define	ST_2FM_AT_EOD	0x0400	/* write 2 file marks at EOD */
 #define	ST_MOUNTED	0x0800	/* Device is presently mounted */
 #define	ST_DONTBUFFER	0x1000	/* Disable buffering/caching */
+#define ST_WAITING	0x2000
 
 #define	ST_PER_ACTION	(ST_AT_FILEMARK | ST_EIO_PENDING | ST_BLANK_READ)
 #define	ST_PER_MOUNT	(ST_INFO_VALID | ST_BLOCK_SET | ST_WRITTEN | \
@@ -333,14 +333,12 @@ stattach(struct device *parent, struct device *self, void *aux)
 	st_identify_drive(st, sa->sa_inqbuf);
 	printf("\n");
 
-	timeout_set(&st->sc_timeout, strestart, st);
-
-	/*
-	 * Set up the buf queue for this device
-	 */
-	st->buf_queue.b_active = 0;
-	st->buf_queue.b_actf = 0;
-	st->buf_queue.b_actb = &st->buf_queue.b_actf;
+	scsi_xsh_set(&st->sc_xsh, sc_link, ststart);
+	timeout_set(&st->sc_timeout, (void (*)(void *))scsi_xsh_set,
+	    &st->sc_xsh);
+	
+	/* Set up the buf queue for this device. */
+	st->sc_bufq = bufq_init(BUFQ_DEFAULT);
 
 	/* Start up with media position unknown. */
 	st->media_fileno = -1;
@@ -355,7 +353,7 @@ stattach(struct device *parent, struct device *self, void *aux)
 }
 
 int
-stactivate(struct device *self, enum devact act)
+stactivate(struct device *self, int act)
 {
 	struct st_softc *st = (struct st_softc *)self;
 	int rv = 0;
@@ -366,7 +364,7 @@ stactivate(struct device *self, enum devact act)
 
 	case DVACT_DEACTIVATE:
 		st->flags |= ST_DYING;
-		st_kill_buffers(st);
+		bufq_drain(st->sc_bufq);
 		break;
 	}
 
@@ -379,7 +377,7 @@ stdetach(struct device *self, int flags)
 	struct st_softc *st = (struct st_softc *)self;
 	int bmaj, cmaj, mn;
 
-	st_kill_buffers(st);
+	bufq_drain(st->sc_bufq);
 
 	/* Locate the lowest minor number to be detached. */
 	mn = STUNIT(self->dv_unit);
@@ -398,6 +396,8 @@ stdetach(struct device *self, int flags)
 			vdevgone(cmaj, mn, mn + 2, VCHR);
 			vdevgone(cmaj, mn, mn + 3, VCHR);
 		}
+
+	bufq_destroy(st->sc_bufq);
 
 	return (0);
 }
@@ -569,6 +569,7 @@ stclose(dev_t dev, int flags, int mode, struct proc *p)
 	}
 	sc_link->flags &= ~SDEV_OPEN;
 	timeout_del(&st->sc_timeout);
+	scsi_xsh_del(&st->sc_xsh);
 
 done:
 	device_unref(&st->sc_dev);
@@ -831,15 +832,16 @@ ststrategy(struct buf *bp)
 {
 	struct scsi_link *sc_link;
 	struct st_softc *st;
-	struct buf *dp;
-	int error, s;
+	int s;
 
 	st = stlookup(STUNIT(bp->b_dev));
-	if (st == NULL)
-		return;
+	if (st == NULL) {
+		bp->b_error = ENXIO;
+		goto bad;
+	}
 	if (st->flags & ST_DYING) {
-		error = ENXIO;
-		goto done;
+		bp->b_error = ENXIO;
+		goto bad;
 	}
 	sc_link = st->sc_link;
 
@@ -876,107 +878,69 @@ ststrategy(struct buf *bp)
 		bp->b_error = EIO;
 		goto bad;
 	}
-	s = splbio();
 
 	/*
 	 * Place it in the queue of activities for this tape
 	 * at the end (a bit silly because we only have on user..
 	 * (but it could fork()))
 	 */
-	dp = &st->buf_queue;
-	bp->b_actf = NULL;
-	bp->b_actb = dp->b_actb;
-	*dp->b_actb = bp;
-	dp->b_actb = &bp->b_actf;
+	BUFQ_QUEUE(st->sc_bufq, bp);
 
 	/*
 	 * Tell the device to get going on the transfer if it's
 	 * not doing anything, otherwise just wait for completion
 	 * (All a bit silly if we're only allowing 1 open but..)
 	 */
-	ststart(st);
+	scsi_xsh_add(&st->sc_xsh);
 
-	splx(s);
 	device_unref(&st->sc_dev);
 	return;
 bad:
 	bp->b_flags |= B_ERROR;
 done:
-	device_unref(&st->sc_dev);
-	/*
-	 * Correctly set the buf to indicate a completed xfer
-	 */
+	/* Set b_resid to indicate no xfer was done. */
 	bp->b_resid = bp->b_bcount;
 	s = splbio();
 	biodone(bp);
 	splx(s);
+	if (st)
+		device_unref(&st->sc_dev);
 }
 
-/*
- * ststart looks to see if there is a buf waiting for the device
- * and that the device is not already busy. If both are true,
- * It dequeues the buf and creates a scsi command to perform the
- * transfer required. The transfer request will call scsi_done
- * on completion, which will in turn call this routine again
- * so that the next queued transfer is performed.
- * The bufs are queued by the strategy routine (ststrategy)
- *
- * This routine is also called after other non-queued requests
- * have been made of the scsi driver, to ensure that the queue
- * continues to be drained.
- * ststart() is called at splbio from ststrategy, strestart and scsi_done()
- */
 void
-ststart(void *v)
+ststart(struct scsi_xfer *xs)
 {
-	struct st_softc *st = v;
-	struct scsi_link *sc_link = st->sc_link;
-	struct buf *bp, *dp;
-	struct scsi_rw_tape cmd;
-	int flags, error;
+	struct scsi_link *sc_link = xs->sc_link;
+	struct st_softc *st = sc_link->device_softc;
+	struct buf *bp;
+	struct scsi_rw_tape *cmd;
+	int s;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("ststart\n"));
 
 	if (st->flags & ST_DYING)
 		return;
 
-	splassert(IPL_BIO);
-
 	/*
-	 * See if there is a buf to do and we are not already
-	 * doing one
+	 * if the device has been unmounted by the user
+	 * then throw away all requests until done
 	 */
-	while (sc_link->openings > 0) {
-		/* if a special awaits, let it proceed first */
-		if (sc_link->flags & SDEV_WAITING) {
-			sc_link->flags &= ~SDEV_WAITING;
-			wakeup((caddr_t)sc_link);
+	if (!(st->flags & ST_MOUNTED) ||
+	    !(sc_link->flags & SDEV_MEDIA_LOADED)) {
+		/* make sure that one implies the other.. */
+		sc_link->flags &= ~SDEV_MEDIA_LOADED;
+		bufq_drain(st->sc_bufq);
+		scsi_xs_put(xs);
+		return;
+	}
+
+	for (;;) {
+		bp = BUFQ_DEQUEUE(st->sc_bufq);
+		if (bp == NULL) {
+			scsi_xs_put(xs);
 			return;
 		}
 
-		dp = &st->buf_queue;
-		if ((bp = dp->b_actf) == NULL)
-			return;
-		if ((dp = bp->b_actf) != NULL)
-			dp->b_actb = bp->b_actb;
-		else
-			st->buf_queue.b_actb = bp->b_actb;
-		*bp->b_actb = dp;
-
-		/*
-		 * if the device has been unmounted by the user
-		 * then throw away all requests until done
-		 */
-		if (!(st->flags & ST_MOUNTED) ||
-		    !(sc_link->flags & SDEV_MEDIA_LOADED)) {
-			/* make sure that one implies the other.. */
-			sc_link->flags &= ~SDEV_MEDIA_LOADED;
-			bp->b_flags |= B_ERROR;
-			bp->b_resid = bp->b_bcount;
-			bp->b_error = EIO;
-			biodone(bp);
-			continue;
-		}
 		/*
 		 * only FIXEDBLOCK devices have pending operations
 		 */
@@ -997,7 +961,9 @@ ststart(void *v)
 						bp->b_flags |= B_ERROR;
 						bp->b_resid = bp->b_bcount;
 						bp->b_error = EIO;
+						s = splbio();
 						biodone(bp);
+						splx(s);
 						continue;
 					}
 				} else {
@@ -1005,7 +971,9 @@ ststart(void *v)
 					bp->b_error = 0;
 					bp->b_flags &= ~B_ERROR;
 					st->flags &= ~ST_AT_FILEMARK;
+					s = splbio();
 					biodone(bp);
+					splx(s);
 					continue;	/* seek more work */
 				}
 			}
@@ -1018,75 +986,130 @@ ststart(void *v)
 				bp->b_error = EIO;
 				bp->b_flags |= B_ERROR;
 				st->flags &= ~ST_EIO_PENDING;
+				s = splbio();
 				biodone(bp);
+				splx(s);
 				continue;	/* seek more work */
 			}
 		}
 
-		/*
-		 *  Fill out the scsi command
-		 */
-		bzero(&cmd, sizeof(cmd));
-		if ((bp->b_flags & B_READ) == B_WRITE) {
-			cmd.opcode = WRITE;
-			st->flags &= ~ST_FM_WRITTEN;
-			st->flags |= ST_WRITTEN;
-			flags = SCSI_DATA_OUT;
-		} else {
-			cmd.opcode = READ;
-			flags = SCSI_DATA_IN;
-		}
+		break;
+	}
 
-		/*
-		 * Handle "fixed-block-mode" tape drives by using the
-		 * block count instead of the length.
-		 */
-		if (st->flags & ST_FIXEDBLOCKS) {
-			cmd.byte2 |= SRW_FIXED;
-			_lto3b(bp->b_bcount / st->blksize, cmd.len);
-		} else
-			_lto3b(bp->b_bcount, cmd.len);
 
-		if (st->media_blkno != -1) {
-			/* Update block count now, errors will set it to -1. */
-			if (st->flags & ST_FIXEDBLOCKS)
-				st->media_blkno += _3btol(cmd.len);
-			else if (cmd.len != 0)
-				st->media_blkno++;
-		}
+	/*
+	 *  Fill out the scsi command
+	 */
+	cmd = (struct scsi_rw_tape *)xs->cmd;
+	bzero(cmd, sizeof(*cmd));
+	if ((bp->b_flags & B_READ) == B_WRITE) {
+		cmd->opcode = WRITE;
+		st->flags &= ~ST_FM_WRITTEN;
+		st->flags |= ST_WRITTEN;
+		xs->flags |= SCSI_DATA_OUT;
+	} else {
+		cmd->opcode = READ;
+		xs->flags |= SCSI_DATA_IN;
+	}
 
-		/*
-		 * go ask the adapter to do all this for us
-		 */
-		error = scsi_scsi_cmd(sc_link, (struct scsi_generic *) &cmd,
-		    sizeof(cmd), (u_char *) bp->b_data, bp->b_bcount, 0,
-		    ST_IO_TIME, bp, flags | SCSI_NOSLEEP);
-		switch (error) {
-		case 0:
-			timeout_del(&st->sc_timeout);
-			break;
-		case EAGAIN:
-			/*
-			 * The device can't start another i/o. Try again later.
-			 */
-			dp->b_actf = bp;
-			timeout_add(&st->sc_timeout, 1);
-			return;
-		default:
-			printf("%s: not queued\n", st->sc_dev.dv_xname);
-			break;
-		}
-	} /* go back and see if we can cram more work in.. */
+	/*
+	 * Handle "fixed-block-mode" tape drives by using the
+	 * block count instead of the length.
+	 */
+	if (st->flags & ST_FIXEDBLOCKS) {
+		cmd->byte2 |= SRW_FIXED;
+		_lto3b(bp->b_bcount / st->blksize, cmd->len);
+	} else
+		_lto3b(bp->b_bcount, cmd->len);
+
+	if (st->media_blkno != -1) {
+		/* Update block count now, errors will set it to -1. */
+		if (st->flags & ST_FIXEDBLOCKS)
+			st->media_blkno += _3btol(cmd->len);
+		else if (cmd->len != 0)
+			st->media_blkno++;
+	}
+
+	xs->cmdlen = sizeof(*cmd);
+	xs->timeout = ST_IO_TIME;
+	xs->data = bp->b_data;
+	xs->datalen = bp->b_bcount;
+	xs->done = st_buf_done;
+	xs->cookie = bp;
+
+	/*
+	 * go ask the adapter to do all this for us
+	 */
+	scsi_xs_exec(xs);
+
+	/*
+	 * should we try do more work now?
+	 */
+	if (ISSET(st->flags, ST_WAITING))
+		CLR(st->flags, ST_WAITING);
+	else if (BUFQ_PEEK(st->sc_bufq))
+		scsi_xsh_add(&st->sc_xsh);
 }
 
 void
-strestart(void *v)
+st_buf_done(struct scsi_xfer *xs)
 {
-	int s;
+	struct st_softc *st = xs->sc_link->device_softc;
+	struct buf *bp = xs->cookie;
+	int error, s;
+
+	switch (xs->error) {
+	case XS_NOERROR:
+		bp->b_error = 0;
+		bp->b_resid = xs->resid;
+		break;
+
+	case XS_NO_CCB:
+		/* The adapter is busy, requeue the buf and try it later. */
+		BUFQ_REQUEUE(st->sc_bufq, bp);
+		scsi_xs_put(xs);
+		SET(st->flags, ST_WAITING); /* dont let ststart xsh_add */
+		timeout_add(&st->sc_timeout, 1);
+		return;
+
+	case XS_SENSE:
+	case XS_SHORTSENSE:
+		error = scsi_interpret_sense(xs);
+		if (error == 0) {
+			bp->b_error = 0;
+			bp->b_resid = xs->resid;
+			break;
+		}
+		if (error != ERESTART)
+			xs->retries = 0;
+		goto retry;
+
+	case XS_BUSY:
+		if (xs->retries) {
+			if (scsi_delay(xs, 1) != ERESTART)
+				xs->retries = 0;
+		}
+		goto retry;
+
+	case XS_TIMEOUT:
+retry:
+		if (xs->retries--) {
+			scsi_xs_exec(xs);
+			return;
+		}
+		/* FALLTHROUGH */
+
+	default:
+		bp->b_error = EIO;
+		bp->b_flags |= B_ERROR;
+		bp->b_resid = bp->b_bcount;
+		break;
+	}
 
 	s = splbio();
-	ststart(v);
+	biodone(bp);
 	splx(s);
+	scsi_xs_put(xs);
 }
 
 void
@@ -1306,7 +1329,7 @@ stioctl(dev_t dev, u_long cmd, caddr_t arg, int flag, struct proc *p)
 #endif
 
 	default:
-		error = scsi_do_ioctl(st->sc_link, dev, cmd, arg, flag, p);
+		error = scsi_do_ioctl(st->sc_link, cmd, arg, flag);
 		break;
 	}
 	goto done;
@@ -2107,24 +2130,4 @@ stdump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
 
 	/* Not implemented. */
 	return ENXIO;
-}
-
-/*
- * Remove unprocessed buffers from queue.
- */
-void
-st_kill_buffers(struct st_softc *st)
-{
-	struct buf *dp, *bp;
-	int s;
-
-	s = splbio();
-	for (dp = &st->buf_queue; (bp = dp->b_actf) != NULL; ) {
-		dp->b_actf = bp->b_actf;
-
-		bp->b_error = ENXIO;
-		bp->b_flags |= B_ERROR;
-		biodone(bp);
-	}
-	splx(s);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_proto.c,v 1.40 2009/03/26 20:34:54 damien Exp $	*/
+/*	$OpenBSD: ieee80211_proto.c,v 1.42 2010/06/05 15:54:35 damien Exp $	*/
 /*	$NetBSD: ieee80211_proto.c,v 1.8 2004/04/30 23:58:20 dyoung Exp $	*/
 
 /*-
@@ -89,7 +89,6 @@ const char * const ieee80211_phymode_name[] = {
 };
 
 int ieee80211_newstate(struct ieee80211com *, enum ieee80211_state, int);
-void ieee80211_set_link_state(struct ieee80211com *, int);
 
 void
 ieee80211_proto_attach(struct ifnet *ifp)
@@ -431,10 +430,11 @@ ieee80211_node_gtk_rekey(void *arg, struct ieee80211_node *ni)
 		return;
 
 	/* initiate a group key handshake with STA */
-	if (ieee80211_send_group_msg1(ic, ni) == 0) {
-		ni->ni_flags |= IEEE80211_NODE_REKEY;
+	ni->ni_flags |= IEEE80211_NODE_REKEY;
+	if (ieee80211_send_group_msg1(ic, ni) != 0)
+		ni->ni_flags &= ~IEEE80211_NODE_REKEY;
+	else
 		ic->ic_rsn_keydonesta++;
-	}
 }
 
 /*
@@ -949,7 +949,6 @@ ieee80211_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 		}
 		break;
 	case IEEE80211_S_RUN:
-		ieee80211_set_link_state(ic, LINK_STATE_UP);
 		switch (ostate) {
 		case IEEE80211_S_INIT:
 		case IEEE80211_S_AUTH:
@@ -981,6 +980,13 @@ ieee80211_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 					"short" : "long",
 				    (ic->ic_flags & IEEE80211_F_USEPROT) ?
 					" protection enabled" : "");
+			}
+			if (!(ic->ic_flags & IEEE80211_F_RSNON)) {
+				/*
+				 * NB: When RSN is enabled, we defer setting
+				 * the link up until the port is valid.
+				 */
+				ieee80211_set_link_state(ic, LINK_STATE_UP);
 			}
 			ic->ic_mgt_timer = 0;
 			(*ifp->if_start)(ifp);

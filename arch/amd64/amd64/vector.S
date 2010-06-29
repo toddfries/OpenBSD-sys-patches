@@ -1,4 +1,4 @@
-/*	$OpenBSD: vector.S,v 1.21 2009/06/06 23:45:35 guenther Exp $	*/
+/*	$OpenBSD: vector.S,v 1.25 2010/04/05 19:04:32 kettenis Exp $	*/
 /*	$NetBSD: vector.S,v 1.5 2004/06/28 09:13:11 fvdl Exp $	*/
 
 /*
@@ -74,7 +74,6 @@
 #include <machine/asm.h>
 #include <machine/frameasm.h>
 #include <machine/segments.h>
-#include <machine/specialreg.h>
 #include <machine/trap.h>
 #include <machine/intr.h>
 #include <machine/psl.h>
@@ -240,9 +239,6 @@ calltrap:
 #endif /* DIAGNOSTIC */
 
 
-#define __HAVE_GENERIC_SOFT_INTERRUPTS	/* XXX */
-
-
 /*
  * Macros for interrupt entry, call to handler, and exit.
  *
@@ -266,9 +262,9 @@ calltrap:
 
 /* XXX See comment in locore.s */
 #ifdef __ELF__
-#define	XINTR(name,num)		Xintr_/**/name/**/num
+#define	XINTR(name,num)		Xintr_##name##num
 #else
-#define	XINTR(name,num)		_Xintr_/**/name/**/num
+#define	XINTR(name,num)		_Xintr_##name##num
 #endif
 
 #if NLAPIC > 0
@@ -348,41 +344,6 @@ IDTVEC(ipi_invlrange)
 	popq	%rax
 	iretq
 
-IDTVEC(ipi_reloadcr3)
-	pushq	%rax
-	pushq	%rcx
-	pushq	%rdx
-	pushq	%r9
-
-	ioapic_asm_ack()
-
-	movl	$MSR_GSBASE, %ecx
-	rdmsr
-	movq	$VM_MAXUSER_ADDRESS, %rcx
-	shlq	$32, %rdx
-	leaq	(%rax,%rdx), %r9
-	cmpq	%rcx, %r9
-	jb	1f
-	swapgs
-1:
-	movq	CPUVAR(CURPCB), %rax
-	movq	PCB_PMAP(%rax), %rax
-	movq	%rax, CPUVAR(CURPMAP)
-	movq	PM_PDIRPA(%rax), %rax
-	movq	%rax, %cr3
-
-	lock
-	decq	tlb_shoot_wait
-
-	cmpq	%rcx, %r9
-	jb	1f
-	swapgs
-1:	popq	%r9
-	popq	%rdx
-	popq	%rcx
-	popq	%rax
-	iretq
-
 #endif /* MULTIPROCESSOR */
 	
 	/*
@@ -434,23 +395,23 @@ IDTVEC(resume_lapic_ltimer)
  */
 
 #define	INTRSTUB(name, num, early_ack, late_ack, mask, unmask, level_mask) \
-IDTVEC(recurse_/**/name/**/num)						;\
+IDTVEC(recurse_##name##num)						;\
 	INTR_RECURSE_HWFRAME						;\
 	subq	$8,%rsp							;\
 	pushq	$T_ASTFLT		/* trap # for doing ASTs */	;\
 	INTRENTRY							;\
-IDTVEC(resume_/**/name/**/num)						\
+IDTVEC(resume_##name##num)						\
 	movq	$IREENT_MAGIC,TF_ERR(%rsp)				;\
 	movl	%ebx,%r13d						;\
 	movq	CPUVAR(ISOURCES) + (num) * 8, %r14			;\
 	movl	IS_MAXLEVEL(%r14),%ebx					;\
 	jmp	1f							;\
-IDTVEC(intr_/**/name/**/num)						;\
+IDTVEC(intr_##name##num)						;\
 	pushq	$0			/* dummy error code */		;\
 	pushq	$T_ASTFLT		/* trap # for doing ASTs */	;\
 	INTRENTRY							;\
-	movq	CPUVAR(ISOURCES) + (num) * 8, %r14		;\
-	mask(num)		/* mask it in hardware */	;\
+	movq	CPUVAR(ISOURCES) + (num) * 8, %r14			;\
+	mask(num)			/* mask it in hardware */	;\
 	early_ack(num)			/* and allow other intrs */	;\
 	testq	%r14,%r14						;\
 	jz	9f			/* stray */			;\

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty.h,v 1.22 2006/08/17 06:27:05 miod Exp $	*/
+/*	$OpenBSD: tty.h,v 1.25 2010/06/28 14:13:36 deraadt Exp $	*/
 /*	$NetBSD: tty.h,v 1.30.4.1 1996/06/02 09:08:13 mrg Exp $	*/
 
 /*-
@@ -107,6 +107,7 @@ struct tty {
 	long	t_cancc;		/* Canonical queue statistics. */
 	struct	clist t_outq;		/* Device output queue. */
 	long	t_outcc;		/* Output queue statistics. */
+	int	t_qlen;			/* Length of above queues */
 	u_char	t_line;			/* Interface to device drivers. */
 	dev_t	t_dev;			/* Device. */
 	int	t_state;		/* Device and driver (TS*) state. */
@@ -165,7 +166,7 @@ struct itty {
 
 #define	TTMASK	15
 #define	OBUFSIZ	512
-#define	TTYHOG	1024
+#define	TTYHOG(tp)	(tp)->t_qlen
 
 #ifdef _KERNEL
 #define	TTMAXHIWAT	roundup(2048, CBSIZE)
@@ -281,9 +282,9 @@ int	 ttyclose(struct tty *tp);
 void	 ttyflush(struct tty *tp, int rw);
 void	 ttyinfo(struct tty *tp);
 int	 ttyinput(int c, struct tty *tp);
-int	 ttylclose(struct tty *tp, int flag);
+int	 ttylclose(struct tty *tp, int flag, struct proc *p);
 int	 ttymodem(struct tty *tp, int flag);
-int	 ttyopen(dev_t device, struct tty *tp);
+int	 ttyopen(dev_t device, struct tty *tp, struct proc *p);
 int	 ttyoutput(int c, struct tty *tp);
 void	 ttypend(struct tty *tp);
 void	 ttyretype(struct tty *tp);
@@ -295,7 +296,7 @@ int	 ttywflush(struct tty *tp);
 void	 ttytstamp(struct tty *tp, int octs, int ncts, int odcd, int ndcd);
 
 void	tty_init(void);
-struct tty *ttymalloc(void);
+struct tty *ttymalloc(int);
 void	 ttyfree(struct tty *);
 u_char	*firstc(struct clist *clp, int *c);
 
@@ -305,7 +306,7 @@ int	cttywrite(dev_t, struct uio *, int);
 int	cttyioctl(dev_t, u_long, caddr_t, int, struct proc *);
 int	cttypoll(dev_t, int, struct proc *);
 
-int	clalloc(struct clist *, int, int);
+void	clalloc(struct clist *, int, int);
 void	clfree(struct clist *);
 
 #if defined(COMPAT_43) || defined(COMPAT_SUNOS) || defined(COMPAT_SVR4) || \

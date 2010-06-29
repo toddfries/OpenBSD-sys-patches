@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.94 2009/06/03 14:45:55 jj Exp $	*/
+/*	$OpenBSD: conf.h,v 1.97 2010/06/08 12:46:49 jsing Exp $	*/
 /*	$NetBSD: conf.h,v 1.33 1996/05/03 20:03:32 christos Exp $	*/
 
 /*-
@@ -355,12 +355,12 @@ extern struct cdevsw cdevsw[];
 	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
 	dev_init(c,n,mmap), 0, D_KQFILTER, dev_init(c,n,kqfilter) }
 
-/* open, close, read, write, ioctl, poll, nokqfilter */
+/* open, close, read, write, ioctl, poll, kqfilter */
 #define cdev_midi_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
 	dev_init(c,n,write), dev_init(c,n,ioctl), \
 	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
-	(dev_type_mmap((*))) enodev }
+	(dev_type_mmap((*))) enodev, 0, D_KQFILTER, dev_init(c,n,kqfilter) }
 
 #define	cdev_svr4_net_init(c,n) { \
 	dev_init(c,n,open), (dev_type_close((*))) enodev, \
@@ -532,8 +532,8 @@ void	randomattach(void);
  * Line discipline switch table
  */
 struct linesw {
-	int	(*l_open)(dev_t dev, struct tty *tp);
-	int	(*l_close)(struct tty *tp, int flags);
+	int	(*l_open)(dev_t dev, struct tty *tp, struct proc *p);
+	int	(*l_close)(struct tty *tp, int flags, struct proc *p);
 	int	(*l_read)(struct tty *tp, struct uio *uio,
 				     int flag);
 	int	(*l_write)(struct tty *tp, struct uio *uio,
@@ -638,6 +638,8 @@ cdev_decl(rd);
 
 bdev_decl(uk);
 cdev_decl(uk);
+
+cdev_decl(diskmap);
 
 cdev_decl(bpf);
 

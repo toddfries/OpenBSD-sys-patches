@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.15 2009/04/11 17:13:33 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.18 2009/10/06 21:35:43 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.h,v 1.7 1997/06/06 23:29:18 thorpej Exp $	*/
 
 /*
@@ -94,10 +94,10 @@ void		pci_conf_write(pci_chipset_tag_t, pcitag_t, int,
 struct pci_attach_args;
 int		pci_intr_map(struct pci_attach_args *,
 		    pci_intr_handle_t *);
-#define		pci_intr_line(ih)	((ih).line)
+#define		pci_intr_line(c, ih)	((ih).line)
 const char	*pci_intr_string(pci_chipset_tag_t, pci_intr_handle_t);
 void		*pci_intr_establish(pci_chipset_tag_t, pci_intr_handle_t,
-		    int, int (*)(void *), void *, char *);
+		    int, int (*)(void *), void *, const char *);
 void		pci_intr_disestablish(pci_chipset_tag_t, void *);
 void		pci_decompose_tag(pci_chipset_tag_t, pcitag_t,
 		    int *, int *, int *);
@@ -108,3 +108,10 @@ void		pci_decompose_tag(pci_chipset_tag_t, pcitag_t,
  * controller on a PC.
  */
 #define	I386_PCI_INTERRUPT_LINE_NO_CONNECTION	0xff
+
+/*
+ * PCI address space is shared with ISA, so avoid legacy ISA I/O
+ * registers.
+ */
+#define PCI_IO_START	0x400
+#define PCI_IO_END	0xffff

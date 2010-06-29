@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.129 2009/06/05 00:05:22 claudio Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.134 2010/04/20 22:05:43 tedu Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -74,6 +74,7 @@
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -104,6 +105,9 @@ extern int ip6_defhlim;
 #endif /* INET6 */
 
 #include "faith.h"
+#if NFAITH > 0
+#include <net/if_types.h>
+#endif
 
 #include "pf.h"
 #if NPF > 0
@@ -440,7 +444,7 @@ udp_input(struct mbuf *m, ...)
 			if (!ip6 && (inp->inp_flags & INP_IPV6))
 				continue;
 #endif
-			if (inp->inp_rdomain != m->m_pkthdr.rdomain)
+			if (inp->inp_rdomain != rtable_l2(m->m_pkthdr.rdomain))
 				continue;
 			if (inp->inp_lport != uh->uh_dport)
 				continue;
@@ -509,7 +513,7 @@ udp_input(struct mbuf *m, ...)
 			 * not have either the SO_REUSEPORT or SO_REUSEADDR
 			 * socket options set.  This heuristic avoids searching
 			 * through all pcbs in the common case of a non-shared
-			 * port.  It * assumes that an application will never
+			 * port.  It assumes that an application will never
 			 * clear these options after setting them.
 			 */
 			if ((last->inp_socket->so_options & (SO_REUSEPORT |
@@ -864,7 +868,7 @@ udp6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 #endif
 
 void *
-udp_ctlinput(int cmd, struct sockaddr *sa, void *v)
+udp_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *v)
 {
 	struct ip *ip = v;
 	struct udphdr *uhp;
@@ -899,17 +903,17 @@ udp_ctlinput(int cmd, struct sockaddr *sa, void *v)
 		/* PMTU discovery for udpencap */
 		if (cmd == PRC_MSGSIZE && ip_mtudisc && udpencap_enable &&
 		    udpencap_port && uhp->uh_sport == htons(udpencap_port)) {
-			udpencap_ctlinput(cmd, sa, v);
+			udpencap_ctlinput(cmd, sa, rdomain, v);
 			return (NULL);
 		}
 #endif
 		inp = in_pcbhashlookup(&udbtable,
 		    ip->ip_dst, uhp->uh_dport, ip->ip_src, uhp->uh_sport,
-		    /* XXX */ 0);
+		    rdomain);
 		if (inp && inp->inp_socket != NULL)
 			notify(inp, errno);
 	} else
-		in_pcbnotifyall(&udbtable, sa, errno, notify);
+		in_pcbnotifyall(&udbtable, sa, rdomain, errno, notify);
 	return (NULL);
 }
 

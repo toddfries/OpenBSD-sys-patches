@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.84 2009/04/03 04:22:49 guenther Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.92 2010/05/26 15:16:57 oga Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -95,10 +95,16 @@ int
 sys_threxit(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_threxit_args /* {
-		syscallarg(int) rval;
+		syscallarg(pid_t *) notdead;
 	} */ *uap = v;
 
-	exit1(p, W_EXITCODE(SCARG(uap, rval), 0), EXIT_THREAD);
+	if (SCARG(uap, notdead) != NULL) {
+		pid_t zero = 0;
+		if (copyout(&zero, SCARG(uap, notdead), sizeof(zero))) {
+			psignal(p, SIGSEGV);
+		}
+	}
+	exit1(p, 0, EXIT_THREAD);
 
 	return (0);
 }
@@ -163,7 +169,6 @@ exit1(struct proc *p, int rv, int flags)
 	 * wake up the parent early to avoid deadlock.
 	 */
 	atomic_setbits_int(&p->p_flag, P_WEXIT);
-	atomic_clearbits_int(&p->p_flag, P_TRACED);
 	if (p->p_flag & P_PPWAIT) {
 		atomic_clearbits_int(&p->p_flag, P_PPWAIT);
 		wakeup(p->p_pptr);
@@ -231,11 +236,6 @@ exit1(struct proc *p, int rv, int flags)
 	if (ISSET(p->p_flag, P_SYSTRACE))
 		systrace_exit(p);
 #endif
-	/*
-	 * NOTE: WE ARE NO LONGER ALLOWED TO SLEEP!
-	 */
-	p->p_stat = SDEAD;
-
         /*
          * Remove proc from pidhash chain so looking it up won't
          * work.  Move it from allproc to zombproc, but do not yet
@@ -243,9 +243,16 @@ exit1(struct proc *p, int rv, int flags)
          * deadproc list later (using the p_hash member), and
          * wake up the reaper when we do.
          */
+	rw_enter_write(&allproclk);
+	/*
+	 * NOTE: WE ARE NO LONGER ALLOWED TO SLEEP!
+	 */
+	p->p_stat = SDEAD;
+
 	LIST_REMOVE(p, p_hash);
 	LIST_REMOVE(p, p_list);
 	LIST_INSERT_HEAD(&zombproc, p, p_list);
+	rw_exit_write(&allproclk);
 
 	/*
 	 * Give orphaned children to init(8).
@@ -285,7 +292,8 @@ exit1(struct proc *p, int rv, int flags)
 	/*
 	 * notify interested parties of our demise.
 	 */
-	KNOTE(&p->p_klist, NOTE_EXIT);
+	if (p == p->p_p->ps_mainproc)
+		KNOTE(&p->p_p->ps_klist, NOTE_EXIT);
 
 	/*
 	 * Notify parent that we're gone.  If we have P_NOZOMBIE or parent has
@@ -304,10 +312,6 @@ exit1(struct proc *p, int rv, int flags)
 			wakeup(pp);
 	}
 
-	if (p->p_exitsig != 0)
-		psignal(p->p_pptr, P_EXITSIG(p));
-	wakeup(p->p_pptr);
-
 	/*
 	 * Release the process's signal state.
 	 */
@@ -322,9 +326,6 @@ exit1(struct proc *p, int rv, int flags)
 	 */
 	if (p->p_emul->e_proc_exit)
 		(*p->p_emul->e_proc_exit)(p);
-
-	/* This process no longer needs to hold the kernel lock. */
-	KERNEL_PROC_UNLOCK(p);
 
 	/*
 	 * Finally, call machine-dependent code to switch to a new
@@ -408,8 +409,9 @@ reaper(void)
 		if ((p->p_flag & P_NOZOMBIE) == 0) {
 			p->p_stat = SZOMB;
 
+			if (P_EXITSIG(p) != 0)
+				psignal(p->p_pptr, P_EXITSIG(p));
 			/* Wake up the parent so it can get exit status. */
-			psignal(p->p_pptr, SIGCHLD);
 			wakeup(p->p_pptr);
 		} else {
 			/* Noone will wait for us. Just zap the process now */
@@ -430,7 +432,7 @@ sys_wait4(struct proc *q, void *v, register_t *retval)
 		syscallarg(struct rusage *) rusage;
 	} */ *uap = v;
 	int nfound;
-	struct proc *p, *t;
+	struct proc *p;
 	int status, error;
 
 	if (SCARG(uap, pid) == 0)
@@ -471,26 +473,7 @@ loop:
 			    (error = copyout(p->p_ru,
 			    SCARG(uap, rusage), sizeof(struct rusage))))
 				return (error);
-
-			/*
-			 * If we got the child via a ptrace 'attach',
-			 * we need to give it back to the old parent.
-			 */
-			if (p->p_oppid && (t = pfind(p->p_oppid))) {
-				p->p_oppid = 0;
-				proc_reparent(p, t);
-				if (p->p_exitsig != 0)
-					psignal(t, P_EXITSIG(p));
-				wakeup(t);
-				return (0);
-			}
-
-			scheduler_wait_hook(q, p);
-			p->p_xstat = 0;
-			ruadd(&q->p_stats->p_cru, p->p_ru);
-
-			proc_zap(p);
-
+			proc_finish_wait(q, p);
 			return (0);
 		}
 		if (p->p_stat == SSTOP && (p->p_flag & P_WAITED) == 0 &&
@@ -530,6 +513,30 @@ loop:
 	goto loop;
 }
 
+void
+proc_finish_wait(struct proc *waiter, struct proc *p)
+{
+	struct proc *t;
+
+	/*
+	 * If we got the child via a ptrace 'attach',
+	 * we need to give it back to the old parent.
+	 */
+	if (p->p_oppid && (t = pfind(p->p_oppid))) {
+		atomic_clearbits_int(&p->p_flag, P_TRACED);
+		p->p_oppid = 0;
+		proc_reparent(p, t);
+		if (p->p_exitsig != 0)
+			psignal(t, p->p_exitsig);
+		wakeup(t);
+	} else {
+		scheduler_wait_hook(waiter, p);
+		p->p_xstat = 0;
+		ruadd(&waiter->p_stats->p_cru, p->p_ru);
+		proc_zap(p);
+	}
+}
+
 /*
  * make process 'parent' the new parent of process 'child'.
  */
@@ -560,7 +567,9 @@ proc_zap(struct proc *p)
 	 * Unlink it from its process group and free it.
 	 */
 	leavepgrp(p);
+	rw_enter_write(&allproclk);
 	LIST_REMOVE(p, p_list);	/* off zombproc */
+	rw_exit_write(&allproclk);
 	LIST_REMOVE(p, p_sibling);
 
 	/*

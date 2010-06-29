@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.32 2009/06/02 17:55:37 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.58 2010/04/28 16:20:28 syuu Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -45,28 +45,27 @@
 #ifndef _MIPS_CPU_H_
 #define	_MIPS_CPU_H_
 
+#ifndef _LOCORE
+
 /*
  * MIPS32-style segment definitions.
  * They only cover the first 512MB of physical addresses.
  */
-#define	KSEG0_BASE	0xffffffff80000000
-#define	KSEG1_BASE	0xffffffffa0000000
-#define	KSSEG_BASE	0xffffffffc0000000
-#define	KSEG3_BASE	0xffffffffe0000000
-#define	KSEG_SIZE	0x0000000020000000
+#define	CKSEG0_BASE		0xffffffff80000000UL
+#define	CKSEG1_BASE		0xffffffffa0000000UL
+#define	CKSSEG_BASE		0xffffffffc0000000UL
+#define	CKSEG3_BASE		0xffffffffe0000000UL
+#define	CKSEG_SIZE		0x0000000020000000UL
 
-#define	KSEG0_TO_PHYS(x)	((u_long)(x) & (KSEG_SIZE - 1))
-#define	KSEG1_TO_PHYS(x)	((u_long)(x) & (KSEG_SIZE - 1))
-#define	PHYS_TO_KSEG0(x)	((u_long)(x) | KSEG0_BASE)
-#define	PHYS_TO_KSEG1(x)	((u_long)(x) | KSEG1_BASE)
-#define	PHYS_TO_KSEG3(x)	((u_long)(x) | KSEG3_BASE)
+#define	CKSEG0_TO_PHYS(x)	((u_long)(x) & (CKSEG_SIZE - 1))
+#define	CKSEG1_TO_PHYS(x)	((u_long)(x) & (CKSEG_SIZE - 1))
+#define	PHYS_TO_CKSEG0(x)	((u_long)(x) | CKSEG0_BASE)
+#define	PHYS_TO_CKSEG1(x)	((u_long)(x) | CKSEG1_BASE)
 
 /*
  * MIPS64-style segment definitions.
  * These allow for 36 bits of addressable physical memory, thus 64GB.
  */
-
-#ifndef _LOCORE
 
 /*
  * Cache Coherency Attributes.
@@ -103,9 +102,10 @@
 
 extern vaddr_t uncached_base;
 
-#endif	/* _LOCORE */
-
+#define	XKSSSEG_BASE		0x4000000000000000UL
 #define	XKPHYS_BASE		0x8000000000000000UL
+#define	XKSSEG_BASE		0xc000000000000000UL
+
 #define	XKPHYS_TO_PHYS(x)	((paddr_t)(x) & 0x0000000fffffffffUL)
 #define	PHYS_TO_XKPHYS(x,c)	((paddr_t)(x) | XKPHYS_BASE | ((c) << 59))
 #define	PHYS_TO_XKPHYS_UNCACHED(x,s) \
@@ -114,6 +114,8 @@ extern vaddr_t uncached_base;
 #define	IS_XKPHYS(va)		(((va) >> 62) == 2)
 #define	XKPHYS_TO_CCA(x)	(((x) >> 59) & 0x07)
 #define	XKPHYS_TO_SP(x)		(((x) >> 57) & 0x03)
+
+#endif	/* _LOCORE */
 
 #ifdef _KERNEL
 
@@ -210,11 +212,11 @@ extern vaddr_t uncached_base;
 /*
  * Location of exception vectors.
  */
-#define	RESET_EXC_VEC		(KSEG0_BASE + 0x3fc00000)
-#define	TLB_MISS_EXC_VEC	(KSEG0_BASE + 0x00000000)
-#define	XTLB_MISS_EXC_VEC	(KSEG0_BASE + 0x00000080)
-#define	CACHE_ERR_EXC_VEC	(KSEG0_BASE + 0x00000100)
-#define	GEN_EXC_VEC		(KSEG0_BASE + 0x00000180)
+#define	RESET_EXC_VEC		(CKSEG1_BASE + 0x1fc00000)
+#define	TLB_MISS_EXC_VEC	(CKSEG0_BASE + 0x00000000)
+#define	XTLB_MISS_EXC_VEC	(CKSEG0_BASE + 0x00000080)
+#define	CACHE_ERR_EXC_VEC	(CKSEG0_BASE + 0x00000100)
+#define	GEN_EXC_VEC		(CKSEG0_BASE + 0x00000180)
 
 /*
  * Coprocessor 0 registers:
@@ -240,6 +242,7 @@ extern vaddr_t uncached_base;
 #define	COP_0_WATCH_HI		$19
 #define	COP_0_TLB_XCONTEXT	$20
 #define	COP_0_TLB_FR_MASK	$21	/* R10000 onwards */
+#define	COP_0_DIAG		$22	/* Loongson 2F */
 #define	COP_0_ECC		$26
 #define	COP_0_CACHE_ERR		$27
 #define	COP_0_TAG_LO		$28
@@ -355,42 +358,127 @@ extern vaddr_t uncached_base;
 
 #ifndef _LOCORE
 
+#include <sys/device.h>
+#include <sys/lock.h>
+#include <machine/intr.h>
 #include <sys/sched.h>
 
-struct cpu_info {
-	struct schedstate_percpu ci_schedstate;
-
-	struct proc *ci_curproc;
-	u_int32_t ci_randseed;
+struct cpu_hwinfo {
+	uint32_t	c0prid;
+	uint32_t	c1prid;
+	uint32_t	clock;	/* Hz */
+	uint32_t	tlbsize;
+	uint		type;
+	uint32_t	l2size;
 };
 
+struct cpu_info {
+	struct device	*ci_dev;	/* our device */
+	struct cpu_info	*ci_self;	/* pointer to this structure */
+	struct cpu_info	*ci_next;	/* next cpu */
+	struct proc	*ci_curproc;
+	struct user	*ci_curprocpaddr;
+	struct proc	*ci_fpuproc;	/* pointer to last proc to use FP */
+	uint32_t	 ci_delayconst;
+	struct cpu_hwinfo
+			ci_hw;
+
+	/* cache information */
+	uint		ci_cacheconfiguration;
+	uint		ci_cacheways;
+	uint		ci_l1instcachesize;
+	uint		ci_l1instcacheline;
+	uint		ci_l1instcacheset;
+	uint		ci_l1datacachesize;
+	uint		ci_l1datacacheline;
+	uint		ci_l1datacacheset;
+	uint		ci_l2size;
+	uint		ci_l3size;
+
+	struct schedstate_percpu
+			ci_schedstate;
+	int		ci_want_resched;	/* need_resched() invoked */
+	cpuid_t		ci_cpuid;		/* our CPU ID */
+	uint32_t	ci_randseed;		/* per cpu random seed */
+	int		ci_ipl;			/* software IPL */
+	uint32_t	ci_softpending;		/* pending soft interrupts */
+	int		ci_clock_started;
+	u_int32_t	ci_cpu_counter_last;
+	u_int32_t	ci_cpu_counter_interval;
+	u_int32_t	ci_pendingticks;
+	struct pmap	*ci_curpmap;
+	uint		ci_intrdepth;		/* interrupt depth */
+#ifdef MULTIPROCESSOR
+	u_long		ci_flags;		/* flags; see below */
+	struct intrhand	ci_ipiih;
+#endif
+};
+
+#define	CPUF_PRIMARY	0x01		/* CPU is primary CPU */
+#define	CPUF_PRESENT	0x02		/* CPU is present */
+#define	CPUF_RUNNING	0x04		/* CPU is running */
+
 extern struct cpu_info cpu_info_primary;
+extern struct cpu_info *cpu_info_list;
+#define CPU_INFO_ITERATOR		int
+#define	CPU_INFO_FOREACH(cii, ci)	for (cii = 0, ci = cpu_info_list; \
+					    ci != NULL; ci = ci->ci_next)
 
-#define	curcpu()	(&cpu_info_primary)
+#define CPU_INFO_UNIT(ci)               ((ci)->ci_dev ? (ci)->ci_dev->dv_unit : 0)
 
-#define	CPU_IS_PRIMARY(ci)	1
-#define	CPU_INFO_ITERATOR	int
-#define	CPU_INFO_FOREACH(cii, ci)					\
-	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
-#define	CPU_INFO_UNIT(ci)	0
-#define	MAXCPUS	1
-#define	cpu_unidle(ci)
+#ifdef MULTIPROCESSOR
+#define MAXCPUS				4
+extern struct cpu_info *getcurcpu(void);
+extern void setcurcpu(struct cpu_info *);
+#ifdef DEBUG
+extern struct cpu_info *get_cpu_info(int);
+#endif
+#define curcpu() getcurcpu()
+#define	CPU_IS_PRIMARY(ci)		((ci)->ci_flags & CPUF_PRIMARY)
+#define cpu_number()			(curcpu()->ci_cpuid)
 
-#define	cpu_number()	0
+extern struct cpuset cpus_running;
+void cpu_unidle(struct cpu_info *);
+void cpu_boot_secondary_processors(void);
+#define cpu_boot_secondary(ci)          hw_cpu_boot_secondary(ci)
+#define cpu_hatch(ci)                   hw_cpu_hatch(ci)
+
+vaddr_t alloc_contiguous_pages(size_t);
+
+#define MIPS64_IPI_NOP		0x00000001
+#define MIPS64_IPI_RENDEZVOUS	0x00000002
+#define MIPS64_NIPIS		2	/* must not exceed 32 */
+
+void	mips64_ipi_init(void);
+void	mips64_send_ipi(unsigned int, unsigned int);
+void	smp_rendezvous_cpus(unsigned long, void (*)(void *), void *arg);
+
+#include <sys/mplock.h>
+#else
+#define MAXCPUS				1
+#define curcpu()			(&cpu_info_primary)
+#define	CPU_IS_PRIMARY(ci)		1
+#define cpu_number()			0
+#define cpu_unidle(ci)
+#endif
+
+void cpu_startclock(struct cpu_info *);
 
 #include <machine/frame.h>
-#include <machine/intr.h>
+
+#endif	/* _LOCORE */
+
+#ifndef _LOCORE
 
 /*
  * Arguments to hardclock encapsulate the previous machine state in
  * an opaque clockframe.
  */
-extern int int_nest_cntr;
 #define	clockframe trap_frame	/* Use normal trap frame */
 
 #define	CLKF_USERMODE(framep)	((framep)->sr & SR_KSU_USER)
 #define	CLKF_PC(framep)		((framep)->pc)
-#define	CLKF_INTR(framep)	(int_nest_cntr > 0)
+#define	CLKF_INTR(framep)	(curcpu()->ci_intrdepth > 1)	/* XXX */
 
 /*
  * This is used during profiling to integrate system time.
@@ -401,25 +489,32 @@ extern int int_nest_cntr;
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
-#define	need_resched(info)	{ want_resched = 1; aston(); }
-#define	clear_resched(ci) 	want_resched = 0
+#define	need_resched(ci) \
+	do { \
+		(ci)->ci_want_resched = 1; \
+		if ((ci)->ci_curproc != NULL) \
+			aston((ci)->ci_curproc); \
+	} while(0)
+#define	clear_resched(ci) 	(ci)->ci_want_resched = 0
 
 /*
  * Give a profiling tick to the current process when the user profiling
  * buffer pages are invalid.  On the PICA, request an ast to send us
  * through trap, marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)	aston()
+#define	need_proftick(p)	aston(p)
 
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#define	signotify(p)	aston()
+#ifdef MULTIPROCESSOR
+#define	signotify(p)		(aston(p), cpu_unidle(p->p_cpu))
+#else
+#define	signotify(p)		aston(p)
+#endif
 
-#define	aston()		(astpending = 1)
-
-extern int want_resched;	/* resched() was called */
+#define	aston(p)		p->p_md.md_astpending = 1
 
 #endif /* !_LOCORE */
 #endif /* _KERNEL */
@@ -461,7 +556,9 @@ extern int want_resched;	/* resched() was called */
 #define	MIPS_RM7000	0x27	/* PMCS RM7000 CPU		ISA IV  */
 #define	MIPS_RM52X0	0x28	/* PMCS RM52X0 CPU		ISA IV  */
 #define	MIPS_RM9000	0x34	/* PMCS RM9000 CPU		ISA IV  */
+#define	MIPS_LOONGSON	0x42	/* STC LoongSon CPU		ISA III */
 #define	MIPS_VR5400	0x54	/* NEC Vr5400 CPU		ISA IV+ */
+#define	MIPS_LOONGSON2	0x63	/* STC LoongSon2 CPU		ISA III */
 
 /*
  * MIPS FPU types. Only soft, rest is the same as cpu type.
@@ -471,66 +568,47 @@ extern int want_resched;	/* resched() was called */
 
 #if defined(_KERNEL) && !defined(_LOCORE)
 
-extern u_int	CpuPrimaryInstCacheSize;
-extern u_int	CpuPrimaryInstCacheLSize;
-extern u_int	CpuPrimaryInstSetSize;
-extern u_int	CpuPrimaryDataCacheSize;
-extern u_int	CpuPrimaryDataCacheLSize;
-extern u_int	CpuPrimaryDataSetSize;
-extern u_int	CpuCacheAliasMask;
-extern u_int	CpuSecondaryCacheSize;
-extern u_int	CpuTertiaryCacheSize;
-extern u_int	CpuNWayCache;
-extern u_int	CpuCacheType;		/* R4K, R5K, RM7K */
-extern u_int	CpuConfigRegister;
-extern u_int	CpuStatusRegister;
-extern u_int	CpuExternalCacheOn;	/* R5K, RM7K */
-extern u_int	CpuOnboardCacheOn;	/* RM7K */
+extern vaddr_t CpuCacheAliasMask;
 
 struct tlb_entry;
 struct user;
 
-void	tlb_set_wired(int);
-void	tlb_set_pid(int);
-u_int	cp0_get_prid(void);
-u_int	cp1_get_prid(void);
 u_int	cp0_get_count(void);
+uint32_t cp0_get_config(void);
+uint32_t cp0_get_prid(void);
 void	cp0_set_compare(u_int);
+u_int	cp1_get_prid(void);
+void	tlb_set_page_mask(uint32_t);
+void	tlb_set_pid(int);
+void	tlb_set_wired(int);
 
 /*
- * Define soft selected cache functions.
+ * Available cache operation routines. See <machine/cpu.h> for more.
  */
-#define	Mips_SyncCache()	(*(sys_config._SyncCache))()
-#define	Mips_InvalidateICache(a, l)	\
-				(*(sys_config._InvalidateICache))((a), (l))
-#define	Mips_InvalidateICachePage(a)	\
-				(*(sys_config._InvalidateICachePage))((a))
-#define	Mips_SyncDCachePage(a)		\
-				(*(sys_config._SyncDCachePage))((a))
-#define	Mips_HitSyncDCache(a, l)	\
-				(*(sys_config._HitSyncDCache))((a), (l))
-#define	Mips_IOSyncDCache(a, l, h)	\
-				(*(sys_config._IOSyncDCache))((a), (l), (h))
-#define	Mips_HitInvalidateDCache(a, l)	\
-				(*(sys_config._HitInvalidateDCache))((a), (l))
 
-int	Mips5k_ConfigCache(void);
-void	Mips5k_SyncCache(void);
-void	Mips5k_InvalidateICache(vaddr_t, int);
-void	Mips5k_InvalidateICachePage(vaddr_t);
-void	Mips5k_SyncDCachePage(vaddr_t);
-void	Mips5k_HitSyncDCache(vaddr_t, int);
-void	Mips5k_IOSyncDCache(vaddr_t, int, int);
-void	Mips5k_HitInvalidateDCache(vaddr_t, int);
+int	Loongson2_ConfigCache(struct cpu_info *);
+void	Loongson2_SyncCache(struct cpu_info *);
+void	Loongson2_InvalidateICache(struct cpu_info *, vaddr_t, size_t);
+void	Loongson2_SyncDCachePage(struct cpu_info *, paddr_t);
+void	Loongson2_HitSyncDCache(struct cpu_info *, paddr_t, size_t);
+void	Loongson2_HitInvalidateDCache(struct cpu_info *, paddr_t, size_t);
+void	Loongson2_IOSyncDCache(struct cpu_info *, paddr_t, size_t, int);
 
-int	Mips10k_ConfigCache(void);
-void	Mips10k_SyncCache(void);
-void	Mips10k_InvalidateICache(vaddr_t, int);
-void	Mips10k_InvalidateICachePage(vaddr_t);
-void	Mips10k_SyncDCachePage(vaddr_t);
-void	Mips10k_HitSyncDCache(vaddr_t, int);
-void	Mips10k_IOSyncDCache(vaddr_t, int, int);
-void	Mips10k_HitInvalidateDCache(vaddr_t, int);
+int	Mips5k_ConfigCache(struct cpu_info *);
+void	Mips5k_SyncCache(struct cpu_info *);
+void	Mips5k_InvalidateICache(struct cpu_info *, vaddr_t, size_t);
+void	Mips5k_SyncDCachePage(struct cpu_info *, vaddr_t);
+void	Mips5k_HitSyncDCache(struct cpu_info *, vaddr_t, size_t);
+void	Mips5k_HitInvalidateDCache(struct cpu_info *, vaddr_t, size_t);
+void	Mips5k_IOSyncDCache(struct cpu_info *, vaddr_t, size_t, int);
+
+int	Mips10k_ConfigCache(struct cpu_info *);
+void	Mips10k_SyncCache(struct cpu_info *);
+void	Mips10k_InvalidateICache(struct cpu_info *, vaddr_t, size_t);
+void	Mips10k_SyncDCachePage(struct cpu_info *, vaddr_t);
+void	Mips10k_HitSyncDCache(struct cpu_info *, vaddr_t, size_t);
+void	Mips10k_HitInvalidateDCache(struct cpu_info *, vaddr_t, size_t);
+void	Mips10k_IOSyncDCache(struct cpu_info *, vaddr_t, size_t, int);
 
 void	tlb_flush(int);
 void	tlb_flush_addr(vaddr_t);
@@ -539,8 +617,9 @@ int	tlb_update(vaddr_t, unsigned);
 void	tlb_read(int, struct tlb_entry *);
 
 void	savectx(struct user *, int);
-void	MipsSaveCurFPState(struct proc *);
-void	MipsSaveCurFPState16(struct proc *);
+
+void	enable_fpu(struct proc *);
+void	save_fpu(void);
 
 int	guarded_read_4(paddr_t, uint32_t *);
 int	guarded_write_4(paddr_t, uint32_t);
@@ -556,10 +635,10 @@ void	setsoftintr0(void);
 void	clearsoftintr0(void);
 void	setsoftintr1(void);
 void	clearsoftintr1(void);
-u_int32_t enableintr(void);
-u_int32_t disableintr(void);
-void	setsr(u_int32_t);
-u_int32_t getsr(void);
+uint32_t enableintr(void);
+uint32_t disableintr(void);
+uint32_t getsr(void);
+uint32_t setsr(uint32_t);
 
 #endif /* _KERNEL */
 #endif /* !_MIPS_CPU_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_proc.c,v 1.40 2009/04/15 10:47:46 art Exp $	*/
+/*	$OpenBSD: kern_proc.c,v 1.42 2010/03/24 23:18:17 tedu Exp $	*/
 /*	$NetBSD: kern_proc.c,v 1.14 1996/02/09 18:59:41 christos Exp $	*/
 
 /*
@@ -40,6 +40,7 @@
 #include <sys/acct.h>
 #include <sys/wait.h>
 #include <sys/file.h>
+#include <sys/rwlock.h>
 #include <ufs/ufs/quota.h>
 #include <sys/uio.h>
 #include <sys/malloc.h>
@@ -61,6 +62,7 @@ u_long pidhash;
 struct pgrphashhead *pgrphashtbl;
 u_long pgrphash;
 struct proclist allproc;
+struct rwlock allproclk;
 struct proclist zombproc;
 
 struct pool proc_pool;
@@ -83,6 +85,7 @@ void
 procinit(void)
 {
 	LIST_INIT(&allproc);
+	rw_init(&allproclk, "allproc");
 	LIST_INIT(&zombproc);
 
 
@@ -151,14 +154,14 @@ chgproccnt(uid_t uid, int diff)
 }
 
 /*
- * Is p an inferior of the current process?
+ * Is p an inferior of parent?
  */
 int
-inferior(struct proc *p)
+inferior(struct proc *p, struct proc *parent)
 {
 
-	for (; p != curproc; p = p->p_pptr)
-		if (p->p_pid == 0)
+	for (; p != parent; p = p->p_pptr)
+		if (p->p_pid == 0 || p->p_pid == 1)
 			return (0);
 	return (1);
 }

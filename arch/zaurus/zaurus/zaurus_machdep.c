@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_machdep.c,v 1.31 2008/11/26 01:29:00 kevlo Exp $	*/
+/*	$OpenBSD: zaurus_machdep.c,v 1.35 2010/06/27 06:21:44 beck Exp $	*/
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -241,6 +241,12 @@ pv_addr_t kernel_pt_table[NUM_KERNEL_PTS];
 
 extern struct user *proc0paddr;
 
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
+
 /* Prototypes */
 
 #define	BOOT_STRING_MAGIC 0x4f425344
@@ -434,7 +440,7 @@ static vaddr_t section_free = ZAURUS_VBASE_FREE;
 
 static int
 bootstrap_bs_map(void *t, bus_addr_t bpa, bus_size_t size,
-    int cacheable, bus_space_handle_t *bshp)
+    int flags, bus_space_handle_t *bshp)
 {
 	u_long startpa;
 	vaddr_t va;

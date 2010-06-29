@@ -1,4 +1,4 @@
-/*	$OpenBSD: socket.h,v 1.60 2009/06/05 00:05:22 claudio Exp $	*/
+/*	$OpenBSD: socket.h,v 1.63 2010/04/21 11:52:46 claudio Exp $	*/
 /*	$NetBSD: socket.h,v 1.14 1996/02/09 18:25:36 christos Exp $	*/
 
 /*
@@ -85,7 +85,7 @@
 #define	SO_ERROR	0x1007		/* get error status and clear */
 #define	SO_TYPE		0x1008		/* get socket type */
 #define	SO_NETPROC	0x1020		/* multiplex; network processing */
-#define SO_RDOMAIN	0x1021		/* routing domain socket belongs to */
+#define	SO_RDOMAIN	0x1021		/* routing domain socket belongs to */
 
 /*
  * Structure used for manipulating linger option.
@@ -306,12 +306,14 @@ struct sockcred {
  *	Fifth: type of info, defined below
  *	Sixth: flag(s) to mask with for NET_RT_FLAGS
  *	Seventh: routing table to use (facultative, defaults to 0)
+ *		 NET_RT_TABLE has the table id as sixth element.
  */
 #define NET_RT_DUMP	1		/* dump; may limit to a.f. */
 #define NET_RT_FLAGS	2		/* by flags, e.g. RESOLVING */
 #define NET_RT_IFLIST	3		/* survey interface list */
 #define	NET_RT_STATS	4		/* routing table statistics */
-#define	NET_RT_MAXID	5
+#define	NET_RT_TABLE	5
+#define	NET_RT_MAXID	6
 
 #define CTL_NET_RT_NAMES { \
 	{ 0, 0 }, \
@@ -319,6 +321,7 @@ struct sockcred {
 	{ "flags", CTLTYPE_STRUCT }, \
 	{ "iflist", CTLTYPE_STRUCT }, \
 	{ "stats", CTLTYPE_STRUCT }, \
+	{ "table", CTLTYPE_STRUCT }, \
 }
 
 /*
@@ -485,6 +488,8 @@ int	setsockopt(int, int, int, const void *, socklen_t);
 int	shutdown(int, int);
 int	socket(int, int, int);
 int	socketpair(int, int, int, int *);
+int	getrdomain(void);
+int	setrdomain(int);
 __END_DECLS
 #else
 # if defined(COMPAT_43) || defined(COMPAT_SUNOS) || defined(COMPAT_LINUX) || \

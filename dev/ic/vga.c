@@ -1,4 +1,4 @@
-/* $OpenBSD: vga.c,v 1.50 2009/03/29 21:53:52 sthen Exp $ */
+/* $OpenBSD: vga.c,v 1.52 2009/09/05 14:09:35 miod Exp $ */
 /* $NetBSD: vga.c,v 1.28.2.1 2000/06/30 16:27:47 simonb Exp $ */
 
 /*-
@@ -123,9 +123,9 @@ void	vga_init(struct vga_config *, bus_space_tag_t, bus_space_tag_t);
 void	vga_setfont(struct vga_config *, struct vgascreen *);
 
 int	vga_mapchar(void *, int, unsigned int *);
-void	vga_putchar(void *, int, int, u_int, long);
+int	vga_putchar(void *, int, int, u_int, long);
 int	vga_alloc_attr(void *, int, int, int, long *);
-void	vga_copyrows(void *, int, int, int);
+int	vga_copyrows(void *, int, int, int);
 void	vga_unpack_attr(void *, long, int *, int *, int *);
 
 int	displaysubmatch(struct device *, void *, void *);
@@ -715,8 +715,10 @@ vga_alloc_screen(v, type, cookiep, curxp, curyp, defattrp)
 		 * for the first one too.
 		 * XXX We could be more clever and use video RAM.
 		 */
-		LIST_FIRST(&vc->screens)->pcs.mem =
-		  malloc(type->ncols * type->nrows * 2, M_DEVBUF, M_WAITOK);
+		scr = LIST_FIRST(&vc->screens);
+		scr->pcs.mem =
+		  malloc(scr->pcs.type->ncols * scr->pcs.type->nrows * 2,
+		    M_DEVBUF, M_WAITOK);
 	}
 
 	scr = malloc(sizeof(struct vgascreen), M_DEVBUF, M_WAITOK);
@@ -1065,7 +1067,7 @@ vga_unpack_attr(id, attr, fg, bg, ul)
 		*fg += 8;
 }
 
-void
+int
 vga_copyrows(id, srcrow, dstrow, nrows)
 	void *id;
 	int srcrow, dstrow, nrows;
@@ -1084,6 +1086,7 @@ vga_copyrows(id, srcrow, dstrow, nrows)
 #ifdef PCDISPLAY_SOFTCURSOR
 			int cursoron = scr->pcs.cursoron;
 
+			/* NOTE this assumes pcdisplay_cursor() never fails */
 			if (cursoron)
 				pcdisplay_cursor(&scr->pcs, 0,
 				    scr->pcs.vc_crow, scr->pcs.vc_ccol);
@@ -1106,6 +1109,7 @@ vga_copyrows(id, srcrow, dstrow, nrows)
 			vga_6845_write(&scr->cfg->hdl, startadrl,
 				       scr->pcs.dispoffset >> 1);
 #ifdef PCDISPLAY_SOFTCURSOR
+			/* NOTE this assumes pcdisplay_cursor() never fails */
 			if (cursoron)
 				pcdisplay_cursor(&scr->pcs, 1,
 				    scr->pcs.vc_crow, scr->pcs.vc_ccol);
@@ -1119,6 +1123,8 @@ vga_copyrows(id, srcrow, dstrow, nrows)
 	} else
 		bcopy(&scr->pcs.mem[srcoff], &scr->pcs.mem[dstoff],
 		      nrows * ncols * 2);
+
+	return 0;
 }
 
 #ifdef WSCONS_SUPPORT_PCVTFONTS
@@ -1320,7 +1326,7 @@ vga_mapchar(id, uni, index)
 	return (res1);
 }
 
-void
+int
 vga_putchar(c, row, col, uc, attr)
 	void *c;
 	int row;
@@ -1333,7 +1339,7 @@ vga_putchar(c, row, col, uc, attr)
 	if (scr->pcs.visibleoffset != scr->pcs.dispoffset)
 		vga_scrollback(scr->cfg, scr, 0);
 
-	pcdisplay_putchar(c, row, col, uc, attr);
+	return pcdisplay_putchar(c, row, col, uc, attr);
 }
 
 void

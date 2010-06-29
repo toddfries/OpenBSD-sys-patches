@@ -1,4 +1,4 @@
-/*	$OpenBSD: lapic.c,v 1.20 2009/06/06 23:45:35 guenther Exp $	*/
+/*	$OpenBSD: lapic.c,v 1.24 2010/06/26 23:24:43 guenther Exp $	*/
 /* $NetBSD: lapic.c,v 1.2 2003/05/08 01:04:35 fvdl Exp $ */
 
 /*-
@@ -34,7 +34,6 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 
@@ -113,7 +112,7 @@ lapic_map(paddr_t lapic_base)
 	invlpg(va);
 
 #ifdef MULTIPROCESSOR
-	cpu_init_first();	/* catch up to changed cpu_number() */
+	cpu_init_first();
 #endif
 
 	lapic_tpr = s;
@@ -234,8 +233,6 @@ lapic_boot_init(paddr_t lapic_base)
 	idt_vec_set(LAPIC_IPI_INVLPG, Xipi_invlpg);
 	idt_allocmap[LAPIC_IPI_INVLRANGE] = 1;
 	idt_vec_set(LAPIC_IPI_INVLRANGE, Xipi_invlrange);
-	idt_allocmap[LAPIC_IPI_RELOADCR3] = 1;
-	idt_vec_set(LAPIC_IPI_RELOADCR3, Xipi_reloadcr3);
 #endif
 	idt_allocmap[LAPIC_SPURIOUS_VECTOR] = 1;
 	idt_vec_set(LAPIC_SPURIOUS_VECTOR, Xintrspurious);
@@ -483,7 +480,7 @@ x86_ipi(int vec, int target, int dl)
 {
 	int result, s;
 
-	s = splclock();
+	s = splhigh();
 
 	i82489_icr_wait();
 

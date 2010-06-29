@@ -1,4 +1,4 @@
-/*      $OpenBSD: ath.c,v 1.80 2009/01/21 21:53:59 grange Exp $  */
+/*      $OpenBSD: ath.c,v 1.85 2010/04/20 22:05:43 tedu Exp $  */
 /*	$NetBSD: ath.c,v 1.37 2004/08/18 21:59:39 dyoung Exp $	*/
 
 /*-
@@ -45,7 +45,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/malloc.h>
 #include <sys/lock.h>
@@ -166,7 +165,7 @@ struct cfdriver ath_cd = {
 
 #if 0
 int
-ath_activate(struct device *self, enum devact act)
+ath_activate(struct device *self, int act)
 {
 	struct ath_softc *sc = (struct ath_softc *)self;
 	int rv = 0, s;
@@ -427,9 +426,6 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 	/*
 	 * Make sure the interface is shutdown during reboot.
 	 */
-	sc->sc_sdhook = shutdownhook_establish(ath_shutdown, sc);
-	if (sc->sc_sdhook == NULL)
-		printf(": WARNING: unable to establish shutdown hook\n");
 	sc->sc_powerhook = powerhook_establish(ath_power, sc);
 	if (sc->sc_powerhook == NULL)
 		printf(": WARNING: unable to establish power hook\n");
@@ -484,8 +480,6 @@ ath_detach(struct ath_softc *sc, int flags)
 	splx(s);
 	if (sc->sc_powerhook != NULL)
 		powerhook_disestablish(sc->sc_powerhook);
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
 #ifdef __FreeBSD__
 	ATH_TXBUF_LOCK_DESTROY(sc);
 	ATH_TXQ_LOCK_DESTROY(sc);
@@ -550,14 +544,6 @@ ath_resume(struct ath_softc *sc, int why)
 		if (ifp->if_flags & IFF_RUNNING)
 			ath_start(ifp);
 	}
-}
-
-void
-ath_shutdown(void *arg)
-{
-	struct ath_softc *sc = arg;
-
-	ath_stop(&sc->sc_ic.ic_if);
 }
 
 int
@@ -2148,7 +2134,6 @@ ath_tx_start(struct ath_softc *sc, struct ieee80211_node *ni,
 	int i, error, iswep, hdrlen, pktlen, len, s;
 	u_int8_t rix, cix, txrate, ctsrate;
 	struct ath_desc *ds;
-	struct mbuf *m;
 	struct ieee80211_frame *wh;
 	struct ieee80211_key *k;
 	u_int32_t iv;
@@ -2251,25 +2236,11 @@ ath_tx_start(struct ath_softc *sc, struct ieee80211_node *ni,
 	 */
 	if (error == EFBIG) {		/* too many desc's, linearize */
 		sc->sc_stats.ast_tx_linear++;
-		MGETHDR(m, M_DONTWAIT, MT_DATA);
-		if (m == NULL) {
-			sc->sc_stats.ast_tx_nombuf++;
-			m_freem(m0);
-			return ENOMEM;
-		}
-
-		M_DUP_PKTHDR(m, m0);
-		MCLGET(m, M_DONTWAIT);
-		if ((m->m_flags & M_EXT) == 0) {
+		if (m_defrag(m0, M_DONTWAIT)) {
 			sc->sc_stats.ast_tx_nomcl++;
 			m_freem(m0);
-			m_free(m);
 			return ENOMEM;
 		}
-		m_copydata(m0, 0, m0->m_pkthdr.len, mtod(m, caddr_t));
-		m_freem(m0);
-		m->m_len = m->m_pkthdr.len;
-		m0 = m;
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, bf->bf_dmamap, m0,
 		    BUS_DMA_NOWAIT);
 		if (error != 0) {
@@ -3027,7 +2998,7 @@ ath_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		timeout_add_sec(&sc->sc_cal_to, ath_calinterval);
 
 		if (ic->ic_opmode != IEEE80211_M_MONITOR)
-			timeout_add(&sc->sc_rssadapt_to, hz / 10);
+			timeout_add_msec(&sc->sc_rssadapt_to, 100);
 	} else if (nstate == IEEE80211_S_SCAN) {
 		/* start ap/neighbor scan timer */
 		timeout_add_msec(&sc->sc_scan_to, ath_dwelltime);
@@ -3224,7 +3195,7 @@ ath_rssadapt_updatestats(void *arg)
 		ieee80211_iterate_nodes(ic, ath_rssadapt_updatenode, arg);
 	}
 
-	timeout_add(&sc->sc_rssadapt_to, hz / 10);
+	timeout_add_msec(&sc->sc_rssadapt_to, 100);
 }
 
 #ifdef AR_DEBUG

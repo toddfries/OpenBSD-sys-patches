@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.46 2009/06/03 14:45:52 jj Exp $ */
+/*	$OpenBSD: conf.c,v 1.48 2010/06/09 15:25:33 jsing Exp $ */
 
 /*-
  * Copyright (c) 1995 Theo de Raadt
@@ -153,6 +153,8 @@ cdev_decl(xd);
 
 #include "systrace.h"
 
+#include "vscsi.h"
+
 struct cdevsw	cdevsw[] =
 {
 	cdev_cn_init(1,cn),		/* 0: virtual console */
@@ -216,6 +218,8 @@ struct cdevsw	cdevsw[] =
 	cdev_lkm_dummy(),		/* 51 */
 #endif
 	cdev_ptm_init(NPTY,ptm),	/* 52: pseudo-tty ptm device */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 53: vscsi */
+	cdev_disk_init(1,diskmap),	/* 54: disk mapper */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

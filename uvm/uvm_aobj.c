@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_aobj.c,v 1.42 2009/06/06 17:46:44 art Exp $	*/
+/*	$OpenBSD: uvm_aobj.c,v 1.50 2010/04/30 21:56:39 oga Exp $	*/
 /*	$NetBSD: uvm_aobj.c,v 1.39 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -144,7 +144,7 @@ struct pool uao_swhash_elt_pool;
  */
 
 struct uvm_aobj {
-	struct uvm_object u_obj; /* has: lock, pgops, memq, #pages, #refs */
+	struct uvm_object u_obj; /* has: lock, pgops, memt, #pages, #refs */
 	int u_pages;		 /* number of pages in entire object */
 	int u_flags;		 /* the flags (see uvm_aobj.h) */
 	int *u_swslots;		 /* array of offset->swapslot mappings */
@@ -167,15 +167,17 @@ struct pool uvm_aobj_pool;
  * local functions
  */
 
-struct uao_swhash_elt	*uao_find_swhash_elt(struct uvm_aobj *, int,
-			     boolean_t);
-static int		 uao_find_swslot(struct uvm_aobj *, int);
-boolean_t		 uao_flush(struct uvm_object *, voff_t, voff_t, int);
-void			 uao_free(struct uvm_aobj *);
-int			 uao_get(struct uvm_object *, voff_t, vm_page_t *,
-			     int *, int, vm_prot_t, int, int);
-boolean_t		 uao_pagein(struct uvm_aobj *, int, int);
-boolean_t		 uao_pagein_page(struct uvm_aobj *, int);
+static struct uao_swhash_elt	*uao_find_swhash_elt(struct uvm_aobj *, int,
+				     boolean_t);
+static int			 uao_find_swslot(struct uvm_aobj *, int);
+static boolean_t		 uao_flush(struct uvm_object *, voff_t,
+				     voff_t, int);
+static void			 uao_free(struct uvm_aobj *);
+static int			 uao_get(struct uvm_object *, voff_t,
+				     vm_page_t *, int *, int, vm_prot_t,
+				     int, int);
+static boolean_t		 uao_pagein(struct uvm_aobj *, int, int);
+static boolean_t		 uao_pagein_page(struct uvm_aobj *, int);
 
 /*
  * aobj_pager
@@ -194,10 +196,15 @@ struct uvm_pagerops aobj_pager = {
 
 /*
  * uao_list: global list of active aobjs, locked by uao_list_lock
+ *
+ * Lock ordering: generally the locking order is object lock, then list lock.
+ * in the case of swap off we have to iterate over the list, and thus the
+ * ordering is reversed. In that case we must use trylocking to prevent
+ * deadlock.
  */
 
-static LIST_HEAD(aobjlist, uvm_aobj) uao_list;
-static simple_lock_data_t uao_list_lock;
+static LIST_HEAD(aobjlist, uvm_aobj) uao_list = LIST_HEAD_INITIALIZER(uao_list);
+static struct mutex uao_list_lock = MUTEX_INITIALIZER(IPL_NONE);
 
 
 /*
@@ -215,7 +222,7 @@ static simple_lock_data_t uao_list_lock;
  * => the object should be locked by the caller
  */
 
-struct uao_swhash_elt *
+static struct uao_swhash_elt *
 uao_find_swhash_elt(struct uvm_aobj *aobj, int pageidx, boolean_t create)
 {
 	struct uao_swhash *swhash;
@@ -253,7 +260,7 @@ uao_find_swhash_elt(struct uvm_aobj *aobj, int pageidx, boolean_t create)
  *
  * => object must be locked by caller 
  */
-static __inline int
+__inline static int
 uao_find_swslot(struct uvm_aobj *aobj, int pageidx)
 {
 
@@ -370,7 +377,7 @@ uao_set_swslot(struct uvm_object *uobj, int pageidx, int slot)
  *
  * => the aobj should be dead
  */
-void
+static void
 uao_free(struct uvm_aobj *aobj)
 {
 
@@ -459,6 +466,7 @@ uao_create(vsize_t size, int flags)
 	static struct uvm_aobj kernel_object_store; /* home of kernel_object */
 	static int kobj_alloced = 0;			/* not allocated yet */
 	int pages = round_page(size) >> PAGE_SHIFT;
+	int refs = UVM_OBJ_KERN;
 	struct uvm_aobj *aobj;
 
 	/*
@@ -472,7 +480,6 @@ uao_create(vsize_t size, int flags)
 		aobj->u_pages = pages;
 		aobj->u_flags = UAO_FLAG_NOSWAP;	/* no swap to start */
 		/* we are special, we never die */
-		aobj->u_obj.uo_refs = UVM_OBJ_KERN;
 		kobj_alloced = UAO_FLAG_KERNOBJ;
 	} else if (flags & UAO_FLAG_KERNSWAP) {
 		aobj = &kernel_object_store;
@@ -483,7 +490,7 @@ uao_create(vsize_t size, int flags)
 		aobj = pool_get(&uvm_aobj_pool, PR_WAITOK);
 		aobj->u_pages = pages;
 		aobj->u_flags = 0;		/* normal object */
-		aobj->u_obj.uo_refs = 1;	/* start with 1 reference */
+		refs = 1;			/* normal object so 1 ref */
 	}
 
 	/*
@@ -516,20 +523,14 @@ uao_create(vsize_t size, int flags)
 		}
 	}
 
-	/*
- 	 * init aobj fields
- 	 */
-	simple_lock_init(&aobj->u_obj.vmobjlock);
-	aobj->u_obj.pgops = &aobj_pager;
-	RB_INIT(&aobj->u_obj.memt);
-	aobj->u_obj.uo_npages = 0;
+	uvm_objinit(&aobj->u_obj, &aobj_pager, refs);
 
 	/*
  	 * now that aobj is ready, add it to the global list
  	 */
-	simple_lock(&uao_list_lock);
+	mtx_enter(&uao_list_lock);
 	LIST_INSERT_HEAD(&uao_list, aobj, u_list);
-	simple_unlock(&uao_list_lock);
+	mtx_leave(&uao_list_lock);
 
 	/*
  	 * done!
@@ -552,9 +553,6 @@ uao_init(void)
 	if (uao_initialized)
 		return;
 	uao_initialized = TRUE;
-
-	LIST_INIT(&uao_list);
-	simple_lock_init(&uao_list_lock);
 
 	/*
 	 * NOTE: Pages for this pool must not come from a pageable
@@ -655,9 +653,9 @@ uao_detach_locked(struct uvm_object *uobj)
 	/*
  	 * remove the aobj from the global list.
  	 */
-	simple_lock(&uao_list_lock);
+	mtx_enter(&uao_list_lock);
 	LIST_REMOVE(aobj, u_list);
-	simple_unlock(&uao_list_lock);
+	mtx_leave(&uao_list_lock);
 
 	/*
 	 * Free all pages left in the object. If they're busy, wait
@@ -700,11 +698,6 @@ uao_detach_locked(struct uvm_object *uobj)
  *	or block.
  * => if PGO_ALLPAGE is set, then all pages in the object are valid targets
  *	for flushing.
- * => NOTE: we rely on the fact that the object's memq is a TAILQ and
- *	that new pages are inserted on the tail end of the list.  thus,
- *	we can make a complete pass through the object in one go by starting
- *	at the head and working towards the tail (new pages are put in
- *	front of us).
  * => NOTE: we are allowed to lock the page queues, so the caller
  *	must not be holding the lock on them [e.g. pagedaemon had
  *	better not call us with the queues locked]
@@ -790,8 +783,10 @@ uao_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
 				continue;
 
 			uvm_lock_pageq();
+			/* zap all mappings for the page. */
+			pmap_page_protect(pp, VM_PROT_NONE);
 
-			/* Deactivate the page. */
+			/* ...and deactivate the page. */
 			uvm_pagedeactivate(pp);
 			uvm_unlock_pageq();
 
@@ -849,7 +844,7 @@ uao_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
  * => NOTE: offset is the offset of pps[0], _NOT_ pps[centeridx]
  * => NOTE: caller must check for released pages!!
  */
-int
+static int
 uao_get(struct uvm_object *uobj, voff_t offset, struct vm_page **pps,
     int *npagesp, int centeridx, vm_prot_t access_type, int advice, int flags)
 {
@@ -1161,14 +1156,14 @@ uao_dropswap(struct uvm_object *uobj, int pageidx)
 boolean_t
 uao_swap_off(int startslot, int endslot)
 {
-	struct uvm_aobj *aobj, *nextaobj;
+	struct uvm_aobj *aobj, *nextaobj, *prevaobj = NULL;
 
 	/*
 	 * walk the list of all aobjs.
 	 */
 
 restart:
-	simple_lock(&uao_list_lock);
+	mtx_enter(&uao_list_lock);
 
 	for (aobj = LIST_FIRST(&uao_list);
 	     aobj != NULL;
@@ -1182,7 +1177,11 @@ restart:
 		 * so this should be a rare case.
 		 */
 		if (!simple_lock_try(&aobj->u_obj.vmobjlock)) {
-			simple_unlock(&uao_list_lock);
+			mtx_leave(&uao_list_lock);
+			if (prevaobj) {
+				uao_detach_locked(&prevaobj->u_obj);
+				prevaobj = NULL;
+			}
 			goto restart;
 		}
 
@@ -1194,8 +1193,14 @@ restart:
 
 		/*
 		 * now it's safe to unlock the uao list.
+		 * note that lock interleaving is alright with IPL_NONE mutexes.
 		 */
-		simple_unlock(&uao_list_lock);
+		mtx_leave(&uao_list_lock);
+
+		if (prevaobj) {
+			uao_detach_locked(&prevaobj->u_obj);
+			prevaobj = NULL;
+		}
 
 		/*
 		 * page in any pages in the swslot range.
@@ -1211,15 +1216,25 @@ restart:
 		 * we're done with this aobj.
 		 * relock the list and drop our ref on the aobj.
 		 */
-		simple_lock(&uao_list_lock);
+		mtx_enter(&uao_list_lock);
 		nextaobj = LIST_NEXT(aobj, u_list);
-		uao_detach_locked(&aobj->u_obj);
+		/*
+		 * prevaobj means that we have an object that we need
+		 * to drop a reference for. We can't just drop it now with
+		 * the list locked since that could cause lock recursion in
+		 * the case where we reduce the refcount to 0. It will be
+		 * released the next time we drop the list lock.
+		 */
+		prevaobj = aobj;
 	}
 
 	/*
 	 * done with traversal, unlock the list
 	 */
-	simple_unlock(&uao_list_lock);
+	mtx_leave(&uao_list_lock);
+	if (prevaobj) {
+		uao_detach_locked(&prevaobj->u_obj);
+	}
 	return FALSE;
 }
 
@@ -1230,7 +1245,7 @@ restart:
  * => aobj must be locked and is returned locked.
  * => returns TRUE if pagein was aborted due to lack of memory.
  */
-boolean_t
+static boolean_t
 uao_pagein(struct uvm_aobj *aobj, int startslot, int endslot)
 {
 	boolean_t rv;
@@ -1304,7 +1319,7 @@ restart:
  *
  * => aobj must be locked and is returned locked.
  */
-boolean_t
+static boolean_t
 uao_pagein_page(struct uvm_aobj *aobj, int pageidx)
 {
 	struct vm_page *pg;
@@ -1350,6 +1365,9 @@ uao_pagein_page(struct uvm_aobj *aobj, int pageidx)
 	 * deactivate the page (to put it on a page queue).
 	 */
 	pmap_clear_reference(pg);
+#ifndef UBC
+	pmap_page_protect(pg, VM_PROT_NONE);
+#endif
 	uvm_lock_pageq();
 	uvm_pagedeactivate(pg);
 	uvm_unlock_pageq();

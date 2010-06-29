@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm.h,v 1.34 2009/06/02 23:00:19 oga Exp $	*/
+/*	$OpenBSD: uvm.h,v 1.40 2010/06/27 03:03:49 thib Exp $	*/
 /*	$NetBSD: uvm.h,v 1.24 2000/11/27 08:40:02 chs Exp $	*/
 
 /*
@@ -56,9 +56,8 @@
 #include <uvm/uvm_object.h>
 #include <uvm/uvm_page.h>
 #include <uvm/uvm_pager.h>
-#include <uvm/uvm_pdaemon.h>
-#include <uvm/uvm_pmemrange.h>
 #include <uvm/uvm_swap.h>
+#include <uvm/uvm_pmemrange.h>
 #ifdef UVM_SWAP_ENCRYPT
 #include <uvm/uvm_swap_encrypt.h>
 #endif
@@ -69,30 +68,27 @@
 #include <machine/vmparam.h>
 
 /*
- * UVM_IO_RANGES: paddr_t pairs, describing the lowest and highest address
- * that should be reserved. These ranges (which may overlap) will have their
- * use counter increased, causing them to be avoided if an allocation can be
- * satisfied from another range of memory.
+ * uvm_constraint_range's:
+ * MD code is allowed to setup constraint ranges for memory allocators, the
+ * primary use for this is to keep allocation for certain memory consumers
+ * such as mbuf pools withing address ranges that are reachable by devices
+ * that perform DMA.
  *
- * IO ranges need not overlap with physmem ranges: the uvm code splits ranges
- * on demand to satisfy requests.
+ * It is also to discourge memory allocations from being satisfied from ranges
+ * such as the ISA memory range, if they can be satisfied with allocation
+ * from other ranges.
  *
- * UVM_IO_RANGES specified here actually translates into a call to
- * uvm_pmr_use_inc() at uvm initialization time. uvm_pmr_use_inc() can also
- * be called after uvm_init() has completed.
- *
- * Note: the upper bound is specified in the same way as to uvm_pglistalloc.
- * Ex: a memory range of 16 bit is specified as: { 0, 0xffff }.
+ * the MD ranges are defined in arch/ARCH/ARCH/machdep.c
  */
-#ifndef UVM_IO_RANGES
-#define UVM_IO_RANGES		{}
-#endif
-
-/* UVM IO ranges are described in an array of uvm_io_ranges. */
-struct uvm_io_ranges {
-	paddr_t low;
-	paddr_t high;
+struct uvm_constraint_range {
+	paddr_t	ucr_low;
+	paddr_t ucr_high;
 };
+
+/* Constraint ranges, set by MD code. */
+extern struct uvm_constraint_range  isa_constraint;
+extern struct uvm_constraint_range  dma_constraint;
+extern struct uvm_constraint_range *uvm_md_constraints[];
 
 /*
  * uvm structure (vm global state: collected in one structure for ease
@@ -102,8 +98,7 @@ struct uvm_io_ranges {
 struct uvm {
 	/* vm_page related parameters */
 
-		/* vm_page queues */
-	struct uvm_pmr_control pmr_control; /* pmemrange control data */
+	/* vm_page queues */
 	struct pglist page_active;	/* allocated pages, in use */
 	struct pglist page_inactive_swp;/* pages inactive (reclaim or free) */
 	struct pglist page_inactive_obj;/* pages inactive (reclaim or free) */
@@ -113,13 +108,22 @@ struct uvm {
 	boolean_t page_init_done;	/* TRUE if uvm_page_init() finished */
 	boolean_t page_idle_zero;	/* TRUE if we should try to zero
 					   pages in the idle loop */
+	struct uvm_pmr_control pmr_control; /* pmemrange data */
 
-	/* page daemon's pid, we sleep on the pointer to this. */
-	struct proc *pagedaemon_proc;
+		/* page daemon trigger */
+	int pagedaemon;			/* daemon sleeps on this */
+	struct proc *pagedaemon_proc;	/* daemon's pid */
 
-	/* aiodone daemon's pid, we sleep on the pointer to this. */
-	struct proc *aiodoned_proc;
+		/* aiodone daemon trigger */
+	int aiodoned;			/* daemon sleeps on this */
+	struct proc *aiodoned_proc;	/* daemon's pid */
 	struct mutex aiodoned_lock;
+
+		/* page hash */
+	struct pglist *page_hash;	/* page hash table (vp/off->page) */
+	int page_nhash;			/* number of buckets */
+	int page_hashmask;		/* hash mask */
+	struct mutex hashlock;		/* lock on page_hash array */
 
 	/* static kernel map entry pool */
 	vm_map_entry_t kentry_free;	/* free page pool */

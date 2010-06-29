@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubt.c,v 1.14 2008/11/22 04:42:58 uwe Exp $	*/
+/*	$OpenBSD: ubt.c,v 1.16 2010/04/22 21:20:22 sthen Exp $	*/
 /*	$NetBSD: ubt.c,v 1.35 2008/07/28 14:19:26 drochner Exp $	*/
 
 /*-
@@ -74,7 +74,6 @@
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
-#include <sys/sysctl.h>
 #include <sys/systm.h>
 
 #include <dev/usb/usb.h>
@@ -188,7 +187,6 @@ struct ubt_softc {
 
 	/* ISOC interface */
 	usbd_interface_handle	 sc_iface1;	/* ISOC interface */
-	struct sysctllog	*sc_log;	/* sysctl log */
 	int			 sc_config;	/* current config no */
 	int			 sc_alt_config;	/* no of alternates */
 
@@ -254,7 +252,7 @@ void ubt_stats(struct device *, struct bt_stats *, int);
 int ubt_match(struct device *, void *, void *); 
 void ubt_attach(struct device *, struct device *, void *); 
 int ubt_detach(struct device *, int); 
-int ubt_activate(struct device *, enum devact); 
+int ubt_activate(struct device *, int); 
 
 struct cfdriver ubt_cd = { 
 	NULL, "ubt", DV_DULL 
@@ -498,7 +496,7 @@ ubt_detach(struct device *self, int flags)
 }
 
 int
-ubt_activate(struct device *self, enum devact act)
+ubt_activate(struct device *self, int act)
 {
 	struct ubt_softc *sc = (struct ubt_softc *)self;
 	int error = 0;

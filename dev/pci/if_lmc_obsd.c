@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lmc_obsd.c,v 1.19 2005/11/07 00:29:21 brad Exp $ */
+/*	$OpenBSD: if_lmc_obsd.c,v 1.21 2010/04/08 00:23:53 tedu Exp $ */
 /*	$NetBSD: if_lmc_nbsd.c,v 1.1 1999/03/25 03:32:43 explorer Exp $	*/
 
 /*-
@@ -73,7 +73,6 @@
 #include <sys/errno.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>	/* only for declaration of wakeup() used by vm.h */
 #include <sys/device.h>
 
 #include <dev/pci/pcidevs.h>
@@ -153,7 +152,7 @@ struct cfattach lmc_ca = {
 };
 
 struct cfdriver lmc_cd = {
-	0, "lmc", DV_IFNET
+	NULL, "lmc", DV_IFNET
 };
 
 static void

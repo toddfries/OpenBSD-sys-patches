@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_object.c,v 1.1 2009/06/06 03:45:08 oga Exp $	*/
+/*	$OpenBSD: uvm_object.c,v 1.6 2010/05/01 13:13:10 oga Exp $	*/
 
 /*
  * Copyright (c) 2006 The NetBSD Foundation, Inc.
@@ -34,15 +34,27 @@
  *
  */
 
-#include <sys/cdefs.h>
-
 #include <sys/param.h>
+#include <sys/proc.h>		/* XXX for atomic */
 
 #include <uvm/uvm.h>
 
 /* We will fetch this page count per step */
 #define	FETCH_PAGECOUNT	16
 
+/*
+ * uvm_objinit: initialise a uvm object.
+ */
+void
+uvm_objinit(struct uvm_object *uobj, struct uvm_pagerops *pgops, int refs)
+{
+	uobj->pgops = pgops;
+	RB_INIT(&uobj->memt);
+	uobj->uo_npages = 0;
+	uobj->uo_refs = refs;
+}
+
+#ifndef SMALL_KERNEL
 /*
  * uvm_objwire: wire the pages of entire uobj
  *
@@ -157,3 +169,4 @@ uvm_objunwire(struct uvm_object *uobj, off_t start, off_t end)
 	uvm_unlock_pageq();
 	simple_unlock(&uobj->vmobjlock);
 }
+#endif /* !SMALL_KERNEL */

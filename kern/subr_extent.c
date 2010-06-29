@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_extent.c,v 1.38 2009/06/04 03:14:14 oga Exp $	*/
+/*	$OpenBSD: subr_extent.c,v 1.43 2010/06/20 17:57:09 phessler Exp $	*/
 /*	$NetBSD: subr_extent.c,v 1.7 1996/11/21 18:46:34 cgd Exp $	*/
 
 /*-
@@ -55,6 +55,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 #define	malloc(s, t, flags)		malloc(s)
 #define	free(p, t)			free(p)
@@ -62,9 +63,9 @@
 #define	wakeup(chan)			((void)0)
 #define	pool_get(pool, flags)		malloc((pool)->pr_size, 0, 0)
 #define	pool_init(a, b, c, d, e, f, g)	(a)->pr_size = (b)
+#define	pool_setipl(pool, ipl)		/* nothing */
 #define	pool_put(pool, rp)		free((rp), 0)
 #define	panic				printf
-#define	splx(s)				((void)(s))
 #endif
 
 #if defined(DIAGNOSTIC) || defined(DDB)
@@ -499,26 +500,47 @@ extent_alloc_region(struct extent *ex, u_long start, u_long size, int flags)
 			 */
 			if (flags & EX_CONFLICTOK) {
 				/*
-				 * There are two possibilities:
+				 * There are four possibilities:
 				 *
-				 * 1. The current region overlaps.
+				 * 1. The current region overlaps with
+				 *    the start of the requested region.
 				 *    Adjust the requested region to
 				 *    start at the end of the current
-				 *    region, and try again.
+				 *    region and try again.
 				 *
 				 * 2. The current region falls
-                                 *    completely within the requested
-                                 *    region.  Free the current region
-                                 *    and try again.
+				 *    completely within the requested
+				 *    region.  Free the current region
+				 *    and try again.
+				 *
+				 * 3. The current region overlaps with
+				 *    the end of the requested region.
+				 *    Adjust the requested region to
+				 *    end at the start of the current
+				 *    region and try again.
+				 *
+				 * 4. The requested region falls
+				 *    completely within the current
+				 *    region.  We're done.
 				 */
 				if (rp->er_start <= start) {
-					start = rp->er_end + 1;
-					size = end - start + 1;
-				} else {
+					if (rp->er_end < ex->ex_end) {
+						start = rp->er_end + 1;
+						size = end - start + 1;
+						goto alloc_start;
+					}
+				} else if (rp->er_end < end) {
 					LIST_REMOVE(rp, er_link);
 					extent_free_region_descriptor(ex, rp);
+					goto alloc_start;
+				} else if (rp->er_start < end) {
+					if (rp->er_start > ex->ex_start) {
+						end = rp->er_start - 1;
+						size = end - start + 1;
+						goto alloc_start;
+					}
 				}
-				goto alloc_start;
+				return (0);
 			}
 
 			extent_free_region_descriptor(ex, myrp);
@@ -615,7 +637,7 @@ extent_alloc_subregion(struct extent *ex, u_long substart, u_long subend,
 	 * that we don't have to traverse the list again when
 	 * we insert ourselves.  If "last" is NULL when we
 	 * finally insert ourselves, we go at the head of the
-	 * list.  See extent_insert_and_optimize() for deatails.
+	 * list.  See extent_insert_and_optimize() for details.
 	 */
 	last = NULL;
 
@@ -1071,7 +1093,7 @@ extent_alloc_region_descriptor(struct extent *ex, int flags)
 
 		/*
 		 * Don't muck with flags after pulling it off the
-		 * freelist; it may be a dynamiclly allocated
+		 * freelist; it may be a dynamically allocated
 		 * region pointer that was kindly given to us,
 		 * and we need to preserve that information.
 		 */

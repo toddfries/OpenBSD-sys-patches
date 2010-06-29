@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.119 2009/06/05 00:30:05 guenther Exp $	*/
+/*	$OpenBSD: proc.h,v 1.127 2010/05/18 22:26:10 tedu Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -48,7 +48,6 @@
 #include <sys/mutex.h>			/* For struct mutex */
 #include <machine/atomic.h>
 
-#define curproc curcpu()->ci_curproc
 #ifdef _KERNEL
 #define __need_process
 #endif
@@ -145,6 +144,9 @@ struct process {
 
 	TAILQ_HEAD(,proc) ps_threads;	/* Threads in this process. */
 	int	ps_refcnt;		/* Number of references. */
+
+	u_int	ps_rdomain;		/* Process routing domain. */
+	struct	klist ps_klist;		/* knotes attached to this process */
 };
 #else
 struct process;
@@ -220,11 +222,8 @@ struct proc {
 
 	struct	vnode *p_textvp;	/* Vnode of executable. */
 
-	struct	emul *p_emul;		/* Emulation information */
 	void	*p_emuldata;		/* Per-process emulation data, or */
 					/* NULL. Malloc type M_EMULDATA */
-	struct	klist p_klist;		/* knotes attached to this process */
-					/* pad to 256, avoid shifting eproc. */
 
 	sigset_t p_sigdivert;		/* Signals to be diverted to thread. */
 
@@ -243,6 +242,7 @@ struct proc {
 	char	p_nice;		/* Process "nice" value. */
 	char	p_comm[MAXCOMLEN+1];
 
+	struct	emul *p_emul;		/* Emulation information */
 	struct 	pgrp *p_pgrp;	/* Pointer to process group. */
 	vaddr_t	p_sigcode;	/* user pointer to the signal code. */
 
@@ -393,6 +393,7 @@ extern int randompid;			/* fork() should create random pid's */
 
 LIST_HEAD(proclist, proc);
 extern struct proclist allproc;		/* List of all processes. */
+extern struct rwlock allproclk;		/* also used for zombie list */
 extern struct proclist zombproc;	/* List of zombie processes. */
 
 extern struct proc *initproc;		/* Process slots for init, pager. */
@@ -417,18 +418,14 @@ int	chgproccnt(uid_t uid, int diff);
 int	enterpgrp(struct proc *p, pid_t pgid, struct pgrp *newpgrp,
 	    struct session *newsess);
 void	fixjobc(struct proc *p, struct pgrp *pgrp, int entering);
-int	inferior(struct proc *p);
+int	inferior(struct proc *, struct proc *);
 int	leavepgrp(struct proc *p);
-void	yield(void);
 void	preempt(struct proc *);
 void	pgdelete(struct pgrp *pgrp);
 void	procinit(void);
 void	resetpriority(struct proc *);
 void	setrunnable(struct proc *);
 void	unsleep(struct proc *);
-void    wakeup_n(const volatile void *, int);
-void    wakeup(const volatile void *);
-#define wakeup_one(c) wakeup_n((c), 1)
 void	reaper(void);
 void	exit1(struct proc *, int, int);
 void	exit2(struct proc *);
@@ -440,6 +437,7 @@ int	groupmember(gid_t, struct ucred *);
 void	child_return(void *);
 
 int	proc_cansugid(struct proc *);
+void	proc_finish_wait(struct proc *, struct proc *);
 void	proc_zap(struct proc *);
 
 struct sleep_state {
@@ -448,18 +446,6 @@ struct sleep_state {
 	int sls_do_sleep;
 	int sls_sig;
 };
-
-void	sleep_setup(struct sleep_state *, const volatile void *, int,
-	    const char *);
-void	sleep_setup_timeout(struct sleep_state *, int);
-void	sleep_setup_signal(struct sleep_state *, int);
-void	sleep_finish(struct sleep_state *, int);
-int	sleep_finish_timeout(struct sleep_state *);
-int	sleep_finish_signal(struct sleep_state *);
-void	sleep_queue_init(void);
-
-int	tsleep(const volatile void *, int, const char *, int);
-int	msleep(const volatile void *, struct mutex *, int,  const char*, int);
 
 #if defined(MULTIPROCESSOR)
 void	proc_trampoline_mp(void);	/* XXX */

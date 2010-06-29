@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.160 2009/02/14 19:03:50 kettenis Exp $	*/
+/*	$OpenBSD: locore.S,v 1.172 2010/06/03 15:48:58 jsing Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -92,24 +92,16 @@
 	.import	boothowto, data
 	.import	bootdev, data
 	.import	esym, data
-	.import	curproc, data
-	.import cpu_info_primary, data
+	.import cpu_info, data
 	.import virtual_avail, data
 	.import	proc0, data
 	.import	proc0paddr, data
-	.import	kpsw, data
 	.import	panic, code
-
-#define curproc	(cpu_info_primary + CI_CURPROC)
 
 #define	EMRG_STACKSIZE	(1*NBPG)
 #define	FPEMU_STACKSIZE	(1*NBPG)
 
 	.data
-	.align	64
-$trap_tmp_save
-	.block	TF_PHYS
-	.size	$trap_tmp_save, .-$trap_tmp_save
 
 	.export netisr, data
 	.align 16
@@ -120,7 +112,6 @@ netisr
 
 	BSS(pdc_stack, 4)	/* temp stack for PDC call */
 	BSS(emrg_stack, 4)	/* stack for HPMC/TOC/PWRF */
-	BSS(fpemu_stack, 4)	/* stack for FPU emulation */
 
 	.export	kernelmapped, data
 	BSS(kernelmapped, 4)	/* set when kernel is mapped */
@@ -177,7 +168,6 @@ ENTRY($start,0)
 
 	STACK_ALLOC(pdc_stack, PDC_STACKSIZE)
 	STACK_ALLOC(emrg_stack, EMRG_STACKSIZE)
-	STACK_ALLOC(fpemu_stack, FPEMU_STACKSIZE)
 
 #undef	STACK_ALLOC
 
@@ -198,7 +188,6 @@ $start_zero_tf
 	mtctl	arg3, cr30
 	stw	r0, U_PCB+PCB_ONFAULT(arg3)
 	stw	r0, U_PCB+PCB_SPACE(arg3)	/* XXX HPPA_SID_KERNEL == 0 */
-	stw	arg3, U_PCB+PCB_UVA(arg3)
 	ldil	L%(USPACE+NBPG), arg0		/* normal U plus red zone */
 	add	arg0, arg3, arg0
 	ldil	L%proc0paddr, t1
@@ -216,6 +205,19 @@ $start_zero_tf
 	 * disable all coprocessors
 	 */
 	mtctl	r0, ccr
+
+	/* Store pointer to cpu_info in CR29. */
+	ldil	L%cpu_info, r1
+	ldo	R%cpu_info(r1), r1
+	mtctl	r1, cr29
+
+#ifdef MULTIPROCESSOR
+	/* Setup SMP rendezvous address. */
+	ldil	L%hw_cpu_spinup_trampoline, r1
+	ldo	R%hw_cpu_spinup_trampoline(r1), r1
+	stw	r1, 0x10(0)	/* MEM_RENDEZ */
+	stw	r0, 0x28(0)	/* MEM_RENDEZ */
+#endif
 
 	copy	sp, arg1
 	ldil	L%$qisnowon, rp
@@ -251,8 +253,8 @@ $qisnowon
 	mtctl	t1, pcoq
 	ldo	4(t1), t1
 	mtctl	t1, pcoq
-	ldil	L%kpsw, t1
-	ldw	R%kpsw(t1), t2
+	mfctl	r29, t1
+	ldw	CI_PSW(t1), t2
 	mtctl	t2, ipsw
 	rfi
 	nop
@@ -561,8 +563,8 @@ $syscall
 	 * t4:	user stack
 	 *
 	 */
-	ldil	L%curproc, t2
-	ldw	R%curproc(sr1, t2), t2
+	mfctl	cr29, t2
+	ldw	CI_CURPROC(sr1, t2), t2
 	ldw	P_ADDR(sr1, t2), t3	/* XXX can use ,sl */
 
 	/* calculate kernel sp, load, create kernel stack frame */
@@ -581,8 +583,8 @@ $syscall
 	copy	t3, sp
 	stw,ma	r0, HPPA_FRAME_SIZE+HPPA_FRAME_MAXARGS(sr1, sp)
 	stw	r0, HPPA_FRAME_CRP(sr1, sp)
-	ldil	L%kpsw, t1
-	ldw	R%kpsw(sr1, t1), t1
+	mfctl	r29, t1
+	ldw	CI_PSW(sr1, t1), t1
 	stw	r1, TF_CR15-TRAPFRAME_SIZEOF(sr1, t3)	/* eiem ,bc */
 	stw	t1, TF_CR22-TRAPFRAME_SIZEOF(sr1, t3)	/* ipsw */
 	mfsp	sr3, t1
@@ -697,8 +699,8 @@ $syscall
 	bv,n	0(r1)
 	nop
 
-	ldil	L%curproc, r1
-	ldw	R%curproc(r1), r1
+	mfctl	cr29, r1
+	ldw	CI_CURPROC(r1), r1
 	ldw	P_MD_REGS(r1), t3
 
 	.exit
@@ -712,7 +714,7 @@ $syscall
 $syscall_return
 	/* t3 == VA trapframe */
 
-	/* splhigh(), just in case */
+	/* disable interrupts, just in case */
 	mtctl	r0, eiem
 
 	/*
@@ -721,8 +723,8 @@ $syscall_return
 	 *	hopefully no page fault would happen on or after the copy,
 	 *	and interrupts are disabled.
 	 */
-	ldil	L%$trap_tmp_save, t2
-	ldo	R%$trap_tmp_save(t2), t2
+	mfctl	cr29, t2
+	ldo	CI_TRAP_SAVE(t2), t2
 	/* use ,bc each cache line */
 	ldw  0(t3), r1 ! ldw  4(t3), t1 ! stw r1,  0(t2) ! stw t1,  4(t2)
 	ldw  8(t3), r1 ! ldw 12(t3), t1 ! stw r1,  8(t2) ! stw t1, 12(t2)
@@ -809,8 +811,8 @@ $syscall_return
 	 * since we don't use it anyway.
 	 */
 	ssm	0, r0
-	ldil	L%$trap_tmp_save, t3
-	ldo	R%$trap_tmp_save(t3), t3
+	mfctl	cr29, t3
+	ldo	CI_TRAP_SAVE(t3), t3
 	nop ! nop ! nop ! nop ! nop
 	rsm	RESET_PSL, r0
 $syscall_return_phys
@@ -852,7 +854,6 @@ $syscall_end
  * interrupt vector table
  */
 #define	TLABEL(name)	$trap$name
-#define	TELABEL(num)	__CONCAT(trap_ep_,num)
 #define TRAP(name,num) \
 	mtctl	r1, tr7			! \
 	.call				! \
@@ -879,8 +880,8 @@ $syscall_end
 	.label	TLABEL(name)$num	! \
 	pre				! \
 	mtctl	r1, tr7			! \
-	.export	TELABEL(num), entry	! \
-	.label	TELABEL(num)		! \
+	.export	trap_ep_##num, entry	! \
+	.label	trap_ep_##num		! \
 	.call				! \
 	b	__CONCAT($name,_l)	! \
 	ldi	num, r1			! \
@@ -1557,8 +1558,8 @@ ENTRY(TLABEL(all),0)
 	/* do not overwrite tr4(cr28) */
 	mtctl	t3, tr2
 
-	ldil	L%$trap_tmp_save, t3
-	ldo	R%$trap_tmp_save(t3), t3
+	mfctl	cr29, t3
+	ldo	CI_TRAP_SAVE(t3), t3
 	stw	t1, TF_R22(t3)		/* use ,bc */
 	stw	t2, TF_R21(t3)
 
@@ -1591,8 +1592,8 @@ ENTRY(TLABEL(all),0)
 	mtsp	r0, sr3
 
 	/* this will enable interrupts after `cold' */
-	ldil	L%kpsw, t1
-	ldw	R%kpsw(t1), t2
+	mfctl	cr29, t1
+	ldw	CI_PSW(t1), t2
 	mtctl	r0, eiem
 	mtctl	t2, ipsw
 
@@ -1628,10 +1629,11 @@ ENTRY(TLABEL(all),0)
 	comb,<>	t1, t2, $trap_from_kernel
 	dep	r0, 31, 6, sp
 
-	mfctl	cr30, t2
+	mfctl	cr29, t2
+	ldw	CI_CURPROC(t2), t2
 	depi	1, T_USER_POS, 1, r1
 	depi	1, TFF_LAST_POS, 1, r1
-	ldw	U_PCB+PCB_UVA(t2), sp
+	ldw	P_ADDR(t2), sp
 	ldo	NBPG(sp), sp
 
 $trap_from_kernel
@@ -1720,8 +1722,8 @@ $trapnowvirt
 	/*
 	 * Copy partially saved state from the store into the frame
 	 */
-	ldil	L%$trap_tmp_save, t2
-	ldo	R%$trap_tmp_save(t2), t2
+	mfctl	cr29, t2
+	ldo	CI_TRAP_SAVE(t2), t2
 	/* use ,bc each cache line */
 	ldw  0(t2), r1 ! ldw  4(t2), t1 ! stw r1,  0(t3) ! stw t1,  4(t3)
 	ldw  8(t2), r1 ! ldw 12(t2), t1 ! stw r1,  8(t3) ! stw t1, 12(t3)
@@ -1815,8 +1817,8 @@ $trapnowvirt
 	b	$syscall_return
 
 	/* see if curproc have really changed */
-	ldil	L%curproc, t1
-	ldw	R%curproc(t1), t2
+	mfctl	cr29, t1
+	ldw	CI_CURPROC(t1), t2
 	sub,<>	r0, t2, r0
 	ldw	P_MD_REGS(t2), t3
 
@@ -2005,10 +2007,10 @@ ENTRY(TLABEL(hpmc),0)
 	.import	hpmc_dump, code
 	ldil	L%hpmc_dump, rp
 	ldo	R%hpmc_dump(rp), rp
-	ldil	L%kpsw, %arg2
-	ldw	R%kpsw(%arg2), %arg2
+	mfctl	cr29, %arg2
+	ldw	CI_PSW(%arg2), %arg2
 	depi	0, PSL_I_POS, 1, %arg2
-	stw	%arg2, R%kpsw(t1)
+	stw	%arg2, CI_PSW(t1)
 	ldil	L%emrg_stack, arg1
 	b	$kernel_setup
 	ldw	R%emrg_stack(arg1), arg1
@@ -2037,10 +2039,10 @@ ENTRY(hppa_toc,0)
 	.import	boot, code
 	ldil	L%boot, rp
 	ldo	R%boot(rp), rp
-	ldil	L%kpsw, %arg2
-	ldw	R%kpsw(%arg2), %arg2
+	mfctl	cr29, %arg2
+	ldw	CI_PSW(%arg2), %arg2
 	depi	0, PSL_I_POS, 1, %arg2
-	stw	%arg2, R%kpsw(t1)
+	stw	%arg2, CI_PSW(t1)
 	ldi	0, arg0
 	ldil	L%emrg_stack, arg1
 	b	$kernel_setup
@@ -2065,10 +2067,10 @@ ENTRY(hppa_pfr,0)
 	.import	boot, code
 	ldil	L%boot, rp
 	ldo	R%boot(rp), rp
-	ldil	L%kpsw, %arg2
-	ldw	R%kpsw(%arg2), %arg2
+	mfctl	cr29, %arg2
+	ldw	CI_PSW(%arg2), %arg2
 	depi	0, PSL_I_POS, 1, %arg2
-	stw	%arg2, R%kpsw(t1)
+	stw	%arg2, CI_PSW(t1)
 	ldi	RB_HALT|RB_POWERDOWN, arg0
 	ldil	L%emrg_stack, arg1
 	b	$kernel_setup
@@ -2103,8 +2105,6 @@ intr_ticks
 #define	INTR_PROF_AFT	/* */
 #endif
 
-	.import	cpl, data
-	.import	ipending, data
 	.import	imask, data
 	.import	intr_table, data
 	.align	32
@@ -2117,9 +2117,9 @@ ENTRY(TLABEL(intr),0)
 
 	ldil	L%intr_table + 32*32, r1
 	ldo	R%intr_table + 32*32(r1), r1
-	ldil	L%ipending, r17
+	mfctl	cr29, r17
 	b	$intr_cont
-	ldw	R%ipending(r17), r24
+	ldw	CI_IPENDING(r17), r24
 
 $intr_ffs
 	addi	-32, r1, r1
@@ -2144,10 +2144,10 @@ $intr_cont
 	comb,<>,n r0, r8, $intr_ffs
 	ldw	-32(r1), r0	/* preload cache */
 
-	ldil	L%ipending, r25
-	stw	r24, R%ipending(r25)
-	ldil	L%cpl, r17
-	ldw	R%cpl(r17), r17
+	mfctl	cr29, r25
+	stw	r24, CI_IPENDING(r25)
+	mfctl	cr29, r17
+	ldw	CI_CPL(r17), r17
 	ldil	L%imask, r16
 	ldo	R%imask(r16), r16
 	ldwx,s	r17(r16), r25
@@ -2265,14 +2265,14 @@ $ibrk_spllower
 	ldo	4(r9), r9
 	mtctl	r9, pcoq
 
-	ldil	L%ipending, r8
-	ldw	R%ipending(r8), r8
+	mfctl	cr29, r8
+	ldw	CI_IPENDING(r8), r8
 	ldil	L%imask, r9
 	ldo	R%imask(r9), r9
-	ldil	L%cpl, r17
-	ldw	R%cpl(r17), ret0
+	mfctl	cr29, r17
+	ldw	CI_CPL(r17), ret0
 	ldwx,s	arg0(r9), r16
-	stw	arg0, R%cpl(r17)
+	stw	arg0, CI_CPL(r17)
 	ldi	T_INTERRUPT, r1
 	andcm,=	r8, r16, r0
 	b	TLABEL(all)
@@ -2364,8 +2364,8 @@ EXIT(fpu_save)
 ENTRY($fpu_emulate,320)
 	copy	r31, r9
 
-	ldil	L%fpemu_stack, r31
-	ldw	R%fpemu_stack(r31), r31
+	mfctl	cr29, r31
+	ldw	CI_STACK(r31), r31
 
 	/* stw	r1 , TF_R1 (r31) shadowed */
 	stw	r2 , TF_R2 (r31)
@@ -2437,8 +2437,8 @@ ENTRY($fpu_emulate,320)
 	fdc	r0(r25)
 	sync
 
-	ldil	L%fpemu_stack, r31
-	ldw	R%fpemu_stack(r31), r31
+	mfctl	cr29, r31
+	ldw	CI_STACK(r31), r31
 
 	ldw	TF_CR11(r31), r1
 	ldw	TF_R2 (r31), r2
@@ -2544,7 +2544,7 @@ LEAF_ENTRY(pdcache)
 	ldw	R%dcache_stride(t1), arg3
 
 	mtsp	arg0, sr1		/* move the space register to sr1 */
-	add	arg1, arg2, arg0	/* get the last byte to flush in arg0 */
+	add	arg1, arg2, arg0	/* get the last byte to purge in arg0 */
 
 	zdep	arg3, 27, 28, t1	/* get size of a 16X loop in t1 */
 	comb,<	arg2, t1, pdc_short	/* check for count < 16 * stride */
@@ -2553,7 +2553,7 @@ LEAF_ENTRY(pdcache)
 	andcm	arg2, t1, t1		/* L = count - (count mod lenbigloop) */
 	add	arg1, t1, t1		/* ub for big loop is lb + L */
 
-	pdc,m	arg3(sr1, arg1)		/* Start flushing first cache line. */
+	pdc,m	arg3(sr1, arg1)		/* Start purging first cache line. */
 pdc_long
 	pdc,m	arg3(sr1, arg1)
 	pdc,m	arg3(sr1, arg1)
@@ -2572,7 +2572,7 @@ pdc_long
 	pdc,m	arg3(sr1, arg1)
 	comb,<<,n arg1, t1, pdc_long
 	pdc,m	arg3(sr1, arg1)
-pdc_short				/* flush one line at a time */
+pdc_short				/* purge one line at a time */
 	comb,<<,n arg1, arg0, pdc_short
 	pdc,m	arg3(sr1, arg1)
 
@@ -2716,8 +2716,8 @@ LEAF_ENTRY(spstrcpy)
 	add	t2, arg1, t2
 	stw	rp, HPPA_FRAME_CRP(sp)
 	/* setup fault handler */
-	ldil	L%curproc, t1
-	ldw	R%curproc(t1), t3
+	mfctl	cr29, t1
+	ldw	CI_CURPROC(t1), t3
 	ldil	L%copy_on_fault, t4
 	ldw	P_ADDR(t3), r2
 	ldo	R%copy_on_fault(t4), t4
@@ -2805,8 +2805,8 @@ kstack_ok
 	/* Record new proc. */
 	ldi	SONPROC, t1
 	stb	t1, P_STAT(arg1)
-	ldil	L%curproc, t1
-	stw	arg1, R%curproc(t1)
+	mfctl	cr29, t1
+	stw	arg1, CI_CURPROC(t1)
 
 	/* If old process exited, don't bother. */
 	comb,=,n r0, arg0, switch_exited
@@ -2898,18 +2898,152 @@ LEAF_ENTRY(cpu_idle_leave)
 EXIT(cpu_idle_leave)
 
 ENTRY(switch_trampoline,0)
-	ldil	L%cpl, t1
-	stw	r0, R%cpl(t1)
+#ifdef MULTIPROCESSOR
+	copy	t4, r3
+	copy	arg0, r4
+	bl	proc_trampoline_mp, rp
+	nop
+	copy	r4, arg0
+	copy	r3, t4
+#endif
+	mfctl	cr29, t1
+	stw	r0, CI_CPL(t1)
 	.call
 	blr	r0, rp
 	bv,n	r0(t4)
 	nop
-	ldil	L%curproc, t1
-	ldw	R%curproc(t1), t2
+	mfctl	cr29, t1
+	ldw	CI_CURPROC(t1), t2
 	.call
 	b	$syscall_return
 	ldw	P_MD_REGS(t2), t3
 EXIT(switch_trampoline)
+
+#ifdef MULTIPROCESSOR
+/*
+ * Trampoline to spin up secondary processors.
+ */
+ENTRY(hw_cpu_spinup_trampoline, 0)
+
+	/*
+	 * disable interrupts and turn off all bits in the psw so that
+	 * we start in a known state.
+	 */
+	rsm	RESET_PSL, r0
+	nop ! nop ! nop ! nop ! nop ! nop
+
+	/* get things ready for the kernel to run in virtual mode */
+	ldi	HPPA_PID_KERNEL, r1
+	mtctl	r1, pidr1
+	mtctl	r1, pidr2
+#if pbably_not_worth_it
+	mtctl	r0, pidr3
+	mtctl	r0, pidr4
+#endif
+	mtsp	r0, sr0
+	mtsp	r0, sr1
+	mtsp	r0, sr2
+	mtsp	r0, sr3
+	mtsp	r0, sr4
+	mtsp	r0, sr5
+	mtsp	r0, sr6
+	mtsp	r0, sr7
+
+	/*
+	 * disable all coprocessors
+	 */
+	mtctl   r0, ccr
+
+	/*
+	 * to keep the spl() routines consistent we need to put the correct
+	 * spl level into eiem, and reset any pending interrupts
+	 */
+	ldi	-1, r1
+	mtctl	r0, eiem
+	mtctl	r1, eirr
+
+	/*
+	 * load address of interrupt vector table
+	 */
+	ldil	L%$ivaaddr, t2
+	ldo	R%$ivaaddr(t2), t2
+	mtctl	t2, iva
+
+	/*
+	 * set up the dp pointer so that we can do quick references off of it
+	 */
+	ldil	L%$global$,dp
+	ldo	R%$global$(dp),dp
+
+	/*
+	 * Store address of cpu_info in CR29.
+	 */
+	ldil	L%cpu_hatch_info, r3
+	ldw	R%cpu_hatch_info(r3), r3
+	mtctl	r3, cr29
+
+	/*
+	 * Setup the stack frame for us to call C with and mark this as the
+	 * first frame on the stack.
+	 */
+	ldw	CI_STACK(r3), sp
+	stw,ma	r0, HPPA_FRAME_SIZE(sp)
+	stw	r0, HPPA_FRAME_CRP(sp)
+	stw	r0, HPPA_FRAME_PSP(sp)
+
+	/* Provide CPU with page tables. */
+	ldil	L%hppa_vtop, t1
+	ldw	R%hppa_vtop(t1), t1
+	mtctl	t1, CR_VTOP
+
+	/* Turn on the Q bit so that we can handle TLB traps. */
+	ldil	L%$q_enabled, t1
+	ldo	R%$q_enabled(t1), t1
+	mtctl	r0, pcsq
+	mtctl	r0, pcsq
+	mtctl	t1, pcoq
+	ldo	4(t1), t1
+	mtctl	t1, pcoq
+	ldi	PSL_Q|PSL_I, t2
+	mtctl	t2, ipsw
+	rfi
+	nop
+
+$q_enabled
+
+	/* Call C routine to setup CPU. */
+	ldil	L%cpu_hw_init, r1
+	ldo	R%cpu_hw_init(r1), r1
+	.import cpu_hw_init, code
+	.call
+	blr	r0, rp
+	bv,n	(r1)
+	nop
+
+	/* Switch CPU mode. */
+	ldil	L%$cpu_spinup_vm, t1
+	ldo	R%$cpu_spinup_vm(t1), t1
+	mtctl	r0, pcsq
+	mtctl	r0, pcsq
+	mtctl	t1, pcoq
+	ldo	4(t1), t1
+	mtctl	t1, pcoq
+	mfctl	cr29, t2
+	ldw	CI_PSW(t2), t2
+	mtctl	t2, ipsw
+	rfi
+	nop
+
+$cpu_spinup_vm
+
+	/*
+	 * Okay, time to return to the land of C.
+	 */
+	b	cpu_hatch
+	nop
+
+EXIT(hw_cpu_spinup_trampoline)
+#endif
 
 /*
  * Signal "trampoline" code. Invoked from RTE setup by sendsig().

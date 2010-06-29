@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbic.c,v 1.22 2009/02/16 21:19:06 miod Exp $ */
+/*	$OpenBSD: sbic.c,v 1.27 2010/05/20 00:55:17 krw Exp $ */
 /*	$NetBSD: sbic.c,v 1.2 1996/04/23 16:32:54 chuck Exp $	*/
 
 /*
@@ -339,7 +339,7 @@ sbic_load_ptrs(dev)
  * so I will too.  I could plug it in, however so could they
  * in scsi_scsi_cmd().
  */
-int
+void
 sbic_scsicmd(xs)
     struct scsi_xfer *xs;
 {
@@ -351,9 +351,6 @@ sbic_scsicmd(xs)
 
     if ( dev->sc_nexus && (flags & SCSI_POLL) )
         panic("sbic_scsicmd: busy");
-
-    if ( slp->target == slp->adapter_target )
-        return ESCAPE_NOT_SUPPORTED;
 
     s = splbio();
 
@@ -370,7 +367,9 @@ sbic_scsicmd(xs)
         Debugger();
 #endif
 #endif
-        return (NO_CCB);
+	xs->error = XS_NO_CCB;
+	scsi_done(xs);
+        return;
     }
 
     if ( flags & SCSI_DATA_IN )
@@ -422,7 +421,7 @@ sbic_scsicmd(xs)
 
         splx(s);
 
-        return(COMPLETE);
+        return;
     }
 
     s = splbio();
@@ -435,8 +434,6 @@ sbic_scsicmd(xs)
         sbic_sched(dev);
 
     splx(s);
-
-    return(SUCCESSFULLY_QUEUED);
 }
 
 /*
@@ -605,8 +602,6 @@ sbic_scsidone(acb, stat)
     } else {
         xs->resid = 0;      /* XXXX */
     }
-
-    xs->flags |= ITSDONE;
 
     /*
      * Remove the ACB from whatever queue it's on.  We have to do a bit of

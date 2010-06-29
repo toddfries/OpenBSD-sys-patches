@@ -1,4 +1,4 @@
-/*	$OpenBSD: est.c,v 1.12 2009/06/06 23:21:43 gwk Exp $ */
+/*	$OpenBSD: est.c,v 1.20 2010/06/04 15:03:34 jsg Exp $ */
 /*
  * Copyright (c) 2003 Michael Eriksson.
  * All rights reserved.
@@ -55,6 +55,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/malloc.h>
 
@@ -215,6 +216,10 @@ p3_get_bus_clock(struct cpu_info *ci)
 			break;
 		}
 		break;
+	case 0x1a: /* Core i7 */
+	case 0x1e: /* Core i5 */
+	case 0x25: /* Core i3 */
+		break;
 	default:
 		printf("%s: unknown i686 model 0x%x, can't get bus clock\n",
 		    ci->ci_dev->dv_xname, ci->ci_model);
@@ -265,7 +270,7 @@ void
 est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 {
 	struct fqlist *acpilist;
-	int needtran = 1, nstates, i;
+	int needtran = 1, i;
 	u_int64_t msr;
 	u_int16_t cur;
 
@@ -279,7 +284,7 @@ est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 		return;
 	}
 
-	if ((acpilist->table = malloc(sizeof(struct est_op) * nstates,
+	if ((acpilist->table = malloc(sizeof(struct est_op) * npss,
 	    M_DEVBUF, M_NOWAIT)) == NULL) {
 		printf("est_acpi_pss_changed: cannot allocate memory for new"
 		    " operating points");
@@ -287,7 +292,7 @@ est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 		return;
 	}
 
-	for (i = 0; i < nstates; i++) {
+	for (i = 0; i < npss; i++) {
 		acpilist->table[i].mhz = pss[i].pss_core_freq;
 		acpilist->table[i].ctrl = pss[i].pss_ctrl;
 		if (pss[i].pss_ctrl == cur)
@@ -325,24 +330,32 @@ est_init(struct cpu_info *ci)
 	} else if (family == 6) {
 		p3_get_bus_clock(ci);
 	}
+
 	if (bus_clock == 0) {
-		printf("%s: EST: unknown system bus clock\n", cpu_device);
+		printf("%s: EST: PSS not yet available for this processor\n",
+		    cpu_device);
 		return;
 	}
-
-	msr = rdmsr(MSR_PERF_STATUS);
-	idhi = (msr >> 32) & 0xffff;
-	idlo = (msr >> 48) & 0xffff;
-	cur = msr & 0xffff;
-	crhi = (idhi  >> 8) & 0xff;
-	crlo = (idlo  >> 8) & 0xff;
-	crcur = (cur >> 8) & 0xff;
 
 #if NACPICPU > 0
 	est_fqlist = est_acpi_init();
 #endif
 
 	if (est_fqlist == NULL) {
+		if (bus_clock == 0) {
+			printf("%s: EST: unknown system bus clock\n",
+			    cpu_device);
+			return;
+		}
+
+		msr = rdmsr(MSR_PERF_STATUS);
+		idhi = (msr >> 32) & 0xffff;
+		idlo = (msr >> 48) & 0xffff;
+		cur = msr & 0xffff;
+		crhi = (idhi  >> 8) & 0xff;
+		crlo = (idlo  >> 8) & 0xff;
+		crcur = (cur >> 8) & 0xff;
+
 		if (crhi == 0 || crcur == 0 || crlo > crhi ||
 		    crcur < crlo || crcur > crhi) {
 			/*
@@ -354,7 +367,7 @@ est_init(struct cpu_info *ci)
 			    cpu_device, msr);
 			return;
 		}
-		if   (crlo == 0 || crhi == crlo) {
+		if (crlo == 0 || crhi == crlo) {
 			/*
 			 * Don't complain about these cases, and silently
 			 * disable EST: - A lowest clock ratio of 0, which
@@ -414,6 +427,9 @@ est_init(struct cpu_info *ci)
 	}
 
 	if (est_fqlist == NULL)
+		return;
+
+	if (est_fqlist->n < 2)
 		return;
 
 	printf("%s: Enhanced SpeedStep %d MHz", cpu_device, cpuspeed);

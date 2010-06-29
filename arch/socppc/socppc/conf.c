@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.6 2009/05/31 20:43:44 maja Exp $ */
+/*	$OpenBSD: conf.c,v 1.10 2010/06/09 15:25:33 jsing Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -110,6 +110,10 @@ cdev_decl(pci);
 #include "usb.h"
 #include "uhid.h"
 
+#include "vscsi.h"
+
+#include "bthub.h"
+
 struct cdevsw cdevsw[] = {
 	cdev_cn_init(1,cn),		/* 0: virtual console */
 	cdev_ctty_init(1,ctty),		/* 1: controlling terminal */
@@ -195,6 +199,11 @@ struct cdevsw cdevsw[] = {
 	cdev_notdef(),			/* 75 */
 	cdev_notdef(),			/* 76 */
 	cdev_ptm_init(NPTY,ptm),	/* 77: pseudo-tty ptm device */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 78: vscsi */
+	cdev_notdef(),			/* 79 */
+	cdev_notdef(),			/* 80 */
+	cdev_bthub_init(NBTHUB,bthub),	/* 81: bluetooth hub */
+	cdev_disk_init(1,diskmap),	/* 82: disk mapper */
 };
 int nchrdev = sizeof cdevsw / sizeof cdevsw[0];
 

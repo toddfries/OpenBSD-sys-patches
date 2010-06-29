@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccbb.c,v 1.64 2009/06/03 04:32:10 jsg Exp $	*/
+/*	$OpenBSD: pccbb.c,v 1.75 2010/04/08 00:23:53 tedu Exp $	*/
 /*	$NetBSD: pccbb.c,v 1.96 2004/03/28 09:49:31 nakayama Exp $	*/
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by HAYAKAWA Koichi.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -53,7 +48,6 @@
 #include <sys/syslog.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
-#include <sys/proc.h>
 
 #include <machine/intr.h>
 #include <machine/bus.h>
@@ -125,11 +119,6 @@ void   *pccbb_cb_intr_establish(cardbus_chipset_tag_t, int irq, int level,
     int (*ih) (void *), void *sc, const char *);
 void	pccbb_cb_intr_disestablish(cardbus_chipset_tag_t ct, void *ih);
 
-cardbustag_t pccbb_make_tag(cardbus_chipset_tag_t, int, int, int);
-void	pccbb_free_tag(cardbus_chipset_tag_t, cardbustag_t);
-cardbusreg_t pccbb_conf_read(cardbus_chipset_tag_t, cardbustag_t, int);
-void	pccbb_conf_write(cardbus_chipset_tag_t, cardbustag_t, int,
-    cardbusreg_t);
 void	pccbb_chipinit(struct pccbb_softc *);
 
 int	pccbb_pcmcia_mem_alloc(pcmcia_chipset_handle_t, bus_size_t,
@@ -214,10 +203,6 @@ static struct cardbus_functions pccbb_funcs = {
 	pccbb_cb_intr_disestablish,
 	pccbb_ctrl,
 	pccbb_power,
-	pccbb_make_tag,
-	pccbb_free_tag,
-	pccbb_conf_read,
-	pccbb_conf_write,
 };
 
 /*
@@ -363,10 +348,6 @@ pccbb_shutdown(void *arg)
 
 	DPRINTF(("%s: shutdown\n", sc->sc_dev.dv_xname));
 
-	/* Nothing for us to do if we didn't map any registers. */
-	if ((sc->sc_flags & CBB_MEMHMAPPED) == 0)
-		return;
-
 	/* turn off power */
 	pccbb_power((cardbus_chipset_tag_t)sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
 
@@ -407,8 +388,6 @@ pccbbattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_rbus_iot = rbus_pccbb_parent_io(self, pa);
 	sc->sc_rbus_memt = rbus_pccbb_parent_mem(self, pa);
 
-	sc->sc_flags &= ~CBB_MEMHMAPPED;
-
 	/*
 	 * MAP socket registers and ExCA registers on memory-space
 	 * When no valid address is set on socket base registers (on pci
@@ -416,41 +395,13 @@ pccbbattach(struct device *parent, struct device *self, void *aux)
 	 */
 	sock_base = pci_conf_read(pc, pa->pa_tag, PCI_SOCKBASE);
 
-	if (PCI_MAPREG_MEM_ADDR(sock_base) >= 0x100000 &&
-	    PCI_MAPREG_MEM_ADDR(sock_base) != 0xfffffff0) {
-		/* The address must be valid. */
-		if (pci_mapreg_map(pa, PCI_SOCKBASE, PCI_MAPREG_TYPE_MEM, 0,
-		    &sc->sc_base_memt, &sc->sc_base_memh, &sockbase, NULL, 0))
-		    {
-			printf("%s: can't map socket base address 0x%x\n",
-			    sc->sc_dev.dv_xname, sock_base);
-			/*
-			 * I think it's funny: socket base registers must be
-			 * mapped on memory space, but ...
-			 */
-			if (pci_mapreg_map(pa, PCI_SOCKBASE,
-			    PCI_MAPREG_TYPE_IO, 0, &sc->sc_base_memt,
-			    &sc->sc_base_memh, &sockbase, NULL, 0)) {
-				printf("%s: can't map socket base address"
-				    " 0x%lx: io mode\n", sc->sc_dev.dv_xname,
-				    sockbase);
-				/* give up... allocate reg space via rbus. */
-				pci_conf_write(pc, pa->pa_tag, PCI_SOCKBASE, 0);
-			} else
-				sc->sc_flags |= CBB_MEMHMAPPED;
-		} else {
-			DPRINTF(("%s: socket base address 0x%lx\n",
-			    sc->sc_dev.dv_xname, sockbase));
-			sc->sc_flags |= CBB_MEMHMAPPED;
-		}
+	if (pci_mapreg_map(pa, PCI_SOCKBASE, PCI_MAPREG_TYPE_MEM, 0,
+	    &sc->sc_base_memt, &sc->sc_base_memh, &sockbase, NULL, 0)) {
+		printf("can't map registers\n");
+		return;
 	}
 
-	sc->sc_mem_start = 0;	       /* XXX */
-	sc->sc_mem_end = 0xffffffff;   /* XXX */
-
 	busreg = pci_conf_read(pc, pa->pa_tag, PCI_BUSNUM);
-
-	/* pccbb_machdep.c end */
 
 #if defined CBB_DEBUG
 	{
@@ -481,7 +432,7 @@ pccbbattach(struct device *parent, struct device *self, void *aux)
 	}
 	intrstr = pci_intr_string(pc, ih);
 	/* must do this after intr is mapped and established */
-	sc->sc_intrline = pci_intr_line(ih);
+	sc->sc_intrline = pci_intr_line(pc, ih);
 
 	/*
 	 * XXX pccbbintr should be called under the priority lower
@@ -515,11 +466,7 @@ pccbbattach(struct device *parent, struct device *self, void *aux)
 
 	/* Disable legacy register mapping. */
 	switch (sc->sc_chipset) {
-	case CB_RX5C46X:	       /* fallthrough */
-#if 0
-	/* The RX5C47X-series requires writes to the PCI_LEGACY register. */
-	case CB_RX5C47X:
-#endif
+	case CB_RX5C46X:
 		/*
 		 * The legacy pcic io-port on Ricoh RX5C46X CardBus bridges
 		 * cannot be disabled by substituting 0 into PCI_LEGACY
@@ -532,7 +479,6 @@ pccbbattach(struct device *parent, struct device *self, void *aux)
 		break;
 
 	default:
-		/* XXX I don't know proper way to kill legacy I/O. */
 		pci_conf_write(pc, pa->pa_tag, PCI_LEGACY, 0x0);
 		break;
 	}
@@ -561,28 +507,11 @@ pccbb_pci_callback(struct device *self)
 	bus_space_tag_t base_memt;
 	bus_space_handle_t base_memh;
 	u_int32_t maskreg;
-	bus_addr_t sockbase;
 	struct cbslot_attach_args cba;
 	struct pcmciabus_attach_args paa;
 	struct cardslot_attach_args caa;
 	struct cardslot_softc *csc;
 	u_int32_t sockstat;
-
-	if (!(sc->sc_flags & CBB_MEMHMAPPED)) {
-		/* The socket registers aren't mapped correctly. */
-		if (rbus_space_alloc(sc->sc_rbus_memt, 0, 0x1000, 0x0fff,
-		    (sc->sc_chipset == CB_RX5C47X
-		    || sc->sc_chipset == CB_TI113X) ? 0x10000 : 0x1000,
-		    0, &sockbase, &sc->sc_base_memh)) {
-			return;
-		}
-		sc->sc_base_memt = sc->sc_memt;
-		pci_conf_write(pc, sc->sc_tag, PCI_SOCKBASE, sockbase);
-		DPRINTF(("%s: CardBus register address 0x%lx -> 0x%x\n",
-		    sc->sc_dev.dv_xname, sockbase, pci_conf_read(pc, sc->sc_tag,
-		    PCI_SOCKBASE)));
-		sc->sc_flags |= CBB_MEMHMAPPED;
-	}
 
 	base_memt = sc->sc_base_memt;  /* socket regs memory tag */
 	base_memh = sc->sc_base_memh;  /* socket regs memory handle */
@@ -614,6 +543,7 @@ pccbb_pci_callback(struct device *self)
 		cba.cba_dmat = sc->sc_dmat;
 		cba.cba_bus = (busreg >> 8) & 0x0ff;
 		cba.cba_cc = (void *)sc;
+		cba.cba_pc = sc->sc_pc;
 		cba.cba_cf = &pccbb_funcs;
 		cba.cba_intrline = sc->sc_intrline;
 
@@ -1028,9 +958,9 @@ pccbbintr_function(struct pccbb_softc *sc)
 	for (pil = sc->sc_pil; pil != NULL; pil = pil->pil_next) {
 		/*
 		 * XXX priority change.  gross.  I use if-else
-		 * sentense instead of switch-case sentense because of
-		 * avoiding duplicate case value error.  More than one
-		 * IPL_XXX use same value.  It depends on
+		 * sentences instead of switch-case sentences in order
+		 * to avoid duplicate case value error.  More than one
+		 * IPL_XXX may use the same value.  It depends on the
 		 * implementation.
 		 */
 		splchanged = 1;
@@ -1708,54 +1638,6 @@ cb_show_regs(pci_chipset_tag_t pc, pcitag_t tag, bus_space_tag_t memt,
 }
 #endif
 
-/*
- * cardbustag_t pccbb_make_tag(cardbus_chipset_tag_t cc,
- *                                    int busno, int devno, int function)
- *   This is the function to make a tag to access config space of
- *  a CardBus Card.  It works same as pci_conf_read.
- */
-cardbustag_t
-pccbb_make_tag(cardbus_chipset_tag_t cc, int busno, int devno, int function)
-{
-	struct pccbb_softc *sc = (struct pccbb_softc *)cc;
-
-	return pci_make_tag(sc->sc_pc, busno, devno, function);
-}
-
-void
-pccbb_free_tag(cardbus_chipset_tag_t cc, cardbustag_t tag)
-{
-}
-
-/*
- * cardbusreg_t pccbb_conf_read(cardbus_chipset_tag_t cc,
- *                                     cardbustag_t tag, int offset)
- *   This is the function to read the config space of a CardBus Card.
- *  It works same as pci_conf_read.
- */
-cardbusreg_t
-pccbb_conf_read(cardbus_chipset_tag_t cc, cardbustag_t tag, int offset)
-{
-	struct pccbb_softc *sc = (struct pccbb_softc *)cc;
-
-	return pci_conf_read(sc->sc_pc, tag, offset);
-}
-
-/*
- * void pccbb_conf_write(cardbus_chipset_tag_t cc, cardbustag_t tag,
- *                              int offs, cardbusreg_t val)
- *   This is the function to write the config space of a CardBus Card.
- *  It works same as pci_conf_write.
- */
-void
-pccbb_conf_write(cardbus_chipset_tag_t cc, cardbustag_t tag, int reg,
-    cardbusreg_t val)
-{
-	struct pccbb_softc *sc = (struct pccbb_softc *)cc;
-
-	pci_conf_write(sc->sc_pc, tag, reg, val);
-}
-
 #if 0
 int
 pccbb_new_pcmcia_io_alloc(pcmcia_chipset_handle_t pch,
@@ -2109,7 +1991,7 @@ pccbb_pcmcia_socket_enable(pcmcia_chipset_handle_t pch)
 
 	/* power down the socket to reset it, clear the card reset pin */
 
-	pccbb_power(sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
+	pccbb_power((cardbus_chipset_tag_t)sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
 
 	/*
 	 * wait 200ms until power fails (Tpf).  Then, wait 100ms since
@@ -2125,7 +2007,7 @@ pccbb_pcmcia_socket_enable(pcmcia_chipset_handle_t pch)
 	/* Power up the socket. */
 	power = Pcic_read(ph, PCIC_PWRCTL);
 	Pcic_write(ph, PCIC_PWRCTL, (power & ~PCIC_PWRCTL_OE));
-	pccbb_power(sc, voltage);
+	pccbb_power((cardbus_chipset_tag_t)sc, voltage);
 
 	/* Now output enable */
 	power = Pcic_read(ph, PCIC_PWRCTL);
@@ -2208,7 +2090,7 @@ pccbb_pcmcia_socket_disable(pcmcia_chipset_handle_t pch)
 	power = Pcic_read(ph, PCIC_PWRCTL);
 	power &= ~PCIC_PWRCTL_OE;
 	Pcic_write(ph, PCIC_PWRCTL, power);
-	pccbb_power(sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
+	pccbb_power((cardbus_chipset_tag_t)sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
 	/*
 	 * wait 300ms until power fails (Tpf).
 	 */
@@ -2658,30 +2540,19 @@ pccbb_rbus_cb_space_alloc(cardbus_chipset_tag_t ct, rbus_tag_t rb,
 	    ("pccbb_rbus_cb_space_alloc: adr %lx, size %lx, mask %lx, align %lx\n",
 	    addr, size, mask, align));
 
-	if (align == 0) {
-		align = size;
+	align = max(align, 4);
+	mask = max(mask, (4 - 1));
+	if (rb->rb_bt == sc->sc_memt) {
+		align = max(align, 0x1000);
+		mask = max(mask, (0x1000 - 1));
 	}
 
-	if (rb->rb_bt == sc->sc_memt) {
-		if (align < 16) {
-			return 1;
-		}
-	} else if (rb->rb_bt == sc->sc_iot) {
-		if (align < 4) {
-			return 1;
-		}
+	if (rb->rb_bt == sc->sc_iot) {
 		/* XXX: hack for avoiding ISA image */
 		if (mask < 0x0100) {
 			mask = 0x3ff;
 			addr = 0x300;
 		}
-
-	} else {
-		DPRINTF(
-		    ("pccbb_rbus_cb_space_alloc: Bus space tag %x is NOT used.\n",
-		    rb->rb_bt));
-		return 1;
-		/* XXX: panic here? */
 	}
 
 	if (rbus_space_alloc(rb, addr, size, mask, align, flags, addrp, bshp)) {
@@ -2832,8 +2703,8 @@ pccbb_winset(bus_addr_t align, struct pccbb_softc *sc, bus_space_tag_t bst)
 	pcitag_t tag;
 	bus_addr_t mask = ~(align - 1);
 	struct {
-		cardbusreg_t win_start;
-		cardbusreg_t win_limit;
+		pcireg_t win_start;
+		pcireg_t win_limit;
 		int win_flags;
 	} win[2];
 	struct pccbb_win_chain *chainp;
@@ -2844,10 +2715,10 @@ pccbb_winset(bus_addr_t align, struct pccbb_softc *sc, bus_space_tag_t bst)
 	win[0].win_flags = win[1].win_flags = 0;
 
 	chainp = TAILQ_FIRST(&sc->sc_iowindow);
-	offs = 0x2c;
+	offs = PCI_CB_IOBASE0;
 	if (sc->sc_memt == bst) {
 		chainp = TAILQ_FIRST(&sc->sc_memwindow);
-		offs = 0x1c;
+		offs = PCI_CB_MEMBASE0;
 	}
 
 	if (chainp != NULL) {
@@ -2906,7 +2777,7 @@ pccbb_winset(bus_addr_t align, struct pccbb_softc *sc, bus_space_tag_t bst)
 				win[1].win_flags = chainp->wc_flags;
 			}
 		} else {
-			/* the flags of win[0] and win[1] is different */
+			/* the flags of win[0] and win[1] are different */
 			if (win[0].win_flags == chainp->wc_flags) {
 				win[0].win_limit = chainp->wc_end & mask;
 				/*
@@ -2969,14 +2840,14 @@ pccbb_powerhook(int why, void *arg)
 	}
 
 	if (why == PWR_RESUME) {
-		if (pci_conf_read (sc->sc_pc, sc->sc_tag, PCI_SOCKBASE) == 0)
+		if (pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_SOCKBASE) == 0)
 			/* BIOS did not recover this register */
-			pci_conf_write (sc->sc_pc, sc->sc_tag,
-					PCI_SOCKBASE, sc->sc_sockbase);
-		if (pci_conf_read (sc->sc_pc, sc->sc_tag, PCI_BUSNUM) == 0)
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    PCI_SOCKBASE, sc->sc_sockbase);
+		if (pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_BUSNUM) == 0)
 			/* BIOS did not recover this register */
-			pci_conf_write (sc->sc_pc, sc->sc_tag,
-					PCI_BUSNUM, sc->sc_busnum);
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    PCI_BUSNUM, sc->sc_busnum);
 		/* CSC Interrupt: Card detect interrupt on */
 		reg = bus_space_read_4(base_memt, base_memh, CB_SOCKET_MASK);
 		/* Card detect intr is turned on. */

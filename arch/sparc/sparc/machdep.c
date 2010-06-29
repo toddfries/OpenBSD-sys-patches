@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.117 2009/06/03 21:30:20 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.126 2010/06/27 13:28:47 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.85 1997/09/12 08:55:02 pk Exp $ */
 
 /*
@@ -58,19 +58,16 @@
 #include <sys/mount.h>
 #include <sys/msgbuf.h>
 #include <sys/syscallargs.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 #include <sys/exec.h>
 #include <sys/sysctl.h>
 #include <sys/extent.h>
 
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_swap.h>
+#include <uvm/uvm.h>
 
 #include <dev/rndvar.h>
 
 #include <machine/autoconf.h>
+#include <machine/bus.h>
 #include <machine/frame.h>
 #include <machine/cpu.h>
 #include <machine/pmap.h>
@@ -82,8 +79,6 @@
 #include <sparc/sparc/cache.h>
 #include <sparc/sparc/vaddrs.h>
 #include <sparc/sparc/cpuvar.h>
-
-#include <uvm/uvm.h>
 
 #ifdef SUN4M
 #include "power.h"
@@ -121,6 +116,9 @@ int	bufpages = 0;
 #endif
 int	bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 }; 
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 int	physmem;
 
 /* sysctl settable */
@@ -139,7 +137,6 @@ int   safepri = 0;
 vaddr_t dvma_base, dvma_end;
 struct extent *dvmamap_extent;
 
-caddr_t allocsys(caddr_t);
 void	dumpsys(void);
 void	stackdump(void);
 
@@ -149,8 +146,6 @@ void	stackdump(void);
 void
 cpu_startup()
 {
-	caddr_t v;
-	int sz;
 #ifdef DEBUG
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
@@ -185,25 +180,6 @@ cpu_startup()
 	    ptoa(physmem)/1024/1024);
 
 	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = (int)allocsys((caddr_t)0);
-
-	if ((v = (caddr_t)uvm_km_alloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-
-	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
@@ -229,7 +205,7 @@ cpu_startup()
 		    vm_map_max(kernel_map) - dvma_base,
                     NULL, UVM_UNKNOWN_OFFSET, 0,
                     UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-                                UVM_ADV_NORMAL, 0)))
+                                UVM_ADV_NORMAL, UVM_FLAG_FIXED)))
 			panic("startup: can not steal dvma map");
 	}
 #endif
@@ -263,32 +239,6 @@ cpu_startup()
 
 	/* Early interrupt handlers initialization */
 	intr_init();
-}
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * You call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(v)
-	caddr_t v;
-{
-
-#define	valloc(name, type, num) \
-	    v = (caddr_t)(((name) = (type *)v) + (num))
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return (v);
 }
 
 /*
@@ -1050,3 +1000,201 @@ caddr_t addr;
 	return (res);
 }
 #endif /* SUN4 */
+
+/*
+ * Common function for DMA map creation.  May be called by bus-specific
+ * DMA map creation functions.
+ */
+int
+_bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
+		   bus_size_t maxsegsz, bus_size_t boundary, int flags,
+		   bus_dmamap_t *dmamp)
+{
+	struct sparc_bus_dmamap *map;
+	void *mapstore;
+	size_t mapsize;
+
+	/*
+	 * Allocate and initialize the DMA map.  The end of the map
+	 * is a variable-sized array of segments, so we allocate enough
+	 * room for them in one shot.
+	 *
+	 * Note we don't preserve the WAITOK or NOWAIT flags.  Preservation
+	 * of ALLOCNOW notifies others that we've reserved these resources,
+	 * and they are not to be freed.
+	 *
+	 * The bus_dmamap_t includes one bus_dma_segment_t, hence
+	 * the (nsegments - 1).
+	 */
+	mapsize = sizeof(struct sparc_bus_dmamap) +
+	    (sizeof(bus_dma_segment_t) * (nsegments - 1));
+	if ((mapstore = malloc(mapsize, M_DEVBUF, (flags & BUS_DMA_NOWAIT) ?
+	    (M_NOWAIT | M_ZERO) : (M_WAITOK | M_ZERO))) == NULL)
+		return (ENOMEM);
+
+	map = (struct sparc_bus_dmamap *)mapstore;
+	map->_dm_size = size;
+	map->_dm_segcnt = nsegments;
+	map->_dm_maxmaxsegsz = maxsegsz;
+	map->_dm_boundary = boundary;
+	map->_dm_align = PAGE_SIZE;
+	map->_dm_flags = flags & ~(BUS_DMA_WAITOK|BUS_DMA_NOWAIT);
+	map->dm_maxsegsz = maxsegsz;
+	map->dm_mapsize = 0;		/* no valid mappings */
+	map->dm_nsegs = 0;
+
+	*dmamp = map;
+	return (0);
+}
+
+/*
+ * Common function for DMA map destruction.  May be called by bus-specific
+ * DMA map destruction functions.
+ */
+void
+_bus_dmamap_destroy(bus_dma_tag_t t, bus_dmamap_t map)
+{
+	free(map, M_DEVBUF);
+}
+
+/*
+ * Like _bus_dmamap_load(), but for mbufs.
+ */
+int
+_bus_dmamap_load_mbuf(bus_dma_tag_t t, bus_dmamap_t map,
+		      struct mbuf *m, int flags)
+{
+	panic("_bus_dmamap_load_mbuf: not implemented");
+}
+
+/*
+ * Like _bus_dmamap_load(), but for uios.
+ */
+int
+_bus_dmamap_load_uio(bus_dma_tag_t t, bus_dmamap_t map,
+		     struct uio *uio, int flags)
+{
+	panic("_bus_dmamap_load_uio: not implemented");
+}
+
+/*
+ * Like _bus_dmamap_load(), but for raw memory allocated with
+ * bus_dmamem_alloc().
+ */
+int
+_bus_dmamap_load_raw(bus_dma_tag_t t, bus_dmamap_t map,
+		     bus_dma_segment_t *segs, int nsegs, bus_size_t size,
+		     int flags)
+{
+	panic("_bus_dmamap_load_raw: not implemented");
+}
+
+/*
+ * Common function for DMA map synchronization.  May be called
+ * by bus-specific DMA map synchronization functions.
+ */
+void
+_bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map,
+		 bus_addr_t offset, bus_size_t len, int ops)
+{
+}
+
+/*
+ * Common function for DMA-safe memory allocation.  May be called
+ * by bus-specific DMA memory allocation functions.
+ */
+int
+_bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size,
+		  bus_size_t alignment, bus_size_t boundary,
+		  bus_dma_segment_t *segs, int nsegs, int *rsegs,
+		  int flags)
+{
+	struct pglist *mlist;
+	int error, plaflag;
+
+	/* Always round the size. */
+	size = round_page(size);
+
+	if ((mlist = malloc(sizeof(*mlist), M_DEVBUF,
+	    (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK)) == NULL)
+		return (ENOMEM);
+
+	/*
+	 * Allocate pages from the VM system.
+	 */
+	plaflag = flags & BUS_DMA_NOWAIT ? UVM_PLA_NOWAIT : UVM_PLA_WAITOK;
+	if (flags & BUS_DMA_ZERO)
+		plaflag |= UVM_PLA_ZERO;
+
+	TAILQ_INIT(mlist);
+	error = uvm_pglistalloc(size, (paddr_t)0, (paddr_t)-1, 0, 0,
+	    mlist, nsegs, plaflag);
+	if (error)
+		return (error);
+
+	/*
+	 * Simply keep a pointer around to the linked list, so
+	 * bus_dmamap_free() can return it.
+	 *
+	 * NOBODY SHOULD TOUCH THE pageq FIELDS WHILE THESE PAGES
+	 * ARE IN OUR CUSTODY.
+	 */
+	segs[0]._ds_mlist = mlist;
+
+	/*
+	 * We now have physical pages, but no DVMA addresses yet. These
+	 * will be allocated in bus_dmamap_load*() routines. Hence we
+	 * save any alignment and boundary requirements in this DMA
+	 * segment.
+	 */
+	segs[0].ds_addr = 0;
+	segs[0].ds_len = 0;
+	segs[0]._ds_va = 0;
+	*rsegs = 1;
+	return (0);
+}
+
+/*
+ * Common function for freeing DMA-safe memory.  May be called by
+ * bus-specific DMA memory free functions.
+ */
+void
+_bus_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
+{
+	if (nsegs != 1)
+		panic("bus_dmamem_free: nsegs = %d", nsegs);
+
+	/*
+	 * Return the list of pages back to the VM system.
+	 */
+	uvm_pglistfree(segs[0]._ds_mlist);
+	free(segs[0]._ds_mlist, M_DEVBUF);
+}
+
+/*
+ * Common function for unmapping DMA-safe memory.  May be called by
+ * bus-specific DMA memory unmapping functions.
+ */
+void
+_bus_dmamem_unmap(bus_dma_tag_t t, void *kva, size_t size)
+{
+
+#ifdef DIAGNOSTIC
+	if ((u_long)kva & PAGE_MASK)
+		panic("_bus_dmamem_unmap");
+#endif
+
+	size = round_page(size);
+	uvm_km_free(kernel_map, (vaddr_t)kva, (vaddr_t)size + size);
+}
+
+/*
+ * Common functin for mmap(2)'ing DMA-safe memory.  May be called by
+ * bus-specific DMA mmap(2)'ing functions.
+ */
+paddr_t
+_bus_dmamem_mmap(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
+		 off_t off, int prot, int flags)
+{
+	panic("_bus_dmamem_mmap: not implemented");
+}

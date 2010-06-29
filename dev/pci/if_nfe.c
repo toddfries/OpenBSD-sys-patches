@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nfe.c,v 1.88 2009/03/29 21:53:52 sthen Exp $	*/
+/*	$OpenBSD: if_nfe.c,v 1.90 2010/05/19 15:27:35 oga Exp $	*/
 
 /*-
  * Copyright (c) 2006, 2007 Damien Bergamini <damien.bergamini@free.fr>
@@ -161,7 +161,8 @@ const struct pci_matchid nfe_devices[] = {
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP79_LAN1 },
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP79_LAN2 },
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP79_LAN3 },
-	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP79_LAN4 }
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP79_LAN4 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_LAN }
 };
 
 int
@@ -247,6 +248,7 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 	case PCI_PRODUCT_NVIDIA_MCP79_LAN2:
 	case PCI_PRODUCT_NVIDIA_MCP79_LAN3:
 	case PCI_PRODUCT_NVIDIA_MCP79_LAN4:
+	case PCI_PRODUCT_NVIDIA_MCP89_LAN:
 		sc->sc_flags |= NFE_JUMBO_SUP | NFE_40BIT_ADDR | NFE_HW_CSUM |
 		    NFE_CORRECT_MACADDR | NFE_PWR_MGMT;
 		break;
@@ -1234,7 +1236,7 @@ nfe_alloc_rx_ring(struct nfe_softc *sc, struct nfe_rx_ring *ring)
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, NFE_RX_RING_COUNT * descsize,
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -1256,8 +1258,6 @@ nfe_alloc_rx_ring(struct nfe_softc *sc, struct nfe_rx_ring *ring)
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
-
-	bzero(*desc, NFE_RX_RING_COUNT * descsize);
 	ring->physaddr = ring->map->dm_segs[0].ds_addr;
 
 	if (sc->sc_flags & NFE_USE_JUMBO) {
@@ -1553,7 +1553,7 @@ nfe_alloc_tx_ring(struct nfe_softc *sc, struct nfe_tx_ring *ring)
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, NFE_TX_RING_COUNT * descsize,
-	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT);
+	    PAGE_SIZE, 0, &ring->seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (error != 0) {
 		printf("%s: could not allocate DMA memory\n",
 		    sc->sc_dev.dv_xname);
@@ -1575,8 +1575,6 @@ nfe_alloc_tx_ring(struct nfe_softc *sc, struct nfe_tx_ring *ring)
 		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
-
-	bzero(*desc, NFE_TX_RING_COUNT * descsize);
 	ring->physaddr = ring->map->dm_segs[0].ds_addr;
 
 	for (i = 0; i < NFE_TX_RING_COUNT; i++) {

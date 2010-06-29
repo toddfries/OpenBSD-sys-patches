@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioprbs.c,v 1.16 2009/02/16 21:19:06 miod Exp $	*/
+/*	$OpenBSD: ioprbs.c,v 1.21 2010/06/28 18:31:01 krw Exp $	*/
 
 /*
  * Copyright (c) 2001 Niklas Hallqvist
@@ -105,7 +105,7 @@ void	ioprbs_internal_cache_cmd(struct scsi_xfer *);
 void	ioprbs_intr(struct device *, struct iop_msg *, void *);
 void	ioprbs_intr_event(struct device *, struct iop_msg *, void *);
 int	ioprbs_match(struct device *, void *, void *);
-int	ioprbs_scsi_cmd(struct scsi_xfer *);
+void	ioprbs_scsi_cmd(struct scsi_xfer *);
 int	ioprbs_start(struct ioprbs_ccb *);
 void	ioprbs_start_ccbs(struct ioprbs_softc *);
 void	ioprbs_timeout(void *);
@@ -122,10 +122,6 @@ struct cfattach ioprbs_ca = {
 
 struct scsi_adapter ioprbs_switch = {
 	ioprbs_scsi_cmd, scsi_minphys, 0, 0,
-};
-
-struct scsi_device ioprbs_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 #ifdef I2OVERBOSE
@@ -345,7 +341,6 @@ ioprbs_attach(struct device *parent, struct device *self, void *aux)
 	/* Fill in the prototype scsi_link. */
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &ioprbs_switch;
-	sc->sc_link.device = &ioprbs_dev;
 	sc->sc_link.openings = 1;
 	sc->sc_link.adapter_buswidth = 1;
 	sc->sc_link.adapter_target = 1;
@@ -397,7 +392,7 @@ ioprbs_unconfig(struct ioprbs_softc *sc, int evreg)
 	iop_initiator_unregister(iop, &sc->sc_ii);
 }
 
-int
+void
 ioprbs_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -408,7 +403,6 @@ ioprbs_scsi_cmd(xs)
 	struct scsi_rw *rw;
 	struct scsi_rw_big *rwb;
 	int s;
-	int retval = SUCCESSFULLY_QUEUED;
 
 	s = splbio();
 
@@ -432,7 +426,6 @@ ioprbs_scsi_cmd(xs)
 		case VERIFY:
 #endif
 			ioprbs_internal_cache_cmd(xs);
-			xs->flags |= ITSDONE;
 			scsi_done(xs);
 			goto ready;
 
@@ -440,7 +433,6 @@ ioprbs_scsi_cmd(xs)
 			DPRINTF(("PREVENT/ALLOW "));
 			/* XXX Not yet implemented */
 			xs->error = XS_NOERROR;
-			xs->flags |= ITSDONE;
 			scsi_done(xs);
 			goto ready;
 
@@ -448,7 +440,6 @@ ioprbs_scsi_cmd(xs)
 			DPRINTF(("SYNCHRONIZE_CACHE "));
 			/* XXX Not yet implemented */
 			xs->error = XS_NOERROR;
-			xs->flags |= ITSDONE;
 			scsi_done(xs);
 			goto ready;
 
@@ -456,7 +447,6 @@ ioprbs_scsi_cmd(xs)
 			DPRINTF(("unknown opc %d ", xs->cmd->opcode));
 			/* XXX Not yet implemented */
 			xs->error = XS_DRIVER_STUFFUP;
-			xs->flags |= ITSDONE;
 			scsi_done(xs);
 			goto ready;
 
@@ -491,7 +481,6 @@ ioprbs_scsi_cmd(xs)
 					 * sense too.
 					 */
 					xs->error = XS_DRIVER_STUFFUP;
-					xs->flags |= ITSDONE;
 					scsi_done(xs);
 					goto ready;
 				}
@@ -503,8 +492,10 @@ ioprbs_scsi_cmd(xs)
 			 * We are out of commands, try again in a little while.
 			 */
 			if (ccb == NULL) {
+				xs->error = XS_NO_CCB;
+				scsi_done(xs);
 				splx(s);
-				return (NO_CCB);
+				return;
 			}
 
 			ccb->ic_blockno = blockno;
@@ -521,9 +512,11 @@ ioprbs_scsi_cmd(xs)
 					splx(s);
 					printf("%s: command timed out\n",
 					    sc->sc_dv.dv_xname);
-					return (TRY_AGAIN_LATER);
+					xs->error = XS_NO_CCB;
+					scsi_done(xs);
+					splx(s);
+					return;
 				}
-				xs->flags |= ITSDONE;
 				scsi_done(xs);
 #endif
 			}
@@ -534,13 +527,11 @@ ioprbs_scsi_cmd(xs)
 		 * Don't process the queue if we are polling.
 		 */
 		if (xs->flags & SCSI_POLL) {
-			retval = COMPLETE;
 			break;
 		}
 	}
 
 	splx(s);
-	return (retval);
 }
 
 void
@@ -565,7 +556,7 @@ ioprbs_intr(struct device *dv, struct iop_msg *im, void *reply)
 	if (!err && rb->reqstatus != I2O_STATUS_SUCCESS) {
 		detail = letoh16(rb->detail);
 #ifdef I2OVERBOSE
-		if (detail > sizeof(ioprbs_errors) / sizeof(ioprbs_errors[0]))
+		if (detail >= sizeof(ioprbs_errors) / sizeof(ioprbs_errors[0]))
 			errstr = "<unknown>";
 		else
 			errstr = ioprbs_errors[detail];

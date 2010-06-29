@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.82 2008/07/21 04:35:54 todd Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.88 2010/06/27 05:52:01 beck Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.73 1997/07/29 09:41:53 fair Exp $ */
 
 /*
@@ -56,6 +56,7 @@
 #include <sys/socket.h>
 #include <sys/malloc.h>
 #include <sys/queue.h>
+#include <sys/proc.h>
 #include <sys/user.h>
 
 #include <net/if.h>
@@ -771,20 +772,6 @@ cpu_configure()
 			if (cf->cf_driver != &memreg_cd ||
 				cf->cf_loc[0] == -1) /* avoid sun4m memreg0 */
 				continue;
-			/*
-			 * On the 4/100 obio addresses must be mapped at
-			 * 0x0YYYYYYY, but alias higher up (we avoid the
-			 * alias condition because it causes pmap difficulties)
-			 * XXX: We also assume that 4/[23]00 obio addresses
-			 * must be 0xZYYYYYYY, where (Z != 0)
-			 * make sure we get the correct memreg cfdriver!
-			 */
-			if (cpuinfo.cpu_type == CPUTYP_4_100 &&
-			    (cf->cf_loc[0] & 0xf0000000))
-				continue;
-			if (cpuinfo.cpu_type != CPUTYP_4_100 &&
-			    !(cf->cf_loc[0] & 0xf0000000))
-				continue;
 			for (p = cf->cf_parents; memregcf==NULL && *p >= 0; p++)
 				if (cfdata[*p].cf_driver == &obio_cd)
 					memregcf = cf;
@@ -1224,12 +1211,15 @@ mainbus_attach(parent, dev, aux)
 		 * node if a framebuffer is installed, even if console is
 		 * set to serial.
 		 */
-		if (*promvec->pv_stdout != PROMDEV_SCREEN)
+		if (*promvec->pv_stdout != PROMDEV_SCREEN ||
+		    *promvec->pv_stdin != PROMDEV_KBD)
 			fbnode = 0;
 		else {
 			/* remember which frame buffer is the console */
 			fbnode = getpropint(node, "fb", 0);
 		}
+	} else {
+		/* fbnode already initialized in consinit() */
 	}
 
 	/* Find the "options" node */
@@ -1757,8 +1747,8 @@ device_register(struct device *dev, void *aux)
 	/*
 	 * scsi: sd,cd
 	 */
-	if (strncmp("sd", dev->dv_xname, 2) == 0 ||
-	    strncmp("cd", dev->dv_xname, 2) == 0) {
+	if (strcmp("sd", dev->dv_cfdata->cf_driver->cd_name) == 0 ||
+	    strcmp("cd", dev->dv_cfdata->cf_driver->cd_name) == 0) {
 		struct scsi_attach_args *sa = aux;
 		struct scsibus_softc *sbsc;
 		int target, lun;

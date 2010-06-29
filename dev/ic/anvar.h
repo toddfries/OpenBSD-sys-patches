@@ -1,4 +1,4 @@
-/*	$OpenBSD: anvar.h,v 1.21 2006/02/20 11:13:57 jsg Exp $	*/
+/*	$OpenBSD: anvar.h,v 1.23 2009/10/13 19:33:16 pirofti Exp $	*/
 /*	$NetBSD: anvar.h,v 1.10 2005/02/27 00:27:00 perry Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -115,8 +115,6 @@ struct an_softc	{
 	int			sc_enabled;
 	int			sc_invalid;
 	int			sc_attached;
-	void			*sc_sdhook;
-
 
 	int			sc_bap_id;
 	int			sc_bap_off;
@@ -163,9 +161,8 @@ struct an_softc	{
 
 int	an_attach(struct an_softc *);
 int	an_detach(struct an_softc *);
-int	an_activate(struct device *, enum devact);
+int	an_activate(struct device *, int);
 void	an_power(int, void *);
-void	an_shutdown(void *);
 int	an_intr(void *);
 int	an_init(struct ifnet *);
 void	an_stop(struct ifnet *, int);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: z8530tty.c,v 1.17 2008/01/18 21:36:43 kettenis Exp $ */
+/*	$OpenBSD: z8530tty.c,v 1.22 2010/06/28 14:13:33 deraadt Exp $ */
 /*	$NetBSD: z8530tty.c,v 1.13 1996/10/16 20:42:14 gwr Exp $	*/
 
 /*
@@ -254,7 +254,7 @@ zstty_attach(parent, self, aux)
 	}
 	printf("\n");
 
-	tp = ttymalloc();
+	tp = ttymalloc(0);
 	tp->t_dev = dev;
 	tp->t_oproc = zsstart;
 	tp->t_param = zsparam;
@@ -348,7 +348,7 @@ zsopen(dev, flags, mode, p)
 	/* It's simpler to do this up here. */
 	if (((tp->t_state & (TS_ISOPEN | TS_XCLUDE))
 	     ==             (TS_ISOPEN | TS_XCLUDE))
-	    && (p->p_ucred->cr_uid != 0) )
+	    && (suser(p, 0) != 0) )
 	{
 		return (EBUSY);
 	}
@@ -416,7 +416,7 @@ zsopen(dev, flags, mode, p)
 	splx(s);
 
 	if (error == 0)
-		error = linesw[tp->t_line].l_open(dev, tp);
+		error = linesw[tp->t_line].l_open(dev, tp, p);
 
 	return (error);
 }
@@ -444,7 +444,7 @@ zsclose(dev, flags, mode, p)
 	if ((tp->t_state & TS_ISOPEN) == 0)
 		return 0;
 
-	(*linesw[tp->t_line].l_close)(tp, flags);
+	(*linesw[tp->t_line].l_close)(tp, flags, p);
 	hup = tp->t_cflag & HUPCL;
 	if (zst->zst_swflags & TIOCFLAG_SOFTCAR)
 		hup = 0;

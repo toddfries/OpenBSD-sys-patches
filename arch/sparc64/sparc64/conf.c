@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.51 2009/06/03 14:45:53 jj Exp $	*/
+/*	$OpenBSD: conf.c,v 1.55 2010/06/09 15:25:33 jsing Exp $	*/
 /*	$NetBSD: conf.c,v 1.17 2001/03/26 12:33:26 lukem Exp $ */
 
 /*
@@ -106,6 +106,8 @@ cdev_decl(pci);
 #include "ucom.h"
 #include "uscanner.h"
 
+#include "bthub.h"
+
 #include "pf.h"
 
 #ifdef NNPFS
@@ -118,6 +120,7 @@ cdev_decl(nnpfs_dev);
 
 #include "systrace.h"
 #include "hotplug.h"
+#include "vscsi.h"
 
 struct bdevsw	bdevsw[] =
 {
@@ -288,7 +291,10 @@ struct cdevsw	cdevsw[] =
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 124: devices hot plugging */
 	cdev_tty_init(NVCONS,vcons),	/* 125: virtual console */
 	cdev_tty_init(NSBBC,sbbc),	/* 126: SBBC console */
-	cdev_tty_init(NVCCTTY,vcctty)	/* 127: virtual console concentrator */
+	cdev_tty_init(NVCCTTY,vcctty),	/* 127: virtual console concentrator */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 128: vscsi */
+	cdev_bthub_init(NBTHUB,bthub),	/* 129: bluetooth hub */
+	cdev_disk_init(1,diskmap),	/* 130: disk mapper */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

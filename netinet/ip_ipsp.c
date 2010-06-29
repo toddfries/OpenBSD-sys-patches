@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.c,v 1.177 2009/06/02 21:28:36 blambert Exp $	*/
+/*	$OpenBSD: ip_ipsp.c,v 1.180 2010/04/20 22:05:43 tedu Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -44,6 +44,7 @@
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/kernel.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -496,7 +497,7 @@ tdb_hashstats(void)
 	db_printf("tdb cnt\t\tbucket cnt\n");
 	for (i = 0; i < NBUCKETS; i++)
 		if (buckets[i] > 0)
-			db_printf("%d%c\t\t%d\n", i, i == NBUCKETS - 1 ?
+			db_printf("%d%s\t\t%d\n", i, i == NBUCKETS - 1 ?
 			    "+" : "", buckets[i]);
 }
 #endif	/* DDB */
@@ -1230,7 +1231,7 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 
 			/* Update the length of trailing ESP authenticators. */
 			if (tdb->tdb_authalgxform)
-				trail += AH_HMAC_HASHLEN;
+				trail += tdb->tdb_authalgxform->authsize;
 
 			splx(s);
 

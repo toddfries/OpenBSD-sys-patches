@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.11 2009/04/20 00:42:06 oga Exp $	*/
+/*	$OpenBSD: bus.h,v 1.13 2010/04/04 12:49:30 miod Exp $	*/
 /*	$NetBSD: bus.h,v 1.12 2003/10/23 15:03:24 scw Exp $	*/
 
 /*-
@@ -358,26 +358,14 @@ struct bus_space {
 /*
  * Copy operations.
  */
-#define	bus_space_copy_region_1(t, h1, o1, h2, o2, c)				\
+#define	bus_space_copy_1(t, h1, o1, h2, o2, c)				\
 	__bs_copy(1, t, h1, o1, h2, o2, c)
-#define	bus_space_copy_region_2(t, h1, o1, h2, o2, c)				\
+#define	bus_space_copy_2(t, h1, o1, h2, o2, c)				\
 	__bs_copy(2, t, h1, o1, h2, o2, c)
-#define	bus_space_copy_region_4(t, h1, o1, h2, o2, c)				\
+#define	bus_space_copy_4(t, h1, o1, h2, o2, c)				\
 	__bs_copy(4, t, h1, o1, h2, o2, c)
-#define	bus_space_copy_region_8(t, h1, o1, h2, o2, c)				\
+#define	bus_space_copy_8(t, h1, o1, h2, o2, c)				\
 	__bs_copy(8, t, h1, o1, h2, o2, c)
-
-void
-bus_space_copy_1(bus_space_tag_t bst, bus_space_handle_t h1,
-    bus_space_handle_t h2, bus_size_t o1, bus_size_t o2, bus_size_t c);
-void
-bus_space_copy_2(bus_space_tag_t bst, bus_space_handle_t h1,
-     bus_space_handle_t h2, bus_size_t o1, bus_size_t o2, bus_size_t c);
-void
-bus_space_copy_4(bus_space_tag_t bst, bus_space_handle_t h1,
-     bus_space_handle_t h2, bus_size_t o1, bus_size_t o2, bus_size_t c);
-#define	bus_space_copy_8 \
-    !!! bus_space_copy_8 not implemented !!!
 
 /*
  * Macros to provide prototypes for all the functions used in the
@@ -386,7 +374,7 @@ bus_space_copy_4(bus_space_tag_t bst, bus_space_handle_t h1,
 
 #define bs_map_proto(f)							\
 int	__bs_c(f,_bs_map) (void *t, bus_addr_t addr,		\
-	    bus_size_t size, int cacheable, bus_space_handle_t *bshp);
+	    bus_size_t size, int flags, bus_space_handle_t *bshp);
 
 #define bs_unmap_proto(f)						\
 void	__bs_c(f,_bs_unmap) (void *t, bus_space_handle_t bsh,	\
@@ -400,7 +388,7 @@ int	__bs_c(f,_bs_subregion) (void *t, bus_space_handle_t bsh,	\
 #define bs_alloc_proto(f)						\
 int	__bs_c(f,_bs_alloc) (void *t, bus_addr_t rstart,		\
 	    bus_addr_t rend, bus_size_t size, bus_size_t align,		\
-	    bus_size_t boundary, int cacheable, bus_addr_t *addrp,	\
+	    bus_size_t boundary, int flags, bus_addr_t *addrp,	\
 	    bus_space_handle_t *bshp);
 
 #define bs_free_proto(f)						\

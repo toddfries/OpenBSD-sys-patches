@@ -1,4 +1,4 @@
-/* $OpenBSD: rf_openbsdkintf.c,v 1.51 2009/05/21 23:45:48 krw Exp $	*/
+/* $OpenBSD: rf_openbsdkintf.c,v 1.57 2010/06/26 23:24:45 guenther Exp $	*/
 /* $NetBSD: rf_netbsdkintf.c,v 1.109 2001/07/27 03:30:07 oster Exp $	*/
 
 /*-
@@ -111,13 +111,14 @@
 #include <sys/device.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/dkio.h>
 #include <sys/fcntl.h>
 #include <sys/systm.h>
 #include <sys/namei.h>
 #include <sys/conf.h>
 #include <sys/lock.h>
 #include <sys/buf.h>
-#include <sys/user.h>
+#include <sys/proc.h>
 #include <sys/reboot.h>
 
 #include "raid.h"
@@ -229,7 +230,7 @@ int numraid = 0;
 int  rf_probe(struct device *, void *, void *);
 void rf_attach(struct device *, struct device *, void *);
 int  rf_detach(struct device *, int);
-int  rf_activate(struct device *, enum devact);
+int  rf_activate(struct device *, int);
 
 struct cfattach raid_ca = {
 	sizeof(struct raid_softc), rf_probe, rf_attach,
@@ -263,7 +264,7 @@ struct raid_softc **raid_scPtrs;
 
 void rf_shutdown_hook(RF_ThreadArg_t);
 void raidgetdefaultlabel(RF_Raid_t *, struct raid_softc *, struct disklabel *);
-void raidgetdisklabel(dev_t, struct raid_softc *, struct disklabel *, int);
+int raidgetdisklabel(dev_t, struct raid_softc *, struct disklabel *, int);
 
 int  raidlock(struct raid_softc *);
 void raidunlock(struct raid_softc *);
@@ -318,7 +319,7 @@ rf_detach(struct device *self, int flags)
 }
 
 int
-rf_activate(struct device *self, enum devact act)
+rf_activate(struct device *self, int act)
 {
 	return 0;
 }
@@ -2082,9 +2083,7 @@ raidgetdefaultlabel(RF_Raid_t *raidPtr, struct raid_softc *rs,
 	strncpy(lp->d_typename, "raid", sizeof(lp->d_typename));
 	lp->d_type = DTYPE_RAID;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-	lp->d_rpm = 3600;
 	lp->d_flags = 0;
-	lp->d_interleave = 1;
 	lp->d_version = 1;
 
 	DL_SETPOFFSET(&lp->d_partitions[RAW_PART], 0);
@@ -2101,14 +2100,13 @@ raidgetdefaultlabel(RF_Raid_t *raidPtr, struct raid_softc *rs,
  * Read the disklabel from the raid device.
  * If one is not present, fake one up.
  */
-void
+int
 raidgetdisklabel(dev_t dev, struct raid_softc *rs, struct disklabel *lp,
     int spoofonly)
 {
 	int unit = DISKUNIT(dev);
-	char *errstring;
 	RF_Raid_t *raidPtr;
-	int i;
+	int error, i;
 	struct partition *pp;
 
 	db1_printf(("Getting the disklabel...\n"));
@@ -2122,12 +2120,10 @@ raidgetdisklabel(dev_t dev, struct raid_softc *rs, struct disklabel *lp,
 	/*
 	 * Call the generic disklabel extraction routine.
 	 */
-	errstring = readdisklabel(DISKLABELDEV(dev), raidstrategy, lp,
+	error = readdisklabel(DISKLABELDEV(dev), raidstrategy, lp,
 	    spoofonly);
-	if (errstring) {
-		/*printf("%s: %s\n", rs->sc_xname, errstring);*/
-		return;
-	}
+	if (error)
+		return (error);
 
 	/*
 	 * Sanity check whether the found disklabel is valid.
@@ -2151,6 +2147,7 @@ raidgetdisklabel(dev_t dev, struct raid_softc *rs, struct disklabel *lp,
 			    "exceeds the size of raid (%ld)\n",
 			    rs->sc_xname, 'a' + i, (long) rs->sc_size);
 	}
+	return (0);
 }
 
 /*

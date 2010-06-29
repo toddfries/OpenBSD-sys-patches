@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.452 2009/06/03 21:30:19 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.474 2010/06/27 03:03:48 thib Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -91,9 +91,6 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/sensors.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 
 #ifdef KGDB
 #include <sys/kgdb.h>
@@ -198,6 +195,14 @@ int	bufpages = 0;
 #endif
 int	bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
+struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
+struct uvm_constraint_range *uvm_md_constraints[] = {
+	&isa_constraint,
+	&dma_constraint,
+	NULL
+};
+
 extern int	boothowto;
 int	physmem;
 
@@ -234,8 +239,15 @@ struct vm_map *phys_map = NULL;
 int p4_model;
 int p3_early;
 void (*update_cpuspeed)(void) = NULL;
+void	via_update_sensor(void *args);
 #endif
 int kbd_reset;
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int	safepri = 0;
 
 #if !defined(SMALL_KERNEL)
 int bus_clock;
@@ -266,8 +278,6 @@ struct	extent *ioport_ex;
 struct	extent *iomem_ex;
 static	int ioport_malloc_safe;
 
-caddr_t	allocsys(caddr_t);
-void	setup_buffers(void);
 void	dumpsys(void);
 int	cpu_dump(void);
 void	init386(paddr_t);
@@ -373,8 +383,6 @@ void
 cpu_startup()
 {
 	unsigned i;
-	caddr_t v;
-	int sz;
 	vaddr_t minaddr, maxaddr, va;
 	paddr_t pa;
 
@@ -410,20 +418,11 @@ cpu_startup()
 	    (unsigned long long)ptoa((psize_t)physmem)/1024U/1024U);
 
 	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
+	 * Determine how many buffers to allocate.  We use bufcachepercent%
+	 * of the memory below 4GB.
 	 */
-	sz = (int)allocsys((caddr_t)0);
-	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
-	 */
-	setup_buffers();
+	if (bufpages == 0)
+		bufpages = atop(avail_end) * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -509,45 +508,6 @@ i386_init_pcb_tss_ldt(struct cpu_info *ci)
 	ci->ci_idle_tss_sel = tss_alloc(pcb);
 }
 #endif	/* MULTIPROCESSOR */
-
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(caddr_t v)
-{
-
-#define	valloc(name, type, num) \
-	    v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return v;
-}
-
-void
-setup_buffers()
-{
-	/*
-	 * Determine how many buffers to allocate.  We use bufcachepercent%
-	 * of the memory below 4GB.
-	 */
-	if (bufpages == 0)
-		bufpages = atop(avail_end) * bufcachepercent / 100;
-
-}
 
 /*
  * Info for CTL_HW
@@ -1047,15 +1007,29 @@ const struct cpu_cpuid_feature i386_cpuid_features[] = {
 
 const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_SSE3,	"SSE3" },
+	{ CPUIDECX_PCLMUL,	"PCLMUL" },
 	{ CPUIDECX_MWAIT,	"MWAIT" },
 	{ CPUIDECX_DSCPL,	"DS-CPL" },
 	{ CPUIDECX_VMX,		"VMX" },
 	{ CPUIDECX_SMX,		"SMX" },
 	{ CPUIDECX_EST,		"EST" },
 	{ CPUIDECX_TM2,		"TM2" },
+	{ CPUIDECX_SSSE3,	"SSSE3" },
 	{ CPUIDECX_CNXTID,	"CNXT-ID" },
+	{ CPUIDECX_FMA3,	"FMA3" },
 	{ CPUIDECX_CX16,	"CX16" },
 	{ CPUIDECX_XTPR,	"xTPR" },
+	{ CPUIDECX_PDCM,	"PDCM" },
+	{ CPUIDECX_DCA,		"DCA" },
+	{ CPUIDECX_SSE41,	"SSE4.1" },
+	{ CPUIDECX_SSE42,	"SSE4.2" },
+	{ CPUIDECX_X2APIC,	"x2APIC" },
+	{ CPUIDECX_MOVBE,	"MOVBE" },
+	{ CPUIDECX_POPCNT,	"POPCNT" },
+	{ CPUIDECX_AES,		"AES" },
+	{ CPUIDECX_XSAVE,	"XSAVE" },
+	{ CPUIDECX_OSXSAVE,	"OSXSAVE" },
+	{ CPUIDECX_AVX,		"AVX" },
 };
 
 void
@@ -1130,6 +1104,22 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 		/*
 		 * C3 Nehemiah & later: fall through.
 		 */
+	
+	case 10: /* C7-M Type A */
+	case 13: /* C7-M Type D */
+	case 15: /* Nano */
+#if !defined(SMALL_KERNEL)
+		if (model == 10 || model == 13 || model == 15) {
+			/* Setup the sensors structures */
+			strlcpy(ci->ci_sensordev.xname, ci->ci_dev.dv_xname,
+			    sizeof(ci->ci_sensordev.xname));
+			ci->ci_sensor.type = SENSOR_TEMP;
+			sensor_task_register(ci, via_update_sensor, 5);
+			sensor_attach(&ci->ci_sensordev, &ci->ci_sensor);
+			sensordev_install(&ci->ci_sensordev);
+		}
+#endif
+
 	default:
 		/*
 		 * C3 Nehemiah/Esther & later models:
@@ -1223,6 +1213,30 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 	}
 }
 
+#if !defined(SMALL_KERNEL)
+void
+via_update_sensor(void *args)
+{
+	struct cpu_info *ci = (struct cpu_info *) args;
+	u_int64_t msr;
+
+	switch (ci->ci_model) {
+	case 0xa:
+	case 0xd:
+		msr = rdmsr(MSR_C7M_TMTEMPERATURE);
+		break;
+	case 0xf:
+		msr = rdmsr(MSR_CENT_TMTEMPERATURE);
+		break;
+	}
+	ci->ci_sensor.value = (msr & 0xffffff);
+	/* micro degrees */
+	ci->ci_sensor.value *= 1000000;
+	ci->ci_sensor.value += 273150000;
+	ci->ci_sensor.flags &= ~SENSOR_FINVALID;
+}
+#endif
+
 void
 cyrix6x86_cpu_setup(struct cpu_info *ci)
 {
@@ -1239,7 +1253,7 @@ cyrix6x86_cpu_setup(struct cpu_info *ci)
 		/* cyrix's workaround  for the "coma bug" */
 		cyrix_write_reg(0x31, cyrix_read_reg(0x31) | 0xf8);
 		cyrix_write_reg(0x32, cyrix_read_reg(0x32) | 0x7f);
-		cyrix_write_reg(0x33, cyrix_read_reg(0x33) & ~0xff);
+		cyrix_read_reg(0x33); cyrix_write_reg(0x33, 0);
 		cyrix_write_reg(0x3c, cyrix_read_reg(0x3c) | 0x87);
 		/* disable access to ccr4/ccr5 */
 		cyrix_write_reg(0xC3, cyrix_read_reg(0xC3) & ~0x10);
@@ -1734,6 +1748,29 @@ identifycpu(struct cpu_info *ci)
 		}
 	}
 
+	if (vendor == CPUVENDOR_INTEL) {
+		/*
+		 * PIII, Core Solo and Core Duo CPUs have known
+		 * errata stating:
+		 * "Page with PAT set to WC while associated MTRR is UC
+		 * may consolidate to UC".
+		 * Because of this it is best we just fallback to mtrrs
+		 * in this case.
+		 */
+		if (ci->ci_family == 6 && ci->ci_model < 15)
+		    ci->ci_feature_flags &= ~CPUID_PAT;
+
+		if (ci->ci_feature_flags & CPUID_CFLUSH) {
+			/* to get the cacheline size you must do cpuid
+			 * with eax 0x01
+			 */
+			u_int regs[4];
+
+			cpuid(0x01, regs); 
+			ci->ci_cflushsz = ((regs[1] >> 8) & 0xff) * 8;
+		}
+	}
+
 	/* Remove leading and duplicated spaces from cpu_brandstr */
 	brandstr_from = brandstr_to = cpu_brandstr;
 	skipspace = 1;
@@ -1985,6 +2022,8 @@ p3_get_bus_clock(struct cpu_info *ci)
 			goto print_msr;
 		}
 		break;
+	case 0x15:	/* EP80579 no FSB */
+		break;
 	case 0xe: /* Core Duo/Solo */
 	case 0xf: /* Core Xeon */
 	case 0x16: /* 65nm Celeron */
@@ -2060,6 +2099,10 @@ p3_get_bus_clock(struct cpu_info *ci)
 			    ci->ci_dev.dv_xname, bus);
 			goto print_msr;
 		}
+		break;
+	case 0x1a: /* Core i7 */
+	case 0x1e: /* Core i5 */
+	case 0x25: /* Core i3 */
 		break;
 	default: 
 		printf("%s: unknown i686 model 0x%x, can't get bus clock",
@@ -2161,7 +2204,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	frame.sf_fpstate = NULL;
 	if (p->p_md.md_flags & MDP_USEDFPU) {
 		sp -= sizeof(union savefpu);
-		sp &= ~0xf;	/* foe XMM regs */
+		sp &= ~0xf;	/* for XMM regs */
 		frame.sf_fpstate = (void *)sp;
 	}
 
@@ -3108,7 +3151,7 @@ init386(paddr_t first_avail)
 #endif
 
 #if defined(MULTIPROCESSOR) || \
-    (NACPI > 0 && defined(ACPI_SLEEP_ENABLED) && !defined(SMALL_KERNEL))
+    (NACPI > 0 && !defined(SMALL_KERNEL))
 	/* install the lowmem ptp after boot args for 1:1 mappings */
 	pmap_prealloc_lowmem_ptp(PTP0_PA);
 #endif
@@ -3119,7 +3162,7 @@ init386(paddr_t first_avail)
 	    VM_PROT_ALL);                       /* protection */
 #endif
 
-#if NACPI > 0 && defined(ACPI_SLEEP_ENABLED) && !defined(SMALL_KERNEL)
+#if NACPI > 0 && !defined(SMALL_KERNEL)
 	pmap_kenter_pa((vaddr_t)ACPI_TRAMPOLINE,/* virtual */
 	    (paddr_t)ACPI_TRAMPOLINE,           /* physical */
 	    VM_PROT_ALL);                       /* protection */
@@ -3532,10 +3575,10 @@ int
 bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
-	u_long pa, endpa;
+	paddr_t pa, endpa;
 	vaddr_t va;
-	pt_entry_t *pte;
 	bus_size_t map_size;
+	int pmap_flags = PMAP_NOCACHE;
 
 	pa = trunc_page(bpa);
 	endpa = round_page(bpa + size);
@@ -3553,19 +3596,15 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
 
 	*bshp = (bus_space_handle_t)(va + (bpa & PGOFSET));
 
+	if (flags & BUS_SPACE_MAP_CACHEABLE)
+		pmap_flags = 0;
+	else if (flags & BUS_SPACE_MAP_PREFETCHABLE)
+		pmap_flags = PMAP_WC;
+
 	for (; map_size > 0;
-	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE) {
-		pmap_kenter_pa(va, pa, VM_PROT_READ | VM_PROT_WRITE);
-
-		pte = kvtopte(va);
-		if (flags & BUS_SPACE_MAP_CACHEABLE)
-			*pte &= ~PG_N;
-		else
-			*pte |= PG_N;
-		pmap_tlb_shootpage(pmap_kernel(), va);
-	}
-
-	pmap_tlb_shootwait();
+	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE)
+		pmap_kenter_pa(va, pa | pmap_flags,
+		    VM_PROT_READ | VM_PROT_WRITE);
 	pmap_update(pmap_kernel());
 
 	return 0;
@@ -3696,15 +3735,11 @@ i386_intlock(int ipl)
 {
 	if (ipl < IPL_SCHED)
 		__mp_lock(&kernel_lock);
-
-	curcpu()->ci_idepth++;
 }
 
 void
 i386_intunlock(int ipl)
 {
-	curcpu()->ci_idepth--;
-
 	if (ipl < IPL_SCHED)
 		__mp_unlock(&kernel_lock);
 }
@@ -3713,13 +3748,11 @@ void
 i386_softintlock(void)
 {
 	__mp_lock(&kernel_lock);
-	curcpu()->ci_idepth++;
 }
 
 void
 i386_softintunlock(void)
 {
-	curcpu()->ci_idepth--;
 	__mp_unlock(&kernel_lock);
 }
 #endif

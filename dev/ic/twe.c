@@ -1,4 +1,4 @@
-/*	$OpenBSD: twe.c,v 1.30 2009/02/16 21:19:07 miod Exp $	*/
+/*	$OpenBSD: twe.c,v 1.37 2010/06/28 18:31:02 krw Exp $	*/
 
 /*
  * Copyright (c) 2000-2002 Michael Shalayeff.  All rights reserved.
@@ -64,14 +64,10 @@ struct cfdriver twe_cd = {
 	NULL, "twe", DV_DULL
 };
 
-int	twe_scsi_cmd(struct scsi_xfer *);
+void	twe_scsi_cmd(struct scsi_xfer *);
 
 struct scsi_adapter twe_switch = {
 	twe_scsi_cmd, tweminphys, 0, 0,
-};
-
-struct scsi_device twe_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 static __inline struct twe_ccb *twe_get_ccb(struct twe_softc *sc);
@@ -383,7 +379,6 @@ twe_attach(sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &twe_switch;
 	sc->sc_link.adapter_target = TWE_MAX_UNITS;
-	sc->sc_link.device = &twe_dev;
 	sc->sc_link.openings = TWE_MAXCMDS / nunits;
 	sc->sc_link.adapter_buswidth = TWE_MAX_UNITS;
 
@@ -635,7 +630,7 @@ twe_start(ccb, wait)
 		printf("%s: twe_start(%d) timed out\n",
 		    sc->sc_dev.dv_xname, cmd->cmd_index);
 
-		return 1;
+		return EPERM;
 	}
 }
 
@@ -737,7 +732,6 @@ twe_done(sc, ccb)
 
 	if (xs) {
 		xs->resid = 0;
-		xs->flags |= ITSDONE;
 		scsi_done(xs);
 	}
 	TWE_UNLOCK(sc, lock);
@@ -771,7 +765,7 @@ twe_copy_internal_data(xs, v, size)
 	}
 }
 
-int
+void
 twe_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -793,7 +787,8 @@ twe_scsi_cmd(xs)
 	if (target >= TWE_MAX_UNITS || !sc->sc_hdr[target].hd_present ||
 	    link->lun != 0) {
 		xs->error = XS_DRIVER_STUFFUP;
-		return (COMPLETE);
+		scsi_done(xs);
+		return;
 	}
 
 	TWE_DPRINTF(TWE_D_CMD, ("twe_scsi_cmd "));
@@ -849,7 +844,8 @@ twe_scsi_cmd(xs)
 
 	case PREVENT_ALLOW:
 		TWE_DPRINTF(TWE_D_CMD, ("PREVENT/ALLOW "));
-		return (COMPLETE);
+		scsi_done(xs);
+		return;
 
 	case READ_COMMAND:
 	case READ_BIG:
@@ -859,7 +855,9 @@ twe_scsi_cmd(xs)
 		lock = TWE_LOCK(sc);
 
 		flags = 0;
-		if (xs->cmd->opcode != SYNCHRONIZE_CACHE) {
+		if (xs->cmd->opcode == SYNCHRONIZE_CACHE) {
+			blockno = blockcnt = 0;
+		} else {
 			/* A read or write operation. */
 			if (xs->cmdlen == 6) {
 				rw = (struct scsi_rw *)xs->cmd;
@@ -883,7 +881,7 @@ twe_scsi_cmd(xs)
 				xs->error = XS_DRIVER_STUFFUP;
 				scsi_done(xs);
 				TWE_UNLOCK(sc, lock);
-				return (COMPLETE);
+				return;
 			}
 		}
 
@@ -896,10 +894,10 @@ twe_scsi_cmd(xs)
 		}
 
 		if ((ccb = twe_get_ccb(sc)) == NULL) {
-			xs->error = XS_DRIVER_STUFFUP;
+			xs->error = XS_NO_CCB;
 			scsi_done(xs);
 			TWE_UNLOCK(sc, lock);
-			return (COMPLETE);
+			return;
 		}
 
 		ccb->ccb_xs = xs;
@@ -920,23 +918,12 @@ twe_scsi_cmd(xs)
 		    BUS_DMA_NOWAIT : BUS_DMA_WAITOK), wait))) {
 
 			TWE_DPRINTF(TWE_D_CMD, ("failed %p ", xs));
-			if (xs->flags & SCSI_POLL) {
-				TWE_UNLOCK(sc, lock);
-				return (TRY_AGAIN_LATER);
-			} else {
-				xs->error = XS_DRIVER_STUFFUP;
-				scsi_done(xs);
-				TWE_UNLOCK(sc, lock);
-				return (COMPLETE);
-			}
+			xs->error = XS_DRIVER_STUFFUP;
+			scsi_done(xs);
 		}
 
 		TWE_UNLOCK(sc, lock);
-
-		if (wait & SCSI_POLL)
-			return (COMPLETE);
-		else
-			return (SUCCESSFULLY_QUEUED);
+		return;
 
 	default:
 		TWE_DPRINTF(TWE_D_CMD, ("unsupported scsi command %#x tgt %d ",
@@ -944,7 +931,7 @@ twe_scsi_cmd(xs)
 		xs->error = XS_DRIVER_STUFFUP;
 	}
 
-	return (COMPLETE);
+	scsi_done(xs);
 }
 
 int

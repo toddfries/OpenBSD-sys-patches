@@ -1,4 +1,4 @@
-/*	$OpenBSD: iscsi.h,v 1.2 2009/03/23 02:19:07 dlg Exp $ */
+/*	$OpenBSD: iscsi.h,v 1.6 2009/08/27 14:12:27 claudio Exp $ */
 
 /*
  * Copyright (c) 2008 David Gwynne <dlg@openbsd.org>
@@ -19,8 +19,6 @@
 #ifndef _SYS_SCSI_ISCSI_H
 #define _SYS_SCSI_ISCSI_H
 
-#define ISCSI_OP_
-
 struct iscsi_pdu {
 	u_int8_t	opcode;
 	u_int8_t	flags;
@@ -33,7 +31,13 @@ struct iscsi_pdu {
 
 	u_int32_t	itt;
 
-	u_int8_t	_reserved2[28];
+	u_int8_t	_reserved2[4];
+
+	u_int32_t	cmdsn;
+
+	u_int32_t	expstatsn;
+
+	u_int8_t	_reserved3[16];
 } __packed;
 
 /*
@@ -67,6 +71,15 @@ struct iscsi_pdu {
 #define ISCSI_PDU_OPCODE(_o)		((_o) & 0x3f)
 #define ISCSI_PDU_I(_h)			((_h)->opcode & 0x40)
 #define ISCSI_PDU_F(_h)			((_h)->flags & 0x80)
+
+#define ISCSI_OP_F_IMMEDIATE		0x40
+
+/*
+ * various other flags and values
+ */
+#define ISCSI_ISID_OUI			0x00000000
+#define ISCSI_ISID_EN			0x40000000
+#define ISCSI_ISID_RAND			0x80000000
 
 struct iscsi_pdu_scsi_request {
 	u_int8_t	opcode;
@@ -112,6 +125,20 @@ struct iscsi_pdu_scsi_response {
 
 	u_int32_t	expdatasn;
 } __packed;
+
+#define ISCSI_SCSI_F_F			0x80
+#define ISCSI_SCSI_F_R			0x40
+#define ISCSI_SCSI_F_W			0x20
+
+#define ISCSI_SCSI_ATTR_UNTAGGED	0
+#define ISCSI_SCSI_ATTR_SIMPLE		1
+#define ISCSI_SCSI_ATTR_ORDERED		2
+#define ISCSI_SCSI_ATTR_HEAD_OF_Q	3
+#define ISCSI_SCSI_ATTR_ACA		4
+
+#define ISCSI_SCSI_STAT_GOOD		0x00
+#define ISCSI_SCSI_STAT_CHCK_COND	0x02
+/* we don't care about the type of the other error conditions */
 
 struct iscsi_pdu_task_request {
 	u_int8_t	opcode;
@@ -200,17 +227,17 @@ struct iscsi_pdu_data_in {
 
 	u_int32_t	ttt;
 
-	u_int8_t	statsn[4];
+	u_int32_t	statsn;
 
-	u_int8_t	expcmdsn[4];
+	u_int32_t	expcmdsn;
 
-	u_int8_t	maxcmdsn[4];
+	u_int32_t	maxcmdsn;
 
-	u_int8_t	datasn[4];
+	u_int32_t	datasn;
 
-	u_int8_t	buffer_offs[4];
+	u_int32_t	buffer_offs;
 
-	u_int8_t	residual[4];
+	u_int32_t	residual;
 } __packed;
 
 struct iscsi_pdu_rt2 {
@@ -311,6 +338,9 @@ struct iscsi_pdu_text_response {
 	u_int8_t	_reserved2[12];
 } __packed;
 
+#define ISCSI_TEXT_F_F	0x80
+#define ISCSI_TEXT_F_C	0x40
+
 struct iscsi_pdu_login_request {
 	u_int8_t	opcode;
 	u_int8_t	flags;
@@ -320,8 +350,9 @@ struct iscsi_pdu_login_request {
 	u_int8_t	ahslen;
 	u_int8_t	datalen[3];
 
-	u_int8_t	isid[6];
-	u_int8_t	tsih[2];
+	u_int32_t	isid_base;
+	u_int16_t	isid_qual;
+	u_int16_t	tsih;
 
 	u_int32_t	itt;
 
@@ -335,6 +366,14 @@ struct iscsi_pdu_login_request {
 	u_int8_t	_reserved2[16];
 } __packed;
 
+#define ISCSI_LOGIN_F_T		0x80
+#define ISCSI_LOGIN_F_C		0x40
+#define ISCSI_LOGIN_F_CSG(x)	(((x) & 0x3) << 2)
+#define ISCSI_LOGIN_F_NSG(x)	((x) & 0x3)
+#define ISCSI_LOGIN_STG_SECNEG	0
+#define ISCSI_LOGIN_STG_OPNEG	1
+#define ISCSI_LOGIN_STG_FULL	3
+
 struct iscsi_pdu_login_response {
 	u_int8_t	opcode;
 	u_int8_t	flags;
@@ -344,8 +383,9 @@ struct iscsi_pdu_login_response {
 	u_int8_t	ahslen;
 	u_int8_t	datalen[3];
 
-	u_int8_t	isid[6];
-	u_int8_t	tsih[2];
+	u_int32_t	isid_base;
+	u_int16_t	isid_qual;
+	u_int16_t	tsih;
 
 	u_int32_t	itt;
 

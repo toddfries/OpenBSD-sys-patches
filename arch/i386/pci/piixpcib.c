@@ -1,4 +1,4 @@
-/*	$OpenBSD: piixpcib.c,v 1.4 2008/06/26 05:42:11 ray Exp $ */
+/*	$OpenBSD: piixpcib.c,v 1.6 2010/04/20 22:05:41 tedu Exp $ */
 
 /*
  * Copyright (c) 2007 Stefan Sperling <stsp@stsp.in-berlin.de>
@@ -55,6 +55,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <machine/bus.h>
@@ -345,7 +346,7 @@ piixpcib_setperf(int level)
 	 *
 	 * And yes, I've tried it the way the Linux speedstep-smi
 	 * driver does it, thank you very much. It doesn't work
-	 * half the time (my machine has more than 4Mhz ;-) and
+	 * half the time (my machine has more than 4MHz ;-) and
 	 * even crashes some machines without specific workarounds.
 	 *
 	 * So call p3_update_cpuspeed() from arch/i386/i386/machdep.c

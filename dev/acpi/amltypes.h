@@ -1,4 +1,4 @@
-/* $OpenBSD: amltypes.h,v 1.32 2009/05/30 22:49:56 jordan Exp $ */
+/* $OpenBSD: amltypes.h,v 1.34 2010/06/27 21:04:22 jordan Exp $ */
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
  *
@@ -213,7 +213,6 @@ enum aml_objecttype {
 #define AML_ARG_TERMOBJ		't'
 
 #define AML_ARG_IFELSE          'I'
-#define AML_ARG_WHILE           'W'
 #define AML_ARG_BUFFER          'B'
 #define AML_ARG_SEARCHNAME      'n'
 #define AML_ARG_CREATENAME      'N'
@@ -350,8 +349,9 @@ struct aml_value {
 
 struct aml_node {
 	struct aml_node *parent;
-	struct aml_node *child;
-	struct aml_node *sibling;
+
+	SIMPLEQ_HEAD(,aml_node)	son;
+	SIMPLEQ_ENTRY(aml_node)	sib;
 
 	char		name[5];
 	u_int16_t	opcode;

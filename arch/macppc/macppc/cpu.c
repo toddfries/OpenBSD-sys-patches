@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.62 2009/06/02 21:38:09 drahn Exp $ */
+/*	$OpenBSD: cpu.c,v 1.66 2010/06/26 23:24:43 guenther Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -36,8 +36,10 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <sys/user.h>
+#include <sys/sysctl.h>
 #include <sys/device.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <dev/ofw/openfirm.h>
 
@@ -231,7 +233,7 @@ ppc_check_procid()
 		for (p = &nop32_start; p->s; p++) {
 			for (inst = p->s; inst < p->e; inst++)
 				*inst = nop_inst;
-			syncicache(p->s, (p->e - p->s) * sizeof(p->e));
+			syncicache(p->s, (p->e - p->s) * sizeof(*p->e));
 		}
 	}
 }
@@ -583,7 +585,7 @@ cpu_spinup(struct device *self, struct cpu_info *ci)
         size += 8192;   /* SPILLSTK(1k) + DDBSTK(7k) */
 
 	TAILQ_INIT(&mlist);
-	error = uvm_pglistalloc(size, 0x0, 0x10000000, 0, 0,
+	error = uvm_pglistalloc(size, 0x0, 0x10000000 - 1, 0, 0,
 	    &mlist, 1, UVM_PLA_WAITOK);
 	if (error) {
 		printf(": unable to allocate idle stack\n");
@@ -790,7 +792,7 @@ cpu_hatch(void)
 	ppc_intr_enable(intrstate);
 
 	/* Enable inter-processor interrupts. */
-	openpic_set_priority(14);
+	openpic_set_priority(curcpu()->ci_cpuid, 14);
 
 	SCHED_LOCK(s);
 	cpu_switchto(NULL, sched_chooseproc());

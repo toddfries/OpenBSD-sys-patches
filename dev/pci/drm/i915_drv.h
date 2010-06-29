@@ -37,7 +37,7 @@
 
 #define DRIVER_NAME		"i915"
 #define DRIVER_DESC		"Intel Graphics"
-#define DRIVER_DATE		"20080312"
+#define DRIVER_DATE		"20080730"
 
 enum pipe {
 	PIPE_A = 0,
@@ -59,41 +59,70 @@ enum pipe {
 #define DRIVER_PATCHLEVEL	0
 
 struct inteldrm_ring {
-	u_int32_t		*kva;
+	struct drm_obj		*ring_obj;
 	bus_space_handle_t	 bsh;
 	bus_size_t		 size;
 	u_int32_t		 head;
 	u_int32_t		 space;
 	u_int32_t		 tail;
-	u_int32_t		 tail_mask;
 	u_int32_t		 woffset;
-	u_int32_t		 wspace;
 };
 
-typedef struct drm_i915_private {
+#define I915_FENCE_REG_NONE -1
+
+struct inteldrm_fence {
+	TAILQ_ENTRY(inteldrm_fence)	 list;
+	struct drm_obj			*obj;
+	u_int32_t			 last_rendering_seqno;
+};
+
+/*
+ * lock ordering:
+ * exec lock,
+ * request lock
+ * list lock.
+ *
+ * XXX fence lock ,object lock
+ */
+struct inteldrm_softc {
 	struct device		 dev;
 	struct device		*drmdev;
+	bus_dma_tag_t		 agpdmat; /* tag from intagp for GEM */
 	bus_dma_tag_t		 dmat;
 	bus_space_tag_t		 bst;
+	struct agp_map		*agph;
 
 	u_long			 flags;
 	u_int16_t		 pci_device;
 
 	pci_chipset_tag_t	 pc;
+	pcitag_t		 tag;
 	pci_intr_handle_t	 ih;
 	void			*irqh;
 
 	struct vga_pci_bar	*regs;
 
-	struct drm_local_map	*sarea;
-	drm_i915_sarea_t	*sarea_priv;
-
+	union flush {
+		struct {
+			bus_space_tag_t		bst;
+			bus_space_handle_t	bsh;
+		} i9xx;
+		struct {
+			bus_dma_segment_t	seg;
+			caddr_t			kva;
+		} i8xx;
+	}			 ifp;
 	struct inteldrm_ring	 ring;
-	struct drm_local_map	 hws_map;
-	struct drm_dmamem	*hws_dmamem;
+	struct workq		*workq;
+	struct vm_page		*pgs;
+	union hws {
+		struct drm_obj		*obj;
+		struct drm_dmamem	*dmamem;
+	}	hws;
+#define				 hws_obj	hws.obj
+#define				 hws_dmamem	hws.dmamem
 	void			*hw_status_page;
-	unsigned int		 status_gfx_addr;
-	u_int32_t		 counter;
+	size_t			 max_gem_obj_size; /* XXX */
 
 	/* Protects user_irq_refcount and irq_mask reg */
 	struct mutex		 user_irq_lock;
@@ -103,13 +132,24 @@ typedef struct drm_i915_private {
 	u_int32_t		 irq_mask_reg;
 	u_int32_t		 pipestat[2];
 
-	int			 allow_batchbuffer;
+	struct mutex		 fence_lock;
+	struct inteldrm_fence	 fence_regs[16]; /* 965 */
+	int			 fence_reg_start; /* 4 by default */
+	int			 num_fence_regs; /* 8 pre-965, 16 post */
+
+	/* protects inactive, flushing, active and exec locks */
+	struct mutex		 list_lock;
+
+	/* protects access to request_list */
+	struct mutex		 request_lock;
 
 	/* Register state */
 	u8 saveLBB;
 	u32 saveDSPACNTR;
 	u32 saveDSPBCNTR;
 	u32 saveDSPARB;
+	u32 saveRENDERSTANDBY;
+	u32 saveHWS;
 	u32 savePIPEACONF;
 	u32 savePIPEBCONF;
 	u32 savePIPEASRC;
@@ -180,6 +220,7 @@ typedef struct drm_i915_private {
 	u32 saveIMR;
 	u32 saveCACHE_MODE_0;
 	u32 saveD_STATE;
+	u32 saveDSPCLK_GATE_D;
 	u32 saveCG_2D_DIS;
 	u32 saveMI_ARB_STATE;
 	u32 saveSWF0[16];
@@ -193,90 +234,243 @@ typedef struct drm_i915_private {
 	u8 saveDACMASK;
 	u8 saveDACDATA[256*3]; /* 256 3-byte colors */
 	u8 saveCR[37];
-} drm_i915_private_t;
+	uint64_t saveFENCE[16];
+	u32 saveCURACNTR;
+	u32 saveCURAPOS;
+	u32 saveCURABASE;
+	u32 saveCURBCNTR;
+	u32 saveCURBPOS;
+	u32 saveCURBBASE;
+	u32 saveCURSIZE;
+
+	struct {
+		/**
+		 * List of objects currently involved in rendering from the
+		 * ringbuffer.
+		 *
+		 * Includes buffers having the contents of their GPU caches
+		 * flushed, not necessarily primitives. last_rendering_seqno
+		 * represents when the rendering involved will be completed.
+		 *
+		 * A reference is held on the buffer while on this list.
+		 */
+		TAILQ_HEAD(i915_gem_list, inteldrm_obj) active_list;
+
+		/**
+		 * List of objects which are not in the ringbuffer but which
+		 * still have a write_domain which needs to be flushed before
+		 * unbinding.
+		 *
+		 * last_rendering_seqno is 0 while an object is in this list
+		 *
+		 * A reference is held on the buffer while on this list.
+		 */
+		struct i915_gem_list flushing_list;
+
+		/*
+		 * list of objects currently pending a GPU write flush.
+		 *
+		 * All elements on this list will either be on the active
+		 * or flushing list, last rendiering_seqno differentiates the
+		 * two.
+		 */
+		struct i915_gem_list gpu_write_list;
+		/**
+		 * LRU list of objects which are not in the ringbuffer and
+		 * are ready to unbind, but are still in the GTT.
+		 *
+		 * last_rendering_seqno is 0 while an object is in this list
+		 *
+		 * A reference is not held on the buffer while on this list,
+		 * as merely being GTT-bound shouldn't prevent its being
+		 * freed, and we'll pull it off the list in the free path.
+		 */
+		struct i915_gem_list inactive_list;
+
+		/* Fence LRU */
+		TAILQ_HEAD(i915_fence, inteldrm_fence)	fence_list;
+
+		/**
+		 * List of breadcrumbs associated with GPU requests currently
+		 * outstanding.
+		 */
+		TAILQ_HEAD(i915_request , inteldrm_request) request_list;
+
+		/**
+		 * We leave the user IRQ off as much as possible,
+		 * but this means that requests will finish and never
+		 * be retired once the system goes idle. Set a timer to
+		 * fire periodically while the ring is running. When it
+		 * fires, go retire requests in a workq.
+		 */
+		struct timeout retire_timer;
+		struct timeout hang_timer;
+		/* for hangcheck */
+		int		hang_cnt;
+		u_int32_t	last_acthd;
+
+		uint32_t next_gem_seqno;
+
+		/**
+		 * Flag if the X Server, and thus DRM, is not currently in
+		 * control of the device.
+		 *
+		 * This is set between LeaveVT and EnterVT.  It needs to be
+		 * replaced with a semaphore.  It also needs to be
+		 * transitioned away from for kernel modesetting.
+		 */
+		int suspended;
+
+		/**
+		 * Flag if the hardware appears to be wedged.
+		 *
+		 * This is set when attempts to idle the device timeout.
+		 * It prevents command submission from occuring and makes
+		 * every pending request fail
+		 */
+		int wedged;
+
+		/** Bit 6 swizzling required for X tiling */
+		uint32_t bit_6_swizzle_x;
+		/** Bit 6 swizzling required for Y tiling */
+		uint32_t bit_6_swizzle_y;
+	} mm;
+};
+
+struct inteldrm_file {
+	struct drm_file	file_priv;
+	struct {
+	} mm;
+};
 
 /* chip type flags */
-#define CHIP_I830	0x0001
-#define CHIP_I845G	0x0002
-#define CHIP_I85X	0x0004
-#define CHIP_I865G	0x0008
-#define CHIP_I9XX	0x0010
-#define CHIP_I915G	0x0020
-#define CHIP_I915GM	0x0040
-#define CHIP_I945G	0x0080
-#define CHIP_I945GM	0x0100
-#define CHIP_I965	0x0200
-#define CHIP_I965GM	0x0400
-#define CHIP_G33	0x0800
-#define CHIP_GM45	0x1000
-#define CHIP_G4X	0x2000
-#define CHIP_M		0x4000
-#define CHIP_HWS	0x8000
+#define CHIP_I830	0x00001
+#define CHIP_I845G	0x00002
+#define CHIP_I85X	0x00004
+#define CHIP_I865G	0x00008
+#define CHIP_I9XX	0x00010
+#define CHIP_I915G	0x00020
+#define CHIP_I915GM	0x00040
+#define CHIP_I945G	0x00080
+#define CHIP_I945GM	0x00100
+#define CHIP_I965	0x00200
+#define CHIP_I965GM	0x00400
+#define CHIP_G33	0x00800
+#define CHIP_GM45	0x01000
+#define CHIP_G4X	0x02000
+#define CHIP_M		0x04000
+#define CHIP_HWS	0x08000
+#define CHIP_GEN2	0x10000
+#define CHIP_GEN3	0x20000
+#define CHIP_GEN4	0x40000
+#define CHIP_GEN6	0x80000
+#define	CHIP_PINEVIEW	0x100000
 
-u_int32_t	inteldrm_read_hws(struct drm_i915_private *, int);
-int		inteldrm_wait_ring(struct drm_i915_private *dev, int n);
-void		inteldrm_begin_ring(struct drm_i915_private *, int);
-void		inteldrm_out_ring(struct drm_i915_private *, u_int32_t);
-void		inteldrm_advance_ring(struct drm_i915_private *);
-void		inteldrm_update_ring(struct drm_i915_private *);
+/* flags we use in drm_obj's do_flags */
+#define I915_ACTIVE		0x0010	/* being used by the gpu. */
+#define I915_IN_EXEC		0x0020	/* being processed in execbuffer */
+#define I915_USER_PINNED	0x0040	/* BO has been pinned from userland */
+#define I915_GPU_WRITE		0x0080	/* BO has been not flushed */
+#define I915_DONTNEED		0x0100	/* BO backing pages purgable */
+#define I915_PURGED		0x0200	/* BO backing pages purged */
+#define I915_DIRTY		0x0400	/* BO written to since last bound */
+#define I915_EXEC_NEEDS_FENCE	0x0800	/* being processed but will need fence*/
+#define I915_FENCED_EXEC	0x1000	/* Most recent exec needs fence */
+#define I915_FENCE_INVALID	0x2000	/* fence has been lazily invalidated */
 
-				/* i915_dma.c */
-extern void i915_driver_lastclose(struct drm_device * dev);
-extern void i915_driver_close(struct drm_device *dev,
-				 struct drm_file *file_priv);
-extern long i915_compat_ioctl(struct file *filp, unsigned int cmd,
-			      unsigned long arg);
-extern void i915_emit_breadcrumb(struct drm_device *dev);
-extern int i915_driver_firstopen(struct drm_device *dev);
-extern int i915_dispatch_batchbuffer(struct drm_device * dev,
-				     drm_i915_batchbuffer_t * batch);
+/** driver private structure attached to each drm_gem_object */
+struct inteldrm_obj {
+	struct drm_obj				 obj;
 
-int	i915_init_phys_hws(drm_i915_private_t *, bus_dma_tag_t);
-void	i915_free_hws(drm_i915_private_t *, bus_dma_tag_t);
+	/** This object's place on the active/flushing/inactive lists */
+	TAILQ_ENTRY(inteldrm_obj)	 	 list;
+	TAILQ_ENTRY(inteldrm_obj)	 	 write_list;
+	struct i915_gem_list			*current_list;
+	/* GTT binding. */
+	bus_dmamap_t				 dmamap;
+	bus_dma_segment_t			*dma_segs;
+	/* Current offset of the object in GTT space. */
+	bus_addr_t				 gtt_offset;
+	u_int32_t				*bit_17;
+	/* extra flags to bus_dma */
+	int					 dma_flags; 
+	/* Fence register for this object. needed for tiling. */
+	int					 fence_reg;
+	/** refcount for times pinned this object in GTT space */
+	int					 pin_count;
+	/* number of times pinned by pin ioctl. */
+	u_int					 user_pin_count;
+
+	/** Breadcrumb of last rendering to the buffer. */
+	u_int32_t				 last_rendering_seqno;
+	u_int32_t				 last_write_seqno;
+	/** Current tiling mode for the object. */
+	u_int32_t				 tiling_mode;
+	u_int32_t				 stride;
+};
+
+/**
+ * Request queue structure.
+ *
+ * The request queue allows us to note sequence numbers that have been emitted
+ * and may be associated with active buffers to be retired.
+ *
+ * By keeping this list, we can avoid having to do questionable
+ * sequence-number comparisons on buffer last_rendering_seqnos, and associate
+ * an emission time with seqnos for tracking how far ahead of the GPU we are.
+ */
+struct inteldrm_request {
+	TAILQ_ENTRY(inteldrm_request)	list;
+	/** GEM sequence number associated with this request. */
+	uint32_t			seqno;
+};
+
+u_int32_t	inteldrm_read_hws(struct inteldrm_softc *, int);
+int		inteldrm_wait_ring(struct inteldrm_softc *dev, int n);
+void		inteldrm_begin_ring(struct inteldrm_softc *, int);
+void		inteldrm_out_ring(struct inteldrm_softc *, u_int32_t);
+void		inteldrm_advance_ring(struct inteldrm_softc *);
+void		inteldrm_update_ring(struct inteldrm_softc *);
+void		inteldrm_error(struct inteldrm_softc *);
+int		inteldrm_pipe_enabled(struct inteldrm_softc *, int);
+int		i915_init_phys_hws(struct inteldrm_softc *, bus_dma_tag_t);
 
 /* i915_irq.c */
-extern int i915_irq_emit(struct drm_device *dev, void *data,
-			 struct drm_file *file_priv);
-extern int i915_irq_wait(struct drm_device *dev, void *data,
-			 struct drm_file *file_priv);
 
 extern int i915_driver_irq_install(struct drm_device * dev);
 extern void i915_driver_irq_uninstall(struct drm_device * dev);
-extern int i915_vblank_pipe_get(struct drm_device *dev, void *data,
-				struct drm_file *file_priv);
-extern int i915_emit_irq(struct drm_device * dev);
 extern int i915_enable_vblank(struct drm_device *dev, int crtc);
 extern void i915_disable_vblank(struct drm_device *dev, int crtc);
 extern u32 i915_get_vblank_counter(struct drm_device *dev, int crtc);
-extern void i915_user_irq_get(struct drm_device *dev);
-extern void i915_user_irq_put(struct drm_device *dev);
+extern void i915_user_irq_get(struct inteldrm_softc *);
+extern void i915_user_irq_put(struct inteldrm_softc *);
 
-/* i915_mem.c */
-extern int i915_mem_alloc(struct drm_device *dev, void *data,
-			  struct drm_file *file_priv);
-extern int i915_mem_free(struct drm_device *dev, void *data,
-			 struct drm_file *file_priv);
-extern int i915_mem_init_heap(struct drm_device *dev, void *data,
-			      struct drm_file *file_priv);
-extern int i915_mem_destroy_heap(struct drm_device *dev, void *data,
-				 struct drm_file *file_priv);
-extern void i915_mem_takedown(struct drm_heap *heap);
-extern void i915_mem_release(struct drm_device * dev,
-			     struct drm_file *file_priv,
-			     struct drm_heap *heap);
+/* XXX need bus_space_write_8, this evaluated arguments twice */
+static __inline void
+write64(struct inteldrm_softc *dev_priv, bus_size_t off, u_int64_t reg)
+{
+	bus_space_write_4(dev_priv->regs->bst, dev_priv->regs->bsh,
+	    off, (u_int32_t)reg);
+	bus_space_write_4(dev_priv->regs->bst, dev_priv->regs->bsh,
+	    off + 4, upper_32_bits(reg));
+}
 
-/* i915_suspend.c */
-extern int i915_save_state(struct drm_device *dev);
-extern int i915_restore_state(struct drm_device *dev);
+static __inline u_int64_t
+read64(struct inteldrm_softc *dev_priv, bus_size_t off)
+{
+	u_int32_t low, high;
 
-/* ioctls */
-extern int i915_dma_init(struct drm_device *, void *, struct drm_file *);
-extern int i915_flush_ioctl(struct drm_device *, void *, struct drm_file *);
-extern int i915_batchbuffer(struct drm_device *, void *, struct drm_file *);
-extern int i915_getparam(struct drm_device *, void *, struct drm_file *);
-extern int i915_setparam(struct drm_device *, void *, struct drm_file *);
-extern int i915_cmdbuffer(struct drm_device *, void *, struct drm_file *);
-extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
+	low = bus_space_read_4(dev_priv->regs->bst,
+	    dev_priv->regs->bsh, off);
+	high = bus_space_read_4(dev_priv->regs->bst,
+	    dev_priv->regs->bsh, off + 4);
+
+	return ((u_int64_t)low | ((u_int64_t)high << 32));
+}
+
+#define I915_READ64(off)	read64(dev_priv, off)
+
+#define I915_WRITE64(off, reg)	write64(dev_priv, off, reg)
 
 #define I915_READ(reg)		bus_space_read_4(dev_priv->regs->bst,	\
 				    dev_priv->regs->bsh, (reg))
@@ -290,7 +484,6 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 				    dev_priv->regs->bsh, (reg))
 #define I915_WRITE8(reg,val)	bus_space_write_1(dev_priv->regs->bst,	\
 				    dev_priv->regs->bsh, (reg), (val))
-
 #define INTELDRM_VERBOSE 0
 #if INTELDRM_VERBOSE > 0
 #define	INTELDRM_VPRINTF(fmt, args...) DRM_INFO(fmt, ##args)
@@ -301,6 +494,10 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 #define BEGIN_LP_RING(n) inteldrm_begin_ring(dev_priv, n)
 #define OUT_RING(n) inteldrm_out_ring(dev_priv, n)
 #define ADVANCE_LP_RING() inteldrm_advance_ring(dev_priv)
+
+/* MCH IFP BARs */
+#define	I915_IFPADDR	0x60
+#define I965_IFPADDR	0x70
 
 /*
  * The Bridge device's PCI config space has information about the
@@ -337,6 +534,11 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 #define   GC_DISPLAY_CLOCK_333_MHZ	(4 << 4)
 #define   GC_DISPLAY_CLOCK_MASK		(7 << 4)
 #define LBB	0xf4
+/* reset register, 965+. this is byte-sized */
+#define GDRST	0xc0
+#define GDRST_FULL	(0<<2)
+#define GDRST_RENDER	(1<<2)
+#define GDRST_MEDIA	(3<<2)
 
 /* VGA stuff */
 
@@ -409,9 +611,6 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 #define   MI_BATCH_NON_SECURE_I965 (1<<8)
 #define MI_BATCH_BUFFER_START	MI_INSTR(0x31, 0)
 
-#define BREADCRUMB_BITS 31
-#define BREADCRUMB_MASK ((1U << BREADCRUMB_BITS) - 1)
-
 /**
  * Reads a dword out of the status page, which is written to from the command
  * queue by automatic updates, MI_REPORT_HEAD, MI_STORE_DATA_INDEX, or
@@ -428,9 +627,7 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
  * The area from dword 0x20 to 0x3ff is available for driver usage.
  */
 #define READ_HWSP(dev_priv, reg)  inteldrm_read_hws(dev_priv, reg)
-#define READ_BREADCRUMB(dev_priv) READ_HWSP(dev_priv, I915_BREADCRUMB_INDEX)
 #define I915_GEM_HWS_INDEX		0x20
-#define	I915_BREADCRUMB_INDEX		0x21
 
 /*
  * 3D instructions used by the kernel
@@ -454,6 +651,7 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 #define GFX_OP_STIPPLE           ((0x3<<29)|(0x1d<<24)|(0x83<<16))
 #define GFX_OP_MAP_INFO          ((0x3<<29)|(0x1d<<24)|0x4)
 #define GFX_OP_DESTBUFFER_VARS   ((0x3<<29)|(0x1d<<24)|(0x85<<16)|0x0)
+#define GFX_OP_DESTBUFFER_INFO	 ((0x3<<29)|(0x1d<<24)|(0x8e<<16)|1)
 #define GFX_OP_DRAWRECT_INFO     ((0x3<<29)|(0x1d<<24)|(0x80<<16)|(0x3))
 #define GFX_OP_DRAWRECT_INFO_I965  ((0x7900<<16)|0x2)
 #define SRC_COPY_BLT_CMD                ((2<<29)|(0x43<<22)|4)
@@ -474,9 +672,33 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 #define   DISPLAY_PLANE_B           (1<<20)
 
 /*
+ * Fence registers
+ */
+#define FENCE_REG_830_0			0x2000
+#define FENCE_REG_945_8			0x3000
+#define   I830_FENCE_START_MASK		0x07f80000
+#define   I830_FENCE_TILING_Y_SHIFT	12
+#define   I830_FENCE_SIZE_BITS(size)	((ffs((size) >> 19) - 1) << 8)
+#define   I830_FENCE_PITCH_SHIFT	4
+#define   I830_FENCE_REG_VALID		(1<<0)
+#define   I915_FENCE_MAX_PITCH_VAL	4
+#define   I830_FENCE_MAX_PITCH_VAL	6
+#define   I830_FENCE_MAX_SIZE_VAL	(1<<8)
+
+#define   I915_FENCE_START_MASK		0x0ff00000
+#define   I915_FENCE_SIZE_BITS(size)	((ffs((size) >> 20) - 1) << 8)
+
+#define FENCE_REG_965_0			0x03000
+#define   I965_FENCE_PITCH_SHIFT	2
+#define   I965_FENCE_TILING_Y_SHIFT	1
+#define   I965_FENCE_REG_VALID		(1<<0)
+#define   I965_FENCE_MAX_PITCH_VAL	0x0400
+
+/*
  * Instruction and interrupt control regs
  */
 
+#define PGTBL_ER	0x02024
 #define PRB0_TAIL	0x02030
 #define PRB0_HEAD	0x02034
 #define PRB0_START	0x02038
@@ -497,11 +719,24 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 #define PRB1_HEAD	0x02044 /* 915+ only */
 #define PRB1_START	0x02048 /* 915+ only */
 #define PRB1_CTL	0x0204c /* 915+ only */
+#define IPEIR_I965	0x02064
+#define IPEHR_I965	0x02068
+#define INSTDONE_I965	0x0206c
+#define INSTPS		0x02070 /* 965+ only */
+#define INSTDONE1	0x0207c /* 965+ only */
 #define ACTHD_I965	0x02074
 #define HWS_PGA		0x02080
+#define HWS_ADDRESS_MASK	0xfffff000
+#define HWS_START_ADDRESS_SHIFT	4
 #define IPEIR		0x02088
+#define IPEHR		0x0208c
+#define INSTDONE	0x02090
 #define NOPID		0x02094
 #define HWSTAM		0x02098
+
+#define MI_MODE		0x0209c
+#define VS_TIMER_DISPATCH	(1 << 6)
+
 #define SCPD0		0x0209c /* 915+ only */
 #define IER		0x020a0
 #define IIR		0x020a4
@@ -527,8 +762,14 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 #define EIR		0x020b0
 #define EMR		0x020b4
 #define ESR		0x020b8
+#define   GM45_ERROR_PAGE_TABLE				(1<<5)
+#define   GM45_ERROR_MEM_PRIV				(1<<4)
+#define   I915_ERROR_PAGE_TABLE				(1<<4)
+#define   GM45_ERROR_CP_PRIV				(1<<3)
+#define   I915_ERROR_MEMORY_REFRESH			(1<<1)
+#define   I915_ERROR_INSTRUCTION			(1<<0)
 #define INSTPM	        0x020c0
-#define ACTHD		0x020c8
+#define ACTHD	        0x020c8
 #define FW_BLC		0x020d8
 #define FW_BLC_SELF	0x020e0 /* 915+ only */
 #define MI_ARB_STATE	0x020e4 /* 915+ only */
@@ -578,7 +819,6 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 /*
  * GPIO regs
  */
-
 #define GPIOA			0x5010
 #define GPIOB			0x5014
 #define GPIOC			0x5018
@@ -708,6 +948,7 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
  */
 #define   DPLL_FPA01_P1_POST_DIV_MASK_I830_LVDS	0x003f0000
 #define   DPLL_FPA01_P1_POST_DIV_SHIFT	16
+#define   DPLL_FPA01_P1_POST_DIV_SHIFT_IGD 15
 /* i830, required in DVO non-gang */
 #define   PLL_P2_DIVIDE_BY_4		(1 << 23)
 #define   PLL_P1_DIVIDE_BY_TWO		(1 << 21) /* i830 */
@@ -717,6 +958,13 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 #define   PLLB_REF_INPUT_SPREADSPECTRUMIN (3 << 13)
 #define   PLL_REF_INPUT_MASK		(3 << 13)
 #define   PLL_LOAD_PULSE_PHASE_SHIFT		9
+/* IGDNG */
+# define PLL_REF_SDVO_HDMI_MULTIPLIER_SHIFT     9
+# define PLL_REF_SDVO_HDMI_MULTIPLIER_MASK      (7 << 9)
+# define PLL_REF_SDVO_HDMI_MULTIPLIER(x)	(((x)-1) << 9)
+# define DPLL_FPA1_P1_POST_DIV_SHIFT            0
+# define DPLL_FPA1_P1_POST_DIV_MASK             0xff
+
 /*
  * Parallel to Serial Load Pulse phase selection.
  * Selects the phase for the 10X DPLL clock for the PCIe
@@ -745,15 +993,15 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 /*
  * SDVO/UDI pixel multiplier.
  *
- * SDVO requires that the bus clock rate be between 1 and 2 Ghz, and the bus
+ * SDVO requires that the bus clock rate be between 1 and 2 GHz, and the bus
  * clock rate is 10 times the DPLL clock.  At low resolution/refresh rate
  * modes, the bus rate would be below the limits, so SDVO allows for stuffing
  * dummy bytes in the datastream at an increased clock rate, with both sides of
  * the link knowing how many bytes are fill.
  *
- * So, for a mode with a dotclock of 65Mhz, we would want to double the clock
- * rate to 130Mhz to get a bus rate of 1.30Ghz.  The DPLL clock rate would be
- * set to 130Mhz, and the SDVO multiplier set to 2x in this register and
+ * So, for a mode with a dotclock of 65MHz, we would want to double the clock
+ * rate to 130MHz to get a bus rate of 1.30GHz.  The DPLL clock rate would be
+ * set to 130MHz, and the SDVO multiplier set to 2x in this register and
  * through an SDVO command.
  *
  * This register field has values of multiplication factor minus 1, with
@@ -774,10 +1022,12 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 #define FPB0	0x06048
 #define FPB1	0x0604c
 #define   FP_N_DIV_MASK		0x003f0000
+#define   FP_N_IGD_DIV_MASK	0x00ff0000
 #define   FP_N_DIV_SHIFT		16
 #define   FP_M1_DIV_MASK	0x00003f00
 #define   FP_M1_DIV_SHIFT		 8
 #define   FP_M2_DIV_MASK	0x0000003f
+#define   FP_M2_IGD_DIV_MASK	0x000000ff
 #define   FP_M2_DIV_SHIFT		 0
 #define DPLL_TEST	0x606c
 #define   DPLLB_TEST_SDVO_DIV_1		(0 << 22)
@@ -791,8 +1041,118 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 #define   DPLLA_TEST_M_BYPASS		(1 << 2)
 #define   DPLLA_INPUT_BUFFER_ENABLE	(1 << 0)
 #define D_STATE		0x6104
-#define CG_2D_DIS	0x6200
-#define CG_3D_DIS	0x6204
+#define  DSTATE_PLL_D3_OFF			(1<<3)
+#define  DSTATE_GFX_CLOCK_GATING		(1<<1)
+#define  DSTATE_DOT_CLOCK_GATING		(1<<0)
+#define DSPCLK_GATE_D		0x6200
+# define DPUNIT_B_CLOCK_GATE_DISABLE		(1 << 30) /* 965 */
+# define VSUNIT_CLOCK_GATE_DISABLE		(1 << 29) /* 965 */
+# define VRHUNIT_CLOCK_GATE_DISABLE		(1 << 28) /* 965 */
+# define VRDUNIT_CLOCK_GATE_DISABLE		(1 << 27) /* 965 */
+# define AUDUNIT_CLOCK_GATE_DISABLE		(1 << 26) /* 965 */
+# define DPUNIT_A_CLOCK_GATE_DISABLE		(1 << 25) /* 965 */
+# define DPCUNIT_CLOCK_GATE_DISABLE		(1 << 24) /* 965 */
+# define TVRUNIT_CLOCK_GATE_DISABLE		(1 << 23) /* 915-945 */
+# define TVCUNIT_CLOCK_GATE_DISABLE		(1 << 22) /* 915-945 */
+# define TVFUNIT_CLOCK_GATE_DISABLE		(1 << 21) /* 915-945 */
+# define TVEUNIT_CLOCK_GATE_DISABLE		(1 << 20) /* 915-945 */
+# define DVSUNIT_CLOCK_GATE_DISABLE		(1 << 19) /* 915-945 */
+# define DSSUNIT_CLOCK_GATE_DISABLE		(1 << 18) /* 915-945 */
+# define DDBUNIT_CLOCK_GATE_DISABLE		(1 << 17) /* 915-945 */
+# define DPRUNIT_CLOCK_GATE_DISABLE		(1 << 16) /* 915-945 */
+# define DPFUNIT_CLOCK_GATE_DISABLE		(1 << 15) /* 915-945 */
+# define DPBMUNIT_CLOCK_GATE_DISABLE		(1 << 14) /* 915-945 */
+# define DPLSUNIT_CLOCK_GATE_DISABLE		(1 << 13) /* 915-945 */
+# define DPLUNIT_CLOCK_GATE_DISABLE		(1 << 12) /* 915-945 */
+# define DPOUNIT_CLOCK_GATE_DISABLE		(1 << 11)
+# define DPBUNIT_CLOCK_GATE_DISABLE		(1 << 10)
+# define DCUNIT_CLOCK_GATE_DISABLE		(1 << 9)
+# define DPUNIT_CLOCK_GATE_DISABLE		(1 << 8)
+# define VRUNIT_CLOCK_GATE_DISABLE		(1 << 7) /* 915+: reserved */
+# define OVHUNIT_CLOCK_GATE_DISABLE		(1 << 6) /* 830-865 */
+# define DPIOUNIT_CLOCK_GATE_DISABLE		(1 << 6) /* 915-945 */
+# define OVFUNIT_CLOCK_GATE_DISABLE		(1 << 5)
+# define OVBUNIT_CLOCK_GATE_DISABLE		(1 << 4)
+/**
+ * This bit must be set on the 830 to prevent hangs when turning off the
+ * overlay scaler.
+ */
+# define OVRUNIT_CLOCK_GATE_DISABLE		(1 << 3)
+# define OVCUNIT_CLOCK_GATE_DISABLE		(1 << 2)
+# define OVUUNIT_CLOCK_GATE_DISABLE		(1 << 1)
+# define ZVUNIT_CLOCK_GATE_DISABLE		(1 << 0) /* 830 */
+# define OVLUNIT_CLOCK_GATE_DISABLE		(1 << 0) /* 845,865 */
+
+#define RENCLK_GATE_D1		0x6204
+# define BLITTER_CLOCK_GATE_DISABLE		(1 << 13) /* 945GM only */
+# define MPEG_CLOCK_GATE_DISABLE		(1 << 12) /* 945GM only */
+# define PC_FE_CLOCK_GATE_DISABLE		(1 << 11)
+# define PC_BE_CLOCK_GATE_DISABLE		(1 << 10)
+# define WINDOWER_CLOCK_GATE_DISABLE		(1 << 9)
+# define INTERPOLATOR_CLOCK_GATE_DISABLE	(1 << 8)
+# define COLOR_CALCULATOR_CLOCK_GATE_DISABLE	(1 << 7)
+# define MOTION_COMP_CLOCK_GATE_DISABLE		(1 << 6)
+# define MAG_CLOCK_GATE_DISABLE			(1 << 5)
+/** This bit must be unset on 855,865 */
+# define MECI_CLOCK_GATE_DISABLE		(1 << 4)
+# define DCMP_CLOCK_GATE_DISABLE		(1 << 3)
+# define MEC_CLOCK_GATE_DISABLE			(1 << 2)
+# define MECO_CLOCK_GATE_DISABLE		(1 << 1)
+/** This bit must be set on 855,865. */
+# define SV_CLOCK_GATE_DISABLE			(1 << 0)
+# define I915_MPEG_CLOCK_GATE_DISABLE		(1 << 16)
+# define I915_VLD_IP_PR_CLOCK_GATE_DISABLE	(1 << 15)
+# define I915_MOTION_COMP_CLOCK_GATE_DISABLE	(1 << 14)
+# define I915_BD_BF_CLOCK_GATE_DISABLE		(1 << 13)
+# define I915_SF_SE_CLOCK_GATE_DISABLE		(1 << 12)
+# define I915_WM_CLOCK_GATE_DISABLE		(1 << 11)
+# define I915_IZ_CLOCK_GATE_DISABLE		(1 << 10)
+# define I915_PI_CLOCK_GATE_DISABLE		(1 << 9)
+# define I915_DI_CLOCK_GATE_DISABLE		(1 << 8)
+# define I915_SH_SV_CLOCK_GATE_DISABLE		(1 << 7)
+# define I915_PL_DG_QC_FT_CLOCK_GATE_DISABLE	(1 << 6)
+# define I915_SC_CLOCK_GATE_DISABLE		(1 << 5)
+# define I915_FL_CLOCK_GATE_DISABLE		(1 << 4)
+# define I915_DM_CLOCK_GATE_DISABLE		(1 << 3)
+# define I915_PS_CLOCK_GATE_DISABLE		(1 << 2)
+# define I915_CC_CLOCK_GATE_DISABLE		(1 << 1)
+# define I915_BY_CLOCK_GATE_DISABLE		(1 << 0)
+
+# define I965_RCZ_CLOCK_GATE_DISABLE		(1 << 30)
+/** This bit must always be set on 965G/965GM */
+# define I965_RCC_CLOCK_GATE_DISABLE		(1 << 29)
+# define I965_RCPB_CLOCK_GATE_DISABLE		(1 << 28)
+# define I965_DAP_CLOCK_GATE_DISABLE		(1 << 27)
+# define I965_ROC_CLOCK_GATE_DISABLE		(1 << 26)
+# define I965_GW_CLOCK_GATE_DISABLE		(1 << 25)
+# define I965_TD_CLOCK_GATE_DISABLE		(1 << 24)
+/** This bit must always be set on 965G */
+# define I965_ISC_CLOCK_GATE_DISABLE		(1 << 23)
+# define I965_IC_CLOCK_GATE_DISABLE		(1 << 22)
+# define I965_EU_CLOCK_GATE_DISABLE		(1 << 21)
+# define I965_IF_CLOCK_GATE_DISABLE		(1 << 20)
+# define I965_TC_CLOCK_GATE_DISABLE		(1 << 19)
+# define I965_SO_CLOCK_GATE_DISABLE		(1 << 17)
+# define I965_FBC_CLOCK_GATE_DISABLE		(1 << 16)
+# define I965_MARI_CLOCK_GATE_DISABLE		(1 << 15)
+# define I965_MASF_CLOCK_GATE_DISABLE		(1 << 14)
+# define I965_MAWB_CLOCK_GATE_DISABLE		(1 << 13)
+# define I965_EM_CLOCK_GATE_DISABLE		(1 << 12)
+# define I965_UC_CLOCK_GATE_DISABLE		(1 << 11)
+# define I965_SI_CLOCK_GATE_DISABLE		(1 << 6)
+# define I965_MT_CLOCK_GATE_DISABLE		(1 << 5)
+# define I965_PL_CLOCK_GATE_DISABLE		(1 << 4)
+# define I965_DG_CLOCK_GATE_DISABLE		(1 << 3)
+# define I965_QC_CLOCK_GATE_DISABLE		(1 << 2)
+# define I965_FT_CLOCK_GATE_DISABLE		(1 << 1)
+# define I965_DM_CLOCK_GATE_DISABLE		(1 << 0)
+
+#define RENCLK_GATE_D2		0x6208
+#define VF_UNIT_CLOCK_GATE_DISABLE		(1 << 9)
+#define GS_UNIT_CLOCK_GATE_DISABLE		(1 << 7)
+#define CL_UNIT_CLOCK_GATE_DISABLE		(1 << 6)
+#define RAMCLK_GATE_D		0x6210		/* CRL only */
+#define DEUC			0x6214          /* CRL only */
 
 /*
  * Palette regs
@@ -800,6 +1160,53 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 
 #define PALETTE_A		0x0a000
 #define PALETTE_B		0x0a800
+
+/* MCH MMIO space */
+
+/*
+ * MCHBAR mirror.
+ *
+ * This mirrors the MCHBAR MMIO space whose location is determined by
+ * device 0 function 0's pci config register 0x44 or 0x48 and matches it in
+ * every way.  It is not accessible from the CP register read instructions.
+ *
+ */
+#define MCHBAR_MIRROR_BASE	0x10000
+
+/** 915-945 and GM965 MCH register controlling DRAM channel access */
+#define DCC			0x10200
+#define DCC_ADDRESSING_MODE_SINGLE_CHANNEL		(0 << 0)
+#define DCC_ADDRESSING_MODE_DUAL_CHANNEL_ASYMMETRIC	(1 << 0)
+#define DCC_ADDRESSING_MODE_DUAL_CHANNEL_INTERLEAVED	(2 << 0)
+#define DCC_ADDRESSING_MODE_MASK			(3 << 0)
+#define DCC_CHANNEL_XOR_DISABLE				(1 << 10)
+#define DCC_CHANNEL_XOR_BIT_17				(1 << 9)
+
+/** 965 MCH register controlling DRAM channel configuration */
+#define C0DRB3			0x10206
+#define C1DRB3			0x10606
+
+/* Clocking configuration register */
+#define CLKCFG			0x10c00
+#define CLKCFG_FSB_400					(5 << 0)	/* hrawclk 100 */
+#define CLKCFG_FSB_533					(1 << 0)	/* hrawclk 133 */
+#define CLKCFG_FSB_667					(3 << 0)	/* hrawclk 166 */
+#define CLKCFG_FSB_800					(2 << 0)	/* hrawclk 200 */
+#define CLKCFG_FSB_1067					(6 << 0)	/* hrawclk 266 */
+#define CLKCFG_FSB_1333					(7 << 0)	/* hrawclk 333 */
+/* Note, below two are guess */
+#define CLKCFG_FSB_1600					(4 << 0)	/* hrawclk 400 */
+#define CLKCFG_FSB_1600_ALT				(0 << 0)	/* hrawclk 400 */
+#define CLKCFG_FSB_MASK					(7 << 0)
+#define CLKCFG_MEM_533					(1 << 4)
+#define CLKCFG_MEM_667					(2 << 4)
+#define CLKCFG_MEM_800					(3 << 4)
+#define CLKCFG_MEM_MASK					(7 << 4)
+
+/** GM965 GM45 render standby register */
+#define MCHBAR_RENDER_STANDBY	0x111B8
+
+#define PEG_BAND_GAP_DATA	0x14d68
 
 /*
  * Overlay regs
@@ -1522,6 +1929,180 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 #define TV_V_CHROMA_0		0x68400
 #define TV_V_CHROMA_42		0x684a8
 
+/* Display Port */
+#define DP_A				0x64000 /* eDP */
+#define DP_B				0x64100
+#define DP_C				0x64200
+#define DP_D				0x64300
+
+#define   DP_PORT_EN			(1 << 31)
+#define   DP_PIPEB_SELECT		(1 << 30)
+
+/* Link training mode - select a suitable mode for each stage */
+#define   DP_LINK_TRAIN_PAT_1		(0 << 28)
+#define   DP_LINK_TRAIN_PAT_2		(1 << 28)
+#define   DP_LINK_TRAIN_PAT_IDLE	(2 << 28)
+#define   DP_LINK_TRAIN_OFF		(3 << 28)
+#define   DP_LINK_TRAIN_MASK		(3 << 28)
+#define   DP_LINK_TRAIN_SHIFT		28
+
+/* Signal voltages. These are mostly controlled by the other end */
+#define   DP_VOLTAGE_0_4		(0 << 25)
+#define   DP_VOLTAGE_0_6		(1 << 25)
+#define   DP_VOLTAGE_0_8		(2 << 25)
+#define   DP_VOLTAGE_1_2		(3 << 25)
+#define   DP_VOLTAGE_MASK		(7 << 25)
+#define   DP_VOLTAGE_SHIFT		25
+
+/* Signal pre-emphasis levels, like voltages, the other end tells us what
+ * they want
+ */
+#define   DP_PRE_EMPHASIS_0		(0 << 22)
+#define   DP_PRE_EMPHASIS_3_5		(1 << 22)
+#define   DP_PRE_EMPHASIS_6		(2 << 22)
+#define   DP_PRE_EMPHASIS_9_5		(3 << 22)
+#define   DP_PRE_EMPHASIS_MASK		(7 << 22)
+#define   DP_PRE_EMPHASIS_SHIFT		22
+
+/* How many wires to use. I guess 3 was too hard */
+#define   DP_PORT_WIDTH_1		(0 << 19)
+#define   DP_PORT_WIDTH_2		(1 << 19)
+#define   DP_PORT_WIDTH_4		(3 << 19)
+#define   DP_PORT_WIDTH_MASK		(7 << 19)
+
+/* Mystic DPCD version 1.1 special mode */
+#define   DP_ENHANCED_FRAMING		(1 << 18)
+
+/* eDP */
+#define   DP_PLL_FREQ_270MHZ		(0 << 16)
+#define   DP_PLL_FREQ_160MHZ		(1 << 16)
+#define   DP_PLL_FREQ_MASK		(3 << 16)
+
+/** locked once port is enabled */
+#define   DP_PORT_REVERSAL		(1 << 15)
+
+/* eDP */
+#define   DP_PLL_ENABLE			(1 << 14)
+
+/** sends the clock on lane 15 of the PEG for debug */
+#define   DP_CLOCK_OUTPUT_ENABLE	(1 << 13)
+
+#define   DP_SCRAMBLING_DISABLE		(1 << 12)
+#define   DP_SCRAMBLING_DISABLE_IGDNG	(1 << 7)
+
+/** limit RGB values to avoid confusing TVs */
+#define   DP_COLOR_RANGE_16_235		(1 << 8)
+
+/** Turn on the audio link */
+#define   DP_AUDIO_OUTPUT_ENABLE	(1 << 6)
+
+/** vs and hs sync polarity */
+#define   DP_SYNC_VS_HIGH		(1 << 4)
+#define   DP_SYNC_HS_HIGH		(1 << 3)
+
+/** A fantasy */
+#define   DP_DETECTED			(1 << 2)
+
+/** The aux channel provides a way to talk to the
+ * signal sink for DDC etc. Max packet size supported
+ * is 20 bytes in each direction, hence the 5 fixed
+ * data registers
+ */
+#define DPA_AUX_CH_CTL			0x64010
+#define DPA_AUX_CH_DATA1		0x64014
+#define DPA_AUX_CH_DATA2		0x64018
+#define DPA_AUX_CH_DATA3		0x6401c
+#define DPA_AUX_CH_DATA4		0x64020
+#define DPA_AUX_CH_DATA5		0x64024
+
+#define DPB_AUX_CH_CTL			0x64110
+#define DPB_AUX_CH_DATA1		0x64114
+#define DPB_AUX_CH_DATA2		0x64118
+#define DPB_AUX_CH_DATA3		0x6411c
+#define DPB_AUX_CH_DATA4		0x64120
+#define DPB_AUX_CH_DATA5		0x64124
+
+#define DPC_AUX_CH_CTL			0x64210
+#define DPC_AUX_CH_DATA1		0x64214
+#define DPC_AUX_CH_DATA2		0x64218
+#define DPC_AUX_CH_DATA3		0x6421c
+#define DPC_AUX_CH_DATA4		0x64220
+#define DPC_AUX_CH_DATA5		0x64224
+
+#define DPD_AUX_CH_CTL			0x64310
+#define DPD_AUX_CH_DATA1		0x64314
+#define DPD_AUX_CH_DATA2		0x64318
+#define DPD_AUX_CH_DATA3		0x6431c
+#define DPD_AUX_CH_DATA4		0x64320
+#define DPD_AUX_CH_DATA5		0x64324
+
+#define   DP_AUX_CH_CTL_SEND_BUSY	    (1 << 31)
+#define   DP_AUX_CH_CTL_DONE		    (1 << 30)
+#define   DP_AUX_CH_CTL_INTERRUPT	    (1 << 29)
+#define   DP_AUX_CH_CTL_TIME_OUT_ERROR	    (1 << 28)
+#define   DP_AUX_CH_CTL_TIME_OUT_400us	    (0 << 26)
+#define   DP_AUX_CH_CTL_TIME_OUT_600us	    (1 << 26)
+#define   DP_AUX_CH_CTL_TIME_OUT_800us	    (2 << 26)
+#define   DP_AUX_CH_CTL_TIME_OUT_1600us	    (3 << 26)
+#define   DP_AUX_CH_CTL_TIME_OUT_MASK	    (3 << 26)
+#define   DP_AUX_CH_CTL_RECEIVE_ERROR	    (1 << 25)
+#define   DP_AUX_CH_CTL_MESSAGE_SIZE_MASK    (0x1f << 20)
+#define   DP_AUX_CH_CTL_MESSAGE_SIZE_SHIFT   20
+#define   DP_AUX_CH_CTL_PRECHARGE_2US_MASK   (0xf << 16)
+#define   DP_AUX_CH_CTL_PRECHARGE_2US_SHIFT  16
+#define   DP_AUX_CH_CTL_AUX_AKSV_SELECT	    (1 << 15)
+#define   DP_AUX_CH_CTL_MANCHESTER_TEST	    (1 << 14)
+#define   DP_AUX_CH_CTL_SYNC_TEST	    (1 << 13)
+#define   DP_AUX_CH_CTL_DEGLITCH_TEST	    (1 << 12)
+#define   DP_AUX_CH_CTL_PRECHARGE_TEST	    (1 << 11)
+#define   DP_AUX_CH_CTL_BIT_CLOCK_2X_MASK    (0x7ff)
+#define   DP_AUX_CH_CTL_BIT_CLOCK_2X_SHIFT   0
+
+/*
+ * Computing GMCH M and N values for the Display Port link
+ *
+ * GMCH M/N = dot clock * bytes per pixel / ls_clk * # of lanes
+ *
+ * ls_clk (we assume) is the DP link clock (1.62 or 2.7 GHz)
+ *
+ * The GMCH value is used internally
+ *
+ * bytes_per_pixel is the number of bytes coming out of the plane,
+ * which is after the LUTs, so we want the bytes for our color format.
+ * For our current usage, this is always 3, one byte for R, G and B.
+ */
+#define PIPEA_GMCH_DATA_M			0x70050
+#define PIPEB_GMCH_DATA_M			0x71050
+
+/* Transfer unit size for display port - 1, default is 0x3f (for TU size 64) */
+#define   PIPE_GMCH_DATA_M_TU_SIZE_MASK		(0x3f << 25)
+#define   PIPE_GMCH_DATA_M_TU_SIZE_SHIFT	25
+
+#define   PIPE_GMCH_DATA_M_MASK			(0xffffff)
+
+#define PIPEA_GMCH_DATA_N			0x70054
+#define PIPEB_GMCH_DATA_N			0x71054
+#define   PIPE_GMCH_DATA_N_MASK			(0xffffff)
+
+/*
+ * Computing Link M and N values for the Display Port link
+ *
+ * Link M / N = pixel_clock / ls_clk
+ *
+ * (the DP spec calls pixel_clock the 'strm_clk')
+ *
+ * The Link value is transmitted in the Main Stream
+ * Attributes and VB-ID.
+ */
+
+#define PIPEA_DP_LINK_M				0x70060
+#define PIPEB_DP_LINK_M				0x71060
+#define   PIPEA_DP_LINK_M_MASK			(0xffffff)
+
+#define PIPEA_DP_LINK_N				0x70064
+#define PIPEB_DP_LINK_N				0x71064
+#define   PIPEA_DP_LINK_N_MASK			(0xffffff)
+
 /* Display & cursor control */
 
 /* Pipe A */
@@ -1615,6 +2196,7 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 #define   CURSOR_POS_SIGN       0x8000
 #define   CURSOR_X_SHIFT        0
 #define   CURSOR_Y_SHIFT        16
+#define CURSIZE			0x700a0
 #define CURBCNTR		0x700c0
 #define CURBBASE		0x700c4
 #define CURBPOS			0x700c8
@@ -1701,7 +2283,7 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 
 #define IS_I915G(dev_priv) ((dev_priv)->flags & CHIP_I915G)
 #define IS_I915GM(dev_priv) ((dev_priv)->flags & CHIP_I915GM)
-#define IS_I945G(dev_priv) ((dev)->flags & CHIP_I945G)
+#define IS_I945G(dev_priv) ((dev_priv)->flags & CHIP_I945G)
 #define IS_I945GM(dev_priv) ((dev_priv)->flags & CHIP_I945GM)
 #define IS_I965G(dev_priv) ((dev_priv)->flags & CHIP_I965)
 #define IS_I965GM(dev_priv) ((dev_priv)->flags & CHIP_I965GM)
@@ -1717,6 +2299,100 @@ extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 
 #define I915_NEED_GFX_HWS(dev_priv) (dev_priv->flags & CHIP_HWS)
 
+#define HAS_RESET(dev_priv)	IS_I965G(dev_priv)
+
+#define IS_GEN2(dev_priv)	(dev_priv->flags & CHIP_GEN2)
+#define IS_GEN3(dev_priv)	(dev_priv->flags & CHIP_GEN3)
+#define IS_GEN4(dev_priv)	(dev_priv->flags & CHIP_GEN4)
+#define IS_GEN6(dev_priv)	(dev_priv->flags & CHIP_GEN6)
+
+/*
+ * Interrupts that are always left unmasked.
+ *
+ * Since pipe events are edge-triggered from the PIPESTAT register to IIRC,
+ * we leave them always unmasked in IMR and then control enabling them through
+ * PIPESTAT alone.
+ */
+#define I915_INTERRUPT_ENABLE_FIX		\
+	(I915_DISPLAY_PIPE_A_EVENT_INTERRUPT |	\
+    	I915_DISPLAY_PIPE_B_EVENT_INTERRUPT |	\
+	I915_RENDER_COMMAND_PARSER_ERROR_INTERRUPT)
+
+/* Interrupts that we mask and unmask at runtime */
+#define I915_INTERRUPT_ENABLE_VAR	(I915_USER_INTERRUPT)
+
+/* These are all of the interrupts used by the driver */
+#define I915_INTERRUPT_ENABLE_MASK	\
+	(I915_INTERRUPT_ENABLE_FIX |	\
+	I915_INTERRUPT_ENABLE_VAR)
+
+#define	printeir(val)	printf("%s: error reg: %b\n", __func__, val,	\
+	"\20\x10PTEERR\x2REFRESHERR\x1INSTERR")
+	
+
+/*
+ * With the i45 and later, Y tiling got adjusted so that it was 32 128-byte
+ * rows, which changes the alignment requirements and fence programming.
+ */
+#define HAS_128_BYTE_Y_TILING(dev_priv) (IS_I9XX(dev_priv) && 	\
+	!(IS_I915G(dev_priv) || IS_I915GM(dev_priv)))
+
 #define PRIMARY_RINGBUFFER_SIZE         (128*1024)
+
+/* Inlines */
+
+/**
+ * Returns true if seq1 is later than seq2.
+ */
+static __inline int
+i915_seqno_passed(uint32_t seq1, uint32_t seq2)
+{
+	return ((int32_t)(seq1 - seq2) >= 0);
+}
+
+/*
+ * Read seqence number from the Hardware status page.
+ */
+static __inline u_int32_t
+i915_get_gem_seqno(struct inteldrm_softc *dev_priv)
+{
+	return (READ_HWSP(dev_priv, I915_GEM_HWS_INDEX));
+}
+
+static __inline int
+i915_obj_purgeable(struct inteldrm_obj *obj_priv)
+{
+	return (obj_priv->obj.do_flags & I915_DONTNEED);
+}
+
+static __inline int
+i915_obj_purged(struct inteldrm_obj *obj_priv)
+{
+	return (obj_priv->obj.do_flags & I915_PURGED);
+}
+
+static __inline int
+inteldrm_is_active(struct inteldrm_obj *obj_priv)
+{
+	return (obj_priv->obj.do_flags & I915_ACTIVE);
+}
+
+static __inline int
+inteldrm_is_dirty(struct inteldrm_obj *obj_priv)	
+{
+	return (obj_priv->obj.do_flags & I915_DIRTY);
+}
+
+static __inline int
+inteldrm_exec_needs_fence(struct inteldrm_obj *obj_priv)
+{
+	return (obj_priv->obj.do_flags & I915_EXEC_NEEDS_FENCE);
+}
+
+static __inline int
+inteldrm_needs_fence(struct inteldrm_obj *obj_priv)
+{
+	return (obj_priv->obj.do_flags & I915_FENCED_EXEC);
+}
 
 #endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.23 2009/05/24 04:56:19 drahn Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.25 2010/03/31 19:46:26 miod Exp $	*/
 /*	$NetBSD: pmap.c,v 1.147 2004/01/18 13:03:50 scw Exp $	*/
 
 /*
@@ -4208,7 +4208,8 @@ pmap_postinit(void)
 		TAILQ_INIT(&plist);
 
 		error = uvm_pglistalloc(L1_TABLE_SIZE, physical_start,
-		    physical_end, L1_TABLE_SIZE, 0, &plist, 1, UVM_PLA_WAITOK);
+		    physical_end - 1, L1_TABLE_SIZE, 0, &plist, 1,
+		    UVM_PLA_WAITOK);
 		if (error)
 			panic("Cannot allocate L1 physical pages");
 
@@ -4692,7 +4693,7 @@ pmap_pte_init_generic(void)
 	pte_l1_c_proto = L1_C_PROTO_generic;
 	pte_l2_s_proto = L2_S_PROTO_generic;
 
-	pmap_copy_page_func = pmap_copy_page_v7;
+	pmap_copy_page_func = pmap_copy_page_generic;
 	pmap_zero_page_func = pmap_zero_page_generic;
 }
 
@@ -4808,6 +4809,7 @@ pmap_pte_init_armv7(void)
 	pte_l1_c_proto = L1_C_PROTO_v7;
 	pte_l2_s_proto = L2_S_PROTO_v7;
 
+	pmap_copy_page_func = pmap_copy_page_v7;
 }
 #endif /* CPU_ARMv7 */
 

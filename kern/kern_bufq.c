@@ -1,8 +1,6 @@
-/*	$OpenBSD: kern_bufq.c,v 1.2 2009/06/04 19:16:13 thib Exp $ */
-
+/*	$OpenBSD: kern_bufq.c,v 1.8 2010/06/27 22:05:28 thib Exp $	*/
 /*
- * Copyright (c) 2008, 2009	Thordur I. Bjornsson <thib@openbsd.org>
- * Copyright (c) 2004		Ted Unangst <tedu@openbsd.org>
+ * Copyright (c) 2010 Thordur I. Bjornsson <thib@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -16,44 +14,57 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/pool.h>
-#include <sys/proc.h>
+#include <sys/mutex.h>
 #include <sys/buf.h>
 #include <sys/errno.h>
+#include <sys/queue.h>
 
 #include <sys/disklabel.h>
 
-/* plain old disksort. */
-struct buf	*bufq_disksort_get(struct bufq *, int);
-void		 bufq_disksort_add(struct bufq *, struct buf *);
-int		 bufq_disksort_init(struct bufq *);
+struct buf *(*bufq_dequeue[BUFQ_HOWMANY])(struct bufq *, int) = {
+	bufq_disksort_dequeue,
+	bufq_fifo_dequeue
+};
+void (*bufq_queue[BUFQ_HOWMANY])(struct bufq *, struct buf *) = {
+	bufq_disksort_queue,
+	bufq_fifo_queue
+};
+void (*bufq_requeue[BUFQ_HOWMANY])(struct bufq *, struct buf *) = {
+	bufq_disksort_requeue,
+	bufq_fifo_requeue
+};
+
 
 struct bufq *
 bufq_init(int type)
 {
-	struct bufq		*bq;
-	int			 error;
-
-	KASSERT(type = BUFQ_DISKSORT);
+	struct bufq	*bq;
+	int		 error;
 
 	bq = malloc(sizeof(*bq), M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (bq == NULL)
-		return (NULL);
+	KASSERT(bq != NULL);
 
-	/* For now, only plain old disksort. */
+	mtx_init(&bq->bufq_mtx, IPL_BIO);
 	bq->bufq_type = type;
-	bq->bufq_get = bufq_disksort_get;
-	bq->bufq_add = bufq_disksort_add;
 
-	error = bufq_disksort_init(bq);
-	if (error) {
-		free(bq, M_DEVBUF);
-		return (NULL);
-	}
+	switch (type) {
+	case BUFQ_DISKSORT:
+		error = bufq_disksort_init(bq);
+		break;
+	case BUFQ_FIFO:
+		error = bufq_fifo_init(bq);
+		break;
+	default:
+		panic("bufq_init: type %i unknown", type);
+		break;
+	};
+
+	KASSERT(error == 0);
 
 	return (bq);
 }
@@ -75,41 +86,58 @@ bufq_drain(struct bufq *bq)
 	struct buf	*bp;
 	int		 s;
 
-	s = splbio();
-	while ((bp = BUFQ_GET(bq)) != NULL) {
+	while ((bp = BUFQ_DEQUEUE(bq)) != NULL) {
 		bp->b_error = ENXIO;
 		bp->b_flags |= B_ERROR;
+		s = splbio();
 		biodone(bp);
+		splx(s);
 	}
-	splx(s);
-
 }
 
 void
-bufq_disksort_add(struct bufq *bq, struct buf *bp)
+bufq_disksort_queue(struct bufq *bq, struct buf *bp)
 {
-	struct buf		*bufq;
-
-	splassert(IPL_BIO);
+	struct buf	*bufq;
 
 	bufq = (struct buf  *)bq->bufq_data;
 
+	mtx_enter(&bq->bufq_mtx);
 	disksort(bufq, bp);
+	mtx_leave(&bq->bufq_mtx);
+}
+
+void
+bufq_disksort_requeue(struct bufq *bq, struct buf *bp)
+{
+	struct buf	*bufq;
+
+	bufq = (struct buf *)bq->bufq_data;
+
+	mtx_enter(&bq->bufq_mtx);
+	bp->b_actf = bufq->b_actf;
+	bufq->b_actf = bp;
+	if (bp->b_actf == NULL)
+		bufq->b_actb = &bp->b_actf;
+	mtx_leave(&bq->bufq_mtx);
 }
 
 struct buf *
-bufq_disksort_get(struct bufq *bq, int peeking)
+bufq_disksort_dequeue(struct bufq *bq, int peeking)
 {
-	struct buf		*bufq, *bp;
+	struct buf	*bufq, *bp;
 
-	splassert(IPL_BIO);
-
+	mtx_enter(&bq->bufq_mtx);
 	bufq = (struct buf *)bq->bufq_data;
 	bp = bufq->b_actf;
-	if (bp == NULL)
-		return (NULL);
-	if (!peeking)
-		bufq->b_actf = bp->b_actf;
+	if (!peeking) {
+		if (bp != NULL)
+			bufq->b_actf = bp->b_actf;
+		if (bufq->b_actf == NULL)
+			bufq->b_actb = &bufq->b_actf;
+	}
+	mtx_leave(&bq->bufq_mtx);
+
 	return (bp);
 }
 
@@ -119,7 +147,7 @@ bufq_disksort_init(struct bufq *bq)
 	int	error = 0;
 
 	bq->bufq_data = malloc(sizeof(struct buf), M_DEVBUF,
-	    M_WAITOK|M_ZERO);
+	    M_NOWAIT|M_ZERO);
 
 	if (bq->bufq_data == NULL)
 		error = ENOMEM;
@@ -127,28 +155,52 @@ bufq_disksort_init(struct bufq *bq)
 	return (error);
 }
 
-#ifdef DDB
-#include <machine/db_machdep.h>
-#include <ddb/db_interface.h>
-#include <ddb/db_output.h>
-
 void
-db_bufq_print(struct bufq *bq, int full, int (*pr)(const char *, ...))
+bufq_fifo_queue(struct bufq *bq, struct buf *bp)
 {
-	struct buf		*bp, *dp;
+	struct bufq_fifo_head	*head = bq->bufq_data;
 
-
-	(*pr)(" type %i\n bufq_add %p bufq_get %p bufq_data %p",
-	    bq->bufq_type, bq->bufq_add, bq->bufq_get, bq->bufq_data);
-
-	if (full) {
-		printf("bufs on queue:\n");
-		bp = (struct buf *)bq->bufq_data;
-		while ((dp = bp->b_actf) != NULL) {
-			printf("%p\n", bp);
-			bp = dp;
-		}
-	}
+	mtx_enter(&bq->bufq_mtx);
+	TAILQ_INSERT_TAIL(head, bp, b_bufq.bufq_data_fifo.bqf_entries);
+	mtx_leave(&bq->bufq_mtx);
 }
 
-#endif
+void
+bufq_fifo_requeue(struct bufq *bq, struct buf *bp)
+{
+	struct bufq_fifo_head	*head = bq->bufq_data;
+
+	mtx_enter(&bq->bufq_mtx);
+	TAILQ_INSERT_HEAD(head, bp, b_bufq.bufq_data_fifo.bqf_entries);
+	mtx_leave(&bq->bufq_mtx);
+}
+
+struct buf *
+bufq_fifo_dequeue(struct bufq *bq, int peeking)
+{
+	struct	bufq_fifo_head	*head = bq->bufq_data;
+	struct	buf		*bp;
+
+	mtx_enter(&bq->bufq_mtx);
+	bp = TAILQ_FIRST(head);
+	if (bp != NULL && !peeking)
+		TAILQ_REMOVE(head, bp, b_bufq.bufq_data_fifo.bqf_entries);
+	mtx_leave(&bq->bufq_mtx);
+
+	return (bp);
+}
+
+int
+bufq_fifo_init(struct bufq *bq)
+{
+	struct bufq_fifo_head	*head;
+
+	head = malloc(sizeof(*head), M_DEVBUF, M_NOWAIT);
+	if (head == NULL)
+		return (ENOMEM);
+
+	TAILQ_INIT(head);
+	bq->bufq_data = head;
+
+	return (0);
+}

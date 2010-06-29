@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.h,v 1.37 2009/03/31 01:21:29 dlg Exp $	*/
+/*	$OpenBSD: if_pfsync.h,v 1.42 2010/01/12 23:38:02 dlg Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -45,13 +45,13 @@
 #ifndef _NET_IF_PFSYNC_H_
 #define _NET_IF_PFSYNC_H_
 
-#define PFSYNC_VERSION		5
+#define PFSYNC_VERSION		6
 #define PFSYNC_DFLTTL		255
 
 #define PFSYNC_ACT_CLR		0	/* clear all states */
-#define PFSYNC_ACT_INS		1	/* insert state */
+#define PFSYNC_ACT_OINS		1	/* old insert state */
 #define PFSYNC_ACT_INS_ACK	2	/* ack of insterted state */
-#define PFSYNC_ACT_UPD		3	/* update state */
+#define PFSYNC_ACT_OUPD		3	/* old update state */
 #define PFSYNC_ACT_UPD_C	4	/* "compressed" update state */
 #define PFSYNC_ACT_UPD_REQ	5	/* request "uncompressed" state */
 #define PFSYNC_ACT_DEL		6	/* delete state */
@@ -60,13 +60,15 @@
 #define PFSYNC_ACT_DEL_F	9	/* delete fragments */
 #define PFSYNC_ACT_BUS		10	/* bulk update status */
 #define PFSYNC_ACT_TDB		11	/* TDB replay counter update */
-#define PFSYNC_ACT_EOF		12	/* end of frame */
-#define PFSYNC_ACT_MAX		13
+#define PFSYNC_ACT_EOF		12	/* end of frame - DEPRECATED */
+#define PFSYNC_ACT_INS		13	/* insert state */
+#define PFSYNC_ACT_UPD		14	/* update state */
+#define PFSYNC_ACT_MAX		15
 
 #define PFSYNC_ACTIONS		"CLR ST",		\
-				"INS ST",		\
+				"INS ST OLD",		\
 				"INS ST ACK",		\
-				"UPD ST",		\
+				"UPD ST OLD",		\
 				"UPD ST COMP",		\
 				"UPD ST REQ",		\
 				"DEL ST",		\
@@ -75,14 +77,13 @@
 				"DEL FR",		\
 				"BULK UPD STAT",	\
 				"TDB UPD",		\
-				"EOF"
-
-#define PFSYNC_HMAC_LEN	20
+				"EOF",			\
+				"INS ST",		\
+				"UPD ST"
 
 /*
  * A pfsync frame is built from a header followed by several sections which
- * are all prefixed with their own subheaders. Frames must be terminated with
- * an EOF subheader.
+ * are all prefixed with their own subheaders.
  *
  * | ...			|
  * | IP header			|
@@ -98,8 +99,6 @@
  * +----------------------------+
  * | second action fields	|
  * | ...			|
- * +----------------------------+
- * | EOF pfsync_subheader	|
  * +============================+
  */
 
@@ -110,7 +109,7 @@
 struct pfsync_header {
 	u_int8_t			version;
 	u_int8_t			_pad;
-	u_int16_t			len;
+	u_int16_t			len; /* in bytes */
 	u_int8_t			pfcksum[PF_MD5_DIGEST_LENGTH];
 } __packed;
 
@@ -120,7 +119,7 @@ struct pfsync_header {
 
 struct pfsync_subheader {
 	u_int8_t			action;
-	u_int8_t			_pad;
+	u_int8_t			len; /* in dwords */
 	u_int16_t			count;
 } __packed;
 
@@ -132,6 +131,12 @@ struct pfsync_clr {
 	char				ifname[IFNAMSIZ];
 	u_int32_t			creatorid;
 } __packed;
+
+/*
+ * OINS, OUPD
+ */
+
+/* these messages are deprecated */
 
 /*
  * INS, UPD, DEL
@@ -159,7 +164,8 @@ struct pfsync_upd_c {
 	u_int32_t			creatorid;
 	u_int32_t			expire;
 	u_int8_t			timeout;
-	u_int8_t			_pad[3];
+	u_int8_t			state_flags;
+	u_int8_t			_pad[2];
 } __packed;
 
 /*
@@ -217,12 +223,10 @@ struct pfsync_tdb {
  * EOF
  */
 
-struct pfsync_eof {
-	u_int8_t			hmac[PFSYNC_HMAC_LEN];
-} __packed;
+/* this message is deprecated */
+
 
 #define PFSYNC_HDRLEN		sizeof(struct pfsync_header)
-
 
 
 /*
@@ -263,7 +267,7 @@ struct pfsyncreq {
 	char		 pfsyncr_syncdev[IFNAMSIZ];
 	struct in_addr	 pfsyncr_syncpeer;
 	int		 pfsyncr_maxupdates;
-	int		 pfsyncr_authlevel;
+	int		 pfsyncr_defer;
 };
 
 #ifdef _KERNEL
@@ -271,11 +275,11 @@ struct pfsyncreq {
 /*
  * this shows where a pf state is with respect to the syncing.
  */
-#define PFSYNC_S_INS	0x00
-#define PFSYNC_S_IACK	0x01
-#define PFSYNC_S_UPD	0x02
-#define PFSYNC_S_UPD_C	0x03
-#define PFSYNC_S_DEL	0x04
+#define PFSYNC_S_IACK	0x00
+#define PFSYNC_S_UPD_C	0x01
+#define PFSYNC_S_DEL	0x02
+#define PFSYNC_S_INS	0x03
+#define PFSYNC_S_UPD	0x04
 #define PFSYNC_S_COUNT	0x05
 
 #define PFSYNC_S_DEFER	0xfe

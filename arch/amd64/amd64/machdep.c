@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.94 2009/06/07 02:01:54 oga Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.113 2010/06/27 13:28:46 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -87,10 +87,6 @@
 #include <sys/kcore.h>
 #include <sys/syscallargs.h>
 
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
-
 #ifdef KGDB
 #include <sys/kgdb.h>
 #endif
@@ -98,9 +94,7 @@
 #include <dev/cons.h>
 #include <stand/boot/bootarg.h>
 
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_page.h>
-#include <uvm/uvm_swap.h>
+#include <uvm/uvm.h>
 
 #include <sys/sysctl.h>
 
@@ -185,6 +179,12 @@ paddr_t tramp_pdirpa;
 
 int kbd_reset;
 
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int	safepri = 0;
+
 #ifdef LKM
 vaddr_t lkm_start, lkm_end;
 static struct vm_map lkm_map_store;
@@ -204,6 +204,15 @@ int	bufpages = BUFPAGES;
 int	bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
+
+/* UVM constraint ranges. */
+struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
+struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
+struct uvm_constraint_range *uvm_md_constraints[] = {
+    &isa_constraint,
+    &dma_constraint,
+    NULL,
+};
 
 #ifdef DEBUG
 int sigdebug = 0;
@@ -255,8 +264,6 @@ u_int32_t	bios_cksumlen;
 phys_ram_seg_t mem_clusters[VM_PHYSSEG_MAX];
 int	mem_cluster_cnt;
 
-vaddr_t	allocsys(vaddr_t);
-void	setup_buffers(void);
 int	cpu_dump(void);
 int	cpu_dumpsize(void);
 u_long	cpu_dump_mempagecnt(void);
@@ -302,8 +309,6 @@ int allowaperture = 0;
 void
 cpu_startup(void)
 {
-	vaddr_t v;
-	vsize_t sz;
 	vaddr_t minaddr, maxaddr;
 
 	msgbuf_vaddr = PMAP_DIRECT_MAP(msgbuf_paddr);
@@ -313,18 +318,6 @@ cpu_startup(void)
 
 	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
 	    ptoa((psize_t)physmem)/1024/1024);
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = allocsys(0);
-	if ((v = uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	setup_buffers();
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -362,43 +355,6 @@ cpu_startup(void)
 
 	/* Safe for i/o port / memory space allocation to use malloc now. */
 	x86_bus_space_mallocok();
-}
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-vaddr_t
-allocsys(vaddr_t v)
-{
-
-#define	valloc(name, type, num) \
-	    v = (vaddr_t)(((name) = (type *)v) + (num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return v;
-}
-
-void
-setup_buffers()
-{
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
 }
 
 /*
@@ -523,6 +479,7 @@ int
 cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
     size_t newlen, struct proc *p)
 {
+	extern int amd64_has_xcrypt;
 	dev_t consdev;
 	dev_t dev;
 
@@ -570,6 +527,8 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 #else
 		return (sysctl_rdint(oldp, oldlenp, newp, 0));
 #endif
+	case CPU_XCRYPT:
+		return (sysctl_rdint(oldp, oldlenp, newp, amd64_has_xcrypt));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -591,6 +550,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
     union sigval val)
 {
 	struct proc *p = curproc;
+	struct savefpu *sfp = &p->p_addr->u_pcb.pcb_savefpu;
 	struct trapframe *tf = p->p_md.md_regs;
 	struct sigacts * psp = p->p_sigacts;
 	struct sigcontext ksc;
@@ -627,6 +587,11 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 		if (copyout(&p->p_addr->u_pcb.pcb_savefpu.fp_fxsave,
 		    (void *)sp, sizeof(struct fxsave64)))
 			sigexit(p, SIGILL);
+
+		/* Signal handlers get a completely clean FP state */
+		p->p_md.md_flags &= ~MDP_USEDFPU;
+		sfp->fp_fxsave.fx_fcw = __INITIAL_NPXCW__;
+		sfp->fp_fxsave.fx_mxcsr = __INITIAL_MXCSR__;
 	}
 
 	sip = 0;
@@ -704,9 +669,12 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	if (p->p_md.md_flags & MDP_USEDFPU)
 		fpusave_proc(p, 0);
 
-	if (ksc.sc_fpstate && (error = copyin(ksc.sc_fpstate,
-	    &p->p_addr->u_pcb.pcb_savefpu.fp_fxsave, sizeof (struct fxsave64))))
-		return (error);
+	if (ksc.sc_fpstate) {
+		if ((error = copyin(ksc.sc_fpstate,
+		    &p->p_addr->u_pcb.pcb_savefpu.fp_fxsave, sizeof (struct fxsave64))))
+			return (error);
+		p->p_md.md_flags |= MDP_USEDFPU;
+	}
 
 	ksc.sc_trapno = tf->tf_trapno;
 	ksc.sc_err = tf->tf_err;
@@ -913,16 +881,7 @@ dumpconf(void)
  * getting on the dump stack, either when called above, or by
  * the auto-restart code.
  */
-#define BYTES_PER_DUMP  PAGE_SIZE /* must be a multiple of pagesize XXX small */
-static vaddr_t dumpspace;
-
-vaddr_t
-reserve_dumppages(vaddr_t p)
-{
-
-	dumpspace = p;
-	return (p + BYTES_PER_DUMP);
-}
+#define BYTES_PER_DUMP  MAXPHYS /* must be a multiple of pagesize */
 
 void
 dumpsys(void)
@@ -978,7 +937,7 @@ dumpsys(void)
 
 		for (i = 0; i < bytes; i += n, totalbytesleft -= n) {
 			/* Print out how many MBs we have left to go. */
-			if ((totalbytesleft % (1024*1024)) == 0)
+			if ((totalbytesleft % (1024*1024)) < BYTES_PER_DUMP)
 				printf("%ld ", totalbytesleft / (1024 * 1024));
 
 			/* Limit size for next transfer. */
@@ -986,10 +945,8 @@ dumpsys(void)
 			if (n > BYTES_PER_DUMP)
 				n = BYTES_PER_DUMP;
 
-			(void) pmap_map(dumpspace, maddr, maddr + n,
-			    VM_PROT_READ);
-
-			error = (*dump)(dumpdev, blkno, (caddr_t)dumpspace, n);
+			error = (*dump)(dumpdev, blkno,
+			    (caddr_t)PMAP_DIRECT_MAP(maddr), n);
 			if (error)
 				goto err;
 			maddr += n;
@@ -1196,7 +1153,7 @@ cpu_init_extents(void)
 }
 
 #if defined(MULTIPROCESSOR) || \
-    (NACPI > 0 && defined(ACPI_SLEEP_ENABLED) && !defined(SMALL_KERNEL))
+    (NACPI > 0 && !defined(SMALL_KERNEL))
 void
 map_tramps(void) {
 	struct pmap *kmp = pmap_kernel();
@@ -1221,11 +1178,9 @@ map_tramps(void) {
 #endif /* MULTIPROCESSOR */
 
 
-#ifdef ACPI_SLEEP_ENABLED
 	pmap_kenter_pa((vaddr_t)ACPI_TRAMPOLINE, /* virtual */
 	    (paddr_t)ACPI_TRAMPOLINE,	/* physical */
 	    VM_PROT_ALL);		/* protection */
-#endif /* ACPI_SLEEP_ENABLED */
 }
 #endif
 
@@ -1320,10 +1275,10 @@ init_x86_64(paddr_t first_avail)
 		avail_start = MP_TRAMPOLINE + PAGE_SIZE;
 #endif
 
-#ifdef ACPI_SLEEP_ENABLED
+#if (NACPI > 0 && !defined(SMALL_KERNEL))
 	if (avail_start < ACPI_TRAMPOLINE + PAGE_SIZE)
 		avail_start = ACPI_TRAMPOLINE + PAGE_SIZE;
-#endif /* ACPI_SLEEP_ENABLED */
+#endif
 
 	/* Let us know if we're supporting > 4GB ram load */
 	if (bigmem)
@@ -1517,7 +1472,7 @@ init_x86_64(paddr_t first_avail)
 	    VM_PROT_READ|VM_PROT_WRITE);
 
 #if defined(MULTIPROCESSOR) || \
-    (NACPI > 0 && defined(ACPI_SLEEP_ENABLED) && !defined(SMALL_KERNEL))
+    (NACPI > 0 && !defined(SMALL_KERNEL))
 	map_tramps();
 #endif
 

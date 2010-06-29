@@ -1,4 +1,4 @@
-/*	$OpenBSD: arc.c,v 1.78 2009/02/16 21:19:07 miod Exp $ */
+/*	$OpenBSD: arc.c,v 1.86 2010/06/28 18:40:51 mk Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -24,7 +24,6 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 #include <sys/rwlock.h>
 
 #include <machine/bus.h>
@@ -352,7 +351,7 @@ int			arc_intr(void *);
 
 struct arc_iop;
 struct arc_ccb;
-TAILQ_HEAD(arc_ccb_list, arc_ccb);
+SLIST_HEAD(arc_ccb_list, arc_ccb);
 
 struct arc_softc {
 	struct device		sc_dev;
@@ -399,15 +398,11 @@ struct cfdriver arc_cd = {
 };
 
 /* interface for scsi midlayer to talk to */
-int			arc_scsi_cmd(struct scsi_xfer *);
+void			arc_scsi_cmd(struct scsi_xfer *);
 void			arc_minphys(struct buf *, struct scsi_link *);
 
 struct scsi_adapter arc_switch = {
 	arc_scsi_cmd, arc_minphys, NULL, NULL, NULL
-};
-
-struct scsi_device arc_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 /* code to deal with getting bits in and out of the bus space */
@@ -453,7 +448,7 @@ struct arc_ccb {
 	struct arc_io_cmd	*ccb_cmd;
 	u_int32_t		ccb_cmd_post;
 
-	TAILQ_ENTRY(arc_ccb)	ccb_link;
+	SLIST_ENTRY(arc_ccb)	ccb_link;
 };
 
 int			arc_alloc_ccbs(struct arc_softc *);
@@ -596,7 +591,6 @@ arc_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc_shutdownhook == NULL)
 		panic("unable to establish arc powerhook");
 
-	sc->sc_link.device = &arc_dev;
 	sc->sc_link.adapter = &arc_switch;
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = ARC_MAX_TARGET;
@@ -709,7 +703,7 @@ arc_intr(void *arg)
 	return (1);
 }
 
-int
+void
 arc_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link		*link = xs->sc_link;
@@ -717,7 +711,6 @@ arc_scsi_cmd(struct scsi_xfer *xs)
 	struct arc_ccb			*ccb;
 	struct arc_msg_scsicmd		*cmd;
 	u_int32_t			reg;
-	int				rv = SUCCESSFULLY_QUEUED;
 	int				s;
 
 	if (xs->cmdlen > ARC_MSG_CDBLEN) {
@@ -726,10 +719,8 @@ arc_scsi_cmd(struct scsi_xfer *xs)
 		xs->sense.flags = SKEY_ILLEGAL_REQUEST;
 		xs->sense.add_sense_code = 0x20;
 		xs->error = XS_SENSE;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
-		return (COMPLETE);
+		return;
 	}
 
 	s = splbio();
@@ -737,10 +728,8 @@ arc_scsi_cmd(struct scsi_xfer *xs)
 	splx(s);
 	if (ccb == NULL) {
 		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
-		return (COMPLETE);
+		return;
 	}
 
 	ccb->ccb_xs = xs;
@@ -751,7 +740,7 @@ arc_scsi_cmd(struct scsi_xfer *xs)
 		arc_put_ccb(sc, ccb);
 		scsi_done(xs);
 		splx(s);
-		return (COMPLETE);
+		return;
 	}
 
 	cmd = &ccb->ccb_cmd->cmd;
@@ -784,15 +773,12 @@ arc_scsi_cmd(struct scsi_xfer *xs)
 	s = splbio();
 	arc_push(sc, reg);
 	if (xs->flags & SCSI_POLL) {
-		rv = COMPLETE;
 		if (arc_complete(sc, ccb, xs->timeout) != 0) {
 			xs->error = XS_DRIVER_STUFFUP;
 			scsi_done(xs);
 		}
 	}
 	splx(s);
-
-	return (rv);
 }
 
 int
@@ -844,9 +830,6 @@ arc_scsi_cmd_done(struct arc_softc *sc, struct arc_ccb *ccb, u_int32_t reg)
 		    BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
 		bus_dmamap_unload(sc->sc_dmat, ccb->ccb_dmamap);
 	}
-
-	/* timeout_del */
-	xs->flags |= ITSDONE;
 
 	if (reg & ARC_RA_REPLY_QUEUE_ERR) {
 		cmd = &ccb->ccb_cmd->cmd;
@@ -1874,7 +1857,7 @@ arc_dmamem_alloc(struct arc_softc *sc, size_t size)
 		goto admfree;
 
 	if (bus_dmamem_alloc(sc->sc_dmat, size, PAGE_SIZE, 0, &adm->adm_seg,
-	    1, &nsegs, BUS_DMA_NOWAIT) != 0)
+	    1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0)
 		goto destroy;
 
 	if (bus_dmamem_map(sc->sc_dmat, &adm->adm_seg, nsegs, size,
@@ -1884,8 +1867,6 @@ arc_dmamem_alloc(struct arc_softc *sc, size_t size)
 	if (bus_dmamap_load(sc->sc_dmat, adm->adm_map, adm->adm_kva, size,
 	    NULL, BUS_DMA_NOWAIT) != 0)
 		goto unmap;
-
-	bzero(adm->adm_kva, size);
 
 	return (adm);
 
@@ -1918,7 +1899,7 @@ arc_alloc_ccbs(struct arc_softc *sc)
 	u_int8_t			*cmd;
 	int				i;
 
-	TAILQ_INIT(&sc->sc_ccb_free);
+	SLIST_INIT(&sc->sc_ccb_free);
 
 	sc->sc_ccbs = malloc(sizeof(struct arc_ccb) * sc->sc_req_count,
 	    M_DEVBUF, M_WAITOK | M_ZERO);
@@ -1970,9 +1951,9 @@ arc_get_ccb(struct arc_softc *sc)
 {
 	struct arc_ccb			*ccb;
 
-	ccb = TAILQ_FIRST(&sc->sc_ccb_free);
+	ccb = SLIST_FIRST(&sc->sc_ccb_free);
 	if (ccb != NULL)
-		TAILQ_REMOVE(&sc->sc_ccb_free, ccb, ccb_link);
+		SLIST_REMOVE_HEAD(&sc->sc_ccb_free, ccb_link);
 
 	return (ccb);
 }
@@ -1982,5 +1963,5 @@ arc_put_ccb(struct arc_softc *sc, struct arc_ccb *ccb)
 {
 	ccb->ccb_xs = NULL;
 	bzero(ccb->ccb_cmd, ARC_MAX_IOCMDLEN);
-	TAILQ_INSERT_TAIL(&sc->sc_ccb_free, ccb, ccb_link);
+	SLIST_INSERT_HEAD(&sc->sc_ccb_free, ccb, ccb_link);
 }

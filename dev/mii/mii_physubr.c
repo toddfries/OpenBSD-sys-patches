@@ -1,4 +1,4 @@
-/*	$OpenBSD: mii_physubr.c,v 1.35 2008/06/26 05:42:16 ray Exp $	*/
+/*	$OpenBSD: mii_physubr.c,v 1.39 2009/10/13 19:33:16 pirofti Exp $	*/
 /*	$NetBSD: mii_physubr.c,v 1.20 2001/04/13 23:30:09 thorpej Exp $	*/
 
 /*-
@@ -204,7 +204,7 @@ mii_phy_auto(struct mii_softc *sc, int waitfor)
 	} else if ((sc->mii_flags & MIIF_DOINGAUTO) == 0) {
 		sc->mii_flags |= MIIF_DOINGAUTO;
 		timeout_set(&sc->mii_phy_timo, mii_phy_auto_timeout, sc);
-		timeout_add(&sc->mii_phy_timo, hz / 2);
+		timeout_add_msec(&sc->mii_phy_timo, 500);
 	}
 	return (EJUSTRETURN);
 }
@@ -391,8 +391,7 @@ mii_phy_statusmsg(struct mii_softc *sc)
 
 /*
  * Initialize generic PHY media based on BMSR, called when a PHY is
- * attached.  We expect to be set up to print a comma-separated list
- * of media names.  Does not print a newline.
+ * attached.
  */
 void
 mii_phy_add_media(struct mii_softc *sc)
@@ -483,13 +482,12 @@ mii_phy_delete_media(struct mii_softc *sc)
 }
 
 int
-mii_phy_activate(struct device *self, enum devact act)
+mii_phy_activate(struct device *self, int act)
 {
 	int rv = 0;
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		rv = EOPNOTSUPP;
 		break;
 
 	case DVACT_DEACTIVATE:

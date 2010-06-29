@@ -1,4 +1,4 @@
-/*	$OpenBSD: ueagle.c,v 1.23 2007/10/11 18:33:15 deraadt Exp $	*/
+/*	$OpenBSD: ueagle.c,v 1.26 2010/06/05 13:06:57 damien Exp $	*/
 
 /*-
  * Copyright (c) 2003-2006
@@ -25,7 +25,6 @@
 #include "bpfilter.h"
 
 #include <sys/param.h>
-#include <sys/sysctl.h>
 #include <sys/sockio.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
@@ -127,7 +126,7 @@ void		ueagle_stop(struct ifnet *, int);
 int ueagle_match(struct device *, void *, void *); 
 void ueagle_attach(struct device *, struct device *, void *); 
 int ueagle_detach(struct device *, int); 
-int ueagle_activate(struct device *, enum devact); 
+int ueagle_activate(struct device *, int); 
 
 struct cfdriver ueagle_cd = { 
 	NULL, "ueagle", DV_DULL 
@@ -611,10 +610,10 @@ ueagle_boot(struct ueagle_softc *sc)
 	sc->ovl = 0;
 	ueagle_loadpage(sc);
 
-	/* wait until modem reaches operationnal state */
+	/* wait until modem reaches operational state */
 	error = tsleep(UEAGLE_COND_READY(sc), PZERO | PCATCH, "boot", 10 * hz);
 	if (error != 0) {
-		printf("%s: timeout waiting for operationnal state\n",
+		printf("%s: timeout waiting for operational state\n",
 		    sc->sc_dev.dv_xname);
 		return error;
 	}
@@ -1460,7 +1459,7 @@ ueagle_stop(struct ifnet *ifp, int disable)
 }
 
 int
-ueagle_activate(struct device *self, enum devact act)
+ueagle_activate(struct device *self, int act)
 {
 	struct ueagle_softc *sc = (struct ueagle_softc *)self;
 

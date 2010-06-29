@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccbbvar.h,v 1.13 2007/11/30 08:12:00 miod Exp $	*/
+/*	$OpenBSD: pccbbvar.h,v 1.15 2010/01/13 09:10:33 jsg Exp $	*/
 /*	$NetBSD: pccbbvar.h,v 1.13 2000/06/08 10:28:29 haya Exp $	*/
 /*
  * Copyright (c) 1999 HAYAKAWA Koichi.  All rights reserved.
@@ -11,11 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by HAYAKAWA Koichi.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -137,18 +132,12 @@ struct pccbb_softc {
 #define	CBB_INSERTING	0x01000000
 #define	CBB_16BITCARD	0x04
 #define	CBB_32BITCARD	0x08
-#define	CBB_MEMHMAPPED	0x02000000
 
 	pci_chipset_tag_t sc_pc;
 	pcitag_t sc_tag;
 	pcireg_t sc_id;
 	int sc_chipset;			/* chipset id */
 	int sc_ints_on;
-
-	bus_addr_t sc_mem_start;	/* CardBus/PCMCIA memory start */
-	bus_addr_t sc_mem_end;		/* CardBus/PCMCIA memory end */
-	bus_addr_t sc_io_start;		/* CardBus/PCMCIA io start */
-	bus_addr_t sc_io_end;		/* CardBus/PCMCIA io end */
 
 	pcireg_t sc_sockbase;		/* Socket base register */
 	pcireg_t sc_busnum;		/* bus number */

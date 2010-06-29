@@ -1,4 +1,4 @@
-/*	$OpenBSD: dl.c,v 1.6 2008/06/26 05:42:14 ray Exp $	*/
+/*	$OpenBSD: dl.c,v 1.11 2010/06/28 14:13:31 deraadt Exp $	*/
 /*	$NetBSD: dl.c,v 1.11 2000/01/24 02:40:29 matt Exp $	*/
 
 /*-
@@ -206,7 +206,7 @@ dl_attach (parent, self, aux)
 
 	/* Initialize our softc structure. Should be done in open? */
 	
-	sc->sc_tty = ttymalloc();
+	sc->sc_tty = ttymalloc(0);
 
 	/* Now register the TX & RX interrupt handlers */
 	uba_intr_establish(ua->ua_icookie, ua->ua_cvec    , dlxint, sc);
@@ -309,10 +309,10 @@ dlopen(dev, flag, mode, p)
 		dlparam(tp, &tp->t_termios);
 		ttsetwater(tp);
 		
-	} else if ((tp->t_state & TS_XCLUDE) && p->p_ucred->cr_uid != 0)
+	} else if ((tp->t_state & TS_XCLUDE) && suser(p, 0) != 0)
 		return EBUSY;
 
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 /*ARGSUSED*/
@@ -330,7 +330,7 @@ dlclose(dev, flag, mode, p)
 	sc = dl_cd.cd_devs[unit];
       	tp = sc->sc_tty;
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	/* Make sure a BREAK state is not left enabled. */
 	dlbrk(sc, 0);

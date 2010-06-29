@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pmemrange.h,v 1.1 2009/06/01 17:42:33 ariane Exp $	*/
+/*	$OpenBSD: uvm_pmemrange.h,v 1.5 2010/04/22 19:02:55 oga Exp $	*/
 
 /*
  * Copyright (c) 2009 Ariane van der Steldt <ariane@stack.nl>
@@ -34,7 +34,7 @@ RB_HEAD(uvm_pmr_size, vm_page);
  * - DIRTY: this page may contain random data.
  * - ZERO: this page has been zeroed.
  */
-#define UVM_PMR_MEMTYPE_DIRTY	1
+#define UVM_PMR_MEMTYPE_DIRTY	0
 #define UVM_PMR_MEMTYPE_ZERO	1
 #define UVM_PMR_MEMTYPE_MAX	2
 
@@ -51,7 +51,7 @@ struct uvm_pmemrange {
 	paddr_t	low;			/* Start of address range (pgno). */
 	paddr_t	high;			/* End +1 (pgno). */
 	int	use;			/* Use counter. */
-	int	nsegs;			/* Current range count. */
+	psize_t	nsegs;			/* Current range count. */
 
 	TAILQ_ENTRY(uvm_pmemrange) pmr_use;
 					/* pmr, sorted by use */

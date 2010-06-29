@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.105 2009/06/06 21:25:19 deraadt Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.109 2010/06/28 23:00:30 guenther Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -48,7 +48,6 @@
 #include <sys/event.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
-#include <sys/timeb.h>
 #include <sys/times.h>
 #include <sys/buf.h>
 #include <sys/acct.h>
@@ -834,7 +833,7 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 #endif
 
 	if (type != SPROPAGATED)
-		KNOTE(&p->p_klist, NOTE_SIGNAL | signum);
+		KNOTE(&p->p_p->ps_klist, NOTE_SIGNAL | signum);
 
 	prop = sigprop[signum];
 
@@ -1203,9 +1202,8 @@ keep:
 void
 proc_stop(struct proc *p, int sw)
 {
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	extern void *softclock_si;
-#endif
+
 #ifdef MULTIPROCESSOR
 	SCHED_ASSERT_LOCKED();
 #endif
@@ -1219,11 +1217,7 @@ proc_stop(struct proc *p, int sw)
 		 * We need this soft interrupt to be handled fast.
 		 * Extra calls to softclock don't hurt.
 		 */
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
                 softintr_schedule(softclock_si);
-#else
-                setsoftclock();
-#endif
 	}
 	if (sw)
 		mi_switch();
@@ -1562,9 +1556,12 @@ sys_thrsigdivert(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_thrsigdivert_args /* {
 		syscallarg(sigset_t) sigmask;
+		syscallarg(siginfo_t *) info;
+		syscallarg(const struct timespec *) timeout;
 	} */ *uap = v;
 	sigset_t mask;
 	sigset_t *m;
+	long long to_ticks = 0;
 	int error;
 
 	m = NULL;
@@ -1582,21 +1579,44 @@ sys_thrsigdivert(struct proc *p, void *v, register_t *retval)
 		return (0);
 	}
 
+	if (SCARG(uap, timeout) != NULL) {
+		struct timespec ts;
+		if ((error = copyin(SCARG(uap, timeout), &ts, sizeof(ts))) != 0)
+			return (error);
+		to_ticks = (long long)hz * ts.tv_sec +
+		    ts.tv_nsec / (tick * 1000);
+		if (to_ticks > INT_MAX)
+			to_ticks = INT_MAX;
+	}
+
 	p->p_sigwait = 0;
 	atomic_setbits_int(&p->p_sigdivert, mask);
-	error = tsleep(&p->p_sigdivert, PPAUSE|PCATCH, "sigwait", 0);
+	error = tsleep(&p->p_sigdivert, PPAUSE|PCATCH, "sigwait",
+	    (int)to_ticks);
 	if (p->p_sigdivert) {
 		/* interrupted */
 		KASSERT(error != 0);
 		atomic_clearbits_int(&p->p_sigdivert, ~0);
 		if (error == EINTR)
 			error = ERESTART;
+		else if (error == ETIMEDOUT)
+			error = EAGAIN;
 		return (error);
 
 	}
 	KASSERT(p->p_sigwait != 0);
 	*retval = p->p_sigwait;
-	return (0);
+
+	if (SCARG(uap, info) == NULL) {
+		error = 0;
+	} else {
+		siginfo_t si;
+
+		bzero(&si, sizeof si);
+		si.si_signo = p->p_sigwait;
+		error = copyout(&si, SCARG(uap, info), sizeof(si));
+	}
+	return (error);
 }
 #endif
 
@@ -1633,7 +1653,7 @@ filt_sigattach(struct knote *kn)
 	kn->kn_flags |= EV_CLEAR;		/* automatically set */
 
 	/* XXX lock the proc here while adding to the list? */
-	SLIST_INSERT_HEAD(&p->p_klist, kn, kn_selnext);
+	SLIST_INSERT_HEAD(&p->p_p->ps_klist, kn, kn_selnext);
 
 	return (0);
 }
@@ -1643,7 +1663,7 @@ filt_sigdetach(struct knote *kn)
 {
 	struct proc *p = kn->kn_ptr.p_proc;
 
-	SLIST_REMOVE(&p->p_klist, kn, knote, kn_selnext);
+	SLIST_REMOVE(&p->p_p->ps_klist, kn, knote, kn_selnext);
 }
 
 /*

@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.74 2009/06/01 15:53:46 jsg Exp $
+#	$OpenBSD: GENERIC,v 1.76 2010/04/26 20:51:51 deraadt Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -20,7 +20,6 @@ options		CACHE_CLEAN_BLOCK_INTR
 
 makeoptions	KERNEL_BASE_PHYS="0xa0200000"
 makeoptions	KERNEL_BASE_VIRT="0xc0200000"
-makeoptions	BOARDTYPE="zaurus"
 
 # CPU options
 options		CPU_XSCALE_PXA2X0	# Support the XScale core
@@ -118,6 +117,7 @@ axe*		at uhub?		# ASIX Electronics AX88172 USB Ethernet
 cue*		at uhub?		# CATC USB-EL1201A based Ethernet
 kue*		at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 cdce*		at uhub?		# CDC Ethernet
+urndis*		at uhub?		# Remote NDIS devices
 upl*		at uhub?		# Prolific PL2301/PL2302 host-to-host
 udav*		at uhub?		# Davicom DM9601 based Ethernet
 ural*		at uhub?		# Ralink RT2500USB

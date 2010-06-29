@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.208 2009/02/10 18:35:44 damien Exp $
+#	$OpenBSD: GENERIC,v 1.211 2010/03/03 20:57:28 mk Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -109,6 +109,7 @@ axe*	at uhub?			# ASIX Electronics AX88172 USB Ethernet
 cue*	at uhub?			# CATC USB-EL1201A based Ethernet
 kue*	at uhub?			# Kawasaki KL5KUSB101B based Ethernet
 cdce*	at uhub?			# CDC Ethernet
+urndis*	at uhub?			# Remote NDIS Ethernet
 udav*	at uhub?			# Davicom DM9601 based Ethernet
 upl*	at uhub?			# Prolific PL2301/PL2302 host-to-host `network'
 url*	at uhub?			# Realtek RTL8150L based adapters
@@ -127,6 +128,7 @@ rum*	at uhub?			# Ralink RT2501USB/RT2601USB
 run*	at uhub?			# Ralink RT2700U/RT2800U/RT3000U
 uow*	at uhub?			# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
+uthum*	at uhidev?			# TEMPerHUM sensor
 
 # USB Video
 uvideo* at uhub?
@@ -277,7 +279,7 @@ vga*	at pci?				# PCI VGA graphics
 tga*	at pci?				# DEC ZLXp-E[123] graphics
 
 # Media Independent Interface (mii) drivers
-eephy*	at mii?				# Marvell PHYs for Intel GigE
+eephy*	at mii?				# Marvell PHYs
 exphy*	at mii?				# 3Com internal PHYs
 inphy*	at mii?				# Intel 82555 PHYs
 iophy*	at mii?				# Intel 82553 PHYs

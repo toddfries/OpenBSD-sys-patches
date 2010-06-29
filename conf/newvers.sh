@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: newvers.sh,v 1.97 2009/05/17 02:02:30 deraadt Exp $
+#	$OpenBSD: newvers.sh,v 1.104 2010/03/18 21:17:48 otto Exp $
 #	$NetBSD: newvers.sh,v 1.17.2.1 1995/10/12 05:17:11 jtc Exp $
 #
 # Copyright (c) 1984, 1986, 1990, 1993
@@ -51,8 +51,6 @@ id=`basename ${d}`
 #	share/mk/sys.mk
 #		OSMAJOR
 #		OSMINOR
-#	distrib/miniroot/install.sub
-#		VERSION
 #	etc/root/root.mail
 #		VERSION and other bits
 #	sys/arch/macppc/stand/tbxidata/bsd.tbxi
@@ -61,10 +59,12 @@ id=`basename ${d}`
 # -current and -beta tagging:
 #	For release, select STATUS ""
 #	Right after release unlock, select STATUS "-current"
+#	and enable POOL_DEBUG in sys/conf/GENERIC
 #	A month or so before release, select STATUS "-beta"
+#	and disable POOL_DEBUG in sys/conf/GENERIC
 
 ost="OpenBSD"
-osr="4.5"
+osr="4.7"
 
 cat >vers.c <<eof
 #define STATUS "-current"		/* just after a release */

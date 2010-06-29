@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_generic.c,v 1.65 2009/06/04 00:24:02 blambert Exp $	*/
+/*	$OpenBSD: sys_generic.c,v 1.68 2010/04/11 17:46:13 kettenis Exp $	*/
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*
@@ -139,13 +139,14 @@ dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	struct iovec *ktriov = NULL;
 #endif
 
+	/* note: can't use iovlen until iovcnt is validated */
+	iovlen = iovcnt * sizeof(struct iovec);
+
 	/*
 	 * If the iovec array exists in userspace, it needs to be copied in;
 	 * otherwise, it can be used directly.
 	 */
 	if (userspace) {
-		/* note: can't use iovlen until iovcnt is validated */
-		iovlen = iovcnt * sizeof(struct iovec);
 		if ((u_int)iovcnt > UIO_SMALLIOV) {
 			if ((u_int)iovcnt > IOV_MAX) {
 				error = EINVAL;
@@ -291,13 +292,14 @@ dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	struct iovec *ktriov = NULL;
 #endif
 
+	/* note: can't use iovlen until iovcnt is validated */
+	iovlen = iovcnt * sizeof(struct iovec);
+
 	/*
 	 * If the iovec array exists in userspace, it needs to be copied in;
 	 * otherwise, it can be used directly.
 	 */
 	if (userspace) {
-		/* note: can't use iovlen until iovcnt is validated */
-		iovlen = iovcnt * sizeof(struct iovec);
 		if ((u_int)iovcnt > UIO_SMALLIOV) {
 			if ((u_int)iovcnt > IOV_MAX) {
 				error = EINVAL;
@@ -394,7 +396,7 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 	caddr_t data, memp;
 	int tmp;
 #define STK_PARAMS	128
-	char stkbuf[STK_PARAMS];
+	u_long stkbuf[STK_PARAMS / sizeof(u_long)];
 
 	fdp = p->p_fd;
 	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
@@ -425,7 +427,7 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 		memp = (caddr_t)malloc((u_long)size, M_IOCTLOPS, M_WAITOK);
 		data = memp;
 	} else
-		data = stkbuf;
+		data = (caddr_t)stkbuf;
 	if (com&IOC_IN) {
 		if (size) {
 			error = copyin(SCARG(uap, data), data, (u_int)size);
@@ -706,6 +708,7 @@ selwakeup(struct selinfo *sip)
 	struct proc *p;
 	int s;
 
+	KNOTE(&sip->si_note, 0);
 	if (sip->si_selpid == 0)
 		return;
 	if (sip->si_flags & SI_COLL) {

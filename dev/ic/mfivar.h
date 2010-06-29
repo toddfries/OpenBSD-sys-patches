@@ -1,4 +1,4 @@
-/* $OpenBSD: mfivar.h,v 1.35 2009/01/28 23:45:12 marco Exp $ */
+/* $OpenBSD: mfivar.h,v 1.38 2010/04/10 17:26:10 marco Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -57,6 +57,7 @@ struct mfi_ccb {
 
 	union mfi_frame		*ccb_frame;
 	paddr_t			ccb_pframe;
+	bus_addr_t		ccb_pframe_offset;
 	uint32_t		ccb_frame_size;
 	uint32_t		ccb_extra_frames;
 
@@ -76,8 +77,7 @@ struct mfi_ccb {
 #define MFI_DATA_IN	1
 #define MFI_DATA_OUT	2
 
-	struct scsi_xfer	*ccb_xs;
-
+	void			*ccb_cookie;
 	void			(*ccb_done)(struct mfi_ccb *);
 
 	volatile enum {
@@ -157,6 +157,7 @@ struct mfi_softc {
 	struct mfi_mem		*sc_sense;
 
 	struct mfi_ccb_list	sc_ccb_freeq;
+	struct mutex		sc_ccb_mtx;
 
 	/* mgmt lock */
 	struct rwlock		sc_lock;

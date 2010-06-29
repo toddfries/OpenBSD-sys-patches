@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.7 2009/04/14 16:01:04 oga Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.10 2010/05/24 15:06:05 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -97,6 +97,15 @@ pt_entry_t	kernel_ptes[] = {
 
 #define	pmap_pvh_attrs(a) \
 	(((a) & PTE_DIRTY) | ((a) ^ PTE_REFTRAP))
+
+struct vm_page	*pmap_pagealloc(struct uvm_object *obj, voff_t off);
+void		 pmap_pte_flush(struct pmap *pmap, vaddr_t va, pt_entry_t pte);
+#ifdef DDB
+void		 pmap_dump_table(pa_space_t space, vaddr_t sva);
+void		 pmap_dump_pv(paddr_t pa);
+#endif
+int		 pmap_check_alias(struct pv_entry *pve, vaddr_t va,
+		    pt_entry_t pte);
 
 struct vm_page *
 pmap_pagealloc(int wait)
@@ -393,7 +402,6 @@ const pt_entry_t hppa_pgs[] = {
 	PTE_PG16M,
 	PTE_PG64M
 };
-#define	nhppa_pgs	sizeof(hppa_pgs)/sizeof(hppa_pgs[0])
 
 void
 pmap_maphys(paddr_t spa, paddr_t epa)
@@ -407,22 +415,22 @@ pmap_maphys(paddr_t spa, paddr_t epa)
 	s = ffs(spa) - 12;
 	e = ffs(epa) - 12;
 
-	if (s < e || (s == e && s / 2 < nhppa_pgs)) {
+	if (s < e || (s == e && s / 2 < nitems(hppa_pgs))) {
 		i = s / 2;
-		if (i > nhppa_pgs)
-			i = nhppa_pgs;
+		if (i > nitems(hppa_pgs))
+			i = nitems(hppa_pgs);
 		pa = spa;
 		spa = tpa = 0x1000 << ((i + 1) * 2);
 	} else if (s > e) {
 		i = e / 2;
-		if (i > nhppa_pgs)
-			i = nhppa_pgs;
+		if (i > nitems(hppa_pgs))
+			i = nitems(hppa_pgs);
 		epa = pa = epa & (0xfffff000 << ((i + 1) * 2));
 		tpa = epa;
 	} else {
 		i = s / 2;
-		if (i > nhppa_pgs)
-			i = nhppa_pgs;
+		if (i > nitems(hppa_pgs))
+			i = nitems(hppa_pgs);
 		pa = spa;
 		spa = tpa = epa;
 	}
@@ -621,7 +629,7 @@ pmap_create()
 	pmap->pm_ptphint = NULL;
 
 	TAILQ_INIT(&pmap->pm_pglist);
-	if (uvm_pglistalloc(2 * PAGE_SIZE, 0, VM_MIN_KERNEL_ADDRESS,
+	if (uvm_pglistalloc(2 * PAGE_SIZE, 0, VM_MIN_KERNEL_ADDRESS - 1,
 	    PAGE_SIZE, 2 * PAGE_SIZE, &pmap->pm_pglist, 1, UVM_PLA_WAITOK))
 		panic("pmap_create: no pages");
 

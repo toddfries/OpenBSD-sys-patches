@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohci.c,v 1.91 2009/06/02 23:49:33 deraadt Exp $ */
+/*	$OpenBSD: ohci.c,v 1.95 2010/05/01 19:43:57 jsg Exp $ */
 /*	$NetBSD: ohci.c,v 1.139 2003/02/22 05:24:16 tsutsui Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ohci.c,v 1.22 1999/11/17 22:33:40 n_hibma Exp $	*/
 
@@ -196,9 +196,27 @@ void		ohci_dump_itds(ohci_soft_itd_t *);
  do { OBARR(sc); bus_space_write_2((sc)->iot, (sc)->ioh, (r), (x)); } while (0)
 #define OWRITE4(sc, r, x) \
  do { OBARR(sc); bus_space_write_4((sc)->iot, (sc)->ioh, (r), (x)); } while (0)
-#define OREAD1(sc, r) (OBARR(sc), bus_space_read_1((sc)->iot, (sc)->ioh, (r)))
-#define OREAD2(sc, r) (OBARR(sc), bus_space_read_2((sc)->iot, (sc)->ioh, (r)))
-#define OREAD4(sc, r) (OBARR(sc), bus_space_read_4((sc)->iot, (sc)->ioh, (r)))
+
+static __inline u_int8_t
+OREAD1(ohci_softc_t *sc, bus_size_t r)
+{
+	OBARR(sc);
+	return bus_space_read_1(sc->iot, sc->ioh, r);
+}
+
+static __inline u_int16_t
+OREAD2(ohci_softc_t *sc, bus_size_t r)
+{
+	OBARR(sc);
+	return bus_space_read_2(sc->iot, sc->ioh, r);
+}
+
+static __inline u_int32_t
+OREAD4(ohci_softc_t *sc, bus_size_t r)
+{
+	OBARR(sc);
+	return bus_space_read_4(sc->iot, sc->ioh, r);
+}
 
 /* Reverse the bits in a value 0 .. 31 */
 u_int8_t revbits[OHCI_NO_INTRS] =
@@ -306,7 +324,7 @@ struct usbd_pipe_methods ohci_device_isoc_methods = {
 };
 
 int
-ohci_activate(struct device *self, enum devact act)
+ohci_activate(struct device *self, int act)
 {
 	struct ohci_softc *sc = (struct ohci_softc *)self;
 	int rv = 0;
@@ -319,6 +337,12 @@ ohci_activate(struct device *self, enum devact act)
 		if (sc->sc_child != NULL)
 			rv = config_deactivate(sc->sc_child);
 		sc->sc_dying = 1;
+		break;
+	case DVACT_SUSPEND:
+		ohci_power(PWR_SUSPEND, sc);
+		break;
+	case DVACT_RESUME:
+		ohci_power(PWR_RESUME, sc);
 		break;
 	}
 	return (rv);
@@ -1470,12 +1494,10 @@ ohci_softintr(void *v)
 		}
 	}
 
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	if (sc->sc_softwake) {
 		sc->sc_softwake = 0;
 		wakeup(&sc->sc_softwake);
 	}
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 
 	sc->sc_bus.intr_context--;
 	DPRINTFN(10,("ohci_softintr: done:\n"));
@@ -2213,13 +2235,9 @@ ohci_abort_xfer(usbd_xfer_handle xfer, usbd_status status)
 	 */
 	usb_delay_ms(opipe->pipe.device->bus, 20); /* Hardware finishes in 1ms */
 	s = splusb();
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	sc->sc_softwake = 1;
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 	usb_schedsoftintr(&sc->sc_bus);
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	tsleep(&sc->sc_softwake, PZERO, "ohciab", 0);
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 	splx(s);
 
 	/*

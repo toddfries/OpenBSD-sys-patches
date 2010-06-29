@@ -1,4 +1,4 @@
-/*	$OpenBSD: beagle_machdep.c,v 1.2 2009/05/24 21:05:30 drahn Exp $ */
+/*	$OpenBSD: beagle_machdep.c,v 1.6 2010/06/27 08:05:59 drahn Exp $ */
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -227,6 +227,12 @@ pv_addr_t kernel_pt_table[NUM_KERNEL_PTS];
 
 extern struct user *proc0paddr;
 
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
+
 /* Prototypes */
 
 void	omdog_reset(void);
@@ -379,10 +385,10 @@ read_ttb(void)
 static vaddr_t section_free = 0xfd000000; /* XXX - huh */
 
 int bootstrap_bs_map(void *t, bus_addr_t bpa, bus_size_t size,
-    int cacheable, bus_space_handle_t *bshp);
+    int flags, bus_space_handle_t *bshp);
 int
 bootstrap_bs_map(void *t, bus_addr_t bpa, bus_size_t size,
-    int cacheable, bus_space_handle_t *bshp)
+    int flags, bus_space_handle_t *bshp)
 {
 	u_long startpa;
 	vaddr_t va;

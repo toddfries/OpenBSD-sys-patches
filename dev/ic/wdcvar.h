@@ -1,4 +1,4 @@
-/*      $OpenBSD: wdcvar.h,v 1.42 2008/06/26 05:42:16 ray Exp $     */
+/*      $OpenBSD: wdcvar.h,v 1.45 2010/05/09 15:46:17 jasper Exp $     */
 /*	$NetBSD: wdcvar.h,v 1.17 1999/04/11 20:50:29 bouyer Exp $	*/
 
 /*-
@@ -54,8 +54,10 @@ struct channel_softc { /* Per channel data */
 	/* Our registers */
 	bus_space_tag_t       cmd_iot;
 	bus_space_handle_t    cmd_ioh;
+	bus_size_t            cmd_iosz;
 	bus_space_tag_t       ctl_iot;
 	bus_space_handle_t    ctl_ioh;
+	bus_size_t            ctl_iosz;
 	/* data32{iot,ioh} are only used for 32 bit xfers */
 	bus_space_tag_t         data32iot;
 	bus_space_handle_t      data32ioh;
@@ -223,7 +225,7 @@ struct wdc_xfer {
 #define C_DMA		0x0040 /* cmd uses DMA */
 #define C_SENSE		0x0080 /* cmd is a internal command */
 #define C_MEDIA_ACCESS	0x0100 /* is a media access command */
-#define C_POLL_MACHINE	0x0200 /* machine has a poll hander */
+#define C_POLL_MACHINE	0x0200 /* machine has a poll handler */
 
 	/* Informations about our location */
 	struct channel_softc *chp;
@@ -260,7 +262,7 @@ struct wdc_xfer {
 int   wdcprobe(struct channel_softc *);
 void  wdcattach(struct channel_softc *);
 int   wdcdetach(struct channel_softc *, int);
-int   wdcactivate(struct device *, enum devact);
+int   wdcactivate(struct device *, int);
 int   wdcintr(void *);
 void  wdc_exec_xfer(struct channel_softc *, struct wdc_xfer *);
 struct wdc_xfer *wdc_get_xfer(int); /* int = WDC_NOSLEEP/CANSLEEP */

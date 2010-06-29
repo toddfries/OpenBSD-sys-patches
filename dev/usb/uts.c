@@ -1,4 +1,4 @@
-/*	$OpenBSD: uts.c,v 1.24 2009/02/14 20:05:09 chl Exp $ */
+/*	$OpenBSD: uts.c,v 1.26 2009/12/05 20:39:31 matthieu Exp $ */
 
 /*
  * Copyright (c) 2007 Robert Nagy <robert@openbsd.org>
@@ -116,7 +116,7 @@ const struct wsmouse_accessops uts_accessops = {
 int uts_match(struct device *, void *, void *);
 void uts_attach(struct device *, struct device *, void *);
 int uts_detach(struct device *, int);
-int uts_activate(struct device *, enum devact);
+int uts_activate(struct device *, int);
 
 struct cfdriver uts_cd = {
 	NULL, "uts", DV_DULL
@@ -134,8 +134,14 @@ int
 uts_match(struct device *parent, void *match, void *aux)
 {
 	struct usb_attach_arg *uaa = aux;
+	usb_interface_descriptor_t *id;
 
 	if (uaa->iface == NULL)
+		return (UMATCH_NONE);
+
+	/* Some eGalax touch screens are HID devices. ignore them */
+	id = usbd_get_interface_descriptor(uaa->iface);
+	if (id != NULL && id->bInterfaceClass == UICLASS_HID)
 		return (UMATCH_NONE);
 
 	return (usb_lookup(uts_devs, uaa->vendor, uaa->product) != NULL) ?
@@ -248,7 +254,7 @@ uts_detach(struct device *self, int flags)
 }
 
 int
-uts_activate(struct device *self, enum devact act)
+uts_activate(struct device *self, int act)
 {
 	struct uts_softc *sc = (struct uts_softc *)self;
 	int rv = 0;

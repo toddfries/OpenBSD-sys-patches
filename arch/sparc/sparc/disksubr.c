@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.81 2009/06/04 21:13:02 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.86 2010/04/25 06:15:17 deraadt Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.16 1996/04/28 20:25:59 thorpej Exp $ */
 
 /*
@@ -46,7 +46,7 @@
 
 #include "cd.h"
 
-static	char *disklabel_sun_to_bsd(struct sun_disklabel *, struct disklabel *);
+static	int disklabel_sun_to_bsd(struct sun_disklabel *, struct disklabel *);
 static	int disklabel_bsd_to_sun(struct disklabel *, struct sun_disklabel *);
 static __inline u_int sun_extended_sum(struct sun_disklabel *, void *);
 
@@ -66,15 +66,15 @@ extern void cdstrategy(struct buf *);
  *
  * Returns null on success and an error string on failure.
  */
-char *
+int
 readdisklabel(dev_t dev, void (*strat)(struct buf *),
     struct disklabel *lp, int spoofonly)
 {
 	struct sun_disklabel *slp;
 	struct buf *bp = NULL;
-	char *msg;
+	int error;
 
-	if ((msg = initdisklabel(lp)))
+	if ((error = initdisklabel(lp)))
 		goto done;
 	lp->d_flags |= D_VENDOR;
 
@@ -82,16 +82,16 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *),
 	 * On sparc64 we check for a CD label first, because our
 	 * CD install media contains both sparc & sparc64 labels.
 	 * We want the sparc64 machine to find the "CD label", not
-	 * the SunOS label, for loading it's kernel.
+	 * the SunOS label, for loading its kernel.
 	 */
 #if NCD > 0
 	if (strat == cdstrategy) {
 #if defined(CD9660)
-		if (iso_disklabelspoof(dev, strat, lp) == 0)
+		if ((error = iso_disklabelspoof(dev, strat, lp)) == 0)
 			goto done;
 #endif
 #if defined(UDF)
-		if (udf_disklabelspoof(dev, strat, lp) == 0)
+		if ((error = udf_disklabelspoof(dev, strat, lp)) == 0)
 			goto done;
 #endif
 	}
@@ -109,37 +109,35 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *),
 	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
 	if (biowait(bp)) {
-		msg = "disk label read error";
+		error = bp->b_error;
 		goto done;
 	}
 
 	slp = (struct sun_disklabel *)bp->b_data;
 	if (slp->sl_magic == SUN_DKMAGIC) {
-		msg = disklabel_sun_to_bsd(slp, lp);
+		error = disklabel_sun_to_bsd(slp, lp);
 		goto done;
 	}
 
-	msg = checkdisklabel(bp->b_data + LABELOFFSET, lp, 0, DL_GETDSIZE(lp));
-	if (msg == NULL)
+	error = checkdisklabel(bp->b_data + LABELOFFSET, lp, 0, DL_GETDSIZE(lp));
+	if (error == 0)
 		goto done;
 
 doslabel:
-	msg = readdoslabel(bp, strat, lp, NULL, spoofonly);
-	if (msg == NULL)
+	error = readdoslabel(bp, strat, lp, NULL, spoofonly);
+	if (error == 0)
 		goto done;
 
 	/* A CD9660/UDF label may be on a non-CD drive, so recheck */
 #if defined(CD9660)
-	if (iso_disklabelspoof(dev, strat, lp) == 0) {
-		msg = NULL;
+	error = iso_disklabelspoof(dev, strat, lp);
+	if (error == 0)
 		goto done;
-	}
 #endif
 #if defined(UDF)
-	if (udf_disklabelspoof(dev, strat, lp) == 0) {
-		msg = NULL;
+	error = udf_disklabelspoof(dev, strat, lp);
+	if (error == 0)
 		goto done;
-	}
 #endif
 
 done:
@@ -147,7 +145,7 @@ done:
 		bp->b_flags |= B_INVAL;
 		brelse(bp);
 	}
-	return (msg);
+	return (error);
 }
 
 /*
@@ -234,7 +232,7 @@ sun_extended_sum(struct sun_disklabel *sl, void *end)
  *
  * The BSD label is cleared out before this is called.
  */
-static char *
+static int
 disklabel_sun_to_bsd(struct sun_disklabel *sl, struct disklabel *lp)
 {
 	struct sun_preamble *preamble = (struct sun_preamble *)sl;
@@ -250,7 +248,7 @@ disklabel_sun_to_bsd(struct sun_disklabel *sl, struct disklabel *lp)
 	while (sp1 < sp2)
 		cksum ^= *sp1++;
 	if (cksum != 0)
-		return ("SunOS disk label, bad checksum");
+		return (EINVAL); /* SunOS disk label, bad checksum */
 
 	/* Format conversion. */
 	lp->d_magic = DISKMAGIC;
@@ -269,10 +267,9 @@ disklabel_sun_to_bsd(struct sun_disklabel *sl, struct disklabel *lp)
 		DL_SETDSIZE(lp, (daddr64_t)secpercyl * sl->sl_ncylinders);
 	lp->d_version = 1;
 
-	lp->d_sparespercyl = sl->sl_sparespercyl;
+	memcpy(&lp->d_uid, &sl->sl_uid, sizeof(sl->sl_uid));
+
 	lp->d_acylinders = sl->sl_acylinders;
-	lp->d_rpm = sl->sl_rpm;
-	lp->d_interleave = sl->sl_interleave;
 
 	lp->d_npartitions = MAXPARTITIONS;
 	/* These are as defined in <ufs/ffs/fs.h> */
@@ -408,15 +405,15 @@ disklabel_bsd_to_sun(struct disklabel *lp, struct sun_disklabel *sl)
 		return (EINVAL);
 
 	/* Format conversion. */
+	bzero(sl, sizeof(*sl));
 	memcpy(sl->sl_text, lp->d_packname, sizeof(lp->d_packname));
-	sl->sl_rpm = lp->d_rpm;
 	sl->sl_pcylinders = lp->d_ncylinders + lp->d_acylinders; /* XXX */
-	sl->sl_sparespercyl = lp->d_sparespercyl;
-	sl->sl_interleave = lp->d_interleave;
 	sl->sl_ncylinders = lp->d_ncylinders;
 	sl->sl_acylinders = lp->d_acylinders;
 	sl->sl_ntracks = lp->d_ntracks;
 	sl->sl_nsectors = lp->d_nsectors;
+
+	memcpy(&sl->sl_uid, &lp->d_uid, sizeof(lp->d_uid));
 
 	secpercyl = sl->sl_nsectors * sl->sl_ntracks;
 	for (i = 0; i < 8; i++) {
@@ -461,7 +458,6 @@ disklabel_bsd_to_sun(struct disklabel *lp, struct sun_disklabel *sl)
 	while (sp1 < sp2)
 		cksum ^= *sp1++;
 	sl->sl_cksum = cksum;
-
 	return (0);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.12 2009/04/20 00:42:06 oga Exp $	*/
+/*	$OpenBSD: bus.h,v 1.15 2010/04/04 12:49:30 miod Exp $	*/
 /*	$NetBSD: bus.h,v 1.14 2000/06/26 04:56:13 simonb Exp $	*/
 
 /*-
@@ -83,9 +83,9 @@ struct vax_bus_space {
 
 	/* mapping/unmapping */
 	int		(*vbs_map)(void *, bus_addr_t, bus_size_t,
-			    int, bus_space_handle_t *, int);
+			    int, bus_space_handle_t *);
 	void		(*vbs_unmap)(void *, bus_space_handle_t,
-			    bus_size_t, int);
+			    bus_size_t);
 	int		(*vbs_subregion)(void *, bus_space_handle_t,
 			    bus_size_t, bus_size_t, bus_space_handle_t *);
 
@@ -95,6 +95,9 @@ struct vax_bus_space {
 			    bus_addr_t *, bus_space_handle_t *);
 	void		(*vbs_free)(void *, bus_space_handle_t,
 			    bus_size_t);
+
+	/* get kernel virtual address */
+	void *		(*vbs_vaddr)(void *, bus_space_handle_t);
 };
 
 /*
@@ -109,9 +112,7 @@ struct vax_bus_space {
 #define	BUS_SPACE_MAP_PREFETCHABLE	0x04
 
 #define	bus_space_map(t, a, s, f, hp)					\
-	(*(t)->vbs_map)((t)->vbs_cookie, (a), (s), (f), (hp), 1)
-#define	vax_bus_space_map_noacct(t, a, s, f, hp)			\
-	(*(t)->vbs_map)((t)->vbs_cookie, (a), (s), (f), (hp), 0)
+	(*(t)->vbs_map)((t)->vbs_cookie, (a), (s), (f), (hp))
 
 /*
  *	int bus_space_unmap(bus_space_tag_t t,
@@ -121,9 +122,7 @@ struct vax_bus_space {
  */
 
 #define bus_space_unmap(t, h, s)					\
-	(*(t)->vbs_unmap)((t)->vbs_cookie, (h), (s), 1)
-#define vax_bus_space_unmap_noacct(t, h, s)				\
-	(*(t)->vbs_unmap)((t)->vbs_cookie, (h), (s), 0)
+	(*(t)->vbs_unmap)((t)->vbs_cookie, (h), (s))
 
 /*
  *	int bus_space_subregion(bus_space_tag_t t,
@@ -158,6 +157,15 @@ struct vax_bus_space {
 
 #define bus_space_free(t, h, s)						\
 	(*(t)->vbs_free)((t)->vbs_cookie, (h), (s))
+
+/*
+ *	void *bus_space_vaddr(bus_space_tag_t t, bus_space_handle_t h);
+ *
+ * Get kernel virtual address.
+ */
+
+#define	bus_space_vaddr(t, h)						\
+	(*(t)->vbs_vaddr)((t)->vbs_cookie, (h))
 
 /*
  *	u_intN_t bus_space_read_N(bus_space_tag_t tag,
@@ -630,7 +638,7 @@ vax_mem_set_region_4(t, h, o, v, c)
 #endif
 
 /*
- *	void bus_space_copy_region_N(bus_space_tag_t tag,
+ *	void bus_space_copy_N(bus_space_tag_t tag,
  *	    bus_space_handle_t bsh1, bus_size_t off1,
  *	    bus_space_handle_t bsh2, bus_size_t off2,
  *	    size_t count);
@@ -639,27 +647,27 @@ vax_mem_set_region_4(t, h, o, v, c)
  * at tag/bsh1/off1 to bus space starting at tag/bsh2/off2.
  */
 
-static __inline void vax_mem_copy_region_1(bus_space_tag_t,
+static __inline void vax_mem_copy_1(bus_space_tag_t,
 	bus_space_handle_t, bus_size_t, bus_space_handle_t,
 	bus_size_t, size_t);
-static __inline void vax_mem_copy_region_2(bus_space_tag_t,
+static __inline void vax_mem_copy_2(bus_space_tag_t,
 	bus_space_handle_t, bus_size_t, bus_space_handle_t,
 	bus_size_t, size_t);
-static __inline void vax_mem_copy_region_4(bus_space_tag_t,
+static __inline void vax_mem_copy_4(bus_space_tag_t,
 	bus_space_handle_t, bus_size_t, bus_space_handle_t,
 	bus_size_t, size_t);
 
-#define	bus_space_copy_region_1(t, h1, o1, h2, o2, c)			\
-	vax_mem_copy_region_1((t), (h1), (o1), (h2), (o2), (c))
+#define	bus_space_copy_1(t, h1, o1, h2, o2, c)				\
+	vax_mem_copy_1((t), (h1), (o1), (h2), (o2), (c))
 
-#define	bus_space_copy_region_2(t, h1, o1, h2, o2, c)			\
-	vax_mem_copy_region_2((t), (h1), (o1), (h2), (o2), (c))
+#define	bus_space_copy_2(t, h1, o1, h2, o2, c)				\
+	vax_mem_copy_2((t), (h1), (o1), (h2), (o2), (c))
 
-#define	bus_space_copy_region_4(t, h1, o1, h2, o2, c)			\
-	vax_mem_copy_region_4((t), (h1), (o1), (h2), (o2), (c))
+#define	bus_space_copy_4(t, h1, o1, h2, o2, c)				\
+	vax_mem_copy_4((t), (h1), (o1), (h2), (o2), (c))
 
 static __inline void
-vax_mem_copy_region_1(t, h1, o1, h2, o2, c)
+vax_mem_copy_1(t, h1, o1, h2, o2, c)
 	bus_space_tag_t t;
 	bus_space_handle_t h1;
 	bus_size_t o1;
@@ -685,7 +693,7 @@ vax_mem_copy_region_1(t, h1, o1, h2, o2, c)
 }
 
 static __inline void
-vax_mem_copy_region_2(t, h1, o1, h2, o2, c)
+vax_mem_copy_2(t, h1, o1, h2, o2, c)
 	bus_space_tag_t t;
 	bus_space_handle_t h1;
 	bus_size_t o1;
@@ -711,7 +719,7 @@ vax_mem_copy_region_2(t, h1, o1, h2, o2, c)
 }
 
 static __inline void
-vax_mem_copy_region_4(t, h1, o1, h2, o2, c)
+vax_mem_copy_4(t, h1, o1, h2, o2, c)
 	bus_space_tag_t t;
 	bus_space_handle_t h1;
 	bus_size_t o1;
@@ -737,7 +745,7 @@ vax_mem_copy_region_4(t, h1, o1, h2, o2, c)
 }
 
 #if 0	/* Cause a link error for bus_space_copy_8 */
-#define	bus_space_copy_region_8	!!! bus_space_copy_region_8 unimplemented !!!
+#define	bus_space_copy_8	!!! bus_space_copy_8 unimplemented !!!
 #endif
 
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.76 2009/04/19 17:53:39 deraadt Exp $	*/
+/*	$OpenBSD: systm.h,v 1.79 2010/04/20 22:05:44 tedu Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -105,6 +105,7 @@ extern dev_t swapdev;		/* swapping device */
 extern struct vnode *swapdev_vp;/* vnode equivalent to above */
 
 struct proc;
+#define curproc curcpu()->ci_curproc
 
 typedef int	sy_call_t(struct proc *, void *, register_t *);
 
@@ -215,7 +216,7 @@ void	realitexpire(void *);
 
 struct clockframe;
 void	hardclock(struct clockframe *);
-void	softclock(void);
+void	softclock(void *);
 void	statclock(struct clockframe *);
 
 void	initclocks(void);
@@ -226,6 +227,24 @@ void	cpu_initclocks(void);
 void	startprofclock(struct proc *);
 void	stopprofclock(struct proc *);
 void	setstatclockrate(int);
+
+struct sleep_state;
+void	sleep_setup(struct sleep_state *, const volatile void *, int,
+	    const char *);
+void	sleep_setup_timeout(struct sleep_state *, int);
+void	sleep_setup_signal(struct sleep_state *, int);
+void	sleep_finish(struct sleep_state *, int);
+int	sleep_finish_timeout(struct sleep_state *);
+int	sleep_finish_signal(struct sleep_state *);
+void	sleep_queue_init(void);
+
+struct mutex;
+void    wakeup_n(const volatile void *, int);
+void    wakeup(const volatile void *);
+#define wakeup_one(c) wakeup_n((c), 1)
+int	tsleep(const volatile void *, int, const char *, int);
+int	msleep(const volatile void *, struct mutex *, int,  const char*, int);
+void	yield(void);
 
 void	wdog_register(void *, int (*)(void *, int));
 

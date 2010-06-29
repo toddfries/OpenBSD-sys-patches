@@ -1,4 +1,4 @@
-/*	$OpenBSD: pool.h,v 1.31 2008/12/23 06:54:12 dlg Exp $	*/
+/*	$OpenBSD: pool.h,v 1.34 2010/06/27 03:03:48 thib Exp $	*/
 /*	$NetBSD: pool.h,v 1.27 2001/06/06 22:00:17 rafal Exp $	*/
 
 /*-
@@ -103,7 +103,7 @@ struct pool {
 
 	int			pr_ipl;
 
-	SPLAY_HEAD(phtree, pool_item_header) pr_phtree;
+	RB_HEAD(phtree, pool_item_header) pr_phtree;
 
 	int		pr_maxcolor;	/* Cache colouring */
 	int		pr_curcolor;
@@ -131,6 +131,10 @@ struct pool {
 	unsigned long	pr_npagefree;	/* # of pages released */
 	unsigned int	pr_hiwat;	/* max # of pages in pool */
 	unsigned long	pr_nidle;	/* # of idle pages */
+
+	/* Physical memory configuration. */
+	struct uvm_constraint_range *pr_crange;
+	int		pr_pa_nsegs;
 };
 
 #ifdef _KERNEL
@@ -144,6 +148,9 @@ void		pool_setipl(struct pool *, int);
 void		pool_setlowat(struct pool *, int);
 void		pool_sethiwat(struct pool *, int);
 int		pool_sethardlimit(struct pool *, u_int, const char *, int);
+struct uvm_constraint_range; /* XXX */
+void		pool_set_constraints(struct pool *,
+		    struct uvm_constraint_range *, int);
 void		pool_set_ctordtor(struct pool *, int (*)(void *, void *, int),
 		    void(*)(void *, void *), void *);
 
@@ -160,7 +167,8 @@ int		pool_prime(struct pool *, int);
 void		pool_printit(struct pool *, const char *,
 		    int (*)(const char *, ...));
 int		pool_chk(struct pool *, const char *);
-void		pool_walk(struct pool *, void (*)(void *));
+void		pool_walk(struct pool *, int, int (*)(const char *, ...),
+		    void (*)(void *, int, int (*)(const char *, ...)));
 #endif
 #endif /* _KERNEL */
 

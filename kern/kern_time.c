@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_time.c,v 1.66 2009/06/05 15:17:02 ckuethe Exp $	*/
+/*	$OpenBSD: kern_time.c,v 1.70 2010/06/28 21:23:20 art Exp $	*/
 /*	$NetBSD: kern_time.c,v 1.20 1996/02/18 11:57:06 fvdl Exp $	*/
 
 /*
@@ -48,6 +48,16 @@
 
 #include <machine/cpu.h>
 
+#ifdef __HAVE_TIMECOUNTER
+struct timeval adjtimedelta;		/* unapplied time correction */
+#else
+int	tickdelta;			/* current clock skew, us. per tick */
+long	timedelta;			/* unapplied time correction, us. */
+long	bigadj = 1000000;		/* use 10x skew above bigadj us. */
+int64_t	ntp_tick_permanent;
+int64_t	ntp_tick_acc;
+#endif
+
 void	itimerround(struct timeval *);
 
 /* 
@@ -67,6 +77,12 @@ settime(struct timespec *ts)
 {
 	struct timespec now;
 
+	/*
+	 * Adjtime in progress is meaningless or harmful after
+	 * setting the clock. Cancel adjtime and then set new time.
+	 */
+	adjtimedelta.tv_usec = 0;
+	adjtimedelta.tv_sec = 0;
 
 	/*
 	 * Don't allow the time to be set forward so far it will wrap
@@ -149,12 +165,45 @@ settime(struct timespec *ts)
 	timersub(tv, &time, &delta);
 	time = *tv;
 	timeradd(&boottime, &delta, &boottime);
+
+	/*
+	 * Adjtime in progress is meaningless or harmful after
+	 * setting the clock.
+	 */
+	tickdelta = 0;
+	timedelta = 0;
+
 	splx(s);
 	resettodr();
 
 	return (0);
 }
 #endif
+
+int
+clock_gettime(struct proc *p, clockid_t clock_id, struct timespec *tp)
+{
+	struct timeval tv;
+
+	switch (clock_id) {
+	case CLOCK_REALTIME:
+		nanotime(tp);
+		break;
+	case CLOCK_MONOTONIC:
+		nanouptime(tp);
+		break;
+	case CLOCK_PROF:
+		microuptime(&tv);
+		timersub(&tv, &curcpu()->ci_schedstate.spc_runtime, &tv);
+		timeradd(&tv, &p->p_rtime, &tv);
+		tp->tv_sec = tv.tv_sec;
+		tp->tv_nsec = tv.tv_usec * 1000;
+		break;
+	default:
+		return (EINVAL);
+	}
+	return (0);
+}
 
 /* ARGSUSED */
 int
@@ -164,24 +213,11 @@ sys_clock_gettime(struct proc *p, void *v, register_t *retval)
 		syscallarg(clockid_t) clock_id;
 		syscallarg(struct timespec *) tp;
 	} */ *uap = v;
-	clockid_t clock_id;
 	struct timespec ats;
+	int error;
 
-	clock_id = SCARG(uap, clock_id);
-	switch (clock_id) {
-	case CLOCK_REALTIME:
-		nanotime(&ats);
-		break;
-	case CLOCK_MONOTONIC:
-		nanouptime(&ats);
-		break;
-	case CLOCK_PROF:
-		ats.tv_sec = p->p_rtime.tv_sec;
-		ats.tv_nsec = p->p_rtime.tv_usec * 1000;
-		break;
-	default:
-		return (EINVAL);
-	}
+	if ((error = clock_gettime(p, SCARG(uap, clock_id), &ats)) != 0)
+		return (error);
 
 	return copyout(&ats, SCARG(uap, tp), sizeof(ats));
 }
@@ -319,16 +355,6 @@ sys_gettimeofday(struct proc *p, void *v, register_t *retval)
 	return (error);
 }
 
-#ifdef __HAVE_TIMECOUNTER
-struct timeval adjtimedelta;		/* unapplied time correction */
-#else
-int	tickdelta;			/* current clock skew, us. per tick */
-long	timedelta;			/* unapplied time correction, us. */
-long	bigadj = 1000000;		/* use 10x skew above bigadj us. */
-int64_t	ntp_tick_permanent;
-int64_t	ntp_tick_acc;
-#endif
-
 /* ARGSUSED */
 int
 sys_settimeofday(struct proc *p, void *v, register_t *retval)
@@ -352,20 +378,6 @@ sys_settimeofday(struct proc *p, void *v, register_t *retval)
 		return (error);
 	if (SCARG(uap, tv)) {
 		struct timespec ts;
-
-		/*
-		 * Adjtime in progress is meaningless or harmful after
-		 * setting the clock. Cancel adjtime and then set new time.
-		 */
-#ifdef __HAVE_TIMECOUNTER
-		adjtimedelta.tv_usec = 0;
-		adjtimedelta.tv_sec = 0;
-#else
-		int s = splclock();
-		tickdelta = 0;
-		timedelta = 0;
-		splx(s);
-#endif
 
 		TIMEVAL_TO_TIMESPEC(&atv, &ts);
 		if ((error = settime(&ts)) != 0)
@@ -638,6 +650,10 @@ sys_setitimer(struct proc *p, void *v, register_t *retval)
 		itimerround(&aitv.it_interval);
 		s = splclock();
 		p->p_stats->p_timer[SCARG(uap, which)] = aitv;
+		if (SCARG(uap, which) == ITIMER_VIRTUAL)
+			timeout_del(&p->p_stats->p_virt_to);
+		if (SCARG(uap, which) == ITIMER_PROF)
+			timeout_del(&p->p_stats->p_prof_to);
 		splx(s);
 	}
 
@@ -681,6 +697,18 @@ realitexpire(void *arg)
 			return;
 		}
 	}
+}
+
+/*
+ * Check that a timespec value is legit
+ */
+int
+timespecfix(struct timespec *ts)
+{
+	if (ts->tv_sec < 0 || ts->tv_sec > 100000000 ||
+	    ts->tv_nsec < 0 || ts->tv_nsec >= 1000000000)
+		return (EINVAL);
+	return (0);
 }
 
 /*

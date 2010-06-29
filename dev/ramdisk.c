@@ -1,4 +1,4 @@
-/*	$OpenBSD: ramdisk.c,v 1.44 2008/08/22 03:12:37 deraadt Exp $	*/
+/*	$OpenBSD: ramdisk.c,v 1.46 2010/04/23 15:25:21 jsing Exp $	*/
 /*	$NetBSD: ramdisk.c,v 1.8 1996/04/12 08:30:09 leo Exp $	*/
 
 /*
@@ -118,7 +118,7 @@ struct cfdriver rd_cd = {
  */
 int  rd_probe(struct device *, void *, void *);
 int  rd_detach(struct device *, int);
-int  rd_activate(struct device *, enum devact);
+int  rd_activate(struct device *, int);
 
 struct cfattach rd_ca = {
 	sizeof(struct rd_softc), rd_probe, rd_attach,
@@ -504,8 +504,6 @@ rdgetdisklabel(dev_t dev, struct rd_softc *sc, struct disklabel *lp,
 	lp->d_type = DTYPE_SCSI;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
 	DL_SETDSIZE(lp, lp->d_nsectors);
-	lp->d_rpm = 3600;
-	lp->d_interleave = 1;
 	lp->d_version = 1;
 
 	lp->d_magic = DISKMAGIC;
@@ -554,7 +552,7 @@ rd_detach(struct device *self, int flags)
 }
 
 int
-rd_activate(struct device *self, enum devact act)
+rd_activate(struct device *self, int act)
 {
 	return (0);
 }

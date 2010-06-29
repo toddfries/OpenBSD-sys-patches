@@ -1,4 +1,4 @@
-/*	$OpenBSD: exception.S,v 1.19 2009/05/27 18:58:15 miod Exp $ */
+/*	$OpenBSD: exception.S,v 1.30 2010/02/01 05:26:17 miod Exp $ */
 
 /*
  * Copyright (c) 2002-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -44,15 +44,14 @@
 #include <machine/cpu.h>
 #include <machine/regnum.h>
 #include <machine/cpustate.h>
+#ifdef CPU_LOONGSON2
+#include <machine/loongson2.h>
+#endif
 
 #include "assym.h"
 
 	.set	mips3
 
-	.data
-	.globl	int_nest_cntr
-int_nest_cntr:
-	.word	-1
 	.text
 
 k_exception_table:
@@ -133,6 +132,15 @@ u_exception_table:
 	.globl	exception
 exception:
 	.set	noat
+#ifdef CPU_LOONGSON2
+	/*
+	 * To work around a branch prediction issue on earlier LS2F
+	 * chips, it is necessary to clear the BTB upon
+	 * userland->kernel boundaries.
+	 */
+	li	k0, COP_0_DIAG_BTB_CLEAR | COP_0_DIAG_RAS_DISABLE
+	dmtc0	k0, COP_0_DIAG
+#endif
 	mfc0	k0, COP_0_STATUS_REG
 	mfc0	k1, COP_0_CAUSE_REG
 	and	k0, k0, SR_KSU_USER
@@ -173,7 +181,7 @@ NNON_LEAF(k_intr, FRAMESZ(KERN_EXC_FRAME_SIZE), ra)
 	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(KERN_EXC_FRAME_SIZE))
 	PTR_SUB	k0, sp, FRAMESZ(KERN_EXC_FRAME_SIZE)
 	SAVE_CPU(k0, CF_RA_OFFS)
-#if 0
+#ifdef RM7000_ICR
 	cfc0	v1, COP_0_ICR
 	SAVE_REG(v1, IC, k0, CF_RA_OFFS)
 #endif
@@ -183,23 +191,14 @@ NNON_LEAF(k_intr, FRAMESZ(KERN_EXC_FRAME_SIZE), ra)
 	and	t0, a1, ~(SR_COP_1_BIT | SR_EXL | SR_INT_ENAB | SR_KSU_MASK)
 	mtc0	t0, COP_0_STATUS_REG
 	ITLBNOPFIX
-	LA	t1, int_nest_cntr
-	lw	t2, (t1)
-	addiu	t2, 1
-	sw	t2, (t1)
-	ITLBNOPFIX
+	ITLBNOPFIX			# XXX necessary?
 	PTR_S	a0, 0(sp)
 	jal	interrupt
 	PTR_S	a3, CF_RA_OFFS + KERN_REG_SIZE(sp)
 
-	LA	t1, int_nest_cntr
-	lw	t2, (t1)
-	addiu	t2, -1
-	sw	t2, (t1)
-
 	PTR_L	a0, CF_RA_OFFS + KERN_REG_SIZE(sp)
 	.set	noat
-#if 0
+#ifdef RM7000_ICR
 	RESTORE_REG(t0, IC, sp, CF_RA_OFFS)
 	ctc0	t0, COP_0_ICR
 #endif
@@ -219,9 +218,10 @@ END(k_intr)
 NNON_LEAF(u_intr, FRAMESZ(CF_SZ), ra)
 	.set	noat
 	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ))
-	PTR_L	k0, curprocpaddr
+	GET_CPU_INFO(k1, k0)
+	PTR_L	k0, CI_CURPROCPADDR(k1)
 	SAVE_CPU(k0, 0)
-#if 0
+#ifdef RM7000_ICR
 	cfc0	v1, COP_0_ICR
 	SAVE_REG(v1, IC, k0, 0)
 #endif
@@ -231,26 +231,24 @@ NNON_LEAF(u_intr, FRAMESZ(CF_SZ), ra)
 	and	t0, a1, ~(SR_COP_1_BIT | SR_EXL | SR_INT_ENAB | SR_KSU_MASK)
 	mtc0	t0, COP_0_STATUS_REG
 	ITLBNOPFIX
-	LA	t1, int_nest_cntr
-	lw	t2, (t1)
-	addiu	t2, 1
-	sw	t2, (t1)
-	ITLBNOPFIX
+	ITLBNOPFIX			# XXX necessary?
 	PTR_S	a0, 0(sp)
 	jal	interrupt
-	PTR_S	a3, CF_RA_OFFS(sp)		# for debugging
+	PTR_S	a3, CF_RA_OFFS(sp)	# for debugging
 
 	mfc0	t0, COP_0_STATUS_REG	# enable interrupts before checking
 	ori	t0, SR_INT_ENAB		# for ast.
 	mtc0	t0, COP_0_STATUS_REG
 	ITLBNOPFIX
 
+	GET_CPU_INFO(t1, t0)
 0:
-	lw	v0, astpending		# any pending interrupts?
+	PTR_L	t0, CI_CURPROC(t1)
+	lw	v0, P_ASTPENDING(t0)	# any pending AST?
 	beq	v0, zero, 4f
 	nop
 
-	PTR_L	t0, curprocpaddr
+	PTR_L	t0, CI_CURPROCPADDR(t1)	# curprocpaddr
 	SAVE_CPU_SREG(t0, 0)
 
 #ifdef PERFCNTRS
@@ -284,7 +282,8 @@ NNON_LEAF(u_intr, FRAMESZ(CF_SZ), ra)
 	lw	t0, cpu_is_rm7k
 	beqz	t0, 1f			# not an RM7K. Don't do perf setup.
 
-	PTR_L	t1, curproc		# set up rm7k.
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t0, CI_CURPROC(t1)	# set up rm7k.
 	ld	v0, P_WATCH_1(t1)
 	dmtc0	v0, COP_0_WATCH_1
 	ld	v0, P_WATCH_2(t1)
@@ -300,7 +299,8 @@ NNON_LEAF(u_intr, FRAMESZ(CF_SZ), ra)
 	nop;nop;nop;nop
 1:
 #endif
-	PTR_L	t0, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t0, CI_CURPROCPADDR(t1)
 	RESTORE_CPU_SREG(t0, 0)
 
 	b	0b
@@ -308,26 +308,23 @@ NNON_LEAF(u_intr, FRAMESZ(CF_SZ), ra)
 
 4:
 	mfc0	t0, COP_0_STATUS_REG	# disable interrupts
-	li	t1, ~SR_INT_ENAB
-	and	t0, t0, t1
+	li	v0, ~SR_INT_ENAB
+	and	t0, t0, v0
 	mtc0	t0, COP_0_STATUS_REG
 	ITLBNOPFIX
-
-	LA	t1, int_nest_cntr
-	lw	t2, (t1)
-	addiu	t2, -1
-	sw	t2, (t1)
 
 	ori	t0, SR_EXL		# restoring to user mode.
 	mtc0	t0, COP_0_STATUS_REG	# must set exception level bit.
 	ITLBNOPFIX
 
-	PTR_L	k0, curprocpaddr
+	# t1 is curcpu() from earlier
+	move	k1, t1
+	PTR_L	k0, CI_CURPROCPADDR(k1)
 	RESTORE_REG(a3, CPL, k0, 0)
-	sw	a3, cpl
+	sw	a3, CI_IPL(k1)
 	.set	noat
 	RESTORE_REG(a0, PC, k0, 0)
-#if 0
+#ifdef RM7000_ICR
 	RESTORE_REG(t0, IC, k0, 0)
 	ctc0	t0, COP_0_ICR
 #endif
@@ -350,7 +347,7 @@ NNON_LEAF(k_general, FRAMESZ(KERN_EXC_FRAME_SIZE), ra)
 	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(KERN_EXC_FRAME_SIZE))
 	PTR_SUB	k0, sp, FRAMESZ(KERN_EXC_FRAME_SIZE)
 	SAVE_CPU(k0, CF_RA_OFFS)
-#if 0
+#ifdef RM7000_ICR
 	cfc0	v1, COP_0_ICR
 	SAVE_REG(v1, IC, k0, CF_RA_OFFS)
 #endif
@@ -374,7 +371,7 @@ NNON_LEAF(k_general, FRAMESZ(KERN_EXC_FRAME_SIZE), ra)
 	ITLBNOPFIX
 
 	.set	noat
-#if 0
+#ifdef RM7000_ICR
 	RESTORE_REG(t0, IC, sp, CF_RA_OFFS)
 	ctc0	t0, COP_0_ICR
 #endif
@@ -393,9 +390,10 @@ NNON_LEAF(u_general, FRAMESZ(CF_SZ), ra)
 	.set	noat
 	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ))
 
-	PTR_L	k0, curprocpaddr
+	GET_CPU_INFO(k1, k0)
+	PTR_L	k0, CI_CURPROCPADDR(k1)
 	SAVE_CPU(k0, 0)
-#if 0
+#ifdef RM7000_ICR
 	cfc0	v1, COP_0_ICR
 	SAVE_REG(v1, IC, k0, 0)
 #endif
@@ -412,7 +410,7 @@ NNON_LEAF(u_general, FRAMESZ(CF_SZ), ra)
 	beqz	t0, 1f			# not an RM7K. Don't do perf save.
 
 	mfc0	v0, COP_0_PC_CTRL
-	PTR_L	t0, curproc
+	PTR_L	t0, CI_CURPROC(k1)
 	sw	v0, P_PC_CTRL(t0)
 	dmfc0	v0, COP_0_WATCH_1
 	dmfc0	v1, COP_0_WATCH_2
@@ -430,18 +428,21 @@ NNON_LEAF(u_general, FRAMESZ(CF_SZ), ra)
 	jal	trap
 	PTR_S	a3, CF_RA_OFFS(sp)		# for debugging
 
+	GET_CPU_INFO(t1, t0)
 0:
-	lw	v0, astpending
-	beqz	v0, 4f
+	PTR_L	t0, CI_CURPROC(t1)
+	lw	v0, P_ASTPENDING(t0)	# any pending AST?
+	beq	v0, zero, 4f
 	nop
 
-	PTR_L	t0, curprocpaddr
+	PTR_L	t0, CI_CURPROCPADDR(t1)	# curprocpaddr
 	SAVE_CPU_SREG(t0, 0)
 
 	jal	ast
 	nop
 
-	PTR_L	t0, curprocpaddr
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t0, CI_CURPROCPADDR(t1)
 	RESTORE_CPU_SREG(t0, 0)
 
 	b	0b
@@ -452,7 +453,7 @@ NNON_LEAF(u_general, FRAMESZ(CF_SZ), ra)
 	lw	t0, cpu_is_rm7k
 	beqz	t0, 1f			# not an RM7K. Don't do perf setup.
 
-	LOAD	t0, curproc		# set up rm7k.
+	LOAD	t0, CI_CURPROC(k1)	# set up rm7k.
 	ld	v0, P_WATCH_1(t0)
 	dmtc0	v0, COP_0_WATCH_1
 	ld	v0, P_WATCH_2(t0)
@@ -478,13 +479,14 @@ NNON_LEAF(u_general, FRAMESZ(CF_SZ), ra)
 	mtc0	t0, COP_0_STATUS_REG	# must set exception level bit.
 	ITLBNOPFIX
 
-	PTR_L	k0, curprocpaddr
+	GET_CPU_INFO(k1, k0)
+	PTR_L	k0, CI_CURPROCPADDR(k1)
 	RESTORE_REG(a3, CPL, k0, 0)
-	sw	a3, cpl
+	sw	a3, CI_IPL(k1)
 	.set	noat
 	RESTORE_CPU_SREG(k0, 0)
 	RESTORE_REG(a0, PC, k0, 0)
-#if 0
+#ifdef RM7000_ICR
 	RESTORE_REG(t0, IC, k0, 0)
 	ctc0	t0, COP_0_ICR
 #endif
@@ -501,35 +503,29 @@ END(u_general)
  *	Setup for and return to user.
  */
 LEAF(proc_trampoline, 0)
+#ifdef DDB
+	move	zero, ra
+#endif
+#ifdef MULTIPROCESSOR
+	jal	_C_LABEL(proc_trampoline_mp)
+	nop
+#endif
 	/*
 	 * Enable interrupts, since we want kernel threads to
 	 * start at spl0 and with interrupts enabled, and these
 	 * won't ``return to userland''.
 	 */
-	sw	zero, cpl		# lower to spl0
-	lw	t0, ipending
-	beqz	t0, 1f
-	nop
-
-	jal	setsoftintr0		# process any pending ints
-	nop
-1:
-#ifdef IMASK_EXTERNAL
-	jal	hw_setintrmask
+#ifndef MULTIPROCESSOR	/* done by proc_trampoline_mp() */
+	jal	splx
 	xor	a0, a0
 #endif
 	jal	updateimask		# Make sure SR imask is updated
-	xor	a0, a0
-
-	mfc0	t0, COP_0_STATUS_REG	# enable interrupts
-	ori	t0, SR_INT_ENAB
-	mtc0	t0, COP_0_STATUS_REG
-	ITLBNOPFIX
+	xor	a0, a0			# and interrupts enabled
 
 	jal	s0
 	move	a0,s1			# invoke callback.
 
-#if 0
+#if 0	/* && defined(RM7000_ICR) */
 	lw	t0, cpu_is_rm7k
 	beqz	t0, 1f			# not an RM7K. Don't do IC reg.
 
@@ -563,10 +559,11 @@ LEAF(proc_trampoline, 0)
 	ITLBNOPFIX
 
 	.set	noat
-	PTR_L	k0, curprocpaddr
+	GET_CPU_INFO(k1, k0)
+	PTR_L	k0, CI_CURPROCPADDR(k1)
 	RESTORE_CPU_SREG(k0, 0)
 	RESTORE_REG(a0, PC, k0, 0)
-#if 0
+#ifdef RM7000_ICR
 	RESTORE_REG(t0, IC, k0, 0)
 	ctc0	t0, COP_0_ICR
 #endif

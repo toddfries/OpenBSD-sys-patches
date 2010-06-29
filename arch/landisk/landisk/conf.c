@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.12 2009/06/03 14:45:52 jj Exp $	*/
+/*	$OpenBSD: conf.c,v 1.15 2010/06/09 15:25:32 jsing Exp $	*/
 
 /*
  * Copyright (c) 1994-1998 Mark Brinicombe.
@@ -133,6 +133,11 @@ cdev_decl(pci);
 #include "uscanner.h"
 
 /*
+ * Bluetooth devices
+ */
+#include "bthub.h"
+
+/*
  * WSCONS devices
  */
 #include "wsdisplay.h"
@@ -265,6 +270,7 @@ cdev_decl(nnpfs_dev);
 
 #include "hotplug.h"
 #include "scif.h"
+#include "vscsi.h"
 
 #ifdef CONF_HAVE_GPIO
 #include "gpio.h"
@@ -380,6 +386,9 @@ struct cdevsw cdevsw[] = {
 	cdev_notdef(),                          /* 96: removed device */
 	cdev_radio_init(NRADIO,radio),		/* 97: generic radio I/O */
 	cdev_ptm_init(NPTY,ptm),		/* 98: pseudo-tty ptm device */
+	cdev_vscsi_init(NVSCSI,vscsi),		/* 99: vscsi */
+	cdev_bthub_init(NBTHUB,bthub),		/* 100: bthub */
+	cdev_disk_init(1,diskmap),		/* 101: disk mapper */
 };
 
 int nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);

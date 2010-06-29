@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_device.c,v 1.33 2009/06/02 23:00:19 oga Exp $	*/
+/*	$OpenBSD: uvm_device.c,v 1.38 2010/04/30 21:56:39 oga Exp $	*/
 /*	$NetBSD: uvm_device.c,v 1.30 2000/11/25 06:27:59 chs Exp $	*/
 
 /*
@@ -44,6 +44,7 @@
 #include <sys/conf.h>
 #include <sys/proc.h>
 #include <sys/malloc.h>
+#include <sys/mutex.h>
 #include <sys/vnode.h>
 
 #include <uvm/uvm.h>
@@ -55,25 +56,27 @@
  * we keep a list of active device objects in the system.
  */
 
-LIST_HEAD(udvlist, uvm_device) udv_list = LIST_HEAD_INITIALIZER(udv_list);
+LIST_HEAD(, uvm_device) udv_list = LIST_HEAD_INITIALIZER(udv_list);
 struct mutex udv_lock = MUTEX_INITIALIZER(IPL_NONE);
 
 /*
  * functions
  */
 
-void		udv_reference(struct uvm_object *);
-void		udv_detach(struct uvm_object *);
-boolean_t	udv_flush(struct uvm_object *, voff_t, voff_t, int);
-int		udv_fault(struct uvm_faultinfo *, vaddr_t, vm_page_t *,
-		    int, int, vm_fault_t, vm_prot_t, int);
+static void             udv_reference(struct uvm_object *);
+static void             udv_detach(struct uvm_object *);
+static int		udv_fault(struct uvm_faultinfo *, vaddr_t,
+				       vm_page_t *, int, int, vm_fault_t,
+				       vm_prot_t, int);
+static boolean_t        udv_flush(struct uvm_object *, voff_t, voff_t,
+				       int);
 
 /*
  * master pager structure
  */
 
 struct uvm_pagerops uvm_deviceops = {
-	NULL,		/* lock and list already initialized */
+	NULL,		/* inited statically */
 	udv_reference,
 	udv_detach,
 	udv_fault,
@@ -81,8 +84,9 @@ struct uvm_pagerops uvm_deviceops = {
 };
 
 /*
- * the ops!
+ * the ops.
  */
+
 
 /*
  * udv_attach
@@ -160,9 +164,10 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 
 			/*
 			 * if someone else has a hold on it, sleep and start
-			 * over again. Else, we need the HOLD flag so we
+			 * over again. Else, we need take HOLD flag so we
 			 * don't have to re-order locking here.
 			 */
+
 			if (lcv->u_flags & UVM_DEVICE_HOLD) {
 				lcv->u_flags |= UVM_DEVICE_WANTED;
 				msleep(lcv, &udv_lock, PVM | PNORELOCK,
@@ -225,11 +230,7 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 		 * and return.
 		 */
 
-		simple_lock_init(&udv->u_obj.vmobjlock);
-		udv->u_obj.pgops = &uvm_deviceops;
-		RB_INIT(&udv->u_obj.memt);
-		udv->u_obj.uo_npages = 0;
-		udv->u_obj.uo_refs = 1;
+		uvm_objinit(&udv->u_obj, &uvm_deviceops, 1);
 		udv->u_flags = 0;
 		udv->u_device = device;
 		LIST_INSERT_HEAD(&udv_list, udv, u_list);
@@ -249,7 +250,7 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
  * => caller must call with object unlocked.
  */
 
-void
+static void
 udv_reference(struct uvm_object *uobj)
 {
 	UVMHIST_FUNC("udv_reference"); UVMHIST_CALLED(maphist);
@@ -269,7 +270,7 @@ udv_reference(struct uvm_object *uobj)
  * => caller must call with object unlocked and map locked.
  */
 
-void
+static void
 udv_detach(struct uvm_object *uobj)
 {
 	struct uvm_device *udv = (struct uvm_device *)uobj;
@@ -291,12 +292,15 @@ again:
 
 	/*
 	 * is it being held?   if so, wait until others are done.
-	 * It is probably about to be referenced.
 	 */
 
 	mtx_enter(&udv_lock);
 	if (udv->u_flags & UVM_DEVICE_HOLD) {
 		udv->u_flags |= UVM_DEVICE_WANTED;
+		/*
+		 * lock interleaving. -- this is ok in this case since the
+		 * locks are both IPL_NONE
+		 */
 		simple_unlock(&uobj->vmobjlock);
 		msleep(udv, &udv_lock, PVM | PNORELOCK, "udv_detach", 0);
 		goto again;
@@ -322,7 +326,7 @@ again:
  * flush pages out of a uvm object.   a no-op for devices.
  */
 
-boolean_t
+static boolean_t
 udv_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
 {
 
@@ -345,7 +349,7 @@ udv_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
  * => NOTE: vaddr is the VA of pps[0] in ufi->entry, _NOT_ pps[centeridx]
  */
 
-int
+static int
 udv_fault(struct uvm_faultinfo *ufi, vaddr_t vaddr, vm_page_t *pps, int npages,
     int centeridx, vm_fault_t fault_type, vm_prot_t access_type, int flags)
 {

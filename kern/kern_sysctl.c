@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.173 2009/06/08 00:52:23 deraadt Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.184 2010/06/19 14:44:44 thib Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -101,8 +101,6 @@
 #include <sys/shm.h>
 #endif
 
-#define	PTRTOINT64(_x)	((u_int64_t)(u_long)(_x))
-
 extern struct forkstat forkstat;
 extern struct nchstats nchstats;
 extern int nselcoll, fscale;
@@ -162,8 +160,13 @@ sys___sysctl(struct proc *p, void *v, register_t *retval)
 	switch (name[0]) {
 	case CTL_KERN:
 		fn = kern_sysctl;
-		if (name[1] == KERN_VNODE)	/* XXX */
+		switch (name[1]) {	/* XXX */
+		case KERN_VNODE:
+		case KERN_FILE:
+		case KERN_FILE2:
 			dolock = 0;
+			break;
+		}
 		break;
 	case CTL_HW:
 		fn = hw_sysctl;
@@ -995,10 +998,12 @@ sysctl_file(char *where, size_t *sizep, struct proc *p)
 	/*
 	 * followed by an array of file structures
 	 */
+	rw_enter_read(&fileheadlk);
 	LIST_FOREACH(fp, &filehead, f_list) {
 		if (buflen < sizeof(struct file)) {
 			*sizep = where - start;
-			return (ENOMEM);
+			error = ENOMEM;
+			goto out;
 		}
 
 		/* Only let the superuser or the owner see some information */
@@ -1012,12 +1017,14 @@ sysctl_file(char *where, size_t *sizep, struct proc *p)
 		}
 		error = copyout(&cfile, where, sizeof (struct file));
 		if (error)
-			return (error);
+			goto out;
 		buflen -= sizeof(struct file);
 		where += sizeof(struct file);
 	}
 	*sizep = where - start;
-	return (0);
+out:
+	rw_exit_read(&fileheadlk);
+	return (error);
 }
 
 #ifndef SMALL_KERNEL
@@ -1095,6 +1102,8 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 		kf->so_pcb = PTRTOINT64(so->so_pcb);
 		kf->so_protocol = so->so_proto->pr_protocol;
 		kf->so_family = so->so_proto->pr_domain->dom_family;
+		if (!so->so_pcb)
+			break;
 		switch (kf->so_family) {
 		case AF_INET: {
 			struct inpcb *inpcb = so->so_pcb;
@@ -1219,11 +1228,13 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 			error = EINVAL;
 			break;
 		}
+		rw_enter_read(&fileheadlk);
 		LIST_FOREACH(fp, &filehead, f_list) {
 			if (fp->f_count == 0)
 				continue;
 			FILLIT(fp, NULL, 0, NULL, NULL);
 		}
+		rw_exit_read(&fileheadlk);
 		break;
 	case KERN_FILE_BYPID:
 		/* A arg of -1 indicates all processes */
@@ -1231,16 +1242,20 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 			error = EINVAL;
 			break;
 		}
+		rw_enter_read(&allproclk);
 		LIST_FOREACH(pp, &allproc, p_list) {
-			/* skip system, embryonic and undead processes */
-			if ((pp->p_flag & P_SYSTEM) ||
-			    pp->p_stat == SIDL || pp->p_stat == SZOMB)
+			/* skip system, exiting, embryonic and undead processes */
+			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_WEXIT)
+			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
 			if (arg > 0 && pp->p_pid != (pid_t)arg) {
 				/* not the pid we are looking for */
 				continue;
 			}
 			fdp = pp->p_fd;
+			fdplock(fdp);
+			if (pp->p_textvp)
+				FILLIT(NULL, NULL, KERN_FILE_TEXT, pp->p_textvp, pp);
 			if (fdp->fd_cdir)
 				FILLIT(NULL, NULL, KERN_FILE_CDIR, fdp->fd_cdir, pp);
 			if (fdp->fd_rdir)
@@ -1254,19 +1269,23 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 					continue;
 				FILLIT(fp, fdp, i, NULL, pp);
 			}
+			fdpunlock(fdp);
 		}
+		rw_exit_read(&allproclk);
 		break;
 	case KERN_FILE_BYUID:
+		rw_enter_read(&allproclk);
 		LIST_FOREACH(pp, &allproc, p_list) {
-			/* skip system, embryonic and undead processes */
-			if ((pp->p_flag & P_SYSTEM) ||
-			    pp->p_stat == SIDL || pp->p_stat == SZOMB)
+			/* skip system, exiting, embryonic and undead processes */
+			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_WEXIT)
+			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
 			if (arg > 0 && pp->p_ucred->cr_uid != (uid_t)arg) {
 				/* not the uid we are looking for */
 				continue;
 			}
 			fdp = pp->p_fd;
+			fdplock(fdp);
 			if (fdp->fd_cdir)
 				FILLIT(NULL, NULL, KERN_FILE_CDIR, fdp->fd_cdir, pp);
 			if (fdp->fd_rdir)
@@ -1280,7 +1299,9 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 					continue;
 				FILLIT(fp, fdp, i, NULL, pp);
 			}
+			fdpunlock(fdp);
 		}
+		rw_exit_read(&allproclk);
 		break;
 	default:
 		error = EINVAL;
@@ -1334,6 +1355,7 @@ sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 		elem_count = name[4];
 		kproc2 = malloc(sizeof(struct kinfo_proc2), M_TEMP, M_WAITOK);
 	}
+	rw_enter_read(&allproclk);
 	p = LIST_FIRST(&allproc);
 	doingzomb = 0;
 again:
@@ -1445,6 +1467,7 @@ again:
 		*sizep = needed;
 	}
 err:
+	rw_exit_read(&allproclk);
 	if (eproc)
 		free(eproc, M_TEMP);
 	if (kproc2)
@@ -1522,126 +1545,28 @@ fill_kproc2(struct proc *p, struct kinfo_proc2 *ki)
 	struct tty *tp;
 	struct timeval ut, st;
 
-	bzero(ki, sizeof(*ki));
+	FILL_KPROC2(ki, strlcpy, p, p->p_p, p->p_cred, p->p_ucred, p->p_pgrp,
+	    p, p->p_session, p->p_vmspace, p->p_p->ps_limit, p->p_stats);
 
-	ki->p_paddr = PTRTOINT64(p);
-	ki->p_fd = PTRTOINT64(p->p_fd);
-	ki->p_stats = PTRTOINT64(p->p_stats);
-	ki->p_limit = PTRTOINT64(p->p_p->ps_limit);
-	ki->p_vmspace = PTRTOINT64(p->p_vmspace);
-	ki->p_sigacts = PTRTOINT64(p->p_sigacts);
-	ki->p_sess = PTRTOINT64(p->p_session);
-	ki->p_tsess = 0;	/* may be changed if controlling tty below */
-	ki->p_ru = PTRTOINT64(p->p_ru);
-
-	ki->p_eflag = 0;
-	ki->p_exitsig = p->p_exitsig;
-	ki->p_flag = p->p_flag | P_INMEM;
-
-	ki->p_pid = p->p_pid;
+	/* stuff that's too painful to generalize into the macros */
 	if (p->p_pptr)
 		ki->p_ppid = p->p_pptr->p_pid;
-	else
-		ki->p_ppid = 0;
 	if (p->p_session->s_leader)
 		ki->p_sid = p->p_session->s_leader->p_pid;
-	else
-		ki->p_sid = 0;
-	ki->p__pgid = p->p_pgrp->pg_id;
 
-	ki->p_tpgid = -1;	/* may be changed if controlling tty below */
-
-	ki->p_uid = p->p_ucred->cr_uid;
-	ki->p_ruid = p->p_cred->p_ruid;
-	ki->p_gid = p->p_ucred->cr_gid;
-	ki->p_rgid = p->p_cred->p_rgid;
-	ki->p_svuid = p->p_cred->p_svuid;
-	ki->p_svgid = p->p_cred->p_svgid;
-
-	memcpy(ki->p_groups, p->p_cred->pc_ucred->cr_groups,
-	    min(sizeof(ki->p_groups), sizeof(p->p_cred->pc_ucred->cr_groups)));
-	ki->p_ngroups = p->p_cred->pc_ucred->cr_ngroups;
-
-	ki->p_jobc = p->p_pgrp->pg_jobc;
 	if ((p->p_flag & P_CONTROLT) && (tp = p->p_session->s_ttyp)) {
 		ki->p_tdev = tp->t_dev;
 		ki->p_tpgid = tp->t_pgrp ? tp->t_pgrp->pg_id : -1;
 		ki->p_tsess = PTRTOINT64(tp->t_session);
 	} else {
 		ki->p_tdev = NODEV;
+		ki->p_tpgid = -1;
 	}
 
-	ki->p_estcpu = p->p_estcpu;
-	ki->p_rtime_sec = p->p_rtime.tv_sec;
-	ki->p_rtime_usec = p->p_rtime.tv_usec;
-	ki->p_cpticks = p->p_cpticks;
-	ki->p_pctcpu = p->p_pctcpu;
-
-	ki->p_uticks = p->p_uticks;
-	ki->p_sticks = p->p_sticks;
-	ki->p_iticks = p->p_iticks;
-
-	ki->p_tracep = PTRTOINT64(p->p_tracep);
-	ki->p_traceflag = p->p_traceflag;
-
-	ki->p_siglist = p->p_siglist;
-	ki->p_sigmask = p->p_sigmask;
-	ki->p_sigignore = p->p_sigignore;
-	ki->p_sigcatch = p->p_sigcatch;
-
-	ki->p_stat = p->p_stat;
-	ki->p_nice = p->p_nice;
-
-	ki->p_xstat = p->p_xstat;
-	ki->p_acflag = p->p_acflag;
-
-	strlcpy(ki->p_emul, p->p_emul->e_name, sizeof(ki->p_emul));
-	strlcpy(ki->p_comm, p->p_comm, sizeof(ki->p_comm));
-	strncpy(ki->p_login, p->p_session->s_login,
-	    min(sizeof(ki->p_login) - 1, sizeof(p->p_session->s_login)));
-
-	if (p->p_stat == SIDL || P_ZOMBIE(p)) {
-		ki->p_vm_rssize = 0;
-		ki->p_vm_tsize = 0;
-		ki->p_vm_dsize = 0;
-		ki->p_vm_ssize = 0;
-	} else {
-		struct vmspace *vm = p->p_vmspace;
-
-		ki->p_vm_rssize = vm_resident_count(vm);
-		ki->p_vm_tsize = vm->vm_tsize;
-		ki->p_vm_dsize = vm->vm_dused;
-		ki->p_vm_ssize = vm->vm_ssize;
-		ki->p_forw = ki->p_back = 0;
-		ki->p_addr = PTRTOINT64(p->p_addr);
-		ki->p_stat = p->p_stat;
-		ki->p_swtime = p->p_swtime;
-		ki->p_slptime = p->p_slptime;
-		ki->p_schedflags = 0;
-		ki->p_holdcnt = 1;
-		ki->p_priority = p->p_priority;
-		ki->p_usrpri = p->p_usrpri;
-		if (p->p_wmesg)
-			strlcpy(ki->p_wmesg, p->p_wmesg, sizeof(ki->p_wmesg));
-		ki->p_wchan = PTRTOINT64(p->p_wchan);
-
-	}
-
-	if (p->p_session->s_ttyvp)
-		ki->p_eflag |= EPROC_CTTY;
-	if (SESS_LEADER(p))
-		ki->p_eflag |= EPROC_SLEADER;
-	if (p->p_rlimit)
-		ki->p_rlim_rss_cur = p->p_rlimit[RLIMIT_RSS].rlim_cur;
-
-	/* XXX Is this double check necessary? */
-	if (P_ZOMBIE(p)) {
-		ki->p_uvalid = 0;
-	} else {
-		ki->p_uvalid = 1;
-
-		ki->p_ustart_sec = p->p_stats->p_start.tv_sec;
-		ki->p_ustart_usec = p->p_stats->p_start.tv_usec;
+	/* fixups that can only be done in the kernel */
+	if (!P_ZOMBIE(p)) {
+		if (p->p_stat != SIDL)
+			ki->p_vm_rssize = vm_resident_count(p->p_vmspace);
 
 		calcru(p, &ut, &st, NULL);
 		ki->p_uutime_sec = ut.tv_sec;
@@ -1649,26 +1574,6 @@ fill_kproc2(struct proc *p, struct kinfo_proc2 *ki)
 		ki->p_ustime_sec = st.tv_sec;
 		ki->p_ustime_usec = st.tv_usec;
 
-		ki->p_uru_maxrss = p->p_stats->p_ru.ru_maxrss;
-		ki->p_uru_ixrss = p->p_stats->p_ru.ru_ixrss;
-		ki->p_uru_idrss = p->p_stats->p_ru.ru_idrss;
-		ki->p_uru_isrss = p->p_stats->p_ru.ru_isrss;
-		ki->p_uru_minflt = p->p_stats->p_ru.ru_minflt;
-		ki->p_uru_majflt = p->p_stats->p_ru.ru_majflt;
-		ki->p_uru_nswap = p->p_stats->p_ru.ru_nswap;
-		ki->p_uru_inblock = p->p_stats->p_ru.ru_inblock;
-		ki->p_uru_oublock = p->p_stats->p_ru.ru_oublock;
-		ki->p_uru_msgsnd = p->p_stats->p_ru.ru_msgsnd;
-		ki->p_uru_msgrcv = p->p_stats->p_ru.ru_msgrcv;
-		ki->p_uru_nsignals = p->p_stats->p_ru.ru_nsignals;
-		ki->p_uru_nvcsw = p->p_stats->p_ru.ru_nvcsw;
-		ki->p_uru_nivcsw = p->p_stats->p_ru.ru_nivcsw;
-
-		timeradd(&p->p_stats->p_cru.ru_utime,
-			 &p->p_stats->p_cru.ru_stime, &ut);
-		ki->p_uctime_sec = ut.tv_sec;
-		ki->p_uctime_usec = ut.tv_usec;
-		ki->p_cpuid = KI_NOCPU;
 #ifdef MULTIPROCESSOR
 		if (p->p_cpu != NULL)
 			ki->p_cpuid = CPU_INFO_UNIT(p->p_cpu);
@@ -1741,7 +1646,7 @@ sysctl_proc_args(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	iov.iov_len = sizeof(pss);
 	uio.uio_iov = &iov;
 	uio.uio_iovcnt = 1;	
-	uio.uio_offset = (off_t)PS_STRINGS;
+	uio.uio_offset = (off_t)(vaddr_t)PS_STRINGS;
 	uio.uio_resid = sizeof(pss);
 	uio.uio_segflg = UIO_SYSSPACE;
 	uio.uio_rw = UIO_READ;
@@ -1965,9 +1870,6 @@ sysctl_diskinit(int update, struct proc *p)
 int
 sysctl_sysvipc(int *name, u_int namelen, void *where, size_t *sizep)
 {
-#ifdef SYSVMSG
-	struct msg_sysctl_info *msgsi;
-#endif
 #ifdef SYSVSEM
 	struct sem_sysctl_info *semsi;
 #endif
@@ -1986,10 +1888,7 @@ sysctl_sysvipc(int *name, u_int namelen, void *where, size_t *sizep)
 	switch (*name) {
 	case KERN_SYSVIPC_MSG_INFO:
 #ifdef SYSVMSG
-		infosize = sizeof(msgsi->msginfo);
-		nds = msginfo.msgmni;
-		dssize = sizeof(msgsi->msgids[0]);
-		break;
+		return (sysctl_sysvmsg(name, namelen, where, sizep));
 #else
 		return (EOPNOTSUPP);
 #endif
@@ -2030,12 +1929,6 @@ sysctl_sysvipc(int *name, u_int namelen, void *where, size_t *sizep)
 	buf = malloc(min(tsize, buflen), M_TEMP, M_WAITOK|M_ZERO);
 
 	switch (*name) {
-#ifdef SYSVMSG
-	case KERN_SYSVIPC_MSG_INFO:
-		msgsi = (struct msg_sysctl_info *)buf;
-		msgsi->msginfo = msginfo;
-		break;
-#endif
 #ifdef SYSVSEM
 	case KERN_SYSVIPC_SEM_INFO:
 		semsi = (struct sem_sysctl_info *)buf;
@@ -2060,11 +1953,6 @@ sysctl_sysvipc(int *name, u_int namelen, void *where, size_t *sizep)
 				break;
 			}
 			switch (*name) {
-#ifdef SYSVMSG
-			case KERN_SYSVIPC_MSG_INFO:
-				bcopy(&msqids[i], &msgsi->msgids[i], dssize);
-				break;
-#endif
 #ifdef SYSVSEM
 			case KERN_SYSVIPC_SEM_INFO:
 				if (sema[i] != NULL)
@@ -2120,9 +2008,9 @@ sysctl_sensors(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 
 	dev = name[0];
 	if (namelen == 1) {
-		ksd = sensordev_get(dev);
-		if (ksd == NULL)
-			return (ENOENT);
+		ret = sensordev_get(dev, &ksd);
+		if (ret)
+			return (ret);
 
 		/* Grab a copy, to clear the kernel pointers */
 		usd = malloc(sizeof(*usd), M_TEMP, M_WAITOK|M_ZERO);
@@ -2141,9 +2029,9 @@ sysctl_sensors(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	type = name[1];
 	numt = name[2];
 
-	ks = sensor_find(dev, type, numt);
-	if (ks == NULL)
-		return (ENOENT);
+	ret = sensor_find(dev, type, numt, &ks);
+	if (ret)
+		return (ret);
 
 	/* Grab a copy, to clear the kernel pointers */
 	us = malloc(sizeof(*us), M_TEMP, M_WAITOK|M_ZERO);

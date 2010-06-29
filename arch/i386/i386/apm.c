@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.83 2009/02/26 17:19:47 oga Exp $	*/
+/*	$OpenBSD: apm.c,v 1.86 2010/06/26 23:24:43 guenther Exp $	*/
 
 /*-
  * Copyright (c) 1998-2001 Michael Shalayeff. All rights reserved.
@@ -43,7 +43,7 @@
 #include <sys/kthread.h>
 #include <sys/rwlock.h>
 #include <sys/proc.h>
-#include <sys/user.h>
+#include <sys/sysctl.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
 #include <sys/fcntl.h>
@@ -61,10 +61,13 @@
 #include <i386/isa/isa_machdep.h>
 #include <i386/isa/nvram.h>
 #include <dev/isa/isavar.h>
+#include <dev/wscons/wsdisplayvar.h>
 
 #include <machine/acpiapm.h>
 #include <machine/biosvar.h>
 #include <machine/apmvar.h>
+
+#include "wsdisplay.h"
 
 #if defined(APMDEBUG)
 #define DPRINTF(x)	printf x
@@ -316,6 +319,9 @@ apm_power_print(struct apm_softc *sc, struct apmregs *regs)
 void
 apm_suspend()
 {
+#if NWSDISPLAY > 0
+	wsdisplay_suspend();
+#endif /* NWSDISPLAY > 0 */
 	dopowerhooks(PWR_SUSPEND);
 
 	if (cold)
@@ -327,6 +333,9 @@ apm_suspend()
 void
 apm_standby()
 {
+#if NWSDISPLAY > 0
+	wsdisplay_suspend();
+#endif /* NWSDISPLAY > 0 */
 	dopowerhooks(PWR_STANDBY);
 
 	if (cold)
@@ -356,6 +365,9 @@ apm_resume(struct apm_softc *sc, struct apmregs *regs)
 	/* restore hw.setperf */
 	if (cpu_setperf != NULL)
 		cpu_setperf(perflevel);
+#if NWSDISPLAY > 0
+	wsdisplay_resume();
+#endif /* NWSDISPLAY > 0 */
 }
 
 int
@@ -750,10 +762,8 @@ apmprobe(struct device *parent, void *match, void *aux)
 	bus_space_handle_t ch, dh;
 
 	if (apm_cd.cd_ndevs || strcmp(ba->ba_name, "apm") ||
-	    !(ba->ba_apmp->apm_detail & APM_32BIT_SUPPORTED)) {
-		DPRINTF(("%s: %x\n", ba->ba_name, ba->ba_apmp->apm_detail));
+	    !(ap->apm_detail & APM_32BIT_SUPPORTED))
 		return 0;
-	}
 
 	/* addresses check
 	   since pc* console and vga* probes much later

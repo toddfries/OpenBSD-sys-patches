@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pflow.c,v 1.10 2009/02/27 11:09:36 gollo Exp $	*/
+/*	$OpenBSD: if_pflow.c,v 1.13 2010/04/20 22:05:43 tedu Exp $	*/
 
 /*
  * Copyright (c) 2008 Henning Brauer <henning@openbsd.org>
@@ -20,10 +20,12 @@
 #include <sys/types.h>
 #include <sys/malloc.h>
 #include <sys/param.h>
+#include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/kernel.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <dev/rndvar.h>
 
@@ -156,9 +158,6 @@ pflow_clone_destroy(struct ifnet *ifp)
 
 	s = splnet();
 	pflow_sendout(sc);
-#if NBPFILTER > 0
-	bpfdetach(ifp);
-#endif
 	if_detach(ifp);
 	SLIST_REMOVE(&pflowif_list, sc, pflow_softc, sc_next);
 	free(sc->sc_imo.imo_membership, M_IPMOPTS);
@@ -356,8 +355,12 @@ copy_flow_data(struct pflow_flow *flow1, struct pflow_flow *flow2,
 	flow1->flow_octets = htonl(st->bytes[0]);
 	flow2->flow_octets = htonl(st->bytes[1]);
 
-	flow1->flow_start = flow2->flow_start = htonl(st->creation * 1000);
-	flow1->flow_finish = flow2->flow_finish = htonl(time_second * 1000);
+	flow1->flow_start = flow2->flow_start =
+	    htonl((st->creation - (time_second - time_uptime)) * 1000);
+	flow1->flow_finish = flow2->flow_finish =
+	    htonl((time_uptime - (st->rule.ptr->timeout[st->timeout] ?
+	    st->rule.ptr->timeout[st->timeout] :
+	    pf_default_rule.timeout[st->timeout])) * 1000);
 	flow1->tcp_flags = flow2->tcp_flags = 0;
 	flow1->protocol = flow2->protocol = sk->proto;
 	flow1->tos = flow2->tos = st->rule.ptr->tos;

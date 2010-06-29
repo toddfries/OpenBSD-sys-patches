@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_biomem.c,v 1.7 2009/06/06 18:06:22 art Exp $ */
+/*	$OpenBSD: vfs_biomem.c,v 1.14 2010/04/30 21:56:39 oga Exp $ */
 /*
  * Copyright (c) 2007 Artur Grabowski <art@openbsd.org>
  *
@@ -20,6 +20,7 @@
 #include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/pool.h>
+#include <sys/proc.h>		/* XXX for atomic */
 #include <sys/mount.h>
 
 #include <uvm/uvm_extern.h>
@@ -63,10 +64,7 @@ buf_mem_init(vsize_t size)
 
 	buf_object = &buf_object_store;
 
-	buf_object->pgops = NULL;
-	RB_INIT(&buf_object->memt);
-	buf_object->uo_npages = 0;
-	buf_object->uo_refs = 1;
+	uvm_objinit(buf_object, NULL, 1);
 }
 
 /*
@@ -80,12 +78,10 @@ buf_acquire(struct buf *bp)
 	KASSERT((bp->b_flags & B_BUSY) == 0);
 
 	s = splbio();
-
 	/*
 	 * Busy before waiting for kvm.
 	 */
 	SET(bp->b_flags, B_BUSY);
-	bremfree(bp);
 	buf_map(bp);
 
 	splx(s);
@@ -151,6 +147,8 @@ buf_map(struct buf *bp)
 		TAILQ_REMOVE(&buf_valist, bp, b_valist);
 	}
 
+	bcstats.busymapped++;
+
 	CLR(bp->b_flags, B_NOTMAPPED);
 }
 
@@ -164,6 +162,7 @@ buf_release(struct buf *bp)
 
 	s = splbio();
 	if (bp->b_data) {
+		bcstats.busymapped--;
 		TAILQ_INSERT_TAIL(&buf_valist, bp, b_valist);
 		if (buf_needva) {
 			buf_needva--;
@@ -197,6 +196,8 @@ buf_dealloc_mem(struct buf *bp)
 	bp->b_data = NULL;
 
 	if (data) {
+		if (bp->b_flags & B_BUSY)
+			bcstats.busymapped--;
 		pmap_kremove((vaddr_t)data, bp->b_bufsize);
 		pmap_update(pmap_kernel());
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_dc_cardbus.c,v 1.28 2009/06/02 15:39:35 jsg Exp $	*/
+/*	$OpenBSD: if_dc_cardbus.c,v 1.33 2010/03/27 21:40:13 jsg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -79,7 +79,8 @@ struct dc_cardbus_softc {
 	int			sc_intrline;
 
 	cardbus_devfunc_t	sc_ct;
-	cardbustag_t		sc_tag;
+	pci_chipset_tag_t	sc_pc;
+	pcitag_t		sc_tag;
 	bus_size_t		sc_mapsize;
 	int			sc_actype;
 };
@@ -95,7 +96,7 @@ struct cfattach dc_cardbus_ca = {
 	    dc_cardbus_detach
 };
 
-const struct cardbus_matchid dc_cardbus_devices[] = {
+const struct pci_matchid dc_cardbus_devices[] = {
 	{ PCI_VENDOR_DEC, PCI_PRODUCT_DEC_21142 },
 	{ PCI_VENDOR_XIRCOM, PCI_PRODUCT_XIRCOM_X3201_3_21143 },
 	{ PCI_VENDOR_ADMTEK, PCI_PRODUCT_ADMTEK_AN985 },
@@ -126,13 +127,15 @@ dc_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	struct cardbus_attach_args *ca = aux;
 	struct cardbus_devfunc *ct = ca->ca_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
+	pci_chipset_tag_t pc = ca->ca_pc;
 	cardbus_function_tag_t cf = ct->ct_cf;
-	cardbusreg_t reg;
+	pcireg_t reg;
 	bus_addr_t addr;
 
 	sc->sc_dmat = ca->ca_dmat;
 	csc->sc_ct = ct;
 	csc->sc_tag = ca->ca_tag;
+	csc->sc_pc = ca->ca_pc;
 
 	Cardbus_function_enable(ct);
 
@@ -152,14 +155,16 @@ dc_cardbus_attach(struct device *parent, struct device *self, void *aux)
 
 	csc->sc_intrline = ca->ca_intrline;
 
-	sc->dc_cachesize = cardbus_conf_read(cc, cf, ca->ca_tag, DC_PCI_CFLT)
+	sc->dc_cachesize = pci_conf_read(csc->sc_pc, ca->ca_tag, DC_PCI_CFLT)
 	    & 0xFF;
 
 	dc_cardbus_setup(csc);
 
-	/* Get the eeprom width, but XIRCOM has no eeprom */
-	if (!(PCI_VENDOR(ca->ca_id) == PCI_VENDOR_XIRCOM &&
+	/* Get the eeprom width */
+	if ((PCI_VENDOR(ca->ca_id) == PCI_VENDOR_XIRCOM &&
 	      PCI_PRODUCT(ca->ca_id) == PCI_PRODUCT_XIRCOM_X3201_3_21143))
+		;	/* XIRCOM has non-standard eeprom */
+	else
 		dc_eeprom_width(sc);
 
 	switch (PCI_VENDOR(ca->ca_id)) {
@@ -179,10 +184,6 @@ dc_cardbus_attach(struct device *parent, struct device *self, void *aux)
 			sc->dc_flags |= DC_TX_INTR_ALWAYS|DC_TX_COALESCE |
 					DC_TX_ALIGN;
 			sc->dc_pmode = DC_PMODE_MII;
-
-			bcopy(ca->ca_cis.funce.network.netid,
-			    &sc->sc_arpcom.ac_enaddr,
-			    sizeof sc->sc_arpcom.ac_enaddr);
 		}
 		break;
 	case PCI_VENDOR_ADMTEK:
@@ -217,11 +218,11 @@ dc_cardbus_attach(struct device *parent, struct device *self, void *aux)
  	/*
 	 * set latency timer, do we really need this?
 	 */
-	reg = cardbus_conf_read(cc, cf, ca->ca_tag, PCI_BHLC_REG);
+	reg = pci_conf_read(pc, ca->ca_tag, PCI_BHLC_REG);
 	if (PCI_LATTIMER(reg) < 0x20) {
 		reg &= ~(PCI_LATTIMER_MASK << PCI_LATTIMER_SHIFT);
 		reg |= (0x20 << PCI_LATTIMER_SHIFT);
-		cardbus_conf_write(cc, cf, ca->ca_tag, PCI_BHLC_REG, reg);
+		pci_conf_write(pc, ca->ca_tag, PCI_BHLC_REG, reg);
 	}
 
 	sc->sc_ih = cardbus_intr_establish(cc, cf, ca->ca_intrline, IPL_NET,
@@ -245,20 +246,16 @@ dc_cardbus_detach(struct device *self, int flags)
 	struct dc_cardbus_softc *csc = (struct dc_cardbus_softc *)self;
 	struct dc_softc *sc = &csc->sc_dc;
 	struct cardbus_devfunc *ct = csc->sc_ct;
-	int rv = 0;
-
-	rv = dc_detach(sc);
-	if (rv)
-		return (rv);
 
 	cardbus_intr_disestablish(ct->ct_cc, ct->ct_cf, sc->sc_ih);
+	dc_detach(sc);
 
 	/* unmap cardbus resources */
 	Cardbus_mapreg_unmap(ct,
 	    csc->sc_actype == CARDBUS_IO_ENABLE ? PCI_CBIO : PCI_CBMEM,
 	    sc->dc_btag, sc->dc_bhandle, csc->sc_mapsize);
 
-	return (rv);
+	return (0);
 }
 
 void
@@ -266,33 +263,33 @@ dc_cardbus_setup(struct dc_cardbus_softc *csc)
 {
 	cardbus_devfunc_t ct = csc->sc_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
-	cardbus_function_tag_t cf = ct->ct_cf;
-	cardbusreg_t reg;
+	pci_chipset_tag_t pc = csc->sc_pc;
+	pcireg_t reg;
 	int r;
 
 	/* wakeup the card if needed */
-	reg = cardbus_conf_read(cc, cf, csc->sc_tag, PCI_CFDA);
+	reg = pci_conf_read(pc, csc->sc_tag, PCI_CFDA);
 	if (reg | (DC_CFDA_SUSPEND|DC_CFDA_STANDBY)) {
-		cardbus_conf_write(cc, cf, csc->sc_tag, PCI_CFDA,
+		pci_conf_write(pc, csc->sc_tag, PCI_CFDA,
 		    reg & ~(DC_CFDA_SUSPEND|DC_CFDA_STANDBY));
 	}
 
-	if (cardbus_get_capability(cc, cf, csc->sc_tag, PCI_CAP_PWRMGMT, &r,
+	if (pci_get_capability(csc->sc_pc, csc->sc_tag, PCI_CAP_PWRMGMT, &r,
 	    0)) {
-		r = cardbus_conf_read(cc, cf, csc->sc_tag, r + 4) & 3;
+		r = pci_conf_read(csc->sc_pc, csc->sc_tag, r + 4) & 3;
 		if (r) {
 			printf("%s: awakening from state D%d\n",
 			    csc->sc_dc.sc_dev.dv_xname, r);
-			cardbus_conf_write(cc, cf, csc->sc_tag, r + 4, 0);
+			pci_conf_write(csc->sc_pc, csc->sc_tag, r + 4, 0);
 		}
 	}
 
 	(*ct->ct_cf->cardbus_ctrl)(cc, csc->sc_actype);
 	(*ct->ct_cf->cardbus_ctrl)(cc, CARDBUS_BM_ENABLE);
 
-	reg = cardbus_conf_read(cc, cf, csc->sc_tag, PCI_COMMAND_STATUS_REG);
+	reg = pci_conf_read(csc->sc_pc, csc->sc_tag, PCI_COMMAND_STATUS_REG);
 	reg |= PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
 	    PCI_COMMAND_MASTER_ENABLE;
-	cardbus_conf_write(cc, cf, csc->sc_tag, PCI_COMMAND_STATUS_REG, reg);
-	reg = cardbus_conf_read(cc, cf, csc->sc_tag, PCI_COMMAND_STATUS_REG);
+	pci_conf_write(csc->sc_pc, csc->sc_tag, PCI_COMMAND_STATUS_REG, reg);
+	reg = pci_conf_read(csc->sc_pc, csc->sc_tag, PCI_COMMAND_STATUS_REG);
 }

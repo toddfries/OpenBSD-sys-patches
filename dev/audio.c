@@ -1,4 +1,4 @@
-/*	$OpenBSD: audio.c,v 1.103 2009/03/21 13:16:21 ratchov Exp $	*/
+/*	$OpenBSD: audio.c,v 1.107 2009/11/09 17:53:39 nicm Exp $	*/
 /*	$NetBSD: audio.c,v 1.119 1999/11/09 16:50:47 augustss Exp $	*/
 
 /*
@@ -153,7 +153,7 @@ int	audioprint(void *, const char *);
 int	audioprobe(struct device *, void *, void *);
 void	audioattach(struct device *, struct device *, void *);
 int	audiodetach(struct device *, int);
-int	audioactivate(struct device *, enum devact);
+int	audioactivate(struct device *, int);
 
 struct portname {
 	char	*name;
@@ -314,8 +314,8 @@ audioattach(struct device *parent, struct device *self, void *aux)
 	 */
 
 	if (hwp->get_default_params) {
-		hwp->get_default_params(sc, AUMODE_PLAY, &sc->sc_pparams);
-		hwp->get_default_params(sc, AUMODE_RECORD, &sc->sc_rparams);
+		hwp->get_default_params(hdlp, AUMODE_PLAY, &sc->sc_pparams);
+		hwp->get_default_params(hdlp, AUMODE_RECORD, &sc->sc_rparams);
 	} else {
 		sc->sc_pparams = audio_default;
 		sc->sc_rparams = audio_default;
@@ -364,7 +364,7 @@ audioattach(struct device *parent, struct device *self, void *aux)
 }
 
 int
-audioactivate(struct device *self, enum devact act)
+audioactivate(struct device *self, int act)
 {
 	struct audio_softc *sc = (struct audio_softc *)self;
 
@@ -1014,9 +1014,9 @@ audio_open(dev_t dev, struct audio_softc *sc, int flags, int ifmt,
 	if (ISDEVAUDIO(dev)) {
 		/* /dev/audio */
 		if (sc->hw_if->get_default_params) {
-			sc->hw_if->get_default_params(sc, AUMODE_PLAY,
+			sc->hw_if->get_default_params(sc->hw_hdl, AUMODE_PLAY,
 			    &sc->sc_pparams);
-			sc->hw_if->get_default_params(sc, AUMODE_RECORD,
+			sc->hw_if->get_default_params(sc->hw_hdl, AUMODE_RECORD,
 			    &sc->sc_rparams);
 		} else {
 			sc->sc_rparams = audio_default;
@@ -1504,13 +1504,6 @@ audio_write(dev_t dev, struct uio *uio, int ioflag)
 		while (cb->used >= cb->usedhigh) {
 			DPRINTFN(2, ("audio_write: sleep used=%d lowat=%d hiwat=%d\n",
 				 cb->used, cb->usedlow, cb->usedhigh));
-			if (!sc->sc_pbus && !cb->pause) {
-				error = audiostartp(sc);
-				if (error) {
-					splx(s);
-					return error;
-				}
-			}
 			if (ioflag & IO_NDELAY) {
 				splx(s);
 				return (EWOULDBLOCK);
@@ -1540,6 +1533,13 @@ audio_write(dev_t dev, struct uio *uio, int ioflag)
 		 * silence in the buffer, but it is simple.
 		 */
 		sc->sc_sil_count = 0;
+		if (!sc->sc_pbus && !cb->pause && cb->used >= cb->blksize) {
+			error = audiostartp(sc);
+			if (error) {
+				splx(s);
+				return error;
+			}
+		}
 		splx(s);
 		cc /= sc->sc_pparams.factor;
 		DPRINTFN(1, ("audio_write: uiomove cc=%d inp=%p, left=%d\n",
@@ -1764,7 +1764,6 @@ audio_selwakeup(struct audio_softc *sc, int play)
 	selwakeup(si);
 	if (sc->sc_async_audio)
 		psignal(sc->sc_async_audio, SIGIO);
-	KNOTE(&si->si_note, 0);
 }
 
 #define	AUDIO_FILTREAD(sc) ( \

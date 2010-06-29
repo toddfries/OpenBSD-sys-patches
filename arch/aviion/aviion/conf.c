@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.8 2009/06/03 14:45:51 jj Exp $	*/
+/*	$OpenBSD: conf.c,v 1.10 2010/06/09 15:25:32 jsing Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -59,6 +59,7 @@
 #include "uk.h"
 #include "vme.h"
 #include "vnd.h"
+#include "vscsi.h"
 #ifdef NNPFS
 #include <nnpfs/nnnpfs.h>
 cdev_decl(nnpfs_dev);
@@ -147,6 +148,8 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 51 */
 #endif
 	cdev_ptm_init(NPTY,ptm),	/* 52: pseudo-tty ptm device */
+	cdev_vscsi_init(NVSCSI,vscsi),	/* 53: vscsi */
+	cdev_disk_init(1,diskmap),	/* 54: disk mapper */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_prot.c,v 1.39 2009/06/02 20:03:59 guenther Exp $	*/
+/*	$OpenBSD: kern_prot.c,v 1.42 2010/06/28 23:00:30 guenther Exp $	*/
 /*	$NetBSD: kern_prot.c,v 1.33 1996/02/09 18:59:42 christos Exp $	*/
 
 /*
@@ -46,7 +46,6 @@
 #include <sys/systm.h>
 #include <sys/ucred.h>
 #include <sys/proc.h>
-#include <sys/timeb.h>
 #include <sys/times.h>
 #include <sys/malloc.h>
 #include <sys/filedesc.h>
@@ -282,7 +281,7 @@ sys_setpgid(struct proc *curp, void *v, register_t *retval)
 	newpgrp = pool_get(&pgrp_pool, PR_WAITOK);
 
 	if (pid != 0 && pid != curp->p_pid) {
-		if ((targp = pfind(pid)) == 0 || !inferior(targp)) {
+		if ((targp = pfind(pid)) == 0 || !inferior(targp, curp)) {
 			error = ESRCH;
 			goto out;
 		}
@@ -891,7 +890,7 @@ proc_cansugid(struct proc *p)
 	if ((p->p_flag & P_TRACED) != 0)
 		return (0);
 
-	/* proceses with shared filedescriptors shouldn't. */
+	/* processes with shared filedescriptors shouldn't. */
 	if (p->p_fd->fd_refcnt > 1)
 		return (0);
 

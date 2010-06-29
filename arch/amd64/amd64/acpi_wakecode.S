@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi_wakecode.S,v 1.3 2009/02/19 21:02:05 marco Exp $ */
+/* $OpenBSD: acpi_wakecode.S,v 1.10 2010/02/22 19:44:11 kettenis Exp $ */
 /*
  * Copyright (c) 2001 Takanori Watanabe <takawata@jp.freebsd.org>
  * Copyright (c) 2001 Mitsuru IWASAKI <iwasaki@jp.freebsd.org>
@@ -57,6 +57,7 @@
 
 #define _ACPI_TRMP_LABEL(a) a = . - _C_LABEL(acpi_real_mode_resume) + ACPI_TRAMPOLINE
 #define _ACPI_TRMP_OFFSET(a) a = . - _C_LABEL(acpi_real_mode_resume)
+#define _ACPI_RM_SEGMENT (ACPI_TRAMPOLINE >> 4)
 
 /*
  * On wakeup, we'll start executing at acpi_real_mode_resume.
@@ -80,7 +81,7 @@
 
 	.text
 	.code16
-	.align 4,0
+	.align 4
 	.global _C_LABEL(acpi_real_mode_resume)
 	.global _C_LABEL(acpi_protected_mode_resume)
 	.global _C_LABEL(acpi_long_mode_resume)
@@ -99,7 +100,9 @@ _C_LABEL(acpi_real_mode_resume):
 	 */
 	movw	%cs,%ax
 	movw	%ax,%ds
+	movw	%ax,%es
 	movw	%ax,%ss
+	lidtl	clean_idt
 
 	/*
 	 * Set up stack to grow down from offset 0x0FFE.
@@ -280,6 +283,26 @@ _C_LABEL(acpi_long_mode_resume):
 	movw	%ax, %gs
 
 	/* Restore registers - start with the MSRs */
+	movl	$MSR_STAR, %ecx
+	movl	acpi_saved_star, %eax
+	movl	acpi_saved_star+4, %edx
+	wrmsr
+
+	movl	$MSR_LSTAR, %ecx
+	movl	acpi_saved_lstar, %eax
+	movl	acpi_saved_lstar+4, %edx
+	wrmsr
+
+	movl	$MSR_CSTAR, %ecx
+	movl	acpi_saved_cstar, %eax
+	movl	acpi_saved_cstar+4, %edx
+	wrmsr
+
+	movl	$MSR_SFMASK, %ecx
+	movl	acpi_saved_sfmask, %eax
+	movl	acpi_saved_sfmask+4, %edx
+	wrmsr
+
 	movl	$MSR_FSBASE, %ecx
 	movl	acpi_saved_fsbase, %eax
 	movl	acpi_saved_fsbase+4, %edx
@@ -347,6 +370,10 @@ _C_LABEL(acpi_long_mode_resume):
 	movq    acpi_saved_r14, %r14
 	movq    acpi_saved_r15, %r15
 
+	/* Poke CR3 one more time. Might not be necessary */	
+	movq	acpi_saved_cr3, %rax
+	movq	%rax, %cr3
+
 	xorq	%rax, %rax	
 	jmp   	*acpi_saved_ret
 
@@ -355,7 +382,7 @@ _ACPI_TRMP_OFFSET(tmp_gdt)
 	.word	tmp_gdt_end - tmp_gdtable
 	.long	tmp_gdtable
 
-	.align 8,0
+	.align 8
 _ACPI_TRMP_LABEL(tmp_gdtable)
 	/*
 	 * null
@@ -396,11 +423,17 @@ _ACPI_TRMP_LABEL(tmp_gdtable)
 _ACPI_TRMP_LABEL(tmp_gdt_end)
 
 	.align 8
+_ACPI_TRMP_OFFSET(clean_idt)
+	.word	0xffff
+	.long	0
+	.word	0
+
+	.align 8
 _ACPI_TRMP_LABEL(tmp_gdt64)
 	.word 	tmp_gdt64_end - tmp_gdtable64
 	.long	tmp_gdtable64
 
-	.align 8,0
+	.align 8
 _ACPI_TRMP_LABEL(tmp_gdtable64)
 	.quad	0x0000000000000000
 	.quad	0x00af9a000000ffff
@@ -481,6 +514,14 @@ _ACPI_TRMP_LABEL(acpi_saved_gsbase)
 	.quad 0
 _ACPI_TRMP_LABEL(acpi_saved_kgs)
 	.quad 0
+_ACPI_TRMP_LABEL(acpi_saved_star)
+	.quad 0
+_ACPI_TRMP_LABEL(acpi_saved_lstar)
+	.quad 0
+_ACPI_TRMP_LABEL(acpi_saved_cstar)
+	.quad 0
+_ACPI_TRMP_LABEL(acpi_saved_sfmask)
+	.quad 0
 
 	.align 4
 _ACPI_TRMP_LABEL(acpi_pdirpa)
@@ -507,6 +548,7 @@ NENTRY(acpi_savecpu)
 	movq	%rsi, acpi_saved_rsi
 	movq	%rdi, acpi_saved_rdi
 	movq	%rsp, acpi_saved_rsp
+	addq	$0x8, acpi_saved_rsp
 
 	movq	%r8, acpi_saved_r8
 	movq	%r9, acpi_saved_r9
@@ -533,6 +575,26 @@ NENTRY(acpi_savecpu)
 	
 	pushq	%rcx
 	pushq	%rdx
+	movl	$MSR_STAR, %ecx
+	rdmsr
+	movl	%eax, acpi_saved_star
+	movl	%edx, acpi_saved_star+4
+
+	movl	$MSR_CSTAR, %ecx
+	rdmsr
+	movl	%eax, acpi_saved_cstar
+	movl	%edx, acpi_saved_cstar+4
+
+	movl	$MSR_LSTAR, %ecx
+	rdmsr
+	movl	%eax, acpi_saved_lstar
+	movl	%edx, acpi_saved_lstar+4
+
+	movl	$MSR_SFMASK, %ecx
+	rdmsr
+	movl	%eax, acpi_saved_sfmask
+	movl	%edx, acpi_saved_sfmask+4
+
 	movl	$MSR_FSBASE, %ecx
 	rdmsr
 	movl	%eax, acpi_saved_fsbase

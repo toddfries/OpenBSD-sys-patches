@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_uath.c,v 1.38 2008/12/15 17:01:54 damien Exp $	*/
+/*	$OpenBSD: if_uath.c,v 1.41 2010/04/20 22:05:43 tedu Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -32,7 +32,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -184,12 +183,12 @@ int	uath_switch_channel(struct uath_softc *, struct ieee80211_channel *);
 int	uath_init(struct ifnet *);
 void	uath_stop(struct ifnet *, int);
 int	uath_loadfirmware(struct uath_softc *, const u_char *, int);
-int	uath_activate(struct device *, enum devact);
+int	uath_activate(struct device *, int);
 
 int uath_match(struct device *, void *, void *); 
 void uath_attach(struct device *, struct device *, void *); 
 int uath_detach(struct device *, int); 
-int uath_activate(struct device *, enum devact); 
+int uath_activate(struct device *, int); 
 
 struct cfdriver uath_cd = { 
 	NULL, "uath", DV_DULL 
@@ -812,7 +811,7 @@ uath_task(void *arg)
 			    sc->sc_dev.dv_xname);
 			break;
 		}
-		timeout_add(&sc->scan_to, hz / 4);
+		timeout_add_msec(&sc->scan_to, 250);
 		break;
 
 	case IEEE80211_S_AUTH:
@@ -2126,7 +2125,7 @@ fail1:	return error;
 }
 
 int
-uath_activate(struct device *self, enum devact act)
+uath_activate(struct device *self, int act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:

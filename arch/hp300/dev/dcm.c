@@ -1,4 +1,4 @@
-/*	$OpenBSD: dcm.c,v 1.29 2008/01/23 16:37:56 jsing Exp $	*/
+/*	$OpenBSD: dcm.c,v 1.34 2010/06/28 14:13:27 deraadt Exp $	*/
 /*	$NetBSD: dcm.c,v 1.41 1997/05/05 20:59:16 thorpej Exp $	*/
 
 /*
@@ -453,7 +453,7 @@ dcmopen(dev, flag, mode, p)
 
 	s = spltty();
 	if (sc->sc_tty[port] == NULL) {
-		tp = sc->sc_tty[port] = ttymalloc();
+		tp = sc->sc_tty[port] = ttymalloc(0);
 	} else
 		tp = sc->sc_tty[port];
 	splx(s);
@@ -482,7 +482,7 @@ dcmopen(dev, flag, mode, p)
 
 		(void) dcmparam(tp, &tp->t_termios);
 		ttsetwater(tp);
-	} else if (tp->t_state & TS_XCLUDE && p->p_ucred->cr_uid != 0)
+	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0)
 		return (EBUSY);
 	else
 		s = spltty();
@@ -549,7 +549,7 @@ dcmopen(dev, flag, mode, p)
 			sc->sc_dev.dv_xname, port, tp->t_state, tp->t_flags);
 #endif
 	if (error == 0)
-		error = (*linesw[tp->t_line].l_open)(dev, tp);
+		error = (*linesw[tp->t_line].l_open)(dev, tp, p);
 
 	return (error);
 }
@@ -572,7 +572,7 @@ dcmclose(dev, flag, mode, p)
 	sc = dcm_cd.cd_devs[board];
 	tp = sc->sc_tty[port];
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	s = spltty();
 

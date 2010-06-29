@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.15 2006/05/10 00:07:40 brad Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.17 2009/08/22 02:54:51 mk Exp $	*/
 
 /*
  * Copyright (c) 1996 Carnegie-Mellon University.
@@ -59,12 +59,10 @@ struct ppc_pci_chipset {
 	const char	*(*pc_intr_string)(void *, pci_intr_handle_t);
 	int		(*pc_intr_line)(void *, pci_intr_handle_t);
 	void		*(*pc_intr_establish)(void *, pci_intr_handle_t,
-			    int, int (*)(void *), void *, char *);
+			    int, int (*)(void *), void *, const char *);
 	void		(*pc_intr_disestablish)(void *, void *);
 	int		(*pc_ether_hw_addr)(struct ppc_pci_chipset *, u_int8_t *);
 };
-
-int		pci_intr_line(pci_intr_handle_t ih);
 
 /*
  * Functions provided to machine-independent PCI code.
@@ -84,9 +82,10 @@ int		pci_intr_line(pci_intr_handle_t ih);
 #define	pci_intr_map(pa, ihp)						\
     (*((pa)->pa_pc)->pc_intr_map)((pa)->pa_pc->pc_intr_v, 		\
 	(pa)->pa_intrtag, (pa)->pa_intrpin, (pa)->pa_intrline, (ihp))
-#define	pci_intr_line(ih)	(ih)
 #define	pci_intr_string(c, ih)						\
     (*(c)->pc_intr_string)((c)->pc_intr_v, (ih))
+#define	pci_intr_line(c, ih)						\
+    (*(c)->pc_intr_line)((c)->pc_intr_v, (ih))
 #define	pci_intr_establish(c, ih, l, h, a, nm)				\
     (*(c)->pc_intr_establish)((c)->pc_intr_v, (ih), (l), (h), (a), (nm))
 #define	pci_intr_disestablish(c, iv)					\
