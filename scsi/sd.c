@@ -182,7 +182,11 @@ sdattach(struct device *parent, struct device *self, void *aux)
 	 */
 	sc->sc_dk.dk_driver = &sddkdriver;
 	sc->sc_dk.dk_name = sc->sc_dev.dv_xname;
-	sc->sc_bufq = bufq_init(BUFQ_DEFAULT);
+
+	if (SCSISPC(sc_link->inqdata.version) >= 2)
+		sc->sc_bufq = bufq_init(BUFQ_FIFO);
+	else
+		sc->sc_bufq = bufq_init(BUFQ_DEFAULT);
 
 	if ((sc_link->flags & SDEV_ATAPI) && (sc_link->flags & SDEV_REMOVABLE))
 		sc_link->quirks |= SDEV_NOSYNCCACHE;
