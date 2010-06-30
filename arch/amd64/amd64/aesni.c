@@ -1,4 +1,4 @@
-/*	$OpenBSD: aesni.c,v 1.1 2010/06/29 21:34:11 thib Exp $	*/
+/*	$OpenBSD: aesni.c,v 1.4 2010/06/30 17:14:36 thib Exp $	*/
 /*-
  * Copyright (c) 2003 Jason Wright
  * Copyright (c) 2003, 2004 Theo de Raadt
@@ -26,26 +26,20 @@
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 
-#ifdef CRYPTO
 #include <crypto/cryptodev.h>
 #include <crypto/rijndael.h>
 #include <crypto/xform.h>
 #include <crypto/cryptosoft.h>
-#endif
 
 #include <dev/rndvar.h>
 
 #include <machine/fpu.h>
 
-#ifdef CRYPTO
 
 /* defines from crypto/xform.c */
 #define AESCTR_NONCESIZE	4
 #define AESCTR_IVSIZE		8
 #define AESCTR_BLOCKSIZE	16
-
-#define AESCTR_MINKEY		16+4
-#define AESCTR_MAXKEY		32+4
 
 struct aesni_sess {
 	uint32_t		 ses_ekey[4 * (AES_MAXROUNDS + 1)];
@@ -62,7 +56,6 @@ struct aesni_sess {
 struct aesni_softc {
 	uint8_t			 op_buf[16384];
 	int32_t			 sc_cid;
-//	uint32_t		 sc_nsessions;
 	LIST_HEAD(, aesni_sess)	 sc_sessions;
 } *aesni_sc;
 
@@ -70,14 +63,17 @@ uint32_t aesni_nsessions, aesni_ops;
 
 /* assembler-assisted key setup */
 extern void aesni_set_key(struct aesni_sess *ses, uint8_t *key, size_t len);
+
 /* aes encryption/decryption */
 extern void aesni_enc(struct aesni_sess *ses, uint8_t *dst, uint8_t *src);
 extern void aesni_dec(struct aesni_sess *ses, uint8_t *dst, uint8_t *src);
+
 /* assembler-assisted CBC mode */
 extern void aesni_cbc_enc(struct aesni_sess *ses, uint8_t *dst,
 	    uint8_t *src, size_t len, uint8_t *iv);
 extern void aesni_cbc_dec(struct aesni_sess *ses, uint8_t *dst,
 	    uint8_t *src, size_t len, uint8_t *iv);
+
 /* assembler-assisted CTR mode */
 extern void aesni_ctr_enc(struct aesni_sess *ses, uint8_t *dst,
 	    uint8_t *src, size_t len, uint8_t *iv);
@@ -97,8 +93,7 @@ void
 aesni_setup(void)
 {
 	int algs[CRYPTO_ALGORITHM_MAX + 1];
-//	int flags = CRYPTOCAP_F_SOFTWARE;
-	int flags = 0; /* XXX TESTING */
+	int flags = 0;	/* CRYPTOCAP_F_SOFTWARE */
 
 	aesni_sc = malloc(sizeof(*aesni_sc), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (aesni_sc == NULL)
@@ -164,7 +159,7 @@ aesni_newsession(u_int32_t *sidp, struct cryptoini *cri)
 	if ((uint64_t)ses % 16 != 0)
 		panic("aesni: unaligned address %p\n", ses);
 
-	fpu_kernel_enter(0);
+	fpu_kernel_enter();
 	for (c = cri; c != NULL; c = c->cri_next) {
 		switch (c->cri_alg) {
 		case CRYPTO_AES_CBC:
@@ -250,7 +245,7 @@ aesni_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			return (EINVAL);
 		}
 	}
-	fpu_kernel_exit(0);
+	fpu_kernel_exit();
 
 	*sidp = ses->ses_sid;
 	return (0);
@@ -456,7 +451,7 @@ aesni_process(struct cryptop *crp)
 		goto out;
 	}
 
-	fpu_kernel_enter(0);
+	fpu_kernel_enter();
 	for (crd = crp->crp_desc; crd; crd = crd->crd_next) {
 		switch (crd->crd_alg) {
 		case CRYPTO_AES_CBC:
@@ -484,11 +479,9 @@ aesni_process(struct cryptop *crp)
 		}
 	}
 cleanup:
-	fpu_kernel_exit(0);
+	fpu_kernel_exit();
 out:
 	crp->crp_etype = err;
 	crypto_done(crp);
 	return (err);
 }
-
-#endif /* CRYPTO */
