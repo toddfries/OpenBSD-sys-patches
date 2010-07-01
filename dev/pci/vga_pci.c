@@ -284,7 +284,6 @@ vga_pci_attach(struct device *parent, struct device *self, void *aux)
 int
 vga_pci_activate(struct device *self, int act)
 {
-	struct vga_pci_softc *sc = (struct vga_pci_softc *)self;
 	int rv = 0;
 
 #if defined (X86EMU) && (defined (__i386__) || defined (__amd64__))
