@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.174 2010/06/29 20:30:31 guenther Exp $	*/
+/*	$OpenBSD: locore.S,v 1.176 2010/07/01 05:33:32 jsing Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -493,37 +493,12 @@ EXIT(pdc_call)
 gateway_page
 	nop				/* @ 0.C0000000 (Nothing)  */
 	gate,n	$bsd_syscall,r0		/* @ 0.C0000004 (HPUX/BSD) */
-#ifdef COMPAT_OSF1
-	bl,n	$osf_syscall,r0
-	bl,n	$osf_syscall,r0
-#else
 	nop				/* @ 0.C0000008 (HPOSF UNIX) */
 	nop				/* @ 0.C000000C (HPOSF Mach) */
-#endif
 	nop
 	nop
 	nop
 	nop
-
-#ifdef COMPAT_OSF1
-$osf_syscall
-	/*
-	 * Ripped screaming from OSF/MkLinux:
-	 *
-	 * Convert HPOSF system call to a BSD one by stashing arg4 and arg5
-	 * back into the frame, and moving the system call number into r22.
-	 * Fortunately, the HPOSF compiler has a bigger stack frame, which
-	 * allows this horrible hack.
-	 *
-	 * We also need to save r29 (aka ret1) for the emulator since it may
-	 * get clobbered between here and there.
-	 */
-	stw	r22, HPPA_FRAME_ARG(4)(sp)
-	stw	r21, HPPA_FRAME_ARG(5)(sp)
-	stw	r29, HPPA_FRAME_SL(sp)
-	gate	$bsd_syscall,r0
-	copy	r1, r22
-#endif /* COMPAT_OSF1 */
 
 $bsd_syscall
 	/*
@@ -980,8 +955,8 @@ ENTRY(TLABEL(excpt),0)
 	copy	rp, r1
 	copy	arg0, r8
 	mfctl	cr30, r9
-#if (PCB_FPREGS+U_PCB) != 0
-	ldo	PCB_FPREGS+U_PCB(r9), r9
+#if HFP_REGS != 0
+	ldo	HFP_REGS(r9), r9
 #endif
 	.import	fpu_save, code
 	.call
@@ -1097,8 +1072,8 @@ $fpusw_set
 
 	copy	arg0, r17
 	copy	rp, r1
-#if (PCB_FPREGS+U_PCB) != 0
-	ldo	PCB_FPREGS+U_PCB(r16), r16
+#if HFP_REGS != 0
+	ldo	HFP_REGS(r16), r16
 #endif
 	.import	fpu_save, code
 	.call
@@ -1112,7 +1087,7 @@ $fpusw_nosave
 	.import	uvmexp, data
 	ldil	L%(uvmexp+FPSWTCH), r1
 	ldw	R%(uvmexp+FPSWTCH)(r1), r16
-	ldo	31*8+PCB_FPREGS+U_PCB(r9), r17
+	ldo	31*8+HFP_REGS(r9), r17
 	ldo	1(r16), r16
 	stw	r16, R%(uvmexp+FPSWTCH)(r1)
 

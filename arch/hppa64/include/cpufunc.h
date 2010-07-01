@@ -1,7 +1,7 @@
-/*	$OpenBSD: pcb.h,v 1.14 2010/07/01 05:33:32 jsing Exp $	*/
+/*	$OpenBSD: cpufunc.h,v 1.1 2010/07/01 04:29:10 jsing Exp $	*/
 
 /*
- * Copyright (c) 1999-2004 Michael Shalayeff
+ * Copyright (c) 1998-2004 Michael Shalayeff
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,25 +26,9 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef _HPPA64_CPUFUNC_H_
+#define _HPPA64_CPUFUNC_H_
 
-#ifndef _MACHINE_PCB_H_
-#define _MACHINE_PCB_H_
+#define	mtsp(v,r)	__asm __volatile ("mtsp %0,%1":: "r" (v), "i" (r))
 
-#include <machine/fpu.h>
-#include <machine/reg.h>
-
-struct pcb {
-	struct hppa_fpstate *pcb_fpstate;	/* not in the trapframe */
-
-	u_int		pcb_ksp;	/* kernel sp for ctxsw */
-	u_int		pcb_onfault;	/* SW copy fault handler */
-	pa_space_t	pcb_space;	/* copy pmap_space, for asm's sake */
-};
-
-struct md_coredump {
-	struct reg md_reg;
-	struct fpreg md_fpreg;
-}; 
-
-
-#endif /* _MACHINE_PCB_H_ */
+#endif

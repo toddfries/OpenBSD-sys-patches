@@ -1,7 +1,7 @@
-/*	$OpenBSD: fpu.h,v 1.2 2010/07/01 05:33:32 jsing Exp $	*/
+/*	$OpenBSD: intr.c,v 1.1 2010/07/01 03:44:35 jsing Exp $	*/
 
 /*
- * Copyright (c) 2010 Joel Sing <jsing@openbsd.org>
+ * Copyright (c) Joel Sing <jsing@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -16,18 +16,25 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#ifndef _MACHINE_FPU_H_
-#define _MACHINE_FPU_H_
+#include <sys/param.h>
 
-#include <machine/cpu.h>
-#include <machine/reg.h>
+#include <machine/intr.h>
 
-struct hppa_fpstate {
-	struct fpreg hfp_regs;
-	volatile struct cpu_info *hfp_cpu;	/* CPU which FPU state is on. */
-};
+volatile u_long imask;
 
-void	fpu_proc_flush(struct proc *);
-void	fpu_proc_save(struct proc *);
+void *
+softintr_establish(int pri, void (*handler)(void *), void *arg)
+{
+	return NULL;
+}
 
-#endif /* _MACHINE_FPU_H_ */
+void
+softintr_disestablish(void *cookie)
+{
+}
+
+void
+softintr_schedule(void *cookie)
+{
+}
+
