@@ -1,4 +1,4 @@
-/*	$OpenBSD: ss_mustek.c,v 1.25 2010/06/30 00:02:00 dlg Exp $	*/
+/*	$OpenBSD: ss_mustek.c,v 1.27 2010/07/01 05:11:18 krw Exp $	*/
 /*	$NetBSD: ss_mustek.c,v 1.4 1996/05/05 19:52:57 christos Exp $	*/
 
 /*
@@ -460,6 +460,7 @@ mustek_read(ss, xs, bp)
 	xs->flags |= SCSI_DATA_IN;
 	xs->done = mustek_read_done;
 	xs->cookie = bp;
+	xs->bp = bp;
 
 	scsi_xs_exec(xs);
 
@@ -493,6 +494,9 @@ mustek_read_done(struct scsi_xfer *xs)
 
 	case XS_SENSE:
 	case XS_SHORTSENSE:
+#ifdef SCSIDEBUG
+		scsi_sense_print_debug(xs);
+#endif
 		error = scsi_interpret_sense(xs);
 		if (error == 0) {
 			ss->sio.scan_lines -= bp->b_bcount /

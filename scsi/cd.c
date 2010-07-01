@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.173 2010/06/30 17:38:03 krw Exp $	*/
+/*	$OpenBSD: cd.c,v 1.175 2010/07/01 05:11:18 krw Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -163,13 +163,6 @@ struct cfdriver cd_cd = {
 
 struct dkdriver cddkdriver = { cdstrategy };
 
-struct scsi_device cd_switch = {
-	cd_interpret_sense,
-	NULL,			/* we have a queue, which is started by this */
-	NULL,			/* we do not have an async handler */
-	NULL,			/* no per driver cddone */
-};
-
 const struct scsi_inquiry_pattern cd_patterns[] = {
 	{T_CDROM, T_REMOV,
 	 "",         "",                 ""},
@@ -216,7 +209,7 @@ cdattach(struct device *parent, struct device *self, void *aux)
 	 * Store information needed to contact our base driver
 	 */
 	sc->sc_link = sc_link;
-	sc_link->device = &cd_switch;
+	sc_link->interpret_sense = cd_interpret_sense;
 	sc_link->device_softc = sc;
 	if (sc_link->openings > CDOUTSTANDING)
 		sc_link->openings = CDOUTSTANDING;
@@ -663,6 +656,7 @@ cdstart(struct scsi_xfer *xs)
 	xs->datalen = bp->b_bcount;
 	xs->done = cd_buf_done;
 	xs->cookie = bp;
+	xs->bp = bp;
 
 	/* Instrumentation. */
 	disk_busy(&sc->sc_dk);
@@ -700,7 +694,10 @@ cd_buf_done(struct scsi_xfer *xs)
 
 	case XS_SENSE:
 	case XS_SHORTSENSE:
-		error = scsi_interpret_sense(xs);
+#ifdef SCSIDEBUG
+		scsi_sense_print_debug(xs);
+#endif
+		error = cd_interpret_sense(xs);
 		if (error == 0) {
 			bp->b_error = 0;
 			bp->b_resid = xs->resid;
@@ -1961,7 +1958,7 @@ cd_interpret_sense(struct scsi_xfer *xs)
 
 	if (((sc_link->flags & SDEV_OPEN) == 0) ||
 	    (serr != SSD_ERRCODE_CURRENT && serr != SSD_ERRCODE_DEFERRED))
-		return (EJUSTRETURN); /* let the generic code handle it */
+		return (scsi_interpret_sense(xs));
 
 	/*
 	 * We do custom processing in cd for the unit becoming ready
@@ -1991,7 +1988,7 @@ cd_interpret_sense(struct scsi_xfer *xs)
 	default:
 		break;
 	}
-	return (EJUSTRETURN); /* use generic handler in scsi_base */
+	return (scsi_interpret_sense(xs));
 }
 
 #if defined(__macppc__)

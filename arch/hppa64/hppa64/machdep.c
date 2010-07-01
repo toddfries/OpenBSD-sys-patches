@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.23 2010/06/29 20:30:32 guenther Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.25 2010/07/01 05:09:27 jsing Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -142,6 +142,12 @@ void hpmc_dump(void);
 void cpuid(void);
 
 /*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int	safepri = 0;
+
+/*
  * wide used hardware params
  */
 struct pdc_hwtlb pdc_hwtlb PDC_ALIGNMENT;
@@ -155,6 +161,9 @@ int sigdebug = 0;
 pid_t sigpid = 0;
 #define SDB_FOLLOW	0x01
 #endif
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 int	hppa_cpuspeed(int *mhz);
 
