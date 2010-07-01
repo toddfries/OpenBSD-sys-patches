@@ -62,9 +62,6 @@ int acpi_hasprocfvs;
 int acpi_thinkpad_enabled;
 int acpi_saved_spl;
 
-int acpi_repost_video = 1;
-int acpi_clean_registers = 1;
-
 #define ACPIEN_RETRIES 15
 
 void	acpi_isr_thread(void *);
@@ -2418,22 +2415,5 @@ acpi_foundvideo(struct aml_node *node, void *arg)
 	config_found(self, &aaa, acpi_print);
 
 	return (0);
-}
-
-void
-acpi_set_trampoline_tweaks()
-{
-	uint8_t *video_resume_flag; 
-	uint8_t *clean_registers_flag;
-
-	/* Set tweaks for various ACPI resume behaviors */ 
-	video_resume_flag = (uint8_t *)(ACPI_TRAMPOLINE + ACPI_TRAMP_DATA);
-	clean_registers_flag = (uint8_t *)(ACPI_TRAMPOLINE + 
-	    ACPI_TRAMP_DATA + 1);
-
-	if (acpi_repost_video)
-		*video_resume_flag = 1;
-	if(acpi_clean_registers)
-		*clean_registers_flag = 1;
 }
 #endif /* SMALL_KERNEL */

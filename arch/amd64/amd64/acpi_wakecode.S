@@ -92,55 +92,19 @@ _C_LABEL(acpi_real_mode_resume):
 	nop
 	cli
 	cld
-	
-	cmpb	$0x1, acpi_rm_clean_registers
-	jne	no_clean_required
 
-<<<<<<< HEAD
-	/* Fix selectors and IDT for machines that need it */
-	movw	$0x10,	%cx
-	lgdtl	%cs:clean_gdt
-	movl	%cr0,	%eax
-	orb	$(CR0_PE), %al
-	movl	%eax,	%cr0
-	jmp	1f
-1:	ljmpw	$0x8, $clean1
-
-_ACPI_TRMP_OFFSET(clean1)
-	movw	%cx,	%ds	
-	movw	%cx,	%es
-	movw	%cx,	%ss
-	movw	%cx,	%fs
-	movw	%cx,	%gs
-	
-	andb	$~(CR0_PE), %al
-	movl	%eax,	%cr0
-	ljmpw	$_ACPI_RM_SEGMENT , $clean2
-
-_ACPI_TRMP_OFFSET(clean2)
-
-=======
 	/*
 	 * Set up segment registers for real mode. 
 	 * We'll only be in real mode for a moment, and we don't have
 	 * ant real dependencies on data or stack, so we'll just use
 	 * the code segment for data and stack (eg, a 64k memory space).
 	 */
->>>>>>> origin/master
 	movw	%cs,%ax
 	movw	%ax,%ds
 	movw	%ax,%es
 	movw	%ax,%ss
 	lidtl	clean_idt
-	jmp	clean4
 
-no_clean_required:
-	movw	%cs,%ax
-	movw	%ax,%ds
-	movw	%ax,%es
-	movw	%ax,%ss
-
-clean4:
 	/*
 	 * Set up stack to grow down from offset 0x0FFE.
 	 * We will only be doing a few push/pops and no calls in real 
@@ -168,17 +132,10 @@ clean4:
 	 * laptops), we might not restore the proper VGA mode
 	 * on resume. Caveat emptor.
 	 */
-<<<<<<< HEAD
-
-	cmpb	$0x1, acpi_rm_video_resume
-	jne	no_rm_video_repost
-=======
 	cmp	$0, do_real_mode_post_off
 	jz	nobiosreset
->>>>>>> origin/master
 	lcall	$0xc000,$3
 
-no_rm_video_repost:
 	/*
 	 * Restore our segment registers in case the call to 
 	 * reset the video hardware clobbered them.
@@ -421,13 +378,6 @@ _C_LABEL(acpi_long_mode_resume):
 
 	xorq	%rax, %rax	
 	jmp   	*acpi_saved_ret
-
-
-	.org ACPI_TRAMP_DATA
-_ACPI_TRMP_OFFSET(acpi_rm_video_resume)
-	.byte 0
-_ACPI_TRMP_OFFSET(acpi_rm_clean_registers)
-	.byte 0
 
 	.align 8
 _ACPI_TRMP_OFFSET(tmp_gdt)
