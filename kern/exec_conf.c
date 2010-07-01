@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_conf.c,v 1.19 2008/09/19 05:41:29 djm Exp $	*/
+/*	$OpenBSD: exec_conf.c,v 1.23 2010/07/01 17:30:25 tedu Exp $	*/
 /*	$NetBSD: exec_conf.c,v 1.16 1995/12/09 05:34:47 cgd Exp $	*/
 
 /*
@@ -47,10 +47,6 @@
 #include <compat/svr4/svr4_exec.h>
 #endif
 
-#ifdef COMPAT_IBCS2
-#include <compat/ibcs2/ibcs2_exec.h>
-#endif
-
 #ifdef COMPAT_LINUX
 #include <compat/linux/linux_exec.h>
 #endif
@@ -63,10 +59,6 @@
 #include <compat/freebsd/freebsd_exec.h>
 #endif
 
-#ifdef COMPAT_HPUX
-#include <compat/hpux/hpux_exec.h>
-#endif
-
 #ifdef COMPAT_M68K4K
 #include <compat/m68k4k/m68k4k_exec.h>
 #endif
@@ -76,9 +68,9 @@
 #endif
 
 extern struct emul emul_native, emul_elf32, emul_elf64, emul_aout,
-	emul_bsdos, emul_freebsd_aout, emul_freebsd_elf, emul_hpux,
-	emul_ibcs2, emul_linux_elf, emul_linux_aout, emul_netbsd_elf64,
-	emul_osf1, emul_sunos, emul_svr4, emul_ultrix;
+	emul_bsdos, emul_freebsd_aout, emul_freebsd_elf,
+	emul_linux_elf, emul_linux_aout, emul_netbsd_elf64,
+	emul_sunos, emul_svr4;
 
 struct execsw execsw[] = {
 	{ EXEC_SCRIPT_HDRSZ, exec_script_makecmds, &emul_native, },	/* shell scripts */
@@ -97,17 +89,10 @@ struct execsw execsw[] = {
 #endif
 #ifdef _KERN_DO_ELF64
 	{ sizeof(Elf64_Ehdr), exec_elf64_makecmds, &emul_native },	/* elf binaries */
-#ifdef COMPAT_OSF1
-	{ sizeof(Elf64_Ehdr), exec_elf64_makecmds, &emul_osf1 },
-#endif
 #endif /* ELF64 */
 #ifdef COMPAT_LINUX
 	{ LINUX_AOUT_HDR_SIZE, exec_linux_aout_makecmds, &emul_linux_aout }, /* linux a.out */
 	{ sizeof(Elf32_Ehdr), exec_linux_elf32_makecmds, &emul_linux_elf },
-#endif
-#ifdef COMPAT_IBCS2
-	{ COFF_HDR_SIZE, exec_ibcs2_coff_makecmds, &emul_ibcs2 },	/* coff binaries */
-	{ XOUT_HDR_SIZE, exec_ibcs2_xout_makecmds, &emul_ibcs2 },	/* x.out binaries */
 #endif
 #ifdef COMPAT_BSDOS
 	{ BSDOS_AOUT_HDR_SIZE, exec_bsdos_aout_makecmds, &emul_bsdos },	/* bsdos */
@@ -116,17 +101,11 @@ struct execsw execsw[] = {
 	{ FREEBSD_AOUT_HDR_SIZE, exec_freebsd_aout_makecmds, &emul_freebsd_aout },	/* freebsd */
 	{ sizeof(Elf32_Ehdr), exec_freebsd_elf32_makecmds, &emul_freebsd_elf },
 #endif
-#ifdef COMPAT_HPUX
-	{ HPUX_EXEC_HDR_SIZE, exec_hpux_makecmds, &emul_hpux },	/* HP-UX a.out */
-#endif
 #ifdef COMPAT_M68K4K
 	{ sizeof(struct exec), exec_m68k4k_makecmds, &emul_native },	/* m68k4k a.out */
 #endif
 #ifdef COMPAT_VAX1K
 	{ sizeof(struct exec), exec_vax1k_makecmds, &emul_native },	/* vax1k a.out */
-#endif
-#ifdef COMPAT_ULTRIX
-	{ ECOFF_HDR_SIZE, exec_ecoff_makecmds, &emul_ultrix },	/* ecoff binaries */
 #endif
 #ifdef COMPAT_SVR4
 	{ sizeof(Elf32_Ehdr), exec_elf32_makecmds, &emul_svr4 },	/* elf binaries */

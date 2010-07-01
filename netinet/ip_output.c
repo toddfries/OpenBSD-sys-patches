@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.200 2009/11/27 20:05:50 guenther Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.207 2010/07/01 02:09:45 reyk Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -121,6 +121,9 @@ ip_output(struct mbuf *m0, ...)
 	struct inpcb *inp;
 	struct tdb *tdb;
 	int s;
+#if NPF > 0
+	struct ifnet *encif;
+#endif
 #endif /* IPSEC */
 
 	va_start(ap, m0);
@@ -186,7 +189,8 @@ ip_output(struct mbuf *m0, ...)
 		 * destination and is still up.  If not, free it and try again.
 		 */
 		if (ro->ro_rt && ((ro->ro_rt->rt_flags & RTF_UP) == 0 ||
-				  dst->sin_addr.s_addr != ip->ip_dst.s_addr)) {
+		    dst->sin_addr.s_addr != ip->ip_dst.s_addr ||
+		    ro->ro_tableid != m->m_pkthdr.rdomain)) {
 			RTFREE(ro->ro_rt);
 			ro->ro_rt = (struct rtentry *)0;
 		}
@@ -195,6 +199,7 @@ ip_output(struct mbuf *m0, ...)
 			dst->sin_family = AF_INET;
 			dst->sin_len = sizeof(*dst);
 			dst->sin_addr = ip->ip_dst;
+			ro->ro_tableid = m->m_pkthdr.rdomain;
 		}
 
 		/*
@@ -221,8 +226,7 @@ ip_output(struct mbuf *m0, ...)
 			IFP_TO_IA(ifp, ia);
 		} else {
 			if (ro->ro_rt == 0)
-				rtalloc_mpath(ro, NULL,
-				    m->m_pkthdr.rdomain);
+				rtalloc_mpath(ro, NULL);
 
 			if (ro->ro_rt == 0) {
 				ipstat.ips_noroute++;
@@ -363,7 +367,8 @@ reroute:
 		 * destination and is still up.  If not, free it and try again.
 		 */
 		if (ro->ro_rt && ((ro->ro_rt->rt_flags & RTF_UP) == 0 ||
-				  dst->sin_addr.s_addr != ip->ip_dst.s_addr)) {
+		    dst->sin_addr.s_addr != ip->ip_dst.s_addr ||
+		    ro->ro_tableid != m->m_pkthdr.rdomain)) {
 			RTFREE(ro->ro_rt);
 			ro->ro_rt = (struct rtentry *)0;
 		}
@@ -372,6 +377,7 @@ reroute:
 			dst->sin_family = AF_INET;
 			dst->sin_len = sizeof(*dst);
 			dst->sin_addr = ip->ip_dst;
+			ro->ro_tableid = m->m_pkthdr.rdomain;
 		}
 
 		/*
@@ -398,8 +404,7 @@ reroute:
 			IFP_TO_IA(ifp, ia);
 		} else {
 			if (ro->ro_rt == 0)
-				rtalloc_mpath(ro, &ip->ip_src.s_addr,
-				    m->m_pkthdr.rdomain);
+				rtalloc_mpath(ro, &ip->ip_src.s_addr);
 
 			if (ro->ro_rt == 0) {
 				ipstat.ips_noroute++;
@@ -542,7 +547,7 @@ reroute:
 	}
 
 	/*
-	 * Look for broadcast address and and verify user is allowed to send
+	 * Look for broadcast address and verify user is allowed to send
 	 * such a packet; if the packet is going in an IPsec tunnel, skip
 	 * this check.
 	 */
@@ -581,12 +586,21 @@ sendit:
 	if (sproto != 0) {
 		s = splnet();
 
+		tdb = gettdb(sspi, &sdst, sproto);
+		if (tdb == NULL) {
+			DPRINTF(("ip_output: unknown TDB"));
+			error = EHOSTUNREACH;
+			splx(s);
+			m_freem(m);
+			goto done;
+		}
+
 		/*
 		 * Packet filter
 		 */
 #if NPF > 0
-
-		if (pf_test(PF_OUT, &encif[0].sc_if, &m, NULL) != PF_PASS) {
+		if ((encif = enc_getif(0, tdb->tdb_tap)) == NULL ||
+		    pf_test(PF_OUT, encif, &m, NULL) != PF_PASS) {
 			error = EHOSTUNREACH;
 			splx(s);
 			m_freem(m);
@@ -606,15 +620,6 @@ sendit:
 		 * What's the behaviour?
 		 */
 #endif
-
-		tdb = gettdb(sspi, &sdst, sproto);
-		if (tdb == NULL) {
-			DPRINTF(("ip_output: unknown TDB"));
-			error = EHOSTUNREACH;
-			splx(s);
-			m_freem(m);
-			goto done;
-		}
 
 		/* Check if we are allowed to fragment */
 		if (ip_mtudisc && (ip->ip_off & htons(IP_DF)) && tdb->tdb_mtu &&
@@ -651,7 +656,7 @@ sendit:
 				if (ro && ro->ro_rt != NULL) {
 					RTFREE(ro->ro_rt);
 					ro->ro_rt = NULL;
-					rtalloc1(&ro->ro_dst, 1,
+					rtalloc1(&ro->ro_dst, RT_REPORT,
 					    m->m_pkthdr.rdomain);
 				}
 				if (rt_mtucloned)
@@ -933,8 +938,12 @@ sendorfree:
 	/*
 	 * If there is no room for all the fragments, don't queue
 	 * any of them.
+	 *
+	 * Queue them anyway on virtual interfaces
+	 * (vlan, etc) with queue length 1 and hope the
+	 * underlying interface can cope.
 	 */
-	if (ifp != NULL) {
+	if (ifp != NULL && ifp->if_snd.ifq_maxlen != 1) {
 		s = splnet();
 		if (ifp->if_snd.ifq_maxlen - ifp->if_snd.ifq_len < fragments &&
 		    error == 0) {
@@ -1423,7 +1432,8 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 			}
 			rtid = *mtod(m, u_int *);
-			if (p->p_rdomain != 0 && p->p_rdomain != rtid &&
+			if (p->p_p->ps_rdomain != 0 &&
+			    p->p_p->ps_rdomain != rtid &&
 			    (error = suser(p, 0)) != 0) {
 				error = EACCES;
 				break;
@@ -1593,9 +1603,11 @@ ip_ctloutput(op, so, level, optname, mp)
 			case IP_IPSEC_LOCAL_AUTH:
 				if (inp->inp_ipo != NULL)
 					ipr = inp->inp_ipo->ipo_local_auth;
+				opt16val = IPSP_AUTH_NONE;
 				break;
 			case IP_IPSEC_REMOTE_AUTH:
 				ipr = inp->inp_ipsec_remoteauth;
+				opt16val = IPSP_AUTH_NONE;
 				break;
 			}
 			if (ipr == NULL)
@@ -1868,7 +1880,8 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 			dst->sin_addr = mreq->imr_multiaddr;
 			if (!(ro.ro_rt && ro.ro_rt->rt_ifp &&
 			    (ro.ro_rt->rt_flags & RTF_UP)))
-				ro.ro_rt = rtalloc1(&ro.ro_dst, 1, rdomain);
+				ro.ro_rt = rtalloc1(&ro.ro_dst, RT_REPORT,
+				    rdomain);
 			if (ro.ro_rt == NULL) {
 				error = EADDRNOTAVAIL;
 				break;

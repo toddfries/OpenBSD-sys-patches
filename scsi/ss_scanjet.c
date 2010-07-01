@@ -1,4 +1,4 @@
-/*	$OpenBSD: ss_scanjet.c,v 1.33 2008/06/22 16:32:05 krw Exp $	*/
+/*	$OpenBSD: ss_scanjet.c,v 1.44 2010/07/01 05:11:18 krw Exp $	*/
 /*	$NetBSD: ss_scanjet.c,v 1.6 1996/05/18 22:58:01 christos Exp $	*/
 
 /*
@@ -42,7 +42,6 @@
 #include <sys/ioctl.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/device.h>
 #include <sys/conf.h>		/* for cdevsw */
 #include <sys/scanio.h>
@@ -54,7 +53,8 @@
 
 int scanjet_set_params(struct ss_softc *, struct scan_io *);
 int scanjet_trigger_scanner(struct ss_softc *);
-int scanjet_read(struct ss_softc *, struct buf *);
+int scanjet_read(struct ss_softc *, struct scsi_xfer *, struct buf *);
+void scanjet_read_done(struct scsi_xfer *);
 
 /* only used internally */
 int scanjet_ctl_write(struct ss_softc *, char *, u_int, int);
@@ -276,42 +276,106 @@ scanjet_trigger_scanner(ss)
 }
 
 int
-scanjet_read(ss, bp)
+scanjet_read(ss, xs, bp)
 	struct ss_softc *ss;
+	struct scsi_xfer *xs;
 	struct buf *bp;
 {
-	struct scsi_rw_scanner cmd;
-	struct scsi_link *sc_link = ss->sc_link;
+	struct scsi_rw_scanner *cdb;
 
-	/*
-	 *  Fill out the scsi command
-	 */
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = READ;
+	SC_DEBUG(ss->sc_link, SDEV_DB1, ("scanjet_read: start\n"));
 
-	/*
-	 * Handle "fixed-block-mode" tape drives by using the
-	 * block count instead of the length.
-	 */
-	_lto3b(bp->b_bcount, cmd.len);
+	cdb = (struct scsi_rw_scanner *)xs->cmd;
+	xs->cmdlen = sizeof(*cdb);
 
-	/*
-	 * go ask the adapter to do all this for us
-	 */
-	if (scsi_scsi_cmd(sc_link, (struct scsi_generic *) &cmd, sizeof(cmd),
-	    (u_char *) bp->b_data, bp->b_bcount, SCSI_RETRIES, 100000, bp,
-	    SCSI_NOSLEEP | SCSI_DATA_IN) != SUCCESSFULLY_QUEUED)
-		printf("%s: not queued\n", ss->sc_dev.dv_xname);
-	else {
-		if (bp->b_bcount >= ss->sio.scan_window_size)
-			ss->sio.scan_window_size = 0;
-		else
-			ss->sio.scan_window_size -= bp->b_bcount;
-	}
+	cdb->opcode = READ;
+	_lto3b(bp->b_bcount, cdb->len);
+
+	xs->data = bp->b_data;
+	xs->datalen = bp->b_bcount;
+	xs->flags |= SCSI_DATA_IN;
+	xs->timeout = 100000;
+	xs->done = scanjet_read_done;
+	xs->cookie = bp;
+	xs->bp = bp;
+
+	scsi_xs_exec(xs);
 
 	return (0);
 }
 
+void
+scanjet_read_done(struct scsi_xfer *xs)
+{
+	struct ss_softc *ss = xs->sc_link->device_softc;
+	struct buf *bp = xs->cookie;
+	int error, s;
+
+	switch (xs->error) {
+	case XS_NOERROR:
+		if (bp->b_bcount >= ss->sio.scan_window_size)
+			ss->sio.scan_window_size = 0;
+		else
+			ss->sio.scan_window_size -= bp->b_bcount;
+
+		bp->b_error = 0;
+		bp->b_resid = xs->resid;
+		break;
+
+	case XS_NO_CCB:
+		/* The adapter is busy, requeue the buf and try it later. */
+		BUFQ_REQUEUE(ss->sc_bufq, bp);
+                scsi_xs_put(xs);
+		SET(ss->flags, SSF_WAITING);
+		timeout_add(&ss->timeout, 1);
+		return;
+
+	case XS_SENSE:
+	case XS_SHORTSENSE:
+#ifdef SCSIDEBUG
+		scsi_sense_print_debug(xs);
+#endif
+		error = scsi_interpret_sense(xs);
+		if (error == 0) {
+			if (bp->b_bcount >= ss->sio.scan_window_size)
+				ss->sio.scan_window_size = 0;
+			else
+				ss->sio.scan_window_size -= bp->b_bcount;
+			bp->b_error = 0;
+			bp->b_resid = xs->resid;
+			break;
+		}
+		if (error != ERESTART)
+			xs->retries = 0;
+		goto retry;
+
+	case XS_BUSY:
+		if (xs->retries) {
+			if (scsi_delay(xs, 1) != ERESTART)
+				xs->retries = 0;
+		}
+		goto retry;
+
+	case XS_TIMEOUT:
+retry:
+		if (xs->retries--) {
+			scsi_xs_exec(xs);
+			return;
+		}
+		/* FALLTHROUGH */
+
+	default:
+		bp->b_error = EIO;
+		bp->b_flags |= B_ERROR;
+		bp->b_resid = bp->b_bcount;
+		break;
+	}
+
+	s = splbio();
+	biodone(bp);
+	splx(s);
+	scsi_xs_put(xs);
+}
 
 /*
  * Do a synchronous write.  Used to send control messages.

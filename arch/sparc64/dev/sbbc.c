@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbbc.c,v 1.7 2009/11/09 17:53:39 nicm Exp $	*/
+/*	$OpenBSD: sbbc.c,v 1.9 2010/06/28 14:13:31 deraadt Exp $	*/
 /*
  * Copyright (c) 2008 Mark Kettenis
  *
@@ -515,7 +515,7 @@ sbbcopen(dev_t dev, int flag, int mode, struct proc *p)
 	if (sc->sc_tty)
 		tp = sc->sc_tty;
 	else
-		tp = sc->sc_tty = ttymalloc();
+		tp = sc->sc_tty = ttymalloc(0);
 
 	tp->t_oproc = sbbcstart;
 	tp->t_param = sbbcparam;
@@ -532,7 +532,7 @@ sbbcopen(dev_t dev, int flag, int mode, struct proc *p)
 		return (EBUSY);
 	tp->t_state |= TS_CARR_ON;
 
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 int
@@ -549,7 +549,7 @@ sbbcclose(dev_t dev, int flag, int mode, struct proc *p)
 		return (ENXIO);
 
 	tp = sc->sc_tty;
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	ttyclose(tp);
 	return (0);
 }

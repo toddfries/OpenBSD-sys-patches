@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sgi,v 1.42 2009/11/21 23:28:14 syuu Exp $
+#	$OpenBSD: files.sgi,v 1.45 2010/03/22 21:22:08 miod Exp $
 #
 # maxpartitions must be first item in files.${ARCH}
 #
@@ -16,6 +16,7 @@ file	arch/sgi/sgi/disksubr.c			disk
 file	arch/sgi/sgi/lock_machdep.c		multiprocessor
 file	arch/sgi/sgi/ip27_machdep.c		tgt_origin
 file	arch/sgi/sgi/ip30_machdep.c		tgt_octane
+file	arch/sgi/sgi/ip30_nmi.S			tgt_octane & ddb
 file	arch/sgi/sgi/ip32_machdep.c		tgt_o2
 file	arch/sgi/sgi/l1.c			tgt_origin
 file	arch/sgi/sgi/machdep.c
@@ -91,6 +92,8 @@ include	"dev/i2o/files.i2o"
 
 include	"dev/pci/files.pci"
 file	arch/sgi/pci/pci_machdep.c		pci
+
+include	"dev/puc/files.puc"
 
 # Sun HME Ethernet controllers
 device	hme: ether, ifnet, mii, ifmedia
@@ -202,3 +205,8 @@ device	owserial
 attach	owserial at onewire
 file	arch/sgi/dev/owserial.c			owserial
 file	arch/sgi/dev/owmem_subr.c		owmac | owserial
+
+# IP35 SPD memory information
+attach	spdmem at mainbus with spdmem_mainbus
+file	arch/sgi/dev/spdmem_mainbus.c		spdmem_mainbus
+

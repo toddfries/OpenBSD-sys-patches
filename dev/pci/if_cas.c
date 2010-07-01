@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cas.c,v 1.28 2009/11/17 20:47:42 kettenis Exp $	*/
+/*	$OpenBSD: if_cas.c,v 1.30 2010/05/19 15:27:35 oga Exp $	*/
 
 /*
  *
@@ -386,7 +386,7 @@ cas_config(struct cas_softc *sc)
 	 */
 	if ((error = bus_dmamem_alloc(sc->sc_dmatag,
 	    sizeof(struct cas_control_data), CAS_PAGE_SIZE, 0, &sc->sc_cdseg,
-	    1, &sc->sc_cdnseg, 0)) != 0) {
+	    1, &sc->sc_cdnseg, BUS_DMA_ZERO)) != 0) {
 		printf("\n%s: unable to allocate control data, error = %d\n",
 		    sc->sc_dev.dv_xname, error);
 		goto fail_0;
@@ -416,8 +416,6 @@ cas_config(struct cas_softc *sc)
 		    sc->sc_dev.dv_xname, error);
 		goto fail_3;
 	}
-
-	bzero(sc->sc_control_data, sizeof(struct cas_control_data));
 
 	/*
 	 * Create the receive buffer DMA maps.
@@ -1050,8 +1048,8 @@ cas_init(struct ifnet *ifp)
 	 */
 	bus_space_write_4(t, h, CAS_RX_PAUSE_THRESH,
 	    (3 * sc->sc_rxfifosize / 256) |
-	    (   (sc->sc_rxfifosize / 256) << 12));
-	bus_space_write_4(t, h, CAS_RX_BLANKING, (6<<12)|6);
+	    ((sc->sc_rxfifosize / 256) << 12));
+	bus_space_write_4(t, h, CAS_RX_BLANKING, (6 << 12) | 6);
 
 	/* step 11. Configure Media */
 	mii_mediachg(&sc->sc_mii);
@@ -1089,21 +1087,19 @@ cas_init_regs(struct cas_softc *sc)
 	/* These regs are not cleared on reset */
 	sc->sc_inited = 0;
 	if (!sc->sc_inited) {
-
-		/* Wooo.  Magic values. */
-		bus_space_write_4(t, h, CAS_MAC_IPG0, 0);
-		bus_space_write_4(t, h, CAS_MAC_IPG1, 8);
-		bus_space_write_4(t, h, CAS_MAC_IPG2, 4);
+		/* Load recommended values  */
+		bus_space_write_4(t, h, CAS_MAC_IPG0, 0x00);
+		bus_space_write_4(t, h, CAS_MAC_IPG1, 0x08);
+		bus_space_write_4(t, h, CAS_MAC_IPG2, 0x04);
 
 		bus_space_write_4(t, h, CAS_MAC_MAC_MIN_FRAME, ETHER_MIN_LEN);
 		/* Max frame and max burst size */
 		v = ETHER_MAX_LEN | (0x2000 << 16) /* Burst size */;
 		bus_space_write_4(t, h, CAS_MAC_MAC_MAX_FRAME, v);
 
-		bus_space_write_4(t, h, CAS_MAC_PREAMBLE_LEN, 0x7);
-		bus_space_write_4(t, h, CAS_MAC_JAM_SIZE, 0x4);
+		bus_space_write_4(t, h, CAS_MAC_PREAMBLE_LEN, 0x07);
+		bus_space_write_4(t, h, CAS_MAC_JAM_SIZE, 0x04);
 		bus_space_write_4(t, h, CAS_MAC_ATTEMPT_LIMIT, 0x10);
-		/* Dunno.... */
 		bus_space_write_4(t, h, CAS_MAC_CONTROL_TYPE, 0x8088);
 		bus_space_write_4(t, h, CAS_MAC_RANDOM_SEED,
 		    ((sc->sc_arpcom.ac_enaddr[5]<<8)|sc->sc_arpcom.ac_enaddr[4])&0x3ff);

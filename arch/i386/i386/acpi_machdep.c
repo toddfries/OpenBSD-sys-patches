@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.26 2009/11/26 22:08:30 mlarkin Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.32 2010/07/01 03:22:12 jsg Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -20,6 +20,9 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
+#include <sys/memrange.h>
+#include <sys/proc.h>
+#include <sys/user.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -28,7 +31,9 @@
 #include <machine/acpiapm.h>
 #include <i386/isa/isa_machdep.h>
 
+#include <machine/cpu.h>
 #include <machine/cpufunc.h>
+#include <machine/cpuvar.h>
 #include <machine/npx.h>
 
 #include <dev/isa/isareg.h>
@@ -57,7 +62,7 @@ int haveacpibutusingapm;
 
 extern u_char acpi_real_mode_resume[], acpi_resume_end[];
 
-extern int acpi_savecpu(void);
+extern int acpi_savecpu(void) __returns_twice;
 extern void intr_calculatemasks(void);
 
 #define ACPI_BIOS_RSDP_WINDOW_BASE        0xe0000
@@ -219,11 +224,8 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 		return (ENXIO);
 	}
 
-	if (rcr3() != pmap_kernel()->pm_pdirpa) {
-		pmap_activate(curproc);
-
-		KASSERT(rcr3() == pmap_kernel()->pm_pdirpa);
-	}
+	/* i386 does lazy pmap_activate */
+	pmap_activate(curproc);
 
 	acpi_set_trampoline_tweaks();
 
@@ -243,23 +245,23 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	if (sc->sc_facs->version == 1)
 		sc->sc_facs->x_wakeup_vector = 0;
 
-	/* Copy the current cpu registers into a safe place for resume. */
+	/* Copy the current cpu registers into a safe place for resume.
+	 * acpi_savecpu actually returns twice - once in the suspend
+	 * path and once in the resume path (see setjmp(3)).
+	 */ 
 	if (acpi_savecpu()) {
+		/* Suspend path */
 		npxsave_cpu(curcpu(), 1);
+#ifdef MULTIPROCESSOR
+		i386_broadcast_ipi(I386_IPI_FLUSH_FPU);
+		i386_broadcast_ipi(I386_IPI_HALT);
+#endif
 		wbinvd();
 		acpi_enter_sleep_state(sc, state);
 		panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
 	}
 
-	/*
-	 * On resume, the execution path will actually occur here.
-	 * This is because we previously saved the stack location
-	 * in acpi_savecpu, and issued a far jmp to the restore
-	 * routine in the wakeup code. This means we are
-	 * returning to the location immediately following the
-	 * last call instruction - after the call to acpi_savecpu.
-	 */
-	
+	/* Resume path continues here */
 #if 0
         /* Temporarily disabled for debugging purposes */
         /* Reset the wakeup vector to avoid resuming on reboot */
@@ -279,6 +281,10 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 
 	npxinit(&cpu_info_primary);
 
+	/* Re-initialise memory range handling */
+	if (mem_range_softc.mr_op != NULL)
+		mem_range_softc.mr_op->initAP(&mem_range_softc);
+
 #if NIOAPIC > 0
 	ioapic_enable();
 #endif
@@ -286,6 +292,46 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	inittodr(time_second);
 
 	return (0);
+}
+
+void
+acpi_resume_machdep(void)
+{
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci;
+	struct proc *p;
+	struct pcb *pcb;
+	struct trapframe *tf;
+	struct switchframe *sf;
+	int i;
+
+	/* XXX refactor with matching code in cpu.c */
+
+	for (i = 0; i < MAXCPUS; i++) {
+		ci = cpu_info[i];
+		if (ci == NULL)
+			continue;
+		if (ci->ci_idle_pcb == NULL)
+			continue;
+		if (ci->ci_flags & (CPUF_BSP|CPUF_SP|CPUF_PRIMARY))
+			continue;
+		KASSERT((ci->ci_flags & CPUF_RUNNING) == 0);
+
+		p = ci->ci_schedstate.spc_idleproc;
+		pcb = &p->p_addr->u_pcb;
+
+		tf = (struct trapframe *)pcb->pcb_tss.tss_esp0 - 1;
+		sf = (struct switchframe *)tf - 1;
+		sf->sf_esi = (int)sched_idle;
+		sf->sf_ebx = (int)ci;
+		sf->sf_eip = (int)proc_trampoline;
+		pcb->pcb_esp = (int)sf;
+
+		ci->ci_idepth = 0;
+	}
+
+	cpu_boot_secondary_processors();
+#endif /* MULTIPROCESSOR */
 }
 
 #endif /* ! SMALL_KERNEL */

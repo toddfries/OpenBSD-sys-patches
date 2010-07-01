@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_esp.c,v 1.105 2008/06/09 07:07:17 djm Exp $ */
+/*	$OpenBSD: ip_esp.c,v 1.108 2010/07/01 02:09:45 reyk Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -183,15 +183,15 @@ esp_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 			break;
 
 		case SADB_X_AALG_SHA2_256:
-			thash = &auth_hash_hmac_sha2_256_96;
+			thash = &auth_hash_hmac_sha2_256_128;
 			break;
 
 		case SADB_X_AALG_SHA2_384:
-			thash = &auth_hash_hmac_sha2_384_96;
+			thash = &auth_hash_hmac_sha2_384_192;
 			break;
 
 		case SADB_X_AALG_SHA2_512:
-			thash = &auth_hash_hmac_sha2_512_96;
+			thash = &auth_hash_hmac_sha2_512_256;
 			break;
 
 		default:
@@ -304,11 +304,7 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 	else
 		hlen = 2 * sizeof(u_int32_t) + tdb->tdb_ivlen; /* "new" ESP */
 
-	if (esph)
-		alen = AH_HMAC_HASHLEN;
-	else
-		alen = 0;
-
+	alen = esph ? esph->authsize : 0;
 	plen = m->m_pkthdr.len - (skip + hlen + alen);
 	if (plen <= 0) {
 		DPRINTF(("esp_input: invalid payload length\n"));
@@ -490,7 +486,7 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 int
 esp_input_cb(void *op)
 {
-	u_int8_t lastthree[3], aalg[AH_HMAC_HASHLEN];
+	u_int8_t lastthree[3], aalg[AH_HMAC_MAX_HASHLEN];
 	int s, hlen, roff, skip, protoff, error;
 	struct mbuf *m1, *mo, *m;
 	struct auth_hash *esph;
@@ -735,25 +731,27 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	struct cryptodesc *crde = NULL, *crda = NULL;
 	struct cryptop *crp;
 #if NBPFILTER > 0
-	struct ifnet *ifn = &(encif[0].sc_if);
+	struct ifnet *encif;
 
-	ifn->if_opackets++;
-	ifn->if_obytes += m->m_pkthdr.len;
+	if ((encif = enc_getif(0, tdb->tdb_tap)) != NULL) {
+		encif->if_opackets++;
+		encif->if_obytes += m->m_pkthdr.len;
 
-	if (ifn->if_bpf) {
-		struct enchdr hdr;
+		if (encif->if_bpf) {
+			struct enchdr hdr;
 
-		bzero (&hdr, sizeof(hdr));
+			bzero (&hdr, sizeof(hdr));
 
-		hdr.af = tdb->tdb_dst.sa.sa_family;
-		hdr.spi = tdb->tdb_spi;
-		if (espx)
-			hdr.flags |= M_CONF;
-		if (esph)
-			hdr.flags |= M_AUTH;
+			hdr.af = tdb->tdb_dst.sa.sa_family;
+			hdr.spi = tdb->tdb_spi;
+			if (espx)
+				hdr.flags |= M_CONF;
+			if (esph)
+				hdr.flags |= M_AUTH;
 
-		bpf_mtap_hdr(ifn->if_bpf, (char *)&hdr, ENC_HDRLEN, m,
-		    BPF_DIRECTION_OUT);
+			bpf_mtap_hdr(encif->if_bpf, (char *)&hdr,
+			    ENC_HDRLEN, m, BPF_DIRECTION_OUT);
+		}
 	}
 #endif
 
@@ -770,11 +768,7 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 
 	padding = ((blks - ((rlen + 2) % blks)) % blks) + 2;
 
-	if (esph)
-		alen = AH_HMAC_HASHLEN;
-	else
-		alen = 0;
-
+	alen = esph ? esph->authsize : 0;
 	espstat.esps_output++;
 
 	switch (tdb->tdb_dst.sa.sa_family) {

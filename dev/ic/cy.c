@@ -1,4 +1,4 @@
-/*	$OpenBSD: cy.c,v 1.28 2009/11/09 17:53:39 nicm Exp $	*/
+/*	$OpenBSD: cy.c,v 1.31 2010/06/28 14:13:32 deraadt Exp $	*/
 /*
  * Copyright (c) 1996 Timo Rossi.
  * All rights reserved.
@@ -62,7 +62,6 @@
 #include <sys/tty.h>
 #include <sys/proc.h>
 #include <sys/conf.h>
-#include <sys/user.h>
 #include <sys/selinfo.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
@@ -300,7 +299,7 @@ cyopen(dev, flag, mode, p)
 
 	s = spltty();
 	if (cy->cy_tty == NULL) {
-		cy->cy_tty = ttymalloc();
+		cy->cy_tty = ttymalloc(0);
 	}
 	splx(s);
 
@@ -400,7 +399,7 @@ cyopen(dev, flag, mode, p)
 
 	splx(s);
 
-	return (*linesw[tp->t_line].l_open)(dev, tp);
+	return (*linesw[tp->t_line].l_open)(dev, tp, p);
 }
 
 /*
@@ -424,7 +423,7 @@ cyclose(dev, flag, mode, p)
 	    port, flag, mode);
 #endif
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	s = spltty();
 
 	if (ISSET(tp->t_cflag, HUPCL) &&

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ss.c,v 1.63 2009/02/16 21:19:07 miod Exp $	*/
+/*	$OpenBSD: ss.c,v 1.79 2010/07/01 05:11:18 krw Exp $	*/
 /*	$NetBSD: ss.c,v 1.10 1996/05/05 19:52:55 christos Exp $	*/
 
 /*
@@ -38,7 +38,6 @@
 #include <sys/ioctl.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/device.h>
 #include <sys/conf.h>
 #include <sys/scanio.h>
@@ -112,7 +111,8 @@ struct  quirkdata ss_gen_quirks = {
 };
 
 void    ssstrategy(struct buf *);
-void    ssstart(void *);
+void    ssstart(struct scsi_xfer *);
+void	ssdone(struct scsi_xfer *);
 void	ssminphys(struct buf *);
 
 void	ss_identify_scanner(struct ss_softc *, struct scsi_inquiry_data*);
@@ -252,13 +252,6 @@ struct cfdriver ss_cd = {
 	NULL, "ss", DV_DULL
 };
 
-struct scsi_device ss_switch = {
-	NULL,
-	ssstart,
-	NULL,
-	NULL,
-};
-
 const struct scsi_inquiry_pattern ss_patterns[] = {
 	{T_SCANNER, T_FIXED,
 	 "",         "",                 ""},
@@ -325,7 +318,6 @@ ssattach(parent, self, aux)
 	 * Store information needed to contact our base driver
 	 */
 	ss->sc_link = sc_link;
-	sc_link->device = &ss_switch;
 	sc_link->device_softc = ss;
 	sc_link->openings = 1;
 
@@ -353,12 +345,11 @@ ssattach(parent, self, aux)
 	/* XXX fill in the rest of the scan_io struct by calling the
 	   compute_sizes routine */
 
-	/*
-	 * Set up the buf queue for this device
-	 */
-	ss->buf_queue.b_active = 0;
-	ss->buf_queue.b_actf = 0;
-	ss->buf_queue.b_actb = &ss->buf_queue.b_actf;
+	scsi_xsh_set(&ss->xsh, sc_link, ssstart);
+	timeout_set(&ss->timeout, (void (*)(void *))scsi_xsh_add, &ss->xsh);
+
+	/* Set up the buf queue for this device. */
+	ss->sc_bufq = bufq_init(BUFQ_DEFAULT);
 }
 
 void
@@ -558,9 +549,14 @@ void
 ssstrategy(bp)
 	struct buf *bp;
 {
-	struct ss_softc *ss = ss_cd.cd_devs[SSUNIT(bp->b_dev)];
-	struct buf *dp;
+	struct ss_softc *ss;
 	int s;
+
+	ss = ss_cd.cd_devs[SSUNIT(bp->b_dev)];
+	if (ss == NULL) {
+		bp->b_error = ENXIO;
+		goto bad;
+	}
 
 	SC_DEBUG(ss->sc_link, SDEV_DB2, ("ssstrategy: %ld bytes @ blk %d\n",
 	    bp->b_bcount, bp->b_blkno));
@@ -574,37 +570,35 @@ ssstrategy(bp)
 	if (bp->b_bcount == 0)
 		goto done;
 
-	s = splbio();
-
 	/*
 	 * Place it in the queue of activities for this scanner
 	 * at the end (a bit silly because we only have on user..)
 	 * (but it could fork() or dup())
 	 */
-	dp = &ss->buf_queue;
-	bp->b_actf = NULL;
-	bp->b_actb = dp->b_actb;
-	*dp->b_actb = bp;
-	dp->b_actb = &bp->b_actf;
+	BUFQ_QUEUE(ss->sc_bufq, bp);
 
 	/*
 	 * Tell the device to get going on the transfer if it's
 	 * not doing anything, otherwise just wait for completion
 	 * (All a bit silly if we're only allowing 1 open but..)
 	 */
-	ssstart(ss);
+	scsi_xsh_add(&ss->xsh);
 
-	splx(s);
+	device_unref(&ss->sc_dev);
 	return;
 
+bad:
+	bp->b_flags |= B_ERROR;
 done:
 	/*
-	 * Correctly set the buf to indicate a completed xfer
+	 * Set the buf to indicate no xfer was done.
 	 */
 	bp->b_resid = bp->b_bcount;
 	s = splbio();
 	biodone(bp);
 	splx(s);
+	if (ss != NULL)
+		device_unref(&ss->sc_dev);
 }
 
 /*
@@ -622,57 +616,110 @@ done:
  * ssstart() is called at splbio
  */
 void
-ssstart(v)
-	void *v;
+ssstart(struct scsi_xfer *xs)
 {
-	struct ss_softc *ss = v;
-	struct scsi_link *sc_link = ss->sc_link;
-	struct buf *bp, *dp;
-	struct scsi_r_scanner read_cmd;
-	int flags;
+	struct scsi_link *sc_link = xs->sc_link;
+	struct ss_softc *ss = sc_link->device_softc;
+	struct buf *bp;
+	struct scsi_r_scanner *cdb;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("ssstart\n"));
-	/*
-	 * See if there is a buf to do and we are not already
-	 * doing one
-	 */
-	while (sc_link->openings > 0) {
-		/* if a special awaits, let it proceed first */
-		if (sc_link->flags & SDEV_WAITING) {
-			sc_link->flags &= ~SDEV_WAITING;
-			wakeup((caddr_t)sc_link);
-			return;
-		}
 
-		/*
-		 * See if there is a buf with work for us to do..
-		 */
-		dp = &ss->buf_queue;
-		if ((bp = dp->b_actf) == NULL)
-			return;
-		if ((dp = bp->b_actf) != NULL)
-			dp->b_actb = bp->b_actb;
-		else
-			ss->buf_queue.b_actb = bp->b_actb;
-		*bp->b_actb = dp;
-
-		if (ss->special.read) {
-			(ss->special.read)(ss, bp);
-		} else {
-			/* generic scsi2 scanner read */
-			bzero(&read_cmd, sizeof(read_cmd));
-			read_cmd.opcode = READ_BIG;
-			_lto3b(bp->b_bcount, read_cmd.len);
-			flags = SCSI_DATA_IN;
-			/*
-			 * go ask the adapter to do all this for us
-			 */
-			if (scsi_scsi_cmd(sc_link, (struct scsi_generic *)
-			    &read_cmd, sizeof(read_cmd), (u_char *) bp->b_data,
-			    bp->b_bcount, 0, 100000, bp, flags | SCSI_NOSLEEP))
-				printf("%s: not queued\n", ss->sc_dev.dv_xname);
-		}
+	bp = BUFQ_DEQUEUE(ss->sc_bufq);
+	if (bp == NULL) {
+		scsi_xs_put(xs);
+		return;
 	}
+
+	if (ss->special.read) {
+		(ss->special.read)(ss, xs, bp);
+	} else {
+		cdb = (struct scsi_r_scanner *)xs->cmd;
+		xs->cmdlen = sizeof(*cdb);
+
+		cdb->opcode = READ_BIG;
+		_lto3b(bp->b_bcount, cdb->len);
+
+		xs->data = bp->b_data;
+		xs->datalen = bp->b_bcount;
+		xs->flags |= SCSI_DATA_IN;
+		xs->retries = 0;
+		xs->timeout = 100000;
+		xs->done = ssdone;
+		xs->cookie = bp;
+		xs->bp = bp;
+
+		scsi_xs_exec(xs);
+	}
+
+	if (ISSET(ss->flags, SSF_WAITING))
+		CLR(ss->flags, SSF_WAITING);
+	else if (BUFQ_PEEK(ss->sc_bufq))
+		scsi_xsh_add(&ss->xsh);
+}
+
+void
+ssdone(struct scsi_xfer *xs)
+{
+	struct ss_softc *ss = xs->sc_link->device_softc;
+	struct buf *bp = xs->cookie;
+	int error, s;
+
+	switch (xs->error) {
+	case XS_NOERROR:
+		bp->b_error = 0;
+		bp->b_resid = xs->resid;
+		break;
+
+	case XS_NO_CCB:
+		/* The adapter is busy, requeue the buf and try it later. */
+		BUFQ_REQUEUE(ss->sc_bufq, bp);
+		scsi_xs_put(xs);
+		SET(ss->flags, SSF_WAITING);
+		timeout_add(&ss->timeout, 1);
+		return;
+
+	case XS_SENSE:
+	case XS_SHORTSENSE:
+#ifdef SCSIDEBUG
+		scsi_sense_print_debug(xs);
+#endif
+		error = scsi_interpret_sense(xs);
+		if (error == 0) {
+			bp->b_error = 0;
+			bp->b_resid = xs->resid;
+			break;
+		}
+		if (error != ERESTART)
+			xs->retries = 0;
+		goto retry;
+
+	case XS_BUSY:
+		if (xs->retries) {
+			if (scsi_delay(xs, 1) != ERESTART)
+				xs->retries = 0;
+		}
+		goto retry;
+
+	case XS_TIMEOUT:
+retry:
+		if (xs->retries--) {
+			scsi_xs_exec(xs);
+			return;
+		}
+		/* FALLTHROUGH */
+
+	default:
+		bp->b_error = EIO;
+		bp->b_flags |= B_ERROR;
+		bp->b_resid = bp->b_bcount;
+		break;
+	}
+
+	s = splbio();
+	biodone(bp);
+	splx(s);
+	scsi_xs_put(xs);
 }
 
 /*
@@ -731,8 +778,7 @@ ssioctl(dev, cmd, addr, flag, p)
 	default:
 		if (SSMODE(dev) != MODE_CONTROL)
 			return (ENOTTY);
-		return (scsi_do_ioctl(ss->sc_link, dev, cmd, addr,
-		    flag, p));
+		return (scsi_do_ioctl(ss->sc_link, cmd, addr, flag));
 	}
 	return (error);
 }

@@ -1,4 +1,4 @@
-/* $OpenBSD: siotty.c,v 1.10 2009/11/09 17:53:38 nicm Exp $ */
+/* $OpenBSD: siotty.c,v 1.13 2010/06/28 14:13:28 deraadt Exp $ */
 /* $NetBSD: siotty.c,v 1.9 2002/03/17 19:40:43 atatat Exp $ */
 
 /*-
@@ -36,7 +36,6 @@
 #include <sys/conf.h>
 #include <sys/ioctl.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/tty.h>
 #include <sys/uio.h>
 #include <sys/fcntl.h>
@@ -359,7 +358,7 @@ sioopen(dev, flag, mode, p)
 	if ((sc = siotty_cd.cd_devs[minor(dev)]) == NULL)
 		return ENXIO;
 	if ((tp = sc->sc_tty) == NULL) {
-		tp = sc->sc_tty = ttymalloc();
+		tp = sc->sc_tty = ttymalloc(0);
 	}		
 	else if ((tp->t_state & TS_ISOPEN) && (tp->t_state & TS_XCLUDE)
 	    && suser(p, 0) != 0)
@@ -400,7 +399,7 @@ sioopen(dev, flag, mode, p)
 /*
 	return (*tp->t_linesw->l_open)(dev, tp);
 */
-	return (*linesw[tp->t_line].l_open)(dev, tp);
+	return (*linesw[tp->t_line].l_open)(dev, tp, p);
 }
  
 int
@@ -416,7 +415,7 @@ sioclose(dev, flag, mode, p)
 /*
 	(*tp->t_linesw->l_close)(tp, flag);
 */
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	s = spltty();
 	siomctl(sc, TIOCM_BREAK, DMBIC);

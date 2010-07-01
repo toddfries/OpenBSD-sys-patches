@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhu.c,v 1.15 2009/11/09 17:53:39 nicm Exp $	*/
+/*	$OpenBSD: dhu.c,v 1.17 2010/06/28 14:13:31 deraadt Exp $	*/
 /*	$NetBSD: dhu.c,v 1.19 2000/06/04 06:17:01 matt Exp $	*/
 /*
  * Copyright (c) 2003, Hugh Graham.
@@ -243,7 +243,7 @@ dhu_attach(parent, self, aux)
 
 	for (i = 0; i < sc->sc_lines; i++) {
 		struct tty *tp;
-		tp = sc->sc_dhu[i].dhu_tty = ttymalloc();
+		tp = sc->sc_dhu[i].dhu_tty = ttymalloc(0);
 		sc->sc_dhu[i].dhu_state = STATE_IDLE;
 		bus_dmamap_create(sc->sc_dmat, tp->t_outq.c_cn, 1, 
 		    tp->t_outq.c_cn, 0, BUS_DMA_ALLOCNOW|BUS_DMA_NOWAIT,
@@ -455,7 +455,7 @@ dhuopen(dev, flag, mode, p)
 	splx(s);
 	if (error)
 		return (error);
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 /*ARGSUSED*/
@@ -476,7 +476,7 @@ dhuclose(dev, flag, mode, p)
 
 	tp = sc->sc_dhu[line].dhu_tty;
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	/* Make sure a BREAK state is not left enabled. */
 

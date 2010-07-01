@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.c,v 1.178 2009/08/12 00:13:43 martynas Exp $	*/
+/*	$OpenBSD: ip_ipsp.c,v 1.180 2010/04/20 22:05:43 tedu Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -44,6 +44,7 @@
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/kernel.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -1230,7 +1231,7 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 
 			/* Update the length of trailing ESP authenticators. */
 			if (tdb->tdb_authalgxform)
-				trail += AH_HMAC_HASHLEN;
+				trail += tdb->tdb_authalgxform->authsize;
 
 			splx(s);
 

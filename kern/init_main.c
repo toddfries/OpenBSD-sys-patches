@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.163 2009/11/27 20:05:50 guenther Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.168 2010/06/29 20:25:57 guenther Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -106,7 +106,7 @@ extern void nfs_init(void);
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-"Copyright (c) 1995-2009 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+"Copyright (c) 1995-2010 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -216,6 +216,7 @@ main(void *framep)
 	printf("%s\n", copyright);
 
 	KERNEL_LOCK_INIT();
+	SCHED_LOCK_INIT();
 
 	uvm_init();
 	disk_init();		/* must come before autoconfiguration */
@@ -264,6 +265,9 @@ main(void *framep)
 	process0.ps_refcnt = 1;
 	p->p_p = &process0;
 
+	/* Set the default routing domain. */
+	process0.ps_rdomain = 0;
+
 	LIST_INSERT_HEAD(&allproc, p, p_list);
 	p->p_pgrp = &pgrp0;
 	LIST_INSERT_HEAD(PIDHASH(0), p, p_hash);
@@ -286,7 +290,6 @@ main(void *framep)
 	timeout_set(&p->p_realit_to, realitexpire, p);
 
 	/* Create credentials. */
-	cred0.p_refcnt = 1;
 	p->p_cred = &cred0;
 	p->p_ucred = crget();
 	p->p_ucred->cr_ngroups = 1;	/* group 0 */
@@ -314,9 +317,6 @@ main(void *framep)
 	limit0.pl_rlimit[RLIMIT_MEMLOCK].rlim_cur = lim / 3;
 	limit0.p_refcnt = 1;
 
-	/* Set the default routing domain. */
-	p->p_rdomain = 0;
-
 	/* Allocate a prototype map so we have something to fork. */
 	uvmspace_init(&vmspace0, pmap_kernel(), round_page(VM_MIN_ADDRESS),
 	    trunc_page(VM_MAX_ADDRESS), TRUE, TRUE);
@@ -342,6 +342,9 @@ main(void *framep)
 
 	/* Initialize work queues */
 	workq_init();
+
+	/* Initialize the interface/address trees */
+	ifinit();
 
 	/* Configure the devices */
 	cpu_configure();
@@ -391,7 +394,6 @@ main(void *framep)
 	 * until everything is ready.
 	 */
 	s = splnet();
-	ifinit();
 	domaininit();
 	if_attachdomain();
 	splx(s);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.68 2009/09/12 01:23:30 krw Exp $	*/
+/*	$OpenBSD: fd.c,v 1.70 2010/05/23 10:49:19 dlg Exp $	*/
 /*	$NetBSD: fd.c,v 1.51 1997/05/24 20:16:19 pk Exp $	*/
 
 /*-
@@ -89,6 +89,7 @@
 #include <sys/queue.h>
 #include <sys/conf.h>
 #include <sys/timeout.h>
+#include <sys/dkio.h>
 
 #include <dev/cons.h>
 
@@ -1945,11 +1946,9 @@ fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
 	lp->d_ncylinders = fd->sc_type->tracks;
 	lp->d_ntracks = fd->sc_type->heads;	/* Go figure... */
 	DL_SETDSIZE(lp, fd->sc_type->size);
-	lp->d_rpm = 300;	/* XXX like it matters... */
 
 	strncpy(lp->d_typename, "floppy disk", sizeof(lp->d_typename));
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-	lp->d_interleave = 1;
 	lp->d_version = 1;
 
 	lp->d_magic = DISKMAGIC;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bha.c,v 1.19 2009/09/04 04:57:14 miod Exp $	*/
+/*	$OpenBSD: bha.c,v 1.25 2010/06/28 18:31:02 krw Exp $	*/
 /*	$NetBSD: bha.c,v 1.27 1998/11/19 21:53:00 thorpej Exp $	*/
 
 #undef BHADEBUG
@@ -63,7 +63,6 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -93,21 +92,13 @@ void bha_start_ccbs(struct bha_softc *);
 void bha_done(struct bha_softc *, struct bha_ccb *);
 int bha_init(struct bha_softc *);
 void bhaminphys(struct buf *, struct scsi_link *);
-int bha_scsi_cmd(struct scsi_xfer *);
+void bha_scsi_cmd(struct scsi_xfer *);
 int bha_poll(struct bha_softc *, struct scsi_xfer *, int);
 void bha_timeout(void *arg);
 int bha_create_ccbs(struct bha_softc *, struct bha_ccb *, int);
 
 struct cfdriver bha_cd = {
 	NULL, "bha", DV_DULL
-};
-
-/* the below structure is so we have a default dev struct for out link struct */
-struct scsi_device bha_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
 };
 
 #define BHA_RESET_TIMEOUT	2000	/* time to wait for reset (mSec) */
@@ -273,7 +264,6 @@ bha_attach(sc, bpd)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = bpd->sc_scsi_dev;
 	sc->sc_link.adapter = &sc->sc_adapter;
-	sc->sc_link.device = &bha_dev;
 	sc->sc_link.openings = 4;
 
 	TAILQ_INIT(&sc->sc_free_ccb);
@@ -536,7 +526,6 @@ bha_create_ccbs(sc, ccbstore, count)
 	struct bha_ccb *ccb;
 	int i, error;
 
-	bzero(ccbstore, sizeof(struct bha_ccb) * count);
 	for (i = 0; i < count; i++) {
 		ccb = &ccbstore[i];
 		if ((error = bha_init_ccb(sc, ccb)) != 0) {
@@ -793,7 +782,6 @@ bha_done(sc, ccb)
 			xs->resid = 0;
 	}
 	bha_free_ccb(sc, ccb);
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
 }
 
@@ -1120,7 +1108,7 @@ bha_init(sc)
 	 * Allocate the mailbox and control blocks.
 	 */
 	if ((error = bus_dmamem_alloc(sc->sc_dmat, sizeof(struct bha_control),
-	    NBPG, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) != 0) {
+	    NBPG, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) != 0) {
 		printf("%s: unable to allocate control structures, "
 		    "error = %d\n", sc->sc_dev.dv_xname, error);
 		return (error);
@@ -1270,7 +1258,7 @@ bhaminphys(struct buf *bp, struct scsi_link *sl)
  * start a scsi operation given the command and the data address.  Also needs
  * the unit, target and lu.
  */
-int
+void
 bha_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -1291,8 +1279,10 @@ bha_scsi_cmd(xs)
 	 */
 	flags = xs->flags;
 	if ((ccb = bha_get_ccb(sc, flags)) == NULL) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
 		splx(s);
-		return (NO_CCB);
+		return;
 	}
 
 	splx(s);		/* done playing with the queue */
@@ -1391,7 +1381,7 @@ bha_scsi_cmd(xs)
 	 */
 	SC_DEBUG(sc_link, SDEV_DB3, ("cmd_sent\n"));
 	if ((flags & SCSI_POLL) == 0)
-		return (SUCCESSFULLY_QUEUED);
+		return;
 
 	/*
 	 * If we can't use interrupts, poll on completion
@@ -1401,16 +1391,12 @@ bha_scsi_cmd(xs)
 		if (bha_poll(sc, xs, ccb->timeout))
 			bha_timeout(ccb);
 	}
-	return (COMPLETE);
+	return;
 
 bad:
 	xs->error = XS_DRIVER_STUFFUP;
 	bha_free_ccb(sc, ccb);
-	s = splbio();
-	xs->flags |= ITSDONE;
 	scsi_done(xs);
-	splx(s);
-	return (COMPLETE);
 }
 
 /*

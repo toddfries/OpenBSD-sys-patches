@@ -1,4 +1,4 @@
-/* $OpenBSD: ncr.c,v 1.25 2009/02/16 21:19:06 miod Exp $ */
+/* $OpenBSD: ncr.c,v 1.27 2010/06/28 18:31:01 krw Exp $ */
 /*	$NetBSD: ncr.c,v 1.32 2000/06/25 16:00:43 ragge Exp $	*/
 
 /*-
@@ -51,7 +51,6 @@
 #include <sys/buf.h>
 #include <sys/disk.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -124,13 +123,6 @@ struct scsi_adapter	si_ops = {
 	si_minphys,		/* scsi_minphys() */
 	NULL,			/* probe_dev() */
 	NULL			/* free_dev() */
-};
-
-struct scsi_device	si_dev = {
-	NULL,		/* use default error handler */
-	NULL,		/* no start function */
-	NULL,		/* no async handler */
-	NULL		/* use default done routine */
 };
 
 struct cfattach ncr_ca = {
@@ -246,7 +238,6 @@ si_attach(parent, self, aux)
 	ncr_sc->sc_link.adapter_softc =	sc;
 	ncr_sc->sc_link.adapter_target = target;
 	ncr_sc->sc_link.adapter = &si_ops;
-	ncr_sc->sc_link.device = &si_dev;
 	ncr_sc->sc_link.openings = 4;
 
 	/*

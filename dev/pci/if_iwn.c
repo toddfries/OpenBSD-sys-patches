@@ -1,7 +1,7 @@
-/*	$OpenBSD: if_iwn.c,v 1.78 2009/11/08 11:54:48 damien Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.97 2010/06/05 18:52:47 damien Exp $	*/
 
 /*-
- * Copyright (c) 2007-2009 Damien Bergamini <damien.bergamini@free.fr>
+ * Copyright (c) 2007-2010 Damien Bergamini <damien.bergamini@free.fr>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -25,7 +25,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -83,7 +82,16 @@ static const struct pci_matchid iwn_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_IPA_1 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_IPA_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_2X2_1 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_2X2_2 }
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_2X2_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005A_2X2_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005A_2X2_2 },
+#ifdef notyet
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005B_1X1_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005B_1X1_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005B_2X2_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005B_2X2_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005B_2X2_3 }
+#endif
 };
 
 int		iwn_match(struct device *, void *, void *);
@@ -236,6 +244,10 @@ int		iwn4965_load_firmware(struct iwn_softc *);
 int		iwn5000_load_firmware_section(struct iwn_softc *, uint32_t,
 		    const uint8_t *, int);
 int		iwn5000_load_firmware(struct iwn_softc *);
+int		iwn_read_firmware_leg(struct iwn_softc *,
+		    struct iwn_fw_info *);
+int		iwn_read_firmware_tlv(struct iwn_softc *,
+		    struct iwn_fw_info *, uint16_t);
 int		iwn_read_firmware(struct iwn_softc *);
 int		iwn_clock_wait(struct iwn_softc *);
 int		iwn_apm_init(struct iwn_softc *);
@@ -485,12 +497,15 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 #if IWN_RBUF_SIZE == 8192
 	    IEEE80211_HTCAP_AMSDU7935 |
 #endif
-	    IEEE80211_HTCAP_SMPS_DIS |
 	    IEEE80211_HTCAP_CBW20_40 |
 	    IEEE80211_HTCAP_SGI20 |
 	    IEEE80211_HTCAP_SGI40;
 	if (sc->hw_type != IWN_HW_REV_TYPE_4965)
 		ic->ic_htcaps |= IEEE80211_HTCAP_GF;
+	if (sc->hw_type == IWN_HW_REV_TYPE_6050)
+		ic->ic_htcaps |= IEEE80211_HTCAP_SMPS_DYN;
+	else
+		ic->ic_htcaps |= IEEE80211_HTCAP_SMPS_DIS;
 #endif	/* !IEEE80211_NO_HT */
 
 	/* Set supported legacy rates. */
@@ -502,11 +517,11 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 	}
 #ifndef IEEE80211_NO_HT
 	/* Set supported HT rates. */
-	ic->ic_sup_mcs[0] = 0xff;
+	ic->ic_sup_mcs[0] = 0xff;		/* MCS 0-7 */
 	if (sc->nrxchains > 1)
-		ic->ic_sup_mcs[1] = 0xff;
+		ic->ic_sup_mcs[1] = 0xff;	/* MCS 7-15 */
 	if (sc->nrxchains > 2)
-		ic->ic_sup_mcs[2] = 0xff;
+		ic->ic_sup_mcs[2] = 0xff;	/* MCS 16-23 */
 #endif
 
 	/* IBSS channel undefined for now. */
@@ -602,7 +617,7 @@ iwn_hal_attach(struct iwn_softc *sc, pci_product_id_t pid)
 		break;
 	case IWN_HW_REV_TYPE_1000:
 		sc->sc_hal = &iwn5000_hal;
-		sc->limits = &iwn5000_sensitivity_limits;
+		sc->limits = &iwn1000_sensitivity_limits;
 		sc->fwname = "iwn-1000";
 		sc->txchainmask = IWN_ANT_A;
 		sc->rxchainmask = IWN_ANT_AB;
@@ -627,7 +642,14 @@ iwn_hal_attach(struct iwn_softc *sc, pci_product_id_t pid)
 	case IWN_HW_REV_TYPE_6050:
 		sc->sc_hal = &iwn5000_hal;
 		sc->limits = &iwn6000_sensitivity_limits;
-		sc->fwname = "iwn-6000";
+		sc->fwname = "iwn-6050";
+		sc->txchainmask = IWN_ANT_AB;
+		sc->rxchainmask = IWN_ANT_AB;
+		break;
+	case IWN_HW_REV_TYPE_6005:
+		sc->sc_hal = &iwn5000_hal;
+		sc->limits = &iwn6000_sensitivity_limits;
+		sc->fwname = "iwn-6005";
 		sc->txchainmask = IWN_ANT_AB;
 		sc->rxchainmask = IWN_ANT_AB;
 		break;
@@ -881,8 +903,7 @@ iwn_eeprom_unlock(struct iwn_softc *sc)
 int
 iwn_init_otprom(struct iwn_softc *sc)
 {
-	uint32_t base;
-	uint16_t next;
+	uint16_t prev, base, next;
 	int count, error;
 
 	/* Wait for clock stabilization before accessing prph. */
@@ -907,8 +928,8 @@ iwn_init_otprom(struct iwn_softc *sc)
 	    IWN_OTP_GP_ECC_CORR_STTS | IWN_OTP_GP_ECC_UNCORR_STTS);
 
 	/*
-	 * Find last valid OTP block (contains the EEPROM image) for HW
-	 * without OTP shadow RAM.
+	 * Find the block before last block (contains the EEPROM image)
+	 * for HW without OTP shadow RAM.
 	 */
 	if (sc->hw_type == IWN_HW_REV_TYPE_1000) {
 		/* Switch to absolute addressing mode. */
@@ -920,12 +941,13 @@ iwn_init_otprom(struct iwn_softc *sc)
 				return error;
 			if (next == 0)	/* End of linked-list. */
 				break;
+			prev = base;
 			base = letoh16(next);
 		}
-		if (base == 0 || count == IWN1000_OTP_NBLOCKS)
+		if (count == 0 || count == IWN1000_OTP_NBLOCKS)
 			return EIO;
 		/* Skip "next" word. */
-		sc->prom_base = base + 1;
+		sc->prom_base = prev + 1;
 	}
 	return 0;
 }
@@ -1469,6 +1491,7 @@ iwn4965_print_power_group(struct iwn_softc *sc, int i)
 void
 iwn5000_read_eeprom(struct iwn_softc *sc)
 {
+	struct iwn5000_eeprom_calib_hdr hdr;
 	int32_t temp, volt;
 	uint32_t base, addr;
 	uint16_t val;
@@ -1492,6 +1515,11 @@ iwn5000_read_eeprom(struct iwn_softc *sc)
 
 	iwn_read_prom_data(sc, IWN5000_EEPROM_CAL, &val, 2);
 	base = letoh16(val);
+	iwn_read_prom_data(sc, base, &hdr, sizeof hdr);
+	DPRINTF(("calib version=%u pa type=%u voltage=%u\n",
+	    hdr.version, hdr.pa_type, letoh16(hdr.volt)));
+	sc->calib_ver = hdr.version;
+
 	if (sc->hw_type == IWN_HW_REV_TYPE_5150) {
 		/* Compute temperature offset. */
 		iwn_read_prom_data(sc, base + IWN5000_EEPROM_TEMP, &val, 2);
@@ -2060,7 +2088,8 @@ iwn5000_rx_calib_results(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 
 	switch (calib->code) {
 	case IWN5000_PHY_CALIB_DC:
-		if (sc->hw_type == IWN_HW_REV_TYPE_5150)
+		if (sc->hw_type == IWN_HW_REV_TYPE_5150 ||
+		    sc->hw_type == IWN_HW_REV_TYPE_6050)
 			idx = 0;
 		break;
 	case IWN5000_PHY_CALIB_LO:
@@ -2525,8 +2554,10 @@ iwn_intr(void *arg)
 			sc->ict_cur = (sc->ict_cur + 1) % IWN_ICT_COUNT;
 		}
 		tmp = letoh32(tmp);
-		if (tmp == 0xffffffff)
-			tmp = 0;	/* Shouldn't happen. */
+		if (tmp == 0xffffffff)	/* Shouldn't happen. */
+			tmp = 0;
+		else if (tmp & 0xc0000)	/* Workaround a HW bug. */
+			tmp |= 0x8000;
 		r1 = (tmp & 0xff00) << 16 | (tmp & 0xff);
 		r2 = 0;	/* Unused. */
 	} else {
@@ -3044,6 +3075,15 @@ iwn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int s, error = 0;
 
 	s = splnet();
+	/*
+	 * Prevent processes from entering this function while another
+	 * process is tsleep'ing in it.
+	 */
+	if (sc->sc_flags & IWN_FLAG_BUSY) {
+		splx(s);
+		return EBUSY;
+	}
+	sc->sc_flags |= IWN_FLAG_BUSY;
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -3103,6 +3143,8 @@ iwn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			error = iwn_init(ifp);
 		}
 	}
+
+	sc->sc_flags &= ~IWN_FLAG_BUSY;
 	splx(s);
 	return error;
 }
@@ -3632,7 +3674,7 @@ iwn4965_get_temperature(struct iwn_softc *sc)
 		return 0;
 
 	/* Sign-extend 23-bit R4 value to 32-bit. */
-	r4 = (r4 << 8) >> 8;
+	r4 = ((r4 & 0xffffff) ^ 0x800000) - 0x800000;
 	/* Compute temperature in Kelvin. */
 	temp = (259 * (r4 - r2)) / (r3 - r1);
 	temp = (temp * 97) / 100 + 8;
@@ -3677,7 +3719,7 @@ iwn_init_sensitivity(struct iwn_softc *sc)
 	/* Set initial correlation values. */
 	calib->ofdm_x1     = sc->limits->min_ofdm_x1;
 	calib->ofdm_mrc_x1 = sc->limits->min_ofdm_mrc_x1;
-	calib->ofdm_x4     = 90;
+	calib->ofdm_x4     = sc->limits->min_ofdm_x4;
 	calib->ofdm_mrc_x4 = sc->limits->min_ofdm_mrc_x4;
 	calib->cck_x4      = 125;
 	calib->cck_mrc_x4  = sc->limits->min_cck_mrc_x4;
@@ -3725,10 +3767,13 @@ iwn_collect_noise(struct iwn_softc *sc,
 	val = MAX(calib->rssi[2], val);
 
 	/* Determine which antennas are connected. */
-	sc->chainmask = 0;
+	sc->chainmask = sc->rxchainmask;
 	for (i = 0; i < 3; i++)
-		if (val - calib->rssi[i] <= 15 * 20)
-			sc->chainmask |= 1 << i;
+		if (val - calib->rssi[i] > 15 * 20)
+			sc->chainmask &= ~(1 << i);
+	DPRINTF(("RX chains mask: theoretical=0x%x, actual=0x%x\n",
+	    sc->rxchainmask, sc->chainmask));
+
 	/* If none of the TX antennas are connected, keep at least one. */
 	if ((sc->chainmask & sc->txchainmask) == 0)
 		sc->chainmask |= IWN_LSB(sc->txchainmask);
@@ -3763,9 +3808,6 @@ int
 iwn5000_init_gains(struct iwn_softc *sc)
 {
 	struct iwn_phy_calib cmd;
-
-	if (sc->hw_type == IWN_HW_REV_TYPE_6050)
-		return 0;
 
 	memset(&cmd, 0, sizeof cmd);
 	cmd.code = IWN5000_PHY_CALIB_RESET_NOISE_GAIN;
@@ -3812,10 +3854,10 @@ iwn5000_set_gains(struct iwn_softc *sc)
 {
 	struct iwn_calib_state *calib = &sc->calib;
 	struct iwn_phy_calib_gain cmd;
-	int i, ant, delta;
+	int i, ant, div, delta;
 
-	if (sc->hw_type == IWN_HW_REV_TYPE_6050)
-		return 0;
+	/* We collected 20 beacons and !=6050 need a 1.5 factor. */
+	div = (sc->hw_type == IWN_HW_REV_TYPE_6050) ? 20 : 30;
 
 	memset(&cmd, 0, sizeof cmd);
 	cmd.code = IWN5000_PHY_CALIB_NOISE_GAIN;
@@ -3828,7 +3870,7 @@ iwn5000_set_gains(struct iwn_softc *sc)
 		if (sc->chainmask & (1 << i)) {
 			/* The delta is relative to antenna "ant". */
 			delta = ((int32_t)calib->noise[ant] -
-			    (int32_t)calib->noise[i]) / 30;
+			    (int32_t)calib->noise[i]) / div;
 			/* Limit to [-4.5dB,+4.5dB]. */
 			cmd.gain[i - 1] = MIN(abs(delta), 3);
 			if (delta < 0)
@@ -4101,7 +4143,7 @@ iwn_config(struct iwn_softc *sc)
 
 	/* Configure bluetooth coexistence. */
 	memset(&bluetooth, 0, sizeof bluetooth);
-	bluetooth.flags = IWN_BT_COEX_MODE_4WIRE;
+	bluetooth.flags = IWN_BT_COEX_CHAN_ANN | IWN_BT_COEX_BT_PRIO;
 	bluetooth.lead_time = IWN_BT_LEAD_TIME_DEF;
 	bluetooth.max_kill = IWN_BT_MAX_KILL_DEF;
 	DPRINTF(("configuring bluetooth coexistence\n"));
@@ -4229,7 +4271,7 @@ iwn_scan(struct iwn_softc *sc, uint16_t flags)
 	tx->lifetime = htole32(IWN_LIFETIME_INFINITE);
 
 	if (flags & IEEE80211_CHAN_5GHZ) {
-		hdr->crc_threshold = htole16(1);
+		hdr->crc_threshold = 0xffff;
 		/* Send probe requests at 6Mbps. */
 		tx->plcp = iwn_rates[IWN_RIDX_OFDM6].plcp;
 		rs = &ic->ic_sup_rates[IEEE80211_MODE_11A];
@@ -4269,6 +4311,10 @@ iwn_scan(struct iwn_softc *sc, uint16_t flags)
 	frm = ieee80211_add_rates(frm, rs);
 	if (rs->rs_nrates > IEEE80211_RATE_SIZE)
 		frm = ieee80211_add_xrates(frm, rs);
+#ifndef IEEE80211_NO_HT
+	if (ic->ic_flags & IEEE80211_F_HTON)
+		frm = ieee80211_add_htcaps(frm, ic);
+#endif
 
 	/* Set length of probe request. */
 	tx->len = htole16(frm - (uint8_t *)wh);
@@ -5135,69 +5181,46 @@ iwn5000_load_firmware(struct iwn_softc *sc)
 	return 0;
 }
 
+/*
+ * Extract text and data sections from a legacy firmware image.
+ */
 int
-iwn_read_firmware(struct iwn_softc *sc)
+iwn_read_firmware_leg(struct iwn_softc *sc, struct iwn_fw_info *fw)
 {
-	const struct iwn_hal *hal = sc->sc_hal;
-	struct iwn_fw_info *fw = &sc->fw;
 	const uint32_t *ptr;
+	size_t hdrlen = 24;
 	uint32_t rev;
-	size_t size;
-	int error;
 
-	/* Read firmware image from filesystem. */
-	if ((error = loadfirmware(sc->fwname, &fw->data, &size)) != 0) {
-		printf("%s: error, %d, could not read firmware %s\n",
-		    sc->sc_dev.dv_xname, error, sc->fwname);
-		return error;
-	}
-	if (size < 28) {
-		printf("%s: truncated firmware header: %d bytes\n",
-		    sc->sc_dev.dv_xname, size);
-		free(fw->data, M_DEVBUF);
-		return EINVAL;
-	}
-
-	/* Process firmware header. */
 	ptr = (const uint32_t *)fw->data;
 	rev = letoh32(*ptr++);
+
 	/* Check firmware API version. */
 	if (IWN_FW_API(rev) <= 1) {
 		printf("%s: bad firmware, need API version >=2\n",
 		    sc->sc_dev.dv_xname);
-		free(fw->data, M_DEVBUF);
 		return EINVAL;
 	}
 	if (IWN_FW_API(rev) >= 3) {
 		/* Skip build number (version 2 header). */
-		size -= 4;
+		hdrlen += 4;
 		ptr++;
+	}
+	if (fw->size < hdrlen) {
+		printf("%s: firmware too short: %d bytes\n",
+		    sc->sc_dev.dv_xname, fw->size);
+		return EINVAL;
 	}
 	fw->main.textsz = letoh32(*ptr++);
 	fw->main.datasz = letoh32(*ptr++);
 	fw->init.textsz = letoh32(*ptr++);
 	fw->init.datasz = letoh32(*ptr++);
 	fw->boot.textsz = letoh32(*ptr++);
-	size -= 24;
-
-	/* Sanity-check firmware header. */
-	if (fw->main.textsz > hal->fw_text_maxsz ||
-	    fw->main.datasz > hal->fw_data_maxsz ||
-	    fw->init.textsz > hal->fw_text_maxsz ||
-	    fw->init.datasz > hal->fw_data_maxsz ||
-	    fw->boot.textsz > IWN_FW_BOOT_TEXT_MAXSZ ||
-	    (fw->boot.textsz & 3) != 0) {
-		printf("%s: invalid firmware header\n", sc->sc_dev.dv_xname);
-		free(fw->data, M_DEVBUF);
-		return EINVAL;
-	}
 
 	/* Check that all firmware sections fit. */
-	if (fw->main.textsz + fw->main.datasz + fw->init.textsz +
-	    fw->init.datasz + fw->boot.textsz > size) {
-		printf("%s: firmware file too short: %d bytes\n",
-		    sc->sc_dev.dv_xname, size);
-		free(fw->data, M_DEVBUF);
+	if (fw->size < hdrlen + fw->main.textsz + fw->main.datasz +
+	    fw->init.textsz + fw->init.datasz + fw->boot.textsz) {
+		printf("%s: firmware too short: %d bytes\n",
+		    sc->sc_dev.dv_xname, fw->size);
 		return EINVAL;
 	}
 
@@ -5207,7 +5230,143 @@ iwn_read_firmware(struct iwn_softc *sc)
 	fw->init.text = fw->main.data + fw->main.datasz;
 	fw->init.data = fw->init.text + fw->init.textsz;
 	fw->boot.text = fw->init.data + fw->init.datasz;
+	return 0;
+}
 
+/*
+ * Extract text and data sections from a TLV firmware image.
+ */
+int
+iwn_read_firmware_tlv(struct iwn_softc *sc, struct iwn_fw_info *fw,
+    uint16_t alt)
+{
+	const struct iwn_fw_tlv_hdr *hdr;
+	const struct iwn_fw_tlv *tlv;
+	const uint8_t *ptr, *end;
+	uint64_t altmask;
+	uint32_t len;
+
+	if (fw->size < sizeof (*hdr)) {
+		printf("%s: firmware too short: %d bytes\n",
+		    sc->sc_dev.dv_xname, fw->size);
+		return EINVAL;
+	}
+	hdr = (const struct iwn_fw_tlv_hdr *)fw->data;
+	if (hdr->signature != htole32(IWN_FW_SIGNATURE)) {
+		printf("%s: bad firmware signature 0x%08x\n",
+		    sc->sc_dev.dv_xname, letoh32(hdr->signature));
+		return EINVAL;
+	}
+	DPRINTF(("FW: \"%.64s\", build 0x%x\n", hdr->descr,
+	    letoh32(hdr->build)));
+
+	/*
+	 * Select the closest supported alternative that is less than
+	 * or equal to the specified one.
+	 */
+	altmask = letoh64(hdr->altmask);
+	while (alt > 0 && !(altmask & (1ULL << alt)))
+		alt--;	/* Downgrade. */
+	DPRINTF(("using alternative %d\n", alt));
+
+	ptr = (const uint8_t *)(hdr + 1);
+	end = (const uint8_t *)(fw->data + fw->size);
+
+	/* Parse type-length-value fields. */
+	while (ptr + sizeof (*tlv) <= end) {
+		tlv = (const struct iwn_fw_tlv *)ptr;
+		len = letoh32(tlv->len);
+
+		ptr += sizeof (*tlv);
+		if (ptr + len > end) {
+			printf("%s: firmware too short: %d bytes\n",
+			    sc->sc_dev.dv_xname, fw->size);
+			return EINVAL;
+		}
+		/* Skip other alternatives. */
+		if (tlv->alt != 0 && tlv->alt != htole16(alt))
+			goto next;
+
+		switch (letoh16(tlv->type)) {
+		case IWN_FW_TLV_MAIN_TEXT:
+			fw->main.text = ptr;
+			fw->main.textsz = len;
+			break;
+		case IWN_FW_TLV_MAIN_DATA:
+			fw->main.data = ptr;
+			fw->main.datasz = len;
+			break;
+		case IWN_FW_TLV_INIT_TEXT:
+			fw->init.text = ptr;
+			fw->init.textsz = len;
+			break;
+		case IWN_FW_TLV_INIT_DATA:
+			fw->init.data = ptr;
+			fw->init.datasz = len;
+			break;
+		case IWN_FW_TLV_BOOT_TEXT:
+			fw->boot.text = ptr;
+			fw->boot.textsz = len;
+			break;
+		default:
+			DPRINTF(("TLV type %d not handled\n",
+			    letoh16(tlv->type)));
+			break;
+		}
+ next:		/* TLV fields are 32-bit aligned. */
+		ptr += (len + 3) & ~3;
+	}
+	return 0;
+}
+
+int
+iwn_read_firmware(struct iwn_softc *sc)
+{
+	const struct iwn_hal *hal = sc->sc_hal;
+	struct iwn_fw_info *fw = &sc->fw;
+	int error;
+
+	memset(fw, 0, sizeof (*fw));
+
+	/* Read firmware image from filesystem. */
+	if ((error = loadfirmware(sc->fwname, &fw->data, &fw->size)) != 0) {
+		printf("%s: error, %d, could not read firmware %s\n",
+		    sc->sc_dev.dv_xname, error, sc->fwname);
+		return error;
+	}
+	if (fw->size < sizeof (uint32_t)) {
+		printf("%s: firmware too short: %d bytes\n",
+		    sc->sc_dev.dv_xname, fw->size);
+		free(fw->data, M_DEVBUF);
+		return EINVAL;
+	}
+
+	/* Retrieve text and data sections. */
+	if (*(const uint32_t *)fw->data != 0)	/* Legacy image. */
+		error = iwn_read_firmware_leg(sc, fw);
+	else
+		error = iwn_read_firmware_tlv(sc, fw, 1);
+	if (error != 0) {
+		printf("%s: could not read firmware sections\n",
+		    sc->sc_dev.dv_xname);
+		free(fw->data, M_DEVBUF);
+		return error;
+	}
+
+	/* Make sure text and data sections fit in hardware memory. */
+	if (fw->main.textsz > hal->fw_text_maxsz ||
+	    fw->main.datasz > hal->fw_data_maxsz ||
+	    fw->init.textsz > hal->fw_text_maxsz ||
+	    fw->init.datasz > hal->fw_data_maxsz ||
+	    fw->boot.textsz > IWN_FW_BOOT_TEXT_MAXSZ ||
+	    (fw->boot.textsz & 3) != 0) {
+		printf("%s: firmware sections too large\n",
+		    sc->sc_dev.dv_xname);
+		free(fw->data, M_DEVBUF);
+		return EINVAL;
+	}
+
+	/* We can proceed with loading the firmware. */
 	return 0;
 }
 
@@ -5257,8 +5416,7 @@ iwn_apm_init(struct iwn_softc *sc)
 		IWN_CLRBITS(sc, IWN_GIO, IWN_GIO_L0S_ENA);
 
 	if (sc->hw_type != IWN_HW_REV_TYPE_4965 &&
-	    sc->hw_type != IWN_HW_REV_TYPE_6000 &&
-	    sc->hw_type != IWN_HW_REV_TYPE_6050)
+	    sc->hw_type <= IWN_HW_REV_TYPE_1000)
 		IWN_SETBITS(sc, IWN_ANA_PLL, IWN_ANA_PLL_INIT);
 
 	/* Wait for clock stabilization before accessing prph. */
@@ -5366,6 +5524,10 @@ iwn5000_nic_config(struct iwn_softc *sc)
 	if (sc->sc_flags & IWN_FLAG_INTERNAL_PA) {
 		/* Use internal power amplifier only. */
 		IWN_WRITE(sc, IWN_GP_DRIVER, IWN_GP_DRIVER_RADIO_2X2_IPA);
+	}
+	if (sc->hw_type == IWN_HW_REV_TYPE_6050 && sc->calib_ver >= 6) {
+		/* Indicate that ROM calibration version is >=6. */
+		IWN_SETBITS(sc, IWN_GP_DRIVER, IWN_GP_DRIVER_CALIB_VER6);
 	}
 	return 0;
 }

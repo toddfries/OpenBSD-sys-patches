@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.120 2009/08/11 19:17:16 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.122 2010/06/27 12:41:23 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -115,8 +115,7 @@
 #include <ddb/db_var.h>
 #endif
 
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_swap.h>
+#include <uvm/uvm.h>
 
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;		/* cpu "architecture" */
@@ -141,6 +140,10 @@ int	bufpages = 0;
 int	bufcachepercent = BUFCACHEPERCENT;
 
 int   physmem;			/* size of physical memory, in pages */
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
  * during autoconfiguration or after a panic.

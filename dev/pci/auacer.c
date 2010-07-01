@@ -1,4 +1,4 @@
-/*	$OpenBSD: auacer.c,v 1.4 2008/10/25 22:30:43 jakemsr Exp $	*/
+/*	$OpenBSD: auacer.c,v 1.6 2010/04/08 00:23:53 tedu Exp $	*/
 /*	$NetBSD: auacer.c,v 1.3 2004/11/10 04:20:26 kent Exp $	*/
 
 /*-
@@ -45,7 +45,6 @@
 #include <sys/malloc.h>
 #include <sys/device.h>
 #include <sys/fcntl.h>
-#include <sys/proc.h>
 
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcivar.h>
@@ -670,7 +669,7 @@ auacer_set_params(void *v, int setmode, int usemode, struct audio_params *play,
 int
 auacer_round_blocksize(void *v, int blk)
 {
-	return (blk & ~0x3f);		/* keep good alignment */
+	return ((blk + 0x3f) & ~0x3f);		/* keep good alignment */
 }
 
 static void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsock.c,v 1.95 2009/11/03 10:59:04 claudio Exp $	*/
+/*	$OpenBSD: rtsock.c,v 1.101 2010/06/28 18:50:37 claudio Exp $	*/
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -79,7 +79,7 @@
 
 #ifdef MPLS
 #include <netmpls/mpls.h>
-#endif /* MPLS */
+#endif
 
 #include <sys/stdarg.h>
 
@@ -158,7 +158,7 @@ route_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 #ifdef MPLS
 		else if (af == AF_MPLS)
 			route_cb.mpls_count++;
-#endif /* MPLS */
+#endif
 		rp->rcb_faddr = &route_src;
 		route_cb.any_count++;
 		soisconnected(so);
@@ -175,7 +175,7 @@ route_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 #ifdef MPLS
 			else if (af == AF_MPLS)
 				route_cb.mpls_count--;
-#endif /* MPLS */
+#endif
 			route_cb.any_count--;
 		}
 		/* FALLTHROUGH */
@@ -321,7 +321,7 @@ route_output(struct mbuf *m, ...)
 	struct rtentry		*saved_nrt = NULL;
 	struct radix_node_head	*rnh;
 	struct rt_addrinfo	 info;
-	int			 len, error = 0;
+	int			 len, newgate, error = 0;
 	struct ifnet		*ifp = NULL;
 	struct ifaddr		*ifa = NULL;
 	struct socket		*so;
@@ -454,8 +454,9 @@ route_output(struct mbuf *m, ...)
 			saved_nrt->rt_refcnt--;
 			saved_nrt->rt_genmask = genmask;
 			/* write back the priority the kernel used */
-			rtm->rtm_index = saved_nrt->rt_ifp->if_index;
 			rtm->rtm_priority = saved_nrt->rt_priority & RTP_MASK;
+			rtm->rtm_index = saved_nrt->rt_ifp->if_index;
+			rtm->rtm_flags = saved_nrt->rt_flags;
 		}
 		break;
 	case RTM_DELETE:
@@ -570,6 +571,7 @@ report:
 				    (struct sockaddr *)&sa_mpls;
 				info.rti_mpls = ((struct rt_mpls *)
 				    rt->rt_llinfo)->mpls_operation;
+				rtm->rtm_mpls = info.rti_mpls;
 			}
 #endif
 			ifpaddr = 0;
@@ -614,6 +616,11 @@ report:
 			 */
 			if ((error = rt_getifa(&info, tableid)) != 0)
 				goto flush;
+			newgate = 0;
+			if (gate)
+				if (rt->rt_gateway == NULL ||
+				    bcmp(rt->rt_gateway, gate, gate->sa_len))
+					newgate = 1;
 			if (gate && rt_setgate(rt, rt_key(rt), gate, tableid)) {
 				error = EDQUOT;
 				goto flush;
@@ -638,32 +645,25 @@ report:
 				    rt->rt_ifa = ifa;
 				    ifa->ifa_refcnt++;
 				    rt->rt_ifp = ifp;
+#ifndef SMALL_KERNEL
+				    /* recheck link state after ifp change */
+				    rt_if_linkstate_change(
+					(struct radix_node *)rt, ifp, tableid);
+#endif
 				}
 			}
-
-			/* XXX Hack to allow some flags to be toggled */
-			if (rtm->rtm_fmask & RTF_FMASK)
-				rt->rt_flags = (rt->rt_flags &
-				    ~rtm->rtm_fmask) |
-				    (rtm->rtm_flags & rtm->rtm_fmask);
-
-			rt_setmetrics(rtm->rtm_inits, &rtm->rtm_rmx,
-			    &rt->rt_rmx);
-			rtm->rtm_index = rt->rt_ifp->if_index;
-			rtm->rtm_priority = rt->rt_priority & RTP_MASK;
-			if (rt->rt_ifa && rt->rt_ifa->ifa_rtrequest)
-				rt->rt_ifa->ifa_rtrequest(RTM_ADD, rt, &info);
-			if (genmask)
-				rt->rt_genmask = genmask;
-			if (info.rti_info[RTAX_LABEL] != NULL) {
-				char *rtlabel = ((struct sockaddr_rtlabel *)
-				    info.rti_info[RTAX_LABEL])->sr_label;
-				rtlabel_unref(rt->rt_labelid);
-				rt->rt_labelid =
-				    rtlabel_name2id(rtlabel);
-			}
 #ifdef MPLS
-			if (info.rti_info[RTAX_SRC] != NULL) {
+			/* if gateway changed remove MPLS information */
+			if (newgate || ((rtm->rtm_fmask & RTF_MPLS) &&
+			    !(rtm->rtm_flags & RTF_MPLS))) {
+				if (rt->rt_llinfo != NULL &&
+				    rt->rt_flags & RTF_MPLS) {
+					free(rt->rt_llinfo, M_TEMP);
+					rt->rt_llinfo = NULL;
+					rt->rt_flags &= ~RTF_MPLS;
+				}
+			} else if ((rtm->rtm_flags & RTF_MPLS) &&
+			    info.rti_info[RTAX_SRC] != NULL) {
 				struct rt_mpls *rt_mpls;
 
 				psa_mpls = (struct sockaddr_mpls *)
@@ -691,16 +691,30 @@ report:
 				/* XXX: set experimental bits */
 
 				rt->rt_flags |= RTF_MPLS;
-			} else {
-				if (rt->rt_llinfo != NULL &&
-				    rt->rt_flags & RTF_MPLS) {
-					free(rt->rt_llinfo, M_TEMP);
-					rt->rt_llinfo = NULL;
-
-					rt->rt_flags &= (~RTF_MPLS);
-				}
 			}
 #endif
+			/* Hack to allow some flags to be toggled */
+			if (rtm->rtm_fmask & RTF_FMASK)
+				rt->rt_flags = (rt->rt_flags &
+				    ~rtm->rtm_fmask) |
+				    (rtm->rtm_flags & rtm->rtm_fmask);
+
+			rt_setmetrics(rtm->rtm_inits, &rtm->rtm_rmx,
+			    &rt->rt_rmx);
+			rtm->rtm_index = rt->rt_ifp->if_index;
+			rtm->rtm_priority = rt->rt_priority & RTP_MASK;
+			rtm->rtm_flags = rt->rt_flags;
+			if (rt->rt_ifa && rt->rt_ifa->ifa_rtrequest)
+				rt->rt_ifa->ifa_rtrequest(RTM_ADD, rt, &info);
+			if (genmask)
+				rt->rt_genmask = genmask;
+			if (info.rti_info[RTAX_LABEL] != NULL) {
+				char *rtlabel = ((struct sockaddr_rtlabel *)
+				    info.rti_info[RTAX_LABEL])->sr_label;
+				rtlabel_unref(rt->rt_labelid);
+				rt->rt_labelid =
+				    rtlabel_name2id(rtlabel);
+			}
 			if_group_routechange(dst, netmask);
 			/* FALLTHROUGH */
 		case RTM_LOCK:
@@ -722,10 +736,6 @@ flush:
 		if (error)
 			rtm->rtm_errno = error;
 		else { 
-#ifdef MPLS
-			if (rt && rt->rt_flags & RTF_MPLS)
-				rtm->rtm_flags |= RTF_MPLS;
-#endif
 			rtm->rtm_flags |= RTF_DONE;
 		}
 	}
@@ -1054,6 +1064,7 @@ rt_newaddrmsg(int cmd, struct ifaddr *ifa, int error, struct rtentry *rt)
 			rtm = mtod(m, struct rt_msghdr *);
 			rtm->rtm_index = ifp->if_index;
 			rtm->rtm_flags |= rt->rt_flags;
+			rtm->rtm_priority = rt->rt_priority & RTP_MASK;
 			rtm->rtm_errno = error;
 			rtm->rtm_addrs = info.rti_addrs;
 			rtm->rtm_tableid = ifp->if_rdomain;
@@ -1093,7 +1104,7 @@ rt_ifannouncemsg(struct ifnet *ifp, int what)
  * This is used in dumping the kernel table via sysctl().
  */
 int
-sysctl_dumpentry(struct radix_node *rn, void *v)
+sysctl_dumpentry(struct radix_node *rn, void *v, u_int id)
 {
 	struct walkarg		*w = v;
 	struct rtentry		*rt = (struct rtentry *)rn;
@@ -1152,6 +1163,7 @@ sysctl_dumpentry(struct radix_node *rn, void *v)
 		rtm->rtm_rmx.rmx_refcnt = rt->rt_refcnt;
 		rtm->rtm_index = rt->rt_ifp->if_index;
 		rtm->rtm_addrs = info.rti_addrs;
+		rtm->rtm_tableid = id;
 #ifdef MPLS
 		rtm->rtm_mpls = info.rti_mpls;
 #endif
@@ -1229,6 +1241,7 @@ sysctl_rtable(int *name, u_int namelen, void *where, size_t *given, void *new,
 	int			 i, s, error = EINVAL;
 	u_char  		 af;
 	struct walkarg		 w;
+	struct rt_tableinfo	 tableinfo;
 	u_int			 tableid = 0;
 
 	if (new)
@@ -1246,7 +1259,7 @@ sysctl_rtable(int *name, u_int namelen, void *where, size_t *given, void *new,
 	if (namelen == 4) {
 		tableid = name[3];
 		if (!rtable_exists(tableid))
-			return (EINVAL);
+			return (ENOENT);
 	}
 
 	s = splsoftnet();
@@ -1269,6 +1282,18 @@ sysctl_rtable(int *name, u_int namelen, void *where, size_t *given, void *new,
 	case NET_RT_STATS:
 		error = sysctl_rdstruct(where, given, new,
 		    &rtstat, sizeof(rtstat));
+		splx(s);
+		return (error);
+	case NET_RT_TABLE:
+		tableid = w.w_arg;
+		if (!rtable_exists(tableid)) {
+			splx(s);
+			return (ENOENT);
+		}
+		tableinfo.rti_tableid = tableid;
+		tableinfo.rti_domainid = rtable_l2(tableid);
+		error = sysctl_rdstruct(where, given, new,
+		    &tableinfo, sizeof(tableinfo));
 		splx(s);
 		return (error);
 	}

@@ -1,4 +1,4 @@
-/* $OpenBSD: if_vether.c,v 1.6 2009/11/22 12:33:25 deraadt Exp $ */
+/* $OpenBSD: if_vether.c,v 1.15 2010/04/02 21:45:49 deraadt Exp $ */
 
 /*
  * Copyright (c) 2009 Theo de Raadt
@@ -16,9 +16,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "vether.h"
-#include "bpfilter.h"
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -30,28 +27,10 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
-#include <net/if_types.h>
-
-#include <net/if_types.h>
-#include <net/netisr.h>
-#include <net/route.h>
 
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#include <netinet/in_var.h>
-#endif
-
-#include <dev/rndvar.h>
-
-#if NBPFILTER > 0
-#include <net/bpf.h>
-#endif
-
-#ifdef VETHER_DEBUG
-#define DPRINTF(x)    do { if (vetherdebug) printf x ; } while (0)
-#else
-#define DPRINTF(x)
 #endif
 
 void	vetherattach(int);
@@ -65,13 +44,10 @@ void	vether_media_status(struct ifnet *, struct ifmediareq *);
 struct vether_softc {
 	struct arpcom		sc_ac;
 	struct ifmedia		sc_media;
-	LIST_ENTRY(vether_softc) sc_list;
 };
 
-LIST_HEAD(, vether_softc)	vether_list;
 struct if_clone	vether_cloner =
     IF_CLONE_INITIALIZER("vether", vether_clone_create, vether_clone_destroy);
-
 
 int
 vether_media_change(struct ifnet *ifp)
@@ -89,36 +65,23 @@ vether_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 void
 vetherattach(int nvether)
 {
-	LIST_INIT(&vether_list);
 	if_clone_attach(&vether_cloner);
 }
 
 int
 vether_clone_create(struct if_clone *ifc, int unit)
 {
-	struct ifnet 		*ifp;
+	struct ifnet		*ifp;
 	struct vether_softc	*sc;
-	u_int32_t		 macaddr_rnd;
-	int 			 s;
 
 	if ((sc = malloc(sizeof(*sc),
 	    M_DEVBUF, M_NOWAIT|M_ZERO)) == NULL)
 		return (ENOMEM);
 
-	/* from if_tun.c: generate fake MAC address: 00 bd xx xx xx unit_no */
-	sc->sc_ac.ac_enaddr[0] = 0x00;
-	sc->sc_ac.ac_enaddr[1] = 0xbd;
-	/*
-	 * This no longer happens pre-scheduler so let's use the real
-	 * random subsystem instead of random().
-	 */
-	macaddr_rnd = arc4random();
-	bcopy(&macaddr_rnd, &sc->sc_ac.ac_enaddr[2], sizeof(u_int32_t));
-	sc->sc_ac.ac_enaddr[5] = (u_char)unit + 1;
-
 	ifp = &sc->sc_ac.ac_if;
 	snprintf(ifp->if_xname, sizeof ifp->if_xname, "vether%d", unit);
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
+	ether_fakeaddr(ifp);
 
 	ifp->if_softc = sc;
 	ifp->if_ioctl = vetherioctl;
@@ -135,10 +98,6 @@ vether_clone_create(struct if_clone *ifc, int unit)
 
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	s = splnet();
-	LIST_INSERT_HEAD(&vether_list, sc, sc_list);
-	splx(s);
 	return (0);
 }
 
@@ -146,11 +105,6 @@ int
 vether_clone_destroy(struct ifnet *ifp)
 {
 	struct vether_softc	*sc = ifp->if_softc;
-	int			 s;
-
-	s = splnet();
-	LIST_REMOVE(sc, sc_list);
-	splx(s);
 
 	ether_ifdetach(ifp);
 	if_detach(ifp);
@@ -165,7 +119,7 @@ vether_clone_destroy(struct ifnet *ifp)
 void
 vetherstart(struct ifnet *ifp)
 {
-	struct mbuf 		*m;
+	struct mbuf		*m;
 	int			 s;
 
 	for (;;) {
@@ -185,11 +139,12 @@ int
 vetherioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct vether_softc	*sc = (struct vether_softc *)ifp->if_softc;
+#ifdef INET
 	struct ifaddr		*ifa = (struct ifaddr *)data;
+#endif
 	struct ifreq		*ifr = (struct ifreq *)data;
 	int			 error = 0, link_state;
 
-	ifr = (struct ifreq *)data;
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -212,6 +167,26 @@ vetherioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if_link_state_change(ifp);
 		}
 		break;
+
+	case SIOCADDMULTI:
+	case SIOCDELMULTI: {
+		if (ifr == 0) {
+			error = EAFNOSUPPORT;	   /* XXX */
+			break;
+		}
+		error = (cmd == SIOCADDMULTI) ?
+		    ether_addmulti(ifr, &sc->sc_ac) :
+		    ether_delmulti(ifr, &sc->sc_ac);
+		if (error == ENETRESET) {
+			/*
+			 * Multicast list has changed; set the hardware
+			 * filter accordingly. The good thing is we do
+			 * not have a hardware filter (:
+			 */
+			error = 0;
+		}
+		break;
+	}
 
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:

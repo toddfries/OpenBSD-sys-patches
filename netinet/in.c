@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.c,v 1.55 2009/11/03 10:59:04 claudio Exp $	*/
+/*	$OpenBSD: in.c,v 1.60 2010/01/13 10:45:21 henning Exp $	*/
 /*	$NetBSD: in.c,v 1.26 1996/02/13 23:41:39 christos Exp $	*/
 
 /*
@@ -95,43 +95,18 @@ int in_lifaddr_ioctl(struct socket *, u_long, caddr_t,
 int in_addprefix(struct in_ifaddr *, int);
 int in_scrubprefix(struct in_ifaddr *);
 
-#ifndef SUBNETSARELOCAL
-#define	SUBNETSARELOCAL	0
-#endif
-
-#ifndef HOSTZEROBROADCAST
-#define HOSTZEROBROADCAST 1
-#endif
-
-int subnetsarelocal = SUBNETSARELOCAL;
-int hostzeroisbroadcast = HOSTZEROBROADCAST;
-
-/*
- * Return 1 if an internet address is for a ``local'' host
- * (one to which we have a connection).  If subnetsarelocal
- * is true, this includes other subnets of the local net.
- * Otherwise, it includes only the directly-connected (sub)nets.
- */
+/* Return 1 if an internet address is for a directly connected host */
 int
 in_localaddr(struct in_addr in, u_int rdomain)
 {
 	struct in_ifaddr *ia;
 
 	rdomain = rtable_l2(rdomain);
-	if (subnetsarelocal) {
-		TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
-			if (ia->ia_ifp->if_rdomain != rdomain)
-				continue;
-			if ((in.s_addr & ia->ia_netmask) == ia->ia_net)
-				return (1);
-		}
-	} else {
-		TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
-			if (ia->ia_ifp->if_rdomain != rdomain)
-				continue;
-			if ((in.s_addr & ia->ia_subnetmask) == ia->ia_subnet)
-				return (1);
-		}
+	TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
+		if (ia->ia_ifp->if_rdomain != rdomain)
+			continue;
+		if ((in.s_addr & ia->ia_netmask) == ia->ia_net)
+			return (1);
 	}
 	return (0);
 }
@@ -282,8 +257,6 @@ in_control(so, cmd, data, ifp)
 			ia = malloc(sizeof *ia, M_IFADDR, M_WAITOK | M_ZERO);
 			s = splsoftnet();
 			TAILQ_INSERT_TAIL(&in_ifaddr, ia, ia_list);
-			TAILQ_INSERT_TAIL(&ifp->if_addrlist, (struct ifaddr *)ia,
-			    ifa_list);
 			ia->ia_addr.sin_family = AF_INET;
 			ia->ia_addr.sin_len = sizeof(ia->ia_addr);
 			ia->ia_ifa.ifa_addr = sintosa(&ia->ia_addr);
@@ -298,6 +271,7 @@ in_control(so, cmd, data, ifp)
 			LIST_INIT(&ia->ia_multiaddrs);
 			if ((ifp->if_flags & IFF_LOOPBACK) == 0)
 				in_interfaces++;
+			ifa_add(ifp, (struct ifaddr *)ia);
 			splx(s);
 
 			newifaddr = 1;
@@ -393,7 +367,7 @@ in_control(so, cmd, data, ifp)
 		return error;
 
 	case SIOCSIFNETMASK:
-		ia->ia_subnetmask = ia->ia_sockmask.sin_addr.s_addr =
+		ia->ia_netmask = ia->ia_sockmask.sin_addr.s_addr =
 		    ifra->ifra_addr.sin_addr.s_addr;
 		break;
 
@@ -413,7 +387,7 @@ in_control(so, cmd, data, ifp)
 		if (ifra->ifra_mask.sin_len) {
 			in_ifscrub(ifp, ia);
 			ia->ia_sockmask = ifra->ifra_mask;
-			ia->ia_subnetmask = ia->ia_sockmask.sin_addr.s_addr;
+			ia->ia_netmask = ia->ia_sockmask.sin_addr.s_addr;
 			maskIsNew = 1;
 		}
 		if ((ifp->if_flags & IFF_POINTOPOINT) &&
@@ -450,7 +424,7 @@ cleanup:
 		 */
 		s = splsoftnet();
 		in_ifscrub(ifp, ia);
-		TAILQ_REMOVE(&ifp->if_addrlist, (struct ifaddr *)ia, ifa_list);
+		ifa_del(ifp, (struct ifaddr *)ia);
 		TAILQ_REMOVE(&in_ifaddr, ia, ia_list);
 		if (ia->ia_allhosts != NULL) {
 			in_delmulti(ia->ia_allhosts);
@@ -716,24 +690,18 @@ in_ifinit(ifp, ia, sin, scrub)
 		in_ifscrub(ifp, ia);
 		ia->ia_ifa.ifa_addr = sintosa(&ia->ia_addr);
 	}
-	if (IN_CLASSA(i))
-		ia->ia_netmask = IN_CLASSA_NET;
-	else if (IN_CLASSB(i))
-		ia->ia_netmask = IN_CLASSB_NET;
-	else
-		ia->ia_netmask = IN_CLASSC_NET;
-	/*
-	 * The subnet mask usually includes at least the standard network part,
-	 * but may may be smaller in the case of supernetting.
-	 * If it is set, we believe it.
-	 */
-	if (ia->ia_subnetmask == 0) {
-		ia->ia_subnetmask = ia->ia_netmask;
-		ia->ia_sockmask.sin_addr.s_addr = ia->ia_subnetmask;
-	} else
-		ia->ia_netmask &= ia->ia_subnetmask;
+
+	if (ia->ia_netmask == 0) {
+		if (IN_CLASSA(i))
+			ia->ia_netmask = IN_CLASSA_NET;
+		else if (IN_CLASSB(i))
+			ia->ia_netmask = IN_CLASSB_NET;
+		else
+			ia->ia_netmask = IN_CLASSC_NET;
+		ia->ia_sockmask.sin_addr.s_addr = ia->ia_netmask;
+	}
+
 	ia->ia_net = i & ia->ia_netmask;
-	ia->ia_subnet = i & ia->ia_subnetmask;
 	in_socktrim(&ia->ia_sockmask);
 	/*
 	 * Add route for the network.
@@ -741,8 +709,6 @@ in_ifinit(ifp, ia, sin, scrub)
 	ia->ia_ifa.ifa_metric = ifp->if_metric;
 	if (ifp->if_flags & IFF_BROADCAST) {
 		ia->ia_broadaddr.sin_addr.s_addr =
-			ia->ia_subnet | ~ia->ia_subnetmask;
-		ia->ia_netbroadcast.s_addr =
 			ia->ia_net | ~ia->ia_netmask;
 	} else if (ifp->if_flags & IFF_LOOPBACK) {
 		ia->ia_dstaddr = ia->ia_addr;
@@ -931,14 +897,7 @@ in_broadcast(in, ifp)
 		TAILQ_FOREACH(ifa, &ifn->if_addrlist, ifa_list)
 			if (ifa->ifa_addr->sa_family == AF_INET &&
 			    in.s_addr != ia->ia_addr.sin_addr.s_addr &&
-			    (in.s_addr == ia->ia_broadaddr.sin_addr.s_addr ||
-			     in.s_addr == ia->ia_netbroadcast.s_addr ||
-			     (hostzeroisbroadcast &&
-			      /*
-			       * Check for old-style (host 0) broadcast.
-			       */
-			      (in.s_addr == ia->ia_subnet ||
-			       in.s_addr == ia->ia_net))))
+			    in.s_addr == ia->ia_broadaddr.sin_addr.s_addr)
 				return 1;
 	}
 	return (0);

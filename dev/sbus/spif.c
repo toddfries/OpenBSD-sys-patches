@@ -1,4 +1,4 @@
-/*	$OpenBSD: spif.c,v 1.16 2009/11/09 17:53:39 nicm Exp $	*/
+/*	$OpenBSD: spif.c,v 1.18 2010/06/28 14:13:34 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1999-2002 Jason L. Wright (jason@thought.net)
@@ -304,7 +304,7 @@ sttyattach(parent, dev, aux)
 
 		DTR_WRITE(sc, port, 0);
 
-		tp = ttymalloc();
+		tp = ttymalloc(0);
 
 		tp->t_oproc = stty_start;
 		tp->t_param = stty_param;
@@ -414,7 +414,7 @@ sttyopen(dev, flags, mode, p)
 
 	splx(s);
 
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 int
@@ -431,7 +431,7 @@ sttyclose(dev, flags, mode, p)
 	int port = SPIF_PORT(dev);
 	int s;
 
-	(*linesw[tp->t_line].l_close)(tp, flags);
+	(*linesw[tp->t_line].l_close)(tp, flags, p);
 	s = spltty();
 
 	if (ISSET(tp->t_cflag, HUPCL) || !ISSET(tp->t_state, TS_ISOPEN)) {

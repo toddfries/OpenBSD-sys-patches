@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_synch.c,v 1.92 2009/11/27 19:45:53 guenther Exp $	*/
+/*	$OpenBSD: kern_synch.c,v 1.95 2010/06/29 00:28:14 tedu Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*
@@ -88,7 +88,7 @@ sleep_queue_init(void)
  * that is safe for use on the interrupt stack; it can be made
  * higher to block network software interrupts after panics.
  */
-int safepri;
+extern int safepri;
 
 /*
  * General sleep call.  Suspends the current process until a wakeup is
@@ -402,8 +402,6 @@ sys_sched_yield(struct proc *p, void *v, register_t *retval)
 	return (0);
 }
 
-#ifdef RTHREADS
-
 int
 sys_thrsleep(struct proc *p, void *v, register_t *revtal)
 {
@@ -419,6 +417,8 @@ sys_thrsleep(struct proc *p, void *v, register_t *revtal)
 	long long to_ticks = 0;
 	int error;
 
+	if (!rthreads_enabled)
+		return (ENOTSUP);
 	if (SCARG(uap, tp) != NULL) {
 		struct timespec now, ats;
 
@@ -430,7 +430,7 @@ sys_thrsleep(struct proc *p, void *v, register_t *revtal)
 			/* already passed: still do the unlock */
 			if (lock)
 				copyout(&unlocked, lock, sizeof(unlocked));
-			return (ETIMEDOUT);
+			return (EWOULDBLOCK);
 		}
 
 		timespecsub(&ats, &now, &ats);
@@ -468,6 +468,8 @@ sys_thrwakeup(struct proc *p, void *v, register_t *retval)
 	struct proc *q;
 	int found = 0;
 
+	if (!rthreads_enabled)
+		return (ENOTSUP);
 	TAILQ_FOREACH(q, &p->p_p->ps_threads, p_thr_link) {
 		if (q->p_thrslpid == ident) {
 			wakeup_one(&q->p_thrslpid);
@@ -481,4 +483,3 @@ sys_thrwakeup(struct proc *p, void *v, register_t *retval)
 
 	return (0);
 }
-#endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mem.c,v 1.13 2009/11/19 20:16:27 miod Exp $	*/
+/*	$OpenBSD: mem.c,v 1.16 2010/06/26 23:24:43 guenther Exp $	*/
 /*	$NetBSD: mem.c,v 1.6 1995/04/10 11:55:03 mycroft Exp $	*/
 
 /*
@@ -49,7 +49,6 @@
 #include <sys/conf.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/msgbuf.h>
 #include <sys/systm.h>
 #include <sys/uio.h>
@@ -57,8 +56,11 @@
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
+#include <machine/memconf.h>
 
 #include <uvm/uvm_extern.h>
+
+boolean_t is_memory_range(paddr_t, psize_t, psize_t);
 
 caddr_t zeropage;
 
@@ -125,21 +127,19 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 			c = min(iov->iov_len, MAXPHYS);
 
 			/* Allow access to RAM through XKPHYS... */
-			if (IS_XKPHYS(v) && IS_XKPHYS(v + (vsize_t)c) &&
-			    XKPHYS_TO_PHYS(v + (vsize_t)c) <= ptoa(physmem))
-				allowed = TRUE;
+			if (IS_XKPHYS(v))
+				allowed = is_memory_range(XKPHYS_TO_PHYS(v),
+				    (psize_t)c, 0);
 			/* ...or through CKSEG0... */
 			else if (v >= CKSEG0_BASE &&
-			    v + (vsize_t)c < CKSEG0_BASE + CKSEG_SIZE &&
-			    (physmem >= atop(CKSEG_SIZE) ||
-			     v + (vsize_t)c <= CKSEG0_BASE + ptoa(physmem)))
-				allowed = TRUE;
+			    v < CKSEG0_BASE + CKSEG_SIZE)
+				allowed = is_memory_range(CKSEG0_TO_PHYS(v),
+				    (psize_t)c, CKSEG_SIZE);
 			/* ...or through CKSEG1... */
 			else if (v >= CKSEG1_BASE &&
-			    v + (vsize_t)c < CKSEG1_BASE + CKSEG_SIZE &&
-			    (physmem >= atop(CKSEG_SIZE) ||
-			     v + c <= CKSEG1_BASE + ptoa(physmem)))
-				allowed = TRUE;
+			    v < CKSEG1_BASE + CKSEG_SIZE)
+				allowed = is_memory_range(CKSEG1_TO_PHYS(v),
+				    (psize_t)c, CKSEG_SIZE);
 			/* ...otherwise, check it's within kernel kvm limits. */
 			else
 				allowed = uvm_kernacc((caddr_t)v, c,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lapic.c,v 1.22 2009/08/10 17:04:37 deraadt Exp $	*/
+/*	$OpenBSD: lapic.c,v 1.24 2010/06/26 23:24:43 guenther Exp $	*/
 /* $NetBSD: lapic.c,v 1.2 2003/05/08 01:04:35 fvdl Exp $ */
 
 /*-
@@ -34,7 +34,6 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 
@@ -113,7 +112,7 @@ lapic_map(paddr_t lapic_base)
 	invlpg(va);
 
 #ifdef MULTIPROCESSOR
-	cpu_init_first();	/* catch up to changed cpu_number() */
+	cpu_init_first();
 #endif
 
 	lapic_tpr = s;

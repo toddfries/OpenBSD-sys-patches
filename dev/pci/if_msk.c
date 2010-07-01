@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_msk.c,v 1.83 2009/11/26 00:12:31 kettenis Exp $	*/
+/*	$OpenBSD: if_msk.c,v 1.87 2010/05/19 15:27:35 oga Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -189,11 +189,6 @@ const struct pci_matchid mskc_devices[] = {
 	{ PCI_VENDOR_DLINK,		PCI_PRODUCT_DLINK_DGE550T_B1 },
 	{ PCI_VENDOR_DLINK,		PCI_PRODUCT_DLINK_DGE560SX },
 	{ PCI_VENDOR_DLINK,		PCI_PRODUCT_DLINK_DGE560T },
-	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_C032 },
-	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_C033 },
-	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_C034 },
-	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_C036 },
-	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_C042 },
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8021CU },
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8021X },
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8022CU },
@@ -212,6 +207,7 @@ const struct pci_matchid mskc_devices[] = {
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8055 },
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8055_2 },
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8056 },
+	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8057 },
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8058 },
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8061CU },
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8061X },
@@ -221,9 +217,13 @@ const struct pci_matchid mskc_devices[] = {
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8071 },
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8072 },
 	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8075 },
-	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_8057 },
-	{ PCI_VENDOR_SCHNEIDERKOCH,	PCI_PRODUCT_SCHNEIDERKOCH_SK9Sxx },
-	{ PCI_VENDOR_SCHNEIDERKOCH,	PCI_PRODUCT_SCHNEIDERKOCH_SK9Exx }
+	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_C032 },
+	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_C033 },
+	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_C034 },
+	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_C036 },
+	{ PCI_VENDOR_MARVELL,		PCI_PRODUCT_MARVELL_YUKON_C042 },
+	{ PCI_VENDOR_SCHNEIDERKOCH,	PCI_PRODUCT_SCHNEIDERKOCH_SK9Exx },
+	{ PCI_VENDOR_SCHNEIDERKOCH,	PCI_PRODUCT_SCHNEIDERKOCH_SK9Sxx }
 };
 
 static inline u_int32_t
@@ -780,10 +780,9 @@ mskc_reset(struct sk_softc *sc)
 	sk_win_write_1(sc, SK_STAT_BMU_FIFOIWM, 16);
 
 #if 0
-	sk_win_write_4(sc, SK_Y2_LEV_TIMERINIT, SK_IM_USECS(100));
-	sk_win_write_4(sc, 0x0ec0, SK_IM_USECS(1000));
-
-	sk_win_write_4(sc, 0x0ed0, SK_IM_USECS(20));
+	sk_win_write_4(sc, SK_Y2_LEV_ITIMERINIT, SK_IM_USECS(100));
+	sk_win_write_4(sc, SK_Y2_TX_ITIMERINIT, SK_IM_USECS(1000));
+	sk_win_write_4(sc, SK_Y2_ISR_ITIMERINIT, SK_IM_USECS(20));
 #else
 	sk_win_write_4(sc, SK_Y2_ISR_ITIMERINIT, SK_IM_USECS(4));
 #endif
@@ -891,7 +890,7 @@ msk_attach(struct device *parent, struct device *self, void *aux)
 	/* Allocate the descriptor queues. */
 	if (bus_dmamem_alloc(sc->sc_dmatag, sizeof(struct msk_ring_data),
 	    PAGE_SIZE, 0, &sc_if->sk_ring_seg, 1, &sc_if->sk_ring_nseg,
-	    BUS_DMA_NOWAIT)) {
+	    BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 		printf(": can't alloc rx buffers\n");
 		goto fail;
 	}
@@ -914,7 +913,6 @@ msk_attach(struct device *parent, struct device *self, void *aux)
 		goto fail_3;
 	}
         sc_if->sk_rdata = (struct msk_ring_data *)kva;
-	bzero(sc_if->sk_rdata, sizeof(struct msk_ring_data));
 
 	if (sc->sk_type != SK_YUKON_FE &&
 	    sc->sk_type != SK_YUKON_FE_P)
@@ -1171,7 +1169,8 @@ mskc_attach(struct device *parent, struct device *self, void *aux)
 	if (bus_dmamem_alloc(sc->sc_dmatag,
 	    MSK_STATUS_RING_CNT * sizeof(struct msk_status_desc),
 	    MSK_STATUS_RING_CNT * sizeof(struct msk_status_desc),
-	    0, &sc->sk_status_seg, 1, &sc->sk_status_nseg, BUS_DMA_NOWAIT)) {
+	    0, &sc->sk_status_seg, 1, &sc->sk_status_nseg,
+	    BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 		printf(": can't alloc status buffers\n");
 		goto fail_2;
 	}
@@ -1198,8 +1197,6 @@ mskc_attach(struct device *parent, struct device *self, void *aux)
 		goto fail_5;
 	}
 	sc->sk_status_ring = (struct msk_status_desc *)kva;
-	bzero(sc->sk_status_ring,
-	    MSK_STATUS_RING_CNT * sizeof(struct msk_status_desc));
 
 	/* Reset the adapter. */
 	mskc_reset(sc);

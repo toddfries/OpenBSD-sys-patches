@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid1.c,v 1.19 2009/08/09 14:12:25 marco Exp $ */
+/* $OpenBSD: softraid_raid1.c,v 1.24 2010/07/01 19:31:04 thib Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  *
@@ -44,6 +44,10 @@
 #include <dev/rndvar.h>
 
 /* RAID 1 functions. */
+int	sr_raid1_create(struct sr_discipline *, struct bioc_createraid *,
+	    int, int64_t);
+int	sr_raid1_assemble(struct sr_discipline *, struct bioc_createraid *,
+	    int);
 int	sr_raid1_alloc_resources(struct sr_discipline *);
 int	sr_raid1_free_resources(struct sr_discipline *);
 int	sr_raid1_rw(struct sr_workunit *);
@@ -57,11 +61,13 @@ sr_raid1_discipline_init(struct sr_discipline *sd)
 
 	/* Fill out discipline members. */
 	sd->sd_type = SR_MD_RAID1;
-	sd->sd_max_ccb_per_wu = sd->sd_meta->ssdi.ssd_chunk_no;
+	sd->sd_capabilities = SR_CAP_SYSTEM_DISK | SR_CAP_AUTO_ASSEMBLE |
+	    SR_CAP_REBUILD;
 	sd->sd_max_wu = SR_RAID1_NOWU;
-	sd->sd_rebuild = 1;
 
 	/* Setup discipline pointers. */
+	sd->sd_create = sr_raid1_create;
+	sd->sd_assemble = sr_raid1_assemble;
 	sd->sd_alloc_resources = sr_raid1_alloc_resources;
 	sd->sd_free_resources = sr_raid1_free_resources;
 	sd->sd_start_discipline = NULL;
@@ -74,6 +80,32 @@ sr_raid1_discipline_init(struct sr_discipline *sd)
 	sd->sd_scsi_rw = sr_raid1_rw;
 	sd->sd_set_chunk_state = sr_raid1_set_chunk_state;
 	sd->sd_set_vol_state = sr_raid1_set_vol_state;
+}
+
+int
+sr_raid1_create(struct sr_discipline *sd, struct bioc_createraid *bc,
+    int no_chunk, int64_t coerced_size)
+{
+
+	if (no_chunk < 2)
+		return EINVAL;
+
+	strlcpy(sd->sd_name, "RAID 1", sizeof(sd->sd_name));
+	sd->sd_meta->ssdi.ssd_size = coerced_size;
+
+	sd->sd_max_ccb_per_wu = no_chunk;
+
+	return 0;
+}
+
+int
+sr_raid1_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
+    int no_chunk)
+{
+
+	sd->sd_max_ccb_per_wu = sd->sd_meta->ssdi.ssd_chunk_no;
+
+	return 0;
 }
 
 int
@@ -349,7 +381,7 @@ sr_raid1_rw(struct sr_workunit *wu)
 		goto bad;
 
 	/* calculate physical block */
-	blk += SR_META_SIZE + SR_META_OFFSET;
+	blk += SR_DATA_OFFSET;
 
 	if (xs->flags & SCSI_DATA_IN)
 		ios = 1;
@@ -384,6 +416,7 @@ sr_raid1_rw(struct sr_workunit *wu)
 		b->b_data = xs->data;
 		b->b_error = 0;
 		b->b_proc = curproc;
+		b->b_bq = NULL;
 		ccb->ccb_wu = wu;
 
 		if (xs->flags & SCSI_DATA_IN) {
@@ -543,7 +576,6 @@ sr_raid1_intr(struct buf *bp)
 
 		xs->error = XS_NOERROR;
 		xs->resid = 0;
-		xs->flags |= ITSDONE;
 
 		pend = 0;
 		TAILQ_FOREACH(wup, &sd->sd_wu_pendq, swu_link) {
@@ -592,7 +624,6 @@ retry:
 	return;
 bad:
 	xs->error = XS_DRIVER_STUFFUP;
-	xs->flags |= ITSDONE;
 	if (wu->swu_flags & SR_WUF_REBUILD) {
 		wu->swu_flags |= SR_WUF_REBUILDIOCOMP;
 		wakeup(wu);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: softintr.c,v 1.9 2009/11/28 16:49:30 miod Exp $	*/
+/*	$OpenBSD: softintr.c,v 1.11 2010/01/18 17:00:28 miod Exp $	*/
 /*	$NetBSD: softintr.c,v 1.2 2003/07/15 00:24:39 lukem Exp $	*/
 
 /*
@@ -204,10 +204,13 @@ dosoftint()
 {
 	struct cpu_info *ci = curcpu();
 	int sir, q, mask;
-
 #ifdef MULTIPROCESSOR
-	if (ci->ci_ipl < IPL_SCHED)
-		__mp_lock(&kernel_lock);
+	u_int32_t sr;
+
+	/* Enable interrupts */
+	sr = getsr();
+	ENABLEIPI();
+	__mp_lock(&kernel_lock);
 #endif
 
 	while ((sir = ci->ci_softpending) != 0) {
@@ -221,7 +224,7 @@ dosoftint()
 	}
 
 #ifdef MULTIPROCESSOR
-	if (ci->ci_ipl < IPL_SCHED)
-		__mp_unlock(&kernel_lock);
+	__mp_unlock(&kernel_lock);
+	setsr(sr);
 #endif
 }

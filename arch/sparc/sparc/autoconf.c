@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.83 2009/10/26 20:17:27 deraadt Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.90 2010/07/01 03:20:38 matthew Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.73 1997/07/29 09:41:53 fair Exp $ */
 
 /*
@@ -56,6 +56,7 @@
 #include <sys/socket.h>
 #include <sys/malloc.h>
 #include <sys/queue.h>
+#include <sys/proc.h>
 #include <sys/user.h>
 
 #include <net/if.h>
@@ -771,20 +772,6 @@ cpu_configure()
 			if (cf->cf_driver != &memreg_cd ||
 				cf->cf_loc[0] == -1) /* avoid sun4m memreg0 */
 				continue;
-			/*
-			 * On the 4/100 obio addresses must be mapped at
-			 * 0x0YYYYYYY, but alias higher up (we avoid the
-			 * alias condition because it causes pmap difficulties)
-			 * XXX: We also assume that 4/[23]00 obio addresses
-			 * must be 0xZYYYYYYY, where (Z != 0)
-			 * make sure we get the correct memreg cfdriver!
-			 */
-			if (cpuinfo.cpu_type == CPUTYP_4_100 &&
-			    (cf->cf_loc[0] & 0xf0000000))
-				continue;
-			if (cpuinfo.cpu_type != CPUTYP_4_100 &&
-			    !(cf->cf_loc[0] & 0xf0000000))
-				continue;
 			for (p = cf->cf_parents; memregcf==NULL && *p >= 0; p++)
 				if (cfdata[*p].cf_driver == &obio_cd)
 					memregcf = cf;
@@ -813,7 +800,8 @@ cpu_configure()
 		node = findroot();
 #endif
 
-	*promvec->pv_synchook = sync_crash;
+	if (!CPU_ISSUN4)
+		*promvec->pv_synchook = sync_crash;
 
 	oca.ca_ra.ra_node = node;
 	oca.ca_ra.ra_name = cp = "mainbus";
@@ -1224,12 +1212,15 @@ mainbus_attach(parent, dev, aux)
 		 * node if a framebuffer is installed, even if console is
 		 * set to serial.
 		 */
-		if (*promvec->pv_stdout != PROMDEV_SCREEN)
+		if (*promvec->pv_stdout != PROMDEV_SCREEN ||
+		    *promvec->pv_stdin != PROMDEV_KBD)
 			fbnode = 0;
 		else {
 			/* remember which frame buffer is the console */
 			fbnode = getpropint(node, "fb", 0);
 		}
+	} else {
+		/* fbnode already initialized in consinit() */
 	}
 
 	/* Find the "options" node */
@@ -1371,130 +1362,76 @@ findzs(zs)
 	/* NOTREACHED */
 }
 
-#if defined(SUN4C) || defined(SUN4M)
-struct v2rmi {
-	int	zero;
-	int	addr;
-	int	len;
-} v2rmi[200];		/* version 2 rom meminfo layout */
-#endif
-
 int
-makememarr(ap, max, which)
-	register struct memarr *ap;
-	int max, which;
+makememarr(struct memarr *ap, u_int xmax, int which)
 {
 #if defined(SUN4C) || defined(SUN4M)
-#define	MAXMEMINFO (sizeof(v2rmi) / sizeof(*v2rmi))
-	register struct v0mlist *mp;
-	register int i, node, len;
+	struct v0mlist *mp;
+	int node, n;
 	char *prop;
+#endif
+
+#ifdef DIAGNOSTIC
+	if (which != MEMARR_AVAILPHYS && which != MEMARR_TOTALPHYS)
+		panic("makememarr");
 #endif
 
 #if defined(SUN4)
 	if (CPU_ISSUN4) {
-		switch (which) {
-		case MEMARR_AVAILPHYS:
-			ap[0].addr = 0;
-			ap[0].len = *oldpvec->memoryAvail;
-			break;
-		case MEMARR_TOTALPHYS:
-			ap[0].addr = 0;
-			ap[0].len = *oldpvec->memorySize;
-			break;
-		default:
-			printf("pre_panic: makememarr");
-			break;
+		if (ap != NULL && xmax != 0) {
+			ap[0].addr_hi = 0;
+			ap[0].addr_lo = 0;
+			ap[0].len = which == MEMARR_AVAILPHYS ?
+			    *oldpvec->memoryAvail : *oldpvec->memorySize;
 		}
-		return (1);
+		return 1;
 	}
 #endif
 #if defined(SUN4C) || defined(SUN4M)
-	switch (i = promvec->pv_romvec_vers) {
-
+	switch (n = promvec->pv_romvec_vers) {
 	case 0:
 		/*
 		 * Version 0 PROMs use a linked list to describe these
 		 * guys.
 		 */
-		switch (which) {
+		mp = which == MEMARR_AVAILPHYS ?
+		    *promvec->pv_v0mem.v0_physavail :
+		    *promvec->pv_v0mem.v0_phystot;
 
-		case MEMARR_AVAILPHYS:
-			mp = *promvec->pv_v0mem.v0_physavail;
-			break;
-
-		case MEMARR_TOTALPHYS:
-			mp = *promvec->pv_v0mem.v0_phystot;
-			break;
-
-		default:
-			panic("makememarr");
-		}
-		for (i = 0; mp != NULL; mp = mp->next, i++) {
-			if (i >= max)
-				goto overflow;
-			ap->addr = (u_int)mp->addr;
+		for (n = 0; mp != NULL; mp = mp->next, n++) {
+			if (ap == NULL || n >= xmax)
+				continue;
+			ap->addr_hi = 0;
+			ap->addr_lo = (uint32_t)mp->addr;
 			ap->len = mp->nbytes;
 			ap++;
 		}
 		break;
-
 	default:
 		printf("makememarr: hope version %d PROM is like version 2\n",
-		    i);
+		    n);
 		/* FALLTHROUGH */
-
-        case 3:
+	case 3:
 	case 2:
 		/*
 		 * Version 2 PROMs use a property array to describe them.
 		 */
-		if (max > MAXMEMINFO) {
-			printf("makememarr: limited to %d\n", MAXMEMINFO);
-			max = MAXMEMINFO;
-		}
 		if ((node = findnode(firstchild(findroot()), "memory")) == 0)
 			panic("makememarr: cannot find \"memory\" node");
-		switch (which) {
-
-		case MEMARR_AVAILPHYS:
-			prop = "available";
-			break;
-
-		case MEMARR_TOTALPHYS:
-			prop = "reg";
-			break;
-
-		default:
-			panic("makememarr");
-		}
-		len = getprop(node, prop, (void *)v2rmi, sizeof v2rmi) /
-		    sizeof(struct v2rmi);
-		for (i = 0; i < len; i++) {
-			if (i >= max)
-				goto overflow;
-			ap->addr = v2rmi[i].addr;
-			ap->len = v2rmi[i].len;
-			ap++;
+		prop = which == MEMARR_AVAILPHYS ? "available" : "reg";
+		n = getproplen(node, prop) / sizeof(struct memarr);
+		if (ap != NULL) {
+			if (getprop(node, prop, ap,
+			    xmax * sizeof(struct memarr)) <= 0)
+				panic("makememarr: cannot get property");
 		}
 		break;
 	}
 
-	/*
-	 * Success!  (Hooray)
-	 */
-	if (i == 0)
+	if (n <= 0)
 		panic("makememarr: no memory found");
-	return (i);
-
-overflow:
-	/*
-	 * Oops, there are more things in the PROM than our caller
-	 * provided space for.  Truncate any extras.
-	 */
-	printf("makememarr: WARNING: lost some memory\n");
-	return (i);
-#endif
+	return (n);
+#endif	/* SUN4C || SUN4M */
 }
 
 /*
@@ -1770,14 +1707,14 @@ device_register(struct device *dev, void *aux)
 
 #if defined(SUN4)
 		if (CPU_ISSUN4 && dev->dv_xname[0] == 's' &&
-		    target == 0 && sbsc->sc_link[0][0] == NULL) {
+		    target == 0 && scsi_get_link(sbsc, 0, 0) == NULL) {
 			/*
 			 * disk unit 0 is magic: if there is actually no
 			 * target 0 scsi device, the PROM will call
 			 * target 3 `sd0'.
 			 * XXX - what if someone puts a tape at target 0?
 			 */
-			/* Note that sc_link[0][0] will be NULL when we are
+			/* Note that sbsc:0:0 will be NULL when we are
 			 * invoked to match the device for target 0, if it
 			 * exists. But then the attachment args will have
 			 * its own target set to zero. It this case, skip

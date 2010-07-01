@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sched.c,v 1.15 2009/11/25 11:01:14 kettenis Exp $	*/
+/*	$OpenBSD: kern_sched.c,v 1.22 2010/05/28 14:23:37 guenther Exp $	*/
 /*
  * Copyright (c) 2007, 2008 Artur Grabowski <art@openbsd.org>
  *
@@ -24,7 +24,6 @@
 #include <sys/resourcevar.h>
 #include <sys/signalvar.h>
 #include <sys/mutex.h>
-#include <machine/atomic.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -32,7 +31,6 @@
 
 
 void sched_kthreads_create(void *);
-void sched_idle(void *);
 
 int sched_proc_to_cpu_cost(struct cpu_info *ci, struct proc *p);
 struct proc *sched_steal_proc(struct cpu_info *);
@@ -44,6 +42,7 @@ struct proc *sched_steal_proc(struct cpu_info *);
  */
 struct cpuset sched_idle_cpus;
 struct cpuset sched_queued_cpus;
+struct cpuset sched_all_cpus;
 
 /*
  * A few notes about cpu_switchto that is implemented in MD code.
@@ -86,6 +85,7 @@ sched_init_cpu(struct cpu_info *ci)
 	 * structures.
 	 */
 	cpuset_init_cpu(ci);
+	cpuset_add(&sched_all_cpus, ci);
 }
 
 void
@@ -146,15 +146,20 @@ sched_idle(void *v)
 
 		splassert(IPL_NONE);
 
-		if (spc->spc_schedflags & SPCF_SHOULDHALT) {
-			spc->spc_schedflags |= SPCF_HALTED;
-			wakeup(spc);
-		}
-
 		cpuset_add(&sched_idle_cpus, ci);
 		cpu_idle_enter();
-		while (spc->spc_whichqs == 0)
+		while (spc->spc_whichqs == 0) {
+			if (spc->spc_schedflags & SPCF_SHOULDHALT &&
+			    (spc->spc_schedflags & SPCF_HALTED) == 0) {
+				cpuset_del(&sched_idle_cpus, ci);
+				SCHED_LOCK(s);
+				atomic_setbits_int(&spc->spc_schedflags,
+				    spc->spc_whichqs ? 0 : SPCF_HALTED);
+				SCHED_UNLOCK(s);
+				wakeup(spc);
+			}
 			cpu_idle_cycle();
+		}
 		cpu_idle_leave();
 		cpuset_del(&sched_idle_cpus, ci);
 	}
@@ -201,9 +206,6 @@ sched_exit(struct proc *p)
 void
 sched_init_runqueues(void)
 {
-#ifdef MULTIPROCESSOR
-	__mp_lock_init(&sched_lock);
-#endif
 }
 
 void
@@ -252,6 +254,15 @@ sched_chooseproc(void)
 	SCHED_ASSERT_LOCKED();
 
 	if (spc->spc_schedflags & SPCF_SHOULDHALT) {
+		if (spc->spc_whichqs) {
+			for (queue = 0; queue < SCHED_NQS; queue++) {
+				TAILQ_FOREACH(p, &spc->spc_qs[queue], p_runq) {
+					remrunqueue(p);
+					p->p_cpu = sched_choosecpu(p);
+					setrunqueue(p);
+				}
+			}
+		}
 		p = spc->spc_idleproc;
 		KASSERT(p);
 		p->p_stat = SRUN;
@@ -327,7 +338,7 @@ sched_choosecpu_fork(struct proc *parent, int flags)
 	 */
 	cpuset_complement(&set, &sched_queued_cpus, &sched_idle_cpus);
 	if (cpuset_first(&set) == NULL)
-		cpuset_add_all(&set);
+		cpuset_copy(&set, &sched_all_cpus);
 
 	while ((ci = cpuset_first(&set)) != NULL) {
 		cpuset_del(&set, ci);
@@ -384,7 +395,7 @@ sched_choosecpu(struct proc *p)
 	}
 
 	if (cpuset_first(&set) == NULL)
-		cpuset_add_all(&set);
+		cpuset_copy(&set, &sched_all_cpus);
 
 	while ((ci = cpuset_first(&set)) != NULL) {
 		int cost = sched_proc_to_cpu_cost(ci, p);
@@ -545,6 +556,58 @@ sched_peg_curproc(struct cpu_info *ci)
 	SCHED_UNLOCK(s);
 }
 
+#ifdef MULTIPROCESSOR
+
+void
+sched_start_secondary_cpus(void)
+{
+	CPU_INFO_ITERATOR cii;
+	struct cpu_info *ci;
+
+	CPU_INFO_FOREACH(cii, ci) {
+		struct schedstate_percpu *spc = &ci->ci_schedstate;
+
+		if (CPU_IS_PRIMARY(ci))
+			continue;
+		cpuset_add(&sched_all_cpus, ci);
+		atomic_clearbits_int(&spc->spc_schedflags,
+		    SPCF_SHOULDHALT | SPCF_HALTED);
+	}
+}
+
+void
+sched_stop_secondary_cpus(void)
+{
+	CPU_INFO_ITERATOR cii;
+	struct cpu_info *ci;
+
+	/*
+	 * Make sure we stop the secondary CPUs.
+	 */
+	CPU_INFO_FOREACH(cii, ci) {
+		struct schedstate_percpu *spc = &ci->ci_schedstate;
+
+		if (CPU_IS_PRIMARY(ci))
+			continue;
+		cpuset_del(&sched_all_cpus, ci);
+		atomic_setbits_int(&spc->spc_schedflags, SPCF_SHOULDHALT);
+	}
+	CPU_INFO_FOREACH(cii, ci) {
+		struct schedstate_percpu *spc = &ci->ci_schedstate;
+		struct sleep_state sls;
+
+		if (CPU_IS_PRIMARY(ci))
+			continue;
+		while ((spc->spc_schedflags & SPCF_HALTED) == 0) {
+			sleep_setup(&sls, spc, PZERO, "schedstate");
+			sleep_finish(&sls,
+			    (spc->spc_schedflags & SPCF_HALTED) == 0);
+		}
+	}
+}
+
+#endif
+
 /*
  * Functions to manipulate cpu sets.
  */
@@ -563,13 +626,6 @@ cpuset_clear(struct cpuset *cs)
 {
 	memset(cs, 0, sizeof(*cs));
 }
-
-/*
- * XXX - implement it on SP architectures too
- */
-#ifndef CPU_INFO_UNIT
-#define CPU_INFO_UNIT 0
-#endif
 
 void
 cpuset_add(struct cpuset *cs, struct cpu_info *ci)

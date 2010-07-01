@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_input.c,v 1.93 2009/11/13 20:54:05 claudio Exp $	*/
+/*	$OpenBSD: ipsec_input.c,v 1.97 2010/07/01 02:09:45 reyk Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -42,6 +42,7 @@
 #include <sys/protosw.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/kernel.h>
 
@@ -118,6 +119,7 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 	union sockaddr_union dst_address;
 	struct timeval tv;
 	struct tdb *tdbp;
+	struct ifnet *encif;
 	u_int32_t spi;
 	u_int16_t cpi;
 	int s, error;
@@ -238,10 +240,24 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 	}
 
 	if (sproto != IPPROTO_IPCOMP) {
+		if ((encif = enc_getif(0, tdbp->tdb_tap)) == NULL) {
+			splx(s);
+			DPRINTF(("ipsec_common_input(): "
+			    "no enc%u interface for SA %s/%08x/%u\n",
+			    tdbp->tdb_tap, ipsp_address(dst_address),
+			    ntohl(spi), tdbp->tdb_sproto));
+			m_freem(m);
+
+			IPSEC_ISTAT(espstat.esps_pdrops,
+			    ahstat.ahs_pdrops,
+			    ipcompstat.ipcomps_pdrops);
+			return EACCES;
+		}
+
 		/* XXX This conflicts with the scoped nature of IPv6 */
-		m->m_pkthdr.rcvif = &encif[0].sc_if;
+		m->m_pkthdr.rcvif = encif;
 	}
-	
+
 	/* Register first use, setup expiration timer. */
 	if (tdbp->tdb_first_use == 0) {
 		tdbp->tdb_first_use = time_second;
@@ -274,10 +290,11 @@ int
 ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
     struct m_tag *mt)
 {
-	int prot, af, sproto;
+	int af, sproto;
+	u_char prot;
 
 #if NBPFILTER > 0
-	struct ifnet *bpfif;
+	struct ifnet *encif;
 #endif
 
 #ifdef INET
@@ -426,7 +443,7 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 		ip6->ip6_plen = htons(m->m_pkthdr.len - skip);
 
 		/* Save protocol */
-		m_copydata(m, protoff, 1, (unsigned char *) &prot);
+		m_copydata(m, protoff, 1, (caddr_t) &prot);
 
 #ifdef INET
 		/* IP-in-IP encapsulation */
@@ -563,19 +580,20 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 		m->m_flags |= M_TUNNEL;
 
 #if NBPFILTER > 0
-	bpfif = &encif[0].sc_if;
-	bpfif->if_ipackets++;
-	bpfif->if_ibytes += m->m_pkthdr.len;
+	if ((encif = enc_getif(0, tdbp->tdb_tap)) != NULL) {
+		encif->if_ipackets++;
+		encif->if_ibytes += m->m_pkthdr.len;
 
-	if (bpfif->if_bpf) {
-		struct enchdr hdr;
+		if (encif->if_bpf) {
+			struct enchdr hdr;
 
-		hdr.af = af;
-		hdr.spi = tdbp->tdb_spi;
-		hdr.flags = m->m_flags & (M_AUTH|M_CONF|M_AUTH_AH);
+			hdr.af = af;
+			hdr.spi = tdbp->tdb_spi;
+			hdr.flags = m->m_flags & (M_AUTH|M_CONF|M_AUTH_AH);
 
-		bpf_mtap_hdr(bpfif->if_bpf, (char *)&hdr, ENC_HDRLEN, m,
-		    BPF_DIRECTION_IN);
+			bpf_mtap_hdr(encif->if_bpf, (char *)&hdr,
+			    ENC_HDRLEN, m, BPF_DIRECTION_IN);
+		}
 	}
 #endif
 

@@ -79,15 +79,17 @@
 
 	.text
 	.code16
-	.align 4,0
+	.align 4
 	.global _C_LABEL(acpi_real_mode_resume)
 	.global _C_LABEL(acpi_protected_mode_resume)
 	.global _C_LABEL(acpi_resume_end)
+	.global _C_LABEL(do_real_mode_post)
 _C_LABEL(acpi_real_mode_resume):
 	nop
 	cli
 	cld
 
+<<<<<<< HEAD
 	cmpb	$0x1, acpi_rm_clean_registers
 	jne	no_clean_required
 
@@ -113,6 +115,14 @@ _ACPI_TRMP_OFFSET(clean1)
 
 _ACPI_TRMP_OFFSET(clean2)
 
+=======
+	/*
+	 * Set up segment registers for real mode. 
+	 * We'll only be in real mode for a moment, and we don't have
+	 * want real dependencies on data or stack, so we'll just use
+	 * the code segment for data and stack (eg, a 64k memory space).
+	 */
+>>>>>>> origin/master
 	movw	%cs,%ax
 	movw	%ax,%ds
 	movw	%ax,%es
@@ -154,8 +164,13 @@ clean4:
 	 * laptops), we might not restore the proper VGA mode
 	 * on resume. Caveat emptor.
 	 */
+<<<<<<< HEAD
 	cmpb	$0x1, acpi_rm_video_resume
 	jne	no_rm_video_repost
+=======
+	cmpl	$0, do_real_mode_post_off
+	jz	nobiosreset
+>>>>>>> origin/master
 	lcall	$0xc000,$3
 
 no_rm_video_repost:
@@ -360,7 +375,7 @@ _ACPI_TRMP_OFFSET(tmp_gdt)
 	.word	tmp_gdt_end - tmp_gdtable
 	.long	tmp_gdtable
 
-	.align 8,0
+	.align 8
 _ACPI_TRMP_LABEL(tmp_gdtable)
 	/*
 	 * null
@@ -400,27 +415,16 @@ _ACPI_TRMP_LABEL(tmp_gdtable)
 	.byte	0, 0x93, 0xcf, 0
 _ACPI_TRMP_LABEL(tmp_gdt_end)
 
-	.align 8, 0
+	.align 8
 _ACPI_TRMP_OFFSET(clean_idt)
 	.word	0xffff
 	.long	0
 	.word	0
 
-_ACPI_TRMP_OFFSET(clean_gdt)
-	.word	clean_gdt_end - clean_gdtable
-	.long	clean_gdtable
-
-	.align 8, 0
-_ACPI_TRMP_LABEL(clean_gdtable)
-	.word	0, 0
-	.byte	0, 0, 0, 0
-
-	.word	0xffff, ACPI_TRAMPOLINE
-	.byte	0, 0x9b, 0, 0
-
-	.word	0xffff, ACPI_TRAMPOLINE
-	.byte	0, 0x93, 0, 0
-_ACPI_TRMP_LABEL(clean_gdt_end)
+	.align 4
+_C_LABEL(do_real_mode_post):
+_ACPI_TRMP_OFFSET(do_real_mode_post_off)
+	.long 0
 
 	.align 4
 _ACPI_TRMP_LABEL(acpi_saved_ebx)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.109 2009/11/27 20:05:50 guenther Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.112 2010/05/07 13:33:16 claudio Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -188,17 +188,16 @@ in_pcballoc(so, v)
 		    "inpcbpl", NULL);
 		inpcb_pool_initialized = 1;
 	}
-	inp = pool_get(&inpcb_pool, PR_NOWAIT);
+	inp = pool_get(&inpcb_pool, PR_NOWAIT|PR_ZERO);
 	if (inp == NULL)
 		return (ENOBUFS);
-	bzero((caddr_t)inp, sizeof(*inp));
 	inp->inp_table = table;
 	inp->inp_socket = so;
 	inp->inp_seclevel[SL_AUTH] = ipsec_auth_default_level;
 	inp->inp_seclevel[SL_ESP_TRANS] = ipsec_esp_trans_default_level;
 	inp->inp_seclevel[SL_ESP_NETWORK] = ipsec_esp_network_default_level;
 	inp->inp_seclevel[SL_IPCOMP] = ipsec_ipcomp_default_level;
-	inp->inp_rdomain = curproc->p_rdomain;
+	inp->inp_rdomain = curproc->p_p->ps_rdomain;
 	s = splnet();
 	CIRCLEQ_INSERT_HEAD(&table->inpt_queue, inp, inp_queue);
 	LIST_INSERT_HEAD(INPCBLHASH(table, inp->inp_lport,
@@ -782,7 +781,7 @@ in_pcbrtentry(inp)
 			ro->ro_dst.sa_len = sizeof(struct sockaddr_in6);
 			((struct sockaddr_in6 *) &ro->ro_dst)->sin6_addr =
 			    inp->inp_faddr6;
-			rtalloc_mpath(ro, &inp->inp_laddr6.s6_addr32[0], 0);
+			rtalloc_mpath(ro, &inp->inp_laddr6.s6_addr32[0]);
 			break;
 #endif /* INET6 */
 		case PF_INET:
@@ -790,9 +789,9 @@ in_pcbrtentry(inp)
 				break;
 			ro->ro_dst.sa_family = AF_INET;
 			ro->ro_dst.sa_len = sizeof(ro->ro_dst);
+			ro->ro_tableid = inp->inp_rdomain;
 			satosin(&ro->ro_dst)->sin_addr = inp->inp_faddr;
-			rtalloc_mpath(ro, &inp->inp_laddr.s_addr,
-			    inp->inp_rdomain);
+			rtalloc_mpath(ro, &inp->inp_laddr.s_addr);
 			break;
 		}
 	}
@@ -825,7 +824,8 @@ in_selectsrc(struct sockaddr_in *sin, struct route *ro, int soopts,
 		ro->ro_dst.sa_family = AF_INET;
 		ro->ro_dst.sa_len = sizeof(struct sockaddr_in);
 		satosin(&ro->ro_dst)->sin_addr = sin->sin_addr;
-		rtalloc_mpath(ro, NULL, rdomain);
+		ro->ro_tableid = rdomain;
+		rtalloc_mpath(ro, NULL);
 
 		/*
 		 * It is important to bzero out the rest of the

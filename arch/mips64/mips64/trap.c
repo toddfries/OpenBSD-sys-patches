@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.52 2009/11/22 00:19:49 syuu Exp $	*/
+/*	$OpenBSD: trap.c,v 1.63 2010/01/21 17:50:44 miod Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -78,6 +78,7 @@
 
 #ifdef DDB
 #include <mips64/db_machdep.h>
+#include <ddb/db_output.h>
 #include <ddb/db_sym.h>
 #endif
 
@@ -87,8 +88,6 @@
 #include <dev/systrace.h>
 
 #define	USERMODE(ps)	(((ps) & SR_KSU_MASK) == SR_KSU_USER)
-
-struct	proc *machFPCurProcPtr;		/* pointer to last proc to use FP */
 
 const char *trap_type[] = {
 	"external interrupt",
@@ -126,21 +125,22 @@ const char *trap_type[] = {
 };
 
 #if defined(DDB) || defined(DEBUG)
-struct trapdebug trapdebug[TRAPSIZE], *trp = trapdebug;
+struct trapdebug trapdebug[MAXCPUS * TRAPSIZE];
+uint trppos[MAXCPUS];
 
 void	stacktrace(struct trap_frame *);
-int	kdbpeek(void *);
+uint32_t kdbpeek(vaddr_t);
+uint64_t kdbpeekd(vaddr_t);
 #endif	/* DDB || DEBUG */
 
 #if defined(DDB)
 extern int kdb_trap(int, db_regs_t *);
 #endif
 
-extern void MipsSwitchFPState(struct proc *, struct trap_frame *);
-extern void MipsSwitchFPState16(struct proc *, struct trap_frame *);
 extern void MipsFPTrap(u_int, u_int, u_int, union sigval);
 
 void	ast(void);
+void	fpu_trapsignal(struct proc *, u_long, int, union sigval);
 void	trap(struct trap_frame *);
 #ifdef PTRACE
 int	cpu_singlestep(struct proc *);
@@ -188,19 +188,19 @@ ast()
  * pcb_onfault is set, otherwise, return old pc.
  */
 void
-trap(trapframe)
-	struct trap_frame *trapframe;
+trap(struct trap_frame *trapframe)
 {
+	struct cpu_info *ci = curcpu();
 	int type, i;
 	unsigned ucode = 0;
-	struct proc *p = curproc;
+	struct proc *p = ci->ci_curproc;
 	vm_prot_t ftype;
 	extern vaddr_t onfault_table[];
 	int onfault;
 	int typ = 0;
 	union sigval sv;
 
-	trapdebug_enter(trapframe, -1);
+	trapdebug_enter(ci, trapframe, -1);
 
 	type = (trapframe->cause & CR_EXC_CODE) >> CR_EXC_CODE_SHIFT;
 	if (USERMODE(trapframe->sr)) {
@@ -208,11 +208,16 @@ trap(trapframe)
 	}
 
 	/*
-	 * Enable hardware interrupts if they were on before the trap.
+	 * Enable hardware interrupts if they were on before the trap;
+	 * enable IPI interrupts only otherwise.
 	 */
-	if (trapframe->sr & SR_INT_ENAB) {
-		if (type != T_BREAK) {
+	if (type != T_BREAK) {
+		if (ISSET(trapframe->sr, SR_INT_ENAB))
 			enableintr();
+		else {
+#ifdef MULTIPROCESSOR
+			ENABLEIPI();
+#endif
 		}
 	}
 
@@ -238,12 +243,15 @@ trap(trapframe)
 			}
 			entry |= PG_M;
 			*pte = entry;
-			tlb_update(trapframe->badvaddr & ~PGOFSET, entry);
+			KERNEL_LOCK();
+			pmap_update_kernel_page(trapframe->badvaddr & ~PGOFSET,
+			    entry);
 			pa = pfn_to_pad(entry);
 			pg = PHYS_TO_VM_PAGE(pa);
 			if (pg == NULL)
 				panic("trap: ktlbmod: unmanaged page");
 			pmap_set_modify(pg);
+			KERNEL_UNLOCK();
 			return;
 		}
 		/* FALLTHROUGH */
@@ -271,13 +279,21 @@ trap(trapframe)
 		}
 		entry |= PG_M;
 		*pte = entry;
-		tlb_update((trapframe->badvaddr & ~PGOFSET) |
-		    (pmap->pm_tlbpid << VMTLB_PID_SHIFT), entry);
+		if (USERMODE(trapframe->sr))
+			KERNEL_PROC_LOCK(p);
+		else
+			KERNEL_LOCK();
+		pmap_update_user_page(pmap, (trapframe->badvaddr & ~PGOFSET), 
+		    entry);
 		pa = pfn_to_pad(entry);
 		pg = PHYS_TO_VM_PAGE(pa);
 		if (pg == NULL)
 			panic("trap: utlbmod: unmanaged page");
 		pmap_set_modify(pg);
+		if (USERMODE(trapframe->sr))
+			KERNEL_PROC_UNLOCK(p);
+		else
+			KERNEL_UNLOCK();
 		if (!USERMODE(trapframe->sr))
 			return;
 		goto out;
@@ -527,10 +543,8 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		rval[0] = 0;
 		rval[1] = locr0->v1;
 #if defined(DDB) || defined(DEBUG)
-		if (trp == trapdebug)
-			trapdebug[TRAPSIZE - 1].code = code;
-		else
-			trp[-1].code = code;
+		trapdebug[TRAPSIZE * ci->ci_cpuid + (trppos[ci->ci_cpuid] == 0 ?
+		    TRAPSIZE : trppos[ci->ci_cpuid]) - 1].code = code;
 #endif
 
 #if NSYSTRACE > 0
@@ -567,7 +581,7 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 			locr0->a3 = 1;
 		}
 		if (code == SYS_ptrace)
-			Mips_SyncCache();
+			Mips_SyncCache(curcpu());
 #ifdef SYSCALL_DEBUG
 		KERNEL_PROC_LOCK(p);
 		scdebug_ret(p, code, i, rval);
@@ -655,7 +669,7 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 				uio.uio_procp = curproc;
 				error = process_domem(curproc, p, &uio,
 				    PT_WRITE_I);
-				Mips_SyncCache();
+				Mips_SyncCache(curcpu());
 
 				if (error)
 					printf("Warning: can't restore instruction at %x: %x\n",
@@ -747,14 +761,7 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 			break;
 		}
 
-		if (p->p_md.md_regs->sr & SR_FR_32)
-			MipsSwitchFPState(machFPCurProcPtr, p->p_md.md_regs);
-		else
-			MipsSwitchFPState16(machFPCurProcPtr, p->p_md.md_regs);
-
-		machFPCurProcPtr = p;
-		p->p_md.md_regs->sr |= SR_COP_1_BIT;
-		p->p_md.md_flags |= MDP_FPUSED;
+		enable_fpu(p);
 		goto out;
 
 	case T_FPE:
@@ -837,34 +844,66 @@ child_return(arg)
 #endif
 }
 
+/*
+ * Wrapper around trapsignal() for use by the floating point code.
+ */
+void
+fpu_trapsignal(struct proc *p, u_long ucode, int typ, union sigval sv)
+{
+	KERNEL_PROC_LOCK(p);
+	trapsignal(p, SIGFPE, ucode, typ, sv);
+	KERNEL_PROC_UNLOCK(p);
+}
+
 #if defined(DDB) || defined(DEBUG)
 void
-trapDump(msg)
-	char *msg;
+trapDump(char *msg)
 {
-	struct trapdebug *ptrp;
+#ifdef MULTIPROCESSOR
+	CPU_INFO_ITERATOR cii;
+#endif
+	struct cpu_info *ci;
+	struct trapdebug *base, *ptrp;
 	int i;
+	uint pos;
 	int s;
+	int (*pr)(const char*, ...);
 
+#ifdef DDB
+	pr = db_printf;
+#else
+	pr = printf;
+#endif
 	s = splhigh();
-	ptrp = trp;
-	printf("trapDump(%s)\n", msg);
-	for (i = 0; i < TRAPSIZE; i++) {
-		if (ptrp == trapdebug) {
-			ptrp = &trapdebug[TRAPSIZE - 1];
+	(*pr)("trapDump(%s)\n", msg);
+#ifndef MULTIPROCESSOR
+	ci = curcpu();
+#else
+	CPU_INFO_FOREACH(cii, ci)
+#endif
+	{
+#ifdef MULTIPROCESSOR
+		(*pr)("cpu%d\n", ci->ci_cpuid);
+#endif
+		/* walk in reverse order */
+		pos = trppos[ci->ci_cpuid];
+		base = trapdebug + ci->ci_cpuid * TRAPSIZE;
+		for (i = TRAPSIZE - 1; i >= 0; i--) {
+			if (pos + i >= TRAPSIZE)
+				ptrp = base + pos + i - TRAPSIZE;
+			else
+				ptrp = base + pos + i;
+
+			if (ptrp->cause == 0)
+				break;
+
+			(*pr)("%s: PC %p CR 0x%08x SR 0x%08x\n",
+			    trap_type[(ptrp->cause & CR_EXC_CODE) >>
+			      CR_EXC_CODE_SHIFT],
+			    ptrp->pc, ptrp->cause, ptrp->status);
+			(*pr)(" RA %p SP %p ADR %p\n",
+			    ptrp->ra, ptrp->sp, ptrp->vadr);
 		}
-		else {
-			ptrp--;
-		}
-
-		if (ptrp->cause == 0)
-			break;
-
-		printf("%s: PC %p CR 0x%x SR 0x%x\n",
-		    trap_type[(ptrp->cause & CR_EXC_CODE) >> CR_EXC_CODE_SHIFT],
-		    ptrp->pc, ptrp->cause, ptrp->status);
-
-		printf(" RA %p SP %p ADR %p\n", ptrp->ra, ptrp->sp, ptrp->vadr);
 	}
 
 	splx(s);
@@ -887,16 +926,14 @@ MipsEmulateBranch(framePtr, instPC, fpcCSR, curinst)
 	int condition;
 	register_t *regsPtr = (register_t *)framePtr;
 
-#define GetBranchDest(InstPtr, inst) \
-	((unsigned long)InstPtr + 4 + ((short)inst.IType.imm << 2))
+#define	GetBranchDest(InstPtr, inst) \
+	    ((unsigned long)InstPtr + 4 + ((short)inst.IType.imm << 2))
 
 
-	if (curinst) {
+	if (curinst)
 		inst = *(InstFmt *)&curinst;
-	}
-	else {
+	else
 		inst = *(InstFmt *)instPC;
-	}
 #if 0
 	printf("regsPtr=%x PC=%x Inst=%x fpcCsr=%x\n", regsPtr, instPC,
 		inst.word, fpcCSR); /* XXX */
@@ -1012,7 +1049,9 @@ MipsEmulateBranch(framePtr, instPC, fpcCSR, curinst)
 	default:
 		retAddr = instPC + 4;
 	}
+
 	return (retAddr);
+#undef	GetBranchDest
 }
 
 #ifdef PTRACE
@@ -1088,7 +1127,7 @@ cpu_singlestep(p)
 	uio.uio_rw = UIO_WRITE;
 	uio.uio_procp = curproc;
 	error = process_domem(curproc, p, &uio, PT_WRITE_I);
-	Mips_SyncCache();
+	Mips_SyncCache(curcpu());
 	if (error)
 		return (EFAULT);
 
@@ -1108,9 +1147,9 @@ cpu_singlestep(p)
 
 /* forward */
 #if !defined(DDB)
-char *fn_name(long addr);
+const char *fn_name(vaddr_t);
 #endif
-void stacktrace_subr(struct trap_frame *, int (*)(const char*, ...));
+void stacktrace_subr(struct trap_frame *, int, int (*)(const char*, ...));
 
 /*
  * Print a stack backtrace.
@@ -1119,29 +1158,33 @@ void
 stacktrace(regs)
 	struct trap_frame *regs;
 {
-	stacktrace_subr(regs, printf);
+	stacktrace_subr(regs, 6, printf);
 }
 
 #define	VALID_ADDRESS(va) \
 	(((va) >= VM_MIN_KERNEL_ADDRESS && (va) < VM_MAX_KERNEL_ADDRESS) || \
-	 IS_XKPHYS(va) || ((va) >= CKSEG0_BASE && (va) < CKSSEG_BASE))
+	 IS_XKPHYS(va) || ((va) >= CKSEG0_BASE && (va) < CKSEG1_BASE))
 
 void
-stacktrace_subr(regs, printfn)
-	struct trap_frame *regs;
-	int (*printfn)(const char*, ...);
+stacktrace_subr(struct trap_frame *regs, int count,
+    int (*pr)(const char*, ...))
 {
-	vaddr_t pc, sp, fp, ra, va, subr;
-	long a0, a1, a2, a3;
-	unsigned instr, mask;
+	vaddr_t pc, sp, ra, va, subr;
+	register_t a0, a1, a2, a3;
+	uint32_t instr, mask;
 	InstFmt i;
 	int more, stksize;
-	unsigned int frames =  0;
+	extern char k_intr[];
+	extern char k_general[];
+#ifdef DDB
+	db_expr_t diff;
+	db_sym_t sym;
+	char *symname;
+#endif
 
 	/* get initial values from the exception frame */
 	sp = (vaddr_t)regs->sp;
 	pc = (vaddr_t)regs->pc;
-	fp = (vaddr_t)regs->s8;
 	ra = (vaddr_t)regs->ra;		/* May be a 'leaf' function */
 	a0 = regs->a0;
 	a1 = regs->a1;
@@ -1150,53 +1193,41 @@ stacktrace_subr(regs, printfn)
 
 /* Jump here when done with a frame, to start a new one */
 loop:
-
-/* Jump here after a nonstandard (interrupt handler) frame */
-	stksize = 0;
+#ifdef DDB
+	symname = NULL;
+#endif
 	subr = 0;
-	if (frames++ > 6) {
-		(*printfn)("stackframe count exceeded\n");
-		return;
+	stksize = 0;
+
+	if (count-- == 0) {
+		ra = 0;
+		goto end;
 	}
 
 	/* check for bad SP: could foul up next frame */
 	if (sp & 3 || !VALID_ADDRESS(sp)) {
-		(*printfn)("SP %p: not in kernel\n", sp);
+		(*pr)("SP %p: not in kernel\n", sp);
 		ra = 0;
-		subr = 0;
-		goto done;
+		goto end;
 	}
-
-#if 0
-	/* Backtraces should contine through interrupts from kernel mode */
-	if (pc >= (vaddr_t)MipsKernIntr && pc < (vaddr_t)MipsUserIntr) {
-		(*printfn)("MipsKernIntr+%x: (%x, %x ,%x) -------\n",
-		       pc - (vaddr_t)MipsKernIntr, a0, a1, a2);
-		regs = (struct trap_frame *)(sp + STAND_ARG_SIZE);
-		a0 = kdbpeek(&regs->a0);
-		a1 = kdbpeek(&regs->a1);
-		a2 = kdbpeek(&regs->a2);
-		a3 = kdbpeek(&regs->a3);
-
-		pc = kdbpeek(&regs->pc); /* exc_pc - pc at time of exception */
-		ra = kdbpeek(&regs->ra); /* ra at time of exception */
-		sp = kdbpeek(&regs->sp);
-		goto specialframe;
-	}
-#endif
-
-
-# define Between(x, y, z) \
-		( ((x) <= (y)) && ((y) < (z)) )
-# define pcBetween(a,b) \
-		Between((vaddr_t)a, pc, (vaddr_t)b)
 
 	/* check for bad PC */
 	if (pc & 3 || !VALID_ADDRESS(pc)) {
-		(*printfn)("PC %p: not in kernel\n", pc);
+		(*pr)("PC %p: not in kernel\n", pc);
 		ra = 0;
-		goto done;
+		goto end;
 	}
+
+#ifdef DDB
+	/*
+	 * Dig out the function from the symbol table.
+	 * Watch out for function tail optimizations.
+	 */
+	sym = db_search_symbol(pc, DB_STGY_ANY, &diff);
+	db_symbol_values(sym, &symname, 0);
+	if (sym != DB_SYM_NULL)
+		subr = pc - (vaddr_t)diff;
+#endif
 
 	/*
 	 * Find the beginning of the current subroutine by scanning backwards
@@ -1204,11 +1235,11 @@ loop:
 	 */
 	if (!subr) {
 		va = pc - sizeof(int);
-		while ((instr = kdbpeek((void *)va)) != MIPS_JR_RA)
-		va -= sizeof(int);
+		while ((instr = kdbpeek(va)) != MIPS_JR_RA)
+			va -= sizeof(int);
 		va += 2 * sizeof(int);	/* skip back over branch & delay slot */
 		/* skip over nulls which might separate .o files */
-		while ((instr = kdbpeek((void *)va)) == 0)
+		while ((instr = kdbpeek(va)) == 0)
 			va += sizeof(int);
 		subr = va;
 	}
@@ -1226,7 +1257,7 @@ loop:
 		/* stop if hit our current position */
 		if (va >= pc)
 			break;
-		instr = kdbpeek((void *)va);
+		instr = kdbpeek(va);
 		i.word = instr;
 		switch (i.JType.op) {
 		case OP_SPECIAL:
@@ -1263,67 +1294,69 @@ loop:
 			};
 			break;
 
-		case OP_SW:
 		case OP_SD:
 			/* look for saved registers on the stack */
-			if (i.IType.rs != 29)
+			if (i.IType.rs != SP)
 				break;
 			/* only restore the first one */
 			if (mask & (1 << i.IType.rt))
 				break;
 			mask |= (1 << i.IType.rt);
 			switch (i.IType.rt) {
-			case 4: /* a0 */
-				a0 = kdbpeek((void *)(sp + (short)i.IType.imm));
+			case A0:
+				a0 = kdbpeekd(sp + (int16_t)i.IType.imm);
 				break;
-
-			case 5: /* a1 */
-				a1 = kdbpeek((void *)(sp + (short)i.IType.imm));
+			case A1:
+				a1 = kdbpeekd(sp + (int16_t)i.IType.imm);
 				break;
-
-			case 6: /* a2 */
-				a2 = kdbpeek((void *)(sp + (short)i.IType.imm));
+			case A2:
+				a2 = kdbpeekd(sp + (int16_t)i.IType.imm);
 				break;
-
-			case 7: /* a3 */
-				a3 = kdbpeek((void *)(sp + (short)i.IType.imm));
+			case A3:
+				a3 = kdbpeekd(sp + (int16_t)i.IType.imm);
 				break;
-
-			case 30: /* fp */
-				fp = kdbpeek((void *)(sp + (short)i.IType.imm));
+			case RA:
+				ra = kdbpeekd(sp + (int16_t)i.IType.imm);
 				break;
-
-			case 31: /* ra */
-				ra = kdbpeek((void *)(sp + (short)i.IType.imm));
 			}
 			break;
 
-		case OP_ADDI:
-		case OP_ADDIU:
 		case OP_DADDI:
 		case OP_DADDIU:
 			/* look for stack pointer adjustment */
-			if (i.IType.rs != 29 || i.IType.rt != 29)
+			if (i.IType.rs != SP || i.IType.rt != SP)
 				break;
-			stksize = - ((short)i.IType.imm);
+			stksize = -((int16_t)i.IType.imm);
 		}
 	}
 
-done:
 #ifdef DDB
-	db_printsym(pc, DB_STGY_ANY, printfn);
-#else
-	(*printfn)("%s+%x", fn_name(subr), pc - subr);
-#endif
-	if (frames == 1)
-		(*printfn)(" ra %p sp %p (%p,%p,%p,%p)\n",
-		    ra, sp, a0, a1, a2, a3);
+	if (symname == NULL)
+		(*pr)("%p ", subr);
 	else
-		(*printfn)(" ra %p sp %p\n", ra, sp);
+		(*pr)("%s+%p ", symname, diff);
+#else
+	(*pr)("%s+%p ", fn_name(subr), pc - subr);
+#endif
+	(*pr)("(%llx,%llx,%llx,%llx) ", a0, a1, a2, a3);
+	(*pr)(" ra %p sp %p, sz %d\n", ra, sp, stksize);
 
+	if (subr == (vaddr_t)k_intr || subr == (vaddr_t)k_general) {
+		if (subr == (vaddr_t)k_intr)
+			(*pr)("(KERNEL INTERRUPT)\n");
+		else
+			(*pr)("(KERNEL TRAP)\n");
+		sp = *(register_t *)sp;
+		pc = ((struct trap_frame *)sp)->pc;
+		ra = ((struct trap_frame *)sp)->ra;
+		sp = ((struct trap_frame *)sp)->sp;
+		goto loop;
+	}
+
+end:
 	if (ra) {
 		if (pc == ra && stksize == 0)
-			(*printfn)("stacktrace: loop!\n");
+			(*pr)("stacktrace: loop!\n");
 		else {
 			pc = ra;
 			sp += stksize;
@@ -1332,9 +1365,9 @@ done:
 		}
 	} else {
 		if (curproc)
-			(*printfn)("User-level: pid %d\n", curproc->p_pid);
+			(*pr)("User-level: pid %d\n", curproc->p_pid);
 		else
-			(*printfn)("User-level: curproc NULL\n");
+			(*pr)("User-level: curproc NULL\n");
 	}
 }
 
@@ -1349,24 +1382,24 @@ done:
 #else
 #define Name(_fn) { _fn, "_fn"}
 #endif
-static struct { void *addr; char *name;} names[] = {
+static const struct { void *addr; const char *name;} names[] = {
 	Name(trap),
-	{0, 0}
+	{ 0, NULL }
 };
 
 /*
  * Map a function address to a string name, if known; or a hex string.
  */
-char *
-fn_name(long addr)
+const char *
+fn_name(vaddr_t addr)
 {
-	static char buf[17];
+	static char buf[19];
 	int i = 0;
 
-	for (i = 0; names[i].name; i++)
+	for (i = 0; names[i].name != NULL; i++)
 		if (names[i].addr == (void*)addr)
 			return (names[i].name);
-	snprintf(buf, sizeof(buf), "%x", addr);
+	snprintf(buf, sizeof(buf), "%p", addr);
 	return (buf);
 }
 #endif	/* !DDB */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: est.c,v 1.15 2009/11/22 20:13:12 jsg Exp $ */
+/*	$OpenBSD: est.c,v 1.20 2010/06/04 15:03:34 jsg Exp $ */
 /*
  * Copyright (c) 2003 Michael Eriksson.
  * All rights reserved.
@@ -55,6 +55,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/malloc.h>
 
@@ -196,9 +197,6 @@ p3_get_bus_clock(struct cpu_info *ci)
 			break;
 		}
 		break;
-	case 0x1a: /* Nehalem based Core i7 and Xeon */
-		bus_clock = BUS133; 
-		break;
 	case 0x1c: /* Atom */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
@@ -217,6 +215,10 @@ p3_get_bus_clock(struct cpu_info *ci)
 			    ci->ci_dev->dv_xname, bus);
 			break;
 		}
+		break;
+	case 0x1a: /* Core i7 */
+	case 0x1e: /* Core i5 */
+	case 0x25: /* Core i3 */
 		break;
 	default:
 		printf("%s: unknown i686 model 0x%x, can't get bus clock\n",
@@ -268,7 +270,7 @@ void
 est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 {
 	struct fqlist *acpilist;
-	int needtran = 1, nstates, i;
+	int needtran = 1, i;
 	u_int64_t msr;
 	u_int16_t cur;
 
@@ -282,7 +284,7 @@ est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 		return;
 	}
 
-	if ((acpilist->table = malloc(sizeof(struct est_op) * nstates,
+	if ((acpilist->table = malloc(sizeof(struct est_op) * npss,
 	    M_DEVBUF, M_NOWAIT)) == NULL) {
 		printf("est_acpi_pss_changed: cannot allocate memory for new"
 		    " operating points");
@@ -290,7 +292,7 @@ est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 		return;
 	}
 
-	for (i = 0; i < nstates; i++) {
+	for (i = 0; i < npss; i++) {
 		acpilist->table[i].mhz = pss[i].pss_core_freq;
 		acpilist->table[i].ctrl = pss[i].pss_ctrl;
 		if (pss[i].pss_ctrl == cur)
@@ -327,6 +329,12 @@ est_init(struct cpu_info *ci)
 		p4_get_bus_clock(ci);
 	} else if (family == 6) {
 		p3_get_bus_clock(ci);
+	}
+
+	if (bus_clock == 0) {
+		printf("%s: EST: PSS not yet available for this processor\n",
+		    cpu_device);
+		return;
 	}
 
 #if NACPICPU > 0

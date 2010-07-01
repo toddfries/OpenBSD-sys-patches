@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.134 2009/09/13 14:42:52 krw Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.139 2010/07/01 19:23:51 beck Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -90,6 +90,7 @@
 
 #include <machine/cpu.h>
 
+#include <uvm/uvm.h>
 #include <uvm/uvm_extern.h>
 
 struct	mbstat mbstat;		/* mbuf stats */
@@ -115,6 +116,10 @@ int max_protohdr;		/* largest protocol header */
 int max_hdr;			/* largest link+protocol header */
 int max_datalen;		/* MHLEN - max_hdr */
 
+struct timeout m_cltick_tmo;
+int	m_clticks;
+void	m_cltick(void *);
+
 void	m_extfree(struct mbuf *);
 struct mbuf *m_copym0(struct mbuf *, int, int, int, int);
 void	nmbclust_update(void);
@@ -132,17 +137,22 @@ mbinit(void)
 	int i;
 
 	pool_init(&mbpool, MSIZE, 0, 0, 0, "mbpl", NULL);
+	pool_set_constraints(&mbpool, &dma_constraint, 1);
 	pool_setlowat(&mbpool, mblowat);
 
 	for (i = 0; i < nitems(mclsizes); i++) {
 		snprintf(mclnames[i], sizeof(mclnames[0]), "mcl%dk",
 		    mclsizes[i] >> 10);
-		pool_init(&mclpools[i], mclsizes[i], 0, 0, 0, mclnames[i],
-		    NULL);
+		pool_init(&mclpools[i], mclsizes[i], 0, 0, 0,
+		    mclnames[i], NULL);
+		pool_set_constraints(&mclpools[i], &dma_constraint, 1); 
 		pool_setlowat(&mclpools[i], mcllowat);
 	}
 
 	nmbclust_update();
+
+	timeout_set(&m_cltick_tmo, m_cltick, NULL);
+	m_cltick(NULL);
 }
 
 void
@@ -298,7 +308,20 @@ m_clsetwms(struct ifnet *ifp, u_int pktlen, u_int lwm, u_int hwm)
 	ifp->if_data.ifi_mclpool[pi].mcl_hwm = hwm;
 }
 
-extern int m_clticks;
+/*
+ * Record when the last timeout has been run.  If the delta is
+ * too high, m_cldrop() will notice and decrease the interface
+ * high water marks.
+ */
+void
+m_cltick(void *arg)
+{
+	extern int ticks;
+
+	m_clticks = ticks;
+	timeout_add(&m_cltick_tmo, 1);
+}
+
 int m_livelock;
 
 int
@@ -608,14 +631,8 @@ m_copym0(struct mbuf *m, int off, int len, int wait, int deep)
 		panic("m_copym0: off %d, len %d", off, len);
 	if (off == 0 && m->m_flags & M_PKTHDR)
 		copyhdr = 1;
-	while (off > 0) {
-		if (m == NULL)
-			panic("m_copym0: null mbuf");
-		if (off < m->m_len)
-			break;
-		off -= m->m_len;
-		m = m->m_next;
-	}
+	if ((m = m_getptr(m, off, &off)) == NULL)
+		panic("m_copym0: short mbuf chain");
 	np = &top;
 	top = NULL;
 	while (len > 0) {
@@ -689,14 +706,8 @@ m_copydata(struct mbuf *m, int off, int len, caddr_t cp)
 		panic("m_copydata: off %d < 0", off);
 	if (len < 0)
 		panic("m_copydata: len %d < 0", len);
-	while (off > 0) {
-		if (m == NULL)
-			panic("m_copydata: null mbuf in skip");
-		if (off < m->m_len)
-			break;
-		off -= m->m_len;
-		m = m->m_next;
-	}
+	if ((m = m_getptr(m, off, &off)) == NULL)
+		panic("m_copydata: short mbuf chain");
 	while (len > 0) {
 		if (m == NULL)
 			panic("m_copydata: null mbuf");
@@ -947,7 +958,7 @@ bad:
  * m_pullup2() works like m_pullup, save that len can be <= MCLBYTES.
  * m_pullup2() only works on values of len such that MHLEN < len <= MCLBYTES,
  * it calls m_pullup() for values <= MHLEN.  It also only coagulates the
- * reqested number of bytes.  (For those of us who expect unwieldly option
+ * requested number of bytes.  (For those of us who expect unwieldy option
  * headers.
  *
  * KEBE SAYS:  Remember that dtom() calls with data in clusters does not work!
@@ -1024,8 +1035,7 @@ m_getptr(struct mbuf *m, int loc, int *off)
 		if (m->m_len > loc) {
 	    		*off = loc;
 	    		return (m);
-		}
-		else {
+		} else {
 	    		loc -= m->m_len;
 
 	    		if (m->m_next == NULL) {
@@ -1033,11 +1043,12 @@ m_getptr(struct mbuf *m, int loc, int *off)
  					/* Point at the end of valid data */
 		    			*off = m->m_len;
 		    			return (m);
-				}
-				else
+				} else {
 		  			return (NULL);
-	    		} else
+				}
+	    		} else {
 	      			m = m->m_next;
+			}
 		}
     	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cp0access.S,v 1.11 2009/11/19 20:15:04 miod Exp $ */
+/*	$OpenBSD: cp0access.S,v 1.13 2010/04/28 16:20:28 syuu Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -148,6 +148,12 @@ LEAF(getsr, 0)
 	nop
 END(getsr)
 
+LEAF(cp0_get_config, 0)
+	mfc0	v0, COP_0_CONFIG
+	j	ra
+	nop
+END(cp0_get_config)
+
 LEAF(cp0_get_prid, 0)
 	mfc0	v0, COP_0_PRID
 	j	ra
@@ -186,3 +192,17 @@ LEAF(cp0_setperfctrl, 0)
 	j	ra
 	nop
 END(cp0_setperfctrl)
+
+#ifdef MULTIPROCESSOR
+LEAF(getcurcpu, 0)
+	GET_CPU_INFO(v0, v1)
+	jr	ra
+	nop
+END(getcurcpu)
+
+LEAF(setcurcpu, 0)
+	mtc0	a0, COP_0_LLADDR
+	j	ra
+	nop
+END(setcurcpu)
+#endif

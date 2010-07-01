@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.466 2009/11/26 08:45:12 nicm Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.475 2010/07/01 17:30:25 tedu Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -195,6 +195,14 @@ int	bufpages = 0;
 #endif
 int	bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
+struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
+struct uvm_constraint_range *uvm_md_constraints[] = {
+	&isa_constraint,
+	&dma_constraint,
+	NULL
+};
+
 extern int	boothowto;
 int	physmem;
 
@@ -234,6 +242,12 @@ void (*update_cpuspeed)(void) = NULL;
 void	via_update_sensor(void *args);
 #endif
 int kbd_reset;
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int	safepri = 0;
 
 #if !defined(SMALL_KERNEL)
 int bus_clock;
@@ -993,15 +1007,29 @@ const struct cpu_cpuid_feature i386_cpuid_features[] = {
 
 const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_SSE3,	"SSE3" },
+	{ CPUIDECX_PCLMUL,	"PCLMUL" },
 	{ CPUIDECX_MWAIT,	"MWAIT" },
 	{ CPUIDECX_DSCPL,	"DS-CPL" },
 	{ CPUIDECX_VMX,		"VMX" },
 	{ CPUIDECX_SMX,		"SMX" },
 	{ CPUIDECX_EST,		"EST" },
 	{ CPUIDECX_TM2,		"TM2" },
+	{ CPUIDECX_SSSE3,	"SSSE3" },
 	{ CPUIDECX_CNXTID,	"CNXT-ID" },
+	{ CPUIDECX_FMA3,	"FMA3" },
 	{ CPUIDECX_CX16,	"CX16" },
 	{ CPUIDECX_XTPR,	"xTPR" },
+	{ CPUIDECX_PDCM,	"PDCM" },
+	{ CPUIDECX_DCA,		"DCA" },
+	{ CPUIDECX_SSE41,	"SSE4.1" },
+	{ CPUIDECX_SSE42,	"SSE4.2" },
+	{ CPUIDECX_X2APIC,	"x2APIC" },
+	{ CPUIDECX_MOVBE,	"MOVBE" },
+	{ CPUIDECX_POPCNT,	"POPCNT" },
+	{ CPUIDECX_AES,		"AES" },
+	{ CPUIDECX_XSAVE,	"XSAVE" },
+	{ CPUIDECX_OSXSAVE,	"OSXSAVE" },
+	{ CPUIDECX_AVX,		"AVX" },
 };
 
 void
@@ -1225,7 +1253,7 @@ cyrix6x86_cpu_setup(struct cpu_info *ci)
 		/* cyrix's workaround  for the "coma bug" */
 		cyrix_write_reg(0x31, cyrix_read_reg(0x31) | 0xf8);
 		cyrix_write_reg(0x32, cyrix_read_reg(0x32) | 0x7f);
-		cyrix_write_reg(0x33, cyrix_read_reg(0x33) & ~0xff);
+		cyrix_read_reg(0x33); cyrix_write_reg(0x33, 0);
 		cyrix_write_reg(0x3c, cyrix_read_reg(0x3c) | 0x87);
 		/* disable access to ccr4/ccr5 */
 		cyrix_write_reg(0xC3, cyrix_read_reg(0xC3) & ~0x10);
@@ -1720,6 +1748,29 @@ identifycpu(struct cpu_info *ci)
 		}
 	}
 
+	if (vendor == CPUVENDOR_INTEL) {
+		/*
+		 * PIII, Core Solo and Core Duo CPUs have known
+		 * errata stating:
+		 * "Page with PAT set to WC while associated MTRR is UC
+		 * may consolidate to UC".
+		 * Because of this it is best we just fallback to mtrrs
+		 * in this case.
+		 */
+		if (ci->ci_family == 6 && ci->ci_model < 15)
+		    ci->ci_feature_flags &= ~CPUID_PAT;
+
+		if (ci->ci_feature_flags & CPUID_CFLUSH) {
+			/* to get the cacheline size you must do cpuid
+			 * with eax 0x01
+			 */
+			u_int regs[4];
+
+			cpuid(0x01, regs); 
+			ci->ci_cflushsz = ((regs[1] >> 8) & 0xff) * 8;
+		}
+	}
+
 	/* Remove leading and duplicated spaces from cpu_brandstr */
 	brandstr_from = brandstr_to = cpu_brandstr;
 	skipspace = 1;
@@ -2004,9 +2055,6 @@ p3_get_bus_clock(struct cpu_info *ci)
 			goto print_msr;
 		}
 		break;
-       case 0x1a: /* Nehalem based Core i7 and Xeon */
-               bus_clock = BUS133;
-               break;
 	case 0x1c: /* Atom */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
@@ -2051,6 +2099,10 @@ p3_get_bus_clock(struct cpu_info *ci)
 			    ci->ci_dev.dv_xname, bus);
 			goto print_msr;
 		}
+		break;
+	case 0x1a: /* Core i7 */
+	case 0x1e: /* Core i5 */
+	case 0x25: /* Core i3 */
 		break;
 	default: 
 		printf("%s: unknown i686 model 0x%x, can't get bus clock",
@@ -2152,7 +2204,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	frame.sf_fpstate = NULL;
 	if (p->p_md.md_flags & MDP_USEDFPU) {
 		sp -= sizeof(union savefpu);
-		sp &= ~0xf;	/* foe XMM regs */
+		sp &= ~0xf;	/* for XMM regs */
 		frame.sf_fpstate = (void *)sp;
 	}
 
@@ -2857,10 +2909,6 @@ init386(paddr_t first_avail)
 	    sizeof(struct cpu_info)-1, SDT_MEMRWA, SEL_KPL, 0, 0);
 
 	/* make ldt gates and memory segments */
-#ifdef COMPAT_IBCS2
-	setgate(&ldt[LSYS5CALLS_SEL].gd, &IDTVEC(osyscall), 1, SDT_SYS386CGT,
-	    SEL_UPL, GCODE_SEL);
-#endif
 #ifdef COMPAT_BSDOS
 	setgate(&ldt[LBSDICALLS_SEL].gd, &IDTVEC(osyscall), 1, SDT_SYS386CGT,
 	    SEL_UPL, GCODE_SEL);
@@ -3523,9 +3571,10 @@ int
 bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
-	u_long pa, endpa;
+	paddr_t pa, endpa;
 	vaddr_t va;
 	bus_size_t map_size;
+	int pmap_flags = PMAP_NOCACHE;
 
 	pa = trunc_page(bpa);
 	endpa = round_page(bpa + size);
@@ -3543,10 +3592,15 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
 
 	*bshp = (bus_space_handle_t)(va + (bpa & PGOFSET));
 
+	if (flags & BUS_SPACE_MAP_CACHEABLE)
+		pmap_flags = 0;
+	else if (flags & BUS_SPACE_MAP_PREFETCHABLE)
+		pmap_flags = PMAP_WC;
+
 	for (; map_size > 0;
 	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE)
-		pmap_kenter_pa(va, pa | ((flags & BUS_SPACE_MAP_CACHEABLE) ?
-		    0 : PMAP_NOCACHE), VM_PROT_READ | VM_PROT_WRITE);
+		pmap_kenter_pa(va, pa | pmap_flags,
+		    VM_PROT_READ | VM_PROT_WRITE);
 	pmap_update(pmap_kernel());
 
 	return 0;

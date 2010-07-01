@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip6_divert.c,v 1.1 2009/11/05 20:50:14 michele Exp $ */
+/*      $OpenBSD: ip6_divert.c,v 1.4 2010/04/20 22:05:44 tedu Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -22,6 +22,7 @@
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -59,6 +60,8 @@ u_int   divert6_recvspace = DIVERT_RECVSPACE;
 int *divert6ctl_vars[DIVERT6CTL_MAXID] = DIVERT6CTL_VARS;
 
 int divb6hashsize = DIVERTHASHSIZE;
+
+static struct sockaddr_in6 ip6addr = { sizeof(ip6addr), AF_INET6 };
 
 void divert6_detach(struct inpcb *);
 
@@ -107,7 +110,8 @@ divert6_output(struct mbuf *m, ...)
 	m->m_pkthdr.pf.flags |= PF_TAG_DIVERTED_PACKET;
 
 	if (!IN6_IS_ADDR_UNSPECIFIED(&sin6->sin6_addr)) {
-		ifa = ifa_ifwithaddr((struct sockaddr *)sin6, 0);
+		ip6addr.sin6_addr = sin6->sin6_addr;
+		ifa = ifa_ifwithaddr(sin6tosa(&ip6addr), m->m_pkthdr.rdomain);
 		if (ifa == NULL) {
 			div6stat.divs_errors++;
 			m_freem(m);

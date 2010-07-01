@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.173 2009/11/19 22:07:17 otto Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.181 2010/06/07 13:26:35 henning Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -43,6 +43,7 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/syslog.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/pool.h>
 
@@ -223,7 +224,6 @@ ip_init()
 
 struct	sockaddr_in ipaddr = { sizeof(ipaddr), AF_INET };
 struct	route ipforward_rt;
-u_int	ipforward_rtableid;
 
 void
 ipintr()
@@ -689,19 +689,15 @@ in_iawithaddr(struct in_addr ina, struct mbuf *m, u_int rdomain)
 		if ((ina.s_addr == ia->ia_addr.sin_addr.s_addr) ||
 		    ((ia->ia_ifp->if_flags & (IFF_LOOPBACK|IFF_LINK1)) ==
 			(IFF_LOOPBACK|IFF_LINK1) &&
-		     ia->ia_subnet == (ina.s_addr & ia->ia_subnetmask)))
+		     ia->ia_net == (ina.s_addr & ia->ia_netmask)))
 			return ia;
+		/* check ancient classful too, e. g. for rarp-based netboot */
 		if (((ip_directedbcast == 0) || (m && ip_directedbcast &&
 		    ia->ia_ifp == m->m_pkthdr.rcvif)) &&
 		    (ia->ia_ifp->if_flags & IFF_BROADCAST)) {
 			if (ina.s_addr == ia->ia_broadaddr.sin_addr.s_addr ||
-			    ina.s_addr == ia->ia_netbroadcast.s_addr ||
-			    /*
-			     * Look for all-0's host part (old broadcast addr),
-			     * either for subnet or net.
-			     */
-			    ina.s_addr == ia->ia_subnet ||
-			    ina.s_addr == ia->ia_net) {
+			    IN_CLASSFULBROADCAST(ina.s_addr,
+			    ia->ia_addr.sin_addr.s_addr)) {
 				/* Make sure M_BCAST is set */
 				if (m)
 					m->m_flags |= M_BCAST;
@@ -1219,7 +1215,7 @@ ip_rtaddr(struct in_addr dst, u_int rtableid)
 		sin->sin_len = sizeof(*sin);
 		sin->sin_addr = dst;
 
-		ipforward_rt.ro_rt = rtalloc1(&ipforward_rt.ro_dst, 1,
+		ipforward_rt.ro_rt = rtalloc1(&ipforward_rt.ro_dst, RT_REPORT,
 		    rtableid);
 	}
 	if (ipforward_rt.ro_rt == 0)
@@ -1435,7 +1431,7 @@ ip_forward(m, srcrt)
 		printf("forward: src %x dst %x ttl %x\n", ip->ip_src.s_addr,
 		    ip->ip_dst.s_addr, ip->ip_ttl);
 #endif
-	if (m->m_flags & M_BCAST || in_canforward(ip->ip_dst) == 0) {
+	if (m->m_flags & (M_BCAST|M_MCAST) || in_canforward(ip->ip_dst) == 0) {
 		ipstat.ips_cantforward++;
 		m_freem(m);
 		return;
@@ -1450,7 +1446,7 @@ ip_forward(m, srcrt)
 	sin = satosin(&ipforward_rt.ro_dst);
 	if ((rt = ipforward_rt.ro_rt) == 0 ||
 	    ip->ip_dst.s_addr != sin->sin_addr.s_addr ||
-	    rtableid != ipforward_rtableid) {
+	    rtableid != ipforward_rt.ro_tableid) {
 		if (ipforward_rt.ro_rt) {
 			RTFREE(ipforward_rt.ro_rt);
 			ipforward_rt.ro_rt = 0;
@@ -1458,13 +1454,13 @@ ip_forward(m, srcrt)
 		sin->sin_family = AF_INET;
 		sin->sin_len = sizeof(*sin);
 		sin->sin_addr = ip->ip_dst;
+		ipforward_rt.ro_tableid = rtableid;
 
-		rtalloc_mpath(&ipforward_rt, &ip->ip_src.s_addr, rtableid);
+		rtalloc_mpath(&ipforward_rt, &ip->ip_src.s_addr);
 		if (ipforward_rt.ro_rt == 0) {
 			icmp_error(m, ICMP_UNREACH, ICMP_UNREACH_HOST, dest, 0);
 			return;
 		}
-		ipforward_rtableid = rtableid;
 		rt = ipforward_rt.ro_rt;
 	}
 
@@ -1496,8 +1492,8 @@ ip_forward(m, srcrt)
 	    !ip_weadvertise(satosin(rt_key(rt))->sin_addr.s_addr,
 	    m->m_pkthdr.rdomain)) {
 		if (rt->rt_ifa &&
-		    (ip->ip_src.s_addr & ifatoia(rt->rt_ifa)->ia_subnetmask) ==
-		    ifatoia(rt->rt_ifa)->ia_subnet) {
+		    (ip->ip_src.s_addr & ifatoia(rt->rt_ifa)->ia_netmask) ==
+		    ifatoia(rt->rt_ifa)->ia_net) {
 		    if (rt->rt_flags & RTF_GATEWAY)
 			dest = satosin(rt->rt_gateway)->sin_addr.s_addr;
 		    else
@@ -1626,7 +1622,6 @@ ip_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 			    rt_timer_queue_create(ip_mtudisc_timeout);
 		} else if (ip_mtudisc == 0 && ip_mtudisc_timeout_q != NULL) {
 			rt_timer_queue_destroy(ip_mtudisc_timeout_q, TRUE);
-			Free(ip_mtudisc_timeout_q);
 			ip_mtudisc_timeout_q = NULL;
 		}
 		return error;

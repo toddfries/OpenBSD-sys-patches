@@ -1,4 +1,4 @@
-/*	$OpenBSD: asc_vsbus.c,v 1.10 2009/02/16 21:19:06 miod Exp $	*/
+/*	$OpenBSD: asc_vsbus.c,v 1.12 2010/06/28 18:31:01 krw Exp $	*/
 /*	$NetBSD: asc_vsbus.c,v 1.22 2001/02/04 20:36:32 ragge Exp $	*/
 
 /*-
@@ -41,7 +41,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/reboot.h>
 #include <sys/queue.h>
 
@@ -111,14 +110,6 @@ struct scsi_adapter	asc_vsbus_ops = {
 	NULL,
 	NULL
 };
-
-static struct scsi_device asc_vsbus_dev = {
-	NULL,			/* Use the default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* use the default done handler */
-};
-
 
 /*
  * Functions and the switch for the MI code
@@ -308,7 +299,7 @@ asc_vsbus_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_maxxfer = 64 * 1024;
 
 	/* Do the common parts of attachment. */
-	ncr53c9x_attach(sc, &asc_vsbus_ops, &asc_vsbus_dev);
+	ncr53c9x_attach(sc, &asc_vsbus_ops);
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: arcbios.c,v 1.25 2009/11/19 06:06:51 miod Exp $	*/
+/*	$OpenBSD: arcbios.c,v 1.29 2010/03/03 12:25:09 jsing Exp $	*/
 /*-
  * Copyright (c) 1996 M. Warner Losh.  All rights reserved.
  * Copyright (c) 1996-2004 Opsycon AB.  All rights reserved.
@@ -50,7 +50,9 @@ int bios_is_32bit;
  */
 char bios_enaddr[20] = "ff:ff:ff:ff:ff:ff";
 
-char bios_console[10];			/* Primary console. */
+char bios_console[30];			/* Primary console. */
+char bios_graphics[6];			/* Graphics state. */
+char bios_keyboard[6];			/* Keyboard layout. */
 
 extern int	physmem;		/* Total physical memory size */
 extern int	rsvdmem;		/* Total reserved memory size */
@@ -87,8 +89,9 @@ static struct systypes {
 /*
  *	ARC Bios trampoline code.
  */
+
 #define ARC_Call(Name,Offset)	\
-__asm__("\n"			\
+__asm__("\n"	\
 "	.text\n"		\
 "	.ent	" #Name "\n"	\
 "	.align	3\n"		\
@@ -107,16 +110,45 @@ __asm__("\n"			\
 "	ld	$2, 2*" #Offset "($2)\n"\
 "	jr	$2\n"		\
 "	nop\n"			\
-"	.end	" #Name "\n"	);
+"	.end	" #Name "\n");
+
+/*
+ * Same, which also forces the stack to be in CKSEG0, used for
+ * restart functions, which aren't supposed to return.
+ */
+#define ARC_Call2(Name,Offset)	\
+__asm__("\n"	\
+"	.text\n"		\
+"	.ent	" #Name "\n"	\
+"	.align	3\n"		\
+"	.set	noreorder\n"	\
+"	.globl	" #Name "\n"	\
+#Name":\n"			\
+"	lw	$2, bios_is_32bit\n"\
+"	beqz	$2, 1f\n"	\
+"	nop\n"			\
+"	ld	$2, proc0paddr\n" \
+"	addi	$29, $2, 16384 - 64\n" \
+"2:\n"				\
+"       lw      $2, 0xffffffff80001020\n"\
+"       lw      $2," #Offset "($2)\n"\
+"	jr	$2\n"		\
+"	nop\n"			\
+"1:\n"				\
+"       ld      $2, 0xffffffff80001040\n"\
+"	ld	$2, 2*" #Offset "($2)\n"\
+"	jr	$2\n"		\
+"	nop\n"			\
+"	.end	" #Name "\n");
 
 ARC_Call(Bios_Load,			0x00);
 ARC_Call(Bios_Invoke,			0x04);
 ARC_Call(Bios_Execute,			0x08);
-ARC_Call(Bios_Halt,			0x0c);
-ARC_Call(Bios_PowerDown,		0x10);
-ARC_Call(Bios_Restart,			0x14);
-ARC_Call(Bios_Reboot,			0x18);
-ARC_Call(Bios_EnterInteractiveMode,	0x1c);
+ARC_Call2(Bios_Halt,			0x0c);
+ARC_Call2(Bios_PowerDown,		0x10);
+ARC_Call2(Bios_Restart,			0x14);
+ARC_Call2(Bios_Reboot,			0x18);
+ARC_Call2(Bios_EnterInteractiveMode,	0x1c);
 ARC_Call(Bios_Unused1,			0x20);
 ARC_Call(Bios_GetPeer,			0x24);
 ARC_Call(Bios_GetChild,			0x28);
@@ -217,8 +249,8 @@ void
 bios_configure_memory()
 {
 	arc_mem_t *descr = NULL;
-	uint64_t start, count;
-	MEMORYTYPE type;
+	uint64_t start, count, prevend = 0;
+	MEMORYTYPE type, prevtype = BadMemory;
 	uint64_t seg_start, seg_end;
 #ifdef TGT_ORIGIN
 	int seen_free = 0;
@@ -297,11 +329,6 @@ bios_configure_memory()
 #endif	/* O200 || O300 */
 		}
 
-		/* convert from ARCBios page size to kernel page size */
-		seg_start = atop(start * 4096);
-		count = atop(count * 4096);
-		seg_end = seg_start + count;
-
 		switch (type) {
 		case BadMemory:		/* have no use for these */
 			break;
@@ -317,25 +344,51 @@ bios_configure_memory()
 			/* FALLTHROUGH */
 		case FreeMemory:
 		case FreeContigous:
-			memrange_register(seg_start, seg_end, 0,
-			    VM_FREELIST_DEFAULT);
+			/*
+			 * Convert from ARCBios page size to kernel page size.
+			 * As this can yield a smaller range due to possible
+			 * different page size, we try to force coalescing
+			 * with the previous range if this is safe.
+			 */
+			seg_start = atop(round_page(start * ARCBIOS_PAGE_SIZE));
+			seg_end = atop(trunc_page((start + count) *
+			    ARCBIOS_PAGE_SIZE));
+			if (start == prevend)
+				switch (prevtype) {
+				case LoadedProgram:
+				case FreeMemory:
+				case FreeContigous:
+					seg_start = atop(trunc_page(start *
+					    ARCBIOS_PAGE_SIZE));
+					break;
+				default:
+					break;
+				}
+			if (seg_start < seg_end)
+				memrange_register(seg_start, seg_end, 0,
+				    VM_FREELIST_DEFAULT);
 			break;
 		case ExceptionBlock:
 		case SystemParameterBlock:
 		case FirmwareTemporary:
 		case FirmwarePermanent:
 			rsvdmem += count;
-			physmem += count;
 			break;
 		default:		/* Unknown type, leave it alone... */
 			break;
 		}
+		prevtype = type;
+		prevend = start + count;
 #ifdef TGT_ORIGIN
 		if (descr == NULL)
 			break;
 #endif
 		descr = (arc_mem_t *)Bios_GetMemoryDescriptor(descr);
 	}
+
+	/* convert rsvdmem to kernel pages, and count it in physmem */
+	rsvdmem = atop(round_page(rsvdmem * ARCBIOS_PAGE_SIZE));
+	physmem += rsvdmem;
 
 #ifdef DEBUG
 	for (i = 0; i < MAXMEMSEGS; i++) {

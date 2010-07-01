@@ -1,4 +1,4 @@
-/* $OpenBSD: acpibtn.c,v 1.24 2009/11/25 19:41:16 kettenis Exp $ */
+/* $OpenBSD: acpibtn.c,v 1.26 2010/03/31 19:21:19 kettenis Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -23,6 +23,7 @@
 #include <sys/malloc.h>
 
 #include <machine/bus.h>
+#include <machine/apmvar.h>
 
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
@@ -134,8 +135,12 @@ acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 		if (aml_evalinteger(sc->sc_acpi, sc->sc_devnode,
 		    "_LID", 0, NULL, &lid))
 			return (0);
-		if (lid == 0)
-			acpi_sleep_state(sc->sc_acpi, ACPI_STATE_S3);
+#if 0
+		if (lid == 0) {
+			if (acpi_record_event(sc->sc_acpi, APM_USER_SUSPEND_REQ))
+				acpi_sleep_state(sc->sc_acpi, ACPI_STATE_S3);
+		}
+#endif
 		break;
 #endif /* SMALL_KERNEL */
 	case ACPIBTN_SLEEP:
@@ -146,7 +151,8 @@ acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 			break;
 		case 0x80:
 			/* Request to go to sleep */
-			acpi_sleep_state(sc->sc_acpi, ACPI_STATE_S3);
+			if (acpi_record_event(sc->sc_acpi, APM_USER_SUSPEND_REQ))
+				acpi_sleep_state(sc->sc_acpi, ACPI_STATE_S3);
 			break;
 		}
 #endif /* SMALL_KERNEL */

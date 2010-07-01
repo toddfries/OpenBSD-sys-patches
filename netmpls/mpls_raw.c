@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpls_raw.c,v 1.4 2008/11/01 16:37:55 michele Exp $	*/
+/*	$OpenBSD: mpls_raw.c,v 1.6 2010/06/02 15:41:07 claudio Exp $	*/
 
 /*
  * Copyright (C) 1999, 2000 and 2001 AYAME Project, WIDE Project.
@@ -39,6 +39,7 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -53,7 +54,6 @@
 u_long mpls_raw_sendspace = MPLS_RAW_SNDQ;
 u_long mpls_raw_recvspace = MPLS_RAW_RCVQ;
 
-int mpls_enable = 0;
 int mpls_defttl = 255;
 int mpls_inkloop = 16;
 int mpls_push_expnull_ip = 0;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr53c9x.c,v 1.42 2009/11/22 14:14:10 krw Exp $	*/
+/*	$OpenBSD: ncr53c9x.c,v 1.48 2010/06/28 18:31:02 krw Exp $	*/
 /*     $NetBSD: ncr53c9x.c,v 1.56 2000/11/30 14:41:46 thorpej Exp $    */
 
 /*
@@ -75,7 +75,6 @@
 #include <sys/buf.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/queue.h>
 #include <sys/pool.h>
 
@@ -186,10 +185,9 @@ ncr53c9x_lunsearch(ti, lun)
  * Attach this instance, and then all the sub-devices
  */
 void
-ncr53c9x_attach(sc, adapter, dev)
+ncr53c9x_attach(sc, adapter)
 	struct ncr53c9x_softc *sc;
 	struct scsi_adapter *adapter;
-	struct scsi_device *dev;
 {
 	struct scsibus_attach_args saa;
 
@@ -266,7 +264,6 @@ ncr53c9x_attach(sc, adapter, dev)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_id;
 	sc->sc_link.adapter = adapter;
-	sc->sc_link.device = dev;
 	sc->sc_link.openings = 2;
 	sc->sc_link.adapter_buswidth = sc->sc_ntarg;
 
@@ -789,7 +786,7 @@ ncr53c9x_get_ecb(sc, flags)
  * This function is called by the higher level SCSI-driver to queue/run
  * SCSI-commands.
  */
-int
+void
 ncr53c9x_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -811,7 +808,9 @@ ncr53c9x_scsi_cmd(xs)
 	if (li == NULL) {
 		/* Initialize LUN info and add to list. */
 		if ((li = malloc(sizeof(*li), M_DEVBUF, M_NOWAIT)) == NULL) {
-			return (NO_CCB);
+			xs->error = XS_NO_CCB;
+			scsi_done(xs);
+			return;
 		}
 		bzero(li, sizeof(*li));
 		li->last_used = time_second;
@@ -823,8 +822,11 @@ ncr53c9x_scsi_cmd(xs)
 		splx(s);
 	}
 
-	if ((ecb = ncr53c9x_get_ecb(sc, flags)) == NULL)
-		return (NO_CCB);
+	if ((ecb = ncr53c9x_get_ecb(sc, flags)) == NULL) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		return;
+	}
 
 	/* Initialize ecb */
 	ecb->xs = xs;
@@ -852,7 +854,7 @@ ncr53c9x_scsi_cmd(xs)
 	splx(s);
 
 	if ((flags & SCSI_POLL) == 0)
-		return (SUCCESSFULLY_QUEUED);
+		return;
 
 	/* Not allowed to use interrupts, use polling instead */
 	if (ncr53c9x_poll(sc, xs, ecb->timeout)) {
@@ -860,7 +862,6 @@ ncr53c9x_scsi_cmd(xs)
 		if (ncr53c9x_poll(sc, xs, ecb->timeout))
 			ncr53c9x_timeout(ecb);
 	}
-	return (COMPLETE);
 }
 
 /*
@@ -942,8 +943,6 @@ ncr53c9x_sched(sc)
 			tag = 0;
 		else if ((ecb->flags & ECB_SENSE) != 0)
 			tag = 0;
-		else if (ecb->xs->flags & SCSI_URGENT)
-			tag = MSG_HEAD_OF_Q_TAG;
 		else
 			tag = MSG_SIMPLE_Q_TAG;
 #if 0
@@ -1091,7 +1090,7 @@ ncr53c9x_done(sc, ecb)
 	struct scsi_xfer *xs = ecb->xs;
 	struct scsi_link *sc_link = xs->sc_link;
 	struct ncr53c9x_tinfo *ti = &sc->sc_tinfo[sc_link->target];
-	int s, lun = sc_link->lun;
+	int lun = sc_link->lun;
 	struct ncr53c9x_linfo *li = TINFO_LUN(ti, lun);
 
 	NCR_TRACE(("[ncr53c9x_done(error:%x)] ", xs->error));
@@ -1132,8 +1131,6 @@ ncr53c9x_done(sc, ecb)
 		}
 	}
 
-	xs->flags |= ITSDONE;
-
 #ifdef NCR53C9X_DEBUG
 	if (ncr53c9x_debug & NCR_SHOWMISC) {
 		if (xs->resid != 0)
@@ -1169,9 +1166,7 @@ ncr53c9x_done(sc, ecb)
 
 	ncr53c9x_free_ecb(sc, ecb, xs->flags);
 	ti->cmds++;
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 void

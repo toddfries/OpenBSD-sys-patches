@@ -1,4 +1,4 @@
-/*	$OpenBSD: est.c,v 1.32 2009/06/08 23:18:05 gwk Exp $ */
+/*	$OpenBSD: est.c,v 1.35 2010/04/20 22:05:41 tedu Exp $ */
 /*
  * Copyright (c) 2003 Michael Eriksson.
  * All rights reserved.
@@ -55,6 +55,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/malloc.h>
 
@@ -1005,7 +1006,7 @@ void
 est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 {
 	struct fqlist *acpilist;
-	int needtran = 1, nstates, i;
+	int needtran = 1, i;
 	u_int64_t msr;
 	u_int16_t cur;
 
@@ -1019,7 +1020,7 @@ est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 		return;
 	}
 
-	if ((acpilist->table = malloc(sizeof( struct est_op) * nstates,
+	if ((acpilist->table = malloc(sizeof( struct est_op) * npss,
 	    M_DEVBUF, M_NOWAIT)) == NULL) {
 		printf("est_acpi_pss_changed: cannot allocate memory for new "
 		    "operating points");
@@ -1027,7 +1028,7 @@ est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 		return;
 	}
 
-	for (i = 0; i < nstates; i++) {
+	for (i = 0; i < npss; i++) {
 		acpilist->table[i].mhz = pss[i].pss_core_freq;
 		acpilist->table[i].ctrl = pss[i].pss_ctrl;
 		if (pss[i].pss_ctrl == cur)
@@ -1060,6 +1061,12 @@ est_init(const char *cpu_device, int vendor)
 
 	if ((cpu_ecxfeature & CPUIDECX_EST) == 0)
 		return;
+
+	if (bus_clock == 0) {
+		printf("%s: EST: PSS not yet available for this processor\n",
+		    cpu_device);
+		return;
+	}
 
 	msr = rdmsr(MSR_PERF_STATUS);
 	idhi = (msr >> 32) & 0xffff;

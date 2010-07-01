@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.20 2009/10/22 22:08:54 miod Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.23 2010/02/13 14:04:45 miod Exp $	*/
 /*
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1992, 1993
@@ -68,18 +68,23 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	void (*func)(void *);
 	void *arg;
 {
-	struct pcb *pcb = &p2->p_addr->u_pcb;
-	extern struct proc *machFPCurProcPtr;
+	struct cpu_info *ci = curcpu();
+	struct pcb *pcb;
+#if UPAGES == 1
+	paddr_t pa;
+
+	/* replace p_addr with a direct translation address */
+	p2->p_md.md_uarea = (vaddr_t)p2->p_addr;
+	pmap_extract(pmap_kernel(), p2->p_md.md_uarea, &pa);
+	p2->p_addr = (void *)PHYS_TO_XKPHYS(pa, CCA_CACHED);
+#endif
+	pcb = &p2->p_addr->u_pcb;
 
 	/*
 	 * If we own the FPU, save its state before copying the PCB.
 	 */
-	if (p1 == machFPCurProcPtr) {
-		if (p1->p_addr->u_pcb.pcb_regs.sr & SR_FR_32)
-			MipsSaveCurFPState(p1);
-		else
-			MipsSaveCurFPState16(p1);
-	}
+	if (p1 == ci->ci_fpuproc)
+		save_fpu();
 
 	p2->p_md.md_flags = p1->p_md.md_flags & MDP_FORKSAVE;
 
@@ -104,11 +109,9 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	/*
 	 * Copy the process control block to the new proc and
 	 * create a clean stack for exit through trampoline.
-	 * pcb_context has s0-s7, sp, s8, ra, sr, icr, ipl.
+	 * pcb_context has s0-s7, sp, s8, ra, sr, icr.
 	 */
-
 	if (p1 != curproc) {
-		pcb->pcb_context.val[13] = IPL_NONE;
 #ifdef RM7000_ICR
 		pcb->pcb_context.val[12] = (idle_mask << 8) & IC_INT_MASK;
 #endif
@@ -118,8 +121,8 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	pcb->pcb_context.val[10] = (register_t)proc_trampoline;
 	pcb->pcb_context.val[8] = (register_t)pcb +
 	    USPACE - sizeof(struct trap_frame);
-	pcb->pcb_context.val[0] = (register_t)func;
 	pcb->pcb_context.val[1] = (register_t)arg;
+	pcb->pcb_context.val[0] = (register_t)func;
 }
 
 /*
@@ -129,12 +132,16 @@ void
 cpu_exit(p)
 	struct proc *p;
 {
-	extern struct proc *machFPCurProcPtr;
+	struct cpu_info *ci = curcpu();
 
-	if (machFPCurProcPtr == p)
-		machFPCurProcPtr = (struct proc *)0;
+	if (ci->ci_fpuproc == p)
+		ci->ci_fpuproc = NULL;
 
 	pmap_deactivate(p);
+#if UPAGES == 1
+	/* restore p_addr for proper deallocation */
+	p->p_addr = (void *)p->p_md.md_uarea;
+#endif
 	sched_exit(p);
 }
 
@@ -148,10 +155,10 @@ cpu_coredump(p, vp, cred, chdr)
 	struct ucred *cred;
 	struct core *chdr;
 {
+	struct cpu_info *ci = curcpu();
 	int error;
 	/*register struct user *up = p->p_addr;*/
 	struct coreseg cseg;
-	extern struct proc *machFPCurProcPtr;
 
 	CORE_SETMAGIC(*chdr, COREMAGIC, MID_MIPS, 0);
 	chdr->c_hdrsize = ALIGN(sizeof(*chdr));
@@ -162,12 +169,8 @@ cpu_coredump(p, vp, cred, chdr)
 	 * Copy floating point state from the FP chip if this process
 	 * has state stored there.
 	 */
-	if (p == machFPCurProcPtr) {
-		if (p->p_md.md_regs->sr & SR_FR_32)
-			MipsSaveCurFPState(p);
-		else
-			MipsSaveCurFPState16(p);
-	}
+	if (p == ci->ci_fpuproc)
+		save_fpu();
 
 	CORE_SETMAGIC(cseg, CORESEGMAGIC, MID_MIPS, CORE_CPU);
 	cseg.c_addr = 0;

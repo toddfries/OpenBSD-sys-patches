@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.124 2009/08/29 15:27:33 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.128 2010/06/29 21:28:11 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.85 1997/09/12 08:55:02 pk Exp $ */
 
 /*
@@ -62,8 +62,7 @@
 #include <sys/sysctl.h>
 #include <sys/extent.h>
 
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_swap.h>
+#include <uvm/uvm.h>
 
 #include <dev/rndvar.h>
 
@@ -80,8 +79,6 @@
 #include <sparc/sparc/cache.h>
 #include <sparc/sparc/vaddrs.h>
 #include <sparc/sparc/cpuvar.h>
-
-#include <uvm/uvm.h>
 
 #ifdef SUN4M
 #include "power.h"
@@ -103,7 +100,6 @@
 #endif
 
 struct vm_map *exec_map = NULL;
-struct vm_map *phys_map = NULL;
 
 /*
  * Declare these as initialized data so we can patch them.
@@ -119,6 +115,9 @@ int	bufpages = 0;
 #endif
 int	bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 }; 
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 int	physmem;
 
 /* sysctl settable */
@@ -128,11 +127,10 @@ int	sparc_led_blink = 0;
  * safepri is a safe priority for sleep to set for a spin-wait
  * during autoconfiguration or after a panic.
  */
-int   safepri = 0;
+int	safepri = 0;
 
 /*
- * dvmamap is used to manage DVMA memory. Note: this coincides with
- * the memory range in `phys_map' (which is mostly a place-holder).
+ * dvmamap_extent is used to manage DVMA memory.
  */
 vaddr_t dvma_base, dvma_end;
 struct extent *dvmamap_extent;
@@ -151,6 +149,7 @@ cpu_startup()
 	int opmapdebug = pmapdebug;
 #endif
 	vaddr_t minaddr, maxaddr;
+	paddr_t msgbufpa;
 	extern struct user *proc0paddr;
 
 #ifdef DEBUG
@@ -164,9 +163,22 @@ cpu_startup()
 	}
 
 	/*
-	 * fix message buffer mapping, note phys addr of msgbuf is 0
+	 * Re-map the message buffer from its temporary address
+	 * at KERNBASE to MSGBUF_VA.
 	 */
-	pmap_map(MSGBUF_VA, 0, MSGBUFSIZE, VM_PROT_READ|VM_PROT_WRITE);
+
+	/* Get physical address of the message buffer */
+	pmap_extract(pmap_kernel(), (vaddr_t)KERNBASE, &msgbufpa);
+
+	/* Invalidate the current mapping at KERNBASE. */
+	pmap_kremove((vaddr_t)KERNBASE, PAGE_SIZE);
+	pmap_update(pmap_kernel());
+
+	/* Enter the new mapping */
+	pmap_map(MSGBUF_VA, msgbufpa, msgbufpa + PAGE_SIZE,
+	    VM_PROT_READ | VM_PROT_WRITE);
+
+	/* Re-initialize the message buffer. */
 	initmsgbuf((caddr_t)(MSGBUF_VA + (CPU_ISSUN4 ? 4096 : 0)), MSGBUFSIZE);
 
 	proc0.p_addr = proc0paddr;
@@ -192,38 +204,11 @@ cpu_startup()
 	 * map, but we want one completely separate, even though it uses
 	 * the same pmap.
 	 */
-	dvma_base = CPU_ISSUN4M ? DVMA4M_BASE : DVMA_BASE;
-	dvma_end = CPU_ISSUN4M ? DVMA4M_END : DVMA_END;
-#if defined(SUN4M)
-	if (CPU_ISSUN4M) {
-		/*
-		 * The DVMA space we want partially overrides kernel_map.
-		 * Allocate it in kernel_map as well to prevent it from being
-		 * used for other things.
-		 */
-		if (uvm_map(kernel_map, &dvma_base,
-		    vm_map_max(kernel_map) - dvma_base,
-                    NULL, UVM_UNKNOWN_OFFSET, 0,
-                    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-                                UVM_ADV_NORMAL, UVM_FLAG_FIXED)))
-			panic("startup: can not steal dvma map");
-	}
-#endif
-	phys_map = uvm_map_create(pmap_kernel(), dvma_base, dvma_end,
-	    VM_MAP_INTRSAFE);
-	if (phys_map == NULL)
-		panic("unable to create DVMA map");
-
-	/*
-	 * Allocate DVMA space and dump into a privately managed
-	 * resource map for double mappings which is usable from
-	 * interrupt contexts.
-	 */
-	if (uvm_km_valloc_wait(phys_map, (dvma_end-dvma_base)) != dvma_base)
-		panic("unable to allocate from DVMA map");
+	dvma_base = CPU_ISSUN4DOR4M ? DVMA4M_BASE : DVMA_BASE;
+	dvma_end = CPU_ISSUN4DOR4M ? DVMA4M_END : DVMA_END;
 	dvmamap_extent = extent_create("dvmamap", dvma_base, dvma_end,
 				       M_DEVBUF, NULL, 0, EX_NOWAIT);
-	if (dvmamap_extent == 0)
+	if (dvmamap_extent == NULL)
 		panic("unable to allocate extent for dvma");
 
 #ifdef DEBUG
@@ -726,7 +711,7 @@ dumpsys()
 	int error = 0;
 	struct memarr *mp;
 	int nmem;
-	extern struct memarr pmemarr[];
+	extern struct memarr *pmemarr;
 	extern int npmemarr;
 
 	/* copy registers to memory */
@@ -767,7 +752,7 @@ dumpsys()
 	printf("memory ");
 	for (mp = pmemarr, nmem = npmemarr; --nmem >= 0 && error == 0; mp++) {
 		unsigned i = 0, n;
-		unsigned maddr = mp->addr;
+		unsigned maddr = mp->addr_lo;
 
 		/* XXX - what's so special about PA 0 that we can't dump it? */
 		if (maddr == 0) {

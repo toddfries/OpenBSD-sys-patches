@@ -1,4 +1,4 @@
-/*	$OpenBSD: interrupt.c,v 1.55 2009/11/27 00:08:27 syuu Exp $ */
+/*	$OpenBSD: interrupt.c,v 1.59 2010/04/21 03:03:26 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -29,6 +29,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/proc.h>
 #include <sys/user.h>
 
 #include <uvm/uvm_extern.h>
@@ -111,8 +112,10 @@ interrupt(struct trap_frame *trapframe)
 	if (!(trapframe->sr & SR_INT_ENAB))
 		return;
 
+	ci->ci_intrdepth++;
+
 #ifdef DEBUG_INTERRUPT
-	trapdebug_enter(trapframe, 0);
+	trapdebug_enter(ci, trapframe, T_INT);
 #endif
 	atomic_add_int(&uvmexp.intrs, 1);
 
@@ -146,6 +149,8 @@ interrupt(struct trap_frame *trapframe)
 		ci->ci_ipl = s;	/* no-overhead splx */
 		__asm__ ("sync\n\t.set reorder\n");
 	}
+
+	ci->ci_intrdepth--;
 }
 
 
@@ -203,7 +208,6 @@ splinit()
 	/*
 	 * Update proc0 pcb to contain proper values.
 	 */
-	pcb->pcb_context.val[13] = IPL_NONE;
 #ifdef RM7000_ICR
 	pcb->pcb_context.val[12] = (idle_mask << 8) & IC_INT_MASK;
 #endif

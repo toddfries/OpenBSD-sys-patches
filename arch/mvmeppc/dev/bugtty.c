@@ -1,4 +1,4 @@
-/*	$OpenBSD: bugtty.c,v 1.12 2009/10/31 12:00:07 fgsch Exp $ */
+/*	$OpenBSD: bugtty.c,v 1.14 2010/06/28 14:13:30 deraadt Exp $ */
 
 /* Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1995 Dale Rahn.
@@ -165,7 +165,7 @@ bugttyopen(dev, flag, mode, p)
 	if (bugtty_tty[unit]) {
 		tp = bugtty_tty[unit];
 	} else {
-		tp = bugtty_tty[unit] = ttymalloc();
+		tp = bugtty_tty[unit] = ttymalloc(0);
 	}
 	tp->t_oproc = bugttyoutput;
 	tp->t_param = NULL;
@@ -226,7 +226,7 @@ bugttyopen(dev, flag, mode, p)
 	 * use of the tty with a dialin open waiting.
 	 */
 	tp->t_dev = dev;
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 int
@@ -268,7 +268,7 @@ bugttyclose(dev, flag, mode, p)
 	int unit = BUGTTYUNIT(dev);
 	struct tty *tp = bugtty_tty[unit];
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	ttyclose(tp);
 #if 0

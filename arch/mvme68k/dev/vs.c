@@ -1,4 +1,4 @@
-/*	$OpenBSD: vs.c,v 1.29 2009/11/22 14:14:10 krw Exp $ */
+/*	$OpenBSD: vs.c,v 1.33 2010/06/28 18:31:01 krw Exp $ */
 
 /*
  * Copyright (c) 2004, 2009, Miodrag Vallat.
@@ -64,20 +64,13 @@
 int	vsmatch(struct device *, void *, void *);
 void	vsattach(struct device *, struct device *, void *);
 void	vs_minphys(struct buf *, struct scsi_link *);
-int	vs_scsicmd(struct scsi_xfer *);
+void	vs_scsicmd(struct scsi_xfer *);
 
 struct scsi_adapter vs_scsiswitch = {
 	vs_scsicmd,
 	vs_minphys,
 	0,			/* no lun support */
 	0,			/* no lun support */
-};
-
-struct scsi_device vs_scsidev = {
-	NULL,		/* use default error handler */
-	NULL,		/* do not have a start function */
-	NULL,		/* have no async handler */
-	NULL,		/* Use default done routine */
 };
 
 struct cfattach vs_ca = {
@@ -104,7 +97,7 @@ int	vs_load_command(struct vs_softc *, struct vs_cb *, bus_addr_t,
 	    bus_addr_t, struct scsi_link *, int, struct scsi_generic *, int,
 	    uint8_t *, int);
 int	vs_nintr(void *);
-int	vs_poll(struct vs_softc *, struct vs_cb *);
+void	vs_poll(struct vs_softc *, struct vs_cb *);
 void	vs_print_addr(struct vs_softc *, struct scsi_xfer *);
 struct vs_cb *vs_find_queue(struct scsi_link *, struct vs_softc *);
 void	vs_reset(struct vs_softc *, int);
@@ -232,7 +225,6 @@ vsattach(struct device *parent, struct device *self, void *args)
 		sc_link->adapter_buswidth = vc->vc_width;
 		sc_link->adapter_softc = sc;
 		sc_link->adapter_target = vc->vc_id;
-		sc_link->device = &vs_scsidev;
 		if (sc->sc_bid != JAGUAR)
 			sc_link->luns = 1;	/* not enough queues */
 		sc_link->openings = 1;
@@ -327,7 +319,7 @@ do_vspoll(struct vs_softc *sc, struct scsi_xfer *xs, int canreset)
 	return 0;
 }
 
-int
+void
 vs_poll(struct vs_softc *sc, struct vs_cb *cb)
 {
 	struct scsi_xfer *xs;
@@ -341,7 +333,6 @@ vs_poll(struct vs_softc *sc, struct vs_cb *cb)
 	if (rc != 0) {
 		xs->error = XS_SELTIMEOUT;
 		xs->status = -1;
-		xs->flags |= ITSDONE;
 #ifdef VS_DEBUG
 		printf("%s: polled command timed out\n", __func__);
 #endif
@@ -356,7 +347,6 @@ vs_poll(struct vs_softc *sc, struct vs_cb *cb)
 	CRB_CLR_DONE;
 
 	vs_clear_return_info(sc);
-	return (COMPLETE);
 }
 
 void
@@ -415,12 +405,11 @@ vs_scsidone(struct vs_softc *sc, struct vs_cb *cb)
 		vs_chksense(cb, xs);
 	}
 
-	xs->flags |= ITSDONE;
 	vs_free(sc, cb);
 	scsi_done(xs);
 }
 
-int
+void
 vs_scsicmd(struct scsi_xfer *xs)
 {
 	struct scsi_link *slp = xs->sc_link;
@@ -449,7 +438,9 @@ vs_scsicmd(struct scsi_xfer *xs)
 		if (cb->cb_xs != NULL) {
 			printf("%s: master command not idle\n",
 			    sc->sc_dev.dv_xname);
-			return (NO_CCB);
+			xs->error = XS_NO_CCB;
+			scsi_done(xs);
+			return;
 		}
 #endif
 		s = splbio();
@@ -462,7 +453,8 @@ vs_scsicmd(struct scsi_xfer *xs)
 			printf("%s: queue for target %d is busy\n",
 			    sc->sc_dev.dv_xname, slp->target);
 #endif
-			return (NO_CCB);
+			xs->error = XS_NO_CCB;
+			scsi_done(xs);
 		}
 		if (vs_getcqe(sc, &cqep, &iopb)) {
 			/* XXX shouldn't happen since our queue is ready */
@@ -470,7 +462,8 @@ vs_scsicmd(struct scsi_xfer *xs)
 #ifdef VS_DEBUG
 			printf("%s: no free CQEs\n", sc->sc_dev.dv_xname);
 #endif
-			return (NO_CCB);
+			xs->error = XS_NO_CCB;
+			scsi_done(xs);
 		}
 	}
 
@@ -486,7 +479,7 @@ vs_scsicmd(struct scsi_xfer *xs)
 		xs->error = XS_DRIVER_STUFFUP;
 		scsi_done(xs);
 		splx(s);
-		return (COMPLETE);
+		return;
 	}
 
 	vs_write(1, cqep + CQE_WORK_QUEUE, cb->cb_q);
@@ -503,10 +496,8 @@ vs_scsicmd(struct scsi_xfer *xs)
 
 	if (flags & SCSI_POLL) {
 		/* poll for the command to complete */
-		return vs_poll(sc, cb);
+		vs_poll(sc, cb);
 	}
-
-	return (SUCCESSFULLY_QUEUED);
 }
 
 int
@@ -1242,7 +1233,6 @@ vs_eintr(void *vsc)
 	if (xs != NULL) {
 		xs->error = XS_SELTIMEOUT;
 		xs->status = -1;
-		xs->flags |= ITSDONE;
 		scsi_done(xs);
 	}
 
