@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci.c,v 1.78 2010/06/30 04:31:37 mlarkin Exp $	*/
+/*	$OpenBSD: pci.c,v 1.80 2010/07/02 04:03:31 kettenis Exp $	*/
 /*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*
@@ -1066,7 +1066,7 @@ pci_enable_vga(pci_chipset_tag_t pc, pcitag_t tag)
 void
 pci_route_vga(struct pci_softc *sc)
 {
-	pci_chipset_tag_t pc;
+	pci_chipset_tag_t pc = sc->sc_pc;
 	pcireg_t bc;
 
 	if (sc->sc_bridgetag == NULL)
@@ -1082,7 +1082,7 @@ pci_route_vga(struct pci_softc *sc)
 void
 pci_unroute_vga(struct pci_softc *sc)
 {
-	pci_chipset_tag_t pc;
+	pci_chipset_tag_t pc = sc->sc_pc;
 	pcireg_t bc;
 
 	if (sc->sc_bridgetag == NULL)

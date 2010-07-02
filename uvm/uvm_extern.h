@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_extern.h,v 1.87 2010/06/27 03:03:49 thib Exp $	*/
+/*	$OpenBSD: uvm_extern.h,v 1.89 2010/07/02 01:25:06 art Exp $	*/
 /*	$NetBSD: uvm_extern.h,v 1.57 2001/03/09 01:02:12 chs Exp $	*/
 
 /*
@@ -503,6 +503,11 @@ int			uvm_vslock(struct proc *, caddr_t, size_t,
 			    vm_prot_t);
 void			uvm_vsunlock(struct proc *, caddr_t, size_t);
 
+int			uvm_vslock_device(struct proc *, void *, size_t,
+			    vm_prot_t, void **);
+void			uvm_vsunlock_device(struct proc *, void *, size_t,
+			    void *);
+
 
 /* uvm_init.c */
 void			uvm_init(void);	
@@ -516,13 +521,12 @@ int			uvm_io(vm_map_t, struct uio *, int);
 /* uvm_km.c */
 vaddr_t			uvm_km_alloc1(vm_map_t, vsize_t, vsize_t, boolean_t);
 void			uvm_km_free(vm_map_t, vaddr_t, vsize_t);
-void			uvm_km_free_wakeup(vm_map_t, vaddr_t,
-						vsize_t);
+void			uvm_km_free_wakeup(vm_map_t, vaddr_t, vsize_t);
 vaddr_t			uvm_km_kmemalloc_pla(struct vm_map *,
-			    struct uvm_object *, vsize_t, int, paddr_t,
-			    paddr_t, paddr_t, paddr_t, int);
+			    struct uvm_object *, vsize_t, vsize_t, int,
+			    paddr_t, paddr_t, paddr_t, paddr_t, int);
 #define uvm_km_kmemalloc(map, obj, sz, flags)				\
-	uvm_km_kmemalloc_pla(map, obj, sz, flags, 0, (paddr_t)-1, 0, 0, 0)
+	uvm_km_kmemalloc_pla(map, obj, sz, 0, flags, 0, (paddr_t)-1, 0, 0, 0)
 struct vm_map		*uvm_km_suballoc(vm_map_t, vaddr_t *,
 				vaddr_t *, vsize_t, int,
 				boolean_t, vm_map_t);

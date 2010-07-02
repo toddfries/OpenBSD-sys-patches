@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_km.c,v 1.80 2010/06/29 20:39:27 thib Exp $	*/
+/*	$OpenBSD: uvm_km.c,v 1.82 2010/07/02 01:25:06 art Exp $	*/
 /*	$NetBSD: uvm_km.c,v 1.42 2001/01/14 02:10:01 thorpej Exp $	*/
 
 /* 
@@ -346,8 +346,8 @@ uvm_km_pgremove_intrsafe(vaddr_t start, vaddr_t end)
 
 vaddr_t
 uvm_km_kmemalloc_pla(struct vm_map *map, struct uvm_object *obj, vsize_t size,
-    int flags, paddr_t low, paddr_t high, paddr_t alignment, paddr_t boundary,
-    int nsegs)
+    vsize_t valign, int flags, paddr_t low, paddr_t high, paddr_t alignment,
+    paddr_t boundary, int nsegs)
 {
 	vaddr_t kva, loopva;
 	voff_t offset;
@@ -377,7 +377,7 @@ uvm_km_kmemalloc_pla(struct vm_map *map, struct uvm_object *obj, vsize_t size,
 	 */
 
 	if (__predict_false(uvm_map(map, &kva, size, obj, UVM_UNKNOWN_OFFSET,
-	      0, UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW, UVM_INH_NONE,
+	      valign, UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW, UVM_INH_NONE,
 			  UVM_ADV_RANDOM, (flags & UVM_KMF_TRYLOCK))) != 0)) {
 		UVMHIST_LOG(maphist, "<- done (no VM)",0,0,0,0);
 		return(0);
@@ -866,6 +866,7 @@ uvm_km_putpage(void *v)
 #ifdef __HAVE_PMAP_DIRECT
 	pg = pmap_unmap_direct(va);
 #else	/* !__HAVE_PMAP_DIRECT */
+	int	freeva = 1;
 	paddr_t pa;
 	if (!pmap_extract(pmap_kernel(), va, &pa))
 		panic("lost pa");
@@ -877,11 +878,14 @@ uvm_km_putpage(void *v)
 	pmap_update(kernel_map->pmap);
 
 	mtx_enter(&uvm_km_pages.mtx);
-	if (uvm_km_pages.free < uvm_km_pages.hiwat)
+	if (uvm_km_pages.free < uvm_km_pages.hiwat) {
 		uvm_km_pages.page[uvm_km_pages.free++] = va;
-	else
-		uvm_km_free_wakeup(kernel_map, va, PAGE_SIZE);
+		freeva = 0;
+	}
 	mtx_leave(&uvm_km_pages.mtx);
+
+	if (freeva)
+		uvm_km_free_wakeup(kernel_map, va, PAGE_SIZE);
 #endif	/* !__HAVE_PMAP_DIRECT */
 
 	uvm_pagefree(pg);
