@@ -565,7 +565,7 @@ struct tcpcb *
 struct tcpcb *
 	 tcp_drop(struct tcpcb *, int);
 int	 tcp_dooptions(struct tcpcb *, u_char *, int, struct tcphdr *,
-		struct mbuf *, int, struct tcp_opt_info *);
+		struct mbuf *, int, struct tcp_opt_info *, u_int);
 void	 tcp_init(void);
 #if defined(INET6) && !defined(TCP6)
 int	 tcp6_input(struct mbuf **, int *, int);

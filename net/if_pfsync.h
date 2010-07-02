@@ -216,7 +216,7 @@ struct pfsync_tdb {
 	u_int64_t			cur_bytes;
 	u_int8_t			sproto;
 	u_int8_t			updates;
-	u_int8_t			_pad[2];
+	u_int16_t			rdomain;
 } __packed;
 
 /*

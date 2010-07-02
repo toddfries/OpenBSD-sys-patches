@@ -924,7 +924,8 @@ send:
 
 		/* XXX gettdbbysrcdst() should really be called at spltdb(). */
 		/* XXX this is splsoftnet(), currently they are the same. */
-		tdb = gettdbbysrcdst(0, &src, &dst, IPPROTO_TCP);
+		tdb = gettdbbysrcdst(rtable_l2(tp->t_inpcb->inp_rdomain),
+		    0, &src, &dst, IPPROTO_TCP);
 		if (tdb == NULL)
 			return (EPERM);
 
