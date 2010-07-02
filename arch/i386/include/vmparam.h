@@ -63,7 +63,10 @@
 #define	DFLDSIZ		(64*1024*1024)		/* initial data size limit */
 #endif
 #ifndef MAXDSIZ
-#define	MAXDSIZ		(1024*1024*1024)	/* max data size */
+#define	MAXDSIZ		(2U*1024*1024*1024 - 4096)	/* max data size */
+#endif
+#ifndef BRKSIZ
+#define BRKSIZ		(1024*1024*1024)
 #endif
 #ifndef	DFLSSIZ
 #define	DFLSSIZ		(4*1024*1024)		/* initial stack size limit */
