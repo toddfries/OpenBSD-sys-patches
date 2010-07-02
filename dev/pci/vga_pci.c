@@ -1,4 +1,4 @@
-/* $OpenBSD: vga_pci.c,v 1.49 2010/07/01 17:05:06 deraadt Exp $ */
+/* $OpenBSD: vga_pci.c,v 1.53 2010/07/02 00:23:42 pirofti Exp $ */
 /* $NetBSD: vga_pci.c,v 1.3 1998/06/08 06:55:58 thorpej Exp $ */
 
 /*
@@ -166,15 +166,15 @@ static const struct vga_device_description vga_devs[] = {
 	    	PCI_VENDOR_SONY, 0x9039 },
 	    {	0xffff, 0xffff, 0xffff, 0xffff }, 1, 0
 	},
-	{	/* Thinkpad x200s */
-	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_IGD_1, 
-	    	0x17aa, 0x20e4 },	
-	    {	0xffff, 0xffff, 0xffff, 0xffff }, 0, 1
+	{	/* Thinkpad T510 (and similar models) */
+	    {	PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ARRANDALE_IGD,	
+	    	0x17aa, 0x215a },
+	    {	0xffff, 0xffff, 0xffff, 0xffff }, 1, 0
 	},
-	{
-		/* NULL */
-	    {	0,	0,	0,	0     },
-	    {	0,	0,	0,	0     }, 0, 0
+	{	/* Lenovo ThinkPad X100e */
+	    {	PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3200_2,
+		0x17aa, 0x21b2 },
+	    {	0xffff, 0xffff, 0xffff, 0xffff}, 1, 0
 	}
 };
 #endif
@@ -252,8 +252,7 @@ vga_pci_attach(struct device *parent, struct device *self, void *aux)
 	subvend = PCI_VENDOR(subid);
 	subprod = PCI_PRODUCT(subid);
 
-	for (i = 0; vga_devs[i].rval[0] && vga_devs[i].rval[1] &&
-	    vga_devs[i].rval[2] && vga_devs[i].rval[3]; i++)
+	for (i = 0; i < nitems(vga_devs); i++)
 		if ((vend & vga_devs[i].rmask[0]) == vga_devs[i].rval[0] &&
 		    (prod & vga_devs[i].rmask[1]) == vga_devs[i].rval[1] &&
 		    (subvend & vga_devs[i].rmask[2]) == vga_devs[i].rval[2] &&
