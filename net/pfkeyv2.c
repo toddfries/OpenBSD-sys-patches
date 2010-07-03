@@ -163,7 +163,7 @@ pfkeyv2_create(struct socket *socket)
 	 * XXX we should get this from the socket instead but
 	 * XXX rawcb doesn't store the rdomain like inpcb does.
 	 */
-	pfkeyv2_socket->rdomain = rtable_l2(curproc->p_p->ps_rdomain);
+	pfkeyv2_socket->rdomain = rtable_l2(curproc->p_p->ps_rtableid);
 
 	pfkeyv2_sockets = pfkeyv2_socket;
 
@@ -2533,7 +2533,7 @@ pfkeyv2_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	w.w_where = oldp;
 	w.w_len = oldp ? *oldlenp : 0;
 
-	rdomain = rtable_l2(curproc->p_p->ps_rdomain);
+	rdomain = rtable_l2(curproc->p_p->ps_rtableid);
 
 	switch(w.w_op) {
 	case NET_KEY_SADB_DUMP:

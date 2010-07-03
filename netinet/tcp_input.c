@@ -3987,7 +3987,7 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 #endif
 		tb.t_state = TCPS_LISTEN;
 		if (tcp_dooptions(&tb, optp, optlen, th, m, iphlen, oi,
-		    sotoinpcb(so)->inp_rdomain))
+		    sotoinpcb(so)->inp_rtableid))
 			return (0);
 	} else
 		tb.t_flags = 0;
@@ -4272,7 +4272,7 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 #endif /* INET6 */
 		}
 
-		tdb = gettdbbysrcdst(rtable_l2(sc->sc_rdomain),
+		tdb = gettdbbysrcdst(rtable_l2(sc->sc_rtableid),
 		    0, &src, &dst, IPPROTO_TCP);
 		if (tdb == NULL) {
 			if (m)
