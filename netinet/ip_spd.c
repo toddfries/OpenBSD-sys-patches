@@ -642,7 +642,7 @@ ipsec_add_policy(struct inpcb *inp, int af, int direction)
 	 * policies (for tunnel/transport and ESP/AH), as needed.
 	 */
 	ipon->ipo_sproto = IPPROTO_ESP;
-	ipon->ipo_rdomain = rtable_l2(inp->inp_rdomain);
+	ipon->ipo_rdomain = rtable_l2(inp->inp_rtableid);
 
 	TAILQ_INIT(&ipon->ipo_acquires);
 	TAILQ_INSERT_HEAD(&ipsec_policy_head, ipon, ipo_list);
@@ -1009,7 +1009,7 @@ ipsp_spd_inp(struct mbuf *m, int af, int hlen, int *error, int direction,
 				inp->inp_ipo->ipo_last_searched = time_second;
 
 				/* Do we have an SA already established ? */
-				if (gettdbbysrc(rtable_l2(inp->inp_rdomain),
+				if (gettdbbysrc(rtable_l2(inp->inp_rtableid),
 				    &inp->inp_ipo->ipo_dst,
 				    inp->inp_ipo->ipo_sproto,
 				    inp->inp_ipo->ipo_srcid,
@@ -1066,7 +1066,7 @@ ipsp_spd_inp(struct mbuf *m, int af, int hlen, int *error, int direction,
 				ipsec_update_policy(inp, inp->inp_ipo, af,
 				    IPSP_DIRECTION_OUT);
 
-				tdb = gettdbbyaddr(rtable_l2(inp->inp_rdomain),
+				tdb = gettdbbyaddr(rtable_l2(inp->inp_rtableid),
 				    &inp->inp_ipo->ipo_dst,
 				    inp->inp_ipo->ipo_sproto,
 				    inp->inp_ipo->ipo_srcid,
@@ -1083,7 +1083,7 @@ ipsp_spd_inp(struct mbuf *m, int af, int hlen, int *error, int direction,
 			ipsec_update_policy(inp, &sipon, af,
 			    IPSP_DIRECTION_OUT);
 
-			tdb = gettdbbyaddr(rtable_l2(inp->inp_rdomain),
+			tdb = gettdbbyaddr(rtable_l2(inp->inp_rtableid),
 			    &sipon.ipo_dst, IPPROTO_ESP, NULL,
 			    NULL, NULL, m, af, &sipon.ipo_addr,
 			    &sipon.ipo_mask);
@@ -1154,7 +1154,7 @@ ipsp_spd_inp(struct mbuf *m, int af, int hlen, int *error, int direction,
 	tdbi = (struct tdb_ident *)(mtag + 1);
 	tdbi->spi = ipo->ipo_tdb->tdb_spi;
 	tdbi->proto = ipo->ipo_tdb->tdb_sproto;
-	tdbi->rdomain = rtable_l2(inp->inp_rdomain);
+	tdbi->rdomain = rtable_l2(inp->inp_rtableid);
 	bcopy(&ipo->ipo_tdb->tdb_dst, &tdbi->dst,
 	    ipo->ipo_tdb->tdb_dst.sa.sa_len);
 	m_tag_prepend(m, mtag);

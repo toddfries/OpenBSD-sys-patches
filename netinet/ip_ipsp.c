@@ -94,8 +94,7 @@ void		tdb_timeout(void *v);
 void		tdb_firstuse(void *v);
 void		tdb_soft_timeout(void *v);
 void		tdb_soft_firstuse(void *v);
-int		tdb_hash(u_int16_t, u_int32_t, union sockaddr_union *,
-		    u_int8_t);
+int		tdb_hash(u_int, u_int32_t, union sockaddr_union *, u_int8_t);
 
 extern int	ipsec_auth_default_level;
 extern int	ipsec_esp_trans_default_level;
@@ -156,7 +155,7 @@ static int tdb_count;
  * so we cannot be DoS-attacked via choosing of the data to hash.
  */
 int
-tdb_hash(u_int16_t rdomain, u_int32_t spi, union sockaddr_union *dst,
+tdb_hash(u_int rdomain, u_int32_t spi, union sockaddr_union *dst,
     u_int8_t proto)
 {
 	static u_int32_t mult1 = 0, mult2 = 0;

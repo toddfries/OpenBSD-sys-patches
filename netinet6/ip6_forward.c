@@ -339,7 +339,8 @@ reroute:
 	if (sproto != 0) {
 		s = splnet();
 
-		tdb = gettdb(m->m_pkthdr.rdomain, sspi, &sdst, sproto);
+		tdb = gettdb(rtable_l2(m->m_pkthdr.rdomain),
+		    sspi, &sdst, sproto);
 		if (tdb == NULL) {
 			splx(s);
 			error = EHOSTUNREACH;

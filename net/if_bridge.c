@@ -152,7 +152,8 @@ u_int8_t bridge_filterrule(struct brl_head *, struct ether_header *,
 struct mbuf *bridge_filter(struct bridge_softc *, int, struct ifnet *,
     struct ether_header *, struct mbuf *m);
 #endif
-int	bridge_ifenqueue(struct bridge_softc *, struct ifnet *, struct mbuf *);
+int	bridge_ifenqueue(struct bridge_softc *, struct ifnet *, struct mbuf *,
+    struct ether_header *);
 void	bridge_fragment(struct bridge_softc *, struct ifnet *,
     struct ether_header *, struct mbuf *);
 #ifdef INET
@@ -1143,7 +1144,7 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 				mc = m1;
 			}
 
-			error = bridge_ifenqueue(sc, dst_if, mc);
+			error = bridge_ifenqueue(sc, dst_if, mc, eh);
 			if (error)
 				continue;
 		}
@@ -1160,7 +1161,7 @@ sendunicast:
 		splx(s);
 		return (ENETDOWN);
 	}
-	bridge_ifenqueue(sc, dst_if, m);
+	bridge_ifenqueue(sc, dst_if, m, eh);
 	splx(s);
 	return (0);
 }
@@ -1372,7 +1373,7 @@ bridgeintr_frame(struct bridge_softc *sc, struct mbuf *m)
 		bridge_fragment(sc, dst_if, &eh, m);
 	else {
 		s = splnet();
-		bridge_ifenqueue(sc, dst_if, m);
+		bridge_ifenqueue(sc, dst_if, m, &eh);
 		splx(s);
 	}
 }
@@ -1665,7 +1666,7 @@ bridge_broadcast(struct bridge_softc *sc, struct ifnet *ifp,
 		if ((len - ETHER_HDR_LEN) > dst_if->if_mtu)
 			bridge_fragment(sc, dst_if, eh, mc);
 		else {
-			bridge_ifenqueue(sc, dst_if, mc);
+			bridge_ifenqueue(sc, dst_if, mc, eh);
 		}
 	}
 
@@ -1757,7 +1758,7 @@ bridge_span(struct bridge_softc *sc, struct ether_header *eh,
 			continue;
 		}
 
-		error = bridge_ifenqueue(sc, ifp, mc);
+		error = bridge_ifenqueue(sc, ifp, mc, eh);
 		if (error)
 			continue;
 	}
@@ -2720,7 +2721,7 @@ bridge_fragment(struct bridge_softc *sc, struct ifnet *ifp,
 		if ((ifp->if_capabilities & IFCAP_VLAN_MTU) &&
 		    (len - sizeof(struct ether_vlan_header) <= ifp->if_mtu)) {
 			s = splnet();
-			bridge_ifenqueue(sc, ifp, m);
+			bridge_ifenqueue(sc, ifp, m, eh);
 			splx(s);
 			return;
 		}
@@ -2790,7 +2791,7 @@ bridge_fragment(struct bridge_softc *sc, struct ifnet *ifp,
 			}
 			bcopy(eh, mtod(m, caddr_t), sizeof(*eh));
 			s = splnet();
-			error = bridge_ifenqueue(sc, ifp, m);
+			error = bridge_ifenqueue(sc, ifp, m, eh);
 			if (error) {
 				splx(s);
 				continue;
@@ -2811,7 +2812,8 @@ bridge_fragment(struct bridge_softc *sc, struct ifnet *ifp,
 }
 
 int
-bridge_ifenqueue(struct bridge_softc *sc, struct ifnet *ifp, struct mbuf *m)
+bridge_ifenqueue(struct bridge_softc *sc, struct ifnet *ifp, struct mbuf *m,
+    struct ether_header *eh)
 {
 	int error, len;
 	short mflags;
