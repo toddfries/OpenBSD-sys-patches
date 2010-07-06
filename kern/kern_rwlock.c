@@ -116,7 +116,7 @@ void
 rw_exit_write(struct rwlock *rwl)
 {
 	if (__predict_false(rw_cas(&rwl->rwl_owner,
-	    RW_PROC(curproc) | RWLOCK_WRLOCK, 0)))
+	    (RW_PROC(curproc) | RWLOCK_WRLOCK), 0)))
 		rw_exit(rwl);
 }
 
