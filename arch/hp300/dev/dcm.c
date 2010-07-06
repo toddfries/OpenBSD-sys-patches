@@ -1,4 +1,4 @@
-/*	$OpenBSD: dcm.c,v 1.32 2009/11/09 17:53:38 nicm Exp $	*/
+/*	$OpenBSD: dcm.c,v 1.35 2010/07/02 17:27:01 nicm Exp $	*/
 /*	$NetBSD: dcm.c,v 1.41 1997/05/05 20:59:16 thorpej Exp $	*/
 
 /*
@@ -453,7 +453,7 @@ dcmopen(dev, flag, mode, p)
 
 	s = spltty();
 	if (sc->sc_tty[port] == NULL) {
-		tp = sc->sc_tty[port] = ttymalloc();
+		tp = sc->sc_tty[port] = ttymalloc(0);
 	} else
 		tp = sc->sc_tty[port];
 	splx(s);
@@ -549,7 +549,7 @@ dcmopen(dev, flag, mode, p)
 			sc->sc_dev.dv_xname, port, tp->t_state, tp->t_flags);
 #endif
 	if (error == 0)
-		error = (*linesw[tp->t_line].l_open)(dev, tp);
+		error = (*linesw[tp->t_line].l_open)(dev, tp, p);
 
 	return (error);
 }
@@ -572,7 +572,7 @@ dcmclose(dev, flag, mode, p)
 	sc = dcm_cd.cd_devs[board];
 	tp = sc->sc_tty[port];
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	s = spltty();
 
@@ -1171,13 +1171,7 @@ dcmstart(tp)
 #endif
 	if (tp->t_state & (TS_TIMEOUT|TS_BUSY|TS_TTSTOP))
 		goto out;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state&TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
 	if (tp->t_outq.c_cc == 0) {
 #ifdef DCMSTATS
 		dsp->xempty++;

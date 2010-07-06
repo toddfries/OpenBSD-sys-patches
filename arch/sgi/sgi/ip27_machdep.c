@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.43 2010/03/07 13:44:26 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.51 2010/05/09 18:37:47 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -37,6 +37,7 @@
 #include <machine/cpu.h>
 #include <machine/memconf.h>
 #include <machine/mnode.h>
+#include <machine/atomic.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -66,9 +67,9 @@ void	ip27_halt(int);
 unsigned int xbow_long_shift = 29;
 
 static paddr_t io_base;
-static gda_t *gda;
 static int ip35 = 0;
-static uint maxnodes;
+uint	 maxnodes;
+gda_t	*gda;
 
 int	ip27_hub_intr_register(int, int, int *);
 int	ip27_hub_intr_establish(int (*)(void *), void *, int, int,
@@ -112,11 +113,11 @@ struct {
 void
 ip27_setup()
 {
-	size_t gsz;
-	uint node;
+	struct ip27_config *ip27_config;
 	uint64_t synergy0_0;
 	console_t *cons;
 	nmi_t *nmi;
+	static char unknown_model[20];
 
 	uncached_base = PHYS_TO_XKPHYS_UNCACHED(0, SP_NC);
 	io_base = PHYS_TO_XKPHYS_UNCACHED(0, SP_IO);
@@ -142,21 +143,36 @@ ip27_setup()
 		case IP35_O300:	/* Speedo2 */
 			hw_prod = "Origin 300";
 			break;
+		case IP35_CBRICK:
+			/* regular C-Brick, must be an Origin 3000 system */
+			hw_prod = "Origin 3000";
+			break;
 		default:
-		    {
-			static char unknown_model[20];
 			snprintf(unknown_model, sizeof unknown_model,
 			    "Unknown IP35 type %x", sys_config.system_subtype);
 			hw_prod = unknown_model;
-		    }
 			break;
 		}
 	} else {
-		/*
-		 * XXX need to look for Sn00 type in LBOOT space to tell
-		 * XXX Origin 2000 and Origin 200 apart.
-		 */
-		hw_prod = "Origin 200";
+		ip27_config = (struct ip27_config *)
+		    IP27_LHSPEC_ADDR(LBOOTBASE_IP27 + IP27_CONFIG_OFFSET);
+		if (ip27_config->magic == IP27_CONFIG_MAGIC)
+			sys_config.system_subtype = ip27_config->ip27_subtype;
+		else
+			sys_config.system_subtype = IP27_UNKNOWN;
+		switch (sys_config.system_subtype) {
+		case IP27_O2K:
+			hw_prod = "Origin 2000";
+			break;
+		case IP27_O200:
+			hw_prod = "Origin 200";
+			break;
+		default:
+			snprintf(unknown_model, sizeof unknown_model,
+			    "Unknown IP27 type %x", sys_config.system_subtype);
+			hw_prod = unknown_model;
+			break;
+		}
 	}
 
 	xbow_widget_base = ip27_widget_short;
@@ -173,40 +189,6 @@ ip27_setup()
 	kl_init(ip35);
 	if (kl_n_mode != 0)
 		xbow_long_shift = 28;
-
-	/*
-	 * Get a grip on the global data area, and figure out how many
-	 * theoretical nodes are available.
-	 */
-
-	gda = IP27_GDA(0);
-	gsz = IP27_GDA_SIZE(0);
-	if (gda->magic != GDA_MAGIC || gda->ver < 2) {
-		masternasid = 0;
-		maxnodes = 0;
-	} else {
-		masternasid = gda->masternasid;
-		maxnodes = (gsz - offsetof(gda_t, nasid)) / sizeof(int16_t);
-		if (maxnodes > GDA_MAXNODES)
-			maxnodes = GDA_MAXNODES;
-		/* in M mode, there can't be more than 64 nodes anyway */
-		if (kl_n_mode == 0 && maxnodes > 64)
-			maxnodes = 64;
-	}
-
-	/*
-	 * Scan all nodes configurations to find out CPU and memory
-	 * information, starting with the master node.
-	 */
-
-	kl_scan_config(masternasid);
-	for (node = 0; node < maxnodes; node++) {
-		if (gda->nasid[node] < 0)
-			continue;
-		if (gda->nasid[node] == masternasid)
-			continue;
-		kl_scan_config(gda->nasid[node]);
-	}
 
 	/*
 	 * Initialize the early console parameters.
@@ -304,6 +286,8 @@ ip27_setup()
 		IP27_RHUB_PI_S(masternasid, 1,
 		    HUBPI_CALIAS_SIZE, PI_CALIAS_SIZE_0);
 	}
+
+	_device_register = dksc_device_register;
 }
 
 /*
@@ -313,7 +297,10 @@ ip27_setup()
 void
 ip27_autoconf(struct device *parent)
 {
-	struct cpu_attach_args caa;
+	union {
+		struct mainbus_attach_args maa;
+		struct cpu_attach_args caa;
+	} u;
 	uint node;
 
 	xbow_widget_id = ip27_widget_id;
@@ -323,13 +310,13 @@ ip27_autoconf(struct device *parent)
 	 * if any, will get attached as they are discovered.
 	 */
 
-	bzero(&caa, sizeof caa);
-	caa.caa_maa.maa_name = "cpu";
-	caa.caa_maa.maa_nasid = currentnasid = masternasid;
-	caa.caa_hw = &bootcpu_hwinfo;
-	config_found(parent, &caa, ip27_print);
-	caa.caa_maa.maa_name = "clock";
-	config_found(parent, &caa.caa_maa, ip27_print);
+	bzero(&u, sizeof u);
+	u.maa.maa_name = "cpu";
+	u.maa.maa_nasid = currentnasid = masternasid;
+	u.caa.caa_hw = &bootcpu_hwinfo;
+	config_found(parent, &u, ip27_print);
+	u.maa.maa_name = "clock";
+	config_found(parent, &u, ip27_print);
 
 	/*
 	 * Now attach all nodes' I/O devices.
@@ -348,12 +335,32 @@ ip27_autoconf(struct device *parent)
 void
 ip27_attach_node(struct device *parent, int16_t nasid)
 {
-	struct mainbus_attach_args maa;
+	union {
+		struct mainbus_attach_args maa;
+		struct spdmem_attach_args saa;
+	} u;
+	uint dimm;
+	void *match;
 
-	bzero(&maa, sizeof maa);
-	maa.maa_name = "xbow";
-	maa.maa_nasid = currentnasid = nasid;
-	config_found(parent, &maa, ip27_print);
+	currentnasid = nasid;
+	bzero(&u, sizeof u);
+	if (ip35) {
+		u.maa.maa_name = "spdmem";
+		u.maa.maa_nasid = nasid;
+		for (dimm = 0; dimm < L1_SPD_DIMM_MAX; dimm++) {
+			u.saa.dimm = dimm;
+			/*
+			 * inline config_found_sm() without printing a message
+			 * if match() fails, to avoid getting
+			 * ``spdmem not configured'' for empty memory slots.
+			 */
+			if ((match = config_search(NULL, parent, &u)) != NULL)
+				config_attach(parent, match, &u, ip27_print);
+		}
+	}
+	u.maa.maa_name = "xbow";
+	u.maa.maa_nasid = nasid;
+	config_found(parent, &u, ip27_print);
 }
 
 int
@@ -361,6 +368,8 @@ ip27_print(void *aux, const char *pnp)
 {
 	struct mainbus_attach_args *maa = aux;
 
+	if (pnp != NULL)
+		printf("%s at %s", maa->maa_name, pnp);
 	printf(" nasid %d", maa->maa_nasid);
 
 	return UNCONF;

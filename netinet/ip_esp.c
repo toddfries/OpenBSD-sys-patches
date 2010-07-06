@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_esp.c,v 1.106 2010/01/10 12:43:07 markus Exp $ */
+/*	$OpenBSD: ip_esp.c,v 1.109 2010/07/02 02:40:16 blambert Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -695,7 +695,7 @@ esp_input_cb(void *op)
 	m_adj(m, -(lastthree[1] + 2));
 
 	/* Restore the Next Protocol field */
-	m_copyback(m, protoff, sizeof(u_int8_t), lastthree + 2);
+	m_copyback(m, protoff, sizeof(u_int8_t), lastthree + 2, M_NOWAIT);
 
 	/* Back to generic IPsec input processing */
 	error = ipsec_common_input_cb(m, tdb, skip, protoff, mtag);
@@ -731,25 +731,27 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	struct cryptodesc *crde = NULL, *crda = NULL;
 	struct cryptop *crp;
 #if NBPFILTER > 0
-	struct ifnet *ifn = &(encif[0].sc_if);
+	struct ifnet *encif;
 
-	ifn->if_opackets++;
-	ifn->if_obytes += m->m_pkthdr.len;
+	if ((encif = enc_getif(0, tdb->tdb_tap)) != NULL) {
+		encif->if_opackets++;
+		encif->if_obytes += m->m_pkthdr.len;
 
-	if (ifn->if_bpf) {
-		struct enchdr hdr;
+		if (encif->if_bpf) {
+			struct enchdr hdr;
 
-		bzero (&hdr, sizeof(hdr));
+			bzero (&hdr, sizeof(hdr));
 
-		hdr.af = tdb->tdb_dst.sa.sa_family;
-		hdr.spi = tdb->tdb_spi;
-		if (espx)
-			hdr.flags |= M_CONF;
-		if (esph)
-			hdr.flags |= M_AUTH;
+			hdr.af = tdb->tdb_dst.sa.sa_family;
+			hdr.spi = tdb->tdb_spi;
+			if (espx)
+				hdr.flags |= M_CONF;
+			if (esph)
+				hdr.flags |= M_AUTH;
 
-		bpf_mtap_hdr(ifn->if_bpf, (char *)&hdr, ENC_HDRLEN, m,
-		    BPF_DIRECTION_OUT);
+			bpf_mtap_hdr(encif->if_bpf, (char *)&hdr,
+			    ENC_HDRLEN, m, BPF_DIRECTION_OUT);
+		}
 	}
 #endif
 
@@ -904,7 +906,7 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 
 	/* Fix Next Protocol in IPv4/IPv6 header. */
 	prot = IPPROTO_ESP;
-	m_copyback(m, protoff, sizeof(u_int8_t), &prot);
+	m_copyback(m, protoff, sizeof(u_int8_t), &prot, M_NOWAIT);
 
 	/* Get crypto descriptors. */
 	crp = crypto_getreq(esph && espx ? 2 : 1);
@@ -929,7 +931,7 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		if (tdb->tdb_flags & TDBF_HALFIV) {
 			/* Copy half-iv in the packet. */
 			m_copyback(m, crde->crd_inject, tdb->tdb_ivlen,
-			    tdb->tdb_iv);
+			    tdb->tdb_iv, M_NOWAIT);
 
 			/* Cook half-iv. */
 			bcopy(tdb->tdb_iv, crde->crd_iv, tdb->tdb_ivlen);

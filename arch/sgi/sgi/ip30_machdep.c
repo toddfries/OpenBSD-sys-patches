@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip30_machdep.c,v 1.37 2010/03/07 13:44:26 miod Exp $	*/
+/*	$OpenBSD: ip30_machdep.c,v 1.42 2010/04/28 16:20:28 syuu Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -22,6 +22,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/device.h>
 #include <sys/reboot.h>
 #include <sys/tty.h>
@@ -211,6 +212,8 @@ ip30_setup()
 		hw_prod = "Octane2";
 
 	ncpusfound = ip30_get_ncpusfound();
+
+	_device_register = arcs_device_register;
 }
 
 /*
@@ -365,14 +368,12 @@ ip30_find_video()
 		return 0;
 	}
 
-	for (widid = WIDGET_MIN; widid <= WIDGET_MAX; widid++) {
+	for (widid = WIDGET_MAX; widid >= WIDGET_MIN; widid--) {
 		if (ip30_widget_id(0, widid, &id) != 0)
 			continue;
 
-		vendor = (id & WIDGET_ID_VENDOR_MASK) >>
-		    WIDGET_ID_VENDOR_SHIFT;
-		product = (id & WIDGET_ID_PRODUCT_MASK) >>
-		    WIDGET_ID_PRODUCT_SHIFT;
+		vendor = WIDGET_ID_VENDOR(id);
+		product = WIDGET_ID_PRODUCT(id);
 
 		if ((vendor == XBOW_VENDOR_SGI2 &&
 		    product == XBOW_PRODUCT_SGI2_ODYSSEY) ||
@@ -530,10 +531,9 @@ hw_cpu_boot_secondary(struct cpu_info *ci)
 	    scachesz, fanloads, launch, rndvz,
 	    stackaddr, lparam, rparam, idleflag);
 #endif
-	kstack = smp_malloc(USPACE);
+	kstack = alloc_contiguous_pages(USPACE);
 	if (kstack == NULL)
 		panic("unable to allocate idle stack\n");
-	bzero((char *)kstack, USPACE);
 	ci->ci_curprocpaddr = (void *)kstack;
 
 	*(volatile uint64_t *)(mpconf + MPCONF_STACKADDR(cpuid)) =
@@ -551,6 +551,11 @@ void
 hw_cpu_hatch(struct cpu_info *ci)
 {
 	int s;
+
+	/*
+	 * Set curcpu address on this processor.
+	 */
+	setcurcpu(ci);
 
 	/*
 	 * Make sure we can access the extended address space.

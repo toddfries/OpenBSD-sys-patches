@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic6360.c,v 1.21 2010/01/13 06:09:44 krw Exp $	*/
+/*	$OpenBSD: aic6360.c,v 1.25 2010/06/28 18:31:02 krw Exp $	*/
 /*	$NetBSD: aic6360.c,v 1.52 1996/12/10 21:27:51 thorpej Exp $	*/
 
 #ifdef DDB
@@ -131,7 +131,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/queue.h>
 
 #include <machine/bus.h>
@@ -158,7 +157,7 @@ void	aic_minphys(struct buf *, struct scsi_link *);
 void 	aic_init(struct aic_softc *);
 void	aic_done(struct aic_softc *, struct aic_acb *);
 void	aic_dequeue(struct aic_softc *, struct aic_acb *);
-int	aic_scsi_cmd(struct scsi_xfer *);
+void	aic_scsi_cmd(struct scsi_xfer *);
 int	aic_poll(struct aic_softc *, struct scsi_xfer *, int);
 integrate void	aic_sched_msgout(struct aic_softc *, u_char);
 integrate void	aic_setsync(struct aic_softc *, struct aic_tinfo *);
@@ -198,14 +197,6 @@ struct scsi_adapter aic_switch = {
 	0,
 	0,
 };
-
-struct scsi_device aic_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
-};
-
 
 /*
  * Do the real search-for-device.
@@ -288,7 +279,6 @@ aicattach(struct aic_softc *sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_initiator;
 	sc->sc_link.adapter = &aic_switch;
-	sc->sc_link.device = &aic_dev;
 	sc->sc_link.openings = 2;
 
 	bzero(&saa, sizeof(saa));
@@ -504,7 +494,7 @@ aic_get_acb(struct aic_softc *sc, int flags)
  * This function is called by the higher level SCSI-driver to queue/run
  * SCSI-commands.
  */
-int
+void
 aic_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link *sc_link = xs->sc_link;
@@ -518,7 +508,9 @@ aic_scsi_cmd(struct scsi_xfer *xs)
 
 	flags = xs->flags;
 	if ((acb = aic_get_acb(sc, flags)) == NULL) {
-		return (NO_CCB);
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		return;
 	}
 
 	/* Initialize acb */
@@ -547,7 +539,7 @@ aic_scsi_cmd(struct scsi_xfer *xs)
 	splx(s);
 
 	if ((flags & SCSI_POLL) == 0)
-		return SUCCESSFULLY_QUEUED;
+		return;
 
 	/* Not allowed to use interrupts, use polling instead */
 	if (aic_poll(sc, xs, acb->timeout)) {
@@ -555,7 +547,6 @@ aic_scsi_cmd(struct scsi_xfer *xs)
 		if (aic_poll(sc, xs, acb->timeout))
 			aic_timeout(acb);
 	}
-	return COMPLETE;
 }
 
 #ifdef notyet
@@ -815,7 +806,6 @@ aic_done(struct aic_softc *sc, struct aic_acb *acb)
 	struct scsi_xfer *xs = acb->xs;
 	struct scsi_link *sc_link = xs->sc_link;
 	struct aic_tinfo *ti = &sc->sc_tinfo[sc_link->target];
-	int s;
 
 	AIC_TRACE(("aic_done  "));
 
@@ -868,9 +858,7 @@ aic_done(struct aic_softc *sc, struct aic_acb *acb)
 
 	aic_free_acb(sc, acb, xs->flags);
 	ti->cmds++;
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 void

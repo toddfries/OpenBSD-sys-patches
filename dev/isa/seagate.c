@@ -1,4 +1,4 @@
-/*	$OpenBSD: seagate.c,v 1.32 2010/01/10 00:40:25 krw Exp $	*/
+/*	$OpenBSD: seagate.c,v 1.36 2010/06/28 18:31:02 krw Exp $	*/
 
 /*
  * ST01/02, Future Domain TMC-885, TMC-950 SCSI driver
@@ -73,7 +73,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/queue.h>
 #include <sys/malloc.h>
 
@@ -274,7 +273,7 @@ static const char *bases[] = {
 
 struct		sea_scb *sea_get_scb(struct sea_softc *, int);
 int		seaintr(void *);
-int		sea_scsi_cmd(struct scsi_xfer *);
+void		sea_scsi_cmd(struct scsi_xfer *);
 int 		sea_poll(struct sea_softc *, struct scsi_xfer *, int);
 int		sea_select(struct sea_softc *sea, struct sea_scb *scb);
 int		sea_transfer_pio(struct sea_softc *sea, u_char *phase,
@@ -294,14 +293,6 @@ struct scsi_adapter sea_switch = {
 	scsi_minphys,	/* no special minphys(), since driver uses PIO */
 	0,
 	0,
-};
-
-/* the below structure is so we have a default dev struct for our link struct */
-struct scsi_device sea_dev = {
-	NULL,		/* use default error handler */
-	NULL,		/* have a queue, served by this */
-	NULL,		/* have no async handler */
-	NULL,		/* Use default 'done' routine */
 };
 
 int	seaprobe(struct device *, void *, void *);
@@ -435,7 +426,6 @@ seaattach(struct device *parent, struct device *self, void *aux)
 	sea->sc_link.adapter_softc = sea;
 	sea->sc_link.adapter_target = sea->our_id;
 	sea->sc_link.adapter = &sea_switch;
-	sea->sc_link.device = &sea_dev;
 	sea->sc_link.openings = 1;
 
 	printf("\n");
@@ -532,7 +522,7 @@ sea_init(struct sea_softc *sea)
  * start a scsi operation given the command and the data address. Also needs
  * the unit, target and lu.
  */
-int
+void
 sea_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link *sc_link = xs->sc_link;
@@ -545,7 +535,9 @@ sea_scsi_cmd(struct scsi_xfer *xs)
 
 	flags = xs->flags;
 	if ((scb = sea_get_scb(sea, flags)) == NULL) {
-		return (NO_CCB);
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		return;
 	}
 	scb->flags = SCB_ACTIVE;
 	scb->xs = xs;
@@ -558,10 +550,8 @@ sea_scsi_cmd(struct scsi_xfer *xs)
 		 */
 		printf("%s: resetting\n", sea->sc_dev.dv_xname);
 		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
-		return COMPLETE;
+		return;
 	}
 
 	/*
@@ -584,7 +574,7 @@ sea_scsi_cmd(struct scsi_xfer *xs)
 	if ((flags & SCSI_POLL) == 0) {
 		timeout_add_msec(&scb->xs->stimeout, xs->timeout);
 		splx(s);
-		return SUCCESSFULLY_QUEUED;
+		return;
 	}
 
 	splx(s);
@@ -597,7 +587,6 @@ sea_scsi_cmd(struct scsi_xfer *xs)
 		if (sea_poll(sea, xs, 2000))
 			sea_timeout(scb);
 	}
-	return COMPLETE;
 }
 
 /*
@@ -1149,7 +1138,6 @@ void
 sea_done(struct sea_softc *sea, struct sea_scb *scb)
 {
 	struct scsi_xfer *xs = scb->xs;
-	int s;
 
 	timeout_del(&scb->xs->stimeout);
 
@@ -1165,9 +1153,7 @@ sea_done(struct sea_softc *sea, struct sea_scb *scb)
 			xs->error = XS_DRIVER_STUFFUP;
 	}
 	sea_free_scb(sea, scb, xs->flags);
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 /*

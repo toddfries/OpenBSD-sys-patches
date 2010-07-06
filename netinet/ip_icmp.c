@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_icmp.c,v 1.87 2010/02/09 13:23:39 claudio Exp $	*/
+/*	$OpenBSD: ip_icmp.c,v 1.90 2010/07/03 04:44:51 guenther Exp $	*/
 /*	$NetBSD: ip_icmp.c,v 1.19 1996/02/13 23:42:22 christos Exp $	*/
 
 /*
@@ -76,6 +76,7 @@
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
 #include <sys/socket.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -687,7 +688,7 @@ icmp_reflect(struct mbuf *m)
 		dst->sin_addr = ip->ip_src;
 
 		/* keep packet in the original virtual instance */
-		ro.ro_rt = rtalloc1(&ro.ro_dst, 1,
+		ro.ro_rt = rtalloc1(&ro.ro_dst, RT_REPORT,
 		     m->m_pkthdr.rdomain);
 		if (ro.ro_rt == 0) {
 			ipstat.ips_noroute++;
@@ -877,7 +878,7 @@ icmp_mtudisc_clone(struct sockaddr *dst, u_int rtableid)
 	struct rtentry *rt;
 	int error;
 
-	rt = rtalloc1(dst, 1, rtableid);
+	rt = rtalloc1(dst, RT_REPORT, rtableid);
 	if (rt == 0)
 		return (NULL);
 
@@ -998,6 +999,7 @@ icmp_mtudisc_timeout(struct rtentry *rt, struct rttimer *r)
 		info.rti_flags = rt->rt_flags;   
 
 		sa = *(struct sockaddr_in *)rt_key(rt);
+		/* XXX this needs the rtableid */
 		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL, 0);
 
 		/* Notify TCP layer of increased Path MTU estimate */

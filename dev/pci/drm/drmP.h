@@ -40,6 +40,7 @@
 #include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/malloc.h>
+#include <sys/pool.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/conf.h>
@@ -69,7 +70,6 @@
 #include <machine/bus.h>
 
 #include "drm.h"
-#include "drm_linux_list.h"
 #include "drm_atomic.h"
 
 #define DRM_KERNEL_CONTEXT    0	 /* Change drm_resctx if changed	  */
@@ -85,6 +85,8 @@
 #define DRM_CURRENTPID		curproc->p_pid
 #define DRM_LOCK()		rw_enter_write(&dev->dev_lock)
 #define DRM_UNLOCK()		rw_exit_write(&dev->dev_lock)
+#define DRM_READLOCK()		rw_enter_read(&dev->dev_lock)
+#define DRM_READUNLOCK()	rw_exit_read(&dev->dev_lock)
 #define DRM_MAXUNITS		8
 
 /* D_CLONE only supports one device, this will be fixed eventually */
@@ -99,7 +101,7 @@
 #define DRM_SUSER(p)		(suser(p, p->p_acflag) == 0)
 #define DRM_MTRR_WC		MDF_WRITECOMBINE
 
-#define PAGE_ALIGN(addr)	(((addr) + PAGE_SIZE - 1) & PAGE_MASK)
+#define PAGE_ALIGN(addr)	(((addr) + PAGE_MASK) & ~PAGE_MASK)
 
 extern struct cfdriver drm_cd;
 
@@ -215,14 +217,17 @@ struct drm_buf_entry {
 };
 
 struct drm_file {
-	SPLAY_ENTRY(drm_file)	 link;
-	int			 authenticated;
-	unsigned long		 ioctl_count;
-	dev_t			 kdev;
-	drm_magic_t		 magic;
-	int			 flags;
-	int			 master;
-	int			 minor;
+	SPLAY_HEAD(drm_obj_tree, drm_handle)	 obj_tree;
+	struct mutex				 table_lock;
+	SPLAY_ENTRY(drm_file)			 link;
+	int					 authenticated;
+	unsigned long				 ioctl_count;
+	dev_t					 kdev;
+	drm_magic_t				 magic;
+	int					 flags;
+	int					 master;
+	int					 minor;
+	u_int					 obj_id; /*next gem id*/
 };
 
 struct drm_lock_data {
@@ -349,6 +354,51 @@ struct drm_ati_pcigart_info {
 	int			 gart_reg_if;
 };
 
+/*
+ *  Locking protocol:
+ * All drm object are uvm objects, as such they have a reference count and
+ * a lock. On the other hand, operations carries out by the drm may involve
+ * sleeping (waiting for rendering to finish, say), while you wish to have
+ * mutual exclusion on an object. For this reason, all drm-related operations
+ * on drm objects must acquire the DRM_BUSY flag on the object as the first
+ * thing that they do. If the BUSY flag is already on the object, set DRM_WANTED
+ * and sleep until the other locker is done with it. When the BUSY flag is 
+ * acquired then only that flag and a reference is required to do most 
+ * operations on the drm_object. The uvm object is still bound by uvm locking
+ * protocol.
+ *
+ * Subdrivers (radeon, intel, etc) may have other locking requirement, these
+ * requirements will be detailed in those drivers.
+ */
+struct drm_obj {
+	struct uvm_object		 uobj;
+	SPLAY_ENTRY(drm_obj)	 	 entry;
+	struct drm_device		*dev;
+	struct uvm_object		*uao;
+
+	size_t				 size;
+	int				 name;
+	int				 handlecount;
+/* any flags over 0x00000010 are device specific */
+#define	DRM_BUSY	0x00000001
+#define	DRM_WANTED	0x00000002
+	u_int				 do_flags;
+#ifdef DRMLOCKDEBUG			/* to tell owner */
+	struct proc			*holding_proc;
+#endif
+	uint32_t			 read_domains;
+	uint32_t			 write_domain;
+
+	uint32_t			 pending_read_domains;
+	uint32_t			 pending_write_domain;
+};
+
+struct drm_handle {
+	SPLAY_ENTRY(drm_handle)	 entry;
+	struct drm_obj		*obj;
+	uint32_t		 handle;
+};
+
 struct drm_driver_info {
 	int	(*firstopen)(struct drm_device *);
 	int	(*open)(struct drm_device *, struct drm_file *);
@@ -356,18 +406,24 @@ struct drm_driver_info {
 		    struct drm_file *);
 	void	(*close)(struct drm_device *, struct drm_file *);
 	void	(*lastclose)(struct drm_device *);
-	void	(*reclaim_buffers_locked)(struct drm_device *,
-		    struct drm_file *);
 	int	(*dma_ioctl)(struct drm_device *, struct drm_dma *,
 		    struct drm_file *);
-	int	(*dma_quiescent)(struct drm_device *);
 	int	(*irq_install)(struct drm_device *);
 	void	(*irq_uninstall)(struct drm_device *);
 	int	vblank_pipes;
 	u_int32_t (*get_vblank_counter)(struct drm_device *, int);
 	int	(*enable_vblank)(struct drm_device *, int);
 	void	(*disable_vblank)(struct drm_device *, int);
+	/*
+	 * driver-specific constructor for gem objects to set up private data.
+	 * returns 0 on success.
+	 */
+	int	(*gem_init_object)(struct drm_obj *);
+	void	(*gem_free_object)(struct drm_obj *);
+	int	(*gem_fault)(struct drm_obj *, struct uvm_faultinfo *, off_t,
+		    vaddr_t, vm_page_t *, int, int, vm_prot_t, int);
 
+	size_t	gem_size;
 	size_t	buf_priv_size;
 	size_t	file_priv_size;
 
@@ -385,6 +441,7 @@ struct drm_driver_info {
 #define DRIVER_PCI_DMA		0x10
 #define DRIVER_SG		0x20
 #define DRIVER_IRQ		0x40
+#define DRIVER_GEM		0x80
 
 	u_int	flags;
 };
@@ -438,6 +495,21 @@ struct drm_device {
 	atomic_t		*ctx_bitmap;
 	void			*dev_private;
 	struct drm_local_map	*agp_buffer_map;
+
+	/* GEM info */
+	struct mutex		 obj_name_lock;
+	atomic_t		 obj_count;
+	u_int			 obj_name;
+	atomic_t		 obj_memory;
+	atomic_t		 pin_count;
+	atomic_t		 pin_memory;
+	atomic_t		 gtt_count;
+	atomic_t		 gtt_memory;
+	uint32_t		 gtt_total;
+	uint32_t		 invalidate_domains;
+	uint32_t		 flush_domains;
+	SPLAY_HEAD(drm_name_tree, drm_obj)	name_tree;
+	struct pool				objpl;
 };
 
 struct drm_attach_args {
@@ -587,6 +659,64 @@ int	drm_agp_bind_ioctl(struct drm_device *, void *, struct drm_file *);
 /* Scatter Gather Support (drm_scatter.c) */
 int	drm_sg_alloc_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_sg_free(struct drm_device *, void *, struct drm_file *);
+
+struct drm_obj *drm_gem_object_alloc(struct drm_device *, size_t);
+void	 drm_unref(struct uvm_object *);
+void	 drm_ref(struct uvm_object *);
+void	 drm_unref_locked(struct uvm_object *);
+void	 drm_ref_locked(struct uvm_object *);
+void	drm_hold_object_locked(struct drm_obj *);
+void	drm_hold_object(struct drm_obj *);
+void	drm_unhold_object_locked(struct drm_obj *);
+void	drm_unhold_object(struct drm_obj *);
+int	drm_try_hold_object(struct drm_obj *);
+void	drm_unhold_and_unref(struct drm_obj *);
+int	drm_handle_create(struct drm_file *, struct drm_obj *, int *);
+struct drm_obj *drm_gem_object_lookup(struct drm_device *,
+			    struct drm_file *, int );
+int	drm_gem_close_ioctl(struct drm_device *, void *, struct drm_file *);
+int	drm_gem_flink_ioctl(struct drm_device *, void *, struct drm_file *);
+int	drm_gem_open_ioctl(struct drm_device *, void *, struct drm_file *);
+int	drm_gem_load_uao(bus_dma_tag_t, bus_dmamap_t, struct uvm_object *,
+	    bus_size_t, int, bus_dma_segment_t **);
+
+static __inline void
+drm_gem_object_reference(struct drm_obj *obj)
+{
+	drm_ref(&obj->uobj);
+}
+
+static __inline void
+drm_gem_object_unreference(struct drm_obj *obj)
+{
+	drm_unref(&obj->uobj);
+}
+
+static __inline void 
+drm_lock_obj(struct drm_obj *obj)
+{
+	simple_lock(&obj->uobj);
+}
+
+static __inline void 
+drm_unlock_obj(struct drm_obj *obj)
+{
+	simple_unlock(&obj->uobj);
+}
+#ifdef DRMLOCKDEBUG
+
+#define DRM_ASSERT_HELD(obj)		\
+	KASSERT(obj->do_flags & DRM_BUSY && obj->holding_proc == curproc)
+#define DRM_OBJ_ASSERT_LOCKED(obj) /* XXX mutexes */
+#define DRM_ASSERT_LOCKED(lock) MUTEX_ASSERT_LOCKED(lock)
+#else
+
+#define DRM_ASSERT_HELD(obj)
+#define DRM_OBJ_ASSERT_LOCKED(obj)
+#define DRM_ASSERT_LOCKED(lock) 
+
+#endif
+
 
 #endif /* __KERNEL__ */
 #endif /* _DRM_P_H_ */

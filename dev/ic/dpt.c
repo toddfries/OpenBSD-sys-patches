@@ -1,4 +1,4 @@
-/*	$OpenBSD: dpt.c,v 1.23 2010/01/09 23:15:06 krw Exp $	*/
+/*	$OpenBSD: dpt.c,v 1.26 2010/06/28 18:31:02 krw Exp $	*/
 /*	$NetBSD: dpt.c,v 1.12 1999/10/23 16:26:33 ad Exp $	*/
 
 /*-
@@ -95,18 +95,15 @@ struct cfdriver dpt_cd = {
 };
 #endif /* __OpenBSD__ */
 
-/* A default for our link struct */
 #ifdef __NetBSD__
+/* A default for our link struct */
 static struct scsipi_device dpt_dev = {
-#endif /* __NetBSD__ */
-#ifdef __OpenBSD__
-static struct scsi_device dpt_dev = {
-#endif /* __OpenBSD__ */
 	NULL,			/* Use default error handler */
 	NULL,			/* have a queue, served by this */
 	NULL,			/* have no async handler */
 	NULL,			/* Use default 'done' routine */
 };
+#endif /* __NetBSD__ */
 
 #ifndef offsetof
 #define offsetof(type, member) (int)((&((type *)0)->member))
@@ -394,6 +391,7 @@ dpt_init(sc, intrstr)
 		link->scsipi_scsi.max_lun = ec->ec_maxlun;
 		link->scsipi_scsi.max_target = ec->ec_maxtarget;
 		link->type = BUS_SCSI;
+		link->device = &dpt_dev;
 #endif /* __NetBSD__ */
 #ifdef __OpenBSD__
 		link->scsibus = i;
@@ -401,7 +399,6 @@ dpt_init(sc, intrstr)
 		link->luns = ec->ec_maxlun + 1;
 		link->adapter_buswidth = ec->ec_maxtarget + 1;
 #endif /* __OpenBSD__ */
-		link->device = &dpt_dev;
 		link->adapter = &sc->sc_adapter;
 		link->adapter_softc = sc;
 		link->openings = sc->sc_nccbs;
@@ -904,7 +901,7 @@ dpt_scsi_cmd(xs)
 		xs->error = XS_DRIVER_STUFFUP;
 		scsi_done(xs);
 		splx(s);
-		return (COMPLETE);
+		return;
 	}
 
 		/* XXX we can't reset devices just yet */
@@ -917,7 +914,7 @@ dpt_scsi_cmd(xs)
 			xs->error = XS_DRIVER_STUFFUP;
 			scsi_done(xs);
 			splx(s);
-			return (COMPLETE);
+			return;
 		}
 
 	/* Get a CCB */
@@ -927,8 +924,10 @@ dpt_scsi_cmd(xs)
 #ifdef __OpenBSD__
 	if ((ccb = dpt_alloc_ccb(sc, xs->flags)) == NULL) {
 #endif /* __OpenBSD__ */
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
 		splx(s);
-		return (NO_CCB);
+		return;
 	}
 
 	splx(s);
@@ -1002,10 +1001,8 @@ dpt_scsi_cmd(xs)
 		
 			xs->error = XS_DRIVER_STUFFUP;
 			dpt_free_ccb(sc, ccb);
-			s = splbio();
 			scsi_done(xs);
-			splx(s);
-			return (COMPLETE);
+			return;
 		}
 
 		bus_dmamap_sync(dmat, xfer, 0, xfer->dm_mapsize,
@@ -1058,11 +1055,13 @@ dpt_scsi_cmd(xs)
 	if (dpt_cmd(sc, &ccb->ccb_eata_cp, ccb->ccb_ccbpa, CP_DMA_CMD, 0)) {
 		printf("%s: dpt_cmd failed\n", sc->sc_dv.dv_xname);
 		dpt_free_ccb(sc, ccb);
-		return (NO_CCB);
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		return;
 	}
 
 	if ((xs->flags & SCSI_POLL) == 0)
-		return (SUCCESSFULLY_QUEUED);
+		return;
 
 	/* Don't wait longer than this single command wants to wait */
 	if (dpt_poll(sc, ccb)) {
@@ -1075,8 +1074,6 @@ dpt_scsi_cmd(xs)
 	s = splbio();
 	dpt_done_ccb(sc, ccb);
 	splx(s);
-
-	return (COMPLETE);
 }
 
 /*

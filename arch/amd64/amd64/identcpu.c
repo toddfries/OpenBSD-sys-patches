@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.26 2009/12/09 21:42:10 deraadt Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.29 2010/07/01 00:24:27 thib Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -40,7 +40,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/sysctl.h>
 #include <machine/cpu.h>
 #include <machine/cpufunc.h>
@@ -48,7 +47,13 @@
 /* sysctl wants this. */
 char cpu_model[48];
 int cpuspeed;
+
 int amd64_has_xcrypt;
+#ifdef CRYPTO
+#ifdef notyet
+int amd64_has_aesni;
+#endif
+#endif
 
 const struct {
 	u_int32_t	bit;
@@ -93,15 +98,29 @@ const struct {
 	{ CPUID_3DNOW,	"3DNOW" }
 }, cpu_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_SSE3,	"SSE3" },
+	{ CPUIDECX_PCLMUL,	"PCLMUL" },
 	{ CPUIDECX_MWAIT,	"MWAIT" },
 	{ CPUIDECX_DSCPL,	"DS-CPL" },
 	{ CPUIDECX_VMX,		"VMX" },
 	{ CPUIDECX_SMX,		"SMX" },
 	{ CPUIDECX_EST,		"EST" },
 	{ CPUIDECX_TM2,		"TM2" },
+	{ CPUIDECX_SSSE3,	"SSSE3" },
 	{ CPUIDECX_CNXTID,	"CNXT-ID" },
+	{ CPUIDECX_FMA3,	"FMA3" },
 	{ CPUIDECX_CX16,	"CX16" },
-	{ CPUIDECX_XTPR,	"xTPR" }
+	{ CPUIDECX_XTPR,	"xTPR" },
+	{ CPUIDECX_PDCM,	"PDCM" },
+	{ CPUIDECX_DCA,		"DCA" },
+	{ CPUIDECX_SSE41,	"SSE4.1" },
+	{ CPUIDECX_SSE42,	"SSE4.2" },
+	{ CPUIDECX_X2APIC,	"x2APIC" },
+	{ CPUIDECX_MOVBE,	"MOVBE" },
+	{ CPUIDECX_POPCNT,	"POPCNT" },
+	{ CPUIDECX_AES,		"AES" },
+	{ CPUIDECX_XSAVE,	"XSAVE" },
+	{ CPUIDECX_OSXSAVE,	"OSXSAVE" },
+	{ CPUIDECX_AVX,		"AVX" }
 };
 
 int
@@ -352,6 +371,11 @@ identifycpu(struct cpu_info *ci)
 	if (cpu_ecxfeature & CPUIDECX_EST) {
 		setperf_setup = est_init;
 	}
+
+#ifdef notyet
+	if (cpu_ecxfeature & CPUIDECX_AES)
+		amd64_has_aesni = 1;
+#endif
 
 	if (!strncmp(cpu_model, "Intel", 5)) {
 		u_int32_t cflushsz;

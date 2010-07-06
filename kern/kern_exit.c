@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.89 2009/12/20 23:54:11 guenther Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.94 2010/06/29 20:25:57 guenther Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -90,13 +90,15 @@ sys_exit(struct proc *p, void *v, register_t *retval)
 	return (0);
 }
 
-#ifdef RTHREADS
 int
 sys_threxit(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_threxit_args /* {
 		syscallarg(pid_t *) notdead;
 	} */ *uap = v;
+
+	if (!rthreads_enabled)
+		return (EINVAL);
 
 	if (SCARG(uap, notdead) != NULL) {
 		pid_t zero = 0;
@@ -108,7 +110,6 @@ sys_threxit(struct proc *p, void *v, register_t *retval)
 
 	return (0);
 }
-#endif
 
 /*
  * Exit: deallocate address space and other resources, change proc state
@@ -126,7 +127,6 @@ exit1(struct proc *p, int rv, int flags)
 	
 	/* unlink ourselves from the active threads */
 	TAILQ_REMOVE(&p->p_p->ps_threads, p, p_thr_link);
-#ifdef RTHREADS
 	if (TAILQ_EMPTY(&p->p_p->ps_threads))
 		wakeup(&p->p_p->ps_threads);
 	/*
@@ -159,7 +159,6 @@ exit1(struct proc *p, int rv, int flags)
 		while (!TAILQ_EMPTY(&p->p_p->ps_threads))
 			tsleep(&p->p_p->ps_threads, PUSER, "thrdeath", 0);
 	}
-#endif
 
 	if (p->p_flag & P_PROFIL)
 		stopprofclock(p);
@@ -236,11 +235,6 @@ exit1(struct proc *p, int rv, int flags)
 	if (ISSET(p->p_flag, P_SYSTRACE))
 		systrace_exit(p);
 #endif
-	/*
-	 * NOTE: WE ARE NO LONGER ALLOWED TO SLEEP!
-	 */
-	p->p_stat = SDEAD;
-
         /*
          * Remove proc from pidhash chain so looking it up won't
          * work.  Move it from allproc to zombproc, but do not yet
@@ -248,9 +242,16 @@ exit1(struct proc *p, int rv, int flags)
          * deadproc list later (using the p_hash member), and
          * wake up the reaper when we do.
          */
+	rw_enter_write(&allproclk);
+	/*
+	 * NOTE: WE ARE NO LONGER ALLOWED TO SLEEP!
+	 */
+	p->p_stat = SDEAD;
+
 	LIST_REMOVE(p, p_hash);
 	LIST_REMOVE(p, p_list);
 	LIST_INSERT_HEAD(&zombproc, p, p_list);
+	rw_exit_write(&allproclk);
 
 	/*
 	 * Give orphaned children to init(8).
@@ -290,7 +291,8 @@ exit1(struct proc *p, int rv, int flags)
 	/*
 	 * notify interested parties of our demise.
 	 */
-	KNOTE(&p->p_klist, NOTE_EXIT);
+	if (p == p->p_p->ps_mainproc)
+		KNOTE(&p->p_p->ps_klist, NOTE_EXIT);
 
 	/*
 	 * Notify parent that we're gone.  If we have P_NOZOMBIE or parent has
@@ -555,6 +557,8 @@ proc_reparent(struct proc *child, struct proc *parent)
 void
 proc_zap(struct proc *p)
 {
+	struct process *pr;
+
 	pool_put(&rusage_pool, p->p_ru);
 	if (p->p_ptstat)
 		free(p->p_ptstat, M_SUBPROC);
@@ -564,7 +568,9 @@ proc_zap(struct proc *p)
 	 * Unlink it from its process group and free it.
 	 */
 	leavepgrp(p);
+	rw_enter_write(&allproclk);
 	LIST_REMOVE(p, p_list);	/* off zombproc */
+	rw_exit_write(&allproclk);
 	LIST_REMOVE(p, p_sibling);
 
 	/*
@@ -582,14 +588,13 @@ proc_zap(struct proc *p)
 	 * Remove us from our process list, possibly killing the process
 	 * in the process (pun intended).
 	 */
-	if (--p->p_p->ps_refcnt == 0) {
-		KASSERT(TAILQ_EMPTY(&p->p_p->ps_threads));
-		limfree(p->p_p->ps_limit);
-		if (--p->p_p->ps_cred->p_refcnt == 0) {
-			crfree(p->p_p->ps_cred->pc_ucred);
-			pool_put(&pcred_pool, p->p_p->ps_cred);
-		}
-		pool_put(&process_pool, p->p_p);
+	pr = p->p_p;
+	if (--pr->ps_refcnt == 0) {
+		KASSERT(TAILQ_EMPTY(&pr->ps_threads));
+		limfree(pr->ps_limit);
+		crfree(pr->ps_cred->pc_ucred);
+		pool_put(&pcred_pool, pr->ps_cred);
+		pool_put(&process_pool, pr);
 	}
 
 	pool_put(&proc_pool, p);

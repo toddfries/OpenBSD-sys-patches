@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.164 2010/02/28 21:17:00 krw Exp $	*/
+/*	$OpenBSD: cd.c,v 1.175 2010/07/01 05:11:18 krw Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -66,6 +66,7 @@
 #include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/scsiio.h>
+#include <sys/dkio.h>
 #include <sys/vnode.h>
 
 #include <scsi/scsi_all.h>
@@ -103,21 +104,20 @@ struct cd_softc {
 #define	CDF_WLABEL	0x04		/* label is writable */
 #define	CDF_LABELLING	0x08		/* writing label */
 #define	CDF_ANCIENT	0x10		/* disk is ancient; for minphys */
+#define	CDF_DYING	0x40		/* dying, when deactivated */
 #define CDF_WAITING	0x100
 	struct scsi_link *sc_link;	/* contains our targ, lun, etc. */
 	struct cd_parms {
 		u_int32_t blksize;
 		daddr64_t disksize;	/* total number sectors */
 	} sc_params;
-	struct buf sc_buf_queue;
-	struct mutex sc_buf_mtx;
-	struct mutex sc_start_mtx;
-	u_int sc_start_count;
+	struct bufq	*sc_bufq;
+	struct scsi_xshandler sc_xsh;
 	struct timeout sc_timeout;
 	void *sc_cdpwrhook;		/* our power hook */
 };
 
-void	cdstart(void *);
+void	cdstart(struct scsi_xfer *);
 void	cd_buf_done(struct scsi_xfer *);
 void	cdminphys(struct buf *);
 int	cdgetdisklabel(dev_t, struct cd_softc *, struct disklabel *, int);
@@ -163,13 +163,6 @@ struct cfdriver cd_cd = {
 
 struct dkdriver cddkdriver = { cdstrategy };
 
-struct scsi_device cd_switch = {
-	cd_interpret_sense,
-	cdstart,		/* we have a queue, which is started by this */
-	NULL,			/* we do not have an async handler */
-	NULL,			/* no per driver cddone */
-};
-
 const struct scsi_inquiry_pattern cd_patterns[] = {
 	{T_CDROM, T_REMOV,
 	 "",         "",                 ""},
@@ -212,24 +205,21 @@ cdattach(struct device *parent, struct device *self, void *aux)
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("cdattach:\n"));
 
-	mtx_init(&sc->sc_buf_mtx, IPL_BIO);
-	mtx_init(&sc->sc_start_mtx, IPL_BIO);
-
 	/*
 	 * Store information needed to contact our base driver
 	 */
 	sc->sc_link = sc_link;
-	sc_link->device = &cd_switch;
+	sc_link->interpret_sense = cd_interpret_sense;
 	sc_link->device_softc = sc;
 	if (sc_link->openings > CDOUTSTANDING)
 		sc_link->openings = CDOUTSTANDING;
 
 	/*
-	 * Initialize and attach the disk structure.
+	 * Initialize disk structures.
 	 */
 	sc->sc_dk.dk_driver = &cddkdriver;
 	sc->sc_dk.dk_name = sc->sc_dev.dv_xname;
-	disk_attach(&sc->sc_dk);
+	sc->sc_bufq = bufq_init(BUFQ_DEFAULT);
 
 	/*
 	 * Note if this device is ancient.  This is used in cdminphys().
@@ -240,17 +230,23 @@ cdattach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n");
 
-	timeout_set(&sc->sc_timeout, cdstart, sc);
+	scsi_xsh_set(&sc->sc_xsh, sc_link, cdstart);
+	timeout_set(&sc->sc_timeout, (void (*)(void *))scsi_xsh_add,
+	    &sc->sc_xsh);
 
 	if ((sc->sc_cdpwrhook = powerhook_establish(cd_powerhook, sc)) == NULL)
 		printf("%s: WARNING: unable to establish power hook\n",
 		    sc->sc_dev.dv_xname);
+
+	/* Attach disk. */
+	disk_attach(&sc->sc_dk);
 }
 
 
 int
 cdactivate(struct device *self, int act)
 {
+	struct cd_softc *sc = (struct cd_softc *)self;
 	int rv = 0;
 
 	switch (act) {
@@ -258,9 +254,8 @@ cdactivate(struct device *self, int act)
 		break;
 
 	case DVACT_DEACTIVATE:
-		/*
-		 * Nothing to do; we key off the device's DVF_ACTIVATE.
-		 */
+		sc->sc_flags |= CDF_DYING;
+		bufq_drain(sc->sc_bufq);
 		break;
 	}
 	return (rv);
@@ -273,7 +268,7 @@ cddetach(struct device *self, int flags)
 	struct cd_softc *sc = (struct cd_softc *)self;
 	int bmaj, cmaj, mn;
 
-	scsi_buf_killqueue(&sc->sc_buf_queue, &sc->sc_buf_mtx);
+	bufq_drain(sc->sc_bufq);
 
 	/* Locate the lowest minor number to be detached. */
 	mn = DISKMINOR(self->dv_unit, 0);
@@ -290,6 +285,7 @@ cddetach(struct device *self, int flags)
 		powerhook_disestablish(sc->sc_cdpwrhook);
 
 	/* Detach disk. */
+	bufq_destroy(sc->sc_bufq);
 	disk_detach(&sc->sc_dk);
 
 	return (0);
@@ -313,6 +309,10 @@ cdopen(dev_t dev, int flag, int fmt, struct proc *p)
 	sc = cdlookup(unit);
 	if (sc == NULL)
 		return (ENXIO);
+	if (sc->sc_flags & CDF_DYING) {
+		device_unref(&sc->sc_dev);
+		return (ENXIO);
+	}
 
 	sc_link = sc->sc_link;
 	SC_DEBUG(sc_link, SDEV_DB1,
@@ -433,6 +433,10 @@ cdclose(dev_t dev, int flag, int fmt, struct proc *p)
 	sc = cdlookup(DISKUNIT(dev));
 	if (sc == NULL)
 		return ENXIO;
+	if (sc->sc_flags & CDF_DYING) {
+		device_unref(&sc->sc_dev);
+		return (ENXIO);
+	}
 
 	if ((error = cdlock(sc)) != 0) {
 		device_unref(&sc->sc_dev);
@@ -464,6 +468,7 @@ cdclose(dev_t dev, int flag, int fmt, struct proc *p)
 		}
 
 		timeout_del(&sc->sc_timeout);
+		scsi_xsh_del(&sc->sc_xsh);
 	}
 
 	cdunlock(sc);
@@ -483,7 +488,12 @@ cdstrategy(struct buf *bp)
 	struct cd_softc *sc;
 	int s;
 
-	if ((sc = cdlookup(DISKUNIT(bp->b_dev))) == NULL) {
+	sc = cdlookup(DISKUNIT(bp->b_dev));
+	if (sc == NULL) {
+		bp->b_error = ENXIO;
+		goto bad;
+	}
+	if (sc->sc_flags & CDF_DYING) {
 		bp->b_error = ENXIO;
 		goto bad;
 	}
@@ -519,18 +529,14 @@ cdstrategy(struct buf *bp)
 	    (sc->sc_flags & (CDF_WLABEL|CDF_LABELLING)) != 0) <= 0)
 		goto done;
 
-	/*
-	 * Place it in the queue of disk activities for this disk
-	 */
-	mtx_enter(&sc->sc_buf_mtx);
-	disksort(&sc->sc_buf_queue, bp);
-	mtx_leave(&sc->sc_buf_mtx);
+	/* Place it in the queue of disk activities for this disk. */
+	BUFQ_QUEUE(sc->sc_bufq, bp);	
 
 	/*
 	 * Tell the device to get going on the transfer if it's
 	 * not doing anything, otherwise just wait for completion
 	 */
-	cdstart(sc);
+	scsi_xsh_add(&sc->sc_xsh);
 
 	device_unref(&sc->sc_dev);
 	return;
@@ -539,7 +545,7 @@ bad:
 	bp->b_flags |= B_ERROR;
 done:
 	/*
-	 * Correctly set the buf to indicate a completed xfer
+	 * Set the buf to indicate no xfer was done.
 	 */
 	bp->b_resid = bp->b_bcount;
 	s = splbio();
@@ -566,116 +572,101 @@ done:
  * cdstart() is called at splbio from cdstrategy and scsi_done
  */
 void
-cdstart(void *v)
+cdstart(struct scsi_xfer *xs)
 {
-	struct cd_softc *sc = v;
-	struct scsi_link *sc_link = sc->sc_link;
+	struct scsi_link *sc_link = xs->sc_link;
+	struct cd_softc *sc = sc_link->device_softc;
 	struct buf *bp;
 	struct scsi_rw_big *cmd_big;
 	struct scsi_rw *cmd_small;
 	int blkno, nblks;
 	struct partition *p;
-	struct scsi_xfer *xs;
 	int read;
-	int s;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("cdstart\n"));
 
-	mtx_enter(&sc->sc_start_mtx);
-	sc->sc_start_count++;
-	if (sc->sc_start_count > 1) {
-		mtx_leave(&sc->sc_start_mtx);
+	if (sc->sc_flags & CDF_DYING) {
+		scsi_xs_put(xs);
 		return;
 	}
-	mtx_leave(&sc->sc_start_mtx);
-	CLR(sc->sc_flags, CDF_WAITING);
-restart:
-	while (!ISSET(sc->sc_flags, CDF_WAITING) &&
-	    (bp = scsi_buf_dequeue(&sc->sc_buf_queue, &sc->sc_buf_mtx)) != NULL) {
-		/*
-		 * If the device has become invalid, abort all the
-		 * reads and writes until all files have been closed and
-		 * re-opened
-		 */
-		if ((sc_link->flags & SDEV_MEDIA_LOADED) == 0) {
-			bp->b_error = EIO;
-			bp->b_flags |= B_ERROR;
-			bp->b_resid = bp->b_bcount;
-			s = splbio();
-			biodone(bp);
-			splx(s);
-			continue;
-		}
 
-		xs = scsi_xs_get(sc_link, SCSI_NOSLEEP);
-		if (xs == NULL) {
-			scsi_buf_requeue(&sc->sc_buf_queue, bp, &sc->sc_buf_mtx);
-			break;
-		}
-
-		/*
-		 * We have a buf, now we should make a command
-		 *
-		 * First, translate the block to absolute and put it in terms
-		 * of the logical blocksize of the device.
-		 */
-		blkno =
-		    bp->b_blkno / (sc->sc_dk.dk_label->d_secsize / DEV_BSIZE);
-		p = &sc->sc_dk.dk_label->d_partitions[DISKPART(bp->b_dev)];
-		blkno += DL_GETPOFFSET(p);
-		nblks = howmany(bp->b_bcount, sc->sc_dk.dk_label->d_secsize);
-
-		read = (bp->b_flags & B_READ);
-
-		/*
-		 *  Fill out the scsi command.  If the transfer will
-		 *  fit in a "small" cdb, use it.
-		 */
-		if (!(sc_link->flags & SDEV_ATAPI) &&
-		    !(sc_link->quirks & SDEV_ONLYBIG) && 
-		    ((blkno & 0x1fffff) == blkno) &&
-		    ((nblks & 0xff) == nblks)) {
-			/*
-			 * We can fit in a small cdb.
-			 */
-			cmd_small = (struct scsi_rw *)xs->cmd;
-			cmd_small->opcode = read ?
-			    READ_COMMAND : WRITE_COMMAND;
-			_lto3b(blkno, cmd_small->addr);
-			cmd_small->length = nblks & 0xff;
-			xs->cmdlen = sizeof(*cmd_small);
-		} else {
-			/*
-			 * Need a large cdb.
-			 */
-			cmd_big = (struct scsi_rw_big *)xs->cmd;
-			cmd_big->opcode = read ?
-			    READ_BIG : WRITE_BIG;
-			_lto4b(blkno, cmd_big->addr);
-			_lto2b(nblks, cmd_big->length);
-			xs->cmdlen = sizeof(*cmd_big);
-		}
-
-		xs->flags |= (read ? SCSI_DATA_IN : SCSI_DATA_OUT);
-		xs->timeout = 30000;
-		xs->data = bp->b_data;
-		xs->datalen = bp->b_bcount;
-		xs->done = cd_buf_done;
-		xs->cookie = bp;
-
-		/* Instrumentation. */
-		disk_busy(&sc->sc_dk);
-
-		scsi_xs_exec(xs);
+	/*
+	 * If the device has become invalid, abort all the
+	 * reads and writes until all files have been closed and
+	 * re-opened
+	 */
+	if ((sc_link->flags & SDEV_MEDIA_LOADED) == 0) {
+		bufq_drain(sc->sc_bufq);
+		scsi_xs_put(xs);
+		return;
 	}
-	mtx_enter(&sc->sc_start_mtx);
-	sc->sc_start_count--;
-	if (sc->sc_start_count != 0) {
-		sc->sc_start_count = 1;
-		mtx_leave(&sc->sc_start_mtx);
-		goto restart;
+
+	bp = BUFQ_DEQUEUE(sc->sc_bufq);
+	if (bp == NULL) {
+		scsi_xs_put(xs);
+ 		return;
+ 	}
+
+	/*
+	 * We have a buf, now we should make a command
+	 *
+	 * First, translate the block to absolute and put it in terms
+	 * of the logical blocksize of the device.
+	 */
+	blkno =
+	    bp->b_blkno / (sc->sc_dk.dk_label->d_secsize / DEV_BSIZE);
+	p = &sc->sc_dk.dk_label->d_partitions[DISKPART(bp->b_dev)];
+	blkno += DL_GETPOFFSET(p);
+	nblks = howmany(bp->b_bcount, sc->sc_dk.dk_label->d_secsize);
+
+	read = (bp->b_flags & B_READ);
+
+	/*
+	 *  Fill out the scsi command.  If the transfer will
+	 *  fit in a "small" cdb, use it.
+	 */
+	if (!(sc_link->flags & SDEV_ATAPI) &&
+	    !(sc_link->quirks & SDEV_ONLYBIG) && 
+	    ((blkno & 0x1fffff) == blkno) &&
+	    ((nblks & 0xff) == nblks)) {
+		/*
+		 * We can fit in a small cdb.
+		 */
+		cmd_small = (struct scsi_rw *)xs->cmd;
+		cmd_small->opcode = read ?
+		    READ_COMMAND : WRITE_COMMAND;
+		_lto3b(blkno, cmd_small->addr);
+		cmd_small->length = nblks & 0xff;
+		xs->cmdlen = sizeof(*cmd_small);
+	} else {
+		/*
+		 * Need a large cdb.
+		 */
+		cmd_big = (struct scsi_rw_big *)xs->cmd;
+		cmd_big->opcode = read ?
+		    READ_BIG : WRITE_BIG;
+		_lto4b(blkno, cmd_big->addr);
+		_lto2b(nblks, cmd_big->length);
+		xs->cmdlen = sizeof(*cmd_big);
 	}
-	mtx_leave(&sc->sc_start_mtx);
+
+	xs->flags |= (read ? SCSI_DATA_IN : SCSI_DATA_OUT);
+	xs->timeout = 30000;
+	xs->data = bp->b_data;
+	xs->datalen = bp->b_bcount;
+	xs->done = cd_buf_done;
+	xs->cookie = bp;
+	xs->bp = bp;
+
+	/* Instrumentation. */
+	disk_busy(&sc->sc_dk);
+
+	scsi_xs_exec(xs);
+
+	if (ISSET(sc->sc_flags, CDF_WAITING))
+		CLR(sc->sc_flags, CDF_WAITING);
+	else if (BUFQ_PEEK(sc->sc_bufq))
+		scsi_xsh_add(&sc->sc_xsh);
 }
 
 void
@@ -683,9 +674,8 @@ cd_buf_done(struct scsi_xfer *xs)
 {
 	struct cd_softc *sc = xs->sc_link->device_softc;
 	struct buf *bp = xs->cookie;
+	int error, s;
 
-	splassert(IPL_BIO);
-         
 	switch (xs->error) {
 	case XS_NOERROR:
 		bp->b_error = 0;
@@ -696,15 +686,24 @@ cd_buf_done(struct scsi_xfer *xs)
 		/* The adapter is busy, requeue the buf and try it later. */
 		disk_unbusy(&sc->sc_dk, bp->b_bcount - xs->resid,
 		    bp->b_flags & B_READ);
-		scsi_buf_requeue(&sc->sc_buf_queue, bp, &sc->sc_buf_mtx);
+		BUFQ_REQUEUE(sc->sc_bufq, bp);
 		scsi_xs_put(xs);
-		SET(sc->sc_flags, CDF_WAITING); /* break out of cdstart loop */
+		SET(sc->sc_flags, CDF_WAITING);
 		timeout_add(&sc->sc_timeout, 1);
 		return;
 
 	case XS_SENSE:
 	case XS_SHORTSENSE:
-		if (scsi_interpret_sense(xs) != ERESTART)
+#ifdef SCSIDEBUG
+		scsi_sense_print_debug(xs);
+#endif
+		error = cd_interpret_sense(xs);
+		if (error == 0) {
+			bp->b_error = 0;
+			bp->b_resid = xs->resid;
+			break;
+		}
+		if (error != ERESTART)
 			xs->retries = 0;
 		goto retry;
 
@@ -733,9 +732,10 @@ retry:
 	disk_unbusy(&sc->sc_dk, bp->b_bcount - xs->resid,
 	    bp->b_flags & B_READ);
 
+	s = splbio();
 	biodone(bp);
+	splx(s);
 	scsi_xs_put(xs);
-	cdstart(sc); /* restart io */
 }
 
 void
@@ -800,6 +800,10 @@ cdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	sc = cdlookup(DISKUNIT(dev));
 	if (sc == NULL)
 		return ENXIO;
+	if (sc->sc_flags & CDF_DYING) {
+		device_unref(&sc->sc_dev);
+		return (ENXIO);
+	}
 
 	SC_DEBUG(sc->sc_link, SDEV_DB2, ("cdioctl 0x%lx\n", cmd));
 
@@ -1153,7 +1157,7 @@ cdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			error = ENOTTY;
 			break;
 		}
-		error = scsi_do_ioctl(sc->sc_link, dev, cmd, addr, flag, p);
+		error = scsi_do_ioctl(sc->sc_link, cmd, addr, flag);
 		break;
 	}
 
@@ -1197,8 +1201,6 @@ cdgetdisklabel(dev_t dev, struct cd_softc *sc, struct disklabel *lp,
 
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
 	DL_SETDSIZE(lp, sc->sc_params.disksize);
-	lp->d_rpm = 300;
-	lp->d_interleave = 1;
 	lp->d_version = 1;
 
 	/* XXX - these values for BBSIZE and SBSIZE assume ffs */
@@ -1956,7 +1958,7 @@ cd_interpret_sense(struct scsi_xfer *xs)
 
 	if (((sc_link->flags & SDEV_OPEN) == 0) ||
 	    (serr != SSD_ERRCODE_CURRENT && serr != SSD_ERRCODE_DEFERRED))
-		return (EJUSTRETURN); /* let the generic code handle it */
+		return (scsi_interpret_sense(xs));
 
 	/*
 	 * We do custom processing in cd for the unit becoming ready
@@ -1986,7 +1988,7 @@ cd_interpret_sense(struct scsi_xfer *xs)
 	default:
 		break;
 	}
-	return (EJUSTRETURN); /* use generic handler in scsi_base */
+	return (scsi_interpret_sense(xs));
 }
 
 #if defined(__macppc__)

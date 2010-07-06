@@ -1,4 +1,4 @@
-/*	$OpenBSD: pchb.c,v 1.32 2010/02/09 19:36:05 kettenis Exp $	*/
+/*	$OpenBSD: pchb.c,v 1.34 2010/06/24 00:06:57 kettenis Exp $	*/
 /*	$NetBSD: pchb.c,v 1.1 2003/04/26 18:39:50 fvdl Exp $	*/
 /*
  * Copyright (c) 2000 Michael Shalayeff
@@ -90,8 +90,10 @@
 #define AMD64HT_LDT1_TYPE	0xb8
 #define AMD64HT_LDT2_BUS	0xd4
 #define AMD64HT_LDT2_TYPE	0xd8
+#define AMD64HT_LDT3_BUS	0xf4
+#define AMD64HT_LDT3_TYPE	0xf8
 
-#define AMD64HT_NUM_LDT		3
+#define AMD64HT_NUM_LDT		4
 
 #define AMD64HT_LDT_TYPE_MASK		0x0000001f
 #define  AMD64HT_LDT_INIT_COMPLETE	0x00000002
@@ -222,7 +224,8 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 			bir = pci_conf_read(pa->pa_pc,
 			    pa->pa_tag, PPB_REG_BUSINFO);
 			pbnum = PPB_BUSINFO_PRIMARY(bir);
-			doattach = 1;
+			if (pbnum > 0)
+				doattach = 1;
 
 			/* Switch back to host bridge mode. */
 			bcreg |= 0x00000004; /* XXX Magic */

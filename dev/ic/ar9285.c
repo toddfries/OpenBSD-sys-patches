@@ -1,8 +1,8 @@
-/*	$OpenBSD: ar9285.c,v 1.5 2010/02/07 12:02:52 damien Exp $	*/
+/*	$OpenBSD: ar9285.c,v 1.8 2010/05/10 17:44:21 damien Exp $	*/
 
 /*-
- * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
- * Copyright (c) 2008-2009 Atheros Communications Inc.
+ * Copyright (c) 2009-2010 Damien Bergamini <damien.bergamini@free.fr>
+ * Copyright (c) 2008-2010 Atheros Communications Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -26,7 +26,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -63,6 +62,7 @@
 #include <dev/ic/athnreg.h>
 #include <dev/ic/athnvar.h>
 
+#include <dev/ic/ar5008reg.h>
 #include <dev/ic/ar9280reg.h>
 #include <dev/ic/ar9285reg.h>
 
@@ -73,6 +73,8 @@ const	struct ar_spur_chan *ar9285_get_spur_chans(struct athn_softc *, int);
 void	ar9285_init_from_rom(struct athn_softc *, struct ieee80211_channel *,
 	    struct ieee80211_channel *);
 void	ar9285_pa_calib(struct athn_softc *);
+int	ar9285_1_2_cl_cal(struct athn_softc *, struct ieee80211_channel *,
+	    struct ieee80211_channel *);
 int	ar9285_1_2_init_calib(struct athn_softc *, struct ieee80211_channel *,
 	    struct ieee80211_channel *);
 void	ar9285_get_pdadcs(struct athn_softc *, struct ieee80211_channel *,
@@ -82,11 +84,28 @@ void	ar9285_set_power_calib(struct athn_softc *,
 void	ar9285_set_txpower(struct athn_softc *, struct ieee80211_channel *,
 	    struct ieee80211_channel *);
 
+/* Extern functions. */
+uint8_t	athn_chan2fbin(struct ieee80211_channel *);
+void	athn_get_pier_ival(uint8_t, const uint8_t *, int, int *, int *);
+int	ar5008_attach(struct athn_softc *);
+void	ar5008_write_txpower(struct athn_softc *, int16_t power[]);
+void	ar5008_get_pdadcs(struct athn_softc *, uint8_t, struct athn_pier *,
+	    struct athn_pier *, int, int, uint8_t, uint8_t *, uint8_t *);
+void	ar5008_get_lg_tpow(struct athn_softc *, struct ieee80211_channel *,
+	    uint8_t, const struct ar_cal_target_power_leg *, int, uint8_t[]);
+void	ar5008_get_ht_tpow(struct athn_softc *, struct ieee80211_channel *,
+	    uint8_t, const struct ar_cal_target_power_ht *, int, uint8_t[]);
+int	ar9280_set_synth(struct athn_softc *, struct ieee80211_channel *,
+	    struct ieee80211_channel *);
+void	ar9280_spur_mitigate(struct athn_softc *, struct ieee80211_channel *,
+	    struct ieee80211_channel *);
+
+
 int
 ar9285_attach(struct athn_softc *sc)
 {
 	sc->eep_base = AR9285_EEP_START_LOC;
-	sc->eep_size = sizeof (struct ar9285_eeprom);
+	sc->eep_size = sizeof(struct ar9285_eeprom);
 	sc->def_nf = AR9285_PHY_CCA_MAX_GOOD_VALUE;
 	sc->ngpiopins = 12;
 	sc->led_pin = 1;
@@ -104,7 +123,8 @@ ar9285_attach(struct athn_softc *sc)
 	else
 		sc->ini = &ar9285_1_0_ini;
 	sc->serdes = ar9280_2_0_serdes;
-	return (0);
+
+	return (ar5008_attach(sc));
 }
 
 void
@@ -113,14 +133,21 @@ ar9285_setup(struct athn_softc *sc)
 	const struct ar9285_eeprom *eep = sc->eep;
 	uint8_t type;
 
-	if (AR_SREV_9285_12(sc)) {
+	if (AR_SREV_9285_12_OR_LATER(sc)) {
 		/* Select initialization values based on ROM. */
 		type = eep->baseEepHeader.txGainType;
 		DPRINTF(("Tx gain type=0x%x\n", type));
-		if (type == AR_EEP_TXGAIN_HIGH_POWER)
-			sc->tx_gain = &ar9285_1_2_tx_gain_high_power;
-		else
-			sc->tx_gain = &ar9285_1_2_tx_gain;
+		if ((AR_READ(sc, AR_AN_SYNTH9) & 0x7) == 0x1) {	/* XE rev. */
+			if (type == AR_EEP_TXGAIN_HIGH_POWER)
+				sc->tx_gain = &ar9285_2_0_tx_gain_high_power;
+			else
+				sc->tx_gain = &ar9285_2_0_tx_gain;
+		} else {
+			if (type == AR_EEP_TXGAIN_HIGH_POWER)
+				sc->tx_gain = &ar9285_1_2_tx_gain_high_power;
+			else
+				sc->tx_gain = &ar9285_1_2_tx_gain;
+		}
 	}
 }
 
@@ -147,7 +174,7 @@ ar9285_get_spur_chans(struct athn_softc *sc, int is2ghz)
 	const struct ar9285_eeprom *eep = sc->eep;
 
 	KASSERT(is2ghz);
-	return eep->modalHeader.spurChans;
+	return (eep->modalHeader.spurChans);
 }
 
 void
@@ -208,7 +235,7 @@ ar9285_init_from_rom(struct athn_softc *sc, struct ieee80211_channel *c,
 	AR_WRITE(sc, AR_PHY_RXGAIN + offset, reg);
 
 	if (AR_SREV_9285_11(sc))
-		AR_WRITE(sc, AR9285_AN_TOP4, AR9285_AN_TOP4_DEFAULT | 0x14);
+		AR_WRITE(sc, AR9285_AN_TOP4, AR9285_AN_TOP4_UNLOCKED);
 
 	if (modal->version >= 3) {
 		/* Setup antenna diversity from ROM. */
@@ -372,8 +399,7 @@ ar9285_pa_calib(struct athn_softc *sc)
 		return;
 
 	if (AR_SREV_9285_11(sc)) {
-		/* XXX magic 0x14. */
-		AR_WRITE(sc, AR9285_AN_TOP4, AR9285_AN_TOP4_DEFAULT | 0x14);
+		AR_WRITE(sc, AR9285_AN_TOP4, AR9285_AN_TOP4_UNLOCKED);
 		DELAY(10);
 	}
 
@@ -456,10 +482,10 @@ ar9285_pa_calib(struct athn_softc *sc)
 }
 
 /*
- * Carrier Leak Calibration (>= AR9285 1.2 only.)
+ * Carrier Leakage Calibration (>= AR9285 1.2 only.)
  */
 int
-ar9285_1_2_init_calib(struct athn_softc *sc, struct ieee80211_channel *c,
+ar9285_1_2_cl_cal(struct athn_softc *sc, struct ieee80211_channel *c,
     struct ieee80211_channel *extc)
 {
 	int ntries;
@@ -504,6 +530,54 @@ ar9285_1_2_init_calib(struct athn_softc *sc, struct ieee80211_channel *c,
 	return (0);
 }
 
+int
+ar9285_1_2_init_calib(struct athn_softc *sc, struct ieee80211_channel *c,
+    struct ieee80211_channel *extc)
+{
+	uint32_t reg, mask, clcgain, rf2g5_svg;
+	int i, maxgain, nclcs, thresh, error;
+
+	/* Do carrier leakage calibration. */
+	if ((error = ar9285_1_2_cl_cal(sc, c, extc)) != 0)
+		return (error);
+
+	mask = 0;
+	nclcs = 0;
+	reg = AR_READ(sc, AR_PHY_TX_PWRCTRL7);
+	maxgain = MS(reg, AR_PHY_TX_PWRCTRL_TX_GAIN_TAB_MAX);
+	for (i = 0; i <= maxgain; i++) {
+		reg = AR_READ(sc, AR_PHY_TX_GAIN_TBL(i));
+		clcgain = MS(reg, AR_PHY_TX_GAIN_CLC);
+		/* NB: clcgain <= 0xf. */
+		if (!(mask & (1 << clcgain))) {
+			mask |= 1 << clcgain;
+			nclcs++;
+		}
+	}
+	thresh = 0;
+	for (i = 0; i < nclcs; i++) {
+		reg = AR_READ(sc, AR_PHY_CLC_TBL(i));
+		if (MS(reg, AR_PHY_CLC_I0) == 0)
+			thresh++;
+		if (MS(reg, AR_PHY_CLC_Q0) == 0)
+			thresh++;
+	}
+	if (thresh <= AR9285_CL_CAL_REDO_THRESH)
+		return (0);	/* No need to redo. */
+
+	/* Threshold reached, redo carrier leakage calibration. */
+	DPRINTFN(2, ("CLC threshold=%d\n", thresh));
+	rf2g5_svg = reg = AR_READ(sc, AR9285_AN_RF2G5);
+	if ((AR_READ(sc, AR_AN_SYNTH9) & 0x7) == 0x1)	/* XE rev. */
+		reg = RW(reg, AR9285_AN_RF2G5_IC50TX, 0x5);
+	else
+		reg = RW(reg, AR9285_AN_RF2G5_IC50TX, 0x4);
+	AR_WRITE(sc, AR9285_AN_RF2G5, reg);
+	error = ar9285_1_2_cl_cal(sc, c, extc);
+	AR_WRITE(sc, AR9285_AN_RF2G5, rf2g5_svg);
+	return (error);
+}
+
 void
 ar9285_get_pdadcs(struct athn_softc *sc, struct ieee80211_channel *c,
     int nxpdgains, uint8_t overlap, uint8_t *boundaries, uint8_t *pdadcs)
@@ -531,7 +605,7 @@ ar9285_get_pdadcs(struct athn_softc *sc, struct ieee80211_channel *c,
 		hipier.pwr[i] = pierdata[lo].pwrPdg[i];
 		hipier.vpd[i] = pierdata[lo].vpdPdg[i];
 	}
-	athn_get_pdadcs(sc, fbin, &lopier, &hipier, nxpdgains,
+	ar5008_get_pdadcs(sc, fbin, &lopier, &hipier, nxpdgains,
 	    AR9285_PD_GAIN_ICEPTS, overlap, boundaries, pdadcs);
 }
 
@@ -553,7 +627,7 @@ ar9285_set_power_calib(struct athn_softc *sc, struct ieee80211_channel *c)
 		overlap = eep->modalHeader.pdGainOverlap;
 
 	nxpdgains = 0;
-	memset(xpdgains, 0, sizeof xpdgains);
+	memset(xpdgains, 0, sizeof(xpdgains));
 	for (i = AR9285_PD_GAINS_IN_MASK - 1; i >= 0; i--) {
 		if (nxpdgains >= AR9285_NUM_PD_GAINS)
 			break;
@@ -609,36 +683,37 @@ ar9285_set_txpower(struct athn_softc *sc, struct ieee80211_channel *c,
 	/* XXX */
 
 	/* Get CCK target powers. */
-	athn_get_lg_tpow(sc, c, AR_CTL_11B, eep->calTargetPowerCck,
+	ar5008_get_lg_tpow(sc, c, AR_CTL_11B, eep->calTargetPowerCck,
 	    AR9285_NUM_2G_CCK_TARGET_POWERS, tpow_cck);
 
 	/* Get OFDM target powers. */
-	athn_get_lg_tpow(sc, c, AR_CTL_11G, eep->calTargetPower2G,
+	ar5008_get_lg_tpow(sc, c, AR_CTL_11G, eep->calTargetPower2G,
 	    AR9285_NUM_2G_20_TARGET_POWERS, tpow_ofdm);
 
 #ifndef IEEE80211_NO_HT
 	/* Get HT-20 target powers. */
-	athn_get_ht_tpow(sc, c, AR_CTL_2GHT20, eep->calTargetPower2GHT20,
+	ar5008_get_ht_tpow(sc, c, AR_CTL_2GHT20, eep->calTargetPower2GHT20,
 	    AR9285_NUM_2G_20_TARGET_POWERS, tpow_ht20);
 
 	if (extc != NULL) {
 		/* Get HT-40 target powers. */
-		athn_get_ht_tpow(sc, c, AR_CTL_2GHT40,
+		ar5008_get_ht_tpow(sc, c, AR_CTL_2GHT40,
 		    eep->calTargetPower2GHT40, AR9285_NUM_2G_40_TARGET_POWERS,
 		    tpow_ht40);
 
 		/* Get secondary channel CCK target powers. */
-		athn_get_lg_tpow(sc, extc, AR_CTL_11B, eep->calTargetPowerCck,
-		    AR9285_NUM_2G_CCK_TARGET_POWERS, tpow_cck_ext);
+		ar5008_get_lg_tpow(sc, extc, AR_CTL_11B,
+		    eep->calTargetPowerCck, AR9285_NUM_2G_CCK_TARGET_POWERS,
+		    tpow_cck_ext);
 
 		/* Get secondary channel OFDM target powers. */
-		athn_get_lg_tpow(sc, extc, AR_CTL_11G,
+		ar5008_get_lg_tpow(sc, extc, AR_CTL_11G,
 		    eep->calTargetPower2G, AR9285_NUM_2G_20_TARGET_POWERS,
 		    tpow_ofdm_ext);
 	}
 #endif
 
-	memset(power, 0, sizeof power);
+	memset(power, 0, sizeof(power));
 	/* Shuffle target powers accross transmit rates. */
 	power[ATHN_POWER_OFDM6   ] =
 	power[ATHN_POWER_OFDM9   ] =
@@ -681,5 +756,5 @@ ar9285_set_txpower(struct athn_softc *sc, struct ieee80211_channel *c,
 	}
 
 	/* Commit transmit power values to hardware. */
-	athn_write_txpower(sc, power);
+	ar5008_write_txpower(sc, power);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.177 2010/01/13 05:25:06 claudio Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.181 2010/07/02 02:40:16 blambert Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -2319,6 +2319,9 @@ bridge_ipsec(struct bridge_softc *sc, struct ifnet *ifp,
 #ifdef INET6
 	struct ip6_hdr *ip6;
 #endif /* INET6 */
+#if NPF > 0
+	struct ifnet *encif;
+#endif
 
 	if (dir == BRIDGE_IN) {
 		switch (af) {
@@ -2454,7 +2457,9 @@ bridge_ipsec(struct bridge_softc *sc, struct ifnet *ifp,
 			switch (af) {
 #ifdef INET
 			case AF_INET:
-				if (pf_test(dir, &encif[0].sc_if,
+				if ((encif = enc_getif(0,
+				    tdb->tdb_tap)) == NULL ||
+				    pf_test(dir, encif,
 				    &m, NULL) != PF_PASS) {
 					m_freem(m);
 					return (1);
@@ -2463,7 +2468,9 @@ bridge_ipsec(struct bridge_softc *sc, struct ifnet *ifp,
 #endif /* INET */
 #ifdef INET6
 			case AF_INET6:
-				if (pf_test6(dir, &encif[0].sc_if,
+				if ((encif = enc_getif(0,
+				    tdb->tdb_tap)) == NULL ||
+				    pf_test6(dir, encif,
 				    &m, NULL) != PF_PASS) {
 					m_freem(m);
 					return (1);
@@ -2704,7 +2711,8 @@ bridge_fragment(struct bridge_softc *sc, struct ifnet *ifp,
 #else
 	etype = ntohs(eh->ether_type);
 #if NVLAN > 0
-	if ((m->m_flags & M_VLANTAG) || etype == ETHERTYPE_VLAN) {
+	if ((m->m_flags & M_VLANTAG) || etype == ETHERTYPE_VLAN ||
+	    etype == ETHERTYPE_QINQ) {
 		int len = m->m_pkthdr.len;
 
 		if (m->m_flags & M_VLANTAG)
@@ -2837,7 +2845,7 @@ bridge_ifenqueue(struct bridge_softc *sc, struct ifnet *ifp, struct mbuf *m)
 			sc->sc_if.if_oerrors++;
 			return (ENOBUFS);
 		}
-		m_copyback(m, 0, sizeof(evh), &evh);
+		m_copyback(m, 0, sizeof(evh), &evh, M_NOWAIT);
 		m->m_flags &= ~M_VLANTAG;
 	}
 #endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubsec.c,v 1.145 2010/01/10 12:43:07 markus Exp $	*/
+/*	$OpenBSD: ubsec.c,v 1.147 2010/07/02 02:40:16 blambert Exp $	*/
 
 /*
  * Copyright (c) 2000 Jason L. Wright (jason@thought.net)
@@ -40,7 +40,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/errno.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
@@ -957,7 +957,7 @@ ubsec_process(struct cryptop *crp)
 				if (crp->crp_flags & CRYPTO_F_IMBUF)
 					m_copyback(q->q_src_m,
 					    enccrd->crd_inject,
-					    ivlen, key.ses_iv);
+					    ivlen, key.ses_iv, M_NOWAIT);
 				else if (crp->crp_flags & CRYPTO_F_IOV)
 					cuio_copyback(q->q_src_io,
 					    enccrd->crd_inject,
@@ -1463,7 +1463,7 @@ ubsec_callback(struct ubsec_softc *sc, struct ubsec_q *q)
 		if (crp->crp_flags & CRYPTO_F_IMBUF)
 			m_copyback((struct mbuf *)crp->crp_buf,
 			    crd->crd_inject, 12,
-			    dmap->d_dma->d_macbuf);
+			    dmap->d_dma->d_macbuf, M_NOWAIT);
 		else if (crp->crp_flags & CRYPTO_F_IOV && crp->crp_mac)
 			bcopy((caddr_t)dmap->d_dma->d_macbuf,
 			    crp->crp_mac, 12);

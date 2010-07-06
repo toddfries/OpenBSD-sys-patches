@@ -1,4 +1,5 @@
-/*	$Id: pipex.c,v 1.3 2010/01/13 07:23:38 yasuoka Exp $	*/
+/*	$OpenBSD: pipex.c,v 1.5 2010/07/03 00:16:07 yasuoka Exp $	*/
+
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
  * All rights reserved.
@@ -1180,7 +1181,8 @@ pipex_pppoe_output(struct mbuf *m0, struct pipex_session *session)
 	}
 	padlen = ETHERMIN - m0->m_pkthdr.len;
 	if (padlen > 0)
-		m_copyback(m0, m0->m_pkthdr.len, padlen, pipex_pppoe_padding);
+		m_copyback(m0, m0->m_pkthdr.len, padlen, pipex_pppoe_padding,
+		    M_NOWAIT);
 
 	/* setup pppoe header information */
 	pppoe = mtod(m0, struct pipex_pppoe_header *);

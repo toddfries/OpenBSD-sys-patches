@@ -1,4 +1,4 @@
-/*	$OpenBSD: adw.c,v 1.41 2010/01/10 00:10:23 krw Exp $ */
+/*	$OpenBSD: adw.c,v 1.46 2010/06/28 18:31:01 krw Exp $ */
 /* $NetBSD: adw.c,v 1.23 2000/05/27 18:24:50 dante Exp $	 */
 
 /*
@@ -41,7 +41,6 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/timeout.h>
 
 #include <machine/bus.h>
@@ -66,7 +65,7 @@ int adw_init_ccb(ADW_SOFTC *, ADW_CCB *);
 ADW_CCB *adw_get_ccb(ADW_SOFTC *, int);
 int adw_queue_ccb(ADW_SOFTC *, ADW_CCB *, int);
 
-int adw_scsi_cmd(struct scsi_xfer *);
+void adw_scsi_cmd(struct scsi_xfer *);
 int adw_build_req(struct scsi_xfer *, ADW_CCB *, int);
 void adw_build_sglist(ADW_CCB *, ADW_SCSI_REQ_Q *, ADW_SG_BLOCK *);
 void adw_minphys(struct buf *, struct scsi_link *);
@@ -87,16 +86,6 @@ struct cfdriver adw_cd = {
 	NULL, "adw", DV_DULL
 };
 
-/* the below structure is so we have a default dev struct for our link struct */
-struct scsi_device adw_dev =
-{
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
-};
-
-
 /******************************************************************************/
 /*                       DMA Mapping for Control Blocks                       */
 /******************************************************************************/
@@ -113,7 +102,7 @@ adw_alloc_controls(sc)
          * Allocate the control structure.
          */
 	if ((error = bus_dmamem_alloc(sc->sc_dmat, sizeof(struct adw_control),
-			   NBPG, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) != 0) {
+	    NBPG, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) != 0) {
 		printf("%s: unable to allocate control structures,"
 		       " error = %d\n", sc->sc_dev.dv_xname, error);
 		return (error);
@@ -474,8 +463,6 @@ adw_attach(sc)
 	if (error)
 		return; /* (error) */ ;
 
-	bzero(sc->sc_control, sizeof(struct adw_control));
-
 	/*
 	 * Create and initialize the Control Blocks.
 	 */
@@ -565,7 +552,6 @@ adw_attach(sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->chip_scsi_id;
 	sc->sc_link.adapter = &sc->sc_adapter;
-	sc->sc_link.device = &adw_dev;
 	sc->sc_link.openings = 4;
 	sc->sc_link.adapter_buswidth = ADW_MAX_TID+1;
 
@@ -590,7 +576,7 @@ adw_minphys(struct buf *bp, struct scsi_link *sl)
  * start a scsi operation given the command and the data address.
  * Also needs the unit, target and lu.
  */
-int
+void
 adw_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -612,8 +598,10 @@ adw_scsi_cmd(xs)
 	if (nowait)
 		flags |= SCSI_NOSLEEP;
 	if ((ccb = adw_get_ccb(sc, flags)) == NULL) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
 		splx(s);
-		return (NO_CCB);
+		return;
 	}
 	splx(s);		/* done playing with the queue */
 
@@ -632,17 +620,15 @@ retryagain:
 
 		case ADW_ERROR:
 			xs->error = XS_DRIVER_STUFFUP;
-			s = splbio();
 			scsi_done(xs);
-			splx(s);
-			return (COMPLETE);
+			return;
 		}
 
 		/*
 	         * Usually return SUCCESSFULLY QUEUED
 	         */
 		if ((xs->flags & SCSI_POLL) == 0)
-			return (SUCCESSFULLY_QUEUED);
+			return;
 
 		/*
 	         * If we can't use interrupts, poll on completion
@@ -654,11 +640,8 @@ retryagain:
 		}
 	} else {
 		/* adw_build_req() has set xs->error already */
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 	}
-	return (COMPLETE);
 }
 
 
@@ -695,10 +678,9 @@ adw_build_req(xs, ccb, flags)
 	 * For wide  boards a CDB length maximum of 16 bytes
 	 * is supported.
 	 */
-	bcopy(xs->cmd, &scsiqp->cdb, ((scsiqp->cdb_len = xs->cmdlen) <= 12)?
-			xs->cmdlen : 12 );
-	if(xs->cmdlen > 12)
-		bcopy(&(xs->cmd[12]),  &scsiqp->cdb16, xs->cmdlen - 12);
+	scsiqp->cdb_len = xs->cmdlen;
+	bcopy((caddr_t)xs->cmd, &scsiqp->cdb, 12);
+	bcopy((caddr_t)xs->cmd + 12, &scsiqp->cdb16, 4);
 
 	scsiqp->target_id = sc_link->target;
 	scsiqp->target_lun = sc_link->lun;

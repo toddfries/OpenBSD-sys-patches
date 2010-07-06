@@ -1,4 +1,4 @@
-/*	$OpenBSD: ss_scanjet.c,v 1.37 2010/01/15 05:50:31 krw Exp $	*/
+/*	$OpenBSD: ss_scanjet.c,v 1.44 2010/07/01 05:11:18 krw Exp $	*/
 /*	$NetBSD: ss_scanjet.c,v 1.6 1996/05/18 22:58:01 christos Exp $	*/
 
 /*
@@ -42,7 +42,6 @@
 #include <sys/ioctl.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/device.h>
 #include <sys/conf.h>		/* for cdevsw */
 #include <sys/scanio.h>
@@ -298,6 +297,7 @@ scanjet_read(ss, xs, bp)
 	xs->timeout = 100000;
 	xs->done = scanjet_read_done;
 	xs->cookie = bp;
+	xs->bp = bp;
 
 	scsi_xs_exec(xs);
 
@@ -309,8 +309,7 @@ scanjet_read_done(struct scsi_xfer *xs)
 {
 	struct ss_softc *ss = xs->sc_link->device_softc;
 	struct buf *bp = xs->cookie;
-
-	splassert(IPL_BIO);
+	int error, s;
 
 	switch (xs->error) {
 	case XS_NOERROR:
@@ -325,15 +324,28 @@ scanjet_read_done(struct scsi_xfer *xs)
 
 	case XS_NO_CCB:
 		/* The adapter is busy, requeue the buf and try it later. */
-		scsi_buf_requeue(&ss->sc_buf_queue, bp, &ss->sc_buf_mtx);
+		BUFQ_REQUEUE(ss->sc_bufq, bp);
                 scsi_xs_put(xs);
-		SET(ss->flags, SSF_WAITING); /* break out of cdstart loop */
+		SET(ss->flags, SSF_WAITING);
 		timeout_add(&ss->timeout, 1);
 		return;
 
 	case XS_SENSE:
 	case XS_SHORTSENSE:
-		if (scsi_interpret_sense(xs) != ERESTART)
+#ifdef SCSIDEBUG
+		scsi_sense_print_debug(xs);
+#endif
+		error = scsi_interpret_sense(xs);
+		if (error == 0) {
+			if (bp->b_bcount >= ss->sio.scan_window_size)
+				ss->sio.scan_window_size = 0;
+			else
+				ss->sio.scan_window_size -= bp->b_bcount;
+			bp->b_error = 0;
+			bp->b_resid = xs->resid;
+			break;
+		}
+		if (error != ERESTART)
 			xs->retries = 0;
 		goto retry;
 
@@ -359,7 +371,9 @@ retry:
 		break;
 	}
 
+	s = splbio();
 	biodone(bp);
+	splx(s);
 	scsi_xs_put(xs);
 }
 

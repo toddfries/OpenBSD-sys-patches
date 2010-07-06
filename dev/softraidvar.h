@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.89 2010/02/13 21:19:26 jsing Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.94 2010/07/02 09:26:05 jsing Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -22,22 +22,36 @@
 #include <crypto/md5.h>
 #include <sys/vnode.h>
 
-#define SR_UUID_MAX		16
-struct sr_uuid {
-	u_int8_t		sui_id[SR_UUID_MAX];
-} __packed;
+#define SR_META_VERSION		4	/* bump when sr_metadata changes */
+#define SR_META_SIZE		64	/* save space at chunk beginning */
+#define SR_META_OFFSET		16	/* skip 8192 bytes at chunk beginning */
+
+#define SR_META_V3_SIZE		64
+#define SR_META_V3_OFFSET	16
+#define SR_META_V3_DATA_OFFSET	(SR_META_V3_OFFSET + SR_META_V3_SIZE)
+
+#define SR_META_F_NATIVE	0	/* Native metadata format. */
+#define SR_META_F_INVALID	-1
+
+#define SR_BOOT_OFFSET		(SR_META_OFFSET + SR_META_SIZE)
+#define SR_BOOT_LOADER_SIZE	320	/* Size of boot loader storage. */
+#define SR_BOOT_LOADER_OFFSET	SR_BOOT_OFFSET
+#define SR_BOOT_BLOCKS_SIZE	128	/* Size of boot block storage. */
+#define SR_BOOT_BLOCKS_OFFSET	(SR_BOOT_LOADER_OFFSET + SR_BOOT_LOADER_SIZE)
+#define SR_BOOT_SIZE		(SR_BOOT_LOADER_SIZE + SR_BOOT_BLOCKS_SIZE)
+
+#define SR_HEADER_SIZE		(SR_META_SIZE + SR_BOOT_SIZE)
+#define SR_DATA_OFFSET		(SR_META_OFFSET + SR_HEADER_SIZE)
 
 #define SR_HOTSPARE_LEVEL	0xffffffff
 #define SR_HOTSPARE_VOLID	0xffffffff
 #define SR_KEYDISK_LEVEL	0xfffffffe
 #define SR_KEYDISK_VOLID	0xfffffffe
 
-#define SR_META_SIZE		64	/* save space at chunk beginning */
-#define SR_META_OFFSET		16	/* skip 8192 bytes at chunk beginning */
-#define SR_META_VERSION		3	/* bump when sr_metadata changes */
-
-#define SR_META_F_NATIVE	0	/* Native metadata format. */
-#define SR_META_F_INVALID	-1
+#define SR_UUID_MAX		16
+struct sr_uuid {
+	u_int8_t		sui_id[SR_UUID_MAX];
+} __packed;
 
 struct sr_metadata {
 	struct sr_meta_invariant {
@@ -45,7 +59,7 @@ struct sr_metadata {
 		u_int64_t	ssd_magic;	/* magic id */
 #define	SR_MAGIC		0x4d4152436372616dLLU
 		u_int32_t	ssd_version; 	/* meta data version */
-		u_int32_t	ssd_flags;
+		u_int32_t	ssd_vol_flags;	/* volume specific flags. */
 		struct sr_uuid	ssd_uuid;	/* unique identifier */
 
 		/* chunks */
@@ -72,7 +86,7 @@ struct sr_metadata {
 	char			ssd_devname[32];/* /dev/XXXXX */
 	u_int32_t		ssd_meta_flags;
 #define	SR_META_DIRTY		0x1
-	u_int32_t		ssd_pad;
+	u_int32_t		ssd_data_offset;
 	u_int64_t		ssd_ondisk;	/* on disk version counter */
 	int64_t			ssd_rebuild;	/* last block of rebuild */
 } __packed;
@@ -136,21 +150,43 @@ struct sr_meta_crypto {
 #define	chk_hmac_sha1	_scm_chk.chk_hmac_sha1
 } __packed;
 
+struct sr_meta_boot {
+	u_int64_t		sbm_root_uid;
+	u_int32_t		sbm_bootblk_size;
+	u_int32_t		sbm_bootldr_size;
+} __packed;
+
+struct sr_meta_keydisk {
+	u_int8_t		skm_maskkey[SR_CRYPTO_MAXKEYBYTES];
+} __packed;
+
 struct sr_meta_opt {
 	struct sr_meta_opt_invariant {
 		u_int32_t	som_type;	/* optional type */
 #define SR_OPT_INVALID		0x00
 #define SR_OPT_CRYPTO		0x01
+#define SR_OPT_BOOT		0x02
+#define SR_OPT_KEYDISK		0x03
 		u_int32_t	som_pad;
 		union {
 			struct sr_meta_crypto smm_crypto;
+			struct sr_meta_boot smm_boot;
+			struct sr_meta_keydisk smm_keydisk;
 		}		som_meta;
 	} _som_invariant;
 #define somi			_som_invariant
 #define somi_crypto		_som_invariant.smm_crypto
+#define somi_boot		_som_invariant.smm_boot
 	/* MD5 of invariant optional metadata */
 	u_int8_t		som_checksum[MD5_DIGEST_LENGTH];
 } __packed;
+
+struct sr_meta_opt_item {
+	struct sr_meta_opt	omi_om;
+	SLIST_ENTRY(sr_meta_opt_item) omi_link;
+};
+
+SLIST_HEAD(sr_meta_opt_head, sr_meta_opt_item);
 
 /* this is a generic hint for KDF done in userland, not interpreted by the kernel. */
 struct sr_crypto_genkdf {
@@ -336,7 +372,7 @@ struct sr_raid6 {
 /* CRYPTO */
 #define SR_CRYPTO_NOWU		16
 struct sr_crypto {
-	struct sr_meta_crypto	scr_meta;
+	struct sr_meta_crypto	*scr_meta;
 	struct sr_chunk		*key_disk;
 
 	struct pool		sr_uiopl;
@@ -384,7 +420,6 @@ SLIST_HEAD(sr_boot_volume_head, sr_boot_volume);
 
 struct sr_chunk {
 	struct sr_meta_chunk	src_meta;	/* chunk meta data */
-	struct sr_meta_opt	src_opt;	/* optional metadata */
 
 	/* runtime data */
 	dev_t			src_dev_mm;	/* major/minor */
@@ -449,6 +484,7 @@ struct sr_discipline {
 	void			*sd_meta_foreign; /* non native metadata */
 	u_int32_t		sd_meta_flags;
 	int			sd_meta_type;	/* metadata functions */
+	struct sr_meta_opt_head sd_meta_opt; /* optional metadata. */
 
 	int			sd_sync;
 	int			sd_must_flush;
@@ -495,6 +531,8 @@ struct sr_discipline {
 				    int, int);
 	void			(*sd_set_vol_state)(struct sr_discipline *);
 	int			(*sd_openings)(struct sr_discipline *);
+	int			(*sd_meta_opt_load)(struct sr_discipline *,
+				    struct sr_meta_opt *);
 
 	/* SCSI emulation */
 	struct scsi_sense_data	sd_scsi_sense;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.44 2008/06/29 01:27:42 miod Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.46 2010/06/07 19:54:33 miod Exp $	*/
 /*	$NetBSD: cpu.c,v 1.56 1997/09/15 20:52:36 pk Exp $ */
 
 /*
@@ -138,20 +138,6 @@ static char *iu_vendor[16] = {
 };
 #endif
 
-/*
- * 4/110 comment: the 4/110 chops off the top 4 bits of an OBIO address.
- *	this confuses autoconf.  for example, if you try and map
- *	0xfe000000 in obio space on a 4/110 it actually maps 0x0e000000.
- *	this is easy to verify with the PROM.   this causes problems
- *	with devices like "esp0 at obio0 addr 0xfa000000" because the
- *	4/110 treats it as esp0 at obio0 addr 0x0a000000" which is the
- *	address of the 4/110's "sw0" scsi chip.   the same thing happens
- *	between zs1 and zs2.    since the sun4 line is "closed" and
- *	we know all the "obio" devices that will ever be on it we just
- *	put in some special case "if"'s in the match routines of esp,
- *	dma, and zs.
- */
-
 int
 cpu_match(parent, vcf, aux)
 	struct device *parent;
@@ -257,10 +243,12 @@ cpu_attach(parent, self, aux)
 		 * nasty to happen to the pagetables while the cache is
 		 * enabled and we haven't uncached them yet.
 		 */
-		s = splhigh();
-		sc->cache_enable();
-		pmap_cache_enable();
-		splx(s);
+		if (sc->cacheinfo.c_totalsize != 0) {
+			s = splhigh();
+			sc->cache_enable();
+			pmap_cache_enable();
+			splx(s);
+		}
 		return;
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ss.c,v 1.70 2010/01/15 05:50:31 krw Exp $	*/
+/*	$OpenBSD: ss.c,v 1.79 2010/07/01 05:11:18 krw Exp $	*/
 /*	$NetBSD: ss.c,v 1.10 1996/05/05 19:52:55 christos Exp $	*/
 
 /*
@@ -38,7 +38,6 @@
 #include <sys/ioctl.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/device.h>
 #include <sys/conf.h>
 #include <sys/scanio.h>
@@ -112,7 +111,7 @@ struct  quirkdata ss_gen_quirks = {
 };
 
 void    ssstrategy(struct buf *);
-void    ssstart(void *);
+void    ssstart(struct scsi_xfer *);
 void	ssdone(struct scsi_xfer *);
 void	ssminphys(struct buf *);
 
@@ -253,13 +252,6 @@ struct cfdriver ss_cd = {
 	NULL, "ss", DV_DULL
 };
 
-struct scsi_device ss_switch = {
-	NULL,
-	ssstart,
-	NULL,
-	NULL,
-};
-
 const struct scsi_inquiry_pattern ss_patterns[] = {
 	{T_SCANNER, T_FIXED,
 	 "",         "",                 ""},
@@ -326,7 +318,6 @@ ssattach(parent, self, aux)
 	 * Store information needed to contact our base driver
 	 */
 	ss->sc_link = sc_link;
-	sc_link->device = &ss_switch;
 	sc_link->device_softc = ss;
 	sc_link->openings = 1;
 
@@ -354,17 +345,11 @@ ssattach(parent, self, aux)
 	/* XXX fill in the rest of the scan_io struct by calling the
 	   compute_sizes routine */
 
-	mtx_init(&ss->sc_buf_mtx, IPL_BIO);
-	mtx_init(&ss->sc_start_mtx, IPL_BIO);
+	scsi_xsh_set(&ss->xsh, sc_link, ssstart);
+	timeout_set(&ss->timeout, (void (*)(void *))scsi_xsh_add, &ss->xsh);
 
-	timeout_set(&ss->timeout, ssstart, ss);
-
-	/*
-	 * Set up the buf queue for this device
-	 */
-	ss->sc_buf_queue.b_active = 0;
-	ss->sc_buf_queue.b_actf = 0;
-	ss->sc_buf_queue.b_actb = &ss->sc_buf_queue.b_actf;
+	/* Set up the buf queue for this device. */
+	ss->sc_bufq = bufq_init(BUFQ_DEFAULT);
 }
 
 void
@@ -564,8 +549,14 @@ void
 ssstrategy(bp)
 	struct buf *bp;
 {
-	struct ss_softc *ss = ss_cd.cd_devs[SSUNIT(bp->b_dev)];
+	struct ss_softc *ss;
 	int s;
+
+	ss = ss_cd.cd_devs[SSUNIT(bp->b_dev)];
+	if (ss == NULL) {
+		bp->b_error = ENXIO;
+		goto bad;
+	}
 
 	SC_DEBUG(ss->sc_link, SDEV_DB2, ("ssstrategy: %ld bytes @ blk %d\n",
 	    bp->b_bcount, bp->b_blkno));
@@ -584,25 +575,30 @@ ssstrategy(bp)
 	 * at the end (a bit silly because we only have on user..)
 	 * (but it could fork() or dup())
 	 */
-	scsi_buf_enqueue(&ss->sc_buf_queue, bp, &ss->sc_buf_mtx);
+	BUFQ_QUEUE(ss->sc_bufq, bp);
 
 	/*
 	 * Tell the device to get going on the transfer if it's
 	 * not doing anything, otherwise just wait for completion
 	 * (All a bit silly if we're only allowing 1 open but..)
 	 */
-	ssstart(ss);
+	scsi_xsh_add(&ss->xsh);
 
+	device_unref(&ss->sc_dev);
 	return;
 
+bad:
+	bp->b_flags |= B_ERROR;
 done:
 	/*
-	 * Correctly set the buf to indicate a completed xfer
+	 * Set the buf to indicate no xfer was done.
 	 */
 	bp->b_resid = bp->b_bcount;
 	s = splbio();
 	biodone(bp);
 	splx(s);
+	if (ss != NULL)
+		device_unref(&ss->sc_dev);
 }
 
 /*
@@ -620,61 +616,46 @@ done:
  * ssstart() is called at splbio
  */
 void
-ssstart(v)
-	void *v;
+ssstart(struct scsi_xfer *xs)
 {
-	struct ss_softc *ss = v;
-	struct scsi_link *sc_link = ss->sc_link;
-	struct scsi_xfer *xs;
+	struct scsi_link *sc_link = xs->sc_link;
+	struct ss_softc *ss = sc_link->device_softc;
 	struct buf *bp;
 	struct scsi_r_scanner *cdb;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("ssstart\n"));
 
-	mtx_enter(&ss->sc_start_mtx);
-	ss->sc_start_count++;
-	if (ss->sc_start_count > 1) {
-		mtx_leave(&ss->sc_start_mtx);
+	bp = BUFQ_DEQUEUE(ss->sc_bufq);
+	if (bp == NULL) {
+		scsi_xs_put(xs);
 		return;
 	}
-	mtx_leave(&ss->sc_start_mtx);
-	CLR(ss->flags, SSF_WAITING);
-restart:
-	while (!ISSET(ss->flags, SSF_WAITING) &&
-	    (bp = scsi_buf_dequeue(&ss->sc_buf_queue, &ss->sc_buf_mtx)) != NULL) {
 
-		xs = scsi_xs_get(sc_link, SCSI_NOSLEEP);
-		if (xs == NULL)
-			break;
+	if (ss->special.read) {
+		(ss->special.read)(ss, xs, bp);
+	} else {
+		cdb = (struct scsi_r_scanner *)xs->cmd;
+		xs->cmdlen = sizeof(*cdb);
 
-		if (ss->special.read) {
-			(ss->special.read)(ss, xs, bp);
-		} else {
-			cdb = (struct scsi_r_scanner *)xs->cmd;
-			xs->cmdlen = sizeof(*cdb);
+		cdb->opcode = READ_BIG;
+		_lto3b(bp->b_bcount, cdb->len);
 
-			cdb->opcode = READ_BIG;
-			_lto3b(bp->b_bcount, cdb->len);
+		xs->data = bp->b_data;
+		xs->datalen = bp->b_bcount;
+		xs->flags |= SCSI_DATA_IN;
+		xs->retries = 0;
+		xs->timeout = 100000;
+		xs->done = ssdone;
+		xs->cookie = bp;
+		xs->bp = bp;
 
-			xs->data = bp->b_data;
-			xs->datalen = bp->b_bcount;
-			xs->flags |= SCSI_DATA_IN;
-			xs->retries = 0;
-			xs->timeout = 100000;
-			xs->done = ssdone;
-			xs->cookie = bp;
-
-			scsi_xs_exec(xs);
-		}
+		scsi_xs_exec(xs);
 	}
-	mtx_enter(&ss->sc_start_mtx);
-	ss->sc_start_count--;
-	if (ss->sc_start_count != 0) {
-		ss->sc_start_count = 1;
-		mtx_leave(&ss->sc_start_mtx);
-		goto restart;
-	}
-	mtx_leave(&ss->sc_start_mtx);
+
+	if (ISSET(ss->flags, SSF_WAITING))
+		CLR(ss->flags, SSF_WAITING);
+	else if (BUFQ_PEEK(ss->sc_bufq))
+		scsi_xsh_add(&ss->xsh);
 }
 
 void
@@ -682,8 +663,7 @@ ssdone(struct scsi_xfer *xs)
 {
 	struct ss_softc *ss = xs->sc_link->device_softc;
 	struct buf *bp = xs->cookie;
-
-	splassert(IPL_BIO);
+	int error, s;
 
 	switch (xs->error) {
 	case XS_NOERROR:
@@ -693,15 +673,24 @@ ssdone(struct scsi_xfer *xs)
 
 	case XS_NO_CCB:
 		/* The adapter is busy, requeue the buf and try it later. */
-		scsi_buf_requeue(&ss->sc_buf_queue, bp, &ss->sc_buf_mtx);
+		BUFQ_REQUEUE(ss->sc_bufq, bp);
 		scsi_xs_put(xs);
-		SET(ss->flags, SSF_WAITING); /* break out of cdstart loop */
+		SET(ss->flags, SSF_WAITING);
 		timeout_add(&ss->timeout, 1);
 		return;
 
 	case XS_SENSE:
 	case XS_SHORTSENSE:
-		if (scsi_interpret_sense(xs) != ERESTART)
+#ifdef SCSIDEBUG
+		scsi_sense_print_debug(xs);
+#endif
+		error = scsi_interpret_sense(xs);
+		if (error == 0) {
+			bp->b_error = 0;
+			bp->b_resid = xs->resid;
+			break;
+		}
+		if (error != ERESTART)
 			xs->retries = 0;
 		goto retry;
 
@@ -727,7 +716,9 @@ retry:
 		break;
 	}
 
+	s = splbio();
 	biodone(bp);
+	splx(s);
 	scsi_xs_put(xs);
 }
 
@@ -787,8 +778,7 @@ ssioctl(dev, cmd, addr, flag, p)
 	default:
 		if (SSMODE(dev) != MODE_CONTROL)
 			return (ENOTTY);
-		return (scsi_do_ioctl(ss->sc_link, dev, cmd, addr,
-		    flag, p));
+		return (scsi_do_ioctl(ss->sc_link, cmd, addr, flag));
 	}
 	return (error);
 }

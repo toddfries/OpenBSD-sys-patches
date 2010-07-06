@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.h,v 1.140 2010/01/10 12:43:07 markus Exp $	*/
+/*	$OpenBSD: ip_ipsp.h,v 1.143 2010/07/01 02:09:45 reyk Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -262,6 +262,7 @@ struct ipsec_policy {
 
 struct route_enc {
 	struct rtentry		*re_rt;
+	u_long			re_tableid; /* u_long because of alignment */
 	struct sockaddr_encap	re_dst;
 };
 
@@ -371,6 +372,7 @@ struct tdb {				/* tunnel descriptor block */
 	u_int16_t	tdb_udpencap_port;	/* Peer UDP port */
 
 	u_int16_t	tdb_tag;		/* Packet filter tag */
+	u_int32_t	tdb_tap;		/* Alternate enc(4) interface */
 
 	struct sockaddr_encap   tdb_filter; /* What traffic is acceptable */
 	struct sockaddr_encap   tdb_filtermask; /* And the mask */
@@ -533,7 +535,7 @@ extern int ipe4_init(struct tdb *, struct xformsw *, struct ipsecinit *);
 extern int ipe4_zeroize(struct tdb *);
 extern int ipip_output(struct mbuf *, struct tdb *, struct mbuf **, int, int);
 extern void ipe4_input(struct mbuf *, ...);
-extern void ipip_input(struct mbuf *, int, struct ifnet *);
+extern void ipip_input(struct mbuf *, int, struct ifnet *, int);
 
 #ifdef INET
 extern void ip4_input(struct mbuf *, ...);
@@ -542,11 +544,6 @@ extern void ip4_input(struct mbuf *, ...);
 #ifdef INET6
 extern int ip4_input6(struct mbuf **, int *, int);
 #endif /* INET */
-
-/* XF_ETHERIP */
-extern int etherip_output(struct mbuf *, struct tdb *, struct mbuf **,
-    int, int);
-extern void etherip_input(struct mbuf *, ...);
 
 /* XF_AH */
 extern int ah_attach(void);

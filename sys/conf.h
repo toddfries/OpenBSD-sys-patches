@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.95 2009/11/01 20:14:12 nicm Exp $	*/
+/*	$OpenBSD: conf.h,v 1.98 2010/07/03 03:59:17 krw Exp $	*/
 /*	$NetBSD: conf.h,v 1.33 1996/05/03 20:03:32 christos Exp $	*/
 
 /*-
@@ -192,13 +192,6 @@ extern struct cdevsw cdevsw[];
 	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
 	0, seltrue, (dev_type_mmap((*))) enodev, D_TAPE }
 
-/* open, close, read, ioctl */
-#define cdev_scanner_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) nullop, \
-	0, seltrue, (dev_type_mmap((*))) enodev }
-
 /* open, close, read, write, ioctl, stop, tty */
 #define	cdev_tty_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
@@ -332,13 +325,6 @@ extern struct cdevsw cdevsw[];
 	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
 	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
 	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	(dev_type_mmap((*))) enodev }
-
-/* open, close, read, ioctl */
-#define cdev_ss_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, seltrue, \
 	(dev_type_mmap((*))) enodev }
 
 /* open, close, ioctl, mmap */
@@ -532,8 +518,8 @@ void	randomattach(void);
  * Line discipline switch table
  */
 struct linesw {
-	int	(*l_open)(dev_t dev, struct tty *tp);
-	int	(*l_close)(struct tty *tp, int flags);
+	int	(*l_open)(dev_t dev, struct tty *tp, struct proc *p);
+	int	(*l_close)(struct tty *tp, int flags, struct proc *p);
 	int	(*l_read)(struct tty *tp, struct uio *uio,
 				     int flag);
 	int	(*l_write)(struct tty *tp, struct uio *uio,
@@ -638,6 +624,8 @@ cdev_decl(rd);
 
 bdev_decl(uk);
 cdev_decl(uk);
+
+cdev_decl(diskmap);
 
 cdev_decl(bpf);
 

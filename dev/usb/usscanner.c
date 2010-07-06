@@ -1,4 +1,4 @@
-/*	$OpenBSD: usscanner.c,v 1.30 2010/01/09 23:15:07 krw Exp $	*/
+/*	$OpenBSD: usscanner.c,v 1.33 2010/06/28 18:31:02 krw Exp $	*/
 /*	$NetBSD: usscanner.c,v 1.6 2001/01/23 14:04:14 augustss Exp $	*/
 
 /*
@@ -77,7 +77,6 @@ int	usscannerdebug = 0;
 #define XS_CTL_DATA_OUT		SCSI_DATA_OUT
 #define scsipi_adapter		scsi_adapter
 #define scsipi_cmd		scsi_cmd
-#define scsipi_device		scsi_device
 #define scsipi_done		scsi_done
 #define scsipi_link		scsi_link
 #define scsipi_minphys		scsi_minphys
@@ -98,14 +97,6 @@ int	usscannerdebug = 0;
 #define USSCANNER_MAX_TRANSFER_SIZE	MAXBSIZE
 
 #define USSCANNER_TIMEOUT 2000
-
-struct scsipi_device usscanner_dev =
-{
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
-};
 
 struct usscanner_softc {
  	struct device		sc_dev;
@@ -150,7 +141,7 @@ struct usscanner_softc {
 
 
 void usscanner_cleanup(struct usscanner_softc *sc);
-int usscanner_scsipi_cmd(struct scsipi_xfer *xs);
+void usscanner_scsipi_cmd(struct scsipi_xfer *xs);
 void usscanner_scsipi_minphys(struct buf *bp, struct scsi_link *sl);
 void usscanner_done(struct usscanner_softc *sc);
 void usscanner_sense(struct usscanner_softc *sc);
@@ -341,7 +332,6 @@ usscanner_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &sc->sc_adapter;
-	sc->sc_link.device = &usscanner_dev;
 	sc->sc_link.openings = 1;
 
 	bzero(&saa, sizeof(saa));
@@ -471,7 +461,6 @@ usscanner_intr_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 		 usbd_status status)
 {
 	struct usscanner_softc *sc = priv;
-	int s;
 
 	DPRINTFN(10, ("usscanner_data_cb status=%d\n", status));
 
@@ -487,9 +476,7 @@ usscanner_intr_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 
 	sc->sc_state = UAS_IDLE;
 
-	s = splbio();
 	scsipi_done(sc->sc_xs);
-	splx(s);
 }
 
 void
@@ -702,13 +689,12 @@ usscanner_cmd_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 	usscanner_done(sc);
 }
 
-int
+void
 usscanner_scsipi_cmd(struct scsipi_xfer *xs)
 {
 	struct scsipi_link *sc_link = xs->sc_link;
 	struct usscanner_softc *sc = sc_link->adapter_softc;
 	usbd_status err;
-	int s;
 
 #ifdef notyet
 	DPRINTFN(8, ("%s: usscanner_scsi_cmd: %d:%d "
@@ -759,13 +745,9 @@ usscanner_scsipi_cmd(struct scsipi_xfer *xs)
 		goto done;
 	}
 
-	return (SUCCESSFULLY_QUEUED);
+	return;
 
  done:
 	sc->sc_state = UAS_IDLE;
-	s = splbio();
 	scsipi_done(xs);
-	splx(s);
-
-	return (COMPLETE);
 }

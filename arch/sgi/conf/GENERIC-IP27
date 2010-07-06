@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC-IP27,v 1.31 2010/03/07 21:26:24 miod Exp $
+#	$OpenBSD: GENERIC-IP27,v 1.35 2010/07/03 03:59:17 krw Exp $
 #
 # THIS KERNEL IS FOR Origin, Onyx, Fuel, Tezro (IP27, IP35) SYSTEMS ONLY.
 #
@@ -38,6 +38,7 @@ config		bsd	swap generic
 #
 mainbus0	at root
 cpu*		at mainbus0
+spdmem*		at mainbus0			# SPD memory eeproms
 clock0		at mainbus0
 
 #### Main local buses
@@ -177,6 +178,7 @@ mskc*		at pci?		# Marvell Yukon-2
 msk*		at mskc?	#  each port of above
 bge*		at pci?		# Broadcom BCM570x (aka Tigon3)
 vge*		at pci?		# VIA VT612x
+bnx*		at pci?		# Broadcom BCM5706/5708 GigE
 
 ##### Media Independent Interface (mii) drivers
 exphy*		at mii?		# 3Com internal PHYs
@@ -214,10 +216,12 @@ wi*		at pci?
 cmpci*		at pci?		# C-Media CMI8338/8738
 eap*		at pci?		# Ensoniq AudioPCI S5016
 emu*		at pci?		# SB Live!
+envy*		at pci?		# VIA Envy24 (aka ICE1712)
 
 audio*		at cmpci?
 audio*		at eap?
 audio*		at emu?
+audio*		at envy?
 
 # OPL[23] FM synthesizers
 opl*		at cmpci?
@@ -237,7 +241,6 @@ sd*		at scsibus?
 st*		at scsibus?
 cd*		at scsibus?
 ch*		at scsibus?
-ss*		at scsibus?
 safte*		at scsibus?
 ses*		at scsibus?
 uk*		at scsibus?

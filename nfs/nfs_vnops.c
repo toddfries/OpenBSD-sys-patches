@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vnops.c,v 1.127 2009/12/15 15:53:48 beck Exp $	*/
+/*	$OpenBSD: nfs_vnops.c,v 1.130 2010/05/19 08:31:23 thib Exp $	*/
 /*	$NetBSD: nfs_vnops.c,v 1.62.4.1 1996/07/08 20:26:52 jtc Exp $	*/
 
 /*
@@ -1927,7 +1927,7 @@ nfs_readdir(void *v)
 	struct vnode *vp = ap->a_vp;
 	struct nfsnode *np = VTONFS(vp);
 	struct uio *uio = ap->a_uio;
-	int tresid, error;
+	int tresid, error = 0;
 	struct vattr vattr;
 	u_long *cookies = NULL;
 	int ncookies = 0, cnt;
@@ -2427,9 +2427,6 @@ nfs_readdirplusrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 				    IFTODT(VTTOIF(np->n_vattr.va_type));
 				if (cnp->cn_namelen <= NCHNAMLEN) {
 					ndp->ni_vp = newvp;
-					cnp->cn_hash =
-					    hash32_str(cnp->cn_nameptr,
-					        HASHINIT);
 					cache_purge(ndp->ni_dvp);
 					nfs_cache_enter(ndp->ni_dvp, ndp->ni_vp,
 					    cnp);
@@ -2715,7 +2712,7 @@ nfs_strategy(void *v)
 	 * queue the request, wake it up and wait for completion
 	 * otherwise just do it ourselves.
 	 */
-	if ((bp->b_flags & B_ASYNC) == 0 || nfs_asyncio(bp))
+	if ((bp->b_flags & B_ASYNC) == 0 || nfs_asyncio(bp, 0))
 		error = nfs_doio(bp, p);
 	return (error);
 }

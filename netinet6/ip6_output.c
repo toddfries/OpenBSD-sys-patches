@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.111 2010/02/08 12:16:02 jsing Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.114 2010/07/01 02:09:45 reyk Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -180,6 +180,9 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 	u_int32_t sspi;
 	struct tdb *tdb;
 	int s;
+#if NPF > 0
+	struct ifnet *encif;
+#endif
 #endif /* IPSEC */
 
 #ifdef IPSEC
@@ -501,8 +504,22 @@ reroute:
 	if (sproto != 0) {
 	        s = splnet();
 
+		/*
+		 * XXX what should we do if ip6_hlim == 0 and the
+		 * packet gets tunneled?
+		 */
+
+		tdb = gettdb(sspi, &sdst, sproto);
+		if (tdb == NULL) {
+			splx(s);
+			error = EHOSTUNREACH;
+			m_freem(m);
+			goto done;
+		}
+
 #if NPF > 0
-		if (pf_test6(PF_OUT, &encif[0].sc_if, &m, NULL) != PF_PASS) {
+		if ((encif = enc_getif(0, tdb->tdb_tap)) == NULL ||
+		    pf_test6(PF_OUT, encif, &m, NULL) != PF_PASS) {
 			splx(s);
 			error = EHOSTUNREACH;
 			m_freem(m);
@@ -521,18 +538,6 @@ reroute:
 		 * What's the behaviour?
 		 */
 #endif
-		/*
-		 * XXX what should we do if ip6_hlim == 0 and the
-		 * packet gets tunneled?
-		 */
-
-		tdb = gettdb(sspi, &sdst, sproto);
-		if (tdb == NULL) {
-			splx(s);
-			error = EHOSTUNREACH;
-			m_freem(m);
-			goto done;
-		}
 
 		m->m_flags &= ~(M_BCAST | M_MCAST);	/* just in case */
 
@@ -1218,7 +1223,7 @@ ip6_getpmtu(struct route_in6 *ro_pmtu, struct route_in6 *ro,
 			ro_pmtu->ro_rt = (struct rtentry *)NULL;
 		}
 		if (ro_pmtu->ro_rt == 0) {
-			bzero(sa6_dst, sizeof(*sa6_dst));
+			bzero(ro_pmtu, sizeof(*ro_pmtu));
 			sa6_dst->sin6_family = AF_INET6;
 			sa6_dst->sin6_len = sizeof(struct sockaddr_in6);
 			sa6_dst->sin6_addr = *dst;
@@ -2437,9 +2442,8 @@ ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 			 * address, and choose the outgoing interface.
 			 *   XXX: is it a good approach?
 			 */
-			ro.ro_rt = NULL;
+			bzero(&ro, sizeof(ro));
 			dst = (struct sockaddr_in6 *)&ro.ro_dst;
-			bzero(dst, sizeof(*dst));
 			dst->sin6_len = sizeof(struct sockaddr_in6);
 			dst->sin6_family = AF_INET6;
 			dst->sin6_addr = mreq->ipv6mr_multiaddr;

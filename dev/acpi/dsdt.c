@@ -1,4 +1,4 @@
-/* $OpenBSD: dsdt.c,v 1.157 2009/12/05 02:38:11 jordan Exp $ */
+/* $OpenBSD: dsdt.c,v 1.164 2010/07/01 06:29:32 jordan Exp $ */
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
  *
@@ -47,8 +47,8 @@
 #define AML_INTSTRLEN		16
 #define AML_NAMESEG_LEN		4
 
-struct acpi_q 		*acpi_maptable(paddr_t, const char *, const char *, 
-    			    const char *);
+struct acpi_q 		*acpi_maptable(struct acpi_softc *sc, paddr_t, const char *, const char *, 
+    			    const char *, int);
 struct aml_scope 	*aml_load(struct acpi_softc *, struct aml_scope *,
     			    struct aml_value *, struct aml_value *);
 
@@ -699,6 +699,10 @@ aml_delchildren(struct aml_node *node)
 
 		aml_delchildren(onode);
 
+		/* Don't delete values that have references */
+		if (onode->value && onode->value->refcnt > 1)
+			onode->value->node = NULL;
+
 		/* Decrease reference count */
 		aml_xdelref(&onode->value, "");
 
@@ -976,6 +980,7 @@ aml_copyvalue(struct aml_value *lhs, struct aml_value *rhs)
 		break;
 	case AML_OBJTYPE_OBJREF:
 		lhs->v_objref = rhs->v_objref;
+		aml_xaddref(lhs->v_objref.ref, "");
 		break;
 	default:
 		printf("copyvalue: %x", rhs->type);
@@ -3319,16 +3324,12 @@ aml_load(struct acpi_softc *sc, struct aml_scope *scope,
 		goto fail;
 
 	/* Load SSDT from memory */
-	entry = acpi_maptable(rgn->v_opregion.iobase, "SSDT", NULL, NULL);
+	entry = acpi_maptable(sc, rgn->v_opregion.iobase, "SSDT", NULL, NULL, 1);
 	if (entry == NULL)
 		goto fail;
 
 	dnprintf(10, "%s: loaded SSDT %s @ %llx\n", sc->sc_dev.dv_xname,
 	    aml_nodename(rgn->node), rgn->v_opregion.iobase);
- 
-	/* Add SSDT to parent list */
-	SIMPLEQ_INSERT_TAIL(&sc->sc_tables, entry,
-	    q_next);
 	ddb->v_integer = entry->q_id;
 
 	p_ssdt = entry->q_table;
@@ -3626,12 +3627,12 @@ aml_xparse(struct aml_scope *scope, int ret_type, const char *stype)
 		/* CondRef: rr => I */
 		ival = 0;
 		if (opargs[0]->node != NULL) {
-			aml_freevalue(opargs[1]);
-
 			/* Create Object Reference */
-			_aml_setvalue(opargs[1], AML_OBJTYPE_OBJREF, opcode, opargs[0]);
-			aml_xaddref(opargs[1], "CondRef");
-			
+			opargs[2] = aml_allocvalue(AML_OBJTYPE_OBJREF, opcode,
+				opargs[0]);
+			aml_xaddref(opargs[0], "CondRef");
+			aml_xstore(scope, opargs[1], 0, opargs[2]);
+
 			/* Mark that we found it */
 			ival = -1;
 		}

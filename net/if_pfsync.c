@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.143 2010/03/01 12:29:35 dlg Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.147 2010/05/24 02:11:04 dlg Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -353,10 +353,7 @@ pfsync_clone_destroy(struct ifnet *ifp)
 	timeout_del(&sc->sc_tmo);
 #if NCARP > 0
 	if (!pfsync_sync_ok)
-		carp_group_demote_adj(&sc->sc_if, -1);
-#endif
-#if NBPFILTER > 0
-	bpfdetach(ifp);
+		carp_group_demote_adj(&sc->sc_if, -1, "pfsync destroy");
 #endif
 	if_detach(ifp);
 
@@ -1194,7 +1191,8 @@ pfsync_in_bus(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 			timeout_del(&sc->sc_bulkfail_tmo);
 #if NCARP > 0
 			if (!pfsync_sync_ok)
-				carp_group_demote_adj(&sc->sc_if, -1);
+				carp_group_demote_adj(&sc->sc_if, -1,
+				    "pfsync bulk done");
 #endif
 			pfsync_sync_ok = 1;
 			DPFPRINTF(LOG_INFO, "received valid bulk update end");
@@ -1219,7 +1217,7 @@ pfsync_in_tdb(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 	s = splsoftnet();
 	for (i = 0; i < count; i++)
 		tp = (struct pfsync_tdb *)(buf + len * i);
-		pfsync_update_net_tdb(&tp[i]);
+		pfsync_update_net_tdb(tp);
 	splx(s);
 #endif
 
@@ -1473,6 +1471,7 @@ pfsync_out_upd_c(struct pf_state *st, void *buf)
 {
 	struct pfsync_upd_c *up = buf;
 
+	bzero(up, sizeof(*up));
 	up->id = st->id;
 	pf_state_peer_hton(&st->src, &up->src);
 	pf_state_peer_hton(&st->dst, &up->dst);
@@ -1484,8 +1483,6 @@ pfsync_out_upd_c(struct pf_state *st, void *buf)
 	else
 		up->expire = htonl(up->expire - time_second);
 	up->timeout = st->timeout;
-
-	bzero(up->_pad, sizeof(up->_pad)); /* XXX */
 }
 
 void
@@ -1888,7 +1885,8 @@ pfsync_request_full_update(struct pfsync_softc *sc)
 		sc->sc_ureq_sent = time_uptime;
 #if NCARP > 0
 		if (pfsync_sync_ok)
-			carp_group_demote_adj(&sc->sc_if, 1);
+			carp_group_demote_adj(&sc->sc_if, 1,
+			    "pfsync bulk start");
 #endif
 		pfsync_sync_ok = 0;
 		DPFPRINTF(LOG_INFO, "requesting bulk update");
@@ -2261,7 +2259,8 @@ pfsync_bulk_fail(void *arg)
 		sc->sc_bulk_tries = 0;
 #if NCARP > 0
 		if (!pfsync_sync_ok)
-			carp_group_demote_adj(&sc->sc_if, -1);
+			carp_group_demote_adj(&sc->sc_if, -1,
+			    "pfsync bulk fail");
 #endif
 		pfsync_sync_ok = 1;
 		DPFPRINTF(LOG_ERR, "failed to receive bulk update");

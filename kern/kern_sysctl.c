@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.180 2010/01/10 03:37:50 guenther Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.188 2010/07/02 18:14:40 guenther Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -66,6 +66,7 @@
 #include <sys/pipe.h>
 #include <sys/eventvar.h>
 #include <sys/socketvar.h>
+#include <sys/socket.h>
 #include <sys/domain.h>
 #include <sys/protosw.h>
 #ifdef __HAVE_TIMECOUNTER
@@ -121,6 +122,8 @@ int (*cpu_cpuspeed)(int *);
 void (*cpu_setperf)(int);
 int perflevel = 100;
 
+int rthreads_enabled = 0;
+
 /*
  * Lock to avoid too many processes vslocking a large amount of memory
  * at the same time.
@@ -160,8 +163,13 @@ sys___sysctl(struct proc *p, void *v, register_t *retval)
 	switch (name[0]) {
 	case CTL_KERN:
 		fn = kern_sysctl;
-		if (name[1] == KERN_VNODE)	/* XXX */
+		switch (name[1]) {	/* XXX */
+		case KERN_VNODE:
+		case KERN_FILE:
+		case KERN_FILE2:
 			dolock = 0;
+			break;
+		}
 		break;
 	case CTL_HW:
 		fn = hw_sysctl;
@@ -552,6 +560,9 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case KERN_CPTIME2:
 		return (sysctl_cptime2(name + 1, namelen -1, oldp, oldlenp,
 		    newp, newlen));
+	case KERN_RTHREADS:
+		return (sysctl_int(oldp, oldlenp, newp, newlen,
+		    &rthreads_enabled));
 	case KERN_CACHEPCT: {
 		int opct, pgs;
 		opct = bufcachepercent;
@@ -993,10 +1004,12 @@ sysctl_file(char *where, size_t *sizep, struct proc *p)
 	/*
 	 * followed by an array of file structures
 	 */
+	rw_enter_read(&fileheadlk);
 	LIST_FOREACH(fp, &filehead, f_list) {
 		if (buflen < sizeof(struct file)) {
 			*sizep = where - start;
-			return (ENOMEM);
+			error = ENOMEM;
+			goto out;
 		}
 
 		/* Only let the superuser or the owner see some information */
@@ -1010,12 +1023,14 @@ sysctl_file(char *where, size_t *sizep, struct proc *p)
 		}
 		error = copyout(&cfile, where, sizeof (struct file));
 		if (error)
-			return (error);
+			goto out;
 		buflen -= sizeof(struct file);
 		where += sizeof(struct file);
 	}
 	*sizep = where - start;
-	return (0);
+out:
+	rw_exit_read(&fileheadlk);
+	return (error);
 }
 
 #ifndef SMALL_KERNEL
@@ -1184,7 +1199,7 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 
 	if (namelen > 4)
 		return (ENOTDIR);
-	if (namelen < 4)
+	if (namelen < 4 || name[2] > sizeof(*kf))
 		return (EINVAL);
 
 	buflen = where != NULL ? *sizep : 0;
@@ -1219,11 +1234,13 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 			error = EINVAL;
 			break;
 		}
+		rw_enter_read(&fileheadlk);
 		LIST_FOREACH(fp, &filehead, f_list) {
 			if (fp->f_count == 0)
 				continue;
 			FILLIT(fp, NULL, 0, NULL, NULL);
 		}
+		rw_exit_read(&fileheadlk);
 		break;
 	case KERN_FILE_BYPID:
 		/* A arg of -1 indicates all processes */
@@ -1231,16 +1248,18 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 			error = EINVAL;
 			break;
 		}
+		rw_enter_read(&allproclk);
 		LIST_FOREACH(pp, &allproc, p_list) {
-			/* skip system, embryonic and undead processes */
-			if ((pp->p_flag & P_SYSTEM) ||
-			    pp->p_stat == SIDL || pp->p_stat == SZOMB)
+			/* skip system, exiting, embryonic and undead processes */
+			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_WEXIT)
+			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
 			if (arg > 0 && pp->p_pid != (pid_t)arg) {
 				/* not the pid we are looking for */
 				continue;
 			}
 			fdp = pp->p_fd;
+			fdplock(fdp);
 			if (pp->p_textvp)
 				FILLIT(NULL, NULL, KERN_FILE_TEXT, pp->p_textvp, pp);
 			if (fdp->fd_cdir)
@@ -1256,19 +1275,23 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 					continue;
 				FILLIT(fp, fdp, i, NULL, pp);
 			}
+			fdpunlock(fdp);
 		}
+		rw_exit_read(&allproclk);
 		break;
 	case KERN_FILE_BYUID:
+		rw_enter_read(&allproclk);
 		LIST_FOREACH(pp, &allproc, p_list) {
-			/* skip system, embryonic and undead processes */
-			if ((pp->p_flag & P_SYSTEM) ||
-			    pp->p_stat == SIDL || pp->p_stat == SZOMB)
+			/* skip system, exiting, embryonic and undead processes */
+			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_WEXIT)
+			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
 			if (arg > 0 && pp->p_ucred->cr_uid != (uid_t)arg) {
 				/* not the uid we are looking for */
 				continue;
 			}
 			fdp = pp->p_fd;
+			fdplock(fdp);
 			if (fdp->fd_cdir)
 				FILLIT(NULL, NULL, KERN_FILE_CDIR, fdp->fd_cdir, pp);
 			if (fdp->fd_rdir)
@@ -1282,7 +1305,9 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 					continue;
 				FILLIT(fp, fdp, i, NULL, pp);
 			}
+			fdpunlock(fdp);
 		}
+		rw_exit_read(&allproclk);
 		break;
 	default:
 		error = EINVAL;
@@ -1328,7 +1353,8 @@ sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 		elem_size = elem_count = 0;
 		eproc = malloc(sizeof(struct eproc), M_TEMP, M_WAITOK);
 	} else /* if (type == KERN_PROC2) */ {
-		if (namelen != 5 || name[3] < 0 || name[4] < 0)
+		if (namelen != 5 || name[3] < 0 || name[4] < 0 ||
+		    name[3] > sizeof(*kproc2))
 			return (EINVAL);
 		op = name[1];
 		arg = name[2];
@@ -1336,6 +1362,7 @@ sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 		elem_count = name[4];
 		kproc2 = malloc(sizeof(struct kinfo_proc2), M_TEMP, M_WAITOK);
 	}
+	rw_enter_read(&allproclk);
 	p = LIST_FIRST(&allproc);
 	doingzomb = 0;
 again:
@@ -1447,14 +1474,13 @@ again:
 		*sizep = needed;
 	}
 err:
+	rw_exit_read(&allproclk);
 	if (eproc)
 		free(eproc, M_TEMP);
 	if (kproc2)
 		free(kproc2, M_TEMP);
 	return (error);
 }
-
-#endif	/* SMALL_KERNEL */
 
 /*
  * Fill in an eproc structure for the specified process.
@@ -1512,8 +1538,6 @@ fill_eproc(struct proc *p, struct eproc *ep)
 	ep->e_maxrss = p->p_rlimit ? p->p_rlimit[RLIMIT_RSS].rlim_cur : 0;
 	ep->e_limit = p->p_p->ps_limit;
 }
-
-#ifndef	SMALL_KERNEL
 
 /*
  * Fill in a kproc2 structure for the specified process.
@@ -1625,7 +1649,7 @@ sysctl_proc_args(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	iov.iov_len = sizeof(pss);
 	uio.uio_iov = &iov;
 	uio.uio_iovcnt = 1;	
-	uio.uio_offset = (off_t)PS_STRINGS;
+	uio.uio_offset = (off_t)(vaddr_t)PS_STRINGS;
 	uio.uio_resid = sizeof(pss);
 	uio.uio_segflg = UIO_SYSSPACE;
 	uio.uio_rw = UIO_READ;
@@ -1987,9 +2011,9 @@ sysctl_sensors(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 
 	dev = name[0];
 	if (namelen == 1) {
-		ksd = sensordev_get(dev);
-		if (ksd == NULL)
-			return (ENOENT);
+		ret = sensordev_get(dev, &ksd);
+		if (ret)
+			return (ret);
 
 		/* Grab a copy, to clear the kernel pointers */
 		usd = malloc(sizeof(*usd), M_TEMP, M_WAITOK|M_ZERO);
@@ -2008,9 +2032,9 @@ sysctl_sensors(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	type = name[1];
 	numt = name[2];
 
-	ks = sensor_find(dev, type, numt);
-	if (ks == NULL)
-		return (ENOENT);
+	ret = sensor_find(dev, type, numt, &ks);
+	if (ret)
+		return (ret);
 
 	/* Grab a copy, to clear the kernel pointers */
 	us = malloc(sizeof(*us), M_TEMP, M_WAITOK|M_ZERO);
