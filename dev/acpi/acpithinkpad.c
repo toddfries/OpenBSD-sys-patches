@@ -279,8 +279,11 @@ thinkpad_hotkey(struct aml_node *node, int notify_type, void *arg)
 			handled = 1;
 			break;
 		case THINKPAD_BUTTON_SUSPEND:
+#ifndef SMALL_KERNEL
+			sc->sc_acpi->sc_sleepmode = ACPI_STATE_S3;
+			acpi_wakeup(sc->sc_acpi);
+#endif
 			handled = 1;
-			acpi_sleep_state(sc->sc_acpi, ACPI_STATE_S3);
 			break;
 		case THINKPAD_BUTTON_HIBERNATE:
 		case THINKPAD_BUTTON_FN_F1:
