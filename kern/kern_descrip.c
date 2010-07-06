@@ -905,6 +905,7 @@ fdcopy(struct proc *p)
 
 	newfdp = pool_get(&fdesc_pool, PR_WAITOK);
 	bcopy(fdp, newfdp, sizeof(struct filedesc));
+	rw_init(&newfdp->fd_lock, "fdlock");
 	if (newfdp->fd_cdir)
 		vref(newfdp->fd_cdir);
 	if (newfdp->fd_rdir)
@@ -991,8 +992,11 @@ fdfree(struct proc *p)
 	struct file **fpp, *fp;
 	int i;
 
-	if (--fdp->fd_refcnt > 0)
+	fdplock(fdp);
+	if (--fdp->fd_refcnt > 0) {
+		fdpunlock(fdp);
 		return;
+	}
 	fpp = fdp->fd_ofiles;
 	for (i = fdp->fd_lastfile; i >= 0; i--, fpp++) {
 		fp = *fpp;
