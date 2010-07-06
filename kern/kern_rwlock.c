@@ -115,10 +115,8 @@ rw_exit_read(struct rwlock *rwl)
 void
 rw_exit_write(struct rwlock *rwl)
 {
-	unsigned long owner = rwl->rwl_owner;
-
-	if (__predict_false((owner & RWLOCK_WAIT) ||
-	    rw_cas(&rwl->rwl_owner, owner, 0)))
+	if (__predict_false(rw_cas(&rwl->rwl_owner,
+	    RW_PROC(curproc) | RWLOCK_WRLOCK, 0)))
 		rw_exit(rwl);
 }
 
@@ -238,11 +236,13 @@ rw_exit(struct rwlock *rwl)
 
 	do {
 		owner = rwl->rwl_owner;
-		if (wrlock)
+		if (wrlock) {
 			set = 0;
-		else
+			KASSERT(RW_PROC(owner) == RW_PROC(curproc));
+		} else {
 			set = (owner - RWLOCK_READ_INCR) &
 				~(RWLOCK_WAIT|RWLOCK_WRWANT);
+		}
 	} while (rw_cas(&rwl->rwl_owner, owner, set));
 
 	if (owner & RWLOCK_WAIT)
