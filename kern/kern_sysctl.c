@@ -1372,6 +1372,11 @@ again:
 		 */
 		if (p->p_stat == SIDL)
 			continue;
+
+		/* XXX skip processes in the middle of being zapped */
+		if (p->p_pgrp == NULL)
+			continue;
+
 		/*
 		 * TODO - make more efficient (see notes below).
 		 */
