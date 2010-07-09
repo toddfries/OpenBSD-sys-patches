@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_conf.c,v 1.23 2010/07/01 17:30:25 tedu Exp $	*/
+/*	$OpenBSD: exec_conf.c,v 1.25 2010/07/05 22:20:22 tedu Exp $	*/
 /*	$NetBSD: exec_conf.c,v 1.16 1995/12/09 05:34:47 cgd Exp $	*/
 
 /*
@@ -51,16 +51,8 @@
 #include <compat/linux/linux_exec.h>
 #endif
 
-#ifdef COMPAT_BSDOS
-#include <compat/bsdos/bsdos_exec.h>
-#endif
-
 #ifdef COMPAT_FREEBSD
 #include <compat/freebsd/freebsd_exec.h>
-#endif
-
-#ifdef COMPAT_M68K4K
-#include <compat/m68k4k/m68k4k_exec.h>
 #endif
 
 #ifdef COMPAT_VAX1K
@@ -68,7 +60,7 @@
 #endif
 
 extern struct emul emul_native, emul_elf32, emul_elf64, emul_aout,
-	emul_bsdos, emul_freebsd_aout, emul_freebsd_elf,
+	emul_freebsd_aout, emul_freebsd_elf,
 	emul_linux_elf, emul_linux_aout, emul_netbsd_elf64,
 	emul_sunos, emul_svr4;
 
@@ -94,24 +86,15 @@ struct execsw execsw[] = {
 	{ LINUX_AOUT_HDR_SIZE, exec_linux_aout_makecmds, &emul_linux_aout }, /* linux a.out */
 	{ sizeof(Elf32_Ehdr), exec_linux_elf32_makecmds, &emul_linux_elf },
 #endif
-#ifdef COMPAT_BSDOS
-	{ BSDOS_AOUT_HDR_SIZE, exec_bsdos_aout_makecmds, &emul_bsdos },	/* bsdos */
-#endif
 #ifdef COMPAT_FREEBSD
 	{ FREEBSD_AOUT_HDR_SIZE, exec_freebsd_aout_makecmds, &emul_freebsd_aout },	/* freebsd */
 	{ sizeof(Elf32_Ehdr), exec_freebsd_elf32_makecmds, &emul_freebsd_elf },
-#endif
-#ifdef COMPAT_M68K4K
-	{ sizeof(struct exec), exec_m68k4k_makecmds, &emul_native },	/* m68k4k a.out */
 #endif
 #ifdef COMPAT_VAX1K
 	{ sizeof(struct exec), exec_vax1k_makecmds, &emul_native },	/* vax1k a.out */
 #endif
 #ifdef COMPAT_SVR4
 	{ sizeof(Elf32_Ehdr), exec_elf32_makecmds, &emul_svr4 },	/* elf binaries */
-#endif
-#ifdef COMPAT_SUNOS
-	{ sizeof(struct exec), exec_aout_makecmds, &emul_sunos },
 #endif
 #ifdef LKM
 	{ 0, NULL, NULL },				/* entries for LKMs */
