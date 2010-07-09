@@ -189,12 +189,12 @@ sys_mquery(struct proc *p, void *v, register_t *retval)
 
 	/* prevent a user requested address from falling in heap space */
 	if ((vaddr + size > (vaddr_t)p->p_vmspace->vm_daddr) &&
-	    (vaddr < (vaddr_t)p->p_vmspace->vm_daddr + BRKSIZ)) {
+	    (vaddr < (vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ)) {
 		if (flags & UVM_FLAG_FIXED) {
 			error = EINVAL;
 			goto done;
 		}
-		vaddr = round_page((vaddr_t)p->p_vmspace->vm_daddr + BRKSIZ);
+		vaddr = round_page((vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ);
 	}
 	vm_map_lock(&p->p_vmspace->vm_map);
 
@@ -208,9 +208,9 @@ again:
 	} else {
 		/* prevent a returned address from falling in heap space */
 		if ((vaddr + size > (vaddr_t)p->p_vmspace->vm_daddr)
-		    && (vaddr < (vaddr_t)p->p_vmspace->vm_daddr + BRKSIZ)) {
+		    && (vaddr < (vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ)) {
 			vaddr = round_page((vaddr_t)p->p_vmspace->vm_daddr +
-			    BRKSIZ);
+			    MAXDSIZ);
 			goto again;
 		}
 		error = 0;
@@ -604,12 +604,6 @@ sys_mmap(struct proc *p, void *v, register_t *retval)
 
 	error = uvm_mmap(&p->p_vmspace->vm_map, &addr, size, prot, maxprot,
 	    flags, handle, pos, p->p_rlimit[RLIMIT_MEMLOCK].rlim_cur, p);
-	if (error == ENOMEM && !(flags & (MAP_FIXED | MAP_TRYFIXED))) {
-		addr = (vaddr_t)p->p_vmspace->vm_daddr;
-		error = uvm_mmap(&p->p_vmspace->vm_map, &addr, size, prot,
-		    maxprot, flags, handle, pos,
-		    p->p_rlimit[RLIMIT_MEMLOCK].rlim_cur, p);
-	}
 
 	if (error == 0)
 		/* remember to add offset */
