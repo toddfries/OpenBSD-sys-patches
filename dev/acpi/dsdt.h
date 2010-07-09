@@ -85,6 +85,16 @@ void			acpi_mutex_release(struct aml_value *);
 
 const char		*aml_nodename(struct aml_node *);
 
+#define SRT_IRQ2		0x22
+#define SRT_IRQ3		0x23
+#define SRT_DMA			0x2A
+#define SRT_STARTDEP0		0x30
+#define SRT_STARTDEP1		0x31
+#define SRT_ENDDEP		0x38
+#define SRT_IOPORT		0x47
+#define SRT_FIXEDPORT		0x4B
+#define SRT_ENDTAG		0x78
+
 #define SR_IRQ			0x04
 #define SR_DMA			0x05
 #define SR_STARTDEP		0x06
@@ -116,15 +126,24 @@ union acpi_resource {
 		uint8_t  typecode;
 		uint16_t irq_mask;
 		uint8_t  irq_flags;
+#define SR_IRQ_SHR		(1L << 4)
+#define SR_IRQ_POLARITY		(1L << 3)
+#define SR_IRQ_MODE		(1L << 0)
 	}  __packed sr_irq;
 	struct {
 		uint8_t  typecode;
 		uint8_t  channel;
 		uint8_t  flags;
+#define SR_DMA_TYP_MASK		0x3
+#define SR_DMA_TYP_SHIFT 	5
+#define SR_DMA_BM		(1L << 2)
+#define SR_DMA_SIZE_MASK	0x3
+#define SR_DMA_SIZE_SHIFT	0
 	}  __packed sr_dma;
 	struct {
 		uint8_t  typecode;
 		uint8_t  flags;
+#define SR_IOPORT_DEC		(1L << 0)
 		uint16_t _min;
 		uint16_t _max;
 		uint8_t  _aln;
