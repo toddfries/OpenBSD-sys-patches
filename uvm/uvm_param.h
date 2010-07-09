@@ -70,10 +70,6 @@
 
 #include <machine/vmparam.h>
 
-#ifndef BRKSIZ
-#define BRKSIZ MAXDSIZ
-#endif
-
 /*
  * This belongs in types.h, but breaks too many existing programs.
  */
