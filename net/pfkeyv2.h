@@ -1,4 +1,4 @@
-/* $OpenBSD: pfkeyv2.h,v 1.57 2010/07/01 02:09:45 reyk Exp $ */
+/* $OpenBSD: pfkeyv2.h,v 1.58 2010/07/09 16:58:06 reyk Exp $ */
 /*
  *	@(#)COPYRIGHT	1.1 (NRL) January 1998
  * 
