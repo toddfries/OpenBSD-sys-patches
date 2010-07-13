@@ -51,6 +51,7 @@
 
 #define	RUSAGE_SELF	0
 #define	RUSAGE_CHILDREN	-1
+#define	RUSAGE_THREAD	1
 
 struct	rusage {
 	struct timeval ru_utime;	/* user time used */
@@ -110,8 +111,9 @@ struct loadavg {
 
 #ifdef _KERNEL
 extern struct loadavg averunnable;
+struct process;
 int	dosetrlimit(struct proc *, u_int, struct rlimit *);
-int	donice(struct proc *, struct proc *, int);
+int	donice(struct proc *, struct process *, int);
 
 #else
 #include <sys/cdefs.h>
