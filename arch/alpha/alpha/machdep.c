@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.121 2009/11/07 23:01:36 miod Exp $ */
+/* $OpenBSD: machdep.c,v 1.127 2010/06/30 20:38:49 tedu Exp $ */
 /* $NetBSD: machdep.c,v 1.210 2000/06/01 17:12:38 thorpej Exp $ */
 
 /*-
@@ -78,8 +78,7 @@
 #include <sys/user.h>
 #include <sys/exec.h>
 #include <sys/exec_ecoff.h>
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_swap.h>
+#include <uvm/uvm.h>
 #include <sys/sysctl.h>
 #include <sys/core.h>
 #include <sys/kcore.h>
@@ -143,8 +142,21 @@ int	bufpages = 0;
 #endif
 int	bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = {
+	&isa_constraint,
+	NULL
+};
+
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
 
 #ifdef APERTURE
 #ifdef INSECURE
@@ -176,6 +188,8 @@ struct	user *proc0paddr;
 u_int64_t	cycles_per_usec;
 
 struct bootinfo_kernel bootinfo;
+
+struct consdev *cn_tab;
 
 /* For built-in TCDS */
 #if defined(DEC_3000_300) || defined(DEC_3000_500)
@@ -1482,12 +1496,6 @@ sendsig(catcher, sig, mask, code, type, val)
 	memset(ksc.sc_reserved, 0, sizeof ksc.sc_reserved);	/* XXX */
 	memset(ksc.sc_xxx, 0, sizeof ksc.sc_xxx);		/* XXX */
 
-#ifdef COMPAT_OSF1
-	/*
-	 * XXX Create an OSF/1-style sigcontext and associated goo.
-	 */
-#endif
-
 	if (psp->ps_siginfo & sigmask(sig)) {
 		initsiginfo(&ksi, sig, code, type, val);
 		sip = (void *)scp + kscsize;
@@ -1879,59 +1887,6 @@ delay(n)
 		pcc0 = pcc1;
 	}
 }
-
-#if defined(COMPAT_OSF1)
-void	cpu_exec_ecoff_setregs(struct proc *, struct exec_package *,
-	    u_long, register_t *);
-
-void
-cpu_exec_ecoff_setregs(p, epp, stack, retval)
-	struct proc *p;
-	struct exec_package *epp;
-	u_long stack;
-	register_t *retval;
-{
-	struct ecoff_exechdr *execp = (struct ecoff_exechdr *)epp->ep_hdr;
-
-	setregs(p, epp, stack, retval);
-	p->p_md.md_tf->tf_regs[FRAME_GP] = execp->a.gp_value;
-}
-
-/*
- * cpu_exec_ecoff_hook():
- *	cpu-dependent ECOFF format hook for execve().
- * 
- * Do any machine-dependent diddling of the exec package when doing ECOFF.
- *
- */
-int
-cpu_exec_ecoff_hook(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-	struct ecoff_exechdr *execp = (struct ecoff_exechdr *)epp->ep_hdr;
-	extern struct emul emul_native;
-	int error;
-	extern int osf1_exec_ecoff_hook(struct proc *, struct exec_package *);
-
-	switch (execp->f.f_magic) {
-#ifdef COMPAT_OSF1
-	case ECOFF_MAGIC_ALPHA:
-		error = osf1_exec_ecoff_hook(p, epp);
-		break;
-#endif
-
-	case ECOFF_MAGIC_NATIVE_ALPHA:
-		epp->ep_emul = &emul_native;
-		error = 0;
-		break;
-
-	default:
-		error = ENOEXEC;
-	}
-	return (error);
-}
-#endif
 
 int
 alpha_pa_access(pa)

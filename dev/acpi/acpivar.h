@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivar.h,v 1.57 2010/04/07 06:33:06 kettenis Exp $	*/
+/*	$OpenBSD: acpivar.h,v 1.59 2010/07/13 21:01:05 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -207,6 +207,8 @@ struct acpi_softc {
 	int			sc_powerbtn;
 	int			sc_sleepbtn;
 
+	int			sc_sleepmode;
+
 	struct {
 		int slp_typa;
 		int slp_typb;
@@ -216,7 +218,7 @@ struct acpi_softc {
 
 	struct gpe_block	*gpe_table;
 
-	int			sc_wakeup;
+	int			sc_threadwaiting;
 	u_int32_t		sc_gpe_sts;
 	u_int32_t		sc_gpe_en;
 	struct acpi_thread	*sc_thread;
@@ -302,6 +304,8 @@ void	 acpi_sleep_walk(struct acpi_softc *, int);
 #define ACPI_IOWRITE 1
 
 void acpi_delay(struct acpi_softc *, int64_t);
+void acpi_wakeup(void *);
+
 int acpi_gasio(struct acpi_softc *, int, int, uint64_t, int, int, void *);
 
 int	acpi_set_gpehandler(struct acpi_softc *, int,

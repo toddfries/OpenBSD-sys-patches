@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.182 2010/04/20 20:49:33 deraadt Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.189 2010/07/10 21:29:37 guenther Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -66,6 +66,7 @@
 #include <sys/pipe.h>
 #include <sys/eventvar.h>
 #include <sys/socketvar.h>
+#include <sys/socket.h>
 #include <sys/domain.h>
 #include <sys/protosw.h>
 #ifdef __HAVE_TIMECOUNTER
@@ -120,6 +121,8 @@ int sysctl_cptime2(int *, u_int, void *, size_t *, void *, size_t);
 int (*cpu_cpuspeed)(int *);
 void (*cpu_setperf)(int);
 int perflevel = 100;
+
+int rthreads_enabled = 0;
 
 /*
  * Lock to avoid too many processes vslocking a large amount of memory
@@ -557,6 +560,9 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case KERN_CPTIME2:
 		return (sysctl_cptime2(name + 1, namelen -1, oldp, oldlenp,
 		    newp, newlen));
+	case KERN_RTHREADS:
+		return (sysctl_int(oldp, oldlenp, newp, newlen,
+		    &rthreads_enabled));
 	case KERN_CACHEPCT: {
 		int opct, pgs;
 		opct = bufcachepercent;
@@ -1193,7 +1199,7 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 
 	if (namelen > 4)
 		return (ENOTDIR);
-	if (namelen < 4)
+	if (namelen < 4 || name[2] > sizeof(*kf))
 		return (EINVAL);
 
 	buflen = where != NULL ? *sizep : 0;
@@ -1244,9 +1250,9 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 		}
 		rw_enter_read(&allproclk);
 		LIST_FOREACH(pp, &allproc, p_list) {
-			/* skip system, embryonic and undead processes */
-			if ((pp->p_flag & P_SYSTEM) ||
-			    pp->p_stat == SIDL || pp->p_stat == SZOMB)
+			/* skip system, exiting, embryonic and undead processes */
+			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_WEXIT)
+			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
 			if (arg > 0 && pp->p_pid != (pid_t)arg) {
 				/* not the pid we are looking for */
@@ -1276,9 +1282,9 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 	case KERN_FILE_BYUID:
 		rw_enter_read(&allproclk);
 		LIST_FOREACH(pp, &allproc, p_list) {
-			/* skip system, embryonic and undead processes */
-			if ((pp->p_flag & P_SYSTEM) ||
-			    pp->p_stat == SIDL || pp->p_stat == SZOMB)
+			/* skip system, exiting, embryonic and undead processes */
+			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_WEXIT)
+			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
 			if (arg > 0 && pp->p_ucred->cr_uid != (uid_t)arg) {
 				/* not the uid we are looking for */
@@ -1347,7 +1353,8 @@ sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 		elem_size = elem_count = 0;
 		eproc = malloc(sizeof(struct eproc), M_TEMP, M_WAITOK);
 	} else /* if (type == KERN_PROC2) */ {
-		if (namelen != 5 || name[3] < 0 || name[4] < 0)
+		if (namelen != 5 || name[3] < 0 || name[4] < 0 ||
+		    name[3] > sizeof(*kproc2))
 			return (EINVAL);
 		op = name[1];
 		arg = name[2];
@@ -1365,6 +1372,11 @@ again:
 		 */
 		if (p->p_stat == SIDL)
 			continue;
+
+		/* XXX skip processes in the middle of being zapped */
+		if (p->p_pgrp == NULL)
+			continue;
+
 		/*
 		 * TODO - make more efficient (see notes below).
 		 */
@@ -1475,8 +1487,6 @@ err:
 	return (error);
 }
 
-#endif	/* SMALL_KERNEL */
-
 /*
  * Fill in an eproc structure for the specified process.
  */
@@ -1533,8 +1543,6 @@ fill_eproc(struct proc *p, struct eproc *ep)
 	ep->e_maxrss = p->p_rlimit ? p->p_rlimit[RLIMIT_RSS].rlim_cur : 0;
 	ep->e_limit = p->p_p->ps_limit;
 }
-
-#ifndef	SMALL_KERNEL
 
 /*
  * Fill in a kproc2 structure for the specified process.
@@ -1646,7 +1654,7 @@ sysctl_proc_args(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	iov.iov_len = sizeof(pss);
 	uio.uio_iov = &iov;
 	uio.uio_iovcnt = 1;	
-	uio.uio_offset = (off_t)PS_STRINGS;
+	uio.uio_offset = (off_t)(vaddr_t)PS_STRINGS;
 	uio.uio_resid = sizeof(pss);
 	uio.uio_segflg = UIO_SYSSPACE;
 	uio.uio_rw = UIO_READ;

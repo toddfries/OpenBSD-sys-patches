@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.79 2010/04/20 22:05:44 tedu Exp $	*/
+/*	$OpenBSD: systm.h,v 1.81 2010/07/08 20:15:01 deraadt Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -107,6 +107,8 @@ extern struct vnode *swapdev_vp;/* vnode equivalent to above */
 struct proc;
 #define curproc curcpu()->ci_curproc
 
+extern int rthreads_enabled;
+
 typedef int	sy_call_t(struct proc *, void *, register_t *);
 
 extern struct sysent {		/* system call table */
@@ -154,6 +156,7 @@ void vfs_opv_init_default(struct vnodeopv_desc *);
 void vfs_op_init(void);
 
 int	seltrue(dev_t dev, int which, struct proc *);
+int	selfalse(dev_t dev, int which, struct proc *);
 void	*hashinit(int, int, int, u_long *);
 int	sys_nosys(struct proc *, void *, register_t *);
 

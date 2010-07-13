@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.17 2010/03/02 20:54:51 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.22 2010/06/27 13:24:39 miod Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -63,7 +63,7 @@
 #include <sys/sem.h>
 #endif
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <machine/db_machdep.h>
 #include <ddb/db_interface.h>
@@ -76,9 +76,6 @@
 #include <dev/cons.h>
 
 #include <mips64/archtype.h>
-
-#include <loongson/dev/bonitoreg.h>
-#include <loongson/dev/bonitovar.h>
 
 /* The following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* Machine "architecture" */
@@ -97,8 +94,22 @@ char	pmon_bootp[80];
 int	bufpages = BUFPAGES;
 int	bufcachepercent = BUFCACHEPERCENT;
 
+/*
+ * Even though the system is 64bit, the hardware is constrained to up
+ * to 2G of contigous physical memory (direct 2GB DMA area), so there
+ * is no particular constraint. paddr_t is long so: 
+ */
+struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 vm_map_t exec_map;
 vm_map_t phys_map;
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
 
 caddr_t	msgbufbase;
 vaddr_t	uncached_base;
@@ -110,6 +121,7 @@ int	kbd_reset;
 
 const struct platform *sys_platform;
 struct cpu_hwinfo bootcpu_hwinfo;
+uint loongson_ver;
 
 /* Pointers to the start and end of the symbol table. */
 caddr_t	ssym;
@@ -155,12 +167,13 @@ struct bonito_flavour {
 
 extern const struct platform fuloong_platform;
 extern const struct platform gdium_platform;
+extern const struct platform generic2e_platform;
 extern const struct platform lynloong_platform;
 extern const struct platform yeeloong_platform;
 
 const struct bonito_flavour bonito_flavours[] = {
 	/* Lemote Fuloong 2F mini-PC */
-	/* how different is LM6003 ? */
+	{ "LM6003",	&fuloong_platform },
 	{ "LM6004",	&fuloong_platform },
 	/* EMTEC Gdium Liberty 1000 */
 	{ "Gdium",	&gdium_platform },
@@ -183,7 +196,7 @@ vaddr_t
 mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
     char *boot_esym)
 {
-	uint prid, loongson_ver;
+	uint prid;
 	u_long memlo, memhi, cpuspeed;
 	vaddr_t xtlb_handler;
 	const char *envvar;
@@ -280,20 +293,29 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 
 	envvar = pmon_getenv("Version");
 	if (envvar == NULL) {
-		pmon_printf("Unable to figure out model!\n");
-		goto unsupported;
-	}
-
-	for (f = bonito_flavours; f->prefix != NULL; f++)
-		if (strncmp(envvar, f->prefix, strlen(f->prefix)) == 0) {
-			sys_platform = f->platform;
-			break;
+		/*
+		 * If this is a 2E system, use the generic code and hope
+		 * for the best.
+		 */
+		if (loongson_ver == 0x2e) {
+			sys_platform = &generic2e_platform;
+		} else {
+			pmon_printf("Unable to figure out model!\n");
+			goto unsupported;
 		}
+	} else {
+		for (f = bonito_flavours; f->prefix != NULL; f++)
+			if (strncmp(envvar, f->prefix, strlen(f->prefix)) ==
+			    0) {
+				sys_platform = f->platform;
+				break;
+			}
 
-	if (sys_platform == NULL) {
-		pmon_printf("This kernel doesn't support model \"%s\".\n",
-		    envvar);
-		goto unsupported;
+		if (sys_platform == NULL) {
+			pmon_printf("This kernel doesn't support model \"%s\"."
+			    "\n", envvar);
+			goto unsupported;
+		}
 	}
 
 	hw_vendor = sys_platform->vendor;

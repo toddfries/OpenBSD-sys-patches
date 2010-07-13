@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi.c,v 1.103 2010/04/22 12:33:30 oga Exp $ */
+/* $OpenBSD: mfi.c,v 1.109 2010/07/01 03:20:38 matthew Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -56,15 +56,11 @@ struct cfdriver mfi_cd = {
 };
 
 void	mfi_scsi_cmd(struct scsi_xfer *);
-int	mfi_scsi_ioctl(struct scsi_link *, u_long, caddr_t, int, struct proc *);
+int	mfi_scsi_ioctl(struct scsi_link *, u_long, caddr_t, int);
 void	mfiminphys(struct buf *bp, struct scsi_link *sl);
 
 struct scsi_adapter mfi_switch = {
 	mfi_scsi_cmd, mfiminphys, 0, 0, mfi_scsi_ioctl
-};
-
-struct scsi_device mfi_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 struct mfi_ccb	*mfi_get_ccb(struct mfi_softc *);
@@ -156,9 +152,9 @@ mfi_get_ccb(struct mfi_softc *sc)
 	struct mfi_ccb		*ccb;
 
 	mtx_enter(&sc->sc_ccb_mtx);
-	ccb = TAILQ_FIRST(&sc->sc_ccb_freeq);
+	ccb = SLIST_FIRST(&sc->sc_ccb_freeq);
 	if (ccb != NULL) {
-		TAILQ_REMOVE(&sc->sc_ccb_freeq, ccb, ccb_link);
+		SLIST_REMOVE_HEAD(&sc->sc_ccb_freeq, ccb_link);
 		ccb->ccb_state = MFI_CCB_READY;
 	}
 	mtx_leave(&sc->sc_ccb_mtx);
@@ -190,7 +186,7 @@ mfi_put_ccb(struct mfi_ccb *ccb)
 	ccb->ccb_len = 0;
 
 	mtx_enter(&sc->sc_ccb_mtx);
-	TAILQ_INSERT_TAIL(&sc->sc_ccb_freeq, ccb, ccb_link);
+	SLIST_INSERT_HEAD(&sc->sc_ccb_freeq, ccb, ccb_link);
 	mtx_leave(&sc->sc_ccb_mtx);
 }
 
@@ -640,7 +636,7 @@ mfi_attach(struct mfi_softc *sc, enum mfi_iop iop)
 	if (mfi_transition_firmware(sc))
 		return (1);
 
-	TAILQ_INIT(&sc->sc_ccb_freeq);
+	SLIST_INIT(&sc->sc_ccb_freeq);
 	mtx_init(&sc->sc_ccb_mtx, IPL_BIO);
 
 	rw_init(&sc->sc_lock, "mfi_lock");
@@ -718,7 +714,6 @@ mfi_attach(struct mfi_softc *sc, enum mfi_iop iop)
 	else
 		sc->sc_link.openings = sc->sc_max_cmds;
 
-	sc->sc_link.device = &mfi_dev;
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &mfi_switch;
 	sc->sc_link.adapter_target = MFI_MAX_LD;
@@ -990,7 +985,6 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 	uint32_t		blockcnt;
 	uint8_t			target = link->target;
 	uint8_t			mbox[MFI_MBOX_SIZE];
-	int			s;
 
 	DNPRINTF(MFI_D_CMD, "%s: mfi_scsi_cmd opcode: %#x\n",
 	    DEVNAME(sc), xs->cmd->opcode);
@@ -1005,9 +999,7 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 	if ((ccb = mfi_get_ccb(sc)) == NULL) {
 		DNPRINTF(MFI_D_CMD, "%s: mfi_scsi_cmd no ccb\n", DEVNAME(sc));
 		xs->error = XS_NO_CCB;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
@@ -1091,9 +1083,7 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 		}
 
 		mfi_put_ccb(ccb);
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
@@ -1107,9 +1097,7 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 stuffup:
 	xs->error = XS_DRIVER_STUFFUP;
 complete:
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 int
@@ -1268,8 +1256,7 @@ mfi_mgmt_done(struct mfi_ccb *ccb)
 }
 
 int
-mfi_scsi_ioctl(struct scsi_link *link, u_long cmd, caddr_t addr, int flag,
-    struct proc *p)
+mfi_scsi_ioctl(struct scsi_link *link, u_long cmd, caddr_t addr, int flag)
 {
 	struct mfi_softc	*sc = (struct mfi_softc *)link->adapter_softc;
 
@@ -1528,7 +1515,7 @@ mfi_ioctl_disk(struct mfi_softc *sc, struct bioc_disk *bd)
 	struct mfi_ld_cfg	*ld;
 	struct mfi_pd_details	*pd;
 	struct scsi_inquiry_data *inqbuf;
-	char			vend[8+16+4+1];
+	char			vend[8+16+4+1], *vendp;
 	int			rv = EINVAL;
 	int			arr, vol, disk, span;
 	uint8_t			mbox[MFI_MBOX_SIZE];
@@ -1614,7 +1601,8 @@ mfi_ioctl_disk(struct mfi_softc *sc, struct bioc_disk *bd)
 	bd->bd_channel = pd->mpd_enc_idx;
 
 	inqbuf = (struct scsi_inquiry_data *)&pd->mpd_inq_data;
-	memcpy(vend, inqbuf->vendor, sizeof vend - 1);
+	vendp = inqbuf->vendor;
+	memcpy(vend, vendp, sizeof vend - 1);
 	vend[sizeof vend - 1] = '\0';
 	strlcpy(bd->bd_vendor, vend, sizeof(bd->bd_vendor));
 
@@ -1811,7 +1799,7 @@ mfi_bio_hs(struct mfi_softc *sc, int volid, int type, void *bio_hs)
 	struct bioc_disk	*sdhs;
 	struct bioc_vol		*vdhs;
 	struct scsi_inquiry_data *inqbuf;
-	char			vend[8+16+4+1];
+	char			vend[8+16+4+1], *vendp;
 	int			i, rv = EINVAL;
 	uint32_t		size;
 	uint8_t			mbox[MFI_MBOX_SIZE];
@@ -1881,7 +1869,8 @@ mfi_bio_hs(struct mfi_softc *sc, int volid, int type, void *bio_hs)
 		sdhs->bd_channel = pd->mpd_enc_idx;
 		sdhs->bd_target = pd->mpd_enc_slot;
 		inqbuf = (struct scsi_inquiry_data *)&pd->mpd_inq_data;
-		memcpy(vend, inqbuf->vendor, sizeof vend - 1);
+		vendp = inqbuf->vendor;
+		memcpy(vend, vendp, sizeof vend - 1);
 		vend[sizeof vend - 1] = '\0';
 		strlcpy(sdhs->bd_vendor, vend, sizeof(sdhs->bd_vendor));
 		break;
@@ -1905,6 +1894,7 @@ mfi_create_sensors(struct mfi_softc *sc)
 {
 	struct device		*dev;
 	struct scsibus_softc	*ssc = NULL;
+	struct scsi_link	*link;
 	int			i;
 
 	TAILQ_FOREACH(dev, &alldevs, dv_list) {
@@ -1929,10 +1919,11 @@ mfi_create_sensors(struct mfi_softc *sc)
 	    sizeof(sc->sc_sensordev.xname));
 
 	for (i = 0; i < sc->sc_ld_cnt; i++) {
-		if (ssc->sc_link[i][0] == NULL)
+		link = scsi_get_link(ssc, i, 0);
+		if (link == NULL)
 			goto bad;
 
-		dev = ssc->sc_link[i][0]->device_softc;
+		dev = link->device_softc;
 
 		sc->sc_sensors[i].type = SENSOR_DRIVE;
 		sc->sc_sensors[i].status = SENSOR_S_UNKNOWN;

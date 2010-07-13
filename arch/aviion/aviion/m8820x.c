@@ -1,4 +1,4 @@
-/*	$OpenBSD: m8820x.c,v 1.7 2010/04/18 22:04:37 miod Exp $	*/
+/*	$OpenBSD: m8820x.c,v 1.9 2010/05/02 22:01:43 miod Exp $	*/
 /*
  * Copyright (c) 2004, 2006, 2010 Miodrag Vallat.
  *
@@ -34,6 +34,7 @@
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
 #include <machine/m8820x.h>
+#include <machine/pmap.h>
 #include <machine/prom.h>
 
 extern	u_int32_t pfsr_straight[];
@@ -83,8 +84,7 @@ m8820x_setup_board_config()
 	 * we need. This is theoretically only available on 88204-based
 	 * machines, but it can't hurt to give it a try.
 	 */
-	if (scm_cpuconfig(&scc) == 0 &&
-	    scc.version == SCM_CPUCONFIG_VERSION)
+	if (scm_cpuconfig(&scc) == 0 && scc.version == SCM_CPUCONFIG_VERSION)
 		goto knowledge;
 
 	/*
@@ -143,7 +143,9 @@ hardprobe:
 		case 3:		/* 2 CPUs, 12 CMMUs */
 		case 7:		/* 1 CPU, 6 CMMU */
 			/*
-			 *
+			 * Regular logic can't cope with asymmetrical
+			 * designs. Report a 4:1 ratio with two missing
+			 * data CMMUs.
 			 */
 			ncpusfound = whoami == 7 ? 1 : 2;
 			cmmu_per_cpu = 6;
@@ -151,6 +153,15 @@ hardprobe:
 			max_cmmus = ncpusfound << cmmu_shift;
 			scc.isplit = scc.dsplit = 0;	/* XXX unknown */
 			m8820x_pfsr = pfsr_six;
+
+			/*
+			 * We can't use writeback userland mappings until
+			 * the CMMU split scheme is known, as the current
+			 * pessimistic behaviour is not good enough to
+			 * prevent out-of-sync cache lines from occuring.
+			 */
+			default_apr |= CACHE_WT;
+
 			goto done;
 			break;
 		default:

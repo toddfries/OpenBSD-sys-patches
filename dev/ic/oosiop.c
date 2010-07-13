@@ -1,4 +1,4 @@
-/*	$OpenBSD: oosiop.c,v 1.15 2010/04/20 20:21:56 miod Exp $	*/
+/*	$OpenBSD: oosiop.c,v 1.17 2010/06/28 18:31:02 krw Exp $	*/
 /*	$NetBSD: oosiop.c,v 1.4 2003/10/29 17:45:55 tsutsui Exp $	*/
 
 /*
@@ -135,13 +135,6 @@ struct scsi_adapter oosiop_adapter = {
 	NULL
 };
 
-struct scsi_device oosiop_dev = {
-	NULL,
-	NULL,
-	NULL,
-	NULL
-};
-
 void
 oosiop_attach(struct oosiop_softc *sc)
 {
@@ -156,7 +149,7 @@ oosiop_attach(struct oosiop_softc *sc)
 	 */
 	scrsize = round_page(sizeof(oosiop_script));
 	err = bus_dmamem_alloc(sc->sc_dmat, scrsize, PAGE_SIZE, 0, &seg, 1,
-	    &nseg, BUS_DMA_NOWAIT);
+	    &nseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (err) {
 		printf(": failed to allocate script memory, err=%d\n", err);
 		return;
@@ -179,7 +172,6 @@ oosiop_attach(struct oosiop_softc *sc)
 		printf(": failed to load script map, err=%d\n", err);
 		return;
 	}
-	bzero(sc->sc_scr, scrsize);
 	sc->sc_scrbase = sc->sc_scrdma->dm_segs[0].ds_addr;
 
 	/* Initialize command block array */
@@ -243,7 +235,6 @@ oosiop_attach(struct oosiop_softc *sc)
 	 */
 	sc->sc_link.adapter = &oosiop_adapter;
 	sc->sc_link.adapter_softc = sc;
-	sc->sc_link.device = &oosiop_dev;
 	sc->sc_link.openings = 1;	/* XXX */
 	sc->sc_link.adapter_buswidth = OOSIOP_NTGT;
 	sc->sc_link.adapter_target = sc->sc_id;

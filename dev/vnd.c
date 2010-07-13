@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.96 2010/04/23 15:25:21 jsing Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.99 2010/07/01 17:48:33 thib Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -57,7 +57,6 @@
  * file, the protection of the mapped file is ignored (effectively,
  * by using root credentials in all transactions).
  *
- * NOTE 3: Doesn't interact with leases, should it?
  */
 
 #include <sys/param.h>
@@ -79,6 +78,7 @@
 #include <sys/rwlock.h>
 #include <sys/uio.h>
 #include <sys/conf.h>
+#include <sys/dkio.h>
 
 #include <crypto/blf.h>
 
@@ -569,6 +569,7 @@ vndstrategy(struct buf *bp)
 		nbp->vb_buf.b_validoff = bp->b_validoff;
 		nbp->vb_buf.b_validend = bp->b_validend;
 		LIST_INIT(&nbp->vb_buf.b_dep);
+		nbp->vb_buf.b_bq = NULL;
 
 		/* save a reference to the old buffer */
 		nbp->vb_obp = bp;

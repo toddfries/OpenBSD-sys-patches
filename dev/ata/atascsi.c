@@ -1,4 +1,4 @@
-/*	$OpenBSD: atascsi.c,v 1.82 2010/04/23 01:39:05 dlg Exp $ */
+/*	$OpenBSD: atascsi.c,v 1.88 2010/07/03 00:41:58 kettenis Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -55,6 +55,8 @@ struct atascsi_port {
 	struct atascsi		*ap_as;
 	int			ap_port;
 	int			ap_type;
+	int			ap_features;
+#define ATA_PORT_F_PROBED	1
 	int			ap_ncqdepth;
 };
 
@@ -69,10 +71,6 @@ struct scsi_adapter atascsi_switch = {
 	atascsi_probe,		/* dev_probe */
 	atascsi_free,		/* dev_free */
 	NULL,			/* ioctl */
-};
-
-struct scsi_device atascsi_device = {
-	NULL, NULL, NULL, NULL
 };
 
 void		ata_swapcopy(void *, void *, size_t);
@@ -91,6 +89,8 @@ void		atascsi_disk_capacity16(struct scsi_xfer *);
 void		atascsi_disk_sync(struct scsi_xfer *);
 void		atascsi_disk_sync_done(struct ata_xfer *);
 void		atascsi_disk_sense(struct scsi_xfer *);
+void		atascsi_disk_start_stop(struct scsi_xfer *);
+void		atascsi_disk_start_stop_done(struct ata_xfer *);
 
 void		atascsi_atapi_cmd(struct scsi_xfer *);
 void		atascsi_atapi_cmd_done(struct ata_xfer *);
@@ -134,7 +134,6 @@ atascsi_attach(struct device *self, struct atascsi_attach_args *aaa)
 		as->as_switch.scsi_minphys = aaa->aaa_minphys;
 
 	/* fill in our scsi_link */
-	as->as_link.device = &atascsi_device;
 	as->as_link.adapter = &as->as_switch;
 	as->as_link.adapter_softc = as;
 	as->as_link.adapter_buswidth = aaa->aaa_nports;
@@ -243,36 +242,6 @@ atascsi_probe(struct scsi_link *link)
 		goto error;
 
 	as->as_ports[port] = ap;
-
-	if (as->as_capability & ASAA_CAP_NCQ &&
-	    (letoh16(ap->ap_identify.satacap) & (1 << 8))) {
-		int host_ncqdepth;
-		/*
-		 * At this point, openings should be the number of commands the
-		 * host controller supports, less any reserved slot the host
-		 * controller needs for recovery.
-		 */
-		host_ncqdepth = link->openings +
-		    ((as->as_capability & ASAA_CAP_NEEDS_RESERVED) ? 1 : 0);
-
-		ap->ap_ncqdepth = (letoh16(ap->ap_identify.qdepth) & 0x1f) + 1;
-
-		/* Limit the number of openings to what the device supports. */
-		if (host_ncqdepth > ap->ap_ncqdepth)
-			link->openings -= (host_ncqdepth - ap->ap_ncqdepth);
-
-		/*
-		 * XXX throw away any xfers that have tag numbers higher than
-		 * what the device supports.
-		 */
-		while (host_ncqdepth--) {
-			xa = scsi_io_get(&ap->ap_iopool, SCSI_NOSLEEP);
-			if (xa->tag < ap->ap_ncqdepth) {
-				xa->state = ATA_S_COMPLETE;
-				scsi_io_put(&ap->ap_iopool, xa);
-			}
-		}
-	}
 
 	if (type != ATA_PORT_T_DISK)
 		return (0);
@@ -437,8 +406,11 @@ atascsi_disk_cmd(struct scsi_xfer *xs)
 		atascsi_passthru_16(xs);
 		return;
 
-	case TEST_UNIT_READY:
 	case START_STOP:
+		atascsi_disk_start_stop(xs);
+		return;
+
+	case TEST_UNIT_READY:
 	case PREVENT_ALLOW:
 		atascsi_done(xs, XS_NOERROR);
 		return;
@@ -566,10 +538,11 @@ atascsi_disk_inq(struct scsi_xfer *xs)
 void
 atascsi_disk_inquiry(struct scsi_xfer *xs)
 {
+	struct scsi_inquiry_data inq;
 	struct scsi_link        *link = xs->sc_link;
 	struct atascsi          *as = link->adapter_softc;
 	struct atascsi_port	*ap = as->as_ports[link->target];
-	struct scsi_inquiry_data inq;
+	struct ata_xfer		*xa;
 
 	bzero(&inq, sizeof(inq));
 
@@ -586,6 +559,41 @@ atascsi_disk_inquiry(struct scsi_xfer *xs)
 	bcopy(&inq, xs->data, MIN(sizeof(inq), xs->datalen));
 
 	atascsi_done(xs, XS_NOERROR);
+
+	if (ap->ap_features & ATA_PORT_F_PROBED)
+		return;
+
+	ap->ap_features = ATA_PORT_F_PROBED;
+
+	if (as->as_capability & ASAA_CAP_NCQ &&
+	    (letoh16(ap->ap_identify.satacap) & (1 << 8))) {
+		int host_ncqdepth;
+		/*
+		 * At this point, openings should be the number of commands the
+		 * host controller supports, less any reserved slot the host
+		 * controller needs for recovery.
+		 */
+		host_ncqdepth = link->openings +
+		    ((as->as_capability & ASAA_CAP_NEEDS_RESERVED) ? 1 : 0);
+
+		ap->ap_ncqdepth = (letoh16(ap->ap_identify.qdepth) & 0x1f) + 1;
+
+		/* Limit the number of openings to what the device supports. */
+		if (host_ncqdepth > ap->ap_ncqdepth)
+			link->openings -= (host_ncqdepth - ap->ap_ncqdepth);
+
+		/*
+		 * XXX throw away any xfers that have tag numbers higher than
+		 * what the device supports.
+		 */
+		while (host_ncqdepth--) {
+			xa = scsi_io_get(&ap->ap_iopool, SCSI_NOSLEEP);
+			if (xa->tag < ap->ap_ncqdepth) {
+				xa->state = ATA_S_COMPLETE;
+				scsi_io_put(&ap->ap_iopool, xa);
+			}
+		}
+	}
 }
 
 void
@@ -872,15 +880,26 @@ atascsi_disk_capacity16(struct scsi_xfer *xs)
 	struct atascsi_port	*ap = as->as_ports[link->target];
 	struct scsi_read_cap_data_16 rcd;
 	u_int			align;
+	u_int16_t		lowest_aligned = 0;
 
 	bzero(&rcd, sizeof(rcd));
 
-	_lto4b(ata_identify_blocks(&ap->ap_identify), rcd.addr);
+	_lto8b(ata_identify_blocks(&ap->ap_identify), rcd.addr);
 	_lto4b(ata_identify_blocksize(&ap->ap_identify), rcd.length);
 	rcd.logical_per_phys = ata_identify_block_l2p_exp(&ap->ap_identify);
 	align = ata_identify_block_logical_align(&ap->ap_identify);
 	if (align > 0)
-		_lto2b((1 << rcd.logical_per_phys) - align, rcd.lowest_aligned);
+		lowest_aligned = (1 << rcd.logical_per_phys) - align;
+
+	if (ISSET(letoh16(ap->ap_identify.data_set_mgmt), 
+	    ATA_ID_DATA_SET_MGMT_TRIM)) {
+		SET(lowest_aligned, READ_CAP_16_TPE);
+
+		if (ISSET(letoh16(ap->ap_identify.add_support), 
+		    ATA_ID_ADD_SUPPORT_DRT))
+			SET(lowest_aligned, READ_CAP_16_TPRZ);
+	}
+	_lto2b(lowest_aligned, rcd.lowest_aligned);
 
 	bcopy(&rcd, xs->data, MIN(sizeof(rcd), xs->datalen));
 
@@ -1029,6 +1048,84 @@ atascsi_disk_sense(struct scsi_xfer *xs)
 }
 
 void
+atascsi_disk_start_stop(struct scsi_xfer *xs)
+{
+	struct scsi_link	*link = xs->sc_link;
+	struct atascsi		*as = link->adapter_softc;
+	struct ata_xfer		*xa = xs->io;
+	struct scsi_start_stop	*ss = (struct scsi_start_stop *)xs->cmd;
+
+	if (ss->how != SSS_STOP) {
+		atascsi_done(xs, XS_NOERROR);
+		return;
+	}
+
+	/*
+	 * A SCSI START_STOP UNIT command with the START bit set to
+	 * zero gets translated into an ATA FLUSH CACHE command
+	 * followed by an ATA STANDBY IMMEDIATE command.
+	 */
+	xa->datalen = 0;
+	xa->flags = ATA_F_READ;
+	xa->complete = atascsi_disk_start_stop_done;
+	/* Spec says flush cache can take >30 sec, so give it at least 45. */
+	xa->timeout = (xs->timeout < 45000) ? 45000 : xs->timeout;
+	xa->atascsi_private = xs;
+	if (xs->flags & SCSI_POLL)
+		xa->flags |= ATA_F_POLL;
+
+	xa->fis->flags = ATA_H2D_FLAGS_CMD;
+	xa->fis->command = ATA_C_FLUSH_CACHE;
+	xa->fis->device = 0;
+
+	ata_exec(as, xa);
+}
+
+void
+atascsi_disk_start_stop_done(struct ata_xfer *xa)
+{
+	struct scsi_xfer	*xs = xa->atascsi_private;
+	struct scsi_link	*link = xs->sc_link;
+	struct atascsi		*as = link->adapter_softc;
+
+	switch (xa->state) {
+	case ATA_S_COMPLETE:
+		break;
+
+	case ATA_S_ERROR:
+	case ATA_S_TIMEOUT:
+		xs->error = (xa->state == ATA_S_TIMEOUT ? XS_TIMEOUT :
+		    XS_DRIVER_STUFFUP);
+		xs->resid = xa->resid;
+		scsi_done(xs);
+		return;
+
+	default:
+		panic("atascsi_disk_start_stop_done: unexpected ata_xfer state (%d)",
+		    xa->state);
+	}
+
+	/*
+	 * The FLUSH CACHE command completed succesfully; now issue
+	 * the STANDBY IMMEDATE command.
+	 */
+	xa->datalen = 0;
+	xa->flags = ATA_F_READ;
+	xa->complete = atascsi_disk_cmd_done;
+	/* Spec says flush cache can take >30 sec, so give it at least 45. */
+	xa->timeout = (xs->timeout < 45000) ? 45000 : xs->timeout;
+	xa->atascsi_private = xs;
+	if (xs->flags & SCSI_POLL)
+		xa->flags |= ATA_F_POLL;
+
+	xa->fis->flags = ATA_H2D_FLAGS_CMD;
+	xa->fis->command = ATA_C_STANDBY_IMMED;
+	xa->fis->device = 0;
+
+	ata_exec(as, xa);
+}
+
+void
 atascsi_atapi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link	*link = xs->sc_link;
@@ -1110,13 +1207,8 @@ atascsi_atapi_cmd_done(struct ata_xfer *xa)
 void
 atascsi_done(struct scsi_xfer *xs, int error)
 {
-	int			s;
-
 	xs->error = error;
-
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 void

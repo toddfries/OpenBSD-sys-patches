@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.307 2010/01/20 21:41:17 mcbride Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.311 2010/06/28 23:21:41 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -354,14 +354,14 @@ struct pfi_dynaddr {
 #endif /* PF_INET6_ONLY */
 #endif /* PF_INET_INET6 */
 
-#define	PF_MISMATCHAW(aw, x, af, neg, ifp)				\
+#define	PF_MISMATCHAW(aw, x, af, neg, ifp, rtid)			\
 	(								\
 		(((aw)->type == PF_ADDR_NOROUTE &&			\
-		    pf_routable((x), (af), NULL)) ||			\
+		    pf_routable((x), (af), NULL, (rtid))) ||		\
 		(((aw)->type == PF_ADDR_URPFFAILED && (ifp) != NULL &&	\
-		    pf_routable((x), (af), (ifp))) ||			\
+		    pf_routable((x), (af), (ifp), (rtid))) ||		\
 		((aw)->type == PF_ADDR_RTLABEL &&			\
-		    !pf_rtlabel_match((x), (af), (aw))) ||		\
+		    !pf_rtlabel_match((x), (af), (aw), (rtid))) ||	\
 		((aw)->type == PF_ADDR_TABLE &&				\
 		    !pfr_match_addr((aw)->p.tbl, (x), (af))) ||		\
 		((aw)->type == PF_ADDR_DYNIFTL &&			\
@@ -1196,6 +1196,9 @@ struct pf_pdesc {
 		void			*any;
 	} hdr;
 
+	struct pf_addr	 nsaddr;	/* src address after NAT */
+	struct pf_addr	 ndaddr;	/* dst address after NAT */
+
 	struct ether_header
 			*eh;
 	struct pf_addr	*src;		/* src address */
@@ -1204,6 +1207,8 @@ struct pf_pdesc {
 	u_int16_t	*dport;
 	u_int16_t	 osport;
 	u_int16_t	 odport;
+	u_int16_t	 nsport;	/* src port after NAT */
+	u_int16_t	 ndport;	/* dst port after NAT */
 
 	u_int32_t	 p_len;		/* total length of payload */
 
@@ -1330,7 +1335,7 @@ struct pf_pdesc {
 
 #define REASON_SET(a, x) \
 	do { \
-		if ((a) != NULL) \
+		if ((void *)(a) != NULL) \
 			*(a) = (x); \
 		if (x < PFRES_MAX) \
 			pf_status.counters[x]++; \
@@ -1513,10 +1518,6 @@ struct pfioc_src_nodes {
 #define psn_src_nodes	psn_u.psu_src_nodes
 };
 
-struct pfioc_if {
-	char		 ifname[IFNAMSIZ];
-};
-
 struct pfioc_tm {
 	int		 timeout;
 	int		 seconds;
@@ -1611,9 +1612,9 @@ struct pfioc_iface {
 /* XXX cut 8 - 17 */
 #define DIOCCLRSTATES	_IOWR('D', 18, struct pfioc_state_kill)
 #define DIOCGETSTATE	_IOWR('D', 19, struct pfioc_state)
-#define DIOCSETSTATUSIF _IOWR('D', 20, struct pfioc_if)
+#define DIOCSETSTATUSIF _IOWR('D', 20, struct pfioc_iface)
 #define DIOCGETSTATUS	_IOWR('D', 21, struct pf_status)
-#define DIOCCLRSTATUS	_IO  ('D', 22)
+#define DIOCCLRSTATUS	_IOWR('D', 22, struct pfioc_iface)
 #define DIOCNATLOOK	_IOWR('D', 23, struct pfioc_natlook)
 #define DIOCSETDEBUG	_IOWR('D', 24, u_int32_t)
 #define DIOCGETSTATES	_IOWR('D', 25, struct pfioc_states)
@@ -1781,8 +1782,10 @@ void	pf_scrub_ip6(struct mbuf **, u_int8_t);
 u_int32_t
 	pf_state_expires(const struct pf_state *);
 void	pf_purge_expired_fragments(void);
-int	pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kif *);
-int	pf_rtlabel_match(struct pf_addr *, sa_family_t, struct pf_addr_wrap *);
+int	pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kif *,
+	    int);
+int	pf_rtlabel_match(struct pf_addr *, sa_family_t, struct pf_addr_wrap *,
+	    int);
 int	pf_socket_lookup(int, struct pf_pdesc *);
 struct pf_state_key *pf_alloc_state_key(int);
 void	pf_pkt_addr_changed(struct mbuf *);
@@ -1923,18 +1926,13 @@ int			 pf_step_out_of_anchor(int *, struct pf_ruleset **,
 			     int *);
 
 int			 pf_get_transaddr(struct pf_rule *, struct pf_pdesc *,
-			    struct pf_addr *, u_int16_t *, struct pf_addr *,
-			    u_int16_t *, struct pf_src_node **);
+			    struct pf_src_node **);
 
 int			 pf_map_addr(sa_family_t, struct pf_rule *,
 			    struct pf_addr *, struct pf_addr *,
 			    struct pf_addr *, struct pf_src_node **,
 			    struct pf_pool *, enum pf_sn_types);
 
-int			 pf_state_key_setup(struct pf_pdesc *,
-			    struct pf_state_key **, struct pf_state_key **,
-			    struct pf_addr **, struct pf_addr **,
-			    u_int16_t *, u_int16_t *, int);
 #endif /* _KERNEL */
 
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.178 2010/04/20 22:05:43 tedu Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.182 2010/07/09 16:58:06 reyk Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -224,7 +224,6 @@ ip_init()
 
 struct	sockaddr_in ipaddr = { sizeof(ipaddr), AF_INET };
 struct	route ipforward_rt;
-u_int	ipforward_rtableid;
 
 void
 ipintr()
@@ -491,7 +490,8 @@ ipv4_input(m)
                 s = splnet();
 		if (mtag != NULL) {
 			tdbi = (struct tdb_ident *)(mtag + 1);
-			tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+			tdb = gettdb(tdbi->rdomain, tdbi->spi,
+			    &tdbi->dst, tdbi->proto);
 		} else
 			tdb = NULL;
 	        ipsp_spd_lookup(m, AF_INET, hlen, &error,
@@ -650,7 +650,8 @@ found:
         s = splnet();
 	if (mtag) {
 		tdbi = (struct tdb_ident *)(mtag + 1);
-	        tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+	        tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst,
+		    tdbi->proto);
 	} else
 		tdb = NULL;
 	ipsp_spd_lookup(m, AF_INET, hlen, &error, IPSP_DIRECTION_IN,
@@ -692,10 +693,13 @@ in_iawithaddr(struct in_addr ina, struct mbuf *m, u_int rdomain)
 			(IFF_LOOPBACK|IFF_LINK1) &&
 		     ia->ia_net == (ina.s_addr & ia->ia_netmask)))
 			return ia;
+		/* check ancient classful too, e. g. for rarp-based netboot */
 		if (((ip_directedbcast == 0) || (m && ip_directedbcast &&
 		    ia->ia_ifp == m->m_pkthdr.rcvif)) &&
 		    (ia->ia_ifp->if_flags & IFF_BROADCAST)) {
-			if (ina.s_addr == ia->ia_broadaddr.sin_addr.s_addr) {
+			if (ina.s_addr == ia->ia_broadaddr.sin_addr.s_addr ||
+			    IN_CLASSFULBROADCAST(ina.s_addr,
+			    ia->ia_addr.sin_addr.s_addr)) {
 				/* Make sure M_BCAST is set */
 				if (m)
 					m->m_flags |= M_BCAST;
@@ -1213,7 +1217,7 @@ ip_rtaddr(struct in_addr dst, u_int rtableid)
 		sin->sin_len = sizeof(*sin);
 		sin->sin_addr = dst;
 
-		ipforward_rt.ro_rt = rtalloc1(&ipforward_rt.ro_dst, 1,
+		ipforward_rt.ro_rt = rtalloc1(&ipforward_rt.ro_dst, RT_REPORT,
 		    rtableid);
 	}
 	if (ipforward_rt.ro_rt == 0)
@@ -1444,7 +1448,7 @@ ip_forward(m, srcrt)
 	sin = satosin(&ipforward_rt.ro_dst);
 	if ((rt = ipforward_rt.ro_rt) == 0 ||
 	    ip->ip_dst.s_addr != sin->sin_addr.s_addr ||
-	    rtableid != ipforward_rtableid) {
+	    rtableid != ipforward_rt.ro_tableid) {
 		if (ipforward_rt.ro_rt) {
 			RTFREE(ipforward_rt.ro_rt);
 			ipforward_rt.ro_rt = 0;
@@ -1452,13 +1456,13 @@ ip_forward(m, srcrt)
 		sin->sin_family = AF_INET;
 		sin->sin_len = sizeof(*sin);
 		sin->sin_addr = ip->ip_dst;
+		ipforward_rt.ro_tableid = rtableid;
 
-		rtalloc_mpath(&ipforward_rt, &ip->ip_src.s_addr, rtableid);
+		rtalloc_mpath(&ipforward_rt, &ip->ip_src.s_addr);
 		if (ipforward_rt.ro_rt == 0) {
 			icmp_error(m, ICMP_UNREACH, ICMP_UNREACH_HOST, dest, 0);
 			return;
 		}
-		ipforward_rtableid = rtableid;
 		rt = ipforward_rt.ro_rt;
 	}
 
@@ -1620,7 +1624,6 @@ ip_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 			    rt_timer_queue_create(ip_mtudisc_timeout);
 		} else if (ip_mtudisc == 0 && ip_mtudisc_timeout_q != NULL) {
 			rt_timer_queue_destroy(ip_mtudisc_timeout_q, TRUE);
-			Free(ip_mtudisc_timeout_q);
 			ip_mtudisc_timeout_q = NULL;
 		}
 		return error;

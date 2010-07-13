@@ -1,4 +1,4 @@
-/*	$OpenBSD: umsm.c,v 1.61 2010/04/14 02:47:58 kevlo Exp $	*/
+/*	$OpenBSD: umsm.c,v 1.66 2010/06/26 00:34:19 yuo Exp $	*/
 
 /*
  * Copyright (c) 2008 Yojiro UO <yuo@nui.org>
@@ -113,8 +113,9 @@ struct umsm_type {
 #define	DEV_UMASS3	0x0040
 #define	DEV_UMASS4	0x0080
 #define	DEV_UMASS5	0x0100
+#define	DEV_UMASS6	0x0200
 #define DEV_UMASS	(DEV_UMASS1 | DEV_UMASS2 | DEV_UMASS3 | DEV_UMASS4 | \
-    DEV_UMASS5)
+    DEV_UMASS5 | DEV_UMASS6)
 };
  
 static const struct umsm_type umsm_devs[] = {
@@ -127,8 +128,9 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_DELL,	USB_PRODUCT_DELL_U740 }, 0},
 	{{ USB_VENDOR_DELL,	USB_PRODUCT_DELL_W5500 }, 0},
 
-	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E161 }, DEV_UMASS1},
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E161 }, DEV_UMASS5},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E180 }, DEV_HUAWEI},
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E182 }, DEV_UMASS5},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E220 }, DEV_HUAWEI},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E510 }, DEV_HUAWEI},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E618 }, DEV_HUAWEI},
@@ -151,8 +153,10 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_QUANTA2, USB_PRODUCT_QUANTA2_UMASS }, DEV_UMASS4},
 	{{ USB_VENDOR_QUANTA2, USB_PRODUCT_QUANTA2_Q101 }, 0},
 
-	{{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_UMASS }, DEV_UMASS4},
+	{{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_UMASS_INSTALLER2 }, DEV_UMASS6},
+	{{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_UMASS_INSTALLER }, DEV_UMASS4},
 	{{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_K3565Z }, 0},
+	{{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_MF633 }, 0},
 	{{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_MF637 }, 0},
 
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_EXPRESSCARD }, 0},
@@ -172,6 +176,8 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINX950D }, DEV_UMASS4},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_ZEROCD2 }, DEV_UMASS4},
 	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_U760 }, DEV_UMASS4},
+	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MC760 }, 0},
+	{{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MC760CD }, DEV_UMASS4},
 
 	{{ USB_VENDOR_NOVATEL1,	USB_PRODUCT_NOVATEL1_FLEXPACKGPS }, 0},
 
@@ -227,6 +233,7 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_CMOTECH, USB_PRODUCT_CMOTECH_CCU550 }, 0}, /* ??? */
 	{{ USB_VENDOR_CMOTECH, USB_PRODUCT_CMOTECH_CGU628 }, DEV_UMASS1},
 	{{ USB_VENDOR_CMOTECH, USB_PRODUCT_CMOTECH_CGU628_DISK }, 0},
+	{{ USB_VENDOR_CMOTECH, USB_PRODUCT_CMOTECH_CNU680 }, DEV_UMASS1},
 };
 
 #define umsm_lookup(v, p) ((const struct umsm_type *)usb_lookup(umsm_devs, v, p))
@@ -683,6 +690,21 @@ umsm_umass_changemode(struct umsm_softc *sc)
 		cbw.bCBWFlags = CBWFLAGS_OUT;
 		cbw.CBWCDB[0] = 0x11;
 		cbw.CBWCDB[1] = 0x06;
+		break;
+	case DEV_UMASS6:	/* ZTE */
+		USETDW(cbw.dCBWDataTransferLength, 0x20); 
+		cbw.bCBWFlags = CBWFLAGS_IN;
+		cbw.bCDBLength= 12; 
+		cbw.CBWCDB[0] = 0x85;
+		cbw.CBWCDB[1] = 0x01;
+		cbw.CBWCDB[2] = 0x01;
+		cbw.CBWCDB[3] = 0x01;
+		cbw.CBWCDB[4] = 0x18;
+		cbw.CBWCDB[5] = 0x01;
+		cbw.CBWCDB[6] = 0x01;
+		cbw.CBWCDB[7] = 0x01;
+		cbw.CBWCDB[8] = 0x01;
+		cbw.CBWCDB[9] = 0x01;
 		break;
 	default:
 		DPRINTF(("%s: unknown device type.\n", sc->sc_dev.dv_xname));

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.76 2010/04/20 23:27:00 deraadt Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.81 2010/06/19 14:06:54 miod Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -74,6 +74,91 @@ struct pdc_chassis_lcd pdc_chassis_lcd PDC_ALIGNMENT;
 /* from machdep.c */
 extern struct extent *hppa_ex;
 extern struct pdc_btlb pdc_btlb;
+
+int		 mbus_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
+		    bus_space_handle_t *bshp);
+int		 mbus_map(void *v, bus_addr_t bpa, bus_size_t size,
+		    int flags, bus_space_handle_t *bshp);
+void		 mbus_unmap(void *v, bus_space_handle_t bsh, bus_size_t size);
+int		 mbus_alloc(void *v, bus_addr_t rstart, bus_addr_t rend,
+		    bus_size_t size, bus_size_t align, bus_size_t boundary,
+		    int flags, bus_addr_t *addrp, bus_space_handle_t *bshp);
+void		 mbus_free(void *v, bus_space_handle_t h, bus_size_t size);
+int		 mbus_subregion(void *v, bus_space_handle_t bsh,
+		    bus_size_t offset, bus_size_t size,
+		    bus_space_handle_t *nbshp);
+void		 mbus_barrier(void *v, bus_space_handle_t h, bus_size_t o,
+		    bus_size_t l, int op);
+void		*mbus_vaddr(void *v, bus_space_handle_t h);
+u_int8_t	 mbus_r1(void *v, bus_space_handle_t h, bus_size_t o);
+u_int16_t	 mbus_r2(void *v, bus_space_handle_t h, bus_size_t o);
+u_int32_t	 mbus_r4(void *v, bus_space_handle_t h, bus_size_t o);
+u_int64_t	 mbus_r8(void *v, bus_space_handle_t h, bus_size_t o);
+void		 mbus_w1(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int8_t vv);
+void		 mbus_w2(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int16_t vv);
+void		 mbus_w4(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int32_t vv);
+void		 mbus_w8(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int64_t vv);
+void		 mbus_rm_1(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int8_t *a, bus_size_t c);
+void		 mbus_rm_2(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int16_t *a, bus_size_t c);
+void		 mbus_rm_4(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int32_t *a, bus_size_t c);
+void		 mbus_rm_8(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int64_t *a, bus_size_t c);
+void		 mbus_wm_1(void *v, bus_space_handle_t h, bus_size_t o,
+		    const u_int8_t *a, bus_size_t c);
+void		 mbus_wm_2(void *v, bus_space_handle_t h, bus_size_t o,
+		    const u_int16_t *a, bus_size_t c);
+void		 mbus_wm_4(void *v, bus_space_handle_t h, bus_size_t o,
+		    const u_int32_t *a, bus_size_t c);
+void		 mbus_wm_8(void *v, bus_space_handle_t h, bus_size_t o,
+		    const u_int64_t *a, bus_size_t c);
+void		 mbus_sm_1(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int8_t vv, bus_size_t c);
+void		 mbus_sm_2(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int16_t vv, bus_size_t c);
+void		 mbus_sm_4(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int32_t vv, bus_size_t c);
+void		 mbus_sm_8(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int64_t vv, bus_size_t c);
+
+void		 mbus_rr_1(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int8_t *a, bus_size_t c);
+void		 mbus_rr_2(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int16_t *a, bus_size_t c);
+void		 mbus_rr_4(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int32_t *a, bus_size_t c);
+void		 mbus_rr_8(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int64_t *a, bus_size_t c);
+void		 mbus_wr_1(void *v, bus_space_handle_t h, bus_size_t o,
+		    const u_int8_t *a, bus_size_t c);
+void		 mbus_wr_2(void *v, bus_space_handle_t h, bus_size_t o,
+		    const u_int16_t *a, bus_size_t c);
+void		 mbus_wr_4(void *v, bus_space_handle_t h, bus_size_t o,
+		    const u_int32_t *a, bus_size_t c);
+void		 mbus_wr_8(void *v, bus_space_handle_t h, bus_size_t o,
+		    const u_int64_t *a, bus_size_t c);
+void		 mbus_sr_1(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int8_t vv, bus_size_t c);
+void		 mbus_sr_2(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int16_t vv, bus_size_t c);
+void		 mbus_sr_4(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int32_t vv, bus_size_t c);
+void		 mbus_sr_8(void *v, bus_space_handle_t h, bus_size_t o,
+		    u_int64_t vv, bus_size_t c);
+void		 mbus_cp_1(void *v, bus_space_handle_t h1, bus_size_t o1,
+		    bus_space_handle_t h2, bus_size_t o2, bus_size_t c);
+void		 mbus_cp_2(void *v, bus_space_handle_t h1, bus_size_t o1,
+		    bus_space_handle_t h2, bus_size_t o2, bus_size_t c);
+void		 mbus_cp_4(void *v, bus_space_handle_t h1, bus_size_t o1,
+		    bus_space_handle_t h2, bus_size_t o2, bus_size_t c);
+void		 mbus_cp_8(void *v, bus_space_handle_t h1, bus_size_t o1,
+		    bus_space_handle_t h2, bus_size_t o2, bus_size_t c);
 
 int
 mbus_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
@@ -190,8 +275,7 @@ mbus_map(void *v, bus_addr_t bpa, bus_size_t size,
 {
 	int error;
 
-	if (!(flags & BUS_SPACE_MAP_NOEXTENT) &&
-	    (error = extent_alloc_region(hppa_ex, bpa, size, EX_NOWAIT)))
+	if ((error = extent_alloc_region(hppa_ex, bpa, size, EX_NOWAIT)))
 		return (error);
 
 	if ((error = mbus_add_mapping(bpa, size, flags, bshp))) {
@@ -232,8 +316,8 @@ mbus_unmap(void *v, bus_space_handle_t bsh, bus_size_t size)
 
 int
 mbus_alloc(void *v, bus_addr_t rstart, bus_addr_t rend, bus_size_t size,
-	 bus_size_t align, bus_size_t boundary, int flags,
-	 bus_addr_t *addrp, bus_space_handle_t *bshp)
+    bus_size_t align, bus_size_t boundary, int flags,
+    bus_addr_t *addrp, bus_space_handle_t *bshp)
 {
 	u_long bpa;
 	int error;
@@ -429,172 +513,156 @@ mbus_sm_8(void *v, bus_space_handle_t h, bus_size_t o, u_int64_t vv, bus_size_t 
 		*(volatile u_int64_t *)h = vv;
 }
 
-void mbus_rrm_2(void *v, bus_space_handle_t h,
-	    bus_size_t o, u_int16_t*a, bus_size_t c);
-void mbus_rrm_4(void *v, bus_space_handle_t h,
-	    bus_size_t o, u_int32_t*a, bus_size_t c);
-void mbus_rrm_8(void *v, bus_space_handle_t h,
-	    bus_size_t o, u_int64_t*a, bus_size_t c);
-
-void mbus_wrm_2(void *v, bus_space_handle_t h,
-	    bus_size_t o, const u_int16_t *a, bus_size_t c);
-void mbus_wrm_4(void *v, bus_space_handle_t h,
-	    bus_size_t o, const u_int32_t *a, bus_size_t c);
-void mbus_wrm_8(void *v, bus_space_handle_t h,
-	    bus_size_t o, const u_int64_t *a, bus_size_t c);
-
 void
 mbus_rr_1(void *v, bus_space_handle_t h, bus_size_t o, u_int8_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int8_t *p = (u_int8_t *)(h + o);
+
 	while (c--)
-		*(a++) = *((volatile u_int8_t *)h)++;
+		*a++ = *p++;
 }
 
 void
 mbus_rr_2(void *v, bus_space_handle_t h, bus_size_t o, u_int16_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int16_t *p = (u_int16_t *)(h + o);
+
 	while (c--)
-		*(a++) = *((volatile u_int16_t *)h)++;
+		*a++ = *p++;
 }
 
 void
 mbus_rr_4(void *v, bus_space_handle_t h, bus_size_t o, u_int32_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int32_t *p = (u_int32_t *)(h + o);
+
 	while (c--)
-		*(a++) = *((volatile u_int32_t *)h)++;
+		*a++ = *p++;
 }
 
 void
 mbus_rr_8(void *v, bus_space_handle_t h, bus_size_t o, u_int64_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int64_t *p = (u_int64_t *)(h + o);
+
 	while (c--)
-		*(a++) = *((volatile u_int64_t *)h)++;
+		*a++ = *p++;
 }
 
 void
 mbus_wr_1(void *v, bus_space_handle_t h, bus_size_t o, const u_int8_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int8_t *p = (u_int8_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int8_t *)h)++ = *(a++);
+		*p++ = *a++;
 }
 
 void
 mbus_wr_2(void *v, bus_space_handle_t h, bus_size_t o, const u_int16_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int16_t *p = (u_int16_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int16_t *)h)++ = *(a++);
+		*p++ = *a++;
 }
 
 void
 mbus_wr_4(void *v, bus_space_handle_t h, bus_size_t o, const u_int32_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int32_t *p = (u_int32_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int32_t *)h)++ = *(a++);
+		*p++ = *a++;
 }
 
 void
 mbus_wr_8(void *v, bus_space_handle_t h, bus_size_t o, const u_int64_t *a, bus_size_t c)
 {
-	h += o;
+	volatile u_int64_t *p = (u_int64_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int64_t *)h)++ = *(a++);
+		*p++ = *a++;
 }
-
-void mbus_rrr_2(void *v, bus_space_handle_t h,
-		   bus_size_t o, u_int16_t *a, bus_size_t c);
-void mbus_rrr_4(void *v, bus_space_handle_t h,
-		   bus_size_t o, u_int32_t *a, bus_size_t c);
-void mbus_rrr_8(void *v, bus_space_handle_t h,
-		   bus_size_t o, u_int64_t *a, bus_size_t c);
-
-void mbus_wrr_2(void *v, bus_space_handle_t h,
-		   bus_size_t o, const u_int16_t *a, bus_size_t c);
-void mbus_wrr_4(void *v, bus_space_handle_t h,
-		   bus_size_t o, const u_int32_t *a, bus_size_t c);
-void mbus_wrr_8(void *v, bus_space_handle_t h,
-		   bus_size_t o, const u_int64_t *a, bus_size_t c);
 
 void
 mbus_sr_1(void *v, bus_space_handle_t h, bus_size_t o, u_int8_t vv, bus_size_t c)
 {
-	h += o;
+	volatile u_int8_t *p = (u_int8_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int8_t *)h)++ = vv;
+		*p++ = vv;
 }
 
 void
 mbus_sr_2(void *v, bus_space_handle_t h, bus_size_t o, u_int16_t vv, bus_size_t c)
 {
-	h += o;
+	volatile u_int16_t *p = (u_int16_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int16_t *)h)++ = vv;
+		*p++ = vv;
 }
 
 void
 mbus_sr_4(void *v, bus_space_handle_t h, bus_size_t o, u_int32_t vv, bus_size_t c)
 {
-	h += o;
+	volatile u_int32_t *p = (u_int32_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int32_t *)h)++ = vv;
+		*p++ = vv;
 }
 
 void
 mbus_sr_8(void *v, bus_space_handle_t h, bus_size_t o, u_int64_t vv, bus_size_t c)
 {
-	h += o;
+	volatile u_int64_t *p = (u_int64_t *)(h + o);
+
 	while (c--)
-		*((volatile u_int64_t *)h)++ = vv;
+		*p++ = vv;
 }
 
 void
 mbus_cp_1(void *v, bus_space_handle_t h1, bus_size_t o1,
 	  bus_space_handle_t h2, bus_size_t o2, bus_size_t c)
 {
-	h1 += o1;
-	h2 += o2;
+	volatile u_int8_t *p1 = (u_int8_t *)(h1 + o1);
+	volatile u_int8_t *p2 = (u_int8_t *)(h2 + o2);
+
 	while (c--)
-		*((volatile u_int8_t *)h1)++ =
-			*((volatile u_int8_t *)h2)++;
+		*p1++ = *p2++;
 }
 
 void
 mbus_cp_2(void *v, bus_space_handle_t h1, bus_size_t o1,
 	  bus_space_handle_t h2, bus_size_t o2, bus_size_t c)
 {
-	h1 += o1;
-	h2 += o2;
+	volatile u_int16_t *p1 = (u_int16_t *)(h1 + o1);
+	volatile u_int16_t *p2 = (u_int16_t *)(h2 + o2);
+
 	while (c--)
-		*((volatile u_int16_t *)h1)++ =
-			*((volatile u_int16_t *)h2)++;
+		*p1++ = *p2++;
 }
 
 void
 mbus_cp_4(void *v, bus_space_handle_t h1, bus_size_t o1,
 	  bus_space_handle_t h2, bus_size_t o2, bus_size_t c)
 {
-	h1 += o1;
-	h2 += o2;
+	volatile u_int32_t *p1 = (u_int32_t *)(h1 + o1);
+	volatile u_int32_t *p2 = (u_int32_t *)(h2 + o2);
+
 	while (c--)
-		*((volatile u_int32_t *)h1)++ =
-			*((volatile u_int32_t *)h2)++;
+		*p1++ = *p2++;
 }
 
 void
 mbus_cp_8(void *v, bus_space_handle_t h1, bus_size_t o1,
 	  bus_space_handle_t h2, bus_size_t o2, bus_size_t c)
 {
-	h1 += o1;
-	h2 += o2;
+	volatile u_int64_t *p1 = (u_int64_t *)(h1 + o1);
+	volatile u_int64_t *p2 = (u_int64_t *)(h2 + o2);
+
 	while (c--)
-		*((volatile u_int64_t *)h1)++ =
-			*((volatile u_int64_t *)h2)++;
+		*p1++ = *p2++;
 }
 
 
@@ -623,6 +691,35 @@ const struct hppa_bus_space_tag hppa_bustag = {
 	mbus_sr_1,  mbus_sr_2, mbus_sr_4, mbus_sr_8,
 	mbus_cp_1,  mbus_cp_2, mbus_cp_4, mbus_cp_8
 };
+
+int		 mbus_dmamap_create(void *v, bus_size_t size, int nsegments,
+		   bus_size_t maxsegsz, bus_size_t boundary, int flags,
+		   bus_dmamap_t *dmamp);
+void		 mbus_dmamap_unload(void *v, bus_dmamap_t map);
+void		 mbus_dmamap_destroy(void *v, bus_dmamap_t map);
+int		 _bus_dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map,
+		    void *buf, bus_size_t buflen, struct proc *p, int flags,
+		    paddr_t *lastaddrp, int *segp, int first);
+int		 mbus_dmamap_load(void *v, bus_dmamap_t map, void *addr,
+		    bus_size_t size, struct proc *p, int flags);
+int		 mbus_dmamap_load_mbuf(void *v, bus_dmamap_t map,
+		    struct mbuf *m0, int flags);
+int		 mbus_dmamap_load_uio(void *v, bus_dmamap_t map,
+		    struct uio *uio, int flags);
+int		 mbus_dmamap_load_raw(void *v, bus_dmamap_t map,
+		    bus_dma_segment_t *segs, int nsegs, bus_size_t size,
+		    int flags);
+void		 mbus_dmamap_sync(void *v, bus_dmamap_t map, bus_addr_t off,
+		    bus_size_t len, int ops);
+int		 mbus_dmamem_alloc(void *v, bus_size_t size,
+		    bus_size_t alignment, bus_size_t boundary,
+		    bus_dma_segment_t *segs, int nsegs, int *rsegs, int flags);
+void		 mbus_dmamem_free(void *v, bus_dma_segment_t *segs, int nsegs);
+int		 mbus_dmamem_map(void *v, bus_dma_segment_t *segs, int nsegs,
+		    size_t size, caddr_t *kvap, int flags);
+void		 mbus_dmamem_unmap(void *v, caddr_t kva, size_t size);
+paddr_t		 mbus_dmamem_mmap(void *v, bus_dma_segment_t *segs, int nsegs,
+		    off_t off, int prot, int flags);
 
 int
 mbus_dmamap_create(void *v, bus_size_t size, int nsegments,
@@ -1128,11 +1225,16 @@ mbattach(parent, self, aux)
 	case HPPA_BOARD_HP780_C230:
 	case HPPA_BOARD_HP780_C240:
 	case HPPA_BOARD_HP785_C360:
-		pdc_scanbus(self, &nca, MAXMODBUS, HPPA_FPA);
+		/* Attach CPUs first, then everything else... */
+		ncpusfound = 0;
+		pdc_scanbus(self, &nca, MAXMODBUS, HPPA_FPA, 1);
+		pdc_scanbus(self, &nca, MAXMODBUS, HPPA_FPA, 0);
 	break;
 	default:
-		pdc_scanbus(self, &nca, MAXMODBUS, 0);
-	break;
+		/* Attach CPUs first, then everything else... */
+		ncpusfound = 0;
+		pdc_scanbus(self, &nca, MAXMODBUS, 0, 1);
+		pdc_scanbus(self, &nca, MAXMODBUS, 0, 0);
 	}
 }
 

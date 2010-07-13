@@ -1,4 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.16 2010/03/30 14:57:02 kettenis Exp $	*/
+/*	$OpenBSD: process_machdep.c,v 1.19 2010/07/01 05:33:32 jsing Exp $	*/
 
 /*
  * Copyright (c) 1999-2004 Michael Shalayeff
@@ -34,6 +34,7 @@
 #include <sys/user.h>
 
 #include <machine/cpufunc.h>
+#include <machine/fpu.h>
 #include <machine/frame.h>
 
 int
@@ -86,15 +87,9 @@ process_read_fpregs(p, fpregs)
 	struct proc *p;
 	struct fpreg *fpregs;
 {
-	extern paddr_t fpu_curpcb;
-	extern u_int fpu_enable;
+	fpu_proc_save(p);
 
-	if (p->p_md.md_regs->tf_cr30 == fpu_curpcb) {
-		mtctl(fpu_enable, CR_CCR);
-		fpu_save((vaddr_t)p->p_addr->u_pcb.pcb_fpregs);
-		mtctl(0, CR_CCR);
-	}
-	bcopy(p->p_addr->u_pcb.pcb_fpregs, fpregs, 32 * 8);
+	bcopy(&p->p_addr->u_pcb.pcb_fpstate->hfp_regs, fpregs, 32 * 8);
 
 	return (0);
 }
@@ -151,14 +146,9 @@ process_write_fpregs(p, fpregs)
 	struct proc *p;
 	struct fpreg *fpregs;
 {
-	extern paddr_t fpu_curpcb;
+	fpu_proc_flush(p);
 
-	if (p->p_md.md_regs->tf_cr30 == fpu_curpcb) {
-		fpu_exit();
-		fpu_curpcb = 0;
-	}
-
-	bcopy(fpregs, p->p_addr->u_pcb.pcb_fpregs, 32 * 8);
+	bcopy(fpregs, &p->p_addr->u_pcb.pcb_fpstate->hfp_regs, 32 * 8);
 
 	return (0);
 }

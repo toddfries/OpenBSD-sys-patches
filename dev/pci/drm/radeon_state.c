@@ -879,7 +879,6 @@ radeon_cp_dispatch_clear(struct drm_device * dev, drm_radeon_clear_t * clear,
 		tempRB3D_CNTL = depth_clear->rb3d_cntl;
 
 		tempRB3D_ZSTENCILCNTL = depth_clear->rb3d_zstencilcntl;
-		tempRB3D_STENCILREFMASK = 0x0;
 
 		tempSE_CNTL = depth_clear->se_cntl;
 
@@ -2111,7 +2110,7 @@ radeon_emit_packets(drm_radeon_private_t * dev_priv, struct drm_file *file_priv,
 	int sz, reg;
 	int *data = (int *)cmdbuf->buf;
 
-	if (id >= RADEON_MAX_STATE_PACKETS)
+	if (id < 0 || id >= RADEON_MAX_STATE_PACKETS)
 		return EINVAL;
 
 	sz = packet[id].len;
@@ -2533,6 +2532,12 @@ radeon_cp_getparam(struct drm_device *dev, void *data,
 		break;
 	case RADEON_PARAM_LAST_CLEAR:
 		value = radeondrm_get_scratch(dev_priv, 2);
+		break;
+	case RADEON_PARAM_LAST_SWI:
+		/* writeback seems to be unreliable for this sometimes, so grab
+		 * direct
+		 */
+		value = RADEON_READ(RADEON_SCRATCH_REG0 + 4 * 3);
 		break;
 	case RADEON_PARAM_IRQ_NR:
 		value = dev->irq;

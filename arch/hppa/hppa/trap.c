@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.106 2010/03/30 14:57:02 kettenis Exp $	*/
+/*	$OpenBSD: trap.c,v 1.110 2010/07/01 05:33:32 jsing Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -129,10 +129,11 @@ u_char hppa_regmap[32] = {
 	offsetof(struct trapframe, tf_r31) / 4,
 };
 
+void	userret(struct proc *p);
+
 void
 userret(struct proc *p)
 {
-	struct cpu_info *ci = curcpu();
 	int sig;
 
 	if (p->p_md.md_astpending) {
@@ -143,7 +144,7 @@ userret(struct proc *p)
 			ADDUPROF(p);
 			KERNEL_PROC_UNLOCK(p);
 		}
-		if (ci->ci_want_resched)
+		if (curcpu()->ci_want_resched)
 			preempt(NULL);
 	}
 
@@ -158,7 +159,6 @@ trap(type, frame)
 	int type;
 	struct trapframe *frame;
 {
-	struct cpu_info *ci = curcpu();
 	struct proc *p = curproc;
 	vaddr_t va;
 	struct vm_map *map;
@@ -171,7 +171,7 @@ trap(type, frame)
 	const char *tts;
 	vm_fault_t fault = VM_FAULT_INVALID;
 #ifdef DIAGNOSTIC
-	int oldcpl = ci->ci_cpl;
+	int oldcpl = curcpu()->ci_cpl;
 #endif
 
 	trapnum = type & ~T_USER;
@@ -296,9 +296,13 @@ trap(type, frame)
 #endif
 
 	case T_EXCEPTION | T_USER: {
-		u_int64_t *fpp = (u_int64_t *)frame->tf_cr30;
+		struct hppa_fpstate *hfp;
+		u_int64_t *fpp;
 		u_int32_t *pex;
 		int i, flt;
+
+		hfp = (struct hppa_fpstate *)frame->tf_cr30;
+		fpp = (u_int64_t *)&hfp->hfp_regs;
 
 		pex = (u_int32_t *)&fpp[0];
 		for (i = 0, pex++; i < 7 && !*pex; i++, pex++);
@@ -613,13 +617,13 @@ if (kdb_trap (type, va, frame))
 	}
 
 #ifdef DIAGNOSTIC
-	if (ci->ci_cpl != oldcpl)
+	if (curcpu()->ci_cpl != oldcpl)
 		printf("WARNING: SPL (%d) NOT LOWERED ON "
-		    "TRAP (%d) EXIT\n", ci->ci_cpl, trapnum);
+		    "TRAP (%d) EXIT\n", curcpu()->ci_cpl, trapnum);
 #endif
 
 	if (trapnum != T_INTERRUPT)
-		splx(ci->ci_cpl);	/* process softints */
+		splx(curcpu()->ci_cpl);	/* process softints */
 
 	/*
 	 * in case we were interrupted from the syscall gate page
@@ -661,6 +665,9 @@ child_return(void *arg)
 #ifdef PTRACE
 
 #include <sys/ptrace.h>
+
+int	ss_get_value(struct proc *p, vaddr_t addr, u_int *value);
+int	ss_put_value(struct proc *p, vaddr_t addr, u_int value);
 
 int
 ss_get_value(struct proc *p, vaddr_t addr, u_int *value)
@@ -716,14 +723,19 @@ process_sstep(struct proc *p, int sstep)
 
 	ss_clear_breakpoints(p);
 
-	/* Don't touch the syscall gateway page. */
-	if (sstep == 0 ||
-	    (p->p_md.md_regs->tf_iioq_tail & ~PAGE_MASK) == SYSCALLGATE) {
+	if (sstep == 0) {
 		p->p_md.md_regs->tf_ipsw &= ~PSL_T;
 		return (0);
 	}
 
-	p->p_md.md_bpva = p->p_md.md_regs->tf_iioq_tail & ~HPPA_PC_PRIV_MASK;
+	/*
+	 * Don't touch the syscall gateway page.  Instead, insert a
+	 * breakpoint where we're supposed to return.
+	 */
+	if ((p->p_md.md_regs->tf_iioq_tail & ~PAGE_MASK) == SYSCALLGATE)
+		p->p_md.md_bpva = p->p_md.md_regs->tf_r31 & ~HPPA_PC_PRIV_MASK;
+	else
+		p->p_md.md_bpva = p->p_md.md_regs->tf_iioq_tail & ~HPPA_PC_PRIV_MASK;
 
 	/*
 	 * Insert two breakpoint instructions; the first one might be
@@ -745,11 +757,17 @@ process_sstep(struct proc *p, int sstep)
 	if (error)
 		return (error);
 
-	p->p_md.md_regs->tf_ipsw |= PSL_T;
+	if ((p->p_md.md_regs->tf_iioq_tail & ~PAGE_MASK) != SYSCALLGATE)
+		p->p_md.md_regs->tf_ipsw |= PSL_T;
+	else
+		p->p_md.md_regs->tf_ipsw &= ~PSL_T;
+
 	return (0);
 }
 
 #endif	/* PTRACE */
+
+void	syscall(struct trapframe *frame);
 
 /*
  * call actual syscall routine
@@ -757,13 +775,12 @@ process_sstep(struct proc *p, int sstep)
 void
 syscall(struct trapframe *frame)
 {
-	struct cpu_info *ci = curcpu();
 	register struct proc *p = curproc;
 	register const struct sysent *callp;
 	int retq, nsys, code, argsize, argoff, oerror, error;
 	register_t args[8], rval[2];
 #ifdef DIAGNOSTIC
-	int oldcpl = ci->ci_cpl;
+	int oldcpl = curcpu()->ci_cpl;
 #endif
 
 	uvmexp.syscalls++;
@@ -924,14 +941,15 @@ syscall(struct trapframe *frame)
 	}
 #endif
 #ifdef DIAGNOSTIC
-	if (ci->ci_cpl != oldcpl) {
+	if (curcpu()->ci_cpl != oldcpl) {
 		printf("WARNING: SPL (0x%x) NOT LOWERED ON "
 		    "syscall(0x%x, 0x%x, 0x%x, 0x%x...) EXIT, PID %d\n",
-		    ci->ci_cpl, code, args[0], args[1], args[2], p->p_pid);
-		ci->ci_cpl = oldcpl;
+		    curcpu()->ci_cpl, code, args[0], args[1], args[2],
+		    p->p_pid);
+		curcpu()->ci_cpl = oldcpl;
 	}
 #endif
-	splx(ci->ci_cpl);	/* process softints */
+	splx(curcpu()->ci_cpl);	/* process softints */
 }
 
 /*

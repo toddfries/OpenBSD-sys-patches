@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.79 2010/04/23 15:25:21 jsing Exp $ */
+/*	$OpenBSD: wd.c,v 1.85 2010/06/28 08:35:46 jsing Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -70,6 +70,7 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/mutex.h>
 #include <sys/buf.h>
 #include <sys/uio.h>
 #include <sys/malloc.h>
@@ -79,6 +80,7 @@
 #include <sys/syslog.h>
 #include <sys/proc.h>
 #include <sys/vnode.h>
+#include <sys/dkio.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -119,7 +121,8 @@ struct wd_softc {
 	/* General disk infos */
 	struct device sc_dev;
 	struct disk sc_dk;
-	struct buf sc_q;
+	struct bufq	*sc_bufq;
+
 	/* IDE disk soft states */
 	struct ata_bio sc_wdc_bio; /* current transfer */
 	struct buf *sc_bp; /* buf being transferred */
@@ -176,6 +179,7 @@ void  __wdstart(struct wd_softc*, struct buf *);
 void  wdrestart(void *);
 int   wd_get_params(struct wd_softc *, u_int8_t, struct ataparams *);
 void  wd_flushcache(struct wd_softc *, int);
+void  wd_standby(struct wd_softc *, int);
 void  wd_shutdown(void *);
 
 struct dkdriver wddkdriver = { wdstrategy };
@@ -361,24 +365,26 @@ wdattach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/*
-	 * Initialize and attach the disk structure.
+	 * Initialize disk structures.
 	 */
 	wd->sc_dk.dk_driver = &wddkdriver;
 	wd->sc_dk.dk_name = wd->sc_dev.dv_xname;
-	disk_attach(&wd->sc_dk);
-	wd->sc_wdc_bio.lp = wd->sc_dk.dk_label;
+	wd->sc_bufq = bufq_init(BUFQ_DEFAULT);
 	wd->sc_sdhook = shutdownhook_establish(wd_shutdown, wd);
 	if (wd->sc_sdhook == NULL)
 		printf("%s: WARNING: unable to establish shutdown hook\n",
 		    wd->sc_dev.dv_xname);
 	timeout_set(&wd->sc_restart_timeout, wdrestart, wd);
+
+	/* Attach disk. */
+	disk_attach(&wd->sc_dk);
+	wd->sc_wdc_bio.lp = wd->sc_dk.dk_label;
 }
 
 int
 wdactivate(struct device *self, int act)
 {
 	struct wd_softc *wd = (void *)self;
-	struct wdc_command wdc_c;
 	int rv = 0;
 
 	switch (act) {
@@ -391,15 +397,8 @@ wdactivate(struct device *self, int act)
 		*/
 		break;
 	case DVACT_SUSPEND:
-		bzero(&wdc_c, sizeof(struct wdc_command));
-
-		wdc_c.r_command = WDCC_STANDBY_IMMED;
-		wdc_c.timeout = 1000;
-		wdc_c.flags = at_poll;
-		if (wdc_exec_command(wd->drvp, &wdc_c) != WDC_COMPLETE) {
-			printf("%s: enter standby command didn't complete\n",
-			       wd->sc_dev.dv_xname);
-		}
+		wd_flushcache(wd, AT_POLL);
+		wd_standby(wd, AT_POLL);
 		break;
 	}
 	return (rv);
@@ -409,13 +408,12 @@ int
 wddetach(struct device *self, int flags)
 {
 	struct wd_softc *sc = (struct wd_softc *)self;
-	struct buf *dp, *bp;
+	struct buf *bp;
 	int s, bmaj, cmaj, mn;
 
 	/* Remove unprocessed buffers from queue */
 	s = splbio();
-	for (dp = &sc->sc_q; (bp = dp->b_actf) != NULL; ) {
-		dp->b_actf = bp->b_actf;
+	while ((bp = BUFQ_DEQUEUE(sc->sc_bufq)) != NULL) {
 		bp->b_error = ENXIO;
 		bp->b_flags |= B_ERROR;
 		biodone(bp);
@@ -437,6 +435,7 @@ wddetach(struct device *self, int flags)
 		shutdownhook_disestablish(sc->sc_sdhook);
 
 	/* Detach disk. */
+	bufq_destroy(sc->sc_bufq);
 	disk_detach(&sc->sc_dk);
 
 	return (0);
@@ -487,8 +486,8 @@ wdstrategy(struct buf *bp)
 	    (wd->sc_flags & (WDF_WLABEL|WDF_LABELLING)) != 0) <= 0)
 		goto done;
 	/* Queue transfer on drive, activate drive and controller if idle. */
+	BUFQ_QUEUE(wd->sc_bufq, bp);
 	s = splbio();
-	disksort(&wd->sc_q, bp);
 	wdstart(wd);
 	splx(s);
 	device_unref(&wd->sc_dev);
@@ -512,18 +511,15 @@ void
 wdstart(void *arg)
 {
 	struct wd_softc *wd = arg;
-	struct buf *dp, *bp = NULL;
+	struct buf *bp = NULL;
 
 	WDCDEBUG_PRINT(("wdstart %s\n", wd->sc_dev.dv_xname),
 	    DEBUG_XFERS);
 	while (wd->openings > 0) {
 
 		/* Is there a buf for us ? */
-		dp = &wd->sc_q;
-		if ((bp = dp->b_actf) == NULL)  /* yes, an assign */
+		if ((bp = BUFQ_DEQUEUE(wd->sc_bufq)) == NULL)
 			return;
-		dp->b_actf = bp->b_actf;
-
 		/*
 		 * Make the command. First lock the device
 		 */
@@ -1210,8 +1206,43 @@ wd_flushcache(struct wd_softc *wd, int flags)
 }
 
 void
+wd_standby(struct wd_softc *wd, int flags)
+{
+	struct wdc_command wdc_c;
+
+	bzero(&wdc_c, sizeof(struct wdc_command));
+	wdc_c.r_command = WDCC_STANDBY_IMMED;
+	wdc_c.r_st_bmask = WDCS_DRDY;
+	wdc_c.r_st_pmask = WDCS_DRDY;
+	if (flags != 0) {
+		wdc_c.flags = AT_POLL;
+	} else {
+		wdc_c.flags = AT_WAIT;
+	}
+	wdc_c.timeout = 1000; /* 1s timeout */
+	if (wdc_exec_command(wd->drvp, &wdc_c) != WDC_COMPLETE) {
+		printf("%s: standby command didn't complete\n",
+		    wd->sc_dev.dv_xname);
+	}
+	if (wdc_c.flags & AT_TIMEOU) {
+		printf("%s: standby command timeout\n",
+		    wd->sc_dev.dv_xname);
+	}
+	if (wdc_c.flags & AT_DF) {
+		printf("%s: standby command: drive fault\n",
+		    wd->sc_dev.dv_xname);
+	}
+	/*
+	 * Ignore error register, it shouldn't report anything else
+	 * than COMMAND ABORTED, which means the device doesn't support
+	 * standby
+	 */
+}
+
+void
 wd_shutdown(void *arg)
 {
 	struct wd_softc *wd = arg;
+
 	wd_flushcache(wd, AT_POLL);
 }

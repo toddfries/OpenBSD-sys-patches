@@ -1,4 +1,4 @@
-/*	$OpenBSD: ucom.c,v 1.47 2010/04/12 12:57:52 tedu Exp $ */
+/*	$OpenBSD: ucom.c,v 1.50 2010/07/02 17:27:01 nicm Exp $ */
 /*	$NetBSD: ucom.c,v 1.49 2003/01/01 00:10:25 thorpej Exp $	*/
 
 /*
@@ -203,7 +203,7 @@ ucom_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_parent = uca->arg;
 	sc->sc_portno = uca->portno;
 
-	tp = ttymalloc();
+	tp = ttymalloc(1000000);
 	tp->t_oproc = ucomstart;
 	tp->t_param = ucomparam;
 	sc->sc_tty = tp;
@@ -650,7 +650,7 @@ ucom_do_ioctl(struct ucom_softc *sc, u_long cmd, caddr_t data,
 	if (sc->sc_methods->ucom_ioctl != NULL) {
 		error = sc->sc_methods->ucom_ioctl(sc->sc_parent,
 			    sc->sc_portno, cmd, data, flag, p);
-		if (error >= 0)
+		if (error != ENOTTY)
 			return (error);
 	}
 
@@ -943,15 +943,9 @@ ucomstart(struct tty *tp)
 	if (sc->sc_tx_stopped)
 		goto out;
 
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (ISSET(tp->t_state, TS_ASLEEP)) {
-			CLR(tp->t_state, TS_ASLEEP);
-			wakeup(&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-		if (tp->t_outq.c_cc == 0)
-			goto out;
-	}
+	ttwakeupwr(tp);
+	if (tp->t_outq.c_cc == 0)
+		goto out;
 
 	/* Grab the first contiguous region of buffer space. */
 	data = tp->t_outq.c_cf;

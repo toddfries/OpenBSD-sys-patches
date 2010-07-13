@@ -1,4 +1,4 @@
-/*	$OpenBSD: vcctty.c,v 1.4 2010/04/12 12:57:52 tedu Exp $	*/
+/*	$OpenBSD: vcctty.c,v 1.6 2010/07/02 17:27:01 nicm Exp $	*/
 /*
  * Copyright (c) 2009 Mark Kettenis
  *
@@ -311,7 +311,7 @@ vccttyopen(dev_t dev, int flag, int mode, struct proc *p)
 	if (sc->sc_tty)
 		tp = sc->sc_tty;
 	else
-		tp = sc->sc_tty = ttymalloc();
+		tp = sc->sc_tty = ttymalloc(0);
 
 	tp->t_oproc = vccttystart;
 	tp->t_param = vccttyparam;
@@ -434,13 +434,7 @@ vccttystart(struct tty *tp)
 		splx(s);
 		return;
 	}
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
 	tp->t_state |= TS_BUSY;
 	while (tp->t_outq.c_cc != 0)
 		vcctty_send_data(sc, getc(&tp->t_outq));

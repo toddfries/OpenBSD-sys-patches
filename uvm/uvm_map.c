@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_map.c,v 1.125 2010/04/23 04:49:46 tedu Exp $	*/
+/*	$OpenBSD: uvm_map.c,v 1.127 2010/06/17 16:11:20 miod Exp $	*/
 /*	$NetBSD: uvm_map.c,v 1.86 2000/11/27 08:40:03 chs Exp $	*/
 
 /* 
@@ -1149,7 +1149,7 @@ uvm_map_lookup_entry(struct vm_map *map, vaddr_t address,
 
 /*
  * Checks if address pointed to by phint fits into the empty
- * space before the vm_map_entry after.  Takes aligment and
+ * space before the vm_map_entry after.  Takes alignment and
  * offset into consideration.
  */
 
@@ -3908,8 +3908,8 @@ uvm_object_printit(uobj, full, pr)
 	struct vm_page *pg;
 	int cnt = 0;
 
-	(*pr)("OBJECT %p: locked=%d, pgops=%p, npages=%d, ",
-	    uobj, uobj->vmobjlock.lock_data, uobj->pgops, uobj->uo_npages);
+	(*pr)("OBJECT %p: pgops=%p, npages=%d, ",
+	    uobj, uobj->pgops, uobj->uo_npages);
 	if (UVM_OBJ_IS_KERN_OBJECT(uobj))
 		(*pr)("refs=<SYSTEM>\n");
 	else

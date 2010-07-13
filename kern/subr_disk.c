@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.100 2010/04/23 15:25:21 jsing Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.104 2010/06/27 00:14:06 jsing Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -80,6 +80,8 @@ int	disk_change;		/* set if a disk has been attached/detached
 
 /* softraid callback, do not use! */
 void (*softraid_disk_attach)(struct disk *, int);
+
+char *disk_readlabel(struct disklabel *, dev_t);
 
 /*
  * Seek sort for disks.  We depend on the driver which calls us using b_resid
@@ -278,7 +280,7 @@ checkdisklabel(void *rlp, struct disklabel *lp,
 		dlp->d_secpercyl = swap32(dlp->d_secpercyl);
 		dlp->d_secperunit = swap32(dlp->d_secperunit);
 
-		dlp->d_label_uid = swap64(dlp->d_label_uid);
+		/* d_uid is a string */
 
 		dlp->d_acylinders = swap32(dlp->d_acylinders);
 
@@ -602,14 +604,15 @@ notfat:
 }
 
 /*
- * Check new disk label for sensibility
- * before setting it.
+ * Check new disk label for sensibility before setting it.
  */
 int
 setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_int openmask)
 {
-	int i;
 	struct partition *opp, *npp;
+	struct disk *dk;
+	u_int64_t uid;
+	int i;
 
 	/* sanity clause */
 	if (nlp->d_secpercyl == 0 || nlp->d_secsize == 0 ||
@@ -648,6 +651,19 @@ setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_int openmask)
 			npp->p_cpg = opp->p_cpg;
 		}
 	}
+
+	/* Generate a UID if the disklabel does not already have one. */
+	uid = 0;
+	if (bcmp(nlp->d_uid, &uid, sizeof(nlp->d_uid)) == 0) {
+		do {
+			arc4random_buf(nlp->d_uid, sizeof(nlp->d_uid));
+			TAILQ_FOREACH(dk, &disklist, dk_link)
+				if (dk->dk_label && bcmp(dk->dk_label->d_uid,
+				    nlp->d_uid, sizeof(nlp->d_uid)) == 0)
+					break;
+		} while (dk != NULL);
+	}
+
 	nlp->d_checksum = 0;
 	nlp->d_checksum = dkcksum(nlp);
 	*olp = *nlp;
@@ -903,38 +919,14 @@ disk_unlock(struct disk *dk)
 int
 dk_mountroot(void)
 {
-	dev_t rawdev, rrootdev;
 	int part = DISKPART(rootdev);
 	int (*mountrootfn)(void);
 	struct disklabel dl;
-	struct vnode *vn;
-	int error;
+	char *error;
 
-	rrootdev = blktochr(rootdev);
-	rawdev = MAKEDISKDEV(major(rrootdev), DISKUNIT(rootdev), RAW_PART);
-#ifdef DEBUG
-	printf("rootdev=0x%x rrootdev=0x%x rawdev=0x%x\n", rootdev,
-	    rrootdev, rawdev);
-#endif
-
-	/*
-	 * open device, ioctl for the disklabel, and close it.
-	 */
-	if (cdevvp(rawdev, &vn))
-		panic("cannot obtain vnode for 0x%x/0x%x", rootdev, rrootdev);
-	error = VOP_OPEN(vn, FREAD, NOCRED, curproc);
+	error = disk_readlabel(&dl, rootdev);
 	if (error)
-		panic("cannot open disk, 0x%x/0x%x, error %d",
-		    rootdev, rrootdev, error);
-	error = VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)&dl, FREAD, NOCRED, 0);
-	if (error)
-		panic("cannot read disk label, 0x%x/0x%x, error %d",
-		    rootdev, rrootdev, error);
-	error = VOP_CLOSE(vn, FREAD, NOCRED, 0);
-	if (error)
-		panic("cannot close disk , 0x%x/0x%x, error %d",
-		    rootdev, rrootdev, error);
-	vput(vn);
+		panic(error);
 
 	if (DL_GETPSIZE(&dl.d_partitions[part]) == 0)
 		panic("root filesystem has size 0");
@@ -1267,4 +1259,125 @@ findblkname(int maj)
 		if (nam2blk[i].maj == maj)
 			return (nam2blk[i].name);
 	return (NULL);
+}
+
+char *
+disk_readlabel(struct disklabel *dl, dev_t dev)
+{
+	static char errbuf[100];
+	struct vnode *vn;
+	dev_t chrdev, rawdev;
+	int error;
+
+	chrdev = blktochr(dev);
+	rawdev = MAKEDISKDEV(major(chrdev), DISKUNIT(chrdev), RAW_PART);
+
+#ifdef DEBUG
+	printf("dev=0x%x chrdev=0x%x rawdev=0x%x\n", dev, chrdev, rawdev);
+#endif
+
+	if (cdevvp(rawdev, &vn)) {
+		snprintf(errbuf, sizeof(errbuf),
+		    "cannot obtain vnode for 0x%x/0x%x", dev, rawdev);
+		return (errbuf);
+	}
+
+	error = VOP_OPEN(vn, FREAD, NOCRED, curproc);
+	if (error) {
+		snprintf(errbuf, sizeof(errbuf),
+		    "cannot open disk, 0x%x/0x%x, error %d",
+		    dev, rawdev, error);
+		return (errbuf);
+	}
+
+	error = VOP_IOCTL(vn, DIOCGDINFO, (caddr_t)dl, FREAD, NOCRED, 0);
+	if (error) {
+		snprintf(errbuf, sizeof(errbuf),
+		    "cannot read disk label, 0x%x/0x%x, error %d",
+		    dev, rawdev, error);
+		return (errbuf);
+	}
+
+	error = VOP_CLOSE(vn, FREAD, NOCRED, 0);
+	if (error) {
+		snprintf(errbuf, sizeof(errbuf),
+		    "cannot close disk, 0x%x/0x%x, error %d",
+		    dev, rawdev, error);
+		return (errbuf);
+	}
+
+	vput(vn);
+
+	return (NULL);
+}
+
+int
+disk_map(char *path, char *mappath, int size, int flags)
+{
+	struct disk *dk, *mdk;
+	u_char uid[8];
+	char c, part;
+	int i;
+
+	/*
+	 * Attempt to map a request for a disklabel UID to the correct device.
+	 * We should be supplied with a disklabel UID which has the following
+	 * format:
+	 *
+	 * [disklabel uid] . [partition]
+	 *
+	 * Alternatively, if the DM_OPENPART flag is set the disklabel UID can
+	 * based passed on its own.
+	 */
+
+	if (strchr(path, '/') != NULL)
+		return -1;
+
+	/* Verify that the device name is properly formed. */
+	if (!((strlen(path) == 16 && (flags & DM_OPENPART)) ||
+	    (strlen(path) == 18 && path[16] == '.')))
+		return -1;
+
+	/* Get partition. */
+	if (flags & DM_OPENPART)
+		part = 'a' + RAW_PART;
+	else
+		part = path[17];
+
+	if (part < 'a' || part >= 'a' + MAXPARTITIONS)
+		return -1;
+
+	/* Derive label UID. */
+	bzero(uid, sizeof(uid));
+	for (i = 0; i < 16; i++) {
+		c = path[i];
+		if (c >= '0' && c <= '9')
+			c -= '0';
+		else if (c >= 'a' && c <= 'f')
+			c -= ('a' - 10);
+                else
+			return -1;
+
+		uid[i / 2] <<= 4;
+		uid[i / 2] |= c & 0xf;
+	}
+
+	mdk = NULL;
+	TAILQ_FOREACH(dk, &disklist, dk_link) {
+		if (dk->dk_label && bcmp(dk->dk_label->d_uid, uid,
+		    sizeof(dk->dk_label->d_uid)) == 0) {
+			/* Fail if there are duplicate UIDs! */
+			if (mdk != NULL)
+				return -1;
+			mdk = dk;
+		}
+	}
+
+	if (mdk == NULL || mdk->dk_name == NULL)
+		return -1;
+
+	snprintf(mappath, size, "/dev/%s%s%c",
+	    (flags & DM_OPENBLCK) ? "" : "r", mdk->dk_name, part);
+
+	return 0;
 }

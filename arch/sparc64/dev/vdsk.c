@@ -1,4 +1,4 @@
-/*	$OpenBSD: vdsk.c,v 1.19 2010/03/24 06:55:28 dlg Exp $	*/
+/*	$OpenBSD: vdsk.c,v 1.24 2010/06/28 18:31:01 krw Exp $	*/
 /*
  * Copyright (c) 2009 Mark Kettenis
  *
@@ -175,10 +175,6 @@ struct cfdriver vdsk_cd = {
 	NULL, "vdsk", DV_DULL
 };
 
-struct scsi_device vdsk_device = {
-	NULL, NULL, NULL, NULL
-};
-
 int	vdsk_tx_intr(void *);
 int	vdsk_rx_intr(void *);
 
@@ -203,7 +199,6 @@ void	vdsk_send_rdx(struct vdsk_softc *);
 void	vdsk_scsi_cmd(struct scsi_xfer *);
 int	vdsk_dev_probe(struct scsi_link *);
 void	vdsk_dev_free(struct scsi_link *);
-int	vdsk_ioctl(struct scsi_link *, u_long, caddr_t, int, struct proc *);
 
 void	vdsk_scsi_inq(struct scsi_xfer *);
 void	vdsk_scsi_inquiry(struct scsi_xfer *);
@@ -343,9 +338,7 @@ vdsk_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_switch.scsi_minphys = scsi_minphys;
 	sc->sc_switch.dev_probe = vdsk_dev_probe;
 	sc->sc_switch.dev_free = vdsk_dev_free;
-	sc->sc_switch.ioctl = vdsk_ioctl;
 
-	sc->sc_link.device = &vdsk_device;
 	sc->sc_link.adapter = &sc->sc_switch;
 	sc->sc_link.adapter_softc = self;
 	sc->sc_link.adapter_buswidth = 2;
@@ -1117,13 +1110,9 @@ vdsk_scsi_capacity(struct scsi_xfer *xs)
 void
 vdsk_scsi_done(struct scsi_xfer *xs, int error)
 {
-	int s;
-
 	xs->error = error;
 
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 int
@@ -1141,12 +1130,4 @@ void
 vdsk_dev_free(struct scsi_link *link)
 {
 	printf("%s\n", __func__);
-}
-
-int
-vdsk_ioctl(struct scsi_link *link, u_long cmd, caddr_t addr, int flags,
-    struct proc *p)
-{
-	printf("%s\n", __func__);
-	return (ENOTTY);
 }

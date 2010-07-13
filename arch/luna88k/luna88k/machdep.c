@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.69 2009/08/30 12:11:33 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.72 2010/06/27 12:41:23 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -91,8 +91,7 @@
 
 #include <dev/cons.h>
 
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_swap.h>
+#include <uvm/uvm.h>
 
 #include "ksyms.h"
 #if DDB
@@ -197,6 +196,9 @@ int bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 /*
  * Info for CTL_HW
  */
@@ -249,6 +251,8 @@ struct consdev romttycons = {
 	makedev(14, 0),
 	CN_LOWPRI,
 };
+
+struct consdev *cn_tab = &romttycons;
 
 /*
  * Early console initialization: called early on from main, before vm init.
@@ -931,7 +935,6 @@ void
 luna88k_bootstrap()
 {
 	extern int kernelstart;
-	extern struct consdev *cn_tab;
 	extern struct cmmu_p cmmu8820x;
 	extern char *end;
 #ifndef MULTIPROCESSOR
@@ -948,9 +951,6 @@ luna88k_bootstrap()
 	*int_mask_reg[1] = 0;
 	*int_mask_reg[2] = 0;
 	*int_mask_reg[3] = 0;
-
-	/* startup fake console driver.  It will be replaced by consinit() */
-	cn_tab = &romttycons;
 
 	uvmexp.pagesize = PAGE_SIZE;
 	uvm_setpagesize();

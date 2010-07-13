@@ -1,4 +1,4 @@
-/*	$OpenBSD: eso.c,v 1.29 2010/04/08 00:23:53 tedu Exp $	*/
+/*	$OpenBSD: eso.c,v 1.31 2010/05/23 11:41:07 deraadt Exp $	*/
 /*	$NetBSD: eso.c,v 1.48 2006/12/18 23:13:39 kleink Exp $	*/
 
 /*
@@ -61,7 +61,7 @@
  * XXX Work around the 24-bit implementation limit of the Audio 1 DMA
  * XXX engine by allocating through the ISA DMA tag.
  */
-#if defined(amd64) || defined(i386)
+#if defined(__amd64__) || defined(__i386__)
 #include "isa.h"
 #if NISA > 0
 #include <dev/isa/isavar.h>
@@ -1562,14 +1562,14 @@ eso_allocm(void *hdl, int direction, size_t size, int type, int flags)
 	 * XXX implements the 24 low address bits only, with
 	 * XXX machine-specific DMA tag use.
 	 */
-#ifdef alpha
+#if defined(__alpha__)
 	/*
 	 * XXX Force allocation through the (ISA) SGMAP.
 	 */
 	if (direction == AUMODE_RECORD)
 		ed->ed_dmat = alphabus_dma_get_tag(sc->sc_dmat, ALPHA_BUS_ISA);
 	else
-#elif defined(amd64) || defined(i386)
+#elif defined(__amd64__) || defined(__i386__)
 	/*
 	 * XXX Force allocation through the ISA DMA tag.
 	 */

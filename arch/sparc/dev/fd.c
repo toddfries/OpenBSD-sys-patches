@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.69 2010/04/23 15:25:21 jsing Exp $	*/
+/*	$OpenBSD: fd.c,v 1.72 2010/07/10 19:32:24 miod Exp $	*/
 /*	$NetBSD: fd.c,v 1.51 1997/05/24 20:16:19 pk Exp $	*/
 
 /*-
@@ -89,6 +89,7 @@
 #include <sys/queue.h>
 #include <sys/conf.h>
 #include <sys/timeout.h>
+#include <sys/dkio.h>
 
 #include <dev/cons.h>
 
@@ -280,9 +281,9 @@ fdcmatch(parent, match, aux)
 	register struct romaux *ra = &ca->ca_ra;
 
 	/*
-	 * Floppy doesn't exist on sun4.
+	 * Floppy doesn't exist on sun4 and sun4e.
 	 */
-	if (CPU_ISSUN4)
+	if (CPU_ISSUN4OR4E)
 		return (0);
 
 	/*
@@ -1794,9 +1795,6 @@ fdioctl(dev, cmd, addr, flag, p)
 		if (((struct mtop *)addr)->mt_op != MTOFFL)
 			return EIO;
 
-#ifdef COMPAT_SUNOS
-	case SUNOS_FDIOCEJECT:
-#endif
 	case DIOCEJECT:
 		fd_do_eject(fd);
 		return (0);

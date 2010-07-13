@@ -1,4 +1,4 @@
-/*	$OpenBSD: atascsi.h,v 1.40 2010/04/22 00:58:32 dlg Exp $ */
+/*	$OpenBSD: atascsi.h,v 1.42 2010/07/03 00:41:58 kettenis Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -32,6 +32,7 @@ struct scsi_link;
 #define ATA_C_IDENTIFY_PACKET	0xa1
 #define ATA_C_READDMA		0xc8
 #define ATA_C_WRITEDMA		0xca
+#define ATA_C_STANDBY_IMMED	0xe0
 #define ATA_C_FLUSH_CACHE	0xe7
 #define ATA_C_FLUSH_CACHE_EXT	0xea /* lba48 */
 #define ATA_C_IDENTIFY		0xec
@@ -79,7 +80,9 @@ struct ata_identify {
 	u_int16_t	recmwdma;	/*  66 */
 	u_int16_t	minpio;		/*  67 */
 	u_int16_t	minpioflow;	/*  68 */
-	u_int16_t	reserved4[2];	/*  69 */
+	u_int16_t	add_support;	/*  69 */
+#define ATA_ID_ADD_SUPPORT_DRT	0x4000
+	u_int16_t	reserved4;	/*  70 */
 	u_int16_t	typtime[2];	/*  71 */
 	u_int16_t	reserved5[2];	/*  73 */
 	u_int16_t	qdepth;		/*  75 */
@@ -133,7 +136,9 @@ struct ata_identify {
 	u_int16_t	padding3[8];	/* 160 */
 	u_int16_t	form;		/* 168 */
 #define ATA_ID_FORM_MASK	0x000f
-	u_int16_t	padding4[7];	/* 169 */
+	u_int16_t	data_set_mgmt;	/* 169 */
+#define ATA_ID_DATA_SET_MGMT_TRIM 0x0001
+	u_int16_t	padding4[6];	/* 170 */
 	u_int16_t	curmedser[30];	/* 176 */
 	u_int16_t	sctsupport;	/* 206 */
 	u_int16_t	rpm;		/* 207 */

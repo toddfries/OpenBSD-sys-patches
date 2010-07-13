@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_bootstrap.c,v 1.17 2006/07/09 19:39:53 miod Exp $	*/
+/*	$OpenBSD: pmap_bootstrap.c,v 1.19 2010/06/28 04:20:25 miod Exp $	*/
 
 /* 
  * Copyright (c) 1995 Theo de Raadt
@@ -96,7 +96,10 @@ void  pmap_bootstrap(paddr_t, paddr_t);
  *	CADDR1, CADDR2:	pmap zero/copy operations
  *	vmmap:		/dev/mem, crash dumps, parity error checking
  */
-caddr_t		CADDR1, CADDR2, vmmap;
+#ifndef __HAVE_PMAP_DIRECT
+caddr_t		CADDR1, CADDR2;
+#endif
+caddr_t		vmmap;
 
 /*
  * Bootstrap the VM system.
@@ -176,7 +179,7 @@ pmap_bootstrap(nextpa, firstpa)
 	 * - nkmempages_max pages in kmeminit().
 	 * - PAGER_MAP_SIZE bytes in uvm_pager_init().
 	 * - 93.75 % of physmem anons in amap_init().
-	 * - 4 * uvm_km_pages_lowat pages in uvm_km_page_init().
+	 * - 4 * uvm_km_pages.lowat pages in uvm_km_page_init().
 	 *
 	 * We'll compute this size in bytes, then round it to pages,
 	 * then to a multiple of NPTEPG.
@@ -195,15 +198,18 @@ pmap_bootstrap(nextpa, firstpa)
 
 #if !defined(__HAVE_PMAP_DIRECT)
 	{
-		extern int uvm_km_pages_lowat;
-
-		if ((num = RELOC(uvm_km_pages_lowat, int)) == 0) {
+		if ((num = RELOC(uvm_km_pages.lowat, int)) == 0) {
 			num = RELOC(physmem, int) / 256;
-			if (num < 128)
+			if (num < 16)
+				num = 32;
+			else if (num < 128) {
 				num = 128;
+				if (num > UVM_KM_PAGES_LOWAT_MAX)
+					num = UVM_KM_PAGES_LOWAT_MAX;
+			}
 		}
 	}
-	nptpages += ptoa(num);
+	nptpages += ptoa(4 * num);
 #endif
 
 	nptpages = (atop(round_page(nptpages)) + NPTEPG - 1) / NPTEPG;
@@ -539,10 +545,12 @@ pmap_bootstrap(nextpa, firstpa)
 	{
 		vaddr_t va = RELOC(virtual_avail, vaddr_t);
 
+#ifndef __HAVE_PMAP_DIRECT
 		RELOC(CADDR1, caddr_t) = (caddr_t)va;
 		va += NBPG;
 		RELOC(CADDR2, caddr_t) = (caddr_t)va;
 		va += NBPG;
+#endif
 		RELOC(vmmap, caddr_t) = (caddr_t)va;
 		va += NBPG;
 
