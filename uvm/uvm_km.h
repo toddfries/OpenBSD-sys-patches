@@ -58,6 +58,9 @@ void uvm_km_pgremove_intrsafe(vaddr_t, vaddr_t);
 #define UVM_KM_PAGES_LOWAT_MAX	(2048)
 #define UVM_KM_PAGES_HIWAT_MAX	(4 * UVM_KM_PAGES_LOWAT_MAX)
 
+struct uvm_km_free_page {
+	struct uvm_km_free_page *next;
+};
 struct uvm_km_pages {
 	struct	mutex mtx;
 
@@ -68,6 +71,9 @@ struct uvm_km_pages {
 	/* Kernel address pool. */
 	int	free;
 	vaddr_t	page[UVM_KM_PAGES_HIWAT_MAX];
+
+	struct uvm_km_free_page *freelist;
+	int freelistlen;
 
 	struct	proc *km_proc;
 };
