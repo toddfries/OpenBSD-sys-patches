@@ -158,11 +158,15 @@ process_new(struct proc *newproc, struct proc *parentproc)
 
 	pr = pool_get(&process_pool, PR_WAITOK);
 	pr->ps_mainproc = newproc;
+	parent = parentproc->p_p;
+
 	TAILQ_INIT(&pr->ps_threads);
 	TAILQ_INSERT_TAIL(&pr->ps_threads, newproc, p_thr_link);
+	LIST_INSERT_AFTER(parent, pr, ps_pglist);
+	pr->ps_pptr = parent;
+	LIST_INSERT_HEAD(&parent->ps_children, pr, ps_sibling);
+	LIST_INIT(&pr->ps_children);
 	pr->ps_refcnt = 1;
-
-	parent = parentproc->p_p;
 
 	/*
 	 * Make a process structure for the new process.
@@ -179,6 +183,10 @@ process_new(struct proc *newproc, struct proc *parentproc)
 	bcopy(parent->ps_cred, pr->ps_cred, sizeof(*pr->ps_cred));
 	crhold(parent->ps_cred->pc_ucred);
 	pr->ps_limit->p_refcnt++;
+
+	if (parent->ps_session->s_ttyvp != NULL &&
+	    parent->ps_flags & PS_CONTROLT)
+		atomic_setbits_int(&pr->ps_flags, PS_CONTROLT);
 
 	newproc->p_p = pr;
 }
@@ -310,14 +318,10 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	else
 		p2->p_fd = fdcopy(p1);
 
-	if (p1->p_session->s_ttyvp != NULL && p1->p_flag & P_CONTROLT)
-		atomic_setbits_int(&p2->p_flag, P_CONTROLT);
 	if (flags & FORK_PPWAIT)
 		atomic_setbits_int(&p2->p_flag, P_PPWAIT);
-	p2->p_pptr = p1;
 	if (flags & FORK_NOZOMBIE)
 		atomic_setbits_int(&p2->p_flag, P_NOZOMBIE);
-	LIST_INIT(&p2->p_children);
 
 #ifdef KTRACE
 	/*
@@ -397,12 +401,12 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	LIST_INSERT_HEAD(&allproc, p2, p_list);
 	LIST_INSERT_HEAD(PIDHASH(p2->p_pid), p2, p_hash);
 	rw_exit_write(&allproclk);
-	LIST_INSERT_HEAD(&p1->p_children, p2, p_sibling);
-	LIST_INSERT_AFTER(p1, p2, p_pglist);
+
 	if (p2->p_flag & P_TRACED) {
 		p2->p_oppid = p1->p_pid;
-		if (p2->p_pptr != p1->p_pptr)
-			proc_reparent(p2, p1->p_pptr);
+		if ((flags & FORK_THREAD) == 0 &&
+		    p2->p_p->ps_pptr != p1->p_p->ps_pptr)
+			proc_reparent(p2->p_p, p1->p_p->ps_pptr);
 
 		/*
 		 * Set ptrace status.
@@ -460,11 +464,11 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	/*
 	 * Preserve synchronization semantics of vfork.  If waiting for
 	 * child to exec or exit, set P_PPWAIT on child, and sleep on our
-	 * proc (in case of exit).
+	 * process (in case of exit).
 	 */
 	if (flags & FORK_PPWAIT)
 		while (p2->p_flag & P_PPWAIT)
-			tsleep(p1, PWAIT, "ppwait", 0);
+			tsleep(p1->p_p, PWAIT, "ppwait", 0);
 
 	/*
 	 * If we're tracing the child, alert the parent too.
@@ -495,9 +499,10 @@ pidtaken(pid_t pid)
 		return (1);
 	if (pgfind(pid) != NULL)
 		return (1);
-	LIST_FOREACH(p, &zombproc, p_list)
-		if (p->p_pid == pid || (p->p_pgrp && p->p_pgrp->pg_id == pid))
+	LIST_FOREACH(p, &zombproc, p_list) {
+		if (p->p_pid == pid || (p->p_p->ps_pgrp && p->p_p->ps_pgrp->pg_id == pid))
 			return (1);
+	}
 	return (0);
 }
 

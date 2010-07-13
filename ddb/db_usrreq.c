@@ -91,10 +91,11 @@ ddb_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &db_log));
 	case DBCTL_TRIGGER:
 		if (newp && db_console) {
-			struct proc *p = curproc;
+			struct process *pr = curproc->p_p;
+
 			if (securelevel < 1 ||
-			    (p->p_flag & P_CONTROLT && cn_tab &&
-			    cn_tab->cn_dev == p->p_session->s_ttyp->t_dev)) {
+			    (pr->ps_flags & PS_CONTROLT && cn_tab &&
+			    cn_tab->cn_dev == pr->ps_session->s_ttyp->t_dev)) {
 				Debugger();
 				newp = NULL;
 			} else

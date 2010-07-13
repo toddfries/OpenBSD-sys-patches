@@ -243,7 +243,7 @@ ttcompat(tp, com, data, flag, p)
 		if (tp->t_session->s_leader == NULL)
 			return ENOTTY;
 
-		*(int *) data =  tp->t_session->s_leader->p_pid;
+		*(int *) data =  tp->t_session->s_leader->ps_pid;
 		break;
 
 	default:
