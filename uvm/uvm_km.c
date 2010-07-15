@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_km.c,v 1.83 2010/07/02 23:12:38 thib Exp $	*/
+/*	$OpenBSD: uvm_km.c,v 1.84 2010/07/15 00:14:17 tedu Exp $	*/
 /*	$NetBSD: uvm_km.c,v 1.42 2001/01/14 02:10:01 thorpej Exp $	*/
 
 /* 
@@ -922,6 +922,7 @@ uvm_km_doputpage(struct uvm_km_free_page *fp)
 	if (freeva)
 		uvm_km_free(kernel_map, va, PAGE_SIZE);
 
+	uvm_pagefree(pg);
 	return (nextfp);
 }
 #endif	/* !__HAVE_PMAP_DIRECT */
