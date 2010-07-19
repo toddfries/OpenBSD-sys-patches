@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_usrreq.c,v 1.100 2009/06/05 00:05:22 claudio Exp $	*/
+/*	$OpenBSD: tcp_usrreq.c,v 1.102 2010/06/07 13:08:43 claudio Exp $	*/
 /*	$NetBSD: tcp_usrreq.c,v 1.20 1996/02/13 23:44:16 christos Exp $	*/
 
 /*
@@ -75,6 +75,7 @@
 #include <sys/socketvar.h>
 #include <sys/protosw.h>
 #include <sys/stat.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/domain.h>
 #include <sys/kernel.h>
@@ -270,10 +271,7 @@ tcp_usrreq(so, req, m, nam, control, p)
 
 			if (IN6_IS_ADDR_UNSPECIFIED(in6_addr) ||
 			    IN6_IS_ADDR_MULTICAST(in6_addr) ||
-			    (IN6_IS_ADDR_V4MAPPED(in6_addr) &&
-			    ((in6_addr->s6_addr32[3] == INADDR_ANY) ||
-			    IN_MULTICAST(in6_addr->s6_addr32[3]) ||
-			    in_broadcast(sin->sin_addr, NULL)))) {
+			    IN6_IS_ADDR_V4MAPPED(in6_addr)) {
 				error = EINVAL;
 				break;
 			}

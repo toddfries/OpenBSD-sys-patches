@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtw.c,v 1.74 2009/07/28 11:45:05 blambert Exp $	*/
+/*	$OpenBSD: rtw.c,v 1.78 2009/11/24 00:28:22 deraadt Exp $	*/
 /*	$NetBSD: rtw.c,v 1.29 2004/12/27 19:49:16 dyoung Exp $ */
 
 /*-
@@ -794,13 +794,13 @@ rtw_identify_sta(struct rtw_regs *regs, u_int8_t (*addr)[IEEE80211_ADDR_LEN],
 	u_int32_t idr0 = RTW_READ(regs, RTW_IDR0),
 	    idr1 = RTW_READ(regs, RTW_IDR1);
 
-	(*addr)[0] = MASK_AND_RSHIFT(idr0, BITS(0,  7));
-	(*addr)[1] = MASK_AND_RSHIFT(idr0, BITS(8,  15));
-	(*addr)[2] = MASK_AND_RSHIFT(idr0, BITS(16, 23));
-	(*addr)[3] = MASK_AND_RSHIFT(idr0, BITS(24 ,31));
+	(*addr)[0] = MASK_AND_RSHIFT(idr0, 0xff);
+	(*addr)[1] = MASK_AND_RSHIFT(idr0, 0xff00);
+	(*addr)[2] = MASK_AND_RSHIFT(idr0, 0xff0000);
+	(*addr)[3] = MASK_AND_RSHIFT(idr0, 0xff000000);
 
-	(*addr)[4] = MASK_AND_RSHIFT(idr1, BITS(0,  7));
-	(*addr)[5] = MASK_AND_RSHIFT(idr1, BITS(8, 15));
+	(*addr)[4] = MASK_AND_RSHIFT(idr1, 0xff);
+	(*addr)[5] = MASK_AND_RSHIFT(idr1, 0xff00);
 
 	if (IEEE80211_ADDR_EQ(addr, empty_macaddr)) {
 		printf("\n%s: could not get mac address, attach failed\n",
@@ -3624,27 +3624,10 @@ rtw_power(int why, void *arg)
 	splx(s);
 }
 
-/* rtw_shutdown: make sure the interface is stopped at reboot time. */
-void
-rtw_shutdown(void *arg)
-{
-	struct rtw_softc *sc = arg;
-
-	rtw_stop(&sc->sc_ic.ic_if, 1);
-}
-
 void
 rtw_establish_hooks(struct rtw_hooks *hooks, const char *dvname,
     void *arg)
 {
-	/*
-	 * Make sure the interface is shutdown during reboot.
-	 */
-	hooks->rh_shutdown = shutdownhook_establish(rtw_shutdown, arg);
-	if (hooks->rh_shutdown == NULL)
-		printf("%s: WARNING: unable to establish shutdown hook\n",
-		    dvname);
-
 	/*
 	 * Add a suspend hook to make sure we come back up after a
 	 * resume.
@@ -3659,9 +3642,6 @@ void
 rtw_disestablish_hooks(struct rtw_hooks *hooks, const char *dvname,
     void *arg)
 {
-	if (hooks->rh_shutdown != NULL)
-		shutdownhook_disestablish(hooks->rh_shutdown);
-
 	if (hooks->rh_power != NULL)
 		powerhook_disestablish(hooks->rh_power);
 }
@@ -4171,11 +4151,12 @@ rtw_detach(struct rtw_softc *sc)
 {
 	sc->sc_flags |= RTW_F_INVALID;
 
-	rtw_stop(&sc->sc_if, 1);
-
 	rtw_disestablish_hooks(&sc->sc_hooks, sc->sc_dev.dv_xname,
 	    (void*)sc);
 	timeout_del(&sc->sc_scan_to);
+
+	rtw_stop(&sc->sc_if, 1);
+
 	ieee80211_ifdetach(&sc->sc_if);
 	if_detach(&sc->sc_if);
 
@@ -4641,12 +4622,12 @@ rtw_grf5101_pwrstate(struct rtw_softc *sc, enum rtw_pwrstate power)
 {
 	switch (power) {
 	case RTW_OFF:
+		/* FALLTHROUGH */
 	case RTW_SLEEP:
 		rtw_rf_macwrite(sc, 0x07, 0x0000);
 		rtw_rf_macwrite(sc, 0x1f, 0x0045);
 		rtw_rf_macwrite(sc, 0x1f, 0x0005);
 		rtw_rf_macwrite(sc, 0x00, 0x08e4);
-	default:
 		break;
 	case RTW_ON:
 		rtw_rf_macwrite(sc, 0x1f, 0x0001);

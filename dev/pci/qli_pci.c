@@ -1,4 +1,4 @@
-/* $OpenBSD: qli_pci.c,v 1.13 2009/02/16 21:19:07 miod Exp $ */
+/* $OpenBSD: qli_pci.c,v 1.19 2010/06/28 18:31:02 krw Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2007 David Collins <dave@davec.name>
@@ -134,7 +134,7 @@ struct qli_mem {
 
 struct qli_mem	*qli_allocmem(struct qli_softc *, size_t);
 void		qli_freemem(struct qli_softc *, struct qli_mem *);
-int		qli_scsi_cmd(struct scsi_xfer *);
+void		qli_scsi_cmd(struct scsi_xfer *);
 int		qli_scsi_ioctl(struct scsi_link *, u_long, caddr_t, int,
 		    struct proc *);
 void		qliminphys(struct buf *bp, struct scsi_link *sl);
@@ -165,10 +165,6 @@ int		qli_create_sensors(struct qli_softc *);
 
 struct scsi_adapter qli_switch = {
 	qli_scsi_cmd, qliminphys, 0, 0, qli_scsi_ioctl
-};
-
-struct scsi_device qli_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 struct cfdriver qli_cd = {
@@ -313,7 +309,7 @@ qli_allocmem(struct qli_softc *sc, size_t size)
 		goto amfree;
 
 	if (bus_dmamem_alloc(sc->sc_dmat, size, PAGE_SIZE, 0, &mm->am_seg, 1,
-	    &nsegs, BUS_DMA_NOWAIT) != 0)
+	    &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0)
 		goto destroy;
 
 	if (bus_dmamem_map(sc->sc_dmat, &mm->am_seg, nsegs, size, &mm->am_kva,
@@ -327,7 +323,6 @@ qli_allocmem(struct qli_softc *sc, size_t size)
 	DNPRINTF(QLI_D_MEM, "  kva: %p  dva: %p  map: %p\n",
 	    mm->am_kva, mm->am_map->dm_segs[0].ds_addr, mm->am_map);
 
-	memset(mm->am_kva, 0, size);
 	return (mm);
 
 unmap:
@@ -504,7 +499,6 @@ qli_get_fw_state(struct qli_softc *sc, u_int32_t *mbox)
 
 	DNPRINTF(QLI_D_MISC, "%s: qli_get_fw_state\n", DEVNAME(sc));
 
-	bzero(mbox, sizeof(mbox));
 	mbox[0] = QLI_MBOX_OPC_GET_FW_STATE;
 	if (qli_mgmt(sc, 1, mbox))
 		goto done;
@@ -998,7 +992,7 @@ nofwcb:
 	return (rv);
 }
 
-int
+void
 qli_scsi_cmd(struct scsi_xfer *xs)
 {
 	int s;
@@ -1011,16 +1005,11 @@ qli_scsi_cmd(struct scsi_xfer *xs)
 #endif
 
 	goto stuffup;
-
-	return (SUCCESSFULLY_QUEUED);
+	return;
 
 stuffup:
 	xs->error = XS_DRIVER_STUFFUP;
-	xs->flags |= ITSDONE;
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
-	return (COMPLETE);
 }
 
 int

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.60 2009/02/01 14:53:04 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.75 2010/06/29 00:50:40 jsing Exp $	*/
 
 /*
  * Copyright (c) 2000-2004 Michael Shalayeff
@@ -64,27 +64,74 @@
 
 #ifndef _LOCORE
 #ifdef _KERNEL
+#include <sys/device.h>
 #include <sys/queue.h>
 #include <sys/sched.h>
 
+#include <machine/mutex.h>
+
+/*
+ * Note that the alignment of ci_trap_save is important since we want to keep
+ * it within a single cache line. As a result, it must be kept as the first
+ * entry within the cpu_info struct.
+ */
 struct cpu_info {
+	register_t	ci_trap_save[16];
+
+	struct device	*ci_dev;
+	int		ci_cpuid;
+	hppa_hpa_t	ci_hpa;
+	volatile int	ci_flags;
+
 	struct proc	*ci_curproc;
+	paddr_t		ci_fpu_state;		/* Process FPU state. */
+	paddr_t		ci_stack;
+
+	register_t	ci_psw;			/* Processor Status Word. */
+	volatile int	ci_cpl;
+	volatile u_long	ci_mask;		/* Hardware interrupt mask. */
+	volatile u_long	ci_ipending;
+	volatile int	ci_in_intr;
+	int		ci_want_resched;
+	u_long		ci_itmr;
+
+	volatile u_long	ci_ipi;			/* IPIs pending. */
+	struct mutex	ci_ipi_mtx;
 
 	struct schedstate_percpu ci_schedstate;
 	u_int32_t	ci_randseed;
-};
+} __attribute__((__aligned__(64)));
 
-extern struct cpu_info cpu_info_primary;
+#define		CPUF_RUNNING	0x0001		/* CPU is running. */
 
-#define curcpu()	(&cpu_info_primary)
+#ifdef MULTIPROCESSOR
+#define		HPPA_MAXCPUS	4
+#else
+#define		HPPA_MAXCPUS	1
+#endif
 
-#define CPU_IS_PRIMARY(ci)	1
-#define CPU_INFO_ITERATOR	int
-#define CPU_INFO_FOREACH(cii, ci)	\
-	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
-#define CPU_INFO_UNIT(ci)	0
-#define MAXCPUS	1
-#define cpu_number()	0
+extern struct cpu_info cpu_info[HPPA_MAXCPUS];
+
+#define MAXCPUS		HPPA_MAXCPUS
+
+static __inline struct cpu_info *
+curcpu(void)
+{
+	struct cpu_info *ci;
+
+	asm volatile ("mfctl    %%cr29, %0" : "=r"(ci));
+
+	return ci;
+}
+
+#define cpu_number()		(curcpu()->ci_cpuid)
+
+#define CPU_INFO_UNIT(ci)	((ci)->ci_dev ? (ci)->ci_dev->dv_unit : 0)
+#define CPU_IS_PRIMARY(ci)	((ci)->ci_cpuid == 0)
+#define	CPU_INFO_ITERATOR	int
+#define CPU_INFO_FOREACH(cii, ci) \
+	for (cii = 0, ci = &cpu_info[0]; cii < ncpus; cii++, ci++)
+
 #define cpu_unidle(ci)
 
 /* types */
@@ -94,7 +141,6 @@ enum hppa_cpu_type {
 extern enum hppa_cpu_type cpu_type;
 extern const char *cpu_typename;
 extern int cpu_hvers;
-extern register_t kpsw;
 #endif
 #endif
 
@@ -153,10 +199,15 @@ extern register_t kpsw;
 #define	CLKF_USERMODE(framep)	((framep)->tf_flags & T_USER)
 #define	CLKF_SYSCALL(framep)	((framep)->tf_flags & TFF_SYS)
 
-#define	signotify(p)		(setsoftast())
-#define	need_resched(ci)	(want_resched = 1, setsoftast())
-#define clear_resched(ci) 	want_resched = 0
-#define	need_proftick(p)	setsoftast()
+#define	signotify(p)		setsoftast(p)
+#define	need_resched(ci)						\
+	do {								\
+		(ci)->ci_want_resched = 1;				\
+		if ((ci)->ci_curproc != NULL)				\
+			setsoftast((ci)->ci_curproc);			\
+	} while (0)
+#define clear_resched(ci) 	(ci)->ci_want_resched = 0
+#define	need_proftick(p)	setsoftast(p)
 #define	PROC_PC(p)		((p)->p_md.md_regs->tf_iioq_head)
 
 #ifndef _LOCORE
@@ -165,8 +216,6 @@ extern register_t kpsw;
 #define MD_CACHE_PURGE 1
 #define MD_CACHE_CTL(a,s,t)	\
 	(((t)? pdcache : fdcache) (HPPA_SID_KERNEL,(vaddr_t)(a),(s)))
-
-extern int want_resched;
 
 #define DELAY(x) delay(x)
 
@@ -183,6 +232,12 @@ int	copy_on_fault(void);
 void	switch_trampoline(void);
 int	cpu_dumpsize(void);
 int	cpu_dump(void);
+
+#ifdef MULTIPROCESSOR
+void	cpu_boot_secondary_processors(void);
+void	cpu_hw_init(void);
+void	cpu_hatch(void);
+#endif
 #endif
 
 /*
@@ -209,6 +264,10 @@ int	cpu_dump(void);
 
 #ifdef _KERNEL
 #include <sys/queue.h>
+
+#ifdef MULTIPROCESSOR
+#include <sys/mplock.h>
+#endif
 
 struct blink_led {
 	void (*bl_func)(void *, int);

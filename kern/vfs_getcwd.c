@@ -1,4 +1,4 @@
-/* $OpenBSD: vfs_getcwd.c,v 1.15 2009/07/09 22:29:56 thib Exp $ */
+/* $OpenBSD: vfs_getcwd.c,v 1.17 2010/05/19 08:31:23 thib Exp $ */
 /* $NetBSD: vfs_getcwd.c,v 1.3.2.3 1999/07/11 10:24:09 sommerfeld Exp $ */
 
 /*
@@ -88,7 +88,6 @@ vfs_getcwd_scandir(struct vnode **lvpp, struct vnode **uvpp, char **bpp,
 	cn.cn_pnbuf = NULL;
 	cn.cn_nameptr = "..";
 	cn.cn_namelen = 2;
-	cn.cn_hash = 0;
 	cn.cn_consume = 0;
 
 	/* Get parent vnode using lookup of '..' */
@@ -210,7 +209,7 @@ vfs_getcwd_getcache(struct vnode **lvpp, struct vnode **uvpp, char **bpp,
 	int error, vpid;
 
 	lvp = *lvpp;
-	obp = *bpp;	/* Save orginal position to restore to on error */
+	obp = *bpp;	/* Save original position to restore to on error */
 
 	error = cache_revlookup(lvp, uvpp, bpp, bufp);
 	if (error) {

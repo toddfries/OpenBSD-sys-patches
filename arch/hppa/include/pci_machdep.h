@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.4 2009/07/20 23:40:43 miod Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.6 2010/06/29 22:08:28 jordan Exp $	*/
 
 /*
  * Copyright (c) 2003 Michael Shalayeff
@@ -53,7 +53,7 @@ struct hppa_pci_chipset_tag {
 			    pci_intr_handle_t *);
 	const char	*(*pc_intr_string)(void *, pci_intr_handle_t);
 	void		*(*pc_intr_establish)(void *, pci_intr_handle_t,
-			    int, int (*)(void *), void *, char *);
+			    int, int (*)(void *), void *, const char *);
 	void		(*pc_intr_disestablish)(void *, void *);
 
 	void		*(*pc_alloc_parent)(struct device *,
@@ -87,5 +87,7 @@ struct hppa_pci_chipset_tag {
 
 #define	pciide_machdep_compat_intr_establish(a, b, c, d, e)	(NULL)
 #define	pciide_machdep_compat_intr_disestablish(a, b)	((void)(a), (void)(b))
+
+#define	pci_dev_postattach(a, b)
 
 #endif /* _MACHINE_PCI_MACHDEP_H_ */

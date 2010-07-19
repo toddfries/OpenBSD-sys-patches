@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upgt.c,v 1.46 2009/08/03 09:33:10 blambert Exp $ */
+/*	$OpenBSD: if_upgt.c,v 1.49 2010/04/20 22:05:43 tedu Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -20,7 +20,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -88,9 +87,8 @@ int upgt_debug = 2;
 int		upgt_match(struct device *, void *, void *);
 void		upgt_attach(struct device *, struct device *, void *);
 void		upgt_attach_hook(void *);
-void		upgt_shutdown_hook(void *);
 int		upgt_detach(struct device *, int);
-int		upgt_activate(struct device *, enum devact);
+int		upgt_activate(struct device *, int);
 
 int		upgt_device_type(struct upgt_softc *, uint16_t, uint16_t);
 int		upgt_device_init(struct upgt_softc *);
@@ -456,27 +454,12 @@ upgt_attach_hook(void *arg)
 	printf("%s: address %s\n",
 	    sc->sc_dev.dv_xname, ether_sprintf(ic->ic_myaddr));
 
-	/* setup shutdown hook */
-	sc->sc_sdhook = shutdownhook_establish(upgt_shutdown_hook, sc);
-
 	/* device attached */
 	sc->sc_flags |= UPGT_DEVICE_ATTACHED;
 
 	return;
 fail:
 	printf("%s: %s failed!\n", sc->sc_dev.dv_xname, __func__);
-}
-
-void
-upgt_shutdown_hook(void *arg)
-{
-	struct upgt_softc *sc = (struct upgt_softc *)arg;
-
-	DPRINTF(1, "%s: %s\n", sc->sc_dev.dv_xname, __func__);
-
-	/* reset device */
-	upgt_set_led(sc, UPGT_LED_OFF);
-	(void)upgt_device_init(sc);
 }
 
 int
@@ -520,9 +503,6 @@ upgt_detach(struct device *self, int flags)
 		if_detach(ifp);
 	}
 
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
-
 	splx(s);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev, &sc->sc_dev);
@@ -531,7 +511,7 @@ upgt_detach(struct device *self, int flags)
 }
 
 int
-upgt_activate(struct device *self, enum devact act)
+upgt_activate(struct device *self, int act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:
@@ -1293,6 +1273,8 @@ upgt_stop(struct upgt_softc *sc)
 	/* device down */
 	ifp->if_timer = 0;
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+
+	upgt_set_led(sc, UPGT_LED_OFF);
 
 	/* change device back to initial state */
 	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);

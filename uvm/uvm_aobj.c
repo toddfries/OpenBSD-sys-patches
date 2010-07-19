@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_aobj.c,v 1.46 2009/07/22 21:05:37 oga Exp $	*/
+/*	$OpenBSD: uvm_aobj.c,v 1.51 2010/07/02 02:08:53 syuu Exp $	*/
 /*	$NetBSD: uvm_aobj.c,v 1.39 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -144,7 +144,7 @@ struct pool uao_swhash_elt_pool;
  */
 
 struct uvm_aobj {
-	struct uvm_object u_obj; /* has: lock, pgops, memq, #pages, #refs */
+	struct uvm_object u_obj; /* has: lock, pgops, memt, #pages, #refs */
 	int u_pages;		 /* number of pages in entire object */
 	int u_flags;		 /* the flags (see uvm_aobj.h) */
 	int *u_swslots;		 /* array of offset->swapslot mappings */
@@ -196,10 +196,15 @@ struct uvm_pagerops aobj_pager = {
 
 /*
  * uao_list: global list of active aobjs, locked by uao_list_lock
+ *
+ * Lock ordering: generally the locking order is object lock, then list lock.
+ * in the case of swap off we have to iterate over the list, and thus the
+ * ordering is reversed. In that case we must use trylocking to prevent
+ * deadlock.
  */
 
-static LIST_HEAD(aobjlist, uvm_aobj) uao_list;
-static simple_lock_data_t uao_list_lock;
+static LIST_HEAD(aobjlist, uvm_aobj) uao_list = LIST_HEAD_INITIALIZER(uao_list);
+static struct mutex uao_list_lock = MUTEX_INITIALIZER(IPL_NONE);
 
 
 /*
@@ -461,6 +466,7 @@ uao_create(vsize_t size, int flags)
 	static struct uvm_aobj kernel_object_store; /* home of kernel_object */
 	static int kobj_alloced = 0;			/* not allocated yet */
 	int pages = round_page(size) >> PAGE_SHIFT;
+	int refs = UVM_OBJ_KERN;
 	struct uvm_aobj *aobj;
 
 	/*
@@ -474,7 +480,6 @@ uao_create(vsize_t size, int flags)
 		aobj->u_pages = pages;
 		aobj->u_flags = UAO_FLAG_NOSWAP;	/* no swap to start */
 		/* we are special, we never die */
-		aobj->u_obj.uo_refs = UVM_OBJ_KERN;
 		kobj_alloced = UAO_FLAG_KERNOBJ;
 	} else if (flags & UAO_FLAG_KERNSWAP) {
 		aobj = &kernel_object_store;
@@ -485,7 +490,7 @@ uao_create(vsize_t size, int flags)
 		aobj = pool_get(&uvm_aobj_pool, PR_WAITOK);
 		aobj->u_pages = pages;
 		aobj->u_flags = 0;		/* normal object */
-		aobj->u_obj.uo_refs = 1;	/* start with 1 reference */
+		refs = 1;			/* normal object so 1 ref */
 	}
 
 	/*
@@ -518,20 +523,14 @@ uao_create(vsize_t size, int flags)
 		}
 	}
 
-	/*
- 	 * init aobj fields
- 	 */
-	simple_lock_init(&aobj->u_obj.vmobjlock);
-	aobj->u_obj.pgops = &aobj_pager;
-	TAILQ_INIT(&aobj->u_obj.memq);
-	aobj->u_obj.uo_npages = 0;
+	uvm_objinit(&aobj->u_obj, &aobj_pager, refs);
 
 	/*
  	 * now that aobj is ready, add it to the global list
  	 */
-	simple_lock(&uao_list_lock);
+	mtx_enter(&uao_list_lock);
 	LIST_INSERT_HEAD(&uao_list, aobj, u_list);
-	simple_unlock(&uao_list_lock);
+	mtx_leave(&uao_list_lock);
 
 	/*
  	 * done!
@@ -554,9 +553,6 @@ uao_init(void)
 	if (uao_initialized)
 		return;
 	uao_initialized = TRUE;
-
-	LIST_INIT(&uao_list);
-	simple_lock_init(&uao_list_lock);
 
 	/*
 	 * NOTE: Pages for this pool must not come from a pageable
@@ -657,9 +653,9 @@ uao_detach_locked(struct uvm_object *uobj)
 	/*
  	 * remove the aobj from the global list.
  	 */
-	simple_lock(&uao_list_lock);
+	mtx_enter(&uao_list_lock);
 	LIST_REMOVE(aobj, u_list);
-	simple_unlock(&uao_list_lock);
+	mtx_leave(&uao_list_lock);
 
 	/*
 	 * Free all pages left in the object. If they're busy, wait
@@ -667,7 +663,7 @@ uao_detach_locked(struct uvm_object *uobj)
 	 * Release swap resources then free the page.
  	 */
 	uvm_lock_pageq();
-	while((pg = TAILQ_FIRST(&uobj->memq)) != NULL) {
+	while((pg = RB_ROOT(&uobj->memt)) != NULL) {
 		if (pg->pg_flags & PG_BUSY) {
 			atomic_setbits_int(&pg->pg_flags, PG_WANTED);
 			uvm_unlock_pageq();
@@ -702,11 +698,6 @@ uao_detach_locked(struct uvm_object *uobj)
  *	or block.
  * => if PGO_ALLPAGE is set, then all pages in the object are valid targets
  *	for flushing.
- * => NOTE: we rely on the fact that the object's memq is a TAILQ and
- *	that new pages are inserted on the tail end of the list.  thus,
- *	we can make a complete pass through the object in one go by starting
- *	at the head and working towards the tail (new pages are put in
- *	front of us).
  * => NOTE: we are allowed to lock the page queues, so the caller
  *	must not be holding the lock on them [e.g. pagedaemon had
  *	better not call us with the queues locked]
@@ -830,7 +821,7 @@ uao_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
 	}
 
 	UVMHIST_LOG(maphist,
-	    "<- done, rv=%ld",retval,0,0,0);
+	    "<- done, rv=TRUE",0,0,0,0);
 	return (TRUE);
 }
 
@@ -1165,14 +1156,14 @@ uao_dropswap(struct uvm_object *uobj, int pageidx)
 boolean_t
 uao_swap_off(int startslot, int endslot)
 {
-	struct uvm_aobj *aobj, *nextaobj;
+	struct uvm_aobj *aobj, *nextaobj, *prevaobj = NULL;
 
 	/*
 	 * walk the list of all aobjs.
 	 */
 
 restart:
-	simple_lock(&uao_list_lock);
+	mtx_enter(&uao_list_lock);
 
 	for (aobj = LIST_FIRST(&uao_list);
 	     aobj != NULL;
@@ -1186,7 +1177,11 @@ restart:
 		 * so this should be a rare case.
 		 */
 		if (!simple_lock_try(&aobj->u_obj.vmobjlock)) {
-			simple_unlock(&uao_list_lock);
+			mtx_leave(&uao_list_lock);
+			if (prevaobj) {
+				uao_detach_locked(&prevaobj->u_obj);
+				prevaobj = NULL;
+			}
 			goto restart;
 		}
 
@@ -1198,8 +1193,14 @@ restart:
 
 		/*
 		 * now it's safe to unlock the uao list.
+		 * note that lock interleaving is alright with IPL_NONE mutexes.
 		 */
-		simple_unlock(&uao_list_lock);
+		mtx_leave(&uao_list_lock);
+
+		if (prevaobj) {
+			uao_detach_locked(&prevaobj->u_obj);
+			prevaobj = NULL;
+		}
 
 		/*
 		 * page in any pages in the swslot range.
@@ -1215,15 +1216,25 @@ restart:
 		 * we're done with this aobj.
 		 * relock the list and drop our ref on the aobj.
 		 */
-		simple_lock(&uao_list_lock);
+		mtx_enter(&uao_list_lock);
 		nextaobj = LIST_NEXT(aobj, u_list);
-		uao_detach_locked(&aobj->u_obj);
+		/*
+		 * prevaobj means that we have an object that we need
+		 * to drop a reference for. We can't just drop it now with
+		 * the list locked since that could cause lock recursion in
+		 * the case where we reduce the refcount to 0. It will be
+		 * released the next time we drop the list lock.
+		 */
+		prevaobj = aobj;
 	}
 
 	/*
 	 * done with traversal, unlock the list
 	 */
-	simple_unlock(&uao_list_lock);
+	mtx_leave(&uao_list_lock);
+	if (prevaobj) {
+		uao_detach_locked(&prevaobj->u_obj);
+	}
 	return FALSE;
 }
 

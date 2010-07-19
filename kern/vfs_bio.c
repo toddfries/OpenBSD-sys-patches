@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.119 2009/08/02 16:28:40 beck Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.124 2010/07/01 16:23:09 thib Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*
@@ -112,6 +112,7 @@ long maxcleanpages;
 long backoffpages;	/* backoff counter for page allocations */
 long buflowpages;	/* bufpages low water mark */
 long bufhighpages; 	/* bufpages high water mark */
+long bufbackpages; 	/* number of pages we back off when asked to shrink */
 
 /* XXX - should be defined here. */
 extern int bufcachepercent;
@@ -213,6 +214,14 @@ bufinit(void)
 	 */
 	buflowpages = physmem * 10 / 100;
 
+	/*
+	 * set bufbackpages to 100 pages, or 10 percent of the low water mark
+	 * if we don't have that many pages.
+	 */
+
+	bufbackpages = buflowpages * 10 / 100;
+	if (bufbackpages > 100)
+		bufbackpages = 100;
 
 	if (bufkvm == 0)
 		bufkvm = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) / 10;
@@ -341,13 +350,13 @@ bufbackoff()
 	if (bufpages <= buflowpages) 
 		return(-1);
 
-	if (bufpages - BACKPAGES >= buflowpages)
-		d = BACKPAGES;
+	if (bufpages - bufbackpages >= buflowpages)
+		d = bufbackpages;
 	else
 		d = bufpages - buflowpages;
-	backoffpages = BACKPAGES;
+	backoffpages = bufbackpages;
 	bufadjust(bufpages - d);
-	backoffpages = BACKPAGES;
+	backoffpages = bufbackpages;
 	return(0);
 }
 
@@ -963,8 +972,8 @@ buf_get(struct vnode *vp, daddr64_t blkno, size_t size)
 	 */
 	if ((backoffpages == 0) && (bufpages < bufhighpages)) {
 		if ( gcount == 0 )  {
-			bufadjust(bufpages + BACKPAGES);
-			gcount += BACKPAGES;
+			bufadjust(bufpages + bufbackpages);
+			gcount += bufbackpages;
 		} else
 			gcount--;
 	}
@@ -1194,6 +1203,9 @@ biodone(struct buf *bp)
 		panic("biodone already");
 	SET(bp->b_flags, B_DONE);		/* note that it's done */
 
+	if (bp->b_bq)
+		bufq_done(bp->b_bq, bp);
+
 	if (LIST_FIRST(&bp->b_dep) != NULL)
 		buf_complete(bp);
 
@@ -1220,3 +1232,21 @@ biodone(struct buf *bp)
 		}
 	}
 }
+
+#ifdef DDB
+void	bcstats_print(int (*)(const char *, ...));
+/*
+ * bcstats_print: ddb hook to print interesting buffer cache counters
+ */
+void
+bcstats_print(int (*pr)(const char *, ...))
+{
+	(*pr)("Current Buffer Cache status:\n");
+	(*pr)("numbufs %lld, freebufs %lld\n",
+	    bcstats.numbufs, bcstats.freebufs);
+    	(*pr)("bufpages %lld, freepages %lld, dirtypages %lld\n",
+	    bcstats.numbufpages, bcstats.numfreepages, bcstats.numdirtypages);
+	(*pr)("pendingreads %lld, pendingwrites %lld\n",
+	    bcstats.pendingreads, bcstats.pendingwrites);
+}
+#endif

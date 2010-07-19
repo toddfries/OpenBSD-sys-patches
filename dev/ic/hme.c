@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.58 2009/06/22 14:31:04 sthen Exp $	*/
+/*	$OpenBSD: hme.c,v 1.61 2009/10/15 17:54:54 deraadt Exp $	*/
 /*	$NetBSD: hme.c,v 1.21 2001/07/07 15:59:37 thorpej Exp $	*/
 
 /*-
@@ -83,11 +83,10 @@ struct cfdriver hme_cd = {
 #define	HME_RX_OFFSET	2
 
 void		hme_start(struct ifnet *);
-void		hme_stop(struct hme_softc *);
+void		hme_stop(struct hme_softc *, int);
 int		hme_ioctl(struct ifnet *, u_long, caddr_t);
 void		hme_tick(void *);
 void		hme_watchdog(struct ifnet *);
-void		hme_shutdown(void *);
 void		hme_init(struct hme_softc *);
 void		hme_meminit(struct hme_softc *);
 void		hme_mifinit(struct hme_softc *);
@@ -149,7 +148,7 @@ hme_config(sc)
 	 */
 
 	/* Make sure the chip is stopped. */
-	hme_stop(sc);
+	hme_stop(sc, 0);
 
 	for (i = 0; i < HME_TX_RING_SIZE; i++) {
 		if (bus_dmamap_create(sc->sc_dmatag, MCLBYTES, HME_TX_NSEGS,
@@ -294,10 +293,6 @@ hme_config(sc)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	sc->sc_sh = shutdownhook_establish(hme_shutdown, sc);
-	if (sc->sc_sh == NULL)
-		panic("hme_config: can't establish shutdownhook");
-
 	timeout_set(&sc->sc_tick_ch, hme_tick, sc);
 	return;
 
@@ -310,6 +305,33 @@ fail:
 	for (i = 0; i < HME_RX_RING_SIZE; i++)
 		if (sc->sc_rxd[i].sd_map != NULL)
 			bus_dmamap_destroy(sc->sc_dmatag, sc->sc_rxd[i].sd_map);
+}
+
+void
+hme_unconfig(sc)
+	struct hme_softc *sc;
+{
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	int i;
+
+	hme_stop(sc, 1);
+
+	bus_dmamap_destroy(sc->sc_dmatag, sc->sc_rxmap_spare);
+	for (i = 0; i < HME_TX_RING_SIZE; i++)
+		if (sc->sc_txd[i].sd_map != NULL)
+			bus_dmamap_destroy(sc->sc_dmatag, sc->sc_txd[i].sd_map);
+	for (i = 0; i < HME_RX_RING_SIZE; i++)
+		if (sc->sc_rxd[i].sd_map != NULL)
+			bus_dmamap_destroy(sc->sc_dmatag, sc->sc_rxd[i].sd_map);
+
+	/* Detach all PHYs */
+	mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
+
+	/* Delete all remaining media. */
+	ifmedia_delete_instance(&sc->sc_mii.mii_media, IFM_INST_ANY);
+
+	ether_ifdetach(ifp);
+	if_detach(ifp);
 }
 
 void
@@ -358,8 +380,7 @@ hme_reset(sc)
 }
 
 void
-hme_stop(sc)
-	struct hme_softc *sc;
+hme_stop(struct hme_softc *sc, int softonly)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	bus_space_tag_t t = sc->sc_bustag;
@@ -374,23 +395,25 @@ hme_stop(sc)
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 	ifp->if_timer = 0;
 
-	mii_down(&sc->sc_mii);
+	if (!softonly) {
+		mii_down(&sc->sc_mii);
 
-	/* Mask all interrupts */
-	bus_space_write_4(t, seb, HME_SEBI_IMASK, 0xffffffff);
+		/* Mask all interrupts */
+		bus_space_write_4(t, seb, HME_SEBI_IMASK, 0xffffffff);
 
-	/* Reset transmitter and receiver */
-	bus_space_write_4(t, seb, HME_SEBI_RESET,
-	    (HME_SEB_RESET_ETX | HME_SEB_RESET_ERX));
+		/* Reset transmitter and receiver */
+		bus_space_write_4(t, seb, HME_SEBI_RESET,
+		    (HME_SEB_RESET_ETX | HME_SEB_RESET_ERX));
 
-	for (n = 0; n < 20; n++) {
-		u_int32_t v = bus_space_read_4(t, seb, HME_SEBI_RESET);
-		if ((v & (HME_SEB_RESET_ETX | HME_SEB_RESET_ERX)) == 0)
-			break;
-		DELAY(20);
+		for (n = 0; n < 20; n++) {
+			u_int32_t v = bus_space_read_4(t, seb, HME_SEBI_RESET);
+			if ((v & (HME_SEB_RESET_ETX | HME_SEB_RESET_ERX)) == 0)
+				break;
+			DELAY(20);
+		}
+		if (n >= 20)
+			printf("%s: hme_stop: reset failed\n", sc->sc_dev.dv_xname);
 	}
-	if (n >= 20)
-		printf("%s: hme_stop: reset failed\n", sc->sc_dev.dv_xname);
 
 	for (n = 0; n < HME_TX_RING_SIZE; n++) {
 		if (sc->sc_txd[n].sd_mbuf != NULL) {
@@ -497,7 +520,7 @@ hme_init(sc)
 	 */
 
 	/* step 1 & 2. Reset the Ethernet Channel */
-	hme_stop(sc);
+	hme_stop(sc, 0);
 
 	/* Re-initialize the MIF */
 	hme_mifinit(sc);
@@ -1007,6 +1030,8 @@ hme_intr(v)
 	int r = 0;
 
 	status = bus_space_read_4(t, seb, HME_SEBI_STAT);
+	if (status == 0xffffffff)
+		return (0);
 
 	if ((status & HME_SEB_STAT_ALL_ERRORS) != 0)
 		r |= hme_eint(sc, status);
@@ -1299,7 +1324,7 @@ hme_ioctl(ifp, cmd, data)
 				hme_init(sc);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
-				hme_stop(sc);
+				hme_stop(sc, 0);
 		}
 #ifdef HMEDEBUG
 		sc->sc_debug = (ifp->if_flags & IFF_DEBUG) != 0 ? 1 : 0;
@@ -1323,13 +1348,6 @@ hme_ioctl(ifp, cmd, data)
 
 	splx(s);
 	return (error);
-}
-
-void
-hme_shutdown(arg)
-	void *arg;
-{
-	hme_stop((struct hme_softc *)arg);
 }
 
 void
@@ -1415,16 +1433,10 @@ hme_newbuf(sc, d)
 	 * until we're sure everything is a success.
 	 */
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->sc_arpcom.ac_if, MCLBYTES);
+	if (!m)
 		return (ENOBUFS);
 	m->m_pkthdr.rcvif = &sc->sc_arpcom.ac_if;
-
-	MCLGETI(m, M_DONTWAIT, &sc->sc_arpcom.ac_if, MCLBYTES);
-	if ((m->m_flags & M_EXT) == 0) {
-		m_freem(m);
-		return (ENOBUFS);
-	}
 
 	if (bus_dmamap_load(sc->sc_dmatag, sc->sc_rxmap_spare,
 	    mtod(m, caddr_t), MCLBYTES - HME_RX_OFFSET, NULL,

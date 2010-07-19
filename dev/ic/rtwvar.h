@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtwvar.h,v 1.26 2009/07/28 11:45:05 blambert Exp $	*/
+/*	$OpenBSD: rtwvar.h,v 1.28 2009/10/13 19:33:16 pirofti Exp $	*/
 /*	$NetBSD: rtwvar.h,v 1.10 2004/12/26 22:37:57 mycroft Exp $	*/
 
 /*-
@@ -288,7 +288,6 @@ struct rtw_tx_radiotap_header {
 } __packed;
 
 struct rtw_hooks {
-	void			*rh_shutdown;	/* shutdown hook */
 	void			*rh_power;	/* power management hook */
 };
 
@@ -453,7 +452,7 @@ int rtw_intr(void *);
 void rtw_disable(struct rtw_softc *);
 int rtw_enable(struct rtw_softc *);
 
-int rtw_activate(struct device *, enum devact);
+int rtw_activate(struct device *, int);
 void rtw_power(int, void *);
 void rtw_shutdown(void *);
 

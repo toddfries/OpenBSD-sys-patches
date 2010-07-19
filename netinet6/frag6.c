@@ -1,4 +1,4 @@
-/*	$OpenBSD: frag6.c,v 1.27 2008/11/23 13:30:59 claudio Exp $	*/
+/*	$OpenBSD: frag6.c,v 1.30 2010/05/07 13:33:17 claudio Exp $	*/
 /*	$KAME: frag6.c,v 1.40 2002/05/27 21:40:31 itojun Exp $	*/
 
 /*
@@ -62,11 +62,11 @@
  */
 #define IN6_IFSTAT_STRICT
 
-static void frag6_enq(struct ip6asfrag *, struct ip6asfrag *);
-static void frag6_deq(struct ip6asfrag *);
-static void frag6_insque(struct ip6q *, struct ip6q *);
-static void frag6_remque(struct ip6q *);
-static void frag6_freef(struct ip6q *);
+void frag6_enq(struct ip6asfrag *, struct ip6asfrag *);
+void frag6_deq(struct ip6asfrag *);
+void frag6_insque(struct ip6q *, struct ip6q *);
+void frag6_remque(struct ip6q *);
+void frag6_freef(struct ip6q *);
 
 static int ip6q_locked;
 u_int frag6_nfragpackets;
@@ -132,7 +132,7 @@ do {									\
  * Initialise reassembly queue and fragment identifier.
  */
 void
-frag6_init()
+frag6_init(void)
 {
 
 	ip6q.ip6q_next = ip6q.ip6q_prev = &ip6q;
@@ -183,7 +183,7 @@ frag6_input(struct mbuf **mp, int *offp, int proto)
 	int fragoff, frgpartlen;	/* must be larger than u_int16_t */
 	struct ifnet *dstifp;
 #ifdef IN6_IFSTAT_STRICT
-	static struct route_in6 ro;
+	struct route_in6 ro;
 	struct sockaddr_in6 *dst;
 #endif
 	u_int8_t ecn, ecn0;
@@ -196,23 +196,18 @@ frag6_input(struct mbuf **mp, int *offp, int proto)
 	dstifp = NULL;
 #ifdef IN6_IFSTAT_STRICT
 	/* find the destination interface of the packet. */
+	bzero(&ro, sizeof(ro));
 	dst = (struct sockaddr_in6 *)&ro.ro_dst;
-	if (ro.ro_rt && ((ro.ro_rt->rt_flags & RTF_UP) == 0
-	  || !IN6_ARE_ADDR_EQUAL(&dst->sin6_addr, &ip6->ip6_dst))) {
-		RTFREE(ro.ro_rt);
-		ro.ro_rt = (struct rtentry *)0;
-	}
-	if (ro.ro_rt == NULL) {
-		bzero(dst, sizeof(*dst));
-		dst->sin6_family = AF_INET6;
-		dst->sin6_len = sizeof(struct sockaddr_in6);
-		dst->sin6_addr = ip6->ip6_dst;
-	}
+	dst->sin6_family = AF_INET6;
+	dst->sin6_len = sizeof(struct sockaddr_in6);
+	dst->sin6_addr = ip6->ip6_dst;
 
-	rtalloc_mpath((struct route *)&ro, &ip6->ip6_src.s6_addr32[0], 0);
+	rtalloc_mpath((struct route *)&ro, &ip6->ip6_src.s6_addr32[0]);
 
 	if (ro.ro_rt != NULL && ro.ro_rt->rt_ifa != NULL)
 		dstifp = ((struct in6_ifaddr *)ro.ro_rt->rt_ifa)->ia_ifp;
+	RTFREE(ro.ro_rt);
+	ro.ro_rt = NULL;
 #else
 	/* we are violating the spec, this is not the destination interface */
 	if ((m->m_flags & M_PKTHDR) != 0)
@@ -640,7 +635,7 @@ frag6_freef(struct ip6q *q6)
 			/* adjust pointer */
 			ip6 = mtod(m, struct ip6_hdr *);
 
-			/* restoure source and destination addresses */
+			/* restore source and destination addresses */
 			ip6->ip6_src = q6->ip6q_src;
 			ip6->ip6_dst = q6->ip6q_dst;
 
@@ -713,7 +708,7 @@ frag6_remque(struct ip6q *p6)
  * queue, discard it.
  */
 void
-frag6_slowtimo()
+frag6_slowtimo(void)
 {
 	struct ip6q *q6;
 	int s = splsoftnet();
@@ -766,7 +761,7 @@ frag6_slowtimo()
  * Drain off all datagram fragments.
  */
 void
-frag6_drain()
+frag6_drain(void)
 {
 
 	if (ip6q_lock_try() == 0)

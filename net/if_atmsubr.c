@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_atmsubr.c,v 1.28 2009/07/08 15:01:50 claudio Exp $       */
+/*      $OpenBSD: if_atmsubr.c,v 1.31 2010/05/07 13:33:16 claudio Exp $       */
 
 /*
  *
@@ -146,11 +146,11 @@ atm_output(ifp, m0, dst, rt0)
 		senderr(ENETDOWN);
 
 #ifdef DIAGNOSTIC
-	if (ifp->if_rdomain != m->m_pkthdr.rdomain) {
+	if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.rdomain)) {
 		printf("%s: trying to send packet on wrong domain. "
-		    "%d vs. %d, AF %d\n", ifp->if_xname, ifp->if_rdomain,
-		    m->m_pkthdr.rdomain, dst->sa_family);
-		senderr(ENETDOWN);
+		    "if %d vs. mbuf %d, AF %d\n", ifp->if_xname,
+		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.rdomain),
+		    dst->sa_family);
 	}
 #endif
 
@@ -160,7 +160,8 @@ atm_output(ifp, m0, dst, rt0)
 	if ((rt = rt0) != NULL) {
 
 		if ((rt->rt_flags & RTF_UP) == 0) { /* route went down! */
-			if ((rt0 = rt = RTALLOC1(dst, 0)) != NULL)
+			if ((rt0 = rt = rtalloc1(dst, RT_REPORT,
+			     m->m_pkthdr.rdomain)) != NULL)
 				rt->rt_refcnt--;
 			else 
 				senderr(EHOSTUNREACH);
@@ -171,7 +172,8 @@ atm_output(ifp, m0, dst, rt0)
 				goto lookup;
 			if (((rt = rt->rt_gwroute)->rt_flags & RTF_UP) == 0) {
 				rtfree(rt); rt = rt0;
-			lookup: rt->rt_gwroute = RTALLOC1(rt->rt_gateway, 0);
+			lookup: rt->rt_gwroute = rtalloc1(rt->rt_gateway,
+			    RT_REPORT, ifp->if_rdomain);
 				if ((rt = rt->rt_gwroute) == 0)
 					senderr(EHOSTUNREACH);
 			}
@@ -279,7 +281,7 @@ atm_input(ifp, ah, m, rxhand)
 		return;
 	}
 
-	/* mark incomming routing domain */
+	/* mark incoming routing domain */
 	m->m_pkthdr.rdomain = ifp->if_rdomain;
 
 	ifp->if_ibytes += m->m_pkthdr.len;

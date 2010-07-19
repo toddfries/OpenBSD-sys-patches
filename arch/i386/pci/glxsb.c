@@ -1,4 +1,4 @@
-/*	$OpenBSD: glxsb.c,v 1.16 2009/08/05 07:44:07 blambert Exp $	*/
+/*	$OpenBSD: glxsb.c,v 1.19 2010/07/02 02:40:15 blambert Exp $	*/
 
 /*
  * Copyright (c) 2006 Tom Cosgrove <tom@openbsd.org>
@@ -110,15 +110,15 @@
 #define SB_CTL_CBC		0x0020		/* CBC (0 is ECB) */
 
 						/* For SB_AES_INT */
-#define SB_AI_DISABLE_AES_A	0x0001		/* Disable AES A compl int */
-#define SB_AI_ENABLE_AES_A	0x0000		/* Enable AES A compl int */
-#define SB_AI_DISABLE_AES_B	0x0002		/* Disable AES B compl int */
-#define SB_AI_ENABLE_AES_B	0x0000		/* Enable AES B compl int */
-#define SB_AI_DISABLE_EEPROM	0x0004		/* Disable EEPROM op comp int */
-#define SB_AI_ENABLE_EEPROM	0x0000		/* Enable EEPROM op compl int */
-#define SB_AI_AES_A_COMPLETE	0x0100		/* AES A operation complete */
-#define SB_AI_AES_B_COMPLETE	0x0200		/* AES B operation complete */
-#define SB_AI_EEPROM_COMPLETE	0x0400		/* EEPROM operation complete */
+#define SB_AI_DISABLE_AES_A	0x00001		/* Disable AES A compl int */
+#define SB_AI_ENABLE_AES_A	0x00000		/* Enable AES A compl int */
+#define SB_AI_DISABLE_AES_B	0x00002		/* Disable AES B compl int */
+#define SB_AI_ENABLE_AES_B	0x00000		/* Enable AES B compl int */
+#define SB_AI_DISABLE_EEPROM	0x00004		/* Disable EEPROM op comp int */
+#define SB_AI_ENABLE_EEPROM	0x00000		/* Enable EEPROM op compl int */
+#define SB_AI_AES_A_COMPLETE	0x10000		/* AES A operation complete */
+#define SB_AI_AES_B_COMPLETE	0x20000		/* AES B operation complete */
+#define SB_AI_EEPROM_COMPLETE	0x40000		/* EEPROM operation complete */
 
 #define SB_RNS_TRNG_VALID	0x0001		/* in SB_RANDOM_NUM_STATUS */
 
@@ -411,13 +411,13 @@ glxsb_crypto_newsession(uint32_t *sidp, struct cryptoini *cri)
 			axf = &auth_hash_hmac_ripemd_160_96;
 			goto authcommon;
 		case CRYPTO_SHA2_256_HMAC:
-			axf = &auth_hash_hmac_sha2_256_96;
+			axf = &auth_hash_hmac_sha2_256_128;
 			goto authcommon;
 		case CRYPTO_SHA2_384_HMAC:
-			axf = &auth_hash_hmac_sha2_384_96;
+			axf = &auth_hash_hmac_sha2_384_192;
 			goto authcommon;
 		case CRYPTO_SHA2_512_HMAC:
-			axf = &auth_hash_hmac_sha2_512_96;
+			axf = &auth_hash_hmac_sha2_512_256;
 		authcommon:
 			swd = malloc(sizeof(struct swcr_data), M_CRYPTO_DATA,
 			    M_NOWAIT|M_ZERO);
@@ -447,7 +447,7 @@ glxsb_crypto_newsession(uint32_t *sidp, struct cryptoini *cri)
 			axf->Init(swd->sw_ictx);
 			axf->Update(swd->sw_ictx, c->cri_key, c->cri_klen / 8);
 			axf->Update(swd->sw_ictx, hmac_ipad_buffer,
-			    HMAC_BLOCK_LEN - (c->cri_klen / 8));
+			    axf->blocksize - (c->cri_klen / 8));
 
 			for (i = 0; i < c->cri_klen / 8; i++)
 				c->cri_key[i] ^= (HMAC_IPAD_VAL ^
@@ -456,7 +456,7 @@ glxsb_crypto_newsession(uint32_t *sidp, struct cryptoini *cri)
 			axf->Init(swd->sw_octx);
 			axf->Update(swd->sw_octx, c->cri_key, c->cri_klen / 8);
 			axf->Update(swd->sw_octx, hmac_opad_buffer,
-			    HMAC_BLOCK_LEN - (c->cri_klen / 8));
+			    axf->blocksize - (c->cri_klen / 8));
 
 			for (i = 0; i < c->cri_klen / 8; i++)
 				c->cri_key[i] ^= HMAC_OPAD_VAL;
@@ -653,7 +653,8 @@ glxsb_crypto_encdec(struct cryptop *crp, struct cryptodesc *crd,
 		if ((crd->crd_flags & CRD_F_IV_PRESENT) == 0) {
 			if (crp->crp_flags & CRYPTO_F_IMBUF)
 				m_copyback((struct mbuf *)crp->crp_buf,
-				    crd->crd_inject, sizeof(op_iv), op_iv);
+				    crd->crd_inject, sizeof(op_iv), op_iv,
+				    M_NOWAIT);
 			else if (crp->crp_flags & CRYPTO_F_IOV)
 				cuio_copyback((struct uio *)crp->crp_buf,
 				    crd->crd_inject, sizeof(op_iv), op_iv);
@@ -705,7 +706,7 @@ glxsb_crypto_encdec(struct cryptop *crp, struct cryptodesc *crd,
 
 		if (crp->crp_flags & CRYPTO_F_IMBUF)
 			m_copyback((struct mbuf *)crp->crp_buf,
-			    crd->crd_skip + offset, len, op_dst);
+			    crd->crd_skip + offset, len, op_dst, M_NOWAIT);
 		else if (crp->crp_flags & CRYPTO_F_IOV)
 			cuio_copyback((struct uio *)crp->crp_buf,
 			    crd->crd_skip + offset, len, op_dst);

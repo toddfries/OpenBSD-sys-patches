@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_var.h,v 1.91 2009/06/05 00:05:22 claudio Exp $	*/
+/*	$OpenBSD: tcp_var.h,v 1.95 2010/07/09 16:58:06 reyk Exp $	*/
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -274,6 +274,7 @@ struct syn_cache {
 	union syn_cache_sa sc_dst;
 	tcp_seq sc_irs;
 	tcp_seq sc_iss;
+	u_int sc_rtableid;
 	u_int sc_rxtcur;			/* current rxt timeout */
 	u_int sc_rxttot;			/* total time spend on queues */
 	u_short sc_rxtshift;			/* for computing backoff */
@@ -557,14 +558,14 @@ int	 tcp_freeq(struct tcpcb *);
 #if defined(INET6) && !defined(TCP6)
 void	 tcp6_ctlinput(int, struct sockaddr *, void *);
 #endif
-void	 *tcp_ctlinput(int, struct sockaddr *, void *);
+void	 *tcp_ctlinput(int, struct sockaddr *, u_int, void *);
 int	 tcp_ctloutput(int, struct socket *, int, int, struct mbuf **);
 struct tcpcb *
 	 tcp_disconnect(struct tcpcb *);
 struct tcpcb *
 	 tcp_drop(struct tcpcb *, int);
 int	 tcp_dooptions(struct tcpcb *, u_char *, int, struct tcphdr *,
-		struct mbuf *, int, struct tcp_opt_info *);
+		struct mbuf *, int, struct tcp_opt_info *, u_int);
 void	 tcp_init(void);
 #if defined(INET6) && !defined(TCP6)
 int	 tcp6_input(struct mbuf **, int *, int);
@@ -587,7 +588,7 @@ void	 tcp_pulloutofband(struct socket *, u_int, struct mbuf *, int);
 int	 tcp_reass(struct tcpcb *, struct tcphdr *, struct mbuf *, int *);
 void	 tcp_rscale(struct tcpcb *, u_long);
 void	 tcp_respond(struct tcpcb *, caddr_t, struct tcphdr *, tcp_seq,
-		tcp_seq, int);
+		tcp_seq, int, u_int);
 void	 tcp_setpersist(struct tcpcb *);
 void	 tcp_slowtimo(void);
 struct mbuf *
@@ -628,16 +629,16 @@ int	 syn_cache_add(struct sockaddr *, struct sockaddr *,
 		struct tcphdr *, unsigned int, struct socket *,
 		struct mbuf *, u_char *, int, struct tcp_opt_info *, tcp_seq *);
 void	 syn_cache_unreach(struct sockaddr *, struct sockaddr *,
-	   struct tcphdr *);
+	   struct tcphdr *, u_int);
 struct socket *syn_cache_get(struct sockaddr *, struct sockaddr *,
 		struct tcphdr *, unsigned int, unsigned int,
 		struct socket *so, struct mbuf *);
 void	 syn_cache_init(void);
 void	 syn_cache_insert(struct syn_cache *, struct tcpcb *);
 struct syn_cache *syn_cache_lookup(struct sockaddr *, struct sockaddr *,
-		struct syn_cache_head **);
+		struct syn_cache_head **, u_int);
 void	 syn_cache_reset(struct sockaddr *, struct sockaddr *,
-		struct tcphdr *);
+		struct tcphdr *, u_int);
 int	 syn_cache_respond(struct syn_cache *, struct mbuf *);
 void	 syn_cache_timer(void *);
 void	 syn_cache_cleanup(struct tcpcb *);

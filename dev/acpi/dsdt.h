@@ -1,4 +1,4 @@
-/* $OpenBSD: dsdt.h,v 1.44 2009/06/01 22:36:12 jordan Exp $ */
+/* $OpenBSD: dsdt.h,v 1.49 2010/07/08 20:56:31 jordan Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -18,18 +18,11 @@
 #ifndef __DEV_ACPI_DSDT_H__
 #define __DEV_ACPI_DSDT_H__
 
-struct aml_vallist {
-	struct aml_value *obj;
-	int nobj;
-	struct aml_vallist *next;
-};
-
 struct aml_scope {
 	struct acpi_softc	*sc;
 	uint8_t			*pos;
 	uint8_t			*end;
 	struct aml_node		*node;
-	struct aml_vallist	*tmpvals;
 	struct aml_scope	*parent;
 	struct aml_value	*locals;
 	struct aml_value	*args;
@@ -220,7 +213,7 @@ union acpi_resource {
 			    3+(x)->hdr.length : 1+((x)->hdr.typecode & 0x7))
 
 int			aml_print_resource(union acpi_resource *, void *);
-int			aml_parse_resource(int, uint8_t *,
+int			aml_parse_resource(struct aml_value *,
 			    int (*)(union acpi_resource *, void *), void *);
 
 #define ACPI_E_NOERROR   0x00
@@ -275,5 +268,9 @@ union amlpci_t
 	};
 };
 int aml_rdpciaddr(struct aml_node *pcidev, union amlpci_t *);
+
+void acpi_getdevlist(struct acpi_devlist_head *, struct aml_node *,
+	struct aml_value *, int);
+void acpi_freedevlist(struct acpi_devlist_head *);
 
 #endif /* __DEV_ACPI_DSDT_H__ */

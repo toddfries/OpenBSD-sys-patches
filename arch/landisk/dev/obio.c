@@ -1,4 +1,4 @@
-/*	$OpenBSD: obio.c,v 1.6 2008/06/26 05:42:11 ray Exp $	*/
+/*	$OpenBSD: obio.c,v 1.8 2010/04/04 12:49:30 miod Exp $	*/
 /*	$NetBSD: obio.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-
@@ -219,6 +219,7 @@ int obio_iomem_alloc(void *v, bus_addr_t rstart, bus_addr_t rend,
     bus_size_t size, bus_size_t alignment, bus_size_t boundary, int flags,
     bus_addr_t *bpap, bus_space_handle_t *bshp);
 void obio_iomem_free(void *v, bus_space_handle_t bsh, bus_size_t size);
+void *obio_iomem_vaddr(void *v, bus_space_handle_t bsh);
 
 int obio_iomem_add_mapping(bus_addr_t, bus_size_t, int,
     bus_space_handle_t *);
@@ -355,6 +356,12 @@ obio_iomem_free(void *v, bus_space_handle_t bsh, bus_size_t size)
 	obio_iomem_unmap(v, bsh, size);
 }
 
+void *
+obio_iomem_vaddr(void *v, bus_space_handle_t bsh)
+{
+	return ((void *)bsh);
+}
+
 /*
  * on-board I/O bus space read/write
  */
@@ -419,11 +426,11 @@ void obio_iomem_set_region_2(void *v, bus_space_handle_t bsh,
     bus_size_t offset, uint16_t val, bus_size_t count);
 void obio_iomem_set_region_4(void *v, bus_space_handle_t bsh,
     bus_size_t offset, uint32_t val, bus_size_t count);
-void obio_iomem_copy_region_1(void *v, bus_space_handle_t h1, bus_size_t o1,
+void obio_iomem_copy_1(void *v, bus_space_handle_t h1, bus_size_t o1,
     bus_space_handle_t h2, bus_size_t o2, bus_size_t count);
-void obio_iomem_copy_region_2(void *v, bus_space_handle_t h1, bus_size_t o1,
+void obio_iomem_copy_2(void *v, bus_space_handle_t h1, bus_size_t o1,
     bus_space_handle_t h2, bus_size_t o2, bus_size_t count);
-void obio_iomem_copy_region_4(void *v, bus_space_handle_t h1, bus_size_t o1,
+void obio_iomem_copy_4(void *v, bus_space_handle_t h1, bus_size_t o1,
     bus_space_handle_t h2, bus_size_t o2, bus_size_t count);
 
 struct _bus_space obio_bus_io =
@@ -437,6 +444,8 @@ struct _bus_space obio_bus_io =
 	.bs_alloc = obio_iomem_alloc,
 	.bs_free = obio_iomem_free,
 
+	.bs_vaddr = obio_iomem_vaddr,
+
 	.bs_r_1 = obio_iomem_read_1,
 	.bs_r_2 = obio_iomem_read_2,
 	.bs_r_4 = obio_iomem_read_4,
@@ -481,9 +490,9 @@ struct _bus_space obio_bus_io =
 	.bs_sr_2 = obio_iomem_set_region_2,
 	.bs_sr_4 = obio_iomem_set_region_4,
 
-	.bs_c_1 = obio_iomem_copy_region_1,
-	.bs_c_2 = obio_iomem_copy_region_2,
-	.bs_c_4 = obio_iomem_copy_region_4,
+	.bs_c_1 = obio_iomem_copy_1,
+	.bs_c_2 = obio_iomem_copy_2,
+	.bs_c_4 = obio_iomem_copy_4,
 };
 
 struct _bus_space obio_bus_mem =
@@ -497,6 +506,8 @@ struct _bus_space obio_bus_mem =
 	.bs_alloc = obio_iomem_alloc,
 	.bs_free = obio_iomem_free,
 
+	.bs_vaddr = obio_iomem_vaddr,
+
 	.bs_r_1 = obio_iomem_read_1,
 	.bs_r_2 = obio_iomem_read_2,
 	.bs_r_4 = obio_iomem_read_4,
@@ -541,9 +552,9 @@ struct _bus_space obio_bus_mem =
 	.bs_sr_2 = obio_iomem_set_region_2,
 	.bs_sr_4 = obio_iomem_set_region_4,
 
-	.bs_c_1 = obio_iomem_copy_region_1,
-	.bs_c_2 = obio_iomem_copy_region_2,
-	.bs_c_4 = obio_iomem_copy_region_4,
+	.bs_c_1 = obio_iomem_copy_1,
+	.bs_c_2 = obio_iomem_copy_2,
+	.bs_c_4 = obio_iomem_copy_4,
 };
 
 /* read */
@@ -890,7 +901,7 @@ obio_iomem_set_region_4(void *v, bus_space_handle_t bsh,
 }
 
 void
-obio_iomem_copy_region_1(void *v, bus_space_handle_t h1, bus_size_t o1,
+obio_iomem_copy_1(void *v, bus_space_handle_t h1, bus_size_t o1,
     bus_space_handle_t h2, bus_size_t o2, bus_size_t count)
 {
 	volatile uint8_t *addr1 = (void *)(h1 + o1);
@@ -910,7 +921,7 @@ obio_iomem_copy_region_1(void *v, bus_space_handle_t h1, bus_size_t o1,
 }
 
 void
-obio_iomem_copy_region_2(void *v, bus_space_handle_t h1, bus_size_t o1,
+obio_iomem_copy_2(void *v, bus_space_handle_t h1, bus_size_t o1,
     bus_space_handle_t h2, bus_size_t o2, bus_size_t count)
 {
 	volatile uint16_t *addr1 = (void *)(h1 + o1);
@@ -930,7 +941,7 @@ obio_iomem_copy_region_2(void *v, bus_space_handle_t h1, bus_size_t o1,
 }
 
 void
-obio_iomem_copy_region_4(void *v, bus_space_handle_t h1, bus_size_t o1,
+obio_iomem_copy_4(void *v, bus_space_handle_t h1, bus_size_t o1,
     bus_space_handle_t h2, bus_size_t o2, bus_size_t count)
 {
 	volatile uint32_t *addr1 = (void *)(h1 + o1);

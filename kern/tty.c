@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty.c,v 1.80 2009/07/19 08:16:06 blambert Exp $	*/
+/*	$OpenBSD: tty.c,v 1.87 2010/07/02 17:27:01 nicm Exp $	*/
 /*	$NetBSD: tty.c,v 1.68.4.2 1996/06/06 16:04:52 thorpej Exp $	*/
 
 /*-
@@ -172,7 +172,7 @@ int64_t tk_cancc, tk_nin, tk_nout, tk_rawcc;
  * Initial open of tty, or (re)entry to standard tty line discipline.
  */
 int
-ttyopen(dev_t device, struct tty *tp)
+ttyopen(dev_t device, struct tty *tp, struct proc *p)
 {
 	int s;
 
@@ -526,7 +526,7 @@ parmrk:				(void)putc(0377 | TTY_QUOTE, &tp->t_rawq);
 	/*
 	 * Check for input buffer overflow
 	 */
-	if (tp->t_rawq.c_cc + tp->t_canq.c_cc >= TTYHOG) {
+	if (tp->t_rawq.c_cc + tp->t_canq.c_cc >= TTYHOG(tp)) {
 		if (ISSET(iflag, IMAXBEL)) {
 			if (tp->t_outq.c_cc < tp->t_hiwat)
 				(void)ttyoutput(CTRL('g'), tp);
@@ -876,6 +876,13 @@ ttioctl(struct tty *tp, u_long cmd, caddr_t data, int flag, struct proc *p)
 		}
 		if (!ISSET(t->c_cflag, CIGNORE)) {
 			/*
+			 * Some minor validation is necessary.
+			 */
+			if (t->c_ispeed < 0 || t->c_ospeed < 0) {
+				splx(s);
+				return (EINVAL);
+			}
+			/*
 			 * Set device hardware.
 			 */
 			if (tp->t_param && (error = (*tp->t_param)(tp, t))) {
@@ -938,10 +945,10 @@ ttioctl(struct tty *tp, u_long cmd, caddr_t data, int flag, struct proc *p)
 			return (ENXIO);
 		if (t != tp->t_line) {
 			s = spltty();
-			(*linesw[tp->t_line].l_close)(tp, flag);
-			error = (*linesw[t].l_open)(device, tp);
+			(*linesw[tp->t_line].l_close)(tp, flag, p);
+			error = (*linesw[t].l_open)(device, tp, p);
 			if (error) {
-				(void)(*linesw[tp->t_line].l_open)(device, tp);
+				(*linesw[tp->t_line].l_open)(device, tp, p);
 				splx(s);
 				return (error);
 			}
@@ -1262,7 +1269,7 @@ ttyblock(struct tty *tp)
 	int total;
 
 	total = tp->t_rawq.c_cc + tp->t_canq.c_cc;
-	if (tp->t_rawq.c_cc > TTYHOG) {
+	if (tp->t_rawq.c_cc > TTYHOG(tp)) {
 		ttyflush(tp, FREAD | FWRITE);
 		CLR(tp->t_state, TS_TBLOCK);
 	}
@@ -1270,7 +1277,7 @@ ttyblock(struct tty *tp)
 	 * Block further input iff: current input > threshold
 	 * AND input is available to user program.
 	 */
-	if ((total >= TTYHOG / 2 &&
+	if ((total >= TTYHOG(tp) / 2 &&
 	     !ISSET(tp->t_state, TS_TBLOCK) &&
 	     !ISSET(tp->t_lflag, ICANON)) || tp->t_canq.c_cc > 0) {
 		if (ISSET(tp->t_iflag, IXOFF) &&
@@ -1318,7 +1325,7 @@ ttstart(struct tty *tp)
  * "close" a line discipline
  */
 int
-ttylclose(struct tty *tp, int flag)
+ttylclose(struct tty *tp, int flag, struct proc *p)
 {
 
 	if (flag & FNONBLOCK)
@@ -1599,7 +1606,7 @@ read:
 	 * the input queue has gone down.
 	 */
 	s = spltty();
-	if (tp->t_rawq.c_cc < TTYHOG/5)
+	if (tp->t_rawq.c_cc < TTYHOG(tp)/5)
 		ttyunblock(tp);
 	splx(s);
 
@@ -2003,6 +2010,22 @@ ttyecho(int c, struct tty *tp)
 }
 
 /*
+ * Wakeup any writers if necessary.
+ */
+void
+ttwakeupwr(struct tty *tp)
+{
+
+	if (tp->t_outq.c_cc <= tp->t_lowat) {
+		if (ISSET(tp->t_state, TS_ASLEEP)) {
+			CLR(tp->t_state, TS_ASLEEP);
+			wakeup(&tp->t_outq);
+		}
+		selwakeup(&tp->t_wsel);
+	}
+}
+
+/*
  * Wake up any readers on a tty.
  */
 void
@@ -2013,7 +2036,6 @@ ttwakeup(struct tty *tp)
 	if (ISSET(tp->t_state, TS_ASYNC))
 		pgsignal(tp->t_pgrp, SIGIO, 1);
 	wakeup((caddr_t)&tp->t_rawq);
-	KNOTE(&tp->t_rsel.si_note, 0);
 }
 
 /*
@@ -2244,17 +2266,20 @@ tty_init(void)
  * tty list.
  */
 struct tty *
-ttymalloc(void)
+ttymalloc(int baud)
 {
 	struct tty *tp;
 
 	tp = malloc(sizeof(struct tty), M_TTYS, M_WAITOK|M_ZERO);
 
-	/* XXX: default to 1024 chars for now */
-	clalloc(&tp->t_rawq, 1024, 1);
-	clalloc(&tp->t_canq, 1024, 1);
+	if (baud <= 115200)
+		tp->t_qlen = 1024;
+	else
+		tp->t_qlen = 8192;
+	clalloc(&tp->t_rawq, tp->t_qlen, 1);
+	clalloc(&tp->t_canq, tp->t_qlen, 1);
 	/* output queue doesn't need quoting */
-	clalloc(&tp->t_outq, 1024, 0);
+	clalloc(&tp->t_outq, tp->t_qlen, 0);
 
 	TAILQ_INSERT_TAIL(&ttylist, tp, tty_link);
 	++tty_count;

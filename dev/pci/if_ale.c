@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ale.c,v 1.7 2009/08/05 03:19:48 kevlo Exp $	*/
+/*	$OpenBSD: if_ale.c,v 1.13 2010/05/19 14:39:07 oga Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -34,7 +34,6 @@
 #include "vlan.h"
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/endian.h>
 #include <sys/systm.h>
 #include <sys/types.h>
@@ -113,7 +112,7 @@ void	ale_get_macaddr(struct ale_softc *);
 void	ale_mac_config(struct ale_softc *);
 void	ale_phy_reset(struct ale_softc *);
 void	ale_reset(struct ale_softc *);
-void	ale_rxfilter(struct ale_softc *);
+void	ale_iff(struct ale_softc *);
 void	ale_rxvlan(struct ale_softc *);
 void	ale_stats_clear(struct ale_softc *);
 void	ale_stats_update(struct ale_softc *);
@@ -623,7 +622,7 @@ ale_dma_alloc(struct ale_softc *sc)
 	/* Allocate DMA'able memory for TX ring */
 	error = bus_dmamem_alloc(sc->sc_dmat, ALE_TX_RING_SZ, 
 	    ETHER_ALIGN, 0, &sc->ale_cdata.ale_tx_ring_seg, 1,
-	    &nsegs, BUS_DMA_WAITOK);
+	    &nsegs, BUS_DMA_WAITOK | BUS_DMA_ZERO);
 	if (error) {
 		printf("%s: could not allocate DMA'able memory for Tx ring.\n",
 		    sc->sc_dev.dv_xname);
@@ -635,8 +634,6 @@ ale_dma_alloc(struct ale_softc *sc)
 	    BUS_DMA_NOWAIT);
 	if (error)
 		return (ENOBUFS);
-
-	bzero(sc->ale_cdata.ale_tx_ring, ALE_TX_RING_SZ);
 
 	/* Load the DMA map for Tx ring. */
 	error = bus_dmamap_load(sc->sc_dmat, sc->ale_cdata.ale_tx_ring_map, 
@@ -664,7 +661,7 @@ ale_dma_alloc(struct ale_softc *sc)
 		/* Allocate DMA'able memory for RX pages */
 		error = bus_dmamem_alloc(sc->sc_dmat, sc->ale_pagesize,
 		    ETHER_ALIGN, 0, &sc->ale_cdata.ale_rx_page[i].page_seg,
-		    1, &nsegs, BUS_DMA_WAITOK);
+		    1, &nsegs, BUS_DMA_WAITOK | BUS_DMA_ZERO);
 		if (error) {
 			printf("%s: could not allocate DMA'able memory for "
 			    "Rx ring.\n", sc->sc_dev.dv_xname);
@@ -677,8 +674,6 @@ ale_dma_alloc(struct ale_softc *sc)
 		    BUS_DMA_NOWAIT);
 		if (error)
 			return (ENOBUFS);
-
-		bzero(sc->ale_cdata.ale_rx_page[i].page_addr, sc->ale_pagesize);
 
 		/* Load the DMA map for Rx pages. */
 		error = bus_dmamap_load(sc->sc_dmat,
@@ -706,7 +701,8 @@ ale_dma_alloc(struct ale_softc *sc)
 
 	/* Allocate DMA'able memory for Tx CMB. */
 	error = bus_dmamem_alloc(sc->sc_dmat, ALE_TX_CMB_SZ, ETHER_ALIGN, 0,
-	    &sc->ale_cdata.ale_tx_cmb_seg, 1, &nsegs, BUS_DMA_WAITOK);
+	    &sc->ale_cdata.ale_tx_cmb_seg, 1, &nsegs,
+	    BUS_DMA_WAITOK |BUS_DMA_ZERO);
 
 	if (error) {
 		printf("%s: could not allocate DMA'able memory for Tx CMB.\n",
@@ -719,8 +715,6 @@ ale_dma_alloc(struct ale_softc *sc)
 	    BUS_DMA_NOWAIT);
 	if (error) 
 		return (ENOBUFS);
-
-	bzero(sc->ale_cdata.ale_tx_cmb, ALE_TX_CMB_SZ);
 
 	/* Load the DMA map for Tx CMB. */
 	error = bus_dmamap_load(sc->sc_dmat, sc->ale_cdata.ale_tx_cmb_map, 
@@ -749,7 +743,7 @@ ale_dma_alloc(struct ale_softc *sc)
 		/* Allocate DMA'able memory for Rx CMB */
 		error = bus_dmamem_alloc(sc->sc_dmat, ALE_RX_CMB_SZ,
 		    ETHER_ALIGN, 0, &sc->ale_cdata.ale_rx_page[i].cmb_seg, 1,
-		    &nsegs, BUS_DMA_WAITOK);
+		    &nsegs, BUS_DMA_WAITOK | BUS_DMA_ZERO);
 		if (error) {
 			printf("%s: could not allocate DMA'able memory for "
 			    "Rx CMB\n", sc->sc_dev.dv_xname);
@@ -762,8 +756,6 @@ ale_dma_alloc(struct ale_softc *sc)
 		    BUS_DMA_NOWAIT);
 		if (error)
 			return (ENOBUFS);
-
-		bzero(sc->ale_cdata.ale_rx_page[i].cmb_addr, ALE_RX_CMB_SZ);
 
 		/* Load the DMA map for Rx CMB */
 		error = bus_dmamap_load(sc->sc_dmat,
@@ -889,43 +881,18 @@ ale_encap(struct ale_softc *sc, struct mbuf **m_head)
 		error = EFBIG;
 	}
 	if (error == EFBIG) {
-		error = 0;
-
-		MGETHDR(m, M_DONTWAIT, MT_DATA);
-		if (m == NULL) {
+		if (m_defrag(*m_head, M_DONTWAIT)) {
 			printf("%s: can't defrag TX mbuf\n",
 			    sc->sc_dev.dv_xname);
 			m_freem(*m_head);
 			*m_head = NULL;
 			return (ENOBUFS);
 		}
-
-		M_DUP_PKTHDR(m, *m_head);
-		if ((*m_head)->m_pkthdr.len > MHLEN) {
-			MCLGET(m, M_DONTWAIT);
-			if (!(m->m_flags & M_EXT)) {
-				m_freem(*m_head);
-				m_freem(m);
-				*m_head = NULL;
-				return (ENOBUFS);
-			}
-		}
-		m_copydata(*m_head, 0, (*m_head)->m_pkthdr.len,
-		    mtod(m, caddr_t));
-		m_freem(*m_head);
-		m->m_len = m->m_pkthdr.len;
-		*m_head = m;
-
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, map, *m_head,
 		    BUS_DMA_NOWAIT);
-
 		if (error != 0) {
 			printf("%s: could not load defragged TX mbuf\n",
 			    sc->sc_dev.dv_xname);
-			if (!error) {
-				bus_dmamap_unload(sc->sc_dmat, map);
-				error = EFBIG;
-			}
 			m_freem(*m_head);
 			*m_head = NULL;
 			return (error);
@@ -1142,7 +1109,7 @@ ale_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING)
-			ale_rxfilter(sc);
+			ale_iff(sc);
 		error = 0;
 	}
 
@@ -1860,7 +1827,8 @@ ale_init(struct ifnet *ifp)
 	CSR_WRITE_4(sc, ALE_MAC_CFG, reg);
 
 	/* Set up the receive filter. */
-	ale_rxfilter(sc);
+	ale_iff(sc);
+
 	ale_rxvlan(sc);
 
 	/* Acknowledge all pending interrupts and clear it. */
@@ -2018,7 +1986,7 @@ ale_rxvlan(struct ale_softc *sc)
 }
 
 void
-ale_rxfilter(struct ale_softc *sc)
+ale_iff(struct ale_softc *sc)
 {
 	struct arpcom *ac = &sc->sc_arpcom;
 	struct ifnet *ifp = &ac->ac_if;
@@ -2030,15 +1998,15 @@ ale_rxfilter(struct ale_softc *sc)
 
 	rxcfg = CSR_READ_4(sc, ALE_MAC_CFG);
 	rxcfg &= ~(MAC_CFG_ALLMULTI | MAC_CFG_BCAST | MAC_CFG_PROMISC);
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
 	/*
 	 * Always accept broadcast frames.
 	 */
 	rxcfg |= MAC_CFG_BCAST;
 
-	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC || 
-	    ac->ac_multirangecnt > 0) {
-allmulti:
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
 		if (ifp->if_flags & IFF_PROMISC)
 			rxcfg |= MAC_CFG_PROMISC;
 		else
@@ -2050,14 +2018,10 @@ allmulti:
 
 		ETHER_FIRST_MULTI(step, ac, enm);
 		while (enm != NULL) {
-			if (bcmp(enm->enm_addrlo, enm->enm_addrhi,
-			    ETHER_ADDR_LEN)) {
-			    	ifp->if_flags |= IFF_ALLMULTI;
-				goto allmulti;
-			}
-			crc = ether_crc32_le(enm->enm_addrlo, ETHER_ADDR_LEN);
+			crc = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN);
 
 			mchash[crc >> 31] |= 1 << ((crc >> 26) & 0x1f);
+
 			ETHER_NEXT_MULTI(step, enm);
 		}
 	}

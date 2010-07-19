@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.11 2009/08/02 16:28:39 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.16 2010/07/02 19:57:14 tedu Exp $	*/
 /*	OpenBSD: machdep.c,v 1.105 2005/04/11 15:13:01 deraadt Exp 	*/
 
 /*
@@ -58,14 +58,11 @@
 #include <sys/mount.h>
 #include <sys/msgbuf.h>
 #include <sys/syscallargs.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 #include <sys/exec.h>
 #include <sys/sysctl.h>
 #include <sys/extent.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <dev/rndvar.h>
 
@@ -83,8 +80,6 @@
 #include <sparc/sparc/asm.h>
 #include <sparc/sparc/cache.h>
 #include <sparc/sparc/cpuvar.h>
-
-#include <uvm/uvm.h>
 
 #include "auxreg.h"
 
@@ -125,7 +120,6 @@ int   safepri = 0;
 vaddr_t dvma_base, dvma_end;
 struct extent *dvmamap_extent;
 
-caddr_t allocsys(caddr_t);
 void	dumpsys(void);
 static int kap_maskcheck(void);
 
@@ -135,8 +129,6 @@ static int kap_maskcheck(void);
 void
 cpu_startup()
 {
-	caddr_t v;
-	int sz;
 #ifdef DEBUG
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
@@ -170,25 +162,6 @@ cpu_startup()
 	/*identifycpu();*/
 	printf("real mem = %d (%dMB)\n", ptoa(physmem),
 	    ptoa(physmem) / 1024 / 1024);
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	sz = (int)allocsys((caddr_t)0);
-
-	if ((v = (caddr_t)uvm_km_alloc(kernel_map, round_page(sz))) == 0)
-		panic("startup: no room for tables");
-
-	if (allocsys(v) - v != sz)
-		panic("startup: table size inconsistency");
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -235,32 +208,6 @@ cpu_startup()
 
 	/* Early interrupt handlers initialization */
 	intr_init();
-}
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * You call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(v)
-	caddr_t v;
-{
-
-#define	valloc(name, type, num) \
-	    v = (caddr_t)(((name) = (type *)v) + (num))
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return (v);
 }
 
 /*
@@ -349,11 +296,7 @@ int sigpid = 0;
 struct sigframe {
 	int	sf_signo;		/* signal number */
 	siginfo_t *sf_sip;		/* points to siginfo_t */
-#ifdef COMPAT_SUNOS
-	struct	sigcontext *sf_scp;	/* points to user addr of sigcontext */
-#else
 	int	sf_xxx;			/* placeholder */
-#endif
 	caddr_t	sf_addr;		/* SunOS compat */
 	struct	sigcontext sf_sc;	/* actual sigcontext */
 	siginfo_t sf_si;
@@ -436,9 +379,6 @@ sendsig(catcher, sig, mask, code, type, val)
 	struct trapframe *tf;
 	int caddr, oonstack, oldsp, newsp;
 	struct sigframe sf;
-#ifdef COMPAT_SUNOS
-	extern struct emul emul_sunos;
-#endif
 
 	tf = p->p_md.md_tf;
 	oldsp = tf->tf_out[6];
@@ -468,13 +408,6 @@ sendsig(catcher, sig, mask, code, type, val)
 	 */
 	sf.sf_signo = sig;
 	sf.sf_sip = NULL;
-#ifdef COMPAT_SUNOS
-	if (p->p_emul == &emul_sunos) {
-		sf.sf_sip = (void *)code;	/* SunOS has "int code" */
-		sf.sf_scp = &fp->sf_sc;
-		sf.sf_addr = val.sival_ptr;
-	}
-#endif
 
 	/*
 	 * Build the signal context to be used by sigreturn.
@@ -528,15 +461,8 @@ sendsig(catcher, sig, mask, code, type, val)
 	 * Arrange to continue execution at the code copied out in exec().
 	 * It needs the function to call in %g1, and a new stack pointer.
 	 */
-#ifdef COMPAT_SUNOS
-	if (psp->ps_usertramp & sigmask(sig)) {
-		caddr = (int)catcher;	/* user does his own trampolining */
-	} else
-#endif
-	{
-		caddr = p->p_sigcode;
-		tf->tf_global[1] = (int)catcher;
-	}
+	caddr = p->p_sigcode;
+	tf->tf_global[1] = (int)catcher;
 	tf->tf_pc = caddr;
 	tf->tf_npc = caddr + 4;
 	tf->tf_out[6] = newsp;
@@ -738,21 +664,6 @@ mapdev(phys, virt, offset, size)
 	pmap_update(pmap_kernel());
 	return (ret);
 }
-
-#ifdef COMPAT_SUNOS
-int
-cpu_exec_aout_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-	int error = ENOEXEC;
-
-	extern int sunos_exec_aout_makecmds(struct proc *, struct exec_package *);
-	if ((error = sunos_exec_aout_makecmds(p, epp)) == 0)
-		return 0;
-	return error;
-}
-#endif
 
 /*
  * Soft interrupt handling

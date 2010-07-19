@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.94 2009/07/22 21:32:50 miod Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.98 2010/05/19 15:27:35 oga Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -110,11 +110,10 @@ struct cfattach sis_ca = {
 };
 
 struct cfdriver sis_cd = {
-	0, "sis", DV_IFNET
+	NULL, "sis", DV_IFNET
 };
 
 int sis_intr(void *);
-void sis_shutdown(void *);
 void sis_fill_rx_ring(struct sis_softc *);
 int sis_newbuf(struct sis_softc *, struct sis_desc *);
 int sis_encap(struct sis_softc *, struct mbuf *, u_int32_t *);
@@ -1063,7 +1062,7 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 
 	if (bus_dmamem_alloc(sc->sc_dmat, sizeof(struct sis_list_data),
 	    PAGE_SIZE, 0, sc->sc_listseg, 1, &sc->sc_listnseg,
-	    BUS_DMA_NOWAIT) != 0) {
+	    BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0) {
 		printf(": can't alloc list mem\n");
 		goto fail_2;
 	}
@@ -1085,7 +1084,6 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 		goto fail_2;
 	}
 	sc->sis_ldata = (struct sis_list_data *)sc->sc_listkva;
-	bzero(sc->sis_ldata, sizeof(struct sis_list_data));
 
 	for (i = 0; i < SIS_RX_LIST_CNT; i++) {
 		if (bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES, 0,
@@ -1144,8 +1142,6 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	shutdownhook_establish(sis_shutdown, sc);
 	return;
 
 fail_2:
@@ -1232,15 +1228,9 @@ sis_newbuf(struct sis_softc *sc, struct sis_desc *c)
 	if (c == NULL)
 		return (EINVAL);
 
-	MGETHDR(m_new, M_DONTWAIT, MT_DATA);
-	if (m_new == NULL)
+	m_new = MCLGETI(NULL, M_DONTWAIT, &sc->arpcom.ac_if, MCLBYTES);
+	if (!m_new)
 		return (ENOBUFS);
-
-	MCLGETI(m_new, M_DONTWAIT, &sc->arpcom.ac_if, MCLBYTES);
-	if (!(m_new->m_flags & M_EXT)) {
-		m_free(m_new);
-		return (ENOBUFS);
-	}
 
 	m_new->m_len = m_new->m_pkthdr.len = MCLBYTES;
 
@@ -1995,16 +1985,4 @@ sis_stop(struct sis_softc *sc)
 		bzero((char *)&sc->sis_ldata->sis_tx_list[i],
 		    sizeof(struct sis_desc) - sizeof(bus_dmamap_t));
 	}
-}
-
-/*
- * Stop all chip I/O so that the kernel's probe routines don't
- * get confused by errant DMAs when rebooting.
- */
-void
-sis_shutdown(void *v)
-{
-	struct sis_softc	*sc = (struct sis_softc *)v;
-
-	sis_stop(sc);
 }

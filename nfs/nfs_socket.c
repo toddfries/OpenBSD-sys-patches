@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_socket.c,v 1.93 2009/08/04 17:12:39 thib Exp $	*/
+/*	$OpenBSD: nfs_socket.c,v 1.98 2010/07/05 16:32:07 deraadt Exp $	*/
 /*	$NetBSD: nfs_socket.c,v 1.27 1996/04/15 20:20:00 thorpej Exp $	*/
 
 /*
@@ -75,8 +75,6 @@ extern u_int32_t nfs_prog;
 extern struct nfsstats nfsstats;
 extern int nfsv3_procid[NFS_NPROCS];
 extern int nfs_ticks;
-
-struct nfsreqhead nfs_reqq;
 
 extern struct pool nfsrv_descript_pl;
 
@@ -224,9 +222,7 @@ nfs_estimate_rto(struct nfsmount *nmp, u_int32_t procnum)
  * We do not free the sockaddr if error.
  */
 int
-nfs_connect(nmp, rep)
-	struct nfsmount *nmp;
-	struct nfsreq *rep;
+nfs_connect(struct nfsmount *nmp, struct nfsreq *rep)
 {
 	struct socket *so;
 	int s, error, rcvreserve, sndreserve;
@@ -384,8 +380,7 @@ bad:
  * nb: Must be called with the nfs_sndlock() set on the mount point.
  */
 int
-nfs_reconnect(rep)
-	struct nfsreq *rep;
+nfs_reconnect(struct nfsreq *rep)
 {
 	struct nfsreq *rp;
 	struct nfsmount *nmp = rep->r_nmp;
@@ -403,11 +398,9 @@ nfs_reconnect(rep)
 	 * on old socket.
 	 */
 	s = splsoftnet();
-	TAILQ_FOREACH(rp, &nfs_reqq, r_chain) {
-		if (rp->r_nmp == nmp) {
-			rp->r_flags |= R_MUSTRESEND;
-			rp->r_rexmit = 0;
-		}
+	TAILQ_FOREACH(rp, &nmp->nm_reqsq, r_chain) {
+		rp->r_flags |= R_MUSTRESEND;
+		rp->r_rexmit = 0;
 	}
 	splx(s);
 	return (0);
@@ -417,8 +410,7 @@ nfs_reconnect(rep)
  * NFS disconnect. Clean up and unlink.
  */
 void
-nfs_disconnect(nmp)
-	struct nfsmount *nmp;
+nfs_disconnect(struct nfsmount *nmp)
 {
 	struct socket *so;
 
@@ -444,11 +436,8 @@ nfs_disconnect(nmp)
  * - do any cleanup required by recoverable socket errors (???)
  */
 int
-nfs_send(so, nam, top, rep)
-	struct socket *so;
-	struct mbuf *nam;
-	struct mbuf *top;
-	struct nfsreq *rep;
+nfs_send(struct socket *so, struct mbuf *nam, struct mbuf *top,
+    struct nfsreq *rep)
 {
 	struct mbuf *sendnam;
 	int error, soflags, flags;
@@ -509,10 +498,7 @@ nfs_send(so, nam, top, rep)
  * we have read any of it, even if the system call has been interrupted.
  */
 int
-nfs_receive(rep, aname, mp)
-	struct nfsreq *rep;
-	struct mbuf **aname;
-	struct mbuf **mp;
+nfs_receive(struct nfsreq *rep, struct mbuf **aname, struct mbuf **mp)
 {
 	struct socket *so;
 	struct uio auio;
@@ -734,8 +720,7 @@ errout:
  * with outstanding requests using the xid, until ours is found.
  */
 int
-nfs_reply(myrep)
-	struct nfsreq *myrep;
+nfs_reply(struct nfsreq *myrep)
 {
 	struct nfsreq *rep;
 	struct nfsmount *nmp = myrep->r_nmp;
@@ -798,7 +783,7 @@ nfsmout:
 		 * Iff no match, just drop the datagram
 		 */
 		s = splsoftnet();
-		TAILQ_FOREACH(rep, &nfs_reqq, r_chain) {
+		TAILQ_FOREACH(rep, &nmp->nm_reqsq, r_chain) {
 			if (rep->r_mrep == NULL && rxid == rep->r_xid) {
 				/* Found it.. */
 				rep->r_mrep = info.nmi_mrep;
@@ -919,7 +904,9 @@ tryagain:
 	 * to put it LAST so timer finds oldest requests first.
 	 */
 	s = splsoftnet();
-	TAILQ_INSERT_TAIL(&nfs_reqq, rep, r_chain);
+	if (TAILQ_EMPTY(&nmp->nm_reqsq))
+		timeout_add(&nmp->nm_rtimeout, nfs_ticks);
+	TAILQ_INSERT_TAIL(&nmp->nm_reqsq, rep, r_chain);
 
 	/*
 	 * If backing off another request or avoiding congestion, don't
@@ -958,7 +945,9 @@ tryagain:
 	 * RPC done, unlink the request.
 	 */
 	s = splsoftnet();
-	TAILQ_REMOVE(&nfs_reqq, rep, r_chain);
+	TAILQ_REMOVE(&nmp->nm_reqsq, rep, r_chain);
+	if (TAILQ_EMPTY(&nmp->nm_reqsq))
+		timeout_del(&nmp->nm_rtimeout);
 	splx(s);
 
 	/*
@@ -1054,13 +1043,8 @@ nfsmout1:
  * siz arg. is used to decide if adding a cluster is worthwhile
  */
 int
-nfs_rephead(siz, nd, slp, err, mrq, mbp)
-	int siz;
-	struct nfsrv_descript *nd;
-	struct nfssvc_sock *slp;
-	int err;
-	struct mbuf **mrq;
-	struct mbuf **mbp;
+nfs_rephead(int siz, struct nfsrv_descript *nd, struct nfssvc_sock *slp,
+    int err, struct mbuf **mrq, struct mbuf **mbp)
 {
 	u_int32_t *tl;
 	struct mbuf *mreq;
@@ -1141,24 +1125,16 @@ nfs_rephead(siz, nd, slp, err, mrq, mbp)
  * Scan the nfsreq list and retranmit any requests that have timed out.
  */
 void
-nfs_timer(arg)
-	void *arg;
+nfs_timer(void *arg)
 {
-	struct timeout *to = (struct timeout *)arg;
+	struct nfsmount *nmp = arg;
 	struct nfsreq *rep;
 	struct mbuf *m;
 	struct socket *so;
-	struct nfsmount *nmp;
-	int timeo;
-	int s, error;
-#ifdef NFSSERVER
-	struct nfssvc_sock *slp;
-	struct timeval tv;
-#endif
+	int timeo, s, error;
 
 	s = splsoftnet();
-	TAILQ_FOREACH(rep, &nfs_reqq, r_chain) {
-		nmp = rep->r_nmp;
+	TAILQ_FOREACH(rep, &nmp->nm_reqsq, r_chain) {
 		if (rep->r_mrep || (rep->r_flags & R_SOFTTERM))
 			continue;
 		if (nfs_sigintr(nmp, rep, rep->r_procp)) {
@@ -1240,21 +1216,8 @@ nfs_timer(arg)
 			}
 		}
 	}
-
-#ifdef NFSSERVER
-	/*
-	 * Scan the write gathering queues for writes that need to be
-	 * completed now.
-	 */
-	getmicrotime(&tv);
-	TAILQ_FOREACH(slp, &nfssvc_sockhead, ns_chain) {
-		if (LIST_FIRST(&slp->ns_tq) &&
-		    timercmp(&LIST_FIRST(&slp->ns_tq)->nd_time, &tv, <=))
-			nfsrv_wakenfsd(slp);
-	}
-#endif /* NFSSERVER */
 	splx(s);
-	timeout_add(to, nfs_ticks);
+	timeout_add(&nmp->nm_rtimeout, nfs_ticks);
 }
 
 /*
@@ -1262,10 +1225,7 @@ nfs_timer(arg)
  * This is used for NFSMNT_INT mounts.
  */
 int
-nfs_sigintr(nmp, rep, p)
-	struct nfsmount *nmp;
-	struct nfsreq *rep;
-	struct proc *p;
+nfs_sigintr(struct nfsmount *nmp, struct nfsreq *rep, struct proc *p)
 {
 
 	if (rep && (rep->r_flags & R_SOFTTERM))
@@ -1286,9 +1246,7 @@ nfs_sigintr(nmp, rep, p)
  * in progress when a reconnect is necessary.
  */
 int
-nfs_sndlock(flagp, rep)
-	int *flagp;
-	struct nfsreq *rep;
+nfs_sndlock(int *flagp, struct nfsreq *rep)
 {
 	struct proc *p;
 	int slpflag = 0, slptimeo = 0;
@@ -1318,8 +1276,7 @@ nfs_sndlock(flagp, rep)
  * Unlock the stream socket for others.
  */
 void
-nfs_sndunlock(flagp)
-	int *flagp;
+nfs_sndunlock(int *flagp)
 {
 
 	if ((*flagp & NFSMNT_SNDLOCK) == 0)
@@ -1332,8 +1289,7 @@ nfs_sndunlock(flagp)
 }
 
 int
-nfs_rcvlock(rep)
-	struct nfsreq *rep;
+nfs_rcvlock(struct nfsreq *rep)
 {
 	int *flagp = &rep->r_nmp->nm_flag;
 	int slpflag, slptimeo = 0;
@@ -1369,8 +1325,7 @@ nfs_rcvlock(rep)
  * Unlock the stream socket for others.
  */
 void
-nfs_rcvunlock(flagp)
-	int *flagp;
+nfs_rcvunlock(int *flagp)
 {
 
 	if ((*flagp & NFSMNT_RCVLOCK) == 0)
@@ -1436,7 +1391,8 @@ nfs_realign(struct mbuf **pm, int hsiz)
 		if (!ALIGNED_POINTER(m->m_data, void *) ||
 		    !ALIGNED_POINTER(m->m_len,  void *)) {
 			MGET(n, M_WAIT, MT_DATA);
-			if (ALIGN(m->m_len) >= MINCLSIZE) {
+#define ALIGN_POINTER(n) ((u_int)(((n) + sizeof(void *)) & ~sizeof(void *)))
+			if (ALIGN_POINTER(m->m_len) >= MINCLSIZE) {
 				MCLGET(n, M_WAIT);
 			}
 			n->m_len = 0;
@@ -1451,7 +1407,7 @@ nfs_realign(struct mbuf **pm, int hsiz)
 	if (n != NULL) {
 		++nfs_realign_count;
 		while (m) {
-			m_copyback(n, off, m->m_len, mtod(m, caddr_t));
+			m_copyback(n, off, m->m_len, mtod(m, caddr_t), M_WAIT);
 
 			/*
 			 * If an unaligned amount of memory was copied, fix up
@@ -1475,10 +1431,7 @@ nfs_realign(struct mbuf **pm, int hsiz)
  * - fill in the cred struct.
  */
 int
-nfs_getreq(nd, nfsd, has_header)
-	struct nfsrv_descript *nd;
-	struct nfsd *nfsd;
-	int has_header;
+nfs_getreq(struct nfsrv_descript *nd, struct nfsd *nfsd, int has_header)
 {
 	int len, i;
 	u_int32_t *tl;
@@ -1565,8 +1518,6 @@ nfs_getreq(nd, nfsd, has_header)
 		    else
 			tl++;
 		nd->nd_cr.cr_ngroups = (len > NGROUPS) ? NGROUPS : len;
-		if (nd->nd_cr.cr_ngroups > 1)
-		    nfsrvw_sort(nd->nd_cr.cr_groups, nd->nd_cr.cr_ngroups);
 		len = fxdr_unsigned(int, *++tl);
 		if (len < 0 || len > RPCAUTH_MAXSIZ) {
 			m_freem(info.nmi_mrep);
@@ -1610,10 +1561,7 @@ nfs_msg(struct nfsreq *rep, char *msg)
  * be called with M_WAIT from an nfsd.
  */
 void
-nfsrv_rcv(so, arg, waitflag)
-	struct socket *so;
-	caddr_t arg;
-	int waitflag;
+nfsrv_rcv(struct socket *so, caddr_t arg, int waitflag)
 {
 	struct nfssvc_sock *slp = (struct nfssvc_sock *)arg;
 	struct mbuf *m;
@@ -1723,9 +1671,7 @@ dorecs:
  * can sleep.
  */
 int
-nfsrv_getstream(slp, waitflag)
-	struct nfssvc_sock *slp;
-	int waitflag;
+nfsrv_getstream(struct nfssvc_sock *slp, int waitflag)
 {
 	struct mbuf *m, **mpp;
 	char *cp1, *cp2;
@@ -1844,10 +1790,8 @@ nfsrv_getstream(slp, waitflag)
  * Parse an RPC header.
  */
 int
-nfsrv_dorec(slp, nfsd, ndp)
-	struct nfssvc_sock *slp;
-	struct nfsd *nfsd;
-	struct nfsrv_descript **ndp;
+nfsrv_dorec(struct nfssvc_sock *slp, struct nfsd *nfsd,
+    struct nfsrv_descript **ndp)
 {
 	struct mbuf *m, *nam;
 	struct nfsrv_descript *nd;

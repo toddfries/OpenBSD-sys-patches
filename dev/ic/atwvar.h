@@ -1,4 +1,4 @@
-/*	$OpenBSD: atwvar.h,v 1.17 2009/06/03 20:00:36 deraadt Exp $	*/
+/*	$OpenBSD: atwvar.h,v 1.21 2009/10/13 19:33:16 pirofti Exp $	*/
 /*	$NetBSD: atwvar.h,v 1.13 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*
@@ -195,7 +195,6 @@ struct atw_softc {
 	bus_space_handle_t	sc_sh;		/* bus space handle */
 	bus_size_t		sc_mapsize;	/* mapping size */
 	bus_dma_tag_t		sc_dmat;	/* bus dma tag */
-	void			*sc_sdhook;	/* shutdown hook */
 	void			*sc_powerhook;	/* power management hook */
 	u_int32_t		sc_cacheline;	/* cache line size */
 	u_int32_t		sc_maxburst;	/* maximum burst length */
@@ -333,14 +332,14 @@ struct atw_frame {
 #define atw_keyid	u.s1.keyid
 #define atw_ihdr	u.s2.ihdr
 
-#define ATW_HDRCTL_SHORT_PREAMBLE	BIT(0)	/* use short preamble */
-#define ATW_HDRCTL_RTSCTS		BIT(4)	/* send RTS */
-#define ATW_HDRCTL_WEP			BIT(5)
-#define ATW_HDRCTL_UNKNOWN1		BIT(15) /* MAC adds FCS? */
-#define ATW_HDRCTL_UNKNOWN2		BIT(8)
+#define ATW_HDRCTL_SHORT_PREAMBLE	(1<<0)	/* use short preamble */
+#define ATW_HDRCTL_RTSCTS		(1<<4)	/* send RTS */
+#define ATW_HDRCTL_WEP			(1<<5)
+#define ATW_HDRCTL_UNKNOWN1		(1<<15) /* MAC adds FCS? */
+#define ATW_HDRCTL_UNKNOWN2		(1<<8)
 
-#define ATW_FRAGTHR_FRAGTHR_MASK	BITS(0, 11)
-#define ATW_FRAGNUM_FRAGNUM_MASK	BITS(4, 7)
+#define ATW_FRAGTHR_FRAGTHR_MASK	0x0fff
+#define ATW_FRAGNUM_FRAGNUM_MASK	0x00f0
 
 /* Values for sc_flags. */
 #define	ATWF_MRL		0x00000010	/* memory read line okay */
@@ -436,10 +435,9 @@ do {									\
 
 void	atw_attach(struct atw_softc *);
 int	atw_detach(struct atw_softc *);
-int	atw_activate(struct device *, enum devact);
+int	atw_activate(struct device *, int);
 int	atw_intr(void *arg);
 int	atw_enable(struct atw_softc *);
 void	atw_power(int, void *);
-void	atw_shutdown(void *);
 
 #endif /* _DEV_IC_ATWVAR_H_ */

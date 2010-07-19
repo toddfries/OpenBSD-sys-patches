@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vfsops.c,v 1.86 2009/08/04 17:12:39 thib Exp $	*/
+/*	$OpenBSD: nfs_vfsops.c,v 1.92 2009/10/19 22:24:18 jsg Exp $	*/
 /*	$NetBSD: nfs_vfsops.c,v 1.46.4.1 1996/05/25 22:40:35 fvdl Exp $	*/
 
 /*
@@ -98,10 +98,7 @@ const struct vfsops nfs_vfsops = {
  * nfs statfs call
  */
 int
-nfs_statfs(mp, sbp, p)
-	struct mount *mp;
-	struct statfs *sbp;
-	struct proc *p;
+nfs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 {
 	struct vnode *vp;
 	struct nfs_statfs *sfp = NULL;
@@ -127,7 +124,7 @@ nfs_statfs(mp, sbp, p)
 		(void)nfs_fsinfo(nmp, vp, cred, p);
 	nfsstats.rpccnt[NFSPROC_FSSTAT]++;
 	info.nmi_mb = info.nmi_mreq = nfsm_reqhead(NFSX_FH(info.nmi_v3));
-	nfsm_fhtom(&info.nmi_mb, vp, info.nmi_v3);
+	nfsm_fhtom(&info, vp, info.nmi_v3);
 
 	info.nmi_procp = p;
 	info.nmi_cred = cred;
@@ -176,11 +173,8 @@ nfsmout:
  * nfs version 3 fsinfo rpc call
  */
 int
-nfs_fsinfo(nmp, vp, cred, p)
-	struct nfsmount *nmp;
-	struct vnode *vp;
-	struct ucred *cred;
-	struct proc *p;
+nfs_fsinfo(struct nfsmount *nmp, struct vnode *vp, struct ucred *cred,
+    struct proc *p)
 {
 	struct nfsv3_fsinfo *fsp;
 	struct nfsm_info	info;
@@ -191,7 +185,7 @@ nfs_fsinfo(nmp, vp, cred, p)
 
 	nfsstats.rpccnt[NFSPROC_FSINFO]++;
 	info.nmi_mb = info.nmi_mreq = nfsm_reqhead(NFSX_FH(1));
-	nfsm_fhtom(&info.nmi_mb, vp, 1);
+	nfsm_fhtom(&info, vp, 1);
 
 	info.nmi_procp = p;
 	info.nmi_cred = cred;
@@ -249,7 +243,7 @@ nfsmout:
  * - build the rootfs mount point and call mountnfs() to do the rest.
  */
 int
-nfs_mountroot()
+nfs_mountroot(void)
 {
 	struct nfs_diskless nd;
 	struct vattr attr;
@@ -370,10 +364,7 @@ nfs_mountroot()
  * Internal version of mount system call for diskless setup.
  */
 struct mount *
-nfs_mount_diskless(ndmntp, mntname, mntflag)
-	struct nfs_dlmount *ndmntp;
-	char *mntname;
-	int mntflag;
+nfs_mount_diskless(struct nfs_dlmount *ndmntp, char *mntname, int mntflag)
 {
 	struct nfs_args args;
 	struct mount *mp;
@@ -420,10 +411,8 @@ nfs_mount_diskless(ndmntp, mntname, mntflag)
 }
 
 void
-nfs_decode_args(nmp, argp, nargp)
-	struct nfsmount *nmp;
-	struct nfs_args *argp;
-	struct nfs_args *nargp;
+nfs_decode_args(struct nfsmount *nmp, struct nfs_args *argp,
+    struct nfs_args *nargp)
 {
 	int s;
 	int adjsock = 0;
@@ -577,12 +566,8 @@ nfs_decode_args(nmp, argp, nargp)
  */
 /* ARGSUSED */
 int
-nfs_mount(mp, path, data, ndp, p)
-	struct mount *mp;
-	const char *path;
-	void *data;
-	struct nameidata *ndp;
-	struct proc *p;
+nfs_mount(struct mount *mp, const char *path, void *data,
+    struct nameidata *ndp, struct proc *p)
 {
 	int error;
 	struct nfs_args args;
@@ -656,11 +641,8 @@ nfs_mount(mp, path, data, ndp, p)
  * Common code for mount and mountroot
  */
 int
-mountnfs(argp, mp, nam, pth, hst)
-	struct nfs_args *argp;
-	struct mount *mp;
-	struct mbuf *nam;
-	char *pth, *hst;
+mountnfs(struct nfs_args *argp, struct mount *mp, struct mbuf *nam, char *pth,
+    char *hst)
 {
 	struct nfsmount *nmp;
 	int error;
@@ -697,6 +679,10 @@ mountnfs(argp, mp, nam, pth, hst)
 	bcopy(argp, &mp->mnt_stat.mount_info.nfs_args, sizeof(*argp));
 	nmp->nm_nam = nam;
 	nfs_decode_args(nmp, argp, &mp->mnt_stat.mount_info.nfs_args);
+
+	RB_INIT(&nmp->nm_ntree);
+	TAILQ_INIT(&nmp->nm_reqsq);
+	timeout_set(&nmp->nm_rtimeout, nfs_timer, nmp);
 
 	/* Set up the sockets and per-host congestion */
 	nmp->nm_sotype = argp->sotype;
@@ -745,6 +731,7 @@ nfs_unmount(struct mount *mp, int mntflags, struct proc *p)
 
 	nfs_disconnect(nmp);
 	m_freem(nmp->nm_nam);
+	timeout_del(&nmp->nm_rtimeout);
 	free(nmp, M_NFSMNT);
 	return (0);
 }
@@ -753,9 +740,7 @@ nfs_unmount(struct mount *mp, int mntflags, struct proc *p)
  * Return root of a filesystem
  */
 int
-nfs_root(mp, vpp)
-	struct mount *mp;
-	struct vnode **vpp;
+nfs_root(struct mount *mp, struct vnode **vpp)
 {
 	struct nfsmount *nmp;
 	struct nfsnode *np;
@@ -773,11 +758,7 @@ nfs_root(mp, vpp)
  * Flush out the buffer cache
  */
 int
-nfs_sync(mp, waitfor, cred, p)
-	struct mount *mp;
-	int waitfor;
-	struct ucred *cred;
-	struct proc *p;
+nfs_sync(struct mount *mp, int waitfor, struct ucred *cred, struct proc *p)
 {
 	struct vnode *vp;
 	int error, allerror = 0;
@@ -818,10 +799,7 @@ loop:
  */
 /* ARGSUSED */
 int
-nfs_vget(mp, ino, vpp)
-	struct mount *mp;
-	ino_t ino;
-	struct vnode **vpp;
+nfs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 {
 
 	return (EOPNOTSUPP);
@@ -832,7 +810,7 @@ nfs_vget(mp, ino, vpp)
  */
 int
 nfs_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
-	   size_t newlen, struct proc *p)
+    size_t newlen, struct proc *p)
 {
 	int rv;
 
@@ -885,10 +863,7 @@ nfs_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
  */
 /* ARGSUSED */
 int
-nfs_fhtovp(mp, fhp, vpp)
-	struct mount *mp;
-	struct fid *fhp;
-	struct vnode **vpp;
+nfs_fhtovp(struct mount *mp, struct fid *fhp, struct vnode **vpp)
 {
 
 	return (EINVAL);
@@ -899,9 +874,7 @@ nfs_fhtovp(mp, fhp, vpp)
  */
 /* ARGSUSED */
 int
-nfs_vptofh(vp, fhp)
-	struct vnode *vp;
-	struct fid *fhp;
+nfs_vptofh(struct vnode *vp, struct fid *fhp)
 {
 
 	return (EINVAL);
@@ -912,10 +885,7 @@ nfs_vptofh(vp, fhp)
  */
 /* ARGSUSED */
 int
-nfs_start(mp, flags, p)
-	struct mount *mp;
-	int flags;
-	struct proc *p;
+nfs_start(struct mount *mp, int flags, struct proc *p)
 {
 
 	return (0);
@@ -926,12 +896,7 @@ nfs_start(mp, flags, p)
  */
 /* ARGSUSED */
 int
-nfs_quotactl(mp, cmd, uid, arg, p)
-	struct mount *mp;
-	int cmd;
-	uid_t uid;
-	caddr_t arg;
-	struct proc *p;
+nfs_quotactl(struct mount *mp, int cmd, uid_t uid, caddr_t arg, struct proc *p)
 {
 
 	return (EOPNOTSUPP);
@@ -942,11 +907,8 @@ nfs_quotactl(mp, cmd, uid, arg, p)
  */
 /* ARGUSED */
 int
-nfs_checkexp(mp, nam, exflagsp, credanonp)
-	struct mount *mp;
-	struct mbuf *nam;
-	int *exflagsp;
-	struct ucred **credanonp;
+nfs_checkexp(struct mount *mp, struct mbuf *nam, int *exflagsp,
+    struct ucred **credanonp)
 {
 	return (EOPNOTSUPP);
 }

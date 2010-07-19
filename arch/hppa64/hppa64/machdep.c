@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.16 2009/08/02 16:28:39 beck Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.25 2010/07/01 05:09:27 jsing Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -39,9 +39,6 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 #include <sys/extent.h>
-#ifdef SYSVMSG
-#include <sys/msg.h>
-#endif
 
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
@@ -59,10 +56,6 @@
 #include <machine/reg.h>
 #include <machine/autoconf.h>
 #include <machine/kcore.h>
-
-#ifdef COMPAT_HPUX
-#include <compat/hpux/hpux.h>
-#endif
 
 #ifdef DDB
 #include <machine/db_machdep.h>
@@ -124,9 +117,6 @@ int	cpu_hvers;
 enum hppa_cpu_type cpu_type;
 const char *cpu_typename;
 u_int	fpu_version;
-#ifdef COMPAT_HPUX
-int	cpu_model_hpux;	/* contains HPUX_SYSCONF_CPU* kind of value */
-#endif
 
 dev_t	bootdev;
 int	physmem, resvmem, resvphysmem, esym;
@@ -138,6 +128,7 @@ paddr_t	avail_end;
 struct user *proc0paddr;
 long mem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(32) / sizeof(long)];
 struct extent *hppa_ex;
+struct consdev *cn_tab;
 
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
@@ -149,6 +140,12 @@ static __inline void fall(int, int, int, int, int);
 void dumpsys(void);
 void hpmc_dump(void);
 void cpuid(void);
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int	safepri = 0;
 
 /*
  * wide used hardware params
@@ -164,6 +161,11 @@ int sigdebug = 0;
 pid_t sigpid = 0;
 #define SDB_FOLLOW	0x01
 #endif
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
+int	hppa_cpuspeed(int *mhz);
 
 int
 hppa_cpuspeed(int *mhz)
@@ -266,24 +268,8 @@ TODO hpmc/toc/pfr
 	    EX_NOWAIT))
 		panic("cannot reserve main memory");
 
-#ifdef SYSVMSG
-{
-	vaddr_t v;
-
-	v = round_page(start);
-#define valloc(name, type, num) (name) = (type *)v; v = (vaddr_t)((name)+(num))
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#undef valloc
-	v = round_page(v);
-	bzero ((void *)start, (v - start));
-	start = v;
-}
-#endif
 	/* sets resvphysmem */
-	pmap_bootstrap(start);
+	pmap_bootstrap(round_page(start));
 
 	/* space has been reserved in pmap_bootstrap() */
 	msgbufp = (struct msgbuf *)((vaddr_t)ptoa(physmem) -
@@ -396,15 +382,8 @@ cpu_startup(void)
 	 */
 	printf("%s%s\n", version, cpu_model);
 	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
-	    ptoa((psize_t)phsymem) / 1024 / 1024);
+	    ptoa((psize_t)physmem) / 1024 / 1024);
 	printf("rsvd mem = %u (%uKB)\n", ptoa(resvmem), ptoa(resvmem) / 1024);
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
 
 printf("here3\n");
 	/*

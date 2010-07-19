@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.84 2009/06/20 23:38:12 miod Exp $	*/
+/*	$OpenBSD: param.h,v 1.87 2010/04/23 21:34:40 deraadt Exp $	*/
 /*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
 
 /*-
@@ -41,8 +41,8 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	200910		/* OpenBSD version (year & month). */
-#define OpenBSD4_6 1		/* OpenBSD 4.6 */
+#define OpenBSD	201005		/* OpenBSD version (year & month). */
+#define OpenBSD4_7 1		/* OpenBSD 4.7 */
 
 #ifndef NULL
 #ifdef 	__GNUG__
@@ -54,7 +54,6 @@
 
 #ifndef _LOCORE
 #include <sys/types.h>
-#include <sys/simplelock.h>
 #endif
 
 /*

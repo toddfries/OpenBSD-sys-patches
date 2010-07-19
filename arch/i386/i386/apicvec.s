@@ -1,4 +1,4 @@
-/* $OpenBSD: apicvec.s,v 1.19 2009/07/10 13:51:47 jsg Exp $ */
+/* $OpenBSD: apicvec.s,v 1.21 2010/01/11 23:09:52 kettenis Exp $ */
 /* $NetBSD: apicvec.s,v 1.1.2.2 2000/02/21 21:54:01 sommerfeld Exp $ */
 
 /*-
@@ -169,6 +169,7 @@ XINTR(ltimer):
 	movl	%eax,CPL
 	ioapic_asm_ack()
 	sti
+	incl	CPUVAR(IDEPTH)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
@@ -179,6 +180,7 @@ XINTR(ltimer):
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
+	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 
 	.globl	XINTR(softclock), XINTR(softnet), XINTR(softtty)
@@ -192,6 +194,7 @@ XINTR(softclock):
 	andl	$~(1<<SIR_CLOCK),CPUVAR(IPENDING)
 	ioapic_asm_ack()
 	sti
+	incl	CPUVAR(IDEPTH)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
@@ -201,6 +204,7 @@ XINTR(softclock):
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
+	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 
 #define DONETISR(s, c) \
@@ -220,6 +224,7 @@ XINTR(softnet):
 	andl	$~(1<<SIR_NET),CPUVAR(IPENDING)
 	ioapic_asm_ack()
 	sti
+	incl	CPUVAR(IDEPTH)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
@@ -234,6 +239,7 @@ XINTR(softnet):
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
+	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 #undef DONETISR
 
@@ -247,6 +253,7 @@ XINTR(softtty):
 	andl	$~(1<<SIR_TTY),CPUVAR(IPENDING)
 	ioapic_asm_ack()
 	sti
+	incl	CPUVAR(IDEPTH)
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
@@ -256,6 +263,7 @@ XINTR(softtty):
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
+	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 
 #if NIOAPIC > 0
@@ -291,6 +299,7 @@ _C_LABEL(Xintr_##name##num):						\
 	jz      _C_LABEL(Xstray_##name##num)				;\
 	APIC_STRAY_INIT			/* nobody claimed it yet */	;\
 7:									 \
+	incl	CPUVAR(IDEPTH)						;\
 	LOCK_KERNEL(IF_PPL(%esp))					;\
 	movl	IH_ARG(%ebx),%eax	/* get handler arg */		;\
 	testl	%eax,%eax						;\
@@ -307,6 +316,7 @@ _C_LABEL(Xintr_##name##num):						\
 	adcl	$0,IH_COUNT+4(%ebx)					;\
 4:									 \
 	UNLOCK_KERNEL(IF_PPL(%esp))					;\
+	decl	CPUVAR(IDEPTH)						;\
 	movl	IH_NEXT(%ebx),%ebx	/* next handler in chain */	;\
 	testl	%ebx,%ebx						;\
 	jnz	7b							;\

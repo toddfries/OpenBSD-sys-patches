@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppb.c,v 1.34 2009/05/30 18:46:06 jsg Exp $	*/
+/*	$OpenBSD: ppb.c,v 1.42 2010/06/30 05:14:39 kettenis Exp $	*/
 /*	$NetBSD: ppb.c,v 1.16 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -35,13 +35,29 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/workq.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/ppbreg.h>
+
+#ifndef PCI_IO_START
+#define PCI_IO_START	0
+#endif
+
+#ifndef PCI_IO_END
+#define PCI_IO_END	0xffffffff
+#endif
+
+#ifndef PCI_MEM_START
+#define PCI_MEM_START	0
+#endif
+
+#ifndef PCI_MEM_END
+#define PCI_MEM_END	0xffffffff
+#endif
 
 struct ppb_softc {
 	struct device sc_dev;		/* generic device glue */
@@ -59,20 +75,30 @@ struct ppb_softc {
 	bus_addr_t sc_iobase, sc_iolimit;
 	bus_addr_t sc_membase, sc_memlimit;
 	bus_addr_t sc_pmembase, sc_pmemlimit;
+
+	pcireg_t sc_csr;
+	pcireg_t sc_bhlcr;
+	pcireg_t sc_bir;
+	pcireg_t sc_bcr;
+	pcireg_t sc_int;
+
+	pcireg_t sc_slcsr;
 };
 
 int	ppbmatch(struct device *, void *, void *);
 void	ppbattach(struct device *, struct device *, void *);
 int	ppbdetach(struct device *self, int flags);
+int	ppbactivate(struct device *self, int act);
 
 struct cfattach ppb_ca = {
-	sizeof(struct ppb_softc), ppbmatch, ppbattach, ppbdetach
+	sizeof(struct ppb_softc), ppbmatch, ppbattach, ppbdetach, ppbactivate
 };
 
 struct cfdriver ppb_cd = {
 	NULL, "ppb", DV_DULL
 };
 
+void	ppb_alloc_resources(struct ppb_softc *, struct pci_attach_args *);
 int	ppb_intr(void *);
 void	ppb_hotplug_insert(void *, void *);
 void	ppb_hotplug_insert_finish(void *);
@@ -163,6 +189,11 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n");
 
+	if (PCI_VENDOR(pa->pa_id) != PCI_VENDOR_INTEL ||
+	    (PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_INTEL_82801BA_HPB &&
+	    PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_INTEL_82801BAM_HPB))
+		ppb_alloc_resources(sc, pa);
+
 	for (pin = PCI_INTERRUPT_PIN_A; pin <= PCI_INTERRUPT_PIN_D; pin++) {
 		pa->pa_intrpin = pa->pa_rawintrpin = pin;
 		pa->pa_intrline = 0;
@@ -215,11 +246,17 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 	blr = pci_conf_read(pc, pa->pa_tag, PPB_REG_PREFMEM);
 	sc->sc_pmembase = (blr & 0x0000fff0) << 16;
 	sc->sc_pmemlimit = (blr & 0xfff00000) | 0x000fffff;
+#ifdef __LP64__	/* XXX because extents use long... */
+	blr = pci_conf_read(pc, pa->pa_tag, PPB_REG_PREFBASE_HI32);
+	sc->sc_pmembase |= ((uint64_t)blr) << 32;
+	blr = pci_conf_read(pc, pa->pa_tag, PPB_REG_PREFLIM_HI32);
+	sc->sc_pmemlimit |= ((uint64_t)blr) << 32;
+#endif
 	if (sc->sc_pmemlimit > sc->sc_pmembase) {
 		name = malloc(32, M_DEVBUF, M_NOWAIT);
 		if (name) {
 			snprintf(name, 32, "%s pcipmem", sc->sc_dev.dv_xname);
-			sc->sc_pmemex = extent_create(name, 0, 0xffffffff,
+			sc->sc_pmemex = extent_create(name, 0, (u_long)-1L,
 			    M_DEVBUF, NULL, 0, EX_NOWAIT | EX_FILLED);
 			extent_free(sc->sc_pmemex, sc->sc_pmembase,
 			    sc->sc_pmemlimit - sc->sc_pmembase + 1,
@@ -233,7 +270,8 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 	 * in general.
 	 */
 	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_INTEL &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801BAM_HPB) {
+	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801BA_HPB ||
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801BAM_HPB)) {
 		if (sc->sc_ioex == NULL)
 			sc->sc_ioex = pa->pa_ioex;
 		if (sc->sc_memex == NULL)
@@ -300,6 +338,229 @@ ppbdetach(struct device *self, int flags)
 	}
 
 	return (rv);
+}
+
+int
+ppbactivate(struct device *self, int act)
+{
+	struct ppb_softc *sc = (void *)self;
+	pci_chipset_tag_t pc = sc->sc_pc;
+	pcitag_t tag = sc->sc_tag;
+	pcireg_t blr;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
+
+		/* Save registers that may get lost. */
+		sc->sc_csr = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
+		sc->sc_bhlcr = pci_conf_read(pc, tag, PCI_BHLC_REG);
+		sc->sc_bir = pci_conf_read(pc, tag, PPB_REG_BUSINFO);
+		sc->sc_bcr = pci_conf_read(pc, tag, PPB_REG_BRIDGECONTROL);
+		sc->sc_int = pci_conf_read(pc, tag, PCI_INTERRUPT_REG);
+		if (sc->sc_cap_off)
+			sc->sc_slcsr = pci_conf_read(pc, tag,
+			    sc->sc_cap_off + PCI_PCIE_SLCSR);
+		break;
+	case DVACT_RESUME:
+		/* Restore the registers saved above. */
+		pci_conf_write(pc, tag, PCI_BHLC_REG, sc->sc_bhlcr);
+		pci_conf_write(pc, tag, PPB_REG_BUSINFO, sc->sc_bir);
+		pci_conf_write(pc, tag, PPB_REG_BRIDGECONTROL, sc->sc_bcr);
+		pci_conf_write(pc, tag, PCI_INTERRUPT_REG, sc->sc_int);
+		if (sc->sc_cap_off)
+			pci_conf_write(pc, tag,
+			    sc->sc_cap_off + PCI_PCIE_SLCSR, sc->sc_slcsr);
+
+		/* Restore I/O window. */
+		blr = pci_conf_read(pc, tag, PPB_REG_IOSTATUS);
+		blr &= 0xffff0000;
+		blr |= sc->sc_iolimit & PPB_IO_MASK;
+		blr |= (sc->sc_iobase >> PPB_IO_SHIFT);
+		pci_conf_write(pc, tag, PPB_REG_IOSTATUS, blr);
+		blr = (sc->sc_iobase & 0xffff0000) >> 16;
+		blr |= sc->sc_iolimit & 0xffff0000;
+		pci_conf_write(pc, tag, PPB_REG_IO_HI, blr);
+
+		/* Restore memory mapped I/O window. */
+		blr = sc->sc_memlimit & PPB_MEM_MASK;
+		blr |= (sc->sc_membase >> PPB_MEM_SHIFT);
+		pci_conf_write(pc, tag, PPB_REG_MEM, blr);
+
+		/* Restore prefetchable MMI/O window. */
+		blr = sc->sc_pmemlimit & PPB_MEM_MASK;
+		blr |= (sc->sc_pmembase >> PPB_MEM_SHIFT);
+		pci_conf_write(pc, tag, PPB_REG_PREFMEM, blr);
+#ifdef __LP64__
+		pci_conf_write(pc, tag, PPB_REG_PREFBASE_HI32,
+		    sc->sc_pmembase >> 32);
+		pci_conf_write(pc, tag, PPB_REG_PREFLIM_HI32,
+		    sc->sc_pmemlimit >> 32);
+#endif
+
+		/*
+		 * Restore command register last to avoid exposing
+		 * uninitialised windows.
+		 */
+		pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, sc->sc_csr);
+
+		rv = config_activate_children(self, act);
+		break;
+	}
+	return (rv);
+}
+
+void
+ppb_alloc_resources(struct ppb_softc *sc, struct pci_attach_args *pa)
+{
+	pci_chipset_tag_t pc = sc->sc_pc;
+	pcireg_t id, busdata, blr, bhlcr, type, csr;
+	pcireg_t addr, mask;
+	pcitag_t tag;
+	int bus, dev;
+	int reg, reg_start, reg_end, reg_rom;
+	int io_count = 0;
+	int mem_count = 0;
+	bus_addr_t start, end;
+	u_long base, size;
+
+	if (pa->pa_memex == NULL)
+		return;
+
+	busdata = pci_conf_read(pc, sc->sc_tag, PPB_REG_BUSINFO);
+	bus = PPB_BUSINFO_SECONDARY(busdata);
+	if (bus == 0)
+		return;
+
+	/*
+	 * Count number of devices.  If there are no devices behind
+	 * this bridge, there's no point in allocating any address
+	 * space.
+	 */
+	for (dev = 0; dev < pci_bus_maxdevs(pc, bus); dev++) {
+		tag = pci_make_tag(pc, bus, dev, 0);
+		id = pci_conf_read(pc, tag, PCI_ID_REG);
+
+		if (PCI_VENDOR(id) == PCI_VENDOR_INVALID ||
+		    PCI_VENDOR(id) == 0)
+			continue;
+
+		bhlcr = pci_conf_read(pc, tag, PCI_BHLC_REG);
+		switch (PCI_HDRTYPE_TYPE(bhlcr)) {
+		case 0:
+			reg_start = PCI_MAPREG_START;
+			reg_end = PCI_MAPREG_END;
+			reg_rom = PCI_ROM_REG;
+			break;
+		case 1:	/* PCI-PCI bridge */
+			reg_start = PCI_MAPREG_START;
+			reg_end = PCI_MAPREG_PPB_END;
+			reg_rom = 0;	/* 0x38 */
+			break;
+		case 2:	/* PCI-Cardbus bridge */
+			reg_start = PCI_MAPREG_START;
+			reg_end = PCI_MAPREG_PCB_END;
+			reg_rom = 0;
+			break;
+		default:
+			return;
+		}
+
+		for (reg = reg_start; reg < reg_end; reg += 4) {
+			if (pci_mapreg_probe(pc, tag, reg, &type) == 0)
+				continue;
+
+			if (type == PCI_MAPREG_TYPE_IO)
+				io_count++;
+			else
+				mem_count++;
+		}
+
+		if (reg_rom != 0) {
+			addr = pci_conf_read(pc, tag, reg_rom);
+			pci_conf_write(pc, tag, reg_rom, ~PCI_ROM_ENABLE);
+			mask = pci_conf_read(pc, tag, reg_rom);
+			pci_conf_write(pc, tag, reg_rom, addr);
+			if (PCI_ROM_SIZE(mask))
+				mem_count++;
+		}
+	}
+
+	csr = pci_conf_read(pc, sc->sc_tag, PCI_COMMAND_STATUS_REG);
+
+	/*
+	 * Get the bridge in a consistent state.  If memory mapped I/O
+	 * is disabled, disabled the associated windows as well.  
+	 */
+	if ((csr & PCI_COMMAND_MEM_ENABLE) == 0) {
+		pci_conf_write(pc, sc->sc_tag, PPB_REG_MEM, 0x0000ffff);
+		pci_conf_write(pc, sc->sc_tag, PPB_REG_PREFMEM, 0x0000ffff);
+		pci_conf_write(pc, sc->sc_tag, PPB_REG_PREFBASE_HI32, 0);
+		pci_conf_write(pc, sc->sc_tag, PPB_REG_PREFLIM_HI32, 0);
+	}
+
+	/* Allocate I/O address space if necessary. */
+	if (io_count > 0 && pa->pa_ioex) {
+		blr = pci_conf_read(pc, sc->sc_tag, PPB_REG_IOSTATUS);
+		sc->sc_iobase = (blr << PPB_IO_SHIFT) & PPB_IO_MASK;
+		sc->sc_iolimit = (blr & PPB_IO_MASK) | 0x00000fff;
+		blr = pci_conf_read(pc, sc->sc_tag, PPB_REG_IO_HI);
+		sc->sc_iobase |= (blr & 0x0000ffff) << 16;
+		sc->sc_iolimit |= (blr & 0xffff0000);
+		if (sc->sc_iolimit < sc->sc_iobase || sc->sc_iobase == 0) {
+			start = max(PCI_IO_START, pa->pa_ioex->ex_start);
+			end = min(PCI_IO_END, pa->pa_ioex->ex_end);
+			for (size = 0x2000; size >= PPB_IO_MIN; size >>= 1)
+				if (extent_alloc_subregion(pa->pa_ioex, start,
+				    end, size, size, 0, 0, 0, &base) == 0)
+					break;
+			if (size >= PPB_IO_MIN) {
+				sc->sc_iobase = base;
+				sc->sc_iolimit = base + size - 1;
+				blr = pci_conf_read(pc, sc->sc_tag,
+				    PPB_REG_IOSTATUS);
+				blr &= 0xffff0000;
+				blr |= sc->sc_iolimit & PPB_IO_MASK;
+				blr |= (sc->sc_iobase >> PPB_IO_SHIFT);
+				pci_conf_write(pc, sc->sc_tag,
+				    PPB_REG_IOSTATUS, blr);
+				blr = (sc->sc_iobase & 0xffff0000) >> 16;
+				blr |= sc->sc_iolimit & 0xffff0000;
+				pci_conf_write(pc, sc->sc_tag,
+				    PPB_REG_IO_HI, blr);
+
+				csr |= PCI_COMMAND_IO_ENABLE;
+			}
+		}
+	}
+
+	/* Allocate memory mapped I/O address space if necessary. */
+	if (mem_count > 0 && pa->pa_memex) {
+		blr = pci_conf_read(pc, sc->sc_tag, PPB_REG_MEM);
+		sc->sc_membase = (blr << PPB_MEM_SHIFT) & PPB_MEM_MASK;
+		sc->sc_memlimit = (blr & PPB_MEM_MASK) | 0x000fffff;
+		if (sc->sc_memlimit < sc->sc_membase || sc->sc_membase == 0) {
+			start = max(PCI_MEM_START, pa->pa_memex->ex_start);
+			end = min(PCI_MEM_END, pa->pa_memex->ex_end);
+			for (size = 0x2000000; size >= PPB_MEM_MIN; size >>= 1)
+				if (extent_alloc_subregion(pa->pa_memex, start,
+				    end, size, size, 0, 0, 0, &base) == 0)
+					break;
+			if (size >= PPB_MEM_MIN) {
+				sc->sc_membase = base;
+				sc->sc_memlimit = base + size - 1;
+				blr = sc->sc_memlimit & PPB_MEM_MASK;
+				blr |= (sc->sc_membase >> PPB_MEM_SHIFT);
+				pci_conf_write(pc, sc->sc_tag,
+				    PPB_REG_MEM, blr);
+
+				csr |= PCI_COMMAND_MEM_ENABLE;
+			}
+		}
+	}
+
+	pci_conf_write(pc, sc->sc_tag, PCI_COMMAND_STATUS_REG, csr);
 }
 
 int

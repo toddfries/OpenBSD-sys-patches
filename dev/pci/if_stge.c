@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_stge.c,v 1.48 2009/07/28 08:24:06 sthen Exp $	*/
+/*	$OpenBSD: if_stge.c,v 1.52 2009/12/07 15:31:07 sthen Exp $	*/
 /*	$NetBSD: if_stge.c,v 1.27 2005/05/16 21:35:32 bouyer Exp $	*/
 
 /*-
@@ -91,8 +91,6 @@ int	stge_ioctl(struct ifnet *, u_long, caddr_t);
 int	stge_init(struct ifnet *);
 void	stge_stop(struct ifnet *, int);
 
-void	stge_shutdown(void *);
-
 void	stge_reset(struct stge_softc *);
 void	stge_rxdrain(struct stge_softc *);
 int	stge_add_rxbuf(struct stge_softc *, int);
@@ -124,7 +122,7 @@ struct cfattach stge_ca = {
 };
 
 struct cfdriver stge_cd = {
-	0, "stge", DV_IFNET
+	NULL, "stge", DV_IFNET
 };
 
 uint32_t stge_mii_bitbang_read(struct device *);
@@ -340,7 +338,7 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_stge1023 = 0;
 	} else {
 		uint16_t myaddr[ETHER_ADDR_LEN / 2];
-		for (i = 0; i <ETHER_ADDR_LEN / 2; i++) {
+		for (i = 0; i < ETHER_ADDR_LEN / 2; i++) {
 			stge_read_eeprom(sc, STGE_EEPROM_StationAddress0 + i, 
 			    &myaddr[i]);
 			myaddr[i] = letoh16(myaddr[i]);
@@ -424,14 +422,6 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	/*
-	 * Make sure the interface is shutdown during reboot.
-	 */
-	sc->sc_sdhook = shutdownhook_establish(stge_shutdown, sc);
-	if (sc->sc_sdhook == NULL)
-		printf("%s: WARNING: unable to establish shutdown hook\n",
-		    sc->sc_dev.dv_xname);
 	return;
 
 	/*
@@ -461,19 +451,6 @@ stge_attach(struct device *parent, struct device *self, void *aux)
  fail_0:
 	bus_space_unmap(sc->sc_st, sc->sc_sh, iosize);
 	return;
-}
-
-/*
- * stge_shutdown:
- *
- *	Make sure the interface is stopped at reboot time.
- */
-void
-stge_shutdown(void *arg)
-{
-	struct stge_softc *sc = arg;
-
-	stge_stop(&sc->sc_arpcom.ac_if, 1);
 }
 
 static void
@@ -1206,9 +1183,18 @@ stge_init(struct ifnet *ifp)
 	STGE_RXCHAIN_RESET(sc);
 
 	/* Set the station address. */
-	for (i = 0; i < 6; i++)
-		CSR_WRITE_1(sc, STGE_StationAddress0 + i,
-		    sc->sc_arpcom.ac_enaddr[i]);
+	if (sc->sc_stge1023) {
+		CSR_WRITE_2(sc, STGE_StationAddress0,
+		    sc->sc_arpcom.ac_enaddr[0] | sc->sc_arpcom.ac_enaddr[1] << 8);
+		CSR_WRITE_2(sc, STGE_StationAddress1,
+		    sc->sc_arpcom.ac_enaddr[2] | sc->sc_arpcom.ac_enaddr[3] << 8);
+		CSR_WRITE_2(sc, STGE_StationAddress2,
+		    sc->sc_arpcom.ac_enaddr[4] | sc->sc_arpcom.ac_enaddr[5] << 8);
+	} else {
+		for (i = 0; i < ETHER_ADDR_LEN; i++)
+			CSR_WRITE_1(sc, STGE_StationAddress0 + i,
+			    sc->sc_arpcom.ac_enaddr[i]);
+	}
 
 	/*
 	 * Set the statistics masks.  Disable all the RMON stats,
@@ -1539,10 +1525,6 @@ stge_iff(struct stge_softc *sc)
 	 * Always accept frames destined to our station address.
 	 */
 	sc->sc_ReceiveMode = RM_ReceiveBroadcast | RM_ReceiveUnicast;
-
-	/* XXX: ST1023 only works in promiscuous mode */
-	if (sc->sc_stge1023)
-		ifp->if_flags |= IFF_PROMISC;
 
 	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
 		ifp->if_flags |= IFF_ALLMULTI;

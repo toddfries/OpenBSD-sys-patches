@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_age.c,v 1.6 2009/07/28 13:53:56 kevlo Exp $	*/
+/*	$OpenBSD: if_age.c,v 1.11 2010/05/19 14:39:07 oga Exp $	*/
 
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
@@ -33,7 +33,6 @@
 #include "vlan.h"
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/endian.h>
 #include <sys/systm.h>
 #include <sys/types.h>
@@ -116,7 +115,7 @@ void	age_stats_update(struct age_softc *);
 void	age_stop_txmac(struct age_softc *);
 void	age_stop_rxmac(struct age_softc *);
 void	age_rxvlan(struct age_softc *sc);
-void	age_rxfilter(struct age_softc *);
+void	age_iff(struct age_softc *);
 
 const struct pci_matchid age_devices[] = {
 	{ PCI_VENDOR_ATTANSIC, PCI_PRODUCT_ATTANSIC_L1 }
@@ -667,7 +666,7 @@ age_dma_alloc(struct age_softc *sc)
 	/* Allocate DMA'able memory for TX ring */
 	error = bus_dmamem_alloc(sc->sc_dmat, AGE_TX_RING_SZ, 
 	    ETHER_ALIGN, 0, &sc->age_rdata.age_tx_ring_seg, 1, 
-	    &nsegs, BUS_DMA_WAITOK);
+	    &nsegs, BUS_DMA_WAITOK | BUS_DMA_ZERO);
 	if (error) {
 		printf("%s: could not allocate DMA'able memory for Tx ring.\n",
 		    sc->sc_dev.dv_xname);
@@ -679,8 +678,6 @@ age_dma_alloc(struct age_softc *sc)
 	    BUS_DMA_NOWAIT);
 	if (error) 
 		return (ENOBUFS);
-
-	bzero(sc->age_rdata.age_tx_ring, AGE_TX_RING_SZ);
 
 	/*  Load the DMA map for Tx ring. */
 	error = bus_dmamap_load(sc->sc_dmat, sc->age_cdata.age_tx_ring_map,
@@ -707,7 +704,7 @@ age_dma_alloc(struct age_softc *sc)
 	/* Allocate DMA'able memory for RX ring */
 	error = bus_dmamem_alloc(sc->sc_dmat, AGE_RX_RING_SZ, 
 	    ETHER_ALIGN, 0, &sc->age_rdata.age_rx_ring_seg, 1, 
-	    &nsegs, BUS_DMA_WAITOK);
+	    &nsegs, BUS_DMA_WAITOK | BUS_DMA_ZERO);
 	if (error) {
 		printf("%s: could not allocate DMA'able memory for Rx ring.\n",
 		    sc->sc_dev.dv_xname);
@@ -719,8 +716,6 @@ age_dma_alloc(struct age_softc *sc)
 	    BUS_DMA_NOWAIT);
 	if (error)
 		return (ENOBUFS);
-
-	bzero(sc->age_rdata.age_rx_ring, AGE_RX_RING_SZ);
 
 	/* Load the DMA map for Rx ring. */
 	error = bus_dmamap_load(sc->sc_dmat, sc->age_cdata.age_rx_ring_map,
@@ -747,7 +742,7 @@ age_dma_alloc(struct age_softc *sc)
 	/* Allocate DMA'able memory for RX return ring */
 	error = bus_dmamem_alloc(sc->sc_dmat, AGE_RR_RING_SZ, 
 	    ETHER_ALIGN, 0, &sc->age_rdata.age_rr_ring_seg, 1, 
-	    &nsegs, BUS_DMA_WAITOK);
+	    &nsegs, BUS_DMA_WAITOK | BUS_DMA_ZERO);
 	if (error) {
 		printf("%s: could not allocate DMA'able memory for Rx "
 		    "return ring.\n", sc->sc_dev.dv_xname);
@@ -759,8 +754,6 @@ age_dma_alloc(struct age_softc *sc)
 	    BUS_DMA_NOWAIT);
 	if (error)
 		return (ENOBUFS);
-
-	bzero(sc->age_rdata.age_rr_ring, AGE_RR_RING_SZ);
 
 	/*  Load the DMA map for Rx return ring. */
 	error = bus_dmamap_load(sc->sc_dmat, sc->age_cdata.age_rr_ring_map,
@@ -788,7 +781,7 @@ age_dma_alloc(struct age_softc *sc)
 	/* Allocate DMA'able memory for CMB block */
 	error = bus_dmamem_alloc(sc->sc_dmat, AGE_CMB_BLOCK_SZ, 
 	    ETHER_ALIGN, 0, &sc->age_rdata.age_cmb_block_seg, 1, 
-	    &nsegs, BUS_DMA_WAITOK);
+	    &nsegs, BUS_DMA_WAITOK | BUS_DMA_ZERO);
 	if (error) {
 		printf("%s: could not allocate DMA'able memory for "
 		    "CMB block\n", sc->sc_dev.dv_xname);
@@ -800,8 +793,6 @@ age_dma_alloc(struct age_softc *sc)
 	    BUS_DMA_NOWAIT);
 	if (error)
 		return (ENOBUFS);
-
-	bzero(sc->age_rdata.age_cmb_block, AGE_CMB_BLOCK_SZ);
 
 	/*  Load the DMA map for CMB block. */
 	error = bus_dmamap_load(sc->sc_dmat, sc->age_cdata.age_cmb_block_map,
@@ -830,7 +821,7 @@ age_dma_alloc(struct age_softc *sc)
 	/* Allocate DMA'able memory for SMB block */
 	error = bus_dmamem_alloc(sc->sc_dmat, AGE_SMB_BLOCK_SZ, 
 	    ETHER_ALIGN, 0, &sc->age_rdata.age_smb_block_seg, 1, 
-	    &nsegs, BUS_DMA_WAITOK);
+	    &nsegs, BUS_DMA_WAITOK | BUS_DMA_ZERO);
 	if (error) {
 		printf("%s: could not allocate DMA'able memory for "
 		    "SMB block\n", sc->sc_dev.dv_xname);
@@ -842,8 +833,6 @@ age_dma_alloc(struct age_softc *sc)
 	    BUS_DMA_NOWAIT);
 	if (error)
 		return (ENOBUFS);
-
-	bzero(sc->age_rdata.age_smb_block, AGE_SMB_BLOCK_SZ);
 
 	/*  Load the DMA map for SMB block */
 	error = bus_dmamap_load(sc->sc_dmat, sc->age_cdata.age_smb_block_map,
@@ -1100,7 +1089,7 @@ age_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING)
-			age_rxfilter(sc);
+			age_iff(sc);
 		error = 0;
 	}
 
@@ -1168,43 +1157,18 @@ age_encap(struct age_softc *sc, struct mbuf **m_head)
 		error = EFBIG;
 	}
 	if (error == EFBIG) {
-		error = 0;
-
-		MGETHDR(m, M_DONTWAIT, MT_DATA);
-		if (m == NULL) {
+		if (m_defrag(*m_head, M_DONTWAIT)) {
 			printf("%s: can't defrag TX mbuf\n", 
 			    sc->sc_dev.dv_xname);
 			m_freem(*m_head);
 			*m_head = NULL;
 			return (ENOBUFS);
 		}
-
-		M_DUP_PKTHDR(m, *m_head);
-		if ((*m_head)->m_pkthdr.len > MHLEN) {
-			MCLGET(m, M_DONTWAIT);
-			if (!(m->m_flags & M_EXT)) {
-				m_freem(*m_head);
-				m_freem(m);
-				*m_head = NULL;
-				return (ENOBUFS);
-			}
-		}
-		m_copydata(*m_head, 0, (*m_head)->m_pkthdr.len,
-		    mtod(m, caddr_t));
-		m_freem(*m_head);
-		m->m_len = m->m_pkthdr.len;
-		*m_head = m;
-
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, map, *m_head,
 		  	    BUS_DMA_NOWAIT);
-
 		if (error != 0) {
 			printf("%s: could not load defragged TX mbuf\n",
 			    sc->sc_dev.dv_xname);
-			if (!error) {
-				bus_dmamap_unload(sc->sc_dmat, map);
-				error = EFBIG;
-			}
 			m_freem(*m_head);
 			*m_head = NULL;
 			return (error);
@@ -1833,7 +1797,8 @@ age_init(struct ifnet *ifp)
 	    MAC_CFG_PREAMBLE_MASK));
 
 	/* Set up the receive filter. */
-	age_rxfilter(sc);
+	age_iff(sc);
+
 	age_rxvlan(sc);
 
 	reg = CSR_READ_4(sc, AGE_MAC_CFG);
@@ -2236,7 +2201,7 @@ age_rxvlan(struct age_softc *sc)
 }
 
 void
-age_rxfilter(struct age_softc *sc)
+age_iff(struct age_softc *sc)
 {
 	struct arpcom *ac = &sc->sc_arpcom;
 	struct ifnet *ifp = &ac->ac_if;
@@ -2268,7 +2233,7 @@ age_rxfilter(struct age_softc *sc)
 
 		ETHER_FIRST_MULTI(step, ac, enm);
 		while (enm != NULL) {
-			crc = ether_crc32_le(enm->enm_addrlo, 
+			crc = ether_crc32_be(enm->enm_addrlo, 
 			    ETHER_ADDR_LEN);
 
 			mchash[crc >> 31] |= 1 << ((crc >> 26) & 0x1f);

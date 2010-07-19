@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tl.c,v 1.47 2009/03/29 21:53:52 sthen Exp $	*/
+/*	$OpenBSD: if_tl.c,v 1.50 2010/05/19 15:27:35 oga Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -264,7 +264,6 @@ int tl_ioctl(struct ifnet *, u_long, caddr_t);
 void tl_init(void *);
 void tl_stop(struct tl_softc *);
 void tl_watchdog(struct ifnet *);
-void tl_shutdown(void *);
 int tl_ifmedia_upd(struct ifnet *);
 void tl_ifmedia_sts(struct ifnet *, struct ifmediareq *);
 
@@ -2048,7 +2047,7 @@ tl_attach(parent, self, aux)
 
 	sc->sc_dmat = pa->pa_dmat;
 	if (bus_dmamem_alloc(sc->sc_dmat, sizeof(struct tl_list_data),
-	    PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) {
+	    PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 		printf("%s: can't alloc list\n", sc->sc_dev.dv_xname);
 		bus_space_unmap(sc->tl_btag, sc->tl_bhandle, iosize);
 		return;
@@ -2078,7 +2077,6 @@ tl_attach(parent, self, aux)
 		return;
 	}
 	sc->tl_ldata = (struct tl_list_data *)kva;
-	bzero(sc->tl_ldata, sizeof(struct tl_list_data));
 
 	for (sc->tl_product = tl_prods; sc->tl_product->tp_vend;
 	     sc->tl_product++) {
@@ -2176,8 +2174,6 @@ tl_attach(parent, self, aux)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	shutdownhook_establish(tl_shutdown, sc);
 }
 
 void
@@ -2191,19 +2187,10 @@ tl_wait_up(xsc)
 	ifp->if_flags &= ~IFF_OACTIVE;
 }
 
-void
-tl_shutdown(xsc)
-	void *xsc;
-{
-	struct tl_softc *sc = xsc;
-
-	tl_stop(sc);
-}
-
 struct cfattach tl_ca = {
 	sizeof(struct tl_softc), tl_probe, tl_attach
 };
 
 struct cfdriver tl_cd = {
-	0, "tl", DV_IFNET
+	NULL, "tl", DV_IFNET
 };

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_init.c,v 1.24 2009/06/16 23:54:58 oga Exp $	*/
+/*	$OpenBSD: uvm_init.c,v 1.27 2010/07/13 16:49:16 deraadt Exp $	*/
 /*	$NetBSD: uvm_init.c,v 1.14 2000/06/27 17:29:23 mrg Exp $	*/
 
 /*
@@ -48,6 +48,7 @@
 #include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/vnode.h>
+#include <sys/pool.h>
 
 #include <uvm/uvm.h>
 
@@ -126,6 +127,11 @@ uvm_init(void)
 	kmeminit();
 
 	/*
+	 * step 6.5: init the dma allocator, which is backed by pools.
+	 */
+	dma_alloc_init();
+
+	/*
 	 * step 7: init all pagers and the pager_map.
 	 */
 
@@ -143,12 +149,10 @@ uvm_init(void)
 	uvm_km_page_init();
 
 	/*
-	 * the VM system is now up!  now that malloc is up we can resize the
-	 * <obj,off> => <page> hash table for general use and enable paging
-	 * of kernel objects.
+	 * the VM system is now up!  now that malloc is up we can
+	 * enable paging of kernel objects.
 	 */
 
-	uvm_page_rehash();
 	uao_create(VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS,
 	    UAO_FLAG_KERNSWAP);
 

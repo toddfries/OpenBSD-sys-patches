@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_ixgb.c,v 1.53 2009/06/24 13:36:56 deraadt Exp $ */
+/* $OpenBSD: if_ixgb.c,v 1.55 2009/08/13 14:24:47 jasper Exp $ */
 
 #include <dev/pci/if_ixgb.h>
 
@@ -64,7 +64,6 @@ const struct pci_matchid ixgb_devices[] = {
  *********************************************************************/
 int  ixgb_probe(struct device *, void *, void *);
 void ixgb_attach(struct device *, struct device *, void *);
-void ixgb_shutdown(void *);
 int  ixgb_intr(void *);
 void ixgb_power(int, void *);
 void ixgb_start(struct ifnet *);
@@ -126,7 +125,7 @@ struct cfattach ixgb_ca = {
 };
 
 struct cfdriver ixgb_cd = {
-	0, "ixgb", DV_IFNET
+	NULL, "ixgb", DV_IFNET
 };
 
 /* some defines for controlling descriptor fetches in h/w */
@@ -247,7 +246,6 @@ ixgb_attach(struct device *parent, struct device *self, void *aux)
 
 	INIT_DEBUGOUT("ixgb_attach: end");
 	sc->sc_powerhook = powerhook_establish(ixgb_power, sc);
-	sc->sc_shutdownhook = shutdownhook_establish(ixgb_shutdown, sc);
 	return;
 
 err_hw_init:
@@ -270,20 +268,6 @@ ixgb_power(int why, void *arg)
 		if (ifp->if_flags & IFF_UP)
 			ixgb_init(sc);
 	}
-}
-
-/*********************************************************************
- *
- *  Shutdown entry point
- *
- **********************************************************************/ 
-
-void
-ixgb_shutdown(void *arg)
-{
-	struct ixgb_softc *sc = arg;
-
-	ixgb_stop(sc);
 }
 
 /*********************************************************************

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.104 2009/07/09 22:29:56 thib Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.119 2010/07/02 01:25:05 art Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -141,10 +141,9 @@ sys_rfork(struct proc *p, void *v, register_t *retval)
 
 	if (rforkflags & RFMEM)
 		flags |= FORK_SHAREVM;
-#ifdef RTHREADS
+
 	if (rforkflags & RFTHREAD)
-		flags |= FORK_THREAD | FORK_SIGHAND;
-#endif
+		flags |= FORK_THREAD | FORK_SIGHAND | FORK_NOZOMBIE;
 
 	return (fork1(p, SIGCHLD, flags, NULL, 0, NULL, NULL, retval, NULL));
 }
@@ -153,15 +152,34 @@ sys_rfork(struct proc *p, void *v, register_t *retval)
  * Allocate and initialize a new process.
  */
 void
-process_new(struct proc *newproc, struct proc *parent)
+process_new(struct proc *newproc, struct proc *parentproc)
 {
-	struct process *pr;
+	struct process *pr, *parent;
 
 	pr = pool_get(&process_pool, PR_WAITOK);
 	pr->ps_mainproc = newproc;
 	TAILQ_INIT(&pr->ps_threads);
 	TAILQ_INSERT_TAIL(&pr->ps_threads, newproc, p_thr_link);
 	pr->ps_refcnt = 1;
+
+	parent = parentproc->p_p;
+
+	/*
+	 * Make a process structure for the new process.
+	 * Start by zeroing the section of proc that is zero-initialized,
+	 * then copy the section that is copied directly from the parent.
+	 */
+	bzero(&pr->ps_startzero,
+	    (unsigned) ((caddr_t)&pr->ps_endzero - (caddr_t)&pr->ps_startzero));
+	bcopy(&parent->ps_startcopy, &pr->ps_startcopy,
+	    (unsigned) ((caddr_t)&pr->ps_endcopy - (caddr_t)&pr->ps_startcopy));
+
+	/* post-copy fixups */
+	pr->ps_cred = pool_get(&pcred_pool, PR_WAITOK);
+	bcopy(parent->ps_cred, pr->ps_cred, sizeof(*pr->ps_cred));
+	crhold(parent->ps_cred->pc_ucred);
+	pr->ps_limit->p_refcnt++;
+
 	newproc->p_p = pr;
 }
 
@@ -185,6 +203,17 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 #if NSYSTRACE > 0
 	void *newstrp = NULL;
 #endif
+
+	/* sanity check some flag combinations */
+	if (flags & FORK_THREAD) {
+		if (!rthreads_enabled)
+			return (ENOTSUP);
+		if ((flags & (FORK_SIGHAND | FORK_NOZOMBIE)) !=
+		    (FORK_SIGHAND | FORK_NOZOMBIE))
+			return (EINVAL);
+	}
+	if (flags & FORK_SIGHAND && (flags & FORK_SHAREVM) == 0)
+		return (EINVAL);
 
 	/*
 	 * Although process entries are dynamically created, we still keep
@@ -213,7 +242,9 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 		return (EAGAIN);
 	}
 
-	uaddr = uvm_km_alloc1(kernel_map, USPACE, USPACE_ALIGN, 1);
+	uaddr = uvm_km_kmemalloc_pla(kernel_map, uvm.kernel_object, USPACE,
+	    USPACE_ALIGN, 0, dma_constraint.ucr_low, dma_constraint.ucr_high,
+	    0, 0, USPACE/PAGE_SIZE);
 	if (uaddr == 0) {
 		chgproccnt(uid, -1);
 		nprocs--;
@@ -231,7 +262,6 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	p2->p_exitsig = exitsig;
 	p2->p_flag = 0;
 
-#ifdef RTHREADS
 	if (flags & FORK_THREAD) {
 		atomic_setbits_int(&p2->p_flag, P_THREAD);
 		p2->p_p = p1->p_p;
@@ -240,9 +270,6 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	} else {
 		process_new(p2, p1);
 	}
-#else
-	process_new(p2, p1);
-#endif
 
 	/*
 	 * Make a proc table entry for the new process.
@@ -265,23 +292,11 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	 * Increase reference counts on shared objects.
 	 * The p_stats and p_sigacts substructs are set in vm_fork.
 	 */
-	p2->p_emul = p1->p_emul;
 	if (p1->p_flag & P_PROFIL)
 		startprofclock(p2);
 	atomic_setbits_int(&p2->p_flag, p1->p_flag & (P_SUGID | P_SUGIDEXEC));
 	if (flags & FORK_PTRACE)
 		atomic_setbits_int(&p2->p_flag, p1->p_flag & P_TRACED);
-#ifdef RTHREADS
-	if (flags & FORK_THREAD) {
-		/* nothing */
-	} else
-#endif
-	{
-		p2->p_p->ps_cred = pool_get(&pcred_pool, PR_WAITOK);
-		bcopy(p1->p_p->ps_cred, p2->p_p->ps_cred, sizeof(*p2->p_p->ps_cred));
-		p2->p_p->ps_cred->p_refcnt = 1;
-		crhold(p1->p_ucred);
-	}
 
 	/* bump references to the text vnode (for procfs) */
 	p2->p_textvp = p1->p_textvp;
@@ -294,26 +309,6 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 		p2->p_fd = fdshare(p1);
 	else
 		p2->p_fd = fdcopy(p1);
-
-	/*
-	 * If ps_limit is still copy-on-write, bump refcnt,
-	 * otherwise get a copy that won't be modified.
-	 * (If PL_SHAREMOD is clear, the structure is shared
-	 * copy-on-write.)
-	 */
-#ifdef RTHREADS
-	if (flags & FORK_THREAD) {
-		/* nothing */
-	} else
-#endif
-	{
-		if (p1->p_p->ps_limit->p_lflags & PL_SHAREMOD)
-			p2->p_p->ps_limit = limcopy(p1->p_p->ps_limit);
-		else {
-			p2->p_p->ps_limit = p1->p_p->ps_limit;
-			p2->p_p->ps_limit->p_refcnt++;
-		}
-	}
 
 	if (p1->p_session->s_ttyvp != NULL && p1->p_flag & P_CONTROLT)
 		atomic_setbits_int(&p2->p_flag, P_CONTROLT);
@@ -393,6 +388,7 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 #endif
 
 	/* Find an unused pid satisfying 1 <= lastpid <= PID_MAX */
+	rw_enter_write(&allproclk);
 	do {
 		lastpid = 1 + (randompid ? arc4random() : lastpid) % PID_MAX;
 	} while (pidtaken(lastpid));
@@ -400,6 +396,7 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 
 	LIST_INSERT_HEAD(&allproc, p2, p_list);
 	LIST_INSERT_HEAD(PIDHASH(p2->p_pid), p2, p_hash);
+	rw_exit_write(&allproclk);
 	LIST_INSERT_HEAD(&p1->p_children, p2, p_sibling);
 	LIST_INSERT_AFTER(p1, p2, p_pglist);
 	if (p2->p_flag & P_TRACED) {
@@ -442,10 +439,11 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	/*
 	 * Notify any interested parties about the new process.
 	 */
-	KNOTE(&p1->p_klist, NOTE_FORK | p2->p_pid);
+	if ((flags & FORK_THREAD) == 0)
+		KNOTE(&p1->p_p->ps_klist, NOTE_FORK | p2->p_pid);
 
 	/*
-	 * Update stats now that we know the fork was successfull.
+	 * Update stats now that we know the fork was successful.
 	 */
 	uvmexp.forks++;
 	if (flags & FORK_PPWAIT)
@@ -498,7 +496,7 @@ pidtaken(pid_t pid)
 	if (pgfind(pid) != NULL)
 		return (1);
 	LIST_FOREACH(p, &zombproc, p_list)
-		if (p->p_pid == pid || p->p_pgid == pid)
+		if (p->p_pid == pid || (p->p_pgrp && p->p_pgrp->pg_id == pid))
 			return (1);
 	return (0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bnx.c,v 1.81 2009/07/03 04:54:05 dlg Exp $	*/
+/*	$OpenBSD: if_bnx.c,v 1.88 2010/05/24 21:23:23 sthen Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation
@@ -42,6 +42,7 @@ __FBSDID("$FreeBSD: src/sys/dev/bce/if_bce.c,v 1.3 2006/04/13 14:12:26 ru Exp $"
  *   BCM5708C B1, B2
  *   BCM5708S B1, B2
  *   BCM5709C A1, C0
+ *   BCM5709S A1, C0
  *   BCM5716  C0
  *
  * The following controllers are not supported by this driver:
@@ -50,7 +51,7 @@ __FBSDID("$FreeBSD: src/sys/dev/bce/if_bce.c,v 1.3 2006/04/13 14:12:26 ru Exp $"
  *   BCM5708C A0, B0
  *   BCM5708S A0, B0
  *   BCM5709C A0  B0, B1, B2 (pre-production)
- *   BCM5709S A0, A1, B0, B1, B2, C0 (pre-production)
+ *   BCM5709S A0, B0, B1, B2 (pre-production)
  */
 
 #include <dev/pci/if_bnxreg.h>
@@ -158,11 +159,10 @@ const struct pci_matchid bnx_devices[] = {
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5706S },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5708 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5708S },
-
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5709 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5709S },
-	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5716 }
-
+	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5716 },
+	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5716S }
 };
 
 /****************************************************************************/
@@ -341,6 +341,7 @@ int	bnx_nvram_write(struct bnx_softc *, u_int32_t, u_int8_t *, int);
 /*                                                                          */
 /****************************************************************************/
 void	bnx_get_media(struct bnx_softc *);
+void	bnx_init_media(struct bnx_softc *);
 int	bnx_dma_alloc(struct bnx_softc *);
 void	bnx_dma_free(struct bnx_softc *);
 void	bnx_release_resources(struct bnx_softc *);
@@ -404,7 +405,7 @@ struct cfattach bnx_ca = {
 };
 
 struct cfdriver bnx_cd = {
-	0, "bnx", DV_IFNET
+	NULL, "bnx", DV_IFNET
 };
 
 /****************************************************************************/
@@ -906,6 +907,9 @@ bnx_attachhook(void *xsc)
 	sc->bnx_mii.mii_writereg = bnx_miibus_write_reg;
 	sc->bnx_mii.mii_statchg = bnx_miibus_statchg;
 
+	/* Handle any special PHY initialization for SerDes PHYs. */
+	bnx_init_media(sc);
+
 	/* Look for our PHY. */
 	ifmedia_init(&sc->bnx_mii.mii_media, 0, bnx_ifmedia_upd,
 	    bnx_ifmedia_sts);
@@ -1121,6 +1125,16 @@ bnx_miibus_read_reg(struct device *dev, int phy, int reg)
 		return(0);
 	}
 
+	/*
+	 * The BCM5709S PHY is an IEEE Clause 45 PHY
+	 * with special mappings to work with IEEE
+	 * Clause 22 register accesses.
+	 */
+	if ((sc->bnx_phy_flags & BNX_PHY_IEEE_CLAUSE_45_FLAG) != 0) {
+		if (reg >= MII_BMCR && reg <= MII_ANLPRNP)
+			reg += 0x10;
+	}
+
 	if (sc->bnx_phy_flags & BNX_PHY_INT_MODE_AUTO_POLLING_FLAG) {
 		val = REG_RD(sc, BNX_EMAC_MDIO_MODE);
 		val &= ~BNX_EMAC_MDIO_MODE_AUTO_POLL;
@@ -1199,6 +1213,16 @@ bnx_miibus_write_reg(struct device *dev, int phy, int reg, int val)
 	DBPRINT(sc, BNX_EXCESSIVE, "%s(): phy = %d, reg = 0x%04X, "
 	    "val = 0x%04X\n", __FUNCTION__,
 	    phy, (u_int16_t) reg & 0xffff, (u_int16_t) val & 0xffff);
+
+	/*
+	 * The BCM5709S PHY is an IEEE Clause 45 PHY
+	 * with special mappings to work with IEEE
+	 * Clause 22 register accesses.
+	 */
+	if ((sc->bnx_phy_flags & BNX_PHY_IEEE_CLAUSE_45_FLAG) != 0) {
+		if (reg >= MII_BMCR && reg <= MII_ANLPRNP)
+			reg += 0x10;
+	}
 
 	if (sc->bnx_phy_flags & BNX_PHY_INT_MODE_AUTO_POLLING_FLAG) {
 		val1 = REG_RD(sc, BNX_EMAC_MDIO_MODE);
@@ -2180,6 +2204,7 @@ bnx_get_media(struct bnx_softc *sc)
 				DBPRINT(sc, BNX_INFO_LOAD, 
 					"BCM5709 s/w configured for SerDes.\n");
 				sc->bnx_phy_flags |= BNX_PHY_SERDES_FLAG;
+				break;
 			default:
 				DBPRINT(sc, BNX_INFO_LOAD, 
 					"BCM5709 s/w configured for Copper.\n");
@@ -2192,6 +2217,7 @@ bnx_get_media(struct bnx_softc *sc)
 				DBPRINT(sc, BNX_INFO_LOAD, 
 					"BCM5709 s/w configured for SerDes.\n");
 				sc->bnx_phy_flags |= BNX_PHY_SERDES_FLAG;
+				break;
 			default:
 				DBPRINT(sc, BNX_INFO_LOAD, 
 					"BCM5709 s/w configured for Copper.\n");
@@ -2203,6 +2229,14 @@ bnx_get_media(struct bnx_softc *sc)
 
 	if (sc->bnx_phy_flags && BNX_PHY_SERDES_FLAG) {
 		sc->bnx_flags |= BNX_NO_WOL_FLAG;
+
+		if (BNX_CHIP_NUM(sc) == BNX_CHIP_NUM_5709)
+			sc->bnx_phy_flags |= BNX_PHY_IEEE_CLAUSE_45_FLAG;
+
+		/*
+		 * The BCM5708S, BCM5709S, and BCM5716S controllers use a
+		 * separate PHY for SerDes.
+		 */
 		if (BNX_CHIP_NUM(sc) != BNX_CHIP_NUM_5706) {
 			sc->bnx_phy_addr = 2;
 			val = REG_RD_IND(sc, sc->bnx_shmem_base +
@@ -2220,6 +2254,36 @@ bnx_get_media(struct bnx_softc *sc)
 bnx_get_media_exit:
 	DBPRINT(sc, (BNX_INFO_LOAD | BNX_INFO_PHY), 
 		"Using PHY address %d.\n", sc->bnx_phy_addr);
+}
+
+/****************************************************************************/
+/* Performs PHY initialization required before MII drivers access the       */
+/* device.                                                                  */
+/*                                                                          */
+/* Returns:                                                                 */
+/*   Nothing.                                                               */
+/****************************************************************************/
+void
+bnx_init_media(struct bnx_softc *sc)
+{
+	if (sc->bnx_phy_flags & BNX_PHY_IEEE_CLAUSE_45_FLAG) {
+		/*
+		 * Configure the BCM5709S / BCM5716S PHYs to use traditional
+		 * IEEE Clause 22 method. Otherwise we have no way to attach
+		 * the PHY to the mii(4) layer. PHY specific configuration
+		 * is done by the mii(4) layer.
+		 */
+
+		/* Select auto-negotiation MMD of the PHY. */
+		bnx_miibus_write_reg(&sc->bnx_dev, sc->bnx_phy_addr,
+		    BRGPHY_BLOCK_ADDR, BRGPHY_BLOCK_ADDR_ADDR_EXT);
+
+		bnx_miibus_write_reg(&sc->bnx_dev, sc->bnx_phy_addr,
+		    BRGPHY_ADDR_EXT, BRGPHY_ADDR_EXT_AN_MMD);
+
+		bnx_miibus_write_reg(&sc->bnx_dev, sc->bnx_phy_addr,
+		    BRGPHY_BLOCK_ADDR, BRGPHY_BLOCK_ADDR_COMBO_IEEE0);
+	}
 }
 
 /****************************************************************************/
@@ -2358,7 +2422,7 @@ bnx_dma_alloc(struct bnx_softc *sc)
 
 	if (bus_dmamem_alloc(sc->bnx_dmatag, BNX_STATUS_BLK_SZ,
 	    BNX_DMA_ALIGN, BNX_DMA_BOUNDARY, &sc->status_seg, 1,
-	    &sc->status_rseg, BUS_DMA_NOWAIT)) {
+	    &sc->status_rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 		printf(": Could not allocate status block DMA memory!\n");
 		rc = ENOMEM;
 		goto bnx_dma_alloc_exit;
@@ -2379,7 +2443,6 @@ bnx_dma_alloc(struct bnx_softc *sc)
 	}
 
 	sc->status_block_paddr = sc->status_map->dm_segs[0].ds_addr;
-	bzero(sc->status_block, BNX_STATUS_BLK_SZ);
 
 	/* DRC - Fix for 64 bit addresses. */
 	DBPRINT(sc, BNX_INFO, "status_block_paddr = 0x%08X\n",
@@ -2446,7 +2509,7 @@ bnx_dma_alloc(struct bnx_softc *sc)
 
 	if (bus_dmamem_alloc(sc->bnx_dmatag, BNX_STATS_BLK_SZ,
 	    BNX_DMA_ALIGN, BNX_DMA_BOUNDARY, &sc->stats_seg, 1,
-	    &sc->stats_rseg, BUS_DMA_NOWAIT)) {
+	    &sc->stats_rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 		printf(": Could not allocate stats block DMA memory!\n");
 		rc = ENOMEM;
 		goto bnx_dma_alloc_exit;
@@ -2467,7 +2530,6 @@ bnx_dma_alloc(struct bnx_softc *sc)
 	}
 
 	sc->stats_block_paddr = sc->stats_map->dm_segs[0].ds_addr;
-	bzero(sc->stats_block, BNX_STATS_BLK_SZ);
 
 	/* DRC - Fix for 64 bit address. */
 	DBPRINT(sc,BNX_INFO, "stats_block_paddr = 0x%08X\n", 
@@ -2542,7 +2604,7 @@ bnx_dma_alloc(struct bnx_softc *sc)
 
 		if (bus_dmamem_alloc(sc->bnx_dmatag, BNX_RX_CHAIN_PAGE_SZ,
 		    BCM_PAGE_SIZE, BNX_DMA_BOUNDARY, &sc->rx_bd_chain_seg[i], 1,
-		    &sc->rx_bd_chain_rseg[i], BUS_DMA_NOWAIT)) {
+		    &sc->rx_bd_chain_rseg[i], BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 			printf(": Could not allocate Rx desc %d DMA memory!\n", 
 			    i);
 			rc = ENOMEM;
@@ -2565,7 +2627,6 @@ bnx_dma_alloc(struct bnx_softc *sc)
 			goto bnx_dma_alloc_exit;
 		}
 
-		bzero(sc->rx_bd_chain[i], BNX_RX_CHAIN_PAGE_SZ);
 		sc->rx_bd_chain_paddr[i] =
 		    sc->rx_bd_chain_map[i]->dm_segs[0].ds_addr;
 
@@ -3461,6 +3522,7 @@ bnx_blockinit(struct bnx_softc *sc)
 
 	/* Set up link change interrupt generation. */
 	REG_WR(sc, BNX_EMAC_ATTENTION_ENA, BNX_EMAC_ATTENTION_ENA_LINK);
+	REG_WR(sc, BNX_HC_ATTN_BITS_ENABLE, STATUS_ATTN_BITS_LINK_STATE);
 
 	/* Program the physical address of the status block. */
 	REG_WR(sc, BNX_HC_STATUS_ADDR_L, (u_int32_t)(sc->status_block_paddr));
@@ -3592,16 +3654,9 @@ bnx_get_buf(struct bnx_softc *sc, u_int16_t *prod,
 	    *prod_bseq);
 
 	/* This is a new mbuf allocation. */
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->arpcom.ac_if, MCLBYTES);
+	if (!m)
 		return (ENOBUFS);
-
-	/* Attach a cluster to the mbuf. */
-	MCLGETI(m, M_DONTWAIT, &sc->arpcom.ac_if, MCLBYTES);
-	if (!(m->m_flags & M_EXT)) {
-		m_freem(m);
-		return (ENOBUFS);
-	}
 	m->m_len = m->m_pkthdr.len = MCLBYTES;
 	/* the chip aligns the ip header for us, no need to m_adj */
 
@@ -3633,12 +3688,12 @@ bnx_get_buf(struct bnx_softc *sc, u_int16_t *prod,
 	/* Setup the rx_bd for the first segment. */
 	rxbd = &sc->rx_bd_chain[RX_PAGE(*chain_prod)][RX_IDX(*chain_prod)];
 
-	addr = (u_int32_t)(map->dm_segs[0].ds_addr);
-	rxbd->rx_bd_haddr_lo = htole32(addr);
+	addr = (u_int32_t)map->dm_segs[0].ds_addr;
+	rxbd->rx_bd_haddr_lo = addr;
 	addr = (u_int32_t)((u_int64_t)map->dm_segs[0].ds_addr >> 32);
-	rxbd->rx_bd_haddr_hi = htole32(addr);
-	rxbd->rx_bd_len = htole32(map->dm_segs[0].ds_len);
-	rxbd->rx_bd_flags = htole32(RX_BD_FLAGS_START);
+	rxbd->rx_bd_haddr_hi = addr;
+	rxbd->rx_bd_len = map->dm_segs[0].ds_len;
+	rxbd->rx_bd_flags = RX_BD_FLAGS_START;
 	*prod_bseq += map->dm_segs[0].ds_len;
 
 	for (i = 1; i < map->dm_nsegs; i++) {
@@ -3648,16 +3703,16 @@ bnx_get_buf(struct bnx_softc *sc, u_int16_t *prod,
 		rxbd =
 		    &sc->rx_bd_chain[RX_PAGE(*chain_prod)][RX_IDX(*chain_prod)];
 
-		addr = (u_int32_t)(map->dm_segs[i].ds_addr);
-		rxbd->rx_bd_haddr_lo = htole32(addr);
+		addr = (u_int32_t)map->dm_segs[i].ds_addr;
+		rxbd->rx_bd_haddr_lo = addr;
 		addr = (u_int32_t)((u_int64_t)map->dm_segs[i].ds_addr >> 32);
-		rxbd->rx_bd_haddr_hi = htole32(addr);
-		rxbd->rx_bd_len = htole32(map->dm_segs[i].ds_len);
+		rxbd->rx_bd_haddr_hi = addr;
+		rxbd->rx_bd_len = map->dm_segs[i].ds_len;
 		rxbd->rx_bd_flags = 0;
 		*prod_bseq += map->dm_segs[i].ds_len;
 	}
 
-	rxbd->rx_bd_flags |= htole32(RX_BD_FLAGS_END);
+	rxbd->rx_bd_flags |= RX_BD_FLAGS_END;
 
 	/*
 	 * Save the mbuf, adjust the map pointer (swap map for first and
@@ -3811,10 +3866,10 @@ bnx_init_tx_chain(struct bnx_softc *sc)
 		else
 			j = i + 1;
 
-		addr = (u_int32_t)(sc->tx_bd_chain_paddr[j]);
-		txbd->tx_bd_haddr_lo = htole32(addr);
+		addr = (u_int32_t)sc->tx_bd_chain_paddr[j];
+		txbd->tx_bd_haddr_lo = addr;
 		addr = (u_int32_t)((u_int64_t)sc->tx_bd_chain_paddr[j] >> 32);
-		txbd->tx_bd_haddr_hi = htole32(addr);
+		txbd->tx_bd_haddr_hi = addr;
 	}
 
 	/*
@@ -4023,9 +4078,9 @@ bnx_init_rx_chain(struct bnx_softc *sc)
 
 		/* Setup the chain page pointers. */
 		addr = (u_int32_t)((u_int64_t)sc->rx_bd_chain_paddr[j] >> 32);
-		rxbd->rx_bd_haddr_hi = htole32(addr);
-		addr = (u_int32_t)(sc->rx_bd_chain_paddr[j]);
-		rxbd->rx_bd_haddr_lo = htole32(addr);
+		rxbd->rx_bd_haddr_hi = addr;
+		addr = (u_int32_t)sc->rx_bd_chain_paddr[j];
+		rxbd->rx_bd_haddr_lo = addr;
 	}
 
 	/* Fill up the RX chain. */
@@ -4848,21 +4903,21 @@ bnx_tx_encap(struct bnx_softc *sc, struct mbuf *m)
 		chain_prod = TX_CHAIN_IDX(prod);
 		txbd = &sc->tx_bd_chain[TX_PAGE(chain_prod)][TX_IDX(chain_prod)];
 
-		addr = (u_int32_t)(map->dm_segs[i].ds_addr);
-		txbd->tx_bd_haddr_lo = htole32(addr);
+		addr = (u_int32_t)map->dm_segs[i].ds_addr;
+		txbd->tx_bd_haddr_lo = addr;
 		addr = (u_int32_t)((u_int64_t)map->dm_segs[i].ds_addr >> 32);
-		txbd->tx_bd_haddr_hi = htole32(addr);
-		txbd->tx_bd_mss_nbytes = htole16(map->dm_segs[i].ds_len);
-		txbd->tx_bd_vlan_tag = htole16(vlan_tag);
-		txbd->tx_bd_flags = htole16(flags);
+		txbd->tx_bd_haddr_hi = addr;
+		txbd->tx_bd_mss_nbytes = map->dm_segs[i].ds_len;
+		txbd->tx_bd_vlan_tag = vlan_tag;
+		txbd->tx_bd_flags = flags;
 		prod_bseq += map->dm_segs[i].ds_len;
 		if (i == 0)
-			txbd->tx_bd_flags |= htole16(TX_BD_FLAGS_START);
+			txbd->tx_bd_flags |= TX_BD_FLAGS_START;
 		prod = NEXT_TX_BD(prod);
  	}
 
 	/* Set the END flag on the last TX buffer descriptor. */
-	txbd->tx_bd_flags |= htole16(TX_BD_FLAGS_END);
+	txbd->tx_bd_flags |= TX_BD_FLAGS_END;
 
 	DBRUN(BNX_INFO_SEND, bnx_dump_tx_chain(sc, debug_prod,
 	    map->dm_nsegs));

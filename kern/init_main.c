@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.160 2009/07/09 22:29:56 thib Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.169 2010/07/03 04:44:51 guenther Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -99,13 +99,14 @@
 extern void nfs_init(void);
 #endif
 
+#include "mpath.h"
 #include "vscsi.h"
 #include "softraid.h"
 
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-"Copyright (c) 1995-2009 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+"Copyright (c) 1995-2010 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -215,6 +216,7 @@ main(void *framep)
 	printf("%s\n", copyright);
 
 	KERNEL_LOCK_INIT();
+	SCHED_LOCK_INIT();
 
 	uvm_init();
 	disk_init();		/* must come before autoconfiguration */
@@ -263,6 +265,9 @@ main(void *framep)
 	process0.ps_refcnt = 1;
 	p->p_p = &process0;
 
+	/* Set the default routing table/domain. */
+	process0.ps_rtableid = 0;
+
 	LIST_INSERT_HEAD(&allproc, p, p_list);
 	p->p_pgrp = &pgrp0;
 	LIST_INSERT_HEAD(PIDHASH(0), p, p_hash);
@@ -285,7 +290,6 @@ main(void *framep)
 	timeout_set(&p->p_realit_to, realitexpire, p);
 
 	/* Create credentials. */
-	cred0.p_refcnt = 1;
 	p->p_cred = &cred0;
 	p->p_ucred = crget();
 	p->p_ucred->cr_ngroups = 1;	/* group 0 */
@@ -339,6 +343,9 @@ main(void *framep)
 	/* Initialize work queues */
 	workq_init();
 
+	/* Initialize the interface/address trees */
+	ifinit();
+
 	/* Configure the devices */
 	cpu_configure();
 
@@ -387,7 +394,6 @@ main(void *framep)
 	 * until everything is ready.
 	 */
 	s = splnet();
-	ifinit();
 	domaininit();
 	if_attachdomain();
 	splx(s);
@@ -444,6 +450,9 @@ main(void *framep)
 
 	dostartuphooks();
 
+#if NMPATH > 0
+	config_rootfound("mpath", NULL);
+#endif
 #if NVSCSI > 0
 	config_rootfound("vscsi", NULL);
 #endif
@@ -537,8 +546,11 @@ main(void *framep)
 	start_init_exec = 1;
 	wakeup((void *)&start_init_exec);
 
-	/* The scheduler is an infinite loop. */
-	uvm_scheduler();
+        /*
+         * proc0: nothing to do, back to sleep
+         */
+        while (1)
+                tsleep(&proc0, PVM, "scheduler", 0);
 	/* NOTREACHED */
 }
 

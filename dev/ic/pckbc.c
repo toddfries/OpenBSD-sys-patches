@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbc.c,v 1.18 2008/09/10 14:01:22 blambert Exp $ */
+/* $OpenBSD: pckbc.c,v 1.21 2010/01/12 20:31:22 drahn Exp $ */
 /* $NetBSD: pckbc.c,v 1.5 2000/06/09 04:58:35 soda Exp $ */
 
 /*
@@ -44,7 +44,7 @@
 
 #include "pckbd.h"
 
-#if (NPCKBD > 0)
+#if NPCKBD > 0
 #include <dev/pckbc/pckbdvar.h>
 #endif
 
@@ -102,6 +102,7 @@ const char *pckbc_slot_names[] = { "kbd", "aux" };
 
 #define KBC_DEVCMD_ACK 0xfa
 #define KBC_DEVCMD_RESEND 0xfe
+#define KBC_DEVCMD_BAT 0xaa
 
 #define	KBD_DELAY	DELAY(8)
 
@@ -142,8 +143,8 @@ pckbc_poll_data1(iot, ioh_d, ioh_c, slot, checkaux)
 	int i;
 	u_char stat;
 
-	/* if 1 port read takes 1us (?), this polls for 100ms */
-	for (i = 100000; i; i--) {
+	/* polls for ~100ms */
+	for (i = 100; i; i--, delay(1000)) {
 		stat = bus_space_read_1(iot, ioh_c, 0);
 		if (stat & KBS_DIB) {
 			register u_char c;
@@ -290,7 +291,7 @@ pckbc_attach(sc)
 	struct pckbc_internal *t;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh_d, ioh_c;
-	int res;
+	int haskbd = 0, res;
 	u_char cmdbits = 0;
 
 	t = sc->id;
@@ -333,16 +334,39 @@ pckbc_attach(sc)
 		if (res != 0)
 			printf("kbc: returned %x on kbd slot test\n", res);
 #endif
-		if (pckbc_attach_slot(sc, PCKBC_KBD_SLOT))
+		if (pckbc_attach_slot(sc, PCKBC_KBD_SLOT)) {
 			cmdbits |= KC8_KENABLE;
+			haskbd = 1;
+		}
 	} else {
 		printf("kbc: kbd port test: %x\n", res);
 		return;
 	}
 #else
-	if (pckbc_attach_slot(sc, PCKBC_KBD_SLOT))
+	if (pckbc_attach_slot(sc, PCKBC_KBD_SLOT)) {
 		cmdbits |= KC8_KENABLE;
+		haskbd = 1;
+	}
 #endif /* 0 */
+	if (haskbd == 0) {
+#if defined(__i386__) || defined(__amd64__)
+		/*
+		 * If there is no keyboard present, yet we are the console,
+		 * we might be on a legacy-free PC where the PS/2 emulated
+		 * keyboard was elected as console, but went away as soon
+		 * as the USB controller drivers attached.
+		 *
+		 * In that case, we want to release ourselves from console
+		 * duties.
+		 */
+		if (pckbc_console != 0) {
+			extern void wscn_input_init(int);
+
+			pckbc_console = 0;
+			wscn_input_init(1);
+		}
+#endif
+	}
 
 	/*
 	 * Check aux port ok.
@@ -597,9 +621,14 @@ pckbc_poll_cmd1(t, slot, cmd)
 			cmd->cmdidx++;
 			continue;
 		}
-		if (c == KBC_DEVCMD_RESEND) {
+		/*
+		 * Some legacy free PCs keep returning Basic Assurance Test
+		 * (BAT) instead of something usable, so fail gracefully.
+		 */
+		if (c == KBC_DEVCMD_RESEND || c == KBC_DEVCMD_BAT) {
 #ifdef PCKBCDEBUG
-			printf("pckbc_cmd: RESEND\n");
+			printf("pckbc_cmd: %s\n",
+			    c == KBC_DEVCMD_RESEND ? "RESEND": "BAT");
 #endif
 			if (cmd->retries++ < 5)
 				continue;
@@ -607,7 +636,7 @@ pckbc_poll_cmd1(t, slot, cmd)
 #ifdef PCKBCDEBUG
 				printf("pckbc: cmd failed\n");
 #endif
-				cmd->status = EIO;
+				cmd->status = ENXIO;
 				return;
 			}
 		}
@@ -794,7 +823,7 @@ pckbc_cmdresponse(t, slot, data)
 #ifdef PCKBCDEBUG
 				printf("pckbc: cmd failed\n");
 #endif
-				cmd->status = EIO;
+				cmd->status = ENXIO;
 				/* dequeue */
 			}
 		} else {

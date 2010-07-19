@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_generic.c,v 1.66 2009/06/08 23:18:42 deraadt Exp $	*/
+/*	$OpenBSD: sys_generic.c,v 1.69 2010/07/08 20:15:03 deraadt Exp $	*/
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*
@@ -63,7 +63,6 @@
 #include <uvm/uvm_extern.h>
 
 int selscan(struct proc *, fd_set *, fd_set *, int, int, register_t *);
-int seltrue(dev_t, int, struct proc *);
 void pollscan(struct proc *, struct pollfd *, u_int, register_t *);
 int pollout(struct pollfd *, struct pollfd *, u_int);
 
@@ -396,7 +395,7 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 	caddr_t data, memp;
 	int tmp;
 #define STK_PARAMS	128
-	char stkbuf[STK_PARAMS];
+	u_long stkbuf[STK_PARAMS / sizeof(u_long)];
 
 	fdp = p->p_fd;
 	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
@@ -427,7 +426,7 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 		memp = (caddr_t)malloc((u_long)size, M_IOCTLOPS, M_WAITOK);
 		data = memp;
 	} else
-		data = stkbuf;
+		data = (caddr_t)stkbuf;
 	if (com&IOC_IN) {
 		if (size) {
 			error = copyin(SCARG(uap, data), data, (u_int)size);
@@ -680,6 +679,13 @@ seltrue(dev_t dev, int events, struct proc *p)
 	return (events & (POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM));
 }
 
+int
+selfalse(dev_t dev, int events, struct proc *p)
+{
+
+	return (0);
+}
+
 /*
  * Record a select request.
  */
@@ -708,6 +714,7 @@ selwakeup(struct selinfo *sip)
 	struct proc *p;
 	int s;
 
+	KNOTE(&sip->si_note, 0);
 	if (sip->si_selpid == 0)
 		return;
 	if (sip->si_flags & SI_COLL) {

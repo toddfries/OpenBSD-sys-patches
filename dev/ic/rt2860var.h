@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860var.h,v 1.11 2008/12/29 13:27:27 damien Exp $	*/
+/*	$OpenBSD: rt2860var.h,v 1.16 2010/04/06 16:41:54 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007
@@ -117,10 +117,14 @@ struct rt2860_softc {
 	bus_space_tag_t			sc_st;
 	bus_space_handle_t		sc_sh;
 
+	uint16_t			(*sc_srom_read)(struct rt2860_softc *,
+					    uint16_t);
+
 	int				sc_flags;
 #define RT2860_ENABLED		(1 << 0)
 #define RT2860_FWLOADED		(1 << 1)
 #define RT2860_ADVANCED_PS	(1 << 2)
+#define RT2860_PCIE		(1 << 3)
 
 	uint32_t			sc_ic_flags;
 	int				fixed_ridx;
@@ -136,24 +140,30 @@ struct rt2860_softc {
 
 	int				sc_tx_timer;
 	int				mgtqid;
-	int				sifs;
 	uint8_t				qfullmsk;
 
-	uint32_t			mac_rev;
+	uint16_t			mac_ver;
+	uint16_t			mac_rev;
 	uint8_t				rf_rev;
 	uint8_t				freq;
 	uint8_t				ntxchains;
 	uint8_t				nrxchains;
 	uint8_t				pslevel;
-	int8_t				txpow1[50];
-	int8_t				txpow2[50];
+	int8_t				txpow1[54];
+	int8_t				txpow2[54];
 	int8_t				rssi_2ghz[3];
 	int8_t				rssi_5ghz[3];
 	uint8_t				lna[4];
+	uint8_t				rf24_20mhz;
+	uint8_t				rf24_40mhz;
+	uint8_t				patch_dac;
+	uint8_t				rfswitch;
 	uint8_t				ext_2ghz_lna;
 	uint8_t				ext_5ghz_lna;
 	uint8_t				calib_2ghz;
 	uint8_t				calib_5ghz;
+	uint8_t				txmixgain_2ghz;
+	uint8_t				txmixgain_5ghz;
 	uint8_t				tssi_2ghz[9];
 	uint8_t				tssi_5ghz[9];
 	uint8_t				step_2ghz;
@@ -161,7 +171,7 @@ struct rt2860_softc {
 	struct {
 		uint8_t	reg;
 		uint8_t	val;
-	}				bbp[8];
+	}				bbp[8], rf[10];
 	uint8_t				leds;
 	uint16_t			led[3];
 	uint32_t			txpow20mhz[5];
@@ -186,11 +196,9 @@ struct rt2860_softc {
 #define sc_txtap			sc_txtapu.th
 	int				sc_txtap_len;
 #endif
-	void				*sc_sdhook;
 	void				*sc_powerhook;
 };
 
 int	rt2860_attach(void *, int);
 int	rt2860_detach(void *);
 int	rt2860_intr(void *);
-void	rt2860_shutdown(void *);

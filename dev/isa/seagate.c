@@ -1,4 +1,4 @@
-/*	$OpenBSD: seagate.c,v 1.27 2009/02/16 21:19:07 miod Exp $	*/
+/*	$OpenBSD: seagate.c,v 1.36 2010/06/28 18:31:02 krw Exp $	*/
 
 /*
  * ST01/02, Future Domain TMC-885, TMC-950 SCSI driver
@@ -73,7 +73,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/queue.h>
 #include <sys/malloc.h>
 
@@ -274,7 +273,7 @@ static const char *bases[] = {
 
 struct		sea_scb *sea_get_scb(struct sea_softc *, int);
 int		seaintr(void *);
-int		sea_scsi_cmd(struct scsi_xfer *);
+void		sea_scsi_cmd(struct scsi_xfer *);
 int 		sea_poll(struct sea_softc *, struct scsi_xfer *, int);
 int		sea_select(struct sea_softc *sea, struct sea_scb *scb);
 int		sea_transfer_pio(struct sea_softc *sea, u_char *phase,
@@ -294,14 +293,6 @@ struct scsi_adapter sea_switch = {
 	scsi_minphys,	/* no special minphys(), since driver uses PIO */
 	0,
 	0,
-};
-
-/* the below structure is so we have a default dev struct for our link struct */
-struct scsi_device sea_dev = {
-	NULL,		/* use default error handler */
-	NULL,		/* have a queue, served by this */
-	NULL,		/* have no async handler */
-	NULL,		/* Use default 'done' routine */
 };
 
 int	seaprobe(struct device *, void *, void *);
@@ -435,7 +426,6 @@ seaattach(struct device *parent, struct device *self, void *aux)
 	sea->sc_link.adapter_softc = sea;
 	sea->sc_link.adapter_target = sea->our_id;
 	sea->sc_link.adapter = &sea_switch;
-	sea->sc_link.device = &sea_dev;
 	sea->sc_link.openings = 1;
 
 	printf("\n");
@@ -532,7 +522,7 @@ sea_init(struct sea_softc *sea)
  * start a scsi operation given the command and the data address. Also needs
  * the unit, target and lu.
  */
-int
+void
 sea_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link *sc_link = xs->sc_link;
@@ -544,15 +534,14 @@ sea_scsi_cmd(struct scsi_xfer *xs)
 	SC_DEBUG(sc_link, SDEV_DB2, ("sea_scsi_cmd\n"));
 
 	flags = xs->flags;
-	if (flags & ITSDONE) {
-		printf("%s: done?\n", sea->sc_dev.dv_xname);
-		xs->flags &= ~ITSDONE;
-	}
 	if ((scb = sea_get_scb(sea, flags)) == NULL) {
-		return (NO_CCB);
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		return;
 	}
 	scb->flags = SCB_ACTIVE;
 	scb->xs = xs;
+	timeout_set(&scb->xs->stimeout, sea_timeout, scb);
 
 	if (flags & SCSI_RESET) {
 		/*
@@ -561,7 +550,8 @@ sea_scsi_cmd(struct scsi_xfer *xs)
 		 */
 		printf("%s: resetting\n", sea->sc_dev.dv_xname);
 		xs->error = XS_DRIVER_STUFFUP;
-		return COMPLETE;
+		scsi_done(xs);
+		return;
 	}
 
 	/*
@@ -582,10 +572,9 @@ sea_scsi_cmd(struct scsi_xfer *xs)
 	 * Usually return SUCCESSFULLY QUEUED
 	 */
 	if ((flags & SCSI_POLL) == 0) {
-		timeout_set(&scb->xs->stimeout, sea_timeout, scb);
 		timeout_add_msec(&scb->xs->stimeout, xs->timeout);
 		splx(s);
-		return SUCCESSFULLY_QUEUED;
+		return;
 	}
 
 	splx(s);
@@ -598,7 +587,6 @@ sea_scsi_cmd(struct scsi_xfer *xs)
 		if (sea_poll(sea, xs, 2000))
 			sea_timeout(scb);
 	}
-	return COMPLETE;
 }
 
 /*
@@ -811,10 +799,8 @@ sea_timeout(void *arg)
 		scb->flags |= SCB_ABORTED;
 		sea_abort(sea, scb);
 		/* 2 secs for the abort */
-		if ((xs->flags & SCSI_POLL) == 0) {
-			timeout_set(&scb->xs->stimeout, sea_timeout, scb);
+		if ((xs->flags & SCSI_POLL) == 0)
 			timeout_add_sec(&scb->xs->stimeout, 2);
-		}
 	}
 
 	splx(s);
@@ -1152,7 +1138,6 @@ void
 sea_done(struct sea_softc *sea, struct sea_scb *scb)
 {
 	struct scsi_xfer *xs = scb->xs;
-	int s;
 
 	timeout_del(&scb->xs->stimeout);
 
@@ -1167,11 +1152,8 @@ sea_done(struct sea_softc *sea, struct sea_scb *scb)
 		if (scb->flags & SCB_ERROR)
 			xs->error = XS_DRIVER_STUFFUP;
 	}
-	xs->flags |= ITSDONE;
 	sea_free_scb(sea, scb, xs->flags);
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 /*
@@ -1275,9 +1257,9 @@ sea_information_transfer(struct sea_softc *sea)
 					if ((tmp & PH_MASK) != phase)
 						break;
 					if (!(phase & STAT_IO)) {
+#ifdef SEA_ASSEMBLER
 						int block = BLOCK_SIZE;
 						void *a = sea->maddr_dr;
-#ifdef SEA_ASSEMBLER
 						asm("shr $2, %%ecx\n\t\
 						    cld\n\t\
 						    rep\n\t\
@@ -1289,15 +1271,16 @@ sea_information_transfer(struct sea_softc *sea)
 						    "2" (a),
 						    "1" (block) );
 #else
+						int count;
 						for (count = 0;
 						    count < BLOCK_SIZE;
 						    count++)
 							DATA = *(scb->data++);
 #endif
 					} else {
+#ifdef SEA_ASSEMBLER
 						int block = BLOCK_SIZE;
 						void *a = sea->maddr_dr;
-#ifdef SEA_ASSEMBLER
 						asm("shr $2, %%ecx\n\t\
 						    cld\n\t\
 						    rep\n\t\
@@ -1308,6 +1291,7 @@ sea_information_transfer(struct sea_softc *sea)
 							"2" (a) ,
 						    "1" (block) );
 #else
+						int count;
 					        for (count = 0;
 						    count < BLOCK_SIZE;
 						    count++)

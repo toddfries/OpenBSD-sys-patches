@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rum.c,v 1.86 2009/08/02 10:38:34 miod Exp $	*/
+/*	$OpenBSD: if_rum.c,v 1.89 2010/07/02 03:13:42 tedu Exp $	*/
 
 /*-
  * Copyright (c) 2005-2007 Damien Bergamini <damien.bergamini@free.fr>
@@ -26,7 +26,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -224,7 +223,7 @@ static const struct rfprog {
 int rum_match(struct device *, void *, void *); 
 void rum_attach(struct device *, struct device *, void *); 
 int rum_detach(struct device *, int); 
-int rum_activate(struct device *, enum devact); 
+int rum_activate(struct device *, int); 
 
 struct cfdriver rum_cd = { 
 	NULL, "rum", DV_IFNET 
@@ -1992,6 +1991,7 @@ rum_init(struct ifnet *ifp)
 	if (ntries == 1000) {
 		printf("%s: timeout waiting for BBP/RF to wakeup\n",
 		    sc->sc_dev.dv_xname);
+		error = ENODEV;
 		goto fail;
 	}
 
@@ -2282,7 +2282,7 @@ rum_amrr_update(usbd_xfer_handle xfer, usbd_private_handle priv,
 }
 
 int
-rum_activate(struct device *self, enum devact act)
+rum_activate(struct device *self, int act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:

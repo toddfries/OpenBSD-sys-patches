@@ -1,4 +1,4 @@
-/*	$OpenBSD: arm32_machdep.c,v 1.29 2008/05/04 09:57:46 martin Exp $	*/
+/*	$OpenBSD: arm32_machdep.c,v 1.35 2010/06/27 13:28:46 miod Exp $	*/
 /*	$NetBSD: arm32_machdep.c,v 1.42 2003/12/30 12:33:15 pk Exp $	*/
 
 /*
@@ -54,7 +54,7 @@
 #include <sys/msg.h>
 #include <sys/msgbuf.h>
 #include <sys/device.h>
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 #include <sys/sysctl.h>
 
 #include <dev/cons.h>
@@ -74,7 +74,6 @@ struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
 extern int physmem;
-caddr_t allocsys(caddr_t);
 
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 5
@@ -86,6 +85,9 @@ int     bufpages = BUFPAGES;
 int     bufpages = 0;
 #endif
 int     bufcachepercent = BUFCACHEPERCENT;
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 int cold = 1;
 
@@ -121,6 +123,8 @@ int kbd_reset;
 int lid_suspend;
 extern int xscale_maxspeed;
 #endif
+
+struct consdev *cn_tab;
 
 /* Prototypes */
 
@@ -245,8 +249,6 @@ cpu_startup()
 	u_int loop;
 	paddr_t minaddr;
 	paddr_t maxaddr;
-	caddr_t sysbase;
-	caddr_t size;
 
 	proc0paddr = (struct user *)kernelstack.pv_va;
 	proc0.p_addr = proc0paddr;
@@ -287,32 +289,6 @@ cpu_startup()
 
 	printf("real mem  = %u (%uMB)\n", ptoa(physmem),
 	    ptoa(physmem)/1024/1024);
-
-	/*
-	 * Find out how much space we need, allocate it,
-	 * and then give everything true virtual addresses.
-	 */
-	size = allocsys(NULL);
-	sysbase = (caddr_t)uvm_km_zalloc(kernel_map, round_page((vaddr_t)size));
-	if (sysbase == 0)
-		panic(
-		    "cpu_startup: no room for system tables; %d bytes required",
-		    (u_int)size);
-	if ((caddr_t)((allocsys(sysbase) - sysbase)) != size)
-		panic("cpu_startup: system table size inconsistency");
-
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate bufcachepercent% of memory for buffer space.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-
-	/* Restrict to at most 25% filled kvm */
-	if (bufpages >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
-		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -434,30 +410,4 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return (EOPNOTSUPP);
 	}
 	/* NOTREACHED */
-}
-
-/*
- * Allocate space for system data structures.  We are given
- * a starting virtual address and we return a final virtual
- * address; along the way we set each data structure pointer.
- *
- * We call allocsys() with 0 to find out how much space we want,
- * allocate that much and fill it with zeroes, and then call
- * allocsys() again with the correct base virtual address.
- */
-caddr_t
-allocsys(caddr_t v)
-{
-
-#define	valloc(name, type, num) \
-	    v = (caddr_t)(((name) = (type *)v) + (num))
-
-#ifdef SYSVMSG
-	valloc(msgpool, char, msginfo.msgmax);
-	valloc(msgmaps, struct msgmap, msginfo.msgseg);
-	valloc(msghdrs, struct msg, msginfo.msgtql);
-	valloc(msqids, struct msqid_ds, msginfo.msgmni);
-#endif
-
-	return v;
 }

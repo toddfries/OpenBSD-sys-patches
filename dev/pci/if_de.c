@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_de.c,v 1.102 2009/06/19 14:13:41 naddy Exp $	*/
+/*	$OpenBSD: if_de.c,v 1.105 2010/04/08 00:23:53 tedu Exp $	*/
 /*	$NetBSD: if_de.c,v 1.58 1998/01/12 09:39:58 thorpej Exp $	*/
 
 /*-
@@ -47,7 +47,6 @@
 #include <sys/errno.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>	/* only for declaration of wakeup() used by vm.h */
 #include <sys/device.h>
 #include <sys/timeout.h>
 
@@ -137,7 +136,7 @@ struct cfattach de_ca = {
 };
 
 struct cfdriver de_cd = {
-	0, "de", DV_IFNET
+	NULL, "de", DV_IFNET
 };
 
 void tulip_timeout_callback(void *arg);
@@ -321,7 +320,6 @@ tulip_media_set(tulip_softc_t * const sc, tulip_media_t media)
 	    printf(TULIP_PRINTF_FMT ": warning: board is running (FD).\n", TULIP_PRINTF_ARGS);
 	if ((TULIP_CSR_READ(sc, csr_command) & TULIP_CMD_FULLDUPLEX) == 0)
 	    printf(TULIP_PRINTF_FMT ": setting full duplex.\n", TULIP_PRINTF_ARGS);
-		       TULIP_PRINTF_ARGS);
 #endif
 	sc->tulip_cmdmode |= TULIP_CMD_FULLDUPLEX;
 	TULIP_CSR_WRITE(sc, csr_command, sc->tulip_cmdmode & ~(TULIP_CMD_RXRUN|TULIP_CMD_TXRUN));

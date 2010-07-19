@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.59 2009/06/03 14:45:50 jj Exp $	*/
+/*	$OpenBSD: conf.c,v 1.63 2010/07/03 03:59:16 krw Exp $	*/
 /*	$NetBSD: conf.c,v 1.16 1996/10/18 21:26:57 cgd Exp $	*/
 
 /*-
@@ -49,7 +49,6 @@ bdev_decl(fd);
 #include "st.h"
 #include "cd.h"
 #include "sd.h"
-#include "ss.h"
 #include "uk.h"
 #include "vnd.h"
 #include "raid.h"
@@ -131,9 +130,11 @@ cdev_decl(nnpfs_dev);
 #include "pci.h"
 cdev_decl(pci);
 #endif
+#include "bthub.h"
 
 #include "systrace.h"
 #include "hotplug.h"
+#include "vscsi.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -169,7 +170,7 @@ struct cdevsw	cdevsw[] =
 	cdev_mouse_init(NWSKBD,wskbd),	/* 29: /dev/kbd XXX */
 	cdev_mouse_init(NWSMOUSE,wsmouse),	/* 30: /dev/mouse XXX */
 	cdev_lpt_init(NLPT,lpt),	/* 31: parallel printer */
-	cdev_scanner_init(NSS,ss),	/* 32: SCSI scanner */
+	cdev_notdef(),			/* 32: */
 	cdev_uk_init(NUK,uk),		/* 33: SCSI unknown */
 	cdev_random_init(1,random),	/* 34: random data source */
 	cdev_pf_init(NPF, pf),		/* 35: packet filter */
@@ -206,6 +207,9 @@ struct cdevsw	cdevsw[] =
 	cdev_bktr_init(NBKTR,bktr),	/* 58: Bt848 video capture device */
 	cdev_radio_init(NRADIO,radio), /* 59: generic radio I/O */
 	cdev_mouse_init(NWSMUX, wsmux),	/* 60: ws multiplexor */
+	cdev_vscsi_init(NVSCSI, vscsi),	/* 61: vscsi */
+	cdev_bthub_init(NBTHUB, bthub), /* 62: bthub */
+	cdev_disk_init(1,diskmap),	/* 63: disk mapper */
 };
 int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);
 

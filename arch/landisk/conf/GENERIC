@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.23 2009/05/15 21:44:34 deraadt Exp $
+# $OpenBSD: GENERIC,v 1.26 2010/07/03 03:59:16 krw Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -136,14 +136,13 @@ axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 cdce*	at uhub?		# CDC Ethernet
+urndis*	at uhub?		# Remote NDIS Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
 #uscanner* at uhub?		# USB Scanners
-#usscanner* at uhub?		# USB SCSI scanners, e.g., HP5300
-#scsibus* at usscanner?
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
@@ -156,6 +155,7 @@ zyd*	at uhub?		# Zydas ZD1211
 #option	NATM
 #ueagle* at uhub?		# Analog Devices Eagle ADSL
 udcf*	at uhub?		# Gude Expert mouseCLOCK
+uthum*	at uhidev?		# TEMPerHUM sensor
 #uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 #onewire* at uow?
 

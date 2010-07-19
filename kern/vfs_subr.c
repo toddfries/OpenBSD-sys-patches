@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.180 2009/08/02 16:28:40 beck Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.187 2010/06/29 04:09:32 tedu Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -103,7 +103,7 @@ int getdevvp(dev_t, struct vnode **, enum vtype);
 
 int vfs_hang_addrlist(struct mount *, struct netexport *,
 				  struct export_args *);
-int vfs_free_netcred(struct radix_node *, void *);
+int vfs_free_netcred(struct radix_node *, void *, u_int);
 void vfs_free_addrlist(struct netexport *);
 void vputonfreelist(struct vnode *);
 
@@ -278,23 +278,6 @@ vfs_getnewfsid(struct mount *mp)
 }
 
 /*
- * Make a 'unique' number from a mount type name.
- * Note that this is no longer used for ffs which
- * now has an on-disk filesystem id.
- */
-long
-makefstype(char *type)
-{
-	long rv;
-
-	for (rv = 0; *type; type++) {
-		rv <<= 2;
-		rv ^= *type;
-	}
-	return rv;
-}
-
-/*
  * Set vnode attributes to VNOVAL
  */
 void
@@ -360,6 +343,8 @@ getnewvnode(enum vtagtype tag, struct mount *mp, int (**vops)(void *),
 		splx(s);
 		vp = pool_get(&vnode_pool, PR_WAITOK | PR_ZERO);
 		RB_INIT(&vp->v_bufs_tree);
+		RB_INIT(&vp->v_nc_tree);
+		TAILQ_INIT(&vp->v_cache_dst);
 		numvnodes++;
 	} else {
 		for (vp = TAILQ_FIRST(listhd); vp != NULLVP;
@@ -628,6 +613,8 @@ vref(struct vnode *vp)
 #ifdef DIAGNOSTIC
 	if (vp->v_usecount == 0)
 		panic("vref used where vget required");
+	if (vp->v_type == VNON)
+		panic("vref on a VNON vnode");
 #endif
 	vp->v_usecount++;
 }
@@ -1478,7 +1465,7 @@ out:
 
 /* ARGSUSED */
 int
-vfs_free_netcred(struct radix_node *rn, void *w)
+vfs_free_netcred(struct radix_node *rn, void *w, u_int id)
 {
 	struct radix_node_head *rnh = (struct radix_node_head *)w;
 
@@ -2160,8 +2147,9 @@ vn_isdisk(struct vnode *vp, int *errp)
 #include <ddb/db_output.h>
 
 void
-vfs_buf_print(struct buf *bp, int full, int (*pr)(const char *, ...))
+vfs_buf_print(void *b, int full, int (*pr)(const char *, ...))
 {
+	struct buf *bp = b;
 
 	(*pr)("  vp %p lblkno 0x%llx blkno 0x%llx dev 0x%x\n"
 	      "  proc %p error %d flags %b\n",
@@ -2186,8 +2174,9 @@ const char *vtypes[] = { VTYPE_NAMES };
 const char *vtags[] = { VTAG_NAMES };
 
 void
-vfs_vnode_print(struct vnode *vp, int full, int (*pr)(const char *, ...))
+vfs_vnode_print(void *v, int full, int (*pr)(const char *, ...))
 {
+	struct vnode *vp = v;
 
 #define	NENTS(n)	(sizeof n / sizeof(n[0]))
 	(*pr)("tag %s(%d) type %s(%d) mount %p typedata %p\n",
@@ -2237,7 +2226,7 @@ vfs_mount_print(struct mount *mp, int full, int (*pr)(const char *, ...))
 	    mp->mnt_stat.f_bsize, mp->mnt_stat.f_iosize, mp->mnt_stat.f_blocks,
 	    mp->mnt_stat.f_bfree, mp->mnt_stat.f_bavail);
 
-	(*pr)("  files %llu ffiles %llu favail $lld\n", mp->mnt_stat.f_files,
+	(*pr)("  files %llu ffiles %llu favail %lld\n", mp->mnt_stat.f_files,
 	    mp->mnt_stat.f_ffree, mp->mnt_stat.f_favail);
 
 	(*pr)("  f_fsidx {0x%x, 0x%x} owner %u ctime 0x%x\n",
@@ -2305,4 +2294,3 @@ copy_statfs_info(struct statfs *sbp, const struct mount *mp)
 	bcopy(&mp->mnt_stat.mount_info.ufs_args, &sbp->mount_info.ufs_args,
 	    sizeof(struct ufs_args));
 }
-

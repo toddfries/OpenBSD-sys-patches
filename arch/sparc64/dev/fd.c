@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.27 2009/07/24 08:07:39 blambert Exp $	*/
+/*	$OpenBSD: fd.c,v 1.31 2010/05/19 04:10:34 dlg Exp $	*/
 /*	$NetBSD: fd.c,v 1.112 2003/08/07 16:29:35 agc Exp $	*/
 
 /*-
@@ -120,6 +120,7 @@
 #include <sys/stat.h>
 #include <sys/syslog.h>
 #include <sys/queue.h>
+#include <sys/dkio.h>
 
 #include <dev/cons.h>
 
@@ -283,7 +284,7 @@ struct cfdriver fd_cd = {
 	NULL, "fd", DV_DISK
 };
 
-void fdgetdisklabel(dev_t, struct fd_softc *, struct disklabel *, int);
+int fdgetdisklabel(dev_t, struct fd_softc *, struct disklabel *, int);
 int fd_get_parms(struct fd_softc *);
 void fdstrategy(struct buf *);
 void fdstart(struct fd_softc *);
@@ -1862,16 +1863,17 @@ fdioctl(dev, cmd, addr, flag, p)
 		return (0);
 
 	case DIOCWDINFO:
+	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0)
 			return (EBADF);
 
 		error = setdisklabel(fd->sc_dk.dk_label,
 		    (struct disklabel *)addr, 0);
-		if (error)
-			return (error);
-
-		error = writedisklabel(DISKLABELDEV(dev), fdstrategy,
-		    fd->sc_dk.dk_label);
+		if (error == 0) {
+			if (cmd == DIOCWDINFO)
+				error = writedisklabel(DISKLABELDEV(dev),
+				    fdstrategy, fd->sc_dk.dk_label);
+		}
 		return (error);
 
 	case DIOCLOCK:
@@ -2007,12 +2009,10 @@ fdformat(dev, finfo, p)
 	return (rv);
 }
 
-void
+int
 fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
     int spoofonly)
 {
-	char *errstring;
-
 	bzero(lp, sizeof(struct disklabel));
 
 	lp->d_type = DTYPE_FLOPPY;
@@ -2022,11 +2022,9 @@ fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
 	lp->d_ncylinders = fd->sc_type->tracks;
 	lp->d_ntracks = fd->sc_type->heads;	/* Go figure... */
 	DL_SETDSIZE(lp, (daddr64_t)lp->d_secpercyl * lp->d_ncylinders);
-	lp->d_rpm = 300;	/* XXX like it matters... */
 
 	strncpy(lp->d_typename, "floppy disk", sizeof(lp->d_typename));
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-	lp->d_interleave = 1;
 	lp->d_version = 1;
 
 	lp->d_magic = DISKMAGIC;
@@ -2037,10 +2035,7 @@ fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
 	 * Call the generic disklabel extraction routine.  If there's
 	 * not a label there, fake it.
 	 */
-	errstring = readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, spoofonly);
-	if (errstring) {
-		/*printf("%s: %s\n", fd->sc_dv.dv_xname, errstring);*/
-	}
+	return readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, spoofonly);
 }
 
 void

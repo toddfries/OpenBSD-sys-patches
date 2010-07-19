@@ -1,4 +1,4 @@
-/*	$OpenBSD: gem.c,v 1.93 2009/08/03 11:09:10 sthen Exp $	*/
+/*	$OpenBSD: gem.c,v 1.96 2009/10/15 17:54:54 deraadt Exp $	*/
 /*	$NetBSD: gem.c,v 1.1 2001/09/16 00:11:43 eeh Exp $ */
 
 /*
@@ -80,11 +80,10 @@ struct cfdriver gem_cd = {
 };
 
 void		gem_start(struct ifnet *);
-void		gem_stop(struct ifnet *);
+void		gem_stop(struct ifnet *, int);
 int		gem_ioctl(struct ifnet *, u_long, caddr_t);
 void		gem_tick(void *);
 void		gem_watchdog(struct ifnet *);
-void		gem_shutdown(void *);
 int		gem_init(struct ifnet *);
 void		gem_init_regs(struct gem_softc *);
 int		gem_ringsize(int);
@@ -346,10 +345,6 @@ gem_config(struct gem_softc *sc)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	sc->sc_sh = shutdownhook_establish(gem_shutdown, sc);
-	if (sc->sc_sh == NULL)
-		panic("gem_config: can't establish shutdownhook");
-
 	timeout_set(&sc->sc_tick_ch, gem_tick, sc);
 	timeout_set(&sc->sc_rx_watchdog, gem_rx_watchdog, sc);
 	return;
@@ -380,6 +375,40 @@ gem_config(struct gem_softc *sc)
 	bus_dmamem_free(sc->sc_dmatag, &sc->sc_cdseg, sc->sc_cdnseg);
  fail_0:
 	return;
+}
+
+void
+gem_unconfig(struct gem_softc *sc)
+{
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	int i;
+
+	gem_stop(ifp, 1);
+
+	for (i = 0; i < GEM_NTXDESC; i++) {
+		if (sc->sc_txd[i].sd_map != NULL)
+			bus_dmamap_destroy(sc->sc_dmatag,
+			    sc->sc_txd[i].sd_map);
+	}
+	for (i = 0; i < GEM_NRXDESC; i++) {
+		if (sc->sc_rxsoft[i].rxs_dmamap != NULL)
+			bus_dmamap_destroy(sc->sc_dmatag,
+			    sc->sc_rxsoft[i].rxs_dmamap);
+	}
+	bus_dmamap_unload(sc->sc_dmatag, sc->sc_cddmamap);
+	bus_dmamap_destroy(sc->sc_dmatag, sc->sc_cddmamap);
+	bus_dmamem_unmap(sc->sc_dmatag, (caddr_t)sc->sc_control_data,
+	    sizeof(struct gem_control_data));
+	bus_dmamem_free(sc->sc_dmatag, &sc->sc_cdseg, sc->sc_cdnseg);
+
+	/* Detach all PHYs */
+	mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
+
+	/* Delete all remaining media. */
+	ifmedia_delete_instance(&sc->sc_mii.mii_media, IFM_INST_ANY);
+
+	ether_ifdetach(ifp);
+	if_detach(ifp);
 }
 
 
@@ -487,7 +516,7 @@ gem_rxdrain(struct gem_softc *sc)
  * Reset the whole thing.
  */
 void
-gem_stop(struct ifnet *ifp)
+gem_stop(struct ifnet *ifp, int softonly)
 {
 	struct gem_softc *sc = (struct gem_softc *)ifp->if_softc;
 	struct gem_sxd *sd;
@@ -503,10 +532,12 @@ gem_stop(struct ifnet *ifp)
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 	ifp->if_timer = 0;
 
-	mii_down(&sc->sc_mii);
+	if (!softonly) {
+		mii_down(&sc->sc_mii);
 
-	gem_reset_rx(sc);
-	gem_reset_tx(sc);
+		gem_reset_rx(sc);
+		gem_reset_tx(sc);
+	}
 
 	/*
 	 * Release any queued transmit buffers.
@@ -713,7 +744,7 @@ gem_init(struct ifnet *ifp)
 	 */
 
 	/* step 1 & 2. Reset the Ethernet Channel */
-	gem_stop(ifp);
+	gem_stop(ifp, 0);
 	gem_reset(sc);
 	DPRINTF(sc, ("%s: gem_init: restarting\n", sc->sc_dev.dv_xname));
 
@@ -1006,15 +1037,9 @@ gem_add_rxbuf(struct gem_softc *sc, int idx)
 	struct mbuf *m;
 	int error;
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->sc_arpcom.ac_if, MCLBYTES);
+	if (!m)
 		return (ENOBUFS);
-
-	MCLGETI(m, M_DONTWAIT, &sc->sc_arpcom.ac_if, MCLBYTES);
-	if ((m->m_flags & M_EXT) == 0) {
-		m_freem(m);
-		return (ENOBUFS);
-	}
 	m->m_len = m->m_pkthdr.len = MCLBYTES;
 
 #ifdef GEM_DEBUG
@@ -1086,6 +1111,9 @@ gem_intr(void *v)
 	status = bus_space_read_4(t, seb, GEM_STATUS);
 	DPRINTF(sc, ("%s: gem_intr: cplt %xstatus %b\n",
 		sc->sc_dev.dv_xname, (status>>19), status, GEM_INTR_BITS));
+
+	if (status == 0xffffffff)
+		return (0);
 
 	if ((status & GEM_INTR_PCS) != 0)
 		r |= gem_pint(sc);
@@ -1477,7 +1505,7 @@ gem_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				gem_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
-				gem_stop(ifp);
+				gem_stop(ifp, 0);
 		}
 #ifdef GEM_DEBUG
 		sc->sc_debug = (ifp->if_flags & IFF_DEBUG) != 0 ? 1 : 0;
@@ -1501,16 +1529,6 @@ gem_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	splx(s);
 	return (error);
-}
-
-
-void
-gem_shutdown(void *arg)
-{
-	struct gem_softc *sc = (struct gem_softc *)arg;
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-
-	gem_stop(ifp);
 }
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.48 2009/05/02 14:32:29 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.53 2010/06/27 12:41:23 miod Exp $	*/
 /*
  * Copyright (c) 2001-2004, Miodrag Vallat
  * Copyright (c) 1998-2001 Steve Murphree, Jr.
@@ -51,9 +51,9 @@
 #include <sys/malloc.h>
 #include <sys/pool.h>
 #include <sys/msgbuf.h>
-#include <sys/user.h>
 
 #include <machine/asm_macro.h>
+#include <machine/mmu.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
 #include <machine/lock.h>
@@ -114,6 +114,8 @@ pt_entry_t *vmpte, *msgbufmap;
 
 struct pmap kernel_pmap_store;
 pmap_t kernel_pmap = &kernel_pmap_store;
+
+apr_t	default_apr = CACHE_GLOBAL | APR_V;
 
 typedef struct kpdt_entry *kpdt_entry_t;
 struct kpdt_entry {
@@ -751,12 +753,12 @@ pmap_bootstrap(vaddr_t load_start)
 	 * Switch to using new page tables
 	 */
 
-	kernel_pmap->pm_apr = (atop((paddr_t)kmap) << PG_SHIFT) |
-	    CACHE_GLOBAL | CACHE_WT | APR_V;
 #if !defined(MULTIPROCESSOR) && defined(M88110)
 	if (CPU_IS88110)
-		kernel_pmap->pm_apr &= ~CACHE_GLOBAL;
+		default_apr &= ~CACHE_GLOBAL;
 #endif
+	kernel_pmap->pm_apr = (atop((paddr_t)kmap) << PG_SHIFT) | default_apr |
+	    CACHE_WT;
 
 	pmap_bootstrap_cpu(cpu_number());
 }
@@ -894,7 +896,7 @@ pmap_create(void)
 	if (pmap_extract(kernel_pmap, (vaddr_t)segdt,
 	    (paddr_t *)&stpa) == FALSE)
 		panic("pmap_create: pmap_extract failed!");
-	pmap->pm_apr = (atop(stpa) << PG_SHIFT) | CACHE_GLOBAL | APR_V;
+	pmap->pm_apr = (atop(stpa) << PG_SHIFT) | default_apr;
 #if !defined(MULTIPROCESSOR) && defined(M88110)
 	if (CPU_IS88110)
 		pmap->pm_apr &= ~CACHE_GLOBAL;
@@ -1140,9 +1142,9 @@ pmap_remove_pte(pmap_t pmap, vaddr_t va, pt_entry_t *pte, boolean_t flush)
 
 	if (prev == NULL) {
 		/*
-		 * Hander is the pv_entry. Copy the next one
-		 * to hander and free the next one (we can't
-		 * free the hander)
+		 * Handler is the pv_entry. Copy the next one
+		 * to handler and free the next one (we can't
+		 * free the handler)
 		 */
 		cur = cur->pv_next;
 		if (cur != NULL) {
@@ -2593,9 +2595,7 @@ pmap_proc_iflush(struct proc *p, vaddr_t va, vsize_t len)
 			ci = curcpu();
 #endif
 			/* CPU_INFO_FOREACH(cpu, ci) */ {
-				if (ci->ci_curpmap == pmap)
-					cmmu_flush_inst_cache(ci->ci_cpuid,
-					    pa, count);
+				cmmu_flush_inst_cache(ci->ci_cpuid, pa, count);
 			}
 		}
 		va += count;

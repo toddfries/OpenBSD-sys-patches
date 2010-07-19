@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.24 2009/07/10 12:00:52 dlg Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.42 2010/04/20 14:54:58 jsg Exp $	*/
 
 /******************************************************************************
 
@@ -35,6 +35,7 @@
 /*$FreeBSD: src/sys/dev/ixgbe/ixgbe.c,v 1.5 2008/05/16 18:46:30 jfv Exp $*/
 
 #include <dev/pci/if_ix.h>
+#include <dev/pci/ixgbe_type.h>
 
 /*********************************************************************
  *  Driver version
@@ -49,13 +50,25 @@
  *********************************************************************/
 
 const struct pci_matchid ixgbe_devices[] = {
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598_BX },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598AF_DUAL },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598AF },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598AT },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598AT_DUAL },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598EB_CX4 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598EB_CX4_DUAL },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598EB_XF_LR },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598AT }
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598EB_SFP },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598_SR_DUAL_EM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598_DA_DUAL },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_KX4 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_KX4_MEZZ },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_XAUI },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_COMBO_BACKPLANE },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_CX4 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_SFP },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_SFP_EM }
 };
 
 /*********************************************************************
@@ -65,7 +78,6 @@ int	ixgbe_probe(struct device *, void *, void *);
 void	ixgbe_attach(struct device *, struct device *, void *);
 int	ixgbe_detach(struct device *, int);
 void	ixgbe_power(int, void *);
-void	ixgbe_shutdown(void *);
 void	ixgbe_start(struct ifnet *);
 void	ixgbe_start_locked(struct tx_ring *, struct ifnet *);
 int	ixgbe_ioctl(struct ifnet *, u_long, caddr_t);
@@ -119,31 +131,26 @@ int	ixgbe_dma_malloc(struct ix_softc *, bus_size_t,
 void	ixgbe_dma_free(struct ix_softc *, struct ixgbe_dma_alloc *);
 int	ixgbe_tx_ctx_setup(struct tx_ring *, struct mbuf *);
 int	ixgbe_tso_setup(struct tx_ring *, struct mbuf *, uint32_t *);
-void	ixgbe_set_ivar(struct ix_softc *, uint16_t, uint8_t);
+void	ixgbe_set_ivar(struct ix_softc *, uint8_t, uint8_t, int8_t);
 void	ixgbe_configure_ivars(struct ix_softc *);
 uint8_t	*ixgbe_mc_array_itr(struct ixgbe_hw *, uint8_t **, uint32_t *);
 
 /* Legacy (single vector interrupt handler */
 int	ixgbe_legacy_irq(void *);
 
-#ifndef NO_82598_A0_SUPPORT
-void	desc_flip(void *);
-#endif
-
 /*********************************************************************
  *  OpenBSD Device Interface Entry Points
  *********************************************************************/
 
 struct cfdriver ix_cd = {
-	0, "ix", DV_IFNET
+	NULL, "ix", DV_IFNET
 };
 
 struct cfattach ix_ca = {
 	sizeof(struct ix_softc), ixgbe_probe, ixgbe_attach, ixgbe_detach
 };
 
-/* Total number of Interfaces - need for config sanity check */
-static int ixgbe_total_ports;
+int ixgbe_smart_speed = ixgbe_smart_speed_on;
 
 /*********************************************************************
  *  Device identification routine
@@ -179,7 +186,9 @@ ixgbe_attach(struct device *parent, struct device *self, void *aux)
 	struct pci_attach_args	*pa = (struct pci_attach_args *)aux;
 	struct ix_softc		*sc = (struct ix_softc *)self;
 	int			 error = 0;
+	uint16_t		 csum;
 	uint32_t			 ctrl_ext;
+	struct ixgbe_hw		*hw = &sc->hw;
 
 	INIT_DEBUGOUT("ixgbe_attach: begin");
 
@@ -210,17 +219,64 @@ ixgbe_attach(struct device *parent, struct device *self, void *aux)
 		goto err_out;
 
 	/* Initialize the shared code */
-	sc->hw.mac.type = ixgbe_mac_82598EB;
-	if (ixgbe_init_ops_82598(&sc->hw) != 0) {
-		printf(": failed to init the 82598EB\n");
+	if (hw->mac.type == ixgbe_mac_82598EB)
+		error = ixgbe_init_ops_82598(&sc->hw);
+	else
+		error = ixgbe_init_ops_82599(&sc->hw);
+	if (error == IXGBE_ERR_SFP_NOT_PRESENT) {
+		/*
+		 * No optics in this port, set up
+		 * so the timer routine will probe 
+		 * for later insertion.
+		 */
+		sc->sfp_probe = TRUE;
+		error = 0;
+	} else if (error == IXGBE_ERR_SFP_NOT_SUPPORTED) {
+		printf(": Unsupported SFP+ module detected!\n");
+		error = EIO;
+		goto err_late;
+	} else if (error) {
+		printf(": Unable to initialize the shared code\n");
+		error = EIO;
 		goto err_late;
 	}
 
-	/* Initialize the hardware */
-	if (ixgbe_hardware_init(sc)) {
-		printf(": unable to initialize the hardware\n");
+	/* Make sure we have a good EEPROM before we read from it */
+	if (sc->hw.eeprom.ops.validate_checksum(&sc->hw, &csum) < 0) {
+		printf(": The EEPROM Checksum Is Not Valid\n");
+		error = EIO;
 		goto err_late;
 	}
+
+	/* Pick up the smart speed setting */
+	if (sc->hw.mac.type == ixgbe_mac_82599EB)
+		sc->hw.phy.smart_speed = ixgbe_smart_speed;
+
+	/* Get Hardware Flow Control setting */
+	hw->fc.requested_mode = ixgbe_fc_full;
+	hw->fc.pause_time = IXGBE_FC_PAUSE;
+	hw->fc.low_water = IXGBE_FC_LO;
+	hw->fc.high_water = IXGBE_FC_HI;
+	hw->fc.send_xon = TRUE;
+
+	error = sc->hw.mac.ops.init_hw(hw);
+	if (error == IXGBE_ERR_EEPROM_VERSION) {
+		printf(": This device is a pre-production adapter/"
+		    "LOM.  Please be aware there may be issues associated "
+		    "with your hardware.\n If you are experiencing problems "
+		    "please contact your Intel or hardware representative "
+		    "who provided you with this hardware.\n");
+	} else if (error == IXGBE_ERR_SFP_NOT_SUPPORTED) {
+		printf("Unsupported SFP+ Module\n");
+	}
+
+	if (error) {
+		printf(": Hardware Initialization Failure\n");
+		goto err_late;
+	}
+
+	bcopy(sc->hw.mac.addr, sc->arpcom.ac_enaddr,
+	    IXGBE_ETH_LENGTH_OF_ADDRESS);
 
 	/* XXX sc->msix > 1 && ixgbe_allocate_msix() */
 	error = ixgbe_allocate_legacy(sc); 
@@ -239,7 +295,6 @@ ixgbe_attach(struct device *parent, struct device *self, void *aux)
 	IXGBE_WRITE_REG(&sc->hw, IXGBE_CTRL_EXT, ctrl_ext);
 
 	sc->powerhook = powerhook_establish(ixgbe_power, sc);
-	sc->shutdownhook = shutdownhook_establish(ixgbe_shutdown, sc);
 
 	printf(", address %s\n", ether_sprintf(sc->hw.mac.addr));
 
@@ -257,7 +312,7 @@ err_out:
  *  Device removal routine
  *
  *  The detach entry point is called when the driver is being removed.
- *  This routine stops the sc and deallocates all the resources
+ *  This routine stops the adapter and deallocates all the resources
  *  that were allocated for driver operation.
  *
  *  return 0 on success, positive on failure
@@ -302,20 +357,6 @@ ixgbe_power(int why, void *arg)
 		if (ifp->if_flags & IFF_UP)
 			ixgbe_init(sc);
 	}
-}
-
-/*********************************************************************
- *
- *  Shutdown entry point
- *
- **********************************************************************/
-
-void
-ixgbe_shutdown(void *arg)
-{
-	struct ix_softc *sc = (struct ix_softc *)arg;
-
-	ixgbe_stop(sc);
 }
 
 /*********************************************************************
@@ -572,7 +613,9 @@ ixgbe_init(void *arg)
 {
 	struct ix_softc	*sc = (struct ix_softc *)arg;
 	struct ifnet	*ifp = &sc->arpcom.ac_if;
-	uint32_t	 txdctl, rxdctl, mhadd, gpie;
+	struct rx_ring	*rxr = sc->rx_rings;
+	uint32_t	 k, txdctl, rxdctl, mhadd, gpie;
+	int		 err;
 	int		 i, s;
 
 	INIT_DEBUGOUT("ixgbe_init: begin");
@@ -587,13 +630,8 @@ ixgbe_init(void *arg)
 	ixgbe_hw(&sc->hw, set_rar, 0, sc->hw.mac.addr, 0, 1);
 	sc->hw.addr_ctrl.rar_used_count = 1;
 
-	/* Initialize the hardware */
-	if (ixgbe_hardware_init(sc)) {
-		printf("%s: Unable to initialize the hardware\n",
-		    ifp->if_xname);
-		splx(s);
-		return;
-	}
+	/* Do a warm reset */
+	sc->hw.mac.ops.reset_hw(&sc->hw);
 
 	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
 		ixgbe_enable_hw_vlans(sc);
@@ -631,6 +669,12 @@ ixgbe_init(void *arg)
 	ixgbe_initialize_receive_units(sc);
 
 	gpie = IXGBE_READ_REG(&sc->hw, IXGBE_GPIE);
+
+	if (sc->hw.mac.type == ixgbe_mac_82599EB) {
+		gpie |= IXGBE_SDP1_GPIEN;
+		gpie |= IXGBE_SDP2_GPIEN;
+	}
+
 	/* Enable Fan Failure Interrupt */
 	if (sc->hw.phy.media_type == ixgbe_media_type_copper)
 		gpie |= IXGBE_SDP1_GPIEN;
@@ -662,16 +706,46 @@ ixgbe_init(void *arg)
 
 	for (i = 0; i < sc->num_rx_queues; i++) {
 		rxdctl = IXGBE_READ_REG(&sc->hw, IXGBE_RXDCTL(i));
-		/* PTHRESH set to 32 */
-		rxdctl |= 0x0020;
+		if (sc->hw.mac.type == ixgbe_mac_82598EB) {
+			/* PTHRESH set to 32 */
+			rxdctl |= 0x0020;
+		}
 		rxdctl |= IXGBE_RXDCTL_ENABLE;
 		IXGBE_WRITE_REG(&sc->hw, IXGBE_RXDCTL(i), rxdctl);
+		for (k = 0; k < 10; k++) {
+			if (IXGBE_READ_REG(&sc->hw, IXGBE_RXDCTL(i)) &
+			    IXGBE_RXDCTL_ENABLE)
+				break;
+			else
+				msec_delay(1);
+		}
+		IXGBE_WRITE_REG(&sc->hw, IXGBE_RDT(i), rxr->last_rx_desc_filled);
 	}
 
 	timeout_add_sec(&sc->timer, 1);
 
+#ifdef MSI
 	/* Set up MSI/X routing */
-	ixgbe_configure_ivars(sc);
+	if (ixgbe_enable_msix)
+		ixgbe_configure_ivars(sc);
+	else  /* Simple settings for Legacy/MSI */
+#else
+	{
+		ixgbe_set_ivar(sc, 0, 0, 0);
+		ixgbe_set_ivar(sc, 0, 0, 1);
+	}
+#endif
+
+	/*
+	 * Check on any SFP devices that
+	 * need to be kick-started
+	 */
+	err = sc->hw.phy.ops.identify(&sc->hw);
+	if (err == IXGBE_ERR_SFP_NOT_SUPPORTED) {
+		printf("Unsupported SFP+ module type was detected.\n");
+		splx(s);
+		return;
+        }
 
 	ixgbe_enable_intr(sc);
 
@@ -809,9 +883,7 @@ ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
 	bus_dmamap_t	map;
 	struct ixgbe_tx_buf *txbuf, *txbuf_mapped;
 	union ixgbe_adv_tx_desc *txd = NULL;
-#ifdef notyet
 	uint32_t	paylen = 0;
-#endif
 
 	/* Basic descriptor defines */
         cmd_type_len |= IXGBE_ADVTXD_DTYP_DATA;
@@ -884,6 +956,11 @@ ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
 	if (ixgbe_tx_ctx_setup(txr, m_head))
 		olinfo_status |= IXGBE_TXD_POPTS_IXSM << 8;
 
+	/* Record payload length */
+	if (paylen == 0)
+		olinfo_status |= m_head->m_pkthdr.len <<
+		    IXGBE_ADVTXD_PAYLEN_SHIFT;
+
 	i = txr->next_avail_tx_desc;
 	for (j = 0; j < map->dm_nsegs; j++) {
 		txbuf = &txr->tx_buffers[i];
@@ -899,20 +976,10 @@ ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
 			i = 0;
 
 		txbuf->m_head = NULL;
-
-		/*
-		 * we have to do this inside the loop right now
-		 * because of the hardware workaround.
-		 */
-		if (j == (map->dm_nsegs -1)) /* Last descriptor gets EOP and RS */
-			txd->read.cmd_type_len |=
-			    htole32(IXGBE_TXD_CMD_EOP | IXGBE_TXD_CMD_RS);
-#ifndef NO_82598_A0_SUPPORT
-		if (sc->hw.revision_id == 0)
-			desc_flip(txd);
-#endif
 	}
 
+	txd->read.cmd_type_len |=
+	    htole32(IXGBE_TXD_CMD_EOP | IXGBE_TXD_CMD_RS);
 	txr->tx_avail -= map->dm_nsegs;
 	txr->next_avail_tx_desc = i;
 
@@ -1141,9 +1208,9 @@ ixgbe_stop(void *arg)
 	INIT_DEBUGOUT("ixgbe_stop: begin\n");
 	ixgbe_disable_intr(sc);
 
-	ixgbe_hw(&sc->hw, reset_hw);
+	ixgbe_hw0(&sc->hw, reset_hw);
 	sc->hw.adapter_stopped = FALSE;
-	ixgbe_hw(&sc->hw, stop_adapter);
+	ixgbe_hw0(&sc->hw, stop_adapter);
 	timeout_del(&sc->timer);
 
 	/* reprogram the RAR[0] in case user changed it. */
@@ -1177,30 +1244,49 @@ ixgbe_identify_hardware(struct ix_softc *sc)
 	sc->hw.subsystem_vendor_id = PCI_VENDOR(reg);
 	sc->hw.subsystem_device_id = PCI_PRODUCT(reg);
 
-	ixgbe_total_ports++;
 	switch (sc->hw.device_id) {
+	case PCI_PRODUCT_INTEL_82598:
 	case PCI_PRODUCT_INTEL_82598AF_DUAL:
-	case PCI_PRODUCT_INTEL_82598EB_CX4_DUAL:
-	case PCI_PRODUCT_INTEL_82598AT_DUAL:
-		ixgbe_total_ports++;
-		break;
-	}
-
-	switch (sc->hw.device_id) {
-	case PCI_PRODUCT_INTEL_82598AF_DUAL:
+	case PCI_PRODUCT_INTEL_82598_DA_DUAL:
 	case PCI_PRODUCT_INTEL_82598AF:
+	case PCI_PRODUCT_INTEL_82598_SR_DUAL_EM:
+	case PCI_PRODUCT_INTEL_82598EB_SFP:
+		sc->hw.mac.type = ixgbe_mac_82598EB;
 		sc->optics = IFM_10G_SR;
 		break;
 	case PCI_PRODUCT_INTEL_82598EB_CX4_DUAL:
 	case PCI_PRODUCT_INTEL_82598EB_CX4:
+		sc->hw.mac.type = ixgbe_mac_82598EB;
 		sc->optics = IFM_10G_CX4;
 		break;
 	case PCI_PRODUCT_INTEL_82598EB_XF_LR:
+		sc->hw.mac.type = ixgbe_mac_82598EB;
 		sc->optics = IFM_10G_LR;
 		break;
 	case PCI_PRODUCT_INTEL_82598AT_DUAL:
 	case PCI_PRODUCT_INTEL_82598AT:
+		sc->hw.mac.type = ixgbe_mac_82598EB;
 		sc->optics = IFM_10G_T;
+		break;
+	case PCI_PRODUCT_INTEL_82598_BX:
+		sc->hw.mac.type = ixgbe_mac_82598EB;
+		sc->optics = IFM_AUTO;
+		break;
+	case PCI_PRODUCT_INTEL_82599_SFP:
+	case PCI_PRODUCT_INTEL_82599_SFP_EM:
+		sc->hw.mac.type = ixgbe_mac_82599EB;
+		sc->optics = IFM_10G_SR;
+		break;
+	case PCI_PRODUCT_INTEL_82599_KX4:
+	case PCI_PRODUCT_INTEL_82599_KX4_MEZZ:
+	case PCI_PRODUCT_INTEL_82599_CX4:
+		sc->hw.mac.type = ixgbe_mac_82599EB;
+		sc->optics = IFM_10G_CX4;
+		break;
+	case PCI_PRODUCT_INTEL_82599_XAUI:
+	case PCI_PRODUCT_INTEL_82599_COMBO_BACKPLANE:
+		sc->hw.mac.type = ixgbe_mac_82599EB;
+		sc->optics = IFM_AUTO;
 		break;
 	default:
 		sc->optics = IFM_AUTO;
@@ -1297,7 +1383,8 @@ ixgbe_free_pci_resources(struct ix_softc * sc)
 	struct ixgbe_osdep	*os = &sc->osdep;
 	struct pci_attach_args	*pa = os->os_pa;
 
-	pci_intr_disestablish(pa->pa_pc, sc->tag[0]);
+	if (sc->tag[0])
+		pci_intr_disestablish(pa->pa_pc, sc->tag[0]);
 	sc->tag[0] = NULL;
 	if (os->os_membase != NULL)
 		bus_space_unmap(os->os_memt, os->os_memh, os->os_memsize);
@@ -1323,7 +1410,7 @@ ixgbe_hardware_init(struct ix_softc *sc)
 	csum = 0;
 	/* Issue a global reset */
 	sc->hw.adapter_stopped = FALSE;
-	ixgbe_hw(&sc->hw, stop_adapter);
+	ixgbe_hw0(&sc->hw, stop_adapter);
 
 	/* Make sure we have a good EEPROM before we read from it */
 	if (ixgbe_ee(&sc->hw, validate_checksum, &csum) < 0) {
@@ -1331,14 +1418,18 @@ ixgbe_hardware_init(struct ix_softc *sc)
 		return (EIO);
 	}
 
+	/* Pick up the smart speed setting */
+	if (sc->hw.mac.type == ixgbe_mac_82599EB)
+		sc->hw.phy.smart_speed = ixgbe_smart_speed;
+
 	/* Get Hardware Flow Control setting */
-	sc->hw.fc.type = ixgbe_fc_full;
+	sc->hw.fc.requested_mode = ixgbe_fc_full;
 	sc->hw.fc.pause_time = IXGBE_FC_PAUSE;
 	sc->hw.fc.low_water = IXGBE_FC_LO;
 	sc->hw.fc.high_water = IXGBE_FC_HI;
 	sc->hw.fc.send_xon = TRUE;
 
-	if (ixgbe_hw(&sc->hw, init_hw) != 0) {
+	if (ixgbe_hw0(&sc->hw, init_hw) != 0) {
 		printf("%s: Hardware Initialization Failed", ifp->if_xname);
 		return (EIO);
 	}
@@ -1382,22 +1473,12 @@ ixgbe_setup_interface(struct ix_softc *sc)
 #endif
 
 #ifdef IX_CSUM_OFFLOAD
-	ifp->if_capabilities |= IFCAP_CSUM_IPv4 | IFCAP_CSUM_TCPv4 |
-				IFCAP_CSUM_UDPv4;
+	ifp->if_capabilities |= IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4 |
+	    IFCAP_CSUM_IPv4;
 #endif
 
 	sc->max_frame_size =
 	    ifp->if_mtu + ETHER_HDR_LEN + ETHER_CRC_LEN;
-
-	if ((hw->device_id == PCI_PRODUCT_INTEL_82598AT) ||
-	    (hw->device_id == PCI_PRODUCT_INTEL_82598AT_DUAL))
-		ixgbe_hw(hw, setup_link_speed,
-		    IXGBE_LINK_SPEED_10GB_FULL |
-		    IXGBE_LINK_SPEED_1GB_FULL, TRUE, TRUE);
-	else
-		ixgbe_hw(hw, setup_link_speed,
-		    IXGBE_LINK_SPEED_10GB_FULL,
-		    TRUE, FALSE);
 
 	/*
 	 * Specify the media types supported by this sc and register
@@ -1632,10 +1713,16 @@ ixgbe_allocate_transmit_buffers(struct tx_ring *txr)
 	struct ifnet		*ifp;
 	struct ixgbe_tx_buf	*txbuf;
 	int			 error, i;
+	int			 max_segs;
 
 	sc = txr->sc;
 	os = &sc->osdep;
 	ifp = &sc->arpcom.ac_if;
+
+	if (sc->hw.mac.type == ixgbe_mac_82598EB)
+		max_segs = IXGBE_82598_SCATTER;
+	else
+		max_segs = IXGBE_82599_SCATTER;
 
 	if (!(txr->tx_buffers =
 	    (struct ixgbe_tx_buf *) malloc(sizeof(struct ixgbe_tx_buf) *
@@ -1651,7 +1738,7 @@ ixgbe_allocate_transmit_buffers(struct tx_ring *txr)
 	for (i = 0; i < sc->num_tx_desc; i++) {
 		txbuf = &txr->tx_buffers[i];
 		error = bus_dmamap_create(txr->txdma.dma_tag, IXGBE_TSO_SIZE,
-			    IXGBE_MAX_SCATTER, PAGE_SIZE, 0,
+			    max_segs, PAGE_SIZE, 0,
 			    BUS_DMA_NOWAIT, &txbuf->map);
 
 		if (error != 0) {
@@ -1771,6 +1858,20 @@ ixgbe_initialize_transmit_units(struct ix_softc *sc)
 	}
 	ifp->if_timer = 0;
 
+	if (hw->mac.type == ixgbe_mac_82599EB) {
+		uint32_t dmatxctl, rttdcs;
+		dmatxctl = IXGBE_READ_REG(hw, IXGBE_DMATXCTL);
+		dmatxctl |= IXGBE_DMATXCTL_TE;
+		IXGBE_WRITE_REG(hw, IXGBE_DMATXCTL, dmatxctl);
+		/* Disable arbiter to set MTQC */
+		rttdcs = IXGBE_READ_REG(hw, IXGBE_RTTDCS);
+		rttdcs |= IXGBE_RTTDCS_ARBDIS;
+		IXGBE_WRITE_REG(hw, IXGBE_RTTDCS, rttdcs);
+		IXGBE_WRITE_REG(hw, IXGBE_MTQC, IXGBE_MTQC_64Q_1PB);
+		rttdcs &= ~IXGBE_RTTDCS_ARBDIS;
+		IXGBE_WRITE_REG(hw, IXGBE_RTTDCS, rttdcs);
+	}
+
 	return;
 }
 
@@ -1850,7 +1951,9 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 	struct ixgbe_tx_buf        *tx_buffer;
 	uint32_t vlan_macip_lens = 0, type_tucmd_mlhl = 0;
 	struct ip *ip;
+#ifdef notyet
 	struct ip6_hdr *ip6;
+#endif
 	uint8_t ipproto = 0;
 	int  ehdrlen, ip_hlen = 0;
 	uint16_t etype;
@@ -1916,6 +2019,7 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 			if (mp->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
 				type_tucmd_mlhl |= IXGBE_ADVTXD_TUCMD_IPV4;
 			break;
+#ifdef notyet
 		case ETHERTYPE_IPV6:
 			ip6 = (struct ip6_hdr *)(mp->m_data + ehdrlen);
 			ip_hlen = sizeof(struct ip6_hdr);
@@ -1925,6 +2029,7 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 			if (mp->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
 				type_tucmd_mlhl |= IXGBE_ADVTXD_TUCMD_IPV6;
 			break;
+#endif
 		default:
 			offload = FALSE;
 			break;
@@ -1941,9 +2046,6 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 			if (mp->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
 				type_tucmd_mlhl |= IXGBE_ADVTXD_TUCMD_L4T_UDP;
 			break;
-		default:
-			offload = FALSE;
-			break;
 		}
 	}
 
@@ -1952,11 +2054,6 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 	TXD->type_tucmd_mlhl |= htole32(type_tucmd_mlhl);
 	TXD->seqnum_seed = htole32(0);
 	TXD->mss_l4len_idx = htole32(0);
-
-#ifndef NO_82598_A0_SUPPORT
-	if (sc->hw.revision_id == 0)
-		desc_flip(TXD);
-#endif
 
 	tx_buffer->m_head = NULL;
 
@@ -2061,11 +2158,6 @@ ixgbe_tso_setup(struct tx_ring *txr, struct mbuf *mp, uint32_t *paylen)
 
 	TXD->seqnum_seed = htole32(0);
 	tx_buffer->m_head = NULL;
-
-#ifndef NO_82598_A0_SUPPORT
-	if (sc->hw.revision_id == 0)
-		desc_flip(TXD);
-#endif
 
 	if (++ctxd == sc->num_tx_desc)
 		ctxd = 0;
@@ -2217,14 +2309,8 @@ ixgbe_get_buf(struct rx_ring *rxr, int i)
 		return (ENOBUFS);
 	}
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL) {
-		sc->mbuf_alloc_failed++;
-		return (ENOBUFS);
-	}
-	MCLGETI(m, M_DONTWAIT, &sc->arpcom.ac_if, size);
-	if ((m->m_flags & M_EXT) == 0) {
-		m_freem(m);
+	m = MCLGETI(NULL, M_DONTWAIT, &sc->arpcom.ac_if, size);
+	if (!m) {
 		sc->mbuf_cluster_failed++;
 		return (ENOBUFS);
 	}
@@ -2248,23 +2334,6 @@ ixgbe_get_buf(struct rx_ring *rxr, int i)
 
 	bzero(rxdesc, dsize);
 	rxdesc->read.pkt_addr = htole64(rxbuf->map->dm_segs[0].ds_addr);
-
-#ifndef NO_82598_A0_SUPPORT
-        /* A0 needs to One's Compliment descriptors */
-	if (sc->hw.revision_id == 0) {
-        	struct dhack {
-			uint32_t a1;
-			uint32_t a2;
-			uint32_t b1;
-			uint32_t b2;
-		};
-        	struct dhack *d;   
-
-        	d = (struct dhack *)rxdesc;
-        	d->a1 = ~(d->a1);
-        	d->a2 = ~(d->a2);
-	}
-#endif
 
 	bus_dmamap_sync(rxr->rxdma.dma_tag, rxr->rxdma.dma_map,
 	    dsize * i, dsize, BUS_DMASYNC_PREWRITE);
@@ -2343,6 +2412,7 @@ ixgbe_setup_receive_ring(struct rx_ring *rxr)
 	/* Setup our descriptor indices */
 	rxr->next_to_check = 0;
 	rxr->last_rx_desc_filled = sc->num_rx_desc - 1;
+	rxr->rx_ndescs = 0;
 
 	ixgbe_rxfill(rxr);
 	if (rxr->rx_ndescs < 1) {
@@ -2515,17 +2585,20 @@ ixgbe_initialize_receive_units(struct ix_softc *sc)
 		rxcsum |= IXGBE_RXCSUM_PCSD;
 	}
 
-#if defined(IX_CSUM_OFFLOAD)
-	rxcsum |= IXGBE_RXCSUM_PCSD;
-#endif
+	if (ifp->if_capabilities & IFCAP_CSUM_IPv4)
+		rxcsum |= IXGBE_RXCSUM_PCSD;
+
 	if (!(rxcsum & IXGBE_RXCSUM_PCSD))
 		rxcsum |= IXGBE_RXCSUM_IPPCSE;
 
 	IXGBE_WRITE_REG(&sc->hw, IXGBE_RXCSUM, rxcsum);
 
 	/* Enable Receive engine */
-	rxctrl |= (IXGBE_RXCTRL_RXEN | IXGBE_RXCTRL_DMBYPS);
-	IXGBE_WRITE_REG(&sc->hw, IXGBE_RXCTRL, rxctrl);
+	rxctrl = IXGBE_READ_REG(&sc->hw, IXGBE_RXCTRL);
+	if (sc->hw.mac.type == ixgbe_mac_82598EB)
+		rxctrl |= IXGBE_RXCTRL_DMBYPS;
+	rxctrl |= IXGBE_RXCTRL_RXEN;
+	sc->hw.mac.ops.enable_rx_dma(&sc->hw, rxctrl);
 
 	return;
 }
@@ -2798,7 +2871,8 @@ ixgbe_enable_hw_vlans(struct ix_softc *sc)
 
 	ixgbe_disable_intr(sc);
 	ctrl = IXGBE_READ_REG(&sc->hw, IXGBE_VLNCTRL);
-	ctrl |= IXGBE_VLNCTRL_VME;
+	if (sc->hw.mac.type == ixgbe_mac_82598EB)
+		ctrl |= IXGBE_VLNCTRL_VME;
 	ctrl &= ~IXGBE_VLNCTRL_CFIEN;
 	ctrl &= ~IXGBE_VLNCTRL_VFE;
 	IXGBE_WRITE_REG(&sc->hw, IXGBE_VLNCTRL, ctrl);
@@ -2814,6 +2888,14 @@ ixgbe_enable_intr(struct ix_softc *sc)
 	/* Enable Fan Failure detection */
 	if (hw->phy.media_type == ixgbe_media_type_copper)
 		    mask |= IXGBE_EIMS_GPI_SDP1;
+
+	/* 82599 specific interrupts */
+	if (sc->hw.mac.type == ixgbe_mac_82599EB) {
+		mask |= IXGBE_EIMS_ECC;
+		mask |= IXGBE_EIMS_GPI_SDP1;
+		mask |= IXGBE_EIMS_GPI_SDP2;
+	}
+
 	/* With RSS we use auto clear */
 	if (sc->msix_mem) {
 		/* Dont autoclear Link */
@@ -2834,7 +2916,13 @@ ixgbe_disable_intr(struct ix_softc *sc)
 {
 	if (sc->msix_mem)
 		IXGBE_WRITE_REG(&sc->hw, IXGBE_EIAC, 0);
-	IXGBE_WRITE_REG(&sc->hw, IXGBE_EIMC, ~0);
+	if (sc->hw.mac.type == ixgbe_mac_82598EB) {
+		IXGBE_WRITE_REG(&sc->hw, IXGBE_EIMC, ~0);
+	} else {
+		IXGBE_WRITE_REG(&sc->hw, IXGBE_EIMC, 0xFFFF0000);
+		IXGBE_WRITE_REG(&sc->hw, IXGBE_EIMC_EX(0), ~0);
+		IXGBE_WRITE_REG(&sc->hw, IXGBE_EIMC_EX(1), ~0);
+	}
 	IXGBE_WRITE_FLUSH(&sc->hw);
 	return;
 }
@@ -2854,16 +2942,63 @@ ixgbe_read_pci_cfg(struct ixgbe_hw *hw, uint32_t reg)
 }
 
 void
-ixgbe_set_ivar(struct ix_softc *sc, uint16_t entry, uint8_t vector)
+ixgbe_write_pci_cfg(struct ixgbe_hw *hw, uint32_t reg, uint16_t value)
 {
+	struct pci_attach_args	*pa;
+
+	pa = ((struct ixgbe_osdep *)hw->back)->os_pa;
+
+	/* Should we do read/mask/write...?  16 vs 32 bit!!! */
+	pci_conf_write(pa->pa_pc, pa->pa_tag, reg, value);
+}
+
+/*
+ * Setup the correct IVAR register for a particular MSIX interrupt
+ *   (yes this is all very magic and confusing :)
+ *  - entry is the register array entry
+ *  - vector is the MSIX vector for this queue
+ *  - type is RX/TX/MISC
+ */
+void
+ixgbe_set_ivar(struct ix_softc *sc, uint8_t entry, uint8_t vector, int8_t type)
+{
+	struct ixgbe_hw *hw = &sc->hw;
 	uint32_t ivar, index;
 
 	vector |= IXGBE_IVAR_ALLOC_VAL;
-	index = (entry >> 2) & 0x1F;
-	ivar = IXGBE_READ_REG(&sc->hw, IXGBE_IVAR(index));
-	ivar &= ~(0xFF << (8 * (entry & 0x3)));
-	ivar |= (vector << (8 * (entry & 0x3)));
-	IXGBE_WRITE_REG(&sc->hw, IXGBE_IVAR(index), ivar);
+
+	switch (hw->mac.type) {
+
+	case ixgbe_mac_82598EB:
+		if (type == -1)
+			entry = IXGBE_IVAR_OTHER_CAUSES_INDEX;
+		else
+			entry += (type * 64);
+		index = (entry >> 2) & 0x1F;
+		ivar = IXGBE_READ_REG(hw, IXGBE_IVAR(index));
+		ivar &= ~(0xFF << (8 * (entry & 0x3)));
+		ivar |= (vector << (8 * (entry & 0x3)));
+		IXGBE_WRITE_REG(&sc->hw, IXGBE_IVAR(index), ivar);
+		break;
+
+	case ixgbe_mac_82599EB:
+		if (type == -1) { /* MISC IVAR */
+			index = (entry & 1) * 8;
+			ivar = IXGBE_READ_REG(hw, IXGBE_IVAR_MISC);
+			ivar &= ~(0xFF << index);
+			ivar |= (vector << index);
+			IXGBE_WRITE_REG(hw, IXGBE_IVAR_MISC, ivar);
+		} else {	/* RX/TX IVARS */
+			index = (16 * (entry & 1)) + (8 * type);
+			ivar = IXGBE_READ_REG(hw, IXGBE_IVAR(entry >> 1));
+			ivar &= ~(0xFF << index);
+			ivar |= (vector << index);
+			IXGBE_WRITE_REG(hw, IXGBE_IVAR(entry >> 1), ivar);
+		}
+
+	default:
+		break;
+	}
 }
 
 void
@@ -2871,22 +3006,16 @@ ixgbe_configure_ivars(struct ix_softc *sc)
 {
 	struct  tx_ring *txr = sc->tx_rings;
 	struct  rx_ring *rxr = sc->rx_rings;
-	int		 i;
+	int i;
 
-        for (i = 0; i < sc->num_rx_queues; i++, rxr++) {
-                ixgbe_set_ivar(sc, IXGBE_IVAR_RX_QUEUE(i), rxr->msix);
-		sc->eims_mask |= rxr->eims;
-	}
+        for (i = 0; i < sc->num_rx_queues; i++, rxr++)
+                ixgbe_set_ivar(sc, i, rxr->msix, 0);
 
-        for (i = 0; i < sc->num_tx_queues; i++, txr++) {
-		ixgbe_set_ivar(sc, IXGBE_IVAR_TX_QUEUE(i), txr->msix);
-		sc->eims_mask |= txr->eims;
-	}
+        for (i = 0; i < sc->num_tx_queues; i++, txr++)
+		ixgbe_set_ivar(sc, i, txr->msix, 1);
 
 	/* For the Link interrupt */
-        ixgbe_set_ivar(sc, IXGBE_IVAR_OTHER_CAUSES_INDEX,
-	    sc->linkvec);
-	sc->eims_mask |= IXGBE_IVAR_OTHER_CAUSES_INDEX;
+        ixgbe_set_ivar(sc, 1, sc->linkvec, -1);
 }
 
 /**********************************************************************
@@ -2909,7 +3038,8 @@ ixgbe_update_stats_counters(struct ix_softc *sc)
 		mp = IXGBE_READ_REG(hw, IXGBE_MPC(i));
 		missed_rx += mp;
         	sc->stats.mpc[i] += mp;
-		sc->stats.rnbc[i] += IXGBE_READ_REG(hw, IXGBE_RNBC(i));
+		if (hw->mac.type == ixgbe_mac_82598EB)
+			sc->stats.rnbc[i] += IXGBE_READ_REG(hw, IXGBE_RNBC(i));
 	}
 
 	/* Hardware workaround, gprc counts missed packets */
@@ -3016,26 +3146,3 @@ ixgbe_print_hw_stats(struct ix_softc * sc)
 	    sc->tso_tx);
 }
 #endif
-
-#ifndef NO_82598_A0_SUPPORT
-/*
- * A0 Workaround: invert descriptor for hardware
- */
-void
-desc_flip(void *desc)
-{
-        struct dhack {uint32_t a1; uint32_t a2; uint32_t b1; uint32_t b2;};
-        struct dhack *d;
-
-        d = (struct dhack *)desc;
-        d->a1 = ~(d->a1);
-        d->a2 = ~(d->a2);
-        d->b1 = ~(d->b1);
-        d->b2 = ~(d->b2);
-        d->b2 &= 0xFFFFFFF0;
-        d->b1 &= ~IXGBE_ADVTXD_DCMD_RS;
-}
-#endif
-
-
-

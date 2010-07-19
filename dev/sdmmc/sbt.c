@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbt.c,v 1.12 2008/11/01 09:24:35 tedu Exp $	*/
+/*	$OpenBSD: sbt.c,v 1.15 2010/07/02 02:40:16 blambert Exp $	*/
 
 /*
  * Copyright (c) 2007 Uwe Stuehler <uwe@openbsd.org>
@@ -162,6 +162,8 @@ sbt_attach(struct device *parent, struct device *self, void *aux)
 	struct sbt_softc *sc = (struct sbt_softc *)self;
 	struct sdmmc_attach_args *sa = aux;
 
+	SDMMC_ASSERT_LOCKED(sc->sc_sf->sc);
+
 	printf("\n");
 
 	sc->sc_sf = sa->sf;
@@ -176,7 +178,7 @@ sbt_attach(struct device *parent, struct device *self, void *aux)
 	printf("%s: SDIO Bluetooth Type-A\n", DEVNAME(sc));
 
 	/* Create a shared buffer for receive and transmit. */
-	sc->sc_buf = malloc(SBT_PKT_BUFSIZ, M_DEVBUF, M_NOWAIT | M_CANFAIL);
+	sc->sc_buf = malloc(SBT_PKT_BUFSIZ, M_DEVBUF, M_NOWAIT);
 	if (sc->sc_buf == NULL) {
 		printf("%s: can't allocate cmd buffer\n", DEVNAME(sc));
 		return;
@@ -308,6 +310,7 @@ sbt_read_packet(struct sbt_softc *sc, u_char *buf, size_t *lenp)
 	}
 
 out:
+	SDMMC_LOCK(sc->sc_sf->sc);
 	if (error) {
 		if (sc->sc_rxtry >= SBT_RXTRY_MAX) {
 			/* Drop and request the next packet. */
@@ -318,11 +321,14 @@ out:
 			sc->sc_rxtry++;
 			CSR_WRITE_1(sc, SBT_REG_RPC, RPC_PCRRT);
 		}
+		SDMMC_UNLOCK(sc->sc_sf->sc);
 		return error;
 	}
 
 	/* acknowledge read packet */
 	CSR_WRITE_1(sc, SBT_REG_RPC, 0);
+
+	SDMMC_UNLOCK(sc->sc_sf->sc);
 
 	*lenp = len;
 	return 0;
@@ -345,8 +351,10 @@ sbt_intr(void *arg)
 	/* Block further SDIO interrupts; XXX not really needed? */
 	s = splsdmmc();
 
+	SDMMC_LOCK(sc->sc_sf->sc);
 	status = CSR_READ_1(sc, SBT_REG_ISTAT);
 	CSR_WRITE_1(sc, SBT_REG_ICLR, status);
+	SDMMC_UNLOCK(sc->sc_sf->sc);
 
 	if ((status & ISTAT_INTRD) == 0)
 		return 0;	/* shared SDIO card interrupt? */
@@ -364,7 +372,7 @@ sbt_intr(void *arg)
 	}
 
 	m->m_pkthdr.len = m->m_len = MHLEN;
-	m_copyback(m, 0, len, sc->sc_buf);
+	m_copyback(m, 0, len, sc->sc_buf, M_NOWAIT);
 	if (m->m_pkthdr.len == MAX(MHLEN, len)) {
 		m->m_pkthdr.len = len;
 		m->m_len = MIN(MHLEN, m->m_pkthdr.len);

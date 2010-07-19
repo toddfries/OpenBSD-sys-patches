@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_bio.c,v 1.62 2009/07/28 11:19:43 art Exp $	*/
+/*	$OpenBSD: nfs_bio.c,v 1.71 2010/04/12 16:37:38 beck Exp $	*/
 /*	$NetBSD: nfs_bio.c,v 1.25.4.2 1996/07/08 20:47:04 jtc Exp $	*/
 
 /*
@@ -67,11 +67,7 @@ uint32_t nfs_bufqmax, nfs_bufqlen;
  * Any similarity to readip() is purely coincidental
  */
 int
-nfs_bioread(vp, uio, ioflag, cred)
-	struct vnode *vp;
-	struct uio *uio;
-	int ioflag;
-	struct ucred *cred;
+nfs_bioread(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred)
 {
 	struct nfsnode *np = VTONFS(vp);
 	int biosize, diff;
@@ -160,7 +156,7 @@ nfs_bioread(vp, uio, ioflag, cred)
 				return (EINTR);
 			    if ((rabp->b_flags & (B_DELWRI | B_DONE)) == 0) {
 				rabp->b_flags |= (B_READ | B_ASYNC);
-				if (nfs_asyncio(rabp)) {
+				if (nfs_asyncio(rabp, 1)) {
 				    rabp->b_flags |= B_INVAL;
 				    brelse(rabp);
 				}
@@ -223,7 +219,7 @@ again:
 		on = 0;
 		break;
 	    default:
-		printf(" nfsbioread: type %x unexpected\n",vp->v_type);
+		panic("nfsbioread: type %x unexpected\n", vp->v_type);
 		break;
 	    }
 
@@ -232,15 +228,10 @@ again:
 			baddr = bp->b_data;
 		error = uiomove(baddr + on, (int)n, uio);
 	    }
-	    switch (vp->v_type) {
-	    case VREG:
-		break;
-	    case VLNK:
+
+	    if (vp->v_type == VLNK)
 		n = 0;
-		break;
-	    default:
-		printf(" nfsbioread: type %x unexpected\n",vp->v_type);
-	    }
+
 	    if (got_buf)
 		brelse(bp);
 	} while (error == 0 && uio->uio_resid > 0 && n > 0);
@@ -251,8 +242,7 @@ again:
  * Vnode op for write using bio
  */
 int
-nfs_write(v)
-	void *v;
+nfs_write(void *v)
 {
 	struct vop_write_args *ap = v;
 	int biosize;
@@ -431,11 +421,7 @@ again:
  * NULL.
  */
 struct buf *
-nfs_getcacheblk(vp, bn, size, p)
-	struct vnode *vp;
-	daddr64_t bn;
-	int size;
-	struct proc *p;
+nfs_getcacheblk(struct vnode *vp, daddr64_t bn, int size, struct proc *p)
 {
 	struct buf *bp;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
@@ -506,14 +492,16 @@ nfs_vinvalbuf(struct vnode *vp, int flags, struct ucred *cred, struct proc *p)
  * are all hung on a dead server.
  */
 int
-nfs_asyncio(bp)
-	struct buf *bp;
+nfs_asyncio(struct buf *bp, int readahead)
 {
 	if (nfs_numasync == 0)
 		goto out;
 
-	if (nfs_bufqlen > nfs_bufqmax)
-		goto out; /* too many bufs in use, force sync */
+	while (nfs_bufqlen > nfs_bufqmax)
+		if (readahead)
+			goto out;
+		else
+			tsleep(&nfs_bufqlen, PRIBIO, "nfs_bufq", 0);
 
 	if ((bp->b_flags & B_READ) == 0) {
 		bp->b_flags |= B_WRITEINPROG;
@@ -535,9 +523,7 @@ out:
  * synchronously or from an nfsiod.
  */
 int
-nfs_doio(bp, p)
-	struct buf *bp;
-	struct proc *p;
+nfs_doio(struct buf *bp, struct proc *p)
 {
 	struct uio *uiop;
 	struct vnode *vp;
@@ -624,7 +610,7 @@ nfs_doio(bp, p)
 		error = nfs_readlinkrpc(vp, uiop, curproc->p_ucred);
 		break;
 	    default:
-		printf("nfs_doio:  type %x unexpected\n", vp->v_type);
+		panic("nfs_doio:  type %x unexpected\n", vp->v_type);
 		break;
 	    };
 	    if (error) {

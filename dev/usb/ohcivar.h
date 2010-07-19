@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohcivar.h,v 1.26 2008/06/26 05:42:18 ray Exp $ */
+/*	$OpenBSD: ohcivar.h,v 1.28 2009/11/04 19:14:10 kettenis Exp $ */
 /*	$NetBSD: ohcivar.h,v 1.32 2003/02/22 05:24:17 tsutsui Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ohcivar.h,v 1.13 1999/11/17 22:33:41 n_hibma Exp $	*/
 
@@ -100,9 +100,7 @@ typedef struct ohci_softc {
 	u_int8_t sc_addr;		/* device address */
 	u_int8_t sc_conf;		/* device configuration */
 
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	char sc_softwake;
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 
 	ohci_soft_ed_t *sc_freeeds;
 	ohci_soft_td_t *sc_freetds;
@@ -145,5 +143,5 @@ usbd_status	ohci_handover(ohci_softc_t *);
 usbd_status	ohci_init(ohci_softc_t *);
 int		ohci_intr(void *);
 int		ohci_detach(ohci_softc_t *, int);
-int		ohci_activate(struct device *, enum devact);
+int		ohci_activate(struct device *, int);
 void		ohci_power(int, void *);

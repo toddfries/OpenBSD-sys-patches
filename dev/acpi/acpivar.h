@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivar.h,v 1.48 2009/06/03 00:36:59 pirofti Exp $	*/
+/*	$OpenBSD: acpivar.h,v 1.59 2010/07/13 21:01:05 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -35,8 +35,6 @@ extern int acpi_debug;
 #define dprintf(x...)
 #define dnprintf(n,x...)
 #endif
-
-/* #define ACPI_SLEEP_ENABLED */
 
 extern int acpi_hasprocfvs;
 
@@ -79,6 +77,7 @@ struct acpi_mem_map {
 
 struct acpi_q {
 	SIMPLEQ_ENTRY(acpi_q)	 q_next;
+	int			 q_id;
 	void			*q_table;
 	u_int8_t		 q_data[0];
 };
@@ -116,6 +115,13 @@ typedef SIMPLEQ_HEAD(, acpi_wakeq) acpi_wakeqhead_t;
 #define ACPIREG_GPE_STS		0x11
 #define ACPIREG_GPE_EN		0x12
 
+/* System status (_SST) codes */
+#define ACPI_SST_INDICATOR_OFF	0
+#define ACPI_SST_WORKING	1
+#define ACPI_SST_WAKING		2
+#define ACPI_SST_SLEEPING	3
+#define ACPI_SST_SLEEP_CONTEXT	4
+
 struct acpi_parsestate {
 	u_int8_t		*start;
 	u_int8_t		*end;
@@ -148,6 +154,13 @@ struct gpe_block {
 	void *arg;
 	int   active;
 };
+
+struct acpi_devlist {
+	struct aml_node			*dev_node;
+	TAILQ_ENTRY(acpi_devlist)	dev_link;
+};
+
+TAILQ_HEAD(acpi_devlist_head, acpi_devlist);
 
 struct acpi_ac {
 	struct acpiac_softc	*aac_softc;
@@ -190,14 +203,11 @@ struct acpi_softc {
 	bus_space_handle_t	sc_ioh_pm1a_evt;
 
 	void			*sc_interrupt;
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
-	void			*sc_softih;
-#else
-	struct timeout		sc_timeout;
-#endif
 
 	int			sc_powerbtn;
 	int			sc_sleepbtn;
+
+	int			sc_sleepmode;
 
 	struct {
 		int slp_typa;
@@ -208,7 +218,7 @@ struct acpi_softc {
 
 	struct gpe_block	*gpe_table;
 
-	int			sc_wakeup;
+	int			sc_threadwaiting;
 	u_int32_t		sc_gpe_sts;
 	u_int32_t		sc_gpe_en;
 	struct acpi_thread	*sc_thread;
@@ -217,6 +227,7 @@ struct acpi_softc {
 	struct aml_node		*sc_pts;
 	struct aml_node		*sc_bfs;
 	struct aml_node		*sc_gts;
+	struct aml_node		*sc_sst;
 	struct aml_node		*sc_wak;
 	int			sc_state;
 	struct acpiec_softc	*sc_ec;		/* XXX assume single EC */
@@ -228,7 +239,15 @@ struct acpi_softc {
 	int			sc_poll;
 
 	int			sc_revision;
+
+	int			sc_pse;		/* passive cooling enabled */
+
+	int			sc_flags;
 };
+
+#define	SCFLAG_OREAD	0x0000001
+#define	SCFLAG_OWRITE	0x0000002
+#define	SCFLAG_OPEN	(SCFLAG_OREAD|SCFLAG_OWRITE)
 
 #define GPE_NONE  0x00
 #define GPE_LEVEL 0x01
@@ -274,10 +293,10 @@ void	 acpi_powerdown(void);
 void	 acpi_reset(void);
 void	 acpi_cpu_flush(struct acpi_softc *, int);
 int	 acpi_sleep_state(struct acpi_softc *, int);
-void	 acpi_resume(struct acpi_softc *);
 int	 acpi_prepare_sleep_state(struct acpi_softc *, int);
 int	 acpi_enter_sleep_state(struct acpi_softc *, int);
 int	 acpi_sleep_machdep(struct acpi_softc *, int);
+void	 acpi_resume_machdep(void);
 void	 acpi_sleep_walk(struct acpi_softc *, int);
 
 
@@ -285,6 +304,8 @@ void	 acpi_sleep_walk(struct acpi_softc *, int);
 #define ACPI_IOWRITE 1
 
 void acpi_delay(struct acpi_softc *, int64_t);
+void acpi_wakeup(void *);
+
 int acpi_gasio(struct acpi_softc *, int, int, uint64_t, int, int, void *);
 
 int	acpi_set_gpehandler(struct acpi_softc *, int,
@@ -302,6 +323,8 @@ void	acpi_write_pmreg(struct acpi_softc *, int, int, int);
 void	acpi_poll(void *);
 
 int acpi_matchhids(struct acpi_attach_args *, const char *[], const char *);
+
+int	acpi_record_event(struct acpi_softc *, u_int);
 
 #endif
 

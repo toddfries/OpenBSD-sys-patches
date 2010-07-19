@@ -1,4 +1,4 @@
-/*	$OpenBSD: vscsivar.h,v 1.1 2008/12/03 23:39:32 dlg Exp $ */
+/*	$OpenBSD: vscsivar.h,v 1.3 2010/06/27 21:36:02 matthew Exp $ */
 
 /*
  * Copyright (c) 2008 David Gwynne <dlg@openbsd.org>
@@ -55,9 +55,16 @@ struct vscsi_ioc_t2i {
 #define VSCSI_STAT_SENSE	1
 #define VSCSI_STAT_ERR		2
 	struct scsi_sense_data	sense;
-	size_t			senselen;
 };
 
 #define VSCSI_T2I _IOW('I', 3, struct vscsi_ioc_t2i)
+
+struct vscsi_ioc_devevent {
+	u_int			target;
+	u_int			lun;
+};
+
+#define VSCSI_REQPROBE _IOW('I', 4, struct vscsi_ioc_devevent)
+#define VSCSI_REQDETACH _IOW('I', 5, struct vscsi_ioc_devevent)
 
 #endif /* _SYS_DEV_VSCSIVAR_H */
