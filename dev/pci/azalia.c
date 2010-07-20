@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.168 2010/03/21 15:02:31 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.174 2010/07/15 03:43:11 jakemsr Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -100,6 +100,8 @@ int az_debug = 0;
 #define		ICH_PCI_HDCTL_SIGNALMODE	0x01
 #define ICH_PCI_HDTCSEL	0x44
 #define		ICH_PCI_HDTCSEL_MASK	0x7
+#define ICH_PCI_MMC	0x62
+#define		ICH_PCI_MMC_ME		0x1
 
 /* internal types */
 
@@ -145,6 +147,7 @@ typedef struct azalia_t {
 	struct device *audiodev;
 
 	pci_chipset_tag_t pc;
+	pcitag_t tag;
 	void *ih;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
@@ -175,7 +178,6 @@ typedef struct azalia_t {
 	int nistreams, nostreams, nbstreams;
 	stream_t pstream;
 	stream_t rstream;
-	struct pci_attach_args *saved_pa;
 } azalia_t;
 #define XNAME(sc)		((sc)->dev.dv_xname)
 #define AZ_READ_1(z, r)		bus_space_read_1((z)->iot, (z)->ioh, HDA_##r)
@@ -394,7 +396,6 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	sc = (azalia_t*)self;
 	pa = aux;
-	sc->saved_pa = pa;
 
 	sc->dmat = pa->pa_dmat;
 
@@ -415,7 +416,14 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 	v = pci_conf_read(pa->pa_pc, pa->pa_tag, ICH_PCI_HDTCSEL);
 	pci_conf_write(pa->pa_pc, pa->pa_tag, ICH_PCI_HDTCSEL,
 	    v & ~(ICH_PCI_HDTCSEL_MASK));
- 
+
+	/* disable MSI, use INTx instead */
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_INTEL) {
+		reg = azalia_pci_read(pa->pa_pc, pa->pa_tag, ICH_PCI_MMC);
+		reg &= ~(ICH_PCI_MMC_ME);
+		azalia_pci_write(pa->pa_pc, pa->pa_tag, ICH_PCI_MMC, reg);
+	}
+
 	/* enable PCIe snoop */
 	switch (PCI_PRODUCT(pa->pa_id)) {
 	case PCI_PRODUCT_ATI_SB450_HDA:
@@ -482,6 +490,7 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	sc->pc = pa->pa_pc;
+	sc->tag = pa->pa_tag;
 	interrupt_str = pci_intr_string(pa->pa_pc, ih);
 	sc->ih = pci_intr_establish(pa->pa_pc, ih, IPL_AUDIO, azalia_intr,
 	    sc, sc->dev.dv_xname);
@@ -792,7 +801,6 @@ int
 azalia_init(azalia_t *az, int resuming)
 {
 	int err;
-	uint32_t gctl;
 
 	err = azalia_reset(az);
 	if (err)
@@ -823,10 +831,6 @@ azalia_init(azalia_t *az, int resuming)
 
 	AZ_WRITE_4(az, INTCTL,
 	    AZ_READ_4(az, INTCTL) | HDA_INTCTL_CIE | HDA_INTCTL_GIE);
-
-	/* enable unsolicited response */
-	gctl = AZ_READ_4(az, GCTL);
-	AZ_WRITE_4(az, GCTL, gctl | HDA_GCTL_UNSOL);
 
 	return(0);
 }
@@ -894,6 +898,9 @@ azalia_init_codecs(azalia_t *az)
 			azalia_codec_delete(codec);
 		}
 	}
+
+	/* Enable unsolicited responses now that az->codecno is set. */
+	AZ_WRITE_4(az, GCTL, AZ_READ_4(az, GCTL) | HDA_GCTL_UNSOL);
 
 	return(0);
 }
@@ -1212,21 +1219,22 @@ void
 azalia_rirb_kick_unsol_events(void *v)
 {
 	azalia_t *az = v;
+	int addr, tag;
 
 	if (az->unsolq_kick)
 		return;
 	az->unsolq_kick = TRUE;
 	while (az->unsolq_rp != az->unsolq_wp) {
-		int i;
-		int tag;
-		codec_t *codec;
-		i = RIRB_RESP_CODEC(az->unsolq[az->unsolq_rp].resp_ex);
+		addr = RIRB_RESP_CODEC(az->unsolq[az->unsolq_rp].resp_ex);
 		tag = RIRB_UNSOL_TAG(az->unsolq[az->unsolq_rp].resp);
-		codec = &az->codecs[i];
-		DPRINTF(("%s: codec#=%d tag=%d\n", __func__, i, tag));
+		DPRINTF(("%s: codec address=%d tag=%d\n", __func__, addr, tag));
+
 		az->unsolq_rp++;
 		az->unsolq_rp %= UNSOLQ_SIZE;
-		azalia_unsol_event(codec, tag);
+
+		/* We only care about events on the using codec. */
+		if (az->codecs[az->codecno].address == addr)
+			azalia_unsol_event(&az->codecs[az->codecno], tag);
 	}
 	az->unsolq_kick = FALSE;
 }
@@ -1395,19 +1403,8 @@ azalia_resume_codec(codec_t *this)
 			    CORB_PS_D0, &result);
 			DELAY(100);
 		}
-		if ((w->type == COP_AWTYPE_PIN_COMPLEX) &&
-		    (w->d.pin.cap & COP_PINCAP_EAPD)) {
-			err = azalia_comresp(this, w->nid,
-			    CORB_GET_EAPD_BTL_ENABLE, 0, &result);
-			if (err)
-				return err;
-			result &= 0xff;
-			result |= CORB_EAPD_EAPD;
-			err = azalia_comresp(this, w->nid,
-			    CORB_SET_EAPD_BTL_ENABLE, result, &result);
-			if (err)
-				return err;
-		}
+		if (w->type == COP_AWTYPE_PIN_COMPLEX)
+			azalia_widget_init_pin(w, this);
 	}
 
 	if (this->qrks & AZ_QRK_GPIO_MASK) {
@@ -1418,40 +1415,37 @@ azalia_resume_codec(codec_t *this)
 
 	azalia_restore_mixer(this);
 
-	err = azalia_codec_enable_unsol(this);
-	if (err)
-		return err;
-
 	return(0);
 }
 
 int
 azalia_resume(azalia_t *az)
 {
-	struct pci_attach_args *pa;
 	pcireg_t v;
 	int err;
 
-	pa = az->saved_pa;
-
 	/* enable back-to-back */
-	v = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+	v = pci_conf_read(az->pc, az->tag, PCI_COMMAND_STATUS_REG);
+	pci_conf_write(az->pc, az->tag, PCI_COMMAND_STATUS_REG,
 	    v | PCI_COMMAND_BACKTOBACK_ENABLE);
 
 	/* traffic class select */
-	v = pci_conf_read(pa->pa_pc, pa->pa_tag, ICH_PCI_HDTCSEL);
-	pci_conf_write(pa->pa_pc, pa->pa_tag, ICH_PCI_HDTCSEL,
+	v = pci_conf_read(az->pc, az->tag, ICH_PCI_HDTCSEL);
+	pci_conf_write(az->pc, az->tag, ICH_PCI_HDTCSEL,
 	    v & ~(ICH_PCI_HDTCSEL_MASK));
 
 	/* is this necessary? */
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG, az->subid);
+	pci_conf_write(az->pc, az->tag, PCI_SUBSYS_ID_REG, az->subid);
 
 	err = azalia_init(az, 1);
 	if (err)
 		return err;
 
 	err = azalia_resume_codec(&az->codecs[az->codecno]);
+	if (err)
+		return err;
+
+	err = azalia_codec_enable_unsol(&az->codecs[az->codecno], 1);
 	if (err)
 		return err;
 
@@ -3877,6 +3871,8 @@ azalia_get_default_params(void *addr, int mode, struct audio_params *params)
 	params->sample_rate = 48000;
 	params->encoding = AUDIO_ENCODING_SLINEAR_LE;
 	params->precision = 16;
+	params->bps = 2;
+	params->msb = 1;
 	params->channels = 2;
 	params->sw_code = NULL;
 	params->factor = 1;
@@ -4014,6 +4010,8 @@ azalia_set_params_sub(codec_t *codec, int mode, audio_params_t *par)
 		}
 	}
 	par->sw_code = swcode;
+	par->bps = AUDIO_BPS(par->precision);
+	par->msb = 1;
 
 	return (0);
 }
@@ -4383,6 +4381,8 @@ azalia_create_encodings(codec_t *this)
 		this->encs[i].index = i;
 		this->encs[i].encoding = encs[i] & 0xff;
 		this->encs[i].precision = encs[i] >> 8;
+		this->encs[i].bps = AUDIO_BPS(encs[i] >> 8);
+		this->encs[i].msb = 1;
 		this->encs[i].flags = 0;
 		switch (this->encs[i].encoding) {
 		case AUDIO_ENCODING_SLINEAR_LE:

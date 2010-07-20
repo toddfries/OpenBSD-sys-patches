@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_apm.c,v 1.31 2009/03/27 16:01:37 oga Exp $	*/
+/*	$OpenBSD: pxa2x0_apm.c,v 1.32 2010/03/30 17:40:55 oga Exp $	*/
 
 /*-
  * Copyright (c) 2001 Alexander Guy.  All rights reserved.

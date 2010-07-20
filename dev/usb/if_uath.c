@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_uath.c,v 1.40 2009/10/13 19:33:17 pirofti Exp $	*/
+/*	$OpenBSD: if_uath.c,v 1.42 2010/06/29 07:12:31 matthew Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -32,7 +32,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -192,7 +191,7 @@ int uath_detach(struct device *, int);
 int uath_activate(struct device *, int); 
 
 struct cfdriver uath_cd = { 
-	NULL, "uath", DV_DULL 
+	NULL, "uath", DV_IFNET
 }; 
 
 const struct cfattach uath_ca = { 

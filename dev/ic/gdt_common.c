@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdt_common.c,v 1.48 2010/03/23 01:57:19 krw Exp $	*/
+/*	$OpenBSD: gdt_common.c,v 1.51 2010/06/28 18:31:02 krw Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000, 2003 Niklas Hallqvist.  All rights reserved.
@@ -103,10 +103,6 @@ struct scsi_adapter gdt_raw_switch = {
 	gdt_raw_scsi_cmd, gdtminphys, 0, 0,
 };
 
-struct scsi_device gdt_dev = {
-	NULL, NULL, NULL, NULL
-};
-
 int gdt_cnt = 0;
 u_int8_t gdt_polling;
 u_int8_t gdt_from_wait;
@@ -161,7 +157,6 @@ gdt_attach(struct gdt_softc *sc)
 	/* Fill in the prototype scsi_link. */
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &gdt_switch;
-	sc->sc_link.device = &gdt_dev;
 	/* openings will be filled in later. */
 	sc->sc_link.adapter_buswidth =
 	    (sc->sc_class & GDT_FC) ? GDT_MAXID : GDT_MAX_HDRIVES;
@@ -499,7 +494,6 @@ gdt_attach(struct gdt_softc *sc)
 		sc->sc_raw_link[i].adapter_softc = sc;
 		sc->sc_raw_link[i].adapter = &gdt_raw_switch;
 		sc->sc_raw_link[i].adapter_target = 7;
-		sc->sc_raw_link[i].device = &gdt_dev;
 		sc->sc_raw_link[i].openings = 4;	/* XXX a guess */
 		sc->sc_raw_link[i].adapter_buswidth =
 		    (sc->sc_class & GDT_FC) ? GDT_MAXID : 16;	/* XXX */
@@ -671,7 +665,9 @@ gdt_scsi_cmd(struct scsi_xfer *xs)
 			 */
 			sc->sc_cmd_off = 0;
 
-			if (xs->cmd->opcode != SYNCHRONIZE_CACHE) {
+			if (xs->cmd->opcode == SYNCHRONIZE_CACHE) {
+				 blockno = blockcnt = 0;
+			} else {
 				/* A read or write operation. */
 				if (xs->cmdlen == 6) {
 					rw = (struct scsi_rw *)xs->cmd;
@@ -1009,18 +1005,14 @@ gdt_raw_scsi_cmd(struct scsi_xfer *xs)
 		xs->sense.flags = SKEY_ILLEGAL_REQUEST;
 		xs->sense.add_sense_code = 0x20; /* illcmd, 0x24 illfield */
 		xs->error = XS_SENSE;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
 	if ((ccb = gdt_get_ccb(sc, xs->flags)) == NULL) {
 		GDT_DPRINTF(GDT_D_CMD, ("no ccb available for %p ", xs));
 		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 

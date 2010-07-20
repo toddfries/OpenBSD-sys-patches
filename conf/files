@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.485 2010/03/22 21:20:55 miod Exp $
+#	$OpenBSD: files,v 1.497 2010/07/13 16:47:03 deraadt Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -233,7 +233,7 @@ file	dev/ic/osiop.c			osiop & (osiop_gsc | osiop_eisa | osiop_pcctwo)
 
 # Symbios/NCR 53c700 SCSI controllers
 device	oosiop: scsi
-file	dev/ic/oosiop.c			oosiop & (oosiop_gsc)
+file	dev/ic/oosiop.c			oosiop
 
 # 3Com Etherlink-III Ethernet controller
 device	ep: ether, ifnet, ifmedia, mii
@@ -374,10 +374,13 @@ file	dev/ic/ath.c			ath
 # Atheros AR9k (802.11a/g/n) driver
 device	athn: ether, ifnet, ifmedia, wlan
 file	dev/ic/athn.c			athn
+file	dev/ic/ar5008.c			athn
 file	dev/ic/ar5416.c			athn
 file	dev/ic/ar9280.c			athn
 file	dev/ic/ar9285.c			athn
 file	dev/ic/ar9287.c			athn
+file	dev/ic/ar9003.c			athn
+file	dev/ic/ar9380.c			athn
 
 # ADMtek ADM8211 802.11
 device	atw: ether, ifnet, ifmedia, smc93cx6, wlan
@@ -588,6 +591,7 @@ file dev/auconv.c			auconv
 file dev/audio.c			audio			needs-flag
 file dev/ccd.c				ccd			needs-flag
 file dev/cons.c
+file dev/diskmap.c
 file dev/firmload.c			firmload
 file dev/flash.c			flash			needs-flag
 file dev/ic/ncr5380sbc.c		ncr5380sbc
@@ -689,6 +693,7 @@ file kern/exec_subr.c
 file kern/init_main.c
 file kern/init_sysent.c
 file kern/kern_acct.c			accounting
+file kern/kern_bufq.c
 file kern/kern_clock.c
 file kern/kern_descrip.c
 file kern/kern_event.c
@@ -726,6 +731,7 @@ file kern/subr_evcount.c
 file kern/subr_extent.c
 file kern/subr_log.c
 file kern/subr_pool.c
+file kern/dma_alloc.c
 file kern/subr_prf.c
 file kern/subr_prof.c
 file kern/subr_userconf.c		boot_config
@@ -870,7 +876,7 @@ file netinet/ip_gre.c			inet
 file netinet/ip_ipsp.c			(inet | inet6) & (ipsec | tcp_signature)
 file netinet/ip_spd.c			(inet | inet6) & (ipsec | tcp_signature)
 file netinet/ip_ipip.c			inet | inet6
-file netinet/ip_ether.c			inet
+file netinet/ip_ether.c			(inet | inet6) & gif
 file netinet/ipsec_input.c		(inet | inet6) & ipsec
 file netinet/ipsec_output.c		(inet | inet6) & ipsec
 file netinet/ip_esp.c			inet & ipsec
@@ -1004,11 +1010,12 @@ file uvm/uvm_km.c
 file uvm/uvm_map.c
 file uvm/uvm_meter.c
 file uvm/uvm_mmap.c
-file uvm/uvm_object.c			!small_kernel
+file uvm/uvm_object.c
 file uvm/uvm_page.c
 file uvm/uvm_pager.c
 file uvm/uvm_pdaemon.c
 file uvm/uvm_pglist.c
+file uvm/uvm_pmemrange.c
 file uvm/uvm_stat.c
 file uvm/uvm_swap.c
 file uvm/uvm_swap_encrypt.c		uvm_swap_encrypt
@@ -1057,19 +1064,14 @@ file compat/common/compat_exec.c	!small_kernel
 file compat/common/compat_util.c	!small_kernel
 file compat/common/compat_dir.c		!small_kernel
 file compat/common/compat_vm.c		!small_kernel &
-	(compat_freebsd | compat_bsdos | compat_sunos | compat_hpux | compat_linux)
+	(compat_freebsd | compat_linux)
 file compat/common/kern_info_09.c	!small_kernel &
-	(compat_freebsd | compat_ibcs2 | compat_sunos | compat_hpux |
-	compat_osf1 | compat_linux)
-file compat/common/kern_ipc_10.c	!small_kernel &
-	(compat_freebsd | compat_ibcs2 | compat_sunos | compat_hpux | compat_bsdos)
-file compat/common/vfs_syscalls_25.c	!small_kernel &
-	(compat_freebsd | compat_bsdos | compat_sunos | compat_hpux)
+	(compat_freebsd | compat_linux)
+file compat/common/kern_ipc_10.c	!small_kernel & compat_freebsd
+file compat/common/vfs_syscalls_25.c	!small_kernel & compat_freebsd
 file compat/common/vfs_syscalls_35.c	!small_kernel & (compat_35 |
-	compat_freebsd | compat_bsdos | compat_sunos | compat_hpux)
-file compat/common/vfs_syscalls_o43.c	!small_kernel & compat_o43
+	compat_freebsd )
 file compat/common/kern_ipc_35.c	!small_kernel & compat_35
-file compat/common/kern_ipc_23.c	!small_kernel & compat_23
 file compat/common/kern_exit_43.c	!small_kernel
 file compat/common/kern_info_43.c	!small_kernel
 file compat/common/kern_resource_43.c	!small_kernel

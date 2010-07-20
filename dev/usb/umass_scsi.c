@@ -1,4 +1,4 @@
-/*	$OpenBSD: umass_scsi.c,v 1.28 2010/03/23 01:57:20 krw Exp $ */
+/*	$OpenBSD: umass_scsi.c,v 1.30 2010/06/28 18:31:02 krw Exp $ */
 /*	$NetBSD: umass_scsipi.c,v 1.9 2003/02/16 23:14:08 augustss Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -77,12 +77,6 @@ void umass_scsi_sense_cb(struct umass_softc *sc, void *priv, int residue,
 			 int status);
 struct umass_scsi_softc *umass_scsi_setup(struct umass_softc *);
 
-struct scsi_device umass_scsi_dev = { NULL, NULL, NULL, NULL, };
-
-#if NATAPISCSI > 0
-struct scsi_device umass_atapiscsi_dev = { NULL, NULL, NULL, NULL, };
-#endif
-
 int
 umass_scsi_attach(struct umass_softc *sc)
 {
@@ -94,7 +88,6 @@ umass_scsi_attach(struct umass_softc *sc)
 	scbus->sc_link.luns = sc->maxlun + 1;
 	scbus->sc_link.flags &= ~SDEV_ATAPI;
 	scbus->sc_link.flags |= SDEV_UMASS;
-	scbus->sc_link.device = &umass_scsi_dev;
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &scbus->sc_link;
@@ -124,7 +117,6 @@ umass_atapi_attach(struct umass_softc *sc)
 	scbus->sc_link.luns = 1;
 	scbus->sc_link.openings = 1;
 	scbus->sc_link.flags |= SDEV_ATAPI;
-	scbus->sc_link.device = &umass_atapiscsi_dev;
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &scbus->sc_link;
@@ -172,7 +164,7 @@ umass_scsi_cmd(struct scsi_xfer *xs)
 	struct scsi_link *sc_link = xs->sc_link;
 	struct umass_softc *sc = sc_link->adapter_softc;
 	struct scsi_generic *cmd;
-	int cmdlen, dir, s;
+	int cmdlen, dir;
 
 #ifdef UMASS_DEBUG
 	microtime(&sc->tv);
@@ -249,9 +241,7 @@ umass_scsi_cmd(struct scsi_xfer *xs)
 
 	/* Return if command finishes early. */
  done:
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 void
@@ -270,7 +260,6 @@ umass_scsi_cb(struct umass_softc *sc, void *priv, int residue, int status)
 	struct scsi_xfer *xs = priv;
 	struct scsi_link *link = xs->sc_link;
 	int cmdlen;
-	int s;
 #ifdef UMASS_DEBUG
 	struct timeval tv;
 	u_int delta;
@@ -375,9 +364,7 @@ umass_scsi_cb(struct umass_softc *sc, void *priv, int residue, int status)
 		}
 	}
 
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 /*
@@ -388,7 +375,6 @@ umass_scsi_sense_cb(struct umass_softc *sc, void *priv, int residue,
 		    int status)
 {
 	struct scsi_xfer *xs = priv;
-	int s;
 
 	DPRINTF(UDMASS_CMD,("umass_scsi_sense_cb: xs=%p residue=%d "
 		"status=%d\n", xs, residue, status));
@@ -428,8 +414,6 @@ umass_scsi_sense_cb(struct umass_softc *sc, void *priv, int residue,
 		}
 	}
 
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 

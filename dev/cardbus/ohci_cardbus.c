@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohci_cardbus.c,v 1.13 2010/03/22 22:28:27 jsg Exp $ */
+/*	$OpenBSD: ohci_cardbus.c,v 1.15 2010/03/27 21:40:13 jsg Exp $ */
 /*	$NetBSD: ohci_cardbus.c,v 1.19 2004/08/02 19:14:28 mycroft Exp $	*/
 
 /*
@@ -64,7 +64,7 @@ int	ohci_cardbus_detach(struct device *, int);
 
 struct ohci_cardbus_softc {
 	ohci_softc_t		sc;
-	pci_chipset_tag_t	sc_cc;
+	cardbus_chipset_tag_t	sc_cc;
 	cardbus_function_tag_t	sc_cf;
 	cardbus_devfunc_t	sc_ct;
 	void 			*sc_ih;		/* interrupt vectoring */
@@ -97,7 +97,8 @@ ohci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	struct ohci_cardbus_softc *sc = (struct ohci_cardbus_softc *)self;
 	struct cardbus_attach_args *ca = aux;
 	cardbus_devfunc_t ct = ca->ca_ct;
-	pci_chipset_tag_t cc = ct->ct_cc;
+	cardbus_chipset_tag_t cc = ct->ct_cc;
+	pci_chipset_tag_t pc = ca->ca_pc;
 	cardbus_function_tag_t cf = ct->ct_cf;
 	pcireg_t csr;
 	usbd_status r;
@@ -124,9 +125,9 @@ ohci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	(ct->ct_cf->cardbus_ctrl)(cc, CARDBUS_BM_ENABLE);
 
 	/* Enable the device. */
-	csr = cardbus_conf_read(cc, cf, ca->ca_tag,
+	csr = pci_conf_read(pc, ca->ca_tag,
 				PCI_COMMAND_STATUS_REG);
-	cardbus_conf_write(cc, cf, ca->ca_tag, PCI_COMMAND_STATUS_REG,
+	pci_conf_write(pc, ca->ca_tag, PCI_COMMAND_STATUS_REG,
 		       csr | PCI_COMMAND_MASTER_ENABLE
 			   | PCI_COMMAND_MEM_ENABLE);
 

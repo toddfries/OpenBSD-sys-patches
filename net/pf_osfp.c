@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_osfp.c,v 1.16 2010/01/18 23:52:46 mcbride Exp $ */
+/*	$OpenBSD: pf_osfp.c,v 1.18 2010/07/13 12:56:06 henning Exp $ */
 
 /*
  * Copyright (c) 2003 Mike Frantzen <frantzen@w4g.org>
@@ -368,9 +368,8 @@ pf_osfp_add(struct pf_osfp_ioctl *fpioc)
 			return (ENOMEM);
 	} else {
 		if ((fp = pool_get(&pf_osfp_pl,
-		    PR_WAITOK|PR_LIMITFAIL)) == NULL)
+		    PR_WAITOK|PR_ZERO|PR_LIMITFAIL)) == NULL)
 			return (ENOMEM);
-		memset(fp, 0, sizeof(*fp));
 		fp->fp_tcpopts = fpioc->fp_tcpopts;
 		fp->fp_wsize = fpioc->fp_wsize;
 		fp->fp_psize = fpioc->fp_psize;
@@ -561,7 +560,7 @@ pf_osfp_validate(void)
 		if (find.fp_mss == 0)
 			find.fp_mss = 128;
 		if (f->fp_flags & PF_OSFP_WSIZE_MSS)
-			find.fp_wsize *= find.fp_mss, 1;
+			find.fp_wsize *= find.fp_mss;
 		else if (f->fp_flags & PF_OSFP_WSIZE_MTU)
 			find.fp_wsize *= (find.fp_mss + 40);
 		else if (f->fp_flags & PF_OSFP_WSIZE_MOD)

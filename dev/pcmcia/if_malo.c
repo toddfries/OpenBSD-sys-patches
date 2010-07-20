@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_malo.c,v 1.67 2009/10/13 19:33:16 pirofti Exp $ */
+/*      $OpenBSD: if_malo.c,v 1.69 2010/07/02 03:13:42 tedu Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -559,6 +559,7 @@ cmalo_fw_load_main(struct malo_softc *sc)
 	DPRINTF(1, "%s: helper FW loaded successfully\n", sc->sc_dev.dv_xname);
 
 	/* download the main firmware */
+	bsize = 0; /* XXX really??? */
 	for (offset = 0; offset < sc->sc_fw_m_size; offset += bsize) {
 		val16 = MALO_READ_2(sc, MALO_REG_RBAL);
 		/*
@@ -998,7 +999,9 @@ cmalo_tx(struct malo_softc *sc, struct mbuf *m)
 	/* prepare TX descriptor */
 	txdesc->pkgoffset = htole32(sizeof(*txdesc));
 	txdesc->pkglen = htole16(m->m_pkthdr.len);
-	bcopy(data, txdesc->dstaddrhigh, ETHER_ADDR_LEN);
+	bcopy(data, txdesc->dstaddrhigh, sizeof(txdesc->dstaddrhigh));
+	bcopy(data + sizeof(txdesc->dstaddrhigh), txdesc->dstaddrlow,
+	    sizeof(txdesc->dstaddrlow));
 
 	/* copy mbuf data to the buffer */
 	m_copydata(m, 0, m->m_pkthdr.len, sc->sc_data + sizeof(*txdesc));

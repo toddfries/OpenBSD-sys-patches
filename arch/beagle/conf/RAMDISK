@@ -1,4 +1,4 @@
-# $OpenBSD: RAMDISK,v 1.5 2010/02/12 05:36:10 drahn Exp $
+# $OpenBSD: RAMDISK,v 1.8 2010/07/03 03:59:16 krw Exp $
 #
 # GENERIC machine description file
 #
@@ -37,7 +37,6 @@ options		CACHE_CLEAN_BLOCK_INTR
 
 makeoptions	KERNEL_BASE_PHYS="0x80300000"
 makeoptions	KERNEL_BASE_VIRT="0xc0300000"
-makeoptions	BOARDTYPE="beagle"
 options	BUILD_STARTUP_PAGETABLE
 options	STARTUP_PAGETABLE_ADDR=0x80200000
 options	SDRAM_START="0x80000000"
@@ -147,8 +146,6 @@ ommmc0		at ahb? addr 0x4809c000 intr 83
 # wi*		at uhub?		# WaveLAN IEEE 802.11DS
 # urio*		at uhub?		# Diamond Multimedia Rio 500
 # uscanner*	at uhub?		# USB Scanners
-# usscanner*	at uhub?		# USB SCSI scanners, e.g., HP5300
-# scsibus*	at usscanner?
 # #uyap*		at uhub?		# Y@P firmware loader
 # udsbr*		at uhub?		# D-Link DSB-R100 radio
 # radio*		at udsbr?		# USB radio
@@ -157,12 +154,11 @@ ommmc0		at ahb? addr 0x4809c000 intr 83
 # 
 # ukphy*	at mii?				# "unknown" PHYs
 # 
-# sd*		at scsibus?
-# st*		at scsibus?
-# cd*		at scsibus?
-# ch*		at scsibus?
-# ss*		at scsibus?
-# uk*		at scsibus?
+sd*		at scsibus?
+st*		at scsibus?
+cd*		at scsibus?
+ch*		at scsibus?
+uk*		at scsibus?
 
 
 # onboard uarts
@@ -177,12 +173,6 @@ com0	at ahb?	addr	0x49020000	size 0x400 intr 74 # UART3
 
 sdmmc*	at ommmc?		# SD/MMC bus
 scsibus* at sdmmc?		# SCSI emulation
-sd*		at scsibus?
-st*		at scsibus?
-cd*		at scsibus?
-ch*		at scsibus?
-ss*		at scsibus?
-uk*		at scsibus?
 
 # Bluetooth controllers
 #sbt*	at sdmmc?		# SDIO Bluetooth

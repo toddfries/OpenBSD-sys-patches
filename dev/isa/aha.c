@@ -1,4 +1,4 @@
-/*	$OpenBSD: aha.c,v 1.67 2010/03/23 01:57:20 krw Exp $	*/
+/*	$OpenBSD: aha.c,v 1.72 2010/07/02 02:29:45 tedu Exp $	*/
 /*	$NetBSD: aha.c,v 1.11 1996/05/12 23:51:23 mycroft Exp $	*/
 
 #undef AHADIAG
@@ -57,7 +57,6 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/timeout.h>
 
 #include <uvm/uvm.h>
@@ -77,7 +76,7 @@
  * on i386 at least, xfers to/from user memory
  * cannot be serviced at interrupt time.
  */
-#ifdef i386
+#ifdef __i386__
 #define VOLATILE_XS(xs) \
 	((xs)->datalen > 0 && (xs)->bp == NULL && \
 	((xs)->flags & SCSI_POLL) == 0)
@@ -160,14 +159,6 @@ struct scsi_adapter aha_switch = {
 	ahaminphys,
 	0,
 	0,
-};
-
-/* the below structure is so we have a default dev struct for out link struct */
-struct scsi_device aha_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
 };
 
 int	aha_isapnp_probe(struct device *, void *, void *);
@@ -400,7 +391,6 @@ ahaattach(parent, self, aux)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_scsi_dev;
 	sc->sc_link.adapter = &aha_switch;
-	sc->sc_link.device = &aha_dev;
 	sc->sc_link.openings = 2;
 
 	bzero(&saa, sizeof(saa));
@@ -1258,9 +1248,7 @@ aha_scsi_cmd(xs)
 	flags = xs->flags;
 	if ((ccb = aha_get_ccb(sc, flags)) == NULL) {
 		xs->error = XS_NO_CCB;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 	ccb->xs = xs;
@@ -1291,9 +1279,7 @@ aha_scsi_cmd(xs)
 		    xs->datalen, NULL, BUS_DMA_NOWAIT) != 0) {
 			aha_free_ccb(sc, ccb);
 			xs->error = XS_NO_CCB;
-			s = splbio();
 			scsi_done(xs);
-			splx(s);
 			return;
 		}
 		for (seg = 0; seg < ccb->dmam->dm_nsegs; seg++) {
@@ -1414,11 +1400,11 @@ aha_timeout(arg)
 	int s;
 
 	s = splbio();
-	bus_dmamap_sync(sc->sc_dmat, ccb->ccb_dmam, 0,
-	    ccb->ccb_dmam->dm_mapsize, BUS_DMASYNC_POSTREAD);
 	xs = ccb->xs;
 	sc_link = xs->sc_link;
 	sc = sc_link->adapter_softc;
+	bus_dmamap_sync(sc->sc_dmat, ccb->ccb_dmam, 0,
+	    ccb->ccb_dmam->dm_mapsize, BUS_DMASYNC_POSTREAD);
 
 	sc_print_addr(sc_link);
 	printf("timed out");

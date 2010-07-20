@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.44 2009/08/13 15:04:20 dlg Exp $	*/
+/*	$OpenBSD: conf.c,v 1.46 2010/07/03 03:59:16 krw Exp $	*/
 /*	$NetBSD: conf.c,v 1.41 1997/02/11 07:35:49 scottr Exp $	*/
 
 /*
@@ -81,7 +81,6 @@ int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 cdev_decl(mm);
 #include "bio.h"
 #include "pty.h"
-#include "ss.h"
 #include "uk.h"
 cdev_decl(fd);
 #include "zsc.h"
@@ -143,7 +142,7 @@ struct cdevsw	cdevsw[] =
 	cdev_lkm_dummy(),		/* 30 */
 	cdev_lkm_dummy(),		/* 31 */
 	cdev_random_init(1,random),	/* 32: random data source */
-	cdev_ss_init(NSS,ss),           /* 33: SCSI scanner */
+	cdev_notdef(),			/* 33 */
 	cdev_uk_init(NUK,uk),		/* 34: SCSI unknown */
 	cdev_pf_init(NPF,pf),		/* 35: packet filter */
 	cdev_audio_init(NASC,asc),      /* 36: ASC audio device */
@@ -168,6 +167,7 @@ struct cdevsw	cdevsw[] =
 #endif
 	cdev_ptm_init(NPTY,ptm),	/* 52: pseudo-tty ptm device */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 53: vscsi */
+	cdev_disk_init(1,diskmap),	/* 54: disk mapper */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

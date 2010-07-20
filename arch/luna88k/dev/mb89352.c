@@ -1,4 +1,4 @@
-/*	$OpenBSD: mb89352.c,v 1.12 2010/03/23 01:57:19 krw Exp $	*/
+/*	$OpenBSD: mb89352.c,v 1.15 2010/06/28 18:31:01 krw Exp $	*/
 /*	$NetBSD: mb89352.c,v 1.5 2000/03/23 07:01:31 thorpej Exp $	*/
 /*	NecBSD: mb89352.c,v 1.4 1998/03/14 07:31:20 kmatsuda Exp	*/
 
@@ -127,7 +127,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/queue.h>
 
 #include <machine/intr.h>
@@ -177,13 +176,6 @@ void	spc_print_active_acb(void);
 
 extern struct cfdriver spc_cd;
 
-struct scsi_device spc_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
-};
-
 /*
  * INITIALIZATION ROUTINES (probe, attach ++)
  */
@@ -222,7 +214,6 @@ spc_attach(sc, adapter)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_initiator;
 	sc->sc_link.adapter = adapter;
-	sc->sc_link.device = &spc_dev;
 	sc->sc_link.openings = 2;
 
 	bzero(&saa, sizeof(saa));
@@ -443,9 +434,7 @@ spc_scsi_cmd(xs)
 	flags = xs->flags;
 	if ((acb = spc_get_acb(sc, flags)) == NULL) {
 		xs->error = XS_NO_CCB;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 

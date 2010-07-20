@@ -1,4 +1,4 @@
-/*	$OpenBSD: vscsi.c,v 1.8 2010/03/23 01:57:19 krw Exp $ */
+/*	$OpenBSD: vscsi.c,v 1.14 2010/06/28 18:31:01 krw Exp $ */
 
 /*
  * Copyright (c) 2008 David Gwynne <dlg@openbsd.org>
@@ -35,19 +35,6 @@
 #include <scsi/scsiconf.h>
 
 #include <dev/vscsivar.h>
-
-#ifdef VSCSI_DEBUG
-#define VSCSI_D_INIT	(1<<0)
-
-int vscsidebug = 0;
-
-#define DPRINTF(_m, _p...)	do { \
-					if (ISSET(vscsidebug, (_m))) \
-						printf(p); \
-				} while (0)
-#else
-#define DPRINTF(_m, _p...)	/* _m, _p */
-#endif
 
 int		vscsi_match(struct device *, void *, void *);
 void		vscsi_attach(struct device *, struct device *, void *);
@@ -106,10 +93,6 @@ struct scsi_adapter vscsi_switch = {
 	NULL
 };
 
-struct scsi_device vscsi_dev = {
-	NULL, NULL, NULL, NULL
-};
-
 void		vscsi_xs_stuffup(struct scsi_xfer *);
 
 
@@ -148,7 +131,6 @@ vscsi_attach(struct device *parent, struct device *self, void *aux)
 	rw_init(&sc->sc_open, DEVNAME(sc));
 	rw_init(&sc->sc_ccb_polling, DEVNAME(sc));
 
-	sc->sc_link.device = &vscsi_dev;
 	sc->sc_link.adapter = &vscsi_switch;
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = 256;
@@ -207,12 +189,8 @@ vscsi_cmd(struct scsi_xfer *xs)
 void
 vscsi_xs_stuffup(struct scsi_xfer *xs)
 {
-	int				s;
-
 	xs->error = XS_DRIVER_STUFFUP;
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 int
@@ -353,7 +331,7 @@ vscsi_data(struct vscsi_softc *sc, struct vscsi_ioc_data *data, int read)
 
 	xs = ccb->ccb_xs;
 
-	if (data->datalen + ccb->ccb_datalen > xs->datalen)
+	if (data->datalen > xs->datalen - ccb->ccb_datalen)
 		return (ENOMEM);
 
 	switch (xs->flags & (SCSI_DATA_IN | SCSI_DATA_OUT)) {
@@ -392,7 +370,6 @@ vscsi_t2i(struct vscsi_softc *sc, struct vscsi_ioc_t2i *t2i)
 	struct scsi_link		*link;
 	int				rv = 0;
 	int				polled;
-	int				s;
 
 	TAILQ_FOREACH(ccb, &sc->sc_ccb_t2i, ccb_entry) {
 		if (ccb->ccb_tag == t2i->tag)
@@ -415,8 +392,7 @@ vscsi_t2i(struct vscsi_softc *sc, struct vscsi_ioc_t2i *t2i)
 		break;
 	case VSCSI_STAT_SENSE:
 		xs->error = XS_SENSE;
-		bcopy(&t2i->sense, &xs->sense, t2i->senselen);
-		xs->req_sense_length = t2i->senselen;
+		bcopy(&t2i->sense, &xs->sense, sizeof(xs->sense));
 		break;
 	case VSCSI_STAT_ERR:
 	default:
@@ -426,9 +402,7 @@ vscsi_t2i(struct vscsi_softc *sc, struct vscsi_ioc_t2i *t2i)
 
 	polled = ISSET(xs->flags, SCSI_POLL);
 
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 
 	if (polled) {
 		ccb->ccb_xs = NULL;

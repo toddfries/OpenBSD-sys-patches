@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_node.c,v 1.56 2010/02/17 18:34:37 damien Exp $	*/
+/*	$OpenBSD: ieee80211_node.c,v 1.60 2010/06/19 08:33:50 damien Exp $	*/
 /*	$NetBSD: ieee80211_node.c,v 1.14 2004/05/09 09:18:47 dyoung Exp $	*/
 
 /*-
@@ -439,6 +439,11 @@ ieee80211_match_bss(struct ieee80211com *ic, struct ieee80211_node *ni)
 			if (!(ic->ic_flags & IEEE80211_F_PSK))
 				fail |= 0x40;
 		}
+		if (ni->ni_rsngroupcipher != IEEE80211_CIPHER_WEP40 &&
+		    ni->ni_rsngroupcipher != IEEE80211_CIPHER_TKIP &&
+		    ni->ni_rsngroupcipher != IEEE80211_CIPHER_CCMP &&
+		    ni->ni_rsngroupcipher != IEEE80211_CIPHER_WEP104)
+			fail |= 0x40;
 		if ((ni->ni_rsnciphers & ic->ic_rsnciphers) == 0)
 			fail |= 0x40;
 
@@ -522,6 +527,7 @@ ieee80211_end_scan(struct ifnet *ifp)
 		 * an unnoccupied one.  If that fails, pick a random
 		 * channel from the active set.
 		 */
+		memset(occupied, 0, sizeof(occupied));
 		RB_FOREACH(ni, ieee80211_tree, &ic->ic_tree)
 			setbit(occupied, ieee80211_chan2ieee(ic, ni->ni_chan));
 		for (i = 0; i < IEEE80211_CHAN_MAX; i++)
@@ -1428,10 +1434,9 @@ ieee80211_node_leave_rsn(struct ieee80211com *ic, struct ieee80211_node *ni)
 	ni->ni_flags &= ~IEEE80211_NODE_PMK;
 	ni->ni_rsn_gstate = RSNA_IDLE;
 
-#ifndef IEEE80211_STA_ONLY
 	timeout_del(&ni->ni_eapol_to);
 	timeout_del(&ni->ni_sa_query_to);
-#endif
+
 	ni->ni_rsn_retries = 0;
 	ni->ni_flags &= ~IEEE80211_NODE_TXRXPROT;
 	ni->ni_port_valid = 0;
@@ -1499,13 +1504,11 @@ ieee80211_node_leave(struct ieee80211com *ic, struct ieee80211_node *ni)
 	if (ic->ic_opmode != IEEE80211_M_HOSTAP)
 		panic("not in ap mode, mode %u", ic->ic_opmode);
 	/*
-	 * If node wasn't previously associated all
-	 * we need to do is reclaim the reference.
+	 * If node wasn't previously associated all we need to do is
+	 * reclaim the reference.
 	 */
 	if (ni->ni_associd == 0)
 		return;
-	IEEE80211_AID_CLR(ni->ni_associd, ic->ic_aid_bitmap);
-	ni->ni_associd = 0;
 
 	if (ni->ni_pwrsave == IEEE80211_PS_DOZE)
 		ic->ic_pssta--;
@@ -1521,6 +1524,8 @@ ieee80211_node_leave(struct ieee80211com *ic, struct ieee80211_node *ni)
 		ieee80211_node_leave_ht(ic, ni);
 #endif
 
+	IEEE80211_AID_CLR(ni->ni_associd, ic->ic_aid_bitmap);
+	ni->ni_associd = 0;
 	ieee80211_node_newstate(ni, IEEE80211_STA_COLLECT);
 
 #if NBRIDGE > 0

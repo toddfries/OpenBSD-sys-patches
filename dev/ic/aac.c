@@ -1,4 +1,4 @@
-/*	$OpenBSD: aac.c,v 1.43 2010/03/23 01:57:19 krw Exp $	*/
+/*	$OpenBSD: aac.c,v 1.47 2010/06/28 18:31:01 krw Exp $	*/
 
 /*-
  * Copyright (c) 2000 Michael Smith
@@ -136,10 +136,6 @@ struct scsi_adapter aac_raw_switch = {
 };
 #endif
 
-struct scsi_device aac_dev = {
-	NULL, NULL, NULL, NULL
-};
-
 /* Falcon/PPC interface */
 int	aac_fa_get_fwstatus(struct aac_softc *);
 void	aac_fa_qnotify(struct aac_softc *, int);
@@ -274,7 +270,6 @@ aac_attach(struct aac_softc *sc)
 	/* Fill in the prototype scsi_link. */
 	sc->aac_link.adapter_softc = sc;
 	sc->aac_link.adapter = &aac_switch;
-	sc->aac_link.device = &aac_dev;
 	sc->aac_link.openings = (sc->total_fibs - 8) / 
 	    (sc->aac_container_count ? sc->aac_container_count : 1);
 	sc->aac_link.adapter_buswidth = AAC_MAX_CONTAINERS;
@@ -1216,7 +1211,7 @@ aac_alloc_commands(struct aac_softc *sc)
 
 	/* allocate the FIBs in DMAable memory and load them */
 	if (bus_dmamem_alloc(sc->aac_dmat, AAC_FIBMAP_SIZE, PAGE_SIZE, 0,
-	    &fm->aac_seg, 1, &fm->aac_nsegs, BUS_DMA_NOWAIT)) {
+	    &fm->aac_seg, 1, &fm->aac_nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 		printf("%s: can't alloc FIBs\n", sc->aac_dev.dv_xname);
 		error = ENOBUFS;
 		goto exit_alloc;
@@ -1245,7 +1240,6 @@ aac_alloc_commands(struct aac_softc *sc)
 
 	/* initialise constant fields in the command structure */
 	AAC_LOCK_ACQUIRE(&sc->aac_io_lock);
-	bzero(fm->aac_fibs, AAC_FIB_COUNT * sizeof(struct aac_fib));
 	for (i = 0; i < AAC_FIB_COUNT; i++) {
 		cm = sc->aac_commands + sc->total_fibs;
 		fm->aac_commands = cm;
@@ -1518,7 +1512,7 @@ aac_init(struct aac_softc *sc)
 	 * of ignored?
 	 */
 	if (bus_dmamem_alloc(sc->aac_dmat, AAC_COMMON_ALLOCSIZE, PAGE_SIZE, 0,
-			     &seg, 1, &nsegs, BUS_DMA_NOWAIT)) {
+			     &seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 		printf("%s: can't allocate common structure\n",
 		    sc->aac_dev.dv_xname);
 		return (ENOMEM);
@@ -1556,7 +1550,6 @@ aac_init(struct aac_softc *sc)
 		(uint8_t *)sc->aac_common += 8192;
 		sc->aac_common_busaddr += 8192;
 	}
-	bzero(sc->aac_common, sizeof *sc->aac_common);
     
 	/* Allocate some FIBs and associated command structs */
 	TAILQ_INIT(&sc->aac_fibmap_tqh);
@@ -2094,8 +2087,8 @@ aac_command_timeout(struct aac_command *cm)
 		struct scsi_xfer *xs = cm->cm_private;
 		int s = splbio();
 		xs->error = XS_DRIVER_STUFFUP;
-		scsi_done(xs);
 		splx(s);
+		scsi_done(xs);
 
 		aac_remove_bio(cm);
 		aac_unmap_command(cm);
@@ -2483,12 +2476,6 @@ aac_internal_cache_cmd(struct scsi_xfer *xs)
 void
 aacminphys(struct buf *bp, struct scsi_link *sl)
 {
-#if 0
-	u_int8_t *buf = bp->b_data;
-	paddr_t pa;
-	long off;
-#endif
-
 	AAC_DPRINTF(AAC_D_MISC, ("aacminphys(0x%x)\n", bp));
 
 #if 0	/* As this is way more than MAXPHYS it's really not necessary. */
@@ -2496,14 +2483,6 @@ aacminphys(struct buf *bp, struct scsi_link *sl)
 		bp->b_bcount = ((AAC_MAXOFFSETS - 1) * PAGE_SIZE);
 #endif
 
-#if 0
-	for (off = PAGE_SIZE, pa = vtophys(buf); off < bp->b_bcount;
-	    off += PAGE_SIZE)
-		if (pa + off != vtophys(buf + off)) {
-			bp->b_bcount = off;
-			break;
-		}
-#endif
 	minphys(bp);
 }
 
@@ -2521,9 +2500,7 @@ aac_raw_scsi_cmd(struct scsi_xfer *xs)
 
 	/* XXX Not yet implemented */
 	xs->error = XS_DRIVER_STUFFUP;
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 #endif
 

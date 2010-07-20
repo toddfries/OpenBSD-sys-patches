@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.h,v 1.41 2010/03/24 00:36:04 oga Exp $	*/
+/*	$OpenBSD: uvm_page.h,v 1.44 2010/06/29 21:25:16 thib Exp $	*/
 /*	$NetBSD: uvm_page.h,v 1.19 2000/12/28 08:24:55 chs Exp $	*/
 
 /* 
@@ -116,6 +116,7 @@ struct vm_page {
 						 * to read: [O or P]
 						 * to modify: [O _and_ P] */
 	paddr_t			phys_addr;	/* physical address of page */
+	psize_t			fpgsz;		/* free page range size */
 
 #ifdef __HAVE_VM_PAGE_MD
 	struct vm_page_md	mdpage;		/* pmap-specific data */
@@ -248,6 +249,8 @@ void		uvm_pagewait(struct vm_page *, int);
 void		uvm_pagewake(struct vm_page *);
 void		uvm_pagewire(struct vm_page *);
 void		uvm_pagezero(struct vm_page *);
+void		uvm_pagealloc_pg(struct vm_page *, struct uvm_object *,
+		    voff_t, struct vm_anon *);
 
 int		uvm_page_lookup_freelist(struct vm_page *);
 
@@ -305,6 +308,9 @@ int		vm_physseg_find(paddr_t, int *);
 #define VM_PAGE_TO_PHYS(entry)	((entry)->phys_addr)
 
 #define VM_PAGE_IS_FREE(entry)  ((entry)->pg_flags & PQ_FREE)
+
+#define	PADDR_IS_DMA_REACHABLE(paddr)	\
+	(dma_constraint.ucr_low <= paddr && dma_constraint.ucr_high > paddr)
 
 #endif /* _KERNEL */
 

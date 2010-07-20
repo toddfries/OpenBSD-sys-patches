@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.10 2009/05/08 02:57:32 drahn Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.12 2010/07/01 22:39:08 drahn Exp $	*/
 /*	$NetBSD: cpu.c,v 1.56 2004/04/14 04:01:49 bsh Exp $	*/
 
 
@@ -385,7 +385,7 @@ const struct cpuidtab cpuids[] = {
 	{ CPU_ID_ARM1136JSR1,	CPU_CLASS_ARM11J,	"ARM1136J-S R1",
 	  generic_steppings },
 
-	{ CPU_ID_OMAP3430,	CPU_CLASS_ARMv7,	"ARM OMAP3430",
+	{ CPU_ID_OMAP3430,	CPU_CLASS_ARMv7,	"ARM OMAP3[45]30",
 	  generic_steppings },
 	{ CPU_ID_OMAP3530,	CPU_CLASS_ARMv7,	"ARM OMAP3530",
 	  generic_steppings },
@@ -652,5 +652,28 @@ cpu_alloc_idlepcb(struct cpu_info *ci)
 	return 0;
 }
 #endif /* MULTIPROCESSOR */
+
+/*
+ * eventually it would be interesting to have these functions
+ * support the V6/V7+ atomic instructions ldrex/strex if available
+ * on the CPU.
+ */
+void
+atomic_setbits_int(__volatile unsigned int *uip, unsigned int v)
+{
+	int oldirqstate;
+	oldirqstate = disable_interrupts(I32_bit|F32_bit);
+	*uip |= v;
+	restore_interrupts(oldirqstate);
+}
+
+void
+atomic_clearbits_int(__volatile unsigned int *uip, unsigned int v)
+{
+	int oldirqstate;
+	oldirqstate = disable_interrupts(I32_bit|F32_bit);
+	*uip &= ~v;
+	restore_interrupts(oldirqstate);
+}
 
 /* End of cpu.c */
