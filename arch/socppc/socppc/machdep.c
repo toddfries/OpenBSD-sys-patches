@@ -1107,11 +1107,11 @@ boot(int howto)
 	while(1) /* forever */;
 }
 
+extern void ipic_do_pending_int(void);
+
 void
 do_pending_int(void)
 {
-<<<<<<< HEAD
-=======
 	struct cpu_info *ci = curcpu();
 	int pcpl, s;
 
@@ -1160,7 +1160,6 @@ do_pending_int(void)
 
 	ci->ci_iactive = 0;
 	ppc_intr_enable(s);
->>>>>>> origin/master
 }
 
 /*

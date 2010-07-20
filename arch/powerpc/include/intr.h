@@ -1,12 +1,8 @@
-<<<<<<< HEAD
-/*	$OpenBSD: intr.h,v 1.40 2009/06/02 21:38:10 drahn Exp $ */
-=======
 /*	$OpenBSD: intr.h,v 1.44 2010/04/23 03:50:22 miod Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997 Per Fogelstrom, Opsycon AB and RTMX Inc, USA.
- *
+ * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -40,20 +36,8 @@
 #define _POWERPC_INTR_H_
 
 #define	IPL_NONE	0
-#define	IPL_SOFT	1
-#define	IPL_SOFTCLOCK	2
-#define	IPL_SOFTNET	3
-#define	IPL_SOFTTTY	4
-#define	IPL_BIO		5
+#define	IPL_BIO		1
 #define	IPL_AUDIO	IPL_BIO /* XXX - was defined this val in audio_if.h */
-<<<<<<< HEAD
-#define	IPL_NET		6
-#define	IPL_TTY		7
-#define	IPL_VM		8
-#define	IPL_CLOCK	9
-#define	IPL_HIGH	10
-#define	IPL_NUM		11
-=======
 #define	IPL_NET		2
 #define	IPL_TTY		3
 #define	IPL_VM		4
@@ -61,7 +45,6 @@
 #define	IPL_SCHED	6
 #define	IPL_HIGH	6
 #define	IPL_NUM		7
->>>>>>> origin/master
 
 #define	IST_NONE	0
 #define	IST_PULSE	1
@@ -73,34 +56,18 @@
 #include <sys/evcount.h>
 #include <machine/atomic.h>
 
-#define	PPC_NIRQ	66
-#define	PPC_CLK_IRQ	64
-#define	PPC_STAT_IRQ	65
+#define PPC_NIRQ	66
+#define PPC_CLK_IRQ	64
+#define PPC_STAT_IRQ	65
 
 int	splraise(int);
 int	spllower(int);
 void	splx(int);
-void	splx_dis(int);
 
-typedef int (ppc_splraise_t) (int);
-typedef int (ppc_spllower_t) (int);
-typedef void (ppc_splx_t) (int);
-typedef void (ppc_setipl_t) (int);
 
-extern struct ppc_intr_func {
-	ppc_splraise_t *raise;
-	ppc_spllower_t *lower;
-	ppc_splx_t *x;
-	ppc_setipl_t *setipl;
-}ppc_intr_func;
+void do_pending_int(void);
 
-extern int ppc_smask[IPL_NUM];
-
-void ppc_smask_init(void);
-char *ppc_intr_typename(int type);
-
-void ppc_do_pending_int(int ncpl);
-void ppc_do_pending_int_dis(int ncpl, int dis);
+extern int imask[IPL_NUM];
 
 /* SPL asserts */
 #define	splassert(wantipl)	/* nothing */
@@ -117,27 +84,6 @@ void ppc_do_pending_int_dis(int ncpl, int dis);
 #define	IPL_SOFTNET	1
 #define	IPL_SOFTTTY	2
 
-<<<<<<< HEAD
-#define	splbio()	splraise(IPL_BIO)
-#define	splnet()	splraise(IPL_NET)
-#define	spltty()	splraise(IPL_TTY)
-#define	splaudio()	splraise(IPL_AUDIO)
-#define	splclock()	splraise(IPL_CLOCK)
-#define	splvm()		splraise(IPL_VM)
-#define	splsched()	splhigh()
-#define	spllock()	splhigh()
-#define	splstatclock()	splhigh()
-#define	splsoftclock()	splraise(IPL_SOFTCLOCK)
-#define	splsoftnet()	splraise(IPL_SOFTNET)
-#define	splsofttty()	splraise(IPL_SOFTTTY)
-
-#define	setsoftclock()	set_sint(SI_TO_IRQBIT(SI_SOFTCLOCK))
-#define	setsoftnet()	set_sint(SI_TO_IRQBIT(SI_SOFTNET))
-#define	setsofttty()	set_sint(SI_TO_IRQBIT(SI_SOFTTTY))
- 
-#define	splhigh()	splraise(IPL_HIGH)
-#define	spl0()		spllower(IPL_NONE)
-=======
 #define	SI_SOFTCLOCK	0	/* for IPL_SOFTCLOCK */
 #define	SI_SOFTNET	1	/* for IPL_SOFTNET */
 #define	SI_SOFTTTY	2	/* for IPL_SOFTTY */
@@ -193,14 +139,13 @@ extern struct soft_intrhand *softnet_intrhand;
 
 #define	splhigh()	splraise(0xffffffff)
 #define	spl0()		spllower(0)
->>>>>>> origin/master
 
 /*
  *	Interrupt control struct used to control the ICU setup.
  */
 
 struct intrhand {
-	TAILQ_ENTRY(intrhand) ih_list;
+	struct intrhand	*ih_next;
 	int		(*ih_fun)(void *);
 	void		*ih_arg;
 	struct evcount	ih_count;
@@ -208,35 +153,10 @@ struct intrhand {
 	int		ih_irq;
 	const char	*ih_what;
 };
-
-struct intrq {
-	TAILQ_HEAD(, intrhand) iq_list; /* handler list */
-	int iq_ipl;			/* IPL_ to mask while handling */
-	int iq_ist;			/* share type */
-};
-
 extern int ppc_configed_intr_cnt;
-#define	MAX_PRECONF_INTR 16
+#define MAX_PRECONF_INTR 16
 extern struct intrhand ppc_configed_intr[MAX_PRECONF_INTR];
 void softnet(int isr);
-
-#define	SI_TO_IRQBIT(x) (1 << (x))
-
-#define	SI_SOFT			0	/* for IPL_SOFT */
-#define	SI_SOFTCLOCK		1	/* for IPL_SOFTCLOCK */
-#define	SI_SOFTNET		2	/* for IPL_SOFTNET */
-#define	SI_SOFTTTY		3	/* for IPL_SOFTSERIAL */
-
-#if 0
-#define	SI_NQUEUES		4
-
-#define SI_QUEUENAMES {		\
-	"generic",		\
-	"clock",		\
-	"net",			\
-	"serial",		\
-}
-#endif
 
 #define PPC_IPI_NOP		0
 #define PPC_IPI_DDB		1

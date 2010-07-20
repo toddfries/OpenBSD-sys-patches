@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: clock.c,v 1.28 2009/06/02 21:38:09 drahn Exp $	*/
-=======
 /*	$OpenBSD: clock.c,v 1.30 2009/10/01 20:19:18 kettenis Exp $	*/
->>>>>>> origin/master
 /*	$NetBSD: clock.c,v 1.1 1996/09/30 16:34:40 ws Exp $	*/
 
 /*
@@ -229,11 +225,7 @@ decr_intr(struct clockframe *frame)
 	 */
 	ppc_mtdec(nextevent - tb);
 
-<<<<<<< HEAD
-	if (ci->ci_cpl >= IPL_CLOCK) {
-=======
 	if (ci->ci_cpl & SPL_CLOCKMASK) {
->>>>>>> origin/master
 		ci->ci_statspending += nstats;
 	} else {
 		KERNEL_LOCK();
@@ -261,9 +253,8 @@ decr_intr(struct clockframe *frame)
 		while (nstats-- > 0)
 			statclock(frame);
 
+		splx(s);
 		(void) ppc_intr_disable();
-
-		ppc_do_pending_int_dis(s, 1);
 
 		/* if a tick has occurred while dealing with these,
 		 * dont service it now, delay until the next tick.

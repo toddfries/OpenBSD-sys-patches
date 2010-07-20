@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: cpu.c,v 1.62 2009/06/02 21:38:09 drahn Exp $ */
-=======
 /*	$OpenBSD: cpu.c,v 1.66 2010/06/26 23:24:43 guenther Exp $ */
->>>>>>> origin/master
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -796,7 +792,7 @@ cpu_hatch(void)
 	ppc_intr_enable(intrstate);
 
 	/* Enable inter-processor interrupts. */
-	openpic_set_priority(14);
+	openpic_set_priority(curcpu()->ci_cpuid, 14);
 
 	SCHED_LOCK(s);
 	cpu_switchto(NULL, sched_chooseproc());
