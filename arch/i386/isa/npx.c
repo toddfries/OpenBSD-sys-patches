@@ -868,7 +868,7 @@ fpu_kernel_enter(void)
 	uint32_t	 cw;
 	int		 s;
 
-	KASSERT(p != NULL);
+	KASSERT(p != NULL && (p->p_flag & P_SYSTEM));
 
 	/*
 	 * Fast path. If we were the last proc on the FPU,
@@ -887,20 +887,18 @@ fpu_kernel_enter(void)
 		uvmexp.fpswtch++;
 	}
 
-	if (p->p_flag & P_SYSTEM) {
-		/*
-		 * If we were switched away to the other cpu, cleanup
-		 * an fpcurproc pointer.
-		 */
-		oci = p->p_addr->u_pcb.pcb_fpcpu;
-		if (oci != NULL && oci != ci && oci->ci_fpcurproc == p)
-			oci->ci_fpcurproc = NULL;
+	/*
+	 * If we were switched away to the other cpu, cleanup
+	 * an fpcurproc pointer.
+	 */
+	oci = p->p_addr->u_pcb.pcb_fpcpu;
+	if (oci != NULL && oci != ci && oci->ci_fpcurproc == p)
+		oci->ci_fpcurproc = NULL;
 
-		/* Claim the FPU */
-		ci->ci_fpcurproc = p;
-		p->p_addr->u_pcb.pcb_fpcpu = ci;
-		p->p_addr->u_pcb.pcb_cr0 &= ~CR0_TS;
-	}
+	/* Claim the FPU */
+	ci->ci_fpcurproc = p;
+	p->p_addr->u_pcb.pcb_fpcpu = ci;
+	p->p_addr->u_pcb.pcb_cr0 &= ~CR0_TS;
 
 	splx(s);
 
@@ -920,13 +918,9 @@ fpu_kernel_enter(void)
 void
 fpu_kernel_exit(void)
 {
-	struct proc	*p = curproc;
-
 	/*
-	 * Restore TS if the process will be returning to the userland.
-	 * The correct FPU context will be restored by the DNA handling
-	 * routine.
+	 * Nothing to do.
+	 * TS is restored on a context switch automatically
+	 * as long as we use hardware assisted task switching.
 	 */
-	if (!(p->p_flag & P_SYSTEM))
-		stts();
 }
