@@ -2204,8 +2204,7 @@ wsdisplay_suspend_device(struct device *dev)
 	struct wsscreen		*scr;
 	int			 active, idx, ret = 0, s;
 	
-	if (sc == NULL || (active = wsdisplay_getactivescreen(sc)) ==
-	    WSDISPLAY_NULLSCREEN)
+	if ((active = wsdisplay_getactivescreen(sc)) == WSDISPLAY_NULLSCREEN)
 		return;
 
 	scr = sc->sc_scr[active];
@@ -2269,7 +2268,7 @@ wsdisplay_resume_device(struct device *dev)
 	struct wsdisplay_softc	*sc = (struct wsdisplay_softc *)dev;
 	int			 idx, s;
 
-	if (sc != NULL && sc->sc_resumescreen != WSDISPLAY_NULLSCREEN) {
+	if (sc->sc_resumescreen != WSDISPLAY_NULLSCREEN) {
 		s = spltty();
 		idx = sc->sc_resumescreen;
 		sc->sc_resumescreen = WSDISPLAY_NULLSCREEN;
