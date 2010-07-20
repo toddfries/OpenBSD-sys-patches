@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.100 2010/03/03 12:25:09 jsing Exp $ */
+/*	$OpenBSD: machdep.c,v 1.105 2010/06/27 13:28:46 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -47,7 +47,7 @@
 #include <sys/sem.h>
 #endif
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <machine/db_machdep.h>
 #include <ddb/db_interface.h>
@@ -95,8 +95,18 @@ char	cpu_model[30];
 int	bufpages = BUFPAGES;
 int	bufcachepercent = BUFCACHEPERCENT;
 
+/* low 32 bits range. */
+struct uvm_constraint_range  dma_constraint = { 0x0, 0x7fffffff };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 vm_map_t exec_map;
 vm_map_t phys_map;
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
 
 caddr_t	msgbufbase;
 vaddr_t	uncached_base;
@@ -148,6 +158,13 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	extern char start[], edata[], end[];
 	extern char exception[], e_exception[];
 	extern char *hw_vendor;
+
+#ifdef MULTIPROCESSOR
+	/*
+	 * Set curcpu address on primary processor.
+	 */
+	setcurcpu(&cpu_info_primary);
+#endif
 
 	/*
 	 * Make sure we can access the extended address space.

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raidp.c,v 1.15 2010/01/20 19:55:15 jordan Exp $ */
+/* $OpenBSD: softraid_raidp.c,v 1.18 2010/07/02 09:20:26 jsing Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -406,8 +406,8 @@ sr_raidp_rw(struct sr_workunit *wu)
 		strip_no = lbaoffs >> strip_bits;
 		strip_offs = lbaoffs & (strip_size - 1);
 		chunk_offs = (strip_no / no_chunk) << strip_bits;
-		phys_offs = chunk_offs + strip_offs + 
-		    ((SR_META_OFFSET + SR_META_SIZE) << DEV_BSHIFT);
+		phys_offs = chunk_offs + strip_offs +
+		    (sd->sd_meta->ssd_data_offset << DEV_BSHIFT);
 
 		/* get size remaining in this stripe */
 		length = MIN(strip_size - strip_offs, datalen);
@@ -769,6 +769,7 @@ sr_raidp_addio(struct sr_workunit *wu, int dsk, daddr64_t blk, daddr64_t len,
 	ccb->ccb_buf.b_proc = curproc;
 	ccb->ccb_buf.b_dev = sd->sd_vol.sv_chunks[dsk]->src_dev_mm;
 	ccb->ccb_buf.b_vp = sd->sd_vol.sv_chunks[dsk]->src_vn;
+	ccb->ccb_buf.b_bq = NULL;
 	if ((ccb->ccb_buf.b_flags & B_READ) == 0)
 		ccb->ccb_buf.b_vp->v_numoutput++;
 

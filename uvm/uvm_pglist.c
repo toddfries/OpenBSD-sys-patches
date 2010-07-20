@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pglist.c,v 1.35 2009/08/13 15:29:59 deraadt Exp $	*/
+/*	$OpenBSD: uvm_pglist.c,v 1.38 2010/06/27 03:03:49 thib Exp $	*/
 /*	$NetBSD: uvm_pglist.c,v 1.13 2001/02/18 21:19:08 chs Exp $	*/
 
 /*-
@@ -77,7 +77,10 @@ u_long	uvm_pglistalloc_npages;
  *	UVM_PLA_NOWAIT	fail if allocation fails
  *	UVM_PLA_WAITOK	wait for memory to become avail
  *	UVM_PLA_ZERO	return zeroed memory
+<<<<<<< HEAD
  *	UVM_PLA_TRYCONTIG caller (device) prefers p-lineair memory
+=======
+>>>>>>> origin/master
  */
 
 int

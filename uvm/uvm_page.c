@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.c,v 1.98 2010/03/24 00:36:04 oga Exp $	*/
+/*	$OpenBSD: uvm_page.c,v 1.101 2010/06/27 03:03:49 thib Exp $	*/
 /*	$NetBSD: uvm_page.c,v 1.44 2000/11/27 08:40:04 chs Exp $	*/
 
 /* 
@@ -77,6 +77,7 @@
 #include <sys/kernel.h>
 #include <sys/vnode.h>
 #include <sys/mount.h>
+#include <sys/proc.h>
 
 #include <uvm/uvm.h>
 
@@ -776,6 +777,33 @@ uvm_shutdown(void)
 }
 
 /*
+ * Perform insert of a given page in the specified anon of obj.
+ * This is basically, uvm_pagealloc, but with the page already given.
+ */
+void
+uvm_pagealloc_pg(struct vm_page *pg, struct uvm_object *obj, voff_t off,
+    struct vm_anon *anon)
+{
+	int	flags;
+
+	flags = PG_BUSY | PG_FAKE;
+	pg->offset = off;
+	pg->uobject = obj;
+	pg->uanon = anon;
+
+	if (anon) {
+		anon->an_page = pg;
+		flags |= PQ_ANON;
+	} else if (obj)
+		uvm_pageinsert(pg);
+	atomic_setbits_int(&pg->pg_flags, flags);
+#if defined(UVM_PAGE_TRKOWN)
+	pg->owner_tag = NULL;
+#endif
+	UVM_PAGE_OWN(pg, "new alloc");
+}
+
+/*
  * uvm_pagealloc_strat: allocate vm_page from a particular free list.
  *
  * => return null if no pages free
@@ -835,13 +863,18 @@ uvm_pagealloc(struct uvm_object *obj, voff_t off, struct vm_anon *anon,
 	pg = TAILQ_FIRST(&pgl);
 	KASSERT(pg != NULL && TAILQ_NEXT(pg, pageq) == NULL);
 
+<<<<<<< HEAD
 	pg->offset = off;
 	pg->uobject = obj;
 	pg->uanon = anon;
+=======
+	uvm_pagealloc_pg(pg, obj, off, anon);
+>>>>>>> origin/master
 	KASSERT((pg->pg_flags & PG_DEV) == 0);
 	atomic_setbits_int(&pg->pg_flags, PG_BUSY|PG_CLEAN|PG_FAKE);
 	if (flags & UVM_PGA_ZERO)
 		atomic_clearbits_int(&pg->pg_flags, PG_CLEAN);
+<<<<<<< HEAD
 	if (anon) {
 		anon->an_page = pg;
 		atomic_setbits_int(&pg->pg_flags, PQ_ANON);
@@ -852,6 +885,8 @@ uvm_pagealloc(struct uvm_object *obj, voff_t off, struct vm_anon *anon,
 	pg->owner_tag = NULL;
 #endif
 	UVM_PAGE_OWN(pg, "new alloc");
+=======
+>>>>>>> origin/master
 
 	UVMHIST_LOG(pghist, "allocated pg %p/%lx", pg,
 	    (u_long)VM_PAGE_TO_PHYS(pg), 0, 0);

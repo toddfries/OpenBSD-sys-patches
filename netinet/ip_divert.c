@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip_divert.c,v 1.5 2010/03/09 12:36:12 jsing Exp $ */
+/*      $OpenBSD: ip_divert.c,v 1.7 2010/07/03 04:44:51 guenther Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -22,6 +22,7 @@
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -93,7 +94,7 @@ divert_output(struct mbuf *m, ...)
 
 	m->m_pkthdr.rcvif = NULL;
 	m->m_nextpkt = NULL;
-	m->m_pkthdr.rdomain = inp->inp_rdomain;
+	m->m_pkthdr.rdomain = inp->inp_rtableid;
 
 	if (control)
 		m_freem(control);

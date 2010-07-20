@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_esp.c,v 1.106 2010/01/10 12:43:07 markus Exp $ */
+/*	$OpenBSD: ip_esp.c,v 1.110 2010/07/09 16:58:06 reyk Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -386,7 +386,8 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 
 		tdbi = (struct tdb_ident *) (mtag + 1);
 		if (tdbi->proto == tdb->tdb_sproto && tdbi->spi == tdb->tdb_spi &&
-		    !bcmp(&tdbi->dst, &tdb->tdb_dst, sizeof(union sockaddr_union)))
+		    tdbi->rdomain == tdb->tdb_rdomain && !bcmp(&tdbi->dst,
+		    &tdb->tdb_dst, sizeof(union sockaddr_union)))
 			break;
 	}
 #else
@@ -449,6 +450,7 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 	tc->tc_protoff = protoff;
 	tc->tc_spi = tdb->tdb_spi;
 	tc->tc_proto = tdb->tdb_sproto;
+	tc->tc_rdomain = tdb->tdb_rdomain;
 	bcopy(&tdb->tdb_dst, &tc->tc_dst, sizeof(union sockaddr_union));
 
 	/* Decryption descriptor */
@@ -516,7 +518,7 @@ esp_input_cb(void *op)
 
 	s = spltdb();
 
-	tdb = gettdb(tc->tc_spi, &tc->tc_dst, tc->tc_proto);
+	tdb = gettdb(tc->tc_rdomain, tc->tc_spi, &tc->tc_dst, tc->tc_proto);
 	if (tdb == NULL) {
 		free(tc, M_XDATA);
 		espstat.esps_notdb++;
@@ -695,7 +697,7 @@ esp_input_cb(void *op)
 	m_adj(m, -(lastthree[1] + 2));
 
 	/* Restore the Next Protocol field */
-	m_copyback(m, protoff, sizeof(u_int8_t), lastthree + 2);
+	m_copyback(m, protoff, sizeof(u_int8_t), lastthree + 2, M_NOWAIT);
 
 	/* Back to generic IPsec input processing */
 	error = ipsec_common_input_cb(m, tdb, skip, protoff, mtag);
@@ -731,25 +733,27 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	struct cryptodesc *crde = NULL, *crda = NULL;
 	struct cryptop *crp;
 #if NBPFILTER > 0
-	struct ifnet *ifn = &(encif[0].sc_if);
+	struct ifnet *encif;
 
-	ifn->if_opackets++;
-	ifn->if_obytes += m->m_pkthdr.len;
+	if ((encif = enc_getif(tdb->tdb_rdomain, tdb->tdb_tap)) != NULL) {
+		encif->if_opackets++;
+		encif->if_obytes += m->m_pkthdr.len;
 
-	if (ifn->if_bpf) {
-		struct enchdr hdr;
+		if (encif->if_bpf) {
+			struct enchdr hdr;
 
-		bzero (&hdr, sizeof(hdr));
+			bzero (&hdr, sizeof(hdr));
 
-		hdr.af = tdb->tdb_dst.sa.sa_family;
-		hdr.spi = tdb->tdb_spi;
-		if (espx)
-			hdr.flags |= M_CONF;
-		if (esph)
-			hdr.flags |= M_AUTH;
+			hdr.af = tdb->tdb_dst.sa.sa_family;
+			hdr.spi = tdb->tdb_spi;
+			if (espx)
+				hdr.flags |= M_CONF;
+			if (esph)
+				hdr.flags |= M_AUTH;
 
-		bpf_mtap_hdr(ifn->if_bpf, (char *)&hdr, ENC_HDRLEN, m,
-		    BPF_DIRECTION_OUT);
+			bpf_mtap_hdr(encif->if_bpf, (char *)&hdr,
+			    ENC_HDRLEN, m, BPF_DIRECTION_OUT);
+		}
 	}
 #endif
 
@@ -904,7 +908,7 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 
 	/* Fix Next Protocol in IPv4/IPv6 header. */
 	prot = IPPROTO_ESP;
-	m_copyback(m, protoff, sizeof(u_int8_t), &prot);
+	m_copyback(m, protoff, sizeof(u_int8_t), &prot, M_NOWAIT);
 
 	/* Get crypto descriptors. */
 	crp = crypto_getreq(esph && espx ? 2 : 1);
@@ -929,7 +933,7 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		if (tdb->tdb_flags & TDBF_HALFIV) {
 			/* Copy half-iv in the packet. */
 			m_copyback(m, crde->crd_inject, tdb->tdb_ivlen,
-			    tdb->tdb_iv);
+			    tdb->tdb_iv, M_NOWAIT);
 
 			/* Cook half-iv. */
 			bcopy(tdb->tdb_iv, crde->crd_iv, tdb->tdb_ivlen);
@@ -961,6 +965,7 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 
 	tc->tc_spi = tdb->tdb_spi;
 	tc->tc_proto = tdb->tdb_sproto;
+	tc->tc_rdomain = tdb->tdb_rdomain;
 	bcopy(&tdb->tdb_dst, &tc->tc_dst, sizeof(union sockaddr_union));
 
 	/* Crypto operation descriptor. */
@@ -1017,7 +1022,7 @@ esp_output_cb(void *op)
 
 	s = spltdb();
 
-	tdb = gettdb(tc->tc_spi, &tc->tc_dst, tc->tc_proto);
+	tdb = gettdb(tc->tc_rdomain, tc->tc_spi, &tc->tc_dst, tc->tc_proto);
 	if (tdb == NULL) {
 		free(tc, M_XDATA);
 		espstat.esps_notdb++;

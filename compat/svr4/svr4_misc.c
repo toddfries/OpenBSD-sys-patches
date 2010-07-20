@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_misc.c,v 1.51 2009/12/20 23:36:04 guenther Exp $	 */
+/*	$OpenBSD: svr4_misc.c,v 1.54 2010/05/25 16:39:15 thib Exp $	 */
 /*	$NetBSD: svr4_misc.c,v 1.42 1996/12/06 03:22:34 christos Exp $	 */
 
 /*
@@ -1121,6 +1121,7 @@ bsd_statfs_to_svr4_statvfs(bfs, sfs)
 	const struct statfs *bfs;
 	struct svr4_statvfs *sfs;
 {
+	bzero(sfs, sizeof(*sfs));
 	sfs->f_bsize = bfs->f_iosize; /* XXX */
 	sfs->f_frsize = bfs->f_bsize;
 	sfs->f_blocks = bfs->f_blocks;
@@ -1131,14 +1132,13 @@ bsd_statfs_to_svr4_statvfs(bfs, sfs)
 	sfs->f_favail = bfs->f_ffree;
 	sfs->f_fsid = bfs->f_fsid.val[0];
 	bcopy(bfs->f_fstypename, sfs->f_basetype, sizeof(sfs->f_basetype));
-	sfs->f_flag = 0;
 	if (bfs->f_flags & MNT_RDONLY)
 		sfs->f_flag |= SVR4_ST_RDONLY;
 	if (bfs->f_flags & MNT_NOSUID)
 		sfs->f_flag |= SVR4_ST_NOSUID;
 	sfs->f_namemax = MAXNAMLEN;
-	bcopy(bfs->f_fstypename, sfs->f_fstr, sizeof(sfs->f_fstr)); /* XXX */
-	bzero(sfs->f_filler, sizeof(sfs->f_filler));
+	bcopy(bfs->f_fstypename, sfs->f_fstr,
+	    MIN(sizeof(bfs->f_fstypename), sizeof(sfs->f_fstr)));
 }
 
 
@@ -1147,6 +1147,7 @@ bsd_statfs_to_svr4_statvfs64(bfs, sfs)
 	const struct statfs *bfs;
 	struct svr4_statvfs64 *sfs; 
 {
+	bzero(sfs, sizeof(*sfs));
 	sfs->f_bsize = bfs->f_iosize; /* XXX */
 	sfs->f_frsize = bfs->f_bsize;
 	sfs->f_blocks = bfs->f_blocks;
@@ -1157,14 +1158,13 @@ bsd_statfs_to_svr4_statvfs64(bfs, sfs)
 	sfs->f_favail = bfs->f_ffree;
 	sfs->f_fsid = bfs->f_fsid.val[0];
 	bcopy(bfs->f_fstypename, sfs->f_basetype, sizeof(sfs->f_basetype));
-	sfs->f_flag = 0;
 	if (bfs->f_flags & MNT_RDONLY)
 		sfs->f_flag |= SVR4_ST_RDONLY;
 	if (bfs->f_flags & MNT_NOSUID)
 		sfs->f_flag |= SVR4_ST_NOSUID;
 	sfs->f_namemax = MAXNAMLEN;   
-	bcopy(bfs->f_fstypename, sfs->f_fstr, sizeof(sfs->f_fstr)); /* XXX */
-	bzero(sfs->f_filler, sizeof(sfs->f_filler));
+	bcopy(bfs->f_fstypename, sfs->f_fstr,
+	    MIN(sizeof(bfs->f_fstypename), sizeof(sfs->f_fstr)));
 }
 
 
@@ -1414,7 +1414,7 @@ svr4_sys_setegid(p, v, retval)
 		syscallarg(gid_t) egid;
         } */ *uap = v;
 
-#if defined(COMPAT_LINUX) && defined(i386)
+#if defined(COMPAT_LINUX) && defined(__i386__)
 	if (SCARG(uap, egid) > 60000) {
 		/*
 		 * One great fuckup deserves another.  The Linux people

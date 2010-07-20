@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_forward.c,v 1.45 2009/11/03 10:59:04 claudio Exp $	*/
+/*	$OpenBSD: ip6_forward.c,v 1.49 2010/07/09 16:58:06 reyk Exp $	*/
 /*	$KAME: ip6_forward.c,v 1.75 2001/06/29 12:42:13 jinmei Exp $	*/
 
 /*
@@ -70,7 +70,6 @@
 #endif
 
 struct	route_in6 ip6_forward_rt;
-u_int	ip6_forward_rtableid;
 
 /*
  * Forward a packet.  If some error occurs return the sender
@@ -102,6 +101,9 @@ ip6_forward(struct mbuf *m, int srcrt)
 	u_int32_t sspi;
 	struct tdb *tdb;
 	int s;
+#if NPF > 0
+	struct ifnet *encif;
+#endif
 #endif /* IPSEC */
 	u_int rtableid = 0;
 
@@ -162,7 +164,8 @@ reroute:
 			    mtag->m_tag_len, sizeof (struct tdb_ident));
 #endif
 		tdbi = (struct tdb_ident *)(mtag + 1);
-		tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+		tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst,
+		    tdbi->proto);
 		if (tdb == NULL)
 			error = -EINVAL;
 		m_tag_delete(m, mtag);
@@ -203,6 +206,7 @@ reroute:
 			tdbi = (struct tdb_ident *)(mtag + 1);
 			if (tdbi->spi == tdb->tdb_spi &&
 			    tdbi->proto == tdb->tdb_sproto &&
+			    tdbi->rdomain == tdb->tdb_rdomain &&
 			    !bcmp(&tdbi->dst, &tdb->tdb_dst,
 			    sizeof(union sockaddr_union))) {
 				splx(s);
@@ -244,15 +248,15 @@ reroute:
 		 */
 		if (ip6_forward_rt.ro_rt == 0 ||
 		    (ip6_forward_rt.ro_rt->rt_flags & RTF_UP) == 0 ||
-		    ip6_forward_rtableid != rtableid) {
+		    ip6_forward_rt.ro_tableid != rtableid) {
 			if (ip6_forward_rt.ro_rt) {
 				RTFREE(ip6_forward_rt.ro_rt);
 				ip6_forward_rt.ro_rt = 0;
 			}
 			/* this probably fails but give it a try again */
+			ip6_forward_rt.ro_tableid = rtableid;
 			rtalloc_mpath((struct route *)&ip6_forward_rt,
-			    &ip6->ip6_src.s6_addr32[0], rtableid);
-			ip6_forward_rtableid = rtableid;
+			    &ip6->ip6_src.s6_addr32[0]);
 		}
 
 		if (ip6_forward_rt.ro_rt == 0) {
@@ -268,7 +272,7 @@ reroute:
 	} else if (ip6_forward_rt.ro_rt == 0 ||
 	   (ip6_forward_rt.ro_rt->rt_flags & RTF_UP) == 0 ||
 	   !IN6_ARE_ADDR_EQUAL(&ip6->ip6_dst, &dst->sin6_addr) ||
-	   ip6_forward_rtableid != rtableid) {
+	   ip6_forward_rt.ro_tableid != rtableid) {
 		if (ip6_forward_rt.ro_rt) {
 			RTFREE(ip6_forward_rt.ro_rt);
 			ip6_forward_rt.ro_rt = 0;
@@ -277,10 +281,10 @@ reroute:
 		dst->sin6_len = sizeof(struct sockaddr_in6);
 		dst->sin6_family = AF_INET6;
 		dst->sin6_addr = ip6->ip6_dst;
+		ip6_forward_rt.ro_tableid = rtableid;
 
 		rtalloc_mpath((struct route *)&ip6_forward_rt,
-		    &ip6->ip6_src.s6_addr32[0], rtableid);
-		ip6_forward_rtableid = rtableid;
+		    &ip6->ip6_src.s6_addr32[0]);
 
 		if (ip6_forward_rt.ro_rt == 0) {
 			ip6stat.ip6s_noroute++;
@@ -335,8 +339,19 @@ reroute:
 	if (sproto != 0) {
 		s = splnet();
 
+		tdb = gettdb(rtable_l2(m->m_pkthdr.rdomain),
+		    sspi, &sdst, sproto);
+		if (tdb == NULL) {
+			splx(s);
+			error = EHOSTUNREACH;
+			m_freem(m);
+			goto senderr;	/*XXX*/
+		}
+
 #if NPF > 0
-		if (pf_test6(PF_OUT, &encif[0].sc_if, &m, NULL) != PF_PASS) {
+		if ((encif = enc_getif(tdb->tdb_rdomain,
+		    tdb->tdb_tap)) == NULL ||
+		    pf_test6(PF_OUT, encif, &m, NULL) != PF_PASS) {
 			splx(s);
 			error = EHOSTUNREACH;
 			m_freem(m);
@@ -355,13 +370,6 @@ reroute:
 		 * What's the behaviour?
 		 */
 #endif
-		tdb = gettdb(sspi, &sdst, sproto);
-		if (tdb == NULL) {
-			splx(s);
-			error = EHOSTUNREACH;
-			m_freem(m);
-			goto senderr;	/*XXX*/
-		}
 
 		m->m_flags &= ~(M_BCAST | M_MCAST);	/* just in case */
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar9280.c,v 1.3 2009/11/17 19:32:22 damien Exp $	*/
+/*	$OpenBSD: ar9280.c,v 1.10 2010/07/15 20:37:38 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -26,7 +26,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -63,23 +62,42 @@
 #include <dev/ic/athnreg.h>
 #include <dev/ic/athnvar.h>
 
+#include <dev/ic/ar5008reg.h>
 #include <dev/ic/ar5416reg.h>	/* We share the ROM layout. */
 #include <dev/ic/ar9280reg.h>
 
 int	ar9280_attach(struct athn_softc *);
 void	ar9280_setup(struct athn_softc *);
+int	ar9280_set_synth(struct athn_softc *, struct ieee80211_channel *,
+	    struct ieee80211_channel *);
 void	ar9280_init_from_rom(struct athn_softc *, struct ieee80211_channel *,
 	    struct ieee80211_channel *);
+void	ar9280_spur_mitigate(struct athn_softc *, struct ieee80211_channel *,
+	    struct ieee80211_channel *);
+void	ar9280_olpc_get_pdadcs(struct athn_softc *,
+	    struct ieee80211_channel *, int, uint8_t *, uint8_t *, uint8_t *);
 void	ar9280_reset_rx_gain(struct athn_softc *, struct ieee80211_channel *);
 void	ar9280_reset_tx_gain(struct athn_softc *, struct ieee80211_channel *);
-void	ar9280_2_0_olpc_init(struct athn_softc *);
-void	ar9280_2_0_olpc_temp_compensation(struct athn_softc *);
+void	ar9280_olpc_init(struct athn_softc *);
+void	ar9280_olpc_temp_compensation(struct athn_softc *);
+
+/* Extern functions. */
+uint8_t	athn_chan2fbin(struct ieee80211_channel *);
+void	athn_get_pier_ival(uint8_t, const uint8_t *, int, int *, int *);
+int	ar5008_attach(struct athn_softc *);
+void	ar5008_set_viterbi_mask(struct athn_softc *, int);
+void	ar5416_swap_rom(struct athn_softc *);
+void	ar5416_set_txpower(struct athn_softc *, struct ieee80211_channel *,
+	    struct ieee80211_channel *);
+const struct ar_spur_chan *
+	ar5416_get_spur_chans(struct athn_softc *, int);
+
 
 int
 ar9280_attach(struct athn_softc *sc)
 {
 	sc->eep_base = AR5416_EEP_START_LOC;
-	sc->eep_size = sizeof (struct ar5416_eeprom);
+	sc->eep_size = sizeof(struct ar5416_eeprom);
 	sc->def_nf = AR9280_PHY_CCA_MAX_GOOD_VALUE;
 	sc->ngpiopins = 10;
 	sc->led_pin = 1;
@@ -91,16 +109,11 @@ ar9280_attach(struct athn_softc *sc)
 	sc->ops.set_synth = ar9280_set_synth;
 	sc->ops.spur_mitigate = ar9280_spur_mitigate;
 	sc->ops.get_spur_chans = ar5416_get_spur_chans;
-	sc->ops.olpc_init = ar9280_2_0_olpc_init;
-	if (AR_SREV_9280_20_OR_LATER(sc))
-		sc->ini = &ar9280_2_0_ini;
-	else
-		sc->ini = &ar9280_1_0_ini;
-	if (AR_SREV_9280_20_OR_LATER(sc))
-		sc->serdes = ar9280_2_0_serdes;
-	else
-		sc->serdes = ar9280_1_0_serdes;
-	return (0);
+	sc->ops.olpc_init = ar9280_olpc_init;
+	sc->ini = &ar9280_2_0_ini;
+	sc->serdes = ar9280_2_0_serdes;
+
+	return (ar5008_attach(sc));
 }
 
 void
@@ -110,10 +123,15 @@ ar9280_setup(struct athn_softc *sc)
 	uint8_t type;
 
 	/* Determine if open loop power control should be used. */
-	if (AR_SREV_9280_20_OR_LATER(sc) &&
-	    sc->eep_rev >= AR_EEP_MINOR_VER_19 &&
+	if (sc->eep_rev >= AR_EEP_MINOR_VER_19 &&
 	    eep->baseEepHeader.openLoopPwrCntl)
 		sc->flags |= ATHN_FLAG_OLPC;
+
+	/* Determine if fast PLL clock is supported. */
+	if (AR_SREV_9280_20(sc) &&
+	    (sc->eep_rev <= AR_EEP_MINOR_VER_16 ||
+	     eep->baseEepHeader.fastClk5g))
+		sc->flags |= ATHN_FLAG_FAST_PLL_CLOCK;
 
 	if (AR_SREV_9280_20(sc)) {
 		/* Check if we have a valid rxGainType field in ROM. */
@@ -158,7 +176,7 @@ ar9280_set_synth(struct athn_softc *sc, struct ieee80211_channel *c,
 		phy |= AR9280_BMODE | AR9280_FRACMODE;
 
 		if (AR_SREV_9287_11_OR_LATER(sc)) {
-			/* XXX Magic from the Linux driver. */
+			/* NB: Magic values from the Linux driver. */
 			if (freq == 2484) {	/* Channel 14. */
 				/* Japanese regulatory requirements. */
 				AR_WRITE(sc, AR_PHY(637), 0x00000000);
@@ -219,7 +237,7 @@ ar9280_init_from_rom(struct athn_softc *sc, struct ieee80211_channel *c,
 
 	modal = &eep->modalHeader[IEEE80211_IS_CHAN_2GHZ(c)];
 
-	AR_WRITE(sc, AR_PHY_SWITCH_COM, modal->antCtrlCommon & 0xffff);
+	AR_WRITE(sc, AR_PHY_SWITCH_COM, modal->antCtrlCommon);
 
 	for (i = 0; i < AR9280_MAX_CHAINS; i++) {
 		if (sc->rxchainmask == 0x5 || sc->txchainmask == 0x5)
@@ -350,8 +368,7 @@ ar9280_init_from_rom(struct athn_softc *sc, struct ieee80211_channel *c,
 		AR_WRITE(sc, AR_PHY_SETTLING, reg);
 	}
 #endif
-	if (AR_SREV_9280_20_OR_LATER(sc) &&
-	    sc->eep_rev >= AR_EEP_MINOR_VER_19) {
+	if (sc->eep_rev >= AR_EEP_MINOR_VER_19) {
 		reg = AR_READ(sc, AR_PHY_CCK_TX_CTRL);
 		reg = RW(reg, AR_PHY_CCK_TX_CTRL_TX_DAC_SCALE_CCK,
 		    MS(modal->miscBits, AR5416_EEP_MISC_TX_DAC_SCALE_CCK));
@@ -382,9 +399,8 @@ ar9280_init_from_rom(struct athn_softc *sc, struct ieee80211_channel *c,
 }
 
 void
-ar9280_2_0_olpc_get_pdadcs(struct athn_softc *sc,
-    struct ieee80211_channel *c, int chain, uint8_t *boundaries,
-    uint8_t *pdadcs, uint8_t *txgain)
+ar9280_olpc_get_pdadcs(struct athn_softc *sc, struct ieee80211_channel *c,
+    int chain, uint8_t *boundaries, uint8_t *pdadcs, uint8_t *txgain)
 {
 	const struct ar5416_eeprom *eep = sc->eep;
 	const struct ar_cal_data_per_freq_olpc *pierdata;
@@ -430,12 +446,12 @@ ar9280_spur_mitigate(struct athn_softc *sc, struct ieee80211_channel *c,
 {
 	const struct ar_spur_chan *spurchans;
 	int spur, bin, spur_delta_phase, spur_freq_sd, spur_subchannel_sd;
-	int spur_off, bound, i;
+	int spur_off, range, i;
 
 	/* NB: Always clear. */
 	AR_CLRBITS(sc, AR_PHY_FORCE_CLKEN_CCK, AR_PHY_FORCE_CLKEN_CCK_MRC_MUX);
 
-	bound = (extc != NULL) ? 19 : 10;
+	range = (extc != NULL) ? 19 : 10;
 
 	spurchans = sc->ops.get_spur_chans(sc, IEEE80211_IS_CHAN_2GHZ(c));
 	for (i = 0; i < AR_EEPROM_MODAL_SPURS; i++) {
@@ -449,7 +465,7 @@ ar9280_spur_mitigate(struct athn_softc *sc, struct ieee80211_channel *c,
 		else
 			spur += AR_BASE_FREQ_5GHZ;
 		spur -= c->ic_freq;
-		if (abs(spur) < bound)
+		if (abs(spur) < range)
 			break;
 	}
 	if (i == AR_EEPROM_MODAL_SPURS)
@@ -469,6 +485,7 @@ ar9280_spur_mitigate(struct athn_softc *sc, struct ieee80211_channel *c,
 	    AR_PHY_SPUR_REG_ENABLE_VIT_SPUR_RSSI |
 	    SM(AR_PHY_SPUR_REG_SPUR_RSSI_THRESH, AR_SPUR_RSSI_THRESH));
 
+#ifndef IEEE80211_NO_HT
 	if (extc != NULL) {
 		spur_delta_phase = (spur * 262144) / 10;
 		if (spur < 0) {
@@ -478,7 +495,9 @@ ar9280_spur_mitigate(struct athn_softc *sc, struct ieee80211_channel *c,
 			spur_subchannel_sd = 0;
 			spur_off = spur - 10;
 		}
-	} else {
+	} else
+#endif
+	{
 		spur_delta_phase = (spur * 524288) / 10;
 		spur_subchannel_sd = 0;
 		spur_off = spur;
@@ -497,7 +516,7 @@ ar9280_spur_mitigate(struct athn_softc *sc, struct ieee80211_channel *c,
 	    SM(AR_PHY_SFCORR_SPUR_SUBCHNL_SD, spur_subchannel_sd));
 
 	bin = spur * 320;
-	athn_set_viterbi_mask(sc, bin);
+	ar5008_set_viterbi_mask(sc, bin);
 }
 
 void
@@ -531,7 +550,7 @@ ar9280_reset_tx_gain(struct athn_softc *sc, struct ieee80211_channel *c)
 }
 
 void
-ar9280_2_0_olpc_init(struct athn_softc *sc)
+ar9280_olpc_init(struct athn_softc *sc)
 {
 	uint32_t reg;
 	int i;
@@ -546,7 +565,7 @@ ar9280_2_0_olpc_init(struct athn_softc *sc)
 }
 
 void
-ar9280_2_0_olpc_temp_compensation(struct athn_softc *sc)
+ar9280_olpc_temp_compensation(struct athn_softc *sc)
 {
 	const struct ar5416_eeprom *eep = sc->eep;
 	int8_t pdadc, txgain, tcomp;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: seagate.c,v 1.33 2010/03/23 01:57:20 krw Exp $	*/
+/*	$OpenBSD: seagate.c,v 1.36 2010/06/28 18:31:02 krw Exp $	*/
 
 /*
  * ST01/02, Future Domain TMC-885, TMC-950 SCSI driver
@@ -73,7 +73,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/queue.h>
 #include <sys/malloc.h>
 
@@ -296,14 +295,6 @@ struct scsi_adapter sea_switch = {
 	0,
 };
 
-/* the below structure is so we have a default dev struct for our link struct */
-struct scsi_device sea_dev = {
-	NULL,		/* use default error handler */
-	NULL,		/* have a queue, served by this */
-	NULL,		/* have no async handler */
-	NULL,		/* Use default 'done' routine */
-};
-
 int	seaprobe(struct device *, void *, void *);
 void	seaattach(struct device *, struct device *, void *);
 int	seaprint(void *, const char *);
@@ -435,7 +426,6 @@ seaattach(struct device *parent, struct device *self, void *aux)
 	sea->sc_link.adapter_softc = sea;
 	sea->sc_link.adapter_target = sea->our_id;
 	sea->sc_link.adapter = &sea_switch;
-	sea->sc_link.device = &sea_dev;
 	sea->sc_link.openings = 1;
 
 	printf("\n");
@@ -546,9 +536,7 @@ sea_scsi_cmd(struct scsi_xfer *xs)
 	flags = xs->flags;
 	if ((scb = sea_get_scb(sea, flags)) == NULL) {
 		xs->error = XS_NO_CCB;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 	scb->flags = SCB_ACTIVE;
@@ -562,9 +550,7 @@ sea_scsi_cmd(struct scsi_xfer *xs)
 		 */
 		printf("%s: resetting\n", sea->sc_dev.dv_xname);
 		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
@@ -1152,7 +1138,6 @@ void
 sea_done(struct sea_softc *sea, struct sea_scb *scb)
 {
 	struct scsi_xfer *xs = scb->xs;
-	int s;
 
 	timeout_del(&scb->xs->stimeout);
 
@@ -1168,9 +1153,7 @@ sea_done(struct sea_softc *sea, struct sea_scb *scb)
 			xs->error = XS_DRIVER_STUFFUP;
 	}
 	sea_free_scb(sea, scb, xs->flags);
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 /*

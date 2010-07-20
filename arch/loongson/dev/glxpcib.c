@@ -1,4 +1,4 @@
-/*      $OpenBSD: glxpcib.c,v 1.4 2010/02/18 22:45:28 miod Exp $	*/
+/*      $OpenBSD: glxpcib.c,v 1.6 2010/05/08 21:59:56 miod Exp $	*/
 
 /*
  * Copyright (c) 2007 Marc Balmer <mbalmer@openbsd.org>
@@ -24,9 +24,9 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/device.h>
 #include <sys/gpio.h>
-#include <sys/sysctl.h>
 #include <sys/timetc.h>
 
 #include <machine/bus.h>
@@ -171,8 +171,10 @@ int
 glxpcib_match(struct device *parent, void *match, void *aux)
 { 
 	if (pci_matchbyid((struct pci_attach_args *)aux, glxpcib_devices,
-	    sizeof(glxpcib_devices) / sizeof(glxpcib_devices[0])))
+	    nitems(glxpcib_devices))) {
+		/* needs to win over pcib */
 		return 2;
+	}
 
 	return 0;
 }

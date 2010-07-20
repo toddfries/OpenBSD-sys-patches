@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860reg.h,v 1.26 2010/02/08 18:46:47 damien Exp $	*/
+/*	$OpenBSD: rt2860reg.h,v 1.30 2010/05/10 18:17:10 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007
@@ -23,6 +23,8 @@
 #define RT2860_PCI_MCUCTRL		0x0008
 #define RT2860_PCI_SYSCTRL		0x000c
 #define RT2860_PCIE_JTAG		0x0010
+
+#define RT3090_AUX_CTRL			0x010c
 
 #define RT3070_OPT_14			0x0114
 
@@ -74,6 +76,7 @@
 #define RT3070_EFUSE_DATA1		0x0594
 #define RT3070_EFUSE_DATA2		0x0598
 #define RT3070_EFUSE_DATA3		0x059c
+#define RT3090_OSC_CTRL			0x05a4
 #define RT3070_LDO_CFG0			0x05d4
 #define RT3070_GPIO_SWITCH		0x05dc
 
@@ -204,6 +207,10 @@
 #define RT2860_H2M_BBPAGENT		0x7028
 #define RT2860_BCN_BASE(vap)		(0x7800 + (vap) * 512)
 
+
+/* possible flags for RT2860_PCI_CFG */
+#define RT2860_PCI_CFG_USB	(1 << 17)
+#define RT2860_PCI_CFG_PCI	(1 << 16)
 
 /* possible flags for register RT2860_PCI_EECTRL */
 #define RT2860_C	(1 << 0)
@@ -499,6 +506,15 @@
 #define RT2860_WAKEUP_LEAD_TIME_SHIFT	0
 
 /* possible flags for register TX_PIN_CFG */
+#define RT3593_LNA_PE_G2_POL	(1 << 31)
+#define RT3593_LNA_PE_A2_POL	(1 << 30)
+#define RT3593_LNA_PE_G2_EN	(1 << 29)
+#define RT3593_LNA_PE_A2_EN	(1 << 28)
+#define RT3593_LNA_PE2_EN	(RT3593_LNA_PE_A2_EN | RT3593_LNA_PE_G2_EN)
+#define RT3593_PA_PE_G2_POL	(1 << 27)
+#define RT3593_PA_PE_A2_POL	(1 << 26)
+#define RT3593_PA_PE_G2_EN	(1 << 25)
+#define RT3593_PA_PE_A2_EN	(1 << 24)
 #define RT2860_TRSW_POL		(1 << 19)
 #define RT2860_TRSW_EN		(1 << 18)
 #define RT2860_RFTR_POL		(1 << 17)
@@ -509,8 +525,10 @@
 #define RT2860_LNA_PE_A0_POL	(1 << 12)
 #define RT2860_LNA_PE_G1_EN	(1 << 11)
 #define RT2860_LNA_PE_A1_EN	(1 << 10)
+#define RT2860_LNA_PE1_EN	(RT2860_LNA_PE_A1_EN | RT2860_LNA_PE_G1_EN)
 #define RT2860_LNA_PE_G0_EN	(1 <<  9)
 #define RT2860_LNA_PE_A0_EN	(1 <<  8)
+#define RT2860_LNA_PE0_EN	(RT2860_LNA_PE_A0_EN | RT2860_LNA_PE_G0_EN)
 #define RT2860_PA_PE_G1_POL	(1 <<  7)
 #define RT2860_PA_PE_A1_POL	(1 <<  6)
 #define RT2860_PA_PE_G0_POL	(1 <<  5)
@@ -682,6 +700,11 @@
 #define RT3070_TX0_PD	(1 << 3)
 #define RT3070_RX1_PD	(1 << 4)
 #define RT3070_TX1_PD	(1 << 5)
+#define RT3070_RX2_PD	(1 << 6)
+#define RT3070_TX2_PD	(1 << 7)
+
+/* possible flags for RT3020 RF register 7 */
+#define RT3070_TUNE	(1 << 0)
 
 /* possible flags for RT3020 RF register 15 */
 #define RT3070_TX_LO2	(1 << 3)
@@ -694,7 +717,35 @@
 
 /* possible flags for RT3020 RF register 21 */
 #define RT3070_RX_LO2	(1 << 3)
+#define RT3070_RX_CTB	(1 << 7)
 
+/* possible flags for RT3020 RF register 22 */
+#define RT3070_BB_LOOPBACK	(1 << 0)
+
+/* possible flags for RT3053 RF register 1 */
+#define RT3593_VCO	(1 << 0)
+
+/* possible flags for RT3053 RF register 2 */
+#define RT3593_RESCAL	(1 << 7)
+
+/* possible flags for RT3053 RF register 3 */
+#define RT3593_VCOCAL	(1 << 7)
+
+/* possible flags for RT3053 RF register 6 */
+#define RT3593_VCO_IC	(1 << 6)
+
+/* possible flags for RT3053 RF register 20 */
+#define RT3593_LDO_PLL_VC_MASK	0x0e
+#define RT3593_LDO_RF_VC_MASK	0xe0
+
+/* possible flags for RT3053 RF register 22 */
+#define RT3593_CP_IC_MASK	0xe0
+#define RT3593_CP_IC_SHIFT	5
+
+/* possible flags for RT3053 RF register 46 */
+#define RT3593_RX_CTB	(1 << 5)
+
+#define RT3090_DEF_LNA	10
 
 /* RT2860 TX descriptor */
 struct rt2860_txd {
@@ -838,6 +889,8 @@ struct rt2860_rxwi {
 #define RT3070_RF_3021	7	/* 1T2R */
 #define RT3070_RF_3022	8	/* 2T2R */
 #define RT3070_RF_3052	9	/* dual-band 2T2R */
+#define RT3070_RF_3320	11	/* 1T1R */
+#define RT3070_RF_3053	13	/* dual-band 3T3R */
 
 /* USB commands for RT2870 only */
 #define RT2870_RESET		1

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hd.c,v 1.59 2009/08/24 08:52:13 jasper Exp $	*/
+/*	$OpenBSD: hd.c,v 1.61 2010/05/23 10:49:19 dlg Exp $	*/
 /*	$NetBSD: rd.c,v 1.33 1997/07/10 18:14:08 kleink Exp $	*/
 
 /*
@@ -58,6 +58,7 @@
 #include <sys/proc.h>
 #include <sys/stat.h>
 #include <sys/syslog.h>
+#include <sys/dkio.h>
 
 #include <ufs/ffs/fs.h>			/* for BBSIZE and SBSIZE */
 
@@ -505,8 +506,6 @@ hdgetdisklabel(dev, rs, lp, spoofonly)
 	strncpy(lp->d_packname, "fictitious", sizeof lp->d_packname);
 
 	DL_SETDSIZE(lp, hdidentinfo[rs->sc_type].ri_nblocks);
-	lp->d_rpm = 3600;
-	lp->d_interleave = 1;
 	lp->d_flags = 0;
 	lp->d_version = 1;
 

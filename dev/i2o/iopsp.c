@@ -1,4 +1,4 @@
-/*	$OpenBSD: iopsp.c,v 1.16 2010/03/23 01:57:19 krw Exp $	*/
+/*	$OpenBSD: iopsp.c,v 1.18 2010/06/28 18:31:01 krw Exp $	*/
 /*	$NetBSD$	*/
 
 /*-
@@ -76,10 +76,6 @@ void	iopspminphys(struct buf *bp, struct scsi_link *sl);
 
 struct scsi_adapter iopsp_switch = {
 	iopsp_scsi_cmd, iopspminphys, 0, 0,
-};
-
-struct scsi_device iopsp_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 void	iopsp_adjqparam(struct device *, int);
@@ -189,7 +185,6 @@ iopsp_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &iopsp_switch;
 	sc->sc_link.adapter_target = letoh32(param.p.sci.initiatorid);
-	sc->sc_link.device = &iopsp_dev;
 	sc->sc_link.openings = 1;
 	sc->sc_link.adapter_buswidth = fcal?
 	    IOPSP_MAX_FCAL_TARGET : param.p.sci.maxdatawidth;
@@ -419,9 +414,7 @@ iopsp_scsi_cmd(xs)
 	tid = IOPSP_TIDMAP(sc->sc_tidmap, link->target, link->lun);
 	if (tid == IOPSP_TID_ABSENT || tid == IOPSP_TID_INUSE) {
 		xs->error = XS_SELTIMEOUT;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
@@ -439,9 +432,7 @@ iopsp_scsi_cmd(xs)
 		} else
 			xs->error = XS_NOERROR;
 
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
@@ -486,9 +477,7 @@ iopsp_scsi_cmd(xs)
 		if (error) {
 			xs->error = XS_DRIVER_STUFFUP;
 			iop_msg_free(iop, im);
-			s = splbio();
 			scsi_done(xs);
-			splx(s);
 			return;
 		}
 		if ((xs->flags & SCSI_DATA_IN) == 0)
@@ -509,9 +498,7 @@ iopsp_scsi_cmd(xs)
 			iop_msg_unmap(iop, im);
 		iop_msg_free(iop, im);
 		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 	}
 }
 

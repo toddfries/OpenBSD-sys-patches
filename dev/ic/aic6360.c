@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic6360.c,v 1.22 2010/03/23 01:57:19 krw Exp $	*/
+/*	$OpenBSD: aic6360.c,v 1.25 2010/06/28 18:31:02 krw Exp $	*/
 /*	$NetBSD: aic6360.c,v 1.52 1996/12/10 21:27:51 thorpej Exp $	*/
 
 #ifdef DDB
@@ -131,7 +131,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/queue.h>
 
 #include <machine/bus.h>
@@ -198,14 +197,6 @@ struct scsi_adapter aic_switch = {
 	0,
 	0,
 };
-
-struct scsi_device aic_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
-};
-
 
 /*
  * Do the real search-for-device.
@@ -288,7 +279,6 @@ aicattach(struct aic_softc *sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_initiator;
 	sc->sc_link.adapter = &aic_switch;
-	sc->sc_link.device = &aic_dev;
 	sc->sc_link.openings = 2;
 
 	bzero(&saa, sizeof(saa));
@@ -519,9 +509,7 @@ aic_scsi_cmd(struct scsi_xfer *xs)
 	flags = xs->flags;
 	if ((acb = aic_get_acb(sc, flags)) == NULL) {
 		xs->error = XS_NO_CCB;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
@@ -818,7 +806,6 @@ aic_done(struct aic_softc *sc, struct aic_acb *acb)
 	struct scsi_xfer *xs = acb->xs;
 	struct scsi_link *sc_link = xs->sc_link;
 	struct aic_tinfo *ti = &sc->sc_tinfo[sc_link->target];
-	int s;
 
 	AIC_TRACE(("aic_done  "));
 
@@ -871,9 +858,7 @@ aic_done(struct aic_softc *sc, struct aic_acb *acb)
 
 	aic_free_acb(sc, acb, xs->flags);
 	ti->cmds++;
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 void

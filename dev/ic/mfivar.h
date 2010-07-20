@@ -1,4 +1,4 @@
-/* $OpenBSD: mfivar.h,v 1.37 2010/01/04 08:04:43 dlg Exp $ */
+/* $OpenBSD: mfivar.h,v 1.39 2010/06/30 19:10:05 mk Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -57,6 +57,7 @@ struct mfi_ccb {
 
 	union mfi_frame		*ccb_frame;
 	paddr_t			ccb_pframe;
+	bus_addr_t		ccb_pframe_offset;
 	uint32_t		ccb_frame_size;
 	uint32_t		ccb_extra_frames;
 
@@ -86,10 +87,10 @@ struct mfi_ccb {
 	}			ccb_state;
 	uint32_t		ccb_flags;
 #define MFI_CCB_F_ERR			(1<<0)
-	TAILQ_ENTRY(mfi_ccb)	ccb_link;
+	SLIST_ENTRY(mfi_ccb)	ccb_link;
 };
 
-TAILQ_HEAD(mfi_ccb_list, mfi_ccb);
+SLIST_HEAD(mfi_ccb_list, mfi_ccb);
 
 enum mfi_iop {
 	MFI_IOP_XSCALE,

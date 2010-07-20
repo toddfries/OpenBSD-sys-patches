@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.62 2010/02/26 23:11:57 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.64 2010/04/23 15:25:20 jsing Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1995 Dale Rahn.
@@ -135,8 +135,21 @@ bsdtocpulabel(struct disklabel *lp, struct mvmedisklabel *clp)
 {
 	char *tmot = "MOTOROLA", *id = "M88K", *mot;
 	int i;
+	u_short osa_u, osa_l, osl;
+	u_int oss;
 
+	/* preserve existing VID boot code information */
+	osa_u = clp->vid_osa_u;
+	osa_l = clp->vid_osa_l;
+	osl = clp->vid_osl;
+	oss = clp->vid_oss;
 	bzero(clp, sizeof(*clp));
+	clp->vid_osa_u = osa_u;
+	clp->vid_osa_l = osa_l;
+	clp->vid_osl = osl;
+	clp->vid_oss = oss;
+	clp->vid_cas = clp->vid_cal = 1;
+
 	clp->magic1 = lp->d_magic;
 	clp->type = lp->d_type;
 	clp->subtype = lp->d_subtype;
@@ -149,12 +162,9 @@ bsdtocpulabel(struct disklabel *lp, struct mvmedisklabel *clp)
 
 	clp->secpercyl = lp->d_secpercyl;
 	clp->secperunit = DL_GETDSIZE(lp);
-	clp->sparespertrack = lp->d_sparespertrack;
-	clp->sparespercyl = lp->d_sparespercyl;
 	clp->acylinders = lp->d_acylinders;
-	clp->rpm = lp->d_rpm;
 
-	clp->cfg_ilv = lp->d_interleave;
+	clp->cfg_ilv = 1;
 	clp->cfg_sof = 1;
 	clp->cylskew = 1;
 	clp->headswitch = 0;
@@ -205,11 +215,7 @@ cputobsdlabel(struct disklabel *lp, struct mvmedisklabel *clp)
 	lp->d_secpercyl = clp->secpercyl;
 	if (DL_GETDSIZE(lp) == 0)
 		DL_SETDSIZE(lp, clp->secperunit);
-	lp->d_sparespertrack = clp->sparespertrack;
-	lp->d_sparespercyl = clp->sparespercyl;
 	lp->d_acylinders = clp->acylinders;
-	lp->d_rpm = clp->rpm;
-	lp->d_interleave = clp->cfg_ilv;
 	lp->d_flags = clp->flags;
 	for (i = 0; i < NDDATA; i++)
 		lp->d_drivedata[i] = clp->drivedata[i];

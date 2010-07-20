@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmapae.c,v 1.20 2009/08/06 15:28:14 oga Exp $	*/
+/*	$OpenBSD: pmapae.c,v 1.21 2010/04/22 19:02:44 oga Exp $	*/
 
 /*
  * Copyright (c) 2006 Michael Shalayeff

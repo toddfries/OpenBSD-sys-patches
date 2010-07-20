@@ -1,4 +1,4 @@
-/*	$OpenBSD: oosiop.c,v 1.14 2010/03/23 01:57:19 krw Exp $	*/
+/*	$OpenBSD: oosiop.c,v 1.17 2010/06/28 18:31:02 krw Exp $	*/
 /*	$NetBSD: oosiop.c,v 1.4 2003/10/29 17:45:55 tsutsui Exp $	*/
 
 /*
@@ -135,13 +135,6 @@ struct scsi_adapter oosiop_adapter = {
 	NULL
 };
 
-struct scsi_device oosiop_dev = {
-	NULL,
-	NULL,
-	NULL,
-	NULL
-};
-
 void
 oosiop_attach(struct oosiop_softc *sc)
 {
@@ -156,7 +149,7 @@ oosiop_attach(struct oosiop_softc *sc)
 	 */
 	scrsize = round_page(sizeof(oosiop_script));
 	err = bus_dmamem_alloc(sc->sc_dmat, scrsize, PAGE_SIZE, 0, &seg, 1,
-	    &nseg, BUS_DMA_NOWAIT);
+	    &nseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO);
 	if (err) {
 		printf(": failed to allocate script memory, err=%d\n", err);
 		return;
@@ -179,7 +172,6 @@ oosiop_attach(struct oosiop_softc *sc)
 		printf(": failed to load script map, err=%d\n", err);
 		return;
 	}
-	bzero(sc->sc_scr, scrsize);
 	sc->sc_scrbase = sc->sc_scrdma->dm_segs[0].ds_addr;
 
 	/* Initialize command block array */
@@ -243,7 +235,6 @@ oosiop_attach(struct oosiop_softc *sc)
 	 */
 	sc->sc_link.adapter = &oosiop_adapter;
 	sc->sc_link.adapter_softc = sc;
-	sc->sc_link.device = &oosiop_dev;
 	sc->sc_link.openings = 1;	/* XXX */
 	sc->sc_link.adapter_buswidth = OOSIOP_NTGT;
 	sc->sc_link.adapter_target = sc->sc_id;
@@ -1044,13 +1035,13 @@ oosiop_reset(struct oosiop_softc *sc)
 	delay(10000);
 
 	/* Set up various chip parameters */
-	oosiop_write_1(sc, OOSIOP_SCNTL0, OOSIOP_ARB_FULL | OOSIOP_SCNTL0_EPG);
+	oosiop_write_1(sc, OOSIOP_SCNTL0, OOSIOP_ARB_FULL | sc->sc_scntl0);
 	oosiop_write_1(sc, OOSIOP_SCNTL1, OOSIOP_SCNTL1_ESR);
 	oosiop_write_1(sc, OOSIOP_DCNTL, sc->sc_dcntl);
-	oosiop_write_1(sc, OOSIOP_DMODE, OOSIOP_DMODE_BL_8);
+	oosiop_write_1(sc, OOSIOP_DMODE, sc->sc_dmode);
 	oosiop_write_1(sc, OOSIOP_SCID, OOSIOP_SCID_VALUE(sc->sc_id));
-	oosiop_write_1(sc, OOSIOP_DWT, 0xff);	/* Enable DMA timeout */
-	oosiop_write_1(sc, OOSIOP_CTEST7, 0);
+	oosiop_write_1(sc, OOSIOP_DWT, sc->sc_dwt);
+	oosiop_write_1(sc, OOSIOP_CTEST7, sc->sc_ctest7);
 	oosiop_write_1(sc, OOSIOP_SXFER, 0);
 
 	/* Clear all interrupts */
