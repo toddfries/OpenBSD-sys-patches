@@ -512,7 +512,7 @@ wsmouseopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	evar = &sc->sc_base.me_evar;
 	wsevent_init(evar);
-	evar->io = p;
+	evar->io = p->p_p;
 
 	error = wsmousedoopen(sc, evar);
 	if (error) {
@@ -638,15 +638,15 @@ wsmouse_do_ioctl(struct wsmouse_softc *sc, u_long cmd, caddr_t data, int flag,
 	case FIOSETOWN:
 		if (sc->sc_base.me_evp == NULL)
 			return (EINVAL);
-		if (-*(int *)data != sc->sc_base.me_evp->io->p_pgid
-		    && *(int *)data != sc->sc_base.me_evp->io->p_pid)
+		if (-*(int *)data != sc->sc_base.me_evp->io->ps_pgid
+		    && *(int *)data != sc->sc_base.me_evp->io->ps_pid)
 			return (EPERM);
 		return (0);
 
 	case TIOCSPGRP:
 		if (sc->sc_base.me_evp == NULL)
 			return (EINVAL);
-		if (*(int *)data != sc->sc_base.me_evp->io->p_pgid)
+		if (*(int *)data != sc->sc_base.me_evp->io->ps_pgid)
 			return (EPERM);
 		return (0);
 	}

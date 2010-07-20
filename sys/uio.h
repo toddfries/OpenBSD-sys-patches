@@ -56,7 +56,7 @@ struct uio {
 	size_t	uio_resid;	/* residual i/o count */
 	enum	uio_seg uio_segflg; /* see above */
 	enum	uio_rw uio_rw;	/* see above */
-	struct	proc *uio_procp;/* associated process or NULL */
+	struct	proc *uio_procp;/* associated thread or NULL */
 };
 
 /*

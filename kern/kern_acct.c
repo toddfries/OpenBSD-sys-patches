@@ -216,8 +216,9 @@ acct_process(struct proc *p)
 	acct.ac_gid = p->p_cred->p_rgid;
 
 	/* (7) The terminal from which the process was started */
-	if ((p->p_flag & P_CONTROLT) && p->p_pgrp->pg_session->s_ttyp)
-		acct.ac_tty = p->p_pgrp->pg_session->s_ttyp->t_dev;
+	if ((p->p_p->ps_flags & PS_CONTROLT) &&
+	    p->p_p->ps_pgrp->pg_session->s_ttyp)
+		acct.ac_tty = p->p_p->ps_pgrp->pg_session->s_ttyp->t_dev;
 	else
 		acct.ac_tty = NODEV;
 
