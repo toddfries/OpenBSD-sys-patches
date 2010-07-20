@@ -576,21 +576,12 @@ ahc_setup_data(struct ahc_softc *ahc, struct scsi_xfer *xs,
 			s = splbio();
 			ahc_free_scb(ahc, scb);
 			splx(s);
-<<<<<<< HEAD
-			return (NO_CCB);	/* XXX fvdl */
-}
-		error = ahc_execute_scb(scb,
-					scb->dmamap->dm_segs,
-					scb->dmamap->dm_nsegs);
-		return error;
-=======
 			xs->error = XS_DRIVER_STUFFUP;
 			scsi_done(xs);
 			return;
 		}
 		ahc_execute_scb(scb, scb->dmamap->dm_segs,
 		    scb->dmamap->dm_nsegs);
->>>>>>> origin/master
 	} else {
 		ahc_execute_scb(scb, NULL, 0);
 	}

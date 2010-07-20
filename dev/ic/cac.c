@@ -709,15 +709,10 @@ cac_scsi_cmd(xs)
 		    target, blockno, flags, xs))) {
 
 			if (error == ENOMEM || error == EBUSY) {
-<<<<<<< HEAD
-				splx(s);
-				return (NO_CCB);
-=======
 				xs->error = XS_NO_CCB;
 				scsi_done(xs);
 				splx(s);
 				return;
->>>>>>> origin/master
 			} else {
 				xs->error = XS_DRIVER_STUFFUP;
 				scsi_done(xs);

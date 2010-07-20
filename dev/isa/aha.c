@@ -1278,13 +1278,9 @@ aha_scsi_cmd(xs)
 		if (bus_dmamap_load(sc->sc_dmat, ccb->dmam, xs->data,
 		    xs->datalen, NULL, BUS_DMA_NOWAIT) != 0) {
 			aha_free_ccb(sc, ccb);
-<<<<<<< HEAD
-			return (NO_CCB);
-=======
 			xs->error = XS_NO_CCB;
 			scsi_done(xs);
 			return;
->>>>>>> origin/master
 		}
 		for (seg = 0; seg < ccb->dmam->dm_nsegs; seg++) {
 			ltophys(ccb->dmam->dm_segs[seg].ds_addr,

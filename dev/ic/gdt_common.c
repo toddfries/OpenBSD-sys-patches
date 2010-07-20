@@ -754,14 +754,10 @@ gdt_scsi_cmd(struct scsi_xfer *xs)
 					printf("%s: command %d timed out\n",
 					    DEVNAME(sc),
 					    ccb->gc_cmd_index);
-<<<<<<< HEAD
-					return (NO_CCB);
-=======
 					xs->error = XS_NO_CCB;
 					scsi_done(xs);
 					splx(s);
 					return;
->>>>>>> origin/master
 				}
 				scsi_done(xs);
 			}

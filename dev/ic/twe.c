@@ -893,17 +893,12 @@ twe_scsi_cmd(xs)
 		default:		op = TWE_CMD_NOP;	break;
 		}
 
-<<<<<<< HEAD
-		if ((ccb = twe_get_ccb(sc)) == NULL)
-			return (NO_CCB);
-=======
 		if ((ccb = twe_get_ccb(sc)) == NULL) {
 			xs->error = XS_NO_CCB;
 			scsi_done(xs);
 			TWE_UNLOCK(sc, lock);
 			return;
 		}
->>>>>>> origin/master
 
 		ccb->ccb_xs = xs;
 		ccb->ccb_data = xs->data;
@@ -925,11 +920,6 @@ twe_scsi_cmd(xs)
 			TWE_DPRINTF(TWE_D_CMD, ("failed %p ", xs));
 			xs->error = XS_DRIVER_STUFFUP;
 			scsi_done(xs);
-<<<<<<< HEAD
-			TWE_UNLOCK(sc, lock);
-			return (COMPLETE);
-=======
->>>>>>> origin/master
 		}
 
 		TWE_UNLOCK(sc, lock);

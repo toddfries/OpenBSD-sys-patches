@@ -957,16 +957,11 @@ ahb_scsi_cmd(xs)
 	 */
 	if (flags & SCSI_RESET) {
 		ecb->flags |= ECB_IMMED;
-<<<<<<< HEAD
-		if (sc->immed_ecb)
-			return NO_CCB;
-=======
 		if (sc->immed_ecb) {
 			xs->error = XS_NO_CCB;
 			scsi_done(xs);
 			return;
 		}
->>>>>>> origin/master
 		sc->immed_ecb = ecb;
 
 		s = splbio();

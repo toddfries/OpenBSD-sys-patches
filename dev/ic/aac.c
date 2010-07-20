@@ -2644,11 +2644,7 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 				xs->error = XS_NO_CCB;
 				scsi_done(xs);
 				splx(s);
-<<<<<<< HEAD
-				return (NO_CCB);
-=======
 				return;
->>>>>>> origin/master
 			}
 			scsi_done(xs);
 		}

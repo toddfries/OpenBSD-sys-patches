@@ -1397,17 +1397,6 @@ siop_scsiprobe(struct scsi_link *link)
 	printf("%s:%d:%d: probe\n",
 	    sc->sc_c.sc_dev.dv_xname, target, lun);
 #endif
-<<<<<<< HEAD
-		sc->sc_c.targets[target] =
-		    malloc(sizeof(struct siop_target), M_DEVBUF,
-		        M_NOWAIT | M_ZERO);
-		if (sc->sc_c.targets[target] == NULL) {
-			printf("%s: can't malloc memory for "
-			    "target %d\n", sc->sc_c.sc_dev.dv_xname,
-			    target);
-			splx(s);
-			return(NO_CCB);
-=======
 
 	/* XXX locking */
 
@@ -1419,7 +1408,6 @@ siop_scsiprobe(struct scsi_link *link)
 			printf("%s: can't malloc memory for target %d\n",
 			    sc->sc_c.sc_dev.dv_xname, target);
 			return (ENOMEM);
->>>>>>> origin/master
 		}
 
 		siop_target->target_c.status = TARST_PROBING;
@@ -1434,13 +1422,8 @@ siop_scsiprobe(struct scsi_link *link)
 		if (siop_target->lunsw == NULL) {
 			printf("%s: can't alloc lunsw for target %d\n",
 			    sc->sc_c.sc_dev.dv_xname, target);
-<<<<<<< HEAD
-			splx(s);
-			return(NO_CCB);
-=======
 			free(siop_target, M_DEVBUF);
 			return (ENOMEM);
->>>>>>> origin/master
 		}
 		for (i = 0; i < 8; i++)
 			siop_target->siop_lun[i] = NULL;
@@ -1459,12 +1442,7 @@ siop_scsiprobe(struct scsi_link *link)
 			printf("%s: can't alloc siop_lun for "
 			    "target %d lun %d\n",
 			    sc->sc_c.sc_dev.dv_xname, target, lun);
-<<<<<<< HEAD
-			splx(s);
-			return(NO_CCB);
-=======
 			return (ENOMEM);
->>>>>>> origin/master
 		}
 	}
 
@@ -1518,16 +1496,9 @@ siop_scsicmd(xs)
 		if (error) {
 			printf("%s: unable to load data DMA map: %d\n",
 			    sc->sc_c.sc_dev.dv_xname, error);
-<<<<<<< HEAD
-			siop_cmd->cmd_c.status = CMDST_FREE;
-			TAILQ_INSERT_TAIL(&sc->free_list, siop_cmd, next);
-			splx(s);
-			return(NO_CCB);
-=======
 			xs->error = XS_DRIVER_STUFFUP;
 			scsi_done(xs);
 			return;
->>>>>>> origin/master
 		}
 		bus_dmamap_sync(sc->sc_c.sc_dmat,
 		    siop_cmd->cmd_c.dmamap_data, 0,

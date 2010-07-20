@@ -423,13 +423,9 @@ vs_scsicmd(struct scsi_xfer *xs)
 		if (cb->cb_xs != NULL) {
 			printf("%s: master command not idle\n",
 			    sc->sc_dev.dv_xname);
-<<<<<<< HEAD
-			return (NO_CCB);
-=======
 			xs->error = XS_NO_CCB;
 			scsi_done(xs);
 			return;
->>>>>>> origin/master
 		}
 #endif
 		s = splbio();
@@ -442,13 +438,9 @@ vs_scsicmd(struct scsi_xfer *xs)
 			printf("%s: queue for target %d is busy\n",
 			    sc->sc_dev.dv_xname, slp->target);
 #endif
-<<<<<<< HEAD
-			return (NO_CCB);
-=======
 			xs->error = XS_NO_CCB;
 			scsi_done(xs);
 			return;
->>>>>>> origin/master
 		}
 		if (vs_getcqe(sc, &cqep, &iopb)) {
 			/* XXX shouldn't happen since our queue is ready */
@@ -456,15 +448,11 @@ vs_scsicmd(struct scsi_xfer *xs)
 #ifdef VS_DEBUG
 			printf("%s: no free CQEs\n", sc->sc_dev.dv_xname);
 #endif
-<<<<<<< HEAD
-			return (NO_CCB);
-=======
 			xs->error = XS_NO_CCB;
 			s = splbio();
 			scsi_done(xs);
 			splx(s);
 			return;
->>>>>>> origin/master
 		}
 	}
 

@@ -327,11 +327,7 @@ ispcmd(XS_T *xs)
 			xs->error = XS_NO_CCB;
 			scsi_done(xs);
 			ISP_UNLOCK(isp);
-<<<<<<< HEAD
-			return (NO_CCB);
-=======
 			return;
->>>>>>> origin/master
 		}
 		if (isp->isp_osinfo.blocked == 2) {
 			isp_restart(isp);
@@ -398,13 +394,8 @@ isp_polled_cmd(struct ispsoftc *isp, XS_T *xs)
 		break;
 	case CMD_RQLATER:
 	case CMD_EAGAIN:
-<<<<<<< HEAD
-		result = NO_CCB;
-		break;
-=======
 		xs->error = XS_NO_CCB;
 		/* FALLTHROUGH */
->>>>>>> origin/master
 	case CMD_COMPLETE:
 		scsi_done(xs);
 		return;

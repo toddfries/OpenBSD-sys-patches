@@ -512,14 +512,10 @@ ioprbs_scsi_cmd(xs)
 					splx(s);
 					printf("%s: command timed out\n",
 					    sc->sc_dv.dv_xname);
-<<<<<<< HEAD
-					return (NO_CCB);
-=======
 					xs->error = XS_NO_CCB;
 					scsi_done(xs);
 					splx(s);
 					return;
->>>>>>> origin/master
 				}
 				scsi_done(xs);
 #endif

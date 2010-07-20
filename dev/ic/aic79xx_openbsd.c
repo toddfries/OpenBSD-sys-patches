@@ -556,11 +556,7 @@ ahd_setup_data(struct ahd_softc *ahd, struct scsi_xfer *xs,
 			xs->error = XS_NO_CCB;
 			scsi_done(xs);
 			ahd_unlock(ahd, &s);
-<<<<<<< HEAD
-			return (NO_CCB);       /* XXX fvdl */
-=======
 			return;
->>>>>>> origin/master
 		}
 		ahd_execute_scb(scb, scb->dmamap->dm_segs,
 		    scb->dmamap->dm_nsegs);
