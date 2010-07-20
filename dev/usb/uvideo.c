@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.126 2009/06/28 17:01:17 mglocker Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.133 2010/07/15 04:46:33 mglocker Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -66,7 +66,7 @@ int		uvideo_match(struct device *, void *, void *);
 void		uvideo_attach(struct device *, struct device *, void *);
 void		uvideo_attach_hook(void *);
 int		uvideo_detach(struct device *, int);
-int		uvideo_activate(struct device *, enum devact);
+int		uvideo_activate(struct device *, int);
 
 usbd_status	uvideo_vc_parse_desc(struct uvideo_softc *);
 usbd_status	uvideo_vc_parse_desc_header(struct uvideo_softc *,
@@ -395,6 +395,9 @@ uvideo_close(void *addr)
 
 	DPRINTF(1, "%s: uvideo_close: sc=%p\n", DEVNAME(sc), sc);
 
+#ifdef UVIDEO_DUMP
+	usb_rem_task(sc->sc_udev, &sc->sc_task_write);
+#endif
 	/* close video stream pipe */
 	uvideo_vs_close(sc);
 
@@ -406,9 +409,6 @@ uvideo_close(void *addr)
 
 	/* free video stream frame buffer */
 	uvideo_vs_free_frame(sc);
-#ifdef UVIDEO_DUMP
-	usb_rem_task(sc->sc_udev, &sc->sc_task_write);
-#endif
 	return (0);
 }
 
@@ -555,7 +555,7 @@ uvideo_detach(struct device *self, int flags)
 }
 
 int
-uvideo_activate(struct device *self, enum devact act)
+uvideo_activate(struct device *self, int act)
 {
 	struct uvideo_softc *sc = (struct uvideo_softc *) self;
 	int rv = 0;
@@ -1024,7 +1024,8 @@ uvideo_vs_parse_desc_frame(struct uvideo_softc *sc)
 		case UDESCSUB_VS_FRAME_UNCOMPRESSED:
 			/* XXX do correct length calculation */
 			if (desc->bLength > 25) {
-				error = uvideo_vs_parse_desc_frame_uncompressed(				    sc, desc);
+				error =uvideo_vs_parse_desc_frame_uncompressed(
+				    sc, desc);
 				if (error != USBD_NORMAL_COMPLETION)
 					return (error);
 			}
@@ -1708,7 +1709,8 @@ uvideo_vs_open(struct uvideo_softc *sc)
 	}
 
 	/* calculate optimal isoc xfer size */
-	if (strncmp(sc->sc_udev->bus->bdev.dv_xname, "ohci", 4) == 0) {
+	if (strcmp(sc->sc_udev->bus->bdev.dv_cfdata->cf_driver->cd_name,
+	    "ohci") == 0) {
 		/* ohci workaround */
 		sc->sc_nframes = 8;
 	} else {
@@ -2092,6 +2094,12 @@ uvideo_mmap_queue(struct uvideo_softc *sc, uint8_t *buf, int len)
 		sc->sc_mmap_cur = 0;
 
 	wakeup(sc);
+
+	/*
+	 * In case userland uses poll(2), signal that we have a frame
+	 * ready to dequeue.
+	 */
+	sc->sc_uplayer_intr(sc->sc_uplayer_arg);
 }
 
 void
@@ -2647,7 +2655,7 @@ uvideo_querycap(void *v, struct v4l2_capability *caps)
 {
 	struct uvideo_softc *sc = v;
 
-	bzero(caps, sizeof(caps));
+	bzero(caps, sizeof(*caps));
 	strlcpy(caps->driver, DEVNAME(sc), sizeof(caps->driver));
 	strlcpy(caps->card, "Generic USB video class device",
 	    sizeof(caps->card));

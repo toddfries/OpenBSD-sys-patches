@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: macintr.c,v 1.36 2009/06/02 21:38:09 drahn Exp $	*/
+=======
+/*	$OpenBSD: macintr.c,v 1.39 2009/10/01 20:19:18 kettenis Exp $	*/
+>>>>>>> origin/master
 
 /*-
  * Copyright (c) 2008 Dale Rahn <drahn@openbsd.org>
@@ -273,7 +277,7 @@ macintr_setipl(int ipl)
  */
 void *
 macintr_establish(void * lcv, int irq, int type, int level,
-    int (*ih_fun)(void *), void *ih_arg, char *name)
+    int (*ih_fun)(void *), void *ih_arg, const char *name)
 {
 	struct cpu_info *ci = curcpu();
 	struct intrq *iq;
@@ -378,6 +382,7 @@ macintr_calc_mask()
 	struct intrhand *ih;
 	int i;
 
+<<<<<<< HEAD
 	for (i = IPL_NONE; i < IPL_NUM; i++) {
 		macintr_pri_share[i] = i;
 	}
@@ -392,6 +397,49 @@ macintr_calc_mask()
 				maxipl = ih->ih_level;
 			if (ih->ih_level < minipl)
 				minipl = ih->ih_level;
+=======
+	/* Then figure out which IRQs use each level. */
+	for (level = IPL_NONE; level < IPL_NUM; level++) {
+		register int irqs = 0;
+		for (irq = 0; irq < ICU_LEN; irq++)
+			if (m_intrlevel[irq] & (1 << level))
+				irqs |= 1 << irq;
+		imask[level] = irqs | SINT_ALLMASK;
+	}
+
+	/*
+	 * There are tty, network and disk drivers that use free() at interrupt
+	 * time, so vm > (tty | net | bio).
+	 *
+	 * Enforce a hierarchy that gives slow devices a better chance at not
+	 * dropping data.
+	 */
+	imask[IPL_NET] |= imask[IPL_BIO];
+	imask[IPL_TTY] |= imask[IPL_NET];
+	imask[IPL_VM] |= imask[IPL_TTY];
+	imask[IPL_CLOCK] |= imask[IPL_VM] | SPL_CLOCKMASK;
+
+	/*
+	 * These are pseudo-levels.
+	 */
+	imask[IPL_NONE] = 0x00000000;
+	imask[IPL_HIGH] = 0xffffffff;
+
+	/* And eventually calculate the complete masks. */
+	for (irq = 0; irq < ICU_LEN; irq++) {
+		register int irqs = 1 << irq;
+		for (q = m_intrhand[irq]; q; q = q->ih_next)
+			irqs |= imask[q->ih_level];
+		m_intrmask[irq] = irqs | SINT_ALLMASK;
+	}
+
+	/* Lastly, determine which IRQs are actually in use. */
+	{
+		register int irqs = 0;
+		for (irq = 0; irq < ICU_LEN; irq++) {
+			if (m_intrhand[irq])
+				irqs |= 1 << irq;
+>>>>>>> origin/master
 		}
 
 		iq->iq_ipl = maxipl;
@@ -477,6 +525,30 @@ macintr_eoi(int irq)
 			out32rb(INT_CLEAR_REG1, state1);
 		}
 	}
+<<<<<<< HEAD
+=======
+
+	/*out32rb(INT_ENABLE_REG, ~imen_m);*/
+
+	do {
+		if((ci->ci_ipending & SINT_CLOCK) & ~pcpl) {
+			ci->ci_ipending &= ~SINT_CLOCK;
+			softintr_dispatch(SI_SOFTCLOCK);
+		}
+		if((ci->ci_ipending & SINT_NET) & ~pcpl) {
+			ci->ci_ipending &= ~SINT_NET;
+			softintr_dispatch(SI_SOFTNET);
+		}
+		if((ci->ci_ipending & SINT_TTY) & ~pcpl) {
+			ci->ci_ipending &= ~SINT_TTY;
+			softintr_dispatch(SI_SOFTTTY);
+		}
+	} while ((ci->ci_ipending & SINT_ALLMASK) & ~pcpl);
+	ci->ci_ipending &= pcpl;
+	ci->ci_cpl = pcpl;	/* Don't use splx... we are here already! */
+	ppc_intr_enable(s);
+	ci->ci_iactive = 0;
+>>>>>>> origin/master
 }
 
 int

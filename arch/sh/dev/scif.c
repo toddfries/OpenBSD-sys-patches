@@ -1,4 +1,4 @@
-/*	$OpenBSD: scif.c,v 1.7 2008/10/15 19:12:19 blambert Exp $	*/
+/*	$OpenBSD: scif.c,v 1.14 2010/07/02 17:27:01 nicm Exp $	*/
 /*	$NetBSD: scif.c,v 1.47 2006/07/23 22:06:06 ad Exp $ */
 
 /*-
@@ -455,7 +455,7 @@ scif_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_si = softintr_establish(IPL_SOFTSERIAL, scifsoft, sc);
 	SET(sc->sc_hwflags, SCIF_HW_DEV_OK);
 
-	tp = ttymalloc();
+	tp = ttymalloc(0);
 	tp->t_oproc = scifstart;
 	tp->t_param = scifparam;
 	tp->t_hwiflow = NULL;
@@ -485,15 +485,9 @@ scifstart(struct tty *tp)
 	if (sc->sc_tx_stopped)
 		goto out;
 
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (ISSET(tp->t_state, TS_ASLEEP)) {
-			CLR(tp->t_state, TS_ASLEEP);
-			wakeup(&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-		if (tp->t_outq.c_cc == 0)
-			goto out;
-	}
+	ttwakeupwr(tp);
+	if (tp->t_outq.c_cc == 0)
+		goto out;
 
 	/* Grab the first contiguous region of buffer space. */
 	{
@@ -697,7 +691,7 @@ scifopen(dev_t dev, int flag, int mode, struct proc *p)
 
 	if (ISSET(tp->t_state, TS_ISOPEN) &&
 	    ISSET(tp->t_state, TS_XCLUDE) &&
-	    p->p_ucred->cr_uid != 0)
+	    suser(p, 0) != 0)
 		return (EBUSY);
 
 	s = spltty();
@@ -767,11 +761,11 @@ scifopen(dev_t dev, int flag, int mode, struct proc *p)
 
 	splx(s);
 
-	error = ttyopen(dev, tp);
+	error = ttyopen(dev, tp, p);
 	if (error)
 		goto bad;
 
-	error = (*linesw[tp->t_line].l_open)(dev, tp);
+	error = (*linesw[tp->t_line].l_open)(dev, tp, p);
 	if (error)
 		goto bad;
 
@@ -792,7 +786,7 @@ scifclose(dev_t dev, int flag, int mode, struct proc *p)
 	if (!ISSET(tp->t_state, TS_ISOPEN))
 		return (0);
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	ttyclose(tp);
 
 	return (0);

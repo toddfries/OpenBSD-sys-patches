@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.18 2009/08/11 19:17:17 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.26 2010/06/27 13:28:46 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -48,15 +48,14 @@
 #include <sys/tty.h>
 #include <sys/user.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <machine/bat.h>
 #include <machine/bus.h>
+#include <machine/fdt.h>
 #include <machine/pio.h>
 #include <machine/powerpc.h>
 #include <machine/trap.h>
-
-#include <net/netisr.h>
 
 #include <dev/cons.h>
 
@@ -86,10 +85,19 @@ int bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 struct bat battable[16];
 
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
 
 int ppc_malloc_ok = 0;
 
@@ -112,6 +120,7 @@ struct bd_info {
 } bootinfo;
 
 extern struct bd_info **fwargsave;
+extern struct fdt_head *fwfdtsave;
 
 void uboot_mem_regions(struct mem_region **, struct mem_region **);
 void uboot_vmon(void);
@@ -173,13 +182,69 @@ initppc(u_int startkernel, u_int endkernel, char *args)
 #endif
 	extern void *msgbuf_addr;
 	int exc, scratch;
+	void *node;
 
 	extern char __bss_start[], __end[];
 	bzero(__bss_start, __end - __bss_start);
 
 	/* Make a copy of the args! */
 	strlcpy(bootpathbuf, args ? args : "wd0a", sizeof bootpathbuf);
-	memcpy(&bootinfo, *fwargsave, sizeof bootinfo);
+
+	if (fwfdtsave == NULL) {
+		/*
+		 * We were loaded by an old U-Boot that didn't provide
+		 * a flattened device tree.  It should have provided a
+		 * valid bootinfo structure which we'll use to build
+		 * such a device tree ourselves.
+		 *
+		 * XXX We don't build a flattened device tree yet.
+		 */
+		memcpy(&bootinfo, *fwargsave, sizeof bootinfo);
+
+		extern uint8_t dt_blob_start[];
+		fdt_init(&dt_blob_start);
+	}
+
+	if (fwfdtsave && fwfdtsave->fh_magic == FDT_MAGIC) {
+		/* 
+		 * Save the FDT firmware blob passed by the bootloader
+		 * before we zero all memory.
+		 * 
+		 */
+		void *fdt = (void *)endkernel;
+		memcpy(fdt, fwfdtsave, fwfdtsave->fh_size);
+		endkernel += fwfdtsave->fh_size;
+
+		fdt_init(fdt);
+
+		/*
+		 * XXX Create a fake bootinfo structure if we were
+		 * loaded by RouterBOOT.
+		 */
+		node = fdt_find_node("/memory");
+		if (node) {
+			char *reg;
+
+			if (fdt_node_property(node, "reg", &reg)) {
+				bootinfo.bi_memstart = *(u_int32_t *)reg;
+				bootinfo.bi_memsize = *((u_int32_t *)reg + 1);
+			}
+		}
+		node = fdt_find_node("/soc8343");
+		if (node) {
+			char *reg;
+
+			if (fdt_node_property(node, "reg", &reg))
+				bootinfo.bi_immr_base = *(u_int32_t *)reg;
+		}
+		node = fdt_find_node("/soc8343/ethernet");
+		if (node) {
+			char *addr;
+
+			if (fdt_node_property(node, "mac-address", &addr))
+				memcpy(bootinfo.bi_enetaddr, addr, 6);
+		}
+	}
 
 	proc0.p_cpu = &cpu_info[0];
 	proc0.p_addr = proc0paddr;
@@ -378,6 +443,24 @@ initppc(u_int startkernel, u_int endkernel, char *args)
 	comconsrate = 115200;
 	comconsaddr = 0x00004500;
 	comconsiot = &mainbus_bus_space;
+
+	node = fdt_find_node("/chosen");
+	if (node) {
+		char *console;
+
+		fdt_node_property(node, "linux,stdout-path", &console);
+		node = fdt_find_node(console);
+		if (node) {
+			char *freq;
+			char *reg;
+
+			if (fdt_node_property(node, "clock-frequency", &freq))
+				comconsfreq = *(u_int32_t *)freq;
+			if (fdt_node_property(node, "reg", &reg))
+				comconsaddr = *(u_int32_t *)reg;
+		}
+	}
+
 	consinit();
 
 #ifdef DDB
@@ -400,21 +483,6 @@ dumpsys(void)
 }
 
 int imask[IPL_NUM];
-
-int netisr;
-
-/*
- * Soft networking interrupts.
- */
-void
-softnet(int isr)
-{
-#define DONETISR(flag, func) \
-	if (isr & (1 << flag))\
-		func();
-
-#include <net/netisr_dispatch.h>
-}
 
 int
 lcsplx(int ipl)
@@ -1042,6 +1110,57 @@ boot(int howto)
 void
 do_pending_int(void)
 {
+<<<<<<< HEAD
+=======
+	struct cpu_info *ci = curcpu();
+	int pcpl, s;
+
+	if (ci->ci_iactive)
+		return;
+
+	ci->ci_iactive = 1;
+	s = ppc_intr_disable();
+	pcpl = ci->ci_cpl;
+
+	ipic_do_pending_int();
+
+	do {
+		if((ci->ci_ipending & SINT_CLOCK) & ~pcpl) {
+			ci->ci_ipending &= ~SINT_CLOCK;
+			ci->ci_cpl = SINT_CLOCK|SINT_NET|SINT_TTY;
+			ppc_intr_enable(1);
+			KERNEL_LOCK();
+			softintr_dispatch(SI_SOFTCLOCK);
+			KERNEL_UNLOCK();
+			ppc_intr_disable();
+			continue;
+		}
+		if((ci->ci_ipending & SINT_NET) & ~pcpl) {
+			ci->ci_ipending &= ~SINT_NET;
+			ci->ci_cpl = SINT_NET|SINT_TTY;
+			ppc_intr_enable(1);
+			KERNEL_LOCK();
+			softintr_dispatch(SI_SOFTNET);
+			KERNEL_UNLOCK();
+			ppc_intr_disable();
+			continue;
+		}
+		if((ci->ci_ipending & SINT_TTY) & ~pcpl) {
+			ci->ci_ipending &= ~SINT_TTY;
+			ci->ci_cpl = SINT_TTY;
+			ppc_intr_enable(1);
+			KERNEL_LOCK();
+			softintr_dispatch(SI_SOFTTTY);
+			KERNEL_UNLOCK();
+			ppc_intr_disable();
+			continue;
+		}
+	} while ((ci->ci_ipending & SINT_ALLMASK) & ~pcpl);
+	ci->ci_cpl = pcpl;	/* Don't use splx... we are here already! */
+
+	ci->ci_iactive = 0;
+	ppc_intr_enable(s);
+>>>>>>> origin/master
 }
 
 /*

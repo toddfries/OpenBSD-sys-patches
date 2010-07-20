@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip32_machdep.c,v 1.6 2009/05/21 16:28:12 miod Exp $ */
+/*	$OpenBSD: ip32_machdep.c,v 1.15 2010/04/06 19:15:29 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -45,23 +45,29 @@
 
 #include <sgi/localbus/crimebus.h>
 #include <sgi/localbus/macebus.h>
+#include <sgi/localbus/macebusvar.h>
 
 #include <dev/ic/comvar.h>
+
+extern char *hw_prod;
 
 void crime_configure_memory(void);
 
 void
 crime_configure_memory(void)
 {
-	struct phys_mem_desc *m;
 	volatile u_int64_t *bank_ctrl;
 	paddr_t addr;
 	psize_t size;
 	u_int64_t ctrl0, ctrl;
-	u_int32_t first_page, last_page;
-	int bank, i;
+	u_int64_t first_page, last_page;
+	int bank;
+#ifdef DEBUG
+	int i;
+#endif
 
-	bank_ctrl = (void *)PHYS_TO_KSEG1(CRIMEBUS_BASE + CRIME_MEM_BANK0_CONTROL);
+	bank_ctrl =
+	    (void *)PHYS_TO_CKSEG1(CRIMEBUS_BASE + CRIME_MEM_BANK0_CONTROL);
 	for (bank = 0; bank < CRIME_MAX_BANKS; bank++) {
 		ctrl = bank_ctrl[bank];
 		addr = (ctrl & CRIME_MEM_BANK_ADDR) << 25;
@@ -92,45 +98,24 @@ crime_configure_memory(void)
 		first_page = atop(addr);
 		last_page = atop(addr + size);
 
-		/*
-		 * Try to coalesce with other memory segments if banks are 
-		 * contiguous.
-		 */
-		m = NULL;
-		for (i = 0; i < MAXMEMSEGS; i++) {
-			if (mem_layout[i].mem_last_page == 0) {
-				if (m == NULL)
-					m = &mem_layout[i];
-			} else if (last_page == mem_layout[i].mem_first_page) {
-				m = &mem_layout[i];
-				m->mem_first_page = first_page;
-			} else if (mem_layout[i].mem_last_page == first_page) {
-				m = &mem_layout[i];
-				m->mem_last_page = last_page;
-			}
-		}
-		if (m != NULL) {
-			if (m->mem_last_page == 0) {
-				m->mem_first_page = first_page;
-				m->mem_last_page = last_page;
-			}
-			m->mem_freelist = VM_FREELIST_DEFAULT;
-			physmem += atop(size);
-		}
+		memrange_register(first_page, last_page, 0,
+		    VM_FREELIST_DEFAULT);
 	}
 
 #ifdef DEBUG
 	for (i = 0; i < MAXMEMSEGS; i++)
-		if (mem_layout[i].mem_first_page)
-			bios_printf("MEM %d, 0x%x to  0x%x\n",i,
-				ptoa(mem_layout[i].mem_first_page),
-				ptoa(mem_layout[i].mem_last_page));
+		if (mem_layout[i].mem_last_page != 0)
+			bios_printf("MEM %d, %p to %p\n", i,
+			    ptoa(mem_layout[i].mem_first_page),
+			    ptoa(mem_layout[i].mem_last_page));
 #endif
 }
 
 void
 ip32_setup()
 {
+	u_long cpuspeed;
+
 	uncached_base = PHYS_TO_XKPHYS(0, CCA_NC);
 
 	crime_configure_memory();
@@ -142,7 +127,87 @@ ip32_setup()
 		break;
 	}
 
-	comconsaddr = MACE_ISA_SER1_OFFS;
-	comconsfreq = 1843200;
-	comconsiot = &macebus_tag;
+	bootcpu_hwinfo.c0prid = cp0_get_prid();
+	bootcpu_hwinfo.c1prid = cp1_get_prid();
+	cpuspeed = bios_getenvint("cpufreq");
+	if (cpuspeed < 100)
+		cpuspeed = 180;		/* reasonable default */
+	bootcpu_hwinfo.clock = cpuspeed * 1000000;
+	bootcpu_hwinfo.type = (bootcpu_hwinfo.c0prid >> 8) & 0xff;
+
+	/*
+	 * Figure out how many TLB are available.
+	 */
+	switch (bootcpu_hwinfo.type) {
+#ifdef CPU_RM7000
+	case MIPS_RM7000:
+		/*
+		 * Rev A (version >= 2) CPU's have 64 TLB entries.
+		 *
+		 * However, the last 16 are only enabled if one
+		 * particular configuration bit (mode bit #24)
+		 * is set on cpu reset, so check whether the
+		 * extra TLB are really usable.
+		 *
+		 * If they are disabled, they are nevertheless
+		 * writable, but random TLB insert operations
+		 * will never use any of them. This can be
+		 * checked by inserting dummy entries and check
+		 * if any of the last 16 entries have been used.
+		 *
+		 * Of course, due to the way the random replacement
+		 * works (hashing various parts of the TLB data,
+		 * such as address bits and ASID), not all the
+		 * available TLB will be used; we simply check
+		 * the highest valid TLB entry we can find and
+		 * see if it is in the upper 16 entries or not.
+		 */
+		bootcpu_hwinfo.tlbsize = 48;
+		if (((bootcpu_hwinfo.c0prid >> 4) & 0x0f) >= 2) {
+			struct tlb_entry te;
+			int e, lastvalid;
+
+			tlb_set_wired(0);
+			tlb_flush(64);
+			for (e = 0; e < 64 * 8; e++)
+				tlb_update(XKSSEG_BASE + ptoa(2 * e),
+				    pfn_to_pad(0) | PG_ROPAGE);
+			lastvalid = 0;
+			for (e = 0; e < 64; e++) {
+				tlb_read(e, &te);
+				if ((te.tlb_lo0 & PG_V) != 0)
+					lastvalid = e;
+			}
+			tlb_flush(64);
+			if (lastvalid >= 48)
+				bootcpu_hwinfo.tlbsize = 64;
+		}
+		break;
+#endif
+#ifdef CPU_R10000
+	case MIPS_R10000:
+	case MIPS_R12000:
+	case MIPS_R14000:
+		bootcpu_hwinfo.tlbsize = 64;
+		break;
+#endif
+	default:	/* R5000, RM52xx */
+		bootcpu_hwinfo.tlbsize = 48;
+		break;
+	}
+
+	/* Setup serial console if ARCS is telling us not to use video. */
+	if (strncmp(bios_console, "video", 5) != 0) {
+		comconsaddr = MACE_ISA_SER1_OFFS;
+		comconsfreq = 1843200;
+		comconsiot = &macebus_tag;
+		comconsrate = bios_getenvint("dbaud");
+		if (comconsrate < 50 || comconsrate > 115200)
+			comconsrate = 9600;
+	}
+
+	/* not sure if there is a way to tell O2 and O2+ apart */
+	hw_prod = "O2";
+
+	_device_register = arcs_device_register;
 }

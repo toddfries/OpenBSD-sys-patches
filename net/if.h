@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.108 2009/08/10 11:22:10 deraadt Exp $	*/
+/*	$OpenBSD: if.h,v 1.117 2010/06/26 19:49:54 claudio Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -36,6 +36,7 @@
 #define _NET_IF_H_
 
 #include <sys/queue.h>
+#include <sys/tree.h>
 
 /*
  * Always include ALTQ glue here -- we use the ALTQ interface queue
@@ -161,12 +162,53 @@ struct	ifqueue {
 /*
  * Values for if_link_state.
  */
-#define	LINK_STATE_UNKNOWN	0	/* link invalid/unknown */
-#define	LINK_STATE_DOWN		1	/* link is down */
-#define	LINK_STATE_UP		2	/* link is up */
-#define LINK_STATE_HALF_DUPLEX	3	/* link is up and half duplex */
-#define LINK_STATE_FULL_DUPLEX	4	/* link is up and full duplex */
+#define LINK_STATE_UNKNOWN	0	/* link unknown */
+#define LINK_STATE_INVALID	1	/* link invalid */
+#define LINK_STATE_DOWN		2	/* link is down */
+#define LINK_STATE_KALIVE_DOWN	3	/* keepalive reports down */
+#define LINK_STATE_UP		4	/* link is up */
+#define LINK_STATE_HALF_DUPLEX	5	/* link is up and half duplex */
+#define LINK_STATE_FULL_DUPLEX	6	/* link is up and full duplex */
+
 #define LINK_STATE_IS_UP(_s)	((_s) >= LINK_STATE_UP)
+
+/*
+ * Status bit descriptions for the various interface types.
+ */
+struct if_status_description {
+	u_char	ifs_type;
+	u_char	ifs_state;
+	const char *ifs_string;
+};
+
+#define LINK_STATE_DESC_MATCH(_ifs, _t, _s)				\
+	(((_ifs)->ifs_type == (_t) || (_ifs)->ifs_type == 0) &&		\
+	    (_ifs)->ifs_state == (_s))
+		
+	
+
+#define LINK_STATE_DESCRIPTIONS {					\
+	{ IFT_ETHER, LINK_STATE_DOWN, "no carrier" },			\
+									\
+	{ IFT_IEEE80211, LINK_STATE_DOWN, "no network" },		\
+									\
+	{ IFT_PPP, LINK_STATE_DOWN, "no carrier" },			\
+									\
+	{ IFT_CARP, LINK_STATE_DOWN, "backup" },			\
+	{ IFT_CARP, LINK_STATE_UP, "master" },				\
+	{ IFT_CARP, LINK_STATE_HALF_DUPLEX, "master" },			\
+	{ IFT_CARP, LINK_STATE_FULL_DUPLEX, "master" },			\
+									\
+	{ 0, LINK_STATE_UP, "active" },					\
+	{ 0, LINK_STATE_HALF_DUPLEX, "active" },			\
+	{ 0, LINK_STATE_FULL_DUPLEX, "active" },			\
+									\
+	{ 0, LINK_STATE_UNKNOWN, "unknown" },				\
+	{ 0, LINK_STATE_INVALID, "invalid" },				\
+	{ 0, LINK_STATE_DOWN, "down" },					\
+	{ 0, LINK_STATE_KALIVE_DOWN, "keepalive down" },		\
+	{ 0, 0, NULL }							\
+}
 
 /*
  * Structure defining a queue for a network interface.
@@ -224,6 +266,10 @@ struct ifnet {				/* and the entries */
 					/* output routine (enqueue) */
 	int	(*if_output)(struct ifnet *, struct mbuf *, struct sockaddr *,
 		     struct rtentry *);
+
+					/* link level output function */
+	int	(*if_ll_output)(struct ifnet *, struct mbuf *,
+		    struct sockaddr *, struct rtentry *);
 					/* initiate output routine */
 	void	(*if_start)(struct ifnet *);
 					/* ioctl routine */
@@ -281,8 +327,10 @@ struct ifnet {				/* and the entries */
 	(IFF_BROADCAST|IFF_POINTOPOINT|IFF_RUNNING|IFF_OACTIVE|\
 	    IFF_SIMPLEX|IFF_MULTICAST|IFF_ALLMULTI)
 
-#define IFXF_TXREADY	0x1		/* interface is ready to tx */
-#define	IFXF_NOINET6	0x2		/* don't do inet6 */
+#define IFXF_TXREADY		0x1		/* interface is ready to tx */
+#define	IFXF_NOINET6		0x2		/* don't do inet6 */
+#define	IFXF_INET6_PRIVACY	0x4		/* autoconf privacy extension */
+#define	IFXF_MPLS		0x8		/* supports MPLS */
 
 #define	IFXF_CANTCHANGE \
 	(IFXF_TXREADY)
@@ -410,6 +458,14 @@ struct ifaddr {
 };
 #define	IFA_ROUTE	RTF_UP		/* route installed */
 
+struct ifaddr_item {
+	RB_ENTRY(ifaddr_item)	 ifai_entry;
+	struct sockaddr		*ifai_addr;
+	struct ifaddr		*ifai_ifa;
+	struct ifaddr_item	*ifai_next;
+	u_int			 ifai_rdomain;
+};
+
 /*
  * Message format for use in obtaining information about interfaces
  * from sysctl and the routing socket.
@@ -421,7 +477,8 @@ struct if_msghdr {
 	u_short ifm_hdrlen;	/* sizeof(if_msghdr) to skip over the header */
 	u_short	ifm_index;	/* index for associated ifp */
 	u_short	ifm_tableid;	/* routing table id */
-	u_short ifm_pad;
+	u_char	ifm_pad1;
+	u_char	ifm_pad2;
 	int	ifm_addrs;	/* like rtm_addrs */
 	int	ifm_flags;	/* value of if_flags */
 	int	ifm_xflags;
@@ -439,7 +496,8 @@ struct ifa_msghdr {
 	u_short ifam_hdrlen;	/* sizeof(ifa_msghdr) to skip over the header */
 	u_short	ifam_index;	/* index for associated ifp */
 	u_short	ifam_tableid;	/* routing table id */
-	u_short ifam_pad;
+	u_char	ifam_pad1;
+	u_char	ifam_pad2;
 	int	ifam_addrs;	/* like rtm_addrs */
 	int	ifam_flags;	/* value of ifa_flags */
 	int	ifam_metric;	/* value of ifa_metric */
@@ -461,55 +519,6 @@ struct if_announcemsghdr {
 
 #define IFAN_ARRIVAL	0	/* interface arrival */
 #define IFAN_DEPARTURE	1	/* interface departure */
-
-/*
- * Comaptibility structures for version 3 messages.
- * Keep them till after OpenBSD 4.4
- */
-struct	if_odata {
-	/* generic interface information */
-	u_char	ifi_type;		/* ethernet, tokenring, etc. */
-	u_char	ifi_addrlen;		/* media address length */
-	u_char	ifi_hdrlen;		/* media header length */
-	u_char	ifi_link_state;		/* current link state */
-	u_long	ifi_mtu;		/* maximum transmission unit */
-	u_long	ifi_metric;		/* routing metric (external only) */
-	u_long	ifi_baudrate;		/* linespeed */
-	/* volatile statistics */
-	u_long	ifi_ipackets;		/* packets received on interface */
-	u_long	ifi_ierrors;		/* input errors on interface */
-	u_long	ifi_opackets;		/* packets sent on interface */
-	u_long	ifi_oerrors;		/* output errors on interface */
-	u_long	ifi_collisions;		/* collisions on csma interfaces */
-	u_long	ifi_ibytes;		/* total number of octets received */
-	u_long	ifi_obytes;		/* total number of octets sent */
-	u_long	ifi_imcasts;		/* packets received via multicast */
-	u_long	ifi_omcasts;		/* packets sent via multicast */
-	u_long	ifi_iqdrops;		/* dropped on input, this interface */
-	u_long	ifi_noproto;		/* destined for unsupported protocol */
-	struct	timeval ifi_lastchange;	/* last operational state change */
-};
-
-struct if_omsghdr {
-	u_short	ifm_msglen;	/* to skip over non-understood messages */
-	u_char	ifm_version;	/* future binary compatibility */
-	u_char	ifm_type;	/* message type */
-	int	ifm_addrs;	/* like rtm_addrs */
-	int	ifm_flags;	/* value of if_flags */
-	u_short	ifm_index;	/* index for associated ifp */
-	struct	if_odata ifm_data;/* statistics and other data about if */
-};
-
-struct ifa_omsghdr {
-	u_short	ifam_msglen;	/* to skip over non-understood messages */
-	u_char	ifam_version;	/* future binary compatibility */
-	u_char	ifam_type;	/* message type */
-	int	ifam_addrs;	/* like rtm_addrs */
-	int	ifam_flags;	/* value of ifa_flags */
-	u_short	ifam_index;	/* index for associated ifp */
-	int	ifam_metric;	/* value of ifa_metric */
-};
-
 
 /*
  * interface groups
@@ -610,6 +619,12 @@ struct ifmediareq {
 	int	ifm_count;			/* # entries in ifm_ulist
 							array */
 	int	*ifm_ulist;			/* media words */
+};
+
+struct ifkalivereq {
+	char	ikar_name[IFNAMSIZ];		/* if name, e.g. "en0" */
+	int	ikar_timeo;
+	int	ikar_cnt;
 };
 
 /*
@@ -806,6 +821,7 @@ int	if_delgroup(struct ifnet *, const char *);
 void	if_group_routechange(struct sockaddr *, struct sockaddr *);
 struct	ifnet *ifunit(const char *);
 void	if_start(struct ifnet *);
+void	ifnewlladdr(struct ifnet *);
 
 struct	ifaddr *ifa_ifwithaddr(struct sockaddr *, u_int);
 struct	ifaddr *ifa_ifwithaf(int, u_int);
@@ -832,5 +848,7 @@ void	loopattach(int);
 int	looutput(struct ifnet *,
 	    struct mbuf *, struct sockaddr *, struct rtentry *);
 void	lortrequest(int, struct rtentry *, struct rt_addrinfo *);
+void	ifa_add(struct ifnet *, struct ifaddr *);
+void	ifa_del(struct ifnet *, struct ifaddr *);
 #endif /* _KERNEL */
 #endif /* _NET_IF_H_ */

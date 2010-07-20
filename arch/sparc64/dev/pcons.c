@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcons.c,v 1.13 2007/11/14 20:43:12 kettenis Exp $	*/
+/*	$OpenBSD: pcons.c,v 1.18 2010/06/28 14:13:31 deraadt Exp $	*/
 /*	$NetBSD: pcons.c,v 1.7 2001/05/02 10:32:20 scw Exp $	*/
 
 /*-
@@ -226,7 +226,7 @@ pconsopen(dev, flag, mode, p)
 		return ENXIO;
 #endif
 	if (!(tp = sc->of_tty)) {
-		sc->of_tty = tp = ttymalloc();
+		sc->of_tty = tp = ttymalloc(0);
 	}
 	tp->t_oproc = pconsstart;
 	tp->t_param = pconsparam;
@@ -250,7 +250,7 @@ pconsopen(dev, flag, mode, p)
 		timeout_add(&sc->sc_poll_to, 1);
 	}
 
-	return (*linesw[tp->t_line].l_open)(dev, tp);
+	return (*linesw[tp->t_line].l_open)(dev, tp, p);
 }
 
 int
@@ -264,7 +264,7 @@ pconsclose(dev, flag, mode, p)
 
 	timeout_del(&sc->sc_poll_to);
 	sc->of_flags &= ~OFPOLL;
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	ttyclose(tp);
 	return 0;
 }
@@ -559,7 +559,7 @@ void	pcons_free_screen(void *, void *);
 int	pcons_ioctl(void *, u_long, caddr_t, int, struct proc *);
 int	pcons_mapchar(void *, int, unsigned int *);
 paddr_t	pcons_mmap(void *, off_t, int);
-void	pcons_putchar(void *, int, int, u_int, long);
+int	pcons_putchar(void *, int, int, u_int, long);
 int	pcons_show_screen(void *, void *, int, void (*)(void *, int, int),
 	    void *);
 
@@ -664,7 +664,7 @@ pcons_mapchar(void *v, int uc, unsigned int *idx)
 	}
 }
 
-void
+int
 pcons_putchar(void *v, int row, int col, u_int uc, long attr)
 {
 	u_char buf[1];
@@ -674,6 +674,8 @@ pcons_putchar(void *v, int row, int col, u_int uc, long attr)
 	s = splhigh();
 	OF_write(stdout, &buf, 1);
 	splx(s);
+
+	return 0;
 }
 
 void

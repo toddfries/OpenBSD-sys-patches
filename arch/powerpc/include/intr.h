@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: intr.h,v 1.40 2009/06/02 21:38:10 drahn Exp $ */
+=======
+/*	$OpenBSD: intr.h,v 1.44 2010/04/23 03:50:22 miod Exp $ */
+>>>>>>> origin/master
 
 /*
  * Copyright (c) 1997 Per Fogelstrom, Opsycon AB and RTMX Inc, USA.
@@ -42,12 +46,22 @@
 #define	IPL_SOFTTTY	4
 #define	IPL_BIO		5
 #define	IPL_AUDIO	IPL_BIO /* XXX - was defined this val in audio_if.h */
+<<<<<<< HEAD
 #define	IPL_NET		6
 #define	IPL_TTY		7
 #define	IPL_VM		8
 #define	IPL_CLOCK	9
 #define	IPL_HIGH	10
 #define	IPL_NUM		11
+=======
+#define	IPL_NET		2
+#define	IPL_TTY		3
+#define	IPL_VM		4
+#define	IPL_CLOCK	5
+#define	IPL_SCHED	6
+#define	IPL_HIGH	6
+#define	IPL_NUM		7
+>>>>>>> origin/master
 
 #define	IST_NONE	0
 #define	IST_PULSE	1
@@ -62,13 +76,6 @@
 #define	PPC_NIRQ	66
 #define	PPC_CLK_IRQ	64
 #define	PPC_STAT_IRQ	65
-
-void setsoftclock(void);
-void clearsoftclock(void);
-int  splsoftclock(void);
-void setsoftnet(void);
-void clearsoftnet(void);
-int  splsoftnet(void);
 
 int	splraise(int);
 int	spllower(int);
@@ -99,8 +106,18 @@ void ppc_do_pending_int_dis(int ncpl, int dis);
 #define	splassert(wantipl)	/* nothing */
 #define	splsoftassert(wantipl)	/* nothing */
 
-#define	set_sint(p)	atomic_setbits_int(&curcpu()->ci_ipending, p)
+#define SINTBIT(q)	(31 - (q))
+#define SINTMASK(q)	(1 << SINTBIT(q))
 
+#define	SPL_CLOCKMASK	SINTMASK(SI_NQUEUES)
+
+/* Soft interrupt masks. */
+
+#define	IPL_SOFTCLOCK	0
+#define	IPL_SOFTNET	1
+#define	IPL_SOFTTTY	2
+
+<<<<<<< HEAD
 #define	splbio()	splraise(IPL_BIO)
 #define	splnet()	splraise(IPL_NET)
 #define	spltty()	splraise(IPL_TTY)
@@ -120,6 +137,63 @@ void ppc_do_pending_int_dis(int ncpl, int dis);
  
 #define	splhigh()	splraise(IPL_HIGH)
 #define	spl0()		spllower(IPL_NONE)
+=======
+#define	SI_SOFTCLOCK	0	/* for IPL_SOFTCLOCK */
+#define	SI_SOFTNET	1	/* for IPL_SOFTNET */
+#define	SI_SOFTTTY	2	/* for IPL_SOFTTY */
+
+#define	SINT_ALLMASK	(SINTMASK(SI_SOFTCLOCK) | \
+			 SINTMASK(SI_SOFTNET) | SINTMASK(SI_SOFTTTY))
+#define	SI_NQUEUES	3
+
+#include <machine/mutex.h>
+#include <sys/queue.h>
+
+struct soft_intrhand {
+	TAILQ_ENTRY(soft_intrhand) sih_list;
+	void	(*sih_func)(void *);
+	void	*sih_arg;
+	struct soft_intrq *sih_siq;
+	int	sih_pending;
+};
+
+struct soft_intrq {
+	TAILQ_HEAD(, soft_intrhand) siq_list;
+	int siq_si;
+	struct mutex siq_mtx;
+};
+
+void	 softintr_disestablish(void *);
+void	 softintr_dispatch(int);
+void	*softintr_establish(int, void (*)(void *), void *);
+void	 softintr_init(void);
+void	 softintr_schedule(void *);
+
+/* XXX For legacy software interrupts. */
+extern struct soft_intrhand *softnet_intrhand;
+
+#define	setsoftnet()	softintr_schedule(softnet_intrhand)
+
+#define	SINT_CLOCK	SINTMASK(SI_SOFTCLOCK)
+#define	SINT_NET	SINTMASK(SI_SOFTNET)
+#define	SINT_TTY	SINTMASK(SI_SOFTTTY)
+
+#define splbio()	splraise(imask[IPL_BIO])
+#define splnet()	splraise(imask[IPL_NET])
+#define spltty()	splraise(imask[IPL_TTY])
+#define splaudio()	splraise(imask[IPL_AUDIO])
+#define splclock()	splraise(imask[IPL_CLOCK])
+#define splvm()		splraise(imask[IPL_VM])
+#define splsched()	splhigh()
+#define spllock()	splhigh()
+#define splstatclock()	splhigh()
+#define	splsoftclock()	splraise(SINT_CLOCK)
+#define	splsoftnet()	splraise(SINT_NET|SINT_CLOCK)
+#define	splsofttty()	splraise(SINT_TTY|SINT_NET|SINT_CLOCK)
+
+#define	splhigh()	splraise(0xffffffff)
+#define	spl0()		spllower(0)
+>>>>>>> origin/master
 
 /*
  *	Interrupt control struct used to control the ICU setup.
@@ -132,7 +206,7 @@ struct intrhand {
 	struct evcount	ih_count;
 	int		ih_level;
 	int		ih_irq;
-	char		*ih_what;
+	const char	*ih_what;
 };
 
 struct intrq {

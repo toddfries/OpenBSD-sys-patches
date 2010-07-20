@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_atu.c,v 1.92 2008/07/21 18:43:19 damien Exp $ */
+/*	$OpenBSD: if_atu.c,v 1.94 2009/11/21 14:18:34 deraadt Exp $ */
 /*
  * Copyright (c) 2003, 2004
  *	Daan Vreeken <Danovitsch@Vitsch.net>.  All rights reserved.
@@ -100,7 +100,7 @@ int atudebug = 1;
 int atu_match(struct device *, void *, void *); 
 void atu_attach(struct device *, struct device *, void *); 
 int atu_detach(struct device *, int); 
-int atu_activate(struct device *, enum devact); 
+int atu_activate(struct device *, int); 
 
 struct cfdriver atu_cd = { 
 	NULL, "atu", DV_IFNET 
@@ -1496,22 +1496,23 @@ atu_detach(struct device *self, int flags)
 
 	if (sc->sc_state != ATU_S_UNCONFIG) {
 		atu_stop(ifp, 1);
-		ieee80211_ifdetach(ifp);
-		if_detach(ifp);
+
+		usb_rem_task(sc->atu_udev, &sc->sc_task);
 
 		if (sc->atu_ep[ATU_ENDPT_TX] != NULL)
 			usbd_abort_pipe(sc->atu_ep[ATU_ENDPT_TX]);
 		if (sc->atu_ep[ATU_ENDPT_RX] != NULL)
 			usbd_abort_pipe(sc->atu_ep[ATU_ENDPT_RX]);
 
-		usb_rem_task(sc->atu_udev, &sc->sc_task);
+		ieee80211_ifdetach(ifp);
+		if_detach(ifp);
 	}
 
 	return(0);
 }
 
 int
-atu_activate(struct device *self, enum devact act)
+atu_activate(struct device *self, int act)
 {
 	struct atu_softc *sc = (struct atu_softc *)self;
 

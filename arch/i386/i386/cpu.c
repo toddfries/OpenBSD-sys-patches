@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.35 2009/06/03 00:49:12 art Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.40 2010/06/26 23:24:43 guenther Exp $	*/
 /* $NetBSD: cpu.c,v 1.1.2.7 2000/06/26 02:04:05 sommerfeld Exp $ */
 
 /*-
@@ -69,7 +69,6 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 
@@ -105,6 +104,7 @@
 
 int     cpu_match(struct device *, void *, void *);
 void    cpu_attach(struct device *, struct device *, void *);
+void	patinit(struct cpu_info *ci);
 
 #ifdef MULTIPROCESSOR
 int mp_cpu_start(struct cpu_info *);
@@ -144,13 +144,6 @@ void	cpu_copy_trampoline(void);
 void
 cpu_init_first()
 {
-	int cpunum = lapic_cpu_number();
-
-	if (cpunum != 0) {
-		cpu_info[0] = NULL;
-		cpu_info[cpunum] = &cpu_info_primary;
-	}
-
 	cpu_copy_trampoline();
 }
 #endif
@@ -181,7 +174,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	struct cpu_attach_args *caa = (struct cpu_attach_args *)aux;
 
 #ifdef MULTIPROCESSOR
-	int cpunum = caa->cpu_number;
+	int cpunum = ci->ci_dev.dv_unit;
 	vaddr_t kstack;
 	struct pcb *pcb;
 #endif
@@ -195,10 +188,10 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	} else {
 		ci = &cpu_info_primary;
 #ifdef MULTIPROCESSOR
-		if (cpunum != lapic_cpu_number()) {
+		if (caa->cpu_number != lapic_cpu_number()) {
 			panic("%s: running cpu is at apic %d"
 			    " instead of at expected %d",
-			    self->dv_xname, lapic_cpu_number(), cpunum);
+			    self->dv_xname, lapic_cpu_number(), caa->cpu_number);
 		}
 #endif
 		bcopy(self, &ci->ci_dev, sizeof *self);
@@ -207,7 +200,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	ci->ci_self = ci;
 	ci->ci_apicid = caa->cpu_number;
 #ifdef MULTIPROCESSOR
-	ci->ci_cpuid = ci->ci_apicid;
+	ci->ci_cpuid = cpunum;
 #else
 	ci->ci_cpuid = 0;	/* False for APs, so what, they're not used */
 #endif
@@ -320,6 +313,12 @@ cpu_init(struct cpu_info *ci)
 		(*ci->cpu_setup)(ci);
 
 	/*
+	 * We do this here after identifycpu() because errata may affect
+	 * what we do.
+	 */
+	patinit(ci);
+ 
+	/*
 	 * Enable ring 0 write protection (486 or above, but 386
 	 * no longer supported).
 	 */
@@ -328,7 +327,11 @@ cpu_init(struct cpu_info *ci)
 	if (cpu_feature & CPUID_PGE)
 		lcr4(rcr4() | CR4_PGE);	/* enable global TLB caching */
 
+#ifdef MULTIPROCESSOR
 	ci->ci_flags |= CPUF_RUNNING;
+	tlbflushg();
+#endif
+
 	/*
 	 * If we have FXSAVE/FXRESTOR, use them.
 	 */
@@ -342,6 +345,40 @@ cpu_init(struct cpu_info *ci)
 			lcr4(rcr4() | CR4_OSXMMEXCPT);
 	}
 }
+
+void
+patinit(struct cpu_info *ci)
+{
+	extern int	pmap_pg_wc;
+	u_int64_t	reg;
+
+	if ((ci->ci_feature_flags & CPUID_PAT) == 0)
+		return;
+
+#define PATENTRY(n, type)	((u_int64_t)type << ((n) * 8))
+#define	PAT_UC		0x0UL
+#define	PAT_WC		0x1UL
+#define	PAT_WT		0x4UL
+#define	PAT_WP		0x5UL
+#define	PAT_WB		0x6UL
+#define	PAT_UCMINUS	0x7UL
+	/* 
+	 * Set up PAT bits.
+	 * The default pat table is the following:
+	 * WB, WT, UC- UC, WB, WT, UC-, UC
+	 * We change it to:
+	 * WB, WC, UC-, UC, WB, WC, UC-, UC.
+	 * i.e change the WT bit to be WC.
+	 */
+	reg = PATENTRY(0, PAT_WB) | PATENTRY(1, PAT_WC) |
+	    PATENTRY(2, PAT_UCMINUS) | PATENTRY(3, PAT_UC) |
+	    PATENTRY(4, PAT_WB) | PATENTRY(5, PAT_WC) |
+	    PATENTRY(6, PAT_UCMINUS) | PATENTRY(7, PAT_UC);
+
+	wrmsr(MSR_CR_PAT, reg);
+	pmap_pg_wc = PG_WC;
+}
+
 
 #ifdef MULTIPROCESSOR
 void

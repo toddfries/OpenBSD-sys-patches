@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc.c,v 1.112 2009/08/10 20:29:54 deraadt Exp $	*/
+/*	$OpenBSD: dc.c,v 1.115 2010/07/02 15:47:54 blambert Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -145,7 +145,7 @@ void dc_tx_underrun(struct dc_softc *);
 void dc_start(struct ifnet *);
 int dc_ioctl(struct ifnet *, u_long, caddr_t);
 void dc_init(void *);
-void dc_stop(struct dc_softc *);
+void dc_stop(struct dc_softc *, int);
 void dc_watchdog(struct ifnet *);
 int dc_ifmedia_upd(struct ifnet *);
 void dc_ifmedia_sts(struct ifnet *, struct ifmediareq *);
@@ -1672,7 +1672,7 @@ hasmac:
 
 	if (bus_dmamem_alloc(sc->sc_dmat, sizeof(struct dc_list_data),
 	    PAGE_SIZE, 0, sc->sc_listseg, 1, &sc->sc_listnseg,
-	    BUS_DMA_NOWAIT) != 0) {
+	    BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0) {
 		printf(": can't alloc list mem\n");
 		goto fail;
 	}
@@ -1694,7 +1694,6 @@ hasmac:
 		goto fail;
 	}
 	sc->dc_ldata = (struct dc_list_data *)sc->sc_listkva;
-	bzero(sc->dc_ldata, sizeof(struct dc_list_data));
 
 	for (i = 0; i < DC_RX_LIST_CNT; i++) {
 		if (bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES,
@@ -2406,7 +2405,7 @@ dc_tick(void *xsc)
 	}
 
 	if (sc->dc_flags & DC_21143_NWAY && !sc->dc_link)
-		timeout_add(&sc->dc_tick_tmo, hz / 10);
+		timeout_add_msec(&sc->dc_tick_tmo, 100);
 	else
 		timeout_add_sec(&sc->dc_tick_tmo, 1);
 
@@ -2465,20 +2464,23 @@ dc_intr(void *arg)
 {
 	struct dc_softc *sc;
 	struct ifnet *ifp;
-	u_int32_t status;
+	u_int32_t status, ints;
 	int claimed = 0;
 
 	sc = arg;
 
 	ifp = &sc->sc_arpcom.ac_if;
 
-	if ((CSR_READ_4(sc, DC_ISR) & DC_INTRS) == 0)
+	ints = CSR_READ_4(sc, DC_ISR);
+	if ((ints & DC_INTRS) == 0)
 		return (claimed);
+	if (ints == 0xffffffff)
+		return (0);
 
 	/* Suppress unwanted interrupts */
 	if (!(ifp->if_flags & IFF_UP)) {
 		if (CSR_READ_4(sc, DC_ISR) & DC_INTRS)
-			dc_stop(sc);
+			dc_stop(sc, 0);
 		return (claimed);
 	}
 
@@ -2750,7 +2752,7 @@ dc_init(void *xsc)
 	/*
 	 * Cancel pending I/O and free all RX/TX buffers.
 	 */
-	dc_stop(sc);
+	dc_stop(sc, 0);
 	dc_reset(sc);
 
 	/*
@@ -2834,7 +2836,7 @@ dc_init(void *xsc)
 	if (dc_list_rx_init(sc) == ENOBUFS) {
 		printf("%s: initialization failed: no "
 		    "memory for rx buffers\n", sc->sc_dev.dv_xname);
-		dc_stop(sc);
+		dc_stop(sc, 0);
 		splx(s);
 		return;
 	}
@@ -2905,7 +2907,7 @@ dc_init(void *xsc)
 		sc->dc_link = 1;
 	else {
 		if (sc->dc_flags & DC_21143_NWAY)
-			timeout_add(&sc->dc_tick_tmo, hz / 10);
+			timeout_add_msec(&sc->dc_tick_tmo, 100);
 		else
 			timeout_add_sec(&sc->dc_tick_tmo, 1);
 	}
@@ -3006,7 +3008,7 @@ dc_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			}
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
-				dc_stop(sc);
+				dc_stop(sc, 0);
 		}
 		sc->dc_if_flags = ifp->if_flags;
 		break;
@@ -3043,7 +3045,7 @@ dc_watchdog(struct ifnet *ifp)
 	ifp->if_oerrors++;
 	printf("%s: watchdog timeout\n", sc->sc_dev.dv_xname);
 
-	dc_stop(sc);
+	dc_stop(sc, 0);
 	dc_reset(sc);
 	dc_init(sc);
 
@@ -3056,7 +3058,7 @@ dc_watchdog(struct ifnet *ifp)
  * RX and TX lists.
  */
 void
-dc_stop(struct dc_softc *sc)
+dc_stop(struct dc_softc *sc, int softonly)
 {
 	struct ifnet *ifp;
 	int i;
@@ -3068,11 +3070,13 @@ dc_stop(struct dc_softc *sc)
 
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
-	DC_CLRBIT(sc, DC_NETCFG, (DC_NETCFG_RX_ON|DC_NETCFG_TX_ON));
-	CSR_WRITE_4(sc, DC_IMR, 0x00000000);
-	CSR_WRITE_4(sc, DC_TXADDR, 0x00000000);
-	CSR_WRITE_4(sc, DC_RXADDR, 0x00000000);
-	sc->dc_link = 0;
+	if (!softonly) {
+		DC_CLRBIT(sc, DC_NETCFG, (DC_NETCFG_RX_ON|DC_NETCFG_TX_ON));
+		CSR_WRITE_4(sc, DC_IMR, 0x00000000);
+		CSR_WRITE_4(sc, DC_TXADDR, 0x00000000);
+		CSR_WRITE_4(sc, DC_RXADDR, 0x00000000);
+		sc->dc_link = 0;
+	}
 
 	/*
 	 * Free data in the RX lists.
@@ -3131,7 +3135,7 @@ dc_power(int why, void *arg)
 
 	s = splnet();
 	if (why != PWR_RESUME)
-		dc_stop(sc);
+		dc_stop(sc, 0);
 	else {
 		ifp = &sc->sc_arpcom.ac_if;
 		if (ifp->if_flags & IFF_UP)
@@ -3144,6 +3148,9 @@ int
 dc_detach(struct dc_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	int i;
+
+	dc_stop(sc, 1);
 
 	if (LIST_FIRST(&sc->sc_mii.mii_phys) != NULL)
 		mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
@@ -3151,7 +3158,20 @@ dc_detach(struct dc_softc *sc)
 	if (sc->dc_srom)
 		free(sc->dc_srom, M_DEVBUF);
 
-	timeout_del(&sc->dc_tick_tmo);
+	for (i = 0; i < DC_RX_LIST_CNT; i++)
+		bus_dmamap_destroy(sc->sc_dmat, sc->dc_cdata.dc_rx_chain[i].sd_map);
+	if (sc->sc_rx_sparemap)
+		bus_dmamap_destroy(sc->sc_dmat, sc->sc_rx_sparemap);
+	for (i = 0; i < DC_TX_LIST_CNT; i++)
+		bus_dmamap_destroy(sc->sc_dmat, sc->dc_cdata.dc_tx_chain[i].sd_map);
+	if (sc->sc_tx_sparemap)
+		bus_dmamap_destroy(sc->sc_dmat, sc->sc_tx_sparemap);
+
+	/// XXX bus_dmamap_sync
+	bus_dmamap_unload(sc->sc_dmat, sc->sc_listmap);
+	bus_dmamem_unmap(sc->sc_dmat, sc->sc_listkva, sc->sc_listnseg);
+	bus_dmamap_destroy(sc->sc_dmat, sc->sc_listmap);
+	bus_dmamem_free(sc->sc_dmat, sc->sc_listseg, sc->sc_listnseg);
 
 	ether_ifdetach(ifp);
 	if_detach(ifp);

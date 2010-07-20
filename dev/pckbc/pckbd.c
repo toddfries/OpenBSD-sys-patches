@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbd.c,v 1.19 2009/08/13 21:46:23 pirofti Exp $ */
+/* $OpenBSD: pckbd.c,v 1.25 2010/07/08 19:29:25 deraadt Exp $ */
 /* $NetBSD: pckbd.c,v 1.24 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -123,7 +123,7 @@ static int pckbd_is_console(pckbc_tag_t, pckbc_slot_t);
 
 int pckbdprobe(struct device *, void *, void *);
 void pckbdattach(struct device *, struct device *, void *);
-int pckbd_activate(struct device *, enum devact);
+int pckbd_activate(struct device *, int);
 
 struct cfattach pckbd_ca = {
 	sizeof(struct pckbd_softc), 
@@ -330,6 +330,15 @@ pckbdprobe(parent, match, aux)
 		 * Let the probe succeed if the keyboard is used
 		 * as console input - it can be connected later.
 		 */
+#if defined(__i386__) || defined(__amd64__)
+		/*
+		 * However, on legacy-free PCs, there might really
+		 * be no PS/2 connector at all; in that case, do not
+		 * even try to attach; ukbd will take over as console.
+		 */
+		if (res == ENXIO)
+			return 0;
+#endif
 		return (pckbd_is_console(pa->pa_tag, pa->pa_slot) ? 1 : 0);
 	}
 	if (resp[0] != KBR_RSTDONE) {
@@ -401,22 +410,19 @@ pckbdattach(parent, self, aux)
 
 	/*
 	 * Attach the wskbd, saving a handle to it.
-	 * XXX XXX XXX
 	 */
 	sc->sc_wskbddev = config_found(self, &a, wskbddevprint);
 }
 
 int
-pckbd_activate(struct device *self, enum devact act)
+pckbd_activate(struct device *self, int act)
 {
 	switch (act) {
-	case DVACT_ACTIVATE:
-		if (!cold)
-			pckbd_enable(self, 1);
+	case DVACT_SUSPEND:
+		pckbd_enable(self, 0);
 		break;
-	case DVACT_DEACTIVATE:
-		if (!cold)
-			pckbd_enable(self, 0);
+	case DVACT_RESUME:
+		pckbd_enable(self, 1);
 		break;
 	}
 	return (0);

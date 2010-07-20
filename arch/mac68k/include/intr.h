@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.19 2009/03/15 20:40:25 miod Exp $	*/
+/*	$OpenBSD: intr.h,v 1.21 2010/04/23 03:50:22 miod Exp $	*/
 /*	$NetBSD: intr.h,v 1.9 1998/08/12 06:58:42 scottr Exp $	*/
 
 /*
@@ -63,7 +63,10 @@ extern u_short	mac68k_statclockipl;
 #define	IPL_VM		PSLTOIPL(mac68k_vmipl)
 #define	IPL_CLOCK	PSLTOIPL(mac68k_clockipl)
 #define	IPL_STATCLOCK	PSLTOIPL(mac68k_statclockipl)
+#define	IPL_SCHED	7
 #define	IPL_HIGH	7
+
+#define	MD_IPLTOPSL(ipl)	IPLTOPSL(ipl)
 
 /*
  * These should be used for:
@@ -89,7 +92,6 @@ extern u_short	mac68k_statclockipl;
 #define	splsched()		splhigh()
 
 /* These spl calls are _not_ to be used by machine-independent code. */
-#define	spladb()		splhigh()
 #define	splzs()			splserial()
 
 /* watch out for side effects */

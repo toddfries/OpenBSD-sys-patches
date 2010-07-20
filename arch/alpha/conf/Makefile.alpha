@@ -1,20 +1,12 @@
-#	$OpenBSD: Makefile.alpha,v 1.45 2009/08/09 23:04:49 miod Exp $
-#	$NetBSD: Makefile.alpha,v 1.27 1996/12/01 06:12:25 jonathan Exp $
+#	$OpenBSD: Makefile.alpha,v 1.70 2010/06/01 23:49:20 deraadt Exp $
 
-# Makefile for OpenBSD
+# For instructions on building kernels consult the config(8) and options(4)
+# manual pages.
 #
-# This makefile is constructed from a machine description:
-#	config machineid
-# Most changes should be made in the machine description
-#	/sys/arch/alpha/conf/``machineid''
-# after which you should do
-#	config machineid
-# Machine generic makefile changes should be made in
-#	/sys/arch/alpha/conf/Makefile.alpha
-# after which config should be rerun for all machines of that type.
-#
-# DEBUG is set to -g if debugging.
-# PROF is set to -pg if profiling.
+# N.B.: NO DEPENDENCIES ON FOLLOWING FLAGS ARE VISIBLE TO MAKEFILE
+#	IF YOU CHANGE THE DEFINITION OF ANY OF THESE RECOMPILE EVERYTHING
+# DEBUG is set to -g by config if debugging is requested (config -g).
+# PROF is set to -pg by config if profiling is requested (config -p).
 
 .include <bsd.own.mk>
 
@@ -26,25 +18,28 @@ STRIP?=	strip
 .ifndef S
 S!=	cd ../../../..; pwd
 .endif
-ALPHA=	$S/arch/alpha
 
-INCLUDES=	-I. -I$S -I$S/arch -nostdinc
-CPPFLAGS=	${INCLUDES} ${IDENT} ${PARAM} -D_KERNEL -Dalpha
+_machdir?=	$S/arch/${_mach}
+_archdir?=	$S/arch/${_arch}
 
-CDIAGFLAGS?=	-Werror -Wall -Wstrict-prototypes -Wmissing-prototypes \
-		-Wno-uninitialized -Wno-format -Wno-main \
-		-Wstack-larger-than-2047 -Wvariable-decl
+INCLUDES=	-nostdinc -I. -I$S -I$S/arch
+CPPFLAGS=	${INCLUDES} ${IDENT} ${PARAM} -D_KERNEL
+CWARNFLAGS=	-Werror -Wall -Wstrict-prototypes -Wmissing-prototypes \
+		-Wno-main -Wno-uninitialized -Wno-format \
+		-Wstack-larger-than-2047
 
-CMACHFLAGS=	-mno-fp-regs -fno-builtin-printf -fno-builtin-log \
-		-finhibit-size-directive -Wa,-mev56
+CMACHFLAGS=	-mno-fp-regs -Wa,-mev56
+CMACHFLAGS+=	-fno-builtin-printf -fno-builtin-snprintf \
+		-fno-builtin-vsnprintf -fno-builtin-log \
+		-fno-builtin-log2 -fno-builtin-malloc 
 .if ${IDENT:M-DNO_PROPOLICE}
 CMACHFLAGS+=	-fno-stack-protector
 .endif
-COPTS?= 	-O2
-CFLAGS=		${DEBUG} ${CDIAGFLAGS} ${CMACHFLAGS} ${COPTS} ${PIPE}
-AFLAGS=		-traditional -D_LOCORE
-LINKFLAGS=	-N -Ttext fffffc0000230000 -e __start -G 4
-STRIPFLAGS=	-g -X -x
+
+COPTS?=		-O2
+CFLAGS=		${DEBUG} ${CWARNFLAGS} ${CMACHFLAGS} ${COPTS} ${PIPE}
+AFLAGS=		-D_LOCORE -x assembler-with-cpp -traditional-cpp ${CMACHFLAGS}
+LINKFLAGS=	-T ${_machdir}/conf/ld.script -X -N -G 4 --warn-common
 
 .if ${IDENT:M-DDDB_STRUCT}
 DB_STRUCTINFO=	db_structinfo.h
@@ -52,18 +47,14 @@ DB_STRUCTINFO=	db_structinfo.h
 DB_STRUCTINFO=
 .endif
 
-HOSTED_CC=	${CC}
+HOSTCC?=	${CC}
 HOSTED_CPPFLAGS=${CPPFLAGS:S/^-nostdinc$//}
 HOSTED_CFLAGS=	${CFLAGS}
-
-# compile rules: rules are named ${TYPE}_${SUFFIX} where TYPE is NORMAL or
-# HOSTED}, and SUFFIX is the file suffix, capitalized (e.g. C for a .c file).
+HOSTED_C=	${HOSTCC} ${HOSTED_CFLAGS} ${HOSTED_CPPFLAGS} -c $<
 
 NORMAL_C_NOP=	${CC} ${CFLAGS} ${CPPFLAGS} -c $<
 NORMAL_C=	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} -c $<
-NORMAL_S=	${CC} -xassembler-with-cpp ${AFLAGS} ${CPPFLAGS} -c $<
-
-HOSTED_C=	${HOSTED_CC} ${HOSTED_CFLAGS} ${HOSTED_CPPFLAGS} -c $<
+NORMAL_S=	${CC} ${AFLAGS} ${CPPFLAGS} -c $<
 
 %OBJS
 
@@ -86,6 +77,7 @@ SYSTEM_LD_TAIL=	@${SIZE} $@; chmod 755 $@
 DEBUG?=
 .if ${DEBUG} == "-g"
 LINKFLAGS+=	-X
+STRIPFLAGS=	-g -x
 SYSTEM_LD_TAIL+=; \
 		echo mv $@ $@.gdb; rm -f $@.gdb; mv $@ $@.gdb; \
 		echo ${STRIP} ${STRIPFLAGS} -o $@ $@.gdb; \
@@ -96,9 +88,11 @@ LINKFLAGS+=	-S -x
 
 %LOAD
 
-assym.h: $S/kern/genassym.sh ${ALPHA}/alpha/genassym.cf Makefile
-	sh $S/kern/genassym.sh ${CC} ${CFLAGS} ${CPPFLAGS} \
-	    ${PARAM} < ${ALPHA}/alpha/genassym.cf > assym.h.tmp && \
+assym.h: $S/kern/genassym.sh Makefile \
+	 ${_archdir}/${_arch}/genassym.cf ${_machdir}/${_mach}/genassym.cf
+	cat ${_archdir}/${_arch}/genassym.cf ${_machdir}/${_mach}/genassym.cf | \
+	    sh $S/kern/genassym.sh ${CC} ${CFLAGS} ${CPPFLAGS} | \
+	    sort -u > assym.h.tmp && \
 	    mv -f assym.h.tmp assym.h
 
 param.c: $S/conf/param.c
@@ -114,40 +108,32 @@ mcount.o: $S/lib/libkern/mcount.c Makefile
 ioconf.o: ioconf.c
 	${NORMAL_C}
 
-newvers: ${SYSTEM_DEP} ${SYSTEM_SWAP_DEP}
+vers.o: ${SYSTEM_DEP} ${SYSTEM_SWAP_DEP}
 	sh $S/conf/newvers.sh
 	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} -c vers.c
 
-
 clean::
-	rm -f eddep *bsd bsd.gdb tags *.[io] [a-z]*.s \
-	    [Ee]rrs linterrs makelinks assym.h ${DB_STRUCTINFO}
+	rm -f eddep *bsd *bsd.gdb tags *.[io] [a-z]*.s \
+	    [Ee]rrs linterrs assym.h ${DB_STRUCTINFO}
 
 lint:
-	@lint -hbxncez -DGENERIC -Dvolatile= ${CPPFLAGS} -UKGDB \
+	@lint -hbxncez -Dvolatile= ${CPPFLAGS} -UKGDB \
 	    ${CFILES} ioconf.c param.c | \
 	    grep -v 'static function .* unused'
 
 tags:
 	@echo "see $S/kern/Makefile for tags"
 
-links:
-	egrep '#if' ${CFILES} | sed -f $S/conf/defines | \
-	  sed -e 's/:.*//' -e 's/\.c/.o/' | sort -u > dontlink
-	echo ${CFILES} | tr -s ' ' '\12' | sed 's/\.c/.o/' | \
-	  sort -u | comm -23 - dontlink | \
-	  sed 's,../.*/\(.*.o\),rm -f \1; ln -s ../GENERIC/\1 \1,' > makelinks
-	sh makelinks && rm -f dontlink
-
-SRCS=	${ALPHA}/alpha/locore.s param.c ioconf.c ${CFILES} ${SFILES}
+AFILES=	${_machdir}/${_mach}/locore.s
 depend:: .depend
-.depend: ${SRCS} assym.h param.c ${ALPHA}/alpha/cpuconf.c ${DB_STRUCTINFO}
-	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${ALPHA}/alpha/locore.s
-	${MKDEP} -a ${CFLAGS} ${CPPFLAGS} ${ALPHA}/alpha/cpuconf.c \
-	    param.c ioconf.c ${CFILES}
+.depend: ${AFILES} param.c ioconf.c ${CFILES} ${SFILES} assym.h ${DB_STRUCTINFO}
+	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${AFILES}
+	${MKDEP} -a ${CFLAGS} ${CPPFLAGS} param.c ioconf.c ${CFILES}
+.if !empty(SFILES)
 	${MKDEP} -a ${AFLAGS} ${CPPFLAGS} ${SFILES}
-	sh $S/kern/genassym.sh ${MKDEP} -f assym.dep ${CFLAGS} \
-	    ${CPPFLAGS} < ${ALPHA}/alpha/genassym.cf
+.endif
+	cat ${_archdir}/${_arch}/genassym.cf ${_machdir}/${_mach}/genassym.cf | \
+	    sh $S/kern/genassym.sh ${MKDEP} -f assym.dep ${CFLAGS} ${CPPFLAGS}
 	@sed -e 's/.*\.o: /assym.h: /' -e 's/\/tmp\/genassym_c.[^ ]*//' \
 	    < assym.dep >> .depend
 	@rm -f assym.dep
@@ -157,22 +143,7 @@ db_structinfo.h: $S/ddb/db_structinfo.c $S/ddb/parse_structinfo.awk
 	objdump -g db_structinfo.o | awk -f $S/ddb/parse_structinfo.awk > $@
 	rm -f db_structinfo.o
 
-
-# depend on root or device configuration
-autoconf.o conf.o: Makefile
- 
-# depend on network or filesystem configuration 
-uipc_proto.o vfs_conf.o: Makefile 
-
-# depend on maxusers
-machdep.o: Makefile
-
-# depend on CPU configuration 
-clock.o machdep.o apecs.o cia.o lca.o ioasic.o scc.o icasic.o: Makefile
-
-
-locore.o: ${ALPHA}/alpha/locore.s assym.h
-	${NORMAL_S}
+locore.o: ${_machdir}/${_mach}/locore.s assym.h
 
 # The install target can be redefined by putting a
 # install-kernel-${MACHINE_NAME} target into /etc/mk.conf

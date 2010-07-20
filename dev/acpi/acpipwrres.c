@@ -1,4 +1,4 @@
-/* $OpenBSD: acpipwrres.c,v 1.1 2009/06/03 07:13:48 pirofti Exp $ */
+/* $OpenBSD: acpipwrres.c,v 1.3 2010/06/27 09:13:36 jordan Exp $ */
 /*
  * Copyright (c) 2009 Paul Irofti <pirofti@openbsd.org>
  *
@@ -126,10 +126,10 @@ acpipwrres_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Get the list of consumers */
 	TAILQ_INIT(&sc->sc_cons);
-	aml_find_node(aml_root.child, "_PRW", acpipwrres_foundcons, sc);
-	aml_find_node(aml_root.child, "_PR0", acpipwrres_foundcons, sc);
-	aml_find_node(aml_root.child, "_PR1", acpipwrres_foundcons, sc);
-	aml_find_node(aml_root.child, "_PR2", acpipwrres_foundcons, sc);
+	aml_find_node(&aml_root, "_PRW", acpipwrres_foundcons, sc);
+	aml_find_node(&aml_root, "_PR0", acpipwrres_foundcons, sc);
+	aml_find_node(&aml_root, "_PR1", acpipwrres_foundcons, sc);
+	aml_find_node(&aml_root, "_PR2", acpipwrres_foundcons, sc);
 }
 
 int
@@ -198,7 +198,7 @@ acpipwrres_foundcons(struct aml_node *node, void *arg)
 			    res.v_package[i]->v_string);
 			if (pnode == sc->sc_devnode) {
 				DPRINTF(("%s: consumer match\n", DEVNAME(sc)));
-				cons = malloc(sizeof *pnode, M_DEVBUF, 
+				cons = malloc(sizeof *cons, M_DEVBUF, 
 				    M_WAITOK | M_ZERO);
 				cons->cs_node = pnode;
 				TAILQ_INSERT_HEAD(&sc->sc_cons, cons, cs_link);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdi.h,v 1.30 2008/06/26 05:42:19 ray Exp $ */
+/*	$OpenBSD: usbdi.h,v 1.33 2009/11/04 19:14:10 kettenis Exp $ */
 /*	$NetBSD: usbdi.h,v 1.62 2002/07/11 21:14:35 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdi.h,v 1.18 1999/11/17 22:33:49 n_hibma Exp $	*/
 
@@ -240,10 +240,11 @@ struct usb_attach_arg {
 #define UMATCH_NONE					 0
 
 /* XXX Perhaps USB should have its own levels? */
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 #define splusb splsoftnet
+#if 0
+#define	SPLUSBCHECK	splsoftassert(IPL_SOFTNET)
 #else
-#define splusb splbio
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
+#define	SPLUSBCHECK	do { /* nothing */ } while (0)
+#endif
 #define splhardusb splbio
 #define IPL_USB IPL_BIO

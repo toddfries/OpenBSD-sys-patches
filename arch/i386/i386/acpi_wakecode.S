@@ -56,6 +56,7 @@
 
 #define _ACPI_TRMP_LABEL(a) a = . - _C_LABEL(acpi_real_mode_resume) + ACPI_TRAMPOLINE
 #define _ACPI_TRMP_OFFSET(a) a = . - _C_LABEL(acpi_real_mode_resume)
+#define _ACPI_RM_SEGMENT (ACPI_TRAMPOLINE >> 4)
 
 /*
  * On wakeup, we'll start executing at acpi_real_mode_resume.
@@ -78,10 +79,11 @@
 
 	.text
 	.code16
-	.align 4,0
+	.align 4
 	.global _C_LABEL(acpi_real_mode_resume)
 	.global _C_LABEL(acpi_protected_mode_resume)
 	.global _C_LABEL(acpi_resume_end)
+	.global _C_LABEL(do_real_mode_post)
 _C_LABEL(acpi_real_mode_resume):
 	nop
 	cli
@@ -95,7 +97,9 @@ _C_LABEL(acpi_real_mode_resume):
 	 */
 	movw	%cs,%ax
 	movw	%ax,%ds
+	movw	%ax,%es
 	movw	%ax,%ss
+	lidtl	clean_idt
 
 	/*
 	 * Set up stack to grow down from offset 0x0FFE.
@@ -124,7 +128,8 @@ _C_LABEL(acpi_real_mode_resume):
 	 * laptops), we might not restore the proper VGA mode
 	 * on resume. Caveat emptor.
 	 */
-	jmp	nobiosreset	/* XXX make this a tunable */
+	cmpl	$0, do_real_mode_post_off
+	jz	nobiosreset
 	lcall	$0xc000,$3
 
 	/*
@@ -304,7 +309,10 @@ _C_LABEL(acpi_protected_mode_resume):
 	movl	acpi_saved_esp, %esp
 	push	acpi_saved_fl
 	popfl
-	cli
+
+	/* Poke CR3 one more time. Might not be necessary */
+	movl	acpi_saved_cr3,%eax
+	movl	%eax,%cr3
 
 	/*
 	 * Return to the OS. We've previously saved the resume
@@ -319,7 +327,7 @@ _ACPI_TRMP_OFFSET(tmp_gdt)
 	.word	tmp_gdt_end - tmp_gdtable
 	.long	tmp_gdtable
 
-	.align 8,0
+	.align 8
 _ACPI_TRMP_LABEL(tmp_gdtable)
 	/*
 	 * null
@@ -358,6 +366,17 @@ _ACPI_TRMP_LABEL(tmp_gdtable)
 	.word	0xffff, 0
 	.byte	0, 0x93, 0xcf, 0
 _ACPI_TRMP_LABEL(tmp_gdt_end)
+
+	.align 8
+_ACPI_TRMP_OFFSET(clean_idt)
+	.word	0xffff
+	.long	0
+	.word	0
+
+	.align 4
+_C_LABEL(do_real_mode_post):
+_ACPI_TRMP_OFFSET(do_real_mode_post_off)
+	.long 0
 
 	.align 4
 _ACPI_TRMP_LABEL(acpi_saved_ebx)

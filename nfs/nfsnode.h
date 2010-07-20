@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsnode.h,v 1.35 2009/08/20 15:04:24 thib Exp $	*/
+/*	$OpenBSD: nfsnode.h,v 1.39 2009/12/15 15:53:48 beck Exp $	*/
 /*	$NetBSD: nfsnode.h,v 1.16 1996/02/18 11:54:04 fvdl Exp $	*/
 
 /*
@@ -53,7 +53,7 @@ struct sillyrename {
 	struct	ucred *s_cred;
 	struct	vnode *s_dvp;
 	long	s_namlen;
-	char	s_name[20];
+	char	s_name[24];
 };
 
 /*
@@ -137,20 +137,10 @@ struct nfsnode {
 #define VTONFS(vp)	((struct nfsnode *)(vp)->v_data)
 #define NFSTOV(np)	((np)->n_vnode)
 
-/* nfs aiod datas. */
-struct nfs_aiod {
-	LIST_ENTRY(nfs_aiod)	 nad_all;
-	LIST_ENTRY(nfs_aiod)	 nad_idle;
-	struct nfsmount		*nad_mnt;
-	int			 nad_exiting;
-};
-
-LIST_HEAD(nfs_aiodhead, nfs_aiod);
-
-extern struct mutex				nfs_aiodl_mtx;
-extern struct nfs_aiodhead			nfs_aiods_all;
-extern struct nfs_aiodhead			nfs_aiods_idle;
-extern int					nfs_numaiods;
-extern int					nfs_aiodbufqmax;
+/*
+ * Queue head for nfsiod's
+ */
+extern TAILQ_HEAD(nfs_bufqhead, buf) nfs_bufq;
+extern uint32_t nfs_bufqlen, nfs_bufqmax;
 
 #endif		/* _NFS_NFSNODE_H_ */

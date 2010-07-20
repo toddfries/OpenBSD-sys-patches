@@ -1,4 +1,4 @@
-/*	$OpenBSD: umbg.c,v 1.9 2009/04/26 02:20:58 cnst Exp $ */
+/*	$OpenBSD: umbg.c,v 1.11 2009/11/21 14:30:35 deraadt Exp $ */
 
 /*
  * Copyright (c) 2007 Marc Balmer <mbalmer@openbsd.org>
@@ -138,7 +138,7 @@ void umbg_it_intr(void *);
 int umbg_match(struct device *, void *, void *); 
 void umbg_attach(struct device *, struct device *, void *); 
 int umbg_detach(struct device *, int); 
-int umbg_activate(struct device *, enum devact); 
+int umbg_activate(struct device *, int); 
 
 void umbg_task(void *);
 
@@ -301,6 +301,8 @@ umbg_detach(struct device *self, int flags)
 	timeout_del(&sc->sc_to);
 	timeout_del(&sc->sc_it_to);
 
+	usb_rem_task(sc->sc_udev, &sc->sc_task);
+
 	if (sc->sc_bulkin_pipe != NULL) {
 		err = usbd_abort_pipe(sc->sc_bulkin_pipe);
 		if (err)
@@ -323,8 +325,6 @@ umbg_detach(struct device *self, int flags)
 			    sc->sc_dev.dv_xname, usbd_errstr(err));
 		sc->sc_bulkout_pipe = NULL;
 	}
-
-	usb_rem_task(sc->sc_udev, &sc->sc_task);
 
 	/* Unregister the clock with the kernel */
 	sensordev_deinstall(&sc->sc_sensordev);
@@ -453,7 +453,7 @@ umbg_it_intr(void *xsc)
 }
 
 int
-umbg_activate(struct device *self, enum devact act)
+umbg_activate(struct device *self, int act)
 {
 	struct umbg_softc *sc = (struct umbg_softc *)self;
 

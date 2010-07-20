@@ -1,4 +1,4 @@
-/*	$OpenBSD: mb89352.c,v 1.18 2009/07/23 21:10:37 blambert Exp $	*/
+/*	$OpenBSD: mb89352.c,v 1.25 2010/06/28 18:31:01 krw Exp $	*/
 /*	$NetBSD: mb89352.c,v 1.5 2000/03/23 07:01:31 thorpej Exp $	*/
 /*	NecBSD: mb89352.c,v 1.4 1998/03/14 07:31:20 kmatsuda Exp	*/
 
@@ -119,7 +119,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/queue.h>
 
 #include <machine/intr.h>
@@ -137,7 +136,7 @@ int spc_debug = 0x00; /* SPC_SHOWSTART|SPC_SHOWMISC|SPC_SHOWTRACE; */
 
 void	spc_done	(struct spc_softc *, struct spc_acb *);
 void	spc_dequeue	(struct spc_softc *, struct spc_acb *);
-int	spc_scsi_cmd	(struct scsi_xfer *);
+void	spc_scsi_cmd	(struct scsi_xfer *);
 int	spc_poll	(struct spc_softc *, struct scsi_xfer *, int);
 void	spc_sched_msgout(struct spc_softc *, u_char);
 void	spc_setsync(struct spc_softc *, struct spc_tinfo *);
@@ -163,13 +162,6 @@ void	spc_print_active_acb(void);
 #endif
 
 extern struct cfdriver spc_cd;
-
-struct scsi_device spc_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
-};
 
 struct scsi_adapter spc_switch = {
 	spc_scsi_cmd,
@@ -214,7 +206,6 @@ spc_attach(struct spc_softc *sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_initiator;
 	sc->sc_link.adapter = &spc_switch;
-	sc->sc_link.device = &spc_dev;
 	sc->sc_link.openings = 2;
 
 	bzero(&saa, sizeof(saa));
@@ -398,7 +389,7 @@ spc_get_acb(struct spc_softc *sc, int flags)
  * This function is called by the higher level SCSI-driver to queue/run
  * SCSI-commands.
  */
-int
+void
 spc_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link *sc_link = xs->sc_link;
@@ -412,12 +403,15 @@ spc_scsi_cmd(struct scsi_xfer *xs)
 
 	flags = xs->flags;
 	if ((acb = spc_get_acb(sc, flags)) == NULL) {
-		return (NO_CCB);
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		return;
 	}
 
 	/* Initialize acb */
 	acb->xs = xs;
 	acb->timeout = xs->timeout;
+	timeout_set(&xs->stimeout, spc_timeout, acb);
 
 	if (xs->flags & SCSI_RESET) {
 		acb->flags |= ACB_RESET;
@@ -441,13 +435,12 @@ spc_scsi_cmd(struct scsi_xfer *xs)
 		spc_sched(sc);
 	/*
 	 * After successful sending, check if we should return just now.
-	 * If so, return SUCCESSFULLY_QUEUED.
 	 */
 
 	splx(s);
 
 	if ((flags & SCSI_POLL) == 0)
-		return SUCCESSFULLY_QUEUED;
+		return;
 
 	/* Not allowed to use interrupts, use polling instead */
 	s = splbio();
@@ -457,7 +450,6 @@ spc_scsi_cmd(struct scsi_xfer *xs)
 			spc_timeout(acb);
 	}
 	splx(s);
-	return COMPLETE;
 }
 
 /*
@@ -753,8 +745,6 @@ spc_done(struct spc_softc *sc, struct spc_acb *acb)
 		}
 	}
 
-	xs->flags |= ITSDONE;
-
 #ifdef SPC_DEBUG
 	if ((spc_debug & SPC_SHOWMISC) != 0) {
 		if (xs->resid != 0)
@@ -796,10 +786,6 @@ spc_dequeue(struct spc_softc *sc, struct spc_acb *acb)
 /*
  * INTERRUPT/PROTOCOL ENGINE
  */
-
-#define IS1BYTEMSG(m) (((m) != 0x01 && (m) < 0x20) || (m) >= 0x80)
-#define IS2BYTEMSG(m) (((m) & 0xf0) == 0x20)
-#define ISEXTMSG(m) ((m) == 0x01)
 
 /*
  * Precondition:
@@ -1619,12 +1605,9 @@ start:
 			sc->sc_cleft = acb->scsi_cmd_length;
 
 			/* On our first connection, schedule a timeout. */
-			if ((acb->xs->flags & SCSI_POLL) == 0) {
-				timeout_set(&acb->xs->stimeout, spc_timeout,
-				    acb);
+			if ((acb->xs->flags & SCSI_POLL) == 0)
 				timeout_add_msec(&acb->xs->stimeout,
 				    acb->timeout);
-			}
 			sc->sc_state = SPC_CONNECTED;
 		} else if ((ints & INTS_TIMEOUT) != 0) {
 			SPC_MISC(("selection timeout  "));

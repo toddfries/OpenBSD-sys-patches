@@ -1,4 +1,4 @@
-/*	$OpenBSD: dz.c,v 1.17 2008/10/15 19:12:19 blambert Exp $	*/
+/*	$OpenBSD: dz.c,v 1.22 2010/06/28 14:13:31 deraadt Exp $	*/
 /*	$NetBSD: dz.c,v 1.23 2000/06/04 02:14:12 matt Exp $	*/
 /*
  * Copyright (c) 1996  Ken C. Wellsch.  All rights reserved.
@@ -126,7 +126,7 @@ dzattach(struct dz_softc *sc)
 	for (n = 0; n < sc->sc_type; n++) {
 		sc->sc_dz[n].dz_sc = sc;
 		sc->sc_dz[n].dz_line = n;
-		sc->sc_dz[n].dz_tty = ttymalloc();
+		sc->sc_dz[n].dz_tty = ttymalloc(0);
 	}
 
 	/* Alas no interrupt on modem bit changes, so we manually scan */
@@ -300,7 +300,7 @@ dzopen(dev_t dev, int flag, int mode, struct proc *p)
 		}
 		(void) dzparam(tp, &tp->t_termios);
 		ttsetwater(tp);
-	} else if ((tp->t_state & TS_XCLUDE) && p->p_ucred->cr_uid != 0)
+	} else if ((tp->t_state & TS_XCLUDE) && suser(p, 0) != 0)
 		return (EBUSY);
 	/* Use DMBIS and *not* DMSET or else we clobber incoming bits */
 	if (dzmctl(sc, line, DML_DTR, DMBIS) & DML_DCD)
@@ -316,7 +316,7 @@ dzopen(dev_t dev, int flag, int mode, struct proc *p)
 	splx(s);
 	if (error)
 		return (error);
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 /*ARGSUSED*/
@@ -334,7 +334,7 @@ dzclose(dev_t dev, int flag, int mode, struct proc *p)
 
 	tp = sc->sc_dz[line].dz_tty;
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	/* Make sure a BREAK state is not left enabled. */
 	(void) dzmctl(sc, line, DML_BRK, DMBIC);

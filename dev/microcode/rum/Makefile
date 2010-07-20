@@ -1,16 +1,17 @@
-# $OpenBSD: Makefile,v 1.8 2009/05/15 15:53:55 damien Exp $
+# $OpenBSD: Makefile,v 1.10 2010/01/30 20:48:20 miod Exp $
 
 NOPROG=
 NOMAN=
 CC=${HOSTCC}
 
 # USB capable systems only
-.if (${MACHINE_ARCH} == "powerpc") || (${MACHINE} == "alpha") || \
-    (${MACHINE} == "amd64") || (${MACHINE} == "armish") || \
-    (${MACHINE} == "hppa") || (${MACHINE} == "hppa64") || \
-    (${MACHINE} == "i386") || (${MACHINE} == "sgi") || \
-    (${MACHINE} == "sparc64") || (${MACHINE} == "zaurus") || \
-    (${MACHINE} == "landisk")
+.if (${MACHINE_ARCH} == "powerpc" || \
+    ${MACHINE} == "alpha" || ${MACHINE} == "amd64" || \
+    ${MACHINE} == "armish" || ${MACHINE} == "hppa" || \
+    ${MACHINE} == "hppa64" || ${MACHINE} == "i386" || \
+    ${MACHINE} == "landisk" || ${MACHINE} == "loongson" || \
+    ${MACHINE} == "palm" || ${MACHINE} == "sgi" || \
+    ${MACHINE} == "sparc64" || ${MACHINE} == "zaurus")
 
 FIRM=	rum-rt2573 run-rt2870 run-rt3071
 

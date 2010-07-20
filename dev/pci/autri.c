@@ -1,4 +1,4 @@
-/*	$OpenBSD: autri.c,v 1.23 2009/03/29 21:53:52 sthen Exp $	*/
+/*	$OpenBSD: autri.c,v 1.25 2010/07/15 03:43:11 jakemsr Exp $	*/
 
 /*
  * Copyright (c) 2001 SOMEYA Yoshihiko and KUROSAWA Takahiro.
@@ -42,7 +42,6 @@
 #include <sys/fcntl.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcireg.h>
@@ -993,6 +992,8 @@ autri_query_encoding(addr, fp)
 	default:
 		return (EINVAL);
 	}
+	fp->bps = AUDIO_BPS(fp->precision);
+	fp->msb = 1;
 
 	return 0;
 }
@@ -1048,6 +1049,8 @@ autri_set_params(addr, setmode, usemode, play, rec)
 		default:
 			return (EINVAL);
 		}
+		p->bps = AUDIO_BPS(p->precision);
+		p->msb = 1;
 	}
 
 	return 0;

@@ -1,4 +1,4 @@
-/* $OpenBSD: acpihpet.c,v 1.8 2009/08/12 22:25:27 pirofti Exp $ */
+/* $OpenBSD: acpihpet.c,v 1.11 2009/11/23 15:17:45 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -31,7 +31,7 @@
 
 int acpihpet_match(struct device *, void *, void *);
 void acpihpet_attach(struct device *, struct device *, void *);
-int acpihpet_activate(struct device *, enum devact);
+int acpihpet_activate(struct device *, int);
 
 #ifdef __HAVE_TIMECOUNTER
 u_int acpihpet_gettime(struct timecounter *tc);
@@ -66,17 +66,14 @@ struct cfdriver acpihpet_cd = {
 };
 
 int
-acpihpet_activate(struct device *self, enum devact act)
+acpihpet_activate(struct device *self, int act)
 {
 	struct acpihpet_softc *sc = (struct acpihpet_softc *) self;
 
-	switch(act) {
-	case DVACT_ACTIVATE:
-		if (!cold) 
-			bus_space_write_4(sc->sc_iot, sc->sc_ioh,
-			    HPET_CONFIGURATION, 1);
-		break;
-	case DVACT_DEACTIVATE:
+	switch (act) {
+	case DVACT_RESUME:
+		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
+		    HPET_CONFIGURATION, 1);
 		break;
 	}
 

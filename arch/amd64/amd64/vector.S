@@ -1,4 +1,4 @@
-/*	$OpenBSD: vector.S,v 1.23 2009/07/10 13:51:47 jsg Exp $	*/
+/*	$OpenBSD: vector.S,v 1.25 2010/04/05 19:04:32 kettenis Exp $	*/
 /*	$NetBSD: vector.S,v 1.5 2004/06/28 09:13:11 fvdl Exp $	*/
 
 /*
@@ -239,9 +239,6 @@ calltrap:
 #endif /* DIAGNOSTIC */
 
 
-#define __HAVE_GENERIC_SOFT_INTERRUPTS	/* XXX */
-
-
 /*
  * Macros for interrupt entry, call to handler, and exit.
  *
@@ -413,8 +410,8 @@ IDTVEC(intr_##name##num)						;\
 	pushq	$0			/* dummy error code */		;\
 	pushq	$T_ASTFLT		/* trap # for doing ASTs */	;\
 	INTRENTRY							;\
-	movq	CPUVAR(ISOURCES) + (num) * 8, %r14		;\
-	mask(num)		/* mask it in hardware */	;\
+	movq	CPUVAR(ISOURCES) + (num) * 8, %r14			;\
+	mask(num)			/* mask it in hardware */	;\
 	early_ack(num)			/* and allow other intrs */	;\
 	testq	%r14,%r14						;\
 	jz	9f			/* stray */			;\

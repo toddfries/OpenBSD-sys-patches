@@ -1,4 +1,4 @@
-/*	$OpenBSD: uscanner.c,v 1.40 2008/06/26 05:42:19 ray Exp $ */
+/*	$OpenBSD: uscanner.c,v 1.42 2010/07/03 03:59:17 krw Exp $ */
 /*	$NetBSD: uscanner.c,v 1.40 2003/01/27 00:32:44 wiz Exp $	*/
 
 /*
@@ -108,25 +108,8 @@ static const struct uscan_info uscanner_devs[] = {
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_4300C }, 0 },
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_S20 }, 0 },
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_5200C }, 0 },
-#if 0
-  /* Handled by usscanner */
- {{ USB_VENDOR_HP, USB_PRODUCT_HP_5300C }, 0 },
-#endif
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_6200C }, 0 },
  {{ USB_VENDOR_HP, USB_PRODUCT_HP_6300C }, 0 },
-
-#if 0
-  /* XXX Should be handled by usscanner */
-  /* Microtek */
- {{ USB_VENDOR_SCANLOGIC, USB_PRODUCT_SCANLOGIC_336CX }, 0 },
- {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_X6U }, 0 },
- {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_336CX }, 0 },
- {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_336CX2 }, 0 },
- {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_C6 }, 0 },
- {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_V6USL }, 0 },
- {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_V6USL2 }, 0 },
- {{ USB_VENDOR_MICROTEK, USB_PRODUCT_MICROTEK_V6UL }, 0 },
-#endif
 
   /* Mustek */
  {{ USB_VENDOR_MUSTEK, USB_PRODUCT_MUSTEK_1200CU }, 0 },
@@ -239,7 +222,7 @@ void uscanner_do_close(struct uscanner_softc *);
 int uscanner_match(struct device *, void *, void *); 
 void uscanner_attach(struct device *, struct device *, void *); 
 int uscanner_detach(struct device *, int); 
-int uscanner_activate(struct device *, enum devact); 
+int uscanner_activate(struct device *, int); 
 
 struct cfdriver uscanner_cd = { 
 	NULL, "uscanner", DV_DULL 
@@ -574,7 +557,7 @@ uscannerwrite(dev_t dev, struct uio *uio, int flag)
 }
 
 int
-uscanner_activate(struct device *self, enum devact act)
+uscanner_activate(struct device *self, int act)
 {
 	struct uscanner_softc *sc = (struct uscanner_softc *)self;
 

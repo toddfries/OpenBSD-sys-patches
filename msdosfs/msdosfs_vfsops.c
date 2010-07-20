@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vfsops.c,v 1.53 2009/08/14 11:35:03 jasper Exp $	*/
+/*	$OpenBSD: msdosfs_vfsops.c,v 1.57 2010/01/24 18:12:46 krw Exp $	*/
 /*	$NetBSD: msdosfs_vfsops.c,v 1.48 1997/10/18 02:54:57 briggs Exp $	*/
 
 /*-
@@ -130,7 +130,7 @@ msdosfs_mount(struct mount *mp, const char *path, void *data,
 			 * If upgrade to read-write by non-root, then verify
 			 * that user has necessary permissions on the device.
 			 */
-			if (p->p_ucred->cr_uid != 0) {
+			if (suser(p, 0) != 0) {
 				devvp = pmp->pm_devvp;
 				vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, p);
 				error = VOP_ACCESS(devvp, VREAD | VWRITE,
@@ -180,7 +180,7 @@ msdosfs_mount(struct mount *mp, const char *path, void *data,
 	 * If mount by non-root, then verify that user has necessary
 	 * permissions on the device.
 	 */
-	if (p->p_ucred->cr_uid != 0) {
+	if (suser(p, 0) != 0) {
 		accessmode = VREAD;
 		if ((mp->mnt_flag & MNT_RDONLY) == 0)
 			accessmode |= VWRITE;
@@ -475,6 +475,8 @@ msdosfs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p,
 			;
 		else
 		        pmp->pm_fsinfo = 0;
+		/* XXX make sure this tiny buf doesn't come back in fillinusemap! */
+		SET(bp->b_flags, B_INVAL);
 		brelse(bp);
 		bp = NULL;
 	}
@@ -548,7 +550,11 @@ error_exit:
 	devvp->v_specmountpoint = NULL;
 	if (bp)
 		brelse(bp);
+
+	vn_lock(devvp, LK_EXCLUSIVE|LK_RETRY, p);
 	(void) VOP_CLOSE(devvp, ronly ? FREAD : FREAD|FWRITE, NOCRED, p);
+	VOP_UNLOCK(devvp, 0, p);
+
 	if (pmp) {
 		if (pmp->pm_inusemap)
 			free(pmp->pm_inusemap, M_MSDOSFSFAT);
@@ -588,9 +594,10 @@ msdosfs_unmount(struct mount *mp, int mntflags,struct proc *p)
 #ifdef MSDOSFS_DEBUG
 	vprint("msdosfs_umount(): just before calling VOP_CLOSE()\n", vp);
 #endif
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	error = VOP_CLOSE(vp,
 	   pmp->pm_flags & MSDOSFSMNT_RONLY ? FREAD : FREAD|FWRITE, NOCRED, p);
-	vrele(vp);
+	vput(vp);
 	free(pmp->pm_inusemap, M_MSDOSFSFAT);
 	free(pmp, M_MSDOSFSMNT);
 	mp->mnt_data = (qaddr_t)0;

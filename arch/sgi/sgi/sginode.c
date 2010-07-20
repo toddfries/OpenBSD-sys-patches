@@ -1,4 +1,4 @@
-/*	$OpenBSD: sginode.c,v 1.11 2009/07/06 22:46:43 miod Exp $	*/
+/*	$OpenBSD: sginode.c,v 1.19 2010/04/06 19:09:50 miod Exp $	*/
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
  *
@@ -51,10 +51,14 @@
 #include <mips64/arcbios.h>
 #include <mips64/archtype.h>
 
+#include <dev/pci/pcireg.h>
+#include <dev/pci/pcidevs.h>
+
 #include <machine/mnode.h>
 #include <sgi/xbow/hub.h>
-
-int nextcpu = 0;
+#include <sgi/xbow/widget.h>
+#include <sgi/xbow/xbow.h>
+#include <sgi/xbow/xbowdevs.h>
 
 void	kl_add_memory_ip27(int16_t, int16_t *, unsigned int);
 void	kl_add_memory_ip35(int16_t, int16_t *, unsigned int);
@@ -70,6 +74,7 @@ int	kl_first_pass_comp(klinfo_t *, void *);
 
 int	kl_n_mode = 0;
 u_int	kl_n_shift = 32;
+klinfo_t *kl_glass_console = NULL;
 
 void
 kl_init(int ip35)
@@ -77,6 +82,7 @@ kl_init(int ip35)
 	kl_config_hdr_t *cfghdr;
 	uint64_t val;
 	uint64_t nibase = ip35 ? HUBNIBASE_IP35 : HUBNIBASE_IP27;
+	size_t gsz;
 
 	/* will be recomputed when processing memory information */
 	physmem = 0;
@@ -96,38 +102,103 @@ kl_init(int ip35)
         DB_PRF(("Region present %p.\n", val));
 	val = IP27_LHUB_L(HUBPI_CALIAS_SIZE);
         DB_PRF(("Calias size %p.\n", val));
-}
 
-void
-kl_scan_config(int nasid)
-{
-	kl_scan_node(nasid, KLBRD_ANY, kl_first_pass_board, NULL);
-}
+	/*
+	 * Get a grip on the global data area, and figure out how many
+	 * theoretical nodes are available.
+	 */
 
-void
-kl_scan_done()
-{
-	if (nextcpu > MAX_CPUS) {
-		bios_printf("%u processors found, increase MAX_CPUS\n",
-		    nextcpu);
+	gda = IP27_GDA(0);
+	gsz = IP27_GDA_SIZE(0);
+	if (gda->magic != GDA_MAGIC || gda->ver < 2) {
+		masternasid = 0;
+		maxnodes = 0;
+	} else {
+		masternasid = gda->masternasid;
+		maxnodes = (gsz - offsetof(gda_t, nasid)) / sizeof(int16_t);
+		if (maxnodes > GDA_MAXNODES)
+			maxnodes = GDA_MAXNODES;
+		/* in M mode, there can't be more than 64 nodes anyway */
+		if (kl_n_mode == 0 && maxnodes > 64)
+			maxnodes = 64;
 	}
-	ncpusfound = nextcpu;
+
+	/*
+	 * Scan all nodes configurations to find out CPU and memory
+	 * information, starting with the master node.
+	 */
+
+	kl_scan_all_nodes(KLBRD_ANY, kl_first_pass_board, &ip35);
 }
 
 /*
- * Callback routine for the initial enumration (boards).
+ * Callback routine for the initial enumeration (boards).
  */
 int
 kl_first_pass_board(lboard_t *boardinfo, void *arg)
 {
-	DB_PRF(("%cboard type %x slot %x nasid %x nic %p components %d\n",
+	DB_PRF(("%cboard type %x slot %x nasid %x nic %p ncomp %d\n",
 	    boardinfo->struct_type & LBOARD ? 'l' : 'r',
-	    boardinfo->brd_type, boardinfo->brd_slot, boardinfo->brd_nasid,
-	    boardinfo->brd_nic, boardinfo->brd_numcompts));
+	    boardinfo->brd_type, boardinfo->brd_slot,
+	    boardinfo->brd_nasid, boardinfo->brd_nic,
+	    boardinfo->brd_numcompts));
 
-	kl_scan_board(boardinfo, KLSTRUCT_ANY, kl_first_pass_comp, NULL);
+	kl_scan_board(boardinfo, KLSTRUCT_ANY, kl_first_pass_comp, arg);
 	return 0;
 }
+
+#ifdef DEBUG
+static const char *klstruct_names[] = {
+	"unknown component",
+	"cpu",
+	"hub",
+	"memory",
+	"xbow",
+	"bridge",
+	"ioc3",
+	"pci",
+	"vme",
+	"router",
+	"graphics",
+	"scsi",
+	"fddi",
+	"mio",
+	"disk",
+	"tape",
+	"cdrom",
+	"hub uart",
+	"ioc3 Ethernet",
+	"ioc3 uart",
+	"component type 20",
+	"ioc3 keyboard",
+	"rad",
+	"hub tty",
+	"ioc3 tty",
+	"fc",
+	"module serialnumber",
+	"ioc3 mouse",
+	"tpu",
+	"gsn main board",
+	"gsn aux board",
+	"xthd",
+	"QLogic fc",
+	"firewire",
+	"usb",
+	"usb keyboard",
+	"usb mouse",
+	"dual scsi",
+	"PE brick",
+	"gigabit Ethernet",
+	"ide",
+	"ioc4",
+	"ioc4 uart",
+	"ioc4 tty",
+	"ioc4 keyboard",
+	"ioc4 mouse",
+	"ioc4 ATA",
+	"pci graphics"
+};
+#endif
 
 /*
  * Callback routine for the initial enumeration (components).
@@ -137,46 +208,65 @@ kl_first_pass_board(lboard_t *boardinfo, void *arg)
 int
 kl_first_pass_comp(klinfo_t *comp, void *arg)
 {
-	struct cpuinfo *cpu;
+	int ip35 = *(int *)arg;
 	klcpu_t *cpucomp;
 	klmembnk_m_t *memcomp_m;
+	arc_config64_t *arc;
 #ifdef DEBUG
-	klhub_t *hubcomp;
 	klmembnk_n_t *memcomp_n;
+	klhub_t *hubcomp;
 	klxbow_t *xbowcomp;
+	klscsi_t *scsicomp;
+	klscctl_t *scsi2comp;
 	int i;
+#endif
+
+	arc = (arc_config64_t *)comp->arcs_compt;
+
+#ifdef DEBUG
+	if (comp->struct_type < nitems(klstruct_names))
+		DB_PRF(("\t%s", klstruct_names[comp->struct_type]));
+	else
+		DB_PRF(("\tcomponent type %d", comp->struct_type));
+	DB_PRF((", widget %x physid 0x%02x virtid %d",
+	    comp->widid, comp->physid, comp->virtid));
+	if (ip35) {
+		DB_PRF((" prt %d bus %d", comp->port, comp->pci_bus_num));
+		if (comp->pci_multifunc)
+			DB_PRF((" pcifn %d", comp->pci_func_num));
+	}
+	DB_PRF(("\n"));
 #endif
 
 	switch (comp->struct_type) {
 	case KLSTRUCT_CPU:
 		cpucomp = (klcpu_t *)comp;
-		DB_PRF(("\tcpu type %x/%x %dMhz cache %dMB speed %dMhz\n",
-		    cpucomp->cpu_prid, cpucomp->cpu_fpirr, cpucomp->cpu_speed,
-		    cpucomp->cpu_scachesz, cpucomp->cpu_scachespeed));
-
-		if (nextcpu < MAX_CPUS) {
-			cpu = &sys_config.cpu[nextcpu];
-			cpu->clock = cpucomp->cpu_speed * 1000000;
-			cpu->type = (cpucomp->cpu_prid >> 8) & 0xff;
-			cpu->vers_maj = (cpucomp->cpu_prid >> 4) & 0x0f;
-			cpu->vers_min = cpucomp->cpu_prid & 0x0f;
-#if 0
-			cpu->fptype = (cpucomp->cpu_fpirr >> 8) & 0xff;
-#else
-			cpu->fptype = cpu->type;
-#endif
-			cpu->fpvers_maj = (cpucomp->cpu_fpirr >> 4) & 0x0f;
-			cpu->fpvers_min = cpucomp->cpu_fpirr & 0x0f;
-			cpu->tlbsize = 64;
-		}
-		nextcpu++;
+		DB_PRF(("\t  type %x/%x %dMHz cache %dMB speed %dMHz\n",
+		    cpucomp->cpu_prid, cpucomp->cpu_fpirr,
+		    cpucomp->cpu_speed, cpucomp->cpu_scachesz,
+		    cpucomp->cpu_scachespeed));
+		/*
+		 * XXX this assumes the first cpu encountered is the boot
+		 * XXX cpu.
+		 */
+		if (bootcpu_hwinfo.clock == 0) {
+			bootcpu_hwinfo.c0prid = cpucomp->cpu_prid;
+			if (ip35)
+				bootcpu_hwinfo.c1prid = cpucomp->cpu_prid;
+			else
+				bootcpu_hwinfo.c1prid = cpucomp->cpu_fpirr;
+			bootcpu_hwinfo.clock = cpucomp->cpu_speed * 1000000;
+			bootcpu_hwinfo.tlbsize = 64;
+			bootcpu_hwinfo.type = (cpucomp->cpu_prid >> 8) & 0xff;
+		} else
+			ncpusfound++;
 		break;
 
 	case KLSTRUCT_MEMBNK:
 		memcomp_m = (klmembnk_m_t *)comp;
 #ifdef DEBUG
 		memcomp_n = (klmembnk_n_t *)comp;
-		DB_PRF(("\tmemory %dMB, select %x flags %x\n",
+		DB_PRF(("\t  %dMB, select %x flags %x\n",
 		    memcomp_m->membnk_memsz, memcomp_m->membnk_dimm_select,
 		    kl_n_mode ?
 		      memcomp_n->membnk_attr : memcomp_m->membnk_attr));
@@ -197,43 +287,109 @@ kl_first_pass_comp(klinfo_t *comp, void *arg)
 			}
 		}
 #endif
-
-		if (sys_config.system_type == SGI_O200)
-			kl_add_memory_ip27(comp->nasid, memcomp_m->membnk_bnksz,
-			    kl_n_mode ? MD_MEM_BANKS_N : MD_MEM_BANKS_M);
+		if (ip35)
+			kl_add_memory_ip35(comp->nasid,
+			    memcomp_m->membnk_bnksz,
+			    kl_n_mode ?  MD_MEM_BANKS_N : MD_MEM_BANKS_M);
 		else
-			kl_add_memory_ip35(comp->nasid, memcomp_m->membnk_bnksz,
-			    kl_n_mode ? MD_MEM_BANKS_N : MD_MEM_BANKS_M);
+			kl_add_memory_ip27(comp->nasid,
+			    memcomp_m->membnk_bnksz,
+			    kl_n_mode ?  MD_MEM_BANKS_N : MD_MEM_BANKS_M);
+		break;
+
+	case KLSTRUCT_GFX:
+		/*
+		 * We rely upon the PROM setting up a fake ARCBios component
+		 * for the graphics console, if there is one.
+		 * Of course, the ARCBios structure is only available as long
+		 * as we do not tear down the PROM TLB, which is why we check
+		 * for this as early as possible and remember the console
+		 * component (KL struct are not short-lived).
+		 */
+		if (arc != NULL &&
+		    arc->class != 0 && arc->type == arc_DisplayController &&
+		    ISSET(arc->flags, ARCBIOS_DEVFLAGS_CONSOLE_OUTPUT)) {
+			DB_PRF(("\t  (console device)\n"));
+			/* paranoia */
+			if (comp->widid >= WIDGET_MIN &&
+			    comp->widid <= WIDGET_MAX)
+				kl_glass_console = comp;
+		}
 		break;
 
 #ifdef DEBUG
 	case KLSTRUCT_HUB:
 		hubcomp = (klhub_t *)comp;
-		DB_PRF(("\thub widget %d port %d flag %d speed %dMHz\n",
-		    hubcomp->hub_info.widid, hubcomp->hub_port.port_nasid,
-		    hubcomp->hub_port.port_flag, hubcomp->hub_speed / 1000000));
+		DB_PRF(("\t  port %d flag %d speed %dMHz\n",
+		    hubcomp->hub_port.port_nasid, hubcomp->hub_port.port_flag,
+		    hubcomp->hub_speed / 1000000));
 		break;
 
 	case KLSTRUCT_XBOW:
 		xbowcomp = (klxbow_t *)comp;
-		DB_PRF(("\txbow hub master link %d\n",
+		DB_PRF(("\t hub master link %d\n",
 		    xbowcomp->xbow_hub_master_link));
 		for (i = 0; i < MAX_XBOW_LINKS; i++) {
-			if (xbowcomp->xbow_port_info[i].port_flag &
-			    XBOW_PORT_ENABLE)
-				DB_PRF(("\t\twidget %d nasid %d flg %u\n",
-				    8 + i,
-				    xbowcomp->xbow_port_info[i].port_nasid,
-				    xbowcomp->xbow_port_info[i].port_flag));
+			if (!ISSET(xbowcomp->xbow_port_info[i].port_flag,
+			    XBOW_PORT_ENABLE))
+				continue;
+			DB_PRF(("\t\twidget %d nasid %d flg %u\n", 8 + i,
+			    xbowcomp->xbow_port_info[i].port_nasid,
+			    xbowcomp->xbow_port_info[i].port_flag));
 		}
 		break;
 
-	default:
-		DB_PRF(("\tcomponent widget %d type %d\n",
-		    comp->widid, comp->struct_type));
+	case KLSTRUCT_SCSI2:
+		scsi2comp = (klscctl_t *)comp;
+		for (i = 0; i < scsi2comp->scsi_buscnt; i++) {
+			scsicomp = (klscsi_t *)scsi2comp->scsi_bus[i];
+			DB_PRF(("\t\tbus %d, physid 0x%02x virtid %d,"
+			    " specific %ld, numdevs %d\n",
+			    i, scsicomp->scsi_info.physid,
+			    scsicomp->scsi_info.virtid,
+			    scsicomp->scsi_specific,
+			    scsicomp->scsi_numdevs));
+		}
 		break;
 #endif
 	}
+
+#ifdef DEBUG
+	if (arc != NULL) {
+		DB_PRF(("\t[ARCBios component:"
+		    " class %d type %d flags %02x key 0x%lx",
+		    arc->class, arc->type, arc->flags, arc->key));
+		if (arc->id_len != 0)
+			DB_PRF((" %.*s]\n",
+			    (int)arc->id_len, (const char *)arc->id));
+		else
+			DB_PRF((" (no name)]\n"));
+	}
+#endif
+
+	return 0;
+}
+
+/*
+ * Enumerate the boards of all nodes, and invoke a callback for those
+ * matching the given class.
+ */
+int
+kl_scan_all_nodes(uint cls, int (*cb)(lboard_t *, void *), void *cbarg)
+{
+	uint node;
+
+	if (kl_scan_node(masternasid, cls, cb, cbarg) != 0)
+		return 1;
+	for (node = 0; node < maxnodes; node++) {
+		if (gda->nasid[node] < 0)
+			continue;
+		if (gda->nasid[node] == masternasid)
+			continue;
+		if (kl_scan_node(gda->nasid[node], cls, cb, cbarg) != 0)
+			return 1;
+	}
+
 	return 0;
 }
 
@@ -293,14 +449,14 @@ kl_scan_board(lboard_t *boardinfo, uint type, int (*cb)(klinfo_t *, void *),
 }
 
 /*
- * Return the virtual address of the console device.
+ * Return the console device information.
  */
-vaddr_t
-kl_get_console_base()
+console_t *
+kl_get_console()
 {
 	kl_config_hdr_t *cfghdr = IP27_KLCONFIG_HDR(0);
 
-	return (vaddr_t)cfghdr->cons_info.uart_base;
+	return &cfghdr->cons_info;
 }
 
 /*
@@ -313,9 +469,8 @@ void
 kl_add_memory_ip27(int16_t nasid, int16_t *sizes, unsigned int cnt)
 {
 	paddr_t basepa;
-	uint32_t fp, lp, np;
-	unsigned int seg, descno, nmeg;
-	struct phys_mem_desc *md;
+	uint64_t fp, lp, np;
+	unsigned int seg, nmeg;
 
 	/*
 	 * On IP27, access to each DIMM is interleaved, which cause it to
@@ -325,13 +480,6 @@ kl_add_memory_ip27(int16_t nasid, int16_t *sizes, unsigned int cnt)
 	 */
 	basepa = (paddr_t)nasid << kl_n_shift;
 	while (cnt-- != 0) {
-		/*
-		 * XXX Temporary until there is a way to cope with
-		 * XXX xbridge ATE shortage.
-		 */
-		if (basepa >= (2UL << 30))
-			return;
-
 		nmeg = *sizes++;
 		for (seg = 0; seg < 4; basepa += (1 << 27), seg++) {
 			if (nmeg <= 128)
@@ -361,63 +509,27 @@ kl_add_memory_ip27(int16_t nasid, int16_t *sizes, unsigned int cnt)
 			}
 
 			/*
-			 * Walk the existing segment list to find if we
-			 * are adjacent to an existing segment, or the
-			 * next free segment to use if not (unless doing
-			 * this would cross the 2GB boundary we need for
-			 * 32 bit DMA memory).
-			 *
-			 * Note that since we do not know in which order
-			 * we'll find our nodes, we have to check for
-			 * both boundaries, despite adding a given node's
-			 * memory in increasing pa order.
+			 * XXX Temporary until there is a way to cope with
+			 * XXX xbridge ATE shortage.
 			 */
-			for (descno = 0, md = mem_layout; descno < MAXMEMSEGS;
-			    descno++, md++) {
-				if (md->mem_first_page == 0)
-					break;
-
-				/*
-				 * Do not try to merge segments if they are
-				 * not covering the same node.
-				 */
-				if ((ptoa(md->mem_first_page) >> kl_n_shift) !=
-				    nasid)
-					continue;
-
-				if (md->mem_first_page == lp &&
-				    lp != atop(2UL << 30)) {
-					md->mem_first_page = fp;
-					physmem += np;
-					md = NULL;
-					break;
-				}
-
-				if (md->mem_last_page == fp &&
-				    fp != atop(2UL << 30)) {
-					md->mem_last_page = lp;
-					physmem += np;
-					md = NULL;
-					break;
-				}
-			}
-			if (descno != MAXMEMSEGS && md != NULL) {
-				md->mem_first_page = fp;
-				md->mem_last_page = lp;
-				md->mem_freelist = lp <= atop(2UL << 30) ?
-				    VM_FREELIST_DMA32 : VM_FREELIST_DEFAULT;
-				physmem += np;
-				md = NULL;
+			if (fp >= atop(2UL << 30)) {
+#if 0
+				physmem += lp - fp;
+#endif
+				continue;
 			}
 
-			if (md != NULL) {
+			if (memrange_register(fp, lp,
+			    ~(atop(1UL << kl_n_shift) - 1),
+			    lp <= atop(2UL << 30) ?
+			      VM_FREELIST_DEFAULT : VM_FREELIST_DMA32) != 0) {
 				/*
 				 * We could hijack the smallest segment here.
 				 * But is it really worth doing?
 				 */
 				bios_printf("%u MB of memory could not be "
 				    "managed, increase MAXMEMSEGS\n",
-				    atop(np) >> 20);
+				    ptoa(np) >> 20);
 			}
 		}
 	}
@@ -428,8 +540,6 @@ kl_add_memory_ip35(int16_t nasid, int16_t *sizes, unsigned int cnt)
 {
 	paddr_t basepa;
 	uint32_t fp, lp, np;
-	unsigned int descno;
-	struct phys_mem_desc *md;
 
 	/*
 	 * On IP35, the smallest memory DIMMs are 256MB, and the
@@ -438,13 +548,6 @@ kl_add_memory_ip35(int16_t nasid, int16_t *sizes, unsigned int cnt)
 
 	basepa = (paddr_t)nasid << kl_n_shift;
 	while (cnt-- != 0) {
-		/*
-		 * XXX Temporary until there is a way to cope with
-		 * XXX xbridge ATE shortage.
-		 */
-		if (basepa >= (2UL << 30))
-			return;
-
 		np = *sizes++;
 		if (np != 0) {
 			DB_PRF(("IP35 memory from %p to %p (%u MB)\n",
@@ -467,65 +570,121 @@ kl_add_memory_ip35(int16_t nasid, int16_t *sizes, unsigned int cnt)
 			}
 
 			/*
-			 * Walk the existing segment list to find if we
-			 * are adjacent to an existing segment, or the
-			 * next free segment to use if not (unless doing
-			 * this would cross the 2GB boundary we need for
-			 * 32 bit DMA memory).
-			 *
-			 * Note that since we do not know in which order
-			 * we'll find our nodes, we have to check for
-			 * both boundaries, despite adding a given node's
-			 * memory in increasing pa order.
+			 * XXX Temporary until there is a way to cope with
+			 * XXX xbridge ATE shortage.
 			 */
-			for (descno = 0, md = mem_layout; descno < MAXMEMSEGS;
-			    descno++, md++) {
-				if (md->mem_first_page == 0)
-					break;
-
-				/*
-				 * Do not try to merge segments if they are
-				 * not covering the same node.
-				 */
-				if ((ptoa(md->mem_first_page) >> kl_n_shift) !=
-				    nasid)
-					continue;
-
-				if (md->mem_first_page == lp &&
-				    lp != atop(2UL << 30)) {
-					md->mem_first_page = fp;
-					physmem += np;
-					md = NULL;
-					break;
-				}
-
-				if (md->mem_last_page == fp &&
-				    fp != atop(2UL << 30)) {
-					md->mem_last_page = lp;
-					physmem += np;
-					md = NULL;
-					break;
-				}
-			}
-			if (descno != MAXMEMSEGS && md != NULL) {
-				md->mem_first_page = fp;
-				md->mem_last_page = lp;
-				md->mem_freelist = lp <= atop(2UL << 30) ?
-				    VM_FREELIST_DMA32 : VM_FREELIST_DEFAULT;
-				physmem += np;
-				md = NULL;
+			if (fp >= atop(2UL << 30)) {
+#if 0
+				physmem += lp - fp;
+#endif
+				goto skip;
 			}
 
-			if (md != NULL) {
+			if (memrange_register(fp, lp,
+			    ~(atop(1UL << kl_n_shift) - 1),
+			    lp <= atop(2UL << 30) ?
+			      VM_FREELIST_DEFAULT : VM_FREELIST_DMA32) != 0) {
 				/*
 				 * We could hijack the smallest segment here.
 				 * But is it really worth doing?
 				 */
 				bios_printf("%u MB of memory could not be "
 				    "managed, increase MAXMEMSEGS\n",
-				    atop(np) >> 20);
+				    ptoa(np) >> 20);
 			}
 		}
+skip:
 		basepa += 1UL << 30;	/* 1 GB */
+	}
+}
+
+/*
+ * Extract unique device location from a klinfo structure.
+ */
+void
+kl_get_location(klinfo_t *cmp, struct sgi_device_location *sdl)
+{
+	uint32_t wid;
+	int device = cmp->physid;
+
+	/*
+	 * If the widget is actually a PIC, we need to compensate
+	 * for PCI device numbering.
+	 */
+	if (xbow_widget_id(cmp->nasid, cmp->widid, &wid) == 0) {
+		if (WIDGET_ID_VENDOR(wid) == XBOW_VENDOR_SGI3 &&
+		    WIDGET_ID_PRODUCT(wid) == XBOW_PRODUCT_SGI3_PIC)
+			device--;
+	}
+
+	sdl->nasid = cmp->nasid;
+	sdl->widget = cmp->widid;
+	if (sys_config.system_type == SGI_IP35) {
+		/*
+		 * IP35: need to be aware of secondary buses on PIC, and
+		 * multifunction PCI cards.
+		 */
+		sdl->bus = cmp->pci_bus_num;
+		sdl->device = device;
+		if (cmp->pci_multifunc)
+			sdl->fn = cmp->pci_func_num;
+		else
+			sdl->fn = -1;
+		sdl->specific = cmp->port;
+	} else {
+		/*
+		 * IP27: secondary buses and multifunction PCI devices are
+		 * not recognized.
+		 */
+		sdl->bus = 0;
+		sdl->device = device;
+		sdl->fn = -1;
+		sdl->specific = 0;
+	}
+}
+
+/*
+ * Similar to the above, but for the input console device, which information
+ * does not come from a klinfo structure.
+ */
+void
+kl_get_console_location(console_t *cons, struct sgi_device_location *sdl)
+{
+	uint32_t wid;
+	int device = cons->npci;
+
+	/*
+	 * If the widget is actually a PIC, we need to compensate
+	 * for PCI device numbering.
+	 */
+	if (xbow_widget_id(cons->nasid, cons->wid, &wid) == 0) {
+		if (WIDGET_ID_VENDOR(wid) == XBOW_VENDOR_SGI3 &&
+		    WIDGET_ID_PRODUCT(wid) == XBOW_PRODUCT_SGI3_PIC)
+			device--;
+	}
+
+	sdl->nasid = cons->nasid;
+	sdl->widget = cons->wid;
+	sdl->fn = -1;
+	sdl->specific = cons->type;
+
+	/*
+	 * This is a disgusting hack. The console structure does not
+	 * contain a precise PCI device identification, and will also
+	 * not point to the relevant klinfo structure.
+	 *
+	 * We assume that if the console `type' is not the IOC3 PCI
+	 * identifier, then it is an IOC4 device connected to a PIC
+	 * bus, therefore we can compute proper PCI location from the
+	 * `npci' field.
+	 */
+
+	if (cons->type == PCI_ID_CODE(PCI_VENDOR_SGI, PCI_PRODUCT_SGI_IOC3) ||
+	    sys_config.system_type != SGI_IP35) {
+		sdl->bus = 0;
+		sdl->device = device;
+	} else {
+		sdl->bus = cons->npci & KLINFO_PHYSID_PIC_BUS1 ? 1 : 0;
+		sdl->device = device & KLINFO_PHYSID_WIDGET_MASK;
 	}
 }

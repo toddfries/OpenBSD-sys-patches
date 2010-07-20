@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccd.c,v 1.87 2009/08/13 15:23:11 deraadt Exp $	*/
+/*	$OpenBSD: ccd.c,v 1.90 2010/05/18 04:41:14 dlg Exp $	*/
 /*	$NetBSD: ccd.c,v 1.33 1996/05/05 04:21:14 thorpej Exp $	*/
 
 /*-
@@ -103,6 +103,7 @@
 #include <sys/vnode.h>
 #include <sys/conf.h>
 #include <sys/rwlock.h>
+#include <sys/dkio.h>
 
 #include <dev/ccdvar.h>
 
@@ -259,7 +260,7 @@ ccdinit(struct ccddevice *ccd, char **cpaths, struct proc *p)
 	struct ccd_softc *cs = &ccd_softc[ccd->ccd_unit];
 	struct ccdcinfo *ci = NULL;
 	daddr64_t size;
-	int ix, rpm;
+	int ix;
 	struct vnode *vp;
 	struct vattr va;
 	size_t minsize;
@@ -291,7 +292,6 @@ ccdinit(struct ccddevice *ccd, char **cpaths, struct proc *p)
 	 */
 	maxsecsize = 0;
 	minsize = 0;
-	rpm = 0;
 	for (ix = 0; ix < cs->sc_nccdisks; ix++) {
 		vp = ccd->ccd_vpp[ix];
 		ci = &cs->sc_cinfo[ix];
@@ -373,9 +373,8 @@ ccdinit(struct ccddevice *ccd, char **cpaths, struct proc *p)
 			minsize = size;
 		ci->ci_size = size;
 		cs->sc_size += size;
-		rpm += dpart.disklab->d_rpm;
 	}
-	ccg->ccg_rpm = rpm / cs->sc_nccdisks;
+	ccg->ccg_rpm = 0;
 
 	/*
 	 * Don't allow the interleave to be smaller than
@@ -809,7 +808,7 @@ ccdbuffer(struct ccd_softc *cs, struct buf *bp, daddr64_t bn, caddr_t addr,
 		}
 		cbn *= cs->sc_ileave;
 		ci = &cs->sc_cinfo[ccdisk];
-		CCD_DPRINTF(CCDB_IO, ("ccdisk %d cbn %d ci %p ci2 %p\n",
+		CCD_DPRINTF(CCDB_IO, ("ccdisk %d cbn %lld ci %p ci2 %p\n",
 		    ccdisk, cbn, ci, ci2));
 	}
 
@@ -863,7 +862,7 @@ ccdbuffer(struct ccd_softc *cs, struct buf *bp, daddr64_t bn, caddr_t addr,
 		cbp->cb_dep = cbp2;
 	}
 
-	CCD_DPRINTF(CCDB_IO, (" dev %x(u%d): cbp %p bn %d addr %p bcnt %ld\n",
+	CCD_DPRINTF(CCDB_IO, (" dev %x(u%d): cbp %p bn %lld addr %p bcnt %ld\n",
 	    ci->ci_dev, ci-cs->sc_cinfo, cbp, bp->b_blkno,
 	    bp->b_data, bp->b_bcount));
 
@@ -909,7 +908,7 @@ ccdiodone(struct buf *vbp)
 	    "ccdiodone: mirror component\n" : 
 	    "ccdiodone: bp %p bcount %ld resid %ld\n",
 	    bp, bp->b_bcount, bp->b_resid));
-	CCD_DPRINTF(CCDB_IO, (" dev %x(u%d), cbp %p bn %d addr %p bcnt %ld\n",
+	CCD_DPRINTF(CCDB_IO, (" dev %x(u%d), cbp %p bn %lld addr %p bcnt %ld\n",
 	    vbp->b_dev, cbp->cb_comp, cbp, vbp->b_blkno,
 	    vbp->b_data, vbp->b_bcount));
 
@@ -1367,12 +1366,10 @@ ccdgetdisklabel(dev_t dev, struct ccd_softc *cs, struct disklabel *lp,
 	lp->d_ntracks = ccg->ccg_ntracks;
 	lp->d_ncylinders = ccg->ccg_ncylinders;
 	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
-	lp->d_rpm = ccg->ccg_rpm;
 
 	strncpy(lp->d_typename, "ccd", sizeof(lp->d_typename));
 	lp->d_type = DTYPE_CCD;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-	lp->d_interleave = 1;
 	lp->d_flags = 0;
 	lp->d_version = 1;
 

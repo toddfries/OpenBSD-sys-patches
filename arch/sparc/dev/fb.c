@@ -1,4 +1,4 @@
-/*	$OpenBSD: fb.c,v 1.49 2009/06/03 20:17:48 kettenis Exp $	*/
+/*	$OpenBSD: fb.c,v 1.52 2010/07/10 19:32:24 miod Exp $	*/
 /*	$NetBSD: fb.c,v 1.23 1997/07/07 23:30:22 pk Exp $ */
 
 /*
@@ -82,7 +82,7 @@
 #include <machine/eeprom.h>
 #include <sparc/dev/pfourreg.h>
 #endif
-#if defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 #include <machine/bsd_openprom.h>
 #endif
 
@@ -118,7 +118,7 @@ fb_unblank()
 
 #if NWSDISPLAY > 0
 
-#if defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 static int a2int(char *, int);
 #endif
 int	fb_get_console_metrics(int *, int *, int *, int *);
@@ -207,22 +207,30 @@ fb_setsize(struct sunfb *sf, int def_depth, int def_width, int def_height,
 					break;
 				}
 			} else if (eep != NULL) {
-				switch (eep->eeScreenSize) {
-				case EE_SCR_1152X900:
+				switch (eep->ee_diag.eed_scrsize) {
+				case EED_SCR_1152X900:
 					sf->sf_width = 1152;
 					sf->sf_height = 900;
 					break;
-				case EE_SCR_1024X1024:
+				case EED_SCR_1024X1024:
 					sf->sf_width = 1024;
 					sf->sf_height = 1024;
 					break;
-				case EE_SCR_1600X1280:
+				case EED_SCR_1600X1280:
 					sf->sf_width = 1600;
 					sf->sf_height = 1280;
 					break;
-				case EE_SCR_1440X1440:
+				case EED_SCR_1440X1440:
 					sf->sf_width = 1440;
 					sf->sf_height = 1440;
+					break;
+				case EED_SCR_640X480:
+					sf->sf_width = 640;
+					sf->sf_height = 480;
+					break;
+				case EED_SCR_1280X1024:
+					sf->sf_width = 1280;
+					sf->sf_height = 1024;
 					break;
 				}
 			}
@@ -264,7 +272,7 @@ obpsize:
 	sf->sf_fbsize = sf->sf_height * sf->sf_linebytes;
 }
 
-#if defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 static int
 a2int(char *cp, int deflt)
 {
@@ -305,7 +313,7 @@ fbwscons_init(struct sunfb *sf, int isconsole)
 {
 	struct rasops_info *ri = &sf->sf_ro;
 	int cols, rows;
-#if defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 	int fw, fh, wt, wl;
 #endif
 
@@ -318,8 +326,8 @@ fbwscons_init(struct sunfb *sf, int isconsole)
 	ri->ri_width = sf->sf_width;
 	ri->ri_height = sf->sf_height;
 
-#if defined(SUN4C) || defined(SUN4M)
-	if (CPU_ISSUN4COR4M) {
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
+	if (!CPU_ISSUN4) {
 		rows = a2int(getpropstring(optionsnode, "screen-#rows"), 34);
 		cols = a2int(getpropstring(optionsnode, "screen-#columns"), 80);
 	}
@@ -329,8 +337,8 @@ fbwscons_init(struct sunfb *sf, int isconsole)
 		struct eeprom *ep = (struct eeprom *)eeprom_va;
 
 		if (ep != NULL) {
-			rows = (u_short)ep->eeTtyRows;
-			cols = (u_short)ep->eeTtyCols;
+			rows = (u_short)ep->ee_diag.eed_rowsize;
+			cols = (u_short)ep->ee_diag.eed_colsize;
 			/* deal with broken nvram contents... */
 			if (rows <= 0)
 				rows = 34;
@@ -361,8 +369,8 @@ fbwscons_init(struct sunfb *sf, int isconsole)
 	 * this chunk.
 	 */
 
-#if defined(SUN4C) || defined(SUN4M)
-	if (CPU_ISSUN4COR4M && isconsole) {
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
+	if (!CPU_ISSUN4 && isconsole) {
 		if (fb_get_console_metrics(&fw, &fh, &wt, &wl) != 0) {
 			/*
 			 * Assume a 12x22 prom font and a centered
@@ -414,7 +422,7 @@ fbwscons_init(struct sunfb *sf, int isconsole)
 
 	rasops_init(ri, rows, cols);
 
-#if defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 	/*
 	 * If this is the console display and there is no font change,
 	 * adjust our terminal window to the position of the PROM
@@ -625,7 +633,7 @@ fb_show_screen(void *v, void *cookie, int waitok, void (*cb)(void *, int, int),
  *	otherwise returns P4 ID
  */
 int
-fb_pfour_id(void *va)
+fb_pfour_id(volatile void *va)
 {
 	volatile u_int32_t val, save, *pfour = va;
 
@@ -662,7 +670,7 @@ fb_pfour_burner(void *v, u_int enable, u_int flags)
 
 #endif /* SUN4 */
 
-#if defined(SUN4C) || defined(SUN4M)
+#if defined(SUN4C) || defined(SUN4D) || defined(SUN4E) || defined(SUN4M)
 int
 fb_get_console_metrics(int *fontwidth, int *fontheight, int *wtop, int *wleft)
 {
@@ -724,6 +732,6 @@ fb_get_console_metrics(int *fontwidth, int *fontheight, int *wtop, int *wleft)
 
 	return (0);
 }
-#endif	/* SUN4C || SUN4M */
+#endif	/* SUN4C || SUN4D || SUN4E || SUN4M */
 
 #endif	/* NWSDISPLAY */

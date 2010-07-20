@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.113 2009/08/11 19:17:16 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.119 2010/06/27 13:28:46 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -52,9 +52,7 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 
-#include <uvm/uvm_extern.h>
-
-#include <net/netisr.h>
+#include <uvm/uvm.h>
 
 #include <dev/cons.h>
 
@@ -108,6 +106,9 @@ int bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 struct bat battable[16];
 
 struct vm_map *exec_map = NULL;
@@ -149,7 +150,7 @@ int power4e_get_eth_addr(void);
 void ppc_intr_setup(intr_establish_t *establish,
     intr_disestablish_t *disestablish);
 void *ppc_intr_establish(void *lcv, pci_intr_handle_t ih, int type,
-    int level, int (*func)(void *), void *arg, char *name);
+    int level, int (*func)(void *), void *arg, const char *name);
 int bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp);
 bus_addr_t bus_space_unmap_p(bus_space_tag_t t, bus_space_handle_t bsh,
@@ -469,6 +470,12 @@ install_extint(void (*handler)(void))
 	syncicache((void *)EXC_EXI, (int)&extsize);
 	ppc_mtmsr(omsr);
 }
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
 
 /*
  * Machine dependent startup code.
@@ -828,6 +835,7 @@ dumpsys()
 
 }
 
+<<<<<<< HEAD
 /*
  * this is a hack interface to allow zs to work better until
  * a true soft interrupt mechanism is created.
@@ -858,6 +866,9 @@ softnet(int isr)
 
 #include <net/netisr_dispatch.h>
 }
+=======
+int imask[IPL_NUM];
+>>>>>>> origin/master
 
 int
 lcsplx(int ipl)
@@ -1018,7 +1029,7 @@ struct intrhand ppc_configed_intr[MAX_PRECONF_INTR];
 
 void *
 ppc_intr_establish(void *lcv, pci_intr_handle_t ih, int type, int level,
-    int (*func)(void *), void *arg, char *name)
+    int (*func)(void *), void *arg, const char *name)
 {
 	if (ppc_configed_intr_cnt < MAX_PRECONF_INTR) {
 		ppc_configed_intr[ppc_configed_intr_cnt].ih_fun = func;
@@ -1420,7 +1431,8 @@ kcopy(const void *from, void *to, size_t size)
 /* prototype for locore function */
 void cpu_switchto_asm(struct proc *oldproc, struct proc *newproc);
 
-void cpu_switchto( struct proc *oldproc, struct proc *newproc)
+void
+cpu_switchto(struct proc *oldproc, struct proc *newproc)
 {
 	/*
 	 * if this CPU is running a new process, flush the

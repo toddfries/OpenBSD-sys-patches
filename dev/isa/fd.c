@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.78 2009/08/13 15:23:12 deraadt Exp $	*/
+/*	$OpenBSD: fd.c,v 1.85 2010/05/18 04:41:14 dlg Exp $	*/
 /*	$NetBSD: fd.c,v 1.90 1996/05/12 23:12:03 mycroft Exp $	*/
 
 /*-
@@ -60,6 +60,7 @@
 #include <sys/queue.h>
 #include <sys/stat.h>
 #include <sys/timeout.h>
+#include <sys/dkio.h>
 
 #include <machine/cpu.h>
 #include <machine/bus.h>
@@ -169,11 +170,9 @@ fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
 	lp->d_ncylinders = fd->sc_type->tracks;
 	lp->d_ntracks = fd->sc_type->heads;	/* Go figure... */
 	DL_SETDSIZE(lp, fd->sc_type->size);
-	lp->d_rpm = 300;	/* XXX like it matters... */
 
 	strncpy(lp->d_typename, "floppy disk", sizeof(lp->d_typename));
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-	lp->d_interleave = 1;
 	lp->d_version = 1;
 
 	lp->d_magic = DISKMAGIC;
@@ -413,7 +412,7 @@ fdstrategy(bp)
  	bp->b_cylinder = bp->b_blkno / (fd_bsize / DEV_BSIZE) / fd->sc_type->seccyl;
 
 #ifdef FD_DEBUG
-	printf("fdstrategy: b_blkno %d b_bcount %d blkno %d cylin %d sz %d\n",
+	printf("fdstrategy: b_blkno %lld b_bcount %d blkno %lld cylin %d sz %d\n",
 	    bp->b_blkno, bp->b_bcount, fd->sc_blkno, bp->b_cylinder, sz);
 #endif
 
@@ -776,10 +775,7 @@ loop:
 		{int block;
 		 block = (fd->sc_cylin * type->heads + head) * type->sectrac + sec;
 		 if (block != fd->sc_blkno) {
-			 printf("fdintr: block %d != blkno %llu\n", block, fd->sc_blkno);
-#ifdef DDB
-			 Debugger();
-#endif
+			 panic("fdintr: block %d != blkno %llu", block, fd->sc_blkno);
 		 }}
 #endif
 		read = bp->b_flags & B_READ ? DMAMODE_READ : DMAMODE_WRITE;
@@ -867,7 +863,7 @@ loop:
 #ifdef FD_DEBUG
 			fdcstatus(&fd->sc_dev, 7, bp->b_flags & B_READ ?
 			    "read failed" : "write failed");
-			printf("blkno %d nblks %d\n",
+			printf("blkno %lld nblks %d\n",
 			    fd->sc_blkno, fd->sc_nblks);
 #endif
 			fdretry(fd);
@@ -1025,7 +1021,7 @@ fdioctl(dev, cmd, addr, flag, p)
 	struct proc *p;
 {
 	struct fd_softc *fd = fd_cd.cd_devs[FDUNIT(dev)];
-	struct disklabel dl, *lp = &dl;
+	struct disklabel *lp;
 	int error;
 
 	switch (cmd) {
@@ -1062,14 +1058,17 @@ fdioctl(dev, cmd, addr, flag, p)
 		return 0;
 
 	case DIOCWDINFO:
+	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 
-		error = setdisklabel(lp, (struct disklabel *)addr, 0);
-		if (error)
-			return error;
-
-		error = writedisklabel(DISKLABELDEV(dev), fdstrategy, lp);
+		error = setdisklabel(fd->sc_dk.dk_label,
+		    (struct disklabel *)addr, 0);
+		if (error == 0) {
+			if (cmd == DIOCWDINFO)
+				error = writedisklabel(DISKLABELDEV(dev),
+				    fdstrategy, fd->sc_dk.dk_label);
+		}
 		return error;
 
         case FD_FORM:

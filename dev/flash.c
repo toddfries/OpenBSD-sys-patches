@@ -1,4 +1,4 @@
-/*	$OpenBSD: flash.c,v 1.13 2009/08/18 19:05:16 kili Exp $	*/
+/*	$OpenBSD: flash.c,v 1.15 2010/04/23 15:25:21 jsing Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@openbsd.org>
@@ -178,7 +178,7 @@ flashdetach(struct device *self, int flags)
 }
 
 int
-flashactivate(struct device *self, enum devact act)
+flashactivate(struct device *self, int act)
 {
 	/* XXX anything to be done here? */
 	return 0;
@@ -990,9 +990,6 @@ flashgetdefaultlabel(dev_t dev, struct flash_softc *sc,
 	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
 	DL_SETDSIZE(lp, (daddr64_t)lp->d_ncylinders * lp->d_secpercyl);
 
-	/* Fake hardware characteristics. */
-	lp->d_rpm = 3600;
-	lp->d_interleave = 1;
 	lp->d_version = 1;
 
 	/* XXX these values assume ffs. */

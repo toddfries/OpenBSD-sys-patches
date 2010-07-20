@@ -1,4 +1,4 @@
-/*	$OpenBSD: dsrtc.c,v 1.6 2009/07/26 19:58:49 miod Exp $ */
+/*	$OpenBSD: dsrtc.c,v 1.11 2009/11/07 14:49:01 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -42,9 +42,10 @@
 #include <mips64/dev/clockvar.h>
 
 #include <sgi/dev/dsrtcvar.h>
-#include <sgi/localbus/macebus.h>
+#include <sgi/localbus/macebusvar.h>
 #include <sgi/pci/iocreg.h>
 #include <sgi/pci/iocvar.h>
+#include <sgi/pci/iofvar.h>
 
 struct	dsrtc_softc {
 	struct device		sc_dev;
@@ -58,6 +59,7 @@ struct	dsrtc_softc {
 
 int	dsrtc_match(struct device *, void *, void *);
 void	dsrtc_attach_ioc(struct device *, struct device *, void *);
+void	dsrtc_attach_iof(struct device *, struct device *, void *);
 void	dsrtc_attach_macebus(struct device *, struct device *, void *);
 
 struct cfdriver dsrtc_cd = {
@@ -69,6 +71,10 @@ struct cfattach dsrtc_macebus_ca = {
 };
 
 struct cfattach dsrtc_ioc_ca = {
+	sizeof(struct dsrtc_softc), dsrtc_match, dsrtc_attach_ioc
+};
+
+struct cfattach dsrtc_iof_ca = {
 	sizeof(struct dsrtc_softc), dsrtc_match, dsrtc_attach_ioc
 };
 
@@ -98,9 +104,14 @@ tobcd(int x, int binary)
 int
 dsrtc_match(struct device *parent, void *match, void *aux)
 {
-	struct confargs *ca = (struct confargs *)aux;
+	/*
+	 * Depending on what dsrtc attaches to, the actual attach_args
+	 * may be a different struct, but all of them start with the
+	 * same name field.
+	 */
+	struct mainbus_attach_args *maa = aux;
 
-	return strcmp(ca->ca_name, dsrtc_cd.cd_name) == 0;
+	return strcmp(maa->maa_name, dsrtc_cd.cd_name) == 0;
 }
 
 void
@@ -109,8 +120,6 @@ dsrtc_attach_ioc(struct device *parent, struct device *self, void *aux)
 	struct dsrtc_softc *sc = (void *)self;
 	struct ioc_attach_args *iaa = aux;
 	bus_space_handle_t ih, ih2;
-	uint c, c2, c3;
-	int ds1687 = 0;
 
 	/*
 	 * The IOC3 RTC is either a Dallas (now Maxim) DS1386 or compatible
@@ -124,53 +133,17 @@ dsrtc_attach_ioc(struct device *parent, struct device *self, void *aux)
 	 * addresses in memory.
 	 */
 
-	if (bus_space_subregion(iaa->iaa_memt, iaa->iaa_memh, IOC3_BYTEBUS_1,
-	    1, &ih) != 0 || bus_space_subregion(iaa->iaa_memt, iaa->iaa_memh,
-	    IOC3_BYTEBUS_2, 1, &ih2) != 0)
-		goto fail;
-
-	/*
-	 * Check the low 4 bits of control register C. If any is set,
-	 * or if the values written to them stick, then this is not
-	 * a Dallas chip.
-	 *
-	 * Note that the value we read the next few times can't be
-	 * compared to the first value read, as the upper four bits
-	 * are cleared by reading them. And might get set again
-	 * between two reads.
-	 */
-
-	bus_space_write_1(iaa->iaa_memt, ih, 0, DS1687_CTRL_C);
-	c = bus_space_read_1(iaa->iaa_memt, ih2, 0);
-	if ((c & 0x0f) != 0)
-		goto done;
-
-	bus_space_write_1(iaa->iaa_memt, ih, 0, DS1687_CTRL_C);
-	bus_space_write_1(iaa->iaa_memt, ih2, 0, c | 0x0f);
-
-	bus_space_write_1(iaa->iaa_memt, ih, 0, DS1687_CTRL_C);
-	c2 = bus_space_read_1(iaa->iaa_memt, ih2, 0);
-	if ((c2 & 0x0f) == 0)
-		ds1687 = 1;	/* maybe... */
-	
-	bus_space_write_1(iaa->iaa_memt, ih, 0, DS1687_CTRL_C);
-	bus_space_write_1(iaa->iaa_memt, ih2, 0, c2 | 0x0f);
-
-	bus_space_write_1(iaa->iaa_memt, ih, 0, DS1687_CTRL_C);
-	c3 = bus_space_read_1(iaa->iaa_memt, ih2, 0);
-	if ((c3 & 0x0f) != 0)
-		ds1687 = 0;	/* ...well, no. */
-
-	/* write back first value read in case this is not a DS1687 */
-	if (ds1687 == 0) {
-		bus_space_write_1(iaa->iaa_memt, ih, 0, DS1687_CTRL_C);
-		bus_space_write_1(iaa->iaa_memt, ih2, 0, c);
-	}
-	
-done:
 	sc->sc_clkt = iaa->iaa_memt;
 
-	if (ds1687) {
+	if (iaa->iaa_base != IOC3_BYTEBUS_0) {
+		/* DS1687 */
+
+		if (bus_space_subregion(iaa->iaa_memt, iaa->iaa_memh,
+		    IOC3_BYTEBUS_1, 1, &ih) != 0 ||
+		    bus_space_subregion(iaa->iaa_memt, iaa->iaa_memh,
+		    IOC3_BYTEBUS_2, 1, &ih2) != 0)
+			goto fail;
+
 		printf(": DS1687\n");
 
 		sc->sc_clkh = ih;
@@ -179,15 +152,16 @@ done:
 		sc->read = ioc_ds1687_dsrtc_read;
 		sc->write = ioc_ds1687_dsrtc_write;
 
-		sys_tod.tod_cookie = self;
 		sys_tod.tod_get = ds1687_get;
 		sys_tod.tod_set = ds1687_set;
 	} else {
+		/* DS1742W */
+
 		bus_space_unmap(iaa->iaa_memt, ih, 1);
 		bus_space_unmap(iaa->iaa_memt, ih2, 1);
 
 		if (bus_space_subregion(iaa->iaa_memt, iaa->iaa_memh,
-		    IOC3_BYTEBUS_0 + MK48T35_CLKOFF,
+		    iaa->iaa_base + MK48T35_CLKOFF,
 		    MK48T35_CLKSZ - MK48T35_CLKOFF, &ih) != 0)
 			goto fail;
 
@@ -199,15 +173,55 @@ done:
 		 * For some reason, the base year differs between IP27
 		 * and IP35.
 		 */
-		sc->sc_yrbase = sys_config.system_type == SGI_O300 ?
+		sc->sc_yrbase = sys_config.system_type == SGI_IP35 ?
 		    POSIX_BASE_YEAR - 2 : POSIX_BASE_YEAR;
 		/* mips64 clock code expects year relative to 1900 */
 		sc->sc_yrbase -= 1900;
 
-		sys_tod.tod_cookie = self;
 		sys_tod.tod_get = ds1742_get;
 		sys_tod.tod_set = ds1742_set;
 	}
+	sys_tod.tod_cookie = self;
+
+	return;
+
+fail:
+	printf(": can't map registers\n");
+}
+
+void
+dsrtc_attach_iof(struct device *parent, struct device *self, void *aux)
+{
+	struct dsrtc_softc *sc = (void *)self;
+	struct iof_attach_args *iaa = aux;
+	bus_space_handle_t ih;
+
+	/*
+	 * The IOC4 RTC is a DS1747 or compatible (itself being a Mostek
+	 * MK48T35 clone).
+	 */
+
+	if (bus_space_subregion(iaa->iaa_memt, iaa->iaa_memh,
+	    iaa->iaa_base + MK48T35_CLKOFF,
+	    MK48T35_CLKSZ - MK48T35_CLKOFF, &ih) != 0)
+		goto fail;
+
+	printf(": DS1742W\n");
+
+	sc->sc_clkh = ih;
+
+	/*
+	 * For some reason, the base year differs between IP27
+	 * and IP35.
+	 */
+	sc->sc_yrbase = sys_config.system_type == SGI_IP35 ?
+	    POSIX_BASE_YEAR - 2 : POSIX_BASE_YEAR;
+	/* mips64 clock code expects year relative to 1900 */
+	sc->sc_yrbase -= 1900;
+
+	sys_tod.tod_cookie = self;
+	sys_tod.tod_get = ds1742_get;
+	sys_tod.tod_set = ds1742_set;
 
 	return;
 
@@ -219,10 +233,10 @@ void
 dsrtc_attach_macebus(struct device *parent, struct device *self, void *aux)
 {
 	struct dsrtc_softc *sc = (void *)self;
-	struct confargs *ca = aux;
+	struct macebus_attach_args *maa = aux;
 
-	sc->sc_clkt = ca->ca_iot;
-	if (bus_space_map(sc->sc_clkt, MACE_ISA_RTC_OFFS, 128 * 256, 0,
+	sc->sc_clkt = maa->maa_iot;
+	if (bus_space_map(sc->sc_clkt, maa->maa_baseaddr, 128 * 256, 0,
 	    &sc->sc_clkh)) {
 		printf(": can't map registers\n");
 		return;

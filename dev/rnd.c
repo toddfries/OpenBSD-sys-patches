@@ -1,4 +1,4 @@
-/*	$OpenBSD: rnd.c,v 1.100 2009/06/05 04:43:23 guenther Exp $	*/
+/*	$OpenBSD: rnd.c,v 1.102 2010/04/20 22:05:41 tedu Exp $	*/
 
 /*
  * rnd.c -- A strong random number generator
@@ -247,7 +247,6 @@
 #include <sys/malloc.h>
 #include <sys/fcntl.h>
 #include <sys/vnode.h>
-#include <sys/sysctl.h>
 #include <sys/timeout.h>
 #include <sys/poll.h>
 #include <sys/mutex.h>
@@ -732,7 +731,6 @@ dequeue_randomness(void *v)
 			rs->asleep--;
 			wakeup((void *)&rs->asleep);
 			selwakeup(&rnd_rsel);
-			KNOTE(&rnd_rsel.si_note, 0);
 		}
 
 		mtx_enter(&rndlock);

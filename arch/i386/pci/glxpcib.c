@@ -1,4 +1,4 @@
-/*      $OpenBSD: glxpcib.c,v 1.7 2008/06/11 20:07:31 mbalmer Exp $	*/
+/*      $OpenBSD: glxpcib.c,v 1.9 2010/04/20 22:05:41 tedu Exp $	*/
 
 /*
  * Copyright (c) 2007 Marc Balmer <mbalmer@openbsd.org>
@@ -26,7 +26,6 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/gpio.h>
-#include <sys/sysctl.h>
 #include <sys/timetc.h>
 
 #include <machine/bus.h>
@@ -37,7 +36,7 @@
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 
-#define	AMD5536_REV		0x51400017
+#define	AMD5536_REV		0x51700017
 #define	AMD5536_REV_MASK	0xff
 #define	AMD5536_TMC		0x51400050
 

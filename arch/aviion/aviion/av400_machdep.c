@@ -1,4 +1,4 @@
-/*	$OpenBSD: av400_machdep.c,v 1.14 2009/02/16 22:54:59 miod Exp $	*/
+/*	$OpenBSD: av400_machdep.c,v 1.18 2010/04/24 18:46:51 miod Exp $	*/
 /*
  * Copyright (c) 2006, 2007, Miodrag Vallat.
  *
@@ -159,7 +159,13 @@
 #include <aviion/dev/sysconvar.h>
 #include <aviion/dev/vmevar.h>
 
-u_int	safe_level(u_int mask, u_int curlevel);
+#ifdef MULTIPROCESSOR0
+#include <machine/db_machdep.h>
+#endif
+
+u_int	av400_safe_level(u_int, u_int);
+void	av400_clock_ipi_handler(struct trapframe *);
+void	av400_ipi_handler(struct trapframe *);
 
 const pmap_table_entry
 av400_ptable[] = {
@@ -167,13 +173,24 @@ av400_ptable[] = {
 	  UVM_PROT_RW,	CACHE_INH },
 #if 0	/* mapped by the hardcoded BATC entries */
 	{ AV400_UTILITY,AV400_UTILITY,	AV400_UTILITY_SIZE,
-	  UVM_PROT_RW,	CACHE_INHIBIT },
+	  UVM_PROT_RW,	CACHE_INH },
 #endif
 	{ 0, 0, (vsize_t)-1, 0, 0 }
 };
 
+const struct vme_range vme_av400[] = {
+	{ VME_A16,
+	  AV400_VME16_START,	AV400_VME16_END,	AV400_VME16_BASE },
+	{ VME_A24,
+	  AV400_VME24_START,	AV400_VME24_END,	AV400_VME24_BASE },
+	{ VME_A32,
+	  AV400_VME32_START1,	AV400_VME32_END1,	AV400_VME32_BASE },
+	{ VME_A32,
+	  AV400_VME32_START2,	AV400_VME32_END2,	AV400_VME32_BASE },
+	{ 0 }
+};
+
 const struct board board_av400 = {
-	"100/200/300/400/3000/4000/4300 series",
 	av400_bootstrap,
 	av400_memsize,
 	av400_startup,
@@ -182,8 +199,14 @@ const struct board board_av400 = {
 	av400_getipl,
 	av400_setipl,
 	av400_raiseipl,
+#ifdef MULTIPROCESSOR
+	NULL,	/* av400_send_ipi, */
+	m88100_smp_setup,
+#endif
 	av400_intsrc,
-	av400_ptable
+	av400_get_vme_ranges,
+
+	av400_ptable,
 };
 
 /*
@@ -199,15 +222,15 @@ const struct board board_av400 = {
  * Note that, on the AV400 design, the interrupt enable registers are
  * write-only and read back as 0xffffffff.
  */
-u_int32_t int_mask_reg[] = { 0, 0, 0, 0 };
+u_int32_t av400_int_mask_reg[] = { 0, 0, 0, 0 };
 
 u_int av400_curspl[] = { IPL_HIGH, IPL_HIGH, IPL_HIGH, IPL_HIGH };
 
-#ifdef MULTIPROCESSOR
+#ifdef MULTIPROCESSOR0
 /*
  * Interrupts allowed on secondary processors.
  */
-#define	SLAVE_MASK	0	/* IRQ_SWI0 | IRQ_SWI1 */
+#define	SLAVE_MASK	0
 #endif
 
 /*
@@ -237,8 +260,6 @@ av400_startup()
 {
 }
 
-int32_t cpuid, sysid;
-
 void
 av400_bootstrap()
 {
@@ -266,8 +287,6 @@ av400_bootstrap()
 	 * we can still use it.
 	 */
 	scm_getenaddr(hostaddr);
-	cpuid = scm_cpuid();
-	sysid = scm_sysid();
 }
 
 /*
@@ -275,10 +294,15 @@ av400_bootstrap()
  * while keeping ``mask'' masked.
  */
 u_int
-safe_level(u_int mask, u_int curlevel)
+av400_safe_level(u_int mask, u_int curlevel)
 {
 	int i;
 
+#ifdef MULTIPROCESSOR0
+	if (mask & AV400_CLOCK_IPI_MASK)
+		curlevel = max(IPL_CLOCK, curlevel);
+	mask &= ~(AV400_IPI_MASK | AV400_CLOCK_IPI_MASK);
+#endif
 	for (i = curlevel; i < NIPLS; i++)
 		if ((int_mask_val[i] & mask) == 0)
 			return i;
@@ -303,13 +327,16 @@ av400_setipl(u_int level)
 	curspl = av400_curspl[cpu];
 
 	mask = int_mask_val[level];
-#ifdef MULTIPROCESSOR
+#ifdef MULTIPROCESSOR0
 	if (cpu != master_cpu)
 		mask &= SLAVE_MASK;
+	mask |= AV400_SWI_IPI_MASK(cpu);
+	if (level < IPL_CLOCK)
+		mask |= AV400_SWI_CLOCK_IPI_MASK(cpu);
 #endif
 
 	av400_curspl[cpu] = level;
-	*(u_int32_t *)AV_IEN(cpu) = int_mask_reg[cpu] = mask;
+	*(u_int32_t *)AV_IEN(cpu) = av400_int_mask_reg[cpu] = mask;
 	/*
 	 * We do not flush the pipeline here, because interrupts are disabled,
 	 * and set_psr() will synchronize the pipeline.
@@ -330,13 +357,16 @@ av400_raiseipl(u_int level)
 	curspl = av400_curspl[cpu];
 	if (curspl < level) {
 		mask = int_mask_val[level];
-#ifdef MULTIPROCESSOR
+#ifdef MULTIPROCESSOR0
 		if (cpu != master_cpu)
 			mask &= SLAVE_MASK;
+		mask |= AV400_SWI_IPI_MASK(cpu);
+		if (level < IPL_CLOCK)
+			mask |= AV400_SWI_CLOCK_IPI_MASK(cpu);
 #endif
 
 		av400_curspl[cpu] = level;
-		*(u_int32_t *)AV_IEN(cpu) = int_mask_reg[cpu] = mask;
+		*(u_int32_t *)AV_IEN(cpu) = av400_int_mask_reg[cpu] = mask;
 	}
 	/*
 	 * We do not flush the pipeline here, because interrupts are disabled,
@@ -347,6 +377,89 @@ av400_raiseipl(u_int level)
 	return curspl;
 }
 
+#ifdef MULTIPROCESSOR0
+
+void
+av400_send_ipi(int ipi, cpuid_t cpu)
+{
+	struct cpu_info *ci = &m88k_cpus[cpu];
+	uint32_t bits = 0;
+
+	if (ci->ci_ipi & ipi)
+		return;
+
+	atomic_setbits_int(&ci->ci_ipi, ipi);
+	if (ipi & ~(CI_IPI_HARDCLOCK | CI_IPI_STATCLOCK))
+		bits |= AV400_SWI_IPI_BIT(cpu);
+	if (ipi & (CI_IPI_HARDCLOCK | CI_IPI_STATCLOCK))
+		bits |= AV400_SWI_CLOCK_IPI_BIT(cpu);
+	*(volatile u_int32_t *)AV400_SETSWI = bits;
+}
+
+/*
+ * Process inter-processor interrupts.
+ */
+
+/*
+ * Unmaskable IPIs - those are processed with interrupts disabled,
+ * and no lock held.
+ */
+void
+av400_ipi_handler(struct trapframe *eframe)
+{
+	struct cpu_info *ci = curcpu();
+	int ipi = ci->ci_ipi & (CI_IPI_DDB | CI_IPI_NOTIFY);
+
+	*(volatile u_int32_t *)AV400_CLRSWI = AV400_SWI_IPI_BIT(ci->ci_cpuid);
+	atomic_clearbits_int(&ci->ci_ipi, ipi);
+
+	if (ipi & CI_IPI_DDB) {
+#ifdef DDB
+		/*
+		 * Another processor has entered DDB. Spin on the ddb lock
+		 * until it is done.
+		 */
+		extern struct __mp_lock ddb_mp_lock;
+
+		__mp_lock(&ddb_mp_lock);
+		__mp_unlock(&ddb_mp_lock);
+
+		/*
+		 * If ddb is hoping to us, it's our turn to enter ddb now.
+		 */
+		if (ci->ci_cpuid == ddb_mp_nextcpu)
+			Debugger();
+#endif
+	}
+	if (ipi & CI_IPI_NOTIFY) {
+		/* nothing to do */
+	}
+}
+
+/*
+ * Maskable IPIs
+ */
+void
+av400_clock_ipi_handler(struct trapframe *eframe)
+{
+	struct cpu_info *ci = curcpu();
+	int ipi = ci->ci_ipi & (CI_IPI_HARDCLOCK | CI_IPI_STATCLOCK);
+
+	/* clear clock ipi interrupt */
+	*(volatile u_int32_t *)AV400_CLRSWI =
+	    AV400_SWI_CLOCK_IPI_BIT(ci->ci_cpuid);
+	atomic_clearbits_int(&ci->ci_ipi, ipi);
+
+	if (ipi & CI_IPI_HARDCLOCK)
+		hardclock((struct clockframe *)eframe);
+#if 0	/* no separate statclock yet */
+	if (ipi & CI_IPI_STATCLOCK)
+		statclock((struct clockframe *)eframe);
+#endif
+}
+
+#endif
+
 /*
  * Provide the interrupt masks for a given logical interrupt source.
  */
@@ -355,23 +468,23 @@ av400_intsrc(int i)
 {
 	static const u_int32_t intsrc[] = {
 		0,
-		IRQ_ABORT,
-		IRQ_ACF,
-		IRQ_SF,
-		IRQ_CIOI,
-		IRQ_DI1,
-		IRQ_DI2,
-		IRQ_ECI,
+		AV400_IRQ_ABORT,
+		AV400_IRQ_ACF,
+		AV400_IRQ_SF,
+		AV400_IRQ_CIOI,
+		AV400_IRQ_DI1,
+		AV400_IRQ_DI2,
+		AV400_IRQ_ECI,
 		0,
-		IRQ_SCI,
+		AV400_IRQ_SCI,
 		0,
-		IRQ_VME1,
-		IRQ_VME2,
-		IRQ_VME3,
-		IRQ_VME4,
-		IRQ_VME5,
-		IRQ_VME6,
-		IRQ_VME7
+		AV400_IRQ_VME1,
+		AV400_IRQ_VME2,
+		AV400_IRQ_VME3,
+		AV400_IRQ_VME4,
+		AV400_IRQ_VME5,
+		AV400_IRQ_VME6,
+		AV400_IRQ_VME7
 	};
 
 	return ((u_int64_t)intsrc[i]);
@@ -380,31 +493,31 @@ av400_intsrc(int i)
 /*
  * Provide the interrupt source for a given interrupt status bit.
  */
-const u_int obio_vec[32] = {
+static const u_int av400_obio_vec[32] = {
 	0,			/* SWI0 */
 	0,			/* SWI1 */
 	0,
 	0,
-	INTSRC_VME,		/* VME1 */
+	INTSRC_VME(1),		/* VME1 */
 	INTSRC_SCSI1,		/* SCI */
-	INTSRC_VME,		/* VME2 */
+	INTSRC_VME(2),		/* VME2 */
 	0,
 	0,
 	0,			/* DVB */
-	INTSRC_VME,		/* VME3 */
+	INTSRC_VME(3),		/* VME3 */
 	0,			/* DWP */
-	INTSRC_VME,		/* VME4 */
+	INTSRC_VME(4),		/* VME4 */
 	0,			/* DTC */
-	INTSRC_VME,		/* VME5 */
+	INTSRC_VME(5),		/* VME5 */
 	INTSRC_ETHERNET1,	/* ECI */
 	INTSRC_DUART2,		/* DI2 */
 	INTSRC_DUART1,		/* DI1 */
 	0,			/* PPI */
-	INTSRC_VME,		/* VME6 */
+	INTSRC_VME(6),		/* VME6 */
 	INTSRC_SYSFAIL,		/* SF */
-	INTSRC_CIO,		/* CIOI */
+	INTSRC_CLOCK,		/* CIOI */
 	0,			/* KBD */
-	INTSRC_VME,		/* VME7 */
+	INTSRC_VME(7),		/* VME7 */
 	0,			/* PAR */
 	0,			/* VID */
 	0,			/* ZBUF */
@@ -422,10 +535,13 @@ const u_int obio_vec[32] = {
 #define VME_VECTOR_MASK		0x1ff 	/* mask into VIACK register */
 #define VME_BERR_MASK		0x100 	/* timeout during VME IACK cycle */
 
+#define ISR_GET_CURRENT_MASK(cpu) \
+	(*(volatile u_int *)AV_IST & av400_int_mask_reg[cpu])
+
 void
 av400_intr(struct trapframe *eframe)
 {
-	int cpu = cpu_number();
+	u_int cpu = cpu_number();
 	u_int32_t cur_mask, ign_mask;
 	u_int level, old_spl;
 	struct intrhand *intr;
@@ -448,11 +564,41 @@ av400_intr(struct trapframe *eframe)
 		 * Spurious interrupts - may be caused by debug output clearing
 		 * DUART interrupts.
 		 */
+#ifdef MULTIPROCESSOR0
+		if (cpu != master_cpu) {
+			if (++problems >= 10) {
+				printf("cpu%d: interrupt pin won't clear, "
+				    "disabling processor\n", cpu);
+				cpu_emergency_disable();
+				/* NOTREACHED */
+			}
+		}
+#endif
 		flush_pipeline();
 		goto out;
 	}
 
 	uvmexp.intrs++;
+
+#ifdef MULTIPROCESSOR0
+	/*
+	 * Handle unmaskable IPIs immediately, so that we can reenable
+	 * interrupts before further processing. We rely on the interrupt
+	 * mask to make sure that if we get an IPI, it's really for us
+	 * and no other processor.
+	 */
+	if (cur_mask & AV400_IPI_MASK) {
+		av400_ipi_handler(eframe);
+		cur_mask &= ~AV400_IPI_MASK;
+		if (cur_mask == 0)
+			goto out;
+	}
+#endif
+
+#ifdef MULTIPROCESSOR
+	if (old_spl < IPL_SCHED)
+		__mp_lock(&kernel_lock);
+#endif
 
 	/*
 	 * We want to service all interrupts marked in the IST register
@@ -460,8 +606,15 @@ av400_intr(struct trapframe *eframe)
 	 * from being generated otherwise.  We will service them in order of
 	 * priority.
 	 */
-	do {
-		level = safe_level(cur_mask, old_spl);
+	for (;;) {
+		cur_mask = ISR_GET_CURRENT_MASK(cpu);
+#ifdef MULTIPROCESSOR0
+		cur_mask &= ~AV400_IPI_MASK;
+#endif
+		if ((cur_mask & ~ign_mask) == 0)
+			break;
+
+		level = av400_safe_level(cur_mask, old_spl);
 		av400_setipl(level);
 
 		if (unmasked == 0) {
@@ -469,17 +622,31 @@ av400_intr(struct trapframe *eframe)
 			unmasked = 1;
 		}
 
+#ifdef MULTIPROCESSOR0
+		/*
+		 * Handle pending maskable IPIs first.
+		 */
+		if (cur_mask & AV400_CLOCK_IPI_MASK) {
+			av400_clock_ipi_handler(eframe);
+			cur_mask &= ~AV400_CLOCK_IPI_MASK;
+			if ((cur_mask & ~ign_mask) == 0)
+				break;
+		}
+#endif
+
 		/* find the first bit set in the current mask */
 		warn = 0;
 		intbit = ff1(cur_mask);
-		intsrc = obio_vec[intbit];
+		intsrc = av400_obio_vec[intbit];
 
 		if (intsrc == 0)
 			panic("%s: unexpected interrupt source (bit %d), "
 			    "level %d, mask 0x%b",
-			    __func__, intbit, level, cur_mask, IST_STRING);
+			    __func__, intbit, level,
+			    cur_mask, AV400_IST_STRING);
 
-		if (intsrc == INTSRC_VME) {
+		if (IS_VME_INTSRC(intsrc)) {
+			level = VME_INTSRC_LEVEL(intsrc);
 			ivec = AV400_VIRQLV + (level << 2);
 			vec = *(volatile u_int32_t *)ivec & VME_VECTOR_MASK;
 			if (vec & VME_BERR_MASK) {
@@ -487,7 +654,7 @@ av400_intr(struct trapframe *eframe)
 				    "interrupt vector, "
 				    "level %d, mask 0x%b\n",
 				    __func__, level,
-				    cur_mask, IST_STRING);
+				    cur_mask, AV400_IST_STRING);
 				ign_mask |= 1 << intbit;
 				continue;
 			}
@@ -522,20 +689,21 @@ av400_intr(struct trapframe *eframe)
 		if (warn != 0) {
 			ign_mask |= 1 << intbit;
 
-			if (intsrc == INTSRC_VME)
+			if (IS_VME_INTSRC(intsrc))
 				printf("%s: %s VME interrupt, "
 				    "level %d, vec 0x%x, mask 0x%b\n",
 				    __func__,
 				    warn == 1 ? "spurious" : "unclaimed",
-				    level, vec, cur_mask, IST_STRING);
+				    level, vec,
+				    cur_mask, AV400_IST_STRING);
 			else
 				printf("%s: %s interrupt, "
 				    "level %d, bit %d, mask 0x%b\n",
 				    __func__,
 				    warn == 1 ? "spurious" : "unclaimed",
-				    level, intbit, cur_mask, IST_STRING);
+				    level, intbit, cur_mask, AV400_IST_STRING);
 		}
-	} while (((cur_mask = ISR_GET_CURRENT_MASK(cpu)) & ~ign_mask) != 0);
+	}
 
 #ifdef DIAGNOSTIC
 	if (ign_mask != 0) {
@@ -543,6 +711,11 @@ av400_intr(struct trapframe *eframe)
 			panic("%s: broken interrupt behaviour", __func__);
 	} else
 		problems = 0;
+#endif
+
+#ifdef MULTIPROCESSOR
+	if (old_spl < IPL_SCHED)
+		__mp_unlock(&kernel_lock);
 #endif
 
 out:
@@ -558,4 +731,19 @@ out:
 	 * be restored later.
 	 */
 	set_psr(get_psr() | PSR_IND);
+}
+
+const struct vme_range *
+av400_get_vme_ranges(void)
+{
+	/* no VME slots on models 100/200/300 */
+	switch (cpuid) {
+	case AVIION_300_310:
+	case AVIION_300C_310C:
+	case AVIION_300CD_310CD:
+	case AVIION_300D_310D:
+		return NULL;
+	default:
+		return vme_av400;
+	}
 }

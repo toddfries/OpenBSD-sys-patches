@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvisor.c,v 1.38 2008/06/26 05:42:19 ray Exp $	*/
+/*	$OpenBSD: uvisor.c,v 1.40 2010/07/02 03:13:42 tedu Exp $	*/
 /*	$NetBSD: uvisor.c,v 1.21 2003/08/03 21:59:26 nathanw Exp $	*/
 
 /*
@@ -198,7 +198,7 @@ static const struct uvisor_type uvisor_devs[] = {
 int uvisor_match(struct device *, void *, void *); 
 void uvisor_attach(struct device *, struct device *, void *); 
 int uvisor_detach(struct device *, int); 
-int uvisor_activate(struct device *, enum devact); 
+int uvisor_activate(struct device *, int); 
 
 struct cfdriver uvisor_cd = { 
 	NULL, "uvisor", DV_DULL 
@@ -379,7 +379,7 @@ bad:
 }
 
 int
-uvisor_activate(struct device *self, enum devact act)
+uvisor_activate(struct device *self, int act)
 {
 	struct uvisor_softc *sc = (struct uvisor_softc *)self;
 	int rv = 0;
@@ -425,7 +425,7 @@ usbd_status
 uvisor_init(struct uvisor_softc *sc, struct uvisor_connection_info *ci,
     struct uvisor_palm_connection_info *cpi)
 {
-	usbd_status err;
+	usbd_status err = 0;
 	usb_device_request_t req;
 	int actlen;
 	uWord avail;

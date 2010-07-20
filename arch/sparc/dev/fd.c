@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.66 2009/08/13 15:23:12 deraadt Exp $	*/
+/*	$OpenBSD: fd.c,v 1.72 2010/07/10 19:32:24 miod Exp $	*/
 /*	$NetBSD: fd.c,v 1.51 1997/05/24 20:16:19 pk Exp $	*/
 
 /*-
@@ -89,6 +89,7 @@
 #include <sys/queue.h>
 #include <sys/conf.h>
 #include <sys/timeout.h>
+#include <sys/dkio.h>
 
 #include <dev/cons.h>
 
@@ -280,9 +281,9 @@ fdcmatch(parent, match, aux)
 	register struct romaux *ra = &ca->ca_ra;
 
 	/*
-	 * Floppy doesn't exist on sun4.
+	 * Floppy doesn't exist on sun4 and sun4e.
 	 */
-	if (CPU_ISSUN4)
+	if (CPU_ISSUN4OR4E)
 		return (0);
 
 	/*
@@ -716,7 +717,7 @@ fdstrategy(bp)
 
 #ifdef FD_DEBUG
 	if (fdc_debug > 1)
-	    printf("fdstrategy: b_blkno %d b_bcount %ld blkno %d cylin %ld\n",
+	    printf("fdstrategy: b_blkno %d b_bcount %ld blkno %lld cylin %ld\n",
 		    bp->b_blkno, bp->b_bcount, fd->sc_blkno, bp->b_cylinder);
 #endif
 
@@ -1371,7 +1372,7 @@ loop:
 		{int block;
 		 block = (fd->sc_cylin * type->heads + head) * type->sectrac + sec;
 		 if (block != fd->sc_blkno) {
-			 printf("fdcintr: block %d != blkno %d\n", block, fd->sc_blkno);
+			 printf("fdcintr: block %d != blkno %lld\n", block, fd->sc_blkno);
 #if defined(FD_DEBUG) && defined(DDB)
 			 Debugger();
 #endif
@@ -1498,7 +1499,7 @@ loop:
 				fdcstatus(fdc,
 					bp->b_flags & B_READ
 					? "read failed" : "write failed");
-				printf("blkno %d nblks %d nstat %d tc %d\n",
+				printf("blkno %lld nblks %d nstat %d tc %d\n",
 				       fd->sc_blkno, fd->sc_nblks,
 				       fdc->sc_nstat, fdc->sc_tc);
 			}
@@ -1771,16 +1772,17 @@ fdioctl(dev, cmd, addr, flag, p)
 		return (0);
 
 	case DIOCWDINFO:
+	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0)
 			return (EBADF);
 
 		error = setdisklabel(fd->sc_dk.dk_label,
 		    (struct disklabel *)addr, 0);
-		if (error)
-			return (error);
-
-		error = writedisklabel(DISKLABELDEV(dev), fdstrategy,
-		    fd->sc_dk.dk_label);
+		if (error == 0) {
+			if (cmd == DIOCWDINFO)
+				error = writedisklabel(DISKLABELDEV(dev),
+				    fdstrategy, fd->sc_dk.dk_label);
+		}
 		return (error);
 
 	case DIOCLOCK:
@@ -1793,9 +1795,6 @@ fdioctl(dev, cmd, addr, flag, p)
 		if (((struct mtop *)addr)->mt_op != MTOFFL)
 			return EIO;
 
-#ifdef COMPAT_SUNOS
-	case SUNOS_FDIOCEJECT:
-#endif
 	case DIOCEJECT:
 		fd_do_eject(fd);
 		return (0);
@@ -1944,11 +1943,9 @@ fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
 	lp->d_ncylinders = fd->sc_type->tracks;
 	lp->d_ntracks = fd->sc_type->heads;	/* Go figure... */
 	DL_SETDSIZE(lp, fd->sc_type->size);
-	lp->d_rpm = 300;	/* XXX like it matters... */
 
 	strncpy(lp->d_typename, "floppy disk", sizeof(lp->d_typename));
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-	lp->d_interleave = 1;
 	lp->d_version = 1;
 
 	lp->d_magic = DISKMAGIC;

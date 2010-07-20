@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.1 2004/08/06 21:12:18 pefo Exp $ */
+/*	$OpenBSD: asm.h,v 1.3 2010/04/28 16:20:28 syuu Exp $ */
 
 /* Use Mips generic include file */
 

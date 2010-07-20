@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 /*	$OpenBSD: clock.c,v 1.4 2009/06/02 23:48:07 drahn Exp $	*/
+=======
+/*	$OpenBSD: clock.c,v 1.7 2009/10/01 20:19:19 kettenis Exp $	*/
+>>>>>>> origin/master
 /*	$NetBSD: clock.c,v 1.1 1996/09/30 16:34:40 ws Exp $	*/
 
 /*
@@ -150,7 +154,7 @@ resettodr(void)
 
 	microtime(&tv);
 
-	if (todr_handle == NULL || todr_settime(todr_handle, &tv) != 0)
+	if (todr_handle != NULL && todr_settime(todr_handle, &tv) != 0)
 		printf("Cannot set time in time-of-day clock\n");
 }
 
@@ -202,7 +206,11 @@ decr_intr(struct clockframe *frame)
 	 */
 	ppc_mtdec(nextevent - tb);
 
+<<<<<<< HEAD
 	if (ci->ci_cpl >= IPL_CLOCK) {
+=======
+	if (curcpu()->ci_cpl & SPL_CLOCKMASK) {
+>>>>>>> origin/master
 		ci->ci_statspending += nstats;
 	} else {
 		KERNEL_LOCK();

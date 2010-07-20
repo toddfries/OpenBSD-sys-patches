@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.145 2009/08/11 17:15:54 oga Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.148 2010/05/08 16:54:08 oga Exp $	*/
 /*	$NetBSD: pmap.c,v 1.91 2000/06/02 17:46:37 thorpej Exp $	*/
 
 /*
@@ -238,6 +238,13 @@ int nkpde = NKPTP;
 int pmap_pg_g = 0;
 
 /*
+ * pmap_pg_wc: if our processor supports PAT then we set this
+ * to be the pte bits for Write Combining. Else we fall back to
+ * UC- so mtrrs can override the cacheability;
+ */
+int pmap_pg_wc = PG_UCMINUS;
+
+/*
  * i386 physical memory comes in a big contig chunk with a small
  * hole toward the front of it...  the following 4 paddr_t's
  * (shared with machdep.c) describe the physical address space
@@ -309,13 +316,12 @@ struct pool pmap_pmap_pool;
  * special VAs and the PTEs that map them
  */
 
-static pt_entry_t *csrc_pte, *cdst_pte, *zero_pte, *ptp_pte;
-static caddr_t csrcp, cdstp, zerop, ptpp;
+static pt_entry_t *csrc_pte, *cdst_pte, *zero_pte, *ptp_pte, *flsh_pte;
+static caddr_t csrcp, cdstp, zerop, ptpp, flshp;
 caddr_t vmmap; /* XXX: used by mem.c... it should really uvm_map_reserve it */
 
 /* stuff to fix the pentium f00f bug */
 extern vaddr_t pentium_idt_vaddr;
-
 
 /*
  * local prototypes
@@ -687,7 +693,8 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 
 	pte = vtopte(va);
 	npte = (pa & PMAP_PA_MASK) | ((prot & VM_PROT_WRITE)? PG_RW : PG_RO) |
-	    PG_V | PG_U | PG_M | ((pa & PMAP_NOCACHE) ? PG_N : 0);
+	    PG_V | PG_U | PG_M | ((pa & PMAP_NOCACHE) ? PG_N : 0) |
+	    ((pa & PMAP_WC) ? pmap_pg_wc : 0);
 
 	/* special 1:1 mappings in the first 4MB must not be global */
 	if (va >= (vaddr_t)NBPD)
@@ -805,11 +812,7 @@ pmap_bootstrap(vaddr_t kva_start)
 	 */
 
 	kpm = pmap_kernel();
-	simple_lock_init(&kpm->pm_obj.vmobjlock);
-	kpm->pm_obj.pgops = NULL;
-	RB_INIT(&kpm->pm_obj.memt);
-	kpm->pm_obj.uo_npages = 0;
-	kpm->pm_obj.uo_refs = 1;
+	uvm_objinit(&kpm->pm_obj, NULL, 1);
 	bzero(&kpm->pm_list, sizeof(kpm->pm_list));  /* pm_list not used */
 	kpm->pm_pdir = (pd_entry_t *)(proc0.p_addr->u_pcb.pcb_cr3 + KERNBASE);
 	kpm->pm_pdirpa = (u_int32_t) proc0.p_addr->u_pcb.pcb_cr3;
@@ -863,6 +866,8 @@ pmap_bootstrap(vaddr_t kva_start)
 
 	ptpp = (caddr_t) virtual_avail+PAGE_SIZE*3;  ptp_pte = pte+3;
 
+	flshp = (caddr_t) virtual_avail+PAGE_SIZE*4;  flsh_pte = pte+4;
+
 	virtual_avail += PAGE_SIZE * MAXCPUS * NPTECL;
 	pte += MAXCPUS * NPTECL;
 #else
@@ -876,6 +881,9 @@ pmap_bootstrap(vaddr_t kva_start)
 	virtual_avail += PAGE_SIZE; pte++;
 
 	ptpp = (caddr_t) virtual_avail;  ptp_pte = pte;
+	virtual_avail += PAGE_SIZE; pte++;
+
+	flshp = (caddr_t) virtual_avail;  flsh_pte = pte;
 	virtual_avail += PAGE_SIZE; pte++;
 #endif
 
@@ -1461,11 +1469,7 @@ void
 pmap_pinit(struct pmap *pmap)
 {
 	/* init uvm_object */
-	simple_lock_init(&pmap->pm_obj.vmobjlock);
-	pmap->pm_obj.pgops = NULL;	/* currently not a mappable object */
-	RB_INIT(&pmap->pm_obj.memt);
-	pmap->pm_obj.uo_npages = 0;
-	pmap->pm_obj.uo_refs = 1;
+	uvm_objinit(&pmap->pm_obj, NULL, 1);
 	pmap->pm_stats.wired_count = 0;
 	pmap->pm_stats.resident_count = 1;	/* count the PDP allocd below */
 	pmap->pm_ptphint = NULL;
@@ -1796,6 +1800,47 @@ pmap_zero_page_uncached(paddr_t pa)
 	*zpte = 0;
 
 	return (TRUE);
+}
+
+/*
+ * pmap_flush_cache: flush the cache for a virtual address.
+ */
+void
+pmap_flush_cache(vaddr_t addr, vsize_t len)
+{
+	vaddr_t i;
+
+	if (curcpu()->ci_cflushsz == 0) {
+		wbinvd();
+		return;
+	}
+	
+	mfence();
+	for (i = addr; i < addr + len; i += curcpu()->ci_cflushsz)
+		clflush(i);
+	mfence();
+}
+
+void
+pmap_flush_page(paddr_t pa)
+{
+#ifdef MULTIPROCESSOR
+	int id = cpu_number();
+#endif
+	pt_entry_t *pte = PTESLEW(flsh_pte, id);
+	caddr_t va = VASLEW(flshp, id);
+
+	KDASSERT(PHYS_TO_VM_PAGE(pa) != NULL);
+#ifdef DIAGNOSTIC
+	if (*pte)
+		panic("pmap_flush_page: lock botch");
+#endif
+
+	*pte = (pa & PG_FRAME) | PG_V | PG_RW;
+	pmap_update_pg(va);
+	pmap_flush_cache((vaddr_t)va, PAGE_SIZE);
+	*pte = 0;
+	pmap_update_pg(va);
 }
 
 /*
@@ -2374,9 +2419,11 @@ pmap_enter(struct pmap *pmap, vaddr_t va, paddr_t pa,
 	struct pv_entry *pve = NULL, *freepve;
 	boolean_t wired = (flags & PMAP_WIRED) != 0;
 	boolean_t nocache = (pa & PMAP_NOCACHE) != 0;
+	boolean_t wc = (pa & PMAP_WC) != 0;
 	struct vm_page *pg = NULL;
 	int error, wired_count, resident_count, ptp_count;
 
+	KASSERT(!(wc && nocache));
 	pa &= PMAP_PA_MASK;	/* nuke flags from pa */
 
 #ifdef DIAGNOSTIC
@@ -2544,8 +2591,14 @@ enter_now:
 		npte |= PG_M;
 	if (pg) {
 		npte |= PG_PVLIST;
+		if (pg->pg_flags & PG_PMAP_WC) {
+			KASSERT(nocache == 0);
+			wc = TRUE;
+		}
 		pmap_sync_flags_pte(pg, npte);
 	}
+	if (wc)
+		npte |= pmap_pg_wc;
 
 	opte = i386_atomic_testset_ul(&ptes[atop(va)], npte);
 	if (ptp)

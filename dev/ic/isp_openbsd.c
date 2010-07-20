@@ -1,4 +1,4 @@
-/* 	$OpenBSD: isp_openbsd.c,v 1.39 2009/08/08 09:51:53 dlg Exp $ */
+/* 	$OpenBSD: isp_openbsd.c,v 1.44 2010/06/28 18:31:02 krw Exp $ */
 /*
  * Platform (OpenBSD) dependent common attachment code for QLogic adapters.
  *
@@ -61,12 +61,10 @@
 #define	_XT(xs)	((((xs)->timeout/1000) * hz) + (3 * hz))
 
 static void ispminphys(struct buf *, struct scsi_link *);
-static int32_t ispcmd_slow(XS_T *);
-static int32_t ispcmd(XS_T *);
+static void ispcmd_slow(XS_T *);
+static void ispcmd(XS_T *);
 
-struct scsi_device isp_dev = { NULL, NULL, NULL, NULL };
-
-int isp_polled_cmd (struct ispsoftc *, XS_T *);
+void isp_polled_cmd (struct ispsoftc *, XS_T *);
 void isp_wdog (void *);
 void isp_make_here(ispsoftc_t *, int);
 void isp_make_gone(ispsoftc_t *, int);
@@ -106,7 +104,6 @@ isp_attach(struct ispsoftc *isp)
 	isp->isp_osinfo.wqf = isp->isp_osinfo.wqt = NULL;
 
 	lptr->adapter_softc = isp;
-	lptr->device = &isp_dev;
 	lptr->adapter = &isp->isp_osinfo._adapter;
 	lptr->openings = imin(isp->isp_maxcmds, MAXISPREQUEST(isp));
 	isp->isp_osinfo._adapter.scsi_cmd = ispcmd_slow;
@@ -124,7 +121,6 @@ isp_attach(struct ispsoftc *isp)
 		if (IS_DUALBUS(isp)) {
 			struct scsi_link *lptrb = &isp->isp_osinfo._link[1];
 			lptrb->adapter_softc = isp;
-			lptrb->device = &isp_dev;
 			lptrb->adapter = &isp->isp_osinfo._adapter;
 			lptrb->openings = lptr->openings;
 			lptrb->adapter_buswidth = MAX_TARGETS;
@@ -197,7 +193,7 @@ ispminphys(struct buf *bp, struct scsi_link *sl)
 	minphys(bp);
 }
 
-int32_t
+void
 ispcmd_slow(XS_T *xs)
 {
 	sdparam *sdp;
@@ -287,12 +283,11 @@ isp_add2_blocked_queue(struct ispsoftc *isp, XS_T *xs)
 	xs->free_list.le_next = NULL;
 }
 
-int32_t
+void
 ispcmd(XS_T *xs)
 {
 	struct ispsoftc *isp;
 	int result;
-
 
 	/*
 	 * Make sure that there's *some* kind of sane setting.
@@ -301,20 +296,24 @@ ispcmd(XS_T *xs)
 
 	timeout_set(&xs->stimeout, isp_wdog, xs);
 
+	ISP_LOCK(isp);
+
 	if (XS_LUN(xs) >= isp->isp_maxluns) {
 		xs->error = XS_SELTIMEOUT;
-		return (COMPLETE);
+		scsi_done(xs);
+		ISP_UNLOCK(isp);
+		return;
 	}
 
-	ISP_LOCK(isp);
 	if (isp->isp_state < ISP_RUNSTATE) {
 		ISP_DISABLE_INTS(isp);
 		isp_init(isp);
 		if (isp->isp_state != ISP_INITSTATE) {
 			ISP_ENABLE_INTS(isp);
-			ISP_UNLOCK(isp);
 			XS_SETERR(xs, HBA_BOTCH);
-			return (CMD_COMPLETE);
+			scsi_done(xs);
+			ISP_UNLOCK(isp);
+			return;
 		}
 		isp->isp_state = ISP_RUNSTATE;
 		ISP_ENABLE_INTS(isp);
@@ -325,8 +324,10 @@ ispcmd(XS_T *xs)
 	 */
 	if (isp->isp_osinfo.blocked) {
 		if (xs->flags & SCSI_POLL) {
+			xs->error = XS_NO_CCB;
+			scsi_done(xs);
 			ISP_UNLOCK(isp);
-			return (TRY_AGAIN_LATER);
+			return;
 		}
 		if (isp->isp_osinfo.blocked == 2) {
 			isp_restart(isp);
@@ -335,24 +336,23 @@ ispcmd(XS_T *xs)
 			isp_add2_blocked_queue(isp, xs);
 			ISP_UNLOCK(isp);
 			isp_prt(isp, ISP_LOGDEBUG0, "added to blocked queue");
-			return (SUCCESSFULLY_QUEUED);
+			return;
 		}
 	}
 
 	if (xs->flags & SCSI_POLL) {
 		volatile u_int8_t ombi = isp->isp_osinfo.no_mbox_ints;
 		isp->isp_osinfo.no_mbox_ints = 1;
-		result = isp_polled_cmd(isp, xs);
+		isp_polled_cmd(isp, xs);
 		isp->isp_osinfo.no_mbox_ints = ombi;
 		ISP_UNLOCK(isp);
-		return (result);
+		return;
 	}
 
 	result = isp_start(xs);
 
 	switch (result) {
 	case CMD_QUEUED:
-		result = SUCCESSFULLY_QUEUED;
 		if (xs->timeout) {
 			timeout_add(&xs->stimeout, _XT(xs));
 			XS_CMD_S_TIMER(xs);
@@ -367,10 +367,8 @@ ispcmd(XS_T *xs)
 		isp->isp_osinfo.blocked |= 2;
 		isp_prt(isp, ISP_LOGDEBUG0, "blocking queue");
 		isp_add2_blocked_queue(isp, xs);
-		result = SUCCESSFULLY_QUEUED;
 		break;
 	case CMD_RQLATER:
-		result = SUCCESSFULLY_QUEUED;	/* Lie */
 		isp_prt(isp, ISP_LOGDEBUG1, "retrying later for %d.%d",
 		    XS_TGT(xs), XS_LUN(xs));
 		timeout_set(&xs->stimeout, isp_requeue, xs);
@@ -378,14 +376,12 @@ ispcmd(XS_T *xs)
 		XS_CMD_S_TIMER(xs);
 		break;
 	case CMD_COMPLETE:
-		result = COMPLETE;
 		break;
 	}
 	ISP_UNLOCK(isp);
-	return (result);
 }
 
-int
+void
 isp_polled_cmd(struct ispsoftc *isp, XS_T *xs)
 {
 	int result;
@@ -395,20 +391,14 @@ isp_polled_cmd(struct ispsoftc *isp, XS_T *xs)
 
 	switch (result) {
 	case CMD_QUEUED:
-		result = SUCCESSFULLY_QUEUED;
 		break;
 	case CMD_RQLATER:
 	case CMD_EAGAIN:
-		result = TRY_AGAIN_LATER;
-		break;
+		xs->error = XS_NO_CCB;
+		/* FALLTHROUGH */
 	case CMD_COMPLETE:
-		result = COMPLETE;
-		break;
-		
-	}
-
-	if (result != SUCCESSFULLY_QUEUED) {
-		return (result);
+		scsi_done(xs);
+		return;
 	}
 
 	/*
@@ -442,8 +432,6 @@ isp_polled_cmd(struct ispsoftc *isp, XS_T *xs)
 			XS_SETERR(xs, HBA_BOTCH);
 		}
 	}
-	result = COMPLETE;
-	return (result);
 }
 
 void

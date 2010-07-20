@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.110 2009/07/09 22:29:56 thib Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.112 2010/05/18 22:26:10 tedu Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -104,7 +104,7 @@ int stackgap_random = STACKGAP_RANDOM;
  * EXEC SWITCH EXIT:
  *	ok:	return 0, filled exec package, one locked vnode.
  *	error:	destructive:
- *			everything deallocated execept exec header.
+ *			everything deallocated except exec header.
  *		non-destructive:
  *			error code, locked vnode, exec header unmodified
  */
@@ -599,7 +599,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	/*
 	 * notify others that we exec'd
 	 */
-	KNOTE(&p->p_klist, NOTE_EXEC);
+	KNOTE(&p->p_p->ps_klist, NOTE_EXEC);
 
 	/* setup new registers and do misc. setup. */
 	if (pack.ep_emul->e_fixup != NULL) {

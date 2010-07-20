@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fddisubr.c,v 1.56 2009/07/08 15:01:50 claudio Exp $	*/
+/*	$OpenBSD: if_fddisubr.c,v 1.59 2010/05/07 13:33:16 claudio Exp $	*/
 /*	$NetBSD: if_fddisubr.c,v 1.5 1996/05/07 23:20:21 christos Exp $	*/
 
 /*
@@ -149,11 +149,11 @@ fddi_output(ifp0, m0, dst, rt0)
 	struct ifnet *ifp = ifp0;
 
 #ifdef DIAGNOSTIC
-	if (ifp->if_rdomain != m->m_pkthdr.rdomain) {
+	if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.rdomain)) {
 		printf("%s: trying to send packet on wrong domain. "
-		    "%d vs. %d, AF %d\n", ifp->if_xname, ifp->if_rdomain,
-		    m->m_pkthdr.rdomain, dst->sa_family);
-		senderr(ENETDOWN);
+		    "if %d vs. mbuf %d, AF %d\n", ifp->if_xname,
+		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.rdomain),
+		    dst->sa_family);
 	}
 #endif
 
@@ -179,7 +179,8 @@ fddi_output(ifp0, m0, dst, rt0)
 		senderr(ENETDOWN);
 	if ((rt = rt0) != NULL) {
 		if ((rt->rt_flags & RTF_UP) == 0) {
-			if ((rt0 = rt = rtalloc1(dst, 1, 0)) != NULL)
+			if ((rt0 = rt = rtalloc1(dst, RT_REPORT,
+			    m->m_pkthdr.rdomain)) != NULL)
 				rt->rt_refcnt--;
 			else 
 				senderr(EHOSTUNREACH);
@@ -189,7 +190,8 @@ fddi_output(ifp0, m0, dst, rt0)
 				goto lookup;
 			if (((rt = rt->rt_gwroute)->rt_flags & RTF_UP) == 0) {
 				rtfree(rt); rt = rt0;
-			lookup: rt->rt_gwroute = rtalloc1(rt->rt_gateway, 1, 0);
+			lookup: rt->rt_gwroute = rtalloc1(rt->rt_gateway,
+			    RT_REPORT, ifp->if_rdomain);
 				if ((rt = rt->rt_gwroute) == 0)
 					senderr(EHOSTUNREACH);
 			}
@@ -392,7 +394,7 @@ fddi_input(ifp, fh, m)
 		m_freem(m);
 		return;
 	}
-	/* mark incomming routing domain */
+	/* mark incoming routing domain */
 	m->m_pkthdr.rdomain = ifp->if_rdomain;
 
 	ifp->if_ibytes += m->m_pkthdr.len + sizeof (*fh);
