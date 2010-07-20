@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.18 2009/03/15 20:40:25 miod Exp $	*/
+/*	$OpenBSD: intr.h,v 1.20 2010/04/23 03:50:22 miod Exp $	*/
 /*
  * Copyright (C) 2000 Steve Murphree, Jr.
  * All rights reserved.
@@ -49,7 +49,10 @@
 #define	IPL_VM		5
 #define IPL_CLOCK	5
 #define IPL_STATCLOCK	5
+#define IPL_SCHED	7
 #define IPL_HIGH	7
+
+#define	MD_IPLTOPSL(ipl)	IPLTOPSL(ipl)
 
 #define	splsoft()		_splraise(PSL_S | PSL_IPL1)
 #define	splsoftclock()		splsoft()

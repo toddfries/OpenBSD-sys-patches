@@ -1,4 +1,4 @@
-/*	$OpenBSD: tireg.h,v 1.1 2009/08/29 21:12:55 kettenis Exp $	*/
+/*	$OpenBSD: tireg.h,v 1.3 2009/12/13 13:21:54 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -39,7 +39,7 @@
  * which can be accessed with the CSR_READ_4()/CSR_WRITE_4() macros.
  * Each register must be accessed using 32 bit operations.
  *
- * All reegisters are accessed through a 16K shared memory block.
+ * All registers are accessed through a 16K shared memory block.
  * The first group of registers are actually copies of the PCI
  * configuration space registers.
  */
@@ -1142,7 +1142,6 @@ struct ti_softc {
 	u_int32_t		ti_rx_max_coal_bds;
 	u_int32_t		ti_tx_max_coal_bds;
 	u_int32_t		ti_tx_buf_ratio;
-	int			ti_if_flags;
 	int			ti_txcnt;
 };
 

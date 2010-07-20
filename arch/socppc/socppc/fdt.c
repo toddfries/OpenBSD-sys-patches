@@ -1,7 +1,8 @@
-/*	$OpenBSD: fdt.c,v 1.4 2009/08/29 11:01:13 miod Exp $	*/
+/*	$OpenBSD: fdt.c,v 1.9 2010/04/21 03:03:26 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2009 Dariusz Swiderski <sfires@sfires.net>
+ * Copyright (c) 2009 Mark Kettenis <kettenis@sfires.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -19,14 +20,18 @@
 
 #include <sys/types.h>
 #include <sys/param.h>
-#include <sys/user.h>
+#include <sys/systm.h>
+
 #include <machine/fdt.h>
+
+#include <dev/ofw/openfirm.h>
 
 unsigned int fdt_check_head(void *);
 char	*fdt_get_str(u_int32_t);
 void	*skip_property(u_int32_t *);
 void	*skip_props(u_int32_t *);
 void	*skip_node_name(u_int32_t *);
+void	*fdt_parent_node_recurse(void *, void *);
 #ifdef DEBUG
 void 	 fdt_print_node_recurse(void *, int);
 #endif
@@ -298,6 +303,31 @@ fdt_find_node(char *name)
 	return node;
 }
 
+void *
+fdt_parent_node_recurse(void *pnode, void *child)
+{
+	void *node = fdt_child_node(pnode);
+	void *tmp;
+	
+	while (node && (node != child)) {
+		if ((tmp = fdt_parent_node_recurse(node, child)))
+			return tmp;
+		node = fdt_next_node(node);
+	}
+	return (node) ? pnode : NULL;
+}
+
+void *
+fdt_parent_node(void *node)
+{
+	void *pnode = fdt_next_node(0);
+
+	if (!tree_inited)
+		return NULL;
+
+	return fdt_parent_node_recurse(pnode, node);
+}
+
 #ifdef DEBUG
 /*
  * Debug methods for printing whole tree, particular odes and properies
@@ -389,3 +419,81 @@ fdt_print_tree(void)
 	fdt_print_node_recurse(fdt_next_node(0), 0);
 }
 #endif
+
+int
+OF_peer(int handle)
+{
+	void *node = (char *)tree.header + handle;
+
+	if (handle == 0)
+		node = fdt_find_node("/");
+	else
+		node = fdt_next_node(node);
+	return node ? ((char *)node - (char *)tree.header) : 0;
+}
+
+int
+OF_child(int handle)
+{
+	void *node = (char *)tree.header + handle;
+
+	node = fdt_child_node(node);
+	return node ? ((char *)node - (char *)tree.header) : 0;
+}
+
+int
+OF_parent(int handle)
+{
+	void *node = (char *)tree.header + handle;
+	
+	node = fdt_parent_node(node);
+	return node ? ((char *)node - (char *)tree.header) : 0;
+}
+
+int
+OF_finddevice(char *name)
+{
+	void *node;
+
+	node = fdt_find_node(name);
+	return node ? ((char *)node - (char *)tree.header) : -1;
+}
+
+int
+OF_getproplen(int handle, char *prop)
+{
+	void *node = (char *)tree.header + handle;
+	char *data;
+
+	return fdt_node_property(node, prop, &data);
+}
+
+int
+OF_getprop(int handle, char *prop, void *buf, int buflen)
+{
+	void *node = (char *)tree.header + handle;
+	char *data;
+	int len;
+
+	len = fdt_node_property(node, prop, &data);
+
+	/*
+	 * The "name" property is optional since version 16 of the
+	 * flattened device tree specification, so we synthesize one
+	 * from the unit name of the node if it is missing.
+	 */
+	if (len == 0 && strcmp(prop, "name") == 0) {
+		data = fdt_node_name(node);
+		if (data) {
+			len = strlcpy(buf, data, buflen);
+			data = strchr(buf, '@');
+			if (data)
+				*data = 0;
+			return len + 1;
+		}
+	}
+
+	if (len > 0)
+		memcpy(buf, data, min(len, buflen));
+	return len;
+}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_descrip.c,v 1.82 2009/07/09 22:29:56 thib Exp $	*/
+/*	$OpenBSD: kern_descrip.c,v 1.84 2010/07/19 23:00:15 guenther Exp $	*/
 /*	$NetBSD: kern_descrip.c,v 1.42 1996/03/30 22:24:38 christos Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_xxx.c,v 1.12 2009/08/10 11:22:10 deraadt Exp $	*/
+/*	$OpenBSD: kern_xxx.c,v 1.16 2010/04/06 20:33:28 kettenis Exp $	*/
 /*	$NetBSD: kern_xxx.c,v 1.32 1996/04/22 01:38:41 christos Exp $	*/
 
 /*
@@ -67,6 +67,10 @@ sys_reboot(struct proc *p, void *v, register_t *retval)
 			break;
 		}
 	}
+
+#ifdef MULTIPROCESSOR
+	sched_stop_secondary_cpus();
+#endif
 
 	if_downall();
 

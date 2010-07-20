@@ -1,4 +1,4 @@
-/*	$OpenBSD: cs4231.c,v 1.27 2008/04/21 00:32:42 jakemsr Exp $	*/
+/*	$OpenBSD: cs4231.c,v 1.29 2010/07/15 03:43:11 jakemsr Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -645,6 +645,8 @@ cs4231_query_encoding(addr, fp)
 	default:
 		err = EINVAL;
 	}
+	fp->bps = AUDIO_BPS(fp->precision);
+	fp->msb = 1;
 	return (err);
 }
 
@@ -735,6 +737,9 @@ cs4231_set_params(addr, setmode, usemode, p, r)
 
 	p->sw_code = pswcode;
 	r->sw_code = rswcode;
+	p->bps = AUDIO_BPS(p->precision);
+	r->bps = AUDIO_BPS(r->precision);
+	p->msb = r->msb = 1;
 
 	sc->sc_format_bits = bits;
 	sc->sc_channels = p->channels;
@@ -1478,7 +1483,7 @@ cs4231_free(addr, ptr, pool)
 	for (pp = &sc->sc_dmas; (p = *pp) != NULL; pp = &(*pp)->next) {
 		if (p->addr != ptr)
 			continue;
-		dvma_free(p->addr_dva, 16*1024, &p->addr);
+		dvma_free(p->addr_dva, p->size, &p->addr);
 		*pp = p->next;
 		free(p, pool);
 		return;

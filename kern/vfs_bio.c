@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.120 2009/08/08 15:04:43 beck Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.124 2010/07/01 16:23:09 thib Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*
@@ -1203,6 +1203,9 @@ biodone(struct buf *bp)
 		panic("biodone already");
 	SET(bp->b_flags, B_DONE);		/* note that it's done */
 
+	if (bp->b_bq)
+		bufq_done(bp->b_bq, bp);
+
 	if (LIST_FIRST(&bp->b_dep) != NULL)
 		buf_complete(bp);
 
@@ -1239,10 +1242,11 @@ void
 bcstats_print(int (*pr)(const char *, ...))
 {
 	(*pr)("Current Buffer Cache status:\n");
-	(*pr)("numbufs %d freebufs %d\n", bcstats.numbufs, bcstats.freebufs);
-    	(*pr)("bufpages %d freepages %d dirtypages %d\n", bcstats.numbufpages,
-	    bcstats.numfreepages, bcstats.numdirtypages);
-	(*pr)("pendingreads %d, pendingwrites %d\n",
+	(*pr)("numbufs %lld, freebufs %lld\n",
+	    bcstats.numbufs, bcstats.freebufs);
+    	(*pr)("bufpages %lld, freepages %lld, dirtypages %lld\n",
+	    bcstats.numbufpages, bcstats.numfreepages, bcstats.numdirtypages);
+	(*pr)("pendingreads %lld, pendingwrites %lld\n",
 	    bcstats.pendingreads, bcstats.pendingwrites);
 }
 #endif

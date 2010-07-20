@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi.c,v 1.145 2009/08/10 20:29:54 deraadt Exp $	*/
+/*	$OpenBSD: if_wi.c,v 1.148 2010/07/02 02:40:15 blambert Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -123,11 +123,6 @@ u_int32_t	widebug = WIDEBUG;
 #else	/* !WIDEBUG */
 #define DPRINTF(mask,args)
 #endif	/* WIDEBUG */
-
-#if !defined(lint) && !defined(__OpenBSD__)
-static const char rcsid[] =
-	"$OpenBSD: if_wi.c,v 1.145 2009/08/10 20:29:54 deraadt Exp $";
-#endif	/* lint */
 
 #ifdef foo
 static u_int8_t	wi_mcast_addr[6] = { 0x01, 0x60, 0x1D, 0x00, 0x01, 0x00 };
@@ -810,7 +805,8 @@ wi_rxeof(struct wi_softc *sc)
 				    (len - WI_SNAPHDR_LEN),
 				    sc->wi_rxbuf + sizeof(struct ether_header) +
 				    IEEE80211_WEP_IVLEN +
-				    IEEE80211_WEP_KIDLEN + WI_SNAPHDR_LEN);
+				    IEEE80211_WEP_KIDLEN + WI_SNAPHDR_LEN,
+				    M_NOWAIT);
 				m_adj(m, -(WI_ETHERTYPE_LEN +
 				    IEEE80211_WEP_IVLEN + IEEE80211_WEP_KIDLEN +
 				    WI_SNAPHDR_LEN));
@@ -2428,7 +2424,8 @@ nextpkt:
 
 			/* Do host encryption. */
 			tx_frame.wi_frame_ctl |= htole16(WI_FCTL_WEP);
-			bcopy(&tx_frame.wi_dat[0], &sc->wi_txbuf[4], 8);
+			bcopy(&tx_frame.wi_dat[0], &sc->wi_txbuf[4], 6);
+			bcopy(&tx_frame.wi_type, &sc->wi_txbuf[10], 2);
 
 			m_copydata(m0, sizeof(struct ether_header),
 			    m0->m_pkthdr.len - sizeof(struct ether_header),

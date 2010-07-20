@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_iof.c,v 1.1 2009/08/18 19:34:15 miod Exp $	*/
+/*	$OpenBSD: com_iof.c,v 1.5 2009/10/16 00:15:46 miod Exp $	*/
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -52,6 +52,7 @@ extern struct cfdriver com_cd;
 int
 com_iof_probe(struct device *parent, void *match, void *aux)
 {
+	struct cfdata *cf = match;
 	struct iof_attach_args *iaa = aux;
 	bus_space_tag_t iot = iaa->iaa_memt;
 	bus_space_handle_t ioh;
@@ -71,6 +72,10 @@ com_iof_probe(struct device *parent, void *match, void *aux)
 	} else
 		rv = 1;
 
+	/* make a config stanza with exact locators match over a generic line */
+	if (cf->cf_loc[0] != -1)
+		rv += rv;
+
 	return rv;
 }
 
@@ -87,7 +92,7 @@ com_iof_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_hwflags = 0;
 	sc->sc_swflags = 0;
-	sc->sc_frequency = 22000000 / 3;
+	sc->sc_frequency = iaa->iaa_clock;
 
 	/* if it's in use as console, it's there. */
 	if (!(console && !comconsattached)) {
@@ -108,7 +113,7 @@ com_iof_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_iot = comconsiot;
 		sc->sc_iobase = comconsaddr;
 
-		if (comcnattach(sc->sc_iot, sc->sc_iobase, TTYDEF_SPEED,
+		if (comcnattach(sc->sc_iot, sc->sc_iobase, comconsrate,
 		    sc->sc_frequency, (TTYDEF_CFLAG & ~(CSIZE | PARENB)) | CS8))
 			panic("can't setup serial console");
 		ioh = comconsioh;

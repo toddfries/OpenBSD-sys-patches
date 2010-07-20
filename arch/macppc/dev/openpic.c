@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.55 2009/08/22 02:54:50 mk Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.60 2010/04/09 19:24:17 jasper Exp $	*/
 
 /*-
  * Copyright (c) 1995 Per Fogelstrom
@@ -68,11 +68,10 @@ static char *intr_typename(int type);
 void openpic_calc_mask(void);
 static __inline int cntlzw(int x);
 static int mapirq(int irq);
-int openpic_prog_button(void *arg);
 void openpic_enable_irq_mask(int irq_mask);
 
-#define HWIRQ_MAX 27
-#define HWIRQ_MASK 0x0fffffff
+#define HWIRQ_MAX (31 - (SI_NQUEUES + 1))
+#define HWIRQ_MASK (0xffffffff >> (SI_NQUEUES + 1))
 
 /* IRQ vector used for inter-processor interrupts. */
 #define IPI_VECTOR_NOP	64
@@ -187,15 +186,12 @@ openpic_attach(struct device *parent, struct device  *self, void *aux)
 	openpic_collect_preconf_intr();
 #endif
 
-#if 1
-	mac_intr_establish(parent, 0x37, IST_LEVEL,
-		IPL_HIGH, openpic_prog_button, (void *)0x37, "progbutton");
-#endif
-
 	ppc_intr_enable(1);
 
 	printf("\n");
 }
+
+
 
 void
 openpic_collect_preconf_intr()
@@ -414,7 +410,9 @@ openpic_calc_mask()
 
 	for (i = IPL_NONE; i <= IPL_HIGH; i++) {
 		if (i > IPL_NONE)
-			imask[i] |= SINT_MASK;
+			imask[i] |= SINT_ALLMASK;
+		if (i >= IPL_CLOCK)
+			imask[i] |= SPL_CLOCKMASK;
 	}
 	imask[IPL_HIGH] = 0xffffffff;
 }
@@ -487,8 +485,10 @@ openpic_do_pending_int()
 		/* this still doesn't handle the interrupts in priority order */
 		for (pri = IPL_HIGH; pri >= IPL_NONE; pri--) {
 			pripending = hwpend & ~imask[pri];
+			if (pripending == 0)
+				continue;
 			irq = 31 - cntlzw(pripending);
-			ci->ci_ipending &= ~(1L << irq);
+			ci->ci_ipending &= ~(1 << irq);
 			ci->ci_cpl = imask[o_intrmaxlvl[o_hwirq[irq]]];
 			openpic_enable_irq_mask(~ci->ci_cpl);
 			ih = o_intrhand[irq];
@@ -508,7 +508,7 @@ openpic_do_pending_int()
 		hwpend = ci->ci_ipending & ~pcpl;/* Catch new pendings */
 		hwpend &= HWIRQ_MASK;
 	}
-	ci->ci_cpl = pcpl | SINT_MASK;
+	ci->ci_cpl = pcpl | SINT_ALLMASK;
 	openpic_enable_irq_mask(~ci->ci_cpl);
 	atomic_clearbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_HARD);
 
@@ -532,39 +532,27 @@ openpic_do_pending_softint(int pcpl)
 			ci->ci_ipending &= ~SINT_CLOCK;
 			ci->ci_cpl = SINT_CLOCK|SINT_NET|SINT_TTY;
 			ppc_intr_enable(1);
-			KERNEL_LOCK();
-			softclock();
-			KERNEL_UNLOCK();
+			softintr_dispatch(SI_SOFTCLOCK);
 			ppc_intr_disable();
 			continue;
 		}
 		if((ci->ci_ipending & SINT_NET) & ~pcpl) {
-			extern int netisr;
-			int pisr;
-		       
 			ci->ci_ipending &= ~SINT_NET;
 			ci->ci_cpl = SINT_NET|SINT_TTY;
-			while ((pisr = netisr) != 0) {
-				atomic_clearbits_int(&netisr, pisr);
-				ppc_intr_enable(1);
-				KERNEL_LOCK();
-				softnet(pisr);
-				KERNEL_UNLOCK();
-				ppc_intr_disable();
-			}
+			ppc_intr_enable(1);
+			softintr_dispatch(SI_SOFTNET);
+			ppc_intr_disable();
 			continue;
 		}
 		if((ci->ci_ipending & SINT_TTY) & ~pcpl) {
 			ci->ci_ipending &= ~SINT_TTY;
 			ci->ci_cpl = SINT_TTY;
 			ppc_intr_enable(1);
-			KERNEL_LOCK();
-			softtty();
-			KERNEL_UNLOCK();
+			softintr_dispatch(SI_SOFTTTY);
 			ppc_intr_disable();
 			continue;
 		}
-	} while ((ci->ci_ipending & SINT_MASK) & ~pcpl);
+	} while ((ci->ci_ipending & SINT_ALLMASK) & ~pcpl);
 	ci->ci_cpl = pcpl;	/* Don't use splx... we are here already! */
 
 	atomic_clearbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_SOFT);
@@ -826,22 +814,6 @@ openpic_init()
 
 	install_extint(ext_intr_openpic);
 }
-/*
- * programmer_button function to fix args to Debugger.
- * deal with any enables/disables, if necessary.
- */
-int
-openpic_prog_button (void *arg)
-{
-#ifdef DDB
-	if (db_console)
-		Debugger();
-#else
-	printf("programmer button pressed, debugger not available\n");
-#endif
-	return 1;
-}
-
 
 void
 openpic_ipi_ddb(void)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pdc.c,v 1.31 2008/01/23 16:37:56 jsing Exp $	*/
+/*	$OpenBSD: pdc.c,v 1.38 2010/07/02 17:27:01 nicm Exp $	*/
 
 /*
  * Copyright (c) 1998-2003 Michael Shalayeff
@@ -32,7 +32,6 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/tty.h>
-#include <sys/user.h>
 #include <sys/timeout.h>
 
 #include <dev/cons.h>
@@ -208,7 +207,7 @@ pdcopen(dev, flag, mode, p)
 	if (sc->sc_tty)
 		tp = sc->sc_tty;
 	else {
-		tp = sc->sc_tty = ttymalloc();
+		tp = sc->sc_tty = ttymalloc(0);
 	}
 
 	tp->t_oproc = pdcstart;
@@ -224,14 +223,14 @@ pdcopen(dev, flag, mode, p)
 		ttsetwater(tp);
 
 		setuptimeout = 1;
-	} else if (tp->t_state&TS_XCLUDE && p->p_ucred->cr_uid != 0) {
+	} else if (tp->t_state&TS_XCLUDE && suser(p, 0) != 0) {
 		splx(s);
 		return (EBUSY);
 	}
 	tp->t_state |= TS_CARR_ON;
 	splx(s);
 
-	error = (*linesw[tp->t_line].l_open)(dev, tp);
+	error = (*linesw[tp->t_line].l_open)(dev, tp, p);
 	if (error == 0 && setuptimeout)
 		pdctimeout(sc);
 
@@ -253,7 +252,7 @@ pdcclose(dev, flag, mode, p)
 
 	tp = sc->sc_tty;
 	timeout_del(&sc->sc_to);
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	ttyclose(tp);
 	return 0;
 }
@@ -339,13 +338,7 @@ pdcstart(tp)
 		splx(s);
 		return;
 	}
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
 	tp->t_state |= TS_BUSY;
 	while (tp->t_outq.c_cc != 0)
 		pdccnputc(tp->t_dev, getc(&tp->t_outq));

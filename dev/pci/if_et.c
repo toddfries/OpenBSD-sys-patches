@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_et.c,v 1.18 2009/08/10 19:41:05 deraadt Exp $	*/
+/*	$OpenBSD: if_et.c,v 1.20 2010/05/19 15:27:35 oga Exp $	*/
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
  * 
@@ -850,7 +850,7 @@ et_dma_mem_create(struct et_softc *sc, bus_size_t size,
 	}
 
 	error = bus_dmamem_alloc(sc->sc_dmat, size, ET_ALIGN, 0, seg,
-	    1, &nsegs, BUS_DMA_WAITOK);
+	    1, &nsegs, BUS_DMA_WAITOK | BUS_DMA_ZERO);
 	if (error) {
 		printf("%s: can't allocate DMA mem\n", sc->sc_dev.dv_xname);
 		return error;
@@ -870,8 +870,6 @@ et_dma_mem_create(struct et_softc *sc, bus_size_t size,
 		bus_dmamem_free(sc->sc_dmat, (bus_dma_segment_t *)addr, 1);
 		return error;
 	}
-
-	memset(*addr, 0, size);
 
 	*paddr = (*dmap)->dm_segs[0].ds_addr;
 
@@ -1823,40 +1821,13 @@ et_encap(struct et_softc *sc, struct mbuf **m0)
 		goto back;
 	}
 	if (error) {	/* error == EFBIG */
-		struct mbuf *m_new;
-
-		error = 0;
-
-		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
-		if (m_new == NULL) {
+		if (m_defrag(m, M_DONTWAIT)) {
 			m_freem(m);
 			printf("%s: can't defrag TX mbuf\n",
 			    sc->sc_dev.dv_xname);
 			error = ENOBUFS;
 			goto back;
 		}
-
-		M_DUP_PKTHDR(m_new, m);
-		if (m->m_pkthdr.len > MHLEN) {
-			MCLGET(m_new, M_DONTWAIT);
-			if (!(m_new->m_flags & M_EXT)) {
-				m_freem(m);
-				m_freem(m_new);
-				error = ENOBUFS;
-			}
-		}
-
-		if (error) {
-			printf("%s: can't defrag TX buffer\n",
-			    sc->sc_dev.dv_xname);
-			goto back;
-		}
-
-		m_copydata(m, 0, m->m_pkthdr.len, mtod(m_new, caddr_t));
-		m_freem(m);
-		m_new->m_len = m_new->m_pkthdr.len;
-		*m0 = m = m_new;
-
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, map, m,
 					     BUS_DMA_NOWAIT);
 		if (error || map->dm_nsegs == 0) {

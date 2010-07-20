@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc_mem.c,v 1.12 2009/04/07 16:35:52 blambert Exp $	*/
+/*	$OpenBSD: sdmmc_mem.c,v 1.14 2010/02/10 23:33:08 drahn Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -19,6 +19,7 @@
 /* Routines for SD/MMC memory cards. */
 
 #include <sys/param.h>
+#include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/systm.h>
@@ -94,6 +95,8 @@ sdmmc_mem_enable(struct sdmmc_softc *sc)
 
 	/* Tell the card(s) to enter the idle state (again). */
 	sdmmc_go_idle_state(sc);
+
+	host_ocr &= card_ocr; /* only allow the common voltages */
 
 	if (sdmmc_send_if_cond(sc, card_ocr) == 0)
 		host_ocr |= SD_OCR_SDHC_CAP;

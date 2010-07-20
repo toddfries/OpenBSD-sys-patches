@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_var.h,v 1.12 2009/06/05 00:05:22 claudio Exp $	*/
+/*	$OpenBSD: in_var.h,v 1.15 2010/01/13 07:05:28 henning Exp $	*/
 /*	$NetBSD: in_var.h,v 1.16 1996/02/13 23:42:15 christos Exp $	*/
 
 /*
@@ -47,12 +47,9 @@ struct in_ifaddr {
 	struct	ifaddr ia_ifa;		/* protocol-independent info */
 #define	ia_ifp		ia_ifa.ifa_ifp
 #define ia_flags	ia_ifa.ifa_flags
-					/* ia_{,sub}net{,mask} in host order */
+					/* ia_net{,mask} in host order */
 	u_int32_t ia_net;		/* network number of interface */
 	u_int32_t ia_netmask;		/* mask of net part */
-	u_int32_t ia_subnet;		/* subnet number, including net */
-	u_int32_t ia_subnetmask;	/* mask of subnet part */
-	struct	in_addr ia_netbroadcast; /* to recognize net broadcasts */
 	TAILQ_ENTRY(in_ifaddr) ia_list;	/* list of internet addresses */
 	struct	sockaddr_in ia_addr;	/* reserve space for interface name */
 	struct	sockaddr_in ia_dstaddr;	/* reserve space for broadcast addr */
@@ -96,7 +93,7 @@ do {									\
 	struct in_ifaddr *ia;						\
 									\
 	for (ia = TAILQ_FIRST(&in_ifaddr); ia != TAILQ_END(&in_ifaddr) && \
-	    (ia->ia_ifp->if_rdomain != rdomain || 			\
+	    (ia->ia_ifp->if_rdomain != rtable_l2(rdomain) || 		\
 	    ia->ia_addr.sin_addr.s_addr != (addr).s_addr);		\
 	    ia = TAILQ_NEXT(ia, ia_list))				\
 		 continue;						\

@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbd.c,v 1.20 2009/08/25 19:16:36 miod Exp $ */
+/* $OpenBSD: pckbd.c,v 1.25 2010/07/08 19:29:25 deraadt Exp $ */
 /* $NetBSD: pckbd.c,v 1.24 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -123,7 +123,7 @@ static int pckbd_is_console(pckbc_tag_t, pckbc_slot_t);
 
 int pckbdprobe(struct device *, void *, void *);
 void pckbdattach(struct device *, struct device *, void *);
-int pckbd_activate(struct device *, enum devact);
+int pckbd_activate(struct device *, int);
 
 struct cfattach pckbd_ca = {
 	sizeof(struct pckbd_softc), 
@@ -415,16 +415,14 @@ pckbdattach(parent, self, aux)
 }
 
 int
-pckbd_activate(struct device *self, enum devact act)
+pckbd_activate(struct device *self, int act)
 {
 	switch (act) {
-	case DVACT_ACTIVATE:
-		if (!cold)
-			pckbd_enable(self, 1);
+	case DVACT_SUSPEND:
+		pckbd_enable(self, 0);
 		break;
-	case DVACT_DEACTIVATE:
-		if (!cold)
-			pckbd_enable(self, 0);
+	case DVACT_RESUME:
+		pckbd_enable(self, 1);
 		break;
 	}
 	return (0);

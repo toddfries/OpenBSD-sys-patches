@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ray.c,v 1.38 2009/08/10 22:11:56 deraadt Exp $	*/
+/*	$OpenBSD: if_ray.c,v 1.41 2010/07/02 03:13:42 tedu Exp $	*/
 /*	$NetBSD: if_ray.c,v 1.21 2000/07/05 02:35:54 onoe Exp $	*/
 
 /*
@@ -306,7 +306,7 @@ int ray_cmd_is_running(struct ray_softc *, int);
 int ray_cmd_is_scheduled(struct ray_softc *, int);
 void ray_cmd_done(struct ray_softc *, int);
 int ray_detach(struct device *, int);
-int ray_activate(struct device *, enum devact);
+int ray_activate(struct device *, int);
 void ray_disable(struct ray_softc *);
 void ray_download_params(struct ray_softc *);
 int ray_enable(struct ray_softc *);
@@ -650,7 +650,7 @@ fail:
 }
 
 int
-ray_activate(struct device *dev, enum devact act)
+ray_activate(struct device *dev, int act)
 {
 	struct ray_softc *sc = (struct ray_softc *)dev;
 	struct ifnet *ifp = &sc->sc_if;
@@ -1211,6 +1211,8 @@ ray_intr_start(struct ray_softc *sc)
 		} else if (et > ETHERMTU) {
 			/* adjust for LLC/SNAP header */
 			tmplen= sizeof(struct ieee80211_frame) - ETHER_ADDR_LEN;
+		} else {
+			tmplen = 0;
 		}
 		/* now get our space for the 802.11 frame */
 		M_PREPEND(m0, tmplen, M_DONTWAIT);
@@ -2762,7 +2764,7 @@ ray_start_join_net_done(struct ray_softc *sc, u_int cmd, bus_size_t ccs, u_int s
 				break;
 		}
 		sc->sc_cnwid.i_len = i;
-		memcpy(sc->sc_cnwid.i_nwid, np.p_ssid, sizeof(sc->sc_cnwid));
+		memcpy(sc->sc_cnwid.i_nwid, np.p_ssid, i);
 		sc->sc_omode = sc->sc_mode;
 		if (np.p_net_type != sc->sc_mode)
 			return (ray_start_join_net);

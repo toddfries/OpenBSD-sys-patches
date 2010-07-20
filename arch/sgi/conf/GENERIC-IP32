@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC-IP32,v 1.9 2009/07/16 21:02:54 miod Exp $
+#	$OpenBSD: GENERIC-IP32,v 1.20 2010/07/03 03:59:17 krw Exp $
 #
 # THIS KERNEL IS FOR O2 (IP32) SYSTEMS ONLY.
 #
@@ -28,6 +28,9 @@ option		USER_PCICONF	# User-space PCI configuration
 
 # Define what targets to support
 option		TGT_O2		# O2, O2+
+option		CPU_R5000	# R5000/RM5200 support
+option		CPU_RM7000	# RM7000 support
+option		CPU_R10000	# R10000/R12000/R14000/R16000 support
 
 # Specify storage configuration (it's a joke..)
 config		bsd	swap generic
@@ -46,13 +49,13 @@ macebus0	at mainbus0	# MACE controller localbus.
 gbe0		at mainbus0
 
 # Localbus devices
-mec0		at macebus0 base 0x00280000 irq 4
-mavb0		at macebus0 base 0x00300000 irq 7
-mkbc0		at macebus0 base 0x00320000 irq 6
-com0		at macebus0 base 0x00390000 irq 5
-com1		at macebus0 base 0x00398000 irq 5
+mec0		at macebus0
+mavb0		at macebus0
+mkbc0		at macebus0
+com0		at macebus0 base 0x00390000
+com1		at macebus0 base 0x00398000
 dsrtc0		at macebus0
-power0		at macebus0 irq 6
+power0		at macebus0
 
 #### PCI Bus
 macepcibr0	at macebus0	# MACE controller PCI Bus bridge.
@@ -121,6 +124,7 @@ urtw*		at uhub?	# RealTek 8187
 wi*		at uhub?	# WaveLAN IEEE 802.11DS
 zyd*		at uhub?	# Zydas ZD1211
 ugen*		at uhub?	# USB Generic driver
+uthum*		at uhidev?	# TEMPerHUM sensor
 
 # USB Video
 uvideo*		at uhub?
@@ -133,7 +137,11 @@ ppb*		at pci?		# PCI-PCI bridges
 pci*		at ppb?
 
 #### NICs
+pcn*		at pci?		# AMD PCnet-PCI Ethernet
+epic*		at pci?		# SMC EPIC/100 ethernet
+de*		at pci?		# DC21X4X-based ethernet
 dc*		at pci?		# 21143, "tulip" clone ethernet
+sf*		at pci?		# Adaptec AIC-6915 ethernet
 em*		at pci?		# Intel Pro/1000 ethernet
 ep*		at pci?		# 3Com 3c59x
 fxp*		at pci?		# EtherExpress 10/100B ethernet
@@ -147,11 +155,14 @@ re*		at pci?		# Realtek 8169/8169S/8110S
 rl*		at pci?		# Realtek 81[23]9 ethernet
 hme*		at pci?		# Sun Happy Meal
 gem*		at pci?		# Sun 'gem' ethernet
+cas*		at pci?		# Sun Cassini 100/Gigabit
 skc*		at pci?		# SysKonnect GEnesis 984x
 sk*		at skc?		#  each port of above
 mskc*		at pci?		# Marvell Yukon-2
 msk*		at mskc?	#  each port of above
 bge*		at pci?		# Broadcom BCM570x (aka Tigon3)
+vge*		at pci?		# VIA VT612x
+bnx*		at pci?		# Broadcom BCM5706/5708 GigE
 
 ##### Media Independent Interface (mii) drivers
 exphy*		at mii?		# 3Com internal PHYs
@@ -172,6 +183,7 @@ amphy*		at mii?		# AMD 79C873 PHYs
 tqphy*		at mii?		# TDK 78Q212x PHYs
 bmtphy*		at mii?		# Broadcom 10/100 PHYs
 brgphy*		at mii?		# Broadcom Gigabit PHYs
+ciphy*		at mii?		# Cicada CS8201 10/100/1000 copper PHY
 eephy*		at mii?		# Marvell 88E1000 series PHY
 xmphy*		at mii?		# XaQti XMAC-II PHYs
 nsgphy*		at mii?		# NS gigabit PHYs
@@ -185,9 +197,23 @@ ukphy*		at mii?		# "unknown" PHYs
 wi*		at pci?
 
 #### Audio
-audio*		at mavb?
-emu*		at pci?
+cmpci*		at pci?		# C-Media CMI8338/8738
+eap*		at pci?		# Ensoniq AudioPCI S5016
+emu*		at pci?		# SB Live!
+envy*		at pci?		# VIA Envy24 (aka ICE1712)
+
+audio*		at cmpci?
+audio*		at eap?
 audio*		at emu?
+audio*		at envy?
+audio*		at mavb?
+
+# OPL[23] FM synthesizers
+opl*		at cmpci?
+
+# MIDI support
+midi*		at opl?
+midi*		at eap?
 
 #### WS Console
 wsdisplay*	at gbe?
@@ -203,13 +229,19 @@ sd*		at scsibus?
 st*		at scsibus?
 cd*		at scsibus?
 ch*		at scsibus?
-ss*		at scsibus?
 safte*		at scsibus?
 ses*		at scsibus?
 uk*		at scsibus?
 
 #### Crypto devices
-hifn*		at pci?		# Hi/fn 7751 crypto card
+lofn*		at pci?		# Hifn6500
+hifn*		at pci?		# Hifn7751/7811/7951
+ubsec*		at pci?		# Broadcom 58xx
+
+# PCI "universal" communication device
+puc*	at pci?
+com*	at puc?
+#lpt*	at puc?
 
 pseudo-device	wsmux	2       # Mouse and keyboard multiplexor
 pseudo-device	crypto	1

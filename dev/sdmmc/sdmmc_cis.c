@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc_cis.c,v 1.1 2006/06/01 21:53:41 uwe Exp $	*/
+/*	$OpenBSD: sdmmc_cis.c,v 1.3 2009/11/11 21:59:16 jasper Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -19,6 +19,7 @@
 /* Routines to decode the Card Information Structure of SD I/O cards */
 
 #include <sys/param.h>
+#include <sys/device.h>
 #include <sys/systm.h>
 
 #include <dev/sdmmc/sdmmc_ioreg.h>
@@ -37,6 +38,8 @@ u_int32_t
 sdmmc_cisptr(struct sdmmc_function *sf)
 {
 	u_int32_t cisptr = 0;
+
+	SDMMC_ASSERT_LOCKED(sf->sc);
 
 	/* XXX where is the per-function CIS pointer register? */
 	if (sf->number != 0)
@@ -58,6 +61,8 @@ sdmmc_read_cis(struct sdmmc_function *sf, struct sdmmc_cis *cis)
 	int reg;
 	u_int8_t tplcode;
 	u_int8_t tpllen;
+
+	SDMMC_ASSERT_LOCKED(sf->sc);
 
 	bzero(cis, sizeof *cis);
 

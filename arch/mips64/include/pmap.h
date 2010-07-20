@@ -1,4 +1,4 @@
-/*      $OpenBSD: pmap.h,v 1.14 2007/10/18 04:32:09 miod Exp $ */
+/*      $OpenBSD: pmap.h,v 1.20 2010/02/02 02:49:57 syuu Exp $ */
 
 /*
  * Copyright (c) 1987 Carnegie-Mellon University
@@ -64,14 +64,36 @@
  * dynamically allocated at boot time.
  */
 
+/*
+ * Size of second level page structs (page tables, and segment table) used
+ * by this pmap.
+ */
+
+#define	PMAP_L2SHIFT		12
+#define	PMAP_L2SIZE		(1UL << PMAP_L2SHIFT)
+
+/*
+ * Segment sizes
+ */
+
+/* -2 below is for log2(sizeof pt_entry_t) */
+#define	SEGSHIFT		(PAGE_SHIFT + PMAP_L2SHIFT - 2)
+#define NBSEG			(1UL << SEGSHIFT)
+#define	SEGOFSET		(NBSEG - 1)
+
 #define mips_trunc_seg(x)	((vaddr_t)(x) & ~SEGOFSET)
 #define mips_round_seg(x)	(((vaddr_t)(x) + SEGOFSET) & ~SEGOFSET)
 #define pmap_segmap(m, v)	((m)->pm_segtab->seg_tab[((v) >> SEGSHIFT)])
 
-#define PMAP_SEGTABSIZE		512
+#define PMAP_SEGTABSIZE		(PMAP_L2SIZE / sizeof(void *))
 
 struct segtab {
 	pt_entry_t	*seg_tab[PMAP_SEGTABSIZE];
+};
+
+struct pmap_asid_info {
+	u_int			pma_asid;	/* address space tag */
+	u_int			pma_asidgen;	/* TLB PID generation number */
 };
 
 /*
@@ -81,10 +103,17 @@ typedef struct pmap {
 	int			pm_count;	/* pmap reference count */
 	simple_lock_data_t	pm_lock;	/* lock on pmap */
 	struct pmap_statistics	pm_stats;	/* pmap statistics */
-	int			pm_tlbpid;	/* address space tag */
-	u_int			pm_tlbgen;	/* TLB PID generation number */
 	struct segtab		*pm_segtab;	/* pointers to pages of PTEs */
+	struct pmap_asid_info	pm_asid[1];	/* ASID information */
 } *pmap_t;
+
+/*
+ * Compute the sizeof of a pmap structure.  Subtract one because one
+ * ASID info structure is already included in the pmap structure itself.
+ */
+#define	PMAP_SIZEOF(x)							\
+	(ALIGN(sizeof(struct pmap) +					\
+	       (sizeof(struct pmap_asid_info) * ((x) - 1))))
 
 
 /* flags for pv_entry */
@@ -94,11 +123,11 @@ typedef struct pmap {
 #define	PV_ATTR_REF	PG_PMAP3
 #define	PV_PRESERVE	(PV_ATTR_MOD | PV_ATTR_REF)
 
-extern	struct pmap kernel_pmap_store;
+extern	struct pmap *const kernel_pmap_ptr;
 
 #define pmap_resident_count(pmap)       ((pmap)->pm_stats.resident_count)
 #define	pmap_wired_count(pmap)		((pmap)->pm_stats.wired_count)
-#define pmap_kernel()			(&kernel_pmap_store)
+#define pmap_kernel()			(kernel_pmap_ptr)
 #define	pmap_phys_address(ppn)		ptoa(ppn)
 
 #define	PMAP_STEAL_MEMORY		/* Enable 'stealing' during boot */
@@ -108,7 +137,7 @@ extern	struct pmap kernel_pmap_store;
 #define	pmap_update(x)			do { /* nothing */ } while (0)
 
 void	pmap_bootstrap(void);
-int	pmap_is_page_ro( pmap_t, vaddr_t, int);
+int	pmap_is_page_ro( pmap_t, vaddr_t, pt_entry_t);
 void	pmap_kenter_cache(vaddr_t va, paddr_t pa, vm_prot_t prot, int cache);
 void	pmap_prefer(vaddr_t, vaddr_t *);
 void	pmap_set_modify(vm_page_t);
@@ -119,6 +148,12 @@ void	pmap_page_cache(vm_page_t, int);
 #define pmap_unuse_final(p)		do { /* nothing yet */ } while (0)
 #define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
 
+void pmap_update_user_page(pmap_t, vaddr_t, pt_entry_t);
+#ifdef MULTIPROCESSOR
+void pmap_update_kernel_page(vaddr_t, pt_entry_t);
+#else
+#define pmap_update_kernel_page(va, entry) tlb_update(va, entry)
+#endif
 #endif	/* _KERNEL */
 
 #endif	/* !_MIPS_PMAP_H_ */

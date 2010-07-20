@@ -1,4 +1,4 @@
-/* $OpenBSD: rf_openbsdkintf.c,v 1.52 2009/08/25 18:46:19 deraadt Exp $	*/
+/* $OpenBSD: rf_openbsdkintf.c,v 1.57 2010/06/26 23:24:45 guenther Exp $	*/
 /* $NetBSD: rf_netbsdkintf.c,v 1.109 2001/07/27 03:30:07 oster Exp $	*/
 
 /*-
@@ -111,13 +111,14 @@
 #include <sys/device.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/dkio.h>
 #include <sys/fcntl.h>
 #include <sys/systm.h>
 #include <sys/namei.h>
 #include <sys/conf.h>
 #include <sys/lock.h>
 #include <sys/buf.h>
-#include <sys/user.h>
+#include <sys/proc.h>
 #include <sys/reboot.h>
 
 #include "raid.h"
@@ -229,7 +230,7 @@ int numraid = 0;
 int  rf_probe(struct device *, void *, void *);
 void rf_attach(struct device *, struct device *, void *);
 int  rf_detach(struct device *, int);
-int  rf_activate(struct device *, enum devact);
+int  rf_activate(struct device *, int);
 
 struct cfattach raid_ca = {
 	sizeof(struct raid_softc), rf_probe, rf_attach,
@@ -318,7 +319,7 @@ rf_detach(struct device *self, int flags)
 }
 
 int
-rf_activate(struct device *self, enum devact act)
+rf_activate(struct device *self, int act)
 {
 	return 0;
 }
@@ -2082,9 +2083,7 @@ raidgetdefaultlabel(RF_Raid_t *raidPtr, struct raid_softc *rs,
 	strncpy(lp->d_typename, "raid", sizeof(lp->d_typename));
 	lp->d_type = DTYPE_RAID;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-	lp->d_rpm = 3600;
 	lp->d_flags = 0;
-	lp->d_interleave = 1;
 	lp->d_version = 1;
 
 	DL_SETPOFFSET(&lp->d_partitions[RAW_PART], 0);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.49 2009/08/22 02:54:50 mk Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.53 2010/07/08 20:56:31 jordan Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.28 1997/06/06 23:29:17 thorpej Exp $	*/
 
 /*-
@@ -651,5 +651,22 @@ pci_init_extents(void)
 				printf("memory map conflict 0x%llx/0x%llx\n",
 				    bmp->addr, bmp->size);
 		}
+
+		/* Take out the video buffer area and BIOS areas. */
+		extent_alloc_region(pcimem_ex, IOM_BEGIN, IOM_SIZE,
+		    EX_CONFLICTOK | EX_NOWAIT);
 	}
+}
+
+#include "acpi.h"
+#if NACPI > 0
+void acpi_pci_match(struct device *, struct pci_attach_args *);
+#endif
+
+void
+pci_dev_postattach(struct device *dev, struct pci_attach_args *pa)
+{
+#if NACPI > 0
+	acpi_pci_match(dev, pa);
+#endif
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.22 2009/08/30 14:57:41 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.26 2010/06/27 13:28:46 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -48,7 +48,7 @@
 #include <sys/tty.h>
 #include <sys/user.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <machine/bat.h>
 #include <machine/bus.h>
@@ -56,8 +56,6 @@
 #include <machine/pio.h>
 #include <machine/powerpc.h>
 #include <machine/trap.h>
-
-#include <net/netisr.h>
 
 #include <dev/cons.h>
 
@@ -87,10 +85,19 @@ int bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 struct bat battable[16];
 
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
 
 int ppc_malloc_ok = 0;
 
@@ -476,21 +483,6 @@ dumpsys(void)
 }
 
 int imask[IPL_NUM];
-
-int netisr;
-
-/*
- * Soft networking interrupts.
- */
-void
-softnet(int isr)
-{
-#define DONETISR(flag, func) \
-	if (isr & (1 << flag))\
-		func();
-
-#include <net/netisr_dispatch.h>
-}
 
 int
 lcsplx(int ipl)
@@ -1138,40 +1130,32 @@ do_pending_int(void)
 			ci->ci_cpl = SINT_CLOCK|SINT_NET|SINT_TTY;
 			ppc_intr_enable(1);
 			KERNEL_LOCK();
-			softclock();
+			softintr_dispatch(SI_SOFTCLOCK);
 			KERNEL_UNLOCK();
 			ppc_intr_disable();
 			continue;
 		}
 		if((ci->ci_ipending & SINT_NET) & ~pcpl) {
-			extern int netisr;
-			int pisr;
-		       
 			ci->ci_ipending &= ~SINT_NET;
 			ci->ci_cpl = SINT_NET|SINT_TTY;
-			while ((pisr = netisr) != 0) {
-				atomic_clearbits_int(&netisr, pisr);
-				ppc_intr_enable(1);
-				KERNEL_LOCK();
-				softnet(pisr);
-				KERNEL_UNLOCK();
-				ppc_intr_disable();
-			}
+			ppc_intr_enable(1);
+			KERNEL_LOCK();
+			softintr_dispatch(SI_SOFTNET);
+			KERNEL_UNLOCK();
+			ppc_intr_disable();
 			continue;
 		}
-#if 0
 		if((ci->ci_ipending & SINT_TTY) & ~pcpl) {
 			ci->ci_ipending &= ~SINT_TTY;
 			ci->ci_cpl = SINT_TTY;
 			ppc_intr_enable(1);
 			KERNEL_LOCK();
-			softtty();
+			softintr_dispatch(SI_SOFTTTY);
 			KERNEL_UNLOCK();
 			ppc_intr_disable();
 			continue;
 		}
-#endif
-	} while ((ci->ci_ipending & SINT_MASK) & ~pcpl);
+	} while ((ci->ci_ipending & SINT_ALLMASK) & ~pcpl);
 	ci->ci_cpl = pcpl;	/* Don't use splx... we are here already! */
 
 	ci->ci_iactive = 0;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.19 2009/08/18 19:31:56 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.51 2010/05/09 18:37:47 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -37,15 +37,22 @@
 #include <machine/cpu.h>
 #include <machine/memconf.h>
 #include <machine/mnode.h>
+#include <machine/atomic.h>
 
 #include <uvm/uvm_extern.h>
 
 #include <sgi/sgi/ip27.h>
+#include <sgi/sgi/l1.h>
 #include <sgi/xbow/hub.h>
+#include <sgi/xbow/widget.h>
 #include <sgi/xbow/xbow.h>
-#include <sgi/xbow/xbridgereg.h>
 
+#include <sgi/pci/iofreg.h>
 #include <dev/ic/comvar.h>
+
+#include <dev/cons.h>
+
+extern char *hw_prod;
 
 extern void (*md_halt)(int);
 
@@ -53,43 +60,124 @@ paddr_t	ip27_widget_short(int16_t, u_int);
 paddr_t	ip27_widget_long(int16_t, u_int);
 paddr_t	ip27_widget_map(int16_t, u_int,bus_addr_t *, bus_size_t *);
 int	ip27_widget_id(int16_t, u_int, uint32_t *);
+int	ip27_widget_id_early(int16_t, u_int, uint32_t *);
 
 void	ip27_halt(int);
 
 unsigned int xbow_long_shift = 29;
 
 static paddr_t io_base;
-static gda_t *gda;
 static int ip35 = 0;
-static uint maxnodes;
+uint	 maxnodes;
+gda_t	*gda;
 
 int	ip27_hub_intr_register(int, int, int *);
 int	ip27_hub_intr_establish(int (*)(void *), void *, int, int,
-	    const char *);
+	    const char *, struct intrhand *);
 void	ip27_hub_intr_disestablish(int);
-intrmask_t ip27_hub_intr_handler(intrmask_t, struct trap_frame *);
-void	ip27_hub_intr_makemasks(void);
-void	ip27_hub_do_pending_int(int);
+void	ip27_hub_intr_clear(int);
+void	ip27_hub_intr_set(int);
+uint32_t hubpi_intr0(uint32_t, struct trap_frame *);
+uint32_t hubpi_intr1(uint32_t, struct trap_frame *);
+void	ip27_hub_intr_makemasks0(void);
+void	ip27_hub_intr_makemasks1(void);
+void	ip27_hub_setintrmask(int);
+void	ip27_hub_splx(int);
 
 void	ip27_attach_node(struct device *, int16_t);
 int	ip27_print(void *, const char *);
 void	ip27_nmi(void *);
 
+/*
+ * IP27 interrupt handling declarations: 128 hw sources, plus timers and
+ * hub error sources; 5 levels.
+ */
+
+struct intrhand *hubpi_intrhand0[HUBPI_NINTS];
+struct intrhand *hubpi_intrhand1[HUBPI_NINTS];
+
+#ifdef notyet
+#define	INTPRI_XBOW_HUB		(INTPRI_CLOCK + 1)	/* HUB errors */
+#define	INTPRI_XBOW_TIMER	(INTPRI_XBOW_HUB + 1)	/* prof timer */
+#define	INTPRI_XBOW_CLOCK	(INTPRI_XBOW_TIMER + 1)	/* RTC */
+#define	INTPRI_XBOW_HW1		(INTPRI_XBOW_CLOCK + 1)	/* HW level 1 */
+#else
+#define	INTPRI_XBOW_HW1		(INTPRI_CLOCK + 1)	/* HW level 1 */
+#endif
+#define	INTPRI_XBOW_HW0		(INTPRI_XBOW_HW1 + 1)	/* HW level 0 */
+
+struct {
+	uint64_t hw[2];
+} hubpi_intem, hubpi_imask[NIPLS];
+
 void
 ip27_setup()
 {
-	size_t gsz;
-	uint node;
+	struct ip27_config *ip27_config;
+	uint64_t synergy0_0;
+	console_t *cons;
 	nmi_t *nmi;
+	static char unknown_model[20];
 
 	uncached_base = PHYS_TO_XKPHYS_UNCACHED(0, SP_NC);
 	io_base = PHYS_TO_XKPHYS_UNCACHED(0, SP_IO);
 
-	ip35 = sys_config.system_type == SGI_O300;
+	ip35 = sys_config.system_type == SGI_IP35;
+
+	if (ip35) {
+		/*
+		 * Get brick model type.
+		 * We need to access the Synergy registers through the remote
+		 * HUB interface, local access is protected on some models.
+		 * Synergy0 register #0 is a 16 bits identification register.
+		 */
+		synergy0_0 = IP27_RHSPEC_L(0, HSPEC_SYNERGY(0, 0));
+		sys_config.system_subtype = (synergy0_0 & 0xf000) >> 12;
+		switch (sys_config.system_subtype) {
+		case IP35_O350:	/* Chimera */
+			hw_prod = "Origin 350";
+			break;
+		case IP35_FUEL:	/* Asterix */
+			hw_prod = "Fuel";
+			break;
+		case IP35_O300:	/* Speedo2 */
+			hw_prod = "Origin 300";
+			break;
+		case IP35_CBRICK:
+			/* regular C-Brick, must be an Origin 3000 system */
+			hw_prod = "Origin 3000";
+			break;
+		default:
+			snprintf(unknown_model, sizeof unknown_model,
+			    "Unknown IP35 type %x", sys_config.system_subtype);
+			hw_prod = unknown_model;
+			break;
+		}
+	} else {
+		ip27_config = (struct ip27_config *)
+		    IP27_LHSPEC_ADDR(LBOOTBASE_IP27 + IP27_CONFIG_OFFSET);
+		if (ip27_config->magic == IP27_CONFIG_MAGIC)
+			sys_config.system_subtype = ip27_config->ip27_subtype;
+		else
+			sys_config.system_subtype = IP27_UNKNOWN;
+		switch (sys_config.system_subtype) {
+		case IP27_O2K:
+			hw_prod = "Origin 2000";
+			break;
+		case IP27_O200:
+			hw_prod = "Origin 200";
+			break;
+		default:
+			snprintf(unknown_model, sizeof unknown_model,
+			    "Unknown IP27 type %x", sys_config.system_subtype);
+			hw_prod = unknown_model;
+			break;
+		}
+	}
 
 	xbow_widget_base = ip27_widget_short;
 	xbow_widget_map = ip27_widget_map;
-	xbow_widget_id = ip27_widget_id;
+	xbow_widget_id = ip27_widget_id_early;
 
 	md_halt = ip27_halt;
 
@@ -103,52 +191,45 @@ ip27_setup()
 		xbow_long_shift = 28;
 
 	/*
-	 * Get a grip on the global data area, and figure out how many
-	 * theoretical nodes are available.
-	 */
-
-	gda = IP27_GDA(0);
-	gsz = IP27_GDA_SIZE(0);
-	if (gda->magic != GDA_MAGIC || gda->ver < 2) {
-		masternasid = 0;
-		maxnodes = 0;
-	} else {
-		masternasid = gda->masternasid;
-		maxnodes = (gsz - offsetof(gda_t, nasid)) / sizeof(int16_t);
-		if (maxnodes > GDA_MAXNODES)
-			maxnodes = GDA_MAXNODES;
-		/* in M mode, there can't be more than 64 nodes anyway */
-		if (kl_n_mode == 0 && maxnodes > 64)
-			maxnodes = 64;
-	}
-
-	/*
-	 * Scan all nodes configurations to find out CPU and memory
-	 * information, starting with the master node.
-	 */
-
-	kl_scan_config(masternasid);
-	for (node = 0; node < maxnodes; node++) {
-		if (gda->nasid[node] < 0)
-			continue;
-		if (gda->nasid[node] == masternasid)
-			continue;
-		kl_scan_config(gda->nasid[node]);
-	}
-	kl_scan_done();
-
-	/*
 	 * Initialize the early console parameters.
-	 * This assumes IOC3 is accessible through a widget small window.
+	 * This assumes it is either on IOC3 or IOC4, accessible through
+	 * a widget small window.
+	 *
+	 * Since IOC3 and IOC4 use different clocks, we need to tell them
+	 * apart early. We rely on the serial port offset within the IOC
+	 * space.
 	 */
 
-	xbow_build_bus_space(&sys_config.console_io, 0, 8 /* whatever */);
-	/* Constrain to the correct window */
+	cons = kl_get_console();
+	xbow_build_bus_space(&sys_config.console_io, 0,
+	    8 /* whatever nonzero */);
+	/* point to devio base */
 	sys_config.console_io.bus_base =
-	    kl_get_console_base() & 0xffffffffff000000UL;
+	    cons->uart_base & 0xfffffffffff00000UL;
+	comconsaddr = cons->uart_base & 0x00000000000fffffUL;
+	comconsrate = cons->baud;
+	if (comconsrate < 50 || comconsrate > 115200)
+		comconsrate = 9600;
+	if ((comconsaddr & 0xfff) < 0x380) {
+		/* IOC3 */
+		comconsfreq = 22000000 / 3;
+	} else {
+		/* IOC4 */
+		uint32_t ioc4_mcr;
+		paddr_t ioc4_base;
 
-	comconsaddr = kl_get_console_base() & 0x0000000000ffffffUL;
-	comconsfreq = 22000000 / 3;
+		/*
+		 * IOC4 clocks are derived from the PCI clock,
+		 * so we need to figure out whether this is an 66MHz
+		 * or a 33MHz bus.
+		 */
+		ioc4_base = sys_config.console_io.bus_base;
+		ioc4_mcr = *(volatile uint32_t *)(ioc4_base + IOC4_MCR);
+		if (ioc4_mcr & IOC4_MCR_PCI_66MHZ)
+			comconsfreq = 66666667;
+		else
+			comconsfreq = 33333333;
+	}
 	comconsiot = &sys_config.console_io;
 
 	/*
@@ -159,9 +240,12 @@ ip27_setup()
 	xbow_intr_widget_intr_register = ip27_hub_intr_register;
 	xbow_intr_widget_intr_establish = ip27_hub_intr_establish;
 	xbow_intr_widget_intr_disestablish = ip27_hub_intr_disestablish;
+	xbow_intr_widget_intr_clear = ip27_hub_intr_clear;
+	xbow_intr_widget_intr_set = ip27_hub_intr_set;
 
-	set_intr(INTPRI_XBOWMUX, CR_INT_0, ip27_hub_intr_handler);
-	register_pending_int_handler(ip27_hub_do_pending_int);
+	set_intr(INTPRI_XBOW_HW1, CR_INT_1, hubpi_intr1);
+	set_intr(INTPRI_XBOW_HW0, CR_INT_0, hubpi_intr0);
+	register_splx_handler(ip27_hub_splx);
 
 	/*
 	 * Disable all hardware interrupts.
@@ -173,7 +257,14 @@ ip27_setup()
 	IP27_LHUB_S(HUBPI_CPU1_IMR1, 0);
 	(void)IP27_LHUB_L(HUBPI_IR0);
 	(void)IP27_LHUB_L(HUBPI_IR1);
-	/* XXX do the other two cpus on IP35 */
+	if (ip35) {
+		IP27_RHUB_PI_S(masternasid, 1, HUBPI_CPU0_IMR0, 0);
+		IP27_RHUB_PI_S(masternasid, 1, HUBPI_CPU0_IMR1, 0);
+		IP27_RHUB_PI_S(masternasid, 1, HUBPI_CPU1_IMR0, 0);
+		IP27_RHUB_PI_S(masternasid, 1, HUBPI_CPU1_IMR1, 0);
+		(void)IP27_RHUB_PI_L(masternasid, 1, HUBPI_IR0);
+		(void)IP27_RHUB_PI_L(masternasid, 1, HUBPI_IR1);
+	}
 
 	/*
 	 * Setup NMI handler.
@@ -189,6 +280,14 @@ ip27_setup()
 	 */
 	IP27_LHUB_S(HUBPI_REGION_PRESENT, 0xffffffffffffffff);
 	IP27_LHUB_S(HUBPI_CALIAS_SIZE, PI_CALIAS_SIZE_0);
+	if (ip35) {
+		IP27_RHUB_PI_S(masternasid, 1,
+		    HUBPI_REGION_PRESENT, 0xffffffffffffffff);
+		IP27_RHUB_PI_S(masternasid, 1,
+		    HUBPI_CALIAS_SIZE, PI_CALIAS_SIZE_0);
+	}
+
+	_device_register = dksc_device_register;
 }
 
 /*
@@ -198,20 +297,26 @@ ip27_setup()
 void
 ip27_autoconf(struct device *parent)
 {
-	struct confargs nca;
+	union {
+		struct mainbus_attach_args maa;
+		struct cpu_attach_args caa;
+	} u;
 	uint node;
+
+	xbow_widget_id = ip27_widget_id;
 
 	/*
 	 * Attach the CPU we are running on early; other processors,
 	 * if any, will get attached as they are discovered.
 	 */
 
-	bzero(&nca, sizeof nca);
-	nca.ca_nasid = masternasid;
-	nca.ca_name = "cpu";
-	config_found(parent, &nca, ip27_print);
-	nca.ca_name = "clock";
-	config_found(parent, &nca, ip27_print);
+	bzero(&u, sizeof u);
+	u.maa.maa_name = "cpu";
+	u.maa.maa_nasid = currentnasid = masternasid;
+	u.caa.caa_hw = &bootcpu_hwinfo;
+	config_found(parent, &u, ip27_print);
+	u.maa.maa_name = "clock";
+	config_found(parent, &u, ip27_print);
 
 	/*
 	 * Now attach all nodes' I/O devices.
@@ -230,20 +335,42 @@ ip27_autoconf(struct device *parent)
 void
 ip27_attach_node(struct device *parent, int16_t nasid)
 {
-	struct confargs nca;
+	union {
+		struct mainbus_attach_args maa;
+		struct spdmem_attach_args saa;
+	} u;
+	uint dimm;
+	void *match;
 
-	bzero(&nca, sizeof nca);
-	nca.ca_name = "xbow";
-	nca.ca_nasid = nasid;
-	config_found(parent, &nca, ip27_print);
+	currentnasid = nasid;
+	bzero(&u, sizeof u);
+	if (ip35) {
+		u.maa.maa_name = "spdmem";
+		u.maa.maa_nasid = nasid;
+		for (dimm = 0; dimm < L1_SPD_DIMM_MAX; dimm++) {
+			u.saa.dimm = dimm;
+			/*
+			 * inline config_found_sm() without printing a message
+			 * if match() fails, to avoid getting
+			 * ``spdmem not configured'' for empty memory slots.
+			 */
+			if ((match = config_search(NULL, parent, &u)) != NULL)
+				config_attach(parent, match, &u, ip27_print);
+		}
+	}
+	u.maa.maa_name = "xbow";
+	u.maa.maa_nasid = nasid;
+	config_found(parent, &u, ip27_print);
 }
 
 int
 ip27_print(void *aux, const char *pnp)
 {
-	struct confargs *ca = aux;
+	struct mainbus_attach_args *maa = aux;
 
-	printf(" nasid %d", ca->ca_nasid);
+	if (pnp != NULL)
+		printf("%s at %s", maa->maa_name, pnp);
+	printf(" nasid %d", maa->maa_nasid);
 
 	return UNCONF;
 }
@@ -391,6 +518,28 @@ ip27_widget_id(int16_t nasid, u_int widget, uint32_t *wid)
 }
 
 /*
+ * Same as the above, but usable before we can handle faults.
+ * Expects the caller to only use valid widget numbers...
+ */
+int
+ip27_widget_id_early(int16_t nasid, u_int widget, uint32_t *wid)
+{
+	paddr_t wpa;
+
+	if (widget != 0)
+	{
+		if (widget < WIDGET_MIN || widget > WIDGET_MAX)
+			return EINVAL;
+	}
+
+	wpa = ip27_widget_short(nasid, widget);
+	if (wid != NULL)
+		*wid = *(uint32_t *)(wpa + (WIDGET_ID | 4));
+
+	return 0;
+}
+
+/*
  * Reboot code
  */
 
@@ -418,16 +567,28 @@ ip27_halt(int howto)
 		else
 			promop = GDA_PROMOP_EIM;
 #else
-		if (howto & RB_POWERDOWN)
-			printf("Software powerdown not supported, "
-			    "please switch off power manually.\n");
-		for (;;) ;
-		/* NOTREACHED */
+		if (howto & RB_POWERDOWN) {
+			if (ip35) {
+				l1_exec_command(masternasid, "* pwr d");
+				delay(1000000);
+				printf("Powerdown failed, "
+				    "please switch off power manually.\n");
+			} else {
+				printf("Software powerdown not supported, "
+				    "please switch off power manually.\n");
+			}
+			for (;;) ;
+		} else {
+			printf("System halted.\n"
+			    "Press any key to restart\n");
+			cngetc();
+			promop = GDA_PROMOP_REBOOT;
+		}
 #endif
 	} else
 		promop = GDA_PROMOP_REBOOT;
 
-	promop |= GDA_PROMOP_MAGIC | GDA_PROMOP_NO_DIAGS |
+	promop |= GDA_PROMOP_MAGIC | /* GDA_PROMOP_NO_DIAGS | */
 	    GDA_PROMOP_NO_MEMINIT;
 
 #if 0
@@ -477,8 +638,6 @@ ip27_halt(int howto)
  * Local HUB interrupt handling routines
  */
 
-uint64_t ip27_hub_intrmask;
-
 /*
  * Find a suitable interrupt bit for the given interrupt.
  */
@@ -488,18 +647,25 @@ ip27_hub_intr_register(int widget, int level, int *intrbit)
 	int bit;
 
 	/*
-	 * All interrupts will be serviced at hardware level 0,
-	 * so the `level' argument can be ignored.
-	 * On HUB, the low 7 bits of the level 0 interrupt register
-	 * are reserved.
+	 * Try to allocate a bit on hardware level 0 first.
 	 */
-	for (bit = SPL_CLOCK - 1; bit >= 7; bit--)
-		if ((ip27_hub_intrmask & (1 << bit)) == 0)
-			break;
+	for (bit = HUBPI_INTR0_WIDGET_MAX; bit >= HUBPI_INTR0_WIDGET_MIN; bit--)
+		if ((hubpi_intem.hw[0] & (1UL << bit)) == 0)
+			goto found;
 
-	if (bit < 7)
-		return EINVAL;
+	/*
+	 * If all level 0 sources are in use, try to allocate a bit on
+	 * level 1.
+	 */
+	for (bit = HUBPI_INTR1_WIDGET_MAX; bit >= HUBPI_INTR1_WIDGET_MIN; bit--)
+		if ((hubpi_intem.hw[1] & (1UL << bit)) == 0) {
+			bit += HUBPI_NINTS;
+			goto found;
+		}
 
+	return EINVAL;
+
+found:
 	*intrbit = bit;
 	return 0;
 }
@@ -509,25 +675,40 @@ ip27_hub_intr_register(int widget, int level, int *intrbit)
  */
 int
 ip27_hub_intr_establish(int (*func)(void *), void *arg, int intrbit,
-    int level, const char *name)
+    int level, const char *name, struct intrhand *ihstore)
 {
-	struct intrhand *ih;
+	struct intrhand *ih, **anchor;
+	int s;
 
 #ifdef DIAGNOSTIC
-	if (intrbit < 0 || intrbit >= SPL_CLOCK)
+	if (intrbit < 0 || intrbit >= HUBPI_NINTS + HUBPI_NINTS)
 		return EINVAL;
 #endif
 
 	/*
 	 * Widget interrupts are not supposed to be shared - the interrupt
-	 * mask is large enough for all widgets.
+	 * mask is supposedly large enough for all interrupt sources.
+	 *
+	 * XXX On systems with many widgets and/or nodes, this assumption
+	 * XXX will no longer stand; we'll need to implement interrupt
+	 * XXX sharing at some point.
 	 */
-	if (intrhand[intrbit] != NULL)
+	if (intrbit >= HUBPI_NINTS)
+		anchor = &hubpi_intrhand1[intrbit % HUBPI_NINTS];
+	else
+		anchor = &hubpi_intrhand0[intrbit];
+	if (*anchor != NULL)
 		return EEXIST;
 
-	ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT);
-	if (ih == NULL)
-		return ENOMEM;
+	if (ihstore == NULL) {
+		ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT);
+		if (ih == NULL)
+			return ENOMEM;
+		ih->ih_flags = IH_ALLOCATED;
+	} else {
+		ih = ihstore;
+		ih->ih_flags = 0;
+	}
 
 	ih->ih_next = NULL;
 	ih->ih_fun = func;
@@ -537,15 +718,18 @@ ip27_hub_intr_establish(int (*func)(void *), void *arg, int intrbit,
 	if (name != NULL)
 		evcount_attach(&ih->ih_count, name, &ih->ih_level,
 		    &evcount_intr);
-	intrhand[intrbit] = ih;
 
-	ip27_hub_intrmask |= 1UL << intrbit;
-	ip27_hub_intr_makemasks();
+	s = splhigh();
 
-	/* XXX this assumes we run on cpu0 */
-	IP27_LHUB_S(HUBPI_CPU0_IMR0,
-	    IP27_LHUB_L(HUBPI_CPU0_IMR0) | (1UL << intrbit));
-	(void)IP27_LHUB_L(HUBPI_IR0);
+	*anchor = ih;
+
+	hubpi_intem.hw[intrbit / HUBPI_NINTS] |= 1UL << (intrbit % HUBPI_NINTS);
+	if (intrbit / HUBPI_NINTS != 0)
+		ip27_hub_intr_makemasks1();
+	else
+		ip27_hub_intr_makemasks0();
+
+	splx(s);	/* causes hw mask update */
 
 	return 0;
 }
@@ -553,183 +737,145 @@ ip27_hub_intr_establish(int (*func)(void *), void *arg, int intrbit,
 void
 ip27_hub_intr_disestablish(int intrbit)
 {
-	struct intrhand *ih;
+	struct intrhand *ih, **anchor;
 	int s;
 
 #ifdef DIAGNOSTIC
-	if (intrbit < 0 || intrbit >= SPL_CLOCK)
+	if (intrbit < 0 || intrbit >= HUBPI_NINTS + HUBPI_NINTS)
 		return;
 #endif
 
+	if (intrbit >= HUBPI_NINTS)
+		anchor = &hubpi_intrhand1[intrbit % HUBPI_NINTS];
+	else
+		anchor = &hubpi_intrhand0[intrbit];
+
 	s = splhigh();
 
-	if ((ih = intrhand[intrbit]) == NULL) {
+	if ((ih = *anchor) == NULL) {
 		splx(s);
 		return;
 	}
 
-	/* XXX this assumes we run on cpu0 */
-	IP27_LHUB_S(HUBPI_CPU0_IMR0,
-	    IP27_LHUB_L(HUBPI_CPU0_IMR0) & ~(1UL << intrbit));
-	(void)IP27_LHUB_L(HUBPI_IR0);
+	*anchor = NULL;
 
-	intrhand[intrbit] = NULL;
-
-	ip27_hub_intrmask &= ~(1UL << intrbit);
-	ip27_hub_intr_makemasks();
-
-	free(ih, M_DEVBUF);
+	hubpi_intem.hw[intrbit / HUBPI_NINTS] &=
+	    ~(1UL << (intrbit % HUBPI_NINTS));
+	if (intrbit / HUBPI_NINTS != 0)
+		ip27_hub_intr_makemasks1();
+	else
+		ip27_hub_intr_makemasks0();
 
 	splx(s);
-}
 
-/*
- * Recompute interrupt masks.
- */
-void
-ip27_hub_intr_makemasks()
-{
-	int irq, level;
-	struct intrhand *q;
-	intrmask_t intrlevel[INTMASKSIZE];
-
-	/* First, figure out which levels each IRQ uses. */
-	for (irq = 0; irq < INTMASKSIZE; irq++) {
-		int levels = 0;
-		for (q = intrhand[irq]; q; q = q->ih_next)
-			levels |= 1 << q->ih_level;
-		intrlevel[irq] = levels;
-	}
-
-	/* Then figure out which IRQs use each level. */
-	for (level = IPL_NONE; level < NIPLS; level++) {
-		int irqs = 0;
-		for (irq = 0; irq < INTMASKSIZE; irq++)
-			if (intrlevel[irq] & (1 << level))
-				irqs |= 1 << irq;
-		if (level != IPL_NONE)
-			irqs |= SINT_ALLMASK;
-		imask[level] = irqs;
-	}
-
-	/*
-	 * There are tty, network and disk drivers that use free() at interrupt
-	 * time, so vm > (tty | net | bio).
-	 *
-	 * Enforce a hierarchy that gives slow devices a better chance at not
-	 * dropping data.
-	 */
-	imask[IPL_NET] |= imask[IPL_BIO];
-	imask[IPL_TTY] |= imask[IPL_NET];
-	imask[IPL_VM] |= imask[IPL_TTY];
-	imask[IPL_CLOCK] |= imask[IPL_VM] | SPL_CLOCKMASK;
-
-	/*
-	 * These are pseudo-levels.
-	 */
-	imask[IPL_NONE] = 0;
-	imask[IPL_HIGH] = -1;
-
-	hw_setintrmask(0);
+	if (ISSET(ih->ih_flags, IH_ALLOCATED))
+		free(ih, M_DEVBUF);
 }
 
 void
-ip27_hub_do_pending_int(int newcpl)
+ip27_hub_intr_clear(int intrbit)
 {
-	/* Update masks to new cpl. Order highly important! */
-	__asm__ (" .set noreorder\n");
-	cpl = newcpl;
-	__asm__ (" sync\n .set reorder\n");
-	hw_setintrmask(newcpl);
+	IP27_RHUB_PI_S(masternasid, 0, HUBPI_IR_CHANGE, PI_IR_CLR | intrbit);
+}
+
+void
+ip27_hub_intr_set(int intrbit)
+{
+	IP27_RHUB_PI_S(masternasid, 0, HUBPI_IR_CHANGE, PI_IR_SET | intrbit);
+}
+
+void
+ip27_hub_splx(int newipl)
+{
+	struct cpu_info *ci = curcpu();
+
+	/* Update masks to new ipl. Order highly important! */
+	__asm__ (".set noreorder\n");
+	ci->ci_ipl = newipl;
+	__asm__ ("sync\n\t.set reorder\n");
+	if (CPU_IS_PRIMARY(ci))
+		ip27_hub_setintrmask(newipl);
 	/* If we still have softints pending trigger processing. */
-	if (ipending & SINT_ALLMASK & ~newcpl)
+	if (ci->ci_softpending && newipl < IPL_SOFTINT)
 		setsoftintr0();
 }
 
-intrmask_t
-ip27_hub_intr_handler(intrmask_t hwpend, struct trap_frame *frame)
-{
-	uint64_t imr, isr;
-	int icpl;
-	int bit;
-	intrmask_t mask;
-	struct intrhand *ih;
-	int rc;
+/*
+ * Level 0 and level 1 interrupt dispatchers.
+ */
 
-	/* XXX this assumes we run on cpu0 */
-	isr = IP27_LHUB_L(HUBPI_IR0);
-	imr = IP27_LHUB_L(HUBPI_CPU0_IMR0);
+#define	INTR_FUNCTIONNAME	hubpi_intr0
+#define	MASK_FUNCTIONNAME	ip27_hub_intr_makemasks0
+#define	INTR_LOCAL_DECLS
+#define	MASK_LOCAL_DECLS
+#define	INTR_GETMASKS \
+do { \
+	/* XXX this assumes we run on cpu0 */ \
+	isr = IP27_LHUB_L(HUBPI_IR0); \
+	imr = IP27_LHUB_L(HUBPI_CPU0_IMR0); \
+	bit = HUBPI_INTR0_WIDGET_MAX; \
+} while (0)
+#define	INTR_MASKPENDING \
+do { \
+	IP27_LHUB_S(HUBPI_CPU0_IMR0, imr & ~isr); \
+	(void)IP27_LHUB_L(HUBPI_IR0); \
+} while (0)
+#define	INTR_IMASK(ipl)		hubpi_imask[ipl].hw[0]
+#define	INTR_HANDLER(bit)	hubpi_intrhand0[bit]
+#define	INTR_SPURIOUS(bit) \
+do { \
+	printf("spurious interrupt, source %d\n", bit); \
+} while (0)
+#define	INTR_MASKRESTORE \
+do { \
+	IP27_LHUB_S(HUBPI_CPU0_IMR0, imr); \
+	(void)IP27_LHUB_L(HUBPI_IR0); \
+} while (0)
+#define	INTR_MASKSIZE	HUBPI_NINTS
 
-	isr &= imr;
-	if (isr == 0)
-		return 0;	/* not for us */
+#include <sgi/sgi/intr_template.c>
 
-	/*
-	 * Mask all pending interrupts.
-	 */
-	IP27_LHUB_S(HUBPI_CPU0_IMR0, imr & ~isr);
-	(void)IP27_LHUB_L(HUBPI_IR0);
+#define	INTR_FUNCTIONNAME	hubpi_intr1
+#define	MASK_FUNCTIONNAME	ip27_hub_intr_makemasks1
+#define	INTR_LOCAL_DECLS
+#define	MASK_LOCAL_DECLS
+#define	INTR_GETMASKS \
+do { \
+	/* XXX this assumes we run on cpu0 */ \
+	isr = IP27_LHUB_L(HUBPI_IR1); \
+	imr = IP27_LHUB_L(HUBPI_CPU0_IMR1); \
+	bit = HUBPI_INTR1_WIDGET_MAX; \
+} while (0)
+#define	INTR_MASKPENDING \
+do { \
+	IP27_LHUB_S(HUBPI_CPU0_IMR1, imr & ~isr); \
+	(void)IP27_LHUB_L(HUBPI_IR1); \
+} while (0)
+#define	INTR_IMASK(ipl)		hubpi_imask[ipl].hw[1]
+#define	INTR_HANDLER(bit)	hubpi_intrhand1[bit]
+#define	INTR_SPURIOUS(bit) \
+do { \
+	printf("spurious interrupt, source %d\n", bit + HUBPI_NINTS); \
+} while (0)
+#define	INTR_MASKRESTORE \
+do { \
+	IP27_LHUB_S(HUBPI_CPU0_IMR1, imr); \
+	(void)IP27_LHUB_L(HUBPI_IR1); \
+} while (0)
+#define	INTR_MASKSIZE	HUBPI_NINTS
 
-	/*
-	 * If interrupts are spl-masked, mark them as pending only.
-	 */
-	if ((mask = isr & frame->cpl) != 0) {
-		atomic_setbits_int(&ipending, mask);
-		isr &= ~mask;
-		imr &= ~mask;
-	}
-
-	/*
-	 * Now process unmasked interrupts.
-	 */
-	if (isr != 0) {
-		atomic_clearbits_int(&ipending, isr);
-
-		__asm__ (" .set noreorder\n");
-		icpl = cpl;
-		__asm__ (" sync\n .set reorder\n");
-
-		/* XXX Rework this to dispatch in decreasing levels */
-		for (bit = SPL_CLOCK - 1, mask = 1 << bit; bit >= 7;
-		    bit--, mask >>= 1) {
-			if ((isr & mask) == 0)
-				continue;
-
-			rc = 0;
-			for (ih = intrhand[bit]; ih != NULL; ih = ih->ih_next) {
-				splraise(imask[ih->ih_level]);
-				ih->frame = frame;
-				if ((*ih->ih_fun)(ih->ih_arg) != 0) {
-					rc = 1;
-					ih->ih_count.ec_count++;
-				}
-			}
-			if (rc == 0)
-				printf("spurious interrupt, source %d\n", bit);
-
-			if ((isr ^= mask) == 0)
-				break;
-		}
-
-		/*
-		 * Reenable interrupts which have been serviced.
-		 */
-		IP27_LHUB_S(HUBPI_CPU0_IMR0, imr);
-		(void)IP27_LHUB_L(HUBPI_IR0);
-		
-		__asm__ (" .set noreorder\n");
-		cpl = icpl;
-		__asm__ (" sync\n .set reorder\n");
-	}
-
-	return CR_INT_0;
-}
+#include <sgi/sgi/intr_template.c>
 
 void
-hw_setintrmask(intrmask_t m)
+ip27_hub_setintrmask(int level)
 {
-	IP27_LHUB_S(HUBPI_CPU0_IMR0, ip27_hub_intrmask & ~((uint64_t)m));
+	/* XXX this assumes we run on cpu0 */
+	IP27_LHUB_S(HUBPI_CPU0_IMR0,
+	    hubpi_intem.hw[0] & ~hubpi_imask[level].hw[0]);
 	(void)IP27_LHUB_L(HUBPI_IR0);
+	IP27_LHUB_S(HUBPI_CPU0_IMR1,
+	    hubpi_intem.hw[1] & ~hubpi_imask[level].hw[1]);
+	(void)IP27_LHUB_L(HUBPI_IR1);
 }
 
 void

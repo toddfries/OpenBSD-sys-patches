@@ -1,4 +1,4 @@
-/*	$OpenBSD: vscsi.c,v 1.3 2009/08/13 19:51:49 dlg Exp $ */
+/*	$OpenBSD: vscsi.c,v 1.14 2010/06/28 18:31:01 krw Exp $ */
 
 /*
  * Copyright (c) 2008 David Gwynne <dlg@openbsd.org>
@@ -35,19 +35,6 @@
 #include <scsi/scsiconf.h>
 
 #include <dev/vscsivar.h>
-
-#ifdef VSCSI_DEBUG
-#define VSCSI_D_INIT	(1<<0)
-
-int vscsidebug = 0;
-
-#define DPRINTF(_m, _p...)	do { \
-					if (ISSET(vscsidebug, (_m))) \
-						printf(p); \
-				} while (0)
-#else
-#define DPRINTF(_m, _p...)	/* _m, _p */
-#endif
 
 int		vscsi_match(struct device *, void *, void *);
 void		vscsi_attach(struct device *, struct device *, void *);
@@ -96,7 +83,7 @@ struct cfdriver vscsi_cd = {
 	DV_DULL
 };
 
-int		vscsi_cmd(struct scsi_xfer *);
+void		vscsi_cmd(struct scsi_xfer *);
 int		vscsi_probe(struct scsi_link *);
 
 struct scsi_adapter vscsi_switch = {
@@ -104,10 +91,6 @@ struct scsi_adapter vscsi_switch = {
 	scsi_minphys,
 	vscsi_probe,
 	NULL
-};
-
-struct scsi_device vscsi_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 void		vscsi_xs_stuffup(struct scsi_xfer *);
@@ -148,7 +131,6 @@ vscsi_attach(struct device *parent, struct device *self, void *aux)
 	rw_init(&sc->sc_open, DEVNAME(sc));
 	rw_init(&sc->sc_ccb_polling, DEVNAME(sc));
 
-	sc->sc_link.device = &vscsi_dev;
 	sc->sc_link.adapter = &vscsi_switch;
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = 256;
@@ -162,7 +144,7 @@ vscsi_attach(struct device *parent, struct device *self, void *aux)
 	    &saa, scsiprint);
 }
 
-int
+void
 vscsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link		*link = xs->sc_link;
@@ -172,20 +154,20 @@ vscsi_cmd(struct scsi_xfer *xs)
 
 	if (sc->sc_opened == 0) { 
 		vscsi_xs_stuffup(xs);
-		return (COMPLETE);
+		return;
 	}
 
 	if (ISSET(xs->flags, SCSI_POLL) && ISSET(xs->flags, SCSI_NOSLEEP)) {
 		printf("%s: POLL && NOSLEEP for 0x%02x\n", DEVNAME(sc),
 		    xs->cmd->opcode);
 		vscsi_xs_stuffup(xs);
-		return (COMPLETE);
+		return;
 	}
 
 	ccb = vscsi_ccb_get(sc, ISSET(xs->flags, SCSI_NOSLEEP) ? 0 : 1);
 	if (ccb == NULL) {
 		vscsi_xs_stuffup(xs);
-		return (COMPLETE);
+		return;
 	}
 
 	ccb->ccb_xs = xs;
@@ -194,7 +176,6 @@ vscsi_cmd(struct scsi_xfer *xs)
 	mtx_leave(&sc->sc_ccb_mtx);
 
 	selwakeup(&sc->sc_sel);
-	KNOTE(&sc->sc_sel.si_note, 0);
 
 	if (polled) {
 		rw_enter_read(&sc->sc_ccb_polling);
@@ -202,22 +183,14 @@ vscsi_cmd(struct scsi_xfer *xs)
 			tsleep(ccb, PRIBIO, "vscsipoll", 0);
 		vscsi_ccb_put(sc, ccb);
 		rw_exit_read(&sc->sc_ccb_polling);
-		return (COMPLETE);
 	}
-
-	return (SUCCESSFULLY_QUEUED);
 }
 
 void
 vscsi_xs_stuffup(struct scsi_xfer *xs)
 {
-	int				s;
-
 	xs->error = XS_DRIVER_STUFFUP;
-	xs->flags |= ITSDONE;
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 int
@@ -358,7 +331,7 @@ vscsi_data(struct vscsi_softc *sc, struct vscsi_ioc_data *data, int read)
 
 	xs = ccb->ccb_xs;
 
-	if (data->datalen + ccb->ccb_datalen > xs->datalen)
+	if (data->datalen > xs->datalen - ccb->ccb_datalen)
 		return (ENOMEM);
 
 	switch (xs->flags & (SCSI_DATA_IN | SCSI_DATA_OUT)) {
@@ -397,7 +370,6 @@ vscsi_t2i(struct vscsi_softc *sc, struct vscsi_ioc_t2i *t2i)
 	struct scsi_link		*link;
 	int				rv = 0;
 	int				polled;
-	int				s;
 
 	TAILQ_FOREACH(ccb, &sc->sc_ccb_t2i, ccb_entry) {
 		if (ccb->ccb_tag == t2i->tag)
@@ -420,8 +392,7 @@ vscsi_t2i(struct vscsi_softc *sc, struct vscsi_ioc_t2i *t2i)
 		break;
 	case VSCSI_STAT_SENSE:
 		xs->error = XS_SENSE;
-		bcopy(&t2i->sense, &xs->sense, t2i->senselen);
-		xs->req_sense_length = t2i->senselen;
+		bcopy(&t2i->sense, &xs->sense, sizeof(xs->sense));
 		break;
 	case VSCSI_STAT_ERR:
 	default:
@@ -431,10 +402,7 @@ vscsi_t2i(struct vscsi_softc *sc, struct vscsi_ioc_t2i *t2i)
 
 	polled = ISSET(xs->flags, SCSI_POLL);
 
-	xs->flags |= ITSDONE;
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 
 	if (polled) {
 		ccb->ccb_xs = NULL;
@@ -525,7 +493,7 @@ vscsiclose(dev_t dev, int flags, int mode, struct proc *p)
 	sc->sc_opened = 0;
 
 	while ((ccb = TAILQ_FIRST(&sc->sc_ccb_t2i)) != NULL) {
-		TAILQ_REMOVE(&sc->sc_ccb_i2t, ccb, ccb_entry);
+		TAILQ_REMOVE(&sc->sc_ccb_t2i, ccb, ccb_entry);
 		polled = ISSET(ccb->ccb_xs->flags, SCSI_POLL);
 
 		vscsi_xs_stuffup(ccb->ccb_xs);

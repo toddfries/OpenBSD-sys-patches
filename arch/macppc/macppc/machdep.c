@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.114 2009/08/22 02:54:50 mk Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.119 2010/06/27 13:28:46 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -52,9 +52,7 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 
-#include <uvm/uvm_extern.h>
-
-#include <net/netisr.h>
+#include <uvm/uvm.h>
 
 #include <dev/cons.h>
 
@@ -107,6 +105,9 @@ int bufpages = BUFPAGES;
 int bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 struct bat battable[16];
 
@@ -471,6 +472,12 @@ install_extint(void (*handler)(void))
 }
 
 /*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
+
+/*
  * Machine dependent startup code.
  */
 void
@@ -829,37 +836,6 @@ dumpsys()
 }
 
 int imask[IPL_NUM];
-
-/*
- * this is a hack interface to allow zs to work better until
- * a true soft interrupt mechanism is created.
- */
-#include "zstty.h"
-#if NZSTTY > 0
-	extern void zssoft(void *);
-#endif
-void
-softtty()
-{
-#if NZSTTY > 0
-	zssoft(0);
-#endif
-}
-
-int netisr;
-
-/*
- * Soft networking interrupts.
- */
-void
-softnet(int isr)
-{
-#define DONETISR(flag, func) \
-	if (isr & (1 << flag))\
-		func();
-
-#include <net/netisr_dispatch.h>
-}
 
 int
 lcsplx(int ipl)
@@ -1435,7 +1411,8 @@ kcopy(const void *from, void *to, size_t size)
 /* prototype for locore function */
 void cpu_switchto_asm(struct proc *oldproc, struct proc *newproc);
 
-void cpu_switchto( struct proc *oldproc, struct proc *newproc)
+void
+cpu_switchto(struct proc *oldproc, struct proc *newproc)
 {
 	/*
 	 * if this CPU is running a new process, flush the

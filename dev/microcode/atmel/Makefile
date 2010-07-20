@@ -1,16 +1,17 @@
-# $OpenBSD: Makefile,v 1.15 2007/08/01 21:42:43 deraadt Exp $
+# $OpenBSD: Makefile,v 1.17 2010/01/30 20:48:19 miod Exp $
 
 NOPROG=
 NOMAN=
 CC=${HOSTCC}
 
 # USB capable systems only
-.if (${MACHINE_ARCH} == "powerpc") || (${MACHINE} == "alpha") || \
-    (${MACHINE} == "amd64") || (${MACHINE} == "armish") || \
-    (${MACHINE} == "hppa") || (${MACHINE} == "hppa64") || \
-    (${MACHINE} == "i386") || (${MACHINE} == "sgi") || \
-    (${MACHINE} == "sparc64") || (${MACHINE} == "zaurus") || \
-    (${MACHINE} == "landisk")
+.if (${MACHINE_ARCH} == "powerpc" || \
+    ${MACHINE} == "alpha" || ${MACHINE} == "amd64" || \
+    ${MACHINE} == "armish" || ${MACHINE} == "hppa" || \
+    ${MACHINE} == "hppa64" || ${MACHINE} == "i386" || \
+    ${MACHINE} == "landisk" || ${MACHINE} == "loongson" || \
+    ${MACHINE} == "palm" || ${MACHINE} == "sgi" || \
+    ${MACHINE} == "sparc64" || ${MACHINE} == "zaurus")
 
 FIRM= 	atu-intersil-int atu-intersil-ext \
 	atu-rfmd-int atu-rfmd-ext \

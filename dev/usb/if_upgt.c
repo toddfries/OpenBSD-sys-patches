@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upgt.c,v 1.47 2009/08/10 20:02:19 deraadt Exp $ */
+/*	$OpenBSD: if_upgt.c,v 1.49 2010/04/20 22:05:43 tedu Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -20,7 +20,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -89,7 +88,7 @@ int		upgt_match(struct device *, void *, void *);
 void		upgt_attach(struct device *, struct device *, void *);
 void		upgt_attach_hook(void *);
 int		upgt_detach(struct device *, int);
-int		upgt_activate(struct device *, enum devact);
+int		upgt_activate(struct device *, int);
 
 int		upgt_device_type(struct upgt_softc *, uint16_t, uint16_t);
 int		upgt_device_init(struct upgt_softc *);
@@ -512,7 +511,7 @@ upgt_detach(struct device *self, int flags)
 }
 
 int
-upgt_activate(struct device *self, enum devact act)
+upgt_activate(struct device *self, int act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:

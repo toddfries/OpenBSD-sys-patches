@@ -1,4 +1,4 @@
-/*	$OpenBSD: creator.c,v 1.41 2009/07/16 21:03:09 kettenis Exp $	*/
+/*	$OpenBSD: creator.c,v 1.45 2009/12/16 11:06:17 jasper Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -32,7 +32,7 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/conf.h>
-#include <sys/timeout.h>
+#include <sys/malloc.h>
 
 #include <machine/bus.h>
 #include <machine/autoconf.h>
@@ -50,17 +50,24 @@ int	creator_match(struct device *, void *, void *);
 void	creator_attach(struct device *, struct device *, void *);
 int	creator_ioctl(void *, u_long, caddr_t, int, struct proc *);
 paddr_t creator_mmap(void *, off_t, int);
+
 void	creator_ras_fifo_wait(struct creator_softc *, int);
 void	creator_ras_wait(struct creator_softc *);
 void	creator_ras_init(struct creator_softc *);
-void	creator_ras_copyrows(void *, int, int, int);
-void	creator_ras_erasecols(void *, int, int, int, long int);
-void	creator_ras_eraserows(void *, int, int, long int);
+int	creator_ras_copyrows(void *, int, int, int);
+int	creator_ras_erasecols(void *, int, int, int, long int);
+int	creator_ras_eraserows(void *, int, int, long int);
 void	creator_ras_fill(struct creator_softc *);
 void	creator_ras_setfg(struct creator_softc *, int32_t);
+
 int	creator_setcursor(struct creator_softc *, struct wsdisplay_cursor *);
 int	creator_updatecursor(struct creator_softc *, u_int);
 void	creator_curs_enable(struct creator_softc *, u_int);
+
+#ifndef SMALL_KERNEL
+void	creator_load_firmware(void *);
+#endif /* SMALL_KERNEL */
+void	creator_load_sram(struct creator_softc *, u_int32_t *, u_int32_t);
 
 struct wsdisplay_accessops creator_accessops = {
 	creator_ioctl,
@@ -190,6 +197,17 @@ creator_attach(parent, self, aux)
 		sc->sc_sunfb.sf_ro.ri_ops.erasecols = creator_ras_erasecols;
 		sc->sc_sunfb.sf_ro.ri_ops.copyrows = creator_ras_copyrows;
 		creator_ras_init(sc);
+
+#ifndef SMALL_KERNEL
+		/*
+		 * Elite3D cards need a firmware for accelerated X to
+		 * work.  Console framebuffer acceleration will work
+		 * without it though, so doing this late should be
+		 * fine.
+		 */
+		if (sc->sc_type == FFB_AFB) 
+			mountroothook_establish(creator_load_firmware, sc);
+#endif /* SMALL_KERNEL */
 	}
 
 	if (sc->sc_console)
@@ -472,7 +490,7 @@ const struct creator_mappings {
 	{ FFB_VOFF_PROM, FFB_POFF_PROM, FFB_VLEN_PROM },
 	{ FFB_VOFF_EXP, FFB_POFF_EXP, FFB_VLEN_EXP },
 };
-#define	CREATOR_NMAPPINGS	(sizeof(creator_map)/sizeof(creator_map[0]))
+#define	CREATOR_NMAPPINGS       nitems(creator_map)
 
 paddr_t
 creator_mmap(vsc, off, prot)
@@ -578,7 +596,7 @@ creator_ras_init(sc)
 	creator_ras_wait(sc);
 }
 
-void
+int
 creator_ras_eraserows(cookie, row, n, attr)
 	void *cookie;
 	int row, n;
@@ -595,7 +613,7 @@ creator_ras_eraserows(cookie, row, n, attr)
 	if (row + n > ri->ri_rows)
 		n = ri->ri_rows - row;
 	if (n <= 0)
-		return;
+		return 0;
 
 	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
 	creator_ras_fill(sc);
@@ -614,9 +632,11 @@ creator_ras_eraserows(cookie, row, n, attr)
 		FBC_WRITE(sc, FFB_FBC_BW, ri->ri_emuwidth);
 	}
 	creator_ras_wait(sc);
+
+	return 0;
 }
 
-void
+int
 creator_ras_erasecols(cookie, row, col, n, attr)
 	void *cookie;
 	int row, col, n;
@@ -627,7 +647,7 @@ creator_ras_erasecols(cookie, row, col, n, attr)
 	int fg, bg;
 
 	if ((row < 0) || (row >= ri->ri_rows))
-		return;
+		return 0;
 	if (col < 0) {
 		n += col;
 		col = 0;
@@ -635,7 +655,7 @@ creator_ras_erasecols(cookie, row, col, n, attr)
 	if (col + n > ri->ri_cols)
 		n = ri->ri_cols - col;
 	if (n <= 0)
-		return;
+		return 0;
 	n *= ri->ri_font->fontwidth;
 	col *= ri->ri_font->fontwidth;
 	row *= ri->ri_font->fontheight;
@@ -649,6 +669,8 @@ creator_ras_erasecols(cookie, row, col, n, attr)
 	FBC_WRITE(sc, FFB_FBC_BH, ri->ri_font->fontheight);
 	FBC_WRITE(sc, FFB_FBC_BW, n - 1);
 	creator_ras_wait(sc);
+
+	return 0;
 }
 
 void
@@ -661,7 +683,7 @@ creator_ras_fill(sc)
 	creator_ras_wait(sc);
 }
 
-void
+int
 creator_ras_copyrows(cookie, src, dst, n)
 	void *cookie;
 	int src, dst, n;
@@ -670,7 +692,7 @@ creator_ras_copyrows(cookie, src, dst, n)
 	struct creator_softc *sc = ri->ri_hw;
 
 	if (dst == src)
-		return;
+		return 0;
 	if (src < 0) {
 		n += src;
 		src = 0;
@@ -684,7 +706,7 @@ creator_ras_copyrows(cookie, src, dst, n)
 	if ((dst + n) > ri->ri_rows)
 		n = ri->ri_rows - dst;
 	if (n <= 0)
-		return;
+		return 0;
 	n *= ri->ri_font->fontheight;
 	src *= ri->ri_font->fontheight;
 	dst *= ri->ri_font->fontheight;
@@ -699,6 +721,8 @@ creator_ras_copyrows(cookie, src, dst, n)
 	FBC_WRITE(sc, FFB_FBC_BH, n);
 	FBC_WRITE(sc, FFB_FBC_BW, ri->ri_emuwidth);
 	creator_ras_wait(sc);
+
+	return 0;
 }
 
 void
@@ -711,5 +735,131 @@ creator_ras_setfg(sc, fg)
 		return;
 	sc->sc_fg_cache = fg;
 	FBC_WRITE(sc, FFB_FBC_FG, fg);
+	creator_ras_wait(sc);
+}
+
+#ifndef SMALL_KERNEL
+struct creator_firmware {
+	char		fw_ident[8];
+	u_int32_t	fw_size;
+	u_int32_t	fw_reserved[2];
+	u_int32_t	fw_ucode[0];
+};
+
+#define CREATOR_FIRMWARE_REV	0x101
+
+void
+creator_load_firmware(void *vsc)
+{
+	struct creator_softc *sc = vsc;
+	struct creator_firmware *fw;
+	u_int32_t ascr;
+	size_t buflen;
+	u_char *buf;
+	int error;
+
+	error = loadfirmware("afb", &buf, &buflen);
+	if (error) {
+		printf("%s: error %d, could not read firmware %s\n",
+		       sc->sc_sunfb.sf_dev.dv_xname, error, "afb");
+		return;
+	}
+
+	fw = (struct creator_firmware *)buf;
+	if (sizeof(*fw) > buflen ||
+	    fw->fw_size * sizeof(u_int32_t) > (buflen - sizeof(*fw))) {
+		printf("%s: corrupt firmware\n", sc->sc_sunfb.sf_dev.dv_xname);
+		free(buf, M_DEVBUF);
+		return;
+	}
+
+	printf("%s: firmware rev %d.%d.%d\n", sc->sc_sunfb.sf_dev.dv_xname,
+	       (fw->fw_ucode[CREATOR_FIRMWARE_REV] >> 16) & 0xff,
+	       (fw->fw_ucode[CREATOR_FIRMWARE_REV] >> 8) & 0xff,
+	       fw->fw_ucode[CREATOR_FIRMWARE_REV] & 0xff);
+
+	ascr = FBC_READ(sc, FFB_FBC_ASCR);
+
+	/* Stop all floats. */
+	FBC_WRITE(sc, FFB_FBC_FEM, ascr & 0x3f);
+	FBC_WRITE(sc, FFB_FBC_ASCR, FBC_ASCR_STOP);
+
+	creator_ras_wait(sc);
+
+	/* Load firmware into all secondary floats. */
+	if (ascr & 0x3e) {
+		FBC_WRITE(sc, FFB_FBC_FEM, ascr & 0x3e);
+		creator_load_sram(sc, fw->fw_ucode, fw->fw_size);
+	}
+
+	/* Load firmware into primary float. */
+	FBC_WRITE(sc, FFB_FBC_FEM, ascr & 0x01);
+	creator_load_sram(sc, fw->fw_ucode, fw->fw_size);
+
+	/* Restart all floats. */
+	FBC_WRITE(sc, FFB_FBC_FEM, ascr & 0x3f);
+	FBC_WRITE(sc, FFB_FBC_ASCR, FBC_ASCR_RESTART);
+
+	creator_ras_wait(sc);
+
+	free(buf, M_DEVBUF);
+}
+#endif /* SMALL_KERNEL */
+
+void
+creator_load_sram(struct creator_softc *sc, u_int32_t *ucode, u_int32_t size)
+{
+	uint64_t pstate, fprs;
+	caddr_t sram;
+
+	sram = bus_space_vaddr(sc->sc_bt, sc->sc_fbc_h) + FFB_FBC_SRAM36;
+
+	/*
+	 * Apparently, loading the firmware into SRAM needs to be done
+	 * using block copies.  And block copies use the
+	 * floating-point registers.  Generally, using the FPU in the
+	 * kernel is verboten.  But since we load the firmware before
+	 * userland processes are started, thrashing the
+	 * floating-point registers is fine.  We do need to enable the
+	 * FPU before we access them though, otherwise we'll trap.
+	 */
+	pstate = sparc_rdpr(pstate);
+	sparc_wrpr(pstate, pstate | PSTATE_PEF, 0);
+	fprs = sparc_rd(fprs);
+	sparc_wr(fprs, FPRS_FEF, 0);
+
+	FBC_WRITE(sc, FFB_FBC_SRAMAR, 0);
+
+	while (size > 0) {
+		creator_ras_fifo_wait(sc, 16);
+
+		__asm__ __volatile__("ld	[%0 + 0x00], %%f1\n\t"
+				     "ld	[%0 + 0x04], %%f0\n\t"
+				     "ld	[%0 + 0x08], %%f3\n\t"
+				     "ld	[%0 + 0x0c], %%f2\n\t"
+				     "ld	[%0 + 0x10], %%f5\n\t"
+				     "ld	[%0 + 0x14], %%f4\n\t"
+				     "ld	[%0 + 0x18], %%f7\n\t"
+				     "ld	[%0 + 0x1c], %%f6\n\t"
+				     "ld	[%0 + 0x20], %%f9\n\t"
+				     "ld	[%0 + 0x24], %%f8\n\t"
+				     "ld	[%0 + 0x28], %%f11\n\t"
+				     "ld	[%0 + 0x2c], %%f10\n\t"
+				     "ld	[%0 + 0x30], %%f13\n\t"
+				     "ld	[%0 + 0x34], %%f12\n\t"
+				     "ld	[%0 + 0x38], %%f15\n\t"
+				     "ld	[%0 + 0x3c], %%f14\n\t"
+				     "membar	#Sync\n\t"
+				     "stda	%%f0, [%1] 240\n\t"
+				     "membar	#Sync"
+				     : : "r" (ucode), "r" (sram));
+
+		ucode += 16;
+		size -= 16;
+	}
+
+	sparc_wr(fprs, fprs, 0);
+	sparc_wrpr(pstate, pstate, 0);
+
 	creator_ras_wait(sc);
 }

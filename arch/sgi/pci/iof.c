@@ -1,4 +1,4 @@
-/*	$OpenBSD: iof.c,v 1.1 2009/08/18 19:34:17 miod Exp $	*/
+/*	$OpenBSD: iof.c,v 1.6 2010/04/06 19:12:34 miod Exp $	*/
 
 /*
  * Copyright (c) 2009 Miodrag Vallat.
@@ -63,6 +63,9 @@ struct iof_softc {
 	bus_space_handle_t	 sc_memh;
 	bus_dma_tag_t		 sc_dmat;
 	pci_chipset_tag_t	 sc_pc;
+	pcitag_t		 sc_tag;
+
+	uint32_t		 sc_mcr;
 
 	void			*sc_ih;	
 	struct iof_intr		*sc_intr[IOC4_NDEVS];
@@ -115,13 +118,16 @@ iof_attach(struct device *parent, struct device *self, void *aux)
 	bus_size_t memsize;
 	const char *intrstr;
 
+	printf(": ");
+
 	if (pci_mapreg_map(pa, PCI_MAPREG_START, PCI_MAPREG_TYPE_MEM, 0,
 	    &memt, &memh, NULL, &memsize, 0)) {
-		printf(": can't map mem space\n");
+		printf("can't map mem space\n");
 		return;
 	}
 
 	sc->sc_pc = pa->pa_pc;
+	sc->sc_tag = pa->pa_tag;
 	sc->sc_dmat = pa->pa_dmat;
 
 	/*
@@ -136,7 +142,7 @@ iof_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_mem_bus_space = malloc(sizeof (*sc->sc_mem_bus_space),
 	    M_DEVBUF, M_NOWAIT);
 	if (sc->sc_mem_bus_space == NULL) {
-		printf(": can't allocate bus_space\n");
+		printf("can't allocate bus_space\n");
 		goto unmap;
 	}
 
@@ -150,6 +156,8 @@ iof_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_memt = sc->sc_mem_bus_space;
 	sc->sc_memh = memh;
+
+	sc->sc_mcr = bus_space_read_4(sc->sc_memt, sc->sc_memh, IOC4_MCR);
 
 	/*
 	 * Acknowledge all pending interrupts, and disable them.
@@ -166,7 +174,7 @@ iof_attach(struct device *parent, struct device *self, void *aux)
 	    bus_space_read_4(sc->sc_memt, sc->sc_memh, IOC4_OTHER_IR));
 
 	if (pci_intr_map(pa, &ih) != 0) {
-		printf(": failed to map interrupt!\n");
+		printf("failed to map interrupt!\n");
 		goto unmap;
 	}
 	intrstr = pci_intr_string(sc->sc_pc, ih);
@@ -174,7 +182,7 @@ iof_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_ih = pci_intr_establish(sc->sc_pc, ih, IPL_TTY, iof_intr,
 	    sc, self->dv_xname);
 	if (sc->sc_ih == NULL) {
-		printf(": failed to establish interrupt at %s\n", intrstr);
+		printf("failed to establish interrupt at %s\n", intrstr);
 		goto unmap;
 	}
 	printf("%s\n", intrstr);
@@ -188,6 +196,7 @@ iof_attach(struct device *parent, struct device *self, void *aux)
 	iof_attach_child(self, "com", IOC4_UARTC_BASE, IOC4DEV_SERIAL_C);
 	iof_attach_child(self, "com", IOC4_UARTD_BASE, IOC4DEV_SERIAL_D);
 	iof_attach_child(self, "iockbc", IOC4_KBC_BASE, IOC4DEV_KBC);
+	iof_attach_child(self, "dsrtc", IOC4_BYTEBUS_0, IOC4DEV_RTC);
 
 	return;
 
@@ -203,11 +212,13 @@ iof_attach_child(struct device *iof, const char *name, bus_addr_t base,
 	struct iof_attach_args iaa;
 
 	iaa.iaa_name = name;
+	pci_get_device_location(sc->sc_pc, sc->sc_tag, &iaa.iaa_location);
 	iaa.iaa_memt = sc->sc_memt;
 	iaa.iaa_memh = sc->sc_memh;
 	iaa.iaa_dmat = sc->sc_dmat;
 	iaa.iaa_base = base;
 	iaa.iaa_dev = dev;
+	iaa.iaa_clock = sc->sc_mcr & IOC4_MCR_PCI_66MHZ ?  66666667 : 33333333;
 
 	config_found_sm(iof, &iaa, iof_print, iof_search);
 }
@@ -247,7 +258,8 @@ static const struct {
 	{ IOC4_SIRQ_UARTC, 0 },
 	{ IOC4_SIRQ_UARTD, 0 },
 	{ 0, IOC4_OIRQ_KBC },
-	{ 0, IOC4_OIRQ_ATAPI }
+	{ 0, IOC4_OIRQ_ATAPI },
+	{ 0, 0 }	/* no RTC interrupt */
 };
 
 void *
@@ -258,6 +270,9 @@ iof_intr_establish(void *cookie, uint dev, int level, int (*func)(void *),
 	struct iof_intr *ii;
 
 	if (dev < 0 || dev >= IOC4_NDEVS)
+		return NULL;
+
+	if (ioc4_intrbits[dev].sio == 0 && ioc4_intrbits[dev].other == 0)
 		return NULL;
 
 	ii = (struct iof_intr *)malloc(sizeof(*ii), M_DEVBUF, M_NOWAIT);

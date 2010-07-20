@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_var.h,v 1.57 2009/08/20 15:04:24 thib Exp $	*/
+/*	$OpenBSD: nfs_var.h,v 1.59 2010/04/12 16:37:38 beck Exp $	*/
 /*	$NetBSD: nfs_var.h,v 1.3 1996/02/18 11:53:54 fvdl Exp $	*/
 
 /*
@@ -44,17 +44,12 @@ struct componentname;
 struct nfs_diskless;
 struct nfsm_info;
 
-/* nfs_aiod.c */
-void	nfs_aiod(void *);
-int	nfs_set_naiod(int);
-void	nfs_init_aiod(void);
-
 /* nfs_bio.c */
 int nfs_bioread(struct vnode *, struct uio *, int, struct ucred *);
 int nfs_write(void *);
 struct buf *nfs_getcacheblk(struct vnode *, daddr64_t, int, struct proc *);
 int nfs_vinvalbuf(struct vnode *, int, struct ucred *, struct proc *);
-int nfs_asyncio(struct buf *);
+int nfs_asyncio(struct buf *, int readahead);
 int nfs_doio(struct buf *, struct proc *);
 
 /* nfs_boot.c */
@@ -261,6 +256,9 @@ int nfssvc_nfsd(struct nfsd *);
 void nfsrv_zapsock(struct nfssvc_sock *);
 void nfsrv_slpderef(struct nfssvc_sock *);
 void nfsrv_init(int);
+void nfssvc_iod(void *);
+void start_nfsio(void *);
+void nfs_getset_niothreads(int);
 
 /* nfs_kq.c */
 int  nfs_kqfilter(void *);

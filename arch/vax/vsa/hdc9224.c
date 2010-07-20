@@ -1,4 +1,4 @@
-/*	$OpenBSD: hdc9224.c,v 1.24 2009/08/13 15:23:13 deraadt Exp $	*/
+/*	$OpenBSD: hdc9224.c,v 1.29 2010/06/26 23:24:44 guenther Exp $	*/
 /*	$NetBSD: hdc9224.c,v 1.16 2001/07/26 15:05:09 wiz Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -58,9 +58,9 @@
 #include <sys/file.h>
 #include <sys/stat.h> 
 #include <sys/ioctl.h>
+#include <sys/dkio.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/device.h>
 #include <sys/disklabel.h>
 #include <sys/disk.h>
@@ -698,7 +698,7 @@ hdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 {
 	struct hdsoftc *hd = hd_cd.cd_devs[DISKUNIT(dev)];
 	struct disklabel *lp = hd->sc_disk.dk_label;
-	int err = 0;
+	int error = 0;
 
 	switch (cmd) {
 	case DIOCGDINFO:
@@ -715,22 +715,23 @@ hdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0)
 			return EBADF;
-		else
-			err = (cmd == DIOCSDINFO ?
-			    setdisklabel(lp, (struct disklabel *)addr, 0) :
-			    writedisklabel(dev, hdstrategy, lp));
+		error = setdisklabel(lp, (struct disklabel *)addr, 0);
+		if (error == 0) {
+			if (cmd == DIOCWDINFO)
+				error = writedisklabel(dev, hdstrategy, lp);
+		}
 		break;
 
 	case DIOCWLABEL:
 		if ((flag & FWRITE) == 0)
-			err = EBADF;
+			error = EBADF;
 		break;
 
 	default:
-		err = ENOTTY;
+		error = ENOTTY;
 		break;
 	}
-	return err;
+	return error;
 }
 
 /*
@@ -851,7 +852,6 @@ hdmakelabel(struct disklabel *dl, struct hdgeom *g)
 	dl->d_typename[p++] = n + '0';
 	dl->d_typename[p] = 0;
 	dl->d_type = DTYPE_MSCP; /* XXX - what to use here??? */
-	dl->d_rpm = 3600;
 	dl->d_secsize = DEV_BSIZE;
 
 	DL_SETDSIZE(dl, g->lbn_count);
@@ -866,7 +866,6 @@ hdmakelabel(struct disklabel *dl, struct hdgeom *g)
 	    
 	DL_SETPOFFSET(&dl->d_partitions[0], 0);
 	DL_SETPOFFSET(&dl->d_partitions[2], 0);
-	dl->d_interleave = 1;
 	dl->d_version = 1;
 	dl->d_magic = dl->d_magic2 = DISKMAGIC;
 	dl->d_checksum = dkcksum(dl);

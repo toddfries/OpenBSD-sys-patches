@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.30 2009/05/31 03:20:10 matthieu Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.34 2010/07/01 00:24:27 thib Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $	*/
 
 /*-
@@ -58,6 +58,7 @@
 #include <sys/reboot.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/timeout.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -99,6 +100,10 @@ void		viac3_rnd(void *);
 #ifdef CRYPTO
 void		viac3_crypto_setup(void);
 extern int	amd64_has_xcrypt;
+#ifdef notyet
+void		aesni_setup(void);
+extern int	amd64_has_aesni;
+#endif
 #endif
 
 /*
@@ -147,6 +152,10 @@ cpu_configure(void)
 	 */
 	if (amd64_has_xcrypt)
 		viac3_crypto_setup();
+#ifdef notyet
+	if (amd64_has_aesni)
+		aesni_setup();
+#endif
 #endif
 }
 

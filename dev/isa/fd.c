@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.81 2009/08/24 08:51:18 jasper Exp $	*/
+/*	$OpenBSD: fd.c,v 1.85 2010/05/18 04:41:14 dlg Exp $	*/
 /*	$NetBSD: fd.c,v 1.90 1996/05/12 23:12:03 mycroft Exp $	*/
 
 /*-
@@ -60,6 +60,7 @@
 #include <sys/queue.h>
 #include <sys/stat.h>
 #include <sys/timeout.h>
+#include <sys/dkio.h>
 
 #include <machine/cpu.h>
 #include <machine/bus.h>
@@ -169,11 +170,9 @@ fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
 	lp->d_ncylinders = fd->sc_type->tracks;
 	lp->d_ntracks = fd->sc_type->heads;	/* Go figure... */
 	DL_SETDSIZE(lp, fd->sc_type->size);
-	lp->d_rpm = 300;	/* XXX like it matters... */
 
 	strncpy(lp->d_typename, "floppy disk", sizeof(lp->d_typename));
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-	lp->d_interleave = 1;
 	lp->d_version = 1;
 
 	lp->d_magic = DISKMAGIC;
@@ -1022,7 +1021,7 @@ fdioctl(dev, cmd, addr, flag, p)
 	struct proc *p;
 {
 	struct fd_softc *fd = fd_cd.cd_devs[FDUNIT(dev)];
-	struct disklabel dl, *lp = &dl;
+	struct disklabel *lp;
 	int error;
 
 	switch (cmd) {
@@ -1059,14 +1058,17 @@ fdioctl(dev, cmd, addr, flag, p)
 		return 0;
 
 	case DIOCWDINFO:
+	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 
-		error = setdisklabel(lp, (struct disklabel *)addr, 0);
-		if (error)
-			return error;
-
-		error = writedisklabel(DISKLABELDEV(dev), fdstrategy, lp);
+		error = setdisklabel(fd->sc_dk.dk_label,
+		    (struct disklabel *)addr, 0);
+		if (error == 0) {
+			if (cmd == DIOCWDINFO)
+				error = writedisklabel(DISKLABELDEV(dev),
+				    fdstrategy, fd->sc_dk.dk_label);
+		}
 		return error;
 
         case FD_FORM:

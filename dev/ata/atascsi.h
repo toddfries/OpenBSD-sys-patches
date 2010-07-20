@@ -1,4 +1,4 @@
-/*	$OpenBSD: atascsi.h,v 1.33 2009/02/16 21:19:06 miod Exp $ */
+/*	$OpenBSD: atascsi.h,v 1.42 2010/07/03 00:41:58 kettenis Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -29,8 +29,10 @@ struct scsi_link;
 #define ATA_C_READ_FPDMA	0x60
 #define ATA_C_WRITE_FPDMA	0x61
 #define ATA_C_PACKET		0xa0
+#define ATA_C_IDENTIFY_PACKET	0xa1
 #define ATA_C_READDMA		0xc8
 #define ATA_C_WRITEDMA		0xca
+#define ATA_C_STANDBY_IMMED	0xe0
 #define ATA_C_FLUSH_CACHE	0xe7
 #define ATA_C_FLUSH_CACHE_EXT	0xea /* lba48 */
 #define ATA_C_IDENTIFY		0xec
@@ -78,7 +80,9 @@ struct ata_identify {
 	u_int16_t	recmwdma;	/*  66 */
 	u_int16_t	minpio;		/*  67 */
 	u_int16_t	minpioflow;	/*  68 */
-	u_int16_t	reserved4[2];	/*  69 */
+	u_int16_t	add_support;	/*  69 */
+#define ATA_ID_ADD_SUPPORT_DRT	0x4000
+	u_int16_t	reserved4;	/*  70 */
 	u_int16_t	typtime[2];	/*  71 */
 	u_int16_t	reserved5[2];	/*  73 */
 	u_int16_t	qdepth;		/*  75 */
@@ -109,7 +113,12 @@ struct ata_identify {
 	u_int16_t	addrsecxt[4];	/* 100 */
 	u_int16_t	stream_xfer_p;	/* 104 */
 	u_int16_t	padding1;	/* 105 */
-	u_int16_t	phys_sect_sz;	/* 106 */
+	u_int16_t	p2l_sect;	/* 106 */
+#define ATA_ID_P2L_SECT_MASK	0xc000
+#define ATA_ID_P2L_SECT_VALID	0x4000
+#define ATA_ID_P2L_SECT_SET	0x2000
+#define ATA_ID_P2L_SECT_SIZESET	0x1000
+#define ATA_ID_P2L_SECT_SIZE	0x000f
 	u_int16_t	seek_delay;	/* 107 */
 	u_int16_t	naa_ieee_oui;	/* 108 */
 	u_int16_t	ieee_oui_uid;	/* 109 */
@@ -124,10 +133,21 @@ struct ata_identify {
 	u_int16_t	rmsn;		/* 127 */
 	u_int16_t	securestatus;	/* 128 */
 	u_int16_t	vendor[31];	/* 129 */
-	u_int16_t	padding3[16];	/* 160 */
+	u_int16_t	padding3[8];	/* 160 */
+	u_int16_t	form;		/* 168 */
+#define ATA_ID_FORM_MASK	0x000f
+	u_int16_t	data_set_mgmt;	/* 169 */
+#define ATA_ID_DATA_SET_MGMT_TRIM 0x0001
+	u_int16_t	padding4[6];	/* 170 */
 	u_int16_t	curmedser[30];	/* 176 */
 	u_int16_t	sctsupport;	/* 206 */
-	u_int16_t	padding4[48];	/* 207 */
+	u_int16_t	rpm;		/* 207 */
+	u_int16_t	padding5[1];	/* 208 */
+	u_int16_t	logical_align;	/* 209 */
+#define ATA_ID_LALIGN_MASK	0xc000
+#define ATA_ID_LALIGN_VALID	0x4000
+#define ATA_ID_LALIGN		0x3fff
+	u_int16_t	padding6[45];	/* 210 */
 	u_int16_t	integrity;	/* 255 */
 } __packed;
 
@@ -248,19 +268,6 @@ struct ata_log_page_10h {
  * ATA interface
  */
 
-struct ata_port {
-	struct ata_identify	ap_identify;
-	struct atascsi		*ap_as;
-	int			ap_port;
-	int			ap_type;
-#define ATA_PORT_T_NONE			0
-#define ATA_PORT_T_DISK			1
-#define ATA_PORT_T_ATAPI		2
-	int			ap_features;
-#define ATA_PORT_F_PROBED		(1 << 0)
-	int			ap_ncqdepth;
-};
-
 struct ata_xfer {
 	struct ata_fis_h2d	*fis;
 	struct ata_fis_d2h	rfis;
@@ -283,9 +290,10 @@ struct ata_xfer {
 #define ATA_F_PIO			(1<<4)
 #define ATA_F_PACKET			(1<<5)
 #define ATA_F_NCQ			(1<<6)
-#define ATA_FMT_FLAGS			"\020" "\007NCQ" "\006PACKET" \
-					"\005PIO" "\004POLL" "\003NOWAIT" \
-					"\002WRITE" "\001READ"
+#define ATA_F_DONE			(1<<7)
+#define ATA_FMT_FLAGS			"\020" "\007DONE" "\007NCQ" \
+					"\006PACKET" "\005PIO" "\004POLL" \
+					"\003NOWAIT" "\002WRITE" "\001READ"
 
 	volatile int		state;
 #define ATA_S_SETUP			0
@@ -295,15 +303,12 @@ struct ata_xfer {
 #define ATA_S_TIMEOUT			4
 #define ATA_S_ONCHIP			5
 #define ATA_S_PUT			6
+#define ATA_S_DONE			7
 
 	void			*atascsi_private;
 
 	void			(*ata_put_xfer)(struct ata_xfer *);
 };
-
-#define ATA_QUEUED		0
-#define ATA_COMPLETE		1
-#define ATA_ERROR		2
 
 /*
  * atascsi
@@ -313,7 +318,7 @@ struct atascsi_methods {
 	int			(*probe)(void *, int);
 	void			(*free)(void *, int);
 	struct ata_xfer *	(*ata_get_xfer)(void *, int );
-	int			(*ata_cmd)(struct ata_xfer *);
+	void			(*ata_cmd)(struct ata_xfer *);
 };
 
 struct atascsi_attach_args {
@@ -329,8 +334,14 @@ struct atascsi_attach_args {
 #define ASAA_CAP_NEEDS_RESERVED	(1 << 1)
 };
 
+#define ATA_PORT_T_NONE		0
+#define ATA_PORT_T_DISK		1
+#define ATA_PORT_T_ATAPI	2
+
 struct atascsi	*atascsi_attach(struct device *, struct atascsi_attach_args *);
 int		atascsi_detach(struct atascsi *, int);
 
 int		atascsi_probe_dev(struct atascsi *, int);
 int		atascsi_detach_dev(struct atascsi *, int, int);
+
+void		ata_complete(struct ata_xfer *);

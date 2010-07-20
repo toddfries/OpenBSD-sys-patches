@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhid.c,v 1.43 2009/07/19 08:16:06 blambert Exp $ */
+/*	$OpenBSD: uhid.c,v 1.47 2009/11/23 11:10:16 yuo Exp $ */
 /*	$NetBSD: uhid.c,v 1.57 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -104,7 +104,7 @@ int uhid_do_ioctl(struct uhid_softc*, u_long, caddr_t, int,
 int uhid_match(struct device *, void *, void *); 
 void uhid_attach(struct device *, struct device *, void *); 
 int uhid_detach(struct device *, int); 
-int uhid_activate(struct device *, enum devact); 
+int uhid_activate(struct device *, int); 
 
 struct cfdriver uhid_cd = { 
 	NULL, "uhid", DV_DULL 
@@ -155,7 +155,7 @@ uhid_attach(struct device *parent, struct device *self, void *aux)
 }
 
 int
-uhid_activate(struct device *self, enum devact act)
+uhid_activate(struct device *self, int act)
 {
 	struct uhid_softc *sc = (struct uhid_softc *)self;
 
@@ -510,6 +510,22 @@ uhid_do_ioctl(struct uhid_softc *sc, u_long cmd, caddr_t addr,
 	case USB_GET_REPORT_ID:
 		*(int *)addr = sc->sc_hdev.sc_report_id;
 		break;
+
+	case USB_GET_DEVICEINFO:
+		usbd_fill_deviceinfo(sc->sc_hdev.sc_parent->sc_udev,
+				     (struct usb_device_info *)addr, 1);
+		break;
+
+        case USB_GET_STRING_DESC:
+	    {
+		struct usb_string_desc *si = (struct usb_string_desc *)addr;
+		err = usbd_get_string_desc(sc->sc_hdev.sc_parent->sc_udev,
+			si->usd_string_index,
+			si->usd_language_id, &si->usd_desc, &size);
+		if (err)
+			return (EINVAL);
+		break;
+	    }
 
 	default:
 		return (EINVAL);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.h,v 1.44 2009/03/05 19:52:24 kettenis Exp $	*/
+/*	$OpenBSD: exec_elf.h,v 1.48 2010/06/07 09:41:16 sthen Exp $	*/
 /*
  * Copyright (c) 1995, 1996 Erik Theisen.  All rights reserved.
  *
@@ -64,7 +64,7 @@ typedef __uint16_t	Elf64_Quarter;
 
 /*
  * e_ident[] identification indexes 
- * See http://www.caldera.com/developers/gabi/2000-07-17/ch4.eheader.html
+ * See http://www.sco.com/developers/gabi/latest/ch4.eheader.html
  */
 #define EI_MAG0		0		/* file ID */
 #define EI_MAG1		1		/* file ID */
@@ -285,6 +285,7 @@ typedef struct {
 #define SHF_WRITE	0x1		/* Writable */
 #define SHF_ALLOC	0x2		/* occupies memory */
 #define SHF_EXECINSTR	0x4		/* executable */
+#define SHF_TLS		0x400		/* thread local storage */
 #define SHF_MASKPROC	0xf0000000	/* reserved bits for processor */
 					/*  specific section attributes */
 
@@ -333,7 +334,7 @@ typedef struct {
 #define STT_FUNC	2		/* function */
 #define STT_SECTION	3		/* section */
 #define STT_FILE	4		/* file */
-#define STT_NUM		5		/* number of symbol types */
+#define STT_TLS		6		/* thread local storage */
 #define STT_LOPROC	13		/* reserved range for processor */
 #define STT_HIPROC	15		/*  specific symbol types */
 
@@ -370,6 +371,20 @@ typedef struct {
 #define	ELF64_R_TYPE(info)	((info) & 0xFFFFFFFF)
 #define ELF64_R_INFO(s,t) 	(((s) << 32) + (__uint32_t)(t))
 
+#if defined(__mips64__) && defined(__MIPSEL__)
+/*
+ * The 64-bit MIPS ELF ABI uses a slightly different relocation format
+ * than the regular ELF ABI: the r_info field is split into several
+ * pieces (see gnu/usr.bin/binutils/include/elf/mips.h for details).
+ */
+#undef	ELF64_R_SYM
+#undef	ELF64_R_TYPE
+#undef	ELF64_R_INFO
+#define	ELF64_R_TYPE(info)	(swap32((info) >> 32))
+#define	ELF64_R_SYM(info)	((info) & 0xFFFFFFFF)
+#define	ELF64_R_INFO(s,t)	(((__uint64_t)swap32(t) << 32) + (__uint32_t)(s))
+#endif	/* __mips64__ && __MIPSEL__ */
+
 /* Program Header */
 typedef struct {
 	Elf32_Word	p_type;		/* segment type */
@@ -401,7 +416,7 @@ typedef struct {
 #define PT_NOTE		4		/* auxiliary information */
 #define PT_SHLIB	5		/* reserved - purpose undefined */
 #define PT_PHDR		6		/* program header */
-#define PT_NUM		7		/* Number of segment types */
+#define PT_TLS		7		/* thread local storage */
 #define PT_LOOS		0x60000000	/* reserved range for OS */
 #define PT_HIOS		0x6fffffff	/*  specific segment types */
 #define PT_LOPROC	0x70000000	/* reserved range for processor */
@@ -461,7 +476,27 @@ typedef struct {
 #define DT_NUM		25		/* Number used. */
 #define DT_LOPROC	0x70000000	/* reserved range for processor */
 #define DT_HIPROC	0x7fffffff	/*  specific dynamic array tags */
-	
+
+/* some other useful tags */
+#define DT_FLAGS_1      0x6ffffffb
+
+/* Dynamic Flags - DT_FLAGS_1 .dynamic entry */
+#define DF_1_NOW	0x00000001
+#define DF_1_GLOBAL	0x00000002
+#define DF_1_GROUP	0x00000004
+#define DF_1_NODELETE	0x00000008
+#define DF_1_LOADFLTR	0x00000010
+#define DF_1_INITFIRST	0x00000020
+#define DF_1_NOOPEN	0x00000040
+#define DF_1_ORIGIN	0x00000080
+#define DF_1_DIRECT	0x00000100
+#define DF_1_TRANS	0x00000200
+#define DF_1_INTERPOSE	0x00000400
+#define DF_1_NODEFLIB	0x00000800
+#define DF_1_NODUMP	0x00001000
+#define DF_1_CONLFAT	0x00002000
+
+
 /* Standard ELF hashing function */
 unsigned int elf_hash(const unsigned char *name);
 

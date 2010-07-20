@@ -1,4 +1,4 @@
-/*	$OpenBSD: qd.c,v 1.14 2008/08/24 14:49:58 miod Exp $	*/
+/*	$OpenBSD: qd.c,v 1.19 2010/07/10 03:06:51 matthew Exp $	*/
 /*	$NetBSD: qd.c,v 1.17 2000/01/24 02:40:29 matt Exp $	*/
 
 /*-
@@ -167,7 +167,6 @@ int Qbus_unmap[NQD];		/* Qbus mapper release code */
 struct qdmap qdmap[NQD];	/* QDSS register map structure */
 struct qdflags qdflags[NQD];	/* QDSS register map structure */
 caddr_t qdbase[NQD];		/* base address of each QDSS unit */
-struct buf qdbuf[NQD];		/* buf structs used by strategy */
 short qdopened[NQD];		/* graphics device is open exclusive use */
 
 /*
@@ -826,7 +825,7 @@ qdopen(dev, flag, mode, p)
 	   
 	       /* If not done already, allocate tty structure */
 	       if (qd_tty[minor_dev] == NULL)
-		       qd_tty[minor_dev] = ttymalloc();
+		       qd_tty[minor_dev] = ttymalloc(0);
 	      
 	       /*
 		* this is the console 
@@ -857,7 +856,7 @@ qdopen(dev, flag, mode, p)
 		* enable intrpts, open line discipline 
 		*/
 		dga->csr |= GLOBAL_IE;	/* turn on the interrupts */
-		return ((*linesw[tp->t_line].l_open)(dev, tp));
+		return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 	}
 	dga->csr |= GLOBAL_IE;	/* turn on the interrupts */
 	return(0);
@@ -1046,7 +1045,7 @@ qdclose(dev, flag, mode, p)
 		* this is the console 
 		*/
 		tp = qd_tty[minor_dev];
-		(*linesw[tp->t_line].l_close)(tp, flag);
+		(*linesw[tp->t_line].l_close)(tp, flag, p);
 		ttyclose(tp);
 		tp->t_state = 0;
 		qdflags[unit].inuse &= ~CONS_DEV;
@@ -1602,8 +1601,7 @@ qdwrite(dev, uio, flag)
 	       /*
 		* this is a DMA xfer from user space 
 		*/
-		return (physio(qd_strategy, &qdbuf[unit],
-		dev, B_WRITE, minphys, uio));
+		return (physio(qd_strategy, NULL, dev, B_WRITE, minphys, uio));
 	}
 	return (ENXIO);
 }
@@ -1631,8 +1629,7 @@ qdread(dev, uio, flag)
 	       /*
 		* this is a bitmap-to-processor xfer 
 		*/
-		return (physio(qd_strategy, &qdbuf[unit],
-		dev, B_READ, minphys, uio));
+		return (physio(qd_strategy, NULL, dev, B_READ, minphys, uio));
 	}
 	return (ENXIO);
 }

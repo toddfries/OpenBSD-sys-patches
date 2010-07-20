@@ -1,8 +1,8 @@
-/*	$OpenBSD: ioc.c,v 1.21 2009/08/18 19:32:47 miod Exp $	*/
+/*	$OpenBSD: ioc.c,v 1.35 2010/05/09 18:37:45 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Joel Sing.
- * Copyright (c) 2008, 2009 Miodrag Vallat.
+ * Copyright (c) 2008, 2009, 2010 Miodrag Vallat.
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -31,6 +31,11 @@
 #include <machine/autoconf.h>
 #include <machine/bus.h>
 
+#ifdef TGT_ORIGIN
+#include <sgi/sgi/ip27.h>
+#include <sgi/sgi/l1.h>
+#endif
+
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
@@ -48,11 +53,6 @@
 
 int	ioc_match(struct device *, void *, void *);
 void	ioc_attach(struct device *, struct device *, void *);
-struct device *
-	ioc_attach_child(struct device *, const char *, bus_addr_t, int);
-int	ioc_search_onewire(struct device *, void *, void *);
-int	ioc_search_mundane(struct device *, void *, void *);
-int	ioc_print(void *, const char *);
 
 struct ioc_intr {
 	struct ioc_softc	*ii_ioc;
@@ -73,15 +73,18 @@ struct ioc_softc {
 	bus_space_handle_t	 sc_memh;
 	bus_dma_tag_t		 sc_dmat;
 	pci_chipset_tag_t	 sc_pc;
+	pcitag_t		 sc_tag;
 
-	void			*sc_ih1;	/* Ethernet interrupt */
-	void			*sc_ih2;	/* SuperIO interrupt */
+	void			*sc_ih_enet;	/* Ethernet interrupt */
+	void			*sc_ih_superio;	/* SuperIO interrupt */
 	struct ioc_intr		*sc_intr[IOC_NDEVS];
 
 	struct onewire_bus	 sc_bus;
 
 	struct owmac_softc	*sc_owmac;
 	struct owserial_softc	*sc_owserial;
+
+	int			 sc_attach_flags;
 };
 
 struct cfattach ioc_ca = {
@@ -91,6 +94,11 @@ struct cfattach ioc_ca = {
 struct cfdriver ioc_cd = {
 	NULL, "ioc", DV_DULL,
 };
+
+void	ioc_attach_child(struct ioc_softc *, const char *, bus_addr_t, int);
+int	ioc_search_onewire(struct device *, void *, void *);
+int	ioc_search_mundane(struct device *, void *, void *);
+int	ioc_print(void *, const char *);
 
 int	ioc_intr_dispatch(struct ioc_softc *, int);
 int	ioc_intr_ethernet(void *);
@@ -103,6 +111,17 @@ int	iocow_send_bit(void *, int);
 int	iocow_read_byte(void *);
 int	iocow_triplet(void *, int);
 int	iocow_pulse(struct ioc_softc *, int, int);
+
+#ifdef TGT_ORIGIN
+/*
+ * A mask of nodes on which an ioc driver has attached.
+ * We use this on IP35 systems, to prevent attaching a pci IOC3 card which NIC
+ * has failed, as the onboard IOC3.
+ * XXX This obviously will not work in N mode... but then IP35 are supposed to
+ * XXX always run in M mode.
+ */
+static	uint64_t ioc_nodemask = 0;
+#endif
 
 int
 ioc_match(struct device *parent, void *match, void *aux)
@@ -124,7 +143,8 @@ ioc_print(void *aux, const char *iocname)
 	if (iocname != NULL)
 		printf("%s at %s", iaa->iaa_name, iocname);
 
-	if ((int)iaa->iaa_base > 0)	/* no base for onewire */
+	/* no base for onewire, and don't display it for rtc */
+	if ((int)iaa->iaa_base > 0 && (int)iaa->iaa_base < IOC3_BYTEBUS_0)
 		printf(" base 0x%x", iaa->iaa_base);
 
 	return (UNCONF);
@@ -135,14 +155,14 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct ioc_softc *sc = (struct ioc_softc *)self;
 	struct pci_attach_args *pa = aux;
-	pci_intr_handle_t ih1, ih2;
+	pci_intr_handle_t ih_enet, ih_superio;
 	bus_space_tag_t memt;
 	bus_space_handle_t memh;
 	bus_size_t memsize;
-	uint32_t data;
-	int dev;
-	int dual_irq, shared_handler, has_ethernet, has_ps2, has_serial;
-	struct device *child;
+	pcireg_t data;
+	int has_superio, has_enet, is_obio;
+	int subdevice_mask;
+	bus_addr_t rtcbase;
 
 	if (pci_mapreg_map(pa, PCI_MAPREG_START, PCI_MAPREG_TYPE_MEM, 0,
 	    &memt, &memh, NULL, &memsize, 0)) {
@@ -151,6 +171,7 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	sc->sc_pc = pa->pa_pc;
+	sc->sc_tag = pa->pa_tag;
 	sc->sc_dmat = pa->pa_dmat;
 
 	/*
@@ -196,56 +217,176 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 	 * board.
 	 */
 
+	bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_GPCR_S,
+	    IOC3_GPCR_MLAN);
+	(void)bus_space_read_4(sc->sc_memt, sc->sc_memh, IOC3_GPCR_S);
 	config_search(ioc_search_onewire, self, aux);
 
 	/*
 	 * Now figure out what our configuration is.
 	 */
 
-	printf("%s: ", self->dv_xname);
-
-	dual_irq = shared_handler = 0;
-	has_ethernet = has_ps2 = has_serial = 0;
+	has_superio = has_enet = 0;
+	is_obio = 0;
+	subdevice_mask = 0;
 	if (sc->sc_owserial != NULL) {
 		if (strncmp(sc->sc_owserial->sc_product, "030-0873-", 9) == 0) {
-			/* MENET board */
-			has_ethernet = has_serial = 1;
-			shared_handler = 1;
+			/*
+			 * MENET board; these attach as four ioc devices
+			 * behind an xbridge. However the fourth one lacks
+			 * the superio chip.
+			 */
+			subdevice_mask = (1 << IOCDEV_EF);
+			has_enet = 1;
+			if (pa->pa_device != 3) {
+				subdevice_mask = (1 << IOCDEV_SERIAL_A) |
+				    (1 << IOCDEV_SERIAL_B);
+				has_superio = 1;
+			}
 		} else
 		if (strncmp(sc->sc_owserial->sc_product, "030-0891-", 9) == 0) {
 			/* IP30 on-board IOC3 */
-			has_ethernet = has_ps2 = has_serial = 1;
-			dual_irq = 1;
+			subdevice_mask = (1 << IOCDEV_SERIAL_A) |
+			    (1 << IOCDEV_SERIAL_B) | (1 << IOCDEV_LPT) |
+			    (1 << IOCDEV_KBC) | (1 << IOCDEV_RTC) |
+			    (1 << IOCDEV_EF);
+			rtcbase = IOC3_BYTEBUS_1;
+			has_superio = has_enet = 1;
+			is_obio = 1;
 		} else
 		if (strncmp(sc->sc_owserial->sc_product, "030-1155-", 9) == 0) {
 			/* CADDuo board */
-			has_ps2 = has_ethernet = 1;
-			shared_handler = 1;
+			subdevice_mask = (1 << IOCDEV_KBC) | (1 << IOCDEV_EF);
+			has_superio = has_enet = 1;
 		} else
 		if (strncmp(sc->sc_owserial->sc_product, "030-1657-", 9) == 0 ||
 		    strncmp(sc->sc_owserial->sc_product, "030-1664-", 9) == 0) {
 			/* PCI_SIO_UFC dual serial board */
-			has_serial = 1;
-		} else {
+			subdevice_mask = (1 << IOCDEV_SERIAL_A) |
+			    (1 << IOCDEV_SERIAL_B);
+			has_superio = 1;
+		} else
 			goto unknown;
-		}
 	} else {
+#ifdef TGT_ORIGIN
 		/*
 		 * If no owserial device has been found, then it is
 		 * very likely that we are the on-board IOC3 found
-		 * on IP27 and IP35 systems.
+		 * on IP27 and IP35 systems, unless we have already
+		 * found an on-board IOC3 on this node.
+		 *
+		 * Origin 2000 (real IP27) systems are a real annoyance,
+		 * because they actually have two IOC3 on their BASEIO
+		 * board, with the various devices split accross them
+		 * (two IOC3 chips are needed to provide the four serial
+		 * ports). We can rely upon the PCI device numbers (2 and 6)
+		 * to tell onboard IOC3 from PCI IOC3 devices.
 		 */
-		if (sys_config.system_type == SGI_O200 ||
-		    sys_config.system_type == SGI_O300) {
-			has_ethernet = has_ps2 = has_serial = 1;
-			dual_irq = 1;
-			/*
-			 * XXX On IP35 class machines, there are no
-			 * XXX Number-In-a-Can chips to tell us the
-			 * XXX Ethernet address, we need to query
-			 * XXX the L1 controller.
-			 */
-		} else {
+		switch (sys_config.system_type) {
+		case SGI_IP27:
+			switch (sys_config.system_subtype) {
+			case IP27_O2K:
+				if (pci_get_widget(sc->sc_pc) ==
+				    IP27_O2K_BRIDGE_WIDGET)
+					switch (pa->pa_device) {
+					case IP27_IOC_SLOTNO:
+						subdevice_mask =
+						    (1 << IOCDEV_SERIAL_A) |
+						    (1 << IOCDEV_SERIAL_B) |
+						    (1 << IOCDEV_RTC) |
+						    (1 << IOCDEV_EF);
+						break;
+					case IP27_IOC2_SLOTNO:
+						subdevice_mask =
+						    (1 << IOCDEV_SERIAL_A) |
+						    (1 << IOCDEV_SERIAL_B) |
+						    (1 << IOCDEV_LPT) |
+#if 0 /* not worth doing */
+						    (1 << IOCDEV_RTC) |
+#endif
+						    (1 << IOCDEV_KBC);
+						break;
+					default:
+						break;
+					}
+				break;
+			case IP27_O200:
+				if (pci_get_widget(sc->sc_pc) ==
+				    IP27_O200_BRIDGE_WIDGET)
+					switch (pa->pa_device) {
+					case IP27_IOC_SLOTNO:
+						subdevice_mask =
+						    (1 << IOCDEV_SERIAL_A) |
+						    (1 << IOCDEV_SERIAL_B) |
+						    (1 << IOCDEV_LPT) |
+						    (1 << IOCDEV_KBC) |
+						    (1 << IOCDEV_RTC) |
+						    (1 << IOCDEV_EF);
+						break;
+					default:
+						break;
+					}
+				break;
+			default:
+				break;
+			}
+			break;
+		case SGI_IP35:
+			if (!ISSET(ioc_nodemask, 1UL << currentnasid)) {
+				SET(ioc_nodemask, 1UL << currentnasid);
+
+				switch (sys_config.system_subtype) {
+				/*
+				 * Origin 300 onboard IOC3 do not have PS/2
+				 * ports; since they can only be connected to
+				 * other 300 or 350 bricks (the latter using
+				 * IOC4 devices), it is safe to do this
+				 * regardless of the current nasid.
+				 * XXX What about Onyx 300 though???
+				 */
+				case IP35_O300:
+					subdevice_mask =
+					    (1 << IOCDEV_SERIAL_A) |
+					    (1 << IOCDEV_SERIAL_B) |
+					    (1 << IOCDEV_LPT) |
+					    (1 << IOCDEV_RTC) |
+					    (1 << IOCDEV_EF);
+					break;
+				/*
+				 * Origin 3000 I-Bricks have only one serial
+				 * port, and no keyboard or parallel ports.
+				 */
+				case IP35_CBRICK:
+					subdevice_mask =
+					    (1 << IOCDEV_SERIAL_A) |
+					    (1 << IOCDEV_RTC) |
+					    (1 << IOCDEV_EF);
+					break;
+				default:
+					subdevice_mask =
+					    (1 << IOCDEV_SERIAL_A) |
+					    (1 << IOCDEV_SERIAL_B) |
+					    (1 << IOCDEV_LPT) |
+					    (1 << IOCDEV_KBC) |
+					    (1 << IOCDEV_RTC) |
+					    (1 << IOCDEV_EF);
+					break;
+				}
+			}
+			break;
+		default:
+			break;
+		}
+
+		if (subdevice_mask != 0) {
+			rtcbase = IOC3_BYTEBUS_0;
+			has_superio = 1;
+			if (ISSET(subdevice_mask, 1 << IOCDEV_EF))
+				has_enet = 1;
+			is_obio = 1;
+		} else
+#endif	/* TGT_ORIGIN */
+		{
 unknown:
 			/*
 			 * Well, we don't really know what kind of device
@@ -253,9 +394,25 @@ unknown:
 			 * to figure out, but for now we'll just
 			 * chicken out.
 			 */
-			printf("unknown flavour\n");
+			printf("%s: unknown flavour\n", self->dv_xname);
 			return;
 		}
+	}
+
+	/*
+	 * Acknowledge all pending interrupts, and disable them.
+	 * Be careful not all registers may be wired depending on what
+	 * devices are actually present.
+	 */
+
+	if (has_superio) {
+		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IEC, ~0x0);
+		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IES, 0x0);
+		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IR,
+		    bus_space_read_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IR));
+	}
+	if (has_enet) {
+		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_ENET_IER, 0);
 	}
 
 	/*
@@ -264,170 +421,147 @@ unknown:
 	 * it actually needs to use two interrupts, one for the superio
 	 * chip, and the other for the Ethernet chip.
 	 *
-	 * Since our pci layer doesn't handle this, we have to compute
-	 * the superio interrupt cookie ourselves, with the help of the
-	 * pci bridge driver.
+	 * This would not be a problem if the device advertized itself
+	 * as a multifunction device. But it doesn't...
 	 *
-	 * (What the above means is that you should wear peril-sensitive
-	 * sunglasses from now on).
-	 *
-	 * To make things ever worse, some IOC3 boards (real boards, not
-	 * on-board components) lack the Ethernet component. We should
-	 * eventually handle them there, but it's not worth doing yet...
-	 * (and we'll need to parse the ownum serial numbers to know
-	 * this anyway)
+	 * Fortunately, the interrupt used are simply interrupt pins A
+	 * and B; so with the help of the PCI bridge driver, we can
+	 * register the two interrupts and almost pretend things are
+	 * as normal as they could be.
 	 */
 
-	if (pci_intr_map(pa, &ih1) != 0) {
-		printf("failed to map interrupt!\n");
-		goto unmap;
-	}
-
-	/*
-	 * The second vector source seems to be the first unused PCI
-	 * slot.
-	 */
-	if (dual_irq) {
-		for (dev = 0;
-		    dev < pci_bus_maxdevs(pa->pa_pc, pa->pa_bus); dev++) {
-			pcitag_t tag;
-			int line, rc;
-
-			if (dev == pa->pa_device)
-				continue;
-
-			tag = pci_make_tag(pa->pa_pc, pa->pa_bus, dev, 0);
-			if (pci_conf_read(pa->pa_pc, tag, PCI_ID_REG) !=
-			    0xffffffff)
-				continue;	/* slot in use... */
-
-			line = pa->pa_intrline;
-			pa->pa_intrline = dev;
-			rc = pci_intr_map(pa, &ih2);
-			pa->pa_intrline = line;
-
-			if (rc != 0) {
-				printf(": failed to map superio interrupt!\n");
-				goto unmap;
-			}
-
-			goto establish;
-		}
-
-		/*
-		 * There are no empty slots, thus we can't steal an
-		 * interrupt. I don't know how IOC3 behaves in this
-		 * situation, but it's probably safe to revert to
-		 * a shared, single interrupt.
-		 */
-		shared_handler = 1;
-		dual_irq = 0;
-	}
-
-	if (dual_irq) {
-establish:
-		/*
-		 * Register the second (superio) interrupt.
-		 */
-
-		sc->sc_ih2 = pci_intr_establish(sc->sc_pc, ih2, IPL_TTY,
-		    ioc_intr_superio, sc, self->dv_xname);
-		if (sc->sc_ih2 == NULL) {
-			printf("failed to establish superio interrupt at %s\n",
-			    pci_intr_string(sc->sc_pc, ih2));
+	if (has_enet) {
+		pa->pa_intrpin = PCI_INTERRUPT_PIN_A;
+		if (pci_intr_map(pa, &ih_enet) != 0) {
+			printf("%s: failed to map ethernet interrupt\n",
+			    self->dv_xname);
 			goto unmap;
 		}
-
-		printf("superio %s", pci_intr_string(sc->sc_pc, ih2));
 	}
 
-	/*
-	 * Register the main (Ethernet if available, superio otherwise)
-	 * interrupt.
-	 */
+	if (has_superio) {
+		if (has_enet)
+			pa->pa_intrpin =
+			    is_obio ? PCI_INTERRUPT_PIN_D : PCI_INTERRUPT_PIN_B;
+		else
+			pa->pa_intrpin = PCI_INTERRUPT_PIN_A;
 
-	sc->sc_ih1 = pci_intr_establish(sc->sc_pc, ih1, IPL_NET,
-	    shared_handler ? ioc_intr_shared : ioc_intr_ethernet,
-	    sc, self->dv_xname);
-	if (sc->sc_ih1 == NULL) {
-		printf("\n%s: failed to establish %sinterrupt!\n",
-		    self->dv_xname, dual_irq ? "ethernet " : "");
-		goto unregister;
+		if (pci_intr_map(pa, &ih_superio) != 0) {
+			printf("%s: failed to map superio interrupt\n",
+			    self->dv_xname);
+			goto unmap;
+		}
 	}
-	printf("%s%s\n", dual_irq ? ", ethernet " : "",
-	    pci_intr_string(sc->sc_pc, ih1));
 
-	/*
-	 * Acknowledge all pending interrupts, and disable them.
-	 */
+	if (has_enet) {
+		sc->sc_ih_enet = pci_intr_establish(sc->sc_pc, ih_enet,
+		    IPL_NET, ioc_intr_ethernet, sc, self->dv_xname);
+		if (sc->sc_ih_enet == NULL) {
+			printf("%s: failed to establish ethernet interrupt "
+			    "at %s\n", self->dv_xname,
+			    pci_intr_string(sc->sc_pc, ih_enet));
+			goto unmap;
+		}
+	}
 
-	bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IEC, ~0x0);
-	bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IES, 0x0);
-	bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IR,
-	    bus_space_read_4(sc->sc_memt, sc->sc_memh, IOC3_SIO_IR));
+	if (has_superio) {
+		sc->sc_ih_superio = pci_intr_establish(sc->sc_pc, ih_superio,
+		    IPL_TTY, ioc_intr_superio, sc, self->dv_xname);
+		if (sc->sc_ih_superio == NULL) {
+			printf("%s: failed to establish superio interrupt "
+			    "at %s\n", self->dv_xname,
+			    pci_intr_string(sc->sc_pc, ih_superio));
+			goto unregister;
+		}
+	}
+
+	if (has_enet)
+		printf("%s: ethernet %s\n",
+		    self->dv_xname, pci_intr_string(sc->sc_pc, ih_enet));
+	if (has_superio)
+		printf("%s: superio %s\n",
+		    self->dv_xname, pci_intr_string(sc->sc_pc, ih_superio));
 
 	/*
 	 * Attach other sub-devices.
 	 */
 
-	if (has_serial) {
-		ioc_attach_child(self, "com", IOC3_UARTA_BASE, IOCDEV_SERIAL_A);
-		ioc_attach_child(self, "com", IOC3_UARTB_BASE, IOCDEV_SERIAL_B);
+	sc->sc_attach_flags = is_obio ? IOC_FLAGS_OBIO : 0;
+
+	if (ISSET(subdevice_mask, 1 << IOCDEV_SERIAL_A)) {
+		/*
+		 * Put serial ports in passthrough mode,
+		 * to use the MI com(4) 16550 support.
+		 */
+		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_UARTA_SSCR, 0);
+		bus_space_write_4(sc->sc_memt, sc->sc_memh, IOC3_UARTB_SSCR, 0);
+
+		bus_space_write_4(sc->sc_memt, sc->sc_memh,
+		    IOC3_UARTA_SHADOW, 0);
+		bus_space_write_4(sc->sc_memt, sc->sc_memh,
+		    IOC3_UARTB_SHADOW, 0);
+
+		ioc_attach_child(sc, "com", IOC3_UARTA_BASE, IOCDEV_SERIAL_A);
+		if (ISSET(subdevice_mask, 1 << IOCDEV_SERIAL_B))
+			ioc_attach_child(sc, "com", IOC3_UARTB_BASE,
+			    IOCDEV_SERIAL_B);
 	}
-	if (has_ps2)
-		ioc_attach_child(self, "iockbc", IOC3_KBC_BASE, IOCDEV_KBC);
-	if (has_ethernet) {
-		child = ioc_attach_child(self, "iec", IOC3_EF_BASE, IOCDEV_EF);
-		if (dual_irq != 0 && child == NULL) {
-			/*
-			 * If we did not attach an ethernet driver and
-			 * this is the dual interrupt design, unhook the
-			 * network interrupt, because ARCS might have left
-			 * interrupt conditions pending, which will not be
-			 * acknowledged at the IOC3 driver level.
-			 */
-			pci_intr_disestablish(sc->sc_pc, sc->sc_ih1);
-		}
-	}
-	/* XXX what about the parallel port? */
-	ioc_attach_child(self, "dsrtc", 0 /* IOC3_RTC_BASE */, IOCDEV_RTC);
+	if (ISSET(subdevice_mask, 1 << IOCDEV_KBC))
+		ioc_attach_child(sc, "iockbc", 0, IOCDEV_KBC);
+	if (ISSET(subdevice_mask, 1 << IOCDEV_EF))
+		ioc_attach_child(sc, "iec", 0, IOCDEV_EF);
+	if (ISSET(subdevice_mask, 1 << IOCDEV_LPT))
+		ioc_attach_child(sc, "lpt", 0, IOCDEV_LPT);
+	if (ISSET(subdevice_mask, 1 << IOCDEV_RTC))
+		ioc_attach_child(sc, "dsrtc", rtcbase, IOCDEV_RTC);
 
 	return;
 
 unregister:
-	if (dual_irq)
-		pci_intr_disestablish(sc->sc_pc, sc->sc_ih2);
+	if (has_enet)
+		pci_intr_disestablish(sc->sc_pc, sc->sc_ih_enet);
 unmap:
 	bus_space_unmap(memt, memh, memsize);
 }
 
-struct device *
-ioc_attach_child(struct device *ioc, const char *name, bus_addr_t base, int dev)
+void
+ioc_attach_child(struct ioc_softc *sc, const char *name, bus_addr_t base,
+    int dev)
 {
-	struct ioc_softc *sc = (struct ioc_softc *)ioc;
 	struct ioc_attach_args iaa;
 
+	memset(&iaa, 0, sizeof iaa);
+
 	iaa.iaa_name = name;
+	pci_get_device_location(sc->sc_pc, sc->sc_tag, &iaa.iaa_location);
 	iaa.iaa_memt = sc->sc_memt;
 	iaa.iaa_memh = sc->sc_memh;
 	iaa.iaa_dmat = sc->sc_dmat;
 	iaa.iaa_base = base;
 	iaa.iaa_dev = dev;
+	iaa.iaa_flags = sc->sc_attach_flags;
 
-	if (sc->sc_owmac != NULL)
-		memcpy(iaa.iaa_enaddr, sc->sc_owmac->sc_enaddr, 6);
-	else {
-		/*
-		 * XXX On IP35, there is no Number-In-a-Can attached to
-		 * XXX the onboard IOC3; instead, the Ethernet address
-		 * XXX is stored in the machine eeprom and can be
-		 * XXX queried by sending the appropriate L1 command
-		 * XXX to the L1 UART. This L1 code is not written yet.
-		 */
-		bzero(iaa.iaa_enaddr, 6);
+	if (dev == IOCDEV_EF) {
+		if (sc->sc_owmac != NULL)
+			memcpy(iaa.iaa_enaddr, sc->sc_owmac->sc_enaddr, 6);
+		else {
+#ifdef TGT_ORIGIN
+			/*
+			 * On IP35 class machines, there are no
+			 * Number-In-a-Can attached to the onboard
+			 * IOC3; instead, the Ethernet address is
+			 * stored in the Brick EEPROM, and can be
+			 * retrieved with an L1 controller query.
+			 */
+			if (sys_config.system_type != SGI_IP35 ||
+			    l1_get_brick_ethernet_address(currentnasid,
+			      iaa.iaa_enaddr) != 0)
+#endif
+				memset(iaa.iaa_enaddr, 0xff, 6);
+		}
 	}
 
-	return config_found_sm(ioc, &iaa, ioc_print, ioc_search_mundane);
+	config_found_sm(&sc->sc_dev, &iaa, ioc_print, ioc_search_mundane);
 }
 
 int

@@ -1,4 +1,4 @@
-/*	$OpenBSD: npx.c,v 1.44 2008/12/04 15:48:19 weingart Exp $	*/
+/*	$OpenBSD: npx.c,v 1.48 2010/06/29 21:13:43 thib Exp $	*/
 /*	$NetBSD: npx.c,v 1.57 1996/05/12 23:12:24 mycroft Exp $	*/
 
 #if 0
@@ -134,8 +134,9 @@ extern int i386_fpu_present;
 extern int i386_fpu_exception;
 extern int i386_fpu_fdivbug;
 
-#define        fxsave(addr)            __asm("fxsave %0" : "=m" (*addr))
-#define        fxrstor(addr)           __asm("fxrstor %0" : : "m" (*addr))
+#define fxsave(addr)		__asm("fxsave %0" : "=m" (*addr))
+#define fxrstor(addr)		__asm("fxrstor %0" : : "m" (*addr))
+#define ldmxcsr(addr)		__asm("ldmxcsr %0" : : "m" (*addr))
 
 static __inline void
 fpu_save(union savefpu *addr)
@@ -535,6 +536,38 @@ npxintr(void *arg)
 	return (1);
 }
 
+void
+npxtrap(struct trapframe *frame)
+{
+	struct proc *p = curcpu()->ci_fpcurproc;
+	union savefpu *addr = &p->p_addr->u_pcb.pcb_savefpu;
+	u_int32_t mxcsr, statbits;
+	int code;
+	union sigval sv;
+
+#ifdef DIAGNOSTIC
+	/*
+	 * At this point, fpcurproc should be curproc.  If it wasn't, the TS
+	 * bit should be set, and we should have gotten a DNA exception.
+	 */
+	if (p != curproc)
+		panic("npxtrap: wrong process");
+#endif
+
+	fxsave(&addr->sv_xmm);
+	mxcsr = addr->sv_xmm.sv_env.en_mxcsr;
+	statbits = mxcsr;
+	mxcsr &= ~0x3f;
+	ldmxcsr(&mxcsr);
+	addr->sv_xmm.sv_ex_sw = addr->sv_xmm.sv_env.en_sw;
+	addr->sv_xmm.sv_ex_tw = addr->sv_xmm.sv_env.en_tw;
+	code = x86fpflags_to_siginfo (statbits);
+	sv.sival_int = frame->tf_eip;
+	KERNEL_PROC_LOCK(p);
+	trapsignal(p, SIGFPE, frame->tf_err, code, sv);
+	KERNEL_PROC_UNLOCK(p);
+}
+
 static int
 x86fpflags_to_siginfo(u_int32_t flags)
 {
@@ -564,14 +597,10 @@ x86fpflags_to_siginfo(u_int32_t flags)
  * Otherwise, we save the previous state, if necessary, and restore our last
  * saved state.
  */
-
-/*
- * XXX It is unclear if the code below is correct in the multiprocessor
- * XXX case.  Check the NetBSD sources once again to be sure.
- */
 int
 npxdna_xmm(struct cpu_info *ci)
 {
+	union savefpu *addr;
 	struct proc *p;
 	int s;
 
@@ -628,8 +657,12 @@ npxdna_xmm(struct cpu_info *ci)
 	splx(s);
 	uvmexp.fpswtch++;
 
+	addr = &p->p_addr->u_pcb.pcb_savefpu;
+
 	if ((p->p_md.md_flags & MDP_USEDFPU) == 0) {
-		fldcw(&p->p_addr->u_pcb.pcb_savefpu.sv_xmm.sv_env.en_cw);
+		fldcw(&addr->sv_xmm.sv_env.en_cw);
+		if (i386_has_sse || i386_has_sse2)
+			ldmxcsr(&addr->sv_xmm.sv_env.en_mxcsr);
 		p->p_md.md_flags |= MDP_USEDFPU;
 	} else {
 		static double	zero = 0.0;
@@ -640,7 +673,7 @@ npxdna_xmm(struct cpu_info *ci)
 		 */
 		fnclex();
 		__asm __volatile("ffree %%st(7)\n\tfld %0" : : "m" (zero));
-		fxrstor(&p->p_addr->u_pcb.pcb_savefpu.sv_xmm);
+		fxrstor(&addr->sv_xmm);
 	}
 
 	return (1);
@@ -825,4 +858,69 @@ npxsave_proc(struct proc *p, int save)
 	KASSERT(ci->ci_fpcurproc == p);
 	npxsave_cpu(ci, save);
 #endif
+}
+
+void
+fpu_kernel_enter(void)
+{
+	struct cpu_info	*oci, *ci = curcpu();
+	struct proc	*p = curproc;
+	uint32_t	 cw;
+	int		 s;
+
+	KASSERT(p != NULL && (p->p_flag & P_SYSTEM));
+
+	/*
+	 * Fast path. If we were the last proc on the FPU,
+	 * there is no work to do besides clearing TS.
+	 */
+	if (ci->ci_fpcurproc == p) {
+		p->p_addr->u_pcb.pcb_cr0 &= ~CR0_TS;
+		clts();
+		return;
+	}
+
+	s = splipi();
+
+	if (ci->ci_fpcurproc != NULL) {
+		npxsave_cpu(ci, 1);
+		uvmexp.fpswtch++;
+	}
+
+	/*
+	 * If we were switched away to the other cpu, cleanup
+	 * an fpcurproc pointer.
+	 */
+	oci = p->p_addr->u_pcb.pcb_fpcpu;
+	if (oci != NULL && oci != ci && oci->ci_fpcurproc == p)
+		oci->ci_fpcurproc = NULL;
+
+	/* Claim the FPU */
+	ci->ci_fpcurproc = p;
+	p->p_addr->u_pcb.pcb_fpcpu = ci;
+	p->p_addr->u_pcb.pcb_cr0 &= ~CR0_TS;
+
+	splx(s);
+
+	/* Disables DNA exceptions */
+	clts();
+
+	/* Initialize the FPU */
+	fninit();
+	cw = __INITIAL_NPXCW__;
+	fldcw(&cw);
+	if (i386_has_sse || i386_has_sse2) {
+		cw = __INITIAL_MXCSR__;
+		ldmxcsr(&cw);
+	}
+}
+
+void
+fpu_kernel_exit(void)
+{
+	/*
+	 * Nothing to do.
+	 * TS is restored on a context switch automatically
+	 * as long as we use hardware assisted task switching.
+	 */
 }

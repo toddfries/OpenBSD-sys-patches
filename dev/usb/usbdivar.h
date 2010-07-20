@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdivar.h,v 1.35 2009/08/30 19:15:40 miod Exp $ */
+/*	$OpenBSD: usbdivar.h,v 1.37 2009/11/12 20:16:37 deraadt Exp $ */
 /*	$NetBSD: usbdivar.h,v 1.70 2002/07/11 21:14:36 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdivar.h,v 1.11 1999/11/17 22:33:51 n_hibma Exp $	*/
 
@@ -88,7 +88,7 @@ struct usbd_hub {
 	usbd_status	      (*explore)(usbd_device_handle hub);
 	void		       *hubsoftc;
 	usb_hub_descriptor_t	hubdesc;
-	struct usbd_port        ports[1];
+	struct usbd_port        *ports;
 };
 
 struct usb_softc;
@@ -116,10 +116,7 @@ struct usbd_bus {
 #define USBREV_1_1	3
 #define USBREV_2_0	4
 #define USBREV_STR { "unknown", "pre 1.0", "1.0", "1.1", "2.0" }
-
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	void		       *soft; /* soft interrupt cookie */
-#endif
 	bus_dma_tag_t		dmatag;	/* DMA tag */
 };
 

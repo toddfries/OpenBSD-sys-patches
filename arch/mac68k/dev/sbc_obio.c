@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbc_obio.c,v 1.15 2006/12/13 21:12:56 miod Exp $	*/
+/*	$OpenBSD: sbc_obio.c,v 1.17 2010/06/28 18:31:01 krw Exp $	*/
 /*	$NetBSD: sbc_obio.c,v 1.1 1997/03/01 20:18:59 scottr Exp $	*/
 
 /*
@@ -39,7 +39,6 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsi_debug.h>
@@ -167,7 +166,6 @@ sbc_obio_attach(parent, self, args)
 	ncr_sc->sc_link.adapter_softc = sc;
 	ncr_sc->sc_link.adapter_target = 7;
 	ncr_sc->sc_link.adapter = &sbc_ops;
-	ncr_sc->sc_link.device = &sbc_dev;
 	ncr_sc->sc_link.openings = 4;
 
 	/*

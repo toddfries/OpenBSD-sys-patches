@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.13 2009/08/22 02:54:50 mk Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.15 2010/06/29 22:08:28 jordan Exp $	*/
 /*	$NetBSD: pci_machdep.h,v 1.1 2003/02/26 21:26:11 fvdl Exp $	*/
 
 /*
@@ -85,6 +85,8 @@ void		pci_intr_disestablish(pci_chipset_tag_t, void *);
 void		pci_decompose_tag(pci_chipset_tag_t, pcitag_t,
 		    int *, int *, int *);
 
+void 		pci_dev_postattach(struct device *, struct pci_attach_args *);
+
 /*
  * ALL OF THE FOLLOWING ARE MACHINE-DEPENDENT, AND SHOULD NOT BE USED
  * BY PORTABLE CODE.
@@ -96,3 +98,10 @@ void		pci_decompose_tag(pci_chipset_tag_t, pcitag_t,
  * controller on a PC.
  */
 #define	X86_PCI_INTERRUPT_LINE_NO_CONNECTION	0xff
+
+/*
+ * PCI address space is shared with ISA, so avoid legacy ISA I/O
+ * registers.
+ */
+#define PCI_IO_START	0x400
+#define PCI_IO_END	0xffff

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.29 2009/02/08 18:33:28 miod Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.37 2010/06/26 23:33:32 jsing Exp $	*/
 
 /*
  * Copyright (c) 1998-2003 Michael Shalayeff
@@ -31,6 +31,8 @@
 #include <sys/device.h>
 #include <sys/reboot.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <machine/cpufunc.h>
 #include <machine/pdc.h>
 #include <machine/reg.h>
@@ -41,10 +43,12 @@
 
 struct cpu_softc {
 	struct  device sc_dev;
-
-	hppa_hpa_t sc_hpa;
-	void *sc_ih;
 };
+
+#ifdef MULTIPROCESSOR
+struct cpu_info *cpu_hatch_info;
+static volatile int start_secondary_cpu;
+#endif
 
 int	cpumatch(struct device *, void *, void *);
 void	cpuattach(struct device *, struct device *, void *);
@@ -58,29 +62,24 @@ struct cfdriver cpu_cd = {
 };
 
 int
-cpumatch(parent, cfdata, aux)   
-	struct device *parent;
-	void *cfdata;
-	void *aux;
+cpumatch(struct device *parent, void *cfdata, void *aux)
 {
-	struct confargs *ca = aux;
 	struct cfdata *cf = cfdata;
+	struct confargs *ca = aux;
 
-	/* there will be only one for now XXX */
 	/* probe any 1.0, 1.1 or 2.0 */
-	if (cf->cf_unit > 0 ||
-	    ca->ca_type.iodc_type != HPPA_TYPE_NPROC ||
+	if (ca->ca_type.iodc_type != HPPA_TYPE_NPROC ||
 	    ca->ca_type.iodc_sv_model != HPPA_NPROC_HPPA)
+		return 0;
+
+	if (cf->cf_unit >= MAXCPUS)
 		return 0;
 
 	return 1;
 }
 
 void
-cpuattach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+cpuattach(struct device *parent, struct device *self, void *aux)
 {
 	/* machdep.c */
 	extern struct pdc_model pdc_model;
@@ -90,11 +89,33 @@ cpuattach(parent, self, aux)
 	extern u_int fpu_enable;
 	/* clock.c */
 	extern int cpu_hardclock(void *);
+	/* ipi.c */
+	extern int hppa_ipi_intr(void *);
 
-	struct cpu_softc *sc = (struct cpu_softc *)self;
-	struct confargs *ca = aux;
+	struct confargs *ca = (struct confargs *)aux;
+	struct cpu_info *ci;
 	u_int mhz = 100 * cpu_ticksnum / cpu_ticksdenom;
+	int cpuno = self->dv_unit;
+	struct pglist mlist;
+	struct vm_page *m;
 	const char *p;
+	int error;
+
+	ci = &cpu_info[cpuno];
+	ci->ci_dev = self;
+	ci->ci_cpuid = cpuno;
+	ci->ci_hpa = ca->ca_hpa;
+
+	/* Allocate stack for spin up and FPU emulation. */
+	TAILQ_INIT(&mlist);
+	error = uvm_pglistalloc(PAGE_SIZE, 0, -1L, 0, 0, &mlist, 1,
+	    UVM_PLA_NOWAIT);
+	if (error) {
+		printf(": unable to allocate CPU stack!\n");
+		return;
+	}
+	m = TAILQ_FIRST(&mlist);
+	ci->ci_stack = VM_PAGE_TO_PHYS(m);
 
 	printf (": %s ", cpu_typename);
 	if (pdc_model.hvers) {
@@ -150,12 +171,102 @@ cpuattach(parent, self, aux)
 	else if (pdc_btlb.finfo.num_i || pdc_btlb.finfo.num_d)
 		printf(", %u/%u D/I BTLBs",
 		    pdc_btlb.finfo.num_i, pdc_btlb.finfo.num_d);
-	printf("\n");
 
-	/* sanity against lusers amongst config editors */
-	if (ca->ca_irq == 31)
-		sc->sc_ih = cpu_intr_establish(IPL_CLOCK, ca->ca_irq,
-		    cpu_hardclock, NULL /*frame*/, sc->sc_dev.dv_xname);
-	else
-		printf ("%s: bad irq %d\n", sc->sc_dev.dv_xname, ca->ca_irq);
+	cpu_intr_establish(IPL_CLOCK, 31, cpu_hardclock, NULL, "clock");
+#ifdef MULTIPROCESSOR
+	cpu_intr_establish(IPL_IPI, 30, hppa_ipi_intr, NULL, "ipi");
+#endif
+
+	printf("\n");
 }
+
+#ifdef MULTIPROCESSOR
+void
+cpu_boot_secondary_processors(void)
+{
+	struct cpu_info *ci;
+	struct iomod *cpu;
+	int i, j;
+
+	/* Initialise primary CPU. */
+	ci = curcpu();
+	ci->ci_flags |= CPUF_RUNNING;
+	hppa_ipi_init(ci);
+
+	for (i = 0; i < HPPA_MAXCPUS; i++) {
+
+		ci = &cpu_info[i];
+		if (ci->ci_cpuid == 0)
+			continue;
+
+		ci->ci_randseed = random();
+
+		sched_init_cpu(ci);
+
+		/* Release the specified CPU by triggering an EIR{0}. */
+		cpu_hatch_info = ci;
+		cpu = (struct iomod *)(ci->ci_hpa);
+		cpu->io_eir = 0;
+		asm volatile ("sync" ::: "memory");
+
+		/* Wait for CPU to wake up... */
+		j = 0;
+		while (!(ci->ci_flags & CPUF_RUNNING) && j++ < 10000)
+			delay(1000);
+		if (!(ci->ci_flags & CPUF_RUNNING))
+			printf("failed to hatch cpu %i!\n", ci->ci_cpuid);
+	}
+
+	/* Release secondary CPUs. */
+	start_secondary_cpu = 1;
+	asm volatile ("sync" ::: "memory");
+}
+
+void
+cpu_hw_init(void)
+{
+	struct cpu_info *ci = curcpu();
+
+	/* Purge TLB and flush caches. */
+	ptlball();
+	ficacheall();
+	fdcacheall();
+
+	/* Enable address translations. */
+	ci->ci_psw = PSL_I | PSL_Q | PSL_P | PSL_C | PSL_D;
+	ci->ci_psw |= (cpu_info[0].ci_psw & PSL_O);
+}
+
+void
+cpu_hatch(void)
+{
+	struct cpu_info *ci = curcpu();
+	extern u_long cpu_hzticks;
+	u_long itmr;
+	int s;
+
+	/* Initialise IPIs. */
+	hppa_ipi_init(ci);
+
+	/* Initialise clock. */
+	mtctl((1 << 31), CR_EIRR);
+	mfctl(CR_ITMR, itmr);
+	ci->ci_itmr = itmr;
+	itmr += cpu_hzticks;
+	mtctl(itmr, CR_ITMR);
+	ci->ci_mask |= (1 << 31);
+
+	/* Enable interrupts. */
+	mtctl(ci->ci_mask, CR_EIEM);
+
+	ncpus++;
+	ci->ci_flags |= CPUF_RUNNING;
+
+	/* Wait for additional CPUs to spinup. */
+	while (!start_secondary_cpu)
+		;
+
+	SCHED_LOCK(s);
+	cpu_switchto(NULL, sched_chooseproc());
+}
+#endif

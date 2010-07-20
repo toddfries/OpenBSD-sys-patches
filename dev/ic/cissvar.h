@@ -1,4 +1,4 @@
-/*	$OpenBSD: cissvar.h,v 1.7 2007/03/22 16:55:31 deraadt Exp $	*/
+/*	$OpenBSD: cissvar.h,v 1.14 2010/06/03 01:03:55 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff
@@ -29,11 +29,9 @@ struct ciss_ld {
 struct ciss_softc {
 	struct device	sc_dev;
 	struct scsi_link sc_link;
-	struct scsi_link *sc_link_raw;
 	struct timeout	sc_hb;
 	void		*sc_ih;
 	void		*sc_sh;
-	struct proc	*sc_thread;
 	int		sc_flush;
 	struct ksensor	*sensors;
 	struct ksensordev sensordev;
@@ -41,7 +39,9 @@ struct ciss_softc {
 	u_int	sc_flags;
 #define	CISS_BIO	0x0001
 	int ccblen, maxcmd, maxsg, nbus, ndrives, maxunits;
-	ciss_queue_head	sc_free_ccb, sc_ccbq, sc_ccbdone;
+	struct ciss_ccb_list sc_free_ccb;
+	struct mutex	sc_free_ccb_mtx;
+	struct scsi_iopool sc_iopool;
 
 	bus_space_tag_t	iot;
 	bus_space_handle_t ioh, cfg_ioh;
@@ -55,13 +55,8 @@ struct ciss_softc {
 	int cfgoff;
 	u_int32_t iem;
 	u_int32_t heartbeat;
+	int       fibrillation;
 	struct ciss_ld **sc_lds;
-};
-
-struct ciss_rawsoftc {
-	struct scsi_link sc_link;
-	struct ciss_softc *sc_softc;
-	u_int8_t	sc_channel;
 };
 
 /* XXX These have to become spinlocks in case of fine SMP */
