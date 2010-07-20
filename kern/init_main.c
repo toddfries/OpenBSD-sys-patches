@@ -89,6 +89,7 @@
 
 #include <net/if.h>
 #include <net/raw_cb.h>
+#include <net/netisr.h>
 
 #if defined(CRYPTO)
 #include <crypto/cryptodev.h>
@@ -395,6 +396,7 @@ main(void *framep)
 	 * until everything is ready.
 	 */
 	s = splnet();
+	netisr_init();
 	domaininit();
 	if_attachdomain();
 	splx(s);

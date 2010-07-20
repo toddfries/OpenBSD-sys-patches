@@ -78,8 +78,6 @@
 #include <machine/intr.h>
 #include <machine/psl.h>
 
-#include <net/netisr.h>
-
 #include "ioapic.h"
 #include "lapic.h"
 #include "assym.h"
@@ -754,10 +752,6 @@ _C_LABEL(ioapic_level_stubs):
 /*
  * Soft interrupt handlers
  */
-	.globl	_C_LABEL(netisr)
-_C_LABEL(netisr):
-	.word	0
-
 	.text
 IDTVEC(softtty)
 	movl	$IPL_SOFTTTY, CPUVAR(ILEVEL)
@@ -783,19 +777,6 @@ IDTVEC(softnet)
 	call	_C_LABEL(x86_softintlock)
 #endif
 	movq	CPUVAR(ISOURCES) + SIR_NET * 8, %r12
-
-	xorq	%r12,%r12
-	xchgl	_C_LABEL(netisr),%r12d
-
-	/* XXX Do the legacy netisrs here for now. */
-#define DONETISR(s, c) \
-	.globl  _C_LABEL(c)	;\
-	testl	$(1 << s),%r12d	;\
-	jz	1f		;\
-	call	_C_LABEL(c)	;\
-1:
-#include <net/netisr_dispatch.h>
-	
 	movl	$X86_SOFTINTR_SOFTNET,%edi
 	call	_C_LABEL(softintr_dispatch)
 #ifdef MULTIPROCESSOR	

@@ -48,8 +48,6 @@
 
 #include <dev/cons.h>
 
-#include <net/netisr.h>
-
 #include <machine/atomic.h>
 #include <machine/cpu.h>
 #include <machine/ctlreg.h>
@@ -69,7 +67,6 @@ struct intrhand *intrlev[MAXINTNUM];
 
 void	strayintr(const struct trapframe64 *, int);
 int	softintr(void *);
-int	softnet(void *);
 int	intr_list_handler(void *);
 void	intr_ack(struct intrhand *);
 
@@ -124,37 +121,6 @@ strayintr(fp, vectored)
  *	Network software interrupt
  *	Soft clock interrupt
  */
-
-int netisr;
-
-int
-softnet(fp)
-	void *fp;
-{
-	int n;
-	
-	while ((n = netisr) != 0) {
-		atomic_clearbits_int(&netisr, n);
-	
-#define DONETISR(bit, fn)						\
-		do {							\
-			if (n & (1 << bit))				\
-				fn();					\
-		} while (0)
-
-#include <net/netisr_dispatch.h>
-
-#undef DONETISR
-	}
-	return (1);
-}
-
-struct intrhand soft01net = { softnet, NULL, 1 };
-
-void 
-setsoftnet() {
-	send_softint(-1, IPL_SOFTNET, &soft01net);
-}
 
 /*
  * PCI devices can share interrupts so we need to have

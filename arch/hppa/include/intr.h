@@ -156,7 +156,6 @@ int	 hppa_ipi_send(struct cpu_info *, u_long);
 #endif
 
 #define	setsoftast(p)	(p->p_md.md_astpending = 1)
-#define	setsoftnet()	softintr(1 << (IPL_SOFTNET - 1))
 
 void	*softintr_establish(int, void (*)(void *), void *);
 void	 softintr_disestablish(void *);

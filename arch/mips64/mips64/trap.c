@@ -59,7 +59,6 @@
 #ifdef PTRACE
 #include <sys/ptrace.h>
 #endif
-#include <net/netisr.h>
 
 #include <uvm/uvm_extern.h>
 
