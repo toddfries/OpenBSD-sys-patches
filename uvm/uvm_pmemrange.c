@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/*	$OpenBSD: uvm_pmemrange.c,v 1.5 2009/06/12 00:01:21 ariane Exp $	*/
-=======
 /*	$OpenBSD: uvm_pmemrange.c,v 1.17 2010/07/01 21:40:32 oga Exp $	*/
->>>>>>> origin/master
 
 /*
  * Copyright (c) 2009, 2010 Ariane van der Steldt <ariane@stack.nl>
@@ -23,10 +19,7 @@
 #include <sys/param.h>
 #include <uvm/uvm.h>
 #include <sys/malloc.h>
-<<<<<<< HEAD
-=======
 #include <sys/proc.h>		/* XXX for atomic */
->>>>>>> origin/master
 
 /*
  * 2 trees: addr tree and size tree.
@@ -116,10 +109,6 @@ void	uvm_pmr_assertvalid(struct uvm_pmemrange *pmr);
 #define uvm_pmr_assertvalid(pmr)	do {} while (0)
 #endif
 
-<<<<<<< HEAD
-
-=======
->>>>>>> origin/master
 int			 uvm_pmr_get1page(psize_t, int, struct pglist *,
 			    paddr_t, paddr_t);
 
@@ -154,11 +143,8 @@ struct vm_page		*uvm_pmr_extract_range(struct uvm_pmemrange *,
 			    struct vm_page *, paddr_t, paddr_t,
 			    struct pglist *);
 psize_t			 pow2divide(psize_t, psize_t);
-<<<<<<< HEAD
-=======
 struct vm_page		*uvm_pmr_rootupdate(struct uvm_pmemrange *,
 			    struct vm_page *, paddr_t, paddr_t, int);
->>>>>>> origin/master
 
 /*
  * Computes num/denom and rounds it up to the next power-of-2.
@@ -191,8 +177,6 @@ pow2divide(psize_t num, psize_t denom)
 	((rhs_high) == 0 || (lhs_high) <= (rhs_high)))
 
 /*
-<<<<<<< HEAD
-=======
  * Predicate: lhs intersects with rhs.
  *
  * If rhs_low == 0: don't care about lower bound.
@@ -205,7 +189,6 @@ pow2divide(psize_t num, psize_t denom)
 	((rhs_high) == 0 || (lhs_low) < (rhs_high)))
 
 /*
->>>>>>> origin/master
  * Align to power-of-2 alignment.
  */
 #define PMR_ALIGN(pgno, align)						\
@@ -452,15 +435,6 @@ uvm_pmr_insert_addr(struct uvm_pmemrange *pmr, struct vm_page *pg, int no_join)
 			return prev;
 		}
 	}
-<<<<<<< HEAD
-#ifdef DEBUG
-	else {
-		uvm_pmr_pnaddr(pmr, pg, &prev, &next);
-		KDASSERT(prev == NULL && next == NULL);
-	}
-#endif /* DEBUG */
-=======
->>>>>>> origin/master
 
 	RB_INSERT(uvm_pmr_addr, &pmr->addr, pg);
 
@@ -615,11 +589,7 @@ uvm_pmr_remove_1strange(struct pglist *pgl, paddr_t boundary,
 	 * element (rather than a close match to the smallest element).
 	 */
 	if (is_desperate) {
-<<<<<<< HEAD
-		/* Lineair search for smallest segment. */
-=======
 		/* Linear search for smallest segment. */
->>>>>>> origin/master
 		pmr_iter = pmr;
 		for (iter = TAILQ_NEXT(end, pageq);
 		    iter != NULL && start != end;
@@ -856,21 +826,13 @@ uvm_pmr_getpages(psize_t count, paddr_t start, paddr_t end, paddr_t align,
 	 */
 	desperate = 0;
 
-<<<<<<< HEAD
-ReTry:		/* Return point after sleeping. */
-=======
 retry:		/* Return point after sleeping. */
->>>>>>> origin/master
 	fcount = 0;
 	fnsegs = 0;
 
 	uvm_lock_fpageq();
 
-<<<<<<< HEAD
-ReTryDesperate:
-=======
 retry_desperate:
->>>>>>> origin/master
 	/*
 	 * If we just want any page(s), go for the really fast option.
 	 */
@@ -886,15 +848,9 @@ retry_desperate:
 		 * all we could anyway.
 		 */
 		if (fcount == count)
-<<<<<<< HEAD
-			goto Out;
-		else
-			goto Fail;
-=======
 			goto out;
 		else
 			goto fail;
->>>>>>> origin/master
 	}
 
 	/*
@@ -934,39 +890,24 @@ retry_desperate:
 			continue;
 
 		/* Outside requested range. */
-<<<<<<< HEAD
-		if (!PMR_IS_SUBRANGE_OF(pmr->low, pmr->high, start, end))
-=======
 		if (!PMR_INTERSECTS_WITH(pmr->low, pmr->high, start, end))
->>>>>>> origin/master
 			continue;
 
 		memtype = memtype_init;
 
-<<<<<<< HEAD
-ReScanMemtype:	/* Return point at memtype++. */
-		try = start_try;
-
-ReScan:		/* Return point at try++. */
-=======
 rescan_memtype:	/* Return point at memtype++. */
 		try = start_try;
 
 rescan:		/* Return point at try++. */
->>>>>>> origin/master
 		for (found = uvm_pmr_nfindsz(pmr, search[try], memtype);
 		    found != NULL;
 		    found = f_next) {
 			f_next = uvm_pmr_nextsz(pmr, found, memtype);
 
 			fstart = atop(VM_PAGE_TO_PHYS(found));
-<<<<<<< HEAD
-DrainFound:
-=======
 			if (start != 0)
 				fstart = MAX(start, fstart);
 drain_found:
->>>>>>> origin/master
 			/*
 			 * Throw away the first segment if fnsegs == maxseg
 			 *
@@ -983,23 +924,15 @@ drain_found:
 			}
 
 			fstart = PMR_ALIGN(fstart, align);
-<<<<<<< HEAD
-			fend = atop(VM_PAGE_TO_PHYS(found)) +
-			    found->fpgsz;
-=======
 			fend = atop(VM_PAGE_TO_PHYS(found)) + found->fpgsz;
->>>>>>> origin/master
 			if (fstart >= fend)
 				continue;
 			if (boundary != 0) {
 				fend =
 				    MIN(fend, PMR_ALIGN(fstart + 1, boundary));
 			}
-<<<<<<< HEAD
-=======
 			if (end != 0)
 				fend = MIN(end, fend);
->>>>>>> origin/master
 			if (fend - fstart > count - fcount)
 				fend = fstart + (count - fcount);
 
@@ -1009,11 +942,7 @@ drain_found:
 			    fstart, fend, result);
 
 			if (fcount == count)
-<<<<<<< HEAD
-				goto Out;
-=======
 				goto out;
->>>>>>> origin/master
 
 			/*
 			 * If there's still space left in found, try to
@@ -1021,11 +950,7 @@ drain_found:
 			 */
 			if (found != NULL) {
 				fstart = fend;
-<<<<<<< HEAD
-				goto DrainFound;
-=======
 				goto drain_found;
->>>>>>> origin/master
 			}
 		}
 
@@ -1033,11 +958,7 @@ drain_found:
 		 * Try a smaller search now.
 		 */
 		if (++try < nitems(search))
-<<<<<<< HEAD
-			goto ReScan;
-=======
 			goto rescan;
->>>>>>> origin/master
 
 		/*
 		 * Exhaust all memory types prior to going to the next memory
@@ -1057,11 +978,7 @@ drain_found:
 		if (memtype == UVM_PMR_MEMTYPE_MAX)
 			memtype = 0;
 		if (memtype != memtype_init)
-<<<<<<< HEAD
-			goto ReScanMemtype;
-=======
 			goto rescan_memtype;
->>>>>>> origin/master
 
 		/*
 		 * If not desperate, enter desperate case prior to eating all
@@ -1098,17 +1015,10 @@ drain_found:
 			uvm_pmr_remove_1strange(result, 0, NULL, 0);
 		fnsegs = 0;
 		fcount = 0;
-<<<<<<< HEAD
-		goto ReTryDesperate;
-	}
-
-Fail:
-=======
 		goto retry_desperate;
 	}
 
 fail:
->>>>>>> origin/master
 	/*
 	 * Allocation failed.
 	 */
@@ -1121,15 +1031,6 @@ fail:
 
 	if (flags & UVM_PLA_WAITOK) {
 		uvm_wait("uvm_pmr_getpages");
-<<<<<<< HEAD
-		goto ReTry;
-	} else
-		wakeup(&uvm.pagedaemon_proc);
-
-	return ENOMEM;
-
-Out:
-=======
 		goto retry;
 	} else
 		wakeup(&uvm.pagedaemon);
@@ -1137,7 +1038,6 @@ Out:
 	return ENOMEM;
 
 out:
->>>>>>> origin/master
 
 	/*
 	 * Allocation succesful.
@@ -1149,12 +1049,9 @@ out:
 
 	/* Update statistics and zero pages if UVM_PLA_ZERO. */
 	TAILQ_FOREACH(found, result, pageq) {
-<<<<<<< HEAD
-=======
 		atomic_clearbits_int(&found->pg_flags,
 		    PG_PMAP0|PG_PMAP1|PG_PMAP2|PG_PMAP3);
 
->>>>>>> origin/master
 		if (found->pg_flags & PG_ZERO) {
 			uvmexp.zeropages--;
 		}
@@ -1171,15 +1068,12 @@ out:
 		found->uobject = NULL;
 		found->uanon = NULL;
 		found->pg_version++;
-<<<<<<< HEAD
-=======
 
 		/*
 		 * Validate that the page matches range criterium.
 		 */
 		KDASSERT(start == 0 || atop(VM_PAGE_TO_PHYS(found)) >= start);
 		KDASSERT(end == 0 || atop(VM_PAGE_TO_PHYS(found)) < end);
->>>>>>> origin/master
 	}
 
 	return 0;
@@ -1295,13 +1189,10 @@ uvm_pmr_assertvalid(struct uvm_pmemrange *pmr)
 	struct vm_page *prev, *next, *i, *xref;
 	int lcv, mti;
 
-<<<<<<< HEAD
-=======
 	/* Empty range */
 	if (pmr->nsegs == 0)
 		return;
 
->>>>>>> origin/master
 	/* Validate address tree. */
 	RB_FOREACH(i, uvm_pmr_addr, &pmr->addr) {
 		/* Validate the range. */
@@ -1417,9 +1308,6 @@ uvm_pmr_split(paddr_t pageno)
 	KASSERT(pmr->low < pageno);
 	KASSERT(pmr->high > pageno);
 
-<<<<<<< HEAD
-	drain = uvm_pmr_allocpmr();
-=======
 	/*
 	 * uvm_pmr_allocpmr() calls into malloc() which in turn calls into
 	 * uvm_kmemalloc which calls into pmemrange, making the locking
@@ -1440,7 +1328,6 @@ uvm_pmr_split(paddr_t pageno)
 		return;
 	}
 
->>>>>>> origin/master
 	drain->low = pageno;
 	drain->high = pmr->high;
 	drain->use = pmr->use;
@@ -1514,59 +1401,29 @@ void
 uvm_pmr_use_inc(paddr_t low, paddr_t high)
 {
 	struct uvm_pmemrange *pmr;
-<<<<<<< HEAD
-
-	/*
-	 * If high+1 == 0 and low == 0, then you are increasing use
-	 * of the whole address space, which won't make any difference.
-	 * Skip in that case.
-	 */
-	high++;
-	if (high == 0 && low == 0)
-		return;
-
-	/*
-	 * pmr uses page numbers, translate low and high.
-	 */
-	low = atop(round_page(low));
-	high = atop(trunc_page(high));
-=======
 	paddr_t sz;
 
 	/* pmr uses page numbers, translate low and high. */
 	high++;
 	high = atop(trunc_page(high));
 	low = atop(round_page(low));
->>>>>>> origin/master
 	uvm_pmr_split(low);
 	uvm_pmr_split(high);
 
 	uvm_lock_fpageq();
-<<<<<<< HEAD
-
-=======
->>>>>>> origin/master
 	/* Increase use count on segments in range. */
 	RB_FOREACH(pmr, uvm_pmemrange_addr, &uvm.pmr_control.addr) {
 		if (PMR_IS_SUBRANGE_OF(pmr->low, pmr->high, low, high)) {
 			TAILQ_REMOVE(&uvm.pmr_control.use, pmr, pmr_use);
 			pmr->use++;
-<<<<<<< HEAD
-=======
 			sz += pmr->high - pmr->low;
->>>>>>> origin/master
 			uvm_pmemrange_use_insert(&uvm.pmr_control.use, pmr);
 		}
 		uvm_pmr_assertvalid(pmr);
 	}
-<<<<<<< HEAD
-
-	uvm_unlock_fpageq();
-=======
 	uvm_unlock_fpageq();
 
 	KASSERT(sz >= high - low);
->>>>>>> origin/master
 }
 
 /*
@@ -1577,25 +1434,11 @@ uvm_pmr_use_inc(paddr_t low, paddr_t high)
  * (And if called in between, you're dead.)
  */
 struct uvm_pmemrange *
-<<<<<<< HEAD
-uvm_pmr_allocpmr()
-=======
 uvm_pmr_allocpmr(void)
->>>>>>> origin/master
 {
 	struct uvm_pmemrange *nw;
 	int i;
 
-<<<<<<< HEAD
-	if (!uvm.page_init_done) {
-		nw = (struct uvm_pmemrange *)
-		    uvm_pageboot_alloc(sizeof(struct uvm_pmemrange));
-		bzero(nw, sizeof(struct uvm_pmemrange));
-	} else {
-		nw = malloc(sizeof(struct uvm_pmemrange),
-		    M_VMMAP, M_NOWAIT | M_ZERO);
-	}
-=======
 	/* We're only ever hitting the !uvm.page_init_done case for now. */
 	if (!uvm.page_init_done) {
 		nw = (struct uvm_pmemrange *)
@@ -1606,7 +1449,6 @@ uvm_pmr_allocpmr(void)
 	}
 	KASSERT(nw != NULL);
 	bzero(nw, sizeof(struct uvm_pmemrange));
->>>>>>> origin/master
 	RB_INIT(&nw->addr);
 	for (i = 0; i < UVM_PMR_MEMTYPE_MAX; i++) {
 		RB_INIT(&nw->size[i]);
@@ -1615,11 +1457,6 @@ uvm_pmr_allocpmr(void)
 	return nw;
 }
 
-<<<<<<< HEAD
-static const struct uvm_io_ranges uvm_io_ranges[] = UVM_IO_RANGES;
-
-=======
->>>>>>> origin/master
 /*
  * Initialization of pmr.
  * Called by uvm_page_init.
@@ -1635,29 +1472,18 @@ uvm_pmr_init(void)
 	TAILQ_INIT(&uvm.pmr_control.use);
 	RB_INIT(&uvm.pmr_control.addr);
 
-<<<<<<< HEAD
-	new_pmr = uvm_pmr_allocpmr();
-	new_pmr->low = 0;
-	new_pmr->high = atop((paddr_t)-1) + 1;
-=======
 	/* By default, one range for the entire address space. */
 	new_pmr = uvm_pmr_allocpmr();
 	new_pmr->low = 0;
 	new_pmr->high = atop((paddr_t)-1) + 1; 
->>>>>>> origin/master
 
 	RB_INSERT(uvm_pmemrange_addr, &uvm.pmr_control.addr, new_pmr);
 	uvm_pmemrange_use_insert(&uvm.pmr_control.use, new_pmr);
 
-<<<<<<< HEAD
-	for (i = 0; i < nitems(uvm_io_ranges); i++)
-		uvm_pmr_use_inc(uvm_io_ranges[i].low, uvm_io_ranges[i].high);
-=======
 	for (i = 0; uvm_md_constraints[i] != NULL; i++) {
 		uvm_pmr_use_inc(uvm_md_constraints[i]->ucr_low,
 	    	    uvm_md_constraints[i]->ucr_high);
 	}
->>>>>>> origin/master
 }
 
 /*
@@ -1715,8 +1541,6 @@ uvm_pmr_isfree(struct vm_page *pg)
 #endif /* DEBUG */
 
 /*
-<<<<<<< HEAD
-=======
  * Given a root of a tree, find a range which intersects start, end and
  * is of the same memtype.
  *
@@ -1819,7 +1643,6 @@ uvm_pmr_rootupdate(struct uvm_pmemrange *pmr, struct vm_page *init_root,
 }
 
 /*
->>>>>>> origin/master
  * Allocate any page, the fastest way. Page number constraints only.
  */
 int
@@ -1827,22 +1650,11 @@ uvm_pmr_get1page(psize_t count, int memtype_init, struct pglist *result,
     paddr_t start, paddr_t end)
 {
 	struct	uvm_pmemrange *pmr;
-<<<<<<< HEAD
-	struct	vm_page *found;
-=======
 	struct	vm_page *found, *splitpg;
->>>>>>> origin/master
 	psize_t	fcount;
 	int	memtype;
 
 	fcount = 0;
-<<<<<<< HEAD
-	for (pmr = TAILQ_FIRST(&uvm.pmr_control.use);
-	    pmr != NULL && fcount != count; pmr = TAILQ_NEXT(pmr, pmr_use)) {
-		/* Outside requested range. */
-		if (!(start == 0 && end == 0) &&
-		    !PMR_IS_SUBRANGE_OF(pmr->low, pmr->high, start, end))
-=======
 	TAILQ_FOREACH(pmr, &uvm.pmr_control.use, pmr_use) {
 		/* We're done. */
 		if (fcount == count)
@@ -1851,26 +1663,12 @@ uvm_pmr_get1page(psize_t count, int memtype_init, struct pglist *result,
 		/* Outside requested range. */
 		if (!(start == 0 && end == 0) &&
 		    !PMR_INTERSECTS_WITH(pmr->low, pmr->high, start, end))
->>>>>>> origin/master
 			continue;
 
 		/* Range is empty. */
 		if (pmr->nsegs == 0)
 			continue;
 
-<<<<<<< HEAD
-		/*
-		 * Loop over all memtypes, starting at memtype_init.
-		 */
-		memtype = memtype_init;
-		do {
-			found = TAILQ_FIRST(&pmr->single[memtype]);
-			if (found == NULL) {
-				found = RB_ROOT(&pmr->size[memtype]);
-				/* Size tree gives pg[1] instead of pg[0] */
-				if (found != NULL)
-					found--;
-=======
 		/* Loop over all memtypes, starting at memtype_init. */
 		memtype = memtype_init;
 		while (fcount != count) {
@@ -1895,13 +1693,10 @@ uvm_pmr_get1page(psize_t count, int memtype_init, struct pglist *result,
 					found = uvm_pmr_rootupdate(pmr, found,
 					    start, end, memtype);
 				}
->>>>>>> origin/master
 			}
 			if (found != NULL) {
 				uvm_pmr_assertvalid(pmr);
 				uvm_pmr_remove_size(pmr, found);
-<<<<<<< HEAD
-=======
 
 				/*
 				 * If the page intersects the end, then it'll
@@ -1937,7 +1732,6 @@ uvm_pmr_get1page(psize_t count, int memtype_init, struct pglist *result,
 					uvm_pmr_insert_addr(pmr, found, 1);
 				}
 
->>>>>>> origin/master
 				/*
 				 * Fetch pages from the end.
 				 * If the range is larger than the requested
@@ -1947,14 +1741,10 @@ uvm_pmr_get1page(psize_t count, int memtype_init, struct pglist *result,
 				 * Since we take from the end and insert at
 				 * the head, any ranges keep preserved.
 				 */
-<<<<<<< HEAD
-				while (found->fpgsz > 0 && fcount < count) {
-=======
 				while (found->fpgsz > 0 && fcount < count &&
 				    (start == 0 ||
 				    atop(VM_PAGE_TO_PHYS(found)) +
 				    found->fpgsz > start)) {
->>>>>>> origin/master
 					found->fpgsz--;
 					fcount++;
 					TAILQ_INSERT_HEAD(result,
@@ -1979,15 +1769,10 @@ uvm_pmr_get1page(psize_t count, int memtype_init, struct pglist *result,
 				memtype += 1;
 				if (memtype == UVM_PMR_MEMTYPE_MAX)
 					memtype = 0;
-<<<<<<< HEAD
-			}
-		} while (memtype != memtype_init && fcount != count);
-=======
 				if (memtype == memtype_init)
 					break;
 			}
 		}
->>>>>>> origin/master
 	}
 
 	/*

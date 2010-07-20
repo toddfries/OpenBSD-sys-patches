@@ -77,10 +77,6 @@ u_long	uvm_pglistalloc_npages;
  *	UVM_PLA_NOWAIT	fail if allocation fails
  *	UVM_PLA_WAITOK	wait for memory to become avail
  *	UVM_PLA_ZERO	return zeroed memory
-<<<<<<< HEAD
- *	UVM_PLA_TRYCONTIG caller (device) prefers p-lineair memory
-=======
->>>>>>> origin/master
  */
 
 int

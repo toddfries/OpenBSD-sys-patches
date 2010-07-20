@@ -863,30 +863,11 @@ uvm_pagealloc(struct uvm_object *obj, voff_t off, struct vm_anon *anon,
 	pg = TAILQ_FIRST(&pgl);
 	KASSERT(pg != NULL && TAILQ_NEXT(pg, pageq) == NULL);
 
-<<<<<<< HEAD
-	pg->offset = off;
-	pg->uobject = obj;
-	pg->uanon = anon;
-=======
 	uvm_pagealloc_pg(pg, obj, off, anon);
->>>>>>> origin/master
 	KASSERT((pg->pg_flags & PG_DEV) == 0);
 	atomic_setbits_int(&pg->pg_flags, PG_BUSY|PG_CLEAN|PG_FAKE);
 	if (flags & UVM_PGA_ZERO)
 		atomic_clearbits_int(&pg->pg_flags, PG_CLEAN);
-<<<<<<< HEAD
-	if (anon) {
-		anon->an_page = pg;
-		atomic_setbits_int(&pg->pg_flags, PQ_ANON);
-	} else if (obj)
-		uvm_pageinsert(pg);
-
-#if defined(UVM_PAGE_TRKOWN)
-	pg->owner_tag = NULL;
-#endif
-	UVM_PAGE_OWN(pg, "new alloc");
-=======
->>>>>>> origin/master
 
 	UVMHIST_LOG(pghist, "allocated pg %p/%lx", pg,
 	    (u_long)VM_PAGE_TO_PHYS(pg), 0, 0);
