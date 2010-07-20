@@ -228,8 +228,6 @@ tcp_output(struct tcpcb *tp)
 	int needect;
 #endif
 
-	opt = (u_char *)tcpopt;
-
 #if defined(TCP_SACK) && defined(TCP_SIGNATURE) && defined(DIAGNOSTIC)
 	if (tp->sack_enable && (tp->t_flags & TF_SIGNATURE))
 		return (EINVAL);
