@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_run.c,v 1.63 2010/03/27 16:13:24 damien Exp $	*/
+/*	$OpenBSD: if_run.c,v 1.70 2010/04/29 07:42:52 jasper Exp $	*/
 
 /*-
  * Copyright (c) 2008-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -25,7 +25,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -126,7 +125,9 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(AZUREWAVE,	RT3070_3),
 	USB_ID(BELKIN,		F5D8053V3),
 	USB_ID(BELKIN,		F5D8055),
+	USB_ID(BELKIN,		F5D8055V2),
 	USB_ID(BELKIN,		F6D4050V1),
+	USB_ID(BELKIN,		F6D4050V2),
 	USB_ID(BELKIN,		RT2870_1),
 	USB_ID(BELKIN,		RT2870_2),
 	USB_ID(CISCOLINKSYS2,	RT3070),
@@ -172,10 +173,13 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(GIGASET,		RT3070_1),
 	USB_ID(GIGASET,		RT3070_2),
 	USB_ID(GUILLEMOT,	HWNU300),
+	USB_ID(HAWKING,		HWDN2),
 	USB_ID(HAWKING,		HWUN2),
 	USB_ID(HAWKING,		RT2870_1),
 	USB_ID(HAWKING,		RT2870_2),
-	USB_ID(HAWKING,		RT3070),
+	USB_ID(HAWKING,		RT2870_3),
+	USB_ID(HAWKING,		RT2870_4),
+	USB_ID(HAWKING,		RT2870_5),
 	USB_ID(IODATA,		RT3072_1),
 	USB_ID(IODATA,		RT3072_2),
 	USB_ID(IODATA,		RT3072_3),
@@ -240,22 +244,20 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(SENAO,		RT3072_3),
 	USB_ID(SENAO,		RT3072_4),
 	USB_ID(SENAO,		RT3072_5),
-	USB_ID(SITECOMEU,	RT2770),
 	USB_ID(SITECOMEU,	RT2870_1),
 	USB_ID(SITECOMEU,	RT2870_2),
 	USB_ID(SITECOMEU,	RT2870_3),
-	USB_ID(SITECOMEU,	RT2870_4),
-	USB_ID(SITECOMEU,	RT3070),
-	USB_ID(SITECOMEU,	RT3070_2),
-	USB_ID(SITECOMEU,	RT3070_3),
-	USB_ID(SITECOMEU,	RT3070_4),
-	USB_ID(SITECOMEU,	RT3071),
-	USB_ID(SITECOMEU,	RT3072_1),
-	USB_ID(SITECOMEU,	RT3072_2),
 	USB_ID(SITECOMEU,	RT3072_3),
 	USB_ID(SITECOMEU,	RT3072_4),
-	USB_ID(SITECOMEU,	RT3072_5),
-	USB_ID(SITECOMEU,	RT3072_6),
+	USB_ID(SITECOMEU,	WL302),
+	USB_ID(SITECOMEU,	WL315),
+	USB_ID(SITECOMEU,	WL321),
+	USB_ID(SITECOMEU,	WL324),
+	USB_ID(SITECOMEU,	WL329),
+	USB_ID(SITECOMEU,	WL343),
+	USB_ID(SITECOMEU,	WL344),
+	USB_ID(SITECOMEU,	WL345),
+	USB_ID(SITECOMEU,	WL349V4),
 	USB_ID(SITECOMEU,	WL608),
 	USB_ID(SPARKLAN,	RT2870_1),
 	USB_ID(SPARKLAN,	RT3070),
@@ -2385,19 +2387,17 @@ run_select_chan_group(struct run_softc *sc, int group)
 	run_write(sc, RT2860_TX_BAND_CFG, tmp);
 
 	/* enable appropriate Power Amplifiers and Low Noise Amplifiers */
-	tmp = RT2860_RFTR_EN | RT2860_TRSW_EN;
+	tmp = RT2860_RFTR_EN | RT2860_TRSW_EN | RT2860_LNA_PE0_EN;
+	if (sc->nrxchains > 1)
+		tmp |= RT2860_LNA_PE1_EN;
 	if (group == 0) {	/* 2GHz */
-		tmp |= RT2860_PA_PE_G0_EN | RT2860_LNA_PE_G0_EN;
+		tmp |= RT2860_PA_PE_G0_EN;
 		if (sc->ntxchains > 1)
 			tmp |= RT2860_PA_PE_G1_EN;
-		if (sc->nrxchains > 1)
-			tmp |= RT2860_LNA_PE_G1_EN;
 	} else {		/* 5GHz */
-		tmp |= RT2860_PA_PE_A0_EN | RT2860_LNA_PE_A0_EN;
+		tmp |= RT2860_PA_PE_A0_EN;
 		if (sc->ntxchains > 1)
 			tmp |= RT2860_PA_PE_A1_EN;
-		if (sc->nrxchains > 1)
-			tmp |= RT2860_LNA_PE_A1_EN;
 	}
 	if (sc->mac_ver == 0x3572) {
 		run_rt3070_rf_write(sc, 8, 0x00);
@@ -2445,13 +2445,13 @@ run_rt2870_set_chan(struct run_softc *sc, u_int chan)
 	txpow2 = sc->txpow2[i];
 	if (chan > 14) {
 		if (txpow1 >= 0)
-			txpow1 = txpow1 << 1;
+			txpow1 = txpow1 << 1 | 1;
 		else
-			txpow1 = (7 + txpow1) << 1 | 1;
+			txpow1 = (7 + txpow1) << 1;
 		if (txpow2 >= 0)
-			txpow2 = txpow2 << 1;
+			txpow2 = txpow2 << 1 | 1;
 		else
-			txpow2 = (7 + txpow2) << 1 | 1;
+			txpow2 = (7 + txpow2) << 1;
 	}
 	r3 = rfprog[i].r3 | txpow1 << 7;
 	r4 = rfprog[i].r4 | sc->freq << 13 | txpow2 << 4;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.54 2010/03/30 19:16:09 matthieu Exp $	*/
+/*	$OpenBSD: conf.c,v 1.56 2010/07/03 03:59:17 krw Exp $	*/
 /*	$NetBSD: conf.c,v 1.17 2001/03/26 12:33:26 lukem Exp $ */
 
 /*
@@ -60,7 +60,6 @@
 #include "vnd.h"
 #include "ccd.h"
 #include "ch.h"
-#include "ss.h"
 #include "sd.h"
 #include "st.h"
 #include "cd.h"
@@ -222,7 +221,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 56 */
 	cdev_notdef(),			/* 57 */
 	cdev_disk_init(NCD,cd),		/* 58: SCSI CD-ROM */
-	cdev_scanner_init(NSS,ss),	/* 59: SCSI scanner */
+	cdev_notdef(),			/* 59 */
 	cdev_uk_init(NUK,uk),		/* 60: SCSI unknown */
 	cdev_disk_init(NRD,rd),		/* 61: memory disk */
 	cdev_notdef(),			/* 62 */
@@ -294,6 +293,7 @@ struct cdevsw	cdevsw[] =
 	cdev_tty_init(NVCCTTY,vcctty),	/* 127: virtual console concentrator */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 128: vscsi */
 	cdev_bthub_init(NBTHUB,bthub),	/* 129: bluetooth hub */
+	cdev_disk_init(1,diskmap),	/* 130: disk mapper */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

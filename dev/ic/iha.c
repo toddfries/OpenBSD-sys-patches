@@ -1,4 +1,4 @@
-/*	$OpenBSD: iha.c,v 1.36 2010/03/23 01:57:19 krw Exp $ */
+/*	$OpenBSD: iha.c,v 1.39 2010/06/28 18:31:02 krw Exp $ */
 /*-------------------------------------------------------------------------
  *
  * Device driver for the INI-9XXXU/UW or INIC-940/950  PCI SCSI Controller.
@@ -58,13 +58,6 @@ struct scsi_adapter iha_switch = {
 	iha_minphys,	/* scsi_minphys() */
 	NULL,		/* probe_dev(void) */
 	NULL		/* free_dev() */
-};
-
-struct scsi_device iha_dev = {
-	NULL,		/* Use default error handler    */
-	NULL,		/* have a queue, served by this */
-	NULL,		/* have no async handler	*/
-	NULL,		/* Use default 'done' routine   */
 };
 
 /*
@@ -266,22 +259,18 @@ iha_scsi_cmd(xs)
 	struct iha_scb *pScb;
 	struct scsi_link *sc_link = xs->sc_link;
 	struct iha_softc *sc = sc_link->adapter_softc;
-	int s, error;
+	int error;
 
 	if ((xs->cmdlen > 12) || (sc_link->target >= IHA_MAX_TARGETS)) {
 		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
 	pScb = iha_pop_free_scb(sc);
 	if (pScb == NULL) {
 		xs->error = XS_NO_CCB;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
@@ -320,9 +309,7 @@ iha_scsi_cmd(xs)
 			iha_append_free_scb(sc, pScb); 
 
 			xs->error = XS_DRIVER_STUFFUP;
-			s = splbio();
 			scsi_done(xs);
-			splx(s);
 			return;
 		}
 		bus_dmamap_sync(sc->sc_dmat, pScb->SCB_DataDma, 
@@ -334,9 +321,7 @@ iha_scsi_cmd(xs)
 		if (error) {
 			bus_dmamap_unload(sc->sc_dmat, pScb->SCB_DataDma);
 			xs->error = XS_DRIVER_STUFFUP;
-			s = splbio();
 			scsi_done(xs);
-			splx(s);
 			return;
 		}
 
@@ -381,7 +366,6 @@ iha_init_tulip(sc)
 	 */
 	sc->sc_link.adapter_softc    = sc;
 	sc->sc_link.adapter	     = &iha_switch;
-	sc->sc_link.device	     = &iha_dev;
 	sc->sc_link.openings	     = 4; /* # xs's allowed per device */
 	sc->sc_link.adapter_target   = pScsi->NVM_SCSI_Id;
 	sc->sc_link.adapter_buswidth = pScsi->NVM_SCSI_Targets;
@@ -2479,7 +2463,6 @@ iha_done_scb(sc, pScb)
 {
 	struct scsi_sense_data *s1, *s2;
 	struct scsi_xfer *xs = pScb->SCB_Xs;
-	int s;
 
 	if (xs != NULL) {
 		timeout_del(&xs->stimeout);
@@ -2559,9 +2542,7 @@ iha_done_scb(sc, pScb)
 			break;
 		}
 
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 	}
 	
 	iha_append_free_scb(sc, pScb);
@@ -2681,7 +2662,7 @@ iha_alloc_scbs(sc)
 	 */
 	if ((error = bus_dmamem_alloc(sc->sc_dmat,
 		 sizeof(struct iha_scb)*IHA_MAX_SCB,
-		 NBPG, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT))
+		 NBPG, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO))
 	    != 0) {
 		printf("%s: unable to allocate SCBs,"
 		       " error = %d\n", sc->sc_dev.dv_xname, error);
@@ -2695,7 +2676,6 @@ iha_alloc_scbs(sc)
 		       sc->sc_dev.dv_xname, error);
 		return (error);
 	}
-	bzero(sc->HCS_Scb, sizeof(struct iha_scb)*IHA_MAX_SCB);
 
 	return (0);
 }

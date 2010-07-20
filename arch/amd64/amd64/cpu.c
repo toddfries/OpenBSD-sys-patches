@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.29 2010/04/01 19:47:59 kettenis Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.34 2010/06/26 23:24:43 guenther Exp $	*/
 /* $NetBSD: cpu.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $ */
 
 /*-
@@ -69,7 +69,6 @@
 
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
@@ -105,6 +104,7 @@
 
 int     cpu_match(struct device *, void *, void *);
 void    cpu_attach(struct device *, struct device *, void *);
+void	patinit(struct cpu_info *ci);
 
 struct cpu_softc {
 	struct device sc_dev;		/* device tree glue */
@@ -145,9 +145,9 @@ u_int32_t cpus_attached = 0;
 struct cpu_info *cpu_info[MAXCPUS] = { &cpu_info_primary };
 
 void    	cpu_hatch(void *);
-static void    	cpu_boot_secondary(struct cpu_info *ci);
-static void    	cpu_start_secondary(struct cpu_info *ci);
-static void	cpu_copy_trampoline(void);
+void    	cpu_boot_secondary(struct cpu_info *ci);
+void    	cpu_start_secondary(struct cpu_info *ci);
+void		cpu_copy_trampoline(void);
 
 /*
  * Runs once per boot once multiprocessor goo has been detected and
@@ -369,12 +369,18 @@ cpu_init(struct cpu_info *ci)
 	/* configure the CPU if needed */
 	if (ci->cpu_setup != NULL)
 		(*ci->cpu_setup)(ci);
+	/*
+	 * We do this here after identifycpu() because errata may affect
+	 * what we do.
+	 */
+	patinit(ci);
 
 	lcr0(rcr0() | CR0_WP);
 	lcr4(rcr4() | CR4_DEFAULT);
 
 #ifdef MULTIPROCESSOR
 	ci->ci_flags |= CPUF_RUNNING;
+	tlbflushg();
 #endif
 }
 
@@ -548,7 +554,7 @@ cpu_debug_dump(void)
 }
 #endif
 
-static void
+void
 cpu_copy_trampoline(void)
 {
 	/*
@@ -659,4 +665,36 @@ cpu_init_msrs(struct cpu_info *ci)
 
 	if (cpu_feature & CPUID_NXE)
 		wrmsr(MSR_EFER, rdmsr(MSR_EFER) | EFER_NXE);
+}
+
+void
+patinit(struct cpu_info *ci)
+{
+	extern int	pmap_pg_wc;
+	u_int64_t	reg;
+
+	if ((ci->ci_feature_flags & CPUID_PAT) == 0)
+		return;
+#define	PATENTRY(n, type)	(type << ((n) * 8))
+#define	PAT_UC		0x0UL
+#define	PAT_WC		0x1UL
+#define	PAT_WT		0x4UL
+#define	PAT_WP		0x5UL
+#define	PAT_WB		0x6UL
+#define	PAT_UCMINUS	0x7UL
+	/* 
+	 * Set up PAT bits.
+	 * The default pat table is the following:
+	 * WB, WT, UC- UC, WB, WT, UC-, UC
+	 * We change it to:
+	 * WB, WC, UC-, UC, WB, WC, UC-, UC.
+	 * i.e change the WT bit to be WC.
+	 */
+	reg = PATENTRY(0, PAT_WB) | PATENTRY(1, PAT_WC) |
+	    PATENTRY(2, PAT_UCMINUS) | PATENTRY(3, PAT_UC) |
+	    PATENTRY(4, PAT_WB) | PATENTRY(5, PAT_WC) |
+	    PATENTRY(6, PAT_UCMINUS) | PATENTRY(7, PAT_UC);
+
+	wrmsr(MSR_CR_PAT, reg);
+	pmap_pg_wc = PG_WC;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mesh.c,v 1.25 2010/03/23 01:57:19 krw Exp $	*/
+/*	$OpenBSD: mesh.c,v 1.28 2010/07/01 03:20:38 matthew Exp $	*/
 /*	$NetBSD: mesh.c,v 1.1 1999/02/19 13:06:03 tsubai Exp $	*/
 
 /*-
@@ -176,8 +176,6 @@ struct mesh_softc {
 	struct device sc_dev;		/* us as a device */
 	struct scsi_link sc_link;
 
-	struct scsibus_softc *sc_scsibus;
-
 	u_char *sc_reg;			/* MESH base address */
 	bus_dmamap_t sc_dmamap;
 	bus_dma_tag_t sc_dmat;
@@ -255,10 +253,6 @@ struct scsi_adapter mesh_switch = {
 	mesh_scsi_cmd, mesh_minphys, NULL, NULL
 };
 
-struct scsi_device mesh_dev = {
-	NULL, NULL, NULL, NULL
-};
-
 #define MESH_DATAOUT	0
 #define MESH_DATAIN	MESH_STATUS0_IO
 #define MESH_COMMAND	MESH_STATUS0_CD
@@ -283,7 +277,7 @@ mesh_match(struct device *parent, void *vcf, void *aux)
 	if (strcmp(ca->ca_name, "mesh") == 0)
 		return 1;
 
-	memset(compat, 0, sizeof(compat));
+	bzero(compat, sizeof(compat));
 	OF_getprop(ca->ca_node, "compatible", compat, sizeof(compat));
 	if (strcmp(compat, "chrp,mesh0") == 0)
 		return 1;
@@ -354,7 +348,6 @@ mesh_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_id;
-	sc->sc_link.device = &mesh_dev;
 	sc->sc_link.adapter = &mesh_switch;
 	sc->sc_link.openings = 2;
 

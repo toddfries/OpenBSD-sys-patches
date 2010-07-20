@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.113 2010/01/13 02:26:49 henning Exp $	*/
+/*	$OpenBSD: if.h,v 1.117 2010/06/26 19:49:54 claudio Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -266,6 +266,10 @@ struct ifnet {				/* and the entries */
 					/* output routine (enqueue) */
 	int	(*if_output)(struct ifnet *, struct mbuf *, struct sockaddr *,
 		     struct rtentry *);
+
+					/* link level output function */
+	int	(*if_ll_output)(struct ifnet *, struct mbuf *,
+		    struct sockaddr *, struct rtentry *);
 					/* initiate output routine */
 	void	(*if_start)(struct ifnet *);
 					/* ioctl routine */
@@ -323,8 +327,10 @@ struct ifnet {				/* and the entries */
 	(IFF_BROADCAST|IFF_POINTOPOINT|IFF_RUNNING|IFF_OACTIVE|\
 	    IFF_SIMPLEX|IFF_MULTICAST|IFF_ALLMULTI)
 
-#define IFXF_TXREADY	0x1		/* interface is ready to tx */
-#define	IFXF_NOINET6	0x2		/* don't do inet6 */
+#define IFXF_TXREADY		0x1		/* interface is ready to tx */
+#define	IFXF_NOINET6		0x2		/* don't do inet6 */
+#define	IFXF_INET6_PRIVACY	0x4		/* autoconf privacy extension */
+#define	IFXF_MPLS		0x8		/* supports MPLS */
 
 #define	IFXF_CANTCHANGE \
 	(IFXF_TXREADY)
@@ -615,6 +621,12 @@ struct ifmediareq {
 	int	*ifm_ulist;			/* media words */
 };
 
+struct ifkalivereq {
+	char	ikar_name[IFNAMSIZ];		/* if name, e.g. "en0" */
+	int	ikar_timeo;
+	int	ikar_cnt;
+};
+
 /*
  * Structure used in SIOCGIFCONF request.
  * Used to retrieve interface configuration
@@ -809,6 +821,7 @@ int	if_delgroup(struct ifnet *, const char *);
 void	if_group_routechange(struct sockaddr *, struct sockaddr *);
 struct	ifnet *ifunit(const char *);
 void	if_start(struct ifnet *);
+void	ifnewlladdr(struct ifnet *);
 
 struct	ifaddr *ifa_ifwithaddr(struct sockaddr *, u_int);
 struct	ifaddr *ifa_ifwithaf(int, u_int);

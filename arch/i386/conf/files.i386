@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.195 2010/02/19 15:00:12 miod Exp $
+#	$OpenBSD: files.i386,v 1.197 2010/07/05 22:52:03 deraadt Exp $
 #
 # new style config file for i386 architecture
 #
@@ -279,15 +279,9 @@ include "../../../compat/aout/files.aout"
 include "../../../compat/svr4/files.svr4"
 file	arch/i386/i386/svr4_machdep.c		compat_svr4
 
-# iBCS-2 binary compatibility (COMPAT_IBCS2)
-include "../../../compat/ibcs2/files.ibcs2"
-
 # Linux binary compatibility (COMPAT_LINUX)
 include "../../../compat/linux/files.linux"
 file	arch/i386/i386/linux_machdep.c		compat_linux
-
-# BSD/OS binary compatibility (COMPAT_BSDOS)
-include "../../../compat/bsdos/files.bsdos"
 
 # FreeBSD binary compatibility (COMPAT_FREEBSD)
 include "../../../compat/freebsd/files.freebsd"

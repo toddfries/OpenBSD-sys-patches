@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.170 2010/04/03 14:40:09 kettenis Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.174 2010/07/15 03:43:11 jakemsr Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -801,7 +801,6 @@ int
 azalia_init(azalia_t *az, int resuming)
 {
 	int err;
-	uint32_t gctl;
 
 	err = azalia_reset(az);
 	if (err)
@@ -832,10 +831,6 @@ azalia_init(azalia_t *az, int resuming)
 
 	AZ_WRITE_4(az, INTCTL,
 	    AZ_READ_4(az, INTCTL) | HDA_INTCTL_CIE | HDA_INTCTL_GIE);
-
-	/* enable unsolicited response */
-	gctl = AZ_READ_4(az, GCTL);
-	AZ_WRITE_4(az, GCTL, gctl | HDA_GCTL_UNSOL);
 
 	return(0);
 }
@@ -903,6 +898,9 @@ azalia_init_codecs(azalia_t *az)
 			azalia_codec_delete(codec);
 		}
 	}
+
+	/* Enable unsolicited responses now that az->codecno is set. */
+	AZ_WRITE_4(az, GCTL, AZ_READ_4(az, GCTL) | HDA_GCTL_UNSOL);
 
 	return(0);
 }
@@ -1221,21 +1219,22 @@ void
 azalia_rirb_kick_unsol_events(void *v)
 {
 	azalia_t *az = v;
+	int addr, tag;
 
 	if (az->unsolq_kick)
 		return;
 	az->unsolq_kick = TRUE;
 	while (az->unsolq_rp != az->unsolq_wp) {
-		int i;
-		int tag;
-		codec_t *codec;
-		i = RIRB_RESP_CODEC(az->unsolq[az->unsolq_rp].resp_ex);
+		addr = RIRB_RESP_CODEC(az->unsolq[az->unsolq_rp].resp_ex);
 		tag = RIRB_UNSOL_TAG(az->unsolq[az->unsolq_rp].resp);
-		codec = &az->codecs[i];
-		DPRINTF(("%s: codec#=%d tag=%d\n", __func__, i, tag));
+		DPRINTF(("%s: codec address=%d tag=%d\n", __func__, addr, tag));
+
 		az->unsolq_rp++;
 		az->unsolq_rp %= UNSOLQ_SIZE;
-		azalia_unsol_event(codec, tag);
+
+		/* We only care about events on the using codec. */
+		if (az->codecs[az->codecno].address == addr)
+			azalia_unsol_event(&az->codecs[az->codecno], tag);
 	}
 	az->unsolq_kick = FALSE;
 }
@@ -1404,19 +1403,8 @@ azalia_resume_codec(codec_t *this)
 			    CORB_PS_D0, &result);
 			DELAY(100);
 		}
-		if ((w->type == COP_AWTYPE_PIN_COMPLEX) &&
-		    (w->d.pin.cap & COP_PINCAP_EAPD)) {
-			err = azalia_comresp(this, w->nid,
-			    CORB_GET_EAPD_BTL_ENABLE, 0, &result);
-			if (err)
-				return err;
-			result &= 0xff;
-			result |= CORB_EAPD_EAPD;
-			err = azalia_comresp(this, w->nid,
-			    CORB_SET_EAPD_BTL_ENABLE, result, &result);
-			if (err)
-				return err;
-		}
+		if (w->type == COP_AWTYPE_PIN_COMPLEX)
+			azalia_widget_init_pin(w, this);
 	}
 
 	if (this->qrks & AZ_QRK_GPIO_MASK) {
@@ -1426,10 +1414,6 @@ azalia_resume_codec(codec_t *this)
 	}
 
 	azalia_restore_mixer(this);
-
-	err = azalia_codec_enable_unsol(this);
-	if (err)
-		return err;
 
 	return(0);
 }
@@ -1458,6 +1442,10 @@ azalia_resume(azalia_t *az)
 		return err;
 
 	err = azalia_resume_codec(&az->codecs[az->codecno]);
+	if (err)
+		return err;
+
+	err = azalia_codec_enable_unsol(&az->codecs[az->codecno], 1);
 	if (err)
 		return err;
 
@@ -3883,6 +3871,8 @@ azalia_get_default_params(void *addr, int mode, struct audio_params *params)
 	params->sample_rate = 48000;
 	params->encoding = AUDIO_ENCODING_SLINEAR_LE;
 	params->precision = 16;
+	params->bps = 2;
+	params->msb = 1;
 	params->channels = 2;
 	params->sw_code = NULL;
 	params->factor = 1;
@@ -4020,6 +4010,8 @@ azalia_set_params_sub(codec_t *codec, int mode, audio_params_t *par)
 		}
 	}
 	par->sw_code = swcode;
+	par->bps = AUDIO_BPS(par->precision);
+	par->msb = 1;
 
 	return (0);
 }
@@ -4389,6 +4381,8 @@ azalia_create_encodings(codec_t *this)
 		this->encs[i].index = i;
 		this->encs[i].encoding = encs[i] & 0xff;
 		this->encs[i].precision = encs[i] >> 8;
+		this->encs[i].bps = AUDIO_BPS(encs[i] >> 8);
+		this->encs[i].msb = 1;
 		this->encs[i].flags = 0;
 		switch (this->encs[i].encoding) {
 		case AUDIO_ENCODING_SLINEAR_LE:

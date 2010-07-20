@@ -1,4 +1,4 @@
-/*	$OpenBSD: pucdata.c,v 1.67 2010/03/27 21:58:30 kettenis Exp $	*/
+/*	$OpenBSD: pucdata.c,v 1.71 2010/07/07 21:32:50 sthen Exp $	*/
 /*	$NetBSD: pucdata.c,v 1.6 1999/07/03 05:55:23 cgd Exp $	*/
 
 /*
@@ -871,7 +871,7 @@ const struct puc_device_description puc_devices[] = {
 	 * Boards with an Oxford Semiconductor chip.
 	 *
 	 * Oxford Semiconductor provides documentation for their chip at:
-	 * <URL:http://www.oxsemi.com/products/uarts/index.html>
+	 * <URL:http://www.plxtech.com/products/uart/>
 	 *
 	 * As sold by Kouwell <URL:http://www.kouwell.com/>.
 	 * I/O Flex PCI I/O Card Model-223 with 4 serial and 1 parallel ports.
@@ -1495,6 +1495,22 @@ const struct puc_device_description puc_devices[] = {
 		{ PUC_PORT_TYPE_COM, 0x18, 0x28, COM_FREQ },
 		{ PUC_PORT_TYPE_COM, 0x18, 0x30, COM_FREQ },
 		{ PUC_PORT_TYPE_COM, 0x18, 0x38, COM_FREQ },
+	    },
+	},
+
+	/* PLX 9016 8 port serial card. (i.e. Syba) */
+	{    /* "PLX 9016 - Syba" */
+	    {	PCI_VENDOR_PLX,	PCI_PRODUCT_PLX_9016,	0, 0 },
+	    {	0xffff,	0xffff,					0, 0 },
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ * 4 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x08, COM_FREQ * 4 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x10, COM_FREQ * 4 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x18, COM_FREQ * 4 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x20, COM_FREQ * 4 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x28, COM_FREQ * 4 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x30, COM_FREQ * 4 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x38, COM_FREQ * 4 },
 	    },
 	},
 

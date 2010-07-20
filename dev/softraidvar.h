@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.91 2010/03/28 16:38:57 jsing Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.94 2010/07/02 09:26:05 jsing Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -25,6 +25,10 @@
 #define SR_META_VERSION		4	/* bump when sr_metadata changes */
 #define SR_META_SIZE		64	/* save space at chunk beginning */
 #define SR_META_OFFSET		16	/* skip 8192 bytes at chunk beginning */
+
+#define SR_META_V3_SIZE		64
+#define SR_META_V3_OFFSET	16
+#define SR_META_V3_DATA_OFFSET	(SR_META_V3_OFFSET + SR_META_V3_SIZE)
 
 #define SR_META_F_NATIVE	0	/* Native metadata format. */
 #define SR_META_F_INVALID	-1
@@ -55,7 +59,7 @@ struct sr_metadata {
 		u_int64_t	ssd_magic;	/* magic id */
 #define	SR_MAGIC		0x4d4152436372616dLLU
 		u_int32_t	ssd_version; 	/* meta data version */
-		u_int32_t	ssd_flags;
+		u_int32_t	ssd_vol_flags;	/* volume specific flags. */
 		struct sr_uuid	ssd_uuid;	/* unique identifier */
 
 		/* chunks */
@@ -82,7 +86,7 @@ struct sr_metadata {
 	char			ssd_devname[32];/* /dev/XXXXX */
 	u_int32_t		ssd_meta_flags;
 #define	SR_META_DIRTY		0x1
-	u_int32_t		ssd_pad;
+	u_int32_t		ssd_data_offset;
 	u_int64_t		ssd_ondisk;	/* on disk version counter */
 	int64_t			ssd_rebuild;	/* last block of rebuild */
 } __packed;
@@ -152,16 +156,22 @@ struct sr_meta_boot {
 	u_int32_t		sbm_bootldr_size;
 } __packed;
 
+struct sr_meta_keydisk {
+	u_int8_t		skm_maskkey[SR_CRYPTO_MAXKEYBYTES];
+} __packed;
+
 struct sr_meta_opt {
 	struct sr_meta_opt_invariant {
 		u_int32_t	som_type;	/* optional type */
 #define SR_OPT_INVALID		0x00
 #define SR_OPT_CRYPTO		0x01
 #define SR_OPT_BOOT		0x02
+#define SR_OPT_KEYDISK		0x03
 		u_int32_t	som_pad;
 		union {
 			struct sr_meta_crypto smm_crypto;
 			struct sr_meta_boot smm_boot;
+			struct sr_meta_keydisk smm_keydisk;
 		}		som_meta;
 	} _som_invariant;
 #define somi			_som_invariant

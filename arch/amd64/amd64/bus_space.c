@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_space.c,v 1.15 2009/08/11 17:15:54 oga Exp $	*/
+/*	$OpenBSD: bus_space.c,v 1.17 2010/05/08 16:54:07 oga Exp $	*/
 /*	$NetBSD: bus_space.c,v 1.2 2003/03/14 18:47:53 christos Exp $	*/
 
 /*-
@@ -238,9 +238,10 @@ int
 x86_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
-	u_long pa, endpa;
+	paddr_t pa, endpa;
 	vaddr_t va;
 	bus_size_t map_size;
+	int pmap_flags = PMAP_NOCACHE;
 
 	pa = trunc_page(bpa);
 	endpa = round_page(bpa + size);
@@ -258,10 +259,15 @@ x86_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
 
 	*bshp = (bus_space_handle_t)(va + (bpa & PGOFSET));
 
+	if (flags & BUS_SPACE_MAP_CACHEABLE)
+		pmap_flags = 0;
+	else if (flags & BUS_SPACE_MAP_PREFETCHABLE)
+		pmap_flags = PMAP_WC;
+
 	for (; map_size > 0;
 	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE)
-		pmap_kenter_pa(va, pa | ((flags & BUS_SPACE_MAP_CACHEABLE) ?
-		    0 : PMAP_NOCACHE), VM_PROT_READ | VM_PROT_WRITE);
+		pmap_kenter_pa(va, pa | pmap_flags,
+		    VM_PROT_READ | VM_PROT_WRITE);
 	pmap_update(pmap_kernel());
 
 	return 0;
@@ -856,7 +862,7 @@ bus_space_set_region_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
 }
 
 void
-bus_space_copy_region_1(bus_space_tag_t t,
+bus_space_copy_1(bus_space_tag_t t,
     bus_space_handle_t h1, bus_size_t o1,
     bus_space_handle_t h2, bus_size_t o2, size_t c)
 {
@@ -891,7 +897,7 @@ bus_space_copy_region_1(bus_space_tag_t t,
 }
 
 void
-bus_space_copy_region_2(bus_space_tag_t t,
+bus_space_copy_2(bus_space_tag_t t,
     bus_space_handle_t h1, bus_size_t o1,
     bus_space_handle_t h2, bus_size_t o2, size_t c)
 {
@@ -926,7 +932,7 @@ bus_space_copy_region_2(bus_space_tag_t t,
 }
 
 void
-bus_space_copy_region_4(bus_space_tag_t t,
+bus_space_copy_4(bus_space_tag_t t,
     bus_space_handle_t h1, bus_size_t o1,
     bus_space_handle_t h2, bus_size_t o2, size_t c)
 {

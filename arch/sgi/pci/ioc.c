@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioc.c,v 1.33 2010/03/20 16:22:53 miod Exp $	*/
+/*	$OpenBSD: ioc.c,v 1.35 2010/05/09 18:37:45 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Joel Sing.
@@ -66,7 +66,6 @@ struct ioc_intr {
 
 struct ioc_softc {
 	struct device		 sc_dev;
-	int			 sc_npci;
 
 	struct mips_bus_space	*sc_mem_bus_space;
 
@@ -74,6 +73,7 @@ struct ioc_softc {
 	bus_space_handle_t	 sc_memh;
 	bus_dma_tag_t		 sc_dmat;
 	pci_chipset_tag_t	 sc_pc;
+	pcitag_t		 sc_tag;
 
 	void			*sc_ih_enet;	/* Ethernet interrupt */
 	void			*sc_ih_superio;	/* SuperIO interrupt */
@@ -171,7 +171,7 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	sc->sc_pc = pa->pa_pc;
-	sc->sc_npci = pa->pa_device;
+	sc->sc_tag = pa->pa_tag;
 	sc->sc_dmat = pa->pa_dmat;
 
 	/*
@@ -335,10 +335,7 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 			if (!ISSET(ioc_nodemask, 1UL << currentnasid)) {
 				SET(ioc_nodemask, 1UL << currentnasid);
 
-				subdevice_mask = (1 << IOCDEV_SERIAL_A) |
-				    (1 << IOCDEV_SERIAL_B) | (1 << IOCDEV_LPT) |
-				    (1 << IOCDEV_KBC) | (1 << IOCDEV_RTC) |
-				    (1 << IOCDEV_EF);
+				switch (sys_config.system_subtype) {
 				/*
 				 * Origin 300 onboard IOC3 do not have PS/2
 				 * ports; since they can only be connected to
@@ -347,8 +344,34 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 				 * regardless of the current nasid.
 				 * XXX What about Onyx 300 though???
 				 */
-				if (sys_config.system_subtype == IP35_O300)
-					subdevice_mask &= ~(1 << IOCDEV_KBC);
+				case IP35_O300:
+					subdevice_mask =
+					    (1 << IOCDEV_SERIAL_A) |
+					    (1 << IOCDEV_SERIAL_B) |
+					    (1 << IOCDEV_LPT) |
+					    (1 << IOCDEV_RTC) |
+					    (1 << IOCDEV_EF);
+					break;
+				/*
+				 * Origin 3000 I-Bricks have only one serial
+				 * port, and no keyboard or parallel ports.
+				 */
+				case IP35_CBRICK:
+					subdevice_mask =
+					    (1 << IOCDEV_SERIAL_A) |
+					    (1 << IOCDEV_RTC) |
+					    (1 << IOCDEV_EF);
+					break;
+				default:
+					subdevice_mask =
+					    (1 << IOCDEV_SERIAL_A) |
+					    (1 << IOCDEV_SERIAL_B) |
+					    (1 << IOCDEV_LPT) |
+					    (1 << IOCDEV_KBC) |
+					    (1 << IOCDEV_RTC) |
+					    (1 << IOCDEV_EF);
+					break;
+				}
 			}
 			break;
 		default:
@@ -479,7 +502,9 @@ unknown:
 		    IOC3_UARTB_SHADOW, 0);
 
 		ioc_attach_child(sc, "com", IOC3_UARTA_BASE, IOCDEV_SERIAL_A);
-		ioc_attach_child(sc, "com", IOC3_UARTB_BASE, IOCDEV_SERIAL_B);
+		if (ISSET(subdevice_mask, 1 << IOCDEV_SERIAL_B))
+			ioc_attach_child(sc, "com", IOC3_UARTB_BASE,
+			    IOCDEV_SERIAL_B);
 	}
 	if (ISSET(subdevice_mask, 1 << IOCDEV_KBC))
 		ioc_attach_child(sc, "iockbc", 0, IOCDEV_KBC);
@@ -508,9 +533,7 @@ ioc_attach_child(struct ioc_softc *sc, const char *name, bus_addr_t base,
 	memset(&iaa, 0, sizeof iaa);
 
 	iaa.iaa_name = name;
-	iaa.iaa_nasid = pci_get_nasid(sc->sc_pc);
-	iaa.iaa_widget = pci_get_widget(sc->sc_pc);
-	iaa.iaa_npci = sc->sc_npci;
+	pci_get_device_location(sc->sc_pc, sc->sc_tag, &iaa.iaa_location);
 	iaa.iaa_memt = sc->sc_memt;
 	iaa.iaa_memh = sc->sc_memh;
 	iaa.iaa_dmat = sc->sc_dmat;

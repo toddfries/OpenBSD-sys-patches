@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.23 2009/10/01 20:19:19 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.26 2010/06/27 13:28:46 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -48,7 +48,7 @@
 #include <sys/tty.h>
 #include <sys/user.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <machine/bat.h>
 #include <machine/bus.h>
@@ -85,10 +85,19 @@ int bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 struct bat battable[16];
 
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
 
 int ppc_malloc_ok = 0;
 

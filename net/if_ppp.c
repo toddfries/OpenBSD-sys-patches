@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ppp.c,v 1.55 2009/11/03 10:59:04 claudio Exp $	*/
+/*	$OpenBSD: if_ppp.c,v 1.58 2010/05/02 22:34:31 stsp Exp $	*/
 /*	$NetBSD: if_ppp.c,v 1.39 1997/05/17 21:11:59 christos Exp $	*/
 
 /*
@@ -695,7 +695,7 @@ pppsioctl(ifp, cmd, data)
 #endif /* PPP_COMPRESS */
 
     default:
-	error = EINVAL;
+	error = ENOTTY;
     }
     splx(s);
     return (error);
@@ -1474,7 +1474,7 @@ ppp_inproc(sc, m)
     m->m_pkthdr.len = ilen;
     m->m_pkthdr.rcvif = ifp;
 
-    /* mark incomming routing domain */
+    /* mark incoming routing domain */
     m->m_pkthdr.rdomain = ifp->if_rdomain;
 
     if ((proto & 0x8000) == 0) {

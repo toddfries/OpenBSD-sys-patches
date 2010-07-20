@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccbb.c,v 1.74 2010/03/27 21:40:13 jsg Exp $	*/
+/*	$OpenBSD: pccbb.c,v 1.76 2010/06/30 19:46:30 blambert Exp $	*/
 /*	$NetBSD: pccbb.c,v 1.96 2004/03/28 09:49:31 nakayama Exp $	*/
 
 /*
@@ -48,7 +48,6 @@
 #include <sys/syslog.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
-#include <sys/proc.h>
 
 #include <machine/intr.h>
 #include <machine/bus.h>
@@ -934,7 +933,7 @@ pccbbintr(void *arg)
 		     * insertion/removal during suspension.
 		     */
 		    (sc->sc_flags & CBB_CARDEXIST) == 0) {
-			timeout_add(&sc->sc_ins_tmo, hz / 10);
+			timeout_add_msec(&sc->sc_ins_tmo, 100);
 			sc->sc_flags |= CBB_INSERTING;
 		}
 		return (1);
@@ -1036,7 +1035,7 @@ pci113x_insert(void *arg)
 			/* who are you? */
 		}
 	} else {
-		timeout_add(&sc->sc_ins_tmo, hz / 10);
+		timeout_add_msec(&sc->sc_ins_tmo, 100);
 	}
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.105 2010/01/13 07:23:38 yasuoka Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.107 2010/07/08 08:40:29 yasuoka Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -59,7 +59,6 @@
 #include <machine/cpu.h>
 
 #include <net/if.h>
-#include <net/if_media.h>
 #include <net/if_types.h>
 #include <net/netisr.h>
 #include <net/route.h>
@@ -93,7 +92,6 @@ struct tun_softc {
 	struct selinfo	tun_rsel;	/* read select */
 	struct selinfo	tun_wsel;	/* write select (not used) */
 	LIST_ENTRY(tun_softc) tun_list;	/* all tunnel interfaces */
-	struct ifmedia	tun_media;
 	int		tun_unit;
 	uid_t		tun_siguid;	/* uid for process that set tun_pgid */
 	uid_t		tun_sigeuid;	/* euid for process that set tun_pgid */
@@ -140,8 +138,6 @@ void	filt_tunrdetach(struct knote *);
 void	filt_tunwdetach(struct knote *);
 void	tunstart(struct ifnet *);
 void	tun_link_state(struct tun_softc *);
-int	tun_media_change(struct ifnet *);
-void	tun_media_status(struct ifnet *, struct ifmediareq *);
 
 struct filterops tunread_filtops =
 	{ 1, NULL, filt_tunrdetach, filt_tunread};
@@ -194,12 +190,9 @@ tun_create(struct if_clone *ifc, int unit, int flags)
 	ifp->if_output = tun_output;
 	ifp->if_start = tunstart;
 	ifp->if_hardmtu = TUNMRU;
+	ifp->if_link_state = LINK_STATE_DOWN;
 	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
 	IFQ_SET_READY(&ifp->if_snd);
-
-	ifmedia_init(&tp->tun_media, 0, tun_media_change, tun_media_status);
-	ifmedia_add(&tp->tun_media, IFM_ETHER | IFM_AUTO, 0, NULL);
-	ifmedia_set(&tp->tun_media, IFM_ETHER | IFM_AUTO);
 
 	if ((flags & TUN_LAYER2) == 0) {
 		tp->tun_flags &= ~TUN_LAYER2;
@@ -371,11 +364,10 @@ tunopen(dev_t dev, int flag, int mode, struct proc *p)
 	ifp = &tp->tun_if;
 	tp->tun_flags |= TUN_OPEN;
 
-	/* automatically UP the interface on open */
+	/* automatically mark the interface running on open */
 	s = splnet();
 	ifp->if_flags |= IFF_RUNNING;
 	tun_link_state(tp);
-	if_up(ifp);
 	splx(s);
 
 	TUNDEBUG(("%s: open\n", ifp->if_xname));
@@ -561,10 +553,6 @@ tun_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = tun_switch(tp,
 		    ifp->if_flags & IFF_LINK0 ? TUN_LAYER2 : 0);
 		break;
-	case SIOCGIFMEDIA:
-	case SIOCSIFMEDIA:
-		error = ifmedia_ioctl(ifp, ifr, &tp->tun_media, cmd);
-		break;
 	default:
 		if (tp->tun_flags & TUN_LAYER2)
 			error = ether_ioctl(ifp, &tp->arpcom, cmd, data);
@@ -586,9 +574,6 @@ tun_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 	struct tun_softc	*tp = ifp->if_softc;
 	int			 s, len, error;
 	u_int32_t		*af;
-#ifdef PIPEX
-	struct pipex_session	*session;
-#endif
 
 	if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING)) {
 		m_freem(m0);
@@ -621,8 +606,8 @@ tun_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 		bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 #ifdef PIPEX
-	if ((session = pipex_ip_lookup_session(m0, &tp->pipex_iface)) != NULL) {
-		pipex_ip_output(m0, session);
+	if ((m0 = pipex_output(m0, dst->sa_family, sizeof(u_int32_t),
+	    &tp->pipex_iface)) == NULL) {
 		splx(s);
 		return (0);
 	}
@@ -1206,26 +1191,4 @@ tun_link_state(struct tun_softc *tp)
 		ifp->if_link_state = link_state;
 		if_link_state_change(ifp);
 	}
-}
-
-int
-tun_media_change(struct ifnet *ifp)
-{
-	/* Ignore */
-	return (0);
-}
-
-void
-tun_media_status(struct ifnet *ifp, struct ifmediareq *imr)
-{
-	struct tun_softc *tp = ifp->if_softc;
-
-	imr->ifm_active = IFM_ETHER | IFM_AUTO;
-	imr->ifm_status = IFM_AVALID;
-
-	tun_link_state(tp);
-
-	if (LINK_STATE_IS_UP(ifp->if_link_state) &&
-	    ifp->if_flags & IFF_UP)
-		imr->ifm_status |= IFM_ACTIVE;
 }

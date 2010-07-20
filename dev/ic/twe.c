@@ -1,4 +1,4 @@
-/*	$OpenBSD: twe.c,v 1.35 2010/03/29 23:33:39 krw Exp $	*/
+/*	$OpenBSD: twe.c,v 1.37 2010/06/28 18:31:02 krw Exp $	*/
 
 /*
  * Copyright (c) 2000-2002 Michael Shalayeff.  All rights reserved.
@@ -68,10 +68,6 @@ void	twe_scsi_cmd(struct scsi_xfer *);
 
 struct scsi_adapter twe_switch = {
 	twe_scsi_cmd, tweminphys, 0, 0,
-};
-
-struct scsi_device twe_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 static __inline struct twe_ccb *twe_get_ccb(struct twe_softc *sc);
@@ -383,7 +379,6 @@ twe_attach(sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &twe_switch;
 	sc->sc_link.adapter_target = TWE_MAX_UNITS;
-	sc->sc_link.device = &twe_dev;
 	sc->sc_link.openings = TWE_MAXCMDS / nunits;
 	sc->sc_link.adapter_buswidth = TWE_MAX_UNITS;
 
@@ -792,9 +787,7 @@ twe_scsi_cmd(xs)
 	if (target >= TWE_MAX_UNITS || !sc->sc_hdr[target].hd_present ||
 	    link->lun != 0) {
 		xs->error = XS_DRIVER_STUFFUP;
-		lock = TWE_LOCK(sc);
 		scsi_done(xs);
-		TWE_UNLOCK(sc, lock);
 		return;
 	}
 
@@ -851,9 +844,7 @@ twe_scsi_cmd(xs)
 
 	case PREVENT_ALLOW:
 		TWE_DPRINTF(TWE_D_CMD, ("PREVENT/ALLOW "));
-		lock = TWE_LOCK(sc);
 		scsi_done(xs);
-		TWE_UNLOCK(sc, lock);
 		return;
 
 	case READ_COMMAND:
@@ -940,9 +931,7 @@ twe_scsi_cmd(xs)
 		xs->error = XS_DRIVER_STUFFUP;
 	}
 
-	lock = TWE_LOCK(sc);
 	scsi_done(xs);
-	TWE_UNLOCK(sc, lock);
 }
 
 int

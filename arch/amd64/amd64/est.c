@@ -1,4 +1,4 @@
-/*	$OpenBSD: est.c,v 1.18 2010/03/28 03:09:50 marco Exp $ */
+/*	$OpenBSD: est.c,v 1.21 2010/07/05 22:47:41 jsg Exp $ */
 /*
  * Copyright (c) 2003 Michael Eriksson.
  * All rights reserved.
@@ -55,6 +55,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/malloc.h>
 
@@ -215,6 +216,10 @@ p3_get_bus_clock(struct cpu_info *ci)
 			break;
 		}
 		break;
+	case 0x1a: /* Core i7 */
+	case 0x1e: /* Core i5 */
+	case 0x25: /* Core i3 */
+		break;
 	default:
 		printf("%s: unknown i686 model 0x%x, can't get bus clock\n",
 		    ci->ci_dev->dv_xname, ci->ci_model);
@@ -309,7 +314,7 @@ est_init(struct cpu_info *ci)
 {
 	const char *cpu_device = ci->ci_dev->dv_xname;
 	int vendor = -1;
-	int i, low, high, family;
+	int i, low, high;
 	u_int64_t msr;
 	u_int16_t idhi, idlo, cur;
 	u_int8_t crhi, crlo, crcur;
@@ -319,30 +324,20 @@ est_init(struct cpu_info *ci)
 	if (setperf_prio > 3)
 		return;
 
-	family = (ci->ci_signature >> 8) & 15;
-	if (family == 0xf) {
-		p4_get_bus_clock(ci);
-	} else if (family == 6) {
-		p3_get_bus_clock(ci);
-	}
-
-	if (bus_clock == 0) {
-		printf("%s: EST: PSS not yet available for this processor\n",
-		    cpu_device);
-		return;
-	}
-
 #if NACPICPU > 0
 	est_fqlist = est_acpi_init();
 #endif
+	if (ci->ci_family == 0xf) {
+		p4_get_bus_clock(ci);
+	} else if (ci->ci_family == 6) {
+		p3_get_bus_clock(ci);
+	}
 
-	if (est_fqlist == NULL) {
-		if (bus_clock == 0) {
-			printf("%s: EST: unknown system bus clock\n",
-			    cpu_device);
-			return;
-		}
-
+	/*
+	 * Interpreting the values of PERF_STATUS is not valid
+	 * on recent processors so don't do it on anything unknown
+	 */
+	if (est_fqlist == NULL && bus_clock != 0) {
 		msr = rdmsr(MSR_PERF_STATUS);
 		idhi = (msr >> 32) & 0xffff;
 		idlo = (msr >> 48) & 0xffff;
