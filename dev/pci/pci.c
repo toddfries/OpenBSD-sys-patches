@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci.c,v 1.68 2009/11/05 20:30:47 kettenis Exp $	*/
+/*	$OpenBSD: pci.c,v 1.80 2010/07/02 04:03:31 kettenis Exp $	*/
 /*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*
@@ -39,6 +39,7 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
+#include <sys/proc.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -49,6 +50,7 @@ int pcimatch(struct device *, void *, void *);
 void pciattach(struct device *, struct device *, void *);
 int pcidetach(struct device *, int);
 void pcipower(int, void *);
+int pciactivate(struct device *, int);
 
 #define NMAPREG			((PCI_MAPREG_END - PCI_MAPREG_START) / \
 				    sizeof(pcireg_t))
@@ -67,7 +69,7 @@ extern int allowaperture;
 #endif
 
 struct cfattach pci_ca = {
-	sizeof(struct pci_softc), pcimatch, pciattach, pcidetach
+	sizeof(struct pci_softc), pcimatch, pciattach, pcidetach, pciactivate
 };
 
 struct cfdriver pci_cd = {
@@ -75,6 +77,11 @@ struct cfdriver pci_cd = {
 };
 
 int	pci_ndomains;
+
+struct proc *pci_vga_proc;
+struct pci_softc *pci_vga_pci;
+pcitag_t pci_vga_tag;
+int	pci_vga_count;
 
 int	pciprint(void *, const char *);
 int	pcisubmatch(struct device *, void *, void *);
@@ -86,6 +93,8 @@ int pci_enumerate_bus(struct pci_softc *,
     int (*)(struct pci_attach_args *), struct pci_attach_args *);
 #endif
 int	pci_reserve_resources(struct pci_attach_args *);
+int	pci_count_vga(struct pci_attach_args *);
+int	pci_primary_vga(struct pci_attach_args *);
 
 /*
  * Important note about PCI-ISA bridges:
@@ -166,6 +175,9 @@ pciattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_intrswiz = pba->pba_intrswiz;
 	sc->sc_intrtag = pba->pba_intrtag;
 	pci_enumerate_bus(sc, pci_reserve_resources, NULL);
+	pci_enumerate_bus(sc, pci_count_vga, NULL);
+	if (pci_enumerate_bus(sc, pci_primary_vga, NULL))
+		pci_vga_pci = sc;
 	pci_enumerate_bus(sc, NULL, NULL);
 }
 
@@ -173,6 +185,24 @@ int
 pcidetach(struct device *self, int flags)
 {
 	return pci_detach_devices((struct pci_softc *)self, flags);
+}
+
+int
+pciactivate(struct device *self, int act)
+{
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
+		pcipower(PWR_SUSPEND, self);	
+		break;
+	case DVACT_RESUME:
+		pcipower(PWR_RESUME, self);
+		rv = config_activate_children(self, act);
+		break;
+	}
+	return (rv);
 }
 
 /* save and restore the pci config space */
@@ -334,12 +364,11 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 		    pcisubmatch))) {
 			pcireg_t reg;
 
+			pci_dev_postattach(dev, &pa);
+
 			/* skip header type != 0 */
 			reg = pci_conf_read(pc, tag, PCI_BHLC_REG);
 			if (PCI_HDRTYPE_TYPE(reg) != 0)
-				return(0);
-			if (pci_get_capability(pc, tag,
-			    PCI_CAP_PWRMGMT, NULL, NULL) == 0)
 				return(0);
 			if (!(pd = malloc(sizeof *pd, M_DEVBUF,
 			    M_NOWAIT)))
@@ -749,6 +778,10 @@ pci_matchbyid(struct pci_attach_args *pa, const struct pci_matchid *ids,
 #define PCIDEBUG(x)
 #endif
 
+void pci_disable_vga(pci_chipset_tag_t, pcitag_t);
+void pci_enable_vga(pci_chipset_tag_t, pcitag_t);
+void pci_route_vga(struct pci_softc *);
+void pci_unroute_vga(struct pci_softc *);
 
 int pciopen(dev_t dev, int oflags, int devtype, struct proc *p);
 int pciclose(dev_t dev, int flag, int devtype, struct proc *p);
@@ -779,6 +812,8 @@ int
 pciclose(dev_t dev, int flag, int devtype, struct proc *p)
 {
 	PCIDEBUG(("pciclose\n"));
+
+	pci_vga_proc = NULL;
 	return (0);
 }
 
@@ -790,7 +825,7 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	struct pci_rom *rom;
 	int i, error;
 	pcitag_t tag;
-	struct pci_softc *pci = NULL;
+	struct pci_softc *pci;
 	pci_chipset_tag_t pc;
 
 	switch (cmd) {
@@ -802,6 +837,11 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 	case PCIOCGETROMLEN:
 	case PCIOCGETROM:
+		break;
+	case PCIOCGETVGA:
+	case PCIOCSETVGA:
+		if (pci_vga_pci == NULL)
+			return EINVAL;
 		break;
 	default:
 		return ENOTTY;
@@ -931,6 +971,70 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 	}
 
+	case PCIOCGETVGA:
+	{
+		struct pci_vga *vga = (struct pci_vga *)data;
+		int bus, device, function;
+
+		pci_decompose_tag(pci_vga_pci->sc_pc, pci_vga_tag,
+		    &bus, &device, &function);
+		vga->pv_sel.pc_bus = bus;
+		vga->pv_sel.pc_dev = device;
+		vga->pv_sel.pc_func = function;
+		error = 0;
+		break;
+	}
+	case PCIOCSETVGA:
+	{
+		struct pci_vga *vga = (struct pci_vga *)data;
+		int bus, device, function;
+
+		switch (vga->pv_lock) {
+		case PCI_VGA_UNLOCK:
+		case PCI_VGA_LOCK:
+		case PCI_VGA_TRYLOCK:
+			break;
+		default:
+			return (EINVAL);
+		}
+
+		if (vga->pv_lock == PCI_VGA_UNLOCK) {
+			if (pci_vga_proc != p)
+				return (EINVAL);
+			pci_vga_proc = NULL;
+			wakeup(&pci_vga_proc);
+			return (0);
+		}
+
+		while (pci_vga_proc != p && pci_vga_proc != NULL) {
+			if (vga->pv_lock == PCI_VGA_TRYLOCK)
+				return (EBUSY);
+			error = tsleep(&pci_vga_proc, PLOCK | PCATCH,
+			    "vgalk", 0);
+			if (error)
+				return (error);
+		}
+		pci_vga_proc = p;
+
+		pci_decompose_tag(pci_vga_pci->sc_pc, pci_vga_tag,
+		    &bus, &device, &function);
+		if (bus != vga->pv_sel.pc_bus ||
+		    device != vga->pv_sel.pc_dev ||
+		    function != vga->pv_sel.pc_func) {
+			pci_disable_vga(pci_vga_pci->sc_pc, pci_vga_tag);
+			if (pci != pci_vga_pci) {
+				pci_unroute_vga(pci_vga_pci);
+				pci_route_vga(pci);
+				pci_vga_pci = pci;
+			}
+			pci_enable_vga(pc, tag);
+			pci_vga_tag = tag;
+		}
+
+		error = 0;
+		break;
+	}
+
 	default:
 		error = ENOTTY;
 		break;
@@ -939,4 +1043,96 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	return (error);
 }
 
-#endif
+void
+pci_disable_vga(pci_chipset_tag_t pc, pcitag_t tag)
+{
+	pcireg_t csr;
+
+	csr = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
+	csr &= ~(PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE);
+	pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, csr);
+}
+
+void
+pci_enable_vga(pci_chipset_tag_t pc, pcitag_t tag)
+{
+	pcireg_t csr;
+
+	csr = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
+	csr |= PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE;
+	pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, csr);
+}
+
+void
+pci_route_vga(struct pci_softc *sc)
+{
+	pci_chipset_tag_t pc = sc->sc_pc;
+	pcireg_t bc;
+
+	if (sc->sc_bridgetag == NULL)
+		return;
+
+	bc = pci_conf_read(pc, *sc->sc_bridgetag, PPB_REG_BRIDGECONTROL);
+	bc |= PPB_BC_VGA_ENABLE;
+	pci_conf_write(pc, *sc->sc_bridgetag, PPB_REG_BRIDGECONTROL, bc);
+
+	pci_route_vga((struct pci_softc *)sc->sc_dev.dv_parent->dv_parent);
+}
+
+void
+pci_unroute_vga(struct pci_softc *sc)
+{
+	pci_chipset_tag_t pc = sc->sc_pc;
+	pcireg_t bc;
+
+	if (sc->sc_bridgetag == NULL)
+		return;
+
+	bc = pci_conf_read(pc, *sc->sc_bridgetag, PPB_REG_BRIDGECONTROL);
+	bc &= ~PPB_BC_VGA_ENABLE;
+	pci_conf_write(pc, *sc->sc_bridgetag, PPB_REG_BRIDGECONTROL, bc);
+
+	pci_unroute_vga((struct pci_softc *)sc->sc_dev.dv_parent->dv_parent);
+}
+#endif /* USER_PCICONF */
+
+int
+pci_count_vga(struct pci_attach_args *pa)
+{
+	/* XXX For now, only handle the first PCI domain. */
+	if (pa->pa_domain != 0)
+		return (0);
+
+	if ((PCI_CLASS(pa->pa_class) != PCI_CLASS_DISPLAY ||
+	    PCI_SUBCLASS(pa->pa_class) != PCI_SUBCLASS_DISPLAY_VGA) &&
+	    (PCI_CLASS(pa->pa_class) != PCI_CLASS_PREHISTORIC ||
+	    PCI_SUBCLASS(pa->pa_class) != PCI_SUBCLASS_PREHISTORIC_VGA))
+		return (0);
+
+	pci_vga_count++;
+
+	return (0);
+}
+
+int
+pci_primary_vga(struct pci_attach_args *pa)
+{
+	/* XXX For now, only handle the first PCI domain. */
+	if (pa->pa_domain != 0)
+		return (0);
+
+	if ((PCI_CLASS(pa->pa_class) != PCI_CLASS_DISPLAY ||
+	    PCI_SUBCLASS(pa->pa_class) != PCI_SUBCLASS_DISPLAY_VGA) &&
+	    (PCI_CLASS(pa->pa_class) != PCI_CLASS_PREHISTORIC ||
+	    PCI_SUBCLASS(pa->pa_class) != PCI_SUBCLASS_PREHISTORIC_VGA))
+		return (0);
+
+	if ((pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG)
+	    & (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE))
+	    != (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE))
+		return (0);
+
+	pci_vga_tag = pa->pa_tag;
+
+	return (1);
+}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.h,v 1.67 2009/06/05 00:05:22 claudio Exp $	*/
+/*	$OpenBSD: in_pcb.h,v 1.69 2010/07/03 04:44:51 guenther Exp $	*/
 /*	$NetBSD: in_pcb.h,v 1.14 1996/02/13 23:42:00 christos Exp $	*/
 
 /*
@@ -146,7 +146,7 @@ struct inpcb {
 #endif
 	struct	icmp6_filter *inp_icmp6filt;
 	void	*inp_pf_sk;
-	u_int	inp_rdomain;
+	u_int	inp_rtableid;
 };
 
 struct inpcbtable {
@@ -272,7 +272,7 @@ struct inpcb *
 	 in_pcblookup(struct inpcbtable *, void *, u_int, void *,
 	    u_int, int, u_int);
 void	 in_pcbnotifyall(struct inpcbtable *, struct sockaddr *,
-	    int, void (*)(struct inpcb *, int));
+	    u_int, int, void (*)(struct inpcb *, int));
 void	 in_pcbrehash(struct inpcb *);
 void	 in_rtchange(struct inpcb *, int);
 void	 in_setpeeraddr(struct inpcb *, struct mbuf *);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.26 2009/10/26 20:14:40 miod Exp $ */
+/*	$OpenBSD: clock.c,v 1.33 2010/02/28 17:23:25 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -52,12 +52,8 @@ struct cfattach clock_ca = {
 	sizeof(struct device), clockmatch, clockattach
 };
 
+void	clock_calibrate(struct cpu_info *);
 uint32_t clock_int5(uint32_t, struct trap_frame *);
-
-int	clock_started;
-u_int32_t cpu_counter_last;
-u_int32_t cpu_counter_interval;
-u_int32_t pendingticks;
 
 u_int cp0_get_timecount(struct timecounter *);
 
@@ -123,50 +119,64 @@ uint32_t
 clock_int5(uint32_t mask, struct trap_frame *tf)
 {
 	u_int32_t clkdiff;
+	struct cpu_info *ci = curcpu();
 
 	/*
 	 * If we got an interrupt before we got ready to process it,
 	 * retrigger it as far as possible. cpu_initclocks() will
 	 * take care of retriggering it correctly.
 	 */
-	if (clock_started == 0) {
+	if (ci->ci_clock_started == 0) {
 		cp0_set_compare(cp0_get_count() - 1);
+
 		return CR_INT_5;
 	}
 
 	/*
 	 * Count how many ticks have passed since the last clock interrupt...
 	 */
-	clkdiff = cp0_get_count() - cpu_counter_last;
-	while (clkdiff >= cpu_counter_interval) {
-		cpu_counter_last += cpu_counter_interval;
-		clkdiff = cp0_get_count() - cpu_counter_last;
-		pendingticks++;
+	clkdiff = cp0_get_count() - ci->ci_cpu_counter_last;
+	while (clkdiff >= ci->ci_cpu_counter_interval) {
+		ci->ci_cpu_counter_last += ci->ci_cpu_counter_interval;
+		clkdiff = cp0_get_count() - ci->ci_cpu_counter_last;
+		ci->ci_pendingticks++;
 	}
-	pendingticks++;
-	cpu_counter_last += cpu_counter_interval;
+	ci->ci_pendingticks++;
+	ci->ci_cpu_counter_last += ci->ci_cpu_counter_interval;
 
 	/*
 	 * Set up next tick, and check if it has just been hit; in this
 	 * case count it and schedule one tick ahead.
 	 */
-	cp0_set_compare(cpu_counter_last);
-	clkdiff = cp0_get_count() - cpu_counter_last;
+	cp0_set_compare(ci->ci_cpu_counter_last);
+	clkdiff = cp0_get_count() - ci->ci_cpu_counter_last;
 	if ((int)clkdiff >= 0) {
-		cpu_counter_last += cpu_counter_interval;
-		pendingticks++;
-		cp0_set_compare(cpu_counter_last);
+		ci->ci_cpu_counter_last += ci->ci_cpu_counter_interval;
+		ci->ci_pendingticks++;
+		cp0_set_compare(ci->ci_cpu_counter_last);
 	}
 
 	/*
 	 * Process clock interrupt unless it is currently masked.
 	 */
-	if (tf->ipl < IPL_CLOCK)
-		while (pendingticks) {
+	if (tf->ipl < IPL_CLOCK) {
+#ifdef MULTIPROCESSOR
+		u_int32_t sr;
+		/* Enable interrupts at this (hardware) level again */
+		sr = getsr();
+		ENABLEIPI();
+		__mp_lock(&kernel_lock);
+#endif
+		while (ci->ci_pendingticks) {
 			clk_count.ec_count++;
 			hardclock(tf);
-			pendingticks--;
+			ci->ci_pendingticks--;
 		}
+#ifdef MULTIPROCESSOR
+		__mp_unlock(&kernel_lock);
+		setsr(sr);
+#endif
+	}
 
 	return CR_INT_5;	/* Clock is always on 5 */
 }
@@ -179,9 +189,14 @@ delay(int n)
 {
 	int dly;
 	int p, c;
+	struct cpu_info *ci = curcpu();
+	uint32_t delayconst;
 
+	delayconst = ci->ci_delayconst;
+	if (delayconst == 0)
+		delayconst = bootcpu_hwinfo.clock / 2;
 	p = cp0_get_count();
-	dly = (sys_config.cpu[0].clock / 1000000) * n / 2;
+	dly = (delayconst / 1000000) * n;
 	while (dly > 0) {
 		c = cp0_get_count();
 		dly -= c - p;
@@ -196,57 +211,84 @@ delay(int n)
 struct tod_desc sys_tod;
 
 /*
+ * Calibrate cpu clock against the TOD clock if available.
+ */
+void
+clock_calibrate(struct cpu_info *ci)
+{
+	struct tod_desc *cd = &sys_tod;
+	struct tod_time ct;
+	u_int first_cp0, second_cp0, cycles_per_sec;
+	int first_sec;
+
+	if (cd->tod_get == NULL)
+		return;
+
+	(*cd->tod_get)(cd->tod_cookie, 0, &ct);
+	first_sec = ct.sec;
+
+	/* Let the clock tick one second. */
+	do {
+		first_cp0 = cp0_get_count();
+		(*cd->tod_get)(cd->tod_cookie, 0, &ct);
+	} while (ct.sec == first_sec);
+	first_sec = ct.sec;
+	/* Let the clock tick one more second. */
+	do {
+		second_cp0 = cp0_get_count();
+		(*cd->tod_get)(cd->tod_cookie, 0, &ct);
+	} while (ct.sec == first_sec);
+
+	cycles_per_sec = second_cp0 - first_cp0;
+	ci->ci_hw.clock = cycles_per_sec * 2;
+	ci->ci_delayconst = cycles_per_sec;
+}
+
+/*
  * Start the real-time and statistics clocks. Leave stathz 0 since there
  * are no other timers available.
  */
 void
 cpu_initclocks()
 {
-	struct tod_desc *cd = &sys_tod;
-	struct tod_time ct;
-	u_int first_cp0, second_cp0, cycles_per_sec;
-	int first_sec;
-	int s;
+	struct cpu_info *ci = curcpu();
 
 	hz = 100;
 	profhz = 100;
 	stathz = 0;	/* XXX no stat clock yet */
 
-	/*
-	 * Calibrate the cycle counter frequency.
-	 */
-	if (cd->tod_get != NULL) {
-		(*cd->tod_get)(cd->tod_cookie, 0, &ct);
-		first_sec = ct.sec;
-
-		/* Let the clock tick one second. */
-		do {
-			first_cp0 = cp0_get_count();
-			(*cd->tod_get)(cd->tod_cookie, 0, &ct);
-		} while (ct.sec == first_sec);
-		first_sec = ct.sec;
-		/* Let the clock tick one more second. */
-		do {
-			second_cp0 = cp0_get_count();
-			(*cd->tod_get)(cd->tod_cookie, 0, &ct);
-		} while (ct.sec == first_sec);
-
-		cycles_per_sec = second_cp0 - first_cp0;
-		sys_config.cpu[0].clock = cycles_per_sec * 2;
-	}
+	clock_calibrate(ci);
 
 	tick = 1000000 / hz;	/* number of micro-seconds between interrupts */
 	tickadj = 240000 / (60 * hz);		/* can adjust 240ms in 60s */
 
-	cp0_timecounter.tc_frequency = sys_config.cpu[0].clock / 2;
+	cp0_timecounter.tc_frequency = (uint64_t)ci->ci_hw.clock / 2;
 	tc_init(&cp0_timecounter);
+	cpu_startclock(ci);
+}
+
+void
+cpu_startclock(struct cpu_info *ci)
+{
+	int s;
+
+	if (!CPU_IS_PRIMARY(ci)) {
+		s = splhigh();
+		microuptime(&ci->ci_schedstate.spc_runtime);
+		splx(s);
+
+		/* try to avoid getting clock interrupts early */
+		cp0_set_compare(cp0_get_count() - 1);
+
+		clock_calibrate(ci);
+	}
 
 	/* Start the clock. */
 	s = splclock();
-	cpu_counter_interval = cp0_timecounter.tc_frequency / hz;
-	cpu_counter_last = cp0_get_count() + cpu_counter_interval;
-	cp0_set_compare(cpu_counter_last);
-	clock_started++;
+	ci->ci_cpu_counter_interval = (ci->ci_hw.clock / 2) / hz;
+	ci->ci_cpu_counter_last = cp0_get_count() + ci->ci_cpu_counter_interval;
+	cp0_set_compare(ci->ci_cpu_counter_last);
+	ci->ci_clock_started++;
 	splx(s);
 }
 
@@ -284,7 +326,7 @@ inittodr(time_t base)
 	if (base < 35 * SECYR) {
 		printf("WARNING: preposterous time in file system");
 		/* read the system clock anyway */
-		base = 38 * SECYR;	/* 2008 */
+		base = 40 * SECYR;	/* 2010 */
 	}
 
 	/*
@@ -389,5 +431,6 @@ resettodr()
 u_int
 cp0_get_timecount(struct timecounter *tc)
 {
+	/* XXX SMP */
 	return (cp0_get_count());
 }

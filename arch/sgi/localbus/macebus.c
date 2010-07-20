@@ -1,4 +1,4 @@
-/*	$OpenBSD: macebus.c,v 1.52 2009/10/26 18:00:06 miod Exp $ */
+/*	$OpenBSD: macebus.c,v 1.56 2009/11/25 17:39:51 syuu Exp $ */
 
 /*
  * Copyright (c) 2000-2004 Opsycon AB  (www.opsycon.se)
@@ -58,7 +58,7 @@ void	 macebus_intr_makemasks(void);
 void	 macebus_splx(int);
 uint32_t macebus_iointr(uint32_t, struct trap_frame *);
 uint32_t macebus_aux(uint32_t, struct trap_frame *);
-int	 macebus_iointr_skip(struct intrhand *);
+int	 macebus_iointr_skip(struct intrhand *, uint64_t, uint64_t);
 void	 crime_setintrmask(int);
 
 u_int8_t mace_read_1(bus_space_tag_t, bus_space_handle_t, bus_size_t);
@@ -535,53 +535,6 @@ macebus_intr_disestablish(void *ih)
 	panic("%s not implemented", __func__);
 }
 
-/*
- * Regenerate interrupt masks to reflect reality.
- */
-void
-macebus_intr_makemasks(void)
-{
-	int irq, level;
-	struct intrhand *q;
-	uint intrlevel[CRIME_NINTS];
-
-	/* First, figure out which levels each IRQ uses. */
-	for (irq = 0; irq < CRIME_NINTS; irq++) {
-		uint levels = 0;
-		for (q = (struct intrhand *)crime_intrhand[irq];
-		    q != NULL; q = q->ih_next)
-			levels |= 1 << q->ih_level;
-		intrlevel[irq] = levels;
-	}
-
-	/* Then figure out which IRQs use each level. */
-	for (level = IPL_NONE; level < IPL_HIGH; level++) {
-		uint64_t irqs = 0;
-		for (irq = 0; irq < CRIME_NINTS; irq++)
-			if (intrlevel[irq] & (1 << level))
-				irqs |= 1UL << irq;
-		crime_imask[level] = irqs;
-	}
-
-	/*
-	 * There are tty, network and disk drivers that use free() at interrupt
-	 * time, so vm > (tty | net | bio).
-	 *
-	 * Enforce a hierarchy that gives slow devices a better chance at not
-	 * dropping data.
-	 */
-	crime_imask[IPL_NET] |= crime_imask[IPL_BIO];
-	crime_imask[IPL_TTY] |= crime_imask[IPL_NET];
-	crime_imask[IPL_VM] |= crime_imask[IPL_TTY];
-	crime_imask[IPL_CLOCK] |= crime_imask[IPL_VM];
-
-	/*
-	 * These are pseudo-levels.
-	 */
-	crime_imask[IPL_NONE] = 0;
-	crime_imask[IPL_HIGH] = -1UL;
-}
-
 void
 macebus_splx(int newipl)
 {
@@ -602,11 +555,23 @@ macebus_splx(int newipl)
  */
 
 #define	INTR_FUNCTIONNAME	macebus_iointr
-#define	INTR_LOCAL_DECLS
+#define	MASK_FUNCTIONNAME	macebus_intr_makemasks
+
+#define	INTR_LOCAL_DECLS \
+	uint64_t mace_isr, mace_imr;
+#define	MASK_LOCAL_DECLS
 #define	INTR_GETMASKS \
 do { \
 	isr = bus_space_read_8(&crimebus_tag, crime_h, CRIME_INT_STAT); \
 	imr = bus_space_read_8(&crimebus_tag, crime_h, CRIME_INT_MASK); \
+	if (((CRIME_INT_SUPER_IO | CRIME_INT_SUB_MISC | CRIME_INT_SUB_AUDIO) & \
+	    isr & imr) != 0) { \
+		mace_isr = bus_space_read_8(&macebus_tag, mace_h, \
+		    MACE_ISA_INT_STAT); \
+		mace_imr = bus_space_read_8(&macebus_tag, mace_h, \
+		    MACE_ISA_INT_MASK); \
+	} else \
+		mace_isr = mace_imr = 0; \
 	bit = 63; \
 } while (0)
 #define	INTR_MASKPENDING \
@@ -615,27 +580,27 @@ do { \
 #define	INTR_HANDLER(bit)	(struct intrhand *)crime_intrhand[bit]
 #define	INTR_SPURIOUS(bit) \
 do { \
-	uint64_t mace_isr, mace_imr; \
-	mace_isr = bus_space_read_8(&macebus_tag, mace_h, MACE_ISA_INT_STAT); \
-	mace_imr = bus_space_read_8(&macebus_tag, mace_h, MACE_ISA_INT_MASK); \
-	/* serial console processing may clear interrupt condition \
-	   before it fires */ \
-	if (bit != 4 || (mace_isr & mace_imr) != 0) \
-		printf("spurious crime interrupt %d mace isr %p imr %p\n", \
-		    bit, mace_isr, mace_imr); \
+	if (((CRIME_INT_SUPER_IO | CRIME_INT_SUB_MISC | CRIME_INT_SUB_AUDIO) & \
+	    (1 << (bit))) != 0) { \
+		if ((mace_isr & mace_imr) != 0) \
+			printf("spurious crime interrupt %d" \
+			    " mace isr %p imr %p\n", bit, mace_isr, mace_imr); \
+	} else \
+		printf("spurious crime interrupt %d\n", bit); \
 } while (0)
 #define	INTR_MASKRESTORE \
 	bus_space_write_8(&crimebus_tag, crime_h, CRIME_INT_MASK, imr)
+#define	INTR_MASKSIZE		CRIME_NINTS
 
-#define	INTR_HANDLER_SKIP(ih)	macebus_iointr_skip((void *)ih)
+#define	INTR_HANDLER_SKIP(ih) \
+	macebus_iointr_skip((void *)ih, mace_isr, mace_imr)
 
 #include <sgi/sgi/intr_template.c>
 
 int
-macebus_iointr_skip(struct intrhand *ih)
+macebus_iointr_skip(struct intrhand *ih, uint64_t mace_isr, uint64_t mace_imr)
 {
 	struct crime_intrhand *mih = (struct crime_intrhand *)ih;
-	uint64_t mace_isr, mace_imr;
 
 	/* do not skip pure CRIME interrupts */
 	if (mih->mace_irqmask == 0)
@@ -647,8 +612,6 @@ macebus_iointr_skip(struct intrhand *ih)
 	 * MACE interrupt status.
 	 */
 
-	mace_isr = bus_space_read_8(&macebus_tag, mace_h, MACE_ISA_INT_STAT);
-	mace_imr = bus_space_read_8(&macebus_tag, mace_h, MACE_ISA_INT_MASK);
 	if ((mace_isr & mace_imr & mih->mace_irqmask) != 0)
 		return 0;
 

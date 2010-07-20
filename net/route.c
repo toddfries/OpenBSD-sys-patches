@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.114 2009/11/03 10:59:04 claudio Exp $	*/
+/*	$OpenBSD: route.c,v 1.125 2010/07/09 16:58:06 reyk Exp $	*/
 /*	$NetBSD: route.c,v 1.14 1996/02/13 22:00:46 christos Exp $	*/
 
 /*
@@ -129,7 +129,7 @@
 #include <netinet/ip_ipsp.h>
 #include <net/if_enc.h>
 
-struct ifaddr	*encap_findgwifa(struct sockaddr *);
+struct ifaddr	*encap_findgwifa(struct sockaddr *, u_int);
 #endif
 
 #define	SA(p) ((struct sockaddr *)(p))
@@ -147,14 +147,10 @@ int			rttrash;	/* routes not in table but not freed */
 struct pool		rtentry_pool;	/* pool for rtentry structures */
 struct pool		rttimer_pool;	/* pool for rttimer structures */
 
-int	rtable_init(struct radix_node_head ***);
-int	okaytoclone(u_int, int);
-int	rtflushclone1(struct radix_node *, void *);
+int	rtable_init(struct radix_node_head ***, u_int);
+int	rtflushclone1(struct radix_node *, void *, u_int);
 void	rtflushclone(struct radix_node_head *, struct rtentry *);
-int	rt_if_remove_rtdelete(struct radix_node *, void *);
-#ifndef SMALL_KERNEL
-int	rt_if_linkstate_change(struct radix_node *, void *);
-#endif
+int	rt_if_remove_rtdelete(struct radix_node *, void *, u_int);
 
 #define	LABELID_MAX	50000
 
@@ -169,17 +165,23 @@ TAILQ_HEAD(rt_labels, rt_label)	rt_labels = TAILQ_HEAD_INITIALIZER(rt_labels);
 
 #ifdef IPSEC
 struct ifaddr *
-encap_findgwifa(struct sockaddr *gw)
+encap_findgwifa(struct sockaddr *gw, u_int rdomain)
 {
-	return (TAILQ_FIRST(&encif[0].sc_if.if_addrlist));
+	struct ifnet	*encif;
+
+	if ((encif = enc_getif(rdomain, 0)) == NULL)
+		return (NULL);
+
+	return (TAILQ_FIRST(&encif->if_addrlist));
 }
 #endif
 
 int
-rtable_init(struct radix_node_head ***table)
+rtable_init(struct radix_node_head ***table, u_int id)
 {
 	void		**p;
 	struct domain	 *dom;
+	u_int8_t	  i;
 
 	if ((p = malloc(sizeof(void *) * (rtafidx_max + 1), M_RTABLE,
 	    M_NOWAIT|M_ZERO)) == NULL)
@@ -192,11 +194,17 @@ rtable_init(struct radix_node_head ***table)
 			    dom->dom_rtoffset);
 
 	*table = (struct radix_node_head **)p;
+
+	for (i = 0; i < rtafidx_max; i++) {
+		if ((*table)[i] != NULL)
+			(*table)[i]->rnh_rtabelid = id;
+	}
+
 	return (0);
 }
 
 void
-route_init()
+route_init(void)
 {
 	struct domain	 *dom;
 
@@ -238,6 +246,7 @@ rtable_add(u_int id)	/* must be called at splsoftnet */
 			bcopy(rt_tables, p, sizeof(void *) * (rtbl_id_max+1));
 			bcopy(rt_tab2dom, q, sizeof(u_int) * (rtbl_id_max+1));
 			free(rt_tables, M_RTABLE);
+			free(rt_tab2dom, M_RTABLE);
 		}
 		rt_tables = p;
 		rt_tab2dom = q;
@@ -248,7 +257,23 @@ rtable_add(u_int id)	/* must be called at splsoftnet */
 		return (-1);
 
 	rt_tab2dom[id] = 0;	/* use main table/domain by default */
-	return (rtable_init(&rt_tables[id]));
+	return (rtable_init(&rt_tables[id], id));
+}
+
+void
+rtable_addif(struct ifnet *ifp, u_int id)
+{
+	/* make sure that the routing table exists */
+	if (!rtable_exists(id)) {
+		if (rtable_add(id) == -1)
+			panic("rtable_addif: rtable_add");
+	}
+	if (id != rtable_l2(id)) {
+		/* XXX we should probably flush the table */
+		rtable_l2set(id, id);
+	}
+
+	ifp->if_rdomain = id;
 }
 
 u_int
@@ -282,83 +307,28 @@ rtable_exists(u_int id)	/* verify table with that ID exists */
 	return (1);
 }
 
-#include "pf.h"
-#if NPF > 0
-void
-rtalloc_noclone(struct route *ro, int howstrict)
-{
-	if (ro->ro_rt && ro->ro_rt->rt_ifp && (ro->ro_rt->rt_flags & RTF_UP))
-		return;		/* XXX */
-	ro->ro_rt = rtalloc2(&ro->ro_dst, 1, howstrict);
-}
-
-int
-okaytoclone(u_int flags, int howstrict)
-{
-	if (howstrict == ALL_CLONING)
-		return (1);
-	if (howstrict == ONNET_CLONING && !(flags & RTF_GATEWAY))
-		return (1);
-	return (0);
-}
-
-struct rtentry *
-rtalloc2(struct sockaddr *dst, int report, int howstrict)
-{
-	struct radix_node_head	*rnh;
-	struct rtentry		*rt;
-	struct radix_node	*rn;
-	struct rtentry		*newrt = 0;
-	struct rt_addrinfo	 info;
-	int			 s = splnet(), err = 0, msgtype = RTM_MISS;
-
-	bzero(&info, sizeof(info));
-	info.rti_info[RTAX_DST] = dst;
-
-	rnh = rt_gettable(dst->sa_family, 0);
-	if (rnh && (rn = rnh->rnh_matchaddr((caddr_t)dst, rnh)) &&
-	    ((rn->rn_flags & RNF_ROOT) == 0)) {
-		newrt = rt = (struct rtentry *)rn;
-		if (report && (rt->rt_flags & RTF_CLONING) &&
-		    okaytoclone(rt->rt_flags, howstrict)) {
-			err = rtrequest1(RTM_RESOLVE, &info, RTP_DEFAULT,
-			    &newrt, 0);
-			if (err) {
-				newrt = rt;
-				rt->rt_refcnt++;
-				goto miss;
-			}
-			if ((rt = newrt) && (rt->rt_flags & RTF_XRESOLVE)) {
-				msgtype = RTM_RESOLVE;
-				goto miss;
-			}
-		} else
-			rt->rt_refcnt++;
-	} else {
-		rtstat.rts_unreach++;
-miss:
-		if (report) {
-			rt_missmsg(msgtype, &info, 0, NULL, err, 0);
-		}
-	}
-	splx(s);
-	return (newrt);
-}
-#endif /* NPF > 0 */
-
 /*
  * Packet routing routines.
  */
+void
+rtalloc_noclone(struct route *ro)
+{
+	if (ro->ro_rt && ro->ro_rt->rt_ifp && (ro->ro_rt->rt_flags & RTF_UP))
+		return;				 /* XXX */
+	ro->ro_rt = rtalloc1(&ro->ro_dst, RT_REPORT | RT_NOCLONING,
+	    ro->ro_tableid);
+}
+
 void
 rtalloc(struct route *ro)
 {
 	if (ro->ro_rt && ro->ro_rt->rt_ifp && (ro->ro_rt->rt_flags & RTF_UP))
 		return;				 /* XXX */
-	ro->ro_rt = rtalloc1(&ro->ro_dst, 1, 0);
+	ro->ro_rt = rtalloc1(&ro->ro_dst, RT_REPORT, ro->ro_tableid);
 }
 
 struct rtentry *
-rtalloc1(struct sockaddr *dst, int report, u_int tableid)
+rtalloc1(struct sockaddr *dst, int flags, u_int tableid)
 {
 	struct radix_node_head	*rnh;
 	struct rtentry		*rt;
@@ -374,7 +344,8 @@ rtalloc1(struct sockaddr *dst, int report, u_int tableid)
 	if (rnh && (rn = rnh->rnh_matchaddr((caddr_t)dst, rnh)) &&
 	    ((rn->rn_flags & RNF_ROOT) == 0)) {
 		newrt = rt = (struct rtentry *)rn;
-		if (report && (rt->rt_flags & RTF_CLONING)) {
+		if ((rt->rt_flags & RTF_CLONING) &&
+		    ISSET(flags,  RT_REPORT | RT_NOCLONING) == RT_REPORT) {
 			err = rtrequest1(RTM_RESOLVE, &info, RTP_DEFAULT,
 			    &newrt, tableid);
 			if (err) {
@@ -409,7 +380,7 @@ rtalloc1(struct sockaddr *dst, int report, u_int tableid)
 	 * sent upward breaking user-level routing queries.
 	 */
 miss:
-		if (report && dst->sa_family != PF_KEY) {
+		if (ISSET(flags, RT_REPORT) && dst->sa_family != PF_KEY) {
 			bzero((caddr_t)&info, sizeof(info));
 			info.rti_info[RTAX_DST] = dst;
 			rt_missmsg(msgtype, &info, 0, NULL, err, tableid);
@@ -609,14 +580,14 @@ rtdeletemsg(struct rtentry *rt, u_int tableid)
 }
 
 int
-rtflushclone1(struct radix_node *rn, void *arg)
+rtflushclone1(struct radix_node *rn, void *arg, u_int id)
 {
 	struct rtentry	*rt, *parent;
 
 	rt = (struct rtentry *)rn;
 	parent = (struct rtentry *)arg;
 	if ((rt->rt_flags & RTF_CLONED) != 0 && rt->rt_parent == parent)
-		rtdeletemsg(rt, 0);
+		rtdeletemsg(rt, id);
 	return 0;
 }
 
@@ -653,7 +624,7 @@ ifa_ifwithroute(int flags, struct sockaddr *dst, struct sockaddr *gateway,
 	 * enc0.
 	 */
 	if (dst && (dst->sa_family == PF_KEY))
-		return (encap_findgwifa(gateway));
+		return (encap_findgwifa(gateway, rtableid));
 #endif
 
 	if ((flags & RTF_GATEWAY) == 0) {
@@ -903,8 +874,9 @@ makeroute:
 
 #ifdef MPLS
 		/* We have to allocate additional space for MPLS infos */ 
-		if (info->rti_info[RTAX_SRC] != NULL ||
-		    info->rti_info[RTAX_DST]->sa_family == AF_MPLS) {
+		if (info->rti_flags & RTF_MPLS &&
+		    (info->rti_info[RTAX_SRC] != NULL ||
+		    info->rti_info[RTAX_DST]->sa_family == AF_MPLS)) {
 			struct rt_mpls *rt_mpls;
 
 			sa_mpls = (struct sockaddr_mpls *)
@@ -931,7 +903,8 @@ makeroute:
 			/* XXX: set experimental bits */
 
 			rt->rt_flags |= RTF_MPLS;
-		}
+		} else
+			rt->rt_flags &= ~RTF_MPLS;
 #endif
 
 		ifa->ifa_refcnt++;
@@ -1034,7 +1007,7 @@ rt_setgate(struct rtentry *rt0, struct sockaddr *dst, struct sockaddr *gate,
 	}
 	if (rt->rt_flags & RTF_GATEWAY) {
 		/* XXX is this actually valid to cross tables here? */
-		rt->rt_gwroute = rtalloc1(gate, 1, rtable_l2(tableid));
+		rt->rt_gwroute = rtalloc1(gate, RT_REPORT, rtable_l2(tableid));
 		/*
 		 * If we switched gateways, grab the MTU from the new
 		 * gateway route if the current MTU is 0 or greater
@@ -1178,7 +1151,7 @@ static int			rt_init_done = 0;
 		bzero(&info, sizeof(info));			\
 		info.rti_info[RTAX_DST] = rt_key(r->rtt_rt);	\
 		rtrequest1(RTM_DELETE, &info,			\
-		    r->rtt_rt->rt_priority, NULL, 0 /* XXX */);	\
+		    r->rtt_rt->rt_priority, NULL, r->rtt_tableid);	\
 	}							\
 }
 
@@ -1214,10 +1187,8 @@ rt_timer_queue_create(u_int timeout)
 	if (rt_init_done == 0)
 		rt_timer_init();
 
-	R_Malloc(rtq, struct rttimer_queue *, sizeof *rtq);
-	if (rtq == NULL)
+	if ((rtq = malloc(sizeof(*rtq), M_RTABLE, M_NOWAIT|M_ZERO)) == NULL)
 		return (NULL);
-	Bzero(rtq, sizeof *rtq);
 
 	rtq->rtq_timeout = timeout;
 	rtq->rtq_count = 0;
@@ -1251,10 +1222,7 @@ rt_timer_queue_destroy(struct rttimer_queue *rtq, int destroy)
 	}
 
 	LIST_REMOVE(rtq, rtq_link);
-
-	/*
-	 * Caller is responsible for freeing the rttimer_queue structure.
-	 */
+	free(rtq, M_RTABLE);
 }
 
 unsigned long
@@ -1281,7 +1249,7 @@ rt_timer_remove_all(struct rtentry *rt)
 
 int
 rt_timer_add(struct rtentry *rt, void (*func)(struct rtentry *,
-    struct rttimer *), struct rttimer_queue *queue)
+    struct rttimer *), struct rttimer_queue *queue, u_int rtableid)
 {
 	struct rttimer	*r;
 	long		 current_time;
@@ -1315,6 +1283,7 @@ rt_timer_add(struct rtentry *rt, void (*func)(struct rtentry *,
 	r->rtt_time = current_time;
 	r->rtt_func = func;
 	r->rtt_queue = queue;
+	r->rtt_tableid = rtableid;
 	LIST_INSERT_HEAD(&rt->rt_timer, r, rtt_link);
 	TAILQ_INSERT_TAIL(&queue->rtq_head, r, rtt_next);
 	r->rtt_queue->rtq_count++;
@@ -1489,7 +1458,7 @@ rt_if_remove(struct ifnet *ifp)
  * as long as EAGAIN is returned.
  */
 int
-rt_if_remove_rtdelete(struct radix_node *rn, void *vifp)
+rt_if_remove_rtdelete(struct radix_node *rn, void *vifp, u_int id)
 {
 	struct ifnet	*ifp = vifp;
 	struct rtentry	*rt = (struct rtentry *)rn;
@@ -1497,7 +1466,7 @@ rt_if_remove_rtdelete(struct radix_node *rn, void *vifp)
 	if (rt->rt_ifp == ifp) {
 		int	cloning = (rt->rt_flags & RTF_CLONING);
 
-		if (rtdeletemsg(rt, ifp->if_rdomain /* XXX wrong */) == 0 && cloning)
+		if (rtdeletemsg(rt, id) == 0 && cloning)
 			return (EAGAIN);
 	}
 
@@ -1534,7 +1503,7 @@ rt_if_track(struct ifnet *ifp)
 }
 
 int
-rt_if_linkstate_change(struct radix_node *rn, void *arg)
+rt_if_linkstate_change(struct radix_node *rn, void *arg, u_int id)
 {
 	struct ifnet *ifp = arg;
 	struct rtentry *rt = (struct rtentry *)rn;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: umass_scsi.c,v 1.25 2009/07/02 18:50:37 krw Exp $ */
+/*	$OpenBSD: umass_scsi.c,v 1.30 2010/06/28 18:31:02 krw Exp $ */
 /*	$NetBSD: umass_scsipi.c,v 1.9 2003/02/16 23:14:08 augustss Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -68,7 +68,7 @@ struct umass_scsi_softc {
 
 #define UMASS_ATAPI_DRIVE	0
 
-int umass_scsi_cmd(struct scsi_xfer *);
+void umass_scsi_cmd(struct scsi_xfer *);
 void umass_scsi_minphys(struct buf *, struct scsi_link *);
 
 void umass_scsi_cb(struct umass_softc *sc, void *priv, int residue,
@@ -76,12 +76,6 @@ void umass_scsi_cb(struct umass_softc *sc, void *priv, int residue,
 void umass_scsi_sense_cb(struct umass_softc *sc, void *priv, int residue,
 			 int status);
 struct umass_scsi_softc *umass_scsi_setup(struct umass_softc *);
-
-struct scsi_device umass_scsi_dev = { NULL, NULL, NULL, NULL, };
-
-#if NATAPISCSI > 0
-struct scsi_device umass_atapiscsi_dev = { NULL, NULL, NULL, NULL, };
-#endif
 
 int
 umass_scsi_attach(struct umass_softc *sc)
@@ -94,7 +88,6 @@ umass_scsi_attach(struct umass_softc *sc)
 	scbus->sc_link.luns = sc->maxlun + 1;
 	scbus->sc_link.flags &= ~SDEV_ATAPI;
 	scbus->sc_link.flags |= SDEV_UMASS;
-	scbus->sc_link.device = &umass_scsi_dev;
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &scbus->sc_link;
@@ -124,7 +117,6 @@ umass_atapi_attach(struct umass_softc *sc)
 	scbus->sc_link.luns = 1;
 	scbus->sc_link.openings = 1;
 	scbus->sc_link.flags |= SDEV_ATAPI;
-	scbus->sc_link.device = &umass_atapiscsi_dev;
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &scbus->sc_link;
@@ -166,14 +158,13 @@ umass_scsi_setup(struct umass_softc *sc)
 	return (scbus);
 }
 
-int
+void
 umass_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link *sc_link = xs->sc_link;
 	struct umass_softc *sc = sc_link->adapter_softc;
-
 	struct scsi_generic *cmd;
-	int cmdlen, dir, rslt, s;
+	int cmdlen, dir;
 
 #ifdef UMASS_DEBUG
 	microtime(&sc->tv);
@@ -233,22 +224,9 @@ umass_scsi_cmd(struct scsi_xfer *xs)
 		sc->sc_xfer_flags = 0;
 		DPRINTF(UDMASS_SCSI, ("umass_scsi_cmd: done err=%d\n",
 				      sc->polled_xfer_status));
-		if (xs->error == XS_NOERROR) {
-			switch (sc->polled_xfer_status) {
-			case USBD_NORMAL_COMPLETION:
-				xs->error = XS_NOERROR;
-				break;
-			case USBD_TIMEOUT:
-				xs->error = XS_TIMEOUT;
-				break;
-			default:
-				xs->error = XS_DRIVER_STUFFUP;
-				break;
-			}
-		}
 		usbd_set_polling(sc->sc_udev, 0);
-		DPRINTF(UDMASS_SCSI, ("umass_scsi_cmd: done, error=%d\n",
-		    xs->error));
+		/* scsi_done() has already been called. */
+		return;
 	} else {
 		DPRINTF(UDMASS_SCSI,
 			("umass_scsi_cmd: async dir=%d, cmdlen=%d"
@@ -257,22 +235,13 @@ umass_scsi_cmd(struct scsi_xfer *xs)
 		sc->sc_methods->wire_xfer(sc, sc_link->lun, cmd, cmdlen,
 					  xs->data, xs->datalen, dir,
 					  xs->timeout, umass_scsi_cb, xs);
-		return (SUCCESSFULLY_QUEUED);
+		/* scsi_done() has already been called. */
+		return;
 	}
 
 	/* Return if command finishes early. */
  done:
-	xs->flags |= ITSDONE;
-	if (xs->flags & SCSI_POLL)
-		rslt = COMPLETE;
-	else
-		rslt = SUCCESSFULLY_QUEUED;
-	
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
-
-	return (rslt);
 }
 
 void
@@ -291,7 +260,6 @@ umass_scsi_cb(struct umass_softc *sc, void *priv, int residue, int status)
 	struct scsi_xfer *xs = priv;
 	struct scsi_link *link = xs->sc_link;
 	int cmdlen;
-	int s;
 #ifdef UMASS_DEBUG
 	struct timeval tv;
 	u_int delta;
@@ -351,11 +319,21 @@ umass_scsi_cb(struct umass_softc *sc, void *priv, int residue, int status)
 		scbus->sc_sense_cmd.length = sizeof(xs->sense);
 
 		cmdlen = sizeof(scbus->sc_sense_cmd);
+		if (xs->flags & SCSI_POLL) {
+			usbd_set_polling(sc->sc_udev, 1);
+			sc->sc_xfer_flags = USBD_SYNCHRONOUS;
+			sc->polled_xfer_status = USBD_INVAL;
+		}
+		/* scsi_done() has already been called. */
 		sc->sc_methods->wire_xfer(sc, link->lun,
 					  &scbus->sc_sense_cmd, cmdlen,
 					  &xs->sense, sizeof(xs->sense),
 					  DIR_IN, xs->timeout,
 					  umass_scsi_sense_cb, xs);
+		if (xs->flags & SCSI_POLL) {
+			sc->sc_xfer_flags = 0;
+			usbd_set_polling(sc->sc_udev, 0);
+		}
 		return;
 
 	case STATUS_WIRE_FAILED:
@@ -367,19 +345,26 @@ umass_scsi_cb(struct umass_softc *sc, void *priv, int residue, int status)
 		      sc->sc_dev.dv_xname, status);
 	}
 
-	if (xs->flags & SCSI_POLL)
-		return;
-
-	xs->flags |= ITSDONE;
-
 	DPRINTF(UDMASS_CMD,("umass_scsi_cb: at %lu.%06lu: return error=%d, "
 			    "status=0x%x resid=%d\n",
 			    tv.tv_sec, tv.tv_usec,
 			    xs->error, xs->status, xs->resid));
 
-	s = splbio();
+	if ((xs->flags & SCSI_POLL) && (xs->error == XS_NOERROR)) {
+		switch (sc->polled_xfer_status) {
+		case USBD_NORMAL_COMPLETION:
+			xs->error = XS_NOERROR;
+			break;
+		case USBD_TIMEOUT:
+			xs->error = XS_TIMEOUT;
+			break;
+		default:
+			xs->error = XS_DRIVER_STUFFUP;
+			break;
+		}
+	}
+
 	scsi_done(xs);
-	splx(s);
 }
 
 /*
@@ -390,7 +375,6 @@ umass_scsi_sense_cb(struct umass_softc *sc, void *priv, int residue,
 		    int status)
 {
 	struct scsi_xfer *xs = priv;
-	int s;
 
 	DPRINTF(UDMASS_CMD,("umass_scsi_sense_cb: xs=%p residue=%d "
 		"status=%d\n", xs, residue, status));
@@ -412,14 +396,24 @@ umass_scsi_sense_cb(struct umass_softc *sc, void *priv, int residue,
 		break;
 	}
 
-	xs->flags |= ITSDONE;
-
 	DPRINTF(UDMASS_CMD,("umass_scsi_sense_cb: return xs->error=%d, "
 		"xs->flags=0x%x xs->resid=%d\n", xs->error, xs->status,
 		xs->resid));
 
-	s = splbio();
+	if ((xs->flags & SCSI_POLL) && (xs->error == XS_NOERROR)) {
+		switch (sc->polled_xfer_status) {
+		case USBD_NORMAL_COMPLETION:
+			xs->error = XS_NOERROR;
+			break;
+		case USBD_TIMEOUT:
+			xs->error = XS_TIMEOUT;
+			break;
+		default:
+			xs->error = XS_DRIVER_STUFFUP;
+			break;
+		}
+	}
+
 	scsi_done(xs);
-	splx(s);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccd.c,v 1.88 2009/08/24 08:51:18 jasper Exp $	*/
+/*	$OpenBSD: ccd.c,v 1.90 2010/05/18 04:41:14 dlg Exp $	*/
 /*	$NetBSD: ccd.c,v 1.33 1996/05/05 04:21:14 thorpej Exp $	*/
 
 /*-
@@ -103,6 +103,7 @@
 #include <sys/vnode.h>
 #include <sys/conf.h>
 #include <sys/rwlock.h>
+#include <sys/dkio.h>
 
 #include <dev/ccdvar.h>
 
@@ -259,7 +260,7 @@ ccdinit(struct ccddevice *ccd, char **cpaths, struct proc *p)
 	struct ccd_softc *cs = &ccd_softc[ccd->ccd_unit];
 	struct ccdcinfo *ci = NULL;
 	daddr64_t size;
-	int ix, rpm;
+	int ix;
 	struct vnode *vp;
 	struct vattr va;
 	size_t minsize;
@@ -291,7 +292,6 @@ ccdinit(struct ccddevice *ccd, char **cpaths, struct proc *p)
 	 */
 	maxsecsize = 0;
 	minsize = 0;
-	rpm = 0;
 	for (ix = 0; ix < cs->sc_nccdisks; ix++) {
 		vp = ccd->ccd_vpp[ix];
 		ci = &cs->sc_cinfo[ix];
@@ -373,9 +373,8 @@ ccdinit(struct ccddevice *ccd, char **cpaths, struct proc *p)
 			minsize = size;
 		ci->ci_size = size;
 		cs->sc_size += size;
-		rpm += dpart.disklab->d_rpm;
 	}
-	ccg->ccg_rpm = rpm / cs->sc_nccdisks;
+	ccg->ccg_rpm = 0;
 
 	/*
 	 * Don't allow the interleave to be smaller than
@@ -1367,12 +1366,10 @@ ccdgetdisklabel(dev_t dev, struct ccd_softc *cs, struct disklabel *lp,
 	lp->d_ntracks = ccg->ccg_ntracks;
 	lp->d_ncylinders = ccg->ccg_ncylinders;
 	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
-	lp->d_rpm = ccg->ccg_rpm;
 
 	strncpy(lp->d_typename, "ccd", sizeof(lp->d_typename));
 	lp->d_type = DTYPE_CCD;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-	lp->d_interleave = 1;
 	lp->d_flags = 0;
 	lp->d_version = 1;
 

@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.12 2009/09/06 20:09:34 kettenis Exp $
+#	$OpenBSD: GENERIC,v 1.14 2010/03/03 22:19:40 kettenis Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -76,6 +76,7 @@ ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
 zyd*	at uhub?		# Zydas ZD1211
+uthum*	at uhidev?		# TEMPerHUM sensor
 
 udl*		at uhub?
 wsdisplay*	at udl?
@@ -92,6 +93,9 @@ rlphy*		at mii?		# RealTek 8139 internal PHYs
 ciphy*		at mii?		# Cicada CS8201 10/100/1000 copper PHY
 gentbi*		at mii?		# Generic 1000BASE-X ten-bit PHY
 ukphy*		at mii?		# Generic unknown PHY
+
+# PCI
+athn*		at pci?		# Atheros AR9k (802.11a/g/n)
 
 # mouse & keyboard multiplexor pseudo-devices
 pseudo-device	wsmux		2

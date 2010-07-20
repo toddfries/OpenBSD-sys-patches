@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip_divert.c,v 1.3 2009/10/04 16:08:37 michele Exp $ */
+/*      $OpenBSD: ip_divert.c,v 1.7 2010/07/03 04:44:51 guenther Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -22,6 +22,7 @@
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -57,6 +58,8 @@ int *divertctl_vars[DIVERTCTL_MAXID] = DIVERTCTL_VARS;
 
 int divbhashsize = DIVERTHASHSIZE;
 
+static struct sockaddr_in ipaddr = { sizeof(ipaddr), AF_INET };
+
 void divert_detach(struct inpcb *);
 
 void
@@ -91,7 +94,7 @@ divert_output(struct mbuf *m, ...)
 
 	m->m_pkthdr.rcvif = NULL;
 	m->m_nextpkt = NULL;
-	m->m_pkthdr.rdomain = inp->inp_rdomain;
+	m->m_pkthdr.rdomain = inp->inp_rtableid;
 
 	if (control)
 		m_freem(control);
@@ -102,7 +105,8 @@ divert_output(struct mbuf *m, ...)
 	m->m_pkthdr.pf.flags |= PF_TAG_DIVERTED_PACKET;
 
 	if (sin->sin_addr.s_addr != INADDR_ANY) {
-		ifa = ifa_ifwithaddr((struct sockaddr *)sin, 0);
+		ipaddr.sin_addr = sin->sin_addr;
+		ifa = ifa_ifwithaddr(sintosa(&ipaddr), m->m_pkthdr.rdomain);
 		if (ifa == NULL) {
 			divstat.divs_errors++;
 			m_freem(m);

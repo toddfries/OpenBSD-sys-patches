@@ -1,4 +1,4 @@
-/*	$OpenBSD: pchb.c,v 1.78 2009/09/18 20:17:17 kettenis Exp $ */
+/*	$OpenBSD: pchb.c,v 1.82 2010/06/24 00:06:57 kettenis Exp $ */
 /*	$NetBSD: pchb.c,v 1.65 2007/08/15 02:26:13 markd Exp $	*/
 
 /*
@@ -67,6 +67,7 @@
 #include <dev/pci/pcidevs.h>
 
 #include <dev/pci/agpvar.h>
+#include <dev/pci/ppbreg.h>
 
 #include <dev/rndvar.h>
 
@@ -101,8 +102,10 @@
 #define AMD64HT_LDT1_TYPE	0xb8
 #define AMD64HT_LDT2_BUS	0xd4
 #define AMD64HT_LDT2_TYPE	0xd8
+#define AMD64HT_LDT3_BUS	0xf4
+#define AMD64HT_LDT3_TYPE	0xf8
 
-#define AMD64HT_NUM_LDT		3
+#define AMD64HT_NUM_LDT		4
 
 #define AMD64HT_LDT_TYPE_MASK		0x0000001f
 #define  AMD64HT_LDT_INIT_COMPLETE	0x00000002
@@ -126,7 +129,8 @@ int	pchbmatch(struct device *, void *, void *);
 void	pchbattach(struct device *, struct device *, void *);
 
 struct cfattach pchb_ca = {
-	sizeof(struct pchb_softc), pchbmatch, pchbattach
+	sizeof(struct pchb_softc), pchbmatch, pchbattach, NULL,
+	config_activate_children
 };
 
 struct cfdriver pchb_cd = {
@@ -168,7 +172,7 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 	struct pchb_softc *sc = (struct pchb_softc *)self;
 	struct pci_attach_args *pa = aux;
 	struct pcibus_attach_args pba;
-	pcireg_t bcreg;
+	pcireg_t bcreg, bir;
 	u_char bdnum, pbnum;
 	pcitag_t tag;
 	int i, r;
@@ -347,17 +351,28 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 		break;
 	case PCI_VENDOR_VIATECH:
 		switch (PCI_PRODUCT(pa->pa_id)) {
-		case PCI_PRODUCT_VIATECH_VT8251_VLINK:
+		case PCI_PRODUCT_VIATECH_VT8251_PCIE_0:
 			/*
-			 * For some strange reason, the VIA VT8251
-			 * chipset can be configured to its PCIe
-			 * bridge show up as a host bridge.  We whack
-			 * it into PCI bridge mode here such that we
-			 * can see the devices behind it.
+			 * Bump the host bridge into PCI-PCI bridge
+			 * mode by clearing magic bit on the VLINK
+			 * device.  This allows us to read the bus
+			 * number for the PCI bus attached to this
+			 * host bridge.
 			 */
-			bcreg = pci_conf_read(pa->pa_pc, pa->pa_tag, 0xfc);
+			tag = pci_make_tag(pa->pa_pc, 0, 17, 7);
+			bcreg = pci_conf_read(pa->pa_pc, tag, 0xfc);
 			bcreg &= ~0x00000004; /* XXX Magic */
-			pci_conf_write(pa->pa_pc, pa->pa_tag, 0xfc, bcreg);
+			pci_conf_write(pa->pa_pc, tag, 0xfc, bcreg);
+
+			bir = pci_conf_read(pa->pa_pc,
+			    pa->pa_tag, PPB_REG_BUSINFO);
+			pbnum = PPB_BUSINFO_PRIMARY(bir);
+			if (pbnum > 0)
+				doattach = 1;
+
+			/* Switch back to host bridge mode. */
+			bcreg |= 0x00000004; /* XXX Magic */
+			pci_conf_write(pa->pa_pc, tag, 0xfc, bcreg);
 			break;
 		}
 		printf("\n");
@@ -382,7 +397,7 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 		config_found(self, &aa, agpdev_print);
 	}
 #endif /* NAGP > 0 */
-#ifdef __i386__
+
 	if (doattach == 0)
 		return;
 
@@ -395,7 +410,6 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 	pba.pba_bus = pbnum;
 	pba.pba_pc = pa->pa_pc;
 	config_found(self, &pba, pchb_print);
-#endif /* __i386__ */
 }
 
 int

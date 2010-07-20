@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched.h,v 1.22 2009/04/14 09:13:25 art Exp $	*/
+/*	$OpenBSD: sched.h,v 1.28 2010/05/14 18:47:56 kettenis Exp $	*/
 /* $NetBSD: sched.h,v 1.2 1999/02/28 18:14:58 ross Exp $ */
 
 /*-
@@ -122,6 +122,8 @@ struct schedstate_percpu {
 #define SPCF_SEENRR             0x0001  /* process has seen roundrobin() */
 #define SPCF_SHOULDYIELD        0x0002  /* process should yield the CPU */
 #define SPCF_SWITCHCLEAR        (SPCF_SEENRR|SPCF_SHOULDYIELD)
+#define SPCF_SHOULDHALT		0x0004	/* CPU should be vacated */
+#define SPCF_HALTED		0x0008	/* CPU has been halted */
 
 #define	SCHED_PPQ	(128 / SCHED_NQS)	/* priorities per queue */
 #define NICE_WEIGHT 2			/* priorities per nice level */
@@ -136,6 +138,7 @@ struct cpu_info;
 void roundrobin(struct cpu_info *);
 
 void sched_init_cpu(struct cpu_info *);
+void sched_idle(void *);
 void sched_exit(struct proc *);
 void mi_switch(void);
 void cpu_switchto(struct proc *, struct proc *);
@@ -146,6 +149,11 @@ void cpu_idle_enter(void);
 void cpu_idle_cycle(void);
 void cpu_idle_leave(void);
 void sched_peg_curproc(struct cpu_info *ci);
+
+#ifdef MULTIPROCESSOR
+void sched_start_secondary_cpus(void);
+void sched_stop_secondary_cpus(void);
+#endif
 
 #define curcpu_is_idle()	(curcpu()->ci_schedstate.spc_whichqs == 0)
 
@@ -163,10 +171,6 @@ void remrunqueue(struct proc *);
 	(parent)->p_estcpu = ESTCPULIM((parent)->p_estcpu + (child)->p_estcpu);\
 } while (0)
 
-#ifndef IPL_SCHED
-#define IPL_SCHED IPL_HIGH
-#endif
-
 #if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
 #include <sys/lock.h>
 
@@ -180,6 +184,8 @@ extern struct __mp_lock sched_lock;
 
 #define	SCHED_ASSERT_LOCKED()	KASSERT(__mp_lock_held(&sched_lock))
 #define	SCHED_ASSERT_UNLOCKED()	KASSERT(__mp_lock_held(&sched_lock) == 0)
+
+#define	SCHED_LOCK_INIT()	__mp_lock_init(&sched_lock)
 
 #define	SCHED_LOCK(s)							\
 do {									\
@@ -197,6 +203,8 @@ do {									\
 
 #define	SCHED_ASSERT_LOCKED()		splassert(IPL_SCHED);
 #define	SCHED_ASSERT_UNLOCKED()		/* nothing */
+
+#define	SCHED_LOCK_INIT()		/* nothing */
 
 #define	SCHED_LOCK(s)			s = splsched()
 #define	SCHED_UNLOCK(s)			splx(s)

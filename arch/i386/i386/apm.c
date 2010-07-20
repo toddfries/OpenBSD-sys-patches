@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.84 2009/06/24 13:54:42 deraadt Exp $	*/
+/*	$OpenBSD: apm.c,v 1.87 2010/07/20 12:23:00 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1998-2001 Michael Shalayeff. All rights reserved.
@@ -43,11 +43,12 @@
 #include <sys/kthread.h>
 #include <sys/rwlock.h>
 #include <sys/proc.h>
-#include <sys/user.h>
+#include <sys/sysctl.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
 #include <sys/fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/buf.h>
 #include <sys/event.h>
 #include <sys/mount.h>	/* for vfs_syncwait() proto */
 
@@ -61,10 +62,13 @@
 #include <i386/isa/isa_machdep.h>
 #include <i386/isa/nvram.h>
 #include <dev/isa/isavar.h>
+#include <dev/wscons/wsdisplayvar.h>
 
 #include <machine/acpiapm.h>
 #include <machine/biosvar.h>
 #include <machine/apmvar.h>
+
+#include "wsdisplay.h"
 
 #if defined(APMDEBUG)
 #define DPRINTF(x)	printf x
@@ -316,6 +320,11 @@ apm_power_print(struct apm_softc *sc, struct apmregs *regs)
 void
 apm_suspend()
 {
+#if NWSDISPLAY > 0
+	wsdisplay_suspend();
+#endif /* NWSDISPLAY > 0 */
+	bufq_quiesce();
+
 	dopowerhooks(PWR_SUSPEND);
 
 	if (cold)
@@ -327,6 +336,11 @@ apm_suspend()
 void
 apm_standby()
 {
+#if NWSDISPLAY > 0
+	wsdisplay_suspend();
+#endif /* NWSDISPLAY > 0 */
+	bufq_quiesce();
+
 	dopowerhooks(PWR_STANDBY);
 
 	if (cold)
@@ -356,6 +370,10 @@ apm_resume(struct apm_softc *sc, struct apmregs *regs)
 	/* restore hw.setperf */
 	if (cpu_setperf != NULL)
 		cpu_setperf(perflevel);
+	bufq_restart();
+#if NWSDISPLAY > 0
+	wsdisplay_resume();
+#endif /* NWSDISPLAY > 0 */
 }
 
 int

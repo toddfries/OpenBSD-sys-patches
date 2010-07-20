@@ -1,4 +1,4 @@
-/*	$OpenBSD: sili.c,v 1.43 2009/06/05 03:57:32 ray Exp $ */
+/*	$OpenBSD: sili.c,v 1.45 2010/05/19 15:27:35 oga Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -164,7 +164,7 @@ int			sili_ata_probe(void *, int);
 void			sili_ata_free(void *, int);
 struct ata_xfer		*sili_ata_get_xfer(void *, int);
 void			sili_ata_put_xfer(struct ata_xfer *);
-int			sili_ata_cmd(struct ata_xfer *);
+void			sili_ata_cmd(struct ata_xfer *);
 
 struct atascsi_methods sili_atascsi_methods = {
 	sili_ata_probe,
@@ -381,7 +381,7 @@ fatal:
 			KASSERT(ccb->ccb_xa.state == ATA_S_COMPLETE ||
 			    ccb->ccb_xa.state == ATA_S_ERROR ||
 			    ccb->ccb_xa.state == ATA_S_TIMEOUT);
-			ccb->ccb_xa.complete(&ccb->ccb_xa);
+			ata_complete(&ccb->ccb_xa);
 		}
 	}
 
@@ -584,7 +584,7 @@ sili_dmamem_alloc(struct sili_softc *sc, bus_size_t size, bus_size_t align)
 		goto sdmfree;
 
 	if (bus_dmamem_alloc(sc->sc_dmat, size, align, 0, &sdm->sdm_seg,
-	    1, &nsegs, BUS_DMA_NOWAIT) != 0)
+	    1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0)
 		goto destroy;
 
 	if (bus_dmamem_map(sc->sc_dmat, &sdm->sdm_seg, nsegs, size,
@@ -594,8 +594,6 @@ sili_dmamem_alloc(struct sili_softc *sc, bus_size_t size, bus_size_t align)
 	if (bus_dmamap_load(sc->sc_dmat, sdm->sdm_map, sdm->sdm_kva, size,
 	    NULL, BUS_DMA_NOWAIT) != 0)
 		goto unmap;
-
-	bzero(sdm->sdm_kva, size);
 
 	return (sdm);
 
@@ -815,7 +813,7 @@ sili_ata_free(void *xsc, int port)
 	/* XXX we should do more here */
 }
 
-int
+void
 sili_ata_cmd(struct ata_xfer *xa)
 {
 	struct sili_ccb			*ccb = (struct sili_ccb *)xa;
@@ -858,24 +856,22 @@ sili_ata_cmd(struct ata_xfer *xa)
 
 	xa->state = ATA_S_PENDING;
 
-	if (xa->flags & ATA_F_POLL) {
+	if (xa->flags & ATA_F_POLL)
 		sili_poll(ccb, xa->timeout, sili_ata_cmd_timeout);
-		return (ATA_COMPLETE);
+	else {
+		timeout_add_msec(&xa->stimeout, xa->timeout);
+		s = splbio();
+		sili_start(sp, ccb);
+		splx(s);
 	}
 
-	timeout_add_msec(&xa->stimeout, xa->timeout);
-
-	s = splbio();
-	sili_start(sp, ccb);
-	splx(s);
-	return (ATA_QUEUED);
+	return;
 
 failcmd:
 	s = splbio();
 	xa->state = ATA_S_ERROR;
-	xa->complete(xa);
+	ata_complete(xa);
 	splx(s);
-	return (ATA_ERROR);
 }
 
 void
@@ -907,7 +903,7 @@ sili_ata_cmd_done(struct sili_ccb *ccb, int defer_completion)
 	if (defer_completion)
 		TAILQ_INSERT_TAIL(&sp->sp_deferred_ccbs, ccb, ccb_entry);
 	else if (xa->state == ATA_S_COMPLETE)
-		xa->complete(xa);
+		ata_complete(xa);
 #ifdef DIAGNOSTIC
 	else
 		printf("%s: completion not deferred, but xa->state is %02x?\n",

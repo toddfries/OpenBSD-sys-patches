@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.305 2009/11/01 01:50:15 dlg Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.308 2010/04/20 06:59:47 jsg Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -555,6 +555,10 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_3400_SATA_6, /* Intel 3400 SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_EP80579_SATA, /* Intel EP80579 SATA */
 	  0,
 	  piixsata_chip_map
 	},
@@ -1261,13 +1265,16 @@ const struct pciide_vendor_desc pciide_vendors[] = {
 int	pciide_match(struct device *, void *, void *);
 void	pciide_attach(struct device *, struct device *, void *);
 int	pciide_detach(struct device *, int);
+int	pciide_activate(struct device *, int);
 
 struct cfattach pciide_pci_ca = {
-	sizeof(struct pciide_softc), pciide_match, pciide_attach, pciide_detach,
+	sizeof(struct pciide_softc), pciide_match, pciide_attach,
+	pciide_detach, pciide_activate
 };
 
 struct cfattach pciide_jmb_ca = {
-	sizeof(struct pciide_softc), pciide_match, pciide_attach, pciide_detach,
+	sizeof(struct pciide_softc), pciide_match, pciide_attach,
+	pciide_detach, pciide_activate
 };
 
 struct cfdriver pciide_cd = {
@@ -1396,6 +1403,21 @@ pciide_detach(struct device *self, int flags)
 		sc->chip_unmap(sc, flags);
 
 	return 0;
+}
+
+int
+pciide_activate(struct device *self, int act)
+{
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+	case DVACT_RESUME:
+		rv = config_activate_children(self, act);
+		break;
+	}
+
+	return (rv);
 }
 
 int
@@ -8633,7 +8655,6 @@ phison_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	int channel;
 	pcireg_t interface = PCI_INTERFACE(pa->pa_class);
 	bus_size_t cmdsize, ctlsize;
-	u_int32_t conf;
 
 	sc->chip_unmap = default_chip_unmap;
 
@@ -8674,9 +8695,6 @@ phison_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 
 		sc->sc_wdcdev.set_modes(&cp->wdc_channel);
 	}
-	WDCDEBUG_PRINT(("%s: new conf register 0x%x\n",
-	    sc->sc_wdcdev.sc_dev.dv_xname, conf), DEBUG_PROBE);
-	pci_conf_write(sc->sc_pc, sc->sc_tag, NFORCE_CONF, conf);
 }
 
 void

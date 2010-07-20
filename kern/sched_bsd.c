@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched_bsd.c,v 1.21 2009/04/14 09:13:25 art Exp $	*/
+/*	$OpenBSD: sched_bsd.c,v 1.23 2010/06/30 22:38:17 art Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*-
@@ -93,23 +93,22 @@ void
 roundrobin(struct cpu_info *ci)
 {
 	struct schedstate_percpu *spc = &ci->ci_schedstate;
-	int s;
 
 	spc->spc_rrticks = rrticks_init;
 
 	if (ci->ci_curproc != NULL) {
-		s = splstatclock();
 		if (spc->spc_schedflags & SPCF_SEENRR) {
 			/*
 			 * The process has already been through a roundrobin
 			 * without switching and may be hogging the CPU.
 			 * Indicate that the process should yield.
 			 */
-			spc->spc_schedflags |= SPCF_SHOULDYIELD;
+			atomic_setbits_int(&spc->spc_schedflags,
+			    SPCF_SHOULDYIELD);
 		} else {
-			spc->spc_schedflags |= SPCF_SEENRR;
+			atomic_setbits_int(&spc->spc_schedflags,
+			    SPCF_SEENRR);
 		}
-		splx(s);
 	}
 
 	if (spc->spc_nrun)
@@ -202,7 +201,7 @@ fixpt_t	ccpu = 0.95122942450071400909 * FSCALE;		/* exp(-1/20) */
 #define	CCPU_SHIFT	11
 
 /*
- * Recompute process priorities, every hz ticks.
+ * Recompute process priorities, every second.
  */
 void
 schedcpu(void *arg)
@@ -406,7 +405,7 @@ mi_switch(void)
 	 * Process is about to yield the CPU; clear the appropriate
 	 * scheduling flags.
 	 */
-	spc->spc_schedflags &= ~SPCF_SWITCHCLEAR;
+	atomic_clearbits_int(&spc->spc_schedflags, SPCF_SWITCHCLEAR);
 
 	nextproc = sched_chooseproc();
 

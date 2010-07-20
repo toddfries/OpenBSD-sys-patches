@@ -1,4 +1,4 @@
-/* $OpenBSD: wsconsio.h,v 1.56 2009/09/21 07:41:18 mglocker Exp $ */
+/* $OpenBSD: wsconsio.h,v 1.61 2010/07/01 02:33:05 maja Exp $ */
 /* $NetBSD: wsconsio.h,v 1.74 2005/04/28 07:15:44 martin Exp $ */
 
 /*
@@ -124,6 +124,7 @@ struct wscons_event {
 #define		WSKBD_TYPE_ZAURUS	16	/* Sharp Zaurus */
 #define		WSKBD_TYPE_DOMAIN	17	/* Apollo Domain */
 #define		WSKBD_TYPE_BLUETOOTH	18	/* Bluetooth keyboard */
+#define		WSKBD_TYPE_KPC		19	/* Palm keypad */
 
 /* Manipulate the keyboard bell. */
 struct wskbd_bell_data {
@@ -309,6 +310,10 @@ struct wsmouse_calibcoords {
 #define		WSDISPLAY_TYPE_MACHFB	59	/* Sun PGX/PGX64 */
 #define		WSDISPLAY_TYPE_GFXP	60	/* Sun PGX32 */
 #define		WSDISPLAY_TYPE_RADEONFB	61	/* Sun XVR-100 */
+#define		WSDISPLAY_TYPE_SMFB	62	/* SiliconMotion SM712 */
+#define		WSDISPLAY_TYPE_SISFB	63	/* SiS 315 Pro */
+#define		WSDISPLAY_TYPE_ODYSSEY	64	/* SGI Odyssey */
+#define		WSDISPLAY_TYPE_IMPACT	65	/* SGI Impact */
 
 /* Basic display information.  Not applicable to all display types. */
 struct wsdisplay_fbinfo {
@@ -474,6 +479,23 @@ struct wsdisplay_gfx_mode {
 };
 
 #define WSDISPLAYIO_SETGFXMODE	_IOW('W', 92, struct wsdisplay_gfx_mode)
+
+struct wsdisplay_screentype {
+	int idx;
+	int nidx;
+	char name[WSSCREEN_NAME_SIZE];
+	int ncols, nrows;
+	int fontwidth, fontheight;
+};
+
+#define	WSDISPLAYIO_GETSCREENTYPE	_IOWR('W', 93, struct wsdisplay_screentype)
+
+struct wsdisplay_emultype {
+	int idx;
+	char name[WSSCREEN_NAME_SIZE];
+};
+
+#define	WSDISPLAYIO_GETEMULTYPE	_IOWR('W', 94, struct wsdisplay_emultype)
 
 /* XXX NOT YET DEFINED */
 /* Mapping information retrieval. */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbt.c,v 1.13 2009/11/11 21:59:16 jasper Exp $	*/
+/*	$OpenBSD: sbt.c,v 1.15 2010/07/02 02:40:16 blambert Exp $	*/
 
 /*
  * Copyright (c) 2007 Uwe Stuehler <uwe@openbsd.org>
@@ -178,7 +178,7 @@ sbt_attach(struct device *parent, struct device *self, void *aux)
 	printf("%s: SDIO Bluetooth Type-A\n", DEVNAME(sc));
 
 	/* Create a shared buffer for receive and transmit. */
-	sc->sc_buf = malloc(SBT_PKT_BUFSIZ, M_DEVBUF, M_NOWAIT | M_CANFAIL);
+	sc->sc_buf = malloc(SBT_PKT_BUFSIZ, M_DEVBUF, M_NOWAIT);
 	if (sc->sc_buf == NULL) {
 		printf("%s: can't allocate cmd buffer\n", DEVNAME(sc));
 		return;
@@ -372,7 +372,7 @@ sbt_intr(void *arg)
 	}
 
 	m->m_pkthdr.len = m->m_len = MHLEN;
-	m_copyback(m, 0, len, sc->sc_buf);
+	m_copyback(m, 0, len, sc->sc_buf, M_NOWAIT);
 	if (m->m_pkthdr.len == MAX(MHLEN, len)) {
 		m->m_pkthdr.len = len;
 		m->m_len = MIN(MHLEN, m->m_pkthdr.len);

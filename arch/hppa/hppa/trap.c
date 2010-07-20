@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.101 2009/02/04 17:23:18 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.110 2010/07/01 05:33:32 jsing Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -93,8 +93,6 @@ const char *trap_type[] = {
 };
 int trap_types = sizeof(trap_type)/sizeof(trap_type[0]);
 
-int want_resched, astpending;
-
 #define	frame_regmap(tf,r)	(((u_int *)(tf))[hppa_regmap[(r)]])
 u_char hppa_regmap[32] = {
 	offsetof(struct trapframe, tf_pad[0]) / 4,	/* r0 XXX */
@@ -131,18 +129,22 @@ u_char hppa_regmap[32] = {
 	offsetof(struct trapframe, tf_r31) / 4,
 };
 
+void	userret(struct proc *p);
+
 void
 userret(struct proc *p)
 {
 	int sig;
 
-	if (astpending) {
-		astpending = 0;
+	if (p->p_md.md_astpending) {
+		p->p_md.md_astpending = 0;
 		uvmexp.softs++;
 		if (p->p_flag & P_OWEUPC) {
+			KERNEL_PROC_LOCK(p);
 			ADDUPROF(p);
+			KERNEL_PROC_UNLOCK(p);
 		}
-		if (want_resched)
+		if (curcpu()->ci_want_resched)
 			preempt(NULL);
 	}
 
@@ -169,7 +171,7 @@ trap(type, frame)
 	const char *tts;
 	vm_fault_t fault = VM_FAULT_INVALID;
 #ifdef DIAGNOSTIC
-	int oldcpl = cpl;
+	int oldcpl = curcpu()->ci_cpl;
 #endif
 
 	trapnum = type & ~T_USER;
@@ -276,7 +278,9 @@ trap(type, frame)
 			code = TRAP_TRACE;
 #endif
 		/* pass to user debugger */
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGTRAP, type &~ T_USER, code, sv);
+		KERNEL_PROC_UNLOCK(p);
 		}
 		break;
 
@@ -285,14 +289,20 @@ trap(type, frame)
 		ss_clear_breakpoints(p);
 
 		/* pass to user debugger */
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGTRAP, type &~ T_USER, TRAP_TRACE, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 #endif
 
 	case T_EXCEPTION | T_USER: {
-		u_int64_t *fpp = (u_int64_t *)frame->tf_cr30;
+		struct hppa_fpstate *hfp;
+		u_int64_t *fpp;
 		u_int32_t *pex;
 		int i, flt;
+
+		hfp = (struct hppa_fpstate *)frame->tf_cr30;
+		fpp = (u_int64_t *)&hfp->hfp_regs;
 
 		pex = (u_int32_t *)&fpp[0];
 		for (i = 0, pex++; i < 7 && !*pex; i++, pex++);
@@ -319,11 +329,11 @@ trap(type, frame)
 		}
 		/* reset the trap flag, as if there was none */
 		fpp[0] &= ~(((u_int64_t)HPPA_FPU_T) << 32);
-		/* flush out, since load is done from phys, only 4 regs */
-		fdcache(HPPA_SID_KERNEL, (vaddr_t)fpp, 8 * 4);
 
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGFPE, type &~ T_USER, flt, sv);
+		KERNEL_PROC_UNLOCK(p);
 		}
 		break;
 
@@ -333,34 +343,46 @@ trap(type, frame)
 
 	case T_EMULATION | T_USER:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGILL, type &~ T_USER, ILL_COPROC, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 	case T_OVERFLOW | T_USER:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGFPE, type &~ T_USER, FPE_INTOVF, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 	case T_CONDITION | T_USER:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGFPE, type &~ T_USER, FPE_INTDIV, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 	case T_PRIV_OP | T_USER:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGILL, type &~ T_USER, ILL_PRVOPC, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 	case T_PRIV_REG | T_USER:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGILL, type &~ T_USER, ILL_PRVREG, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 		/* these should never got here */
 	case T_HIGHERPL | T_USER:
 	case T_LOWERPL | T_USER:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGSEGV, vftype, SEGV_ACCERR, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 	/*
@@ -379,7 +401,9 @@ trap(type, frame)
 
 	case T_IPROT | T_USER:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGSEGV, vftype, SEGV_ACCERR, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 	case T_ITLBMISSNA:
@@ -407,6 +431,11 @@ trap(type, frame)
 				pl = frame_regmap(frame,
 				    (opcode >> 16) & 0x1f) & 3;
 
+			if (type & T_USER)
+				KERNEL_PROC_LOCK(p);
+			else
+				KERNEL_LOCK();
+
 			if ((type & T_USER && space == HPPA_SID_KERNEL) ||
 			    (frame->tf_iioq_head & 3) != pl ||
 			    (type & T_USER && va >= VM_MAXUSER_ADDRESS) ||
@@ -415,9 +444,16 @@ trap(type, frame)
 				frame_regmap(frame, opcode & 0x1f) = 0;
 				frame->tf_ipsw |= PSL_N;
 			}
+
+			if (type & T_USER)
+				KERNEL_PROC_UNLOCK(p);
+			else
+				KERNEL_UNLOCK();
 		} else if (type & T_USER) {
 			sv.sival_int = va;
+			KERNEL_PROC_LOCK(p);
 			trapsignal(p, SIGILL, type & ~T_USER, ILL_ILLTRP, sv);
+			KERNEL_PROC_UNLOCK(p);
 		} else
 			panic("trap: %s @ 0x%x:0x%x for 0x%x:0x%x irr 0x%08x",
 			    tts, frame->tf_iisq_head, frame->tf_iioq_head,
@@ -455,9 +491,16 @@ datacc:
 		if ((type & T_USER && va >= VM_MAXUSER_ADDRESS) ||
 		   (type & T_USER && map->pmap->pm_space != space)) {
 			sv.sival_int = va;
+			KERNEL_PROC_LOCK(p);
 			trapsignal(p, SIGSEGV, vftype, SEGV_MAPERR, sv);
+			KERNEL_PROC_UNLOCK(p);
 			break;
 		}
+
+		if (type & T_USER)
+			KERNEL_PROC_LOCK(p);
+		else
+			KERNEL_LOCK();
 
 		ret = uvm_fault(map, trunc_page(va), fault, vftype);
 
@@ -476,12 +519,19 @@ datacc:
 				ret = EFAULT;
 		}
 
+		if (type & T_USER)
+			KERNEL_PROC_UNLOCK(p);
+		else
+			KERNEL_UNLOCK();
+
 		if (ret != 0) {
 			if (type & T_USER) {
 				sv.sival_int = va;
+				KERNEL_PROC_LOCK(p);
 				trapsignal(p, SIGSEGV, vftype,
 				    ret == EACCES? SEGV_ACCERR : SEGV_MAPERR,
 				    sv);
+				KERNEL_PROC_UNLOCK(p);
 			} else {
 				if (p && p->p_addr->u_pcb.pcb_onfault) {
 					frame->tf_iioq_tail = 4 +
@@ -502,7 +552,9 @@ datacc:
 	case T_DATALIGN | T_USER:
 datalign_user:
 		sv.sival_int = va;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGBUS, vftype, BUS_ADRALN, sv);
+		KERNEL_PROC_UNLOCK(p);
 		break;
 
 	case T_INTERRUPT:
@@ -524,7 +576,9 @@ datalign_user:
 		}
 		if (type & T_USER) {
 			sv.sival_int = va;
+			KERNEL_PROC_LOCK(p);
 			trapsignal(p, SIGILL, type &~ T_USER, ILL_ILLOPC, sv);
+			KERNEL_PROC_UNLOCK(p);
 			break;
 		}
 		/* FALLTHROUGH */
@@ -563,13 +617,13 @@ if (kdb_trap (type, va, frame))
 	}
 
 #ifdef DIAGNOSTIC
-	if (cpl != oldcpl)
+	if (curcpu()->ci_cpl != oldcpl)
 		printf("WARNING: SPL (%d) NOT LOWERED ON "
-		    "TRAP (%d) EXIT\n", cpl, trapnum);
+		    "TRAP (%d) EXIT\n", curcpu()->ci_cpl, trapnum);
 #endif
 
 	if (trapnum != T_INTERRUPT)
-		splx(cpl);	/* process softints */
+		splx(curcpu()->ci_cpl);	/* process softints */
 
 	/*
 	 * in case we were interrupted from the syscall gate page
@@ -583,8 +637,7 @@ if (kdb_trap (type, va, frame))
 }
 
 void
-child_return(arg)
-	void *arg;
+child_return(void *arg)
 {
 	struct proc *p = (struct proc *)arg;
 	struct trapframe *tf = p->p_md.md_regs;
@@ -596,17 +649,25 @@ child_return(arg)
 	tf->tf_ret1 = 1;	/* ischild */
 	tf->tf_t1 = 0;		/* errno */
 
+	KERNEL_PROC_UNLOCK(p);
+
 	userret(p);
 #ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
+	if (KTRPOINT(p, KTR_SYSRET)) {
+		KERNEL_PROC_LOCK(p);
 		ktrsysret(p,
 		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
+		KERNEL_PROC_UNLOCK(p);
+	}
 #endif
 }
 
 #ifdef PTRACE
 
 #include <sys/ptrace.h>
+
+int	ss_get_value(struct proc *p, vaddr_t addr, u_int *value);
+int	ss_put_value(struct proc *p, vaddr_t addr, u_int value);
 
 int
 ss_get_value(struct proc *p, vaddr_t addr, u_int *value)
@@ -662,14 +723,19 @@ process_sstep(struct proc *p, int sstep)
 
 	ss_clear_breakpoints(p);
 
-	/* Don't touch the syscall gateway page. */
-	if (sstep == 0 ||
-	    (p->p_md.md_regs->tf_iioq_tail & ~PAGE_MASK) == SYSCALLGATE) {
+	if (sstep == 0) {
 		p->p_md.md_regs->tf_ipsw &= ~PSL_T;
 		return (0);
 	}
 
-	p->p_md.md_bpva = p->p_md.md_regs->tf_iioq_tail & ~HPPA_PC_PRIV_MASK;
+	/*
+	 * Don't touch the syscall gateway page.  Instead, insert a
+	 * breakpoint where we're supposed to return.
+	 */
+	if ((p->p_md.md_regs->tf_iioq_tail & ~PAGE_MASK) == SYSCALLGATE)
+		p->p_md.md_bpva = p->p_md.md_regs->tf_r31 & ~HPPA_PC_PRIV_MASK;
+	else
+		p->p_md.md_bpva = p->p_md.md_regs->tf_iioq_tail & ~HPPA_PC_PRIV_MASK;
 
 	/*
 	 * Insert two breakpoint instructions; the first one might be
@@ -691,11 +757,17 @@ process_sstep(struct proc *p, int sstep)
 	if (error)
 		return (error);
 
-	p->p_md.md_regs->tf_ipsw |= PSL_T;
+	if ((p->p_md.md_regs->tf_iioq_tail & ~PAGE_MASK) != SYSCALLGATE)
+		p->p_md.md_regs->tf_ipsw |= PSL_T;
+	else
+		p->p_md.md_regs->tf_ipsw &= ~PSL_T;
+
 	return (0);
 }
 
 #endif	/* PTRACE */
+
+void	syscall(struct trapframe *frame);
 
 /*
  * call actual syscall routine
@@ -708,7 +780,7 @@ syscall(struct trapframe *frame)
 	int retq, nsys, code, argsize, argoff, oerror, error;
 	register_t args[8], rval[2];
 #ifdef DIAGNOSTIC
-	int oldcpl = cpl;
+	int oldcpl = curcpu()->ci_cpl;
 #endif
 
 	uvmexp.syscalls++;
@@ -803,11 +875,16 @@ syscall(struct trapframe *frame)
 	}
 
 #ifdef SYSCALL_DEBUG
+	KERNEL_PROC_LOCK(p);
 	scdebug_call(p, code, args);
+	KERNEL_PROC_UNLOCK(p);
 #endif
 #ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSCALL))
+	if (KTRPOINT(p, KTR_SYSCALL)) {
+		KERNEL_PROC_LOCK(p);
 		ktrsyscall(p, code, callp->sy_argsize, args);
+		KERNEL_PROC_UNLOCK(p);
+	}
 #endif
 	if (error)
 		goto bad;
@@ -815,11 +892,21 @@ syscall(struct trapframe *frame)
 	rval[0] = 0;
 	rval[1] = frame->tf_ret1;
 #if NSYSTRACE > 0
-	if (ISSET(p->p_flag, P_SYSTRACE))
+	if (ISSET(p->p_flag, P_SYSTRACE)) {
+		KERNEL_PROC_LOCK(p);
 		oerror = error = systrace_redirect(code, p, args, rval);
-	else
+		KERNEL_PROC_UNLOCK(p);
+	} else
 #endif
+	{
+		int nolock = (callp->sy_flags & SY_NOLOCK);
+		if (!nolock)
+			KERNEL_PROC_LOCK(p);
 		oerror = error = (*callp->sy_call)(p, args, rval);
+		if (!nolock)
+			KERNEL_PROC_UNLOCK(p);
+
+	}
 	switch (error) {
 	case 0:
 		frame->tf_ret0 = rval[0];
@@ -841,22 +928,28 @@ syscall(struct trapframe *frame)
 		break;
 	}
 #ifdef SYSCALL_DEBUG
+	KERNEL_PROC_LOCK(p);
 	scdebug_ret(p, code, oerror, rval);
+	KERNEL_PROC_UNLOCK(p);
 #endif
 	userret(p);
 #ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
+	if (KTRPOINT(p, KTR_SYSRET)) {
+		KERNEL_PROC_LOCK(p);
 		ktrsysret(p, code, oerror, rval[0]);
-#endif
-#ifdef DIAGNOSTIC
-	if (cpl != oldcpl) {
-		printf("WARNING: SPL (0x%x) NOT LOWERED ON "
-		    "syscall(0x%x, 0x%x, 0x%x, 0x%x...) EXIT, PID %d\n",
-		    cpl, code, args[0], args[1], args[2], p->p_pid);
-		cpl = oldcpl;
+		KERNEL_PROC_UNLOCK(p);
 	}
 #endif
-	splx(cpl);	/* process softints */
+#ifdef DIAGNOSTIC
+	if (curcpu()->ci_cpl != oldcpl) {
+		printf("WARNING: SPL (0x%x) NOT LOWERED ON "
+		    "syscall(0x%x, 0x%x, 0x%x, 0x%x...) EXIT, PID %d\n",
+		    curcpu()->ci_cpl, code, args[0], args[1], args[2],
+		    p->p_pid);
+		curcpu()->ci_cpl = oldcpl;
+	}
+#endif
+	splx(curcpu()->ci_cpl);	/* process softints */
 }
 
 /*

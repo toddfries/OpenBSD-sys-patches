@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.95 2009/08/24 08:51:18 jasper Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.99 2010/07/01 17:48:33 thib Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -57,7 +57,6 @@
  * file, the protection of the mapped file is ignored (effectively,
  * by using root credentials in all transactions).
  *
- * NOTE 3: Doesn't interact with leases, should it?
  */
 
 #include <sys/param.h>
@@ -79,6 +78,7 @@
 #include <sys/rwlock.h>
 #include <sys/uio.h>
 #include <sys/conf.h>
+#include <sys/dkio.h>
 
 #include <crypto/blf.h>
 
@@ -316,8 +316,6 @@ vndgetdisklabel(dev_t dev, struct vnd_softc *sc, struct disklabel *lp,
 	lp->d_type = DTYPE_VND;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
 	DL_SETDSIZE(lp, sc->sc_size);
-	lp->d_rpm = 3600;
-	lp->d_interleave = 1;
 	lp->d_flags = 0;
 	lp->d_version = 1;
 
@@ -571,6 +569,7 @@ vndstrategy(struct buf *bp)
 		nbp->vb_buf.b_validoff = bp->b_validoff;
 		nbp->vb_buf.b_validend = bp->b_validend;
 		LIST_INIT(&nbp->vb_buf.b_dep);
+		nbp->vb_buf.b_bq = NULL;
 
 		/* save a reference to the old buffer */
 		nbp->vb_obp = bp;

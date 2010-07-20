@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.175 2009/11/09 03:16:05 deraadt Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.182 2010/07/09 16:58:06 reyk Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -1040,6 +1040,13 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 		goto sendunicast;
 	}
 
+#if NBPFILTER > 0
+	if (sc->sc_if.if_bpf)
+		bpf_mtap(sc->sc_if.if_bpf, m, BPF_DIRECTION_OUT);
+#endif
+	ifp->if_opackets++;
+	ifp->if_obytes += m->m_pkthdr.len;
+
 	/*
 	 * If the packet is a broadcast or we don't know a better way to
 	 * get there, send to all interfaces.
@@ -1206,11 +1213,6 @@ bridgeintr_frame(struct bridge_softc *sc, struct mbuf *m)
 	}
 
 	src_if = m->m_pkthdr.rcvif;
-
-#if NBPFILTER > 0
-	if (sc->sc_if.if_bpf)
-		bpf_mtap(sc->sc_if.if_bpf, m, BPF_DIRECTION_IN);
-#endif
 
 	sc->sc_if.if_ipackets++;
 	sc->sc_if.if_ibytes += m->m_pkthdr.len;
@@ -1410,6 +1412,12 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 	if (ifl == LIST_END(&sc->sc_iflist))
 		return (m);
 
+#if NBPFILTER > 0
+	if (sc->sc_if.if_bpf)
+		bpf_mtap_hdr(sc->sc_if.if_bpf, (caddr_t)eh,
+		    ETHER_HDR_LEN, m, BPF_DIRECTION_IN);
+#endif
+
 	bridge_span(sc, eh, m);
 
 	if (m->m_flags & (M_BCAST | M_MCAST)) {
@@ -1454,9 +1462,16 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 					break;
 			}
 			if (ifl != LIST_END(&sc->sc_iflist)) {
-				m->m_flags |= M_PROTO1;
 				m->m_pkthdr.rcvif = ifl->ifp;
+				m->m_pkthdr.rdomain = ifl->ifp->if_rdomain;
+#if NBPFILTER > 0
+				if (ifl->ifp->if_bpf)
+					bpf_mtap(ifl->ifp->if_bpf, m,
+					    BPF_DIRECTION_IN);
+#endif
+				m->m_flags |= M_PROTO1;
 				ether_input(ifl->ifp, eh, m);
+				ifl->ifp->if_ipackets++;
 				m = NULL;
 			}
 		}
@@ -1493,7 +1508,25 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 				m_freem(m);
 				return (NULL);
 			}
+
+			/* Make sure the real incoming interface
+			 * is aware */
+#if NBPFILTER > 0
+			if (ifl->ifp->if_bpf)
+				bpf_mtap_hdr(ifl->ifp->if_bpf,
+				    (caddr_t)eh,
+				    ETHER_HDR_LEN, m,
+				    BPF_DIRECTION_IN);
+#endif
+			/* Count for the interface we are going to */
+			ifl->ifp->if_ipackets++;
+
+			/* Count for the bridge */
+			sc->sc_if.if_ipackets++;
+			sc->sc_if.if_ibytes += ETHER_HDR_LEN + m->m_pkthdr.len;
+
 			m->m_pkthdr.rcvif = ifl->ifp;
+			m->m_pkthdr.rdomain = ifl->ifp->if_rdomain;
 			if (ifp->if_type == IFT_GIF) {
 				m->m_flags |= M_PROTO1;
 				ether_input(ifl->ifp, eh, m);
@@ -1666,12 +1699,19 @@ bridge_localbroadcast(struct bridge_softc *sc, struct ifnet *ifp,
 		sc->sc_if.if_oerrors++;
 		return;
 	}
-	m_adj(m1, ETHER_HDR_LEN);
-
 	/* fixup header a bit */
-	m1->m_flags |= M_PROTO1;
 	m1->m_pkthdr.rcvif = ifp;
-	ether_input(ifp, eh, m1);
+	m1->m_pkthdr.rdomain = ifp->if_rdomain;
+	m1->m_flags |= M_PROTO1;
+
+#if NBPFILTER > 0
+	if (ifp->if_bpf)
+		bpf_mtap(ifp->if_bpf, m1,
+		    BPF_DIRECTION_IN);
+#endif
+
+	ether_input(ifp, NULL, m1);
+	ifp->if_ipackets++;
 }
 
 void
@@ -2279,6 +2319,9 @@ bridge_ipsec(struct bridge_softc *sc, struct ifnet *ifp,
 #ifdef INET6
 	struct ip6_hdr *ip6;
 #endif /* INET6 */
+#if NPF > 0
+	struct ifnet *encif;
+#endif
 
 	if (dir == BRIDGE_IN) {
 		switch (af) {
@@ -2359,7 +2402,7 @@ bridge_ipsec(struct bridge_softc *sc, struct ifnet *ifp,
 
 		s = spltdb();
 
-		tdb = gettdb(spi, &dst, proto);
+		tdb = gettdb(ifp->if_rdomain, spi, &dst, proto);
 		if (tdb != NULL && (tdb->tdb_flags & TDBF_INVALID) == 0 &&
 		    tdb->tdb_xform != NULL) {
 			if (tdb->tdb_first_use == 0) {
@@ -2414,7 +2457,9 @@ bridge_ipsec(struct bridge_softc *sc, struct ifnet *ifp,
 			switch (af) {
 #ifdef INET
 			case AF_INET:
-				if (pf_test(dir, &encif[0].sc_if,
+				if ((encif = enc_getif(tdb->tdb_rdomain,
+				    tdb->tdb_tap)) == NULL ||
+				    pf_test(dir, encif,
 				    &m, NULL) != PF_PASS) {
 					m_freem(m);
 					return (1);
@@ -2423,7 +2468,9 @@ bridge_ipsec(struct bridge_softc *sc, struct ifnet *ifp,
 #endif /* INET */
 #ifdef INET6
 			case AF_INET6:
-				if (pf_test6(dir, &encif[0].sc_if,
+				if ((encif = enc_getif(tdb->tdb_rdomain,
+				    tdb->tdb_tap)) == NULL ||
+				    pf_test6(dir, encif,
 				    &m, NULL) != PF_PASS) {
 					m_freem(m);
 					return (1);
@@ -2564,7 +2611,6 @@ bridge_filter(struct bridge_softc *sc, int dir, struct ifnet *ifp,
 #endif /* IPSEC */
 
 		/* Finally, we get to filter the packet! */
-		m->m_pkthdr.rcvif = ifp;
 		if (pf_test(dir, ifp, &m, eh) != PF_PASS)
 			goto dropit;
 		if (m == NULL)
@@ -2665,7 +2711,8 @@ bridge_fragment(struct bridge_softc *sc, struct ifnet *ifp,
 #else
 	etype = ntohs(eh->ether_type);
 #if NVLAN > 0
-	if ((m->m_flags & M_VLANTAG) || etype == ETHERTYPE_VLAN) {
+	if ((m->m_flags & M_VLANTAG) || etype == ETHERTYPE_VLAN ||
+	    etype == ETHERTYPE_QINQ) {
 		int len = m->m_pkthdr.len;
 
 		if (m->m_flags & M_VLANTAG)
@@ -2766,21 +2813,18 @@ bridge_fragment(struct bridge_softc *sc, struct ifnet *ifp,
 int
 bridge_ifenqueue(struct bridge_softc *sc, struct ifnet *ifp, struct mbuf *m)
 {
-#if VETHER > 0
-	extern void vetherstart(struct ifnet *);
-#endif
 	int error, len;
 	short mflags;
 
 #if NGIF > 0
 	/* Packet needs etherip encapsulation. */
-	if (ifp->if_type == IFT_GIF)
+	if (ifp->if_type == IFT_GIF) {
 		m->m_flags |= M_PROTO1;
-#endif
-#if VETHER > 0
-	/* Indicate packets which are outbound */
-	if (ifp->if_start == vetherstart)
-		m->m_flags |= M_PROTO1;
+
+		/* Count packets input into the gif from outside */
+		ifp->if_ipackets++;
+		ifp->if_ibytes += m->m_pkthdr.len;
+	}
 #endif
 #if NVLAN > 0
 	/*
@@ -2801,7 +2845,7 @@ bridge_ifenqueue(struct bridge_softc *sc, struct ifnet *ifp, struct mbuf *m)
 			sc->sc_if.if_oerrors++;
 			return (ENOBUFS);
 		}
-		m_copyback(m, 0, sizeof(evh), &evh);
+		m_copyback(m, 0, sizeof(evh), &evh, M_NOWAIT);
 		m->m_flags &= ~M_VLANTAG;
 	}
 #endif

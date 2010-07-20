@@ -1,4 +1,4 @@
-/*	$OpenBSD: ueagle.c,v 1.24 2009/10/13 19:33:17 pirofti Exp $	*/
+/*	$OpenBSD: ueagle.c,v 1.26 2010/06/05 13:06:57 damien Exp $	*/
 
 /*-
  * Copyright (c) 2003-2006
@@ -25,7 +25,6 @@
 #include "bpfilter.h"
 
 #include <sys/param.h>
-#include <sys/sysctl.h>
 #include <sys/sockio.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
@@ -611,10 +610,10 @@ ueagle_boot(struct ueagle_softc *sc)
 	sc->ovl = 0;
 	ueagle_loadpage(sc);
 
-	/* wait until modem reaches operationnal state */
+	/* wait until modem reaches operational state */
 	error = tsleep(UEAGLE_COND_READY(sc), PZERO | PCATCH, "boot", 10 * hz);
 	if (error != 0) {
-		printf("%s: timeout waiting for operationnal state\n",
+		printf("%s: timeout waiting for operational state\n",
 		    sc->sc_dev.dv_xname);
 		return error;
 	}

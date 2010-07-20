@@ -1,4 +1,4 @@
-/*	$OpenBSD: esa.c,v 1.17 2009/06/02 18:06:31 deraadt Exp $	*/
+/*	$OpenBSD: esa.c,v 1.19 2010/07/15 03:43:11 jakemsr Exp $	*/
 /* $NetBSD: esa.c,v 1.12 2002/03/24 14:17:35 jmcneill Exp $ */
 
 /*
@@ -165,19 +165,20 @@ int		esa_suspend(struct esa_softc *);
 int		esa_resume(struct esa_softc *);
 
 static audio_encoding_t esa_encoding[] = {
-	{ 0, AudioEulinear, AUDIO_ENCODING_ULINEAR, 8, 0 },
-	{ 1, AudioEmulaw, AUDIO_ENCODING_ULAW, 8,
-		AUDIO_ENCODINGFLAG_EMULATED },
-	{ 2, AudioEalaw, AUDIO_ENCODING_ALAW, 8, AUDIO_ENCODINGFLAG_EMULATED },
-	{ 3, AudioEslinear, AUDIO_ENCODING_SLINEAR, 8,
-		AUDIO_ENCODINGFLAG_EMULATED }, /* XXX: Are you sure? */
-	{ 4, AudioEslinear_le, AUDIO_ENCODING_SLINEAR_LE, 16, 0 },
-	{ 5, AudioEulinear_le, AUDIO_ENCODING_ULINEAR_LE, 16,
-		AUDIO_ENCODINGFLAG_EMULATED },
-	{ 6, AudioEslinear_be, AUDIO_ENCODING_SLINEAR_BE, 16,
-		AUDIO_ENCODINGFLAG_EMULATED },
-	{ 7, AudioEulinear_be, AUDIO_ENCODING_ULINEAR_BE, 16,
-		AUDIO_ENCODINGFLAG_EMULATED }
+	{ 0, AudioEulinear, AUDIO_ENCODING_ULINEAR, 8, 1, 1, 0 },
+	{ 1, AudioEmulaw, AUDIO_ENCODING_ULAW, 8, 1, 1,
+	    AUDIO_ENCODINGFLAG_EMULATED },
+	{ 2, AudioEalaw, AUDIO_ENCODING_ALAW, 8, 1, 1,
+	    AUDIO_ENCODINGFLAG_EMULATED },
+	{ 3, AudioEslinear, AUDIO_ENCODING_SLINEAR, 8, 1, 1,
+	    AUDIO_ENCODINGFLAG_EMULATED },
+	{ 4, AudioEslinear_le, AUDIO_ENCODING_SLINEAR_LE, 16, 2, 1, 0 },
+	{ 5, AudioEulinear_le, AUDIO_ENCODING_ULINEAR_LE, 16, 2, 1,
+	    AUDIO_ENCODINGFLAG_EMULATED },
+	{ 6, AudioEslinear_be, AUDIO_ENCODING_SLINEAR_BE, 16, 2, 1,
+	    AUDIO_ENCODINGFLAG_EMULATED },
+	{ 7, AudioEulinear_be, AUDIO_ENCODING_ULINEAR_BE, 16, 2, 1,
+	    AUDIO_ENCODINGFLAG_EMULATED }
 };
 
 #define ESA_NENCODINGS 8
@@ -336,6 +337,8 @@ esa_set_params(void *hdl, int setmode, int usemode, struct audio_params *play,
 		default:
 			return (EINVAL);
 		}
+		p->bps = AUDIO_BPS(p->precision);
+		p->msb = 1;
 
 		ch->mode = *p;
 	}
@@ -688,7 +691,7 @@ esa_trigger_output(void *hdl, void *start, void *end, int blksize,
 	    ESA_DMAC_BLOCKF_SELECTOR);
 
 	/* Set an armload of static initializers */
-	for (i = 0; i < (sizeof(esa_playvals) / sizeof(esa_playvals[0])); i++)
+	for (i = 0; i < nitems(esa_playvals); i++)
 		esa_write_assp(sc, ESA_MEMTYPE_INTERNAL_DATA, dac_data +
 		    esa_playvals[i].addr, esa_playvals[i].val);
 
@@ -821,7 +824,7 @@ esa_trigger_input(void *hdl, void *start, void *end, int blksize,
 	    ESA_DMAC_PAGE3_SELECTOR + ESA_DMAC_BLOCKF_SELECTOR);
 
 	/* Set an armload of static initializers */
-	for (i = 0; i < (sizeof(esa_recvals) / sizeof(esa_recvals[0])); i++)
+	for (i = 0; i < nitems(esa_recvals); i++)
 		esa_write_assp(sc, ESA_MEMTYPE_INTERNAL_DATA, adc_data +
 		    esa_recvals[i].addr, esa_recvals[i].val);
 
@@ -1332,18 +1335,18 @@ esa_init(struct esa_softc *sc)
 	    ESA_KDATA_DMA_XFER0);
 
 	/* Write kernel code into memory */
-	size = sizeof(esa_assp_kernel_image);
+	size = nitems(esa_assp_kernel_image);
 	for (i = 0; i < size; i++)
 		esa_write_assp(sc, ESA_MEMTYPE_INTERNAL_CODE,
 		    ESA_REV_B_CODE_MEMORY_BEGIN + i, esa_assp_kernel_image[i]);
 
-	size = sizeof(esa_assp_minisrc_image);
+	size = nitems(esa_assp_minisrc_image);
 	for (i = 0; i < size; i++)
 		esa_write_assp(sc, ESA_MEMTYPE_INTERNAL_CODE, 0x400 + i,
 		    esa_assp_minisrc_image[i]);
 
 	/* Write the coefficients for the low pass filter */
-	size = sizeof(esa_minisrc_lpf_image);
+	size = nitems(esa_minisrc_lpf_image);
 	for (i = 0; i < size; i++)
 		esa_write_assp(sc, ESA_MEMTYPE_INTERNAL_CODE,
 		    0x400 + ESA_MINISRC_COEF_LOC + i, esa_minisrc_lpf_image[i]);

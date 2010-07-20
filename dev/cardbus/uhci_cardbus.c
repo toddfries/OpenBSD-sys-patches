@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhci_cardbus.c,v 1.8 2009/08/20 18:47:03 martynas Exp $	*/
+/*	$OpenBSD: uhci_cardbus.c,v 1.11 2010/03/27 21:40:13 jsg Exp $	*/
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -66,7 +66,6 @@ struct cfattach uhci_cardbus_ca = {
 	    uhci_cardbus_attach, uhci_cardbus_detach, uhci_activate
 };
 
-#define CARDBUS_INTERFACE_UHCI PCI_INTERFACE_UHCI
 #define cardbus_findvendor pci_findvendor
 
 int
@@ -74,9 +73,9 @@ uhci_cardbus_match(struct device *parent, void *match, void *aux)
 {
 	struct cardbus_attach_args *ca = (struct cardbus_attach_args *)aux;
 
-	if (CARDBUS_CLASS(ca->ca_class) == CARDBUS_CLASS_SERIALBUS &&
-	    CARDBUS_SUBCLASS(ca->ca_class) == CARDBUS_SUBCLASS_SERIALBUS_USB &&
-	    CARDBUS_INTERFACE(ca->ca_class) == CARDBUS_INTERFACE_UHCI)
+	if (PCI_CLASS(ca->ca_class) == PCI_CLASS_SERIALBUS &&
+	    PCI_SUBCLASS(ca->ca_class) == PCI_SUBCLASS_SERIALBUS_USB &&
+	    PCI_INTERFACE(ca->ca_class) == PCI_INTERFACE_UHCI)
 		return (1);
  
 	return (0);
@@ -89,14 +88,15 @@ uhci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	struct cardbus_attach_args *ca = aux;
 	cardbus_devfunc_t ct = ca->ca_ct;
 	cardbus_chipset_tag_t cc = ct->ct_cc;
+	pci_chipset_tag_t pc = ca->ca_pc;
 	cardbus_function_tag_t cf = ct->ct_cf;
-	cardbusreg_t csr;
+	pcireg_t csr;
 	usbd_status r;
 	const char *vendor;
 	const char *devname = sc->sc.sc_bus.bdev.dv_xname;
 
 	/* Map I/O registers */
-	if (Cardbus_mapreg_map(ct, PCI_CBIO, CARDBUS_MAPREG_TYPE_IO, 0,
+	if (Cardbus_mapreg_map(ct, PCI_CBIO, PCI_MAPREG_TYPE_IO, 0,
 			   &sc->sc.iot, &sc->sc.ioh, NULL, &sc->sc.sc_size)) {
 		printf(": can't map io space\n");
 		return;
@@ -114,11 +114,11 @@ uhci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	(ct->ct_cf->cardbus_ctrl)(cc, CARDBUS_BM_ENABLE);
 
 	/* Enable the device. */
-	csr = cardbus_conf_read(cc, cf, ca->ca_tag,
-				CARDBUS_COMMAND_STATUS_REG);
-	cardbus_conf_write(cc, cf, ca->ca_tag, CARDBUS_COMMAND_STATUS_REG,
-		       csr | CARDBUS_COMMAND_MASTER_ENABLE
-			   | CARDBUS_COMMAND_IO_ENABLE);
+	csr = pci_conf_read(pc, ca->ca_tag,
+				PCI_COMMAND_STATUS_REG);
+	pci_conf_write(pc, ca->ca_tag, PCI_COMMAND_STATUS_REG,
+		       csr | PCI_COMMAND_MASTER_ENABLE
+			   | PCI_COMMAND_IO_ENABLE);
 
 	sc->sc_ih = cardbus_intr_establish(cc, cf, ca->ca_intrline,
 					   IPL_USB, uhci_intr, sc, devname);
@@ -129,10 +129,10 @@ uhci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	printf(": irq %d\n", ca->ca_intrline);
 
 	/* Set LEGSUP register to its default value. */
-	cardbus_conf_write(cc, cf, ca->ca_tag, PCI_LEGSUP,
+	pci_conf_write(pc, ca->ca_tag, PCI_LEGSUP,
 			   PCI_LEGSUP_USBPIRQDEN);
 
-	switch(cardbus_conf_read(cc, cf, ca->ca_tag, PCI_USBREV) & PCI_USBREV_MASK) {
+	switch(pci_conf_read(pc, ca->ca_tag, PCI_USBREV) & PCI_USBREV_MASK) {
 	case PCI_USBREV_PRE_1_0:
 		sc->sc.sc_bus.usbrev = USBREV_PRE_1_0;
 		break;
@@ -155,12 +155,12 @@ uhci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Figure out vendor for root hub descriptor. */
 	vendor = cardbus_findvendor(ca->ca_id);
-	sc->sc.sc_id_vendor = CARDBUS_VENDOR(ca->ca_id);
+	sc->sc.sc_id_vendor = PCI_VENDOR(ca->ca_id);
 	if (vendor)
 		strlcpy(sc->sc.sc_vendor, vendor, sizeof (sc->sc.sc_vendor));
 	else
 		snprintf(sc->sc.sc_vendor, sizeof(sc->sc.sc_vendor),
-		    "vendor 0x%04x", CARDBUS_VENDOR(ca->ca_id));
+		    "vendor 0x%04x", PCI_VENDOR(ca->ca_id));
 	
 	r = uhci_init(&sc->sc);
 	if (r != USBD_NORMAL_COMPLETION) {

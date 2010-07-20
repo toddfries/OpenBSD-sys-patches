@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpivar.h,v 1.25 2009/11/02 23:20:41 marco Exp $ */
+/*	$OpenBSD: mpivar.h,v 1.32 2010/07/06 07:18:18 dlg Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -69,6 +69,7 @@ struct mpi_softc;
 
 struct mpi_rcb {
 	void			*rcb_reply;
+	bus_addr_t		rcb_offset;
 	u_int32_t		rcb_reply_dva;
 };
 
@@ -76,7 +77,7 @@ struct mpi_ccb {
 	struct mpi_softc	*ccb_sc;
 	int			ccb_id;
 
-	struct scsi_xfer	*ccb_xs;
+	void 			*ccb_cookie;
 	bus_dmamap_t		ccb_dmamap;
 
 	bus_addr_t		ccb_offset;
@@ -91,10 +92,10 @@ struct mpi_ccb {
 	void			(*ccb_done)(struct mpi_ccb *);
 	struct mpi_rcb		*ccb_rcb;
 
-	TAILQ_ENTRY(mpi_ccb)	ccb_link;
+	SLIST_ENTRY(mpi_ccb)	ccb_link;
 };
 
-TAILQ_HEAD(mpi_ccb_list, mpi_ccb);
+SLIST_HEAD(mpi_ccb_list, mpi_ccb);
 
 struct mpi_softc {
 	struct device		sc_dev;
@@ -125,10 +126,15 @@ struct mpi_softc {
 	struct mpi_dmamem	*sc_requests;
 	struct mpi_ccb		*sc_ccbs;
 	struct mpi_ccb_list	sc_ccb_free;
+	struct mutex		sc_ccb_mtx;
+	struct scsi_iopool	sc_iopool;
 
 	struct mpi_dmamem	*sc_replies;
 	struct mpi_rcb		*sc_rcbs;
 	int			sc_repq;
+
+	struct mpi_ccb		*sc_evt_ccb;
+	struct scsi_iohandler	sc_evt_ack;
 
 	size_t			sc_fw_len;
 	struct mpi_dmamem	*sc_fw;
