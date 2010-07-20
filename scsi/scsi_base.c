@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.176 2010/06/28 09:11:21 dlg Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.183 2010/07/06 01:07:28 krw Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -41,6 +41,7 @@
 #include <sys/kernel.h>
 #include <sys/buf.h>
 #include <sys/uio.h>
+#include <sys/malloc.h>
 #include <sys/errno.h>
 #include <sys/device.h>
 #include <sys/proc.h>
@@ -617,9 +618,6 @@ scsi_xs_put(struct scsi_xfer *xs)
 
 	scsi_io_put(link->pool, io);
 	scsi_link_close(link);
-
-	if (link->device->start)
-		link->device->start(link->device_softc);
 }
 
 /*
@@ -628,66 +626,86 @@ scsi_xs_put(struct scsi_xfer *xs)
 daddr64_t
 scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 {
-	struct scsi_read_cap_data_16 rdcap16;
 	struct scsi_read_capacity_16 rc16;
-	struct scsi_read_cap_data rdcap;
 	struct scsi_read_capacity rc;
+	struct scsi_read_cap_data_16 *rdcap16;
+	struct scsi_read_cap_data *rdcap;
 	daddr64_t max_addr;
 	int error;
 
 	if (blksize != NULL)
 		*blksize = 0;
 
+	CLR(flags, SCSI_IGNORE_ILLEGAL_REQUEST);
+
 	/*
-	 * make up a scsi command and ask the scsi driver to do it for you.
+	 * Start with a READ CAPACITY(10).
 	 */
 	bzero(&rc, sizeof(rc));
 	bzero(&rdcap, sizeof(rdcap));
 	rc.opcode = READ_CAPACITY;
 
-	/*
-	 * If the command works, interpret the result as a 4 byte
-	 * number of blocks
-	 */
+	rdcap = malloc(sizeof(*rdcap), M_TEMP, ((flags & SCSI_NOSLEEP) ?
+	    M_NOWAIT : M_WAITOK) | M_ZERO);
+	if (rdcap == NULL)
+		return (0);
 	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&rc, sizeof(rc),
-	    (u_char *)&rdcap, sizeof(rdcap), SCSI_RETRIES, 20000, NULL,
-	    flags | SCSI_DATA_IN);
+	    (u_char *)rdcap, sizeof(*rdcap), SCSI_RETRIES, 20000, NULL,
+	    flags | SCSI_DATA_IN | SCSI_SILENT);
 	if (error) {
 		SC_DEBUG(sc_link, SDEV_DB1, ("READ CAPACITY error (%#x)\n",
 		    error));
+		free(rdcap, M_TEMP);
 		return (0);
 	}
 
-	max_addr = _4btol(rdcap.addr);
+	max_addr = _4btol(rdcap->addr);
 	if (blksize != NULL)
-		*blksize = _4btol(rdcap.length);
+		*blksize = _4btol(rdcap->length);
+	free(rdcap, M_TEMP);
 
-	if (max_addr != 0xffffffff)
-		return (max_addr + 1);
+	if (SCSISPC(sc_link->inqdata.version) < 3 && max_addr != 0xffffffff)
+		goto exit;
 
 	/*
-	 * The device has more than 2^32-1 sectors. Use 16-byte READ CAPACITY.
+	 * SCSI-3 devices, or devices reporting more than 2^32-1 sectors can try
+	 * READ CAPACITY(16).
 	 */
 	 bzero(&rc16, sizeof(rc16));
 	 bzero(&rdcap16, sizeof(rdcap16));
 	 rc16.opcode = READ_CAPACITY_16;
 	 rc16.byte2 = SRC16_SERVICE_ACTION;
-	 _lto4b(sizeof(rdcap16), rc16.length);
+	 _lto4b(sizeof(*rdcap16), rc16.length);
 
+	rdcap16 = malloc(sizeof(*rdcap16), M_TEMP, ((flags & SCSI_NOSLEEP) ?
+	    M_NOWAIT : M_WAITOK) | M_ZERO);
+	if (rdcap16 == NULL)
+		goto exit;
 	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&rc16,
-	    sizeof(rc16), (u_char *)&rdcap16, sizeof(rdcap16), SCSI_RETRIES,
-	    20000, NULL, flags | SCSI_DATA_IN);
+	    sizeof(rc16), (u_char *)rdcap16, sizeof(*rdcap16), SCSI_RETRIES,
+	    20000, NULL, flags | SCSI_DATA_IN | SCSI_SILENT);
 	if (error) {
 		SC_DEBUG(sc_link, SDEV_DB1, ("READ CAPACITY 16 error (%#x)\n",
 		    error));
-		return (0);
+		free(rdcap16, M_TEMP);
+		goto exit;
 	}
 
-	max_addr = _8btol(rdcap16.addr);
+	max_addr = _8btol(rdcap16->addr);
 	if (blksize != NULL)
-		*blksize = _4btol(rdcap16.length);
+		*blksize = _4btol(rdcap16->length);
+	/* XXX The other READ CAPACITY(16) info could be stored away. */
+	free(rdcap16, M_TEMP);
 
 	return (max_addr + 1);
+
+exit:
+	/* Return READ CAPACITY 10 values. */
+	if (max_addr != 0xffffffff)
+		return (max_addr + 1);
+	else if (blksize != NULL)
+		*blksize = 0;
+	return (0);
 }
 
 /*
@@ -1212,34 +1230,22 @@ scsi_scsi_cmd(struct scsi_link *link, struct scsi_generic *scsi_cmd,
 	xs->datalen = datalen;
 	xs->retries = retries;
 	xs->timeout = timeout;
+	xs->bp = bp;
 
 	error = scsi_xs_sync(xs);
 
-	if (error != EAGAIN) {
-		if (bp != NULL) {
-			if (error) {
-				bp->b_error = error;
-				bp->b_flags |= B_ERROR;
-				bp->b_resid = bp->b_bcount;
-			} else {  
-				bp->b_error = 0;
-				bp->b_resid = xs->resid;
-			}
-	
-			s = splbio();
-			biodone(bp);
-			splx(s);
+	if (bp != NULL) {
+		bp->b_error = error;
+		if (bp->b_error) {
+			SET(bp->b_flags, B_ERROR);
+			bp->b_resid = bp->b_bcount;
+		} else {
+			CLR(bp->b_flags, B_ERROR);
+			bp->b_resid = xs->resid;
 		}
-
-		if (link->device->done) {
-			/*
-			 * Tell the device the operation is actually complete.
-			 * No more will happen with this xfer.  This for
-			 * notification of the upper-level driver only; they
-			 * won't be returning any meaningful information to us.
-			 */
-			link->device->done(xs);
-		}
+		s = splbio();
+		biodone(bp);
+		splx(s);
 	}
 
 	scsi_xs_put(xs);
@@ -1263,17 +1269,17 @@ scsi_xs_error(struct scsi_xfer *xs)
 		error = 0;
 		break;
 
-	case XS_NO_CCB:
-		error = EAGAIN;
-		break;
-
 	case XS_SENSE:
 	case XS_SHORTSENSE:
-		error = scsi_interpret_sense(xs);
+#ifdef SCSIDEBUG
+		scsi_sense_print_debug(xs);
+#endif
+		error = xs->sc_link->interpret_sense(xs);
 		SC_DEBUG(xs->sc_link, SDEV_DB3,
 		    ("scsi_interpret_sense returned %#x\n", error));
 		break;
 
+	case XS_NO_CCB:
 	case XS_BUSY:
 		error = scsi_delay(xs, 1);
 		break;
@@ -1325,6 +1331,33 @@ scsi_delay(struct scsi_xfer *xs, int seconds)
 	return (ERESTART);
 }
 
+#ifdef SCSIDEBUG
+/*
+ * Print out sense data details.
+ */
+void
+scsi_sense_print_debug(struct scsi_xfer *xs)
+{
+	struct scsi_sense_data *sense = &xs->sense;
+	struct scsi_link *sc_link = xs->sc_link;
+
+	SC_DEBUG(sc_link, SDEV_DB1,
+	    ("code:%#x valid:%d key:%#x ili:%d eom:%d fmark:%d extra:%d\n",
+	    sense->error_code & SSD_ERRCODE,
+	    sense->error_code & SSD_ERRCODE_VALID ? 1 : 0,
+	    sense->flags & SSD_KEY,
+	    sense->flags & SSD_ILI ? 1 : 0,
+	    sense->flags & SSD_EOM ? 1 : 0,
+	    sense->flags & SSD_FILEMARK ? 1 : 0,
+	    sense->extra_len));
+
+	if (xs->sc_link->flags & SDEV_DB1)
+		scsi_show_mem((u_char *)&xs->sense, sizeof(xs->sense));
+
+	scsi_print_sense(xs);
+}
+#endif
+
 /*
  * Look at the returned sense and act on the error, determining
  * the unix error number to pass back.  (0 = report no error)
@@ -1338,35 +1371,6 @@ scsi_interpret_sense(struct scsi_xfer *xs)
 	struct scsi_link			*sc_link = xs->sc_link;
 	u_int8_t				serr, skey;
 	int					error;
-
-	SC_DEBUG(sc_link, SDEV_DB1,
-	    ("code:%#x valid:%d key:%#x ili:%d eom:%d fmark:%d extra:%d\n",
-	    sense->error_code & SSD_ERRCODE,
-	    sense->error_code & SSD_ERRCODE_VALID ? 1 : 0,
-	    sense->flags & SSD_KEY,
-	    sense->flags & SSD_ILI ? 1 : 0,
-	    sense->flags & SSD_EOM ? 1 : 0,
-	    sense->flags & SSD_FILEMARK ? 1 : 0,
-	    sense->extra_len));
-
-#ifdef SCSIDEBUG
-	if (xs->sc_link->flags & SDEV_DB1)
-		scsi_show_mem((u_char *)&xs->sense, sizeof(xs->sense));
-	scsi_print_sense(xs);
-#endif /* SCSIDEBUG */
-
-	/*
-	 * If the device has its own error handler, call it first.
-	 * If it returns a legit error value, return that, otherwise
-	 * it wants us to continue with normal error processing.
-	 */
-	if (sc_link->device->err_handler) {
-		SC_DEBUG(sc_link, SDEV_DB2,
-		    ("calling private err_handler()\n"));
-		error = (*sc_link->device->err_handler) (xs);
-		if (error != EJUSTRETURN)
-			return (error); /* error >= 0  better ? */
-	}
 
 	/* Default sense interpretation. */
 	serr = sense->error_code & SSD_ERRCODE;

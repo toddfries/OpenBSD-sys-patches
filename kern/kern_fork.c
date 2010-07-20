@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.117 2010/06/30 00:40:28 guenther Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.120 2010/07/19 23:00:15 guenther Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -205,8 +205,7 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 #endif
 
 	/* sanity check some flag combinations */
-	if (flags & FORK_THREAD)
-	{
+	if (flags & FORK_THREAD) {
 		if (!rthreads_enabled)
 			return (ENOTSUP);
 		if ((flags & (FORK_SIGHAND | FORK_NOZOMBIE)) !=
@@ -243,7 +242,9 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 		return (EAGAIN);
 	}
 
-	uaddr = uvm_km_alloc1(kernel_map, USPACE, USPACE_ALIGN, 1);
+	uaddr = uvm_km_kmemalloc_pla(kernel_map, uvm.kernel_object, USPACE,
+	    USPACE_ALIGN, 0, dma_constraint.ucr_low, dma_constraint.ucr_high,
+	    0, 0, USPACE/PAGE_SIZE);
 	if (uaddr == 0) {
 		chgproccnt(uid, -1);
 		nprocs--;
@@ -387,7 +388,6 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 #endif
 
 	/* Find an unused pid satisfying 1 <= lastpid <= PID_MAX */
-	rw_enter_write(&allproclk);
 	do {
 		lastpid = 1 + (randompid ? arc4random() : lastpid) % PID_MAX;
 	} while (pidtaken(lastpid));
@@ -395,7 +395,6 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 
 	LIST_INSERT_HEAD(&allproc, p2, p_list);
 	LIST_INSERT_HEAD(PIDHASH(p2->p_pid), p2, p_hash);
-	rw_exit_write(&allproclk);
 	LIST_INSERT_HEAD(&p1->p_children, p2, p_sibling);
 	LIST_INSERT_AFTER(p1, p2, p_pglist);
 	if (p2->p_flag & P_TRACED) {

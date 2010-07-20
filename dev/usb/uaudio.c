@@ -1,4 +1,4 @@
-/*	$OpenBSD: uaudio.c,v 1.73 2009/12/04 20:50:59 jakemsr Exp $ */
+/*	$OpenBSD: uaudio.c,v 1.77 2010/07/19 07:57:36 jakemsr Exp $ */
 /*	$NetBSD: uaudio.c,v 1.90 2004/10/29 17:12:53 kent Exp $	*/
 
 /*
@@ -58,9 +58,9 @@
 #include <dev/auconv.h>
 
 #include <dev/usb/usb.h>
+#include <dev/usb/usbdevs.h>
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdi_util.h>
-#include <dev/usb/usb_quirks.h>
 
 #include <dev/usb/uaudioreg.h>
 
@@ -153,6 +153,38 @@ struct chan {
 	struct uaudio_softc *sc; /* our softc */
 };
 
+#define UAUDIO_FLAG_BAD_AUDIO	 0x0001	/* claims audio class, but isn't */
+#define UAUDIO_FLAG_NO_FRAC	 0x0002	/* don't use fractional samples */
+#define UAUDIO_FLAG_NO_XU	 0x0004	/* has broken extension unit */
+#define UAUDIO_FLAG_BAD_ADC	 0x0008	/* bad audio spec version number */
+#define UAUDIO_FLAG_VENDOR_CLASS 0x0010	/* claims vendor class but works */
+
+struct uaudio_devs {
+	struct usb_devno	 uv_dev;
+	int			 flags;
+} uaudio_devs[] = {
+	{ { USB_VENDOR_ALTEC, USB_PRODUCT_ALTEC_ADA70 },
+		UAUDIO_FLAG_BAD_ADC } ,
+	{ { USB_VENDOR_ALTEC, USB_PRODUCT_ALTEC_ASC495 },
+		UAUDIO_FLAG_BAD_AUDIO },
+	{ { USB_VENDOR_CREATIVE, USB_PRODUCT_CREATIVE_EMU0202 },
+		UAUDIO_FLAG_VENDOR_CLASS },
+	{ { USB_VENDOR_DALLAS, USB_PRODUCT_DALLAS_J6502 },
+		UAUDIO_FLAG_NO_XU | UAUDIO_FLAG_BAD_ADC },
+	{ { USB_VENDOR_LOGITECH, USB_PRODUCT_LOGITECH_QUICKCAMNBDLX },
+		UAUDIO_FLAG_BAD_AUDIO },
+	{ { USB_VENDOR_LOGITECH, USB_PRODUCT_LOGITECH_QUICKCAMPRONB },
+		UAUDIO_FLAG_BAD_AUDIO },
+	{ { USB_VENDOR_LOGITECH, USB_PRODUCT_LOGITECH_QUICKCAMPRO4K },
+		UAUDIO_FLAG_BAD_AUDIO },
+	{ { USB_VENDOR_LOGITECH, USB_PRODUCT_LOGITECH_QUICKCAMZOOM },
+		UAUDIO_FLAG_BAD_AUDIO },
+	{ { USB_VENDOR_TELEX, USB_PRODUCT_TELEX_MIC1 },
+		UAUDIO_FLAG_NO_FRAC }
+};
+#define uaudio_lookup(v, p) \
+	((struct uaudio_devs *)usb_lookup(uaudio_devs, v, p))
+
 struct uaudio_softc {
 	struct device	 sc_dev;	/* base device */
 	usbd_device_handle sc_udev;	/* USB device */
@@ -177,6 +209,7 @@ struct uaudio_softc {
 	int		 sc_nctls;	/* # of mixer controls */
 	struct device	*sc_audiodev;
 	char		 sc_dying;
+	int		 sc_quirks;
 };
 
 struct terminal_list {
@@ -225,7 +258,7 @@ usbd_status uaudio_process_as
 void	uaudio_add_alt(struct uaudio_softc *, const struct as_info *);
 
 const usb_interface_descriptor_t *uaudio_find_iface
-	(const char *, int, int *, int);
+	(const char *, int, int *, int, int);
 
 void	uaudio_mixer_add_ctl(struct uaudio_softc *, struct mixerctl *);
 char	*uaudio_id_name
@@ -377,19 +410,32 @@ uaudio_match(struct device *parent, void *match, void *aux)
 {
 	struct usb_attach_arg *uaa = aux;
 	usb_interface_descriptor_t *id;
+	struct uaudio_devs *quirk;
+	int flags;
 
 	if (uaa->iface == NULL)
 		return (UMATCH_NONE);
 
 	id = usbd_get_interface_descriptor(uaa->iface);
-	/* Trigger on the control interface. */
-	if (id == NULL ||
-	    id->bInterfaceClass != UICLASS_AUDIO ||
-	    id->bInterfaceSubClass != UISUBCLASS_AUDIOCONTROL ||
-	    (usbd_get_quirks(uaa->device)->uq_flags & UQ_BAD_AUDIO))
+	if (id == NULL)
 		return (UMATCH_NONE);
 
-	return (UMATCH_IFACECLASS_IFACESUBCLASS);
+	quirk = uaudio_lookup(uaa->vendor, uaa->product);
+	if (quirk)
+		flags = quirk->flags;
+
+	if (id->bInterfaceClass == UICLASS_AUDIO &&
+	    id->bInterfaceSubClass == UISUBCLASS_AUDIOCONTROL &&
+	    !(flags & UAUDIO_FLAG_BAD_AUDIO))
+		return (UMATCH_VENDOR_PRODUCT_CONF_IFACE);
+
+	/* additional quirk devices which we want to attach */
+	if ((flags & UAUDIO_FLAG_VENDOR_CLASS) &&
+	    id->bInterfaceClass == UICLASS_VENDOR &&
+	    id->bInterfaceSubClass == UISUBCLASS_AUDIOCONTROL)
+		return (UMATCH_VENDOR_PRODUCT_CONF_IFACE);
+
+	return (UMATCH_NONE);
 }
 
 void
@@ -397,12 +443,17 @@ uaudio_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct uaudio_softc *sc = (struct uaudio_softc *)self;
 	struct usb_attach_arg *uaa = aux;
+	struct uaudio_devs *quirk;
 	usb_interface_descriptor_t *id;
 	usb_config_descriptor_t *cdesc;
 	usbd_status err;
 	int i, j, found;
 
 	sc->sc_udev = uaa->device;
+
+	quirk = uaudio_lookup(uaa->vendor, uaa->product);
+	if (quirk)
+		sc->sc_quirks = quirk->flags;
 
 	cdesc = usbd_get_config_descriptor(sc->sc_udev);
 	if (cdesc == NULL) {
@@ -453,7 +504,7 @@ uaudio_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_playchan.altidx = -1;
 	sc->sc_recchan.altidx = -1;
 
-	if (usbd_get_quirks(sc->sc_udev)->uq_flags & UQ_AU_NO_FRAC)
+	if (sc->sc_quirks & UAUDIO_FLAG_NO_FRAC)
 		sc->sc_altflags |= UA_NOFRAC;
 
 	printf(", %d mixer controls\n", sc->sc_nctls);
@@ -531,56 +582,60 @@ uaudio_query_encoding(void *addr, struct audio_encoding *fp)
 		fp->encoding = AUDIO_ENCODING_ULINEAR;
 		fp->precision = 8;
 		fp->flags = flags&HAS_8U ? 0 : AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 1:
 		strlcpy(fp->name, AudioEmulaw, sizeof(fp->name));
 		fp->encoding = AUDIO_ENCODING_ULAW;
 		fp->precision = 8;
 		fp->flags = flags&HAS_MULAW ? 0 : AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 2:
 		strlcpy(fp->name, AudioEalaw, sizeof(fp->name));
 		fp->encoding = AUDIO_ENCODING_ALAW;
 		fp->precision = 8;
 		fp->flags = flags&HAS_ALAW ? 0 : AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 3:
 		strlcpy(fp->name, AudioEslinear, sizeof(fp->name));
 		fp->encoding = AUDIO_ENCODING_SLINEAR;
 		fp->precision = 8;
 		fp->flags = flags&HAS_8 ? 0 : AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 4:
 		strlcpy(fp->name, AudioEslinear_le, sizeof(fp->name));
 		fp->encoding = AUDIO_ENCODING_SLINEAR_LE;
 		fp->precision = 16;
 		fp->flags = 0;
-		return (0);
+		break;
 	case 5:
 		strlcpy(fp->name, AudioEulinear_le, sizeof(fp->name));
 		fp->encoding = AUDIO_ENCODING_ULINEAR_LE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 6:
 		strlcpy(fp->name, AudioEslinear_be, sizeof(fp->name));
 		fp->encoding = AUDIO_ENCODING_SLINEAR_BE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 7:
 		strlcpy(fp->name, AudioEulinear_be, sizeof(fp->name));
 		fp->encoding = AUDIO_ENCODING_ULINEAR_BE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	default:
 		return (EINVAL);
 	}
+	fp->bps = AUDIO_BPS(fp->precision);
+	fp->msb = 1;
+
+	return (0);
 }
 
 const usb_interface_descriptor_t *
-uaudio_find_iface(const char *buf, int size, int *offsp, int subtype)
+uaudio_find_iface(const char *buf, int size, int *offsp, int subtype, int flags)
 {
 	const usb_interface_descriptor_t *d;
 
@@ -588,8 +643,10 @@ uaudio_find_iface(const char *buf, int size, int *offsp, int subtype)
 		d = (const void *)(buf + *offsp);
 		*offsp += d->bLength;
 		if (d->bDescriptorType == UDESC_INTERFACE &&
-		    d->bInterfaceClass == UICLASS_AUDIO &&
-		    d->bInterfaceSubClass == subtype)
+		    d->bInterfaceSubClass == subtype &&
+		    (d->bInterfaceClass == UICLASS_AUDIO ||
+		    (d->bInterfaceClass == UICLASS_VENDOR &&
+		    (flags & UAUDIO_FLAG_VENDOR_CLASS))))
 			return (d);
 	}
 	return (NULL);
@@ -1264,7 +1321,7 @@ uaudio_add_extension(struct uaudio_softc *sc, const struct io_terminal *iot, int
 	DPRINTFN(2,("uaudio_add_extension: bUnitId=%d bNrInPins=%d\n",
 		    d->bUnitId, d->bNrInPins));
 
-	if (usbd_get_quirks(sc->sc_udev)->uq_flags & UQ_AU_NO_XU)
+	if (sc->sc_quirks & UAUDIO_FLAG_NO_XU)
 		return;
 
 	if (d1->bmControls[0] & UA_EXT_ENABLE_MASK) {
@@ -1722,7 +1779,8 @@ uaudio_identify_as(struct uaudio_softc *sc,
 
 	/* Locate the AudioStreaming interface descriptor. */
 	offs = 0;
-	id = uaudio_find_iface(buf, size, &offs, UISUBCLASS_AUDIOSTREAM);
+	id = uaudio_find_iface(buf, size, &offs, UISUBCLASS_AUDIOSTREAM,
+	    sc->sc_quirks);
 	if (id == NULL)
 		return (USBD_INVAL);
 
@@ -1748,7 +1806,8 @@ uaudio_identify_as(struct uaudio_softc *sc,
 			       sc->sc_dev.dv_xname, id->bNumEndpoints);
 			break;
 		}
-		id = uaudio_find_iface(buf, size, &offs,UISUBCLASS_AUDIOSTREAM);
+		id = uaudio_find_iface(buf, size, &offs, UISUBCLASS_AUDIOSTREAM,
+		    sc->sc_quirks);
 		if (id == NULL)
 			break;
 	}
@@ -1782,7 +1841,8 @@ uaudio_identify_ac(struct uaudio_softc *sc, const usb_config_descriptor_t *cdesc
 
 	/* Locate the AudioControl interface descriptor. */
 	offs = 0;
-	id = uaudio_find_iface(buf, size, &offs, UISUBCLASS_AUDIOCONTROL);
+	id = uaudio_find_iface(buf, size, &offs, UISUBCLASS_AUDIOCONTROL,
+	    sc->sc_quirks);
 	if (id == NULL)
 		return (USBD_INVAL);
 	if (offs + sizeof *acdp > size)
@@ -1800,7 +1860,7 @@ uaudio_identify_ac(struct uaudio_softc *sc, const usb_config_descriptor_t *cdesc
 	if (offs + aclen > size)
 		return (USBD_INVAL);
 
-	if (!(usbd_get_quirks(sc->sc_udev)->uq_flags & UQ_BAD_ADC) &&
+	if (!(sc->sc_quirks & UAUDIO_FLAG_BAD_ADC) &&
 	     UGETW(acdp->bcdADC) != UAUDIO_VERSION)
 		return (USBD_INVAL);
 
@@ -2181,8 +2241,6 @@ uaudio_round_blocksize(void *addr, int blk)
 	}
 	bpf = max(pbpf, rbpf);
 
-	bpf = (bpf + 15) &~ 15;
-
 	if (blk < bpf)
 		blk = bpf;
 
@@ -2221,6 +2279,8 @@ uaudio_get_default_params(void *addr, int mode, struct audio_params *p)
 	p->sample_rate = 44100;
 	p->encoding = AUDIO_ENCODING_SLINEAR_LE;
 	p->precision = 16;
+	p->bps = 2;
+	p->msb = 1;
 	p->channels = 2;
 	p->sw_code = NULL;
 	p->factor = 1;
@@ -2249,6 +2309,9 @@ uaudio_get_default_params(void *addr, int mode, struct audio_params *p)
 	}
 
 	uaudio_match_alt(sc, p, mode, p->encoding, p->precision);
+
+	p->bps = AUDIO_BPS(p->precision);
+	p->msb = 1;
 }
 
 int
@@ -2916,8 +2979,7 @@ uaudio_chan_init(struct chan *ch, int altidx, const struct audio_params *param,
 	ch->altidx = altidx;
 	ch->maxpktsize = maxpktsize;
 	ch->sample_rate = param->sample_rate;
-	ch->sample_size = param->factor * param->channels *
-	    param->precision / NBBY;
+	ch->sample_size = param->factor * param->channels * param->bps;
 	ch->usb_fps = USB_FRAMES_PER_SECOND;
 
 	/*
@@ -3247,6 +3309,9 @@ uaudio_set_params(void *addr, int setmode, int usemode,
 
 		p->sw_code = swcode;
 		p->factor  = factor;
+
+		p->bps = AUDIO_BPS(p->precision);
+		p->msb = 1;
 
 		if (mode == AUMODE_PLAY)
 			paltidx = i;

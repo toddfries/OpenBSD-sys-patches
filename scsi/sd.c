@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.198 2010/06/28 08:35:46 jsing Exp $	*/
+/*	$OpenBSD: sd.c,v 1.204 2010/07/07 03:53:07 marco Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -113,13 +113,6 @@ struct cfdriver sd_cd = {
 
 struct dkdriver sddkdriver = { sdstrategy };
 
-struct scsi_device sd_switch = {
-	sd_interpret_sense,	/* check out error handler first */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* have no done handler */
-};
-
 const struct scsi_inquiry_pattern sd_patterns[] = {
 	{T_DIRECT, T_FIXED,
 	 "",         "",                 ""},
@@ -174,7 +167,7 @@ sdattach(struct device *parent, struct device *self, void *aux)
 	 * Store information needed to contact our base driver
 	 */
 	sc->sc_link = sc_link;
-	sc_link->device = &sd_switch;
+	sc_link->interpret_sense = sd_interpret_sense;
 	sc_link->device_softc = sc;
 
 	/*
@@ -292,11 +285,27 @@ sdactivate(struct device *self, int act)
 		sc->flags |= SDF_DYING;
 		bufq_drain(sc->sc_bufq);
 		break;
+
+	case DVACT_SUSPEND:
+		/*
+		 * Stop the disk.  Stopping the disk should flush the
+		 * cache, but we are paranoid so we flush the cache
+		 * first.
+		 */
+		if ((sc->flags & SDF_DIRTY) != 0)
+			sd_flush(sc, SCSI_AUTOCONF);
+		scsi_start(sc->sc_link, SSS_STOP,
+		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_AUTOCONF);
+		break;
+
+	case DVACT_RESUME:
+		scsi_start(sc->sc_link, SSS_START,
+		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_AUTOCONF);
+		break;
 	}
 
 	return (rv);
 }
-
 
 int
 sddetach(struct device *self, int flags)
@@ -720,6 +729,7 @@ sdstart(struct scsi_xfer *xs)
 
 	xs->done = sd_buf_done;
 	xs->cookie = bp;
+	xs->bp = bp;
 
 	/* Instrumentation. */
 	disk_busy(&sc->sc_dk);
@@ -762,7 +772,10 @@ sd_buf_done(struct scsi_xfer *xs)
 
 	case XS_SENSE:
 	case XS_SHORTSENSE:
-		error = scsi_interpret_sense(xs);
+#ifdef SCSIDEBUG
+		scsi_sense_print_debug(xs);
+#endif
+		error = sd_interpret_sense(xs);
 		if (error == 0) {
 			bp->b_error = 0;
 			bp->b_resid = xs->resid;
@@ -1201,7 +1214,7 @@ sd_interpret_sense(struct scsi_xfer *xs)
 	    (serr != SSD_ERRCODE_CURRENT && serr != SSD_ERRCODE_DEFERRED) ||
 	    ((sense->flags & SSD_KEY) != SKEY_NOT_READY) ||
 	    (sense->extra_len < 6))
-		return (EJUSTRETURN);
+		return (scsi_interpret_sense(xs));
 
 	switch (ASC_ASCQ(sense)) {
 	case SENSE_NOT_READY_BECOMING_READY:
@@ -1221,7 +1234,7 @@ sd_interpret_sense(struct scsi_xfer *xs)
 		break;
 
 	default:
-		retval = EJUSTRETURN;
+		retval = scsi_interpret_sense(xs);
 		break;
 	}
 

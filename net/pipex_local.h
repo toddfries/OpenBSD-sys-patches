@@ -1,4 +1,5 @@
-/*	$Id: pipex_local.h,v 1.4 2010/01/13 07:23:38 yasuoka Exp $	*/
+/*	$OpenBSD: pipex_local.h,v 1.7 2010/07/09 08:36:31 yasuoka Exp $	*/
+
 /*
  * Copyright (c) 2009 Internet Initiative Japan Inc.
  * All rights reserved.
@@ -276,6 +277,7 @@ Static int                   pipex_get_closed (struct pipex_session_list_req *);
 Static int                   pipex_destroy_session (struct pipex_session *);
 Static struct pipex_session  *pipex_lookup_by_ip_address (struct in_addr);
 Static struct pipex_session  *pipex_lookup_by_session_id (int, int);
+Static void                  pipex_ip_output (struct mbuf *, struct pipex_session *);
 Static void                  pipex_ppp_output (struct mbuf *, struct pipex_session *, int);
 Static inline int            pipex_ppp_proto (struct mbuf *, struct pipex_session *, int, int *);
 Static void                  pipex_ppp_input (struct mbuf *, struct pipex_session *, int);
@@ -295,7 +297,7 @@ Static void                  GetNewKeyFromSHA (u_char *, u_char *, int, u_char *
 Static void                  pipex_mppe_reduce_key (struct pipex_mppe *);
 Static void                  mppe_key_change (struct pipex_mppe *);
 Static void                  pipex_mppe_input (struct mbuf *, struct pipex_session *);
-Static void                  pipex_mppe_output (struct mbuf *, struct pipex_session *);
+Static void                  pipex_mppe_output (struct mbuf *, struct pipex_session *, uint16_t);
 Static void                  pipex_ccp_input (struct mbuf *, struct pipex_session *);
 Static int                   pipex_ccp_output (struct pipex_session *, int, int);
 #endif

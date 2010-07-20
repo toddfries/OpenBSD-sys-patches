@@ -1,4 +1,4 @@
-/*	$OpenBSD: ips.c,v 1.99 2010/06/28 18:31:02 krw Exp $	*/
+/*	$OpenBSD: ips.c,v 1.102 2010/07/01 16:30:57 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006, 2007, 2009 Alexander Yurchenko <grange@openbsd.org>
@@ -366,11 +366,11 @@ struct ips_ccb {
 	void			(*c_done)(struct ips_softc *,	/* cmd done */
 				    struct ips_ccb *);		/* callback */
 
-	TAILQ_ENTRY(ips_ccb)	c_link;		/* queue link */
+	SLIST_ENTRY(ips_ccb)	c_link;		/* queue link */
 };
 
 /* CCB queue */
-TAILQ_HEAD(ips_ccbq, ips_ccb);
+SLIST_HEAD(ips_ccbq, ips_ccb);
 
 /* DMA-able chunk of memory */
 struct dmamem {
@@ -658,8 +658,8 @@ ips_attach(struct device *parent, struct device *self, void *aux)
 	bzero(&ccb0, sizeof(ccb0));
 	ccb0.c_cmdbva = sc->sc_cmdbm.dm_vaddr;
 	ccb0.c_cmdbpa = sc->sc_cmdbm.dm_paddr;
-	TAILQ_INIT(&sc->sc_ccbq_free);
-	TAILQ_INSERT_TAIL(&sc->sc_ccbq_free, &ccb0, c_link);
+	SLIST_INIT(&sc->sc_ccbq_free);
+	SLIST_INSERT_HEAD(&sc->sc_ccbq_free, &ccb0, c_link);
 
 	/* Get adapter info */
 	if (ips_getadapterinfo(sc, SCSI_NOSLEEP)) {
@@ -689,9 +689,9 @@ ips_attach(struct device *parent, struct device *self, void *aux)
 		printf(": can't alloc ccb queue\n");
 		goto fail4;
 	}
-	TAILQ_INIT(&sc->sc_ccbq_free);
+	SLIST_INIT(&sc->sc_ccbq_free);
 	for (i = 0; i < sc->sc_nccbs; i++)
-		TAILQ_INSERT_TAIL(&sc->sc_ccbq_free,
+		SLIST_INSERT_HEAD(&sc->sc_ccbq_free,
 		    &sc->sc_ccb[i], c_link);
 
 	/* Install interrupt handler */
@@ -752,12 +752,12 @@ ips_attach(struct device *parent, struct device *self, void *aux)
 		/* Check if channel has any devices besides disks */
 		for (target = 0, lastarget = -1; target < IPS_MAXTARGETS;
 		    target++) {
-			struct ips_dev *dev;
+			struct ips_dev *idev;
 			int type;
 
-			dev = &sc->sc_info->conf.dev[i][target];
-			type = dev->params & SID_TYPE;
-			if (dev->state && type != T_DIRECT) {
+			idev = &sc->sc_info->conf.dev[i][target];
+			type = idev->params & SID_TYPE;
+			if (idev->state && type != T_DIRECT) {
 				lastarget = target;
 				if (type == T_PROCESSOR ||
 				    type == T_ENCLOSURE)
@@ -798,10 +798,12 @@ ips_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
 	    sizeof(sc->sc_sensordev.xname));
 	for (i = 0; i < sc->sc_nunits; i++) {
+		struct device *dev;
+
 		sc->sc_sensors[i].type = SENSOR_DRIVE;
 		sc->sc_sensors[i].status = SENSOR_S_UNKNOWN;
-		strlcpy(sc->sc_sensors[i].desc, ((struct device *)
-		    sc->sc_scsibus->sc_link[i][0]->device_softc)->dv_xname,
+		dev = scsi_get_link(sc->sc_scsibus, i, 0)->device_softc;
+		strlcpy(sc->sc_sensors[i].desc, dev->dv_xname,
 		    sizeof(sc->sc_sensors[i].desc));
 		sensor_attach(&sc->sc_sensordev, &sc->sc_sensors[i]);
 	}
@@ -1194,7 +1196,7 @@ ips_ioctl_vol(struct ips_softc *sc, struct bioc_vol *bv)
 			}
 	}
 
-	dv = sc->sc_scsibus->sc_link[vid][0]->device_softc;
+	dv = scsi_get_link(sc->sc_scsibus, vid, 0)->device_softc;
 	strlcpy(bv->bv_dev, dv->dv_xname, sizeof(bv->bv_dev));
 	strlcpy(bv->bv_vendor, "IBM", sizeof(bv->bv_vendor));
 
@@ -2076,8 +2078,8 @@ ips_ccb_get(struct ips_softc *sc)
 
 	splassert(IPL_BIO);
 
-	if ((ccb = TAILQ_FIRST(&sc->sc_ccbq_free)) != NULL) {
-		TAILQ_REMOVE(&sc->sc_ccbq_free, ccb, c_link);
+	if ((ccb = SLIST_FIRST(&sc->sc_ccbq_free)) != NULL) {
+		SLIST_REMOVE_HEAD(&sc->sc_ccbq_free, c_link);
 		ccb->c_flags = 0;
 		ccb->c_xfer = NULL;
 		bzero(ccb->c_cmdbva, sizeof(struct ips_cmdb));
@@ -2092,7 +2094,7 @@ ips_ccb_put(struct ips_softc *sc, struct ips_ccb *ccb)
 	splassert(IPL_BIO);
 
 	ccb->c_state = IPS_CCB_FREE;
-	TAILQ_INSERT_TAIL(&sc->sc_ccbq_free, ccb, c_link);
+	SLIST_INSERT_HEAD(&sc->sc_ccbq_free, ccb, c_link);
 }
 
 int

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.122 2010/06/29 18:52:20 kettenis Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.124 2010/07/01 16:23:09 thib Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*
@@ -1203,6 +1203,9 @@ biodone(struct buf *bp)
 		panic("biodone already");
 	SET(bp->b_flags, B_DONE);		/* note that it's done */
 
+	if (bp->b_bq)
+		bufq_done(bp->b_bq, bp);
+
 	if (LIST_FIRST(&bp->b_dep) != NULL)
 		buf_complete(bp);
 
@@ -1228,9 +1231,6 @@ biodone(struct buf *bp)
 			wakeup(bp);
 		}
 	}
-
-	if (bp->b_bq)
-		bufq_done(bp->b_bq, bp);
 }
 
 #ifdef DDB

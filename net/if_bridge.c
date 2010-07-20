@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.179 2010/06/29 21:28:37 reyk Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.182 2010/07/09 16:58:06 reyk Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -2402,7 +2402,7 @@ bridge_ipsec(struct bridge_softc *sc, struct ifnet *ifp,
 
 		s = spltdb();
 
-		tdb = gettdb(spi, &dst, proto);
+		tdb = gettdb(ifp->if_rdomain, spi, &dst, proto);
 		if (tdb != NULL && (tdb->tdb_flags & TDBF_INVALID) == 0 &&
 		    tdb->tdb_xform != NULL) {
 			if (tdb->tdb_first_use == 0) {
@@ -2457,7 +2457,8 @@ bridge_ipsec(struct bridge_softc *sc, struct ifnet *ifp,
 			switch (af) {
 #ifdef INET
 			case AF_INET:
-				if ((encif = enc_getif(0)) == NULL ||
+				if ((encif = enc_getif(tdb->tdb_rdomain,
+				    tdb->tdb_tap)) == NULL ||
 				    pf_test(dir, encif,
 				    &m, NULL) != PF_PASS) {
 					m_freem(m);
@@ -2467,7 +2468,8 @@ bridge_ipsec(struct bridge_softc *sc, struct ifnet *ifp,
 #endif /* INET */
 #ifdef INET6
 			case AF_INET6:
-				if ((encif = enc_getif(0)) == NULL ||
+				if ((encif = enc_getif(tdb->tdb_rdomain,
+				    tdb->tdb_tap)) == NULL ||
 				    pf_test6(dir, encif,
 				    &m, NULL) != PF_PASS) {
 					m_freem(m);
@@ -2843,7 +2845,7 @@ bridge_ifenqueue(struct bridge_softc *sc, struct ifnet *ifp, struct mbuf *m)
 			sc->sc_if.if_oerrors++;
 			return (ENOBUFS);
 		}
-		m_copyback(m, 0, sizeof(evh), &evh);
+		m_copyback(m, 0, sizeof(evh), &evh, M_NOWAIT);
 		m->m_flags &= ~M_VLANTAG;
 	}
 #endif

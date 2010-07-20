@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.121 2010/06/28 17:00:18 naddy Exp $	*/
+/*	$OpenBSD: re.c,v 1.123 2010/07/14 19:24:27 naddy Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -353,19 +353,20 @@ re_gmii_readreg(struct device *self, int phy, int reg)
 	}
 
 	CSR_WRITE_4(sc, RL_PHYAR, reg << 16);
-	DELAY(1000);
 
-	for (i = 0; i < RL_TIMEOUT; i++) {
+	for (i = 0; i < RL_PHY_TIMEOUT; i++) {
 		rval = CSR_READ_4(sc, RL_PHYAR);
 		if (rval & RL_PHYAR_BUSY)
 			break;
-		DELAY(100);
+		DELAY(25);
 	}
 
-	if (i == RL_TIMEOUT) {
+	if (i == RL_PHY_TIMEOUT) {
 		printf ("%s: PHY read failed\n", sc->sc_dev.dv_xname);
 		return (0);
 	}
+
+	DELAY(20);
 
 	return (rval & RL_PHYAR_PHYDATA);
 }
@@ -379,17 +380,18 @@ re_gmii_writereg(struct device *dev, int phy, int reg, int data)
 
 	CSR_WRITE_4(sc, RL_PHYAR, (reg << 16) |
 	    (data & RL_PHYAR_PHYDATA) | RL_PHYAR_BUSY);
-	DELAY(1000);
 
-	for (i = 0; i < RL_TIMEOUT; i++) {
+	for (i = 0; i < RL_PHY_TIMEOUT; i++) {
 		rval = CSR_READ_4(sc, RL_PHYAR);
 		if (!(rval & RL_PHYAR_BUSY))
 			break;
-		DELAY(100);
+		DELAY(25);
 	}
 
-	if (i == RL_TIMEOUT)
+	if (i == RL_PHY_TIMEOUT)
 		printf ("%s: PHY write failed\n", sc->sc_dev.dv_xname);
+
+	DELAY(20);
 }
 
 int
@@ -2176,7 +2178,12 @@ re_stop(struct ifnet *ifp, int disable)
 
 	mii_down(&sc->sc_mii);
 
-	CSR_WRITE_1(sc, RL_COMMAND, 0x00);
+	if (sc->rl_flags & RL_FLAG_CMDSTOP)
+		CSR_WRITE_1(sc, RL_COMMAND, RL_CMD_STOPREQ | RL_CMD_TX_ENB |
+		    RL_CMD_RX_ENB);
+	else
+		CSR_WRITE_1(sc, RL_COMMAND, 0x00);
+	DELAY(1000);
 	CSR_WRITE_2(sc, RL_IMR, 0x0000);
 	CSR_WRITE_2(sc, RL_ISR, 0xFFFF);
 

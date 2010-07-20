@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi.c,v 1.107 2010/06/28 18:31:02 krw Exp $ */
+/* $OpenBSD: mfi.c,v 1.109 2010/07/01 03:20:38 matthew Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -152,9 +152,9 @@ mfi_get_ccb(struct mfi_softc *sc)
 	struct mfi_ccb		*ccb;
 
 	mtx_enter(&sc->sc_ccb_mtx);
-	ccb = TAILQ_FIRST(&sc->sc_ccb_freeq);
+	ccb = SLIST_FIRST(&sc->sc_ccb_freeq);
 	if (ccb != NULL) {
-		TAILQ_REMOVE(&sc->sc_ccb_freeq, ccb, ccb_link);
+		SLIST_REMOVE_HEAD(&sc->sc_ccb_freeq, ccb_link);
 		ccb->ccb_state = MFI_CCB_READY;
 	}
 	mtx_leave(&sc->sc_ccb_mtx);
@@ -186,7 +186,7 @@ mfi_put_ccb(struct mfi_ccb *ccb)
 	ccb->ccb_len = 0;
 
 	mtx_enter(&sc->sc_ccb_mtx);
-	TAILQ_INSERT_TAIL(&sc->sc_ccb_freeq, ccb, ccb_link);
+	SLIST_INSERT_HEAD(&sc->sc_ccb_freeq, ccb, ccb_link);
 	mtx_leave(&sc->sc_ccb_mtx);
 }
 
@@ -636,7 +636,7 @@ mfi_attach(struct mfi_softc *sc, enum mfi_iop iop)
 	if (mfi_transition_firmware(sc))
 		return (1);
 
-	TAILQ_INIT(&sc->sc_ccb_freeq);
+	SLIST_INIT(&sc->sc_ccb_freeq);
 	mtx_init(&sc->sc_ccb_mtx, IPL_BIO);
 
 	rw_init(&sc->sc_lock, "mfi_lock");
@@ -1894,6 +1894,7 @@ mfi_create_sensors(struct mfi_softc *sc)
 {
 	struct device		*dev;
 	struct scsibus_softc	*ssc = NULL;
+	struct scsi_link	*link;
 	int			i;
 
 	TAILQ_FOREACH(dev, &alldevs, dv_list) {
@@ -1918,10 +1919,11 @@ mfi_create_sensors(struct mfi_softc *sc)
 	    sizeof(sc->sc_sensordev.xname));
 
 	for (i = 0; i < sc->sc_ld_cnt; i++) {
-		if (ssc->sc_link[i][0] == NULL)
+		link = scsi_get_link(ssc, i, 0);
+		if (link == NULL)
 			goto bad;
 
-		dev = ssc->sc_link[i][0]->device_softc;
+		dev = link->device_softc;
 
 		sc->sc_sensors[i].type = SENSOR_DRIVE;
 		sc->sc_sensors[i].status = SENSOR_S_UNKNOWN;

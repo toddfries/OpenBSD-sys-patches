@@ -1,4 +1,4 @@
-/* $OpenBSD: wsdisplay.c,v 1.100 2010/06/28 14:13:35 deraadt Exp $ */
+/* $OpenBSD: wsdisplay.c,v 1.102 2010/07/02 17:27:01 nicm Exp $ */
 /* $NetBSD: wsdisplay.c,v 1.82 2005/02/27 00:27:52 perry Exp $ */
 
 /*
@@ -1250,7 +1250,29 @@ wsdisplay_internal_ioctl(struct wsdisplay_softc *sc, struct wsscreen *scr,
 
 	case WSDISPLAYIO_SETSCREEN:
 		return (wsdisplay_switch((void *)sc, *(int *)data, 1));
-	}
+
+	case WSDISPLAYIO_GETSCREENTYPE:
+#define d ((struct wsdisplay_screentype *)data)
+		if (d->idx >= sc->sc_scrdata->nscreens)
+			return(EINVAL);
+
+		d->nidx = sc->sc_scrdata->nscreens;
+		strncpy(d->name, sc->sc_scrdata->screens[d->idx]->name,
+			WSSCREEN_NAME_SIZE);
+		d->ncols = sc->sc_scrdata->screens[d->idx]->ncols;
+		d->nrows = sc->sc_scrdata->screens[d->idx]->nrows;
+		d->fontwidth = sc->sc_scrdata->screens[d->idx]->fontwidth;
+		d->fontheight = sc->sc_scrdata->screens[d->idx]->fontheight;
+		return (0);
+#undef d
+	case WSDISPLAYIO_GETEMULTYPE:
+#define d ((struct wsdisplay_emultype *)data)
+		if (wsemul_getname(d->idx) == NULL)
+			return(EINVAL);
+		strncpy(d->name, wsemul_getname(d->idx), WSEMUL_NAME_SIZE);
+		return (0);
+#undef d
+        }
 
 	/* check ioctls for display */
 	return ((*sc->sc_accessops->ioctl)(sc->sc_accesscookie, cmd, data,
@@ -1484,14 +1506,8 @@ wsdisplaystart(struct tty *tp)
 		tp->t_state |= TS_TIMEOUT;
 		timeout_add(&tp->t_rstrt_to, (hz > 128) ? (hz / 128) : 1);
 	}
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
 low:
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
 	splx(s);
 }
 

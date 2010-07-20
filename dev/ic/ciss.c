@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss.c,v 1.57 2010/06/28 18:31:02 krw Exp $	*/
+/*	$OpenBSD: ciss.c,v 1.61 2010/07/07 10:12:13 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff
@@ -364,7 +364,7 @@ ciss_attach(struct ciss_softc *sc)
 	}
 
 	sc->sc_link.adapter_softc = sc;
-	sc->sc_link.openings = sc->maxcmd / (sc->maxunits? sc->maxunits : 1);
+	sc->sc_link.openings = sc->maxcmd;
 	sc->sc_link.adapter = &ciss_switch;
 	sc->sc_link.luns = 1;
 	sc->sc_link.adapter_target = sc->maxunits;
@@ -395,18 +395,19 @@ ciss_attach(struct ciss_softc *sc)
 	sc->sensors = malloc(sizeof(struct ksensor) * sc->maxunits,
 	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc->sensors) {
+		struct device *dev;
+
 		strlcpy(sc->sensordev.xname, sc->sc_dev.dv_xname,
 		    sizeof(sc->sensordev.xname));
-		for (i = 0; i < sc->maxunits;
-		    sensor_attach(&sc->sensordev, &sc->sensors[i++])) {
+		for (i = 0; i < sc->maxunits; i++) {
 			sc->sensors[i].type = SENSOR_DRIVE;
 			sc->sensors[i].status = SENSOR_S_UNKNOWN;
-			strlcpy(sc->sensors[i].desc, ((struct device *)
-			    scsibus->sc_link[i][0]->device_softc)->dv_xname,
+			dev = scsi_get_link(scsibus, i, 0)->device_softc;
+			strlcpy(sc->sensors[i].desc, dev->dv_xname,
 			    sizeof(sc->sensors[i].desc));
-			strlcpy(sc->sc_lds[i]->xname, ((struct device *)
-			    scsibus->sc_link[i][0]->device_softc)->dv_xname,
+			strlcpy(sc->sc_lds[i]->xname, dev->dv_xname,
 			    sizeof(sc->sc_lds[i]->xname));
+			sensor_attach(&sc->sensordev, &sc->sensors[i]);
 		}
 		if (sensor_task_register(sc, ciss_sensors, 10) == NULL)
 			free(sc->sensors, M_DEVBUF);

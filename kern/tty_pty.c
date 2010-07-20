@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_pty.c,v 1.46 2010/06/28 14:13:36 deraadt Exp $	*/
+/*	$OpenBSD: tty_pty.c,v 1.48 2010/07/02 19:57:15 tedu Exp $	*/
 /*	$NetBSD: tty_pty.c,v 1.33.4.1 1996/06/02 09:08:11 mrg Exp $	*/
 
 /*
@@ -502,13 +502,7 @@ ptcread(dev_t dev, struct uio *uio, int flag)
 			break;
 		error = uiomove(buf, cc, uio);
 	}
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state&TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup(&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
 	if (bufcc)
 		bzero(buf, bufcc);
 	return (error);
@@ -807,21 +801,6 @@ ptyioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		switch (cmd) {
 
 		case TIOCGPGRP:
-#ifdef COMPAT_SUNOS
-		    {
-			/*
-			 * I'm not sure about SunOS TIOCGPGRP semantics
-			 * on PTYs, but it's something like this:
-			 */
-			extern struct emul emul_sunos;
-			if (p->p_emul == &emul_sunos) {
-				if (tp->t_pgrp == 0)
-					return (EIO);
-				*(int *)data = tp->t_pgrp->pg_id;
-				return (0);
-			}
-		    }
-#endif
 			/*
 			 * We avoid calling ttioctl on the controller since,
 			 * in that case, tp must be the controlling terminal.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: apci.c,v 1.39 2010/06/28 14:13:27 deraadt Exp $	*/
+/*	$OpenBSD: apci.c,v 1.41 2010/07/02 17:27:01 nicm Exp $	*/
 /*	$NetBSD: apci.c,v 1.9 2000/11/02 00:35:05 eeh Exp $	*/
 
 /*-
@@ -486,7 +486,7 @@ apciintr(arg)
 			}
 			if (iflowdone == 0 && tp != NULL &&
 			    (tp->t_cflag & CRTS_IFLOW) &&
-			    tp->t_rawq.c_cc > (TTYHOG / 2)) {
+			    tp->t_rawq.c_cc > (TTYHOG(tp) / 2)) {
 				apci->ap_mcr &= ~MCR_RTS;
 				iflowdone = 1;
 			}
@@ -762,15 +762,9 @@ apcistart(tp)
 
 	if (tp->t_state & (TS_TIMEOUT|TS_TTSTOP))
 		goto out;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-		if (tp->t_outq.c_cc == 0)
-			goto out;
-	}
+	ttwakeupwr(tp);
+	if (tp->t_outq.c_cc == 0)
+		goto out;
 	if (apci->ap_lsr & LSR_TXRDY) {
 		tp->t_state |= TS_BUSY;
 		if (sc->sc_flags & APCI_HASFIFO) {

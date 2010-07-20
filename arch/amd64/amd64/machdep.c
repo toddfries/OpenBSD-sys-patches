@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.113 2010/06/27 13:28:46 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.116 2010/07/01 23:06:33 kettenis Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -1029,6 +1029,14 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	tf->tf_rdx = 0;
 	tf->tf_rcx = 0;
 	tf->tf_rax = 0;
+	tf->tf_r8 = 0;
+	tf->tf_r9 = 0;
+	tf->tf_r10 = 0;
+	tf->tf_r11 = 0;
+	tf->tf_r12 = 0;
+	tf->tf_r13 = 0;
+	tf->tf_r14 = 0;
+	tf->tf_r15 = 0;
 	tf->tf_rip = pack->ep_entry;
 	tf->tf_cs = LSEL(LUCODE_SEL, SEL_UPL);
 	tf->tf_rflags = PSL_USERSET;
@@ -1240,7 +1248,7 @@ init_x86_64(paddr_t first_avail)
 /*
  * Memory on the AMD64 port is described by three different things.
  *
- * 1. biosbasemem, biosextmem - These are outdated, and should realy
+ * 1. biosbasemem, biosextmem - These are outdated, and should really
  *    only be used to santize the other values.  They are the things
  *    we get back from the BIOS using the legacy routines, usually
  *    only describing the lower 4GB of memory.
@@ -1669,7 +1677,6 @@ int
 amd64_pa_used(paddr_t addr)
 {
 	struct vm_page	*pg;
-	bios_memmap_t	*bmp;
 
 	/* Kernel manages these */
 	if ((pg = PHYS_TO_VM_PAGE(addr)) && (pg->pg_flags & PG_DEV) == 0)
@@ -1678,13 +1685,6 @@ amd64_pa_used(paddr_t addr)
 	/* Kernel is loaded here */
 	if (addr > IOM_END && addr < (kern_end - KERNBASE))
 		return 1;
-
-	/* Memory is otherwise reserved */
-	for (bmp = bios_memmap; bmp->type != BIOS_MAP_END; bmp++) {
-		if (addr > bmp->addr && addr < (bmp->addr + bmp->size) &&
-			bmp->type != BIOS_MAP_FREE)
-			return 1;
-	}
 
 	/* Low memory used for various bootstrap things */
 	if (addr >= 0 && addr < avail_start)

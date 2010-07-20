@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urndis.c,v 1.21 2010/06/06 17:53:31 miod Exp $ */
+/*	$OpenBSD: if_urndis.c,v 1.23 2010/07/14 20:44:17 mk Exp $ */
 
 /*
  * Copyright (c) 2010 Jonathan Armani <armani@openbsd.org>
@@ -69,7 +69,7 @@
 
 #define DEVNAME(sc)	((sc)->sc_dev.dv_xname)
 
-int urndis_newbuf(struct urndis_softc *, struct urndis_chain *, struct mbuf *);
+int urndis_newbuf(struct urndis_softc *, struct urndis_chain *);
 
 int urndis_ioctl(struct ifnet *, u_long, caddr_t);
 void urndis_watchdog(struct ifnet *);
@@ -850,26 +850,27 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 			return;
 		}
 
+		if (letoh32(msg->rm_datalen) < sizeof(struct ether_header)) {
+			ifp->if_ierrors++;
+			printf("%s: urndis_decap invalid ethernet size "
+			    "%d < %d\n",
+			    DEVNAME(sc),
+			    letoh32(msg->rm_datalen),
+			    sizeof(struct ether_header));
+			return;
+		}
+
 		memcpy(mtod(m, char*),
 		    ((char*)&msg->rm_dataoffset + letoh32(msg->rm_dataoffset)),
 		    letoh32(msg->rm_datalen));
 		m->m_pkthdr.len = m->m_len = letoh32(msg->rm_datalen);
 
-		if (m->m_len < sizeof(struct ether_header)) {
-			ifp->if_ierrors++;
-			printf("%s: urndis_decap invalid ethernet size "
-			    "%d < %d\n",
-			    DEVNAME(sc),
-			    m->m_len,
-			    sizeof(struct ether_header));
-			return;
-		}
 		ifp->if_ipackets++;
 		m->m_pkthdr.rcvif = ifp;
 
 		s = splnet();
 
-		if (urndis_newbuf(sc, c, NULL) == ENOBUFS) {
+		if (urndis_newbuf(sc, c) == ENOBUFS) {
 			ifp->if_ierrors++;
 		} else {
 
@@ -889,32 +890,24 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 }
 
 int
-urndis_newbuf(struct urndis_softc *sc, struct urndis_chain *c, struct mbuf *m)
+urndis_newbuf(struct urndis_softc *sc, struct urndis_chain *c)
 {
 	struct mbuf *m_new = NULL;
 
-	if (m == NULL) {
-		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
-		if (m_new == NULL) {
-			printf("%s: no memory for rx list "
-			    "-- packet dropped!\n",
-			    DEVNAME(sc));
-			return (ENOBUFS);
-		}
-		MCLGET(m_new, M_DONTWAIT);
-		if (!(m_new->m_flags & M_EXT)) {
-			printf("%s: no memory for rx list "
-			    "-- packet dropped!\n",
-			    DEVNAME(sc));
-			m_freem(m_new);
-			return (ENOBUFS);
-		}
-		m_new->m_len = m_new->m_pkthdr.len = MCLBYTES;
-	} else {
-		m_new = m;
-		m_new->m_len = m_new->m_pkthdr.len = MCLBYTES;
-		m_new->m_data = m_new->m_ext.ext_buf;
+	MGETHDR(m_new, M_DONTWAIT, MT_DATA);
+	if (m_new == NULL) {
+		printf("%s: no memory for rx list -- packet dropped!\n",
+		    DEVNAME(sc));
+		return (ENOBUFS);
 	}
+	MCLGET(m_new, M_DONTWAIT);
+	if (!(m_new->m_flags & M_EXT)) {
+		printf("%s: no memory for rx list -- packet dropped!\n",
+		    DEVNAME(sc));
+		m_freem(m_new);
+		return (ENOBUFS);
+	}
+	m_new->m_len = m_new->m_pkthdr.len = MCLBYTES;
 
 	m_adj(m_new, ETHER_ALIGN);
 	c->sc_mbuf = m_new;
@@ -934,7 +927,7 @@ urndis_rx_list_init(struct urndis_softc *sc)
 		c->sc_softc = sc;
 		c->sc_idx = i;
 
-		if (urndis_newbuf(sc, c, NULL) == ENOBUFS)
+		if (urndis_newbuf(sc, c) == ENOBUFS)
 			return (ENOBUFS);
 
 		if (c->sc_xfer == NULL) {
