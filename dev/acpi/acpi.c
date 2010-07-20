@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.177 2010/07/18 19:49:35 mlarkin Exp $ */
+/* $OpenBSD: acpi.c,v 1.181 2010/07/20 04:04:00 matthew Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -164,15 +164,6 @@ int acpi_evindex;
 #define acpi_bus_space_unmap	_bus_space_unmap
 
 #define pch(x) (((x)>=' ' && (x)<='z') ? (x) : ' ')
-
-#if 0
-void
-acpi_delay(struct acpi_softc *sc, int64_t uSecs)
-{
-	/* XXX this needs to become a tsleep later */
-	delay(uSecs);
-}
-#endif
 
 int
 acpi_gasio(struct acpi_softc *sc, int iodir, int iospace, uint64_t address,
@@ -536,7 +527,7 @@ acpi_matchhids(struct acpi_attach_args *aa, const char *hids[],
 	if (aa->aaa_dev == NULL || aa->aaa_node == NULL)
 		return (0);
 	if (_acpi_matchhids(aa->aaa_dev, hids)) {
-		dnprintf(5, "driver %s matches %s\n", driver, hids[i]);
+		dnprintf(5, "driver %s matches %s\n", driver, hids);
 		return (1);
 	}
 	return (0);
@@ -674,6 +665,8 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_iot = ba->ba_iot;
 	sc->sc_memt = ba->ba_memt;
+
+	acpi_softc = sc;
 
 	if (acpi_map(ba->ba_acpipbase, sizeof(struct acpi_rsdp), &handle)) {
 		printf(": can't map memory\n");
@@ -865,8 +858,6 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 		aaa.aaa_table = entry->q_table;
 		config_found_sm(self, &aaa, acpi_print, acpi_submatch);
 	}
-
-	acpi_softc = sc;
 
 	/* initialize runtime environment */
 	aml_find_node(&aml_root, "_INI", acpi_inidev, sc);
@@ -2281,12 +2272,14 @@ acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
 	acpi_susp_resume_gpewalk(sc, state, 1);
 
 fail:
-	bufq_restart();
+	if (error) {
+		bufq_restart();
 
 #if NWSDISPLAY > 0
-	if (error)
 		wsdisplay_resume();
 #endif /* NWSDISPLAY > 0 */
+	}
+
 	return (error);
 }
 

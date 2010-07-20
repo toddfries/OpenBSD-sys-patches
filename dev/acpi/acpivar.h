@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivar.h,v 1.59 2010/07/13 21:01:05 deraadt Exp $	*/
+/*	$OpenBSD: acpivar.h,v 1.61 2010/07/19 16:57:27 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -245,6 +245,8 @@ struct acpi_softc {
 	int			sc_flags;
 };
 
+extern struct acpi_softc *acpi_softc;
+
 #define	SCFLAG_OREAD	0x0000001
 #define	SCFLAG_OWRITE	0x0000002
 #define	SCFLAG_OPEN	(SCFLAG_OREAD|SCFLAG_OWRITE)
@@ -303,7 +305,6 @@ void	 acpi_sleep_walk(struct acpi_softc *, int);
 #define ACPI_IOREAD 0
 #define ACPI_IOWRITE 1
 
-void acpi_delay(struct acpi_softc *, int64_t);
 void acpi_wakeup(void *);
 
 int acpi_gasio(struct acpi_softc *, int, int, uint64_t, int, int, void *);
