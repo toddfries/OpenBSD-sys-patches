@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.94 2010/06/29 20:25:57 guenther Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.95 2010/07/19 23:00:15 guenther Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -250,7 +250,6 @@ exit1(struct proc *p, int rv, int flags)
          * deadproc list later (using the p_hash member), and
          * wake up the reaper when we do.
          */
-	rw_enter_write(&allproclk);
 	/*
 	 * NOTE: WE ARE NO LONGER ALLOWED TO SLEEP!
 	 */
@@ -259,7 +258,6 @@ exit1(struct proc *p, int rv, int flags)
 	LIST_REMOVE(p, p_hash);
 	LIST_REMOVE(p, p_list);
 	LIST_INSERT_HEAD(&zombproc, p, p_list);
-	rw_exit_write(&allproclk);
 
 	/*
 	 * Give orphaned children to init(8).
@@ -580,13 +578,9 @@ proc_zap(struct proc *p)
 	 * Finally finished with old proc entry.
 	 * Unlink it from its process group and free it.
 	 */
-	if ((p->p_flag & P_THREAD) == 0)
-		leavepgrp(pr);
-	rw_enter_write(&allproclk);
+	leavepgrp(p);
 	LIST_REMOVE(p, p_list);	/* off zombproc */
-	rw_exit_write(&allproclk);
-	if ((p->p_flag & P_THREAD) == 0)
-		LIST_REMOVE(pr, ps_sibling);
+	LIST_REMOVE(p, p_sibling);
 
 	/*
 	 * Decrement the count of procs running with this uid.
