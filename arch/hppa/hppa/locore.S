@@ -103,13 +103,6 @@
 
 	.data
 
-	.export netisr, data
-	.align 16
-netisr
-	.word	0
-	.size	netisr, .-netisr
-	.align	16
-
 	BSS(pdc_stack, 4)	/* temp stack for PDC call */
 	BSS(emrg_stack, 4)	/* stack for HPMC/TOC/PWRF */
 
