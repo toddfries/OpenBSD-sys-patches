@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipex.c,v 1.5 2010/07/03 00:16:07 yasuoka Exp $	*/
+/*	$OpenBSD: pipex.c,v 1.7 2010/07/09 08:36:31 yasuoka Exp $	*/
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -537,9 +537,12 @@ pipex_lookup_by_ip_address(struct in_addr addr)
 	struct pipex_session *session;
 	struct sockaddr_in pipex_in4, pipex_in4mask;
 
+	bzero(&pipex_in4, sizeof(pipex_in4));
 	pipex_in4.sin_addr = addr;
 	pipex_in4.sin_family = AF_INET;
 	pipex_in4.sin_len = sizeof(pipex_in4);
+
+	bzero(&pipex_in4mask, sizeof(pipex_in4mask));
 	pipex_in4mask.sin_addr.s_addr = htonl(0xFFFFFFFFL);
 	pipex_in4mask.sin_family = AF_INET;
 	pipex_in4mask.sin_len = sizeof(pipex_in4mask);
@@ -773,38 +776,37 @@ pipex_timer(void *ignored_arg)
 /***********************************************************************
  * Common network I/O functions.  (tunnel protocol independent)
  ***********************************************************************/
-struct pipex_session *
-pipex_ip_lookup_session(struct mbuf *m0,
+struct mbuf *
+pipex_output(struct mbuf *m0, int af, int off,
     struct pipex_iface_context *pipex_iface)
 {
 	struct pipex_session *session;
 	struct ip ip;
 
-	/* length check */
-	if (m0->m_pkthdr.len < sizeof(struct ip)) {
-		PIPEX_DBG((NULL, LOG_DEBUG, 
-		    "<%s> packet length is too short", __func__));
-		return (NULL);
+	session = NULL;
+	switch (af) {
+	case AF_INET:
+		if (m0->m_pkthdr.len >= sizeof(struct ip) + off) {
+			m_copydata(m0, off, sizeof(struct ip), (caddr_t)&ip);
+			if (IN_MULTICAST(ip.ip_dst.s_addr))
+				session = pipex_iface->multicast_session;
+			else
+				session = pipex_lookup_by_ip_address(ip.ip_dst);
+		}
+		if (session != NULL) {
+			if (off > 0)
+				m_adj(m0, off);
+
+			pipex_ip_output(m0, session);
+			return (NULL);
+		}
+		break;
 	}
 
-	/* copy ip header info */
-	m_copydata(m0, 0, sizeof(struct ip), (caddr_t)&ip);
-
-	if (IN_MULTICAST(ip.ip_dst.s_addr) && pipex_iface != NULL)
-		return (pipex_iface->multicast_session);
-
-	/* lookup pipex session table */
-	session = pipex_lookup_by_ip_address(ip.ip_dst);
-	if (session == NULL) {
-		PIPEX_DBG((NULL, LOG_DEBUG, "<%s> session not found.",
-		    __func__));
-		return (NULL);
-	}
-
-	return (session);
+	return (m0);
 }
 
-void
+Static void
 pipex_ip_output(struct mbuf *m0, struct pipex_session *session)
 {
 	int is_idle;
@@ -857,22 +859,23 @@ Static void
 pipex_ppp_output(struct mbuf *m0, struct pipex_session *session, int proto)
 {
 	u_char *cp, hdr[16];
-	int mppe = 0;
 
 #ifdef PIPEX_MPPE
 	if (pipex_session_is_mppe_enabled(session)) {
-		if (proto == PPP_IP) 
-			mppe = 1;
+		if (proto == PPP_IP) {
+			pipex_mppe_output(m0, session, PPP_IP);
+			return;
+		}
 	}
 #endif /* PIPEX_MPPE */
 	cp = hdr;
-	if (!mppe && pipex_session_has_acf(session)) {
+	if (pipex_session_has_acf(session)) {
 		if (!pipex_session_is_acfc_enabled(session)) {
 			PUTCHAR(PPP_ALLSTATIONS, cp);
 			PUTCHAR(PPP_UI, cp);
 		}
 	}
-	if (!mppe && pipex_session_is_pfc_enabled(session) && proto <= 0xff)
+	if (pipex_session_is_pfc_enabled(session) && proto <= 0xff)
 		PUTCHAR(proto, cp);	/* protocol field compression */
 	else
 		PUTSHORT(proto, cp);
@@ -881,13 +884,6 @@ pipex_ppp_output(struct mbuf *m0, struct pipex_session *session, int proto)
 	if (m0 == NULL)
 		goto drop;
 	memcpy(mtod(m0, u_char *), hdr, cp - hdr);
-
-#ifdef PIPEX_MPPE
-	if (mppe) {
-		pipex_mppe_output(m0, session);
-		return;
-	}
-#endif /* PIPEX_MPPE */
 
 	switch (session->protocol) {
 #ifdef	PIPEX_PPPOE
@@ -1845,10 +1841,14 @@ drop:
 }
 
 Static void
-pipex_mppe_output(struct mbuf *m0, struct pipex_session *session)
+pipex_mppe_output(struct mbuf *m0, struct pipex_session *session,
+    uint16_t protocol)
 {
 	int encrypt, flushed, len;
-	uint16_t coher_cnt;
+	struct mppe_header {
+		uint16_t coher_cnt;
+		uint16_t protocol;
+	} __packed *hdr;
 	u_char *cp;
 	struct pipex_mppe *mppe;
 	struct mbuf *m;
@@ -1856,12 +1856,12 @@ pipex_mppe_output(struct mbuf *m0, struct pipex_session *session)
 	mppe = &session->mppe_send;
 
 	/* prepend mppe header */
-	M_PREPEND(m0, sizeof(coher_cnt), M_NOWAIT);
+	M_PREPEND(m0, sizeof(struct mppe_header), M_NOWAIT);
 	if (m0 == NULL)
 		goto drop;
-	m0 = m_pullup(m0, 2);
-	if (m0 == NULL)
-		goto drop;
+	hdr = mtod(m0, struct mppe_header *);
+	hdr->protocol = protocol;
+
 	/*
 	 * create a deep-copy if the mbuf has a shared mbuf cluster.
 	 * this is required to handle cases of tcp retransmition.
@@ -1876,7 +1876,6 @@ pipex_mppe_output(struct mbuf *m0, struct pipex_session *session)
 			break;
 		}
 	}
-	cp = mtod(m0, u_char *);
 
 	/* check coherency counter */
 	flushed = 0;
@@ -1903,21 +1902,24 @@ pipex_mppe_output(struct mbuf *m0, struct pipex_session *session)
 	    (encrypt) ? "[encrypt]" : ""));
 
 	/* setup header information */
-	coher_cnt = (mppe->coher_cnt++) & PIPEX_COHERENCY_CNT_MASK;
-	mppe->coher_cnt &= PIPEX_COHERENCY_CNT_MASK;
+	hdr->coher_cnt = (mppe->coher_cnt++) & PIPEX_COHERENCY_CNT_MASK;
+	hdr->coher_cnt &= PIPEX_COHERENCY_CNT_MASK;
 	if (flushed)
-		coher_cnt |= 0x8000;
+		hdr->coher_cnt |= 0x8000;
 	if (encrypt)
-		coher_cnt |= 0x1000;
+		hdr->coher_cnt |= 0x1000;
 
-	PUTSHORT(coher_cnt, cp);
-	len = m0->m_len - 2;
-	rc4_crypt(&mppe->rc4ctx, cp, cp, len);
+	HTONS(hdr->protocol);
+	HTONS(hdr->coher_cnt);
 
 	/* encrypt chain */
-	for (m = m0->m_next; m; m = m->m_next) {
+	for (m = m0; m; m = m->m_next) {
 		cp = mtod(m, u_char *);
 		len = m->m_len;
+		if (m == m0 && len > offsetof(struct mppe_header, protocol)) {
+			len -= offsetof(struct mppe_header, protocol);
+			cp += offsetof(struct mppe_header, protocol);
+		}
 		rc4_crypt(&mppe->rc4ctx, cp, cp, len);
 	}
 

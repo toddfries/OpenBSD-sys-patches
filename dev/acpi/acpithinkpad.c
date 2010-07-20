@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpithinkpad.c,v 1.22 2009/11/25 18:57:02 deraadt Exp $	*/
+/*	$OpenBSD: acpithinkpad.c,v 1.23 2010/07/06 20:14:17 deraadt Exp $	*/
 /*
  * Copyright (c) 2008 joshua stein <jcs@openbsd.org>
  *
@@ -17,12 +17,15 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
 #include <dev/acpi/acpidev.h>
 #include <dev/acpi/amltypes.h>
 #include <dev/acpi/dsdt.h>
+
+#include <machine/apmvar.h>
 
 #define	THINKPAD_HKEY_VERSION		0x0100
 
@@ -280,8 +283,10 @@ thinkpad_hotkey(struct aml_node *node, int notify_type, void *arg)
 			break;
 		case THINKPAD_BUTTON_SUSPEND:
 #ifndef SMALL_KERNEL
-			sc->sc_acpi->sc_sleepmode = ACPI_STATE_S3;
-			acpi_wakeup(sc->sc_acpi);
+			if (acpi_record_event(sc->sc_acpi, APM_USER_SUSPEND_REQ)) {
+				sc->sc_acpi->sc_sleepmode = ACPI_STATE_S3;
+				acpi_wakeup(sc->sc_acpi);
+			}
 #endif
 			handled = 1;
 			break;
