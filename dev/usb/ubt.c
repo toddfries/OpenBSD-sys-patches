@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubt.c,v 1.15 2009/10/13 19:33:17 pirofti Exp $	*/
+/*	$OpenBSD: ubt.c,v 1.17 2010/07/02 02:40:16 blambert Exp $	*/
 /*	$NetBSD: ubt.c,v 1.35 2008/07/28 14:19:26 drochner Exp $	*/
 
 /*-
@@ -74,7 +74,6 @@
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
-#include <sys/sysctl.h>
 #include <sys/systm.h>
 
 #include <dev/usb/usb.h>
@@ -188,7 +187,6 @@ struct ubt_softc {
 
 	/* ISOC interface */
 	usbd_interface_handle	 sc_iface1;	/* ISOC interface */
-	struct sysctllog	*sc_log;	/* sysctl log */
 	int			 sc_config;	/* current config no */
 	int			 sc_alt_config;	/* no of alternates */
 
@@ -1289,7 +1287,7 @@ ubt_mbufload(uint8_t *buf, int count, uint8_t type)
 
 	*mtod(m, uint8_t *) = type;
 	m->m_pkthdr.len = m->m_len = MHLEN;
-	m_copyback(m, 1, count, buf);	// (extends if necessary)
+	m_copyback(m, 1, count, buf, M_NOWAIT); /* extends if this doesn't fail */
 	if (m->m_pkthdr.len != MAX(MHLEN, count + 1)) {
 		m_free(m);
 		return NULL;

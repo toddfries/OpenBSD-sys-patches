@@ -1,4 +1,4 @@
-/*	$OpenBSD: uha.c,v 1.16 2010/03/23 01:57:20 krw Exp $	*/
+/*	$OpenBSD: uha.c,v 1.20 2010/06/30 19:06:16 mk Exp $	*/
 /*	$NetBSD: uha.c,v 1.3 1996/10/13 01:37:29 christos Exp $	*/
 
 #undef UHADEBUG
@@ -69,7 +69,7 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -94,14 +94,6 @@ struct scsi_adapter uha_switch = {
 	uhaminphys,
 	0,
 	0,
-};
-
-/* the below structure is so we have a default dev struct for out link struct */
-struct scsi_device uha_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
 };
 
 struct cfdriver uha_cd = {
@@ -135,7 +127,7 @@ uha_attach(sc)
 	struct scsibus_attach_args saa;
 
 	(sc->init)(sc);
-	TAILQ_INIT(&sc->sc_free_mscp);
+	SLIST_INIT(&sc->sc_free_mscp);
 
 	/*
 	 * fill in the prototype scsi_link.
@@ -143,7 +135,6 @@ uha_attach(sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_scsi_dev;
 	sc->sc_link.adapter = &uha_switch;
-	sc->sc_link.device = &uha_dev;
 	sc->sc_link.openings = 2;
 
 	bzero(&saa, sizeof(saa));
@@ -177,13 +168,13 @@ uha_free_mscp(sc, mscp)
 	s = splbio();
 
 	uha_reset_mscp(sc, mscp);
-	TAILQ_INSERT_HEAD(&sc->sc_free_mscp, mscp, chain);
+	SLIST_INSERT_HEAD(&sc->sc_free_mscp, mscp, chain);
 
 	/*
 	 * If there were none, wake anybody waiting for one to come free,
 	 * starting with queued entries.
 	 */
-	if (TAILQ_NEXT(mscp, chain) == NULL)
+	if (SLIST_NEXT(mscp, chain) == NULL)
 		wakeup(&sc->sc_free_mscp);
 
 	splx(s);
@@ -229,9 +220,9 @@ uha_get_mscp(sc, flags)
 	 * but only if we can't allocate a new one
 	 */
 	for (;;) {
-		mscp = TAILQ_FIRST(&sc->sc_free_mscp);
+		mscp = SLIST_FIRST(&sc->sc_free_mscp);
 		if (mscp) {
-			TAILQ_REMOVE(&sc->sc_free_mscp, mscp, chain);
+			SLIST_REMOVE_HEAD(&sc->sc_free_mscp, chain);
 			break;
 		}
 		if (sc->sc_nummscps < UHA_MSCP_MAX) {
@@ -366,9 +357,7 @@ uha_scsi_cmd(xs)
 	flags = xs->flags;
 	if ((mscp = uha_get_mscp(sc, flags)) == NULL) {
 		xs->error = XS_NO_CCB;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 	mscp->xs = xs;
@@ -495,9 +484,7 @@ uha_scsi_cmd(xs)
 
 bad:
 	xs->error = XS_DRIVER_STUFFUP;
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 	uha_free_mscp(sc, mscp);
 	return;
 }

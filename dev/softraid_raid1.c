@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid1.c,v 1.22 2010/01/09 23:15:06 krw Exp $ */
+/* $OpenBSD: softraid_raid1.c,v 1.25 2010/07/02 09:20:26 jsing Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  *
@@ -381,7 +381,7 @@ sr_raid1_rw(struct sr_workunit *wu)
 		goto bad;
 
 	/* calculate physical block */
-	blk += SR_META_SIZE + SR_META_OFFSET;
+	blk += sd->sd_meta->ssd_data_offset;
 
 	if (xs->flags & SCSI_DATA_IN)
 		ios = 1;
@@ -416,6 +416,7 @@ sr_raid1_rw(struct sr_workunit *wu)
 		b->b_data = xs->data;
 		b->b_error = 0;
 		b->b_proc = curproc;
+		b->b_bq = NULL;
 		ccb->ccb_wu = wu;
 
 		if (xs->flags & SCSI_DATA_IN) {

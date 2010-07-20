@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.1.1.1 2009/12/25 21:25:46 miod Exp $	*/
+/*	$OpenBSD: bus.h,v 1.3 2010/05/08 21:59:56 miod Exp $	*/
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB Sweden.  All rights reserved.
@@ -43,7 +43,6 @@ typedef u_long bus_addr_t;
 typedef u_long bus_size_t;
 typedef u_long bus_space_handle_t;
 typedef struct mips_bus_space *bus_space_tag_t;
-typedef struct mips_bus_space bus_space_t;
 
 struct mips_bus_space {
 	bus_addr_t	bus_base;
@@ -159,7 +158,7 @@ CAT(bus_space_read_raw_region_,n)(bus_space_tag_t bst,			      \
 {									      \
 	cnt >>= ((n) >> 1);						      \
 	while (cnt--) {							      \
-		CAT(bus_space_read_raw_multi_,n)(bst, bsh, ba, x, 1);	      \
+		CAT(bus_space_read_raw_multi_,n)(bst, bsh, ba, x, (n));	      \
 		ba += (n);						      \
 		x += (n);						      \
 	}								      \
@@ -211,7 +210,7 @@ CAT(bus_space_write_raw_region_,n)(bus_space_tag_t bst,			      \
 {									      \
 	cnt >>= ((n) >> 1);						      \
 	while (cnt--) {							      \
-		CAT(bus_space_write_raw_multi_,n)(bst, bsh, ba, x, 1);	      \
+		CAT(bus_space_write_raw_multi_,n)(bst, bsh, ba, x, (n));      \
 		ba += (n);						      \
 		x += (n);						      \
 	}								      \

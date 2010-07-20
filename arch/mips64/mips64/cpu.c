@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.27 2010/02/28 18:01:39 miod Exp $ */
+/*	$OpenBSD: cpu.c,v 1.30 2010/06/26 23:24:43 guenther Exp $ */
 
 /*
  * Copyright (c) 1997-2004 Opsycon AB (www.opsycon.se)
@@ -29,9 +29,10 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <machine/cpu.h>
 #include <machine/autoconf.h>
@@ -41,15 +42,9 @@ void	cpuattach(struct device *, struct device *, void *);
 
 struct cpu_info cpu_info_primary;
 struct cpu_info *cpu_info_list = &cpu_info_primary;
+struct cpu_info *cpu_info_secondaries;
 #ifdef MULTIPROCESSOR
 struct cpuset cpus_running;
-
-/*
- * Array of CPU info structures.  Must be statically-allocated because
- * curproc, etc. are used early.
- */
-
-struct cpu_info *cpu_info[MAXCPUS] = { &cpu_info_primary };
 #endif
 
 vaddr_t	CpuCacheAliasMask;
@@ -91,18 +86,18 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 #ifdef MULTIPROCESSOR
 		ci->ci_flags |= CPUF_RUNNING | CPUF_PRESENT | CPUF_PRIMARY;
 		cpuset_add(&cpus_running, ci);
+		cpu_info_secondaries = (struct cpu_info *)alloc_contiguous_pages(
+			sizeof(struct cpu_info) * ncpusfound - 1);
+		if (cpu_info_secondaries == NULL)
+			panic("unable to allocate cpu_info\n");
 #endif
 	}
 #ifdef MULTIPROCESSOR
 	else {
-		ci = (struct cpu_info *)smp_malloc(sizeof(*ci));
-		if (ci == NULL)
-			panic("unable to allocate cpu_info\n");
-		bzero((char *)ci, sizeof(*ci));
+		ci = &cpu_info_secondaries[cpuno - 1];
 		ci->ci_next = cpu_info_list->ci_next;
 		cpu_info_list->ci_next = ci;
 		ci->ci_flags |= CPUF_PRESENT;
-		cpu_info[cpuno] = ci;
 	}
 #endif
 	ci->ci_self = ci;
@@ -202,6 +197,7 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	switch (fptype) {
 	case MIPS_SOFT:
 		printf("Software FP emulation");
+		displayver = 0;
 		break;
 	case MIPS_R4000:
 		printf("R4010 FPC");
@@ -213,7 +209,12 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		printf("R12000 FPU");
 		break;
 	case MIPS_R14000:
-		printf("R1%d000 FPU", isr16k ? 6 : 4);
+		if (isr16k) {
+			if (ch->c0prid == ch->c1prid)
+				vers_maj -= 2;
+			printf("R16000 FPU");
+		} else
+			printf("R14000 FPU");
 		break;
 	case MIPS_R4200:
 		printf("VR4200 FPC (ICE)");
@@ -367,16 +368,28 @@ save_fpu(void)
 }
 
 #ifdef MULTIPROCESSOR
+#ifdef DEBUG
+struct cpu_info *
+get_cpu_info(int cpuno)
+{
+	struct cpu_info *ci;
+	CPU_INFO_ITERATOR cii;
+
+	CPU_INFO_FOREACH(cii, ci) {
+		if (ci->ci_cpuid == cpuno)
+			return ci;
+	}
+	return NULL;
+}
+#endif
+
 void
 cpu_boot_secondary_processors(void)
 {
        struct cpu_info *ci;
-       u_long i;
+	CPU_INFO_ITERATOR cii;
 
-       for (i = 0; i < MAXCPUS; i++) {
-               ci = cpu_info[i];
-               if (ci == NULL)
-                       continue;
+	CPU_INFO_FOREACH(cii, ci) {
                if ((ci->ci_flags & CPUF_PRESENT) == 0)
                        continue;
                if (ci->ci_flags & CPUF_PRIMARY)
@@ -385,7 +398,7 @@ cpu_boot_secondary_processors(void)
                sched_init_cpu(ci);
                ci->ci_randseed = random();
                cpu_boot_secondary(ci);
-       }
+	}
 
        /* This must called after xheart0 has initialized, so here is 
 	* the best place to do so.
@@ -401,31 +414,21 @@ cpu_unidle(struct cpu_info *ci)
 }
 
 vaddr_t 
-smp_malloc(size_t size)
+alloc_contiguous_pages(size_t size)
 {
-       struct pglist mlist;
-       struct vm_page *m;
-       int error;
-       vaddr_t va;
-       paddr_t pa;
+	struct pglist mlist;
+	struct vm_page *m;
+	int error;
+	paddr_t pa;
 
-       if (size < PAGE_SIZE) {
-	       va = (vaddr_t)malloc(size, M_DEVBUF, M_NOWAIT);
-	       if (va == NULL)
-		       return NULL;
-	       error = pmap_extract(pmap_kernel(), va, &pa);
-	       if (error == FALSE)
-		       return NULL;
-       } else { 
-	       TAILQ_INIT(&mlist);
-	       error = uvm_pglistalloc(size, 0, -1L, 0, 0,
-		   &mlist, 1, UVM_PLA_NOWAIT);
-	       if (error)
-		       return NULL;
-	       m = TAILQ_FIRST(&mlist);
-	       pa = VM_PAGE_TO_PHYS(m);
-       }
+	TAILQ_INIT(&mlist);
+	error = uvm_pglistalloc(roundup(size, USPACE), 0, 0xffffffff, 0, 0,
+		&mlist, 1, UVM_PLA_NOWAIT | UVM_PLA_ZERO);
+	if (error)
+		return NULL;
+	m = TAILQ_FIRST(&mlist);
+	pa = VM_PAGE_TO_PHYS(m);
 
-       return PHYS_TO_XKPHYS(pa, CCA_CACHED);
+	return PHYS_TO_XKPHYS(pa, CCA_CACHED);
 }
 #endif

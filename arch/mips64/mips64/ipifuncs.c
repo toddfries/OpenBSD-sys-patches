@@ -1,4 +1,4 @@
-/* $OpenBSD: ipifuncs.c,v 1.2 2009/12/28 06:55:27 syuu Exp $ */
+/* $OpenBSD: ipifuncs.c,v 1.4 2010/04/28 16:20:28 syuu Exp $ */
 /* $NetBSD: ipifuncs.c,v 1.40 2008/04/28 20:23:10 martin Exp $ */
 
 /*-
@@ -34,6 +34,7 @@
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -118,10 +119,10 @@ mips64_ipi_intr(void *arg)
 void
 mips64_send_ipi(unsigned int cpuid, unsigned int ipimask)
 {
-#ifdef DIAGNOSTIC
-	if (cpuid >= CPU_MAXID || cpu_info[cpuid] == NULL)
+#ifdef DEBUG
+	if (cpuid >= CPU_MAXID || get_cpu_info(cpuid) == NULL)
 		panic("mips_send_ipi: bogus cpu_id");
-	if (!cpuset_isset(&cpus_running, cpu_info[cpuid]))
+	if (!cpuset_isset(&cpus_running, get_cpu_info(cpuid)))
 	        panic("mips_send_ipi: CPU %ld not running", cpuid);
 #endif
 

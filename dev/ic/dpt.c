@@ -1,4 +1,4 @@
-/*	$OpenBSD: dpt.c,v 1.24 2010/03/23 01:57:19 krw Exp $	*/
+/*	$OpenBSD: dpt.c,v 1.26 2010/06/28 18:31:02 krw Exp $	*/
 /*	$NetBSD: dpt.c,v 1.12 1999/10/23 16:26:33 ad Exp $	*/
 
 /*-
@@ -95,18 +95,15 @@ struct cfdriver dpt_cd = {
 };
 #endif /* __OpenBSD__ */
 
-/* A default for our link struct */
 #ifdef __NetBSD__
+/* A default for our link struct */
 static struct scsipi_device dpt_dev = {
-#endif /* __NetBSD__ */
-#ifdef __OpenBSD__
-static struct scsi_device dpt_dev = {
-#endif /* __OpenBSD__ */
 	NULL,			/* Use default error handler */
 	NULL,			/* have a queue, served by this */
 	NULL,			/* have no async handler */
 	NULL,			/* Use default 'done' routine */
 };
+#endif /* __NetBSD__ */
 
 #ifndef offsetof
 #define offsetof(type, member) (int)((&((type *)0)->member))
@@ -394,6 +391,7 @@ dpt_init(sc, intrstr)
 		link->scsipi_scsi.max_lun = ec->ec_maxlun;
 		link->scsipi_scsi.max_target = ec->ec_maxtarget;
 		link->type = BUS_SCSI;
+		link->device = &dpt_dev;
 #endif /* __NetBSD__ */
 #ifdef __OpenBSD__
 		link->scsibus = i;
@@ -401,7 +399,6 @@ dpt_init(sc, intrstr)
 		link->luns = ec->ec_maxlun + 1;
 		link->adapter_buswidth = ec->ec_maxtarget + 1;
 #endif /* __OpenBSD__ */
-		link->device = &dpt_dev;
 		link->adapter = &sc->sc_adapter;
 		link->adapter_softc = sc;
 		link->openings = sc->sc_nccbs;
@@ -1004,9 +1001,7 @@ dpt_scsi_cmd(xs)
 		
 			xs->error = XS_DRIVER_STUFFUP;
 			dpt_free_ccb(sc, ccb);
-			s = splbio();
 			scsi_done(xs);
-			splx(s);
 			return;
 		}
 
@@ -1061,9 +1056,7 @@ dpt_scsi_cmd(xs)
 		printf("%s: dpt_cmd failed\n", sc->sc_dv.dv_xname);
 		dpt_free_ccb(sc, ccb);
 		xs->error = XS_NO_CCB;
-		s = splbio();
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
