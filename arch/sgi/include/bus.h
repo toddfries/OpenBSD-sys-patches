@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.21 2009/07/30 21:39:15 miod Exp $	*/
+/*	$OpenBSD: bus.h,v 1.23 2010/04/04 11:24:30 miod Exp $	*/
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB Sweden.  All rights reserved.
@@ -159,7 +159,7 @@ CAT(bus_space_read_raw_region_,n)(bus_space_tag_t bst,			      \
 {									      \
 	cnt >>= ((n) >> 1);						      \
 	while (cnt--) {							      \
-		CAT(bus_space_read_raw_multi_,n)(bst, bsh, ba, x, 1);	      \
+		CAT(bus_space_read_raw_multi_,n)(bst, bsh, ba, x, (n));	      \
 		ba += (n);						      \
 		x += (n);						      \
 	}								      \
@@ -211,7 +211,7 @@ CAT(bus_space_write_raw_region_,n)(bus_space_tag_t bst,			      \
 {									      \
 	cnt >>= ((n) >> 1);						      \
 	while (cnt--) {							      \
-		CAT(bus_space_write_raw_multi_,n)(bst, bsh, ba, x, 1);	      \
+		CAT(bus_space_write_raw_multi_,n)(bst, bsh, ba, x, (n));      \
 		ba += (n);						      \
 		x += (n);						      \
 	}								      \
@@ -334,7 +334,8 @@ struct machine_bus_dma_segment {
 	bus_addr_t	ds_addr;	/* DMA address */
 	bus_size_t	ds_len;		/* length of transfer */
 
-	bus_addr_t	_ds_vaddr;	/* CPU address */
+	paddr_t		_ds_paddr;	/* CPU address */
+	vaddr_t		_ds_vaddr;	/* CPU address */
 };
 typedef struct machine_bus_dma_segment	bus_dma_segment_t;
 

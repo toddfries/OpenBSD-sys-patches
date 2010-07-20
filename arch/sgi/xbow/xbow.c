@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbow.c,v 1.22 2009/10/26 20:14:42 miod Exp $	*/
+/*	$OpenBSD: xbow.c,v 1.29 2010/04/06 19:02:57 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -44,13 +44,13 @@
 /*
  *  XBOW is the mux between two nodes and XIO.
  *
- *  A Crossbow (XBOW) connects two nodeboards via their respecive
+ *  A Crossbow (XBOW) connects two nodeboards via their respective
  *  HUB to up to six different I/O controllers in XIO slots. In a
  *  multiprocessor system all processors have access to the XIO
  *  slots but may need to pass traffic via the routers.
  *
  *  To each XIO port on the XBOW a XIO interface is attached. Such
- *  interfaces can be for example PCI bridges wich then add another
+ *  interfaces can be for example PCI bridges which then add another
  *  level to the hierarchy.
  */
 
@@ -69,7 +69,9 @@
 #include <machine/mnode.h>
 
 #include <sgi/xbow/hub.h>
+#include <sgi/xbow/widget.h>
 #include <sgi/xbow/xbow.h>
+
 #include <sgi/xbow/xbowdevs.h>
 #include <sgi/xbow/xbowdevs_data.h>
 
@@ -140,7 +142,7 @@ static const bus_space_t xbowbus_tag = {
 };
 
 /*
- * Function pointers to hide widget window mapping differences accross
+ * Function pointers to hide widget discovery and mapping differences accross
  * systems.
  */
 paddr_t	(*xbow_widget_base)(int16_t, u_int);
@@ -161,8 +163,8 @@ xbowmatch(struct device *parent, void *match, void *aux)
 		return (0);
 
 	switch (sys_config.system_type) {
-	case SGI_O200:
-	case SGI_O300:
+	case SGI_IP27:
+	case SGI_IP35:
 	case SGI_OCTANE:
 		return (1);
 	default:
@@ -234,21 +236,21 @@ const uint8_t xbow_probe_octane[] =
 /* Origin 200: probe onboard devices, and there is nothing more */
 const uint8_t xbow_probe_singlebridge[] =
 	{ 0x08, 0 };
-/* Base I/O board: probe in ascending order */
+/* Base I/O board: probe onboard devices, then other slots in ascending order */
 const uint8_t xbow_probe_baseio[] =
-	{ 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0 };
+	{ 0x0f, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0 };
 /* I-Brick: probe PCI buses first (starting with the onboard devices) */
 const uint8_t xbow_probe_ibrick[] =
 	{ 0x0f, 0x0e, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0 };
 /* P-Brick: all widgets are PCI buses, probe in recommended order */
 const uint8_t xbow_probe_pbrick[] =
-	{ 0x09, 0x08, 0x0f, 0x0e, 0x0d, 0x0c, 0x0a, 0x0b, 0 };
+	{ 0x09, 0x08, 0x0f, 0x0e, 0x0c, 0x0d, 0x0a, 0x0b, 0 };
 /* X-Brick: all widgets are XIO devices, probe in recommended order */
 const uint8_t xbow_probe_xbrick[] =
 	{ 0x08, 0x09, 0x0c, 0x0d, 0x0a, 0x0b, 0x0e, 0x0f, 0 };
 
 /*
- * Structures used to carry information between KL and atatchment code.
+ * Structures used to carry information between KL and attachment code.
  */
 
 struct xbow_config {
@@ -282,23 +284,22 @@ xbowattach(struct device *parent, struct device *self, void *aux)
 	 */
 	if (xbow_widget_id(nasid, 0, &wid) != 0)
 		panic("no xbow");
-	vendor = (wid & WIDGET_ID_VENDOR_MASK) >> WIDGET_ID_VENDOR_SHIFT;
-	product = (wid & WIDGET_ID_PRODUCT_MASK) >> WIDGET_ID_PRODUCT_SHIFT;
+	vendor = WIDGET_ID_VENDOR(wid);
+	product = WIDGET_ID_PRODUCT(wid);
 	p = xbow_identify(vendor, product);
 	if (p == NULL)
 		printf(": unknown xbow (vendor %x product %x)",
 		    vendor, product);
 	else
 		printf(": %s", p->productname);
-	printf(" revision %d\n",
-	    (wid & WIDGET_ID_REV_MASK) >> WIDGET_ID_REV_SHIFT);
+	printf(" revision %d\n", WIDGET_ID_REV(wid));
 
 	memset(&cfg, 0, sizeof cfg);
 	switch (sys_config.system_type) {
 	case SGI_OCTANE:
 		klcfg.probe_order = xbow_probe_octane;
 		break;
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 	default:
 		/*
 		 * Default value for the interrupt register.
@@ -307,7 +308,7 @@ xbowattach(struct device *parent, struct device *self, void *aux)
 			xbow_intr_widget_register =
 			    (1UL << 47) /* XIO I/O space */ |
 			    (nasid <<
-			      (sys_config.system_type == SGI_O300 ? 39 : 38)) |
+			      (sys_config.system_type == SGI_IP35 ? 39 : 38)) |
 			    ((paddr_t)IP27_RHUB_ADDR(0, HUBPI_IR_CHANGE) -
 			     IP27_NODE_IO_BASE(0)) /* HUB register offset */;
 
@@ -381,11 +382,9 @@ xbow_attach_widget(struct device *self, int16_t nasid, int widget,
 
 	xaa.xaa_nasid = nasid;
 	xaa.xaa_widget = widget;
-	xaa.xaa_vendor = (wid & WIDGET_ID_VENDOR_MASK) >>
-	    WIDGET_ID_VENDOR_SHIFT;
-	xaa.xaa_product = (wid & WIDGET_ID_PRODUCT_MASK) >>
-	    WIDGET_ID_PRODUCT_SHIFT;
-	xaa.xaa_revision = (wid & WIDGET_ID_REV_MASK) >> WIDGET_ID_REV_SHIFT;
+	xaa.xaa_vendor = WIDGET_ID_VENDOR(wid);
+	xaa.xaa_product = WIDGET_ID_PRODUCT(wid);
+	xaa.xaa_revision = WIDGET_ID_REV(wid);
 	xaa.xaa_iot = &bs;
 
 	if (config_found_sm(self, &xaa, print, sm) == NULL)
@@ -394,7 +393,7 @@ xbow_attach_widget(struct device *self, int16_t nasid, int widget,
 	return 0;
 }
 
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
+#ifdef TGT_ORIGIN
 
 /*
  * These two functions try to figure out the configuration of the XBow
@@ -663,7 +662,7 @@ int	xbow_intr_widget = 0;
 paddr_t	xbow_intr_widget_register;
 int	(*xbow_intr_widget_intr_register)(int, int, int *) = NULL;
 int	(*xbow_intr_widget_intr_establish)(int (*)(void *), void *, int, int,
-	    const char *) = NULL;
+	    const char *, struct intrhand *) = NULL;
 void	(*xbow_intr_widget_intr_disestablish)(int) = NULL;
 void	(*xbow_intr_widget_intr_set)(int) = NULL;
 void	(*xbow_intr_widget_intr_clear)(int) = NULL;
@@ -679,13 +678,13 @@ xbow_intr_register(int widget, int level, int *intrbit)
 
 int
 xbow_intr_establish(int (*func)(void *), void *arg, int intrbit, int level,
-    const char *name)
+    const char *name, struct intrhand *ihstore)
 {
 	if (xbow_intr_widget_intr_establish == NULL)
 		return EINVAL;
 
 	return (*xbow_intr_widget_intr_establish)(func, arg, intrbit, level,
-	    name);
+	    name, ihstore);
 }
 
 void

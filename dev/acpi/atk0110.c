@@ -1,4 +1,4 @@
-/*	$OpenBSD: atk0110.c,v 1.1 2009/07/23 01:38:16 cnst Exp $	*/
+/*	$OpenBSD: atk0110.c,v 1.4 2010/05/17 21:59:45 nicm Exp $	*/
 
 /*
  * Copyright (c) 2009 Constantine A. Murenin <cnst+openbsd@bugmail.mojo.ru>
@@ -41,7 +41,7 @@
  */
 
 #define AIBS_MORE_SENSORS
-#define AIBS_VERBOSE
+/* #define AIBS_VERBOSE */
 
 struct aibs_sensor {
 	struct ksensor	s;
@@ -131,7 +131,7 @@ aibs_attach_sif(struct aibs_softc *sc, enum sensor_type st)
 	struct aml_value	res;
 	struct aml_value	**v;
 	int			i, n;
-	char			*name = "?SIF";
+	char			name[] = "?SIF";
 	struct aibs_sensor	*as;
 
 	switch (st) {
@@ -312,8 +312,9 @@ aibs_refresh_r(struct aibs_softc *sc, enum sensor_type st)
 
 	for (i = 0; i < n; i++) {
 		struct aml_value	req, res;
-		struct ksensor		*s;
-		int64_t			v, l, h;
+		int64_t			v;
+		struct ksensor		*s = &as[i].s;
+		const int64_t		l = as[i].l, h = as[i].h;
 
 		req.type = AML_OBJTYPE_INTEGER;
 		req.v_integer = as[i].i;
@@ -331,11 +332,8 @@ aibs_refresh_r(struct aibs_softc *sc, enum sensor_type st)
 			s->flags |= SENSOR_FINVALID;
 			continue;
 		}
-
 		v = res.v_integer;
-		s = &as[i].s;
-		l = as[i].l;
-		h = as[i].h;
+		aml_freevalue(&res);
 
 		switch (st) {
 		case SENSOR_TEMP:
@@ -375,7 +373,6 @@ aibs_refresh_r(struct aibs_softc *sc, enum sensor_type st)
 			/* NOTREACHED */
 			break;
 		}
-		aml_freevalue(&res);
 	}
 
 	return;

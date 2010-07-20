@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_lb.c,v 1.7 2009/09/07 08:27:45 sthen Exp $ */
+/*	$OpenBSD: pf_lb.c,v 1.13 2010/06/27 01:39:43 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -51,6 +51,7 @@
 #include <sys/pool.h>
 #include <sys/proc.h>
 #include <sys/rwlock.h>
+#include <sys/syslog.h>
 
 #include <crypto/md5.h>
 
@@ -93,18 +94,15 @@
 #endif /* INET6 */
 
 
-#define DPFPRINTF(n, x)	if (pf_status.debug >= (n)) printf x
-
 /*
  * Global variables
  */
 
 void			 pf_hash(struct pf_addr *, struct pf_addr *,
 			    struct pf_poolhashkey *, sa_family_t);
-int			 pf_get_sport(sa_family_t, u_int8_t, struct pf_rule *,
-			    struct pf_addr *, struct pf_addr *, u_int16_t,
-			    struct pf_addr *, u_int16_t *, u_int16_t, u_int16_t,
-			    struct pf_src_node **);
+int			 pf_get_sport(struct pf_pdesc *, struct pf_rule *,
+			    struct pf_addr *, u_int16_t *, u_int16_t,
+			    u_int16_t, struct pf_src_node **);
 
 #define mix(a,b,c) \
 	do {					\
@@ -164,8 +162,7 @@ pf_hash(struct pf_addr *inaddr, struct pf_addr *hash,
 }
 
 int
-pf_get_sport(sa_family_t af, u_int8_t proto, struct pf_rule *r,
-    struct pf_addr *saddr, struct pf_addr *daddr, u_int16_t dport,
+pf_get_sport(struct pf_pdesc *pd, struct pf_rule *r,
     struct pf_addr *naddr, u_int16_t *nport, u_int16_t low, u_int16_t high,
     struct pf_src_node **sn)
 {
@@ -174,12 +171,13 @@ pf_get_sport(sa_family_t af, u_int8_t proto, struct pf_rule *r,
 	u_int16_t		cut;
 
 	bzero(&init_addr, sizeof(init_addr));
-	if (pf_map_addr(af, r, saddr, naddr, &init_addr, sn, &r->nat))
+	if (pf_map_addr(pd->af, r, &pd->nsaddr, naddr, &init_addr, sn, &r->nat,
+	    PF_SN_NAT))
 		return (1);
 
-	if (proto == IPPROTO_ICMP || proto == IPPROTO_ICMPV6) {
-		if (dport == htons(ICMP6_ECHO_REQUEST) ||
-		    dport == htons(ICMP_ECHO)) {
+	if (pd->proto == IPPROTO_ICMP || pd->proto == IPPROTO_ICMPV6) {
+		if (pd->ndport == htons(ICMP6_ECHO_REQUEST) ||
+		    pd->ndport == htons(ICMP_ECHO)) {
 			low = 1;
 			high = 65535;
 		} else
@@ -187,28 +185,34 @@ pf_get_sport(sa_family_t af, u_int8_t proto, struct pf_rule *r,
 	}
 
 	do {
-		key.af = af;
-		key.proto = proto;
-		PF_ACPY(&key.addr[1], daddr, key.af);
-		PF_ACPY(&key.addr[0], naddr, key.af);
-		key.port[1] = dport;
+		key.af = pd->af;
+		key.proto = pd->proto;
+		key.rdomain = pd->rdomain;
+		PF_ACPY(&key.addr[0], &pd->ndaddr, key.af);
+		PF_ACPY(&key.addr[1], naddr, key.af);
+		key.port[0] = pd->ndport;
 
 		/*
 		 * port search; start random, step;
 		 * similar 2 portloop in in_pcbbind
 		 */
-		if (!(proto == IPPROTO_TCP || proto == IPPROTO_UDP ||
-		    proto == IPPROTO_ICMP)) {
-			/* XXX bug icmp states dont use the id on both sides */
-			key.port[0] = dport;
-			if (pf_find_state_all(&key, PF_IN, NULL) == NULL)
+		if (!(pd->proto == IPPROTO_TCP || pd->proto == IPPROTO_UDP ||
+		    pd->proto == IPPROTO_ICMP)) {
+			/* XXX bug: icmp states dont use the id on both
+			 * XXX sides (traceroute -I through nat) */
+			key.port[1] = pd->nsport;
+			if (pf_find_state_all(&key, PF_IN, NULL) == NULL) {
+				*nport = pd->nsport;
 				return (0);
+			}
 		} else if (low == 0 && high == 0) {
-			key.port[0] = *nport;
-			if (pf_find_state_all(&key, PF_IN, NULL) == NULL)
+			key.port[1] = pd->nsport;
+			if (pf_find_state_all(&key, PF_IN, NULL) == NULL) {
+				*nport = pd->nsport;
 				return (0);
+			}
 		} else if (low == high) {
-			key.port[0] = htons(low);
+			key.port[1] = htons(low);
 			if (pf_find_state_all(&key, PF_IN, NULL) == NULL) {
 				*nport = htons(low);
 				return (0);
@@ -225,17 +229,17 @@ pf_get_sport(sa_family_t af, u_int8_t proto, struct pf_rule *r,
 			cut = arc4random_uniform(1 + high - low) + low;
 			/* low <= cut <= high */
 			for (tmp = cut; tmp <= high; ++(tmp)) {
-				key.port[0] = htons(tmp);
+				key.port[1] = htons(tmp);
 				if (pf_find_state_all(&key, PF_IN, NULL) ==
-				    NULL && !in_baddynamic(tmp, proto)) {
+				    NULL && !in_baddynamic(tmp, pd->proto)) {
 					*nport = htons(tmp);
 					return (0);
 				}
 			}
 			for (tmp = cut - 1; tmp >= low; --(tmp)) {
-				key.port[0] = htons(tmp);
+				key.port[1] = htons(tmp);
 				if (pf_find_state_all(&key, PF_IN, NULL) ==
-				    NULL && !in_baddynamic(tmp, proto)) {
+				    NULL && !in_baddynamic(tmp, pd->proto)) {
 					*nport = htons(tmp);
 					return (0);
 				}
@@ -245,8 +249,8 @@ pf_get_sport(sa_family_t af, u_int8_t proto, struct pf_rule *r,
 		switch (r->nat.opts & PF_POOL_TYPEMASK) {
 		case PF_POOL_RANDOM:
 		case PF_POOL_ROUNDROBIN:
-			if (pf_map_addr(af, r, saddr, naddr, &init_addr, sn,
-			    &r->nat))
+			if (pf_map_addr(pd->af, r, &pd->nsaddr, naddr,
+			    &init_addr, sn, &r->nat, PF_SN_NAT))
 				return (1);
 			break;
 		case PF_POOL_NONE:
@@ -255,76 +259,74 @@ pf_get_sport(sa_family_t af, u_int8_t proto, struct pf_rule *r,
 		default:
 			return (1);
 		}
-	} while (! PF_AEQ(&init_addr, naddr, af) );
+	} while (! PF_AEQ(&init_addr, naddr, pd->af) );
 	return (1);					/* none available */
 }
 
 int
 pf_map_addr(sa_family_t af, struct pf_rule *r, struct pf_addr *saddr,
-    struct pf_addr *naddr, struct pf_addr *init_addr, struct pf_src_node **sn,
-    struct pf_pool *rpool)
+    struct pf_addr *naddr, struct pf_addr *init_addr, struct pf_src_node **sns,
+    struct pf_pool *rpool, enum pf_sn_types type)
 {
 	unsigned char		 hash[16];
-	struct pf_addr		*raddr = &rpool->cur->addr.v.a.addr;
-	struct pf_addr		*rmask = &rpool->cur->addr.v.a.mask;
-	struct pf_pooladdr	*acur = rpool->cur;
+	struct pf_addr		*raddr = &rpool->addr.v.a.addr;
+	struct pf_addr		*rmask = &rpool->addr.v.a.mask;
 	struct pf_src_node	 k;
 
-	if (*sn == NULL && rpool->opts & PF_POOL_STICKYADDR &&
+	if (sns[type] == NULL && rpool->opts & PF_POOL_STICKYADDR &&
 	    (rpool->opts & PF_POOL_TYPEMASK) != PF_POOL_NONE) {
 		k.af = af;
+		k.type = type;
 		PF_ACPY(&k.addr, saddr, af);
-		if (r->rule_flag & PFRULE_RULESRCTRACK ||
-		    rpool->opts & PF_POOL_STICKYADDR)
-			k.rule.ptr = r;
-		else
-			k.rule.ptr = NULL;
+		k.rule.ptr = r;
 		pf_status.scounters[SCNT_SRC_NODE_SEARCH]++;
-		*sn = RB_FIND(pf_src_tree, &tree_src_tracking, &k);
-		if (*sn != NULL && !PF_AZERO(&(*sn)->raddr, af)) {
-			PF_ACPY(naddr, &(*sn)->raddr, af);
-			if (pf_status.debug >= PF_DEBUG_MISC) {
-				printf("pf_map_addr: src tracking maps ");
+		sns[type] = RB_FIND(pf_src_tree, &tree_src_tracking, &k);
+		if (sns[type] != NULL) {
+			if (!PF_AZERO(&(sns[type])->raddr, af))
+				PF_ACPY(naddr, &(sns[type])->raddr, af);
+			if (pf_status.debug >= LOG_DEBUG) {
+				log(LOG_DEBUG, "pf: pf_map_addr: "
+				    "src tracking (%u) maps ", type);
 				pf_print_host(&k.addr, 0, af);
-				printf(" to ");
+				addlog(" to ");
 				pf_print_host(naddr, 0, af);
-				printf("\n");
+				addlog("\n");
 			}
 			return (0);
 		}
 	}
 
-	if (rpool->cur->addr.type == PF_ADDR_NOROUTE)
+	if (rpool->addr.type == PF_ADDR_NOROUTE)
 		return (1);
-	if (rpool->cur->addr.type == PF_ADDR_DYNIFTL) {
+	if (rpool->addr.type == PF_ADDR_DYNIFTL) {
 		switch (af) {
 #ifdef INET
 		case AF_INET:
-			if (rpool->cur->addr.p.dyn->pfid_acnt4 < 1 &&
+			if (rpool->addr.p.dyn->pfid_acnt4 < 1 &&
 			    (rpool->opts & PF_POOL_TYPEMASK) !=
 			    PF_POOL_ROUNDROBIN)
 				return (1);
-			 raddr = &rpool->cur->addr.p.dyn->pfid_addr4;
-			 rmask = &rpool->cur->addr.p.dyn->pfid_mask4;
+			 raddr = &rpool->addr.p.dyn->pfid_addr4;
+			 rmask = &rpool->addr.p.dyn->pfid_mask4;
 			break;
 #endif /* INET */
 #ifdef INET6
 		case AF_INET6:
-			if (rpool->cur->addr.p.dyn->pfid_acnt6 < 1 &&
+			if (rpool->addr.p.dyn->pfid_acnt6 < 1 &&
 			    (rpool->opts & PF_POOL_TYPEMASK) !=
 			    PF_POOL_ROUNDROBIN)
 				return (1);
-			raddr = &rpool->cur->addr.p.dyn->pfid_addr6;
-			rmask = &rpool->cur->addr.p.dyn->pfid_mask6;
+			raddr = &rpool->addr.p.dyn->pfid_addr6;
+			rmask = &rpool->addr.p.dyn->pfid_mask6;
 			break;
 #endif /* INET6 */
 		}
-	} else if (rpool->cur->addr.type == PF_ADDR_TABLE) {
+	} else if (rpool->addr.type == PF_ADDR_TABLE) {
 		if ((rpool->opts & PF_POOL_TYPEMASK) != PF_POOL_ROUNDROBIN)
 			return (1); /* unsupported */
 	} else {
-		raddr = &rpool->cur->addr.v.a.addr;
-		rmask = &rpool->cur->addr.v.a.mask;
+		raddr = &rpool->addr.v.a.addr;
+		rmask = &rpool->addr.v.a.mask;
 	}
 
 	switch (rpool->opts & PF_POOL_TYPEMASK) {
@@ -378,103 +380,79 @@ pf_map_addr(sa_family_t af, struct pf_rule *r, struct pf_addr *saddr,
 		PF_POOLMASK(naddr, raddr, rmask, (struct pf_addr *)&hash, af);
 		break;
 	case PF_POOL_ROUNDROBIN:
-		if (rpool->cur->addr.type == PF_ADDR_TABLE) {
-			if (!pfr_pool_get(rpool->cur->addr.p.tbl,
+		if (rpool->addr.type == PF_ADDR_TABLE) {
+			if (pfr_pool_get(rpool->addr.p.tbl,
 			    &rpool->tblidx, &rpool->counter,
-			    &raddr, &rmask, af))
-				goto get_addr;
-		} else if (rpool->cur->addr.type == PF_ADDR_DYNIFTL) {
-			if (!pfr_pool_get(rpool->cur->addr.p.dyn->pfid_kt,
+			    &raddr, &rmask, &rpool->kif, af))
+				return (1);
+		} else if (rpool->addr.type == PF_ADDR_DYNIFTL) {
+			if (pfr_pool_get(rpool->addr.p.dyn->pfid_kt,
 			    &rpool->tblidx, &rpool->counter,
-			    &raddr, &rmask, af))
-				goto get_addr;
+			    &raddr, &rmask, &rpool->kif, af))
+				return (1);
 		} else if (pf_match_addr(0, raddr, rmask, &rpool->counter, af))
-			goto get_addr;
+			return (1);
 
-	try_next:
-		if ((rpool->cur = TAILQ_NEXT(rpool->cur, entries)) == NULL)
-			rpool->cur = TAILQ_FIRST(&rpool->list);
-		if (rpool->cur->addr.type == PF_ADDR_TABLE) {
-			rpool->tblidx = -1;
-			if (pfr_pool_get(rpool->cur->addr.p.tbl,
-			    &rpool->tblidx, &rpool->counter,
-			    &raddr, &rmask, af)) {
-				/* table contains no address of type 'af' */
-				if (rpool->cur != acur)
-					goto try_next;
-				return (1);
-			}
-		} else if (rpool->cur->addr.type == PF_ADDR_DYNIFTL) {
-			rpool->tblidx = -1;
-			if (pfr_pool_get(rpool->cur->addr.p.dyn->pfid_kt,
-			    &rpool->tblidx, &rpool->counter,
-			    &raddr, &rmask, af)) {
-				/* table contains no address of type 'af' */
-				if (rpool->cur != acur)
-					goto try_next;
-				return (1);
-			}
-		} else {
-			raddr = &rpool->cur->addr.v.a.addr;
-			rmask = &rpool->cur->addr.v.a.mask;
-			PF_ACPY(&rpool->counter, raddr, af);
-		}
-
-	get_addr:
 		PF_ACPY(naddr, &rpool->counter, af);
 		if (init_addr != NULL && PF_AZERO(init_addr, af))
 			PF_ACPY(init_addr, naddr, af);
 		PF_AINC(&rpool->counter, af);
 		break;
 	}
-	if (*sn != NULL)
-		PF_ACPY(&(*sn)->raddr, naddr, af);
 
-	if (pf_status.debug >= PF_DEBUG_NOISY &&
+	if (rpool->opts & PF_POOL_STICKYADDR) {
+		if (sns[type] != NULL) {
+			pf_remove_src_node(sns[type]);
+			sns[type] = NULL;
+		}
+		if (pf_insert_src_node(&sns[type], r, type, af, saddr, naddr,
+		    0))
+			return (1);
+	}
+
+	if (pf_status.debug >= LOG_NOTICE &&
 	    (rpool->opts & PF_POOL_TYPEMASK) != PF_POOL_NONE) {
-		printf("pf_map_addr: selected address ");
+		log(LOG_NOTICE, "pf: pf_map_addr: selected address ");
 		pf_print_host(naddr, 0, af);
-		printf("\n");
+		addlog("\n");
 	}
 
 	return (0);
 }
 
 int
-pf_get_transaddr(struct pf_rule *r, struct pf_pdesc *pd, struct pf_addr *saddr,
-    u_int16_t *sport, struct pf_addr *daddr, u_int16_t *dport)
+pf_get_transaddr(struct pf_rule *r, struct pf_pdesc *pd,
+    struct pf_src_node **sns)
 {
 	struct pf_addr	naddr;
 	u_int16_t	nport = 0;
 
-	struct pf_src_node srcnode, *sn = &srcnode;
-
-	if (!TAILQ_EMPTY(&r->nat.list)) {
-		if (pf_get_sport(pd->af, pd->proto, r, saddr,
-		    daddr, *dport, &naddr, &nport, r->nat.proxy_port[0],
-		    r->nat.proxy_port[1], &sn)) {
-			DPFPRINTF(PF_DEBUG_MISC,
-			    ("pf: NAT proxy port allocation "
-			    "(%u-%u) failed\n",
+	if (r->nat.addr.type != PF_ADDR_NONE) {
+		/* XXX is this right? what if rtable is changed at the same
+		 * XXX time? where do I need to figure out the sport? */
+		if (pf_get_sport(pd, r, &naddr, &nport,
+		    r->nat.proxy_port[0], r->nat.proxy_port[1], sns)) {
+			DPFPRINTF(LOG_NOTICE,
+			    "pf: NAT proxy port allocation (%u-%u) failed",
 			    r->nat.proxy_port[0],
-			    r->nat.proxy_port[1]));
+			    r->nat.proxy_port[1]);
 			return (-1);
 		}
-		PF_ACPY(saddr, &naddr, pd->af);
-		if (nport)
-			*sport = nport;
+		PF_ACPY(&pd->nsaddr, &naddr, pd->af);
+		pd->nsport = nport;
 	}
-	if (!TAILQ_EMPTY(&r->rdr.list)) {
-		if (pf_map_addr(pd->af, r, saddr, &naddr, NULL, &sn, &r->rdr))
+	if (r->rdr.addr.type != PF_ADDR_NONE) {
+		if (pf_map_addr(pd->af, r, &pd->nsaddr, &naddr, NULL, sns,
+		    &r->rdr, PF_SN_RDR))
 			return (-1);
 		if ((r->rdr.opts & PF_POOL_TYPEMASK) == PF_POOL_BITMASK)
-			PF_POOLMASK(&naddr, &naddr,  &r->rdr.cur->addr.v.a.mask,
-			    daddr, pd->af);
+			PF_POOLMASK(&naddr, &naddr,  &r->rdr.addr.v.a.mask,
+			    &pd->ndaddr, pd->af);
 
 			if (r->rdr.proxy_port[1]) {
 				u_int32_t	tmp_nport;
 
-				tmp_nport = ((ntohs(*dport) -
+				tmp_nport = ((ntohs(pd->ndport) -
 				    ntohs(r->dst.port[0])) %
 				    (r->rdr.proxy_port[1] -
 				    r->rdr.proxy_port[0] + 1)) +
@@ -487,11 +465,10 @@ pf_get_transaddr(struct pf_rule *r, struct pf_pdesc *pd, struct pf_addr *saddr,
 			} else if (r->rdr.proxy_port[0])
 				nport = htons(r->rdr.proxy_port[0]);
 
-		PF_ACPY(daddr, &naddr, pd->af);
+		PF_ACPY(&pd->ndaddr, &naddr, pd->af);
 		if (nport)
-			*dport = nport;
+			pd->ndport = nport;
 	}
 
 	return (0);
 }
-

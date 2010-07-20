@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.110 2009/09/17 13:27:24 claudio Exp $	*/
+/*	$OpenBSD: if.h,v 1.117 2010/06/26 19:49:54 claudio Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -36,6 +36,7 @@
 #define _NET_IF_H_
 
 #include <sys/queue.h>
+#include <sys/tree.h>
 
 /*
  * Always include ALTQ glue here -- we use the ALTQ interface queue
@@ -265,6 +266,10 @@ struct ifnet {				/* and the entries */
 					/* output routine (enqueue) */
 	int	(*if_output)(struct ifnet *, struct mbuf *, struct sockaddr *,
 		     struct rtentry *);
+
+					/* link level output function */
+	int	(*if_ll_output)(struct ifnet *, struct mbuf *,
+		    struct sockaddr *, struct rtentry *);
 					/* initiate output routine */
 	void	(*if_start)(struct ifnet *);
 					/* ioctl routine */
@@ -322,8 +327,10 @@ struct ifnet {				/* and the entries */
 	(IFF_BROADCAST|IFF_POINTOPOINT|IFF_RUNNING|IFF_OACTIVE|\
 	    IFF_SIMPLEX|IFF_MULTICAST|IFF_ALLMULTI)
 
-#define IFXF_TXREADY	0x1		/* interface is ready to tx */
-#define	IFXF_NOINET6	0x2		/* don't do inet6 */
+#define IFXF_TXREADY		0x1		/* interface is ready to tx */
+#define	IFXF_NOINET6		0x2		/* don't do inet6 */
+#define	IFXF_INET6_PRIVACY	0x4		/* autoconf privacy extension */
+#define	IFXF_MPLS		0x8		/* supports MPLS */
 
 #define IFXF_RTSOL	0x100		/* ipv6 autoconfiguration */
 #define IFXF_AUTOCONF	0xF00		/* ip autoconfiguration */
@@ -454,6 +461,14 @@ struct ifaddr {
 };
 #define	IFA_ROUTE	RTF_UP		/* route installed */
 
+struct ifaddr_item {
+	RB_ENTRY(ifaddr_item)	 ifai_entry;
+	struct sockaddr		*ifai_addr;
+	struct ifaddr		*ifai_ifa;
+	struct ifaddr_item	*ifai_next;
+	u_int			 ifai_rdomain;
+};
+
 /*
  * Message format for use in obtaining information about interfaces
  * from sysctl and the routing socket.
@@ -465,7 +480,8 @@ struct if_msghdr {
 	u_short ifm_hdrlen;	/* sizeof(if_msghdr) to skip over the header */
 	u_short	ifm_index;	/* index for associated ifp */
 	u_short	ifm_tableid;	/* routing table id */
-	u_short ifm_pad;
+	u_char	ifm_pad1;
+	u_char	ifm_pad2;
 	int	ifm_addrs;	/* like rtm_addrs */
 	int	ifm_flags;	/* value of if_flags */
 	int	ifm_xflags;
@@ -483,7 +499,8 @@ struct ifa_msghdr {
 	u_short ifam_hdrlen;	/* sizeof(ifa_msghdr) to skip over the header */
 	u_short	ifam_index;	/* index for associated ifp */
 	u_short	ifam_tableid;	/* routing table id */
-	u_short ifam_pad;
+	u_char	ifam_pad1;
+	u_char	ifam_pad2;
 	int	ifam_addrs;	/* like rtm_addrs */
 	int	ifam_flags;	/* value of ifa_flags */
 	int	ifam_metric;	/* value of ifa_metric */
@@ -605,6 +622,12 @@ struct ifmediareq {
 	int	ifm_count;			/* # entries in ifm_ulist
 							array */
 	int	*ifm_ulist;			/* media words */
+};
+
+struct ifkalivereq {
+	char	ikar_name[IFNAMSIZ];		/* if name, e.g. "en0" */
+	int	ikar_timeo;
+	int	ikar_cnt;
 };
 
 /*
@@ -801,6 +824,7 @@ int	if_delgroup(struct ifnet *, const char *);
 void	if_group_routechange(struct sockaddr *, struct sockaddr *);
 struct	ifnet *ifunit(const char *);
 void	if_start(struct ifnet *);
+void	ifnewlladdr(struct ifnet *);
 
 struct	ifaddr *ifa_ifwithaddr(struct sockaddr *, u_int);
 struct	ifaddr *ifa_ifwithaf(int, u_int);
@@ -827,5 +851,7 @@ void	loopattach(int);
 int	looutput(struct ifnet *,
 	    struct mbuf *, struct sockaddr *, struct rtentry *);
 void	lortrequest(int, struct rtentry *, struct rt_addrinfo *);
+void	ifa_add(struct ifnet *, struct ifaddr *);
+void	ifa_del(struct ifnet *, struct ifaddr *);
 #endif /* _KERNEL */
 #endif /* _NET_IF_H_ */

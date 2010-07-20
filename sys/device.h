@@ -1,4 +1,4 @@
-/*	$OpenBSD: device.h,v 1.38 2009/10/13 19:33:19 pirofti Exp $	*/
+/*	$OpenBSD: device.h,v 1.41 2009/11/23 14:12:10 deraadt Exp $	*/
 /*	$NetBSD: device.h,v 1.15 1996/04/09 20:55:24 cgd Exp $	*/
 
 /*
@@ -64,6 +64,8 @@ enum devclass {
  */
 #define	DVACT_ACTIVATE		0	/* activate the device */
 #define	DVACT_DEACTIVATE	1	/* deactivate the device */
+#define	DVACT_SUSPEND		2	/* suspend the device */
+#define	DVACT_RESUME		3	/* resume the device */
 
 struct device {
 	enum	devclass dv_class;	/* this device's classification */
@@ -184,6 +186,7 @@ int config_detach(struct device *, int);
 int config_detach_children(struct device *, int);
 int config_activate(struct device *);
 int config_deactivate(struct device *);
+int config_suspend(struct device *, int);
 int config_activate_children(struct device *, int);
 struct device *config_make_softc(struct device *parent,
     struct cfdata *cf);

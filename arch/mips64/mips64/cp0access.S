@@ -1,4 +1,4 @@
-/*	$OpenBSD: cp0access.S,v 1.10 2009/10/22 18:46:48 miod Exp $ */
+/*	$OpenBSD: cp0access.S,v 1.13 2010/04/28 16:20:28 syuu Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -128,6 +128,9 @@ LEAF(updateimask, 0)
 	or	v1, v0
 	mtc0	v1, COP_0_STATUS_REG
 	ITLBNOPFIX
+	ori	v1, SR_INT_ENAB		# enable interrupts
+	mtc0	v1, COP_0_STATUS_REG
+	ITLBNOPFIX
 	jr	ra
 	move	v0, v1
 END(updateimask)
@@ -144,6 +147,12 @@ LEAF(getsr, 0)
 	jr	ra
 	nop
 END(getsr)
+
+LEAF(cp0_get_config, 0)
+	mfc0	v0, COP_0_CONFIG
+	j	ra
+	nop
+END(cp0_get_config)
 
 LEAF(cp0_get_prid, 0)
 	mfc0	v0, COP_0_PRID
@@ -183,3 +192,17 @@ LEAF(cp0_setperfctrl, 0)
 	j	ra
 	nop
 END(cp0_setperfctrl)
+
+#ifdef MULTIPROCESSOR
+LEAF(getcurcpu, 0)
+	GET_CPU_INFO(v0, v1)
+	jr	ra
+	nop
+END(getcurcpu)
+
+LEAF(setcurcpu, 0)
+	mtc0	a0, COP_0_LLADDR
+	j	ra
+	nop
+END(setcurcpu)
+#endif

@@ -1,6 +1,6 @@
-/*	$OpenBSD: autoconf.c,v 1.26 2009/10/26 20:14:42 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.32 2010/04/06 19:15:29 miod Exp $	*/
 /*
- * Copyright (c) 2009 Miodrag Vallat.
+ * Copyright (c) 2009, 2010 Miodrag Vallat.
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -95,9 +95,19 @@
 #include <sys/device.h>
 
 #include <machine/autoconf.h>
+#include <machine/memconf.h>
+
 #include <mips64/arcbios.h>
 #include <mips64/archtype.h>
 
+#include <uvm/uvm_extern.h>
+
+#ifdef TGT_ORIGIN
+#include <machine/mnode.h>
+#endif
+#ifdef TGT_OCTANE
+#include <sgi/sgi/ip30.h>
+#endif
 #include <sgi/xbow/xbow.h>
 #include <dev/pci/pcivar.h>
 #include <scsi/scsi_all.h>
@@ -105,12 +115,7 @@
 
 extern void dumpconf(void);
 
-static u_long atoi(const char *, int, const char **);
-
-void	bootpath_convert(void);
-const char *bootpath_get(int *);
-void	bootpath_init(void);
-void	bootpath_next(void);
+static u_long strtoul(const char *, int, const char **);
 
 /*
  * The following several variables are related to
@@ -119,6 +124,7 @@ void	bootpath_next(void);
  */
 int	cold = 1;			/* if 1, still working on cold-start */
 struct device *bootdv = NULL;
+int16_t	currentnasid = 0;
 
 char	osloadpartition[256];
 
@@ -153,13 +159,103 @@ diskconf(void)
 	dumpconf();
 }
 
+/*
+ * Register a memory region.
+ */
+int
+memrange_register(uint64_t startpfn, uint64_t endpfn, uint64_t bmask,
+    unsigned int freelist)
+{
+	struct phys_mem_desc *cur, *m = NULL;
+	int i;
+
+#ifdef DEBUG
+{
+	extern int console_ok;
+
+	if (console_ok)
+		printf("%s: memory from %p to %p\n",
+		    __func__, ptoa(startpfn), ptoa(endpfn));
+	else
+		bios_printf("%s: memory from %p to %p\n",
+		     __func__, ptoa(startpfn), ptoa(endpfn));
+}
+#endif
+	physmem += endpfn - startpfn;
+
+#ifdef TGT_OCTANE
+	/*
+	 * On Octane, the second 16KB page is reserved for the NMI handler.
+	 */
+	if (sys_config.system_type == SGI_OCTANE &&
+	    startpfn < atop(IP30_MEMORY_BASE) + 2) {
+		startpfn = atop(IP30_MEMORY_BASE) + 2;
+		if (startpfn >= endpfn)
+			return 0;
+	}
+#endif
+	/*
+	 * Prevent use of memory above 16GB physical, until pmap can support
+	 * this.
+	 */
+	if (startpfn >= atop(16UL * 1024 * 1024 * 1024))
+		return 0;
+	if (endpfn >= atop(16UL * 1024 * 1024 * 1024))
+		endpfn = atop(16UL * 1024 * 1024 * 1024);
+	
+	for (i = 0, cur = mem_layout; i < MAXMEMSEGS; i++, cur++) {
+		if (cur->mem_last_page == 0) {
+			if (m == NULL)
+				m = cur;	/* first free segment */
+			continue;
+		}
+		/* merge contiguous areas if on the same freelist */
+		if (cur->mem_freelist == freelist) {
+			if (cur->mem_first_page == endpfn &&
+			    ((cur->mem_last_page ^ startpfn) & bmask) == 0) {
+				cur->mem_first_page = startpfn;
+				return 0;
+			}
+			if (cur->mem_last_page == startpfn &&
+			    ((cur->mem_first_page ^ endpfn) & bmask) == 0) {
+				cur->mem_last_page = endpfn;
+				return 0;
+			}
+		}
+	}
+
+	if (m == NULL)
+		return ENOMEM;
+	
+	m->mem_first_page = startpfn;
+	m->mem_last_page = endpfn;
+	m->mem_freelist = freelist;
+	return 0;
+}
+
+void	(*_device_register)(struct device *, void *);
+
+void
+device_register(struct device *dev, void *aux)
+{
+	if (_device_register)
+		(*_device_register)(dev, aux);
+}
+
+#if defined(TGT_O2) || defined(TGT_OCTANE)
+
+/*
+ * ARCS boot path traversal
+ */
+
+const char *bootpath_get(int *);
+void	bootpath_init(void);
+void	bootpath_next(void);
+
 static char bootpath_store[sizeof osloadpartition];
 static char *bootpath_curpos;
 static char *bootpath_lastpos;
 static int bootpath_lastunit;
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
-static int dksc_ctrl, dksc_mode;
-#endif
 
 /*
  * Initialize bootpath analysis.
@@ -169,63 +265,7 @@ bootpath_init()
 {
 	strlcpy(bootpath_store, osloadpartition, sizeof bootpath_store);
 	bootpath_curpos = bootpath_store;
-
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
-	/*
-	 * If this is the first time we're ever invoked,
-	 * check for a dksc() syntax and rewrite it as
-	 * something more friendly to us.
-	 */
-	if (strncmp(bootpath_store, "dksc(", 5) == 0)
-		bootpath_convert();
-#endif
 }
-
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
-/*
- * Convert a `dksc()' bootpath into an ARC-friendly bootpath.
- */
-void
-bootpath_convert()
-{
-	int val[3], idx;
-	char *c;
-
-	val[0] = val[1] = val[2] = 0;
-	idx = 0;
-
-	for (c = bootpath_store + 5; *c != '\0'; c++) {
-		if (*c == ')')
-			break;
-		else if (*c == ',') {
-			if (++idx == 3)
-				break;
-		} else if (*c >= '0' && *c <= '9')
-			val[idx] = 10 * val[idx] + (*c - '0');
-	}
-
-	/*
-	 * We can not convert the dksc() bootpath to an exact ARCS bootpath
-	 * without knowing our device tree already.  This is because
-	 * the controller number is not an absolute locator, but rather an
-	 * occurence number.
-	 *
-	 * So we convert to an incomplete ARCS bootpath and have explicit
-	 * dksc handling in device_register().  This relies on our device
-	 * probe order matching ARCS.
-	 */
-
-	dksc_ctrl = val[0];
-	dksc_mode = 1;
-	snprintf(bootpath_store, sizeof bootpath_store,
-	    "scsi(%d)disk(%d)rdisk(0)partition(%d)",
-	    val[0], val[1], val[2]);
-#ifdef DEBUG
-	printf("%s: converting %s to %s\n",
-	    __func__, osloadpartition, bootpath_store);
-#endif
-}
-#endif
 
 /*
  * Extract a component of the boot path, and return its name and unit
@@ -284,7 +324,7 @@ bootpath_next()
 }
 
 void
-device_register(struct device *dev, void *aux)
+arcs_device_register(struct device *dev, void *aux)
 {
 	static struct device *lastparent = NULL;
 	static struct device *pciparent = NULL;
@@ -313,12 +353,8 @@ device_register(struct device *dev, void *aux)
 	 * pci() matches any pci controller (macepcibr, xbridge), with the
 	 *   unit number being ignored on O2 and the widget number of the
 	 *   controller elsewhere.
-	 *   XXX I have no idea how this works when PIC devices are involved
-	 *   XXX since they provide two distinct PCI buses...
-	 *   XXX ...and our device numbering is off by one in that case.
 	 * scsi() matches any pci scsi controller, with the unit number
-	 *   being the pci device number (minus one on the O2, grr),
-	 *   or the scsibus number in dksc mode.
+	 *   being the pci device number (minus one on the O2, grr).
 	 * disk() and cdrom() match sd and cd, respectively, with the
 	 *   unit number being the target number.
 	 *
@@ -359,8 +395,7 @@ device_register(struct device *dev, void *aux)
 		}
 		if (strcmp(cd->cd_name, "xbpci") == 0 &&
 		    parent == lastparent) {
-			if (1)	/* how to match the exact bus number? */
-				goto found;
+			goto found;
 		}
 	}
 
@@ -372,26 +407,13 @@ device_register(struct device *dev, void *aux)
 		 *
 		 * Then we'll only advance the bootpath when matching the
 		 * scsibus device.
-		 *
-		 * With a dksc bootpath, things are a little different:
-		 * we need to count scsi controllers, until we find ours.
 		 */
-
-#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
-		if (dksc_mode) {
-			if (strcmp(cd->cd_name, "scsibus") == 0 &&
-			    dev->dv_unit == dksc_ctrl)
-				goto found_advance;
-
-			return;
-		}
-#endif
 
 		if (strcmp(cd->cd_name, "scsibus") == 0) {
 			if (parent == lastparent)
 				goto found_advance;
 
-#if defined(TGT_O2)
+#ifdef TGT_O2
 			/*
 			 * On O2, the pci(0) component may be omitted from
 			 * the bootpath, in which case we fake the missing
@@ -455,6 +477,182 @@ found:
 	lastparent = dev;
 }
 
+#endif	/* defined(TGT_O2) || defined(TGT_OCTANE) */
+
+#ifdef TGT_ORIGIN
+
+/*
+ * Origin (dksc) boot path analysis
+ */
+
+void	dksc_init(void);
+int	dksc_scan_board(lboard_t *, void *);
+int	dksc_scan_cmp(klinfo_t *, void *);
+
+static struct sgi_device_location dksc_device;
+static int dksc_ctrl, dksc_unit;
+static const char *dksc_devname;
+
+void
+dksc_init()
+{
+	int val[3], idx;
+	char *c = NULL;
+
+	if (strncmp(osloadpartition, "dksc(", 5) == 0) {
+		c = osloadpartition + 5;
+		dksc_devname = "sd";
+	} else if (strncmp(osloadpartition, "cdrom(", 6) == 0) {
+		c = osloadpartition + 6;
+		dksc_devname = "cd";
+	}
+
+	if (c == NULL)
+		return;
+
+	val[0] = val[1] = val[2] = 0;
+	idx = 0;
+
+	for (; *c != '\0'; c++) {
+		if (*c == ')')
+			break;
+		else if (*c == ',') {
+			if (++idx == 3)
+				break;
+		} else if (*c >= '0' && *c <= '9')
+			val[idx] = 10 * val[idx] + (*c - '0');
+	}
+
+	dksc_ctrl = val[0];
+	dksc_unit = val[1];
+
+	/*
+	 * Walk kl configuration and try to match the boot controller
+	 * with a component.
+	 */
+	kl_scan_all_nodes(KLBRD_ANY, dksc_scan_board, NULL);
+}
+
+int
+dksc_scan_board(lboard_t *brd, void *arg)
+{
+	kl_scan_board(brd, KLSTRUCT_ANY, dksc_scan_cmp, arg);
+	return 0;
+}
+
+int
+dksc_scan_cmp(klinfo_t *cmp, void *arg)
+{
+	klscctl_t *scsi2comp;
+	klscsi_t *scsicomp;
+	int i;
+
+	/* bail out quickly if no controller number */
+	if (cmp->virtid < 0)
+		return 0;
+
+	switch (cmp->struct_type) {
+	case KLSTRUCT_SCSI:
+	case KLSTRUCT_FIBERCHANNEL:
+	case KLSTRUCT_QLFIBRE:
+	case KLSTRUCT_FIREWIRE:
+#if 0	/* should not get controller numbers anyway */
+	case KLSTRUCT_IDE:
+	case KLSTRUCT_IOC4_ATA:
+#endif
+		if (cmp->virtid == dksc_ctrl) {
+			kl_get_location(cmp, &dksc_device);
+			return 1;
+		}
+		break;
+	case KLSTRUCT_SCSI2:
+		/*
+		 * Figure out whether one of the two ports matches our
+		 * controller number.
+		 */
+		scsi2comp = (klscctl_t *)cmp;
+		for (i = 0; i < scsi2comp->scsi_buscnt; i++) {
+			scsicomp = (klscsi_t *)scsi2comp->scsi_bus[i];
+			if (scsicomp->scsi_info.virtid == dksc_ctrl) {
+				kl_get_location(cmp, &dksc_device);
+				dksc_device.specific = i;	/* port # */
+				return 1;
+			}
+		}
+		break;
+	}
+
+	return 0;
+}
+
+void
+dksc_device_register(struct device *dev, void *aux)
+{
+	static int dksc_state = 0;
+	static struct device *controller = NULL;
+	static struct device *scsibus = NULL;
+
+	struct device *parent = dev->dv_parent;
+	struct cfdata *cf = dev->dv_cfdata;
+	struct cfdriver *cd = cf->cf_driver;
+
+	struct sgi_device_location dl;
+
+	if (dksc_state == 0) {
+		dksc_state = 1;
+		dksc_init();
+	}
+
+	if (parent == NULL)
+		return;		/* one of the @root devices */
+
+	if (bootdv != NULL)
+		return;
+
+	/*
+	 * If we already know our bus, try to match the correct device.
+	 */
+	if (scsibus != NULL) {
+		if (strcmp(cd->cd_name, dksc_devname) == 0) {
+			struct scsi_attach_args *saa = aux;
+			if (dksc_unit == saa->sa_sc_link->target)
+				bootdv = dev;
+		}
+		return;
+	}
+
+	/*
+	 * If we already know our controller driver, try to match the
+	 * correct scsibus.
+	 */
+	if (controller != NULL) {
+		if (parent == controller &&
+		    strcmp(cd->cd_name, "scsibus") == 0) {
+			/* only match on the required bus */
+			if (dksc_device.specific == 0)
+				scsibus = dev;
+			else
+				dksc_device.specific--;
+		}
+		return;
+	}
+
+	/*
+	 * If we are investigating a PCI bus, check whether the current
+	 * device may be the controller we are looking for.
+	 */
+
+	if (strcmp(parent->dv_cfdata->cf_driver->cd_name, "pci") == 0) {
+		struct pci_attach_args *paa = aux;
+		if (pci_get_device_location(paa->pa_pc, paa->pa_tag, &dl) &&
+		    location_match(&dksc_device, &dl))
+			controller = dev;
+		return;
+	}
+}
+
+#endif
+
 struct nam2blk nam2blk[] = {
 	{ "sd",		0 },
 	{ "wd",		4 },
@@ -473,7 +671,7 @@ enaddr_aton(const char *s, u_int8_t *a)
 
 	if (s != NULL) {
 		for (i = 0; i < 6; i++) {
-			a[i] = atoi(s, 16, &s);
+			a[i] = strtoul(s, 16, &s);
 			if (*s == ':')
 				s++;
 		}
@@ -491,7 +689,7 @@ bios_getenvint(const char *name)
 
 	envvar = Bios_GetEnvironmentVariable(name);
 	if (envvar != NULL) {
-		value = atoi(envvar, 10, &envvar);
+		value = strtoul(envvar, 10, &envvar);
 		if (*envvar != '\0')
 			value = 0;
 	} else
@@ -504,7 +702,7 @@ bios_getenvint(const char *name)
  * Convert an ASCII string into an integer.
  */
 static u_long
-atoi(const char *s, int b, const char **o)
+strtoul(const char *s, int b, const char **o)
 {
 	int c;
 	unsigned base = b, d;
@@ -568,4 +766,35 @@ atoi(const char *s, int b, const char **o)
 	if (o != NULL)
 		*o = s - 1;
 	return val;
+}
+
+/*
+ * Relaxed comparison of two devices' physical location.
+ */
+int
+location_match(struct sgi_device_location *l1, struct sgi_device_location *l2)
+{
+	/* must be on the same widget */
+	if (l1->nasid != l2->nasid || l1->widget != l2->widget)
+		return 0;
+
+	/* must be on the same PCI bus, if applicable */
+	if (l1->bus == -1 || l2->bus == -1)
+		return 1;
+	if (l1->bus != l2->bus)
+		return 0;
+
+	/* must be the same PCI device, if applicable */
+	if (l1->device == -1 || l2->device == -1)
+		return 1;
+	if (l1->device != l2->device)
+		return 0;
+
+	/* must be the same PCI function, if applicable */
+	if (l1->fn == -1 || l2->fn == -1)
+		return 1;
+	if (l1->fn != l2->fn)
+		return 0;
+
+	return 1;
 }

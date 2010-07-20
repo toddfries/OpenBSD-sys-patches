@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcons.c,v 1.15 2009/10/31 06:40:16 deraadt Exp $	*/
+/*	$OpenBSD: pcons.c,v 1.18 2010/06/28 14:13:31 deraadt Exp $	*/
 /*	$NetBSD: pcons.c,v 1.7 2001/05/02 10:32:20 scw Exp $	*/
 
 /*-
@@ -226,7 +226,7 @@ pconsopen(dev, flag, mode, p)
 		return ENXIO;
 #endif
 	if (!(tp = sc->of_tty)) {
-		sc->of_tty = tp = ttymalloc();
+		sc->of_tty = tp = ttymalloc(0);
 	}
 	tp->t_oproc = pconsstart;
 	tp->t_param = pconsparam;
@@ -250,7 +250,7 @@ pconsopen(dev, flag, mode, p)
 		timeout_add(&sc->sc_poll_to, 1);
 	}
 
-	return (*linesw[tp->t_line].l_open)(dev, tp);
+	return (*linesw[tp->t_line].l_open)(dev, tp, p);
 }
 
 int
@@ -264,7 +264,7 @@ pconsclose(dev, flag, mode, p)
 
 	timeout_del(&sc->sc_poll_to);
 	sc->of_flags &= ~OFPOLL;
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	ttyclose(tp);
 	return 0;
 }
@@ -359,7 +359,6 @@ pconsstart(tp)
 			wakeup(cl);
 		}
 		selwakeup(&tp->t_wsel);
-		KNOTE(&tp->t_wsel.si_note, 0);
 	}
 	splx(s);
 }

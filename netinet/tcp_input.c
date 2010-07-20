@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.228 2009/08/20 13:25:42 bluhm Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.234 2010/07/09 16:58:06 reyk Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -96,6 +96,9 @@
 #include <netinet/tcp_debug.h>
 
 #include "faith.h"
+#if NFAITH > 0
+#include <net/if_types.h>
+#endif
 
 #include "pf.h"
 #if NPF > 0
@@ -720,7 +723,7 @@ findpcb:
 			if ((tiflags & (TH_RST|TH_ACK|TH_SYN)) != TH_SYN) {
 				if (tiflags & TH_RST) {
 					syn_cache_reset(&src.sa, &dst.sa, th,
-					    inp->inp_rdomain);
+					    inp->inp_rtableid);
 				} else if ((tiflags & (TH_ACK|TH_SYN)) ==
 				    (TH_ACK|TH_SYN)) {
 					/*
@@ -890,7 +893,8 @@ after_listen:
         s = splnet();
 	if (mtag != NULL) {
 		tdbi = (struct tdb_ident *)(mtag + 1);
-	        tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+	        tdb = gettdb(tdbi->rdomain, tdbi->spi,
+		    &tdbi->dst, tdbi->proto);
 	} else
 		tdb = NULL;
 	ipsp_spd_lookup(m, af, iphlen, &error, IPSP_DIRECTION_IN,
@@ -959,7 +963,8 @@ after_listen:
 #else
 	if (optp)
 #endif
-		if (tcp_dooptions(tp, optp, optlen, th, m, iphlen, &opti))
+		if (tcp_dooptions(tp, optp, optlen, th, m, iphlen, &opti,
+		    m->m_pkthdr.rdomain))
 			goto drop;
 
 	if (opti.ts_present && opti.ts_ecr) {
@@ -2218,12 +2223,12 @@ dropwithreset:
 		goto drop;
 	if (tiflags & TH_ACK) {
 		tcp_respond(tp, mtod(m, caddr_t), th, (tcp_seq)0, th->th_ack,
-		    TH_RST);
+		    TH_RST, 0);
 	} else {
 		if (tiflags & TH_SYN)
 			tlen++;
 		tcp_respond(tp, mtod(m, caddr_t), th, th->th_seq + tlen,
-		    (tcp_seq)0, TH_RST|TH_ACK);
+		    (tcp_seq)0, TH_RST|TH_ACK, 0);
 	}
 	m_freem(m);
 	return;
@@ -2253,7 +2258,8 @@ drop:
 
 int
 tcp_dooptions(struct tcpcb *tp, u_char *cp, int cnt, struct tcphdr *th,
-    struct mbuf *m, int iphlen, struct tcp_opt_info *oi)
+    struct mbuf *m, int iphlen, struct tcp_opt_info *oi,
+    u_int rtableid)
 {
 	u_int16_t mss = 0;
 	int opt, optlen;
@@ -2385,7 +2391,8 @@ tcp_dooptions(struct tcpcb *tp, u_char *cp, int cnt, struct tcphdr *th,
 #endif /* INET6 */
 		}
 
-		tdb = gettdbbysrcdst(0, &src, &dst, IPPROTO_TCP);
+		tdb = gettdbbysrcdst(rtable_l2(rtableid),
+		    0, &src, &dst, IPPROTO_TCP);
 
 		/*
 		 * We don't have an SA for this peer, so we turn off
@@ -3035,7 +3042,7 @@ tcp_mss(struct tcpcb *tp, int offer)
 	else if (tp->pf == AF_INET) {
 		if (ip_mtudisc)
 			mss = ifp->if_mtu - iphlen - sizeof(struct tcphdr);
-		else if (inp && in_localaddr(inp->inp_faddr, inp->inp_rdomain))
+		else if (inp && in_localaddr(inp->inp_faddr, inp->inp_rtableid))
 			mss = ifp->if_mtu - iphlen - sizeof(struct tcphdr);
 	}
 #ifdef INET6
@@ -3561,7 +3568,7 @@ syn_cache_cleanup(struct tcpcb *tp)
  */
 struct syn_cache *
 syn_cache_lookup(struct sockaddr *src, struct sockaddr *dst,
-    struct syn_cache_head **headp, u_int rdomain)
+    struct syn_cache_head **headp, u_int rtableid)
 {
 	struct syn_cache *sc;
 	struct syn_cache_head *scp;
@@ -3579,7 +3586,7 @@ syn_cache_lookup(struct sockaddr *src, struct sockaddr *dst,
 			continue;
 		if (!bcmp(&sc->sc_src, src, src->sa_len) &&
 		    !bcmp(&sc->sc_dst, dst, dst->sa_len) &&
-		    rdomain == sc->sc_rdomain) {
+		    rtable_l2(rtableid) == rtable_l2(sc->sc_rtableid)) {
 			splx(s);
 			return (sc);
 		}
@@ -3625,7 +3632,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 
 	s = splsoftnet();
 	if ((sc = syn_cache_lookup(src, dst, &scp,
-	    m->m_pkthdr.rdomain)) == NULL) {
+	    sotoinpcb(so)->inp_rtableid)) == NULL) {
 		splx(s);
 		return (NULL);
 	}
@@ -3705,8 +3712,8 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	inp = (struct inpcb *)so->so_pcb;
 #endif /* INET6 */
 
-	/* inherit rdomain from listening socket */
-	inp->inp_rdomain = sc->sc_rdomain;
+	/* inherit rtable from listening socket */
+	inp->inp_rtableid = sc->sc_rtableid;
 
 	inp->inp_lport = th->th_dport;
 	switch (src->sa_family) {
@@ -3845,7 +3852,8 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	return (so);
 
 resetandabort:
-	tcp_respond(NULL, mtod(m, caddr_t), th, (tcp_seq)0, th->th_ack, TH_RST);
+	tcp_respond(NULL, mtod(m, caddr_t), th, (tcp_seq)0, th->th_ack, TH_RST,
+	    m->m_pkthdr.rdomain);
 	m_freem(m);
 abort:
 	if (so != NULL)
@@ -3863,13 +3871,13 @@ abort:
 
 void
 syn_cache_reset(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
-    u_int rdomain)
+    u_int rtableid)
 {
 	struct syn_cache *sc;
 	struct syn_cache_head *scp;
 	int s = splsoftnet();
 
-	if ((sc = syn_cache_lookup(src, dst, &scp, rdomain)) == NULL) {
+	if ((sc = syn_cache_lookup(src, dst, &scp, rtableid)) == NULL) {
 		splx(s);
 		return;
 	}
@@ -3886,14 +3894,14 @@ syn_cache_reset(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 
 void
 syn_cache_unreach(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
-    u_int rdomain)
+    u_int rtableid)
 {
 	struct syn_cache *sc;
 	struct syn_cache_head *scp;
 	int s;
 
 	s = splsoftnet();
-	if ((sc = syn_cache_lookup(src, dst, &scp, rdomain)) == NULL) {
+	if ((sc = syn_cache_lookup(src, dst, &scp, rtableid)) == NULL) {
 		splx(s);
 		return;
 	}
@@ -3978,7 +3986,8 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 			tb.t_flags |= TF_SIGNATURE;
 #endif
 		tb.t_state = TCPS_LISTEN;
-		if (tcp_dooptions(&tb, optp, optlen, th, m, iphlen, oi))
+		if (tcp_dooptions(&tb, optp, optlen, th, m, iphlen, oi,
+		    sotoinpcb(so)->inp_rtableid))
 			return (0);
 	} else
 		tb.t_flags = 0;
@@ -4001,8 +4010,8 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	 * If we do, resend the SYN,ACK.  We do not count this
 	 * as a retransmission (XXX though maybe we should).
 	 */
-	if ((sc = syn_cache_lookup(src, dst, &scp, m->m_pkthdr.rdomain)) !=
-	    NULL) {
+	if ((sc = syn_cache_lookup(src, dst, &scp, sotoinpcb(so)->inp_rtableid))
+	    != NULL) {
 		tcpstat.tcps_sc_dupesyn++;
 		if (ipopts) {
 			/*
@@ -4021,7 +4030,7 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 		return (1);
 	}
 
-	sc = pool_get(&syn_cache_pool, PR_NOWAIT);
+	sc = pool_get(&syn_cache_pool, PR_NOWAIT|PR_ZERO);
 	if (sc == NULL) {
 		if (ipopts)
 			(void) m_free(ipopts);
@@ -4032,11 +4041,9 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	 * Fill in the cache, and put the necessary IP and TCP
 	 * options into the reply.
 	 */
-	bzero(sc, sizeof(struct syn_cache));
-	bzero(&sc->sc_timer, sizeof(sc->sc_timer));
 	bcopy(src, &sc->sc_src, src->sa_len);
 	bcopy(dst, &sc->sc_dst, dst->sa_len);
-	sc->sc_rdomain = m->m_pkthdr.rdomain;
+	sc->sc_rtableid = sotoinpcb(so)->inp_rtableid;
 	sc->sc_flags = 0;
 	sc->sc_ipopts = ipopts;
 	sc->sc_irs = th->th_seq;
@@ -4164,7 +4171,7 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 	m->m_data += max_linkhdr;
 	m->m_len = m->m_pkthdr.len = tlen;
 	m->m_pkthdr.rcvif = NULL;
-	m->m_pkthdr.rdomain = sc->sc_rdomain;
+	m->m_pkthdr.rdomain = sc->sc_rtableid;
 	memset(mtod(m, u_char *), 0, tlen);
 
 	switch (sc->sc_src.sa.sa_family) {
@@ -4265,7 +4272,8 @@ syn_cache_respond(struct syn_cache *sc, struct mbuf *m)
 #endif /* INET6 */
 		}
 
-		tdb = gettdbbysrcdst(0, &src, &dst, IPPROTO_TCP);
+		tdb = gettdbbysrcdst(rtable_l2(sc->sc_rtableid),
+		    0, &src, &dst, IPPROTO_TCP);
 		if (tdb == NULL) {
 			if (m)
 				m_freem(m);

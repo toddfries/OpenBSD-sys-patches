@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpi.c,v 1.97 2009/10/31 11:52:07 damien Exp $	*/
+/*	$OpenBSD: if_wpi.c,v 1.100 2010/04/20 22:05:43 tedu Exp $	*/
 
 /*-
  * Copyright (c) 2006-2008
@@ -25,7 +25,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -33,7 +32,6 @@
 #include <sys/malloc.h>
 #include <sys/conf.h>
 #include <sys/device.h>
-#include <sys/sensors.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -72,9 +70,6 @@ static const struct pci_matchid wpi_devices[] = {
 
 int		wpi_match(struct device *, void *, void *);
 void		wpi_attach(struct device *, struct device *, void *);
-#ifndef SMALL_KERNEL
-void		wpi_sensor_attach(struct wpi_softc *);
-#endif
 #if NBPFILTER > 0
 void		wpi_radiotap_attach(struct wpi_softc *);
 #endif
@@ -125,7 +120,7 @@ int		wpi_mrr_setup(struct wpi_softc *);
 void		wpi_updateedca(struct ieee80211com *);
 void		wpi_set_led(struct wpi_softc *, uint8_t, uint8_t, uint8_t);
 int		wpi_set_timing(struct wpi_softc *, struct ieee80211_node *);
-void		wpi_power_calibration(struct wpi_softc *, int);
+void		wpi_power_calibration(struct wpi_softc *);
 int		wpi_set_txpower(struct wpi_softc *, int);
 int		wpi_get_power_index(struct wpi_softc *,
 		    struct wpi_power_group *, struct ieee80211_channel *, int);
@@ -325,9 +320,6 @@ wpi_attach(struct device *parent, struct device *self, void *aux)
 	sc->amrr.amrr_min_success_threshold =  1;
 	sc->amrr.amrr_max_success_threshold = 15;
 
-#ifndef SMALL_KERNEL
-	wpi_sensor_attach(sc);
-#endif
 #if NBPFILTER > 0
 	wpi_radiotap_attach(sc);
 #endif
@@ -343,25 +335,6 @@ fail2:	while (--i >= 0)
 	wpi_free_shared(sc);
 fail1:	wpi_free_fwmem(sc);
 }
-
-#ifndef SMALL_KERNEL
-/*
- * Attach the adapter on-board thermal sensor to the sensors framework.
- */
-void
-wpi_sensor_attach(struct wpi_softc *sc)
-{
-	strlcpy(sc->sensordev.xname, sc->sc_dev.dv_xname,
-	    sizeof sc->sensordev.xname);
-	strlcpy(sc->sensor.desc, "temperature 0 - 285",
-	    sizeof sc->sensor.desc);
-	sc->sensor.type = SENSOR_INTEGER;	/* not in muK! */
-	/* Temperature is not valid unless interface is up. */
-	sc->sensor.flags = SENSOR_FINVALID;
-	sensor_attach(&sc->sensordev, &sc->sensor);
-	sensordev_install(&sc->sensordev);
-}
-#endif
 
 #if NBPFILTER > 0
 /*
@@ -407,12 +380,6 @@ wpi_detach(struct device *self, int flags)
 	wpi_free_fwmem(sc);
 
 	bus_space_unmap(sc->sc_st, sc->sc_sh, sc->sc_sz);
-
-#ifndef SMALL_KERNEL
-	/* Detach the thermal sensor. */
-	sensor_detach(&sc->sensordev, &sc->sensor);
-	sensordev_deinstall(&sc->sensordev);
-#endif
 
 	ieee80211_ifdetach(ifp);
 	if_detach(ifp);
@@ -693,7 +660,7 @@ wpi_alloc_rx_ring(struct wpi_softc *sc, struct wpi_rx_ring *ring)
 
 		error = bus_dmamap_load(sc->sc_dmat, data->map,
 		    mtod(data->m, void *), WPI_RBUF_SIZE, NULL,
-		    BUS_DMA_NOWAIT);
+		    BUS_DMA_NOWAIT | BUS_DMA_READ);
 		if (error != 0) {
 			printf("%s: can't map mbuf (error %d)\n",
 			    sc->sc_dev.dv_xname, error);
@@ -1108,7 +1075,7 @@ wpi_calib_timeout(void *arg)
 {
 	struct wpi_softc *sc = arg;
 	struct ieee80211com *ic = &sc->sc_ic;
-	int temp, s;
+	int s;
 
 	s = splnet();
 	/* Automatic rate control triggered every 500ms. */
@@ -1118,13 +1085,10 @@ wpi_calib_timeout(void *arg)
 		else
 			ieee80211_iterate_nodes(ic, wpi_iter_func, sc);
 	}
-	/* Update sensor. */
-	temp = (int)WPI_READ(sc, WPI_UCODE_GP2);
-	sc->sensor.value = temp + 260;
 
 	/* Force automatic TX power calibration every 60 secs. */
 	if (++sc->calib_cnt >= 120) {
-		wpi_power_calibration(sc, temp);
+		wpi_power_calibration(sc);
 		sc->calib_cnt = 0;
 	}
 	splx(s);
@@ -1236,14 +1200,14 @@ wpi_rx_done(struct wpi_softc *sc, struct wpi_rx_desc *desc,
 	bus_dmamap_unload(sc->sc_dmat, data->map);
 
 	error = bus_dmamap_load(sc->sc_dmat, data->map, mtod(m1, void *),
-	    WPI_RBUF_SIZE, NULL, BUS_DMA_NOWAIT);
+	    WPI_RBUF_SIZE, NULL, BUS_DMA_NOWAIT | BUS_DMA_READ);
 	if (error != 0) {
 		m_freem(m1);
 
 		/* Try to reload the old mbuf. */
 		error = bus_dmamap_load(sc->sc_dmat, data->map,
 		    mtod(data->m, void *), WPI_RBUF_SIZE, NULL,
-		    BUS_DMA_NOWAIT);
+		    BUS_DMA_NOWAIT | BUS_DMA_READ);
 		if (error != 0) {
 			panic("%s: could not load old RX mbuf",
 			    sc->sc_dev.dv_xname);
@@ -1838,7 +1802,7 @@ wpi_tx(struct wpi_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	tx->flags = htole32(flags);
 
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m,
-	    BUS_DMA_NOWAIT);
+	    BUS_DMA_NOWAIT | BUS_DMA_WRITE);
 	if (error != 0 && error != EFBIG) {
 		printf("%s: can't map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
@@ -1866,7 +1830,7 @@ wpi_tx(struct wpi_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 		m = m1;
 
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m,
-		    BUS_DMA_NOWAIT);
+		    BUS_DMA_NOWAIT | BUS_DMA_WRITE);
 		if (error != 0) {
 			printf("%s: can't map mbuf (error %d)\n",
 			    sc->sc_dev.dv_xname, error);
@@ -2096,7 +2060,7 @@ wpi_cmd(struct wpi_softc *sc, int code, const void *buf, int size, int async)
 		}
 		cmd = mtod(m, struct wpi_tx_cmd *);
 		error = bus_dmamap_load(sc->sc_dmat, data->map, cmd, totlen,
-		    NULL, BUS_DMA_NOWAIT);
+		    NULL, BUS_DMA_NOWAIT | BUS_DMA_WRITE);
 		if (error != 0) {
 			m_freem(m);
 			return error;
@@ -2251,8 +2215,11 @@ wpi_set_timing(struct wpi_softc *sc, struct ieee80211_node *ni)
  * based on temperature variation.
  */
 void
-wpi_power_calibration(struct wpi_softc *sc, int temp)
+wpi_power_calibration(struct wpi_softc *sc)
 {
+	int temp;
+
+	temp = (int)WPI_READ(sc, WPI_UCODE_GP2);
 	/* Sanity-check temperature. */
 	if (temp < -260 || temp > 25) {
 		/* This can't be correct, ignore. */
@@ -2862,8 +2829,6 @@ wpi_post_alive(struct wpi_softc *sc)
 		return ETIMEDOUT;
 	}
 	DPRINTF(("temperature %d\n", sc->temp));
-	sc->sensor.value = sc->temp + 260;
-	sc->sensor.flags &= ~SENSOR_FINVALID;
 	return 0;
 }
 
@@ -3361,8 +3326,4 @@ wpi_stop(struct ifnet *ifp, int disable)
 
 	/* Power OFF hardware. */
 	wpi_hw_stop(sc);
-
-	/* Temperature sensor is no longer valid. */
-	sc->sensor.value = 0;
-	sc->sensor.flags |= SENSOR_FINVALID;
 }

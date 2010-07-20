@@ -1,4 +1,4 @@
-/*	$OpenBSD: cl.c,v 1.49 2009/10/31 12:00:06 fgsch Exp $ */
+/*	$OpenBSD: cl.c,v 1.52 2010/06/28 14:13:29 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Dale Rahn. All rights reserved.
@@ -554,7 +554,7 @@ clopen(dev, flag, mode, p)
 	if (cl->tty) {
 		tp = cl->tty;
 	} else {
-		tp = cl->tty = ttymalloc();
+		tp = cl->tty = ttymalloc(0);
 	}
 	tp->t_oproc = clstart;
 	tp->t_param = clparam;
@@ -671,7 +671,7 @@ if (channel == 2) { /* test one channel now */
 #ifdef DEBUG
 	cl_dumpport(channel);
 #endif
-	return((*linesw[tp->t_line].l_open)(dev, tp));
+	return((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 int clparam(tp, t)
 	struct tty *tp;
@@ -759,7 +759,7 @@ clclose(dev, flag, mode, p)
 	channel = CL_CHANNEL(dev);
 	cl = &sc->sc_cl[channel];
 	tp = cl->tty;
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	s = splcl();
 	
@@ -1555,7 +1555,6 @@ cl_txintr(arg)
 							wakeup((caddr_t) &tp->t_outq);
 						}
 						selwakeup(&tp->t_wsel);
-						KNOTE(&tp->t_wsel.si_note, 0);
 					}
 					sc->cl_reg->cl_ier = sc->cl_reg->cl_ier & ~0x3;
 				}
@@ -1589,7 +1588,6 @@ cl_txintr(arg)
 					wakeup((caddr_t) &tp->t_outq);
 				}
 				selwakeup(&tp->t_wsel);
-				KNOTE(&tp->t_wsel.si_note, 0);
 			}
 			sc->cl_reg->cl_ier = sc->cl_reg->cl_ier & ~0x3;
 		}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: interrupt.c,v 1.49 2009/10/22 22:08:54 miod Exp $ */
+/*	$OpenBSD: interrupt.c,v 1.59 2010/04/21 03:03:26 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -29,6 +29,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/proc.h>
 #include <sys/user.h>
 
 #include <uvm/uvm_extern.h>
@@ -111,18 +112,19 @@ interrupt(struct trap_frame *trapframe)
 	if (!(trapframe->sr & SR_INT_ENAB))
 		return;
 
-#ifdef DEBUG_INTERRUPT
-	trapdebug_enter(trapframe, 0);
-#endif
+	ci->ci_intrdepth++;
 
-	uvmexp.intrs++;
+#ifdef DEBUG_INTERRUPT
+	trapdebug_enter(ci, trapframe, T_INT);
+#endif
+	atomic_add_int(&uvmexp.intrs, 1);
 
 	/* Mask out interrupts from cause that are unmasked */
 	pending = trapframe->cause & CR_IPEND & trapframe->sr;
 
 	if (pending & SOFT_INT_MASK_0) {
 		clearsoftintr0();
-		soft_count.ec_count++;
+		atomic_add_uint64(&soft_count.ec_count, 1);
 	}
 
 #ifdef RM7K_PERFCNTR
@@ -147,6 +149,8 @@ interrupt(struct trap_frame *trapframe)
 		ci->ci_ipl = s;	/* no-overhead splx */
 		__asm__ ("sync\n\t.set reorder\n");
 	}
+
+	ci->ci_intrdepth--;
 }
 
 
@@ -200,12 +204,10 @@ splinit()
 {
 	struct proc *p = curproc;
 	struct pcb *pcb = &p->p_addr->u_pcb;
-	u_int32_t sr;
 
 	/*
 	 * Update proc0 pcb to contain proper values.
 	 */
-	pcb->pcb_context.val[13] = IPL_NONE;
 #ifdef RM7000_ICR
 	pcb->pcb_context.val[12] = (idle_mask << 8) & IC_INT_MASK;
 #endif
@@ -213,9 +215,7 @@ splinit()
 	    (idle_mask & SR_INT_MASK);
 
 	spl0();
-	sr = updateimask(0);
-	sr |= SR_INT_ENAB;
-	setsr(sr);
+	(void)updateimask(0);
 }
 
 int

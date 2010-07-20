@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.h,v 1.56 2009/10/11 06:45:46 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.h,v 1.60 2010/06/27 21:47:07 jakemsr Exp $	*/
 /*	$NetBSD: azalia.h,v 1.6 2006/01/16 14:15:26 kent Exp $	*/
 
 /*-
@@ -601,6 +601,11 @@ typedef struct {
 #define MI_TARGET_PLAYVOL	0x10d
 #define MI_TARGET_RECVOL	0x10e
 #define MI_TARGET_MIXERSET	0x10f
+	union {
+		int ord;
+		int mask;
+		mixer_level_t value;
+	} saved;
 } mixer_item_t;
 
 #define VALID_WIDGET_NID(nid, codec)	(nid == (codec)->audiofunc || \
@@ -686,8 +691,10 @@ typedef struct codec_t {
 	nid_t mic;		/* fixed (internal) mic */
 	nid_t mic_adc;
 	nid_t speaker;		/* fixed (internal) speaker */
-	nid_t spkr_dac;
+	nid_t speaker2;		/* 2nd fixed (internal) speaker */
+	nid_t spkr_dac;		/* default DAC for speaker and speaker2 */
 	nid_t input_mixer;
+	nid_t fhp;		/* front headphone jack */
 	nid_t fhp_dac;
 	int nout_jacks;		/* number of default output jacks */
 
@@ -720,4 +727,4 @@ int	azalia_comresp(const codec_t *, nid_t, uint32_t, uint32_t, uint32_t *);
 int	azalia_mixer_get(const codec_t *, nid_t, int, mixer_ctrl_t *);
 int	azalia_mixer_set(codec_t *, nid_t, int, const mixer_ctrl_t *);
 
-int	azalia_codec_enable_unsol(codec_t *);
+int	azalia_codec_enable_unsol(codec_t *, int);

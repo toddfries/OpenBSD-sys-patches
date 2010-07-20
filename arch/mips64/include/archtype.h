@@ -1,4 +1,4 @@
-/*	$OpenBSD: archtype.h,v 1.7 2009/08/06 21:11:38 miod Exp $	*/
+/*	$OpenBSD: archtype.h,v 1.12 2010/05/08 21:59:56 miod Exp $	*/
 /*
  * Copyright (c) 1997-2004 Opsycon AB, Sweden (www.opsycon.se)
  *
@@ -47,12 +47,10 @@
 #define	SGI_INDY		0x0015	/* Indy, Indigo2, Challenge S */
 #define	SGI_POWER10		0x0016	/* POWER Challenge R10k */
 #define	SGI_POWERI		0x0017	/* POWER Indigo2 */
-#define	SGI_O2			0x0018	/* IP32 O2/Moosehead */
-#define	SGI_O200		0x0019	/* IP27 Origin200, Onyx2/Speedo */
-#define	SGI_O2000		0x001a	/* IP27 Origin2000/Lego */
-#define	SGI_OCTANE		0x001b	/* IP30 Octane/Speedracer */
-#define	SGI_O300		0x001c	/* IP35 Origin300, Onyx3, Fuel */
-#define	SGI_O3000		0x001d	/* IP35 Origin350, Tezro */
+#define	SGI_O2			0x0018	/* IP32 O2  */
+#define	SGI_IP27		0x0019	/* IP27 Origin200/2000 */
+#define	SGI_OCTANE		0x001a	/* IP30 Octane */
+#define	SGI_IP35		0x001b	/* IP35 Origin3x0/3x00/Fuel/Tezro */
 
 #define	ALGOR_CLASS		0x0020	/* Algorithmics class */
 #define	ALGOR_P4032		0x0021	/* ALGORITHMICS P-4032 */
@@ -80,7 +78,11 @@
 #define	WG8232			0x005a	/* Willowglen CPU-8232 */
 
 #define	LOONGSON_CLASS		0x0060	/* Loongson + PMON2000 class */
-#define	LOONGSON_YEELONG	0x0061	/* Lemote Yeelong */
+#define	LOONGSON_2E		0x0060	/* Generic Loongson 2E system */
+#define	LOONGSON_YEELOONG	0x0061	/* Lemote Yeeloong */
+#define	LOONGSON_GDIUM		0x0062	/* EMTEC Gdium Liberty */
+#define	LOONGSON_FULOONG	0x0063	/* Lemote Fuloong */
+#define	LOONGSON_LYNLOONG	0x0064	/* Lemote Lynloong */
 
 #define	MISC_CLASS		0x00f0	/* Misc machines... */
 #define	LAGUNA			0x00f1	/* Heurikon Laguna VME board */

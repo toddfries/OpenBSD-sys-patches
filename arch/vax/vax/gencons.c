@@ -1,4 +1,4 @@
-/*	$OpenBSD: gencons.c,v 1.20 2009/10/31 12:00:07 fgsch Exp $	*/
+/*	$OpenBSD: gencons.c,v 1.23 2010/06/28 14:13:31 deraadt Exp $	*/
 /*	$NetBSD: gencons.c,v 1.22 2000/01/24 02:40:33 matt Exp $	*/
 
 /*
@@ -86,7 +86,7 @@ gencnopen(dev, flag, mode, p)
 		return ENXIO;
 
 	if (gencn_tty[unit] == NULL)
-		gencn_tty[unit] = ttymalloc();
+		gencn_tty[unit] = ttymalloc(0);
 
 	tp = gencn_tty[unit];
 
@@ -110,7 +110,7 @@ gencnopen(dev, flag, mode, p)
 	mtpr(GC_RIE, pr_rxcs[unit]); /* Turn on interrupts */
 	mtpr(GC_TIE, pr_txcs[unit]);
 
-        return ((*linesw[tp->t_line].l_open)(dev, tp));
+        return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 int
@@ -123,7 +123,7 @@ gencnclose(dev, flag, mode, p)
 
 	if (minor(dev) == 0)
 		consopened = 0;
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	ttyclose(tp);
 	return (0);
 }
@@ -192,7 +192,6 @@ gencnstart(struct tty *tp)
 			wakeup((caddr_t)cl);
 		}
 		selwakeup(&tp->t_wsel);
-		KNOTE(&tp->t_wsel.si_note, 0);
 	}
 
 out:	splx(s);

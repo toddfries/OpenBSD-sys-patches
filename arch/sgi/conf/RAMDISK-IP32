@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK-IP32,v 1.8 2009/10/26 18:00:04 miod Exp $
+#	$OpenBSD: RAMDISK-IP32,v 1.15 2010/07/03 03:59:17 krw Exp $
 #
 # THIS KERNEL IS FOR O2 (IP32) SYSTEMS ONLY.
 
@@ -30,11 +30,14 @@ option		INET		# IP + ICMP + TCP + UDP
 option		INET6		# IPv6 (needs INET)
 
 # RAMDISK stuff
-option		MINIROOTSIZE=8192
+option		MINIROOTSIZE=10240
 option		RAMDISK_HOOKS
 
 # Define what targets to support
 option		TGT_O2		# O2, O2+
+option		CPU_R5000	# R5000/RM5200 support
+option		CPU_RM7000	# RM7000 support
+option		CPU_R10000	# R10000/R12000/R14000/R16000 support
 
 # Specify storage configuration using ramdisk
 config		bsd	root on rd0a swap on rd0b
@@ -88,7 +91,7 @@ uvscom*		at uhub?	# SUNTAC Slipper U VS-10U serial
 ucom*		at uvscom?
 ubsa*		at uhub?	# Belkin serial adapter
 ucom*		at ubsa?
-ulpt*		at uhub?	# USB Printers	
+#ulpt*		at uhub?	# USB Printers	
 umass*		at uhub?	# USB Mass Storage devices
 atapiscsi*	at umass?
 scsibus*	at atapiscsi?
@@ -124,7 +127,11 @@ ppb*		at pci?		# PCI-PCI bridges
 pci*		at ppb?
 
 #### NICs
+pcn*		at pci?		# AMD PCnet-PCI Ethernet
+epic*		at pci?		# SMC EPIC/100 ethernet
+de*		at pci?		# DC21X4X-based ethernet
 dc*		at pci?		# 21143, "tulip" clone ethernet
+sf*		at pci?		# Adaptec AIC-6915 ethernet
 em*		at pci?		# Intel Pro/1000 ethernet
 ep*		at pci?		# 3Com 3c59x
 fxp*		at pci?		# EtherExpress 10/100B ethernet
@@ -138,11 +145,14 @@ re*		at pci?		# Realtek 8169/8169S/8110S
 rl*		at pci?		# Realtek 81[23]9 ethernet
 hme*		at pci?		# Sun Happy Meal
 gem*		at pci?		# Sun 'gem' ethernet
+cas*		at pci?		# Sun Cassini 100/Gigabit
 skc*		at pci?		# SysKonnect GEnesis 984x
 sk*		at skc?		#  each port of above
 mskc*		at pci?		# Marvell Yukon-2
 msk*		at mskc?	#  each port of above
 bge*		at pci?		# Broadcom BCM570x (aka Tigon3)
+vge*		at pci?		# VIA VT612x
+bnx*		at pci?		# Broadcom BCM5706/5708 GigE
 
 ##### Media Independent Interface (mii) drivers
 exphy*		at mii?		# 3Com internal PHYs
@@ -163,6 +173,7 @@ amphy*		at mii?		# AMD 79C873 PHYs
 tqphy*		at mii?		# TDK 78Q212x PHYs
 bmtphy*		at mii?		# Broadcom 10/100 PHYs
 brgphy*		at mii?		# Broadcom Gigabit PHYs
+ciphy*		at mii?		# Cicada CS8201 10/100/1000 copper PHY
 eephy*		at mii?		# Marvell 88E1000 series PHY
 xmphy*		at mii?		# XaQti XMAC-II PHYs
 nsgphy*		at mii?		# NS gigabit PHYs
@@ -189,7 +200,6 @@ sd*		at scsibus?
 st*		at scsibus?
 cd*		at scsibus?
 #ch*		at scsibus?
-#ss*		at scsibus?
 #uk*		at scsibus?
 
 #### PSEUDO Devices

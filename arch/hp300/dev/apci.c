@@ -1,4 +1,4 @@
-/*	$OpenBSD: apci.c,v 1.36 2009/11/01 20:29:00 nicm Exp $	*/
+/*	$OpenBSD: apci.c,v 1.41 2010/07/02 17:27:01 nicm Exp $	*/
 /*	$NetBSD: apci.c,v 1.9 2000/11/02 00:35:05 eeh Exp $	*/
 
 /*-
@@ -276,7 +276,7 @@ apciopen(dev, flag, mode, p)
 
 	s = spltty();
 	if (sc->sc_tty == NULL) {
-		tp = sc->sc_tty = ttymalloc();
+		tp = sc->sc_tty = ttymalloc(0);
 	} else
 		tp = sc->sc_tty;
 	splx(s);
@@ -368,7 +368,7 @@ apciopen(dev, flag, mode, p)
 	splx(s);
 
 	if (error == 0)
-		error = (*linesw[tp->t_line].l_open)(dev, tp);
+		error = (*linesw[tp->t_line].l_open)(dev, tp, p);
 
 	if (error == 0) {
 		/* clear errors, start timeout */
@@ -396,7 +396,7 @@ apciclose(dev, flag, mode, p)
 	apci = sc->sc_apci;
 	tp = sc->sc_tty;
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 
 	s = spltty();
 
@@ -486,7 +486,7 @@ apciintr(arg)
 			}
 			if (iflowdone == 0 && tp != NULL &&
 			    (tp->t_cflag & CRTS_IFLOW) &&
-			    tp->t_rawq.c_cc > (TTYHOG / 2)) {
+			    tp->t_rawq.c_cc > (TTYHOG(tp) / 2)) {
 				apci->ap_mcr &= ~MCR_RTS;
 				iflowdone = 1;
 			}
@@ -762,16 +762,9 @@ apcistart(tp)
 
 	if (tp->t_state & (TS_TIMEOUT|TS_TTSTOP))
 		goto out;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-		KNOTE(&tp->t_wsel.si_note, 0);
-		if (tp->t_outq.c_cc == 0)
-			goto out;
-	}
+	ttwakeupwr(tp);
+	if (tp->t_outq.c_cc == 0)
+		goto out;
 	if (apci->ap_lsr & LSR_TXRDY) {
 		tp->t_state |= TS_BUSY;
 		if (sc->sc_flags & APCI_HASFIFO) {

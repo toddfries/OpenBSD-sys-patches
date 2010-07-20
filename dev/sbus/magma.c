@@ -1,4 +1,4 @@
-/*	$OpenBSD: magma.c,v 1.19 2009/10/31 12:00:08 fgsch Exp $	*/
+/*	$OpenBSD: magma.c,v 1.23 2010/07/02 17:27:01 nicm Exp $	*/
 
 /*-
  * Copyright (c) 1998 Iain Hibbert
@@ -805,7 +805,7 @@ mtty_attach(struct device *parent, struct device *dev, void *args)
 		}
 		mp->mp_channel = chan;
 
-		tp = ttymalloc();
+		tp = ttymalloc(0);
 		tp->t_oproc = mtty_start;
 		tp->t_param = mtty_param;
 
@@ -915,7 +915,7 @@ mttyopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	splx(s);
 
-	return ((*linesw[tp->t_line].l_open)(dev, tp));
+	return ((*linesw[tp->t_line].l_open)(dev, tp, p));
 }
 
 /*
@@ -929,7 +929,7 @@ mttyclose(dev_t dev, int flag, int mode, struct proc *p)
 	struct tty *tp = mp->mp_tty;
 	int s;
 
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	s = spltty();
 
 	/* if HUPCL is set, and the tty is no longer open
@@ -1116,15 +1116,7 @@ mtty_start(struct tty *tp)
 		/* if we are sleeping and output has drained below
 		 * low water mark, awaken
 		 */
-		if (tp->t_outq.c_cc <= tp->t_lowat) {
-			if (ISSET(tp->t_state, TS_ASLEEP)) {
-				CLR(tp->t_state, TS_ASLEEP);
-				wakeup(&tp->t_outq);
-			}
-
-			selwakeup(&tp->t_wsel);
-			KNOTE(&tp->t_wsel.si_note, 0);
-		}
+		ttwakeupwr(tp);
 
 		/* if something to send, start transmitting
 		 */

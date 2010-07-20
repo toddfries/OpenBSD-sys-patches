@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpath.c,v 1.7 2009/10/23 01:02:29 dlg Exp $ */
+/*	$OpenBSD: mpath.c,v 1.17 2010/07/01 03:01:37 matthew Exp $ */
 
 /*
  * Copyright (c) 2009 David Gwynne <dlg@openbsd.org>
@@ -74,7 +74,7 @@ struct cfdriver mpath_cd = {
 	DV_DULL
 };
 
-int		mpath_cmd(struct scsi_xfer *);
+void		mpath_cmd(struct scsi_xfer *);
 void		mpath_minphys(struct buf *, struct scsi_link *);
 int		mpath_probe(struct scsi_link *);
 
@@ -85,10 +85,6 @@ struct scsi_adapter mpath_switch = {
 	scsi_minphys,
 	mpath_probe,
 	NULL
-};
-
-struct scsi_device mpath_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 void		mpath_xs_stuffup(struct scsi_xfer *);
@@ -109,7 +105,6 @@ mpath_attach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n");
 
-	sc->sc_link.device = &mpath_dev;
 	sc->sc_link.adapter = &mpath_switch;
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = MPATH_BUSWIDTH;
@@ -126,13 +121,8 @@ mpath_attach(struct device *parent, struct device *self, void *aux)
 void
 mpath_xs_stuffup(struct scsi_xfer *xs)
 {
-	int s;
-
 	xs->error = XS_DRIVER_STUFFUP;
-	xs->flags |= ITSDONE;
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 int
@@ -148,7 +138,7 @@ mpath_probe(struct scsi_link *link)
 	return (0);
 }
 
-int
+void
 mpath_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link *link = xs->sc_link;
@@ -158,13 +148,13 @@ mpath_cmd(struct scsi_xfer *xs)
 
 	if (n == NULL || p == NULL) {
 		mpath_xs_stuffup(xs);
-		return (COMPLETE);
+		return;
 	}
 
 	mxs = scsi_xs_get(p->path_link, xs->flags);
 	if (mxs == NULL) {
 		mpath_xs_stuffup(xs);
-		return (COMPLETE);
+		return;
 	}
 
 	memcpy(mxs->cmd, xs->cmd, xs->cmdlen);
@@ -173,14 +163,12 @@ mpath_cmd(struct scsi_xfer *xs)
 	mxs->datalen = xs->datalen;
 	mxs->retries = xs->retries;
 	mxs->timeout = xs->timeout;
-	mxs->req_sense_length = xs->req_sense_length;
+	mxs->bp = xs->bp;
 
 	mxs->cookie = xs;
 	mxs->done = mpath_done;
 
 	scsi_xs_exec(mxs);
-
-	return (COMPLETE); /* doesnt matter anymore */
 }
 
 void
@@ -198,9 +186,7 @@ mpath_done(struct scsi_xfer *mxs)
 
 	scsi_xs_put(mxs);
 
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 void

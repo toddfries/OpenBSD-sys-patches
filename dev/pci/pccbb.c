@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccbb.c,v 1.68 2009/08/28 15:54:52 kettenis Exp $	*/
+/*	$OpenBSD: pccbb.c,v 1.76 2010/06/30 19:46:30 blambert Exp $	*/
 /*	$NetBSD: pccbb.c,v 1.96 2004/03/28 09:49:31 nakayama Exp $	*/
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by HAYAKAWA Koichi.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -53,7 +48,6 @@
 #include <sys/syslog.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
-#include <sys/proc.h>
 
 #include <machine/intr.h>
 #include <machine/bus.h>
@@ -125,11 +119,6 @@ void   *pccbb_cb_intr_establish(cardbus_chipset_tag_t, int irq, int level,
     int (*ih) (void *), void *sc, const char *);
 void	pccbb_cb_intr_disestablish(cardbus_chipset_tag_t ct, void *ih);
 
-cardbustag_t pccbb_make_tag(cardbus_chipset_tag_t, int, int, int);
-void	pccbb_free_tag(cardbus_chipset_tag_t, cardbustag_t);
-cardbusreg_t pccbb_conf_read(cardbus_chipset_tag_t, cardbustag_t, int);
-void	pccbb_conf_write(cardbus_chipset_tag_t, cardbustag_t, int,
-    cardbusreg_t);
 void	pccbb_chipinit(struct pccbb_softc *);
 
 int	pccbb_pcmcia_mem_alloc(pcmcia_chipset_handle_t, bus_size_t,
@@ -214,10 +203,6 @@ static struct cardbus_functions pccbb_funcs = {
 	pccbb_cb_intr_disestablish,
 	pccbb_ctrl,
 	pccbb_power,
-	pccbb_make_tag,
-	pccbb_free_tag,
-	pccbb_conf_read,
-	pccbb_conf_write,
 };
 
 /*
@@ -558,6 +543,7 @@ pccbb_pci_callback(struct device *self)
 		cba.cba_dmat = sc->sc_dmat;
 		cba.cba_bus = (busreg >> 8) & 0x0ff;
 		cba.cba_cc = (void *)sc;
+		cba.cba_pc = sc->sc_pc;
 		cba.cba_cf = &pccbb_funcs;
 		cba.cba_intrline = sc->sc_intrline;
 
@@ -947,7 +933,7 @@ pccbbintr(void *arg)
 		     * insertion/removal during suspension.
 		     */
 		    (sc->sc_flags & CBB_CARDEXIST) == 0) {
-			timeout_add(&sc->sc_ins_tmo, hz / 10);
+			timeout_add_msec(&sc->sc_ins_tmo, 100);
 			sc->sc_flags |= CBB_INSERTING;
 		}
 		return (1);
@@ -1049,7 +1035,7 @@ pci113x_insert(void *arg)
 			/* who are you? */
 		}
 	} else {
-		timeout_add(&sc->sc_ins_tmo, hz / 10);
+		timeout_add_msec(&sc->sc_ins_tmo, 100);
 	}
 }
 
@@ -1652,54 +1638,6 @@ cb_show_regs(pci_chipset_tag_t pc, pcitag_t tag, bus_space_tag_t memt,
 }
 #endif
 
-/*
- * cardbustag_t pccbb_make_tag(cardbus_chipset_tag_t cc,
- *                                    int busno, int devno, int function)
- *   This is the function to make a tag to access config space of
- *  a CardBus Card.  It works same as pci_conf_read.
- */
-cardbustag_t
-pccbb_make_tag(cardbus_chipset_tag_t cc, int busno, int devno, int function)
-{
-	struct pccbb_softc *sc = (struct pccbb_softc *)cc;
-
-	return pci_make_tag(sc->sc_pc, busno, devno, function);
-}
-
-void
-pccbb_free_tag(cardbus_chipset_tag_t cc, cardbustag_t tag)
-{
-}
-
-/*
- * cardbusreg_t pccbb_conf_read(cardbus_chipset_tag_t cc,
- *                                     cardbustag_t tag, int offset)
- *   This is the function to read the config space of a CardBus Card.
- *  It works same as pci_conf_read.
- */
-cardbusreg_t
-pccbb_conf_read(cardbus_chipset_tag_t cc, cardbustag_t tag, int offset)
-{
-	struct pccbb_softc *sc = (struct pccbb_softc *)cc;
-
-	return pci_conf_read(sc->sc_pc, tag, offset);
-}
-
-/*
- * void pccbb_conf_write(cardbus_chipset_tag_t cc, cardbustag_t tag,
- *                              int offs, cardbusreg_t val)
- *   This is the function to write the config space of a CardBus Card.
- *  It works same as pci_conf_write.
- */
-void
-pccbb_conf_write(cardbus_chipset_tag_t cc, cardbustag_t tag, int reg,
-    cardbusreg_t val)
-{
-	struct pccbb_softc *sc = (struct pccbb_softc *)cc;
-
-	pci_conf_write(sc->sc_pc, tag, reg, val);
-}
-
 #if 0
 int
 pccbb_new_pcmcia_io_alloc(pcmcia_chipset_handle_t pch,
@@ -2053,7 +1991,7 @@ pccbb_pcmcia_socket_enable(pcmcia_chipset_handle_t pch)
 
 	/* power down the socket to reset it, clear the card reset pin */
 
-	pccbb_power(sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
+	pccbb_power((cardbus_chipset_tag_t)sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
 
 	/*
 	 * wait 200ms until power fails (Tpf).  Then, wait 100ms since
@@ -2069,7 +2007,7 @@ pccbb_pcmcia_socket_enable(pcmcia_chipset_handle_t pch)
 	/* Power up the socket. */
 	power = Pcic_read(ph, PCIC_PWRCTL);
 	Pcic_write(ph, PCIC_PWRCTL, (power & ~PCIC_PWRCTL_OE));
-	pccbb_power(sc, voltage);
+	pccbb_power((cardbus_chipset_tag_t)sc, voltage);
 
 	/* Now output enable */
 	power = Pcic_read(ph, PCIC_PWRCTL);
@@ -2152,7 +2090,7 @@ pccbb_pcmcia_socket_disable(pcmcia_chipset_handle_t pch)
 	power = Pcic_read(ph, PCIC_PWRCTL);
 	power &= ~PCIC_PWRCTL_OE;
 	Pcic_write(ph, PCIC_PWRCTL, power);
-	pccbb_power(sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
+	pccbb_power((cardbus_chipset_tag_t)sc, CARDBUS_VCC_0V | CARDBUS_VPP_0V);
 	/*
 	 * wait 300ms until power fails (Tpf).
 	 */
@@ -2602,30 +2540,19 @@ pccbb_rbus_cb_space_alloc(cardbus_chipset_tag_t ct, rbus_tag_t rb,
 	    ("pccbb_rbus_cb_space_alloc: adr %lx, size %lx, mask %lx, align %lx\n",
 	    addr, size, mask, align));
 
-	if (align == 0) {
-		align = size;
+	align = max(align, 4);
+	mask = max(mask, (4 - 1));
+	if (rb->rb_bt == sc->sc_memt) {
+		align = max(align, 0x1000);
+		mask = max(mask, (0x1000 - 1));
 	}
 
-	if (rb->rb_bt == sc->sc_memt) {
-		if (align < 16) {
-			return 1;
-		}
-	} else if (rb->rb_bt == sc->sc_iot) {
-		if (align < 4) {
-			return 1;
-		}
+	if (rb->rb_bt == sc->sc_iot) {
 		/* XXX: hack for avoiding ISA image */
 		if (mask < 0x0100) {
 			mask = 0x3ff;
 			addr = 0x300;
 		}
-
-	} else {
-		DPRINTF(
-		    ("pccbb_rbus_cb_space_alloc: Bus space tag %x is NOT used.\n",
-		    rb->rb_bt));
-		return 1;
-		/* XXX: panic here? */
 	}
 
 	if (rbus_space_alloc(rb, addr, size, mask, align, flags, addrp, bshp)) {
@@ -2776,8 +2703,8 @@ pccbb_winset(bus_addr_t align, struct pccbb_softc *sc, bus_space_tag_t bst)
 	pcitag_t tag;
 	bus_addr_t mask = ~(align - 1);
 	struct {
-		cardbusreg_t win_start;
-		cardbusreg_t win_limit;
+		pcireg_t win_start;
+		pcireg_t win_limit;
 		int win_flags;
 	} win[2];
 	struct pccbb_win_chain *chainp;

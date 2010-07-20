@@ -1,4 +1,4 @@
-/*      $OpenBSD: ath.c,v 1.84 2009/10/13 19:33:16 pirofti Exp $  */
+/*      $OpenBSD: ath.c,v 1.86 2010/07/02 06:06:30 reyk Exp $  */
 /*	$NetBSD: ath.c,v 1.37 2004/08/18 21:59:39 dyoung Exp $	*/
 
 /*-
@@ -45,7 +45,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/malloc.h>
 #include <sys/lock.h>
@@ -141,7 +140,6 @@ void	ath_recv_mgmt(struct ieee80211com *, struct mbuf *,
 	    struct ieee80211_node *, struct ieee80211_rxinfo *, int);
 #endif
 void	ath_disable(struct ath_softc *);
-void	ath_power(int, void *);
 
 int	ath_gpio_attach(struct ath_softc *, u_int16_t);
 int	ath_gpio_pin_read(void *, int);
@@ -506,12 +504,6 @@ ath_power(int why, void *arg)
 	case PWR_RESUME:
 		ath_resume(sc, why);
 		break;
-#if !defined(__OpenBSD__)
-	case PWR_SOFTSUSPEND:
-	case PWR_SOFTSTANDBY:
-	case PWR_SOFTRESUME:
-		break;
-#endif
 	}
 	splx(s);
 }
@@ -537,9 +529,6 @@ ath_resume(struct ath_softc *sc, int why)
 
 	if (ifp->if_flags & IFF_UP) {
 		ath_init(ifp);
-#if 0
-		(void)ath_intr(sc);
-#endif
 		if (sc->sc_power != NULL)
 			(*sc->sc_power)(sc, why);
 		if (ifp->if_flags & IFF_RUNNING)

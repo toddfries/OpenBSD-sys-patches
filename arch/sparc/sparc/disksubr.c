@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.82 2009/08/13 15:23:11 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.86 2010/04/25 06:15:17 deraadt Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.16 1996/04/28 20:25:59 thorpej Exp $ */
 
 /*
@@ -82,7 +82,7 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *),
 	 * On sparc64 we check for a CD label first, because our
 	 * CD install media contains both sparc & sparc64 labels.
 	 * We want the sparc64 machine to find the "CD label", not
-	 * the SunOS label, for loading it's kernel.
+	 * the SunOS label, for loading its kernel.
 	 */
 #if NCD > 0
 	if (strat == cdstrategy) {
@@ -267,10 +267,9 @@ disklabel_sun_to_bsd(struct sun_disklabel *sl, struct disklabel *lp)
 		DL_SETDSIZE(lp, (daddr64_t)secpercyl * sl->sl_ncylinders);
 	lp->d_version = 1;
 
-	lp->d_sparespercyl = sl->sl_sparespercyl;
+	memcpy(&lp->d_uid, &sl->sl_uid, sizeof(sl->sl_uid));
+
 	lp->d_acylinders = sl->sl_acylinders;
-	lp->d_rpm = sl->sl_rpm;
-	lp->d_interleave = sl->sl_interleave;
 
 	lp->d_npartitions = MAXPARTITIONS;
 	/* These are as defined in <ufs/ffs/fs.h> */
@@ -406,15 +405,15 @@ disklabel_bsd_to_sun(struct disklabel *lp, struct sun_disklabel *sl)
 		return (EINVAL);
 
 	/* Format conversion. */
+	bzero(sl, sizeof(*sl));
 	memcpy(sl->sl_text, lp->d_packname, sizeof(lp->d_packname));
-	sl->sl_rpm = lp->d_rpm;
 	sl->sl_pcylinders = lp->d_ncylinders + lp->d_acylinders; /* XXX */
-	sl->sl_sparespercyl = lp->d_sparespercyl;
-	sl->sl_interleave = lp->d_interleave;
 	sl->sl_ncylinders = lp->d_ncylinders;
 	sl->sl_acylinders = lp->d_acylinders;
 	sl->sl_ntracks = lp->d_ntracks;
 	sl->sl_nsectors = lp->d_nsectors;
+
+	memcpy(&sl->sl_uid, &lp->d_uid, sizeof(lp->d_uid));
 
 	secpercyl = sl->sl_nsectors * sl->sl_ntracks;
 	for (i = 0; i < 8; i++) {

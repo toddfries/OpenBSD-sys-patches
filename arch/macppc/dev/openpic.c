@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.58 2009/10/01 20:19:18 kettenis Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.60 2010/04/09 19:24:17 jasper Exp $	*/
 
 /*-
  * Copyright (c) 1995 Per Fogelstrom
@@ -68,7 +68,6 @@ static char *intr_typename(int type);
 void openpic_calc_mask(void);
 static __inline int cntlzw(int x);
 static int mapirq(int irq);
-int openpic_prog_button(void *arg);
 void openpic_enable_irq_mask(int irq_mask);
 
 #define HWIRQ_MAX (31 - (SI_NQUEUES + 1))
@@ -187,15 +186,12 @@ openpic_attach(struct device *parent, struct device  *self, void *aux)
 	openpic_collect_preconf_intr();
 #endif
 
-#if 1
-	mac_intr_establish(parent, 0x37, IST_LEVEL,
-		IPL_HIGH, openpic_prog_button, (void *)0x37, "progbutton");
-#endif
-
 	ppc_intr_enable(1);
 
 	printf("\n");
 }
+
+
 
 void
 openpic_collect_preconf_intr()
@@ -536,9 +532,7 @@ openpic_do_pending_softint(int pcpl)
 			ci->ci_ipending &= ~SINT_CLOCK;
 			ci->ci_cpl = SINT_CLOCK|SINT_NET|SINT_TTY;
 			ppc_intr_enable(1);
-			KERNEL_LOCK();
 			softintr_dispatch(SI_SOFTCLOCK);
-			KERNEL_UNLOCK();
 			ppc_intr_disable();
 			continue;
 		}
@@ -546,9 +540,7 @@ openpic_do_pending_softint(int pcpl)
 			ci->ci_ipending &= ~SINT_NET;
 			ci->ci_cpl = SINT_NET|SINT_TTY;
 			ppc_intr_enable(1);
-			KERNEL_LOCK();
 			softintr_dispatch(SI_SOFTNET);
-			KERNEL_UNLOCK();
 			ppc_intr_disable();
 			continue;
 		}
@@ -556,9 +548,7 @@ openpic_do_pending_softint(int pcpl)
 			ci->ci_ipending &= ~SINT_TTY;
 			ci->ci_cpl = SINT_TTY;
 			ppc_intr_enable(1);
-			KERNEL_LOCK();
 			softintr_dispatch(SI_SOFTTTY);
-			KERNEL_UNLOCK();
 			ppc_intr_disable();
 			continue;
 		}
@@ -824,22 +814,6 @@ openpic_init()
 
 	install_extint(ext_intr_openpic);
 }
-/*
- * programmer_button function to fix args to Debugger.
- * deal with any enables/disables, if necessary.
- */
-int
-openpic_prog_button (void *arg)
-{
-#ifdef DDB
-	if (db_console)
-		Debugger();
-#else
-	printf("programmer button pressed, debugger not available\n");
-#endif
-	return 1;
-}
-
 
 void
 openpic_ipi_ddb(void)

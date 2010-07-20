@@ -1,4 +1,4 @@
-/*	$OpenBSD: promcons.c,v 1.11 2009/10/31 12:00:05 fgsch Exp $	*/
+/*	$OpenBSD: promcons.c,v 1.16 2010/07/02 17:27:01 nicm Exp $	*/
 /*	$NetBSD: promcons.c,v 1.5 1996/11/13 22:20:55 cgd Exp $	*/
 
 /*
@@ -34,7 +34,6 @@
 #include <sys/selinfo.h>
 #include <sys/tty.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/conf.h>
 #include <sys/file.h>
 #include <sys/uio.h>
@@ -75,7 +74,7 @@ promopen(dev, flag, mode, p)
 	s = spltty();
 
 	if (prom_tty[unit] == NULL) {
-		tp = prom_tty[unit] = ttymalloc();
+		tp = prom_tty[unit] = ttymalloc(0);
 	} else
 		tp = prom_tty[unit];
 
@@ -100,7 +99,7 @@ promopen(dev, flag, mode, p)
 
 	splx(s);
 
-	error = (*linesw[tp->t_line].l_open)(dev, tp);
+	error = (*linesw[tp->t_line].l_open)(dev, tp, p);
 	if (error == 0 && setuptimeout) {
 		timeout_set(&prom_to, promtimeout, tp);
 		timeout_add(&prom_to, 1);
@@ -118,7 +117,7 @@ promclose(dev, flag, mode, p)
 	struct tty *tp = prom_tty[unit];
 
 	timeout_del(&prom_to);
-	(*linesw[tp->t_line].l_close)(tp, flag);
+	(*linesw[tp->t_line].l_close)(tp, flag, p);
 	ttyclose(tp);
 	return 0;
 }
@@ -185,14 +184,7 @@ promstart(tp)
 	s = spltty();
 	if (tp->t_state & (TS_TTSTOP | TS_BUSY))
 		goto out;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-		KNOTE(&tp->t_wsel.si_note, 0);
-	}
+	ttwakeupwr(tp);
 	tp->t_state |= TS_BUSY;
 	while (tp->t_outq.c_cc != 0)
 		promcnputc(tp->t_dev, getc(&tp->t_outq));

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.15 2009/10/14 21:26:54 miod Exp $ */
+/*	$OpenBSD: bus_dma.c,v 1.19 2010/06/26 23:24:44 guenther Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -60,7 +60,6 @@
 #include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
-#include <sys/user.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -312,15 +311,18 @@ _dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
 #define SYNC_X 2	/* WB writeback + invalidate, WT invalidate */
 	int nsegs;
 	int curseg;
+	struct cpu_info *ci = curcpu();
 
 	nsegs = map->dm_nsegs;
 	curseg = 0;
 
 	while (size && nsegs) {
-		bus_addr_t vaddr;
+		paddr_t paddr;
+		vaddr_t vaddr;
 		bus_size_t ssize;
 
 		ssize = map->dm_segs[curseg].ds_len;
+		paddr = map->dm_segs[curseg]._ds_paddr;
 		vaddr = map->dm_segs[curseg]._ds_vaddr;
 
 		if (addr != 0) {
@@ -329,6 +331,7 @@ _dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
 				ssize = 0;
 			} else {
 				vaddr += addr;
+				paddr += addr;
 				ssize -= addr;
 				addr = 0;
 			}
@@ -350,18 +353,22 @@ _dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
 			 */
 			if (op & BUS_DMASYNC_PREWRITE) {
 #ifdef TGT_COHERENT
-				Mips_IOSyncDCache(vaddr, ssize, SYNC_W);
+				Mips_IOSyncDCache(ci, vaddr, paddr,
+				    ssize, SYNC_W);
 #else
 				if (op & BUS_DMASYNC_PREREAD)
-					Mips_IOSyncDCache(vaddr, ssize, SYNC_X);
+					Mips_IOSyncDCache(ci, vaddr, paddr,
+					    ssize, SYNC_X);
 				else
-					Mips_IOSyncDCache(vaddr, ssize, SYNC_W);
+					Mips_IOSyncDCache(ci, vaddr, paddr,
+					    ssize, SYNC_W);
 #endif
 			} else
 			if (op & (BUS_DMASYNC_PREREAD | BUS_DMASYNC_POSTREAD)) {
 #ifdef TGT_COHERENT
 #else
-				Mips_IOSyncDCache(vaddr, ssize, SYNC_R);
+				Mips_IOSyncDCache(ci, vaddr, paddr,
+				    ssize, SYNC_R);
 #endif
 			}
 			size -= ssize;
@@ -424,10 +431,11 @@ int
 _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
     caddr_t *kvap, int flags)
 {
-	vaddr_t va;
+	vaddr_t va, sva;
+	size_t ssize;
 	paddr_t pa;
 	bus_addr_t addr;
-	int curseg;
+	int curseg, error;
 
 #ifdef TGT_COHERENT
 	if (ISSET(flags, BUS_DMA_COHERENT))
@@ -450,6 +458,8 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 
 	*kvap = (caddr_t)va;
 
+	sva = va;
+	ssize = size;
 	for (curseg = 0; curseg < nsegs; curseg++) {
 		for (addr = segs[curseg].ds_addr;
 		    addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
@@ -457,9 +467,18 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 			if (size == 0)
 				panic("_dmamem_map: size botch");
 			pa = (*t->_device_to_pa)(addr);
-			pmap_enter(pmap_kernel(), va, pa,
-			    VM_PROT_READ | VM_PROT_WRITE,
-			    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
+			error = pmap_enter(pmap_kernel(), va, pa,
+			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
+			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
+			if (error) {
+				/*
+				 * Clean up after ourselves.
+				 * XXX uvm_wait on WAITOK
+				 */
+				pmap_update(pmap_kernel());
+				uvm_km_free(kernel_map, va, ssize);
+				return (error);
+			}
 
 			if (flags & BUS_DMA_COHERENT)
 				pmap_page_cache(PHYS_TO_VM_PAGE(pa),
@@ -482,8 +501,6 @@ _dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
 		return;
 
 	size = round_page(size);
-	pmap_remove(pmap_kernel(), (vaddr_t)kva, (vaddr_t)kva + size);
-	pmap_update(pmap_kernel());
 	uvm_km_free(kernel_map, (vaddr_t)kva, size);
 }
 
@@ -584,7 +601,8 @@ _dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 			map->dm_segs[seg].ds_addr =
 			    (*t->_pa_to_device)(curaddr);
 			map->dm_segs[seg].ds_len = sgsize;
-			map->dm_segs[seg]._ds_vaddr = (vaddr_t)vaddr;
+			map->dm_segs[seg]._ds_paddr = curaddr;
+			map->dm_segs[seg]._ds_vaddr = vaddr;
 			first = 0;
 		} else {
 			if ((bus_addr_t)curaddr == lastaddr &&
@@ -600,7 +618,8 @@ _dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 				map->dm_segs[seg].ds_addr =
 				    (*t->_pa_to_device)(curaddr);
 				map->dm_segs[seg].ds_len = sgsize;
-				map->dm_segs[seg]._ds_vaddr = (vaddr_t)vaddr;
+				map->dm_segs[seg]._ds_paddr = curaddr;
+				map->dm_segs[seg]._ds_vaddr = vaddr;
 			}
 		}
 

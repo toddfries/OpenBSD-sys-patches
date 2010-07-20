@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhid.c,v 1.45 2009/10/31 06:40:17 deraadt Exp $ */
+/*	$OpenBSD: uhid.c,v 1.47 2009/11/23 11:10:16 yuo Exp $ */
 /*	$NetBSD: uhid.c,v 1.57 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -234,7 +234,6 @@ uhid_intr(struct uhidev *addr, void *data, u_int len)
 		wakeup(&sc->sc_q);
 	}
 	selwakeup(&sc->sc_rsel);
-	KNOTE(&sc->sc_rsel.si_note, 0);
 	if (sc->sc_async != NULL) {
 		DPRINTFN(3, ("uhid_intr: sending SIGIO %p\n", sc->sc_async));
 		psignal(sc->sc_async, SIGIO);
@@ -511,6 +510,22 @@ uhid_do_ioctl(struct uhid_softc *sc, u_long cmd, caddr_t addr,
 	case USB_GET_REPORT_ID:
 		*(int *)addr = sc->sc_hdev.sc_report_id;
 		break;
+
+	case USB_GET_DEVICEINFO:
+		usbd_fill_deviceinfo(sc->sc_hdev.sc_parent->sc_udev,
+				     (struct usb_device_info *)addr, 1);
+		break;
+
+        case USB_GET_STRING_DESC:
+	    {
+		struct usb_string_desc *si = (struct usb_string_desc *)addr;
+		err = usbd_get_string_desc(sc->sc_hdev.sc_parent->sc_udev,
+			si->usd_string_index,
+			si->usd_language_id, &si->usd_desc, &size);
+		if (err)
+			return (EINVAL);
+		break;
+	    }
 
 	default:
 		return (EINVAL);

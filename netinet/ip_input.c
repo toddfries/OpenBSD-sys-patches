@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.171 2009/08/23 20:06:25 david Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.182 2010/07/09 16:58:06 reyk Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -43,6 +43,7 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/syslog.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/pool.h>
 
@@ -199,7 +200,8 @@ ip_init()
 	for (pr = inetdomain.dom_protosw;
 	    pr < inetdomain.dom_protoswNPROTOSW; pr++)
 		if (pr->pr_domain->dom_family == PF_INET &&
-		    pr->pr_protocol && pr->pr_protocol != IPPROTO_RAW)
+		    pr->pr_protocol && pr->pr_protocol != IPPROTO_RAW &&
+		    pr->pr_protocol < IPPROTO_MAX)
 			ip_protox[pr->pr_protocol] = pr - inetsw;
 	LIST_INIT(&ipq);
 	ipintrq.ifq_maxlen = ipqmaxlen;
@@ -222,7 +224,6 @@ ip_init()
 
 struct	sockaddr_in ipaddr = { sizeof(ipaddr), AF_INET };
 struct	route ipforward_rt;
-u_int	ipforward_rtableid;
 
 void
 ipintr()
@@ -489,7 +490,8 @@ ipv4_input(m)
                 s = splnet();
 		if (mtag != NULL) {
 			tdbi = (struct tdb_ident *)(mtag + 1);
-			tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+			tdb = gettdb(tdbi->rdomain, tdbi->spi,
+			    &tdbi->dst, tdbi->proto);
 		} else
 			tdb = NULL;
 	        ipsp_spd_lookup(m, AF_INET, hlen, &error,
@@ -648,7 +650,8 @@ found:
         s = splnet();
 	if (mtag) {
 		tdbi = (struct tdb_ident *)(mtag + 1);
-	        tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+	        tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst,
+		    tdbi->proto);
 	} else
 		tdb = NULL;
 	ipsp_spd_lookup(m, AF_INET, hlen, &error, IPSP_DIRECTION_IN,
@@ -681,25 +684,22 @@ in_iawithaddr(struct in_addr ina, struct mbuf *m, u_int rdomain)
 {
 	struct in_ifaddr *ia;
 
+	rdomain = rtable_l2(rdomain);
 	TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
 		if (ia->ia_ifp->if_rdomain != rdomain)
 			continue;
 		if ((ina.s_addr == ia->ia_addr.sin_addr.s_addr) ||
 		    ((ia->ia_ifp->if_flags & (IFF_LOOPBACK|IFF_LINK1)) ==
 			(IFF_LOOPBACK|IFF_LINK1) &&
-		     ia->ia_subnet == (ina.s_addr & ia->ia_subnetmask)))
+		     ia->ia_net == (ina.s_addr & ia->ia_netmask)))
 			return ia;
+		/* check ancient classful too, e. g. for rarp-based netboot */
 		if (((ip_directedbcast == 0) || (m && ip_directedbcast &&
 		    ia->ia_ifp == m->m_pkthdr.rcvif)) &&
 		    (ia->ia_ifp->if_flags & IFF_BROADCAST)) {
 			if (ina.s_addr == ia->ia_broadaddr.sin_addr.s_addr ||
-			    ina.s_addr == ia->ia_netbroadcast.s_addr ||
-			    /*
-			     * Look for all-0's host part (old broadcast addr),
-			     * either for subnet or net.
-			     */
-			    ina.s_addr == ia->ia_subnet ||
-			    ina.s_addr == ia->ia_net) {
+			    IN_CLASSFULBROADCAST(ina.s_addr,
+			    ia->ia_addr.sin_addr.s_addr)) {
 				/* Make sure M_BCAST is set */
 				if (m)
 					m->m_flags |= M_BCAST;
@@ -1076,8 +1076,7 @@ ip_dooptions(m)
 				ia = (INA)ifa_ifwithnet((SA)&ipaddr,
 				    m->m_pkthdr.rdomain);
 			} else
-				/* keep packet in the original VRF instance */
-				/* XXX rdomain or rtableid ??? */
+				/* keep packet in the virtual instance */
 				ia = ip_rtaddr(ipaddr.sin_addr,
 				    m->m_pkthdr.rdomain);
 			if (ia == 0) {
@@ -1116,8 +1115,7 @@ ip_dooptions(m)
 			/*
 			 * locate outgoing interface; if we're the destination,
 			 * use the incoming interface (should be same).
-			 * Again keep the packet inside the VRF instance.
-			 * XXX rdomain vs. rtableid ???
+			 * Again keep the packet inside the virtual instance.
 			 */
 			if ((ia = (INA)ifa_ifwithaddr((SA)&ipaddr,
 			    m->m_pkthdr.rdomain)) == 0 &&
@@ -1219,7 +1217,7 @@ ip_rtaddr(struct in_addr dst, u_int rtableid)
 		sin->sin_len = sizeof(*sin);
 		sin->sin_addr = dst;
 
-		ipforward_rt.ro_rt = rtalloc1(&ipforward_rt.ro_dst, 1,
+		ipforward_rt.ro_rt = rtalloc1(&ipforward_rt.ro_dst, RT_REPORT,
 		    rtableid);
 	}
 	if (ipforward_rt.ro_rt == 0)
@@ -1276,6 +1274,7 @@ ip_weadvertise(u_int32_t addr, u_int rtableid)
 		return 0;
 	}
 
+	rtableid = rtable_l2(rtableid);
 	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 		if (ifp->if_rdomain != rtableid)
 			continue;
@@ -1434,7 +1433,7 @@ ip_forward(m, srcrt)
 		printf("forward: src %x dst %x ttl %x\n", ip->ip_src.s_addr,
 		    ip->ip_dst.s_addr, ip->ip_ttl);
 #endif
-	if (m->m_flags & M_BCAST || in_canforward(ip->ip_dst) == 0) {
+	if (m->m_flags & (M_BCAST|M_MCAST) || in_canforward(ip->ip_dst) == 0) {
 		ipstat.ips_cantforward++;
 		m_freem(m);
 		return;
@@ -1445,13 +1444,11 @@ ip_forward(m, srcrt)
 	}
 
 	rtableid = m->m_pkthdr.rdomain;
-	if (m->m_pkthdr.pf.rtableid)
-		rtableid = m->m_pkthdr.pf.rtableid;
 
 	sin = satosin(&ipforward_rt.ro_dst);
 	if ((rt = ipforward_rt.ro_rt) == 0 ||
 	    ip->ip_dst.s_addr != sin->sin_addr.s_addr ||
-	    rtableid != ipforward_rtableid) {
+	    rtableid != ipforward_rt.ro_tableid) {
 		if (ipforward_rt.ro_rt) {
 			RTFREE(ipforward_rt.ro_rt);
 			ipforward_rt.ro_rt = 0;
@@ -1459,13 +1456,13 @@ ip_forward(m, srcrt)
 		sin->sin_family = AF_INET;
 		sin->sin_len = sizeof(*sin);
 		sin->sin_addr = ip->ip_dst;
+		ipforward_rt.ro_tableid = rtableid;
 
-		rtalloc_mpath(&ipforward_rt, &ip->ip_src.s_addr, rtableid);
+		rtalloc_mpath(&ipforward_rt, &ip->ip_src.s_addr);
 		if (ipforward_rt.ro_rt == 0) {
 			icmp_error(m, ICMP_UNREACH, ICMP_UNREACH_HOST, dest, 0);
 			return;
 		}
-		ipforward_rtableid = rtableid;
 		rt = ipforward_rt.ro_rt;
 	}
 
@@ -1497,8 +1494,8 @@ ip_forward(m, srcrt)
 	    !ip_weadvertise(satosin(rt_key(rt))->sin_addr.s_addr,
 	    m->m_pkthdr.rdomain)) {
 		if (rt->rt_ifa &&
-		    (ip->ip_src.s_addr & ifatoia(rt->rt_ifa)->ia_subnetmask) ==
-		    ifatoia(rt->rt_ifa)->ia_subnet) {
+		    (ip->ip_src.s_addr & ifatoia(rt->rt_ifa)->ia_netmask) ==
+		    ifatoia(rt->rt_ifa)->ia_net) {
 		    if (rt->rt_flags & RTF_GATEWAY)
 			dest = satosin(rt->rt_gateway)->sin_addr.s_addr;
 		    else
@@ -1627,7 +1624,6 @@ ip_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 			    rt_timer_queue_create(ip_mtudisc_timeout);
 		} else if (ip_mtudisc == 0 && ip_mtudisc_timeout_q != NULL) {
 			rt_timer_queue_destroy(ip_mtudisc_timeout_q, TRUE);
-			Free(ip_mtudisc_timeout_q);
 			ip_mtudisc_timeout_q = NULL;
 		}
 		return error;

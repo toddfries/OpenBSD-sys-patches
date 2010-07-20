@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdvar.h,v 1.19 2009/09/14 00:03:28 dlg Exp $	*/
+/*	$OpenBSD: sdvar.h,v 1.31 2010/06/02 13:32:13 dlg Exp $	*/
 /*	$NetBSD: sdvar.h,v 1.7 1998/08/17 00:49:03 mycroft Exp $	*/
 
 /*-
@@ -51,6 +51,7 @@
 struct sd_softc {
 	struct device		sc_dev;
 	struct disk		sc_dk;
+	struct bufq		*sc_bufq;
 
 	int			flags;
 #define	SDF_LOCKED	0x01
@@ -60,6 +61,7 @@ struct sd_softc {
 #define	SDF_ANCIENT	0x10		/* disk is ancient; for minphys */
 #define	SDF_DIRTY	0x20		/* disk is dirty; needs cache flush */
 #define	SDF_DYING	0x40		/* dying, when deactivated */
+#define	SDF_WAITING	0x80
 	struct scsi_link	*sc_link; /* contains our targ, lun, etc. */
 	struct disk_parms {
 		u_long	heads;		/* number of heads */
@@ -69,11 +71,10 @@ struct sd_softc {
 		u_long	rot_rate;	/* rotational rate, in RPM */
 		daddr64_t	disksize;	/* total number sectors */
 	} params;
-	struct mutex sc_buf_mtx;
-	struct buf sc_buf_queue;
 	void *sc_sdhook;		/* our shutdown hook */
 	struct timeout sc_timeout;
-	
+
+	struct scsi_xshandler sc_xsh;
 };
 
 #define	SDGP_RESULT_OK		0	/* parameters obtained */

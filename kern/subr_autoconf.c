@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_autoconf.c,v 1.57 2009/10/13 19:33:19 pirofti Exp $	*/
+/*	$OpenBSD: subr_autoconf.c,v 1.61 2010/06/30 22:05:44 deraadt Exp $	*/
 /*	$NetBSD: subr_autoconf.c,v 1.21 1996/04/04 06:06:18 cgd Exp $	*/
 
 /*
@@ -746,43 +746,74 @@ config_detach_children(struct device *parent, int flags)
 }
 
 int
+config_suspend(struct device *dev, int act)
+{
+	struct cfattach *ca = dev->dv_cfdata->cf_attach;
+
+	if (ca->ca_activate) {
+#if 0
+		printf("activate: %s %d\n", dev->dv_xname, act);
+#endif
+		return (*ca->ca_activate)(dev, act);
+	}
+	return (0);
+}
+
+/*
+ * Call the ca_activate for each of our children, letting each
+ * decide whether they wish to do the same for their children
+ * and more.
+ */
+int
 config_activate_children(struct device *parent, int act)
 {
-	struct device *dev, *next_dev;
-	int  rv = 0;
+	struct device *d;
+	int rv = 0;
 
-	/* The config_deactivate routine may sleep, meaning devices
-	   may be added to the queue. However, all devices will
-	   be added to the tail of the queue, the queue won't
-	   be re-organized, and the subtree of parent here should be locked
-	   for purposes of adding/removing children.
-	*/
-	for (dev = TAILQ_FIRST(&alldevs);
-	     dev != NULL; dev = next_dev) {
-		next_dev = TAILQ_NEXT(dev, dv_list);
-		if (dev->dv_parent == parent) {
-			switch (act) {
-			case DVACT_ACTIVATE:
-				rv = config_activate(dev);
-				break;
-			case DVACT_DEACTIVATE:
-				rv = config_deactivate(dev);
-				break;
-			default:
-#ifdef DIAGNOSTIC
-				printf ("config_activate_children: shouldn't get here");
-#endif
-				rv = EOPNOTSUPP;
-				break;
-
-			}
-						
-			if (rv)
-				break;
+	for (d = TAILQ_NEXT(parent, dv_list); d != NULL;
+	    d = TAILQ_NEXT(d, dv_list)) {
+		if (d->dv_parent != parent)
+			continue;
+		switch (act) {
+		case DVACT_ACTIVATE:
+			rv = config_activate(d);
+			break;
+		case DVACT_DEACTIVATE:
+			rv = config_deactivate(d);
+			break;
+		case DVACT_SUSPEND:
+		case DVACT_RESUME:
+			rv = config_suspend(d, act);
+			break;
 		}
-	}
+		if (rv == 0)
+			continue;
 
-	return  (rv);
+		/*
+		 * Found a device that refuses the action.
+		 * If we were being asked to suspend, we can
+		 * try to resume all previous devices.
+		 */
+#ifdef DIAGNOSTIC
+		printf("config_activate_children: device %s failed %d\n",
+		    d->dv_xname, act);
+#endif
+		if (act == DVACT_RESUME)
+			printf("failing resume cannot be handled\n");
+		if (act != DVACT_SUSPEND)
+			return (rv);
+
+		d = TAILQ_PREV(d, devicelist, dv_list);
+		for (; d != NULL && d != parent;
+		    d = TAILQ_PREV(d, devicelist, dv_list)) {
+			if (d->dv_parent != parent)
+				continue;
+			printf("resume %s\n", d->dv_xname);
+			config_suspend(d, DVACT_RESUME);
+		}
+		return (rv);
+	}
+	return (rv);
 }
 
 /* 

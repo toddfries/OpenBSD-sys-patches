@@ -1,4 +1,4 @@
-/*	$OpenBSD: ukbd.c,v 1.48 2009/10/13 20:56:50 miod Exp $	*/
+/*	$OpenBSD: ukbd.c,v 1.51 2010/02/22 17:24:20 miod Exp $	*/
 /*      $NetBSD: ukbd.c,v 1.85 2003/03/11 16:44:00 augustss Exp $        */
 
 /*
@@ -192,7 +192,7 @@ struct ukbd_softc {
 	int sc_console_keyboard;	/* we are the console keyboard */
 
 	char sc_debounce;		/* for quirk handling */
-	struct timeout sc_delay;		/* for quirk handling */
+	struct timeout sc_delay;	/* for quirk handling */
 	struct ukbd_data sc_data;	/* for quirk handling */
 
 	struct hid_location sc_numloc;
@@ -546,8 +546,10 @@ ukbd_intr(struct uhidev *addr, void *ibuf, u_int len)
 		 * polling from inside the interrupt routine and that
 		 * loses bigtime.
 		 */
-		sc->sc_data = *ud;
-		timeout_add(&sc->sc_delay, 1);
+		/* if (!timeout_pending(&sc->sc_delay)) */ {
+			sc->sc_data = *ud;
+			timeout_add(&sc->sc_delay, 1);
+		}
 #endif
 	} else {
 		ukbd_decode(sc, ud);

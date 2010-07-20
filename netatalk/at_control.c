@@ -1,4 +1,4 @@
-/*	$OpenBSD: at_control.c,v 1.13 2008/06/08 19:10:33 claudio Exp $	*/
+/*	$OpenBSD: at_control.c,v 1.16 2010/07/02 05:45:25 blambert Exp $	*/
 
 /*
  * Copyright (c) 1990,1991 Regents of The University of Michigan.
@@ -113,7 +113,7 @@ at_control( cmd, data, ifp, p )
     struct at_aliasreq	*ifra = (struct at_aliasreq *)data;
     struct at_ifaddr	*aa0;
     struct at_ifaddr	*aa = 0;
-    struct ifaddr	*ifa, *ifa0;
+    struct ifaddr	*ifa0;
 
     if ( ifp ) {
 	for ( aa = at_ifaddr; aa; aa = aa->aa_next ) {
@@ -190,13 +190,7 @@ at_control( cmd, data, ifp, p )
 
 	    aa = aa0;
 
-	    if (( ifa = ifp->if_addrlist.tqh_first ) != NULL ) {
-	        for ( ; ifa->ifa_list.tqe_next; ifa = ifa->ifa_list.tqe_next )
-		    ;
-	    	ifa->ifa_list.tqe_next = (struct ifaddr *)aa;
-	    } else {
-		ifp->if_addrlist.tqh_first = (struct ifaddr *)aa;
-	    }
+	    ifa_add(ifp, (struct ifaddr *)aa);
 
 	    /* FreeBSD found this. Whew */
 	    aa->aa_ifa.ifa_refcnt++;
@@ -265,19 +259,7 @@ at_control( cmd, data, ifp, p )
     case SIOCDIFADDR:
 	at_scrub( ifp, aa );
 	ifa0 = (struct ifaddr *)aa;
-	if (( ifa = ifp->if_addrlist.tqh_first ) == ifa0 ) {
-	    ifp->if_addrlist.tqh_first = ifa->ifa_list.tqe_next;
-	} else {
-	    while ( ifa->ifa_list.tqe_next &&
-	    		( ifa->ifa_list.tqe_next != ifa0 )) {
-	    	ifa = ifa->ifa_list.tqe_next;
-	    }
-	    if ( ifa->ifa_list.tqe_next ) {
-	    	ifa->ifa_list.tqe_next = ifa0->ifa_list.tqe_next;
-	    } else {
-	    	panic( "at_control" );
-	    }
-	}
+	ifa_del(ifp, ifa0);
 
 	/* FreeBSD */
 	IFAFREE(ifa0);
@@ -417,7 +399,7 @@ at_ifinit( ifp, aa, sat )
 		aa->aa_probcnt = 10;
 		timeout_set(&aarpprobe_timeout, aarpprobe, ifp);
 		/* XXX don't use hz so badly */
-		timeout_add(&aarpprobe_timeout, hz / 5);
+		timeout_add_msec(&aarpprobe_timeout, 200);
 		if ( tsleep( aa, PPAUSE|PCATCH, "at_ifinit", 0 )) {
 		    printf( "at_ifinit why did this happen?!\n" );
 		    aa->aa_addr = oldaddr;

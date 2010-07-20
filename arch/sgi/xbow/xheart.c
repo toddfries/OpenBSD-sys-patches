@@ -1,4 +1,4 @@
-/*	$OpenBSD: xheart.c,v 1.15 2009/10/31 00:20:47 miod Exp $	*/
+/*	$OpenBSD: xheart.c,v 1.19 2009/11/26 23:32:46 syuu Exp $	*/
 
 /*
  * Copyright (c) 2008 Miodrag Vallat.
@@ -64,7 +64,8 @@ int	xheart_ow_triplet(void *, int);
 int	xheart_ow_pulse(struct xheart_softc *, int, int);
 
 int	xheart_intr_register(int, int, int *);
-int	xheart_intr_establish(int (*)(void *), void *, int, int, const char *);
+int	xheart_intr_establish(int (*)(void *), void *, int, int, const char *,
+	    struct intrhand *);
 void	xheart_intr_disestablish(int);
 void	xheart_intr_clear(int);
 void	xheart_intr_set(int);
@@ -88,13 +89,13 @@ struct intrhand *xheart_intrhand[HEART_NINTS];
 #define	INTPRI_HEART_1	(INTPRI_HEART_2 + 1)
 #define	INTPRI_HEART_0	(INTPRI_HEART_1 + 1)
 #else
-#define	INTPRI_HEART_2	(INTPRI_CLOCK + 1)
-#define	INTPRI_HEART_0	(INTPRI_HEART_2 + 1)
+#define	INTPRI_HEART_2	(INTPRI_IPI)
+#define	INTPRI_HEART_0	(INTPRI_CLOCK + 1)
 #endif
 #define	INTPRI_HEART_LEDS	(INTPRI_HEART_0 + 1)
 
-uint64_t xheart_intem;
-uint64_t xheart_imask[NIPLS];
+uint64_t xheart_intem[MAXCPUS];
+uint64_t xheart_imask[MAXCPUS][NIPLS];
 
 int
 xheart_match(struct device *parent, void *match, void *aux)
@@ -144,7 +145,6 @@ xheart_attach(struct device *parent, struct device *self, void *aux)
 		xbow_intr_widget_intr_disestablish = xheart_intr_disestablish;
 		xbow_intr_widget_intr_clear = xheart_intr_clear;
 		xbow_intr_widget_intr_set = xheart_intr_set;
-		xheart_intem = 0;
 
 		/*
 		 * Acknowledge and disable all interrupts.
@@ -270,13 +270,14 @@ int
 xheart_intr_register(int widget, int level, int *intrbit)
 {
 	int bit;
+	u_long cpuid = cpu_number();
 
 	/*
 	 * All interrupts will be serviced at hardware level 0,
 	 * so the `level' argument can be ignored.
 	 */
 	for (bit = HEART_INTR_WIDGET_MAX; bit >= HEART_INTR_WIDGET_MIN; bit--)
-		if ((xheart_intem & (1UL << bit)) == 0)
+		if ((xheart_intem[cpuid] & (1UL << bit)) == 0)
 			goto found;
 
 	return EINVAL;
@@ -291,10 +292,11 @@ found:
  */
 int
 xheart_intr_establish(int (*func)(void *), void *arg, int intrbit,
-    int level, const char *name)
+    int level, const char *name, struct intrhand *ihstore)
 {
 	struct intrhand *ih;
 	int s;
+	u_long cpuid = cpu_number();
 
 #ifdef DIAGNOSTIC
 	if (intrbit < 0 || intrbit >= HEART_NINTS)
@@ -308,9 +310,15 @@ xheart_intr_establish(int (*func)(void *), void *arg, int intrbit,
 	if (xheart_intrhand[intrbit] != NULL)
 		return EEXIST;
 
-	ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT);
-	if (ih == NULL)
-		return ENOMEM;
+	if (ihstore == NULL) {
+		ih = malloc(sizeof(*ih), M_DEVBUF, M_NOWAIT);
+		if (ih == NULL)
+			return ENOMEM;
+		ih->ih_flags = IH_ALLOCATED;
+	} else {
+		ih = ihstore;
+		ih->ih_flags = 0;
+	}
 
 	ih->ih_next = NULL;
 	ih->ih_fun = func;
@@ -325,7 +333,7 @@ xheart_intr_establish(int (*func)(void *), void *arg, int intrbit,
 
 	xheart_intrhand[intrbit] = ih;
 
-	xheart_intem |= 1UL << intrbit;
+	xheart_intem[cpuid] |= 1UL << intrbit;
 	xheart_intr_makemasks();
 
 	splx(s);	/* causes hw mask update */
@@ -338,6 +346,7 @@ xheart_intr_disestablish(int intrbit)
 {
 	struct intrhand *ih;
 	int s;
+	u_long cpuid = cpu_number();
 
 #ifdef DIAGNOSTIC
 	if (intrbit < 0 || intrbit >= HEART_NINTS)
@@ -353,12 +362,13 @@ xheart_intr_disestablish(int intrbit)
 
 	xheart_intrhand[intrbit] = NULL;
 
-	xheart_intem &= ~(1UL << intrbit);
+	xheart_intem[cpuid] &= ~(1UL << intrbit);
 	xheart_intr_makemasks();
 
 	splx(s);
 
-	free(ih, M_DEVBUF);
+	if (ISSET(ih->ih_flags, IH_ALLOCATED))
+		free(ih, M_DEVBUF);
 }
 
 void
@@ -375,57 +385,6 @@ xheart_intr_set(int intrbit)
 	    CCA_NC) = 1UL << intrbit;
 }
 
-/*
- * Recompute interrupt masks.
- */
-void
-xheart_intr_makemasks()
-{
-	int irq, level;
-	struct intrhand *q;
-	uint intrlevel[HEART_NINTS];
-
-	/* First, figure out which levels each IRQ uses. */
-	for (irq = 0; irq < HEART_NINTS; irq++) {
-		uint levels = 0;
-		for (q = xheart_intrhand[irq]; q; q = q->ih_next)
-			levels |= 1 << q->ih_level;
-		intrlevel[irq] = levels;
-	}
-
-	/*
-	 * Then figure out which IRQs use each level.
-	 * Note that we make sure never to overwrite imask[IPL_HIGH], in
-	 * case an interrupt occurs during intr_disestablish() and causes
-	 * an unfortunate splx() while we are here recomputing the masks.
-	 */
-	for (level = IPL_NONE; level < IPL_HIGH; level++) {
-		uint64_t irqs = 0;
-		for (irq = 0; irq < HEART_NINTS; irq++)
-			if (intrlevel[irq] & (1 << level))
-				irqs |= 1UL << irq;
-		xheart_imask[level] = irqs;
-	}
-
-	/*
-	 * There are tty, network and disk drivers that use free() at interrupt
-	 * time, so vm > (tty | net | bio).
-	 *
-	 * Enforce a hierarchy that gives slow devices a better chance at not
-	 * dropping data.
-	 */
-	xheart_imask[IPL_NET] |= xheart_imask[IPL_BIO];
-	xheart_imask[IPL_TTY] |= xheart_imask[IPL_NET];
-	xheart_imask[IPL_VM] |= xheart_imask[IPL_TTY];
-	xheart_imask[IPL_CLOCK] |= xheart_imask[IPL_VM];
-
-	/*
-	 * These are pseudo-levels.
-	 */
-	xheart_imask[IPL_NONE] = 0;
-	xheart_imask[IPL_HIGH] = -1UL;
-}
-
 void
 xheart_splx(int newipl)
 {
@@ -435,8 +394,10 @@ xheart_splx(int newipl)
 	__asm__ (".set noreorder\n");
 	ci->ci_ipl = newipl;
 	__asm__ ("sync\n\t.set reorder\n");
+
 	if (CPU_IS_PRIMARY(ci))
 		xheart_setintrmask(newipl);
+
 	/* If we still have softints pending trigger processing. */
 	if (ci->ci_softpending != 0 && newipl < IPL_SOFTINT)
 		setsoftintr0();
@@ -447,12 +408,16 @@ xheart_splx(int newipl)
  */
 
 #define	INTR_FUNCTIONNAME	xheart_intr_handler
+#define	MASK_FUNCTIONNAME	xheart_intr_makemasks
 #define	INTR_LOCAL_DECLS \
-	paddr_t heart = PHYS_TO_XKPHYS(HEART_PIU_BASE, CCA_NC);
+	paddr_t heart = PHYS_TO_XKPHYS(HEART_PIU_BASE, CCA_NC); \
+	u_long cpuid = cpu_number();
+#define	MASK_LOCAL_DECLS \
+	u_long cpuid = cpu_number();
 #define	INTR_GETMASKS \
 do { \
 	isr = *(volatile uint64_t *)(heart + HEART_ISR); \
-	imr = *(volatile uint64_t *)(heart + HEART_IMR(0)); \
+	imr = *(volatile uint64_t *)(heart + HEART_IMR(cpuid));	\
 	switch (hwpend) { \
 	case CR_INT_0: \
 		isr &= HEART_ISR_LVL0_MASK; \
@@ -479,15 +444,16 @@ do { \
 	} \
 } while (0)
 #define	INTR_MASKPENDING \
-	*(volatile uint64_t *)(heart + HEART_IMR(0)) &= ~isr
-#define	INTR_IMASK(ipl)		xheart_imask[ipl]
+	*(volatile uint64_t *)(heart + HEART_IMR(cpuid)) &= ~isr
+#define	INTR_IMASK(ipl)		xheart_imask[cpuid][ipl]
 #define	INTR_HANDLER(bit)	xheart_intrhand[bit]
 #define	INTR_SPURIOUS(bit) \
 do { \
 	printf("spurious xheart interrupt %d\n", bit); \
 } while (0)
 #define	INTR_MASKRESTORE \
-	*(volatile uint64_t *)(heart + HEART_IMR(0)) = imr
+	*(volatile uint64_t *)(heart + HEART_IMR(cpuid)) = imr
+#define	INTR_MASKSIZE	HEART_NINTS
 
 #include <sgi/sgi/intr_template.c>
 
@@ -495,6 +461,8 @@ void
 xheart_setintrmask(int level)
 {
 	paddr_t heart = PHYS_TO_XKPHYS(HEART_PIU_BASE, CCA_NC);
-	*(volatile uint64_t *)(heart + HEART_IMR(0)) =
-	    xheart_intem & ~xheart_imask[level];
+	u_long cpuid = cpu_number();
+
+	*(volatile uint64_t *)(heart + HEART_IMR(cpuid)) =
+		xheart_intem[cpuid] & ~xheart_imask[cpuid][level];
 }

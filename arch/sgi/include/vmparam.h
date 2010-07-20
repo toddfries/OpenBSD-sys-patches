@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.4 2009/10/14 20:18:26 miod Exp $ */
+/*	$OpenBSD: vmparam.h,v 1.7 2009/12/08 22:15:48 miod Exp $ */
 /* public domain */
 #ifndef _SGI_VMPARAM_H_
 #define _SGI_VMPARAM_H_
@@ -8,7 +8,7 @@
 /*
  * On Origin and Octane families, DMA to 32-bit PCI devices is restricted.
  *
- * Systems with physical memory after the 2GB boundary needs to ensure
+ * Systems with physical memory after the 2GB boundary need to ensure
  * memory which may used for DMA transfers is allocated from the low
  * memory range.
  *

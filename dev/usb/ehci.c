@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.103 2009/10/13 19:33:17 pirofti Exp $ */
+/*	$OpenBSD: ehci.c,v 1.106 2009/11/26 12:27:48 deraadt Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -672,12 +672,10 @@ ehci_softintr(void *v)
 		timeout_add_sec(&sc->sc_tmo_intrlist, 1);
 	}
 
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	if (sc->sc_softwake) {
 		sc->sc_softwake = 0;
 		wakeup(&sc->sc_softwake);
 	}
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 
 	sc->sc_bus.intr_context--;
 }
@@ -1041,6 +1039,13 @@ ehci_activate(struct device *self, int act)
 		if (sc->sc_child != NULL)
 			rv = config_deactivate(sc->sc_child);
 		sc->sc_dying = 1;
+		break;
+	case DVACT_SUSPEND:
+		ehci_power(PWR_SUSPEND, sc);
+		break;
+	case DVACT_RESUME:
+		ehci_power(PWR_RESUME, sc);
+		rv = config_activate_children(self, act);
 		break;
 	}
 	return (rv);
@@ -2795,13 +2800,9 @@ ehci_abort_xfer(usbd_xfer_handle xfer, usbd_status status)
 	 * has run.
 	 */
 	s = splusb();
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	sc->sc_softwake = 1;
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 	usb_schedsoftintr(&sc->sc_bus);
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	tsleep(&sc->sc_softwake, PZERO, "ehciab", 0);
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 
 	/*
 	 * Step 5: Remove any vestiges of the xfer from the hardware.
@@ -2957,13 +2958,9 @@ ehci_abort_isoc_xfer(usbd_xfer_handle xfer, usbd_status status)
 	splx(s);
 
 	s = splusb();
-#ifdef USB_USE_SOFTINTR
 	sc->sc_softwake = 1;
-#endif /* USB_USE_SOFTINTR */
 	usb_schedsoftintr(&sc->sc_bus);
-#ifdef USB_USE_SOFTINTR
 	tsleep(&sc->sc_softwake, PZERO, "ehciab", 0);
-#endif /* USB_USE_SOFTINTR */
 	splx(s);
 
 #ifdef DIAGNOSTIC
@@ -3694,7 +3691,7 @@ ehci_device_isoc_start(usbd_xfer_handle xfer)
 	 * the entire frame table. To within 4 frames, to allow some leeway
 	 * on either side of where the hc currently is.
 	 */
-	if ((1 << (epipe->pipe.endpoint->edesc->bInterval)) *
+	if ((1 << (epipe->pipe.endpoint->edesc->bInterval - 1)) *
 	    xfer->nframes >= (sc->sc_flsize - 4) * 8) {
 		printf("ehci: isoc descriptor requested that spans the entire "
 		    "frametable, too many frames\n");
@@ -3864,7 +3861,7 @@ ehci_device_isoc_start(usbd_xfer_handle xfer)
 		frindex &= (sc->sc_flsize - 1);
 
 	/* Whats the frame interval? */
-	i = (1 << epipe->pipe.endpoint->edesc->bInterval);
+	i = (1 << (epipe->pipe.endpoint->edesc->bInterval - 1));
 	if (i / 8 == 0)
 		i = 1;
 	else

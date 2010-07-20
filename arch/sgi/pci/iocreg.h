@@ -1,4 +1,4 @@
-/*	$OpenBSD: iocreg.h,v 1.5 2009/11/01 19:17:56 miod Exp $	*/
+/*	$OpenBSD: iocreg.h,v 1.10 2009/11/18 19:03:27 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Joel Sing.
@@ -42,6 +42,13 @@
 #define	IOC3_GPDR		0x0000003c	/* GPIO data */
 #define	IOC3_GPPR_BASE		0x00000040	/* 9 GPIO pin registers */
 #define	IOC3_GPPR(x)		(IOC3_GPPR_BASE + (x) * 4)
+
+/* Keyboard controller registers. */
+#define	IOC3_KBC_CTRL_STATUS	0x0000009c
+#define	IOC3_KBC_KBD_RX		0x000000a0
+#define	IOC3_KBC_AUX_RX		0x000000a4
+#define	IOC3_KBC_KBD_TX		0x000000a8
+#define	IOC3_KBC_AUX_TX		0x000000ac
 
 /* Non-16550 mode UART registers */
 #define	IOC3_UARTA_SSCR		0x000000b8	/* control register */
@@ -107,6 +114,8 @@
 #define	IOC3_ENET_MCR_PADEN		0x00000004
 #define	IOC3_ENET_MCR_RXOFF_MASK	0x000001f8
 #define	IOC3_ENET_MCR_RXOFF_SHIFT	3
+#define	IOC3_ENET_MCR_PARITY_ENABLE	0x00000200
+#define	IOC3_ENET_MCR_LARGE_SSRAM	0x00001000
 #define	IOC3_ENET_MCR_TX_DMA		0x00002000
 #define	IOC3_ENET_MCR_TX		0x00004000
 #define	IOC3_ENET_MCR_RX_DMA		0x00008000
@@ -163,6 +172,9 @@
 #define	IOC3_ENET_TCDC_DEFER_MASK	0xffff0000
 #define	IOC3_ENET_TCDC_DEFER_SHIFT	16
 
+/* bits in ENET_TCIR */
+#define	IOC3_ENET_TCIR_IDLE		0x80000000
+
 /* bits in ENET_MICR */
 #define	IOC3_ENET_MICR_REG_MASK		0x0000001f
 #define	IOC3_ENET_MICR_PHY_MASK		0x000003e0
@@ -179,6 +191,17 @@
 
 #define	IOC3_UARTA_BASE		0x00020178
 #define	IOC3_UARTB_BASE		0x00020170
+
+/*
+ * Ethernet SSRAM.
+ */
+
+#define	IOC3_SSRAM_BASE		0x00040000
+#define	IOC3_SSRAM_SMALL_SIZE	0x00020000
+#define	IOC3_SSRAM_LARGE_SIZE	0x00040000
+
+#define	IOC3_SSRAM_PARITY_BIT		0x00010000
+#define	IOC3_SSRAM_DATA_MASK		0x0000ffff
 
 /*
  * Offsets of devices connected to the four IOC3 `bytebus'.
