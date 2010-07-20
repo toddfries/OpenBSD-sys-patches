@@ -306,7 +306,6 @@ void	 acpi_sleep_walk(struct acpi_softc *, int);
 #define ACPI_IOREAD 0
 #define ACPI_IOWRITE 1
 
-void acpi_delay(struct acpi_softc *, int64_t);
 void acpi_wakeup(void *);
 
 int acpi_gasio(struct acpi_softc *, int, int, uint64_t, int, int, void *);
