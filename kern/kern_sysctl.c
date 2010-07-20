@@ -1242,7 +1242,6 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_WEXIT)
 			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
-
 			if (arg > 0 && pp->p_pid != (pid_t)arg) {
 				/* not the pid we are looking for */
 				continue;
@@ -1271,7 +1270,6 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_WEXIT)
 			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
-
 			if (arg > 0 && pp->p_ucred->cr_uid != (uid_t)arg) {
 				/* not the uid we are looking for */
 				continue;
