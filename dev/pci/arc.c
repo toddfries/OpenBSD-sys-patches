@@ -1,4 +1,4 @@
-/*	$OpenBSD: arc.c,v 1.84 2010/05/20 00:55:17 krw Exp $ */
+/*	$OpenBSD: arc.c,v 1.90 2010/07/18 12:49:10 mk Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -23,6 +23,7 @@
 #include <sys/buf.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/mutex.h>
 #include <sys/device.h>
 #include <sys/rwlock.h>
 
@@ -351,7 +352,7 @@ int			arc_intr(void *);
 
 struct arc_iop;
 struct arc_ccb;
-TAILQ_HEAD(arc_ccb_list, arc_ccb);
+SLIST_HEAD(arc_ccb_list, arc_ccb);
 
 struct arc_softc {
 	struct device		sc_dev;
@@ -375,7 +376,9 @@ struct arc_softc {
 	struct arc_dmamem	*sc_requests;
 	struct arc_ccb		*sc_ccbs;
 	struct arc_ccb_list	sc_ccb_free;
+	struct mutex		sc_ccb_mtx;
 
+	struct scsi_iopool	sc_iopool;
 	struct scsibus_softc	*sc_scsibus;
 
 	struct rwlock		sc_lock;
@@ -403,10 +406,6 @@ void			arc_minphys(struct buf *, struct scsi_link *);
 
 struct scsi_adapter arc_switch = {
 	arc_scsi_cmd, arc_minphys, NULL, NULL, NULL
-};
-
-struct scsi_device arc_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 /* code to deal with getting bits in and out of the bus space */
@@ -452,7 +451,7 @@ struct arc_ccb {
 	struct arc_io_cmd	*ccb_cmd;
 	u_int32_t		ccb_cmd_post;
 
-	TAILQ_ENTRY(arc_ccb)	ccb_link;
+	SLIST_ENTRY(arc_ccb)	ccb_link;
 };
 
 int			arc_alloc_ccbs(struct arc_softc *);
@@ -595,12 +594,12 @@ arc_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc_shutdownhook == NULL)
 		panic("unable to establish arc powerhook");
 
-	sc->sc_link.device = &arc_dev;
 	sc->sc_link.adapter = &arc_switch;
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = ARC_MAX_TARGET;
 	sc->sc_link.adapter_buswidth = ARC_MAX_TARGET;
-	sc->sc_link.openings = sc->sc_req_count / ARC_MAX_TARGET;
+	sc->sc_link.openings = sc->sc_req_count;
+	sc->sc_link.pool = &sc->sc_iopool;
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &sc->sc_link;
@@ -728,23 +727,12 @@ arc_scsi_cmd(struct scsi_xfer *xs)
 		return;
 	}
 
-	s = splbio();
-	ccb = arc_get_ccb(sc);
-	splx(s);
-	if (ccb == NULL) {
-		xs->error = XS_DRIVER_STUFFUP;
-		scsi_done(xs);
-		return;
-	}
-
+	ccb = xs->io;
 	ccb->ccb_xs = xs;
 
 	if (arc_load_xs(ccb) != 0) {
 		xs->error = XS_DRIVER_STUFFUP;
-		s = splbio();
-		arc_put_ccb(sc, ccb);
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 
@@ -869,7 +857,6 @@ arc_scsi_cmd_done(struct arc_softc *sc, struct arc_ccb *ccb, u_int32_t reg)
 		xs->resid = 0;
 	}
 
-	arc_put_ccb(sc, ccb);
 	scsi_done(xs);
 }
 
@@ -1346,8 +1333,8 @@ arc_bio_vol(struct arc_softc *sc, struct bioc_vol *bv)
 	}
 
 	bv->bv_nodisk = volinfo->member_disks;
-	sc_link = sc->sc_scsibus->sc_link[volinfo->scsi_attr.target]
-	    [volinfo->scsi_attr.lun];
+	sc_link = scsi_get_link(sc->sc_scsibus, volinfo->scsi_attr.target,
+	    volinfo->scsi_attr.lun);
 	if (sc_link != NULL) {
 		dev = sc_link->device_softc;
 		strlcpy(bv->bv_dev, dev->dv_xname, sizeof(bv->bv_dev));
@@ -1904,7 +1891,8 @@ arc_alloc_ccbs(struct arc_softc *sc)
 	u_int8_t			*cmd;
 	int				i;
 
-	TAILQ_INIT(&sc->sc_ccb_free);
+	SLIST_INIT(&sc->sc_ccb_free);
+	mtx_init(&sc->sc_ccb_mtx, IPL_BIO);
 
 	sc->sc_ccbs = malloc(sizeof(struct arc_ccb) * sc->sc_req_count,
 	    M_DEVBUF, M_WAITOK | M_ZERO);
@@ -1938,6 +1926,10 @@ arc_alloc_ccbs(struct arc_softc *sc)
 		arc_put_ccb(sc, ccb);
 	}
 
+	scsi_iopool_init(&sc->sc_iopool, sc,
+	    (void *(*)(void *))arc_get_ccb,
+	    (void (*)(void *, void *))arc_put_ccb);
+
 	return (0);
 
 free_maps:
@@ -1956,9 +1948,11 @@ arc_get_ccb(struct arc_softc *sc)
 {
 	struct arc_ccb			*ccb;
 
-	ccb = TAILQ_FIRST(&sc->sc_ccb_free);
+	mtx_enter(&sc->sc_ccb_mtx);
+	ccb = SLIST_FIRST(&sc->sc_ccb_free);
 	if (ccb != NULL)
-		TAILQ_REMOVE(&sc->sc_ccb_free, ccb, ccb_link);
+		SLIST_REMOVE_HEAD(&sc->sc_ccb_free, ccb_link);
+	mtx_leave(&sc->sc_ccb_mtx);
 
 	return (ccb);
 }
@@ -1968,5 +1962,7 @@ arc_put_ccb(struct arc_softc *sc, struct arc_ccb *ccb)
 {
 	ccb->ccb_xs = NULL;
 	bzero(ccb->ccb_cmd, ARC_MAX_IOCMDLEN);
-	TAILQ_INSERT_TAIL(&sc->sc_ccb_free, ccb, ccb_link);
+	mtx_enter(&sc->sc_ccb_mtx);
+	SLIST_INSERT_HEAD(&sc->sc_ccb_free, ccb, ccb_link);
+	mtx_leave(&sc->sc_ccb_mtx);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.20 2010/06/10 17:54:13 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.23 2010/06/27 12:41:23 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-
@@ -71,7 +71,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/mount.h>
 #include <sys/reboot.h>
 #include <sys/sysctl.h>
@@ -79,7 +78,7 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <dev/cons.h>
 
@@ -93,6 +92,7 @@
 
 #include <machine/cpu.h>
 #include <machine/kcore.h>
+#include <machine/pcb.h>
 
 #include <landisk/landisk/landiskreg.h>
 
@@ -114,6 +114,9 @@ int	kbd_reset;
 int	led_blink;
 
 extern u_int32_t getramsize(void);
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 /*
  * safepri is a safe priority for sleep to set for a spin-wait

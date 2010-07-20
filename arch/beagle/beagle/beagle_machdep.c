@@ -1,4 +1,4 @@
-/*	$OpenBSD: beagle_machdep.c,v 1.4 2010/06/10 17:54:13 deraadt Exp $ */
+/*	$OpenBSD: beagle_machdep.c,v 1.6 2010/06/27 08:05:59 drahn Exp $ */
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*

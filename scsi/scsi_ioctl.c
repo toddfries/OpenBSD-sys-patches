@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_ioctl.c,v 1.41 2010/04/23 01:39:05 dlg Exp $	*/
+/*	$OpenBSD: scsi_ioctl.c,v 1.45 2010/07/10 02:52:38 matthew Exp $	*/
 /*	$NetBSD: scsi_ioctl.c,v 1.23 1996/10/12 23:23:17 christos Exp $	*/
 
 /*
@@ -44,7 +44,6 @@
 #include <sys/file.h>
 #include <sys/malloc.h>
 #include <sys/buf.h>
-#include <sys/proc.h>
 #include <sys/device.h>
 #include <sys/fcntl.h>
 
@@ -106,6 +105,8 @@ scsi_ioc_cmd(struct scsi_link *link, scsireq_t *screq)
 
 	if (screq->cmdlen > sizeof(struct scsi_generic))
 		return (EFAULT);
+	if (screq->datalen > MAXPHYS)
+		return (EINVAL);
 
 	xs = scsi_xs_get(link, 0);
 	if (xs == NULL)
@@ -115,7 +116,12 @@ scsi_ioc_cmd(struct scsi_link *link, scsireq_t *screq)
 	xs->cmdlen = screq->cmdlen;
 
 	if (screq->datalen > 0) {
-		xs->data = malloc(screq->datalen, M_TEMP, M_WAITOK);
+		xs->data = malloc(screq->datalen, M_TEMP,
+		    M_WAITOK | M_CANFAIL | M_ZERO);
+		if (xs->data == NULL) {
+			err = ENOMEM;
+			goto err;
+		}
 		xs->datalen = screq->datalen;
 	}
 
@@ -146,12 +152,18 @@ scsi_ioc_cmd(struct scsi_link *link, scsireq_t *screq)
 		screq->retsts = SCCMD_OK;
 		break;
 	case XS_SENSE:
+#ifdef SCSIDEBUG
+		scsi_sense_print_debug(xs);
+#endif
 		screq->senselen_used = min(sizeof(xs->sense),
 		    sizeof(screq->sense));
 		bcopy(&xs->sense, screq->sense, screq->senselen_used);
 		screq->retsts = SCCMD_SENSE;
 		break;
 	case XS_SHORTSENSE:
+#ifdef SCSIDEBUG
+		scsi_sense_print_debug(xs);
+#endif
 		printf("XS_SHORTSENSE\n");
 		screq->senselen_used = min(sizeof(xs->sense),
 		    sizeof(screq->sense));
@@ -179,7 +191,7 @@ scsi_ioc_cmd(struct scsi_link *link, scsireq_t *screq)
 	}
 
 err:
-	if (screq->datalen > 0)
+	if (xs->data)
 		free(xs->data, M_TEMP);
 	scsi_xs_put(xs);
 
@@ -192,6 +204,9 @@ scsi_ioc_ata_cmd(struct scsi_link *link, atareq_t *atareq)
 	struct scsi_xfer *xs;
 	struct scsi_ata_passthru_12 *cdb;
 	int err = 0;
+
+	if (atareq->datalen > MAXPHYS)
+		return (EINVAL);
 
 	xs = scsi_xs_get(link, 0);
 	if (xs == NULL)
@@ -224,7 +239,12 @@ scsi_ioc_ata_cmd(struct scsi_link *link, atareq_t *atareq)
 	xs->cmdlen = sizeof(*cdb);
 
 	if (atareq->datalen > 0) {
-		xs->data = malloc(atareq->datalen, M_TEMP, M_WAITOK);
+		xs->data = malloc(atareq->datalen, M_TEMP,
+		    M_WAITOK | M_CANFAIL | M_ZERO);
+		if (xs->data == NULL) {
+			err = ENOMEM;
+			goto err;
+		}
 		xs->datalen = atareq->datalen;
 	}
 
@@ -250,6 +270,9 @@ scsi_ioc_ata_cmd(struct scsi_link *link, atareq_t *atareq)
 	switch (xs->error) {
 	case XS_SENSE:
 	case XS_SHORTSENSE:
+#ifdef SCSIDEBUG
+		scsi_sense_print_debug(xs);
+#endif
 		/* XXX this is not right */
 	case XS_NOERROR:
 		atareq->retsts = ATACMD_OK;
@@ -266,7 +289,7 @@ scsi_ioc_ata_cmd(struct scsi_link *link, atareq_t *atareq)
 	}
 
 err:
-	if (atareq->datalen > 0)
+	if (xs->data)
 		free(xs->data, M_TEMP);
 	scsi_xs_put(xs);
 
@@ -277,12 +300,9 @@ err:
  * Something (e.g. another driver) has called us
  * with an sc_link for a target/lun/adapter, and a scsi
  * specific ioctl to perform, better try.
- * If user-level type command, we must still be running
- * in the context of the calling process
  */
 int
-scsi_do_ioctl(struct scsi_link *sc_link, dev_t dev, u_long cmd, caddr_t addr,
-    int flag, struct proc *p)
+scsi_do_ioctl(struct scsi_link *sc_link, u_long cmd, caddr_t addr, int flag)
 {
 	SC_DEBUG(sc_link, SDEV_DB2, ("scsi_do_ioctl(0x%lx)\n", cmd));
 
@@ -313,7 +333,7 @@ scsi_do_ioctl(struct scsi_link *sc_link, dev_t dev, u_long cmd, caddr_t addr,
 	default:
 		if (sc_link->adapter->ioctl)
 			return ((sc_link->adapter->ioctl)(sc_link, cmd, addr,
-			    flag, p));
+			    flag));
 		else
 			return (ENOTTY);
 	}

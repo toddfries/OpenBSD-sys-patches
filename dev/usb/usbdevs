@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.499 2010/06/01 04:53:17 mglocker Exp $
+$OpenBSD: usbdevs,v 1.507 2010/07/15 15:44:55 sthen Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -556,6 +556,7 @@ vendor ALTI2		0x1bc9	Alti-2
 vendor LONGCHEER	0x1c9e	Longcheer Technology
 vendor DRESDENELEC	0x1cf1	Dresden Elektronic
 vendor PEGATRON		0x1d4d	Pegatron
+vendor METAGEEK		0x1dd5	MetaGeek
 vendor MODACOM		0x1eb8	Modacom
 vendor AIRTIES		0x1eda	AirTies
 vendor DLINK		0x2001	D-Link
@@ -590,6 +591,7 @@ vendor ARKMICRO		0x6547	Arkmicro
 vendor 3COM2		0x6891	3Com
 vendor EDIMAX		0x7392	EDIMAX
 vendor INTEL		0x8086	Intel
+vendor INTEL2		0x8087	Intel
 vendor ALLWIN		0x8516	ALLWIN Tech
 vendor SITECOM2		0x9016	Sitecom
 vendor MOSCHIP		0x9710	MosChip
@@ -1143,6 +1145,7 @@ product CMOTECH CM5100P		0x5523	CM-5100P EVDO
 product CMOTECH CCU550		0x5533	CCU-550 EVDO
 product CMOTECH CNU550pro	0x5543	CNU-550pro EVDO
 product CMOTECH CGU628		0x6006	CGU-628
+product CMOTECH CNU680		0x6803	CNU-680
 product CMOTECH CGU628_DISK	0xf000	CGU-628 disk mode
 
 /* Conceptronic products */
@@ -1336,6 +1339,7 @@ product DISPLAYLINK EC008	0x019b	EasyCAP008 DVI
 product DISPLAYLINK HPDOCK	0x01d4	HP USB Docking
 product DISPLAYLINK M01061	0x01e2	Lenovo DVI
 product DISPLAYLINK SWDVI	0x024c	SUNWEIT DVI
+product DISPLAYLINK LUM70	0x02a9	Lilliput UM-70
 product DISPLAYLINK UM7X0	0x401a	nanovision MiMo
 
 /* DMI products */
@@ -1857,6 +1861,7 @@ product HUAWEI E220		0x1003	HUAWEI Mobile Modem
 product HUAWEI Mobile		0x1008	HUAWEI Mobile Modem
 product HUAWEI E180		0x140c	HUAWEI Mobile E180
 product HUAWEI E510		0x1411	HUAWEI Mobile E510
+product	HUAWEI E182		0x1429	HUWAEI Mobile Modem
 product HUAWEI E161		0x1446	HUAWEI Mobile E161
 product HUAWEI K3765		0x1465	HUAWEI Mobile K3765
 product HUAWEI K3765_INIT	0x1520	HUAWEI Mobile K3765 Initial
@@ -1870,6 +1875,7 @@ product HYUNDAI UM175		0x3714	UM175 EVDO
 
 /* IBM Corporation */
 product IBM OPTTRAVELMOUSE	0x3107	Optical
+product IBM OPTWHEELMOUSE	0x310b	Wheel
 product IBM USBCDROMDRIVE	0x4427	CD-ROM 
 product IBM THINKPADHUB		0x4484	Hub
 
@@ -1933,6 +1939,7 @@ product INSYSTEM USBCABLE	0x081a	USB cable
 product INSYSTEM ADAPTERV2	0x5701	USB Storage Adapter V2
 
 /* Intel products */
+product INTEL2 RMH		0x0020	Rate Matching Hub
 product INTEL EASYPC_CAMERA	0x0110	EasyPC
 product INTEL AP310		0x0200	AP310 AnyPoint II
 product INTEL I2011B		0x1111	Wireless 2011B
@@ -2508,6 +2515,9 @@ product MELCO WLIUCGN		0x015d	WLI-UC-GN
 product MECANIQUE WISPY		0x083e	MetaGeek Wi-Spy
 product MECANIQUE TELLSTICK	0x0c30	Telldus Tellstick
 
+/* MetaGeek products */
+product METAGEEK WISPY24I	0x2400	Wi-Spy 2.4i
+
 /* Metricom products */
 product METRICOM RICOCHET_GS	0x0001	Ricochet GS
 
@@ -2611,6 +2621,7 @@ product MOBILITY EASIDOCK	0x0304	EasiDock Ethernet
 
 /* MosChip products */
 product MOSCHIP MCS7703		0x7703	MCS7703 Serial
+product	MOSCHIP	MCS7715		0x7715	MCS7715	Serial Parallel
 product MOSCHIP MCS7730		0x7730	MCS7730 Ethernet
 product MOSCHIP MCS7830		0x7830	MCS7830 Ethernet
 
@@ -3043,6 +3054,7 @@ product RATOC REXUSB60F		0xb020	REX-USB60F
 /* Realtek products */
 product REALTEK RTL8150		0x8150	RTL8150
 product REALTEK RTL8151		0x8151	RTL8151 PNA
+product REALTEK RTL8171		0x8171	RTL8171
 product REALTEK RTL8187		0x8187	RTL8187
 product REALTEK RTL8187B_0	0x8189	RTL8187B
 product REALTEK RTL8187B_1	0x8197	RTL8187B

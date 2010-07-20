@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.167 2010/05/14 18:47:56 kettenis Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.169 2010/07/03 04:44:51 guenther Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -265,8 +265,8 @@ main(void *framep)
 	process0.ps_refcnt = 1;
 	p->p_p = &process0;
 
-	/* Set the default routing domain. */
-	process0.ps_rdomain = 0;
+	/* Set the default routing table/domain. */
+	process0.ps_rtableid = 0;
 
 	LIST_INSERT_HEAD(&allproc, p, p_list);
 	p->p_pgrp = &pgrp0;
@@ -290,7 +290,6 @@ main(void *framep)
 	timeout_set(&p->p_realit_to, realitexpire, p);
 
 	/* Create credentials. */
-	cred0.p_refcnt = 1;
 	p->p_cred = &cred0;
 	p->p_ucred = crget();
 	p->p_ucred->cr_ngroups = 1;	/* group 0 */

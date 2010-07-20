@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.89 2010/05/09 12:03:16 kettenis Exp $	*/
+/*	$OpenBSD: trap.c,v 1.93 2010/07/14 00:15:27 deraadt Exp $	*/
 /*	$NetBSD: trap.c,v 1.95 1996/05/05 06:50:02 mycroft Exp $	*/
 
 /*-
@@ -71,11 +71,6 @@
 #include <sys/kgdb.h>
 #endif
 
-#ifdef COMPAT_IBCS2
-#include <compat/ibcs2/ibcs2_errno.h>
-#include <compat/ibcs2/ibcs2_exec.h>
-extern struct emul emul_ibcs2;
-#endif
 #include <sys/exec.h>
 #ifdef COMPAT_LINUX
 #include <compat/linux/linux_syscall.h>
@@ -83,9 +78,6 @@ extern struct emul emul_linux_aout, emul_linux_elf;
 #endif
 #ifdef COMPAT_FREEBSD
 extern struct emul emul_freebsd_aout, emul_freebsd_elf;
-#endif
-#ifdef COMPAT_BSDOS
-extern struct emul emul_bsdos;
 #endif
 #ifdef COMPAT_AOUT
 extern struct emul emul_aout;
@@ -181,7 +173,7 @@ trap(struct trapframe *frame)
 #ifdef DEBUG
 	if (trapdebug) {
 		printf("trap %d code %x eip %x cs %x eflags %x cr2 %x cpl %x\n",
-		    frame->tf_trapno, frame->tf_err, frame.->f_eip,
+		    frame->tf_trapno, frame->tf_err, frame->f_eip,
 		    frame->tf_cs, frame->tf_eflags, rcr2(), lapic_tpr);
 		printf("curproc %p\n", curproc);
 	}
@@ -602,11 +594,6 @@ syscall(struct trapframe *frame)
 	nsys = p->p_emul->e_nsysent;
 	callp = p->p_emul->e_sysent;
 
-#ifdef COMPAT_IBCS2
-	if (p->p_emul == &emul_ibcs2)
-		if (IBCS2_HIGH_SYSCALL(code))
-			code = IBCS2_CVT_HIGH_SYSCALL(code);
-#endif
 	params = (caddr_t)frame->tf_esp + sizeof(int);
 
 #ifdef VM86
@@ -646,9 +633,6 @@ syscall(struct trapframe *frame)
 #endif
 #ifdef COMPAT_AOUT
 		    && p->p_emul != &emul_aout
-#endif
-#ifdef COMPAT_BSDOS
-		    && p->p_emul != &emul_bsdos
 #endif
 		    )
 			break;

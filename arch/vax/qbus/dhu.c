@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhu.c,v 1.16 2010/04/12 12:57:52 tedu Exp $	*/
+/*	$OpenBSD: dhu.c,v 1.18 2010/07/02 17:27:01 nicm Exp $	*/
 /*	$NetBSD: dhu.c,v 1.19 2000/06/04 06:17:01 matt Exp $	*/
 /*
  * Copyright (c) 2003, Hugh Graham.
@@ -243,7 +243,7 @@ dhu_attach(parent, self, aux)
 
 	for (i = 0; i < sc->sc_lines; i++) {
 		struct tty *tp;
-		tp = sc->sc_dhu[i].dhu_tty = ttymalloc();
+		tp = sc->sc_dhu[i].dhu_tty = ttymalloc(0);
 		sc->sc_dhu[i].dhu_state = STATE_IDLE;
 		bus_dmamap_create(sc->sc_dmat, tp->t_outq.c_cn, 1, 
 		    tp->t_outq.c_cn, 0, BUS_DMA_ALLOCNOW|BUS_DMA_NOWAIT,
@@ -639,13 +639,7 @@ dhustart(tp)
 
 	if (tp->t_state & (TS_TIMEOUT|TS_BUSY|TS_TTSTOP))
 		goto out;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
 	if (tp->t_outq.c_cc == 0)
 		goto out;
 	cc = ndqb(&tp->t_outq, 0);

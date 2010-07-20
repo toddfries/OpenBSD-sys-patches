@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.153 2009/08/11 19:17:16 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.155 2010/07/02 19:57:14 tedu Exp $	*/
 /*	$NetBSD: machdep.c,v 1.207 1998/07/08 04:39:34 thorpej Exp $	*/
 
 /*
@@ -183,6 +183,9 @@ int	bufpages = 0;
 int	bufcachepercent = BUFCACHEPERCENT;
 
 int	physmem;		/* size of physical memory, in pages */
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
@@ -887,24 +890,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return (EOPNOTSUPP);
 	}
 	/* NOTREACHED */
-}
-
-int
-cpu_exec_aout_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-	int error = ENOEXEC;
-
-#ifdef COMPAT_SUNOS
-	{
-		extern int sunos_exec_aout_makecmds(struct proc *,
-			        struct exec_package *);
-		if ((error = sunos_exec_aout_makecmds(p, epp)) == 0)
-			return 0;
-	}
-#endif
-	return error;
 }
 
 static char *envbuf = NULL;

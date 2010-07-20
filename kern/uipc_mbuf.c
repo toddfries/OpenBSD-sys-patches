@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.137 2010/06/07 19:47:25 blambert Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.143 2010/07/15 09:45:09 claudio Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -76,7 +76,6 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/malloc.h>
-#define MBTYPES
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
@@ -90,6 +89,7 @@
 
 #include <machine/cpu.h>
 
+#include <uvm/uvm.h>
 #include <uvm/uvm_extern.h>
 
 struct	mbstat mbstat;		/* mbuf stats */
@@ -136,13 +136,15 @@ mbinit(void)
 	int i;
 
 	pool_init(&mbpool, MSIZE, 0, 0, 0, "mbpl", NULL);
+	pool_set_constraints(&mbpool, &dma_constraint, 1);
 	pool_setlowat(&mbpool, mblowat);
 
 	for (i = 0; i < nitems(mclsizes); i++) {
 		snprintf(mclnames[i], sizeof(mclnames[0]), "mcl%dk",
 		    mclsizes[i] >> 10);
-		pool_init(&mclpools[i], mclsizes[i], 0, 0, 0, mclnames[i],
-		    NULL);
+		pool_init(&mclpools[i], mclsizes[i], 0, 0, 0,
+		    mclnames[i], NULL);
+		pool_set_constraints(&mclpools[i], &dma_constraint, 1); 
 		pool_setlowat(&mclpools[i], mcllowat);
 	}
 
@@ -193,7 +195,7 @@ m_get(int nowait, int type)
 	int s;
 
 	s = splnet();
-	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK : 0);
+	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK : PR_NOWAIT);
 	if (m)
 		mbstat.m_mtypes[type]++;
 	splx(s);
@@ -218,7 +220,7 @@ m_gethdr(int nowait, int type)
 	int s;
 
 	s = splnet();
-	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK : 0);
+	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK : PR_NOWAIT);
 	if (m)
 		mbstat.m_mtypes[type]++;
 	splx(s);
@@ -410,7 +412,7 @@ m_clget(struct mbuf *m, int how, struct ifnet *ifp, u_int pktlen)
 		m = m0;
 	}			
 	m->m_ext.ext_buf = pool_get(&mclpools[pi],
-	    how == M_WAIT ? PR_WAITOK : 0);
+	    how == M_WAIT ? PR_WAITOK : PR_NOWAIT);
 	if (!m->m_ext.ext_buf) {
 		if (m0)
 			m_freem(m0);
@@ -618,17 +620,17 @@ m_copym2(struct mbuf *m, int off, int len, int wait)
 }
 
 struct mbuf *
-m_copym0(struct mbuf *m, int off, int len, int wait, int deep)
+m_copym0(struct mbuf *m0, int off, int len, int wait, int deep)
 {
-	struct mbuf *n, **np;
+	struct mbuf *m, *n, **np;
 	struct mbuf *top;
 	int copyhdr = 0;
 
 	if (off < 0 || len < 0)
 		panic("m_copym0: off %d, len %d", off, len);
-	if (off == 0 && m->m_flags & M_PKTHDR)
+	if (off == 0 && m0->m_flags & M_PKTHDR)
 		copyhdr = 1;
-	if ((m = m_getptr(m, off, &off)) == NULL)
+	if ((m = m_getptr(m0, off, &off)) == NULL)
 		panic("m_copym0: short mbuf chain");
 	np = &top;
 	top = NULL;
@@ -643,7 +645,7 @@ m_copym0(struct mbuf *m, int off, int len, int wait, int deep)
 		if (n == NULL)
 			goto nospace;
 		if (copyhdr) {
-			if (m_dup_pkthdr(n, m))
+			if (m_dup_pkthdr(n, m0))
 				goto nospace;
 			if (len != M_COPYALL)
 				n->m_pkthdr.len = len;
@@ -723,26 +725,30 @@ m_copydata(struct mbuf *m, int off, int len, caddr_t cp)
  * chain if necessary. The mbuf needs to be properly initialized
  * including the setting of m_len.
  */
-void
-m_copyback(struct mbuf *m0, int off, int len, const void *_cp)
+int
+m_copyback(struct mbuf *m0, int off, int len, const void *_cp, int wait)
 {
 	int mlen, totlen = 0;
 	struct mbuf *m = m0, *n;
 	caddr_t cp = (caddr_t)_cp;
+	int error = 0;
 
 	if (m0 == NULL)
-		return;
+		return (0);
 	while (off > (mlen = m->m_len)) {
 		off -= mlen;
 		totlen += mlen;
 		if (m->m_next == NULL) {
-			if ((n = m_get(M_DONTWAIT, m->m_type)) == NULL)
+			if ((n = m_get(wait, m->m_type)) == NULL) {
+				error = ENOBUFS;
 				goto out;
+			}
 
 			if (off + len > MLEN) {
-				MCLGETI(n, M_DONTWAIT, NULL, off + len);
+				MCLGETI(n, wait, NULL, off + len);
 				if (!(n->m_flags & M_EXT)) {
 					m_free(n);
+					error = ENOBUFS;
 					goto out;
 				}
 			}
@@ -767,13 +773,16 @@ m_copyback(struct mbuf *m0, int off, int len, const void *_cp)
 		off = 0;
 
 		if (m->m_next == NULL) {
-			if ((n = m_get(M_DONTWAIT, m->m_type)) == NULL)
+			if ((n = m_get(wait, m->m_type)) == NULL) {
+				error = ENOBUFS;
 				goto out;
+			}
 
 			if (len > MLEN) {
-				MCLGETI(n, M_DONTWAIT, NULL, len);
+				MCLGETI(n, wait, NULL, len);
 				if (!(n->m_flags & M_EXT)) {
 					m_free(n);
+					error = ENOBUFS;
 					goto out;
 				}
 			}
@@ -785,6 +794,8 @@ m_copyback(struct mbuf *m0, int off, int len, const void *_cp)
 out:
 	if (((m = m0)->m_flags & M_PKTHDR) && (m->m_pkthdr.len < totlen))
 		m->m_pkthdr.len = totlen;
+
+	return (error);
 }
 
 /*

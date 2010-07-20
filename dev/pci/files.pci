@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.271 2010/04/02 20:07:29 deraadt Exp $
+#	$OpenBSD: files.pci,v 1.273 2010/07/03 01:02:25 mlarkin Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -224,8 +224,8 @@ file	dev/pci/mpi_pci.c		mpi_pci
 
 # LSI Logic Fusion-MPT Message Passing Interface 2.0
 device	mpii: scsi
-attach	mpii at pci with mpii_pci
-file	dev/pci/mpii.c			mpii_pci
+attach	mpii at pci
+file	dev/pci/mpii.c			mpii
 
 # Emulex Light Pulse Fibre Channel (Service Level Interface)
 attach	sli at pci with sli_pci
@@ -805,4 +805,9 @@ file	dev/pci/gcu.c			gcu
 device	auglx: audio, ac97
 attach	auglx at pci
 file	dev/pci/auglx.c			auglx
+
+# Intel 3400 Thermal 
+device	itherm
+attach	itherm at pci
+file	dev/pci/itherm.c		itherm
 

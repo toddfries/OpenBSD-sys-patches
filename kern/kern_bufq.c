@@ -1,3 +1,4 @@
+/*	$OpenBSD: kern_bufq.c,v 1.13 2010/07/08 23:18:55 dlg Exp $	*/
 /*
  * Copyright (c) 2010 Thordur I. Bjornsson <thib@openbsd.org>
  *
@@ -21,33 +22,23 @@
 #include <sys/mutex.h>
 #include <sys/buf.h>
 #include <sys/errno.h>
-#include <sys/mutex.h>
 #include <sys/queue.h>
 
 #include <sys/disklabel.h>
 
-#ifdef BUFQ_DEBUG
-#define	BUFQDBG_INIT		0x0001
-#define	BUFQDBG_DRAIN		0x0002
-#define	BUFQDBG_DISKSORT	0x0004
-#define	BUFQDBG_FIFO		0x0008
-int	bqdebug = 0;
-#define	DPRINTF(p...)		do { if (bqdebug) printf(p); } while (0)
-#define	DNPRINTF(n, p...)	do { if ((n) & bqdebug) printf(p); } while (0)
-#else
-#define	DPRINTF(p...)		/* p */
-#define	DNPRINTF(n, p...)	/* n, p */
-#endif
+SLIST_HEAD(, bufq)	bufqs = SLIST_HEAD_INITIALIZER(&bufq);
+struct mutex		bufqs_mtx = MUTEX_INITIALIZER(IPL_BIO);
+int			bufqs_stop;
 
-struct buf *(*bufq_dequeue[BUFQ_HOWMANY])(struct bufq *, int) = {
+struct buf *(*bufq_dequeuev[BUFQ_HOWMANY])(struct bufq *, int) = {
 	bufq_disksort_dequeue,
 	bufq_fifo_dequeue
 };
-void (*bufq_queue[BUFQ_HOWMANY])(struct bufq *, struct buf *) = {
+void (*bufq_queuev[BUFQ_HOWMANY])(struct bufq *, struct buf *) = {
 	bufq_disksort_queue,
 	bufq_fifo_queue
 };
-void (*bufq_requeue[BUFQ_HOWMANY])(struct bufq *, struct buf *) = {
+void (*bufq_requeuev[BUFQ_HOWMANY])(struct bufq *, struct buf *) = {
 	bufq_disksort_requeue,
 	bufq_fifo_requeue
 };
@@ -61,9 +52,6 @@ bufq_init(int type)
 
 	bq = malloc(sizeof(*bq), M_DEVBUF, M_NOWAIT|M_ZERO);
 	KASSERT(bq != NULL);
-
-	DNPRINTF(BUFQDBG_INIT, "%s: initing bufq %p of type %i\n",
-	    __func__, bq, type);
 
 	mtx_init(&bq->bufq_mtx, IPL_BIO);
 	bq->bufq_type = type;
@@ -82,6 +70,10 @@ bufq_init(int type)
 
 	KASSERT(error == 0);
 
+	mtx_enter(&bufqs_mtx);
+	SLIST_INSERT_HEAD(&bufqs, bq, bufq_entries);
+	mtx_leave(&bufqs_mtx);
+
 	return (bq);
 }
 
@@ -90,12 +82,36 @@ bufq_destroy(struct bufq *bq)
 {
 	bufq_drain(bq);
 
-	DNPRINTF(BUFQDBG_INIT, "%s: destroying bufq %p\n", __func__, bq);
-
 	if (bq->bufq_data != NULL)
 		free(bq->bufq_data, M_DEVBUF);
 
+	mtx_enter(&bufqs_mtx);
+	while (bufqs_stop) {
+		msleep(&bufqs_stop, &bufqs_mtx, PRIBIO, "bufqstop", 0);
+	}
+	SLIST_REMOVE(&bufqs, bq, bufq, bufq_entries);
+	mtx_leave(&bufqs_mtx);
+
 	free(bq, M_DEVBUF);
+}
+
+void
+bufq_queue(struct bufq *bq, struct buf *bp)
+{
+	mtx_enter(&bq->bufq_mtx);
+	while (bq->bufq_stop) {
+		msleep(&bq->bufq_stop, &bq->bufq_mtx, PRIBIO, "bufqstop", 0);
+	}
+	bufq_queuev[bq->bufq_type](bq, bp);
+	mtx_leave(&bq->bufq_mtx);
+}
+
+void
+bufq_requeue(struct bufq *bq, struct buf *bp)
+{
+	mtx_enter(&bq->bufq_mtx);
+	bufq_requeuev[bq->bufq_type](bq, bp);
+	mtx_leave(&bq->bufq_mtx);
 }
 
 void
@@ -103,9 +119,6 @@ bufq_drain(struct bufq *bq)
 {
 	struct buf	*bp;
 	int		 s;
-
-	DNPRINTF(BUFQDBG_DRAIN, "%s: draining bufq %p\n",
-	    __func__, bq);
 
 	while ((bp = BUFQ_DEQUEUE(bq)) != NULL) {
 		bp->b_error = ENXIO;
@@ -117,18 +130,66 @@ bufq_drain(struct bufq *bq)
 }
 
 void
+bufq_done(struct bufq *bq, struct buf *bp)
+{
+	mtx_enter(&bq->bufq_mtx);
+	bq->bufq_outstanding--;
+	KASSERT(bq->bufq_outstanding >= 0);
+	if (bq->bufq_outstanding == 0)
+		wakeup(&bq->bufq_outstanding);
+	mtx_leave(&bq->bufq_mtx);
+	bp->b_bq = NULL;
+}
+
+void
+bufq_quiesce(void)
+{
+	struct bufq		*bq;
+
+restart:
+	mtx_enter(&bufqs_mtx);
+	bufqs_stop = 1;
+	SLIST_FOREACH(bq, &bufqs, bufq_entries) {
+		mtx_enter(&bq->bufq_mtx);
+		bq->bufq_stop = 1;
+		if (bq->bufq_outstanding) {
+			mtx_leave(&bufqs_mtx);
+			msleep(&bq->bufq_outstanding, &bq->bufq_mtx,
+			    PRIBIO | PNORELOCK, "bufqqui", 0);
+			goto restart;
+		}
+		mtx_leave(&bq->bufq_mtx);
+	}
+	mtx_leave(&bufqs_mtx);
+}
+
+void
+bufq_restart(void)
+{
+	struct bufq		*bq;
+
+	mtx_enter(&bufqs_mtx);
+	SLIST_FOREACH(bq, &bufqs, bufq_entries) {
+		mtx_enter(&bq->bufq_mtx);
+		bq->bufq_stop = 0;
+		wakeup(&bq->bufq_stop);
+		mtx_leave(&bq->bufq_mtx);
+	}
+	bufqs_stop = 0;
+	wakeup(&bufqs_stop);
+	mtx_leave(&bufqs_mtx);
+}
+
+void
 bufq_disksort_queue(struct bufq *bq, struct buf *bp)
 {
 	struct buf	*bufq;
 
-	bufq = (struct buf  *)bq->bufq_data;
+	bufq = (struct buf *)bq->bufq_data;
 
-	DNPRINTF(BUFQDBG_DISKSORT, "%s: queueing bp %p in bufq %p\n",
-	    __func__, bp, bq);
-
-	mtx_enter(&bq->bufq_mtx);
+	bq->bufq_outstanding++;
+	bp->b_bq = bq;
 	disksort(bufq, bp);
-	mtx_leave(&bq->bufq_mtx);
 }
 
 void
@@ -138,15 +199,10 @@ bufq_disksort_requeue(struct bufq *bq, struct buf *bp)
 
 	bufq = (struct buf *)bq->bufq_data;
 
-	DNPRINTF(BUFQDBG_DISKSORT, "%s: requeueing bp % in bufq %p\n",
-	    __func__, bp, bufq);
-
-	mtx_enter(&bq->bufq_mtx);
 	bp->b_actf = bufq->b_actf;
 	bufq->b_actf = bp;
 	if (bp->b_actf == NULL)
 		bufq->b_actb = &bp->b_actf;
-	mtx_leave(&bq->bufq_mtx);
 }
 
 struct buf *
@@ -164,9 +220,6 @@ bufq_disksort_dequeue(struct bufq *bq, int peeking)
 			bufq->b_actb = &bufq->b_actf;
 	}
 	mtx_leave(&bq->bufq_mtx);
-
-	DNPRINTF(BUFQDBG_DISKSORT, "%s: %s buf %p from bufq %p\n", __func__, 
-	    peeking ? "peeking at" : "dequeueing", bp, bq);
 
 	return (bp);
 }
@@ -190,12 +243,9 @@ bufq_fifo_queue(struct bufq *bq, struct buf *bp)
 {
 	struct bufq_fifo_head	*head = bq->bufq_data;
 
-	DNPRINTF(BUFQDBG_FIFO, "%s: queueing bp %p in bufq %p\n",
-	    __func__, bp, bq);
-
-	mtx_enter(&bq->bufq_mtx);
-	TAILQ_INSERT_TAIL(head, bp, b_bufq.bufq_data_fifo.bqf_entries);
-	mtx_leave(&bq->bufq_mtx);
+	bq->bufq_outstanding++;
+	bp->b_bq = bq;
+	SIMPLEQ_INSERT_TAIL(head, bp, b_bufq.bufq_data_fifo.bqf_entries);
 }
 
 void
@@ -203,12 +253,7 @@ bufq_fifo_requeue(struct bufq *bq, struct buf *bp)
 {
 	struct bufq_fifo_head	*head = bq->bufq_data;
 
-	DNPRINTF(BUFQDBG_FIFO, "%s: requeueing bp % in bufq %p\n",
-	    __func__, bp, bq);
-
-	mtx_enter(&bq->bufq_mtx);
-	TAILQ_INSERT_HEAD(head, bp, b_bufq.bufq_data_fifo.bqf_entries);
-	mtx_leave(&bq->bufq_mtx);
+	SIMPLEQ_INSERT_HEAD(head, bp, b_bufq.bufq_data_fifo.bqf_entries);
 }
 
 struct buf *
@@ -218,13 +263,10 @@ bufq_fifo_dequeue(struct bufq *bq, int peeking)
 	struct	buf		*bp;
 
 	mtx_enter(&bq->bufq_mtx);
-	bp = TAILQ_FIRST(head);
+	bp = SIMPLEQ_FIRST(head);
 	if (bp != NULL && !peeking)
-		TAILQ_REMOVE(head, bp, b_bufq.bufq_data_fifo.bqf_entries);
+		SIMPLEQ_REMOVE_HEAD(head, b_bufq.bufq_data_fifo.bqf_entries);
 	mtx_leave(&bq->bufq_mtx);
-
-	DNPRINTF(BUFQDBG_FIFO, "%s: %s buf %p from bufq %p\n", __func__, 
-	    peeking ? "peeking at" : "dequeueing", bp, bq);
 
 	return (bp);
 }
@@ -238,7 +280,7 @@ bufq_fifo_init(struct bufq *bq)
 	if (head == NULL)
 		return (ENOMEM);
 
-	TAILQ_INIT(head);
+	SIMPLEQ_INIT(head);
 	bq->bufq_data = head;
 
 	return (0);

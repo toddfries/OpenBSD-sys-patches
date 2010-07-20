@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.103 2010/06/10 17:54:13 deraadt Exp $ */
+/*	$OpenBSD: machdep.c,v 1.105 2010/06/27 13:28:46 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -47,7 +47,7 @@
 #include <sys/sem.h>
 #endif
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <machine/db_machdep.h>
 #include <ddb/db_interface.h>
@@ -94,6 +94,10 @@ char	cpu_model[30];
 
 int	bufpages = BUFPAGES;
 int	bufcachepercent = BUFCACHEPERCENT;
+
+/* low 32 bits range. */
+struct uvm_constraint_range  dma_constraint = { 0x0, 0x7fffffff };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 vm_map_t exec_map;
 vm_map_t phys_map;
