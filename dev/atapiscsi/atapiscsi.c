@@ -1,4 +1,4 @@
-/*      $OpenBSD: atapiscsi.c,v 1.90 2010/06/15 04:11:34 dlg Exp $     */
+/*      $OpenBSD: atapiscsi.c,v 1.92 2010/07/01 03:20:38 matthew Exp $     */
 
 /*
  * This code is derived from code with the copyright below.
@@ -177,14 +177,6 @@ static struct scsi_adapter atapiscsi_switch =
 	wdc_atapi_ioctl
 };
 
-static struct scsi_device atapiscsi_dev =
-{
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-};
-
 /* Inital version shares bus_link structure so it can easily
    be "attached to current" wdc driver */
 
@@ -249,7 +241,6 @@ atapiscsi_attach(parent, self, aux)
 	as->sc_adapterlink.adapter_target = 7;
 	as->sc_adapterlink.adapter_buswidth = 2;
 	as->sc_adapterlink.adapter = &atapiscsi_switch;
-	as->sc_adapterlink.device = &atapiscsi_dev;
 	as->sc_adapterlink.luns = 1;
 	as->sc_adapterlink.openings = 1;
 	as->sc_adapterlink.flags = SDEV_ATAPI;
@@ -293,7 +284,7 @@ atapiscsi_attach(parent, self, aux)
 
 	if (child != NULL) {
 		struct scsibus_softc *scsi = (struct scsibus_softc *)child;
-		struct scsi_link *link = scsi->sc_link[0][0];
+		struct scsi_link *link = scsi_get_link(scsi, 0, 0);
 
 		if (link) {
 			strlcpy(drvp->drive_name,

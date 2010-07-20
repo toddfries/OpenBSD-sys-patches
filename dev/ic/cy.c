@@ -1,4 +1,4 @@
-/*	$OpenBSD: cy.c,v 1.29 2010/04/12 12:57:52 tedu Exp $	*/
+/*	$OpenBSD: cy.c,v 1.32 2010/07/02 17:27:01 nicm Exp $	*/
 /*
  * Copyright (c) 1996 Timo Rossi.
  * All rights reserved.
@@ -62,7 +62,6 @@
 #include <sys/tty.h>
 #include <sys/proc.h>
 #include <sys/conf.h>
-#include <sys/user.h>
 #include <sys/selinfo.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
@@ -300,7 +299,7 @@ cyopen(dev, flag, mode, p)
 
 	s = spltty();
 	if (cy->cy_tty == NULL) {
-		cy->cy_tty = ttymalloc();
+		cy->cy_tty = ttymalloc(0);
 	}
 	splx(s);
 
@@ -622,17 +621,9 @@ cystart(tp)
 #endif
 
 	if (!ISSET(tp->t_state, TS_TTSTOP | TS_TIMEOUT | TS_BUSY)) {
-		if (tp->t_outq.c_cc <= tp->t_lowat) {
-			if (ISSET(tp->t_state, TS_ASLEEP)) {
-				CLR(tp->t_state, TS_ASLEEP);
-				wakeup(&tp->t_outq);
-			}
-
-			selwakeup(&tp->t_wsel);
-
-			if (tp->t_outq.c_cc == 0)
-				goto out;
-		}
+		ttwakeupwr(tp);
+		if (tp->t_outq.c_cc == 0)
+			goto out;
 
 		SET(tp->t_state, TS_BUSY);
 		cy_enable_transmitter(cy);

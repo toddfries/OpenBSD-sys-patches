@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.22 2010/06/09 15:44:17 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.25 2010/07/01 05:09:27 jsing Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -56,10 +56,6 @@
 #include <machine/reg.h>
 #include <machine/autoconf.h>
 #include <machine/kcore.h>
-
-#ifdef COMPAT_HPUX
-#include <compat/hpux/hpux.h>
-#endif
 
 #ifdef DDB
 #include <machine/db_machdep.h>
@@ -121,9 +117,6 @@ int	cpu_hvers;
 enum hppa_cpu_type cpu_type;
 const char *cpu_typename;
 u_int	fpu_version;
-#ifdef COMPAT_HPUX
-int	cpu_model_hpux;	/* contains HPUX_SYSCONF_CPU* kind of value */
-#endif
 
 dev_t	bootdev;
 int	physmem, resvmem, resvphysmem, esym;
@@ -149,6 +142,12 @@ void hpmc_dump(void);
 void cpuid(void);
 
 /*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int	safepri = 0;
+
+/*
  * wide used hardware params
  */
 struct pdc_hwtlb pdc_hwtlb PDC_ALIGNMENT;
@@ -162,6 +161,9 @@ int sigdebug = 0;
 pid_t sigpid = 0;
 #define SDB_FOLLOW	0x01
 #endif
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 int	hppa_cpuspeed(int *mhz);
 

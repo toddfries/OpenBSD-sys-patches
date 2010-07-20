@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.20 2010/06/01 23:14:37 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.24 2010/07/01 17:30:25 tedu Exp $
 
 # Makefile for kernel tags files, init_sysent, etc.
 
@@ -30,8 +30,8 @@ SYSTAGS=/var/db/sys_tags
 SYSDIR=/sys
 
 # Directories in which to place tags links (other than machine-dependent)
-DGEN=	compat compat/common compat/freebsd compat/hpux compat/ibcs2 \
-	compat/linux compat/osf1 compat/sunos compat/svr4 compat/ultrix \
+DGEN=	compat compat/common compat/freebsd \
+	compat/linux compat/sunos compat/svr4 \
 	conf \
 	ddb \
 	dev dev/eisa dev/ic dev/isa dev/pci dev/pcmcia dev/cardbus \

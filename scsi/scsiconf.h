@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.127 2010/06/15 04:11:34 dlg Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.131 2010/07/13 00:30:30 krw Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -266,8 +266,6 @@ void		devid_free(struct devid *);
  *
  * each adapter type has a scsi_adapter struct. This describes the adapter and
  *    identifies routines that can be called to use the adapter.
- * each device type has a scsi_device struct. This describes the device and
- *    identifies routines that can be called to use the device.
  * each existing device position (scsibus + target + lun)
  *    can be described by a scsi_link struct.
  *    Only scsi positions that actually have devices, have a scsi_link
@@ -310,24 +308,6 @@ struct scsi_adapter {
 	void		(*dev_free)(struct scsi_link *);
 	int		(*ioctl)(struct scsi_link *, u_long, caddr_t, int);
 };
-
-/*
- * These entry points are called by the low-end drivers to get services from
- * whatever high-end drivers they are attached to.  Each device type has one
- * of these statically allocated.
- */
-struct scsi_device {
-	int	(*err_handler)(struct scsi_xfer *);
-			/* returns -1 to say err processing done */
-	void	(*start)(void *);
-
-	int	(*async)(void);
-	void	(*done)(struct scsi_xfer *);
-};
-
-/*
- *
- */
 
 struct scsi_runq_entry {
 	TAILQ_ENTRY(scsi_runq_entry) e;
@@ -380,6 +360,8 @@ struct scsi_xshandler {
  * as well.
  */
 struct scsi_link {
+	SLIST_ENTRY(scsi_link)	bus_list;
+
 	u_int		state;
 #define SDEV_S_WAITING		(1<<0)
 #define SDEV_S_DYING		(1<<1)
@@ -415,7 +397,7 @@ struct scsi_link {
 #define	ADEV_NOCAPACITY		0x0800	/* no READ CD CAPACITY */
 #define	ADEV_NODOORLOCK		0x2000	/* can't lock door */
 #define SDEV_ONLYBIG		0x4000  /* always use READ_BIG and WRITE_BIG */
-	struct	scsi_device *device;	/* device entry points etc. */
+	int	(*interpret_sense)(struct scsi_xfer *);
 	void	*device_softc;		/* needed for call to foo_start */
 	struct	scsi_adapter *adapter;	/* adapter entry points etc. */
 	void	*adapter_softc;		/* needed for call to foo_scsi_cmd */
@@ -458,7 +440,7 @@ struct scsibus_attach_args {
 struct scsibus_softc {
 	struct device sc_dev;
 	struct scsi_link *adapter_link;	/* prototype supplied by adapter */
-	struct scsi_link ***sc_link;
+	SLIST_HEAD(, scsi_link) sc_link;
 	u_int16_t sc_buswidth;
 };
 
@@ -490,12 +472,7 @@ struct scsi_xfer {
 	size_t	resid;			/* how much buffer was not touched */
 	int	error;			/* an error value	*/
 	struct	buf *bp;		/* If we need to associate with a buf */
-	struct	scsi_sense_data	sense; /* 32 bytes*/
-	/*
-	 * Believe it or not, Some targets fall on the ground with
-	 * anything but a certain sense length.
-	 */
-	int	req_sense_length;	/* Explicit request sense length */
+	struct	scsi_sense_data	sense;	/* 18 bytes*/
 	u_int8_t status;		/* SCSI status */
 	struct	scsi_generic cmdstore;	/* stash the command in here */
 	/*
@@ -615,6 +592,12 @@ int	scsi_req_detach(struct scsibus_softc *, int, int, int);
 
 void	scsi_activate(struct scsibus_softc *, int, int, int);
 
+struct scsi_link *	scsi_get_link(struct scsibus_softc *, int, int);
+void			scsi_add_link(struct scsibus_softc *,
+			    struct scsi_link *);
+void			scsi_remove_link(struct scsibus_softc *,
+			    struct scsi_link *);
+
 extern const u_int8_t version_to_spc[];
 #define SCSISPC(x)(version_to_spc[(x) & SID_ANSII])
 
@@ -622,6 +605,9 @@ struct scsi_xfer *	scsi_xs_get(struct scsi_link *, int);
 void			scsi_xs_exec(struct scsi_xfer *);
 int			scsi_xs_sync(struct scsi_xfer *);
 void			scsi_xs_put(struct scsi_xfer *);
+#ifdef SCSIDEBUG
+void			scsi_sense_print_debug(struct scsi_xfer *);
+#endif
 
 /*
  * iopool stuff

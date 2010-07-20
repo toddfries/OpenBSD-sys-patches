@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.165 2010/05/24 04:40:14 dlg Exp $ */
+/*	$OpenBSD: ahci.c,v 1.168 2010/07/03 00:23:36 kettenis Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -401,6 +401,8 @@ struct ahci_softc {
 
 	struct atascsi		*sc_atascsi;
 
+	u_int32_t		sc_cap;
+
 #ifdef AHCI_COALESCE
 	u_int32_t		sc_ccc_mask;
 	u_int32_t		sc_ccc_ports;
@@ -454,6 +456,12 @@ static const struct ahci_device ahci_devices[] = {
 	    NULL,		ahci_nvidia_mcp_attach },
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP79_AHCI_1,
 	    NULL,		ahci_nvidia_mcp_attach },
+	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP79_AHCI_2,
+	    NULL,		ahci_nvidia_mcp_attach },
+	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP79_AHCI_3,
+	    NULL,		ahci_nvidia_mcp_attach },
+	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP79_AHCI_4,
+	    NULL,		ahci_nvidia_mcp_attach },
 
 	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8251_SATA,
 	  ahci_no_match,	ahci_vt8251_attach }
@@ -463,12 +471,14 @@ int			ahci_pci_match(struct device *, void *, void *);
 void			ahci_pci_attach(struct device *, struct device *,
 			    void *);
 int			ahci_pci_detach(struct device *, int);
+int			ahci_pci_activate(struct device *, int);
 
 struct cfattach ahci_pci_ca = {
 	sizeof(struct ahci_softc),
 	ahci_pci_match,
 	ahci_pci_attach,
-	ahci_pci_detach
+	ahci_pci_detach,
+	ahci_pci_activate
 };
 
 struct cfattach ahci_jmb_ca = {
@@ -493,6 +503,7 @@ void			ahci_unmap_intr(struct ahci_softc *);
 int			ahci_init(struct ahci_softc *);
 int			ahci_port_alloc(struct ahci_softc *, u_int);
 void			ahci_port_free(struct ahci_softc *, u_int);
+int			ahci_port_init(struct ahci_softc *, u_int);
 
 int			ahci_port_start(struct ahci_port *, int);
 int			ahci_port_stop(struct ahci_port *, int);
@@ -532,13 +543,17 @@ int			ahci_wait_ne(struct ahci_softc *, bus_size_t,
 u_int32_t		ahci_pread(struct ahci_port *, bus_size_t);
 void			ahci_pwrite(struct ahci_port *, bus_size_t, u_int32_t);
 int			ahci_pwait_eq(struct ahci_port *, bus_size_t,
-			    u_int32_t, u_int32_t);
+			    u_int32_t, u_int32_t, int);
 
 /* Wait for all bits in _b to be cleared */
-#define ahci_pwait_clr(_ap, _r, _b) ahci_pwait_eq((_ap), (_r), (_b), 0)
+#define ahci_pwait_clr(_ap, _r, _b, _n) \
+   ahci_pwait_eq((_ap), (_r), (_b), 0, (_n))
 
 /* Wait for all bits in _b to be set */
-#define ahci_pwait_set(_ap, _r, _b) ahci_pwait_eq((_ap), (_r), (_b), (_b))
+#define ahci_pwait_set(_ap, _r, _b, _n) \
+   ahci_pwait_eq((_ap), (_r), (_b), (_b), (_n))
+
+
 
 /* provide methods for atascsi to call */
 int			ahci_ata_probe(void *, int);
@@ -669,7 +684,7 @@ ahci_pci_attach(struct device *parent, struct device *self, void *aux)
 	struct atascsi_attach_args	aaa;
 	const struct ahci_device	*ad;
 	pci_intr_handle_t		ih;
-	u_int32_t			cap, pi;
+	u_int32_t			pi;
 	int				i;
 
 	sc->sc_pc = pa->pa_pc;
@@ -707,13 +722,13 @@ ahci_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_dmat = pa->pa_dmat;
 
-	cap = ahci_read(sc, AHCI_REG_CAP);
-	sc->sc_ncmds = AHCI_REG_CAP_NCS(cap);
+	sc->sc_cap = ahci_read(sc, AHCI_REG_CAP);
+	sc->sc_ncmds = AHCI_REG_CAP_NCS(sc->sc_cap);
 #ifdef AHCI_DEBUG
 	if (ahcidebug & AHCI_D_VERBOSE) {
 		const char *gen;
 
-		switch (cap & AHCI_REG_CAP_ISS) {
+		switch (sc->sc_cap & AHCI_REG_CAP_ISS) {
 		case AHCI_REG_CAP_ISS_G1:
 			gen = "1 (1.5Gbps)";
 			break;
@@ -726,8 +741,8 @@ ahci_pci_attach(struct device *parent, struct device *self, void *aux)
 		}
 
 		printf("%s: capabilities 0x%b, %d ports, %d cmds, gen %s\n",
-		    DEVNAME(sc), cap, AHCI_FMT_CAP,
-		    AHCI_REG_CAP_NP(cap), sc->sc_ncmds, gen);
+		    DEVNAME(sc), sc->sc_cap, AHCI_FMT_CAP,
+		    AHCI_REG_CAP_NP(sc->sc_cap), sc->sc_ncmds, gen);
 	}
 #endif
 
@@ -737,7 +752,7 @@ ahci_pci_attach(struct device *parent, struct device *self, void *aux)
 
 #ifdef AHCI_COALESCE
 	/* Naive coalescing support - enable for all ports. */
-	if (cap & AHCI_REG_CAP_CCCS) {
+	if (sc->sc_cap & AHCI_REG_CAP_CCCS) {
 		u_int16_t		ccc_timeout = 20;
 		u_int8_t		ccc_numcomplete = 12;
 		u_int32_t		ccc_ctl;
@@ -787,7 +802,8 @@ noccc:
 	aaa.aaa_nports = AHCI_MAX_PORTS;
 	aaa.aaa_ncmds = sc->sc_ncmds;
 	aaa.aaa_capability = ASAA_CAP_NEEDS_RESERVED;
-	if (!(sc->sc_flags & AHCI_F_NO_NCQ) && (cap & AHCI_REG_CAP_SNCQ))
+	if (!(sc->sc_flags & AHCI_F_NO_NCQ) &&
+	    (sc->sc_cap & AHCI_REG_CAP_SNCQ))
 		aaa.aaa_capability |= ASAA_CAP_NCQ;
 
 	sc->sc_atascsi = atascsi_attach(&sc->sc_dev, &aaa);
@@ -830,6 +846,42 @@ ahci_pci_detach(struct device *self, int flags)
 	ahci_unmap_regs(sc);
 
 	return (0);
+}
+
+int
+ahci_pci_activate(struct device *self, int act)
+{
+	struct ahci_softc		*sc = (struct ahci_softc *)self;
+	int				 i, rv = 0;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
+		for (i = 0; i < AHCI_MAX_PORTS; i++) {
+			if (sc->sc_ports[i] != NULL)
+				ahci_port_stop(sc->sc_ports[i], 1);
+		}
+		break;
+	case DVACT_RESUME:
+		/* enable ahci (global interrupts disabled) */
+		ahci_write(sc, AHCI_REG_GHC, AHCI_REG_GHC_AE);
+
+		/* restore BIOS initialised parameters */
+		ahci_write(sc, AHCI_REG_CAP, sc->sc_cap);
+
+		for (i = 0; i < AHCI_MAX_PORTS; i++) {
+			if (sc->sc_ports[i] != NULL)
+				ahci_port_init(sc, i);
+		}
+
+		/* Enable interrupts */
+		ahci_write(sc, AHCI_REG_GHC, AHCI_REG_GHC_AE | AHCI_REG_GHC_IE);
+
+		rv = config_activate_children(self, act);
+		break;
+	}
+
+	return (rv);
 }
 
 int
@@ -1080,7 +1132,7 @@ nomem:
 	}
 
 	/* Wait for ICC change to complete */
-	ahci_pwait_clr(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_ICC);
+	ahci_pwait_clr(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_ICC, 1);
 
 	/* Reset port */
 	rc = ahci_port_portreset(ap);
@@ -1186,6 +1238,135 @@ ahci_port_free(struct ahci_softc *sc, u_int port)
 }
 
 int
+ahci_port_init(struct ahci_softc *sc, u_int port)
+{
+	struct ahci_port		*ap;
+	u_int64_t			dva;
+	u_int32_t			cmd;
+	int				rc = ENOMEM;
+
+#ifdef AHCI_DEBUG
+	snprintf(ap->ap_name, sizeof(ap->ap_name), "%s.%d",
+	    DEVNAME(sc), port);
+#endif
+	ap = sc->sc_ports[port];
+
+	/* Disable port interrupts */
+	ahci_pwrite(ap, AHCI_PREG_IE, 0);
+
+	/* Sec 10.1.2 - deinitialise port if it is already running */
+	cmd = ahci_pread(ap, AHCI_PREG_CMD);
+	if (ISSET(cmd, (AHCI_PREG_CMD_ST | AHCI_PREG_CMD_CR |
+	    AHCI_PREG_CMD_FRE | AHCI_PREG_CMD_FR)) ||
+	    ISSET(ahci_pread(ap, AHCI_PREG_SCTL), AHCI_PREG_SCTL_DET)) {
+		int r;
+
+		r = ahci_port_stop(ap, 1);
+		if (r) {
+			printf("%s: unable to disable %s, ignoring port %d\n",
+			    DEVNAME(sc), r == 2 ? "CR" : "FR", port);
+			rc = ENXIO;
+			goto reterr;
+		}
+
+		/* Write DET to zero */
+		ahci_pwrite(ap, AHCI_PREG_SCTL, 0);
+	}
+
+	/* Setup RFIS base address */
+	ap->ap_rfis = (struct ahci_rfis *) AHCI_DMA_KVA(ap->ap_dmamem_rfis);
+	dva = AHCI_DMA_DVA(ap->ap_dmamem_rfis);
+	ahci_pwrite(ap, AHCI_PREG_FBU, (u_int32_t)(dva >> 32));
+	ahci_pwrite(ap, AHCI_PREG_FB, (u_int32_t)dva);
+
+	/* Enable FIS reception and activate port. */
+	cmd = ahci_pread(ap, AHCI_PREG_CMD) & ~AHCI_PREG_CMD_ICC;
+	cmd |= AHCI_PREG_CMD_FRE | AHCI_PREG_CMD_POD | AHCI_PREG_CMD_SUD;
+	ahci_pwrite(ap, AHCI_PREG_CMD, cmd | AHCI_PREG_CMD_ICC_ACTIVE);
+
+	/* Check whether port activated.  Skip it if not. */
+	cmd = ahci_pread(ap, AHCI_PREG_CMD) & ~AHCI_PREG_CMD_ICC;
+	if (!ISSET(cmd, AHCI_PREG_CMD_FRE)) {
+		rc = ENXIO;
+		goto reterr;
+	}
+
+	/* Setup command list base address */
+	dva = AHCI_DMA_DVA(ap->ap_dmamem_cmd_list);
+	ahci_pwrite(ap, AHCI_PREG_CLBU, (u_int32_t)(dva >> 32));
+	ahci_pwrite(ap, AHCI_PREG_CLB, (u_int32_t)dva);
+
+	/* Wait for ICC change to complete */
+	ahci_pwait_clr(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_ICC, 1);
+
+	/* Reset port */
+	rc = ahci_port_portreset(ap);
+	switch (rc) {
+	case ENODEV:
+		switch (ahci_pread(ap, AHCI_PREG_SSTS) & AHCI_PREG_SSTS_DET) {
+		case AHCI_PREG_SSTS_DET_DEV_NE:
+			printf("%s: device not communicating on port %d\n",
+			    DEVNAME(sc), port);
+			break;
+		case AHCI_PREG_SSTS_DET_PHYOFFLINE:
+			printf("%s: PHY offline on port %d\n", DEVNAME(sc),
+			    port);
+			break;
+		default:
+			DPRINTF(AHCI_D_VERBOSE, "%s: no device detected "
+			    "on port %d\n", DEVNAME(sc), port);
+			break;
+		}
+		goto reterr;
+
+	case EBUSY:
+		printf("%s: device on port %d didn't come ready, "
+		    "TFD: 0x%b\n", DEVNAME(sc), port,
+		    ahci_pread(ap, AHCI_PREG_TFD), AHCI_PFMT_TFD_STS);
+
+		/* Try a soft reset to clear busy */
+		rc = ahci_port_softreset(ap);
+		if (rc) {
+			printf("%s: unable to communicate "
+			    "with device on port %d\n", DEVNAME(sc), port);
+			goto reterr;
+		}
+		break;
+
+	default:
+		break;
+	}
+	DPRINTF(AHCI_D_VERBOSE, "%s: detected device on port %d\n",
+	    DEVNAME(sc), port);
+
+	/* Enable command transfers on port */
+	if (ahci_port_start(ap, 0)) {
+		printf("%s: failed to start command DMA on port %d, "
+		    "disabling\n", DEVNAME(sc), port);
+		rc = ENXIO;	/* couldn't start port */
+	}
+
+	/* Flush interrupts for port */
+	ahci_pwrite(ap, AHCI_PREG_IS, ahci_pread(ap, AHCI_PREG_IS));
+	ahci_write(sc, AHCI_REG_IS, 1 << port);
+
+	/* Enable port interrupts */
+	ahci_pwrite(ap, AHCI_PREG_IE, AHCI_PREG_IE_TFEE | AHCI_PREG_IE_HBFE |
+	    AHCI_PREG_IE_IFE | AHCI_PREG_IE_OFE | AHCI_PREG_IE_DPE |
+	    AHCI_PREG_IE_UFE |
+#ifdef AHCI_COALESCE
+	    ((sc->sc_ccc_ports & (1 << port)) ? 0 : (AHCI_PREG_IE_SDBE |
+	    AHCI_PREG_IE_DHRE))
+#else
+	    AHCI_PREG_IE_SDBE | AHCI_PREG_IE_DHRE
+#endif
+	    );
+
+reterr:
+	return (rc);
+}
+
+int
 ahci_port_start(struct ahci_port *ap, int fre_only)
 {
 	u_int32_t			r;
@@ -1208,12 +1389,13 @@ ahci_port_start(struct ahci_port *ap, int fre_only)
 
 	if (!(ap->ap_sc->sc_flags & AHCI_F_IGN_FR)) {
 		/* Wait for FR to come on */
-		if (ahci_pwait_set(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_FR))
+		if (ahci_pwait_set(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_FR, 1))
 			return (2);
 	}
 
 	/* Wait for CR to come on */
-	if (!fre_only && ahci_pwait_set(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_CR))
+	if (!fre_only &&
+	    ahci_pwait_set(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_CR, 1))
 		return (1);
 
 	return (0);
@@ -1241,11 +1423,12 @@ ahci_port_stop(struct ahci_port *ap, int stop_fis_rx)
 	ahci_pwrite(ap, AHCI_PREG_CMD, r);
 
 	/* Wait for CR to go off */
-	if (ahci_pwait_clr(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_CR))
+	if (ahci_pwait_clr(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_CR, 1))
 		return (1);
 
 	/* Wait for FR to go off */
-	if (stop_fis_rx && ahci_pwait_clr(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_FR))
+	if (stop_fis_rx &&
+	    ahci_pwait_clr(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_FR, 1))
 		return (2);
 
 	return (0);
@@ -1271,7 +1454,7 @@ ahci_port_clo(struct ahci_port *ap)
 	ahci_pwrite(ap, AHCI_PREG_CMD, cmd | AHCI_PREG_CMD_CLO);
 
 	/* Wait for completion */
-	if (ahci_pwait_clr(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_CLO)) {
+	if (ahci_pwait_clr(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_CLO, 1)) {
 		printf("%s: CLO did not complete\n", PORTNAME(ap));
 		return (1);
 	}
@@ -1320,7 +1503,7 @@ ahci_port_softreset(struct ahci_port *ap)
 
 	/* Check whether CLO worked */
 	if (ahci_pwait_clr(ap, AHCI_PREG_TFD,
-	    AHCI_PREG_TFD_STS_BSY | AHCI_PREG_TFD_STS_DRQ)) {
+	    AHCI_PREG_TFD_STS_BSY | AHCI_PREG_TFD_STS_DRQ, 1)) {
 		printf("%s: CLO %s, need port reset\n", PORTNAME(ap),
 		    ISSET(ahci_read(ap->ap_sc, AHCI_REG_CAP), AHCI_REG_CAP_SCLO)
 		    ? "failed" : "unsupported");
@@ -1360,7 +1543,7 @@ ahci_port_softreset(struct ahci_port *ap)
 		goto err;
 
 	if (ahci_pwait_clr(ap, AHCI_PREG_TFD, AHCI_PREG_TFD_STS_BSY |
-	    AHCI_PREG_TFD_STS_DRQ | AHCI_PREG_TFD_STS_ERR)) {
+	    AHCI_PREG_TFD_STS_DRQ | AHCI_PREG_TFD_STS_ERR, 1)) {
 		printf("%s: device didn't come ready after reset, TFD: 0x%b\n",
 		    PORTNAME(ap), ahci_pread(ap, AHCI_PREG_TFD),
 		    AHCI_PFMT_TFD_STS);
@@ -1422,7 +1605,7 @@ ahci_port_portreset(struct ahci_port *ap)
 
 	/* Wait for device to be detected and communications established */
 	if (ahci_pwait_eq(ap, AHCI_PREG_SSTS, AHCI_PREG_SSTS_DET,
-	    AHCI_PREG_SSTS_DET_DEV)) {
+	    AHCI_PREG_SSTS_DET_DEV, 1)) {
 		rc = ENODEV;
 		goto err;
 	}
@@ -1431,9 +1614,8 @@ ahci_port_portreset(struct ahci_port *ap)
 	ahci_pwrite(ap, AHCI_PREG_SERR, ahci_pread(ap, AHCI_PREG_SERR));
 
 	/* Wait for device to become ready */
-	/* XXX maybe more than the default wait is appropriate here? */
 	if (ahci_pwait_clr(ap, AHCI_PREG_TFD, AHCI_PREG_TFD_STS_BSY |
-	    AHCI_PREG_TFD_STS_DRQ | AHCI_PREG_TFD_STS_ERR)) {
+	    AHCI_PREG_TFD_STS_DRQ | AHCI_PREG_TFD_STS_ERR, 3)) {
 		rc = EBUSY;
 		goto err;
 	}
@@ -2274,11 +2456,11 @@ ahci_pwrite(struct ahci_port *ap, bus_size_t r, u_int32_t v)
 
 int
 ahci_pwait_eq(struct ahci_port *ap, bus_size_t r, u_int32_t mask,
-    u_int32_t target)
+    u_int32_t target, int n)
 {
 	int				i;
 
-	for (i = 0; i < 1000; i++) {
+	for (i = 0; i < n * 1000; i++) {
 		if ((ahci_pread(ap, r) & mask) == target)
 			return (0);
 		delay(1000);

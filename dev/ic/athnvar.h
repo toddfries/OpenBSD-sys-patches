@@ -1,4 +1,4 @@
-/*	$OpenBSD: athnvar.h,v 1.15 2010/06/05 18:43:57 damien Exp $	*/
+/*	$OpenBSD: athnvar.h,v 1.19 2010/07/15 20:37:38 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -80,6 +80,8 @@ struct athn_tx_buf {
 
 	struct mbuf			*bf_m;
 	struct ieee80211_node		*bf_ni;
+	int				bf_txflags;
+#define ATHN_TXFLAG_PAPRD	(1 << 0)
 };
 
 struct athn_txq {
@@ -370,7 +372,7 @@ struct athn_ops {
 	void	(*rx_enable)(struct athn_softc *);
 	int	(*intr)(struct athn_softc *);
 	int	(*tx)(struct athn_softc *, struct mbuf *,
-		    struct ieee80211_node *);
+		    struct ieee80211_node *, int);
 	/* PHY callbacks. */
 	void	(*set_rf_mode)(struct athn_softc *,
 		    struct ieee80211_channel *);
@@ -389,6 +391,8 @@ struct athn_ops {
 	void	(*next_calib)(struct athn_softc *);
 	void	(*hw_init)(struct athn_softc *, struct ieee80211_channel *,
 		    struct ieee80211_channel *);
+	void	(*get_paprd_masks)(struct athn_softc *sc,
+		    struct ieee80211_channel *, uint32_t *, uint32_t *);
 	/* ANI callbacks. */
 	void	(*set_noise_immunity_level)(struct athn_softc *, int);
 	void	(*enable_ofdm_weak_signal)(struct athn_softc *);
@@ -421,7 +425,7 @@ struct athn_softc {
 	u_int				flags;
 #define ATHN_FLAG_PCIE			(1 << 0)
 #define ATHN_FLAG_OLPC			(1 << 1)
-#define ATHN_FLAG_SPLIT_MMIC		(1 << 2)
+#define ATHN_FLAG_PAPRD			(1 << 2)
 #define ATHN_FLAG_FAST_PLL_CLOCK	(1 << 3)
 #define ATHN_FLAG_RFSILENT		(1 << 4)
 #define ATHN_FLAG_RFSILENT_REVERSED	(1 << 5)
@@ -432,7 +436,6 @@ struct athn_softc {
 #define ATHN_FLAG_11A			(1 << 8)
 #define ATHN_FLAG_11G			(1 << 9)
 #define ATHN_FLAG_11N			(1 << 10)
-#define ATHN_FLAG_SPLIT_TKIP_MIC	(1 << 11)
 
 	uint8_t				ngpiopins;
 	int				led_pin;
@@ -464,6 +467,16 @@ struct athn_softc {
 	int8_t				tx_gain_tbl[AR9280_TX_GAIN_TABLE_SIZE];
 	int8_t				pdadc;
 	int8_t				tcomp;
+
+	/* PA predistortion. */
+	uint16_t			gain1[AR_MAX_CHAINS];
+	uint32_t			txgain[AR9003_TX_GAIN_TABLE_SIZE];
+	int16_t				pa_in[AR_MAX_CHAINS]
+					     [AR9003_PAPRD_MEM_TAB_SIZE];
+	int16_t				angle[AR_MAX_CHAINS]
+					     [AR9003_PAPRD_MEM_TAB_SIZE];
+	int32_t				trainpow;
+	uint8_t				paprd_curchain;
 
 	uint32_t			rwbuf[64];
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.50 2010/06/12 16:30:45 jsg Exp $	*/
+/*	$OpenBSD: athn.c,v 1.55 2010/07/15 20:37:38 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -129,6 +129,7 @@ void		athn_next_scan(void *);
 int		athn_newstate(struct ieee80211com *, enum ieee80211_state,
 		    int);
 void		athn_updateedca(struct ieee80211com *);
+int		athn_clock_rate(struct athn_softc *);
 void		athn_updateslot(struct ieee80211com *);
 void		athn_start(struct ifnet *);
 void		athn_watchdog(struct ifnet *);
@@ -152,7 +153,7 @@ int		ar9287_attach(struct athn_softc *);
 int		ar9380_attach(struct athn_softc *);
 int		ar5416_init_calib(struct athn_softc *,
 		    struct ieee80211_channel *, struct ieee80211_channel *);
-int		ar9285_1_2_init_calib(struct athn_softc *,
+int		ar9285_init_calib(struct athn_softc *,
 		    struct ieee80211_channel *, struct ieee80211_channel *);
 int		ar9003_init_calib(struct athn_softc *);
 void		ar9285_pa_calib(struct athn_softc *);
@@ -218,13 +219,9 @@ athn_attach(struct athn_softc *sc)
 	/*
 	 * In HostAP mode, the number of STAs that we can handle is
 	 * limited by the number of entries in the HW key cache.
-	 * TKIP keys consume 2 or 4 entries in the cache.
+	 * TKIP keys consume 2 entries in the cache.
 	 */
-	if (sc->flags & ATHN_FLAG_SPLIT_TKIP_MIC)
-		ic->ic_max_nnodes = sc->kc_entries / 4;
-	else
-		ic->ic_max_nnodes = sc->kc_entries / 2;
-	ic->ic_max_nnodes -= IEEE80211_WEP_NKID;
+	ic->ic_max_nnodes = (sc->kc_entries / 2) - IEEE80211_WEP_NKID;
 	if (ic->ic_max_nnodes > IEEE80211_CACHE_SIZE)
 		ic->ic_max_nnodes = IEEE80211_CACHE_SIZE;
 
@@ -962,44 +959,16 @@ athn_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 			rxmic = &key[16];
 			txmic = &key[24];
 		}
-		if (sc->flags & ATHN_FLAG_SPLIT_TKIP_MIC) {
-			/* Tx MIC is at entry + 64. */
-			micentry = entry + 64;
-			AR_WRITE(sc, AR_KEYTABLE_KEY0(micentry),
-			    LE_READ_4(&txmic[0]));
-			AR_WRITE(sc, AR_KEYTABLE_KEY1(micentry), 0);
+		/* Tx+Rx MIC key is at entry + 64. */
+		micentry = entry + 64;
+		AR_WRITE(sc, AR_KEYTABLE_KEY0(micentry), LE_READ_4(&rxmic[0]));
+		AR_WRITE(sc, AR_KEYTABLE_KEY1(micentry), LE_READ_2(&txmic[2]));
 
-			AR_WRITE(sc, AR_KEYTABLE_KEY2(micentry),
-			    LE_READ_4(&txmic[4]));
-			AR_WRITE(sc, AR_KEYTABLE_KEY3(micentry), 0);
+		AR_WRITE(sc, AR_KEYTABLE_KEY2(micentry), LE_READ_4(&rxmic[4]));
+		AR_WRITE(sc, AR_KEYTABLE_KEY3(micentry), LE_READ_2(&txmic[0]));
 
-			/* Rx MIC key is at entry + 64 + 32. */
-			micentry = entry + 64 + 32;
-			AR_WRITE(sc, AR_KEYTABLE_KEY0(micentry),
-			    LE_READ_4(&rxmic[0]));
-			AR_WRITE(sc, AR_KEYTABLE_KEY1(micentry), 0);
-
-			AR_WRITE(sc, AR_KEYTABLE_KEY2(micentry),
-			    LE_READ_4(&rxmic[4]));
-			AR_WRITE(sc, AR_KEYTABLE_KEY3(micentry), 0);
-		} else {
-			/* Tx+Rx MIC key is at entry + 64. */
-			micentry = entry + 64;
-			AR_WRITE(sc, AR_KEYTABLE_KEY0(micentry),
-			    LE_READ_4(&rxmic[0]));
-			AR_WRITE(sc, AR_KEYTABLE_KEY1(micentry),
-			    LE_READ_2(&txmic[2]));
-
-			AR_WRITE(sc, AR_KEYTABLE_KEY2(micentry),
-			    LE_READ_4(&rxmic[4]));
-			AR_WRITE(sc, AR_KEYTABLE_KEY3(micentry),
-			    LE_READ_2(&txmic[0]));
-
-			AR_WRITE(sc, AR_KEYTABLE_KEY4(micentry),
-			    LE_READ_4(&txmic[4]));
-			AR_WRITE(sc, AR_KEYTABLE_TYPE(micentry),
-			    AR_KEYTABLE_TYPE_CLR);
-		}
+		AR_WRITE(sc, AR_KEYTABLE_KEY4(micentry), LE_READ_4(&txmic[4]));
+		AR_WRITE(sc, AR_KEYTABLE_TYPE(micentry), AR_KEYTABLE_TYPE_CLR);
 	}
 	AR_WRITE(sc, AR_KEYTABLE_KEY0(entry), LE_READ_4(&key[ 0]));
 	AR_WRITE(sc, AR_KEYTABLE_KEY1(entry), LE_READ_2(&key[ 4]));
@@ -1012,8 +981,8 @@ athn_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 
 	if (!(k->k_flags & IEEE80211_KEY_GROUP)) {
 		addr = ni->ni_macaddr;
-		lo = addr[0] | addr[1] << 8 | addr[2] << 16 | addr[3] << 24;
-		hi = addr[4] | addr[5] << 8;
+		lo = LE_READ_4(&addr[0]);
+		hi = LE_READ_2(&addr[4]);
 		lo = lo >> 1 | hi << 31;
 		hi = hi >> 1;
 	} else
@@ -1041,8 +1010,6 @@ athn_delete_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 		entry = (uintptr_t)k->k_priv;
 		athn_reset_key(sc, entry);
 		athn_reset_key(sc, entry + 64);
-		if (sc->flags & ATHN_FLAG_SPLIT_TKIP_MIC)
-			athn_reset_key(sc, entry + 64 + 32);
 		break;
 	default:
 		/* Fallback to software crypto for other ciphers. */
@@ -1205,8 +1172,8 @@ athn_init_calib(struct athn_softc *sc, struct ieee80211_channel *c,
 
 	if (AR_SREV_9380_10_OR_LATER(sc))
 		error = ar9003_init_calib(sc);
-	else if (AR_SREV_9285_12_OR_LATER(sc))
-		error = ar9285_1_2_init_calib(sc, c, extc);
+	else if (AR_SREV_9285_10_OR_LATER(sc))
+		error = ar9285_init_calib(sc, c, extc);
 	else
 		error = ar5416_init_calib(sc, c, extc);
 	if (error != 0)
@@ -1454,7 +1421,9 @@ athn_ani_monitor(struct athn_softc *sc)
 		cycdelta = cyccnt - ani->cyccnt;
 		txfdelta = txfcnt - ani->txfcnt;
 		rxfdelta = rxfcnt - ani->rxfcnt;
-		listen_time = (cycdelta - txfdelta - rxfdelta) / 44000;
+
+		listen_time = (cycdelta - txfdelta - rxfdelta) /
+		    (athn_clock_rate(sc) * 1000);
 	} else
 		listen_time = 0;
 
@@ -2150,8 +2119,7 @@ athn_hw_reset(struct athn_softc *sc, struct ieee80211_channel *c,
 
 	athn_init_qos(sc);
 
-	if (!(sc->flags & ATHN_FLAG_SPLIT_TKIP_MIC))
-		AR_SETBITS(sc, AR_PCU_MISC, AR_PCU_MIC_NEW_LOC_ENA);
+	AR_SETBITS(sc, AR_PCU_MISC, AR_PCU_MIC_NEW_LOC_ENA);
 
 	if (AR_SREV_9287_13_OR_LATER(sc) && !AR_SREV_9380_10_OR_LATER(sc))
 		ar9287_1_3_setup_async_fifo(sc);
@@ -2367,28 +2335,36 @@ athn_updateedca(struct ieee80211com *ic)
 #undef ATHN_EXP2
 }
 
+int
+athn_clock_rate(struct athn_softc *sc)
+{
+	struct ieee80211com *ic = &sc->sc_ic;
+	int clockrate;	/* MHz. */
+
+	if (ic->ic_curmode == IEEE80211_MODE_11A) {
+		if (sc->flags & ATHN_FLAG_FAST_PLL_CLOCK)
+			clockrate = AR_CLOCK_RATE_FAST_5GHZ_OFDM;
+		else
+			clockrate = AR_CLOCK_RATE_5GHZ_OFDM;
+	} else if (ic->ic_curmode == IEEE80211_MODE_11B) {
+		clockrate = AR_CLOCK_RATE_CCK;
+	} else
+		clockrate = AR_CLOCK_RATE_2GHZ_OFDM;
+#ifndef IEEE80211_NO_HT
+	if (sc->curchanext != NULL)
+		clockrate *= 2;
+#endif
+	return (clockrate);
+}
+
 void
 athn_updateslot(struct ieee80211com *ic)
 {
 	struct athn_softc *sc = ic->ic_softc;
-	uint32_t clks;
+	int slot;
 
-	if (ic->ic_curmode == IEEE80211_MODE_11A) {
-		if (sc->flags & ATHN_FLAG_FAST_PLL_CLOCK)
-			clks = AR_CLOCK_RATE_FAST_5GHZ_OFDM;
-		else
-			clks = AR_CLOCK_RATE_5GHZ_OFDM;
-	} else if (ic->ic_curmode == IEEE80211_MODE_11B) {
-		clks = AR_CLOCK_RATE_CCK;
-	} else
-		clks = AR_CLOCK_RATE_2GHZ_OFDM;
-#ifndef IEEE80211_NO_HT
-	if (sc->curchanext != NULL)
-		clks *= 2;
-#endif
-	clks *= (ic->ic_flags & IEEE80211_F_SHSLOT) ? 9 : 20;
-
-	AR_WRITE(sc, AR_D_GBL_IFS_SLOT, clks);
+	slot = (ic->ic_flags & IEEE80211_F_SHSLOT) ? 9 : 20;
+	AR_WRITE(sc, AR_D_GBL_IFS_SLOT, slot * athn_clock_rate(sc));
 }
 
 void
@@ -2431,7 +2407,7 @@ athn_start(struct ifnet *ifp)
 		if (ic->ic_rawbpf != NULL)
 			bpf_mtap(ic->ic_rawbpf, m, BPF_DIRECTION_OUT);
 #endif
-		if (sc->ops.tx(sc, m, ni) != 0) {
+		if (sc->ops.tx(sc, m, ni, 0) != 0) {
 			ieee80211_release_node(ic, ni);
 			ifp->if_oerrors++;
 			continue;

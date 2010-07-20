@@ -1,4 +1,4 @@
-/*	$OpenBSD: spif.c,v 1.25 2010/04/12 12:57:52 tedu Exp $	*/
+/*	$OpenBSD: spif.c,v 1.27 2010/07/02 17:27:01 nicm Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -234,7 +234,7 @@ sttyattach(parent, dev, aux)
 		sp->sp_dtr = 0;
 		sc->sc_regs->dtrlatch[port] = 1;
 
-		tp = ttymalloc();
+		tp = ttymalloc(0);
 
 		tp->t_oproc = stty_start;
 		tp->t_param = stty_param;
@@ -676,13 +676,7 @@ stty_start(tp)
 	s = spltty();
 
 	if (!ISSET(tp->t_state, TS_TTSTOP | TS_TIMEOUT | TS_BUSY)) {
-		if (tp->t_outq.c_cc <= tp->t_lowat) {
-			if (ISSET(tp->t_state, TS_ASLEEP)) {
-				CLR(tp->t_state, TS_ASLEEP);
-				wakeup(&tp->t_outq);
-			}
-			selwakeup(&tp->t_wsel);
-		}
+		ttwakeupwr(tp);
 		if (tp->t_outq.c_cc) {
 			sp->sp_txc = ndqb(&tp->t_outq, 0);
 			sp->sp_txp = tp->t_outq.c_cf;

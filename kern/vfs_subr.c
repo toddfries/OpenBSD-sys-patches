@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.185 2010/05/06 06:53:09 mpf Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.187 2010/06/29 04:09:32 tedu Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -103,7 +103,7 @@ int getdevvp(dev_t, struct vnode **, enum vtype);
 
 int vfs_hang_addrlist(struct mount *, struct netexport *,
 				  struct export_args *);
-int vfs_free_netcred(struct radix_node *, void *);
+int vfs_free_netcred(struct radix_node *, void *, u_int);
 void vfs_free_addrlist(struct netexport *);
 void vputonfreelist(struct vnode *);
 
@@ -275,23 +275,6 @@ vfs_getnewfsid(struct mount *mp)
 		}
 	}
 	mp->mnt_stat.f_fsid.val[0] = tfsid.val[0];
-}
-
-/*
- * Make a 'unique' number from a mount type name.
- * Note that this is no longer used for ffs which
- * now has an on-disk filesystem id.
- */
-long
-makefstype(char *type)
-{
-	long rv;
-
-	for (rv = 0; *type; type++) {
-		rv <<= 2;
-		rv ^= *type;
-	}
-	return rv;
 }
 
 /*
@@ -1482,7 +1465,7 @@ out:
 
 /* ARGSUSED */
 int
-vfs_free_netcred(struct radix_node *rn, void *w)
+vfs_free_netcred(struct radix_node *rn, void *w, u_int id)
 {
 	struct radix_node_head *rnh = (struct radix_node_head *)w;
 

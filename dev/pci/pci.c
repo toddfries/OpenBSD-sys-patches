@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci.c,v 1.76 2010/04/21 23:12:24 deraadt Exp $	*/
+/*	$OpenBSD: pci.c,v 1.80 2010/07/02 04:03:31 kettenis Exp $	*/
 /*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*
@@ -364,12 +364,11 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 		    pcisubmatch))) {
 			pcireg_t reg;
 
+			pci_dev_postattach(dev, &pa);
+
 			/* skip header type != 0 */
 			reg = pci_conf_read(pc, tag, PCI_BHLC_REG);
 			if (PCI_HDRTYPE_TYPE(reg) != 0)
-				return(0);
-			if (pci_get_capability(pc, tag,
-			    PCI_CAP_PWRMGMT, NULL, NULL) == 0)
 				return(0);
 			if (!(pd = malloc(sizeof *pd, M_DEVBUF,
 			    M_NOWAIT)))
@@ -1067,7 +1066,7 @@ pci_enable_vga(pci_chipset_tag_t pc, pcitag_t tag)
 void
 pci_route_vga(struct pci_softc *sc)
 {
-	pci_chipset_tag_t pc;
+	pci_chipset_tag_t pc = sc->sc_pc;
 	pcireg_t bc;
 
 	if (sc->sc_bridgetag == NULL)
@@ -1083,7 +1082,7 @@ pci_route_vga(struct pci_softc *sc)
 void
 pci_unroute_vga(struct pci_softc *sc)
 {
-	pci_chipset_tag_t pc;
+	pci_chipset_tag_t pc = sc->sc_pc;
 	pcireg_t bc;
 
 	if (sc->sc_bridgetag == NULL)

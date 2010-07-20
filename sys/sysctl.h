@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.102 2010/05/02 00:51:10 tedu Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.104 2010/06/29 00:28:14 tedu Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -188,7 +188,8 @@ struct ctlname {
 #define	KERN_CPTIME2		71	/* array: cp_time2 */
 #define	KERN_CACHEPCT		72	/* buffer cache % of physmem */
 #define	KERN_FILE2		73	/* struct: file entries */
-#define	KERN_MAXID		74	/* number of valid kern ids */
+#define	KERN_RTHREADS		74	/* kernel rthreads support enabled */
+#define	KERN_MAXID		75	/* number of valid kern ids */
 
 #define	CTL_KERN_NAMES { \
 	{ 0, 0 }, \
@@ -265,6 +266,7 @@ struct ctlname {
  	{ "cp_time2", CTLTYPE_STRUCT }, \
 	{ "bufcachepercent", CTLTYPE_INT }, \
 	{ "file2", CTLTYPE_STRUCT }, \
+	{ "rthreads", CTLTYPE_INT }, \
 }
 
 /*
@@ -942,7 +944,7 @@ int sysctl_file2(int *, u_int, char *, size_t *, struct proc *);
 int sysctl_doproc(int *, u_int, char *, size_t *);
 struct radix_node;
 struct walkarg;
-int sysctl_dumpentry(struct radix_node *, void *);
+int sysctl_dumpentry(struct radix_node *, void *, u_int);
 int sysctl_iflist(int, struct walkarg *);
 int sysctl_rtable(int *, u_int, void *, size_t *, void *, size_t);
 int sysctl_clockrate(char *, size_t *, void *);

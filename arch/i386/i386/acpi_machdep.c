@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.30 2010/04/20 22:05:41 tedu Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.34 2010/07/06 06:25:55 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -57,12 +57,12 @@
 #endif
 
 #if NAPM > 0
-int haveacpibutusingapm;	
+int haveacpibutusingapm;
 #endif
 
 extern u_char acpi_real_mode_resume[], acpi_resume_end[];
 
-extern int acpi_savecpu(void);
+extern int acpi_savecpu(void) __returns_twice;
 extern void intr_calculatemasks(void);
 
 #define ACPI_BIOS_RSDP_WINDOW_BASE        0xe0000
@@ -243,11 +243,15 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	if (sc->sc_facs->version == 1)
 		sc->sc_facs->x_wakeup_vector = 0;
 
-	/* Copy the current cpu registers into a safe place for resume. */
+	/* Copy the current cpu registers into a safe place for resume.
+	 * acpi_savecpu actually returns twice - once in the suspend
+	 * path and once in the resume path (see setjmp(3)).
+	 */
 	if (acpi_savecpu()) {
+		/* Suspend path */
 		npxsave_cpu(curcpu(), 1);
 #ifdef MULTIPROCESSOR
-		i386_broadcast_ipi(I386_IPI_FLUSH_FPU);
+		i386_broadcast_ipi(I386_IPI_SYNCH_FPU);
 		i386_broadcast_ipi(I386_IPI_HALT);
 #endif
 		wbinvd();
@@ -255,20 +259,12 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 		panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
 	}
 
-	/*
-	 * On resume, the execution path will actually occur here.
-	 * This is because we previously saved the stack location
-	 * in acpi_savecpu, and issued a far jmp to the restore
-	 * routine in the wakeup code. This means we are
-	 * returning to the location immediately following the
-	 * last call instruction - after the call to acpi_savecpu.
-	 */
-	
+	/* Resume path continues here */
 #if 0
         /* Temporarily disabled for debugging purposes */
         /* Reset the wakeup vector to avoid resuming on reboot */
         sc->sc_facs->wakeup_vector = 0;
-#endif	
+#endif
 
 #if NISA > 0
 	isa_defaultirq();
@@ -335,5 +331,4 @@ acpi_resume_machdep(void)
 	cpu_boot_secondary_processors();
 #endif /* MULTIPROCESSOR */
 }
-
 #endif /* ! SMALL_KERNEL */

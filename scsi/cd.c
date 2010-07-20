@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.171 2010/06/15 04:11:34 dlg Exp $	*/
+/*	$OpenBSD: cd.c,v 1.175 2010/07/01 05:11:18 krw Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -104,6 +104,7 @@ struct cd_softc {
 #define	CDF_WLABEL	0x04		/* label is writable */
 #define	CDF_LABELLING	0x08		/* writing label */
 #define	CDF_ANCIENT	0x10		/* disk is ancient; for minphys */
+#define	CDF_DYING	0x40		/* dying, when deactivated */
 #define CDF_WAITING	0x100
 	struct scsi_link *sc_link;	/* contains our targ, lun, etc. */
 	struct cd_parms {
@@ -162,13 +163,6 @@ struct cfdriver cd_cd = {
 
 struct dkdriver cddkdriver = { cdstrategy };
 
-struct scsi_device cd_switch = {
-	cd_interpret_sense,
-	NULL,			/* we have a queue, which is started by this */
-	NULL,			/* we do not have an async handler */
-	NULL,			/* no per driver cddone */
-};
-
 const struct scsi_inquiry_pattern cd_patterns[] = {
 	{T_CDROM, T_REMOV,
 	 "",         "",                 ""},
@@ -215,18 +209,17 @@ cdattach(struct device *parent, struct device *self, void *aux)
 	 * Store information needed to contact our base driver
 	 */
 	sc->sc_link = sc_link;
-	sc_link->device = &cd_switch;
+	sc_link->interpret_sense = cd_interpret_sense;
 	sc_link->device_softc = sc;
 	if (sc_link->openings > CDOUTSTANDING)
 		sc_link->openings = CDOUTSTANDING;
 
 	/*
-	 * Initialize and attach the disk structure.
+	 * Initialize disk structures.
 	 */
 	sc->sc_dk.dk_driver = &cddkdriver;
 	sc->sc_dk.dk_name = sc->sc_dev.dv_xname;
 	sc->sc_bufq = bufq_init(BUFQ_DEFAULT);
-	disk_attach(&sc->sc_dk);
 
 	/*
 	 * Note if this device is ancient.  This is used in cdminphys().
@@ -244,12 +237,16 @@ cdattach(struct device *parent, struct device *self, void *aux)
 	if ((sc->sc_cdpwrhook = powerhook_establish(cd_powerhook, sc)) == NULL)
 		printf("%s: WARNING: unable to establish power hook\n",
 		    sc->sc_dev.dv_xname);
+
+	/* Attach disk. */
+	disk_attach(&sc->sc_dk);
 }
 
 
 int
 cdactivate(struct device *self, int act)
 {
+	struct cd_softc *sc = (struct cd_softc *)self;
 	int rv = 0;
 
 	switch (act) {
@@ -257,9 +254,8 @@ cdactivate(struct device *self, int act)
 		break;
 
 	case DVACT_DEACTIVATE:
-		/*
-		 * Nothing to do; we key off the device's DVF_ACTIVATE.
-		 */
+		sc->sc_flags |= CDF_DYING;
+		bufq_drain(sc->sc_bufq);
 		break;
 	}
 	return (rv);
@@ -313,6 +309,10 @@ cdopen(dev_t dev, int flag, int fmt, struct proc *p)
 	sc = cdlookup(unit);
 	if (sc == NULL)
 		return (ENXIO);
+	if (sc->sc_flags & CDF_DYING) {
+		device_unref(&sc->sc_dev);
+		return (ENXIO);
+	}
 
 	sc_link = sc->sc_link;
 	SC_DEBUG(sc_link, SDEV_DB1,
@@ -433,6 +433,10 @@ cdclose(dev_t dev, int flag, int fmt, struct proc *p)
 	sc = cdlookup(DISKUNIT(dev));
 	if (sc == NULL)
 		return ENXIO;
+	if (sc->sc_flags & CDF_DYING) {
+		device_unref(&sc->sc_dev);
+		return (ENXIO);
+	}
 
 	if ((error = cdlock(sc)) != 0) {
 		device_unref(&sc->sc_dev);
@@ -484,7 +488,12 @@ cdstrategy(struct buf *bp)
 	struct cd_softc *sc;
 	int s;
 
-	if ((sc = cdlookup(DISKUNIT(bp->b_dev))) == NULL) {
+	sc = cdlookup(DISKUNIT(bp->b_dev));
+	if (sc == NULL) {
+		bp->b_error = ENXIO;
+		goto bad;
+	}
+	if (sc->sc_flags & CDF_DYING) {
 		bp->b_error = ENXIO;
 		goto bad;
 	}
@@ -536,7 +545,7 @@ bad:
 	bp->b_flags |= B_ERROR;
 done:
 	/*
-	 * Correctly set the buf to indicate a completed xfer
+	 * Set the buf to indicate no xfer was done.
 	 */
 	bp->b_resid = bp->b_bcount;
 	s = splbio();
@@ -575,6 +584,11 @@ cdstart(struct scsi_xfer *xs)
 	int read;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("cdstart\n"));
+
+	if (sc->sc_flags & CDF_DYING) {
+		scsi_xs_put(xs);
+		return;
+	}
 
 	/*
 	 * If the device has become invalid, abort all the
@@ -642,6 +656,7 @@ cdstart(struct scsi_xfer *xs)
 	xs->datalen = bp->b_bcount;
 	xs->done = cd_buf_done;
 	xs->cookie = bp;
+	xs->bp = bp;
 
 	/* Instrumentation. */
 	disk_busy(&sc->sc_dk);
@@ -679,7 +694,10 @@ cd_buf_done(struct scsi_xfer *xs)
 
 	case XS_SENSE:
 	case XS_SHORTSENSE:
-		error = scsi_interpret_sense(xs);
+#ifdef SCSIDEBUG
+		scsi_sense_print_debug(xs);
+#endif
+		error = cd_interpret_sense(xs);
 		if (error == 0) {
 			bp->b_error = 0;
 			bp->b_resid = xs->resid;
@@ -782,6 +800,10 @@ cdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	sc = cdlookup(DISKUNIT(dev));
 	if (sc == NULL)
 		return ENXIO;
+	if (sc->sc_flags & CDF_DYING) {
+		device_unref(&sc->sc_dev);
+		return (ENXIO);
+	}
 
 	SC_DEBUG(sc->sc_link, SDEV_DB2, ("cdioctl 0x%lx\n", cmd));
 
@@ -1936,7 +1958,7 @@ cd_interpret_sense(struct scsi_xfer *xs)
 
 	if (((sc_link->flags & SDEV_OPEN) == 0) ||
 	    (serr != SSD_ERRCODE_CURRENT && serr != SSD_ERRCODE_DEFERRED))
-		return (EJUSTRETURN); /* let the generic code handle it */
+		return (scsi_interpret_sense(xs));
 
 	/*
 	 * We do custom processing in cd for the unit becoming ready
@@ -1966,7 +1988,7 @@ cd_interpret_sense(struct scsi_xfer *xs)
 	default:
 		break;
 	}
-	return (EJUSTRETURN); /* use generic handler in scsi_base */
+	return (scsi_interpret_sense(xs));
 }
 
 #if defined(__macppc__)

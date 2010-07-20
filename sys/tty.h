@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty.h,v 1.24 2010/04/12 12:57:52 tedu Exp $	*/
+/*	$OpenBSD: tty.h,v 1.28 2010/07/02 19:57:15 tedu Exp $	*/
 /*	$NetBSD: tty.h,v 1.30.4.1 1996/06/02 09:08:13 mrg Exp $	*/
 
 /*-
@@ -107,6 +107,7 @@ struct tty {
 	long	t_cancc;		/* Canonical queue statistics. */
 	struct	clist t_outq;		/* Device output queue. */
 	long	t_outcc;		/* Output queue statistics. */
+	int	t_qlen;			/* Length of above queues */
 	u_char	t_line;			/* Interface to device drivers. */
 	dev_t	t_dev;			/* Device. */
 	int	t_state;		/* Device and driver (TS*) state. */
@@ -165,7 +166,7 @@ struct itty {
 
 #define	TTMASK	15
 #define	OBUFSIZ	512
-#define	TTYHOG	1024
+#define	TTYHOG(tp)	(tp)->t_qlen
 
 #ifdef _KERNEL
 #define	TTMAXHIWAT	roundup(2048, CBSIZE)
@@ -273,6 +274,7 @@ int	 ttkqfilter(dev_t dev, struct knote *kn);
 void	 ttsetwater(struct tty *tp);
 int	 ttspeedtab(int speed, const struct speedtab *table);
 int	 ttstart(struct tty *tp);
+void	 ttwakeupwr(struct tty *tp);
 void	 ttwakeup(struct tty *tp);
 int	 ttwrite(struct tty *tp, struct uio *uio, int flag);
 void	 ttychars(struct tty *tp);
@@ -295,7 +297,7 @@ int	 ttywflush(struct tty *tp);
 void	 ttytstamp(struct tty *tp, int octs, int ncts, int odcd, int ndcd);
 
 void	tty_init(void);
-struct tty *ttymalloc(void);
+struct tty *ttymalloc(int);
 void	 ttyfree(struct tty *);
 u_char	*firstc(struct clist *clp, int *c);
 
@@ -308,8 +310,8 @@ int	cttypoll(dev_t, int, struct proc *);
 void	clalloc(struct clist *, int, int);
 void	clfree(struct clist *);
 
-#if defined(COMPAT_43) || defined(COMPAT_SUNOS) || defined(COMPAT_SVR4) || \
-    defined(COMPAT_FREEBSD) || defined(COMPAT_OSF1)
+#if defined(COMPAT_43) || defined(COMPAT_SVR4) || \
+    defined(COMPAT_FREEBSD)
 # define COMPAT_OLDTTY
 int 	ttcompat(struct tty *, u_long, caddr_t, int, struct proc *);
 #endif

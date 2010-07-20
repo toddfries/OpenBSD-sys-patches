@@ -1,4 +1,4 @@
-/*	$OpenBSD: magma.c,v 1.21 2010/04/12 12:57:52 tedu Exp $	*/
+/*	$OpenBSD: magma.c,v 1.23 2010/07/02 17:27:01 nicm Exp $	*/
 
 /*-
  * Copyright (c) 1998 Iain Hibbert
@@ -805,7 +805,7 @@ mtty_attach(struct device *parent, struct device *dev, void *args)
 		}
 		mp->mp_channel = chan;
 
-		tp = ttymalloc();
+		tp = ttymalloc(0);
 		tp->t_oproc = mtty_start;
 		tp->t_param = mtty_param;
 
@@ -1116,14 +1116,7 @@ mtty_start(struct tty *tp)
 		/* if we are sleeping and output has drained below
 		 * low water mark, awaken
 		 */
-		if (tp->t_outq.c_cc <= tp->t_lowat) {
-			if (ISSET(tp->t_state, TS_ASLEEP)) {
-				CLR(tp->t_state, TS_ASLEEP);
-				wakeup(&tp->t_outq);
-			}
-
-			selwakeup(&tp->t_wsel);
-		}
+		ttwakeupwr(tp);
 
 		/* if something to send, start transmitting
 		 */

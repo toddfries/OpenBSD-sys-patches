@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5008.c,v 1.8 2010/06/05 18:43:57 damien Exp $	*/
+/*	$OpenBSD: ar5008.c,v 1.11 2010/07/15 19:38:40 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -88,7 +88,8 @@ int	ar5008_tx_process(struct athn_softc *, int);
 void	ar5008_tx_intr(struct athn_softc *);
 int	ar5008_swba_intr(struct athn_softc *);
 int	ar5008_intr(struct athn_softc *);
-int	ar5008_tx(struct athn_softc *, struct mbuf *, struct ieee80211_node *);
+int	ar5008_tx(struct athn_softc *, struct mbuf *, struct ieee80211_node *,
+	    int);
 void	ar5008_set_rf_mode(struct athn_softc *, struct ieee80211_channel *);
 int	ar5008_rf_bus_request(struct athn_softc *);
 void	ar5008_rf_bus_release(struct athn_softc *);
@@ -1193,7 +1194,8 @@ ar5008_intr(struct athn_softc *sc)
 }
 
 int
-ar5008_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
+ar5008_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
+    int txflags)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211_key *k = NULL;
@@ -1341,6 +1343,7 @@ ar5008_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	}
 	bf->bf_m = m;
 	bf->bf_ni = ni;
+	bf->bf_txflags = txflags;
 
 	wh = mtod(m, struct ieee80211_frame *);
 
@@ -1789,15 +1792,15 @@ ar5008_bb_load_noisefloor(struct athn_softc *sc)
 	AR_CLRBITS(sc, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NO_UPDATE_NF);
 	AR_SETBITS(sc, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NF);
 	/* Wait for load to complete. */
-	for (ntries = 0; ntries < 5; ntries++) {
+	for (ntries = 0; ntries < 1000; ntries++) {
 		if (!(AR_READ(sc, AR_PHY_AGC_CONTROL) & AR_PHY_AGC_CONTROL_NF))
 			break;
 		DELAY(50);
 	}
-#ifdef ATHN_DEBUG
-	if (ntries == 5 && athn_debug > 0)
-		printf("failed to load noisefloor values\n");
-#endif
+	if (ntries == 1000) {
+		DPRINTF(("failed to load noisefloor values\n"));
+		return;
+	}
 
 	/* Restore noisefloor values to initial (max) values. */
 	for (i = 0; i < AR_MAX_CHAINS; i++)
@@ -2398,7 +2401,7 @@ ar5008_get_pdadcs(struct athn_softc *sc, uint8_t fbin,
 		while (ss < maxidx && npdadcs < AR_NUM_PDADC_VALUES - 1)
 			pdadcs[npdadcs++] = vpd[ss++];
 
-		if (tgtidx <= maxidx)
+		if (tgtidx < maxidx)
 			continue;
 
 		/* Extrapolate data for maxidx <= ss <= tgtidx. */
