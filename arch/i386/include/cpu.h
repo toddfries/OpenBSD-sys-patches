@@ -92,6 +92,7 @@ struct cpu_info {
 	 * Private members.
 	 */
 	struct proc *ci_fpcurproc;	/* current owner of the FPU */
+	struct proc *ci_fpsaveproc;
 	int ci_fpsaving;		/* save in progress */
 
 	struct pcb *ci_curpcb;		/* VA of current HW PCB */

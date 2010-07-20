@@ -74,6 +74,7 @@ struct cpu_info {
 	u_int64_t ci_scratch;
 
 	struct proc *ci_fpcurproc;
+	struct proc *ci_fpsaveproc;
 	int ci_fpsaving;
 
 	struct pcb *ci_curpcb;
