@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.159 2009/08/28 13:04:40 jsing Exp $	*/
+/*	$OpenBSD: locore.s,v 1.162 2010/03/27 23:12:48 kettenis Exp $	*/
 /*	$NetBSD: locore.s,v 1.137 2001/08/13 06:10:10 jdolecek Exp $	*/
 
 /*
@@ -773,10 +773,10 @@ _C_LABEL(trapbase):
 	TRAP T_DIV0			! 028 = divide by zero
 	UTRAP 0x029			! 029 = internal processor error
 	UTRAP 0x02a; UTRAP 0x02b; UTRAP 0x02c; UTRAP 0x02d; UTRAP 0x02e; UTRAP 0x02f
-	VTRAP T_DATAFAULT, winfault	! 030 = data fetch fault
+	VTRAP T_DATAFAULT, datafault	! 030 = data fetch fault
 	UTRAP 0x031			! 031 = data MMU miss -- no MMU
-	VTRAP T_DATA_ERROR, winfault	! 032 = data access error
-	VTRAP T_DATA_PROT, winfault	! 033 = data protection fault
+	VTRAP T_DATA_ERROR, datafault	! 032 = data access error
+	VTRAP T_DATA_PROT, datafault	! 033 = data protection fault
 	TRAP T_ALIGN			! 034 = address alignment error -- we could fix it inline...
 	TRAP T_LDDF_ALIGN		! 035 = LDDF address alignment error -- we could fix it inline...
 	TRAP T_STDF_ALIGN		! 036 = STDF address alignment error -- we could fix it inline...
@@ -785,7 +785,7 @@ _C_LABEL(trapbase):
 	TRAP T_STQF_ALIGN		! 039 = STQF address alignment error
 	UTRAP 0x03a; UTRAP 0x03b; UTRAP 0x03c;
 	UTRAP 0x03d; UTRAP 0x03e; UTRAP 0x03f;
-	VTRAP T_ASYNC_ERROR, winfault	! 040 = data fetch fault
+	VTRAP T_ASYNC_ERROR, datafault	! 040 = data fetch fault
 	SOFTINT4U 1, IE_L1		! 041 = level 1 interrupt
 	HARDINT4U 2			! 042 = level 2 interrupt
 	HARDINT4U 3			! 043 = level 3 interrupt
@@ -3328,8 +3328,6 @@ sun4v_datatrap:
 	ldxa	[%g1] ASI_PHYS_CACHED, %g1
 	add	%g3, 0x50, %g2
 	ldxa	[%g2] ASI_PHYS_CACHED, %g2
-	add	%g3, 0x60, %g4
-	stxa	%sp, [%g4] ASI_PHYS_CACHED
 
 	TRAP_SETUP -CC64FSZ-TF_SIZE
 	or	%g1, %g2, %o3
@@ -3598,12 +3596,13 @@ checkalign:
  *
  */
 slowtrap:
+	TRAP_SETUP -CC64FSZ-TF_SIZE
+
 	rdpr	%tt, %g4
 	rdpr	%tstate, %g1
 	rdpr	%tpc, %g2
 	rdpr	%tnpc, %g3
 
-	TRAP_SETUP -CC64FSZ-TF_SIZE
 Lslowtrap_reenter:
 	stx	%g1, [%sp + CC64FSZ + BIAS + TF_TSTATE]
 	mov	%g4, %o1		! (type)

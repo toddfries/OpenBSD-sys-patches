@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbic.c,v 1.24 2010/01/09 23:15:06 krw Exp $ */
+/*	$OpenBSD: sbic.c,v 1.28 2010/06/29 21:12:01 krw Exp $ */
 /*	$NetBSD: sbic.c,v 1.2 1996/04/23 16:32:54 chuck Exp $	*/
 
 /*
@@ -339,7 +339,7 @@ sbic_load_ptrs(dev)
  * so I will too.  I could plug it in, however so could they
  * in scsi_scsi_cmd().
  */
-int
+void
 sbic_scsicmd(xs)
     struct scsi_xfer *xs;
 {
@@ -367,7 +367,9 @@ sbic_scsicmd(xs)
         Debugger();
 #endif
 #endif
-        return (NO_CCB);
+	xs->error = XS_NO_CCB;
+	scsi_done(xs);
+        return;
     }
 
     if ( flags & SCSI_DATA_IN )
@@ -419,7 +421,7 @@ sbic_scsicmd(xs)
 
         splx(s);
 
-        return(COMPLETE);
+        return;
     }
 
     s = splbio();
@@ -432,8 +434,6 @@ sbic_scsicmd(xs)
         sbic_sched(dev);
 
     splx(s);
-
-    return(SUCCESSFULLY_QUEUED);
 }
 
 /*
@@ -595,8 +595,7 @@ sbic_scsidone(acb, stat)
 
 #ifdef DEBUG
         if (report_sense)
-            printf(" => %02x %02x\n", xs->sense.flags, 
-			xs->sense.extra_bytes[3]);
+            printf(" => %02x\n", xs->sense.flags);
 #endif
 
     } else {

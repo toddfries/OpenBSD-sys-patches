@@ -1,4 +1,4 @@
-/*	$OpenBSD: udl.h,v 1.15 2009/10/11 12:38:23 mglocker Exp $ */
+/*	$OpenBSD: udl.h,v 1.17 2010/06/27 12:05:18 maja Exp $ */
 
 /*
  * Copyright (c) 2009 Marcus Glocker <mglocker@openbsd.org>
@@ -85,6 +85,7 @@ struct udl_softc {
 #define DLMAX	0x0004
 #define	DLUNK	0x00ff				/* unknown */
 	uint8_t			 sc_cur_mode;
+	u_int			*sc_cbs;	/* character backing store */
 
 	/*
 	 * We use function pointers to the framebuffer manipulation
@@ -170,6 +171,11 @@ uint8_t udl_reg_vals_640x480_75[] = {	/*  31.50 Mhz 75.7 Hz VESA std */
 	0x00, 0xeb, 0xf7, 0xd3, 0x0f, 0x4f, 0x93, 0xfa, 0x47, 0xb5, 0x58, 0xff,
 	0xff, 0xbf, 0x70, 0x02, 0x80, 0xf4, 0x8f, 0xff, 0xff, 0xff, 0xf9, 0x01,
 	0xe0, 0x01, 0x02, 0x9c, 0x18
+};
+uint8_t udl_reg_vals_800x480_61[] = {	/*  33.00 MHz 61.9 Hz */
+	0x00, 0x20, 0x3c, 0x7a, 0xc9, 0xf2, 0x6c, 0x48, 0xf9, 0x70, 0x53, 0xff,
+	0xff, 0x21, 0x27, 0x03, 0x20, 0x91, 0xf3, 0xff, 0xff, 0xff, 0xf9, 0x01,
+	0xe0, 0x01, 0x02, 0xc8, 0x19
 };
 uint8_t udl_reg_vals_800x600_56[] = {	/*  36.00 MHz 56.2 Hz VESA std */
 	0x00, 0x65, 0x35, 0x48, 0xf4, 0xf2, 0x6c, 0x19, 0x18, 0xc9, 0x4b, 0xff,
@@ -277,6 +283,8 @@ static const struct udl_mode udl_modes[] = {
 	{ 640,  480,  67, DLALL,  3025, udl_reg_vals_640x480_67 },
 	{ 640,  480,  72, DLALL,  3150, udl_reg_vals_640x480_72 },
 	{ 640,  480,  75, DLALL,  3150, udl_reg_vals_640x480_75 },
+	{ 800,	480,  59, DLALL,  5000, udl_reg_vals_800x480_61 },
+	{ 800,	480,  61, DLALL,  3300, udl_reg_vals_800x480_61 },
 	{ 800,  600,  56, DLALL,  3600, udl_reg_vals_800x600_56 },
 	{ 800,  600,  60, DLALL,  4000, udl_reg_vals_800x600_60 },
 	{ 800,  600,  72, DLALL,  5000, udl_reg_vals_800x600_72 },

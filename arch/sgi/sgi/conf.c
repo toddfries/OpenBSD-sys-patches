@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.22 2009/08/13 15:04:20 dlg Exp $ */
+/*	$OpenBSD: conf.c,v 1.24 2010/07/03 03:59:17 krw Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -101,7 +101,6 @@ cdev_decl(com);
 #include "lpt.h"
 cdev_decl(lpt);
 #include "ch.h"
-#include "ss.h"
 #include "uk.h"
 cdev_decl(wd);
 #include "audio.h"
@@ -172,7 +171,7 @@ struct cdevsw	cdevsw[] =
 	cdev_pf_init(NPF,pf),		/* 31: packet filter */
 	cdev_uk_init(NUK,uk),		/* 32: unknown SCSI */
 	cdev_random_init(1,random),	/* 33: random data source */
-	cdev_ss_init(NSS,ss),		/* 34: SCSI scanner */
+	cdev_notdef(),			/* 34: */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 35: Kernel symbols device */
 	cdev_ch_init(NCH,ch),		/* 36: SCSI autochanger */
 	cdev_notdef(),			/* 37: */
@@ -211,6 +210,7 @@ struct cdevsw	cdevsw[] =
 	cdev_tty_init(NUCOM,ucom),	/* 66: USB tty */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 67: devices hotplugging */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 68: vscsi */
+	cdev_disk_init(1,diskmap),	/* 69: disk mapper */
 };
 
 int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);

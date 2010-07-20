@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.23 2009/08/13 15:04:20 dlg Exp $	*/
+/*	$OpenBSD: conf.c,v 1.26 2010/07/03 03:59:16 krw Exp $	*/
 /*	$NetBSD: conf.c,v 1.10 2002/04/19 01:04:38 wiz Exp $	*/
 
 /*
@@ -118,7 +118,6 @@ cdev_decl(pci);
 #include "cd.h"
 #include "ch.h"
 #include "uk.h"
-#include "ss.h"
 #include "bio.h"
 
 /*
@@ -139,6 +138,11 @@ cdev_decl(pci);
 #include "ulpt.h"
 #include "urio.h"
 #include "uscanner.h"
+
+/*
+ * Bluetooth devices
+ */
+#include "bthub.h"
 
 /*
  * WSCONS devices
@@ -324,7 +328,7 @@ struct cdevsw cdevsw[] = {
 	cdev_disk_init(NCD,cd),			/* 26: SCSI CD-ROM */
 	cdev_ch_init(NCH,ch),	 		/* 27: SCSI autochanger */
 	cdev_uk_init(NUK,uk),	 		/* 28: SCSI unknown */
-	cdev_scanner_init(NSS,ss),		/* 29: SCSI scanner */
+	cdev_notdef(),				/* 29: */
 	cdev_lkm_dummy(),			/* 30: */
 	cdev_lkm_dummy(),			/* 31: */
 	cdev_lkm_dummy(),			/* 32: */
@@ -404,6 +408,8 @@ struct cdevsw cdevsw[] = {
 	cdev_ptm_init(NPTY,ptm),		/* 98: pseudo-tty ptm device */
 	cdev_spkr_init(NSPKR,spkr),		/* 99: PC speaker */
 	cdev_vscsi_init(NVSCSI,vscsi),		/* 100: vscsi */
+	cdev_bthub_init(NBTHUB,bthub),		/* 101: bthub */
+	cdev_disk_init(1,diskmap),		/* 102: disk mapper */
 };
 
 int nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);

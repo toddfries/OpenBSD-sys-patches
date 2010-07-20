@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.c,v 1.84 2010/02/08 13:32:50 claudio Exp $	*/
+/*	$OpenBSD: if_ether.c,v 1.87 2010/06/28 18:50:37 claudio Exp $	*/
 /*	$NetBSD: if_ether.c,v 1.31 1996/05/11 12:59:58 mycroft Exp $	*/
 
 /*
@@ -105,7 +105,7 @@ struct ifnet *myip_ifp;
 void	db_print_sa(struct sockaddr *);
 void	db_print_ifa(struct ifaddr *);
 void	db_print_llinfo(caddr_t);
-int	db_show_radix_node(struct radix_node *, void *);
+int	db_show_radix_node(struct radix_node *, void *, u_int);
 #endif
 
 /*
@@ -399,7 +399,7 @@ arpresolve(ac, rt, m, dst, desten)
 			log(LOG_DEBUG, "arpresolve: %s: route without link "
 			    "local address\n", inet_ntoa(SIN(dst)->sin_addr));
 	} else {
-		if ((la = arplookup(SIN(dst)->sin_addr.s_addr, 1, 0,
+		if ((la = arplookup(SIN(dst)->sin_addr.s_addr, RT_REPORT, 0,
 		    ac->ac_if.if_rdomain)) != NULL)
 			rt = la->la_rt;
 		else
@@ -653,7 +653,7 @@ in_arpinput(m)
 
 	if (!bcmp((caddr_t)ea->arp_sha, enaddr, sizeof (ea->arp_sha)))
 		goto out;	/* it's from me, ignore it. */
-	if (ETHER_IS_MULTICAST (&ea->arp_sha[0]))
+	if (ETHER_IS_MULTICAST(&ea->arp_sha[0]))
 		if (!bcmp((caddr_t)ea->arp_sha, (caddr_t)etherbroadcastaddr,
 		    sizeof (ea->arp_sha))) {
 			log(LOG_ERR, "arp: ether address is broadcast for "
@@ -1106,16 +1106,14 @@ db_print_llinfo(li)
  * Return non-zero error to abort walk.
  */
 int
-db_show_radix_node(rn, w)
-	struct radix_node *rn;
-	void *w;
+db_show_radix_node(struct radix_node *rn, void *w, u_int id)
 {
 	struct rtentry *rt = (struct rtentry *)rn;
 
 	db_printf("rtentry=%p", rt);
 
-	db_printf(" flags=0x%x refcnt=%d use=%ld expire=%ld\n",
-	    rt->rt_flags, rt->rt_refcnt, rt->rt_use, rt->rt_expire);
+	db_printf(" flags=0x%x refcnt=%d use=%ld expire=%ld rtableid %u\n",
+	    rt->rt_flags, rt->rt_refcnt, rt->rt_use, rt->rt_expire, id);
 
 	db_printf(" key="); db_print_sa(rt_key(rt));
 	db_printf(" mask="); db_print_sa(rt_mask(rt));
@@ -1142,7 +1140,7 @@ db_show_radix_node(rn, w)
  * Use this from ddb:  "call db_show_arptab"
  */
 int
-db_show_arptab()
+db_show_arptab(void)
 {
 	struct radix_node_head *rnh;
 	rnh = rt_gettable(AF_INET, 0);

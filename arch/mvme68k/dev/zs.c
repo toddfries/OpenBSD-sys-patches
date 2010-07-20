@@ -1,4 +1,4 @@
-/*	$OpenBSD: zs.c,v 1.30 2009/11/09 17:53:39 nicm Exp $ */
+/*	$OpenBSD: zs.c,v 1.34 2010/07/02 17:27:01 nicm Exp $ */
 
 /*
  * Copyright (c) 2000 Steve Murphree, Jr.
@@ -32,7 +32,6 @@
 #include <sys/param.h>
 #include <sys/ioctl.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/tty.h>
 #include <sys/uio.h>
 #include <sys/systm.h>
@@ -352,7 +351,7 @@ zsopen(dev, flag, mode, p)
 
 	zp = &sc->sc_zs[zsside(dev)];
 	if (zp->tty == NULL) {
-		zp->tty = ttymalloc();
+		zp->tty = ttymalloc(0);
 		zs_ttydef(zp);
 		if (minor(dev) < NZSLINE)
 			zs_tty[minor(dev)] = zp->tty;
@@ -368,7 +367,7 @@ zsopen(dev, flag, mode, p)
 	} else if (tp->t_state & TS_XCLUDE && suser(p, 0) != 0)
 		return (EBUSY);
 
-	error = ((*linesw[tp->t_line].l_open) (dev, tp));
+	error = ((*linesw[tp->t_line].l_open) (dev, tp, p));
 
 	if (error == 0)
 		++zp->nzs_open;
@@ -392,7 +391,7 @@ zsclose(dev, flag, mode, p)
 	zp = &sc->sc_zs[zsside(dev)];
 	tp = zp->tty;
 
-	(*linesw[tp->t_line].l_close) (tp, flag);
+	(*linesw[tp->t_line].l_close) (tp, flag, p);
 	s = splzs();
 	if ((zp->flags & ZS_CONSOLE) == 0 && (tp->t_cflag & HUPCL) != 0)
 		ZBIC(&zp->scc, 5, 0x82);		  /* drop DTR, RTS */
@@ -558,13 +557,7 @@ zsstop(tp, flag)
 		tp->t_state &= ~TS_BUSY;
 		spltty();
 		ndflush(&tp->t_outq, n);
-		if (tp->t_outq.c_cc <= tp->t_lowat) {
-			if (tp->t_state & TS_ASLEEP) {
-				tp->t_state &= ~TS_ASLEEP;
-				wakeup((caddr_t) & tp->t_outq);
-			}
-			selwakeup(&tp->t_wsel);
-		}
+		ttwakeupwr(tp);
 	}
 	splx(s);
 	return (0);
@@ -906,13 +899,7 @@ zs_softint(arg)
 			 && (tp->t_state & TS_BUSY) != 0) {
 			tp->t_state &= ~(TS_BUSY | TS_FLUSH);
 			ndflush(&tp->t_outq, zp->sent_count);
-			if (tp->t_outq.c_cc <= tp->t_lowat) {
-				if (tp->t_state & TS_ASLEEP) {
-					tp->t_state &= ~TS_ASLEEP;
-					wakeup((caddr_t) & tp->t_outq);
-				}
-				selwakeup(&tp->t_wsel);
-			}
+			ttwakeupwr(tp);
 			if (tp->t_line != 0)
 				(*linesw[tp->t_line].l_start) (tp);
 			else

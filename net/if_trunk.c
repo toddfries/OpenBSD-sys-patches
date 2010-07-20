@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_trunk.c,v 1.71 2010/01/12 01:36:33 dlg Exp $	*/
+/*	$OpenBSD: if_trunk.c,v 1.75 2010/05/08 11:26:06 stsp Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -26,7 +26,6 @@
 #include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/hash.h>
@@ -201,7 +200,7 @@ trunk_clone_create(struct if_clone *ifc, int unit)
 	    ifc->ifc_name, unit);
 
 	/*
-	 * Attach as an ordinary ethernet device, childs will be attached
+	 * Attach as an ordinary ethernet device, children will be attached
 	 * as special device IFT_IEEE8023ADLAG.
 	 */
 	if_attach(ifp);
@@ -285,26 +284,12 @@ void
 trunk_port_lladdr(struct trunk_port *tp, u_int8_t *lladdr)
 {
 	struct ifnet *ifp = tp->tp_if;
-	struct ifaddr *ifa;
-	struct ifreq ifr;
 
 	/* Set the link layer address */
 	trunk_lladdr((struct arpcom *)ifp, lladdr);
 
 	/* Reset the port to update the lladdr */
-	if (ifp->if_flags & IFF_UP) {
-		int s = splnet();
-		ifp->if_flags &= ~IFF_UP;
-		(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifr);
-		ifp->if_flags |= IFF_UP;
-		(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifr);
-		splx(s);
-		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-			if (ifa->ifa_addr != NULL &&
-			    ifa->ifa_addr->sa_family == AF_INET)
-				arp_ifinit((struct arpcom *)ifp, ifa);
-		}
-	}
+	ifnewlladdr(ifp);
 }
 
 int
@@ -371,7 +356,8 @@ trunk_port_create(struct trunk_softc *tr, struct ifnet *ifp)
 	}
 
 	/* Update link layer address for this port */
-	trunk_port_lladdr(tp, tr->tr_primary->tp_lladdr);
+	trunk_port_lladdr(tp,
+	    ((struct arpcom *)(tr->tr_primary->tp_if))->ac_enaddr);
 
 	/* Insert into the list of ports */
 	SLIST_INSERT_HEAD(&tr->tr_ports, tp, tp_entries);

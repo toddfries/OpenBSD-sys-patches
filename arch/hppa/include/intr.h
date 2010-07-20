@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.28 2009/12/31 13:22:02 jsing Exp $	*/
+/*	$OpenBSD: intr.h,v 1.34 2010/07/02 00:00:45 jsing Exp $	*/
 
 /*
  * Copyright (c) 2002-2004 Michael Shalayeff
@@ -32,7 +32,7 @@
 #include <machine/psl.h>
 
 #define	CPU_NINTS	32
-#define	NIPL		16
+#define	NIPL		17
 
 #define	IPL_NONE	0
 #define	IPL_SOFTCLOCK	1
@@ -45,19 +45,26 @@
 #define	IPL_AUDIO	8
 #define	IPL_CLOCK	9
 #define	IPL_STATCLOCK	10
+#define	IPL_SCHED	10
 #define	IPL_HIGH	10
-#define	IPL_NESTED	11	/* pseudo-level for sub-tables */
+#define	IPL_IPI		11
+#define	IPL_NESTED	12	/* pseudo-level for sub-tables */
 
 #define	IST_NONE	0
 #define	IST_PULSE	1
 #define	IST_EDGE	2
 #define	IST_LEVEL	3
 
+#ifdef MULTIPROCESSOR
+#define	HPPA_IPI_NOP		0
+#define	HPPA_IPI_FPU_SAVE	1
+#define	HPPA_IPI_FPU_FLUSH	2
+#define	HPPA_NIPI		3
+#endif
+
 #if !defined(_LOCORE) && defined(_KERNEL)
 
-#include <machine/atomic.h>
-
-extern volatile u_long ipending, imask[NIPL];
+extern volatile u_long imask[NIPL];
 
 #ifdef DIAGNOSTIC
 void splassert_fail(int, int, const char *);
@@ -135,12 +142,18 @@ hppa_intr_enable(register_t eiem)
 #define	splsched()	splraise(IPL_SCHED)
 #define	splstatclock()	splraise(IPL_STATCLOCK)
 #define	splhigh()	splraise(IPL_HIGH)
+#define	splipi()	splraise(IPL_IPI)
 #define	spl0()		spllower(IPL_NONE)
 
-#define	softintr(mask)	atomic_setbits_long(&ipending, mask)
+#define	softintr(mask)	atomic_setbits_long(&curcpu()->ci_ipending, mask)
 
 #define	SOFTINT_MASK ((1 << (IPL_SOFTCLOCK - 1)) | \
     (1 << (IPL_SOFTNET - 1)) | (1 << (IPL_SOFTTTY - 1)))
+
+#ifdef MULTIPROCESSOR
+void	 hppa_ipi_init(struct cpu_info *);
+int	 hppa_ipi_send(struct cpu_info *, u_long);
+#endif
 
 #define	setsoftast(p)	(p->p_md.md_astpending = 1)
 #define	setsoftnet()	softintr(1 << (IPL_SOFTNET - 1))
@@ -148,6 +161,12 @@ hppa_intr_enable(register_t eiem)
 void	*softintr_establish(int, void (*)(void *), void *);
 void	 softintr_disestablish(void *);
 void	 softintr_schedule(void *);
+
+#ifdef MULTIPROCESSOR
+void	 hppa_ipi_init(struct cpu_info *);
+int	 hppa_ipi_intr(void *arg);
+int	 hppa_ipi_send(struct cpu_info *, u_long);
+#endif
 
 #endif /* !_LOCORE && _KERNEL */
 #endif /* _MACHINE_INTR_H_ */

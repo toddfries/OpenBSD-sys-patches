@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6.c,v 1.83 2010/02/08 11:56:09 jsing Exp $	*/
+/*	$OpenBSD: nd6.c,v 1.85 2010/06/28 16:48:15 bluhm Exp $	*/
 /*	$KAME: nd6.c,v 1.280 2002/06/08 19:52:07 itojun Exp $	*/
 
 /*
@@ -1021,19 +1021,17 @@ nd6_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
 		return;
 	}
 
-	if (req == RTM_RESOLVE &&
-	    (nd6_need_cache(ifp) == 0 || /* stf case */
-	     !nd6_is_addr_neighbor((struct sockaddr_in6 *)rt_key(rt), ifp))) {
+	if (req == RTM_RESOLVE && nd6_need_cache(ifp) == 0) {
 		/*
-		 * FreeBSD and BSD/OS often make a cloned host route based
-		 * on a less-specific route (e.g. the default route).
-		 * If the less specific route does not have a "gateway"
-		 * (this is the case when the route just goes to a p2p or an
-		 * stf interface), we'll mistakenly make a neighbor cache for
-		 * the host route, and will see strange neighbor solicitation
-		 * for the corresponding destination.  In order to avoid the
-		 * confusion, we check if the destination of the route is
-		 * a neighbor in terms of neighbor discovery, and stop the
+		 * For routing daemons like ospf6d we allow neighbor discovery
+		 * based on the cloning route only.  This allows us to sent
+		 * packets directly into a network without having an address
+		 * with matching prefix on the interface.  If the cloning
+		 * route is used for an stf interface, we would mistakenly
+		 * make a neighbor cache for the host route, and would see
+		 * strange neighbor solicitation for the corresponding
+		 * destination.  In order to avoid confusion, we check if the
+		 * interface is suitable for neighbor discovery, and stop the
 		 * process if not.  Additionally, we remove the LLINFO flag
 		 * so that ndp(8) will not try to get the neighbor information
 		 * of the destination.
@@ -1528,7 +1526,7 @@ nd6_cache_lladdr(struct ifnet *ifp, struct in6_addr *from, char *lladdr,
 			return NULL;
 #endif
 
-		rt = nd6_lookup(from, 1, ifp);
+		rt = nd6_lookup(from, RT_REPORT, ifp);
 		is_newentry = 1;
 	} else {
 		/* do nothing if static ndp is set */
@@ -1772,7 +1770,7 @@ nd6_output(struct ifnet *ifp, struct ifnet *origifp, struct mbuf *m0,
 	if (rt) {
 		if ((rt->rt_flags & RTF_UP) == 0) {
 			if ((rt0 = rt = rtalloc1((struct sockaddr *)dst,
-			    1, 0)) != NULL)
+			    RT_REPORT, 0)) != NULL)
 			{
 				rt->rt_refcnt--;
 				if (rt->rt_ifp != ifp)
@@ -1810,7 +1808,8 @@ nd6_output(struct ifnet *ifp, struct ifnet *origifp, struct mbuf *m0,
 			if (((rt = rt->rt_gwroute)->rt_flags & RTF_UP) == 0) {
 				rtfree(rt); rt = rt0;
 			lookup:
-				rt->rt_gwroute = rtalloc1(rt->rt_gateway, 1, 0);
+				rt->rt_gwroute = rtalloc1(rt->rt_gateway,
+				    RT_REPORT, 0);
 				if ((rt = rt->rt_gwroute) == 0)
 					senderr(EHOSTUNREACH);
 			}
@@ -1834,7 +1833,7 @@ nd6_output(struct ifnet *ifp, struct ifnet *origifp, struct mbuf *m0,
 		 * it is tolerable, because this should be a rare case.
 		 */
 		if (nd6_is_addr_neighbor(dst, ifp) &&
-		    (rt = nd6_lookup(&dst->sin6_addr, 1, ifp)) != NULL)
+		    (rt = nd6_lookup(&dst->sin6_addr, RT_REPORT, ifp)) != NULL)
 			ln = (struct llinfo_nd6 *)rt->rt_llinfo;
 	}
 	if (!ln || !rt) {

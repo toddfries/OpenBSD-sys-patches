@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_socket.c,v 1.96 2009/10/19 22:24:18 jsg Exp $	*/
+/*	$OpenBSD: nfs_socket.c,v 1.98 2010/07/05 16:32:07 deraadt Exp $	*/
 /*	$NetBSD: nfs_socket.c,v 1.27 1996/04/15 20:20:00 thorpej Exp $	*/
 
 /*
@@ -1391,7 +1391,8 @@ nfs_realign(struct mbuf **pm, int hsiz)
 		if (!ALIGNED_POINTER(m->m_data, void *) ||
 		    !ALIGNED_POINTER(m->m_len,  void *)) {
 			MGET(n, M_WAIT, MT_DATA);
-			if (ALIGN(m->m_len) >= MINCLSIZE) {
+#define ALIGN_POINTER(n) ((u_int)(((n) + sizeof(void *)) & ~sizeof(void *)))
+			if (ALIGN_POINTER(m->m_len) >= MINCLSIZE) {
 				MCLGET(n, M_WAIT);
 			}
 			n->m_len = 0;
@@ -1406,7 +1407,7 @@ nfs_realign(struct mbuf **pm, int hsiz)
 	if (n != NULL) {
 		++nfs_realign_count;
 		while (m) {
-			m_copyback(n, off, m->m_len, mtod(m, caddr_t));
+			m_copyback(n, off, m->m_len, mtod(m, caddr_t), M_WAIT);
 
 			/*
 			 * If an unaligned amount of memory was copied, fix up

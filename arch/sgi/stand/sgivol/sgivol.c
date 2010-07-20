@@ -1,4 +1,4 @@
-/*	$OpenBSD: sgivol.c,v 1.15 2009/06/04 21:57:56 miod Exp $	*/
+/*	$OpenBSD: sgivol.c,v 1.17 2010/05/18 04:41:14 dlg Exp $	*/
 /*	$NetBSD: sgivol.c,v 1.8 2003/11/08 04:59:00 sekiya Exp $	*/
 
 /*-
@@ -45,6 +45,7 @@
 #include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/dkio.h>
 
 /*
  * Some IRIX man pages refer to the size being a multiple of whole cylinders.
@@ -311,7 +312,7 @@ init_volhdr(void)
 	volhdr->dp.dp_trks0 = htobe16(lbl.d_ntracks);
 	volhdr->dp.dp_secs = htobe16(lbl.d_nsectors);
 	volhdr->dp.dp_secbytes = htobe16(lbl.d_secsize);
-	volhdr->dp.dp_interleave = htobe16(lbl.d_interleave);
+	volhdr->dp.dp_interleave = 1;
 	volhdr->dp.dp_nretries = htobe32(22);
 	volhdr->partitions[10].blocks =
 	    htobe32(DL_SECTOBLK(&lbl, lbl.d_secperunit));

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.105 2010/03/08 03:40:50 jolan Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.116 2010/07/01 23:06:33 kettenis Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -94,9 +94,7 @@
 #include <dev/cons.h>
 #include <stand/boot/bootarg.h>
 
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_page.h>
-#include <uvm/uvm_swap.h>
+#include <uvm/uvm.h>
 
 #include <sys/sysctl.h>
 
@@ -181,6 +179,12 @@ paddr_t tramp_pdirpa;
 
 int kbd_reset;
 
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int	safepri = 0;
+
 #ifdef LKM
 vaddr_t lkm_start, lkm_end;
 static struct vm_map lkm_map_store;
@@ -200,6 +204,15 @@ int	bufpages = BUFPAGES;
 int	bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
+
+/* UVM constraint ranges. */
+struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
+struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
+struct uvm_constraint_range *uvm_md_constraints[] = {
+    &isa_constraint,
+    &dma_constraint,
+    NULL,
+};
 
 #ifdef DEBUG
 int sigdebug = 0;
@@ -537,6 +550,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
     union sigval val)
 {
 	struct proc *p = curproc;
+	struct savefpu *sfp = &p->p_addr->u_pcb.pcb_savefpu;
 	struct trapframe *tf = p->p_md.md_regs;
 	struct sigacts * psp = p->p_sigacts;
 	struct sigcontext ksc;
@@ -573,6 +587,11 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 		if (copyout(&p->p_addr->u_pcb.pcb_savefpu.fp_fxsave,
 		    (void *)sp, sizeof(struct fxsave64)))
 			sigexit(p, SIGILL);
+
+		/* Signal handlers get a completely clean FP state */
+		p->p_md.md_flags &= ~MDP_USEDFPU;
+		sfp->fp_fxsave.fx_fcw = __INITIAL_NPXCW__;
+		sfp->fp_fxsave.fx_mxcsr = __INITIAL_MXCSR__;
 	}
 
 	sip = 0;
@@ -650,9 +669,12 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	if (p->p_md.md_flags & MDP_USEDFPU)
 		fpusave_proc(p, 0);
 
-	if (ksc.sc_fpstate && (error = copyin(ksc.sc_fpstate,
-	    &p->p_addr->u_pcb.pcb_savefpu.fp_fxsave, sizeof (struct fxsave64))))
-		return (error);
+	if (ksc.sc_fpstate) {
+		if ((error = copyin(ksc.sc_fpstate,
+		    &p->p_addr->u_pcb.pcb_savefpu.fp_fxsave, sizeof (struct fxsave64))))
+			return (error);
+		p->p_md.md_flags |= MDP_USEDFPU;
+	}
 
 	ksc.sc_trapno = tf->tf_trapno;
 	ksc.sc_err = tf->tf_err;
@@ -859,16 +881,7 @@ dumpconf(void)
  * getting on the dump stack, either when called above, or by
  * the auto-restart code.
  */
-#define BYTES_PER_DUMP  PAGE_SIZE /* must be a multiple of pagesize XXX small */
-static vaddr_t dumpspace;
-
-vaddr_t
-reserve_dumppages(vaddr_t p)
-{
-
-	dumpspace = p;
-	return (p + BYTES_PER_DUMP);
-}
+#define BYTES_PER_DUMP  MAXPHYS /* must be a multiple of pagesize */
 
 void
 dumpsys(void)
@@ -924,7 +937,7 @@ dumpsys(void)
 
 		for (i = 0; i < bytes; i += n, totalbytesleft -= n) {
 			/* Print out how many MBs we have left to go. */
-			if ((totalbytesleft % (1024*1024)) == 0)
+			if ((totalbytesleft % (1024*1024)) < BYTES_PER_DUMP)
 				printf("%ld ", totalbytesleft / (1024 * 1024));
 
 			/* Limit size for next transfer. */
@@ -932,10 +945,8 @@ dumpsys(void)
 			if (n > BYTES_PER_DUMP)
 				n = BYTES_PER_DUMP;
 
-			(void) pmap_map(dumpspace, maddr, maddr + n,
-			    VM_PROT_READ);
-
-			error = (*dump)(dumpdev, blkno, (caddr_t)dumpspace, n);
+			error = (*dump)(dumpdev, blkno,
+			    (caddr_t)PMAP_DIRECT_MAP(maddr), n);
 			if (error)
 				goto err;
 			maddr += n;
@@ -1018,6 +1029,14 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	tf->tf_rdx = 0;
 	tf->tf_rcx = 0;
 	tf->tf_rax = 0;
+	tf->tf_r8 = 0;
+	tf->tf_r9 = 0;
+	tf->tf_r10 = 0;
+	tf->tf_r11 = 0;
+	tf->tf_r12 = 0;
+	tf->tf_r13 = 0;
+	tf->tf_r14 = 0;
+	tf->tf_r15 = 0;
 	tf->tf_rip = pack->ep_entry;
 	tf->tf_cs = LSEL(LUCODE_SEL, SEL_UPL);
 	tf->tf_rflags = PSL_USERSET;
@@ -1229,7 +1248,7 @@ init_x86_64(paddr_t first_avail)
 /*
  * Memory on the AMD64 port is described by three different things.
  *
- * 1. biosbasemem, biosextmem - These are outdated, and should realy
+ * 1. biosbasemem, biosextmem - These are outdated, and should really
  *    only be used to santize the other values.  They are the things
  *    we get back from the BIOS using the legacy routines, usually
  *    only describing the lower 4GB of memory.
@@ -1657,22 +1676,15 @@ cpu_dump_mempagecnt(void)
 int
 amd64_pa_used(paddr_t addr)
 {
-	bios_memmap_t *bmp;
+	struct vm_page	*pg;
 
 	/* Kernel manages these */
-	if (PHYS_TO_VM_PAGE(addr))
+	if ((pg = PHYS_TO_VM_PAGE(addr)) && (pg->pg_flags & PG_DEV) == 0)
 		return 1;
 
 	/* Kernel is loaded here */
 	if (addr > IOM_END && addr < (kern_end - KERNBASE))
 		return 1;
-
-	/* Memory is otherwise reserved */
-	for (bmp = bios_memmap; bmp->type != BIOS_MAP_END; bmp++) {
-		if (addr > bmp->addr && addr < (bmp->addr + bmp->size) &&
-			bmp->type != BIOS_MAP_FREE)
-			return 1;
-	}
 
 	/* Low memory used for various bootstrap things */
 	if (addr >= 0 && addr < avail_start)

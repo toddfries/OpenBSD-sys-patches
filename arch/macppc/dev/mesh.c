@@ -1,4 +1,4 @@
-/*	$OpenBSD: mesh.c,v 1.24 2010/01/13 06:09:44 krw Exp $	*/
+/*	$OpenBSD: mesh.c,v 1.28 2010/07/01 03:20:38 matthew Exp $	*/
 /*	$NetBSD: mesh.c,v 1.1 1999/02/19 13:06:03 tsubai Exp $	*/
 
 /*-
@@ -176,8 +176,6 @@ struct mesh_softc {
 	struct device sc_dev;		/* us as a device */
 	struct scsi_link sc_link;
 
-	struct scsibus_softc *sc_scsibus;
-
 	u_char *sc_reg;			/* MESH base address */
 	bus_dmamap_t sc_dmamap;
 	bus_dma_tag_t sc_dmat;
@@ -236,7 +234,7 @@ int mesh_stp(struct mesh_softc *, int);
 void mesh_setsync(struct mesh_softc *, struct mesh_tinfo *);
 struct mesh_scb *mesh_get_scb(struct mesh_softc *);
 void mesh_free_scb(struct mesh_softc *, struct mesh_scb *);
-int mesh_scsi_cmd(struct scsi_xfer *);
+void mesh_scsi_cmd(struct scsi_xfer *);
 void mesh_sched(struct mesh_softc *);
 int mesh_poll(struct scsi_xfer *);
 void mesh_done(struct mesh_softc *, struct mesh_scb *);
@@ -253,10 +251,6 @@ struct cfdriver mesh_cd = {
 
 struct scsi_adapter mesh_switch = {
 	mesh_scsi_cmd, mesh_minphys, NULL, NULL
-};
-
-struct scsi_device mesh_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 #define MESH_DATAOUT	0
@@ -283,7 +277,7 @@ mesh_match(struct device *parent, void *vcf, void *aux)
 	if (strcmp(ca->ca_name, "mesh") == 0)
 		return 1;
 
-	memset(compat, 0, sizeof(compat));
+	bzero(compat, sizeof(compat));
 	OF_getprop(ca->ca_node, "compatible", compat, sizeof(compat));
 	if (strcmp(compat, "chrp,mesh0") == 0)
 		return 1;
@@ -354,7 +348,6 @@ mesh_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_id;
-	sc->sc_link.device = &mesh_dev;
 	sc->sc_link.adapter = &mesh_switch;
 	sc->sc_link.openings = 2;
 
@@ -1030,7 +1023,7 @@ mesh_free_scb(struct mesh_softc *sc, struct mesh_scb *scb)
 	TAILQ_INSERT_TAIL(&sc->free_scb, scb, chain);
 }
 
-int
+void
 mesh_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link *sc_link = xs->sc_link;;
@@ -1042,9 +1035,13 @@ mesh_scsi_cmd(struct scsi_xfer *xs)
 	flags = xs->flags;
 	s = splbio();
 	scb = mesh_get_scb(sc);
+	if (scb == NULL) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		splx(s);
+		return;
+	}
 	splx(s);
-	if (scb == NULL)
-		return (NO_CCB);
 	DPRINTF("cmdlen: %d\n", xs->cmdlen);
 	scb->xs = xs;
 	scb->flags = 0;
@@ -1075,10 +1072,7 @@ mesh_scsi_cmd(struct scsi_xfer *xs)
 			    sc->sc_dev.dv_xname);
 
 		}
-		return COMPLETE;
 	}
-
-	return SUCCESSFULLY_QUEUED;
 }
 
 void

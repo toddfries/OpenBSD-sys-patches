@@ -1,4 +1,4 @@
-/*	$OpenBSD: apic.c,v 1.8 2009/08/22 02:54:50 mk Exp $	*/
+/*	$OpenBSD: apic.c,v 1.10 2010/05/24 15:04:53 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -76,6 +76,10 @@ u_int32_t apic_get_int_ent0(struct elroy_softc *, int);
 #ifdef DEBUG
 void	apic_dump(struct elroy_softc *);
 #endif
+
+void		apic_write(volatile struct elroy_regs *r, u_int32_t reg,
+		    u_int32_t val);
+u_int32_t	apic_read(volatile struct elroy_regs *r, u_int32_t reg);
 
 void
 apic_write(volatile struct elroy_regs *r, u_int32_t reg, u_int32_t val)
@@ -228,6 +232,7 @@ apic_intr(void *v)
 	struct apic_iv *iv = v;
 	struct elroy_softc *sc = iv->sc;
 	volatile struct elroy_regs *r = sc->sc_regs;
+	pci_intr_handle_t ih = iv->ih;
 	int claimed = 0;
 
 	while (iv) {
@@ -242,7 +247,7 @@ apic_intr(void *v)
 
 	/* Signal EOI. */
 	elroy_write32(&r->apic_eoi,
-	    htole32((31 - APIC_INT_IRQ(iv->ih)) & APIC_ENT0_VEC));
+	    htole32((31 - APIC_INT_IRQ(ih)) & APIC_ENT0_VEC));
 
 	return (claimed);
 }

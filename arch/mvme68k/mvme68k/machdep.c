@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.120 2009/08/11 19:17:16 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.123 2010/07/02 19:57:14 tedu Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -115,8 +115,7 @@
 #include <ddb/db_var.h>
 #endif
 
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_swap.h>
+#include <uvm/uvm.h>
 
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;		/* cpu "architecture" */
@@ -141,15 +140,15 @@ int	bufpages = 0;
 int	bufcachepercent = BUFCACHEPERCENT;
 
 int   physmem;			/* size of physical memory, in pages */
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
  * during autoconfiguration or after a panic.
  */
 int   safepri = PSL_LOWIPL;
-
-#ifdef COMPAT_SUNOS
-extern struct emul emul_sunos;
-#endif
 
 void dumpsys(void);
 void initvectors(void);
@@ -827,30 +826,6 @@ nmihand(frame)
 	if (db_console)
 		Debugger();
 #endif
-}
-
-/*
- * cpu_exec_aout_makecmds():
- *	cpu-dependent a.out format hook for execve().
- * 
- * Determine of the given exec package refers to something which we
- * understand and, if so, set up the vmcmds for it.
- */
-int
-cpu_exec_aout_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-	int error = ENOEXEC;
-
-#ifdef COMPAT_SUNOS
-	{
-		extern int sunos_exec_aout_makecmds(struct proc *, struct exec_package *);
-		if ((error = sunos_exec_aout_makecmds(p, epp)) == 0)
-			return (0);
-	}
-#endif
-	return (error);
 }
 
 u_char   myea[6] = { 0x08, 0x00, 0x3e, 0xff, 0xff, 0xff};

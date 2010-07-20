@@ -1,4 +1,4 @@
-/*	$OpenBSD: adv.c,v 1.27 2010/01/10 00:10:23 krw Exp $	*/
+/*	$OpenBSD: adv.c,v 1.32 2010/06/28 18:31:01 krw Exp $	*/
 /*	$NetBSD: adv.c,v 1.6 1998/10/28 20:39:45 dante Exp $	*/
 
 /*
@@ -41,7 +41,6 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -68,7 +67,7 @@ static void adv_start_ccbs(ASC_SOFTC *);
 
 static u_int8_t *adv_alloc_overrunbuf(char *dvname, bus_dma_tag_t);
 
-static int adv_scsi_cmd(struct scsi_xfer *);
+static void adv_scsi_cmd(struct scsi_xfer *);
 static void advminphys(struct buf *, struct scsi_link *);
 static void adv_narrow_isr_callback(ASC_SOFTC *, ASC_QDONE_INFO *);
 
@@ -94,16 +93,6 @@ struct scsi_adapter adv_switch =
 };
 
 
-/* the below structure is so we have a default dev struct for out link struct */
-struct scsi_device adv_dev =
-{
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
-};
-
-
 #define ADV_ABORT_TIMEOUT       2000	/* time to wait for abort (mSec) */
 #define ADV_WATCH_TIMEOUT       1000	/* time to wait for watchdog (mSec) */
 
@@ -124,7 +113,8 @@ adv_alloc_ccbs(sc)
          * Allocate the control blocks.
          */
 	if ((error = bus_dmamem_alloc(sc->sc_dmat, sizeof(struct adv_control),
-			   NBPG, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) != 0) {
+			   NBPG, 0, &seg, 1, &rseg,
+			   BUS_DMA_NOWAIT | BUS_DMA_ZERO)) != 0) {
 		printf("%s: unable to allocate control structures,"
 		       " error = %d\n", sc->sc_dev.dv_xname, error);
 		return (error);
@@ -160,6 +150,7 @@ adv_alloc_ccbs(sc)
 /*
  * Create a set of ccbs and add them to the free list.  Called once
  * by adv_init().  We return the number of CCBs successfully created.
+ * CCB data is already zeroed on allocation.
  */
 static int
 adv_create_ccbs(sc, ccbstore, count)
@@ -170,7 +161,6 @@ adv_create_ccbs(sc, ccbstore, count)
 	ADV_CCB        *ccb;
 	int             i, error;
 
-	bzero(ccbstore, sizeof(ADV_CCB) * count);
 	for (i = 0; i < count; i++) {
 		ccb = &ccbstore[i];
 		if ((error = adv_init_ccb(sc, ccb)) != 0) {
@@ -523,7 +513,6 @@ adv_attach(sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->chip_scsi_id;
 	sc->sc_link.adapter = &adv_switch;
-	sc->sc_link.device = &adv_dev;
 	sc->sc_link.openings = 4;
 	sc->sc_link.adapter_buswidth = 7;
 
@@ -571,7 +560,7 @@ advminphys(struct buf *bp, struct scsi_link *sl)
  * start a scsi operation given the command and the data address.  Also needs
  * the unit, target and lu.
  */
-static int
+static void
 adv_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -591,8 +580,10 @@ adv_scsi_cmd(xs)
 
 	flags = xs->flags;
 	if ((ccb = adv_get_ccb(sc, flags)) == NULL) {
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
 		splx(s);
-		return (NO_CCB);
+		return;
 	}
 	splx(s);		/* done playing with the queue */
 
@@ -653,10 +644,8 @@ adv_scsi_cmd(xs)
 
 			xs->error = XS_DRIVER_STUFFUP;
 			adv_free_ccb(sc, ccb);
-			s = splbio();
 			scsi_done(xs);
-			splx(s);
-			return (COMPLETE);
+			return;
 		}
 		bus_dmamap_sync(dmat, ccb->dmamap_xfer,
 		    0, ccb->dmamap_xfer->dm_mapsize,
@@ -699,7 +688,7 @@ adv_scsi_cmd(xs)
          * Usually return SUCCESSFULLY QUEUED
          */
 	if ((flags & SCSI_POLL) == 0)
-		return (SUCCESSFULLY_QUEUED);
+		return;
 
 	/*
          * If we can't use interrupts, poll on completion
@@ -709,8 +698,6 @@ adv_scsi_cmd(xs)
 		if (adv_poll(sc, xs, ccb->timeout))
 			adv_timeout(ccb);
 	}
-
-	return (COMPLETE);
 }
 
 

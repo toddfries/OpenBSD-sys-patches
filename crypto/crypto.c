@@ -1,4 +1,4 @@
-/*	$OpenBSD: crypto.c,v 1.53 2009/09/03 07:47:27 dlg Exp $	*/
+/*	$OpenBSD: crypto.c,v 1.56 2010/07/08 09:46:50 thib Exp $	*/
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -35,7 +35,6 @@ int crypto_drivers_num = 0;
 
 struct pool cryptop_pool;
 struct pool cryptodesc_pool;
-int crypto_pool_initialized = 0;
 
 struct workq *crypto_workq;
 
@@ -295,7 +294,7 @@ crypto_kregister(u_int32_t driverid, int *kalg,
 
 	s = splvm();
 
-	for (i = 0; i < CRK_ALGORITHM_MAX; i++) {
+	for (i = 0; i <= CRK_ALGORITHM_MAX; i++) {
 		/*
 		 * XXX Do some performance testing to determine
 		 * placing.  We probably need an auxiliary data
@@ -326,7 +325,7 @@ crypto_register(u_int32_t driverid, int *alg,
 	
 	s = splvm();
 
-	for (i = 0; i < CRYPTO_ALGORITHM_ALL; i++) {
+	for (i = 0; i <= CRYPTO_ALGORITHM_MAX; i++) {
 		/*
 		 * XXX Do some performance testing to determine
 		 * placing.  We probably need an auxiliary data
@@ -364,13 +363,13 @@ crypto_unregister(u_int32_t driverid, int alg)
 	/* Sanity checks. */
 	if (driverid >= crypto_drivers_num || crypto_drivers == NULL ||
 	    ((alg <= 0 || alg > CRYPTO_ALGORITHM_MAX) &&
-		alg != CRYPTO_ALGORITHM_ALL) ||
+		alg != CRYPTO_ALGORITHM_MAX + 1) ||
 	    crypto_drivers[driverid].cc_alg[alg] == 0) {
 		splx(s);
 		return EINVAL;
 	}
 
-	if (alg != CRYPTO_ALGORITHM_ALL) {
+	if (alg != CRYPTO_ALGORITHM_MAX + 1) {
 		crypto_drivers[driverid].cc_alg[alg] = 0;
 
 		/* Was this the last algorithm ? */
@@ -381,9 +380,9 @@ crypto_unregister(u_int32_t driverid, int alg)
 
 	/*
 	 * If a driver unregistered its last algorithm or all of them
-	 * (alg == CRYPTO_ALGORITHM_ALL), cleanup its entry.
+	 * (alg == CRYPTO_ALGORITHM_MAX + 1), cleanup its entry.
 	 */
-	if (i == CRYPTO_ALGORITHM_MAX + 1 || alg == CRYPTO_ALGORITHM_ALL) {
+	if (i == CRYPTO_ALGORITHM_MAX + 1 || alg == CRYPTO_ALGORITHM_MAX + 1) {
 		ses = crypto_drivers[driverid].cc_sessions;
 		bzero(&crypto_drivers[driverid], sizeof(struct cryptocap));
 		if (ses != 0) {
@@ -534,7 +533,7 @@ crypto_invoke(struct cryptop *crp)
 	if (error) {
 		if (error == ERESTART) {
 			/* Unregister driver and migrate session. */
-			crypto_unregister(hid, CRYPTO_ALGORITHM_ALL);
+			crypto_unregister(hid, CRYPTO_ALGORITHM_MAX + 1);
 			goto migrate;
 		} else {
 			crp->crp_etype = error;
@@ -593,14 +592,6 @@ crypto_getreq(int num)
 	
 	s = splvm();
 
-	if (crypto_pool_initialized == 0) {
-		pool_init(&cryptop_pool, sizeof(struct cryptop), 0, 0,
-		    0, "cryptop", NULL);
-		pool_init(&cryptodesc_pool, sizeof(struct cryptodesc), 0, 0,
-		    0, "cryptodesc", NULL);
-		crypto_pool_initialized = 1;
-	}
-
 	crp = pool_get(&cryptop_pool, PR_NOWAIT);
 	if (crp == NULL) {
 		splx(s);
@@ -626,8 +617,12 @@ crypto_getreq(int num)
 }
 
 void
-init_crypto()
+init_crypto(void)
 {
+	pool_init(&cryptop_pool, sizeof(struct cryptop), 0, 0, 0,
+	    "cryptop", NULL);
+	pool_init(&cryptodesc_pool, sizeof(struct cryptodesc), 0, 0, 0,
+	    "cryptodesc", NULL);
 	crypto_workq = workq_create("crypto", 1, IPL_HIGH);
 }
 
@@ -672,7 +667,7 @@ crypto_getfeat(int *featp)
 		}
 		if (crypto_drivers[hid].cc_kprocess == NULL)
 			continue;
-		for (kalg = 0; kalg < CRK_ALGORITHM_MAX; kalg++)
+		for (kalg = 0; kalg <= CRK_ALGORITHM_MAX; kalg++)
 			if ((crypto_drivers[hid].cc_kalg[kalg] &
 			    CRYPTO_ALG_FLAG_SUPPORTED) != 0)
 				feat |=  1 << kalg;

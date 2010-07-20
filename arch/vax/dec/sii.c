@@ -1,4 +1,4 @@
-/*	$OpenBSD: sii.c,v 1.7 2010/01/10 00:40:25 krw Exp $	*/
+/*	$OpenBSD: sii.c,v 1.11 2010/06/28 18:31:01 krw Exp $	*/
 /*	$NetBSD: sii.c,v 1.42 2000/06/02 20:20:29 mhitch Exp $	*/
 /*
  * Copyright (c) 2008 Miodrag Vallat.
@@ -156,7 +156,7 @@ int	sii_GetByte(SIIRegs *regs, int phase, int ack);
 void	sii_DoSync(struct sii_softc *, State *);
 void	sii_StartDMA(SIIRegs *regs, int phase, u_int dmaAddr, int size);
 u_int	sii_msgout(SIIRegs *, u_int, u_int8_t);
-int	sii_scsi_cmd(struct scsi_xfer *);
+void	sii_scsi_cmd(struct scsi_xfer *);
 void	sii_schedule(struct sii_softc *);
 #ifdef DEBUG
 void	sii_DumpLog(void);
@@ -165,13 +165,6 @@ void	sii_DumpLog(void);
 struct scsi_adapter sii_scsiswitch = {
 	sii_scsi_cmd,
 	scsi_minphys,
-	NULL,
-	NULL,
-	NULL
-};
-
-struct scsi_device sii_scsidev = {
-	NULL,
 	NULL,
 	NULL,
 	NULL
@@ -208,7 +201,6 @@ sii_attach(sc)
 	sc->sc_link.adapter_buswidth = 8;
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_regs->id & SII_IDMSK;
-	sc->sc_link.device = &sii_scsidev;
 	sc->sc_link.openings = 1;	/* driver can't queue requests yet */
 
 	/*
@@ -225,7 +217,7 @@ sii_attach(sc)
  * connect/disconnect during an operation.
  */
 
-int
+void
 sii_scsi_cmd(xs)
 	struct scsi_xfer *xs;
 {
@@ -236,11 +228,13 @@ sii_scsi_cmd(xs)
 
 	s = splbio();
 	if (sc->sc_xs[target] != NULL) {
-		splx(s);
 #ifdef DEBUG
 		printf("[busy at start]\n");
 #endif
-		return (NO_CCB);
+		xs->error = XS_NO_CCB;
+		scsi_done(xs);
+		splx(s);
+		return;
 	}
 	/*
 	 * Build a ScsiCmd for this command and start it.
@@ -250,9 +244,9 @@ sii_scsi_cmd(xs)
 	splx(s);
 
 	if ((xs->flags & ITSDONE) != 0)
-		return (COMPLETE);
+		return;
 	if ((xs->flags & SCSI_POLL) == 0)
-		return (SUCCESSFULLY_QUEUED);
+		return;
 	count = xs->timeout;
 	while (count) {
 		s = splbio();
@@ -265,12 +259,10 @@ sii_scsi_cmd(xs)
 		--count;
 	}
 	if ((xs->flags & ITSDONE) != 0)
-		return (COMPLETE);
+		return;
 	xs->error = XS_TIMEOUT;
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
-	return (COMPLETE);
+	return;
 }
 
 /*
@@ -817,7 +809,7 @@ again:
 			if (state->cmdlen > 0) {
 				printf("%s: device %d: cmd 0x%x: command data not all sent (%d) 1\n",
 					sc->sc_dev.dv_xname, sc->sc_target,
-					sc->sc_xs[sc->sc_target]->cmd[0],
+					sc->sc_xs[sc->sc_target]->cmd->opcode,
 					state->cmdlen);
 				state->cmdlen = 0;
 #ifdef DEBUG
@@ -899,7 +891,7 @@ again:
 			if (state->cmdlen > 0) {
 				printf("%s: device %d: cmd 0x%x: command data not all sent (%d) 2\n",
 					sc->sc_dev.dv_xname, sc->sc_target,
-					sc->sc_xs[sc->sc_target]->cmd[0],
+					sc->sc_xs[sc->sc_target]->cmd->opcode,
 					state->cmdlen);
 				state->cmdlen = 0;
 #ifdef DEBUG
@@ -1692,7 +1684,8 @@ sii_CmdDone(sc, target, error)
 	if (sii_debug > 1) {
 		printf("sii_CmdDone: %s target %d cmd 0x%x err %d resid %d\n",
 			sc->sc_dev.dv_xname,
-			target, xs->cmd[0], error, sc->sc_st[target].buflen);
+			target, xs->cmd->opcode, error,
+			sc->sc_st[target].buflen);
 	}
 #endif
 

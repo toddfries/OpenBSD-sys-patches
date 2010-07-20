@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urndis.c,v 1.15 2010/03/07 17:17:33 mk Exp $ */
+/*	$OpenBSD: if_urndis.c,v 1.23 2010/07/14 20:44:17 mk Exp $ */
 
 /*
  * Copyright (c) 2010 Jonathan Armani <armani@openbsd.org>
@@ -69,7 +69,7 @@
 
 #define DEVNAME(sc)	((sc)->sc_dev.dv_xname)
 
-int urndis_newbuf(struct urndis_softc *, struct urndis_chain *, struct mbuf *);
+int urndis_newbuf(struct urndis_softc *, struct urndis_chain *);
 
 int urndis_ioctl(struct ifnet *, u_long, caddr_t);
 void urndis_watchdog(struct ifnet *);
@@ -125,6 +125,13 @@ struct cfattach urndis_ca = {
 	urndis_attach,
 	urndis_detach,
 	urndis_activate,
+};
+
+/*
+ * Supported devices that we can't match by class IDs.
+ */
+static const struct usb_devno urndis_devs[] = {
+	{ USB_VENDOR_HTC,	USB_PRODUCT_HTC_ANDROID }
 };
 
 usbd_status
@@ -784,6 +791,15 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 		DPRINTF(("%s: urndis_decap buffer size left %u\n", DEVNAME(sc),
 		    len));
 
+		if (len < sizeof(*msg)) {
+			printf("%s: urndis_decap invalid buffer len %u < "
+			    "minimum header %u\n",
+			    DEVNAME(sc),
+			    len,
+			    sizeof(*msg));
+			return;
+		}
+
 		DPRINTF(("%s: urndis_decap len %u data(off:%u len:%u) "
 		    "oobdata(off:%u len:%u nb:%u) perpacket(off:%u len:%u)\n",
 		    DEVNAME(sc),
@@ -796,14 +812,6 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 		    letoh32(msg->rm_pktinfooffset),
 		    letoh32(msg->rm_pktinfooffset)));
 
-		if (len < sizeof(*msg)) {
-			printf("%s: urndis_decap invalid buffer len %u < "
-			    "minimum header %u\n",
-			    DEVNAME(sc),
-			    letoh32(msg->rm_len),
-			    sizeof(*msg));
-			return;
-		}
 		if (letoh32(msg->rm_type) != REMOTE_NDIS_PACKET_MSG) {
 			printf("%s: urndis_decap invalid type 0x%x != 0x%x\n",
 			    DEVNAME(sc),
@@ -842,26 +850,27 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 			return;
 		}
 
+		if (letoh32(msg->rm_datalen) < sizeof(struct ether_header)) {
+			ifp->if_ierrors++;
+			printf("%s: urndis_decap invalid ethernet size "
+			    "%d < %d\n",
+			    DEVNAME(sc),
+			    letoh32(msg->rm_datalen),
+			    sizeof(struct ether_header));
+			return;
+		}
+
 		memcpy(mtod(m, char*),
 		    ((char*)&msg->rm_dataoffset + letoh32(msg->rm_dataoffset)),
 		    letoh32(msg->rm_datalen));
 		m->m_pkthdr.len = m->m_len = letoh32(msg->rm_datalen);
 
-		if (m->m_len < sizeof(struct ether_header)) {
-			ifp->if_ierrors++;
-			printf("%s: urndis_decap invalid ethernet size "
-			    "%d < %d\n",
-			    DEVNAME(sc),
-			    m->m_len,
-			    sizeof(struct ether_header));
-			return;
-		}
 		ifp->if_ipackets++;
 		m->m_pkthdr.rcvif = ifp;
 
 		s = splnet();
 
-		if (urndis_newbuf(sc, c, NULL) == ENOBUFS) {
+		if (urndis_newbuf(sc, c) == ENOBUFS) {
 			ifp->if_ierrors++;
 		} else {
 
@@ -881,32 +890,24 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 }
 
 int
-urndis_newbuf(struct urndis_softc *sc, struct urndis_chain *c, struct mbuf *m)
+urndis_newbuf(struct urndis_softc *sc, struct urndis_chain *c)
 {
 	struct mbuf *m_new = NULL;
 
-	if (m == NULL) {
-		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
-		if (m_new == NULL) {
-			printf("%s: no memory for rx list "
-			    "-- packet dropped!\n",
-			    DEVNAME(sc));
-			return (ENOBUFS);
-		}
-		MCLGET(m_new, M_DONTWAIT);
-		if (!(m_new->m_flags & M_EXT)) {
-			printf("%s: no memory for rx list "
-			    "-- packet dropped!\n",
-			    DEVNAME(sc));
-			m_freem(m_new);
-			return (ENOBUFS);
-		}
-		m_new->m_len = m_new->m_pkthdr.len = MCLBYTES;
-	} else {
-		m_new = m;
-		m_new->m_len = m_new->m_pkthdr.len = MCLBYTES;
-		m_new->m_data = m_new->m_ext.ext_buf;
+	MGETHDR(m_new, M_DONTWAIT, MT_DATA);
+	if (m_new == NULL) {
+		printf("%s: no memory for rx list -- packet dropped!\n",
+		    DEVNAME(sc));
+		return (ENOBUFS);
 	}
+	MCLGET(m_new, M_DONTWAIT);
+	if (!(m_new->m_flags & M_EXT)) {
+		printf("%s: no memory for rx list -- packet dropped!\n",
+		    DEVNAME(sc));
+		m_freem(m_new);
+		return (ENOBUFS);
+	}
+	m_new->m_len = m_new->m_pkthdr.len = MCLBYTES;
 
 	m_adj(m_new, ETHER_ALIGN);
 	c->sc_mbuf = m_new;
@@ -926,7 +927,7 @@ urndis_rx_list_init(struct urndis_softc *sc)
 		c->sc_softc = sc;
 		c->sc_idx = i;
 
-		if (urndis_newbuf(sc, c, NULL) == ENOBUFS)
+		if (urndis_newbuf(sc, c) == ENOBUFS)
 			return (ENOBUFS);
 
 		if (c->sc_xfer == NULL) {
@@ -1315,13 +1316,8 @@ urndis_match(struct device *parent, void *match, void *aux)
 	    id->bInterfaceProtocol == UIPROTO_RNDIS)
 		return (UMATCH_IFACECLASS_IFACESUBCLASS_IFACEPROTO);
 
-	/* XXX Hack for HTC Hero for now */
-	if (id->bInterfaceClass == UICLASS_CDC &&
-	    id->bInterfaceSubClass == UISUBCLASS_ABSTRACT_CONTROL_MODEL)
-		return (UMATCH_IFACECLASS_GENERIC);
-
-
-	return (UMATCH_NONE);
+	return (usb_lookup(urndis_devs, uaa->vendor, uaa->product) != NULL) ?
+	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE;
 }
 
 void
@@ -1392,8 +1388,6 @@ urndis_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	id = usbd_get_interface_descriptor(sc->sc_iface_ctl);
-
 	id = usbd_get_interface_descriptor(sc->sc_iface_data);
 	cd = usbd_get_config_descriptor(sc->sc_udev);
 	altcnt = usbd_get_no_alts(cd, id->bInterfaceNumber);
@@ -1463,6 +1457,8 @@ urndis_attach(struct device *parent, struct device *self, void *aux)
 	if (urndis_ctrl_query(sc, OID_802_3_PERMANENT_ADDRESS, NULL, 0,
 	    &buf, &bufsz) != RNDIS_STATUS_SUCCESS) {
 		printf("%s: unable to get hardware address\n", DEVNAME(sc));
+		urndis_stop(sc);
+		splx(s);
 		return;
 	}
 
@@ -1474,9 +1470,10 @@ urndis_attach(struct device *parent, struct device *self, void *aux)
 		printf("%s: invalid address\n", DEVNAME(sc));
 		free(buf, M_TEMP);
 		urndis_stop(sc);
+		splx(s);
 		return;
 	}
-	
+
 	/* Initialize packet filter */
 	sc->sc_filter = RNDIS_PACKET_TYPE_BROADCAST; 
 	sc->sc_filter |= RNDIS_PACKET_TYPE_ALL_MULTICAST;
@@ -1485,6 +1482,7 @@ urndis_attach(struct device *parent, struct device *self, void *aux)
 	    sizeof(filter)) != RNDIS_STATUS_SUCCESS) {
 		printf("%s: unable to set data filters\n", DEVNAME(sc));
 		urndis_stop(sc);
+		splx(s);
 		return;
 	}
 

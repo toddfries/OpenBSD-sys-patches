@@ -1,4 +1,4 @@
-/*	$OpenBSD: eso.c,v 1.28 2009/03/29 21:53:52 sthen Exp $	*/
+/*	$OpenBSD: eso.c,v 1.32 2010/07/15 03:43:11 jakemsr Exp $	*/
 /*	$NetBSD: eso.c,v 1.48 2006/12/18 23:13:39 kleink Exp $	*/
 
 /*
@@ -38,7 +38,6 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/pcivar.h>
@@ -62,7 +61,7 @@
  * XXX Work around the 24-bit implementation limit of the Audio 1 DMA
  * XXX engine by allocating through the ISA DMA tag.
  */
-#if defined(amd64) || defined(i386)
+#if defined(__amd64__) || defined(__i386__)
 #include "isa.h"
 #if NISA > 0
 #include <dev/isa/isavar.h>
@@ -677,6 +676,8 @@ eso_query_encoding(void *hdl, struct audio_encoding *fp)
 	default:
 		return (EINVAL);
 	}
+	fp->bps = AUDIO_BPS(fp->precision);
+	fp->msb = 1;
 
 	return (0);
 }
@@ -687,6 +688,8 @@ eso_get_default_params(void *addr, int mode, struct audio_params *params)
 	params->sample_rate = 48000;
 	params->encoding = AUDIO_ENCODING_ULINEAR_LE;
 	params->precision = 16;
+	params->bps = 2;
+	params->msb = 1;
 	params->channels = 2;
 	params->sw_code = NULL;
 	params->factor = 1;
@@ -747,6 +750,8 @@ eso_set_params(void *hdl, int setmode, int usemode,
 		default:
 			return (EINVAL);
 		}
+		p->bps = AUDIO_BPS(p->precision);
+		p->msb = 1;
 
 		/*
 		 * We'll compute both possible sample rate dividers and pick
@@ -1563,14 +1568,14 @@ eso_allocm(void *hdl, int direction, size_t size, int type, int flags)
 	 * XXX implements the 24 low address bits only, with
 	 * XXX machine-specific DMA tag use.
 	 */
-#ifdef alpha
+#if defined(__alpha__)
 	/*
 	 * XXX Force allocation through the (ISA) SGMAP.
 	 */
 	if (direction == AUMODE_RECORD)
 		ed->ed_dmat = alphabus_dma_get_tag(sc->sc_dmat, ALPHA_BUS_ISA);
 	else
-#elif defined(amd64) || defined(i386)
+#elif defined(__amd64__) || defined(__i386__)
 	/*
 	 * XXX Force allocation through the ISA DMA tag.
 	 */

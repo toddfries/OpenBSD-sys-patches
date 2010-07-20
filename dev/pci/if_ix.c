@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.37 2010/02/25 10:56:07 jsg Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.42 2010/04/20 14:54:58 jsg Exp $	*/
 
 /******************************************************************************
 
@@ -137,10 +137,6 @@ uint8_t	*ixgbe_mc_array_itr(struct ixgbe_hw *, uint8_t **, uint32_t *);
 
 /* Legacy (single vector interrupt handler */
 int	ixgbe_legacy_irq(void *);
-
-#ifndef NO_82598_A0_SUPPORT
-void	desc_flip(void *);
-#endif
 
 /*********************************************************************
  *  OpenBSD Device Interface Entry Points
@@ -1717,10 +1713,16 @@ ixgbe_allocate_transmit_buffers(struct tx_ring *txr)
 	struct ifnet		*ifp;
 	struct ixgbe_tx_buf	*txbuf;
 	int			 error, i;
+	int			 max_segs;
 
 	sc = txr->sc;
 	os = &sc->osdep;
 	ifp = &sc->arpcom.ac_if;
+
+	if (sc->hw.mac.type == ixgbe_mac_82598EB)
+		max_segs = IXGBE_82598_SCATTER;
+	else
+		max_segs = IXGBE_82599_SCATTER;
 
 	if (!(txr->tx_buffers =
 	    (struct ixgbe_tx_buf *) malloc(sizeof(struct ixgbe_tx_buf) *
@@ -1736,7 +1738,7 @@ ixgbe_allocate_transmit_buffers(struct tx_ring *txr)
 	for (i = 0; i < sc->num_tx_desc; i++) {
 		txbuf = &txr->tx_buffers[i];
 		error = bus_dmamap_create(txr->txdma.dma_tag, IXGBE_TSO_SIZE,
-			    IXGBE_MAX_SCATTER, PAGE_SIZE, 0,
+			    max_segs, PAGE_SIZE, 0,
 			    BUS_DMA_NOWAIT, &txbuf->map);
 
 		if (error != 0) {
@@ -1949,7 +1951,9 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 	struct ixgbe_tx_buf        *tx_buffer;
 	uint32_t vlan_macip_lens = 0, type_tucmd_mlhl = 0;
 	struct ip *ip;
+#ifdef notyet
 	struct ip6_hdr *ip6;
+#endif
 	uint8_t ipproto = 0;
 	int  ehdrlen, ip_hlen = 0;
 	uint16_t etype;
@@ -2015,6 +2019,7 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 			if (mp->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
 				type_tucmd_mlhl |= IXGBE_ADVTXD_TUCMD_IPV4;
 			break;
+#ifdef notyet
 		case ETHERTYPE_IPV6:
 			ip6 = (struct ip6_hdr *)(mp->m_data + ehdrlen);
 			ip_hlen = sizeof(struct ip6_hdr);
@@ -2024,6 +2029,7 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 			if (mp->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
 				type_tucmd_mlhl |= IXGBE_ADVTXD_TUCMD_IPV6;
 			break;
+#endif
 		default:
 			offload = FALSE;
 			break;
@@ -2048,11 +2054,6 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 	TXD->type_tucmd_mlhl |= htole32(type_tucmd_mlhl);
 	TXD->seqnum_seed = htole32(0);
 	TXD->mss_l4len_idx = htole32(0);
-
-#ifndef NO_82598_A0_SUPPORT
-	if (sc->hw.revision_id == 0)
-		desc_flip(TXD);
-#endif
 
 	tx_buffer->m_head = NULL;
 
@@ -2157,11 +2158,6 @@ ixgbe_tso_setup(struct tx_ring *txr, struct mbuf *mp, uint32_t *paylen)
 
 	TXD->seqnum_seed = htole32(0);
 	tx_buffer->m_head = NULL;
-
-#ifndef NO_82598_A0_SUPPORT
-	if (sc->hw.revision_id == 0)
-		desc_flip(TXD);
-#endif
 
 	if (++ctxd == sc->num_tx_desc)
 		ctxd = 0;
@@ -2339,23 +2335,6 @@ ixgbe_get_buf(struct rx_ring *rxr, int i)
 	bzero(rxdesc, dsize);
 	rxdesc->read.pkt_addr = htole64(rxbuf->map->dm_segs[0].ds_addr);
 
-#ifndef NO_82598_A0_SUPPORT
-        /* A0 needs to One's Compliment descriptors */
-	if (sc->hw.revision_id == 0) {
-        	struct dhack {
-			uint32_t a1;
-			uint32_t a2;
-			uint32_t b1;
-			uint32_t b2;
-		};
-        	struct dhack *d;   
-
-        	d = (struct dhack *)rxdesc;
-        	d->a1 = ~(d->a1);
-        	d->a2 = ~(d->a2);
-	}
-#endif
-
 	bus_dmamap_sync(rxr->rxdma.dma_tag, rxr->rxdma.dma_map,
 	    dsize * i, dsize, BUS_DMASYNC_PREWRITE);
 
@@ -2433,6 +2412,7 @@ ixgbe_setup_receive_ring(struct rx_ring *rxr)
 	/* Setup our descriptor indices */
 	rxr->next_to_check = 0;
 	rxr->last_rx_desc_filled = sc->num_rx_desc - 1;
+	rxr->rx_ndescs = 0;
 
 	ixgbe_rxfill(rxr);
 	if (rxr->rx_ndescs < 1) {
@@ -2618,7 +2598,7 @@ ixgbe_initialize_receive_units(struct ix_softc *sc)
 	if (sc->hw.mac.type == ixgbe_mac_82598EB)
 		rxctrl |= IXGBE_RXCTRL_DMBYPS;
 	rxctrl |= IXGBE_RXCTRL_RXEN;
-	IXGBE_WRITE_REG(&sc->hw, IXGBE_RXCTRL, rxctrl);
+	sc->hw.mac.ops.enable_rx_dma(&sc->hw, rxctrl);
 
 	return;
 }
@@ -3166,26 +3146,3 @@ ixgbe_print_hw_stats(struct ix_softc * sc)
 	    sc->tso_tx);
 }
 #endif
-
-#ifndef NO_82598_A0_SUPPORT
-/*
- * A0 Workaround: invert descriptor for hardware
- */
-void
-desc_flip(void *desc)
-{
-        struct dhack {uint32_t a1; uint32_t a2; uint32_t b1; uint32_t b2;};
-        struct dhack *d;
-
-        d = (struct dhack *)desc;
-        d->a1 = ~(d->a1);
-        d->a2 = ~(d->a2);
-        d->b1 = ~(d->b1);
-        d->b2 = ~(d->b2);
-        d->b2 &= 0xFFFFFFF0;
-        d->b1 &= ~IXGBE_ADVTXD_DCMD_RS;
-}
-#endif
-
-
-

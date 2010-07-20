@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK-IP32,v 1.11 2009/12/18 11:40:16 jsing Exp $
+#	$OpenBSD: RAMDISK-IP32,v 1.15 2010/07/03 03:59:17 krw Exp $
 #
 # THIS KERNEL IS FOR O2 (IP32) SYSTEMS ONLY.
 
@@ -30,7 +30,7 @@ option		INET		# IP + ICMP + TCP + UDP
 option		INET6		# IPv6 (needs INET)
 
 # RAMDISK stuff
-option		MINIROOTSIZE=8192
+option		MINIROOTSIZE=10240
 option		RAMDISK_HOOKS
 
 # Define what targets to support
@@ -91,7 +91,7 @@ uvscom*		at uhub?	# SUNTAC Slipper U VS-10U serial
 ucom*		at uvscom?
 ubsa*		at uhub?	# Belkin serial adapter
 ucom*		at ubsa?
-ulpt*		at uhub?	# USB Printers	
+#ulpt*		at uhub?	# USB Printers	
 umass*		at uhub?	# USB Mass Storage devices
 atapiscsi*	at umass?
 scsibus*	at atapiscsi?
@@ -152,6 +152,7 @@ mskc*		at pci?		# Marvell Yukon-2
 msk*		at mskc?	#  each port of above
 bge*		at pci?		# Broadcom BCM570x (aka Tigon3)
 vge*		at pci?		# VIA VT612x
+bnx*		at pci?		# Broadcom BCM5706/5708 GigE
 
 ##### Media Independent Interface (mii) drivers
 exphy*		at mii?		# 3Com internal PHYs
@@ -199,7 +200,6 @@ sd*		at scsibus?
 st*		at scsibus?
 cd*		at scsibus?
 #ch*		at scsibus?
-#ss*		at scsibus?
 #uk*		at scsibus?
 
 #### PSEUDO Devices
