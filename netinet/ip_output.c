@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.207 2010/07/01 02:09:45 reyk Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.210 2010/07/09 16:58:06 reyk Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -272,7 +272,8 @@ reroute:
 			    mtag->m_tag_len, sizeof (struct tdb_ident));
 #endif
 		tdbi = (struct tdb_ident *)(mtag + 1);
-		tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+		tdb = gettdb(tdbi->rdomain,
+		    tdbi->spi, &tdbi->dst, tdbi->proto);
 		if (tdb == NULL)
 			error = -EINVAL;
 		m_tag_delete(m, mtag);
@@ -315,6 +316,7 @@ reroute:
 			tdbi = (struct tdb_ident *)(mtag + 1);
 			if (tdbi->spi == tdb->tdb_spi &&
 			    tdbi->proto == tdb->tdb_sproto &&
+			    tdbi->rdomain == tdb->tdb_rdomain &&
 			    !bcmp(&tdbi->dst, &tdb->tdb_dst,
 			    sizeof(union sockaddr_union))) {
 				splx(s);
@@ -586,7 +588,8 @@ sendit:
 	if (sproto != 0) {
 		s = splnet();
 
-		tdb = gettdb(sspi, &sdst, sproto);
+		tdb = gettdb(rtable_l2(m->m_pkthdr.rdomain),
+		    sspi, &sdst, sproto);
 		if (tdb == NULL) {
 			DPRINTF(("ip_output: unknown TDB"));
 			error = EHOSTUNREACH;
@@ -599,7 +602,8 @@ sendit:
 		 * Packet filter
 		 */
 #if NPF > 0
-		if ((encif = enc_getif(0, tdb->tdb_tap)) == NULL ||
+		if ((encif = enc_getif(tdb->tdb_rdomain,
+		    tdb->tdb_tap)) == NULL ||
 		    pf_test(PF_OUT, encif, &m, NULL) != PF_PASS) {
 			error = EHOSTUNREACH;
 			splx(s);
@@ -1162,7 +1166,7 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_ADD_MEMBERSHIP:
 		case IP_DROP_MEMBERSHIP:
 			error = ip_setmoptions(optname, &inp->inp_moptions, m,
-			    inp->inp_rdomain);
+			    inp->inp_rtableid);
 			break;
 
 		case IP_PORTRANGE:
@@ -1426,24 +1430,23 @@ ip_ctloutput(op, so, level, optname, mp)
 			}
 #endif
 			break;
-		case SO_RDOMAIN:
+		case SO_RTABLE:
 			if (m == NULL || m->m_len < sizeof(u_int)) {
 				error = EINVAL;
 				break;
 			}
 			rtid = *mtod(m, u_int *);
-			if (p->p_p->ps_rdomain != 0 &&
-			    p->p_p->ps_rdomain != rtid &&
-			    (error = suser(p, 0)) != 0) {
+			/* needs priviledges to switch when already set */
+			if (p->p_p->ps_rtableid != 0 && suser(p, 0) != 0) {
 				error = EACCES;
 				break;
 			}
-			/* table must exist and be a domain */
-			if (!rtable_exists(rtid) || rtid != rtable_l2(rtid)) {
+			/* table must exist */
+			if (!rtable_exists(rtid)) {
 				error = EINVAL;
 				break;
 			}
-			inp->inp_rdomain = rtid;
+			inp->inp_rtableid = rtid;
 			break;
 		default:
 			error = ENOPROTOOPT;
@@ -1634,14 +1637,14 @@ ip_ctloutput(op, so, level, optname, mp)
 				m->m_len = len;
 				*mtod(m, u_int16_t *) = ipr->ref_type;
 				m_copyback(m, sizeof(u_int16_t), ipr->ref_len,
-				    ipr + 1);
+				    ipr + 1, M_NOWAIT);
 			}
 #endif
 			break;
-		case SO_RDOMAIN:
+		case SO_RTABLE:
 			*mp = m = m_get(M_WAIT, MT_SOOPTS);
 			m->m_len = sizeof(u_int);
-			*mtod(m, u_int *) = inp->inp_rdomain;
+			*mtod(m, u_int *) = inp->inp_rtableid;
 			break;
 		default:
 			error = ENOPROTOOPT;
@@ -1765,7 +1768,7 @@ bad:
  */
 int
 ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
-    u_int rdomain)
+    u_int rtableid)
 {
 	int error = 0;
 	u_char loop;
@@ -1822,7 +1825,7 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 		 * IP address.  Find the interface and confirm that
 		 * it supports multicasting.
 		 */
-		INADDR_TO_IFP(addr, ifp, rdomain);
+		INADDR_TO_IFP(addr, ifp, rtableid);
 		if (ifp == NULL || (ifp->if_flags & IFF_MULTICAST) == 0) {
 			error = EADDRNOTAVAIL;
 			break;
@@ -1881,7 +1884,7 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 			if (!(ro.ro_rt && ro.ro_rt->rt_ifp &&
 			    (ro.ro_rt->rt_flags & RTF_UP)))
 				ro.ro_rt = rtalloc1(&ro.ro_dst, RT_REPORT,
-				    rdomain);
+				    rtableid);
 			if (ro.ro_rt == NULL) {
 				error = EADDRNOTAVAIL;
 				break;
@@ -1889,7 +1892,7 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 			ifp = ro.ro_rt->rt_ifp;
 			rtfree(ro.ro_rt);
 		} else {
-			INADDR_TO_IFP(mreq->imr_interface, ifp, rdomain);
+			INADDR_TO_IFP(mreq->imr_interface, ifp, rtableid);
 		}
 		/*
 		 * See if we found an interface, and confirm that it
@@ -1975,7 +1978,7 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 		if (mreq->imr_interface.s_addr == INADDR_ANY)
 			ifp = NULL;
 		else {
-			INADDR_TO_IFP(mreq->imr_interface, ifp, rdomain);
+			INADDR_TO_IFP(mreq->imr_interface, ifp, rtableid);
 			if (ifp == NULL) {
 				error = EADDRNOTAVAIL;
 				break;
@@ -2151,7 +2154,7 @@ in_delayed_cksum(struct mbuf *m)
 	}
 
 	if ((offset + sizeof(u_int16_t)) > m->m_len)
-		m_copyback(m, offset, sizeof(csum), &csum);
+		m_copyback(m, offset, sizeof(csum), &csum, M_NOWAIT);
 	else
 		*(u_int16_t *)(mtod(m, caddr_t) + offset) = csum;
 }

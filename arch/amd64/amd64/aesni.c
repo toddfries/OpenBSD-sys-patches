@@ -1,4 +1,4 @@
-/*	$OpenBSD: aesni.c,v 1.4 2010/06/30 17:14:36 thib Exp $	*/
+/*	$OpenBSD: aesni.c,v 1.7 2010/07/08 08:15:18 thib Exp $	*/
 /*-
  * Copyright (c) 2003 Jason Wright
  * Copyright (c) 2003, 2004 Theo de Raadt
@@ -54,7 +54,8 @@ struct aesni_sess {
 };
 
 struct aesni_softc {
-	uint8_t			 op_buf[16384];
+	uint8_t			*sc_buf;
+	size_t			 sc_buflen;
 	int32_t			 sc_cid;
 	LIST_HEAD(, aesni_sess)	 sc_sessions;
 } *aesni_sc;
@@ -93,11 +94,14 @@ void
 aesni_setup(void)
 {
 	int algs[CRYPTO_ALGORITHM_MAX + 1];
-	int flags = 0;	/* CRYPTOCAP_F_SOFTWARE */
 
 	aesni_sc = malloc(sizeof(*aesni_sc), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (aesni_sc == NULL)
 		return;
+
+	aesni_sc->sc_buf = malloc(PAGE_SIZE, M_DEVBUF, M_NOWAIT|M_ZERO);
+	if (aesni_sc->sc_buf != NULL)
+		aesni_sc->sc_buflen = PAGE_SIZE;
 
 	bzero(algs, sizeof(algs));
 	algs[CRYPTO_AES_CBC] = CRYPTO_ALG_FLAG_SUPPORTED;
@@ -111,7 +115,7 @@ aesni_setup(void)
 	algs[CRYPTO_SHA2_384_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
 	algs[CRYPTO_SHA2_512_HMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
 
-	aesni_sc->sc_cid = crypto_get_driverid(flags);
+	aesni_sc->sc_cid = crypto_get_driverid(0);
 	if (aesni_sc->sc_cid < 0) {
 		free(aesni_sc, M_DEVBUF);
 		return;
@@ -155,9 +159,6 @@ aesni_newsession(u_int32_t *sidp, struct cryptoini *cri)
 	}
 
 	ses->ses_used = 1;
-
-	if ((uint64_t)ses % 16 != 0)
-		panic("aesni: unaligned address %p\n", ses);
 
 	fpu_kernel_enter();
 	for (c = cri; c != NULL; c = c->cri_next) {
@@ -301,7 +302,7 @@ aesni_swauth(struct cryptop *crp, struct cryptodesc *crd,
 	if (crp->crp_flags & CRYPTO_F_IMBUF)
 		type = CRYPTO_BUF_MBUF;
 	else
-		type= CRYPTO_BUF_IOV;
+		type = CRYPTO_BUF_IOV;
 
 	return (swcr_authcompute(crp, crd, sw, buf, type));
 }
@@ -311,7 +312,7 @@ aesni_encdec(struct cryptop *crp, struct cryptodesc *crd,
     struct aesni_sess *ses)
 {
 	uint8_t iv[EALG_MAX_BLOCK_LEN];
-	uint8_t *buf = &aesni_sc->op_buf[0];
+	uint8_t *buf = aesni_sc->sc_buf;
 	int ivlen = 0;
 	int err = 0;
 
@@ -320,18 +321,19 @@ aesni_encdec(struct cryptop *crp, struct cryptodesc *crd,
 		return (err);
 	}
 
-	if (crd->crd_len > sizeof (aesni_sc->op_buf)) {
-		printf("aesni: crd->crd_len > sizeof (aesni_sc->op_buf)\n");
-		return (EINVAL);
-	}
+	if (crd->crd_len > aesni_sc->sc_buflen) {
+		if (buf != NULL) {
+			bzero(buf, aesni_sc->sc_buflen);
+			free(buf, M_DEVBUF);
+		}
 
-	/*
-	buf = malloc(crd->crd_len, M_DEVBUF, M_NOWAIT);
-	if (buf == NULL) {
-		err = ENOMEM;
-		return (err);
+		aesni_sc->sc_buflen = 0;
+		aesni_sc->sc_buf = buf = malloc(crd->crd_len, M_DEVBUF,
+		    M_NOWAIT|M_ZERO);
+		if (buf == NULL)
+			return (ENOMEM);
+		aesni_sc->sc_buflen = crd->crd_len;
 	}
-	*/
 
 	/* CBC uses 16, CTR only 8 */
 	ivlen = (crd->crd_alg == CRYPTO_AES_CBC) ? 16 : 8;
@@ -345,10 +347,13 @@ aesni_encdec(struct cryptop *crp, struct cryptodesc *crd,
 
 		/* Do we need to write the IV */
 		if ((crd->crd_flags & CRD_F_IV_PRESENT) == 0) {
-			if (crp->crp_flags & CRYPTO_F_IMBUF)
-				m_copyback((struct mbuf *)crp->crp_buf,
-				    crd->crd_inject, ivlen, iv);
-			else if (crp->crp_flags & CRYPTO_F_IOV)
+			if (crp->crp_flags & CRYPTO_F_IMBUF) {
+				if (m_copyback((struct mbuf *)crp->crp_buf,
+				    crd->crd_inject, ivlen, iv, M_NOWAIT)) {
+				    err = ENOMEM;
+				    goto out;
+				}
+			} else if (crp->crp_flags & CRYPTO_F_IOV)
 				cuio_copyback((struct uio *)crp->crp_buf,
 				    crd->crd_inject, ivlen, iv);
 			else
@@ -394,10 +399,13 @@ aesni_encdec(struct cryptop *crp, struct cryptodesc *crd,
 	aesni_ops++;
 
 	/* Copy back the result */
-	if (crp->crp_flags & CRYPTO_F_IMBUF)
-		m_copyback((struct mbuf *)crp->crp_buf, crd->crd_skip,
-		    crd->crd_len, buf);
-	else if (crp->crp_flags & CRYPTO_F_IOV)
+	if (crp->crp_flags & CRYPTO_F_IMBUF) {
+		if (m_copyback((struct mbuf *)crp->crp_buf, crd->crd_skip,
+		    crd->crd_len, buf, M_NOWAIT)) {
+			err = ENOMEM;
+			goto out;
+		}
+	} else if (crp->crp_flags & CRYPTO_F_IOV)
 		cuio_copyback((struct uio *)crp->crp_buf, crd->crd_skip,
 		    crd->crd_len, buf);
 	else
@@ -418,13 +426,7 @@ aesni_encdec(struct cryptop *crp, struct cryptodesc *crd,
 			    crd->crd_len - ivlen, ses->ses_iv, ivlen);
 	}
 
-	/*
-	if (buf != NULL) {
-		bzero(buf, crd->crd_len);
-		free(buf, M_DEVBUF);
-	}
-	*/
-
+out:
 	bzero(buf, crd->crd_len);
 	return (err);
 }

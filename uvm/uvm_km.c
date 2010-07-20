@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_km.c,v 1.80 2010/06/29 20:39:27 thib Exp $	*/
+/*	$OpenBSD: uvm_km.c,v 1.84 2010/07/15 00:14:17 tedu Exp $	*/
 /*	$NetBSD: uvm_km.c,v 1.42 2001/01/14 02:10:01 thorpej Exp $	*/
 
 /* 
@@ -346,8 +346,8 @@ uvm_km_pgremove_intrsafe(vaddr_t start, vaddr_t end)
 
 vaddr_t
 uvm_km_kmemalloc_pla(struct vm_map *map, struct uvm_object *obj, vsize_t size,
-    int flags, paddr_t low, paddr_t high, paddr_t alignment, paddr_t boundary,
-    int nsegs)
+    vsize_t valign, int flags, paddr_t low, paddr_t high, paddr_t alignment,
+    paddr_t boundary, int nsegs)
 {
 	vaddr_t kva, loopva;
 	voff_t offset;
@@ -377,7 +377,7 @@ uvm_km_kmemalloc_pla(struct vm_map *map, struct uvm_object *obj, vsize_t size,
 	 */
 
 	if (__predict_false(uvm_map(map, &kva, size, obj, UVM_UNKNOWN_OFFSET,
-	      0, UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW, UVM_INH_NONE,
+	      valign, UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW, UVM_INH_NONE,
 			  UVM_ADV_RANDOM, (flags & UVM_KMF_TRYLOCK))) != 0)) {
 		UVMHIST_LOG(maphist, "<- done (no VM)",0,0,0,0);
 		return(0);
@@ -707,6 +707,7 @@ struct uvm_km_pages uvm_km_pages;
 
 void uvm_km_createthread(void *);
 void uvm_km_thread(void *);
+struct uvm_km_free_page *uvm_km_doputpage(struct uvm_km_free_page *);
 
 /*
  * Allocate the initial reserve, and create the thread which will
@@ -768,34 +769,47 @@ uvm_km_thread(void *arg)
 {
 	vaddr_t pg[16];
 	int i;
+	int allocmore = 0;
+	struct uvm_km_free_page *fp = NULL;
 
 	for (;;) {
 		mtx_enter(&uvm_km_pages.mtx);
-		if (uvm_km_pages.free >= uvm_km_pages.lowat) {
+		if (uvm_km_pages.free >= uvm_km_pages.lowat &&
+		    uvm_km_pages.freelist == NULL) {
 			msleep(&uvm_km_pages.km_proc, &uvm_km_pages.mtx,
 			    PVM, "kmalloc", 0);
 		}
+		allocmore = uvm_km_pages.free < uvm_km_pages.lowat;
+		fp = uvm_km_pages.freelist;
+		uvm_km_pages.freelist = NULL;
+		uvm_km_pages.freelistlen = 0;
 		mtx_leave(&uvm_km_pages.mtx);
 
-		for (i = 0; i < nitems(pg); i++) {
-			pg[i] = (vaddr_t)uvm_km_kmemalloc(kernel_map, NULL,
-			    PAGE_SIZE, UVM_KMF_VALLOC);
+		if (allocmore) {
+			for (i = 0; i < nitems(pg); i++) {
+				pg[i] = (vaddr_t)uvm_km_kmemalloc(kernel_map,
+				    NULL, PAGE_SIZE, UVM_KMF_VALLOC);
+			}
+	
+			mtx_enter(&uvm_km_pages.mtx);
+			for (i = 0; i < nitems(pg); i++) {
+				if (uvm_km_pages.free ==
+				    nitems(uvm_km_pages.page))
+					break;
+				else
+					uvm_km_pages.page[uvm_km_pages.free++]
+					    = pg[i];
+			}
+			wakeup(&uvm_km_pages.free);
+			mtx_leave(&uvm_km_pages.mtx);
+
+			/* Cleanup left-over pages (if any). */
+			for (; i < nitems(pg); i++)
+				uvm_km_free(kernel_map, pg[i], PAGE_SIZE);
 		}
-
-		mtx_enter(&uvm_km_pages.mtx);
-		for (i = 0; i < nitems(pg); i++) {
-			if (uvm_km_pages.free == nitems(uvm_km_pages.page))
-				break;
-			else
-				uvm_km_pages.page[uvm_km_pages.free++] = pg[i];
+		while (fp) {
+			fp = uvm_km_doputpage(fp);
 		}
-
-		wakeup(&uvm_km_pages.free);
-		mtx_leave(&uvm_km_pages.mtx);
-
-		/* Cleanup left-over pages (if any). */
-		for (; i < nitems(pg); i++)
-			uvm_km_free_wakeup(kernel_map, pg[i], PAGE_SIZE);
 	}
 }
 #endif
@@ -860,13 +874,35 @@ uvm_km_getpage_pla(int flags, int *slowdown, paddr_t low, paddr_t high,
 void
 uvm_km_putpage(void *v)
 {
+#ifdef __HAVE_PMAP_DIRECT
 	vaddr_t va = (vaddr_t)v;
 	struct vm_page *pg;
 
-#ifdef __HAVE_PMAP_DIRECT
 	pg = pmap_unmap_direct(va);
+
+	uvm_pagefree(pg);
 #else	/* !__HAVE_PMAP_DIRECT */
+	struct uvm_km_free_page *fp = v;
+
+	mtx_enter(&uvm_km_pages.mtx);
+	fp->next = uvm_km_pages.freelist;
+	uvm_km_pages.freelist = fp;
+	if (uvm_km_pages.freelistlen++ > 16)
+		wakeup(&uvm_km_pages.km_proc);
+	mtx_leave(&uvm_km_pages.mtx);
+#endif	/* !__HAVE_PMAP_DIRECT */
+}
+
+#ifndef __HAVE_PMAP_DIRECT
+struct uvm_km_free_page *
+uvm_km_doputpage(struct uvm_km_free_page *fp)
+{
+	vaddr_t va = (vaddr_t)fp;
+	struct vm_page *pg;
+	int	freeva = 1;
 	paddr_t pa;
+	struct uvm_km_free_page *nextfp = fp->next;
+
 	if (!pmap_extract(pmap_kernel(), va, &pa))
 		panic("lost pa");
 	pg = PHYS_TO_VM_PAGE(pa);
@@ -877,12 +913,16 @@ uvm_km_putpage(void *v)
 	pmap_update(kernel_map->pmap);
 
 	mtx_enter(&uvm_km_pages.mtx);
-	if (uvm_km_pages.free < uvm_km_pages.hiwat)
+	if (uvm_km_pages.free < uvm_km_pages.hiwat) {
 		uvm_km_pages.page[uvm_km_pages.free++] = va;
-	else
-		uvm_km_free_wakeup(kernel_map, va, PAGE_SIZE);
+		freeva = 0;
+	}
 	mtx_leave(&uvm_km_pages.mtx);
-#endif	/* !__HAVE_PMAP_DIRECT */
+
+	if (freeva)
+		uvm_km_free(kernel_map, va, PAGE_SIZE);
 
 	uvm_pagefree(pg);
+	return (nextfp);
 }
+#endif	/* !__HAVE_PMAP_DIRECT */

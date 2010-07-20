@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_var.h,v 1.93 2009/11/13 20:54:05 claudio Exp $	*/
+/*	$OpenBSD: tcp_var.h,v 1.95 2010/07/09 16:58:06 reyk Exp $	*/
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -274,7 +274,7 @@ struct syn_cache {
 	union syn_cache_sa sc_dst;
 	tcp_seq sc_irs;
 	tcp_seq sc_iss;
-	u_int sc_rdomain;
+	u_int sc_rtableid;
 	u_int sc_rxtcur;			/* current rxt timeout */
 	u_int sc_rxttot;			/* total time spend on queues */
 	u_short sc_rxtshift;			/* for computing backoff */
@@ -565,7 +565,7 @@ struct tcpcb *
 struct tcpcb *
 	 tcp_drop(struct tcpcb *, int);
 int	 tcp_dooptions(struct tcpcb *, u_char *, int, struct tcphdr *,
-		struct mbuf *, int, struct tcp_opt_info *);
+		struct mbuf *, int, struct tcp_opt_info *, u_int);
 void	 tcp_init(void);
 #if defined(INET6) && !defined(TCP6)
 int	 tcp6_input(struct mbuf **, int *, int);

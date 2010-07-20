@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket.c,v 1.80 2010/06/30 19:57:05 deraadt Exp $	*/
+/*	$OpenBSD: uipc_socket.c,v 1.83 2010/07/03 04:44:51 guenther Exp $	*/
 /*	$NetBSD: uipc_socket.c,v 1.21 1996/02/04 02:17:52 christos Exp $	*/
 
 /*
@@ -125,13 +125,6 @@ socreate(int dom, struct socket **aso, int type, int proto)
 		splx(s);
 		return (error);
 	}
-#ifdef COMPAT_SUNOS
-	{
-		extern struct emul emul_sunos;
-		if (p->p_emul == &emul_sunos && type == SOCK_DGRAM)
-			so->so_options |= SO_BROADCAST;
-	}
-#endif
 	splx(s);
 	*aso = so;
 	return (0);
@@ -988,7 +981,6 @@ sosetopt(struct socket *so, int level, int optname, struct mbuf *m0)
 	} else {
 		switch (optname) {
 		case SO_BINDANY:
-		case SO_RDOMAIN:
 			if ((error = suser(curproc, 0)) != 0)	/* XXX */
 				goto bad;
 			break;
@@ -1205,7 +1197,7 @@ sogetopt(struct socket *so, int level, int optname, struct mbuf **mp)
 					    mtod(m, caddr_t),
 					    (unsigned)m->m_len);
 				} else
-					return (EINVAL);
+					return (ENOTCONN);
 			} else
 				return (EOPNOTSUPP);
 			break;

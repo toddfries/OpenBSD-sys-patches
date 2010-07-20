@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.32 2010/07/01 03:22:12 jsg Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.34 2010/07/06 06:25:55 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -57,7 +57,7 @@
 #endif
 
 #if NAPM > 0
-int haveacpibutusingapm;	
+int haveacpibutusingapm;
 #endif
 
 extern u_char acpi_real_mode_resume[], acpi_resume_end[];
@@ -246,12 +246,12 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	/* Copy the current cpu registers into a safe place for resume.
 	 * acpi_savecpu actually returns twice - once in the suspend
 	 * path and once in the resume path (see setjmp(3)).
-	 */ 
+	 */
 	if (acpi_savecpu()) {
 		/* Suspend path */
 		npxsave_cpu(curcpu(), 1);
 #ifdef MULTIPROCESSOR
-		i386_broadcast_ipi(I386_IPI_FLUSH_FPU);
+		i386_broadcast_ipi(I386_IPI_SYNCH_FPU);
 		i386_broadcast_ipi(I386_IPI_HALT);
 #endif
 		wbinvd();
@@ -264,7 +264,7 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
         /* Temporarily disabled for debugging purposes */
         /* Reset the wakeup vector to avoid resuming on reboot */
         sc->sc_facs->wakeup_vector = 0;
-#endif	
+#endif
 
 #if NISA > 0
 	isa_defaultirq();
@@ -331,5 +331,4 @@ acpi_resume_machdep(void)
 	cpu_boot_secondary_processors();
 #endif /* MULTIPROCESSOR */
 }
-
 #endif /* ! SMALL_KERNEL */

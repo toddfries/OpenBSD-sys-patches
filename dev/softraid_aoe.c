@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_aoe.c,v 1.15 2010/06/29 18:43:54 tedu Exp $ */
+/* $OpenBSD: softraid_aoe.c,v 1.17 2010/07/02 15:49:25 krw Exp $ */
 /*
  * Copyright (c) 2008 Ted Unangst <tedu@openbsd.org>
  * Copyright (c) 2008 Marco Peereboom <marco@openbsd.org>
@@ -382,7 +382,8 @@ sr_send_aoe_chunk(struct sr_workunit *wu, daddr64_t blk, int i)
 	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, rv);
 	if ((ifp->if_flags & IFF_OACTIVE) == 0)
 		(*ifp->if_start)(ifp);
-	timeout_add_sec(&ar->to, 10);
+	if (rv == 0)
+		timeout_add_sec(&ar->to, 10);
 	splx(s);
 
 	if (rv) {
@@ -816,7 +817,7 @@ resleep:
 			eh->ether_type = htons(ETHERTYPE_AOE);
 			ap = (struct aoe_packet *)&eh[1];
 			AOE_HDR2BLK(ap, blk);
-			memset(&buf, 0, sizeof buf);
+			bzero(&buf, sizeof(buf));
 			buf.b_blkno = blk;
 			buf.b_flags = B_WRITE | B_PHYS;
 			buf.b_bcount = len;
