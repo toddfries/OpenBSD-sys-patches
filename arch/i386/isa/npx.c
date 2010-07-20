@@ -848,9 +848,9 @@ npxsave_proc(struct proc *p, int save)
 		IPRINTF(("%s: fp ipi to %s %s %lx\n", ci->ci_dev.dv_xname,
 		    oci->ci_dev.dv_xname, save ? "save" : "flush", (u_long)p));
 
+		oci->ci_fpsaveproc = p;
 		i386_send_ipi(oci,
 		    save ? I386_IPI_SYNCH_FPU : I386_IPI_FLUSH_FPU);
-
 		while (p->p_addr->u_pcb.pcb_fpcpu != NULL)
 			SPINLOCK_SPIN_HOOK;
 	}

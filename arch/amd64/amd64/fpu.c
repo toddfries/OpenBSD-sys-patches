@@ -312,8 +312,9 @@ fpusave_proc(struct proc *p, int save)
 		fpusave_cpu(ci, save);
 		splx(s);
 	} else {
+		oci->ci_fpsaveproc = p;
 		x86_send_ipi(oci,
-	    	save ? X86_IPI_SYNCH_FPU : X86_IPI_FLUSH_FPU);
+	    	    save ? X86_IPI_SYNCH_FPU : X86_IPI_FLUSH_FPU);
 		while (p->p_addr->u_pcb.pcb_fpcpu != NULL)
 			SPINLOCK_SPIN_HOOK;
 	}

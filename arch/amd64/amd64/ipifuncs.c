@@ -110,13 +110,15 @@ x86_64_ipi_halt(struct cpu_info *ci)
 void
 x86_64_ipi_flush_fpu(struct cpu_info *ci)
 {
-	fpusave_cpu(ci, 0);
+	if (ci->ci_fpsaveproc == ci->ci_fpcurproc)
+		fpusave_cpu(ci, 0);
 }
 
 void
 x86_64_ipi_synch_fpu(struct cpu_info *ci)
 {
-	fpusave_cpu(ci, 1);
+	if (ci->ci_fpsaveproc == ci->ci_fpcurproc)
+		fpusave_cpu(ci, 1);
 }
 
 #if NMTRR > 0
