@@ -357,12 +357,12 @@ kputchar(int c, int flags, struct tty *tp)
 void
 uprintf(const char *fmt, ...)
 {
-	struct process *pr = curproc->p_p;
+	struct proc *p = curproc;
 	va_list ap;
 
-	if (pr->ps_flags & PS_CONTROLT && pr->ps_session->s_ttyvp) {
+	if (p->p_flag & P_CONTROLT && p->p_session->s_ttyvp) {
 		va_start(ap, fmt);
-		kprintf(fmt, TOTTY, pr->ps_session->s_ttyp, NULL, ap);
+		kprintf(fmt, TOTTY, p->p_session->s_ttyp, NULL, ap);
 		va_end(ap);
 	}
 }
@@ -380,7 +380,6 @@ uprintf(const char *fmt, ...)
 
 /*
  * tprintf_open: get a tprintf handle on a process "p"
- * XXX change s/proc/process
  *
  * => returns NULL if process can't be printed to
  */
@@ -388,11 +387,10 @@ uprintf(const char *fmt, ...)
 tpr_t
 tprintf_open(struct proc *p)
 {
-	struct process *pr = p->p_p;
 
-	if (pr->ps_flags & PS_CONTROLT && pr->ps_session->s_ttyvp) {
-		SESSHOLD(pr->ps_session);
-		return ((tpr_t)pr->ps_session);
+	if (p->p_flag & P_CONTROLT && p->p_session->s_ttyvp) {
+		SESSHOLD(p->p_session);
+		return ((tpr_t) p->p_session);
 	}
 	return ((tpr_t) NULL);
 }

@@ -476,12 +476,12 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 		if (tmp <= 0) {
 			tmp = -tmp;
 		} else {
-			struct process *pr = prfind(tmp);
-			if (pr == NULL) {
+			struct proc *p1 = pfind(tmp);
+			if (p1 == 0) {
 				error = ESRCH;
 				break;
 			}
-			tmp = pr->ps_pgrp->pg_id;
+			tmp = p1->p_pgrp->pg_id;
 		}
 		error = (*fp->f_ops->fo_ioctl)
 			(fp, TIOCSPGRP, (caddr_t)&tmp, p);

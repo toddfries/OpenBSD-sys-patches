@@ -172,7 +172,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		 *	    not init (because that would create a loop in
 		 *	    the process graph).
 		 */
-		if (t->p_pid != 1 && inferior(p->p_p, t->p_p))
+		if (t->p_pid != 1 && inferior(p, t))
 			return (EINVAL);
 		break;
 
@@ -217,7 +217,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		/*
 		 *	(2) it's not being traced by _you_, or
 		 */
-		if (t->p_p->ps_pptr != p->p_p)
+		if (t->p_pptr != p)
 			return (EBUSY);
 
 		/*
@@ -242,7 +242,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 	case  PT_TRACE_ME:
 		/* Just set the trace flag. */
 		atomic_setbits_int(&t->p_flag, P_TRACED);
-		t->p_oppid = t->p_p->ps_pptr->ps_pid;
+		t->p_oppid = t->p_pptr->p_pid;
 		if (t->p_ptstat == NULL)
 			t->p_ptstat = malloc(sizeof(*t->p_ptstat),
 			    M_SUBPROC, M_WAITOK);
@@ -387,11 +387,11 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 #endif
 
 		/* give process back to original parent or init */
-		if (t->p_oppid != t->p_p->ps_pptr->ps_pid) {
-			struct process *ppr;
+		if (t->p_oppid != t->p_pptr->p_pid) {
+			struct proc *pp;
 
-			ppr = prfind(t->p_oppid);
-			proc_reparent(t->p_p, ppr ? ppr : initproc->p_p);
+			pp = pfind(t->p_oppid);
+			proc_reparent(t, pp ? pp : initproc);
 		}
 
 		/* not being traced any more */
@@ -432,9 +432,9 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		 * Stop the target.
 		 */
 		atomic_setbits_int(&t->p_flag, P_TRACED);
-		t->p_oppid = t->p_p->ps_pptr->ps_pid;
-		if (t->p_p->ps_pptr != p->p_p)
-			proc_reparent(t->p_p, p->p_p);
+		t->p_oppid = t->p_pptr->p_pid;
+		if (t->p_pptr != p)
+			proc_reparent(t, p);
 		if (t->p_ptstat == NULL)
 			t->p_ptstat = malloc(sizeof(*t->p_ptstat),
 			    M_SUBPROC, M_WAITOK);

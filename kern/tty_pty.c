@@ -287,20 +287,19 @@ int
 ptsread(dev_t dev, struct uio *uio, int flag)
 {
 	struct proc *p = curproc;
-	struct process *pr = p->p_p;
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
 	int error = 0;
 
 again:
 	if (pti->pt_flags & PF_REMOTE) {
-		while (isbackground(pr, tp)) {
+		while (isbackground(p, tp)) {
 			if ((p->p_sigignore & sigmask(SIGTTIN)) ||
 			    (p->p_sigmask & sigmask(SIGTTIN)) ||
-			    pr->ps_pgrp->pg_jobc == 0 ||
+			    p->p_pgrp->pg_jobc == 0 ||
 			    p->p_flag & P_PPWAIT)
 				return (EIO);
-			pgsignal(pr->ps_pgrp, SIGTTIN, 1);
+			pgsignal(p->p_pgrp, SIGTTIN, 1);
 			error = ttysleep(tp, &lbolt,
 			    TTIPRI | PCATCH, ttybg, 0);
 			if (error)

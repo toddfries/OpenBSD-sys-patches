@@ -190,8 +190,7 @@ linux_sys_open(p, v, retval)
 	 * terminal yet, and the O_NOCTTY flag is not set, try to make
 	 * this the controlling terminal.
 	 */ 
-        if (!(fl & O_NOCTTY) && SESS_LEADER(p->p_p) &&
-	    !(p->p_p->ps_flags & PS_CONTROLT)) {
+        if (!(fl & O_NOCTTY) && SESS_LEADER(p) && !(p->p_flag & P_CONTROLT)) {
                 struct filedesc *fdp = p->p_fd;
                 struct file     *fp;
 
@@ -418,13 +417,13 @@ linux_sys_fcntl(p, v, retval)
 		if ((long)arg <= 0) {
 			pgid = -(long)arg;
 		} else {
-			struct process *pr = prfind((long)arg);
-			if (pr == 0)
+			struct proc *p1 = pfind((long)arg);
+			if (p1 == 0)
 				return (ESRCH);
-			pgid = (long)pr->ps_pgrp->pg_id;
+			pgid = (long)p1->p_pgrp->pg_id;
 		}
 		pgrp = pgfind(pgid);
-		if (pgrp == NULL || pgrp->pg_session != p->p_p->ps_session)
+		if (pgrp == NULL || pgrp->pg_session != p->p_session)
 			return EPERM;
 		tp->t_pgrp = pgrp;
 		return 0;

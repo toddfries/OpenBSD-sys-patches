@@ -84,7 +84,7 @@ struct wseventvar {
 	u_int	get;		/* get (read) index (modified synchronously) */
 	volatile u_int put;	/* put (write) index (modified by interrupt) */
 	struct selinfo sel;	/* process selecting */
-	struct process *io;	/* process that opened queue (can get SIGIO) */
+	struct proc *io;	/* process that opened queue (can get SIGIO) */
 	int	wanted;		/* wake up on input ready */
 	int	async;		/* send SIGIO on input ready */
 	struct wscons_event *q;	/* circular buffer (queue) of events */
@@ -99,7 +99,7 @@ struct wseventvar {
 		wakeup((caddr_t)(ev)); \
 	} \
 	if ((ev)->async) \
-		pgsignal((ev)->io->ps_pgrp, SIGIO, 0); \
+		pgsignal((ev)->io->p_pgrp, SIGIO, 0); \
 }
 
 void	wsevent_init(struct wseventvar *);

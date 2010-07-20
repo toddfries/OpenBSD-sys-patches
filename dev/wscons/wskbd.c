@@ -815,7 +815,7 @@ wskbdopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	evar = &sc->sc_base.me_evar;
 	wsevent_init(evar);
-	evar->io = p->p_p;
+	evar->io = p;
 
 	error = wskbd_do_open(sc, evar);
 	if (error) {
@@ -937,15 +937,15 @@ wskbd_do_ioctl_sc(struct wskbd_softc *sc, u_long cmd, caddr_t data, int flag,
 	case FIOSETOWN:
 		if (sc->sc_base.me_evp == NULL)
 			return (EINVAL);
-		if (-*(int *)data != sc->sc_base.me_evp->io->ps_pgid &&
-		    *(int *)data != sc->sc_base.me_evp->io->ps_pid)
+		if (-*(int *)data != sc->sc_base.me_evp->io->p_pgid &&
+		    *(int *)data != sc->sc_base.me_evp->io->p_pid)
 			return (EPERM);
 		return (0);
 		   
 	case TIOCSPGRP:
 		if (sc->sc_base.me_evp == NULL)
 			return (EINVAL);
-		if (*(int *)data != sc->sc_base.me_evp->io->ps_pgid)
+		if (*(int *)data != sc->sc_base.me_evp->io->p_pgid)
 			return (EPERM);
 		return (0);
 	}

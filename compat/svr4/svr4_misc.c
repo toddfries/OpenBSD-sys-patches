@@ -101,7 +101,7 @@ static void bsd_statfs_to_svr4_statvfs(const struct statfs *,
     struct svr4_statvfs *);
 static void bsd_statfs_to_svr4_statvfs64(const struct statfs *,
     struct svr4_statvfs64 *);
-static struct process *svr4_prfind(pid_t pid);
+static struct proc *svr4_pfind(pid_t pid);
 
 static int svr4_mknod(struct proc *, register_t *, char *,
 			   svr4_mode_t, svr4_dev_t);
@@ -815,20 +815,20 @@ svr4_sys_ulimit(p, v, retval)
 }
 
 
-static struct process *
-svr4_prfind(pid_t pid)
+static struct proc *
+svr4_pfind(pid)
+	pid_t pid;
 {
-	struct process *pr;
 	struct proc *p;
 
 	/* look in the live processes */
-	if ((pr = prfind(pid)) != NULL)
-		return pr;
+	if ((p = pfind(pid)) != NULL)
+		return p;
 
 	/* look in the zombies */
 	LIST_FOREACH(p, &zombproc, p_list)
 		if (p->p_pid == pid)
-			return p->p_flag & P_THREAD ? NULL : p->p_p;
+			return p;
 
 	return NULL;
 }
@@ -841,12 +841,11 @@ svr4_sys_pgrpsys(p, v, retval)
 	register_t *retval;
 {
 	struct svr4_sys_pgrpsys_args *uap = v;
-	struct process *pr = p->p_p;
 	int error;
 
 	switch (SCARG(uap, cmd)) {
 	case 0:			/* getpgrp() */
-		*retval = pr->ps_pgrp->pg_id;
+		*retval = p->p_pgrp->pg_id;
 		return 0;
 
 	case 1:			/* setpgrp() */
@@ -857,19 +856,19 @@ svr4_sys_pgrpsys(p, v, retval)
 			SCARG(&sa, pgid) = 0;
 			if ((error = sys_setpgid(p, &sa, retval)) != 0)
 				return error;
-			*retval = pr->ps_pgrp->pg_id;
+			*retval = p->p_pgrp->pg_id;
 			return 0;
 		}
 
 	case 2:			/* getsid(pid) */
 		if (SCARG(uap, pid) != 0 &&
-		    (pr = svr4_prfind(SCARG(uap, pid))) == NULL)
+		    (p = svr4_pfind(SCARG(uap, pid))) == NULL)
 			return ESRCH;
 		/* 
 		 * we return the pid of the session leader for this
 		 * process
 		 */
-		*retval = (register_t)pr->ps_session->s_leader->ps_pid;
+		*retval = (register_t) p->p_session->s_leader->p_pid;
 		return 0;
 
 	case 3:			/* setsid() */
@@ -878,10 +877,10 @@ svr4_sys_pgrpsys(p, v, retval)
 	case 4:			/* getpgid(pid) */
 
 		if (SCARG(uap, pid) != 0 &&
-		    (pr = svr4_prfind(SCARG(uap, pid))) == NULL)
+		    (p = svr4_pfind(SCARG(uap, pid))) == NULL)
 			return ESRCH;
 
-		*retval = (int)pr->ps_pgrp->pg_id;
+		*retval = (int) p->p_pgrp->pg_id;
 		return 0;
 
 	case 5:			/* setpgid(pid, pgid); */
@@ -1043,7 +1042,6 @@ svr4_sys_waitsys(q, v, retval)
 	struct svr4_sys_waitsys_args *uap = v;
 	int nfound;
 	int error;
-	struct process *pr;
 	struct proc *p;
 
 	switch (SCARG(uap, grp)) {
@@ -1051,7 +1049,7 @@ svr4_sys_waitsys(q, v, retval)
 		break;
 
 	case SVR4_P_PGID:
-		SCARG(uap, id) = -q->p_p->ps_pgid;
+		SCARG(uap, id) = -q->p_pgid;
 		break;
 
 	case SVR4_P_ALL:
@@ -1067,13 +1065,12 @@ svr4_sys_waitsys(q, v, retval)
 
 loop:
 	nfound = 0;
-	LIST_FOREACH(pr, &q->p_p->ps_children, ps_sibling) {
-		p = pr->ps_mainproc;
+	LIST_FOREACH(p, &q->p_children, p_sibling) {
 		if (SCARG(uap, id) != WAIT_ANY &&
 		    p->p_pid != SCARG(uap, id) &&
-		    pr->ps_pgid != -SCARG(uap, id)) {
+		    p->p_pgid != -SCARG(uap, id)) {
 			DPRINTF(("pid %d pgid %d != %d\n", p->p_pid,
-				 pr->ps_pgid, SCARG(uap, id)));
+				 p->p_pgid, SCARG(uap, id)));
 			continue;
 		}
 		nfound++;

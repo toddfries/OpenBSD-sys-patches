@@ -59,8 +59,8 @@ int
 sys_getpid(struct proc *p, void *v, register_t *retval)
 {
 
-	retval[0] = p->p_p->ps_pid;
-	retval[1] = p->p_p->ps_pptr->ps_pid;
+	retval[0] = p->p_p->ps_mainproc->p_pid;
+	retval[1] = p->p_p->ps_mainproc->p_pptr->p_pid;
 	return (0);
 }
 
@@ -80,7 +80,7 @@ int
 sys_getppid(struct proc *p, void *v, register_t *retval)
 {
 
-	*retval = p->p_p->ps_pptr->ps_pid;
+	*retval = p->p_p->ps_mainproc->p_pptr->p_pid;
 	return (0);
 }
 
@@ -89,7 +89,7 @@ int
 sys_getpgrp(struct proc *p, void *v, register_t *retval)
 {
 
-	*retval = p->p_p->ps_pgrp->pg_id;
+	*retval = p->p_pgrp->pg_id;
 	return (0);
 }
 
@@ -102,16 +102,16 @@ sys_getpgid(struct proc *curp, void *v, register_t *retval)
 	struct sys_getpgid_args /* {
 		syscallarg(pid_t) pid;
 	} */ *uap = v;
-	struct process *targpr = curp->p_p;
+	struct proc *targp = curp;
 
-	if (SCARG(uap, pid) == 0 || SCARG(uap, pid) == targpr->ps_pid)
+	if (SCARG(uap, pid) == 0 || SCARG(uap, pid) == curp->p_pid)
 		goto found;
-	if ((targpr = prfind(SCARG(uap, pid))) == NULL)
+	if ((targp = pfind(SCARG(uap, pid))) == NULL)
 		return (ESRCH);
-	if (targpr->ps_session != curp->p_p->ps_session)
+	if (targp->p_session != curp->p_session)
 		return (EPERM);
 found:
-	*retval = targpr->ps_pgid;
+	*retval = targp->p_pgid;
 	return (0);
 }
 
@@ -121,19 +121,19 @@ sys_getsid(struct proc *curp, void *v, register_t *retval)
 	struct sys_getsid_args /* {
 		syscallarg(pid_t) pid;
 	} */ *uap = v;
-	struct process *targpr = curp->p_p;
+	struct proc *targp = curp;
 
-	if (SCARG(uap, pid) == 0 || SCARG(uap, pid) == targpr->ps_pid)
+	if (SCARG(uap, pid) == 0 || SCARG(uap, pid) == curp->p_pid)
 		goto found;
-	if ((targpr = prfind(SCARG(uap, pid))) == NULL)
+	if ((targp = pfind(SCARG(uap, pid))) == NULL)
 		return (ESRCH);
-	if (targpr->ps_session != curp->p_p->ps_session)
+	if (targp->p_session != curp->p_session)
 		return (EPERM);
 found:
 	/* Skip exiting processes */
-	if (targpr->ps_pgrp->pg_session->s_leader == NULL)
+	if (targp->p_pgrp->pg_session->s_leader == NULL)
 		return (ESRCH);
-	*retval = targpr->ps_pgrp->pg_session->s_leader->ps_pid;
+	*retval = targp->p_pgrp->pg_session->s_leader->p_pid;
 	return (0);
 }
 
@@ -223,19 +223,17 @@ sys_setsid(struct proc *p, void *v, register_t *retval)
 {
 	struct session *newsess;
 	struct pgrp *newpgrp;
-	struct process *pr = p->p_p;
-	pid_t pid = pr->ps_pid;
 
 	newsess = pool_get(&session_pool, PR_WAITOK);
 	newpgrp = pool_get(&pgrp_pool, PR_WAITOK);
 
-	if (pr->ps_pgid == pid || pgfind(pid)) {
+	if (p->p_pgid == p->p_pid || pgfind(p->p_pid)) {
 		pool_put(&pgrp_pool, newpgrp);
 		pool_put(&session_pool, newsess);
 		return (EPERM);
 	} else {
-		(void) enterpgrp(pr, pid, newpgrp, newsess);
-		*retval = pid;
+		(void) enterpgrp(p, p->p_pid, newpgrp, newsess);
+		*retval = p->p_pid;
 		return (0);
 	}
 }
@@ -261,8 +259,7 @@ sys_setpgid(struct proc *curp, void *v, register_t *retval)
 		syscallarg(pid_t) pid;
 		syscallarg(int) pgid;
 	} */ *uap = v;
-	struct process *curpr = curp->p_p;
-	struct process *targpr;		/* target process */
+	struct proc *targp;		/* target process */
 	struct pgrp *pgrp, *newpgrp;	/* target pgrp */
 	pid_t pid;
 	int pgid, error;
@@ -275,34 +272,34 @@ sys_setpgid(struct proc *curp, void *v, register_t *retval)
 
 	newpgrp = pool_get(&pgrp_pool, PR_WAITOK);
 
-	if (pid != 0 && pid != curpr->ps_pid) {
-		if ((targpr = prfind(pid)) == 0 || !inferior(targpr, curpr)) {
+	if (pid != 0 && pid != curp->p_pid) {
+		if ((targp = pfind(pid)) == 0 || !inferior(targp, curp)) {
 			error = ESRCH;
 			goto out;
 		}
-		if (targpr->ps_session != curpr->ps_session) {
+		if (targp->p_session != curp->p_session) {
 			error = EPERM;
 			goto out;
 		}
-		if (targpr->ps_mainproc->p_flag & P_EXEC) {
+		if (targp->p_flag & P_EXEC) {
 			error = EACCES;
 			goto out;
 		}
 	} else
-		targpr = curpr;
-	if (SESS_LEADER(targpr)) {
+		targp = curp;
+	if (SESS_LEADER(targp)) {
 		error = EPERM;
 		goto out;
 	}
 	if (pgid == 0)
-		pgid = targpr->ps_pid;
-	else if (pgid != targpr->ps_pid)
+		pgid = targp->p_pid;
+	else if (pgid != targp->p_pid)
 		if ((pgrp = pgfind(pgid)) == 0 ||
-		    pgrp->pg_session != curpr->ps_session) {
+		    pgrp->pg_session != curp->p_session) {
 			error = EPERM;
 			goto out;
 		}
-	return (enterpgrp(targpr, pgid, newpgrp, NULL));
+	return (enterpgrp(targp, pgid, newpgrp, NULL));
 out:
 	pool_put(&pgrp_pool, newpgrp);
 	return (error);
@@ -846,12 +843,11 @@ sys_getlogin(struct proc *p, void *v, register_t *retval)
 		syscallarg(char *) namebuf;
 		syscallarg(u_int) namelen;
 	} */ *uap = v;
-	struct session *s = p->p_p->ps_pgrp->pg_session;
 
-	if (SCARG(uap, namelen) > sizeof(s->s_login))
-		SCARG(uap, namelen) = sizeof(s->s_login);
-	return (copyout((caddr_t)s->s_login,
-	    (caddr_t)SCARG(uap, namebuf), SCARG(uap, namelen)));
+	if (SCARG(uap, namelen) > sizeof (p->p_pgrp->pg_session->s_login))
+		SCARG(uap, namelen) = sizeof (p->p_pgrp->pg_session->s_login);
+	return (copyout((caddr_t) p->p_pgrp->pg_session->s_login,
+	    (caddr_t) SCARG(uap, namebuf), SCARG(uap, namelen)));
 }
 
 /*
@@ -864,13 +860,13 @@ sys_setlogin(struct proc *p, void *v, register_t *retval)
 	struct sys_setlogin_args /* {
 		syscallarg(const char *) namebuf;
 	} */ *uap = v;
-	struct session *s = p->p_p->ps_pgrp->pg_session;
 	int error;
 
 	if ((error = suser(p, 0)) != 0)
 		return (error);
-	error = copyinstr((caddr_t)SCARG(uap, namebuf), (caddr_t)s->s_login,
-	    sizeof(s->s_login), NULL);
+	error = copyinstr((caddr_t) SCARG(uap, namebuf),
+	    (caddr_t) p->p_pgrp->pg_session->s_login,
+	    sizeof (p->p_pgrp->pg_session->s_login), (size_t *)0);
 	if (error == ENAMETOOLONG)
 		error = EINVAL;
 	return (error);

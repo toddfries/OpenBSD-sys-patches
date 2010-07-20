@@ -1223,16 +1223,16 @@ linux_sys_getpgid(p, v, retval)
 	struct linux_sys_getpgid_args /* {
 		syscallarg(int) pid;
 	} */ *uap = v;
-	struct process *targpr;
+	struct proc *targp;
 
 	if (SCARG(uap, pid) != 0 && SCARG(uap, pid) != p->p_pid) {
-		if ((targpr = prfind(SCARG(uap, pid))) == 0)
+		if ((targp = pfind(SCARG(uap, pid))) == 0)
 			return ESRCH;
 	}
 	else
-		targpr = p->p_p;
+		targp = p;
 
-	retval[0] = targpr->ps_pgid;
+	retval[0] = targp->p_pgid;
 	return 0;
 }
 

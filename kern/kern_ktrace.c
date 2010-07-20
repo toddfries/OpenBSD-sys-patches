@@ -54,7 +54,7 @@
 
 void ktrinitheader(struct ktr_header *, struct proc *, int);
 int ktrops(struct proc *, struct proc *, int, int, struct vnode *);
-int ktrsetchildren(struct proc *, struct process *, int, int,
+int ktrsetchildren(struct proc *, struct proc *, int, int,
 			struct vnode *);
 int ktrwrite(struct proc *, struct ktr_header *);
 int ktrcanset(struct proc *, struct proc *);
@@ -290,7 +290,6 @@ sys_ktrace(struct proc *curp, void *v, register_t *retval)
 	} */ *uap = v;
 	struct vnode *vp = NULL;
 	struct proc *p = NULL;
-	struct process *pr = NULL;
 	struct pgrp *pg;
 	int facs = SCARG(uap, facs) & ~((unsigned) KTRFAC_ROOT);
 	int ops = KTROP(SCARG(uap, ops));
@@ -353,29 +352,25 @@ sys_ktrace(struct proc *curp, void *v, register_t *retval)
 			error = ESRCH;
 			goto done;
 		}
-		LIST_FOREACH(pr, &pg->pg_members, ps_pglist) {
+		LIST_FOREACH(p, &pg->pg_members, p_pglist)
 			if (descend)
-				ret |= ktrsetchildren(curp, pr, ops, facs, vp);
+				ret |= ktrsetchildren(curp, p, ops, facs, vp);
 			else 
-				TAILQ_FOREACH(p, &pr->ps_threads, p_thr_link)
-					ret |= ktrops(curp, p, ops, facs, vp);
-		}
+				ret |= ktrops(curp, p, ops, facs, vp);
 					
 	} else {
 		/*
 		 * by pid
 		 */
-		pr = prfind(SCARG(uap, pid));
-		if (pr == NULL) {
+		p = pfind(SCARG(uap, pid));
+		if (p == NULL) {
 			error = ESRCH;
 			goto done;
 		}
 		if (descend)
-			ret |= ktrsetchildren(curp, pr, ops, facs, vp);
+			ret |= ktrsetchildren(curp, p, ops, facs, vp);
 		else
-			TAILQ_FOREACH(p, &pr->ps_threads, p_thr_link) {
-				ret |= ktrops(curp, p, ops, facs, vp);
-		}
+			ret |= ktrops(curp, p, ops, facs, vp);
 	}
 	if (!ret)
 		error = EPERM;
@@ -417,32 +412,30 @@ ktrops(struct proc *curp, struct proc *p, int ops, int facs, struct vnode *vp)
 }
 
 int
-ktrsetchildren(struct proc *curp, struct process *top, int ops, int facs,
+ktrsetchildren(struct proc *curp, struct proc *top, int ops, int facs,
     struct vnode *vp)
 {
-	struct process *pr;
 	struct proc *p;
 	int ret = 0;
 
-	pr = top;
+	p = top;
 	for (;;) {
-		TAILQ_FOREACH(p, &pr->ps_threads, p_thr_link)
-			ret |= ktrops(curp, p, ops, facs, vp);
+		ret |= ktrops(curp, p, ops, facs, vp);
 		/*
 		 * If this process has children, descend to them next,
 		 * otherwise do any siblings, and if done with this level,
 		 * follow back up the tree (but not past top).
 		 */
-		if (!LIST_EMPTY(&pr->ps_children))
-			pr = LIST_FIRST(&pr->ps_children);
+		if (!LIST_EMPTY(&p->p_children))
+			p = LIST_FIRST(&p->p_children);
 		else for (;;) {
-			if (pr == top)
+			if (p == top)
 				return (ret);
-			if (LIST_NEXT(pr, ps_sibling) != NULL) {
-				pr = LIST_NEXT(pr, ps_sibling);
+			if (LIST_NEXT(p, p_sibling) != NULL) {
+				p = LIST_NEXT(p, p_sibling);
 				break;
 			}
-			pr = pr->ps_pptr;
+			p = p->p_pptr;
 		}
 	}
 	/*NOTREACHED*/
