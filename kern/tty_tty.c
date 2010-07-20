@@ -45,9 +45,7 @@
 #include <sys/conf.h>
 
 
-#define cttyvp(p) \
-	((p)->p_p->ps_flags & PS_CONTROLT ? \
-	    (p)->p_p->ps_session->s_ttyvp : NULL)
+#define cttyvp(p) ((p)->p_flag & P_CONTROLT ? (p)->p_session->s_ttyvp : NULL)
 
 /*ARGSUSED*/
 int
@@ -120,8 +118,8 @@ cttyioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	if (cmd == TIOCSCTTY)		/* XXX */
 		return (EINVAL);
 	if (cmd == TIOCNOTTY) {
-		if (!SESS_LEADER(p->p_p)) {
-			atomic_clearbits_int(&p->p_p->ps_flags, PS_CONTROLT);
+		if (!SESS_LEADER(p)) {
+			atomic_clearbits_int(&p->p_flag, P_CONTROLT);
 			return (0);
 		} else
 			return (EINVAL);

@@ -338,8 +338,8 @@ svr4_sys_open(p, v, retval)
 	if (error)
 		return error;
 
-	if (!(SCARG(&cup, flags) & O_NOCTTY) && SESS_LEADER(p->p_p) &&
-	    !(p->p_p->ps_flags & PS_CONTROLT)) {
+	if (!(SCARG(&cup, flags) & O_NOCTTY) && SESS_LEADER(p) &&
+	    !(p->p_flag & P_CONTROLT)) {
 		struct filedesc	*fdp = p->p_fd;
 		struct file	*fp;
 

@@ -64,7 +64,6 @@ int	procfs_stat_gen(struct proc *, char *s, int);
 int
 procfs_stat_gen(struct proc *p, char *s, int l)
 {
-	struct process *pr = p->p_p;
 	struct session *sess;
 	struct tty *tp;
 	struct ucred *cr;
@@ -73,11 +72,11 @@ procfs_stat_gen(struct proc *p, char *s, int l)
 	char ps[256], *sep;
 	int i, n;
 
-	pid = pr->ps_pid;
-	ppid = pr->ps_pptr ? pr->ps_pptr->ps_pid : 0;
-	pgid = pr->ps_pgrp->pg_id;
-	sess = pr->ps_pgrp->pg_session;
-	sid = sess->s_leader ? sess->s_leader->ps_pid : 0;
+	pid = p->p_pid;
+	ppid = p->p_pptr ? p->p_pptr->p_pid : 0;
+	pgid = p->p_pgrp->pg_id;
+	sess = p->p_pgrp->pg_session;
+	sid = sess->s_leader ? sess->s_leader->p_pid : 0;
 
 	n = 0;
 	if (s)
@@ -91,7 +90,7 @@ procfs_stat_gen(struct proc *p, char *s, int l)
 	    pid, ppid, pgid, sid);
 	COUNTORCAT(s, l, ps, n);
 
-	if ((pr->ps_flags & PS_CONTROLT) && (tp = sess->s_ttyp))
+	if ((p->p_flag&P_CONTROLT) && (tp = sess->s_ttyp))
 		snprintf(ps, sizeof(ps), "%d,%d ",
 		    major(tp->t_dev), minor(tp->t_dev));
 	else
@@ -106,7 +105,7 @@ procfs_stat_gen(struct proc *p, char *s, int l)
 		COUNTORCAT(s, l, ps, n);
 	}
 
-	if (SESS_LEADER(pr)) {
+	if (SESS_LEADER(p)) {
 		snprintf(ps, sizeof(ps), "%ssldr", sep);
 		sep = ",";
 		COUNTORCAT(s, l, ps, n);

@@ -193,7 +193,7 @@ wsmuxopen(dev_t dev, int flags, int mode, struct proc *p)
 
 	evar = &sc->sc_base.me_evar;
 	wsevent_init(evar);
-	evar->io = p->p_p;
+	evar->io = p;
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 	sc->sc_rawkbd = 0;
 #endif
@@ -477,8 +477,8 @@ wsmux_do_ioctl(struct device *dv, u_long cmd, caddr_t data, int flag,
 		evar = sc->sc_base.me_evp;
 		if (evar == NULL)
 			return (EINVAL);
-		if (-*(int *)data != evar->io->ps_pgid
-		    && *(int *)data != evar->io->ps_pid)
+		if (-*(int *)data != evar->io->p_pgid
+		    && *(int *)data != evar->io->p_pid)
 			return (EPERM);
 		return (0);
 	case TIOCSPGRP:
@@ -486,7 +486,7 @@ wsmux_do_ioctl(struct device *dv, u_long cmd, caddr_t data, int flag,
 		evar = sc->sc_base.me_evp;
 		if (evar == NULL)
 			return (EINVAL);
-		if (*(int *)data != evar->io->ps_pgid)
+		if (*(int *)data != evar->io->p_pgid)
 			return (EPERM);
 		return (0);
 	default:
