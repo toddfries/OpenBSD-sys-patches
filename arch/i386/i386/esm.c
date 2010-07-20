@@ -1,4 +1,4 @@
-/*	$OpenBSD: esm.c,v 1.50 2009/10/24 22:11:07 miod Exp $ */
+/*	$OpenBSD: esm.c,v 1.52 2010/07/02 01:35:13 tedu Exp $ */
 
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -464,11 +464,11 @@ esm_refresh(void *arg)
 
 	if (sc->sc_nextsensor == NULL) {
 		sc->sc_nextsensor = TAILQ_FIRST(&sc->sc_sensors);
-		timeout_add(&sc->sc_timeout, hz * 10);
+		timeout_add_sec(&sc->sc_timeout, 10);
 		return;
 	}
 tick:
-	timeout_add(&sc->sc_timeout, hz / 20);
+	timeout_add_msec(&sc->sc_timeout, 50);
 }
 
 int
@@ -685,9 +685,9 @@ struct esm_sensor_map esm_sensors_powerunit[] = {
 void
 esm_devmap(struct esm_softc *sc, struct esm_devmap *devmap)
 {
-	struct esm_sensor_map	*sensor_map;
+	struct esm_sensor_map	*sensor_map = NULL;
 	const char		*name = NULL, *fname = NULL;
-	int			mapsize;
+	int			mapsize = 0;
 
 	switch (devmap->dev_major) {
 	case ESM2_DEV_ESM2:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cac.c,v 1.38 2010/05/20 00:55:17 krw Exp $	*/
+/*	$OpenBSD: cac.c,v 1.40 2010/07/01 03:20:38 matthew Exp $	*/
 /*	$NetBSD: cac.c,v 1.15 2000/11/08 19:20:35 ad Exp $	*/
 
 /*
@@ -101,10 +101,6 @@ void	cacminphys(struct buf *bp, struct scsi_link *sl);
 
 struct scsi_adapter cac_switch = {
 	cac_scsi_cmd, cacminphys, 0, 0,
-};
-
-struct scsi_device cac_dev = {
-	NULL, NULL, NULL, NULL
 };
 
 struct	cac_ccb *cac_ccb_alloc(struct cac_softc *, int);
@@ -246,7 +242,6 @@ cac_init(struct cac_softc *sc, int startfw)
 	sc->sc_link.adapter = &cac_switch;
 	sc->sc_link.adapter_target = cinfo.num_drvs;
 	sc->sc_link.adapter_buswidth = cinfo.num_drvs;
-	sc->sc_link.device = &cac_dev;
 	sc->sc_link.openings = CAC_MAX_CCBS / sc->sc_nunits;
 	if (sc->sc_link.openings < 4 )
 		sc->sc_link.openings = 4;
@@ -891,6 +886,7 @@ cac_create_sensors(struct cac_softc *sc)
 {
 	struct device *dev;
 	struct scsibus_softc *ssc = NULL;
+	struct scsi_link *link;
 	int i;
 
 	TAILQ_FOREACH(dev, &alldevs, dv_list) {
@@ -916,10 +912,11 @@ cac_create_sensors(struct cac_softc *sc)
 	    sizeof(sc->sc_sensordev.xname));
 
 	for (i = 0; i < sc->sc_nunits; i++) {
-		if (ssc->sc_link[i][0] == NULL)
+		link = scsi_get_link(ssc, i, 0);
+		if (link == NULL)
 			goto bad;
 
-		dev = ssc->sc_link[i][0]->device_softc;
+		dev = link->device_softc;
 
 		sc->sc_sensors[i].type = SENSOR_DRIVE;
 		sc->sc_sensors[i].status = SENSOR_S_UNKNOWN;

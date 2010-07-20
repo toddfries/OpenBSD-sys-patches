@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.683 2010/04/02 20:07:28 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.688 2010/07/05 22:20:22 tedu Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -24,10 +24,8 @@ option		APERTURE	# in-kernel aperture driver for XFree86
 #option		"KGDB_DEVNAME=\"com\"",KGDBADDR=0x2f8,KGDBRATE=9600
 
 option		COMPAT_SVR4	# binary compatibility with SVR4
-option		COMPAT_IBCS2	# binary compatibility with SCO and ISC
 option		COMPAT_LINUX	# binary compatibility with Linux
 option		COMPAT_FREEBSD	# binary compatibility with FreeBSD
-option		COMPAT_BSDOS	# binary compatibility with BSD/OS
 option		COMPAT_AOUT	# a.out binaries are emulated
 
 option		PROCFS		# /proc
@@ -148,11 +146,12 @@ viasio*	at isa? port 0x4e flags 0x0000
 wbsio*	at isa? port 0x2e		# Winbond LPC Super I/O
 wbsio*	at isa? port 0x4e
 lm*	at wbsio?
-uguru0	at isa? port 0xe0		# ABIT uGuru
+uguru0	at isa? disable port 0xe0	# ABIT uGuru
 fins0	at isa? port 0x4e		# Fintek F71805 Super I/O
 
 aps0	at isa? port 0x1600		# ThinkPad Active Protection System
 
+itherm*	at pci?				# Intel 3400 Thermal Sensor
 adc*	at iic?				# Analog Devices AD7416/AD7417/7418
 andl*	at iic?				# Andigilog aSC7611
 adl*	at iic?				# Andigilog aSC7621
@@ -283,8 +282,6 @@ url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
 uscanner* at uhub? disable	# USB Scanners
-usscanner* at uhub?		# USB SCSI scanners, e.g., HP5300
-scsibus* at usscanner?
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
@@ -519,7 +516,6 @@ sd*	at scsibus?		# SCSI disk drives
 st*	at scsibus?		# SCSI tape drives
 cd*	at scsibus?		# SCSI CD-ROM drives
 ch*	at scsibus?		# SCSI autochangers
-ss*	at scsibus?		# SCSI scanners
 safte*	at scsibus?		# SCSI accessed fault-tolerant enclosures
 ses*	at scsibus?		# SCSI enclosure services
 uk*	at scsibus?		# unknown SCSI

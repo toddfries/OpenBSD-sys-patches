@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.70 2010/06/09 15:44:17 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.72 2010/06/27 12:41:23 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -91,8 +91,7 @@
 
 #include <dev/cons.h>
 
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_swap.h>
+#include <uvm/uvm.h>
 
 #include "ksyms.h"
 #if DDB
@@ -196,6 +195,9 @@ int bufpages = BUFPAGES;
 int bufpages = 0;
 #endif
 int bufcachepercent = BUFCACHEPERCENT;
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 /*
  * Info for CTL_HW

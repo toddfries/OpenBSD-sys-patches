@@ -1,4 +1,4 @@
-/*	$OpenBSD: adv.c,v 1.30 2010/05/20 00:55:17 krw Exp $	*/
+/*	$OpenBSD: adv.c,v 1.32 2010/06/28 18:31:01 krw Exp $	*/
 /*	$NetBSD: adv.c,v 1.6 1998/10/28 20:39:45 dante Exp $	*/
 
 /*
@@ -41,7 +41,6 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -91,16 +90,6 @@ struct scsi_adapter adv_switch =
 	advminphys,		/* to limit the transfer to max device can do */
 	0,			/* IT SEEMS IT IS NOT USED YET */
 	0,			/* as above... */
-};
-
-
-/* the below structure is so we have a default dev struct for out link struct */
-struct scsi_device adv_dev =
-{
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
 };
 
 
@@ -524,7 +513,6 @@ adv_attach(sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->chip_scsi_id;
 	sc->sc_link.adapter = &adv_switch;
-	sc->sc_link.device = &adv_dev;
 	sc->sc_link.openings = 4;
 	sc->sc_link.adapter_buswidth = 7;
 

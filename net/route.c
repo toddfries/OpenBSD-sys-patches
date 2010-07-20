@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.119 2010/06/04 11:05:13 blambert Exp $	*/
+/*	$OpenBSD: route.c,v 1.125 2010/07/09 16:58:06 reyk Exp $	*/
 /*	$NetBSD: route.c,v 1.14 1996/02/13 22:00:46 christos Exp $	*/
 
 /*
@@ -129,7 +129,7 @@
 #include <netinet/ip_ipsp.h>
 #include <net/if_enc.h>
 
-struct ifaddr	*encap_findgwifa(struct sockaddr *);
+struct ifaddr	*encap_findgwifa(struct sockaddr *, u_int);
 #endif
 
 #define	SA(p) ((struct sockaddr *)(p))
@@ -147,11 +147,10 @@ int			rttrash;	/* routes not in table but not freed */
 struct pool		rtentry_pool;	/* pool for rtentry structures */
 struct pool		rttimer_pool;	/* pool for rttimer structures */
 
-int	rtable_init(struct radix_node_head ***);
-int	okaytoclone(u_int, int);
-int	rtflushclone1(struct radix_node *, void *);
+int	rtable_init(struct radix_node_head ***, u_int);
+int	rtflushclone1(struct radix_node *, void *, u_int);
 void	rtflushclone(struct radix_node_head *, struct rtentry *);
-int	rt_if_remove_rtdelete(struct radix_node *, void *);
+int	rt_if_remove_rtdelete(struct radix_node *, void *, u_int);
 
 #define	LABELID_MAX	50000
 
@@ -166,17 +165,23 @@ TAILQ_HEAD(rt_labels, rt_label)	rt_labels = TAILQ_HEAD_INITIALIZER(rt_labels);
 
 #ifdef IPSEC
 struct ifaddr *
-encap_findgwifa(struct sockaddr *gw)
+encap_findgwifa(struct sockaddr *gw, u_int rdomain)
 {
-	return (TAILQ_FIRST(&encif[0].sc_if.if_addrlist));
+	struct ifnet	*encif;
+
+	if ((encif = enc_getif(rdomain, 0)) == NULL)
+		return (NULL);
+
+	return (TAILQ_FIRST(&encif->if_addrlist));
 }
 #endif
 
 int
-rtable_init(struct radix_node_head ***table)
+rtable_init(struct radix_node_head ***table, u_int id)
 {
 	void		**p;
 	struct domain	 *dom;
+	u_int8_t	  i;
 
 	if ((p = malloc(sizeof(void *) * (rtafidx_max + 1), M_RTABLE,
 	    M_NOWAIT|M_ZERO)) == NULL)
@@ -189,11 +194,17 @@ rtable_init(struct radix_node_head ***table)
 			    dom->dom_rtoffset);
 
 	*table = (struct radix_node_head **)p;
+
+	for (i = 0; i < rtafidx_max; i++) {
+		if ((*table)[i] != NULL)
+			(*table)[i]->rnh_rtabelid = id;
+	}
+
 	return (0);
 }
 
 void
-route_init()
+route_init(void)
 {
 	struct domain	 *dom;
 
@@ -246,7 +257,23 @@ rtable_add(u_int id)	/* must be called at splsoftnet */
 		return (-1);
 
 	rt_tab2dom[id] = 0;	/* use main table/domain by default */
-	return (rtable_init(&rt_tables[id]));
+	return (rtable_init(&rt_tables[id], id));
+}
+
+void
+rtable_addif(struct ifnet *ifp, u_int id)
+{
+	/* make sure that the routing table exists */
+	if (!rtable_exists(id)) {
+		if (rtable_add(id) == -1)
+			panic("rtable_addif: rtable_add");
+	}
+	if (id != rtable_l2(id)) {
+		/* XXX we should probably flush the table */
+		rtable_l2set(id, id);
+	}
+
+	ifp->if_rdomain = id;
 }
 
 u_int
@@ -553,14 +580,14 @@ rtdeletemsg(struct rtentry *rt, u_int tableid)
 }
 
 int
-rtflushclone1(struct radix_node *rn, void *arg)
+rtflushclone1(struct radix_node *rn, void *arg, u_int id)
 {
 	struct rtentry	*rt, *parent;
 
 	rt = (struct rtentry *)rn;
 	parent = (struct rtentry *)arg;
 	if ((rt->rt_flags & RTF_CLONED) != 0 && rt->rt_parent == parent)
-		rtdeletemsg(rt, 0);
+		rtdeletemsg(rt, id);
 	return 0;
 }
 
@@ -597,7 +624,7 @@ ifa_ifwithroute(int flags, struct sockaddr *dst, struct sockaddr *gateway,
 	 * enc0.
 	 */
 	if (dst && (dst->sa_family == PF_KEY))
-		return (encap_findgwifa(gateway));
+		return (encap_findgwifa(gateway, rtableid));
 #endif
 
 	if ((flags & RTF_GATEWAY) == 0) {
@@ -1124,7 +1151,7 @@ static int			rt_init_done = 0;
 		bzero(&info, sizeof(info));			\
 		info.rti_info[RTAX_DST] = rt_key(r->rtt_rt);	\
 		rtrequest1(RTM_DELETE, &info,			\
-		    r->rtt_rt->rt_priority, NULL, 0 /* XXX */);	\
+		    r->rtt_rt->rt_priority, NULL, r->rtt_tableid);	\
 	}							\
 }
 
@@ -1222,7 +1249,7 @@ rt_timer_remove_all(struct rtentry *rt)
 
 int
 rt_timer_add(struct rtentry *rt, void (*func)(struct rtentry *,
-    struct rttimer *), struct rttimer_queue *queue)
+    struct rttimer *), struct rttimer_queue *queue, u_int rtableid)
 {
 	struct rttimer	*r;
 	long		 current_time;
@@ -1256,6 +1283,7 @@ rt_timer_add(struct rtentry *rt, void (*func)(struct rtentry *,
 	r->rtt_time = current_time;
 	r->rtt_func = func;
 	r->rtt_queue = queue;
+	r->rtt_tableid = rtableid;
 	LIST_INSERT_HEAD(&rt->rt_timer, r, rtt_link);
 	TAILQ_INSERT_TAIL(&queue->rtq_head, r, rtt_next);
 	r->rtt_queue->rtq_count++;
@@ -1430,7 +1458,7 @@ rt_if_remove(struct ifnet *ifp)
  * as long as EAGAIN is returned.
  */
 int
-rt_if_remove_rtdelete(struct radix_node *rn, void *vifp)
+rt_if_remove_rtdelete(struct radix_node *rn, void *vifp, u_int id)
 {
 	struct ifnet	*ifp = vifp;
 	struct rtentry	*rt = (struct rtentry *)rn;
@@ -1438,7 +1466,7 @@ rt_if_remove_rtdelete(struct radix_node *rn, void *vifp)
 	if (rt->rt_ifp == ifp) {
 		int	cloning = (rt->rt_flags & RTF_CLONING);
 
-		if (rtdeletemsg(rt, ifp->if_rdomain /* XXX wrong */) == 0 && cloning)
+		if (rtdeletemsg(rt, id) == 0 && cloning)
 			return (EAGAIN);
 	}
 
@@ -1475,7 +1503,7 @@ rt_if_track(struct ifnet *ifp)
 }
 
 int
-rt_if_linkstate_change(struct radix_node *rn, void *arg)
+rt_if_linkstate_change(struct radix_node *rn, void *arg, u_int id)
 {
 	struct ifnet *ifp = arg;
 	struct rtentry *rt = (struct rtentry *)rn;

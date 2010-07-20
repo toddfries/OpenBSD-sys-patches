@@ -1,4 +1,4 @@
-/*	$OpenBSD: wds.c,v 1.34 2010/05/20 00:55:17 krw Exp $	*/
+/*	$OpenBSD: wds.c,v 1.37 2010/07/02 02:29:45 tedu Exp $	*/
 /*	$NetBSD: wds.c,v 1.13 1996/11/03 16:20:31 mycroft Exp $	*/
 
 #undef	WDSDIAG
@@ -67,7 +67,7 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -172,14 +172,6 @@ struct scsi_adapter wds_switch = {
 	wdsminphys,
 	0,
 	0,
-};
-
-/* the below structure is so we have a default dev struct for our link struct */
-struct scsi_device wds_dev = {
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
 };
 
 int	wdsprobe(struct device *, void *, void *);
@@ -312,7 +304,6 @@ wdsattach(parent, self, aux)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_scsi_dev;
 	sc->sc_link.adapter = &wds_switch;
-	sc->sc_link.device = &wds_dev;
 	/* XXX */
 	/* I don't think the -ASE can handle openings > 1. */
 	/* It gives Vendor Error 26 whenever I try it.     */
@@ -853,7 +844,7 @@ wds_find(ia, sc)
 	struct wds_softc *sc;
 {
 	bus_space_tag_t iot = ia->ia_iot;
-	bus_space_handle_t ioh;
+	bus_space_handle_t ioh = ia->ia_ioh;
 	u_char c;
 	int i;
 

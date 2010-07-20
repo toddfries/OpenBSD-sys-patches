@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_machdep.c,v 1.33 2010/06/10 17:54:13 deraadt Exp $	*/
+/*	$OpenBSD: zaurus_machdep.c,v 1.35 2010/06/27 06:21:44 beck Exp $	*/
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*

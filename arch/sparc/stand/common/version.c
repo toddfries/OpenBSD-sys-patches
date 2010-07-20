@@ -1,4 +1,4 @@
-/*	$OpenBSD: version.c,v 1.4 2009/07/01 20:13:39 miod Exp $	*/
+/*	$OpenBSD: version.c,v 1.6 2010/07/06 20:41:06 miod Exp $	*/
 /*	$NetBSD: version.c,v 1.4 1995/09/16 23:20:39 pk Exp $ */
 
 /*
@@ -43,6 +43,8 @@
  *	2.1	Bumped RELOC
  *	2.2	ELF support added.
  *	2.3	Bumped RELOC
+ *	2.4	Support for larger kernels and fragmented memory layouts.
+ *	2.5	sun4e support
  */
 
-char *version = "2.3";
+char *version = "2.5";

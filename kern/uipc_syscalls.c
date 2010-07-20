@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_syscalls.c,v 1.74 2009/12/23 07:40:31 guenther Exp $	*/
+/*	$OpenBSD: uipc_syscalls.c,v 1.76 2010/07/03 04:44:51 guenther Exp $	*/
 /*	$NetBSD: uipc_syscalls.c,v 1.19 1996/02/09 19:00:48 christos Exp $	*/
 
 /*
@@ -1007,7 +1007,7 @@ sys_getpeereid(struct proc *p, void *v, register_t *retval)
 	struct file *fp;
 	struct socket *so;
 	struct mbuf *m = NULL;
-	struct unpcbid *id;
+	struct sockpeercred *id;
 	int error;
 
 	if ((error = getsock(p->p_fd, SCARG(uap, fdes), &fp)) != 0)
@@ -1023,14 +1023,14 @@ sys_getpeereid(struct proc *p, void *v, register_t *retval)
 		goto bad;
 	}	
 	error = (*so->so_proto->pr_usrreq)(so, PRU_PEEREID, 0, m, 0, p);
-	if (!error && m->m_len != sizeof(struct unpcbid))
+	if (!error && m->m_len != sizeof(struct sockpeercred))
 		error = EOPNOTSUPP;
 	if (error)
 		goto bad;
-	id = mtod(m, struct unpcbid *);
-	error = copyout(&(id->unp_euid), SCARG(uap, euid), sizeof(uid_t));
+	id = mtod(m, struct sockpeercred *);
+	error = copyout(&(id->uid), SCARG(uap, euid), sizeof(uid_t));
 	if (error == 0)
-		error = copyout(&(id->unp_egid), SCARG(uap, egid), sizeof(gid_t));
+		error = copyout(&(id->gid), SCARG(uap, egid), sizeof(gid_t));
 bad:
 	FRELE(fp);
 	m_freem(m);
@@ -1096,30 +1096,30 @@ getsock(struct filedesc *fdp, int fdes, struct file **fpp)
 
 /* ARGSUSED */
 int
-sys_setrdomain(struct proc *p, void *v, register_t *retval)
+sys_setrtable(struct proc *p, void *v, register_t *retval)
 {
-	struct sys_setrdomain_args /* {
-		syscallarg(int) rdomain;
+	struct sys_setrtable_args /* {
+		syscallarg(int) rtableid;
 	} */ *uap = v;
-	int rdomain, error;
+	int rtableid, error;
 
-	rdomain = SCARG(uap, rdomain);
+	rtableid = SCARG(uap, rtableid);
 
-	if (p->p_p->ps_rdomain == (u_int)rdomain)
+	if (p->p_p->ps_rtableid == (u_int)rtableid)
 		return (0);
-	if (p->p_p->ps_rdomain != 0 && (error = suser(p, 0)) != 0)
+	if (p->p_p->ps_rtableid != 0 && (error = suser(p, 0)) != 0)
 		return (error);
-	if (rdomain < 0 || !rtable_exists((u_int)rdomain))
+	if (rtableid < 0 || !rtable_exists((u_int)rtableid))
 		return (EINVAL);
 
-	p->p_p->ps_rdomain = (u_int)rdomain;
+	p->p_p->ps_rtableid = (u_int)rtableid;
 	return (0);
 }
 
 /* ARGSUSED */
 int
-sys_getrdomain(struct proc *p, void *v, register_t *retval)
+sys_getrtable(struct proc *p, void *v, register_t *retval)
 {
-	*retval = (int)p->p_p->ps_rdomain;
+	*retval = (int)p->p_p->ps_rtableid;
 	return (0);
 }

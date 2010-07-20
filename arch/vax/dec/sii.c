@@ -1,4 +1,4 @@
-/*	$OpenBSD: sii.c,v 1.9 2010/05/20 00:55:17 krw Exp $	*/
+/*	$OpenBSD: sii.c,v 1.11 2010/06/28 18:31:01 krw Exp $	*/
 /*	$NetBSD: sii.c,v 1.42 2000/06/02 20:20:29 mhitch Exp $	*/
 /*
  * Copyright (c) 2008 Miodrag Vallat.
@@ -170,13 +170,6 @@ struct scsi_adapter sii_scsiswitch = {
 	NULL
 };
 
-struct scsi_device sii_scsidev = {
-	NULL,
-	NULL,
-	NULL,
-	NULL
-};
-
 void
 sii_attach(sc)
 	struct sii_softc *sc;
@@ -208,7 +201,6 @@ sii_attach(sc)
 	sc->sc_link.adapter_buswidth = 8;
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_regs->id & SII_IDMSK;
-	sc->sc_link.device = &sii_scsidev;
 	sc->sc_link.openings = 1;	/* driver can't queue requests yet */
 
 	/*
@@ -817,7 +809,7 @@ again:
 			if (state->cmdlen > 0) {
 				printf("%s: device %d: cmd 0x%x: command data not all sent (%d) 1\n",
 					sc->sc_dev.dv_xname, sc->sc_target,
-					sc->sc_xs[sc->sc_target]->cmd[0],
+					sc->sc_xs[sc->sc_target]->cmd->opcode,
 					state->cmdlen);
 				state->cmdlen = 0;
 #ifdef DEBUG
@@ -899,7 +891,7 @@ again:
 			if (state->cmdlen > 0) {
 				printf("%s: device %d: cmd 0x%x: command data not all sent (%d) 2\n",
 					sc->sc_dev.dv_xname, sc->sc_target,
-					sc->sc_xs[sc->sc_target]->cmd[0],
+					sc->sc_xs[sc->sc_target]->cmd->opcode,
 					state->cmdlen);
 				state->cmdlen = 0;
 #ifdef DEBUG
@@ -1692,7 +1684,8 @@ sii_CmdDone(sc, target, error)
 	if (sii_debug > 1) {
 		printf("sii_CmdDone: %s target %d cmd 0x%x err %d resid %d\n",
 			sc->sc_dev.dv_xname,
-			target, xs->cmd[0], error, sc->sc_st[target].buflen);
+			target, xs->cmd->opcode, error,
+			sc->sc_st[target].buflen);
 	}
 #endif
 

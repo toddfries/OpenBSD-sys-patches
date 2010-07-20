@@ -1,4 +1,4 @@
-/*	$OpenBSD: ess.c,v 1.14 2008/10/25 22:30:43 jakemsr Exp $	*/
+/*	$OpenBSD: ess.c,v 1.16 2010/07/15 03:43:11 jakemsr Exp $	*/
 /*	$NetBSD: ess.c,v 1.44.4.1 1999/06/21 01:18:00 thorpej Exp $	*/
 
 /*
@@ -1141,52 +1141,55 @@ ess_query_encoding(addr, fp)
 		fp->encoding = AUDIO_ENCODING_ULINEAR;
 		fp->precision = 8;
 		fp->flags = 0;
-		return (0);
+		break;
 	case 1:
 		strlcpy(fp->name, AudioEmulaw, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULAW;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 2:
 		strlcpy(fp->name, AudioEalaw, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ALAW;
 		fp->precision = 8;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 3:
 		strlcpy(fp->name, AudioEslinear, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR;
 		fp->precision = 8;
 		fp->flags = 0;
-		return (0);
+		break;
 	case 4:
 		strlcpy(fp->name, AudioEslinear_le, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR_LE;
 		fp->precision = 16;
 		fp->flags = 0;
-		return (0);
+		break;
 	case 5:
 		strlcpy(fp->name, AudioEulinear_le, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULINEAR_LE;
 		fp->precision = 16;
 		fp->flags = 0;
-		return (0);
+		break;
 	case 6:
 		strlcpy(fp->name, AudioEslinear_be, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_SLINEAR_BE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	case 7:
 		strlcpy(fp->name, AudioEulinear_be, sizeof fp->name);
 		fp->encoding = AUDIO_ENCODING_ULINEAR_BE;
 		fp->precision = 16;
 		fp->flags = AUDIO_ENCODINGFLAG_EMULATED;
-		return (0);
+		break;
 	default:
 		return EINVAL;
 	}
+	fp->bps = AUDIO_BPS(fp->precision);
+	fp->msb = 1;
+
 	return (0);
 }
 
@@ -1266,6 +1269,8 @@ ess_set_params(addr, setmode, usemode, play, rec)
 		default:
 			return (EINVAL);
 		}
+		p->bps = AUDIO_BPS(p->precision);
+		p->msb = 1;
 	}
 
 	if (usemode == AUMODE_RECORD)
@@ -1310,7 +1315,7 @@ ess_audio1_trigger_output(addr, start, end, blksize, intr, arg, param)
 		sc->sc_audio1.buffersize = (char *)end - (char *)start;
 		sc->sc_audio1.dmacount = 0;
 		sc->sc_audio1.blksize = blksize;
-		timeout_add(&sc->sc_tmo1, hz/30);
+		timeout_add_msec(&sc->sc_tmo1, 1000/30);
 	}
 
 	reg = ess_read_x_reg(sc, ESS_XCMD_AUDIO_CTRL);
@@ -1388,7 +1393,7 @@ ess_audio2_trigger_output(addr, start, end, blksize, intr, arg, param)
 		sc->sc_audio2.buffersize = (char *)end - (char *)start;
 		sc->sc_audio2.dmacount = 0;
 		sc->sc_audio2.blksize = blksize;
-		timeout_add(&sc->sc_tmo2, hz/30);
+		timeout_add_msec(&sc->sc_tmo2, 1000/30);
 	}
 
 	reg = ess_read_mix_reg(sc, ESS_MREG_AUDIO2_CTRL2);
@@ -1457,7 +1462,7 @@ ess_audio1_trigger_input(addr, start, end, blksize, intr, arg, param)
 		sc->sc_audio1.buffersize = (char *)end - (char *)start;
 		sc->sc_audio1.dmacount = 0;
 		sc->sc_audio1.blksize = blksize;
-		timeout_add(&sc->sc_tmo1, hz/30);
+		timeout_add_msec(&sc->sc_tmo1, 1000/30);
 	}
 
 	reg = ess_read_x_reg(sc, ESS_XCMD_AUDIO_CTRL);
@@ -1627,7 +1632,7 @@ ess_audio1_poll(addr)
 	(*sc->sc_audio1.intr)(sc->sc_audio1.arg, dmacount);
 #endif
 
-	timeout_add(&sc->sc_tmo1, hz/30);
+	timeout_add_msec(&sc->sc_tmo1, 1000/30);
 }
 
 void
@@ -1658,7 +1663,7 @@ ess_audio2_poll(addr)
 	(*sc->sc_audio2.intr)(sc->sc_audio2.arg, dmacount);
 #endif
 
-	timeout_add(&sc->sc_tmo2, hz/30);
+	timeout_add_msec(&sc->sc_tmo2, 1000/30);
 }
 
 int
