@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.465 2009/11/23 16:21:54 pirofti Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.478 2010/07/05 22:20:22 tedu Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -195,6 +195,14 @@ int	bufpages = 0;
 #endif
 int	bufcachepercent = BUFCACHEPERCENT;
 
+struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
+struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
+struct uvm_constraint_range *uvm_md_constraints[] = {
+	&isa_constraint,
+	&dma_constraint,
+	NULL
+};
+
 extern int	boothowto;
 int	physmem;
 
@@ -234,6 +242,12 @@ void (*update_cpuspeed)(void) = NULL;
 void	via_update_sensor(void *args);
 #endif
 int kbd_reset;
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int	safepri = 0;
 
 #if !defined(SMALL_KERNEL)
 int bus_clock;
@@ -993,15 +1007,29 @@ const struct cpu_cpuid_feature i386_cpuid_features[] = {
 
 const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_SSE3,	"SSE3" },
+	{ CPUIDECX_PCLMUL,	"PCLMUL" },
 	{ CPUIDECX_MWAIT,	"MWAIT" },
 	{ CPUIDECX_DSCPL,	"DS-CPL" },
 	{ CPUIDECX_VMX,		"VMX" },
 	{ CPUIDECX_SMX,		"SMX" },
 	{ CPUIDECX_EST,		"EST" },
 	{ CPUIDECX_TM2,		"TM2" },
+	{ CPUIDECX_SSSE3,	"SSSE3" },
 	{ CPUIDECX_CNXTID,	"CNXT-ID" },
+	{ CPUIDECX_FMA3,	"FMA3" },
 	{ CPUIDECX_CX16,	"CX16" },
 	{ CPUIDECX_XTPR,	"xTPR" },
+	{ CPUIDECX_PDCM,	"PDCM" },
+	{ CPUIDECX_DCA,		"DCA" },
+	{ CPUIDECX_SSE41,	"SSE4.1" },
+	{ CPUIDECX_SSE42,	"SSE4.2" },
+	{ CPUIDECX_X2APIC,	"x2APIC" },
+	{ CPUIDECX_MOVBE,	"MOVBE" },
+	{ CPUIDECX_POPCNT,	"POPCNT" },
+	{ CPUIDECX_AES,		"AES" },
+	{ CPUIDECX_XSAVE,	"XSAVE" },
+	{ CPUIDECX_OSXSAVE,	"OSXSAVE" },
+	{ CPUIDECX_AVX,		"AVX" },
 };
 
 void
@@ -1081,13 +1109,15 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 	case 13: /* C7-M Type D */
 	case 15: /* Nano */
 #if !defined(SMALL_KERNEL)
-		/* Setup the sensors structures */
-		strlcpy(ci->ci_sensordev.xname, ci->ci_dev.dv_xname,
-		    sizeof(ci->ci_sensordev.xname));
-		ci->ci_sensor.type = SENSOR_TEMP;
-		sensor_task_register(ci, via_update_sensor, 5);
-		sensor_attach(&ci->ci_sensordev, &ci->ci_sensor);
-		sensordev_install(&ci->ci_sensordev);
+		if (model == 10 || model == 13 || model == 15) {
+			/* Setup the sensors structures */
+			strlcpy(ci->ci_sensordev.xname, ci->ci_dev.dv_xname,
+			    sizeof(ci->ci_sensordev.xname));
+			ci->ci_sensor.type = SENSOR_TEMP;
+			sensor_task_register(ci, via_update_sensor, 5);
+			sensor_attach(&ci->ci_sensordev, &ci->ci_sensor);
+			sensordev_install(&ci->ci_sensordev);
+		}
 #endif
 
 	default:
@@ -1223,7 +1253,7 @@ cyrix6x86_cpu_setup(struct cpu_info *ci)
 		/* cyrix's workaround  for the "coma bug" */
 		cyrix_write_reg(0x31, cyrix_read_reg(0x31) | 0xf8);
 		cyrix_write_reg(0x32, cyrix_read_reg(0x32) | 0x7f);
-		cyrix_write_reg(0x33, cyrix_read_reg(0x33) & ~0xff);
+		cyrix_read_reg(0x33); cyrix_write_reg(0x33, 0);
 		cyrix_write_reg(0x3c, cyrix_read_reg(0x3c) | 0x87);
 		/* disable access to ccr4/ccr5 */
 		cyrix_write_reg(0xC3, cyrix_read_reg(0xC3) & ~0x10);
@@ -1718,6 +1748,29 @@ identifycpu(struct cpu_info *ci)
 		}
 	}
 
+	if (vendor == CPUVENDOR_INTEL) {
+		/*
+		 * PIII, Core Solo and Core Duo CPUs have known
+		 * errata stating:
+		 * "Page with PAT set to WC while associated MTRR is UC
+		 * may consolidate to UC".
+		 * Because of this it is best we just fallback to mtrrs
+		 * in this case.
+		 */
+		if (ci->ci_family == 6 && ci->ci_model < 15)
+		    ci->ci_feature_flags &= ~CPUID_PAT;
+
+		if (ci->ci_feature_flags & CPUID_CFLUSH) {
+			/* to get the cacheline size you must do cpuid
+			 * with eax 0x01
+			 */
+			u_int regs[4];
+
+			cpuid(0x01, regs); 
+			ci->ci_cflushsz = ((regs[1] >> 8) & 0xff) * 8;
+		}
+	}
+
 	/* Remove leading and duplicated spaces from cpu_brandstr */
 	brandstr_from = brandstr_to = cpu_brandstr;
 	skipspace = 1;
@@ -2002,9 +2055,6 @@ p3_get_bus_clock(struct cpu_info *ci)
 			goto print_msr;
 		}
 		break;
-       case 0x1a: /* Nehalem based Core i7 and Xeon */
-               bus_clock = BUS133;
-               break;
 	case 0x1c: /* Atom */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
@@ -2049,6 +2099,10 @@ p3_get_bus_clock(struct cpu_info *ci)
 			    ci->ci_dev.dv_xname, bus);
 			goto print_msr;
 		}
+		break;
+	case 0x1a: /* Core i7 */
+	case 0x1e: /* Core i5 */
+	case 0x25: /* Core i3 */
 		break;
 	default: 
 		printf("%s: unknown i686 model 0x%x, can't get bus clock",
@@ -2124,8 +2178,8 @@ void
 sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
     union sigval val)
 {
-	extern char sigcode, sigcode_xmm;
 	struct proc *p = curproc;
+	union savefpu *sfp = &p->p_addr->u_pcb.pcb_savefpu;
 	struct trapframe *tf = p->p_md.md_regs;
 	struct sigframe *fp, frame;
 	struct sigacts *psp = p->p_sigacts;
@@ -2147,11 +2201,23 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	} else
 		sp = tf->tf_esp;
 
-	frame.sf_fpstate = NULL;
+	frame.sf_sc.sc_fpstate = NULL;
 	if (p->p_md.md_flags & MDP_USEDFPU) {
+		npxsave_proc(p, 1);
 		sp -= sizeof(union savefpu);
-		sp &= ~0xf;	/* foe XMM regs */
-		frame.sf_fpstate = (void *)sp;
+		sp &= ~0xf;	/* for XMM regs */
+		frame.sf_sc.sc_fpstate = (void *)sp;
+		if (copyout(&p->p_addr->u_pcb.pcb_savefpu,
+		    (void *)sp, sizeof(union savefpu)))
+			sigexit(p, SIGILL);
+
+		/* Signal handlers get a completely clean FP state */
+		p->p_md.md_flags &= ~MDP_USEDFPU;
+		if (i386_use_fxsave) {
+			sfp->sv_xmm.sv_env.en_cw = __OpenBSD_NPXCW__;
+			sfp->sv_xmm.sv_env.en_mxcsr = __INITIAL_MXCSR__;
+		} else
+			sfp->sv_87.sv_env.en_cw = __OpenBSD_NPXCW__;
 	}
 
 	fp = (struct sigframe *)sp - 1;
@@ -2222,8 +2288,6 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_eip = p->p_sigcode;
 	tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
-	if (i386_use_fxsave)
-		tf->tf_eip += &sigcode_xmm - &sigcode;
 	tf->tf_eflags &= ~(PSL_T|PSL_D|PSL_VM|PSL_AC);
 	tf->tf_esp = (int)fp;
 	tf->tf_ss = GSEL(GUDATA_SEL, SEL_UPL);
@@ -2246,9 +2310,8 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 		syscallarg(struct sigcontext *) sigcntxp;
 	} */ *uap = v;
 	struct sigcontext *scp, context;
-	struct trapframe *tf;
-
-	tf = p->p_md.md_regs;
+	struct trapframe *tf = p->p_md.md_regs;
+	int error;
 
 	/*
 	 * The trampoline code hands us the context.
@@ -2299,6 +2362,16 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	tf->tf_cs = context.sc_cs;
 	tf->tf_esp = context.sc_esp;
 	tf->tf_ss = context.sc_ss;
+
+	if (p->p_md.md_flags & MDP_USEDFPU)
+		npxsave_proc(p, 0);
+
+	if (context.sc_fpstate) {
+		if ((error = copyin(context.sc_fpstate,
+		    &p->p_addr->u_pcb.pcb_savefpu, sizeof (union savefpu))))
+			return (error);
+		p->p_md.md_flags |= MDP_USEDFPU;
+	}
 
 	if (context.sc_onstack & 01)
 		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
@@ -2659,8 +2732,13 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	tf->tf_gs = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_es = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
+	tf->tf_edi = 0;
+	tf->tf_esi = 0;
 	tf->tf_ebp = 0;
 	tf->tf_ebx = (int)PS_STRINGS;
+	tf->tf_edx = 0;
+	tf->tf_ecx = 0;
+	tf->tf_eax = 0;
 	tf->tf_eip = pack->ep_entry;
 	tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
 	tf->tf_eflags = PSL_USERSET;
@@ -2853,16 +2931,6 @@ init386(paddr_t first_avail)
 	    SDT_MEMRWA, SEL_UPL, 1, 1);
 	setsegment(&gdt[GCPU_SEL].sd, &cpu_info_primary,
 	    sizeof(struct cpu_info)-1, SDT_MEMRWA, SEL_KPL, 0, 0);
-
-	/* make ldt gates and memory segments */
-#ifdef COMPAT_IBCS2
-	setgate(&ldt[LSYS5CALLS_SEL].gd, &IDTVEC(osyscall), 1, SDT_SYS386CGT,
-	    SEL_UPL, GCODE_SEL);
-#endif
-#ifdef COMPAT_BSDOS
-	setgate(&ldt[LBSDICALLS_SEL].gd, &IDTVEC(osyscall), 1, SDT_SYS386CGT,
-	    SEL_UPL, GCODE_SEL);
-#endif
 
 	/* exceptions */
 	setgate(&idt[  0], &IDTVEC(div),     0, SDT_SYS386TGT, SEL_KPL, GCODE_SEL);
@@ -3521,9 +3589,10 @@ int
 bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
     bus_space_handle_t *bshp)
 {
-	u_long pa, endpa;
+	paddr_t pa, endpa;
 	vaddr_t va;
 	bus_size_t map_size;
+	int pmap_flags = PMAP_NOCACHE;
 
 	pa = trunc_page(bpa);
 	endpa = round_page(bpa + size);
@@ -3541,10 +3610,15 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
 
 	*bshp = (bus_space_handle_t)(va + (bpa & PGOFSET));
 
+	if (flags & BUS_SPACE_MAP_CACHEABLE)
+		pmap_flags = 0;
+	else if (flags & BUS_SPACE_MAP_PREFETCHABLE)
+		pmap_flags = PMAP_WC;
+
 	for (; map_size > 0;
 	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE)
-		pmap_kenter_pa(va, pa | ((flags & BUS_SPACE_MAP_CACHEABLE) ?
-		    0 : PMAP_NOCACHE), VM_PROT_READ | VM_PROT_WRITE);
+		pmap_kenter_pa(va, pa | pmap_flags,
+		    VM_PROT_READ | VM_PROT_WRITE);
 	pmap_update(pmap_kernel());
 
 	return 0;

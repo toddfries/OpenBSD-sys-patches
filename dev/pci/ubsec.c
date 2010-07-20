@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubsec.c,v 1.144 2009/09/13 14:42:52 krw Exp $	*/
+/*	$OpenBSD: ubsec.c,v 1.147 2010/07/02 02:40:16 blambert Exp $	*/
 
 /*
  * Copyright (c) 2000 Jason L. Wright (jason@thought.net)
@@ -40,7 +40,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/errno.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
@@ -744,7 +744,7 @@ ubsec_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			MD5Update(&md5ctx, macini->cri_key,
 			    macini->cri_klen / 8);
 			MD5Update(&md5ctx, hmac_ipad_buffer,
-			    HMAC_BLOCK_LEN - (macini->cri_klen / 8));
+			    HMAC_MD5_BLOCK_LEN - (macini->cri_klen / 8));
 			bcopy(md5ctx.state, ses->ses_hminner,
 			    sizeof(md5ctx.state));
 		} else {
@@ -752,7 +752,7 @@ ubsec_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			SHA1Update(&sha1ctx, macini->cri_key,
 			    macini->cri_klen / 8);
 			SHA1Update(&sha1ctx, hmac_ipad_buffer,
-			    HMAC_BLOCK_LEN - (macini->cri_klen / 8));
+			    HMAC_SHA1_BLOCK_LEN - (macini->cri_klen / 8));
 			bcopy(sha1ctx.state, ses->ses_hminner,
 			    sizeof(sha1ctx.state));
 		}
@@ -765,7 +765,7 @@ ubsec_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			MD5Update(&md5ctx, macini->cri_key,
 			    macini->cri_klen / 8);
 			MD5Update(&md5ctx, hmac_opad_buffer,
-			    HMAC_BLOCK_LEN - (macini->cri_klen / 8));
+			    HMAC_MD5_BLOCK_LEN - (macini->cri_klen / 8));
 			bcopy(md5ctx.state, ses->ses_hmouter,
 			    sizeof(md5ctx.state));
 		} else {
@@ -773,7 +773,7 @@ ubsec_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			SHA1Update(&sha1ctx, macini->cri_key,
 			    macini->cri_klen / 8);
 			SHA1Update(&sha1ctx, hmac_opad_buffer,
-			    HMAC_BLOCK_LEN - (macini->cri_klen / 8));
+			    HMAC_SHA1_BLOCK_LEN - (macini->cri_klen / 8));
 			bcopy(sha1ctx.state, ses->ses_hmouter,
 			    sizeof(sha1ctx.state));
 		}
@@ -957,7 +957,7 @@ ubsec_process(struct cryptop *crp)
 				if (crp->crp_flags & CRYPTO_F_IMBUF)
 					m_copyback(q->q_src_m,
 					    enccrd->crd_inject,
-					    ivlen, key.ses_iv);
+					    ivlen, key.ses_iv, M_NOWAIT);
 				else if (crp->crp_flags & CRYPTO_F_IOV)
 					cuio_copyback(q->q_src_io,
 					    enccrd->crd_inject,
@@ -1463,7 +1463,7 @@ ubsec_callback(struct ubsec_softc *sc, struct ubsec_q *q)
 		if (crp->crp_flags & CRYPTO_F_IMBUF)
 			m_copyback((struct mbuf *)crp->crp_buf,
 			    crd->crd_inject, 12,
-			    dmap->d_dma->d_macbuf);
+			    dmap->d_dma->d_macbuf, M_NOWAIT);
 		else if (crp->crp_flags & CRYPTO_F_IOV && crp->crp_mac)
 			bcopy((caddr_t)dmap->d_dma->d_macbuf,
 			    crp->crp_mac, 12);

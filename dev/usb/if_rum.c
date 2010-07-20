@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rum.c,v 1.87 2009/10/13 19:33:17 pirofti Exp $	*/
+/*	$OpenBSD: if_rum.c,v 1.89 2010/07/02 03:13:42 tedu Exp $	*/
 
 /*-
  * Copyright (c) 2005-2007 Damien Bergamini <damien.bergamini@free.fr>
@@ -26,7 +26,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/sysctl.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -1992,6 +1991,7 @@ rum_init(struct ifnet *ifp)
 	if (ntries == 1000) {
 		printf("%s: timeout waiting for BBP/RF to wakeup\n",
 		    sc->sc_dev.dv_xname);
+		error = ENODEV;
 		goto fail;
 	}
 

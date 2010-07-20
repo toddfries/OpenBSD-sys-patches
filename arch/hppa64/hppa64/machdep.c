@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.19 2009/08/11 19:17:16 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.25 2010/07/01 05:09:27 jsing Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -56,10 +56,6 @@
 #include <machine/reg.h>
 #include <machine/autoconf.h>
 #include <machine/kcore.h>
-
-#ifdef COMPAT_HPUX
-#include <compat/hpux/hpux.h>
-#endif
 
 #ifdef DDB
 #include <machine/db_machdep.h>
@@ -121,9 +117,6 @@ int	cpu_hvers;
 enum hppa_cpu_type cpu_type;
 const char *cpu_typename;
 u_int	fpu_version;
-#ifdef COMPAT_HPUX
-int	cpu_model_hpux;	/* contains HPUX_SYSCONF_CPU* kind of value */
-#endif
 
 dev_t	bootdev;
 int	physmem, resvmem, resvphysmem, esym;
@@ -135,6 +128,7 @@ paddr_t	avail_end;
 struct user *proc0paddr;
 long mem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(32) / sizeof(long)];
 struct extent *hppa_ex;
+struct consdev *cn_tab;
 
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
@@ -146,6 +140,12 @@ static __inline void fall(int, int, int, int, int);
 void dumpsys(void);
 void hpmc_dump(void);
 void cpuid(void);
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int	safepri = 0;
 
 /*
  * wide used hardware params
@@ -161,6 +161,11 @@ int sigdebug = 0;
 pid_t sigpid = 0;
 #define SDB_FOLLOW	0x01
 #endif
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
+int	hppa_cpuspeed(int *mhz);
 
 int
 hppa_cpuspeed(int *mhz)
@@ -377,7 +382,7 @@ cpu_startup(void)
 	 */
 	printf("%s%s\n", version, cpu_model);
 	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
-	    ptoa((psize_t)phsymem) / 1024 / 1024);
+	    ptoa((psize_t)physmem) / 1024 / 1024);
 	printf("rsvd mem = %u (%uKB)\n", ptoa(resvmem), ptoa(resvmem) / 1024);
 
 printf("here3\n");

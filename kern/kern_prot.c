@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_prot.c,v 1.39 2009/06/02 20:03:59 guenther Exp $	*/
+/*	$OpenBSD: kern_prot.c,v 1.45 2010/07/01 02:41:12 guenther Exp $	*/
 /*	$NetBSD: kern_prot.c,v 1.33 1996/02/09 18:59:42 christos Exp $	*/
 
 /*
@@ -46,7 +46,6 @@
 #include <sys/systm.h>
 #include <sys/ucred.h>
 #include <sys/proc.h>
-#include <sys/timeb.h>
 #include <sys/times.h>
 #include <sys/malloc.h>
 #include <sys/filedesc.h>
@@ -60,24 +59,21 @@ int
 sys_getpid(struct proc *p, void *v, register_t *retval)
 {
 
-	*retval = p->p_p->ps_mainproc->p_pid;
-#if defined(COMPAT_43) || defined(COMPAT_SUNOS) || defined(COMPAT_IBCS2) || \
-    defined(COMPAT_FREEBSD) || defined(COMPAT_BSDOS)
+	retval[0] = p->p_p->ps_mainproc->p_pid;
 	retval[1] = p->p_p->ps_mainproc->p_pptr->p_pid;
-#endif
 	return (0);
 }
 
-#ifdef RTHREADS
 /* ARGSUSED */
 int
 sys_getthrid(struct proc *p, void *v, register_t *retval)
 {
 
-	*retval = p->p_pid + (p->p_flag & P_THREAD ? 0 : THREAD_PID_OFFSET);
+	if (!rthreads_enabled)
+		return (ENOTSUP);
+	*retval = p->p_pid + THREAD_PID_OFFSET;
 	return (0);
 }
-#endif
 
 /* ARGSUSED */
 int
@@ -146,11 +142,8 @@ int
 sys_getuid(struct proc *p, void *v, register_t *retval)
 {
 
-	*retval = p->p_cred->p_ruid;
-#if defined(COMPAT_43) || defined(COMPAT_SUNOS) || defined(COMPAT_IBCS2) || \
-    defined(COMPAT_FREEBSD) || defined(COMPAT_BSDOS)
+	retval[0] = p->p_cred->p_ruid;
 	retval[1] = p->p_ucred->cr_uid;
-#endif
 	return (0);
 }
 
@@ -179,10 +172,8 @@ int
 sys_getgid(struct proc *p, void *v, register_t *retval)
 {
 
-	*retval = p->p_cred->p_rgid;
-#if defined(COMPAT_43) || defined(COMPAT_SUNOS) || defined(COMPAT_FREEBSD) || defined(COMPAT_BSDOS)
+	retval[0] = p->p_cred->p_rgid;
 	retval[1] = p->p_ucred->cr_gid;
-#endif
 	return (0);
 }
 
@@ -282,7 +273,7 @@ sys_setpgid(struct proc *curp, void *v, register_t *retval)
 	newpgrp = pool_get(&pgrp_pool, PR_WAITOK);
 
 	if (pid != 0 && pid != curp->p_pid) {
-		if ((targp = pfind(pid)) == 0 || !inferior(targp)) {
+		if ((targp = pfind(pid)) == 0 || !inferior(targp, curp)) {
 			error = ESRCH;
 			goto out;
 		}
@@ -891,7 +882,7 @@ proc_cansugid(struct proc *p)
 	if ((p->p_flag & P_TRACED) != 0)
 		return (0);
 
-	/* proceses with shared filedescriptors shouldn't. */
+	/* processes with shared filedescriptors shouldn't. */
 	if (p->p_fd->fd_refcnt > 1)
 		return (0);
 

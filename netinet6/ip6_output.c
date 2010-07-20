@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.110 2009/11/25 07:37:29 mpf Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.116 2010/07/09 16:58:06 reyk Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -119,21 +119,21 @@ struct ip6_exthdrs {
 	struct mbuf *ip6e_dest2;
 };
 
-static int ip6_pcbopt(int, u_char *, int, struct ip6_pktopts **, int, int);
-static int ip6_pcbopts(struct ip6_pktopts **, struct mbuf *, struct socket *);
-static int ip6_getpcbopt(struct ip6_pktopts *, int, struct mbuf **);
-static int ip6_setpktopt(int, u_char *, int, struct ip6_pktopts *, int, int,
+int ip6_pcbopt(int, u_char *, int, struct ip6_pktopts **, int, int);
+int ip6_pcbopts(struct ip6_pktopts **, struct mbuf *, struct socket *);
+int ip6_getpcbopt(struct ip6_pktopts *, int, struct mbuf **);
+int ip6_setpktopt(int, u_char *, int, struct ip6_pktopts *, int, int,
 	int, int);
-static int ip6_setmoptions(int, struct ip6_moptions **, struct mbuf *);
-static int ip6_getmoptions(int, struct ip6_moptions *, struct mbuf **);
-static int ip6_copyexthdr(struct mbuf **, caddr_t, int);
-static int ip6_insertfraghdr(struct mbuf *, struct mbuf *, int,
+int ip6_setmoptions(int, struct ip6_moptions **, struct mbuf *);
+int ip6_getmoptions(int, struct ip6_moptions *, struct mbuf **);
+int ip6_copyexthdr(struct mbuf **, caddr_t, int);
+int ip6_insertfraghdr(struct mbuf *, struct mbuf *, int,
 	struct ip6_frag **);
-static int ip6_insert_jumboopt(struct ip6_exthdrs *, u_int32_t);
-static int ip6_splithdr(struct mbuf *, struct ip6_exthdrs *);
-static int ip6_getpmtu(struct route_in6 *, struct route_in6 *,
+int ip6_insert_jumboopt(struct ip6_exthdrs *, u_int32_t);
+int ip6_splithdr(struct mbuf *, struct ip6_exthdrs *);
+int ip6_getpmtu(struct route_in6 *, struct route_in6 *,
 	struct ifnet *, struct in6_addr *, u_long *, int *);
-static int copypktopts(struct ip6_pktopts *, struct ip6_pktopts *, int);
+int copypktopts(struct ip6_pktopts *, struct ip6_pktopts *, int);
 
 /* Context for non-repeating IDs */
 struct idgen32_ctx ip6_id_ctx;
@@ -153,8 +153,8 @@ struct idgen32_ctx ip6_id_ctx;
  */
 int
 ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
-	int flags, struct ip6_moptions *im6o, struct ifnet **ifpp, 
-	struct inpcb *inp)
+    int flags, struct ip6_moptions *im6o, struct ifnet **ifpp, 
+    struct inpcb *inp)
 {
 	struct ip6_hdr *ip6, *mhip6;
 	struct ifnet *ifp, *origifp = NULL;
@@ -180,6 +180,9 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 	u_int32_t sspi;
 	struct tdb *tdb;
 	int s;
+#if NPF > 0
+	struct ifnet *encif;
+#endif
 #endif /* IPSEC */
 
 #ifdef IPSEC
@@ -239,7 +242,7 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 			    mtag->m_tag_len, sizeof (struct tdb_ident));
 #endif
 		tdbi = (struct tdb_ident *)(mtag + 1);
-		tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+		tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst, tdbi->proto);
 		if (tdb == NULL)
 			error = -EINVAL;
 		m_tag_delete(m, mtag);
@@ -280,6 +283,7 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 			tdbi = (struct tdb_ident *)(mtag + 1);
 			if (tdbi->spi == tdb->tdb_spi &&
 			    tdbi->proto == tdb->tdb_sproto &&
+			    tdbi->rdomain == tdb->tdb_rdomain &&
 			    !bcmp(&tdbi->dst, &tdb->tdb_dst,
 			    sizeof(union sockaddr_union))) {
 				splx(s);
@@ -501,8 +505,24 @@ reroute:
 	if (sproto != 0) {
 	        s = splnet();
 
+		/*
+		 * XXX what should we do if ip6_hlim == 0 and the
+		 * packet gets tunneled?
+		 */
+
+		tdb = gettdb(rtable_l2(m->m_pkthdr.rdomain),
+		    sspi, &sdst, sproto);
+		if (tdb == NULL) {
+			splx(s);
+			error = EHOSTUNREACH;
+			m_freem(m);
+			goto done;
+		}
+
 #if NPF > 0
-		if (pf_test6(PF_OUT, &encif[0].sc_if, &m, NULL) != PF_PASS) {
+		if ((encif = enc_getif(tdb->tdb_rdomain,
+		    tdb->tdb_tap)) == NULL ||
+		    pf_test6(PF_OUT, encif, &m, NULL) != PF_PASS) {
 			splx(s);
 			error = EHOSTUNREACH;
 			m_freem(m);
@@ -521,18 +541,6 @@ reroute:
 		 * What's the behaviour?
 		 */
 #endif
-		/*
-		 * XXX what should we do if ip6_hlim == 0 and the
-		 * packet gets tunneled?
-		 */
-
-		tdb = gettdb(sspi, &sdst, sproto);
-		if (tdb == NULL) {
-			splx(s);
-			error = EHOSTUNREACH;
-			m_freem(m);
-			goto done;
-		}
 
 		m->m_flags &= ~(M_BCAST | M_MCAST);	/* just in case */
 
@@ -1033,7 +1041,7 @@ bad:
 	goto done;
 }
 
-static int
+int
 ip6_copyexthdr(struct mbuf **mp, caddr_t hdr, int hlen)
 {
 	struct mbuf *m;
@@ -1063,7 +1071,7 @@ ip6_copyexthdr(struct mbuf **mp, caddr_t hdr, int hlen)
 /*
  * Insert jumbo payload option.
  */
-static int
+int
 ip6_insert_jumboopt(struct ip6_exthdrs *exthdrs, u_int32_t plen)
 {
 	struct mbuf *mopt;
@@ -1158,9 +1166,9 @@ ip6_insert_jumboopt(struct ip6_exthdrs *exthdrs, u_int32_t plen)
 /*
  * Insert fragment header and copy unfragmentable header portions.
  */
-static int
+int
 ip6_insertfraghdr(struct mbuf *m0, struct mbuf *m, int hlen, 
-	struct ip6_frag **frghdrp)
+    struct ip6_frag **frghdrp)
 {
 	struct mbuf *n, *mlast;
 
@@ -1199,10 +1207,9 @@ ip6_insertfraghdr(struct mbuf *m0, struct mbuf *m, int hlen,
 	return (0);
 }
 
-static int
+int
 ip6_getpmtu(struct route_in6 *ro_pmtu, struct route_in6 *ro, 
-	struct ifnet *ifp, struct in6_addr *dst, u_long *mtup, 
-	int *alwaysfragp)
+    struct ifnet *ifp, struct in6_addr *dst, u_long *mtup, int *alwaysfragp)
 {
 	u_int32_t mtu = 0;
 	int alwaysfrag = 0;
@@ -1219,7 +1226,7 @@ ip6_getpmtu(struct route_in6 *ro_pmtu, struct route_in6 *ro,
 			ro_pmtu->ro_rt = (struct rtentry *)NULL;
 		}
 		if (ro_pmtu->ro_rt == 0) {
-			bzero(sa6_dst, sizeof(*sa6_dst));
+			bzero(ro_pmtu, sizeof(*ro_pmtu));
 			sa6_dst->sin6_family = AF_INET6;
 			sa6_dst->sin6_len = sizeof(struct sockaddr_in6);
 			sa6_dst->sin6_addr = *dst;
@@ -1276,7 +1283,7 @@ ip6_getpmtu(struct route_in6 *ro_pmtu, struct route_in6 *ro,
  */
 int
 ip6_ctloutput(int op, struct socket *so, int level, int optname, 
-	struct mbuf **mp)
+    struct mbuf **mp)
 {
 	int privileged, optdatalen, uproto;
 	void *optdata;
@@ -1632,8 +1639,8 @@ do { \
 				}
 				tdbip = mtod(m, struct tdb_ident *);
 				s = spltdb();
-				tdb = gettdb(tdbip->spi, &tdbip->dst,
-				    tdbip->proto);
+				tdb = gettdb(tdbip->rdomain, tdbip->spi,
+				    &tdbip->dst, tdbip->proto);
 				if (tdb == NULL)
 					error = ESRCH;
 				else
@@ -1904,6 +1911,8 @@ do { \
 					tdbi.spi = inp->inp_tdb_out->tdb_spi;
 					tdbi.dst = inp->inp_tdb_out->tdb_dst;
 					tdbi.proto = inp->inp_tdb_out->tdb_sproto;
+					tdbi.rdomain =
+					    inp->inp_tdb_out->tdb_rdomain;
 					*mp = m = m_get(M_WAIT, MT_SOOPTS);
 					m->m_len = sizeof(tdbi);
 					bcopy((caddr_t)&tdbi, mtod(m, caddr_t),
@@ -1962,7 +1971,7 @@ do { \
 
 int
 ip6_raw_ctloutput(int op, struct socket *so, int level, int optname, 
-	struct mbuf **mp)
+    struct mbuf **mp)
 {
 	int error = 0, optval;
 	const int icmp6off = offsetof(struct icmp6_hdr, icmp6_cksum);
@@ -2035,7 +2044,7 @@ ip6_raw_ctloutput(int op, struct socket *so, int level, int optname,
  * Store in mbuf with pointer in pcbopt, adding pseudo-option
  * with destination address if source routed.
  */
-static int
+int
 ip6_pcbopts(struct ip6_pktopts **pktopt, struct mbuf *m, struct socket *so)
 {
 	struct ip6_pktopts *opt = *pktopt;
@@ -2087,9 +2096,9 @@ ip6_initpktopts(struct ip6_pktopts *opt)
 }
 
 #define sin6tosa(sin6)	((struct sockaddr *)(sin6)) /* XXX */
-static int
+int
 ip6_pcbopt(int optname, u_char *buf, int len, struct ip6_pktopts **pktopt,
-	int priv, int uproto)
+    int priv, int uproto)
 {
 	struct ip6_pktopts *opt;
 
@@ -2103,7 +2112,7 @@ ip6_pcbopt(int optname, u_char *buf, int len, struct ip6_pktopts **pktopt,
 	return (ip6_setpktopt(optname, buf, len, opt, priv, 1, 0, uproto));
 }
 
-static int
+int
 ip6_getpcbopt(struct ip6_pktopts *pktopt, int optname, struct mbuf **mp)
 {
 	void *optdata = NULL;
@@ -2259,7 +2268,7 @@ do {\
 	}\
 } while (/*CONSTCOND*/ 0)
 
-static int
+int
 copypktopts(struct ip6_pktopts *dst, struct ip6_pktopts *src, int canwait)
 {
 	dst->ip6po_hlim = src->ip6po_hlim;
@@ -2306,7 +2315,7 @@ ip6_freepcbopts(struct ip6_pktopts *pktopt)
 /*
  * Set the IP6 multicast options in response to user setsockopt().
  */
-static int
+int
 ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 {
 	int error = 0;
@@ -2438,9 +2447,8 @@ ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 			 * address, and choose the outgoing interface.
 			 *   XXX: is it a good approach?
 			 */
-			ro.ro_rt = NULL;
+			bzero(&ro, sizeof(ro));
 			dst = (struct sockaddr_in6 *)&ro.ro_dst;
-			bzero(dst, sizeof(*dst));
 			dst->sin6_len = sizeof(struct sockaddr_in6);
 			dst->sin6_family = AF_INET6;
 			dst->sin6_addr = mreq->ipv6mr_multiaddr;
@@ -2591,7 +2599,7 @@ ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 /*
  * Return the IP6 multicast options in response to user getsockopt().
  */
-static int
+int
 ip6_getmoptions(int optname, struct ip6_moptions *im6o, struct mbuf **mp)
 {
 	u_int *hlim, *loop, *ifindex;
@@ -2656,7 +2664,7 @@ ip6_freemoptions(struct ip6_moptions *im6o)
  */
 int
 ip6_setpktopts(struct mbuf *control, struct ip6_pktopts *opt, 
-	struct ip6_pktopts *stickyopt, int priv, int uproto)
+    struct ip6_pktopts *stickyopt, int priv, int uproto)
 {
 	u_int clen;
 	struct cmsghdr *cm = 0;
@@ -2722,9 +2730,9 @@ ip6_setpktopts(struct mbuf *control, struct ip6_pktopts *opt,
  * "sticky=1, cmsg=0": RFC3542 socket option
  * "sticky=1, cmsg=1": RFC2292 socket option
  */
-static int
+int
 ip6_setpktopt(int optname, u_char *buf, int len, struct ip6_pktopts *opt,
-	int priv, int sticky, int cmsg, int uproto)
+    int priv, int sticky, int cmsg, int uproto)
 {
 	int minmtupolicy;
 
@@ -3138,7 +3146,7 @@ ip6_mloopback(struct ifnet *ifp, struct mbuf *m, struct sockaddr_in6 *dst)
 /*
  * Chop IPv6 header off from the payload.
  */
-static int
+int
 ip6_splithdr(struct mbuf *m, struct ip6_exthdrs *exthdrs)
 {
 	struct mbuf *mh;
@@ -3162,29 +3170,6 @@ ip6_splithdr(struct mbuf *m, struct ip6_exthdrs *exthdrs)
 	}
 	exthdrs->ip6e_ip6 = m;
 	return 0;
-}
-
-/*
- * Compute IPv6 extension header length.
- */
-int
-ip6_optlen(struct inpcb *inp)
-{
-	int len;
-
-	if (!inp->inp_outputopts6)
-		return 0;
-
-	len = 0;
-#define elen(x) \
-    (((struct ip6_ext *)(x)) ? (((struct ip6_ext *)(x))->ip6e_len + 1) << 3 : 0)
-
-	len += elen(inp->inp_outputopts6->ip6po_hbh);
-	len += elen(inp->inp_outputopts6->ip6po_dest1);
-	len += elen(inp->inp_outputopts6->ip6po_rthdr);
-	len += elen(inp->inp_outputopts6->ip6po_dest2);
-	return len;
-#undef elen
 }
 
 u_int32_t

@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip_gre.c,v 1.34 2009/11/21 14:08:14 claudio Exp $ */
+/*      $OpenBSD: ip_gre.c,v 1.38 2010/06/26 19:49:54 claudio Exp $ */
 /*	$NetBSD: ip_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -43,7 +43,10 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
+#include <sys/protosw.h>
 #include <sys/socket.h>
+#include <sys/socketvar.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <net/if.h>
 #include <net/netisr.h>
@@ -58,6 +61,7 @@
 #include <netinet/ip_var.h>
 #include <netinet/ip_gre.h>
 #include <netinet/if_ether.h>
+#include <netinet/in_pcb.h>
 #else
 #error "ip_gre used without inet"
 #endif
@@ -68,11 +72,19 @@
 #include <netatalk/at_extern.h>
 #endif
 
+#ifdef MPLS
+#include <netmpls/mpls.h>
+#endif
+
 #include "bpfilter.h"
 #include "pf.h"
 
 #if NPF > 0
 #include <net/pfvar.h>
+#endif
+
+#ifdef PIPEX
+#include <net/pipex.h>
 #endif
 
 /* Needs IP headers. */
@@ -174,7 +186,20 @@ gre_input2(m , hlen, proto)
 			schednetisr(NETISR_IPV6);
 			af = AF_INET6;
 			break;
-#endif /* INET6 */
+#endif
+		case 0:
+			/* keepalive reply, retrigger hold timer */
+			gre_recv_keepalive(sc);
+			m_freem(m);
+			return (1);
+#ifdef MPLS
+		case ETHERTYPE_MPLS:
+		case ETHERTYPE_MPLS_MCAST:
+			ifq = &mplsintrq;
+			schednetisr(NETISR_MPLS);
+			af = AF_MPLS;
+			break;
+#endif
 		default:	   /* others not yet supported */
 			return (0);
 		}
@@ -225,6 +250,17 @@ gre_input(struct mbuf *m, ...)
 	        m_freem(m);
 		return;
 	}
+
+#ifdef PIPEX
+    {
+	struct pipex_session *session;
+
+	if ((session = pipex_pptp_lookup_session(m)) != NULL) {
+		if (pipex_pptp_input(m, session) == NULL)
+			return;
+	}
+    }
+#endif
 
 	ret = gre_input2(m, hlen, IPPROTO_GRE);
 	/*
@@ -399,5 +435,41 @@ ipmobile_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
                 return (ENOPROTOOPT);
         }
         /* NOTREACHED */
+}
+
+int
+gre_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
+    struct mbuf *control, struct proc *p)
+{
+#ifdef  PIPEX 
+	if (req == PRU_SEND) {
+		int s;
+		struct inpcb *inp;
+		struct sockaddr_in *sin4;
+		struct in_addr *ina_dst;
+		struct pipex_session *session;
+
+		s = splsoftnet();
+		ina_dst = NULL;
+		if ((so->so_state & SS_ISCONNECTED) != 0) {
+			inp = sotoinpcb(so);
+			if (inp)
+				ina_dst = &inp->inp_laddr;
+		} else if (nam) {
+			sin4 = mtod(nam, struct sockaddr_in *);
+			if (nam->m_len == sizeof(struct sockaddr_in) &&
+			    sin4->sin_family == AF_INET)
+				ina_dst = &sin4->sin_addr;
+		}
+		if (ina_dst != NULL &&
+		    (session = pipex_pptp_userland_lookup_session(m, *ina_dst)))
+			m = pipex_pptp_userland_output(m, session);
+		splx(s);
+
+		if (m == NULL)
+			return (ENOMEM);
+	}
+#endif
+	return rip_usrreq(so, req, m, nam, control, p);
 }
 #endif /* if NGRE > 0 */

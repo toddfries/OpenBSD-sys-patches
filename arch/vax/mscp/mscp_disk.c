@@ -1,4 +1,4 @@
-/*	$OpenBSD: mscp_disk.c,v 1.26 2009/08/13 15:23:13 deraadt Exp $	*/
+/*	$OpenBSD: mscp_disk.c,v 1.29 2010/05/22 17:10:23 deraadt Exp $	*/
 /*	$NetBSD: mscp_disk.c,v 1.30 2001/11/13 07:38:28 lukem Exp $	*/
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -53,6 +53,7 @@
 #include <sys/disk.h>
 #include <sys/disklabel.h>
 #include <sys/ioctl.h>
+#include <sys/dkio.h>
 #include <sys/stat.h>
 #include <sys/fcntl.h>
 #include <sys/reboot.h>
@@ -302,6 +303,9 @@ rastrategy(bp)
 	 * If drive is open `raw' or reading label, let it at it.
 	 */
 	if (ra->ra_state == DK_RDLABEL) {
+		s = splbio();
+		disk_busy(&ra->ra_disk);
+		splx(s);
 		mscp_strategy(bp, ra->ra_dev.dv_parent);
 		return;
 	}
@@ -798,8 +802,21 @@ rriodone(usc, bp)
 	struct buf *bp;
 {
 	int s;
+	struct rx_softc *rx = NULL; /* Wall */
+
+	int unit = DISKUNIT(bp->b_dev);
+#if NRA
+	if (major(bp->b_dev) == RAMAJOR)
+		rx = ra_cd.cd_devs[unit];
+#endif
+#if NRX
+	if (major(bp->b_dev) != RAMAJOR)
+		rx = rx_cd.cd_devs[unit];
+#endif
 
 	s = splbio();
+	disk_unbusy(&rx->ra_disk, bp->b_bcount - bp->b_resid,
+	    bp->b_flags & B_READ);
 	biodone(bp);
 	splx(s);
 }
@@ -832,10 +849,8 @@ rronline(usc, mp)
 	if (dl->d_secpercyl) {
 		dl->d_ncylinders = DL_GETDSIZE(dl) / dl->d_secpercyl;
 		dl->d_type = DTYPE_MSCP;
-		dl->d_rpm = 3600;
 	} else {
 		dl->d_type = DTYPE_FLOPPY;
-		dl->d_rpm = 300;
 	}
 	rrmakelabel(dl, rx->ra_mediaid);
 
@@ -873,7 +888,6 @@ rrmakelabel(dl, type)
 	DL_SETPSIZE(&dl->d_partitions[2], DL_GETDSIZE(dl));
 	DL_SETPOFFSET(&dl->d_partitions[0], 0);
 	DL_SETPOFFSET(&dl->d_partitions[2], 0);
-	dl->d_interleave = 1;
 	dl->d_version = 1;
 	dl->d_magic = dl->d_magic2 = DISKMAGIC;
 	dl->d_checksum = dkcksum(dl);

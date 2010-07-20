@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_icmp.c,v 1.86 2009/11/13 20:54:05 claudio Exp $	*/
+/*	$OpenBSD: ip_icmp.c,v 1.91 2010/07/09 15:44:20 claudio Exp $	*/
 /*	$NetBSD: ip_icmp.c,v 1.19 1996/02/13 23:42:22 christos Exp $	*/
 
 /*
@@ -76,6 +76,7 @@
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
 #include <sys/socket.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -596,7 +597,7 @@ reflect:
 		    m->m_pkthdr.rdomain);
 		if (rt != NULL && icmp_redirtimeout != 0) {
 			(void)rt_timer_add(rt, icmp_redirect_timeout,
-			    icmp_redirect_timeout_q);
+			    icmp_redirect_timeout_q, m->m_pkthdr.rdomain);
 		}
 		if (rt != NULL)
 			rtfree(rt);
@@ -687,7 +688,7 @@ icmp_reflect(struct mbuf *m)
 		dst->sin_addr = ip->ip_src;
 
 		/* keep packet in the original virtual instance */
-		ro.ro_rt = rtalloc1(&ro.ro_dst, 1,
+		ro.ro_rt = rtalloc1(&ro.ro_dst, RT_REPORT,
 		     m->m_pkthdr.rdomain);
 		if (ro.ro_rt == 0) {
 			ipstat.ips_noroute++;
@@ -877,8 +878,13 @@ icmp_mtudisc_clone(struct sockaddr *dst, u_int rtableid)
 	struct rtentry *rt;
 	int error;
 
-	rt = rtalloc1(dst, 1, rtableid);
+	rt = rtalloc1(dst, RT_REPORT, rtableid);
 	if (rt == 0)
+		return (NULL);
+
+	/* Check if the route is actually usable */
+	if (rt->rt_flags & (RTF_REJECT | RTF_BLACKHOLE) ||
+	    (rt->rt_flags & RTF_UP) == 0)
 		return (NULL);
 
 	/* If we didn't get a host route, allocate one */
@@ -901,7 +907,8 @@ icmp_mtudisc_clone(struct sockaddr *dst, u_int rtableid)
 		rtfree(rt);
 		rt = nrt;
 	}
-	error = rt_timer_add(rt, icmp_mtudisc_timeout, ip_mtudisc_timeout_q);
+	error = rt_timer_add(rt, icmp_mtudisc_timeout, ip_mtudisc_timeout_q,
+	    rtableid);
 	if (error) {
 		rtfree(rt);
 		return (NULL);
@@ -973,7 +980,6 @@ icmp_mtudisc(struct icmp *icp, u_int rtableid)
 	rtfree(rt);
 }
 
-/* XXX only handles table 0 right now */
 void
 icmp_mtudisc_timeout(struct rtentry *rt, struct rttimer *r)
 {
@@ -993,12 +999,14 @@ icmp_mtudisc_timeout(struct rtentry *rt, struct rttimer *r)
 		info.rti_flags = rt->rt_flags;   
 
 		sa = *(struct sockaddr_in *)rt_key(rt);
-		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL, 0);
+		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL,
+		    r->rtt_tableid);
 
 		/* Notify TCP layer of increased Path MTU estimate */
 		ctlfunc = inetsw[ip_protox[IPPROTO_TCP]].pr_ctlinput;
 		if (ctlfunc)
-			(*ctlfunc)(PRC_MTUINC,(struct sockaddr *)&sa, 0, NULL);
+			(*ctlfunc)(PRC_MTUINC,(struct sockaddr *)&sa,
+			    r->rtt_tableid, NULL);
 	} else
 		if ((rt->rt_rmx.rmx_locks & RTV_MTU) == 0)
 			rt->rt_rmx.rmx_mtu = 0;
@@ -1025,7 +1033,6 @@ icmp_ratelimit(const struct in_addr *dst, const int type, const int code)
 	return 0;
 }
 
-/* XXX only handles table 0 right now */
 void
 icmp_redirect_timeout(struct rtentry *rt, struct rttimer *r)
 {
@@ -1041,6 +1048,7 @@ icmp_redirect_timeout(struct rtentry *rt, struct rttimer *r)
 		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 		info.rti_flags = rt->rt_flags;   
 
-		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL, 0);
+		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL, 
+		    r->rtt_tableid);
 	}
 }

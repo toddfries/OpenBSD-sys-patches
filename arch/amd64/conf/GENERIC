@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.278 2009/11/24 08:19:27 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.292 2010/07/03 03:59:16 krw Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -54,11 +54,12 @@ acpithinkpad*	at acpi?
 acpivideo*	at acpi?
 acpivout*	at acpivideo?
 acpipwrres*	at acpi?
-#aibs*		at acpi?
+aibs*		at acpi?
 
 mpbios0		at bios0
 
 ipmi0	at mainbus? disable	# IPMI
+#vmt0	at mainbus?		# VMware Tools
 
 option		PCIVERBOSE
 option		USBVERBOSE
@@ -95,6 +96,7 @@ viaenv*	at pci?			# VIA VT82C686A hardware monitor
 wbsio*	at isa? port 0x2e	# Winbond LPC Super I/O
 wbsio*	at isa? port 0x4e
 lm*	at wbsio?
+uguru0	at isa? disable port 0xe0	# ABIT uGuru
 
 aps0	at isa? port 0x1600		# ThinkPad Active Protection System
 
@@ -111,6 +113,7 @@ iic*	at nviic?
 amdpm*	at pci?			# AMD-7xx/8111 and NForce SMBus controller
 iic*	at amdpm?
 
+itherm*	at pci?			# Intel 3400 Thermal Sensor
 adc*	at iic?			# Analog Devices AD7416/AD7417/7418
 adl*	at iic?			# Andigilog aSC7621
 admtemp* at iic?		# Analog Devices ADM1021
@@ -199,6 +202,8 @@ atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
 ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
+uhts*	 at uhidev?		# USB HID touch screen
+wsmouse* at uhts? mux 0
 uts*	at uhub?		# USB touchscreen
 wsmouse* at uts? mux 0
 ukbd*	at uhidev?		# USB keyboard
@@ -212,6 +217,7 @@ axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 cdce*	at uhub?		# CDC Ethernet
+urndis*	at uhub?		# Remote NDIS Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
@@ -219,8 +225,6 @@ url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
 uscanner* at uhub?		# USB Scanners
-usscanner* at uhub?		# USB SCSI scanners, e.g., HP5300
-scsibus* at usscanner?
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
@@ -236,6 +240,7 @@ upgt*	at uhub?		# Conexant/Intersil PrismGT SoftMAC USB
 urtw*	at uhub?		# RealTek 8187
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 uthum*	at uhidev?		# TEMPerHUM sensor
+utrh*	at uhidev?		# USBRH sensor
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 uvideo*	at uhub?		# USB Video
@@ -340,6 +345,8 @@ arc*	at pci?				# Areca RAID Controller
 scsibus* at arc?
 mpi*	at pci?				# LSI Logic Message Passing Interface
 scsibus* at mpi?
+mpii*	at pci?				# LSI Message Passing Interface II
+scsibus* at mpii?
 gdt*	at pci?				# ICP Vortex GDT RAID controllers
 scsibus* at gdt?
 twe*	at pci?				# 3ware Escalade RAID controllers
@@ -379,7 +386,6 @@ sd*	at scsibus?			# SCSI disk drives
 st*	at scsibus?			# SCSI tape drives
 cd*	at scsibus?			# SCSI CD-ROM drives
 ch*	at scsibus?			# SCSI autochangers
-ss*	at scsibus?			# SCSI scanners
 safte*	at scsibus?			# SCSI accessed fault-tolerant encl
 ses*	at scsibus?			# SCSI enclosure services
 uk*	at scsibus?			# unknown SCSI
@@ -391,6 +397,8 @@ fd*	at fdc? flags 0x00
 # IDE controllers
 pciide* at pci? flags 0x0000
 
+wdc0	at isa? disable port 0x1f0 irq 14 flags 0x00
+wdc1	at isa? disable port 0x170 irq 15 flags 0x00
 wdc*	at pcmcia?
 
 # IDE hard drives
@@ -426,6 +434,7 @@ vr*	at pci?				# VIA Rhine ethernet
 #wb*	at pci?				# Winbond W89C840F ethernet
 sf*	at pci?				# Adaptec AIC-6915 ethernet
 sis*	at pci?				# SiS 900/7016 ethernet
+se*	at pci?				# SiS 190/191 ethernet
 #ste*	at pci?				# Sundance ST201 ethernet BORKED
 pcn*	at pci?				# AMD PCnet-PCI Ethernet
 dc*	at pci?				# 21143, "tulip" clone ethernet

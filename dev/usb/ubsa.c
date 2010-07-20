@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubsa.c,v 1.47 2009/10/13 19:33:17 pirofti Exp $ 	*/
+/*	$OpenBSD: ubsa.c,v 1.49 2010/04/22 19:47:30 mk Exp $ 	*/
 /*	$NetBSD: ubsa.c,v 1.5 2002/11/25 00:51:33 fvdl Exp $	*/
 /*-
  * Copyright (c) 2002, Alexander Kabaev <kan.FreeBSD.org>.
@@ -70,7 +70,6 @@
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/poll.h>
-#include <sys/sysctl.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbcdc.h>
@@ -215,10 +214,10 @@ const struct usb_devno ubsa_devs[] = {
 	{ USB_VENDOR_GOHUBS, USB_PRODUCT_GOHUBS_GOCOM232 },
 	/* Peracom */
 	{ USB_VENDOR_PERACOM, USB_PRODUCT_PERACOM_SERIAL1 },
-	/* Qualcomm Inc. ZTE CMDMA MSM modem */
-	{ USB_VENDOR_QUALCOMM3, USB_PRODUCT_QUALCOMM3_CDMA_MSM },
-	/* Qualcomm Inc. AC8700 */
-	{ USB_VENDOR_QUALCOMM3, USB_PRODUCT_QUALCOMM3_AC8700 },
+	/* ZTE Inc. CMDMA MSM modem */
+	{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_CDMA_MSM },
+	/* ZTE Inc. AC8700 */
+	{ USB_VENDOR_ZTE, USB_PRODUCT_ZTE_AC8700 },
 };
 #define ubsa_lookup(v, p) usb_lookup(ubsa_devs, v, p)
 

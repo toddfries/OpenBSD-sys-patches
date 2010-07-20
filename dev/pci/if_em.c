@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.229 2009/11/25 13:28:13 dms Exp $ */
+/* $OpenBSD: if_em.c,v 1.240 2010/06/28 20:24:39 jsg Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -118,14 +118,24 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573L_PL_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573V_PM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82574L },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82574LA },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575EB_COPPER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575EB_SERDES },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575GB_QUAD_CPR },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82575GB_QP_PM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_FIBER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_SERDES },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_QUAD_COPPER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_QUAD_CU_ET2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_NS },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_NS_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_SERDES_QUAD },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82577LC },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82577LM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DC },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_82567V_3 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE_G },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE_GT },
@@ -159,6 +169,7 @@ int  em_probe(struct device *, void *, void *);
 void em_attach(struct device *, struct device *, void *);
 void em_defer_attach(struct device*);
 int  em_detach(struct device *, int);
+int  em_activate(struct device *, int);
 int  em_intr(void *);
 void em_power(int, void *);
 void em_start(struct ifnet *);
@@ -226,7 +237,8 @@ u_int32_t em_fill_descriptors(u_int64_t address, u_int32_t length,
  *********************************************************************/
 
 struct cfattach em_ca = {
-	sizeof(struct em_softc), em_probe, em_attach, em_detach
+	sizeof(struct em_softc), em_probe, em_attach, em_detach,
+	em_activate
 };
 
 struct cfdriver em_cd = {
@@ -390,6 +402,9 @@ em_attach(struct device *parent, struct device *self, void *aux)
 		case em_80003es2lan:
 			/* Limit Jumbo Frame size */
 			sc->hw.max_frame_size = 9234;
+			break;
+		case em_pchlan:
+			sc->hw.max_frame_size = 4096;
 			break;
 		case em_82542_rev2_0:
 		case em_82542_rev2_1:
@@ -753,6 +768,7 @@ em_init(void *arg)
 		break;
 	case em_ich9lan:
 	case em_ich10lan:
+	case em_pchlan:
 		pba = E1000_PBA_10K;
 		break;
 	default:
@@ -1519,9 +1535,6 @@ em_identify_hardware(struct em_softc *sc)
 	sc->hw.vendor_id = PCI_VENDOR(pa->pa_id);
 	sc->hw.device_id = PCI_PRODUCT(pa->pa_id);
 
-	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_CLASS_REG);
-	sc->hw.revision_id = PCI_REVISION(reg);
-
 	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
 	sc->hw.subsystem_vendor_id = PCI_VENDOR(reg);
 	sc->hw.subsystem_id = PCI_PRODUCT(reg);
@@ -1529,6 +1542,13 @@ em_identify_hardware(struct em_softc *sc)
 	/* Identify the MAC */
 	if (em_set_mac_type(&sc->hw))
 		printf("%s: Unknown MAC Type\n", sc->sc_dv.dv_xname);
+
+	if (sc->hw.mac_type == em_pchlan)
+		sc->hw.revision_id = PCI_PRODUCT(pa->pa_id) & 0x0f;
+	else {
+		reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_CLASS_REG);
+		sc->hw.revision_id = PCI_REVISION(reg);
+	}
 
 	if (sc->hw.mac_type == em_82541 ||
 	    sc->hw.mac_type == em_82541_rev_2 ||
@@ -1585,7 +1605,8 @@ em_allocate_pci_resources(struct em_softc *sc)
 	/* for ICH8 and family we need to find the flash memory */
 	if (sc->hw.mac_type == em_ich8lan ||
 	    sc->hw.mac_type == em_ich9lan ||
-	    sc->hw.mac_type == em_ich10lan) {
+	    sc->hw.mac_type == em_ich10lan ||
+	    sc->hw.mac_type == em_pchlan) {
 		val = pci_conf_read(pa->pa_pc, pa->pa_tag, EM_FLASH);
 		if (PCI_MAPREG_TYPE(val) != PCI_MAPREG_TYPE_MEM) {
 			printf(": flash is not mem space\n");
@@ -1865,6 +1886,27 @@ em_detach(struct device *self, int flags)
 	return (0);
 }
 
+int
+em_activate(struct device *self, int act)
+{
+	struct em_softc *sc = (struct em_softc *)self;
+	struct ifnet *ifp = &sc->interface_data.ac_if;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		/* We have no children atm, but we will soon */
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		em_stop(sc, 0);
+		rv = config_activate_children(self, act);
+		if (ifp->if_flags & IFF_UP)
+			em_init(sc);
+		break;
+	}
+	return rv;
+}
 
 /*********************************************************************
  *
@@ -2499,6 +2541,7 @@ em_setup_receive_structures(struct em_softc *sc)
 	/* Setup our descriptor pointers */
 	sc->next_rx_desc_to_check = 0;
 	sc->last_rx_desc_filled = sc->num_rx_desc - 1;
+	sc->rx_ndescs = 0;
 
 	em_rxfill(sc);
 	if (sc->rx_ndescs < 1) {
@@ -2579,6 +2622,13 @@ em_initialize_receive_unit(struct em_softc *sc)
 		reg_rxcsum |= (E1000_RXCSUM_IPOFL | E1000_RXCSUM_TUOFL);
 		E1000_WRITE_REG(&sc->hw, RXCSUM, reg_rxcsum);
 	}
+
+	/*
+	 * XXX TEMPORARY WORKAROUND: on some systems with 82573
+	 * long latencies are observed, like Lenovo X60.
+	 */
+	if (sc->hw.mac_type == em_82573)
+		E1000_WRITE_REG(&sc->hw, RDTR, 0x20);
 
 	/* Enable Receives */
 	E1000_WRITE_REG(&sc->hw, RCTL, reg_rctl);

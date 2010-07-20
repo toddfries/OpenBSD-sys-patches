@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.7 2009/09/11 17:45:01 dms Exp $
+#	$OpenBSD: Makefile,v 1.10 2010/02/15 13:57:15 kettenis Exp $
 
 .include "${.CURDIR}/../Makefile.inc"
 
@@ -28,9 +28,15 @@ SRCS+=		ctime.c strtol.c cmd_socppc.c
 .PATH:	${S}/lib/libkern/arch/powerpc ${S}/lib/libkern
 SRCS+=	strlcpy.c strlen.c ashrdi3.c
 
+### find out what to use for libz
+Z_AS=		library
+.include "${S}/lib/libz/Makefile.inc"
+LIBZ=		${ZLIB}
+
 ### find out what to use for libsa
 SA_AS=          library
 SAREL=
+SA_ZLIB=	yes
 USE_LOADFILE=	yes
 .include "${S}/lib/libsa/Makefile.inc"
 LIBSA=          ${SALIB}
@@ -41,10 +47,16 @@ RELOC=		0x100000
 LDFLAGS=	-Ttext ${RELOC}
 OBJCOPY?=	objcopy
 
-${PROG}: ${OBJS} ${LIBSA}
-	${LD} ${LDFLAGS} -o ${PROG}.elf ${OBJS} ${LIBSA} ${LIBSA}
+${PROG}: ${OBJS} ${LIBSA} ${LIBZ}
+	${LD} ${LDFLAGS} -o ${PROG}.elf ${OBJS} ${LIBSA} ${LIBZ}
 	${OBJCOPY} -O binary ${PROG}.elf ${PROG}.bin
 	${MKBOOT} -e ${RELOC} -l ${RELOC} ${PROG}.bin ${PROG}
+
+realinstall:
+	${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} \
+	    -m ${BINMODE} ${PROG} ${DESTDIR}${BINDIR}/${PROG}
+	${INSTALL} ${INSTALL_COPY} ${INSTALL_STRIP} -o ${BINOWN} -g ${BINGRP} \
+	    -m ${BINMODE} ${PROG}.elf ${DESTDIR}${BINDIR}/${PROG}.elf
 
 .if !make(obj)
 .BEGIN:

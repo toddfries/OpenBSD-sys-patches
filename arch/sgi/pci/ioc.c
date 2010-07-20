@@ -1,8 +1,8 @@
-/*	$OpenBSD: ioc.c,v 1.31 2009/11/11 15:56:42 miod Exp $	*/
+/*	$OpenBSD: ioc.c,v 1.35 2010/05/09 18:37:45 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Joel Sing.
- * Copyright (c) 2008, 2009 Miodrag Vallat.
+ * Copyright (c) 2008, 2009, 2010 Miodrag Vallat.
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -73,6 +73,7 @@ struct ioc_softc {
 	bus_space_handle_t	 sc_memh;
 	bus_dma_tag_t		 sc_dmat;
 	pci_chipset_tag_t	 sc_pc;
+	pcitag_t		 sc_tag;
 
 	void			*sc_ih_enet;	/* Ethernet interrupt */
 	void			*sc_ih_superio;	/* SuperIO interrupt */
@@ -114,10 +115,10 @@ int	iocow_pulse(struct ioc_softc *, int, int);
 #ifdef TGT_ORIGIN
 /*
  * A mask of nodes on which an ioc driver has attached.
- * We use this to prevent attaching a pci IOC3 card which NIC has failed,
- * as the onboard IOC3.
- *
- * XXX This obviously will not work in N mode...
+ * We use this on IP35 systems, to prevent attaching a pci IOC3 card which NIC
+ * has failed, as the onboard IOC3.
+ * XXX This obviously will not work in N mode... but then IP35 are supposed to
+ * XXX always run in M mode.
  */
 static	uint64_t ioc_nodemask = 0;
 #endif
@@ -170,6 +171,7 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	sc->sc_pc = pa->pa_pc;
+	sc->sc_tag = pa->pa_tag;
 	sc->sc_dmat = pa->pa_dmat;
 
 	/*
@@ -272,32 +274,118 @@ ioc_attach(struct device *parent, struct device *self, void *aux)
 		 * very likely that we are the on-board IOC3 found
 		 * on IP27 and IP35 systems, unless we have already
 		 * found an on-board IOC3 on this node.
+		 *
+		 * Origin 2000 (real IP27) systems are a real annoyance,
+		 * because they actually have two IOC3 on their BASEIO
+		 * board, with the various devices split accross them
+		 * (two IOC3 chips are needed to provide the four serial
+		 * ports). We can rely upon the PCI device numbers (2 and 6)
+		 * to tell onboard IOC3 from PCI IOC3 devices.
 		 */
-		if ((sys_config.system_type == SGI_IP27 ||
-		    sys_config.system_type == SGI_IP35) &&
-		    !ISSET(ioc_nodemask, 1UL << currentnasid)) {
-			SET(ioc_nodemask, 1UL << currentnasid);
+		switch (sys_config.system_type) {
+		case SGI_IP27:
+			switch (sys_config.system_subtype) {
+			case IP27_O2K:
+				if (pci_get_widget(sc->sc_pc) ==
+				    IP27_O2K_BRIDGE_WIDGET)
+					switch (pa->pa_device) {
+					case IP27_IOC_SLOTNO:
+						subdevice_mask =
+						    (1 << IOCDEV_SERIAL_A) |
+						    (1 << IOCDEV_SERIAL_B) |
+						    (1 << IOCDEV_RTC) |
+						    (1 << IOCDEV_EF);
+						break;
+					case IP27_IOC2_SLOTNO:
+						subdevice_mask =
+						    (1 << IOCDEV_SERIAL_A) |
+						    (1 << IOCDEV_SERIAL_B) |
+						    (1 << IOCDEV_LPT) |
+#if 0 /* not worth doing */
+						    (1 << IOCDEV_RTC) |
+#endif
+						    (1 << IOCDEV_KBC);
+						break;
+					default:
+						break;
+					}
+				break;
+			case IP27_O200:
+				if (pci_get_widget(sc->sc_pc) ==
+				    IP27_O200_BRIDGE_WIDGET)
+					switch (pa->pa_device) {
+					case IP27_IOC_SLOTNO:
+						subdevice_mask =
+						    (1 << IOCDEV_SERIAL_A) |
+						    (1 << IOCDEV_SERIAL_B) |
+						    (1 << IOCDEV_LPT) |
+						    (1 << IOCDEV_KBC) |
+						    (1 << IOCDEV_RTC) |
+						    (1 << IOCDEV_EF);
+						break;
+					default:
+						break;
+					}
+				break;
+			default:
+				break;
+			}
+			break;
+		case SGI_IP35:
+			if (!ISSET(ioc_nodemask, 1UL << currentnasid)) {
+				SET(ioc_nodemask, 1UL << currentnasid);
 
-			subdevice_mask = (1 << IOCDEV_SERIAL_A) |
-			    (1 << IOCDEV_SERIAL_B) | (1 << IOCDEV_LPT) |
-			    (1 << IOCDEV_KBC) | (1 << IOCDEV_RTC) |
-			    (1 << IOCDEV_EF);
-			/*
-			 * Origin 300 onboard IOC3 do not have PS/2 ports;
-			 * since they can only be connected to other 300 or
-			 * 350 bricks (the latter using IOC4 devices),
-			 * it is safe to do this regardless of the current
-			 * nasid.
-			 */
-			if (sys_config.system_type == SGI_IP35 &&
-			    sys_config.system_subtype == IP35_O300)
-				subdevice_mask &= ~(1 << IOCDEV_KBC);
+				switch (sys_config.system_subtype) {
+				/*
+				 * Origin 300 onboard IOC3 do not have PS/2
+				 * ports; since they can only be connected to
+				 * other 300 or 350 bricks (the latter using
+				 * IOC4 devices), it is safe to do this
+				 * regardless of the current nasid.
+				 * XXX What about Onyx 300 though???
+				 */
+				case IP35_O300:
+					subdevice_mask =
+					    (1 << IOCDEV_SERIAL_A) |
+					    (1 << IOCDEV_SERIAL_B) |
+					    (1 << IOCDEV_LPT) |
+					    (1 << IOCDEV_RTC) |
+					    (1 << IOCDEV_EF);
+					break;
+				/*
+				 * Origin 3000 I-Bricks have only one serial
+				 * port, and no keyboard or parallel ports.
+				 */
+				case IP35_CBRICK:
+					subdevice_mask =
+					    (1 << IOCDEV_SERIAL_A) |
+					    (1 << IOCDEV_RTC) |
+					    (1 << IOCDEV_EF);
+					break;
+				default:
+					subdevice_mask =
+					    (1 << IOCDEV_SERIAL_A) |
+					    (1 << IOCDEV_SERIAL_B) |
+					    (1 << IOCDEV_LPT) |
+					    (1 << IOCDEV_KBC) |
+					    (1 << IOCDEV_RTC) |
+					    (1 << IOCDEV_EF);
+					break;
+				}
+			}
+			break;
+		default:
+			break;
+		}
 
+		if (subdevice_mask != 0) {
 			rtcbase = IOC3_BYTEBUS_0;
-			has_superio = has_enet = 1;
+			has_superio = 1;
+			if (ISSET(subdevice_mask, 1 << IOCDEV_EF))
+				has_enet = 1;
 			is_obio = 1;
 		} else
-#endif
+#endif	/* TGT_ORIGIN */
 		{
 unknown:
 			/*
@@ -414,7 +502,9 @@ unknown:
 		    IOC3_UARTB_SHADOW, 0);
 
 		ioc_attach_child(sc, "com", IOC3_UARTA_BASE, IOCDEV_SERIAL_A);
-		ioc_attach_child(sc, "com", IOC3_UARTB_BASE, IOCDEV_SERIAL_B);
+		if (ISSET(subdevice_mask, 1 << IOCDEV_SERIAL_B))
+			ioc_attach_child(sc, "com", IOC3_UARTB_BASE,
+			    IOCDEV_SERIAL_B);
 	}
 	if (ISSET(subdevice_mask, 1 << IOCDEV_KBC))
 		ioc_attach_child(sc, "iockbc", 0, IOCDEV_KBC);
@@ -443,6 +533,7 @@ ioc_attach_child(struct ioc_softc *sc, const char *name, bus_addr_t base,
 	memset(&iaa, 0, sizeof iaa);
 
 	iaa.iaa_name = name;
+	pci_get_device_location(sc->sc_pc, sc->sc_tag, &iaa.iaa_location);
 	iaa.iaa_memt = sc->sc_memt;
 	iaa.iaa_memh = sc->sc_memh;
 	iaa.iaa_dmat = sc->sc_dmat;

@@ -79,36 +79,15 @@
 
 	.text
 	.code16
-	.align 4,0
+	.align 4
 	.global _C_LABEL(acpi_real_mode_resume)
 	.global _C_LABEL(acpi_protected_mode_resume)
 	.global _C_LABEL(acpi_resume_end)
+	.global _C_LABEL(do_real_mode_post)
 _C_LABEL(acpi_real_mode_resume):
 	nop
 	cli
 	cld
-
-	/* Some BIOS vendors screw up the gdt, make sure we clean it */
-	movw	$0x10,	%cx
-	lgdtl	%cs:clean_gdt
-	movl	%cr0,	%eax
-	orb	$(CR0_PE), %al
-	movl	%eax,	%cr0
-	jmp	1f
-1:	ljmpw	$0x8, $clean1
-
-_ACPI_TRMP_OFFSET(clean1)
-	movw	%cx,	%ds	
-	movw	%cx,	%es
-	movw	%cx,	%ss
-	movw	%cx,	%fs
-	movw	%cx,	%gs
-	
-	andb	$~(CR0_PE), %al
-	movl	%eax,	%cr0
-	ljmpw	$_ACPI_RM_SEGMENT , $clean2
-
-_ACPI_TRMP_OFFSET(clean2)
 
 	/*
 	 * Set up segment registers for real mode. 
@@ -149,7 +128,8 @@ _ACPI_TRMP_OFFSET(clean2)
 	 * laptops), we might not restore the proper VGA mode
 	 * on resume. Caveat emptor.
 	 */
- 	/* jmp	nobiosreset */  	/* XXX make this a tunable */ 
+	cmpl	$0, do_real_mode_post_off
+	jz	nobiosreset
 	lcall	$0xc000,$3
 
 	/*
@@ -347,7 +327,7 @@ _ACPI_TRMP_OFFSET(tmp_gdt)
 	.word	tmp_gdt_end - tmp_gdtable
 	.long	tmp_gdtable
 
-	.align 8,0
+	.align 8
 _ACPI_TRMP_LABEL(tmp_gdtable)
 	/*
 	 * null
@@ -387,27 +367,16 @@ _ACPI_TRMP_LABEL(tmp_gdtable)
 	.byte	0, 0x93, 0xcf, 0
 _ACPI_TRMP_LABEL(tmp_gdt_end)
 
-	.align 8, 0
+	.align 8
 _ACPI_TRMP_OFFSET(clean_idt)
 	.word	0xffff
 	.long	0
 	.word	0
 
-_ACPI_TRMP_OFFSET(clean_gdt)
-	.word	clean_gdt_end - clean_gdtable
-	.long	clean_gdtable
-
-	.align 8, 0
-_ACPI_TRMP_LABEL(clean_gdtable)
-	.word	0, 0
-	.byte	0, 0, 0, 0
-
-	.word	0xffff, ACPI_TRAMPOLINE
-	.byte	0, 0x9b, 0, 0
-
-	.word	0xffff, ACPI_TRAMPOLINE
-	.byte	0, 0x93, 0, 0
-_ACPI_TRMP_LABEL(clean_gdt_end)
+	.align 4
+_C_LABEL(do_real_mode_post):
+_ACPI_TRMP_OFFSET(do_real_mode_post_off)
+	.long 0
 
 	.align 4
 _ACPI_TRMP_LABEL(acpi_saved_ebx)

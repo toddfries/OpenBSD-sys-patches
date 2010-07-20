@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.27 2009/08/13 15:04:20 dlg Exp $	*/
+/*	$OpenBSD: conf.c,v 1.29 2010/07/03 03:59:16 krw Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.
@@ -122,7 +122,6 @@ cdev_decl(wd);
 cdev_decl(com);
 cdev_decl(fd);
 cdev_decl(scd);
-#include "ss.h"
 #include "lpt.h"
 cdev_decl(lpt);
 #include "ch.h"
@@ -214,7 +213,7 @@ struct cdevsw	cdevsw[] =
 	cdev_lpt_init(NLPT,lpt),	/* 16: parallel printer */
 	cdev_ch_init(NCH,ch),		/* 17: SCSI autochanger */
 	cdev_disk_init(NCCD,ccd),	/* 18: concatenated disk driver */
-	cdev_ss_init(NSS,ss),           /* 19: SCSI scanner */
+	cdev_notdef(),			/* 19 */
 	cdev_uk_init(NUK,uk),		/* 20: unknown SCSI */
 	cdev_notdef(), 			/* 21 */
 	cdev_fd_init(1,filedesc),	/* 22: file descriptor pseudo-device */
@@ -304,6 +303,7 @@ struct cdevsw	cdevsw[] =
 	cdev_drm_init(NDRM,drm),	/* 87: drm */
 	cdev_gpio_init(NGPIO,gpio),	/* 88: gpio */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 89: vscsi */
+	cdev_disk_init(1,diskmap),	/* 90: disk mapper */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

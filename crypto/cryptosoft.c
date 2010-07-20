@@ -1,4 +1,4 @@
-/*	$OpenBSD: cryptosoft.c,v 1.51 2008/06/09 16:07:00 djm Exp $	*/
+/*	$OpenBSD: cryptosoft.c,v 1.54 2010/07/02 02:40:15 blambert Exp $	*/
 
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
@@ -25,7 +25,6 @@
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
-#include <sys/sysctl.h>
 #include <sys/errno.h>
 #include <dev/rndvar.h>
 #include <crypto/md5.h>
@@ -38,7 +37,15 @@
 #include <crypto/cryptosoft.h>
 #include <crypto/xform.h>
 
-const u_int8_t hmac_ipad_buffer[64] = {
+const u_int8_t hmac_ipad_buffer[HMAC_MAX_BLOCK_LEN] = {
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
+	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36,
@@ -49,7 +56,15 @@ const u_int8_t hmac_ipad_buffer[64] = {
 	0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x36
 };
 
-const u_int8_t hmac_opad_buffer[64] = {
+const u_int8_t hmac_opad_buffer[HMAC_MAX_BLOCK_LEN] = {
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
+	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
 	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
 	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
 	0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C, 0x5C,
@@ -66,7 +81,7 @@ u_int32_t swcr_sesnum = 0;
 int32_t swcr_id = -1;
 
 #define COPYBACK(x, a, b, c, d) \
-	(x) == CRYPTO_BUF_MBUF ? m_copyback((struct mbuf *)a,b,c,d) \
+	(x) == CRYPTO_BUF_MBUF ? m_copyback((struct mbuf *)a,b,c,d,M_NOWAIT) \
 	: cuio_copyback((struct uio *)a,b,c,d)
 #define COPYDATA(x, a, b, c, d) \
 	(x) == CRYPTO_BUF_MBUF ? m_copydata((struct mbuf *)a,b,c,d) \
@@ -192,7 +207,7 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 				}
 
 				/* Copy back decrypted block */
-				m_copyback(m, k, blks, blk);
+				m_copyback(m, k, blks, blk, M_NOWAIT);
 
 				/* Advance pointer */
 				m = m_getptr(m, k + blks, &k);
@@ -660,13 +675,13 @@ swcr_newsession(u_int32_t *sid, struct cryptoini *cri)
 			axf = &auth_hash_hmac_ripemd_160_96;
 			goto authcommon;
 		case CRYPTO_SHA2_256_HMAC:
-			axf = &auth_hash_hmac_sha2_256_96;
+			axf = &auth_hash_hmac_sha2_256_128;
 			goto authcommon;
 		case CRYPTO_SHA2_384_HMAC:
-			axf = &auth_hash_hmac_sha2_384_96;
+			axf = &auth_hash_hmac_sha2_384_192;
 			goto authcommon;
 		case CRYPTO_SHA2_512_HMAC:
-			axf = &auth_hash_hmac_sha2_512_96;
+			axf = &auth_hash_hmac_sha2_512_256;
 		authcommon:
 			(*swd)->sw_ictx = malloc(axf->ctxsize, M_CRYPTO_DATA,
 			    M_NOWAIT);
@@ -689,7 +704,7 @@ swcr_newsession(u_int32_t *sid, struct cryptoini *cri)
 			axf->Update((*swd)->sw_ictx, cri->cri_key,
 			    cri->cri_klen / 8);
 			axf->Update((*swd)->sw_ictx, hmac_ipad_buffer,
-			    HMAC_BLOCK_LEN - (cri->cri_klen / 8));
+			    axf->blocksize - (cri->cri_klen / 8));
 
 			for (k = 0; k < cri->cri_klen / 8; k++)
 				cri->cri_key[k] ^= (HMAC_IPAD_VAL ^ HMAC_OPAD_VAL);
@@ -698,7 +713,7 @@ swcr_newsession(u_int32_t *sid, struct cryptoini *cri)
 			axf->Update((*swd)->sw_octx, cri->cri_key,
 			    cri->cri_klen / 8);
 			axf->Update((*swd)->sw_octx, hmac_opad_buffer,
-			    HMAC_BLOCK_LEN - (cri->cri_klen / 8));
+			    axf->blocksize - (cri->cri_klen / 8));
 
 			for (k = 0; k < cri->cri_klen / 8; k++)
 				cri->cri_key[k] ^= HMAC_OPAD_VAL;

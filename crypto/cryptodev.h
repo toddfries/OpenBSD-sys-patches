@@ -1,4 +1,4 @@
-/*	$OpenBSD: cryptodev.h,v 1.48 2009/09/03 07:47:27 dlg Exp $	*/
+/*	$OpenBSD: cryptodev.h,v 1.51 2010/06/23 09:26:32 thib Exp $	*/
 
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
@@ -60,7 +60,13 @@
 #define CRYPTO_SW_SESSIONS	32
 
 /* HMAC values */
-#define HMAC_BLOCK_LEN		64
+#define HMAC_MD5_BLOCK_LEN	64
+#define HMAC_SHA1_BLOCK_LEN	64
+#define HMAC_RIPEMD160_BLOCK_LEN 64
+#define HMAC_SHA2_256_BLOCK_LEN	64
+#define HMAC_SHA2_384_BLOCK_LEN	128
+#define HMAC_SHA2_512_BLOCK_LEN	128
+#define HMAC_MAX_BLOCK_LEN	HMAC_SHA2_512_BLOCK_LEN	/* keep in sync */
 #define HMAC_IPAD_VAL		0x36
 #define HMAC_OPAD_VAL		0x5C
 
@@ -99,9 +105,7 @@
 #define CRYPTO_SHA2_512_HMAC	20
 #define CRYPTO_AES_CTR		21
 #define CRYPTO_AES_XTS		22
-#define CRYPTO_ALGORITHM_MAX	22 /* Keep updated - see below */
-
-#define	CRYPTO_ALGORITHM_ALL	(CRYPTO_ALGORITHM_MAX + 1)
+#define CRYPTO_ALGORITHM_MAX	22 /* Keep updated */
 
 /* Algorithm flags */
 #define	CRYPTO_ALG_FLAG_SUPPORTED	0x01 /* Algorithm is supported */
@@ -205,7 +209,7 @@ struct crypt_kop {
 #define CRK_DSA_SIGN		2
 #define CRK_DSA_VERIFY		3
 #define CRK_DH_COMPUTE_KEY	4
-#define CRK_ALGORITHM_MAX	4 /* Keep updated - see below */
+#define CRK_ALGORITHM_MAX	4 /* Keep updated */
 
 #define CRF_MOD_EXP		(1 << CRK_MOD_EXP)
 #define CRF_MOD_EXP_CRT		(1 << CRK_MOD_EXP_CRT)
@@ -311,7 +315,6 @@ int	crypto_register(u_int32_t, int *,
 int	crypto_kregister(u_int32_t, int *, int (*)(struct cryptkop *));
 int	crypto_unregister(u_int32_t, int);
 int32_t	crypto_get_driverid(u_int8_t);
-void	crypto_thread(void);
 int	crypto_invoke(struct cryptop *);
 int	crypto_kinvoke(struct cryptkop *);
 void	crypto_done(struct cryptop *);

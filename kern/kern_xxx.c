@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_xxx.c,v 1.13 2009/11/25 11:01:14 kettenis Exp $	*/
+/*	$OpenBSD: kern_xxx.c,v 1.16 2010/04/06 20:33:28 kettenis Exp $	*/
 /*	$NetBSD: kern_xxx.c,v 1.32 1996/04/22 01:38:41 christos Exp $	*/
 
 /*
@@ -53,7 +53,7 @@ sys_reboot(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	CPU_INFO_ITERATOR cii;
 	struct cpu_info *ci;
-	int error, s;
+	int error;
 
 	if ((error = suser(p, 0)) != 0)
 		return (error);
@@ -68,22 +68,9 @@ sys_reboot(struct proc *p, void *v, register_t *retval)
 		}
 	}
 
-	/*
-	 * Make sure we stop the secondary CPUs.
-	 */
-	s = splstatclock();
-	CPU_INFO_FOREACH(cii, ci) {
-		if (CPU_IS_PRIMARY(ci))
-			continue;
-		ci->ci_schedstate.spc_schedflags |= SPCF_SHOULDHALT;
-	}
-	CPU_INFO_FOREACH(cii, ci) {
-		if (CPU_IS_PRIMARY(ci))
-			continue;
-		while ((ci->ci_schedstate.spc_schedflags & SPCF_HALTED) == 0)
-			tsleep(&ci->ci_schedstate, PZERO, "schedstate", 0);
-	}
-	splx(s);
+#ifdef MULTIPROCESSOR
+	sched_stop_secondary_cpus();
+#endif
 
 	if_downall();
 

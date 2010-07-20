@@ -1,4 +1,4 @@
-/*	$OpenBSD: siop.c,v 1.54 2009/11/22 14:14:10 krw Exp $ */
+/*	$OpenBSD: siop.c,v 1.62 2010/07/06 23:32:01 dlg Exp $ */
 /*	$NetBSD: siop.c,v 1.79 2005/11/18 23:10:32 bouyer Exp $	*/
 
 /*
@@ -89,7 +89,11 @@ int	siop_handle_qtag_reject(struct siop_cmd *);
 void	siop_scsicmd_end(struct siop_cmd *);
 void	siop_start(struct siop_softc *);
 void 	siop_timeout(void *);
-int	siop_scsicmd(struct scsi_xfer *);
+void	siop_scsicmd(struct scsi_xfer *);
+void *	siop_cmd_get(void *);
+void	siop_cmd_put(void *, void *);
+int	siop_scsiprobe(struct scsi_link *);
+void	siop_scsifree(struct scsi_link *);
 #ifdef DUMP_SCRIPT
 void	siop_dump_script(struct siop_softc *);
 #endif
@@ -105,15 +109,8 @@ struct cfdriver siop_cd = {
 struct scsi_adapter siop_adapter = {
 	siop_scsicmd,
 	siop_minphys,
-	NULL,
-	NULL,
-};
-
-struct scsi_device siop_dev = {
-	NULL,
-	NULL,
-	NULL,
-	NULL,
+	siop_scsiprobe,
+	siop_scsifree
 };
 
 #ifdef SIOP_STATS
@@ -196,10 +193,11 @@ siop_attach(sc)
 	TAILQ_INIT(&sc->urgent_list);
 	TAILQ_INIT(&sc->cmds);
 	TAILQ_INIT(&sc->lunsw_list);
+	scsi_iopool_init(&sc->iopool, sc, siop_cmd_get, siop_cmd_put);
 	sc->sc_currschedslot = 0;
 	sc->sc_c.sc_link.adapter = &siop_adapter;
-	sc->sc_c.sc_link.device = &siop_dev;
 	sc->sc_c.sc_link.openings = SIOP_NTAG;
+	sc->sc_c.sc_link.pool = &sc->iopool;
 
 	/* Start with one page worth of commands */
 	siop_morecbd(sc);
@@ -362,7 +360,6 @@ siop_intr(v)
 	int offset, target, lun, tag;
 	bus_addr_t dsa;
 	struct siop_cbd *cbdp;
-	int freetarget = 0;
 	int restart = 0;
 
 	istat = bus_space_read_1(sc->sc_c.sc_rt, sc->sc_c.sc_rh, SIOP_ISTAT);
@@ -583,7 +580,6 @@ siop_intr(v)
 			if (siop_cmd) {
 				siop_cmd->cmd_c.status = CMDST_DONE;
 				xs->error = XS_SELTIMEOUT;
-				freetarget = 1;
 				goto end;
 			} else {
 				printf("%s: selection timeout without "
@@ -1077,8 +1073,6 @@ end:
 		restart = 1;
 	siop_lun->siop_tag[tag].active = NULL;
 	siop_scsicmd_end(siop_cmd);
-	if (freetarget && siop_target->target_c.status == TARST_PROBING)
-		siop_del_dev(sc, target, lun);
 	siop_start(sc);
 	if (restart)
 		CALL_SCRIPT(Ent_script_sched);
@@ -1202,9 +1196,6 @@ siop_scsicmd_end(siop_cmd)
 	}
 out:
 	siop_lun->lun_flags &= ~SIOP_LUNF_FULL;
-	xs->flags |= ITSDONE;
-	siop_cmd->cmd_c.status = CMDST_FREE;
-	TAILQ_INSERT_TAIL(&sc->free_list, siop_cmd, next);
 #if 0
 	if (xs->resid != 0)
 		printf("resid %d datalen %d\n", xs->resid, xs->datalen);
@@ -1357,39 +1348,68 @@ siop_handle_reset(sc)
 	}
 }
 
-int
-siop_scsicmd(xs)
-	struct scsi_xfer *xs;
+void *
+siop_cmd_get(void *cookie)
 {
-	struct siop_softc *sc = (struct siop_softc *)xs->sc_link->adapter_softc;
+	struct siop_softc *sc = cookie;
 	struct siop_cmd *siop_cmd;
-	struct siop_target *siop_target;
-	int s, error, i, j;
-	const int target = xs->sc_link->target;
-	const int lun = xs->sc_link->lun;
+	int s;
+
+	/* Look if a ccb is available. */
+	s = splbio();
+	siop_cmd = TAILQ_FIRST(&sc->free_list);
+	if (siop_cmd != NULL) {
+		TAILQ_REMOVE(&sc->free_list, siop_cmd, next);
+#ifdef DIAGNOSTIC
+		if (siop_cmd->cmd_c.status != CMDST_FREE)
+			panic("siop_scsicmd: new cmd not free");
+#endif
+		siop_cmd->cmd_c.status = CMDST_READY;
+	}
+	splx(s);
+
+	return (siop_cmd);
+}
+
+void
+siop_cmd_put(void *cookie, void *io)
+{
+	struct siop_softc *sc = cookie;
+	struct siop_cmd *siop_cmd = io;
+	int s;
 
 	s = splbio();
-#ifdef SIOP_DEBUG_SCHED
-	printf("starting cmd for %d:%d\n", target, lun);
+	siop_cmd->cmd_c.status = CMDST_FREE;
+	TAILQ_INSERT_TAIL(&sc->free_list, siop_cmd, next);
+	splx(s);
+}
+
+int
+siop_scsiprobe(struct scsi_link *link)
+{
+	struct siop_softc *sc = (struct siop_softc *)link->adapter_softc;
+	struct siop_target *siop_target;
+	const int target = link->target;
+	const int lun = link->lun;
+	int i;
+
+#ifdef SIOP_DEBUG
+	printf("%s:%d:%d: probe\n",
+	    sc->sc_c.sc_dev.dv_xname, target, lun);
 #endif
+
+	/* XXX locking */
+
 	siop_target = (struct siop_target*)sc->sc_c.targets[target];
 	if (siop_target == NULL) {
-#ifdef SIOP_DEBUG
-		printf("%s: alloc siop_target for target %d\n",
-			sc->sc_c.sc_dev.dv_xname, target);
-#endif
-		sc->sc_c.targets[target] =
-		    malloc(sizeof(struct siop_target), M_DEVBUF,
-		        M_NOWAIT | M_ZERO);
-		if (sc->sc_c.targets[target] == NULL) {
-			printf("%s: can't malloc memory for "
-			    "target %d\n", sc->sc_c.sc_dev.dv_xname,
-			    target);
-			splx(s);
-			return(NO_CCB);
+		siop_target = malloc(sizeof(*siop_target), M_DEVBUF,
+		    M_WAITOK | M_CANFAIL | M_ZERO);
+		if (siop_target == NULL) {
+			printf("%s: can't malloc memory for target %d\n",
+			    sc->sc_c.sc_dev.dv_xname, target);
+			return (ENOMEM);
 		}
-		siop_target =
-		    (struct siop_target*)sc->sc_c.targets[target];
+
 		siop_target->target_c.status = TARST_PROBING;
 		siop_target->target_c.flags  = 0;
 		siop_target->target_c.id =
@@ -1402,37 +1422,56 @@ siop_scsicmd(xs)
 		if (siop_target->lunsw == NULL) {
 			printf("%s: can't alloc lunsw for target %d\n",
 			    sc->sc_c.sc_dev.dv_xname, target);
-			splx(s);
-			return(NO_CCB);
+			free(siop_target, M_DEVBUF);
+			return (ENOMEM);
 		}
-		for (i=0; i < 8; i++)
+		for (i = 0; i < 8; i++)
 			siop_target->siop_lun[i] = NULL;
+
+		sc->sc_c.targets[target] =
+		    (struct siop_common_target *)siop_target;
+
 		siop_add_reselsw(sc, target);
 	}
+
 	if (siop_target->siop_lun[lun] == NULL) {
 		siop_target->siop_lun[lun] =
 		    malloc(sizeof(struct siop_lun), M_DEVBUF,
-		    M_NOWAIT | M_ZERO);
+		    M_WAITOK | M_CANFAIL | M_ZERO);
 		if (siop_target->siop_lun[lun] == NULL) {
 			printf("%s: can't alloc siop_lun for "
 			    "target %d lun %d\n",
 			    sc->sc_c.sc_dev.dv_xname, target, lun);
-			splx(s);
-			return(NO_CCB);
+			return (ENOMEM);
 		}
 	}
 
-	/* Looks like we could issue a command, if a ccb is available. */
-	siop_cmd = TAILQ_FIRST(&sc->free_list);
-	if (siop_cmd == NULL) {
-		splx(s);
-		return(NO_CCB);
-	}
-	TAILQ_REMOVE(&sc->free_list, siop_cmd, next);
-#ifdef DIAGNOSTIC
-	if (siop_cmd->cmd_c.status != CMDST_FREE)
-		panic("siop_scsicmd: new cmd not free");
+	return (0);
+}
+
+void
+siop_scsicmd(xs)
+	struct scsi_xfer *xs;
+{
+	struct siop_softc *sc = (struct siop_softc *)xs->sc_link->adapter_softc;
+	struct siop_cmd *siop_cmd;
+	struct siop_target *siop_target;
+	int s, error, i, j;
+	const int target = xs->sc_link->target;
+	const int lun = xs->sc_link->lun;
+
+#ifdef SIOP_DEBUG_SCHED
+	printf("starting cmd for %d:%d\n", target, lun);
 #endif
+
+	siop_target = (struct siop_target*)sc->sc_c.targets[target];
+	siop_cmd = xs->io;
+
+	/*
+	 * The xs may have been restarted by the scsi layer, so ensure the ccb
+	 * starts in the proper state.
+	 */
+	siop_cmd->cmd_c.status = CMDST_READY;
 
 	/* Always reset xs->stimeout, lest we timeout_del() with trash */
 	timeout_set(&xs->stimeout, siop_timeout, siop_cmd);
@@ -1440,7 +1479,6 @@ siop_scsicmd(xs)
 	siop_cmd->cmd_c.siop_target = sc->sc_c.targets[target];
 	siop_cmd->cmd_c.xs = xs;
 	siop_cmd->cmd_c.flags = 0;
-	siop_cmd->cmd_c.status = CMDST_READY;
 
 	bzero(&siop_cmd->cmd_c.siop_tables->xscmd,
 	    sizeof(siop_cmd->cmd_c.siop_tables->xscmd));
@@ -1458,10 +1496,9 @@ siop_scsicmd(xs)
 		if (error) {
 			printf("%s: unable to load data DMA map: %d\n",
 			    sc->sc_c.sc_dev.dv_xname, error);
-			siop_cmd->cmd_c.status = CMDST_FREE;
-			TAILQ_INSERT_TAIL(&sc->free_list, siop_cmd, next);
-			splx(s);
-			return(NO_CCB);
+			xs->error = XS_DRIVER_STUFFUP;
+			scsi_done(xs);
+			return;
 		}
 		bus_dmamap_sync(sc->sc_c.sc_dmat,
 		    siop_cmd->cmd_c.dmamap_data, 0,
@@ -1475,17 +1512,17 @@ siop_scsicmd(xs)
 	siop_table_sync(siop_cmd,
 	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
-	TAILQ_INSERT_TAIL(&sc->ready_list, siop_cmd, next);
-
 	/* Negotiate transfer parameters on first non-polling command. */
 	if (((xs->flags & SCSI_POLL) == 0) &&
 	    siop_target->target_c.status == TARST_PROBING)
 		siop_target->target_c.status = TARST_ASYNC;
 
+	s = splbio();
+	TAILQ_INSERT_TAIL(&sc->ready_list, siop_cmd, next);
 	siop_start(sc);
 	if ((xs->flags & SCSI_POLL) == 0) {
 		splx(s);
-		return (SUCCESSFULLY_QUEUED);
+		return;
 	}
 
 	/* Poll for command completion. */
@@ -1532,7 +1569,6 @@ siop_scsicmd(xs)
 	}
 
 	splx(s);
-	return (COMPLETE);
 }
 
 void
@@ -1543,7 +1579,6 @@ siop_start(sc)
 	struct siop_lun *siop_lun;
 	struct siop_xfer *siop_xfer;
 	u_int32_t dsa;
-	int timeout;
 	int target, lun, tag, slot;
 	int newcmd = 0; 
 	int doingready = 0;
@@ -1652,13 +1687,7 @@ again:
 				    sc->sc_c.sc_dev.dv_xname, target, lun, tag,
 				    msgcount);
 #endif
-			if (siop_cmd->cmd_c.xs->bp != NULL &&
-			    (siop_cmd->cmd_c.xs->bp->b_flags & B_ASYNC))
-				siop_cmd->cmd_tables->msg_out[1] =
-				    MSG_SIMPLE_Q_TAG;
-			else
-				siop_cmd->cmd_tables->msg_out[1] =
-				    MSG_ORDERED_Q_TAG;
+			siop_cmd->cmd_tables->msg_out[1] = MSG_SIMPLE_Q_TAG;
 			siop_cmd->cmd_tables->msg_out[2] = tag;
 			siop_cmd->cmd_tables->t_msgout.count =
 			    siop_htoc32(&sc->sc_c, 3);
@@ -1699,11 +1728,8 @@ again:
 		if (siop_cmd->cmd_c.status == CMDST_ACTIVE) {
 			if ((siop_cmd->cmd_c.xs->flags & SCSI_POLL) == 0) {
 				/* start expire timer */
-				timeout = (u_int64_t) siop_cmd->cmd_c.xs->timeout *
-				    (u_int64_t)hz / 1000;
-				if (timeout == 0)
-					timeout = 1;
-				timeout_add(&siop_cmd->cmd_c.xs->stimeout, timeout);
+				timeout_add_msec(&siop_cmd->cmd_c.xs->stimeout,
+				    siop_cmd->cmd_c.xs->timeout);
 			}
 		}
 		/*
@@ -2155,19 +2181,19 @@ siop_add_dev(sc, target, lun)
 }
 
 void
-siop_del_dev(sc, target, lun)
-	struct siop_softc *sc;
-	int target;
-	int lun;
+siop_scsifree(struct scsi_link *link)
 {
+	struct siop_softc *sc = link->adapter_softc;
+	int target = link->target;
+	int lun = link->lun;
 	int i;
 	struct siop_target *siop_target;
+
 #ifdef SIOP_DEBUG
 		printf("%s:%d:%d: free lun sw entry\n",
 		    sc->sc_c.sc_dev.dv_xname, target, lun);
 #endif
-	if (sc->sc_c.targets[target] == NULL)
-		return;
+
 	siop_target = (struct siop_target *)sc->sc_c.targets[target];
 	free(siop_target->siop_lun[lun], M_DEVBUF);
 	siop_target->siop_lun[lun] = NULL;

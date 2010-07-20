@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi_wakecode.S,v 1.6 2009/11/25 15:41:43 pirofti Exp $ */
+/* $OpenBSD: acpi_wakecode.S,v 1.11 2010/07/01 01:02:31 pirofti Exp $ */
 /*
  * Copyright (c) 2001 Takanori Watanabe <takawata@jp.freebsd.org>
  * Copyright (c) 2001 Mitsuru IWASAKI <iwasaki@jp.freebsd.org>
@@ -81,38 +81,17 @@
 
 	.text
 	.code16
-	.align 4,0
+	.align 4
 	.global _C_LABEL(acpi_real_mode_resume)
 	.global _C_LABEL(acpi_protected_mode_resume)
 	.global _C_LABEL(acpi_long_mode_resume)
 	.global _C_LABEL(acpi_resume_end)
 	.global _C_LABEL(acpi_pdirpa)
+	.global _C_LABEL(do_real_mode_post)
 _C_LABEL(acpi_real_mode_resume):
 	nop
 	cli
 	cld
-
-	/* Some BIOS vendors screw up the gdt, make sure we clean it */
-	movw	$0x10,	%cx
-	lgdtl	%cs:clean_gdt
-	movl	%cr0,	%eax
-	orb	$(CR0_PE), %al
-	movl	%eax,	%cr0
-	jmp	1f
-1:	ljmpw	$0x8, $clean1
-
-_ACPI_TRMP_OFFSET(clean1)
-	movw	%cx,	%ds	
-	movw	%cx,	%es
-	movw	%cx,	%ss
-	movw	%cx,	%fs
-	movw	%cx,	%gs
-	
-	andb	$~(CR0_PE), %al
-	movl	%eax,	%cr0
-	ljmpw	$_ACPI_RM_SEGMENT , $clean2
-
-_ACPI_TRMP_OFFSET(clean2)
 
 	/*
 	 * Set up segment registers for real mode. 
@@ -153,7 +132,8 @@ _ACPI_TRMP_OFFSET(clean2)
 	 * laptops), we might not restore the proper VGA mode
 	 * on resume. Caveat emptor.
 	 */
-	/* jmp	nobiosreset */ 	/* XXX make this a tunable */
+	cmp	$0, do_real_mode_post_off
+	jz	nobiosreset
 	lcall	$0xc000,$3
 
 	/*
@@ -404,7 +384,7 @@ _ACPI_TRMP_OFFSET(tmp_gdt)
 	.word	tmp_gdt_end - tmp_gdtable
 	.long	tmp_gdtable
 
-	.align 8,0
+	.align 8
 _ACPI_TRMP_LABEL(tmp_gdtable)
 	/*
 	 * null
@@ -444,39 +424,28 @@ _ACPI_TRMP_LABEL(tmp_gdtable)
 	.byte	0, 0x93, 0xcf, 0
 _ACPI_TRMP_LABEL(tmp_gdt_end)
 
-	.align 8, 0
+	.align 8
 _ACPI_TRMP_OFFSET(clean_idt)
 	.word	0xffff
 	.long	0
 	.word	0
-
-_ACPI_TRMP_OFFSET(clean_gdt)
-	.word	clean_gdt_end - clean_gdtable
-	.long	clean_gdtable
-
-	.align 8, 0
-_ACPI_TRMP_LABEL(clean_gdtable)
-	.word	0, 0
-	.byte	0, 0, 0, 0
-
-	.word	0xffff, ACPI_TRAMPOLINE
-	.byte	0, 0x9b, 0, 0
-
-	.word	0xffff, ACPI_TRAMPOLINE
-	.byte	0, 0x93, 0, 0
-_ACPI_TRMP_LABEL(clean_gdt_end)
 
 	.align 8
 _ACPI_TRMP_LABEL(tmp_gdt64)
 	.word 	tmp_gdt64_end - tmp_gdtable64
 	.long	tmp_gdtable64
 
-	.align 8,0
+	.align 8
 _ACPI_TRMP_LABEL(tmp_gdtable64)
 	.quad	0x0000000000000000
 	.quad	0x00af9a000000ffff
 	.quad	0x00cf92000000ffff
 _ACPI_TRMP_LABEL(tmp_gdt64_end)
+
+	.align 4
+_C_LABEL(do_real_mode_post):
+_ACPI_TRMP_OFFSET(do_real_mode_post_off)
+	.long	0
 
 	.align 8
 _ACPI_TRMP_LABEL(acpi_saved_rbx)
@@ -586,6 +555,7 @@ NENTRY(acpi_savecpu)
 	movq	%rsi, acpi_saved_rsi
 	movq	%rdi, acpi_saved_rdi
 	movq	%rsp, acpi_saved_rsp
+	addq	$0x8, acpi_saved_rsp
 
 	movq	%r8, acpi_saved_r8
 	movq	%r9, acpi_saved_r9

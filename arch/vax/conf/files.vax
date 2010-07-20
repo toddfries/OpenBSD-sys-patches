@@ -1,4 +1,4 @@
-#	$OpenBSD: files.vax,v 1.50 2009/03/20 18:39:26 miod Exp $
+#	$OpenBSD: files.vax,v 1.52 2010/06/29 18:46:34 tedu Exp $
 #	$NetBSD: files.vax,v 1.60 1999/08/27 20:04:32 ragge Exp $
 #
 # new style config file for vax architecture
@@ -383,7 +383,6 @@ file	arch/vax/vax/ka660.c			vax660
 file	arch/vax/vax/ka670.c			vax670
 file	arch/vax/vax/ka680.c			vax680
 file	arch/vax/vax/ka820.c			vax8200
-file	arch/vax/vax/locore.c
 file	arch/vax/vax/machdep.c
 file	arch/vax/vax/mem.c
 file	arch/vax/vax/mutex.c
@@ -401,7 +400,6 @@ file	arch/vax/vax/vxt.c			vxt
 file	arch/vax/vax/wscons_machdep.c		wsdisplay | wskbd
 file	arch/vax/uba/uba_dma.c			uba
 
-include	"compat/ultrix/files.ultrix"
 include	"compat/vax1k/files.vax1k"
 
 # Keep these for now. Time will tell which we will need... 

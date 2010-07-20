@@ -1,4 +1,4 @@
-/*	$OpenBSD: icmp6.c,v 1.108 2009/11/20 09:02:21 guenther Exp $	*/
+/*	$OpenBSD: icmp6.c,v 1.113 2010/07/09 15:44:20 claudio Exp $	*/
 /*	$KAME: icmp6.c,v 1.217 2001/06/20 15:03:29 jinmei Exp $	*/
 
 /*
@@ -168,32 +168,32 @@ static struct rttimer_queue *icmp6_redirect_timeout_q = NULL;
 /* XXX experimental, turned off */
 static int icmp6_redirect_lowat = -1;
 
-static void icmp6_errcount(struct icmp6errstat *, int, int);
-static int icmp6_rip6_input(struct mbuf **, int);
-static int icmp6_ratelimit(const struct in6_addr *, const int, const int);
-static const char *icmp6_redirect_diag(struct in6_addr *,
-	struct in6_addr *, struct in6_addr *);
-static struct mbuf *ni6_input(struct mbuf *, int);
-static struct mbuf *ni6_nametodns(const char *, int, int);
-static int ni6_dnsmatch(const char *, int, const char *, int);
-static int ni6_addrs(struct icmp6_nodeinfo *, struct mbuf *,
-			  struct ifnet **, char *);
-static int ni6_store_addrs(struct icmp6_nodeinfo *, struct icmp6_nodeinfo *,
-				struct ifnet *, int);
-static int icmp6_notify_error(struct mbuf *, int, int, int);
-static struct rtentry *icmp6_mtudisc_clone(struct sockaddr *);
-static void icmp6_mtudisc_timeout(struct rtentry *, struct rttimer *);
-static void icmp6_redirect_timeout(struct rtentry *, struct rttimer *);
+void	icmp6_errcount(struct icmp6errstat *, int, int);
+int	icmp6_rip6_input(struct mbuf **, int);
+int	icmp6_ratelimit(const struct in6_addr *, const int, const int);
+const char *icmp6_redirect_diag(struct in6_addr *, struct in6_addr *,
+	    struct in6_addr *);
+struct mbuf *ni6_input(struct mbuf *, int);
+struct mbuf *ni6_nametodns(const char *, int, int);
+int	ni6_dnsmatch(const char *, int, const char *, int);
+int	ni6_addrs(struct icmp6_nodeinfo *, struct mbuf *, struct ifnet **,
+	    char *);
+int	ni6_store_addrs(struct icmp6_nodeinfo *, struct icmp6_nodeinfo *,
+	    struct ifnet *, int);
+int	icmp6_notify_error(struct mbuf *, int, int, int);
+struct rtentry *icmp6_mtudisc_clone(struct sockaddr *);
+void	icmp6_mtudisc_timeout(struct rtentry *, struct rttimer *);
+void	icmp6_redirect_timeout(struct rtentry *, struct rttimer *);
 
 void
-icmp6_init()
+icmp6_init(void)
 {
 	mld6_init();
 	icmp6_mtudisc_timeout_q = rt_timer_queue_create(pmtu_expire);
 	icmp6_redirect_timeout_q = rt_timer_queue_create(icmp6_redirtimeout);
 }
 
-static void
+void
 icmp6_errcount(struct icmp6errstat *stat, int type, int code)
 {
 	switch (type) {
@@ -301,7 +301,7 @@ icmp6_error(struct mbuf *m, int type, int code, int param)
 	 * we should basically suppress sending an error (RFC 2463, Section
 	 * 2.4).
 	 * We have two exceptions (the item e.2 in that section):
-	 * - the Pakcet Too Big message can be sent for path MTU discovery.
+	 * - the Packet Too Big message can be sent for path MTU discovery.
 	 * - the Parameter Problem Message that can be allowed an icmp6 error
 	 *   in the option type field.  This check has been done in
 	 *   ip6_unknown_opt(), so we can just check the type and code.
@@ -893,7 +893,7 @@ badlen:
 	return IPPROTO_DONE;
 }
 
-static int
+int
 icmp6_notify_error(struct mbuf *m, int off, int icmp6len, int code)
 {
 	struct icmp6_hdr *icmp6;
@@ -1184,7 +1184,7 @@ icmp6_mtudisc_update(struct ip6ctlparam *ip6cp, int validated)
 #ifndef offsetof		/* XXX */
 #define	offsetof(type, member)	((size_t)(&((type *)0)->member))
 #endif
-static struct mbuf *
+struct mbuf *
 ni6_input(struct mbuf *m, int off)
 {
 	struct icmp6_nodeinfo *ni6, *nni6;
@@ -1487,7 +1487,7 @@ ni6_input(struct mbuf *m, int off)
  *
  * old - return pascal string if non-zero
  */
-static struct mbuf *
+struct mbuf *
 ni6_nametodns(const char *name, int namelen, int old)
 {
 	struct mbuf *m;
@@ -1594,7 +1594,7 @@ ni6_nametodns(const char *name, int namelen, int old)
  * form (with \0\0 at the end).  no compression support.
  * XXX upper/lowercase match (see RFC2065)
  */
-static int
+int
 ni6_dnsmatch(const char *a, int alen, const char *b, int blen)
 {
 	const char *a0, *b0;
@@ -1654,9 +1654,9 @@ ni6_dnsmatch(const char *a, int alen, const char *b, int blen)
 /*
  * calculate the number of addresses to be returned in the node info reply.
  */
-static int
+int
 ni6_addrs(struct icmp6_nodeinfo *ni6, struct mbuf *m, struct ifnet **ifpp, 
-	char *subj)
+    char *subj)
 {
 	struct ifnet *ifp;
 	struct in6_ifaddr *ifa6;
@@ -1742,9 +1742,9 @@ ni6_addrs(struct icmp6_nodeinfo *ni6, struct mbuf *m, struct ifnet **ifpp,
 	return (addrs);
 }
 
-static int
+int
 ni6_store_addrs(struct icmp6_nodeinfo *ni6, struct icmp6_nodeinfo *nni6, 
-	struct ifnet *ifp0, int resid)
+    struct ifnet *ifp0, int resid)
 {
 	struct ifnet *ifp = ifp0 ? ifp0 : TAILQ_FIRST(&ifnet);
 	struct in6_ifaddr *ifa6;
@@ -1880,7 +1880,7 @@ ni6_store_addrs(struct icmp6_nodeinfo *ni6, struct icmp6_nodeinfo *nni6,
 /*
  * XXX almost dup'ed code with rip6_input.
  */
-static int
+int
 icmp6_rip6_input(struct mbuf **mp, int off)
 {
 	struct mbuf *m = *mp;
@@ -2145,15 +2145,15 @@ icmp6_reflect(struct mbuf *m, size_t off)
 }
 
 void
-icmp6_fasttimo()
+icmp6_fasttimo(void)
 {
 
 	mld6_fasttimeo();
 }
 
-static const char *
+const char *
 icmp6_redirect_diag(struct in6_addr *src6, struct in6_addr *dst6, 
-	struct in6_addr *tgt6)
+    struct in6_addr *tgt6)
 {
 	static char buf[1024];
 	snprintf(buf, sizeof(buf), "(src=%s dst=%s tgt=%s)",
@@ -2346,7 +2346,7 @@ icmp6_redirect_input(struct mbuf *m, int off)
 
 		if (newrt) {
 			(void)rt_timer_add(newrt, icmp6_redirect_timeout,
-			    icmp6_redirect_timeout_q);
+			    icmp6_redirect_timeout_q, /* XXX */ 0);
 			rtfree(newrt);
 		}
 	}
@@ -2644,7 +2644,7 @@ fail:
  */
 int
 icmp6_ctloutput(int op, struct socket *so, int level, int optname, 
-	struct mbuf **mp)
+    struct mbuf **mp)
 {
 	int error = 0;
 	struct in6pcb *in6p = sotoin6pcb(so);
@@ -2732,7 +2732,7 @@ icmp6_ctloutput(int op, struct socket *so, int level, int optname,
  * type - not used at this moment
  * code - not used at this moment
  */
-static int
+int
 icmp6_ratelimit(const struct in6_addr *dst, const int type, const int code)
 {
 	int ret;
@@ -2749,13 +2749,13 @@ icmp6_ratelimit(const struct in6_addr *dst, const int type, const int code)
 	return ret;
 }
 
-static struct rtentry *
+struct rtentry *
 icmp6_mtudisc_clone(struct sockaddr *dst)
 {
 	struct rtentry *rt;
 	int    error;
 
-	rt = rtalloc1(dst, 1, 0);
+	rt = rtalloc1(dst, RT_REPORT, 0);
 	if (rt == 0)
 		return NULL;
 
@@ -2778,7 +2778,7 @@ icmp6_mtudisc_clone(struct sockaddr *dst)
 		rt = nrt;
 	}
 	error = rt_timer_add(rt, icmp6_mtudisc_timeout,
-			icmp6_mtudisc_timeout_q);
+			icmp6_mtudisc_timeout_q, /* XXX */ 0);
 	if (error) {
 		rtfree(rt);
 		return NULL;
@@ -2787,7 +2787,7 @@ icmp6_mtudisc_clone(struct sockaddr *dst)
 	return rt;	/* caller need to call rtfree() */
 }
 
-static void
+void
 icmp6_mtudisc_timeout(struct rtentry *rt, struct rttimer *r)
 {
 	if (rt == NULL)
@@ -2801,14 +2801,15 @@ icmp6_mtudisc_timeout(struct rtentry *rt, struct rttimer *r)
 		info.rti_info[RTAX_DST] = rt_key(rt);
 		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
-		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL, 0);
+		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL,
+		    r->rtt_tableid);
 	} else {
 		if (!(rt->rt_rmx.rmx_locks & RTV_MTU))
 			rt->rt_rmx.rmx_mtu = 0;
 	}
 }
 
-static void
+void
 icmp6_redirect_timeout(struct rtentry *rt, struct rttimer *r)
 {
 	if (rt == NULL)
@@ -2822,18 +2823,20 @@ icmp6_redirect_timeout(struct rtentry *rt, struct rttimer *r)
 		info.rti_info[RTAX_DST] = rt_key(rt);
 		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
-		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL, 0);
+		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL,
+		    r->rtt_tableid);
 	}
 }
 
 #include <uvm/uvm_extern.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 int *icmpv6ctl_vars[ICMPV6CTL_MAXID] = ICMPV6CTL_VARS;
 
 int
 icmp6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, 
-	void *newp, size_t newlen)
+    void *newp, size_t newlen)
 {
 	/* All sysctl names at this level are terminal. */
 	if (namelen != 1)

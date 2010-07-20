@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raidp.c,v 1.10 2009/08/09 14:12:25 marco Exp $ */
+/* $OpenBSD: softraid_raidp.c,v 1.18 2010/07/02 09:20:26 jsing Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -45,6 +45,10 @@
 #include <dev/rndvar.h>
 
 /* RAID P functions. */
+int	sr_raidp_create(struct sr_discipline *, struct bioc_createraid *,
+	    int, int64_t);
+int	sr_raidp_assemble(struct sr_discipline *, struct bioc_createraid *,
+	    int);
 int	sr_raidp_alloc_resources(struct sr_discipline *);
 int	sr_raidp_free_resources(struct sr_discipline *);
 int	sr_raidp_rw(struct sr_workunit *);
@@ -65,15 +69,18 @@ void	sr_put_block(struct sr_discipline *, void *);
 
 /* discipline initialisation. */
 void
-sr_raidp_discipline_init(struct sr_discipline *sd)
+sr_raidp_discipline_init(struct sr_discipline *sd, u_int8_t type)
 {
 
 	/* fill out discipline members. */
+	sd->sd_type = type;
+	sd->sd_capabilities = SR_CAP_SYSTEM_DISK | SR_CAP_AUTO_ASSEMBLE;
 	sd->sd_max_ccb_per_wu = 4; /* only if stripsize <= MAXPHYS */
 	sd->sd_max_wu = SR_RAIDP_NOWU;
-	sd->sd_rebuild = 0;
 
 	/* setup discipline pointers. */
+	sd->sd_create = sr_raidp_create;
+	sd->sd_assemble = sr_raidp_assemble;
 	sd->sd_alloc_resources = sr_raidp_alloc_resources;
 	sd->sd_free_resources = sr_raidp_free_resources;
 	sd->sd_start_discipline = NULL;
@@ -87,6 +94,39 @@ sr_raidp_discipline_init(struct sr_discipline *sd)
 	sd->sd_set_chunk_state = sr_raidp_set_chunk_state;
 	sd->sd_set_vol_state = sr_raidp_set_vol_state;
 	sd->sd_openings = sr_raidp_openings;
+}
+
+int
+sr_raidp_create(struct sr_discipline *sd, struct bioc_createraid *bc,
+    int no_chunk, int64_t coerced_size)
+{
+
+	if (no_chunk < 3)
+		return EINVAL;
+
+	if (sd->sd_type == SR_MD_RAID4)
+		strlcpy(sd->sd_name, "RAID 4", sizeof(sd->sd_name));
+	else
+		strlcpy(sd->sd_name, "RAID 5", sizeof(sd->sd_name));
+
+	/*
+	 * XXX add variable strip size later even though MAXPHYS is really
+	 * the clever value, users like to tinker with that type of stuff.
+	 */
+	sd->sd_meta->ssdi.ssd_strip_size = MAXPHYS;
+	sd->sd_meta->ssdi.ssd_size = (coerced_size &
+	    ~((sd->sd_meta->ssdi.ssd_strip_size >> DEV_BSHIFT) - 1)) *
+	    (no_chunk - 1);
+
+	return 0;
+}
+
+int
+sr_raidp_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
+    int no_chunk)
+{
+
+	return 0;
 }
 
 int
@@ -336,7 +376,7 @@ sr_raidp_rw(struct sr_workunit *wu)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_chunk		*scp;
 	int			s, i;
-	daddr64_t		blk, lbaoffs, strip_no, chunk;
+	daddr64_t		blk, lbaoffs, strip_no, chunk, row_size;
 	daddr64_t		strip_size, no_chunk, lba, chunk_offs, phys_offs;
 	daddr64_t		strip_bits, length, parity, strip_offs, datalen;
 	void		       *xorbuf, *data;
@@ -348,6 +388,7 @@ sr_raidp_rw(struct sr_workunit *wu)
 	strip_size = sd->sd_meta->ssdi.ssd_strip_size;
 	strip_bits = sd->mds.mdd_raidp.srp_strip_bits;
 	no_chunk = sd->sd_meta->ssdi.ssd_chunk_no - 1;
+	row_size = (no_chunk << strip_bits) >> DEV_BSHIFT;
 
 	data = xs->data;
 	datalen = xs->datalen;
@@ -365,8 +406,8 @@ sr_raidp_rw(struct sr_workunit *wu)
 		strip_no = lbaoffs >> strip_bits;
 		strip_offs = lbaoffs & (strip_size - 1);
 		chunk_offs = (strip_no / no_chunk) << strip_bits;
-		phys_offs = chunk_offs + strip_offs + 
-		    ((SR_META_OFFSET + SR_META_SIZE) << DEV_BSHIFT);
+		phys_offs = chunk_offs + strip_offs +
+		    (sd->sd_meta->ssd_data_offset << DEV_BSHIFT);
 
 		/* get size remaining in this stripe */
 		length = MIN(strip_size - strip_offs, datalen);
@@ -387,8 +428,8 @@ sr_raidp_rw(struct sr_workunit *wu)
 	
 		/* XXX big hammer.. exclude I/O from entire stripe */
 		if (wu->swu_blk_start == 0)
-			wu->swu_blk_start = chunk_offs >> DEV_BSHIFT;
-		wu->swu_blk_end = ((chunk_offs + (no_chunk << strip_bits)) >> DEV_BSHIFT) - 1;
+			wu->swu_blk_start = (strip_no / no_chunk) * row_size;
+		wu->swu_blk_end = (strip_no / no_chunk) * row_size + (row_size - 1);
 
 		scp = sd->sd_vol.sv_chunks[chunk];
 		if (xs->flags & SCSI_DATA_IN) {
@@ -593,7 +634,6 @@ sr_raidp_intr(struct buf *bp)
 		if (xs != NULL) {
 			xs->error = XS_NOERROR;
 			xs->resid = 0;
-			xs->flags |= ITSDONE;
 		}
 
 		pend = 0;
@@ -644,7 +684,6 @@ retry:
 	return;
 bad:
 	xs->error = XS_DRIVER_STUFFUP;
-	xs->flags |= ITSDONE;
 	if (wu->swu_flags & SR_WUF_REBUILD) {
 		wu->swu_flags |= SR_WUF_REBUILDIOCOMP;
 		wakeup(wu);
@@ -730,6 +769,7 @@ sr_raidp_addio(struct sr_workunit *wu, int dsk, daddr64_t blk, daddr64_t len,
 	ccb->ccb_buf.b_proc = curproc;
 	ccb->ccb_buf.b_dev = sd->sd_vol.sv_chunks[dsk]->src_dev_mm;
 	ccb->ccb_buf.b_vp = sd->sd_vol.sv_chunks[dsk]->src_vn;
+	ccb->ccb_buf.b_bq = NULL;
 	if ((ccb->ccb_buf.b_flags & B_READ) == 0)
 		ccb->ccb_buf.b_vp->v_numoutput++;
 

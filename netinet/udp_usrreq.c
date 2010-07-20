@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.132 2009/11/13 20:54:05 claudio Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.136 2010/07/09 16:58:06 reyk Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -74,6 +74,7 @@
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -104,6 +105,9 @@ extern int ip6_defhlim;
 #endif /* INET6 */
 
 #include "faith.h"
+#if NFAITH > 0
+#include <net/if_types.h>
+#endif
 
 #include "pf.h"
 #if NPF > 0
@@ -440,7 +444,8 @@ udp_input(struct mbuf *m, ...)
 			if (!ip6 && (inp->inp_flags & INP_IPV6))
 				continue;
 #endif
-			if (inp->inp_rdomain != rtable_l2(m->m_pkthdr.rdomain))
+			if (rtable_l2(inp->inp_rtableid) !=
+			    rtable_l2(m->m_pkthdr.rdomain))
 				continue;
 			if (inp->inp_lport != uh->uh_dport)
 				continue;
@@ -611,7 +616,8 @@ udp_input(struct mbuf *m, ...)
 	s = splnet();
 	if (mtag != NULL) {
 		tdbi = (struct tdb_ident *)(mtag + 1);
-		tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+		tdb = gettdb(tdbi->rdomain, tdbi->spi,
+		    &tdbi->dst, tdbi->proto);
 	} else
 		tdb = NULL;
 	ipsp_spd_lookup(m, srcsa.sa.sa_family, iphlen, &error,
@@ -1007,7 +1013,7 @@ udp_output(struct mbuf *m, ...)
 	udpstat.udps_opackets++;
 
 	/* force routing domain */
-	m->m_pkthdr.rdomain = inp->inp_rdomain;
+	m->m_pkthdr.rdomain = inp->inp_rtableid;
 
 	error = ip_output(m, inp->inp_options, &inp->inp_route,
 	    inp->inp_socket->so_options &

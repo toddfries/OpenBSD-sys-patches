@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.h,v 1.40 2009/11/09 23:46:38 dlg Exp $	*/
+/*	$OpenBSD: if_pfsync.h,v 1.43 2010/07/09 16:58:06 reyk Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -60,7 +60,7 @@
 #define PFSYNC_ACT_DEL_F	9	/* delete fragments */
 #define PFSYNC_ACT_BUS		10	/* bulk update status */
 #define PFSYNC_ACT_TDB		11	/* TDB replay counter update */
-#define PFSYNC_ACT_EOF		12	/* end of frame */
+#define PFSYNC_ACT_EOF		12	/* end of frame - DEPRECATED */
 #define PFSYNC_ACT_INS		13	/* insert state */
 #define PFSYNC_ACT_UPD		14	/* update state */
 #define PFSYNC_ACT_MAX		15
@@ -81,12 +81,9 @@
 				"INS ST",		\
 				"UPD ST"
 
-#define PFSYNC_HMAC_LEN	20
-
 /*
  * A pfsync frame is built from a header followed by several sections which
- * are all prefixed with their own subheaders. Frames must be terminated with
- * an EOF subheader.
+ * are all prefixed with their own subheaders.
  *
  * | ...			|
  * | IP header			|
@@ -102,8 +99,6 @@
  * +----------------------------+
  * | second action fields	|
  * | ...			|
- * +----------------------------+
- * | EOF pfsync_subheader	|
  * +============================+
  */
 
@@ -114,7 +109,7 @@
 struct pfsync_header {
 	u_int8_t			version;
 	u_int8_t			_pad;
-	u_int16_t			len;
+	u_int16_t			len; /* in bytes */
 	u_int8_t			pfcksum[PF_MD5_DIGEST_LENGTH];
 } __packed;
 
@@ -124,7 +119,7 @@ struct pfsync_header {
 
 struct pfsync_subheader {
 	u_int8_t			action;
-	u_int8_t			_pad;
+	u_int8_t			len; /* in dwords */
 	u_int16_t			count;
 } __packed;
 
@@ -221,19 +216,17 @@ struct pfsync_tdb {
 	u_int64_t			cur_bytes;
 	u_int8_t			sproto;
 	u_int8_t			updates;
-	u_int8_t			_pad[2];
+	u_int16_t			rdomain;
 } __packed;
 
 /*
  * EOF
  */
 
-struct pfsync_eof {
-	u_int8_t			hmac[PFSYNC_HMAC_LEN];
-} __packed;
+/* this message is deprecated */
+
 
 #define PFSYNC_HDRLEN		sizeof(struct pfsync_header)
-
 
 
 /*

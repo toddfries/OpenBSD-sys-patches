@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppb.c,v 1.39 2009/11/24 00:52:07 kettenis Exp $	*/
+/*	$OpenBSD: ppb.c,v 1.42 2010/06/30 05:14:39 kettenis Exp $	*/
 /*	$NetBSD: ppb.c,v 1.16 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -35,13 +35,29 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/workq.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/ppbreg.h>
+
+#ifndef PCI_IO_START
+#define PCI_IO_START	0
+#endif
+
+#ifndef PCI_IO_END
+#define PCI_IO_END	0xffffffff
+#endif
+
+#ifndef PCI_MEM_START
+#define PCI_MEM_START	0
+#endif
+
+#ifndef PCI_MEM_END
+#define PCI_MEM_END	0xffffffff
+#endif
 
 struct ppb_softc {
 	struct device sc_dev;		/* generic device glue */
@@ -65,6 +81,8 @@ struct ppb_softc {
 	pcireg_t sc_bir;
 	pcireg_t sc_bcr;
 	pcireg_t sc_int;
+
+	pcireg_t sc_slcsr;
 };
 
 int	ppbmatch(struct device *, void *, void *);
@@ -171,7 +189,10 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n");
 
-	ppb_alloc_resources(sc, pa);
+	if (PCI_VENDOR(pa->pa_id) != PCI_VENDOR_INTEL ||
+	    (PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_INTEL_82801BA_HPB &&
+	    PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_INTEL_82801BAM_HPB))
+		ppb_alloc_resources(sc, pa);
 
 	for (pin = PCI_INTERRUPT_PIN_A; pin <= PCI_INTERRUPT_PIN_D; pin++) {
 		pa->pa_intrpin = pa->pa_rawintrpin = pin;
@@ -249,7 +270,8 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 	 * in general.
 	 */
 	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_INTEL &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801BAM_HPB) {
+	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801BA_HPB ||
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801BAM_HPB)) {
 		if (sc->sc_ioex == NULL)
 			sc->sc_ioex = pa->pa_ioex;
 		if (sc->sc_memex == NULL)
@@ -337,6 +359,9 @@ ppbactivate(struct device *self, int act)
 		sc->sc_bir = pci_conf_read(pc, tag, PPB_REG_BUSINFO);
 		sc->sc_bcr = pci_conf_read(pc, tag, PPB_REG_BRIDGECONTROL);
 		sc->sc_int = pci_conf_read(pc, tag, PCI_INTERRUPT_REG);
+		if (sc->sc_cap_off)
+			sc->sc_slcsr = pci_conf_read(pc, tag,
+			    sc->sc_cap_off + PCI_PCIE_SLCSR);
 		break;
 	case DVACT_RESUME:
 		/* Restore the registers saved above. */
@@ -344,6 +369,9 @@ ppbactivate(struct device *self, int act)
 		pci_conf_write(pc, tag, PPB_REG_BUSINFO, sc->sc_bir);
 		pci_conf_write(pc, tag, PPB_REG_BRIDGECONTROL, sc->sc_bcr);
 		pci_conf_write(pc, tag, PCI_INTERRUPT_REG, sc->sc_int);
+		if (sc->sc_cap_off)
+			pci_conf_write(pc, tag,
+			    sc->sc_cap_off + PCI_PCIE_SLCSR, sc->sc_slcsr);
 
 		/* Restore I/O window. */
 		blr = pci_conf_read(pc, tag, PPB_REG_IOSTATUS);
@@ -394,6 +422,7 @@ ppb_alloc_resources(struct ppb_softc *sc, struct pci_attach_args *pa)
 	int reg, reg_start, reg_end, reg_rom;
 	int io_count = 0;
 	int mem_count = 0;
+	bus_addr_t start, end;
 	u_long base, size;
 
 	if (pa->pa_memex == NULL)
@@ -480,9 +509,11 @@ ppb_alloc_resources(struct ppb_softc *sc, struct pci_attach_args *pa)
 		sc->sc_iobase |= (blr & 0x0000ffff) << 16;
 		sc->sc_iolimit |= (blr & 0xffff0000);
 		if (sc->sc_iolimit < sc->sc_iobase || sc->sc_iobase == 0) {
+			start = max(PCI_IO_START, pa->pa_ioex->ex_start);
+			end = min(PCI_IO_END, pa->pa_ioex->ex_end);
 			for (size = 0x2000; size >= PPB_IO_MIN; size >>= 1)
-				if (extent_alloc(pa->pa_ioex, size, size,
-				    0, 0, 0, &base) == 0)
+				if (extent_alloc_subregion(pa->pa_ioex, start,
+				    end, size, size, 0, 0, 0, &base) == 0)
 					break;
 			if (size >= PPB_IO_MIN) {
 				sc->sc_iobase = base;
@@ -510,9 +541,11 @@ ppb_alloc_resources(struct ppb_softc *sc, struct pci_attach_args *pa)
 		sc->sc_membase = (blr << PPB_MEM_SHIFT) & PPB_MEM_MASK;
 		sc->sc_memlimit = (blr & PPB_MEM_MASK) | 0x000fffff;
 		if (sc->sc_memlimit < sc->sc_membase || sc->sc_membase == 0) {
+			start = max(PCI_MEM_START, pa->pa_memex->ex_start);
+			end = min(PCI_MEM_END, pa->pa_memex->ex_end);
 			for (size = 0x2000000; size >= PPB_MEM_MIN; size >>= 1)
-				if (extent_alloc(pa->pa_memex, size, size,
-				    0, 0, 0, &base) == 0)
+				if (extent_alloc_subregion(pa->pa_memex, start,
+				    end, size, size, 0, 0, 0, &base) == 0)
 					break;
 			if (size >= PPB_MEM_MIN) {
 				sc->sc_membase = base;

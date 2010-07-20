@@ -1,4 +1,4 @@
-/*	$OpenBSD: hifn7751.c,v 1.158 2009/09/13 14:42:52 krw Exp $	*/
+/*	$OpenBSD: hifn7751.c,v 1.162 2010/07/05 11:07:56 blambert Exp $	*/
 
 /*
  * Invertex AEON / Hifn 7751 driver
@@ -47,7 +47,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/errno.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
@@ -197,7 +197,8 @@ hifn_attach(struct device *parent, struct device *self, void *aux)
 		goto fail_io1;
 	}
 	if (bus_dmamem_alloc(sc->sc_dmat, sizeof(*sc->sc_dma), PAGE_SIZE, 0,
-	    sc->sc_dmasegs, 1, &sc->sc_dmansegs, BUS_DMA_NOWAIT)) {
+	    sc->sc_dmasegs, 1, &sc->sc_dmansegs,
+	    BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
 		printf(": can't alloc dma buffer\n");
 		bus_dmamap_destroy(sc->sc_dmat, sc->sc_dmamap);
 		goto fail_io1;
@@ -219,7 +220,6 @@ hifn_attach(struct device *parent, struct device *self, void *aux)
 		goto fail_io1;
 	}
 	sc->sc_dma = (struct hifn_dma *)kva;
-	bzero(sc->sc_dma, sizeof(*sc->sc_dma));
 
 	hifn_reset_board(sc, 0);
 
@@ -314,7 +314,7 @@ hifn_attach(struct device *parent, struct device *self, void *aux)
 		hifn_init_pubrng(sc);
 
 	timeout_set(&sc->sc_tickto, hifn_tick, sc);
-	timeout_add(&sc->sc_tickto, hz);
+	timeout_add_sec(&sc->sc_tickto, 1);
 
 	return;
 
@@ -1674,7 +1674,7 @@ hifn_tick(void *vsc)
 	else
 		sc->sc_active--;
 	splx(s);
-	timeout_add(&sc->sc_tickto, hz);
+	timeout_add_sec(&sc->sc_tickto, 1);
 }
 
 int 
@@ -2082,7 +2082,7 @@ hifn_process(struct cryptop *crp)
 					if (crp->crp_flags & CRYPTO_F_IMBUF)
 						m_copyback(cmd->srcu.src_m,
 						    enccrd->crd_inject,
-						    ivlen, cmd->iv);
+						    ivlen, cmd->iv, M_NOWAIT);
 					else if (crp->crp_flags & CRYPTO_F_IOV)
 						cuio_copyback(cmd->srcu.src_io,
 						    enccrd->crd_inject,
@@ -2293,7 +2293,8 @@ hifn_callback(struct hifn_softc *sc, struct hifn_command *cmd,
 		if (crp->crp_flags & CRYPTO_F_IMBUF)
 			m_copyback((struct mbuf *)crp->crp_buf,
 			    cmd->src_map->dm_mapsize - cmd->sloplen,
-			    cmd->sloplen, &dma->slop[cmd->slopidx]);
+			    cmd->sloplen, &dma->slop[cmd->slopidx],
+			    M_NOWAIT);
 		else if (crp->crp_flags & CRYPTO_F_IOV)
 			cuio_copyback((struct uio *)crp->crp_buf,
 			    cmd->src_map->dm_mapsize - cmd->sloplen,
@@ -2366,7 +2367,7 @@ hifn_callback(struct hifn_softc *sc, struct hifn_command *cmd,
 
 			if (crp->crp_flags & CRYPTO_F_IMBUF)
 				m_copyback((struct mbuf *)crp->crp_buf,
-				    crd->crd_inject, len, macbuf);
+				    crd->crd_inject, len, macbuf, M_NOWAIT);
 			else if ((crp->crp_flags & CRYPTO_F_IOV) && crp->crp_mac)
 				bcopy((caddr_t)macbuf, crp->crp_mac, len);
 			break;

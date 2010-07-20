@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bgereg.h,v 1.99 2009/10/11 10:36:31 sthen Exp $	*/
+/*	$OpenBSD: if_bgereg.h,v 1.101 2010/07/09 00:04:42 sthen Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -210,6 +210,7 @@
 #define BGE_PCI_ISR_MBX_LO		0xB4
 #define BGE_PCI_PRODID_ASICREV		0xBC
 #define BGE_PCI_GEN2_PRODID_ASICREV	0xF4
+#define BGE_PCI_GEN15_PRODID_ASICREV	0xFC
 
 /* XXX:
  * Used in PCI-Express code for 575x chips.
@@ -326,6 +327,7 @@
 #define BGE_ASICREV_BCM5785		0x5785
 #define BGE_ASICREV_BCM57780		0x57780
 #define BGE_ASICREV_BCM5717		0x5717
+#define BGE_ASICREV_BCM57765		0x57785
 
 /* chip revisions */
 #define BGE_CHIPREV(x)			((x) >> 8)
@@ -1515,6 +1517,7 @@
 #define BGE_RDMAMODE_MBUF_SBD_CRPT_ATTN	0x00002000
 #define BGE_RDMAMODE_FIFO_SIZE_128	0x00020000
 #define BGE_RDMAMODE_FIFO_LONG_BURST	0x00030000
+#define BGE_RDMAMODE_MULT_DMA_RD_DIS	0x01000000
 
 /* Read DMA status register */
 #define BGE_RDMASTAT_PCI_TGT_ABRT_ATTN	0x00000004
@@ -1546,6 +1549,7 @@
 #define BGE_WDMAMODE_ALL_ATTNS		0x000003FC
 #define BGE_WDMAMODE_RX_ACCEL		0x00000400
 #define BGE_WDMAMODE_STATUS_TAG_FIX	0x20000000
+#define BGE_WDMAMODE_BURST_ALL_DATA	0xc0000000
 
 /* Write DMA status register */
 #define BGE_WDMASTAT_PCI_TGT_ABRT_ATTN	0x00000004

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.37 2009/11/25 11:23:30 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.51 2010/05/09 18:37:47 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -29,6 +29,7 @@
 #include <sys/reboot.h>
 #include <sys/tty.h>
 
+#include <mips64/arcbios.h>
 #include <mips64/archtype.h>
 
 #include <machine/autoconf.h>
@@ -36,16 +37,20 @@
 #include <machine/cpu.h>
 #include <machine/memconf.h>
 #include <machine/mnode.h>
+#include <machine/atomic.h>
 
 #include <uvm/uvm_extern.h>
 
 #include <sgi/sgi/ip27.h>
+#include <sgi/sgi/l1.h>
 #include <sgi/xbow/hub.h>
 #include <sgi/xbow/widget.h>
 #include <sgi/xbow/xbow.h>
 
 #include <sgi/pci/iofreg.h>
 #include <dev/ic/comvar.h>
+
+#include <dev/cons.h>
 
 extern char *hw_prod;
 
@@ -55,15 +60,16 @@ paddr_t	ip27_widget_short(int16_t, u_int);
 paddr_t	ip27_widget_long(int16_t, u_int);
 paddr_t	ip27_widget_map(int16_t, u_int,bus_addr_t *, bus_size_t *);
 int	ip27_widget_id(int16_t, u_int, uint32_t *);
+int	ip27_widget_id_early(int16_t, u_int, uint32_t *);
 
 void	ip27_halt(int);
 
 unsigned int xbow_long_shift = 29;
 
 static paddr_t io_base;
-static gda_t *gda;
 static int ip35 = 0;
-static uint maxnodes;
+uint	 maxnodes;
+gda_t	*gda;
 
 int	ip27_hub_intr_register(int, int, int *);
 int	ip27_hub_intr_establish(int (*)(void *), void *, int, int,
@@ -107,11 +113,11 @@ struct {
 void
 ip27_setup()
 {
-	size_t gsz;
-	uint node;
+	struct ip27_config *ip27_config;
 	uint64_t synergy0_0;
 	console_t *cons;
 	nmi_t *nmi;
+	static char unknown_model[20];
 
 	uncached_base = PHYS_TO_XKPHYS_UNCACHED(0, SP_NC);
 	io_base = PHYS_TO_XKPHYS_UNCACHED(0, SP_IO);
@@ -137,26 +143,41 @@ ip27_setup()
 		case IP35_O300:	/* Speedo2 */
 			hw_prod = "Origin 300";
 			break;
+		case IP35_CBRICK:
+			/* regular C-Brick, must be an Origin 3000 system */
+			hw_prod = "Origin 3000";
+			break;
 		default:
-		    {
-			static char unknown_model[20];
 			snprintf(unknown_model, sizeof unknown_model,
 			    "Unknown IP35 type %x", sys_config.system_subtype);
 			hw_prod = unknown_model;
-		    }
 			break;
 		}
 	} else {
-		/*
-		 * XXX need to look for Sn00 type in LBOOT space to tell
-		 * XXX Origin 2000 and Origin 200 apart.
-		 */
-		hw_prod = "Origin 200";
+		ip27_config = (struct ip27_config *)
+		    IP27_LHSPEC_ADDR(LBOOTBASE_IP27 + IP27_CONFIG_OFFSET);
+		if (ip27_config->magic == IP27_CONFIG_MAGIC)
+			sys_config.system_subtype = ip27_config->ip27_subtype;
+		else
+			sys_config.system_subtype = IP27_UNKNOWN;
+		switch (sys_config.system_subtype) {
+		case IP27_O2K:
+			hw_prod = "Origin 2000";
+			break;
+		case IP27_O200:
+			hw_prod = "Origin 200";
+			break;
+		default:
+			snprintf(unknown_model, sizeof unknown_model,
+			    "Unknown IP27 type %x", sys_config.system_subtype);
+			hw_prod = unknown_model;
+			break;
+		}
 	}
 
 	xbow_widget_base = ip27_widget_short;
 	xbow_widget_map = ip27_widget_map;
-	xbow_widget_id = ip27_widget_id;
+	xbow_widget_id = ip27_widget_id_early;
 
 	md_halt = ip27_halt;
 
@@ -168,41 +189,6 @@ ip27_setup()
 	kl_init(ip35);
 	if (kl_n_mode != 0)
 		xbow_long_shift = 28;
-
-	/*
-	 * Get a grip on the global data area, and figure out how many
-	 * theoretical nodes are available.
-	 */
-
-	gda = IP27_GDA(0);
-	gsz = IP27_GDA_SIZE(0);
-	if (gda->magic != GDA_MAGIC || gda->ver < 2) {
-		masternasid = 0;
-		maxnodes = 0;
-	} else {
-		masternasid = gda->masternasid;
-		maxnodes = (gsz - offsetof(gda_t, nasid)) / sizeof(int16_t);
-		if (maxnodes > GDA_MAXNODES)
-			maxnodes = GDA_MAXNODES;
-		/* in M mode, there can't be more than 64 nodes anyway */
-		if (kl_n_mode == 0 && maxnodes > 64)
-			maxnodes = 64;
-	}
-
-	/*
-	 * Scan all nodes configurations to find out CPU and memory
-	 * information, starting with the master node.
-	 */
-
-	kl_scan_config(masternasid);
-	for (node = 0; node < maxnodes; node++) {
-		if (gda->nasid[node] < 0)
-			continue;
-		if (gda->nasid[node] == masternasid)
-			continue;
-		kl_scan_config(gda->nasid[node]);
-	}
-	kl_scan_done();
 
 	/*
 	 * Initialize the early console parameters.
@@ -217,11 +203,10 @@ ip27_setup()
 	cons = kl_get_console();
 	xbow_build_bus_space(&sys_config.console_io, 0,
 	    8 /* whatever nonzero */);
-	/* Constrain to the correct window */
+	/* point to devio base */
 	sys_config.console_io.bus_base =
-	    cons->uart_base & 0xffffffffff000000UL;
-
-	comconsaddr = cons->uart_base & 0x0000000000ffffffUL;
+	    cons->uart_base & 0xfffffffffff00000UL;
+	comconsaddr = cons->uart_base & 0x00000000000fffffUL;
 	comconsrate = cons->baud;
 	if (comconsrate < 50 || comconsrate > 115200)
 		comconsrate = 9600;
@@ -234,10 +219,11 @@ ip27_setup()
 		paddr_t ioc4_base;
 
 		/*
-		 * IOC4 clocks are derived from the PCI clock, so we need to
-		 * figure out whether this is an 66MHz or a 33MHz bus.
+		 * IOC4 clocks are derived from the PCI clock,
+		 * so we need to figure out whether this is an 66MHz
+		 * or a 33MHz bus.
 		 */
-		ioc4_base = cons->uart_base & ~0xfffffUL; /* point to devio */
+		ioc4_base = sys_config.console_io.bus_base;
 		ioc4_mcr = *(volatile uint32_t *)(ioc4_base + IOC4_MCR);
 		if (ioc4_mcr & IOC4_MCR_PCI_66MHZ)
 			comconsfreq = 66666667;
@@ -300,6 +286,8 @@ ip27_setup()
 		IP27_RHUB_PI_S(masternasid, 1,
 		    HUBPI_CALIAS_SIZE, PI_CALIAS_SIZE_0);
 	}
+
+	_device_register = dksc_device_register;
 }
 
 /*
@@ -309,20 +297,26 @@ ip27_setup()
 void
 ip27_autoconf(struct device *parent)
 {
-	struct mainbus_attach_args maa;
+	union {
+		struct mainbus_attach_args maa;
+		struct cpu_attach_args caa;
+	} u;
 	uint node;
+
+	xbow_widget_id = ip27_widget_id;
 
 	/*
 	 * Attach the CPU we are running on early; other processors,
 	 * if any, will get attached as they are discovered.
 	 */
 
-	bzero(&maa, sizeof maa);
-	maa.maa_nasid = currentnasid = masternasid;
-	maa.maa_name = "cpu";
-	config_found(parent, &maa, ip27_print);
-	maa.maa_name = "clock";
-	config_found(parent, &maa, ip27_print);
+	bzero(&u, sizeof u);
+	u.maa.maa_name = "cpu";
+	u.maa.maa_nasid = currentnasid = masternasid;
+	u.caa.caa_hw = &bootcpu_hwinfo;
+	config_found(parent, &u, ip27_print);
+	u.maa.maa_name = "clock";
+	config_found(parent, &u, ip27_print);
 
 	/*
 	 * Now attach all nodes' I/O devices.
@@ -341,12 +335,32 @@ ip27_autoconf(struct device *parent)
 void
 ip27_attach_node(struct device *parent, int16_t nasid)
 {
-	struct mainbus_attach_args maa;
+	union {
+		struct mainbus_attach_args maa;
+		struct spdmem_attach_args saa;
+	} u;
+	uint dimm;
+	void *match;
 
-	bzero(&maa, sizeof maa);
-	maa.maa_name = "xbow";
-	maa.maa_nasid = currentnasid = nasid;
-	config_found(parent, &maa, ip27_print);
+	currentnasid = nasid;
+	bzero(&u, sizeof u);
+	if (ip35) {
+		u.maa.maa_name = "spdmem";
+		u.maa.maa_nasid = nasid;
+		for (dimm = 0; dimm < L1_SPD_DIMM_MAX; dimm++) {
+			u.saa.dimm = dimm;
+			/*
+			 * inline config_found_sm() without printing a message
+			 * if match() fails, to avoid getting
+			 * ``spdmem not configured'' for empty memory slots.
+			 */
+			if ((match = config_search(NULL, parent, &u)) != NULL)
+				config_attach(parent, match, &u, ip27_print);
+		}
+	}
+	u.maa.maa_name = "xbow";
+	u.maa.maa_nasid = nasid;
+	config_found(parent, &u, ip27_print);
 }
 
 int
@@ -354,6 +368,8 @@ ip27_print(void *aux, const char *pnp)
 {
 	struct mainbus_attach_args *maa = aux;
 
+	if (pnp != NULL)
+		printf("%s at %s", maa->maa_name, pnp);
 	printf(" nasid %d", maa->maa_nasid);
 
 	return UNCONF;
@@ -502,6 +518,28 @@ ip27_widget_id(int16_t nasid, u_int widget, uint32_t *wid)
 }
 
 /*
+ * Same as the above, but usable before we can handle faults.
+ * Expects the caller to only use valid widget numbers...
+ */
+int
+ip27_widget_id_early(int16_t nasid, u_int widget, uint32_t *wid)
+{
+	paddr_t wpa;
+
+	if (widget != 0)
+	{
+		if (widget < WIDGET_MIN || widget > WIDGET_MAX)
+			return EINVAL;
+	}
+
+	wpa = ip27_widget_short(nasid, widget);
+	if (wid != NULL)
+		*wid = *(uint32_t *)(wpa + (WIDGET_ID | 4));
+
+	return 0;
+}
+
+/*
  * Reboot code
  */
 
@@ -529,11 +567,23 @@ ip27_halt(int howto)
 		else
 			promop = GDA_PROMOP_EIM;
 #else
-		if (howto & RB_POWERDOWN)
-			printf("Software powerdown not supported, "
-			    "please switch off power manually.\n");
-		for (;;) ;
-		/* NOTREACHED */
+		if (howto & RB_POWERDOWN) {
+			if (ip35) {
+				l1_exec_command(masternasid, "* pwr d");
+				delay(1000000);
+				printf("Powerdown failed, "
+				    "please switch off power manually.\n");
+			} else {
+				printf("Software powerdown not supported, "
+				    "please switch off power manually.\n");
+			}
+			for (;;) ;
+		} else {
+			printf("System halted.\n"
+			    "Press any key to restart\n");
+			cngetc();
+			promop = GDA_PROMOP_REBOOT;
+		}
 #endif
 	} else
 		promop = GDA_PROMOP_REBOOT;
@@ -757,6 +807,7 @@ ip27_hub_splx(int newipl)
 #define	INTR_FUNCTIONNAME	hubpi_intr0
 #define	MASK_FUNCTIONNAME	ip27_hub_intr_makemasks0
 #define	INTR_LOCAL_DECLS
+#define	MASK_LOCAL_DECLS
 #define	INTR_GETMASKS \
 do { \
 	/* XXX this assumes we run on cpu0 */ \
@@ -787,6 +838,7 @@ do { \
 #define	INTR_FUNCTIONNAME	hubpi_intr1
 #define	MASK_FUNCTIONNAME	ip27_hub_intr_makemasks1
 #define	INTR_LOCAL_DECLS
+#define	MASK_LOCAL_DECLS
 #define	INTR_GETMASKS \
 do { \
 	/* XXX this assumes we run on cpu0 */ \

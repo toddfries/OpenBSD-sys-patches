@@ -1,4 +1,4 @@
-/*	$OpenBSD: sab.c,v 1.27 2009/11/09 17:53:39 nicm Exp $	*/
+/*	$OpenBSD: sab.c,v 1.30 2010/07/02 17:27:01 nicm Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
@@ -377,7 +377,7 @@ sabtty_attach(parent, self, aux)
 	struct sabtty_attach_args *sa = aux;
 	int r;
 
-	sc->sc_tty = ttymalloc();
+	sc->sc_tty = ttymalloc(0);
 	sc->sc_tty->t_oproc = sabtty_start;
 	sc->sc_tty->t_param = sabtty_param;
 
@@ -725,7 +725,7 @@ sabttyopen(dev, flags, mode, p)
 
 	splx(s);
 
-	s = (*linesw[tp->t_line].l_open)(dev, tp);
+	s = (*linesw[tp->t_line].l_open)(dev, tp, p);
 	if (s != 0) {
 		if (tp->t_state & TS_ISOPEN)
 			return (s);
@@ -755,7 +755,7 @@ sabttyclose(dev, flags, mode, p)
 	struct tty *tp = sc->sc_tty;
 	int s;
 
-	(*linesw[tp->t_line].l_close)(tp, flags);
+	(*linesw[tp->t_line].l_close)(tp, flags, p);
 
 	s = spltty();
 
@@ -1093,13 +1093,7 @@ sabtty_start(tp)
 
 	s = spltty();
 	if ((tp->t_state & (TS_TTSTOP | TS_TIMEOUT | TS_BUSY)) == 0) {
-		if (tp->t_outq.c_cc <= tp->t_lowat) {
-			if (tp->t_state & TS_ASLEEP) {
-				tp->t_state &= ~TS_ASLEEP;
-				wakeup(&tp->t_outq);
-			}
-			selwakeup(&tp->t_wsel);
-		}
+		ttwakeupwr(tp);
 		if (tp->t_outq.c_cc) {
 			sc->sc_txc = ndqb(&tp->t_outq, 0);
 			sc->sc_txp = tp->t_outq.c_cf;

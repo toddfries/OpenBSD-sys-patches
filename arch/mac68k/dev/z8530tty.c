@@ -1,4 +1,4 @@
-/*	$OpenBSD: z8530tty.c,v 1.21 2009/11/09 17:53:38 nicm Exp $	*/
+/*	$OpenBSD: z8530tty.c,v 1.24 2010/07/02 17:27:01 nicm Exp $	*/
 /*	$NetBSD: z8530tty.c,v 1.14 1996/12/17 20:42:43 gwr Exp $	*/
 
 /*
@@ -245,7 +245,7 @@ zstty_attach(parent, self, aux)
 	}
 	printf("\n");
 
-	tp = ttymalloc();
+	tp = ttymalloc(0);
 	tp->t_dev = dev;
 	tp->t_oproc = zsstart;
 	tp->t_param = zsparam;
@@ -443,7 +443,7 @@ zsopen(dev, flags, mode, p)
 
 	splx(s);
 	if (error == 0)
-		error = linesw[tp->t_line].l_open(dev, tp);
+		error = linesw[tp->t_line].l_open(dev, tp, p);
 	return (error);
 }
 
@@ -470,7 +470,7 @@ zsclose(dev, flags, mode, p)
 	if ((tp->t_state & TS_ISOPEN) == 0)
 		return 0;
 
-	(*linesw[tp->t_line].l_close)(tp, flags);
+	(*linesw[tp->t_line].l_close)(tp, flags, p);
 
 	/* Disable interrupts. */
 	s = splzs();
@@ -639,13 +639,7 @@ zsstart(tp)
 	 * If there are sleepers, and output has drained below low
 	 * water mark, awaken.
 	 */
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (tp->t_state & TS_ASLEEP) {
-			tp->t_state &= ~TS_ASLEEP;
-			wakeup((caddr_t)&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-	}
+	ttwakeupwr(tp);
 
 	nch = ndqb(&tp->t_outq, 0);	/* XXX */
 	(void) splzs();
