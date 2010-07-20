@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpls_input.c,v 1.22 2010/05/07 13:33:17 claudio Exp $	*/
+/*	$OpenBSD: mpls_input.c,v 1.28 2010/07/07 20:58:25 claudio Exp $	*/
 
 /*
  * Copyright (c) 2008 Claudio Jeker <claudio@openbsd.org>
@@ -56,6 +56,9 @@ extern int	mpls_inkloop;
 extern int	mpls_mapttl_ip;
 extern int	mpls_mapttl_ip6;
 
+int	mpls_ip_adjttl(struct mbuf *, u_int8_t);
+int	mpls_ip6_adjttl(struct mbuf *, u_int8_t);
+
 void
 mpls_init(void)
 {
@@ -77,7 +80,7 @@ mplsintr(void)
 			return;
 #ifdef DIAGNOSTIC
 		if ((m->m_flags & M_PKTHDR) == 0)
-			panic("ipintr no HDR");
+			panic("mplsintr no HDR");
 #endif
 		mpls_input(m);
 	}
@@ -93,9 +96,9 @@ mpls_input(struct mbuf *m)
 	struct rtentry *rt = NULL;
 	struct rt_mpls *rt_mpls;
 	u_int8_t ttl;
-	int i, hasbos;
+	int i, s, hasbos;
 
-	if (!mpls_enable) {
+	if (!ISSET(ifp->if_xflags, IFXF_MPLS)) {
 		m_freem(m);
 		return;
 	}
@@ -117,7 +120,7 @@ mpls_input(struct mbuf *m)
 	    ifp->if_xname, MPLS_LABEL_GET(shim->shim_label),
 	    MPLS_TTL_GET(shim->shim_label),
 	    MPLS_BOS_ISSET(shim->shim_label));
-#endif	/* MPLS_DEBUG */
+#endif
 
 	/* check and decrement TTL */
 	ttl = ntohl(shim->shim_label & MPLS_TTL_MASK);
@@ -132,11 +135,11 @@ mpls_input(struct mbuf *m)
 	}
 	ttl--;
 
+	bzero(&sa_mpls, sizeof(sa_mpls));
+	smpls = &sa_mpls;
+	smpls->smpls_family = AF_MPLS;
+	smpls->smpls_len = sizeof(*smpls);
 	for (i = 0; i < mpls_inkloop; i++) {
-		bzero(&sa_mpls, sizeof(sa_mpls));
-		smpls = &sa_mpls;
-		smpls->smpls_family = AF_MPLS;
-		smpls->smpls_len = sizeof(*smpls);
 		smpls->smpls_label = shim->shim_label & MPLS_LABEL_MASK;
 
 #ifdef MPLS_DEBUG
@@ -151,18 +154,31 @@ mpls_input(struct mbuf *m)
 			m = mpls_shim_pop(m);
 			shim = mtod(m, struct shim_hdr *);
 
-			switch (ntohl(smpls->smpls_label)) { 
-
+			switch (ntohl(smpls->smpls_label)) {
 			case MPLS_LABEL_IPV4NULL:
+				/*
+				 * RFC 4182 relaxes the position of the
+				 * explicit NULL labels. The no longer need
+				 * to be at the beginning of the stack.
+				 */
 				if (hasbos) {
-					mpls_ip_input(m, ttl);
+					if (mpls_ip_adjttl(m, ttl))
+						goto done;
+					s = splnet();
+					IF_INPUT_ENQUEUE(&ipintrq, m);
+					schednetisr(NETISR_IP);
+					splx(s);
 					goto done;
 				} else
 					continue;
-
 			case MPLS_LABEL_IPV6NULL:
 				if (hasbos) {
-					mpls_ip6_input(m, ttl);
+					if (mpls_ip6_adjttl(m, ttl))
+						goto done;
+					s = splnet();
+					IF_INPUT_ENQUEUE(&ip6intrq, m);
+					schednetisr(NETISR_IPV6);
+					splx(s);
 					goto done;
 				} else
 					continue;
@@ -184,7 +200,6 @@ mpls_input(struct mbuf *m)
 		}
 
 		rt->rt_use++;
-		smpls = satosmpls(rt_key(rt));
 		rt_mpls = (struct rt_mpls *)rt->rt_llinfo;
 
 		if (rt_mpls == NULL || (rt->rt_flags & RTF_MPLS) == 0) {
@@ -196,62 +211,98 @@ mpls_input(struct mbuf *m)
 			goto done;
 		}
 
-		if (rt_mpls->mpls_operation == MPLS_OP_LOCAL) {
+		hasbos = MPLS_BOS_ISSET(shim->shim_label);
+		switch (rt_mpls->mpls_operation) {
+		case MPLS_OP_LOCAL:
 			/* Packet is for us */
-			hasbos = MPLS_BOS_ISSET(shim->shim_label);
-			if (!hasbos) {
-#ifdef MPLS_DEBUG
-				printf("MPLS_DEBUG: packet malformed\n");
-#endif
-				m_freem(m);
-				goto done;
-			}
 			m = mpls_shim_pop(m);
+			if (!hasbos)
+				/* redo lookup with next label */
+				break;
 
 			if (!rt->rt_gateway) {
-#ifdef MPLS_DEBUG
-				printf("MPLS_DEBUG: no layer 3 informations "
-				    "attached\n");
-#endif
 				m_freem(m);
 				goto done;
 			}
 
 			switch(rt->rt_gateway->sa_family) {
 			case AF_INET:
-				mpls_ip_input(m, ttl);
+				if (mpls_ip_adjttl(m, ttl))
+					break;
+				s = splnet();
+				IF_INPUT_ENQUEUE(&ipintrq, m);
+				schednetisr(NETISR_IP);
+				splx(s);
 				break;
 			case AF_INET6:
-				mpls_ip6_input(m, ttl);
+				if (mpls_ip6_adjttl(m, ttl))
+					break;
+				s = splnet();
+				IF_INPUT_ENQUEUE(&ip6intrq, m);
+				schednetisr(NETISR_IPV6);
+				splx(s);
 				break;
 			default:
 				m_freem(m);
 			}
-
 			goto done;
-		}
+		case MPLS_OP_POP:
+			m = mpls_shim_pop(m);
+			if (!hasbos)
+				/* redo lookup with next label */
+				break;
 
-		if (rt_mpls->mpls_operation & MPLS_OP_POP) {
-			hasbos = MPLS_BOS_ISSET(shim->shim_label);
-			if (hasbos) {
-				m = mpls_shim_pop(m);
+			ifp = rt->rt_ifp;
 #if NMPE > 0
-				if (rt->rt_ifp->if_type == IFT_MPLS) {
-					mpe_input(m, rt->rt_ifp, smpls, ttl);
-					goto done;
-				}
+			if (ifp->if_type == IFT_MPLS) {
+				smpls = satosmpls(rt_key(rt));
+				mpe_input(m, rt->rt_ifp, smpls, ttl);
+				goto done;
+			}
 #endif
-				/* last label but we have no clue so drop */
+			if (!rt->rt_gateway) {
 				m_freem(m);
 				goto done;
 			}
+
+			switch(rt->rt_gateway->sa_family) {
+			case AF_INET:
+				if (mpls_ip_adjttl(m, ttl))
+					goto done;
+				break;
+			case AF_INET6:
+				if (mpls_ip6_adjttl(m, ttl))
+					goto done;
+				break;
+			default:
+				m_freem(m);
+				goto done;
+			}
+
+			/* Output iface is not MPLS-enabled */
+			if (!ISSET(ifp->if_xflags, IFXF_MPLS)) {
+				m_freem(m);
+				goto done;
+			}
+
+			(*ifp->if_ll_output)(ifp, m, rt->rt_gateway, rt);
+			goto done;
+		case MPLS_OP_PUSH:
+			m = mpls_shim_push(m, rt_mpls);
+			break;
+		case MPLS_OP_SWAP:
+			m = mpls_shim_swap(m, rt_mpls);
+			break;
 		}
+
+		if (m == NULL)
+			goto done;
 
 		/* refetch label */
 		shim = mtod(m, struct shim_hdr *);
-		ifp = rt->rt_ifp;
 
-		if (ifp != NULL)  
+		ifp = rt->rt_ifp;
+		if (ifp != NULL && rt_mpls->mpls_operation != MPLS_OP_LOCAL)
 			break;
 
 		RTFREE(rt);
@@ -273,33 +324,41 @@ mpls_input(struct mbuf *m)
 	    MPLS_LABEL_GET(rt_mpls->mpls_label));
 #endif
 
-	(*ifp->if_output)(ifp, m, smplstosa(smpls), rt);
+	/* Output iface is not MPLS-enabled */
+	if (!ISSET(ifp->if_xflags, IFXF_MPLS)) {
+#ifdef MPLS_DEBUG
+		printf("MPLS_DEBUG: interface not mpls enabled\n");
+#endif
+		goto done;
+	}
+
+	(*ifp->if_ll_output)(ifp, m, smplstosa(smpls), rt);
 done:
 	if (rt)
 		RTFREE(rt);
 }
 
-void
-mpls_ip_input(struct mbuf *m, u_int8_t ttl) 
+int
+mpls_ip_adjttl(struct mbuf *m, u_int8_t ttl)
 {
 	struct ip	*ip;
-	int		 s, hlen;
+	int		 hlen;
 
 	if (mpls_mapttl_ip) {
 		if (m->m_len < sizeof (struct ip) &&
 		    (m = m_pullup(m, sizeof(struct ip))) == NULL)
-			return;
+			return -1;
 		ip = mtod(m, struct ip *);
 		hlen = ip->ip_hl << 2;
 		if (m->m_len < hlen) {
 			if ((m = m_pullup(m, hlen)) == NULL)
-				return;
+				return -1;
 			ip = mtod(m, struct ip *);
 		}
-
+		/* make sure we have a valid header */
 		if (in_cksum(m, hlen) != 0) {
 			m_free(m);
-			return;
+			return -1;
 		}
 
 		/* set IP ttl from MPLS ttl */
@@ -309,32 +368,23 @@ mpls_ip_input(struct mbuf *m, u_int8_t ttl)
 		ip->ip_sum = 0;
 		ip->ip_sum = in_cksum(m, hlen);
 	}
-
-	s = splnet();
-	IF_ENQUEUE(&ipintrq, m);
-	schednetisr(NETISR_IP);
-	splx(s);
+	return 0;
 }
 
-void
-mpls_ip6_input(struct mbuf *m, u_int8_t ttl)
+int
+mpls_ip6_adjttl(struct mbuf *m, u_int8_t ttl)
 {
 	struct ip6_hdr *ip6hdr;
-	int		s;
 
 	if (mpls_mapttl_ip6) {
 		if (m->m_len < sizeof (struct ip6_hdr) &&
 		    (m = m_pullup(m, sizeof(struct ip6_hdr))) == NULL)
-			return;
+			return -1;
 
 		ip6hdr = mtod(m, struct ip6_hdr *);
 
 		/* set IPv6 ttl from MPLS ttl */
 		ip6hdr->ip6_hlim = ttl;
 	}
-
-	s = splnet();
-	IF_ENQUEUE(&ip6intrq, m);
-	schednetisr(NETISR_IPV6);
-	splx(s);
+	return 0;
 }

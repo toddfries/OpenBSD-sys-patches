@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.126 2009/08/11 19:17:16 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.129 2010/07/02 19:57:14 tedu Exp $	*/
 /*	$NetBSD: machdep.c,v 1.121 1999/03/26 23:41:29 mycroft Exp $	*/
 
 /*
@@ -114,6 +114,10 @@ int	bufpages = 0;
 int	bufcachepercent = BUFCACHEPERCENT;
 
 int	physmem;		/* size of physical memory, in pages */
+
+struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
  * during autoconfiguration or after a panic.
@@ -122,13 +126,6 @@ int	safepri = PSL_LOWIPL;
 
 extern	u_int lowram;
 extern	short exframesize[];
-
-#ifdef COMPAT_HPUX
-extern struct emul emul_hpux;
-#endif
-#ifdef COMPAT_SUNOS
-extern struct emul emul_sunos;
-#endif
 
 /*
  * Some storage space must be allocated statically because of the
@@ -1048,52 +1045,4 @@ done:
 	pmap_update(pmap_kernel());
 	splx(s);
 	return(found);
-}
-
-/*
- * cpu_exec_aout_makecmds():
- *	cpu-dependent a.out format hook for execve().
- *
- * Determine of the given exec package refers to something which we
- * understand and, if so, set up the vmcmds for it.
- */
-int
-cpu_exec_aout_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-#if defined(COMPAT_44) || defined(COMPAT_SUNOS)
-	u_long midmag, magic;
-	u_short mid;
-	int error;
-	struct exec *execp = epp->ep_hdr;
-#ifdef COMPAT_SUNOS
-	extern int sunos_exec_aout_makecmds(struct proc *, struct exec_package *);
-#endif
-
-	midmag = ntohl(execp->a_midmag);
-	mid = (midmag >> 16) & 0xffff;
-	magic = midmag & 0xffff;
-
-	midmag = mid << 16 | magic;
-
-	switch (midmag) {
-#ifdef COMPAT_44
-	case (MID_HP300 << 16) | ZMAGIC:
-		error = exec_aout_prep_oldzmagic(p, epp);
-		break;
-#endif
-	default:
-#ifdef COMPAT_SUNOS
-		/* Hand it over to the SunOS emulation package. */
-		error = sunos_exec_aout_makecmds(p, epp);
-#else
-		error = ENOEXEC;
-#endif
-	}
-
-	return error;
-#else /* !(defined(COMPAT_44) || defined(COMPAT_SUNOS)) */
-	return ENOEXEC;
-#endif
 }

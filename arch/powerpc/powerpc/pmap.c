@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.114 2010/04/24 17:56:06 kettenis Exp $ */
+/*	$OpenBSD: pmap.c,v 1.116 2010/07/16 06:22:31 kettenis Exp $ */
 
 /*
  * Copyright (c) 2001, 2002, 2007 Dale Rahn.
@@ -78,7 +78,6 @@
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
-#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/pool.h>
 
@@ -1302,11 +1301,8 @@ pmap_t
 pmap_create()
 {
 	pmap_t pmap;
-	int s;
 
-	s = splvm();
 	pmap = pool_get(&pmap_pmap_pool, PR_WAITOK);
-	splx(s);
 	pmap_pinit(pmap);
 	return (pmap);
 }
@@ -1330,7 +1326,6 @@ void
 pmap_destroy(pmap_t pm)
 {
 	int refs;
-	int s;
 
 	/* simple_lock(&pmap->pm_obj.vmobjlock); */
 	refs = --pm->pm_refs;
@@ -1342,9 +1337,7 @@ pmap_destroy(pmap_t pm)
 	 * reference count is zero, free pmap resources and free pmap.
 	 */
 	pmap_release(pm);
-	s = splvm();
 	pool_put(&pmap_pmap_pool, pm);
-	splx(s);
 }
 
 /*

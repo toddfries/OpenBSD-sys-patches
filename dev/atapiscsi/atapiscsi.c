@@ -1,4 +1,4 @@
-/*      $OpenBSD: atapiscsi.c,v 1.89 2010/05/20 00:55:17 krw Exp $     */
+/*      $OpenBSD: atapiscsi.c,v 1.92 2010/07/01 03:20:38 matthew Exp $     */
 
 /*
  * This code is derived from code with the copyright below.
@@ -165,8 +165,7 @@ struct atapiscsi_softc {
 };
 
 void  wdc_atapi_minphys(struct buf *bp, struct scsi_link *sl);
-int   wdc_atapi_ioctl(struct scsi_link *,
-	u_long, caddr_t, int, struct proc *);
+int   wdc_atapi_ioctl(struct scsi_link *, u_long, caddr_t, int);
 void  wdc_atapi_send_cmd(struct scsi_xfer *sc_xfer);
 
 static struct scsi_adapter atapiscsi_switch =
@@ -176,14 +175,6 @@ static struct scsi_adapter atapiscsi_switch =
 	NULL,
 	NULL,
 	wdc_atapi_ioctl
-};
-
-static struct scsi_device atapiscsi_dev =
-{
-	NULL,
-	NULL,
-	NULL,
-	NULL,
 };
 
 /* Inital version shares bus_link structure so it can easily
@@ -250,7 +241,6 @@ atapiscsi_attach(parent, self, aux)
 	as->sc_adapterlink.adapter_target = 7;
 	as->sc_adapterlink.adapter_buswidth = 2;
 	as->sc_adapterlink.adapter = &atapiscsi_switch;
-	as->sc_adapterlink.device = &atapiscsi_dev;
 	as->sc_adapterlink.luns = 1;
 	as->sc_adapterlink.openings = 1;
 	as->sc_adapterlink.flags = SDEV_ATAPI;
@@ -294,7 +284,7 @@ atapiscsi_attach(parent, self, aux)
 
 	if (child != NULL) {
 		struct scsibus_softc *scsi = (struct scsibus_softc *)child;
-		struct scsi_link *link = scsi->sc_link[0][0];
+		struct scsi_link *link = scsi_get_link(scsi, 0, 0);
 
 		if (link) {
 			strlcpy(drvp->drive_name,
@@ -437,12 +427,11 @@ wdc_atapi_minphys (struct buf *bp, struct scsi_link *sl)
 }
 
 int
-wdc_atapi_ioctl (sc_link, cmd, addr, flag, p)
+wdc_atapi_ioctl (sc_link, cmd, addr, flag)
 	struct   scsi_link *sc_link;
 	u_long   cmd;
 	caddr_t  addr;
 	int      flag;
-	struct proc *p;
 {
 	struct atapiscsi_softc *as = sc_link->adapter_softc;
 	struct channel_softc *chp = as->chp;
@@ -451,7 +440,7 @@ wdc_atapi_ioctl (sc_link, cmd, addr, flag, p)
 	if (sc_link->target != 0)
 		return ENOTTY;
 
-	return (wdc_ioctl(drvp, cmd, addr, flag, p));
+	return (wdc_ioctl(drvp, cmd, addr, flag, curproc));
 }
 
 

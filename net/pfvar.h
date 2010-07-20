@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.309 2010/05/07 13:33:16 claudio Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.311 2010/06/28 23:21:41 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -1196,6 +1196,9 @@ struct pf_pdesc {
 		void			*any;
 	} hdr;
 
+	struct pf_addr	 nsaddr;	/* src address after NAT */
+	struct pf_addr	 ndaddr;	/* dst address after NAT */
+
 	struct ether_header
 			*eh;
 	struct pf_addr	*src;		/* src address */
@@ -1204,6 +1207,8 @@ struct pf_pdesc {
 	u_int16_t	*dport;
 	u_int16_t	 osport;
 	u_int16_t	 odport;
+	u_int16_t	 nsport;	/* src port after NAT */
+	u_int16_t	 ndport;	/* dst port after NAT */
 
 	u_int32_t	 p_len;		/* total length of payload */
 
@@ -1513,10 +1518,6 @@ struct pfioc_src_nodes {
 #define psn_src_nodes	psn_u.psu_src_nodes
 };
 
-struct pfioc_if {
-	char		 ifname[IFNAMSIZ];
-};
-
 struct pfioc_tm {
 	int		 timeout;
 	int		 seconds;
@@ -1611,9 +1612,9 @@ struct pfioc_iface {
 /* XXX cut 8 - 17 */
 #define DIOCCLRSTATES	_IOWR('D', 18, struct pfioc_state_kill)
 #define DIOCGETSTATE	_IOWR('D', 19, struct pfioc_state)
-#define DIOCSETSTATUSIF _IOWR('D', 20, struct pfioc_if)
+#define DIOCSETSTATUSIF _IOWR('D', 20, struct pfioc_iface)
 #define DIOCGETSTATUS	_IOWR('D', 21, struct pf_status)
-#define DIOCCLRSTATUS	_IO  ('D', 22)
+#define DIOCCLRSTATUS	_IOWR('D', 22, struct pfioc_iface)
 #define DIOCNATLOOK	_IOWR('D', 23, struct pfioc_natlook)
 #define DIOCSETDEBUG	_IOWR('D', 24, u_int32_t)
 #define DIOCGETSTATES	_IOWR('D', 25, struct pfioc_states)
@@ -1925,18 +1926,13 @@ int			 pf_step_out_of_anchor(int *, struct pf_ruleset **,
 			     int *);
 
 int			 pf_get_transaddr(struct pf_rule *, struct pf_pdesc *,
-			    struct pf_addr *, u_int16_t *, struct pf_addr *,
-			    u_int16_t *, struct pf_src_node **);
+			    struct pf_src_node **);
 
 int			 pf_map_addr(sa_family_t, struct pf_rule *,
 			    struct pf_addr *, struct pf_addr *,
 			    struct pf_addr *, struct pf_src_node **,
 			    struct pf_pool *, enum pf_sn_types);
 
-int			 pf_state_key_setup(struct pf_pdesc *,
-			    struct pf_state_key **, struct pf_state_key **,
-			    struct pf_addr **, struct pf_addr **,
-			    u_int16_t *, u_int16_t *, int);
 #endif /* _KERNEL */
 
 

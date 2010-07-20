@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5008.c,v 1.7 2010/05/16 14:34:19 damien Exp $	*/
+/*	$OpenBSD: ar5008.c,v 1.11 2010/07/15 19:38:40 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -88,7 +88,8 @@ int	ar5008_tx_process(struct athn_softc *, int);
 void	ar5008_tx_intr(struct athn_softc *);
 int	ar5008_swba_intr(struct athn_softc *);
 int	ar5008_intr(struct athn_softc *);
-int	ar5008_tx(struct athn_softc *, struct mbuf *, struct ieee80211_node *);
+int	ar5008_tx(struct athn_softc *, struct mbuf *, struct ieee80211_node *,
+	    int);
 void	ar5008_set_rf_mode(struct athn_softc *, struct ieee80211_channel *);
 int	ar5008_rf_bus_request(struct athn_softc *);
 void	ar5008_rf_bus_release(struct athn_softc *);
@@ -597,8 +598,8 @@ ar5008_rx_alloc(struct athn_softc *sc)
 			goto fail;
 		}
 
-		bus_dmamap_sync(sc->sc_dmat, bf->bf_map, 0,
-		    bf->bf_map->dm_mapsize, BUS_DMASYNC_PREREAD);
+		bus_dmamap_sync(sc->sc_dmat, bf->bf_map, 0, ATHN_RXBUFSZ,
+		    BUS_DMASYNC_PREREAD);
 
 		bf->bf_desc = ds;
 		bf->bf_daddr = rxq->map->dm_segs[0].ds_addr +
@@ -818,7 +819,7 @@ ar5008_rx_process(struct athn_softc *sc)
 	}
 
 	len = MS(ds->ds_status1, AR_RXS1_DATA_LEN);
-	if (__predict_false(len == 0 || len > ATHN_RXBUFSZ)) {
+	if (__predict_false(len < IEEE80211_MIN_LEN || len > ATHN_RXBUFSZ)) {
 		DPRINTF(("corrupted descriptor length=%d\n", len));
 		ifp->if_ierrors++;
 		goto skip;
@@ -874,7 +875,7 @@ ar5008_rx_process(struct athn_softc *sc)
 		u_int hdrlen = ieee80211_get_hdrlen(wh);
 		if (hdrlen & 3) {
 			ovbcopy(wh, (caddr_t)wh + 2, hdrlen);
-			m_adj(m, 2);	/* XXX sure? */
+			m_adj(m, 2);
 		}
 	}
 #if NBPFILTER > 0
@@ -931,7 +932,7 @@ ar5008_tx_process(struct athn_softc *sc, int qid)
 	uint8_t failcnt;
 
 	bf = SIMPLEQ_FIRST(&txq->head);
-	if (__predict_false(bf == NULL))
+	if (bf == NULL)
 		return (ENOENT);
 	/* Get descriptor of last DMA segment. */
 	ds = &((struct ar_tx_desc *)bf->bf_descs)[bf->bf_map->dm_nsegs - 1];
@@ -1193,7 +1194,8 @@ ar5008_intr(struct athn_softc *sc)
 }
 
 int
-ar5008_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
+ar5008_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
+    int txflags)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211_key *k = NULL;
@@ -1341,6 +1343,7 @@ ar5008_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	}
 	bf->bf_m = m;
 	bf->bf_ni = ni;
+	bf->bf_txflags = txflags;
 
 	wh = mtod(m, struct ieee80211_frame *);
 
@@ -1709,8 +1712,8 @@ ar5008_set_rxchains(struct athn_softc *sc)
 void
 ar5008_read_noisefloor(struct athn_softc *sc, int16_t *nf, int16_t *nf_ext)
 {
-/* Sign-extend 9-bit value to 16-bit. */
-#define SIGN_EXT(v)	((((int16_t)(v)) << 7) >> 7)
+/* Sign-extends 9-bit value (assumes upper bits are zeroes.) */
+#define SIGN_EXT(v)	(((v) ^ 0x100) - 0x100)
 	uint32_t reg;
 	int i;
 
@@ -1789,15 +1792,15 @@ ar5008_bb_load_noisefloor(struct athn_softc *sc)
 	AR_CLRBITS(sc, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NO_UPDATE_NF);
 	AR_SETBITS(sc, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NF);
 	/* Wait for load to complete. */
-	for (ntries = 0; ntries < 5; ntries++) {
+	for (ntries = 0; ntries < 1000; ntries++) {
 		if (!(AR_READ(sc, AR_PHY_AGC_CONTROL) & AR_PHY_AGC_CONTROL_NF))
 			break;
 		DELAY(50);
 	}
-#ifdef ATHN_DEBUG
-	if (ntries == 5 && athn_debug > 0)
-		printf("failed to load noisefloor values\n");
-#endif
+	if (ntries == 1000) {
+		DPRINTF(("failed to load noisefloor values\n"));
+		return;
+	}
 
 	/* Restore noisefloor values to initial (max) values. */
 	for (i = 0; i < AR_MAX_CHAINS; i++)
@@ -2398,7 +2401,7 @@ ar5008_get_pdadcs(struct athn_softc *sc, uint8_t fbin,
 		while (ss < maxidx && npdadcs < AR_NUM_PDADC_VALUES - 1)
 			pdadcs[npdadcs++] = vpd[ss++];
 
-		if (tgtidx <= maxidx)
+		if (tgtidx < maxidx)
 			continue;
 
 		/* Extrapolate data for maxidx <= ss <= tgtidx. */

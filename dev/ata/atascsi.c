@@ -1,4 +1,4 @@
-/*	$OpenBSD: atascsi.c,v 1.85 2010/05/26 12:17:35 dlg Exp $ */
+/*	$OpenBSD: atascsi.c,v 1.89 2010/07/20 01:06:54 deraadt Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -73,10 +73,6 @@ struct scsi_adapter atascsi_switch = {
 	NULL,			/* ioctl */
 };
 
-struct scsi_device atascsi_device = {
-	NULL, NULL, NULL, NULL
-};
-
 void		ata_swapcopy(void *, void *, size_t);
 
 void		atascsi_disk_cmd(struct scsi_xfer *);
@@ -93,6 +89,8 @@ void		atascsi_disk_capacity16(struct scsi_xfer *);
 void		atascsi_disk_sync(struct scsi_xfer *);
 void		atascsi_disk_sync_done(struct ata_xfer *);
 void		atascsi_disk_sense(struct scsi_xfer *);
+void		atascsi_disk_start_stop(struct scsi_xfer *);
+void		atascsi_disk_start_stop_done(struct ata_xfer *);
 
 void		atascsi_atapi_cmd(struct scsi_xfer *);
 void		atascsi_atapi_cmd_done(struct ata_xfer *);
@@ -136,7 +134,6 @@ atascsi_attach(struct device *self, struct atascsi_attach_args *aaa)
 		as->as_switch.scsi_minphys = aaa->aaa_minphys;
 
 	/* fill in our scsi_link */
-	as->as_link.device = &atascsi_device;
 	as->as_link.adapter = &as->as_switch;
 	as->as_link.adapter_softc = as;
 	as->as_link.adapter_buswidth = aaa->aaa_nports;
@@ -192,6 +189,7 @@ atascsi_probe(struct scsi_link *link)
 	struct atascsi		*as = link->adapter_softc;
 	struct atascsi_port	*ap;
 	struct ata_xfer		*xa;
+	struct ata_identify	*identify;
 	int			port, type;
 	int			rv;
 	u_int16_t		cmdset;
@@ -229,8 +227,9 @@ atascsi_probe(struct scsi_link *link)
 	xa = scsi_io_get(&ap->ap_iopool, SCSI_NOSLEEP);
 	if (xa == NULL)
 		panic("no free xfers on a new port");
-	xa->data = &ap->ap_identify;
-	xa->datalen = sizeof(ap->ap_identify);
+	identify = malloc(sizeof(*identify), M_TEMP, M_WAITOK); /* XXX dma reachable */
+	xa->data = identify;
+	xa->datalen = sizeof(*identify);
 	xa->fis->flags = ATA_H2D_FLAGS_CMD;
 	xa->fis->command = (type == ATA_PORT_T_DISK) ?
 	    ATA_C_IDENTIFY : ATA_C_IDENTIFY_PACKET;
@@ -241,8 +240,12 @@ atascsi_probe(struct scsi_link *link)
 	xa->atascsi_private = &ap->ap_iopool;
 	ata_exec(as, xa);
 	rv = ata_polled(xa);
-	if (rv != 0)
+	if (rv != 0) {
+		free(identify, M_TEMP);
 		goto error;
+	}
+	bcopy(identify, &ap->ap_identify, sizeof(ap->ap_identify));
+	free(identify, M_TEMP);
 
 	as->as_ports[port] = ap;
 
@@ -409,8 +412,11 @@ atascsi_disk_cmd(struct scsi_xfer *xs)
 		atascsi_passthru_16(xs);
 		return;
 
-	case TEST_UNIT_READY:
 	case START_STOP:
+		atascsi_disk_start_stop(xs);
+		return;
+
+	case TEST_UNIT_READY:
 	case PREVENT_ALLOW:
 		atascsi_done(xs, XS_NOERROR);
 		return;
@@ -1048,6 +1054,84 @@ atascsi_disk_sense(struct scsi_xfer *xs)
 }
 
 void
+atascsi_disk_start_stop(struct scsi_xfer *xs)
+{
+	struct scsi_link	*link = xs->sc_link;
+	struct atascsi		*as = link->adapter_softc;
+	struct ata_xfer		*xa = xs->io;
+	struct scsi_start_stop	*ss = (struct scsi_start_stop *)xs->cmd;
+
+	if (ss->how != SSS_STOP) {
+		atascsi_done(xs, XS_NOERROR);
+		return;
+	}
+
+	/*
+	 * A SCSI START_STOP UNIT command with the START bit set to
+	 * zero gets translated into an ATA FLUSH CACHE command
+	 * followed by an ATA STANDBY IMMEDIATE command.
+	 */
+	xa->datalen = 0;
+	xa->flags = ATA_F_READ;
+	xa->complete = atascsi_disk_start_stop_done;
+	/* Spec says flush cache can take >30 sec, so give it at least 45. */
+	xa->timeout = (xs->timeout < 45000) ? 45000 : xs->timeout;
+	xa->atascsi_private = xs;
+	if (xs->flags & SCSI_POLL)
+		xa->flags |= ATA_F_POLL;
+
+	xa->fis->flags = ATA_H2D_FLAGS_CMD;
+	xa->fis->command = ATA_C_FLUSH_CACHE;
+	xa->fis->device = 0;
+
+	ata_exec(as, xa);
+}
+
+void
+atascsi_disk_start_stop_done(struct ata_xfer *xa)
+{
+	struct scsi_xfer	*xs = xa->atascsi_private;
+	struct scsi_link	*link = xs->sc_link;
+	struct atascsi		*as = link->adapter_softc;
+
+	switch (xa->state) {
+	case ATA_S_COMPLETE:
+		break;
+
+	case ATA_S_ERROR:
+	case ATA_S_TIMEOUT:
+		xs->error = (xa->state == ATA_S_TIMEOUT ? XS_TIMEOUT :
+		    XS_DRIVER_STUFFUP);
+		xs->resid = xa->resid;
+		scsi_done(xs);
+		return;
+
+	default:
+		panic("atascsi_disk_start_stop_done: unexpected ata_xfer state (%d)",
+		    xa->state);
+	}
+
+	/*
+	 * The FLUSH CACHE command completed succesfully; now issue
+	 * the STANDBY IMMEDATE command.
+	 */
+	xa->datalen = 0;
+	xa->flags = ATA_F_READ;
+	xa->complete = atascsi_disk_cmd_done;
+	/* Spec says flush cache can take >30 sec, so give it at least 45. */
+	xa->timeout = (xs->timeout < 45000) ? 45000 : xs->timeout;
+	xa->atascsi_private = xs;
+	if (xs->flags & SCSI_POLL)
+		xa->flags |= ATA_F_POLL;
+
+	xa->fis->flags = ATA_H2D_FLAGS_CMD;
+	xa->fis->command = ATA_C_STANDBY_IMMED;
+	xa->fis->device = 0;
+
+	ata_exec(as, xa);
+}
+
+void
 atascsi_atapi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link	*link = xs->sc_link;
@@ -1129,13 +1213,8 @@ atascsi_atapi_cmd_done(struct ata_xfer *xa)
 void
 atascsi_done(struct scsi_xfer *xs, int error)
 {
-	int			s;
-
 	xs->error = error;
-
-	s = splbio();
 	scsi_done(xs);
-	splx(s);
 }
 
 void

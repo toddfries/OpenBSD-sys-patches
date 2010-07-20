@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.179 2010/05/07 13:33:17 claudio Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.182 2010/07/09 16:58:06 reyk Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -490,7 +490,8 @@ ipv4_input(m)
                 s = splnet();
 		if (mtag != NULL) {
 			tdbi = (struct tdb_ident *)(mtag + 1);
-			tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+			tdb = gettdb(tdbi->rdomain, tdbi->spi,
+			    &tdbi->dst, tdbi->proto);
 		} else
 			tdb = NULL;
 	        ipsp_spd_lookup(m, AF_INET, hlen, &error,
@@ -649,7 +650,8 @@ found:
         s = splnet();
 	if (mtag) {
 		tdbi = (struct tdb_ident *)(mtag + 1);
-	        tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
+	        tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst,
+		    tdbi->proto);
 	} else
 		tdb = NULL;
 	ipsp_spd_lookup(m, AF_INET, hlen, &error, IPSP_DIRECTION_IN,
@@ -691,10 +693,13 @@ in_iawithaddr(struct in_addr ina, struct mbuf *m, u_int rdomain)
 			(IFF_LOOPBACK|IFF_LINK1) &&
 		     ia->ia_net == (ina.s_addr & ia->ia_netmask)))
 			return ia;
+		/* check ancient classful too, e. g. for rarp-based netboot */
 		if (((ip_directedbcast == 0) || (m && ip_directedbcast &&
 		    ia->ia_ifp == m->m_pkthdr.rcvif)) &&
 		    (ia->ia_ifp->if_flags & IFF_BROADCAST)) {
-			if (ina.s_addr == ia->ia_broadaddr.sin_addr.s_addr) {
+			if (ina.s_addr == ia->ia_broadaddr.sin_addr.s_addr ||
+			    IN_CLASSFULBROADCAST(ina.s_addr,
+			    ia->ia_addr.sin_addr.s_addr)) {
 				/* Make sure M_BCAST is set */
 				if (m)
 					m->m_flags |= M_BCAST;
@@ -1619,7 +1624,6 @@ ip_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 			    rt_timer_queue_create(ip_mtudisc_timeout);
 		} else if (ip_mtudisc == 0 && ip_mtudisc_timeout_q != NULL) {
 			rt_timer_queue_destroy(ip_mtudisc_timeout_q, TRUE);
-			Free(ip_mtudisc_timeout_q);
 			ip_mtudisc_timeout_q = NULL;
 		}
 		return error;

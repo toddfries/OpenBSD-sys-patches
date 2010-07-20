@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.19 2010/05/08 21:59:56 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.22 2010/06/27 13:24:39 miod Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -63,7 +63,7 @@
 #include <sys/sem.h>
 #endif
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <machine/db_machdep.h>
 #include <ddb/db_interface.h>
@@ -94,8 +94,22 @@ char	pmon_bootp[80];
 int	bufpages = BUFPAGES;
 int	bufcachepercent = BUFCACHEPERCENT;
 
+/*
+ * Even though the system is 64bit, the hardware is constrained to up
+ * to 2G of contigous physical memory (direct 2GB DMA area), so there
+ * is no particular constraint. paddr_t is long so: 
+ */
+struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
+struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+
 vm_map_t exec_map;
 vm_map_t phys_map;
+
+/*
+ * safepri is a safe priority for sleep to set for a spin-wait
+ * during autoconfiguration or after a panic.
+ */
+int   safepri = 0;
 
 caddr_t	msgbufbase;
 vaddr_t	uncached_base;

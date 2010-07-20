@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.72 2010/05/21 15:24:29 jsing Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.75 2010/06/29 00:50:40 jsing Exp $	*/
 
 /*
  * Copyright (c) 2000-2004 Michael Shalayeff
@@ -84,7 +84,8 @@ struct cpu_info {
 	volatile int	ci_flags;
 
 	struct proc	*ci_curproc;
-	paddr_t		ci_spinup_stack;
+	paddr_t		ci_fpu_state;		/* Process FPU state. */
+	paddr_t		ci_stack;
 
 	register_t	ci_psw;			/* Processor Status Word. */
 	volatile int	ci_cpl;
@@ -234,6 +235,8 @@ int	cpu_dump(void);
 
 #ifdef MULTIPROCESSOR
 void	cpu_boot_secondary_processors(void);
+void	cpu_hw_init(void);
+void	cpu_hatch(void);
 #endif
 #endif
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trm.c,v 1.19 2010/05/19 15:27:35 oga Exp $
+/*	$OpenBSD: trm.c,v 1.21 2010/06/28 18:31:02 krw Exp $
  * ------------------------------------------------------------
  *   O.S       : OpenBSD
  *   File Name : trm.c
@@ -137,13 +137,6 @@ struct scsi_adapter trm_switch = {
 	trm_minphys,
 	NULL,
 	NULL
-};
-
-static struct scsi_device trm_device = {
-	NULL,            /* Use default error handler */
-	NULL,            /* have a queue, served by this */
-	NULL,            /* have no async handler */
-	NULL,            /* Use default 'done' routine */
 };
 
 /* 
@@ -354,18 +347,14 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 		printf("%s: target=%d >= %d\n",
 		    sc->sc_device.dv_xname, target, TRM_MAX_TARGETS);
 		xs->error = XS_DRIVER_STUFFUP;
-		intflag = splbio();
 		scsi_done(xs);
-		splx(intflag);
 		return;
 	}
 	if (lun >= TRM_MAX_LUNS) {
 		printf("%s: lun=%d >= %d\n",
 		    sc->sc_device.dv_xname, lun, TRM_MAX_LUNS);
 		xs->error = XS_DRIVER_STUFFUP;
-		intflag = splbio();
 		scsi_done(xs);
-		splx(intflag);
 		return;
 	}
 
@@ -373,9 +362,7 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 	if (pDCB == NULL) {
 		/* Removed as a result of INQUIRY proving no device present */
 		xs->error = XS_DRIVER_STUFFUP;
-		intflag = splbio();
 		scsi_done(xs);
-		splx(intflag);
 		return;
  	}
  
@@ -386,9 +373,7 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 #endif
 		trm_reset(sc);
 		xs->error = XS_NOERROR;
-		intflag = splbio();
 		scsi_done(xs);
-		splx(intflag);
 		return;
 	}
 
@@ -401,9 +386,9 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 	pSRB = trm_GetFreeSRB(sc);
 
 	if (pSRB == NULL) {
+		splx(intflag);
 		xs->error = XS_NO_CCB;
 		scsi_done(xs);
-		splx(intflag);
 		return;
 	}
 
@@ -432,8 +417,8 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 			 * free SRB
 			 */
 			TAILQ_INSERT_HEAD(&sc->freeSRB, pSRB, link);
-			scsi_done(xs);
 			splx(intflag);
+			scsi_done(xs);
 			return;
 		}
 
@@ -2443,7 +2428,6 @@ trm_initACB(struct trm_softc *sc, int unit)
 	sc->sc_link.adapter_softc    = sc;
 	sc->sc_link.adapter_target   = sc->sc_AdaptSCSIID;
 	sc->sc_link.openings         = 30; /* So TagMask (32 bit integer) always has space */
-	sc->sc_link.device           = &trm_device;
 	sc->sc_link.adapter          = &sc->sc_adapter;
 	sc->sc_link.adapter_buswidth = ((sc->sc_config & HCC_WIDE_CARD) == 0) ? 8:16;
 

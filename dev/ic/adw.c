@@ -1,4 +1,4 @@
-/*	$OpenBSD: adw.c,v 1.44 2010/05/20 00:55:17 krw Exp $ */
+/*	$OpenBSD: adw.c,v 1.46 2010/06/28 18:31:01 krw Exp $ */
 /* $NetBSD: adw.c,v 1.23 2000/05/27 18:24:50 dante Exp $	 */
 
 /*
@@ -41,7 +41,6 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/timeout.h>
 
 #include <machine/bus.h>
@@ -86,16 +85,6 @@ void adw_reset_bus(ADW_SOFTC *);
 struct cfdriver adw_cd = {
 	NULL, "adw", DV_DULL
 };
-
-/* the below structure is so we have a default dev struct for our link struct */
-struct scsi_device adw_dev =
-{
-	NULL,			/* Use default error handler */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* Use default 'done' routine */
-};
-
 
 /******************************************************************************/
 /*                       DMA Mapping for Control Blocks                       */
@@ -563,7 +552,6 @@ adw_attach(sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->chip_scsi_id;
 	sc->sc_link.adapter = &sc->sc_adapter;
-	sc->sc_link.device = &adw_dev;
 	sc->sc_link.openings = 4;
 	sc->sc_link.adapter_buswidth = ADW_MAX_TID+1;
 
@@ -690,10 +678,9 @@ adw_build_req(xs, ccb, flags)
 	 * For wide  boards a CDB length maximum of 16 bytes
 	 * is supported.
 	 */
-	bcopy(xs->cmd, &scsiqp->cdb, ((scsiqp->cdb_len = xs->cmdlen) <= 12)?
-			xs->cmdlen : 12 );
-	if(xs->cmdlen > 12)
-		bcopy(&(xs->cmd[12]),  &scsiqp->cdb16, xs->cmdlen - 12);
+	scsiqp->cdb_len = xs->cmdlen;
+	bcopy((caddr_t)xs->cmd, &scsiqp->cdb, 12);
+	bcopy((caddr_t)xs->cmd + 12, &scsiqp->cdb16, 4);
 
 	scsiqp->target_id = sc_link->target;
 	scsiqp->target_lun = sc_link->lun;

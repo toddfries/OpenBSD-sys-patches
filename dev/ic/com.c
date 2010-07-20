@@ -1,4 +1,4 @@
-/*	$OpenBSD: com.c,v 1.138 2010/04/12 12:57:52 tedu Exp $	*/
+/*	$OpenBSD: com.c,v 1.142 2010/07/02 17:27:01 nicm Exp $	*/
 /*	$NetBSD: com.c,v 1.82.4.1 1996/06/02 09:08:00 mrg Exp $	*/
 
 /*
@@ -68,7 +68,6 @@
 #include <sys/selinfo.h>
 #include <sys/tty.h>
 #include <sys/proc.h>
-#include <sys/user.h>
 #include <sys/conf.h>
 #include <sys/file.h>
 #include <sys/uio.h>
@@ -287,7 +286,7 @@ comopen(dev_t dev, int flag, int mode, struct proc *p)
 
 	s = spltty();
 	if (!sc->sc_tty) {
-		tp = sc->sc_tty = ttymalloc();
+		tp = sc->sc_tty = ttymalloc(1000000);
 	} else
 		tp = sc->sc_tty;
 	splx(s);
@@ -357,6 +356,8 @@ comopen(dev_t dev, int flag, int mode, struct proc *p)
 
 			if (tp->t_ispeed <= 1200)
 				fifo |= FIFO_TRIGGER_1;
+			else if (tp->t_ispeed <= 38400)
+				fifo |= FIFO_TRIGGER_4;
 			else
 				fifo |= FIFO_TRIGGER_8;
 			if (sc->sc_uarttype == COM_UART_TI16750) {
@@ -883,15 +884,9 @@ comstart(struct tty *tp)
 		goto stopped;
 	if (ISSET(tp->t_cflag, CRTSCTS) && !ISSET(sc->sc_msr, MSR_CTS))
 		goto stopped;
-	if (tp->t_outq.c_cc <= tp->t_lowat) {
-		if (ISSET(tp->t_state, TS_ASLEEP)) {
-			CLR(tp->t_state, TS_ASLEEP);
-			wakeup(&tp->t_outq);
-		}
-		selwakeup(&tp->t_wsel);
-		if (tp->t_outq.c_cc == 0)
-			goto stopped;
-	}
+	ttwakeupwr(tp);
+	if (tp->t_outq.c_cc == 0)
+		goto stopped;
 	SET(tp->t_state, TS_BUSY);
 
 #ifdef COM_PXA2X0
