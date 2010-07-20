@@ -164,6 +164,7 @@ void	pgsignal(struct pgrp *pgrp, int sig, int checkctty);
 void	postsig(int sig);
 void	psignal(struct proc *p, int sig);
 void	ptsignal(struct proc *p, int sig, enum signal_type type);
+#define prsignal(pr,sig)	ptsignal((pr)->ps_mainproc, (sig), SPROCESS)
 void	siginit(struct proc *p);
 void	trapsignal(struct proc *p, int sig, u_long code, int type,
 	    union sigval val);

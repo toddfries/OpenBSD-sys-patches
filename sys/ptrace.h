@@ -96,7 +96,7 @@ struct reg;
 struct fpreg;
 #endif
 
-void	proc_reparent(struct proc *child, struct proc *newparent);
+void	proc_reparent(struct process *child, struct process *newparent);
 #ifdef PT_GETFPREGS
 int	process_read_fpregs(struct proc *p, struct fpreg *regs);
 #endif

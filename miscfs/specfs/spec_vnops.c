@@ -500,9 +500,9 @@ spec_close(void *v)
 		 * plus the session), release the reference from the session.
 		 */
 		if (vcount(vp) == 2 && ap->a_p &&
-		    vp == ap->a_p->p_session->s_ttyvp) {
+		    vp == ap->a_p->p_p->ps_session->s_ttyvp) {
 			vrele(vp);
-			ap->a_p->p_session->s_ttyvp = NULL;
+			ap->a_p->p_p->ps_session->s_ttyvp = NULL;
 		}
 		if (cdevsw[major(dev)].d_flags & D_CLONE)
 			return (spec_close_clone(ap));
