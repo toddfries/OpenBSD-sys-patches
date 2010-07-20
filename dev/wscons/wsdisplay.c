@@ -2273,7 +2273,7 @@ wsdisplay_resume_device(struct device *dev)
 		s = spltty();
 		idx = sc->sc_resumescreen;
 		sc->sc_resumescreen = WSDISPLAY_NULLSCREEN;
-		wakeup (&sc->sc_resumescreen);
+		wakeup(&sc->sc_resumescreen);
 		splx(s);
 		(void)wsdisplay_switch((struct device *)sc, idx, 1);
 	}
