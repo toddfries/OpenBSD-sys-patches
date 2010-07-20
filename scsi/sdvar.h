@@ -71,11 +71,6 @@ struct sd_softc {
 		u_long	rot_rate;	/* rotational rate, in RPM */
 		daddr64_t	disksize;	/* total number sectors */
 	} params;
-<<<<<<< HEAD
-	struct mutex sc_buf_mtx;
-	struct buf sc_buf_queue;
-=======
->>>>>>> origin/master
 	void *sc_sdhook;		/* our shutdown hook */
 	struct timeout sc_timeout;
 

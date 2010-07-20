@@ -158,7 +158,6 @@ struct mfi_softc {
 
 	struct mfi_ccb_list	sc_ccb_freeq;
 	struct mutex		sc_ccb_mtx;
-	struct scsi_iopool	sc_iopool;
 
 	/* mgmt lock */
 	struct rwlock		sc_lock;

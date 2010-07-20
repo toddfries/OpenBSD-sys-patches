@@ -1402,10 +1402,6 @@ mpi_scsi_cmd_done(struct mpi_ccb *ccb)
 	    xs->error, xs->status);
 
 	mpi_push_reply(sc, ccb->ccb_rcb);
-<<<<<<< HEAD
-	s = splbio();
-=======
->>>>>>> origin/master
 	scsi_done(xs);
 }
 

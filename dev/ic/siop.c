@@ -92,11 +92,8 @@ void 	siop_timeout(void *);
 void	siop_scsicmd(struct scsi_xfer *);
 void *	siop_cmd_get(void *);
 void	siop_cmd_put(void *, void *);
-<<<<<<< HEAD
-=======
 int	siop_scsiprobe(struct scsi_link *);
 void	siop_scsifree(struct scsi_link *);
->>>>>>> origin/master
 #ifdef DUMP_SCRIPT
 void	siop_dump_script(struct siop_softc *);
 #endif
@@ -1353,46 +1350,6 @@ siop_handle_reset(sc)
 
 void *
 siop_cmd_get(void *cookie)
-<<<<<<< HEAD
-{
-	struct siop_softc *sc = cookie;
-	struct siop_cmd *siop_cmd;
-	int s;
-
-	/* Look if a ccb is available. */
-	s = splbio();
-	siop_cmd = TAILQ_FIRST(&sc->free_list);
-	if (siop_cmd != NULL) {
-		TAILQ_REMOVE(&sc->free_list, siop_cmd, next);
-#ifdef DIAGNOSTIC
-		if (siop_cmd->cmd_c.status != CMDST_FREE)
-			panic("siop_scsicmd: new cmd not free");
-#endif
-		siop_cmd->cmd_c.status = CMDST_READY;
-	}
-	splx(s);
-
-	return (siop_cmd);
-}
-
-void
-siop_cmd_put(void *cookie, void *io)
-{
-	struct siop_softc *sc = cookie;
-	struct siop_cmd *siop_cmd = io;
-	int s;
-
-	s = splbio();
-	siop_cmd->cmd_c.status = CMDST_FREE;
-	TAILQ_INSERT_TAIL(&sc->free_list, siop_cmd, next);
-	splx(s);
-}
-
-void
-siop_scsicmd(xs)
-	struct scsi_xfer *xs;
-=======
->>>>>>> origin/master
 {
 	struct siop_softc *sc = cookie;
 	struct siop_cmd *siop_cmd;
@@ -1489,9 +1446,6 @@ siop_scsiprobe(struct scsi_link *link)
 		}
 	}
 
-<<<<<<< HEAD
-	siop_cmd = xs->io;
-=======
 	return (0);
 }
 
@@ -1509,7 +1463,6 @@ siop_scsicmd(xs)
 #ifdef SIOP_DEBUG_SCHED
 	printf("starting cmd for %d:%d\n", target, lun);
 #endif
->>>>>>> origin/master
 
 	siop_target = (struct siop_target*)sc->sc_c.targets[target];
 	siop_cmd = xs->io;

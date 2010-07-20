@@ -858,12 +858,7 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 	*sc_link = *scsi->adapter_link;
 	sc_link->target = target;
 	sc_link->lun = lun;
-<<<<<<< HEAD
-	sc_link->device = &probe_switch;
-	mtx_init(&sc_link->mtx, IPL_BIO);
-=======
 	sc_link->interpret_sense = scsi_interpret_sense;
->>>>>>> origin/master
 	TAILQ_INIT(&sc_link->queue);
 	inqbuf = &sc_link->inqdata;
 

@@ -354,52 +354,6 @@ struct scsi_xshandler {
 };
 
 /*
- *
- */
-
-struct scsi_runq_entry {
-        TAILQ_ENTRY(scsi_runq_entry) e;
-};
-TAILQ_HEAD(scsi_runq, scsi_runq_entry);
-
-struct scsi_iopool;
-
-struct scsi_iohandler {
-	struct scsi_runq_entry entry; /* must be first */
-	u_int onq;
-
-	struct scsi_iopool *pool;
-	void (*handler)(void *, void *);
-	void *cookie;
-};
-
-struct scsi_iopool {
-	/* access to the IOs */
-	void	*iocookie;
-	void	*(*io_get)(void *);
-	void	 (*io_put)(void *, void *);
-	
-	/* the runqueue */
-	struct scsi_runq queue;
-	/* runqueue semaphore */
-	u_int running;
-	/* protection for the runqueue and its semaphore */
-	struct mutex mtx;
-};
-
-/*
- *
- */
-
-struct scsi_xshandler {
-	struct scsi_iohandler ioh; /* must be first */
-	u_int onq;
-
-	struct scsi_link *link;
-	void (*handler)(struct scsi_xfer *);
-};
-
-/*
  * This structure describes the connection between an adapter driver and
  * a device driver, and is used by each to call services provided by
  * the other, and to allow generic scsi glue code to call these services
@@ -450,10 +404,6 @@ struct scsi_link {
 	struct	scsibus_softc *bus;	/* link to the scsibus we're on */
 	struct	scsi_inquiry_data inqdata; /* copy of INQUIRY data from probe */
 	struct  devid *id;
-<<<<<<< HEAD
-	struct	mutex mtx;
-=======
->>>>>>> origin/master
 
 	struct	scsi_runq queue;
 	u_int	running;
@@ -623,15 +573,6 @@ int	scsi_report_luns(struct scsi_link *, int,
 void	scsi_minphys(struct buf *, struct scsi_link *);
 int	scsi_interpret_sense(struct scsi_xfer *);
 
-<<<<<<< HEAD
-void		 scsi_buf_enqueue(struct buf *, struct buf *, struct mutex *);
-struct buf	*scsi_buf_dequeue(struct buf *, struct mutex *);
-void		 scsi_buf_requeue(struct buf *, struct buf *, struct mutex *);
-int		 scsi_buf_canqueue(struct buf *, struct mutex *);
-void		 scsi_buf_killqueue(struct buf *, struct mutex *);
-
-=======
->>>>>>> origin/master
 void	scsi_xs_show(struct scsi_xfer *);
 void	scsi_print_sense(struct scsi_xfer *);
 void	scsi_show_mem(u_char *, int);
@@ -667,34 +608,6 @@ void			scsi_xs_put(struct scsi_xfer *);
 #ifdef SCSIDEBUG
 void			scsi_sense_print_debug(struct scsi_xfer *);
 #endif
-
-/*
- * iopool stuff
- */
-void	scsi_iopool_init(struct scsi_iopool *, void *,
-	    void *(*)(void *), void (*)(void *, void *));
-
-void *	scsi_io_get(struct scsi_iopool *, int);
-void	scsi_io_put(struct scsi_iopool *, void *);
-
-/*
- * default io allocator.
- */
-void *	scsi_default_get(void *);
-void	scsi_default_put(void *, void *);
-
-/*
- * io handler interface
- */
-void	scsi_ioh_set(struct scsi_iohandler *, struct scsi_iopool *,
-	    void (*)(void *, void *), void *);
-void	scsi_ioh_add(struct scsi_iohandler *);
-void	scsi_ioh_del(struct scsi_iohandler *);
-
-void	scsi_xsh_set(struct scsi_xshandler *, struct scsi_link *,
-	    void (*)(struct scsi_xfer *));
-void	scsi_xsh_add(struct scsi_xshandler *);
-void	scsi_xsh_del(struct scsi_xshandler *);
 
 /*
  * iopool stuff

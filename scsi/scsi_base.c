@@ -79,23 +79,12 @@ void	scsi_plug_detach(void *, void *);
 
 struct scsi_xfer *	scsi_xs_io(struct scsi_link *, void *, int);
 
-<<<<<<< HEAD
-struct scsi_iohandler *	scsi_ioh_deq(struct scsi_iopool *);
-void			scsi_ioh_req(struct scsi_iopool *,
-			    struct scsi_iohandler *);
-void			scsi_ioh_runqueue(struct scsi_iopool *);
-
-void			scsi_xsh_ioh(void *, void *);
-void			scsi_xsh_runqueue(struct scsi_link *);
-struct scsi_xshandler *	scsi_xsh_deq(struct scsi_link *);
-=======
 int			scsi_ioh_pending(struct scsi_iopool *);
 struct scsi_iohandler *	scsi_ioh_deq(struct scsi_iopool *);
 void			scsi_ioh_runqueue(struct scsi_iopool *);
 
 void			scsi_xsh_runqueue(struct scsi_link *);
 void			scsi_xsh_ioh(void *, void *);
->>>>>>> origin/master
 
 int			scsi_link_open(struct scsi_link *);
 void			scsi_link_close(struct scsi_link *);
@@ -268,240 +257,6 @@ scsi_default_put(void *iocookie, void *io)
 void
 scsi_ioh_set(struct scsi_iohandler *ioh, struct scsi_iopool *iopl,
     void (*handler)(void *, void *), void *cookie)
-<<<<<<< HEAD
-{
-	ioh->onq = 0;
-	ioh->pool = iopl;
-	ioh->handler = handler;
-	ioh->cookie = cookie;
-}
-
-void
-scsi_ioh_add(struct scsi_iohandler *ioh)
-{
-	struct scsi_iopool *iopl = ioh->pool;
-
-	mtx_enter(&iopl->mtx);
-	if (!ioh->onq) {
-		TAILQ_INSERT_TAIL(&iopl->queue, &ioh->entry, e);
-		ioh->onq = 1;
-	}
-	mtx_leave(&iopl->mtx);
-
-	/* lets get some io up in the air */
-	scsi_ioh_runqueue(iopl);
-}
-
-void
-scsi_ioh_del(struct scsi_iohandler *ioh)
-{
-	struct scsi_iopool *iopl = ioh->pool;
-
-	mtx_enter(&iopl->mtx);
-	if (ioh->onq) {
-		TAILQ_REMOVE(&iopl->queue, &ioh->entry, e);
-		ioh->onq = 0;
-	}
-	mtx_leave(&iopl->mtx);
-}
-
-/*
- * internal iopool runqueue handling.
- */
-
-struct scsi_iohandler *
-scsi_ioh_deq(struct scsi_iopool *iopl)
-{
-	struct scsi_iohandler *ioh = NULL;
-
-	mtx_enter(&iopl->mtx);
-	ioh = (struct scsi_iohandler *)TAILQ_FIRST(&iopl->queue);
-	if (ioh != NULL) {
-		TAILQ_REMOVE(&iopl->queue, &ioh->entry, e);
-		ioh->onq = 0;
-	}
-	mtx_leave(&iopl->mtx);
-
-	return (ioh);
-}
-
-void
-scsi_ioh_req(struct scsi_iopool *iopl, struct scsi_iohandler *ioh)
-{
-	mtx_enter(&iopl->mtx);
-	if (!ioh->onq) {
-		TAILQ_INSERT_HEAD(&iopl->queue, &ioh->entry, e);
-		ioh->onq = 1;
-	}
-	mtx_leave(&iopl->mtx);
-}
-
-void
-scsi_ioh_runqueue(struct scsi_iopool *iopl)
-{
-	struct scsi_iohandler *ioh;
-	void *io;
-
-	if (!scsi_sem_enter(&iopl->mtx, &iopl->running))
-		return;
-	do {
-		for (;;) {
-			ioh = scsi_ioh_deq(iopl);
-			if (ioh == NULL)
-				break;
-
-			io = iopl->io_get(iopl->iocookie);
-			if (io == NULL) {
-				scsi_ioh_req(iopl, ioh);
-				break;
-			}
-
-			ioh->handler(ioh->cookie, io);
-		}
-	} while (!scsi_sem_leave(&iopl->mtx, &iopl->running));
-}
-
-/*
- * synchronous api for allocating an io.
- */
-
-void *
-scsi_io_get(struct scsi_iopool *iopl, int flags)
-{
-	struct scsi_io_mover m = { MUTEX_INITIALIZER(IPL_BIO), NULL };
-	struct scsi_iohandler ioh;
-	void *io;
-
-	/* try and sneak an io off the backend immediately */
-	io = iopl->io_get(iopl->iocookie);
-	if (io != NULL)
-		return (io);
-	else if (ISSET(flags, SCSI_NOSLEEP))
-		return (NULL);
-
-	/* otherwise sleep until we get one */
-	scsi_ioh_set(&ioh, iopl, scsi_io_get_done, &m);
-	scsi_ioh_add(&ioh);
-
-	mtx_enter(&m.mtx);
-	while (m.io == NULL)
-		msleep(&m, &m.mtx, PRIBIO, "scsiio", 0);
-	mtx_leave(&m.mtx);
-
-	return (m.io);
-}
-
-void
-scsi_io_get_done(void *cookie, void *io)
-{
-	struct scsi_io_mover *m = cookie;
-
-	mtx_enter(&m->mtx);
-	m->io = io;
-	wakeup_one(m);
-	mtx_leave(&m->mtx);
-}
-
-void
-scsi_io_put(struct scsi_iopool *iopl, void *io)
-{
-	iopl->io_put(iopl->iocookie, io);
-	scsi_ioh_runqueue(iopl);
-}
-
-/*
- * public interface to the xsh api.
- */
-
-void
-scsi_xsh_set(struct scsi_xshandler *xsh, struct scsi_link *link,
-    void (*handler)(struct scsi_xfer *))
-{
-	scsi_ioh_set(&xsh->ioh, link->pool, scsi_xsh_ioh, xsh);
-
-	xsh->onq = 0;
-	xsh->link = link;
-	xsh->handler = handler;
-}
-
-void
-scsi_xsh_add(struct scsi_xshandler *xsh)
-{
-	struct scsi_link *link = xsh->link;
-
-	mtx_enter(&link->mtx);
-	if (!xsh->onq) {
-		TAILQ_INSERT_TAIL(&link->queue, &xsh->ioh.entry, e);
-		xsh->onq = 1;
-	}
-	mtx_leave(&link->mtx);
-
-	/* lets get some io up in the air */
-	scsi_xsh_runqueue(link);
-}
-
-void
-scsi_xsh_del(struct scsi_xshandler *xsh)
-{
-	struct scsi_link *link = xsh->link;
-
-	mtx_enter(&link->mtx);
-	if (xsh->onq) {
-		TAILQ_REMOVE(&link->queue, &xsh->ioh.entry, e);
-		xsh->onq = 0;
-	}
-	mtx_leave(&link->mtx);
-}
-
-/*
- * internal xs runqueue handling.
- */
-
-struct scsi_xshandler *
-scsi_xsh_deq(struct scsi_link *link)
-{
-	struct scsi_runq_entry *entry;
-	struct scsi_xshandler *xsh = NULL;
-
-	mtx_enter(&link->mtx);
-	if (link->openings && ((entry = TAILQ_FIRST(&link->queue)) != NULL)) {
-		TAILQ_REMOVE(&link->queue, entry, e);
-
-		xsh = (struct scsi_xshandler *)entry;
-		xsh->onq = 0;
-
-		link->openings--;
-	}
-	mtx_leave(&link->mtx);
-
-	return (xsh);
-}
-
-void
-scsi_xsh_runqueue(struct scsi_link *link)
-{
-	struct scsi_xshandler *xsh;
-
-	if (!scsi_sem_enter(&link->mtx, &link->running))
-		return;
-	do {
-		for (;;) {
-			xsh = scsi_xsh_deq(link);
-			if (xsh == NULL)
-				break;
-
-			scsi_ioh_add(&xsh->ioh);
-		}
-	} while (!scsi_sem_leave(&link->mtx, &link->running));
-}
-
-void
-scsi_xsh_ioh(void *cookie, void *io)
-{
-	struct scsi_xshandler *xsh = cookie;
-	struct scsi_xfer *xs;
-
-=======
 {
 	ioh->entry.state = RUNQ_IDLE;
 	ioh->pool = iopl;
@@ -752,7 +507,6 @@ scsi_xsh_ioh(void *cookie, void *io)
 	struct scsi_xshandler *xsh = cookie;
 	struct scsi_xfer *xs;
 
->>>>>>> origin/master
 	xs = scsi_xs_io(xsh->link, io, SCSI_NOSLEEP);
 	if (xs == NULL) {
 		/*
@@ -790,48 +544,6 @@ scsi_xs_get(struct scsi_link *link, int flags)
 	} else {
 		if (ISSET(flags, SCSI_NOSLEEP))
 			return (NULL);
-<<<<<<< HEAD
-
-		/* really custom xs handler to avoid scsi_xsh_ioh */
-		scsi_ioh_set(&xsh.ioh, link->pool, scsi_io_get_done, &m);
-		xsh.onq = 0;
-		xsh.link = link;
-		scsi_xsh_add(&xsh);
-
-		mtx_enter(&m.mtx);
-		while (m.io == NULL)
-			msleep(&m, &m.mtx, PRIBIO, "scsixs", 0);
-		mtx_leave(&m.mtx);
-
-		io = m.io;
-	}
-
-	return (scsi_xs_io(link, io, flags));
-}
-
-int
-scsi_link_open(struct scsi_link *link)
-{
-	int open = 0;
-
-	mtx_enter(&link->mtx);
-	if (link->openings) {
-		link->openings--;
-		open = 1;
-	}
-	mtx_leave(&link->mtx);
-
-	return (open);
-}
-
-void
-scsi_link_close(struct scsi_link *link)
-{
-	mtx_enter(&link->mtx);
-	link->openings++;
-	mtx_leave(&link->mtx);
-
-=======
 
 		/* really custom xs handler to avoid scsi_xsh_ioh */
 		scsi_ioh_set(&xsh.ioh, link->pool, scsi_io_get_done, &m);
@@ -871,7 +583,6 @@ scsi_link_close(struct scsi_link *link)
 	link->openings++;
 	mtx_leave(&link->pool->mtx);
 
->>>>>>> origin/master
 	scsi_xsh_runqueue(link);
 }
 
@@ -907,12 +618,6 @@ scsi_xs_put(struct scsi_xfer *xs)
 
 	scsi_io_put(link->pool, io);
 	scsi_link_close(link);
-<<<<<<< HEAD
-
-	if (link->device->start)
-		link->device->start(link->device_softc);
-=======
->>>>>>> origin/master
 }
 
 /*
@@ -2549,77 +2254,6 @@ scsi_decode_sense(struct scsi_sense_data *sense, int flag)
 	return (rqsbuf);
 }
 
-<<<<<<< HEAD
-void
-scsi_buf_enqueue(struct buf *head, struct buf *bp, struct mutex *mtx)
-{
-	struct buf *dp;
-
-	mtx_enter(mtx);
-	dp = head;
-	bp->b_actf = NULL;
-	bp->b_actb = dp->b_actb;
-	*dp->b_actb = bp;
-	dp->b_actb = &bp->b_actf;
-	mtx_leave(mtx);
-}
-
-struct buf *
-scsi_buf_dequeue(struct buf *head, struct mutex *mtx)
-{
-	struct buf *bp;
-
-	mtx_enter(mtx);
-	bp = head->b_actf;
-	if (bp != NULL)
-		head->b_actf = bp->b_actf;
-	if (head->b_actf == NULL)
-		head->b_actb = &head->b_actf;
-	mtx_leave(mtx);
-
-	return (bp);
-}
-
-void
-scsi_buf_requeue(struct buf *head, struct buf *bp, struct mutex *mtx)
-{
-	mtx_enter(mtx);
-	bp->b_actf = head->b_actf;
-	head->b_actf = bp;
-	if (bp->b_actf == NULL)
-		head->b_actb = &bp->b_actf;
-	mtx_leave(mtx);
-}
-
-int
-scsi_buf_canqueue(struct buf *head, struct mutex *mtx)
-{
-	int rv;
-
-	mtx_enter(mtx);
-	rv = (head->b_actf != NULL);
-	mtx_leave(mtx);
-
-	return (rv);
-}
-
-void
-scsi_buf_killqueue(struct buf *head, struct mutex *mtx)
-{
-	struct buf *bp;
-	int s;
-
-	while ((bp = scsi_buf_dequeue(head, mtx)) != NULL) {
-		bp->b_error = ENXIO;
-		bp->b_flags |= B_ERROR;
-		s = splbio();
-		biodone(bp);
-		splx(s);
-	}
-}
-
-=======
->>>>>>> origin/master
 #ifdef SCSIDEBUG
 /*
  * Given a scsi_xfer, dump the request, in all its glory

@@ -113,16 +113,6 @@ struct cfdriver sd_cd = {
 
 struct dkdriver sddkdriver = { sdstrategy };
 
-<<<<<<< HEAD
-struct scsi_device sd_switch = {
-	sd_interpret_sense,	/* check out error handler first */
-	NULL,			/* have a queue, served by this */
-	NULL,			/* have no async handler */
-	NULL,			/* have no done handler */
-};
-
-=======
->>>>>>> origin/master
 const struct scsi_inquiry_pattern sd_patterns[] = {
 	{T_DIRECT, T_FIXED,
 	 "",         "",                 ""},
@@ -173,11 +163,6 @@ sdattach(struct device *parent, struct device *self, void *aux)
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("sdattach:\n"));
 
-<<<<<<< HEAD
-	mtx_init(&sc->sc_buf_mtx, IPL_BIO);
-
-=======
->>>>>>> origin/master
 	/*
 	 * Store information needed to contact our base driver
 	 */
@@ -698,20 +683,12 @@ sdstart(struct scsi_xfer *xs)
 		return;
 	}
 	if ((link->flags & SDEV_MEDIA_LOADED) == 0) {
-<<<<<<< HEAD
-		scsi_buf_killqueue(&sc->sc_buf_queue, &sc->sc_buf_mtx);
-=======
 		bufq_drain(sc->sc_bufq);
->>>>>>> origin/master
 		scsi_xs_put(xs);
 		return;
 	}
 
-<<<<<<< HEAD
-	bp = scsi_buf_dequeue(&sc->sc_buf_queue, &sc->sc_buf_mtx);
-=======
 	bp = BUFQ_DEQUEUE(sc->sc_bufq);
->>>>>>> origin/master
 	if (bp == NULL) {
 		scsi_xs_put(xs);
 		return;
@@ -748,10 +725,7 @@ sdstart(struct scsi_xfer *xs)
 
 	xs->done = sd_buf_done;
 	xs->cookie = bp;
-<<<<<<< HEAD
-=======
 	xs->bp = bp;
->>>>>>> origin/master
 
 	/* Instrumentation. */
 	disk_busy(&sc->sc_dk);
@@ -763,13 +737,9 @@ sdstart(struct scsi_xfer *xs)
 	scsi_xs_exec(xs);
 
 	/* move onto the next io */
-<<<<<<< HEAD
-	if (scsi_buf_canqueue(&sc->sc_buf_queue, &sc->sc_buf_mtx))
-=======
 	if (ISSET(sc->flags, SDF_WAITING))
 		CLR(sc->flags, SDF_WAITING);
 	else if (BUFQ_PEEK(sc->sc_bufq) != NULL)
->>>>>>> origin/master
 		scsi_xsh_add(&sc->sc_xsh);
 }
 

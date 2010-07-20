@@ -66,8 +66,6 @@ struct scsi_adapter mfi_switch = {
 struct mfi_ccb	*mfi_get_ccb(struct mfi_softc *);
 void		mfi_put_ccb(struct mfi_ccb *);
 int		mfi_init_ccb(struct mfi_softc *);
-void *		mfi_ccb_get(void *);
-void		mfi_ccb_put(void *, void *);
 
 struct mfi_mem	*mfi_allocmem(struct mfi_softc *, size_t);
 void		mfi_freemem(struct mfi_softc *, struct mfi_mem *);
@@ -166,14 +164,6 @@ mfi_get_ccb(struct mfi_softc *sc)
 	return (ccb);
 }
 
-void *
-mfi_ccb_get(void *xsc)
-{
-	struct mfi_softc	*sc = xsc;
-
-	return (mfi_get_ccb(sc));
-}
-
 void
 mfi_put_ccb(struct mfi_ccb *ccb)
 {
@@ -198,14 +188,6 @@ mfi_put_ccb(struct mfi_ccb *ccb)
 	mtx_enter(&sc->sc_ccb_mtx);
 	SLIST_INSERT_HEAD(&sc->sc_ccb_freeq, ccb, ccb_link);
 	mtx_leave(&sc->sc_ccb_mtx);
-}
-
-void
-mfi_ccb_put(void *xsc, void *xccb)
-{
-	struct mfi_ccb		*ccb = xccb;
-
-	mfi_put_ccb(ccb);
 }
 
 int
@@ -259,8 +241,6 @@ mfi_init_ccb(struct mfi_softc *sc)
 		/* add ccb to queue */
 		mfi_put_ccb(ccb);
 	}
-
-	scsi_iopool_init(&sc->sc_iopool, sc, mfi_ccb_get, mfi_ccb_put);
 
 	return (0);
 destroy:
@@ -940,6 +920,7 @@ mfi_scsi_xs_done(struct mfi_ccb *ccb)
 
 	xs->resid = 0;
 
+	mfi_put_ccb(ccb);
 	scsi_done(xs);
 }
 
@@ -1015,9 +996,6 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 		goto stuffup;
 	}
 
-<<<<<<< HEAD
-	ccb = xs->io;
-=======
 	if ((ccb = mfi_get_ccb(sc)) == NULL) {
 		DNPRINTF(MFI_D_CMD, "%s: mfi_scsi_cmd no ccb\n", DEVNAME(sc));
 		xs->error = XS_NO_CCB;
@@ -1025,7 +1003,6 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 		return;
 	}
 
->>>>>>> origin/master
 	xs->error = XS_NOERROR;
 
 	switch (xs->cmd->opcode) {
@@ -1036,6 +1013,7 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 		blockno = (uint64_t)_4btol(rwb->addr);
 		blockcnt = _2btol(rwb->length);
 		if (mfi_scsi_io(ccb, xs, blockno, blockcnt)) {
+			mfi_put_ccb(ccb);
 			goto stuffup;
 		}
 		break;
@@ -1047,6 +1025,7 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 		    (uint64_t)(_3btol(rw->addr) & (SRW_TOPADDR << 16 | 0xffff));
 		blockcnt = rw->length ? rw->length : 0x100;
 		if (mfi_scsi_io(ccb, xs, blockno, blockcnt)) {
+			mfi_put_ccb(ccb);
 			goto stuffup;
 		}
 		break;
@@ -1057,11 +1036,14 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 		blockno = _8btol(rw16->addr);
 		blockcnt = _4btol(rw16->length);
 		if (mfi_scsi_io(ccb, xs, blockno, blockcnt)) {
+			mfi_put_ccb(ccb);
 			goto stuffup;
 		}
 		break;
 
 	case SYNCHRONIZE_CACHE:
+		mfi_put_ccb(ccb); /* we don't need this */
+
 		mbox[0] = MR_FLUSH_CTRL_CACHE | MR_FLUSH_DISK_CACHE;
 		if (mfi_mgmt(sc, MR_DCMD_CTRL_CACHE_FLUSH, MFI_DATA_NONE,
 		    0, NULL, mbox))
@@ -1080,6 +1062,7 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 
 	default:
 		if (mfi_scsi_ld(ccb, xs)) {
+			mfi_put_ccb(ccb);
 			goto stuffup;
 		}
 		break;
@@ -1099,11 +1082,7 @@ mfi_scsi_cmd(struct scsi_xfer *xs)
 			xs->error = XS_SENSE;
 		}
 
-<<<<<<< HEAD
-		s = splbio();
-=======
 		mfi_put_ccb(ccb);
->>>>>>> origin/master
 		scsi_done(xs);
 		return;
 	}
