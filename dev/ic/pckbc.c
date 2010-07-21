@@ -85,7 +85,7 @@ static struct pckbc_slotdata pckbc_cons_slotdata;
 static int pckbc_wait_output(bus_space_tag_t, bus_space_handle_t);
 
 static int pckbc_get8042cmd(struct pckbc_internal *);
-static int pckbc_put8042cmd(struct pckbc_internal *);
+int pckbc_put8042cmd(struct pckbc_internal *);
 static int pckbc_send_devcmd(struct pckbc_internal *, pckbc_slot_t,
 				  u_char);
 static void pckbc_poll_cmd1(struct pckbc_internal *, pckbc_slot_t,
@@ -197,7 +197,7 @@ pckbc_get8042cmd(t)
 /*
  * Pass command byte to keyboard controller (8042).
  */
-static int
+int
 pckbc_put8042cmd(t)
 	struct pckbc_internal *t;
 {

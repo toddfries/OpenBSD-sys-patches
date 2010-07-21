@@ -46,6 +46,9 @@
 
 int	pckbc_isa_match(struct device *, void *, void *);
 void	pckbc_isa_attach(struct device *, struct device *, void *);
+int	pckbc_isa_activate(struct device *, int);
+
+int	pckbc_put8042cmd(struct pckbc_internal *);
 
 struct pckbc_isa_softc {
 	struct pckbc_softc sc_pckbc;
@@ -56,6 +59,7 @@ struct pckbc_isa_softc {
 
 struct cfattach pckbc_isa_ca = {
 	sizeof(struct pckbc_isa_softc), pckbc_isa_match, pckbc_isa_attach,
+	NULL, pckbc_isa_activate
 };
 
 void	pckbc_isa_intr_establish(struct pckbc_softc *, pckbc_slot_t);
@@ -111,6 +115,31 @@ pckbc_isa_match(parent, match, aux)
 	}
 	return (ok);
 }
+
+int
+pckbc_isa_activate(struct device *self, int act)
+{
+	struct pckbc_isa_softc *isc = (struct pckbc_isa_softc *)self;
+	struct pckbc_softc *sc = &isc->sc_pckbc;
+	struct pckbc_internal *t = sc->id;
+	bus_space_tag_t iot = t->t_iot;
+	bus_space_handle_t ioh_d = t->t_ioh_d, ioh_c = t->t_ioh_c;
+
+	switch (act) {
+	case DVACT_RESUME:
+		pckbc_poll_data1(iot, ioh_d, ioh_c,
+		    PCKBC_KBD_SLOT, 0);
+		/* KBC selftest */
+		if (pckbc_send_cmd(iot, ioh_c, KBC_SELFTEST) == 0)
+			break;
+		pckbc_poll_data1(iot, ioh_d, ioh_c, 
+		    PCKBC_KBD_SLOT, 0);
+		(void)pckbc_put8042cmd(t);
+		pckbcintr(t->t_sc);
+	}
+	return (0);
+}
+
 
 void
 pckbc_isa_attach(parent, self, aux)
