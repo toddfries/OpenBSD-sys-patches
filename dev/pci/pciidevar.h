@@ -70,6 +70,10 @@ struct pciide_softc {
 	bus_size_t		sc_dma_maxsegsz;
 	bus_size_t		sc_dma_boundary;
 
+	pcireg_t		sc_save[6];
+	pcireg_t		sc_save2[6];
+	pcireg_t		sc_savedma[IDEDMA_NREGS];
+
 	/* Chip description */
 	const struct pciide_product_desc *sc_pp;
 	/* unmap/detach */
