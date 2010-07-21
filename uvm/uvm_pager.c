@@ -80,7 +80,7 @@ struct uvm_pseg {
 	/* Bitmap of the segments in use in this pseg. */
 	int	use;
 };
-struct	mutex uvm_pseg_lck;
+struct	rwlock uvm_pseg_lck = RWLOCK_INITIALIZER("pseg");
 struct	uvm_pseg psegs[PSEG_NUMSEGS];
 
 #define UVM_PSEG_FULL(pseg)	((pseg)->use == (1 << MAX_PAGER_SEGS) - 1)
@@ -88,7 +88,6 @@ struct	uvm_pseg psegs[PSEG_NUMSEGS];
 #define UVM_PSEG_INUSE(pseg,id)	(((pseg)->use & (1 << (id))) != 0)
 
 void		uvm_pseg_init(struct uvm_pseg *);
-void		uvm_pseg_destroy(struct uvm_pseg *);
 vaddr_t		uvm_pseg_get(int);
 void		uvm_pseg_release(vaddr_t);
 
@@ -107,8 +106,9 @@ uvm_pager_init(void)
 	 * init pager map
 	 */
 
+	rw_enter_write(&uvm_pseg_lck);
 	uvm_pseg_init(&psegs[0]);
-	mtx_init(&uvm_pseg_lck, IPL_VM);
+	rw_exit_write(&uvm_pseg_lck);
 
 	/*
 	 * init ASYNC I/O queue
@@ -136,28 +136,10 @@ uvm_pager_init(void)
 void
 uvm_pseg_init(struct uvm_pseg *pseg)
 {
+	rw_assert_wrlock(&uvm_pseg_lck);
 	KASSERT(pseg->start == 0);
 	KASSERT(pseg->use == 0);
-	pseg->start = uvm_km_valloc_try(kernel_map, MAX_PAGER_SEGS * MAXBSIZE);
-}
-
-/*
- * Destroy a uvm_pseg.
- *
- * Never fails.
- *
- * Requires that seg != &psegs[0]
- *
- * Caller locks uvm_pseg_lck.
- */
-void
-uvm_pseg_destroy(struct uvm_pseg *pseg)
-{
-	KASSERT(pseg != &psegs[0]);
-	KASSERT(pseg->start != 0);
-	KASSERT(pseg->use == 0);
-	uvm_km_free(kernel_map, pseg->start, MAX_PAGER_SEGS * MAXBSIZE);
-	pseg->start = 0;
+	pseg->start = uvm_km_valloc(kernel_map, MAX_PAGER_SEGS * MAXBSIZE);
 }
 
 /*
@@ -173,7 +155,8 @@ uvm_pseg_get(int flags)
 	int i;
 	struct uvm_pseg *pseg;
 
-	mtx_enter(&uvm_pseg_lck);
+	splassert(IPL_NONE);
+	rw_enter_write(&uvm_pseg_lck);
 
 pager_seg_restart:
 	/* Find first pseg that has room. */
@@ -197,7 +180,7 @@ pager_seg_restart:
 		for (; i < MAX_PAGER_SEGS; i++) {
 			if (!UVM_PSEG_INUSE(pseg, i)) {
 				pseg->use |= 1 << i;
-				mtx_leave(&uvm_pseg_lck);
+				rw_exit_write(&uvm_pseg_lck);
 				return pseg->start + i * MAXBSIZE;
 			}
 		}
@@ -205,11 +188,23 @@ pager_seg_restart:
 
 pager_seg_fail:
 	if ((flags & UVMPAGER_MAPIN_WAITOK) != 0) {
-		msleep(&psegs, &uvm_pseg_lck, PVM, "pagerseg", 0);
+		struct sleep_state sls;
+
+		/*
+		 * Sleep atomically releasing the rwlock so we won't miss
+		 * our wakeup.
+		 */
+		sleep_setup(&sls, &psegs, PVM, "pseg_get");
+
+		rw_exit_write(&uvm_pseg_lck);
+
+		sleep_finish(&sls, 1);
+
+		rw_enter_write(&uvm_pseg_lck);
 		goto pager_seg_restart;
 	}
 
-	mtx_leave(&uvm_pseg_lck);
+	rw_exit_write(&uvm_pseg_lck);
 	return 0;
 }
 
@@ -225,7 +220,9 @@ uvm_pseg_release(vaddr_t segaddr)
 {
 	int id;
 	struct uvm_pseg *pseg;
+	vaddr_t to_free = 0;
 
+	splassert(IPL_NONE);
 	for (pseg = &psegs[0]; pseg != &psegs[PSEG_NUMSEGS]; pseg++) {
 		if (pseg->start <= segaddr &&
 		    segaddr < pseg->start + MAX_PAGER_SEGS * MAXBSIZE)
@@ -239,17 +236,22 @@ uvm_pseg_release(vaddr_t segaddr)
 	/* test for no remainder */
 	KDASSERT(segaddr == pseg->start + id * MAXBSIZE);
 
-	mtx_enter(&uvm_pseg_lck);
+	rw_enter_write(&uvm_pseg_lck);
 
 	KASSERT(UVM_PSEG_INUSE(pseg, id));
 
 	pseg->use &= ~(1 << id);
 	wakeup(&psegs);
 
-	if (pseg != &psegs[0] && UVM_PSEG_EMPTY(pseg))
-		uvm_pseg_destroy(pseg);
+	if (pseg != &psegs[0] && UVM_PSEG_EMPTY(pseg)) {
+		to_free = pseg->start;
+		pseg->start = 0;
+	}
 
-	mtx_leave(&uvm_pseg_lck);
+	rw_exit_write(&uvm_pseg_lck);
+
+	if (to_free)
+		uvm_km_free(kernel_map, to_free, MAX_PAGER_SEGS * MAXBSIZE);
 }
 
 /*
