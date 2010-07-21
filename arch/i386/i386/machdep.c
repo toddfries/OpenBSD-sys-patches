@@ -2696,6 +2696,7 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	/* If we were using the FPU, forget about it. */
 	if (pcb->pcb_fpcpu != NULL)
 		npxsave_proc(p, 0);
+	p->p_md.md_flags &= ~MDP_USEDFPU;
 #endif
 
 #ifdef USER_LDT
@@ -2720,13 +2721,6 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	 * And reset the hiexec marker in the pmap.
 	 */
 	pmap->pm_hiexec = 0;
-
-	p->p_md.md_flags &= ~MDP_USEDFPU;
-	if (i386_use_fxsave) {
-		pcb->pcb_savefpu.sv_xmm.sv_env.en_cw = __OpenBSD_NPXCW__;
-		pcb->pcb_savefpu.sv_xmm.sv_env.en_mxcsr = __INITIAL_MXCSR__;
-	} else
-		pcb->pcb_savefpu.sv_87.sv_env.en_cw = __OpenBSD_NPXCW__;
 
 	tf->tf_fs = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_gs = GSEL(GUDATA_SEL, SEL_UPL);

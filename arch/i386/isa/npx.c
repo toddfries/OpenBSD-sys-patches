@@ -660,9 +660,10 @@ npxdna_xmm(struct cpu_info *ci)
 	addr = &p->p_addr->u_pcb.pcb_savefpu;
 
 	if ((p->p_md.md_flags & MDP_USEDFPU) == 0) {
-		fldcw(&addr->sv_xmm.sv_env.en_cw);
-		if (i386_has_sse || i386_has_sse2)
-			ldmxcsr(&addr->sv_xmm.sv_env.en_mxcsr);
+		bzero(&addr->sv_xmm, sizeof(addr->sv_xmm));
+		addr->sv_xmm.sv_env.en_cw = __OpenBSD_NPXCW__;
+		addr->sv_xmm.sv_env.en_mxcsr = __INITIAL_MXCSR__;
+		fxrstor(&addr->sv_xmm);
 		p->p_md.md_flags |= MDP_USEDFPU;
 	} else {
 		static double	zero = 0.0;
@@ -682,6 +683,7 @@ npxdna_xmm(struct cpu_info *ci)
 int
 npxdna_s87(struct cpu_info *ci)
 {
+	union savefpu *addr;
 	struct proc *p;
 	int s;
 
@@ -736,8 +738,13 @@ npxdna_s87(struct cpu_info *ci)
 	splx(s);
 	uvmexp.fpswtch++;
 
+	addr = &p->p_addr->u_pcb.pcb_savefpu;
+
 	if ((p->p_md.md_flags & MDP_USEDFPU) == 0) {
-		fldcw(&p->p_addr->u_pcb.pcb_savefpu.sv_87.sv_env.en_cw);
+		bzero(&addr->sv_87, sizeof(addr->sv_87));
+		addr->sv_87.sv_env.en_cw = __OpenBSD_NPXCW__;
+		addr->sv_87.sv_env.en_tw = 0xffff;
+		frstor(&addr->sv_87);
 		p->p_md.md_flags |= MDP_USEDFPU;
 	} else {
 		/*
@@ -753,7 +760,7 @@ npxdna_s87(struct cpu_info *ci)
 		 * fnclex if it is the first FPU instruction after a context
 		 * switch.
 		 */
-		frstor(&p->p_addr->u_pcb.pcb_savefpu.sv_87);
+		frstor(&addr->sv_87);
 	}
 
 	return (1);
