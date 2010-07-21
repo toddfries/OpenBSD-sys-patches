@@ -68,8 +68,8 @@ option		MROUTING	# Multicast router
 #option		PIM		# Protocol Independent Multicast
 option		MPLS		# Multi-Protocol Label Switching
 
-#mpath0		at root		# SCSI Multipathing
-#scsibus*	at mpath?
+mpath0		at root		# SCSI Multipathing
+scsibus*	at mpath?
 
 softraid0	at root		# Software RAID
 scsibus*	at softraid?
