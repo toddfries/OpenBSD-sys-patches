@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.183 2010/07/06 01:07:28 krw Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.185 2010/07/22 05:21:58 matthew Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -629,6 +629,7 @@ scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 	struct scsi_read_cap_data_16 *rdcap16;
 	struct scsi_read_capacity_16 *cmd;
 	struct scsi_read_cap_data *rdcap;
+	struct scsi_read_capacity *cmd10;
 	struct scsi_xfer *xs;
 	daddr64_t max_addr;
 	int error;
@@ -646,11 +647,13 @@ scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 	if (rdcap == NULL)
 		return (0);
 
-	xs = scsi_xs_get(sc_link, flags | SCSI_DATA_IN);
-	if (xs == NULL)
-		return (ENOMEM);
+	xs = scsi_xs_get(sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
+	if (xs == NULL) {
+		free(rdcap, M_TEMP);
+		return (0);
+	}
 	xs->cmd->opcode = READ_CAPACITY;
-	xs->cmdlen = sizeof(struct scsi_read_capacity);
+	xs->cmdlen = sizeof(*cmd10);
 	xs->data = (void *)rdcap;
 	xs->datalen = sizeof(*rdcap);
 	xs->timeout = 20000;
@@ -685,8 +688,10 @@ scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 		goto exit;
 
 	xs = scsi_xs_get(sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
-	if (xs == NULL)
-		return (ENOMEM);
+	if (xs == NULL) {
+		free(rdcap16, M_TEMP);
+		goto exit;
+	}
 	xs->cmd->opcode = READ_CAPACITY_16;
 	xs->cmdlen = sizeof(*cmd);
 	xs->data = (void *)rdcap16;
@@ -731,6 +736,7 @@ exit:
 int
 scsi_test_unit_ready(struct scsi_link *sc_link, int retries, int flags)
 {
+	struct scsi_test_unit_ready *cmd;
 	struct scsi_xfer *xs;
 	int error;
 
@@ -738,7 +744,7 @@ scsi_test_unit_ready(struct scsi_link *sc_link, int retries, int flags)
 	if (xs == NULL)
 		return (ENOMEM);
 	xs->cmd->opcode = TEST_UNIT_READY;
-	xs->cmdlen = sizeof(scsi_test_unit_ready);
+	xs->cmdlen = sizeof(*cmd);
 	xs->retries = retries;
 	xs->timeout = 10000;
 
@@ -756,8 +762,8 @@ int
 scsi_inquire(struct scsi_link *link, struct scsi_inquiry_data *inqbuf,
     int flags)
 {
+	struct scsi_inquiry *cmd;
 	struct scsi_xfer *xs;
-	struct scsi_inquiry *cdb;
 	size_t length;
 	int error;
 
@@ -771,11 +777,11 @@ scsi_inquire(struct scsi_link *link, struct scsi_inquiry_data *inqbuf,
 	 */
 	length = SID_INQUIRY_HDR + SID_SCSI2_ALEN;
 
-	cdb = (struct scsi_inquiry *)xs->cmd;
-	cdb->opcode = INQUIRY;
-	_lto2b(length, cdb->length);
+	cmd = (struct scsi_inquiry *)xs->cmd;
+	cmd->opcode = INQUIRY;
+	_lto2b(length, cmd->length);
 
-	xs->cmdlen = sizeof(*cdb);
+	xs->cmdlen = sizeof(*cmd);
 
 	xs->flags |= SCSI_DATA_IN;
 	xs->data = (void *)inqbuf;
@@ -806,7 +812,7 @@ scsi_inquire_vpd(struct scsi_link *sc_link, void *buf, u_int buflen,
 	int error;
 
 	if (sc_link->flags & SDEV_UMASS)
-		error = EJUSTRETURN;
+		return (EJUSTRETURN);
 
 	xs = scsi_xs_get(sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
 	if (xs == NULL)
@@ -1117,7 +1123,7 @@ scsi_mode_select(struct scsi_link *sc_link, int byte2,
 	if (xs == NULL)
 		return (ENOMEM);
 	xs->cmd->opcode = MODE_SELECT;
-	xs->cmdlen = sizeof(struct scsi_mode_select *);
+	xs->cmdlen = sizeof(*cmd);
 	xs->data = (void *)data;
 	xs->datalen = len;
 	xs->timeout = timeout;

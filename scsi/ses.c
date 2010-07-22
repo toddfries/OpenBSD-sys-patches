@@ -1,4 +1,4 @@
-/*	$OpenBSD: ses.c,v 1.47 2007/09/16 01:30:24 krw Exp $ */
+/*	$OpenBSD: ses.c,v 1.48 2010/07/22 00:31:06 krw Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -276,8 +276,10 @@ ses_read_config(struct ses_softc *sc)
 	if (cold)
 		flags |= SCSI_AUTOCONF;
 	xs = scsi_xs_get(sc->sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
-	if (xs == NULL)
-		return (ENOMEM);
+	if (xs == NULL) {
+		free(buf, M_DEVBUF);
+		return (1);
+	}
 	xs->cmd->opcode = RECEIVE_DIAGNOSTIC;
 	xs->cmdlen = sizeof(*cmd);
 	xs->data = buf;
@@ -373,7 +375,7 @@ ses_read_status(struct ses_softc *sc)
 		flags |= SCSI_AUTOCONF;
 	xs = scsi_xs_get(sc->sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
 	if (xs == NULL)
-		return (ENOMEM);
+		return (1);
 	xs->cmd->opcode = RECEIVE_DIAGNOSTIC;
 	xs->cmdlen = sizeof(*cmd);
 	xs->data = sc->sc_buf;
@@ -604,7 +606,7 @@ ses_write_config(struct ses_softc *sc)
 
 	xs = scsi_xs_get(sc->sc_link, flags | SCSI_DATA_OUT | SCSI_SILENT);
 	if (xs == NULL)
-		return (ENOMEM);
+		return (1);
 	xs->cmd->opcode = SEND_DIAGNOSTIC;
 	xs->cmdlen = sizeof(*cmd);
 	xs->data = sc->sc_buf;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.175 2010/07/01 05:11:18 krw Exp $	*/
+/*	$OpenBSD: cd.c,v 1.177 2010/07/22 04:54:24 matthew Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -1708,14 +1708,15 @@ cddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
 int
 dvd_auth(struct cd_softc *sc, union dvd_authinfo *a)
 {
+	struct scsi_generic *cmd;
 	struct scsi_xfer *xs;
 	u_int8_t buf[20];
 	int error;
 
-	xs = scsi_xs_get(sc->sc_link, SCSI_DATA_IN);
+	xs = scsi_xs_get(sc->sc_link, 0);
 	if (xs == NULL)
 		return (ENOMEM);
-	xs->cmdlen = sizeof(*xs->cmd);
+	xs->cmdlen = sizeof(*cmd);
 	xs->timeout = 30000;
 	xs->data = (void *)&buf;
 
@@ -1727,6 +1728,7 @@ dvd_auth(struct cd_softc *sc, union dvd_authinfo *a)
 		xs->cmd->bytes[8] = 8;
 		xs->cmd->bytes[9] = 0 | (0 << 6);
 		xs->datalen = 8;
+		xs->flags |= SCSI_DATA_IN;
 
 		error = scsi_xs_sync(xs);
 		scsi_xs_put(xs);
@@ -1740,6 +1742,7 @@ dvd_auth(struct cd_softc *sc, union dvd_authinfo *a)
 		xs->cmd->bytes[8] = 16;
 		xs->cmd->bytes[9] = 1 | (a->lsc.agid << 6);
 		xs->datalen = 16;
+		xs->flags |= SCSI_DATA_IN;
 
 		error = scsi_xs_sync(xs);
 		scsi_xs_put(xs);
@@ -1752,6 +1755,7 @@ dvd_auth(struct cd_softc *sc, union dvd_authinfo *a)
 		xs->cmd->bytes[8] = 12;
 		xs->cmd->bytes[9] = 2 | (a->lsk.agid << 6);
 		xs->datalen = 12;
+		xs->flags |= SCSI_DATA_IN;
 
 		error = scsi_xs_sync(xs);
 		scsi_xs_put(xs);
@@ -1766,6 +1770,7 @@ dvd_auth(struct cd_softc *sc, union dvd_authinfo *a)
 		xs->cmd->bytes[8] = 12;
 		xs->cmd->bytes[9] = 4 | (a->lstk.agid << 6);
 		xs->datalen = 12;
+		xs->flags |= SCSI_DATA_IN;
 
 		error = scsi_xs_sync(xs);
 		scsi_xs_put(xs);
@@ -1783,6 +1788,7 @@ dvd_auth(struct cd_softc *sc, union dvd_authinfo *a)
 		xs->cmd->bytes[8] = 8;
 		xs->cmd->bytes[9] = 5 | (a->lsasf.agid << 6);
 		xs->datalen = 8;
+		xs->flags |= SCSI_DATA_IN;
 
 		error = scsi_xs_sync(xs);
 		scsi_xs_put(xs);
@@ -1798,6 +1804,7 @@ dvd_auth(struct cd_softc *sc, union dvd_authinfo *a)
 		buf[1] = 14;
 		dvd_copy_challenge(&buf[4], a->hsc.chal);
 		xs->datalen = 16;
+		xs->flags |= SCSI_DATA_OUT;
 
 		error = scsi_xs_sync(xs);
 		scsi_xs_put(xs);
@@ -1813,6 +1820,7 @@ dvd_auth(struct cd_softc *sc, union dvd_authinfo *a)
 		buf[1] = 10;
 		dvd_copy_key(&buf[4], a->hsk.key);
 		xs->datalen = 12;
+		xs->flags |= SCSI_DATA_OUT;
 
 		error = scsi_xs_sync(xs);
 		scsi_xs_put(xs);
@@ -1838,6 +1846,7 @@ dvd_auth(struct cd_softc *sc, union dvd_authinfo *a)
 		xs->cmd->bytes[8] = 8;
 		xs->cmd->bytes[9] = 8 | (0 << 6);
 		xs->datalen = 8;
+		xs->flags |= SCSI_DATA_IN;
 
 		error = scsi_xs_sync(xs);
 		scsi_xs_put(xs);
@@ -1858,6 +1867,7 @@ dvd_auth(struct cd_softc *sc, union dvd_authinfo *a)
 		buf[1] = 6;
 		buf[4] = a->hrpcs.pdrc;
 		xs->datalen = 8;
+		xs->flags |= SCSI_DATA_OUT;
 
 		error = scsi_xs_sync(xs);
 		scsi_xs_put(xs);
@@ -1865,6 +1875,7 @@ dvd_auth(struct cd_softc *sc, union dvd_authinfo *a)
 		return (error);
 
 	default:
+		scsi_xs_put(xs);
 		return (ENOTTY);
 	}
 }
@@ -1872,6 +1883,7 @@ dvd_auth(struct cd_softc *sc, union dvd_authinfo *a)
 int
 dvd_read_physical(struct cd_softc *sc, union dvd_struct *s)
 {
+	struct scsi_generic *cmd;
 	struct dvd_layer *layer;
 	struct scsi_xfer *xs;
 	u_int8_t buf[4 + 4 * 20], *bufp;
@@ -1881,7 +1893,7 @@ dvd_read_physical(struct cd_softc *sc, union dvd_struct *s)
 	if (xs == NULL)
 		return (ENOMEM);
 	xs->cmd->opcode = GPCMD_READ_DVD_STRUCTURE;
-	xs->cmdlen = sizeof(struct scsi_generic);
+	xs->cmdlen = sizeof(*cmd);
 	xs->data = buf;
 	xs->datalen = sizeof(buf);
 	xs->timeout = 30000;
@@ -1921,6 +1933,7 @@ dvd_read_physical(struct cd_softc *sc, union dvd_struct *s)
 int
 dvd_read_copyright(struct cd_softc *sc, union dvd_struct *s)
 {
+	struct scsi_generic *cmd;
 	struct scsi_xfer *xs;
 	u_int8_t buf[8];
 	int error;
@@ -1929,7 +1942,7 @@ dvd_read_copyright(struct cd_softc *sc, union dvd_struct *s)
 	if (xs == NULL)
 		return (ENOMEM);
 	xs->cmd->opcode = GPCMD_READ_DVD_STRUCTURE;
-	xs->cmdlen = sizeof(struct scsi_generic);
+	xs->cmdlen = sizeof(*cmd);
 	xs->data = buf;
 	xs->datalen = sizeof(buf);
 	xs->timeout = 30000;
@@ -1970,8 +1983,10 @@ dvd_read_disckey(struct cd_softc *sc, union dvd_struct *s)
 	xs->timeout = 30000;
 
 	buf = malloc(sizeof(*buf), M_TEMP, M_WAITOK | M_ZERO);
-	if (buf == NULL)
+	if (buf == NULL) {
+		scsi_xs_put(xs);
 		return (ENOMEM);
+	}
 
 	cmd->format = s->type;
 	cmd->agid = s->disckey.agid << 6;
@@ -1990,6 +2005,7 @@ dvd_read_disckey(struct cd_softc *sc, union dvd_struct *s)
 int
 dvd_read_bca(struct cd_softc *sc, union dvd_struct *s)
 {
+	struct scsi_generic *cmd;
 	struct scsi_xfer *xs;
 	u_int8_t buf[4 + 188];
 	int error;
@@ -1998,7 +2014,7 @@ dvd_read_bca(struct cd_softc *sc, union dvd_struct *s)
 	if (xs == NULL)
 		return (ENOMEM);
 	xs->cmd->opcode = GPCMD_READ_DVD_STRUCTURE;
-	xs->cmdlen = sizeof(*xs->cmd);
+	xs->cmdlen = sizeof(*cmd);
 	xs->data = buf;
 	xs->datalen = sizeof(buf);
 	xs->timeout = 30000;
@@ -2038,8 +2054,10 @@ dvd_read_manufact(struct cd_softc *sc, union dvd_struct *s)
 	xs->timeout = 30000;
 
 	buf = malloc(sizeof(*buf), M_TEMP, M_WAITOK | M_ZERO);
-	if (buf == NULL)
+	if (buf == NULL) {
+		scsi_xs_put(xs);
 		return (ENOMEM);
+	}
 
 	cmd = (struct scsi_read_dvd_structure *)xs->cmd;
 	cmd->format = s->type;

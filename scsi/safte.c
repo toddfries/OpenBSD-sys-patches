@@ -1,4 +1,4 @@
-/*	$OpenBSD: safte.c,v 1.40 2009/01/20 21:46:42 kettenis Exp $ */
+/*	$OpenBSD: safte.c,v 1.43 2010/07/22 05:21:02 matthew Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -112,7 +112,6 @@ safte_match(struct device *parent, void *match, void *aux)
 	struct scsi_attach_args	*sa = aux;
 	struct scsi_inquiry_data *inq = sa->sa_inqbuf;
 	struct scsi_inquiry *cmd;
-	struct safte_softc *sc = (struct safte_softc *)aux;
 	struct scsi_xfer *xs;
 	struct safte_inq *si;
 	int error, flags = 0, length;
@@ -140,9 +139,9 @@ safte_match(struct device *parent, void *match, void *aux)
 
 	if (cold)
 		flags |= SCSI_AUTOCONF;
-	xs = scsi_xs_get(sc->sc_link, flags | SCSI_DATA_IN);
+	xs = scsi_xs_get(sa->sa_sc_link, flags | SCSI_DATA_IN);
 	if (xs == NULL)
-		return (ENOMEM);
+		return (0);
 	xs->cmd->opcode = INQUIRY;
 	xs->cmdlen = sizeof(*cmd);
 	xs->data = (void *)&inqbuf;
@@ -159,12 +158,13 @@ safte_match(struct device *parent, void *match, void *aux)
 	error = scsi_xs_sync(xs);
 	scsi_xs_put(xs);
 
-	if (error == 0) {
-		if (memcmp(si->ident, SAFTE_IDENT, sizeof(si->ident)) == 0)
-			return (2);
-	}
+	if (error)
+		return (0);
 
-	return (error);
+	if (memcmp(si->ident, SAFTE_IDENT, sizeof(si->ident)) == 0)
+		return (2);
+
+	return (0);
 }
 
 void
@@ -269,9 +269,9 @@ safte_read_config(struct safte_softc *sc)
 		flags |= SCSI_AUTOCONF;
 	xs = scsi_xs_get(sc->sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
 	if (xs == NULL)
-		return (ENOMEM);
+		return (1);
 	xs->cmd->opcode = READ_BUFFER;
-	xs->cmdlen = sizeof(struct safte_readbuf_cmd);
+	xs->cmdlen = sizeof(*cmd);
 	xs->data = (void *)&config;
 	xs->datalen = sizeof(config);
 	xs->retries = 2;
@@ -397,7 +397,7 @@ void
 safte_read_encstat(void *arg)
 {
 	struct safte_readbuf_cmd *cmd;
-	struct safte_sensor*s;
+	struct safte_sensor *s;
 	struct safte_softc *sc = (struct safte_softc *)arg;
 	struct scsi_xfer *xs;
 	int error, i, flags = 0;
@@ -408,8 +408,10 @@ safte_read_encstat(void *arg)
 	if (cold)
 		flags |= SCSI_AUTOCONF;
 	xs = scsi_xs_get(sc->sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
-	if (xs == NULL)
+	if (xs == NULL) {
+		rw_exit_write(&sc->sc_lock);
 		return;
+	}
 	xs->cmd->opcode = READ_BUFFER;
 	xs->cmdlen = sizeof(*cmd);
 	xs->data = sc->sc_encbuf;
@@ -590,8 +592,10 @@ safte_bio_blink(struct safte_softc *sc, struct bioc_blink *blink)
 	if (cold)
 		flags |= SCSI_AUTOCONF;
 	xs = scsi_xs_get(sc->sc_link, flags | SCSI_DATA_OUT | SCSI_SILENT);
-	if (xs == NULL)
+	if (xs == NULL) {
+		free(op, M_TEMP);
 		return (ENOMEM);
+	}
 	xs->cmd->opcode = WRITE_BUFFER;
 	xs->cmdlen = sizeof(*cmd);
 	xs->data = (void *)op;
