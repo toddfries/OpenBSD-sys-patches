@@ -1,4 +1,4 @@
-/* $OpenBSD: dsdt.h,v 1.52 2010/07/21 19:35:15 deraadt Exp $ */
+/* $OpenBSD: dsdt.h,v 1.54 2010/07/22 14:19:47 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -31,6 +31,7 @@ struct aml_scope {
 	struct aml_value	*retv;
 	uint8_t			*start;
 	int			type;
+	int			rep;
 };
 
 
@@ -47,12 +48,9 @@ struct aml_node		*aml_searchname(struct aml_node *, const void *);
 struct aml_node		*aml_searchrel(struct aml_node *, const void *);
 
 struct aml_value	*aml_getstack(struct aml_scope *, int);
-struct aml_value	*aml_allocint(uint64_t);
-struct aml_value	*aml_allocstr(const char *);
 struct aml_value	*aml_allocvalue(int, int64_t, const void *);
 void			aml_freevalue(struct aml_value *);
 void			aml_notify(struct aml_node *, int);
-void			aml_notify_dev(const char *, int);
 void			aml_showvalue(struct aml_value *, int);
 void			aml_walkroot(void);
 void			aml_walktree(struct aml_node *);
@@ -78,6 +76,16 @@ int			aml_evalinteger(struct acpi_softc *, struct aml_node *,
 void			aml_create_defaultobjects(void);
 
 const char		*aml_nodename(struct aml_node *);
+
+#define SRT_IRQ2		0x22
+#define SRT_IRQ3		0x23
+#define SRT_DMA			0x2A
+#define SRT_STARTDEP0		0x30
+#define SRT_STARTDEP1		0x31
+#define SRT_ENDDEP		0x38
+#define SRT_IOPORT		0x47
+#define SRT_FIXEDPORT		0x4B
+#define SRT_ENDTAG		0x78
 
 #define SR_IRQ			0x04
 #define SR_DMA			0x05
@@ -110,15 +118,24 @@ union acpi_resource {
 		uint8_t  typecode;
 		uint16_t irq_mask;
 		uint8_t  irq_flags;
+#define SR_IRQ_SHR		(1L << 4)
+#define SR_IRQ_POLARITY		(1L << 3)
+#define SR_IRQ_MODE		(1L << 0)
 	}  __packed sr_irq;
 	struct {
 		uint8_t  typecode;
 		uint8_t  channel;
 		uint8_t  flags;
+#define SR_DMA_TYP_MASK		0x3
+#define SR_DMA_TYP_SHIFT 	5
+#define SR_DMA_BM		(1L << 2)
+#define SR_DMA_SIZE_MASK	0x3
+#define SR_DMA_SIZE_SHIFT	0
 	}  __packed sr_dma;
 	struct {
 		uint8_t  typecode;
 		uint8_t  flags;
+#define SR_IOPORT_DEC		(1L << 0)
 		uint16_t _min;
 		uint16_t _max;
 		uint8_t  _aln;
@@ -223,7 +240,6 @@ void			aml_walknodes(struct aml_node *, int,
 			    int (*)(struct aml_node *, void *), void *);
 
 void			aml_postparse(void);
-void			acpi_poll_notify(void);
 
 void			aml_hashopcodes(void);
 
@@ -232,7 +248,6 @@ void			aml_foreachpkg(struct aml_value *, int,
 
 const char		*aml_val_to_string(const struct aml_value *);
 
-int			valid_acpihdr(void *, int, const char *);
 void			aml_disasm(struct aml_scope *scope, int lvl,
 			    void (*dbprintf)(void *, const char *, ...),
 			    void *arg);
@@ -258,8 +273,13 @@ union amlpci_t {
 int			aml_rdpciaddr(struct aml_node *pcidev,
 			    union amlpci_t *);
 
+#ifndef SMALL_KERNEL
 void			acpi_getdevlist(struct acpi_devlist_head *,
 			    struct aml_node *, struct aml_value *, int);
+void			acpi_poll_notify(void);
+void			aml_notify_dev(const char *, int);
+#endif
+
 void			acpi_freedevlist(struct acpi_devlist_head *);
 
 #endif /* __DEV_ACPI_DSDT_H__ */
