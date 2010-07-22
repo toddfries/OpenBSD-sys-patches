@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.131 2010/07/13 00:30:30 krw Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.132 2010/07/22 00:31:06 krw Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
