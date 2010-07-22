@@ -1419,9 +1419,6 @@ pciide_activate(struct device *self, int act)
 		for (i = 0; i < nitems(sc->sc_save); i++)
 			sc->sc_save[i] = pci_conf_read(sc->sc_pc,
 			    sc->sc_tag, PCI_MAPREG_END + 0x18 + (i * 4));
-		for (i = 0; i < sc->sc_dma_iosz / 4; i++)
-			sc->sc_savedma[i] = bus_space_read_4(
-			    sc->sc_dma_iot, sc->sc_dma_ioh, i * 4);
 
 		if (sc->sc_pp->chip_map == sch_chip_map) {
 			sc->sc_save2[0] = pci_conf_read(sc->sc_pc,
@@ -1437,34 +1434,21 @@ pciide_activate(struct device *self, int act)
 			    sc->sc_tag, ICH_SATA_PCS);
 		} else if (sc->sc_pp->chip_map == piix_chip_map) {
 			/* nothing to save */
+		} else if (sc->sc_pp->chip_map == phison_chip_map) {
+			/* nothing to save */
 		}
 		break;
 	case DVACT_RESUME:
-#if 0
-		printf("reg ");
-		for (i = 0; i < nitems(sc->sc_save); i++)
-			printf("0x%x:0x%x ", PCI_MAPREG_END + 0x18 + (i * 4),
-			    sc->sc_save[i]);
-		printf("\ndma %d ", sc->sc_dma_iosz);
-		for (i = 0; i < sc->sc_dma_iosz / 4; i++)
-			printf("0x%x:0x%x ", i * 4, sc->sc_savedma[i]);
-		printf("\n");
-#endif
 		for (i = 0; i < nitems(sc->sc_save); i++)
 			pci_conf_write(sc->sc_pc, sc->sc_tag,
 			    PCI_MAPREG_END + 0x18 + (i * 4),
 			    sc->sc_save[i]);
-		for (i = 0; i < sc->sc_dma_iosz / 4; i++)
-			bus_space_write_4(sc->sc_dma_iot, sc->sc_dma_ioh,
-			    (i * 4), sc->sc_savedma[i]);
 
 		if (sc->sc_pp->chip_map == sch_chip_map) {
 			pci_conf_write(sc->sc_pc, sc->sc_tag,
 			    SCH_D0TIM, sc->sc_save2[0]);
 			pci_conf_write(sc->sc_pc, sc->sc_tag,
 			    SCH_D1TIM, sc->sc_save2[1]);
-			printf("sch 0x%x 0x%x\n",
-			    sc->sc_save2[0], sc->sc_save2[1]);
 		} else if (sc->sc_pp->chip_map == piixsata_chip_map) {
 			pciide_pci_write(sc->sc_pc, sc->sc_tag,
 			    ICH5_SATA_MAP, sc->sc_save2[0]);
@@ -1472,12 +1456,10 @@ pciide_activate(struct device *self, int act)
 			    ICH5_SATA_PI, sc->sc_save2[1]);
 			pciide_pci_write(sc->sc_pc, sc->sc_tag,
 			    ICH_SATA_PCS, sc->sc_save2[2]);
-			printf("piixsata 0x%x 0x%x 0x%x\n",
-			    sc->sc_save2[0], sc->sc_save2[1], sc->sc_save2[1]);
 		} else if (sc->sc_pp->chip_map == piix_chip_map) {
-			/* nothing to save */
+			/* nothing more to restore */
 		} else if (sc->sc_pp->chip_map == phison_chip_map) {
-			/* nothing to save */
+			/* nothing more to restore */
 		} else {
 			printf("%s: restore for unknown chip map %x\n",
 			    sc->sc_wdcdev.sc_dev.dv_xname,

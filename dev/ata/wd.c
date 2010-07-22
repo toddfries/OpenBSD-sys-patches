@@ -400,6 +400,12 @@ wdactivate(struct device *self, int act)
 		wd_flushcache(wd, AT_POLL);
 		wd_standby(wd, AT_POLL);
 		break;
+	case DVACT_RESUME:
+		wdc_disable_intr(wd->drvp->chnl_softc);
+		wdc_reset_channel(wd->drvp);
+		delay(10000);
+		wdc_reset_channel(wd->drvp);
+		wdc_enable_intr(wd->drvp->chnl_softc);
 	}
 	return (rv);
 }

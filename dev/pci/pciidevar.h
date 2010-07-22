@@ -70,9 +70,15 @@ struct pciide_softc {
 	bus_size_t		sc_dma_maxsegsz;
 	bus_size_t		sc_dma_boundary;
 
+	/*
+	 * Used as a register save space by pciide_activate()
+	 * 
+	 * sc_save[] is for the 6 pci regs starting at PCI_MAPREG_END + 0x18 --
+	 * most IDE chipsets need a subset of those saved.  sc_save2 is for
+	 * up to 6 other registers, which specific chips might need saved.
+	 */
 	pcireg_t		sc_save[6];
 	pcireg_t		sc_save2[6];
-	pcireg_t		sc_savedma[IDEDMA_NREGS];
 
 	/* Chip description */
 	const struct pciide_product_desc *sc_pp;
