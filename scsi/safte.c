@@ -161,12 +161,10 @@ safte_match(struct device *parent, void *match, void *aux)
 	if (error)
 		return (0);
 
-	if (error == 0) {
-		if (memcmp(si->ident, SAFTE_IDENT, sizeof(si->ident)) == 0)
-			return (2);
-	}
+	if (memcmp(si->ident, SAFTE_IDENT, sizeof(si->ident)) == 0)
+		return (2);
 
-	return (error);
+	return (0);
 }
 
 void

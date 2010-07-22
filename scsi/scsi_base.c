@@ -647,13 +647,6 @@ scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 	if (rdcap == NULL)
 		return (0);
 
-<<<<<<< HEAD
-	xs = scsi_xs_get(sc_link, flags | SCSI_DATA_IN);
-	if (xs == NULL)
-		return (ENOMEM);
-	xs->cmd->opcode = READ_CAPACITY;
-	xs->cmdlen = sizeof(struct scsi_read_capacity);
-=======
 	xs = scsi_xs_get(sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
 	if (xs == NULL) {
 		free(rdcap, M_TEMP);
@@ -661,7 +654,6 @@ scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 	}
 	xs->cmd->opcode = READ_CAPACITY;
 	xs->cmdlen = sizeof(*cmd10);
->>>>>>> origin/master
 	xs->data = (void *)rdcap;
 	xs->datalen = sizeof(*rdcap);
 	xs->timeout = 20000;
@@ -696,15 +688,10 @@ scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 		goto exit;
 
 	xs = scsi_xs_get(sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
-<<<<<<< HEAD
-	if (xs == NULL)
-		return (ENOMEM);
-=======
 	if (xs == NULL) {
 		free(rdcap16, M_TEMP);
 		goto exit;
 	}
->>>>>>> origin/master
 	xs->cmd->opcode = READ_CAPACITY_16;
 	xs->cmdlen = sizeof(*cmd);
 	xs->data = (void *)rdcap16;
@@ -749,19 +736,6 @@ exit:
 int
 scsi_test_unit_ready(struct scsi_link *sc_link, int retries, int flags)
 {
-<<<<<<< HEAD
-	struct scsi_xfer *xs;
-	int error;
-
-	xs = scsi_xs_get(sc_link, flags);
-	if (xs == NULL)
-		return (ENOMEM);
-	xs->cmd->opcode = TEST_UNIT_READY;
-	xs->cmdlen = sizeof(scsi_test_unit_ready);
-	xs->retries = retries;
-	xs->timeout = 10000;
-
-=======
 	struct scsi_test_unit_ready *cmd;
 	struct scsi_xfer *xs;
 	int error;
@@ -774,7 +748,6 @@ scsi_test_unit_ready(struct scsi_link *sc_link, int retries, int flags)
 	xs->retries = retries;
 	xs->timeout = 10000;
 
->>>>>>> origin/master
 	error = scsi_xs_sync(xs);
 	scsi_xs_put(xs);
 
@@ -839,11 +812,7 @@ scsi_inquire_vpd(struct scsi_link *sc_link, void *buf, u_int buflen,
 	int error;
 
 	if (sc_link->flags & SDEV_UMASS)
-<<<<<<< HEAD
-		error = EJUSTRETURN;
-=======
 		return (EJUSTRETURN);
->>>>>>> origin/master
 
 	xs = scsi_xs_get(sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
 	if (xs == NULL)
@@ -891,17 +860,10 @@ scsi_prevent(struct scsi_link *sc_link, int type, int flags)
 
 	cmd = (struct scsi_prevent *)xs->cmd;
 	cmd->how = type;
-<<<<<<< HEAD
 
 	error = scsi_xs_sync(xs);
 	scsi_xs_put(xs);
 
-=======
-
-	error = scsi_xs_sync(xs);
-	scsi_xs_put(xs);
-
->>>>>>> origin/master
 	return (error);
 }
 
@@ -922,7 +884,6 @@ scsi_start(struct scsi_link *sc_link, int type, int flags)
 	xs->cmdlen = sizeof(*cmd);
 	xs->retries = 2;
 	xs->timeout = (type == SSS_START) ? 30000 : 10000;
-<<<<<<< HEAD
 
 	cmd = (struct scsi_start_stop *)xs->cmd;
 	cmd->how = type;
@@ -930,15 +891,6 @@ scsi_start(struct scsi_link *sc_link, int type, int flags)
 	error = scsi_xs_sync(xs);
 	scsi_xs_put(xs);
 
-=======
-
-	cmd = (struct scsi_start_stop *)xs->cmd;
-	cmd->how = type;
-
-	error = scsi_xs_sync(xs);
-	scsi_xs_put(xs);
-
->>>>>>> origin/master
 	return (error);
 }
 
@@ -1171,11 +1123,7 @@ scsi_mode_select(struct scsi_link *sc_link, int byte2,
 	if (xs == NULL)
 		return (ENOMEM);
 	xs->cmd->opcode = MODE_SELECT;
-<<<<<<< HEAD
-	xs->cmdlen = sizeof(struct scsi_mode_select *);
-=======
 	xs->cmdlen = sizeof(*cmd);
->>>>>>> origin/master
 	xs->data = (void *)data;
 	xs->datalen = len;
 	xs->timeout = timeout;
@@ -1203,15 +1151,9 @@ scsi_mode_select_big(struct scsi_link *sc_link, int byte2,
 	struct scsi_xfer *xs;
 	u_int32_t len;
 	int error;
-<<<<<<< HEAD
 
 	len = _2btol(data->data_length) + 2; /* 2 == sizeof data_length */
 
-=======
-
-	len = _2btol(data->data_length) + 2; /* 2 == sizeof data_length */
-
->>>>>>> origin/master
 	xs = scsi_xs_get(sc_link, flags | SCSI_DATA_OUT);
 	if (xs == NULL)
 		return (ENOMEM);
