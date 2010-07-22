@@ -48,8 +48,6 @@ int	pckbc_isa_match(struct device *, void *, void *);
 void	pckbc_isa_attach(struct device *, struct device *, void *);
 int	pckbc_isa_activate(struct device *, int);
 
-int	pckbc_put8042cmd(struct pckbc_internal *);
-
 struct pckbc_isa_softc {
 	struct pckbc_softc sc_pckbc;
 
