@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.177 2010/07/22 04:54:24 matthew Exp $	*/
+/*	$OpenBSD: cd.c,v 1.178 2010/07/22 15:59:46 matthew Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -1980,7 +1980,7 @@ dvd_read_disckey(struct cd_softc *sc, union dvd_struct *s)
 
 	xs = scsi_xs_get(sc->sc_link, SCSI_DATA_IN);
 	if (xs == NULL) {
-		scsi_xs_put(xs);
+		free(buf, M_TEMP);
 		return (ENOMEM);
 	}
 	xs->cmd->opcode = GPCMD_READ_DVD_STRUCTURE;
@@ -2052,7 +2052,7 @@ dvd_read_manufact(struct cd_softc *sc, union dvd_struct *s)
 
 	xs = scsi_xs_get(sc->sc_link, SCSI_DATA_IN);
 	if (xs == NULL) {
-		scsi_xs_put(xs);
+		free(buf, M_TEMP);
 		return (ENOMEM);
 	}
 	xs->cmd->opcode = GPCMD_READ_DVD_STRUCTURE;

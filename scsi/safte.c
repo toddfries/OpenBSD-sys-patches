@@ -1,4 +1,4 @@
-/*	$OpenBSD: safte.c,v 1.43 2010/07/22 05:21:02 matthew Exp $ */
+/*	$OpenBSD: safte.c,v 1.44 2010/07/22 15:59:47 matthew Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
