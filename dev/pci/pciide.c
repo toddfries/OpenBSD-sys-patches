@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.308 2010/04/20 06:59:47 jsg Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.309 2010/07/22 18:11:16 deraadt Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
