@@ -1,4 +1,4 @@
-/*	$OpenBSD: pckbc_isa.c,v 1.6 2010/07/21 20:10:17 miod Exp $	*/
+/*	$OpenBSD: pckbc_isa.c,v 1.7 2010/07/22 14:27:46 deraadt Exp $	*/
 /*	$NetBSD: pckbc_isa.c,v 1.2 2000/03/23 07:01:35 thorpej Exp $	*/
 
 /*
@@ -120,26 +120,18 @@ int
 pckbc_isa_activate(struct device *self, int act)
 {
 	struct pckbc_isa_softc *isc = (struct pckbc_isa_softc *)self;
-	struct pckbc_softc *sc = &isc->sc_pckbc;
-	struct pckbc_internal *t = sc->id;
-	bus_space_tag_t iot = t->t_iot;
-	bus_space_handle_t ioh_d = t->t_ioh_d, ioh_c = t->t_ioh_c;
 
 	switch (act) {
+	case DVACT_SUSPEND:
+		config_activate_children(self, act);
+		break;
 	case DVACT_RESUME:
-		pckbc_poll_data1(iot, ioh_d, ioh_c,
-		    PCKBC_KBD_SLOT, 0);
-		/* KBC selftest */
-		if (pckbc_send_cmd(iot, ioh_c, KBC_SELFTEST) == 0)
-			break;
-		pckbc_poll_data1(iot, ioh_d, ioh_c, 
-		    PCKBC_KBD_SLOT, 0);
-		(void)pckbc_put8042cmd(t);
-		pckbcintr(t->t_sc);
+		pckbc_reset(&isc->sc_pckbc);
+		config_activate_children(self, act);
+		break;
 	}
 	return (0);
 }
-
 
 void
 pckbc_isa_attach(parent, self, aux)
