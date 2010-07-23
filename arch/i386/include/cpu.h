@@ -374,6 +374,7 @@ void	proc_trampoline(void);
 void	initrtclock(void);
 void	startrtclock(void);
 void	rtcdrain(void *);
+void	rtcresume(void);
 void	i8254_delay(int);
 void	i8254_initclocks(void);
 void	i8254_inittimecounter(void);
