@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.478 2010/07/05 22:20:22 tedu Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.479 2010/07/23 14:56:31 kettenis Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -2179,7 +2179,6 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
     union sigval val)
 {
 	struct proc *p = curproc;
-	union savefpu *sfp = &p->p_addr->u_pcb.pcb_savefpu;
 	struct trapframe *tf = p->p_md.md_regs;
 	struct sigframe *fp, frame;
 	struct sigacts *psp = p->p_sigacts;
@@ -2213,11 +2212,6 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 
 		/* Signal handlers get a completely clean FP state */
 		p->p_md.md_flags &= ~MDP_USEDFPU;
-		if (i386_use_fxsave) {
-			sfp->sv_xmm.sv_env.en_cw = __OpenBSD_NPXCW__;
-			sfp->sv_xmm.sv_env.en_mxcsr = __INITIAL_MXCSR__;
-		} else
-			sfp->sv_87.sv_env.en_cw = __OpenBSD_NPXCW__;
 	}
 
 	fp = (struct sigframe *)sp - 1;
