@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdc.c,v 1.105 2009/11/23 23:48:37 deraadt Exp $	*/
+/*	$OpenBSD: wdc.c,v 1.107 2010/07/23 07:47:13 jsg Exp $	*/
 /*	$NetBSD: wdc.c,v 1.68 1999/06/23 19:00:17 bouyer Exp $	*/
 /*
  * Copyright (c) 1998, 2001 Manuel Bouyer.  All rights reserved.
@@ -11,11 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *  This product includes software developed by Manuel Bouyer.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -288,9 +283,7 @@ wdc_get_log(unsigned int * size, unsigned int *left)
 #endif /* WDCDEBUG */
 
 u_int8_t
-wdc_default_read_reg(chp, reg)
-	struct channel_softc *chp;
-	enum wdc_regs reg;
+wdc_default_read_reg(struct channel_softc *chp, enum wdc_regs reg)
 {
 #ifdef DIAGNOSTIC
 	if (reg & _WDC_WRONLY) {
@@ -307,10 +300,7 @@ wdc_default_read_reg(chp, reg)
 }
 
 void
-wdc_default_write_reg(chp, reg, val)
-	struct channel_softc *chp;
-	enum wdc_regs reg;
-	u_int8_t val;
+wdc_default_write_reg(struct channel_softc *chp, enum wdc_regs reg, u_int8_t val)
 {
 #ifdef DIAGNOSTIC
 	if (reg & _WDC_RDONLY) {
@@ -327,10 +317,8 @@ wdc_default_write_reg(chp, reg, val)
 }
 
 void
-wdc_default_lba48_write_reg(chp, reg, val)
-	struct channel_softc *chp;
-	enum wdc_regs reg;
-	u_int16_t val;
+wdc_default_lba48_write_reg(struct channel_softc *chp, enum wdc_regs reg,
+    u_int16_t val)
 {
 	/* All registers are two byte deep FIFOs. */
 	CHP_WRITE_REG(chp, reg, val >> 8);
@@ -338,10 +326,8 @@ wdc_default_lba48_write_reg(chp, reg, val)
 }
 
 void
-wdc_default_read_raw_multi_2(chp, data, nbytes)
-	struct channel_softc *chp;
-	void *data;
-	unsigned int nbytes;
+wdc_default_read_raw_multi_2(struct channel_softc *chp, void *data,
+    unsigned int nbytes)
 {
 	if (data == NULL) {
 		unsigned int i;
@@ -359,10 +345,8 @@ wdc_default_read_raw_multi_2(chp, data, nbytes)
 
 
 void
-wdc_default_write_raw_multi_2(chp, data, nbytes)
-	struct channel_softc *chp;
-	void *data;
-	unsigned int nbytes;
+wdc_default_write_raw_multi_2(struct channel_softc *chp, void *data,
+    unsigned int nbytes)
 {
 	if (data == NULL) {
 		unsigned int i;
@@ -380,10 +364,8 @@ wdc_default_write_raw_multi_2(chp, data, nbytes)
 
 
 void
-wdc_default_write_raw_multi_4(chp, data, nbytes)
-	struct channel_softc *chp;
-	void *data;
-	unsigned int nbytes;
+wdc_default_write_raw_multi_4(struct channel_softc *chp, void *data,
+    unsigned int nbytes)
 {
 	if (data == NULL) {
 		unsigned int i;
@@ -401,10 +383,8 @@ wdc_default_write_raw_multi_4(chp, data, nbytes)
 
 
 void
-wdc_default_read_raw_multi_4(chp, data, nbytes)
-	struct channel_softc *chp;
-	void *data;
-	unsigned int nbytes;
+wdc_default_read_raw_multi_4(struct channel_softc *chp, void *data,
+    unsigned int nbytes)
 {
 	if (data == NULL) {
 		unsigned int i;
@@ -420,11 +400,8 @@ wdc_default_read_raw_multi_4(chp, data, nbytes)
 	    data, nbytes);
 }
 
-
 int
-wdprint(aux, pnp)
-	void *aux;
-	const char *pnp;
+wdprint(void *aux, const char *pnp)
 {
 	struct ata_atapi_attach *aa_link = aux;
 	if (pnp)
@@ -435,15 +412,13 @@ wdprint(aux, pnp)
 }
 
 void
-wdc_disable_intr(chp)
-	struct channel_softc *chp;
+wdc_disable_intr(struct channel_softc *chp)
 {
 	CHP_WRITE_REG(chp, wdr_ctlr, WDCTL_IDS);
 }
 
 void
-wdc_enable_intr(chp)
-	struct channel_softc *chp;
+wdc_enable_intr(struct channel_softc *chp)
 {
 	CHP_WRITE_REG(chp, wdr_ctlr, WDCTL_4BIT);
 }
@@ -456,10 +431,7 @@ wdc_set_drive(struct channel_softc *chp, int drive)
 }
 
 int
-wdc_floating_bus(chp, drive)
-	struct channel_softc *chp;
-	int drive;
-
+wdc_floating_bus(struct channel_softc *chp, int drive)
 {
 	u_int8_t cumulative_status, status;
 	int      iter;
@@ -490,12 +462,8 @@ wdc_floating_bus(chp, drive)
 	return 0;
 }
 
-
 int
-wdc_preata_drive(chp, drive)
-	struct channel_softc *chp;
-	int drive;
-
+wdc_preata_drive(struct channel_softc *chp, int drive)
 {
 	if (wdc_floating_bus(chp, drive)) {
 		WDCDEBUG_PRINT(("%s:%d:%d: floating bus detected\n",
@@ -526,9 +494,7 @@ wdc_preata_drive(chp, drive)
 }
 
 int
-wdc_ata_present(chp, drive)
-	struct channel_softc *chp;
-	int drive;
+wdc_ata_present(struct channel_softc *chp, int drive)
 {
 	int time_to_done;
 	int retry_cnt = 0;
@@ -614,8 +580,7 @@ retry:
  */
 
 int
-wdcprobe(chp)
-	struct channel_softc *chp;
+wdcprobe(struct channel_softc *chp)
 {
 	u_int8_t st0, st1, sc, sn, cl, ch;
 	u_int8_t ret_value = 0x03;
@@ -735,9 +700,7 @@ wdcprobe(chp)
  * Call activate routine of underlying devices.
  */
 int
-wdcactivate(self, act)
-	struct device *self;
-	int act;
+wdcactivate(struct device *self, int act)
 {
 	int error = 0;
 	int s;
@@ -750,8 +713,7 @@ wdcactivate(self, act)
 }
 
 void
-wdcattach(chp)
-	struct channel_softc *chp;
+wdcattach(struct channel_softc *chp)
 {
 	int channel_flags, ctrl_flags, i;
 	struct ata_atapi_attach aa_link;
@@ -891,8 +853,7 @@ exit:
  * are shared.
  */
 void
-wdcstart(chp)
-	struct channel_softc *chp;
+wdcstart(struct channel_softc *chp)
 {
 	struct wdc_xfer *xfer;
 
@@ -928,9 +889,7 @@ wdcstart(chp)
 }
 
 int
-wdcdetach(chp, flags)
-	struct channel_softc *chp;
-	int flags;
+wdcdetach(struct channel_softc *chp, int flags)
 {
 	int s, rv;
 
@@ -950,8 +909,7 @@ wdcdetach(chp, flags)
  * the next chunk if so.
  */
 int
-wdcintr(arg)
-	void *arg;
+wdcintr(void *arg)
 {
 	struct channel_softc *chp = arg;
 	struct wdc_xfer *xfer;
@@ -991,8 +949,7 @@ wdcintr(arg)
 
 /* Put all disk in RESET state */
 void
-wdc_reset_channel(drvp)
-	struct ata_drive_datas *drvp;
+wdc_reset_channel(struct ata_drive_datas *drvp)
 {
 	struct channel_softc *chp = drvp->chnl_softc;
 	int drive;
@@ -1007,9 +964,7 @@ wdc_reset_channel(drvp)
 }
 
 int
-wdcreset(chp, verb)
-	struct channel_softc *chp;
-	int verb;
+wdcreset(struct channel_softc *chp, int verb)
 {
 	int drv_mask1, drv_mask2;
 
@@ -1046,9 +1001,7 @@ wdc_do_reset(struct channel_softc *chp)
 }
 
 int
-__wdcwait_reset(chp, drv_mask)
-	struct channel_softc *chp;
-	int drv_mask;
+__wdcwait_reset(struct channel_softc *chp, int drv_mask)
 {
 	int timeout;
 	u_int8_t st0, er0, st1, er1;
@@ -1104,9 +1057,7 @@ end:
  * return -1 for a timeout after "timeout" ms.
  */
 int
-wdc_wait_for_status(chp, mask, bits, timeout)
-	struct channel_softc *chp;
-	int mask, bits, timeout;
+wdc_wait_for_status(struct channel_softc *chp, int mask, int bits, int timeout)
 {
 	u_char status;
 	int time = 0;
@@ -1168,10 +1119,7 @@ wdc_wait_for_status(chp, mask, bits, timeout)
  * Busy-wait for DMA to complete
  */
 int
-wdc_dmawait(chp, xfer, timeout)
-	struct channel_softc *chp;
-	struct wdc_xfer *xfer;
-	int timeout;
+wdc_dmawait(struct channel_softc *chp, struct wdc_xfer *xfer, int timeout)
 {
 	int time;
 	for (time = 0; time < timeout * 1000 / WDCDELAY; time++) {
@@ -1189,8 +1137,7 @@ wdc_dmawait(chp, xfer, timeout)
 }
 
 void
-wdctimeout(arg)
-	void *arg;
+wdctimeout(void *arg)
 {
 	struct channel_softc *chp = (struct channel_softc *)arg;
 	struct wdc_xfer *xfer;
@@ -1238,9 +1185,7 @@ wdctimeout(arg)
  * XXX this should be a controller-indep function
  */
 void
-wdc_probe_caps(drvp, params)
-	struct ata_drive_datas *drvp;
-	struct ataparams *params;
+wdc_probe_caps(struct ata_drive_datas *drvp, struct ataparams *params)
 {
 	struct channel_softc *chp = drvp->chnl_softc;
 	struct wdc_softc *wdc = chp->wdc;
@@ -1466,10 +1411,7 @@ wdc_probe_caps(drvp, params)
 }
 
 void
-wdc_output_bytes(drvp, bytes, buflen)
-	struct ata_drive_datas *drvp;
-	void *bytes;
-	unsigned int buflen;
+wdc_output_bytes(struct ata_drive_datas *drvp, void *bytes, unsigned int buflen)
 {
 	struct channel_softc *chp = drvp->chnl_softc;
 	unsigned int off = 0;
@@ -1494,10 +1436,7 @@ wdc_output_bytes(drvp, bytes, buflen)
 }
 
 void
-wdc_input_bytes(drvp, bytes, buflen)
-	struct ata_drive_datas *drvp;
-	void *bytes;
-	unsigned int buflen;
+wdc_input_bytes(struct ata_drive_datas *drvp, void *bytes, unsigned int buflen)
 {
 	struct channel_softc *chp = drvp->chnl_softc;
 	unsigned int off = 0;
@@ -1522,8 +1461,7 @@ wdc_input_bytes(drvp, bytes, buflen)
 }
 
 void
-wdc_print_caps(drvp)
-	struct ata_drive_datas *drvp;
+wdc_print_caps(struct ata_drive_datas *drvp)
 {
 	/* This is actually a lie until we fix the _probe_caps
 	   algorithm. Don't print out lies */
@@ -1550,8 +1488,7 @@ wdc_print_caps(drvp)
 }
 
 void
-wdc_print_current_modes(chp)
-	struct channel_softc *chp;
+wdc_print_current_modes(struct channel_softc *chp)
 {
 	int drive;
 	struct ata_drive_datas *drvp;
@@ -1583,8 +1520,7 @@ wdc_print_current_modes(chp)
  * downgrade was possible, 0 otherwise.
  */
 int
-wdc_downgrade_mode(drvp)
-	struct ata_drive_datas *drvp;
+wdc_downgrade_mode(struct ata_drive_datas *drvp)
 {
 	struct channel_softc *chp = drvp->chnl_softc;
 	struct wdc_softc *wdc = chp->wdc;
@@ -1638,9 +1574,7 @@ wdc_downgrade_mode(drvp)
 }
 
 int
-wdc_exec_command(drvp, wdc_c)
-	struct ata_drive_datas *drvp;
-	struct wdc_command *wdc_c;
+wdc_exec_command(struct ata_drive_datas *drvp, struct wdc_command *wdc_c)
 {
 	struct channel_softc *chp = drvp->chnl_softc;
 	struct wdc_xfer *xfer;
@@ -1694,9 +1628,7 @@ wdc_exec_command(drvp, wdc_c)
 }
 
 void
-__wdccommand_start(chp, xfer)
-	struct channel_softc *chp;
-	struct wdc_xfer *xfer;
+__wdccommand_start(struct channel_softc *chp, struct wdc_xfer *xfer)
 {
 	int drive = xfer->drive;
 	struct wdc_command *wdc_c = xfer->cmd;
@@ -1768,10 +1700,7 @@ timeout:
 }
 
 int
-__wdccommand_intr(chp, xfer, irq)
-	struct channel_softc *chp;
-	struct wdc_xfer *xfer;
-	int irq;
+__wdccommand_intr(struct channel_softc *chp, struct wdc_xfer *xfer, int irq)
 {
 	struct ata_drive_datas *drvp = &chp->ch_drive[xfer->drive];
 	struct wdc_command *wdc_c = xfer->cmd;
@@ -1804,9 +1733,7 @@ out:
 }
 
 void
-__wdccommand_done(chp, xfer)
-	struct channel_softc *chp;
-	struct wdc_xfer *xfer;
+__wdccommand_done(struct channel_softc *chp, struct wdc_xfer *xfer)
 {
 	struct wdc_command *wdc_c = xfer->cmd;
 
@@ -1854,12 +1781,9 @@ __wdccommand_done(chp, xfer)
  * Assumes interrupts are blocked.
  */
 void
-wdccommand(chp, drive, command, cylin, head, sector, count, precomp)
-	struct channel_softc *chp;
-	u_int8_t drive;
-	u_int8_t command;
-	u_int16_t cylin;
-	u_int8_t head, sector, count, precomp;
+wdccommand(struct channel_softc *chp, u_int8_t drive, u_int8_t command,
+    u_int16_t cylin, u_int8_t head, u_int8_t sector, u_int8_t count,
+    u_int8_t precomp)
 {
 	WDCDEBUG_PRINT(("wdccommand %s:%d:%d: command=0x%x cylin=%d head=%d "
 	    "sector=%d count=%d precomp=%d\n", chp->wdc->sc_dev.dv_xname,
@@ -1887,12 +1811,8 @@ wdccommand(chp, drive, command, cylin, head, sector, count, precomp)
  * Assumes interrupts are blocked.
  */
 void
-wdccommandext(chp, drive, command, blkno, count)
-	struct channel_softc *chp;
-	u_int8_t drive;
-	u_int8_t command;
-	u_int64_t blkno;
-	u_int16_t count;
+wdccommandext(struct channel_softc *chp, u_int8_t drive, u_int8_t command,
+    u_int64_t blkno, u_int16_t count)
 {
 	WDCDEBUG_PRINT(("wdccommandext %s:%d:%d: command=0x%x blkno=%llu "
 	    "count=%d\n", chp->wdc->sc_dev.dv_xname,
@@ -1922,10 +1842,7 @@ wdccommandext(chp, drive, command, blkno, count)
  * tested by the caller.
  */
 void
-wdccommandshort(chp, drive, command)
-	struct channel_softc *chp;
-	int drive;
-	int command;
+wdccommandshort(struct channel_softc *chp, int drive, int command)
 {
 
 	WDCDEBUG_PRINT(("wdccommandshort %s:%d:%d command 0x%x\n",
@@ -1941,9 +1858,7 @@ wdccommandshort(chp, drive, command)
 /* Add a command to the queue and start controller. Must be called at splbio */
 
 void
-wdc_exec_xfer(chp, xfer)
-	struct channel_softc *chp;
-	struct wdc_xfer *xfer;
+wdc_exec_xfer(struct channel_softc *chp, struct wdc_xfer *xfer)
 {
 	WDCDEBUG_PRINT(("wdc_exec_xfer %p flags 0x%x channel %d drive %d\n",
 	    xfer, xfer->c_flags, chp->channel, xfer->drive), DEBUG_XFERS);
@@ -1968,8 +1883,7 @@ wdc_exec_xfer(chp, xfer)
 }
 
 struct wdc_xfer *
-wdc_get_xfer(flags)
-	int flags;
+wdc_get_xfer(int flags)
 {
 	struct wdc_xfer *xfer;
 	int s;
@@ -1984,9 +1898,7 @@ wdc_get_xfer(flags)
 }
 
 void
-wdc_free_xfer(chp, xfer)
-	struct channel_softc *chp;
-	struct wdc_xfer *xfer;
+wdc_free_xfer(struct channel_softc *chp, struct wdc_xfer *xfer)
 {
 	struct wdc_softc *wdc = chp->wdc;
 	int s;
@@ -2007,8 +1919,7 @@ wdc_free_xfer(chp, xfer)
  * Must be called at splbio().
  */
 void
-wdc_kill_pending(chp)
-	struct channel_softc *chp;
+wdc_kill_pending(struct channel_softc *chp)
 {
 	struct wdc_xfer *xfer;
 
@@ -2019,9 +1930,7 @@ wdc_kill_pending(chp)
 }
 
 void
-__wdcerror(chp, msg)
-	struct channel_softc *chp;
-	char *msg;
+__wdcerror(struct channel_softc *chp, char *msg)
 {
 	struct wdc_xfer *xfer = TAILQ_FIRST(&chp->ch_queue->sc_xfer);
 	if (xfer == NULL)
@@ -2038,9 +1947,7 @@ __wdcerror(chp, msg)
  * the bit bucket
  */
 void
-wdcbit_bucket(chp, size)
-	struct channel_softc *chp;
-	int size;
+wdcbit_bucket(struct channel_softc *chp, int size)
 {
 	CHP_READ_RAW_MULTI_2(chp, NULL, size);
 }
@@ -2075,7 +1982,7 @@ LIST_HEAD(, wdc_ioctl) wi_head;
  * scsipi_ioctl.c
  */
 struct wdc_ioctl *
-wdc_ioctl_get()
+wdc_ioctl_get(void)
 {
 	struct wdc_ioctl *wi;
 	int s;
@@ -2092,8 +1999,7 @@ wdc_ioctl_get()
  */
 
 void
-wdc_ioctl_free(wi)
-	struct wdc_ioctl *wi;
+wdc_ioctl_free(struct wdc_ioctl *wi)
 {
 	int s;
 
@@ -2108,8 +2014,7 @@ wdc_ioctl_free(wi)
  */
 
 struct wdc_ioctl *
-wdc_ioctl_find(bp)
-	struct buf *bp;
+wdc_ioctl_find(struct buf *bp)
 {
 	struct wdc_ioctl *wi;
 	int s;
@@ -2145,8 +2050,7 @@ wdc_ioctl_find(bp)
  */
 
 void
-wdc_ioctl_strategy(bp)
-	struct buf *bp;
+wdc_ioctl_strategy(struct buf *bp)
 {
 	struct wdc_ioctl *wi;
 	struct wdc_command wdc_c;
@@ -2249,12 +2153,8 @@ bad:
 }
 
 int
-wdc_ioctl(drvp, xfer, addr, flag, p)
-	struct ata_drive_datas *drvp;
-	u_long xfer;
-	caddr_t addr;
-	int flag;
-	struct proc *p;
+wdc_ioctl(struct ata_drive_datas *drvp, u_long xfer, caddr_t addr, int flag,
+    struct proc *p)
 {
 	int error = 0;
 
