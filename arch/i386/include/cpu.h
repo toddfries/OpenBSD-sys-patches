@@ -377,7 +377,7 @@ void	rtcdrain(void *);
 void	i8254_delay(int);
 void	i8254_initclocks(void);
 void	i8254_inittimecounter(void);
-void	i8254_inittimecounter_simple(void);
+void	i8254_inittimecounter_simple(int);
 
 
 #if !defined(SMALL_KERNEL)
