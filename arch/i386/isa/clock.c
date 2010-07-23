@@ -693,14 +693,16 @@ i8254_inittimecounter(void)
  * algorithm for the i8254 timecounters.
  */
 void
-i8254_inittimecounter_simple(void)
+i8254_inittimecounter_simple(int resume)
 {
 	u_long tval = 0x8000;
 
-	i8254_timecounter.tc_get_timecount = i8254_simple_get_timecount;
-	i8254_timecounter.tc_counter_mask = 0x7fff;
+	if (resume == 0) {
+		i8254_timecounter.tc_get_timecount = i8254_simple_get_timecount;
+		i8254_timecounter.tc_counter_mask = 0x7fff;
 
-	i8254_timecounter.tc_frequency = TIMER_FREQ;
+		i8254_timecounter.tc_frequency = TIMER_FREQ;
+	}
 
 	mtx_enter(&timer_mutex);
 	outb(IO_TIMER1 + TIMER_MODE, TIMER_SEL0 | TIMER_RATEGEN | TIMER_16BIT);
@@ -709,8 +711,6 @@ i8254_inittimecounter_simple(void)
 
 	rtclock_tval = tval;
 	mtx_leave(&timer_mutex);
-
-	tc_init(&i8254_timecounter);
 }
 
 u_int

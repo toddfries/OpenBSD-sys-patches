@@ -3293,10 +3293,9 @@ cpu_initclocks(void)
 {
 	(*initclock_func)();
 
-	if (initclock_func == i8254_initclocks)
-		i8254_inittimecounter();
-	else
-		i8254_inittimecounter_simple();
+	if (initclock_func != i8254_initclocks)
+		i8254_inittimecounter_simple(0);
+	i8254_inittimecounter();
 }
 
 void
