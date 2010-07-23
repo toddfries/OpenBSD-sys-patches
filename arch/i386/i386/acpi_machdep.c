@@ -291,7 +291,7 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	initrtclock();
 	if (initclock_func == i8254_initclocks)
 		i8254_initclocks();
-	else
+	if (initclock_func != i8254_initclocks)
 		i8254_inittimecounter_simple(1);
 	inittodr(time_second);
 
