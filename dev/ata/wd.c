@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.86 2010/07/22 18:10:37 mlarkin Exp $ */
+/*	$OpenBSD: wd.c,v 1.88 2010/07/23 07:47:13 jsg Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *	notice, this list of conditions and the following disclaimer in the
  *	documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *	must display the following acknowledgement:
- *  This product includes software developed by Manuel Bouyer.
- * 4. The name of the author may not be used to endorse or promote products
- *	derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -1231,7 +1226,7 @@ wd_standby(struct wd_softc *wd, int flags)
 	} else {
 		wdc_c.flags = AT_WAIT;
 	}
-	wdc_c.timeout = 1000; /* 1s timeout */
+	wdc_c.timeout = 30000; /* 30s timeout */
 	if (wdc_exec_command(wd->drvp, &wdc_c) != WDC_COMPLETE) {
 		printf("%s: standby command didn't complete\n",
 		    wd->sc_dev.dv_xname);
