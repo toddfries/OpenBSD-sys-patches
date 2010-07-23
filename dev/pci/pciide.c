@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.309 2010/07/22 18:11:16 deraadt Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.311 2010/07/23 07:47:13 jsg Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -12,12 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Manuel Bouyer.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -1432,10 +1426,6 @@ pciide_activate(struct device *self, int act)
 			    sc->sc_tag, ICH5_SATA_PI);
 			sc->sc_save2[2] = pciide_pci_read(sc->sc_pc,
 			    sc->sc_tag, ICH_SATA_PCS);
-		} else if (sc->sc_pp->chip_map == piix_chip_map) {
-			/* nothing to save */
-		} else if (sc->sc_pp->chip_map == phison_chip_map) {
-			/* nothing to save */
 		}
 		break;
 	case DVACT_RESUME:
@@ -1460,6 +1450,8 @@ pciide_activate(struct device *self, int act)
 			/* nothing more to restore */
 		} else if (sc->sc_pp->chip_map == phison_chip_map) {
 			/* nothing more to restore */
+		} else if (sc->sc_pp->chip_map == ixp_chip_map) {
+			/* nothing to restore (0x40 - 0x56) */
 		} else {
 			printf("%s: restore for unknown chip map %x\n",
 			    sc->sc_wdcdev.sc_dev.dv_xname,
