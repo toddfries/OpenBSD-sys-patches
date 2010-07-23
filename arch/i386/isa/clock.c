@@ -401,15 +401,19 @@ void
 i8254_initclocks(void)
 {
 	static struct timeout rtcdrain_timeout;
+	static int intrsetup;
 
-	/*
-	 * XXX If you're doing strange things with multiple clocks, you might
-	 * want to keep track of clock handlers.
-	 */
-	(void)isa_intr_establish(NULL, 0, IST_PULSE, IPL_CLOCK, clockintr,
-	    0, "clock");
-	(void)isa_intr_establish(NULL, 8, IST_PULSE, IPL_CLOCK, rtcintr,
-	    0, "rtc");
+	if (intrsetup == 0) {
+		/*
+		 * XXX If you're doing strange things with multiple clocks,
+		 * you might want to keep track of clock handlers.
+		 */
+		(void)isa_intr_establish(NULL, 0, IST_PULSE, IPL_CLOCK,
+		    clockintr, 0, "clock");
+		(void)isa_intr_establish(NULL, 8, IST_PULSE, IPL_CLOCK,
+		    rtcintr, 0, "rtc");
+		intrsetup = 1;
+	}
 
 	mc146818_write(NULL, MC_REGA, MC_BASE_32_KHz | MC_RATE_128_Hz);
 	mc146818_write(NULL, MC_REGB, MC_REGB_24HR | MC_REGB_PIE);

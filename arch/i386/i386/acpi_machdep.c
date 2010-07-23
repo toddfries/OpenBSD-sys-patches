@@ -287,6 +287,7 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	ioapic_enable();
 #endif
 	initrtclock();
+	i8254_initclocks();
 	inittodr(time_second);
 
 	return (0);
