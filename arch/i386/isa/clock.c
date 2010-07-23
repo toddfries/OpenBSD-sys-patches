@@ -115,7 +115,6 @@ int 	hexdectodec(int);
 int	dectohexdec(int);
 int	rtcintr(void *);
 void	rtcdrain(void *);
-void	rtcresume(void);
 
 u_int mc146818_read(void *, u_int);
 void mc146818_write(void *, u_int, u_int);
@@ -195,39 +194,6 @@ rtcdrain(void *v)
   	while (mc146818_read(NULL, MC_REGC) & MC_REGC_PF)
 		; /* Nothing. */
 }
-
-void
-rtcresume(void)
-{
-	int v = MC_REGC_PF;
-
-	/*
-	 * Restart the clock. We can't call i8254_initclocks as it has
-	 * buried splx calls that we can't call yet.
-	 */
-	outb(IO_RTC, MC_REGA);
-	DELAY(1);
-	outb(IO_RTC+1, MC_BASE_32_KHz | MC_RATE_128_Hz);
-	DELAY(1);
-
-	outb(IO_RTC, MC_REGB);
-	DELAY(1);
-	outb(IO_RTC+1, MC_REGB_24HR | MC_REGB_PIE);
-	DELAY(1);
-
-	/* 
-	 * Drain un-acknowledged RTC interrupts.
-	 * We can't call rtcdrain as it has buried splx calls that we
-	 * can't call yet.
-	 */
-	while (v & MC_REGC_PF) {
-		outb(IO_RTC, MC_REGC);
-		DELAY(1);
-		v = inb(IO_RTC+1);
-		DELAY(1);
-	}
-}
-		
 
 void
 initrtclock(void)

@@ -288,7 +288,6 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 #endif
 	initrtclock();
 	inittodr(time_second);
-	rtcresume();
 
 	return (0);
 }
