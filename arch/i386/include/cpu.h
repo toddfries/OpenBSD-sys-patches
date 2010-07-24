@@ -371,14 +371,16 @@ void	switch_exit(struct proc *);
 void	proc_trampoline(void);
 
 /* clock.c */
+extern void (*initclock_func)(void);
 void	initrtclock(void);
 void	startrtclock(void);
 void	rtcdrain(void *);
+void	rtcreinitirq(void);
 void	i8254_delay(int);
 void	i8254_initclocks(void);
-void	i8254_inittimecounter(void);
-void	i8254_inittimecounter_simple(int);
-
+void	i8254_starttimecounter(void);
+void	i8254_inittimecounter_simple(void);
+void	i8254_restartclock(void);
 
 #if !defined(SMALL_KERNEL)
 /* est.c */

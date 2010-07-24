@@ -219,8 +219,6 @@ acpi_cpu_flush(struct acpi_softc *sc, int state)
 int
 acpi_sleep_machdep(struct acpi_softc *sc, int state)
 {
-	extern void (*initclock_func)(void); /* XXX put in header file */
-
 	if (sc->sc_facs == NULL) {
 		printf("%s: acpi_sleep_machdep: no FACS\n", DEVNAME(sc));
 		return (ENXIO);
@@ -290,9 +288,8 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 #endif
 	initrtclock();
 	if (initclock_func == i8254_initclocks)
-		i8254_initclocks();
-	if (initclock_func != i8254_initclocks)
-		i8254_inittimecounter_simple(1);
+		rtcreinitirq();		/* in i8254 mode, rtc is profclock */
+	i8254_restartclock();
 	inittodr(time_second);
 
 	return (0);
