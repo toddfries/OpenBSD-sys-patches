@@ -400,20 +400,22 @@ calibrate_cyclecounter(void)
 void
 i8254_initclocks(void)
 {
-	static struct timeout rtcdrain_timeout;
-	static int intrsetup;
+	/*
+	 * XXX If you're doing strange things with multiple clocks,
+	 * you might want to keep track of clock handlers.
+	 */
+	(void)isa_intr_establish(NULL, 0, IST_PULSE, IPL_CLOCK,
+	    clockintr, 0, "clock");
+	(void)isa_intr_establish(NULL, 8, IST_PULSE, IPL_CLOCK,
+	    rtcintr, 0, "rtc");
 
-	if (intrsetup == 0) {
-		/*
-		 * XXX If you're doing strange things with multiple clocks,
-		 * you might want to keep track of clock handlers.
-		 */
-		(void)isa_intr_establish(NULL, 0, IST_PULSE, IPL_CLOCK,
-		    clockintr, 0, "clock");
-		(void)isa_intr_establish(NULL, 8, IST_PULSE, IPL_CLOCK,
-		    rtcintr, 0, "rtc");
-		intrsetup = 1;
-	}
+	rtcreinitirq();
+}
+
+void
+rtcreinitirq(void)
+{
+	static struct timeout rtcdrain_timeout;
 
 	mc146818_write(NULL, MC_REGA, MC_BASE_32_KHz | MC_RATE_128_Hz);
 	mc146818_write(NULL, MC_REGB, MC_REGB_24HR | MC_REGB_PIE);
@@ -683,7 +685,7 @@ setstatclockrate(int arg)
 }
 
 void
-i8254_inittimecounter(void)
+i8254_starttimecounter(void)
 {
 	tc_init(&i8254_timecounter);
 }
@@ -693,24 +695,29 @@ i8254_inittimecounter(void)
  * algorithm for the i8254 timecounters.
  */
 void
-i8254_inittimecounter_simple(int resume)
+i8254_inittimecounter_simple(void)
 {
 	u_long tval = 0x8000;
 
-	if (resume == 0) {
-		i8254_timecounter.tc_get_timecount = i8254_simple_get_timecount;
-		i8254_timecounter.tc_counter_mask = 0x7fff;
+	i8254_timecounter.tc_get_timecount = i8254_simple_get_timecount;
+	i8254_timecounter.tc_counter_mask = 0x7fff;
 
-		i8254_timecounter.tc_frequency = TIMER_FREQ;
-	}
+	i8254_timecounter.tc_frequency = TIMER_FREQ;
 
 	mtx_enter(&timer_mutex);
+	rtclock_tval = tval;
+	i8254_restartclock();
+	mtx_leave(&timer_mutex);
+}
+
+void
+i8254_restartclock(void)
+{
+	u_long tval = rtclock_tval;
+
 	outb(IO_TIMER1 + TIMER_MODE, TIMER_SEL0 | TIMER_RATEGEN | TIMER_16BIT);
 	outb(IO_TIMER1, tval & 0xff);
 	outb(IO_TIMER1, tval >> 8);
-
-	rtclock_tval = tval;
-	mtx_leave(&timer_mutex);
 }
 
 u_int

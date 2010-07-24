@@ -263,7 +263,6 @@ lapic_initclocks(void)
 }
 
 extern int gettick(void);	/* XXX put in header file */
-extern void (*initclock_func)(void); /* XXX put in header file */
 
 /*
  * Calibrate the local apic count-down timer (which is running at
