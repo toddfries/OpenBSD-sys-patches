@@ -167,11 +167,14 @@ mc146818_write(void *sc, u_int reg, u_int datum)
 }
 
 void
-startrtclock(void)
+startclocks(void)
 {
 	int s;
 
-	initrtclock();
+	mtx_enter(&timer_mutex);
+	rtclock_tval = TIMER_DIV(hz);
+	i8254_startclock();
+	mtx_leave(&timer_mutex);
 
 	/* Check diagnostic status */
 	if ((s = mc146818_read(NULL, NVRAM_DIAG)) != 0)	/* XXX softc */
@@ -193,22 +196,6 @@ rtcdrain(void *v)
 	 */
   	while (mc146818_read(NULL, MC_REGC) & MC_REGC_PF)
 		; /* Nothing. */
-}
-
-void
-initrtclock(void)
-{
-	mtx_enter(&timer_mutex);
-
-	/* initialize 8253 clock */
-	outb(IO_TIMER1 + TIMER_MODE, TIMER_SEL0|TIMER_RATEGEN|TIMER_16BIT);
-
-	/* Correct rounding will buy us a better precision in timekeeping */
-	outb(IO_TIMER1, TIMER_DIV(hz) % 256);
-	outb(IO_TIMER1, TIMER_DIV(hz) / 256);
-
-	rtclock_tval = TIMER_DIV(hz);
-	mtx_leave(&timer_mutex);
 }
 
 int
@@ -400,20 +387,17 @@ calibrate_cyclecounter(void)
 void
 i8254_initclocks(void)
 {
-	/*
-	 * XXX If you're doing strange things with multiple clocks,
-	 * you might want to keep track of clock handlers.
-	 */
+	/* When using i8254 for clock, we also use the rtc for profclock */
 	(void)isa_intr_establish(NULL, 0, IST_PULSE, IPL_CLOCK,
 	    clockintr, 0, "clock");
 	(void)isa_intr_establish(NULL, 8, IST_PULSE, IPL_CLOCK,
 	    rtcintr, 0, "rtc");
 
-	rtcreinitirq();
+	i8254_inittimecounter();
 }
 
 void
-rtcreinitirq(void)
+rtcstart(void)
 {
 	static struct timeout rtcdrain_timeout;
 
@@ -685,7 +669,7 @@ setstatclockrate(int arg)
 }
 
 void
-i8254_starttimecounter(void)
+i8254_inittimecounter(void)
 {
 	tc_init(&i8254_timecounter);
 }
@@ -697,27 +681,24 @@ i8254_starttimecounter(void)
 void
 i8254_inittimecounter_simple(void)
 {
-	u_long tval = 0x8000;
-
 	i8254_timecounter.tc_get_timecount = i8254_simple_get_timecount;
 	i8254_timecounter.tc_counter_mask = 0x7fff;
-
 	i8254_timecounter.tc_frequency = TIMER_FREQ;
 
 	mtx_enter(&timer_mutex);
-	rtclock_tval = tval;
-	i8254_restartclock();
+	rtclock_tval = 0x8000;
+	i8254_startclock();
 	mtx_leave(&timer_mutex);
+
+	tc_init(&i8254_timecounter);
 }
 
 void
-i8254_restartclock(void)
+i8254_startclock(void)
 {
-	u_long tval = rtclock_tval;
-
 	outb(IO_TIMER1 + TIMER_MODE, TIMER_SEL0 | TIMER_RATEGEN | TIMER_16BIT);
-	outb(IO_TIMER1, tval & 0xff);
-	outb(IO_TIMER1, tval >> 8);
+	outb(IO_TIMER1 + TIMER_CNTR0, rtclock_tval & 0xff);
+	outb(IO_TIMER1 + TIMER_CNTR0, rtclock_tval >> 8);
 }
 
 u_int

@@ -105,8 +105,6 @@ cpu_configure(void)
 	 * architectures.  This fact is used by the pcmcia irq line probing.
 	 */
 
-	startrtclock();
-
 	gdt_init();		/* XXX - pcibios uses gdt stuff */
 
 	/* Set up proc0's TSS and LDT */

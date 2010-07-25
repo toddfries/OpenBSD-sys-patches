@@ -372,15 +372,14 @@ void	proc_trampoline(void);
 
 /* clock.c */
 extern void (*initclock_func)(void);
-void	initrtclock(void);
-void	startrtclock(void);
+void	startclocks(void);
 void	rtcdrain(void *);
-void	rtcreinitirq(void);
+void	rtcstart(void);
 void	i8254_delay(int);
 void	i8254_initclocks(void);
-void	i8254_starttimecounter(void);
+void	i8254_startclock(void);
+void	i8254_inittimecounter(void);
 void	i8254_inittimecounter_simple(void);
-void	i8254_restartclock(void);
 
 #if !defined(SMALL_KERNEL)
 /* est.c */
