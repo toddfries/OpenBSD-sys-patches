@@ -118,8 +118,6 @@ cpu_configure(void)
 
 	x86_64_proc0_tss_ldt_init();
 
-	startrtclock();
-
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("configure: mainbus not configured");
 

@@ -497,7 +497,7 @@ cpu_hatch(void *v)
 	ci->ci_flags |= CPUF_PRESENT;
 
 	lapic_enable();
-	lapic_initclocks();
+	lapic_startclock();
 
 	while ((ci->ci_flags & CPUF_GO) == 0)
 		delay(10);

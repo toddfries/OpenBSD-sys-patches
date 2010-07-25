@@ -393,7 +393,9 @@ i8254_initclocks(void)
 	(void)isa_intr_establish(NULL, 8, IST_PULSE, IPL_CLOCK,
 	    rtcintr, 0, "rtc");
 
-	i8254_inittimecounter();
+	rtcstart();			/* start the mc146818 clock */
+
+	i8254_inittimecounter();	/* hook the interrupt-based i8254 tc */
 }
 
 void
@@ -696,9 +698,11 @@ i8254_inittimecounter_simple(void)
 void
 i8254_startclock(void)
 {
+	u_long tval = rtclock_tval;
+
 	outb(IO_TIMER1 + TIMER_MODE, TIMER_SEL0 | TIMER_RATEGEN | TIMER_16BIT);
-	outb(IO_TIMER1 + TIMER_CNTR0, rtclock_tval & 0xff);
-	outb(IO_TIMER1 + TIMER_CNTR0, rtclock_tval >> 8);
+	outb(IO_TIMER1 + TIMER_CNTR0, tval & 0xff);
+	outb(IO_TIMER1 + TIMER_CNTR0, tval >> 8);
 }
 
 u_int

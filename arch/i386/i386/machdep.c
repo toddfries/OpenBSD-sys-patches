@@ -3292,8 +3292,6 @@ void
 cpu_initclocks(void)
 {
 	(*initclock_func)();		/* lapic or i8254 */
-
-	rtcstart();			/* mc146818 */
 }
 
 void
