@@ -123,6 +123,7 @@ extern void lapic_boot_init(paddr_t);
 extern void lapic_set_lvt(void);
 extern void lapic_enable(void);
 extern void lapic_calibrate_timer(struct cpu_info *ci);
+extern void lapic_startclock(void);
 extern void lapic_initclocks(void);
 
 #endif
