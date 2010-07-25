@@ -273,7 +273,8 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 
 #if NLAPIC > 0
 	lapic_enable();
-	lapic_initclocks();
+	if (initclock_func == lapic_initclocks)
+		lapic_startclock();
 	lapic_set_lvt();
 #endif
 

@@ -470,7 +470,7 @@ cpu_hatch(void *v)
 
 	cpu_init_idt();
 	lapic_enable();
-	lapic_initclocks();
+	lapic_startclock();
 	lapic_set_lvt();
 	gdt_init_cpu(ci);
 	cpu_init_ldt(ci);
