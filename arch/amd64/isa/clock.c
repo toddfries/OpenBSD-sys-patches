@@ -158,15 +158,6 @@ u_long rtclock_tval;
 void
 startclocks(void)
 {
-	mtx_enter(&timer_mutex);
-	rtclock_tval = TIMER_DIV(hz);
-	i8254_startclock();
-	mtx_leave(&timer_mutex);
-}
-
-void
-startrtclock(void)
-{
 	int s;
 
 	mtx_enter(&timer_mutex);

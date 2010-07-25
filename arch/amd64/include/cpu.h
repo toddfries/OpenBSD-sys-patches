@@ -291,16 +291,13 @@ void	child_trampoline(void);
 
 /* clock.c */
 extern void (*initclock_func)(void);
-void	initrtclock(void);
-void	startrtclock(void);
 void	startclocks(void);
 void	rtcstart(void);
 void	i8254_delay(int);
-void	i8254_startclock(void);
 void	i8254_initclocks(void);
+void	i8254_startclock(void);
 void	i8254_inittimecounter(void);
 void	i8254_inittimecounter_simple(void);
-void	i8254_restartclock(void);
 
 /* i8259.c */
 void	i8259_default_setup(void);
