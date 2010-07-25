@@ -260,6 +260,8 @@ lapic_initclocks(void)
 	i82489_writereg(LAPIC_DCR_TIMER, LAPIC_DCRT_DIV1);
 	i82489_writereg(LAPIC_ICR_TIMER, lapic_tval);
 	i82489_writereg(LAPIC_LVTT, LAPIC_LVTT_TM|LAPIC_TIMER_VECTOR);
+
+	i8254_inittimecounter_simple();
 }
 
 extern int gettick(void);	/* XXX put in header file */

@@ -401,7 +401,7 @@ cpu_startup()
 	initmsgbuf((caddr_t)msgbufp, round_page(MSGBUFSIZE));
 
 	printf("%s", version);
-	startrtclock();
+	startclocks();
 
 	/*
 	 * We need to call identifycpu here early, so users have at least some
@@ -3291,11 +3291,9 @@ cpu_reset()
 void
 cpu_initclocks(void)
 {
-	(*initclock_func)();
+	(*initclock_func)();		/* lapic or i8254 */
 
-	if (initclock_func != i8254_initclocks)
-		i8254_inittimecounter_simple();
-	i8254_starttimecounter();
+	rtcstart();			/* mc146818 */
 }
 
 void

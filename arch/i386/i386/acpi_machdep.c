@@ -286,10 +286,9 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 #if NIOAPIC > 0
 	ioapic_enable();
 #endif
-	initrtclock();
+	i8254_startclock();
 	if (initclock_func == i8254_initclocks)
-		rtcreinitirq();		/* in i8254 mode, rtc is profclock */
-	i8254_restartclock();
+		rtcstart();		/* in i8254 mode, rtc is profclock */
 	inittodr(time_second);
 
 	return (0);

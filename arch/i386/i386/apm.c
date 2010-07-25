@@ -356,8 +356,10 @@ apm_resume(struct apm_softc *sc, struct apmregs *regs)
 
 	apm_resumes = APM_RESUME_HOLDOFF;
 
-	/* they say that some machines may require reinitializing the clock */
-	initrtclock();
+	/* they say that some machines may require reinitializing the clocks */
+	i8254_startclock();
+	if (initclock_func == i8254_initclocks)
+		rtcstart();		/* in i8254 mode, rtc is profclock */
 
 	inittodr(time_second);
 	/* lower bit in cx means pccard was powered down */
