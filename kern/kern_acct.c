@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_acct.c,v 1.22 2010/01/14 23:12:11 schwarze Exp $	*/
+/*	$OpenBSD: kern_acct.c,v 1.23 2010/07/26 01:56:27 guenther Exp $	*/
 /*	$NetBSD: kern_acct.c,v 1.42 1996/02/04 02:15:12 christos Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_generic.c,v 1.69 2010/07/08 20:15:03 deraadt Exp $	*/
+/*	$OpenBSD: sys_generic.c,v 1.70 2010/07/26 01:56:27 guenther Exp $	*/
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*

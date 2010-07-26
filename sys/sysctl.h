@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.104 2010/06/29 00:28:14 tedu Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.105 2010/07/26 01:56:27 guenther Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*

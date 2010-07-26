@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pager.c,v 1.56 2010/06/27 20:53:31 oga Exp $	*/
+/*	$OpenBSD: uvm_pager.c,v 1.57 2010/07/24 15:40:39 kettenis Exp $	*/
 /*	$NetBSD: uvm_pager.c,v 1.36 2000/11/27 18:26:41 chs Exp $	*/
 
 /*
@@ -139,7 +139,7 @@ uvm_pseg_init(struct uvm_pseg *pseg)
 	rw_assert_wrlock(&uvm_pseg_lck);
 	KASSERT(pseg->start == 0);
 	KASSERT(pseg->use == 0);
-	pseg->start = uvm_km_valloc(kernel_map, MAX_PAGER_SEGS * MAXBSIZE);
+	pseg->start = uvm_km_valloc_try(kernel_map, MAX_PAGER_SEGS * MAXBSIZE);
 }
 
 /*
@@ -220,7 +220,7 @@ uvm_pseg_release(vaddr_t segaddr)
 {
 	int id;
 	struct uvm_pseg *pseg;
-	vaddr_t to_free = 0;
+	vaddr_t va = 0;
 
 	splassert(IPL_NONE);
 	for (pseg = &psegs[0]; pseg != &psegs[PSEG_NUMSEGS]; pseg++) {
@@ -244,14 +244,14 @@ uvm_pseg_release(vaddr_t segaddr)
 	wakeup(&psegs);
 
 	if (pseg != &psegs[0] && UVM_PSEG_EMPTY(pseg)) {
-		to_free = pseg->start;
+		va = pseg->start;
 		pseg->start = 0;
 	}
 
-	rw_exit_write(&uvm_pseg_lck);
+	mtx_leave(&uvm_pseg_lck);
 
-	if (to_free)
-		uvm_km_free(kernel_map, to_free, MAX_PAGER_SEGS * MAXBSIZE);
+	if (va)
+		uvm_km_free(kernel_map, va, MAX_PAGER_SEGS * MAXBSIZE);
 }
 
 /*

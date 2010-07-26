@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhid.c,v 1.47 2009/11/23 11:10:16 yuo Exp $ */
+/*	$OpenBSD: uhid.c,v 1.48 2010/07/26 01:56:27 guenther Exp $ */
 /*	$NetBSD: uhid.c,v 1.57 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/* $OpenBSD: wskbd.c,v 1.61 2009/10/13 19:33:19 pirofti Exp $ */
+/* $OpenBSD: wskbd.c,v 1.62 2010/07/26 01:56:27 guenther Exp $ */
 /* $NetBSD: wskbd.c,v 1.80 2005/05/04 01:52:16 augustss Exp $ */
 
 /*
