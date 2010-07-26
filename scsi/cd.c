@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.178 2010/07/22 15:59:46 matthew Exp $	*/
+/*	$OpenBSD: cd.c,v 1.180 2010/07/25 16:34:41 krw Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -1939,7 +1939,7 @@ dvd_read_copyright(struct cd_softc *sc, union dvd_struct *s)
 	u_int8_t buf[8];
 	int error;
 
-	xs = scsi_xs_get(sc->sc_link, 0);
+	xs = scsi_xs_get(sc->sc_link, SCSI_DATA_IN);
 	if (xs == NULL)
 		return (ENOMEM);
 	xs->cmd->opcode = GPCMD_READ_DVD_STRUCTURE;
@@ -1958,7 +1958,7 @@ dvd_read_copyright(struct cd_softc *sc, union dvd_struct *s)
 	error = scsi_xs_sync(xs);
 	scsi_xs_put(xs);
 
-	if (error) {
+	if (error == 0) {
 		s->copyright.cpst = buf[4];
 		s->copyright.rmi = buf[5];
 	}
