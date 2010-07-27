@@ -459,7 +459,7 @@ bce_power(int why, void *xsc)
 	if (why == PWR_RESUME) {
 		ifp = &sc->bce_ac.ac_if;
 		if (ifp->if_flags & IFF_UP) {
-			bce_init(xsc);
+			bce_init(ifp);
 			bce_start(ifp);
 		}
 	}
