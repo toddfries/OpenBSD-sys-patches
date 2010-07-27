@@ -750,7 +750,7 @@ iwn_activate(struct device *self, int act)
 	switch (act) {
 	case DVACT_SUSPEND:
 		if (ifp->if_flags & IFF_RUNNING)
-			iwn_stop(ifp, 1);
+			iwn_stop(ifp, 0);
 		break;
 	case DVACT_RESUME:
 		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
@@ -771,12 +771,14 @@ void
 iwn_power(int why, void *arg)
 {
 	struct iwn_softc *sc = arg;
-	struct ifnet *ifp;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	pcireg_t reg;
 	int s;
 
-	if (why != PWR_RESUME)
+	if (why != PWR_RESUME) {
+		iwn_stop(ifp, 0);
 		return;
+	}
 
 	/* Clear device-specific "PCI retry timeout" register (41h). */
 	reg = pci_conf_read(sc->sc_pct, sc->sc_pcitag, 0x40);
@@ -786,12 +788,8 @@ iwn_power(int why, void *arg)
 	s = splnet();
 	sc->sc_flags |= IWN_FLAG_BUSY;
 
-	ifp = &sc->sc_ic.ic_if;
-	if (ifp->if_flags & IFF_UP) {
-		ifp->if_init(ifp);
-		if (ifp->if_flags & IFF_RUNNING)
-			ifp->if_start(ifp);
-	}
+	if (ifp->if_flags & IFF_UP)
+		iwn_init(ifp);
 
 	sc->sc_flags &= ~IWN_FLAG_BUSY;
 	splx(s);
@@ -5817,7 +5815,7 @@ fail:	iwn_stop(ifp, 1);
 }
 
 void
-iwn_stop(struct ifnet *ifp, int disable)
+iwn_stop(struct ifnet *ifp, int softalso)
 {
 	struct iwn_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;

@@ -128,6 +128,7 @@ struct ipw_softc {
 	int				txfree;
 
 	void				*powerhook;
+	struct workq_task		sc_resume_wqt;
 
 #if NBPFILTER > 0
 	caddr_t				sc_drvbpf;
