@@ -295,23 +295,21 @@ void
 ipw_power(int why, void *arg)
 {
 	struct ipw_softc *sc = arg;
-	struct ifnet *ifp;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	pcireg_t data;
 
-	if (why != PWR_RESUME)
+	if (why != PWR_RESUME) {
+		ipw_stop(ifp, 0);
 		return;
+	}
 
 	/* clear device specific PCI configuration register 0x41 */
 	data = pci_conf_read(sc->sc_pct, sc->sc_pcitag, 0x40);
 	data &= ~0x0000ff00;
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, data);
 
-	ifp = &sc->sc_ic.ic_if;
-	if (ifp->if_flags & IFF_UP) {
-		ifp->if_init(ifp);
-		if (ifp->if_flags & IFF_RUNNING)
-			ifp->if_start(ifp);
-	}
+	if (ifp->if_flags & IFF_UP)
+		ipw_init(ifp);
 }
 
 int
@@ -2029,7 +2027,7 @@ fail1:	ipw_stop(ifp, 0);
 }
 
 void
-ipw_stop(struct ifnet *ifp, int disable)
+ipw_stop(struct ifnet *ifp, int softalso)
 {
 	struct ipw_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
@@ -2047,7 +2045,8 @@ ipw_stop(struct ifnet *ifp, int disable)
 	for (i = 0; i < IPW_NTBD; i++)
 		ipw_release_sbd(sc, &sc->stbd_list[i]);
 
-	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
+	if (softalso)
+		ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
 }
 
 void
