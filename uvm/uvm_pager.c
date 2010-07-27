@@ -80,7 +80,7 @@ struct uvm_pseg {
 	/* Bitmap of the segments in use in this pseg. */
 	int	use;
 };
-struct	rwlock uvm_pseg_lck = RWLOCK_INITIALIZER("pseg");
+struct	mutex uvm_pseg_lck;
 struct	uvm_pseg psegs[PSEG_NUMSEGS];
 
 #define UVM_PSEG_FULL(pseg)	((pseg)->use == (1 << MAX_PAGER_SEGS) - 1)
@@ -106,9 +106,8 @@ uvm_pager_init(void)
 	 * init pager map
 	 */
 
-	rw_enter_write(&uvm_pseg_lck);
 	uvm_pseg_init(&psegs[0]);
-	rw_exit_write(&uvm_pseg_lck);
+	mtx_init(&uvm_pseg_lck, IPL_VM);
 
 	/*
 	 * init ASYNC I/O queue
@@ -136,7 +135,6 @@ uvm_pager_init(void)
 void
 uvm_pseg_init(struct uvm_pseg *pseg)
 {
-	rw_assert_wrlock(&uvm_pseg_lck);
 	KASSERT(pseg->start == 0);
 	KASSERT(pseg->use == 0);
 	pseg->start = uvm_km_valloc_try(kernel_map, MAX_PAGER_SEGS * MAXBSIZE);
@@ -155,8 +153,7 @@ uvm_pseg_get(int flags)
 	int i;
 	struct uvm_pseg *pseg;
 
-	splassert(IPL_NONE);
-	rw_enter_write(&uvm_pseg_lck);
+	mtx_enter(&uvm_pseg_lck);
 
 pager_seg_restart:
 	/* Find first pseg that has room. */
@@ -180,7 +177,7 @@ pager_seg_restart:
 		for (; i < MAX_PAGER_SEGS; i++) {
 			if (!UVM_PSEG_INUSE(pseg, i)) {
 				pseg->use |= 1 << i;
-				rw_exit_write(&uvm_pseg_lck);
+				mtx_leave(&uvm_pseg_lck);
 				return pseg->start + i * MAXBSIZE;
 			}
 		}
@@ -188,23 +185,11 @@ pager_seg_restart:
 
 pager_seg_fail:
 	if ((flags & UVMPAGER_MAPIN_WAITOK) != 0) {
-		struct sleep_state sls;
-
-		/*
-		 * Sleep atomically releasing the rwlock so we won't miss
-		 * our wakeup.
-		 */
-		sleep_setup(&sls, &psegs, PVM, "pseg_get");
-
-		rw_exit_write(&uvm_pseg_lck);
-
-		sleep_finish(&sls, 1);
-
-		rw_enter_write(&uvm_pseg_lck);
+		msleep(&psegs, &uvm_pseg_lck, PVM, "pagerseg", 0);
 		goto pager_seg_restart;
 	}
 
-	rw_exit_write(&uvm_pseg_lck);
+	mtx_leave(&uvm_pseg_lck);
 	return 0;
 }
 
@@ -222,7 +207,6 @@ uvm_pseg_release(vaddr_t segaddr)
 	struct uvm_pseg *pseg;
 	vaddr_t va = 0;
 
-	splassert(IPL_NONE);
 	for (pseg = &psegs[0]; pseg != &psegs[PSEG_NUMSEGS]; pseg++) {
 		if (pseg->start <= segaddr &&
 		    segaddr < pseg->start + MAX_PAGER_SEGS * MAXBSIZE)
@@ -236,7 +220,7 @@ uvm_pseg_release(vaddr_t segaddr)
 	/* test for no remainder */
 	KDASSERT(segaddr == pseg->start + id * MAXBSIZE);
 
-	rw_enter_write(&uvm_pseg_lck);
+	mtx_enter(&uvm_pseg_lck);
 
 	KASSERT(UVM_PSEG_INUSE(pseg, id));
 
