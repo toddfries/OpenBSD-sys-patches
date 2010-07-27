@@ -1,4 +1,4 @@
-/*	$OpenBSD: pte.h,v 1.1 2005/04/01 10:40:48 mickey Exp $	*/
+/*	$OpenBSD: pte.h,v 1.3 2010/07/24 16:25:33 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -28,7 +28,7 @@
 #define	PDE_SHIFT	(PTE_SHIFT+9)
 #define	PTE_MASK	(0x000001ff000UL)
 #define	PTE_SHIFT	PAGE_SHIFT
-#define	PTE_PAGE(pte)	(((pte) & ~PTE_PGMASK) << 7)
+#define	PTE_PAGE(pte)	(((pte) & PTE_PGMASK) << 7)
 #define	TLB_PAGE(pg)	(((pg) >> 7) & PTE_PGMASK)
 
 #define	PTE_IFLUSH	0x8000000000000000UL	/* software */
@@ -56,6 +56,9 @@
 #define	PTE_PG4M	0x0000000000000005UL
 #define	PTE_PG16M	0x0000000000000006UL
 #define	PTE_PG64M	0x0000000000000007UL
+
+#define	PTE_PAGE_SHIFT(pte)	(12 + (2 * ((pte) & PTE_PG64M)))
+#define	PTE_PAGE_SIZE(pte)	(1 << PTE_PAGE_SHIFT(pte))
 
 #define	PTE_GETBITS(pte)	((pte) >> 48)
 #define	PTE_BITS \
