@@ -240,12 +240,14 @@ pms_change_state(struct pms_softc *sc, int newstate)
 
 		/* FALLTHROUGH */
 	case PMS_STATE_SUSPENDED:
-		cmd[0] = PMS_DEV_DISABLE;
-		res = pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot,
-		    cmd, 1, 0, 1, 0);
-		if (res)
-			printf("pms_disable: command error\n");
-		pckbc_slot_enable(sc->sc_kbctag, sc->sc_kbcslot, 0);
+		if (sc->sc_state == PMS_STATE_ENABLED) {
+			cmd[0] = PMS_DEV_DISABLE;
+			res = pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot,
+			    cmd, 1, 0, 1, 0);
+			if (res)
+				printf("pms_disable: command error\n");
+			pckbc_slot_enable(sc->sc_kbctag, sc->sc_kbcslot, 0);
+		}
 		sc->sc_state = newstate;
 		break;
 	}

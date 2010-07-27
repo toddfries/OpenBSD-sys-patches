@@ -77,31 +77,27 @@ const struct wsmouse_accessops pmsi_accessops = {
 	pmsi_disable,
 };
 
-int	pmsi_setintellimode(pckbc_tag_t, pckbc_slot_t, int);
+static int pmsi_setintellimode(pckbc_tag_t, pckbc_slot_t);
 
-int
-pmsi_setintellimode(pckbc_tag_t tag, pckbc_slot_t slot, int poll)
+static int
+pmsi_setintellimode(tag, slot)
+	pckbc_tag_t tag;
+	pckbc_slot_t slot;
 {
 	u_char cmd[2], resp[1];
 	int i, res;
-	static const u_char rates[] = {200, 100, 80};
+	static u_char rates[] = {200, 100, 80};
 
 	cmd[0] = PMS_SET_SAMPLE;
 	for (i = 0; i < 3; i++) {
 		cmd[1] = rates[i];
-		if (poll)
-			res = pckbc_poll_cmd(tag, slot, cmd, 2, 0, NULL, 0);
-		else
-			res = pckbc_enqueue_cmd(tag, slot, cmd, 2, 0, 0, NULL);
+		res = pckbc_poll_cmd(tag, slot, cmd, 2, 0, NULL, 0);
 		if (res)
 			return (res);
 	}
 
 	cmd[0] = PMS_SEND_DEV_ID;
-	if (poll)
-		res = pckbc_poll_cmd(tag, slot, cmd, 1, 1, resp, 0);
-	else
-		res = pckbc_enqueue_cmd(tag, slot, cmd, 1, 1, 0, resp);
+	res = pckbc_poll_cmd(tag, slot, cmd, 1, 1, resp, 0);
 	if (res)
 		return (res);
 	if (resp[0] != 3)
@@ -148,7 +144,7 @@ pmsiprobe(parent, match, aux)
 		return (0);
 	}
 
-	if ((res = pmsi_setintellimode(pa->pa_tag, pa->pa_slot, 1))) {
+	if ((res = pmsi_setintellimode(pa->pa_tag, pa->pa_slot))) {
 #ifdef DEBUG
 		printf("pmsiprobe: intellimode -> %d\n", res);
 #endif
@@ -186,7 +182,7 @@ pmsiattach(parent, self, aux)
 		return;
 	}
 #endif
-	res = pmsi_setintellimode(pa->pa_tag, pa->pa_slot, 1);
+	res = pmsi_setintellimode(pa->pa_tag, pa->pa_slot);
 #ifdef DEBUG
 	if (res) {
 		printf("pmsiattach: error setting intelli mode\n");
@@ -261,14 +257,14 @@ pmsi_change_state(struct pmsi_softc *sc, int newstate)
 		    cmd, 1, 2, resp, 1);
 #ifdef DEBUG
 		if (res || resp[0] != PMS_RSTDONE || resp[1] != 0) {
-			printf("pmsi_change_state: reset error\n");
+			printf("pmsiattach: reset error\n");
 			return;
 		}
 #endif
-		res = pmsi_setintellimode(sc->sc_kbctag, sc->sc_kbcslot, 0);
+		res = pmsi_setintellimode(sc->sc_kbctag, sc->sc_kbcslot);
 #ifdef DEBUG
 		if (res) {
-			printf("pmsi_change_state: error setting intelli mode\n");
+			printf("pmsiattach: error setting intelli mode\n");
 			return;
 		}
 #endif
@@ -277,17 +273,18 @@ pmsi_change_state(struct pmsi_softc *sc, int newstate)
 		res = pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot,
 		    cmd, 1, 0, 1, 0);
 		if (res)
-			printf("pmsi_change_state: command error\n");
+			printf("pmsi_enable: command error\n");
 		sc->sc_state = newstate;
 		break;
 	case PMSI_STATE_DISABLED:
+
 		/* FALLTHROUGH */
 	case PMSI_STATE_SUSPENDED:
 	        cmd[0] = PMS_DEV_DISABLE;
 	        res = pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_kbcslot,
 		    cmd, 1, 0, 1, 0);
 	        if (res)
-	                printf("pmsi_change_state: command error\n");
+	                printf("pmsi_disable: command error\n");
 	        pckbc_slot_enable(sc->sc_kbctag, sc->sc_kbcslot, 0);
 		sc->sc_state = newstate;
 		break;
