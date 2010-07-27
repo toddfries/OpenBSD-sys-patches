@@ -1,4 +1,4 @@
-/* $OpenBSD: wsmouse.c,v 1.20 2009/10/13 19:33:19 pirofti Exp $ */
+/* $OpenBSD: wsmouse.c,v 1.21 2010/07/26 01:56:27 guenther Exp $ */
 /* $NetBSD: wsmouse.c,v 1.35 2005/02/27 00:27:52 perry Exp $ */
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_misc.c,v 1.64 2010/06/30 21:54:35 guenther Exp $	*/
+/*	$OpenBSD: linux_misc.c,v 1.65 2010/07/26 01:56:27 guenther Exp $	*/
 /*	$NetBSD: linux_misc.c,v 1.27 1996/05/20 01:59:21 fvdl Exp $	*/
 
 /*-

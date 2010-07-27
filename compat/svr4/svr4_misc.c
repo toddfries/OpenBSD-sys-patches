@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_misc.c,v 1.54 2010/05/25 16:39:15 thib Exp $	 */
+/*	$OpenBSD: svr4_misc.c,v 1.55 2010/07/26 01:56:27 guenther Exp $	 */
 /*	$NetBSD: svr4_misc.c,v 1.42 1996/12/06 03:22:34 christos Exp $	 */
 
 /*
