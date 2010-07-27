@@ -1898,6 +1898,13 @@ acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
 			goto fail;
 		}
 
+	/* Reset the indicator lights to "sleeping" */
+	if (sc->sc_sst) {
+		env.v_integer = ACPI_SST_SLEEPING;
+		aml_evalnode(sc, sc->sc_sst, 1, &env, NULL);
+	}
+	env.v_integer = state;
+
 	sc->sc_state = state;
 	/* _GTS(state) */
 	if (sc->sc_gts)
