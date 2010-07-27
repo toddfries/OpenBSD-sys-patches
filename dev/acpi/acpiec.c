@@ -1,4 +1,4 @@
-/* $OpenBSD: acpiec.c,v 1.36 2010/07/27 06:12:50 deraadt Exp $ */
+/* $OpenBSD: acpiec.c,v 1.38 2010/07/27 22:32:51 marco Exp $ */
 /*
  * Copyright (c) 2006 Can Erkin Acar <canacar@openbsd.org>
  *
@@ -268,6 +268,7 @@ acpiec_attach(struct device *parent, struct device *self, void *aux)
 		printf(": Only single EC is supported\n");
 		return;
 	}
+	sc->sc_acpi->sc_ec = sc;
 
 	if (acpiec_getcrs(sc, aa)) {
 		printf(": Failed to read resource settings\n");
@@ -279,7 +280,6 @@ acpiec_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	sc->sc_acpi->sc_ec = sc;
 	acpiec_get_events(sc);
 
 	dnprintf(10, "%s: GPE: %d\n", DEVNAME(sc), sc->sc_gpe);
@@ -390,7 +390,7 @@ acpiec_getcrs(struct acpiec_softc *sc, struct acpi_attach_args *aa)
 	int			size, ret;
 	int64_t			gpe;
 	struct acpi_ecdt	*ecdt = aa->aaa_table;
-	extern struct aml_node   aml_root;
+	extern struct aml_node	aml_root;
 
 	/* Check if this is ECDT initialization */
 	if (ecdt) {
