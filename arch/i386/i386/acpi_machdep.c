@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.34 2010/07/06 06:25:55 deraadt Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.35 2010/07/25 21:43:35 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
