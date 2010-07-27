@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.133 2010/07/24 04:01:52 matthew Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.135 2010/07/27 04:41:56 matthew Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -309,24 +309,17 @@ struct scsi_adapter {
 	int		(*ioctl)(struct scsi_link *, u_long, caddr_t, int);
 };
 
-struct scsi_runq_entry {
-	TAILQ_ENTRY(scsi_runq_entry) e;
-	u_int state;
-#define RUNQ_IDLE	0
-#define RUNQ_LINKQ	1
-#define RUNQ_POOLQ	3
-};
-TAILQ_HEAD(scsi_runq, scsi_runq_entry);
-
 struct scsi_iopool;
 
 struct scsi_iohandler {
-	struct scsi_runq_entry entry; /* must be first */
+	TAILQ_ENTRY(scsi_iohandler) q_entry;
+	u_int q_state;
 
 	struct scsi_iopool *pool;
 	void (*handler)(void *, void *);
 	void *cookie;
 };
+TAILQ_HEAD(scsi_runq, scsi_iohandler);
 
 struct scsi_iopool {
 	/* access to the IOs */
@@ -341,10 +334,6 @@ struct scsi_iopool {
 	/* protection for the runqueue and its semaphore */
 	struct mutex mtx;
 };
-
-/*
- *
- */
 
 struct scsi_xshandler {
 	struct scsi_iohandler ioh; /* must be first */
@@ -641,6 +630,11 @@ int	mpath_path_detach(struct scsi_link *, int);
 
 void	mpath_path_activate(struct scsi_link *);
 void	mpath_path_deactivate(struct scsi_link *);
+
+/*
+ * Utility functions for SCSI HBA emulation.
+ */
+void	scsi_cmd_rw_decode(struct scsi_generic *, u_int64_t *, u_int32_t *);
 
 #endif /* _KERNEL */
 #endif /* SCSI_SCSICONF_H */
