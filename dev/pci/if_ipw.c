@@ -64,6 +64,8 @@
 
 int		ipw_match(struct device *, void *, void *);
 void		ipw_attach(struct device *, struct device *, void *);
+int		ipw_activate(struct device *, int);
+void		ipw_resume(void *, void *);
 void		ipw_power(int, void *);
 int		ipw_dma_alloc(struct ipw_softc *);
 void		ipw_release(struct ipw_softc *);
@@ -132,7 +134,8 @@ int ipw_debug = 0;
 #endif
 
 struct cfattach ipw_ca = {
-	sizeof (struct ipw_softc), ipw_match, ipw_attach
+	sizeof (struct ipw_softc), ipw_match, ipw_attach, NULL,
+	ipw_activate
 };
 
 int
@@ -289,6 +292,32 @@ ipw_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_txtap.wt_ihdr.it_len = htole16(sc->sc_txtap_len);
 	sc->sc_txtap.wt_ihdr.it_present = htole32(IPW_TX_RADIOTAP_PRESENT);
 #endif
+}
+
+int
+ipw_activate(struct device *self, int act)
+{
+	struct ipw_softc *sc = (struct ipw_softc *)self;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			ipw_stop(ifp, 0);
+		break;
+	case DVACT_RESUME:
+		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
+		    ipw_resume, sc, NULL);
+		break;
+	}
+
+	return (0);
+}
+
+void
+ipw_resume(void *arg1, void *arg2)
+{
+	ipw_power(PWR_RESUME, arg1);
 }
 
 void
@@ -2045,8 +2074,7 @@ ipw_stop(struct ifnet *ifp, int softalso)
 	for (i = 0; i < IPW_NTBD; i++)
 		ipw_release_sbd(sc, &sc->stbd_list[i]);
 
-	if (softalso)
-		ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
+	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
 }
 
 void

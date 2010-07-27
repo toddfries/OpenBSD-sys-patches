@@ -114,6 +114,7 @@ struct iwi_softc {
 	int			sc_tx_timer;
 
 	void			*powerhook;
+	struct workq_task	sc_resume_wqt;
 
 #if NBPFILTER > 0
 	caddr_t			sc_drvbpf;
