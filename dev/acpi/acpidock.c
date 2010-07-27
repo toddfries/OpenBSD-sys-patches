@@ -1,4 +1,4 @@
-/* $OpenBSD: acpidock.c,v 1.41 2010/07/23 18:38:46 jordan Exp $ */
+/* $OpenBSD: acpidock.c,v 1.42 2010/07/27 01:21:19 jordan Exp $ */
 /*
  * Copyright (c) 2006,2007 Michael Knudsen <mk@openbsd.org>
  *
@@ -29,11 +29,8 @@
 #include <dev/acpi/amltypes.h>
 #include <dev/acpi/dsdt.h>
 
-#include <dev/isa/isavar.h>
-
 struct aml_nodelist {
 	struct aml_node *node;
-	struct device	*dev;
 	TAILQ_ENTRY(aml_nodelist) entries;
 };
 
@@ -56,11 +53,6 @@ int	acpidock_status(struct acpidock_softc *);
 int	acpidock_walkchildren(struct aml_node *, void *);
 
 int	acpidock_foundejd(struct aml_node *, void *);
-
-extern void isascan(struct device *, void *);
-
-void acpi_enable_device(struct acpidock_softc *, struct aml_nodelist *);
-void acpi_disable_device(struct acpidock_softc *, struct aml_nodelist *);
 
 int
 acpidock_match(struct device *parent, void *match, void *aux)
@@ -215,12 +207,10 @@ acpidock_eject(struct acpidock_softc *sc, struct aml_node *node)
 	return (rv);
 }
 
-
 int
 acpidock_notify(struct aml_node *node, int notify_type, void *arg)
 {
 	struct acpidock_softc	*sc = arg;
-	struct device *isa;
 	struct aml_nodelist	*n;
 
 	dnprintf(5, "%s: acpidock_notify: notify %d\n", DEVNAME(sc),
@@ -231,22 +221,16 @@ acpidock_notify(struct aml_node *node, int notify_type, void *arg)
 		acpidock_docklock(sc, 1);
 		acpidock_dockctl(sc, 1);
 
-		TAILQ_FOREACH_REVERSE(n, &sc->sc_deps_h, aml_nodelisth, entries) {
-			acpi_enable_device(sc, n);
+		TAILQ_FOREACH_REVERSE(n, &sc->sc_deps_h, aml_nodelisth, entries)
 			aml_notify(n->node, 0x00);
-		}
-		TAILQ_FOREACH(isa, &alldevs, dv_list)
-			if (!strcmp(isa->dv_xname, "isa0"))
-				break;
-		if (isa)
-			config_scan(isascan, isa);
 		break;
 
 	case ACPIDOCK_EVENT_EJECT:
-		TAILQ_FOREACH(n, &sc->sc_deps_h, entries) {
-			acpi_disable_device(sc, n);
+	case ACPIDOCK_EVENT_DEVCHECK:
+		/* ACPI Spec says eject button press generates
+		 * a Notify(Device, 1); */
+		TAILQ_FOREACH(n, &sc->sc_deps_h, entries)
 			acpidock_eject(sc, n->node);
-		}
 		acpidock_dockctl(sc, 0);
 		acpidock_docklock(sc, 0);
 
@@ -311,156 +295,4 @@ acpidock_foundejd(struct aml_node *node, void *arg)
 	}
 
 	return (0);
-}
-
-int acpidock_getres(union acpi_resource *, void *);
-void aml_buildres(struct aml_value *, struct isa_attach_args *);
-
-struct acpireslist {
-	struct isa_attach_args ia;
-	struct isa_attach_args *conf;
-};
-
-int
-acpidock_getres(union acpi_resource *res, void *arg)
-{
-	struct acpireslist *rl = arg;
-	struct isa_attach_args *ia, **ppia;
-	int typ, i;
-
-	if ((ia = rl->conf) == NULL)
-		ia = &rl->ia;
-
-	typ = AML_CRSTYPE(res);
-	switch (typ) {
-	case SR_STARTDEP:
-		/* Add new conf as child */
-		rl->conf = malloc(sizeof(*ia), M_DEVBUF, M_WAITOK|M_ZERO);
-		for (ppia = &rl->ia.ipa_child; *ppia; ppia = &(*ppia)->ipa_sibling)
-			;
-		*ppia = rl->conf;
-
-		rl->conf->ia_iot = I386_BUS_SPACE_IO;
-		rl->conf->ia_memt = I386_BUS_SPACE_MEM;
-		rl->conf->ia_dmat = &isa_bus_dma_tag;
-		rl->conf->ia_iobase = -1;
-		rl->conf->ia_iosize = -1;
-		rl->conf->ia_irq = -1;
-		rl->conf->ia_maddr = -1;
-		rl->conf->ia_msize = 0;
-		rl->conf->ia_drq = -1;
-		rl->conf->ia_drq2 = -1;
-		rl->conf->ia_delaybah= -1;
-		break;
-	case SR_IRQ:
-		for (i=0; i < 16; i++) {
-			if (res->sr_irq.irq_mask & (1L << i)) {
-				ia->ipa_irq[ia->ipa_nirq++].num = i;
-			}
-		}
-		break;
-	case SR_IOPORT:
-		ia->ipa_io[ia->ipa_nio].base = res->sr_ioport._min;
-		ia->ipa_io[ia->ipa_nio].minbase = res->sr_ioport._min;
-		ia->ipa_io[ia->ipa_nio].maxbase = res->sr_ioport._max;
-		ia->ipa_io[ia->ipa_nio].length = res->sr_ioport._len;
-		ia->ipa_io[ia->ipa_nio].align = res->sr_ioport._aln;
-		ia->ipa_io[ia->ipa_nio].flags = res->sr_ioport.flags;
-		ia->ipa_nio++;
-		break;
-	case SR_DMA:
-		for (i=0; i<8; i++) {
-			if (res->sr_dma.channel & (1L << i)) {
-				ia->ipa_drq[ia->ipa_ndrq++].num = i;
-			}
-		}
-		break;
-	}
-	return (0);
-}
-
-void
-aml_buildres(struct aml_value *res, struct isa_attach_args *ia)
-{
-	union acpi_resource *rs;
-	static uint8_t buffer[128];
-	int len, off, i;
-
-	len = 0;
-	rs  = (void *)buffer;
-	len += ia->ipa_nio * sizeof(rs->sr_ioport);
-	len += sizeof(rs->sr_irq);
-	len += sizeof(rs->sr_dma);
-
-	off = 0;
-	memset(buffer, 0, sizeof(buffer));
-
-	/* Rebuild IOPORT */
-	for (i=0; i<ia->ipa_nio; i++) {
-		rs = (void *)buffer + off;
-		rs->sr_ioport.typecode = SRT_IOPORT;
-		rs->sr_ioport.flags = SR_IOPORT_DEC;
-		rs->sr_ioport._min  = ia->ipa_io[i].minbase;
-		rs->sr_ioport._max  = ia->ipa_io[i].maxbase;
-		rs->sr_ioport._len  = ia->ipa_io[i].length;
-		rs->sr_ioport._aln  = ia->ipa_io[i].align;
-		off += sizeof(rs->sr_ioport);
-	}
-	/* Rebuild IRQ */
-	if (ia->ipa_nirq) {
-		rs = (void *)buffer + off;
-		rs->sr_irq.typecode = SRT_IRQ2;
-		rs->sr_irq.irq_mask = 1L << ia->ipa_irq[0].num;
-		off += 3;
-	}
-	/* Rebuild DMA */
-	if (ia->ipa_ndrq) {
-		rs = (void *)buffer + off;
-		rs->sr_dma.typecode = SRT_DMA;
-		rs->sr_dma.channel = 1L << ia->ipa_drq[0].num;
-		off += 2;
-	}
-	res->type = AML_OBJTYPE_BUFFER;
-	res->length = len;
-	res->v_buffer = buffer;
-}
-
-void
-acpi_enable_device(struct acpidock_softc *sc, struct aml_nodelist *ndev)
-{
-	struct acpireslist rlist;
-	struct aml_value res;
-	struct device *isa;
-	struct isa_softc *isc;
-
-	TAILQ_FOREACH(isa, &alldevs, dv_list)
-		if (!strcmp(isa->dv_xname, "isa0"))
-			break;
-	if (isa == NULL)
-		return;
-
-	memset(&rlist, 0, sizeof(rlist));	
-	printf("adding device: %s\n", aml_nodename(ndev->node));
-	if (!aml_evalname(sc->sc_acpi, ndev->node, "_PRS", 0, NULL, &res)) {
-		aml_parse_resource(&res, acpidock_getres, &rlist);
-		aml_freevalue(&res);
-
-		aml_buildres(&res, rlist.ia.ipa_child);
-		aml_evalname(sc->sc_acpi, ndev->node, "_SRS", 1, &res, NULL);
-		memset(&res, 0, sizeof(res));
-
-		isc = (void *)isa;
-		rlist.ia.ipa_child->ia_ic = isc->sc_ic;
-		//config_found(isa, rlist.ia.ipa_child, isaprint);
-	}
-}
-
-void
-acpi_disable_device(struct acpidock_softc *sc, struct aml_nodelist *ndev)
-{
-	printf("removing device: %s\n", aml_nodename(ndev->node));
-	if (ndev->dev && config_detach(ndev->dev, DETACH_FORCE))
-		printf("detach fails\n");
-	if (!aml_evalname(sc->sc_acpi, ndev->node, "_DIS", 0, 0, 0))
-		printf("_DIS succeeds\n");
 }
