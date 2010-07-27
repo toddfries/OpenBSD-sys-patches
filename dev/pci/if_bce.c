@@ -166,6 +166,7 @@ do {									\
 
 int	bce_probe(struct device *, void *, void *);
 void	bce_attach(struct device *, struct device *, void *);
+int	bce_activate(struct device *, int);
 int	bce_ioctl(struct ifnet *, u_long, caddr_t);
 void	bce_start(struct ifnet *);
 void	bce_watchdog(struct ifnet *);
@@ -173,6 +174,7 @@ int	bce_intr(void *);
 void	bce_rxintr(struct bce_softc *);
 void	bce_txintr(struct bce_softc *);
 int	bce_init(struct ifnet *);
+void	bce_power(int, void *);
 void	bce_add_mac(struct bce_softc *, u_int8_t *, unsigned long);
 int	bce_add_rxbuf(struct bce_softc *, int);
 void	bce_rxdrain(struct bce_softc *);
@@ -202,7 +204,7 @@ int             bcedebug = 0;
 #endif
 
 struct cfattach bce_ca = {
-	sizeof(struct bce_softc), bce_probe, bce_attach
+	sizeof(struct bce_softc), bce_probe, bce_attach, NULL, bce_activate
 };
 struct cfdriver bce_cd = {
 	NULL, "bce", DV_IFNET
@@ -427,6 +429,40 @@ bce_attach(struct device *parent, struct device *self, void *aux)
 	ether_ifattach(ifp);
 
 	timeout_set(&sc->bce_timeout, bce_tick, sc);
+}
+
+int
+bce_activate(struct device *self, int act)
+{
+	struct bce_softc *sc = (struct bce_softc *)self;
+	struct ifnet *ifp = &sc->bce_ac.ac_if;
+
+	switch(act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			bce_stop(ifp, 1);
+		break;
+	case DVACT_RESUME:
+		bce_power(PWR_RESUME, self);
+		break;
+	}
+
+	return (0);
+}
+
+void
+bce_power(int why, void *xsc)
+{
+	struct bce_softc *sc = (struct bce_softc *)xsc;
+	struct ifnet *ifp;
+
+	if (why == PWR_RESUME) {
+		ifp = &sc->bce_ac.ac_if;
+		if (ifp->if_flags & IFF_UP) {
+			bce_init(xsc);
+			bce_start(ifp);
+		}
+	}
 }
 
 /* handle media, and ethernet requests */
