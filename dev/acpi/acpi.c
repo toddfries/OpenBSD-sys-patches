@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.192 2010/07/27 22:11:44 deraadt Exp $ */
+/* $OpenBSD: acpi.c,v 1.195 2010/07/27 23:33:21 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -749,7 +749,6 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	aml_find_node(&aml_root, "_PRT", acpi_foundprt, sc);
 
 #ifndef SMALL_KERNEL
-	 /* XXX EC needs to be attached first on some systems */
 	aml_find_node(&aml_root, "_HID", acpi_foundec, sc);
 
 	aml_walknodes(&aml_root, AML_WALK_PRE, acpi_add_device, sc);
@@ -1716,6 +1715,9 @@ acpi_enter_sleep_state(struct acpi_softc *sc, int state)
 	 */
 	acpi_cpu_flush(sc, state);
 
+	/*
+	 * XXX The following sequence is probably not right. 
+	 */
 	acpi_write_pmreg(sc, ACPIREG_PM1A_CNT, 0, rega);
 	acpi_write_pmreg(sc, ACPIREG_PM1B_CNT, 0, regb);
 
@@ -1723,8 +1725,8 @@ acpi_enter_sleep_state(struct acpi_softc *sc, int state)
 	for (retries = 1000; retries > 0; retries--) {
 		rega = acpi_read_pmreg(sc, ACPIREG_PM1A_STS, 0);
 		regb = acpi_read_pmreg(sc, ACPIREG_PM1B_STS, 0);
-		if (rega & ACPI_PM1_WAK_STS ||
-		    regb & ACPI_PM1_WAK_STS)
+		if ((rega & ACPI_PM1_WAK_STS) ||
+		    (regb & ACPI_PM1_WAK_STS))
 			break;
 		DELAY(10);
 	}
