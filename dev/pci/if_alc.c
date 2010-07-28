@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_alc.c,v 1.5 2010/04/08 00:23:53 tedu Exp $	*/
+/*	$OpenBSD: if_alc.c,v 1.6 2010/07/27 22:39:59 deraadt Exp $	*/
 /*-
  * Copyright (c) 2009, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
