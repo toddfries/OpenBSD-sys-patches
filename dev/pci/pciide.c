@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.311 2010/07/23 07:47:13 jsg Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.313 2010/07/28 18:31:51 deraadt Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -1426,6 +1426,11 @@ pciide_activate(struct device *self, int act)
 			    sc->sc_tag, ICH5_SATA_PI);
 			sc->sc_save2[2] = pciide_pci_read(sc->sc_pc,
 			    sc->sc_tag, ICH_SATA_PCS);
+		} else if (sc->sc_pp->chip_map == sii3112_chip_map) {
+			sc->sc_save[0] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, SII3112_SCS_CMD);
+			sc->sc_save[1] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, SII3112_PCI_CFGCTL);
 		}
 		break;
 	case DVACT_RESUME:
@@ -1434,7 +1439,9 @@ pciide_activate(struct device *self, int act)
 			    PCI_MAPREG_END + 0x18 + (i * 4),
 			    sc->sc_save[i]);
 
-		if (sc->sc_pp->chip_map == sch_chip_map) {
+		if (sc->sc_pp->chip_map == default_chip_map) {
+			/* nothing more to restore */
+		} else if (sc->sc_pp->chip_map == sch_chip_map) {
 			pci_conf_write(sc->sc_pc, sc->sc_tag,
 			    SCH_D0TIM, sc->sc_save2[0]);
 			pci_conf_write(sc->sc_pc, sc->sc_tag,
@@ -1452,6 +1459,13 @@ pciide_activate(struct device *self, int act)
 			/* nothing more to restore */
 		} else if (sc->sc_pp->chip_map == ixp_chip_map) {
 			/* nothing to restore (0x40 - 0x56) */
+		} else if (sc->sc_pp->chip_map == sii3112_chip_map) {
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    SII3112_SCS_CMD, sc->sc_save[0]);
+			delay(50 * 1000);
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    SII3112_PCI_CFGCTL, sc->sc_save[1]);
+			delay(50 * 1000);
 		} else {
 			printf("%s: restore for unknown chip map %x\n",
 			    sc->sc_wdcdev.sc_dev.dv_xname,
