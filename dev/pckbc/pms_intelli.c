@@ -262,14 +262,15 @@ pmsi_change_state(struct pmsi_softc *sc, int newstate)
 #ifdef DEBUG
 		if (res || resp[0] != PMS_RSTDONE || resp[1] != 0) {
 			printf("pmsi_change_state: reset error\n");
-			return;
 		}
 #endif
-		res = pmsi_setintellimode(sc->sc_kbctag, sc->sc_kbcslot, 0);
+		if (res)
+			res = pmsi_setintellimode(sc->sc_kbctag, sc->sc_kbcslot, 1);
+		else
+			res = pmsi_setintellimode(sc->sc_kbctag, sc->sc_kbcslot, 0);
 #ifdef DEBUG
 		if (res) {
 			printf("pmsi_change_state: error setting intelli mode\n");
-			return;
 		}
 #endif
 
