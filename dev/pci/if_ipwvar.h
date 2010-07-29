@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ipwvar.h,v 1.18 2008/08/28 15:08:38 damien Exp $	*/
+/*	$OpenBSD: if_ipwvar.h,v 1.19 2010/07/28 21:21:38 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2004-2006
