@@ -80,13 +80,17 @@ attach	uhid at uhidbus
 file	dev/usb/uhid.c			uhid			needs-flag
 
 # Keyboards
-device	ukbd: hid, wskbddev
+define	hidkbd
+file	dev/usb/hidkbd.c		hidkbd			needs-flag
+file	dev/usb/ukbdmap.c		hidkbd
+device	ukbd: hid, hidkbd, wskbddev
 attach	ukbd at uhidbus
 file	dev/usb/ukbd.c			ukbd			needs-flag
-file	dev/usb/ukbdmap.c		ukbd | btkbd
 
 # Mice
-device	ums: hid, wsmousedev
+define	hidms
+file	dev/usb/hidms.c			hidms
+device	ums: hid, hidms, wsmousedev
 attach	ums at uhidbus
 file	dev/usb/ums.c			ums
 

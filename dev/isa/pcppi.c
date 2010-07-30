@@ -45,11 +45,11 @@
 #include <dev/ic/i8253reg.h>
 
 #include "pckbd.h"
-#include "ukbd.h"
-#if NPCKBD > 0 || NUKBD > 0
+#include "hidkbd.h"
+#if NPCKBD > 0 || NHIDKBD > 0
 #include <dev/ic/pckbcvar.h>
 #include <dev/pckbc/pckbdvar.h>
-#include <dev/usb/ukbdvar.h>
+#include <dev/usb/hidkbdvar.h>
 void	pcppi_kbd_bell(void *, u_int, u_int, u_int, int);
 #endif
 
@@ -174,8 +174,8 @@ pcppi_attach(parent, self, aux)
 #if NPCKBD > 0
 	pckbd_hookup_bell(pcppi_kbd_bell, sc);
 #endif
-#if NUKBD > 0
-	ukbd_hookup_bell(pcppi_kbd_bell, sc);
+#if NHIDKBD > 0
+	hidkbd_hookup_bell(pcppi_kbd_bell, sc);
 #endif
 
 	pa.pa_cookie = sc;
@@ -259,7 +259,7 @@ pcppi_bell_stop(arg)
 	splx(s);
 }
 
-#if NPCKBD > 0 || NUKBD > 0
+#if NPCKBD > 0 || NHIDKBD > 0
 void
 pcppi_kbd_bell(arg, pitch, period, volume, poll)
 	void *arg;
@@ -272,4 +272,4 @@ pcppi_kbd_bell(arg, pitch, period, volume, poll)
 	pcppi_bell(arg, volume ? pitch : 0, (period * hz) / 1000,
 	    poll ? PCPPI_BELL_POLL : 0);
 }
-#endif /* NPCKBD > 0 || NUKBD > 0 */
+#endif /* NPCKBD > 0 || NHIDKBD > 0 */
