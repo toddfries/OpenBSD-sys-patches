@@ -24,6 +24,7 @@
 #include "bpfilter.h"
 
 #include <sys/param.h>
+#include <sys/workq.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/systm.h>
