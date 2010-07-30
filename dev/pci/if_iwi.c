@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwi.c,v 1.103 2010/05/19 15:27:35 oga Exp $	*/
+/*	$OpenBSD: if_iwi.c,v 1.104 2010/07/28 21:21:38 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2004-2008

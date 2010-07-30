@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwivar.h,v 1.20 2009/06/05 22:40:31 deraadt Exp $	*/
+/*	$OpenBSD: if_iwivar.h,v 1.21 2010/07/28 21:21:38 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2004-2006

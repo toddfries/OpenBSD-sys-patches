@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ipw.c,v 1.86 2010/04/20 22:05:43 tedu Exp $	*/
+/*	$OpenBSD: if_ipw.c,v 1.87 2010/07/28 21:21:38 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2004-2008
