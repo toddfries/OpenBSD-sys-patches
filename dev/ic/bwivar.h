@@ -620,6 +620,7 @@ struct bwi_softc {
 #define sc_txtap                 sc_txtapu.th
         int                      sc_txtap_len;
 #endif
+	struct workq_task	 sc_resume_wqt;
 };
 
 #define BWI_F_BUS_INITED	0x1
@@ -738,3 +739,5 @@ bwi_rf_lo_update(struct bwi_mac *_mac)
 int		bwi_intr(void *);
 int		bwi_attach(struct bwi_softc *);
 int		bwi_detach(void *);
+int		bwi_init(struct ifnet *);
+int		bwi_stop(struct bwi_softc *, int);
