@@ -241,7 +241,7 @@ pmsiactivate(struct device *self, int act)
 int
 pmsi_change_state(struct pmsi_softc *sc, int newstate)
 {
-	u_char cmd[1], resp[2];
+	u_char cmd[1];
 	int res;
 
 	switch (newstate) {
@@ -254,20 +254,7 @@ pmsi_change_state(struct pmsi_softc *sc, int newstate)
 		pckbc_slot_enable(sc->sc_kbctag, sc->sc_kbcslot, 1);
 
 		pckbc_flush(sc->sc_kbctag, sc->sc_kbcslot);
-
-		/* reset the device */
-		cmd[0] = PMS_RESET;
-		res = pckbc_poll_cmd(sc->sc_kbctag, sc->sc_kbcslot,
-		    cmd, 1, 2, resp, 1);
-#ifdef DEBUG
-		if (res || resp[0] != PMS_RSTDONE || resp[1] != 0) {
-			printf("pmsi_change_state: reset error\n");
-		}
-#endif
-		if (res)
-			res = pmsi_setintellimode(sc->sc_kbctag, sc->sc_kbcslot, 1);
-		else
-			res = pmsi_setintellimode(sc->sc_kbctag, sc->sc_kbcslot, 0);
+		res = pmsi_setintellimode(sc->sc_kbctag, sc->sc_kbcslot, 0);
 #ifdef DEBUG
 		if (res) {
 			printf("pmsi_change_state: error setting intelli mode\n");
