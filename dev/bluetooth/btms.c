@@ -1,4 +1,4 @@
-/*	$OpenBSD: btms.c,v 1.4 2008/11/22 04:42:58 uwe Exp $	*/
+/*	$OpenBSD: btms.c,v 1.5 2010/07/31 16:04:50 miod Exp $	*/
 /*	$NetBSD: btms.c,v 1.8 2008/09/09 03:54:56 cube Exp $	*/
 
 /*

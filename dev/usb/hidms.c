@@ -1,4 +1,4 @@
-/*	$OpenBSD: ums.c,v 1.31 2009/10/13 19:33:19 pirofti Exp $ */
+/*	$OpenBSD: hidms.c,v 1.1 2010/07/31 16:04:50 miod Exp $ */
 /*	$NetBSD: ums.c,v 1.60 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*

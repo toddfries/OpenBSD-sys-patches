@@ -1,4 +1,4 @@
-#	$OpenBSD: files.bluetooth,v 1.6 2008/11/24 22:31:19 uwe Exp $
+#	$OpenBSD: files.bluetooth,v 1.7 2010/07/31 16:04:50 miod Exp $
 #
 # Config file and device description for machine-independent Bluetooth code.
 # Included by ports that support Bluetooth host controllers.

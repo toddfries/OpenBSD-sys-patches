@@ -1,4 +1,4 @@
-/*	$OpenBSD: btkbd.c,v 1.5 2009/01/21 21:53:59 grange Exp $	*/
+/*	$OpenBSD: btkbd.c,v 1.6 2010/07/31 16:04:50 miod Exp $	*/
 /*	$NetBSD: btkbd.c,v 1.10 2008/09/09 03:54:56 cube Exp $	*/
 
 /*

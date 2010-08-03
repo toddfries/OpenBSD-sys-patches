@@ -1,4 +1,4 @@
-/*	$OpenBSD: kb3310.c,v 1.10 2010/05/08 21:59:56 miod Exp $	*/
+/*	$OpenBSD: kb3310.c,v 1.11 2010/07/31 16:04:46 miod Exp $	*/
 /*
  * Copyright (c) 2010 Otto Moerbeek <otto@drijf.net>
  *
