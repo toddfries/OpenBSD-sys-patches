@@ -167,4 +167,6 @@ struct rt2560_softc {
 
 int	rt2560_attach(void *, int);
 int	rt2560_detach(void *);
+void	rt2560_suspend(void *);
+void	rt2560_resume(void *);
 int	rt2560_intr(void *);
