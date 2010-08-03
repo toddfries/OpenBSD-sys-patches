@@ -1,4 +1,4 @@
-/* $OpenBSD: pms_intelli.c,v 1.4 2010/07/25 22:46:17 miod Exp $ */
+/* $OpenBSD: pms_intelli.c,v 1.5 2010/07/30 17:15:14 krw Exp $ */
 /* $NetBSD: psm_intelli.c,v 1.8 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
