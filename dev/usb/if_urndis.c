@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urndis.c,v 1.23 2010/07/14 20:44:17 mk Exp $ */
+/*	$OpenBSD: if_urndis.c,v 1.25 2010/07/31 11:51:45 mk Exp $ */
 
 /*
  * Copyright (c) 2010 Jonathan Armani <armani@openbsd.org>
@@ -72,7 +72,9 @@
 int urndis_newbuf(struct urndis_softc *, struct urndis_chain *);
 
 int urndis_ioctl(struct ifnet *, u_long, caddr_t);
+#if 0
 void urndis_watchdog(struct ifnet *);
+#endif
 
 void urndis_start(struct ifnet *);
 void urndis_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
@@ -104,8 +106,10 @@ u_int32_t urndis_ctrl_query(struct urndis_softc *, u_int32_t, void *, size_t,
 u_int32_t urndis_ctrl_set(struct urndis_softc *, u_int32_t, void *, size_t);
 u_int32_t urndis_ctrl_set_param(struct urndis_softc *, const char *, u_int32_t,
     void *, size_t);
+#if 0
 u_int32_t urndis_ctrl_reset(struct urndis_softc *);
 u_int32_t urndis_ctrl_keepalive(struct urndis_softc *);
+#endif
 
 int urndis_encap(struct urndis_softc *, struct mbuf *, int);
 void urndis_decap(struct urndis_softc *, struct urndis_chain *, u_int32_t);
@@ -250,7 +254,8 @@ urndis_ctrl_handle(struct urndis_softc *sc, struct urndis_comp_hdr *hdr,
 }
 
 u_int32_t
-urndis_ctrl_handle_init(struct urndis_softc *sc, const struct urndis_comp_hdr *hdr)
+urndis_ctrl_handle_init(struct urndis_softc *sc,
+    const struct urndis_comp_hdr *hdr)
 {
 	const struct urndis_init_comp	*msg;
 
@@ -592,8 +597,11 @@ urndis_ctrl_set(struct urndis_softc *sc, u_int32_t oid, void *buf, size_t len)
 }
 
 u_int32_t
-urndis_ctrl_set_param(struct urndis_softc *sc, const char *name, u_int32_t type,
-    void *buf, size_t len)
+urndis_ctrl_set_param(struct urndis_softc *sc,
+    const char *name,
+    u_int32_t type,
+    void *buf,
+    size_t len)
 {
 	struct urndis_set_parameter	*param;
 	u_int32_t			 rval;
@@ -641,6 +649,7 @@ urndis_ctrl_set_param(struct urndis_softc *sc, const char *name, u_int32_t type,
 	return rval;
 }
 
+#if 0
 /* XXX : adrreset, get it from response */
 u_int32_t
 urndis_ctrl_reset(struct urndis_softc *sc)
@@ -725,6 +734,7 @@ urndis_ctrl_keepalive(struct urndis_softc *sc)
 
 	return rval;
 }
+#endif
 
 int
 urndis_encap(struct urndis_softc *sc, struct mbuf *m, int idx)
@@ -1021,6 +1031,7 @@ urndis_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	return (error);
 }
 
+#if 0
 void
 urndis_watchdog(struct ifnet *ifp)
 {
@@ -1036,6 +1047,7 @@ urndis_watchdog(struct ifnet *ifp)
 
 	urndis_ctrl_keepalive(sc);
 }
+#endif
 
 void
 urndis_init(struct urndis_softc *sc)
@@ -1202,7 +1214,9 @@ urndis_start(struct ifnet *ifp)
 }
 
 void
-urndis_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+urndis_rxeof(usbd_xfer_handle xfer,
+    usbd_private_handle priv,
+    usbd_status status)
 {
 	struct urndis_chain	*c;
 	struct urndis_softc	*sc;
@@ -1242,7 +1256,9 @@ done:
 }
 
 void
-urndis_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+urndis_txeof(usbd_xfer_handle xfer,
+    usbd_private_handle priv,
+    usbd_status status)
 {
 	struct urndis_chain	*c;
 	struct urndis_softc	*sc;
@@ -1551,3 +1567,4 @@ urndis_activate(struct device *self, int devact)
 
 	return 0;
 }
+

@@ -1,12 +1,13 @@
-/*	$OpenBSD: oplvar.h,v 1.5 2008/06/26 05:42:16 ray Exp $	*/
-/*	$NetBSD: oplvar.h,v 1.3 1998/11/25 22:17:06 augustss Exp $	*/
+/*	$OpenBSD: hidkbdvar.h,v 1.1 2010/07/31 16:04:50 miod Exp $	*/
+/*      $NetBSD: ukbd.c,v 1.85 2003/03/11 16:44:00 augustss Exp $        */
 
 /*
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Lennart Augustsson (augustss@netbsd.org).
+ * by Lennart Augustsson (lennart@augustsson.net) at
+ * Carlstedt Research & Technology.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,56 +31,4 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <dev/midivar.h>
-#include <dev/midisynvar.h>
-
-struct opl_voice {
-	int voiceno;
-	int iooffs;
-	u_int8_t op[4];
-	const struct opl_operators *patch;
-	u_int8_t rB0;
-};
-
-struct opl_softc {
-	struct midi_softc mididev;
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	int	offs;
-	int	model;
-#define OPL_2 2
-#define OPL_3 3
-	struct	midisyn syn;
-
-	struct opl_voice voices[OPL3_NVOICE];
-	int volume;
-
-	int	(*spkrctl)(void *, int);
-	void    *spkrarg;
-};
-
-struct opl_attach_arg {
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	int offs;
-	int done;
-};
-
-struct opl_operators {
-	u_int8_t opl3;
-	u_int8_t ops[22];
-#define OO_CHARS	0
-#define OO_KSL_LEV	2
-#define OO_ATT_DEC	4
-#define OO_SUS_REL	6
-#define OO_WAV_SEL	8
-#define OO_FB_CONN	10
-#define OO_4OP_OFFS	11
-};
-
-#define OPL_NINSTR 256
-extern const struct opl_operators opl2_instrs[];
-extern const struct opl_operators opl3_instrs[];
-
-int	opl_find(struct opl_attach_arg *);
-void	opl_attach(struct opl_softc *);
+void	hidkbd_hookup_bell(void (*)(void *, u_int, u_int, u_int, int), void *);
