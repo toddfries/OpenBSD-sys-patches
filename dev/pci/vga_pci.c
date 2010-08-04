@@ -174,26 +174,10 @@ static const struct vga_device_description vga_devs[] = {
 	    	0x17aa, 0x215a },
 	    {	0xffff, 0xffff, 0xffff, 0xffff }, 1, 0
 	},
-	{	/* Lenovo ThinkPad X100e */
-	    {	PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3200_2,
-		0x17aa, 0x21b2 },
-	    {	0xffff, 0xffff, 0xffff, 0xffff}, 1, 0
+	{	/* All ati chipsets until kernel modesetting */
+	    {	PCI_VENDOR_ATI, 0, 0, 0 },
+	    {	0xffff, 0x0, 0x0, 0x0}, 1, 0
 	},
-	{	/* Gateway LT3103u (ATI Radeon X1250/RS690) */
-	    {	PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1250IGP,
-		0x1025, 0x028c },
-	    {	0xffff, 0xffff, 0xffff, 0xffff}, 1, 0
-	},
-	{	/* Thinkpad T43p with ATI FireGL (M24) */
-	    {	PCI_VENDOR_ATI, PCI_PRODUCT_ATI_FIREGL_M24GL,
-		0x1014, 0x0570 },
-	    {	0xffff, 0xffff, 0xffff, 0xffff}, 1, 0
-	},
-	{	/* HP Pavilion dv7-3160us with ATI Radeon HD4500 */
-	    {	PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4500_M,
-		0x103c, 0x3639 },
-	    {	0xffff, 0xffff, 0xffff, 0xffff}, 1, 0
-	}
 };
 #endif
 
