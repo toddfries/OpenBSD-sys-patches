@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.199 2010/08/04 17:35:39 kettenis Exp $ */
+/* $OpenBSD: acpi.c,v 1.203 2010/08/05 17:26:57 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -1318,7 +1318,7 @@ acpi_interrupt(void *arg)
 {
 	struct acpi_softc *sc = (struct acpi_softc *)arg;
 	u_int32_t processed = 0, idx, jdx;
-	u_int8_t sts, en;
+	u_int16_t sts, en;
 
 	dnprintf(40, "ACPI Interrupt\n");
 	for (idx = 0; idx < sc->sc_lastgpe; idx += 8) {
@@ -1697,10 +1697,10 @@ acpi_enter_sleep_state(struct acpi_softc *sc, int state)
 	int retries;
 
 	/* Clear WAK_STS bit */
-	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 1, ACPI_PM1_WAK_STS);
+	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 0, ACPI_PM1_WAK_STS);
 
 	/* Disable BM arbitration */
-	acpi_write_pmreg(sc, ACPIREG_PM2_CNT, 1, ACPI_PM2_ARB_DIS);
+	acpi_write_pmreg(sc, ACPIREG_PM2_CNT, 0, ACPI_PM2_ARB_DIS);
 
 	/* Write SLP_TYPx values */
 	rega = acpi_read_pmreg(sc, ACPIREG_PM1A_CNT, 0);
@@ -1754,7 +1754,7 @@ acpi_resume(struct acpi_softc *sc, int state)
 	acpi_write_pmreg(sc, ACPIREG_PM1_CNT, 0, ACPI_PM1_SCI_EN);
 
 	/* Clear fixed event status */
-	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 1,
+	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 0,
 	    ACPI_PM1_ALL_STS);
 
 	if (sc->sc_bfs)
@@ -1923,7 +1923,7 @@ acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
 		}
 
 	/* Clear fixed event status */
-	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 1,
+	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 0,
 	    ACPI_PM1_ALL_STS);
 
 	/* Enable wake GPEs */
@@ -1977,7 +1977,7 @@ acpi_thread(void *arg)
 	 * so let us enable some events we can forward to userland
 	 */
 	if (sc->sc_interrupt) {
-		int16_t flag;
+		int16_t en;
 
 		dnprintf(1,"slpbtn:%c  pwrbtn:%c\n",
 		    sc->sc_fadt->flags & FADT_SLP_BUTTON ? 'n' : 'y',
@@ -1987,14 +1987,12 @@ acpi_thread(void *arg)
 
 		/* Enable Sleep/Power buttons if they exist */
 		s = spltty();
-		flag = acpi_read_pmreg(sc, ACPIREG_PM1_EN, 0);
-		if (!(sc->sc_fadt->flags & FADT_PWR_BUTTON)) {
-			flag |= ACPI_PM1_PWRBTN_EN;
-		}
-		if (!(sc->sc_fadt->flags & FADT_SLP_BUTTON)) {
-			flag |= ACPI_PM1_SLPBTN_EN;
-		}
-		acpi_write_pmreg(sc, ACPIREG_PM1_EN, 0, flag);
+		en = acpi_read_pmreg(sc, ACPIREG_PM1_EN, 0);
+		if (!(sc->sc_fadt->flags & FADT_PWR_BUTTON))
+			en |= ACPI_PM1_PWRBTN_EN;
+		if (!(sc->sc_fadt->flags & FADT_SLP_BUTTON))
+			en |= ACPI_PM1_SLPBTN_EN;
+		acpi_write_pmreg(sc, ACPIREG_PM1_EN, 0, en);
 		splx(s);
 
 		/* Enable handled GPEs here */
@@ -2028,11 +2026,11 @@ acpi_thread(void *arg)
 			}
 		}
 		if (sc->sc_powerbtn) {
-			uint8_t en;
+			uint16_t en;
 
 			sc->sc_powerbtn = 0;
 			dnprintf(1,"power button pressed\n");
-			aml_notify_dev(ACPI_DEV_PBD, 0x80);
+			sc->sc_powerdown = 1;
 
 			/* Reset the latch and re-enable the GPE */
 			s = spltty();
@@ -2043,7 +2041,7 @@ acpi_thread(void *arg)
 
 		}
 		if (sc->sc_sleepbtn) {
-			uint8_t en;
+			uint16_t en;
 
 			sc->sc_sleepbtn = 0;
 			dnprintf(1,"sleep button pressed\n");
@@ -2061,6 +2059,13 @@ acpi_thread(void *arg)
 		if (sc->sc_poll) {
 			sc->sc_poll = 0;
 			acpi_poll_notify();
+		}
+
+		if (sc->sc_powerdown) {
+			sc->sc_powerdown = 0;
+
+			/* XXX put a knob in front of this */
+			psignal(initproc, SIGUSR2);
 		}
 
 		if (sc->sc_sleepmode) {
