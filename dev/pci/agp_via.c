@@ -47,7 +47,20 @@
 
 #include <machine/bus.h>
 
+struct agp_via_softc {
+	struct device		 dev;
+	struct agp_softc	*agpdev;
+	struct agp_gatt		*gatt;
+	int			*regs;
+	pci_chipset_tag_t	 vsc_pc;
+	pcitag_t		 vsc_tag;
+	bus_addr_t		 vsc_apaddr;
+	bus_size_t		 vsc_apsize;
+};
+
 void	agp_via_attach(struct device *, struct device *, void *);
+int	agp_via_activate(struct device *, int);
+void	agp_via_configure(struct agp_via_softc *);
 int	agp_via_probe(struct device *, void *, void *);
 bus_size_t agp_via_get_aperture(void *);
 int	agp_via_set_aperture(void *, bus_size_t);
@@ -61,19 +74,9 @@ const struct agp_methods agp_via_methods = {
 	agp_via_flush_tlb,
 };
 
-struct agp_via_softc {
-	struct device		 dev;
-	struct agp_softc	*agpdev;
-	struct agp_gatt		*gatt;
-	int			*regs;
-	pci_chipset_tag_t	 vsc_pc;
-	pcitag_t		 vsc_tag;
-	bus_addr_t		 vsc_apaddr;
-	bus_size_t		 vsc_apsize;
-};
-
 struct cfattach viaagp_ca = {
-        sizeof(struct agp_via_softc), agp_via_probe, agp_via_attach
+        sizeof(struct agp_via_softc), agp_via_probe, agp_via_attach,
+	NULL, agp_via_activate
 };
 
 struct cfdriver viaagp_cd = {
@@ -159,24 +162,7 @@ agp_via_attach(struct device *parent, struct device *self, void *aux)
 	}
 	vsc->gatt = gatt;
 
-	if (vsc->regs == via_v2_regs) {
-		/* Install the gatt. */
-		pci_conf_write(pa->pa_pc, pa->pa_tag, vsc->regs[REG_ATTBASE],
-		    gatt->ag_physical | 3);
-		/* Enable the aperture. */
-		pci_conf_write(pa->pa_pc, pa->pa_tag, vsc->regs[REG_GARTCTRL],
-		    0x0000000f);
-	} else {
-		pcireg_t gartctrl;
-		/* Install the gatt. */
-		pci_conf_write(pa->pa_pc, pa->pa_tag, vsc->regs[REG_ATTBASE],
-		    gatt->ag_physical);
-		/* Enable the aperture. */
-		gartctrl = pci_conf_read(pa->pa_pc, pa->pa_tag,
-		    vsc->regs[REG_ATTBASE]);
-		pci_conf_write(pa->pa_pc, pa->pa_tag, vsc->regs[REG_GARTCTRL],
-		    gartctrl | (3 << 7));
-	}
+	agp_via_configure(vsc);
 	vsc->agpdev = (struct agp_softc *)agp_attach_bus(pa, &agp_via_methods,
 	    vsc->vsc_apaddr, vsc->vsc_apsize, &vsc->dev);
 
@@ -202,6 +188,54 @@ agp_via_detach(struct agp_softc *sc)
 	return (0);
 }
 #endif
+
+int
+agp_via_activate(struct device *arg, int act)
+{
+	struct agp_via_softc *vsc = (struct agp_via_softc *)arg;
+
+	switch (act) {
+	case DVACT_RESUME:
+		/*
+		 * all the pte state is in dma memory, so we just need to
+		 * put the information back.
+		 */
+		agp_via_configure(vsc);
+		break;
+	}
+
+	return (0);
+}
+
+void
+agp_via_configure(struct agp_via_softc *vsc)
+{
+
+	/*
+	 * reset size now just in case, if it worked before then sanity
+	 * checking will not fail
+	 */
+	(void)agp_via_set_aperture(vsc, vsc->vsc_apsize);
+
+	if (vsc->regs == via_v2_regs) {
+		/* Install the gatt. */
+		pci_conf_write(vsc->vsc_pc, vsc->vsc_tag,
+		    vsc->regs[REG_ATTBASE], vsc->gatt->ag_physical | 3);
+		/* Enable the aperture. */
+		pci_conf_write(vsc->vsc_pc, vsc->vsc_tag,
+		    vsc->regs[REG_GARTCTRL], 0x0000000f);
+	} else {
+		pcireg_t gartctrl;
+		/* Install the gatt. */
+		pci_conf_write(vsc->vsc_pc, vsc->vsc_tag,
+		    vsc->regs[REG_ATTBASE], vsc->gatt->ag_physical);
+		/* Enable the aperture. */
+		gartctrl = pci_conf_read(vsc->vsc_pc, vsc->vsc_tag,
+		    vsc->regs[REG_ATTBASE]);
+		pci_conf_write(vsc->vsc_pc, vsc->vsc_tag,
+		    vsc->regs[REG_GARTCTRL], gartctrl | (3 << 7));
+	}
+}
 
 bus_size_t
 agp_via_get_aperture(void *sc)
