@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ral_pci.c,v 1.19 2010/04/05 14:14:02 damien Exp $  */
+/*	$OpenBSD: if_ral_pci.c,v 1.20 2010/08/04 19:48:33 damien Exp $  */
 
 /*-
  * Copyright (c) 2005-2010 Damien Bergamini <damien.bergamini@free.fr>
