@@ -1,4 +1,4 @@
-/*	$OpenBSD: bwi.c,v 1.92 2010/05/19 15:27:35 oga Exp $	*/
+/*	$OpenBSD: bwi.c,v 1.93 2010/08/06 05:26:24 mglocker Exp $	*/
 
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.

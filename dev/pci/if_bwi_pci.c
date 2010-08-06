@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bwi_pci.c,v 1.10 2009/03/29 21:53:52 sthen Exp $ */
+/*	$OpenBSD: if_bwi_pci.c,v 1.11 2010/08/06 05:26:24 mglocker Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
