@@ -1,4 +1,4 @@
-/* $OpenBSD: acpibtn.c,v 1.27 2010/07/06 20:14:17 deraadt Exp $ */
+/* $OpenBSD: acpibtn.c,v 1.31 2010/08/05 21:10:06 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -84,9 +84,17 @@ acpibtn_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_acpi = (struct acpi_softc *)parent;
 	sc->sc_devnode = aa->aaa_node;
 
-	if (!strcmp(aa->aaa_dev, ACPI_DEV_LD))
+	if (!strcmp(aa->aaa_dev, ACPI_DEV_LD)) {
+		struct aml_value	val;
+
 		sc->sc_btn_type = ACPIBTN_LID;
-	else if (!strcmp(aa->aaa_dev, ACPI_DEV_PBD))
+		bzero(&val, sizeof val);
+		val.type = AML_OBJTYPE_INTEGER;
+		val.v_integer = 1;
+		val.length = 1;
+		(void) aml_evalname(sc->sc_acpi, sc->sc_devnode, "_PSW",
+		    1, &val, NULL);
+	} else if (!strcmp(aa->aaa_dev, ACPI_DEV_PBD))
 		sc->sc_btn_type = ACPIBTN_POWER;
 	else if (!strcmp(aa->aaa_dev, ACPI_DEV_SBD))
 		sc->sc_btn_type = ACPIBTN_SLEEP;
@@ -112,14 +120,12 @@ acpibtn_getsta(struct acpibtn_softc *sc)
 	return (0);
 }
 
-/* XXX tie this to a sysctl later */
-int	acpi_lid_suspend = 0;
-
 int
 acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 {
 	struct acpibtn_softc	*sc = arg;
 #ifndef SMALL_KERNEL
+	extern int lid_suspend;
 	int64_t lid;
 #endif
 
@@ -135,15 +141,13 @@ acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 		 * _LID method.  0 means the lid is closed and we
 		 * should go to sleep.
 		 */
+		if (lid_suspend == 0)
+			break;
 		if (aml_evalinteger(sc->sc_acpi, sc->sc_devnode,
 		    "_LID", 0, NULL, &lid))
 			return (0);
-		if (acpi_lid_suspend && lid == 0) {
-			if (acpi_record_event(sc->sc_acpi, APM_USER_SUSPEND_REQ)) {
-				sc->sc_acpi->sc_sleepmode = ACPI_STATE_S3;
-				acpi_wakeup(sc->sc_acpi);
-			}
-		}
+		if (lid == 0)
+			goto sleep;
 #endif /* SMALL_KERNEL */
 		break;
 	case ACPIBTN_SLEEP:
@@ -153,6 +157,7 @@ acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 			/* "something" has been taken care of by the system */
 			break;
 		case 0x80:
+sleep:
 			/* Request to go to sleep */
 			if (acpi_record_event(sc->sc_acpi, APM_USER_SUSPEND_REQ)) {
 				sc->sc_acpi->sc_sleepmode = ACPI_STATE_S3;
@@ -164,7 +169,7 @@ acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 		break;
 	case ACPIBTN_POWER:
 		if (notify_type == 0x80)
-			psignal(initproc, SIGUSR2);
+			sc->sc_acpi->sc_powerdown = 1;
 		break;
 	default:
 		printf("%s: spurious acpi button interrupt %i\n", DEVNAME(sc),
