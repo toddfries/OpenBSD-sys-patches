@@ -76,6 +76,8 @@ struct agp_amd_softc {
 };
 
 void	agp_amd_attach(struct device *, struct device *, void *);
+int	agp_amd_activate(struct device *, int);
+void	agp_amd_configure(struct agp_amd_softc *);
 int	agp_amd_probe(struct device *, void *, void *);
 bus_size_t agp_amd_get_aperture(void *);
 struct agp_amd_gatt *agp_amd_alloc_gatt(bus_dma_tag_t, bus_size_t);
@@ -85,7 +87,8 @@ void	agp_amd_unbind_page(void *, bus_size_t);
 void	agp_amd_flush_tlb(void *);
 
 struct cfattach amdagp_ca = {
-	sizeof(struct agp_amd_softc), agp_amd_probe, agp_amd_attach
+	sizeof(struct agp_amd_softc), agp_amd_probe, agp_amd_attach, NULL,
+	agp_amd_activate
 };
 
 struct cfdriver amdagp_cd = {
@@ -183,7 +186,6 @@ agp_amd_attach(struct device *parent, struct device *self, void *aux)
 	struct agp_attach_args	*aa = aux;
 	struct pci_attach_args	*pa = aa->aa_pa;
 	struct agp_amd_gatt	*gatt;
-	pcireg_t		 reg;
 	int			 error;
 
 	asc->asc_pc = pa->pa_pc;
@@ -221,19 +223,7 @@ agp_amd_attach(struct device *parent, struct device *self, void *aux)
 	}
 	asc->gatt = gatt;
 
-	/* Install the gatt. */
-	WRITE4(AGP_AMD751_ATTBASE, gatt->ag_physical);
-
-	/* Enable synchronisation between host and agp. */
-	reg = pci_conf_read(asc->asc_pc, asc->asc_tag, AGP_AMD751_MODECTRL);
-	reg &= ~0x00ff00ff;
-	reg |= (AGP_AMD751_MODECTRL_SYNEN) | (AGP_AMD751_MODECTRL2_GPDCE << 16);
-	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_AMD751_MODECTRL, reg);
-	/* Enable the TLB and flush */
-	WRITE2(AGP_AMD751_STATUS,
-	    READ2(AGP_AMD751_STATUS) | AGP_AMD751_STATUS_GCE);
-	agp_amd_flush_tlb(asc);
-
+	agp_amd_configure(asc);
 	asc->agpdev = (struct agp_softc *)agp_attach_bus(pa, &agp_amd_methods,
 	    asc->asc_apaddr, asc->asc_apsize, &asc->dev);
 	return;
@@ -268,6 +258,49 @@ agp_amd_detach(void *sc)
 	return (0);
 }
 #endif
+
+int
+agp_amd_activate(struct device *arg, int act)
+{
+	struct agp_amd_softc *asc = (struct agp_amd_softc *)arg;
+
+	switch (act) {
+	case DVACT_RESUME:
+		/*
+		 * all the pte state is in dma memory, so we just need to
+		 * put the information back.
+		 */
+		agp_amd_configure(asc);
+		break;
+	}
+
+	return (0);
+}
+
+void
+agp_amd_configure(struct agp_amd_softc *asc)
+{
+	pcireg_t		 reg;
+
+	/*
+	 * reset size now just in case, if it worked before then sanity
+	 * checking will not fail
+	 */
+	(void)agp_amd_set_aperture(asc, asc->asc_apsize);
+
+	/* Install the gatt. */
+	WRITE4(AGP_AMD751_ATTBASE, asc->gatt->ag_physical);
+
+	/* Enable synchronisation between host and agp. */
+	reg = pci_conf_read(asc->asc_pc, asc->asc_tag, AGP_AMD751_MODECTRL);
+	reg &= ~0x00ff00ff;
+	reg |= (AGP_AMD751_MODECTRL_SYNEN) | (AGP_AMD751_MODECTRL2_GPDCE << 16);
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_AMD751_MODECTRL, reg);
+	/* Enable the TLB and flush */
+	WRITE2(AGP_AMD751_STATUS,
+	    READ2(AGP_AMD751_STATUS) | AGP_AMD751_STATUS_GCE);
+	agp_amd_flush_tlb(asc);
+}
 
 bus_size_t
 agp_amd_get_aperture(void *sc)

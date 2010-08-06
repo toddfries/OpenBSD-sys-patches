@@ -67,6 +67,8 @@ struct agp_intel_softc {
 
 
 void	agp_intel_attach(struct device *, struct device *, void *);
+int	agp_intel_activate(struct device *, int);
+void	agp_intel_configure(struct agp_intel_softc *);
 int	agp_intel_probe(struct device *, void *, void *);
 bus_size_t agp_intel_get_aperture(void *);
 int	agp_intel_set_aperture(void *, bus_size_t);
@@ -75,7 +77,8 @@ void	agp_intel_unbind_page(void *, bus_addr_t);
 void	agp_intel_flush_tlb(void *);
 
 struct cfattach intelagp_ca = {
-	sizeof(struct agp_intel_softc), agp_intel_probe, agp_intel_attach
+	sizeof(struct agp_intel_softc), agp_intel_probe, agp_intel_attach,
+	NULL, agp_intel_activate
 };
 
 struct cfdriver intelagp_cd = {
@@ -129,7 +132,6 @@ agp_intel_attach(struct device *parent, struct device *self, void *aux)
 	struct agp_attach_args	*aa = aux;
 	struct pci_attach_args	*pa = aa->aa_pa;
 	struct agp_gatt		*gatt;
-	pcireg_t		 reg;
 	u_int32_t		 value;
 
 	isc->isc_pc = pa->pa_pc;
@@ -193,64 +195,7 @@ agp_intel_attach(struct device *parent, struct device *self, void *aux)
 	}
 	isc->gatt = gatt;
 
-	/* Install the gatt. */
-	pci_conf_write(pa->pa_pc, pa->pa_tag, AGP_INTEL_ATTBASE,
-	    gatt->ag_physical);
-	
-	/* Enable the GLTB and setup the control register. */
-	switch (isc->chiptype) {
-	case CHIP_I443:
-		pci_conf_write(isc->isc_pc, isc->isc_tag, AGP_INTEL_AGPCTRL,
-		    AGPCTRL_AGPRSE | AGPCTRL_GTLB);
-		break;
-	default:
-		pci_conf_write(isc->isc_pc, isc->isc_tag, AGP_INTEL_AGPCTRL,
-		    pci_conf_read(isc->isc_pc, isc->isc_tag,
-		    AGP_INTEL_AGPCTRL) | AGPCTRL_GTLB);
-	}
-
-	/* Enable things, clear errors etc. */
-	switch (isc->chiptype) {
-	case CHIP_I845:
-	case CHIP_I865:
-		reg = pci_conf_read(pa->pa_pc, pa->pa_tag, AGP_I840_MCHCFG);
-		reg |= MCHCFG_AAGN;
-		pci_conf_write(pa->pa_pc, pa->pa_tag, AGP_I840_MCHCFG, reg);
-		break;
-	case CHIP_I840:
-	case CHIP_I850:
-		reg = pci_conf_read(pa->pa_pc, pa->pa_tag, AGP_INTEL_AGPCMD);
-		reg |= AGPCMD_AGPEN;
-		pci_conf_write(pa->pa_pc, pa->pa_tag, AGP_INTEL_AGPCMD,
-		    reg);
-		reg = pci_conf_read(pa->pa_pc, pa->pa_tag, AGP_I840_MCHCFG);
-		reg |= MCHCFG_AAGN;
-		pci_conf_write(pa->pa_pc, pa->pa_tag, AGP_I840_MCHCFG,
-		    reg);
-		break;
-	default:
-		reg = pci_conf_read(pa->pa_pc, pa->pa_tag, AGP_INTEL_NBXCFG);
-		reg &= ~NBXCFG_APAE;
-		reg |=  NBXCFG_AAGN;
-		pci_conf_write(pa->pa_pc, pa->pa_tag, AGP_INTEL_NBXCFG, reg);
-	}
-
-	/* Clear Error status */
-	switch (isc->chiptype) {
-	case CHIP_I840:
-		pci_conf_write(pa->pa_pc, pa->pa_tag,
-		    AGP_INTEL_I8XX_ERRSTS, 0xc000);
-		break;
-	case CHIP_I845:
-	case CHIP_I850:
-	case CHIP_I865:
-		pci_conf_write(isc->isc_pc, isc->isc_tag,
-		    AGP_INTEL_I8XX_ERRSTS, 0x00ff);
-		break;
-
-	default:
-		pci_conf_write(pa->pa_pc, pa->pa_tag, AGP_INTEL_ERRSTS, 0x70);
-	}
+	agp_intel_configure(isc);
 	
 	isc->agpdev = (struct agp_softc *)agp_attach_bus(pa, &agp_intel_methods,
 	    isc->isc_apaddr, isc->isc_apsize, &isc->dev);
@@ -281,6 +226,103 @@ agp_intel_detach(struct agp_softc *sc)
 	return (0);
 }
 #endif
+
+int
+agp_intel_activate(struct device *arg, int act)
+{
+	struct agp_intel_softc *isc = (struct agp_intel_softc *)arg;
+
+	switch (act) {
+	case DVACT_RESUME:
+		/*
+		 * all the pte state is in dma memory, so we just need to
+		 * put the information back.
+		 */
+		agp_intel_configure(isc);
+		break;
+	}
+
+	return (0);
+}
+
+
+void
+agp_intel_configure(struct agp_intel_softc *isc)
+{
+	pcireg_t		 reg;
+
+	/*
+	 * reset size now just in case, if it worked before then sanity
+	 * checking will not fail
+	 */
+	(void)agp_intel_set_aperture(isc, isc->isc_apsize);
+
+	/* Install the gatt. */
+	pci_conf_write(isc->isc_pc, isc->isc_tag, AGP_INTEL_ATTBASE,
+	    isc->gatt->ag_physical);
+	
+	/* Enable the GLTB and setup the control register. */
+	switch (isc->chiptype) {
+	case CHIP_I443:
+		pci_conf_write(isc->isc_pc, isc->isc_tag, AGP_INTEL_AGPCTRL,
+		    AGPCTRL_AGPRSE | AGPCTRL_GTLB);
+		break;
+	default:
+		pci_conf_write(isc->isc_pc, isc->isc_tag, AGP_INTEL_AGPCTRL,
+		    pci_conf_read(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_AGPCTRL) | AGPCTRL_GTLB);
+	}
+
+	/* Enable things, clear errors etc. */
+	switch (isc->chiptype) {
+	case CHIP_I845:
+	case CHIP_I865:
+		reg = pci_conf_read(isc->isc_pc, isc->isc_tag,
+		    AGP_I840_MCHCFG);
+		reg |= MCHCFG_AAGN;
+		pci_conf_write(isc->isc_pc, isc->isc_tag,
+		    AGP_I840_MCHCFG, reg);
+		break;
+	case CHIP_I840:
+	case CHIP_I850:
+		reg = pci_conf_read(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_AGPCMD);
+		reg |= AGPCMD_AGPEN;
+		pci_conf_write(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_AGPCMD, reg);
+		reg = pci_conf_read(isc->isc_pc, isc->isc_tag,
+		    AGP_I840_MCHCFG);
+		reg |= MCHCFG_AAGN;
+		pci_conf_write(isc->isc_pc, isc->isc_tag,
+		    AGP_I840_MCHCFG, reg);
+		break;
+	default:
+		reg = pci_conf_read(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_NBXCFG);
+		reg &= ~NBXCFG_APAE;
+		reg |=  NBXCFG_AAGN;
+		pci_conf_write(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_NBXCFG, reg);
+	}
+
+	/* Clear Error status */
+	switch (isc->chiptype) {
+	case CHIP_I840:
+		pci_conf_write(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_I8XX_ERRSTS, 0xc000);
+		break;
+	case CHIP_I845:
+	case CHIP_I850:
+	case CHIP_I865:
+		pci_conf_write(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_I8XX_ERRSTS, 0x00ff);
+		break;
+
+	default:
+		pci_conf_write(isc->isc_pc, isc->isc_tag,
+		    AGP_INTEL_ERRSTS, 0x70);
+	}
+}
 
 bus_size_t
 agp_intel_get_aperture(void *sc)

@@ -58,6 +58,8 @@ struct agp_sis_softc {
 };
 
 void	agp_sis_attach(struct device *, struct device *, void *);
+int	agp_sis_activate(struct device *, int);
+void	agp_sis_configure(struct agp_sis_softc *);
 int	agp_sis_probe(struct device *, void *, void *);
 bus_size_t agp_sis_get_aperture(void *);
 int	agp_sis_set_aperture(void *, bus_size_t);
@@ -66,7 +68,8 @@ void	agp_sis_unbind_page(void *, bus_addr_t);
 void	agp_sis_flush_tlb(void *);
 
 struct cfattach sisagp_ca = {
-        sizeof(struct agp_sis_softc), agp_sis_probe, agp_sis_attach
+        sizeof(struct agp_sis_softc), agp_sis_probe, agp_sis_attach,
+	NULL, agp_sis_activate
 };
 
 struct cfdriver sisagp_cd = {
@@ -101,7 +104,6 @@ agp_sis_attach(struct device *parent, struct device *self, void *aux)
 	struct agp_attach_args	*aa = aux;
 	struct pci_attach_args	*pa = aa->aa_pa;
 	struct agp_gatt		*gatt;
-	pcireg_t		 reg;
 
 	if (pci_mapreg_info(pa->pa_pc, pa->pa_tag, AGP_APBASE,
 	    PCI_MAPREG_TYPE_MEM, &ssc->ssc_apaddr, NULL, NULL) != 0) {
@@ -130,15 +132,7 @@ agp_sis_attach(struct device *parent, struct device *self, void *aux)
 	}
 	ssc->gatt = gatt;
 
-	/* Install the gatt. */
-	pci_conf_write(ssc->ssc_pc, ssc->ssc_tag, AGP_SIS_ATTBASE,
-	    gatt->ag_physical);
-	
-	/* Enable the aperture and auto-tlb-inval */
-	reg = pci_conf_read(ssc->ssc_pc, ssc->ssc_tag, AGP_SIS_WINCTRL);
-	reg |= (0x05 << 24) | 3;
-	pci_conf_write(ssc->ssc_pc, ssc->ssc_tag, AGP_SIS_WINCTRL, reg);
-
+	agp_sis_configure(ssc);
 	ssc->agpdev = (struct agp_softc *)agp_attach_bus(pa, &agp_sis_methods,
 	    ssc->ssc_apaddr, ssc->ssc_apsize, &ssc->dev);
 	return;
@@ -168,6 +162,46 @@ agp_sis_detach(struct agp_softc *sc)
 	return (0);
 }
 #endif
+
+int
+agp_sis_activate(struct device *arg, int act)
+{
+	struct agp_sis_softc *ssc = (struct agp_sis_softc *)arg;
+
+	switch (act) {
+	case DVACT_RESUME:
+		/*
+		 * all the pte state is in dma memory, so we just need to
+		 * put the information back.
+		 */
+		agp_sis_configure(ssc);
+		break;
+	}
+
+	return (0);
+}
+
+void
+agp_sis_configure(struct agp_sis_softc *ssc)
+{
+	pcireg_t		 reg;
+
+	/*
+	 * reset size now just in case, if it worked before then sanity
+	 * checking will not fail
+	 */
+	(void)agp_sis_set_aperture(ssc, ssc->ssc_apsize);
+
+	/* Install the gatt. */
+	pci_conf_write(ssc->ssc_pc, ssc->ssc_tag, AGP_SIS_ATTBASE,
+	    ssc->gatt->ag_physical);
+	
+	/* Enable the aperture and auto-tlb-inval */
+	reg = pci_conf_read(ssc->ssc_pc, ssc->ssc_tag, AGP_SIS_WINCTRL);
+	reg |= (0x05 << 24) | 3;
+	pci_conf_write(ssc->ssc_pc, ssc->ssc_tag, AGP_SIS_WINCTRL, reg);
+}
+
 
 bus_size_t
 agp_sis_get_aperture(void *sc)
