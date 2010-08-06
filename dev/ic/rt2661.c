@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2661.c,v 1.54 2010/05/19 15:27:35 oga Exp $	*/
+/*	$OpenBSD: rt2661.c,v 1.55 2010/08/04 19:48:33 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006

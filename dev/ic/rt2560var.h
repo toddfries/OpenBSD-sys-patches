@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2560var.h,v 1.6 2009/08/10 17:47:23 damien Exp $  */
+/*	$OpenBSD: rt2560var.h,v 1.7 2010/08/04 19:48:33 damien Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006
