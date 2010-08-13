@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.187 2010/06/29 04:09:32 tedu Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.189 2010/08/12 15:00:17 oga Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -136,7 +136,7 @@ void
 vntblinit(void)
 {
 	/* buffer cache may need a vnode for each buffer */
-	maxvnodes = desiredvnodes;
+	maxvnodes = 2 * desiredvnodes;
 	pool_init(&vnode_pool, sizeof(struct vnode), 0, 0, 0, "vnodes",
 	    &pool_allocator_nointr);
 	TAILQ_INIT(&vnode_hold_list);
@@ -318,6 +318,13 @@ getnewvnode(enum vtagtype tag, struct mount *mp, int (**vops)(void *),
 	int s;
 
 	/*
+	 * allow maxvnodes to increase if the buffer cache itself
+	 * is big enough to justify it. (we don't shrink it ever)
+	 */
+	maxvnodes = maxvnodes < bcstats.numbufs ? bcstats.numbufs
+	    : maxvnodes;
+
+	/*
 	 * We must choose whether to allocate a new vnode or recycle an
 	 * existing one. The criterion for allocating a new one is that
 	 * the total number of vnodes is less than the number desired or
@@ -333,7 +340,7 @@ getnewvnode(enum vtagtype tag, struct mount *mp, int (**vops)(void *),
 	 * referencing buffers.
 	 */
 	toggle ^= 1;
-	if (numvnodes > 2 * maxvnodes)
+	if (numvnodes / 2 > maxvnodes)
 		toggle = 0;
 
 	s = splbio();
@@ -757,7 +764,7 @@ vdrop(struct vnode *vp)
 {
 #ifdef DIAGNOSTIC
 	if (vp->v_holdcnt == 0)
-		panic("vdrop: zero holdcnt"); 
+		panic("vdrop: zero holdcnt");
 #endif
 
 	vp->v_holdcnt--;
@@ -843,7 +850,7 @@ vflush_vnode(struct vnode *vp, void *arg) {
 		vgonel(vp, p);
 		return (0);
 	}
-		
+
 	/*
 	 * If FORCECLOSE is set, forcibly close the vnode.
 	 * For block or character devices, revert to an
