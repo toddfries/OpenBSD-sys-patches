@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.147 2010/06/27 21:47:07 jakemsr Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.149 2010/08/08 05:25:30 jakemsr Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -1390,7 +1390,7 @@ azalia_mixer_default(codec_t *this)
  	}
 	this->recvols.mute = 0;
 
-	err = azalia_codec_enable_unsol(this, 0);
+	err = azalia_codec_enable_unsol(this);
 	if (err)
 		return(err);
 
@@ -1398,7 +1398,7 @@ azalia_mixer_default(codec_t *this)
 }
 
 int
-azalia_codec_enable_unsol(codec_t *this, int resuming)
+azalia_codec_enable_unsol(codec_t *this)
 {
 	widget_t *w;
 	uint32_t result;
@@ -1416,7 +1416,7 @@ azalia_codec_enable_unsol(codec_t *this, int resuming)
 		azalia_unsol_event(this, AZ_TAG_SPKR);
 
 	/* volume knob */
-	if (this->playvols.master != this->audiofunc && !resuming) {
+	if (this->playvols.master != this->audiofunc) {
 
 		w = &this->w[this->playvols.master];
 		err = azalia_comresp(this, w->nid, CORB_GET_VOLUME_KNOB,
@@ -1726,8 +1726,8 @@ azalia_mixer_get(const codec_t *this, nid_t nid, int target,
 	}
 
 	else {
-		printf("%s: internal error in %s: target=%x\n",
-		    XNAME(this), __func__, target);
+		DPRINTF(("%s: internal error in %s: target=%x\n",
+		    XNAME(this), __func__, target));
 		return -1;
 	}
 	return 0;
@@ -2245,8 +2245,8 @@ azalia_mixer_set(codec_t *this, nid_t nid, int target, const mixer_ctrl_t *mc)
 	}
 
 	else {
-		printf("%s: internal error in %s: target=%x\n",
-		    XNAME(this), __func__, target);
+		DPRINTF(("%s: internal error in %s: target=%x\n",
+		    XNAME(this), __func__, target));
 		return -1;
 	}
 	return 0;
@@ -2266,7 +2266,7 @@ azalia_mixer_from_device_value(const codec_t *this, nid_t nid, int target,
 		steps = COP_AMPCAP_NUMSTEPS(this->w[nid].outamp_cap);
 		ctloff = COP_AMPCAP_CTLOFF(this->w[nid].outamp_cap);
 	} else {
-		printf("%s: unknown target: %d\n", __func__, target);
+		DPRINTF(("%s: unknown target: %d\n", __func__, target));
 		steps = 255;
 	}
 	dv -= ctloff;
@@ -2292,7 +2292,7 @@ azalia_mixer_to_device_value(const codec_t *this, nid_t nid, int target,
 		steps = COP_AMPCAP_NUMSTEPS(this->w[nid].outamp_cap);
 		ctloff = COP_AMPCAP_CTLOFF(this->w[nid].outamp_cap);
 	} else {
-		printf("%s: unknown target: %d\n", __func__, target);
+		DPRINTF(("%s: unknown target: %d\n", __func__, target));
 		steps = 255;
 	}
 	if (uv <= AUDIO_MIN_GAIN || steps == 0)
