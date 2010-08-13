@@ -1,4 +1,4 @@
-/*	$OpenBSD: pgt.c,v 1.59 2010/05/19 15:27:35 oga Exp $  */
+/*	$OpenBSD: pgt.c,v 1.61 2010/08/07 16:16:18 kettenis Exp $  */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -603,6 +603,7 @@ pgt_attach(void *xsc)
 	tsleep(&sc->sc_flags, 0, "pgtres", hz);
 	if (sc->sc_flags & SC_UNINITIALIZED) {
 		printf("%s: not responding\n", sc->sc_dev.dv_xname);
+		sc->sc_flags |= SC_NEEDS_FIRMWARE;
 		return;
 	} else {
 		/* await all interrupts */
@@ -2675,7 +2676,7 @@ badopmode:
 		DPRINTF(("IEEE80211_MODE_AUTO\n"));
 		break;
 	default:
-		panic("unknown mode %d\n", ic->ic_curmode);
+		panic("unknown mode %d", ic->ic_curmode);
 	}
 
 	switch (sc->sc_80211_ioc_auth) {
