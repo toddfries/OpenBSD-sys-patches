@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_via.c,v 1.15 2010/04/08 00:23:53 tedu Exp $	*/
+/*	$OpenBSD: agp_via.c,v 1.16 2010/08/07 19:31:23 oga Exp $	*/
 /*	$NetBSD: agp_via.c,v 1.2 2001/09/15 00:25:00 thorpej Exp $	*/
 
 /*-
@@ -56,11 +56,15 @@ struct agp_via_softc {
 	pcitag_t		 vsc_tag;
 	bus_addr_t		 vsc_apaddr;
 	bus_size_t		 vsc_apsize;
+	pcireg_t		 vsc_regapsize;
+	pcireg_t		 vsc_regattbase;
+	pcireg_t                 vsc_reggartctl;
 };
 
 void	agp_via_attach(struct device *, struct device *, void *);
 int	agp_via_activate(struct device *, int);
-void	agp_via_configure(struct agp_via_softc *);
+void	agp_via_save(struct agp_via_softc *);
+void	agp_via_restore(struct agp_via_softc *);
 int	agp_via_probe(struct device *, void *, void *);
 bus_size_t agp_via_get_aperture(void *);
 int	agp_via_set_aperture(void *, bus_size_t);
@@ -75,7 +79,7 @@ const struct agp_methods agp_via_methods = {
 };
 
 struct cfattach viaagp_ca = {
-        sizeof(struct agp_via_softc), agp_via_probe, agp_via_attach,
+	sizeof(struct agp_via_softc), agp_via_probe, agp_via_attach,
 	NULL, agp_via_activate
 };
 
@@ -162,7 +166,24 @@ agp_via_attach(struct device *parent, struct device *self, void *aux)
 	}
 	vsc->gatt = gatt;
 
-	agp_via_configure(vsc);
+	if (vsc->regs == via_v2_regs) {
+		/* Install the gatt. */
+		pci_conf_write(pa->pa_pc, pa->pa_tag, vsc->regs[REG_ATTBASE],
+		    gatt->ag_physical | 3);
+		/* Enable the aperture. */
+		pci_conf_write(pa->pa_pc, pa->pa_tag, vsc->regs[REG_GARTCTRL],
+		    0x0000000f);
+	} else {
+		pcireg_t gartctrl;
+		/* Install the gatt. */
+		pci_conf_write(pa->pa_pc, pa->pa_tag, vsc->regs[REG_ATTBASE],
+		    gatt->ag_physical);
+		/* Enable the aperture. */
+		gartctrl = pci_conf_read(pa->pa_pc, pa->pa_tag,
+		    vsc->regs[REG_ATTBASE]);
+		pci_conf_write(pa->pa_pc, pa->pa_tag, vsc->regs[REG_GARTCTRL],
+		    gartctrl | (3 << 7));
+	}
 	vsc->agpdev = (struct agp_softc *)agp_attach_bus(pa, &agp_via_methods,
 	    vsc->vsc_apaddr, vsc->vsc_apsize, &vsc->dev);
 
@@ -195,12 +216,11 @@ agp_via_activate(struct device *arg, int act)
 	struct agp_via_softc *vsc = (struct agp_via_softc *)arg;
 
 	switch (act) {
+	case DVACT_SUSPEND:
+		agp_via_save(vsc);
+		break;
 	case DVACT_RESUME:
-		/*
-		 * all the pte state is in dma memory, so we just need to
-		 * put the information back.
-		 */
-		agp_via_configure(vsc);
+		agp_via_restore(vsc);
 		break;
 	}
 
@@ -208,33 +228,30 @@ agp_via_activate(struct device *arg, int act)
 }
 
 void
-agp_via_configure(struct agp_via_softc *vsc)
+agp_via_save(struct agp_via_softc *vsc)
+{
+	vsc->vsc_regapsize = pci_conf_read(vsc->vsc_pc, vsc->vsc_tag,
+	    vsc->regs[REG_APSIZE]);
+	vsc->vsc_regattbase = pci_conf_read(vsc->vsc_pc, vsc->vsc_tag,
+	    vsc->regs[REG_ATTBASE]);
+	vsc->vsc_reggartctl = pci_conf_read(vsc->vsc_pc, vsc->vsc_tag,
+	    vsc->regs[REG_GARTCTRL]);
+}
+void
+agp_via_restore(struct agp_via_softc *vsc)
 {
 
-	/*
-	 * reset size now just in case, if it worked before then sanity
-	 * checking will not fail
-	 */
-	(void)agp_via_set_aperture(vsc, vsc->vsc_apsize);
-
-	if (vsc->regs == via_v2_regs) {
-		/* Install the gatt. */
-		pci_conf_write(vsc->vsc_pc, vsc->vsc_tag,
-		    vsc->regs[REG_ATTBASE], vsc->gatt->ag_physical | 3);
-		/* Enable the aperture. */
-		pci_conf_write(vsc->vsc_pc, vsc->vsc_tag,
-		    vsc->regs[REG_GARTCTRL], 0x0000000f);
-	} else {
-		pcireg_t gartctrl;
-		/* Install the gatt. */
-		pci_conf_write(vsc->vsc_pc, vsc->vsc_tag,
-		    vsc->regs[REG_ATTBASE], vsc->gatt->ag_physical);
-		/* Enable the aperture. */
-		gartctrl = pci_conf_read(vsc->vsc_pc, vsc->vsc_tag,
-		    vsc->regs[REG_ATTBASE]);
-		pci_conf_write(vsc->vsc_pc, vsc->vsc_tag,
-		    vsc->regs[REG_GARTCTRL], gartctrl | (3 << 7));
-	}
+	/* aperture size */
+	pci_conf_write(vsc->vsc_pc, vsc->vsc_tag, vsc->regs[REG_APSIZE],
+	    vsc->vsc_regapsize);
+	/* GATT address and enable */
+	pci_conf_write(vsc->vsc_pc, vsc->vsc_tag, vsc->regs[REG_ATTBASE],
+	    vsc->vsc_regattbase);
+	/* Turn it all back on. */
+	pci_conf_write(vsc->vsc_pc, vsc->vsc_tag, vsc->regs[REG_GARTCTRL],
+	    vsc->vsc_reggartctl);
+	/* flush the tlb, just in case */
+	agp_via_flush_tlb(vsc);
 }
 
 bus_size_t
