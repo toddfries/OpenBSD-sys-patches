@@ -91,7 +91,7 @@ struct agp_i810_softc {
 };
 
 void	agp_i810_attach(struct device *, struct device *, void *);
-int	agp_i810_activate(struct device *, int);
+int	agp_i810_activate(struct device *arg, int act);
 void	agp_i810_configure(struct agp_i810_softc *);
 int	agp_i810_probe(struct device *, void *, void *);
 int	agp_i810_get_chiptype(struct pci_attach_args *);

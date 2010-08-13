@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_ali.c,v 1.11 2010/04/08 00:23:53 tedu Exp $	*/
+/*	$OpenBSD: agp_ali.c,v 1.12 2010/08/07 18:15:38 oga Exp $	*/
 /*	$NetBSD: agp_ali.c,v 1.2 2001/09/15 00:25:00 thorpej Exp $	*/
 
 
@@ -56,11 +56,14 @@ struct agp_ali_softc {
 	pcitag_t		 asc_tag;
 	bus_addr_t		 asc_apaddr;
 	bus_size_t		 asc_apsize;
+	pcireg_t		 asc_attbase;
+	pcireg_t		 asc_tlbctrl;
 };
 
 void	agp_ali_attach(struct device *, struct device *, void *);
 int	agp_ali_activate(struct device *, int);
-void	agp_ali_configure(struct agp_ali_softc *);
+void	agp_ali_save(struct agp_ali_softc *);
+void	agp_ali_restore(struct agp_ali_softc *);
 int	agp_ali_probe(struct device *, void *, void *);
 bus_size_t agp_ali_get_aperture(void *);
 int	agp_ali_set_aperture(void *sc, bus_size_t);
@@ -69,8 +72,8 @@ void	agp_ali_unbind_page(void *, bus_addr_t);
 void	agp_ali_flush_tlb(void *);
 
 struct cfattach aliagp_ca = {
-        sizeof(struct agp_ali_softc), agp_ali_probe, agp_ali_attach,
-            NULL, agp_ali_activate
+	sizeof(struct agp_ali_softc), agp_ali_probe, agp_ali_attach,
+	NULL, agp_ali_activate
 };
 
 struct cfdriver aliagp_cd = {
@@ -103,6 +106,7 @@ agp_ali_attach(struct device *parent, struct device *self, void *aux)
 	struct agp_gatt		*gatt;
 	struct agp_attach_args	*aa = aux;
 	struct pci_attach_args	*pa = aa->aa_pa;
+	pcireg_t		 reg;
 
 	asc->asc_tag = pa->pa_tag;
 	asc->asc_pc = pa->pa_pc;
@@ -130,7 +134,16 @@ agp_ali_attach(struct device *parent, struct device *self, void *aux)
 	}
 	asc->gatt = gatt;
 
-	agp_ali_configure(asc);
+	/* Install the gatt. */
+	reg = pci_conf_read(asc->asc_pc, asc->asc_tag, AGP_ALI_ATTBASE);
+	reg = (reg & 0xff) | gatt->ag_physical;
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_ATTBASE, reg);
+	
+	/* Enable the TLB. */
+	reg = pci_conf_read(asc->asc_pc, asc->asc_tag, AGP_ALI_TLBCTRL);
+	reg = (reg & ~0xff) | 0x10;
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_TLBCTRL, reg);
+
 	asc->agpdev = (struct agp_softc *)agp_attach_bus(pa, &agp_ali_methods,
 	    asc->asc_apaddr, asc->asc_apsize, &asc->dev);
 	return;
@@ -171,12 +184,11 @@ agp_ali_activate(struct device *arg, int act)
 	struct agp_ali_softc *asc = (struct agp_ali_softc *)arg;
 
 	switch (act) {
+	case DVACT_SUSPEND:
+		agp_ali_save(asc);
+		break;
 	case DVACT_RESUME:
-		/*
-		 * all the pte state is in dma memory, so we just need to
-		 * put the information back.
-		 */
-		agp_ali_configure(asc);
+		agp_ali_restore(asc);
 		break;
 	}
 
@@ -184,25 +196,25 @@ agp_ali_activate(struct device *arg, int act)
 }
 
 void
-agp_ali_configure(struct agp_ali_softc *asc)
+agp_ali_save(struct agp_ali_softc *asc)
 {
-	pcireg_t		 reg;
+	asc->asc_attbase = pci_conf_read(asc->asc_pc, asc->asc_tag,
+	    AGP_ALI_ATTBASE);
+	asc->asc_tlbctrl = pci_conf_read(asc->asc_pc, asc->asc_tag,
+	    AGP_ALI_TLBCTRL);
+}
 
-	/*
-	 * reset size now just in case, if it worked before then sanity
-	 * checking will not fail
-	 */
-	(void)agp_ali_set_aperture(asc, asc->asc_apsize);
+void
+agp_ali_restore(struct agp_ali_softc *asc)
+{
 
-	/* Install the gatt. */
-	reg = pci_conf_read(asc->asc_pc, asc->asc_tag, AGP_ALI_ATTBASE);
-	reg = (reg & 0xff) | asc->gatt->ag_physical;
-	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_ATTBASE, reg);
+	/* Install the gatt and aperture size. */
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_ATTBASE,
+	    asc->asc_attbase);
 	
 	/* Enable the TLB. */
-	reg = pci_conf_read(asc->asc_pc, asc->asc_tag, AGP_ALI_TLBCTRL);
-	reg = (reg & ~0xff) | 0x10;
-	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_TLBCTRL, reg);
+	pci_conf_write(asc->asc_pc, asc->asc_tag, AGP_ALI_TLBCTRL,
+	    asc->asc_tlbctrl);
 }
 
 #define M 1024*1024
