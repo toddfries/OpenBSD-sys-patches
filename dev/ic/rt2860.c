@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860.c,v 1.58 2010/08/25 21:37:59 kettenis Exp $	*/
+/*	$OpenBSD: rt2860.c,v 1.61 2010/08/27 17:08:00 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2007-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -357,7 +357,6 @@ rt2860_attachhook(void *xsc)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = rt2860_init;
 	ifp->if_ioctl = rt2860_ioctl;
 	ifp->if_start = rt2860_start;
 	ifp->if_watchdog = rt2860_watchdog;
@@ -436,8 +435,10 @@ void
 rt2860_resume(void *xsc)
 {
 	struct rt2860_softc *sc = xsc;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
 
-	rt2860_power(PWR_RESUME, sc);
+	if (ifp->if_flags & IFF_UP)
+		rt2860_init(ifp);
 }
 
 int
@@ -3867,23 +3868,15 @@ void
 rt2860_power(int why, void *arg)
 {
 	struct rt2860_softc *sc = arg;
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int s;
 
 	s = splnet();
 	switch (why) {
 	case PWR_SUSPEND:
-	case PWR_STANDBY:
-		rt2860_stop(ifp, 0);
-		if (sc->sc_power != NULL)
-			(*sc->sc_power)(sc, why);
+		rt2860_suspend(sc);
 		break;
 	case PWR_RESUME:
-		if (ifp->if_flags & IFF_UP) {
-			rt2860_init(ifp);
-			if (sc->sc_power != NULL)
-				(*sc->sc_power)(sc, why);
-		}
+		rt2860_resume(sc);
 		break;
 	}
 	splx(s);
