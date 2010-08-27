@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.508 2010/07/19 05:12:49 jakemsr Exp $
+$OpenBSD: usbdevs,v 1.514 2010/08/21 18:42:11 jsg Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -1331,6 +1331,7 @@ product DLINK3 KVM221		0x020f	KVM-221
 product DISPLAYLINK LCD4300U	0x01ba	LCD-4300U
 product DISPLAYLINK LCD8000U	0x01bb	LCD-8000U
 product DISPLAYLINK LD220	0x0100	Samsung LD220
+product DISPLAYLINK GUC2020	0x0059	IOGEAR DVI GUC2020
 product DISPLAYLINK VCUD60	0x0136	Rextron DVI
 product DISPLAYLINK CONV	0x0138	StarTech CONV-USB2DVI
 product DISPLAYLINK DLDVI	0x0141	DisplayLink DVI
@@ -1338,8 +1339,10 @@ product DISPLAYLINK VGA10	0x015a	CMP-USBVGA10
 product DISPLAYLINK WSDVI	0x0198	WS Tech DVI
 product DISPLAYLINK EC008	0x019b	EasyCAP008 DVI
 product DISPLAYLINK HPDOCK	0x01d4	HP USB Docking
+product DISPLAYLINK NL571	0x01d7	HP USB DVI
 product DISPLAYLINK M01061	0x01e2	Lenovo DVI
 product DISPLAYLINK SWDVI	0x024c	SUNWEIT DVI
+product DISPLAYLINK NBDOCK	0x0215	VideoHome NBdock1920
 product DISPLAYLINK LUM70	0x02a9	Lilliput UM-70
 product DISPLAYLINK UM7X0	0x401a	nanovision MiMo
 
@@ -1770,6 +1773,7 @@ product GUILLEMOT HWGUSB254	0xe000	HWGUSB2-54 WLAN
 product GUILLEMOT HWGUSB254LB	0xe010	HWGUSB2-54-LB
 product GUILLEMOT HWGUSB254V2AP	0xe020	HWGUSB2-54V2-AP
 product GUILLEMOT HWNU300	0xe030	HWNU-300
+product GUILLEMOT HWNUP150	0xe033	HWNUP-150
 
 /* Gunze Gunze Electronics USA */
 product GUNZE TOUCHPANEL	0x0001	Gunze USB Touch Panel
@@ -1862,9 +1866,10 @@ product HUAWEI E220		0x1003	HUAWEI Mobile Modem
 product HUAWEI Mobile		0x1008	HUAWEI Mobile Modem
 product HUAWEI E180		0x140c	HUAWEI Mobile E180
 product HUAWEI E510		0x1411	HUAWEI Mobile E510
-product	HUAWEI E182		0x1429	HUWAEI Mobile Modem
+product HUAWEI E182		0x1429	HUAWEI Mobile Modem
 product HUAWEI E161		0x1446	HUAWEI Mobile E161
 product HUAWEI K3765		0x1465	HUAWEI Mobile K3765
+product HUAWEI E1820		0x14ac  HUAWEI Mobile Modem
 product HUAWEI K3765_INIT	0x1520	HUAWEI Mobile K3765 Initial
 
 /* HUMAX products */
@@ -2556,6 +2561,7 @@ product MSI BLUETOOTH_3		0xa97a	Bluetooth
 
 /* Microdia / Sonix Techonology Co., Ltd. products */
 product MICRODIA YUREX		0x1010	YUREX
+product	MICRODIA CAM_1		0x62c0	CAM_1
 
 /* Micronet Communications products */
 product MICRONET SP128AR	0x0003	SP128AR EtherFast
@@ -2578,6 +2584,7 @@ product MICROSOFT WLNOTEBOOK	0x00b9	Wireless Optical Mouse (Model 1023)
 product MICROSOFT WLNOTEBOOK3	0x00d2	Wireless Optical Mouse 3000 (Model 1049)
 product MICROSOFT WLNOTEBOOK2	0x00e1	Wireless Optical Mouse 3000 (Model 1056)
 product MICROSOFT XBOX360	0x0292	XBOX 360 WLAN
+product MICROSOFT LIFECAM	0x074a	Microsoft LifeCam
 
 /* Microtech products */
 product MICROTECH SCSIDB25	0x0004	SCSI-DB25
@@ -3538,7 +3545,7 @@ product TESTO 556		0x0009	556/560 USB interface
 product TESTO SERIAL_1		0x000a	USB adapter
 product TESTO SERIAL_2		0xf001	USB to serial converter
 
-/* Texas Intel products */
+/* Texas Instruments products */
 product TI UTUSB41		0x1446	UT-USB41 hub
 product TI TUSB2046		0x2046	TUSB2046 hub
 product TI TUSB3410		0x3410	TUSB3410

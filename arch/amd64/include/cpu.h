@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.51 2009/12/09 14:27:34 oga Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.55 2010/08/11 21:22:44 kettenis Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -74,6 +74,7 @@ struct cpu_info {
 	u_int64_t ci_scratch;
 
 	struct proc *ci_fpcurproc;
+	struct proc *ci_fpsaveproc;
 	int ci_fpsaving;
 
 	struct pcb *ci_curpcb;
@@ -289,10 +290,13 @@ void	proc_trampoline(void);
 void	child_trampoline(void);
 
 /* clock.c */
-void	initrtclock(void);
-void	startrtclock(void);
+extern void (*initclock_func)(void);
+void	startclocks(void);
+void	rtcstart(void);
+void	rtcstop(void);
 void	i8254_delay(int);
 void	i8254_initclocks(void);
+void	i8254_startclock(void);
 void	i8254_inittimecounter(void);
 void	i8254_inittimecounter_simple(void);
 
@@ -345,7 +349,8 @@ void mp_setperf_init(void);
 #define CPU_KBDRESET		10	/* keyboard reset under pcvt */
 #define CPU_APMHALT		11	/* halt -p hack */
 #define CPU_XCRYPT		12	/* supports VIA xcrypt in userland */
-#define CPU_MAXID		13	/* number of valid machdep ids */
+#define CPU_LIDSUSPEND		13	/* lid close causes a suspend */
+#define CPU_MAXID		14	/* number of valid machdep ids */
 
 #define	CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
@@ -361,6 +366,7 @@ void mp_setperf_init(void);
 	{ "kbdreset", CTLTYPE_INT }, \
 	{ "apmhalt", CTLTYPE_INT }, \
 	{ "xcrypt", CTLTYPE_INT }, \
+	{ "lidsuspend", CTLTYPE_INT }, \
 }
 
 /*

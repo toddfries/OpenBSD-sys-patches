@@ -1,4 +1,4 @@
-/*	$OpenBSD: pckbc_isa.c,v 1.5 2007/10/01 15:34:48 krw Exp $	*/
+/*	$OpenBSD: pckbc_isa.c,v 1.7 2010/07/22 14:27:46 deraadt Exp $	*/
 /*	$NetBSD: pckbc_isa.c,v 1.2 2000/03/23 07:01:35 thorpej Exp $	*/
 
 /*
@@ -46,6 +46,7 @@
 
 int	pckbc_isa_match(struct device *, void *, void *);
 void	pckbc_isa_attach(struct device *, struct device *, void *);
+int	pckbc_isa_activate(struct device *, int);
 
 struct pckbc_isa_softc {
 	struct pckbc_softc sc_pckbc;
@@ -56,6 +57,7 @@ struct pckbc_isa_softc {
 
 struct cfattach pckbc_isa_ca = {
 	sizeof(struct pckbc_isa_softc), pckbc_isa_match, pckbc_isa_attach,
+	NULL, pckbc_isa_activate
 };
 
 void	pckbc_isa_intr_establish(struct pckbc_softc *, pckbc_slot_t);
@@ -112,6 +114,23 @@ pckbc_isa_match(parent, match, aux)
 	return (ok);
 }
 
+int
+pckbc_isa_activate(struct device *self, int act)
+{
+	struct pckbc_isa_softc *isc = (struct pckbc_isa_softc *)self;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		pckbc_reset(&isc->sc_pckbc);
+		config_activate_children(self, act);
+		break;
+	}
+	return (0);
+}
+
 void
 pckbc_isa_attach(parent, self, aux)
 	struct device *parent, *self;
@@ -119,6 +138,7 @@ pckbc_isa_attach(parent, self, aux)
 {
 	struct pckbc_isa_softc *isc = (void *)self;
 	struct pckbc_softc *sc = &isc->sc_pckbc;
+	struct cfdata *cf = self->dv_cfdata;
 	struct isa_attach_args *ia = aux;
 	struct pckbc_internal *t;
 	bus_space_tag_t iot;
@@ -162,7 +182,7 @@ pckbc_isa_attach(parent, self, aux)
 	printf("\n");
 
 	/* Finish off the attach. */
-	pckbc_attach(sc);
+	pckbc_attach(sc, cf->cf_flags);
 }
 
 void

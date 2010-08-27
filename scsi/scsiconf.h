@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.131 2010/07/13 00:30:30 krw Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.136 2010/08/25 00:31:35 dlg Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -309,24 +309,17 @@ struct scsi_adapter {
 	int		(*ioctl)(struct scsi_link *, u_long, caddr_t, int);
 };
 
-struct scsi_runq_entry {
-	TAILQ_ENTRY(scsi_runq_entry) e;
-	u_int state;
-#define RUNQ_IDLE	0
-#define RUNQ_LINKQ	1
-#define RUNQ_POOLQ	3
-};
-TAILQ_HEAD(scsi_runq, scsi_runq_entry);
-
 struct scsi_iopool;
 
 struct scsi_iohandler {
-	struct scsi_runq_entry entry; /* must be first */
+	TAILQ_ENTRY(scsi_iohandler) q_entry;
+	u_int q_state;
 
 	struct scsi_iopool *pool;
 	void (*handler)(void *, void *);
 	void *cookie;
 };
+TAILQ_HEAD(scsi_runq, scsi_iohandler);
 
 struct scsi_iopool {
 	/* access to the IOs */
@@ -341,10 +334,6 @@ struct scsi_iopool {
 	/* protection for the runqueue and its semaphore */
 	struct mutex mtx;
 };
-
-/*
- *
- */
 
 struct scsi_xshandler {
 	struct scsi_iohandler ioh; /* must be first */
@@ -542,7 +531,6 @@ const void *scsi_inqmatch(struct scsi_inquiry_data *, const void *, int,
     workq_add_task(NULL, (_fl), (_f), (_a1), (_a2))
 
 void	scsi_init(void);
-void	scsi_deinit(void);
 daddr64_t scsi_size(struct scsi_link *, int, u_int32_t *);
 int	scsi_test_unit_ready(struct scsi_link *, int, int);
 int	scsi_inquire(struct scsi_link *, struct scsi_inquiry_data *, int);
@@ -563,9 +551,6 @@ int	scsi_mode_select(struct scsi_link *, int, struct scsi_mode_header *,
 int	scsi_mode_select_big(struct scsi_link *, int,
 	    struct scsi_mode_header_big *, int, int);
 void	scsi_done(struct scsi_xfer *);
-int	scsi_scsi_cmd(struct scsi_link *, struct scsi_generic *,
-	    int cmdlen, u_char *data_addr, int datalen, int retries,
-	    int timeout, struct buf *bp, int flags);
 int	scsi_do_ioctl(struct scsi_link *, u_long, caddr_t, int);
 void	sc_print_addr(struct scsi_link *);
 int	scsi_report_luns(struct scsi_link *, int,
@@ -614,6 +599,8 @@ void			scsi_sense_print_debug(struct scsi_xfer *);
  */
 void	scsi_iopool_init(struct scsi_iopool *, void *,
 	    void *(*)(void *), void (*)(void *, void *));
+void	scsi_iopool_destroy(struct scsi_iopool *);
+void	scsi_link_shutdown(struct scsi_link *);
 
 void *	scsi_io_get(struct scsi_iopool *, int);
 void	scsi_io_put(struct scsi_iopool *, void *);
@@ -645,6 +632,11 @@ int	mpath_path_detach(struct scsi_link *, int);
 
 void	mpath_path_activate(struct scsi_link *);
 void	mpath_path_deactivate(struct scsi_link *);
+
+/*
+ * Utility functions for SCSI HBA emulation.
+ */
+void	scsi_cmd_rw_decode(struct scsi_generic *, u_int64_t *, u_int32_t *);
 
 #endif /* _KERNEL */
 #endif /* SCSI_SCSICONF_H */

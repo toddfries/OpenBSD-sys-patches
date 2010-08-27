@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.85 2010/06/28 08:35:46 jsing Exp $ */
+/*	$OpenBSD: wd.c,v 1.88 2010/07/23 07:47:13 jsg Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *	notice, this list of conditions and the following disclaimer in the
  *	documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *	must display the following acknowledgement:
- *  This product includes software developed by Manuel Bouyer.
- * 4. The name of the author may not be used to endorse or promote products
- *	derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -399,6 +394,18 @@ wdactivate(struct device *self, int act)
 	case DVACT_SUSPEND:
 		wd_flushcache(wd, AT_POLL);
 		wd_standby(wd, AT_POLL);
+		break;
+	case DVACT_RESUME:
+		/*
+		 * Do two resets separated by a small delay. The
+		 * first wakes the controller, the second resets
+		 * the channel
+		 */
+		wdc_disable_intr(wd->drvp->chnl_softc);
+		wdc_reset_channel(wd->drvp);
+		delay(10000);
+		wdc_reset_channel(wd->drvp);
+		wdc_enable_intr(wd->drvp->chnl_softc);
 		break;
 	}
 	return (rv);
@@ -1219,7 +1226,7 @@ wd_standby(struct wd_softc *wd, int flags)
 	} else {
 		wdc_c.flags = AT_WAIT;
 	}
-	wdc_c.timeout = 1000; /* 1s timeout */
+	wdc_c.timeout = 30000; /* 30s timeout */
 	if (wdc_exec_command(wd->drvp, &wdc_c) != WDC_COMPLETE) {
 		printf("%s: standby command didn't complete\n",
 		    wd->sc_dev.dv_xname);

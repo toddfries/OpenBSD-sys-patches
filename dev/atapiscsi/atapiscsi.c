@@ -1,4 +1,4 @@
-/*      $OpenBSD: atapiscsi.c,v 1.92 2010/07/01 03:20:38 matthew Exp $     */
+/*      $OpenBSD: atapiscsi.c,v 1.94 2010/08/04 19:43:52 deraadt Exp $     */
 
 /*
  * This code is derived from code with the copyright below.
@@ -15,12 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Manuel Bouyer.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -150,6 +144,7 @@ struct atapiscsi_xfer;
 
 int	atapiscsi_match(struct device *, void *, void *);
 void	atapiscsi_attach(struct device *, struct device *, void *);
+int	atapiscsi_activate(struct device *, int);
 int	atapiscsi_detach(struct device *, int);
 int     atapi_to_scsi_sense(struct scsi_xfer *, u_int8_t);
 
@@ -182,7 +177,7 @@ static struct scsi_adapter atapiscsi_switch =
 
 struct cfattach atapiscsi_ca = {
 	sizeof(struct atapiscsi_softc), atapiscsi_match, atapiscsi_attach,
-	    atapiscsi_detach
+	    atapiscsi_detach, atapiscsi_activate
 };
 
 struct cfdriver atapiscsi_cd = {
@@ -299,6 +294,32 @@ atapiscsi_attach(parent, self, aux)
 	if (chp->wdc->sc_dev.dv_cfdata->cf_flags & WDC_OPTION_PROBE_VERBOSE)
 		wdcdebug_atapi_mask &= ~DEBUG_PROBE;
 #endif
+}
+
+int
+atapiscsi_activate(struct device *self, int act)
+{
+	struct atapiscsi_softc *as = (void *)self;
+ 	struct channel_softc *chp = as->chp;
+	struct ata_drive_datas *drvp = &chp->ch_drive[as->drive];
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		break;
+	case DVACT_RESUME:
+		/*
+		 * Do two resets separated by a small delay. The
+		 * first wakes the controller, the second resets
+		 * the channel
+		 */
+		wdc_disable_intr(chp);
+		wdc_reset_channel(drvp);
+		delay(10000);
+		wdc_reset_channel(drvp);
+		wdc_enable_intr(chp);
+		break;
+	}
+	return (0);
 }
 
 int

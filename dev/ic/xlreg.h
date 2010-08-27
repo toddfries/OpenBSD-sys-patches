@@ -1,4 +1,4 @@
-/*	$OpenBSD: xlreg.h,v 1.20 2009/12/22 21:10:25 naddy Exp $	*/
+/*	$OpenBSD: xlreg.h,v 1.22 2010/08/12 14:21:55 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -743,3 +743,6 @@ struct xl_stats {
 extern int xl_intr(void *);
 extern void xl_attach(struct xl_softc *);
 extern int xl_detach(struct xl_softc *);
+void xl_init(void *);
+void xl_stop(struct xl_softc *);
+void xl_reset(struct xl_softc *);

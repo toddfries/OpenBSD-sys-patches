@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.34 2010/07/06 06:25:55 deraadt Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.39 2010/08/11 21:22:44 kettenis Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -122,7 +122,7 @@ acpi_scan(struct acpi_mem_map *handle, paddr_t pa, size_t len)
 			if (rsdp->revision == 0 &&
 			    acpi_checksum(ptr, sizeof(struct acpi_rsdp1)) == 0)
 				return (ptr);
-			else if (rsdp->revision >= 2 && rsdp->revision <= 3 &&
+			else if (rsdp->revision >= 2 && rsdp->revision <= 4 &&
 			    acpi_checksum(ptr, sizeof(struct acpi_rsdp)) == 0)
 				return (ptr);
 		}
@@ -224,6 +224,8 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 		return (ENXIO);
 	}
 
+	rtcstop();
+
 	/* i386 does lazy pmap_activate */
 	pmap_activate(curproc);
 
@@ -260,11 +262,9 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	}
 
 	/* Resume path continues here */
-#if 0
-        /* Temporarily disabled for debugging purposes */
-        /* Reset the wakeup vector to avoid resuming on reboot */
-        sc->sc_facs->wakeup_vector = 0;
-#endif
+
+	/* Reset the vector */
+	sc->sc_facs->wakeup_vector = 0;
 
 #if NISA > 0
 	isa_defaultirq();
@@ -273,7 +273,8 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 
 #if NLAPIC > 0
 	lapic_enable();
-	lapic_initclocks();
+	if (initclock_func == lapic_initclocks)
+		lapic_startclock();
 	lapic_set_lvt();
 #endif
 
@@ -286,7 +287,9 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 #if NIOAPIC > 0
 	ioapic_enable();
 #endif
-	initrtclock();
+	i8254_startclock();
+	if (initclock_func == i8254_initclocks)
+		rtcstart();		/* in i8254 mode, rtc is profclock */
 	inittodr(time_second);
 
 	return (0);

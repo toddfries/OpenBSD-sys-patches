@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpivar.h,v 1.20 2009/11/17 20:35:53 damien Exp $	*/
+/*	$OpenBSD: if_wpivar.h,v 1.22 2010/07/22 14:42:43 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2006-2008
@@ -142,6 +142,7 @@ struct wpi_softc {
 
 	u_int			sc_flags;
 #define WPI_FLAG_HAS_5GHZ	(1 << 0)
+#define WPI_FLAG_BUSY		(1 << 1)
 
 	/* Shared area. */
 	struct wpi_dma_info	shared_dma;
@@ -180,6 +181,7 @@ struct wpi_softc {
 
 	int			sc_tx_timer;
 	void			*powerhook;
+	struct workq_task	sc_resume_wqt;
 
 #if NBPFILTER > 0
 	caddr_t			sc_drvbpf;

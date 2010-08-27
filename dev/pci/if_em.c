@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.240 2010/06/28 20:24:39 jsg Exp $ */
+/* $OpenBSD: if_em.c,v 1.244 2010/08/08 12:53:16 kettenis Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -1535,6 +1535,9 @@ em_identify_hardware(struct em_softc *sc)
 	sc->hw.vendor_id = PCI_VENDOR(pa->pa_id);
 	sc->hw.device_id = PCI_PRODUCT(pa->pa_id);
 
+	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_CLASS_REG);
+	sc->hw.revision_id = PCI_REVISION(reg);
+
 	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
 	sc->hw.subsystem_vendor_id = PCI_VENDOR(reg);
 	sc->hw.subsystem_id = PCI_PRODUCT(reg);
@@ -1545,10 +1548,6 @@ em_identify_hardware(struct em_softc *sc)
 
 	if (sc->hw.mac_type == em_pchlan)
 		sc->hw.revision_id = PCI_PRODUCT(pa->pa_id) & 0x0f;
-	else {
-		reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_CLASS_REG);
-		sc->hw.revision_id = PCI_REVISION(reg);
-	}
 
 	if (sc->hw.mac_type == em_82541 ||
 	    sc->hw.mac_type == em_82541_rev_2 ||
@@ -1648,12 +1647,11 @@ em_allocate_pci_resources(struct em_softc *sc)
 	 * can confuse the system
 	 */
 	if(sc->hw.mac_type == em_icp_xxxx) {
-		uint8_t offset;
+		int offset;
 		pcireg_t val;
 		
 		if (!pci_get_capability(sc->osdep.em_pa.pa_pc, 
-		    sc->osdep.em_pa.pa_tag, PCI_CAP_ID_ST, (int*) &offset, 
-		    &val)) {
+		    sc->osdep.em_pa.pa_tag, PCI_CAP_ID_ST, &offset, &val)) {
 			return (0);
 		}
 		offset += PCI_ST_SMIA_OFFSET;
@@ -1816,7 +1814,8 @@ em_setup_interface(struct em_softc *sc)
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 #if NVLAN > 0
-	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+	if (sc->hw.mac_type != em_82575)
+		ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
 
 #ifdef EM_CSUM_OFFLOAD
@@ -1895,11 +1894,12 @@ em_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			em_stop(sc, 0);
 		/* We have no children atm, but we will soon */
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
-		em_stop(sc, 0);
 		rv = config_activate_children(self, act);
 		if (ifp->if_flags & IFF_UP)
 			em_init(sc);

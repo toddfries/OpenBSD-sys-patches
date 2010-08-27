@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.55 2010/07/15 20:37:38 damien Exp $	*/
+/*	$OpenBSD: athn.c,v 1.62 2010/08/18 18:58:01 damien Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -322,7 +322,7 @@ athn_attach(struct athn_softc *sc)
 		    ieee80211_std_rateset_11a;
 	}
 
-	/* Get the list of auhtorized/supported channels. */
+	/* Get the list of authorized/supported channels. */
 	athn_get_chanlist(sc);
 
 	/* IBSS channel undefined for now. */
@@ -445,6 +445,7 @@ athn_rx_start(struct athn_softc *sc)
 	/* Want Compressed Block Ack Requests. */
 	rfilt |= AR_RX_FILTER_COMPR_BAR;
 #endif
+	rfilt |= AR_RX_FILTER_BEACON;
 	if (ic->ic_opmode != IEEE80211_M_STA) {
 		rfilt |= AR_RX_FILTER_PROBEREQ;
 		if (ic->ic_opmode == IEEE80211_M_MONITOR)
@@ -454,9 +455,7 @@ athn_rx_start(struct athn_softc *sc)
 		    ic->ic_opmode == IEEE80211_M_HOSTAP)
 			rfilt |= AR_RX_FILTER_PSPOLL;
 #endif
-		rfilt |= AR_RX_FILTER_BEACON;
-	} else
-		rfilt |= AR_RX_FILTER_BEACON; /* XXX AR_RX_FILTER_MYBEACON */
+	}
 	athn_set_rxfilter(sc, rfilt);
 
 	/* Set BSSID mask. */
@@ -1141,17 +1140,34 @@ athn_iter_func(void *arg, struct ieee80211_node *ni)
 void
 athn_calib_to(void *arg)
 {
+	extern int ticks;
 	struct athn_softc *sc = arg;
+	struct athn_ops *ops = &sc->ops;
 	struct ieee80211com *ic = &sc->sc_ic;
 	int s;
 
 	s = splnet();
+
+	/* Do periodic (every 4 minutes) PA calibration. */
+	if (AR_SREV_9285_11_OR_LATER(sc) &&
+	    !AR_SREV_9380_10_OR_LATER(sc) &&
+	    ticks >= sc->pa_calib_ticks + 240 * hz) {
+		sc->pa_calib_ticks = ticks;
+		ar9285_pa_calib(sc);
+	}
+
+	/* Do periodic (every 30 seconds) temperature compensation. */
+	if ((sc->flags & ATHN_FLAG_OLPC) &&
+	    ticks >= sc->olpc_ticks + 30 * hz) {
+		sc->olpc_ticks = ticks;
+		ops->olpc_temp_compensation(sc);
+	}
+
 #ifdef notyet
 	/* XXX ANI. */
 	athn_ani_monitor(sc);
-	/* XXX OLPC temperature compensation. */
 
-	sc->ops.next_calib(sc);
+	ops->next_calib(sc);
 #endif
 	if (ic->ic_fixed_rate == -1) {
 		if (ic->ic_opmode == IEEE80211_M_STA)
@@ -1181,9 +1197,11 @@ athn_init_calib(struct athn_softc *sc, struct ieee80211_channel *c,
 
 	if (!AR_SREV_9380_10_OR_LATER(sc)) {
 		/* Do PA calibration. */
-		if (AR_SREV_9285_11_OR_LATER(sc))
+		if (AR_SREV_9285_11_OR_LATER(sc)) {
+			extern int ticks;
+			sc->pa_calib_ticks = ticks;
 			ar9285_pa_calib(sc);
-
+		}
 		/* Do noisefloor calibration. */
 		ops->noisefloor_calib(sc);
 	}
@@ -2244,6 +2262,7 @@ athn_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 	struct ifnet *ifp = &ic->ic_if;
 	struct athn_softc *sc = ifp->if_softc;
 	struct athn_ops *ops = &sc->ops;
+	uint32_t reg;
 	int error;
 
 	timeout_del(&sc->calib_to);
@@ -2291,6 +2310,12 @@ athn_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 			athn_set_sta_timers(sc);
 			/* Enable beacon miss interrupts. */
 			sc->imask |= AR_IMR_BMISS;
+
+			/* Stop receiving beacons from other BSS. */
+			reg = AR_READ(sc, AR_RX_FILTER);
+			reg = (reg & ~AR_RX_FILTER_BEACON) |
+			    AR_RX_FILTER_MYBEACON;
+			AR_WRITE(sc, AR_RX_FILTER, reg);
 		}
 		athn_enable_interrupts(sc);
 
@@ -2700,4 +2725,22 @@ athn_stop(struct ifnet *ifp, int disable)
 	/* For CardBus, power down the socket. */
 	if (disable && sc->sc_disable != NULL)
 		sc->sc_disable(sc);
+}
+
+void
+athn_suspend(struct athn_softc *sc)
+{
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	if (ifp->if_flags & IFF_RUNNING)
+		athn_stop(ifp, 1);
+}
+
+void
+athn_resume(struct athn_softc *sc)
+{
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	if (ifp->if_flags & IFF_UP)
+		athn_init(ifp);
 }

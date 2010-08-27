@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.294 2010/07/09 00:04:42 sthen Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.298 2010/08/07 03:50:02 krw Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -832,7 +832,7 @@ bge_newbuf_jumbo(struct bge_softc *sc, int i)
 		r->bge_bd.bge_len = dmap->dm_segs[0].ds_len;
 		break;
 	default:
-		panic("%s: %d segments\n", __func__, dmap->dm_nsegs);
+		panic("%s: %d segments", __func__, dmap->dm_nsegs);
 	}
 
 	bus_dmamap_sync(sc->bge_dmatag, sc->bge_ring_map,
@@ -2291,8 +2291,13 @@ fail_1:
 int
 bge_activate(struct device *self, int act)
 {
-	switch(act) {
+	struct bge_softc *sc = (struct bge_softc *)self;
+	struct ifnet *ifp = &sc->arpcom.ac_if;
+
+	switch (act) {
 	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			bge_stop(sc);
 		break;
 	case DVACT_RESUME:
 		bge_power(PWR_RESUME, self);
@@ -3735,9 +3740,7 @@ bge_power(int why, void *xsc)
 
 	if (why == PWR_RESUME) {
 		ifp = &sc->arpcom.ac_if;
-		if (ifp->if_flags & IFF_UP) {
+		if (ifp->if_flags & IFF_UP)
 			bge_init(xsc);
-			bge_start(ifp);
-		}
 	}
 }

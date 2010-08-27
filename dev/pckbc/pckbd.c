@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbd.c,v 1.25 2010/07/08 19:29:25 deraadt Exp $ */
+/* $OpenBSD: pckbd.c,v 1.27 2010/07/22 14:26:38 deraadt Exp $ */
 /* $NetBSD: pckbd.c,v 1.24 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -123,14 +123,13 @@ static int pckbd_is_console(pckbc_tag_t, pckbc_slot_t);
 
 int pckbdprobe(struct device *, void *, void *);
 void pckbdattach(struct device *, struct device *, void *);
-int pckbd_activate(struct device *, int);
 
 struct cfattach pckbd_ca = {
 	sizeof(struct pckbd_softc), 
 	pckbdprobe, 
 	pckbdattach, 
 	NULL, 
-	pckbd_activate
+	NULL
 };
 
 int	pckbd_enable(void *, int);
@@ -336,8 +335,12 @@ pckbdprobe(parent, match, aux)
 		 * be no PS/2 connector at all; in that case, do not
 		 * even try to attach; ukbd will take over as console.
 		 */
-		if (res == ENXIO)
-			return 0;
+		if (res == ENXIO) {
+			/* check cf_flags from parent */
+			struct cfdata *cf = parent->dv_cfdata;
+			if (!ISSET(cf->cf_flags, PCKBCF_FORCE_KEYBOARD_PRESENT))
+				return 0;
+		}
 #endif
 		return (pckbd_is_console(pa->pa_tag, pa->pa_slot) ? 1 : 0);
 	}
@@ -412,20 +415,6 @@ pckbdattach(parent, self, aux)
 	 * Attach the wskbd, saving a handle to it.
 	 */
 	sc->sc_wskbddev = config_found(self, &a, wskbddevprint);
-}
-
-int
-pckbd_activate(struct device *self, int act)
-{
-	switch (act) {
-	case DVACT_SUSPEND:
-		pckbd_enable(self, 0);
-		break;
-	case DVACT_RESUME:
-		pckbd_enable(self, 1);
-		break;
-	}
-	return (0);
 }
 
 int

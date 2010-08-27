@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.123 2010/07/14 19:24:27 naddy Exp $	*/
+/*	$OpenBSD: re.c,v 1.127 2010/08/08 21:00:31 krw Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -773,7 +773,7 @@ done:
 	sc->rl_testmode = 0;
 	sc->rl_flags &= ~RL_FLAG_LINK;
 	ifp->if_flags &= ~IFF_PROMISC;
-	re_stop(ifp, 1);
+	re_stop(ifp);
 	if (m0 != NULL)
 		m_freem(m0);
 	DPRINTF(("leaving re_diag\n"));
@@ -1942,7 +1942,7 @@ re_init(struct ifnet *ifp)
 	/*
 	 * Cancel pending I/O and free all RX/TX buffers.
 	 */
-	re_stop(ifp, 0);
+	re_stop(ifp);
 
 	/*
 	 * Enable C+ RX and TX mode, as well as RX checksum offload.
@@ -2118,7 +2118,7 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 				re_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
-				re_stop(ifp, 1);
+				re_stop(ifp);
 		}
 		break;
 	case SIOCGIFMEDIA:
@@ -2163,7 +2163,7 @@ re_watchdog(struct ifnet *ifp)
  * RX and TX lists.
  */
 void
-re_stop(struct ifnet *ifp, int disable)
+re_stop(struct ifnet *ifp)
 {
 	struct rl_softc *sc;
 	int	i;
@@ -2178,12 +2178,7 @@ re_stop(struct ifnet *ifp, int disable)
 
 	mii_down(&sc->sc_mii);
 
-	if (sc->rl_flags & RL_FLAG_CMDSTOP)
-		CSR_WRITE_1(sc, RL_COMMAND, RL_CMD_STOPREQ | RL_CMD_TX_ENB |
-		    RL_CMD_RX_ENB);
-	else
-		CSR_WRITE_1(sc, RL_COMMAND, 0x00);
-	DELAY(1000);
+	CSR_WRITE_1(sc, RL_COMMAND, 0x00);
 	CSR_WRITE_2(sc, RL_IMR, 0x0000);
 	CSR_WRITE_2(sc, RL_ISR, 0xFFFF);
 
@@ -2306,7 +2301,7 @@ re_config_imtype(struct rl_softc *sc, int imtype)
 		break;
 
 	default:
-		panic("%s: unknown imtype %d\n",
+		panic("%s: unknown imtype %d",
 		      sc->sc_dev.dv_xname, imtype);
 	}
 }
@@ -2339,7 +2334,7 @@ re_setup_intr(struct rl_softc *sc, int enable_intrs, int imtype)
 		break;
 
 	default:
-		panic("%s: unknown imtype %d\n",
+		panic("%s: unknown imtype %d",
 		      sc->sc_dev.dv_xname, imtype);
 	}
 }

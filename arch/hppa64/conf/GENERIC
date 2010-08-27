@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.19 2010/07/03 03:59:16 krw Exp $
+#	$OpenBSD: GENERIC,v 1.21 2010/08/18 21:01:14 jasper Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -16,7 +16,6 @@ maxusers	80			# estimated number of users
 option		DEBUG
 option		USER_PCICONF	# user-space PCI configuration
 
-#option	COMPAT_LINUX
 #option		PROCFS		# /proc
 
 config	bsd swap generic
@@ -192,5 +191,6 @@ ukphy*		at mii?		# generic unknown PHYs
 #owid*	at onewire?		# ID
 #owsbm*	at onewire?		# Smart Battery Monitor
 #owtemp* at onewire?		# Temperature
+#owctn*	at onewire?			# Counter device
 
 #pseudo-device	wsmux	2	# mouse and keyboard multiplexor

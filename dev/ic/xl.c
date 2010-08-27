@@ -1,4 +1,4 @@
-/*	$OpenBSD: xl.c,v 1.89 2010/05/19 15:27:35 oga Exp $	*/
+/*	$OpenBSD: xl.c,v 1.91 2010/08/12 14:21:55 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -161,8 +161,6 @@ int xl_intr(void *);
 void xl_start(struct ifnet *);
 void xl_start_90xB(struct ifnet *);
 int xl_ioctl(struct ifnet *, u_long, caddr_t);
-void xl_init(void *);
-void xl_stop(struct xl_softc *);
 void xl_freetxrx(struct xl_softc *);
 void xl_watchdog(struct ifnet *);
 void xl_shutdown(void *);
@@ -181,7 +179,6 @@ void xl_setmode(struct xl_softc *, int);
 void xl_iff(struct xl_softc *);
 void xl_iff_90x(struct xl_softc *);
 void xl_iff_905b(struct xl_softc *);
-void xl_reset(struct xl_softc *);
 int xl_list_rx_init(struct xl_softc *);
 int xl_list_tx_init(struct xl_softc *);
 int xl_list_tx_init_90xB(struct xl_softc *);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ipwvar.h,v 1.18 2008/08/28 15:08:38 damien Exp $	*/
+/*	$OpenBSD: if_ipwvar.h,v 1.20 2010/08/03 18:26:25 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2004-2006
@@ -81,8 +81,9 @@ struct ipw_softc {
 	int				(*sc_newstate)(struct ieee80211com *,
 					    enum ieee80211_state, int);
 
-	uint32_t			flags;
+	uint32_t			sc_flags;
 #define IPW_FLAG_FW_INITED	(1 << 0)
+#define IPW_FLAG_BUSY		(1 << 1)
 
 	bus_space_tag_t			sc_st;
 	bus_space_handle_t		sc_sh;
@@ -128,6 +129,7 @@ struct ipw_softc {
 	int				txfree;
 
 	void				*powerhook;
+	struct workq_task		sc_resume_wqt;
 
 #if NBPFILTER > 0
 	caddr_t				sc_drvbpf;

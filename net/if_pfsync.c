@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.152 2010/07/09 16:58:06 reyk Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.154 2010/07/28 06:52:05 dlg Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -1215,9 +1215,10 @@ pfsync_in_tdb(struct pfsync_pkt *pkt, caddr_t buf, int len, int count)
 	int s;
 
 	s = splsoftnet();
-	for (i = 0; i < count; i++)
+	for (i = 0; i < count; i++) {
 		tp = (struct pfsync_tdb *)(buf + len * i);
 		pfsync_update_net_tdb(tp);
+	}
 	splx(s);
 #endif
 
@@ -2257,6 +2258,9 @@ void
 pfsync_bulk_fail(void *arg)
 {
 	struct pfsync_softc *sc = arg;
+	int s;
+
+	s = splsoftnet();
 
 	if (sc->sc_bulk_tries++ < PFSYNC_MAX_BULKTRIES) {
 		/* Try again */
@@ -2274,6 +2278,8 @@ pfsync_bulk_fail(void *arg)
 		pfsync_sync_ok = 1;
 		DPFPRINTF(LOG_ERR, "failed to receive bulk update");
 	}
+
+	splx(s);
 }
 
 void

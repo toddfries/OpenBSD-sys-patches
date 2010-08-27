@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.116 2010/07/01 23:06:33 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.119 2010/08/05 21:10:10 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -178,6 +178,7 @@ paddr_t lo32_paddr;
 paddr_t tramp_pdirpa;
 
 int kbd_reset;
+int lid_suspend;
 
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
@@ -315,6 +316,7 @@ cpu_startup(void)
 	initmsgbuf((caddr_t)msgbuf_vaddr, round_page(MSGBUFSIZE));
 
 	printf("%s", version);
+	startclocks();
 
 	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
 	    ptoa((psize_t)physmem)/1024/1024);
@@ -529,6 +531,8 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 #endif
 	case CPU_XCRYPT:
 		return (sysctl_rdint(oldp, oldlenp, newp, amd64_has_xcrypt));
+	case CPU_LIDSUSPEND:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &lid_suspend));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -550,7 +554,6 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
     union sigval val)
 {
 	struct proc *p = curproc;
-	struct savefpu *sfp = &p->p_addr->u_pcb.pcb_savefpu;
 	struct trapframe *tf = p->p_md.md_regs;
 	struct sigacts * psp = p->p_sigacts;
 	struct sigcontext ksc;
@@ -590,8 +593,6 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 
 		/* Signal handlers get a completely clean FP state */
 		p->p_md.md_flags &= ~MDP_USEDFPU;
-		sfp->fp_fxsave.fx_fcw = __INITIAL_NPXCW__;
-		sfp->fp_fxsave.fx_mxcsr = __INITIAL_MXCSR__;
 	}
 
 	sip = 0;
@@ -1010,12 +1011,9 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	/* If we were using the FPU, forget about it. */
 	if (p->p_addr->u_pcb.pcb_fpcpu != NULL)
 		fpusave_proc(p, 0);
-
 	p->p_md.md_flags &= ~MDP_USEDFPU;
+
 	pcb->pcb_flags = 0;
-	pcb->pcb_savefpu.fp_fxsave.fx_fcw = __INITIAL_NPXCW__;
-	pcb->pcb_savefpu.fp_fxsave.fx_mxcsr = __INITIAL_MXCSR__;
-	pcb->pcb_savefpu.fp_fxsave.fx_mxcsr_mask = __INITIAL_MXCSR_MASK__;
 
 	tf = p->p_md.md_regs;
 	tf->tf_ds = LSEL(LUDATA_SEL, SEL_UPL);
@@ -1703,11 +1701,6 @@ void
 cpu_initclocks(void)
 {
 	(*initclock_func)();
-
-	if (initclock_func == i8254_initclocks)
-		i8254_inittimecounter();
-	else
-		i8254_inittimecounter_simple();
 }
 
 void

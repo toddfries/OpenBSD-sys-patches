@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.688 2010/07/05 22:20:22 tedu Exp $
+#	$OpenBSD: GENERIC,v 1.695 2010/08/08 14:27:42 kettenis Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -60,6 +60,7 @@ acpimadt0	at acpi?
 acpiprt*	at acpi?
 acpitz*		at acpi?
 acpiasus*	at acpi?
+acpisony*	at acpi?
 acpithinkpad*	at acpi?
 acpivideo*	at acpi?
 acpivout*	at acpivideo?
@@ -337,7 +338,7 @@ option	WSDISPLAY_COMPAT_RAWKBD		# provide raw scancodes; needed for X11
 option	WSDISPLAY_DEFAULTSCREENS=6	# initial number of text consoles
 option	WSDISPLAY_COMPAT_PCVT		# emulate some ioctls; needed for X11
 
-pckbc0		at isa?		# PC keyboard controller
+pckbc0		at isa? flags 0x00	# PC keyboard controller
 pckbd*		at pckbc?	# PC keyboard
 pms*		at pckbc?	# PS/2 mouse for wsmouse
 pmsi*		at pckbc?	# PS/2 "Intelli"mouse for wsmouse
@@ -620,7 +621,7 @@ re*	at cardbus?			# Realtek 8169/8169S/8110S
 stge*	at pci?				# Sundance TC9021 GigE
 lge*	at pci?				# Level1 LXT1001 GigE
 hme*	at pci?				# Sun Happy Meal
-bce*	at pci?				# Broadcom BCM4401
+#bce*	at pci?				# Broadcom BCM4401
 vge*	at pci?				# VIA VT612x
 nfe*	at pci?				# NVIDIA nForce Ethernet
 musycc*	at pci?				# Conexant HDLC controller
@@ -736,18 +737,8 @@ ym*	at isapnp?
 mpu*	at isapnp?
 mpu*	at isa? port 0x300		# generic MPU, Yamaha SW60XG
 
-# OPL[23] FM synthesizers
-#opl0	at isa? port 0x388	# use only if not attached to sound card
-opl*	at eso?
-opl*	at sb?
-opl*	at ess?
-opl*	at yds?
-opl*	at cmpci?
-
 # MIDI support
-midi*	at pcppi?		# MIDI interface to the PC speaker
 midi*	at sb?			# SB MPU401 port
-midi*	at opl?			# OPL FM synth
 midi*	at ym?
 midi*	at mpu?
 midi*	at autri?
@@ -837,6 +828,7 @@ option ONEWIREVERBOSE
 owid*	at onewire?		# ID
 owsbm*	at onewire?		# Smart Battery Monitor
 owtemp* at onewire?		# Temperature
+owctr*	at onewire?		# Counter device
 
 pseudo-device	pctr		1
 pseudo-device	mtrr		1	# Memory range attributes control

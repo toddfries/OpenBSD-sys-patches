@@ -1,4 +1,4 @@
-/* $OpenBSD: acpidev.h,v 1.28 2009/06/02 23:03:34 jordan Exp $ */
+/* $OpenBSD: acpidev.h,v 1.32 2010/08/06 21:12:27 marco Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
@@ -259,9 +259,6 @@ struct acpicpu_pct {
 struct acpiac_softc {
 	struct device		sc_dev;
 
-	bus_space_tag_t		sc_iot;
-	bus_space_handle_t	sc_ioh;
-
 	struct acpi_softc	*sc_acpi;
 	struct aml_node		*sc_devnode;
 
@@ -273,9 +270,6 @@ struct acpiac_softc {
 
 struct acpibat_softc {
 	struct device		sc_dev;
-
-	bus_space_tag_t		sc_iot;
-	bus_space_handle_t	sc_ioh;
 
 	struct acpi_softc	*sc_acpi;
 	struct aml_node		*sc_devnode;
@@ -292,9 +286,6 @@ TAILQ_HEAD(aml_nodelisth, aml_nodelist);
 
 struct acpidock_softc {
 	struct device		sc_dev;
-
-	bus_space_tag_t		sc_iot;
-	bus_space_handle_t	sc_ioh;
 
 	struct acpi_softc	*sc_acpi;
 	struct aml_node		*sc_devnode;
@@ -314,6 +305,7 @@ struct acpidock_softc {
 };
 
 #define ACPIDOCK_EVENT_INSERT	0
+#define ACPIDOCK_EVENT_DEVCHECK 1
 #define	ACPIDOCK_EVENT_EJECT	3
 
 #define ACPIEC_MAX_EVENTS	256
@@ -324,6 +316,8 @@ struct acpiec_event {
 
 struct acpiec_softc {
 	struct device		sc_dev;
+
+	int			sc_ecbusy;
 
 	/* command/status register */
 	bus_space_tag_t		sc_cmd_bt;
@@ -340,4 +334,6 @@ struct acpiec_softc {
 	int			sc_gotsci;
 };
 
+void		acpibtn_disable_psw(void);
+void		acpibtn_enable_psw(void);
 #endif /* __DEV_ACPI_ACPIDEV_H__ */

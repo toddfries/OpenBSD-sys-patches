@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.478 2010/07/05 22:20:22 tedu Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.481 2010/08/05 21:10:09 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -242,6 +242,7 @@ void (*update_cpuspeed)(void) = NULL;
 void	via_update_sensor(void *args);
 #endif
 int kbd_reset;
+int lid_suspend;
 
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
@@ -401,7 +402,7 @@ cpu_startup()
 	initmsgbuf((caddr_t)msgbufp, round_page(MSGBUFSIZE));
 
 	printf("%s", version);
-	startrtclock();
+	startclocks();
 
 	/*
 	 * We need to call identifycpu here early, so users have at least some
@@ -2179,7 +2180,6 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
     union sigval val)
 {
 	struct proc *p = curproc;
-	union savefpu *sfp = &p->p_addr->u_pcb.pcb_savefpu;
 	struct trapframe *tf = p->p_md.md_regs;
 	struct sigframe *fp, frame;
 	struct sigacts *psp = p->p_sigacts;
@@ -2213,11 +2213,6 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 
 		/* Signal handlers get a completely clean FP state */
 		p->p_md.md_flags &= ~MDP_USEDFPU;
-		if (i386_use_fxsave) {
-			sfp->sv_xmm.sv_env.en_cw = __OpenBSD_NPXCW__;
-			sfp->sv_xmm.sv_env.en_mxcsr = __INITIAL_MXCSR__;
-		} else
-			sfp->sv_87.sv_env.en_cw = __OpenBSD_NPXCW__;
 	}
 
 	fp = (struct sigframe *)sp - 1;
@@ -2696,6 +2691,7 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	/* If we were using the FPU, forget about it. */
 	if (pcb->pcb_fpcpu != NULL)
 		npxsave_proc(p, 0);
+	p->p_md.md_flags &= ~MDP_USEDFPU;
 #endif
 
 #ifdef USER_LDT
@@ -2720,13 +2716,6 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	 * And reset the hiexec marker in the pmap.
 	 */
 	pmap->pm_hiexec = 0;
-
-	p->p_md.md_flags &= ~MDP_USEDFPU;
-	if (i386_use_fxsave) {
-		pcb->pcb_savefpu.sv_xmm.sv_env.en_cw = __OpenBSD_NPXCW__;
-		pcb->pcb_savefpu.sv_xmm.sv_env.en_mxcsr = __INITIAL_MXCSR__;
-	} else
-		pcb->pcb_savefpu.sv_87.sv_env.en_cw = __OpenBSD_NPXCW__;
 
 	tf->tf_fs = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_gs = GSEL(GUDATA_SEL, SEL_UPL);
@@ -3303,12 +3292,7 @@ cpu_reset()
 void
 cpu_initclocks(void)
 {
-	(*initclock_func)();
-
-	if (initclock_func == i8254_initclocks)
-		i8254_inittimecounter();
-	else
-		i8254_inittimecounter_simple();
+	(*initclock_func)();		/* lapic or i8254 */
 }
 
 void
@@ -3428,6 +3412,8 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (sysctl_rdint(oldp, oldlenp, newp, i386_has_sse2));
 	case CPU_XCRYPT:
 		return (sysctl_rdint(oldp, oldlenp, newp, i386_has_xcrypt));
+	case CPU_LIDSUSPEND:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &lid_suspend));
 	default:
 		return (EOPNOTSUPP);
 	}

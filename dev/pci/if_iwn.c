@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwn.c,v 1.97 2010/06/05 18:52:47 damien Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.102 2010/08/12 16:59:29 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -33,6 +33,7 @@
 #include <sys/conf.h>
 #include <sys/device.h>
 #include <sys/sensors.h>
+#include <sys/workq.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -104,6 +105,8 @@ void		iwn_sensor_attach(struct iwn_softc *);
 void		iwn_radiotap_attach(struct iwn_softc *);
 #endif
 int		iwn_detach(struct device *, int);
+int		iwn_activate(struct device *, int);
+void		iwn_resume(void *, void *);
 void		iwn_power(int, void *);
 int		iwn_nic_lock(struct iwn_softc *);
 int		iwn_eeprom_lock(struct iwn_softc *);
@@ -331,7 +334,8 @@ struct cfdriver iwn_cd = {
 };
 
 struct cfattach iwn_ca = {
-	sizeof (struct iwn_softc), iwn_match, iwn_attach, iwn_detach
+	sizeof (struct iwn_softc), iwn_match, iwn_attach, iwn_detach,
+	iwn_activate
 };
 
 int
@@ -737,16 +741,44 @@ iwn_detach(struct device *self, int flags)
 	return 0;
 }
 
+int
+iwn_activate(struct device *self, int act)
+{
+	struct iwn_softc *sc = (struct iwn_softc *)self;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			iwn_stop(ifp, 0);
+		break;
+	case DVACT_RESUME:
+		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
+		    iwn_resume, sc, NULL);
+		break;
+	}
+
+	return 0;
+}
+
+void
+iwn_resume(void *arg1, void *arg2)
+{
+	iwn_power(PWR_RESUME, arg1);
+}
+
 void
 iwn_power(int why, void *arg)
 {
 	struct iwn_softc *sc = arg;
-	struct ifnet *ifp;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	pcireg_t reg;
 	int s;
 
-	if (why != PWR_RESUME)
+	if (why != PWR_RESUME) {
+		iwn_stop(ifp, 0);
 		return;
+	}
 
 	/* Clear device-specific "PCI retry timeout" register (41h). */
 	reg = pci_conf_read(sc->sc_pct, sc->sc_pcitag, 0x40);
@@ -754,12 +786,15 @@ iwn_power(int why, void *arg)
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, reg);
 
 	s = splnet();
-	ifp = &sc->sc_ic.ic_if;
-	if (ifp->if_flags & IFF_UP) {
-		ifp->if_init(ifp);
-		if (ifp->if_flags & IFF_RUNNING)
-			ifp->if_start(ifp);
-	}
+	while (sc->sc_flags & IWN_FLAG_BUSY)
+		tsleep(&sc->sc_flags, 0, "iwnpwr", 0);
+	sc->sc_flags |= IWN_FLAG_BUSY;
+
+	if (ifp->if_flags & IFF_UP)
+		iwn_init(ifp);
+
+	sc->sc_flags &= ~IWN_FLAG_BUSY;
+	wakeup(&sc->sc_flags);
 	splx(s);
 }
 
@@ -3079,9 +3114,11 @@ iwn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	 * Prevent processes from entering this function while another
 	 * process is tsleep'ing in it.
 	 */
-	if (sc->sc_flags & IWN_FLAG_BUSY) {
+	while ((sc->sc_flags & IWN_FLAG_BUSY) && error == 0)
+		error = tsleep(&sc->sc_flags, PCATCH, "iwnioc", 0);
+	if (error != 0) {
 		splx(s);
-		return EBUSY;
+		return error;
 	}
 	sc->sc_flags |= IWN_FLAG_BUSY;
 
@@ -3145,6 +3182,7 @@ iwn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	}
 
 	sc->sc_flags &= ~IWN_FLAG_BUSY;
+	wakeup(&sc->sc_flags);
 	splx(s);
 	return error;
 }
@@ -5676,7 +5714,6 @@ iwn_hw_stop(struct iwn_softc *sc)
 {
 	const struct iwn_hal *hal = sc->sc_hal;
 	int chnl, qid, ntries;
-	uint32_t tmp;
 
 	IWN_WRITE(sc, IWN_RESET, IWN_RESET_NEVO);
 
@@ -5697,8 +5734,7 @@ iwn_hw_stop(struct iwn_softc *sc)
 		for (chnl = 0; chnl < hal->ndmachnls; chnl++) {
 			IWN_WRITE(sc, IWN_FH_TX_CONFIG(chnl), 0);
 			for (ntries = 0; ntries < 200; ntries++) {
-				tmp = IWN_READ(sc, IWN_FH_TX_STATUS);
-				if ((tmp & IWN_FH_TX_STATUS_IDLE(chnl)) ==
+				if (IWN_READ(sc, IWN_FH_TX_STATUS) &
 				    IWN_FH_TX_STATUS_IDLE(chnl))
 					break;
 				DELAY(10);
