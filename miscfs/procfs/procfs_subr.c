@@ -111,7 +111,7 @@ loop:
 		}
 	}
 
-	if ((error = getnewvnode(VT_PROCFS, mp, procfs_vnodeop_p, vpp)) != 0)
+	if ((error = getnewvnode(VT_PROCFS, mp, &procfs_vops, vpp)) != 0)
 		goto out;
 	vp = *vpp;
 
