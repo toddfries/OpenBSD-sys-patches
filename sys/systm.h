@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.81 2010/07/08 20:15:01 deraadt Exp $	*/
+/*	$OpenBSD: systm.h,v 1.83 2010/08/27 04:09:21 deraadt Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -213,8 +213,8 @@ int	copyin(const void *, void *, size_t)
 int	copyout(const void *, void *, size_t);
 
 struct timeval;
-int	hzto(struct timeval *);
-int	tvtohz(struct timeval *);
+int	hzto(const struct timeval *);
+int	tvtohz(const struct timeval *);
 void	realitexpire(void *);
 
 struct clockframe;
@@ -300,9 +300,8 @@ void	dohooks(struct hook_desc_head *, int);
 void	*powerhook_establish(void (*)(int, void *), void *);
 void	powerhook_disestablish(void *);
 void	dopowerhooks(int);
-#define PWR_RESUME 0
-#define PWR_SUSPEND 1
-#define PWR_STANDBY 2
+#define PWR_RESUME 3
+#define PWR_SUSPEND 2
 
 struct uio;
 int	uiomove(void *, int, struct uio *);
