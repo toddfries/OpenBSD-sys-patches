@@ -1,7 +1,7 @@
-/*	$OpenBSD: sdhcvar.h,v 1.4 2010/08/27 15:41:43 deraadt Exp $	*/
+/*	$OpenBSD: elf64.c,v 1.1 2010/08/16 13:04:52 kettenis Exp $	*/
 
 /*
- * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
+ * Copyright (c) 2010 Mark Kettenis
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -16,29 +16,21 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#ifndef _SDHCVAR_H_
-#define _SDHCVAR_H_
+#include <lib/libkern/libkern.h>
+#include <lib/libsa/stand.h>
 
-#include <machine/bus.h>
+#include <sys/param.h>
+#include <sys/exec.h>
 
-struct sdhc_host;
+#include "../../../../lib/libsa/loadfile.h"
 
-struct sdhc_softc {
-	struct device sc_dev;
-	struct sdhc_host **sc_host;
-	int sc_nhosts;
-	u_int sc_flags;
-};
+#undef ELFSIZE
+#define ELFSIZE  64
 
-/* Host controller functions called by the attachment driver. */
-int	sdhc_host_found(struct sdhc_softc *, bus_space_tag_t,
-	    bus_space_handle_t, bus_size_t, int);
-int	sdhc_activate(struct device *, int);
-void	sdhc_powerhook(int, void *);
-void	sdhc_shutdown(void *);
-int	sdhc_intr(void *);
+#include <sys/exec_elf.h>
 
-/* flag values */
-#define SDHC_F_NOPWR0		(1 << 0)
-
-#endif
+int
+ELFNAME(exec)(int fd, Elf_Ehdr *elf, u_long *marks, int flags)
+{
+	return 1;
+}
