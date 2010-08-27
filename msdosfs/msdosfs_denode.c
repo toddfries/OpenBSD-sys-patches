@@ -168,7 +168,7 @@ deget(struct msdosfsmount *pmp, uint32_t dirclust, uint32_t diroffset,
     struct denode **depp)
 {
 	int error;
-	extern int (**msdosfs_vnodeop_p)(void *);
+	extern struct vops msdosfs_vops;
 	struct direntry *direntptr;
 	struct denode *ldep;
 	struct vnode *nvp;
@@ -211,8 +211,7 @@ retry:
 	 * copy it from the passed disk buffer.
 	 */
 	/* getnewvnode() does a vref() on the vnode */
-	error = getnewvnode(VT_MSDOSFS, pmp->pm_mountp,
-			    msdosfs_vnodeop_p, &nvp);
+	error = getnewvnode(VT_MSDOSFS, pmp->pm_mountp, &msdosfs_vops, &nvp);
 	if (error) {
 		*depp = 0;
 		return (error);
