@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccbb.c,v 1.76 2010/06/30 19:46:30 blambert Exp $	*/
+/*	$OpenBSD: pccbb.c,v 1.78 2010/08/27 04:09:20 deraadt Exp $	*/
 /*	$NetBSD: pccbb.c,v 1.96 2004/03/28 09:49:31 nakayama Exp $	*/
 
 /*
@@ -176,7 +176,8 @@ void	cb_show_regs(pci_chipset_tag_t, pcitag_t, bus_space_tag_t,
 #endif
 
 struct cfattach cbb_pci_ca = {
-	sizeof(struct pccbb_softc), pcicbbmatch, pccbbattach
+	sizeof(struct pccbb_softc), pcicbbmatch, pccbbattach, NULL,
+	config_activate_children
 };
 
 static struct pcmcia_chip_functions pccbb_pcmcia_funcs = {
@@ -2827,7 +2828,7 @@ pccbb_powerhook(int why, void *arg)
 
 	DPRINTF(("%s: power: why %d\n", sc->sc_dev.dv_xname, why));
 
-	if (why == PWR_SUSPEND || why == PWR_STANDBY) {
+	if (why == PWR_SUSPEND) {
 		DPRINTF(("%s: power: why %d stopping intr\n",
 		    sc->sc_dev.dv_xname, why));
 		if (sc->sc_pil_intr_enable) {
