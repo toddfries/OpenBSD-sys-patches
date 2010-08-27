@@ -190,9 +190,7 @@ sbt_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* Enable the HCI packet transport read interrupt. */
-	SDMMC_LOCK(sc->sc_sf->sc);
 	CSR_WRITE_1(sc, SBT_REG_IENA, ISTAT_INTRD);
-	SDMMC_UNLOCK(sc->sc_sf->sc);
 
 	/* Enable the card interrupt for this function. */
 	sc->sc_ih = sdmmc_intr_establish(parent, sbt_intr, sc, DEVNAME(sc));
