@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2560.c,v 1.49 2010/08/04 19:48:33 damien Exp $  */
+/*	$OpenBSD: rt2560.c,v 1.53 2010/08/27 17:08:00 jsg Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006
@@ -265,7 +265,6 @@ rt2560_attach(void *xsc, int id)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = rt2560_init;
 	ifp->if_ioctl = rt2560_ioctl;
 	ifp->if_start = rt2560_start;
 	ifp->if_watchdog = rt2560_watchdog;
@@ -341,15 +340,17 @@ rt2560_suspend(void *xsc)
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 
 	if (ifp->if_flags & IFF_RUNNING)
-		rt2560_stop(ifp, 0);
+		rt2560_stop(ifp, 1);
 }
 
 void
 rt2560_resume(void *xsc)
 {
 	struct rt2560_softc *sc = xsc;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
 
-	rt2560_power(PWR_RESUME, sc);
+	if (ifp->if_flags & IFF_UP)
+		rt2560_init(ifp);
 }
 
 int
@@ -2732,23 +2733,15 @@ void
 rt2560_power(int why, void *arg)
 {
 	struct rt2560_softc *sc = arg;
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int s;
 
 	s = splnet();
 	switch (why) {
 	case PWR_SUSPEND:
-	case PWR_STANDBY:
-		rt2560_stop(ifp, 0);
-		if (sc->sc_power != NULL)
-			(*sc->sc_power)(sc, why);
+		rt2560_suspend(sc);
 		break;
 	case PWR_RESUME:
-		if (ifp->if_flags & IFF_UP) {
-			rt2560_init(ifp);
-			if (sc->sc_power != NULL)
-				(*sc->sc_power)(sc, why);
-		}
+		rt2560_resume(sc);
 		break;
 	}
 	splx(s);
