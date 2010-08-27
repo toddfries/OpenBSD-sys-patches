@@ -1,4 +1,4 @@
-/*	$OpenBSD: pgt.c,v 1.61 2010/08/07 16:16:18 kettenis Exp $  */
+/*	$OpenBSD: pgt.c,v 1.63 2010/08/27 17:08:00 jsg Exp $  */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -1891,7 +1891,6 @@ pgt_net_attach(struct pgt_softc *sc)
 		return (error);
 
 	ifp->if_softc = sc;
-	ifp->if_init = pgt_init;
 	ifp->if_ioctl = pgt_ioctl;
 	ifp->if_start = pgt_start;
 	ifp->if_watchdog = pgt_watchdog;
@@ -3325,7 +3324,6 @@ pgt_power(int why, void *arg)
 	s = splnet();
 
 	switch (why) {
-	case PWR_STANDBY:
 	case PWR_SUSPEND:
 		pgt_stop(sc, SC_NEEDS_RESET);
 		pgt_update_hw_from_sw(sc, 0, 0);
