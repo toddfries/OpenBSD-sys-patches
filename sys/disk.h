@@ -1,4 +1,4 @@
-/*	$OpenBSD: disk.h,v 1.21 2010/05/03 15:27:28 jsing Exp $	*/
+/*	$OpenBSD: disk.h,v 1.23 2010/08/30 16:53:28 jsing Exp $	*/
 /*	$NetBSD: disk.h,v 1.11 1996/04/28 20:22:50 thorpej Exp $	*/
 
 /*
@@ -76,6 +76,7 @@ struct disk {
 	struct rwlock	dk_lock;	/* disk lock */
 	struct mutex	dk_mtx;		/* busy/unbusy mtx */
 	char		*dk_name;	/* disk name */
+	dev_t		dk_devno;	/* disk device number. */
 	int		dk_flags;	/* disk flags */
 #define DKF_CONSTRUCTED  0x0001
 
@@ -100,28 +101,13 @@ struct disk {
 	int		dk_blkshift;	/* shift to convert DEV_BSIZE to blks*/
 	int		dk_byteshift;	/* shift to convert bytes to blks */
 
-	struct	dkdriver *dk_driver;	/* pointer to driver */
-
 	/*
 	 * Disk label information.  Storage for the in-core disk label
 	 * must be dynamically allocated, otherwise the size of this
 	 * structure becomes machine-dependent.
 	 */
-	daddr64_t	dk_labelsector;		/* sector containing label */
+	daddr64_t	dk_labelsector;	/* sector containing label */
 	struct disklabel *dk_label;	/* label */
-};
-
-struct dkdriver {
-	void	(*d_strategy)(struct buf *);
-#ifdef notyet
-	int	(*d_open)(dev_t dev, int ifmt, int, struct proc *);
-	int	(*d_close)(dev_t dev, int, int ifmt, struct proc *);
-	int	(*d_ioctl)(dev_t dev, u_long cmd, caddr_t data, int fflag,
-				struct proc *);
-	int	(*d_dump)(dev_t);
-	void	(*d_start)(struct buf *, daddr64_t);
-	int	(*d_mklabel)(struct disk *);
-#endif
 };
 
 /* states */
@@ -157,6 +143,7 @@ struct disksort_stats {
 TAILQ_HEAD(disklist_head, disk);	/* the disklist is a TAILQ */
 
 #ifdef _KERNEL
+extern	struct disklist_head disklist;	/* list of disks attached to system */
 extern	int disk_count;			/* number of disks in global disklist */
 extern	int disk_change;		/* disk attached/detached */
 
