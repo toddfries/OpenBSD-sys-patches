@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.183 2010/08/08 05:25:30 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.186 2010/08/31 17:26:57 deraadt Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -36,7 +36,6 @@
  *
  *
  * TO DO:
- *  - power hook
  *  - multiple codecs (needed?)
  *  - multiple streams (needed?)
  */
@@ -536,26 +535,27 @@ err_exit:
 int
 azalia_pci_activate(struct device *self, int act)
 {
-	azalia_t *sc;
-	int ret;
+	azalia_t *sc = (azalia_t*)self;
+	int rv = 0; 
 
-	sc = (azalia_t*)self;
-	ret = 0;
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return ret;
-	case DVACT_DEACTIVATE:
-		if (sc->audiodev != NULL)
-			ret = config_deactivate(sc->audiodev);
-		return ret;
+		break;
+	case DVACT_QUIESCE:
+		/* XXX to be filled by jakemsr */
+		break;
 	case DVACT_SUSPEND:
 		azalia_suspend(sc);
-		return ret;
+		break;
 	case DVACT_RESUME:
 		azalia_resume(sc);
-		return ret;
+		break;
+	case DVACT_DEACTIVATE:
+		if (sc->audiodev != NULL)
+			rv = config_deactivate(sc->audiodev);
+		break;
 	}
-	return EOPNOTSUPP;
+	return (rv);
 }
 
 int
