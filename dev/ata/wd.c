@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.88 2010/07/23 07:47:13 jsg Exp $ */
+/*	$OpenBSD: wd.c,v 1.90 2010/08/31 17:00:32 deraadt Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -176,8 +176,6 @@ int   wd_get_params(struct wd_softc *, u_int8_t, struct ataparams *);
 void  wd_flushcache(struct wd_softc *, int);
 void  wd_standby(struct wd_softc *, int);
 void  wd_shutdown(void *);
-
-struct dkdriver wddkdriver = { wdstrategy };
 
 /* XXX: these should go elsewhere */
 cdev_decl(wd);
@@ -362,7 +360,6 @@ wdattach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Initialize disk structures.
 	 */
-	wd->sc_dk.dk_driver = &wddkdriver;
 	wd->sc_dk.dk_name = wd->sc_dev.dv_xname;
 	wd->sc_bufq = bufq_init(BUFQ_DEFAULT);
 	wd->sc_sdhook = shutdownhook_establish(wd_shutdown, wd);
@@ -385,12 +382,6 @@ wdactivate(struct device *self, int act)
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
-
-	case DVACT_DEACTIVATE:
-		/*
-		* Nothing to do; we key off the device's DVF_ACTIVATE.
-		*/
-		break;
 	case DVACT_SUSPEND:
 		wd_flushcache(wd, AT_POLL);
 		wd_standby(wd, AT_POLL);
@@ -406,6 +397,11 @@ wdactivate(struct device *self, int act)
 		delay(10000);
 		wdc_reset_channel(wd->drvp);
 		wdc_enable_intr(wd->drvp->chnl_softc);
+		break;
+	case DVACT_DEACTIVATE:
+		/*
+		* Nothing to do; we key off the device's DVF_ACTIVATE.
+		*/
 		break;
 	}
 	return (rv);
