@@ -1,4 +1,4 @@
-/*	$OpenBSD: auich.c,v 1.86 2010/08/09 05:43:48 jakemsr Exp $	*/
+/*	$OpenBSD: auich.c,v 1.89 2010/08/31 17:13:44 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2000,2001 Michael Shalayeff
@@ -565,23 +565,26 @@ int
 auich_activate(struct device *self, int act)
 {
 	struct auich_softc *sc = (struct auich_softc *)self;
-	int ret = 0;
+	int rv = 0;
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return ret;
-	case DVACT_DEACTIVATE:
-		if (sc->audiodev != NULL)
-			ret = config_deactivate(sc->audiodev);
-		return ret;
+		break;
+	case DVACT_QUIESCE:
+		/* XXX to be filled by jakemsr */
+		break;
 	case DVACT_SUSPEND:
 		auich_suspend(sc);
-		return ret;
+		break;
 	case DVACT_RESUME:
 		auich_resume(sc);
-		return ret;
+		break;
+	case DVACT_DEACTIVATE:
+		if (sc->audiodev != NULL)
+			rv = config_deactivate(sc->audiodev);
+		break;
 	}
-	return EOPNOTSUPP;
+	return (rv);
 }
 
 int
@@ -1952,33 +1955,9 @@ auich_resume(struct auich_softc *sc)
 }
 
 void
-auich_powerhook(why, self)
-	int why;
-	void *self;
+auich_powerhook(int why, void *self)
 {
-	struct auich_softc *sc = (struct auich_softc *)self;
-
-	if (why != PWR_RESUME) {
-		/* Power down */
-		DPRINTF(1, ("auich: power down\n"));
-		sc->suspend = why;
-		auich_read_codec(sc, AC97_REG_EXT_AUDIO_CTRL, &sc->ext_ctrl);
-
-	} else {
-		/* Wake up */
-		DPRINTF(1, ("auich: power resume\n"));
-		if (sc->suspend == PWR_RESUME) {
-			printf("%s: resume without suspend?\n",
-			    sc->sc_dev.dv_xname);
-			sc->suspend = why;
-			return;
-		}
-		sc->suspend = why;
-		auich_reset_codec(sc);
-		DELAY(1000);
-		(sc->codec_if->vtbl->restore_ports)(sc->codec_if);
-		auich_write_codec(sc, AC97_REG_EXT_AUDIO_CTRL, sc->ext_ctrl);
-	}
+	auich_activate(self, why);
 }
 
 
