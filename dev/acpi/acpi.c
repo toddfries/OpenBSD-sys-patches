@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.209 2010/08/08 20:45:18 kettenis Exp $ */
+/* $OpenBSD: acpi.c,v 1.212 2010/08/31 17:13:46 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -796,6 +796,9 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_thread = malloc(sizeof(struct acpi_thread), M_DEVBUF, M_WAITOK);
 	sc->sc_thread->sc = sc;
 	sc->sc_thread->running = 1;
+
+	/* Enable PCI Power Management. */
+	pci_dopm = 1;
 
 	acpi_attach_machdep(sc);
 
@@ -1909,6 +1912,7 @@ acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
 #endif /* NWSDISPLAY > 0 */
 
 	bufq_quiesce();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_QUIESCE);
 
 	acpi_saved_spl = splhigh();
 	disable_intr();
@@ -2403,8 +2407,12 @@ acpiioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	switch (cmd) {
 	case APM_IOC_SUSPEND:
 	case APM_IOC_STANDBY:
-		sc->sc_sleepmode = ACPI_STATE_S3;
-		acpi_wakeup(sc);
+		if ((flag & FWRITE) == 0) {
+			error = EBADF;
+		} else {
+			sc->sc_sleepmode = ACPI_STATE_S3;
+			acpi_wakeup(sc);
+		}
 		break;
 	case APM_IOC_GETPOWER:
 		/* A/C */
