@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2661.c,v 1.60 2010/08/28 18:08:07 deraadt Exp $	*/
+/*	$OpenBSD: rt2661.c,v 1.62 2010/09/06 19:20:21 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -1247,6 +1247,8 @@ rt2661_intr(void *arg)
 
 	r1 = RAL_READ(sc, RT2661_INT_SOURCE_CSR);
 	r2 = RAL_READ(sc, RT2661_MCU_INT_SOURCE_CSR);
+	if (__predict_false(r1 == 0xffffffff && r2 == 0xffffffff))
+		return 0;	/* device likely went away */
 	if (r1 == 0 && r2 == 0)
 		return 0;	/* not for us */
 
@@ -2932,10 +2934,10 @@ rt2661_powerhook(int why, void *arg)
 
 	s = splnet();
 	switch (why) {
-	case PWR_SUSPEND:
+	case DVACT_SUSPEND:
 		rt2661_suspend(sc);
 		break;
-	case PWR_RESUME:
+	case DVACT_RESUME:
 		rt2661_resume(sc);
 		break;
 	}
