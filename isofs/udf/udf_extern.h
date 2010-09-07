@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_extern.h,v 1.8 2007/12/09 20:54:01 jmc Exp $	*/
+/*	$OpenBSD: udf_extern.h,v 1.9 2010/09/06 23:44:10 thib Exp $	*/
 
 /*
  * Written by Pedro Martelletto <pedro@ambientworks.net> in February 2005.

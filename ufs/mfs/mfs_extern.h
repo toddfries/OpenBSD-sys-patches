@@ -1,4 +1,4 @@
-/*	$OpenBSD: mfs_extern.h,v 1.15 2008/05/03 14:41:29 thib Exp $	*/
+/*	$OpenBSD: mfs_extern.h,v 1.16 2010/09/06 23:44:10 thib Exp $	*/
 /*	$NetBSD: mfs_extern.h,v 1.4 1996/02/09 22:31:27 christos Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_conf.c,v 1.37 2010/04/20 22:05:43 tedu Exp $	*/
+/*	$OpenBSD: vfs_conf.c,v 1.38 2010/09/06 23:44:10 thib Exp $	*/
 /*	$NetBSD: vfs_conf.c,v 1.21.4.1 1995/11/01 00:06:26 jtc Exp $	*/
 
 /*

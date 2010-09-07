@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_vfsops.c,v 1.55 2010/05/18 04:41:14 dlg Exp $	*/
+/*	$OpenBSD: ext2fs_vfsops.c,v 1.56 2010/09/06 23:44:10 thib Exp $	*/
 /*	$NetBSD: ext2fs_vfsops.c,v 1.1 1997/06/11 09:34:07 bouyer Exp $	*/
 
 /*
