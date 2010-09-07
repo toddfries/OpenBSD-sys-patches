@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2560.c,v 1.54 2010/08/28 18:08:07 deraadt Exp $  */
+/*	$OpenBSD: rt2560.c,v 1.56 2010/09/06 19:20:21 deraadt Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006
@@ -1337,7 +1337,10 @@ rt2560_intr(void *arg)
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	uint32_t r;
 
-	if ((r = RAL_READ(sc, RT2560_CSR7)) == 0)
+	r = RAL_READ(sc, RT2560_CSR7);
+	if (__predict_false(r == 0xffffffff))
+		return 0;	/* device likely went away */
+	if (r == 0)
 		return 0;	/* not for us */
 
 	/* disable interrupts */
@@ -2737,10 +2740,10 @@ rt2560_powerhook(int why, void *arg)
 
 	s = splnet();
 	switch (why) {
-	case PWR_SUSPEND:
+	case DVACT_SUSPEND:
 		rt2560_suspend(sc);
 		break;
-	case PWR_RESUME:
+	case DVACT_RESUME:
 		rt2560_resume(sc);
 		break;
 	}
