@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.185 2010/09/01 01:38:12 dlg Exp $	*/
+/*	$OpenBSD: cd.c,v 1.189 2010/09/08 15:16:22 jsing Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -114,9 +114,6 @@ struct cd_softc {
 	struct bufq	sc_bufq;
 	struct scsi_xshandler sc_xsh;
 	struct timeout sc_timeout;
-	void *sc_cdpwrhook;		/* our power hook */
-
-	struct workq_task sc_resume_wqt;
 };
 
 void	cdstart(struct scsi_xfer *);
@@ -148,9 +145,6 @@ int	dvd_read_bca(struct cd_softc *, union dvd_struct *);
 int	dvd_read_manufact(struct cd_softc *, union dvd_struct *);
 int	dvd_read_struct(struct cd_softc *, union dvd_struct *);
 
-void	cd_powerhook(int why, void *arg);
-void	cd_resume(void *, void *);
-
 #if defined(__macppc__)
 int	cd_eject(void);
 #endif
@@ -179,7 +173,7 @@ const struct scsi_inquiry_pattern cd_patterns[] = {
 
 #define cdlock(softc)   disk_lock(&(softc)->sc_dk)
 #define cdunlock(softc) disk_unlock(&(softc)->sc_dk)
-#define cdlookup(unit) (struct cd_softc *)device_lookup(&cd_cd, (unit))
+#define cdlookup(unit) (struct cd_softc *)disk_lookup(&cd_cd, (unit))
 
 int
 cdmatch(struct device *parent, void *match, void *aux)
@@ -234,12 +228,8 @@ cdattach(struct device *parent, struct device *self, void *aux)
 	timeout_set(&sc->sc_timeout, (void (*)(void *))scsi_xsh_add,
 	    &sc->sc_xsh);
 
-	if ((sc->sc_cdpwrhook = powerhook_establish(cd_powerhook, sc)) == NULL)
-		printf("%s: WARNING: unable to establish power hook\n",
-		    sc->sc_dev.dv_xname);
-
 	/* Attach disk. */
-	disk_attach(&sc->sc_dk);
+	disk_attach(&sc->sc_dev, &sc->sc_dk);
 }
 
 
@@ -258,8 +248,9 @@ cdactivate(struct device *self, int act)
 		 * there are any open partitions, lock the CD.
 		 */
 		if (sc->sc_dk.dk_openmask != 0)
-			workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
-			    cd_resume, sc, NULL);
+			scsi_prevent(sc->sc_link, PR_PREVENT,
+			    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE |
+			    SCSI_SILENT | SCSI_AUTOCONF);
 		break;			
 	case DVACT_DEACTIVATE:
 		sc->sc_flags |= CDF_DYING;
@@ -267,25 +258,6 @@ cdactivate(struct device *self, int act)
 		break;
 	}
 	return (rv);
-}
-
-void
-cd_resume(void *arg1, void *arg2)
-{
-	struct cd_softc *sc = arg1;
-
-	scsi_prevent(sc->sc_link, PR_PREVENT,
-	    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE |
-	    SCSI_SILENT);
-}
-
-void
-cd_powerhook(int why, void *arg)
-{
-	struct cd_softc *sc = arg;
-
-	if (why == DVACT_RESUME && sc->sc_dk.dk_openmask != 0)
-		cd_resume(sc, NULL);
 }
 
 int
@@ -305,10 +277,6 @@ cddetach(struct device *self, int flags)
 	for (cmaj = 0; cmaj < nchrdev; cmaj++)
 		if (cdevsw[cmaj].d_open == cdopen)
 			vdevgone(cmaj, mn, mn + MAXPARTITIONS - 1, VCHR);
-
-	/* Get rid of the power hook. */
-	if (sc->sc_cdpwrhook != NULL)
-		powerhook_disestablish(sc->sc_cdpwrhook);
 
 	/* Detach disk. */
 	bufq_destroy(&sc->sc_bufq);

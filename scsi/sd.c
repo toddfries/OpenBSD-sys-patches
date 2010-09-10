@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.209 2010/09/01 04:51:24 miod Exp $	*/
+/*	$OpenBSD: sd.c,v 1.211 2010/09/08 15:16:22 jsing Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -128,7 +128,7 @@ const struct scsi_inquiry_pattern sd_patterns[] = {
 
 #define sdlock(softc)   disk_lock(&(softc)->sc_dk)
 #define sdunlock(softc) disk_unlock(&(softc)->sc_dk)
-#define sdlookup(unit) (struct sd_softc *)device_lookup(&sd_cd, (unit))
+#define sdlookup(unit) (struct sd_softc *)disk_lookup(&sd_cd, (unit))
 
 int
 sdmatch(struct device *parent, void *match, void *aux)
@@ -261,7 +261,7 @@ sdattach(struct device *parent, struct device *self, void *aux)
 		    sc->sc_dev.dv_xname);
 
 	/* Attach disk. */
-	disk_attach(&sc->sc_dk);
+	disk_attach(&sc->sc_dev, &sc->sc_dk);
 }
 
 int
