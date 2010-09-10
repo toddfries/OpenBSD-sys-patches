@@ -1,4 +1,4 @@
-/*      $OpenBSD: glxpcib.c,v 1.6 2010/05/08 21:59:56 miod Exp $	*/
+/*      $OpenBSD: glxpcib.c,v 1.9 2010/09/07 16:59:42 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2007 Marc Balmer <mbalmer@openbsd.org>
@@ -124,12 +124,23 @@
 #define AMD5536_GPIO_IN_INVRT_EN 0x24	/* invert input */
 #define	AMD5536_GPIO_READ_BACK	0x30	/* read back value */
 
+/*
+ * MSR registers we want to preserve accross suspend/resume
+ */
+const uint32_t glxpcib_msrlist[] = {
+	GLIU_PAE,
+	GLCP_GLD_MSR_PM,
+	DIVIL_BALL_OPTS
+};
+
 struct glxpcib_softc {
 	struct device		sc_dev;
 
 	struct timecounter	sc_timecounter;
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
+
+	uint64_t 		sc_msrsave[nitems(glxpcib_msrlist)];
 
 #if NGPIO > 0
 	/* GPIO interface */
@@ -146,9 +157,11 @@ struct cfdriver glxpcib_cd = {
 
 int	glxpcib_match(struct device *, void *, void *);
 void	glxpcib_attach(struct device *, struct device *, void *);
+int	glxpcib_activate(struct device *, int);
 
 struct cfattach glxpcib_ca = {
-	sizeof(struct glxpcib_softc), glxpcib_match, glxpcib_attach
+	sizeof(struct glxpcib_softc), glxpcib_match, glxpcib_attach,
+	NULL, glxpcib_activate
 };
 
 /* from arch/<*>/pci/pcib.c */
@@ -263,6 +276,29 @@ glxpcib_attach(struct device *parent, struct device *self, void *aux)
 	if (gpio)
 		config_found(&sc->sc_dev, &gba, gpiobus_print);
 #endif
+}
+
+int
+glxpcib_activate(struct device *self, int act)
+{
+	struct glxpcib_softc *sc = (struct glxpcib_softc *)self;
+	int rv = 0;
+	uint i;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
+		for (i = 0; i < nitems(glxpcib_msrlist); i++)
+			sc->sc_msrsave[i] = rdmsr(glxpcib_msrlist[i]);
+		break;
+	case DVACT_RESUME:
+		for (i = 0; i < nitems(glxpcib_msrlist); i++)
+			wrmsr(glxpcib_msrlist[i], sc->sc_msrsave[i]);
+		rv = config_activate_children(self, act);
+		break;
+	}
+
+	return rv;
 }
 
 u_int
