@@ -82,7 +82,7 @@ extern struct vnode *speclisth[SPECHSZ];
 /*
  * Prototypes for special file operations on vnodes.
  */
-extern struct vops spec_vops;
+extern	int (**spec_vnodeop_p)(void *);
 struct	nameidata;
 struct	componentname;
 struct	ucred;
@@ -107,6 +107,8 @@ int	spec_strategy(void *);
 int	spec_print(void *);
 int	spec_pathconf(void *);
 int	spec_advlock(void *);
+
+int	spec_vnoperate(void *);
 
 /* spec_subr.c */
 int	spec_open_clone(struct vop_open_args *);

@@ -61,5 +61,7 @@ extern struct pool udf_trans_pool;
 extern struct pool unode_pool;
 extern struct pool udf_ds_pool;
 
-/* Set of UDF vnode operations.*/
-extern struct vops udf_vops;
+/*
+ * Set of UDF vnode operations.
+ */
+extern int (**udf_vnodeop_p)(void *);

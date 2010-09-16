@@ -99,10 +99,10 @@ int cd9660_check_export(struct mount *, struct mbuf *, int *,
 
 int cd9660_mountroot(void); 
 
-extern struct vops	cd9660_vops;
-extern struct vops	cd9660_specvops;
+extern int (**cd9660_vnodeop_p)(void *);
+extern int (**cd9660_specop_p)(void *);
 #ifdef FIFO
-extern struct vops	cd9660_fifovops;
+extern int (**cd9660_fifoop_p)(void *);
 #endif
 
 int isochar(const u_char *, const u_char *, int, u_char *);

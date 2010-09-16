@@ -43,8 +43,7 @@ struct vfsconf;
 struct mbuf;
 struct mfsnode;
 
-extern struct vops mfs_vops;
-
+__BEGIN_DECLS
 /* mfs_vfsops.c */
 int mfs_mount(struct mount *, const char *, void *, struct nameidata *,
     struct proc *);
@@ -65,3 +64,4 @@ int mfs_print(void *);
 #define	mfs_revoke vop_generic_revoke
 int mfs_badop(void *);
 
+__END_DECLS

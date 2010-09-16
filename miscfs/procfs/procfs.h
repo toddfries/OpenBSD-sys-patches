@@ -135,7 +135,7 @@ int procfs_rw(void *);
 #define PROCFS_LOCKED	0x01
 #define PROCFS_WANT	0x02
 
-extern struct vops procfs_vops;
+extern int (**procfs_vnodeop_p)(void *);
 extern const struct vfsops procfs_vfsops;
 
 struct vfsconf;

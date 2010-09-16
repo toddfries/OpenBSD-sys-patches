@@ -8,11 +8,15 @@ ARCH=	alpha amd64 armish aviion beagle hp300 \
 	mvme88k mvmeppc palm sgi socppc \
 	solbourne sparc sparc64 vax zaurus
 
-all:	init_sysent.c
+all:	init_sysent.c vnode_if.c
 
 SYSCALLSRC = makesyscalls.sh syscalls.conf syscalls.master
 init_sysent.c syscalls.c ../sys/syscall.h ../sys/syscallargs.h: ${SYSCALLSRC}
 	sh makesyscalls.sh syscalls.conf syscalls.master
+
+VNODEIFSRC = vnode_if.sh vnode_if.src
+vnode_if.c ../sys/vnode_if.h: ${VNODEIFSRC}
+	sh vnode_if.sh vnode_if.src
 
 # Kernel tags:
 # tags files are built in the top-level directory for each architecture.

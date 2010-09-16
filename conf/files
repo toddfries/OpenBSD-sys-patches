@@ -766,9 +766,9 @@ file kern/vfs_lookup.c
 file kern/vfs_subr.c
 file kern/vfs_sync.c
 file kern/vfs_syscalls.c
-file kern/vfs_vops.c
 file kern/vfs_vnops.c
 file kern/vfs_getcwd.c
+file kern/vnode_if.c
 file miscfs/deadfs/dead_vnops.c
 file miscfs/fifofs/fifo_vnops.c		fifo
 file miscfs/portal/portal_vfsops.c	portal

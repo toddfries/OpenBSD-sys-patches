@@ -904,7 +904,7 @@ swap_on(struct proc *p, struct swapdev *sdp)
 	long addr;
 	struct vattr va;
 #if defined(NFSCLIENT)
-	extern struct vops nfs_vops;
+	extern int (**nfsv2_vnodeop_p)(void *);
 #endif /* defined(NFSCLIENT) */
 	dev_t dev;
 	UVMHIST_FUNC("swap_on"); UVMHIST_CALLED(pdhist);
@@ -965,7 +965,7 @@ swap_on(struct proc *p, struct swapdev *sdp)
 		 * at any one time.   take it easy on NFS servers.
 		 */
 #if defined(NFSCLIENT)
-		if (vp->v_op == &nfs_vops)
+		if (vp->v_op == nfsv2_vnodeop_p)
 			sdp->swd_maxactive = 2; /* XXX */
 		else
 #endif /* defined(NFSCLIENT) */

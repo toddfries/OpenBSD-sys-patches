@@ -685,7 +685,7 @@ udf_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 		 */
 		nvp->v_data = vp->v_data;
 		vp->v_data = NULL;
-		vp->v_op = &spec_vops;
+		vp->v_op = spec_vnodeop_p;
 		vrele(vp);
 		vgone(vp);
 		/*

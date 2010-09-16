@@ -53,4 +53,8 @@ int	fifo_pathconf(void *);
 int	fifo_advlock(void *);
 
 void 	fifo_printinfo(struct vnode *);
+int	fifo_vnoperate(void *);
+
+extern int (**fifo_vnodeop_p)(void *);
+
 #endif /* FIFO */
