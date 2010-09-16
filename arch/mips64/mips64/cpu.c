@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.32 2010/08/30 08:52:10 syuu Exp $ */
+/*	$OpenBSD: cpu.c,v 1.35 2010/09/13 21:59:07 syuu Exp $ */
 
 /*
  * Copyright (c) 1997-2004 Opsycon AB (www.opsycon.se)
@@ -105,21 +105,8 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	ci->ci_dev = dev;
 	bcopy(ch, &ci->ci_hw, sizeof(struct cpu_hwinfo));
 #ifdef MULTIPROCESSOR
-	/*
-	 * When attaching secondary processors, cache information is not
-	 * available yet.  But since the MP-capable systems we run on
-	 * currently all have R10k-style caches, we can quickly compute
-	 * the needed values.
-	 */
-	if (!ISSET(ci->ci_flags, CPUF_PRIMARY)) {
-		ci->ci_cacheways = 2;
-		ci->ci_l1instcachesize = 32 * 1024;
-		ci->ci_l1instcacheline = 64;
-		ci->ci_l1datacachesize = 32 * 1024;
-		ci->ci_l1datacacheline = 64;
-		ci->ci_l2size = ch->l2size;
-		ci->ci_l3size = 0;
-	}
+	if (!ISSET(ci->ci_flags, CPUF_PRIMARY))
+		hw_cpu_init_secondary(ci);
 #endif
 
 	printf(": ");
@@ -182,6 +169,9 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		printf("STC Loongson2%c CPU", 'C' + vers_min);
 		displayver = 0;
 		break;
+	case MIPS_OCTEON:
+		printf("Cavium OCTEON CPU");
+		break;
 	default:
 		printf("Unknown CPU type (0x%x)", ch->type);
 		break;
@@ -191,9 +181,13 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	printf(" %d MHz, ", ch->clock / 1000000);
 
 	displayver = 1;
-	fptype = (ch->c1prid >> 8) & 0xff;
-	vers_maj = (ch->c1prid >> 4) & 0x0f;
-	vers_min = ch->c1prid & 0x0f;
+	if (ch->type == MIPS_OCTEON)
+		fptype = MIPS_SOFT;
+	else {
+		fptype = (ch->c1prid >> 8) & 0xff;
+		vers_maj = (ch->c1prid >> 4) & 0x0f;
+		vers_min = ch->c1prid & 0x0f;
+	}
 	switch (fptype) {
 	case MIPS_SOFT:
 		printf("Software FP emulation");
@@ -287,7 +281,7 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 
 #ifdef DEBUG
 	printf("cpu%d: Setsize %d:%d\n", cpuno,
-	    ci->ci_l1instset, ci->ci_l1dataset);
+	    ci->ci_l1instcacheset, ci->ci_l1datacacheset);
 	printf("cpu%d: Alias mask %p\n", cpuno, CpuCacheAliasMask);
 	printf("cpu%d: Config Register %08x\n", cpuno, cp0_get_config());
 	printf("cpu%d: Cache configuration %x\n",
