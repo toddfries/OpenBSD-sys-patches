@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_vnops.c,v 1.39 2009/08/27 23:14:47 jolan Exp $	*/
+/*	$OpenBSD: udf_vnops.c,v 1.41 2010/09/10 16:34:08 thib Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
