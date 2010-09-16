@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.185 2010/09/01 01:38:12 dlg Exp $	*/
+/*	$OpenBSD: cd.c,v 1.192 2010/09/14 04:02:43 dlg Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -108,15 +108,12 @@ struct cd_softc {
 #define CDF_WAITING	0x100
 	struct scsi_link *sc_link;	/* contains our targ, lun, etc. */
 	struct cd_parms {
-		u_int32_t blksize;
+		u_int32_t secsize;
 		daddr64_t disksize;	/* total number sectors */
-	} sc_params;
+	} params;
 	struct bufq	sc_bufq;
 	struct scsi_xshandler sc_xsh;
 	struct timeout sc_timeout;
-	void *sc_cdpwrhook;		/* our power hook */
-
-	struct workq_task sc_resume_wqt;
 };
 
 void	cdstart(struct scsi_xfer *);
@@ -148,9 +145,6 @@ int	dvd_read_bca(struct cd_softc *, union dvd_struct *);
 int	dvd_read_manufact(struct cd_softc *, union dvd_struct *);
 int	dvd_read_struct(struct cd_softc *, union dvd_struct *);
 
-void	cd_powerhook(int why, void *arg);
-void	cd_resume(void *, void *);
-
 #if defined(__macppc__)
 int	cd_eject(void);
 #endif
@@ -179,7 +173,7 @@ const struct scsi_inquiry_pattern cd_patterns[] = {
 
 #define cdlock(softc)   disk_lock(&(softc)->sc_dk)
 #define cdunlock(softc) disk_unlock(&(softc)->sc_dk)
-#define cdlookup(unit) (struct cd_softc *)device_lookup(&cd_cd, (unit))
+#define cdlookup(unit) (struct cd_softc *)disk_lookup(&cd_cd, (unit))
 
 int
 cdmatch(struct device *parent, void *match, void *aux)
@@ -234,12 +228,8 @@ cdattach(struct device *parent, struct device *self, void *aux)
 	timeout_set(&sc->sc_timeout, (void (*)(void *))scsi_xsh_add,
 	    &sc->sc_xsh);
 
-	if ((sc->sc_cdpwrhook = powerhook_establish(cd_powerhook, sc)) == NULL)
-		printf("%s: WARNING: unable to establish power hook\n",
-		    sc->sc_dev.dv_xname);
-
 	/* Attach disk. */
-	disk_attach(&sc->sc_dk);
+	disk_attach(&sc->sc_dev, &sc->sc_dk);
 }
 
 
@@ -258,34 +248,17 @@ cdactivate(struct device *self, int act)
 		 * there are any open partitions, lock the CD.
 		 */
 		if (sc->sc_dk.dk_openmask != 0)
-			workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
-			    cd_resume, sc, NULL);
+			scsi_prevent(sc->sc_link, PR_PREVENT,
+			    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE |
+			    SCSI_SILENT | SCSI_AUTOCONF);
 		break;			
 	case DVACT_DEACTIVATE:
 		sc->sc_flags |= CDF_DYING;
 		bufq_drain(&sc->sc_bufq);
+		scsi_xsh_del(&sc->sc_xsh);
 		break;
 	}
 	return (rv);
-}
-
-void
-cd_resume(void *arg1, void *arg2)
-{
-	struct cd_softc *sc = arg1;
-
-	scsi_prevent(sc->sc_link, PR_PREVENT,
-	    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE |
-	    SCSI_SILENT);
-}
-
-void
-cd_powerhook(int why, void *arg)
-{
-	struct cd_softc *sc = arg;
-
-	if (why == DVACT_RESUME && sc->sc_dk.dk_openmask != 0)
-		cd_resume(sc, NULL);
 }
 
 int
@@ -305,10 +278,6 @@ cddetach(struct device *self, int flags)
 	for (cmaj = 0; cmaj < nchrdev; cmaj++)
 		if (cdevsw[cmaj].d_open == cdopen)
 			vdevgone(cmaj, mn, mn + MAXPARTITIONS - 1, VCHR);
-
-	/* Get rid of the power hook. */
-	if (sc->sc_cdpwrhook != NULL)
-		powerhook_disestablish(sc->sc_cdpwrhook);
 
 	/* Detach disk. */
 	bufq_destroy(&sc->sc_bufq);
@@ -605,7 +574,7 @@ cdstart(struct scsi_xfer *xs)
 	struct buf *bp;
 	struct scsi_rw_big *cmd_big;
 	struct scsi_rw *cmd_small;
-	int blkno, nblks;
+	int secno, nsecs;
 	struct partition *p;
 	int read;
 
@@ -639,11 +608,11 @@ cdstart(struct scsi_xfer *xs)
 	 * First, translate the block to absolute and put it in terms
 	 * of the logical blocksize of the device.
 	 */
-	blkno =
+	secno =
 	    bp->b_blkno / (sc->sc_dk.dk_label->d_secsize / DEV_BSIZE);
 	p = &sc->sc_dk.dk_label->d_partitions[DISKPART(bp->b_dev)];
-	blkno += DL_GETPOFFSET(p);
-	nblks = howmany(bp->b_bcount, sc->sc_dk.dk_label->d_secsize);
+	secno += DL_GETPOFFSET(p);
+	nsecs = howmany(bp->b_bcount, sc->sc_dk.dk_label->d_secsize);
 
 	read = (bp->b_flags & B_READ);
 
@@ -653,16 +622,16 @@ cdstart(struct scsi_xfer *xs)
 	 */
 	if (!(sc_link->flags & SDEV_ATAPI) &&
 	    !(sc_link->quirks & SDEV_ONLYBIG) && 
-	    ((blkno & 0x1fffff) == blkno) &&
-	    ((nblks & 0xff) == nblks)) {
+	    ((secno & 0x1fffff) == secno) &&
+	    ((nsecs & 0xff) == nsecs)) {
 		/*
 		 * We can fit in a small cdb.
 		 */
 		cmd_small = (struct scsi_rw *)xs->cmd;
 		cmd_small->opcode = read ?
 		    READ_COMMAND : WRITE_COMMAND;
-		_lto3b(blkno, cmd_small->addr);
-		cmd_small->length = nblks & 0xff;
+		_lto3b(secno, cmd_small->addr);
+		cmd_small->length = nsecs & 0xff;
 		xs->cmdlen = sizeof(*cmd_small);
 	} else {
 		/*
@@ -671,8 +640,8 @@ cdstart(struct scsi_xfer *xs)
 		cmd_big = (struct scsi_rw_big *)xs->cmd;
 		cmd_big->opcode = read ?
 		    READ_BIG : WRITE_BIG;
-		_lto4b(blkno, cmd_big->addr);
-		_lto2b(nblks, cmd_big->length);
+		_lto4b(secno, cmd_big->addr);
+		_lto2b(nsecs, cmd_big->length);
 		xs->cmdlen = sizeof(*cmd_big);
 	}
 
@@ -1211,11 +1180,11 @@ cdgetdisklabel(dev_t dev, struct cd_softc *sc, struct disklabel *lp,
 
 	toc = malloc(sizeof(*toc), M_TEMP, M_WAITOK | M_ZERO);
 
-	lp->d_secsize = sc->sc_params.blksize;
+	lp->d_secsize = sc->params.secsize;
 	lp->d_ntracks = 1;
 	lp->d_nsectors = 100;
 	lp->d_secpercyl = 100;
-	lp->d_ncylinders = (sc->sc_params.disksize / 100) + 1;
+	lp->d_ncylinders = (sc->params.disksize / 100) + 1;
 
 	if (sc->sc_link->flags & SDEV_ATAPI) {
 		strncpy(lp->d_typename, "ATAPI CD-ROM", sizeof(lp->d_typename));
@@ -1226,7 +1195,7 @@ cdgetdisklabel(dev_t dev, struct cd_softc *sc, struct disklabel *lp,
 	}
 
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-	DL_SETDSIZE(lp, sc->sc_params.disksize);
+	DL_SETDSIZE(lp, sc->params.disksize);
 	lp->d_version = 1;
 
 	/* XXX - these values for BBSIZE and SBSIZE assume ffs */
@@ -1435,7 +1404,7 @@ cd_set_pa_immed(struct cd_softc *sc, int flags)
  * Get scsi driver to send a "start playing" command
  */
 int
-cd_play(struct cd_softc *sc, int blkno, int nblks)
+cd_play(struct cd_softc *sc, int secno, int nsecs)
 {
 	struct scsi_play *cmd;
 	struct scsi_xfer *xs;
@@ -1449,8 +1418,8 @@ cd_play(struct cd_softc *sc, int blkno, int nblks)
 
 	cmd = (struct scsi_play *)xs->cmd;
 	cmd->opcode = PLAY;
-	_lto4b(blkno, cmd->blk_addr);
-	_lto2b(nblks, cmd->xfer_len);
+	_lto4b(secno, cmd->blk_addr);
+	_lto2b(nsecs, cmd->xfer_len);
 
 	error = scsi_xs_sync(xs);
 	scsi_xs_put(xs);
@@ -1695,21 +1664,21 @@ int
 cd_get_parms(struct cd_softc *sc, int flags)
 {
 	/* Reasonable defaults for drives that don't support READ_CAPACITY */
-	sc->sc_params.blksize = 2048;
-	sc->sc_params.disksize = 400000;
+	sc->params.secsize = 2048;
+	sc->params.disksize = 400000;
 
 	if (sc->sc_link->quirks & ADEV_NOCAPACITY)
 		return (0);
 
-	sc->sc_params.disksize = scsi_size(sc->sc_link, flags,
-	    &sc->sc_params.blksize);
+	sc->params.disksize = scsi_size(sc->sc_link, flags,
+	    &sc->params.secsize);
 
-	if ((sc->sc_params.blksize < 512) ||
-	    ((sc->sc_params.blksize & 511) != 0))
-		sc->sc_params.blksize = 2048;	/* some drives lie ! */
+	if ((sc->params.secsize < 512) ||
+	    ((sc->params.secsize & 511) != 0))
+		sc->params.secsize = 2048;	/* some drives lie ! */
 
-	if (sc->sc_params.disksize < 100)
-		sc->sc_params.disksize = 400000;
+	if (sc->params.disksize < 100)
+		sc->params.disksize = 400000;
 
 	return (0);
 }
@@ -1723,7 +1692,7 @@ cdsize(dev_t dev)
 }
 
 int
-cddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
+cddump(dev_t dev, daddr64_t secno, caddr_t va, size_t size)
 {
 	/* Not implemented. */
 	return ENXIO;

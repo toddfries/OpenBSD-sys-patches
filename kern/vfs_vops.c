@@ -1,3 +1,4 @@
+/*	$OpenBSD: vfs_vops.c,v 1.2 2010/09/08 10:50:27 thib Exp $	*/
 /*
  * Copyright (c) 2010 Thordur I. Bjornsson <thib@openbsd.org> 
  *
@@ -92,7 +93,7 @@ VOP_CREATE(struct vnode *dvp, struct vnode **vpp,
 	a.a_cnp = cnp;
 	a.a_vap = vap;
 
-        ASSERT_VP_ISLOCKED(dvp);
+	ASSERT_VP_ISLOCKED(dvp);
 
 	if (dvp->v_op->vop_create == NULL)
 		return ((dvp->v_op->vop_default)(&a));
@@ -109,7 +110,7 @@ VOP_MKNOD(struct vnode *dvp, struct vnode **vpp,
 	a.a_cnp = cnp;
 	a.a_vap = vap;
 
-        ASSERT_VP_ISLOCKED(dvp);
+	ASSERT_VP_ISLOCKED(dvp);
 
 	if (dvp->v_op->vop_mknod == NULL)
 		return ((dvp->v_op->vop_default)(&a));
@@ -139,7 +140,7 @@ VOP_CLOSE(struct vnode *vp, int fflag, struct ucred *cred, struct proc *p)
 	a.a_cred = cred;
 	a.a_p = p;
 
-        ASSERT_VP_ISLOCKED(vp);
+	ASSERT_VP_ISLOCKED(vp);
 
 	if (vp->v_op->vop_close == NULL)
 		return ((vp->v_op->vop_default)(&a));
@@ -155,7 +156,7 @@ VOP_ACCESS(struct vnode *vp, int mode, struct ucred *cred, struct proc *p)
 	a.a_cred = cred;
 	a.a_p = p;
 
-        ASSERT_VP_ISLOCKED(vp);
+	ASSERT_VP_ISLOCKED(vp);
 
 	if (vp->v_op->vop_access == NULL)
 		return ((vp->v_op->vop_default)(&a));
@@ -187,7 +188,7 @@ VOP_SETATTR(struct vnode *vp, struct vattr *vap, struct ucred *cred,
 	a.a_cred = cred;
 	a.a_p = p;
 
-        ASSERT_VP_ISLOCKED(vp);
+	ASSERT_VP_ISLOCKED(vp);
 
 	if (vp->v_op->vop_setattr == NULL)
 		return ((vp->v_op->vop_default)(&a));
@@ -203,7 +204,7 @@ VOP_READ(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred)
 	a.a_ioflag = ioflag;
 	a.a_cred = cred;
 
-        ASSERT_VP_ISLOCKED(vp);
+	ASSERT_VP_ISLOCKED(vp);
 
 	if (vp->v_op->vop_read == NULL)
 		return ((vp->v_op->vop_default)(&a));
@@ -220,7 +221,7 @@ VOP_WRITE(struct vnode *vp, struct uio *uio, int ioflag,
 	a.a_ioflag = ioflag;
 	a.a_cred = cred;
 
-        ASSERT_VP_ISLOCKED(vp);
+	ASSERT_VP_ISLOCKED(vp);
 
 	if (vp->v_op->vop_write == NULL)
 		return ((vp->v_op->vop_default)(&a));
@@ -291,7 +292,7 @@ VOP_FSYNC(struct vnode *vp, struct ucred *cred, int waitfor,
 	a.a_waitfor = waitfor;
 	a.a_p = p;
 
-        ASSERT_VP_ISLOCKED(vp);
+	ASSERT_VP_ISLOCKED(vp);
 
 	if (vp->v_op->vop_fsync == NULL)
 		return ((vp->v_op->vop_default)(&a));
@@ -306,8 +307,8 @@ VOP_REMOVE(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
         a.a_vp = vp;
 	a.a_cnp = cnp;
 
-        ASSERT_VP_ISLOCKED(dvp);
-        ASSERT_VP_ISLOCKED(vp);
+	ASSERT_VP_ISLOCKED(dvp);
+	ASSERT_VP_ISLOCKED(vp);
 
 	if (dvp->v_op->vop_remove == NULL)
 		return ((dvp->v_op->vop_default)(&a));
@@ -322,7 +323,7 @@ VOP_LINK(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 	a.a_vp = vp;
 	a.a_cnp = cnp;
 
-        ASSERT_VP_ISLOCKED(dvp);
+	ASSERT_VP_ISLOCKED(dvp);
 
 	if (dvp->v_op->vop_link == NULL)
 		return ((dvp->v_op->vop_default)(&a));
@@ -342,7 +343,7 @@ VOP_RENAME(struct vnode *fdvp, struct vnode *fvp,
 	a.a_tvp = tvp;
 	a.a_tcnp = tcnp;
 
-        ASSERT_VP_ISLOCKED(tdvp);
+	ASSERT_VP_ISLOCKED(tdvp);
 
 	if (fdvp->v_op->vop_rename == NULL) 
 		return ((fdvp->v_op->vop_default)(&a));
@@ -359,7 +360,7 @@ VOP_MKDIR(struct vnode *dvp, struct vnode **vpp,
 	a.a_cnp = cnp;
 	a.a_vap = vap;
 
-        ASSERT_VP_ISLOCKED(dvp);
+	ASSERT_VP_ISLOCKED(dvp);
 
 	if (dvp->v_op->vop_mkdir == NULL)
 		return ((dvp->v_op->vop_default)(&a));
@@ -374,8 +375,8 @@ VOP_RMDIR(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
 	a.a_vp = vp;
 	a.a_cnp = cnp;
 
-        ASSERT_VP_ISLOCKED(dvp);
-        ASSERT_VP_ISLOCKED(vp);
+	ASSERT_VP_ISLOCKED(dvp);
+	ASSERT_VP_ISLOCKED(vp);
 
 	if (dvp->v_op->vop_rmdir == NULL)
 		return ((dvp->v_op->vop_default)(&a));
@@ -393,7 +394,7 @@ VOP_SYMLINK(struct vnode *dvp, struct vnode **vpp,
 	a.a_vap = vap;
 	a.a_target = target;
 
-        ASSERT_VP_ISLOCKED(dvp);
+	ASSERT_VP_ISLOCKED(dvp);
 
 	if (dvp->v_op->vop_symlink == NULL)
 		return ((dvp->v_op->vop_default)(&a));
@@ -412,7 +413,7 @@ VOP_READDIR(struct vnode *vp, struct uio *uio, struct ucred *cred,
 	a.a_ncookies = ncookies;
 	a.a_cookies = cookies;
 
-        ASSERT_VP_ISLOCKED(vp);
+	ASSERT_VP_ISLOCKED(vp);
 
 	if (vp->v_op->vop_readdir == NULL)
 		return ((vp->v_op->vop_default)(&a));
@@ -427,7 +428,7 @@ VOP_READLINK(struct vnode *vp, struct uio *uio, struct ucred *cred)
 	a.a_uio = uio;
 	a.a_cred = cred;
 
-        ASSERT_VP_ISLOCKED(vp);
+	ASSERT_VP_ISLOCKED(vp);
 
 	if (vp->v_op->vop_readlink == NULL)
 		return ((vp->v_op->vop_default)(&a));
@@ -453,7 +454,7 @@ VOP_INACTIVE(struct vnode *vp, struct proc *p)
 	a.a_vp = vp;
 	a.a_p = p;
 
-        ASSERT_VP_ISLOCKED(vp);
+	ASSERT_VP_ISLOCKED(vp);
 
 	if (vp->v_op->vop_inactive == NULL)
 		return ((vp->v_op->vop_default)(&a));
@@ -509,7 +510,7 @@ VOP_BMAP(struct vnode *vp, daddr64_t bn, struct vnode **vpp,
 	a.a_bnp = bnp;
 	a.a_runp = runp;
 
-        ASSERT_VP_ISLOCKED(vp);
+	ASSERT_VP_ISLOCKED(vp);
 
 	if (vp->v_op->vop_bmap == NULL)
 		return ((vp->v_op->vop_default)(&a));
@@ -535,7 +536,7 @@ VOP_PATHCONF(struct vnode *vp, int name, register_t *retval)
 	a.a_name = name;
 	a.a_retval = retval;
 
-        ASSERT_VP_ISLOCKED(vp);
+	ASSERT_VP_ISLOCKED(vp);
 
 	if (vp->v_op->vop_pathconf == NULL)
 		return ((vp->v_op->vop_default)(&a));
@@ -564,7 +565,7 @@ VOP_REALLOCBLKS(struct vnode *vp, struct cluster_save *buflist)
 	a.a_vp = vp;
 	a.a_buflist = buflist;
 
-        ASSERT_VP_ISLOCKED(vp);
+	ASSERT_VP_ISLOCKED(vp);
 
 	if (vp->v_op->vop_reallocblks == NULL)
 		return ((vp->v_op->vop_default)(&a));
