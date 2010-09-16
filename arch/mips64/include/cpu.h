@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.59 2010/08/30 08:52:10 syuu Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.62 2010/09/13 21:59:07 syuu Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -403,8 +403,9 @@ struct cpu_info {
 	int		ci_ipl;			/* software IPL */
 	uint32_t	ci_softpending;		/* pending soft interrupts */
 	int		ci_clock_started;
-	u_int32_t	ci_cpu_counter_last;
-	u_int32_t	ci_cpu_counter_interval;
+	u_int32_t	ci_cpu_counter_last;	/* last compare value loaded */
+	u_int32_t	ci_cpu_counter_interval; /* # of counter ticks/tick */
+
 	u_int32_t	ci_pendingticks;
 	struct pmap	*ci_curpmap;
 	uint		ci_intrdepth;		/* interrupt depth */
@@ -434,8 +435,8 @@ extern struct cpu_info *cpu_info_list;
 
 #ifdef MULTIPROCESSOR
 #define MAXCPUS				4
-extern struct cpu_info *getcurcpu(void);
-extern void setcurcpu(struct cpu_info *);
+#define getcurcpu()			hw_getcurcpu()
+#define setcurcpu(ci)			hw_setcurcpu(ci)
 extern struct cpu_info *get_cpu_info(int);
 #define curcpu() getcurcpu()
 #define	CPU_IS_PRIMARY(ci)		((ci)->ci_flags & CPUF_PRIMARY)
@@ -471,10 +472,6 @@ void	smp_rendezvous_cpus(unsigned long, void (*)(void *), void *arg);
 void cpu_startclock(struct cpu_info *);
 
 #include <machine/frame.h>
-
-#endif	/* _LOCORE */
-
-#ifndef _LOCORE
 
 /*
  * Arguments to hardclock encapsulate the previous machine state in
@@ -547,6 +544,7 @@ void cpu_startclock(struct cpu_info *);
 #define	MIPS_R4000	0x04	/* MIPS R4000/4400 CPU		ISA III	*/
 #define	MIPS_R3LSI	0x05	/* LSI Logic R3000 derivate	ISA I	*/
 #define	MIPS_R6000A	0x06	/* MIPS R6000A CPU		ISA II	*/
+#define MIPS_OCTEON	0x06	/* Cavium OCTEON		MIPS64R2*/
 #define	MIPS_R3IDT	0x07	/* IDT R3000 derivate		ISA I	*/
 #define	MIPS_R10000	0x09	/* MIPS R10000/T5 CPU		ISA IV  */
 #define	MIPS_R4200	0x0a	/* MIPS R4200 CPU (ICE)		ISA III */
@@ -630,8 +628,7 @@ void	save_fpu(void);
 int	guarded_read_4(paddr_t, uint32_t *);
 int	guarded_write_4(paddr_t, uint32_t);
 
-extern u_int32_t cpu_counter_interval;	/* Number of counter ticks/tick */
-extern u_int32_t cpu_counter_last;	/* Last compare value loaded */
+register_t MipsEmulateBranch(struct trap_frame *, vaddr_t, uint32_t, uint32_t);
 
 /*
  *  Low level access routines to CPU registers
