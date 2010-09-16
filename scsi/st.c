@@ -1,4 +1,4 @@
-/*	$OpenBSD: st.c,v 1.107 2010/08/30 02:47:56 matthew Exp $	*/
+/*	$OpenBSD: st.c,v 1.112 2010/09/14 04:49:42 dlg Exp $	*/
 /*	$NetBSD: st.c,v 1.71 1997/02/21 23:03:49 thorpej Exp $	*/
 
 /*
@@ -215,7 +215,7 @@ struct st_softc {
 #define BLKSIZE_SET_BY_USER	0x04
 #define BLKSIZE_SET_BY_QUIRK	0x08
 
-	struct bufq *sc_bufq;
+	struct bufq sc_bufq;
 	struct timeout sc_timeout;
 	struct scsi_xshandler sc_xsh;
 };
@@ -331,7 +331,7 @@ stattach(struct device *parent, struct device *self, void *aux)
 	    &st->sc_xsh);
 	
 	/* Set up the buf queue for this device. */
-	st->sc_bufq = bufq_init(BUFQ_FIFO);
+	bufq_init(&st->sc_bufq, BUFQ_FIFO);
 
 	/* Start up with media position unknown. */
 	st->media_fileno = -1;
@@ -357,7 +357,8 @@ stactivate(struct device *self, int act)
 
 	case DVACT_DEACTIVATE:
 		st->flags |= ST_DYING;
-		bufq_drain(st->sc_bufq);
+		bufq_drain(&st->sc_bufq);
+		scsi_xsh_del(&st->sc_xsh);
 		break;
 	}
 
@@ -370,7 +371,7 @@ stdetach(struct device *self, int flags)
 	struct st_softc *st = (struct st_softc *)self;
 	int bmaj, cmaj, mn;
 
-	bufq_drain(st->sc_bufq);
+	bufq_drain(&st->sc_bufq);
 
 	/* Locate the lowest minor number to be detached. */
 	mn = STUNIT(self->dv_unit);
@@ -390,7 +391,7 @@ stdetach(struct device *self, int flags)
 			vdevgone(cmaj, mn, mn + 3, VCHR);
 		}
 
-	bufq_destroy(st->sc_bufq);
+	bufq_destroy(&st->sc_bufq);
 
 	return (0);
 }
@@ -877,7 +878,7 @@ ststrategy(struct buf *bp)
 	 * at the end (a bit silly because we only have on user..
 	 * (but it could fork()))
 	 */
-	BUFQ_QUEUE(st->sc_bufq, bp);
+	bufq_queue(&st->sc_bufq, bp);
 
 	/*
 	 * Tell the device to get going on the transfer if it's
@@ -911,8 +912,10 @@ ststart(struct scsi_xfer *xs)
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("ststart\n"));
 
-	if (st->flags & ST_DYING)
+	if (st->flags & ST_DYING) {
+		scsi_xs_put(xs);
 		return;
+	}
 
 	/*
 	 * if the device has been unmounted by the user
@@ -922,13 +925,13 @@ ststart(struct scsi_xfer *xs)
 	    !(sc_link->flags & SDEV_MEDIA_LOADED)) {
 		/* make sure that one implies the other.. */
 		sc_link->flags &= ~SDEV_MEDIA_LOADED;
-		bufq_drain(st->sc_bufq);
+		bufq_drain(&st->sc_bufq);
 		scsi_xs_put(xs);
 		return;
 	}
 
 	for (;;) {
-		bp = BUFQ_DEQUEUE(st->sc_bufq);
+		bp = bufq_dequeue(&st->sc_bufq);
 		if (bp == NULL) {
 			scsi_xs_put(xs);
 			return;
@@ -1041,7 +1044,7 @@ ststart(struct scsi_xfer *xs)
 	 */
 	if (ISSET(st->flags, ST_WAITING))
 		CLR(st->flags, ST_WAITING);
-	else if (BUFQ_PEEK(st->sc_bufq))
+	else if (bufq_peek(&st->sc_bufq))
 		scsi_xsh_add(&st->sc_xsh);
 }
 
@@ -1060,7 +1063,7 @@ st_buf_done(struct scsi_xfer *xs)
 
 	case XS_NO_CCB:
 		/* The adapter is busy, requeue the buf and try it later. */
-		BUFQ_REQUEUE(st->sc_bufq, bp);
+		bufq_requeue(&st->sc_bufq, bp);
 		scsi_xs_put(xs);
 		SET(st->flags, ST_WAITING); /* dont let ststart xsh_add */
 		timeout_add(&st->sc_timeout, 1);
@@ -1952,7 +1955,8 @@ st_interpret_sense(struct scsi_xfer *xs)
 	struct st_softc *st = sc_link->device_softc;
 	u_int8_t serr = sense->error_code & SSD_ERRCODE;
 	u_int8_t skey = sense->flags & SSD_KEY;
-	int32_t info;
+	int32_t resid;
+	int datalen;
 
 	if (((sc_link->flags & SDEV_OPEN) == 0) ||
 	    (serr != SSD_ERRCODE_CURRENT && serr != SSD_ERRCODE_DEFERRED))
@@ -1996,87 +2000,76 @@ st_interpret_sense(struct scsi_xfer *xs)
 	}
 
 	/*
-	 * Get the sense fields and work out what code
+	 * 'resid' can be in units of st->blksize or bytes. xs->resid and
+	 * xs->datalen are always in units of bytes. So we need a variable
+	 * to store datalen in the same units as resid and to adjust
+	 * xs->resid to be in bytes.
 	 */
-	if (sense->error_code & SSD_ERRCODE_VALID)
-		info = _4btol(sense->info);
-	else
-		info = xs->datalen;	/* bad choice if fixed blocks */
-	if (st->flags & ST_FIXEDBLOCKS) {
-		xs->resid = info * st->blksize;
-		if (sense->flags & SSD_EOM) {
-			st->flags |= ST_EIO_PENDING;
+	datalen = xs->datalen;
+	if (sense->error_code & SSD_ERRCODE_VALID) {
+		xs->resid = resid = (int32_t)_4btol(sense->info);
+		if (st->flags & ST_FIXEDBLOCKS) {
+			xs->resid *= st->blksize;
+			datalen /= st->blksize;
 		}
-		if (sense->flags & SSD_FILEMARK) {
-			st->flags |= ST_AT_FILEMARK;
-			if (st->media_fileno != -1) {
-				st->media_fileno++;
-				st->media_blkno = 0;
-			}
+		if (xs->resid < 0 || xs->resid > xs->datalen)
+			xs->resid = xs->datalen;
+	} else {
+		xs->resid = resid = xs->datalen;
+		if (st->flags & ST_FIXEDBLOCKS) {
+			resid /= st->blksize;
+			datalen /= st->blksize;
 		}
-		if (sense->flags & SSD_ILI) {
-			st->flags |= ST_EIO_PENDING;
-			if (sense->error_code & SSD_ERRCODE_VALID &&
-			    (xs->flags & SCSI_SILENT) == 0)
-				printf("%s: block wrong size, %d blocks residual\n",
-				    st->sc_dev.dv_xname, info);
+	}
 
-			/*
-			 * This quirk code helps the drive read
-			 * the first tape block, regardless of
-			 * format.  That is required for these
-			 * drives to return proper MODE SENSE
-			 * information.
-			 */
-			if ((st->quirks & ST_Q_SENSE_HELP) &&
-			    !(sc_link->flags & SDEV_MEDIA_LOADED))
-				st->blksize -= 512;
+	if (sense->flags & SSD_FILEMARK) {
+		if (st->media_fileno != -1) {
+			st->media_fileno++;
+			st->media_blkno = 0;
 		}
-		/*
-		 * If no data was transferred, return immediately
-		 */
-		if (xs->resid >= xs->datalen) {
-			if (st->flags & ST_EIO_PENDING)
-				return EIO;
-			if (st->flags & ST_AT_FILEMARK) {
-				return 0;
-			}
-		}
-	} else {		/* must be variable mode */
-		xs->resid = xs->datalen;	/* to be sure */
-		if (sense->flags & SSD_EOM)
-			return EIO;
-		if (sense->flags & SSD_FILEMARK) {
-			if (st->media_fileno != -1) {
-				st->media_fileno++;
-				st->media_blkno = 0;
-			}
+		if ((st->flags & ST_FIXEDBLOCKS) == 0)
 			return 0;
+		st->flags |= ST_AT_FILEMARK;
+	}
+
+	if (sense->flags & SSD_EOM) {
+		if ((st->flags & ST_FIXEDBLOCKS) == 0)
+			return EIO;
+		st->flags |= ST_EIO_PENDING;
+	}
+
+	if (sense->flags & SSD_ILI) {
+		if ((st->flags & ST_FIXEDBLOCKS) == 0) {
+			if (resid >= 0 && resid <= datalen)
+				return (0);
+			if ((xs->flags & SCSI_SILENT) == 0)
+				printf( "%s: bad residual %d out of "
+				    "%d\n", st->sc_dev.dv_xname, resid,
+				    datalen);
+			return (EIO);
 		}
-		if (sense->flags & SSD_ILI) {
-			if (info < 0) {
-				/*
-				 * the record was bigger than the read
-				 */
-				if ((xs->flags & SCSI_SILENT) == 0)
-					printf("%s: %d-byte record too big\n",
-					    st->sc_dev.dv_xname,
-					    xs->datalen - info);
-				return (EIO);
-			} else if (info > xs->datalen) {
-				/*
-				 * huh? the residual is bigger than the request
-				 */
-				if ((xs->flags & SCSI_SILENT) == 0)
-					printf(
-					    "%s: bad residual %d out of %d\n",
-					    st->sc_dev.dv_xname, info,
-					    xs->datalen);
-				return (EIO);
-			}
-			xs->resid = info;
-			return (0);
-		}
+
+		/* Fixed size blocks. */
+		if (sense->error_code & SSD_ERRCODE_VALID)
+			if ((xs->flags & SCSI_SILENT) == 0)
+				printf("%s: block wrong size, %d blocks "
+				    "residual\n", st->sc_dev.dv_xname, resid);
+		st->flags |= ST_EIO_PENDING;
+		/*
+                 * This quirk code helps the drive read the first tape block,
+		 * regardless of format.  That is required for these drives to
+		 * return proper MODE SENSE information.
+		 */
+		if ((st->quirks & ST_Q_SENSE_HELP) &&
+		    !(sc_link->flags & SDEV_MEDIA_LOADED))
+			st->blksize -= 512;
+	}
+
+	if ((st->flags & ST_FIXEDBLOCKS) && xs->resid == xs->datalen) {
+		if (st->flags & ST_EIO_PENDING)
+			return EIO;
+		if (st->flags & ST_AT_FILEMARK)
+			return 0;
 	}
 
 	if (skey == SKEY_BLANK_CHECK) {

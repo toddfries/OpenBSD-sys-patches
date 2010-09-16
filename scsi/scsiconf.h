@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.136 2010/08/25 00:31:35 dlg Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.138 2010/09/14 01:39:44 dlg Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -396,6 +396,7 @@ struct scsi_link {
 
 	struct	scsi_runq queue;
 	u_int	running;
+	u_short	pending;
 
 	struct	scsi_iopool *pool;
 };
@@ -575,7 +576,7 @@ int	scsi_detach_lun(struct scsibus_softc *, int, int, int);
 int	scsi_req_probe(struct scsibus_softc *, int, int);
 int	scsi_req_detach(struct scsibus_softc *, int, int, int);
 
-void	scsi_activate(struct scsibus_softc *, int, int, int);
+int	scsi_activate(struct scsibus_softc *, int, int, int);
 
 struct scsi_link *	scsi_get_link(struct scsibus_softc *, int, int);
 void			scsi_add_link(struct scsibus_softc *,
