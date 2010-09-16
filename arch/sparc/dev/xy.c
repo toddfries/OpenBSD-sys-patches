@@ -1,4 +1,4 @@
-/*	$OpenBSD: xy.c,v 1.46 2010/08/28 20:23:22 matthew Exp $	*/
+/*	$OpenBSD: xy.c,v 1.48 2010/09/08 14:47:10 jsing Exp $	*/
 /*	$NetBSD: xy.c,v 1.26 1997/07/19 21:43:56 pk Exp $	*/
 
 /*
@@ -390,8 +390,8 @@ xycattach(parent, self, aux)
 		xyc->iopbase[lcv].relo = 1;	/* always the same */
 		xyc->iopbase[lcv].thro = XY_THRO;/* always the same */
 	}
-	xyc->ciorq = &xyc->reqs[XYC_CTLIOPB];    /* short hand name */
-	xyc->ciopb = &xyc->iopbase[XYC_CTLIOPB]; /* short hand name */
+	xyc->ciorq = &xyc->reqs[XYC_CTLIOPB];    /* shorthand name */
+	xyc->ciopb = &xyc->iopbase[XYC_CTLIOPB]; /* shorthand name */
 	xyc->xy_hand = 0;
 
 	/* read controller parameters and insure we have a 450/451 */
@@ -586,7 +586,7 @@ xyattach(parent, self, aux)
 
 	xy->hw_spt = spt = 0; /* XXX needed ? */
 	/* Attach the disk: must be before getdisklabel to malloc label */
-	disk_attach(&xy->sc_dk);
+	disk_attach(&xy->sc_dev, &xy->sc_dk);
 
 	if (xygetdisklabel(xy, xa->buf) != 0)
 		goto done;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.164 2010/08/31 17:13:48 deraadt Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.166 2010/09/08 00:58:05 dlg Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -107,9 +107,9 @@ int scsi_autoconf = SCSI_AUTOCONF;
 int scsibusprint(void *, const char *);
 void scsibus_printlink(struct scsi_link *);
 
-void scsi_activate_bus(struct scsibus_softc *, int);
-void scsi_activate_target(struct scsibus_softc *, int, int);
-void scsi_activate_lun(struct scsibus_softc *, int, int, int);
+int scsi_activate_bus(struct scsibus_softc *, int);
+int scsi_activate_target(struct scsibus_softc *, int, int);
+int scsi_activate_lun(struct scsibus_softc *, int, int, int);
 
 const u_int8_t version_to_spc [] = {
 	0, /* 0x00: The device does not claim conformance to any standard. */
@@ -189,45 +189,51 @@ scsibusactivate(struct device *dev, int act)
 {
 	struct scsibus_softc *sc = (struct scsibus_softc *)dev;
 
-	scsi_activate(sc, -1, -1, act);
-
-	return (0);
+	return scsi_activate(sc, -1, -1, act);
 }
 
-void
+int
 scsi_activate(struct scsibus_softc *sc, int target, int lun, int act)
 {
 	if (target == -1 && lun == -1)
-		scsi_activate_bus(sc, act);
+		return scsi_activate_bus(sc, act);
 
 	if (target == -1)
-		return;
+		return 0;
 
 	if (lun == -1)
-		scsi_activate_target(sc, target, act);
+		return scsi_activate_target(sc, target, act);
 
-	scsi_activate_lun(sc, target, lun, act);
+	return scsi_activate_lun(sc, target, lun, act);
 }
 
-void
+int
 scsi_activate_bus(struct scsibus_softc *sc, int act)
 {
-	int target;
+	int target, rv = 0, r;
 
-	for (target = 0; target < sc->sc_buswidth; target++)
-		scsi_activate_target(sc, target, act);
+	for (target = 0; target < sc->sc_buswidth; target++) {
+		r = scsi_activate_target(sc, target, act);
+		if (r)
+			rv = r;
+	}
+	return (rv);
 }
 
-void
+int
 scsi_activate_target(struct scsibus_softc *sc, int target, int act)
 {
-	int lun;
+	int lun, rv = 0, r;
 
-	for (lun = 0; lun < sc->adapter_link->luns; lun++)
-		scsi_activate_lun(sc, target, lun, act);
+	for (lun = 0; lun < sc->adapter_link->luns; lun++) {
+		r = scsi_activate_lun(sc, target, lun, act);
+		if (r)
+			rv = r;
+	}
+	return (rv);
 }
 
-void
+int
 scsi_activate_lun(struct scsibus_softc *sc, int target, int lun, int act)
 {
 	struct scsi_link *link;
@@ -235,7 +241,7 @@ scsi_activate_lun(struct scsibus_softc *sc, int target, int lun, int act)
 
 	link = scsi_get_link(sc, target, lun);
 	if (link == NULL)
-		return;
+		return (0);
 
 	dev = link->device_softc;
 	switch (act) {
@@ -265,6 +271,8 @@ scsi_activate_lun(struct scsibus_softc *sc, int target, int lun, int act)
 	default:
 		break;
 	}
+
+	return (0);
 }
 
 int
@@ -1124,6 +1132,7 @@ scsi_devid(struct scsi_link *link)
 		u_int8_t list[32];
 	} __packed pg;
 	int pg80 = 0, pg83 = 0, i;
+	size_t len;
 
 	if (link->id != NULL)
 		return;
@@ -1133,7 +1142,8 @@ scsi_devid(struct scsi_link *link)
 		    scsi_autoconf) != 0)
 			return;
 
-		for (i = 0; i < MIN(sizeof(pg.list), pg.hdr.page_length); i++) {
+		len = MIN(sizeof(pg.list), _2btol(pg.hdr.page_length));
+		for (i = 0; i < len; i++) {
 			switch (pg.list[i]) {
 			case SI_PG_SERIAL:
 				pg80 = 1;
@@ -1169,7 +1179,7 @@ scsi_devid_pg83(struct scsi_link *link)
 	if (rv != 0)
 		return (rv);
 
-	len = sizeof(hdr) + hdr.page_length;
+	len = sizeof(hdr) + _2btol(hdr.page_length);
 	pg = malloc(len, M_TEMP, M_WAITOK);
 
 	rv = scsi_inquire_vpd(link, pg, len, SI_PG_DEVID, scsi_autoconf);
