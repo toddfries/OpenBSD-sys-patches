@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2661.c,v 1.60 2010/08/28 18:08:07 deraadt Exp $	*/
+/*	$OpenBSD: rt2661.c,v 1.63 2010/09/07 16:21:42 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -156,7 +156,6 @@ int		rt2661_prepare_beacon(struct rt2661_softc *);
 #endif
 void		rt2661_enable_tsf_sync(struct rt2661_softc *);
 int		rt2661_get_rssi(struct rt2661_softc *, uint8_t);
-void		rt2661_powerhook(int, void *);
 
 static const struct {
 	uint32_t	reg;
@@ -246,12 +245,6 @@ rt2661_attach(void *xsc, int id)
 		mountroothook_establish(rt2661_attachhook, sc);
 	else
 		rt2661_attachhook(sc);
-
-	sc->sc_powerhook = powerhook_establish(rt2661_powerhook, sc);
-	if (sc->sc_powerhook == NULL) {
-		printf("%s: WARNING: unable to establish power hook\n",
-		    sc->sc_dev.dv_xname);
-	}
 
 	return 0;
 
@@ -382,9 +375,6 @@ rt2661_detach(void *xsc)
 
 	timeout_del(&sc->scan_to);
 	timeout_del(&sc->amrr_to);
-
-	if (sc->sc_powerhook != NULL)
-		powerhook_disestablish(sc->sc_powerhook);
 
 	ieee80211_ifdetach(ifp);	/* free all nodes */
 	if_detach(ifp);
@@ -1247,6 +1237,8 @@ rt2661_intr(void *arg)
 
 	r1 = RAL_READ(sc, RT2661_INT_SOURCE_CSR);
 	r2 = RAL_READ(sc, RT2661_MCU_INT_SOURCE_CSR);
+	if (__predict_false(r1 == 0xffffffff && r2 == 0xffffffff))
+		return 0;	/* device likely went away */
 	if (r1 == 0 && r2 == 0)
 		return 0;	/* not for us */
 
@@ -2922,22 +2914,4 @@ rt2661_get_rssi(struct rt2661_softc *sc, uint8_t raw)
 			rssi -= 100;
 	}
 	return rssi;
-}
-
-void
-rt2661_powerhook(int why, void *arg)
-{
-	struct rt2661_softc *sc = arg;
-	int s;
-
-	s = splnet();
-	switch (why) {
-	case PWR_SUSPEND:
-		rt2661_suspend(sc);
-		break;
-	case PWR_RESUME:
-		rt2661_resume(sc);
-		break;
-	}
-	splx(s);
 }

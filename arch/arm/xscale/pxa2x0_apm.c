@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_apm.c,v 1.34 2010/08/30 21:37:52 deraadt Exp $	*/
+/*	$OpenBSD: pxa2x0_apm.c,v 1.36 2010/09/08 21:18:14 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2001 Alexander Guy.  All rights reserved.
@@ -40,7 +40,6 @@
 #include <sys/kernel.h>
 #include <sys/kthread.h>
 #include <sys/rwlock.h>
-#include <sys/mount.h>		/* for vfs_syncwait() */
 #include <sys/proc.h>
 #include <sys/buf.h>
 #include <sys/device.h>
@@ -314,9 +313,6 @@ apm_suspend(struct pxa2x0_apm_softc *sc)
 
 	resettodr();
 
-	if (cold)
-		vfs_syncwait(0);
-
 	if (sc->sc_suspend == NULL)
 		pxa2x0_wakeup_config(PXA2X0_WAKEUP_ALL, 1);
 	else
@@ -342,7 +338,7 @@ apm_resume(struct pxa2x0_apm_softc *sc)
 
 	/*
 	 * Clear the OTG Peripheral hold after running the pxaudc and pxaohci
-	 * powerhooks to re-enable their operation. See 3.8.1.2
+	 * ca_activate to re-enable their operation. See 3.8.1.2
 	 */
 	/* XXX ifdef NPXAUDC > 0 */
 	bus_space_write_4(sc->sc_iot, sc->sc_pm_ioh, POWMAN_PSSR, PSSR_OTGPH);
