@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.157 2010/08/27 05:30:59 dlg Exp $ */
+/*	$OpenBSD: mpi.c,v 1.162 2010/09/14 00:03:04 dlg Exp $ */
 
 /*
  * Copyright (c) 2005, 2006, 2009 David Gwynne <dlg@openbsd.org>
@@ -137,9 +137,15 @@ int			mpi_scsi_probe_virtual(struct scsi_link *);
 
 int			mpi_eventnotify(struct mpi_softc *);
 void			mpi_eventnotify_done(struct mpi_ccb *);
+void			mpi_eventnotify_free(struct mpi_softc *,
+			    struct mpi_rcb *);
 void			mpi_eventack(void *, void *);
 void			mpi_eventack_done(struct mpi_ccb *);
-void			mpi_evt_sas(struct mpi_softc *, struct mpi_rcb *);
+int			mpi_evt_sas(struct mpi_softc *, struct mpi_rcb *);
+void			mpi_evt_sas_detach(void *, void *);
+void			mpi_evt_sas_detach_done(struct mpi_ccb *);
+void			mpi_evt_fc_rescan(struct mpi_softc *);
+void			mpi_fc_rescan(void *, void *);
 
 int			mpi_req_cfg_header(struct mpi_softc *, u_int8_t,
 			    u_int8_t, u_int32_t, int, void *);
@@ -204,6 +210,9 @@ mpi_attach(struct mpi_softc *sc)
 
 	printf("\n");
 
+	rw_init(&sc->sc_lock, "mpi_lock");
+	mtx_init(&sc->sc_evt_rescan_mtx, IPL_BIO);
+
 	/* disable interrupts */
 	mpi_write(sc, MPI_INTR_MASK,
 	    MPI_INTR_MASK_REPLY | MPI_INTR_MASK_DOORBELL);
@@ -254,11 +263,19 @@ mpi_attach(struct mpi_softc *sc)
 		goto free_replies;
 	}
 
-	if (sc->sc_porttype == MPI_PORTFACTS_PORTTYPE_SAS) {
+	switch (sc->sc_porttype) {
+	case MPI_PORTFACTS_PORTTYPE_SAS:
+		SIMPLEQ_INIT(&sc->sc_evt_scan_queue);
+		mtx_init(&sc->sc_evt_scan_mtx, IPL_BIO);
+		scsi_ioh_set(&sc->sc_evt_scan_handler, &sc->sc_iopool,
+		    mpi_evt_sas_detach, sc);
+		/* FALLTHROUGH */
+	case MPI_PORTFACTS_PORTTYPE_FC:
 		if (mpi_eventnotify(sc) != 0) {
 			printf("%s: unable to enable events\n", DEVNAME(sc));
 			goto free_replies;
 		}
+		break;
 	}
 
 	if (mpi_portenable(sc) != 0) {
@@ -281,8 +298,6 @@ mpi_attach(struct mpi_softc *sc)
 		mpi_fc_info(sc);
 		break;
 	}
-
-	rw_init(&sc->sc_lock, "mpi_lock");
 
 	/* get raid pages */
 	mpi_get_raid(sc);
@@ -324,7 +339,10 @@ mpi_attach(struct mpi_softc *sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_target;
 	sc->sc_link.adapter_buswidth = sc->sc_buswidth;
-	sc->sc_link.openings = sc->sc_maxcmds / sc->sc_buswidth;
+	if (sc->sc_porttype == MPI_PORTFACTS_PORTTYPE_SCSI)
+		sc->sc_link.openings = sc->sc_maxcmds / sc->sc_buswidth;
+	else
+		sc->sc_link.openings = sc->sc_maxcmds;
 	sc->sc_link.pool = &sc->sc_iopool;
 
 	bzero(&saa, sizeof(saa));
@@ -2181,6 +2199,12 @@ mpi_eventnotify(struct mpi_softc *sc)
 		return (1);
 	}
 
+	sc->sc_evt_ccb = ccb;
+	SIMPLEQ_INIT(&sc->sc_evt_ack_queue);
+	mtx_init(&sc->sc_evt_ack_mtx, IPL_BIO);
+	scsi_ioh_set(&sc->sc_evt_ack_handler, &sc->sc_iopool,
+	    mpi_eventack, sc);
+
 	ccb->ccb_done = mpi_eventnotify_done;
 	enq = ccb->ccb_cmd;
 
@@ -2189,8 +2213,6 @@ mpi_eventnotify(struct mpi_softc *sc)
 	enq->event_switch = MPI_EVENT_SWITCH_ON;
 	enq->msg_context = htole32(ccb->ccb_id);
 
-	sc->sc_evt_ccb = ccb;
-	scsi_ioh_set(&sc->sc_evt_ack, &sc->sc_iopool, mpi_eventack, sc);
 	mpi_start(sc, ccb);
 	return (0);
 }
@@ -2199,7 +2221,8 @@ void
 mpi_eventnotify_done(struct mpi_ccb *ccb)
 {
 	struct mpi_softc			*sc = ccb->ccb_sc;
-	struct mpi_msg_event_reply		*enp = ccb->ccb_rcb->rcb_reply;
+	struct mpi_rcb				*rcb = ccb->ccb_rcb;
+	struct mpi_msg_event_reply		*enp = rcb->rcb_reply;
 
 	DNPRINTF(MPI_D_EVT, "%s: mpi_eventnotify_done\n", DEVNAME(sc));
 
@@ -2229,7 +2252,16 @@ mpi_eventnotify_done(struct mpi_ccb *ccb)
 		if (sc->sc_scsibus == NULL)
 			break;
 
-		mpi_evt_sas(sc, ccb->ccb_rcb);
+		if (mpi_evt_sas(sc, rcb) != 0) {
+			/* reply is freed later on */
+			return;
+		}
+		break;
+
+	case MPI_EVENT_RESCAN:
+		if (sc->sc_scsibus != NULL &&
+		    sc->sc_porttype == MPI_PORTFACTS_PORTTYPE_FC)
+			mpi_evt_fc_rescan(sc);
 		break;
 
 	default:
@@ -2238,13 +2270,24 @@ mpi_eventnotify_done(struct mpi_ccb *ccb)
 		break;
 	}
 
-	if (enp->ack_required)
-		scsi_ioh_add(&sc->sc_evt_ack);
-	else
-		mpi_push_reply(sc, ccb->ccb_rcb);
+	mpi_eventnotify_free(sc, rcb);
 }
 
 void
+mpi_eventnotify_free(struct mpi_softc *sc, struct mpi_rcb *rcb)
+{
+	struct mpi_msg_event_reply		*enp = rcb->rcb_reply;
+
+	if (enp->ack_required) {
+		mtx_enter(&sc->sc_evt_ack_mtx);
+		SIMPLEQ_INSERT_TAIL(&sc->sc_evt_ack_queue, rcb, rcb_link);
+		mtx_leave(&sc->sc_evt_ack_mtx);
+		scsi_ioh_add(&sc->sc_evt_ack_handler);
+	} else
+		mpi_push_reply(sc, rcb);
+}
+
+int
 mpi_evt_sas(struct mpi_softc *sc, struct mpi_rcb *rcb)
 {
 	struct mpi_evt_sas_change		*ch;
@@ -2255,7 +2298,7 @@ mpi_evt_sas(struct mpi_softc *sc, struct mpi_rcb *rcb)
 	ch = (struct mpi_evt_sas_change *)data;
 
 	if (ch->bus != 0)
-		return;
+		return (0);
 
 	switch (ch->reason) {
 	case MPI_EVT_SASCH_REASON_ADDED:
@@ -2268,12 +2311,14 @@ mpi_evt_sas(struct mpi_softc *sc, struct mpi_rcb *rcb)
 
 	case MPI_EVT_SASCH_REASON_NOT_RESPONDING:
 		scsi_activate(sc->sc_scsibus, ch->target, -1, DVACT_DEACTIVATE);
-		if (scsi_req_detach(sc->sc_scsibus, ch->target, -1,
-		    DETACH_FORCE) != 0) {
-			printf("%s: unable to request detach of %d\n",
-			    DEVNAME(sc), ch->target);
-		}
-		break;
+
+		mtx_enter(&sc->sc_evt_scan_mtx);
+		SIMPLEQ_INSERT_TAIL(&sc->sc_evt_scan_queue, rcb, rcb_link);
+		mtx_leave(&sc->sc_evt_scan_mtx);
+		scsi_ioh_add(&sc->sc_evt_scan_handler);
+
+		/* we'll handle event ack later on */
+		return (1);
 
 	case MPI_EVT_SASCH_REASON_SMART_DATA:
 	case MPI_EVT_SASCH_REASON_UNSUPPORTED:
@@ -2284,6 +2329,131 @@ mpi_evt_sas(struct mpi_softc *sc, struct mpi_rcb *rcb)
 		    "0x%02x\n", DEVNAME(sc), ch->reason);
 		break;
 	}
+
+	return (0);
+}
+
+void
+mpi_evt_sas_detach(void *cookie, void *io)
+{
+	struct mpi_softc			*sc = cookie;
+	struct mpi_ccb				*ccb = io;
+	struct mpi_rcb				*rcb, *next;
+	struct mpi_msg_event_reply		*enp;
+	struct mpi_evt_sas_change		*ch;
+	struct mpi_msg_scsi_task_request	*str;
+
+	DNPRINTF(MPI_D_EVT, "%s: event sas detach handler\n", DEVNAME(sc));
+
+	mtx_enter(&sc->sc_evt_scan_mtx);
+	rcb = SIMPLEQ_FIRST(&sc->sc_evt_scan_queue);
+	if (rcb != NULL) {
+		next = SIMPLEQ_NEXT(rcb, rcb_link);
+		SIMPLEQ_REMOVE_HEAD(&sc->sc_evt_scan_queue, rcb_link);
+	}
+	mtx_leave(&sc->sc_evt_scan_mtx);
+
+	if (rcb == NULL) {
+		scsi_io_put(&sc->sc_iopool, ccb);
+		return;
+	}
+
+	enp = rcb->rcb_reply;
+	ch = (struct mpi_evt_sas_change *)(enp + 1);
+
+	ccb->ccb_done = mpi_evt_sas_detach_done;
+	str = ccb->ccb_cmd;
+
+	str->target_id = ch->target;
+	str->bus = 0;
+	str->function = MPI_FUNCTION_SCSI_TASK_MGMT;
+
+	str->task_type = MPI_MSG_SCSI_TASK_TYPE_TARGET_RESET;
+
+	str->msg_context = htole32(ccb->ccb_id);
+
+	mpi_eventnotify_free(sc, rcb);
+
+	mpi_start(sc, ccb);
+
+	if (next != NULL)
+		scsi_ioh_add(&sc->sc_evt_scan_handler);
+}
+
+void
+mpi_evt_sas_detach_done(struct mpi_ccb *ccb)
+{
+	struct mpi_softc			*sc = ccb->ccb_sc;
+	struct mpi_msg_scsi_task_reply		*r = ccb->ccb_rcb->rcb_reply;
+
+	if (scsi_req_detach(sc->sc_scsibus, r->target_id, -1,
+	    DETACH_FORCE) != 0) {
+		printf("%s: unable to request detach of %d\n",
+		    DEVNAME(sc), r->target_id);
+	}
+
+	mpi_push_reply(sc, ccb->ccb_rcb);
+	scsi_io_put(&sc->sc_iopool, ccb);
+}
+
+void
+mpi_evt_fc_rescan(struct mpi_softc *sc)
+{
+	int					queue = 1;
+
+	mtx_enter(&sc->sc_evt_rescan_mtx);
+	if (sc->sc_evt_rescan_sem)
+		queue = 0;
+	else
+		sc->sc_evt_rescan_sem = 1;
+	mtx_leave(&sc->sc_evt_rescan_mtx);
+
+	if (queue) {
+		workq_queue_task(NULL, &sc->sc_evt_rescan, 0,
+		    mpi_fc_rescan, sc, NULL);
+	}
+}
+
+void
+mpi_fc_rescan(void *xsc, void *xarg)
+{
+	struct mpi_softc			*sc = xsc;
+	struct mpi_cfg_hdr			hdr;
+	struct mpi_cfg_fc_device_pg0		pg;
+	struct scsi_link			*link;
+	u_int32_t				id;
+	int					i;
+
+	mtx_enter(&sc->sc_evt_rescan_mtx);
+	sc->sc_evt_rescan_sem = 0;
+	mtx_leave(&sc->sc_evt_rescan_mtx);
+
+	for (i = 0; i < sc->sc_buswidth; i++) {
+		id = MPI_PAGE_ADDRESS_FC_BTID | i;
+
+		if (mpi_req_cfg_header(sc, MPI_CONFIG_REQ_PAGE_TYPE_FC_DEV, 0,
+		    id, 0, &hdr) != 0) {
+			printf("%s: header get for rescan of %d failed\n",
+			    DEVNAME(sc), i);
+			return;
+		}
+
+		link = scsi_get_link(sc->sc_scsibus, i, 0);
+
+		memset(&pg, 0, sizeof(pg));
+		if (mpi_req_cfg_page(sc, id, 0, &hdr, 1,
+		    &pg, sizeof(pg)) == 0) {
+			if (link == NULL)
+				scsi_probe_target(sc->sc_scsibus, i);
+		} else {
+			if (link != NULL) {
+				scsi_activate(sc->sc_scsibus, i, -1,
+				    DVACT_DEACTIVATE);
+				scsi_detach_target(sc->sc_scsibus, i,
+				    DETACH_FORCE);
+			}
+		}
+	}
 }
 
 void
@@ -2291,11 +2461,26 @@ mpi_eventack(void *cookie, void *io)
 {
 	struct mpi_softc			*sc = cookie;
 	struct mpi_ccb				*ccb = io;
-	struct mpi_ccb				*eccb = sc->sc_evt_ccb;
-	struct mpi_msg_event_reply		*enp = eccb->ccb_rcb->rcb_reply;
+	struct mpi_rcb				*rcb, *next;
+	struct mpi_msg_event_reply		*enp;
 	struct mpi_msg_eventack_request		*eaq;
 
 	DNPRINTF(MPI_D_EVT, "%s: event ack\n", DEVNAME(sc));
+
+	mtx_enter(&sc->sc_evt_ack_mtx);
+	rcb = SIMPLEQ_FIRST(&sc->sc_evt_ack_queue);
+	if (rcb != NULL) {
+		next = SIMPLEQ_NEXT(rcb, rcb_link);
+		SIMPLEQ_REMOVE_HEAD(&sc->sc_evt_ack_queue, rcb_link);
+	}
+	mtx_leave(&sc->sc_evt_ack_mtx);
+
+	if (rcb == NULL) {
+		scsi_io_put(&sc->sc_iopool, ccb);
+		return;
+	}
+
+	enp = rcb->rcb_reply;
 
 	ccb->ccb_done = mpi_eventack_done;
 	eaq = ccb->ccb_cmd;
@@ -2306,8 +2491,11 @@ mpi_eventack(void *cookie, void *io)
 	eaq->event = enp->event;
 	eaq->event_context = enp->event_context;
 
-	mpi_push_reply(sc, eccb->ccb_rcb);
+	mpi_push_reply(sc, rcb);
 	mpi_start(sc, ccb);
+
+	if (next != NULL)
+		scsi_ioh_add(&sc->sc_evt_ack_handler);
 }
 
 void
